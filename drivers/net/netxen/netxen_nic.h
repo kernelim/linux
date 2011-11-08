@@ -19,7 +19,7 @@
  * MA  02111-1307, USA.
  *
  * The full GNU General Public License is included in this distribution
- * in the file called LICENSE.
+ * in the file called "COPYING".
  *
  */
 
@@ -53,8 +53,8 @@
 
 #define _NETXEN_NIC_LINUX_MAJOR 4
 #define _NETXEN_NIC_LINUX_MINOR 0
-#define _NETXEN_NIC_LINUX_SUBVERSION 50
-#define NETXEN_NIC_LINUX_VERSIONID  "4.0.50"
+#define _NETXEN_NIC_LINUX_SUBVERSION 77
+#define NETXEN_NIC_LINUX_VERSIONID  "4.0.77"
 
 #define NETXEN_VERSION_CODE(a, b, c)	(((a) << 24) + ((b) << 16) + (c))
 #define _major(v)	(((v) >> 24) & 0xff)
@@ -73,8 +73,6 @@
 #define NETXEN_FLASH_SECTOR_SIZE (64 * 1024)
 #define NETXEN_FLASH_TOTAL_SIZE  (NETXEN_NUM_FLASH_SECTORS \
 					* NETXEN_FLASH_SECTOR_SIZE)
-
-#define PHAN_VENDOR_ID 0x4040
 
 #define RCV_DESC_RINGSIZE(rds_ring)	\
 	(sizeof(struct rcv_desc) * (rds_ring)->num_desc)
@@ -97,6 +95,9 @@
 #define ADDR_IN_WINDOW1(off)	\
 	((off > NETXEN_CRB_PCIX_HOST2) && (off < NETXEN_CRB_MAX)) ? 1 : 0
 
+#define ADDR_IN_RANGE(addr, low, high)	\
+	(((addr) < (high)) && ((addr) >= (low)))
+
 /*
  * normalize a 64MB crb address to 32MB PCI window
  * To use NETXEN_CRB_NORMALIZE, window _must_ be set to 1
@@ -117,9 +118,11 @@
 #define NX_P3_B0		0x40
 #define NX_P3_B1		0x41
 #define NX_P3_B2		0x42
+#define NX_P3P_A0		0x50
 
 #define NX_IS_REVISION_P2(REVISION)     (REVISION <= NX_P2_C1)
 #define NX_IS_REVISION_P3(REVISION)     (REVISION >= NX_P3_A0)
+#define NX_IS_REVISION_P3P(REVISION)     (REVISION >= NX_P3P_A0)
 
 #define FIRST_PAGE_GROUP_START	0
 #define FIRST_PAGE_GROUP_END	0x100000
@@ -171,8 +174,11 @@
 
 #define	MAX_NUM_CARDS		4
 
-#define MAX_BUFFERS_PER_CMD	32
-#define TX_STOP_THRESH		((MAX_SKB_FRAGS >> 2) + 4)
+#define NETXEN_MAX_FRAGS_PER_TX	14
+#define MAX_TSO_HEADER_DESC	2
+#define MGMT_CMD_DESC_RESV	4
+#define TX_STOP_THRESH		((MAX_SKB_FRAGS >> 2) + MAX_TSO_HEADER_DESC \
+							+ MGMT_CMD_DESC_RESV)
 #define NX_MAX_TX_TIMEOUTS	2
 
 /*
@@ -419,6 +425,33 @@ struct status_desc {
 	__le64 status_desc_data[2];
 } __attribute__ ((aligned(16)));
 
+/* UNIFIED ROMIMAGE *************************/
+#define NX_UNI_DIR_SECT_PRODUCT_TBL	0x0
+#define NX_UNI_DIR_SECT_BOOTLD		0x6
+#define NX_UNI_DIR_SECT_FW		0x7
+
+/*Offsets */
+#define NX_UNI_CHIP_REV_OFF		10
+#define NX_UNI_FLAGS_OFF		11
+#define NX_UNI_BIOS_VERSION_OFF 	12
+#define NX_UNI_BOOTLD_IDX_OFF		27
+#define NX_UNI_FIRMWARE_IDX_OFF 	29
+
+struct uni_table_desc{
+	uint32_t	findex;
+	uint32_t	num_entries;
+	uint32_t	entry_size;
+	uint32_t	reserved[5];
+};
+
+struct uni_data_desc{
+	uint32_t	findex;
+	uint32_t	size;
+	uint32_t	reserved[5];
+};
+
+/* UNIFIED ROMIMAGE *************************/
+
 /* The version of the main data structure */
 #define	NETXEN_BDINFO_VERSION 1
 
@@ -485,7 +518,15 @@ struct status_desc {
 #define NX_P2_MN_ROMIMAGE	0
 #define NX_P3_CT_ROMIMAGE	1
 #define NX_P3_MN_ROMIMAGE	2
-#define NX_FLASH_ROMIMAGE	3
+#define NX_UNIFIED_ROMIMAGE	3
+#define NX_FLASH_ROMIMAGE	4
+#define NX_UNKNOWN_ROMIMAGE	0xff
+
+#define NX_P2_MN_ROMIMAGE_NAME		"nxromimg.bin"
+#define NX_P3_CT_ROMIMAGE_NAME		"nx3fwct.bin"
+#define NX_P3_MN_ROMIMAGE_NAME		"nx3fwmn.bin"
+#define NX_UNIFIED_ROMIMAGE_NAME	"phanfw-4.0.579.bin"
+#define NX_FLASH_ROMIMAGE_NAME		"flash"
 
 extern char netxen_nic_driver_name[];
 
@@ -517,7 +558,7 @@ struct netxen_recv_crb {
  */
 struct netxen_cmd_buffer {
 	struct sk_buff *skb;
-	struct netxen_skb_frag frag_array[MAX_BUFFERS_PER_CMD + 1];
+	struct netxen_skb_frag frag_array[MAX_SKB_FRAGS + 1];
 	u32 frag_count;
 };
 
@@ -543,13 +584,16 @@ struct netxen_hardware_context {
 	void __iomem *pci_base1;
 	void __iomem *pci_base2;
 	void __iomem *db_base;
+	void __iomem *ocm_win_crb;
+
 	unsigned long db_len;
 	unsigned long pci_len0;
 
-	int qdr_sn_window;
-	int ddr_mn_window;
-	u32 mn_win_crb;
-	u32 ms_win_crb;
+	u32 ocm_win;
+	u32 crb_win;
+
+	rwlock_t crb_lock;
+	spinlock_t mem_lock;
 
 	u8 cut_through;
 	u8 revision_id;
@@ -695,7 +739,8 @@ struct netxen_recv_context {
 #define NX_CDRP_CMD_READ_PEXQ_PARAMETERS	0x0000001c
 #define NX_CDRP_CMD_GET_LIC_CAPABILITIES	0x0000001d
 #define NX_CDRP_CMD_READ_MAX_LRO_PER_BOARD	0x0000001e
-#define NX_CDRP_CMD_MAX				0x0000001f
+#define NX_CDRP_CMD_CONFIG_GBE_PORT		0x0000001f
+#define NX_CDRP_CMD_MAX				0x00000020
 
 #define NX_RCODE_SUCCESS		0
 #define NX_RCODE_NO_HOST_MEM		1
@@ -1010,6 +1055,7 @@ typedef struct {
 #define NX_FW_CAPABILITY_BDG			(1 << 8)
 #define NX_FW_CAPABILITY_FVLANTX		(1 << 9)
 #define NX_FW_CAPABILITY_HW_LRO			(1 << 10)
+#define NX_FW_CAPABILITY_GBE_LINK_CFG		(1 << 11)
 
 /* module types */
 #define LINKEVENT_MODULE_NOT_PRESENT			1
@@ -1038,6 +1084,9 @@ typedef struct {
 
 #define LINKEVENT_LINKSPEED_MBPS	0
 #define LINKEVENT_LINKSPEED_ENCODED	1
+
+#define AUTO_FW_RESET_ENABLED	0xEF10AF12
+#define AUTO_FW_RESET_DISABLED	0xDCBAAF12
 
 /* firmware response header:
  *	63:58 - message type
@@ -1085,7 +1134,9 @@ typedef struct {
 #define NETXEN_NIC_MSI_ENABLED		0x02
 #define NETXEN_NIC_MSIX_ENABLED		0x04
 #define NETXEN_NIC_LRO_ENABLED		0x08
+#define NETXEN_NIC_LRO_DISABLED		0x00
 #define NETXEN_NIC_BRIDGE_ENABLED       0X10
+#define NETXEN_NIC_DIAG_ENABLED		0x20
 #define NETXEN_IS_MSI_FAMILY(adapter) \
 	((adapter)->flags & (NETXEN_NIC_MSI_ENABLED | NETXEN_NIC_MSIX_ENABLED))
 
@@ -1114,10 +1165,6 @@ struct netxen_adapter {
 	struct net_device *netdev;
 	struct pci_dev *pdev;
 	struct list_head mac_list;
-
-	u32 curr_window;
-	u32 crb_win;
-	rwlock_t adapter_lock;
 
 	spinlock_t tx_clean_lock;
 
@@ -1165,6 +1212,7 @@ struct netxen_adapter {
 
 	u8 mac_addr[ETH_ALEN];
 
+	struct vlan_group *vlgrp;
 	struct netxen_adapter_stats stats;
 
 	struct netxen_recv_context recv_ctx;
@@ -1182,11 +1230,10 @@ struct netxen_adapter {
 	u32 (*crb_read)(struct netxen_adapter *, ulong);
 	int (*crb_write)(struct netxen_adapter *, ulong, u32);
 
-	int (*pci_mem_read)(struct netxen_adapter *, u64, void *, int);
-	int (*pci_mem_write)(struct netxen_adapter *, u64, void *, int);
+	int (*pci_mem_read)(struct netxen_adapter *, u64, u64 *);
+	int (*pci_mem_write)(struct netxen_adapter *, u64, u64);
 
-	unsigned long (*pci_set_window)(struct netxen_adapter *,
-			unsigned long long);
+	int (*pci_set_window)(struct netxen_adapter *, u64, u32 *);
 
 	u32 (*io_read)(struct netxen_adapter *, void __iomem *);
 	void (*io_write)(struct netxen_adapter *, void __iomem *, u32);
@@ -1205,28 +1252,16 @@ struct netxen_adapter {
 
 	struct work_struct  tx_timeout_task;
 
-	struct net_device_stats net_stats;
-
 	nx_nic_intr_coalesce_t coal;
 
 	unsigned long state;
-	u32 resv5;
+	__le32 file_prd_off;	/*File fw product offset*/
 	u32 fw_version;
 	const struct firmware *fw;
 };
 
-int netxen_niu_xg_init_port(struct netxen_adapter *adapter, int port);
-int netxen_niu_disable_xg_port(struct netxen_adapter *adapter);
-
 int nx_fw_cmd_query_phy(struct netxen_adapter *adapter, u32 reg, u32 *val);
 int nx_fw_cmd_set_phy(struct netxen_adapter *adapter, u32 reg, u32 val);
-
-/* Functions available from netxen_nic_hw.c */
-int netxen_nic_set_mtu_xgb(struct netxen_adapter *adapter, int new_mtu);
-int netxen_nic_set_mtu_gb(struct netxen_adapter *adapter, int new_mtu);
-
-int netxen_p2_nic_set_mac_addr(struct netxen_adapter *adapter, u8 *addr);
-int netxen_p3_nic_set_mac_addr(struct netxen_adapter *adapter, u8 *addr);
 
 #define NXRD32(adapter, off) \
 	(adapter->crb_read(adapter, off))
@@ -1268,12 +1303,13 @@ int netxen_nic_wol_supported(struct netxen_adapter *adapter);
 int netxen_init_dummy_dma(struct netxen_adapter *adapter);
 void netxen_free_dummy_dma(struct netxen_adapter *adapter);
 
+int netxen_check_flash_fw_compatibility(struct netxen_adapter *adapter);
 int netxen_phantom_init(struct netxen_adapter *adapter, int pegtune_val);
 int netxen_load_firmware(struct netxen_adapter *adapter);
 int netxen_need_fw_reset(struct netxen_adapter *adapter);
 void netxen_request_firmware(struct netxen_adapter *adapter);
 void netxen_release_firmware(struct netxen_adapter *adapter);
-int netxen_pinit_from_rom(struct netxen_adapter *adapter, int verbose);
+int netxen_pinit_from_rom(struct netxen_adapter *adapter);
 
 int netxen_rom_fast_read(struct netxen_adapter *adapter, int addr, int *valp);
 int netxen_rom_fast_read_words(struct netxen_adapter *adapter, int addr,
@@ -1307,25 +1343,23 @@ void netxen_post_rx_buffers(struct netxen_adapter *adapter, u32 ringid,
 		struct nx_host_rds_ring *rds_ring);
 int netxen_process_cmd_ring(struct netxen_adapter *adapter);
 int netxen_process_rcv_ring(struct nx_host_sds_ring *sds_ring, int max);
-void netxen_p2_nic_set_multi(struct net_device *netdev);
-void netxen_p3_nic_set_multi(struct net_device *netdev);
+
 void netxen_p3_free_mac_list(struct netxen_adapter *adapter);
-int netxen_p2_nic_set_promisc(struct netxen_adapter *adapter, u32 mode);
-int netxen_p3_nic_set_promisc(struct netxen_adapter *adapter, u32);
 int netxen_config_intr_coalesce(struct netxen_adapter *adapter);
 int netxen_config_rss(struct netxen_adapter *adapter, int enable);
 int netxen_config_ipaddr(struct netxen_adapter *adapter, u32 ip, int cmd);
 int netxen_linkevent_request(struct netxen_adapter *adapter, int enable);
 void netxen_advert_link_change(struct netxen_adapter *adapter, int linkup);
+void netxen_pci_camqm_read_2M(struct netxen_adapter *, u64, u64 *);
+void netxen_pci_camqm_write_2M(struct netxen_adapter *, u64, u64);
 
+int nx_fw_cmd_set_gbe_port(struct netxen_adapter *adapter,
+				u32 speed, u32 duplex, u32 autoneg);
 int nx_fw_cmd_set_mtu(struct netxen_adapter *adapter, int mtu);
 int netxen_nic_change_mtu(struct net_device *netdev, int new_mtu);
 int netxen_config_hw_lro(struct netxen_adapter *adapter, int enable);
 int netxen_config_bridged_mode(struct netxen_adapter *adapter, int enable);
 int netxen_send_lro_cleanup(struct netxen_adapter *adapter);
-
-int netxen_nic_set_mac(struct net_device *netdev, void *p);
-struct net_device_stats *netxen_nic_get_stats(struct net_device *netdev);
 
 void netxen_nic_update_cmd_producer(struct netxen_adapter *adapter,
 		struct nx_host_tx_ring *tx_ring);
@@ -1391,8 +1425,8 @@ static inline u32 netxen_tx_avail(struct nx_host_tx_ring *tx_ring)
 
 }
 
-int netxen_get_flash_mac_addr(struct netxen_adapter *adapter, __le64 *mac);
-int netxen_p3_get_mac_addr(struct netxen_adapter *adapter, __le64 *mac);
+int netxen_get_flash_mac_addr(struct netxen_adapter *adapter, u64 *mac);
+int netxen_p3_get_mac_addr(struct netxen_adapter *adapter, u64 *mac);
 extern void netxen_change_ringparam(struct netxen_adapter *adapter);
 extern int netxen_rom_fast_read(struct netxen_adapter *adapter, int addr,
 				int *valp);

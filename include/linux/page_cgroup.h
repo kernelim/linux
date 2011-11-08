@@ -1,8 +1,23 @@
 #ifndef __LINUX_PAGE_CGROUP_H
 #define __LINUX_PAGE_CGROUP_H
 
+enum {
+	/* flags for mem_cgroup */
+	PCG_LOCK,  /* Lock for pc->mem_cgroup and following bits. */
+	PCG_CACHE, /* charged as cache */
+	PCG_USED, /* this object is in use. */
+	PCG_ACCT_LRU, /* page has been accounted for (under lru_lock) */
+	PCG_FILE_MAPPED, /* page is accounted as "mapped" */
+	PCG_MIGRATION, /* under page migration */
+	__NR_PCG_FLAGS,
+};
+
+#ifndef __GENERATING_BOUNDS_H
+#include <linux/bounds.h>
+
 #ifdef CONFIG_CGROUP_MEM_RES_CTLR
 #include <linux/bit_spinlock.h>
+
 /*
  * Page Cgroup can be considered as an extended mem_map.
  * A page_cgroup page is associated with every page descriptor. The
@@ -13,7 +28,6 @@
 struct page_cgroup {
 	unsigned long flags;
 	struct mem_cgroup *mem_cgroup;
-	struct page *page;
 	struct list_head lru;		/* per cgroup LRU list */
 };
 
@@ -32,14 +46,7 @@ static inline void __init page_cgroup_init(void)
 #endif
 
 struct page_cgroup *lookup_page_cgroup(struct page *page);
-
-enum {
-	/* flags for mem_cgroup */
-	PCG_LOCK,  /* page cgroup is locked */
-	PCG_CACHE, /* charged as cache */
-	PCG_USED, /* this object is in use. */
-	PCG_ACCT_LRU, /* page has been accounted for */
-};
+struct page *lookup_cgroup_page(struct page_cgroup *pc);
 
 #define TESTPCGFLAG(uname, lname)			\
 static inline int PageCgroup##uname(struct page_cgroup *pc)	\
@@ -71,15 +78,13 @@ CLEARPCGFLAG(AcctLRU, ACCT_LRU)
 TESTPCGFLAG(AcctLRU, ACCT_LRU)
 TESTCLEARPCGFLAG(AcctLRU, ACCT_LRU)
 
-static inline int page_cgroup_nid(struct page_cgroup *pc)
-{
-	return page_to_nid(pc->page);
-}
+SETPCGFLAG(FileMapped, FILE_MAPPED)
+CLEARPCGFLAG(FileMapped, FILE_MAPPED)
+TESTPCGFLAG(FileMapped, FILE_MAPPED)
 
-static inline enum zone_type page_cgroup_zid(struct page_cgroup *pc)
-{
-	return page_zonenum(pc->page);
-}
+SETPCGFLAG(Migration, MIGRATION)
+CLEARPCGFLAG(Migration, MIGRATION)
+TESTPCGFLAG(Migration, MIGRATION)
 
 static inline void lock_page_cgroup(struct page_cgroup *pc)
 {
@@ -94,6 +99,39 @@ static inline int trylock_page_cgroup(struct page_cgroup *pc)
 static inline void unlock_page_cgroup(struct page_cgroup *pc)
 {
 	bit_spin_unlock(PCG_LOCK, &pc->flags);
+}
+
+#ifdef CONFIG_SPARSEMEM
+#define PCG_ARRAYID_WIDTH	SECTIONS_SHIFT
+#else
+#define PCG_ARRAYID_WIDTH	NODES_SHIFT
+#endif
+
+#if (PCG_ARRAYID_WIDTH > BITS_PER_LONG - NR_PCG_FLAGS)
+#error Not enough space left in pc->flags to store page_cgroup array IDs
+#endif
+
+/* pc->flags: ARRAY-ID | FLAGS */
+
+#define PCG_ARRAYID_MASK	((1UL << PCG_ARRAYID_WIDTH) - 1)
+
+#define PCG_ARRAYID_OFFSET	(BITS_PER_LONG - PCG_ARRAYID_WIDTH)
+/*
+ * Zero the shift count for non-existant fields, to prevent compiler
+ * warnings and ensure references are optimized away.
+ */
+#define PCG_ARRAYID_SHIFT	(PCG_ARRAYID_OFFSET * (PCG_ARRAYID_WIDTH != 0))
+
+static inline void set_page_cgroup_array_id(struct page_cgroup *pc,
+					    unsigned long id)
+{
+	pc->flags &= ~(PCG_ARRAYID_MASK << PCG_ARRAYID_SHIFT);
+	pc->flags |= (id & PCG_ARRAYID_MASK) << PCG_ARRAYID_SHIFT;
+}
+
+static inline unsigned long page_cgroup_array_id(struct page_cgroup *pc)
+{
+	return (pc->flags >> PCG_ARRAYID_SHIFT) & PCG_ARRAYID_MASK;
 }
 
 #else /* CONFIG_CGROUP_MEM_RES_CTLR */
@@ -116,11 +154,13 @@ static inline void __init page_cgroup_init_flatmem(void)
 {
 }
 
-#endif
+#endif /* CONFIG_CGROUP_MEM_RES_CTLR */
 
 #include <linux/swap.h>
 
 #ifdef CONFIG_CGROUP_MEM_RES_CTLR_SWAP
+extern unsigned short swap_cgroup_cmpxchg(swp_entry_t ent,
+					unsigned short old, unsigned short new);
 extern unsigned short swap_cgroup_record(swp_entry_t ent, unsigned short id);
 extern unsigned short lookup_swap_cgroup(swp_entry_t ent);
 extern int swap_cgroup_swapon(int type, unsigned long max_pages);
@@ -150,5 +190,8 @@ static inline void swap_cgroup_swapoff(int type)
 	return;
 }
 
-#endif
-#endif
+#endif /* CONFIG_CGROUP_MEM_RES_CTLR_SWAP */
+
+#endif /* !__GENERATING_BOUNDS_H */
+
+#endif /* __LINUX_PAGE_CGROUP_H */

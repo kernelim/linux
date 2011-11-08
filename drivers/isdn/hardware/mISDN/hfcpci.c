@@ -2316,8 +2316,10 @@ _hfcpci_softirq(struct device *dev, void *arg)
 static void
 hfcpci_softirq(void *arg)
 {
-	(void) driver_for_each_device(&hfc_driver.driver, NULL, arg,
-					_hfcpci_softirq);
+	int ret;
+	ret = driver_for_each_device(&hfc_driver.driver, NULL, arg,
+				     _hfcpci_softirq);
+	BUG_ON(ret); /* RHEL6 only: should never happen */
 
 	/* if next event would be in the past ... */
 	if ((s32)(hfc_jiffies + tics - jiffies) <= 0)

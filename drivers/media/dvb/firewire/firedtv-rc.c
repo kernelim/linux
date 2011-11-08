@@ -12,8 +12,10 @@
 #include <linux/bitops.h>
 #include <linux/input.h>
 #include <linux/kernel.h>
+#include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/types.h>
+#include <linux/workqueue.h>
 
 #include "firedtv.h"
 
@@ -163,13 +165,15 @@ fail:
 
 void fdtv_unregister_rc(struct firedtv *fdtv)
 {
+	cancel_work_sync(&fdtv->remote_ctrl_work);
 	kfree(fdtv->remote_ctrl_dev->keycode);
 	input_unregister_device(fdtv->remote_ctrl_dev);
 }
 
 void fdtv_handle_rc(struct firedtv *fdtv, unsigned int code)
 {
-	u16 *keycode = fdtv->remote_ctrl_dev->keycode;
+	struct input_dev *idev = fdtv->remote_ctrl_dev;
+	u16 *keycode = idev->keycode;
 
 	if (code >= 0x0300 && code <= 0x031f)
 		code = keycode[code - 0x0300];
@@ -185,6 +189,8 @@ void fdtv_handle_rc(struct firedtv *fdtv, unsigned int code)
 		return;
 	}
 
-	input_report_key(fdtv->remote_ctrl_dev, code, 1);
-	input_report_key(fdtv->remote_ctrl_dev, code, 0);
+	input_report_key(idev, code, 1);
+	input_sync(idev);
+	input_report_key(idev, code, 0);
+	input_sync(idev);
 }

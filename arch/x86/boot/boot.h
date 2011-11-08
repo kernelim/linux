@@ -294,7 +294,7 @@ int cmdline_find_option_bool(const char *option);
 struct cpu_features {
 	int level;		/* Family, or 64 for x86-64 */
 	int model;
-	u32 flags[NCAPINTS];
+	u32 flags[RHNCAPINTS];
 };
 extern struct cpu_features cpu;
 int check_cpu(int *cpu_level_ptr, int *req_level_ptr, u32 **err_flags_ptr);

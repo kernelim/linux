@@ -34,7 +34,7 @@
 #define ACPI_POWER_METER_NAME		"power_meter"
 ACPI_MODULE_NAME(ACPI_POWER_METER_NAME);
 #define ACPI_POWER_METER_DEVICE_NAME	"Power Meter"
-#define ACPI_POWER_METER_CLASS		"power_meter_resource"
+#define ACPI_POWER_METER_CLASS		"pwr_meter_resource"
 
 #define NUM_SENSORS			17
 
@@ -56,13 +56,7 @@ ACPI_MODULE_NAME(ACPI_POWER_METER_NAME);
 #define POWER_AVG_INTERVAL_NAME	"power1_average_interval"
 #define POWER_ALARM_NAME	"power1_alarm"
 
-static int cap_in_hardware;
-static int force_cap_on;
-
-static int can_cap_in_hardware(void)
-{
-	return force_cap_on || cap_in_hardware;
-}
+static int force_cap_on; /* Unused */
 
 static struct acpi_device_id power_meter_ids[] = {
 	{"ACPI000D", 0},
@@ -707,12 +701,6 @@ static int setup_attrs(struct acpi_power_meter_resource *resource)
 	}
 
 	if (resource->caps.flags & POWER_METER_CAN_CAP) {
-		if (!can_cap_in_hardware()) {
-			dev_err(&resource->acpi_dev->dev,
-				"Ignoring unsafe software power cap!\n");
-			goto skip_unsafe_cap;
-		}
-
 		if (resource->caps.configurable_cap) {
 			res = register_rw_attrs(resource, rw_cap_attrs);
 			if (res)
@@ -726,7 +714,6 @@ static int setup_attrs(struct acpi_power_meter_resource *resource)
 		if (res)
 			goto error;
 	}
-skip_unsafe_cap:
 
 	if (resource->caps.flags & POWER_METER_CAN_TRIP) {
 		res = register_rw_attrs(resource, trip_attrs);
@@ -973,31 +960,12 @@ static struct acpi_driver acpi_power_meter_driver = {
 		},
 };
 
-/* Module init/exit routines */
-static int __init enable_cap_knobs(const struct dmi_system_id *d)
-{
-	cap_in_hardware = 1;
-	return 0;
-}
-
-static struct dmi_system_id __initdata pm_dmi_table[] = {
-	{
-		enable_cap_knobs, "IBM Active Energy Manager",
-		{
-			DMI_MATCH(DMI_SYS_VENDOR, "IBM")
-		},
-	},
-	{}
-};
-
 static int __init acpi_power_meter_init(void)
 {
 	int result;
 
 	if (acpi_disabled)
 		return -ENODEV;
-
-	dmi_check_system(pm_dmi_table);
 
 	result = acpi_bus_register_driver(&acpi_power_meter_driver);
 	if (result < 0)
@@ -1016,7 +984,7 @@ MODULE_DESCRIPTION("ACPI 4.0 power meter driver");
 MODULE_LICENSE("GPL");
 
 module_param(force_cap_on, bool, 0644);
-MODULE_PARM_DESC(force_cap_on, "Enable power cap even it is unsafe to do so.");
+MODULE_PARM_DESC(force_cap_on, "Unused module parameter");
 
 module_init(acpi_power_meter_init);
 module_exit(acpi_power_meter_exit);

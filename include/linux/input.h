@@ -543,6 +543,8 @@ struct input_absinfo {
 #define KEY_FRAMEFORWARD	0x1b5
 #define KEY_CONTEXT_MENU	0x1b6	/* GenDesc - system context menu */
 #define KEY_MEDIA_REPEAT	0x1b7	/* Consumer - transport control */
+#define KEY_10CHANNELSUP        0x1b8   /* 10 channels up (10+) */
+#define KEY_10CHANNELSDOWN      0x1b9   /* 10 channels up (10-) */
 
 #define KEY_DEL_EOL		0x1c0
 #define KEY_DEL_EOS		0x1c1
@@ -595,6 +597,8 @@ struct input_absinfo {
 #define KEY_NUMERIC_STAR	0x20a
 #define KEY_NUMERIC_POUND	0x20b
 
+#define KEY_RFKILL		0x20c /* Key that controls all radios */
+
 /* We avoid low common keys in module aliases so they don't get huge. */
 #define KEY_MIN_INTERESTING	KEY_MUTE
 #define KEY_MAX			0x2ff
@@ -645,9 +649,12 @@ struct input_absinfo {
 #define ABS_TILT_X		0x1a
 #define ABS_TILT_Y		0x1b
 #define ABS_TOOL_WIDTH		0x1c
+
 #define ABS_VOLUME		0x20
+
 #define ABS_MISC		0x28
 
+#define ABS_MT_SLOT		0x2f	/* MT slot being modified */
 #define ABS_MT_TOUCH_MAJOR	0x30	/* Major axis of touching ellipse */
 #define ABS_MT_TOUCH_MINOR	0x31	/* Minor axis (omit if circular) */
 #define ABS_MT_WIDTH_MAJOR	0x32	/* Major axis of approaching ellipse */
@@ -658,6 +665,13 @@ struct input_absinfo {
 #define ABS_MT_TOOL_TYPE	0x37	/* Type of touching device */
 #define ABS_MT_BLOB_ID		0x38	/* Group a set of packets as a blob */
 #define ABS_MT_TRACKING_ID	0x39	/* Unique ID of initiated contact */
+#define ABS_MT_PRESSURE		0x3a	/* Pressure on contact area */
+
+#ifdef __KERNEL__
+/* Implementation details, userspace should not care about these */
+#define ABS_MT_FIRST		ABS_MT_TOUCH_MAJOR
+#define ABS_MT_LAST		ABS_MT_PRESSURE
+#endif
 
 #define ABS_MAX			0x3f
 #define ABS_CNT			(ABS_MAX+1)
@@ -762,6 +776,7 @@ struct input_absinfo {
  */
 #define MT_TOOL_FINGER		0
 #define MT_TOOL_PEN		1
+#define MT_TOOL_MAX		1
 
 /*
  * Values describing the status of a force-feedback effect
@@ -1027,6 +1042,11 @@ struct ff_effect {
  * @sync: set to 1 when there were no new events since last EV_SYNC
  * @abs: current values for reports from absolute axes
  * @rep: current values for autorepeat parameters (delay, rate)
+ * @mt: pointer to array of struct input_mt_slot holding current values
+ *	of tracked contacts
+ * @mtsize: number of MT slots the device uses
+ * @slot: MT slot currently being transmitted
+ * @trkid: stores MT tracking ID for the current contact
  * @key: reflects current state of device's keys/buttons
  * @led: reflects current state of device's LEDs
  * @snd: reflects current state of sound effects
@@ -1129,6 +1149,14 @@ struct input_dev {
 
 	struct list_head	h_list;
 	struct list_head	node;
+
+#ifndef __GENKSYMS__
+	/* Currently used only by the synaptics driver */
+	struct input_mt_slot *mt;
+	int mtsize;
+	int slot;
+	int trkid;
+#endif
 };
 #define to_input_dev(d) container_of(d, struct input_dev, dev)
 
@@ -1414,6 +1442,9 @@ int input_ff_erase(struct input_dev *dev, int effect_id, struct file *file);
 
 int input_ff_create_memless(struct input_dev *dev, void *data,
 		int (*play_effect)(struct input_dev *, void *, struct ff_effect *));
+
+int input_mt_create_slots(struct input_dev *dev, unsigned int num_slots);
+void input_mt_destroy_slots(struct input_dev *dev);
 
 #endif
 #endif

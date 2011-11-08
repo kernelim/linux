@@ -1198,7 +1198,7 @@ static int ttusb_init_rc( struct ttusb_dec *dec)
 	int err;
 
 	usb_make_path(dec->udev, dec->rc_phys, sizeof(dec->rc_phys));
-	strlcpy(dec->rc_phys, "/input0", sizeof(dec->rc_phys));
+	strlcat(dec->rc_phys, "/input0", sizeof(dec->rc_phys));
 
 	input_dev = input_allocate_device();
 	if (!input_dev)
@@ -1551,7 +1551,7 @@ static void ttusb_dec_exit_rc(struct ttusb_dec *dec)
 	usb_free_urb(dec->irq_urb);
 
 	usb_buffer_free(dec->udev,IRQ_PACKET_SIZE,
-			   dec->irq_buffer, dec->irq_dma_handle);
+			  dec->irq_buffer, dec->irq_dma_handle);
 
 	if (dec->rc_input_dev) {
 		input_unregister_device(dec->rc_input_dev);

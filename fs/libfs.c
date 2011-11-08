@@ -7,6 +7,7 @@
 #include <linux/pagemap.h>
 #include <linux/mount.h>
 #include <linux/vfs.h>
+#include <linux/quotaops.h>
 #include <linux/mutex.h>
 #include <linux/exportfs.h>
 #include <linux/writeback.h>
@@ -328,6 +329,81 @@ int simple_rename(struct inode *old_dir, struct dentry *old_dentry,
 
 	return 0;
 }
+
+/**
+ * simple_setsize - handle core mm and vfs requirements for file size change
+ * @inode: inode
+ * @newsize: new file size
+ *
+ * Returns 0 on success, -error on failure.
+ *
+ * simple_setsize must be called with inode_mutex held.
+ *
+ * simple_setsize will check that the requested new size is OK (see
+ * inode_newsize_ok), and then will perform the necessary i_size update
+ * and pagecache truncation (if necessary). It will be typically be called
+ * from the filesystem's setattr function when ATTR_SIZE is passed in.
+ *
+ * The inode itself must have correct permissions and attributes to allow
+ * i_size to be changed, this function then just checks that the new size
+ * requested is valid.
+ *
+ * In the case of simple in-memory filesystems with inodes stored solely
+ * in the inode cache, and file data in the pagecache, nothing more needs
+ * to be done to satisfy a truncate request. Filesystems with on-disk
+ * blocks for example will need to free them in the case of truncate, in
+ * that case it may be easier not to use simple_setsize (but each of its
+ * components will likely be required at some point to update pagecache
+ * and inode etc).
+ */
+int simple_setsize(struct inode *inode, loff_t newsize)
+{
+	loff_t oldsize;
+	int error;
+
+	error = inode_newsize_ok(inode, newsize);
+	if (error)
+		return error;
+
+	oldsize = inode->i_size;
+	i_size_write(inode, newsize);
+	truncate_pagecache(inode, oldsize, newsize);
+
+	return error;
+}
+EXPORT_SYMBOL(simple_setsize);
+
+/**
+ * simple_setattr - setattr for simple in-memory filesystem
+ * @dentry: dentry
+ * @iattr: iattr structure
+ *
+ * Returns 0 on success, -error on failure.
+ *
+ * simple_setattr implements setattr for an in-memory filesystem which
+ * does not store its own file data or metadata (eg. uses the page cache
+ * and inode cache as its data store).
+ */
+int simple_setattr(struct dentry *dentry, struct iattr *iattr)
+{
+	struct inode *inode = dentry->d_inode;
+	int error;
+
+	error = inode_change_ok(inode, iattr);
+	if (error)
+		return error;
+
+	if (iattr->ia_valid & ATTR_SIZE) {
+		error = simple_setsize(inode, iattr->ia_size);
+		if (error)
+			return error;
+	}
+
+	generic_setattr(inode, iattr);
+
+	return error;
+}
+EXPORT_SYMBOL(simple_setattr);
 
 int simple_readpage(struct file *file, struct page *page)
 {
@@ -816,10 +892,6 @@ EXPORT_SYMBOL_GPL(generic_fh_to_parent);
 
 int simple_fsync(struct file *file, struct dentry *dentry, int datasync)
 {
-	struct writeback_control wbc = {
-		.sync_mode = WB_SYNC_ALL,
-		.nr_to_write = 0, /* metadata-only; caller takes care of data */
-	};
 	struct inode *inode = dentry->d_inode;
 	int err;
 	int ret;
@@ -830,7 +902,7 @@ int simple_fsync(struct file *file, struct dentry *dentry, int datasync)
 	if (datasync && !(inode->i_state & I_DIRTY_DATASYNC))
 		return ret;
 
-	err = sync_inode(inode, &wbc);
+	err = sync_inode_metadata(inode, 1);
 	if (ret == 0)
 		ret = err;
 	return ret;

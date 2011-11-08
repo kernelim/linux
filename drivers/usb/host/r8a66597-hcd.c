@@ -33,11 +33,11 @@
 #include <linux/list.h>
 #include <linux/interrupt.h>
 #include <linux/usb.h>
+#include <linux/usb/hcd.h>
 #include <linux/platform_device.h>
 #include <linux/io.h>
 #include <linux/irq.h>
 
-#include "../core/hcd.h"
 #include "r8a66597.h"
 
 MODULE_DESCRIPTION("R8A66597 USB Host Controller Driver");
@@ -2122,8 +2122,9 @@ static void r8a66597_hub_descriptor(struct r8a66597 *r8a66597,
 	desc->bDescLength = 9;
 	desc->bPwrOn2PwrGood = 0;
 	desc->wHubCharacteristics = cpu_to_le16(0x0011);
-	desc->bitmap[0] = ((1 << r8a66597->max_root_hub) - 1) << 1;
-	desc->bitmap[1] = ~0;
+	desc->u.hs.DeviceRemovable[0] =
+		((1 << r8a66597->max_root_hub) - 1) << 1;
+	desc->u.hs.DeviceRemovable[1] = ~0;
 }
 
 static int r8a66597_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue,

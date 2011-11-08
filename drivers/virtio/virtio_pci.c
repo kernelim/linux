@@ -95,11 +95,6 @@ static struct pci_device_id virtio_pci_id_table[] = {
 
 MODULE_DEVICE_TABLE(pci, virtio_pci_id_table);
 
-/* A PCI device has it's own struct device and so does a virtio device so
- * we create a place for the virtio devices to show up in sysfs.  I think it
- * would make more sense for virtio to not insist on having it's own device. */
-static struct device *virtio_pci_root;
-
 /* Convert a generic virtio device to our structure */
 static struct virtio_pci_device *to_vp_device(struct virtio_device *vdev)
 {
@@ -473,7 +468,8 @@ static void vp_del_vqs(struct virtio_device *vdev)
 
 	list_for_each_entry_safe(vq, n, &vdev->vqs, list) {
 		info = vq->priv;
-		if (vp_dev->per_vq_vectors)
+		if (vp_dev->per_vq_vectors &&
+			info->msix_vector != VIRTIO_MSI_NO_VECTOR)
 			free_irq(vp_dev->msix_entries[info->msix_vector].vector,
 				 vq);
 		vp_del_vq(vq);
@@ -593,15 +589,10 @@ static struct virtio_config_ops virtio_pci_config_ops = {
 
 static void virtio_pci_release_dev(struct device *_d)
 {
-	struct virtio_device *dev = container_of(_d, struct virtio_device, dev);
+	struct virtio_device *dev = container_of(_d, struct virtio_device,
+						 dev);
 	struct virtio_pci_device *vp_dev = to_vp_device(dev);
-	struct pci_dev *pci_dev = vp_dev->pci_dev;
 
-	vp_del_vqs(dev);
-	pci_set_drvdata(pci_dev, NULL);
-	pci_iounmap(pci_dev, vp_dev->ioaddr);
-	pci_release_regions(pci_dev);
-	pci_disable_device(pci_dev);
 	kfree(vp_dev);
 }
 
@@ -627,12 +618,15 @@ static int __devinit virtio_pci_probe(struct pci_dev *pci_dev,
 	if (vp_dev == NULL)
 		return -ENOMEM;
 
-	vp_dev->vdev.dev.parent = virtio_pci_root;
+	vp_dev->vdev.dev.parent = &pci_dev->dev;
 	vp_dev->vdev.dev.release = virtio_pci_release_dev;
 	vp_dev->vdev.config = &virtio_pci_config_ops;
 	vp_dev->pci_dev = pci_dev;
 	INIT_LIST_HEAD(&vp_dev->virtqueues);
 	spin_lock_init(&vp_dev->lock);
+
+	/* Disable MSI/MSIX to bring device to a known good state. */
+	pci_msi_off(pci_dev);
 
 	/* enable the device */
 	err = pci_enable_device(pci_dev);
@@ -680,6 +674,12 @@ static void __devexit virtio_pci_remove(struct pci_dev *pci_dev)
 	struct virtio_pci_device *vp_dev = pci_get_drvdata(pci_dev);
 
 	unregister_virtio_device(&vp_dev->vdev);
+
+	vp_del_vqs(&vp_dev->vdev);
+	pci_set_drvdata(pci_dev, NULL);
+	pci_iounmap(pci_dev, vp_dev->ioaddr);
+	pci_release_regions(pci_dev);
+	pci_disable_device(pci_dev);
 }
 
 #ifdef CONFIG_PM
@@ -711,17 +711,7 @@ static struct pci_driver virtio_pci_driver = {
 
 static int __init virtio_pci_init(void)
 {
-	int err;
-
-	virtio_pci_root = root_device_register("virtio-pci");
-	if (IS_ERR(virtio_pci_root))
-		return PTR_ERR(virtio_pci_root);
-
-	err = pci_register_driver(&virtio_pci_driver);
-	if (err)
-		root_device_unregister(virtio_pci_root);
-
-	return err;
+	return pci_register_driver(&virtio_pci_driver);
 }
 
 module_init(virtio_pci_init);
@@ -729,7 +719,6 @@ module_init(virtio_pci_init);
 static void __exit virtio_pci_exit(void)
 {
 	pci_unregister_driver(&virtio_pci_driver);
-	root_device_unregister(virtio_pci_root);
 }
 
 module_exit(virtio_pci_exit);

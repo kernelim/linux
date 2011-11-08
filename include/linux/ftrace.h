@@ -134,6 +134,8 @@ extern void
 unregister_ftrace_function_probe_func(char *glob, struct ftrace_probe_ops *ops);
 extern void unregister_ftrace_function_probe_all(char *glob);
 
+extern int ftrace_text_reserved(void *start, void *end);
+
 enum {
 	FTRACE_FL_FREE		= (1 << 0),
 	FTRACE_FL_FAILED	= (1 << 1),
@@ -250,6 +252,10 @@ static inline int unregister_ftrace_command(char *cmd_name)
 {
 	return -EINVAL;
 }
+static inline int ftrace_text_reserved(void *start, void *end)
+{
+	return 0;
+}
 #endif /* CONFIG_DYNAMIC_FTRACE */
 
 /* totally disable ftrace - can not re-enable after this */
@@ -347,6 +353,10 @@ struct ftrace_graph_ret {
 	int depth;
 };
 
+/* Type of the callback handlers for tracing function graph*/
+typedef void (*trace_func_graph_ret_t)(struct ftrace_graph_ret *); /* return */
+typedef int (*trace_func_graph_ent_t)(struct ftrace_graph_ent *); /* entry */
+
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 
 /* for init task */
@@ -395,10 +405,6 @@ extern char __irqentry_text_end[];
 
 #define FTRACE_RETFUNC_DEPTH 50
 #define FTRACE_RETSTACK_ALLOC_SIZE 32
-/* Type of the callback handlers for tracing function graph*/
-typedef void (*trace_func_graph_ret_t)(struct ftrace_graph_ret *); /* return */
-typedef int (*trace_func_graph_ent_t)(struct ftrace_graph_ent *); /* entry */
-
 extern int register_ftrace_graph(trace_func_graph_ret_t retfunc,
 				trace_func_graph_ent_t entryfunc);
 
@@ -435,6 +441,13 @@ static inline void unpause_graph_tracing(void)
 
 static inline void ftrace_graph_init_task(struct task_struct *t) { }
 static inline void ftrace_graph_exit_task(struct task_struct *t) { }
+
+static inline int register_ftrace_graph(trace_func_graph_ret_t retfunc,
+			  trace_func_graph_ent_t entryfunc)
+{
+	return -1;
+}
+static inline void unregister_ftrace_graph(void) { }
 
 static inline int task_curr_ret_stack(struct task_struct *tsk)
 {
@@ -498,17 +511,5 @@ extern int ftrace_dump_on_oops;
 #ifndef INIT_TRACE_RECURSION
 #define INIT_TRACE_RECURSION
 #endif
-
-#ifdef CONFIG_HW_BRANCH_TRACER
-
-void trace_hw_branch(u64 from, u64 to);
-void trace_hw_branch_oops(void);
-
-#else /* CONFIG_HW_BRANCH_TRACER */
-
-static inline void trace_hw_branch(u64 from, u64 to) {}
-static inline void trace_hw_branch_oops(void) {}
-
-#endif /* CONFIG_HW_BRANCH_TRACER */
 
 #endif /* _LINUX_FTRACE_H */

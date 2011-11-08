@@ -84,6 +84,8 @@ obj-$(CONFIG_CRYPTO_RNG2) += krng.o
 obj-$(CONFIG_CRYPTO_ANSI_CPRNG) += ansi_cprng.o
 obj-$(CONFIG_CRYPTO_TEST) += tcrypt.o
 obj-$(CONFIG_CRYPTO_GHASH) += ghash-generic.o
+obj-$(CONFIG_CRYPTO_MPILIB) += mpi/
+obj-$(CONFIG_CRYPTO_SIGNATURE) += signature/
 
 #
 # generic algorithms and the async_tx api

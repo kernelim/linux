@@ -2,9 +2,6 @@
 /*
  * Pentium III FXSR, SSE support
  *	Gareth Hughes <gareth@valinux.com>, May 2000
- *
- * BTS tracing
- *	Markus Metzger <markus.t.metzger@intel.com>, Dec 2007
  */
 
 #include <linux/kernel.h>
@@ -21,7 +18,7 @@
 #include <linux/audit.h>
 #include <linux/seccomp.h>
 #include <linux/signal.h>
-#include <linux/workqueue.h>
+#include <linux/module.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -33,7 +30,6 @@
 #include <asm/desc.h>
 #include <asm/prctl.h>
 #include <asm/proto.h>
-#include <asm/ds.h>
 
 #include "tls.h"
 
@@ -45,6 +41,7 @@ enum x86_regset {
 	REGSET_FP,
 	REGSET_XFP,
 	REGSET_IOPERM64 = REGSET_XFP,
+	REGSET_XSTATE,
 	REGSET_TLS,
 	REGSET_IOPERM32,
 };
@@ -408,14 +405,14 @@ static int genregs_get(struct task_struct *target,
 {
 	if (kbuf) {
 		unsigned long *k = kbuf;
-		while (count > 0) {
+		while (count >= sizeof(*k)) {
 			*k++ = getreg(target, pos);
 			count -= sizeof(*k);
 			pos += sizeof(*k);
 		}
 	} else {
 		unsigned long __user *u = ubuf;
-		while (count > 0) {
+		while (count >= sizeof(*u)) {
 			if (__put_user(getreg(target, pos), u++))
 				return -EFAULT;
 			count -= sizeof(*u);
@@ -434,14 +431,14 @@ static int genregs_set(struct task_struct *target,
 	int ret = 0;
 	if (kbuf) {
 		const unsigned long *k = kbuf;
-		while (count > 0 && !ret) {
+		while (count >= sizeof(*k) && !ret) {
 			ret = putreg(target, pos, *k++);
 			count -= sizeof(*k);
 			pos += sizeof(*k);
 		}
 	} else {
 		const unsigned long  __user *u = ubuf;
-		while (count > 0 && !ret) {
+		while (count >= sizeof(*u) && !ret) {
 			unsigned long word;
 			ret = __get_user(word, u++);
 			if (ret)
@@ -569,342 +566,6 @@ static int ioperm_get(struct task_struct *target,
 				   0, IO_BITMAP_BYTES);
 }
 
-#ifdef CONFIG_X86_PTRACE_BTS
-/*
- * A branch trace store context.
- *
- * Contexts may only be installed by ptrace_bts_config() and only for
- * ptraced tasks.
- *
- * Contexts are destroyed when the tracee is detached from the tracer.
- * The actual destruction work requires interrupts enabled, so the
- * work is deferred and will be scheduled during __ptrace_unlink().
- *
- * Contexts hold an additional task_struct reference on the traced
- * task, as well as a reference on the tracer's mm.
- *
- * Ptrace already holds a task_struct for the duration of ptrace operations,
- * but since destruction is deferred, it may be executed after both
- * tracer and tracee exited.
- */
-struct bts_context {
-	/* The branch trace handle. */
-	struct bts_tracer	*tracer;
-
-	/* The buffer used to store the branch trace and its size. */
-	void			*buffer;
-	unsigned int		size;
-
-	/* The mm that paid for the above buffer. */
-	struct mm_struct	*mm;
-
-	/* The task this context belongs to. */
-	struct task_struct	*task;
-
-	/* The signal to send on a bts buffer overflow. */
-	unsigned int		bts_ovfl_signal;
-
-	/* The work struct to destroy a context. */
-	struct work_struct	work;
-};
-
-static int alloc_bts_buffer(struct bts_context *context, unsigned int size)
-{
-	void *buffer = NULL;
-	int err = -ENOMEM;
-
-	err = account_locked_memory(current->mm, current->signal->rlim, size);
-	if (err < 0)
-		return err;
-
-	buffer = kzalloc(size, GFP_KERNEL);
-	if (!buffer)
-		goto out_refund;
-
-	context->buffer = buffer;
-	context->size = size;
-	context->mm = get_task_mm(current);
-
-	return 0;
-
- out_refund:
-	refund_locked_memory(current->mm, size);
-	return err;
-}
-
-static inline void free_bts_buffer(struct bts_context *context)
-{
-	if (!context->buffer)
-		return;
-
-	kfree(context->buffer);
-	context->buffer = NULL;
-
-	refund_locked_memory(context->mm, context->size);
-	context->size = 0;
-
-	mmput(context->mm);
-	context->mm = NULL;
-}
-
-static void free_bts_context_work(struct work_struct *w)
-{
-	struct bts_context *context;
-
-	context = container_of(w, struct bts_context, work);
-
-	ds_release_bts(context->tracer);
-	put_task_struct(context->task);
-	free_bts_buffer(context);
-	kfree(context);
-}
-
-static inline void free_bts_context(struct bts_context *context)
-{
-	INIT_WORK(&context->work, free_bts_context_work);
-	schedule_work(&context->work);
-}
-
-static inline struct bts_context *alloc_bts_context(struct task_struct *task)
-{
-	struct bts_context *context = kzalloc(sizeof(*context), GFP_KERNEL);
-	if (context) {
-		context->task = task;
-		task->bts = context;
-
-		get_task_struct(task);
-	}
-
-	return context;
-}
-
-static int ptrace_bts_read_record(struct task_struct *child, size_t index,
-				  struct bts_struct __user *out)
-{
-	struct bts_context *context;
-	const struct bts_trace *trace;
-	struct bts_struct bts;
-	const unsigned char *at;
-	int error;
-
-	context = child->bts;
-	if (!context)
-		return -ESRCH;
-
-	trace = ds_read_bts(context->tracer);
-	if (!trace)
-		return -ESRCH;
-
-	at = trace->ds.top - ((index + 1) * trace->ds.size);
-	if ((void *)at < trace->ds.begin)
-		at += (trace->ds.n * trace->ds.size);
-
-	if (!trace->read)
-		return -EOPNOTSUPP;
-
-	error = trace->read(context->tracer, at, &bts);
-	if (error < 0)
-		return error;
-
-	if (copy_to_user(out, &bts, sizeof(bts)))
-		return -EFAULT;
-
-	return sizeof(bts);
-}
-
-static int ptrace_bts_drain(struct task_struct *child,
-			    long size,
-			    struct bts_struct __user *out)
-{
-	struct bts_context *context;
-	const struct bts_trace *trace;
-	const unsigned char *at;
-	int error, drained = 0;
-
-	context = child->bts;
-	if (!context)
-		return -ESRCH;
-
-	trace = ds_read_bts(context->tracer);
-	if (!trace)
-		return -ESRCH;
-
-	if (!trace->read)
-		return -EOPNOTSUPP;
-
-	if (size < (trace->ds.top - trace->ds.begin))
-		return -EIO;
-
-	for (at = trace->ds.begin; (void *)at < trace->ds.top;
-	     out++, drained++, at += trace->ds.size) {
-		struct bts_struct bts;
-
-		error = trace->read(context->tracer, at, &bts);
-		if (error < 0)
-			return error;
-
-		if (copy_to_user(out, &bts, sizeof(bts)))
-			return -EFAULT;
-	}
-
-	memset(trace->ds.begin, 0, trace->ds.n * trace->ds.size);
-
-	error = ds_reset_bts(context->tracer);
-	if (error < 0)
-		return error;
-
-	return drained;
-}
-
-static int ptrace_bts_config(struct task_struct *child,
-			     long cfg_size,
-			     const struct ptrace_bts_config __user *ucfg)
-{
-	struct bts_context *context;
-	struct ptrace_bts_config cfg;
-	unsigned int flags = 0;
-
-	if (cfg_size < sizeof(cfg))
-		return -EIO;
-
-	if (copy_from_user(&cfg, ucfg, sizeof(cfg)))
-		return -EFAULT;
-
-	context = child->bts;
-	if (!context)
-		context = alloc_bts_context(child);
-	if (!context)
-		return -ENOMEM;
-
-	if (cfg.flags & PTRACE_BTS_O_SIGNAL) {
-		if (!cfg.signal)
-			return -EINVAL;
-
-		return -EOPNOTSUPP;
-		context->bts_ovfl_signal = cfg.signal;
-	}
-
-	ds_release_bts(context->tracer);
-	context->tracer = NULL;
-
-	if ((cfg.flags & PTRACE_BTS_O_ALLOC) && (cfg.size != context->size)) {
-		int err;
-
-		free_bts_buffer(context);
-		if (!cfg.size)
-			return 0;
-
-		err = alloc_bts_buffer(context, cfg.size);
-		if (err < 0)
-			return err;
-	}
-
-	if (cfg.flags & PTRACE_BTS_O_TRACE)
-		flags |= BTS_USER;
-
-	if (cfg.flags & PTRACE_BTS_O_SCHED)
-		flags |= BTS_TIMESTAMPS;
-
-	context->tracer =
-		ds_request_bts_task(child, context->buffer, context->size,
-				    NULL, (size_t)-1, flags);
-	if (unlikely(IS_ERR(context->tracer))) {
-		int error = PTR_ERR(context->tracer);
-
-		free_bts_buffer(context);
-		context->tracer = NULL;
-		return error;
-	}
-
-	return sizeof(cfg);
-}
-
-static int ptrace_bts_status(struct task_struct *child,
-			     long cfg_size,
-			     struct ptrace_bts_config __user *ucfg)
-{
-	struct bts_context *context;
-	const struct bts_trace *trace;
-	struct ptrace_bts_config cfg;
-
-	context = child->bts;
-	if (!context)
-		return -ESRCH;
-
-	if (cfg_size < sizeof(cfg))
-		return -EIO;
-
-	trace = ds_read_bts(context->tracer);
-	if (!trace)
-		return -ESRCH;
-
-	memset(&cfg, 0, sizeof(cfg));
-	cfg.size	= trace->ds.end - trace->ds.begin;
-	cfg.signal	= context->bts_ovfl_signal;
-	cfg.bts_size	= sizeof(struct bts_struct);
-
-	if (cfg.signal)
-		cfg.flags |= PTRACE_BTS_O_SIGNAL;
-
-	if (trace->ds.flags & BTS_USER)
-		cfg.flags |= PTRACE_BTS_O_TRACE;
-
-	if (trace->ds.flags & BTS_TIMESTAMPS)
-		cfg.flags |= PTRACE_BTS_O_SCHED;
-
-	if (copy_to_user(ucfg, &cfg, sizeof(cfg)))
-		return -EFAULT;
-
-	return sizeof(cfg);
-}
-
-static int ptrace_bts_clear(struct task_struct *child)
-{
-	struct bts_context *context;
-	const struct bts_trace *trace;
-
-	context = child->bts;
-	if (!context)
-		return -ESRCH;
-
-	trace = ds_read_bts(context->tracer);
-	if (!trace)
-		return -ESRCH;
-
-	memset(trace->ds.begin, 0, trace->ds.n * trace->ds.size);
-
-	return ds_reset_bts(context->tracer);
-}
-
-static int ptrace_bts_size(struct task_struct *child)
-{
-	struct bts_context *context;
-	const struct bts_trace *trace;
-
-	context = child->bts;
-	if (!context)
-		return -ESRCH;
-
-	trace = ds_read_bts(context->tracer);
-	if (!trace)
-		return -ESRCH;
-
-	return (trace->ds.top - trace->ds.begin) / trace->ds.size;
-}
-
-/*
- * Called from __ptrace_unlink() after the child has been moved back
- * to its original parent.
- */
-void ptrace_bts_untrace(struct task_struct *child)
-{
-	if (unlikely(child->bts)) {
-		free_bts_context(child->bts);
-		child->bts = NULL;
-	}
-}
-#endif /* CONFIG_X86_PTRACE_BTS */
-
 /*
  * Called by kernel/ptrace.c when detaching..
  *
@@ -1031,39 +692,6 @@ long arch_ptrace(struct task_struct *child, long request, long addr, long data)
 		ret = do_arch_prctl(child, data, addr);
 		break;
 #endif
-
-	/*
-	 * These bits need more cooking - not enabled yet:
-	 */
-#ifdef CONFIG_X86_PTRACE_BTS
-	case PTRACE_BTS_CONFIG:
-		ret = ptrace_bts_config
-			(child, data, (struct ptrace_bts_config __user *)addr);
-		break;
-
-	case PTRACE_BTS_STATUS:
-		ret = ptrace_bts_status
-			(child, data, (struct ptrace_bts_config __user *)addr);
-		break;
-
-	case PTRACE_BTS_SIZE:
-		ret = ptrace_bts_size(child);
-		break;
-
-	case PTRACE_BTS_GET:
-		ret = ptrace_bts_read_record
-			(child, data, (struct bts_struct __user *) addr);
-		break;
-
-	case PTRACE_BTS_CLEAR:
-		ret = ptrace_bts_clear(child);
-		break;
-
-	case PTRACE_BTS_DRAIN:
-		ret = ptrace_bts_drain
-			(child, data, (struct bts_struct __user *) addr);
-		break;
-#endif /* CONFIG_X86_PTRACE_BTS */
 
 	default:
 		ret = ptrace_request(child, request, addr, data);
@@ -1219,14 +847,14 @@ static int genregs32_get(struct task_struct *target,
 {
 	if (kbuf) {
 		compat_ulong_t *k = kbuf;
-		while (count > 0) {
+		while (count >= sizeof(*k)) {
 			getreg32(target, pos, k++);
 			count -= sizeof(*k);
 			pos += sizeof(*k);
 		}
 	} else {
 		compat_ulong_t __user *u = ubuf;
-		while (count > 0) {
+		while (count >= sizeof(*u)) {
 			compat_ulong_t word;
 			getreg32(target, pos, &word);
 			if (__put_user(word, u++))
@@ -1247,14 +875,14 @@ static int genregs32_set(struct task_struct *target,
 	int ret = 0;
 	if (kbuf) {
 		const compat_ulong_t *k = kbuf;
-		while (count > 0 && !ret) {
+		while (count >= sizeof(*k) && !ret) {
 			ret = putreg32(target, pos, *k++);
 			count -= sizeof(*k);
 			pos += sizeof(*k);
 		}
 	} else {
 		const compat_ulong_t __user *u = ubuf;
-		while (count > 0 && !ret) {
+		while (count >= sizeof(*u) && !ret) {
 			compat_ulong_t word;
 			ret = __get_user(word, u++);
 			if (ret)
@@ -1324,14 +952,6 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 
 	case PTRACE_GET_THREAD_AREA:
 	case PTRACE_SET_THREAD_AREA:
-#ifdef CONFIG_X86_PTRACE_BTS
-	case PTRACE_BTS_CONFIG:
-	case PTRACE_BTS_STATUS:
-	case PTRACE_BTS_SIZE:
-	case PTRACE_BTS_GET:
-	case PTRACE_BTS_CLEAR:
-	case PTRACE_BTS_DRAIN:
-#endif /* CONFIG_X86_PTRACE_BTS */
 		return arch_ptrace(child, request, addr, data);
 
 	default:
@@ -1345,7 +965,7 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 
 #ifdef CONFIG_X86_64
 
-static const struct user_regset x86_64_regsets[] = {
+static struct user_regset x86_64_regsets[] __read_mostly = {
 	[REGSET_GENERAL] = {
 		.core_note_type = NT_PRSTATUS,
 		.n = sizeof(struct user_regs_struct) / sizeof(long),
@@ -1357,6 +977,12 @@ static const struct user_regset x86_64_regsets[] = {
 		.n = sizeof(struct user_i387_struct) / sizeof(long),
 		.size = sizeof(long), .align = sizeof(long),
 		.active = xfpregs_active, .get = xfpregs_get, .set = xfpregs_set
+	},
+	[REGSET_XSTATE] = {
+		.core_note_type = NT_X86_XSTATE,
+		.size = sizeof(u64), .align = sizeof(u64),
+		.active = xstateregs_active, .get = xstateregs_get,
+		.set = xstateregs_set
 	},
 	[REGSET_IOPERM64] = {
 		.core_note_type = NT_386_IOPERM,
@@ -1383,7 +1009,7 @@ static const struct user_regset_view user_x86_64_view = {
 #endif	/* CONFIG_X86_64 */
 
 #if defined CONFIG_X86_32 || defined CONFIG_IA32_EMULATION
-static const struct user_regset x86_32_regsets[] = {
+static struct user_regset x86_32_regsets[] __read_mostly = {
 	[REGSET_GENERAL] = {
 		.core_note_type = NT_PRSTATUS,
 		.n = sizeof(struct user_regs_struct32) / sizeof(u32),
@@ -1401,6 +1027,12 @@ static const struct user_regset x86_32_regsets[] = {
 		.n = sizeof(struct user32_fxsr_struct) / sizeof(u32),
 		.size = sizeof(u32), .align = sizeof(u32),
 		.active = xfpregs_active, .get = xfpregs_get, .set = xfpregs_set
+	},
+	[REGSET_XSTATE] = {
+		.core_note_type = NT_X86_XSTATE,
+		.size = sizeof(u64), .align = sizeof(u64),
+		.active = xstateregs_active, .get = xstateregs_get,
+		.set = xstateregs_set
 	},
 	[REGSET_TLS] = {
 		.core_note_type = NT_386_TLS,
@@ -1424,6 +1056,23 @@ static const struct user_regset_view user_x86_32_view = {
 };
 #endif
 
+/*
+ * This represents bytes 464..511 in the memory layout exported through
+ * the REGSET_XSTATE interface.
+ */
+u64 xstate_fx_sw_bytes[USER_XSTATE_FX_SW_WORDS];
+
+void update_regset_xstate_info(unsigned int size, u64 xstate_mask)
+{
+#ifdef CONFIG_X86_64
+	x86_64_regsets[REGSET_XSTATE].n = size / sizeof(u64);
+#endif
+#if defined CONFIG_X86_32 || defined CONFIG_IA32_EMULATION
+	x86_32_regsets[REGSET_XSTATE].n = size / sizeof(u64);
+#endif
+	xstate_fx_sw_bytes[USER_XSTATE_XCR0_WORD] = xstate_mask;
+}
+
 const struct user_regset_view *task_user_regset_view(struct task_struct *task)
 {
 #ifdef CONFIG_IA32_EMULATION
@@ -1437,21 +1086,33 @@ const struct user_regset_view *task_user_regset_view(struct task_struct *task)
 #endif
 }
 
+static void fill_sigtrap_info(struct task_struct *tsk,
+				struct pt_regs *regs,
+				int error_code, int si_code,
+				struct siginfo *info)
+{
+	tsk->thread.trap_no = 1;
+	tsk->thread.error_code = error_code;
+
+	memset(info, 0, sizeof(*info));
+	info->si_signo = SIGTRAP;
+	info->si_code = si_code;
+	info->si_addr = user_mode_vm(regs) ? (void __user *)regs->ip : NULL;
+}
+
+void user_single_step_siginfo(struct task_struct *tsk,
+				struct pt_regs *regs,
+				struct siginfo *info)
+{
+	fill_sigtrap_info(tsk, regs, 0, TRAP_BRKPT, info);
+}
+
 void send_sigtrap(struct task_struct *tsk, struct pt_regs *regs,
 					 int error_code, int si_code)
 {
 	struct siginfo info;
 
-	tsk->thread.trap_no = 1;
-	tsk->thread.error_code = error_code;
-
-	memset(&info, 0, sizeof(info));
-	info.si_signo = SIGTRAP;
-	info.si_code = si_code;
-
-	/* User-mode ip? */
-	info.si_addr = user_mode_vm(regs) ? (void __user *) regs->ip : NULL;
-
+	fill_sigtrap_info(tsk, regs, error_code, si_code, &info);
 	/* Send us the fake SIGTRAP */
 	force_sig_info(SIGTRAP, &info, tsk);
 }
@@ -1516,29 +1177,21 @@ asmregparm long syscall_trace_enter(struct pt_regs *regs)
 
 asmregparm void syscall_trace_leave(struct pt_regs *regs)
 {
-	if (unlikely(current->audit_context))
-		audit_syscall_exit(AUDITSC_RESULT(regs->ax), regs->ax);
+	bool step;
+
+	audit_syscall_exit(regs);
 
 	if (unlikely(test_thread_flag(TIF_SYSCALL_TRACEPOINT)))
 		trace_sys_exit(regs, regs->ax);
-
-	if (test_thread_flag(TIF_SYSCALL_TRACE))
-		tracehook_report_syscall_exit(regs, 0);
 
 	/*
 	 * If TIF_SYSCALL_EMU is set, we only get here because of
 	 * TIF_SINGLESTEP (i.e. this is PTRACE_SYSEMU_SINGLESTEP).
 	 * We already reported this syscall instruction in
-	 * syscall_trace_enter(), so don't do any more now.
+	 * syscall_trace_enter().
 	 */
-	if (unlikely(test_thread_flag(TIF_SYSCALL_EMU)))
-		return;
-
-	/*
-	 * If we are single-stepping, synthesize a trap to follow the
-	 * system call instruction.
-	 */
-	if (test_thread_flag(TIF_SINGLESTEP) &&
-	    tracehook_consider_fatal_signal(current, SIGTRAP))
-		send_sigtrap(current, regs, 0, TRAP_BRKPT);
+	step = unlikely(test_thread_flag(TIF_SINGLESTEP)) &&
+			!test_thread_flag(TIF_SYSCALL_EMU);
+	if (step || test_thread_flag(TIF_SYSCALL_TRACE))
+		tracehook_report_syscall_exit(regs, step);
 }

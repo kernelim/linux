@@ -13,6 +13,7 @@
 #include <asm/e820.h>
 #include <asm/time.h>
 #include <asm/irq.h>
+#include <asm/pat.h>
 #include <asm/tsc.h>
 
 void __cpuinit x86_init_noop(void) { }
@@ -26,7 +27,7 @@ void __init x86_init_pgd_noop(pgd_t *unused) { }
 struct x86_init_ops x86_init __initdata = {
 
 	.resources = {
-		.probe_roms		= x86_init_noop,
+		.probe_roms		= probe_roms,
 		.reserve_resources	= reserve_standard_io_resources,
 		.memory_setup		= default_machine_specific_memory_setup,
 	},
@@ -68,8 +69,12 @@ struct x86_cpuinit_ops x86_cpuinit __cpuinitdata = {
 	.setup_percpu_clockev		= setup_secondary_APIC_clock,
 };
 
+static void default_nmi_init(void) { };
+
 struct x86_platform_ops x86_platform = {
 	.calibrate_tsc			= native_calibrate_tsc,
 	.get_wallclock			= mach_get_cmos_time,
 	.set_wallclock			= mach_set_rtc_mmss,
+	.is_untracked_pat_range		= is_ISA_range,
+	.nmi_init			= default_nmi_init
 };

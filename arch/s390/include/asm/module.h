@@ -29,14 +29,17 @@ struct mod_arch_specific
 };
 
 #ifdef __s390x__
+#define MODULES_ARE_ELF64
 #define ElfW(x) Elf64_ ## x
 #define ELFW(x) ELF64_ ## x
 #else
+#define MODULES_ARE_ELF32
 #define ElfW(x) Elf32_ ## x
 #define ELFW(x) ELF32_ ## x
 #endif
 
 #define Elf_Addr ElfW(Addr)
+#define Elf_Rel ElfW(Rel)
 #define Elf_Rela ElfW(Rela)
 #define Elf_Shdr ElfW(Shdr)
 #define Elf_Sym ElfW(Sym)

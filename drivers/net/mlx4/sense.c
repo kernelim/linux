@@ -38,8 +38,8 @@
 
 #include "mlx4.h"
 
-static int mlx4_SENSE_PORT(struct mlx4_dev *dev, int port,
-			   enum mlx4_port_type *type)
+int mlx4_SENSE_PORT(struct mlx4_dev *dev, int port,
+		    enum mlx4_port_type *type)
 {
 	u64 out_param;
 	int err = 0;
@@ -53,7 +53,7 @@ static int mlx4_SENSE_PORT(struct mlx4_dev *dev, int port,
 
 	if (out_param > 2) {
 		mlx4_err(dev, "Sense returned illegal value: 0x%llx\n", out_param);
-		return EINVAL;
+		return -EINVAL;
 	}
 
 	*type = out_param;

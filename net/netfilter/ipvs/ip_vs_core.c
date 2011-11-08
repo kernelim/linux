@@ -172,6 +172,13 @@ ip_vs_set_state(struct ip_vs_conn *cp, int direction,
 	return pp->state_transition(cp, direction, skb, pp);
 }
 
+static inline __u16
+ip_vs_onepacket_enabled(struct ip_vs_service *svc, struct ip_vs_iphdr *iph)
+{
+	return (svc->flags & IP_VS_SVC_F_ONEPACKET
+		&& iph->protocol == IPPROTO_UDP)
+		? IP_VS_CONN_F_ONE_PACKET : 0;
+}
 
 /*
  *  IPVS persistent scheduling function
@@ -343,7 +350,7 @@ ip_vs_sched_persist(struct ip_vs_service *svc,
 			    &iph.saddr, ports[0],
 			    &iph.daddr, ports[1],
 			    &dest->addr, dport,
-			    0,
+			    ip_vs_onepacket_enabled(svc, &iph),
 			    dest);
 	if (cp == NULL) {
 		ip_vs_conn_put(ct);
@@ -410,7 +417,7 @@ ip_vs_schedule(struct ip_vs_service *svc, const struct sk_buff *skb)
 			    &iph.saddr, pptr[0],
 			    &iph.daddr, pptr[1],
 			    &dest->addr, dest->port ? dest->port : pptr[1],
-			    0,
+			    ip_vs_onepacket_enabled(svc, &iph),
 			    dest);
 	if (cp == NULL)
 		return NULL;
@@ -470,7 +477,8 @@ int ip_vs_leave(struct ip_vs_service *svc, struct sk_buff *skb,
 				    &iph.saddr, pptr[0],
 				    &iph.daddr, pptr[1],
 				    &daddr, 0,
-				    IP_VS_CONN_F_BYPASS,
+				    IP_VS_CONN_F_BYPASS |
+				    ip_vs_onepacket_enabled(svc, &iph),
 				    NULL);
 		if (cp == NULL)
 			return NF_DROP;

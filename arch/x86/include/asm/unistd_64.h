@@ -661,6 +661,25 @@ __SYSCALL(__NR_pwritev, sys_pwritev)
 __SYSCALL(__NR_rt_tgsigqueueinfo, sys_rt_tgsigqueueinfo)
 #define __NR_perf_event_open			298
 __SYSCALL(__NR_perf_event_open, sys_perf_event_open)
+#define __NR_recvmmsg				299
+__SYSCALL(__NR_recvmmsg, sys_recvmmsg)
+#define __NR_fanotify_init			300
+__SYSCALL(__NR_fanotify_init, sys_ni_syscall)
+#define __NR_fanotify_mark			301
+__SYSCALL(__NR_fanotify_mark, sys_ni_syscall)
+#define __NR_prlimit64				302
+__SYSCALL(__NR_prlimit64, sys_ni_syscall)
+#define __NR_name_to_handle_at			303
+__SYSCALL(__NR_name_to_handle_at, sys_ni_syscall)
+#define __NR_open_by_handle_at			304
+__SYSCALL(__NR_open_by_handle_at, sys_ni_syscall)
+#define __NR_clock_adjtime			305
+__SYSCALL(__NR_clock_adjtime, sys_ni_syscall)
+#define __NR_syncfs                             306
+__SYSCALL(__NR_syncfs, sys_syncfs)
+#define __NR_sendmmsg				307
+__SYSCALL(__NR_sendmmsg, sys_sendmmsg)
+
 
 #ifndef __NO_STUBS
 #define __ARCH_WANT_OLD_READDIR

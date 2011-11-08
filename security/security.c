@@ -16,6 +16,7 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/security.h>
+#include <linux/ima.h>
 
 /* Boot-time LSM user choice */
 static __initdata char chosen_lsm[SECURITY_NAME_MAX + 1];
@@ -235,7 +236,12 @@ int security_bprm_set_creds(struct linux_binprm *bprm)
 
 int security_bprm_check(struct linux_binprm *bprm)
 {
-	return security_ops->bprm_check_security(bprm);
+	int ret;
+
+	ret = security_ops->bprm_check_security(bprm);
+	if (ret)
+		return ret;
+	return ima_bprm_check(bprm);
 }
 
 void security_bprm_committing_creds(struct linux_binprm *bprm)
@@ -268,6 +274,11 @@ int security_sb_copy_data(char *orig, char *copy)
 	return security_ops->sb_copy_data(orig, copy);
 }
 EXPORT_SYMBOL(security_sb_copy_data);
+
+int security_sb_remount(struct super_block *sb, void *data)
+{
+	return security_ops->sb_remount(sb, data);
+}
 
 int security_sb_kern_mount(struct super_block *sb, int flags, void *data)
 {
@@ -352,12 +363,21 @@ EXPORT_SYMBOL(security_sb_parse_opts_str);
 
 int security_inode_alloc(struct inode *inode)
 {
+	int ret;
+
 	inode->i_security = NULL;
-	return security_ops->inode_alloc_security(inode);
+	ret =  security_ops->inode_alloc_security(inode);
+	if (ret)
+		return ret;
+	ret = ima_inode_alloc(inode);
+	if (ret)
+		security_inode_free(inode);
+	return ret;
 }
 
 void security_inode_free(struct inode *inode)
 {
+	ima_inode_free(inode);
 	security_ops->inode_free_security(inode);
 }
 
@@ -426,6 +446,7 @@ int security_path_rename(struct path *old_dir, struct dentry *old_dentry,
 	return security_ops->path_rename(old_dir, old_dentry, new_dir,
 					 new_dentry);
 }
+#endif
 
 int security_path_truncate(struct path *path, loff_t length,
 			   unsigned int time_attrs)
@@ -434,7 +455,6 @@ int security_path_truncate(struct path *path, loff_t length,
 		return 0;
 	return security_ops->path_truncate(path, length, time_attrs);
 }
-#endif
 
 int security_inode_create(struct inode *dir, struct dentry *dentry, int mode)
 {
@@ -639,7 +659,12 @@ int security_file_mmap(struct file *file, unsigned long reqprot,
 			unsigned long prot, unsigned long flags,
 			unsigned long addr, unsigned long addr_only)
 {
-	return security_ops->file_mmap(file, reqprot, prot, flags, addr, addr_only);
+	int ret;
+
+	ret = security_ops->file_mmap(file, reqprot, prot, flags, addr, addr_only);
+	if (ret)
+		return ret;
+	return ima_file_mmap(file, prot);
 }
 
 int security_file_mprotect(struct vm_area_struct *vma, unsigned long reqprot,
@@ -719,9 +744,9 @@ int security_kernel_create_files_as(struct cred *new, struct inode *inode)
 	return security_ops->kernel_create_files_as(new, inode);
 }
 
-int security_kernel_module_request(void)
+int security_kernel_module_request(char *kmod_name)
 {
-	return security_ops->kernel_module_request();
+	return security_ops->kernel_module_request(kmod_name);
 }
 
 int security_task_setuid(uid_t id0, uid_t id1, uid_t id2, int flags)
@@ -781,9 +806,10 @@ int security_task_getioprio(struct task_struct *p)
 	return security_ops->task_getioprio(p);
 }
 
-int security_task_setrlimit(unsigned int resource, struct rlimit *new_rlim)
+int security_task_setrlimit(struct task_struct *p, unsigned int resource,
+		struct rlimit *new_rlim)
 {
-	return security_ops->task_setrlimit(resource, new_rlim);
+	return security_ops->task_setrlimit(p, resource, new_rlim);
 }
 
 int security_task_setscheduler(struct task_struct *p,

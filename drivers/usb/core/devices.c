@@ -55,18 +55,18 @@
 #include <linux/usb.h>
 #include <linux/smp_lock.h>
 #include <linux/usbdevice_fs.h>
+#include <linux/usb/hcd.h>
 #include <linux/mutex.h>
 #include <asm/uaccess.h>
 
 #include "usb.h"
-#include "hcd.h"
 
 /* Define ALLOW_SERIAL_NUMBER if you want to see the serial number of devices */
 #define ALLOW_SERIAL_NUMBER
 
 static const char *format_topo =
-/* T:  Bus=dd Lev=dd Prnt=dd Port=dd Cnt=dd Dev#=ddd Spd=ddd MxCh=dd */
-"\nT:  Bus=%2.2d Lev=%2.2d Prnt=%2.2d Port=%2.2d Cnt=%2.2d Dev#=%3d Spd=%3s MxCh=%2d\n";
+/* T:  Bus=dd Lev=dd Prnt=dd Port=dd Cnt=dd Dev#=ddd Spd=dddd MxCh=dd */
+"\nT:  Bus=%2.2d Lev=%2.2d Prnt=%2.2d Port=%2.2d Cnt=%2.2d Dev#=%3d Spd=%-4s MxCh=%2d\n";
 
 static const char *format_string_manufacturer =
 /* S:  Manufacturer=xxxx */
@@ -494,7 +494,7 @@ static ssize_t usb_device_dump(char __user **buffer, size_t *nbytes,
 		return 0;
 	/* allocate 2^1 pages = 8K (on i386);
 	 * should be more than enough for one device */
-	pages_start = (char *)__get_free_pages(GFP_KERNEL, 1);
+	pages_start = (char *)__get_free_pages(GFP_NOIO, 1);
 	if (!pages_start)
 		return -ENOMEM;
 
@@ -509,11 +509,14 @@ static ssize_t usb_device_dump(char __user **buffer, size_t *nbytes,
 		speed = "1.5"; break;
 	case USB_SPEED_UNKNOWN:		/* usb 1.1 root hub code */
 	case USB_SPEED_FULL:
-		speed = "12 "; break;
+		speed = "12"; break;
+	case USB_SPEED_VARIABLE:	/* Wireless has no real fixed speed */
 	case USB_SPEED_HIGH:
 		speed = "480"; break;
+	case USB_SPEED_SUPER:
+		speed = "5000"; break;
 	default:
-		speed = "?? ";
+		speed = "??";
 	}
 	data_end = pages_start + sprintf(pages_start, format_topo,
 			bus->busnum, level, parent_devnum,

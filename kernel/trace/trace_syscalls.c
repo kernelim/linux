@@ -103,7 +103,8 @@ extern char *__bad_type_size(void);
 #define SYSCALL_FIELD(type, name)					\
 	sizeof(type) != sizeof(trace.name) ?				\
 		__bad_type_size() :					\
-		#type, #name, offsetof(typeof(trace), name), sizeof(trace.name)
+		#type, #name, offsetof(typeof(trace), name),		\
+		sizeof(trace.name), is_signed_type(type)
 
 int syscall_enter_format(struct ftrace_event_call *call, struct trace_seq *s)
 {
@@ -120,7 +121,8 @@ int syscall_enter_format(struct ftrace_event_call *call, struct trace_seq *s)
 	if (!entry)
 		return 0;
 
-	ret = trace_seq_printf(s, "\tfield:%s %s;\toffset:%zu;\tsize:%zu;\n",
+	ret = trace_seq_printf(s, "\tfield:%s %s;\toffset:%zu;\tsize:%zu;"
+			       "\tsigned:%u;\n",
 			       SYSCALL_FIELD(int, nr));
 	if (!ret)
 		return 0;
@@ -130,8 +132,10 @@ int syscall_enter_format(struct ftrace_event_call *call, struct trace_seq *s)
 				        entry->args[i]);
 		if (!ret)
 			return 0;
-		ret = trace_seq_printf(s, "\toffset:%d;\tsize:%zu;\n", offset,
-				       sizeof(unsigned long));
+		ret = trace_seq_printf(s, "\toffset:%d;\tsize:%zu;"
+				       "\tsigned:%u;\n", offset,
+				       sizeof(unsigned long),
+				       is_signed_type(unsigned long));
 		if (!ret)
 			return 0;
 		offset += sizeof(unsigned long);
@@ -163,8 +167,10 @@ int syscall_exit_format(struct ftrace_event_call *call, struct trace_seq *s)
 	struct syscall_trace_exit trace;
 
 	ret = trace_seq_printf(s,
-			       "\tfield:%s %s;\toffset:%zu;\tsize:%zu;\n"
-			       "\tfield:%s %s;\toffset:%zu;\tsize:%zu;\n",
+			       "\tfield:%s %s;\toffset:%zu;\tsize:%zu;"
+			       "\tsigned:%u;\n"
+			       "\tfield:%s %s;\toffset:%zu;\tsize:%zu;"
+			       "\tsigned:%u;\n",
 			       SYSCALL_FIELD(int, nr),
 			       SYSCALL_FIELD(long, ret));
 	if (!ret)
@@ -193,8 +199,8 @@ int syscall_enter_define_fields(struct ftrace_event_call *call)
 		return ret;
 
 	for (i = 0; i < meta->nb_args; i++) {
-		ret = trace_define_field(call, meta->types[i],
-					 meta->args[i], offset,
+		ret = trace_define_field(call, (char *)meta->types[i],
+					 (char *)meta->args[i], offset,
 					 sizeof(unsigned long), 0,
 					 FILTER_OTHER);
 		offset += sizeof(unsigned long);
@@ -212,7 +218,7 @@ int syscall_exit_define_fields(struct ftrace_event_call *call)
 	if (ret)
 		return ret;
 
-	ret = trace_define_field(call, SYSCALL_FIELD(long, ret), 0,
+	ret = trace_define_field(call, SYSCALL_FIELD(long, ret),
 				 FILTER_OTHER);
 
 	return ret;
@@ -285,23 +291,20 @@ void ftrace_syscall_exit(struct pt_regs *regs, long ret)
 		trace_current_buffer_unlock_commit(buffer, event, 0, 0);
 }
 
-int reg_event_syscall_enter(void *ptr)
+int reg_event_syscall_enter(struct ftrace_event_call *call)
 {
 	int ret = 0;
 	int num;
 	char *name;
 
-	name = (char *)ptr;
+	name = (char *)call->data;
 	num = syscall_name_to_nr(name);
 	if (num < 0 || num >= NR_syscalls)
 		return -ENOSYS;
 	mutex_lock(&syscall_trace_lock);
 	if (!sys_refcount_enter)
 		ret = register_trace_sys_enter(ftrace_syscall_enter);
-	if (ret) {
-		pr_info("event trace: Could not activate"
-				"syscall entry trace point");
-	} else {
+	if (!ret) {
 		set_bit(num, enabled_enter_syscalls);
 		sys_refcount_enter++;
 	}
@@ -309,12 +312,12 @@ int reg_event_syscall_enter(void *ptr)
 	return ret;
 }
 
-void unreg_event_syscall_enter(void *ptr)
+void unreg_event_syscall_enter(struct ftrace_event_call *call)
 {
 	int num;
 	char *name;
 
-	name = (char *)ptr;
+	name = (char *)call->data;
 	num = syscall_name_to_nr(name);
 	if (num < 0 || num >= NR_syscalls)
 		return;
@@ -326,23 +329,20 @@ void unreg_event_syscall_enter(void *ptr)
 	mutex_unlock(&syscall_trace_lock);
 }
 
-int reg_event_syscall_exit(void *ptr)
+int reg_event_syscall_exit(struct ftrace_event_call *call)
 {
 	int ret = 0;
 	int num;
 	char *name;
 
-	name = (char *)ptr;
+	name = call->data;
 	num = syscall_name_to_nr(name);
 	if (num < 0 || num >= NR_syscalls)
 		return -ENOSYS;
 	mutex_lock(&syscall_trace_lock);
 	if (!sys_refcount_exit)
 		ret = register_trace_sys_exit(ftrace_syscall_exit);
-	if (ret) {
-		pr_info("event trace: Could not activate"
-				"syscall exit trace point");
-	} else {
+	if (!ret) {
 		set_bit(num, enabled_exit_syscalls);
 		sys_refcount_exit++;
 	}
@@ -350,12 +350,12 @@ int reg_event_syscall_exit(void *ptr)
 	return ret;
 }
 
-void unreg_event_syscall_exit(void *ptr)
+void unreg_event_syscall_exit(struct ftrace_event_call *call)
 {
 	int num;
 	char *name;
 
-	name = (char *)ptr;
+	name = call->data;
 	num = syscall_name_to_nr(name);
 	if (num < 0 || num >= NR_syscalls)
 		return;
@@ -391,6 +391,7 @@ static void prof_syscall_enter(struct pt_regs *regs, long id)
 	int syscall_nr;
 	int size;
 	int cpu;
+	int rctx;
 
 	syscall_nr = syscall_get_nr(current, regs);
 	if (!test_bit(syscall_nr, enabled_prof_enter_syscalls))
@@ -407,6 +408,10 @@ static void prof_syscall_enter(struct pt_regs *regs, long id)
 
 	if (WARN_ONCE(size > FTRACE_MAX_PROFILE_SIZE,
 		      "profile buffer not large enough"))
+		return;
+
+	rctx = perf_swevent_get_recursion_context();
+	if (rctx == -1)
 		return;
 
 	/* Protect the per cpu buffer, begin the rcu read side */
@@ -434,6 +439,7 @@ static void prof_syscall_enter(struct pt_regs *regs, long id)
 	syscall_get_arguments(current, regs, 0, sys_data->nb_args,
 			       (unsigned long *)&rec->args);
 	perf_tp_event(sys_data->enter_id, 0, 1, rec, size);
+	perf_swevent_put_recursion_context(rctx);
 
 end:
 	local_irq_restore(flags);
@@ -487,6 +493,7 @@ static void prof_syscall_exit(struct pt_regs *regs, long ret)
 	char *raw_data;
 	int size;
 	int cpu;
+	int rctx;
 
 	syscall_nr = syscall_get_nr(current, regs);
 	if (!test_bit(syscall_nr, enabled_prof_exit_syscalls))
@@ -506,6 +513,10 @@ static void prof_syscall_exit(struct pt_regs *regs, long ret)
 	 */
 	if (WARN_ONCE(size > FTRACE_MAX_PROFILE_SIZE,
 		"exit event has grown above profile buffer size"))
+		return;
+
+	rctx = perf_swevent_get_recursion_context();
+	if (rctx == -1)
 		return;
 
 	/* Protect the per cpu buffer, begin the rcu read side */
@@ -533,6 +544,7 @@ static void prof_syscall_exit(struct pt_regs *regs, long ret)
 	rec->ret = syscall_get_return_value(current, regs);
 
 	perf_tp_event(sys_data->exit_id, 0, 1, rec, size);
+	perf_swevent_put_recursion_context(rctx);
 
 end:
 	local_irq_restore(flags);

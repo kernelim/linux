@@ -40,15 +40,10 @@ struct cfq_io_context {
 	struct io_context *ioc;
 
 	unsigned long last_end_request;
-	sector_t last_request_pos;
 
 	unsigned long ttime_total;
 	unsigned long ttime_samples;
 	unsigned long ttime_mean;
-
-	unsigned int seek_samples;
-	u64 seek_total;
-	sector_t seek_mean;
 
 	struct list_head queue_list;
 	struct hlist_node cic_list;
@@ -73,11 +68,15 @@ struct io_context {
 	unsigned short ioprio;
 	unsigned short ioprio_changed;
 
+#ifdef CONFIG_BLK_CGROUP
+	unsigned short cgroup_changed;
+#endif
+
 	/*
 	 * For request batching
 	 */
-	unsigned long last_waited; /* Time last woken after wait for request */
 	int nr_batch_requests;     /* Number of requests left in the batch */
+	unsigned long last_waited; /* Time last woken after wait for request */
 
 	struct as_io_context *aic;
 	struct radix_tree_root radix_root;

@@ -218,6 +218,7 @@ struct pci_dev {
 	unsigned int	class;		/* 3 bytes: (base,sub,prog-if) */
 	u8		revision;	/* PCI revision, low byte of class word */
 	u8		hdr_type;	/* PCI header type (`multi' flag masked out) */
+	u8		pcie_cap;	/* PCI-E capability offset */
 	u8		pcie_type;	/* PCI-E device/port type */
 	u8		rom_base_reg;	/* which config register controls the ROM */
 	u8		pin;  		/* which interrupt pin this device uses */
@@ -238,10 +239,13 @@ struct pci_dev {
 					   configuration space */
 	unsigned int	pme_support:5;	/* Bitmask of states from which PME#
 					   can be generated */
+	unsigned int	pme_interrupt:1;/* unimplemented in RHEL6 */
 	unsigned int	d1_support:1;	/* Low power state D1 is supported */
 	unsigned int	d2_support:1;	/* Low power state D2 is supported */
 	unsigned int	no_d1d2:1;	/* Only allow D0 and D3 */
 	unsigned int	wakeup_prepared:1;
+	unsigned int	d3_delay;	/* D3->D0 transition time in ms,
+					   unimplemented in RHEL6 */
 
 #ifdef CONFIG_PCIEASPM
 	struct pcie_link_state	*link_state;	/* ASPM link state. */
@@ -280,6 +284,7 @@ struct pci_dev {
 	unsigned int	is_virtfn:1;
 	unsigned int	reset_fn:1;
 	unsigned int    is_hotplug_bridge:1;
+	unsigned int	aer_firmware_first:1;
 	pci_dev_flags_t dev_flags;
 	atomic_t	enable_cnt;	/* pci_enable_device has been called */
 
@@ -300,9 +305,19 @@ struct pci_dev {
 	};
 	struct pci_ats	*ats;	/* Address Translation Service */
 #endif
+	/* RHEL6: padding to add future features to the pci_dev struct */
+	void *rh_reserved1;	/* used -- see pci_dev_rh1 */
+	void *rh_reserved2;
+};
+
+struct pci_dev_rh1 {
+	unsigned int    __aer_firmware_first_valid:1;
+	unsigned int	__pcie_osc_capabilities_valid:1;
+	unsigned int	pcie_osc_capabilities;
 };
 
 extern struct pci_dev *alloc_pci_dev(void);
+extern void kfree_pci_dev(struct pci_dev *);
 
 #define pci_dev_b(n) list_entry(n, struct pci_dev, bus_list)
 #define	to_pci_dev(n) container_of(n, struct pci_dev, dev)
@@ -347,6 +362,7 @@ struct pci_bus {
 	struct list_head slots;		/* list of slots on this bus */
 	struct resource	*resource[PCI_BUS_NUM_RESOURCES];
 					/* address space routed to this bus */
+	struct list_head resources;	/* unimplemented in RHEL6 */
 
 	struct pci_ops	*ops;		/* configuration access functions */
 	void		*sysdata;	/* hook for sys-specific extension */
@@ -356,6 +372,10 @@ struct pci_bus {
 	unsigned char	primary;	/* number of primary bridge */
 	unsigned char	secondary;	/* number of secondary bridge */
 	unsigned char	subordinate;	/* max number of subordinate buses */
+	unsigned char	max_bus_speed;	/* enum pci_bus_speed, unimplemented
+					   in RHEL6 */
+	unsigned char	cur_bus_speed;	/* enum pci_bus_speed, unimplemented
+					   in RHEL6 */
 
 	char		name[48];
 
@@ -366,6 +386,8 @@ struct pci_bus {
 	struct bin_attribute	*legacy_io; /* legacy I/O for this bus */
 	struct bin_attribute	*legacy_mem; /* legacy mem */
 	unsigned int		is_added:1;
+	/* RHEL6: padding to add future features to the pci_bus struct */
+	void *rh_reserved;
 };
 
 #define pci_bus_b(n)	list_entry(n, struct pci_bus, node)
@@ -488,6 +510,8 @@ struct pci_driver {
 	struct pci_error_handlers *err_handler;
 	struct device_driver	driver;
 	struct pci_dynids dynids;
+	/* RHEL6: padding to add future features to the pci_driver struct */
+	void *rh_reserved;
 };
 
 #define	to_pci_driver(drv) container_of(drv, struct pci_driver, driver)
@@ -564,8 +588,12 @@ void pcibios_align_resource(void *, struct resource *, resource_size_t,
 				resource_size_t);
 void pcibios_update_irq(struct pci_dev *, int irq);
 
+/* Weak but can be overriden by arch */
+void pci_fixup_cardbus(struct pci_bus *);
+
 /* Generic PCI functions used internally */
 
+void pcibios_scan_specific_bus(int busn);
 extern struct pci_bus *pci_find_bus(int domain, int busnr);
 void pci_bus_add_devices(const struct pci_bus *bus);
 struct pci_bus *pci_scan_bus_parented(struct device *parent, int bus,
@@ -606,6 +634,9 @@ extern void pci_remove_bus_device(struct pci_dev *dev);
 extern void pci_stop_bus_device(struct pci_dev *dev);
 void pci_setup_cardbus(struct pci_bus *bus);
 extern void pci_sort_breadthfirst(void);
+#define dev_is_pci(d) ((d)->bus == &pci_bus_type)
+#define dev_is_pf(d) ((dev_is_pci(d) ? to_pci_dev(d)->is_physfn : false))
+#define dev_num_vf(d) ((dev_is_pci(d) ? pci_num_vf(to_pci_dev(d)) : 0))
 
 /* Generic PCI functions exported to card drivers */
 
@@ -636,6 +667,8 @@ struct pci_dev *pci_get_subsys(unsigned int vendor, unsigned int device,
 				struct pci_dev *from);
 struct pci_dev *pci_get_slot(struct pci_bus *bus, unsigned int devfn);
 struct pci_dev *pci_get_bus_and_slot(unsigned int bus, unsigned int devfn);
+struct pci_dev *pci_get_domain_bus_and_slot(int domain, unsigned int bus,
+					    unsigned int devfn);
 struct pci_dev *pci_get_class(unsigned int class, struct pci_dev *from);
 int pci_dev_present(const struct pci_device_id *ids);
 
@@ -743,6 +776,27 @@ pci_power_t pci_target_state(struct pci_dev *dev);
 int pci_prepare_to_sleep(struct pci_dev *dev);
 int pci_back_from_sleep(struct pci_dev *dev);
 
+#define PCI_EXP_IDO_REQUEST	(1<<0)
+#define PCI_EXP_IDO_COMPLETION	(1<<1)
+void pci_enable_ido(struct pci_dev *dev, unsigned long type);
+void pci_disable_ido(struct pci_dev *dev, unsigned long type);
+
+enum pci_obff_signal_type {
+	PCI_EXP_OBFF_SIGNAL_L0 = 0,
+	PCI_EXP_OBFF_SIGNAL_ALWAYS = 1,
+};
+int pci_enable_obff(struct pci_dev *dev, enum pci_obff_signal_type);
+void pci_disable_obff(struct pci_dev *dev);
+
+bool pci_ltr_supported(struct pci_dev *dev);
+int pci_enable_ltr(struct pci_dev *dev);
+void pci_disable_ltr(struct pci_dev *dev);
+int pci_set_ltr(struct pci_dev *dev, int snoop_lat_ns, int nosnoop_lat_ns);
+
+/* For use by arch with custom probe code */
+void set_pcie_port_type(struct pci_dev *pdev);
+void set_pcie_hotplug_bridge(struct pci_dev *pdev);
+
 /* Functions for PCI Hotplug drivers to use */
 int pci_bus_find_capability(struct pci_bus *bus, unsigned int devfn, int cap);
 #ifdef CONFIG_HOTPLUG
@@ -814,8 +868,11 @@ int pci_cfg_space_size_ext(struct pci_dev *dev);
 int pci_cfg_space_size(struct pci_dev *dev);
 unsigned char pci_bus_max_busnr(struct pci_bus *bus);
 
+#define PCI_VGA_STATE_CHANGE_BRIDGE (1 << 0)
+#define PCI_VGA_STATE_CHANGE_DECODES (1 << 1)
+
 int pci_set_vga_state(struct pci_dev *pdev, bool decode,
-		      unsigned int command_bits, bool change_bridge);
+		      unsigned int command_bits, u32 flags);
 /* kmem_cache style wrapper around pci_alloc_consistent() */
 
 #include <linux/dmapool.h>
@@ -891,13 +948,23 @@ extern void pci_restore_msi_state(struct pci_dev *dev);
 extern int pci_msi_enabled(void);
 #endif
 
+extern bool pcie_ports_disabled;
+extern bool pcie_ports_auto;
+
 #ifndef CONFIG_PCIEASPM
-static inline int pcie_aspm_enabled(void)
-{
-	return 0;
-}
+static inline int pcie_aspm_enabled(void) { return 0; }
+static inline bool pcie_aspm_support_enabled(void) { return false; }
 #else
 extern int pcie_aspm_enabled(void);
+extern bool pcie_aspm_support_enabled(void);
+#endif
+
+#ifdef CONFIG_PCIEAER
+void pci_no_aer(void);
+bool pci_aer_available(void);
+#else
+static inline void pci_no_aer(void) { }
+static inline bool pci_aer_available(void) { return false; }
 #endif
 
 #ifndef CONFIG_PCIE_ECRC
@@ -941,6 +1008,11 @@ static inline int pci_proc_domain(struct pci_bus *bus)
 	return 0;
 }
 #endif /* CONFIG_PCI_DOMAINS */
+
+/* some architectures require additional setup to direct VGA traffic */
+typedef int (*arch_set_vga_state_t)(struct pci_dev *pdev, bool decode,
+		      unsigned int command_bits, u32 flags);
+extern void pci_register_set_vga_state(arch_set_vga_state_t func);
 
 #else /* CONFIG_PCI is not enabled */
 
@@ -1089,6 +1161,23 @@ static inline int pci_enable_wake(struct pci_dev *dev, pci_power_t state,
 	return 0;
 }
 
+static inline void pci_enable_ido(struct pci_dev *dev, unsigned long type)
+{
+}
+
+static inline void pci_disable_ido(struct pci_dev *dev, unsigned long type)
+{
+}
+
+static inline int pci_enable_obff(struct pci_dev *dev, unsigned long type)
+{
+	return 0;
+}
+
+static inline void pci_disable_obff(struct pci_dev *dev)
+{
+}
+
 static inline int pci_request_regions(struct pci_dev *dev, const char *res_name)
 {
 	return -EIO;
@@ -1116,6 +1205,9 @@ static inline struct pci_dev *pci_get_bus_and_slot(unsigned int bus,
 						unsigned int devfn)
 { return NULL; }
 
+#define dev_is_pci(d) (false)
+#define dev_is_pf(d) (false)
+#define dev_num_vf(d) (0)
 #endif /* CONFIG_PCI */
 
 /* Include architecture-dependent settings and functions */
@@ -1271,6 +1363,7 @@ void __iomem *pci_ioremap_bar(struct pci_dev *pdev, int bar);
 extern int pci_enable_sriov(struct pci_dev *dev, int nr_virtfn);
 extern void pci_disable_sriov(struct pci_dev *dev);
 extern irqreturn_t pci_sriov_migration(struct pci_dev *dev);
+extern int pci_num_vf(struct pci_dev *dev);
 #else
 static inline int pci_enable_sriov(struct pci_dev *dev, int nr_virtfn)
 {
@@ -1283,12 +1376,133 @@ static inline irqreturn_t pci_sriov_migration(struct pci_dev *dev)
 {
 	return IRQ_NONE;
 }
+static inline int pci_num_vf(struct pci_dev *dev)
+{
+	return 0;
+}
 #endif
 
 #if defined(CONFIG_HOTPLUG_PCI) || defined(CONFIG_HOTPLUG_PCI_MODULE)
 extern void pci_hp_create_module_link(struct pci_slot *pci_slot);
 extern void pci_hp_remove_module_link(struct pci_slot *pci_slot);
 #endif
+
+void pci_request_acs(void);
+/**
+ * pci_pcie_cap - get the saved PCIe capability offset
+ * @dev: PCI device
+ *
+ * PCIe capability offset is calculated at PCI device initialization
+ * time and saved in the data structure. This function returns saved
+ * PCIe capability offset. Using this instead of pci_find_capability()
+ * reduces unnecessary search in the PCI configuration space. If you
+ * need to calculate PCIe capability offset from raw device for some
+ * reasons, please use pci_find_capability() instead.
+ */
+static inline int pci_pcie_cap(struct pci_dev *dev)
+{
+	return dev->pcie_cap;
+}
+
+
+#define PCI_VPD_LRDT			0x80	/* Large Resource Data Type */
+#define PCI_VPD_LRDT_ID(x)		(x | PCI_VPD_LRDT)
+
+/* Large Resource Data Type Tag Item Names */
+#define PCI_VPD_LTIN_ID_STRING		0x02	/* Identifier String */
+#define PCI_VPD_LTIN_RO_DATA		0x10	/* Read-Only Data */
+#define PCI_VPD_LTIN_RW_DATA		0x11	/* Read-Write Data */
+
+#define PCI_VPD_LRDT_ID_STRING		PCI_VPD_LRDT_ID(PCI_VPD_LTIN_ID_STRING)
+#define PCI_VPD_LRDT_RO_DATA		PCI_VPD_LRDT_ID(PCI_VPD_LTIN_RO_DATA)
+#define PCI_VPD_LRDT_RW_DATA		PCI_VPD_LRDT_ID(PCI_VPD_LTIN_RW_DATA)
+
+/* Small Resource Data Type Tag Item Names */
+#define PCI_VPD_STIN_END		0x78	/* End */
+
+#define PCI_VPD_SRDT_END		PCI_VPD_STIN_END
+
+#define PCI_VPD_SRDT_TIN_MASK		0x78
+#define PCI_VPD_SRDT_LEN_MASK		0x07
+
+#define PCI_VPD_LRDT_TAG_SIZE		3
+#define PCI_VPD_SRDT_TAG_SIZE		1
+
+#define PCI_VPD_INFO_FLD_HDR_SIZE	3
+
+#define PCI_VPD_RO_KEYWORD_PARTNO	"PN"
+#define PCI_VPD_RO_KEYWORD_MFR_ID	"MN"
+#define PCI_VPD_RO_KEYWORD_VENDOR0	"V0"
+#define PCI_VPD_RO_KEYWORD_CHKSUM	"RV"
+
+/**
+ * pci_vpd_lrdt_size - Extracts the Large Resource Data Type length
+ * @lrdt: Pointer to the beginning of the Large Resource Data Type tag
+ *
+ * Returns the extracted Large Resource Data Type length.
+ */
+static inline u16 pci_vpd_lrdt_size(const u8 *lrdt)
+{
+	return (u16)lrdt[1] + ((u16)lrdt[2] << 8);
+}
+
+/**
+ * pci_vpd_srdt_size - Extracts the Small Resource Data Type length
+ * @lrdt: Pointer to the beginning of the Small Resource Data Type tag
+ *
+ * Returns the extracted Small Resource Data Type length.
+ */
+static inline u8 pci_vpd_srdt_size(const u8 *srdt)
+{
+	return (*srdt) & PCI_VPD_SRDT_LEN_MASK;
+}
+
+/**
+ * pci_vpd_info_field_size - Extracts the information field length
+ * @lrdt: Pointer to the beginning of an information field header
+ *
+ * Returns the extracted information field length.
+ */
+static inline u8 pci_vpd_info_field_size(const u8 *info_field)
+{
+	return info_field[2];
+}
+
+/**
+ * pci_vpd_find_tag - Locates the Resource Data Type tag provided
+ * @buf: Pointer to buffered vpd data
+ * @off: The offset into the buffer at which to begin the search
+ * @len: The length of the vpd buffer
+ * @rdt: The Resource Data Type to search for
+ *
+ * Returns the index where the Resource Data Type was found or
+ * -ENOENT otherwise.
+ */
+int pci_vpd_find_tag(const u8 *buf, unsigned int off, unsigned int len, u8 rdt);
+
+/**
+ * pci_vpd_find_info_keyword - Locates an information field keyword in the VPD
+ * @buf: Pointer to buffered vpd data
+ * @off: The offset into the buffer at which to begin the search
+ * @len: The length of the buffer area, relative to off, in which to search
+ * @kw: The keyword to search for
+ *
+ * Returns the index where the information field keyword was found or
+ * -ENOENT otherwise.
+ */
+int pci_vpd_find_info_keyword(const u8 *buf, unsigned int off,
+			      unsigned int len, const char *kw);
+
+/**
+ * pci_is_pcie - check if the PCI device is PCI Express capable
+ * @dev: PCI device
+ *
+ * Retrun true if the PCI device is PCI Express capable, false otherwise.
+ */
+static inline bool pci_is_pcie(struct pci_dev *dev)
+{
+	return !!pci_pcie_cap(dev);
+}
 
 #endif /* __KERNEL__ */
 #endif /* LINUX_PCI_H */

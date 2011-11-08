@@ -110,3 +110,7 @@ void efi_call_phys_epilog(void)
 
 	local_irq_restore(efi_rt_eflags);
 }
+
+void efi_call_phys_prelog_in_physmode(void) { /* Not supported */ }
+void efi_call_phys_epilog_in_physmode(void) { /* Not supported */ }
+

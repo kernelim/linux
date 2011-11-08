@@ -99,9 +99,10 @@ int arch_update_cpu_topology(void);
 				| 1*SD_WAKE_AFFINE			\
 				| 1*SD_SHARE_CPUPOWER			\
 				| 0*SD_POWERSAVINGS_BALANCE		\
-				| 0*SD_SHARE_PKG_RESOURCES		\
+				| 1*SD_SHARE_PKG_RESOURCES		\
 				| 0*SD_SERIALIZE			\
 				| 0*SD_PREFER_SIBLING			\
+				| arch_sd_sibling_asym_packing()	\
 				,					\
 	.last_balance		= jiffies,				\
 	.balance_interval	= 1,					\
@@ -198,6 +199,12 @@ int arch_update_cpu_topology(void);
 	.last_balance		= jiffies,				\
 	.balance_interval	= 64,					\
 }
+
+#ifdef CONFIG_SCHED_BOOK
+#ifndef SD_BOOK_INIT
+#error Please define an appropriate SD_BOOK_INIT in include/asm/topology.h!!!
+#endif
+#endif /* CONFIG_SCHED_BOOK */
 
 #ifdef CONFIG_NUMA
 #ifndef SD_NODE_INIT

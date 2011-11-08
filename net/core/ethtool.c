@@ -120,7 +120,7 @@ int ethtool_op_set_ufo(struct net_device *dev, u32 data)
  * NETIF_F_xxx values in include/linux/netdevice.h
  */
 static const u32 flags_dup_features =
-	ETH_FLAG_LRO;
+	(ETH_FLAG_LRO | ETH_FLAG_NTUPLE | ETH_FLAG_RXHASH);
 
 u32 ethtool_op_get_flags(struct net_device *dev)
 {
@@ -138,6 +138,11 @@ int ethtool_op_set_flags(struct net_device *dev, u32 data)
 		dev->features |= NETIF_F_LRO;
 	else
 		dev->features &= ~NETIF_F_LRO;
+
+	if (data & ETH_FLAG_RXHASH)
+		dev->features |= NETIF_F_RXHASH;
+	else
+		dev->features &= ~NETIF_F_RXHASH;
 
 	return 0;
 }
@@ -179,14 +184,20 @@ static int ethtool_get_drvinfo(struct net_device *dev, void __user *useraddr)
 	struct ethtool_drvinfo info;
 	const struct ethtool_ops *ops = dev->ethtool_ops;
 
-	if (!ops->get_drvinfo)
-		return -EOPNOTSUPP;
-
 	memset(&info, 0, sizeof(info));
 	info.cmd = ETHTOOL_GDRVINFO;
-	ops->get_drvinfo(dev, &info);
+	if (ops && ops->get_drvinfo) {
+		ops->get_drvinfo(dev, &info);
+	} else if (dev->dev.parent && dev->dev.parent->driver) {
+		strlcpy(info.bus_info, dev_name(dev->dev.parent),
+			sizeof(info.bus_info));
+		strlcpy(info.driver, dev->dev.parent->driver->name,
+			sizeof(info.driver));
+	} else {
+		return -EOPNOTSUPP;
+	}
 
-	if (ops->get_sset_count) {
+	if (ops && ops->get_sset_count) {
 		int rc;
 
 		rc = ops->get_sset_count(dev, ETH_SS_TEST);
@@ -201,14 +212,14 @@ static int ethtool_get_drvinfo(struct net_device *dev, void __user *useraddr)
 	} else {
 		/* code path for obsolete hooks */
 
-		if (ops->self_test_count)
+		if (ops && ops->self_test_count)
 			info.testinfo_len = ops->self_test_count(dev);
-		if (ops->get_stats_count)
+		if (ops && ops->get_stats_count)
 			info.n_stats = ops->get_stats_count(dev);
 	}
-	if (ops->get_regs_len)
+	if (ops && ops->get_regs_len)
 		info.regdump_len = ops->get_regs_len(dev);
-	if (ops->get_eeprom_len)
+	if (ops && ops->get_eeprom_len)
 		info.eedump_len = ops->get_eeprom_len(dev);
 
 	if (copy_to_user(useraddr, &info, sizeof(info)))
@@ -244,8 +255,9 @@ static int ethtool_get_rxnfc(struct net_device *dev, void __user *useraddr)
 
 	if (info.cmd == ETHTOOL_GRXCLSRLALL) {
 		if (info.rule_cnt > 0) {
-			rule_buf = kmalloc(info.rule_cnt * sizeof(u32),
-					   GFP_USER);
+			if (info.rule_cnt <= KMALLOC_MAX_SIZE / sizeof(u32))
+				rule_buf = kzalloc(info.rule_cnt * sizeof(u32),
+						   GFP_USER);
 			if (!rule_buf)
 				return -ENOMEM;
 		}
@@ -290,7 +302,7 @@ static int ethtool_get_regs(struct net_device *dev, char __user *useraddr)
 	if (regs.len > reglen)
 		regs.len = reglen;
 
-	regbuf = kmalloc(reglen, GFP_USER);
+	regbuf = kzalloc(reglen, GFP_USER);
 	if (!regbuf)
 		return -ENOMEM;
 
@@ -924,11 +936,18 @@ int dev_ethtool(struct net *net, struct ifreq *ifr)
 	if (!dev || !netif_device_present(dev))
 		return -ENODEV;
 
-	if (!dev->ethtool_ops)
-		return -EOPNOTSUPP;
-
 	if (copy_from_user(&ethcmd, useraddr, sizeof (ethcmd)))
 		return -EFAULT;
+
+	if (!dev->ethtool_ops) {
+		/* ETHTOOL_GDRVINFO does not require any driver support.
+		 * It is also unprivileged and does not change anything,
+		 * so we can take a shortcut to it. */
+		if (ethcmd == ETHTOOL_GDRVINFO)
+			return ethtool_get_drvinfo(dev, useraddr);
+		else
+			return -EOPNOTSUPP;
+	}
 
 	/* Allow some commands to be done by anyone */
 	switch(ethcmd) {

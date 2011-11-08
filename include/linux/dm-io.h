@@ -37,14 +37,14 @@ enum dm_io_mem_type {
 struct dm_io_memory {
 	enum dm_io_mem_type type;
 
+	unsigned offset;
+
 	union {
 		struct page_list *pl;
 		struct bio_vec *bvec;
 		void *vma;
 		void *addr;
 	} ptr;
-
-	unsigned offset;
 };
 
 struct dm_io_notify {
@@ -69,8 +69,7 @@ struct dm_io_request {
  *
  * Create/destroy may block.
  */
-struct dm_io_client *dm_io_client_create(unsigned num_pages);
-int dm_io_client_resize(unsigned num_pages, struct dm_io_client *client);
+struct dm_io_client *dm_io_client_create(void);
 void dm_io_client_destroy(struct dm_io_client *client);
 
 /*

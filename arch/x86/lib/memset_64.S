@@ -2,9 +2,13 @@
 
 #include <linux/linkage.h>
 #include <asm/dwarf2.h>
+#include <asm/cpufeature.h>
+#include <asm/alternative-asm.h>
 
 /*
- * ISO C memset - set a memory block to a byte value.
+ * ISO C memset - set a memory block to a byte value. This function uses fast
+ * string to get better performance than the original function. The code is
+ * simpler and shorter than the orignal function as well.
  *	
  * rdi   destination
  * rsi   value (char) 
@@ -12,9 +16,8 @@
  * 
  * rax   original destination
  */	
-	ALIGN
-memset_c:
-	CFI_STARTPROC
+	.section .altinstr_replacement, "ax", @progbits
+.Lmemset_c:
 	movq %rdi,%r9
 	movl %edx,%r8d
 	andl $7,%r8d
@@ -29,8 +32,30 @@ memset_c:
 	rep stosb
 	movq %r9,%rax
 	ret
-	CFI_ENDPROC
-ENDPROC(memset_c)
+.Lmemset_e:
+	.previous
+
+/*
+ * ISO C memset - set a memory block to a byte value. This function uses
+ * enhanced rep stosb to override the fast string function.
+ * The code is simpler and shorter than the fast string function as well.
+ *
+ * rdi   destination
+ * rsi   value (char)
+ * rdx   count (bytes)
+ *
+ * rax   original destination
+ */
+	.section .altinstr_replacement, "ax", @progbits
+.Lmemset_c_e:
+	movq %rdi,%r9
+	movb %sil,%al
+	movl %edx,%ecx
+	rep stosb
+	movq %r9,%rax
+	ret
+.Lmemset_e_e:
+	.previous
 
 ENTRY(memset)
 ENTRY(__memset)
@@ -113,21 +138,20 @@ ENTRY(__memset)
 ENDPROC(memset)
 ENDPROC(__memset)
 
-	/* Some CPUs run faster using the string instructions.
-	   It is also a lot simpler. Use this when possible */
-
-#include <asm/cpufeature.h>
-
-	.section .altinstr_replacement,"ax"
-1:	.byte 0xeb				/* jmp <disp8> */
-	.byte (memset_c - memset) - (2f - 1b)	/* offset */
-2:
-	.previous
+	/* Some CPUs support enhanced REP MOVSB/STOSB feature.
+	 * It is recommended to use this when possible.
+	 *
+	 * If enhanced REP MOVSB/STOSB feature is not available, use fast string
+	 * instructions.
+	 *
+	 * Otherwise, use original memset function.
+	 *
+	 * In .altinstructions section, ERMS feature is placed after REG_GOOD
+         * feature to implement the right patch order.
+	 */
 	.section .altinstructions,"a"
-	.align 8
-	.quad memset
-	.quad 1b
-	.byte X86_FEATURE_REP_GOOD
-	.byte .Lfinal - memset
-	.byte 2b - 1b
+	altinstruction_entry memset,.Lmemset_c,X86_FEATURE_REP_GOOD,\
+			     .Lfinal-memset,.Lmemset_e-.Lmemset_c
+	altinstruction_entry memset,.Lmemset_c_e,X86_FEATURE_ERMS, \
+			     .Lfinal-memset,.Lmemset_e_e-.Lmemset_c_e
 	.previous

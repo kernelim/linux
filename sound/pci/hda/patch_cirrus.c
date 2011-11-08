@@ -51,7 +51,7 @@ struct cs_spec {
 	unsigned int cur_adc_format;
 	hda_nid_t dig_in;
 
-	struct hda_bind_ctls *capture_bind[2];
+	const struct hda_bind_ctls *capture_bind[2];
 
 	unsigned int gpio_mask;
 	unsigned int gpio_dir;
@@ -65,7 +65,9 @@ struct cs_spec {
 
 /* available models */
 enum {
+	CS420X_MBP53,
 	CS420X_MBP55,
+	CS420X_IMAC27,
 	CS420X_AUTO,
 	CS420X_MODELS
 };
@@ -229,7 +231,7 @@ static int cs_capture_pcm_cleanup(struct hda_pcm_stream *hinfo,
 
 /*
  */
-static struct hda_pcm_stream cs_pcm_analog_playback = {
+static const struct hda_pcm_stream cs_pcm_analog_playback = {
 	.substreams = 1,
 	.channels_min = 2,
 	.channels_max = 2,
@@ -240,7 +242,7 @@ static struct hda_pcm_stream cs_pcm_analog_playback = {
 	},
 };
 
-static struct hda_pcm_stream cs_pcm_analog_capture = {
+static const struct hda_pcm_stream cs_pcm_analog_capture = {
 	.substreams = 1,
 	.channels_min = 2,
 	.channels_max = 2,
@@ -250,7 +252,7 @@ static struct hda_pcm_stream cs_pcm_analog_capture = {
 	},
 };
 
-static struct hda_pcm_stream cs_pcm_digital_playback = {
+static const struct hda_pcm_stream cs_pcm_digital_playback = {
 	.substreams = 1,
 	.channels_min = 2,
 	.channels_max = 2,
@@ -262,7 +264,7 @@ static struct hda_pcm_stream cs_pcm_digital_playback = {
 	},
 };
 
-static struct hda_pcm_stream cs_pcm_digital_capture = {
+static const struct hda_pcm_stream cs_pcm_digital_capture = {
 	.substreams = 1,
 	.channels_min = 2,
 	.channels_max = 2,
@@ -328,12 +330,12 @@ static int is_ext_mic(struct hda_codec *codec, unsigned int idx)
 {
 	struct cs_spec *spec = codec->spec;
 	struct auto_pin_cfg *cfg = &spec->autocfg;
-	hda_nid_t pin = cfg->input_pins[idx];
-	unsigned int val = snd_hda_query_pin_caps(codec, pin);
-	if (!(val & AC_PINCAP_PRES_DETECT))
+	hda_nid_t pin = cfg->inputs[idx].pin;
+	unsigned int val;
+	if (!is_jack_detectable(codec, pin))
 		return 0;
 	val = snd_hda_codec_get_pincfg(codec, pin);
-	return (get_defcfg_connect(val) == AC_JACK_PORT_COMPLEX);
+	return (snd_hda_get_input_pin_attr(val) != INPUT_PIN_ATTR_INT);
 }
 
 static hda_nid_t get_adc(struct hda_codec *codec, hda_nid_t pin,
@@ -344,22 +346,15 @@ static hda_nid_t get_adc(struct hda_codec *codec, hda_nid_t pin,
 
 	nid = codec->start_nid;
 	for (i = 0; i < codec->num_nodes; i++, nid++) {
-		hda_nid_t pins[2];
 		unsigned int type;
-		int j, nums;
-		type = (get_wcaps(codec, nid) & AC_WCAP_TYPE)
-			>> AC_WCAP_TYPE_SHIFT;
+		int idx;
+		type = get_wcaps_type(get_wcaps(codec, nid));
 		if (type != AC_WID_AUD_IN)
 			continue;
-		nums = snd_hda_get_connections(codec, nid, pins,
-					       ARRAY_SIZE(pins));
-		if (nums <= 0)
-			continue;
-		for (j = 0; j < nums; j++) {
-			if (pins[j] == pin) {
-				*idxp = j;
-				return nid;
-			}
+		idx = snd_hda_get_conn_index(codec, nid, pin, 0);
+		if (idx >= 0) {
+			*idxp = idx;
+			return nid;
 		}
 	}
 	return 0;
@@ -423,10 +418,8 @@ static int parse_input(struct hda_codec *codec)
 	struct auto_pin_cfg *cfg = &spec->autocfg;
 	int i;
 
-	for (i = 0; i < AUTO_PIN_LAST; i++) {
-		hda_nid_t pin = cfg->input_pins[i];
-		if (!pin)
-			continue;
+	for (i = 0; i < cfg->num_inputs; i++) {
+		hda_nid_t pin = cfg->inputs[i].pin;
 		spec->input_idx[spec->num_inputs] = i;
 		spec->capsrc_idx[i] = spec->num_inputs++;
 		spec->cur_input = i;
@@ -437,16 +430,17 @@ static int parse_input(struct hda_codec *codec)
 
 	/* check whether the automatic mic switch is available */
 	if (spec->num_inputs == 2 &&
-	    spec->adc_nid[AUTO_PIN_MIC] && spec->adc_nid[AUTO_PIN_FRONT_MIC]) {
-		if (is_ext_mic(codec, cfg->input_pins[AUTO_PIN_FRONT_MIC])) {
-			if (!is_ext_mic(codec, cfg->input_pins[AUTO_PIN_MIC])) {
+	    cfg->inputs[0].type == AUTO_PIN_MIC &&
+	    cfg->inputs[1].type == AUTO_PIN_MIC) {
+		if (is_ext_mic(codec, cfg->inputs[0].pin)) {
+			if (!is_ext_mic(codec, cfg->inputs[1].pin)) {
 				spec->mic_detect = 1;
-				spec->automic_idx = AUTO_PIN_FRONT_MIC;
+				spec->automic_idx = 0;
 			}
 		} else {
-			if (is_ext_mic(codec, cfg->input_pins[AUTO_PIN_MIC])) {
+			if (is_ext_mic(codec, cfg->inputs[1].pin)) {
 				spec->mic_detect = 1;
-				spec->automic_idx = AUTO_PIN_MIC;
+				spec->automic_idx = 1;
 			}
 		}
 	}
@@ -489,7 +483,7 @@ static int parse_digital_input(struct hda_codec *codec)
  * create mixer controls
  */
 
-static const char *dir_sfx[2] = { "Playback", "Capture" };
+static const char * const dir_sfx[2] = { "Playback", "Capture" };
 
 static int add_mute(struct hda_codec *codec, const char *name, int index,
 		    unsigned int pval, int dir, struct snd_kcontrol **kctlp)
@@ -500,7 +494,8 @@ static int add_mute(struct hda_codec *codec, const char *name, int index,
 	knew.private_value = pval;
 	snprintf(tmp, sizeof(tmp), "%s %s Switch", name, dir_sfx[dir]);
 	*kctlp = snd_ctl_new1(&knew, codec);
-	return snd_hda_ctl_add(codec, *kctlp);
+	(*kctlp)->id.subdevice = HDA_SUBDEV_AMP_FLAG;
+	return snd_hda_ctl_add(codec, 0, *kctlp);
 }
 
 static int add_volume(struct hda_codec *codec, const char *name,
@@ -513,7 +508,8 @@ static int add_volume(struct hda_codec *codec, const char *name,
 	knew.private_value = pval;
 	snprintf(tmp, sizeof(tmp), "%s %s Volume", name, dir_sfx[dir]);
 	*kctlp = snd_ctl_new1(&knew, codec);
-	return snd_hda_ctl_add(codec, *kctlp);
+	(*kctlp)->id.subdevice = HDA_SUBDEV_AMP_FLAG;
+	return snd_hda_ctl_add(codec, 0, *kctlp);
 }
 
 static void fix_volume_caps(struct hda_codec *codec, hda_nid_t dac)
@@ -536,14 +532,14 @@ static int add_vmaster(struct hda_codec *codec, hda_nid_t dac)
 
 	spec->vmaster_sw =
 		snd_ctl_make_virtual_master("Master Playback Switch", NULL);
-	err = snd_hda_ctl_add(codec, spec->vmaster_sw);
+	err = snd_hda_ctl_add(codec, dac, spec->vmaster_sw);
 	if (err < 0)
 		return err;
 
 	snd_hda_set_vmaster_tlv(codec, dac, HDA_OUTPUT, tlv);
 	spec->vmaster_vol =
 		snd_ctl_make_virtual_master("Master Playback Volume", tlv);
-	err = snd_hda_ctl_add(codec, spec->vmaster_vol);
+	err = snd_hda_ctl_add(codec, dac, spec->vmaster_vol);
 	if (err < 0)
 		return err;
 	return 0;
@@ -556,10 +552,10 @@ static int add_output(struct hda_codec *codec, hda_nid_t dac, int idx,
 	const char *name;
 	int err, index;
 	struct snd_kcontrol *kctl;
-	static char *speakers[] = {
+	static const char * const speakers[] = {
 		"Front Speaker", "Surround Speaker", "Bass Speaker"
 	};
-	static char *line_outs[] = {
+	static const char * const line_outs[] = {
 		"Front Line-Out", "Surround Line-Out", "Bass Line-Out"
 	};
 
@@ -639,7 +635,7 @@ static int build_output(struct hda_codec *codec)
 /*
  */
 
-static struct snd_kcontrol_new cs_capture_ctls[] = {
+static const struct snd_kcontrol_new cs_capture_ctls[] = {
 	HDA_BIND_SW("Capture Switch", 0),
 	HDA_BIND_VOL("Capture Volume", 0),
 };
@@ -653,7 +649,7 @@ static int change_cur_input(struct hda_codec *codec, unsigned int idx,
 		return 0;
 	if (spec->cur_adc && spec->cur_adc != spec->adc_nid[idx]) {
 		/* stream is running, let's swap the current ADC */
-		snd_hda_codec_cleanup_stream(codec, spec->cur_adc);
+		__snd_hda_codec_cleanup_stream(codec, spec->cur_adc, 1);
 		spec->cur_adc = spec->adc_nid[idx];
 		snd_hda_codec_setup_stream(codec, spec->cur_adc,
 					   spec->cur_adc_stream_tag, 0,
@@ -671,6 +667,7 @@ static int cs_capture_source_info(struct snd_kcontrol *kcontrol,
 {
 	struct hda_codec *codec = snd_kcontrol_chip(kcontrol);
 	struct cs_spec *spec = codec->spec;
+	struct auto_pin_cfg *cfg = &spec->autocfg;
 	unsigned int idx;
 
 	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
@@ -679,7 +676,8 @@ static int cs_capture_source_info(struct snd_kcontrol *kcontrol,
 	if (uinfo->value.enumerated.item >= spec->num_inputs)
 		uinfo->value.enumerated.item = spec->num_inputs - 1;
 	idx = spec->input_idx[uinfo->value.enumerated.item];
-	strcpy(uinfo->value.enumerated.name, auto_pin_cfg_labels[idx]);
+	strcpy(uinfo->value.enumerated.name,
+	       hda_get_input_pin_label(codec, cfg->inputs[idx].pin, 1));
 	return 0;
 }
 
@@ -705,7 +703,7 @@ static int cs_capture_source_put(struct snd_kcontrol *kcontrol,
 	return change_cur_input(codec, idx, 0);
 }
 
-static struct snd_kcontrol_new cs_capture_source = {
+static const struct snd_kcontrol_new cs_capture_source = {
 	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	.name = "Capture Source",
 	.access = SNDRV_CTL_ELEM_ACCESS_READWRITE,
@@ -714,7 +712,7 @@ static struct snd_kcontrol_new cs_capture_source = {
 	.put = cs_capture_source_put,
 };
 
-static struct hda_bind_ctls *make_bind_capture(struct hda_codec *codec,
+static const struct hda_bind_ctls *make_bind_capture(struct hda_codec *codec,
 					       struct hda_ctl_ops *ops)
 {
 	struct cs_spec *spec = codec->spec;
@@ -737,6 +735,27 @@ static struct hda_bind_ctls *make_bind_capture(struct hda_codec *codec,
 	return bind;
 }
 
+/* add a (input-boost) volume control to the given input pin */
+static int add_input_volume_control(struct hda_codec *codec,
+				    struct auto_pin_cfg *cfg,
+				    int item)
+{
+	hda_nid_t pin = cfg->inputs[item].pin;
+	u32 caps;
+	const char *label;
+	struct snd_kcontrol *kctl;
+		
+	if (!(get_wcaps(codec, pin) & AC_WCAP_IN_AMP))
+		return 0;
+	caps = query_amp_caps(codec, pin, HDA_INPUT);
+	caps = (caps & AC_AMPCAP_NUM_STEPS) >> AC_AMPCAP_NUM_STEPS_SHIFT;
+	if (caps <= 1)
+		return 0;
+	label = hda_get_autocfg_input_label(codec, cfg, item);
+	return add_volume(codec, label, 0,
+			  HDA_COMPOSE_AMP_VAL(pin, 3, 0, HDA_INPUT), 1, &kctl);
+}
+
 static int build_input(struct hda_codec *codec)
 {
 	struct cs_spec *spec = codec->spec;
@@ -750,20 +769,34 @@ static int build_input(struct hda_codec *codec)
 	spec->capture_bind[1] = make_bind_capture(codec, &snd_hda_bind_vol);
 	for (i = 0; i < 2; i++) {
 		struct snd_kcontrol *kctl;
+		int n;
 		if (!spec->capture_bind[i])
 			return -ENOMEM;
 		kctl = snd_ctl_new1(&cs_capture_ctls[i], codec);
 		if (!kctl)
 			return -ENOMEM;
 		kctl->private_value = (long)spec->capture_bind[i];
-		err = snd_hda_ctl_add(codec, kctl);
+		err = snd_hda_ctl_add(codec, 0, kctl);
 		if (err < 0)
 			return err;
+		for (n = 0; n < AUTO_PIN_LAST; n++) {
+			if (!spec->adc_nid[n])
+				continue;
+			err = snd_hda_add_nid(codec, kctl, 0, spec->adc_nid[n]);
+			if (err < 0)
+				return err;
+		}
 	}
 	
 	if (spec->num_inputs > 1 && !spec->mic_detect) {
-		err = snd_hda_ctl_add(codec,
+		err = snd_hda_ctl_add(codec, 0,
 				      snd_ctl_new1(&cs_capture_source, codec));
+		if (err < 0)
+			return err;
+	}
+
+	for (i = 0; i < spec->num_inputs; i++) {
+		err = add_input_volume_control(codec, &spec->autocfg, i);
 		if (err < 0)
 			return err;
 	}
@@ -782,7 +815,8 @@ static int build_digital_output(struct hda_codec *codec)
 	if (!spec->multiout.dig_out_nid)
 		return 0;
 
-	err = snd_hda_create_spdif_out_ctls(codec, spec->multiout.dig_out_nid);
+	err = snd_hda_create_spdif_out_ctls(codec, spec->multiout.dig_out_nid,
+					    spec->multiout.dig_out_nid);
 	if (err < 0)
 		return err;
 	err = snd_hda_create_spdif_share_sw(codec, &spec->multiout);
@@ -807,22 +841,16 @@ static void cs_automute(struct hda_codec *codec)
 {
 	struct cs_spec *spec = codec->spec;
 	struct auto_pin_cfg *cfg = &spec->autocfg;
-	unsigned int caps, present, hp_present;
+	unsigned int hp_present;
 	hda_nid_t nid;
 	int i;
 
 	hp_present = 0;
 	for (i = 0; i < cfg->hp_outs; i++) {
 		nid = cfg->hp_pins[i];
-		caps = snd_hda_query_pin_caps(codec, nid);
-		if (!(caps & AC_PINCAP_PRES_DETECT))
+		if (!is_jack_detectable(codec, nid))
 			continue;
-		if (caps & AC_PINCAP_TRIG_REQ)
-			snd_hda_codec_read(codec, nid, 0,
-					   AC_VERB_SET_PIN_SENSE, 0);
-		present = snd_hda_codec_read(codec, nid, 0,
-					     AC_VERB_GET_PIN_SENSE, 0);
-		hp_present |= (present & AC_PINSENSE_PRESENCE) != 0;
+		hp_present = snd_hda_jack_detect(codec, nid);
 		if (hp_present)
 			break;
 	}
@@ -832,7 +860,9 @@ static void cs_automute(struct hda_codec *codec)
 				    AC_VERB_SET_PIN_WIDGET_CONTROL,
 				    hp_present ? 0 : PIN_OUT);
 	}
-	if (spec->board_config == CS420X_MBP55) {
+	if (spec->board_config == CS420X_MBP53 ||
+	    spec->board_config == CS420X_MBP55 ||
+	    spec->board_config == CS420X_IMAC27) {
 		unsigned int gpio = hp_present ? 0x02 : 0x08;
 		snd_hda_codec_write(codec, 0x01, 0,
 				    AC_VERB_SET_GPIO_DATA, gpio);
@@ -844,21 +874,14 @@ static void cs_automic(struct hda_codec *codec)
 	struct cs_spec *spec = codec->spec;
 	struct auto_pin_cfg *cfg = &spec->autocfg;
 	hda_nid_t nid;
-	unsigned int caps, present;
+	unsigned int present;
 	
-	nid = cfg->input_pins[spec->automic_idx];
-	caps = snd_hda_query_pin_caps(codec, nid);
-	if (caps & AC_PINCAP_TRIG_REQ)
-		snd_hda_codec_read(codec, nid, 0, AC_VERB_SET_PIN_SENSE, 0);
-	present = snd_hda_codec_read(codec, nid, 0,
-				     AC_VERB_GET_PIN_SENSE, 0);
-	if (present & AC_PINSENSE_PRESENCE)
+	nid = cfg->inputs[spec->automic_idx].pin;
+	present = snd_hda_jack_detect(codec, nid);
+	if (present)
 		change_cur_input(codec, spec->automic_idx, 0);
-	else {
-		unsigned int imic = (spec->automic_idx == AUTO_PIN_MIC) ?
-			AUTO_PIN_FRONT_MIC : AUTO_PIN_MIC;
-		change_cur_input(codec, imic, 0);
-	}
+	else
+		change_cur_input(codec, !spec->automic_idx, 0);
 }
 
 /*
@@ -894,7 +917,7 @@ static void init_output(struct hda_codec *codec)
 				    AC_VERB_SET_PIN_WIDGET_CONTROL, PIN_HP);
 		if (!cfg->speaker_outs)
 			continue;
-		if (get_wcaps(codec, nid) & AC_WCAP_UNSOL_CAP) {
+		if (is_jack_detectable(codec, nid)) {
 			snd_hda_codec_write(codec, nid, 0,
 					    AC_VERB_SET_UNSOLICITED_ENABLE,
 					    AC_USRSP_EN | HP_EVENT);
@@ -915,14 +938,14 @@ static void init_input(struct hda_codec *codec)
 	unsigned int coef;
 	int i;
 
-	for (i = 0; i < AUTO_PIN_LAST; i++) {
+	for (i = 0; i < cfg->num_inputs; i++) {
 		unsigned int ctl;
-		hda_nid_t pin = cfg->input_pins[i];
-		if (!pin || !spec->adc_nid[i])
+		hda_nid_t pin = cfg->inputs[i].pin;
+		if (!spec->adc_nid[i])
 			continue;
 		/* set appropriate pin control and mute first */
 		ctl = PIN_IN;
-		if (i <= AUTO_PIN_FRONT_MIC) {
+		if (cfg->inputs[i].type == AUTO_PIN_MIC) {
 			unsigned int caps = snd_hda_query_pin_caps(codec, pin);
 			caps >>= AC_PINCAP_VREF_SHIFT;
 			if (caps & AC_PINCAP_VREF_80)
@@ -947,13 +970,13 @@ static void init_input(struct hda_codec *codec)
 		coef |= 0x0500; /* DMIC2 enable 2 channels, disable GPIO1 */
 	if (is_active_pin(codec, CS_DMIC1_PIN_NID))
 		coef |= 0x1800; /* DMIC1 enable 2 channels, disable GPIO0 
-				 * No effect if SPDIF_OUT2 is slected in 
+				 * No effect if SPDIF_OUT2 is selected in 
 				 * IDX_SPDIF_CTL.
 				  */
 	cs_vendor_coef_set(codec, IDX_ADC_CFG, coef);
 }
 
-static struct hda_verb cs_coef_init_verbs[] = {
+static const struct hda_verb cs_coef_init_verbs[] = {
 	{0x11, AC_VERB_SET_PROC_STATE, 1},
 	{0x11, AC_VERB_SET_COEF_INDEX, IDX_DAC_CFG},
 	{0x11, AC_VERB_SET_PROC_COEF,
@@ -965,6 +988,55 @@ static struct hda_verb cs_coef_init_verbs[] = {
 	/* Beep */
 	{0x11, AC_VERB_SET_COEF_INDEX, IDX_DAC_CFG},
 	{0x11, AC_VERB_SET_PROC_COEF, 0x0007}, /* Enable Beep thru DAC1/2/3 */
+
+	{} /* terminator */
+};
+
+/* Errata: CS4207 rev C0/C1/C2 Silicon
+ *
+ * http://www.cirrus.com/en/pubs/errata/ER880C3.pdf
+ *
+ * 6. At high temperature (TA > +85°C), the digital supply current (IVD)
+ * may be excessive (up to an additional 200 μA), which is most easily
+ * observed while the part is being held in reset (RESET# active low).
+ *
+ * Root Cause: At initial powerup of the device, the logic that drives
+ * the clock and write enable to the S/PDIF SRC RAMs is not properly
+ * initialized.
+ * Certain random patterns will cause a steady leakage current in those
+ * RAM cells. The issue will resolve once the SRCs are used (turned on).
+ *
+ * Workaround: The following verb sequence briefly turns on the S/PDIF SRC
+ * blocks, which will alleviate the issue.
+ */
+
+static const struct hda_verb cs_errata_init_verbs[] = {
+	{0x01, AC_VERB_SET_POWER_STATE, 0x00}, /* AFG: D0 */
+	{0x11, AC_VERB_SET_PROC_STATE, 0x01},  /* VPW: processing on */
+
+	{0x11, AC_VERB_SET_COEF_INDEX, 0x0008},
+	{0x11, AC_VERB_SET_PROC_COEF, 0x9999},
+	{0x11, AC_VERB_SET_COEF_INDEX, 0x0017},
+	{0x11, AC_VERB_SET_PROC_COEF, 0xa412},
+	{0x11, AC_VERB_SET_COEF_INDEX, 0x0001},
+	{0x11, AC_VERB_SET_PROC_COEF, 0x0009},
+
+	{0x07, AC_VERB_SET_POWER_STATE, 0x00}, /* S/PDIF Rx: D0 */
+	{0x08, AC_VERB_SET_POWER_STATE, 0x00}, /* S/PDIF Tx: D0 */
+
+	{0x11, AC_VERB_SET_COEF_INDEX, 0x0017},
+	{0x11, AC_VERB_SET_PROC_COEF, 0x2412},
+	{0x11, AC_VERB_SET_COEF_INDEX, 0x0008},
+	{0x11, AC_VERB_SET_PROC_COEF, 0x0000},
+	{0x11, AC_VERB_SET_COEF_INDEX, 0x0001},
+	{0x11, AC_VERB_SET_PROC_COEF, 0x0008},
+	{0x11, AC_VERB_SET_PROC_STATE, 0x00},
+
+#if 0 /* Don't to set to D3 as we are in power-up sequence */
+	{0x07, AC_VERB_SET_POWER_STATE, 0x03}, /* S/PDIF Rx: D3 */
+	{0x08, AC_VERB_SET_POWER_STATE, 0x03}, /* S/PDIF Tx: D3 */
+	/*{0x01, AC_VERB_SET_POWER_STATE, 0x03},*/ /* AFG: D3 This is already handled */
+#endif
 
 	{} /* terminator */
 };
@@ -987,6 +1059,9 @@ static void init_digital(struct hda_codec *codec)
 static int cs_init(struct hda_codec *codec)
 {
 	struct cs_spec *spec = codec->spec;
+
+	/* init_verb sequence for C0/C1/C2 errata*/
+	snd_hda_sequence_write(codec, cs_errata_init_verbs);
 
 	snd_hda_sequence_write(codec, cs_coef_init_verbs);
 
@@ -1044,7 +1119,7 @@ static void cs_unsol_event(struct hda_codec *codec, unsigned int res)
 	}
 }
 
-static struct hda_codec_ops cs_patch_ops = {
+static const struct hda_codec_ops cs_patch_ops = {
 	.build_controls = cs_build_controls,
 	.build_pcms = cs_build_pcms,
 	.init = cs_init,
@@ -1076,14 +1151,20 @@ static int cs_parse_auto_config(struct hda_codec *codec)
 	return 0;
 }
 
-static const char *cs420x_models[CS420X_MODELS] = {
+static const char * const cs420x_models[CS420X_MODELS] = {
+	[CS420X_MBP53] = "mbp53",
 	[CS420X_MBP55] = "mbp55",
+	[CS420X_IMAC27] = "imac27",
 	[CS420X_AUTO] = "auto",
 };
 
 
-static struct snd_pci_quirk cs420x_cfg_tbl[] = {
+static const struct snd_pci_quirk cs420x_cfg_tbl[] = {
+	SND_PCI_QUIRK(0x10de, 0x0ac0, "MacBookPro 5,3", CS420X_MBP53),
+	SND_PCI_QUIRK(0x10de, 0x0d94, "MacBookAir 3,1(2)", CS420X_MBP55),
 	SND_PCI_QUIRK(0x10de, 0xcb79, "MacBookPro 5,5", CS420X_MBP55),
+	SND_PCI_QUIRK(0x10de, 0xcb89, "MacBookPro 7,1", CS420X_MBP55),
+	SND_PCI_QUIRK(0x8086, 0x7270, "IMac 27 Inch", CS420X_IMAC27),
 	{} /* terminator */
 };
 
@@ -1092,7 +1173,21 @@ struct cs_pincfg {
 	u32 val;
 };
 
-static struct cs_pincfg mbp55_pincfgs[] = {
+static const struct cs_pincfg mbp53_pincfgs[] = {
+	{ 0x09, 0x012b4050 },
+	{ 0x0a, 0x90100141 },
+	{ 0x0b, 0x90100140 },
+	{ 0x0c, 0x018b3020 },
+	{ 0x0d, 0x90a00110 },
+	{ 0x0e, 0x400000f0 },
+	{ 0x0f, 0x01cbe030 },
+	{ 0x10, 0x014be060 },
+	{ 0x12, 0x400000f0 },
+	{ 0x15, 0x400000f0 },
+	{} /* terminator */
+};
+
+static const struct cs_pincfg mbp55_pincfgs[] = {
 	{ 0x09, 0x012b4030 },
 	{ 0x0a, 0x90100121 },
 	{ 0x0b, 0x90100120 },
@@ -1106,8 +1201,24 @@ static struct cs_pincfg mbp55_pincfgs[] = {
 	{} /* terminator */
 };
 
-static struct cs_pincfg *cs_pincfgs[CS420X_MODELS] = {
+static const struct cs_pincfg imac27_pincfgs[] = {
+	{ 0x09, 0x012b4050 },
+	{ 0x0a, 0x90100140 },
+	{ 0x0b, 0x90100142 },
+	{ 0x0c, 0x018b3020 },
+	{ 0x0d, 0x90a00110 },
+	{ 0x0e, 0x400000f0 },
+	{ 0x0f, 0x01cbe030 },
+	{ 0x10, 0x014be060 },
+	{ 0x12, 0x01ab9070 },
+	{ 0x15, 0x400000f0 },
+	{} /* terminator */
+};
+
+static const struct cs_pincfg *cs_pincfgs[CS420X_MODELS] = {
+	[CS420X_MBP53] = mbp53_pincfgs,
 	[CS420X_MBP55] = mbp55_pincfgs,
+	[CS420X_IMAC27] = imac27_pincfgs,
 };
 
 static void fix_pincfg(struct hda_codec *codec, int model)
@@ -1137,6 +1248,8 @@ static int patch_cs420x(struct hda_codec *codec)
 		fix_pincfg(codec, spec->board_config);
 
 	switch (spec->board_config) {
+	case CS420X_IMAC27:
+	case CS420X_MBP53:
 	case CS420X_MBP55:
 		/* GPIO1 = headphones */
 		/* GPIO3 = speakers */
@@ -1163,7 +1276,7 @@ static int patch_cs420x(struct hda_codec *codec)
 /*
  * patch entries
  */
-static struct hda_codec_preset snd_hda_preset_cirrus[] = {
+static const struct hda_codec_preset snd_hda_preset_cirrus[] = {
 	{ .id = 0x10134206, .name = "CS4206", .patch = patch_cs420x },
 	{ .id = 0x10134207, .name = "CS4207", .patch = patch_cs420x },
 	{} /* terminator */

@@ -207,7 +207,7 @@ static int create_lockd_listener(struct svc_serv *serv, const char *name,
 
 	xprt = svc_find_xprt(serv, name, family, 0);
 	if (xprt == NULL)
-		return svc_create_xprt(serv, name, family, port,
+		return svc_create_xprt(serv, name, &init_net, family, port,
 						SVC_SOCK_DEFAULTS);
 	svc_xprt_put(xprt);
 	return 0;
@@ -243,11 +243,9 @@ static int make_socks(struct svc_serv *serv)
 	if (err < 0)
 		goto out_err;
 
-#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
 	err = create_lockd_family(serv, PF_INET6);
 	if (err < 0 && err != -EAFNOSUPPORT)
 		goto out_err;
-#endif	/* CONFIG_IPV6 || CONFIG_IPV6_MODULE */
 
 	warned = 0;
 	return 0;

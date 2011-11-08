@@ -180,7 +180,7 @@ new_segment:
 	}
 
 	if (q->dma_drain_size && q->dma_drain_needed(rq)) {
-		if (rq->cmd_flags & REQ_RW)
+		if (rq->cmd_flags & REQ_WRITE)
 			memset(q->dma_drain_buffer, 0, q->dma_drain_size);
 
 		sg->page_link &= ~0x02;
@@ -206,8 +206,7 @@ static inline int ll_new_hw_segment(struct request_queue *q,
 {
 	int nr_phys_segs = bio_phys_segments(q, bio);
 
-	if (req->nr_phys_segments + nr_phys_segs > queue_max_hw_segments(q) ||
-	    req->nr_phys_segments + nr_phys_segs > queue_max_phys_segments(q)) {
+	if (req->nr_phys_segments + nr_phys_segs > queue_max_segments(q)) {
 		req->cmd_flags |= REQ_NOMERGE;
 		if (req == q->last_merge)
 			q->last_merge = NULL;
@@ -227,7 +226,7 @@ int ll_back_merge_fn(struct request_queue *q, struct request *req,
 {
 	unsigned short max_sectors;
 
-	if (unlikely(blk_pc_request(req)))
+	if (unlikely(req->cmd_type == REQ_TYPE_BLOCK_PC))
 		max_sectors = queue_max_hw_sectors(q);
 	else
 		max_sectors = queue_max_sectors(q);
@@ -251,7 +250,7 @@ int ll_front_merge_fn(struct request_queue *q, struct request *req,
 {
 	unsigned short max_sectors;
 
-	if (unlikely(blk_pc_request(req)))
+	if (unlikely(req->cmd_type == REQ_TYPE_BLOCK_PC))
 		max_sectors = queue_max_hw_sectors(q);
 	else
 		max_sectors = queue_max_sectors(q);
@@ -300,10 +299,7 @@ static int ll_merge_requests_fn(struct request_queue *q, struct request *req,
 		total_phys_segments--;
 	}
 
-	if (total_phys_segments > queue_max_phys_segments(q))
-		return 0;
-
-	if (total_phys_segments > queue_max_hw_segments(q))
+	if (total_phys_segments > queue_max_segments(q))
 		return 0;
 
 	/* Merge is OK... */
@@ -364,6 +360,12 @@ static int attempt_merge(struct request_queue *q, struct request *req,
 			  struct request *next)
 {
 	if (!rq_mergeable(req) || !rq_mergeable(next))
+		return 0;
+
+	/*
+	 * Don't merge file system requests and discard requests
+	 */
+	if ((req->cmd_flags & REQ_DISCARD) != (next->cmd_flags & REQ_DISCARD))
 		return 0;
 
 	/*

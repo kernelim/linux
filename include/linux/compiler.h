@@ -34,6 +34,8 @@ extern void __chk_io_ptr(const volatile void __iomem *);
 # define __cond_lock(x,c) (c)
 #endif
 
+#define __percpu
+
 #ifdef __KERNEL__
 
 #ifdef __GNUC__

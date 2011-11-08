@@ -40,6 +40,9 @@
  */
 
 LIST_HEAD(dpm_list);
+#ifdef CONFIG_PPC_PSERIES
+LIST_HEAD(dpm_unregistered_list);
+#endif /* CONFIG_PPC_PSERIES */
 
 static DEFINE_MUTEX(dpm_list_mtx);
 
@@ -75,16 +78,102 @@ void device_pm_unlock(void)
 	mutex_unlock(&dpm_list_mtx);
 }
 
+#ifdef CONFIG_PPC_PSERIES
+/**
+ * get_dev_pm_info_entry - Find the dev_pm_info_entry for a device on a list
+ * @dev: Device to find on the list
+ * @list: List to search for the device
+ */
+struct dev_pm_info_entry *get_dev_pm_info_entry(struct device *dev,
+						struct list_head *list) {
+	struct dev_pm_info_entry *pm_entry;
+
+	list_for_each_entry(pm_entry, list, entry)
+		if (pm_entry->dev == dev)
+			return pm_entry;
+
+	return NULL;
+}
+
+/**
+ * device_pm_pre_add - Pre-allocate a dev_pm_info_entry structure.
+ *
+ * This is called early in device_add to ensure that the memory allocation
+ * succeeds.  There is no way to allocate for this new structure in
+ * device_pm_add and indicate success without breaking the KABI
+ *
+ * @dev: Device object to create a struct dev_pm_info_entry for.
+ *
+ * Return: 0 on success, 1 on error error
+ */
+int device_pm_pre_add(struct device *dev)
+{
+	struct dev_pm_info_entry *pm_entry;
+
+	pm_entry = kzalloc(sizeof(struct dev_pm_info_entry), GFP_KERNEL);
+	if (!pm_entry)
+		return -ENOMEM;
+
+	mutex_lock(&dpm_list_mtx);
+	pm_entry->dev = dev;
+
+	list_add(&pm_entry->entry, &dpm_unregistered_list);
+	mutex_unlock(&dpm_list_mtx);
+	return 0;
+}
+
+/**
+ * device_pm_pre_add_cleanup - Remove a pre-allocated dev_pm_info_entry struct
+ *
+ * This is called in device_add during cleanup to free a pre-allocated
+ * dev_pm_info_entry struct if one exists.
+ *
+ * @dev: Device object which requires cleanup
+ *
+ */
+void device_pm_pre_add_cleanup(struct device *dev)
+{
+	struct dev_pm_info_entry *pm_entry;
+
+	mutex_lock(&dpm_list_mtx);
+	pm_entry = get_dev_pm_info_entry(dev, &dpm_unregistered_list);
+	if (pm_entry) {
+		list_del_init(&pm_entry->entry);
+		kfree(pm_entry);
+	}
+	mutex_unlock(&dpm_list_mtx);
+}
+#endif /* CONFIG_PPC_PSERIES */
+
 /**
  * device_pm_add - Add a device to the PM core's list of active devices.
  * @dev: Device to add to the list.
  */
 void device_pm_add(struct device *dev)
 {
-	pr_debug("PM: Adding info for %s:%s\n",
-		 dev->bus ? dev->bus->name : "No Bus",
-		 kobject_name(&dev->kobj));
+	struct list_head *entry = NULL;
+#ifdef CONFIG_PPC_PSERIES
+	struct dev_pm_info_entry *pm_entry = NULL;
+#endif /* CONFIG_PPC_PSERIES */
+
 	mutex_lock(&dpm_list_mtx);
+#ifdef CONFIG_PPC_PSERIES
+	/*
+	 * The memory for struct dev_pm_info_entry must be allocated
+	 * in device_add prior to calling this function and put on the
+	 * dpm_unregistered_list.
+	 */
+	pm_entry = get_dev_pm_info_entry(dev, &dpm_unregistered_list);
+	if (!pm_entry)
+		panic("%s: Could not find the device to add to the power "
+			"management list", __func__);
+
+	list_del_init(&pm_entry->entry);
+	entry = &pm_entry->entry;
+#else  /* !CONFIG_PPC_PSERIES */
+	entry = &dev->power.entry;
+#endif /* !CONFIG_PPC_PSERIES */
+
 	if (dev->parent) {
 		if (dev->parent->power.status >= DPM_SUSPENDING)
 			dev_warn(dev, "parent %s should not be sleeping\n",
@@ -98,7 +187,7 @@ void device_pm_add(struct device *dev)
 		dev_WARN(dev, "Parentless device registered during a PM transaction\n");
 	}
 
-	list_add_tail(&dev->power.entry, &dpm_list);
+	list_add_tail(entry, &dpm_list);
 	mutex_unlock(&dpm_list_mtx);
 }
 
@@ -108,11 +197,28 @@ void device_pm_add(struct device *dev)
  */
 void device_pm_remove(struct device *dev)
 {
+#ifdef CONFIG_PPC_PSERIES
+	struct dev_pm_info_entry* pm_entry;
+#endif /* CONFIG_PPC_PSERIES */
+
 	pr_debug("PM: Removing info for %s:%s\n",
 		 dev->bus ? dev->bus->name : "No Bus",
 		 kobject_name(&dev->kobj));
 	mutex_lock(&dpm_list_mtx);
+
+#ifdef CONFIG_PPC_PSERIES
+	pm_entry = get_dev_pm_info_entry(dev, &dpm_list);
+	if (!pm_entry) {
+		dev_WARN(dev, "Not found on PM device list");
+		goto out;
+	}
+	list_del_init(&pm_entry->entry);
+	kfree(pm_entry);
+out:
+#else  /* !CONFIG_PPC_PSERIES */
 	list_del_init(&dev->power.entry);
+#endif /* !CONFIG_PPC_PSERIES */
+
 	mutex_unlock(&dpm_list_mtx);
 	pm_runtime_remove(dev);
 }
@@ -124,13 +230,39 @@ void device_pm_remove(struct device *dev)
  */
 void device_pm_move_before(struct device *deva, struct device *devb)
 {
+	struct list_head *entrya, *entryb;
+#ifdef CONFIG_PPC_PSERIES
+	struct dev_pm_info_entry *pm_entrya, *pm_entryb;
+#endif /* CONFIG_PPC_PSERIES */
+
 	pr_debug("PM: Moving %s:%s before %s:%s\n",
 		 deva->bus ? deva->bus->name : "No Bus",
 		 kobject_name(&deva->kobj),
 		 devb->bus ? devb->bus->name : "No Bus",
 		 kobject_name(&devb->kobj));
+
+#ifdef CONFIG_PPC_PSERIES
+	pm_entrya = get_dev_pm_info_entry(deva, &dpm_list);
+	if (!pm_entrya) {
+		dev_WARN(deva, "Not found on PM device list");
+		return;
+	}
+
+	pm_entryb = get_dev_pm_info_entry(devb, &dpm_list);
+	if (!pm_entryb) {
+		dev_WARN(devb, "Not found on PM device list");
+		return;
+	}
+
+	entrya = &pm_entrya->entry;
+	entryb = &pm_entryb->entry;
+#else /* !CONFIG_PPC_PSERIES */
+	entrya = &deva->power.entry;
+	entryb = &devb->power.entry;
+#endif /* !CONFIG_PPC_PSERIES */
+
 	/* Delete deva from dpm_list and reinsert before devb. */
-	list_move_tail(&deva->power.entry, &devb->power.entry);
+	list_move_tail(entrya, entryb);
 }
 
 /**
@@ -140,13 +272,39 @@ void device_pm_move_before(struct device *deva, struct device *devb)
  */
 void device_pm_move_after(struct device *deva, struct device *devb)
 {
+	struct list_head *entrya, *entryb;
+#ifdef CONFIG_PPC_PSERIES
+	struct dev_pm_info_entry *pm_entrya, *pm_entryb;
+#endif /* CONFIG_PPC_PSERIES */
+
 	pr_debug("PM: Moving %s:%s after %s:%s\n",
 		 deva->bus ? deva->bus->name : "No Bus",
 		 kobject_name(&deva->kobj),
 		 devb->bus ? devb->bus->name : "No Bus",
 		 kobject_name(&devb->kobj));
-	/* Delete deva from dpm_list and reinsert after devb. */
-	list_move(&deva->power.entry, &devb->power.entry);
+
+#ifdef CONFIG_PPC_PSERIES
+	pm_entrya = get_dev_pm_info_entry(deva, &dpm_list);
+	if (!pm_entrya) {
+		dev_WARN(deva, "Not found on PM device list");
+		return;
+	}
+
+	pm_entryb = get_dev_pm_info_entry(devb, &dpm_list);
+	if (!pm_entryb) {
+		dev_WARN(devb, "Not found on PM device list");
+		return;
+	}
+
+	entrya = &pm_entrya->entry;
+	entryb = &pm_entryb->entry;
+#else /* !CONFIG_PPC_PSERIES */
+	entrya = &deva->power.entry;
+	entryb = &devb->power.entry;
+#endif /* !CONFIG_PPC_PSERIES */
+
+	/* Delete deva from dpm_list and reinsert before devb. */
+	list_move_tail(entrya, entryb);
 }
 
 /**
@@ -155,10 +313,27 @@ void device_pm_move_after(struct device *deva, struct device *devb)
  */
 void device_pm_move_last(struct device *dev)
 {
+	struct list_head *entry;
+#ifdef CONFIG_PPC_PSERIES
+	struct dev_pm_info_entry *pm_entry;
+#endif /* CONFIG_PPC_PSERIES */
+
 	pr_debug("PM: Moving %s:%s to end of list\n",
 		 dev->bus ? dev->bus->name : "No Bus",
 		 kobject_name(&dev->kobj));
-	list_move_tail(&dev->power.entry, &dpm_list);
+
+#ifdef CONFIG_PPC_PSERIES
+	pm_entry = get_dev_pm_info_entry(dev, &dpm_list);
+	if (!pm_entry) {
+		dev_WARN(dev, "Not found on PM device list");
+		return;
+	}
+	entry = &pm_entry->entry;
+#else /* !CONFIG_PPC_PSERIES */
+	entry = &dev->power.entry;
+#endif /* !CONFIG_PPC_PSERIES */
+
+	list_move_tail(entry, &dpm_list);
 }
 
 /**
@@ -363,10 +538,18 @@ static int device_resume_noirq(struct device *dev, pm_message_t state)
 void dpm_resume_noirq(pm_message_t state)
 {
 	struct device *dev;
+#ifdef CONFIG_PPC_PSERIES
+	struct list_head *lh;
+#endif /* CONFIG_PPC_PSERIES */
 
 	mutex_lock(&dpm_list_mtx);
 	transition_started = false;
-	list_for_each_entry(dev, &dpm_list, power.entry)
+#ifdef CONFIG_PPC_PSERIES
+	list_for_each(lh, &dpm_list) {
+		dev = (list_entry(lh, struct dev_pm_info_entry, entry))->dev;
+#else /* !CONFIG_PPC_PSERIES */
+	list_for_each_entry(dev, &dpm_list, power.entry) {
+#endif /* !CONFIG_PPC_PSERIES */
 		if (dev->power.status > DPM_OFF) {
 			int error;
 
@@ -375,6 +558,7 @@ void dpm_resume_noirq(pm_message_t state)
 			if (error)
 				pm_dev_err(dev, state, " early", error);
 		}
+	}
 	mutex_unlock(&dpm_list_mtx);
 	resume_device_irqs();
 }
@@ -441,11 +625,13 @@ static int device_resume(struct device *dev, pm_message_t state)
 static void dpm_resume(pm_message_t state)
 {
 	struct list_head list;
+	struct list_head *entry;
 
 	INIT_LIST_HEAD(&list);
 	mutex_lock(&dpm_list_mtx);
 	while (!list_empty(&dpm_list)) {
 		struct device *dev = to_device(dpm_list.next);
+		entry = dpm_list.next;
 
 		get_device(dev);
 		if (dev->power.status >= DPM_OFF) {
@@ -463,8 +649,8 @@ static void dpm_resume(pm_message_t state)
 			/* Allow new children of the device to be registered */
 			dev->power.status = DPM_RESUMING;
 		}
-		if (!list_empty(&dev->power.entry))
-			list_move_tail(&dev->power.entry, &list);
+		if (!list_empty(entry))
+			list_move_tail(entry, &list);
 		put_device(dev);
 	}
 	list_splice(&list, &dpm_list);
@@ -507,13 +693,14 @@ static void device_complete(struct device *dev, pm_message_t state)
  */
 static void dpm_complete(pm_message_t state)
 {
-	struct list_head list;
+	struct list_head list, *entry;
 
 	INIT_LIST_HEAD(&list);
 	mutex_lock(&dpm_list_mtx);
 	transition_started = false;
 	while (!list_empty(&dpm_list)) {
 		struct device *dev = to_device(dpm_list.prev);
+		entry = dpm_list.prev;
 
 		get_device(dev);
 		if (dev->power.status > DPM_ON) {
@@ -525,8 +712,8 @@ static void dpm_complete(pm_message_t state)
 
 			mutex_lock(&dpm_list_mtx);
 		}
-		if (!list_empty(&dev->power.entry))
-			list_move(&dev->power.entry, &list);
+		if (!list_empty(entry))
+			list_move(entry, &list);
 		put_device(dev);
 	}
 	list_splice(&list, &dpm_list);
@@ -605,10 +792,18 @@ int dpm_suspend_noirq(pm_message_t state)
 {
 	struct device *dev;
 	int error = 0;
+#ifdef CONFIG_PPC_PSERIES
+	struct list_head *lh;
+#endif /* CONFIG_PPC_PSERIES */
 
 	suspend_device_irqs();
 	mutex_lock(&dpm_list_mtx);
+#ifdef CONFIG_PPC_PSERIES
+	list_for_each(lh, &dpm_list) {
+		dev = (list_entry(lh, struct dev_pm_info_entry, entry))->dev;
+#else /* !CONFIG_PPC_PSERIES */
 	list_for_each_entry_reverse(dev, &dpm_list, power.entry) {
+#endif /* !CONFIG_PPC_PSERIES */
 		error = device_suspend_noirq(dev, state);
 		if (error) {
 			pm_dev_err(dev, state, " late", error);
@@ -678,13 +873,14 @@ static int device_suspend(struct device *dev, pm_message_t state)
  */
 static int dpm_suspend(pm_message_t state)
 {
-	struct list_head list;
+	struct list_head list, *entry;
 	int error = 0;
 
 	INIT_LIST_HEAD(&list);
 	mutex_lock(&dpm_list_mtx);
 	while (!list_empty(&dpm_list)) {
 		struct device *dev = to_device(dpm_list.prev);
+		entry = dpm_list.prev;
 
 		get_device(dev);
 		mutex_unlock(&dpm_list_mtx);
@@ -698,8 +894,8 @@ static int dpm_suspend(pm_message_t state)
 			break;
 		}
 		dev->power.status = DPM_OFF;
-		if (!list_empty(&dev->power.entry))
-			list_move(&dev->power.entry, &list);
+		if (!list_empty(entry))
+			list_move(entry, &list);
 		put_device(dev);
 	}
 	list_splice(&list, dpm_list.prev);
@@ -756,7 +952,7 @@ static int device_prepare(struct device *dev, pm_message_t state)
  */
 static int dpm_prepare(pm_message_t state)
 {
-	struct list_head list;
+	struct list_head list, *entry;
 	int error = 0;
 
 	INIT_LIST_HEAD(&list);
@@ -764,6 +960,7 @@ static int dpm_prepare(pm_message_t state)
 	transition_started = true;
 	while (!list_empty(&dpm_list)) {
 		struct device *dev = to_device(dpm_list.next);
+		entry = dpm_list.next;
 
 		get_device(dev);
 		dev->power.status = DPM_PREPARING;
@@ -793,8 +990,8 @@ static int dpm_prepare(pm_message_t state)
 			break;
 		}
 		dev->power.status = DPM_SUSPENDING;
-		if (!list_empty(&dev->power.entry))
-			list_move_tail(&dev->power.entry, &list);
+		if (!list_empty(entry))
+			list_move_tail(entry, &list);
 		put_device(dev);
 	}
 	list_splice(&list, &dpm_list);

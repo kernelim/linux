@@ -14,6 +14,8 @@
 #include "chsc.h"
 
 #define QDIO_BUSY_BIT_PATIENCE		100	/* 100 microseconds */
+#define QDIO_BUSY_BIT_RETRY_DELAY	10	/* 10 milliseconds */
+#define QDIO_BUSY_BIT_RETRIES		1000	/* = 10s retry time */
 #define QDIO_INPUT_THRESHOLD		500	/* 500 microseconds */
 
 /*
@@ -42,6 +44,7 @@ enum qdio_irq_states {
 #define SLSB_STATE_NOT_INIT	0x0
 #define SLSB_STATE_EMPTY	0x1
 #define SLSB_STATE_PRIMED	0x2
+#define SLSB_STATE_PENDING	0x3
 #define SLSB_STATE_HALTED	0xe
 #define SLSB_STATE_ERROR	0xf
 #define SLSB_TYPE_INPUT		0x0
@@ -65,6 +68,8 @@ enum qdio_irq_states {
 	(SLSB_OWNER_PROG | SLSB_TYPE_OUTPUT | SLSB_STATE_NOT_INIT) /* 0xa0 */
 #define SLSB_P_OUTPUT_EMPTY	\
 	(SLSB_OWNER_PROG | SLSB_TYPE_OUTPUT | SLSB_STATE_EMPTY)	   /* 0xa1 */
+#define SLSB_P_OUTPUT_PENDING \
+	(SLSB_OWNER_PROG | SLSB_TYPE_OUTPUT | SLSB_STATE_PENDING)  /* 0xa3 */
 #define SLSB_CU_OUTPUT_PRIMED	\
 	(SLSB_OWNER_CU | SLSB_TYPE_OUTPUT | SLSB_STATE_PRIMED)	   /* 0x62 */
 #define SLSB_P_OUTPUT_HALTED	\
@@ -82,14 +87,12 @@ enum qdio_irq_states {
 #define CHSC_FLAG_QDIO_CAPABILITY	0x80
 #define CHSC_FLAG_VALIDITY		0x40
 
-/* qdio adapter-characteristics-1 flag */
-#define AC1_SIGA_INPUT_NEEDED		0x40	/* process input queues */
-#define AC1_SIGA_OUTPUT_NEEDED		0x20	/* process output queues */
-#define AC1_SIGA_SYNC_NEEDED		0x10	/* ask hypervisor to sync */
-#define AC1_AUTOMATIC_SYNC_ON_THININT	0x08	/* set by hypervisor */
-#define AC1_AUTOMATIC_SYNC_ON_OUT_PCI	0x04	/* set by hypervisor */
-#define AC1_SC_QEBSM_AVAILABLE		0x02	/* available for subchannel */
-#define AC1_SC_QEBSM_ENABLED		0x01	/* enabled for subchannel */
+/* SIGA flags */
+#define QDIO_SIGA_WRITE		0x00
+#define QDIO_SIGA_READ		0x01
+#define QDIO_SIGA_SYNC		0x02
+#define QDIO_SIGA_WRITEQ	0x04
+#define QDIO_SIGA_QEBSM_FLAG	0x80
 
 #ifdef CONFIG_64BIT
 static inline int do_sqbs(u64 token, unsigned char state, int queue,
@@ -182,37 +185,115 @@ struct scssc_area {
 	u32:32;
 } __attribute__ ((packed));
 
+struct qdio_dev_perf_stat {
+	unsigned int adapter_int;
+	unsigned int qdio_int;
+	unsigned int pci_request_int;
+
+	unsigned int tasklet_inbound;
+	unsigned int tasklet_inbound_resched;
+	unsigned int tasklet_inbound_resched2;
+	unsigned int tasklet_outbound;
+
+	unsigned int siga_read;
+	unsigned int siga_write;
+	unsigned int siga_sync;
+
+	unsigned int inbound_call;
+	unsigned int inbound_handler;
+	unsigned int stop_polling;
+	unsigned int inbound_queue_full;
+	unsigned int outbound_call;
+	unsigned int outbound_handler;
+	unsigned int fast_requeue;
+	unsigned int target_full;
+	unsigned int eqbs;
+	unsigned int eqbs_partial;
+	unsigned int sqbs;
+	unsigned int sqbs_partial;
+	unsigned int int_discarded;
+} ____cacheline_aligned;
+
+struct qdio_queue_perf_stat {
+	/*
+	 * Sorted into order-2 buckets: 1, 2-3, 4-7, ... 64-127, 128.
+	 * Since max. 127 SBALs are scanned reuse entry for 128 as queue full
+	 * aka 127 SBALs found.
+	 */
+	unsigned int nr_sbals[8];
+	unsigned int nr_sbal_error;
+	unsigned int nr_sbal_nop;
+	unsigned int nr_sbal_total;
+};
+
+enum qdio_queue_irq_states {
+	QDIO_QUEUE_IRQS_DISABLED,
+};
+
 struct qdio_input_q {
 	/* input buffer acknowledgement flag */
 	int polling;
-
 	/* first ACK'ed buffer */
 	int ack_start;
-
 	/* how much sbals are acknowledged with qebsm */
 	int ack_count;
-
 	/* last time of noticing incoming data */
 	u64 timestamp;
+	/* upper-layer polling flag */
+	unsigned long queue_irq_state;
+	/* callback to start upper-layer polling */
+	void (*queue_start_poll) (struct ccw_device *, int, unsigned long);
 };
 
 struct qdio_output_q {
 	/* PCIs are enabled for the queue */
 	int pci_out_enabled;
-
+	/* cq: use asynchronous output buffers */
+	int use_cq;
+	/* cq: aobs used for particual SBAL */
+	struct qaob **aobs;
+	/* cq: sbal state related to asynchronous operation */
+	struct qdio_outbuf_state *sbal_state;
 	/* IQDIO: output multiple buffers (enhanced SIGA) */
 	int use_enh_siga;
-
 	/* timer to check for more outbound work */
 	struct timer_list timer;
 };
 
+/*
+ * Note on cache alignment: grouped slsb and write mostly data at the beginning
+ * sbal[] is read-only and starts on a new cacheline followed by read mostly.
+ */
 struct qdio_q {
 	struct slsb slsb;
+
 	union {
 		struct qdio_input_q in;
 		struct qdio_output_q out;
 	} u;
+
+	/*
+	 * inbound: next buffer the program should check for
+	 * outbound: next buffer to check if adapter processed it
+	 */
+	int first_to_check;
+
+	/* first_to_check of the last time */
+	int last_move;
+
+	/* beginning position for calling the program */
+	int first_to_kick;
+
+	/* number of buffers in use by the adapter */
+	atomic_t nr_buf_used;
+
+	/* error condition during a data transfer */
+	unsigned int qdio_error;
+
+	struct tasklet_struct tasklet;
+	struct qdio_queue_perf_stat q_stats;
+
+	struct qdio_buffer *sbal[QDIO_MAX_BUFFERS_PER_Q] ____cacheline_aligned;
 
 	/* queue number */
 	int nr;
@@ -229,32 +310,9 @@ struct qdio_q {
 	/* upper-layer program handler */
 	qdio_handler_t (*handler);
 
-	/*
-	 * inbound: next buffer the program should check for
-	 * outbound: next buffer to check for having been processed
-	 * by the card
-	 */
-	int first_to_check;
-
-	/* first_to_check of the last time */
-	int last_move;
-
-	/* beginning position for calling the program */
-	int first_to_kick;
-
-	/* number of buffers in use by the adapter */
-	atomic_t nr_buf_used;
-
-	struct qdio_irq *irq_ptr;
 	struct dentry *debugfs_q;
-	struct tasklet_struct tasklet;
-
-	/* error condition during a data transfer */
-	unsigned int qdio_error;
-
+	struct qdio_irq *irq_ptr;
 	struct sl *sl;
-	struct qdio_buffer *sbal[QDIO_MAX_BUFFERS_PER_Q];
-
 	/*
 	 * Warning: Leave this member at the end so it won't be cleared in
 	 * qdio_fill_qs. A page is allocated under this pointer and used for
@@ -269,6 +327,7 @@ struct qdio_irq {
 	u32 *dsci;		/* address of device state change indicator */
 	struct ccw_device *cdev;
 	struct dentry *debugfs_dev;
+	struct dentry *debugfs_perf;
 
 	unsigned long int_parm;
 	struct subchannel_id schid;
@@ -286,13 +345,10 @@ struct qdio_irq {
 	struct ciw aqueue;
 
 	struct qdio_ssqd_desc ssqd_desc;
-
 	void (*orig_handler) (struct ccw_device *, unsigned long, struct irb *);
 
-	/*
-	 * Warning: Leave these members together at the end so they won't be
-	 * cleared in qdio_setup_irq.
-	 */
+	int perf_stat_enabled;
+
 	struct qdr *qdr;
 	unsigned long chsc_page;
 
@@ -301,6 +357,7 @@ struct qdio_irq {
 
 	debug_info_t *debug_area;
 	struct mutex setup_mutex;
+	struct qdio_dev_perf_stat perf_stat;
 };
 
 /* helper functions */
@@ -310,6 +367,21 @@ struct qdio_irq {
 #define is_thinint_irq(irq) \
 	(irq->qib.qfmt == QDIO_IQDIO_QFMT || \
 	 css_general_characteristics.aif_osa)
+
+#define qperf(__qdev, __attr)	((__qdev)->perf_stat.(__attr))
+
+#define qperf_inc(__q, __attr)						\
+({									\
+	struct qdio_irq *qdev = (__q)->irq_ptr;				\
+	if (qdev->perf_stat_enabled)					\
+		(qdev->perf_stat.__attr)++;				\
+})
+
+static inline void account_sbals_error(struct qdio_q *q, int count)
+{
+	q->q_stats.nr_sbal_error += count;
+	q->q_stats.nr_sbal_total += count;
+}
 
 /* the highest iqdio queue is used for multicast */
 static inline int multicast_outbound(struct qdio_q *q)
@@ -352,6 +424,37 @@ static inline unsigned long long get_usecs(void)
 #define sub_buf(bufnr, dec) \
 	((bufnr - dec) & QDIO_MAX_BUFFERS_MASK)
 
+#define queue_irqs_enabled(q)			\
+	(test_bit(QDIO_QUEUE_IRQS_DISABLED, &q->u.in.queue_irq_state) == 0)
+#define queue_irqs_disabled(q)			\
+	(test_bit(QDIO_QUEUE_IRQS_DISABLED, &q->u.in.queue_irq_state) != 0)
+
+#define TIQDIO_SHARED_IND		63
+
+/* device state change indicators */
+struct indicator_t {
+	u32 ind;	/* u32 because of compare-and-swap performance */
+	atomic_t count; /* use count, 0 or 1 for non-shared indicators */
+};
+
+extern struct indicator_t *q_indicators;
+
+static inline int has_multiple_inq_on_dsci(struct qdio_irq *irq)
+{
+	return irq->nr_input_qs > 1;
+}
+
+static inline int references_shared_dsci(struct qdio_irq *irq)
+{
+	return irq->dsci == &q_indicators[TIQDIO_SHARED_IND].ind;
+}
+
+static inline int shared_ind(struct qdio_q *q)
+{
+	struct qdio_irq *i = q->irq_ptr;
+	return references_shared_dsci(i) || has_multiple_inq_on_dsci(i);
+}
+
 /* prototypes for thin interrupt */
 void qdio_setup_thinint(struct qdio_irq *irq_ptr);
 int qdio_establish_thinint(struct qdio_irq *irq_ptr);
@@ -363,6 +466,7 @@ int tiqdio_allocate_memory(void);
 void tiqdio_free_memory(void);
 int tiqdio_register_thinints(void);
 void tiqdio_unregister_thinints(void);
+
 
 /* prototypes for setup */
 void qdio_inbound_processing(unsigned long data);
@@ -384,6 +488,9 @@ int qdio_setup_create_sysfs(struct ccw_device *cdev);
 void qdio_setup_destroy_sysfs(struct ccw_device *cdev);
 int qdio_setup_init(void);
 void qdio_setup_exit(void);
+int qdio_enable_async_operation(struct qdio_output_q *q);
+void qdio_disable_async_operation(struct qdio_output_q *q);
+struct qaob *qdio_allocate_aob(void);
 
 int debug_get_buf_state(struct qdio_q *q, unsigned int bufnr,
 			unsigned char *state);

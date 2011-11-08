@@ -1538,13 +1538,18 @@ bad_no_ah:
 
 void ath_set_hw_capab(struct ath_softc *sc, struct ieee80211_hw *hw)
 {
+	struct ath_hw *ah = sc->sc_ah;
+
 	hw->flags = IEEE80211_HW_RX_INCLUDES_FCS |
 		IEEE80211_HW_HOST_BROADCAST_PS_BUFFERING |
 		IEEE80211_HW_SIGNAL_DBM |
-		IEEE80211_HW_AMPDU_AGGREGATION |
 		IEEE80211_HW_SUPPORTS_PS |
 		IEEE80211_HW_PS_NULLFUNC_STACK |
+		IEEE80211_HW_REPORTS_TX_ACK_STATUS |
 		IEEE80211_HW_SPECTRUM_MGMT;
+
+	if (sc->sc_ah->caps.hw_caps & ATH9K_HW_CAP_HT)
+		 hw->flags |= IEEE80211_HW_AMPDU_AGGREGATION;
 
 	if (AR_SREV_9160_10_OR_LATER(sc->sc_ah) || modparam_nohwcrypt)
 		hw->flags |= IEEE80211_HW_MFP_CAPABLE;
@@ -1555,7 +1560,10 @@ void ath_set_hw_capab(struct ath_softc *sc, struct ieee80211_hw *hw)
 		BIT(NL80211_IFTYPE_ADHOC) |
 		BIT(NL80211_IFTYPE_MESH_POINT);
 
-	hw->wiphy->ps_default = false;
+	if (AR_SREV_5416(ah))
+		hw->wiphy->ps_default = false;
+	else
+		hw->wiphy->ps_default = true;
 
 	hw->queues = 4;
 	hw->max_rates = 4;
@@ -1586,7 +1594,7 @@ int ath_init_device(u16 devid, struct ath_softc *sc, u16 subsysid)
 
 	error = ath_init_softc(devid, sc, subsysid);
 	if (error != 0)
-		return error;
+		goto error_init;
 
 	/* get mac address from hardware and set in mac80211 */
 
@@ -1597,7 +1605,7 @@ int ath_init_device(u16 devid, struct ath_softc *sc, u16 subsysid)
 	error = ath_regd_init(&sc->common.regulatory, sc->hw->wiphy,
 			      ath9k_reg_notifier);
 	if (error)
-		return error;
+		goto error_regd;
 
 	reg = &sc->common.regulatory;
 
@@ -1610,22 +1618,24 @@ int ath_init_device(u16 devid, struct ath_softc *sc, u16 subsysid)
 	/* initialize tx/rx engine */
 	error = ath_tx_init(sc, ATH_TXBUF);
 	if (error != 0)
-		goto error_attach;
+		goto error_tx;
 
 	error = ath_rx_init(sc, ATH_RXBUF);
 	if (error != 0)
-		goto error_attach;
+		goto error_rx;
 
 	INIT_WORK(&sc->chan_work, ath9k_wiphy_chan_work);
 	INIT_DELAYED_WORK(&sc->wiphy_work, ath9k_wiphy_work);
 	sc->wiphy_scheduler_int = msecs_to_jiffies(500);
 
 	error = ieee80211_register_hw(hw);
+	if (error)
+		goto error_register;
 
 	if (!ath_is_world_regd(reg)) {
 		error = regulatory_hint(hw->wiphy, reg->alpha2);
 		if (error)
-			goto error_attach;
+			goto error_world;
 	}
 
 	/* Initialize LED control */
@@ -1635,7 +1645,15 @@ int ath_init_device(u16 devid, struct ath_softc *sc, u16 subsysid)
 
 	return 0;
 
-error_attach:
+error_world:
+	ieee80211_unregister_hw(hw);
+error_register:
+	ath_rx_cleanup(sc);
+error_rx:
+	ath_tx_cleanup(sc);
+error_tx:
+	/* Nothing */
+error_regd:
 	/* cleanup tx queues */
 	for (i = 0; i < ATH9K_NUM_TX_QUEUES; i++)
 		if (ATH_TXQ_SETUP(sc, i))
@@ -1644,7 +1662,7 @@ error_attach:
 	ath9k_hw_detach(sc->sc_ah);
 	sc->sc_ah = NULL;
 	ath9k_exit_debug(sc);
-
+error_init:
 	return error;
 }
 
@@ -2147,6 +2165,9 @@ static void ath9k_stop(struct ieee80211_hw *hw)
 		return; /* another wiphy still in use */
 	}
 
+	/* Ensure HW is awake when we try to shut it down. */
+	ath9k_ps_wakeup(sc);
+
 	if (sc->sc_flags & SC_OP_BTCOEX_ENABLED) {
 		ath9k_hw_btcoex_disable(sc->sc_ah);
 		if (sc->btcoex_info.btcoex_scheme == ATH_BTCOEX_CFG_3WIRE)
@@ -2167,6 +2188,9 @@ static void ath9k_stop(struct ieee80211_hw *hw)
 	/* disable HAL and put h/w to sleep */
 	ath9k_hw_disable(sc->sc_ah);
 	ath9k_hw_configpcipowersave(sc->sc_ah, 1, 1);
+	ath9k_ps_restore(sc);
+
+	/* Finally, put the chip in FULL SLEEP mode */
 	ath9k_hw_setpower(sc->sc_ah, ATH9K_PM_FULL_SLEEP);
 
 	sc->sc_flags |= SC_OP_INVALID;
@@ -2277,10 +2301,12 @@ static void ath9k_remove_interface(struct ieee80211_hw *hw,
 	if ((sc->sc_ah->opmode == NL80211_IFTYPE_AP) ||
 	    (sc->sc_ah->opmode == NL80211_IFTYPE_ADHOC) ||
 	    (sc->sc_ah->opmode == NL80211_IFTYPE_MESH_POINT)) {
+		ath9k_ps_wakeup(sc);
 		ath9k_hw_stoptxdma(sc->sc_ah, sc->beacon.beaconq);
-		ath_beacon_return(sc, avp);
+		ath9k_ps_restore(sc);
 	}
 
+	ath_beacon_return(sc, avp);
 	sc->sc_flags &= ~SC_OP_BEACONS;
 
 	for (i = 0; i < ARRAY_SIZE(sc->beacon.bslot); i++) {
@@ -2295,6 +2321,19 @@ static void ath9k_remove_interface(struct ieee80211_hw *hw,
 	sc->nvifs--;
 
 	mutex_unlock(&sc->mutex);
+}
+
+void ath9k_enable_ps(struct ath_softc *sc)
+{
+	sc->ps_enabled = true;
+	if (!(sc->sc_ah->caps.hw_caps & ATH9K_HW_CAP_AUTOSLEEP)) {
+		if ((sc->imask & ATH9K_INT_TIM_TIMER) == 0) {
+			sc->imask |= ATH9K_INT_TIM_TIMER;
+			ath9k_hw_set_interrupts(sc->sc_ah,
+					sc->imask);
+		}
+	}
+	ath9k_hw_setrxabort(sc->sc_ah, 1);
 }
 
 static int ath9k_config(struct ieee80211_hw *hw, u32 changed)
@@ -2325,20 +2364,27 @@ static int ath9k_config(struct ieee80211_hw *hw, u32 changed)
 		}
 	}
 
+	/*
+	 * We just prepare to enable PS. We have to wait until our AP has
+	 * ACK'd our null data frame to disable RX otherwise we'll ignore
+	 * those ACKs and end up retransmitting the same null data frames.
+	 * IEEE80211_CONF_CHANGE_PS is only passed by mac80211 for STA mode.
+	 */
 	if (changed & IEEE80211_CONF_CHANGE_PS) {
 		if (conf->flags & IEEE80211_CONF_PS) {
-			if (!(ah->caps.hw_caps &
-			      ATH9K_HW_CAP_AUTOSLEEP)) {
-				if ((sc->imask & ATH9K_INT_TIM_TIMER) == 0) {
-					sc->imask |= ATH9K_INT_TIM_TIMER;
-					ath9k_hw_set_interrupts(sc->sc_ah,
-							sc->imask);
-				}
-				ath9k_hw_setrxabort(sc->sc_ah, 1);
+			sc->sc_flags |= SC_OP_PS_ENABLED;
+			/*
+			 * At this point we know hardware has received an ACK
+			 * of a previously sent null data frame.
+			 */
+			if ((sc->sc_flags & SC_OP_NULLFUNC_COMPLETED)) {
+				sc->sc_flags &= ~SC_OP_NULLFUNC_COMPLETED;
+				ath9k_enable_ps(sc);
 			}
-			sc->ps_enabled = true;
 		} else {
 			sc->ps_enabled = false;
+			sc->sc_flags &= ~(SC_OP_PS_ENABLED |
+					  SC_OP_NULLFUNC_COMPLETED);
 			ath9k_hw_setpower(sc->sc_ah, ATH9K_PM_AWAKE);
 			if (!(ah->caps.hw_caps &
 			      ATH9K_HW_CAP_AUTOSLEEP)) {
@@ -2717,15 +2763,21 @@ static int ath9k_ampdu_action(struct ieee80211_hw *hw,
 	case IEEE80211_AMPDU_RX_STOP:
 		break;
 	case IEEE80211_AMPDU_TX_START:
+		ath9k_ps_wakeup(sc);
 		ath_tx_aggr_start(sc, sta, tid, ssn);
 		ieee80211_start_tx_ba_cb_irqsafe(hw, sta->addr, tid);
+		ath9k_ps_restore(sc);
 		break;
 	case IEEE80211_AMPDU_TX_STOP:
+		ath9k_ps_wakeup(sc);
 		ath_tx_aggr_stop(sc, sta, tid);
 		ieee80211_stop_tx_ba_cb_irqsafe(hw, sta->addr, tid);
+		ath9k_ps_restore(sc);
 		break;
 	case IEEE80211_AMPDU_TX_OPERATIONAL:
+		ath9k_ps_wakeup(sc);
 		ath_tx_aggr_resume(sc, sta, tid);
+		ath9k_ps_restore(sc);
 		break;
 	default:
 		DPRINTF(sc, ATH_DBG_FATAL, "Unknown AMPDU action\n");

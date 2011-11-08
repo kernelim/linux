@@ -20,7 +20,6 @@ config KVM
 	depends on HAVE_KVM && EXPERIMENTAL
 	select PREEMPT_NOTIFIERS
 	select ANON_INODES
-	select S390_SWITCH_AMODE
 	---help---
 	  Support hosting paravirtualized guest machines using the SIE
 	  virtualization capability on the mainframe. This should work
@@ -34,8 +33,20 @@ config KVM
 
 	  If unsure, say N.
 
+config KVM_AWARE_CMF
+	depends on KVM
+	bool "KVM aware sampling"
+	---help---
+	  This option enhances the sampling data from the CPU Measurement
+	  Facility with additional information, that allows to distinguish
+	  guest(s) and host when using the kernel based virtual machine
+	  functionality.
+
+	  If unsure, say N.
+
 # OK, it's a little counter-intuitive to do this, but it puts it neatly under
 # the virtualization menu.
+source drivers/vhost/Kconfig
 source drivers/virtio/Kconfig
 
 endif # VIRTUALIZATION

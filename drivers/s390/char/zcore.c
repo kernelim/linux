@@ -140,33 +140,6 @@ static int memcpy_hsa_kernel(void *dest, unsigned long src, size_t count)
 	return memcpy_hsa(dest, src, count, TO_KERNEL);
 }
 
-static int memcpy_real(void *dest, unsigned long src, size_t count)
-{
-	unsigned long flags;
-	int rc = -EFAULT;
-	register unsigned long _dest asm("2") = (unsigned long) dest;
-	register unsigned long _len1 asm("3") = (unsigned long) count;
-	register unsigned long _src  asm("4") = src;
-	register unsigned long _len2 asm("5") = (unsigned long) count;
-
-	if (count == 0)
-		return 0;
-	flags = __raw_local_irq_stnsm(0xf8UL); /* switch to real mode */
-	asm volatile (
-		"0:	mvcle	%1,%2,0x0\n"
-		"1:	jo	0b\n"
-		"	lhi	%0,0x0\n"
-		"2:\n"
-		EX_TABLE(1b,2b)
-		: "+d" (rc), "+d" (_dest), "+d" (_src), "+d" (_len1),
-		  "+d" (_len2), "=m" (*((long*)dest))
-		: "m" (*((long*)src))
-		: "cc", "memory");
-	__raw_local_irq_ssm(flags);
-
-	return rc;
-}
-
 static int memcpy_real_user(void __user *dest, unsigned long src, size_t count)
 {
 	static char buf[4096];
@@ -174,7 +147,7 @@ static int memcpy_real_user(void __user *dest, unsigned long src, size_t count)
 
 	while (offs < count) {
 		size = min(sizeof(buf), count - offs);
-		if (memcpy_real(buf, src + offs, size))
+		if (memcpy_real(buf, (void *) src + offs, size))
 			return -EFAULT;
 		if (copy_to_user(dest + offs, buf, size))
 			return -EFAULT;
@@ -254,7 +227,7 @@ static int __init init_cpu_info(enum arch_id arch)
 
 static DEFINE_MUTEX(zcore_mutex);
 
-#define DUMP_VERSION	0x3
+#define DUMP_VERSION	0x5
 #define DUMP_MAGIC	0xa8190173618f23fdULL
 #define DUMP_ARCH_S390X	2
 #define DUMP_ARCH_S390	1
@@ -279,7 +252,14 @@ struct zcore_header {
 	u32 volnr;
 	u32 build_arch;
 	u64 rmem_size;
-	char pad2[4016];
+	u8 mvdump;
+	u16 cpu_cnt;
+	u16 real_cpu_cnt;
+	u8 end_pad1[0x200-0x061];
+	u64 mvdump_sign;
+	u64 mvdump_zipl_time;
+	u8 end_pad2[0x800-0x210];
+	u32 lc_vec[512];
 } __attribute__((packed,__aligned__(16)));
 
 static struct zcore_header zcore_header = {
@@ -660,8 +640,9 @@ static int __init get_mem_size(unsigned long *mem)
 
 static int __init zcore_header_init(int arch, struct zcore_header *hdr)
 {
-	int rc;
+	int rc, i;
 	unsigned long memory = 0;
+	u32 prefix;
 
 	if (arch == ARCH_S390X)
 		hdr->arch_id = DUMP_ARCH_S390X;
@@ -676,6 +657,17 @@ static int __init zcore_header_init(int arch, struct zcore_header *hdr)
 	hdr->num_pages = memory / PAGE_SIZE;
 	hdr->tod = get_clock();
 	get_cpu_id(&hdr->cpu_id);
+	for (i = 0; zfcpdump_save_areas[i]; i++) {
+		if (arch == ARCH_S390X)
+			prefix = zfcpdump_save_areas[i]->s390x.pref_reg;
+		else
+			prefix = zfcpdump_save_areas[i]->s390.pref_reg;
+		hdr->real_cpu_cnt++;
+		if (!prefix)
+			continue;
+		hdr->lc_vec[hdr->cpu_cnt] = prefix;
+		hdr->cpu_cnt++;
+	}
 	return 0;
 }
 
@@ -699,12 +691,8 @@ static int __init zcore_reipl_init(void)
 	if (ipib_info.ipib < ZFCPDUMP_HSA_SIZE)
 		rc = memcpy_hsa_kernel(ipl_block, ipib_info.ipib, PAGE_SIZE);
 	else
-		rc = memcpy_real(ipl_block, ipib_info.ipib, PAGE_SIZE);
-	if (rc) {
-		free_page((unsigned long) ipl_block);
-		return rc;
-	}
-	if (csum_partial(ipl_block, ipl_block->hdr.len, 0) !=
+		rc = memcpy_real(ipl_block, (void *) ipib_info.ipib, PAGE_SIZE);
+	if (rc || csum_partial(ipl_block, ipl_block->hdr.len, 0) !=
 	    ipib_info.checksum) {
 		TRACE("Checksum does not match\n");
 		free_page((unsigned long) ipl_block);

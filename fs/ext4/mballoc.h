@@ -194,11 +194,6 @@ struct ext4_allocation_context {
 	__u8 ac_op;		/* operation, for history only */
 	struct page *ac_bitmap_page;
 	struct page *ac_buddy_page;
-	/*
-	 * pointer to the held semaphore upon successful
-	 * block allocation
-	 */
-	struct rw_semaphore *alloc_semp;
 	struct ext4_prealloc_space *ac_pa;
 	struct ext4_locality_group *ac_lg;
 };
@@ -216,12 +211,9 @@ struct ext4_buddy {
 	struct super_block *bd_sb;
 	__u16 bd_blkbits;
 	ext4_group_t bd_group;
-	struct rw_semaphore *alloc_semp;
 };
 #define EXT4_MB_BITMAP(e4b)	((e4b)->bd_bitmap)
 #define EXT4_MB_BUDDY(e4b)	((e4b)->bd_buddy)
-
-#define in_range(b, first, len)	((b) >= (first) && (b) <= (first) + (len) - 1)
 
 static inline ext4_fsblk_t ext4_grp_offs_to_block(struct super_block *sb,
 					struct ext4_free_extent *fex)

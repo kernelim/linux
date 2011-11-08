@@ -39,6 +39,53 @@ int page_cluster;
 static DEFINE_PER_CPU(struct pagevec[NR_LRU_LISTS], lru_add_pvecs);
 static DEFINE_PER_CPU(struct pagevec, lru_rotate_pvecs);
 
+static int __get_page_tail(struct page *page)
+{
+	/*
+	 * This takes care of get_page() if run on a tail page
+	 * returned by one of the get_user_pages/follow_page variants.
+	 * get_user_pages/follow_page itself doesn't need the compound
+	 * lock because it runs __get_page_tail_foll() under the
+	 * proper PT lock that already serializes against
+	 * split_huge_page().
+	 */
+	unsigned long flags;
+	int got = 0;
+	struct page *page_head = compound_trans_head(page);
+	if (likely(page != page_head && get_page_unless_zero(page_head))) {
+		/*
+		 * page_head wasn't a dangling pointer but it
+		 * may not be a head page anymore by the time
+		 * we obtain the lock. That is ok as long as it
+		 * can't be freed from under us.
+		 */
+		flags = compound_lock_irqsave(page_head);
+		/* here __split_huge_page_refcount won't run anymore */
+		if (likely(PageTail(page))) {
+			__get_page_tail_foll(page, false);
+			got = 1;
+		}
+		compound_unlock_irqrestore(page_head, flags);
+		if (unlikely(!got))
+			put_page(page_head);
+	}
+	return got;
+}
+
+void get_page(struct page *page)
+{
+	if (unlikely(PageTail(page)))
+		if (likely(__get_page_tail(page)))
+			return;
+	/*
+	 * Getting a normal page or the head of a compound page
+	 * requires to already have an elevated page->_count.
+	 */
+	VM_BUG_ON(atomic_read(&page->_count) <= 0);
+	atomic_inc(&page->_count);
+}
+EXPORT_SYMBOL(get_page);
+
 /*
  * This path almost never happens for VM activity - pages are normally
  * freed via pagevecs.  But it gets used by networking.
@@ -55,17 +102,80 @@ static void __page_cache_release(struct page *page)
 		del_page_from_lru(zone, page);
 		spin_unlock_irqrestore(&zone->lru_lock, flags);
 	}
+}
+
+static void __put_single_page(struct page *page)
+{
+	__page_cache_release(page);
 	free_hot_page(page);
+}
+
+static void __put_compound_page(struct page *page)
+{
+	compound_page_dtor *dtor;
+
+	__page_cache_release(page);
+	dtor = get_compound_page_dtor(page);
+	(*dtor)(page);
 }
 
 static void put_compound_page(struct page *page)
 {
-	page = compound_head(page);
-	if (put_page_testzero(page)) {
-		compound_page_dtor *dtor;
-
-		dtor = get_compound_page_dtor(page);
-		(*dtor)(page);
+	if (unlikely(PageTail(page))) {
+		/* __split_huge_page_refcount can run under us */
+		struct page *page_head = compound_trans_head(page);
+		if (likely(page != page_head &&
+			   get_page_unless_zero(page_head))) {
+			unsigned long flags;
+			/*
+			 * page_head wasn't a dangling pointer but it
+			 * may not be a head page anymore by the time
+			 * we obtain the lock. That is ok as long as it
+			 * can't be freed from under us.
+			 */
+			flags = compound_lock_irqsave(page_head);
+			if (unlikely(!PageTail(page))) {
+				/* __split_huge_page_refcount run before us */
+				compound_unlock_irqrestore(page_head, flags);
+				VM_BUG_ON(PageHead(page_head));
+				if (put_page_testzero(page_head))
+					__put_single_page(page_head);
+			out_put_single:
+				if (put_page_testzero(page))
+					__put_single_page(page);
+				return;
+			}
+			VM_BUG_ON(page_head != page->first_page);
+			/*
+			 * We can release the refcount taken by
+			 * get_page_unless_zero() now that
+			 * __split_huge_page_refcount() is blocked on
+			 * the compound_lock.
+			 */
+			if (put_page_testzero(page_head))
+				VM_BUG_ON(1);
+			/* __split_huge_page_refcount will wait now */
+			VM_BUG_ON(page_mapcount(page) <= 0);
+			atomic_dec(&page->_mapcount);
+			VM_BUG_ON(atomic_read(&page_head->_count) <= 0);
+			VM_BUG_ON(atomic_read(&page->_count) != 0);
+			compound_unlock_irqrestore(page_head, flags);
+			if (put_page_testzero(page_head)) {
+				if (PageHead(page_head))
+					__put_compound_page(page_head);
+				else
+					__put_single_page(page_head);
+			}
+		} else {
+			/* page_head is a dangling pointer */
+			VM_BUG_ON(PageTail(page));
+			goto out_put_single;
+		}
+	} else if (put_page_testzero(page)) {
+		if (PageHead(page))
+			__put_compound_page(page);
+		else
+			__put_single_page(page);
 	}
 }
 
@@ -74,7 +184,7 @@ void put_page(struct page *page)
 	if (unlikely(PageCompound(page)))
 		put_compound_page(page);
 	else if (put_page_testzero(page))
-		__page_cache_release(page);
+		__put_single_page(page);
 }
 EXPORT_SYMBOL(put_page);
 
@@ -395,6 +505,43 @@ void __pagevec_release(struct pagevec *pvec)
 }
 
 EXPORT_SYMBOL(__pagevec_release);
+
+/* used by __split_huge_page_refcount() */
+void lru_add_page_tail(struct zone* zone,
+		       struct page *page, struct page *page_tail)
+{
+	int active;
+	enum lru_list lru;
+	const int file = 0;
+	struct list_head *head;
+
+	VM_BUG_ON(!PageHead(page));
+	VM_BUG_ON(PageCompound(page_tail));
+	VM_BUG_ON(PageLRU(page_tail));
+	VM_BUG_ON(!spin_is_locked(&zone->lru_lock));
+
+	SetPageLRU(page_tail);
+
+	if (page_evictable(page_tail, NULL)) {
+		if (PageActive(page)) {
+			SetPageActive(page_tail);
+			active = 1;
+			lru = LRU_ACTIVE_ANON;
+		} else {
+			active = 0;
+			lru = LRU_INACTIVE_ANON;
+		}
+		update_page_reclaim_stat(zone, page_tail, file, active);
+		if (likely(PageLRU(page)))
+			head = page->lru.prev;
+		else
+			head = &zone->lru[lru].list;
+		__add_page_to_lru_list(zone, page_tail, lru, head);
+	} else {
+		SetPageUnevictable(page_tail);
+		add_page_to_lru_list(zone, page_tail, LRU_UNEVICTABLE);
+	}
+}
 
 /*
  * Add the passed pages to the LRU, then drop the caller's refcount

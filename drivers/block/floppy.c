@@ -3341,7 +3341,7 @@ static inline int set_geometry(unsigned int cmd, struct floppy_struct *g,
 			struct block_device *bdev = opened_bdev[cnt];
 			if (!bdev || ITYPE(drive_state[cnt].fd_device) != type)
 				continue;
-			__invalidate_device(bdev);
+			__invalidate_device(bdev, true);
 		}
 		mutex_unlock(&open_lock);
 	} else {
@@ -4231,7 +4231,7 @@ static int __init floppy_init(void)
 		err = -ENOMEM;
 		goto out_unreg_driver;
 	}
-	blk_queue_max_sectors(floppy_queue, 64);
+	blk_queue_max_hw_sectors(floppy_queue, 64);
 
 	blk_register_region(MKDEV(FLOPPY_MAJOR, 0), 256, THIS_MODULE,
 			    floppy_find, NULL, NULL);
@@ -4636,7 +4636,7 @@ static const struct pnp_device_id floppy_pnpids[] = {
 	{ "PNP0700", 0 },
 	{ }
 };
-MODULE_DEVICE_TABLE(pnp, floppy_pnpids);
+/* MODULE_DEVICE_TABLE(pnp, floppy_pnpids); */
 
 #else
 

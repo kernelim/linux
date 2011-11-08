@@ -6,6 +6,7 @@
  *	      Martin Schwidefsky <schwidefsky@de.ibm.com>
  *	      Ralph Wuerthner <rwuerthn@de.ibm.com>
  *	      Felix Beck <felix.beck@de.ibm.com>
+ *	      Holger Dengler <hd@linux.vnet.ibm.com>
  *
  * Adjunct processor bus.
  *
@@ -102,6 +103,7 @@ static atomic_t ap_poll_requests = ATOMIC_INIT(0);
 static DECLARE_WAIT_QUEUE_HEAD(ap_poll_wait);
 static struct task_struct *ap_poll_kthread = NULL;
 static DEFINE_MUTEX(ap_poll_thread_mutex);
+static DEFINE_SPINLOCK(ap_poll_timer_lock);
 static void *ap_interrupt_indicator;
 static struct hrtimer ap_poll_timer;
 /* In LPAR poll with 4kHz frequency. Poll every 250000 nanoseconds.
@@ -226,6 +228,95 @@ ap_queue_interruption_control(ap_qid_t qid, void *ind)
 }
 #endif
 
+#ifdef CONFIG_64BIT
+static inline struct ap_queue_status
+__ap_query_functions(ap_qid_t qid, unsigned int *functions)
+{
+	register unsigned long reg0 asm ("0") = 0UL | qid | (1UL << 23);
+	register struct ap_queue_status reg1 asm ("1") = AP_QUEUE_STATUS_INVALID;
+	register unsigned long reg2 asm ("2");
+
+	asm volatile(
+		".long 0xb2af0000\n"
+		"0:\n"
+		EX_TABLE(0b, 0b)
+		: "+d" (reg0), "+d" (reg1), "=d" (reg2)
+		:
+		: "cc");
+
+	*functions = (unsigned int)(reg2 >> 32);
+	return reg1;
+}
+#endif
+
+/**
+ * ap_query_functions(): Query supported functions.
+ * @qid: The AP queue number
+ * @functions: Pointer to functions field.
+ *
+ * Returns
+ *   0        on success.
+ *   -ENODEV  if queue not valid.
+ *   -EBUSY   if device busy.
+ *   -EINVAL  if query function is not supported
+ */
+static int ap_query_functions(ap_qid_t qid, unsigned int *functions)
+{
+#ifdef CONFIG_64BIT
+	struct ap_queue_status status;
+	int i;
+	status = __ap_query_functions(qid, functions);
+
+	for (i = 0; i < AP_MAX_RESET; i++) {
+		if (ap_queue_status_invalid_test(&status))
+			return -ENODEV;
+
+		switch (status.response_code) {
+		case AP_RESPONSE_NORMAL:
+			return 0;
+		case AP_RESPONSE_RESET_IN_PROGRESS:
+		case AP_RESPONSE_BUSY:
+			break;
+		case AP_RESPONSE_Q_NOT_AVAIL:
+		case AP_RESPONSE_DECONFIGURED:
+		case AP_RESPONSE_CHECKSTOPPED:
+		case AP_RESPONSE_INVALID_ADDRESS:
+			return -ENODEV;
+		case AP_RESPONSE_OTHERWISE_CHANGED:
+			break;
+		default:
+			break;
+		}
+		if (i < AP_MAX_RESET - 1) {
+			udelay(5);
+			status = __ap_query_functions(qid, functions);
+		}
+	}
+	return -EBUSY;
+#else
+	return -EINVAL;
+#endif
+}
+
+/**
+ * ap_4096_commands_availablen(): Check for availability of 4096 bit RSA
+ * support.
+ * @qid: The AP queue number
+ *
+ * Returns 1 if 4096 bit RSA keys are support fo the AP, returns 0 if not.
+ */
+int ap_4096_commands_available(ap_qid_t qid)
+{
+	unsigned int functions;
+
+	if (ap_query_functions(qid, &functions))
+		return 0;
+
+	return test_ap_facility(functions, 1) &&
+	       test_ap_facility(functions, 2);
+}
+EXPORT_SYMBOL(ap_4096_commands_available);
+
 /**
  * ap_queue_enable_interruption(): Enable interruption on an AP.
  * @qid: The AP queue number
@@ -282,6 +373,7 @@ static int ap_queue_enable_interruption(ap_qid_t qid, void *ind)
  * @psmid: The program supplied message identifier
  * @msg: The message text
  * @length: The message length
+ * @special: Special Bit
  *
  * Returns AP queue status structure.
  * Condition code 1 on NQAP can't happen because the L bit is 1.
@@ -289,7 +381,8 @@ static int ap_queue_enable_interruption(ap_qid_t qid, void *ind)
  * because a segment boundary was reached. The NQAP is repeated.
  */
 static inline struct ap_queue_status
-__ap_send(ap_qid_t qid, unsigned long long psmid, void *msg, size_t length)
+__ap_send(ap_qid_t qid, unsigned long long psmid, void *msg, size_t length,
+	  unsigned int special)
 {
 	typedef struct { char _[length]; } msgblock;
 	register unsigned long reg0 asm ("0") = qid | 0x40000000UL;
@@ -298,6 +391,9 @@ __ap_send(ap_qid_t qid, unsigned long long psmid, void *msg, size_t length)
 	register unsigned long reg3 asm ("3") = (unsigned long) length;
 	register unsigned long reg4 asm ("4") = (unsigned int) (psmid >> 32);
 	register unsigned long reg5 asm ("5") = (unsigned int) psmid;
+
+	if (special == 1)
+		reg0 |= 0x400000UL;
 
 	asm volatile (
 		"0: .long 0xb2ad0042\n"		/* DQAP */
@@ -312,13 +408,15 @@ int ap_send(ap_qid_t qid, unsigned long long psmid, void *msg, size_t length)
 {
 	struct ap_queue_status status;
 
-	status = __ap_send(qid, psmid, msg, length);
+	status = __ap_send(qid, psmid, msg, length, 0);
 	switch (status.response_code) {
 	case AP_RESPONSE_NORMAL:
 		return 0;
 	case AP_RESPONSE_Q_FULL:
 	case AP_RESPONSE_RESET_IN_PROGRESS:
 		return -EBUSY;
+	case AP_RESPONSE_REQ_FAC_NOT_INST:
+		return -EINVAL;
 	default:	/* Device is gone. */
 		return -ENODEV;
 	}
@@ -1008,7 +1106,7 @@ static int ap_probe_device_type(struct ap_device *ap_dev)
 	}
 
 	status = __ap_send(ap_dev->qid, 0x0102030405060708ULL,
-			   msg, sizeof(msg));
+			   msg, sizeof(msg), 0);
 	if (status.response_code != AP_RESPONSE_NORMAL) {
 		rc = -ENODEV;
 		goto out_free;
@@ -1068,6 +1166,7 @@ static void ap_scan_bus(struct work_struct *unused)
 	struct device *dev;
 	ap_qid_t qid;
 	int queue_depth, device_type;
+	unsigned int device_functions;
 	int rc, i;
 
 	if (ap_select_domain() != 0)
@@ -1116,10 +1215,30 @@ static void ap_scan_bus(struct work_struct *unused)
 		INIT_LIST_HEAD(&ap_dev->list);
 		setup_timer(&ap_dev->timeout, ap_request_timeout,
 			    (unsigned long) ap_dev);
-		if (device_type == 0)
-			ap_probe_device_type(ap_dev);
-		else
+		switch (device_type) {
+		case 0:
+			if (ap_probe_device_type(ap_dev)) {
+				kfree(ap_dev);
+				continue;
+			}
+			break;
+		case 10:
+			if (ap_query_functions(qid, &device_functions)) {
+				kfree(ap_dev);
+				continue;
+			}
+			if (test_ap_facility(device_functions, 3))
+				ap_dev->device_type = AP_DEVICE_TYPE_CEX3C;
+			else if (test_ap_facility(device_functions, 4))
+				ap_dev->device_type = AP_DEVICE_TYPE_CEX3A;
+			else {
+				kfree(ap_dev);
+				continue;
+			}
+			break;
+		default:
 			ap_dev->device_type = device_type;
+		}
 
 		ap_dev->device.bus = &ap_bus_type;
 		ap_dev->device.parent = ap_root_device;
@@ -1163,16 +1282,19 @@ ap_config_timeout(unsigned long ptr)
 static inline void ap_schedule_poll_timer(void)
 {
 	ktime_t hr_time;
+
+	spin_lock_bh(&ap_poll_timer_lock);
 	if (ap_using_interrupts() || ap_suspend_flag)
-		return;
+		goto out;
 	if (hrtimer_is_queued(&ap_poll_timer))
-		return;
+		goto out;
 	if (ktime_to_ns(hrtimer_expires_remaining(&ap_poll_timer)) <= 0) {
 		hr_time = ktime_set(0, poll_timeout);
 		hrtimer_forward_now(&ap_poll_timer, hr_time);
 		hrtimer_restart(&ap_poll_timer);
 	}
-	return;
+out:
+	spin_unlock_bh(&ap_poll_timer_lock);
 }
 
 /**
@@ -1243,7 +1365,7 @@ static int ap_poll_write(struct ap_device *ap_dev, unsigned long *flags)
 	/* Start the next request on the queue. */
 	ap_msg = list_entry(ap_dev->requestq.next, struct ap_message, list);
 	status = __ap_send(ap_dev->qid, ap_msg->psmid,
-			   ap_msg->message, ap_msg->length);
+			   ap_msg->message, ap_msg->length, ap_msg->special);
 	switch (status.response_code) {
 	case AP_RESPONSE_NORMAL:
 		atomic_inc(&ap_poll_requests);
@@ -1261,6 +1383,7 @@ static int ap_poll_write(struct ap_device *ap_dev, unsigned long *flags)
 		*flags |= 2;
 		break;
 	case AP_RESPONSE_MESSAGE_TOO_BIG:
+	case AP_RESPONSE_REQ_FAC_NOT_INST:
 		return -EINVAL;
 	default:
 		return -ENODEV;
@@ -1302,7 +1425,8 @@ static int __ap_queue_message(struct ap_device *ap_dev, struct ap_message *ap_ms
 	if (list_empty(&ap_dev->requestq) &&
 	    ap_dev->queue_count < ap_dev->queue_depth) {
 		status = __ap_send(ap_dev->qid, ap_msg->psmid,
-				   ap_msg->message, ap_msg->length);
+				   ap_msg->message, ap_msg->length,
+				   ap_msg->special);
 		switch (status.response_code) {
 		case AP_RESPONSE_NORMAL:
 			list_add_tail(&ap_msg->list, &ap_dev->pendingq);
@@ -1317,6 +1441,7 @@ static int __ap_queue_message(struct ap_device *ap_dev, struct ap_message *ap_ms
 			ap_dev->requestq_count++;
 			ap_dev->total_request_count++;
 			return -EBUSY;
+		case AP_RESPONSE_REQ_FAC_NOT_INST:
 		case AP_RESPONSE_MESSAGE_TOO_BIG:
 			ap_dev->drv->receive(ap_dev, ap_msg, ERR_PTR(-EINVAL));
 			return -EINVAL;
@@ -1658,6 +1783,7 @@ int __init ap_module_init(void)
 	 */
 	if (MACHINE_IS_VM)
 		poll_timeout = 1500000;
+	spin_lock_init(&ap_poll_timer_lock);
 	hrtimer_init(&ap_poll_timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
 	ap_poll_timer.function = ap_poll_timeout;
 

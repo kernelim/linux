@@ -1,6 +1,6 @@
 /*
  * QLogic iSCSI HBA Driver
- * Copyright (c)  2003-2006 QLogic Corporation
+ * Copyright (c)  2003-2010 QLogic Corporation
  *
  * See LICENSE.qla4xxx for copyright and licensing details.
  */
@@ -11,7 +11,8 @@
 
 #define MAX_PRST_DEV_DB_ENTRIES		64
 #define MIN_DISC_DEV_DB_ENTRY		MAX_PRST_DEV_DB_ENTRIES
-#define MAX_DEV_DB_ENTRIES 512
+#define MAX_DEV_DB_ENTRIES		512
+#define MAX_DEV_DB_ENTRIES_40XX		256
 
 /*************************************************************************
  *
@@ -35,6 +36,33 @@ struct host_mem_cfg_regs {
 	__le32 rsrvd0[12];	/* 0x50-0x79 */
 	__le32 req_q_out;	/* 0x80 */
 	__le32 rsrvd1[31];	/* 0x84-0xFF */
+};
+
+/*
+ * ISP 82xx I/O Register Set structure definitions.
+ */
+struct device_reg_82xx {
+	__le32 req_q_out;	/* 0x0000 (R): Request Queue out-Pointer. */
+	__le32 reserve1[63];	/* Request Queue out-Pointer. (64 * 4) */
+	__le32 rsp_q_in;	/* 0x0100 (R/W): Response Queue In-Pointer. */
+	__le32 reserve2[63];	/* Response Queue In-Pointer. */
+	__le32 rsp_q_out;	/* 0x0200 (R/W): Response Queue Out-Pointer. */
+	__le32 reserve3[63];	/* Response Queue Out-Pointer. */
+
+	__le32 mailbox_in[8];	/* 0x0300 (R/W): Mail box In registers */
+	__le32 reserve4[24];
+	__le32 hint;		/* 0x0380 (R/W): Host interrupt register */
+#define HINT_MBX_INT_PENDING	BIT_0
+	__le32 reserve5[31];
+	__le32 mailbox_out[8];	/* 0x0400 (R): Mail box Out registers */
+	__le32 reserve6[56];
+
+	__le32 host_status;	/* Offset 0x500 (R): host status */
+#define HSRX_RISC_MB_INT	BIT_0  /* RISC to Host Mailbox interrupt */
+#define HSRX_RISC_IOCB_INT	BIT_1  /* RISC to Host IOCB interrupt */
+
+	__le32 host_int;	/* Offset 0x0504 (R/W): Interrupt status. */
+#define ISRX_82XX_RISC_INT	BIT_0 /* RISC interrupt. */
 };
 
 /*  remote register set (access via PCI memory read/write) */
@@ -119,6 +147,13 @@ struct isp_reg {
 #define QL4022_NVRAM_SEM_MASK	(QL4022_RESOURCE_MASK_BASE_CODE << (10+16))
 #define QL4022_FLASH_SEM_MASK	(QL4022_RESOURCE_MASK_BASE_CODE << (13+16))
 
+/* nvram address for 4032 */
+#define NVRAM_PORT0_BOOT_MODE		0x03b1
+#define NVRAM_PORT0_BOOT_PRI_TGT	0x03b2
+#define NVRAM_PORT0_BOOT_SEC_TGT	0x03bb
+#define NVRAM_PORT1_BOOT_MODE		0x07b1
+#define NVRAM_PORT1_BOOT_PRI_TGT	0x07b2
+#define NVRAM_PORT1_BOOT_SEC_TGT	0x07bb
 
 
 /* Page # defines for 4022 */
@@ -167,6 +202,9 @@ static inline uint32_t clr_rmask(uint32_t val)
 /* ISP 4022 nvram definitions */
 #define NVR_WRITE_ENABLE			0x00000010	/* 4022 */
 
+#define QL4010_NVRAM_SIZE			0x200
+#define QL40X2_NVRAM_SIZE			0x800
+
 /*  ISP port_status definitions */
 
 /*  ISP Semaphore definitions */
@@ -206,6 +244,84 @@ union external_hw_config_reg {
 	uint32_t Asuint32_t;
 };
 
+/* 82XX Support  start */
+/* 82xx Default FLT Addresses */
+#define FA_FLASH_LAYOUT_ADDR_82		0xFC400
+#define FA_FLASH_DESCR_ADDR_82		0xFC000
+#define FA_BOOT_LOAD_ADDR_82		0x04000
+#define FA_BOOT_CODE_ADDR_82		0x20000
+#define FA_RISC_CODE_ADDR_82		0x40000
+#define FA_GOLD_RISC_CODE_ADDR_82	0x80000
+#define FA_FLASH_ISCSI_CHAP		0x540000
+#define FA_FLASH_CHAP_SIZE		0xC0000
+
+/* Flash Description Table */
+struct qla_fdt_layout {
+	uint8_t sig[4];
+	uint16_t version;
+	uint16_t len;
+	uint16_t checksum;
+	uint8_t unused1[2];
+	uint8_t model[16];
+	uint16_t man_id;
+	uint16_t id;
+	uint8_t flags;
+	uint8_t erase_cmd;
+	uint8_t alt_erase_cmd;
+	uint8_t wrt_enable_cmd;
+	uint8_t wrt_enable_bits;
+	uint8_t wrt_sts_reg_cmd;
+	uint8_t unprotect_sec_cmd;
+	uint8_t read_man_id_cmd;
+	uint32_t block_size;
+	uint32_t alt_block_size;
+	uint32_t flash_size;
+	uint32_t wrt_enable_data;
+	uint8_t read_id_addr_len;
+	uint8_t wrt_disable_bits;
+	uint8_t read_dev_id_len;
+	uint8_t chip_erase_cmd;
+	uint16_t read_timeout;
+	uint8_t protect_sec_cmd;
+	uint8_t unused2[65];
+};
+
+/* Flash Layout Table */
+
+struct qla_flt_location {
+	uint8_t sig[4];
+	uint16_t start_lo;
+	uint16_t start_hi;
+	uint8_t version;
+	uint8_t unused[5];
+	uint16_t checksum;
+};
+
+struct qla_flt_header {
+	uint16_t version;
+	uint16_t length;
+	uint16_t checksum;
+	uint16_t unused;
+};
+
+/* 82xx FLT Regions */
+#define FLT_REG_FDT		0x1a
+#define FLT_REG_FLT		0x1c
+#define FLT_REG_BOOTLOAD_82	0x72
+#define FLT_REG_FW_82		0x74
+#define FLT_REG_FW_82_1		0x97
+#define FLT_REG_GOLD_FW_82	0x75
+#define FLT_REG_BOOT_CODE_82	0x78
+#define FLT_REG_ISCSI_PARAM	0x65
+#define FLT_REG_ISCSI_CHAP	0x63
+
+struct qla_flt_region {
+	uint32_t code;
+	uint32_t size;
+	uint32_t start;
+	uint32_t end;
+};
+
 /*************************************************************************
  *
  *		Mailbox Commands Structures and Definitions
@@ -215,6 +331,11 @@ union external_hw_config_reg {
 /*  Mailbox command definitions */
 #define MBOX_CMD_ABOUT_FW			0x0009
 #define MBOX_CMD_PING				0x000B
+#define MBOX_CMD_ENABLE_INTRS			0x0010
+#define INTR_DISABLE				0
+#define INTR_ENABLE				1
+#define MBOX_CMD_STOP_FW			0x0014
+#define MBOX_CMD_ABORT_TASK			0x0015
 #define MBOX_CMD_LUN_RESET			0x0016
 #define MBOX_CMD_TARGET_WARM_RESET		0x0017
 #define MBOX_CMD_GET_MANAGEMENT_DATA		0x001E
@@ -226,9 +347,11 @@ union external_hw_config_reg {
 #define MBOX_CMD_WRITE_FLASH			0x0025
 #define MBOX_CMD_READ_FLASH			0x0026
 #define MBOX_CMD_CLEAR_DATABASE_ENTRY		0x0031
+#define MBOX_CMD_CONN_OPEN			0x0074
 #define MBOX_CMD_CONN_CLOSE_SESS_LOGOUT		0x0056
-#define LOGOUT_OPTION_CLOSE_SESSION		0x01
-#define LOGOUT_OPTION_RELOGIN			0x02
+#define LOGOUT_OPTION_CLOSE_SESSION		0x0002
+#define LOGOUT_OPTION_RELOGIN			0x0004
+#define LOGOUT_OPTION_FREE_DDB			0x0008
 #define MBOX_CMD_EXECUTE_IOCB_A64		0x005A
 #define MBOX_CMD_INITIALIZE_FIRMWARE		0x0060
 #define MBOX_CMD_GET_INIT_FW_CTRL_BLOCK		0x0061
@@ -237,11 +360,15 @@ union external_hw_config_reg {
 #define MBOX_CMD_GET_DATABASE_ENTRY		0x0064
 #define DDB_DS_UNASSIGNED			0x00
 #define DDB_DS_NO_CONNECTION_ACTIVE		0x01
+#define DDB_DS_DISCOVERY			0x02
 #define DDB_DS_SESSION_ACTIVE			0x04
 #define DDB_DS_SESSION_FAILED			0x06
 #define DDB_DS_LOGIN_IN_PROCESS			0x07
 #define MBOX_CMD_GET_FW_STATE			0x0069
 #define MBOX_CMD_GET_INIT_FW_CTRL_BLOCK_DEFAULTS 0x006A
+#define MBOX_CMD_GET_SYS_INFO			0x0078
+#define MBOX_CMD_GET_NVRAM			0x0078	/* For 40xx */
+#define MBOX_CMD_SET_NVRAM			0x0079	/* For 40xx */
 #define MBOX_CMD_RESTORE_FACTORY_DEFAULTS	0x0087
 #define MBOX_CMD_SET_ACB			0x0088
 #define MBOX_CMD_GET_ACB			0x0089
@@ -258,16 +385,21 @@ union external_hw_config_reg {
 /* Mailbox 1 */
 #define FW_STATE_READY				0x0000
 #define FW_STATE_CONFIG_WAIT			0x0001
-#define FW_STATE_WAIT_LOGIN			0x0002
+#define FW_STATE_WAIT_AUTOCONNECT		0x0002
 #define FW_STATE_ERROR				0x0004
-#define FW_STATE_DHCP_IN_PROGRESS		0x0008
+#define FW_STATE_CONFIGURING_IP			0x0008
 
 /* Mailbox 3 */
 #define FW_ADDSTATE_OPTICAL_MEDIA		0x0001
-#define FW_ADDSTATE_DHCP_ENABLED		0x0002
+#define FW_ADDSTATE_DHCPv4_ENABLED		0x0002
+#define FW_ADDSTATE_DHCPv4_LEASE_ACQUIRED	0x0004
+#define FW_ADDSTATE_DHCPv4_LEASE_EXPIRED	0x0008
 #define FW_ADDSTATE_LINK_UP			0x0010
 #define FW_ADDSTATE_ISNS_SVC_ENABLED		0x0020
+
 #define MBOX_CMD_GET_DATABASE_ENTRY_DEFAULTS	0x006B
+#define IPV6_DEFAULT_DDB_ENTRY			0x0001
+
 #define MBOX_CMD_CONN_OPEN_SESS_LOGIN		0x0074
 #define MBOX_CMD_GET_CRASH_RECORD		0x0076	/* 4010 only */
 #define MBOX_CMD_GET_CONN_EVENT_LOG		0x0077
@@ -308,6 +440,8 @@ union external_hw_config_reg {
 #define MBOX_ASTS_IPV6_ND_PREFIX_IGNORED	0x802C
 #define MBOX_ASTS_IPV6_LCL_PREFIX_IGNORED	0x802D
 #define MBOX_ASTS_ICMPV6_ERROR_MSG_RCVD		0x802E
+#define MBOX_ASTS_TXSCVR_INSERTED		0x8130
+#define MBOX_ASTS_TXSCVR_REMOVED		0x8131
 
 #define ISNS_EVENT_DATA_RECEIVED		0x0000
 #define ISNS_EVENT_CONNECTION_OPENED		0x0001
@@ -315,11 +449,30 @@ union external_hw_config_reg {
 #define MBOX_ASTS_IPSEC_SYSTEM_FATAL_ERROR	0x8022
 #define MBOX_ASTS_SUBNET_STATE_CHANGE		0x8027
 
+/* ACB State Defines */
+#define ACB_STATE_UNCONFIGURED	0x00
+#define ACB_STATE_INVALID	0x01
+#define ACB_STATE_ACQUIRING	0x02
+#define ACB_STATE_TENTATIVE	0x03
+#define ACB_STATE_DEPRICATED	0x04
+#define ACB_STATE_VALID		0x05
+#define ACB_STATE_DISABLING	0x06
+
+/* FLASH offsets */
+#define FLASH_SEGMENT_IFCB	0x04000000
+
+#define FLASH_OPT_RMW_HOLD	0
+#define FLASH_OPT_RMW_INIT	1
+#define FLASH_OPT_COMMIT	2
+#define FLASH_OPT_RMW_COMMIT	3
+
 /*************************************************************************/
 
 /* Host Adapter Initialization Control Block (from host) */
 struct addr_ctrl_blk {
 	uint8_t version;	/* 00 */
+#define  IFCB_VER_MIN			0x01
+#define  IFCB_VER_MAX			0x02
 	uint8_t control;	/* 01 */
 
 	uint16_t fw_options;	/* 02-03 */
@@ -327,12 +480,15 @@ struct addr_ctrl_blk {
 #define	 FWOPT_SESSION_MODE		  0x0040
 #define	 FWOPT_INITIATOR_MODE		  0x0020
 #define	 FWOPT_TARGET_MODE		  0x0010
+#define	 FWOPT_ENABLE_CRBDB		  0x8000
 
 	uint16_t exec_throttle;	/* 04-05 */
 	uint8_t zio_count;	/* 06 */
 	uint8_t res0;	/* 07 */
 	uint16_t eth_mtu_size;	/* 08-09 */
 	uint16_t add_fw_options;	/* 0A-0B */
+#define ADFWOPT_SERIALIZE_TASK_MGMT	0x0400
+#define ADFWOPT_AUTOCONN_DISABLE	0x0002
 
 	uint8_t hb_interval;	/* 0C */
 	uint8_t inst_num; /* 0D */
@@ -350,12 +506,19 @@ struct addr_ctrl_blk {
 
 	uint16_t iscsi_opts;	/* 30-31 */
 	uint16_t ipv4_tcp_opts;	/* 32-33 */
+#define TCPOPT_DHCP_ENABLE		0x0200
 	uint16_t ipv4_ip_opts;	/* 34-35 */
+#define IPOPT_IPV4_PROTOCOL_ENABLE	0x8000
+#define IPOPT_VLAN_TAGGING_ENABLE	0x2000
 
 	uint16_t iscsi_max_pdu_size;	/* 36-37 */
 	uint8_t ipv4_tos;	/* 38 */
 	uint8_t ipv4_ttl;	/* 39 */
 	uint8_t acb_version;	/* 3A */
+#define ACB_NOT_SUPPORTED		0x00
+#define ACB_SUPPORTED			0x02 /* Capable of ACB Version 2
+						Features */
+
 	uint8_t res2;	/* 3B */
 	uint16_t def_timeout;	/* 3C-3D */
 	uint16_t iscsi_fburst_len;	/* 3E-3F */
@@ -397,16 +560,36 @@ struct addr_ctrl_blk {
 	uint32_t cookie;	/* 200-203 */
 	uint16_t ipv6_port;	/* 204-205 */
 	uint16_t ipv6_opts;	/* 206-207 */
+#define IPV6_OPT_IPV6_PROTOCOL_ENABLE	0x8000
+#define IPV6_OPT_VLAN_TAGGING_ENABLE	0x2000
+
 	uint16_t ipv6_addtl_opts;	/* 208-209 */
+#define IPV6_ADDOPT_NEIGHBOR_DISCOVERY_ADDR_ENABLE	0x0002 /* Pri ACB
+								  Only */
+#define IPV6_ADDOPT_AUTOCONFIG_LINK_LOCAL_ADDR		0x0001
+
 	uint16_t ipv6_tcp_opts;	/* 20A-20B */
 	uint8_t ipv6_tcp_wsf;	/* 20C */
 	uint16_t ipv6_flow_lbl;	/* 20D-20F */
-	uint8_t ipv6_gw_addr[16];	/* 210-21F */
+	uint8_t ipv6_dflt_rtr_addr[16]; /* 210-21F */
 	uint16_t ipv6_vlan_tag;	/* 220-221 */
 	uint8_t ipv6_lnk_lcl_addr_state;/* 222 */
 	uint8_t ipv6_addr0_state;	/* 223 */
 	uint8_t ipv6_addr1_state;	/* 224 */
-	uint8_t ipv6_gw_state;	/* 225 */
+#define IP_ADDRSTATE_UNCONFIGURED	0
+#define IP_ADDRSTATE_INVALID		1
+#define IP_ADDRSTATE_ACQUIRING		2
+#define IP_ADDRSTATE_TENTATIVE		3
+#define IP_ADDRSTATE_DEPRICATED		4
+#define IP_ADDRSTATE_PREFERRED		5
+#define IP_ADDRSTATE_DISABLING		6
+
+	uint8_t ipv6_dflt_rtr_state;    /* 225 */
+#define IPV6_RTRSTATE_UNKNOWN                   0
+#define IPV6_RTRSTATE_MANUAL                    1
+#define IPV6_RTRSTATE_ADVERTISED                3
+#define IPV6_RTRSTATE_STALE                     4
+
 	uint8_t ipv6_traffic_class;	/* 226 */
 	uint8_t ipv6_hop_limit;	/* 227 */
 	uint8_t ipv6_if_id[8];	/* 228-22F */
@@ -422,17 +605,119 @@ struct addr_ctrl_blk {
 	uint8_t res14[140];	/* 274-2FF */
 };
 
+#define IP_ADDR_COUNT	4 /* Total 4 IP address supported in one interface
+			   * One IPv4, one IPv6 link local and 2 IPv6
+			   */
+
+#define IP_STATE_MASK	0x0F000000
+#define IP_STATE_SHIFT	24
+
 struct init_fw_ctrl_blk {
 	struct addr_ctrl_blk pri;
 	struct addr_ctrl_blk sec;
 };
 
+#define PRIMARI_ACB		0
+#define SECONDARY_ACB		1
+
+struct addr_ctrl_blk_def {
+	uint8_t reserved1[1];	/* 00 */
+	uint8_t control;	/* 01 */
+	uint8_t reserved2[11];	/* 02-0C */
+	uint8_t inst_num;	/* 0D */
+	uint8_t reserved3[34];	/* 0E-2F */
+	uint16_t iscsi_opts;	/* 30-31 */
+	uint16_t ipv4_tcp_opts;	/* 32-33 */
+	uint16_t ipv4_ip_opts;	/* 34-35 */
+	uint16_t iscsi_max_pdu_size;	/* 36-37 */
+	uint8_t ipv4_tos;	/* 38 */
+	uint8_t ipv4_ttl;	/* 39 */
+	uint8_t reserved4[2];	/* 3A-3B */
+	uint16_t def_timeout;	/* 3C-3D */
+	uint16_t iscsi_fburst_len;	/* 3E-3F */
+	uint8_t reserved5[4];	/* 40-43 */
+	uint16_t iscsi_max_outstnd_r2t;	/* 44-45 */
+	uint8_t reserved6[2];	/* 46-47 */
+	uint16_t ipv4_port;	/* 48-49 */
+	uint16_t iscsi_max_burst_len;	/* 4A-4B */
+	uint8_t reserved7[4];	/* 4C-4F */
+	uint8_t ipv4_addr[4];	/* 50-53 */
+	uint16_t ipv4_vlan_tag;	/* 54-55 */
+	uint8_t ipv4_addr_state;	/* 56 */
+	uint8_t ipv4_cacheid;	/* 57 */
+	uint8_t reserved8[8];	/* 58-5F */
+	uint8_t ipv4_subnet[4];	/* 60-63 */
+	uint8_t reserved9[12];	/* 64-6F */
+	uint8_t ipv4_gw_addr[4];	/* 70-73 */
+	uint8_t reserved10[84];	/* 74-C7 */
+	uint8_t abort_timer;	/* C8    */
+	uint8_t ipv4_tcp_wsf;	/* C9    */
+	uint8_t reserved11[10];	/* CA-D3 */
+	uint8_t ipv4_dhcp_vid_len;	/* D4 */
+	uint8_t ipv4_dhcp_vid[11];	/* D5-DF */
+	uint8_t reserved12[20];	/* E0-F3 */
+	uint8_t ipv4_dhcp_alt_cid_len;	/* F4 */
+	uint8_t ipv4_dhcp_alt_cid[11];	/* F5-FF */
+	uint8_t iscsi_name[224];	/* 100-1DF */
+	uint8_t reserved13[32];	/* 1E0-1FF */
+	uint32_t cookie;	/* 200-203 */
+	uint16_t ipv6_port;	/* 204-205 */
+	uint16_t ipv6_opts;	/* 206-207 */
+	uint16_t ipv6_addtl_opts;	/* 208-209 */
+	uint16_t ipv6_tcp_opts;		/* 20A-20B */
+	uint8_t ipv6_tcp_wsf;		/* 20C */
+	uint16_t ipv6_flow_lbl;		/* 20D-20F */
+	uint8_t ipv6_dflt_rtr_addr[16];	/* 210-21F */
+	uint16_t ipv6_vlan_tag;		/* 220-221 */
+	uint8_t ipv6_lnk_lcl_addr_state;	/* 222 */
+	uint8_t ipv6_addr0_state;	/* 223 */
+	uint8_t ipv6_addr1_state;	/* 224 */
+	uint8_t ipv6_dflt_rtr_state;	/* 225 */
+	uint8_t ipv6_traffic_class;	/* 226 */
+	uint8_t ipv6_hop_limit;		/* 227 */
+	uint8_t ipv6_if_id[8];		/* 228-22F */
+	uint8_t ipv6_addr0[16];		/* 230-23F */
+	uint8_t ipv6_addr1[16];		/* 240-24F */
+	uint32_t ipv6_nd_reach_time;	/* 250-253 */
+	uint32_t ipv6_nd_rexmit_timer;	/* 254-257 */
+	uint32_t ipv6_nd_stale_timeout;	/* 258-25B */
+	uint8_t ipv6_dup_addr_detect_count;	/* 25C */
+	uint8_t ipv6_cache_id;		/* 25D */
+	uint8_t reserved14[18];		/* 25E-26F */
+	uint32_t ipv6_gw_advrt_mtu;	/* 270-273 */
+	uint8_t reserved15[140];	/* 274-2FF */
+};
+
 /*************************************************************************/
+
+#define MAX_CHAP_ENTRIES_40XX	128
+#define MAX_CHAP_ENTRIES_82XX	1024
+#define MAX_RESRV_CHAP_IDX	3
+#define FLASH_CHAP_OFFSET	0x06000000
+
+struct ql4_chap_table {
+	uint16_t link;
+	uint8_t flags;
+	uint8_t secret_len;
+#define MIN_CHAP_SECRET_LEN	12
+#define MAX_CHAP_SECRET_LEN	100
+	uint8_t secret[MAX_CHAP_SECRET_LEN];
+#define MAX_CHAP_NAME_LEN	256
+	uint8_t name[MAX_CHAP_NAME_LEN];
+	uint16_t reserved;
+#define CHAP_VALID_COOKIE	0x4092
+#define CHAP_INVALID_COOKIE	0xFFEE
+	uint16_t cookie;
+};
 
 struct dev_db_entry {
 	uint16_t options;	/* 00-01 */
 #define DDB_OPT_DISC_SESSION  0x10
 #define DDB_OPT_TARGET	      0x02 /* device is a target */
+#define DDB_OPT_IPV6_DEVICE	0x100
+#define DDB_OPT_AUTO_SENDTGTS_DISABLE		0x40
+#define DDB_OPT_IPV6_NULL_LINK_LOCAL		0x800 /* post connection */
+#define DDB_OPT_IPV6_FW_DEFINED_LINK_LOCAL	0x800 /* pre connection */
 
 	uint16_t exec_throttle;	/* 02-03 */
 	uint16_t exec_count;	/* 04-05 */
@@ -441,6 +726,7 @@ struct dev_db_entry {
 	uint16_t tcp_options;	/* 0A-0B */
 	uint16_t ip_options;	/* 0C-0D */
 	uint16_t iscsi_max_rcv_data_seg_len;	/* 0E-0F */
+#define BYTE_UNITS	512
 	uint32_t res1;	/* 10-13 */
 	uint16_t iscsi_max_snd_data_seg_len;	/* 14-15 */
 	uint16_t iscsi_first_burst_len;	/* 16-17 */
@@ -468,7 +754,7 @@ struct dev_db_entry {
 					 * pointer to a string so we
 					 * don't have to reserve soooo
 					 * much RAM */
-	uint8_t ipv6_addr[0x10];/* 1A0-1AF */
+	uint8_t link_local_ipv6_addr[0x10]; /* 1A0-1AF */
 	uint8_t res5[0x10];	/* 1B0-1BF */
 	uint16_t ddb_link;	/* 1C0-1C1 */
 	uint16_t chap_tbl_idx;	/* 1C2-1C3 */
@@ -477,7 +763,10 @@ struct dev_db_entry {
 	uint8_t tcp_rcv_wsf;	/* 1C7 */
 	uint32_t stat_sn;	/* 1C8-1CB */
 	uint32_t exp_stat_sn;	/* 1CC-1CF */
-	uint8_t res6[0x30];	/* 1D0-1FF */
+	uint8_t res6[0x2b];	/* 1D0-1FB */
+#define DDB_VALID_COOKIE	0x9034
+	uint16_t cookie;	/* 1FC-1FD */
+	uint16_t len;		/* 1FE-1FF */
 };
 
 /*************************************************************************/
@@ -489,6 +778,14 @@ struct dev_db_entry {
 #define FLASH_EOF_OFFSET	(FLASH_DEFAULTBLOCKSIZE-8) /* 4 bytes
 							    * for EOF
 							    * signature */
+#define FLASH_RAW_ACCESS_ADDR	0x8e000000
+
+#define BOOT_PARAM_OFFSET_PORT0 0x3b0
+#define BOOT_PARAM_OFFSET_PORT1 0x7b0
+
+#define FLASH_OFFSET_DB_INFO	0x05000000
+#define FLASH_OFFSET_DB_END	(FLASH_OFFSET_DB_INFO + 0x7fff)
+
 
 struct sys_info_phys_addr {
 	uint8_t address[6];	/* 00-05 */
@@ -525,6 +822,43 @@ struct flash_sys_info {
 	 */
 	uint32_t reserved1[39]; /* 170-1ff */
 };	/* 200 */
+
+struct mbx_sys_info {
+	uint8_t board_id_str[16];   /*  0-f  Keep board ID string first */
+				/* in this structure for GUI. */
+	uint16_t board_id;	/* 10-11 board ID code */
+	uint16_t phys_port_cnt;	/* 12-13 number of physical network ports */
+	uint16_t port_num;	/* 14-15 network port for this PCI function */
+				/* (port 0 is first port) */
+	uint8_t mac_addr[6];	/* 16-1b MAC address for this PCI function */
+	uint32_t iscsi_pci_func_cnt;  /* 1c-1f number of iSCSI PCI functions */
+	uint32_t pci_func;	      /* 20-23 this PCI function */
+	unsigned char serial_number[16];  /* 24-33 serial number string */
+	uint8_t reserved[12];		  /* 34-3f */
+};
+
+struct about_fw_info {
+	uint16_t fw_major;		/* 00 - 01 */
+	uint16_t fw_minor;		/* 02 - 03 */
+	uint16_t fw_patch;		/* 04 - 05 */
+	uint16_t fw_build;		/* 06 - 07 */
+	uint8_t fw_build_date[16];	/* 08 - 17 ASCII String */
+	uint8_t fw_build_time[16];	/* 18 - 27 ASCII String */
+	uint8_t fw_build_user[16];	/* 28 - 37 ASCII String */
+	uint16_t fw_load_source;	/* 38 - 39 */
+					/* 1 = Flash Primary,
+					   2 = Flash Secondary,
+					   3 = Host Download
+					*/
+	uint8_t reserved1[6];		/* 3A - 3F */
+	uint16_t iscsi_major;		/* 40 - 41 */
+	uint16_t iscsi_minor;		/* 42 - 43 */
+	uint16_t bootload_major;	/* 44 - 45 */
+	uint16_t bootload_minor;	/* 46 - 47 */
+	uint16_t bootload_patch;	/* 48 - 49 */
+	uint16_t bootload_build;	/* 4A - 4B */
+	uint8_t reserved2[180];		/* 4C - FF */
+};
 
 struct crash_record {
 	uint16_t fw_major_version;	/* 00 - 01 */
@@ -587,6 +921,7 @@ struct qla4_header {
 
 	uint8_t entryStatus;
 	uint8_t systemDefined;
+#define SD_ISCSI_PDU	0x01
 	uint8_t entryCount;
 
 	/* SyetemDefined definition */
@@ -744,21 +1079,22 @@ struct passthru0 {
 	struct qla4_header hdr;		       /* 00-03 */
 	uint32_t handle;	/* 04-07 */
 	uint16_t target;	/* 08-09 */
-	uint16_t connectionID;	/* 0A-0B */
+	uint16_t connection_id;	/* 0A-0B */
 #define ISNS_DEFAULT_SERVER_CONN_ID	((uint16_t)0x8000)
 
-	uint16_t controlFlags;	/* 0C-0D */
+	uint16_t control_flags;	/* 0C-0D */
 #define PT_FLAG_ETHERNET_FRAME		0x8000
 #define PT_FLAG_ISNS_PDU		0x8000
 #define PT_FLAG_SEND_BUFFER		0x0200
 #define PT_FLAG_WAIT_4_RESPONSE		0x0100
+#define PT_FLAG_ISCSI_PDU		0x1000
 
 	uint16_t timeout;	/* 0E-0F */
 #define PT_DEFAULT_TIMEOUT		30 /* seconds */
 
-	struct data_seg_a64 outDataSeg64;	/* 10-1B */
+	struct data_seg_a64 out_dsd;    /* 10-1B */
 	uint32_t res1;		/* 1C-1F */
-	struct data_seg_a64 inDataSeg64;	/* 20-2B */
+	struct data_seg_a64 in_dsd;     /* 20-2B */
 	uint8_t res2[20];	/* 2C-3F */
 };
 
@@ -780,6 +1116,54 @@ struct passthru_status {
 	uint8_t res2[12];	/* 20-2B */
 	uint32_t inResidual;	/* 2C-2F */
 	uint8_t res4[16];	/* 30-3F */
+};
+
+/*
+ * ISP queue - response queue entry definition.
+ */
+struct response {
+	uint8_t data[60];
+	uint32_t signature;
+#define RESPONSE_PROCESSED	0xDEADDEAD	/* Signature */
+};
+
+struct ql_iscsi_stats {
+	uint8_t reserved1[656]; /* 0000-028F */
+	uint32_t tx_cmd_pdu; /* 0290-0293 */
+	uint32_t tx_resp_pdu; /* 0294-0297 */
+	uint32_t rx_cmd_pdu; /* 0298-029B */
+	uint32_t rx_resp_pdu; /* 029C-029F */
+
+	uint64_t tx_data_octets; /* 02A0-02A7 */
+	uint64_t rx_data_octets; /* 02A8-02AF */
+
+	uint32_t hdr_digest_err; /* 02B0–02B3 */
+	uint32_t data_digest_err; /* 02B4–02B7 */
+	uint32_t conn_timeout_err; /* 02B8–02BB */
+	uint32_t framing_err; /* 02BC–02BF */
+
+	uint32_t tx_nopout_pdus; /* 02C0–02C3 */
+	uint32_t tx_scsi_cmd_pdus;  /* 02C4–02C7 */
+	uint32_t tx_tmf_cmd_pdus; /* 02C8–02CB */
+	uint32_t tx_login_cmd_pdus; /* 02CC–02CF */
+	uint32_t tx_text_cmd_pdus; /* 02D0–02D3 */
+	uint32_t tx_scsi_write_pdus; /* 02D4–02D7 */
+	uint32_t tx_logout_cmd_pdus; /* 02D8–02DB */
+	uint32_t tx_snack_req_pdus; /* 02DC–02DF */
+
+	uint32_t rx_nopin_pdus; /* 02E0–02E3 */
+	uint32_t rx_scsi_resp_pdus; /* 02E4–02E7 */
+	uint32_t rx_tmf_resp_pdus; /* 02E8–02EB */
+	uint32_t rx_login_resp_pdus; /* 02EC–02EF */
+	uint32_t rx_text_resp_pdus; /* 02F0–02F3 */
+	uint32_t rx_scsi_read_pdus; /* 02F4–02F7 */
+	uint32_t rx_logout_resp_pdus; /* 02F8–02FB */
+
+	uint32_t rx_r2t_pdus; /* 02FC–02FF */
+	uint32_t rx_async_pdus; /* 0300–0303 */
+	uint32_t rx_reject_pdus; /* 0304–0307 */
+
+	uint8_t reserved2[264]; /* 0x0308 - 0x040F */
 };
 
 #endif /*  _QLA4X_FW_H */

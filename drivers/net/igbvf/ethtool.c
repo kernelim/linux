@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel(R) 82576 Virtual Function Linux driver
-  Copyright(c) 2009 Intel Corporation.
+  Copyright(c) 2009 - 2010 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -90,29 +90,24 @@ static int igbvf_get_settings(struct net_device *netdev,
 	status = er32(STATUS);
 	if (status & E1000_STATUS_LU) {
 		if (status & E1000_STATUS_SPEED_1000)
-			ecmd->speed = 1000;
+			ethtool_cmd_speed_set(ecmd, SPEED_1000);
 		else if (status & E1000_STATUS_SPEED_100)
-			ecmd->speed = 100;
+			ethtool_cmd_speed_set(ecmd, SPEED_100);
 		else
-			ecmd->speed = 10;
+			ethtool_cmd_speed_set(ecmd, SPEED_10);
 
 		if (status & E1000_STATUS_FD)
 			ecmd->duplex = DUPLEX_FULL;
 		else
 			ecmd->duplex = DUPLEX_HALF;
 	} else {
-		ecmd->speed = -1;
+		ethtool_cmd_speed_set(ecmd, -1);
 		ecmd->duplex = -1;
 	}
 
 	ecmd->autoneg = AUTONEG_DISABLE;
 
 	return 0;
-}
-
-static u32 igbvf_get_link(struct net_device *netdev)
-{
-	return netif_carrier_ok(netdev);
 }
 
 static int igbvf_set_settings(struct net_device *netdev,
@@ -153,7 +148,7 @@ static int igbvf_set_rx_csum(struct net_device *netdev, u32 data)
 
 static u32 igbvf_get_tx_csum(struct net_device *netdev)
 {
-	return ((netdev->features & NETIF_F_IP_CSUM) != 0);
+	return (netdev->features & NETIF_F_IP_CSUM) != 0;
 }
 
 static int igbvf_set_tx_csum(struct net_device *netdev, u32 data)
@@ -206,13 +201,11 @@ static void igbvf_get_regs(struct net_device *netdev,
 	struct igbvf_adapter *adapter = netdev_priv(netdev);
 	struct e1000_hw *hw = &adapter->hw;
 	u32 *regs_buff = p;
-	u8 revision_id;
 
 	memset(p, 0, IGBVF_REGS_LEN * sizeof(u32));
 
-	pci_read_config_byte(adapter->pdev, PCI_REVISION_ID, &revision_id);
-
-	regs->version = (1 << 24) | (revision_id << 16) | adapter->pdev->device;
+	regs->version = (1 << 24) | (adapter->pdev->revision << 16) |
+			adapter->pdev->device;
 
 	regs_buff[0] = er32(CTRL);
 	regs_buff[1] = er32(STATUS);
@@ -367,16 +360,6 @@ static int igbvf_link_test(struct igbvf_adapter *adapter, u64 *data)
 	return *data;
 }
 
-static int igbvf_get_self_test_count(struct net_device *netdev)
-{
-	return IGBVF_TEST_LEN;
-}
-
-static int igbvf_get_stats_count(struct net_device *netdev)
-{
-	return IGBVF_GLOBAL_STATS_LEN;
-}
-
 static void igbvf_diag_test(struct net_device *netdev,
                             struct ethtool_test *eth_test, u64 *data)
 {
@@ -400,19 +383,12 @@ static void igbvf_get_wol(struct net_device *netdev,
 {
 	wol->supported = 0;
 	wol->wolopts = 0;
-
-	return;
 }
 
 static int igbvf_set_wol(struct net_device *netdev,
                          struct ethtool_wolinfo *wol)
 {
 	return -EOPNOTSUPP;
-}
-
-static int igbvf_phys_id(struct net_device *netdev, u32 data)
-{
-	return 0;
 }
 
 static int igbvf_get_coalesce(struct net_device *netdev,
@@ -484,6 +460,18 @@ static void igbvf_get_ethtool_stats(struct net_device *netdev,
 
 }
 
+static int igbvf_get_sset_count(struct net_device *dev, int stringset)
+{
+	switch(stringset) {
+	case ETH_SS_TEST:
+		return IGBVF_TEST_LEN;
+	case ETH_SS_STATS:
+		return IGBVF_GLOBAL_STATS_LEN;
+	default:
+		return -EINVAL;
+	}
+}
+
 static void igbvf_get_strings(struct net_device *netdev, u32 stringset,
                               u8 *data)
 {
@@ -515,7 +503,7 @@ static const struct ethtool_ops igbvf_ethtool_ops = {
 	.get_msglevel		= igbvf_get_msglevel,
 	.set_msglevel		= igbvf_set_msglevel,
 	.nway_reset		= igbvf_nway_reset,
-	.get_link		= igbvf_get_link,
+	.get_link		= ethtool_op_get_link,
 	.get_eeprom_len		= igbvf_get_eeprom_len,
 	.get_eeprom		= igbvf_get_eeprom,
 	.set_eeprom		= igbvf_set_eeprom,
@@ -532,11 +520,9 @@ static const struct ethtool_ops igbvf_ethtool_ops = {
 	.get_tso		= ethtool_op_get_tso,
 	.set_tso		= igbvf_set_tso,
 	.self_test		= igbvf_diag_test,
+	.get_sset_count		= igbvf_get_sset_count,
 	.get_strings		= igbvf_get_strings,
-	.phys_id		= igbvf_phys_id,
 	.get_ethtool_stats	= igbvf_get_ethtool_stats,
-	.self_test_count	= igbvf_get_self_test_count,
-	.get_stats_count	= igbvf_get_stats_count,
 	.get_coalesce		= igbvf_get_coalesce,
 	.set_coalesce		= igbvf_set_coalesce,
 };

@@ -17,6 +17,10 @@
 /* Handles exceptions in both to and from, but doesn't do access_ok */
 __must_check unsigned long
 copy_user_generic(void *to, const void *from, unsigned len);
+__must_check unsigned long
+copy_user_generic_string(void *to, const void *from, unsigned len);
+__must_check unsigned long
+copy_user_generic_unrolled(void *to, const void *from, unsigned len);
 
 __must_check unsigned long
 copy_to_user(void __user *to, const void *from, unsigned len);

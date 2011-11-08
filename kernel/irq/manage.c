@@ -138,6 +138,22 @@ int irq_set_affinity(unsigned int irq, const struct cpumask *cpumask)
 	return 0;
 }
 
+int irq_set_affinity_hint(unsigned int irq, const struct cpumask *m)
+{
+	struct irq_desc *desc = irq_to_desc(irq);
+	unsigned long flags;
+
+	if (!desc)
+		return -EINVAL;
+
+	spin_lock_irqsave(&desc->lock, flags);
+	desc->affinity_hint = m;
+	spin_unlock_irqrestore(&desc->lock, flags);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(irq_set_affinity_hint);
+
 #ifndef CONFIG_AUTO_IRQ_AFFINITY
 /*
  * Generic version of the affinity autoselector.
@@ -200,7 +216,10 @@ static inline int setup_affinity(unsigned int irq, struct irq_desc *desc)
 void __disable_irq(struct irq_desc *desc, unsigned int irq, bool suspend)
 {
 	if (suspend) {
-		if (!desc->action || (desc->action->flags & IRQF_TIMER))
+		/* kABI WARNING! We cannot change IRQF_TIMER to include
+		   IRQF_NO_SUSPEND. So test for both bits here. */
+		if (!desc->action ||
+		    (desc->action->flags & (IRQF_TIMER|IRQF_NO_SUSPEND)))
 			return;
 		desc->status |= IRQ_SUSPENDED;
 	}
@@ -735,6 +754,16 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 		if (new->flags & IRQF_ONESHOT)
 			desc->status |= IRQ_ONESHOT;
 
+		/*
+		 * Force MSI interrupts to run with interrupts
+		 * disabled. The multi vector cards can cause stack
+		 * overflows due to nested interrupts when enough of
+		 * them are directed to a core and fire at the same
+		 * time.
+		 */
+		if (desc->msi_desc)
+			new->flags |= IRQF_DISABLED;
+
 		if (!(desc->status & IRQ_NOAUTOEN)) {
 			desc->depth = 0;
 			desc->status &= ~IRQ_DISABLED;
@@ -883,6 +912,12 @@ static struct irqaction *__free_irq(unsigned int irq, void *dev_id)
 		else
 			desc->chip->disable(irq);
 	}
+
+#ifdef CONFIG_SMP
+	/* make sure affinity_hint is cleaned up */
+	if (WARN_ON_ONCE(desc->affinity_hint))
+		desc->affinity_hint = NULL;
+#endif
 
 	spin_unlock_irqrestore(&desc->lock, flags);
 

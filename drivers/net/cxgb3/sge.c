@@ -36,12 +36,14 @@
 #include <linux/ip.h>
 #include <linux/tcp.h>
 #include <linux/dma-mapping.h>
+#include <linux/prefetch.h>
 #include <net/arp.h>
 #include "common.h"
 #include "regs.h"
 #include "sge_defs.h"
 #include "t3_cpl.h"
 #include "firmware_exports.h"
+#include "cxgb3_offload.h"
 
 #define USE_GTS 0
 
@@ -197,7 +199,7 @@ static inline void refill_rspq(struct adapter *adapter,
  *	need_skb_unmap - does the platform need unmapping of sk_buffs?
  *
  *	Returns true if the platfrom needs sk_buff unmapping.  The compiler
- *	optimizes away unecessary code if this returns true.
+ *	optimizes away unnecessary code if this returns true.
  */
 static inline int need_skb_unmap(void)
 {
@@ -298,8 +300,10 @@ static void free_tx_desc(struct adapter *adapter, struct sge_txq *q,
 		if (d->skb) {	/* an SGL is present */
 			if (need_unmap)
 				unmap_skb(d->skb, q, cidx, pdev);
-			if (d->eop)
+			if (d->eop) {
 				kfree_skb(d->skb);
+				d->skb = NULL;
+			}
 		}
 		++d;
 		if (++cidx == q->size) {
@@ -480,6 +484,7 @@ static inline void ring_fl_db(struct adapter *adap, struct sge_fl *q)
 {
 	if (q->pend_cred >= q->credits / 4) {
 		q->pend_cred = 0;
+		wmb();
 		t3_write_reg(adap, A_SG_KDOORBELL, V_EGRCNTX(q->cntxt_id));
 	}
 }
@@ -1146,7 +1151,7 @@ static void write_tx_pkt_wr(struct adapter *adap, struct sk_buff *skb,
 	cpl->len = htonl(skb->len);
 	cntrl = V_TXPKT_INTF(pi->port_id);
 
-	if (vlan_tx_tag_present(skb) && pi->vlan_grp)
+	if (vlan_tx_tag_present(skb))
 		cntrl |= F_TXPKT_VLAN_VLD | V_TXPKT_VLAN(vlan_tx_tag_get(skb));
 
 	tso_info = V_LSO_MSS(skb_shinfo(skb)->gso_size);
@@ -1260,7 +1265,7 @@ netdev_tx_t t3_eth_xmit(struct sk_buff *skb, struct net_device *dev)
 		if (should_restart_tx(q) &&
 		    test_and_clear_bit(TXQ_ETH, &qs->txq_stopped)) {
 			q->restarts++;
-			netif_tx_wake_queue(txq);
+			netif_tx_start_queue(txq);
 		}
 	}
 
@@ -1280,7 +1285,7 @@ netdev_tx_t t3_eth_xmit(struct sk_buff *skb, struct net_device *dev)
 		qs->port_stats[SGE_PSTAT_TX_CSUM]++;
 	if (skb_shinfo(skb)->gso_size)
 		qs->port_stats[SGE_PSTAT_TSO]++;
-	if (vlan_tx_tag_present(skb) && pi->vlan_grp)
+	if (vlan_tx_tag_present(skb))
 		qs->port_stats[SGE_PSTAT_VLANINS]++;
 
 	/*
@@ -1946,10 +1951,9 @@ static void restart_tx(struct sge_qset *qs)
  *	Check if the ARP request is probing the private IP address
  *	dedicated to iSCSI, generate an ARP reply if so.
  */
-static void cxgb3_arp_process(struct adapter *adapter, struct sk_buff *skb)
+static void cxgb3_arp_process(struct port_info *pi, struct sk_buff *skb)
 {
 	struct net_device *dev = skb->dev;
-	struct port_info *pi;
 	struct arphdr *arp;
 	unsigned char *arp_ptr;
 	unsigned char *sha;
@@ -1972,18 +1976,30 @@ static void cxgb3_arp_process(struct adapter *adapter, struct sk_buff *skb)
 	arp_ptr += dev->addr_len;
 	memcpy(&tip, arp_ptr, sizeof(tip));
 
-	pi = netdev_priv(dev);
 	if (tip != pi->iscsi_ipv4addr)
 		return;
 
 	arp_send(ARPOP_REPLY, ETH_P_ARP, sip, dev, tip, sha,
-		 dev->dev_addr, sha);
+		 pi->iscsic.mac_addr, sha);
 
 }
 
 static inline int is_arp(struct sk_buff *skb)
 {
 	return skb->protocol == htons(ETH_P_ARP);
+}
+
+static void cxgb3_process_iscsi_prov_pack(struct port_info *pi,
+					struct sk_buff *skb)
+{
+	if (is_arp(skb)) {
+		cxgb3_arp_process(pi, skb);
+		return;
+	}
+
+	if (pi->iscsic.recv)
+		pi->iscsic.recv(pi, skb);
+
 }
 
 /**
@@ -2012,8 +2028,8 @@ static void rx_eth(struct adapter *adap, struct sge_rspq *rq,
 		qs->port_stats[SGE_PSTAT_RX_CSUM_GOOD]++;
 		skb->ip_summed = CHECKSUM_UNNECESSARY;
 	} else
-		skb->ip_summed = CHECKSUM_NONE;
-	skb_record_rx_queue(skb, qs - &adap->sge.qs[0]);
+		skb_checksum_none_assert(skb);
+	skb_record_rx_queue(skb, qs - &adap->sge.qs[pi->first_qset]);
 
 	if (unlikely(p->vlan_valid)) {
 		struct vlan_group *grp = pi->vlan_grp;
@@ -2024,13 +2040,12 @@ static void rx_eth(struct adapter *adap, struct sge_rspq *rq,
 				vlan_gro_receive(&qs->napi, grp,
 						 ntohs(p->vlan), skb);
 			else {
-				if (unlikely(pi->iscsi_ipv4addr &&
-				    is_arp(skb))) {
+				if (unlikely(pi->iscsic.flags)) {
 					unsigned short vtag = ntohs(p->vlan) &
 								VLAN_VID_MASK;
 					skb->dev = vlan_group_get_device(grp,
 									 vtag);
-					cxgb3_arp_process(adap, skb);
+					cxgb3_process_iscsi_prov_pack(pi, skb);
 				}
 				__vlan_hwaccel_rx(skb, grp, ntohs(p->vlan),
 					  	  rq->polling);
@@ -2041,8 +2056,8 @@ static void rx_eth(struct adapter *adap, struct sge_rspq *rq,
 		if (lro)
 			napi_gro_receive(&qs->napi, skb);
 		else {
-			if (unlikely(pi->iscsi_ipv4addr && is_arp(skb)))
-				cxgb3_arp_process(adap, skb);
+			if (unlikely(pi->iscsic.flags))
+				cxgb3_process_iscsi_prov_pack(pi, skb);
 			netif_receive_skb(skb);
 		}
 	} else
@@ -2069,6 +2084,7 @@ static void lro_add_page(struct adapter *adap, struct sge_qset *qs,
 			 struct sge_fl *fl, int len, int complete)
 {
 	struct rx_sw_desc *sd = &fl->sdesc[fl->cidx];
+	struct port_info *pi = netdev_priv(qs->netdev);
 	struct sk_buff *skb = NULL;
 	struct cpl_rx_pkt *cpl;
 	struct skb_frag_struct *rx_frag;
@@ -2106,11 +2122,18 @@ static void lro_add_page(struct adapter *adap, struct sge_qset *qs,
 
 	if (!nr_frags) {
 		offset = 2 + sizeof(struct cpl_rx_pkt);
-		qs->lro_va = sd->pg_chunk.va + 2;
-	}
-	len -= offset;
+		cpl = qs->lro_va = sd->pg_chunk.va + 2;
 
-	prefetch(qs->lro_va);
+		if ((pi->rx_offload & T3_RX_CSUM) &&
+		     cpl->csum_valid && cpl->csum == htons(0xffff)) {
+			skb->ip_summed = CHECKSUM_UNNECESSARY;
+			qs->port_stats[SGE_PSTAT_RX_CSUM_GOOD]++;
+		} else
+			skb->ip_summed = CHECKSUM_NONE;
+	} else
+		cpl = qs->lro_va;
+
+	len -= offset;
 
 	rx_frag += nr_frags;
 	rx_frag->page = sd->pg_chunk.page;
@@ -2125,12 +2148,9 @@ static void lro_add_page(struct adapter *adap, struct sge_qset *qs,
 	if (!complete)
 		return;
 
-	skb->ip_summed = CHECKSUM_UNNECESSARY;
-	cpl = qs->lro_va;
+	skb_record_rx_queue(skb, qs - &adap->sge.qs[pi->first_qset]);
 
 	if (unlikely(cpl->vlan_valid)) {
-		struct net_device *dev = qs->netdev;
-		struct port_info *pi = netdev_priv(dev);
 		struct vlan_group *grp = pi->vlan_grp;
 
 		if (likely(grp != NULL)) {
@@ -2271,11 +2291,14 @@ static int process_responses(struct adapter *adap, struct sge_qset *qs,
 	while (likely(budget_left && is_new_response(r, q))) {
 		int packet_complete, eth, ethpad = 2, lro = qs->lro_enabled;
 		struct sk_buff *skb = NULL;
-		u32 len, flags = ntohl(r->flags);
-		__be32 rss_hi = *(const __be32 *)r,
-		       rss_lo = r->rss_hdr.rss_hash_val;
+		u32 len, flags;
+		__be32 rss_hi, rss_lo;
 
+		rmb();
 		eth = r->rss_hdr.opcode == CPL_RX_PKT;
+		rss_hi = *(const __be32 *)r;
+		rss_lo = r->rss_hdr.rss_hash_val;
+		flags = ntohl(r->flags);
 
 		if (unlikely(flags & F_RSPD_ASYNC_NOTIF)) {
 			skb = alloc_skb(AN_PKT_SIZE, GFP_ATOMIC);
@@ -2486,7 +2509,10 @@ static int process_pure_responses(struct adapter *adap, struct sge_qset *qs,
 			refill_rspq(adap, q, q->credits);
 			q->credits = 0;
 		}
-	} while (is_new_response(r, q) && is_pure_response(r));
+		if (!is_new_response(r, q))
+			break;
+		rmb();
+	} while (is_pure_response(r));
 
 	if (sleeping)
 		check_ring_db(adap, qs, sleeping);
@@ -2520,6 +2546,7 @@ static inline int handle_responses(struct adapter *adap, struct sge_rspq *q)
 
 	if (!is_new_response(r, q))
 		return -1;
+	rmb();
 	if (is_pure_response(r) && process_pure_responses(adap, qs, r) == 0) {
 		t3_write_reg(adap, A_SG_GTS, V_RSPQ(q->cntxt_id) |
 			     V_NEWTIMER(q->holdoff_tmr) | V_NEWINDEX(q->cidx));
@@ -2533,7 +2560,7 @@ static inline int handle_responses(struct adapter *adap, struct sge_rspq *q)
  * The MSI-X interrupt handler for an SGE response queue for the non-NAPI case
  * (i.e., response queue serviced in hard interrupt).
  */
-irqreturn_t t3_sge_intr_msix(int irq, void *cookie)
+static irqreturn_t t3_sge_intr_msix(int irq, void *cookie)
 {
 	struct sge_qset *qs = cookie;
 	struct adapter *adap = qs->adap;
@@ -2818,8 +2845,13 @@ void t3_sge_err_intr_handler(struct adapter *adapter)
 	}
 
 	if (status & (F_HIPIODRBDROPERR | F_LOPIODRBDROPERR))
-		CH_ALERT(adapter, "SGE dropped %s priority doorbell\n",
-			 status & F_HIPIODRBDROPERR ? "high" : "lo");
+		queue_work(cxgb3_wq, &adapter->db_drop_task);
+
+	if (status & (F_HIPRIORITYDBFULL | F_LOPRIORITYDBFULL))
+		queue_work(cxgb3_wq, &adapter->db_full_task);
+
+	if (status & (F_HIPRIORITYDBEMPTY | F_LOPRIORITYDBEMPTY))
+		queue_work(cxgb3_wq, &adapter->db_empty_task);
 
 	t3_write_reg(adapter, A_SG_INT_CAUSE, status);
 	if (status &  SGE_FATALERR)
@@ -3293,41 +3325,4 @@ void t3_sge_prep(struct adapter *adap, struct sge_params *p)
 	}
 
 	spin_lock_init(&adap->sge.reg_lock);
-}
-
-/**
- *	t3_get_desc - dump an SGE descriptor for debugging purposes
- *	@qs: the queue set
- *	@qnum: identifies the specific queue (0..2: Tx, 3:response, 4..5: Rx)
- *	@idx: the descriptor index in the queue
- *	@data: where to dump the descriptor contents
- *
- *	Dumps the contents of a HW descriptor of an SGE queue.  Returns the
- *	size of the descriptor.
- */
-int t3_get_desc(const struct sge_qset *qs, unsigned int qnum, unsigned int idx,
-		unsigned char *data)
-{
-	if (qnum >= 6)
-		return -EINVAL;
-
-	if (qnum < 3) {
-		if (!qs->txq[qnum].desc || idx >= qs->txq[qnum].size)
-			return -EINVAL;
-		memcpy(data, &qs->txq[qnum].desc[idx], sizeof(struct tx_desc));
-		return sizeof(struct tx_desc);
-	}
-
-	if (qnum == 3) {
-		if (!qs->rspq.desc || idx >= qs->rspq.size)
-			return -EINVAL;
-		memcpy(data, &qs->rspq.desc[idx], sizeof(struct rsp_desc));
-		return sizeof(struct rsp_desc);
-	}
-
-	qnum -= 4;
-	if (!qs->fl[qnum].desc || idx >= qs->fl[qnum].size)
-		return -EINVAL;
-	memcpy(data, &qs->fl[qnum].desc[idx], sizeof(struct rx_desc));
-	return sizeof(struct rx_desc);
 }

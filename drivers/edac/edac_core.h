@@ -41,9 +41,11 @@
 #define MC_PROC_NAME_MAX_LEN	7
 
 #if PAGE_SHIFT < 20
-#define PAGES_TO_MiB( pages )	( ( pages ) >> ( 20 - PAGE_SHIFT ) )
+#define PAGES_TO_MiB(pages)	((pages) >> (20 - PAGE_SHIFT))
+#define MiB_TO_PAGES(mb)	((mb) << (20 - PAGE_SHIFT))
 #else				/* PAGE_SHIFT > 20 */
-#define PAGES_TO_MiB( pages )	( ( pages ) << ( PAGE_SHIFT - 20 ) )
+#define PAGES_TO_MiB(pages)	((pages) << (PAGE_SHIFT - 20))
+#define MiB_TO_PAGES(mb)	((mb) >> (PAGE_SHIFT - 20))
 #endif
 
 #define edac_printk(level, prefix, fmt, arg...) \
@@ -71,6 +73,8 @@
 #define EDAC_MC "MC"
 #define EDAC_PCI "PCI"
 #define EDAC_DEBUG "DEBUG"
+
+extern const char *edac_mem_types[];
 
 #ifdef CONFIG_EDAC_DEBUG
 extern int edac_debug_level;
@@ -340,12 +344,30 @@ struct csrow_info {
 	struct channel_info *channels;
 };
 
+struct mcidev_sysfs_group {
+	const char *name;				/* group name */
+	const struct mcidev_sysfs_attribute *mcidev_attr; /* group attributes */
+};
+
+struct mcidev_sysfs_group_kobj {
+	struct list_head list;		/* list for all instances within a mc */
+
+	struct kobject kobj;		/* kobj for the group */
+
+	const struct mcidev_sysfs_group *grp;	/* group description table */
+	struct mem_ctl_info *mci;	/* the parent */
+};
+
 /* mcidev_sysfs_attribute structure
  *	used for driver sysfs attributes and in mem_ctl_info
  * 	sysfs top level entries
  */
 struct mcidev_sysfs_attribute {
-        struct attribute attr;
+	/* It should use either attr or grp */
+	struct attribute attr;
+	const struct mcidev_sysfs_group *grp;	/* Points to a group of attributes */
+
+	/* Ops for show/store values at the attribute - not used on group */
         ssize_t (*show)(struct mem_ctl_info *,char *);
         ssize_t (*store)(struct mem_ctl_info *, const char *,size_t);
 };
@@ -374,13 +396,13 @@ struct mem_ctl_info {
 	   internal representation and configures whatever else needs
 	   to be configured.
 	 */
-	int (*set_sdram_scrub_rate) (struct mem_ctl_info * mci, u32 * bw);
+	int (*set_sdram_scrub_rate) (struct mem_ctl_info * mci, u32 bw);
 
 	/* Get the current sdram memory scrub rate from the internal
 	   representation and converts it to the closest matching
 	   bandwith in bytes/sec.
 	 */
-	int (*get_sdram_scrub_rate) (struct mem_ctl_info * mci, u32 * bw);
+	int (*get_sdram_scrub_rate) (struct mem_ctl_info * mci);
 
 
 	/* pointer to edac checking routine */
@@ -423,6 +445,9 @@ struct mem_ctl_info {
 	/* edac sysfs device control */
 	struct kobject edac_mci_kobj;
 
+	/* list for all grp instances within a mc */
+	struct list_head grp_kobj_list;
+
 	/* Additional top controller level attributes, but specified
 	 * by the low level driver.
 	 *
@@ -433,7 +458,7 @@ struct mem_ctl_info {
 	 * If attributes are desired, then set to array of attributes
 	 * If no attributes are desired, leave NULL
 	 */
-	struct mcidev_sysfs_attribute *mc_driver_sysfs_attributes;
+	const struct mcidev_sysfs_attribute *mc_driver_sysfs_attributes;
 
 	/* work struct for this MC */
 	struct delayed_work work;
@@ -803,6 +828,7 @@ extern struct mem_ctl_info *edac_mc_alloc(unsigned sz_pvt, unsigned nr_csrows,
 extern int edac_mc_add_mc(struct mem_ctl_info *mci);
 extern void edac_mc_free(struct mem_ctl_info *mci);
 extern struct mem_ctl_info *edac_mc_find(int idx);
+extern struct mem_ctl_info *find_mci_by_dev(struct device *dev);
 extern struct mem_ctl_info *edac_mc_del_mc(struct device *dev);
 extern int edac_mc_find_csrow_by_page(struct mem_ctl_info *mci,
 				      unsigned long page);

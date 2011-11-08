@@ -30,171 +30,9 @@
 #include <linux/audit.h>
 #include <linux/falloc.h>
 #include <linux/fs_struct.h>
+#include <linux/ima.h>
 
-int vfs_statfs(struct dentry *dentry, struct kstatfs *buf)
-{
-	int retval = -ENODEV;
-
-	if (dentry) {
-		retval = -ENOSYS;
-		if (dentry->d_sb->s_op->statfs) {
-			memset(buf, 0, sizeof(*buf));
-			retval = security_sb_statfs(dentry);
-			if (retval)
-				return retval;
-			retval = dentry->d_sb->s_op->statfs(dentry, buf);
-			if (retval == 0 && buf->f_frsize == 0)
-				buf->f_frsize = buf->f_bsize;
-		}
-	}
-	return retval;
-}
-
-EXPORT_SYMBOL(vfs_statfs);
-
-static int vfs_statfs_native(struct dentry *dentry, struct statfs *buf)
-{
-	struct kstatfs st;
-	int retval;
-
-	retval = vfs_statfs(dentry, &st);
-	if (retval)
-		return retval;
-
-	if (sizeof(*buf) == sizeof(st))
-		memcpy(buf, &st, sizeof(st));
-	else {
-		if (sizeof buf->f_blocks == 4) {
-			if ((st.f_blocks | st.f_bfree | st.f_bavail |
-			     st.f_bsize | st.f_frsize) &
-			    0xffffffff00000000ULL)
-				return -EOVERFLOW;
-			/*
-			 * f_files and f_ffree may be -1; it's okay to stuff
-			 * that into 32 bits
-			 */
-			if (st.f_files != -1 &&
-			    (st.f_files & 0xffffffff00000000ULL))
-				return -EOVERFLOW;
-			if (st.f_ffree != -1 &&
-			    (st.f_ffree & 0xffffffff00000000ULL))
-				return -EOVERFLOW;
-		}
-
-		buf->f_type = st.f_type;
-		buf->f_bsize = st.f_bsize;
-		buf->f_blocks = st.f_blocks;
-		buf->f_bfree = st.f_bfree;
-		buf->f_bavail = st.f_bavail;
-		buf->f_files = st.f_files;
-		buf->f_ffree = st.f_ffree;
-		buf->f_fsid = st.f_fsid;
-		buf->f_namelen = st.f_namelen;
-		buf->f_frsize = st.f_frsize;
-		memset(buf->f_spare, 0, sizeof(buf->f_spare));
-	}
-	return 0;
-}
-
-static int vfs_statfs64(struct dentry *dentry, struct statfs64 *buf)
-{
-	struct kstatfs st;
-	int retval;
-
-	retval = vfs_statfs(dentry, &st);
-	if (retval)
-		return retval;
-
-	if (sizeof(*buf) == sizeof(st))
-		memcpy(buf, &st, sizeof(st));
-	else {
-		buf->f_type = st.f_type;
-		buf->f_bsize = st.f_bsize;
-		buf->f_blocks = st.f_blocks;
-		buf->f_bfree = st.f_bfree;
-		buf->f_bavail = st.f_bavail;
-		buf->f_files = st.f_files;
-		buf->f_ffree = st.f_ffree;
-		buf->f_fsid = st.f_fsid;
-		buf->f_namelen = st.f_namelen;
-		buf->f_frsize = st.f_frsize;
-		memset(buf->f_spare, 0, sizeof(buf->f_spare));
-	}
-	return 0;
-}
-
-SYSCALL_DEFINE2(statfs, const char __user *, pathname, struct statfs __user *, buf)
-{
-	struct path path;
-	int error;
-
-	error = user_path(pathname, &path);
-	if (!error) {
-		struct statfs tmp;
-		error = vfs_statfs_native(path.dentry, &tmp);
-		if (!error && copy_to_user(buf, &tmp, sizeof(tmp)))
-			error = -EFAULT;
-		path_put(&path);
-	}
-	return error;
-}
-
-SYSCALL_DEFINE3(statfs64, const char __user *, pathname, size_t, sz, struct statfs64 __user *, buf)
-{
-	struct path path;
-	long error;
-
-	if (sz != sizeof(*buf))
-		return -EINVAL;
-	error = user_path(pathname, &path);
-	if (!error) {
-		struct statfs64 tmp;
-		error = vfs_statfs64(path.dentry, &tmp);
-		if (!error && copy_to_user(buf, &tmp, sizeof(tmp)))
-			error = -EFAULT;
-		path_put(&path);
-	}
-	return error;
-}
-
-SYSCALL_DEFINE2(fstatfs, unsigned int, fd, struct statfs __user *, buf)
-{
-	struct file * file;
-	struct statfs tmp;
-	int error;
-
-	error = -EBADF;
-	file = fget(fd);
-	if (!file)
-		goto out;
-	error = vfs_statfs_native(file->f_path.dentry, &tmp);
-	if (!error && copy_to_user(buf, &tmp, sizeof(tmp)))
-		error = -EFAULT;
-	fput(file);
-out:
-	return error;
-}
-
-SYSCALL_DEFINE3(fstatfs64, unsigned int, fd, size_t, sz, struct statfs64 __user *, buf)
-{
-	struct file * file;
-	struct statfs64 tmp;
-	int error;
-
-	if (sz != sizeof(*buf))
-		return -EINVAL;
-
-	error = -EBADF;
-	file = fget(fd);
-	if (!file)
-		goto out;
-	error = vfs_statfs64(file->f_path.dentry, &tmp);
-	if (!error && copy_to_user(buf, &tmp, sizeof(tmp)))
-		error = -EFAULT;
-	fput(file);
-out:
-	return error;
-}
+#include "internal.h"
 
 int do_truncate(struct dentry *dentry, loff_t length, unsigned int time_attrs,
 	struct file *filp)
@@ -268,7 +106,7 @@ static long do_sys_truncate(const char __user *pathname, loff_t length)
 	 * Make sure that there are no leases.  get_write_access() protects
 	 * against the truncate racing with a lease-granting setlease().
 	 */
-	error = break_lease(inode, FMODE_WRITE);
+	error = break_lease(inode, O_WRONLY);
 	if (error)
 		goto put_write_and_out;
 
@@ -805,15 +643,14 @@ static inline int __get_file_write_access(struct inode *inode,
 }
 
 static struct file *__dentry_open(struct dentry *dentry, struct vfsmount *mnt,
-					int flags, struct file *f,
+					struct file *f,
 					int (*open)(struct inode *, struct file *),
 					const struct cred *cred)
 {
 	struct inode *inode;
 	int error;
 
-	f->f_flags = flags;
-	f->f_mode = (__force fmode_t)((flags+1) & O_ACCMODE) | FMODE_LSEEK |
+	f->f_mode = (__force fmode_t)((f->f_flags+1) & O_ACCMODE) | FMODE_LSEEK |
 				FMODE_PREAD | FMODE_PWRITE;
 	inode = dentry->d_inode;
 	if (f->f_mode & FMODE_WRITE) {
@@ -842,6 +679,7 @@ static struct file *__dentry_open(struct dentry *dentry, struct vfsmount *mnt,
 		if (error)
 			goto cleanup_all;
 	}
+	ima_counts_get(f);
 
 	f->f_flags &= ~(O_CREAT | O_EXCL | O_NOCTTY | O_TRUNC);
 
@@ -913,7 +751,6 @@ struct file *lookup_instantiate_filp(struct nameidata *nd, struct dentry *dentry
 	if (IS_ERR(dentry))
 		goto out_err;
 	nd->intent.open.file = __dentry_open(dget(dentry), mntget(nd->path.mnt),
-					     nd->intent.open.flags - 1,
 					     nd->intent.open.file,
 					     open, cred);
 out:
@@ -932,7 +769,7 @@ EXPORT_SYMBOL_GPL(lookup_instantiate_filp);
  *
  * Note that this function destroys the original nameidata
  */
-struct file *nameidata_to_filp(struct nameidata *nd, int flags)
+struct file *nameidata_to_filp(struct nameidata *nd)
 {
 	const struct cred *cred = current_cred();
 	struct file *filp;
@@ -941,7 +778,7 @@ struct file *nameidata_to_filp(struct nameidata *nd, int flags)
 	filp = nd->intent.open.file;
 	/* Has the filesystem initialised the file for us? */
 	if (filp->f_path.dentry == NULL)
-		filp = __dentry_open(nd->path.dentry, nd->path.mnt, flags, filp,
+		filp = __dentry_open(nd->path.dentry, nd->path.mnt, filp,
 				     NULL, cred);
 	else
 		path_put(&nd->path);
@@ -980,7 +817,8 @@ struct file *dentry_open(struct dentry *dentry, struct vfsmount *mnt, int flags,
 		return ERR_PTR(error);
 	}
 
-	return __dentry_open(dentry, mnt, flags, f, NULL, cred);
+	f->f_flags = flags;
+	return __dentry_open(dentry, mnt, f, NULL, cred);
 }
 EXPORT_SYMBOL(dentry_open);
 

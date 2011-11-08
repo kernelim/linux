@@ -5,6 +5,7 @@
 #include <asm/ldt.h>
 #include <asm/mmu.h>
 #include <linux/smp.h>
+#include <linux/mm_types.h>
 
 static inline void fill_ldt(struct desc_struct *desc,
 			    const struct user_desc *info)
@@ -93,6 +94,9 @@ static inline int desc_empty(const void *ptr)
 
 #define load_TLS(t, cpu) native_load_tls(t, cpu)
 #define set_ldt native_set_ldt
+#ifdef CONFIG_X86_32
+#define load_user_cs_desc native_load_user_cs_desc
+#endif /*CONFIG_X86_32*/
 
 #define write_ldt_entry(dt, entry, desc)	\
 	native_write_ldt_entry(dt, entry, desc)
@@ -391,5 +395,26 @@ static inline void set_system_intr_gate_ist(int n, void *addr, unsigned ist)
 	BUG_ON((unsigned)n > 0xFF);
 	_set_gate(n, GATE_INTERRUPT, addr, 0x3, ist, __KERNEL_CS);
 }
+
+#ifdef CONFIG_X86_32
+static inline void set_user_cs(struct desc_struct *desc, unsigned long limit)
+{
+	limit = (limit - 1) / PAGE_SIZE;
+	desc->a = limit & 0xffff;
+	desc->b = (limit & 0xf0000) | 0x00c0fb00;
+}
+
+static inline void native_load_user_cs_desc(int cpu, struct mm_struct *mm)
+{
+	get_cpu_gdt_table(cpu)[GDT_ENTRY_DEFAULT_USER_CS] = (mm)->context.user_cs;
+}
+
+#define arch_add_exec_range arch_add_exec_range
+#define arch_remove_exec_range arch_remove_exec_range
+#define arch_flush_exec_range arch_flush_exec_range
+extern void arch_add_exec_range(struct mm_struct *mm, unsigned long limit);
+extern void arch_remove_exec_range(struct mm_struct *mm, unsigned long limit);
+extern void arch_flush_exec_range(struct mm_struct *mm);
+#endif /* CONFIG_X86_32 */
 
 #endif /* _ASM_X86_DESC_H */

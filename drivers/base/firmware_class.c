@@ -202,8 +202,9 @@ static ssize_t firmware_loading_store(struct device *dev,
 static DEVICE_ATTR(loading, 0644, firmware_loading_show, firmware_loading_store);
 
 static ssize_t
-firmware_data_read(struct kobject *kobj, struct bin_attribute *bin_attr,
-		   char *buffer, loff_t offset, size_t count)
+firmware_data_read(struct file *filp, struct kobject *kobj,
+		   struct bin_attribute *bin_attr, char *buffer, loff_t offset,
+		   size_t count)
 {
 	struct device *dev = to_dev(kobj);
 	struct firmware_priv *fw_priv = dev_get_drvdata(dev);
@@ -286,6 +287,7 @@ fw_realloc_buffer(struct firmware_priv *fw_priv, int min_size)
 
 /**
  * firmware_data_write - write method for firmware
+ * @filp: open sysfs file
  * @kobj: kobject for the device
  * @bin_attr: bin_attr structure
  * @buffer: buffer being written
@@ -296,8 +298,9 @@ fw_realloc_buffer(struct firmware_priv *fw_priv, int min_size)
  *	the driver as a firmware image.
  **/
 static ssize_t
-firmware_data_write(struct kobject *kobj, struct bin_attribute *bin_attr,
-		    char *buffer, loff_t offset, size_t count)
+firmware_data_write(struct file* filp, struct kobject *kobj,
+		    struct bin_attribute *bin_attr, char *buffer,
+		    loff_t offset, size_t count)
 {
 	struct device *dev = to_dev(kobj);
 	struct firmware_priv *fw_priv = dev_get_drvdata(dev);
@@ -601,12 +604,9 @@ request_firmware_work_func(void *arg)
 	}
 	ret = _request_firmware(&fw, fw_work->name, fw_work->device,
 		fw_work->uevent);
-	if (ret < 0)
-		fw_work->cont(NULL, fw_work->context);
-	else {
-		fw_work->cont(fw, fw_work->context);
-		release_firmware(fw);
-	}
+
+	fw_work->cont(fw, fw_work->context);
+
 	module_put(fw_work->module);
 	kfree(fw_work);
 	return ret;
@@ -619,6 +619,7 @@ request_firmware_work_func(void *arg)
  *	is non-zero else the firmware copy must be done manually.
  * @name: name of firmware file
  * @device: device for which firmware is being loaded
+ * @gfp: allocation flags
  * @context: will be passed over to @cont, and
  *	@fw may be %NULL if firmware request fails.
  * @cont: function will be called asynchronously when the firmware
@@ -631,12 +632,12 @@ request_firmware_work_func(void *arg)
 int
 request_firmware_nowait(
 	struct module *module, int uevent,
-	const char *name, struct device *device, void *context,
+	const char *name, struct device *device, gfp_t gfp, void *context,
 	void (*cont)(const struct firmware *fw, void *context))
 {
 	struct task_struct *task;
 	struct firmware_work *fw_work = kmalloc(sizeof (struct firmware_work),
-						GFP_ATOMIC);
+						gfp);
 
 	if (!fw_work)
 		return -ENOMEM;

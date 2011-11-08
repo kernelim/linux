@@ -11,6 +11,12 @@
 #include <linux/cpumask.h>
 #include <linux/percpu.h>
 
+struct vmemmap_backing {
+	struct vmemmap_backing *list;
+	unsigned long phys;
+	unsigned long virt_addr;
+};
+
 #ifndef CONFIG_PPC_SUBPAGE_PROT
 static inline void subpage_prot_free(pgd_t *pgd) {}
 #endif

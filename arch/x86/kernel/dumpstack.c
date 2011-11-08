@@ -18,7 +18,6 @@
 
 #include <asm/stacktrace.h>
 
-#include "dumpstack.h"
 
 int panic_on_unrecovered_nmi;
 int panic_on_io_nmi;
@@ -109,6 +108,32 @@ print_context_stack(struct thread_info *tinfo,
 	}
 	return bp;
 }
+EXPORT_SYMBOL_GPL(print_context_stack);
+
+unsigned long
+print_context_stack_bp(struct thread_info *tinfo,
+		       unsigned long *stack, unsigned long bp,
+		       const struct stacktrace_ops *ops, void *data,
+		       unsigned long *end, int *graph)
+{
+	struct stack_frame *frame = (struct stack_frame *)bp;
+	unsigned long *ret_addr = &frame->return_address;
+
+	while (valid_stack_ptr(tinfo, ret_addr, sizeof(*ret_addr), end)) {
+		unsigned long addr = *ret_addr;
+
+		if (!__kernel_text_address(addr))
+			break;
+
+		ops->address(data, addr, 1);
+		frame = frame->next_frame;
+		ret_addr = &frame->return_address;
+		print_ftrace_graph_addr(addr, data, ops, tinfo, graph);
+	}
+
+	return (unsigned long)frame;
+}
+EXPORT_SYMBOL_GPL(print_context_stack_bp);
 
 
 static void
@@ -141,29 +166,30 @@ static void print_trace_address(void *data, unsigned long addr, int reliable)
 }
 
 static const struct stacktrace_ops print_trace_ops = {
-	.warning = print_trace_warning,
-	.warning_symbol = print_trace_warning_symbol,
-	.stack = print_trace_stack,
-	.address = print_trace_address,
+	.warning		= print_trace_warning,
+	.warning_symbol		= print_trace_warning_symbol,
+	.stack			= print_trace_stack,
+	.address		= print_trace_address,
+	.walk_stack		= print_context_stack,
 };
 
 void
 show_trace_log_lvl(struct task_struct *task, struct pt_regs *regs,
-		unsigned long *stack, unsigned long bp, char *log_lvl)
+		unsigned long *stack, char *log_lvl)
 {
 	printk("%sCall Trace:\n", log_lvl);
-	dump_trace(task, regs, stack, bp, &print_trace_ops, log_lvl);
+	dump_trace(task, regs, stack, &print_trace_ops, log_lvl);
 }
 
 void show_trace(struct task_struct *task, struct pt_regs *regs,
-		unsigned long *stack, unsigned long bp)
+		unsigned long *stack)
 {
-	show_trace_log_lvl(task, regs, stack, bp, "");
+	show_trace_log_lvl(task, regs, stack, "");
 }
 
 void show_stack(struct task_struct *task, unsigned long *sp)
 {
-	show_stack_log_lvl(task, NULL, sp, 0, "");
+	show_stack_log_lvl(task, NULL, sp, "");
 }
 
 /*
@@ -171,20 +197,14 @@ void show_stack(struct task_struct *task, unsigned long *sp)
  */
 void dump_stack(void)
 {
-	unsigned long bp = 0;
 	unsigned long stack;
-
-#ifdef CONFIG_FRAME_POINTER
-	if (!bp)
-		get_bp(bp);
-#endif
 
 	printk("Pid: %d, comm: %.20s %s %s %.*s\n",
 		current->pid, current->comm, print_tainted(),
 		init_utsname()->release,
 		(int)strcspn(init_utsname()->version, " "),
 		init_utsname()->version);
-	show_trace(NULL, NULL, &stack, bp);
+	show_trace(NULL, NULL, &stack);
 }
 EXPORT_SYMBOL(dump_stack);
 
@@ -196,11 +216,6 @@ unsigned __kprobes long oops_begin(void)
 {
 	int cpu;
 	unsigned long flags;
-
-	/* notify the hw-branch tracer so it may disable tracing and
-	   add the last trace to the trace buffer -
-	   the earlier this happens, the more useful the trace. */
-	trace_hw_branch_oops();
 
 	oops_enter();
 
@@ -219,6 +234,7 @@ unsigned __kprobes long oops_begin(void)
 	bust_spinlocks(1);
 	return flags;
 }
+EXPORT_SYMBOL_GPL(oops_begin);
 
 void __kprobes oops_end(unsigned long flags, struct pt_regs *regs, int signr)
 {
@@ -268,11 +284,12 @@ int __kprobes __die(const char *str, struct pt_regs *regs, long err)
 
 	show_registers(regs);
 #ifdef CONFIG_X86_32
-	sp = (unsigned long) (&regs->sp);
-	savesegment(ss, ss);
-	if (user_mode(regs)) {
+	if (user_mode_vm(regs)) {
 		sp = regs->sp;
 		ss = regs->ss & 0xffff;
+	} else {
+		sp = kernel_stack_pointer(regs);
+		savesegment(ss, ss);
 	}
 	printk(KERN_EMERG "EIP: [<%08lx>] ", regs->ip);
 	print_symbol("%s", regs->ip);

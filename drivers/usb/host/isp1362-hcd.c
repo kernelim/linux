@@ -77,6 +77,7 @@
 #include <linux/interrupt.h>
 #include <linux/usb.h>
 #include <linux/usb/isp1362.h>
+#include <linux/usb/hcd.h>
 #include <linux/platform_device.h>
 #include <linux/pm.h>
 #include <linux/io.h>
@@ -95,7 +96,6 @@ module_param(dbg_level, int, 0);
 #define	STUB_DEBUG_FILE
 #endif
 
-#include "../core/hcd.h"
 #include "../core/usb.h"
 #include "isp1362.h"
 
@@ -1570,9 +1570,9 @@ static void isp1362_hub_descriptor(struct isp1362_hcd *isp1362_hcd,
 	desc->wHubCharacteristics = cpu_to_le16((reg >> 8) & 0x1f);
 	DBG(0, "%s: hubcharacteristics = %02x\n", __func__, cpu_to_le16((reg >> 8) & 0x1f));
 	desc->bPwrOn2PwrGood = (reg >> 24) & 0xff;
-	/* two bitmaps:  ports removable, and legacy PortPwrCtrlMask */
-	desc->bitmap[0] = desc->bNbrPorts == 1 ? 1 << 1 : 3 << 1;
-	desc->bitmap[1] = ~0;
+	/* ports removable, and legacy PortPwrCtrlMask */
+	desc->u.hs.DeviceRemovable[0] = desc->bNbrPorts == 1 ? 1 << 1 : 3 << 1;
+	desc->u.hs.DeviceRemovable[1] = ~0;
 
 	DBG(3, "%s: exit\n", __func__);
 }
@@ -2231,7 +2231,7 @@ static void create_debug_file(struct isp1362_hcd *isp1362_hcd)
 static void remove_debug_file(struct isp1362_hcd *isp1362_hcd)
 {
 	if (isp1362_hcd->pde)
-		remove_proc_entry(proc_filename, 0);
+		remove_proc_entry(proc_filename, NULL);
 }
 
 #endif
@@ -2284,10 +2284,10 @@ static int isp1362_mem_config(struct usb_hcd *hcd)
 	dev_info(hcd->self.controller, "ISP1362 Memory usage:\n");
 	dev_info(hcd->self.controller, "  ISTL:    2 * %4d:     %4d @ $%04x:$%04x\n",
 		 istl_size / 2, istl_size, 0, istl_size / 2);
-	dev_info(hcd->self.controller, "  INTL: %4d * (%3lu+8):  %4d @ $%04x\n",
+	dev_info(hcd->self.controller, "  INTL: %4d * (%3zu+8):  %4d @ $%04x\n",
 		 ISP1362_INTL_BUFFERS, intl_blksize - PTD_HEADER_SIZE,
 		 intl_size, istl_size);
-	dev_info(hcd->self.controller, "  ATL : %4d * (%3lu+8):  %4d @ $%04x\n",
+	dev_info(hcd->self.controller, "  ATL : %4d * (%3zu+8):  %4d @ $%04x\n",
 		 atl_buffers, atl_blksize - PTD_HEADER_SIZE,
 		 atl_size, istl_size + intl_size);
 	dev_info(hcd->self.controller, "  USED/FREE:   %4d      %4d\n", total,

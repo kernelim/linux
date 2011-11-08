@@ -40,7 +40,7 @@ static void gfs2_pin(struct gfs2_sbd *sdp, struct buffer_head *bh)
 {
 	struct gfs2_bufdata *bd;
 
-	gfs2_assert_withdraw(sdp, test_bit(SDF_JOURNAL_LIVE, &sdp->sd_flags));
+	BUG_ON(!current->journal_info);
 
 	clear_buffer_dirty(bh);
 	if (test_set_buffer_pinned(bh))
@@ -51,8 +51,10 @@ static void gfs2_pin(struct gfs2_sbd *sdp, struct buffer_head *bh)
 	/* If this buffer is in the AIL and it has already been written
 	 * to in-place disk block, remove it from the AIL.
 	 */
+	spin_lock(&sdp->sd_ail_lock);
 	if (bd->bd_ail)
 		list_move(&bd->bd_ail_st_list, &bd->bd_ail->ai_ail2_list);
+	spin_unlock(&sdp->sd_ail_lock);
 	get_bh(bh);
 	trace_gfs2_pin(bd, 1);
 }
@@ -62,6 +64,7 @@ static void gfs2_pin(struct gfs2_sbd *sdp, struct buffer_head *bh)
  * @sdp: the filesystem the buffer belongs to
  * @bh: The buffer to unpin
  * @ai:
+ * @flags: The inode dirty flags
  *
  */
 
@@ -70,16 +73,14 @@ static void gfs2_unpin(struct gfs2_sbd *sdp, struct buffer_head *bh,
 {
 	struct gfs2_bufdata *bd = bh->b_private;
 
-	gfs2_assert_withdraw(sdp, buffer_uptodate(bh));
-
-	if (!buffer_pinned(bh))
-		gfs2_assert_withdraw(sdp, 0);
+	BUG_ON(!buffer_uptodate(bh));
+	BUG_ON(!buffer_pinned(bh));
 
 	lock_buffer(bh);
 	mark_buffer_dirty(bh);
 	clear_buffer_pinned(bh);
 
-	gfs2_log_lock(sdp);
+	spin_lock(&sdp->sd_ail_lock);
 	if (bd->bd_ail) {
 		list_del(&bd->bd_ail_st_list);
 		brelse(bh);
@@ -90,9 +91,10 @@ static void gfs2_unpin(struct gfs2_sbd *sdp, struct buffer_head *bh,
 	}
 	bd->bd_ail = ai;
 	list_add(&bd->bd_ail_st_list, &ai->ai_ail1_list);
+	spin_unlock(&sdp->sd_ail_lock);
+
 	clear_bit(GLF_LFLUSH, &bd->bd_gl->gl_flags);
 	trace_gfs2_pin(bd, 0);
-	gfs2_log_unlock(sdp);
 	unlock_buffer(bh);
 }
 
@@ -132,6 +134,7 @@ static struct buffer_head *gfs2_get_log_desc(struct gfs2_sbd *sdp, u32 ld_type)
 static void buf_lo_add(struct gfs2_sbd *sdp, struct gfs2_log_element *le)
 {
 	struct gfs2_bufdata *bd = container_of(le, struct gfs2_bufdata, bd_le);
+	struct gfs2_meta_header *mh;
 	struct gfs2_trans *tr;
 
 	lock_buffer(bd->bd_bh);
@@ -148,6 +151,9 @@ static void buf_lo_add(struct gfs2_sbd *sdp, struct gfs2_log_element *le)
 	set_bit(GLF_DIRTY, &bd->bd_gl->gl_flags);
 	gfs2_meta_check(sdp, bd->bd_bh);
 	gfs2_pin(sdp, bd->bd_bh);
+	mh = (struct gfs2_meta_header *)bd->bd_bh->b_data;
+	mh->__pad0 = cpu_to_be64(0);
+	mh->mh_jid = cpu_to_be32(sdp->sd_jdesc->jd_jid);
 	sdp->sd_log_num_buf++;
 	list_add(&le->le_list, &sdp->sd_log_le_buf);
 	tr->tr_num_buf_new++;
@@ -312,12 +318,16 @@ static void buf_lo_after_scan(struct gfs2_jdesc *jd, int error, int pass)
 
 static void revoke_lo_add(struct gfs2_sbd *sdp, struct gfs2_log_element *le)
 {
+	struct gfs2_bufdata *bd = container_of(le, struct gfs2_bufdata, bd_le);
+	struct gfs2_glock *gl = bd->bd_gl;
 	struct gfs2_trans *tr;
 
 	tr = current->journal_info;
 	tr->tr_touched = 1;
 	tr->tr_num_revoke++;
 	sdp->sd_log_num_revoke++;
+	atomic_inc(&gl->gl_revokes);
+	set_bit(GLF_LFLUSH, &gl->gl_flags);
 	list_add(&le->le_list, &sdp->sd_log_le_revoke);
 }
 
@@ -340,9 +350,7 @@ static void revoke_lo_before_commit(struct gfs2_sbd *sdp)
 	ld->ld_data1 = cpu_to_be32(sdp->sd_log_num_revoke);
 	offset = sizeof(struct gfs2_log_descriptor);
 
-	while (!list_empty(head)) {
-		bd = list_entry(head->next, struct gfs2_bufdata, bd_le.le_list);
-		list_del_init(&bd->bd_le.le_list);
+	list_for_each_entry(bd, head, bd_le.le_list) {
 		sdp->sd_log_num_revoke--;
 
 		if (offset + sizeof(u64) > sdp->sd_sb.sb_bsize) {
@@ -357,13 +365,27 @@ static void revoke_lo_before_commit(struct gfs2_sbd *sdp)
 		}
 
 		*(__be64 *)(bh->b_data + offset) = cpu_to_be64(bd->bd_blkno);
-		kmem_cache_free(gfs2_bufdata_cachep, bd);
-
 		offset += sizeof(u64);
 	}
 	gfs2_assert_withdraw(sdp, !sdp->sd_log_num_revoke);
 
 	submit_bh(WRITE_SYNC_PLUG, bh);
+}
+
+static void revoke_lo_after_commit(struct gfs2_sbd *sdp, struct gfs2_ail *ai)
+{
+	struct list_head *head = &sdp->sd_log_le_revoke;
+	struct gfs2_bufdata *bd;
+	struct gfs2_glock *gl;
+
+	while (!list_empty(head)) {
+		bd = list_entry(head->next, struct gfs2_bufdata, bd_le.le_list);
+		list_del_init(&bd->bd_le.le_list);
+		gl = bd->bd_gl;
+		atomic_dec(&gl->gl_revokes);
+		clear_bit(GLF_LFLUSH, &gl->gl_flags);
+		kmem_cache_free(gfs2_bufdata_cachep, bd);
+	}
 }
 
 static void revoke_lo_before_scan(struct gfs2_jdesc *jd,
@@ -524,9 +546,9 @@ static void databuf_lo_add(struct gfs2_sbd *sdp, struct gfs2_log_element *le)
 		gfs2_pin(sdp, bd->bd_bh);
 		tr->tr_num_databuf_new++;
 		sdp->sd_log_num_databuf++;
-		list_add(&le->le_list, &sdp->sd_log_le_databuf);
+		list_add_tail(&le->le_list, &sdp->sd_log_le_databuf);
 	} else {
-		list_add(&le->le_list, &sdp->sd_log_le_ordered);
+		list_add_tail(&le->le_list, &sdp->sd_log_le_ordered);
 	}
 out:
 	gfs2_log_unlock(sdp);
@@ -739,6 +761,7 @@ const struct gfs2_log_operations gfs2_buf_lops = {
 const struct gfs2_log_operations gfs2_revoke_lops = {
 	.lo_add = revoke_lo_add,
 	.lo_before_commit = revoke_lo_before_commit,
+	.lo_after_commit = revoke_lo_after_commit,
 	.lo_before_scan = revoke_lo_before_scan,
 	.lo_scan_elements = revoke_lo_scan_elements,
 	.lo_after_scan = revoke_lo_after_scan,

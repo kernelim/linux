@@ -217,8 +217,8 @@ cx88_free_buffer(struct videobuf_queue *q, struct cx88_buffer *buf)
 	struct videobuf_dmabuf *dma=videobuf_to_dma(&buf->vb);
 
 	BUG_ON(in_interrupt());
-	videobuf_waiton(&buf->vb,0,0);
-	videobuf_dma_unmap(q, dma);
+	videobuf_waiton(q, &buf->vb, 0, 0);
+	videobuf_dma_unmap(q->dev, dma);
 	videobuf_dma_free(dma);
 	btcx_riscmem_free(to_pci_dev(q->dev), &buf->risc);
 	buf->vb.state = VIDEOBUF_NEEDS_INIT;
@@ -624,7 +624,7 @@ int cx88_reset(struct cx88_core *core)
 	/* setup image format */
 	cx_andor(MO_COLOR_CTRL, 0x4000, 0x4000);
 
-	/* setup FIFO Threshholds */
+	/* setup FIFO Thresholds */
 	cx_write(MO_PDMA_STHRSH,   0x0807);
 	cx_write(MO_PDMA_DTHRSH,   0x0807);
 
@@ -847,7 +847,8 @@ static int set_tvaudio(struct cx88_core *core)
 {
 	v4l2_std_id norm = core->tvnorm;
 
-	if (CX88_VMUX_TELEVISION != INPUT(core->input).type)
+	if (CX88_VMUX_TELEVISION != INPUT(core->input).type &&
+	    CX88_VMUX_CABLE != INPUT(core->input).type)
 		return 0;
 
 	if (V4L2_STD_PAL_BG & norm) {
@@ -878,7 +879,7 @@ static int set_tvaudio(struct cx88_core *core)
 	} else {
 		printk("%s/0: tvaudio support needs work for this tv norm [%s], sorry\n",
 		       core->name, v4l2_norm_to_name(core->tvnorm));
-		core->tvaudio = 0;
+		core->tvaudio = WW_NONE;
 		return 0;
 	}
 

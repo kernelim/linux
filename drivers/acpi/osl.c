@@ -38,6 +38,7 @@
 #include <linux/workqueue.h>
 #include <linux/nmi.h>
 #include <linux/acpi.h>
+#include <linux/acpi_io.h>
 #include <linux/efi.h>
 #include <linux/ioport.h>
 #include <linux/list.h>
@@ -80,7 +81,8 @@ static acpi_osd_handler acpi_irq_handler;
 static void *acpi_irq_context;
 static struct workqueue_struct *kacpid_wq;
 static struct workqueue_struct *kacpi_notify_wq;
-static struct workqueue_struct *kacpi_hotplug_wq;
+struct workqueue_struct *kacpi_hotplug_wq;
+EXPORT_SYMBOL(kacpi_hotplug_wq);
 
 struct acpi_res_list {
 	resource_size_t start;
@@ -266,8 +268,23 @@ void acpi_os_vprintf(const char *fmt, va_list args)
 #endif
 }
 
+#ifdef CONFIG_KEXEC
+static unsigned long acpi_rsdp;
+static int __init setup_acpi_rsdp(char *arg)
+{
+	acpi_rsdp = simple_strtoul(arg, NULL, 16);
+	return 0;
+}
+early_param("acpi_rsdp", setup_acpi_rsdp);
+#endif
+
 acpi_physical_address __init acpi_os_get_root_pointer(void)
 {
+#ifdef CONFIG_KEXEC
+	if (acpi_rsdp)
+		return acpi_rsdp;
+#endif
+
 	if (efi_enabled) {
 		if (efi.acpi20 != EFI_INVALID_TABLE_ADDR)
 			return efi.acpi20;
@@ -297,7 +314,7 @@ acpi_os_map_memory(acpi_physical_address phys, acpi_size size)
 		/*
 		* ioremap checks to ensure this is in reserved space
 		*/
-		return ioremap((unsigned long)phys, size);
+		return acpi_os_ioremap(phys, size);
 	else
 		return __acpi_map_table((unsigned long)phys, size);
 }
@@ -522,7 +539,7 @@ acpi_os_read_memory(acpi_physical_address phys_addr, u32 * value, u32 width)
 	u32 dummy;
 	void __iomem *virt_addr;
 
-	virt_addr = ioremap(phys_addr, width);
+	virt_addr = acpi_os_ioremap(phys_addr, width / 8);
 	if (!value)
 		value = &dummy;
 
@@ -550,7 +567,7 @@ acpi_os_write_memory(acpi_physical_address phys_addr, u32 value, u32 width)
 {
 	void __iomem *virt_addr;
 
-	virt_addr = ioremap(phys_addr, width);
+	virt_addr = acpi_os_ioremap(phys_addr, width / 8);
 
 	switch (width) {
 	case 8:

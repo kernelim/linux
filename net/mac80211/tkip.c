@@ -200,7 +200,7 @@ EXPORT_SYMBOL(ieee80211_get_tkip_key);
  * headroom of eight octets for IV and Ext. IV and taildroom of four octets
  * for ICV. @payload_len is the length of payload (_not_ including extra
  * headroom and tailroom). @ta is the transmitter addresses. */
-void ieee80211_tkip_encrypt_data(struct crypto_blkcipher *tfm,
+int ieee80211_tkip_encrypt_data(struct crypto_blkcipher *tfm,
 				 struct ieee80211_key *key,
 				 u8 *pos, size_t payload_len, u8 *ta)
 {
@@ -215,7 +215,7 @@ void ieee80211_tkip_encrypt_data(struct crypto_blkcipher *tfm,
 	tkip_mixing_phase2(tk, ctx, ctx->iv16, rc4key);
 
 	pos = ieee80211_tkip_add_iv(pos, key, key->u.tkip.tx.iv16);
-	ieee80211_wep_encrypt_data(tfm, rc4key, 16, pos, payload_len);
+	return ieee80211_wep_encrypt_data(tfm, rc4key, 16, pos, payload_len);
 }
 
 /* Decrypt packet payload with TKIP using @key. @pos is a pointer to the

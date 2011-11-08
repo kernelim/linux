@@ -272,10 +272,12 @@ static void ieee80211_rx_bss_info(struct ieee80211_sub_if_data *sdata,
 				    (unsigned long long) supp_rates,
 				    (unsigned long long) sta->sta.supp_rates[band]);
 #endif
-		} else
-			ieee80211_ibss_add_sta(sdata, mgmt->bssid, mgmt->sa, supp_rates);
-
-		rcu_read_unlock();
+			rcu_read_unlock();
+		} else {
+			rcu_read_unlock();
+			ieee80211_ibss_add_sta(sdata, mgmt->bssid, mgmt->sa,
+					       supp_rates, GFP_KERNEL);
+		}
 	}
 
 	bss = ieee80211_bss_info_update(local, rx_status, mgmt, len, elems,
@@ -367,7 +369,8 @@ static void ieee80211_rx_bss_info(struct ieee80211_sub_if_data *sdata,
 		       sdata->dev->name, mgmt->bssid);
 #endif
 		ieee80211_sta_join_ibss(sdata, bss);
-		ieee80211_ibss_add_sta(sdata, mgmt->bssid, mgmt->sa, supp_rates);
+		ieee80211_ibss_add_sta(sdata, mgmt->bssid, mgmt->sa,
+				       supp_rates, GFP_KERNEL);
 	}
 
  put_bss:
@@ -380,7 +383,8 @@ static void ieee80211_rx_bss_info(struct ieee80211_sub_if_data *sdata,
  * must be callable in atomic context.
  */
 struct sta_info *ieee80211_ibss_add_sta(struct ieee80211_sub_if_data *sdata,
-					u8 *bssid,u8 *addr, u32 supp_rates)
+					u8 *bssid,u8 *addr, u32 supp_rates,
+					gfp_t gfp)
 {
 	struct ieee80211_local *local = sdata->local;
 	struct sta_info *sta;
@@ -405,7 +409,7 @@ struct sta_info *ieee80211_ibss_add_sta(struct ieee80211_sub_if_data *sdata,
 	       wiphy_name(local->hw.wiphy), addr, sdata->dev->name);
 #endif
 
-	sta = sta_info_alloc(sdata, addr, GFP_ATOMIC);
+	sta = sta_info_alloc(sdata, addr, gfp);
 	if (!sta)
 		return NULL;
 
@@ -417,9 +421,9 @@ struct sta_info *ieee80211_ibss_add_sta(struct ieee80211_sub_if_data *sdata,
 
 	rate_control_rate_init(sta);
 
+	/* If it fails, maybe we raced another insertion? */
 	if (sta_info_insert(sta))
-		return NULL;
-
+		return sta_info_get(local, addr);
 	return sta;
 }
 
@@ -455,6 +459,10 @@ static void ieee80211_sta_merge_ibss(struct ieee80211_sub_if_data *sdata)
 
 	ieee80211_sta_expire(sdata, IEEE80211_IBSS_INACTIVITY_LIMIT);
 
+	if (time_before(jiffies, ifibss->last_scan_completed +
+		       IEEE80211_IBSS_MERGE_INTERVAL))
+		return;
+
 	if (ieee80211_sta_active_ibss(sdata))
 		return;
 
@@ -464,7 +472,9 @@ static void ieee80211_sta_merge_ibss(struct ieee80211_sub_if_data *sdata)
 	printk(KERN_DEBUG "%s: No active IBSS STAs - trying to scan for other "
 	       "IBSS networks with same SSID (merge)\n", sdata->dev->name);
 
-	ieee80211_request_internal_scan(sdata, ifibss->ssid, ifibss->ssid_len);
+	ieee80211_request_internal_scan(sdata,
+			ifibss->ssid, ifibss->ssid_len,
+			ifibss->fixed_channel ? ifibss->channel : NULL);
 }
 
 static void ieee80211_sta_create_ibss(struct ieee80211_sub_if_data *sdata)
@@ -569,8 +579,9 @@ static void ieee80211_sta_find_ibss(struct ieee80211_sub_if_data *sdata)
 		printk(KERN_DEBUG "%s: Trigger new scan to find an IBSS to "
 		       "join\n", sdata->dev->name);
 
-		ieee80211_request_internal_scan(sdata, ifibss->ssid,
-						ifibss->ssid_len);
+		ieee80211_request_internal_scan(sdata,
+				ifibss->ssid, ifibss->ssid_len,
+				ifibss->fixed_channel ? ifibss->channel : NULL);
 	} else if (ifibss->state != IEEE80211_IBSS_MLME_JOINED) {
 		int interval = IEEE80211_SCAN_INTERVAL;
 
@@ -639,7 +650,7 @@ static void ieee80211_rx_mgmt_probe_req(struct ieee80211_sub_if_data *sdata,
 	}
 	if (pos[1] != 0 &&
 	    (pos[1] != ifibss->ssid_len ||
-	     !memcmp(pos + 2, ifibss->ssid, ifibss->ssid_len))) {
+	     memcmp(pos + 2, ifibss->ssid, ifibss->ssid_len))) {
 		/* Ignore ProbeReq for foreign SSID */
 		return;
 	}

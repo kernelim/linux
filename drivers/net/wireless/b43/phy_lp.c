@@ -379,7 +379,7 @@ static void lpphy_save_dig_flt_state(struct b43_wldev *dev)
 	}
 }
 
-static void lpphy_restore_dig_flt_state(struct b43_wldev *dev)
+static void __used lpphy_restore_dig_flt_state(struct b43_wldev *dev)
 {
 	static const u16 addr[] = {
 		B43_PHY_OFDM(0xC1),
@@ -887,7 +887,7 @@ static void lpphy_rev2plus_set_rx_gain(struct b43_wldev *dev, u32 gain)
 	}
 }
 
-static void lpphy_disable_rx_gain_override(struct b43_wldev *dev)
+static void __used lpphy_disable_rx_gain_override(struct b43_wldev *dev)
 {
 	b43_phy_mask(dev, B43_LPPHY_RF_OVERRIDE_0, 0xFFFE);
 	b43_phy_mask(dev, B43_LPPHY_RF_OVERRIDE_0, 0xFFEF);

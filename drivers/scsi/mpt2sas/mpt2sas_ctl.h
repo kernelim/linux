@@ -3,7 +3,7 @@
  * controllers
  *
  * This code is based on drivers/scsi/mpt2sas/mpt2_ctl.h
- * Copyright (C) 2007-2009  LSI Corporation
+ * Copyright (C) 2007-2010  LSI Corporation
  *  (mailto:DL-MPTFusionLinux@lsi.com)
  *
  * This program is free software; you can redistribute it and/or
@@ -133,6 +133,7 @@ struct mpt2_ioctl_pci_info {
 #define MPT2_IOCTL_INTERFACE_FC_IP	(0x02)
 #define MPT2_IOCTL_INTERFACE_SAS	(0x03)
 #define MPT2_IOCTL_INTERFACE_SAS2	(0x04)
+#define MPT2_IOCTL_INTERFACE_SAS2_SSS6200	(0x05)
 #define MPT2_IOCTL_VERSION_LENGTH	(32)
 
 /**
@@ -313,7 +314,7 @@ struct mpt2_ioctl_btdh_mapping {
  * struct mpt2_diag_register - application register with driver
  * @hdr - generic header
  * @reserved -
- * @buffer_type - specifies either TRACE or SNAPSHOT
+ * @buffer_type - specifies either TRACE, SNAPSHOT, or EXTENDED
  * @application_flags - misc flags
  * @diagnostic_flags - specifies flags affecting command processing
  * @product_specific - product specific information
@@ -352,7 +353,7 @@ struct mpt2_diag_unregister {
  * struct mpt2_diag_query - query relevant info associated with diag buffers
  * @hdr - generic header
  * @reserved -
- * @buffer_type - specifies either TRACE or SNAPSHOT
+ * @buffer_type - specifies either TRACE, SNAPSHOT, or EXTENDED
  * @application_flags - misc flags
  * @diagnostic_flags - specifies flags affecting command processing
  * @product_specific - product specific information

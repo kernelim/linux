@@ -25,11 +25,11 @@
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/usb.h>
+#include <linux/usb/hcd.h>
 #include <linux/of_platform.h>
 #include <linux/of_gpio.h>
 #include <asm/qe.h>
 #include <asm/fsl_gtm.h>
-#include "../core/hcd.h"
 #include "fhci.h"
 
 void fhci_start_sof_timer(struct fhci_hcd *fhci)

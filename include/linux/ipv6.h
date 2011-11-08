@@ -333,6 +333,9 @@ struct ipv6_pinfo {
 				odstopts:1,
                                 rxflow:1,
 				rxtclass:1;
+#ifndef __GENKSYMS__
+			__u8	rxorigdstaddr:1;
+#endif
 		} bits;
 		__u16		all;
 	} rxopt;

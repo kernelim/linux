@@ -11,10 +11,6 @@
 #include <linux/time.h>
 #include <linux/slab.h>
 #include <linux/smp_lock.h>
-#include <linux/in.h>
-#include <linux/sunrpc/svc.h>
-#include <linux/sunrpc/clnt.h>
-#include <linux/nfsd/nfsd.h>
 #include <linux/lockd/lockd.h>
 #include <linux/lockd/share.h>
 
@@ -235,9 +231,7 @@ static void nlm4svc_callback_exit(struct rpc_task *task, void *data)
 
 static void nlm4svc_callback_release(void *data)
 {
-	lock_kernel();
 	nlm_release_call(data);
-	unlock_kernel();
 }
 
 static const struct rpc_call_ops nlm4svc_callback_ops = {

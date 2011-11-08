@@ -43,6 +43,7 @@
 
 #include <linux/if_vlan.h>
 #include <linux/pci.h>
+#include <linux/slab.h>
 #include <linux/tcp.h>
 #include <net/ip.h>
 #include <linux/netdevice.h>
@@ -54,7 +55,7 @@ MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("Neterion's X3100 Series 10GbE PCIe I/O"
 	"Virtualized Server Adapter");
 
-static struct pci_device_id vxge_id_table[] __devinitdata = {
+static DEFINE_PCI_DEVICE_TABLE(vxge_id_table) = {
 	{PCI_VENDOR_ID_S2IO, PCI_DEVICE_ID_TITAN_WIN, PCI_ANY_ID,
 	PCI_ANY_ID},
 	{PCI_VENDOR_ID_S2IO, PCI_DEVICE_ID_TITAN_UNI, PCI_ANY_ID,
@@ -310,7 +311,7 @@ static int vxge_rx_map(void *dtrh, struct vxge_ring *ring)
 	dma_addr = pci_map_single(ring->pdev, rx_priv->skb_data,
 				rx_priv->data_size, PCI_DMA_FROMDEVICE);
 
-	if (dma_addr == 0) {
+	if (unlikely(pci_dma_mapping_error(ring->pdev, dma_addr))) {
 		ring->stats.pci_map_fail++;
 		return -EIO;
 	}
@@ -444,7 +445,7 @@ vxge_rx_1b_compl(struct __vxge_hw_ring *ringh, void *dtr,
 		ring->ndev->name, __func__, __LINE__);
 	ring->pkts_processed = 0;
 
-	vxge_hw_ring_replenish(ringh, 0);
+	vxge_hw_ring_replenish(ringh);
 
 	do {
 		prefetch((char *)dtr + L1_CACHE_BYTES);
@@ -1365,28 +1366,26 @@ static int vxge_set_mac_addr(struct net_device *dev, void *p)
 void vxge_vpath_intr_enable(struct vxgedev *vdev, int vp_id)
 {
 	struct vxge_vpath *vpath = &vdev->vpaths[vp_id];
-	int msix_id, alarm_msix_id;
-	int tim_msix_id[4] = {[0 ...3] = 0};
+	int msix_id = 0;
+	int tim_msix_id[4] = {0, 1, 0, 0};
+	int alarm_msix_id = VXGE_ALARM_MSIX_ID;
 
 	vxge_hw_vpath_intr_enable(vpath->handle);
 
 	if (vdev->config.intr_type == INTA)
 		vxge_hw_vpath_inta_unmask_tx_rx(vpath->handle);
 	else {
-		msix_id = vp_id * VXGE_HW_VPATH_MSIX_ACTIVE;
-		alarm_msix_id =
-			VXGE_HW_VPATH_MSIX_ACTIVE * vdev->no_of_vpath - 2;
-
-		tim_msix_id[0] = msix_id;
-		tim_msix_id[1] = msix_id + 1;
 		vxge_hw_vpath_msix_set(vpath->handle, tim_msix_id,
 			alarm_msix_id);
 
+		msix_id = vpath->device_id * VXGE_HW_VPATH_MSIX_ACTIVE;
 		vxge_hw_vpath_msix_unmask(vpath->handle, msix_id);
 		vxge_hw_vpath_msix_unmask(vpath->handle, msix_id + 1);
 
 		/* enable the alarm vector */
-		vxge_hw_vpath_msix_unmask(vpath->handle, alarm_msix_id);
+		msix_id = (vpath->handle->vpath->hldev->first_vp_id *
+			VXGE_HW_VPATH_MSIX_ACTIVE) + alarm_msix_id;
+		vxge_hw_vpath_msix_unmask(vpath->handle, msix_id);
 	}
 }
 
@@ -1407,12 +1406,13 @@ void vxge_vpath_intr_disable(struct vxgedev *vdev, int vp_id)
 	if (vdev->config.intr_type == INTA)
 		vxge_hw_vpath_inta_mask_tx_rx(vpath->handle);
 	else {
-		msix_id = vp_id * VXGE_HW_VPATH_MSIX_ACTIVE;
+		msix_id = vpath->device_id * VXGE_HW_VPATH_MSIX_ACTIVE;
 		vxge_hw_vpath_msix_mask(vpath->handle, msix_id);
 		vxge_hw_vpath_msix_mask(vpath->handle, msix_id + 1);
 
 		/* disable the alarm vector */
-		msix_id = VXGE_HW_VPATH_MSIX_ACTIVE * vdev->no_of_vpath - 2;
+		msix_id = (vpath->handle->vpath->hldev->first_vp_id *
+			VXGE_HW_VPATH_MSIX_ACTIVE) + VXGE_ALARM_MSIX_ID;
 		vxge_hw_vpath_msix_mask(vpath->handle, msix_id);
 	}
 }
@@ -2225,19 +2225,18 @@ vxge_alarm_msix_handle(int irq, void *dev_id)
 	enum vxge_hw_status status;
 	struct vxge_vpath *vpath = (struct vxge_vpath *)dev_id;
 	struct vxgedev *vdev = vpath->vdev;
-	int alarm_msix_id =
-		VXGE_HW_VPATH_MSIX_ACTIVE * vdev->no_of_vpath - 2;
+	int msix_id = (vpath->handle->vpath->vp_id *
+		VXGE_HW_VPATH_MSIX_ACTIVE) + VXGE_ALARM_MSIX_ID;
 
 	for (i = 0; i < vdev->no_of_vpath; i++) {
-		vxge_hw_vpath_msix_mask(vdev->vpaths[i].handle,
-			alarm_msix_id);
+		vxge_hw_vpath_msix_mask(vdev->vpaths[i].handle, msix_id);
 
 		status = vxge_hw_vpath_alarm_process(vdev->vpaths[i].handle,
 			vdev->exec_mode);
 		if (status == VXGE_HW_OK) {
 
 			vxge_hw_vpath_msix_unmask(vdev->vpaths[i].handle,
-				alarm_msix_id);
+					msix_id);
 			continue;
 		}
 		vxge_debug_intr(VXGE_ERR,
@@ -2250,38 +2249,37 @@ vxge_alarm_msix_handle(int irq, void *dev_id)
 static int vxge_alloc_msix(struct vxgedev *vdev)
 {
 	int j, i, ret = 0;
-	int intr_cnt = 0;
-	int alarm_msix_id = 0, msix_intr_vect = 0;
+	int msix_intr_vect = 0, temp;
 	vdev->intr_cnt = 0;
 
+start:
 	/* Tx/Rx MSIX Vectors count */
 	vdev->intr_cnt = vdev->no_of_vpath * 2;
 
 	/* Alarm MSIX Vectors count */
 	vdev->intr_cnt++;
 
-	intr_cnt = (vdev->max_vpath_supported * 2) + 1;
-	vdev->entries = kzalloc(intr_cnt * sizeof(struct msix_entry),
+	vdev->entries = kzalloc(vdev->intr_cnt * sizeof(struct msix_entry),
 						GFP_KERNEL);
 	if (!vdev->entries) {
 		vxge_debug_init(VXGE_ERR,
 			"%s: memory allocation failed",
 			VXGE_DRIVER_NAME);
-		return  -ENOMEM;
+		ret = -ENOMEM;
+		goto alloc_entries_failed;
 	}
 
-	vdev->vxge_entries = kzalloc(intr_cnt * sizeof(struct vxge_msix_entry),
-							GFP_KERNEL);
+	vdev->vxge_entries =
+		kzalloc(vdev->intr_cnt * sizeof(struct vxge_msix_entry),
+				GFP_KERNEL);
 	if (!vdev->vxge_entries) {
 		vxge_debug_init(VXGE_ERR, "%s: memory allocation failed",
 			VXGE_DRIVER_NAME);
-		kfree(vdev->entries);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto alloc_vxge_entries_failed;
 	}
 
-	/* Last vector in the list is used for alarm */
-	alarm_msix_id = VXGE_HW_VPATH_MSIX_ACTIVE * vdev->no_of_vpath - 2;
-	for (i = 0, j = 0; i < vdev->max_vpath_supported; i++) {
+	for (i = 0, j = 0; i < vdev->no_of_vpath; i++) {
 
 		msix_intr_vect = i * VXGE_HW_VPATH_MSIX_ACTIVE;
 
@@ -2299,91 +2297,68 @@ static int vxge_alloc_msix(struct vxgedev *vdev)
 	}
 
 	/* Initialize the alarm vector */
-	vdev->entries[j].entry = alarm_msix_id;
-	vdev->vxge_entries[j].entry = alarm_msix_id;
+	vdev->entries[j].entry = VXGE_ALARM_MSIX_ID;
+	vdev->vxge_entries[j].entry = VXGE_ALARM_MSIX_ID;
 	vdev->vxge_entries[j].in_use = 0;
 
-	ret = pci_enable_msix(vdev->pdev, vdev->entries, intr_cnt);
-	/* if driver request exceeeds available irq's, request with a small
-	 * number.
-	*/
+	ret = pci_enable_msix(vdev->pdev, vdev->entries, vdev->intr_cnt);
+
 	if (ret > 0) {
 		vxge_debug_init(VXGE_ERR,
-			"%s: MSI-X enable failed for %d vectors, available: %d",
-			VXGE_DRIVER_NAME, intr_cnt, ret);
-		vdev->max_vpath_supported = vdev->no_of_vpath;
-		intr_cnt = (vdev->max_vpath_supported * 2) + 1;
-
-		/* Reset the alarm vector setting */
-		vdev->entries[j].entry = 0;
-		vdev->vxge_entries[j].entry = 0;
-
-		/* Initialize the alarm vector with new setting */
-		vdev->entries[intr_cnt - 1].entry = alarm_msix_id;
-		vdev->vxge_entries[intr_cnt - 1].entry = alarm_msix_id;
-		vdev->vxge_entries[intr_cnt - 1].in_use = 0;
-
-		ret = pci_enable_msix(vdev->pdev, vdev->entries, intr_cnt);
-		if (!ret)
-			vxge_debug_init(VXGE_ERR,
-				"%s: MSI-X enabled for %d vectors",
-				VXGE_DRIVER_NAME, intr_cnt);
-	}
-
-	if (ret) {
-		vxge_debug_init(VXGE_ERR,
 			"%s: MSI-X enable failed for %d vectors, ret: %d",
-			VXGE_DRIVER_NAME, intr_cnt, ret);
+			VXGE_DRIVER_NAME, vdev->intr_cnt, ret);
+		if ((max_config_vpath != VXGE_USE_DEFAULT) || (ret < 3)) {
+			ret = -ENODEV;
+			goto enable_msix_failed;
+		}
+
 		kfree(vdev->entries);
 		kfree(vdev->vxge_entries);
 		vdev->entries = NULL;
 		vdev->vxge_entries = NULL;
-		return -ENODEV;
+		/* Try with less no of vector by reducing no of vpaths count */
+		temp = (ret - 1)/2;
+		vxge_close_vpaths(vdev, temp);
+		vdev->no_of_vpath = temp;
+		goto start;
+	} else if (ret < 0) {
+		ret = -ENODEV;
+		goto enable_msix_failed;
 	}
 	return 0;
+
+enable_msix_failed:
+	kfree(vdev->vxge_entries);
+alloc_vxge_entries_failed:
+	kfree(vdev->entries);
+alloc_entries_failed:
+	return ret;
 }
 
 static int vxge_enable_msix(struct vxgedev *vdev)
 {
 
 	int i, ret = 0;
-	enum vxge_hw_status status;
 	/* 0 - Tx, 1 - Rx  */
-	int tim_msix_id[4];
-	int alarm_msix_id = 0, msix_intr_vect = 0;
+	int tim_msix_id[4] = {0, 1, 0, 0};
+
 	vdev->intr_cnt = 0;
 
 	/* allocate msix vectors */
 	ret = vxge_alloc_msix(vdev);
 	if (!ret) {
-		/* Last vector in the list is used for alarm */
-		alarm_msix_id =
-			VXGE_HW_VPATH_MSIX_ACTIVE * vdev->no_of_vpath - 2;
 		for (i = 0; i < vdev->no_of_vpath; i++) {
 
 			/* If fifo or ring are not enabled
 			   the MSIX vector for that should be set to 0
 			   Hence initializeing this array to all 0s.
 			*/
-			memset(tim_msix_id, 0, sizeof(tim_msix_id));
-			msix_intr_vect = i * VXGE_HW_VPATH_MSIX_ACTIVE;
-			tim_msix_id[0] = msix_intr_vect;
+			vdev->vpaths[i].ring.rx_vector_no =
+				(vdev->vpaths[i].device_id *
+					VXGE_HW_VPATH_MSIX_ACTIVE) + 1;
 
-			tim_msix_id[1] = msix_intr_vect + 1;
-			vdev->vpaths[i].ring.rx_vector_no = tim_msix_id[1];
-
-			status = vxge_hw_vpath_msix_set(
-						vdev->vpaths[i].handle,
-						tim_msix_id, alarm_msix_id);
-			if (status != VXGE_HW_OK) {
-				vxge_debug_init(VXGE_ERR,
-					"vxge_hw_vpath_msix_set "
-					"failed with status : %x", status);
-				kfree(vdev->entries);
-				kfree(vdev->vxge_entries);
-				pci_disable_msix(vdev->pdev);
-				return -ENODEV;
-			}
+			vxge_hw_vpath_msix_set(vdev->vpaths[i].handle,
+					tim_msix_id, VXGE_ALARM_MSIX_ID);
 		}
 	}
 
@@ -2394,7 +2369,7 @@ static void vxge_rem_msix_isr(struct vxgedev *vdev)
 {
 	int intr_cnt;
 
-	for (intr_cnt = 0; intr_cnt < (vdev->max_vpath_supported * 2 + 1);
+	for (intr_cnt = 0; intr_cnt < (vdev->no_of_vpath * 2 + 1);
 		intr_cnt++) {
 		if (vdev->vxge_entries[intr_cnt].in_use) {
 			synchronize_irq(vdev->entries[intr_cnt].vector);
@@ -2435,7 +2410,6 @@ static int vxge_add_isr(struct vxgedev *vdev)
 	int ret = 0;
 #ifdef CONFIG_PCI_MSI
 	int vp_idx = 0, intr_idx = 0, intr_cnt = 0, msix_idx = 0, irq_req = 0;
-	u64 function_mode = vdev->config.device_hw_info.function_mode;
 	int pci_fun = PCI_FUNC(vdev->pdev->devfn);
 
 	if (vdev->config.intr_type == MSI_X)
@@ -2444,20 +2418,9 @@ static int vxge_add_isr(struct vxgedev *vdev)
 	if (ret) {
 		vxge_debug_init(VXGE_ERR,
 			"%s: Enabling MSI-X Failed", VXGE_DRIVER_NAME);
-		if ((function_mode == VXGE_HW_FUNCTION_MODE_MULTI_FUNCTION) &&
-			test_and_set_bit(__VXGE_STATE_CARD_UP,
-				&driver_config->inta_dev_open))
-			return VXGE_HW_FAIL;
-		else {
-			vxge_debug_init(VXGE_ERR,
-				"%s: Defaulting to INTA", VXGE_DRIVER_NAME);
-			vdev->config.intr_type = INTA;
-			vxge_hw_device_set_intr_type(vdev->devh,
-				VXGE_HW_INTR_MODE_IRQLINE);
-			vxge_close_vpaths(vdev, 1);
-			vdev->no_of_vpath = 1;
-			vdev->stats.vpaths_open = 1;
-		}
+		vxge_debug_init(VXGE_ERR,
+			"%s: Defaulting to INTA", VXGE_DRIVER_NAME);
+		vdev->config.intr_type = INTA;
 	}
 
 	if (vdev->config.intr_type == MSI_X) {
@@ -2471,9 +2434,10 @@ static int vxge_add_isr(struct vxgedev *vdev)
 			switch (msix_idx) {
 			case 0:
 				snprintf(vdev->desc[intr_cnt], VXGE_INTR_STRLEN,
-					"%s:vxge fn: %d vpath: %d Tx MSI-X: %d",
-					vdev->ndev->name, pci_fun, vp_idx,
-					vdev->entries[intr_cnt].entry);
+				"%s:vxge:MSI-X %d - Tx - fn:%d vpath:%d",
+					vdev->ndev->name,
+					vdev->entries[intr_cnt].entry,
+					pci_fun, vp_idx);
 				ret = request_irq(
 				    vdev->entries[intr_cnt].vector,
 					vxge_tx_msix_handle, 0,
@@ -2485,9 +2449,10 @@ static int vxge_add_isr(struct vxgedev *vdev)
 				break;
 			case 1:
 				snprintf(vdev->desc[intr_cnt], VXGE_INTR_STRLEN,
-					"%s:vxge fn: %d vpath: %d Rx MSI-X: %d",
-					vdev->ndev->name, pci_fun, vp_idx,
-					vdev->entries[intr_cnt].entry);
+				"%s:vxge:MSI-X %d - Rx - fn:%d vpath:%d",
+					vdev->ndev->name,
+					vdev->entries[intr_cnt].entry,
+					pci_fun, vp_idx);
 				ret = request_irq(
 				    vdev->entries[intr_cnt].vector,
 					vxge_rx_msix_napi_handle,
@@ -2505,85 +2470,70 @@ static int vxge_add_isr(struct vxgedev *vdev)
 					"%s: MSIX - %d  Registration failed",
 					vdev->ndev->name, intr_cnt);
 				vxge_rem_msix_isr(vdev);
-				if ((function_mode ==
-					VXGE_HW_FUNCTION_MODE_MULTI_FUNCTION) &&
-					test_and_set_bit(__VXGE_STATE_CARD_UP,
-						&driver_config->inta_dev_open))
-					return VXGE_HW_FAIL;
-				else {
-					vxge_hw_device_set_intr_type(
-						vdev->devh,
-						VXGE_HW_INTR_MODE_IRQLINE);
-						vdev->config.intr_type = INTA;
-					vxge_debug_init(VXGE_ERR,
-						"%s: Defaulting to INTA"
-						, vdev->ndev->name);
-					vxge_close_vpaths(vdev, 1);
-					vdev->no_of_vpath = 1;
-					vdev->stats.vpaths_open = 1;
+				vdev->config.intr_type = INTA;
+				vxge_debug_init(VXGE_ERR,
+					"%s: Defaulting to INTA"
+					, vdev->ndev->name);
 					goto INTA_MODE;
-				}
 			}
 
 			if (irq_req) {
 				/* We requested for this msix interrupt */
 				vdev->vxge_entries[intr_cnt].in_use = 1;
+				msix_idx +=  vdev->vpaths[vp_idx].device_id *
+					VXGE_HW_VPATH_MSIX_ACTIVE;
 				vxge_hw_vpath_msix_unmask(
 					vdev->vpaths[vp_idx].handle,
-					intr_idx);
+					msix_idx);
 				intr_cnt++;
 			}
 
 			/* Point to next vpath handler */
-			if (((intr_idx + 1) % VXGE_HW_VPATH_MSIX_ACTIVE == 0)
-				&& (vp_idx < (vdev->no_of_vpath - 1)))
-					vp_idx++;
+			if (((intr_idx + 1) % VXGE_HW_VPATH_MSIX_ACTIVE == 0) &&
+			    (vp_idx < (vdev->no_of_vpath - 1)))
+				vp_idx++;
 		}
 
-		intr_cnt = vdev->max_vpath_supported * 2;
+		intr_cnt = vdev->no_of_vpath * 2;
 		snprintf(vdev->desc[intr_cnt], VXGE_INTR_STRLEN,
-			"%s:vxge Alarm fn: %d MSI-X: %d",
-			vdev->ndev->name, pci_fun,
-			vdev->entries[intr_cnt].entry);
+			"%s:vxge:MSI-X %d - Alarm - fn:%d",
+			vdev->ndev->name,
+			vdev->entries[intr_cnt].entry,
+			pci_fun);
 		/* For Alarm interrupts */
 		ret = request_irq(vdev->entries[intr_cnt].vector,
 					vxge_alarm_msix_handle, 0,
 					vdev->desc[intr_cnt],
-					&vdev->vpaths[vp_idx]);
+					&vdev->vpaths[0]);
 		if (ret) {
 			vxge_debug_init(VXGE_ERR,
 				"%s: MSIX - %d Registration failed",
 				vdev->ndev->name, intr_cnt);
 			vxge_rem_msix_isr(vdev);
-			if ((function_mode ==
-				VXGE_HW_FUNCTION_MODE_MULTI_FUNCTION) &&
-				test_and_set_bit(__VXGE_STATE_CARD_UP,
-						&driver_config->inta_dev_open))
-				return VXGE_HW_FAIL;
-			else {
-				vxge_hw_device_set_intr_type(vdev->devh,
-						VXGE_HW_INTR_MODE_IRQLINE);
-				vdev->config.intr_type = INTA;
-				vxge_debug_init(VXGE_ERR,
-					"%s: Defaulting to INTA",
-					vdev->ndev->name);
-				vxge_close_vpaths(vdev, 1);
-				vdev->no_of_vpath = 1;
-				vdev->stats.vpaths_open = 1;
+			vdev->config.intr_type = INTA;
+			vxge_debug_init(VXGE_ERR,
+				"%s: Defaulting to INTA",
+				vdev->ndev->name);
 				goto INTA_MODE;
-			}
 		}
 
+		msix_idx = (vdev->vpaths[0].handle->vpath->vp_id *
+			VXGE_HW_VPATH_MSIX_ACTIVE) + VXGE_ALARM_MSIX_ID;
 		vxge_hw_vpath_msix_unmask(vdev->vpaths[vp_idx].handle,
-					intr_idx - 2);
+					msix_idx);
 		vdev->vxge_entries[intr_cnt].in_use = 1;
-		vdev->vxge_entries[intr_cnt].arg = &vdev->vpaths[vp_idx];
+		vdev->vxge_entries[intr_cnt].arg = &vdev->vpaths[0];
 	}
 INTA_MODE:
 #endif
-	snprintf(vdev->desc[0], VXGE_INTR_STRLEN, "%s:vxge", vdev->ndev->name);
 
 	if (vdev->config.intr_type == INTA) {
+		snprintf(vdev->desc[0], VXGE_INTR_STRLEN,
+			"%s:vxge:INTA", vdev->ndev->name);
+		vxge_hw_device_set_intr_type(vdev->devh,
+			VXGE_HW_INTR_MODE_IRQLINE);
+		vxge_hw_vpath_tti_ci_set(vdev->devh,
+			vdev->vpaths[0].device_id);
 		ret = request_irq((int) vdev->pdev->irq,
 			vxge_isr_napi,
 			IRQF_SHARED, vdev->desc[0], vdev);
@@ -2687,13 +2637,6 @@ vxge_open(struct net_device *dev)
 	/* make sure you have link off by default every time Nic is
 	 * initialized */
 	netif_carrier_off(dev);
-
-	/* Check for another device already opn with INTA */
-	if ((function_mode == VXGE_HW_FUNCTION_MODE_MULTI_FUNCTION) &&
-		test_bit(__VXGE_STATE_CARD_UP, &driver_config->inta_dev_open)) {
-		ret = -EPERM;
-		goto out0;
-	}
 
 	/* Open VPATHs */
 	status = vxge_open_vpaths(vdev);
@@ -2983,7 +2926,6 @@ int do_vxge_close(struct net_device *dev, int do_io)
 	vxge_debug_entryexit(VXGE_TRACE,
 		"%s: %s:%d  Exiting...", dev->name, __func__, __LINE__);
 
-	clear_bit(__VXGE_STATE_CARD_UP, &driver_config->inta_dev_open);
 	clear_bit(__VXGE_STATE_RESET_CARD, &vdev->state);
 
 	return 0;
@@ -3653,11 +3595,12 @@ static int __devinit vxge_config_vpaths(
 		device_config->vp_config[i].fifo.enable =
 						VXGE_HW_FIFO_ENABLE;
 		device_config->vp_config[i].fifo.max_frags =
-				MAX_SKB_FRAGS;
+				MAX_SKB_FRAGS + 1;
 		device_config->vp_config[i].fifo.memblock_size =
 			VXGE_HW_MIN_FIFO_MEMBLOCK_SIZE;
 
-		txdl_size = MAX_SKB_FRAGS * sizeof(struct vxge_hw_fifo_txd);
+		txdl_size = device_config->vp_config[i].fifo.max_frags *
+				sizeof(struct vxge_hw_fifo_txd);
 		txdl_per_memblock = VXGE_HW_MIN_FIFO_MEMBLOCK_SIZE / txdl_size;
 
 		device_config->vp_config[i].fifo.fifo_blocks =
@@ -4036,6 +3979,50 @@ static void vxge_io_resume(struct pci_dev *pdev)
 	netif_device_attach(netdev);
 }
 
+static inline u32 vxge_get_num_vfs(u64 function_mode)
+{
+	u32 num_functions = 0;
+
+	switch (function_mode) {
+	case VXGE_HW_FUNCTION_MODE_MULTI_FUNCTION:
+	case VXGE_HW_FUNCTION_MODE_SRIOV_8:
+		num_functions = 8;
+		break;
+	case VXGE_HW_FUNCTION_MODE_SINGLE_FUNCTION:
+		num_functions = 1;
+		break;
+	case VXGE_HW_FUNCTION_MODE_SRIOV:
+	case VXGE_HW_FUNCTION_MODE_MRIOV:
+	case VXGE_HW_FUNCTION_MODE_MULTI_FUNCTION_17:
+		num_functions = 17;
+		break;
+	case VXGE_HW_FUNCTION_MODE_SRIOV_4:
+		num_functions = 4;
+		break;
+	case VXGE_HW_FUNCTION_MODE_MULTI_FUNCTION_2:
+		num_functions = 2;
+		break;
+	case VXGE_HW_FUNCTION_MODE_MRIOV_8:
+		num_functions = 8; /* TODO */
+		break;
+	}
+	return num_functions;
+}
+
+static int __devinit is_sriov_initialized(struct pci_dev *pdev)
+{
+	int pos;
+	u16 ctrl;
+
+	pos = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_SRIOV);
+	if (pos) {
+		pci_read_config_word(pdev, pos + PCI_SRIOV_CTRL, &ctrl);
+		if (ctrl & PCI_SRIOV_CTRL_VFE)
+			return 1;
+	}
+	return 0;
+}
+
 /**
  * vxge_probe
  * @pdev : structure containing the PCI related information of the device.
@@ -4056,21 +4043,26 @@ vxge_probe(struct pci_dev *pdev, const struct pci_device_id *pre)
 	int high_dma = 0;
 	u64 vpath_mask = 0;
 	struct vxgedev *vdev;
-	struct vxge_config ll_config;
+	struct vxge_config *ll_config = NULL;
 	struct vxge_hw_device_config *device_config = NULL;
 	struct vxge_hw_device_attr attr;
 	int i, j, no_of_vpath = 0, max_vpath_supported = 0;
 	u8 *macaddr;
 	struct vxge_mac_addrs *entry;
 	static int bus = -1, device = -1;
+	u32 host_type;
 	u8 new_device = 0;
+	enum vxge_hw_status is_privileged;
+	u32 function_mode;
+	u32 num_vfs = 0;
 
 	vxge_debug_entryexit(VXGE_TRACE, "%s:%d", __func__, __LINE__);
 	attr.pdev = pdev;
 
-	if (bus != pdev->bus->number)
-		new_device = 1;
-	if (device != PCI_SLOT(pdev->devfn))
+	/* In SRIOV-17 mode, functions of the same adapter
+	 * can be deployed on different buses */
+	if ((!pdev->is_virtfn) && ((bus != pdev->bus->number) ||
+		(device != PCI_SLOT(pdev->devfn))))
 		new_device = 1;
 
 	bus = pdev->bus->number;
@@ -4087,9 +4079,12 @@ vxge_probe(struct pci_dev *pdev, const struct pci_device_id *pre)
 				driver_config->total_dev_cnt);
 		driver_config->config_dev_cnt = 0;
 		driver_config->total_dev_cnt = 0;
-		driver_config->g_no_cpus = 0;
-		driver_config->vpath_per_dev = max_config_vpath;
 	}
+	/* Now making the CPU based no of vpath calculation
+	 * applicable for individual functions as well.
+	 */
+	driver_config->g_no_cpus = 0;
+	driver_config->vpath_per_dev = max_config_vpath;
 
 	driver_config->total_dev_cnt++;
 	if (++driver_config->config_dev_cnt > max_config_dev) {
@@ -4107,17 +4102,24 @@ vxge_probe(struct pci_dev *pdev, const struct pci_device_id *pre)
 		goto _exit0;
 	}
 
-	memset(&ll_config, 0, sizeof(struct vxge_config));
-	ll_config.tx_steering_type = TX_MULTIQ_STEERING;
-	ll_config.intr_type = MSI_X;
-	ll_config.napi_weight = NEW_NAPI_WEIGHT;
-	ll_config.rth_steering = RTH_STEERING;
+	ll_config = kzalloc(sizeof(*ll_config), GFP_KERNEL);
+	if (!ll_config) {
+		ret = -ENOMEM;
+		vxge_debug_init(VXGE_ERR,
+			"ll_config : malloc failed %s %d",
+			__FILE__, __LINE__);
+		goto _exit0;
+	}
+	ll_config->tx_steering_type = TX_MULTIQ_STEERING;
+	ll_config->intr_type = MSI_X;
+	ll_config->napi_weight = NEW_NAPI_WEIGHT;
+	ll_config->rth_steering = RTH_STEERING;
 
 	/* get the default configuration parameters */
 	vxge_hw_device_config_default_get(device_config);
 
 	/* initialize configuration parameters */
-	vxge_device_config_init(device_config, &ll_config.intr_type);
+	vxge_device_config_init(device_config, &ll_config->intr_type);
 
 	ret = pci_enable_device(pdev);
 	if (ret) {
@@ -4126,21 +4128,21 @@ vxge_probe(struct pci_dev *pdev, const struct pci_device_id *pre)
 		goto _exit0;
 	}
 
-	if (!pci_set_dma_mask(pdev, 0xffffffffffffffffULL)) {
+	if (!pci_set_dma_mask(pdev, DMA_BIT_MASK(64))) {
 		vxge_debug_ll_config(VXGE_TRACE,
 			"%s : using 64bit DMA", __func__);
 
 		high_dma = 1;
 
 		if (pci_set_consistent_dma_mask(pdev,
-						0xffffffffffffffffULL)) {
+						DMA_BIT_MASK(64))) {
 			vxge_debug_init(VXGE_ERR,
 				"%s : unable to obtain 64bit DMA for "
 				"consistent allocations", __func__);
 			ret = -ENOMEM;
 			goto _exit1;
 		}
-	} else if (!pci_set_dma_mask(pdev, 0xffffffffUL)) {
+	} else if (!pci_set_dma_mask(pdev, DMA_BIT_MASK(32))) {
 		vxge_debug_ll_config(VXGE_TRACE,
 			"%s : using 32bit DMA", __func__);
 	} else {
@@ -4170,7 +4172,7 @@ vxge_probe(struct pci_dev *pdev, const struct pci_device_id *pre)
 		(unsigned long long)pci_resource_start(pdev, 0));
 
 	status = vxge_hw_device_hw_info_get(attr.bar0,
-			&ll_config.device_hw_info);
+			&ll_config->device_hw_info);
 	if (status != VXGE_HW_OK) {
 		vxge_debug_init(VXGE_ERR,
 			"%s: Reading of hardware info failed."
@@ -4179,7 +4181,7 @@ vxge_probe(struct pci_dev *pdev, const struct pci_device_id *pre)
 		goto _exit3;
 	}
 
-	if (ll_config.device_hw_info.fw_version.major !=
+	if (ll_config->device_hw_info.fw_version.major !=
 		VXGE_DRIVER_FW_VERSION_MAJOR) {
 		vxge_debug_init(VXGE_ERR,
 			"%s: Incorrect firmware version."
@@ -4189,7 +4191,7 @@ vxge_probe(struct pci_dev *pdev, const struct pci_device_id *pre)
 		goto _exit3;
 	}
 
-	vpath_mask = ll_config.device_hw_info.vpath_mask;
+	vpath_mask = ll_config->device_hw_info.vpath_mask;
 	if (vpath_mask == 0) {
 		vxge_debug_ll_config(VXGE_TRACE,
 			"%s: No vpaths available in device", VXGE_DRIVER_NAME);
@@ -4201,6 +4203,11 @@ vxge_probe(struct pci_dev *pdev, const struct pci_device_id *pre)
 		"%s:%d  Vpath mask = %llx", __func__, __LINE__,
 		(unsigned long long)vpath_mask);
 
+	function_mode = ll_config->device_hw_info.function_mode;
+	host_type = ll_config->device_hw_info.host_type;
+	is_privileged = __vxge_hw_device_is_privilaged(host_type,
+		ll_config->device_hw_info.func_id);
+
 	/* Check how many vpaths are available */
 	for (i = 0; i < VXGE_HW_MAX_VIRTUAL_PATHS; i++) {
 		if (!((vpath_mask) & vxge_mBIT(i)))
@@ -4208,21 +4215,31 @@ vxge_probe(struct pci_dev *pdev, const struct pci_device_id *pre)
 		max_vpath_supported++;
 	}
 
+	if (new_device)
+		num_vfs = vxge_get_num_vfs(function_mode) - 1;
+
 	/* Enable SRIOV mode, if firmware has SRIOV support and if it is a PF */
-	if ((VXGE_HW_FUNCTION_MODE_SRIOV ==
-		ll_config.device_hw_info.function_mode) &&
-		(max_config_dev > 1) && (pdev->is_physfn)) {
-			ret = pci_enable_sriov(pdev, max_config_dev - 1);
+	if (is_sriov(function_mode) && ll_config->intr_type != INTA) {
+		int initialized = is_sriov_initialized(pdev);
+		if (initialized && pci_num_vf(pdev) != num_vfs) {
+			pci_disable_sriov(pdev);
+			initialized = 0;
+		}
+		if (!initialized) {
+			ret = pci_enable_sriov(pdev, num_vfs);
 			if (ret)
 				vxge_debug_ll_config(VXGE_ERR,
-					"Failed to enable SRIOV: %d \n", ret);
+					"Failed in enabling SRIOV mode: %d\n",
+					ret);
+			/* No need to fail out, as an error here is non-fatal */
+		}
 	}
 
 	/*
 	 * Configure vpaths and get driver configured number of vpaths
 	 * which is less than or equal to the maximum vpaths per function.
 	 */
-	no_of_vpath = vxge_config_vpaths(device_config, vpath_mask, &ll_config);
+	no_of_vpath = vxge_config_vpaths(device_config, vpath_mask, ll_config);
 	if (!no_of_vpath) {
 		vxge_debug_ll_config(VXGE_ERR,
 			"%s: No more vpaths to configure", VXGE_DRIVER_NAME);
@@ -4243,26 +4260,35 @@ vxge_probe(struct pci_dev *pdev, const struct pci_device_id *pre)
 			goto _exit3;
 	}
 
+	/* if FCS stripping is not disabled in MAC fail driver load */
+	if (vxge_hw_vpath_strip_fcs_check(hldev, vpath_mask) != VXGE_HW_OK) {
+		vxge_debug_init(VXGE_ERR,
+			"%s: FCS stripping is not disabled in MAC"
+			" failing driver load", VXGE_DRIVER_NAME);
+		ret = -EINVAL;
+		goto _exit4;
+	}
+
 	vxge_hw_device_debug_set(hldev, VXGE_ERR, VXGE_COMPONENT_LL);
 
 	/* set private device info */
 	pci_set_drvdata(pdev, hldev);
 
-	ll_config.gro_enable = VXGE_GRO_ALWAYS_AGGREGATE;
-	ll_config.fifo_indicate_max_pkts = VXGE_FIFO_INDICATE_MAX_PKTS;
-	ll_config.addr_learn_en = addr_learn_en;
-	ll_config.rth_algorithm = RTH_ALG_JENKINS;
-	ll_config.rth_hash_type_tcpipv4 = VXGE_HW_RING_HASH_TYPE_TCP_IPV4;
-	ll_config.rth_hash_type_ipv4 = VXGE_HW_RING_HASH_TYPE_NONE;
-	ll_config.rth_hash_type_tcpipv6 = VXGE_HW_RING_HASH_TYPE_NONE;
-	ll_config.rth_hash_type_ipv6 = VXGE_HW_RING_HASH_TYPE_NONE;
-	ll_config.rth_hash_type_tcpipv6ex = VXGE_HW_RING_HASH_TYPE_NONE;
-	ll_config.rth_hash_type_ipv6ex = VXGE_HW_RING_HASH_TYPE_NONE;
-	ll_config.rth_bkt_sz = RTH_BUCKET_SIZE;
-	ll_config.tx_pause_enable = VXGE_PAUSE_CTRL_ENABLE;
-	ll_config.rx_pause_enable = VXGE_PAUSE_CTRL_ENABLE;
+	ll_config->gro_enable = VXGE_GRO_ALWAYS_AGGREGATE;
+	ll_config->fifo_indicate_max_pkts = VXGE_FIFO_INDICATE_MAX_PKTS;
+	ll_config->addr_learn_en = addr_learn_en;
+	ll_config->rth_algorithm = RTH_ALG_JENKINS;
+	ll_config->rth_hash_type_tcpipv4 = VXGE_HW_RING_HASH_TYPE_TCP_IPV4;
+	ll_config->rth_hash_type_ipv4 = VXGE_HW_RING_HASH_TYPE_NONE;
+	ll_config->rth_hash_type_tcpipv6 = VXGE_HW_RING_HASH_TYPE_NONE;
+	ll_config->rth_hash_type_ipv6 = VXGE_HW_RING_HASH_TYPE_NONE;
+	ll_config->rth_hash_type_tcpipv6ex = VXGE_HW_RING_HASH_TYPE_NONE;
+	ll_config->rth_hash_type_ipv6ex = VXGE_HW_RING_HASH_TYPE_NONE;
+	ll_config->rth_bkt_sz = RTH_BUCKET_SIZE;
+	ll_config->tx_pause_enable = VXGE_PAUSE_CTRL_ENABLE;
+	ll_config->rx_pause_enable = VXGE_PAUSE_CTRL_ENABLE;
 
-	if (vxge_device_register(hldev, &ll_config, high_dma, no_of_vpath,
+	if (vxge_device_register(hldev, ll_config, high_dma, no_of_vpath,
 		&vdev)) {
 		ret = -EINVAL;
 		goto _exit4;
@@ -4293,7 +4319,7 @@ vxge_probe(struct pci_dev *pdev, const struct pci_device_id *pre)
 		vdev->vpaths[j].vdev = vdev;
 		vdev->vpaths[j].max_mac_addr_cnt = max_mac_vpath;
 		memcpy((u8 *)vdev->vpaths[j].macaddr,
-				(u8 *)ll_config.device_hw_info.mac_addrs[i],
+				ll_config->device_hw_info.mac_addrs[i],
 				ETH_ALEN);
 
 		/* Initialize the mac address list header */
@@ -4314,34 +4340,32 @@ vxge_probe(struct pci_dev *pdev, const struct pci_device_id *pre)
 
 	macaddr = (u8 *)vdev->vpaths[0].macaddr;
 
-	ll_config.device_hw_info.serial_number[VXGE_HW_INFO_LEN - 1] = '\0';
-	ll_config.device_hw_info.product_desc[VXGE_HW_INFO_LEN - 1] = '\0';
-	ll_config.device_hw_info.part_number[VXGE_HW_INFO_LEN - 1] = '\0';
+	ll_config->device_hw_info.serial_number[VXGE_HW_INFO_LEN - 1] = '\0';
+	ll_config->device_hw_info.product_desc[VXGE_HW_INFO_LEN - 1] = '\0';
+	ll_config->device_hw_info.part_number[VXGE_HW_INFO_LEN - 1] = '\0';
 
 	vxge_debug_init(VXGE_TRACE, "%s: SERIAL NUMBER: %s",
-		vdev->ndev->name, ll_config.device_hw_info.serial_number);
+		vdev->ndev->name, ll_config->device_hw_info.serial_number);
 
 	vxge_debug_init(VXGE_TRACE, "%s: PART NUMBER: %s",
-		vdev->ndev->name, ll_config.device_hw_info.part_number);
+		vdev->ndev->name, ll_config->device_hw_info.part_number);
 
 	vxge_debug_init(VXGE_TRACE, "%s: Neterion %s Server Adapter",
-		vdev->ndev->name, ll_config.device_hw_info.product_desc);
+		vdev->ndev->name, ll_config->device_hw_info.product_desc);
 
-	vxge_debug_init(VXGE_TRACE,
-		"%s: MAC ADDR: %02X:%02X:%02X:%02X:%02X:%02X",
-		vdev->ndev->name, macaddr[0], macaddr[1], macaddr[2],
-		macaddr[3], macaddr[4], macaddr[5]);
+	vxge_debug_init(VXGE_TRACE, "%s: MAC ADDR: %pM",
+		vdev->ndev->name, macaddr);
 
 	vxge_debug_init(VXGE_TRACE, "%s: Link Width x%d",
 		vdev->ndev->name, vxge_hw_device_link_width_get(hldev));
 
 	vxge_debug_init(VXGE_TRACE,
 		"%s: Firmware version : %s Date : %s", vdev->ndev->name,
-		ll_config.device_hw_info.fw_version.version,
-		ll_config.device_hw_info.fw_date.date);
+		ll_config->device_hw_info.fw_version.version,
+		ll_config->device_hw_info.fw_date.date);
 
 	if (new_device) {
-		switch (ll_config.device_hw_info.function_mode) {
+		switch (ll_config->device_hw_info.function_mode) {
 		case VXGE_HW_FUNCTION_MODE_SINGLE_FUNCTION:
 			vxge_debug_init(VXGE_TRACE,
 			"%s: Single Function Mode Enabled", vdev->ndev->name);
@@ -4364,7 +4388,7 @@ vxge_probe(struct pci_dev *pdev, const struct pci_device_id *pre)
 	vxge_print_parm(vdev, vpath_mask);
 
 	/* Store the fw version for ethttool option */
-	strcpy(vdev->fw_version, ll_config.device_hw_info.fw_version.version);
+	strcpy(vdev->fw_version, ll_config->device_hw_info.fw_version.version);
 	memcpy(vdev->ndev->dev_addr, (u8 *)vdev->vpaths[0].macaddr, ETH_ALEN);
 	memcpy(vdev->ndev->perm_addr, vdev->ndev->dev_addr, ETH_ALEN);
 
@@ -4387,6 +4411,27 @@ vxge_probe(struct pci_dev *pdev, const struct pci_device_id *pre)
 	}
 
 	kfree(device_config);
+
+	/*
+	 * INTA is shared in multi-function mode. This is unlike the INTA
+	 * implementation in MR mode, where each VH has its own INTA message.
+	 * - INTA is masked (disabled) as long as at least one function sets
+	 * its TITAN_MASK_ALL_INT.ALARM bit.
+	 * - INTA is unmasked (enabled) when all enabled functions have cleared
+	 * their own TITAN_MASK_ALL_INT.ALARM bit.
+	 * The TITAN_MASK_ALL_INT ALARM & TRAFFIC bits are cleared on power up.
+	 * Though this driver leaves the top level interrupts unmasked while
+	 * leaving the required module interrupt bits masked on exit, there
+	 * could be a rougue driver around that does not follow this procedure
+	 * resulting in a failure to generate interrupts. The following code is
+	 * present to prevent such a failure.
+	 */
+
+	if (ll_config->device_hw_info.function_mode ==
+		VXGE_HW_FUNCTION_MODE_MULTI_FUNCTION)
+		if (vdev->config.intr_type == INTA)
+			vxge_hw_device_unmask_all(hldev);
+
 	vxge_debug_entryexit(VXGE_TRACE, "%s: %s:%d  Exiting...",
 		vdev->ndev->name, __func__, __LINE__);
 
@@ -4394,6 +4439,7 @@ vxge_probe(struct pci_dev *pdev, const struct pci_device_id *pre)
 	VXGE_COPY_DEBUG_INFO_TO_LL(vdev, vxge_hw_device_error_level_get(hldev),
 		vxge_hw_device_trace_level_get(hldev));
 
+	kfree(ll_config);
 	return 0;
 
 _exit5:
@@ -4402,7 +4448,6 @@ _exit5:
 
 	vxge_device_unregister(hldev);
 _exit4:
-	pci_disable_sriov(pdev);
 	vxge_hw_device_terminate(hldev);
 _exit3:
 	iounmap(attr.bar0);
@@ -4411,6 +4456,7 @@ _exit2:
 _exit1:
 	pci_disable_device(pdev);
 _exit0:
+	kfree(ll_config);
 	kfree(device_config);
 	driver_config->config_dev_cnt--;
 	pci_set_drvdata(pdev, NULL);
@@ -4462,8 +4508,6 @@ vxge_remove(struct pci_dev *pdev)
 	kfree(vdev->vpaths);
 
 	iounmap(vdev->bar0);
-
-	pci_disable_sriov(pdev);
 
 	/* we are safe to free it now */
 	free_netdev(dev);

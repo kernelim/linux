@@ -84,6 +84,7 @@ static int proc_handler_callhome(struct ctl_table *ctl, int write,
 		rc = copy_from_user(buf, buffer, sizeof(buf));
 		if (rc != 0)
 			return -EFAULT;
+		buf[sizeof(buf) - 1] = '\0';
 		if (strict_strtoul(buf, 0, &val) != 0)
 			return -EINVAL;
 		if (val != 0 && val != 1)
@@ -135,11 +136,7 @@ static int sclp_async_send_wait(char *message)
 	request->sccb = sccb;
 	request->status = SCLP_REQ_FILLED;
 	strncpy(sccb->evbuf.data, message, sizeof(sccb->evbuf.data));
-	/*
-	 * Retain Queue
-	 * e.g. 5639CC140 500 Red Hat RHEL5 Linux for zSeries (RHEL AS)
-	 */
-	strncpy(sccb->evbuf.comp_id, "000000000", sizeof(sccb->evbuf.comp_id));
+	strncpy(sccb->evbuf.comp_id, "5639H7CH0", sizeof(sccb->evbuf.comp_id));
 	sccb->evbuf.header.length = sizeof(sccb->evbuf);
 	sccb->header.length = sizeof(sccb->evbuf) + sizeof(sccb->header);
 	sccb->header.function_code = SCLP_NORMAL_WRITE;

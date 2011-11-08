@@ -240,10 +240,16 @@ static int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 
 int kvm_apic_set_irq(struct kvm_vcpu *vcpu, struct kvm_lapic_irq *irq)
 {
+	int result;
 	struct kvm_lapic *apic = vcpu->arch.apic;
 
-	return __apic_accept_irq(apic, irq->delivery_mode, irq->vector,
+	result = __apic_accept_irq(apic, irq->delivery_mode, irq->vector,
 			irq->level, irq->trig_mode);
+
+	if (!kvm_vcpu_is_bsp(apic->vcpu) && !irq->trig_mode)
+		result = 0;
+
+	return result;
 }
 
 static inline int apic_find_highest_isr(struct kvm_lapic *apic)
@@ -374,6 +380,12 @@ static int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 		if (unlikely(!apic_enabled(apic)))
 			break;
 
+		if (trig_mode) {
+			apic_debug("level trig mode for vector %d", vector);
+			apic_set_vector(vector, apic->regs + APIC_TMR);
+		} else
+			apic_clear_vector(vector, apic->regs + APIC_TMR);
+
 		result = !apic_test_and_set_irr(vector, apic);
 		trace_kvm_apic_accept_irq(vcpu->vcpu_id, delivery_mode,
 					  trig_mode, vector, !result);
@@ -384,11 +396,6 @@ static int __apic_accept_irq(struct kvm_lapic *apic, int delivery_mode,
 			break;
 		}
 
-		if (trig_mode) {
-			apic_debug("level trig mode for vector %d", vector);
-			apic_set_vector(vector, apic->regs + APIC_TMR);
-		} else
-			apic_clear_vector(vector, apic->regs + APIC_TMR);
 		kvm_vcpu_kick(vcpu);
 		break;
 
@@ -471,11 +478,8 @@ static void apic_set_eoi(struct kvm_lapic *apic)
 		trigger_mode = IOAPIC_LEVEL_TRIG;
 	else
 		trigger_mode = IOAPIC_EDGE_TRIG;
-	if (!(apic_get_reg(apic, APIC_SPIV) & APIC_SPIV_DIRECTED_EOI)) {
-		mutex_lock(&apic->vcpu->kvm->irq_lock);
+	if (!(apic_get_reg(apic, APIC_SPIV) & APIC_SPIV_DIRECTED_EOI))
 		kvm_ioapic_update_eoi(apic->vcpu->kvm, vector, trigger_mode);
-		mutex_unlock(&apic->vcpu->kvm->irq_lock);
-	}
 }
 
 static void apic_send_ipi(struct kvm_lapic *apic)
@@ -504,9 +508,7 @@ static void apic_send_ipi(struct kvm_lapic *apic)
 		   irq.trig_mode, irq.level, irq.dest_mode, irq.delivery_mode,
 		   irq.vector);
 
-	mutex_lock(&apic->vcpu->kvm->irq_lock);
 	kvm_irq_delivery_to_apic(apic->vcpu->kvm, apic, &irq);
-	mutex_unlock(&apic->vcpu->kvm->irq_lock);
 }
 
 static u32 apic_get_tmcct(struct kvm_lapic *apic)
@@ -1110,13 +1112,11 @@ int kvm_apic_accept_pic_intr(struct kvm_vcpu *vcpu)
 	u32 lvt0 = apic_get_reg(vcpu->arch.apic, APIC_LVT0);
 	int r = 0;
 
-	if (kvm_vcpu_is_bsp(vcpu)) {
-		if (!apic_hw_enabled(vcpu->arch.apic))
-			r = 1;
-		if ((lvt0 & APIC_LVT_MASKED) == 0 &&
-		    GET_APIC_DELIVERY_MODE(lvt0) == APIC_MODE_EXTINT)
-			r = 1;
-	}
+	if (!apic_hw_enabled(vcpu->arch.apic))
+		r = 1;
+	if ((lvt0 & APIC_LVT_MASKED) == 0 &&
+	    GET_APIC_DELIVERY_MODE(lvt0) == APIC_MODE_EXTINT)
+		r = 1;
 	return r;
 }
 
@@ -1156,6 +1156,7 @@ void kvm_apic_post_state_restore(struct kvm_vcpu *vcpu)
 	hrtimer_cancel(&apic->lapic_timer.timer);
 	update_divide_count(apic);
 	start_apic_timer(apic);
+	apic->irr_pending = true;
 }
 
 void __kvm_migrate_apic_timer(struct kvm_vcpu *vcpu)

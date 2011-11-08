@@ -39,7 +39,7 @@ static int ext4_release_dir(struct inode *inode,
 				struct file *filp);
 
 const struct file_operations ext4_dir_operations = {
-	.llseek		= generic_file_llseek,
+	.llseek		= ext4_llseek,
 	.read		= generic_read_dir,
 	.readdir	= ext4_readdir,		/* we take BKL. needed?*/
 	.unlocked_ioctl = ext4_ioctl,
@@ -70,26 +70,29 @@ int ext4_check_dir_entry(const char *function, struct inode *dir,
 	const int rlen = ext4_rec_len_from_disk(de->rec_len,
 						dir->i_sb->s_blocksize);
 
-	if (rlen < EXT4_DIR_REC_LEN(1))
+	if (unlikely(rlen < EXT4_DIR_REC_LEN(1)))
 		error_msg = "rec_len is smaller than minimal";
-	else if (rlen % 4 != 0)
+	else if (unlikely(rlen % 4 != 0))
 		error_msg = "rec_len % 4 != 0";
-	else if (rlen < EXT4_DIR_REC_LEN(de->name_len))
+	else if (unlikely(rlen < EXT4_DIR_REC_LEN(de->name_len)))
 		error_msg = "rec_len is too small for name_len";
-	else if (((char *) de - bh->b_data) + rlen > dir->i_sb->s_blocksize)
+	else if (unlikely(((char *) de - bh->b_data) + rlen > dir->i_sb->s_blocksize))
 		error_msg = "directory entry across blocks";
-	else if (le32_to_cpu(de->inode) >
-			le32_to_cpu(EXT4_SB(dir->i_sb)->s_es->s_inodes_count))
+	else if (unlikely(le32_to_cpu(de->inode) >
+			le32_to_cpu(EXT4_SB(dir->i_sb)->s_es->s_inodes_count)))
 		error_msg = "inode out of bounds";
+	else
+		return 1;
 
-	if (error_msg != NULL)
-		ext4_error(dir->i_sb, function,
-			"bad entry in directory #%lu: %s - "
-			"offset=%u, inode=%u, rec_len=%d, name_len=%d",
-			dir->i_ino, error_msg, offset,
-			le32_to_cpu(de->inode),
-			rlen, de->name_len);
-	return error_msg == NULL ? 1 : 0;
+	__ext4_error(dir->i_sb, function,
+		"bad entry in directory #%lu: %s - block=%llu"
+		"offset=%u(%u), inode=%u, rec_len=%d, name_len=%d",
+		dir->i_ino, error_msg, 
+		(unsigned long long) bh->b_blocknr,     
+		(unsigned) (offset%bh->b_size), offset,
+		le32_to_cpu(de->inode),
+		rlen, de->name_len);
+	return 0;
 }
 
 static int ext4_readdir(struct file *filp,
@@ -109,7 +112,7 @@ static int ext4_readdir(struct file *filp,
 
 	if (EXT4_HAS_COMPAT_FEATURE(inode->i_sb,
 				    EXT4_FEATURE_COMPAT_DIR_INDEX) &&
-	    ((EXT4_I(inode)->i_flags & EXT4_INDEX_FL) ||
+	    ((ext4_test_inode_flag(inode, EXT4_INODE_INDEX)) ||
 	     ((inode->i_size >> sb->s_blocksize_bits) == 1))) {
 		err = ext4_dx_readdir(filp, dirent, filldir);
 		if (err != ERR_BAD_DX_DIR) {
@@ -120,7 +123,8 @@ static int ext4_readdir(struct file *filp,
 		 * We don't set the inode dirty flag since it's not
 		 * critical that it get flushed back to the disk.
 		 */
-		EXT4_I(filp->f_path.dentry->d_inode)->i_flags &= ~EXT4_INDEX_FL;
+		ext4_clear_inode_flag(filp->f_path.dentry->d_inode,
+				      EXT4_INODE_INDEX);
 	}
 	stored = 0;
 	offset = filp->f_pos & (sb->s_blocksize - 1);
@@ -150,7 +154,7 @@ static int ext4_readdir(struct file *filp,
 		 */
 		if (!bh) {
 			if (!dir_has_error) {
-				ext4_error(sb, __func__, "directory #%lu "
+				ext4_error(sb, "directory #%lu "
 					   "contains a hole at offset %Lu",
 					   inode->i_ino,
 					   (unsigned long long) filp->f_pos);
@@ -303,7 +307,7 @@ static void free_rb_tree_fname(struct rb_root *root)
 			kfree(old);
 		}
 		if (!parent)
-			root->rb_node = NULL;
+			*root = RB_ROOT;
 		else if (parent->rb_left == n)
 			parent->rb_left = NULL;
 		else if (parent->rb_right == n)

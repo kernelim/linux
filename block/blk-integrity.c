@@ -29,6 +29,8 @@
 
 static struct kmem_cache *integrity_cachep;
 
+static const char *bi_unsupported_name = "unsupported";
+
 /**
  * blk_rq_count_integrity_sg - Count number of integrity scatterlist elements
  * @rq:		request with integrity metadata attached
@@ -278,7 +280,7 @@ static struct attribute *integrity_attrs[] = {
 	NULL,
 };
 
-static struct sysfs_ops integrity_ops = {
+static const struct sysfs_ops integrity_ops = {
 	.show	= &integrity_attr_show,
 	.store	= &integrity_attr_store,
 };
@@ -306,6 +308,14 @@ static struct kobj_type integrity_ktype = {
 	.release	= blk_integrity_release,
 };
 
+bool blk_integrity_is_initialized(struct gendisk *disk)
+{
+	struct blk_integrity *bi = blk_get_integrity(disk);
+
+	return (bi && bi->name && strcmp(bi->name, bi_unsupported_name) != 0);
+}
+EXPORT_SYMBOL(blk_integrity_is_initialized);
+
 /**
  * blk_integrity_register - Register a gendisk as being integrity-capable
  * @disk:	struct gendisk pointer to make integrity-aware
@@ -321,8 +331,14 @@ static struct kobj_type integrity_ktype = {
 int blk_integrity_register(struct gendisk *disk, struct blk_integrity *template)
 {
 	struct blk_integrity *bi;
+	static bool seen = false;
 
 	BUG_ON(disk == NULL);
+
+	if (!seen) {
+		mark_tech_preview("DIF/DIX support", NULL);
+		seen = true;
+	}
 
 	if (disk->integrity == NULL) {
 		bi = kmem_cache_alloc(integrity_cachep,
@@ -355,7 +371,7 @@ int blk_integrity_register(struct gendisk *disk, struct blk_integrity *template)
 		bi->get_tag_fn = template->get_tag_fn;
 		bi->tag_size = template->tag_size;
 	} else
-		bi->name = "unsupported";
+		bi->name = bi_unsupported_name;
 
 	return 0;
 }
@@ -380,7 +396,6 @@ void blk_integrity_unregister(struct gendisk *disk)
 	kobject_uevent(&bi->kobj, KOBJ_REMOVE);
 	kobject_del(&bi->kobj);
 	kobject_put(&bi->kobj);
-	kmem_cache_free(integrity_cachep, bi);
 	disk->integrity = NULL;
 }
 EXPORT_SYMBOL(blk_integrity_unregister);

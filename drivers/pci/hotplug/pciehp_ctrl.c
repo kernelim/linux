@@ -228,6 +228,9 @@ static int board_added(struct slot *p_slot)
 		return retval;
 	}
 
+	/* Wait for 1 second after checking link training status */
+	msleep(1000);
+
 	/* Check for a power fault */
 	if (pciehp_query_power_fault(p_slot)) {
 		ctrl_dbg(ctrl, "Power fault detected\n");

@@ -34,12 +34,15 @@ zfcp_qdio_sbale(struct zfcp_qdio_queue *q, int sbal_idx, int sbale_idx)
 	return &q->sbal[sbal_idx]->element[sbale_idx];
 }
 
-static void zfcp_qdio_handler_error(struct zfcp_qdio *qdio, char *id)
+static void zfcp_qdio_handler_error(struct zfcp_qdio *qdio, char *id,
+				    unsigned int qdio_err)
 {
 	struct zfcp_adapter *adapter = qdio->adapter;
 
 	dev_warn(&adapter->ccw_device->dev, "A QDIO problem occurred\n");
 
+	if (qdio_err & QDIO_ERROR_SLSB_STATE)
+		zfcp_qdio_siosl(adapter);
 	zfcp_erp_adapter_reopen(adapter,
 				ZFCP_STATUS_ADAPTER_LINK_UNPLUGGED |
 				ZFCP_STATUS_COMMON_ERP_FAILED, id, NULL);
@@ -81,7 +84,7 @@ static void zfcp_qdio_int_req(struct ccw_device *cdev, unsigned int qdio_err,
 	if (unlikely(qdio_err)) {
 		zfcp_dbf_hba_qdio(qdio->adapter->dbf, qdio_err, first,
 					count);
-		zfcp_qdio_handler_error(qdio, "qdireq1");
+		zfcp_qdio_handler_error(qdio, "qdireq1", qdio_err);
 		return;
 	}
 
@@ -124,7 +127,7 @@ static void zfcp_qdio_int_resp(struct ccw_device *cdev, unsigned int qdio_err,
 	if (unlikely(qdio_err)) {
 		zfcp_dbf_hba_qdio(qdio->adapter->dbf, qdio_err, first,
 					count);
-		zfcp_qdio_handler_error(qdio, "qdires1");
+		zfcp_qdio_handler_error(qdio, "qdires1", qdio_err);
 		return;
 	}
 
@@ -335,15 +338,11 @@ int zfcp_qdio_send(struct zfcp_qdio *qdio, struct zfcp_queue_req *q_req)
 static void zfcp_qdio_setup_init_data(struct qdio_initialize *id,
 				      struct zfcp_qdio *qdio)
 {
-
+	memset(id, 0, sizeof(*id));
 	id->cdev = qdio->adapter->ccw_device;
 	id->q_format = QDIO_ZFCP_QFMT;
 	memcpy(id->adapter_name, dev_name(&id->cdev->dev), 8);
 	ASCEBC(id->adapter_name, 8);
-	id->qib_param_field_format = 0;
-	id->qib_param_field = NULL;
-	id->input_slib_elements = NULL;
-	id->output_slib_elements = NULL;
 	id->no_input_qs = 1;
 	id->no_output_qs = 1;
 	id->input_handler = zfcp_qdio_int_resp;
@@ -392,6 +391,8 @@ void zfcp_qdio_close(struct zfcp_qdio *qdio)
 	atomic_clear_mask(ZFCP_STATUS_ADAPTER_QDIOUP, &qdio->adapter->status);
 	spin_unlock_bh(&qdio->req_q_lock);
 
+	wake_up(&qdio->req_q_wq);
+
 	qdio_shutdown(qdio->adapter->ccw_device,
 		      QDIO_FLAG_CLEANUP_USING_CLEAR);
 
@@ -422,6 +423,9 @@ int zfcp_qdio_open(struct zfcp_qdio *qdio)
 
 	if (atomic_read(&qdio->adapter->status) & ZFCP_STATUS_ADAPTER_QDIOUP)
 		return -EIO;
+
+	atomic_clear_mask(ZFCP_STATUS_ADAPTER_SIOSL_ISSUED,
+			  &qdio->adapter->status);
 
 	zfcp_qdio_setup_init_data(&init_data, qdio);
 
@@ -500,3 +504,26 @@ int zfcp_qdio_setup(struct zfcp_adapter *adapter)
 	return 0;
 }
 
+/**
+ * zfcp_qdio_siosl - Trigger logging in FCP channel
+ * @adapter: The zfcp_adapter where to trigger logging
+ *
+ * Call the cio siosl function to trigger hardware logging.  This
+ * wrapper function sets a flag to ensure hardware logging is only
+ * triggered once before going through qdio shutdown.
+ *
+ * The triggers are always run from qdio tasklet context, so no
+ * additional synchronization is necessary.
+ */
+void zfcp_qdio_siosl(struct zfcp_adapter *adapter)
+{
+	int rc;
+
+	if (atomic_read(&adapter->status) & ZFCP_STATUS_ADAPTER_SIOSL_ISSUED)
+		return;
+
+	rc = ccw_device_siosl(adapter->ccw_device);
+	if (!rc)
+		atomic_set_mask(ZFCP_STATUS_ADAPTER_SIOSL_ISSUED,
+				&adapter->status);
+}

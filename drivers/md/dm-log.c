@@ -145,8 +145,9 @@ int dm_dirty_log_type_unregister(struct dm_dirty_log_type *type)
 EXPORT_SYMBOL(dm_dirty_log_type_unregister);
 
 struct dm_dirty_log *dm_dirty_log_create(const char *type_name,
-					 struct dm_target *ti,
-					 unsigned int argc, char **argv)
+			struct dm_target *ti,
+			int (*flush_callback_fn)(struct dm_target *ti),
+			unsigned int argc, char **argv)
 {
 	struct dm_dirty_log_type *type;
 	struct dm_dirty_log *log;
@@ -161,6 +162,7 @@ struct dm_dirty_log *dm_dirty_log_create(const char *type_name,
 		return NULL;
 	}
 
+	log->flush_callback_fn = flush_callback_fn;
 	log->type = type;
 	if (type->ctr(log, ti, argc, argv)) {
 		kfree(log);
@@ -195,20 +197,28 @@ EXPORT_SYMBOL(dm_dirty_log_destroy);
 #define MIRROR_DISK_VERSION 2
 #define LOG_OFFSET 2
 
-struct log_header {
-	uint32_t magic;
+struct log_header_disk {
+	__le32 magic;
 
 	/*
 	 * Simple, incrementing version. no backward
 	 * compatibility.
 	 */
+	__le32 version;
+	__le64 nr_regions;
+} __packed;
+
+struct log_header_core {
+	uint32_t magic;
 	uint32_t version;
-	sector_t nr_regions;
+	uint64_t nr_regions;
 };
 
 struct log_c {
 	struct dm_target *ti;
-	int touched;
+	int touched_dirtied;
+	int touched_cleaned;
+	int flush_failed;
 	uint32_t region_size;
 	unsigned int region_count;
 	region_t sync_count;
@@ -233,11 +243,12 @@ struct log_c {
 	 * Disk log fields
 	 */
 	int log_dev_failed;
+	int log_dev_flush_failed;
 	struct dm_dev *log_dev;
-	struct log_header header;
+	struct log_header_core header;
 
 	struct dm_io_region header_location;
-	struct log_header *disk_header;
+	struct log_header_disk *disk_header;
 };
 
 /*
@@ -253,27 +264,27 @@ static inline void log_set_bit(struct log_c *l,
 			       uint32_t *bs, unsigned bit)
 {
 	ext2_set_bit(bit, (unsigned long *) bs);
-	l->touched = 1;
+	l->touched_cleaned = 1;
 }
 
 static inline void log_clear_bit(struct log_c *l,
 				 uint32_t *bs, unsigned bit)
 {
 	ext2_clear_bit(bit, (unsigned long *) bs);
-	l->touched = 1;
+	l->touched_dirtied = 1;
 }
 
 /*----------------------------------------------------------------
  * Header IO
  *--------------------------------------------------------------*/
-static void header_to_disk(struct log_header *core, struct log_header *disk)
+static void header_to_disk(struct log_header_core *core, struct log_header_disk *disk)
 {
 	disk->magic = cpu_to_le32(core->magic);
 	disk->version = cpu_to_le32(core->version);
 	disk->nr_regions = cpu_to_le64(core->nr_regions);
 }
 
-static void header_from_disk(struct log_header *core, struct log_header *disk)
+static void header_from_disk(struct log_header_core *core, struct log_header_disk *disk)
 {
 	core->magic = le32_to_cpu(disk->magic);
 	core->version = le32_to_cpu(disk->version);
@@ -285,6 +296,19 @@ static int rw_header(struct log_c *lc, int rw)
 	lc->io_req.bi_rw = rw;
 
 	return dm_io(&lc->io_req, 1, &lc->header_location, NULL);
+}
+
+static int flush_header(struct log_c *lc)
+{
+	struct dm_io_region null_location = {
+		.bdev = lc->header_location.bdev,
+		.sector = 0,
+		.count = 0,
+	};
+
+	lc->io_req.bi_rw = WRITE_FLUSH;
+
+	return dm_io(&lc->io_req, 1, &null_location, NULL);
 }
 
 static int read_header(struct log_c *log)
@@ -378,7 +402,9 @@ static int create_log_context(struct dm_dirty_log *log, struct dm_target *ti,
 	}
 
 	lc->ti = ti;
-	lc->touched = 0;
+	lc->touched_dirtied = 0;
+	lc->touched_cleaned = 0;
+	lc->flush_failed = 0;
 	lc->region_size = region_size;
 	lc->region_count = region_count;
 	lc->sync = sync;
@@ -406,6 +432,7 @@ static int create_log_context(struct dm_dirty_log *log, struct dm_target *ti,
 	} else {
 		lc->log_dev = dev;
 		lc->log_dev_failed = 0;
+		lc->log_dev_flush_failed = 0;
 		lc->header_location.bdev = lc->log_dev->bdev;
 		lc->header_location.sector = 0;
 
@@ -428,13 +455,12 @@ static int create_log_context(struct dm_dirty_log *log, struct dm_target *ti,
 
 		lc->io_req.mem.type = DM_IO_VMA;
 		lc->io_req.notify.fn = NULL;
-		lc->io_req.client = dm_io_client_create(dm_div_up(buf_size,
-								   PAGE_SIZE));
+		lc->io_req.client = dm_io_client_create();
 		if (IS_ERR(lc->io_req.client)) {
 			r = PTR_ERR(lc->io_req.client);
 			DMWARN("couldn't allocate disk io client");
 			kfree(lc);
-			return -ENOMEM;
+			return r;
 		}
 
 		lc->disk_header = vmalloc(buf_size);
@@ -466,7 +492,7 @@ static int create_log_context(struct dm_dirty_log *log, struct dm_target *ti,
 	memset(lc->sync_bits, (sync == NOSYNC) ? -1 : 0, bitset_size);
 	lc->sync_count = (sync == NOSYNC) ? region_count : 0;
 
-	lc->recovering_bits = vmalloc(bitset_size);
+	lc->recovering_bits = vzalloc(bitset_size);
 	if (!lc->recovering_bits) {
 		DMWARN("couldn't allocate sync bitset");
 		vfree(lc->sync_bits);
@@ -478,7 +504,6 @@ static int create_log_context(struct dm_dirty_log *log, struct dm_target *ti,
 		kfree(lc);
 		return -ENOMEM;
 	}
-	memset(lc->recovering_bits, 0, bitset_size);
 	lc->sync_search = 0;
 	log->context = lc;
 
@@ -522,8 +547,7 @@ static int disk_ctr(struct dm_dirty_log *log, struct dm_target *ti,
 		return -EINVAL;
 	}
 
-	r = dm_get_device(ti, argv[0], 0, 0 /* FIXME */,
-			  FMODE_READ | FMODE_WRITE, &dev);
+	r = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table), &dev);
 	if (r)
 		return r;
 
@@ -614,6 +638,11 @@ static int disk_resume(struct dm_dirty_log *log)
 
 	/* write the new header */
 	r = rw_header(lc, WRITE);
+	if (!r) {
+		r = flush_header(lc);
+		if (r)
+			lc->log_dev_flush_failed = 1;
+	}
 	if (r) {
 		DMWARN("%s: Failed to write header on dirty region log device",
 		       lc->log_dev->name);
@@ -656,18 +685,40 @@ static int core_flush(struct dm_dirty_log *log)
 
 static int disk_flush(struct dm_dirty_log *log)
 {
-	int r;
-	struct log_c *lc = (struct log_c *) log->context;
+	int r, i;
+	struct log_c *lc = log->context;
 
 	/* only write if the log has changed */
-	if (!lc->touched)
+	if (!lc->touched_cleaned && !lc->touched_dirtied)
 		return 0;
+
+	if (lc->touched_cleaned && log->flush_callback_fn &&
+	    log->flush_callback_fn(lc->ti)) {
+		/*
+		 * At this point it is impossible to determine which
+		 * regions are clean and which are dirty (without
+		 * re-reading the log off disk). So mark all of them
+		 * dirty.
+		 */
+		lc->flush_failed = 1;
+		for (i = 0; i < lc->region_count; i++)
+			log_clear_bit(lc, lc->clean_bits, i);
+	}
 
 	r = rw_header(lc, WRITE);
 	if (r)
 		fail_log_device(lc);
-	else
-		lc->touched = 0;
+	else {
+		if (lc->touched_dirtied) {
+			r = flush_header(lc);
+			if (r) {
+				lc->log_dev_flush_failed = 1;
+				fail_log_device(lc);
+			} else
+				lc->touched_dirtied = 0;
+		}
+		lc->touched_cleaned = 0;
+	}
 
 	return r;
 }
@@ -681,7 +732,8 @@ static void core_mark_region(struct dm_dirty_log *log, region_t region)
 static void core_clear_region(struct dm_dirty_log *log, region_t region)
 {
 	struct log_c *lc = (struct log_c *) log->context;
-	log_set_bit(lc, lc->clean_bits, region);
+	if (likely(!lc->flush_failed))
+		log_set_bit(lc, lc->clean_bits, region);
 }
 
 static int core_get_resync_work(struct dm_dirty_log *log, region_t *region)
@@ -762,7 +814,9 @@ static int disk_status(struct dm_dirty_log *log, status_type_t status,
 	switch(status) {
 	case STATUSTYPE_INFO:
 		DMEMIT("3 %s %s %c", log->type->name, lc->log_dev->name,
-		       lc->log_dev_failed ? 'D' : 'A');
+		       lc->log_dev_flush_failed ? 'F' :
+		       lc->log_dev_failed ? 'D' :
+		       'A');
 		break;
 
 	case STATUSTYPE_TABLE:

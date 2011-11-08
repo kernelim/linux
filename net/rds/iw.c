@@ -55,7 +55,7 @@ struct list_head rds_iw_devices;
 DEFINE_SPINLOCK(iw_nodev_conns_lock);
 LIST_HEAD(iw_nodev_conns);
 
-void rds_iw_add_one(struct ib_device *device)
+static void rds_iw_add_one(struct ib_device *device)
 {
 	struct rds_iw_device *rds_iwdev;
 	struct ib_device_attr *dev_attr;
@@ -123,7 +123,7 @@ free_attr:
 	kfree(dev_attr);
 }
 
-void rds_iw_remove_one(struct ib_device *device)
+static void rds_iw_remove_one(struct ib_device *device)
 {
 	struct rds_iw_device *rds_iwdev;
 	struct rds_iw_cm_id *i_cm_id, *next;
@@ -184,8 +184,8 @@ static int rds_iw_conn_info_visitor(struct rds_connection *conn,
 		ic = conn->c_transport_data;
 		dev_addr = &ic->i_cm_id->route.addr.dev_addr;
 
-		ib_addr_get_sgid(dev_addr, (union ib_gid *) &iinfo->src_gid);
-		ib_addr_get_dgid(dev_addr, (union ib_gid *) &iinfo->dst_gid);
+		rdma_addr_get_sgid(dev_addr, (union ib_gid *) &iinfo->src_gid);
+		rdma_addr_get_dgid(dev_addr, (union ib_gid *) &iinfo->dst_gid);
 
 		rds_iwdev = ib_get_client_data(ic->i_cm_id->device, &rds_iw_client);
 		iinfo->max_send_wr = ic->i_send_ring.w_nr;
@@ -225,7 +225,7 @@ static int rds_iw_laddr_check(__be32 addr)
 	/* Create a CMA ID and try to bind it. This catches both
 	 * IB and iWARP capable NICs.
 	 */
-	cm_id = rdma_create_id(NULL, NULL, RDMA_PS_TCP);
+	cm_id = rdma_create_id(NULL, NULL, RDMA_PS_TCP, IB_QPT_RC);
 	if (IS_ERR(cm_id))
 		return PTR_ERR(cm_id);
 
@@ -263,7 +263,6 @@ struct rds_transport rds_iw_transport = {
 	.laddr_check		= rds_iw_laddr_check,
 	.xmit_complete		= rds_iw_xmit_complete,
 	.xmit			= rds_iw_xmit,
-	.xmit_cong_map		= NULL,
 	.xmit_rdma		= rds_iw_xmit_rdma,
 	.recv			= rds_iw_recv,
 	.conn_alloc		= rds_iw_conn_alloc,
@@ -271,7 +270,6 @@ struct rds_transport rds_iw_transport = {
 	.conn_connect		= rds_iw_conn_connect,
 	.conn_shutdown		= rds_iw_conn_shutdown,
 	.inc_copy_to_user	= rds_iw_inc_copy_to_user,
-	.inc_purge		= rds_iw_inc_purge,
 	.inc_free		= rds_iw_inc_free,
 	.cm_initiate_connect	= rds_iw_cm_initiate_connect,
 	.cm_handle_connect	= rds_iw_cm_handle_connect,
@@ -288,7 +286,7 @@ struct rds_transport rds_iw_transport = {
 	.t_prefer_loopback	= 1,
 };
 
-int __init rds_iw_init(void)
+int rds_iw_init(void)
 {
 	int ret;
 

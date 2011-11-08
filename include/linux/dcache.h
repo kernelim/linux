@@ -90,7 +90,7 @@ struct dentry {
 	atomic_t d_count;
 	unsigned int d_flags;		/* protected by d_lock */
 	spinlock_t d_lock;		/* per dentry lock */
-	int d_mounted;
+	int d_mounted;			/* obsolete, ->d_flags is now used for this */
 	struct inode *d_inode;		/* Where the name belongs to - NULL is
 					 * negative */
 	/*
@@ -139,6 +139,10 @@ struct dentry_operations {
 	void (*d_release)(struct dentry *);
 	void (*d_iput)(struct dentry *, struct inode *);
 	char *(*d_dname)(struct dentry *, char *, int);
+#ifndef __GENKSYMS__
+	struct vfsmount *(*d_automount)(struct path *);
+	int (*d_manage)(struct dentry *, bool);
+#endif
 };
 
 /* the dentry parameter passed to d_hash and d_compare is the parent
@@ -157,6 +161,7 @@ d_compare:	no		yes		yes      no
 d_delete:	no		yes		no       no
 d_release:	no		no		no       yes
 d_iput:		no		no		no       yes
+d_automount:	no		no		no	 yes
  */
 
 /* d_flags entries */
@@ -177,14 +182,37 @@ d_iput:		no		no		no       yes
       * typically using d_splice_alias.
       */
 
+#define DCACHE_NFSFS_RENAMED  0x0002
+     /* this dentry has been "silly renamed" and has to be deleted on the last
+      * dput() */
+
+#define	DCACHE_DISCONNECTED	0x0004
+     /* This dentry is possibly not currently connected to the dcache tree, in
+      * which case its parent will either be itself, or will have this flag as
+      * well.  nfsd will not use a dentry with this bit set, but will first
+      * endeavour to clear the bit either by discovering that it is connected,
+      * or by performing lookup operations.   Any filesystem which supports
+      * nfsd_operations MUST have a lookup function which, if it finds a
+      * directory inode with a DCACHE_DISCONNECTED dentry, will d_move that
+      * dentry into place and return that dentry rather than the passed one,
+      * typically using d_splice_alias. */
+
 #define DCACHE_REFERENCED	0x0008  /* Recently used, don't discard. */
 #define DCACHE_UNHASHED		0x0010	
 
-#define DCACHE_INOTIFY_PARENT_WATCHED	0x0020 /* Parent inode is watched by inotify */
+#define DCACHE_INOTIFY_PARENT_WATCHED 0x0020
+     /* Parent inode is watched by inotify */
 
 #define DCACHE_COOKIE		0x0040	/* For use by dcookie subsystem */
 
-#define DCACHE_FSNOTIFY_PARENT_WATCHED	0x0080 /* Parent inode is watched by some fsnotify listener */
+#define DCACHE_FSNOTIFY_PARENT_WATCHED 0x0080
+     /* Parent inode is watched by some fsnotify listener */
+
+#define DCACHE_MOUNTED		0x10000	/* is a mountpoint */
+#define DCACHE_NEED_AUTOMOUNT	0x20000	/* handle automount on this dir */
+#define DCACHE_MANAGE_TRANSIT	0x40000	/* manage transit from this dirent */
+#define DCACHE_MANAGED_DENTRY \
+	(DCACHE_MOUNTED|DCACHE_NEED_AUTOMOUNT|DCACHE_MANAGE_TRANSIT)
 
 extern spinlock_t dcache_lock;
 extern seqlock_t rename_lock;
@@ -370,9 +398,14 @@ static inline struct dentry *dget_parent(struct dentry *dentry)
 
 extern void dput(struct dentry *);
 
+static inline bool d_managed(struct dentry *dentry)
+{
+	return dentry->d_flags & DCACHE_MANAGED_DENTRY;
+}
+
 static inline int d_mountpoint(struct dentry *dentry)
 {
-	return dentry->d_mounted;
+	return dentry->d_flags & DCACHE_MOUNTED;
 }
 
 extern struct vfsmount *lookup_mnt(struct path *);

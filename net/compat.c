@@ -40,10 +40,12 @@ static inline int iov_from_user_compat_to_kern(struct iovec *kiov,
 		compat_size_t len;
 
 		if (get_user(len, &uiov32->iov_len) ||
-		   get_user(buf, &uiov32->iov_base)) {
-			tot_len = -EFAULT;
-			break;
-		}
+		    get_user(buf, &uiov32->iov_base))
+			return -EFAULT;
+
+		if (len > INT_MAX - tot_len)
+			len = INT_MAX - tot_len;
+
 		tot_len += len;
 		kiov->iov_base = compat_ptr(buf);
 		kiov->iov_len = (__kernel_size_t) len;
@@ -727,15 +729,22 @@ EXPORT_SYMBOL(compat_mc_getsockopt);
 
 /* Argument list sizes for compat_sys_socketcall */
 #define AL(x) ((x) * sizeof(u32))
-static unsigned char nas[19]={AL(0),AL(3),AL(3),AL(3),AL(2),AL(3),
+static unsigned char nas[21]={AL(0),AL(3),AL(3),AL(3),AL(2),AL(3),
 				AL(3),AL(3),AL(4),AL(4),AL(4),AL(6),
 				AL(6),AL(2),AL(5),AL(5),AL(3),AL(3),
-				AL(4)};
+				AL(4),AL(5),AL(4)};
 #undef AL
 
 asmlinkage long compat_sys_sendmsg(int fd, struct compat_msghdr __user *msg, unsigned flags)
 {
 	return sys_sendmsg(fd, (struct msghdr __user *)msg, flags | MSG_CMSG_COMPAT);
+}
+
+asmlinkage long compat_sys_sendmmsg(int fd, struct compat_mmsghdr __user *mmsg,
+				    unsigned vlen, unsigned int flags)
+{
+	return __sys_sendmmsg(fd, (struct mmsghdr __user *)mmsg, vlen,
+			      flags | MSG_CMSG_COMPAT);
 }
 
 asmlinkage long compat_sys_recvmsg(int fd, struct compat_msghdr __user *msg, unsigned int flags)
@@ -755,13 +764,35 @@ asmlinkage long compat_sys_recvfrom(int fd, void __user *buf, size_t len,
 	return sys_recvfrom(fd, buf, len, flags | MSG_CMSG_COMPAT, addr, addrlen);
 }
 
+asmlinkage long compat_sys_recvmmsg(int fd, struct compat_mmsghdr __user *mmsg,
+				    unsigned vlen, unsigned int flags,
+				    struct compat_timespec __user *timeout)
+{
+	int datagrams;
+	struct timespec ktspec;
+
+	if (timeout == NULL)
+		return __sys_recvmmsg(fd, (struct mmsghdr __user *)mmsg, vlen,
+				      flags | MSG_CMSG_COMPAT, NULL);
+
+	if (get_compat_timespec(&ktspec, timeout))
+		return -EFAULT;
+
+	datagrams = __sys_recvmmsg(fd, (struct mmsghdr __user *)mmsg, vlen,
+				   flags | MSG_CMSG_COMPAT, &ktspec);
+	if (datagrams > 0 && put_compat_timespec(&ktspec, timeout))
+		datagrams = -EFAULT;
+
+	return datagrams;
+}
+
 asmlinkage long compat_sys_socketcall(int call, u32 __user *args)
 {
 	int ret;
 	u32 a[6];
 	u32 a0, a1;
 
-	if (call < SYS_SOCKET || call > SYS_ACCEPT4)
+	if (call < SYS_SOCKET || call > SYS_SENDMMSG)
 		return -EINVAL;
 	if (copy_from_user(a, args, nas[call]))
 		return -EFAULT;
@@ -820,8 +851,15 @@ asmlinkage long compat_sys_socketcall(int call, u32 __user *args)
 	case SYS_SENDMSG:
 		ret = compat_sys_sendmsg(a0, compat_ptr(a1), a[2]);
 		break;
+	case SYS_SENDMMSG:
+		ret = compat_sys_sendmmsg(a0, compat_ptr(a1), a[2], a[3]);
+		break;
 	case SYS_RECVMSG:
 		ret = compat_sys_recvmsg(a0, compat_ptr(a1), a[2]);
+		break;
+	case SYS_RECVMMSG:
+		ret = compat_sys_recvmmsg(a0, compat_ptr(a1), a[2], a[3],
+					  compat_ptr(a[4]));
 		break;
 	case SYS_ACCEPT4:
 		ret = sys_accept4(a0, compat_ptr(a1), compat_ptr(a[2]), a[3]);

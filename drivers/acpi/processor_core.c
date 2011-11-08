@@ -123,6 +123,8 @@ static const struct file_operations acpi_processor_info_fops = {
 #endif
 
 DEFINE_PER_CPU(struct acpi_processor *, processors);
+EXPORT_PER_CPU_SYMBOL(processors);
+
 struct acpi_processor_errata errata __read_mostly;
 static int set_no_mwait(const struct dmi_system_id *id)
 {
@@ -760,8 +762,14 @@ static int acpi_cpu_soft_notify(struct notifier_block *nfb,
 	if (action == CPU_ONLINE && pr) {
 		acpi_processor_ppc_has_changed(pr);
 		acpi_processor_cst_has_changed(pr);
+		acpi_processor_reevaluate_tstate(pr, action);
 		acpi_processor_tstate_has_changed(pr);
 	}
+	if (action == CPU_DEAD && pr) {
+		/* invalidate the flag.throttling after one CPU is offline */
+		acpi_processor_reevaluate_tstate(pr, action);
+	}
+
 	return NOTIFY_OK;
 }
 
@@ -836,7 +844,8 @@ static int __cpuinit acpi_processor_add(struct acpi_device *device)
 	acpi_processor_get_limit_info(pr);
 
 
-	acpi_processor_power_init(pr, device);
+	if (cpuidle_get_driver() == &acpi_idle_driver)
+		acpi_processor_power_init(pr, device);
 
 	pr->cdev = thermal_cooling_device_register("Processor", device,
 						&processor_cooling_ops);
@@ -977,6 +986,15 @@ static void __ref acpi_processor_hotplug_notify(acpi_handle handle,
 	struct acpi_device *device = NULL;
 	int result;
 
+#ifdef __i386__
+	/*
+	 * BZ 600435 -- disable physical CPU Hotplug (hot add) for
+	 * 32-bit kernel.  This code block must be removed if hot add is
+	 * re-enabled for 32-bit
+	 */
+
+	mark_hardware_unsupported("CPU Hot Add is not supported for x86 32-bit.\n");
+#endif
 
 	switch (event) {
 	case ACPI_NOTIFY_BUS_CHECK:
@@ -1150,9 +1168,14 @@ static int __init acpi_processor_init(void)
 	 * should not use mwait for CPU-states.
 	 */
 	dmi_check_system(processor_idle_dmi_table);
-	result = cpuidle_register_driver(&acpi_idle_driver);
-	if (result < 0)
-		goto out_proc;
+
+	if (!cpuidle_register_driver(&acpi_idle_driver)) {
+		printk(KERN_DEBUG "ACPI: %s registered with cpuidle\n",
+		       acpi_idle_driver.name);
+	} else {
+		printk(KERN_DEBUG "ACPI: acpi_idle yielding to %s",
+		       cpuidle_get_driver()->name);
+	}
 
 	result = acpi_bus_register_driver(&acpi_processor_driver);
 	if (result < 0)
@@ -1171,7 +1194,6 @@ static int __init acpi_processor_init(void)
 out_cpuidle:
 	cpuidle_unregister_driver(&acpi_idle_driver);
 
-out_proc:
 #ifdef CONFIG_ACPI_PROCFS
 	remove_proc_entry(ACPI_PROCESSOR_CLASS, acpi_root_dir);
 #endif

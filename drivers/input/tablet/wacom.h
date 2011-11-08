@@ -1,7 +1,7 @@
 /*
  * drivers/input/tablet/wacom.h
  *
- *  USB Wacom Graphire and Wacom Intuos tablet support
+ *  USB Wacom tablet support
  *
  *  Copyright (c) 2000-2004 Vojtech Pavlik	<vojtech@ucw.cz>
  *  Copyright (c) 2000 Andreas Bach Aaen	<abach@stofanet.dk>
@@ -69,6 +69,7 @@
  *      v1.49 (pc) - Added support for USB Tablet PC (0x90, 0x93, and 0x9A)
  *      v1.50 (pc) - Fixed a TabletPC touch bug in 2.6.28
  *      v1.51 (pc) - Added support for Intuos4
+ *      v1.52 (pc) - Query Wacom data upon system resume
  */
 
 /*
@@ -89,9 +90,9 @@
 /*
  * Version Information
  */
-#define DRIVER_VERSION "v1.51"
+#define DRIVER_VERSION "v1.52"
 #define DRIVER_AUTHOR "Vojtech Pavlik <vojtech@ucw.cz>"
-#define DRIVER_DESC "USB Wacom Graphire and Wacom Intuos tablet driver"
+#define DRIVER_DESC "USB Wacom tablet driver"
 #define DRIVER_LICENSE "GPL"
 
 MODULE_AUTHOR(DRIVER_AUTHOR);
@@ -126,6 +127,7 @@ extern void wacom_input_sync(void *wcombo);
 extern void wacom_init_input_dev(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
 extern void input_dev_g4(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
 extern void input_dev_g(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
+extern void input_dev_c21ux2(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
 extern void input_dev_i3s(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
 extern void input_dev_i3(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
 extern void input_dev_i(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
@@ -135,6 +137,7 @@ extern void input_dev_pl(struct input_dev *input_dev, struct wacom_wac *wacom_wa
 extern void input_dev_pt(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
 extern void input_dev_mo(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
 extern void input_dev_bee(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
+extern void input_dev_cintiq(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
 extern __u16 wacom_le16_to_cpu(unsigned char *data);
 extern __u16 wacom_be16_to_cpu(unsigned char *data);
 extern struct wacom_features *get_wacom_feature(const struct usb_device_id *id);

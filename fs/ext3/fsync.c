@@ -30,6 +30,7 @@
 #include <linux/jbd.h>
 #include <linux/ext3_fs.h>
 #include <linux/ext3_jbd.h>
+#include <trace/events/ext3.h>
 
 /*
  * akpm: A new design for ext3_sync_file().
@@ -51,10 +52,13 @@ int ext3_sync_file(struct file * file, struct dentry *dentry, int datasync)
 	int ret = 0;
 	tid_t commit_tid;
 
+	J_ASSERT(ext3_journal_current_handle() == NULL);
+
+	trace_ext3_sync_file_enter(file, datasync);
+
 	if (inode->i_sb->s_flags & MS_RDONLY)
 		return 0;
 
-	J_ASSERT(ext3_journal_current_handle() == NULL);
 
 	/*
 	 * data=writeback,ordered:
@@ -93,5 +97,6 @@ int ext3_sync_file(struct file * file, struct dentry *dentry, int datasync)
 	if (test_opt(inode->i_sb, BARRIER))
 		blkdev_issue_flush(inode->i_sb->s_bdev, NULL);
 out:
+	trace_ext3_sync_file_exit(inode, ret);
 	return ret;
 }

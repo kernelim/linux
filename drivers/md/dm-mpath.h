@@ -12,6 +12,7 @@
 struct dm_dev;
 
 struct dm_path {
+	uint64_t features;	/* 3rd party driver must initialize to zero */
 	struct dm_dev *dev;	/* Read-only */
 	void *pscontext;	/* For path-selector use */
 };

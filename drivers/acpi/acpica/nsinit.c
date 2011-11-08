@@ -191,6 +191,15 @@ acpi_status acpi_ns_initialize_devices(void)
 					ACPI_UINT32_MAX, FALSE,
 					acpi_ns_init_one_device, &info, NULL);
 
+	/*
+	 * Any _OSI requests should be completed by now. If the BIOS has
+	 * requested any Windows OSI strings, we will always truncate
+	 * I/O addresses to 16 bits -- for Windows compatibility.
+	 */
+	if (acpi_gbl_osi_data >= ACPI_OSI_WIN_2000) {
+		acpi_gbl_truncate_io_addresses = TRUE;
+	}
+
 	ACPI_FREE(info.evaluate_info);
 	if (ACPI_FAILURE(status)) {
 		goto error_exit;
@@ -399,7 +408,7 @@ acpi_ns_find_ini_methods(acpi_handle obj_handle,
 	 * The only _INI methods that we care about are those that are
 	 * present under Device, Processor, and Thermal objects.
 	 */
-	parent_node = acpi_ns_get_parent_node(node);
+	parent_node = node->parent;
 	switch (parent_node->type) {
 	case ACPI_TYPE_DEVICE:
 	case ACPI_TYPE_PROCESSOR:
@@ -409,7 +418,7 @@ acpi_ns_find_ini_methods(acpi_handle obj_handle,
 
 		while (parent_node) {
 			parent_node->flags |= ANOBJ_SUBTREE_HAS_INI;
-			parent_node = acpi_ns_get_parent_node(parent_node);
+			parent_node = parent_node->parent;
 		}
 		break;
 

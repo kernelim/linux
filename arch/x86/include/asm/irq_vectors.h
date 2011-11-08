@@ -106,19 +106,24 @@
 /*
  * Generic system vector for platform specific use
  */
-#define GENERIC_INTERRUPT_VECTOR	0xed
+#define X86_PLATFORM_IPI_VECTOR		0xed
 
 /*
  * Performance monitoring pending work vector:
  */
 #define LOCAL_PENDING_VECTOR		0xec
 
-#define UV_BAU_MESSAGE			0xec
+#define UV_BAU_MESSAGE			0xea
 
 /*
  * Self IPI vector for machine checks
  */
 #define MCE_SELF_VECTOR			0xeb
+
+#ifdef CONFIG_XEN
+/* Xen vector callback to receive events in a HVM domain */
+#define XEN_HVM_EVTCHN_CALLBACK		0xe9
+#endif
 
 /*
  * First APIC vector available to drivers: (vectors 0x30-0xee) we

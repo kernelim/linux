@@ -31,26 +31,39 @@ OPTIONS
 	event (eventsel+umask) in the form of rNNN where NNN is a
 	hexadecimal event descriptor.
 
+--filter=<filter>::
+        Event filter.
+
 -a::
-        System-wide collection.
+--all-cpus::
+        System-wide collection from all CPUs.
 
 -l::
         Scale counter values.
 
 -p::
 --pid=::
-	Record events on existing pid.
+        Record events on existing process ID.
+
+-t::
+--tid=::
+        Record events on existing thread ID.
+
+
 
 -r::
 --realtime=::
 	Collect data with this RT SCHED_FIFO priority.
+-D::
+--no-delay::
+	Collect data without buffering.
 -A::
 --append::
 	Append to the output file to do incremental profiling.
 
 -f::
 --force::
-	Overwrite existing data file.
+	Overwrite existing data file. (deprecated)
 
 -c::
 --count=::
@@ -61,8 +74,8 @@ OPTIONS
 	Output file name.
 
 -i::
---inherit::
-	Child tasks inherit counters.
+--no-inherit::
+	Child tasks do not inherit counters.
 -F::
 --freq=::
 	Profile at this frequency.
@@ -74,6 +87,10 @@ OPTIONS
 -g::
 --call-graph::
 	Do call-graph (stack chain/backtrace) recording.
+
+-q::
+--quiet::
+	Don't print any message, useful for scripting.
 
 -v::
 --verbose::
@@ -87,13 +104,42 @@ OPTIONS
 --data::
 	Sample addresses.
 
+-T::
+--timestamp::
+	Sample timestamps. Use it with 'perf report -D' to see the timestamps,
+	for instance.
+
 -n::
 --no-samples::
 	Don't sample.
 
 -R::
 --raw-samples::
-Collect raw sample records from all opened counters (typically for tracepoint counters).
+Collect raw sample records from all opened counters (default for tracepoint counters).
+
+-C::
+--cpu::
+Collect samples only on the list of CPUs provided. Multiple CPUs can be provided as a
+comma-separated list with no space: 0,1. Ranges of CPUs are specified with -: 0-2.
+In per-thread mode with inheritance mode on (default), samples are captured only when
+the thread executes on the designated CPUs. Default is to monitor all CPUs.
+
+-N::
+--no-buildid-cache::
+Do not update the builid cache. This saves some overhead in situations
+where the information in the perf.data file (which includes buildids)
+is sufficient.
+
+-G name,...::
+--cgroup name,...::
+monitor only in the container (cgroup) called "name". This option is available only
+in per-cpu mode. The cgroup filesystem must be mounted. All threads belonging to
+container "name" are monitored when they run on the monitored CPUs. Multiple cgroups
+can be provided. Each cgroup is applied to the corresponding event, i.e., first cgroup
+to first event, second cgroup to second event and so on. It is possible to provide
+an empty cgroup (monitor all the time) using, e.g., -G foo,,bar. Cgroups must have
+corresponding events, i.e., they always refer to events defined earlier on the command
+line.
 
 SEE ALSO
 --------

@@ -38,7 +38,15 @@
 #include <net/sock.h>
 
 #include "rds.h"
-#include "rdma.h"
+
+char *rds_str_array(char **array, size_t elements, size_t index)
+{
+	if ((index < elements) && array[index])
+		return array[index];
+	else
+		return "unknown";
+}
+EXPORT_SYMBOL(rds_str_array);
 
 /* this is just used for stats gathering :/ */
 static DEFINE_SPINLOCK(rds_sock_lock);
@@ -61,7 +69,7 @@ static int rds_release(struct socket *sock)
 	struct rds_sock *rs;
 	unsigned long flags;
 
-	if (sk == NULL)
+	if (!sk)
 		goto out;
 
 	rs = rds_sk_to_rs(sk);
@@ -72,7 +80,15 @@ static int rds_release(struct socket *sock)
 	 * with the socket. */
 	rds_clear_recv_queue(rs);
 	rds_cong_remove_socket(rs);
+
+	/*
+	 * the binding lookup hash uses rcu, we need to
+	 * make sure we sychronize_rcu before we free our
+	 * entry
+	 */
 	rds_remove_bound(rs);
+	synchronize_rcu();
+
 	rds_send_drop_to(rs, NULL);
 	rds_rdma_drop_keys(rs);
 	rds_notify_queue_get(rs, NULL);
@@ -81,6 +97,8 @@ static int rds_release(struct socket *sock)
 	list_del_init(&rs->rs_item);
 	rds_sock_count--;
 	spin_unlock_irqrestore(&rds_sock_lock, flags);
+
+	rds_trans_put(rs->rs_transport);
 
 	sock->sk = NULL;
 	sock_put(sk);
@@ -159,7 +177,8 @@ static unsigned int rds_poll(struct file *file, struct socket *sock,
 
 	poll_wait(file, sk->sk_sleep, wait);
 
-	poll_wait(file, &rds_poll_waitq, wait);
+	if (rs->rs_seen_congestion)
+		poll_wait(file, &rds_poll_waitq, wait);
 
 	read_lock_irqsave(&rs->rs_recv_lock, flags);
 	if (!rs->rs_cong_monitor) {
@@ -180,6 +199,10 @@ static unsigned int rds_poll(struct file *file, struct socket *sock,
 	if (rs->rs_snd_bytes < rds_sk_sndbuf(rs))
 		mask |= (POLLOUT | POLLWRNORM);
 	read_unlock_irqrestore(&rs->rs_recv_lock, flags);
+
+	/* clear state any time we wake a seen-congested socket */
+	if (mask)
+		rs->rs_seen_congestion = 0;
 
 	return mask;
 }
@@ -264,6 +287,9 @@ static int rds_setsockopt(struct socket *sock, int level, int optname,
 		break;
 	case RDS_GET_MR:
 		ret = rds_get_mr(rs, optval, optlen);
+		break;
+	case RDS_GET_MR_FOR_DEST:
+		ret = rds_get_mr_for_dest(rs, optval, optlen);
 		break;
 	case RDS_FREE_MR:
 		ret = rds_free_mr(rs, optval, optlen);
@@ -407,7 +433,8 @@ static int __rds_create(struct socket *sock, struct sock *sk, int protocol)
 	return 0;
 }
 
-static int rds_create(struct net *net, struct socket *sock, int protocol)
+static int rds_create(struct net *net, struct socket *sock, int protocol,
+		      int kern)
 {
 	struct sock *sk;
 
@@ -442,7 +469,6 @@ static void rds_sock_inc_info(struct socket *sock, unsigned int len,
 			      struct rds_info_lengths *lens)
 {
 	struct rds_sock *rs;
-	struct sock *sk;
 	struct rds_incoming *inc;
 	unsigned long flags;
 	unsigned int total = 0;
@@ -452,7 +478,6 @@ static void rds_sock_inc_info(struct socket *sock, unsigned int len,
 	spin_lock_irqsave(&rds_sock_lock, flags);
 
 	list_for_each_entry(rs, &rds_sock_list, rs_item) {
-		sk = rds_rs_to_sk(rs);
 		read_lock(&rs->rs_recv_lock);
 
 		/* XXX too lazy to maintain counts.. */
@@ -506,7 +531,7 @@ out:
 	spin_unlock_irqrestore(&rds_sock_lock, flags);
 }
 
-static void __exit rds_exit(void)
+static void rds_exit(void)
 {
 	sock_unregister(rds_family_ops.family);
 	proto_unregister(&rds_proto);
@@ -521,7 +546,7 @@ static void __exit rds_exit(void)
 }
 module_exit(rds_exit);
 
-static int __init rds_init(void)
+static int rds_init(void)
 {
 	int ret;
 

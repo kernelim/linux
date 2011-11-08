@@ -82,7 +82,8 @@ asm(
 	"	lm	6,15,24(15)\n"
 #endif
 	"	br	14\n"
-	"	.size	savesys_ipl_nss, .-savesys_ipl_nss\n");
+	"	.size	savesys_ipl_nss, .-savesys_ipl_nss\n"
+	"	.previous\n");
 
 static __initdata char upper_command_line[COMMAND_LINE_SIZE];
 
@@ -352,6 +353,7 @@ static __init void detect_machine_facilities(void)
 {
 #ifdef CONFIG_64BIT
 	unsigned int facilities;
+	unsigned long long facility_bits;
 
 	facilities = stfl();
 	if (facilities & (1 << 28))
@@ -360,23 +362,28 @@ static __init void detect_machine_facilities(void)
 		S390_lowcore.machine_flags |= MACHINE_FLAG_PFMF;
 	if (facilities & (1 << 4))
 		S390_lowcore.machine_flags |= MACHINE_FLAG_MVCOS;
+	if ((stfle(&facility_bits, 1) > 0) &&
+	    (facility_bits & (1ULL << (63 - 40))))
+		S390_lowcore.machine_flags |= MACHINE_FLAG_SPP;
 #endif
 }
 
 static __init void rescue_initrd(void)
 {
 #ifdef CONFIG_BLK_DEV_INITRD
+	unsigned long min_initrd_addr = (unsigned long) _end + (4UL << 20);
 	/*
-	 * Move the initrd right behind the bss section in case it starts
-	 * within the bss section. So we don't overwrite it when the bss
-	 * section gets cleared.
+	 * Just like in case of IPL from VM reader we make sure there is a
+	 * gap of 4MB between end of kernel and start of initrd.
+	 * That way we can also be sure that saving an NSS will succeed,
+	 * which however only requires different segments.
 	 */
 	if (!INITRD_START || !INITRD_SIZE)
 		return;
-	if (INITRD_START >= (unsigned long) __bss_stop)
+	if (INITRD_START >= min_initrd_addr)
 		return;
-	memmove(__bss_stop, (void *) INITRD_START, INITRD_SIZE);
-	INITRD_START = (unsigned long) __bss_stop;
+	memmove((void *) min_initrd_addr, (void *) INITRD_START, INITRD_SIZE);
+	INITRD_START = min_initrd_addr;
 #endif
 }
 

@@ -142,9 +142,9 @@ enum arq_state {
 	AS_RQ_POSTSCHED,	/* when they shouldn't be */
 };
 
-#define RQ_IOC(rq)	((struct io_context *) (rq)->elevator_private)
-#define RQ_STATE(rq)	((enum arq_state)(rq)->elevator_private2)
-#define RQ_SET_STATE(rq, state)	((rq)->elevator_private2 = (void *) state)
+#define RQ_IOC(rq)	((struct io_context *) (rq)->elevator_private[0])
+#define RQ_STATE(rq)	((enum arq_state)(rq)->elevator_private[1])
+#define RQ_SET_STATE(rq, state)	((rq)->elevator_private[1] = (void *) state)
 
 static DEFINE_PER_CPU(unsigned long, as_ioc_count);
 static struct completion *ioc_gone;
@@ -259,16 +259,6 @@ static void as_put_io_context(struct request *rq)
  * rb tree support functions
  */
 #define RQ_RB_ROOT(ad, rq)	(&(ad)->sort_list[rq_is_sync((rq))])
-
-static void as_add_rq_rb(struct as_data *ad, struct request *rq)
-{
-	struct request *alias;
-
-	while ((unlikely(alias = elv_rb_add(RQ_RB_ROOT(ad, rq), rq)))) {
-		as_move_to_dispatch(ad, alias);
-		as_antic_stop(ad);
-	}
-}
 
 static inline void as_del_rq_rb(struct as_data *ad, struct request *rq)
 {
@@ -1192,14 +1182,14 @@ static void as_add_request(struct request_queue *q, struct request *rq)
 
 	data_dir = rq_is_sync(rq);
 
-	rq->elevator_private = as_get_io_context(q->node);
+	rq->elevator_private[0] = as_get_io_context(q->node);
 
 	if (RQ_IOC(rq)) {
 		as_update_iohist(ad, RQ_IOC(rq)->aic, rq);
 		atomic_inc(&RQ_IOC(rq)->aic->nr_queued);
 	}
 
-	as_add_rq_rb(ad, rq);
+	elv_rb_add(RQ_RB_ROOT(ad, rq), rq);
 
 	/*
 	 * set expire time and add to fifo list
@@ -1270,7 +1260,7 @@ static void as_merged_request(struct request_queue *q, struct request *req,
 	 */
 	if (type == ELEVATOR_FRONT_MERGE) {
 		as_del_rq_rb(ad, req);
-		as_add_rq_rb(ad, req);
+		elv_rb_add(RQ_RB_ROOT(ad, req), req);
 		/*
 		 * Note! At this stage of this and the next function, our next
 		 * request may not be optimal - eg the request may have "grown"

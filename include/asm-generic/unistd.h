@@ -622,9 +622,42 @@ __SYSCALL(__NR_move_pages, sys_move_pages)
 __SYSCALL(__NR_rt_tgsigqueueinfo, sys_rt_tgsigqueueinfo)
 #define __NR_perf_event_open 241
 __SYSCALL(__NR_perf_event_open, sys_perf_event_open)
+#define __NR_accept4 242
+__SYSCALL(__NR_accept4, sys_accept4)
+#define __NR_recvmmsg 243
+__SYSCALL(__NR_recvmmsg, sys_recvmmsg)
+
+
+/*
+ * Architectures may provide up to 16 syscalls of their own
+ * starting with this value.
+ */
+#define __NR_arch_specific_syscall 244
+
+/* This is already defined in RHEL but moved here upstresm, thus commenting
+ * it out
+
+#define __NR_wait4 260
+__SC_COMP(__NR_wait4, sys_ni_syscall, sys_ni_syscall)
+*/
+#define __NR_prlimit64 261
+__SYSCALL(__NR_prlimit64, sys_ni_syscall)
+#define __NR_fanotify_init 262
+__SYSCALL(__NR_fanotify_init, sys_ni_syscall)
+#define __NR_fanotify_mark 263
+__SYSCALL(__NR_fanotify_mark, sys_ni_syscall)
+#define __NR_name_to_handle_at         264
+__SYSCALL(__NR_name_to_handle_at, sys_ni_syscall)
+#define __NR_open_by_handle_at         265
+__SYSCALL(__NR_open_by_handle_at, sys_ni_syscall)
+#define __NR_clock_adjtime 266
+__SYSCALL(__NR_clock_adjtime, sys_ni_syscall)
+#define __NR_syncfs 267
+__SYSCALL(__NR_syncfs, sys_syncfs)
+
 
 #undef __NR_syscalls
-#define __NR_syscalls 242
+#define __NR_syscalls 268
 
 /*
  * All syscalls below here should go away really,

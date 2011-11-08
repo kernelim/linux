@@ -2206,6 +2206,7 @@ int xfrm_bundle_ok(struct xfrm_policy *pol, struct xfrm_dst *first,
 	if (!dst_check(dst->path, ((struct xfrm_dst *)dst)->path_cookie) ||
 	    (dst->dev && !netif_running(dst->dev)))
 		return 0;
+#if 0
 #ifdef CONFIG_XFRM_SUB_POLICY
 	if (fl) {
 		if (first->origin && !flow_cache_uli_match(first->origin, fl))
@@ -2214,6 +2215,7 @@ int xfrm_bundle_ok(struct xfrm_policy *pol, struct xfrm_dst *first,
 		    !xfrm_selector_match(first->partner, fl, family))
 			return 0;
 	}
+#endif
 #endif
 
 	last = NULL;

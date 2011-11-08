@@ -33,12 +33,13 @@ static DEFINE_MUTEX(sample_timer_lock);
  */
 static DEFINE_PER_CPU(struct hrtimer, stack_trace_hrtimer);
 
-struct stack_frame {
+struct stack_frame_user {
 	const void __user	*next_fp;
 	unsigned long		return_address;
 };
 
-static int copy_stack_frame(const void __user *fp, struct stack_frame *frame)
+static int
+copy_stack_frame(const void __user *fp, struct stack_frame_user *frame)
 {
 	int ret;
 
@@ -93,6 +94,7 @@ static const struct stacktrace_ops backtrace_ops = {
 	.warning_symbol		= backtrace_warning_symbol,
 	.stack			= backtrace_stack,
 	.address		= backtrace_address,
+	.walk_stack		= print_context_stack,
 };
 
 static int
@@ -100,7 +102,6 @@ trace_kernel(struct pt_regs *regs, struct trace_array *tr,
 	     struct trace_array_cpu *data)
 {
 	struct backtrace_info info;
-	unsigned long bp;
 	char *stack;
 
 	info.tr = tr;
@@ -108,15 +109,8 @@ trace_kernel(struct pt_regs *regs, struct trace_array *tr,
 	info.pos = 1;
 
 	__trace_special(info.tr, info.data, 1, regs->ip, 0);
-
 	stack = ((char *)regs + sizeof(struct pt_regs));
-#ifdef CONFIG_FRAME_POINTER
-	bp = regs->bp;
-#else
-	bp = 0;
-#endif
-
-	dump_trace(NULL, regs, (void *)stack, bp, &backtrace_ops, &info);
+	dump_trace(NULL, regs, (void *)stack, &backtrace_ops, &info);
 
 	return info.pos;
 }
@@ -124,7 +118,7 @@ trace_kernel(struct pt_regs *regs, struct trace_array *tr,
 static void timer_notify(struct pt_regs *regs, int cpu)
 {
 	struct trace_array_cpu *data;
-	struct stack_frame frame;
+	struct stack_frame_user frame;
 	struct trace_array *tr;
 	const void __user *fp;
 	int is_user;

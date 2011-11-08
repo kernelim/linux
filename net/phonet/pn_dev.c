@@ -224,6 +224,11 @@ static int phonet_device_notify(struct notifier_block *me, unsigned long what,
 				void *arg)
 {
 	struct net_device *dev = arg;
+	struct phonet_net *pnn = net_generic(dev_net(dev), phonet_net_id);
+
+	if (!pnn)
+		/* pernet memory already freed */
+		return 0;
 
 	switch (what) {
 	case NETDEV_REGISTER:
@@ -272,6 +277,7 @@ static void phonet_exit_net(struct net *net)
 	rtnl_unlock();
 
 	proc_net_remove(net, "phonet");
+	net_assign_generic(net, phonet_net_id, NULL);
 	kfree(pnn);
 }
 

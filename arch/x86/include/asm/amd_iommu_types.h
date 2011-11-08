@@ -135,6 +135,7 @@
 
 /* constants to configure the command buffer */
 #define CMD_BUFFER_SIZE    8192
+#define CMD_BUFFER_UNINITIALIZED 1
 #define CMD_BUFFER_ENTRIES 512
 #define MMIO_CMD_SIZE_SHIFT 56
 #define MMIO_CMD_SIZE_512 (0x9ULL << MMIO_CMD_SIZE_SHIFT)
@@ -348,6 +349,24 @@ struct amd_iommu {
 
 	/* default dma_ops domain for that IOMMU */
 	struct dma_ops_domain *default_dom;
+
+	/*
+	 * We can't rely on the BIOS to restore all values on reinit, so we
+	 * need to stash them
+	 */
+
+	/* The iommu BAR */
+	u32 stored_addr_lo;
+	u32 stored_addr_hi;
+
+	/*
+	 * Each iommu has 6 l1s, each of which is documented as having 0x12
+	 * registers
+	 */
+	u32 stored_l1[6][0x12];
+
+	/* The l2 indirect registers */
+	u32 stored_l2[0x83];
 };
 
 /*
@@ -465,6 +484,12 @@ struct __iommu_counter {
 static inline void amd_iommu_stats_init(void) { }
 
 #endif /* CONFIG_AMD_IOMMU_STATS */
+
+static inline bool is_rd890_iommu(struct pci_dev *pdev)
+{
+	return (pdev->vendor == PCI_VENDOR_ID_ATI) &&
+		(pdev->device == PCI_DEVICE_ID_RD890_IOMMU);
+}
 
 /* some function prototypes */
 extern void amd_iommu_reset_cmd_buffer(struct amd_iommu *iommu);

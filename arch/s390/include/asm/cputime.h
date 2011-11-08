@@ -88,6 +88,21 @@ msecs_to_cputime(const unsigned int m)
 }
 
 /*
+ * Convert cputime to microseconds and back.
+ */
+static inline unsigned int
+cputime_to_usecs(const cputime_t cputime)
+{
+	return cputime_div(cputime, 4096);
+}
+
+static inline cputime_t
+usecs_to_cputime(const unsigned int m)
+{
+	return (cputime_t) m * 4096;
+}
+
+/*
  * Convert cputime to milliseconds and back.
  */
 static inline unsigned int
@@ -183,6 +198,7 @@ struct s390_idle_data {
 	unsigned long long idle_count;
 	unsigned long long idle_enter;
 	unsigned long long idle_time;
+	int nohz_delay;
 };
 
 DECLARE_PER_CPU(struct s390_idle_data, s390_idle);
@@ -197,5 +213,12 @@ static inline void s390_idle_check(void)
 	if ((&__get_cpu_var(s390_idle))->idle_enter != 0ULL)
 		vtime_start_cpu();
 }
+
+static inline int s390_nohz_delay(int cpu)
+{
+	return per_cpu(s390_idle, cpu).nohz_delay != 0;
+}
+
+#define arch_needs_cpu(cpu) s390_nohz_delay(cpu)
 
 #endif /* _S390_CPUTIME_H */

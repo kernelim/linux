@@ -608,7 +608,7 @@
  * My guess is that there are two bits for each zbias primitive
  * (FILL, LINE, POINT).
  *  One to enable depth test and one for depth write.
- * Yet this doesnt explain why depth writes work ...
+ * Yet this doesn't explain why depth writes work ...
  */
 #define R300_RE_OCCLUSION_CNTL		    0x42B4
 #	define R300_OCCLUSION_ON		(1<<1)
@@ -817,7 +817,7 @@
 #	define R300_TX_MIN_FILTER_LINEAR_MIP_NEAREST        (6  <<  11)
 #	define R300_TX_MIN_FILTER_LINEAR_MIP_LINEAR         (10 <<  11)
 
-/* NOTE: NEAREST doesnt seem to exist.
+/* NOTE: NEAREST doesn't seem to exist.
  * Im not seting MAG_FILTER_MASK and (3 << 11) on for all
  * anisotropy modes because that would void selected mag filter
  */
@@ -900,6 +900,7 @@
 #	define R300_TX_FORMAT_FL_I32		    0x1B
 #	define R300_TX_FORMAT_FL_I32A32		    0x1C
 #	define R300_TX_FORMAT_FL_R32G32B32A32	    0x1D
+#	define R300_TX_FORMAT_ATI2N		    0x1F
 	/* alpha modes, convenience mostly */
 	/* if you have alpha, pick constant appropriate to the
 	   number of channels (1 for I8, 2 for I8A8, 4 for R8G8B8A8, etc */
@@ -951,6 +952,7 @@
 #       define R300_TXO_ENDIAN_HALFDW_SWAP       (3 << 0)
 #       define R300_TXO_MACRO_TILE               (1 << 2)
 #       define R300_TXO_MICRO_TILE               (1 << 3)
+#       define R300_TXO_MICRO_TILE_SQUARE        (2 << 3)
 #       define R300_TXO_OFFSET_MASK              0xffffffe0
 #       define R300_TXO_OFFSET_SHIFT             5
 	/* END: Guess from R200 */
@@ -1359,6 +1361,7 @@
 #       define R300_COLORPITCH_MASK              0x00001FF8 /* GUESS */
 #       define R300_COLOR_TILE_ENABLE            (1 << 16) /* GUESS */
 #       define R300_COLOR_MICROTILE_ENABLE       (1 << 17) /* GUESS */
+#       define R300_COLOR_MICROTILE_SQUARE_ENABLE (2 << 17)
 #       define R300_COLOR_ENDIAN_NO_SWAP         (0 << 18) /* GUESS */
 #       define R300_COLOR_ENDIAN_WORD_SWAP       (1 << 18) /* GUESS */
 #       define R300_COLOR_ENDIAN_DWORD_SWAP      (2 << 18) /* GUESS */
@@ -1368,6 +1371,8 @@
 #define R300_RB3D_COLORPITCH2               0x4E40 /* GUESS */
 #define R300_RB3D_COLORPITCH3               0x4E44 /* GUESS */
 
+#define R300_RB3D_AARESOLVE_OFFSET          0x4E80
+#define R300_RB3D_AARESOLVE_PITCH           0x4E84
 #define R300_RB3D_AARESOLVE_CTL             0x4E88
 /* gap */
 

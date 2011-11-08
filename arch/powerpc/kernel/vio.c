@@ -1053,7 +1053,7 @@ static struct iommu_table *vio_build_iommu_table(struct vio_dev *dev)
 	if (!dma_window)
 		return NULL;
 
-	tbl = kmalloc(sizeof(*tbl), GFP_KERNEL);
+	tbl = kzalloc(sizeof(*tbl), GFP_KERNEL);
 	if (tbl == NULL)
 		return NULL;
 
@@ -1066,6 +1066,7 @@ static struct iommu_table *vio_build_iommu_table(struct vio_dev *dev)
 	tbl->it_offset = offset >> IOMMU_PAGE_SHIFT;
 	tbl->it_busno = 0;
 	tbl->it_type = TCE_VB;
+	tbl->it_blocksize = 16;
 
 	return iommu_init_table(tbl, -1);
 }
@@ -1319,9 +1320,27 @@ static ssize_t devspec_show(struct device *dev,
 	return sprintf(buf, "%s\n", of_node ? of_node->full_name : "none");
 }
 
+static ssize_t modalias_show(struct device *dev, struct device_attribute *attr,
+			     char *buf)
+{
+	const struct vio_dev *vio_dev = to_vio_dev(dev);
+	struct device_node *dn;
+	const char *cp;
+
+	dn = dev->archdata.of_node;
+	if (!dn)
+		return -ENODEV;
+	cp = of_get_property(dn, "compatible", NULL);
+	if (!cp)
+		return -ENODEV;
+
+	return sprintf(buf, "vio:T%sS%s\n", vio_dev->type, cp);
+}
+
 static struct device_attribute vio_dev_attrs[] = {
 	__ATTR_RO(name),
 	__ATTR_RO(devspec),
+	__ATTR_RO(modalias),
 	__ATTR_NULL
 };
 
@@ -1357,6 +1376,29 @@ static int vio_hotplug(struct device *dev, struct kobj_uevent_env *env)
 	return 0;
 }
 
+static int vio_pm_suspend(struct device *dev)
+{
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	if (pm && pm->suspend)
+		return pm->suspend(dev);
+	return 0;
+}
+
+static int vio_pm_resume(struct device *dev)
+{
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	if (pm && pm->resume)
+		return pm->resume(dev);
+	return 0;
+}
+
+const struct dev_pm_ops vio_dev_pm_ops = {
+	.suspend = vio_pm_suspend,
+	.resume = vio_pm_resume,
+};
+
 static struct bus_type vio_bus_type = {
 	.name = "vio",
 	.dev_attrs = vio_dev_attrs,
@@ -1364,6 +1406,7 @@ static struct bus_type vio_bus_type = {
 	.match = vio_bus_match,
 	.probe = vio_bus_probe,
 	.remove = vio_bus_remove,
+	.pm = &vio_dev_pm_ops,
 };
 
 /**

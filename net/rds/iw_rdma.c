@@ -33,7 +33,6 @@
 #include <linux/kernel.h>
 
 #include "rds.h"
-#include "rdma.h"
 #include "iw.h"
 
 
@@ -157,7 +156,8 @@ static int rds_iw_add_cm_id(struct rds_iw_device *rds_iwdev, struct rdma_cm_id *
 	return 0;
 }
 
-void rds_iw_remove_cm_id(struct rds_iw_device *rds_iwdev, struct rdma_cm_id *cm_id)
+static void rds_iw_remove_cm_id(struct rds_iw_device *rds_iwdev,
+				struct rdma_cm_id *cm_id)
 {
 	struct rds_iw_cm_id *i_cm_id;
 
@@ -206,9 +206,9 @@ void rds_iw_add_conn(struct rds_iw_device *rds_iwdev, struct rds_connection *con
 	BUG_ON(list_empty(&ic->iw_node));
 	list_del(&ic->iw_node);
 
-	spin_lock_irq(&rds_iwdev->spinlock);
+	spin_lock(&rds_iwdev->spinlock);
 	list_add_tail(&ic->iw_node, &rds_iwdev->conn_list);
-	spin_unlock_irq(&rds_iwdev->spinlock);
+	spin_unlock(&rds_iwdev->spinlock);
 	spin_unlock_irq(&iw_nodev_conns_lock);
 
 	ic->rds_iwdev = rds_iwdev;
@@ -245,11 +245,8 @@ void __rds_iw_destroy_conns(struct list_head *list, spinlock_t *list_lock)
 	INIT_LIST_HEAD(list);
 	spin_unlock_irq(list_lock);
 
-	list_for_each_entry_safe(ic, _ic, &tmp_list, iw_node) {
-		if (ic->conn->c_passive)
-			rds_conn_destroy(ic->conn->c_passive);
+	list_for_each_entry_safe(ic, _ic, &tmp_list, iw_node)
 		rds_conn_destroy(ic->conn);
-	}
 }
 
 static void rds_iw_set_scatterlist(struct rds_iw_scatterlist *sg,

@@ -72,11 +72,13 @@ static int gfs2_unstuffer_page(struct gfs2_inode *ip, struct buffer_head *dibh,
 
 	if (!PageUptodate(page)) {
 		void *kaddr = kmap(page);
+		u64 dsize = i_size_read(inode);
+ 
+		if (dsize > (dibh->b_size - sizeof(struct gfs2_dinode)))
+			dsize = dibh->b_size - sizeof(struct gfs2_dinode);
 
-		memcpy(kaddr, dibh->b_data + sizeof(struct gfs2_dinode),
-		       ip->i_disksize);
-		memset(kaddr + ip->i_disksize, 0,
-		       PAGE_CACHE_SIZE - ip->i_disksize);
+		memcpy(kaddr, dibh->b_data + sizeof(struct gfs2_dinode), dsize);
+		memset(kaddr + dsize, 0, PAGE_CACHE_SIZE - dsize);
 		kunmap(page);
 
 		SetPageUptodate(page);
@@ -541,7 +543,7 @@ static int gfs2_bmap_alloc(struct inode *inode, const sector_t lblock,
 				*ptr++ = cpu_to_be64(bn++);
 			break;
 		}
-	} while (state != ALLOC_DATA);
+	} while ((state != ALLOC_DATA) || !dblock);
 
 	ip->i_height = height;
 	gfs2_add_inode_blocks(&ip->i_inode, alloced);
@@ -666,6 +668,30 @@ int gfs2_extent_map(struct inode *inode, u64 lblock, int *new, u64 *dblock, unsi
 	return ret;
 }
 
+static void gfs2_metapath_ra(struct gfs2_glock *gl,
+			     const struct buffer_head *bh, const __be64 *pos)
+{
+	struct buffer_head *rabh;
+	const __be64 *endp = (const __be64 *)(bh->b_data + bh->b_size);
+	const __be64 *t;
+
+	for (t = pos; t < endp; t++) {
+		if (!*t)
+			continue;
+
+		rabh = gfs2_getbuf(gl, be64_to_cpu(*t), CREATE);
+		if (trylock_buffer(rabh)) {
+			if (!buffer_uptodate(rabh)) {
+				rabh->b_end_io = end_buffer_read_sync;
+				submit_bh(READA | REQ_META, rabh);
+				continue;
+			}
+			unlock_buffer(rabh);
+		}
+		brelse(rabh);
+	}
+}
+
 /**
  * recursive_scan - recursively scan through the end of a file
  * @ip: the inode
@@ -718,7 +744,8 @@ static int recursive_scan(struct gfs2_inode *ip, struct buffer_head *dibh,
 	if (error)
 		goto out;
 
-	if (height < ip->i_height - 1)
+	if (height < ip->i_height - 1) {
+		gfs2_metapath_ra(ip->i_gl, bh, top);
 		for (; top < bottom; top++, first = 0) {
 			if (!*top)
 				continue;
@@ -730,7 +757,7 @@ static int recursive_scan(struct gfs2_inode *ip, struct buffer_head *dibh,
 			if (error)
 				break;
 		}
-
+	}
 out:
 	brelse(bh);
 	return error;
@@ -763,7 +790,7 @@ static int do_strip(struct gfs2_inode *ip, struct buffer_head *dibh,
 	int metadata;
 	unsigned int revokes = 0;
 	int x;
-	int error;
+	int error = 0;
 
 	if (!*top)
 		sm->sm_first = 0;
@@ -779,8 +806,14 @@ static int do_strip(struct gfs2_inode *ip, struct buffer_head *dibh,
 	metadata = (height != ip->i_height - 1);
 	if (metadata)
 		revokes = (height) ? sdp->sd_inptrs : sdp->sd_diptrs;
+	else if (ip->i_depth)
+		revokes = sdp->sd_inptrs;
 
-	error = gfs2_rindex_hold(sdp, &ip->i_alloc->al_ri_gh);
+	if (ip != GFS2_I(sdp->sd_rindex))
+		error = gfs2_rindex_hold(sdp, &ip->i_alloc->al_ri_gh);
+	else if (!sdp->sd_rgrps)
+		error = gfs2_ri_update(ip);
+
 	if (error)
 		return error;
 
@@ -879,7 +912,8 @@ out_rg_gunlock:
 out_rlist:
 	gfs2_rlist_free(&rlist);
 out:
-	gfs2_glock_dq_uninit(&ip->i_alloc->al_ri_gh);
+	if (ip != GFS2_I(sdp->sd_rindex))
+		gfs2_glock_dq_uninit(&ip->i_alloc->al_ri_gh);
 	return error;
 }
 
@@ -915,7 +949,7 @@ static int do_grow(struct gfs2_inode *ip, u64 size)
 		goto out_gunlock_q;
 
 	error = gfs2_trans_begin(sdp,
-			sdp->sd_max_height + al->al_rgd->rd_length +
+			sdp->sd_max_height + gfs2_rg_blocks(al) +
 			RES_JDATA + RES_DINODE + RES_STATFS + RES_QUOTA, 0);
 	if (error)
 		goto out_ipres;
@@ -1039,13 +1073,15 @@ static int trunc_start(struct gfs2_inode *ip, u64 size)
 		goto out;
 
 	if (gfs2_is_stuffed(ip)) {
+		u64 dsize = size + sizeof(struct gfs2_dinode);
 		ip->i_disksize = size;
 		ip->i_inode.i_mtime = ip->i_inode.i_ctime = CURRENT_TIME;
 		gfs2_trans_add_bh(ip->i_gl, dibh, 1);
 		gfs2_dinode_out(ip, dibh->b_data);
-		gfs2_buffer_clear_tail(dibh, sizeof(struct gfs2_dinode) + size);
+		if (dsize > dibh->b_size)
+			dsize = dibh->b_size;
+		gfs2_buffer_clear_tail(dibh, dsize);
 		error = 1;
-
 	} else {
 		if (size & (u64)(sdp->sd_sb.sb_bsize - 1))
 			error = gfs2_block_truncate_page(ip->i_inode.i_mapping);

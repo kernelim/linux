@@ -37,7 +37,7 @@
 #include <asm/vio.h>
 #include <asm/mmu.h>
 
-#define MODULE_VERS "1.8"
+#define MODULE_VERS "1.9"
 #define MODULE_NAME "lparcfg"
 
 /* #define LPARCFG_DEBUG */
@@ -131,34 +131,6 @@ static int iseries_lparcfg_data(struct seq_file *m, void *v)
 /*
  * Methods used to fetch LPAR data when running on a pSeries platform.
  */
-/**
- * h_get_mpp
- * H_GET_MPP hcall returns info in 7 parms
- */
-int h_get_mpp(struct hvcall_mpp_data *mpp_data)
-{
-	int rc;
-	unsigned long retbuf[PLPAR_HCALL9_BUFSIZE];
-
-	rc = plpar_hcall9(H_GET_MPP, retbuf);
-
-	mpp_data->entitled_mem = retbuf[0];
-	mpp_data->mapped_mem = retbuf[1];
-
-	mpp_data->group_num = (retbuf[2] >> 2 * 8) & 0xffff;
-	mpp_data->pool_num = retbuf[2] & 0xffff;
-
-	mpp_data->mem_weight = (retbuf[3] >> 7 * 8) & 0xff;
-	mpp_data->unallocated_mem_weight = (retbuf[3] >> 6 * 8) & 0xff;
-	mpp_data->unallocated_entitlement = retbuf[3] & 0xffffffffffff;
-
-	mpp_data->pool_size = retbuf[4];
-	mpp_data->loan_request = retbuf[5];
-	mpp_data->backing_mem = retbuf[6];
-
-	return rc;
-}
-EXPORT_SYMBOL(h_get_mpp);
 
 struct hvcall_ppp_data {
 	u64	entitlement;
@@ -344,6 +316,30 @@ static void parse_mpp_data(struct seq_file *m)
 	seq_printf(m, "backing_memory=%ld bytes\n", mpp_data.backing_mem);
 }
 
+/**
+ * parse_mpp_x_data
+ * Parse out data returned from h_get_mpp_x
+ */
+static void parse_mpp_x_data(struct seq_file *m)
+{
+	struct hvcall_mpp_x_data mpp_x_data;
+
+	if (!firmware_has_feature(FW_FEATURE_XCMO))
+		return;
+	if (h_get_mpp_x(&mpp_x_data))
+		return;
+
+	seq_printf(m, "coalesced_bytes=%ld\n", mpp_x_data.coalesced_bytes);
+
+	if (mpp_x_data.pool_coalesced_bytes)
+		seq_printf(m, "pool_coalesced_bytes=%ld\n",
+			   mpp_x_data.pool_coalesced_bytes);
+	if (mpp_x_data.pool_purr_cycles)
+		seq_printf(m, "coalesce_pool_purr=%ld\n", mpp_x_data.pool_purr_cycles);
+	if (mpp_x_data.pool_spurr_cycles)
+		seq_printf(m, "coalesce_pool_spurr=%ld\n", mpp_x_data.pool_spurr_cycles);
+}
+
 #define SPLPAR_CHARACTERISTICS_TOKEN 20
 #define SPLPAR_MAXLENGTH 1026*(sizeof(char))
 
@@ -486,6 +482,14 @@ static void splpar_dispatch_data(struct seq_file *m)
 	seq_printf(m, "dispatch_dispersions=%lu\n", dispatch_dispersions);
 }
 
+static void parse_em_data(struct seq_file *m)
+{
+	unsigned long retbuf[PLPAR_HCALL_BUFSIZE];
+
+	if (plpar_hcall(H_GET_EM_PARMS, retbuf) == H_SUCCESS)
+		seq_printf(m, "power_mode_data=%016lx\n", retbuf[0]);
+}
+
 static int pseries_lparcfg_data(struct seq_file *m, void *v)
 {
 	int partition_potential_processors;
@@ -511,6 +515,7 @@ static int pseries_lparcfg_data(struct seq_file *m, void *v)
 		parse_system_parameter_string(m);
 		parse_ppp_data(m);
 		parse_mpp_data(m);
+		parse_mpp_x_data(m);
 		pseries_cmo_data(m);
 		splpar_dispatch_data(m);
 
@@ -539,6 +544,8 @@ static int pseries_lparcfg_data(struct seq_file *m, void *v)
 	seq_printf(m, "shared_processor_mode=%d\n", lppaca[0].shared_proc);
 
 	seq_printf(m, "slb_size=%d\n", mmu_slb_size);
+
+	parse_em_data(m);
 
 	return 0;
 }

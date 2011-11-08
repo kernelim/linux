@@ -13,11 +13,13 @@
  */
 static inline void native_set_pte(pte_t *ptep , pte_t pte)
 {
+	mm_track_pte(ptep);
 	*ptep = pte;
 }
 
 static inline void native_set_pmd(pmd_t *pmdp, pmd_t pmd)
 {
+	mm_track_pmd(pmdp);
 	*pmdp = pmd;
 }
 
@@ -34,12 +36,14 @@ static inline void native_pmd_clear(pmd_t *pmdp)
 static inline void native_pte_clear(struct mm_struct *mm,
 				    unsigned long addr, pte_t *xp)
 {
+	mm_track_pte(xp);
 	*xp = native_make_pte(0);
 }
 
 #ifdef CONFIG_SMP
 static inline pte_t native_ptep_get_and_clear(pte_t *xp)
 {
+	mm_track_pte(xp);
 	return __pte(xchg(&xp->pte_low, 0));
 }
 #else

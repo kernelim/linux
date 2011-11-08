@@ -105,6 +105,7 @@ struct mlx4_bitmap {
 	u32			max;
 	u32                     reserved_top;
 	u32			mask;
+	u32			avail;
 	spinlock_t		lock;
 	unsigned long	       *table;
 };
@@ -282,6 +283,11 @@ struct mlx4_sense {
 	struct delayed_work	sense_poll;
 };
 
+struct mlx4_msix_ctl {
+	u64		pool_bm;
+	spinlock_t	pool_lock;
+};
+
 struct mlx4_priv {
 	struct mlx4_dev		dev;
 
@@ -313,6 +319,10 @@ struct mlx4_priv {
 	struct mlx4_port_info	port[MLX4_MAX_PORTS + 1];
 	struct mlx4_sense       sense;
 	struct mutex		port_mutex;
+	struct mlx4_msix_ctl	msix_ctl;
+	struct list_head	bf_list;
+	struct mutex		bf_mutex;
+	struct io_mapping	*bf_mapping;
 };
 
 static inline struct mlx4_priv *mlx4_priv(struct mlx4_dev *dev)
@@ -328,6 +338,7 @@ u32 mlx4_bitmap_alloc(struct mlx4_bitmap *bitmap);
 void mlx4_bitmap_free(struct mlx4_bitmap *bitmap, u32 obj);
 u32 mlx4_bitmap_alloc_range(struct mlx4_bitmap *bitmap, int cnt, int align);
 void mlx4_bitmap_free_range(struct mlx4_bitmap *bitmap, u32 obj, int cnt);
+u32 mlx4_bitmap_avail(struct mlx4_bitmap *bitmap);
 int mlx4_bitmap_init(struct mlx4_bitmap *bitmap, u32 num, u32 mask,
 		     u32 reserved_bot, u32 resetrved_top);
 void mlx4_bitmap_cleanup(struct mlx4_bitmap *bitmap);
@@ -386,6 +397,8 @@ void mlx4_srq_event(struct mlx4_dev *dev, u32 srqn, int event_type);
 
 void mlx4_handle_catas_err(struct mlx4_dev *dev);
 
+int mlx4_SENSE_PORT(struct mlx4_dev *dev, int port,
+		    enum mlx4_port_type *type);
 void mlx4_do_sense_ports(struct mlx4_dev *dev,
 			 enum mlx4_port_type *stype,
 			 enum mlx4_port_type *defaults);

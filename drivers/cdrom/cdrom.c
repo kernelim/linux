@@ -1186,8 +1186,12 @@ static int check_for_audio_disc(struct cdrom_device_info * cdi,
 
 void cdrom_release(struct cdrom_device_info *cdi, fmode_t mode)
 {
-	struct cdrom_device_ops *cdo = cdi->ops;
+	struct cdrom_device_ops *cdo;
 	int opened_for_data;
+
+	if (cdi == NULL)	/* device is gone */
+		return;
+	cdo = cdi->ops;
 
 	cdinfo(CD_CLOSE, "entering cdrom_release\n");
 

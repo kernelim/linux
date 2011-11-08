@@ -195,6 +195,8 @@ DEFINE_PER_CPU(unsigned long, cputime_scaled_last_delta);
 
 cputime_t cputime_one_jiffy;
 
+void (*dtl_consumer)(struct dtl_entry *, u64);
+
 static void calc_cputime_factors(void)
 {
 	struct div_result res;
@@ -210,28 +212,101 @@ static void calc_cputime_factors(void)
 }
 
 /*
- * Read the PURR on systems that have it, otherwise the timebase.
+ * Read the SPURR on systems that have it, otherwise the PURR,
+ * or if that doesn't exist return the timebase value passed in.
  */
-static u64 read_purr(void)
+static u64 read_spurr(u64 tb)
 {
+	if (cpu_has_feature(CPU_FTR_SPURR))
+		return mfspr(SPRN_SPURR);
 	if (cpu_has_feature(CPU_FTR_PURR))
 		return mfspr(SPRN_PURR);
-	return mftb();
+	return tb;
+}
+
+#ifdef CONFIG_PPC_SPLPAR
+
+/*
+ * Scan the dispatch trace log and count up the stolen time.
+ * Should be called with interrupts disabled.
+ */
+static u64 scan_dispatch_log(u64 stop_tb)
+{
+	u64 i = local_paca->dtl_ridx;
+	struct dtl_entry *dtl = local_paca->dtl_curr;
+	struct dtl_entry *dtl_end = local_paca->dispatch_log_end;
+	struct lppaca *vpa = local_paca->lppaca_ptr;
+	u64 tb_delta;
+	u64 stolen = 0;
+	u64 dtb;
+
+	if (!dtl)
+		return 0;
+
+	if (i == vpa->dtl_idx)
+		return 0;
+	while (i < vpa->dtl_idx) {
+		if (dtl_consumer)
+			dtl_consumer(dtl, i);
+		dtb = dtl->timebase;
+		tb_delta = dtl->enqueue_to_dispatch_time +
+			dtl->ready_to_enqueue_time;
+		barrier();
+		if (i + N_DISPATCH_LOG < vpa->dtl_idx) {
+			/* buffer has overflowed */
+			i = vpa->dtl_idx - N_DISPATCH_LOG;
+			dtl = local_paca->dispatch_log + (i % N_DISPATCH_LOG);
+			continue;
+		}
+		if (dtb > stop_tb)
+			break;
+		stolen += tb_delta;
+		++i;
+		++dtl;
+		if (dtl == dtl_end)
+			dtl = local_paca->dispatch_log;
+	}
+	local_paca->dtl_ridx = i;
+	local_paca->dtl_curr = dtl;
+	return stolen;
 }
 
 /*
- * Read the SPURR on systems that have it, otherwise the purr
+ * Accumulate stolen time by scanning the dispatch trace log.
+ * Called on entry from user mode.
  */
-static u64 read_spurr(u64 purr)
+void accumulate_stolen_time(void)
 {
-	/*
-	 * cpus without PURR won't have a SPURR
-	 * We already know the former when we use this, so tell gcc
-	 */
-	if (cpu_has_feature(CPU_FTR_PURR) && cpu_has_feature(CPU_FTR_SPURR))
-		return mfspr(SPRN_SPURR);
-	return purr;
+	u64 sst, ust;
+
+	sst = scan_dispatch_log(get_paca()->starttime_user);
+	ust = scan_dispatch_log(get_paca()->starttime);
+	get_paca()->system_time -= sst;
+	get_paca()->user_time -= ust;
+	get_paca()->stolen_time += ust + sst;
 }
+
+static inline u64 calculate_stolen_time(u64 stop_tb)
+{
+	u64 stolen = 0;
+
+	if (get_paca()->dtl_ridx != get_paca()->lppaca_ptr->dtl_idx) {
+		stolen = scan_dispatch_log(stop_tb);
+		get_paca()->system_time -= stolen;
+	}
+
+	stolen += get_paca()->stolen_time;
+	get_paca()->stolen_time = 0;
+	return stolen;
+}
+
+#else /* CONFIG_PPC_SPLPAR */
+static inline u64 calculate_stolen_time(u64 stop_tb)
+{
+	return 0;
+}
+
+#endif /* CONFIG_PPC_SPLPAR */
 
 /*
  * Account time for a transition between system, hard irq
@@ -239,33 +314,54 @@ static u64 read_spurr(u64 purr)
  */
 void account_system_vtime(struct task_struct *tsk)
 {
-	u64 now, nowscaled, delta, deltascaled, sys_time;
+	u64 now, nowscaled, delta, deltascaled;
 	unsigned long flags;
+	u64 stolen, udelta, sys_scaled, user_scaled;
 
 	local_irq_save(flags);
-	now = read_purr();
+	now = mftb();
 	nowscaled = read_spurr(now);
-	delta = now - get_paca()->startpurr;
+	get_paca()->system_time += now - get_paca()->starttime;
+	get_paca()->starttime = now;
 	deltascaled = nowscaled - get_paca()->startspurr;
-	get_paca()->startpurr = now;
 	get_paca()->startspurr = nowscaled;
-	if (!in_interrupt()) {
-		/* deltascaled includes both user and system time.
-		 * Hence scale it based on the purr ratio to estimate
-		 * the system time */
-		sys_time = get_paca()->system_time;
-		if (get_paca()->user_time)
-			deltascaled = deltascaled * sys_time /
-			     (sys_time + get_paca()->user_time);
-		delta += sys_time;
-		get_paca()->system_time = 0;
+
+	stolen = calculate_stolen_time(now);
+
+	delta = get_paca()->system_time;
+	get_paca()->system_time = 0;
+	udelta = get_paca()->user_time - get_paca()->utime_sspurr;
+	get_paca()->utime_sspurr = get_paca()->user_time;
+
+	/*
+	 * Because we don't read the SPURR on every kernel entry/exit,
+	 * deltascaled includes both user and system SPURR ticks.
+	 * Apportion these ticks to system SPURR ticks and user
+	 * SPURR ticks in the same ratio as the system time (delta)
+	 * and user time (udelta) values obtained from the timebase
+	 * over the same interval.  The system ticks get accounted here;
+	 * the user ticks get saved up in paca->user_time_scaled to be
+	 * used by account_process_tick.
+	 */
+	sys_scaled = delta;
+	user_scaled = udelta;
+	if (deltascaled != delta + udelta) {
+		if (udelta) {
+			sys_scaled = deltascaled * delta / (delta + udelta);
+			user_scaled = deltascaled - sys_scaled;
+		} else {
+			sys_scaled = deltascaled;
+		}
 	}
-	if (in_irq() || idle_task(smp_processor_id()) != tsk)
-		account_system_time(tsk, 0, delta, deltascaled);
-	else
-		account_idle_time(delta);
-	per_cpu(cputime_last_delta, smp_processor_id()) = delta;
-	per_cpu(cputime_scaled_last_delta, smp_processor_id()) = deltascaled;
+	get_paca()->user_time_scaled += user_scaled;
+
+	if (in_irq() || idle_task(smp_processor_id()) != tsk) {
+		account_system_time(tsk, 0, delta, sys_scaled);
+		if (stolen)
+			account_steal_time(stolen);
+	} else {
+		account_idle_time(delta + stolen);
+	}
 	local_irq_restore(flags);
 }
 
@@ -274,124 +370,25 @@ void account_system_vtime(struct task_struct *tsk)
  * by the exception entry and exit code to the generic process
  * user and system time records.
  * Must be called with interrupts disabled.
+ * Assumes that account_system_vtime() has been called recently
+ * (i.e. since the last entry from usermode) so that
+ * get_paca()->user_time_scaled is up to date.
  */
 void account_process_tick(struct task_struct *tsk, int user_tick)
 {
 	cputime_t utime, utimescaled;
 
 	utime = get_paca()->user_time;
+	utimescaled = get_paca()->user_time_scaled;
 	get_paca()->user_time = 0;
-	utimescaled = cputime_to_scaled(utime);
+	get_paca()->user_time_scaled = 0;
+	get_paca()->utime_sspurr = 0;
 	account_user_time(tsk, utime, utimescaled);
 }
 
-/*
- * Stuff for accounting stolen time.
- */
-struct cpu_purr_data {
-	int	initialized;			/* thread is running */
-	u64	tb;			/* last TB value read */
-	u64	purr;			/* last PURR value read */
-	u64	spurr;			/* last SPURR value read */
-};
-
-/*
- * Each entry in the cpu_purr_data array is manipulated only by its
- * "owner" cpu -- usually in the timer interrupt but also occasionally
- * in process context for cpu online.  As long as cpus do not touch
- * each others' cpu_purr_data, disabling local interrupts is
- * sufficient to serialize accesses.
- */
-static DEFINE_PER_CPU(struct cpu_purr_data, cpu_purr_data);
-
-static void snapshot_tb_and_purr(void *data)
-{
-	unsigned long flags;
-	struct cpu_purr_data *p = &__get_cpu_var(cpu_purr_data);
-
-	local_irq_save(flags);
-	p->tb = get_tb_or_rtc();
-	p->purr = mfspr(SPRN_PURR);
-	wmb();
-	p->initialized = 1;
-	local_irq_restore(flags);
-}
-
-/*
- * Called during boot when all cpus have come up.
- */
-void snapshot_timebases(void)
-{
-	if (!cpu_has_feature(CPU_FTR_PURR))
-		return;
-	on_each_cpu(snapshot_tb_and_purr, NULL, 1);
-}
-
-/*
- * Must be called with interrupts disabled.
- */
-void calculate_steal_time(void)
-{
-	u64 tb, purr;
-	s64 stolen;
-	struct cpu_purr_data *pme;
-
-	pme = &__get_cpu_var(cpu_purr_data);
-	if (!pme->initialized)
-		return;		/* !CPU_FTR_PURR or early in early boot */
-	tb = mftb();
-	purr = mfspr(SPRN_PURR);
-	stolen = (tb - pme->tb) - (purr - pme->purr);
-	if (stolen > 0) {
-		if (idle_task(smp_processor_id()) != current)
-			account_steal_time(stolen);
-		else
-			account_idle_time(stolen);
-	}
-	pme->tb = tb;
-	pme->purr = purr;
-}
-
-#ifdef CONFIG_PPC_SPLPAR
-/*
- * Must be called before the cpu is added to the online map when
- * a cpu is being brought up at runtime.
- */
-static void snapshot_purr(void)
-{
-	struct cpu_purr_data *pme;
-	unsigned long flags;
-
-	if (!cpu_has_feature(CPU_FTR_PURR))
-		return;
-	local_irq_save(flags);
-	pme = &__get_cpu_var(cpu_purr_data);
-	pme->tb = mftb();
-	pme->purr = mfspr(SPRN_PURR);
-	pme->initialized = 1;
-	local_irq_restore(flags);
-}
-
-#endif /* CONFIG_PPC_SPLPAR */
-
 #else /* ! CONFIG_VIRT_CPU_ACCOUNTING */
 #define calc_cputime_factors()
-#define calculate_steal_time()		do { } while (0)
 #endif
-
-#if !(defined(CONFIG_VIRT_CPU_ACCOUNTING) && defined(CONFIG_PPC_SPLPAR))
-#define snapshot_purr()			do { } while (0)
-#endif
-
-/*
- * Called when a cpu comes up after the system has finished booting,
- * i.e. as a result of a hotplug cpu action.
- */
-void snapshot_timebase(void)
-{
-	__get_cpu_var(last_jiffy) = get_tb_or_rtc();
-	snapshot_purr();
-}
 
 void __delay(unsigned long loops)
 {
@@ -422,7 +419,8 @@ void udelay(unsigned long usecs)
 EXPORT_SYMBOL(udelay);
 
 static inline void update_gtod(u64 new_tb_stamp, u64 new_stamp_xsec,
-			       u64 new_tb_to_xs)
+			       u64 new_tb_to_xs, struct timespec *now,
+			       u32 frac_sec)
 {
 	/*
 	 * tb_update_count is used to allow the userspace gettimeofday code
@@ -440,7 +438,8 @@ static inline void update_gtod(u64 new_tb_stamp, u64 new_stamp_xsec,
 	vdso_data->tb_to_xs = new_tb_to_xs;
 	vdso_data->wtom_clock_sec = wall_to_monotonic.tv_sec;
 	vdso_data->wtom_clock_nsec = wall_to_monotonic.tv_nsec;
-	vdso_data->stamp_xtime = xtime;
+	vdso_data->stamp_xtime = *now;
+	vdso_data->stamp_sec_fraction = frac_sec;
 	smp_wmb();
 	++(vdso_data->tb_update_count);
 }
@@ -530,25 +529,60 @@ void __init iSeries_time_init_early(void)
 }
 #endif /* CONFIG_PPC_ISERIES */
 
-#if defined(CONFIG_PERF_EVENTS) && defined(CONFIG_PPC32)
-DEFINE_PER_CPU(u8, perf_event_pending);
+#ifdef CONFIG_PERF_EVENTS
 
-void set_perf_event_pending(void)
+/*
+ * 64-bit uses a byte in the PACA, 32-bit uses a per-cpu variable...
+ */
+#ifdef CONFIG_PPC64
+static inline unsigned long test_perf_event_pending(void)
 {
-	get_cpu_var(perf_event_pending) = 1;
-	set_dec(1);
-	put_cpu_var(perf_event_pending);
+	unsigned long x;
+
+	asm volatile("lbz %0,%1(13)"
+		: "=r" (x)
+		: "i" (offsetof(struct paca_struct, perf_event_pending)));
+	return x;
 }
 
+static inline void set_perf_event_pending_flag(void)
+{
+	asm volatile("stb %0,%1(13)" : :
+		"r" (1),
+		"i" (offsetof(struct paca_struct, perf_event_pending)));
+}
+
+static inline void clear_perf_event_pending(void)
+{
+	asm volatile("stb %0,%1(13)" : :
+		"r" (0),
+		"i" (offsetof(struct paca_struct, perf_event_pending)));
+}
+
+#else /* 32-bit */
+
+DEFINE_PER_CPU(u8, perf_event_pending);
+
+#define set_perf_event_pending_flag()	__get_cpu_var(perf_event_pending) = 1
 #define test_perf_event_pending()	__get_cpu_var(perf_event_pending)
 #define clear_perf_event_pending()	__get_cpu_var(perf_event_pending) = 0
 
-#else  /* CONFIG_PERF_EVENTS && CONFIG_PPC32 */
+#endif /* 32 vs 64 bit */
+
+void set_perf_event_pending(void)
+{
+	preempt_disable();
+	set_perf_event_pending_flag();
+	set_dec(1);
+	preempt_enable();
+}
+
+#else  /* CONFIG_PERF_EVENTS */
 
 #define test_perf_event_pending()	0
 #define clear_perf_event_pending()
 
-#endif /* CONFIG_PERF_EVENTS && CONFIG_PPC32 */
+#endif /* CONFIG_PERF_EVENTS */
 
 /*
  * For iSeries shared processors, we have to let the hypervisor
@@ -576,10 +610,6 @@ void timer_interrupt(struct pt_regs * regs)
 	set_dec(DECREMENTER_MAX);
 
 #ifdef CONFIG_PPC32
-	if (test_perf_event_pending()) {
-		clear_perf_event_pending();
-		perf_event_do_pending();
-	}
 	if (atomic_read(&ppc_n_lost_interrupts) != 0)
 		do_IRQ(regs);
 #endif
@@ -595,7 +625,10 @@ void timer_interrupt(struct pt_regs * regs)
 	old_regs = set_irq_regs(regs);
 	irq_enter();
 
-	calculate_steal_time();
+	if (test_perf_event_pending()) {
+		clear_perf_event_pending();
+		perf_event_do_pending();
+	}
 
 #ifdef CONFIG_PPC_ISERIES
 	if (firmware_has_feature(FW_FEATURE_ISERIES))
@@ -828,9 +861,12 @@ static cycle_t timebase_read(struct clocksource *cs)
 	return (cycle_t)get_tb();
 }
 
-void update_vsyscall(struct timespec *wall_time, struct clocksource *clock)
+void update_vsyscall(struct timespec *wall_time, struct clocksource *clock,
+		     u32 mult)
 {
 	u64 t2x, stamp_xsec;
+	u32 frac_sec;
+	struct timespec t;
 
 	if (clock != &clocksource_timebase)
 		return;
@@ -841,11 +877,19 @@ void update_vsyscall(struct timespec *wall_time, struct clocksource *clock)
 
 	/* XXX this assumes clock->shift == 22 */
 	/* 4611686018 ~= 2^(20+64-22) / 1e9 */
-	t2x = (u64) clock->mult * 4611686018ULL;
+	t2x = (u64) mult * 4611686018ULL;
 	stamp_xsec = (u64) xtime.tv_nsec * XSEC_PER_SEC;
 	do_div(stamp_xsec, 1000000000);
 	stamp_xsec += (u64) xtime.tv_sec * XSEC_PER_SEC;
-	update_gtod(clock->cycle_last, stamp_xsec, t2x);
+
+	t = xtime;
+	if (t.tv_nsec >= 1000000000) {
+		++t.tv_sec;
+		t.tv_nsec -= 1000000000;
+	}
+	/* this is tv_nsec / 1e9 as a 0.32 fraction */
+	frac_sec = ((u64) t.tv_nsec * 18446744073ULL) >> 32;
+	update_gtod(clock->cycle_last, stamp_xsec, t2x, &t, frac_sec);
 }
 
 void update_vsyscall_tz(void)

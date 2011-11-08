@@ -1465,10 +1465,14 @@ static int __init ip6_tunnel_init(void)
 {
 	int  err;
 
+	err = register_pernet_gen_device(&ip6_tnl_net_id, &ip6_tnl_net_ops);
+	if (err < 0)
+		goto out;
+
 	if (xfrm6_tunnel_register(&ip4ip6_handler, AF_INET)) {
 		printk(KERN_ERR "ip6_tunnel init: can't register ip4ip6\n");
 		err = -EAGAIN;
-		goto out;
+		goto unreg_pernet_dev;
 	}
 
 	if (xfrm6_tunnel_register(&ip6ip6_handler, AF_INET6)) {
@@ -1477,14 +1481,12 @@ static int __init ip6_tunnel_init(void)
 		goto unreg_ip4ip6;
 	}
 
-	err = register_pernet_gen_device(&ip6_tnl_net_id, &ip6_tnl_net_ops);
-	if (err < 0)
-		goto err_pernet;
 	return 0;
-err_pernet:
-	xfrm6_tunnel_deregister(&ip6ip6_handler, AF_INET6);
+
 unreg_ip4ip6:
 	xfrm6_tunnel_deregister(&ip4ip6_handler, AF_INET);
+unreg_pernet_dev:
+	unregister_pernet_gen_device(ip6_tnl_net_id, &ip6_tnl_net_ops);
 out:
 	return err;
 }

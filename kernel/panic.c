@@ -10,6 +10,7 @@
  */
 #include <linux/debug_locks.h>
 #include <linux/interrupt.h>
+#include <linux/kmsg_dump.h>
 #include <linux/kallsyms.h>
 #include <linux/notifier.h>
 #include <linux/module.h>
@@ -23,13 +24,14 @@
 #include <linux/nmi.h>
 #include <linux/dmi.h>
 
-int panic_on_oops;
+int panic_on_oops = 1;
 static unsigned long tainted_mask;
 static int pause_on_oops;
 static int pause_on_oops_flag;
 static DEFINE_SPINLOCK(pause_on_oops_lock);
 
 int panic_timeout;
+EXPORT_SYMBOL_GPL(panic_timeout);
 
 ATOMIC_NOTIFIER_HEAD(panic_notifier_list);
 
@@ -80,6 +82,8 @@ NORET_TYPE void panic(const char * fmt, ...)
 	 * Do we want to call this before we try to display a message?
 	 */
 	crash_kexec(NULL);
+
+	kmsg_dump(KMSG_DUMP_PANIC);
 
 	/*
 	 * Note smp_send_stop is the usual smp shutdown function, which
@@ -161,6 +165,25 @@ static const struct tnt tnts[] = {
 	{ TAINT_OVERRIDDEN_ACPI_TABLE,	'A', ' ' },
 	{ TAINT_WARN,			'W', ' ' },
 	{ TAINT_CRAP,			'C', ' ' },
+	{ TAINT_FIRMWARE_WORKAROUND,	'I', ' ' },
+	{ TAINT_12,			'?', '-' },
+	{ TAINT_13,			'?', '-' },
+	{ TAINT_14,			'?', '-' },
+	{ TAINT_15,			'?', '-' },
+	{ TAINT_16,			'?', '-' },
+	{ TAINT_17,			'?', '-' },
+	{ TAINT_18,			'?', '-' },
+	{ TAINT_19,			'?', '-' },
+	{ TAINT_20,			'?', '-' },
+	{ TAINT_21,			'?', '-' },
+	{ TAINT_22,			'?', '-' },
+	{ TAINT_23,			'?', '-' },
+	{ TAINT_24,			'?', '-' },
+	{ TAINT_25,			'?', '-' },
+	{ TAINT_26,			'?', '-' },
+	{ TAINT_27,			'?', '-' },
+	{ TAINT_HARDWARE_UNSUPPORTED,	'H', ' ' },
+	{ TAINT_TECH_PREVIEW,		'T', ' ' },
 };
 
 /**
@@ -177,6 +200,8 @@ static const struct tnt tnts[] = {
  *  'A' - ACPI table overridden.
  *  'W' - Taint on warning.
  *  'C' - modules from drivers/staging are loaded.
+ *  'I' - Working around severe firmware bug.
+ *  'H' - Hardware is unsupported.
  *
  *	The string is overwritten by the next call to print_tainted().
  */
@@ -200,6 +225,7 @@ const char *print_tainted(void)
 
 	return buf;
 }
+EXPORT_SYMBOL(print_tainted);
 
 int test_taint(unsigned flag)
 {
@@ -221,7 +247,11 @@ void add_taint(unsigned flag)
 	 * Also we want to keep up lockdep for staging development and
 	 * post-warning case.
 	 */
-	if (flag != TAINT_CRAP && flag != TAINT_WARN && __debug_locks_off())
+	if (flag != TAINT_CRAP &&
+	    flag != TAINT_WARN &&
+	    flag != TAINT_TECH_PREVIEW &&
+	    flag != TAINT_HARDWARE_UNSUPPORTED &&
+	    __debug_locks_off())
 		printk(KERN_WARNING "Disabling lock debugging due to kernel taint\n");
 
 	set_bit(flag, &tainted_mask);
@@ -339,6 +369,7 @@ void oops_exit(void)
 {
 	do_oops_enter_exit();
 	print_oops_end_marker();
+	kmsg_dump(KMSG_DUMP_OOPS);
 }
 
 #ifdef WANT_WARN_ON_SLOWPATH
@@ -347,12 +378,14 @@ struct slowpath_args {
 	va_list args;
 };
 
-static void warn_slowpath_common(const char *file, int line, void *caller, struct slowpath_args *args)
+static void warn_slowpath_common(const char *file, int line, void *caller,
+				 unsigned taint, struct slowpath_args *args)
 {
 	const char *board;
 
 	printk(KERN_WARNING "------------[ cut here ]------------\n");
-	printk(KERN_WARNING "WARNING: at %s:%d %pS()\n", file, line, caller);
+	printk(KERN_WARNING "WARNING: at %s:%d %pS() (%s)\n",
+		file, line, caller, print_tainted());
 	board = dmi_get_system_info(DMI_PRODUCT_NAME);
 	if (board)
 		printk(KERN_WARNING "Hardware name: %s\n", board);
@@ -363,7 +396,7 @@ static void warn_slowpath_common(const char *file, int line, void *caller, struc
 	print_modules();
 	dump_stack();
 	print_oops_end_marker();
-	add_taint(TAINT_WARN);
+	add_taint(taint);
 }
 
 void warn_slowpath_fmt(const char *file, int line, const char *fmt, ...)
@@ -372,14 +405,29 @@ void warn_slowpath_fmt(const char *file, int line, const char *fmt, ...)
 
 	args.fmt = fmt;
 	va_start(args.args, fmt);
-	warn_slowpath_common(file, line, __builtin_return_address(0), &args);
+	warn_slowpath_common(file, line, __builtin_return_address(0),
+			     TAINT_WARN, &args);
 	va_end(args.args);
 }
 EXPORT_SYMBOL(warn_slowpath_fmt);
 
+void warn_slowpath_fmt_taint(const char *file, int line,
+			     unsigned taint, const char *fmt, ...)
+{
+	struct slowpath_args args;
+
+	args.fmt = fmt;
+	va_start(args.args, fmt);
+	warn_slowpath_common(file, line, __builtin_return_address(0),
+			     taint, &args);
+	va_end(args.args);
+}
+EXPORT_SYMBOL(warn_slowpath_fmt_taint);
+
 void warn_slowpath_null(const char *file, int line)
 {
-	warn_slowpath_common(file, line, __builtin_return_address(0), NULL);
+	warn_slowpath_common(file, line, __builtin_return_address(0),
+			     TAINT_WARN, NULL);
 }
 EXPORT_SYMBOL(warn_slowpath_null);
 #endif

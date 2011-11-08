@@ -21,6 +21,7 @@
 #include <linux/string.h>
 #include <linux/types.h>
 #include <linux/jhash.h>
+#include <linux/netdevice.h>
 
 #include <net/flow.h>
 #include <net/sock.h>
@@ -149,6 +150,13 @@ struct inet_sock {
 	} cork;
 };
 
+static inline __u32 inet_sk_rxhash(struct sock *sk)
+{
+	struct sock_extended *ske = sk_extended(sk);
+
+	return ske->inet_sock_extended.rxhash;
+}
+
 #define IPCORK_OPT	1	/* ip-options has been held in ipcork.opt */
 #define IPCORK_ALLFRAG	2	/* always fragment (for ipv6 for now) */
 
@@ -217,4 +225,33 @@ static inline __u8 inet_sk_flowi_flags(const struct sock *sk)
 	return inet_sk(sk)->transparent ? FLOWI_FLAG_ANYSRC : 0;
 }
 
+static inline void inet_rps_record_flow(struct sock *sk)
+{
+	struct rps_sock_flow_table *sock_flow_table;
+
+	rcu_read_lock();
+	sock_flow_table = rcu_dereference(rps_sock_flow_table);
+	rps_record_sock_flow(sock_flow_table, inet_sk_rxhash(sk));
+	rcu_read_unlock();
+}
+
+static inline void inet_rps_reset_flow(struct sock *sk)
+{
+	struct rps_sock_flow_table *sock_flow_table;
+
+	rcu_read_lock();
+	sock_flow_table = rcu_dereference(rps_sock_flow_table);
+	rps_reset_sock_flow(sock_flow_table, inet_sk_rxhash(sk));
+	rcu_read_unlock();
+}
+
+static inline void inet_rps_save_rxhash(struct sock *sk, u32 rxhash)
+{
+	struct sock_extended *ske = sk_extended(sk);
+
+	if (unlikely(ske->inet_sock_extended.rxhash != rxhash)) {
+		inet_rps_reset_flow(sk);
+		ske->inet_sock_extended.rxhash = rxhash;
+	}
+}
 #endif	/* _INET_SOCK_H */

@@ -121,13 +121,15 @@ static ssize_t zfcp_sysfs_port_rescan_store(struct device *dev,
 					    const char *buf, size_t count)
 {
 	struct zfcp_adapter *adapter = dev_get_drvdata(dev);
-	int ret;
 
 	if (atomic_read(&adapter->status) & ZFCP_STATUS_COMMON_REMOVE)
 		return -EBUSY;
 
-	ret = zfcp_fc_scan_ports(adapter);
-	return ret ? ret : (ssize_t) count;
+	/* sync the user-space- with the kernel-invocation of scan_work */
+	queue_work(adapter->work_queue, &adapter->scan_work);
+	flush_work(&adapter->scan_work);
+
+	return (ssize_t) count;
 }
 static ZFCP_DEV_ATTR(adapter, port_rescan, S_IWUSR, NULL,
 		     zfcp_sysfs_port_rescan_store);
@@ -205,30 +207,29 @@ static ssize_t zfcp_sysfs_unit_add_store(struct device *dev,
 	struct zfcp_port *port = dev_get_drvdata(dev);
 	struct zfcp_unit *unit;
 	u64 fcp_lun;
-	int retval = -EINVAL;
 
 	mutex_lock(&zfcp_data.config_mutex);
 	if (atomic_read(&port->status) & ZFCP_STATUS_COMMON_REMOVE) {
-		retval = -EBUSY;
-		goto out;
+		mutex_unlock(&zfcp_data.config_mutex);
+		return -EBUSY;
 	}
 
-	if (strict_strtoull(buf, 0, (unsigned long long *) &fcp_lun))
-		goto out;
+	if (strict_strtoull(buf, 0, (unsigned long long *) &fcp_lun)) {
+		mutex_unlock(&zfcp_data.config_mutex);
+		return -EINVAL;
+	}
 
 	unit = zfcp_unit_enqueue(port, fcp_lun);
+	mutex_unlock(&zfcp_data.config_mutex);
 	if (IS_ERR(unit))
-		goto out;
-
-	retval = 0;
+		return -EINVAL;
 
 	zfcp_erp_unit_reopen(unit, 0, "syuas_1", NULL);
 	zfcp_erp_wait(unit->port->adapter);
-	flush_work(&unit->scsi_work);
+	zfcp_scsi_scan(unit);
 	zfcp_unit_put(unit);
-out:
-	mutex_unlock(&zfcp_data.config_mutex);
-	return retval ? retval : (ssize_t) count;
+
+	return (ssize_t) count;
 }
 static DEVICE_ATTR(unit_add, S_IWUSR, NULL, zfcp_sysfs_unit_add_store);
 
@@ -239,52 +240,56 @@ static ssize_t zfcp_sysfs_unit_remove_store(struct device *dev,
 	struct zfcp_port *port = dev_get_drvdata(dev);
 	struct zfcp_unit *unit;
 	u64 fcp_lun;
-	int retval = 0;
 	LIST_HEAD(unit_remove_lh);
+	struct scsi_device *sdev;
 
 	mutex_lock(&zfcp_data.config_mutex);
 	if (atomic_read(&port->status) & ZFCP_STATUS_COMMON_REMOVE) {
-		retval = -EBUSY;
-		goto out;
+		mutex_unlock(&zfcp_data.config_mutex);
+		return -EBUSY;
 	}
 
 	if (strict_strtoull(buf, 0, (unsigned long long *) &fcp_lun)) {
-		retval = -EINVAL;
-		goto out;
+		mutex_unlock(&zfcp_data.config_mutex);
+		return -EINVAL;
+	}
+
+	read_lock_irq(&zfcp_data.config_lock);
+	unit = zfcp_get_unit_by_lun(port, fcp_lun);
+	read_unlock_irq(&zfcp_data.config_lock);
+	if (!unit) {
+		mutex_unlock(&zfcp_data.config_mutex);
+		return -ENXIO;
+	}
+	zfcp_unit_get(unit);
+	mutex_unlock(&zfcp_data.config_mutex);
+
+	sdev = scsi_device_lookup(port->adapter->scsi_host, 0,
+				  port->starget_id,
+				  scsilun_to_int((struct scsi_lun *)&fcp_lun));
+	if (sdev) {
+		scsi_remove_device(sdev);
+		scsi_device_put(sdev);
+	}
+
+	mutex_lock(&zfcp_data.config_mutex);
+	zfcp_unit_put(unit);
+	if (atomic_read(&unit->refcount)) {
+		mutex_unlock(&zfcp_data.config_mutex);
+		return -ENXIO;
 	}
 
 	write_lock_irq(&zfcp_data.config_lock);
-	unit = zfcp_get_unit_by_lun(port, fcp_lun);
-	if (unit) {
-		write_unlock_irq(&zfcp_data.config_lock);
-		/* wait for possible timeout during SCSI probe */
-		flush_work(&unit->scsi_work);
-		write_lock_irq(&zfcp_data.config_lock);
-
-		if (atomic_read(&unit->refcount) == 0) {
-			zfcp_unit_get(unit);
-			atomic_set_mask(ZFCP_STATUS_COMMON_REMOVE,
-					&unit->status);
-			list_move(&unit->list, &unit_remove_lh);
-		} else {
-			unit = NULL;
-		}
-	}
-
+	atomic_set_mask(ZFCP_STATUS_COMMON_REMOVE, &unit->status);
+	list_move(&unit->list, &unit_remove_lh);
 	write_unlock_irq(&zfcp_data.config_lock);
-
-	if (!unit) {
-		retval = -ENXIO;
-		goto out;
-	}
+	mutex_unlock(&zfcp_data.config_mutex);
 
 	zfcp_erp_unit_shutdown(unit, 0, "syurs_1", NULL);
 	zfcp_erp_wait(unit->port->adapter);
-	zfcp_unit_put(unit);
 	zfcp_unit_dequeue(unit);
-out:
-	mutex_unlock(&zfcp_data.config_mutex);
-	return retval ? retval : (ssize_t) count;
+
+	return (ssize_t)count;
 }
 static DEVICE_ATTR(unit_remove, S_IWUSR, NULL, zfcp_sysfs_unit_remove_store);
 

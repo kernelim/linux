@@ -67,6 +67,7 @@ extern void mnt_set_mountpoint(struct vfsmount *, struct dentry *,
 extern void release_mounts(struct list_head *);
 extern void umount_tree(struct vfsmount *, int, struct list_head *);
 extern struct vfsmount *copy_tree(struct vfsmount *, struct dentry *, int);
+extern int finish_automount(struct vfsmount *, struct path *);
 
 extern void __init mnt_init(void);
 
@@ -79,8 +80,16 @@ extern void chroot_fs_refs(struct path *, struct path *);
  * file_table.c
  */
 extern void mark_files_ro(struct super_block *);
+extern struct file *get_empty_filp(void);
 
 /*
  * super.c
  */
 extern int do_remount_sb(struct super_block *, int, void *, int);
+
+/*
+ * open.c
+ */
+struct nameidata;
+extern struct file *nameidata_to_filp(struct nameidata *);
+extern void release_open_intent(struct nameidata *);

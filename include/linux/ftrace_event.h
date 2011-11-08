@@ -24,6 +24,9 @@ const char *ftrace_print_flags_seq(struct trace_seq *p, const char *delim,
 const char *ftrace_print_symbols_seq(struct trace_seq *p, unsigned long val,
 				     const struct trace_print_flags *symbol_array);
 
+const char *ftrace_print_hex_seq(struct trace_seq *p,
+				 const unsigned char *buf, int len);
+
 /*
  * The trace entry - the most basic unit of tracing. This is what
  * is printed in the end as a single line in the trace output, such as:
@@ -110,29 +113,62 @@ void tracing_record_cmdline(struct task_struct *tsk);
 
 struct event_filter;
 
+enum {
+	TRACE_EVENT_FL_ENABLED_BIT,
+	TRACE_EVENT_FL_FILTERED_BIT,
+	TRACE_EVENT_FL_RECORDED_CMD_BIT,
+};
+
+enum {
+	TRACE_EVENT_FL_ENABLED		= (1 << TRACE_EVENT_FL_ENABLED_BIT),
+	TRACE_EVENT_FL_FILTERED		= (1 << TRACE_EVENT_FL_FILTERED_BIT),
+	TRACE_EVENT_FL_RECORDED_CMD	= (1 << TRACE_EVENT_FL_RECORDED_CMD_BIT),
+};
+
 struct ftrace_event_call {
 	struct list_head	list;
 	char			*name;
 	char			*system;
 	struct dentry		*dir;
 	struct trace_event	*event;
+	/* The enabled field was invalidated by flags field,
+	 * but is left here due to the KABI constrains. */
 	int			enabled;
-	int			(*regfunc)(void *);
-	void			(*unregfunc)(void *);
+	int			(*regfunc)(struct ftrace_event_call *);
+	void			(*unregfunc)(struct ftrace_event_call *);
 	int			id;
-	int			(*raw_init)(void);
-	int			(*show_format)(struct ftrace_event_call *call,
-					       struct trace_seq *s);
+	int			(*raw_init)(struct ftrace_event_call *);
+	int			(*show_format)(struct ftrace_event_call *,
+					       struct trace_seq *);
 	int			(*define_fields)(struct ftrace_event_call *);
 	struct list_head	fields;
+#ifdef __GENKSYMS__
 	int			filter_active;
+#else
+	/*
+	 * 32 bit flags:
+	 *   bit 1:		enabled
+	 *   bit 2:		filter_active
+	 *   bit 3:		enabled cmd record
+	 *
+	 * Changes to flags must hold the event_mutex.
+	 *
+	 * Note: Reads of flags do not hold the event_mutex since
+	 * they occur in critical sections. But the way flags
+	 * is currently used, these changes do no affect the code
+	 * except that when a change is made, it may have a slight
+	 * delay in propagating the changes to other CPUs due to
+	 * caching and such.
+	 */
+	unsigned int		flags;
+#endif
 	struct event_filter	*filter;
 	void			*mod;
 	void			*data;
 
 	atomic_t		profile_count;
-	int			(*profile_enable)(void);
-	void			(*profile_disable)(void);
+	int			(*profile_enable)(struct ftrace_event_call *);
+	void			(*profile_disable)(struct ftrace_event_call *);
 };
 
 #define FTRACE_MAX_PROFILE_SIZE	2048
@@ -144,7 +180,7 @@ extern char			*trace_profile_buf_nmi;
 #define MAX_FILTER_STR_VAL	256	/* Should handle KSYM_SYMBOL_LEN */
 
 extern void destroy_preds(struct ftrace_event_call *call);
-extern int filter_match_preds(struct ftrace_event_call *call, void *rec);
+extern int filter_match_preds(struct event_filter *filter, void *rec);
 extern int filter_current_check_discard(struct ring_buffer *buffer,
 					struct ftrace_event_call *call,
 					void *rec,
@@ -157,11 +193,12 @@ enum {
 	FILTER_PTR_STRING,
 };
 
-extern int trace_define_field(struct ftrace_event_call *call,
-			      const char *type, const char *name,
-			      int offset, int size, int is_signed,
-			      int filter_type);
 extern int trace_define_common_fields(struct ftrace_event_call *call);
+extern int trace_define_field(struct ftrace_event_call *call, const char *type,
+			      const char *name, int offset, int size,
+			      int is_signed, int filter_type);
+extern int trace_add_event_call(struct ftrace_event_call *call);
+extern void trace_remove_event_call(struct ftrace_event_call *call);
 
 #define is_signed_type(type)	(((type)(-1)) < 0)
 
@@ -185,5 +222,14 @@ do {									\
 	} else								\
 		__trace_printk(ip, fmt, ##args);			\
 } while (0)
+
+#ifdef CONFIG_EVENT_PROFILE
+struct perf_event;
+extern int ftrace_profile_enable(int event_id);
+extern void ftrace_profile_disable(int event_id);
+extern int ftrace_profile_set_filter(struct perf_event *event, int event_id,
+				     char *filter_str);
+extern void ftrace_profile_free_filter(struct perf_event *event);
+#endif
 
 #endif /* _LINUX_FTRACE_EVENT_H */

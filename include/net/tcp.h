@@ -59,6 +59,9 @@ extern void tcp_time_wait(struct sock *sk, int state, int timeo);
  */
 #define MAX_TCP_WINDOW		32767U
 
+/* Offer an initial receive window of 10 mss. */
+#define TCP_DEFAULT_INIT_RCVWND	10
+
 /* Minimal accepted MSS. It is (60+60+8) - (20+20). */
 #define TCP_MIN_MSS		88U
 
@@ -193,6 +196,12 @@ extern void tcp_time_wait(struct sock *sk, int state, int timeo);
 #define TCP_NAGLE_CORK		2	/* Socket is corked	    */
 #define TCP_NAGLE_PUSH		4	/* Cork is overridden for already queued data */
 
+/* TCP thin-stream limits */
+#define TCP_THIN_LINEAR_RETRIES 6       /* After 6 linear retries, do exp. backoff */
+
+/* TCP initial congestion window */
+#define TCP_INIT_CWND		10
+
 extern struct inet_timewait_death_row tcp_death_row;
 
 /* sysctl variables for tcp */
@@ -237,6 +246,8 @@ extern int sysctl_tcp_base_mss;
 extern int sysctl_tcp_workaround_signed_windows;
 extern int sysctl_tcp_slow_start_after_idle;
 extern int sysctl_tcp_max_ssthresh;
+extern int sysctl_tcp_thin_linear_timeouts;
+extern int sysctl_tcp_thin_dupack;
 
 extern atomic_t tcp_memory_allocated;
 extern struct percpu_counter tcp_sockets_allocated;
@@ -1031,6 +1042,14 @@ static inline int keepalive_probes(const struct tcp_sock *tp)
 	return tp->keepalive_probes ? : sysctl_tcp_keepalive_probes;
 }
 
+static inline u32 keepalive_time_elapsed(const struct tcp_sock *tp)
+{
+	const struct inet_connection_sock *icsk = &tp->inet_conn;
+
+	return min_t(u32, tcp_time_stamp - icsk->icsk_ack.lrcvtime,
+			  tcp_time_stamp - tp->rcv_tstamp);
+}
+
 static inline int tcp_fin_time(const struct sock *sk)
 {
 	int fin_timeout = tcp_sk(sk)->linger2 ? : sysctl_tcp_fin_timeout;
@@ -1263,13 +1282,19 @@ static inline struct sk_buff *tcp_write_queue_prev(struct sock *sk, struct sk_bu
  * TCP connection after "boundary" unsucessful, exponentially backed-off
  * retransmissions with an initial RTO of TCP_RTO_MIN.
  */
-static inline bool retransmits_timed_out(const struct sock *sk,
+static inline bool retransmits_timed_out(struct sock *sk,
 					 unsigned int boundary)
 {
 	unsigned int timeout, linear_backoff_thresh;
+	unsigned int start_ts;
 
 	if (!inet_csk(sk)->icsk_retransmits)
 		return false;
+
+	if (unlikely(!tcp_sk(sk)->retrans_stamp))
+		start_ts = TCP_SKB_CB(tcp_write_queue_head(sk))->when;
+	else
+		start_ts = tcp_sk(sk)->retrans_stamp;
 
 	linear_backoff_thresh = ilog2(TCP_RTO_MAX/TCP_RTO_MIN);
 
@@ -1279,7 +1304,7 @@ static inline bool retransmits_timed_out(const struct sock *sk,
 		timeout = ((2 << linear_backoff_thresh) - 1) * TCP_RTO_MIN +
 			  (boundary - linear_backoff_thresh) * TCP_RTO_MAX;
 
-	return (tcp_time_stamp - tcp_sk(sk)->retrans_stamp) >= timeout;
+	return (tcp_time_stamp - start_ts) >= timeout;
 }
 
 static inline struct sk_buff *tcp_send_head(struct sock *sk)
@@ -1401,6 +1426,14 @@ static inline void tcp_highest_sack_combine(struct sock *sk,
 {
 	if (tcp_sk(sk)->sacked_out && (old == tcp_sk(sk)->highest_sack))
 		tcp_sk(sk)->highest_sack = new;
+}
+
+/* Determines whether this is a thin stream (which may suffer from
+ * increased latency). Used to trigger latency-reducing mechanisms.
+ */
+static inline unsigned int tcp_stream_is_thin(struct tcp_sock *tp)
+{
+	return tp->packets_out < 4 && !tcp_in_initial_slowstart(tp);
 }
 
 /* /proc */

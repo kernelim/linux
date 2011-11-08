@@ -22,9 +22,11 @@
  */
 
 #include <linux/dmi.h>
+#include <linux/module.h>
 #include <asm/div64.h>
 #include <asm/vmware.h>
 #include <asm/x86_init.h>
+#include <asm/nmi.h>
 
 #define CPUID_VMWARE_INFO_LEAF	0x40000000
 #define VMWARE_HYPERVISOR_MAGIC	0x564D5868
@@ -50,7 +52,7 @@ static inline int __vmware_platform(void)
 
 static unsigned long vmware_get_tsc_khz(void)
 {
-	uint64_t tsc_hz;
+	uint64_t tsc_hz, lpj;
 	uint32_t eax, ebx, ecx, edx;
 
 	VMWARE_PORT(GETHZ, eax, ebx, ecx, edx);
@@ -61,6 +63,13 @@ static unsigned long vmware_get_tsc_khz(void)
 	printk(KERN_INFO "TSC freq read from hypervisor : %lu.%03lu MHz\n",
 			 (unsigned long) tsc_hz / 1000,
 			 (unsigned long) tsc_hz % 1000);
+
+	if (!preset_lpj) {
+		lpj = ((u64)tsc_hz * 1000);
+		do_div(lpj, HZ);
+		preset_lpj = lpj;
+	}
+
 	return tsc_hz;
 }
 
@@ -75,6 +84,8 @@ void __init vmware_platform_setup(void)
 	else
 		printk(KERN_WARNING
 		       "Failed to get TSC freq from the hypervisor\n");
+	/* NMI watchdog uses perfctrs, but they are not present. */
+	nmi_watchdog = NMI_NONE;
 }
 
 /*
@@ -101,6 +112,7 @@ int vmware_platform(void)
 
 	return 0;
 }
+EXPORT_SYMBOL(vmware_platform);
 
 /*
  * VMware hypervisor takes care of exporting a reliable TSC to the guest.

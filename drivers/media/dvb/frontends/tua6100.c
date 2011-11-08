@@ -28,6 +28,7 @@
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
+#include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/dvb/frontend.h>
 #include <asm/types.h>
@@ -79,6 +80,7 @@ static int tua6100_set_params(struct dvb_frontend *fe,
 	struct i2c_msg msg1 = { .addr = priv->i2c_address, .flags = 0, .buf = reg1, .len = 4 };
 	struct i2c_msg msg2 = { .addr = priv->i2c_address, .flags = 0, .buf = reg2, .len = 3 };
 
+#undef _P
 #define _R 4
 #define _P 32
 #define _ri 4000000

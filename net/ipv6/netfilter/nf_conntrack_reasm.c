@@ -63,6 +63,7 @@ struct nf_ct_frag6_queue
 	struct inet_frag_queue	q;
 
 	__be32			id;		/* fragment id		*/
+	u32			user;
 	struct in6_addr		saddr;
 	struct in6_addr		daddr;
 
@@ -74,7 +75,7 @@ static struct inet_frags nf_frags;
 static struct netns_frags nf_init_frags;
 
 #ifdef CONFIG_SYSCTL
-struct ctl_table nf_ct_ipv6_sysctl_table[] = {
+struct ctl_table nf_ct_frag6_sysctl_table[] = {
 	{
 		.procname	= "nf_conntrack_frag6_timeout",
 		.data		= &nf_init_frags.timeout,
@@ -100,6 +101,8 @@ struct ctl_table nf_ct_ipv6_sysctl_table[] = {
 	},
 	{ .ctl_name = 0 }
 };
+
+static struct ctl_table_header *nf_ct_frag6_sysctl_header;
 #endif
 
 static unsigned int nf_hashfn(struct inet_frag_queue *q)
@@ -170,13 +173,14 @@ out:
 /* Creation primitives. */
 
 static __inline__ struct nf_ct_frag6_queue *
-fq_find(__be32 id, struct in6_addr *src, struct in6_addr *dst)
+fq_find(__be32 id, u32 user, struct in6_addr *src, struct in6_addr *dst)
 {
 	struct inet_frag_queue *q;
 	struct ip6_create_arg arg;
 	unsigned int hash;
 
 	arg.id = id;
+	arg.user = user;
 	arg.src = src;
 	arg.dst = dst;
 
@@ -561,7 +565,7 @@ find_prev_fhdr(struct sk_buff *skb, u8 *prevhdrp, int *prevhoff, int *fhoff)
 	return 0;
 }
 
-struct sk_buff *nf_ct_frag6_gather(struct sk_buff *skb)
+struct sk_buff *nf_ct_frag6_gather(struct sk_buff *skb, u32 user)
 {
 	struct sk_buff *clone;
 	struct net_device *dev = skb->dev;
@@ -607,7 +611,7 @@ struct sk_buff *nf_ct_frag6_gather(struct sk_buff *skb)
 	if (atomic_read(&nf_init_frags.mem) > nf_init_frags.high_thresh)
 		nf_ct_frag6_evictor();
 
-	fq = fq_find(fhdr->identification, &hdr->saddr, &hdr->daddr);
+	fq = fq_find(fhdr->identification, user, &hdr->saddr, &hdr->daddr);
 	if (fq == NULL) {
 		pr_debug("Can't find and can't create new queue\n");
 		goto ret_orig;
@@ -675,11 +679,21 @@ int nf_ct_frag6_init(void)
 	inet_frags_init_net(&nf_init_frags);
 	inet_frags_init(&nf_frags);
 
+	nf_ct_frag6_sysctl_header = register_sysctl_paths(nf_net_netfilter_sysctl_path,
+							  nf_ct_frag6_sysctl_table);
+	if (!nf_ct_frag6_sysctl_header) {
+		inet_frags_fini(&nf_frags);
+		return -ENOMEM;
+	}
+
 	return 0;
 }
 
 void nf_ct_frag6_cleanup(void)
 {
+	unregister_sysctl_table(nf_ct_frag6_sysctl_header);
+	nf_ct_frag6_sysctl_header = NULL;
+
 	inet_frags_fini(&nf_frags);
 
 	nf_init_frags.low_thresh = 0;

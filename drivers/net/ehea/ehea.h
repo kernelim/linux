@@ -40,7 +40,7 @@
 #include <asm/io.h>
 
 #define DRV_NAME	"ehea"
-#define DRV_VERSION	"EHEA_0102"
+#define DRV_VERSION	"EHEA_0103-04"
 
 /* eHEA capability flags */
 #define DLPAR_PORT_ADD_REM 1
@@ -400,6 +400,7 @@ struct ehea_port_res {
 	u32 poll_counter;
 	struct net_lro_mgr lro_mgr;
 	struct net_lro_desc lro_desc[MAX_LRO_DESCRIPTORS];
+	int sq_restart_flag;
 };
 
 
@@ -490,6 +491,8 @@ struct ehea_port {
 	u8 full_duplex;
 	u8 autoneg;
 	u8 num_def_qps;
+	wait_queue_head_t swqe_avail_wq;
+	wait_queue_head_t restart_wq;
 };
 
 struct port_res_cfg {

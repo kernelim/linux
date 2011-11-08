@@ -1025,10 +1025,14 @@ static ssize_t pktgen_if_write(struct file *file,
 		return count;
 	}
 	if (!strcmp(name, "clone_skb")) {
+		struct net_device_extended *nde;
 		len = num_arg(&user_buffer[i], 10, &value);
 		if (len < 0)
 			return len;
-
+		nde = netdev_extended(pkt_dev->odev);
+		if ((value > 0) &&
+		    (!(nde->ext_priv_flags & IFF_TX_SKB_SHARING)))
+			return -ENOTSUPP;
 		i += len;
 		pkt_dev->clone_skb = value;
 
@@ -3516,6 +3520,7 @@ static int pktgen_thread_worker(void *arg)
 			wait_event_interruptible_timeout(t->queue,
 							 t->control != 0,
 							 HZ/10);
+			try_to_freeze();
 			continue;
 		}
 
@@ -3621,6 +3626,7 @@ out:
 static int pktgen_add_device(struct pktgen_thread *t, const char *ifname)
 {
 	struct pktgen_dev *pkt_dev;
+	struct net_device_extended *nde;
 	int err;
 
 	/* We don't allow a device to be on several threads */
@@ -3647,7 +3653,6 @@ static int pktgen_add_device(struct pktgen_thread *t, const char *ifname)
 	pkt_dev->min_pkt_size = ETH_ZLEN;
 	pkt_dev->max_pkt_size = ETH_ZLEN;
 	pkt_dev->nfrags = 0;
-	pkt_dev->clone_skb = pg_clone_skb_d;
 	pkt_dev->delay = pg_delay_d;
 	pkt_dev->count = pg_count_d;
 	pkt_dev->sofar = 0;
@@ -3655,7 +3660,6 @@ static int pktgen_add_device(struct pktgen_thread *t, const char *ifname)
 	pkt_dev->udp_src_max = 9;
 	pkt_dev->udp_dst_min = 9;
 	pkt_dev->udp_dst_max = 9;
-
 	pkt_dev->vlan_p = 0;
 	pkt_dev->vlan_cfi = 0;
 	pkt_dev->vlan_id = 0xffff;
@@ -3666,6 +3670,9 @@ static int pktgen_add_device(struct pktgen_thread *t, const char *ifname)
 	err = pktgen_setup_dev(pkt_dev, ifname);
 	if (err)
 		goto out1;
+	nde = netdev_extended(pkt_dev->odev);
+	if (nde->ext_priv_flags & IFF_TX_SKB_SHARING)
+		pkt_dev->clone_skb = pg_clone_skb_d;
 
 	pkt_dev->entry = proc_create_data(ifname, 0600, pg_proc_dir,
 					  &pktgen_if_fops, pkt_dev);

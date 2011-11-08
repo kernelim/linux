@@ -35,6 +35,7 @@
 #include <linux/acpi.h>
 #include <acpi/acpi_bus.h>
 #include <acpi/acpi_drivers.h>
+#include <acpi/apei.h>
 
 #define PREFIX "ACPI: "
 
@@ -45,6 +46,11 @@ ACPI_MODULE_NAME("pci_root");
 static int acpi_pci_root_add(struct acpi_device *device);
 static int acpi_pci_root_remove(struct acpi_device *device, int type);
 static int acpi_pci_root_start(struct acpi_device *device);
+
+#define ACPI_PCIE_REQ_SUPPORT (OSC_EXT_PCI_CONFIG_SUPPORT \
+				| OSC_ACTIVE_STATE_PWR_SUPPORT \
+				| OSC_CLOCK_PWR_CAPABILITY_SUPPORT \
+				| OSC_MSI_SUPPORT)
 
 static struct acpi_device_id root_device_ids[] = {
 	{"PNP0A03", 0},
@@ -202,91 +208,56 @@ static void acpi_pci_bridge_scan(struct acpi_device *device)
 		}
 }
 
-static u8 OSC_UUID[16] = {0x5B, 0x4D, 0xDB, 0x33, 0xF7, 0x1F, 0x1C, 0x40,
-			  0x96, 0x57, 0x74, 0x41, 0xC0, 0x3D, 0xD7, 0x66};
+static u8 pci_osc_uuid_str[] = "33DB4D5B-1FF7-401C-9657-7441C03DD766";
 
 static acpi_status acpi_pci_run_osc(acpi_handle handle,
 				    const u32 *capbuf, u32 *retval)
 {
+	struct acpi_osc_context context = {
+		.uuid_str = pci_osc_uuid_str,
+		.rev = 1,
+		.cap.length = 12,
+		.cap.pointer = (void *)capbuf,
+	};
 	acpi_status status;
-	struct acpi_object_list input;
-	union acpi_object in_params[4];
-	struct acpi_buffer output = {ACPI_ALLOCATE_BUFFER, NULL};
-	union acpi_object *out_obj;
-	u32 errors;
 
-	/* Setting up input parameters */
-	input.count = 4;
-	input.pointer = in_params;
-	in_params[0].type 		= ACPI_TYPE_BUFFER;
-	in_params[0].buffer.length 	= 16;
-	in_params[0].buffer.pointer	= OSC_UUID;
-	in_params[1].type 		= ACPI_TYPE_INTEGER;
-	in_params[1].integer.value 	= 1;
-	in_params[2].type 		= ACPI_TYPE_INTEGER;
-	in_params[2].integer.value	= 3;
-	in_params[3].type		= ACPI_TYPE_BUFFER;
-	in_params[3].buffer.length 	= 12;
-	in_params[3].buffer.pointer 	= (u8 *)capbuf;
-
-	status = acpi_evaluate_object(handle, "_OSC", &input, &output);
-	if (ACPI_FAILURE(status))
-		return status;
-
-	if (!output.length)
-		return AE_NULL_OBJECT;
-
-	out_obj = output.pointer;
-	if (out_obj->type != ACPI_TYPE_BUFFER) {
-		printk(KERN_DEBUG "_OSC evaluation returned wrong type\n");
-		status = AE_TYPE;
-		goto out_kfree;
+	status = acpi_run_osc(handle, &context);
+	if (ACPI_SUCCESS(status)) {
+		*retval = *((u32 *)(context.ret.pointer + 8));
+		kfree(context.ret.pointer);
 	}
-	/* Need to ignore the bit0 in result code */
-	errors = *((u32 *)out_obj->buffer.pointer) & ~(1 << 0);
-	if (errors) {
-		if (errors & OSC_REQUEST_ERROR)
-			printk(KERN_DEBUG "_OSC request failed\n");
-		if (errors & OSC_INVALID_UUID_ERROR)
-			printk(KERN_DEBUG "_OSC invalid UUID\n");
-		if (errors & OSC_INVALID_REVISION_ERROR)
-			printk(KERN_DEBUG "_OSC invalid revision\n");
-		if (errors & OSC_CAPABILITIES_MASK_ERROR) {
-			if (capbuf[OSC_QUERY_TYPE] & OSC_QUERY_ENABLE)
-				goto out_success;
-			printk(KERN_DEBUG
-			       "Firmware did not grant requested _OSC control\n");
-			status = AE_SUPPORT;
-			goto out_kfree;
-		}
-		status = AE_ERROR;
-		goto out_kfree;
-	}
-out_success:
-	*retval = *((u32 *)(out_obj->buffer.pointer + 8));
-	status = AE_OK;
-
-out_kfree:
-	kfree(output.pointer);
 	return status;
 }
 
-static acpi_status acpi_pci_query_osc(struct acpi_pci_root *root, u32 flags)
+static acpi_status acpi_pci_query_osc(struct acpi_pci_root *root,
+					u32 support,
+					u32 *control)
 {
 	acpi_status status;
-	u32 support_set, result, capbuf[3];
+	u32 result, capbuf[3];
 
-	/* do _OSC query for all possible controls */
-	support_set = root->osc_support_set | (flags & OSC_SUPPORT_MASKS);
+	support &= OSC_PCI_SUPPORT_MASKS;
+	support |= root->osc_support_set;
+
 	capbuf[OSC_QUERY_TYPE] = OSC_QUERY_ENABLE;
-	capbuf[OSC_SUPPORT_TYPE] = support_set;
-	capbuf[OSC_CONTROL_TYPE] = OSC_CONTROL_MASKS;
+	capbuf[OSC_SUPPORT_TYPE] = support;
+	if (control) {
+		*control &= OSC_PCI_CONTROL_MASKS;
+		capbuf[OSC_CONTROL_TYPE] = *control | root->osc_control_set;
+	} else {
+		/* Run _OSC query for all possible controls. */
+		capbuf[OSC_CONTROL_TYPE] = OSC_PCI_CONTROL_MASKS;
+	}
 
 	status = acpi_pci_run_osc(root->device->handle, capbuf, &result);
 	if (ACPI_SUCCESS(status)) {
-		root->osc_support_set = support_set;
-		root->osc_control_qry = result;
-		root->osc_queried = 1;
+		root->osc_support_set = support;
+		if (control) {
+			*control = result;
+		} else {
+			root->osc_control_qry = result;
+			root->osc_queried = 1;
+		}
 	}
 	return status;
 }
@@ -300,7 +271,7 @@ static acpi_status acpi_pci_osc_support(struct acpi_pci_root *root, u32 flags)
 	if (ACPI_FAILURE(status))
 		return status;
 	mutex_lock(&osc_lock);
-	status = acpi_pci_query_osc(root, flags);
+	status = acpi_pci_query_osc(root, flags, NULL);
 	mutex_unlock(&osc_lock);
 	return status;
 }
@@ -410,43 +381,60 @@ out:
 EXPORT_SYMBOL_GPL(acpi_get_pci_dev);
 
 /**
- * acpi_pci_osc_control_set - commit requested control to Firmware
- * @handle: acpi_handle for the target ACPI object
- * @flags: driver's requested control bits
+ * acpi_pci_osc_control_set - Request control of PCI root _OSC features.
+ * @handle: ACPI handle of a PCI root bridge (or PCIe Root Complex).
+ * @mask: Mask of _OSC bits to request control of, place to store control mask.
+ * @req: Mask of _OSC bits the control of is essential to the caller.
  *
- * Attempt to take control from Firmware on requested control bits.
+ * Run _OSC query for @mask and if that is successful, compare the returned
+ * mask of control bits with @req.  If all of the @req bits are set in the
+ * returned mask, run _OSC request for it.
+ *
+ * The variable at the @mask address may be modified regardless of whether or
+ * not the function returns success.  On success it will contain the mask of
+ * _OSC bits the BIOS has granted control of, but its contents are meaningless
+ * on failure.
  **/
-acpi_status acpi_pci_osc_control_set(acpi_handle handle, u32 flags)
+acpi_status acpi_pci_osc_control_set(acpi_handle handle, u32 *mask, u32 req)
 {
-	acpi_status status;
-	u32 control_req, result, capbuf[3];
-	acpi_handle tmp;
 	struct acpi_pci_root *root;
+	acpi_status status;
+	u32 ctrl, capbuf[3];
+	acpi_handle tmp;
 
-	status = acpi_get_handle(handle, "_OSC", &tmp);
-	if (ACPI_FAILURE(status))
-		return status;
+	if (!mask)
+		return AE_BAD_PARAMETER;
 
-	control_req = (flags & OSC_CONTROL_MASKS);
-	if (!control_req)
+	ctrl = *mask & OSC_PCI_CONTROL_MASKS;
+	if ((ctrl & req) != req)
 		return AE_TYPE;
 
 	root = acpi_pci_find_root(handle);
 	if (!root)
 		return AE_NOT_EXIST;
 
+	status = acpi_get_handle(handle, "_OSC", &tmp);
+	if (ACPI_FAILURE(status))
+		return status;
+
 	mutex_lock(&osc_lock);
+
+	*mask = ctrl | root->osc_control_set;
 	/* No need to evaluate _OSC if the control was already granted. */
-	if ((root->osc_control_set & control_req) == control_req)
+	if ((root->osc_control_set & ctrl) == ctrl)
 		goto out;
 
-	/* Need to query controls first before requesting them */
-	if (!root->osc_queried) {
-		status = acpi_pci_query_osc(root, root->osc_support_set);
+	/* Need to check the available controls bits before requesting them. */
+	while (*mask) {
+		status = acpi_pci_query_osc(root, root->osc_support_set, mask);
 		if (ACPI_FAILURE(status))
 			goto out;
+		if (ctrl == *mask)
+			break;
+		ctrl = *mask;
 	}
-	if ((root->osc_control_qry & control_req) != control_req) {
+
+	if ((ctrl & req) != req) {
 		printk(KERN_DEBUG
 		       "Firmware did not grant requested _OSC control\n");
 		status = AE_SUPPORT;
@@ -455,10 +443,10 @@ acpi_status acpi_pci_osc_control_set(acpi_handle handle, u32 flags)
 
 	capbuf[OSC_QUERY_TYPE] = 0;
 	capbuf[OSC_SUPPORT_TYPE] = root->osc_support_set;
-	capbuf[OSC_CONTROL_TYPE] = root->osc_control_set | control_req;
-	status = acpi_pci_run_osc(handle, capbuf, &result);
+	capbuf[OSC_CONTROL_TYPE] = ctrl;
+	status = acpi_pci_run_osc(handle, capbuf, mask);
 	if (ACPI_SUCCESS(status))
-		root->osc_control_set = result;
+		root->osc_control_set = *mask;
 out:
 	mutex_unlock(&osc_lock);
 	return status;
@@ -568,13 +556,40 @@ static int __devinit acpi_pci_root_add(struct acpi_device *device)
 	/* Indicate support for various _OSC capabilities. */
 	if (pci_ext_cfg_avail(root->bus->self))
 		flags |= OSC_EXT_PCI_CONFIG_SUPPORT;
-	if (pcie_aspm_enabled())
+	if (pcie_aspm_support_enabled())
 		flags |= OSC_ACTIVE_STATE_PWR_SUPPORT |
 			OSC_CLOCK_PWR_CAPABILITY_SUPPORT;
 	if (pci_msi_enabled())
 		flags |= OSC_MSI_SUPPORT;
 	if (flags != base_flags)
 		acpi_pci_osc_support(root, flags);
+
+	if (!pcie_ports_disabled
+	    && (flags & ACPI_PCIE_REQ_SUPPORT) == ACPI_PCIE_REQ_SUPPORT) {
+		flags = OSC_PCI_EXPRESS_CAP_STRUCTURE_CONTROL
+			| OSC_PCI_EXPRESS_NATIVE_HP_CONTROL
+			| OSC_PCI_EXPRESS_PME_CONTROL;
+
+		if (pci_aer_available()) {
+			if (aer_acpi_firmware_first())
+				dev_dbg(root->bus->bridge,
+					"PCIe errors handled by BIOS.\n");
+			else
+				flags |= OSC_PCI_EXPRESS_AER_CONTROL;
+		}
+
+		dev_info(root->bus->bridge,
+			"Requesting ACPI _OSC control (0x%02x)\n", flags);
+
+		status = acpi_pci_osc_control_set(device->handle, &flags,
+					OSC_PCI_EXPRESS_CAP_STRUCTURE_CONTROL);
+		if (ACPI_SUCCESS(status))
+			dev_info(root->bus->bridge,
+				"ACPI _OSC control (0x%02x) granted\n", flags);
+		else
+			dev_dbg(root->bus->bridge,
+				"ACPI _OSC request failed (code %d)\n", status);
+	}
 
 	return 0;
 
@@ -603,6 +618,8 @@ static int acpi_pci_root_remove(struct acpi_device *device, int type)
 
 static int __init acpi_pci_root_init(void)
 {
+	acpi_hest_init();
+
 	if (acpi_pci_disabled)
 		return 0;
 

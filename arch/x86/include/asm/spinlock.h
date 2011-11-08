@@ -34,8 +34,10 @@
  * (PPro errata 66, 92)
  */
 # define UNLOCK_LOCK_PREFIX LOCK_PREFIX
+# define UNLOCK_LOCK_ALT_PREFIX "nop;"
 #else
 # define UNLOCK_LOCK_PREFIX
+# define UNLOCK_LOCK_ALT_PREFIX
 #endif
 
 /*
@@ -60,19 +62,27 @@
 
 static __always_inline void __ticket_spin_lock(raw_spinlock_t *lock)
 {
-	short inc = 0x0100;
+	short inc;
 
 	asm volatile (
+		"1:\t\n"
+		"mov $0x100, %0\n\t"
 		LOCK_PREFIX "xaddw %w0, %1\n"
-		"1:\t"
+		"2:\t"
 		"cmpb %h0, %b0\n\t"
-		"je 2f\n\t"
+		"je 4f\n\t"
+		"3:\t\n"
 		"rep ; nop\n\t"
+		ALTERNATIVE(
 		"movb %1, %b0\n\t"
 		/* don't need lfence here, because loads are in-order */
-		"jmp 1b\n"
-		"2:"
-		: "+Q" (inc), "+m" (lock->slock)
+		"jmp 2b\n",
+		"", X86_FEATURE_UNFAIR_SPINLOCK)"\n\t"
+		"cmpw $0, %1\n\t"
+		"jne 3b\n\t"
+		"jmp 1b\n\t"
+		"4:"
+		: "=Q" (inc), "+m" (lock->slock)
 		:
 		: "memory", "cc");
 }
@@ -98,31 +108,41 @@ static __always_inline int __ticket_spin_trylock(raw_spinlock_t *lock)
 
 static __always_inline void __ticket_spin_unlock(raw_spinlock_t *lock)
 {
-	asm volatile(UNLOCK_LOCK_PREFIX "incb %0"
-		     : "+m" (lock->slock)
-		     :
-		     : "memory", "cc");
+	asm volatile(
+		ALTERNATIVE(UNLOCK_LOCK_PREFIX"incb (%0);"ASM_NOP3,
+			    UNLOCK_LOCK_ALT_PREFIX"movw $0, (%0)",
+			    X86_FEATURE_UNFAIR_SPINLOCK)
+		:
+		: "Q" (&lock->slock)
+		: "memory", "cc");
 }
 #else
 #define TICKET_SHIFT 16
 
 static __always_inline void __ticket_spin_lock(raw_spinlock_t *lock)
 {
-	int inc = 0x00010000;
+	int inc;
 	int tmp;
 
-	asm volatile(LOCK_PREFIX "xaddl %0, %1\n"
+	asm volatile("1:\t\n"
+		     "mov $0x10000, %0\n\t"
+		     LOCK_PREFIX "xaddl %0, %1\n"
 		     "movzwl %w0, %2\n\t"
 		     "shrl $16, %0\n\t"
-		     "1:\t"
+		     "2:\t"
 		     "cmpl %0, %2\n\t"
-		     "je 2f\n\t"
+		     "je 4f\n\t"
+		     "3:\n\t"
 		     "rep ; nop\n\t"
+		     ALTERNATIVE(
 		     "movzwl %1, %2\n\t"
 		     /* don't need lfence here, because loads are in-order */
-		     "jmp 1b\n"
-		     "2:"
-		     : "+r" (inc), "+m" (lock->slock), "=&r" (tmp)
+		     "jmp 2b\n\t", "", X86_FEATURE_UNFAIR_SPINLOCK)"\n\t"
+		     "cmp $0, %1\n\t"
+		     "jne 3b\n\t"
+		     "jmp 1b\n\t"
+		     "4:"
+		     : "=&r" (inc), "+m" (lock->slock), "=&r" (tmp)
 		     :
 		     : "memory", "cc");
 }
@@ -151,9 +171,11 @@ static __always_inline int __ticket_spin_trylock(raw_spinlock_t *lock)
 
 static __always_inline void __ticket_spin_unlock(raw_spinlock_t *lock)
 {
-	asm volatile(UNLOCK_LOCK_PREFIX "incw %0"
-		     : "+m" (lock->slock)
+	asm volatile(ALTERNATIVE(UNLOCK_LOCK_PREFIX "incw (%0);"ASM_NOP3,
+				 UNLOCK_LOCK_ALT_PREFIX"movl $0, (%0)",
+				 X86_FEATURE_UNFAIR_SPINLOCK)
 		     :
+		     : "Q" (&lock->slock)
 		     : "memory", "cc");
 }
 #endif

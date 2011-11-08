@@ -47,6 +47,7 @@
 #include <asm/system.h>
 
 #include <asm/apic.h>
+#include <asm/nmi.h>
 
 /*
  * Put the error code here just in case the user cares:
@@ -519,7 +520,7 @@ static struct notifier_block kgdb_notifier = {
 	/*
 	 * Lowest-prio notifier priority, we want to be notified last:
 	 */
-	.priority	= -INT_MAX,
+	.priority	= NMI_LOCAL_LOW_PRIOR,
 };
 
 /**

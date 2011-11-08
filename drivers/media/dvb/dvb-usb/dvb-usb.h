@@ -14,6 +14,7 @@
 #include <linux/usb.h>
 #include <linux/firmware.h>
 #include <linux/mutex.h>
+#include <media/rc-core.h>
 
 #include "dvb_frontend.h"
 #include "dvb_demux.h"
@@ -165,6 +166,38 @@ struct dvb_usb_adapter_properties {
 };
 
 /**
+ * struct dvb_rc properties of remote controller, using rc-core
+ * @rc_codes: name of rc codes table
+ * @protocol: type of protocol(s) currently used by the driver
+ * @allowed_protos: protocol(s) supported by the driver
+ * @change_protocol: callback to change protocol
+ * @rc_query: called to query an event event.
+ * @rc_interval: time in ms between two queries.
+ * @bulk_mode: device supports bulk mode for RC (disable polling mode)
+ */
+struct dvb_rc {
+	char *rc_codes;
+	u64 protocol;
+	u64 allowed_protos;
+	int (*change_protocol)(struct rc_dev *dev, u64 rc_type);
+	char *module_name;
+	int (*rc_query) (struct dvb_usb_device *d);
+	int rc_interval;
+	bool bulk_mode;                         /* uses bulk mode */
+};
+
+/**
+ * enum dvb_usb_mode - Specifies if it is using a legacy driver or a new one
+ *		       based on rc-core
+ * This is initialized/used only inside dvb-usb-remote.c.
+ * It shouldn't be set by the drivers.
+ */
+enum dvb_usb_mode {
+	DVB_RC_LEGACY,
+	DVB_RC_CORE,
+};
+
+/**
  * struct dvb_usb_device_properties - properties of a dvb-usb-device
  * @usb_ctrl: which USB device-side controller is in use. Needed for firmware
  *  download.
@@ -198,6 +231,12 @@ struct dvb_usb_adapter_properties {
  * @num_device_descs: number of struct dvb_usb_device_description in @devices
  * @devices: array of struct dvb_usb_device_description compatibles with these
  *  properties.
+ *
+ * @generic_bulk_ctrl_endpoint_response: some DVB USB devices use a separate
+ *  endpoint for responses to control messages sent with bulk transfers via
+ *  the generic_bulk_ctrl_endpoint. When this is non-zero, this will be used
+ *  instead of the generic_bulk_ctrl_endpoint when reading usb responses in
+ *  the dvb_usb_generic_rw helper function.
  */
 #define MAX_NO_OF_ADAPTER_PER_DEVICE 2
 struct dvb_usb_device_properties {
@@ -239,6 +278,11 @@ struct dvb_usb_device_properties {
 
 	int num_device_descs;
 	struct dvb_usb_device_description devices[12];
+#ifndef __GENKSYMS__
+	struct dvb_rc rc_core;
+	enum dvb_usb_mode rc_mode;
+	int generic_bulk_ctrl_endpoint_response;
+#endif
 };
 
 /**
@@ -385,6 +429,10 @@ struct dvb_usb_device {
 	struct module *owner;
 
 	void *priv;
+
+#ifndef __GENKSYMS__
+	struct rc_dev *rc_dev;
+#endif
 };
 
 extern int dvb_usb_device_init(struct usb_interface *,

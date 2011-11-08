@@ -882,7 +882,7 @@ static void i2o_block_request_fn(struct request_queue *q)
 		if (!req)
 			break;
 
-		if (blk_fs_request(req)) {
+		if (req->cmd_type == REQ_TYPE_FS) {
 			struct i2o_block_delayed_request *dreq;
 			struct i2o_block_request *ireq = req->special;
 			unsigned int queue_depth;
@@ -1065,9 +1065,8 @@ static int i2o_block_probe(struct device *dev)
 	queue = gd->queue;
 	queue->queuedata = i2o_blk_dev;
 
-	blk_queue_max_phys_segments(queue, I2O_MAX_PHYS_SEGMENTS);
-	blk_queue_max_sectors(queue, max_sectors);
-	blk_queue_max_hw_segments(queue, i2o_sg_tablesize(c, body_size));
+	blk_queue_max_hw_sectors(queue, max_sectors);
+	blk_queue_max_segments(queue, i2o_sg_tablesize(c, body_size));
 
 	osm_debug("max sectors = %d\n", queue->max_sectors);
 	osm_debug("phys segments = %d\n", queue->max_phys_segments);

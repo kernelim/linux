@@ -21,6 +21,18 @@ config PCI_MSI
 
 	   If you don't know what to do here, say N.
 
+config PCI_MSI_DEFAULT_ON
+	def_bool y
+	prompt "Use Message Signaled Interrupts by default"
+	depends on PCI_MSI
+	help
+	  Selecting this option will enable use of PCI MSI where applicable
+	  by default. Support for MSI can be disabled through the use of the
+	  pci=nomsi boot flag. Conversely, if this option is not selected,
+	  support for PCI MSI can be enabled by passing the pci=msi flag.
+
+	  If you don't know what to do here, say N.
+
 config PCI_LEGACY
 	bool "Enable deprecated pci_find_* API"
 	depends on PCI

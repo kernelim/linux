@@ -4522,6 +4522,9 @@ static int niu_alloc_channels(struct niu *np)
 {
 	struct niu_parent *parent = np->parent;
 	int first_rx_channel, first_tx_channel;
+	int num_rx_rings, num_tx_rings;
+	struct rx_ring_info *rx_rings;
+	struct tx_ring_info *tx_rings;
 	int i, port, err;
 
 	port = np->port;
@@ -4531,16 +4534,20 @@ static int niu_alloc_channels(struct niu *np)
 		first_tx_channel += parent->txchan_per_port[i];
 	}
 
-	np->num_rx_rings = parent->rxchan_per_port[port];
-	np->num_tx_rings = parent->txchan_per_port[port];
+	num_rx_rings = parent->rxchan_per_port[port];
+	num_tx_rings = parent->txchan_per_port[port];
 
-	np->dev->real_num_tx_queues = np->num_tx_rings;
+	netif_set_real_num_tx_queues(np->dev, num_tx_rings);
 
-	np->rx_rings = kzalloc(np->num_rx_rings * sizeof(struct rx_ring_info),
-			       GFP_KERNEL);
+	rx_rings = kcalloc(num_rx_rings, sizeof(struct rx_ring_info),
+			   GFP_KERNEL);
 	err = -ENOMEM;
-	if (!np->rx_rings)
+	if (!rx_rings)
 		goto out_err;
+
+	np->num_rx_rings = num_rx_rings;
+	smp_wmb();
+	np->rx_rings = rx_rings;
 
 	for (i = 0; i < np->num_rx_rings; i++) {
 		struct rx_ring_info *rp = &np->rx_rings[i];
@@ -4570,11 +4577,15 @@ static int niu_alloc_channels(struct niu *np)
 			return err;
 	}
 
-	np->tx_rings = kzalloc(np->num_tx_rings * sizeof(struct tx_ring_info),
-			       GFP_KERNEL);
+	tx_rings = kcalloc(num_tx_rings, sizeof(struct tx_ring_info),
+			   GFP_KERNEL);
 	err = -ENOMEM;
-	if (!np->tx_rings)
+	if (!tx_rings)
 		goto out_err;
+
+	np->num_tx_rings = num_tx_rings;
+	smp_wmb();
+	np->tx_rings = tx_rings;
 
 	for (i = 0; i < np->num_tx_rings; i++) {
 		struct tx_ring_info *rp = &np->tx_rings[i];
@@ -6287,11 +6298,17 @@ static void niu_sync_mac_stats(struct niu *np)
 static void niu_get_rx_stats(struct niu *np)
 {
 	unsigned long pkts, dropped, errors, bytes;
+	struct rx_ring_info *rx_rings;
 	int i;
 
 	pkts = dropped = errors = bytes = 0;
+
+	rx_rings = ACCESS_ONCE(np->rx_rings);
+	if (!rx_rings)
+		goto no_rings;
+
 	for (i = 0; i < np->num_rx_rings; i++) {
-		struct rx_ring_info *rp = &np->rx_rings[i];
+		struct rx_ring_info *rp = &rx_rings[i];
 
 		niu_sync_rx_discard_stats(np, rp, 0);
 
@@ -6300,6 +6317,8 @@ static void niu_get_rx_stats(struct niu *np)
 		dropped += rp->rx_dropped;
 		errors += rp->rx_errors;
 	}
+
+no_rings:
 	np->dev->stats.rx_packets = pkts;
 	np->dev->stats.rx_bytes = bytes;
 	np->dev->stats.rx_dropped = dropped;
@@ -6309,16 +6328,24 @@ static void niu_get_rx_stats(struct niu *np)
 static void niu_get_tx_stats(struct niu *np)
 {
 	unsigned long pkts, errors, bytes;
+	struct tx_ring_info *tx_rings;
 	int i;
 
 	pkts = errors = bytes = 0;
+
+	tx_rings = ACCESS_ONCE(np->tx_rings);
+	if (!tx_rings)
+		goto no_rings;
+
 	for (i = 0; i < np->num_tx_rings; i++) {
-		struct tx_ring_info *rp = &np->tx_rings[i];
+		struct tx_ring_info *rp = &tx_rings[i];
 
 		pkts += rp->tx_packets;
 		bytes += rp->tx_bytes;
 		errors += rp->tx_errors;
 	}
+
+no_rings:
 	np->dev->stats.tx_packets = pkts;
 	np->dev->stats.tx_bytes = bytes;
 	np->dev->stats.tx_errors = errors;
@@ -6328,9 +6355,10 @@ static struct net_device_stats *niu_get_stats(struct net_device *dev)
 {
 	struct niu *np = netdev_priv(dev);
 
-	niu_get_rx_stats(np);
-	niu_get_tx_stats(np);
-
+	if (netif_running(dev)) {
+		niu_get_rx_stats(np);
+		niu_get_tx_stats(np);
+	}
 	return &dev->stats;
 }
 
@@ -6376,7 +6404,7 @@ static void niu_set_rx_mode(struct net_device *dev)
 	if ((dev->flags & IFF_ALLMULTI) || (dev->mc_count > 0))
 		np->flags |= NIU_FLAGS_MCAST;
 
-	alt_cnt = dev->uc.count;
+	alt_cnt = netdev_uc_count(dev);
 	if (alt_cnt > niu_num_alt_addr(np)) {
 		alt_cnt = 0;
 		np->flags |= NIU_FLAGS_PROMISC;
@@ -6385,7 +6413,7 @@ static void niu_set_rx_mode(struct net_device *dev)
 	if (alt_cnt) {
 		int index = 0;
 
-		list_for_each_entry(ha, &dev->uc.list, list) {
+		netdev_for_each_uc_addr(ha, dev) {
 			err = niu_set_alt_mac(np, index, ha->addr);
 			if (err)
 				printk(KERN_WARNING PFX "%s: Error %d "
@@ -7315,33 +7343,28 @@ static int niu_get_ethtool_tcam_all(struct niu *np,
 	struct niu_parent *parent = np->parent;
 	struct niu_tcam_entry *tp;
 	int i, idx, cnt;
-	u16 n_entries;
 	unsigned long flags;
-
+	int ret = 0;
 
 	/* put the tcam size here */
 	nfc->data = tcam_get_size(np);
 
 	niu_lock_parent(np, flags);
-	n_entries = nfc->rule_cnt;
 	for (cnt = 0, i = 0; i < nfc->data; i++) {
 		idx = tcam_get_index(np, i);
 		tp = &parent->tcam[idx];
 		if (!tp->valid)
 			continue;
+		if (cnt == nfc->rule_cnt) {
+			ret = -EMSGSIZE;
+			break;
+		}
 		rule_locs[cnt] = i;
 		cnt++;
 	}
 	niu_unlock_parent(np, flags);
 
-	if (n_entries != cnt) {
-		/* print warning, this should not happen */
-		pr_info(PFX "niu%d: %s In niu_get_ethtool_tcam_all, "
-			"n_entries[%d] != cnt[%d]!!!\n\n",
-			np->parent->index, np->dev->name, n_entries, cnt);
-	}
-
-	return 0;
+	return ret;
 }
 
 static int niu_get_nfc(struct net_device *dev, struct ethtool_rxnfc *cmd,

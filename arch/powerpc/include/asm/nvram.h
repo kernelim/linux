@@ -12,6 +12,7 @@
 
 #include <linux/errno.h>
 
+/* Max bytes to read/write in one go */
 #define NVRW_CNT 0x20
 #define NVRAM_HEADER_LEN 16 /* sizeof(struct nvram_header) */
 #define NVRAM_BLOCK_LEN 16
@@ -35,6 +36,7 @@
 #define MOTO_RTC_CONTROLA       0x1FF8
 #define MOTO_RTC_CONTROLB       0x1FF9
 
+/* Signatures for nvram partitions */
 #define NVRAM_SIG_SP	0x02	/* support processor */
 #define NVRAM_SIG_OF	0x50	/* open firmware config */
 #define NVRAM_SIG_FW	0x51	/* general firmware */
@@ -54,6 +56,7 @@ struct nvram_header {
 	unsigned char signature;
 	unsigned char checksum;
 	unsigned short length;
+	/* Terminating null required only for names < 12 chars. */
 	char name[12];
 };
 
@@ -68,14 +71,15 @@ struct nvram_partition {
 };
 
 
+#ifdef CONFIG_PPC_PSERIES
 extern int nvram_write_error_log(char * buff, int length,
 					 unsigned int err_type, unsigned int err_seq);
 extern int nvram_read_error_log(char * buff, int length,
 					 unsigned int * err_type, unsigned int *err_seq);
 extern int nvram_clear_error_log(void);
-extern struct nvram_partition *nvram_find_partition(int sig, const char *name);
 
 extern int pSeries_nvram_init(void);
+#endif
 
 #ifdef CONFIG_MMIO_NVRAM
 extern int mmio_nvram_init(void);
@@ -85,6 +89,20 @@ static inline int mmio_nvram_init(void)
 	return -ENODEV;
 }
 #endif
+
+/*
+ * This function is no longer used internally, but it's exported, so we
+ * retain it to preserve the kABI.
+ */
+extern struct nvram_partition *nvram_find_partition(int sig, const char *name);
+
+extern int __init nvram_scan_partitions(void);
+extern loff_t nvram_create_partition(const char *name, int sig,
+				     int req_size, int min_size);
+extern int nvram_remove_partition(const char *name, int sig,
+					const char *const exceptions[]);
+extern int nvram_get_partition_size(loff_t data_index);
+extern loff_t nvram_find_partition2(const char *name, int sig, int *out_size);
 
 #endif /* __KERNEL__ */
 

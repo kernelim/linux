@@ -10,6 +10,7 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/pci.h>
+#include <linux/pcieport_if.h>
 #include <linux/errno.h>
 #include <linux/ioport.h>
 #include <linux/proc_fs.h>
@@ -190,6 +191,8 @@ void pci_enable_bridges(struct pci_bus *bus)
 	list_for_each_entry(dev, &bus->devices, bus_list) {
 		if (dev->subordinate) {
 			if (!pci_is_enabled(dev)) {
+				if (dev->is_pcie)
+					pcie_get_port_device_capability(dev);
 				retval = pci_enable_device(dev);
 				pci_set_master(dev);
 			}

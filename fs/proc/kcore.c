@@ -89,7 +89,8 @@ static size_t get_kcore_size(int *nphdr, size_t *elf_buflen)
 			roundup(sizeof(struct elf_prpsinfo), 4) +
 			roundup(sizeof(struct task_struct), 4);
 	*elf_buflen = PAGE_ALIGN(*elf_buflen);
-	return size + *elf_buflen;
+	/* Access to kcore is not allowed (except elf headers) */
+	return *elf_buflen;
 }
 
 static void free_kclist_ents(struct list_head *head)
@@ -428,7 +429,7 @@ read_kcore(struct file *file, char __user *buffer, size_t buflen, loff_t *fpos)
 	size_t size, tsz;
 	size_t elf_buflen;
 	int nphdr;
-	unsigned long start;
+	/* unsigned long start; */
 
 	read_lock(&kclist_lock);
 	size = get_kcore_size(&nphdr, &elf_buflen);
@@ -472,6 +473,10 @@ read_kcore(struct file *file, char __user *buffer, size_t buflen, loff_t *fpos)
 	} else
 		read_unlock(&kclist_lock);
 
+	/* Access to kcore is not allowed (except elf headers). */
+	return acc;
+
+#if 0
 	/*
 	 * Check to see if our file offset matches with any of
 	 * the addresses in the elf_phdr on our list.
@@ -536,6 +541,7 @@ read_kcore(struct file *file, char __user *buffer, size_t buflen, loff_t *fpos)
 	}
 
 	return acc;
+#endif
 }
 
 

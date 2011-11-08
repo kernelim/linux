@@ -56,7 +56,7 @@ static void usb_urb_complete(struct urb *urb)
 				stream->complete(stream, b, urb->actual_length);
 			break;
 		default:
-			err("unkown endpoint type in completition handler.");
+			err("unknown endpoint type in completition handler.");
 			return;
 	}
 	usb_submit_urb(urb,GFP_ATOMIC);
@@ -97,7 +97,8 @@ static int usb_free_stream_buffers(struct usb_data_stream *stream)
 			stream->buf_num--;
 			deb_mem("freeing buffer %d\n",stream->buf_num);
 			usb_buffer_free(stream->udev, stream->buf_size,
-					stream->buf_list[stream->buf_num], stream->dma_addr[stream->buf_num]);
+					  stream->buf_list[stream->buf_num],
+					  stream->dma_addr[stream->buf_num]);
 		}
 	}
 
@@ -228,7 +229,7 @@ int usb_urb_init(struct usb_data_stream *stream, struct usb_data_stream_properti
 		case USB_ISOC:
 			return usb_isoc_urb_init(stream);
 		default:
-			err("unkown URB-type for data transfer.");
+			err("unknown URB-type for data transfer.");
 			return -EINVAL;
 	}
 }

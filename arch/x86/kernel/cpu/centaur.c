@@ -294,7 +294,7 @@ static void __cpuinit init_c3(struct cpuinfo_x86 *c)
 		set_cpu_cap(c, X86_FEATURE_REP_GOOD);
 	}
 
-	display_cacheinfo(c);
+	cpu_detect_cache_sizes(c);
 }
 
 enum {
@@ -320,6 +320,7 @@ enum {
 
 static void __cpuinit early_init_centaur(struct cpuinfo_x86 *c)
 {
+	mark_hardware_unsupported("Centaur Processor");
 	switch (c->x86) {
 #ifdef CONFIG_X86_32
 	case 5:

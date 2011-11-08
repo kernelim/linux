@@ -89,6 +89,7 @@ ia64_elf32_init (struct pt_regs *regs)
 	 */
 	vma = kmem_cache_zalloc(vm_area_cachep, GFP_KERNEL);
 	if (vma) {
+		INIT_LIST_HEAD(&vma->anon_vma_chain);
 		vma->vm_mm = current->mm;
 		vma->vm_start = IA32_GDT_OFFSET;
 		vma->vm_end = vma->vm_start + PAGE_SIZE;
@@ -114,6 +115,7 @@ ia64_elf32_init (struct pt_regs *regs)
 	 */
 	vma = kmem_cache_zalloc(vm_area_cachep, GFP_KERNEL);
 	if (vma) {
+		INIT_LIST_HEAD(&vma->anon_vma_chain);
 		vma->vm_mm = current->mm;
 		vma->vm_start = IA32_GATE_OFFSET;
 		vma->vm_end = vma->vm_start + PAGE_SIZE;
@@ -138,6 +140,7 @@ ia64_elf32_init (struct pt_regs *regs)
 	 */
 	vma = kmem_cache_zalloc(vm_area_cachep, GFP_KERNEL);
 	if (vma) {
+		INIT_LIST_HEAD(&vma->anon_vma_chain);
 		vma->vm_mm = current->mm;
 		vma->vm_start = IA32_LDT_OFFSET;
 		vma->vm_end = vma->vm_start + PAGE_ALIGN(IA32_LDT_ENTRIES*IA32_LDT_ENTRY_SIZE);

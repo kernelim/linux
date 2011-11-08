@@ -49,7 +49,7 @@ set_render_target(drm_radeon_private_t *dev_priv, int format, int w, int h, u64 
 	RING_LOCALS;
 	DRM_DEBUG("\n");
 
-	h = (h + 7) & ~7;
+	h = ALIGN(h, 8);
 	if (h < 8)
 		h = 8;
 
@@ -137,9 +137,9 @@ set_shaders(struct drm_device *dev)
 	ps = (u32 *) ((char *)dev->agp_buffer_map->handle + dev_priv->blit_vb->offset + 256);
 
 	for (i = 0; i < r6xx_vs_size; i++)
-		vs[i] = r6xx_vs[i];
+		vs[i] = cpu_to_le32(r6xx_vs[i]);
 	for (i = 0; i < r6xx_ps_size; i++)
-		ps[i] = r6xx_ps[i];
+		ps[i] = cpu_to_le32(r6xx_ps[i]);
 
 	dev_priv->blit_vb->used = 512;
 
@@ -192,6 +192,9 @@ set_vtx_resource(drm_radeon_private_t *dev_priv, u64 gpu_addr)
 	DRM_DEBUG("\n");
 
 	sq_vtx_constant_word2 = (((gpu_addr >> 32) & 0xff) | (16 << 8));
+#ifdef __BIG_ENDIAN
+	sq_vtx_constant_word2 |= (2 << 30);
+#endif
 
 	BEGIN_RING(9);
 	OUT_RING(CP_PACKET3(R600_IT_SET_RESOURCE, 7));
@@ -291,7 +294,11 @@ draw_auto(drm_radeon_private_t *dev_priv)
 	OUT_RING(DI_PT_RECTLIST);
 
 	OUT_RING(CP_PACKET3(R600_IT_INDEX_TYPE, 0));
+#ifdef __BIG_ENDIAN
+	OUT_RING((2 << 2) | DI_INDEX_SIZE_16_BIT);
+#else
 	OUT_RING(DI_INDEX_SIZE_16_BIT);
+#endif
 
 	OUT_RING(CP_PACKET3(R600_IT_NUM_INSTANCES, 0));
 	OUT_RING(1);
@@ -538,9 +545,12 @@ int
 r600_prepare_blit_copy(struct drm_device *dev, struct drm_file *file_priv)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
+	int ret;
 	DRM_DEBUG("\n");
 
-	r600_nomm_get_vb(dev);
+	ret = r600_nomm_get_vb(dev);
+	if (ret)
+		return ret;
 
 	dev_priv->blit_vb->file_priv = file_priv;
 

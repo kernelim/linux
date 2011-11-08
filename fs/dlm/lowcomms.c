@@ -62,6 +62,9 @@
 #define NEEDED_RMEM (4*1024*1024)
 #define CONN_HASH_SIZE 32
 
+/* Number of messages to send before rescheduling */
+#define MAX_SEND_MSG_COUNT 25
+
 struct cbuf {
 	unsigned int base;
 	unsigned int len;
@@ -107,6 +110,7 @@ struct connection {
 #define CF_INIT_PENDING 4
 #define CF_IS_OTHERCON 5
 #define CF_CLOSE 6
+#define CF_APP_LIMITED 7
 	struct list_head writequeue;  /* List of outgoing writequeue_entries */
 	spinlock_t writequeue_lock;
 	int (*rx_action) (struct connection *);	/* What to do when active */
@@ -294,7 +298,17 @@ static void lowcomms_write_space(struct sock *sk)
 {
 	struct connection *con = sock2con(sk);
 
-	if (con && !test_and_set_bit(CF_WRITE_PENDING, &con->flags))
+	if (!con)
+		return;
+
+	clear_bit(SOCK_NOSPACE, &con->sock->flags);
+
+	if (test_and_clear_bit(CF_APP_LIMITED, &con->flags)) {
+		con->sock->sk->sk_write_pending--;
+		clear_bit(SOCK_ASYNC_NOSPACE, &con->sock->flags);
+	}
+
+	if (!test_and_set_bit(CF_WRITE_PENDING, &con->flags))
 		queue_work(send_workqueue, &con->swork);
 }
 
@@ -914,6 +928,7 @@ static void tcp_connect_to_sock(struct connection *con)
 	struct sockaddr_storage saddr, src_addr;
 	int addr_len;
 	struct socket *sock = NULL;
+	int one = 1;
 
 	if (con->nodeid == 0) {
 		log_print("attempt to connect sock 0 foiled");
@@ -959,6 +974,11 @@ static void tcp_connect_to_sock(struct connection *con)
 	make_sockaddr(&saddr, dlm_config.ci_tcp_port, &addr_len);
 
 	log_print("connecting to %d", con->nodeid);
+
+	/* Turn off Nagle's algorithm */
+	kernel_setsockopt(sock, SOL_TCP, TCP_NODELAY, (char *)&one,
+			  sizeof(one));
+
 	result =
 		sock->ops->connect(sock, (struct sockaddr *)&saddr, addr_len,
 				   O_NONBLOCK);
@@ -1010,6 +1030,10 @@ static struct socket *tcp_create_listen_sock(struct connection *con,
 		goto create_out;
 	}
 
+	/* Turn off Nagle's algorithm */
+	kernel_setsockopt(sock, SOL_TCP, TCP_NODELAY, (char *)&one,
+			  sizeof(one));
+
 	result = kernel_setsockopt(sock, SOL_SOCKET, SO_REUSEADDR,
 				   (char *)&one, sizeof(one));
 
@@ -1060,7 +1084,7 @@ static void init_local(void)
 		if (dlm_our_addr(&sas, i))
 			break;
 
-		addr = kmalloc(sizeof(*addr), GFP_KERNEL);
+		addr = kmalloc(sizeof(*addr), GFP_NOFS);
 		if (!addr)
 			break;
 		memcpy(addr, &sas, sizeof(*addr));
@@ -1099,7 +1123,7 @@ static int sctp_listen_for_all(void)
 	struct sockaddr_storage localaddr;
 	struct sctp_event_subscribe subscribe;
 	int result = -EINVAL, num = 1, i, addr_len;
-	struct connection *con = nodeid2con(0, GFP_KERNEL);
+	struct connection *con = nodeid2con(0, GFP_NOFS);
 	int bufsize = NEEDED_RMEM;
 
 	if (!con)
@@ -1171,7 +1195,7 @@ out:
 static int tcp_listen_for_all(void)
 {
 	struct socket *sock = NULL;
-	struct connection *con = nodeid2con(0, GFP_KERNEL);
+	struct connection *con = nodeid2con(0, GFP_NOFS);
 	int result = -EINVAL;
 
 	if (!con)
@@ -1296,6 +1320,7 @@ static void send_to_sock(struct connection *con)
 	const int msg_flags = MSG_DONTWAIT | MSG_NOSIGNAL;
 	struct writequeue_entry *e;
 	int len, offset;
+	int count = 0;
 
 	mutex_lock(&con->sock_mutex);
 	if (con->sock == NULL)
@@ -1318,14 +1343,27 @@ static void send_to_sock(struct connection *con)
 			ret = kernel_sendpage(con->sock, e->page, offset, len,
 					      msg_flags);
 			if (ret == -EAGAIN || ret == 0) {
+				if (ret == -EAGAIN &&
+				    test_bit(SOCK_ASYNC_NOSPACE, &con->sock->flags) &&
+				    !test_and_set_bit(CF_APP_LIMITED, &con->flags)) {
+					/* Notify TCP that we're limited by the
+					 * application window size.
+					 */
+					set_bit(SOCK_NOSPACE, &con->sock->flags);
+					con->sock->sk->sk_write_pending++;
+				}
 				cond_resched();
 				goto out;
 			}
 			if (ret <= 0)
 				goto send_error;
 		}
-			/* Don't starve people filling buffers */
+
+		/* Don't starve people filling buffers */
+		if (++count >= MAX_SEND_MSG_COUNT) {
 			cond_resched();
+			count = 0;
+		}
 
 		spin_lock(&con->writequeue_lock);
 		e->offset += ret;

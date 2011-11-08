@@ -3,6 +3,12 @@
 #include <linux/module.h>
 #include <linux/major.h>
 
+/*
+ *	These allocations are managed by device@lanana.org. If you use an
+ *	entry that is not in assigned your entry may well be moved and
+ *	reassigned, or set dynamic if a fixed value is not justified.
+ */
+
 #define PSMOUSE_MINOR		1
 #define MS_BUSMOUSE_MINOR	2
 #define ATIXL_BUSMOUSE_MINOR	3

@@ -65,6 +65,16 @@ config BLK_DEV_BSG
 
 	  If unsure, say Y.
 
+config BLK_DEV_BSGLIB
+	bool "Block layer SG support v4 helper lib"
+	default n
+	select BLK_DEV_BSG
+	help
+	  Subsystems will normally enable this if needed. Users will not
+	  normally need to manually enable this.
+
+	  If unsure, say N.
+
 config BLK_DEV_INTEGRITY
 	bool "Block layer data integrity support"
 	---help---
@@ -76,6 +86,18 @@ config BLK_DEV_INTEGRITY
 	Say yes here if you have a storage device that provides the
 	T10/SCSI Data Integrity Field or the T13/ATA External Path
 	Protection.  If in doubt, say N.
+
+config BLK_DEV_THROTTLING
+	bool "Block layer bio throttling support"
+	depends on BLK_CGROUP=y && EXPERIMENTAL
+	default n
+	---help---
+	Block layer bio throttling support. It can be used to limit
+	the IO rate to a device. IO rate policies are per cgroup and
+	one needs to mount and use blkio cgroup controller for creating
+	cgroups and specifying per device IO rate policies.
+
+	See Documentation/cgroups/blkio-controller.txt for more information.
 
 endif # BLOCK
 

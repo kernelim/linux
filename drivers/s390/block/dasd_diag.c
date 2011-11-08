@@ -44,7 +44,7 @@ MODULE_LICENSE("GPL");
 			   sizeof(struct dasd_diag_req)) / \
 		           sizeof(struct dasd_diag_bio)) / 2)
 #define DIAG_MAX_RETRIES	32
-#define DIAG_TIMEOUT		50 * HZ
+#define DIAG_TIMEOUT		50
 
 static struct dasd_discipline dasd_diag_discipline;
 
@@ -145,6 +145,13 @@ dasd_diag_erp(struct dasd_device *device)
 
 	mdsk_term_io(device);
 	rc = mdsk_init_io(device, device->block->bp_block, 0, NULL);
+	if (rc == 4) {
+		if (!(test_and_set_bit(DASD_FLAG_DEVICE_RO, &device->flags)))
+			dev_warn(&device->cdev->dev,
+				 "The access mode of a DIAG device changed"
+				 " to read-only");
+		rc = 0;
+	}
 	if (rc)
 		dev_warn(&device->cdev->dev, "DIAG ERP failed with "
 			    "rc=%d\n", rc);
@@ -354,6 +361,8 @@ dasd_diag_check_device(struct dasd_device *device)
 		goto out;
 	}
 
+	device->default_expires = DIAG_TIMEOUT;
+
 	/* Figure out position of label block */
 	switch (private->rdc_data.vdev_class) {
 	case DEV_CLASS_FBA:
@@ -433,16 +442,20 @@ dasd_diag_check_device(struct dasd_device *device)
 	for (sb = 512; sb < bsize; sb = sb << 1)
 		block->s2b_shift++;
 	rc = mdsk_init_io(device, block->bp_block, 0, NULL);
-	if (rc) {
+	if (rc && (rc != 4)) {
 		dev_warn(&device->cdev->dev, "DIAG initialization "
 			"failed with rc=%d\n", rc);
 		rc = -EIO;
 	} else {
+		if (rc == 4)
+			set_bit(DASD_FLAG_DEVICE_RO, &device->flags);
 		dev_info(&device->cdev->dev,
-			 "New DASD with %ld byte/block, total size %ld KB\n",
+			 "New DASD with %ld byte/block, total size %ld KB%s\n",
 			 (unsigned long) block->bp_block,
 			 (unsigned long) (block->blocks <<
-					  block->s2b_shift) >> 1);
+					  block->s2b_shift) >> 1,
+			 (rc == 4) ? ", read-only device" : "");
+		rc = 0;
 	}
 out_label:
 	free_page((long) label);
@@ -551,7 +564,7 @@ static struct dasd_ccw_req *dasd_diag_build_cp(struct dasd_device *memdev,
 	cqr->startdev = memdev;
 	cqr->memdev = memdev;
 	cqr->block = block;
-	cqr->expires = DIAG_TIMEOUT;
+	cqr->expires = memdev->default_expires * HZ;
 	cqr->status = DASD_CQR_FILLED;
 	return cqr;
 }
@@ -606,6 +619,7 @@ static struct dasd_discipline dasd_diag_discipline = {
 	.ebcname = "DIAG",
 	.max_blocks = DIAG_MAX_BLOCKS,
 	.check_device = dasd_diag_check_device,
+	.verify_path = dasd_generic_verify_path,
 	.fill_geometry = dasd_diag_fill_geometry,
 	.start_IO = dasd_start_diag,
 	.term_IO = dasd_diag_term_IO,

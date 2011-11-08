@@ -234,6 +234,18 @@ config MFD_WM8352_CONFIG_MODE_3
 config MFD_WM8350_I2C
 	tristate "Support Wolfson Microelectronics WM8350 with I2C"
 	select MFD_WM8350
+	select MFD_WM8350_CONFIG_MODE_0
+	select MFD_WM8350_CONFIG_MODE_1
+	select MFD_WM8350_CONFIG_MODE_2
+	select MFD_WM8350_CONFIG_MODE_3
+	select MFD_WM8351_CONFIG_MODE_0
+	select MFD_WM8351_CONFIG_MODE_1
+	select MFD_WM8351_CONFIG_MODE_2
+	select MFD_WM8351_CONFIG_MODE_3
+	select MFD_WM8352_CONFIG_MODE_0
+	select MFD_WM8352_CONFIG_MODE_1
+	select MFD_WM8352_CONFIG_MODE_2
+	select MFD_WM8352_CONFIG_MODE_3
 	depends on I2C
 	help
 	  The WM8350 is an integrated audio and power management

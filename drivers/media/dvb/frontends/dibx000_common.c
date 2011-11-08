@@ -6,7 +6,7 @@ static int debug;
 module_param(debug, int, 0644);
 MODULE_PARM_DESC(debug, "turn on debugging (default: 0)");
 
-#define dprintk(args...) do { if (debug) { printk(KERN_DEBUG "DiBX000: "); printk(args); } } while (0)
+#define dprintk(args...) do { if (debug) { printk(KERN_DEBUG "DiBX000: "); printk(args); printk("\n"); } } while (0)
 
 static int dibx000_write_word(struct dibx000_i2c_master *mst, u16 reg, u16 val)
 {
@@ -25,7 +25,7 @@ static int dibx000_i2c_select_interface(struct dibx000_i2c_master *mst,
 					enum dibx000_i2c_interface intf)
 {
 	if (mst->device_rev > DIB3000MC && mst->selected_interface != intf) {
-		dprintk("selecting interface: %d\n", intf);
+		dprintk("selecting interface: %d", intf);
 		mst->selected_interface = intf;
 		return dibx000_write_word(mst, mst->base_reg + 4, intf);
 	}
@@ -130,7 +130,7 @@ static int i2c_adapter_init(struct i2c_adapter *i2c_adap,
 			    struct dibx000_i2c_master *mst)
 {
 	strncpy(i2c_adap->name, name, sizeof(i2c_adap->name));
-	i2c_adap->class = I2C_CLASS_TV_DIGITAL, i2c_adap->algo = algo;
+	i2c_adap->algo = algo;
 	i2c_adap->algo_data = NULL;
 	i2c_set_adapdata(i2c_adap, mst);
 	if (i2c_add_adapter(i2c_adap) < 0)
@@ -171,8 +171,17 @@ void dibx000_exit_i2c_master(struct dibx000_i2c_master *mst)
 {
 	i2c_del_adapter(&mst->gated_tuner_i2c_adap);
 }
-
 EXPORT_SYMBOL(dibx000_exit_i2c_master);
+
+
+u32 systime(void)
+{
+    struct timespec t;
+
+    t = current_kernel_time();
+    return (t.tv_sec * 10000) + (t.tv_nsec / 100000);
+}
+EXPORT_SYMBOL(systime);
 
 MODULE_AUTHOR("Patrick Boettcher <pboettcher@dibcom.fr>");
 MODULE_DESCRIPTION("Common function the DiBcom demodulator family");

@@ -1855,3 +1855,8 @@ sys32_execve_wrapper:
 	llgtr	%r3,%r3			# compat_uptr_t *
 	llgtr	%r4,%r4			# compat_uptr_t *
 	jg	sys32_execve		# branch to system call
+
+	.globl	sys_syncfs_wrapper
+sys_syncfs_wrapper:
+	lgfr	%r2,%r2			# int
+	jg	sys_syncfs

@@ -1768,7 +1768,6 @@ static void iucv_tasklet_fn(unsigned long ignored)
  */
 static void iucv_work_fn(struct work_struct *work)
 {
-	typedef void iucv_irq_fn(struct iucv_irq_data *);
 	LIST_HEAD(work_queue);
 	struct iucv_irq_list *p, *n;
 
@@ -1878,14 +1877,25 @@ int iucv_path_table_empty(void)
 static int iucv_pm_freeze(struct device *dev)
 {
 	int cpu;
+	struct iucv_irq_list *p, *n;
 	int rc = 0;
 
 #ifdef CONFIG_PM_DEBUG
 	printk(KERN_WARNING "iucv_pm_freeze\n");
 #endif
+	if (iucv_pm_state != IUCV_PM_FREEZING) {
+		for_each_cpu_mask_nr(cpu, iucv_irq_cpumask)
+			smp_call_function_single(cpu, iucv_block_cpu_almost,
+						 NULL, 1);
+		cancel_work_sync(&iucv_work);
+		list_for_each_entry_safe(p, n, &iucv_work_queue, list) {
+			list_del_init(&p->list);
+			iucv_sever_pathid(p->data.ippathid,
+					  iucv_error_no_listener);
+			kfree(p);
+		}
+	}
 	iucv_pm_state = IUCV_PM_FREEZING;
-	for_each_cpu_mask_nr(cpu, iucv_irq_cpumask)
-		smp_call_function_single(cpu, iucv_block_cpu_almost, NULL, 1);
 	if (dev->driver && dev->driver->pm && dev->driver->pm->freeze)
 		rc = dev->driver->pm->freeze(dev);
 	if (iucv_path_table_empty())
@@ -1959,6 +1969,27 @@ out:
 	return rc;
 }
 
+struct iucv_interface iucv_if = {
+	.message_receive = iucv_message_receive,
+	.__message_receive = __iucv_message_receive,
+	.message_reply = iucv_message_reply,
+	.message_reject = iucv_message_reject,
+	.message_send = iucv_message_send,
+	.__message_send = __iucv_message_send,
+	.message_send2way = iucv_message_send2way,
+	.message_purge = iucv_message_purge,
+	.path_accept = iucv_path_accept,
+	.path_connect = iucv_path_connect,
+	.path_quiesce = iucv_path_quiesce,
+	.path_resume = iucv_path_resume,
+	.path_sever = iucv_path_sever,
+	.iucv_register = iucv_register,
+	.iucv_unregister = iucv_unregister,
+	.bus = NULL,
+	.root = NULL,
+};
+EXPORT_SYMBOL(iucv_if);
+
 /**
  * iucv_init
  *
@@ -2022,6 +2053,8 @@ static int __init iucv_init(void)
 	rc = bus_register(&iucv_bus);
 	if (rc)
 		goto out_reboot;
+	iucv_if.root = iucv_root;
+	iucv_if.bus = &iucv_bus;
 	return 0;
 
 out_reboot:

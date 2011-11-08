@@ -663,8 +663,10 @@ static int netconsole_netdev_event(struct notifier_block *this,
 	unsigned long flags;
 	struct netconsole_target *nt;
 	struct net_device *dev = ptr;
+	bool stopped = false;
 
-	if (!(event == NETDEV_CHANGENAME || event == NETDEV_UNREGISTER))
+	if (!(event == NETDEV_CHANGENAME || event == NETDEV_UNREGISTER ||
+	      event == NETDEV_RELEASE || event == NETDEV_JOIN))
 		goto done;
 
 	spin_lock_irqsave(&target_list_lock, flags);
@@ -675,20 +677,34 @@ static int netconsole_netdev_event(struct notifier_block *this,
 			case NETDEV_CHANGENAME:
 				strlcpy(nt->np.dev_name, dev->name, IFNAMSIZ);
 				break;
+			case NETDEV_RELEASE:
+			case NETDEV_JOIN:
 			case NETDEV_UNREGISTER:
-				if (!nt->enabled)
-					break;
 				netpoll_cleanup(&nt->np);
+				/* Fall through */
 				nt->enabled = 0;
-				printk(KERN_INFO "netconsole: network logging stopped"
-					", interface %s unregistered\n",
-					dev->name);
+				stopped = true;
 				break;
 			}
 		}
 		netconsole_target_put(nt);
 	}
 	spin_unlock_irqrestore(&target_list_lock, flags);
+	if (stopped) {
+		printk(KERN_INFO "netconsole: network logging stopped on "
+		       "interface %s as it ", dev->name);
+		switch (event) {
+		case NETDEV_UNREGISTER:
+			printk(KERN_CONT "unregistered\n");
+			break;
+		case NETDEV_RELEASE:
+			printk(KERN_CONT "released slaves\n");
+			break;
+		case NETDEV_JOIN:
+			printk(KERN_CONT "is joining a master device\n");
+			break;
+		}
+	}
 
 done:
 	return NOTIFY_DONE;

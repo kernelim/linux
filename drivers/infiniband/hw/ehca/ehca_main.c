@@ -123,7 +123,7 @@ DEFINE_IDR(ehca_qp_idr);
 DEFINE_IDR(ehca_cq_idr);
 
 static LIST_HEAD(shca_list); /* list of all registered ehcas */
-static DEFINE_SPINLOCK(shca_list_lock);
+DEFINE_SPINLOCK(shca_list_lock);
 
 static struct timer_list poll_eqs_timer;
 
@@ -359,7 +359,8 @@ static int ehca_sense_attributes(struct ehca_shca *shca)
 	 * a firmware property, so it's valid across all adapters
 	 */
 	if (ehca_lock_hcalls == -1)
-		ehca_lock_hcalls = !(shca->hca_cap & HCA_CAP_H_ALLOC_RES_SYNC);
+		ehca_lock_hcalls = !EHCA_BMASK_GET(HCA_CAP_H_ALLOC_RES_SYNC,
+					shca->hca_cap);
 
 	/* translate supported MR page sizes; always support 4K */
 	shca->hca_cap_mr_pgsize = EHCA_PAGESIZE;
@@ -798,7 +799,7 @@ static int __devinit ehca_probe(struct of_device *dev,
 		goto probe5;
 	}
 
-	ret = ib_register_device(&shca->ib_device);
+	ret = ib_register_device(&shca->ib_device, NULL);
 	if (ret) {
 		ehca_err(&shca->ib_device,
 			 "ib_register_device() failed ret=%i", ret);

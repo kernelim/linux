@@ -230,6 +230,37 @@ struct hd_struct *disk_map_sector_rcu(struct gendisk *disk, sector_t sector)
 }
 EXPORT_SYMBOL_GPL(disk_map_sector_rcu);
 
+int is_same_part(struct gendisk *disk, sector_t sector1, sector_t sector2,
+		 struct hd_struct **part1, struct hd_struct **part2)
+{
+	struct disk_part_tbl *ptbl;
+	struct hd_struct *part;
+	int i = 1;
+
+	*part1 = *part2 = NULL;
+
+	ptbl = rcu_dereference(disk->part_tbl);
+	part = rcu_dereference(ptbl->last_lookup);
+
+	do {
+		if (part) {
+			if (sector_in_part(part, sector1))
+				*part1 = part;
+			if (sector_in_part(part, sector2))
+				*part2 = part;
+
+			if (*part1 && *part2)
+				/* we found both partitions */
+				return *part1 == *part2;
+		}
+
+		part = rcu_dereference(ptbl->part[i]);
+	} while (i++ < ptbl->len);
+
+	/* we did not found at least one partition */
+	return *part1 == *part2;
+}
+
 /*
  * Can be deleted altogether. Later.
  *
@@ -541,13 +572,15 @@ void add_disk(struct gendisk *disk)
 	disk->major = MAJOR(devt);
 	disk->first_minor = MINOR(devt);
 
+	/* Register BDI before referencing it from bdev */ 
+	bdi = &disk->queue->backing_dev_info;
+	bdi_register_dev(bdi, disk_devt(disk));
+
 	blk_register_region(disk_devt(disk), disk->minors, NULL,
 			    exact_match, exact_lock, disk);
 	register_disk(disk);
 	blk_register_queue(disk);
 
-	bdi = &disk->queue->backing_dev_info;
-	bdi_register_dev(bdi, disk_devt(disk));
 	retval = sysfs_create_link(&disk_to_dev(disk)->kobj, &bdi->dev->kobj,
 				   "bdi");
 	WARN_ON(retval);
@@ -861,12 +894,23 @@ static ssize_t disk_alignment_offset_show(struct device *dev,
 	return sprintf(buf, "%d\n", queue_alignment_offset(disk->queue));
 }
 
+static ssize_t disk_discard_alignment_show(struct device *dev,
+					   struct device_attribute *attr,
+					   char *buf)
+{
+	struct gendisk *disk = dev_to_disk(dev);
+
+	return sprintf(buf, "%d\n", queue_discard_alignment(disk->queue));
+}
+
 static DEVICE_ATTR(range, S_IRUGO, disk_range_show, NULL);
 static DEVICE_ATTR(ext_range, S_IRUGO, disk_ext_range_show, NULL);
 static DEVICE_ATTR(removable, S_IRUGO, disk_removable_show, NULL);
 static DEVICE_ATTR(ro, S_IRUGO, disk_ro_show, NULL);
 static DEVICE_ATTR(size, S_IRUGO, part_size_show, NULL);
 static DEVICE_ATTR(alignment_offset, S_IRUGO, disk_alignment_offset_show, NULL);
+static DEVICE_ATTR(discard_alignment, S_IRUGO, disk_discard_alignment_show,
+		   NULL);
 static DEVICE_ATTR(capability, S_IRUGO, disk_capability_show, NULL);
 static DEVICE_ATTR(stat, S_IRUGO, part_stat_show, NULL);
 static DEVICE_ATTR(inflight, S_IRUGO, part_inflight_show, NULL);
@@ -887,6 +931,7 @@ static struct attribute *disk_attrs[] = {
 	&dev_attr_ro.attr,
 	&dev_attr_size.attr,
 	&dev_attr_alignment_offset.attr,
+	&dev_attr_discard_alignment.attr,
 	&dev_attr_capability.attr,
 	&dev_attr_stat.attr,
 	&dev_attr_inflight.attr,
@@ -1267,7 +1312,7 @@ int invalidate_partition(struct gendisk *disk, int partno)
 	struct block_device *bdev = bdget_disk(disk, partno);
 	if (bdev) {
 		fsync_bdev(bdev);
-		res = __invalidate_device(bdev);
+		res = __invalidate_device(bdev, true);
 		bdput(bdev);
 	}
 	return res;

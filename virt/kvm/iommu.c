@@ -28,14 +28,20 @@
 #include <linux/iommu.h>
 #include <linux/intel-iommu.h>
 
+static int allow_unsafe_assigned_interrupts;
+module_param_named(allow_unsafe_assigned_interrupts,
+		   allow_unsafe_assigned_interrupts, bool, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(allow_unsafe_assigned_interrupts,
+		 "Enable device assignment on platforms without interrupt remapping support.");
+
 static int kvm_iommu_unmap_memslots(struct kvm *kvm);
 static void kvm_iommu_put_pages(struct kvm *kvm,
 				gfn_t base_gfn, unsigned long npages);
 
-int kvm_iommu_map_pages(struct kvm *kvm,
-			gfn_t base_gfn, unsigned long npages)
+int kvm_iommu_map_pages(struct kvm *kvm, struct kvm_memory_slot *slot)
 {
-	gfn_t gfn = base_gfn;
+	gfn_t gfn = slot->base_gfn;
+	unsigned long npages = slot->npages;
 	pfn_t pfn;
 	int i, r = 0;
 	struct iommu_domain *domain = kvm->arch.iommu_domain;
@@ -54,7 +60,7 @@ int kvm_iommu_map_pages(struct kvm *kvm,
 		if (iommu_iova_to_phys(domain, gfn_to_gpa(gfn)))
 			continue;
 
-		pfn = gfn_to_pfn(kvm, gfn);
+		pfn = gfn_to_pfn_memslot(kvm, slot, gfn);
 		r = iommu_map_range(domain,
 				    gfn_to_gpa(gfn),
 				    pfn_to_hpa(pfn),
@@ -69,17 +75,19 @@ int kvm_iommu_map_pages(struct kvm *kvm,
 	return 0;
 
 unmap_pages:
-	kvm_iommu_put_pages(kvm, base_gfn, i);
+	kvm_iommu_put_pages(kvm, slot->base_gfn, i);
 	return r;
 }
 
 static int kvm_iommu_map_memslots(struct kvm *kvm)
 {
 	int i, r = 0;
+	struct kvm_memslots *slots;
 
-	for (i = 0; i < kvm->nmemslots; i++) {
-		r = kvm_iommu_map_pages(kvm, kvm->memslots[i].base_gfn,
-					kvm->memslots[i].npages);
+	slots = rcu_dereference(kvm->memslots);
+
+	for (i = 0; i < slots->nmemslots; i++) {
+		r = kvm_iommu_map_pages(kvm, &slots->memslots[i]);
 		if (r)
 			break;
 	}
@@ -173,6 +181,15 @@ int kvm_iommu_map_guest(struct kvm *kvm)
 	if (!kvm->arch.iommu_domain)
 		return -ENOMEM;
 
+	if (!allow_unsafe_assigned_interrupts &&
+	    !iommu_domain_has_cap(kvm->arch.iommu_domain,
+				  IOMMU_CAP_INTR_REMAP)) {
+		printk(KERN_WARNING "%s: No interrupt remapping support, disallowing device assignment.  Re-enble with \"allow_unsafe_assigned_interrupts=1\" module option.\n", __func__);
+		iommu_domain_free(kvm->arch.iommu_domain);
+		kvm->arch.iommu_domain = NULL;
+		return -EPERM;
+	}
+
 	r = kvm_iommu_map_memslots(kvm);
 	if (r)
 		goto out_unmap;
@@ -210,10 +227,13 @@ static void kvm_iommu_put_pages(struct kvm *kvm,
 static int kvm_iommu_unmap_memslots(struct kvm *kvm)
 {
 	int i;
+	struct kvm_memslots *slots;
 
-	for (i = 0; i < kvm->nmemslots; i++) {
-		kvm_iommu_put_pages(kvm, kvm->memslots[i].base_gfn,
-				    kvm->memslots[i].npages);
+	slots = rcu_dereference(kvm->memslots);
+
+	for (i = 0; i < slots->nmemslots; i++) {
+		kvm_iommu_put_pages(kvm, slots->memslots[i].base_gfn,
+				    slots->memslots[i].npages);
 	}
 
 	return 0;

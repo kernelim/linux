@@ -100,7 +100,7 @@ bool xen_vcpu_stolen(int vcpu)
 	return per_cpu(runstate, vcpu).state == RUNSTATE_runnable;
 }
 
-static void setup_runstate_info(int cpu)
+void xen_setup_runstate_info(int cpu)
 {
 	struct vcpu_register_runstate_memory_area area;
 
@@ -153,45 +153,6 @@ static void do_stolen_accounting(void)
 	__get_cpu_var(residual_blocked) = blocked;
 	account_idle_ticks(ticks);
 }
-
-/*
- * Xen sched_clock implementation.  Returns the number of unstolen
- * nanoseconds, which is nanoseconds the VCPU spent in RUNNING+BLOCKED
- * states.
- */
-unsigned long long xen_sched_clock(void)
-{
-	struct vcpu_runstate_info state;
-	cycle_t now;
-	u64 ret;
-	s64 offset;
-
-	/*
-	 * Ideally sched_clock should be called on a per-cpu basis
-	 * anyway, so preempt should already be disabled, but that's
-	 * not current practice at the moment.
-	 */
-	preempt_disable();
-
-	now = xen_clocksource_read();
-
-	get_runstate_snapshot(&state);
-
-	WARN_ON(state.state != RUNSTATE_running);
-
-	offset = now - state.state_entry_time;
-	if (offset < 0)
-		offset = 0;
-
-	ret = state.time[RUNSTATE_blocked] +
-		state.time[RUNSTATE_running] +
-		offset;
-
-	preempt_enable();
-
-	return ret;
-}
-
 
 /* Get the TSC speed from Xen */
 unsigned long xen_tsc_khz(void)
@@ -434,7 +395,7 @@ void xen_setup_timer(int cpu)
 		name = "<timer kasprintf failed>";
 
 	irq = bind_virq_to_irqhandler(VIRQ_TIMER, cpu, xen_timer_interrupt,
-				      IRQF_DISABLED|IRQF_PERCPU|IRQF_NOBALANCING,
+				      IRQF_DISABLED|IRQF_PERCPU|IRQF_NOBALANCING|IRQF_TIMER,
 				      name, NULL);
 
 	evt = &per_cpu(xen_clock_events, cpu);
@@ -442,8 +403,6 @@ void xen_setup_timer(int cpu)
 
 	evt->cpumask = cpumask_of(cpu);
 	evt->irq = irq;
-
-	setup_runstate_info(cpu);
 }
 
 void xen_teardown_timer(int cpu)
@@ -464,6 +423,8 @@ void xen_setup_cpu_clockevents(void)
 void xen_timer_resume(void)
 {
 	int cpu;
+
+	pvclock_resume();
 
 	if (xen_clockevent != &xen_vcpuop_clockevent)
 		return;
@@ -494,6 +455,7 @@ __init void xen_time_init(void)
 
 	setup_force_cpu_cap(X86_FEATURE_TSC);
 
+	xen_setup_runstate_info(cpu);
 	xen_setup_timer(cpu);
 	xen_setup_cpu_clockevents();
 }

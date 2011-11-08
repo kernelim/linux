@@ -59,11 +59,14 @@ static LIST_HEAD(adapter_list);
 static const unsigned int MAX_ATIDS = 64 * 1024;
 static const unsigned int ATID_BASE = 0x10000;
 
+static void cxgb_neigh_update(struct neighbour *neigh);
+static void cxgb_redirect(struct dst_entry *old, struct dst_entry *new);
+
 static inline int offload_activated(struct t3cdev *tdev)
 {
 	const struct adapter *adapter = tdev2adap(tdev);
 
-	return (test_bit(OFFLOAD_DEVMAP_BIT, &adapter->open_device_map));
+	return test_bit(OFFLOAD_DEVMAP_BIT, &adapter->open_device_map);
 }
 
 /**
@@ -165,6 +168,8 @@ void cxgb3_event_notify(struct t3cdev *tdev, u32 event, u32 port)
 	mutex_unlock(&cxgb3_db_lock);
 }
 
+#define is_bond_slave(dev)\
+ ((dev->flags & IFF_SLAVE) && (dev->priv_flags & IFF_BONDING))
 static struct net_device *get_iff_from_mac(struct adapter *adapter,
 					   const unsigned char *mac,
 					   unsigned int vlan)
@@ -182,9 +187,10 @@ static struct net_device *get_iff_from_mac(struct adapter *adapter,
 				dev = NULL;
 				if (grp)
 					dev = vlan_group_get_device(grp, vlan);
-			} else
+			} else if (is_bond_slave(dev)) {
 				while (dev->master)
 					dev = dev->master;
+			}
 			return dev;
 		}
 	}
@@ -562,7 +568,7 @@ static void t3_process_tid_release_list(struct work_struct *work)
 	while (td->tid_release_list) {
 		struct t3c_tid_entry *p = td->tid_release_list;
 
-		td->tid_release_list = (struct t3c_tid_entry *)p->ctx;
+		td->tid_release_list = p->ctx;
 		spin_unlock_bh(&td->tid_release_lock);
 
 		skb = alloc_skb(sizeof(struct cpl_tid_release),
@@ -963,8 +969,6 @@ static int nb_callback(struct notifier_block *self, unsigned long event,
 		cxgb_neigh_update((struct neighbour *)ctx);
 		break;
 	}
-	case (NETEVENT_PMTU_UPDATE):
-		break;
 	case (NETEVENT_REDIRECT):{
 		struct netevent_redirect *nr = ctx;
 		cxgb_redirect(nr->old, nr->new);
@@ -1014,7 +1018,7 @@ EXPORT_SYMBOL(t3_register_cpl_handler);
 /*
  * T3CDEV's receive method.
  */
-int process_rx(struct t3cdev *dev, struct sk_buff **skbs, int n)
+static int process_rx(struct t3cdev *dev, struct sk_buff **skbs, int n)
 {
 	while (n--) {
 		struct sk_buff *skb = *skbs++;
@@ -1069,7 +1073,7 @@ static int is_offloading(struct net_device *dev)
 	return 0;
 }
 
-void cxgb_neigh_update(struct neighbour *neigh)
+static void cxgb_neigh_update(struct neighbour *neigh)
 {
 	struct net_device *dev = neigh->dev;
 
@@ -1103,7 +1107,7 @@ static void set_l2t_ix(struct t3cdev *tdev, u32 tid, struct l2t_entry *e)
 	tdev->send(tdev, skb);
 }
 
-void cxgb_redirect(struct dst_entry *old, struct dst_entry *new)
+static void cxgb_redirect(struct dst_entry *old, struct dst_entry *new)
 {
 	struct net_device *olddev, *newdev;
 	struct tid_info *ti;
@@ -1146,12 +1150,14 @@ void cxgb_redirect(struct dst_entry *old, struct dst_entry *new)
 		if (te && te->ctx && te->client && te->client->redirect) {
 			update_tcb = te->client->redirect(te->ctx, old, new, e);
 			if (update_tcb) {
+				rcu_read_lock();
 				l2t_hold(L2DATA(tdev), e);
+				rcu_read_unlock();
 				set_l2t_ix(tdev, tid, e);
 			}
 		}
 	}
-	l2t_release(L2DATA(tdev), e);
+	l2t_release(tdev, e);
 }
 
 /*
@@ -1160,12 +1166,10 @@ void cxgb_redirect(struct dst_entry *old, struct dst_entry *new)
  */
 void *cxgb_alloc_mem(unsigned long size)
 {
-	void *p = kmalloc(size, GFP_KERNEL);
+	void *p = kzalloc(size, GFP_KERNEL);
 
 	if (!p)
-		p = vmalloc(size);
-	if (p)
-		memset(p, 0, size);
+		p = vzalloc(size);
 	return p;
 }
 
@@ -1252,7 +1256,7 @@ int cxgb3_offload_activate(struct adapter *adapter)
 	struct mtutab mtutab;
 	unsigned int l2t_capacity;
 
-	t = kcalloc(1, sizeof(*t), GFP_KERNEL);
+	t = kzalloc(sizeof(*t), GFP_KERNEL);
 	if (!t)
 		return -ENOMEM;
 
@@ -1266,7 +1270,7 @@ int cxgb3_offload_activate(struct adapter *adapter)
 		goto out_free;
 
 	err = -ENOMEM;
-	L2DATA(dev) = t3_init_l2t(l2t_capacity);
+	dev->l2opt = t3_init_l2t(l2t_capacity);
 	if (!L2DATA(dev))
 		goto out_free;
 
@@ -1300,16 +1304,24 @@ int cxgb3_offload_activate(struct adapter *adapter)
 
 out_free_l2t:
 	t3_free_l2t(L2DATA(dev));
-	L2DATA(dev) = NULL;
+	rcu_assign_pointer(dev->l2opt, NULL);
 out_free:
 	kfree(t);
 	return err;
 }
 
+static void clean_l2_data(struct rcu_head *head)
+{
+	struct l2t_data *d = container_of(head, struct l2t_data, rcu_head);
+	t3_free_l2t(d);
+}
+
+
 void cxgb3_offload_deactivate(struct adapter *adapter)
 {
 	struct t3cdev *tdev = &adapter->tdev;
 	struct t3c_data *t = T3C_DATA(tdev);
+	struct l2t_data *d;
 
 	remove_adapter(adapter);
 	if (list_empty(&adapter_list))
@@ -1317,8 +1329,11 @@ void cxgb3_offload_deactivate(struct adapter *adapter)
 
 	free_tid_maps(&t->tid_maps);
 	T3C_DATA(tdev) = NULL;
-	t3_free_l2t(L2DATA(tdev));
-	L2DATA(tdev) = NULL;
+	rcu_read_lock();
+	d = L2DATA(tdev);
+	rcu_read_unlock();
+	rcu_assign_pointer(tdev->l2opt, NULL);
+	call_rcu(&d->rcu_head, clean_l2_data);
 	if (t->nofail_skb)
 		kfree_skb(t->nofail_skb);
 	kfree(t);

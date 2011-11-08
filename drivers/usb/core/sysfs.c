@@ -82,9 +82,13 @@ static ssize_t  show_##name(struct device *dev,				\
 		struct device_attribute *attr, char *buf)		\
 {									\
 	struct usb_device *udev;					\
+	int retval;							\
 									\
 	udev = to_usb_device(dev);					\
-	return sprintf(buf, "%s\n", udev->name);			\
+	usb_lock_device(udev);						\
+	retval = sprintf(buf, "%s\n", udev->name);			\
+	usb_unlock_device(udev);					\
+	return retval;							\
 }									\
 static DEVICE_ATTR(name, S_IRUGO, show_##name, NULL);
 
@@ -110,6 +114,12 @@ show_speed(struct device *dev, struct device_attribute *attr, char *buf)
 		break;
 	case USB_SPEED_HIGH:
 		speed = "480";
+		break;
+	case USB_SPEED_VARIABLE:
+		speed = "480";
+		break;
+	case USB_SPEED_SUPER:
+		speed = "5000";
 		break;
 	default:
 		speed = "unknown";
@@ -508,6 +518,28 @@ static ssize_t usb_dev_authorized_store(struct device *dev,
 static DEVICE_ATTR(authorized, 0644,
 	    usb_dev_authorized_show, usb_dev_authorized_store);
 
+/* "Safely remove a device" */
+static ssize_t usb_remove_store(struct device *dev,
+		struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	struct usb_device *udev = to_usb_device(dev);
+	int rc = 0;
+
+	usb_lock_device(udev);
+	if (udev->state != USB_STATE_NOTATTACHED) {
+
+		/* To avoid races, first unconfigure and then remove */
+		usb_set_configuration(udev, -1);
+		rc = usb_remove_device(udev);
+	}
+	if (rc == 0)
+		rc = count;
+	usb_unlock_device(udev);
+	return rc;
+}
+static DEVICE_ATTR(remove, 0200, NULL, usb_remove_store);
+
 
 static struct attribute *dev_attrs[] = {
 	/* current configuration's attributes */
@@ -533,6 +565,7 @@ static struct attribute *dev_attrs[] = {
 	&dev_attr_maxchild.attr,
 	&dev_attr_quirks.attr,
 	&dev_attr_authorized.attr,
+	&dev_attr_remove.attr,
 	NULL,
 };
 static struct attribute_group dev_attr_grp = {
@@ -582,7 +615,8 @@ const struct attribute_group *usb_device_groups[] = {
 /* Binary descriptors */
 
 static ssize_t
-read_descriptors(struct kobject *kobj, struct bin_attribute *attr,
+read_descriptors(struct file *filp, struct kobject *kobj,
+		struct bin_attribute *attr,
 		char *buf, loff_t off, size_t count)
 {
 	struct device *dev = container_of(kobj, struct device, kobj);

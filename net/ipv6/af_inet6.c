@@ -95,7 +95,8 @@ static __inline__ struct ipv6_pinfo *inet6_sk_generic(struct sock *sk)
 	return (struct ipv6_pinfo *)(((u8 *)sk) + offset);
 }
 
-static int inet6_create(struct net *net, struct socket *sock, int protocol)
+static int inet6_create(struct net *net, struct socket *sock, int protocol,
+			int kern)
 {
 	struct inet_sock *inet;
 	struct ipv6_pinfo *np;
@@ -158,7 +159,7 @@ lookup_protocol:
 	}
 
 	err = -EPERM;
-	if (answer->capability > 0 && !capable(answer->capability))
+	if (sock->type == SOCK_RAW && !kern && !capable(CAP_NET_RAW))
 		goto out_rcu_unlock;
 
 	sock->ops = answer->ops;
@@ -340,7 +341,8 @@ int inet6_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 			 */
 			v4addr = LOOPBACK4_IPV6;
 			if (!(addr_type & IPV6_ADDR_MULTICAST))	{
-				if (!ipv6_chk_addr(net, &addr->sin6_addr,
+				if (!inet->transparent &&
+				    !ipv6_chk_addr(net, &addr->sin6_addr,
 						   dev, 0)) {
 					if (dev)
 						dev_put(dev);
@@ -1072,6 +1074,8 @@ static int __init inet6_init(void)
 		       "reboot required to enable\n");
 		goto out;
 	}
+
+	initialize_hashidentrnd();
 
 	err = proto_register(&tcpv6_prot, 1);
 	if (err)

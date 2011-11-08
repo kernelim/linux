@@ -678,14 +678,15 @@ Found in hex form in kernel source.
 
 Driver: bnx2x: Broadcom Everest
 
-File: bnx2x-e1-4.8.53.0.fw.ihex
-File: bnx2x-e1h-4.8.53.0.fw.ihex
+File: bnx2x/bnx2x-e1-6.2.9.0.fw
+File: bnx2x/bnx2x-e1h-6.2.9.0.fw
+File: bnx2x/bnx2x-e2-6.2.9.0.fw
 
 License:
-  Copyright (c) 2007-2009 Broadcom Corporation
+  Copyright (c) 2007-2011 Broadcom Corporation
 
   This file contains firmware data derived from proprietary unpublished
-  source code, Copyright (c) 2007-2009 Broadcom Corporation.
+  source code, Copyright (c) 2007-2011 Broadcom Corporation.
 
   Permission is hereby granted for the distribution of this firmware data
   in hexadecimal or equivalent format, provided this copyright notice is
@@ -698,15 +699,16 @@ Found in hex form in kernel source.
 
 Driver: BNX2 - Broadcom NetXtremeII
 
-File: bnx2/bnx2-mips-06-4.6.16.fw
-File: bnx2/bnx2-rv2p-06-4.6.16.fw
-File: bnx2/bnx2-mips-09-4.6.17.fw
-File: bnx2/bnx2-rv2p-09-4.6.15.fw
+File: bnx2/bnx2-mips-06-6.2.1.fw
+File: bnx2/bnx2-rv2p-06-6.0.15.fw
+File: bnx2/bnx2-mips-09-6.2.1a.fw
+File: bnx2/bnx2-rv2p-09-6.0.17.fw
+File: bnx2/bnx2-rv2p-09ax-6.0.17.fw
 
 Licence:
 
  This file contains firmware data derived from proprietary unpublished
- source code, Copyright (c) 2004 - 2009 Broadcom Corporation.
+ source code, Copyright (c) 2004 - 2010 Broadcom Corporation.
 
  Permission is hereby granted for the distribution of this firmware data
  in hexadecimal or equivalent format, provided this copyright notice is
@@ -856,4 +858,87 @@ Licence:
 
 Found in hex form in kernel source.
 
+--------------------------------------------------------------------------
+
+Driver: ib_qib - QLogic Infiniband
+
+File: qlogic/sd7220.fw
+
+Licence:
+
+ * Copyright (c) 2007, 2008 QLogic Corporation. All rights reserved.
+ *
+ * This software is available to you under a choice of one of two
+ * licenses.  You may choose to be licensed under the terms of the GNU
+ * General Public License (GPL) Version 2, available from the file
+ * COPYING in the main directory of this source tree, or the
+ * OpenIB.org BSD license below:
+ *
+ *     Redistribution and use in source and binary forms, with or
+ *     without modification, are permitted provided that the following
+ *     conditions are met:
+ *
+ *      - Redistributions of source code must retain the above
+ *        copyright notice, this list of conditions and the following
+ *        disclaimer.
+ *
+ *      - Redistributions in binary form must reproduce the above
+ *        copyright notice, this list of conditions and the following
+ *        disclaimer in the documentation and/or other materials
+ *        provided with the distribution.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+ * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+
+Found in hex form in kernel source.
+
+--------------------------------------------------------------------------
+
+Driver: netxen_nic - NetXen Multi port (1/10) Gigabit Ethernet NIC
+
+File: phanfw-4.0.579.bin
+Info: v4.0.579
+
+Licence:
+
+Copyright © 2003-2010 QLogic Corporation
+QLogic Linux Intelligent Ethernet (3000 and 3100 Series) Adapter Firmware
+
+Redistribution and use in binary form, without modification, for use in
+conjunction with QLogic authorized products is permitted provided that the
+following conditions are met:
+
+1. Redistribution in binary form must reproduce the above copyright notice, this
+   list of conditions and the following disclaimer in the documentation and/or
+   other materials provided with the distribution.
+2. The name of QLogic Corporation may not be used to endorse or promote products
+   derived from this software without specific prior written permission.
+3. Reverse engineering, decompilation, or disassembly of this firmware is not
+   permitted.
+
+REGARDLESS OF WHAT LICENSING MECHANISM IS USED OR APPLICABLE,THIS PROGRAM IS
+PROVIDED BY QLOGIC CORPORATION "AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
+INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR
+BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+GOODS OR SERVICES; LOSS OF USE,DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+LIABILITY,OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+DAMAGE.
+
+USER ACKNOWLEDGES AND AGREES THAT USE OF THIS PROGRAM WILL NOT CREATE OR GIVE
+GROUNDS FOR A LICENSE BY IMPLICATION, ESTOPPEL, OR OTHERWISE IN ANY INTELLECTUAL
+PROPERTY RIGHTS (PATENT, COPYRIGHT, TRADE SECRET, MASK WORK, OR OTHER
+PROPRIETARY RIGHT) EMBODIED IN ANY OTHER QLOGIC HARDWARE OR SOFTWARE EITHER
+SOLELY OR IN COMBINATION WITH THIS PROGRAM.
+
+Found in hex form in kernel source.
 --------------------------------------------------------------------------

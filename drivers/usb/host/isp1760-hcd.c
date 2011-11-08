@@ -14,12 +14,12 @@
 #include <linux/slab.h>
 #include <linux/list.h>
 #include <linux/usb.h>
+#include <linux/usb/hcd.h>
 #include <linux/debugfs.h>
 #include <linux/uaccess.h>
 #include <linux/io.h>
 #include <asm/unaligned.h>
 
-#include "../core/hcd.h"
 #include "isp1760-hcd.h"
 
 static struct kmem_cache *qtd_cachep;
@@ -480,7 +480,6 @@ static int isp1760_run(struct usb_hcd *hcd)
 	u32 chipid;
 
 	hcd->uses_new_polling = 1;
-	hcd->poll_rh = 0;
 
 	hcd->state = HC_STATE_RUNNING;
 	isp1760_enable_interrupts(hcd);
@@ -1441,7 +1440,7 @@ static int isp1760_prepare_enqueue(struct isp1760_hcd *priv, struct urb *urb,
 	epnum = urb->ep->desc.bEndpointAddress;
 
 	spin_lock_irqsave(&priv->lock, flags);
-	if (!test_bit(HCD_FLAG_HW_ACCESSIBLE, &priv_to_hcd(priv)->flags)) {
+	if (!HCD_HW_ACCESSIBLE(priv_to_hcd(priv))) {
 		rc = -ESHUTDOWN;
 		goto done;
 	}
@@ -1834,9 +1833,9 @@ static void isp1760_hub_descriptor(struct isp1760_hcd *priv,
 	temp = 1 + (ports / 8);
 	desc->bDescLength = 7 + 2 * temp;
 
-	/* two bitmaps:  ports removable, and usb 1.0 legacy PortPwrCtrlMask */
-	memset(&desc->bitmap[0], 0, temp);
-	memset(&desc->bitmap[temp], 0xff, temp);
+	/* ports removable, and usb 1.0 legacy PortPwrCtrlMask */
+	memset(&desc->u.hs.DeviceRemovable[0], 0, temp);
+	memset(&desc->u.hs.DeviceRemovable[temp], 0xff, temp);
 
 	/* per-port overcurrent reporting */
 	temp = 0x0008;

@@ -148,7 +148,7 @@ static ssize_t smi_data_buf_size_store(struct device *dev,
 	return count;
 }
 
-static ssize_t smi_data_read(struct kobject *kobj,
+static ssize_t smi_data_read(struct file *filp, struct kobject *kobj,
 			     struct bin_attribute *bin_attr,
 			     char *buf, loff_t pos, size_t count)
 {
@@ -161,7 +161,7 @@ static ssize_t smi_data_read(struct kobject *kobj,
 	return ret;
 }
 
-static ssize_t smi_data_write(struct kobject *kobj,
+static ssize_t smi_data_write(struct file *filp, struct kobject *kobj,
 			      struct bin_attribute *bin_attr,
 			      char *buf, loff_t pos, size_t count)
 {
@@ -267,8 +267,10 @@ int dcdbas_smi_request(struct smi_cmd *smi_cmd)
 	}
 
 	/* generate SMI */
+	/* inb to force posted write through and make SMI happen now */
 	asm volatile (
-		"outb %b0,%w1"
+		"outb %b0,%w1\n"
+		"inb %w1"
 		: /* no output args */
 		: "a" (smi_cmd->command_code),
 		  "d" (smi_cmd->command_address),

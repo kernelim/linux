@@ -1,7 +1,7 @@
 #ifndef B43_DMA_H_
 #define B43_DMA_H_
 
-#include <linux/ieee80211.h>
+#include <linux/err.h>
 
 #include "b43.h"
 
@@ -163,7 +163,11 @@ struct b43_dmadesc_generic {
 /* DMA engine tuning knobs */
 #define B43_TXRING_SLOTS		256
 #define B43_RXRING_SLOTS		64
-#define B43_DMA0_RX_BUFFERSIZE		IEEE80211_MAX_FRAME_LEN
+#define B43_DMA0_RX_BUFFERSIZE		(B43_DMA0_RX_FRAMEOFFSET + IEEE80211_MAX_FRAME_LEN)
+
+/* Pointer poison */
+#define B43_DMA_PTR_POISON		((void *)ERR_PTR(-ENOMEM))
+#define b43_dma_ptr_is_poisoned(ptr)	(unlikely((ptr) == B43_DMA_PTR_POISON))
 
 
 struct sk_buff;

@@ -90,6 +90,18 @@ config MACVLAN
 	  To compile this driver as a module, choose M here: the module
 	  will be called macvlan.
 
+config MACVTAP
+	tristate "MAC-VLAN based tap driver (EXPERIMENTAL)"
+	depends on MACVLAN
+	help
+	  This adds a specialized tap character device driver that is based
+	  on the MAC-VLAN network interface, called macvtap. A macvtap device
+	  can be added in the same way as a macvlan device, using 'type
+	  macvlan', and then be accessed through the tap user space interface.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called macvtap.
+
 config EQUALIZER
 	tristate "EQL (serial line load balancing) support"
 	---help---
@@ -2559,6 +2571,31 @@ config CHELSIO_T3
 	  To compile this driver as a module, choose M here: the module
 	  will be called cxgb3.
 
+config CHELSIO_T4_DEPENDS
+	tristate
+	depends on PCI && INET
+	default y
+
+config CHELSIO_T4
+	tristate "Chelsio Communications T4 Ethernet support"
+	depends on CHELSIO_T4_DEPENDS
+	select FW_LOADER
+	select MDIO
+	help
+	  This driver supports Chelsio T4-based gigabit and 10Gb Ethernet
+	  adapters.
+
+	  For general information about Chelsio and our products, visit
+	  our website at <http://www.chelsio.com>.
+
+	  For customer support, please visit our customer support page at
+	  <http://www.chelsio.com/support.htm>.
+
+	  Please send feedback to <linux-bugs@chelsio.com>.
+
+	  To compile this driver as a module choose M here; the module
+	  will be called cxgb4.
+
 config EHEA
 	tristate "eHEA Ethernet support"
 	depends on IBMEBUS && INET && SPARSEMEM
@@ -2570,11 +2607,10 @@ config EHEA
 	  will be called ehea.
 
 config ENIC
-	tristate "Cisco 10G Ethernet NIC support"
+	tristate "Cisco VIC Ethernet NIC Support"
 	depends on PCI && INET
-	select INET_LRO
 	help
-	  This enables the support for the Cisco 10G Ethernet card.
+	  This enables the support for the Cisco VIC Ethernet card.
 
 config IXGBE
 	tristate "Intel(R) 10GbE PCI Express adapters support"
@@ -2613,6 +2649,28 @@ config IXGBE_DCB
 	  driver.
 
 	  If unsure, say N.
+
+config IXGBEVF
+       tristate "Intel(R) 82599 Virtual Function Ethernet support"
+       depends on PCI_MSI
+       ---help---
+         This driver supports Intel(R) 82599 virtual functions.  For more
+         information on how to identify your adapter, go to the Adapter &
+         Driver ID Guide at:
+
+         <http://support.intel.com/support/network/sb/CS-008441.htm>
+
+         For general information and support, go to the Intel support
+         website at:
+
+         <http://support.intel.com>
+
+         More specific information on configuring the driver is in
+         <file:Documentation/networking/ixgbevf.txt>.
+
+         To compile this driver as a module, choose M here. The module
+         will be called ixgbevf.  MSI-X interrupt support is required
+         for this driver to work correctly.
 
 config IXGB
 	tristate "Intel(R) PRO/10GbE support"
@@ -2751,6 +2809,13 @@ config BNX2X
 	  To compile this driver as a module, choose M here: the module
 	  will be called bnx2x.  This is recommended.
 
+config QLCNIC
+	tristate "QLOGIC QLCNIC 1/10Gb Converged Ethernet NIC Support"
+	depends on PCI
+	help
+	  This driver supports QLogic QLE8240 and QLE8242 Converged Ethernet
+	  devices.
+
 config QLGE
 	tristate "QLogic QLGE 10Gb Ethernet Driver Support"
 	depends on PCI
@@ -2759,6 +2824,20 @@ config QLGE
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called qlge.
+
+config BNA
+	tristate "Brocade 1010/1020 10Gb Ethernet Driver support"
+	depends on PCI
+	---help---
+	  This driver supports Brocade 1010/1020 10Gb CEE capable Ethernet
+	  cards.
+	  To compile this driver as a module, choose M here: the module
+	  will be called bna.
+
+	  For general information and support, go to the Brocade support
+	  website at:
+
+	  <http://support.brocade.com>
 
 source "drivers/net/sfc/Kconfig"
 
@@ -3235,7 +3314,7 @@ config VIRTIO_NET
 
 config VMXNET3
        tristate "VMware VMXNET3 ethernet driver"
-       depends on PCI && X86 && INET
+       depends on PCI && INET
        help
          This driver supports VMware's vmxnet3 virtual ethernet NIC.
          To compile this driver as a module, choose M here: the

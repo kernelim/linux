@@ -217,6 +217,7 @@ struct zfcp_ls_adisc {
 
 /* adapter status */
 #define ZFCP_STATUS_ADAPTER_QDIOUP		0x00000002
+#define ZFCP_STATUS_ADAPTER_SIOSL_ISSUED	0x00000004
 #define ZFCP_STATUS_ADAPTER_XCONFIG_OK		0x00000008
 #define ZFCP_STATUS_ADAPTER_HOST_CON_INIT	0x00000010
 #define ZFCP_STATUS_ADAPTER_ERP_PENDING		0x00000100
@@ -247,10 +248,8 @@ enum zfcp_wka_status {
 #define ZFCP_STATUS_FSFREQ_CLEANUP		0x00000010
 #define ZFCP_STATUS_FSFREQ_ABORTSUCCEEDED	0x00000040
 #define ZFCP_STATUS_FSFREQ_ABORTNOTNEEDED       0x00000080
-#define ZFCP_STATUS_FSFREQ_ABORTED              0x00000100
 #define ZFCP_STATUS_FSFREQ_TMFUNCFAILED         0x00000200
 #define ZFCP_STATUS_FSFREQ_TMFUNCNOTSUPP        0x00000400
-#define ZFCP_STATUS_FSFREQ_RETRY                0x00000800
 #define ZFCP_STATUS_FSFREQ_DISMISSED            0x00001000
 
 /************************* STRUCTURE DEFINITIONS *****************************/
@@ -365,6 +364,14 @@ struct zfcp_send_els {
 	int status;
 };
 
+struct zfcp_els_adisc {
+	struct zfcp_send_els els;
+	struct scatterlist req;
+	struct scatterlist resp;
+	struct zfcp_ls_adisc ls_adisc;
+	struct zfcp_ls_adisc ls_adisc_acc;
+};
+
 struct zfcp_wka_port {
 	struct zfcp_adapter	*adapter;
 	wait_queue_head_t	completion_wq;
@@ -420,6 +427,30 @@ struct zfcp_latencies {
 	struct latency_cont write;
 	struct latency_cont cmd;
 	spinlock_t lock;
+};
+
+/**
+ * struct zfcp_fc_event - FC HBAAPI event for internal queueing from irq context
+ * @code: Event code
+ * @data: Event data
+ * @list: list_head for zfcp_fc_events list
+ */
+struct zfcp_fc_event {
+        enum fc_host_event_code code;
+        u32 data;
+        struct list_head list;
+};
+
+/**
+ * struct zfcp_fc_events - Infrastructure for posting FC events from irq context
+ * @list: List for queueing of events from irq context to workqueue
+ * @list_lock: Lock for event list
+ * @work: work_struct for forwarding events in workqueue
+ */
+struct zfcp_fc_events {
+        struct list_head list;
+        spinlock_t list_lock;
+        struct work_struct work;
 };
 
 /** struct zfcp_qdio - basic QDIO data structure
@@ -494,6 +525,7 @@ struct zfcp_adapter {
 	struct work_struct	scan_work;
 	struct service_level	service_level;
 	struct workqueue_struct	*work_queue;
+	struct zfcp_fc_events events;
 };
 
 struct zfcp_port {
@@ -518,6 +550,7 @@ struct zfcp_port {
 	struct work_struct     test_link_work;
 	struct work_struct     rport_work;
 	enum { RPORT_NONE, RPORT_ADD, RPORT_DEL }  rport_task;
+	unsigned int		starget_id;
 };
 
 struct zfcp_unit {
@@ -609,6 +642,7 @@ struct zfcp_data {
 	struct kmem_cache	*qtcb_cache;
 	struct kmem_cache	*sr_buffer_cache;
 	struct kmem_cache	*gid_pn_cache;
+	struct kmem_cache	*adisc_cache;
 };
 
 /********************** ZFCP SPECIFIC DEFINES ********************************/

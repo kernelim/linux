@@ -559,3 +559,19 @@ unsigned int kstat_irqs_cpu(unsigned int irq, int cpu)
 }
 EXPORT_SYMBOL(kstat_irqs_cpu);
 
+
+#ifdef CONFIG_GENERIC_HARDIRQS
+unsigned int kstat_irqs(unsigned int irq)
+{
+	struct irq_desc *desc = irq_to_desc(irq);
+	int cpu;
+	int sum = 0;
+
+	if (!desc)
+		return 0;
+	for_each_possible_cpu(cpu)
+		sum += desc->kstat_irqs[cpu];
+	return sum;
+}
+EXPORT_SYMBOL(kstat_irqs);
+#endif /* CONFIG_GENERIC_HARDIRQS */

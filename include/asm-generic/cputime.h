@@ -39,6 +39,12 @@ typedef u64 cputime64_t;
 #define msecs_to_cputime(__msecs)	msecs_to_jiffies(__msecs)
 
 /*
+ * Convert cputime to microseconds and back.
+ */
+#define cputime_to_usecs(__ct)		jiffies_to_usecs(__ct);
+#define usecs_to_cputime(__msecs)	usecs_to_jiffies(__msecs);
+
+/*
  * Convert cputime to seconds and back.
  */
 #define cputime_to_secs(jif)		((jif) / HZ)

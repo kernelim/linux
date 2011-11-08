@@ -1190,7 +1190,7 @@ static int ext2_remount (struct super_block * sb, int * flags, char * data)
 	es = sbi->s_es;
 	if (((sbi->s_mount_opt & EXT2_MOUNT_XIP) !=
 	    (old_mount_opt & EXT2_MOUNT_XIP)) &&
-	    invalidate_inodes(sb)) {
+	    invalidate_inodes(sb, true)) {
 		ext2_warning(sb, __func__, "refusing change of xip flag "
 			     "with busy inodes while remounting");
 		sbi->s_mount_opt &= ~EXT2_MOUNT_XIP;

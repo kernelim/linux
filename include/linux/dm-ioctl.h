@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2001 - 2003 Sistina Software (UK) Limited.
- * Copyright (C) 2004 - 2005 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2004 - 2009 Red Hat, Inc. All rights reserved.
  *
  * This file is released under the LGPL.
  */
@@ -43,7 +43,7 @@
  * Remove a device, destroy any tables.
  *
  * DM_DEV_RENAME:
- * Rename a device.
+ * Rename a device or set its uuid if none was previously supplied.
  *
  * DM_SUSPEND:
  * This performs both suspend and resume, depending which flag is
@@ -266,9 +266,9 @@ enum {
 #define DM_DEV_SET_GEOMETRY	_IOWR(DM_IOCTL, DM_DEV_SET_GEOMETRY_CMD, struct dm_ioctl)
 
 #define DM_VERSION_MAJOR	4
-#define DM_VERSION_MINOR	15
-#define DM_VERSION_PATCHLEVEL	0
-#define DM_VERSION_EXTRA	"-ioctl (2009-04-01)"
+#define DM_VERSION_MINOR	22
+#define DM_VERSION_PATCHLEVEL	6
+#define DM_VERSION_EXTRA	"-ioctl (2011-10-19)"
 
 /* Status bits */
 #define DM_READONLY_FLAG	(1 << 0) /* In/Out */
@@ -308,5 +308,29 @@ enum {
  * Set this to suspend without flushing queued ios.
  */
 #define DM_NOFLUSH_FLAG		(1 << 11) /* In */
+
+/*
+ * If set, any table information returned will relate to the inactive
+ * table instead of the live one.  Always check DM_INACTIVE_PRESENT_FLAG
+ * is set before using the data returned.
+ */
+#define DM_QUERY_INACTIVE_TABLE_FLAG	(1 << 12) /* In */
+
+/*
+ * If set, a uevent was generated for which the caller may need to wait.
+ */
+#define DM_UEVENT_GENERATED_FLAG	(1 << 13) /* Out */
+
+/*
+ * If set, rename changes the uuid not the name.  Only permitted
+ * if no uuid was previously supplied: an existing uuid cannot be changed.
+ */
+#define DM_UUID_FLAG			(1 << 14) /* In */
+
+/*
+ * If set, all buffers are wiped after use. Use when sending
+ * or requesting sensitive data such as an encryption key.
+ */
+#define DM_SECURE_DATA_FLAG		(1 << 15) /* In */
 
 #endif				/* _LINUX_DM_IOCTL_H */

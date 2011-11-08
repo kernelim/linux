@@ -75,6 +75,7 @@ enum {
 	ATA_ID_EIDE_DMA_TIME	= 66,
 	ATA_ID_EIDE_PIO		= 67,
 	ATA_ID_EIDE_PIO_IORDY	= 68,
+	ATA_ID_ADDITIONAL_SUPP	= 69,
 	ATA_ID_QUEUE_DEPTH	= 75,
 	ATA_ID_MAJOR_VER	= 80,
 	ATA_ID_COMMAND_SET_1	= 82,
@@ -87,6 +88,8 @@ enum {
 	ATA_ID_HW_CONFIG	= 93,
 	ATA_ID_SPG		= 98,
 	ATA_ID_LBA_CAPACITY_2	= 100,
+	ATA_ID_SECTOR_SIZE	= 106,
+	ATA_ID_LOGICAL_SECTOR_SIZE	= 117,	/* and 118 */
 	ATA_ID_LAST_LUN		= 126,
 	ATA_ID_DLF		= 128,
 	ATA_ID_CSFO		= 129,
@@ -638,6 +641,51 @@ static inline int ata_id_flush_ext_enabled(const u16 *id)
 	return (id[ATA_ID_CFS_ENABLE_2] & 0x2400) == 0x2400;
 }
 
+static inline u32 ata_id_logical_sector_size(const u16 *id)
+{
+	/* T13/1699-D Revision 6a, Sep 6, 2008. Page 128.
+	 * IDENTIFY DEVICE data, word 117-118.
+	 * 0xd000 ignores bit 13 (logical:physical > 1)
+	 */
+	if ((id[ATA_ID_SECTOR_SIZE] & 0xd000) == 0x5000)
+		return (((id[ATA_ID_LOGICAL_SECTOR_SIZE+1] << 16)
+			 + id[ATA_ID_LOGICAL_SECTOR_SIZE]) * sizeof(u16)) ;
+	return ATA_SECT_SIZE;
+}
+
+static inline u8 ata_id_log2_per_physical_sector(const u16 *id)
+{
+	/* T13/1699-D Revision 6a, Sep 6, 2008. Page 128.
+	 * IDENTIFY DEVICE data, word 106.
+	 * 0xe000 ignores bit 12 (logical sector > 512 bytes)
+	 */
+	if ((id[ATA_ID_SECTOR_SIZE] & 0xe000) == 0x6000)
+		return (id[ATA_ID_SECTOR_SIZE] & 0xf);
+	return 0;
+}
+
+/* Offset of logical sectors relative to physical sectors.
+ *
+ * If device has more than one logical sector per physical sector
+ * (aka 512 byte emulation), vendors might offset the "sector 0" address
+ * so sector 63 is "naturally aligned" - e.g. FAT partition table.
+ * This avoids Read/Mod/Write penalties when using FAT partition table
+ * and updating "well aligned" (FS perspective) physical sectors on every
+ * transaction.
+ */
+static inline u16 ata_id_logical_sector_offset(const u16 *id,
+	 u8 log2_per_phys)
+{
+	u16 word_209 = id[209];
+
+	if ((log2_per_phys > 1) && (word_209 & 0xc000) == 0x4000) {
+		u16 first = word_209 & 0x3fff;
+		if (first > 0)
+			return (1 << log2_per_phys) - first;
+	}
+	return 0;
+}
+
 static inline int ata_id_has_lba48(const u16 *id)
 {
 	if ((id[ATA_ID_COMMAND_SET_2] & 0xC000) != 0x4000)
@@ -803,6 +851,16 @@ static inline int ata_id_has_trim(const u16 *id)
 	return 0;
 }
 
+static inline int ata_id_has_zero_after_trim(const u16 *id)
+{
+	/* DSM supported, deterministic read, and read zero after trim set */
+	if (ata_id_has_trim(id) &&
+	    (id[ATA_ID_ADDITIONAL_SUPP] & 0x4020) == 0x4020)
+		return 1;
+
+	return 0;
+}
+
 static inline int ata_id_current_chs_valid(const u16 *id)
 {
 	/* For ATA-1 devices, if the INITIALIZE DEVICE PARAMETERS command
@@ -958,17 +1016,17 @@ static inline void ata_id_to_hd_driveid(u16 *id)
 }
 
 /*
- * Write up to 'max' LBA Range Entries to the buffer that will cover the
- * extent from sector to sector + count.  This is used for TRIM and for
- * ADD LBA(S) TO NV CACHE PINNED SET.
+ * Write LBA Range Entries to the buffer that will cover the extent from
+ * sector to sector + count.  This is used for TRIM and for ADD LBA(S)
+ * TO NV CACHE PINNED SET.
  */
-static inline unsigned ata_set_lba_range_entries(void *_buffer, unsigned max,
-						u64 sector, unsigned long count)
+static inline unsigned ata_set_lba_range_entries(void *_buffer,
+		unsigned buf_size, u64 sector, unsigned long count)
 {
 	__le64 *buffer = _buffer;
-	unsigned i = 0;
+	unsigned i = 0, used_bytes;
 
-	while (i < max) {
+	while (i < buf_size / 8 ) { /* 6-byte LBA + 2-byte range per entry */
 		u64 entry = sector |
 			((u64)(count > 0xffff ? 0xffff : count) << 48);
 		buffer[i++] = __cpu_to_le64(entry);
@@ -978,9 +1036,9 @@ static inline unsigned ata_set_lba_range_entries(void *_buffer, unsigned max,
 		sector += 0xffff;
 	}
 
-	max = ALIGN(i * 8, 512);
-	memset(buffer + i, 0, max - i * 8);
-	return max;
+	used_bytes = ALIGN(i * 8, 512);
+	memset(buffer + i, 0, used_bytes - i * 8);
+	return used_bytes;
 }
 
 static inline int is_multi_taskfile(struct ata_taskfile *tf)
@@ -1000,8 +1058,8 @@ static inline int ata_ok(u8 status)
 
 static inline int lba_28_ok(u64 block, u32 n_block)
 {
-	/* check the ending block number */
-	return ((block + n_block) < ((u64)1 << 28)) && (n_block <= 256);
+	/* check the ending block number: must be LESS THAN 0x0fffffff */
+	return ((block + n_block) < ((1 << 28) - 1)) && (n_block <= 256);
 }
 
 static inline int lba_48_ok(u64 block, u32 n_block)

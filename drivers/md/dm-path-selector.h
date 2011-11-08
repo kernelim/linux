@@ -28,6 +28,7 @@ struct path_selector {
 
 /* Information about a path selector type */
 struct path_selector_type {
+	uint64_t features;	/* 3rd party driver must initialize to zero */
 	char *name;
 	struct module *module;
 

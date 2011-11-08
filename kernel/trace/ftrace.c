@@ -369,11 +369,19 @@ static int function_stat_show(struct seq_file *m, void *v)
 {
 	struct ftrace_profile *rec = v;
 	char str[KSYM_SYMBOL_LEN];
+	int ret = 0;
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
-	static DEFINE_MUTEX(mutex);
 	static struct trace_seq s;
 	unsigned long long avg;
 #endif
+
+	mutex_lock(&ftrace_profile_lock);
+
+	/* we raced with function_profile_reset() */
+	if (unlikely(rec->counter == 0)) {
+		ret = -EBUSY;
+		goto out;
+	}
 
 	kallsyms_lookup(rec->ip, NULL, NULL, NULL, str);
 	seq_printf(m, "  %-30.30s  %10lu", str, rec->counter);
@@ -383,17 +391,17 @@ static int function_stat_show(struct seq_file *m, void *v)
 	avg = rec->time;
 	do_div(avg, rec->counter);
 
-	mutex_lock(&mutex);
 	trace_seq_init(&s);
 	trace_print_graph_duration(rec->time, &s);
 	trace_seq_puts(&s, "    ");
 	trace_print_graph_duration(avg, &s);
 	trace_print_seq(m, &s);
-	mutex_unlock(&mutex);
 #endif
 	seq_putc(m, '\n');
+out:
+	mutex_unlock(&ftrace_profile_lock);
 
-	return 0;
+	return ret;
 }
 
 static void ftrace_profile_reset(struct ftrace_profile_stat *stat)
@@ -1016,6 +1024,21 @@ static void ftrace_bug(int failed, unsigned long ip)
 }
 
 
+/* Return 1 if the address range is reserved for ftrace */
+int ftrace_text_reserved(void *start, void *end)
+{
+	struct dyn_ftrace *rec;
+	struct ftrace_page *pg;
+
+	do_for_each_ftrace_rec(pg, rec) {
+		if (rec->ip <= (unsigned long)end &&
+		    rec->ip + MCOUNT_INSN_SIZE > (unsigned long)start)
+			return 1;
+	} while_for_each_ftrace_rec();
+	return 0;
+}
+
+
 static int
 __ftrace_replace_code(struct dyn_ftrace *rec, int enable)
 {
@@ -1473,6 +1496,8 @@ static void *t_start(struct seq_file *m, loff_t *pos)
 		if (*pos > 0)
 			return t_hash_start(m, pos);
 		iter->flags |= FTRACE_ITER_PRINTALL;
+		/* reset in case of seek/pread */
+		iter->flags &= ~FTRACE_ITER_HASH;
 		return iter;
 	}
 
@@ -1656,60 +1681,6 @@ ftrace_regex_lseek(struct file *file, loff_t offset, int origin)
 	return ret;
 }
 
-enum {
-	MATCH_FULL,
-	MATCH_FRONT_ONLY,
-	MATCH_MIDDLE_ONLY,
-	MATCH_END_ONLY,
-};
-
-/*
- * (static function - no need for kernel doc)
- *
- * Pass in a buffer containing a glob and this function will
- * set search to point to the search part of the buffer and
- * return the type of search it is (see enum above).
- * This does modify buff.
- *
- * Returns enum type.
- *  search returns the pointer to use for comparison.
- *  not returns 1 if buff started with a '!'
- *     0 otherwise.
- */
-static int
-ftrace_setup_glob(char *buff, int len, char **search, int *not)
-{
-	int type = MATCH_FULL;
-	int i;
-
-	if (buff[0] == '!') {
-		*not = 1;
-		buff++;
-		len--;
-	} else
-		*not = 0;
-
-	*search = buff;
-
-	for (i = 0; i < len; i++) {
-		if (buff[i] == '*') {
-			if (!i) {
-				*search = buff + 1;
-				type = MATCH_END_ONLY;
-			} else {
-				if (type == MATCH_END_ONLY)
-					type = MATCH_MIDDLE_ONLY;
-				else
-					type = MATCH_FRONT_ONLY;
-				buff[i] = 0;
-				break;
-			}
-		}
-	}
-
-	return type;
-}
-
 static int ftrace_match(char *str, char *regex, int len, int type)
 {
 	int matched = 0;
@@ -1758,7 +1729,7 @@ static void ftrace_match_records(char *buff, int len, int enable)
 	int not;
 
 	flag = enable ? FTRACE_FL_FILTER : FTRACE_FL_NOTRACE;
-	type = ftrace_setup_glob(buff, len, &search, &not);
+	type = filter_parse_regex(buff, len, &search, &not);
 
 	search_len = strlen(search);
 
@@ -1826,7 +1797,7 @@ static void ftrace_match_module_records(char *buff, char *mod, int enable)
 	}
 
 	if (strlen(buff)) {
-		type = ftrace_setup_glob(buff, strlen(buff), &search, &not);
+		type = filter_parse_regex(buff, strlen(buff), &search, &not);
 		search_len = strlen(search);
 	}
 
@@ -1991,7 +1962,7 @@ register_ftrace_function_probe(char *glob, struct ftrace_probe_ops *ops,
 	int count = 0;
 	char *search;
 
-	type = ftrace_setup_glob(glob, strlen(glob), &search, &not);
+	type = filter_parse_regex(glob, strlen(glob), &search, &not);
 	len = strlen(search);
 
 	/* we do not support '!' for function probes */
@@ -2068,7 +2039,7 @@ __unregister_ftrace_function_probe(char *glob, struct ftrace_probe_ops *ops,
 	else if (glob) {
 		int not;
 
-		type = ftrace_setup_glob(glob, strlen(glob), &search, &not);
+		type = filter_parse_regex(glob, strlen(glob), &search, &not);
 		len = strlen(search);
 
 		/* we do not support '!' for function probes */
@@ -2393,7 +2364,7 @@ static const struct file_operations ftrace_filter_fops = {
 	.open = ftrace_filter_open,
 	.read = seq_read,
 	.write = ftrace_filter_write,
-	.llseek = ftrace_regex_lseek,
+	.llseek = no_llseek,
 	.release = ftrace_filter_release,
 };
 
@@ -2513,7 +2484,7 @@ ftrace_set_func(unsigned long *array, int *idx, char *buffer)
 		return -ENODEV;
 
 	/* decode regex */
-	type = ftrace_setup_glob(buffer, strlen(buffer), &search, &not);
+	type = filter_parse_regex(buffer, strlen(buffer), &search, &not);
 	if (not)
 		return -EINVAL;
 
@@ -3258,6 +3229,7 @@ void ftrace_graph_init_task(struct task_struct *t)
 {
 	/* Make sure we do not use the parent ret_stack */
 	t->ret_stack = NULL;
+	t->curr_ret_stack = -1;
 
 	if (ftrace_graph_active) {
 		struct ftrace_ret_stack *ret_stack;
@@ -3267,7 +3239,6 @@ void ftrace_graph_init_task(struct task_struct *t)
 				GFP_KERNEL);
 		if (!ret_stack)
 			return;
-		t->curr_ret_stack = -1;
 		atomic_set(&t->tracing_graph_pause, 0);
 		atomic_set(&t->trace_overrun, 0);
 		t->ftrace_timestamp = 0;

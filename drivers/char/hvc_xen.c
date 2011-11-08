@@ -72,7 +72,8 @@ static int __write_console(const char *data, int len)
 	wmb();			/* write ring before updating pointer */
 	intf->out_prod = prod;
 
-	notify_daemon();
+	if (sent)
+		notify_daemon();
 	return sent;
 }
 
@@ -120,7 +121,7 @@ static int read_console(uint32_t vtermno, char *buf, int len)
 	return recv;
 }
 
-static struct hv_ops hvc_ops = {
+static const struct hv_ops hvc_ops = {
 	.get_chars = read_console,
 	.put_chars = write_console,
 	.notifier_add = notifier_add_irq,

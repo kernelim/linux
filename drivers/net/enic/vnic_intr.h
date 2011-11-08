@@ -1,5 +1,5 @@
 /*
- * Copyright 2008 Cisco Systems, Inc.  All rights reserved.
+ * Copyright 2008-2010 Cisco Systems, Inc.  All rights reserved.
  * Copyright 2007 Nuova Systems, Inc.  All rights reserved.
  *
  * This program is free software; you may redistribute it and/or modify
@@ -23,8 +23,6 @@
 #include <linux/pci.h>
 
 #include "vnic_dev.h"
-
-#define VNIC_INTR_TIMER_MAX		0xffff
 
 #define VNIC_INTR_TIMER_TYPE_ABS	0
 #define VNIC_INTR_TIMER_TYPE_QUIET	1
@@ -63,6 +61,11 @@ static inline void vnic_intr_mask(struct vnic_intr *intr)
 	iowrite32(1, &intr->ctrl->mask);
 }
 
+static inline int vnic_intr_masked(struct vnic_intr *intr)
+{
+	return ioread32(&intr->ctrl->mask);
+}
+
 static inline void vnic_intr_return_credits(struct vnic_intr *intr,
 	unsigned int credits, int unmask, int reset_timer)
 {
@@ -99,8 +102,10 @@ static inline u32 vnic_intr_legacy_pba(u32 __iomem *legacy_pba)
 void vnic_intr_free(struct vnic_intr *intr);
 int vnic_intr_alloc(struct vnic_dev *vdev, struct vnic_intr *intr,
 	unsigned int index);
-void vnic_intr_init(struct vnic_intr *intr, unsigned int coalescing_timer,
+void vnic_intr_init(struct vnic_intr *intr, u32 coalescing_timer,
 	unsigned int coalescing_type, unsigned int mask_on_assertion);
+void vnic_intr_coalescing_timer_set(struct vnic_intr *intr,
+	u32 coalescing_timer);
 void vnic_intr_clean(struct vnic_intr *intr);
 
 #endif /* _VNIC_INTR_H_ */

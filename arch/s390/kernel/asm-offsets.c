@@ -30,6 +30,7 @@ int main(void)
 	DEFINE(__TI_precount, offsetof(struct thread_info, preempt_count));
 	DEFINE(__TI_user_timer, offsetof(struct thread_info, user_timer));
 	DEFINE(__TI_system_timer, offsetof(struct thread_info, system_timer));
+	DEFINE(__TI_last_break, offsetof(struct thread_info, last_break));
 	BLANK();
 	DEFINE(__PT_ARGS, offsetof(struct pt_regs, args));
 	DEFINE(__PT_PSW, offsetof(struct pt_regs, psw));
@@ -52,6 +53,7 @@ int main(void)
 	DEFINE(__VDSO_WTOM_NSEC, offsetof(struct vdso_data, wtom_clock_nsec));
 	DEFINE(__VDSO_TIMEZONE, offsetof(struct vdso_data, tz_minuteswest));
 	DEFINE(__VDSO_ECTG_OK, offsetof(struct vdso_data, ectg_available));
+	DEFINE(__VDSO_NTP_MULT, offsetof(struct vdso_data, ntp_mult));
 	DEFINE(__VDSO_ECTG_BASE,
 	       offsetof(struct vdso_per_cpu_data, ectg_timer_base));
 	DEFINE(__VDSO_ECTG_USER,

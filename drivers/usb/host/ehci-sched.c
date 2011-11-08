@@ -98,7 +98,14 @@ static void periodic_unlink (struct ehci_hcd *ehci, unsigned frame, void *ptr)
 	 */
 	*prev_p = *periodic_next_shadow(ehci, &here,
 			Q_NEXT_TYPE(ehci, *hw_p));
-	*hw_p = *shadow_next_periodic(ehci, &here, Q_NEXT_TYPE(ehci, *hw_p));
+
+	if (!ehci->use_dummy_qh ||
+	    *shadow_next_periodic(ehci, &here, Q_NEXT_TYPE(ehci, *hw_p))
+			!= EHCI_LIST_END(ehci))
+		*hw_p = *shadow_next_periodic(ehci, &here,
+				Q_NEXT_TYPE(ehci, *hw_p));
+	else
+		*hw_p = ehci->dummy->qh_dma;
 }
 
 /* how many of the uframe's 125 usecs are allocated? */
@@ -464,8 +471,10 @@ static int enable_periodic (struct ehci_hcd *ehci)
 	 */
 	status = handshake_on_error_set_halt(ehci, &ehci->regs->status,
 					     STS_PSS, 0, 9 * 125);
-	if (status)
+	if (status) {
+		usb_hc_died(ehci_to_hcd(ehci));
 		return status;
+	}
 
 	cmd = ehci_readl(ehci, &ehci->regs->command) | CMD_PSE;
 	ehci_writel(ehci, cmd, &ehci->regs->command);
@@ -503,8 +512,10 @@ static int disable_periodic (struct ehci_hcd *ehci)
 	 */
 	status = handshake_on_error_set_halt(ehci, &ehci->regs->status,
 					     STS_PSS, STS_PSS, 9 * 125);
-	if (status)
+	if (status) {
+		usb_hc_died(ehci_to_hcd(ehci));
 		return status;
+	}
 
 	cmd = ehci_readl(ehci, &ehci->regs->command) & ~CMD_PSE;
 	ehci_writel(ehci, cmd, &ehci->regs->command);
@@ -878,8 +889,7 @@ static int intr_submit (
 
 	spin_lock_irqsave (&ehci->lock, flags);
 
-	if (unlikely(!test_bit(HCD_FLAG_HW_ACCESSIBLE,
-			&ehci_to_hcd(ehci)->flags))) {
+	if (unlikely(!HCD_HW_ACCESSIBLE(ehci_to_hcd(ehci)))) {
 		status = -ESHUTDOWN;
 		goto done_not_linked;
 	}
@@ -1121,8 +1131,8 @@ iso_stream_find (struct ehci_hcd *ehci, struct urb *urb)
 					urb->interval);
 		}
 
-	/* if dev->ep [epnum] is a QH, info1.maxpacket is nonzero */
-	} else if (unlikely (stream->hw_info1 != 0)) {
+	/* if dev->ep [epnum] is a QH, hw is set */
+	} else if (unlikely (stream->hw != NULL)) {
 		ehci_dbg (ehci, "dev %s ep%d%s, not iso??\n",
 			urb->dev->devpath, epnum,
 			usb_pipein(urb->pipe) ? "in" : "out");
@@ -1553,13 +1563,27 @@ itd_patch(
 static inline void
 itd_link (struct ehci_hcd *ehci, unsigned frame, struct ehci_itd *itd)
 {
-	/* always prepend ITD/SITD ... only QH tree is order-sensitive */
-	itd->itd_next = ehci->pshadow [frame];
-	itd->hw_next = ehci->periodic [frame];
-	ehci->pshadow [frame].itd = itd;
+	union ehci_shadow	*prev = &ehci->pshadow[frame];
+	__hc32			*hw_p = &ehci->periodic[frame];
+	union ehci_shadow	here = *prev;
+	__hc32			type = 0;
+
+	/* skip any iso nodes which might belong to previous microframes */
+	while (here.ptr) {
+		type = Q_NEXT_TYPE(ehci, *hw_p);
+		if (type == cpu_to_hc32(ehci, Q_TYPE_QH))
+			break;
+		prev = periodic_next_shadow(ehci, prev, type);
+		hw_p = shadow_next_periodic(ehci, &here, type);
+		here = *prev;
+	}
+
+	itd->itd_next = here;
+	itd->hw_next = *hw_p;
+	prev->itd = itd;
 	itd->frame = frame;
 	wmb ();
-	ehci->periodic[frame] = cpu_to_hc32(ehci, itd->itd_dma | Q_TYPE_ITD);
+	*hw_p = cpu_to_hc32(ehci, itd->itd_dma | Q_TYPE_ITD);
 }
 
 /* fit urb's itds into the selected schedule slot; activate as needed */
@@ -1589,6 +1613,12 @@ itd_link_urb (
 			next_uframe >> 3, next_uframe & 0x7);
 		stream->start = jiffies;
 	}
+
+	if (ehci_to_hcd(ehci)->self.bandwidth_isoc_reqs == 0) {
+		if (ehci->amd_pll_fix == 1)
+			usb_amd_quirk_pll_disable();
+	}
+
 	ehci_to_hcd(ehci)->self.bandwidth_isoc_reqs++;
 
 	/* fill iTDs uframe by uframe */
@@ -1715,6 +1745,11 @@ itd_complete (
 	(void) disable_periodic(ehci);
 	ehci_to_hcd(ehci)->self.bandwidth_isoc_reqs--;
 
+	if (ehci_to_hcd(ehci)->self.bandwidth_isoc_reqs == 0) {
+		if (ehci->amd_pll_fix == 1)
+			usb_amd_quirk_pll_enable();
+	}
+
 	if (unlikely(list_is_singular(&stream->td_list))) {
 		ehci_to_hcd(ehci)->self.bandwidth_allocated
 				-= stream->bandwidth;
@@ -1789,8 +1824,7 @@ static int itd_submit (struct ehci_hcd *ehci, struct urb *urb,
 
 	/* schedule ... need to lock */
 	spin_lock_irqsave (&ehci->lock, flags);
-	if (unlikely(!test_bit(HCD_FLAG_HW_ACCESSIBLE,
-			       &ehci_to_hcd(ehci)->flags))) {
+	if (unlikely(!HCD_HW_ACCESSIBLE(ehci_to_hcd(ehci)))) {
 		status = -ESHUTDOWN;
 		goto done_not_linked;
 	}
@@ -2002,6 +2036,12 @@ sitd_link_urb (
 			stream->interval, hc32_to_cpu(ehci, stream->splits));
 		stream->start = jiffies;
 	}
+
+	if (ehci_to_hcd(ehci)->self.bandwidth_isoc_reqs == 0) {
+		if (ehci->amd_pll_fix == 1)
+			usb_amd_quirk_pll_disable();
+	}
+
 	ehci_to_hcd(ehci)->self.bandwidth_isoc_reqs++;
 
 	/* fill sITDs frame by frame */
@@ -2104,6 +2144,11 @@ sitd_complete (
 	(void) disable_periodic(ehci);
 	ehci_to_hcd(ehci)->self.bandwidth_isoc_reqs--;
 
+	if (ehci_to_hcd(ehci)->self.bandwidth_isoc_reqs == 0) {
+		if (ehci->amd_pll_fix == 1)
+			usb_amd_quirk_pll_enable();
+	}
+
 	if (list_is_singular(&stream->td_list)) {
 		ehci_to_hcd(ehci)->self.bandwidth_allocated
 				-= stream->bandwidth;
@@ -2113,13 +2158,27 @@ sitd_complete (
 			(stream->bEndpointAddress & USB_DIR_IN) ? "in" : "out");
 	}
 	iso_stream_put (ehci, stream);
-	/* OK to recycle this SITD now that its completion callback ran. */
+
 done:
 	sitd->urb = NULL;
-	sitd->stream = NULL;
-	list_move(&sitd->sitd_list, &stream->free_list);
-	iso_stream_put(ehci, stream);
-
+	if (ehci->clock_frame != sitd->frame) {
+		/* OK to recycle this SITD now. */
+		sitd->stream = NULL;
+		list_move(&sitd->sitd_list, &stream->free_list);
+		iso_stream_put(ehci, stream);
+	} else {
+		/* HW might remember this SITD, so we can't recycle it yet.
+		 * Move it to a safe place until a new frame starts.
+		 */
+		list_move(&sitd->sitd_list, &ehci->cached_sitd_list);
+		if (stream->refcount == 2) {
+			/* If iso_stream_put() were called here, stream
+			 * would be freed.  Instead, just prevent reuse.
+			 */
+			stream->ep->hcpriv = NULL;
+			stream->ep = NULL;
+		}
+	}
 	return retval;
 }
 
@@ -2161,8 +2220,7 @@ static int sitd_submit (struct ehci_hcd *ehci, struct urb *urb,
 
 	/* schedule ... need to lock */
 	spin_lock_irqsave (&ehci->lock, flags);
-	if (unlikely(!test_bit(HCD_FLAG_HW_ACCESSIBLE,
-			       &ehci_to_hcd(ehci)->flags))) {
+	if (unlikely(!HCD_HW_ACCESSIBLE(ehci_to_hcd(ehci)))) {
 		status = -ESHUTDOWN;
 		goto done_not_linked;
 	}
@@ -2185,14 +2243,22 @@ done:
 
 /*-------------------------------------------------------------------------*/
 
-static void free_cached_itd_list(struct ehci_hcd *ehci)
+static void free_cached_lists(struct ehci_hcd *ehci)
 {
 	struct ehci_itd *itd, *n;
+	struct ehci_sitd *sitd, *sn;
 
 	list_for_each_entry_safe(itd, n, &ehci->cached_itd_list, itd_list) {
 		struct ehci_iso_stream	*stream = itd->stream;
 		itd->stream = NULL;
 		list_move(&itd->itd_list, &stream->free_list);
+		iso_stream_put(ehci, stream);
+	}
+
+	list_for_each_entry_safe(sitd, sn, &ehci->cached_sitd_list, sitd_list) {
+		struct ehci_iso_stream	*stream = sitd->stream;
+		sitd->stream = NULL;
+		list_move(&sitd->sitd_list, &stream->free_list);
 		iso_stream_put(ehci, stream);
 	}
 }
@@ -2221,7 +2287,7 @@ scan_periodic (struct ehci_hcd *ehci)
 		clock_frame = -1;
 	}
 	if (ehci->clock_frame != clock_frame) {
-		free_cached_itd_list(ehci);
+		free_cached_lists(ehci);
 		ehci->clock_frame = clock_frame;
 	}
 	clock %= mod;
@@ -2300,7 +2366,11 @@ restart:
 				 * pointer for much longer, if at all.
 				 */
 				*q_p = q.itd->itd_next;
-				*hw_p = q.itd->hw_next;
+				if (!ehci->use_dummy_qh ||
+				    q.itd->hw_next != EHCI_LIST_END(ehci))
+					*hw_p = q.itd->hw_next;
+				else
+					*hw_p = ehci->dummy->qh_dma;
 				type = Q_NEXT_TYPE(ehci, q.itd->hw_next);
 				wmb();
 				modified = itd_complete (ehci, q.itd);
@@ -2329,7 +2399,11 @@ restart:
 				 * URB completion.
 				 */
 				*q_p = q.sitd->sitd_next;
-				*hw_p = q.sitd->hw_next;
+				if (!ehci->use_dummy_qh ||
+				    q.sitd->hw_next != EHCI_LIST_END(ehci))
+					*hw_p = q.sitd->hw_next;
+				else
+					*hw_p = ehci->dummy->qh_dma;
 				type = Q_NEXT_TYPE(ehci, q.sitd->hw_next);
 				wmb();
 				modified = sitd_complete (ehci, q.sitd);
@@ -2384,7 +2458,7 @@ restart:
 			clock = now;
 			clock_frame = clock >> 3;
 			if (ehci->clock_frame != clock_frame) {
-				free_cached_itd_list(ehci);
+				free_cached_lists(ehci);
 				ehci->clock_frame = clock_frame;
 			}
 		} else {

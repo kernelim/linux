@@ -27,7 +27,7 @@
 #include <asm/gart.h>
 #include <asm/pci-direct.h>
 #include <asm/dma.h>
-#include <asm/k8.h>
+#include <asm/amd_nb.h>
 
 int gart_iommu_aperture;
 int gart_iommu_aperture_disabled __initdata;
@@ -205,7 +205,7 @@ static u32 __init read_agp(int bus, int slot, int func, int cap, u32 *order)
  * Do an PCI bus scan by hand because we're running before the PCI
  * subsystem.
  *
- * All K8 AGP bridges are AGPv3 compliant, so we can do this scan
+ * All AMD AGP bridges are AGPv3 compliant, so we can do this scan
  * generically. It's probably overkill to always scan all slots because
  * the AGP bridges should be always an own bus on the HT hierarchy,
  * but do it here for future safety.
@@ -299,7 +299,7 @@ void __init early_gart_iommu_check(void)
 		dev_limit = bus_dev_ranges[i].dev_limit;
 
 		for (slot = dev_base; slot < dev_limit; slot++) {
-			if (!early_is_k8_nb(read_pci_config(bus, slot, 3, 0x00)))
+			if (!early_is_amd_nb(read_pci_config(bus, slot, 3, 0x00)))
 				continue;
 
 			ctl = read_pci_config(bus, slot, 3, AMD64_GARTAPERTURECTL);
@@ -354,7 +354,7 @@ void __init early_gart_iommu_check(void)
 		dev_limit = bus_dev_ranges[i].dev_limit;
 
 		for (slot = dev_base; slot < dev_limit; slot++) {
-			if (!early_is_k8_nb(read_pci_config(bus, slot, 3, 0x00)))
+			if (!early_is_amd_nb(read_pci_config(bus, slot, 3, 0x00)))
 				continue;
 
 			ctl = read_pci_config(bus, slot, 3, AMD64_GARTAPERTURECTL);
@@ -389,19 +389,32 @@ void __init gart_iommu_hole_init(void)
 	for (i = 0; i < ARRAY_SIZE(bus_dev_ranges); i++) {
 		int bus;
 		int dev_base, dev_limit;
+		u32 ctl;
 
 		bus = bus_dev_ranges[i].bus;
 		dev_base = bus_dev_ranges[i].dev_base;
 		dev_limit = bus_dev_ranges[i].dev_limit;
 
 		for (slot = dev_base; slot < dev_limit; slot++) {
-			if (!early_is_k8_nb(read_pci_config(bus, slot, 3, 0x00)))
+			if (!early_is_amd_nb(read_pci_config(bus, slot, 3, 0x00)))
 				continue;
 
 			iommu_detected = 1;
 			gart_iommu_aperture = 1;
 
-			aper_order = (read_pci_config(bus, slot, 3, AMD64_GARTAPERTURECTL) >> 1) & 7;
+			ctl = read_pci_config(bus, slot, 3,
+					      AMD64_GARTAPERTURECTL);
+
+			/*
+			 * Before we do anything else disable the GART. It may
+			 * still be enabled if we boot into a crash-kernel here.
+			 * Reconfiguring the GART while it is enabled could have
+			 * unknown side-effects.
+			 */
+			ctl &= ~GARTEN;
+			write_pci_config(bus, slot, 3, AMD64_GARTAPERTURECTL, ctl);
+
+			aper_order = (ctl >> 1) & 7;
 			aper_size = (32 * 1024 * 1024) << aper_order;
 			aper_base = read_pci_config(bus, slot, 3, AMD64_GARTAPERTUREBASE) & 0x7fff;
 			aper_base <<= 25;
@@ -489,20 +502,22 @@ out:
 
 	/* Fix up the north bridges */
 	for (i = 0; i < ARRAY_SIZE(bus_dev_ranges); i++) {
-		int bus;
-		int dev_base, dev_limit;
+		int bus, dev_base, dev_limit;
+
+		/*
+		 * Don't enable translation yet but enable GART IO and CPU
+		 * accesses and set DISTLBWALKPRB since GART table memory is UC.
+		 */
+		u32 ctl = aper_order << 1;
 
 		bus = bus_dev_ranges[i].bus;
 		dev_base = bus_dev_ranges[i].dev_base;
 		dev_limit = bus_dev_ranges[i].dev_limit;
 		for (slot = dev_base; slot < dev_limit; slot++) {
-			if (!early_is_k8_nb(read_pci_config(bus, slot, 3, 0x00)))
+			if (!early_is_amd_nb(read_pci_config(bus, slot, 3, 0x00)))
 				continue;
 
-			/* Don't enable translation yet. That is done later.
-			   Assume this BIOS didn't initialise the GART so
-			   just overwrite all previous bits */
-			write_pci_config(bus, slot, 3, AMD64_GARTAPERTURECTL, aper_order << 1);
+			write_pci_config(bus, slot, 3, AMD64_GARTAPERTURECTL, ctl);
 			write_pci_config(bus, slot, 3, AMD64_GARTAPERTUREBASE, aper_alloc >> 25);
 		}
 	}

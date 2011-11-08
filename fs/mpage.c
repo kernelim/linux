@@ -73,7 +73,6 @@ static void mpage_end_io_write(struct bio *bio, int err)
 			prefetchw(&bvec->bv_page->flags);
 
 		if (!uptodate){
-			SetPageError(page);
 			if (page->mapping)
 				set_bit(AS_EIO, &page->mapping->flags);
 		}

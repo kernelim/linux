@@ -148,7 +148,7 @@ static void lockspace_kobj_release(struct kobject *k)
 	kfree(ls);
 }
 
-static struct sysfs_ops dlm_attr_ops = {
+static const struct sysfs_ops dlm_attr_ops = {
 	.show  = dlm_attr_show,
 	.store = dlm_attr_store,
 };
@@ -231,7 +231,6 @@ static struct dlm_ls *find_ls_to_scan(void)
 static int dlm_scand(void *data)
 {
 	struct dlm_ls *ls;
-	int timeout_jiffies = dlm_config.ci_scan_secs * HZ;
 
 	while (!kthread_should_stop()) {
 		ls = find_ls_to_scan();
@@ -240,13 +239,14 @@ static int dlm_scand(void *data)
 				ls->ls_scan_time = jiffies;
 				dlm_scan_rsbs(ls);
 				dlm_scan_timeout(ls);
+				dlm_scan_waiters(ls);
 				dlm_unlock_recovery(ls);
 			} else {
 				ls->ls_scan_time += HZ;
 			}
-		} else {
-			schedule_timeout_interruptible(timeout_jiffies);
+			continue;
 		}
+		schedule_timeout_interruptible(dlm_config.ci_scan_secs * HZ);
 	}
 	return 0;
 }
@@ -430,7 +430,7 @@ static int new_lockspace(const char *name, int namelen, void **lockspace,
 
 	error = -ENOMEM;
 
-	ls = kzalloc(sizeof(struct dlm_ls) + namelen, GFP_KERNEL);
+	ls = kzalloc(sizeof(struct dlm_ls) + namelen, GFP_NOFS);
 	if (!ls)
 		goto out;
 	memcpy(ls->ls_name, name, namelen);
@@ -443,11 +443,6 @@ static int new_lockspace(const char *name, int namelen, void **lockspace,
 	if (flags & DLM_LSFL_TIMEWARN)
 		set_bit(LSFL_TIMEWARN, &ls->ls_flags);
 
-	if (flags & DLM_LSFL_FS)
-		ls->ls_allocation = GFP_NOFS;
-	else
-		ls->ls_allocation = GFP_KERNEL;
-
 	/* ls_exflags are forced to match among nodes, and we don't
 	   need to require all nodes to have some flags set */
 	ls->ls_exflags = (flags & ~(DLM_LSFL_TIMEWARN | DLM_LSFL_FS |
@@ -456,7 +451,7 @@ static int new_lockspace(const char *name, int namelen, void **lockspace,
 	size = dlm_config.ci_rsbtbl_size;
 	ls->ls_rsbtbl_size = size;
 
-	ls->ls_rsbtbl = kmalloc(sizeof(struct dlm_rsbtable) * size, GFP_KERNEL);
+	ls->ls_rsbtbl = vmalloc(sizeof(struct dlm_rsbtable) * size);
 	if (!ls->ls_rsbtbl)
 		goto out_lsfree;
 	for (i = 0; i < size; i++) {
@@ -468,7 +463,7 @@ static int new_lockspace(const char *name, int namelen, void **lockspace,
 	size = dlm_config.ci_lkbtbl_size;
 	ls->ls_lkbtbl_size = size;
 
-	ls->ls_lkbtbl = kmalloc(sizeof(struct dlm_lkbtable) * size, GFP_KERNEL);
+	ls->ls_lkbtbl = vmalloc(sizeof(struct dlm_lkbtable) * size);
 	if (!ls->ls_lkbtbl)
 		goto out_rsbfree;
 	for (i = 0; i < size; i++) {
@@ -480,7 +475,7 @@ static int new_lockspace(const char *name, int namelen, void **lockspace,
 	size = dlm_config.ci_dirtbl_size;
 	ls->ls_dirtbl_size = size;
 
-	ls->ls_dirtbl = kmalloc(sizeof(struct dlm_dirtable) * size, GFP_KERNEL);
+	ls->ls_dirtbl = vmalloc(sizeof(struct dlm_dirtable) * size);
 	if (!ls->ls_dirtbl)
 		goto out_lkbfree;
 	for (i = 0; i < size; i++) {
@@ -527,7 +522,7 @@ static int new_lockspace(const char *name, int namelen, void **lockspace,
 	mutex_init(&ls->ls_requestqueue_mutex);
 	mutex_init(&ls->ls_clear_proc_locks);
 
-	ls->ls_recover_buf = kmalloc(dlm_config.ci_buffer_size, GFP_KERNEL);
+	ls->ls_recover_buf = kmalloc(dlm_config.ci_buffer_size, GFP_NOFS);
 	if (!ls->ls_recover_buf)
 		goto out_dirfree;
 
@@ -596,11 +591,11 @@ static int new_lockspace(const char *name, int namelen, void **lockspace,
 	spin_unlock(&lslist_lock);
 	kfree(ls->ls_recover_buf);
  out_dirfree:
-	kfree(ls->ls_dirtbl);
+	vfree(ls->ls_dirtbl);
  out_lkbfree:
-	kfree(ls->ls_lkbtbl);
+	vfree(ls->ls_lkbtbl);
  out_rsbfree:
-	kfree(ls->ls_rsbtbl);
+	vfree(ls->ls_rsbtbl);
  out_lsfree:
 	if (do_unreg)
 		kobject_put(&ls->ls_kobj);
@@ -714,7 +709,7 @@ static int release_lockspace(struct dlm_ls *ls, int force)
 	 */
 
 	dlm_dir_clear(ls);
-	kfree(ls->ls_dirtbl);
+	vfree(ls->ls_dirtbl);
 
 	/*
 	 * Free all lkb's on lkbtbl[] lists.
@@ -738,7 +733,7 @@ static int release_lockspace(struct dlm_ls *ls, int force)
 	}
 	dlm_astd_resume();
 
-	kfree(ls->ls_lkbtbl);
+	vfree(ls->ls_lkbtbl);
 
 	/*
 	 * Free all rsb's on rsbtbl[] lists
@@ -763,7 +758,7 @@ static int release_lockspace(struct dlm_ls *ls, int force)
 		}
 	}
 
-	kfree(ls->ls_rsbtbl);
+	vfree(ls->ls_rsbtbl);
 
 	/*
 	 * Free structures on any other lists

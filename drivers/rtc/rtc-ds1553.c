@@ -246,7 +246,7 @@ static const struct rtc_class_ops ds1553_rtc_ops = {
 	.ioctl		= ds1553_rtc_ioctl,
 };
 
-static ssize_t ds1553_nvram_read(struct kobject *kobj,
+static ssize_t ds1553_nvram_read(struct file *filp, struct kobject *kobj,
 				 struct bin_attribute *bin_attr,
 				 char *buf, loff_t pos, size_t size)
 {
@@ -261,7 +261,7 @@ static ssize_t ds1553_nvram_read(struct kobject *kobj,
 	return count;
 }
 
-static ssize_t ds1553_nvram_write(struct kobject *kobj,
+static ssize_t ds1553_nvram_write(struct file *filp, struct kobject *kobj,
 				  struct bin_attribute *bin_attr,
 				  char *buf, loff_t pos, size_t size)
 {

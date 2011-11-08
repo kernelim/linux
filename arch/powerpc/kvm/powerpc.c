@@ -78,8 +78,9 @@ int kvmppc_emulate_mmio(struct kvm_run *run, struct kvm_vcpu *vcpu)
 	return r;
 }
 
-void kvm_arch_hardware_enable(void *garbage)
+int kvm_arch_hardware_enable(void *garbage)
 {
+	return 0;
 }
 
 void kvm_arch_hardware_disable(void *garbage)
@@ -135,6 +136,7 @@ void kvm_arch_destroy_vm(struct kvm *kvm)
 {
 	kvmppc_free_vcpus(kvm);
 	kvm_free_physmem(kvm);
+	cleanup_srcu_struct(&kvm->srcu);
 	kfree(kvm);
 }
 
@@ -160,13 +162,23 @@ long kvm_arch_dev_ioctl(struct file *filp,
 	return -EINVAL;
 }
 
-int kvm_arch_set_memory_region(struct kvm *kvm,
-                               struct kvm_userspace_memory_region *mem,
-                               struct kvm_memory_slot old,
-                               int user_alloc)
+int kvm_arch_prepare_memory_region(struct kvm *kvm,
+                                   struct kvm_memory_slot *memslot,
+                                   struct kvm_memory_slot old,
+                                   struct kvm_userspace_memory_region *mem,
+                                   int user_alloc)
 {
 	return 0;
 }
+
+void kvm_arch_commit_memory_region(struct kvm *kvm,
+               struct kvm_userspace_memory_region *mem,
+               struct kvm_memory_slot old,
+               int user_alloc)
+{
+       return;
+}
+
 
 void kvm_arch_flush_shadow(struct kvm *kvm)
 {

@@ -19,12 +19,13 @@
 #include <linux/proc_fs.h>
 #include <linux/if_bonding.h>
 #include <linux/kobject.h>
+#include <linux/cpumask.h>
 #include <linux/in6.h>
 #include "bond_3ad.h"
 #include "bond_alb.h"
 
-#define DRV_VERSION	"3.5.0"
-#define DRV_RELDATE	"November 4, 2008"
+#define DRV_VERSION	"3.6.0"
+#define DRV_RELDATE	"September 26, 2009"
 #define DRV_NAME	"bonding"
 #define DRV_DESCRIPTION	"Ethernet Channel Bonding Driver"
 
@@ -62,6 +63,9 @@ extern struct list_head bond_dev_list;
 		 ((mode) == BOND_MODE_TLB)          ||	\
 		 ((mode) == BOND_MODE_ALB))
 
+#define TX_QUEUE_OVERRIDE(mode)				\
+			(((mode) == BOND_MODE_ACTIVEBACKUP) ||	\
+			 ((mode) == BOND_MODE_ROUNDROBIN))
 /*
  * Less bad way to call ioctl from within the kernel; this needs to be
  * done some other way to get the call out of interrupt context.
@@ -116,6 +120,31 @@ extern struct list_head bond_dev_list;
 		bond_for_each_slave_from(bond, pos, cnt, (bond)->first_slave)
 
 
+#ifdef CONFIG_NET_POLL_CONTROLLER
+extern atomic_t netpoll_block_tx;
+
+static inline void block_netpoll_tx(void)
+{
+	atomic_inc(&netpoll_block_tx);
+}
+
+static inline void unblock_netpoll_tx(void)
+{
+	atomic_dec(&netpoll_block_tx);
+}
+
+static inline int is_netpoll_tx_blocked(struct net_device *dev)
+{
+	if (unlikely(dev->priv_flags & IFF_IN_NETPOLL))
+		return atomic_read(&netpoll_block_tx);
+	return 0;
+}
+#else
+#define block_netpoll_tx()
+#define unblock_netpoll_tx()
+#define is_netpoll_tx_blocked(dev) (0)
+#endif
+
 struct bond_params {
 	int mode;
 	int xmit_policy;
@@ -131,7 +160,11 @@ struct bond_params {
 	int lacp_fast;
 	int ad_select;
 	char primary[IFNAMSIZ];
+	int primary_reselect;
 	__be32 arp_targets[BOND_MAX_ARP_TARGETS];
+	int tx_queues;
+	int all_slaves_active;
+	int resend_igmp;
 };
 
 struct bond_parm_tbl {
@@ -161,11 +194,12 @@ struct slave {
 	s8     new_link;
 	s8     state;   /* one of BOND_STATE_XXXX */
 	u32    original_flags;
+	u8     duplex;
 	u32    original_mtu;
 	u32    link_failure_count;
+	u32    speed;
+	u16    queue_id;
 	u8     perm_hwaddr[ETH_ALEN];
-	u16    speed;
-	u8     duplex;
 	struct ad_slave_info ad_info; /* HUGE - better to dynamically alloc */
 	struct tlb_slave_info tlb_info;
 };
@@ -190,6 +224,7 @@ struct bonding {
 	struct   slave *curr_active_slave;
 	struct   slave *current_arp_slave;
 	struct   slave *primary_slave;
+	bool     force_primary;
 	s32      slave_cnt; /* never change this value outside the attach/detach wrappers */
 	rwlock_t lock;
 	rwlock_t curr_slave_lock;
@@ -197,6 +232,7 @@ struct bonding {
 	s8	 send_grat_arp;
 	s8	 send_unsol_na;
 	s8	 setup_by_slave;
+	s8	 igmp_retrans;
 	struct   net_device_stats stats;
 #ifdef CONFIG_PROC_FS
 	struct   proc_dir_entry *proc_entry;
@@ -219,6 +255,7 @@ struct bonding {
 	struct   delayed_work arp_work;
 	struct   delayed_work alb_work;
 	struct   delayed_work ad_work;
+	struct   delayed_work mcast_work;
 #if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
 	struct   in6_addr master_ipv6;
 #endif
@@ -258,6 +295,10 @@ static inline bool bond_is_lb(const struct bonding *bond)
 		|| bond->params.mode == BOND_MODE_ALB;
 }
 
+#define BOND_PRI_RESELECT_ALWAYS	0
+#define BOND_PRI_RESELECT_BETTER	1
+#define BOND_PRI_RESELECT_FAILURE	2
+
 #define BOND_FOM_NONE			0
 #define BOND_FOM_ACTIVE			1
 #define BOND_FOM_FOLLOW			2
@@ -288,7 +329,8 @@ static inline void bond_set_slave_inactive_flags(struct slave *slave)
 	struct bonding *bond = netdev_priv(slave->dev->master);
 	if (!bond_is_lb(bond))
 		slave->state = BOND_STATE_BACKUP;
-	slave->dev->priv_flags |= IFF_SLAVE_INACTIVE;
+	if (!bond->params.all_slaves_active)
+		slave->dev->priv_flags |= IFF_SLAVE_INACTIVE;
 	if (slave_do_arp_validate(bond, slave))
 		slave->dev->priv_flags |= IFF_SLAVE_NEEDARP;
 }
@@ -348,6 +390,7 @@ extern const struct bond_parm_tbl bond_mode_tbl[];
 extern const struct bond_parm_tbl xmit_hashtype_tbl[];
 extern const struct bond_parm_tbl arp_validate_tbl[];
 extern const struct bond_parm_tbl fail_over_mac_tbl[];
+extern const struct bond_parm_tbl pri_reselect_tbl[];
 extern struct bond_parm_tbl ad_select_tbl[];
 
 #if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)

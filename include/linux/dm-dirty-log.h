@@ -21,10 +21,12 @@ struct dm_dirty_log_type;
 
 struct dm_dirty_log {
 	struct dm_dirty_log_type *type;
+	int (*flush_callback_fn)(struct dm_target *ti);
 	void *context;
 };
 
 struct dm_dirty_log_type {
+	uint64_t features;
 	const char *name;
 	struct module *module;
 
@@ -136,8 +138,9 @@ int dm_dirty_log_type_unregister(struct dm_dirty_log_type *type);
  * type->constructor/destructor() directly.
  */
 struct dm_dirty_log *dm_dirty_log_create(const char *type_name,
-					 struct dm_target *ti,
-					 unsigned argc, char **argv);
+			struct dm_target *ti,
+			int (*flush_callback_fn)(struct dm_target *ti),
+			unsigned argc, char **argv);
 void dm_dirty_log_destroy(struct dm_dirty_log *log);
 
 #endif	/* __KERNEL__ */

@@ -9,7 +9,6 @@
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
-
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
@@ -27,6 +26,9 @@
 #ifdef CONFIG_BLOCK
 
 #include <asm/io.h>
+
+/* BIO_* and request flags are defined in blk_types.h */
+#include <linux/blk_types.h>
 
 #define BIO_DEBUG
 
@@ -110,78 +112,6 @@ struct bio {
 	 */
 	struct bio_vec		bi_inline_vecs[0];
 };
-
-/*
- * bio flags
- */
-#define BIO_UPTODATE	0	/* ok after I/O completion */
-#define BIO_RW_BLOCK	1	/* RW_AHEAD set, and read/write would block */
-#define BIO_EOF		2	/* out-out-bounds error */
-#define BIO_SEG_VALID	3	/* bi_phys_segments valid */
-#define BIO_CLONED	4	/* doesn't own data */
-#define BIO_BOUNCED	5	/* bio is a bounce bio */
-#define BIO_USER_MAPPED 6	/* contains user pages */
-#define BIO_EOPNOTSUPP	7	/* not supported */
-#define BIO_CPU_AFFINE	8	/* complete bio on same CPU as submitted */
-#define BIO_NULL_MAPPED 9	/* contains invalid user pages */
-#define BIO_FS_INTEGRITY 10	/* fs owns integrity data, not block layer */
-#define BIO_QUIET	11	/* Make BIO Quiet */
-#define bio_flagged(bio, flag)	((bio)->bi_flags & (1 << (flag)))
-
-/*
- * top 4 bits of bio flags indicate the pool this bio came from
- */
-#define BIO_POOL_BITS		(4)
-#define BIO_POOL_NONE		((1UL << BIO_POOL_BITS) - 1)
-#define BIO_POOL_OFFSET		(BITS_PER_LONG - BIO_POOL_BITS)
-#define BIO_POOL_MASK		(1UL << BIO_POOL_OFFSET)
-#define BIO_POOL_IDX(bio)	((bio)->bi_flags >> BIO_POOL_OFFSET)	
-
-/*
- * bio bi_rw flags
- *
- * bit 0 -- data direction
- *	If not set, bio is a read from device. If set, it's a write to device.
- * bit 1 -- fail fast device errors
- * bit 2 -- fail fast transport errors
- * bit 3 -- fail fast driver errors
- * bit 4 -- rw-ahead when set
- * bit 5 -- barrier
- *	Insert a serialization point in the IO queue, forcing previously
- *	submitted IO to be completed before this one is issued.
- * bit 6 -- synchronous I/O hint.
- * bit 7 -- Unplug the device immediately after submitting this bio.
- * bit 8 -- metadata request
- *	Used for tracing to differentiate metadata and data IO. May also
- *	get some preferential treatment in the IO scheduler
- * bit 9 -- discard sectors
- *	Informs the lower level device that this range of sectors is no longer
- *	used by the file system and may thus be freed by the device. Used
- *	for flash based storage.
- *	Don't want driver retries for any fast fail whatever the reason.
- * bit 10 -- Tell the IO scheduler not to wait for more requests after this
-	one has been submitted, even if it is a SYNC request.
- */
-enum bio_rw_flags {
-	BIO_RW,
-	BIO_RW_FAILFAST_DEV,
-	BIO_RW_FAILFAST_TRANSPORT,
-	BIO_RW_FAILFAST_DRIVER,
-	/* above flags must match REQ_* */
-	BIO_RW_AHEAD,
-	BIO_RW_BARRIER,
-	BIO_RW_SYNCIO,
-	BIO_RW_UNPLUG,
-	BIO_RW_META,
-	BIO_RW_DISCARD,
-	BIO_RW_NOIDLE,
-};
-
-/*
- * First four bits must match between bio->bi_rw and rq->cmd_flags, make
- * that explicit here.
- */
-#define BIO_RW_RQ_MASK		0xf
 
 static inline bool bio_rw_flagged(struct bio *bio, enum bio_rw_flags flag)
 {
@@ -438,7 +368,6 @@ struct biovec_slab {
 };
 
 extern struct bio_set *fs_bio_set;
-extern struct biovec_slab bvec_slabs[BIOVEC_NR_POOLS] __read_mostly;
 
 /*
  * a small number of entries is fine, not going to be performance critical.

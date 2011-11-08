@@ -94,30 +94,29 @@ int sysfs_setattr(struct dentry * dentry, struct iattr * iattr)
 		if (!sd_attrs)
 			return -ENOMEM;
 		sd->s_iattr = sd_attrs;
-	} else {
-		/* attributes were changed at least once in past */
-		iattrs = &sd_attrs->ia_iattr;
+	}
+	/* attributes were changed at least once in past */
+	iattrs = &sd_attrs->ia_iattr;
 
-		if (ia_valid & ATTR_UID)
-			iattrs->ia_uid = iattr->ia_uid;
-		if (ia_valid & ATTR_GID)
-			iattrs->ia_gid = iattr->ia_gid;
-		if (ia_valid & ATTR_ATIME)
-			iattrs->ia_atime = timespec_trunc(iattr->ia_atime,
-					inode->i_sb->s_time_gran);
-		if (ia_valid & ATTR_MTIME)
-			iattrs->ia_mtime = timespec_trunc(iattr->ia_mtime,
-					inode->i_sb->s_time_gran);
-		if (ia_valid & ATTR_CTIME)
-			iattrs->ia_ctime = timespec_trunc(iattr->ia_ctime,
-					inode->i_sb->s_time_gran);
-		if (ia_valid & ATTR_MODE) {
-			umode_t mode = iattr->ia_mode;
+	if (ia_valid & ATTR_UID)
+		iattrs->ia_uid = iattr->ia_uid;
+	if (ia_valid & ATTR_GID)
+		iattrs->ia_gid = iattr->ia_gid;
+	if (ia_valid & ATTR_ATIME)
+		iattrs->ia_atime = timespec_trunc(iattr->ia_atime,
+			inode->i_sb->s_time_gran);
+	if (ia_valid & ATTR_MTIME)
+		iattrs->ia_mtime = timespec_trunc(iattr->ia_mtime,
+			inode->i_sb->s_time_gran);
+	if (ia_valid & ATTR_CTIME)
+		iattrs->ia_ctime = timespec_trunc(iattr->ia_ctime,
+			inode->i_sb->s_time_gran);
+	if (ia_valid & ATTR_MODE) {
+		umode_t mode = iattr->ia_mode;
 
-			if (!in_group_p(inode->i_gid) && !capable(CAP_FSETID))
-				mode &= ~S_ISGID;
-			iattrs->ia_mode = sd->s_mode = mode;
-		}
+		if (!in_group_p(inode->i_gid) && !capable(CAP_FSETID))
+			mode &= ~S_ISGID;
+		iattrs->ia_mode = sd->s_mode = mode;
 	}
 	return error;
 }
@@ -189,18 +188,6 @@ static inline void set_inode_attr(struct inode * inode, struct iattr * iattr)
  */
 static struct lock_class_key sysfs_inode_imutex_key;
 
-static int sysfs_count_nlink(struct sysfs_dirent *sd)
-{
-	struct sysfs_dirent *child;
-	int nr = 0;
-
-	for (child = sd->s_dir.children; child; child = child->s_sibling)
-		if (sysfs_type(child) == SYSFS_DIR)
-			nr++;
-
-	return nr + 2;
-}
-
 static void sysfs_init_inode(struct sysfs_dirent *sd, struct inode *inode)
 {
 	struct bin_attribute *bin_attr;
@@ -232,7 +219,7 @@ static void sysfs_init_inode(struct sysfs_dirent *sd, struct inode *inode)
 	case SYSFS_DIR:
 		inode->i_op = &sysfs_dir_inode_operations;
 		inode->i_fop = &sysfs_dir_operations;
-		inode->i_nlink = sysfs_count_nlink(sd);
+		inode->i_nlink = sd->s_dir.subdirs + 2;
 		break;
 	case SYSFS_KOBJ_ATTR:
 		inode->i_size = PAGE_SIZE;

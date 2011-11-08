@@ -158,7 +158,7 @@ icmp_error_message(struct net *net, struct sk_buff *skb,
 	/* Update skb to refer to this connection */
 	skb->nfct = &nf_ct_tuplehash_to_ctrack(h)->ct_general;
 	skb->nfctinfo = *ctinfo;
-	return -NF_ACCEPT;
+	return NF_ACCEPT;
 }
 
 /* Small and modified version of icmp_rcv */

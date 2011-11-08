@@ -392,6 +392,7 @@ static void ehea_refill_rq1(struct ehea_port_res *pr, int index, int nr_of_wqes)
 			skb_arr_rq1[index] = netdev_alloc_skb(dev,
 							      EHEA_L_PKT_SIZE);
 			if (!skb_arr_rq1[index]) {
+				ehea_info("Unable to allocate enough skb in the array\n");
 				pr->rq1_skba.os_skbs = fill_wqes - i;
 				break;
 			}
@@ -414,13 +415,20 @@ static void ehea_init_fill_rq1(struct ehea_port_res *pr, int nr_rq1a)
 	struct net_device *dev = pr->port->netdev;
 	int i;
 
-	for (i = 0; i < pr->rq1_skba.len; i++) {
+	if (nr_rq1a > pr->rq1_skba.len){
+		ehea_error("NR_RQ1A bigger than skb array len\n");
+		return;
+	}
+
+	for (i = 0; i < nr_rq1a; i++) {
 		skb_arr_rq1[i] = netdev_alloc_skb(dev, EHEA_L_PKT_SIZE);
-		if (!skb_arr_rq1[i])
+		if (!skb_arr_rq1[i]){
+			ehea_info("No enough memory to allocate skb array\n");
 			break;
+		}
 	}
 	/* Ring doorbell */
-	ehea_update_rq1a(pr->qp, nr_rq1a);
+	ehea_update_rq1a(pr->qp, i - 1);
 }
 
 static int ehea_refill_rq_def(struct ehea_port_res *pr,
@@ -714,12 +722,14 @@ static int ehea_proc_rwqes(struct net_device *dev,
 							  wqe_index);
 				if (unlikely(!skb)) {
 					if (netif_msg_rx_err(port))
-						ehea_error("LL rq1: skb=NULL");
+						ehea_info("LL rq1: skb=NULL");
 
 					skb = netdev_alloc_skb(dev,
 							       EHEA_L_PKT_SIZE);
-					if (!skb)
+					if (!skb){
+						ehea_error("Not enough memory to allocate skb\n");
 						break;
+					}
 				}
 				skb_copy_to_linear_data(skb, ((char *)cqe) + 64,
 						 cqe->num_bytes_transfered - 4);
@@ -771,6 +781,54 @@ static int ehea_proc_rwqes(struct net_device *dev,
 	return processed;
 }
 
+#define SWQE_RESTART_CHECK 0xdeadbeaff00d0000ull
+
+static void reset_sq_restart_flag(struct ehea_port *port)
+{
+	int i;
+
+	for (i = 0; i < port->num_def_qps + port->num_add_tx_qps; i++) {
+		struct ehea_port_res *pr = &port->port_res[i];
+		pr->sq_restart_flag = 0;
+	}
+	wake_up(&port->restart_wq);
+}
+
+static void check_sqs(struct ehea_port *port)
+{
+	struct ehea_swqe *swqe;
+	int swqe_index;
+	int i, k;
+
+	for (i = 0; i < port->num_def_qps + port->num_add_tx_qps; i++) {
+		struct ehea_port_res *pr = &port->port_res[i];
+		int ret;
+		k = 0;
+		swqe = ehea_get_swqe(pr->qp, &swqe_index);
+		memset(swqe, 0, SWQE_HEADER_SIZE);
+		atomic_dec(&pr->swqe_avail);
+
+		swqe->tx_control |= EHEA_SWQE_PURGE;
+		swqe->wr_id = SWQE_RESTART_CHECK;
+		swqe->tx_control |= EHEA_SWQE_SIGNALLED_COMPLETION;
+		swqe->tx_control |= EHEA_SWQE_IMM_DATA_PRESENT;
+		swqe->immediate_data_length = 80;
+
+		ehea_post_swqe(pr->qp, swqe);
+
+		ret = wait_event_timeout(port->restart_wq,
+					 pr->sq_restart_flag == 0,
+					 msecs_to_jiffies(100));
+
+		if (!ret) {
+			ehea_error("HW/SW queues out of sync");
+			ehea_schedule_port_reset(pr->port);
+			return;
+		}
+	}
+}
+
+
 static struct ehea_cqe *ehea_proc_cqes(struct ehea_port_res *pr, int my_quota)
 {
 	struct sk_buff *skb;
@@ -788,12 +846,25 @@ static struct ehea_cqe *ehea_proc_cqes(struct ehea_port_res *pr, int my_quota)
 
 		cqe_counter++;
 		rmb();
+
+		if (cqe->wr_id == SWQE_RESTART_CHECK) {
+			pr->sq_restart_flag = 1;
+			swqe_av++;
+			break;
+		}
+
 		if (cqe->status & EHEA_CQE_STAT_ERR_MASK) {
-			ehea_error("Send Completion Error: Resetting port");
+			ehea_error("Bad send completion status=0x%04X",
+				   cqe->status);
+
 			if (netif_msg_tx_err(pr->port))
 				ehea_dump(cqe, sizeof(*cqe), "Send CQE");
-			ehea_schedule_port_reset(pr->port);
-			break;
+
+			if (cqe->status & EHEA_CQE_STAT_RESET_MASK) {
+				ehea_error("Resetting port");
+				ehea_schedule_port_reset(pr->port);
+				break;
+			}
 		}
 
 		if (netif_msg_tx_done(pr->port))
@@ -825,6 +896,7 @@ static struct ehea_cqe *ehea_proc_cqes(struct ehea_port_res *pr, int my_quota)
 		pr->queue_stopped = 0;
 	}
 	spin_unlock_irqrestore(&pr->netif_queue, flags);
+	wake_up(&pr->port->swqe_avail_wq);
 
 	return cqe;
 }
@@ -856,6 +928,7 @@ static int ehea_poll(struct napi_struct *napi, int budget)
 		ehea_reset_cq_ep(pr->send_cq);
 		ehea_reset_cq_n1(pr->recv_cq);
 		ehea_reset_cq_n1(pr->send_cq);
+		rmb();
 		cqe = ehea_poll_rq1(pr->qp, &wqe_index);
 		cqe_skb = ehea_poll_cq(pr->send_cq);
 
@@ -899,6 +972,8 @@ static irqreturn_t ehea_qp_aff_irq_handler(int irq, void *param)
 	struct ehea_eqe *eqe;
 	struct ehea_qp *qp;
 	u32 qp_token;
+	u64 resource_type, aer, aerr;
+	int reset_port = 0;
 
 	eqe = ehea_poll_eq(port->qp_eq);
 
@@ -908,11 +983,24 @@ static irqreturn_t ehea_qp_aff_irq_handler(int irq, void *param)
 			   eqe->entry, qp_token);
 
 		qp = port->port_res[qp_token].qp;
-		ehea_error_data(port->adapter, qp->fw_handle);
+
+		resource_type = ehea_error_data(port->adapter, qp->fw_handle,
+						&aer, &aerr);
+
+		if (resource_type == EHEA_AER_RESTYPE_QP) {
+			if ((aer & EHEA_AER_RESET_MASK) ||
+			    (aerr & EHEA_AERR_RESET_MASK))
+				 reset_port = 1;
+		} else
+			reset_port = 1;   /* Reset in case of CQ or EQ error */
+
 		eqe = ehea_poll_eq(port->qp_eq);
 	}
 
-	ehea_schedule_port_reset(port);
+	if (reset_port) {
+		ehea_error("Resetting port");
+		ehea_schedule_port_reset(port);
+	}
 
 	return IRQ_HANDLED;
 }
@@ -1222,9 +1310,7 @@ static int ehea_fill_port_res(struct ehea_port_res *pr)
 	int ret;
 	struct ehea_qp_init_attr *init_attr = &pr->qp->init_attr;
 
-	ehea_init_fill_rq1(pr, init_attr->act_nr_rwqes_rq1
-			       - init_attr->act_nr_rwqes_rq2
-			       - init_attr->act_nr_rwqes_rq3 - 1);
+	ehea_init_fill_rq1(pr, pr->rq1_skba.len);
 
 	ret = ehea_refill_rq2(pr, init_attr->act_nr_rwqes_rq2 - 1);
 
@@ -2649,11 +2735,15 @@ static void ehea_flush_sq(struct ehea_port *port)
 	for (i = 0; i < port->num_def_qps + port->num_add_tx_qps; i++) {
 		struct ehea_port_res *pr = &port->port_res[i];
 		int swqe_max = pr->sq_skba_size - 2 - pr->swqe_ll_count;
-		int k = 0;
-		while (atomic_read(&pr->swqe_avail) < swqe_max) {
-			msleep(5);
-			if (++k == 20)
-				break;
+		int ret;
+
+		ret = wait_event_timeout(port->swqe_avail_wq,
+			 atomic_read(&pr->swqe_avail) >= swqe_max,
+			 msecs_to_jiffies(100));
+
+		if (!ret) {
+			ehea_error("WARNING: sq not flushed completely");
+			break;
 		}
 	}
 }
@@ -2837,6 +2927,7 @@ static void ehea_reset_port(struct work_struct *work)
 		container_of(work, struct ehea_port, reset_task);
 	struct net_device *dev = port->netdev;
 
+	mutex_lock(&dlpar_mem_lock);
 	port->resets++;
 	mutex_lock(&port->port_lock);
 	netif_stop_queue(dev);
@@ -2859,6 +2950,7 @@ static void ehea_reset_port(struct work_struct *work)
 	netif_wake_queue(dev);
 out:
 	mutex_unlock(&port->port_lock);
+	mutex_unlock(&dlpar_mem_lock);
 	return;
 }
 
@@ -2867,7 +2959,6 @@ static void ehea_rereg_mrs(struct work_struct *work)
 	int ret, i;
 	struct ehea_adapter *adapter;
 
-	mutex_lock(&dlpar_mem_lock);
 	ehea_info("LPAR memory changed - re-initializing driver");
 
 	list_for_each_entry(adapter, &adapter_list, list)
@@ -2894,6 +2985,7 @@ static void ehea_rereg_mrs(struct work_struct *work)
 					port_napi_disable(port);
 					mutex_unlock(&port->port_lock);
 				}
+				reset_sq_restart_flag(port);
 			}
 
 			/* Unregister old memory region */
@@ -2928,6 +3020,7 @@ static void ehea_rereg_mrs(struct work_struct *work)
 						mutex_lock(&port->port_lock);
 						port_napi_enable(port);
 						ret = ehea_restart_qps(dev);
+						check_sqs(port);
 						if (!ret)
 							netif_wake_queue(dev);
 						mutex_unlock(&port->port_lock);
@@ -2937,7 +3030,6 @@ static void ehea_rereg_mrs(struct work_struct *work)
 		}
 	ehea_info("re-initializing driver complete");
 out:
-	mutex_unlock(&dlpar_mem_lock);
 	return;
 }
 
@@ -3155,6 +3247,9 @@ struct ehea_port *ehea_setup_single_port(struct ehea_adapter *adapter,
 	dev->watchdog_timeo = EHEA_WATCH_DOG_TIMEOUT;
 
 	INIT_WORK(&port->reset_task, ehea_reset_port);
+
+	init_waitqueue_head(&port->swqe_avail_wq);
+	init_waitqueue_head(&port->restart_wq);
 
 	ret = register_netdev(dev);
 	if (ret) {
@@ -3520,7 +3615,11 @@ void ehea_crash_handler(void)
 static int ehea_mem_notifier(struct notifier_block *nb,
                              unsigned long action, void *data)
 {
+	int ret = NOTIFY_BAD;
 	struct memory_notify *arg = data;
+
+	mutex_lock(&dlpar_mem_lock);
+
 	switch (action) {
 	case MEM_CANCEL_OFFLINE:
 		ehea_info("memory offlining canceled");
@@ -3529,14 +3628,14 @@ static int ehea_mem_notifier(struct notifier_block *nb,
 		ehea_info("memory is going online");
 		set_bit(__EHEA_STOP_XFER, &ehea_driver_flags);
 		if (ehea_add_sect_bmap(arg->start_pfn, arg->nr_pages))
-			return NOTIFY_BAD;
+			goto out_unlock;
 		ehea_rereg_mrs(NULL);
 		break;
 	case MEM_GOING_OFFLINE:
 		ehea_info("memory is going offline");
 		set_bit(__EHEA_STOP_XFER, &ehea_driver_flags);
 		if (ehea_rem_sect_bmap(arg->start_pfn, arg->nr_pages))
-			return NOTIFY_BAD;
+			goto out_unlock;
 		ehea_rereg_mrs(NULL);
 		break;
 	default:
@@ -3544,8 +3643,11 @@ static int ehea_mem_notifier(struct notifier_block *nb,
 	}
 
 	ehea_update_firmware_handles();
+	ret = NOTIFY_OK;
 
-	return NOTIFY_OK;
+out_unlock:
+	mutex_unlock(&dlpar_mem_lock);
+	return ret;
 }
 
 static struct notifier_block ehea_mem_nb = {

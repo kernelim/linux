@@ -305,13 +305,13 @@ void generic_shutdown_super(struct super_block *sb)
 		sb->s_flags &= ~MS_ACTIVE;
 
 		/* bad name - it should be evict_inodes() */
-		invalidate_inodes(sb);
+		invalidate_inodes(sb, true);
 
 		if (sop->put_super)
 			sop->put_super(sb);
 
 		/* Forget any remaining inodes */
-		if (invalidate_inodes(sb)) {
+		if (invalidate_inodes(sb, true)) {
 			printk("VFS: Busy inodes after unmount of %s. "
 			   "Self-destruct in 5 seconds.  Have a nice day...\n",
 			   sb->s_id);
@@ -532,30 +532,6 @@ rescan:
 	return NULL;
 }
 
-SYSCALL_DEFINE2(ustat, unsigned, dev, struct ustat __user *, ubuf)
-{
-        struct super_block *s;
-        struct ustat tmp;
-        struct kstatfs sbuf;
-	int err = -EINVAL;
-
-        s = user_get_super(new_decode_dev(dev));
-        if (s == NULL)
-                goto out;
-	err = vfs_statfs(s->s_root, &sbuf);
-	drop_super(s);
-	if (err)
-		goto out;
-
-        memset(&tmp,0,sizeof(struct ustat));
-        tmp.f_tfree = sbuf.f_bfree;
-        tmp.f_tinode = sbuf.f_ffree;
-
-        err = copy_to_user(ubuf,&tmp,sizeof(struct ustat)) ? -EFAULT : 0;
-out:
-	return err;
-}
-
 /**
  *	do_remount_sb - asks filesystem to change mount options.
  *	@sb:	superblock in question
@@ -568,7 +544,7 @@ out:
 int do_remount_sb(struct super_block *sb, int flags, void *data, int force)
 {
 	int retval;
-	int remount_rw;
+	int remount_rw, remount_ro;
 
 	if (sb->s_frozen != SB_UNFROZEN)
 		return -EBUSY;
@@ -583,9 +559,12 @@ int do_remount_sb(struct super_block *sb, int flags, void *data, int force)
 	shrink_dcache_sb(sb);
 	sync_filesystem(sb);
 
+	remount_ro = (flags & MS_RDONLY) && !(sb->s_flags & MS_RDONLY);
+	remount_rw = !(flags & MS_RDONLY) && (sb->s_flags & MS_RDONLY);
+
 	/* If we are remounting RDONLY and current sb is read/write,
 	   make sure there are no rw files opened */
-	if ((flags & MS_RDONLY) && !(sb->s_flags & MS_RDONLY)) {
+	if (remount_ro) {
 		if (force)
 			mark_files_ro(sb);
 		else if (!fs_may_remount_ro(sb))
@@ -594,7 +573,6 @@ int do_remount_sb(struct super_block *sb, int flags, void *data, int force)
 		if (retval < 0 && retval != -ENOSYS)
 			return -EBUSY;
 	}
-	remount_rw = !(flags & MS_RDONLY) && (sb->s_flags & MS_RDONLY);
 
 	if (sb->s_op->remount_fs) {
 		retval = sb->s_op->remount_fs(sb, &flags, data);
@@ -604,6 +582,16 @@ int do_remount_sb(struct super_block *sb, int flags, void *data, int force)
 	sb->s_flags = (sb->s_flags & ~MS_RMT_MASK) | (flags & MS_RMT_MASK);
 	if (remount_rw)
 		vfs_dq_quota_on_remount(sb);
+	/*
+	 * Some filesystems modify their metadata via some other path than the
+	 * bdev buffer cache (eg. use a private mapping, or directories in
+	 * pagecache, etc). Also file data modifications go via their own
+	 * mappings. So If we try to mount readonly then copy the filesystem
+	 * from bdev, we could get stale data, so invalidate it to give a best
+	 * effort at coherency.
+	 */
+	if (remount_ro && sb->s_bdev)
+		invalidate_bdev(sb->s_bdev);
 	return 0;
 }
 
@@ -901,8 +889,9 @@ int get_sb_single(struct file_system_type *fs_type,
 			return error;
 		}
 		s->s_flags |= MS_ACTIVE;
+	} else {
+		do_remount_sb(s, flags, data, 0);
 	}
-	do_remount_sb(s, flags, data, 0);
 	simple_set_mnt(mnt, s);
 	return 0;
 }

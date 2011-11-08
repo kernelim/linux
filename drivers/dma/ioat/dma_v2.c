@@ -166,7 +166,7 @@ static void __cleanup(struct ioat2_dma_chan *ioat, unsigned long phys_complete)
 			seen_current = true;
 	}
 	ioat->tail += i;
-	BUG_ON(!seen_current); /* no active descs have written a completion? */
+	BUG_ON(active && !seen_current); /* no active descs have written a completion? */
 
 	chan->last_completion = phys_complete;
 	if (ioat->head == ioat->tail) {
@@ -239,20 +239,50 @@ void __ioat2_restart_chan(struct ioat2_dma_chan *ioat)
 		__ioat2_start_null_desc(ioat);
 }
 
-static void ioat2_restart_channel(struct ioat2_dma_chan *ioat)
+int ioat2_quiesce(struct ioat_chan_common *chan, unsigned long tmo)
 {
-	struct ioat_chan_common *chan = &ioat->base;
-	unsigned long phys_complete;
+	unsigned long end = jiffies + tmo;
+	int err = 0;
 	u32 status;
 
 	status = ioat_chansts(chan);
 	if (is_ioat_active(status) || is_ioat_idle(status))
 		ioat_suspend(chan);
 	while (is_ioat_active(status) || is_ioat_idle(status)) {
+		if (tmo && time_after(jiffies, end)) {
+			err = -ETIMEDOUT;
+			break;
+		}
 		status = ioat_chansts(chan);
 		cpu_relax();
 	}
 
+	return err;
+}
+
+int ioat2_reset_sync(struct ioat_chan_common *chan, unsigned long tmo)
+{
+	unsigned long end = jiffies + tmo;
+	int err = 0;
+
+	ioat_reset(chan);
+	while (ioat_reset_pending(chan)) {
+		if (end && time_after(jiffies, end)) {
+			err = -ETIMEDOUT;
+			break;
+		}
+		cpu_relax();
+	}
+
+	return err;
+}
+
+static void ioat2_restart_channel(struct ioat2_dma_chan *ioat)
+{
+	struct ioat_chan_common *chan = &ioat->base;
+	unsigned long phys_complete;
+
+	ioat2_quiesce(chan, 0);
 	if (ioat_cleanup_preamble(chan, &phys_complete))
 		__cleanup(ioat, phys_complete);
 
@@ -281,7 +311,10 @@ void ioat2_timer_event(unsigned long data)
 			chanerr = readl(chan->reg_base + IOAT_CHANERR_OFFSET);
 			dev_err(to_dev(chan), "%s: Channel halted (%x)\n",
 				__func__, chanerr);
-			BUG_ON(is_ioat_bug(chanerr));
+			if (test_bit(IOAT_RUN, &chan->state))
+				BUG_ON(is_ioat_bug(chanerr));
+			else /* we never got off the ground */
+				return;
 		}
 
 		/* if we haven't made progress and we have already
@@ -316,6 +349,19 @@ void ioat2_timer_event(unsigned long data)
 			mod_timer(&chan->timer, jiffies + IDLE_TIMEOUT);
 	}
 	spin_unlock_bh(&chan->cleanup_lock);
+}
+
+static int ioat2_reset_hw(struct ioat_chan_common *chan)
+{
+	/* throw away whatever the channel was doing and get it initialized */
+	u32 chanerr;
+
+	ioat2_quiesce(chan, msecs_to_jiffies(100));
+
+	chanerr = readl(chan->reg_base + IOAT_CHANERR_OFFSET);
+	writel(chanerr, chan->reg_base + IOAT_CHANERR_OFFSET);
+
+	return ioat2_reset_sync(chan, msecs_to_jiffies(200));
 }
 
 /**
@@ -360,6 +406,10 @@ int ioat2_enumerate_channels(struct ioatdma_device *device)
 				  (unsigned long) ioat);
 		ioat->xfercap_log = xfercap_log;
 		spin_lock_init(&ioat->ring_lock);
+		if (device->reset_hw(&ioat->base)) {
+			i = 0;
+			break;
+		}
 	}
 	dma->chancnt = i;
 	return i;
@@ -459,6 +509,8 @@ static struct ioat_ring_ent **ioat2_alloc_ring(struct dma_chan *c, int order, gf
 	return ring;
 }
 
+void ioat2_free_chan_resources(struct dma_chan *c);
+
 /* ioat2_alloc_chan_resources - allocate/initialize ioat2 descriptor ring
  * @chan: channel to be initialized
  */
@@ -467,8 +519,9 @@ int ioat2_alloc_chan_resources(struct dma_chan *c)
 	struct ioat2_dma_chan *ioat = to_ioat2_chan(c);
 	struct ioat_chan_common *chan = &ioat->base;
 	struct ioat_ring_ent **ring;
-	u32 chanerr;
+	u64 status;
 	int order;
+	int i = 0;
 
 	/* have we already been set up? */
 	if (ioat->ring)
@@ -476,12 +529,6 @@ int ioat2_alloc_chan_resources(struct dma_chan *c)
 
 	/* Setup register to interrupt and write completion status on error */
 	writew(IOAT_CHANCTRL_RUN, chan->reg_base + IOAT_CHANCTRL_OFFSET);
-
-	chanerr = readl(chan->reg_base + IOAT_CHANERR_OFFSET);
-	if (chanerr) {
-		dev_err(to_dev(chan), "CHANERR = %x, clearing\n", chanerr);
-		writel(chanerr, chan->reg_base + IOAT_CHANERR_OFFSET);
-	}
 
 	/* allocate a completion writeback area */
 	/* doing 2 32bit writes to mmio since 1 64b write doesn't work */
@@ -513,7 +560,23 @@ int ioat2_alloc_chan_resources(struct dma_chan *c)
 	tasklet_enable(&chan->cleanup_task);
 	ioat2_start_null_desc(ioat);
 
-	return 1 << ioat->alloc_order;
+	/* check that we got off the ground */
+	do {
+		udelay(1);
+		status = ioat_chansts(chan);
+	} while (i++ < 20 && !is_ioat_active(status) && !is_ioat_idle(status));
+
+	if (is_ioat_active(status) || is_ioat_idle(status)) {
+		set_bit(IOAT_RUN, &chan->state);
+		return 1 << ioat->alloc_order;
+	} else {
+		u32 chanerr = readl(chan->reg_base + IOAT_CHANERR_OFFSET);
+
+		dev_WARN(to_dev(chan),
+			"failed to start channel chanerr: %#x\n", chanerr);
+		ioat2_free_chan_resources(c);
+		return -EFAULT;
+	}
 }
 
 bool reshape_ring(struct ioat2_dma_chan *ioat, int order)
@@ -746,13 +809,8 @@ void ioat2_free_chan_resources(struct dma_chan *c)
 	tasklet_disable(&chan->cleanup_task);
 	del_timer_sync(&chan->timer);
 	device->cleanup_tasklet((unsigned long) ioat);
-
-	/* Delay 100ms after reset to allow internal DMA logic to quiesce
-	 * before removing DMA descriptor resources.
-	 */
-	writeb(IOAT_CHANCMD_RESET,
-	       chan->reg_base + IOAT_CHANCMD_OFFSET(chan->device->version));
-	mdelay(100);
+	device->reset_hw(chan);
+	clear_bit(IOAT_RUN, &chan->state);
 
 	spin_lock_bh(&ioat->ring_lock);
 	descs = ioat2_ring_space(ioat);
@@ -839,6 +897,7 @@ int __devinit ioat2_dma_probe(struct ioatdma_device *device, int dca)
 	int err;
 
 	device->enumerate_channels = ioat2_enumerate_channels;
+	device->reset_hw = ioat2_reset_hw;
 	device->cleanup_tasklet = ioat2_cleanup_tasklet;
 	device->timer_fn = ioat2_timer_event;
 	device->self_test = ioat_dma_self_test;

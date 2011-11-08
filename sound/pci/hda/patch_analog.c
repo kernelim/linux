@@ -30,10 +30,10 @@
 #include "hda_beep.h"
 
 struct ad198x_spec {
-	struct snd_kcontrol_new *mixers[5];
+	const struct snd_kcontrol_new *mixers[6];
 	int num_mixers;
 	unsigned int beep_amp;	/* beep amp value, set via set_beep_amp() */
-	const struct hda_verb *init_verbs[5];	/* initialization verbs
+	const struct hda_verb *init_verbs[6];	/* initialization verbs
 						 * don't forget NULL termination!
 						 */
 	unsigned int num_init_verbs;
@@ -46,14 +46,17 @@ struct ad198x_spec {
 	unsigned int cur_eapd;
 	unsigned int need_dac_fix;
 
+	const hda_nid_t *alt_dac_nid;
+	const struct hda_pcm_stream *stream_analog_alt_playback;
+
 	/* capture */
 	unsigned int num_adc_nids;
-	hda_nid_t *adc_nids;
+	const hda_nid_t *adc_nids;
 	hda_nid_t dig_in_nid;		/* digital-in NID; optional */
 
 	/* capture source */
 	const struct hda_input_mux *input_mux;
-	hda_nid_t *capsrc_nids;
+	const hda_nid_t *capsrc_nids;
 	unsigned int cur_mux[3];
 
 	/* channel model */
@@ -71,16 +74,18 @@ struct ad198x_spec {
 	struct hda_input_mux private_imux;
 	hda_nid_t private_dac_nids[AUTO_CFG_MAX_OUTS];
 
-	unsigned int jack_present :1;
-	unsigned int inv_jack_detect:1;
+	unsigned int jack_present: 1;
+	unsigned int inv_jack_detect: 1;/* inverted jack-detection */
+	unsigned int inv_eapd: 1;	/* inverted EAPD implementation */
+	unsigned int analog_beep: 1;	/* analog beep input present */
 
 #ifdef CONFIG_SND_HDA_POWER_SAVE
 	struct hda_loopback_check loopback;
 #endif
 	/* for virtual master */
 	hda_nid_t vmaster_nid;
-	const char **slave_vols;
-	const char **slave_sws;
+	const char * const *slave_vols;
+	const char * const *slave_sws;
 };
 
 /*
@@ -128,7 +133,7 @@ static int ad198x_init(struct hda_codec *codec)
 	return 0;
 }
 
-static const char *ad_slave_vols[] = {
+static const char * const ad_slave_vols[] = {
 	"Front Playback Volume",
 	"Surround Playback Volume",
 	"Center Playback Volume",
@@ -141,7 +146,7 @@ static const char *ad_slave_vols[] = {
 	NULL
 };
 
-static const char *ad_slave_sws[] = {
+static const char * const ad_slave_sws[] = {
 	"Front Playback Switch",
 	"Surround Playback Switch",
 	"Center Playback Switch",
@@ -154,21 +159,51 @@ static const char *ad_slave_sws[] = {
 	NULL
 };
 
+static const char * const ad1988_6stack_fp_slave_vols[] = {
+	"Front Playback Volume",
+	"Surround Playback Volume",
+	"Center Playback Volume",
+	"LFE Playback Volume",
+	"Side Playback Volume",
+	"IEC958 Playback Volume",
+	NULL
+};
+
+static const char * const ad1988_6stack_fp_slave_sws[] = {
+	"Front Playback Switch",
+	"Surround Playback Switch",
+	"Center Playback Switch",
+	"LFE Playback Switch",
+	"Side Playback Switch",
+	"IEC958 Playback Switch",
+	NULL
+};
 static void ad198x_free_kctls(struct hda_codec *codec);
 
+#ifdef CONFIG_SND_HDA_INPUT_BEEP
 /* additional beep mixers; the actual parameters are overwritten at build */
-static struct snd_kcontrol_new ad_beep_mixer[] = {
+static const struct snd_kcontrol_new ad_beep_mixer[] = {
 	HDA_CODEC_VOLUME("Beep Playback Volume", 0, 0, HDA_OUTPUT),
-	HDA_CODEC_MUTE("Beep Playback Switch", 0, 0, HDA_OUTPUT),
+	HDA_CODEC_MUTE_BEEP("Beep Playback Switch", 0, 0, HDA_OUTPUT),
+	{ } /* end */
+};
+
+static const struct snd_kcontrol_new ad_beep2_mixer[] = {
+	HDA_CODEC_VOLUME("Digital Beep Playback Volume", 0, 0, HDA_OUTPUT),
+	HDA_CODEC_MUTE_BEEP("Digital Beep Playback Switch", 0, 0, HDA_OUTPUT),
 	{ } /* end */
 };
 
 #define set_beep_amp(spec, nid, idx, dir) \
 	((spec)->beep_amp = HDA_COMPOSE_AMP_VAL(nid, 1, idx, dir)) /* mono */
+#else
+#define set_beep_amp(spec, nid, idx, dir) /* NOP */
+#endif
 
 static int ad198x_build_controls(struct hda_codec *codec)
 {
 	struct ad198x_spec *spec = codec->spec;
+	struct snd_kcontrol *kctl;
 	unsigned int i;
 	int err;
 
@@ -178,7 +213,9 @@ static int ad198x_build_controls(struct hda_codec *codec)
 			return err;
 	}
 	if (spec->multiout.dig_out_nid) {
-		err = snd_hda_create_spdif_out_ctls(codec, spec->multiout.dig_out_nid);
+		err = snd_hda_create_spdif_out_ctls(codec,
+						    spec->multiout.dig_out_nid,
+						    spec->multiout.dig_out_nid);
 		if (err < 0)
 			return err;
 		err = snd_hda_create_spdif_share_sw(codec,
@@ -194,19 +231,22 @@ static int ad198x_build_controls(struct hda_codec *codec)
 	}
 
 	/* create beep controls if needed */
+#ifdef CONFIG_SND_HDA_INPUT_BEEP
 	if (spec->beep_amp) {
-		struct snd_kcontrol_new *knew;
-		for (knew = ad_beep_mixer; knew->name; knew++) {
+		const struct snd_kcontrol_new *knew;
+		knew = spec->analog_beep ? ad_beep2_mixer : ad_beep_mixer;
+		for ( ; knew->name; knew++) {
 			struct snd_kcontrol *kctl;
 			kctl = snd_ctl_new1(knew, codec);
 			if (!kctl)
 				return -ENOMEM;
 			kctl->private_value = spec->beep_amp;
-			err = snd_hda_ctl_add(codec, kctl);
+			err = snd_hda_ctl_add(codec, 0, kctl);
 			if (err < 0)
 				return err;
 		}
 	}
+#endif
 
 	/* if we have no master control, let's create it */
 	if (!snd_hda_find_mixer_ctl(codec, "Master Playback Volume")) {
@@ -230,6 +270,27 @@ static int ad198x_build_controls(struct hda_codec *codec)
 	}
 
 	ad198x_free_kctls(codec); /* no longer needed */
+
+	/* assign Capture Source enums to NID */
+	kctl = snd_hda_find_mixer_ctl(codec, "Capture Source");
+	if (!kctl)
+		kctl = snd_hda_find_mixer_ctl(codec, "Input Source");
+	for (i = 0; kctl && i < kctl->count; i++) {
+		err = snd_hda_add_nid(codec, kctl, i, spec->capsrc_nids[i]);
+		if (err < 0)
+			return err;
+	}
+
+	/* assign IEC958 enums to NID */
+	kctl = snd_hda_find_mixer_ctl(codec,
+			SNDRV_CTL_NAME_IEC958("",PLAYBACK,NONE) "Source");
+	if (kctl) {
+		err = snd_hda_add_nid(codec, kctl, 0,
+				      spec->multiout.dig_out_nid);
+		if (err < 0)
+			return err;
+	}
+
 	return 0;
 }
 
@@ -271,6 +332,13 @@ static int ad198x_playback_pcm_cleanup(struct hda_pcm_stream *hinfo,
 	struct ad198x_spec *spec = codec->spec;
 	return snd_hda_multi_out_analog_cleanup(codec, &spec->multiout);
 }
+
+static const struct hda_pcm_stream ad198x_pcm_analog_alt_playback = {
+	.substreams = 1,
+	.channels_min = 2,
+	.channels_max = 2,
+	/* NID is set in ad198x_build_pcms */
+};
 
 /*
  * Digital out
@@ -337,7 +405,7 @@ static int ad198x_capture_pcm_cleanup(struct hda_pcm_stream *hinfo,
 
 /*
  */
-static struct hda_pcm_stream ad198x_pcm_analog_playback = {
+static const struct hda_pcm_stream ad198x_pcm_analog_playback = {
 	.substreams = 1,
 	.channels_min = 2,
 	.channels_max = 6, /* changed later */
@@ -349,7 +417,7 @@ static struct hda_pcm_stream ad198x_pcm_analog_playback = {
 	},
 };
 
-static struct hda_pcm_stream ad198x_pcm_analog_capture = {
+static const struct hda_pcm_stream ad198x_pcm_analog_capture = {
 	.substreams = 1,
 	.channels_min = 2,
 	.channels_max = 2,
@@ -360,7 +428,7 @@ static struct hda_pcm_stream ad198x_pcm_analog_capture = {
 	},
 };
 
-static struct hda_pcm_stream ad198x_pcm_digital_playback = {
+static const struct hda_pcm_stream ad198x_pcm_digital_playback = {
 	.substreams = 1,
 	.channels_min = 2,
 	.channels_max = 2,
@@ -373,7 +441,7 @@ static struct hda_pcm_stream ad198x_pcm_digital_playback = {
 	},
 };
 
-static struct hda_pcm_stream ad198x_pcm_digital_capture = {
+static const struct hda_pcm_stream ad198x_pcm_digital_capture = {
 	.substreams = 1,
 	.channels_min = 2,
 	.channels_max = 2,
@@ -409,6 +477,17 @@ static int ad198x_build_pcms(struct hda_codec *codec)
 		}
 	}
 
+	if (spec->alt_dac_nid && spec->stream_analog_alt_playback) {
+		codec->num_pcms++;
+		info = spec->pcm_rec + 2;
+		info->name = "AD198x Headphone";
+		info->pcm_type = HDA_PCM_TYPE_AUDIO;
+		info->stream[SNDRV_PCM_STREAM_PLAYBACK] =
+			*spec->stream_analog_alt_playback;
+		info->stream[SNDRV_PCM_STREAM_PLAYBACK].nid =
+			spec->alt_dac_nid[0];
+	}
+
 	return 0;
 }
 
@@ -425,6 +504,52 @@ static void ad198x_free_kctls(struct hda_codec *codec)
 	snd_array_free(&spec->kctls);
 }
 
+static void ad198x_power_eapd_write(struct hda_codec *codec, hda_nid_t front,
+				hda_nid_t hp)
+{
+	struct ad198x_spec *spec = codec->spec;
+	if (snd_hda_query_pin_caps(codec, front) & AC_PINCAP_EAPD)
+		snd_hda_codec_write(codec, front, 0, AC_VERB_SET_EAPD_BTLENABLE,
+			    !spec->inv_eapd ? 0x00 : 0x02);
+	if (snd_hda_query_pin_caps(codec, hp) & AC_PINCAP_EAPD)
+		snd_hda_codec_write(codec, hp, 0, AC_VERB_SET_EAPD_BTLENABLE,
+			    !spec->inv_eapd ? 0x00 : 0x02);
+}
+
+static void ad198x_power_eapd(struct hda_codec *codec)
+{
+	/* We currently only handle front, HP */
+	switch (codec->vendor_id) {
+	case 0x11d41882:
+	case 0x11d4882a:
+	case 0x11d41884:
+	case 0x11d41984:
+	case 0x11d41883:
+	case 0x11d4184a:
+	case 0x11d4194a:
+	case 0x11d4194b:
+	case 0x11d41988:
+	case 0x11d4198b:
+	case 0x11d4989a:
+	case 0x11d4989b:
+		ad198x_power_eapd_write(codec, 0x12, 0x11);
+		break;
+	case 0x11d41981:
+	case 0x11d41983:
+		ad198x_power_eapd_write(codec, 0x05, 0x06);
+		break;
+	case 0x11d41986:
+		ad198x_power_eapd_write(codec, 0x1b, 0x1a);
+		break;
+	}
+}
+
+static void ad198x_shutup(struct hda_codec *codec)
+{
+	snd_hda_shutup_pins(codec);
+	ad198x_power_eapd(codec);
+}
+
 static void ad198x_free(struct hda_codec *codec)
 {
 	struct ad198x_spec *spec = codec->spec;
@@ -432,12 +557,21 @@ static void ad198x_free(struct hda_codec *codec)
 	if (!spec)
 		return;
 
+	ad198x_shutup(codec);
 	ad198x_free_kctls(codec);
 	kfree(spec);
 	snd_hda_detach_beep_device(codec);
 }
 
-static struct hda_codec_ops ad198x_patch_ops = {
+#ifdef SND_HDA_NEEDS_RESUME
+static int ad198x_suspend(struct hda_codec *codec, pm_message_t state)
+{
+	ad198x_shutup(codec);
+	return 0;
+}
+#endif
+
+static const struct hda_codec_ops ad198x_patch_ops = {
 	.build_controls = ad198x_build_controls,
 	.build_pcms = ad198x_build_pcms,
 	.init = ad198x_init,
@@ -445,12 +579,16 @@ static struct hda_codec_ops ad198x_patch_ops = {
 #ifdef CONFIG_SND_HDA_POWER_SAVE
 	.check_power_status = ad198x_check_power_status,
 #endif
+#ifdef SND_HDA_NEEDS_RESUME
+	.suspend = ad198x_suspend,
+#endif
+	.reboot_notify = ad198x_shutup,
 };
 
 
 /*
  * EAPD control
- * the private value = nid | (invert << 8)
+ * the private value = nid
  */
 #define ad198x_eapd_info	snd_ctl_boolean_mono_info
 
@@ -459,8 +597,7 @@ static int ad198x_eapd_get(struct snd_kcontrol *kcontrol,
 {
 	struct hda_codec *codec = snd_kcontrol_chip(kcontrol);
 	struct ad198x_spec *spec = codec->spec;
-	int invert = (kcontrol->private_value >> 8) & 1;
-	if (invert)
+	if (spec->inv_eapd)
 		ucontrol->value.integer.value[0] = ! spec->cur_eapd;
 	else
 		ucontrol->value.integer.value[0] = spec->cur_eapd;
@@ -472,11 +609,10 @@ static int ad198x_eapd_put(struct snd_kcontrol *kcontrol,
 {
 	struct hda_codec *codec = snd_kcontrol_chip(kcontrol);
 	struct ad198x_spec *spec = codec->spec;
-	int invert = (kcontrol->private_value >> 8) & 1;
 	hda_nid_t nid = kcontrol->private_value & 0xff;
 	unsigned int eapd;
 	eapd = !!ucontrol->value.integer.value[0];
-	if (invert)
+	if (spec->inv_eapd)
 		eapd = !eapd;
 	if (eapd == spec->cur_eapd)
 		return 0;
@@ -505,13 +641,13 @@ static int ad198x_ch_mode_put(struct snd_kcontrol *kcontrol,
 #define AD1986A_CLFE_DAC	0x05
 #define AD1986A_ADC		0x06
 
-static hda_nid_t ad1986a_dac_nids[3] = {
+static const hda_nid_t ad1986a_dac_nids[3] = {
 	AD1986A_FRONT_DAC, AD1986A_SURR_DAC, AD1986A_CLFE_DAC
 };
-static hda_nid_t ad1986a_adc_nids[1] = { AD1986A_ADC };
-static hda_nid_t ad1986a_capsrc_nids[1] = { 0x12 };
+static const hda_nid_t ad1986a_adc_nids[1] = { AD1986A_ADC };
+static const hda_nid_t ad1986a_capsrc_nids[1] = { 0x12 };
 
-static struct hda_input_mux ad1986a_capture_source = {
+static const struct hda_input_mux ad1986a_capture_source = {
 	.num_items = 7,
 	.items = {
 		{ "Mic", 0x0 },
@@ -525,7 +661,7 @@ static struct hda_input_mux ad1986a_capture_source = {
 };
 
 
-static struct hda_bind_ctls ad1986a_bind_pcm_vol = {
+static const struct hda_bind_ctls ad1986a_bind_pcm_vol = {
 	.ops = &snd_hda_bind_vol,
 	.values = {
 		HDA_COMPOSE_AMP_VAL(AD1986A_FRONT_DAC, 3, 0, HDA_OUTPUT),
@@ -535,7 +671,7 @@ static struct hda_bind_ctls ad1986a_bind_pcm_vol = {
 	},
 };
 
-static struct hda_bind_ctls ad1986a_bind_pcm_sw = {
+static const struct hda_bind_ctls ad1986a_bind_pcm_sw = {
 	.ops = &snd_hda_bind_sw,
 	.values = {
 		HDA_COMPOSE_AMP_VAL(AD1986A_FRONT_DAC, 3, 0, HDA_OUTPUT),
@@ -548,7 +684,7 @@ static struct hda_bind_ctls ad1986a_bind_pcm_sw = {
 /*
  * mixers
  */
-static struct snd_kcontrol_new ad1986a_mixers[] = {
+static const struct snd_kcontrol_new ad1986a_mixers[] = {
 	/*
 	 * bind volumes/mutes of 3 DACs as a single PCM control for simplicity
 	 */
@@ -572,7 +708,7 @@ static struct snd_kcontrol_new ad1986a_mixers[] = {
 	HDA_CODEC_MUTE("Aux Playback Switch", 0x16, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("Mic Playback Volume", 0x13, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Mic Playback Switch", 0x13, 0x0, HDA_OUTPUT),
-	HDA_CODEC_VOLUME("Mic Boost", 0x0f, 0x0, HDA_OUTPUT),
+	HDA_CODEC_VOLUME("Mic Boost Volume", 0x0f, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("Mono Playback Volume", 0x1e, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Mono Playback Switch", 0x1e, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("Capture Volume", 0x12, 0x0, HDA_OUTPUT),
@@ -589,7 +725,7 @@ static struct snd_kcontrol_new ad1986a_mixers[] = {
 };
 
 /* additional mixers for 3stack mode */
-static struct snd_kcontrol_new ad1986a_3st_mixers[] = {
+static const struct snd_kcontrol_new ad1986a_3st_mixers[] = {
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = "Channel Mode",
@@ -601,10 +737,10 @@ static struct snd_kcontrol_new ad1986a_3st_mixers[] = {
 };
 
 /* laptop model - 2ch only */
-static hda_nid_t ad1986a_laptop_dac_nids[1] = { AD1986A_FRONT_DAC };
+static const hda_nid_t ad1986a_laptop_dac_nids[1] = { AD1986A_FRONT_DAC };
 
 /* master controls both pins 0x1a and 0x1b */
-static struct hda_bind_ctls ad1986a_laptop_master_vol = {
+static const struct hda_bind_ctls ad1986a_laptop_master_vol = {
 	.ops = &snd_hda_bind_vol,
 	.values = {
 		HDA_COMPOSE_AMP_VAL(0x1a, 3, 0, HDA_OUTPUT),
@@ -613,7 +749,7 @@ static struct hda_bind_ctls ad1986a_laptop_master_vol = {
 	},
 };
 
-static struct hda_bind_ctls ad1986a_laptop_master_sw = {
+static const struct hda_bind_ctls ad1986a_laptop_master_sw = {
 	.ops = &snd_hda_bind_sw,
 	.values = {
 		HDA_COMPOSE_AMP_VAL(0x1a, 3, 0, HDA_OUTPUT),
@@ -622,7 +758,7 @@ static struct hda_bind_ctls ad1986a_laptop_master_sw = {
 	},
 };
 
-static struct snd_kcontrol_new ad1986a_laptop_mixers[] = {
+static const struct snd_kcontrol_new ad1986a_laptop_mixers[] = {
 	HDA_CODEC_VOLUME("PCM Playback Volume", 0x03, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("PCM Playback Switch", 0x03, 0x0, HDA_OUTPUT),
 	HDA_BIND_VOL("Master Playback Volume", &ad1986a_laptop_master_vol),
@@ -635,7 +771,7 @@ static struct snd_kcontrol_new ad1986a_laptop_mixers[] = {
 	HDA_CODEC_MUTE("Aux Playback Switch", 0x16, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("Mic Playback Volume", 0x13, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Mic Playback Switch", 0x13, 0x0, HDA_OUTPUT),
-	HDA_CODEC_VOLUME("Mic Boost", 0x0f, 0x0, HDA_OUTPUT),
+	HDA_CODEC_VOLUME("Mic Boost Volume", 0x0f, 0x0, HDA_OUTPUT),
 	/* 
 	   HDA_CODEC_VOLUME("Mono Playback Volume", 0x1e, 0x0, HDA_OUTPUT),
 	   HDA_CODEC_MUTE("Mono Playback Switch", 0x1e, 0x0, HDA_OUTPUT), */
@@ -653,7 +789,7 @@ static struct snd_kcontrol_new ad1986a_laptop_mixers[] = {
 
 /* laptop-eapd model - 2ch only */
 
-static struct hda_input_mux ad1986a_laptop_eapd_capture_source = {
+static const struct hda_input_mux ad1986a_laptop_eapd_capture_source = {
 	.num_items = 3,
 	.items = {
 		{ "Mic", 0x0 },
@@ -662,7 +798,7 @@ static struct hda_input_mux ad1986a_laptop_eapd_capture_source = {
 	},
 };
 
-static struct hda_input_mux ad1986a_automic_capture_source = {
+static const struct hda_input_mux ad1986a_automic_capture_source = {
 	.num_items = 2,
 	.items = {
 		{ "Mic", 0x0 },
@@ -670,18 +806,18 @@ static struct hda_input_mux ad1986a_automic_capture_source = {
 	},
 };
 
-static struct snd_kcontrol_new ad1986a_laptop_master_mixers[] = {
+static const struct snd_kcontrol_new ad1986a_laptop_master_mixers[] = {
 	HDA_BIND_VOL("Master Playback Volume", &ad1986a_laptop_master_vol),
 	HDA_BIND_SW("Master Playback Switch", &ad1986a_laptop_master_sw),
 	{ } /* end */
 };
 
-static struct snd_kcontrol_new ad1986a_laptop_eapd_mixers[] = {
+static const struct snd_kcontrol_new ad1986a_laptop_eapd_mixers[] = {
 	HDA_CODEC_VOLUME("PCM Playback Volume", 0x03, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("PCM Playback Switch", 0x03, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("Mic Playback Volume", 0x13, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Mic Playback Switch", 0x13, 0x0, HDA_OUTPUT),
-	HDA_CODEC_VOLUME("Mic Boost", 0x0f, 0x0, HDA_OUTPUT),
+	HDA_CODEC_VOLUME("Mic Boost Volume", 0x0f, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("Capture Volume", 0x12, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Capture Switch", 0x12, 0x0, HDA_OUTPUT),
 	{
@@ -694,15 +830,16 @@ static struct snd_kcontrol_new ad1986a_laptop_eapd_mixers[] = {
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = "External Amplifier",
+		.subdevice = HDA_SUBDEV_NID_FLAG | 0x1b,
 		.info = ad198x_eapd_info,
 		.get = ad198x_eapd_get,
 		.put = ad198x_eapd_put,
-		.private_value = 0x1b | (1 << 8), /* port-D, inversed */
+		.private_value = 0x1b, /* port-D */
 	},
 	{ } /* end */
 };
 
-static struct snd_kcontrol_new ad1986a_laptop_intmic_mixers[] = {
+static const struct snd_kcontrol_new ad1986a_laptop_intmic_mixers[] = {
 	HDA_CODEC_VOLUME("Internal Mic Playback Volume", 0x17, 0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Internal Mic Playback Switch", 0x17, 0, HDA_OUTPUT),
 	{ } /* end */
@@ -712,10 +849,10 @@ static struct snd_kcontrol_new ad1986a_laptop_intmic_mixers[] = {
 static void ad1986a_automic(struct hda_codec *codec)
 {
 	unsigned int present;
-	present = snd_hda_codec_read(codec, 0x1f, 0, AC_VERB_GET_PIN_SENSE, 0);
+	present = snd_hda_jack_detect(codec, 0x1f);
 	/* 0 = 0x1f, 2 = 0x1d, 4 = mixed */
 	snd_hda_codec_write(codec, 0x0f, 0, AC_VERB_SET_CONNECT_SEL,
-			    (present & AC_PINSENSE_PRESENCE) ? 0 : 2);
+			    present ? 0 : 2);
 }
 
 #define AD1986A_MIC_EVENT		0x36
@@ -754,10 +891,8 @@ static void ad1986a_update_hp(struct hda_codec *codec)
 static void ad1986a_hp_automute(struct hda_codec *codec)
 {
 	struct ad198x_spec *spec = codec->spec;
-	unsigned int present;
 
-	present = snd_hda_codec_read(codec, 0x1a, 0, AC_VERB_GET_PIN_SENSE, 0);
-	spec->jack_present = !!(present & 0x80000000);
+	spec->jack_present = snd_hda_jack_detect(codec, 0x1a);
 	if (spec->inv_jack_detect)
 		spec->jack_present = !spec->jack_present;
 	ad1986a_update_hp(codec);
@@ -798,11 +933,12 @@ static int ad1986a_hp_master_sw_put(struct snd_kcontrol *kcontrol,
 	return change;
 }
 
-static struct snd_kcontrol_new ad1986a_automute_master_mixers[] = {
+static const struct snd_kcontrol_new ad1986a_automute_master_mixers[] = {
 	HDA_BIND_VOL("Master Playback Volume", &ad1986a_laptop_master_vol),
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = "Master Playback Switch",
+		.subdevice = HDA_SUBDEV_AMP_FLAG,
 		.info = snd_hda_mixer_amp_switch_info,
 		.get = snd_hda_mixer_amp_switch_get,
 		.put = ad1986a_hp_master_sw_put,
@@ -815,7 +951,7 @@ static struct snd_kcontrol_new ad1986a_automute_master_mixers[] = {
 /*
  * initialization verbs
  */
-static struct hda_verb ad1986a_init_verbs[] = {
+static const struct hda_verb ad1986a_init_verbs[] = {
 	/* Front, Surround, CLFE DAC; mute as default */
 	{0x03, AC_VERB_SET_AMP_GAIN_MUTE, 0xb080},
 	{0x04, AC_VERB_SET_AMP_GAIN_MUTE, 0xb080},
@@ -870,7 +1006,7 @@ static struct hda_verb ad1986a_init_verbs[] = {
 	{ } /* end */
 };
 
-static struct hda_verb ad1986a_ch2_init[] = {
+static const struct hda_verb ad1986a_ch2_init[] = {
 	/* Surround out -> Line In */
 	{ 0x1c, AC_VERB_SET_PIN_WIDGET_CONTROL, PIN_IN },
  	/* Line-in selectors */
@@ -882,7 +1018,7 @@ static struct hda_verb ad1986a_ch2_init[] = {
 	{ } /* end */
 };
 
-static struct hda_verb ad1986a_ch4_init[] = {
+static const struct hda_verb ad1986a_ch4_init[] = {
 	/* Surround out -> Surround */
 	{ 0x1c, AC_VERB_SET_PIN_WIDGET_CONTROL, PIN_OUT },
 	{ 0x10, AC_VERB_SET_CONNECT_SEL, 0x0 },
@@ -892,7 +1028,7 @@ static struct hda_verb ad1986a_ch4_init[] = {
 	{ } /* end */
 };
 
-static struct hda_verb ad1986a_ch6_init[] = {
+static const struct hda_verb ad1986a_ch6_init[] = {
 	/* Surround out -> Surround out */
 	{ 0x1c, AC_VERB_SET_PIN_WIDGET_CONTROL, PIN_OUT },
 	{ 0x10, AC_VERB_SET_CONNECT_SEL, 0x0 },
@@ -902,19 +1038,19 @@ static struct hda_verb ad1986a_ch6_init[] = {
 	{ } /* end */
 };
 
-static struct hda_channel_mode ad1986a_modes[3] = {
+static const struct hda_channel_mode ad1986a_modes[3] = {
 	{ 2, ad1986a_ch2_init },
 	{ 4, ad1986a_ch4_init },
 	{ 6, ad1986a_ch6_init },
 };
 
 /* eapd initialization */
-static struct hda_verb ad1986a_eapd_init_verbs[] = {
+static const struct hda_verb ad1986a_eapd_init_verbs[] = {
 	{0x1b, AC_VERB_SET_EAPD_BTLENABLE, 0x00 },
 	{}
 };
 
-static struct hda_verb ad1986a_automic_verbs[] = {
+static const struct hda_verb ad1986a_automic_verbs[] = {
 	{0x1d, AC_VERB_SET_PIN_WIDGET_CONTROL, PIN_VREF80},
 	{0x1f, AC_VERB_SET_PIN_WIDGET_CONTROL, PIN_VREF80},
 	/*{0x20, AC_VERB_SET_PIN_WIDGET_CONTROL, PIN_VREF80},*/
@@ -924,7 +1060,7 @@ static struct hda_verb ad1986a_automic_verbs[] = {
 };
 
 /* Ultra initialization */
-static struct hda_verb ad1986a_ultra_init[] = {
+static const struct hda_verb ad1986a_ultra_init[] = {
 	/* eapd initialization */
 	{ 0x1b, AC_VERB_SET_EAPD_BTLENABLE, 0x00 },
 	/* CLFE -> Mic in */
@@ -935,7 +1071,7 @@ static struct hda_verb ad1986a_ultra_init[] = {
 };
 
 /* pin sensing on HP jack */
-static struct hda_verb ad1986a_hp_init_verbs[] = {
+static const struct hda_verb ad1986a_hp_init_verbs[] = {
 	{0x1a, AC_VERB_SET_UNSOLICITED_ENABLE, AC_USRSP_EN | AD1986A_HP_EVENT},
 	{}
 };
@@ -975,7 +1111,7 @@ enum {
 	AD1986A_MODELS
 };
 
-static const char *ad1986a_models[AD1986A_MODELS] = {
+static const char * const ad1986a_models[AD1986A_MODELS] = {
 	[AD1986A_6STACK]	= "6stack",
 	[AD1986A_3STACK]	= "3stack",
 	[AD1986A_LAPTOP]	= "laptop",
@@ -986,7 +1122,7 @@ static const char *ad1986a_models[AD1986A_MODELS] = {
 	[AD1986A_SAMSUNG_P50]	= "samsung-p50",
 };
 
-static struct snd_pci_quirk ad1986a_cfg_tbl[] = {
+static const struct snd_pci_quirk ad1986a_cfg_tbl[] = {
 	SND_PCI_QUIRK(0x103c, 0x30af, "HP B2800", AD1986A_LAPTOP_EAPD),
 	SND_PCI_QUIRK(0x1043, 0x1153, "ASUS M9", AD1986A_LAPTOP_EAPD),
 	SND_PCI_QUIRK(0x1043, 0x11f7, "ASUS U5A", AD1986A_LAPTOP_EAPD),
@@ -1003,7 +1139,7 @@ static struct snd_pci_quirk ad1986a_cfg_tbl[] = {
 	SND_PCI_QUIRK(0x1043, 0x81cb, "ASUS M2N", AD1986A_3STACK),
 	SND_PCI_QUIRK(0x1043, 0x8234, "ASUS M2N", AD1986A_3STACK),
 	SND_PCI_QUIRK(0x10de, 0xcb84, "ASUS A8N-VM", AD1986A_3STACK),
-	SND_PCI_QUIRK(0x1179, 0xff40, "Toshiba", AD1986A_LAPTOP_EAPD),
+	SND_PCI_QUIRK(0x1179, 0xff40, "Toshiba Satellite L40-10Q", AD1986A_3STACK),
 	SND_PCI_QUIRK(0x144d, 0xb03c, "Samsung R55", AD1986A_3STACK),
 	SND_PCI_QUIRK(0x144d, 0xc01e, "FSC V2060", AD1986A_LAPTOP),
 	SND_PCI_QUIRK(0x144d, 0xc024, "Samsung P50", AD1986A_SAMSUNG_P50),
@@ -1018,7 +1154,7 @@ static struct snd_pci_quirk ad1986a_cfg_tbl[] = {
 };
 
 #ifdef CONFIG_SND_HDA_POWER_SAVE
-static struct hda_amp_list ad1986a_loopbacks[] = {
+static const struct hda_amp_list ad1986a_loopbacks[] = {
 	{ 0x13, HDA_OUTPUT, 0 }, /* Mic */
 	{ 0x14, HDA_OUTPUT, 0 }, /* Phone */
 	{ 0x15, HDA_OUTPUT, 0 }, /* CD */
@@ -1068,6 +1204,7 @@ static int patch_ad1986a(struct hda_codec *codec)
 	spec->loopback.amplist = ad1986a_loopbacks;
 #endif
 	spec->vmaster_nid = 0x1b;
+	spec->inv_eapd = 1; /* AD1986A has the inverted EAPD implementation */
 
 	codec->patch_ops = ad198x_patch_ops;
 
@@ -1180,6 +1317,9 @@ static int patch_ad1986a(struct hda_codec *codec)
 	 */
 	spec->multiout.no_share_stream = 1;
 
+	codec->no_trigger_sense = 1;
+	codec->no_sticky_stream = 1;
+
 	return 0;
 }
 
@@ -1191,11 +1331,11 @@ static int patch_ad1986a(struct hda_codec *codec)
 #define AD1983_DAC		0x03
 #define AD1983_ADC		0x04
 
-static hda_nid_t ad1983_dac_nids[1] = { AD1983_DAC };
-static hda_nid_t ad1983_adc_nids[1] = { AD1983_ADC };
-static hda_nid_t ad1983_capsrc_nids[1] = { 0x15 };
+static const hda_nid_t ad1983_dac_nids[1] = { AD1983_DAC };
+static const hda_nid_t ad1983_adc_nids[1] = { AD1983_ADC };
+static const hda_nid_t ad1983_capsrc_nids[1] = { 0x15 };
 
-static struct hda_input_mux ad1983_capture_source = {
+static const struct hda_input_mux ad1983_capture_source = {
 	.num_items = 4,
 	.items = {
 		{ "Mic", 0x0 },
@@ -1210,7 +1350,7 @@ static struct hda_input_mux ad1983_capture_source = {
  */
 static int ad1983_spdif_route_info(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_info *uinfo)
 {
-	static char *texts[] = { "PCM", "ADC" };
+	static const char * const texts[] = { "PCM", "ADC" };
 
 	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
 	uinfo->count = 1;
@@ -1247,7 +1387,7 @@ static int ad1983_spdif_route_put(struct snd_kcontrol *kcontrol, struct snd_ctl_
 	return 0;
 }
 
-static struct snd_kcontrol_new ad1983_mixers[] = {
+static const struct snd_kcontrol_new ad1983_mixers[] = {
 	HDA_CODEC_VOLUME("Front Playback Volume", 0x05, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Front Playback Switch", 0x05, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("Headphone Playback Volume", 0x06, 0x0, HDA_OUTPUT),
@@ -1260,7 +1400,7 @@ static struct snd_kcontrol_new ad1983_mixers[] = {
 	HDA_CODEC_MUTE("Mic Playback Switch", 0x12, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("Line Playback Volume", 0x13, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Line Playback Switch", 0x13, 0x0, HDA_OUTPUT),
-	HDA_CODEC_VOLUME("Mic Boost", 0x0c, 0x0, HDA_OUTPUT),
+	HDA_CODEC_VOLUME("Mic Boost Volume", 0x0c, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("Capture Volume", 0x15, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Capture Switch", 0x15, 0x0, HDA_OUTPUT),
 	{
@@ -1280,7 +1420,7 @@ static struct snd_kcontrol_new ad1983_mixers[] = {
 	{ } /* end */
 };
 
-static struct hda_verb ad1983_init_verbs[] = {
+static const struct hda_verb ad1983_init_verbs[] = {
 	/* Front, HP, Mono; mute as default */
 	{0x05, AC_VERB_SET_AMP_GAIN_MUTE, 0xb080},
 	{0x06, AC_VERB_SET_AMP_GAIN_MUTE, 0xb080},
@@ -1320,7 +1460,7 @@ static struct hda_verb ad1983_init_verbs[] = {
 };
 
 #ifdef CONFIG_SND_HDA_POWER_SAVE
-static struct hda_amp_list ad1983_loopbacks[] = {
+static const struct hda_amp_list ad1983_loopbacks[] = {
 	{ 0x12, HDA_OUTPUT, 0 }, /* Mic */
 	{ 0x13, HDA_OUTPUT, 0 }, /* Line */
 	{ } /* end */
@@ -1365,6 +1505,9 @@ static int patch_ad1983(struct hda_codec *codec)
 
 	codec->patch_ops = ad198x_patch_ops;
 
+	codec->no_trigger_sense = 1;
+	codec->no_sticky_stream = 1;
+
 	return 0;
 }
 
@@ -1377,12 +1520,12 @@ static int patch_ad1983(struct hda_codec *codec)
 #define AD1981_DAC		0x03
 #define AD1981_ADC		0x04
 
-static hda_nid_t ad1981_dac_nids[1] = { AD1981_DAC };
-static hda_nid_t ad1981_adc_nids[1] = { AD1981_ADC };
-static hda_nid_t ad1981_capsrc_nids[1] = { 0x15 };
+static const hda_nid_t ad1981_dac_nids[1] = { AD1981_DAC };
+static const hda_nid_t ad1981_adc_nids[1] = { AD1981_ADC };
+static const hda_nid_t ad1981_capsrc_nids[1] = { 0x15 };
 
 /* 0x0c, 0x09, 0x0e, 0x0f, 0x19, 0x05, 0x18, 0x17 */
-static struct hda_input_mux ad1981_capture_source = {
+static const struct hda_input_mux ad1981_capture_source = {
 	.num_items = 7,
 	.items = {
 		{ "Front Mic", 0x0 },
@@ -1395,7 +1538,7 @@ static struct hda_input_mux ad1981_capture_source = {
 	},
 };
 
-static struct snd_kcontrol_new ad1981_mixers[] = {
+static const struct snd_kcontrol_new ad1981_mixers[] = {
 	HDA_CODEC_VOLUME("Front Playback Volume", 0x05, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Front Playback Switch", 0x05, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("Headphone Playback Volume", 0x06, 0x0, HDA_OUTPUT),
@@ -1414,8 +1557,8 @@ static struct snd_kcontrol_new ad1981_mixers[] = {
 	HDA_CODEC_MUTE("Mic Playback Switch", 0x1c, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("CD Playback Volume", 0x1d, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("CD Playback Switch", 0x1d, 0x0, HDA_OUTPUT),
-	HDA_CODEC_VOLUME("Front Mic Boost", 0x08, 0x0, HDA_INPUT),
-	HDA_CODEC_VOLUME("Mic Boost", 0x18, 0x0, HDA_INPUT),
+	HDA_CODEC_VOLUME("Front Mic Boost Volume", 0x08, 0x0, HDA_INPUT),
+	HDA_CODEC_VOLUME("Mic Boost Volume", 0x18, 0x0, HDA_INPUT),
 	HDA_CODEC_VOLUME("Capture Volume", 0x15, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Capture Switch", 0x15, 0x0, HDA_OUTPUT),
 	{
@@ -1436,7 +1579,7 @@ static struct snd_kcontrol_new ad1981_mixers[] = {
 	{ } /* end */
 };
 
-static struct hda_verb ad1981_init_verbs[] = {
+static const struct hda_verb ad1981_init_verbs[] = {
 	/* Front, HP, Mono; mute as default */
 	{0x05, AC_VERB_SET_AMP_GAIN_MUTE, 0xb080},
 	{0x06, AC_VERB_SET_AMP_GAIN_MUTE, 0xb080},
@@ -1484,7 +1627,7 @@ static struct hda_verb ad1981_init_verbs[] = {
 };
 
 #ifdef CONFIG_SND_HDA_POWER_SAVE
-static struct hda_amp_list ad1981_loopbacks[] = {
+static const struct hda_amp_list ad1981_loopbacks[] = {
 	{ 0x12, HDA_OUTPUT, 0 }, /* Front Mic */
 	{ 0x13, HDA_OUTPUT, 0 }, /* Line */
 	{ 0x1b, HDA_OUTPUT, 0 }, /* Aux */
@@ -1504,7 +1647,7 @@ static struct hda_amp_list ad1981_loopbacks[] = {
 #define AD1981_HP_EVENT		0x37
 #define AD1981_MIC_EVENT	0x38
 
-static struct hda_verb ad1981_hp_init_verbs[] = {
+static const struct hda_verb ad1981_hp_init_verbs[] = {
 	{0x05, AC_VERB_SET_EAPD_BTLENABLE, 0x00 }, /* default off */
 	/* pin sensing on HP and Mic jacks */
 	{0x06, AC_VERB_SET_UNSOLICITED_ENABLE, AC_USRSP_EN | AD1981_HP_EVENT},
@@ -1533,7 +1676,7 @@ static int ad1981_hp_master_sw_put(struct snd_kcontrol *kcontrol,
 }
 
 /* bind volumes of both NID 0x05 and 0x06 */
-static struct hda_bind_ctls ad1981_hp_bind_master_vol = {
+static const struct hda_bind_ctls ad1981_hp_bind_master_vol = {
 	.ops = &snd_hda_bind_vol,
 	.values = {
 		HDA_COMPOSE_AMP_VAL(0x05, 3, 0, HDA_OUTPUT),
@@ -1547,8 +1690,7 @@ static void ad1981_hp_automute(struct hda_codec *codec)
 {
 	unsigned int present;
 
-	present = snd_hda_codec_read(codec, 0x06, 0,
-				     AC_VERB_GET_PIN_SENSE, 0) & 0x80000000;
+	present = snd_hda_jack_detect(codec, 0x06);
 	snd_hda_codec_amp_stereo(codec, 0x05, HDA_OUTPUT, 0,
 				 HDA_AMP_MUTE, present ? HDA_AMP_MUTE : 0);
 }
@@ -1556,20 +1698,19 @@ static void ad1981_hp_automute(struct hda_codec *codec)
 /* toggle input of built-in and mic jack appropriately */
 static void ad1981_hp_automic(struct hda_codec *codec)
 {
-	static struct hda_verb mic_jack_on[] = {
+	static const struct hda_verb mic_jack_on[] = {
 		{0x1f, AC_VERB_SET_AMP_GAIN_MUTE, 0xb080},
 		{0x1e, AC_VERB_SET_AMP_GAIN_MUTE, 0xb000},
 		{}
 	};
-	static struct hda_verb mic_jack_off[] = {
+	static const struct hda_verb mic_jack_off[] = {
 		{0x1e, AC_VERB_SET_AMP_GAIN_MUTE, 0xb080},
 		{0x1f, AC_VERB_SET_AMP_GAIN_MUTE, 0xb000},
 		{}
 	};
 	unsigned int present;
 
-	present = snd_hda_codec_read(codec, 0x08, 0,
-			    	 AC_VERB_GET_PIN_SENSE, 0) & 0x80000000;
+	present = snd_hda_jack_detect(codec, 0x08);
 	if (present)
 		snd_hda_sequence_write(codec, mic_jack_on);
 	else
@@ -1591,7 +1732,7 @@ static void ad1981_hp_unsol_event(struct hda_codec *codec,
 	}
 }
 
-static struct hda_input_mux ad1981_hp_capture_source = {
+static const struct hda_input_mux ad1981_hp_capture_source = {
 	.num_items = 3,
 	.items = {
 		{ "Mic", 0x0 },
@@ -1600,10 +1741,11 @@ static struct hda_input_mux ad1981_hp_capture_source = {
 	},
 };
 
-static struct snd_kcontrol_new ad1981_hp_mixers[] = {
+static const struct snd_kcontrol_new ad1981_hp_mixers[] = {
 	HDA_BIND_VOL("Master Playback Volume", &ad1981_hp_bind_master_vol),
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.subdevice = HDA_SUBDEV_NID_FLAG | 0x05,
 		.name = "Master Playback Switch",
 		.info = ad198x_eapd_info,
 		.get = ad198x_eapd_get,
@@ -1626,8 +1768,8 @@ static struct snd_kcontrol_new ad1981_hp_mixers[] = {
 	HDA_CODEC_VOLUME("CD Playback Volume", 0x1d, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("CD Playback Switch", 0x1d, 0x0, HDA_OUTPUT),
 #endif
-	HDA_CODEC_VOLUME("Mic Boost", 0x08, 0x0, HDA_INPUT),
-	HDA_CODEC_VOLUME("Internal Mic Boost", 0x18, 0x0, HDA_INPUT),
+	HDA_CODEC_VOLUME("Mic Boost Volume", 0x08, 0x0, HDA_INPUT),
+	HDA_CODEC_VOLUME("Internal Mic Boost Volume", 0x18, 0x0, HDA_INPUT),
 	HDA_CODEC_VOLUME("Capture Volume", 0x15, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Capture Switch", 0x15, 0x0, HDA_OUTPUT),
 	{
@@ -1650,7 +1792,7 @@ static int ad1981_hp_init(struct hda_codec *codec)
 }
 
 /* configuration for Toshiba Laptops */
-static struct hda_verb ad1981_toshiba_init_verbs[] = {
+static const struct hda_verb ad1981_toshiba_init_verbs[] = {
 	{0x05, AC_VERB_SET_EAPD_BTLENABLE, 0x01 }, /* default on */
 	/* pin sensing on HP and Mic jacks */
 	{0x06, AC_VERB_SET_UNSOLICITED_ENABLE, AC_USRSP_EN | AD1981_HP_EVENT},
@@ -1658,14 +1800,14 @@ static struct hda_verb ad1981_toshiba_init_verbs[] = {
 	{}
 };
 
-static struct snd_kcontrol_new ad1981_toshiba_mixers[] = {
+static const struct snd_kcontrol_new ad1981_toshiba_mixers[] = {
 	HDA_CODEC_VOLUME("Amp Volume", 0x1a, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Amp Switch", 0x1a, 0x0, HDA_OUTPUT),
 	{ }
 };
 
 /* configuration for Lenovo Thinkpad T60 */
-static struct snd_kcontrol_new ad1981_thinkpad_mixers[] = {
+static const struct snd_kcontrol_new ad1981_thinkpad_mixers[] = {
 	HDA_CODEC_VOLUME("Master Playback Volume", 0x05, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Master Playback Switch", 0x05, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("PCM Playback Volume", 0x11, 0x0, HDA_OUTPUT),
@@ -1674,7 +1816,7 @@ static struct snd_kcontrol_new ad1981_thinkpad_mixers[] = {
 	HDA_CODEC_MUTE("Mic Playback Switch", 0x12, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("CD Playback Volume", 0x1d, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("CD Playback Switch", 0x1d, 0x0, HDA_OUTPUT),
-	HDA_CODEC_VOLUME("Mic Boost", 0x08, 0x0, HDA_INPUT),
+	HDA_CODEC_VOLUME("Mic Boost Volume", 0x08, 0x0, HDA_INPUT),
 	HDA_CODEC_VOLUME("Capture Volume", 0x15, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Capture Switch", 0x15, 0x0, HDA_OUTPUT),
 	{
@@ -1695,7 +1837,7 @@ static struct snd_kcontrol_new ad1981_thinkpad_mixers[] = {
 	{ } /* end */
 };
 
-static struct hda_input_mux ad1981_thinkpad_capture_source = {
+static const struct hda_input_mux ad1981_thinkpad_capture_source = {
 	.num_items = 3,
 	.items = {
 		{ "Mic", 0x0 },
@@ -1713,14 +1855,14 @@ enum {
 	AD1981_MODELS
 };
 
-static const char *ad1981_models[AD1981_MODELS] = {
+static const char * const ad1981_models[AD1981_MODELS] = {
 	[AD1981_HP]		= "hp",
 	[AD1981_THINKPAD]	= "thinkpad",
 	[AD1981_BASIC]		= "basic",
 	[AD1981_TOSHIBA]	= "toshiba"
 };
 
-static struct snd_pci_quirk ad1981_cfg_tbl[] = {
+static const struct snd_pci_quirk ad1981_cfg_tbl[] = {
 	SND_PCI_QUIRK(0x1014, 0x0597, "Lenovo Z60", AD1981_THINKPAD),
 	SND_PCI_QUIRK(0x1014, 0x05b7, "Lenovo Z60m", AD1981_THINKPAD),
 	/* All HP models */
@@ -1780,15 +1922,32 @@ static int patch_ad1981(struct hda_codec *codec)
 		spec->mixers[0] = ad1981_hp_mixers;
 		spec->num_init_verbs = 2;
 		spec->init_verbs[1] = ad1981_hp_init_verbs;
-		spec->multiout.dig_out_nid = 0;
+		if (!is_jack_available(codec, 0x0a))
+			spec->multiout.dig_out_nid = 0;
 		spec->input_mux = &ad1981_hp_capture_source;
 
 		codec->patch_ops.init = ad1981_hp_init;
 		codec->patch_ops.unsol_event = ad1981_hp_unsol_event;
+		/* set the upper-limit for mixer amp to 0dB for avoiding the
+		 * possible damage by overloading
+		 */
+		snd_hda_override_amp_caps(codec, 0x11, HDA_INPUT,
+					  (0x17 << AC_AMPCAP_OFFSET_SHIFT) |
+					  (0x17 << AC_AMPCAP_NUM_STEPS_SHIFT) |
+					  (0x05 << AC_AMPCAP_STEP_SIZE_SHIFT) |
+					  (1 << AC_AMPCAP_MUTE_SHIFT));
 		break;
 	case AD1981_THINKPAD:
 		spec->mixers[0] = ad1981_thinkpad_mixers;
 		spec->input_mux = &ad1981_thinkpad_capture_source;
+		/* set the upper-limit for mixer amp to 0dB for avoiding the
+		 * possible damage by overloading
+		 */
+		snd_hda_override_amp_caps(codec, 0x11, HDA_INPUT,
+					  (0x17 << AC_AMPCAP_OFFSET_SHIFT) |
+					  (0x17 << AC_AMPCAP_NUM_STEPS_SHIFT) |
+					  (0x05 << AC_AMPCAP_STEP_SIZE_SHIFT) |
+					  (1 << AC_AMPCAP_MUTE_SHIFT));
 		break;
 	case AD1981_TOSHIBA:
 		spec->mixers[0] = ad1981_hp_mixers;
@@ -1801,6 +1960,10 @@ static int patch_ad1981(struct hda_codec *codec)
 		codec->patch_ops.unsol_event = ad1981_hp_unsol_event;
 		break;
 	}
+
+	codec->no_trigger_sense = 1;
+	codec->no_sticky_stream = 1;
+
 	return 0;
 }
 
@@ -1895,6 +2058,7 @@ static int patch_ad1981(struct hda_codec *codec)
 enum {
 	AD1988_6STACK,
 	AD1988_6STACK_DIG,
+	AD1988_6STACK_DIG_FP,
 	AD1988_3STACK,
 	AD1988_3STACK_DIG,
 	AD1988_LAPTOP,
@@ -1914,28 +2078,32 @@ enum {
  * mixers
  */
 
-static hda_nid_t ad1988_6stack_dac_nids[4] = {
+static const hda_nid_t ad1988_6stack_dac_nids[4] = {
 	0x04, 0x06, 0x05, 0x0a
 };
 
-static hda_nid_t ad1988_3stack_dac_nids[3] = {
+static const hda_nid_t ad1988_3stack_dac_nids[3] = {
 	0x04, 0x05, 0x0a
 };
 
 /* for AD1988A revision-2, DAC2-4 are swapped */
-static hda_nid_t ad1988_6stack_dac_nids_rev2[4] = {
+static const hda_nid_t ad1988_6stack_dac_nids_rev2[4] = {
 	0x04, 0x05, 0x0a, 0x06
 };
 
-static hda_nid_t ad1988_3stack_dac_nids_rev2[3] = {
+static const hda_nid_t ad1988_alt_dac_nid[1] = {
+	0x03
+};
+
+static const hda_nid_t ad1988_3stack_dac_nids_rev2[3] = {
 	0x04, 0x0a, 0x06
 };
 
-static hda_nid_t ad1988_adc_nids[3] = {
+static const hda_nid_t ad1988_adc_nids[3] = {
 	0x08, 0x09, 0x0f
 };
 
-static hda_nid_t ad1988_capsrc_nids[3] = {
+static const hda_nid_t ad1988_capsrc_nids[3] = {
 	0x0c, 0x0d, 0x0e
 };
 
@@ -1943,11 +2111,11 @@ static hda_nid_t ad1988_capsrc_nids[3] = {
 #define AD1988_SPDIF_OUT_HDMI	0x0b
 #define AD1988_SPDIF_IN		0x07
 
-static hda_nid_t ad1989b_slave_dig_outs[] = {
+static const hda_nid_t ad1989b_slave_dig_outs[] = {
 	AD1988_SPDIF_OUT, AD1988_SPDIF_OUT_HDMI, 0
 };
 
-static struct hda_input_mux ad1988_6stack_capture_source = {
+static const struct hda_input_mux ad1988_6stack_capture_source = {
 	.num_items = 5,
 	.items = {
 		{ "Front Mic", 0x1 },	/* port-B */
@@ -1958,7 +2126,7 @@ static struct hda_input_mux ad1988_6stack_capture_source = {
 	},
 };
 
-static struct hda_input_mux ad1988_laptop_capture_source = {
+static const struct hda_input_mux ad1988_laptop_capture_source = {
 	.num_items = 3,
 	.items = {
 		{ "Mic/Line", 0x1 },	/* port-B */
@@ -2001,7 +2169,7 @@ static int ad198x_ch_mode_put(struct snd_kcontrol *kcontrol,
 }
 
 /* 6-stack mode */
-static struct snd_kcontrol_new ad1988_6stack_mixers1[] = {
+static const struct snd_kcontrol_new ad1988_6stack_mixers1[] = {
 	HDA_CODEC_VOLUME("Front Playback Volume", 0x04, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("Surround Playback Volume", 0x06, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME_MONO("Center Playback Volume", 0x05, 1, 0x0, HDA_OUTPUT),
@@ -2010,7 +2178,7 @@ static struct snd_kcontrol_new ad1988_6stack_mixers1[] = {
 	{ } /* end */
 };
 
-static struct snd_kcontrol_new ad1988_6stack_mixers1_rev2[] = {
+static const struct snd_kcontrol_new ad1988_6stack_mixers1_rev2[] = {
 	HDA_CODEC_VOLUME("Front Playback Volume", 0x04, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("Surround Playback Volume", 0x05, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME_MONO("Center Playback Volume", 0x0a, 1, 0x0, HDA_OUTPUT),
@@ -2019,7 +2187,7 @@ static struct snd_kcontrol_new ad1988_6stack_mixers1_rev2[] = {
 	{ } /* end */
 };
 
-static struct snd_kcontrol_new ad1988_6stack_mixers2[] = {
+static const struct snd_kcontrol_new ad1988_6stack_mixers2[] = {
 	HDA_BIND_MUTE("Front Playback Switch", 0x29, 2, HDA_INPUT),
 	HDA_BIND_MUTE("Surround Playback Switch", 0x2a, 2, HDA_INPUT),
 	HDA_BIND_MUTE_MONO("Center Playback Switch", 0x27, 1, 2, HDA_INPUT),
@@ -2040,14 +2208,20 @@ static struct snd_kcontrol_new ad1988_6stack_mixers2[] = {
 	HDA_CODEC_VOLUME("Analog Mix Playback Volume", 0x21, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Analog Mix Playback Switch", 0x21, 0x0, HDA_OUTPUT),
 
-	HDA_CODEC_VOLUME("Front Mic Boost", 0x39, 0x0, HDA_OUTPUT),
-	HDA_CODEC_VOLUME("Mic Boost", 0x3c, 0x0, HDA_OUTPUT),
+	HDA_CODEC_VOLUME("Front Mic Boost Volume", 0x39, 0x0, HDA_OUTPUT),
+	HDA_CODEC_VOLUME("Mic Boost Volume", 0x3c, 0x0, HDA_OUTPUT),
+
+	{ } /* end */
+};
+
+static const struct snd_kcontrol_new ad1988_6stack_fp_mixers[] = {
+	HDA_CODEC_VOLUME("Headphone Playback Volume", 0x03, 0x0, HDA_OUTPUT),
 
 	{ } /* end */
 };
 
 /* 3-stack mode */
-static struct snd_kcontrol_new ad1988_3stack_mixers1[] = {
+static const struct snd_kcontrol_new ad1988_3stack_mixers1[] = {
 	HDA_CODEC_VOLUME("Front Playback Volume", 0x04, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("Surround Playback Volume", 0x0a, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME_MONO("Center Playback Volume", 0x05, 1, 0x0, HDA_OUTPUT),
@@ -2055,7 +2229,7 @@ static struct snd_kcontrol_new ad1988_3stack_mixers1[] = {
 	{ } /* end */
 };
 
-static struct snd_kcontrol_new ad1988_3stack_mixers1_rev2[] = {
+static const struct snd_kcontrol_new ad1988_3stack_mixers1_rev2[] = {
 	HDA_CODEC_VOLUME("Front Playback Volume", 0x04, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("Surround Playback Volume", 0x0a, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME_MONO("Center Playback Volume", 0x06, 1, 0x0, HDA_OUTPUT),
@@ -2063,7 +2237,7 @@ static struct snd_kcontrol_new ad1988_3stack_mixers1_rev2[] = {
 	{ } /* end */
 };
 
-static struct snd_kcontrol_new ad1988_3stack_mixers2[] = {
+static const struct snd_kcontrol_new ad1988_3stack_mixers2[] = {
 	HDA_BIND_MUTE("Front Playback Switch", 0x29, 2, HDA_INPUT),
 	HDA_BIND_MUTE("Surround Playback Switch", 0x2c, 2, HDA_INPUT),
 	HDA_BIND_MUTE_MONO("Center Playback Switch", 0x26, 1, 2, HDA_INPUT),
@@ -2083,8 +2257,8 @@ static struct snd_kcontrol_new ad1988_3stack_mixers2[] = {
 	HDA_CODEC_VOLUME("Analog Mix Playback Volume", 0x21, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Analog Mix Playback Switch", 0x21, 0x0, HDA_OUTPUT),
 
-	HDA_CODEC_VOLUME("Front Mic Boost", 0x39, 0x0, HDA_OUTPUT),
-	HDA_CODEC_VOLUME("Mic Boost", 0x3c, 0x0, HDA_OUTPUT),
+	HDA_CODEC_VOLUME("Front Mic Boost Volume", 0x39, 0x0, HDA_OUTPUT),
+	HDA_CODEC_VOLUME("Mic Boost Volume", 0x3c, 0x0, HDA_OUTPUT),
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = "Channel Mode",
@@ -2097,7 +2271,7 @@ static struct snd_kcontrol_new ad1988_3stack_mixers2[] = {
 };
 
 /* laptop mode */
-static struct snd_kcontrol_new ad1988_laptop_mixers[] = {
+static const struct snd_kcontrol_new ad1988_laptop_mixers[] = {
 	HDA_CODEC_VOLUME("PCM Playback Volume", 0x04, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("PCM Playback Switch", 0x29, 0x0, HDA_INPUT),
 	HDA_BIND_MUTE("Mono Playback Switch", 0x1e, 2, HDA_INPUT),
@@ -2112,22 +2286,23 @@ static struct snd_kcontrol_new ad1988_laptop_mixers[] = {
 	HDA_CODEC_VOLUME("Analog Mix Playback Volume", 0x21, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Analog Mix Playback Switch", 0x21, 0x0, HDA_OUTPUT),
 
-	HDA_CODEC_VOLUME("Mic Boost", 0x39, 0x0, HDA_OUTPUT),
+	HDA_CODEC_VOLUME("Mic Boost Volume", 0x39, 0x0, HDA_OUTPUT),
 
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = "External Amplifier",
+		.subdevice = HDA_SUBDEV_NID_FLAG | 0x12,
 		.info = ad198x_eapd_info,
 		.get = ad198x_eapd_get,
 		.put = ad198x_eapd_put,
-		.private_value = 0x12 | (1 << 8), /* port-D, inversed */
+		.private_value = 0x12, /* port-D */
 	},
 
 	{ } /* end */
 };
 
 /* capture */
-static struct snd_kcontrol_new ad1988_capture_mixers[] = {
+static const struct snd_kcontrol_new ad1988_capture_mixers[] = {
 	HDA_CODEC_VOLUME("Capture Volume", 0x0c, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Capture Switch", 0x0c, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME_IDX("Capture Volume", 1, 0x0d, 0x0, HDA_OUTPUT),
@@ -2152,7 +2327,7 @@ static struct snd_kcontrol_new ad1988_capture_mixers[] = {
 static int ad1988_spdif_playback_source_info(struct snd_kcontrol *kcontrol,
 					     struct snd_ctl_elem_info *uinfo)
 {
-	static char *texts[] = {
+	static const char * const texts[] = {
 		"PCM", "ADC1", "ADC2", "ADC3"
 	};
 	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
@@ -2233,11 +2408,12 @@ static int ad1988_spdif_playback_source_put(struct snd_kcontrol *kcontrol,
 	return change;
 }
 
-static struct snd_kcontrol_new ad1988_spdif_out_mixers[] = {
+static const struct snd_kcontrol_new ad1988_spdif_out_mixers[] = {
 	HDA_CODEC_VOLUME("IEC958 Playback Volume", 0x1b, 0x0, HDA_OUTPUT),
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = "IEC958 Playback Source",
+		.subdevice = HDA_SUBDEV_NID_FLAG | 0x1b,
 		.info = ad1988_spdif_playback_source_info,
 		.get = ad1988_spdif_playback_source_get,
 		.put = ad1988_spdif_playback_source_put,
@@ -2245,12 +2421,12 @@ static struct snd_kcontrol_new ad1988_spdif_out_mixers[] = {
 	{ } /* end */
 };
 
-static struct snd_kcontrol_new ad1988_spdif_in_mixers[] = {
+static const struct snd_kcontrol_new ad1988_spdif_in_mixers[] = {
 	HDA_CODEC_VOLUME("IEC958 Capture Volume", 0x1c, 0x0, HDA_INPUT),
 	{ } /* end */
 };
 
-static struct snd_kcontrol_new ad1989_spdif_out_mixers[] = {
+static const struct snd_kcontrol_new ad1989_spdif_out_mixers[] = {
 	HDA_CODEC_VOLUME("IEC958 Playback Volume", 0x1b, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("HDMI Playback Volume", 0x1d, 0x0, HDA_OUTPUT),
 	{ } /* end */
@@ -2263,7 +2439,7 @@ static struct snd_kcontrol_new ad1989_spdif_out_mixers[] = {
 /*
  * for 6-stack (+dig)
  */
-static struct hda_verb ad1988_6stack_init_verbs[] = {
+static const struct hda_verb ad1988_6stack_init_verbs[] = {
 	/* Front, Surround, CLFE, side DAC; unmute as default */
 	{0x04, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_UNMUTE},
 	{0x06, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_UNMUTE},
@@ -2323,7 +2499,20 @@ static struct hda_verb ad1988_6stack_init_verbs[] = {
 	{ }
 };
 
-static struct hda_verb ad1988_capture_init_verbs[] = {
+static const struct hda_verb ad1988_6stack_fp_init_verbs[] = {
+	/* Headphone; unmute as default */
+	{0x03, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_UNMUTE},
+	/* Port-A front headphon path */
+	{0x37, AC_VERB_SET_CONNECT_SEL, 0x00}, /* DAC0:03h */
+	{0x22, AC_VERB_SET_AMP_GAIN_MUTE, AMP_IN_MUTE(0)},
+	{0x22, AC_VERB_SET_AMP_GAIN_MUTE, AMP_IN_MUTE(1)},
+	{0x11, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_UNMUTE},
+	{0x11, AC_VERB_SET_PIN_WIDGET_CONTROL, PIN_HP},
+
+	{ }
+};
+
+static const struct hda_verb ad1988_capture_init_verbs[] = {
 	/* mute analog mix */
 	{0x20, AC_VERB_SET_AMP_GAIN_MUTE, AMP_IN_MUTE(0)},
 	{0x20, AC_VERB_SET_AMP_GAIN_MUTE, AMP_IN_MUTE(1)},
@@ -2341,7 +2530,7 @@ static struct hda_verb ad1988_capture_init_verbs[] = {
 	{ }
 };
 
-static struct hda_verb ad1988_spdif_init_verbs[] = {
+static const struct hda_verb ad1988_spdif_init_verbs[] = {
 	/* SPDIF out sel */
 	{0x02, AC_VERB_SET_CONNECT_SEL, 0x0}, /* PCM */
 	{0x0b, AC_VERB_SET_CONNECT_SEL, 0x0}, /* ADC1 */
@@ -2353,8 +2542,14 @@ static struct hda_verb ad1988_spdif_init_verbs[] = {
 	{ }
 };
 
+static const struct hda_verb ad1988_spdif_in_init_verbs[] = {
+	/* unmute SPDIF input pin */
+	{0x1c, AC_VERB_SET_AMP_GAIN_MUTE, AMP_IN_UNMUTE(0)},
+	{ }
+};
+
 /* AD1989 has no ADC -> SPDIF route */
-static struct hda_verb ad1989_spdif_init_verbs[] = {
+static const struct hda_verb ad1989_spdif_init_verbs[] = {
 	/* SPDIF-1 out pin */
 	{0x1b, AC_VERB_SET_PIN_WIDGET_CONTROL, PIN_OUT },
 	{0x1b, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_UNMUTE | 0x27}, /* 0dB */
@@ -2367,7 +2562,7 @@ static struct hda_verb ad1989_spdif_init_verbs[] = {
 /*
  * verbs for 3stack (+dig)
  */
-static struct hda_verb ad1988_3stack_ch2_init[] = {
+static const struct hda_verb ad1988_3stack_ch2_init[] = {
 	/* set port-C to line-in */
 	{ 0x15, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_MUTE },
 	{ 0x15, AC_VERB_SET_PIN_WIDGET_CONTROL, PIN_IN },
@@ -2377,7 +2572,7 @@ static struct hda_verb ad1988_3stack_ch2_init[] = {
 	{ } /* end */
 };
 
-static struct hda_verb ad1988_3stack_ch6_init[] = {
+static const struct hda_verb ad1988_3stack_ch6_init[] = {
 	/* set port-C to surround out */
 	{ 0x15, AC_VERB_SET_PIN_WIDGET_CONTROL, PIN_OUT },
 	{ 0x15, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_UNMUTE },
@@ -2387,12 +2582,12 @@ static struct hda_verb ad1988_3stack_ch6_init[] = {
 	{ } /* end */
 };
 
-static struct hda_channel_mode ad1988_3stack_modes[2] = {
+static const struct hda_channel_mode ad1988_3stack_modes[2] = {
 	{ 2, ad1988_3stack_ch2_init },
 	{ 6, ad1988_3stack_ch6_init },
 };
 
-static struct hda_verb ad1988_3stack_init_verbs[] = {
+static const struct hda_verb ad1988_3stack_init_verbs[] = {
 	/* Front, Surround, CLFE, side DAC; unmute as default */
 	{0x04, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_UNMUTE},
 	{0x06, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_UNMUTE},
@@ -2452,13 +2647,13 @@ static struct hda_verb ad1988_3stack_init_verbs[] = {
 /*
  * verbs for laptop mode (+dig)
  */
-static struct hda_verb ad1988_laptop_hp_on[] = {
+static const struct hda_verb ad1988_laptop_hp_on[] = {
 	/* unmute port-A and mute port-D */
 	{ 0x11, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_UNMUTE },
 	{ 0x12, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_MUTE },
 	{ } /* end */
 };
-static struct hda_verb ad1988_laptop_hp_off[] = {
+static const struct hda_verb ad1988_laptop_hp_off[] = {
 	/* mute port-A and unmute port-D */
 	{ 0x11, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_MUTE },
 	{ 0x12, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_UNMUTE },
@@ -2467,7 +2662,7 @@ static struct hda_verb ad1988_laptop_hp_off[] = {
 
 #define AD1988_HP_EVENT	0x01
 
-static struct hda_verb ad1988_laptop_init_verbs[] = {
+static const struct hda_verb ad1988_laptop_init_verbs[] = {
 	/* Front, Surround, CLFE, side DAC; unmute as default */
 	{0x04, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_UNMUTE},
 	{0x06, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_UNMUTE},
@@ -2524,14 +2719,14 @@ static void ad1988_laptop_unsol_event(struct hda_codec *codec, unsigned int res)
 {
 	if ((res >> 26) != AD1988_HP_EVENT)
 		return;
-	if (snd_hda_codec_read(codec, 0x11, 0, AC_VERB_GET_PIN_SENSE, 0) & (1 << 31))
+	if (snd_hda_jack_detect(codec, 0x11))
 		snd_hda_sequence_write(codec, ad1988_laptop_hp_on);
 	else
 		snd_hda_sequence_write(codec, ad1988_laptop_hp_off);
 } 
 
 #ifdef CONFIG_SND_HDA_POWER_SAVE
-static struct hda_amp_list ad1988_loopbacks[] = {
+static const struct hda_amp_list ad1988_loopbacks[] = {
 	{ 0x20, HDA_INPUT, 0 }, /* Front Mic */
 	{ 0x20, HDA_INPUT, 1 }, /* Line */
 	{ 0x20, HDA_INPUT, 4 }, /* Mic */
@@ -2549,7 +2744,7 @@ enum {
 	AD_CTL_WIDGET_MUTE,
 	AD_CTL_BIND_MUTE,
 };
-static struct snd_kcontrol_new ad1988_control_templates[] = {
+static const struct snd_kcontrol_new ad1988_control_templates[] = {
 	HDA_CODEC_VOLUME(NULL, 0, 0, 0),
 	HDA_CODEC_MUTE(NULL, 0, 0, 0),
 	HDA_BIND_MUTE(NULL, 0, 0, 0),
@@ -2569,6 +2764,8 @@ static int add_control(struct ad198x_spec *spec, int type, const char *name,
 	knew->name = kstrdup(name, GFP_KERNEL);
 	if (! knew->name)
 		return -ENOMEM;
+	if (get_amp_nid_(val))
+		knew->subdevice = HDA_SUBDEV_AMP_FLAG;
 	knew->private_value = val;
 	return 0;
 }
@@ -2576,18 +2773,18 @@ static int add_control(struct ad198x_spec *spec, int type, const char *name,
 #define AD1988_PIN_CD_NID		0x18
 #define AD1988_PIN_BEEP_NID		0x10
 
-static hda_nid_t ad1988_mixer_nids[8] = {
+static const hda_nid_t ad1988_mixer_nids[8] = {
 	/* A     B     C     D     E     F     G     H */
 	0x22, 0x2b, 0x2c, 0x29, 0x26, 0x2a, 0x27, 0x28
 };
 
 static inline hda_nid_t ad1988_idx_to_dac(struct hda_codec *codec, int idx)
 {
-	static hda_nid_t idx_to_dac[8] = {
+	static const hda_nid_t idx_to_dac[8] = {
 		/* A     B     C     D     E     F     G     H */
 		0x04, 0x06, 0x05, 0x04, 0x0a, 0x06, 0x05, 0x0a
 	};
-	static hda_nid_t idx_to_dac_rev2[8] = {
+	static const hda_nid_t idx_to_dac_rev2[8] = {
 		/* A     B     C     D     E     F     G     H */
 		0x04, 0x05, 0x0a, 0x04, 0x06, 0x05, 0x0a, 0x06
 	};
@@ -2597,13 +2794,13 @@ static inline hda_nid_t ad1988_idx_to_dac(struct hda_codec *codec, int idx)
 		return idx_to_dac[idx];
 }
 
-static hda_nid_t ad1988_boost_nids[8] = {
+static const hda_nid_t ad1988_boost_nids[8] = {
 	0x38, 0x39, 0x3a, 0x3d, 0x3c, 0x3b, 0, 0
 };
 
 static int ad1988_pin_idx(hda_nid_t nid)
 {
-	static hda_nid_t ad1988_io_pins[8] = {
+	static const hda_nid_t ad1988_io_pins[8] = {
 		0x11, 0x14, 0x15, 0x12, 0x17, 0x16, 0x24, 0x25
 	};
 	int i;
@@ -2615,7 +2812,7 @@ static int ad1988_pin_idx(hda_nid_t nid)
 
 static int ad1988_pin_to_loopback_idx(hda_nid_t nid)
 {
-	static int loopback_idx[8] = {
+	static const int loopback_idx[8] = {
 		2, 0, 1, 3, 4, 5, 1, 4
 	};
 	switch (nid) {
@@ -2628,7 +2825,7 @@ static int ad1988_pin_to_loopback_idx(hda_nid_t nid)
 
 static int ad1988_pin_to_adc_idx(hda_nid_t nid)
 {
-	static int adc_idx[8] = {
+	static const int adc_idx[8] = {
 		0, 1, 2, 8, 4, 3, 6, 7
 	};
 	switch (nid) {
@@ -2651,7 +2848,7 @@ static int ad1988_auto_fill_dac_nids(struct hda_codec *codec,
 	/* check the pins hardwired to audio widget */
 	for (i = 0; i < cfg->line_outs; i++) {
 		idx = ad1988_pin_idx(cfg->line_out_pins[i]);
-		spec->multiout.dac_nids[i] = ad1988_idx_to_dac(codec, idx);
+		spec->private_dac_nids[i] = ad1988_idx_to_dac(codec, idx);
 	}
 	spec->multiout.num_dacs = cfg->line_outs;
 	return 0;
@@ -2662,7 +2859,9 @@ static int ad1988_auto_create_multi_out_ctls(struct ad198x_spec *spec,
 					     const struct auto_pin_cfg *cfg)
 {
 	char name[32];
-	static const char *chname[4] = { "Front", "Surround", NULL /*CLFE*/, "Side" };
+	static const char * const chname[4] = {
+		"Front", "Surround", NULL /*CLFE*/, "Side"
+	};
 	hda_nid_t nid;
 	int i, err;
 
@@ -2753,7 +2952,7 @@ static int ad1988_auto_create_extra_out(struct hda_codec *codec, hda_nid_t pin,
 
 /* create input playback/capture controls for the given pin */
 static int new_analog_input(struct ad198x_spec *spec, hda_nid_t pin,
-			    const char *ctlname, int boost)
+			    const char *ctlname, int ctlidx, int boost)
 {
 	char name[32];
 	int err, idx;
@@ -2772,7 +2971,7 @@ static int new_analog_input(struct ad198x_spec *spec, hda_nid_t pin,
 		idx = ad1988_pin_idx(pin);
 		bnid = ad1988_boost_nids[idx];
 		if (bnid) {
-			sprintf(name, "%s Boost", ctlname);
+			sprintf(name, "%s Boost Volume", ctlname);
 			return add_control(spec, AD_CTL_WIDGET_VOL, name,
 					   HDA_COMPOSE_AMP_VAL(bnid, 3, idx, HDA_OUTPUT));
 
@@ -2782,25 +2981,27 @@ static int new_analog_input(struct ad198x_spec *spec, hda_nid_t pin,
 }
 
 /* create playback/capture controls for input pins */
-static int ad1988_auto_create_analog_input_ctls(struct ad198x_spec *spec,
+static int ad1988_auto_create_analog_input_ctls(struct hda_codec *codec,
 						const struct auto_pin_cfg *cfg)
 {
+	struct ad198x_spec *spec = codec->spec;
 	struct hda_input_mux *imux = &spec->private_imux;
-	int i, err;
+	int i, err, type, type_idx;
 
-	for (i = 0; i < AUTO_PIN_LAST; i++) {
-		err = new_analog_input(spec, cfg->input_pins[i],
-				       auto_pin_cfg_labels[i],
-				       i <= AUTO_PIN_FRONT_MIC);
+	for (i = 0; i < cfg->num_inputs; i++) {
+		const char *label;
+		type = cfg->inputs[i].type;
+		label = hda_get_autocfg_input_label(codec, cfg, i);
+		snd_hda_add_imux_item(imux, label,
+				      ad1988_pin_to_adc_idx(cfg->inputs[i].pin),
+				      &type_idx);
+		err = new_analog_input(spec, cfg->inputs[i].pin,
+				       label, type_idx,
+				       type == AUTO_PIN_MIC);
 		if (err < 0)
 			return err;
-		imux->items[imux->num_items].label = auto_pin_cfg_labels[i];
-		imux->items[imux->num_items].index = ad1988_pin_to_adc_idx(cfg->input_pins[i]);
-		imux->num_items++;
 	}
-	imux->items[imux->num_items].label = "Mix";
-	imux->items[imux->num_items].index = 9;
-	imux->num_items++;
+	snd_hda_add_imux_item(imux, "Mix", 9, NULL);
 
 	if ((err = add_control(spec, AD_CTL_WIDGET_VOL,
 			       "Analog Mix Playback Volume",
@@ -2867,12 +3068,12 @@ static void ad1988_auto_init_extra_out(struct hda_codec *codec)
 static void ad1988_auto_init_analog_input(struct hda_codec *codec)
 {
 	struct ad198x_spec *spec = codec->spec;
+	const struct auto_pin_cfg *cfg = &spec->autocfg;
 	int i, idx;
 
-	for (i = 0; i < AUTO_PIN_LAST; i++) {
-		hda_nid_t nid = spec->autocfg.input_pins[i];
-		if (! nid)
-			continue;
+	for (i = 0; i < cfg->num_inputs; i++) {
+		hda_nid_t nid = cfg->inputs[i].pin;
+		int type = cfg->inputs[i].type;
 		switch (nid) {
 		case 0x15: /* port-C */
 			snd_hda_codec_write(codec, 0x33, 0, AC_VERB_SET_CONNECT_SEL, 0x0);
@@ -2882,7 +3083,7 @@ static void ad1988_auto_init_analog_input(struct hda_codec *codec)
 			break;
 		}
 		snd_hda_codec_write(codec, nid, 0, AC_VERB_SET_PIN_WIDGET_CONTROL,
-				    i <= AUTO_PIN_FRONT_MIC ? PIN_VREF80 : PIN_IN);
+				    type == AUTO_PIN_MIC ? PIN_VREF80 : PIN_IN);
 		if (nid != AD1988_PIN_CD_NID)
 			snd_hda_codec_write(codec, nid, 0, AC_VERB_SET_AMP_GAIN_MUTE,
 					    AMP_OUT_MUTE);
@@ -2913,7 +3114,7 @@ static int ad1988_parse_auto_config(struct hda_codec *codec)
 						"Speaker")) < 0 ||
 	    (err = ad1988_auto_create_extra_out(codec, spec->autocfg.hp_pins[0],
 						"Headphone")) < 0 ||
-	    (err = ad1988_auto_create_analog_input_ctls(spec, &spec->autocfg)) < 0)
+	    (err = ad1988_auto_create_analog_input_ctls(codec, &spec->autocfg)) < 0)
 		return err;
 
 	spec->multiout.max_channels = spec->multiout.num_dacs * 2;
@@ -2943,13 +3144,13 @@ static int ad1988_auto_init(struct hda_codec *codec)
 	return 0;
 }
 
-
 /*
  */
 
-static const char *ad1988_models[AD1988_MODEL_LAST] = {
+static const char * const ad1988_models[AD1988_MODEL_LAST] = {
 	[AD1988_6STACK]		= "6stack",
 	[AD1988_6STACK_DIG]	= "6stack-dig",
+	[AD1988_6STACK_DIG_FP]	= "6stack-dig-fp",
 	[AD1988_3STACK]		= "3stack",
 	[AD1988_3STACK_DIG]	= "3stack-dig",
 	[AD1988_LAPTOP]		= "laptop",
@@ -2957,10 +3158,11 @@ static const char *ad1988_models[AD1988_MODEL_LAST] = {
 	[AD1988_AUTO]		= "auto",
 };
 
-static struct snd_pci_quirk ad1988_cfg_tbl[] = {
+static const struct snd_pci_quirk ad1988_cfg_tbl[] = {
 	SND_PCI_QUIRK(0x1043, 0x81ec, "Asus P5B-DLX", AD1988_6STACK_DIG),
 	SND_PCI_QUIRK(0x1043, 0x81f6, "Asus M2N-SLI", AD1988_6STACK_DIG),
 	SND_PCI_QUIRK(0x1043, 0x8277, "Asus P5K-E/WIFI-AP", AD1988_6STACK_DIG),
+	SND_PCI_QUIRK(0x1043, 0x82c0, "Asus M3N-HT Deluxe", AD1988_6STACK_DIG),
 	SND_PCI_QUIRK(0x1043, 0x8311, "Asus P5Q-Premium/Pro", AD1988_6STACK_DIG),
 	{}
 };
@@ -3009,6 +3211,7 @@ static int patch_ad1988(struct hda_codec *codec)
 	switch (board_config) {
 	case AD1988_6STACK:
 	case AD1988_6STACK_DIG:
+	case AD1988_6STACK_DIG_FP:
 		spec->multiout.max_channels = 8;
 		spec->multiout.num_dacs = 4;
 		if (is_rev2(codec))
@@ -3024,7 +3227,19 @@ static int patch_ad1988(struct hda_codec *codec)
 		spec->mixers[1] = ad1988_6stack_mixers2;
 		spec->num_init_verbs = 1;
 		spec->init_verbs[0] = ad1988_6stack_init_verbs;
-		if (board_config == AD1988_6STACK_DIG) {
+		if (board_config == AD1988_6STACK_DIG_FP) {
+			spec->num_mixers++;
+			spec->mixers[2] = ad1988_6stack_fp_mixers;
+			spec->num_init_verbs++;
+			spec->init_verbs[1] = ad1988_6stack_fp_init_verbs;
+			spec->slave_vols = ad1988_6stack_fp_slave_vols;
+			spec->slave_sws = ad1988_6stack_fp_slave_sws;
+			spec->alt_dac_nid = ad1988_alt_dac_nid;
+			spec->stream_analog_alt_playback =
+				&ad198x_pcm_analog_alt_playback;
+		}
+		if ((board_config == AD1988_6STACK_DIG) ||
+			(board_config == AD1988_6STACK_DIG_FP)) {
 			spec->multiout.dig_out_nid = AD1988_SPDIF_OUT;
 			spec->dig_in_nid = AD1988_SPDIF_IN;
 		}
@@ -3059,6 +3274,7 @@ static int patch_ad1988(struct hda_codec *codec)
 		spec->input_mux = &ad1988_laptop_capture_source;
 		spec->num_mixers = 1;
 		spec->mixers[0] = ad1988_laptop_mixers;
+		spec->inv_eapd = 1; /* inverted EAPD */
 		spec->num_init_verbs = 1;
 		spec->init_verbs[0] = ad1988_laptop_init_verbs;
 		if (board_config == AD1988_LAPTOP_DIG)
@@ -3085,8 +3301,11 @@ static int patch_ad1988(struct hda_codec *codec)
 				ad1988_spdif_init_verbs;
 		}
 	}
-	if (spec->dig_in_nid && codec->vendor_id < 0x11d4989a)
+	if (spec->dig_in_nid && codec->vendor_id < 0x11d4989a) {
 		spec->mixers[spec->num_mixers++] = ad1988_spdif_in_mixers;
+		spec->init_verbs[spec->num_init_verbs++] =
+			ad1988_spdif_in_init_verbs;
+	}
 
 	codec->patch_ops = ad198x_patch_ops;
 	switch (board_config) {
@@ -3102,6 +3321,9 @@ static int patch_ad1988(struct hda_codec *codec)
 	spec->loopback.amplist = ad1988_loopbacks;
 #endif
 	spec->vmaster_nid = 0x04;
+
+	codec->no_trigger_sense = 1;
+	codec->no_sticky_stream = 1;
 
 	return 0;
 }
@@ -3125,21 +3347,21 @@ static int patch_ad1988(struct hda_codec *codec)
  * but no build-up framework is given, so far.
  */
 
-static hda_nid_t ad1884_dac_nids[1] = {
+static const hda_nid_t ad1884_dac_nids[1] = {
 	0x04,
 };
 
-static hda_nid_t ad1884_adc_nids[2] = {
+static const hda_nid_t ad1884_adc_nids[2] = {
 	0x08, 0x09,
 };
 
-static hda_nid_t ad1884_capsrc_nids[2] = {
+static const hda_nid_t ad1884_capsrc_nids[2] = {
 	0x0c, 0x0d,
 };
 
 #define AD1884_SPDIF_OUT	0x02
 
-static struct hda_input_mux ad1884_capture_source = {
+static const struct hda_input_mux ad1884_capture_source = {
 	.num_items = 4,
 	.items = {
 		{ "Front Mic", 0x0 },
@@ -3149,7 +3371,7 @@ static struct hda_input_mux ad1884_capture_source = {
 	},
 };
 
-static struct snd_kcontrol_new ad1884_base_mixers[] = {
+static const struct snd_kcontrol_new ad1884_base_mixers[] = {
 	HDA_CODEC_VOLUME("PCM Playback Volume", 0x04, 0x0, HDA_OUTPUT),
 	/* HDA_CODEC_VOLUME_IDX("PCM Playback Volume", 1, 0x03, 0x0, HDA_OUTPUT), */
 	HDA_CODEC_MUTE("Headphone Playback Switch", 0x11, 0x0, HDA_OUTPUT),
@@ -3162,8 +3384,8 @@ static struct snd_kcontrol_new ad1884_base_mixers[] = {
 	HDA_CODEC_MUTE("Mic Playback Switch", 0x20, 0x01, HDA_INPUT),
 	HDA_CODEC_VOLUME("CD Playback Volume", 0x20, 0x02, HDA_INPUT),
 	HDA_CODEC_MUTE("CD Playback Switch", 0x20, 0x02, HDA_INPUT),
-	HDA_CODEC_VOLUME("Mic Boost", 0x15, 0x0, HDA_INPUT),
-	HDA_CODEC_VOLUME("Front Mic Boost", 0x14, 0x0, HDA_INPUT),
+	HDA_CODEC_VOLUME("Mic Boost Volume", 0x15, 0x0, HDA_INPUT),
+	HDA_CODEC_VOLUME("Front Mic Boost Volume", 0x14, 0x0, HDA_INPUT),
 	HDA_CODEC_VOLUME("Capture Volume", 0x0c, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Capture Switch", 0x0c, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME_IDX("Capture Volume", 1, 0x0d, 0x0, HDA_OUTPUT),
@@ -3193,7 +3415,7 @@ static struct snd_kcontrol_new ad1884_base_mixers[] = {
 	{ } /* end */
 };
 
-static struct snd_kcontrol_new ad1984_dmic_mixers[] = {
+static const struct snd_kcontrol_new ad1984_dmic_mixers[] = {
 	HDA_CODEC_VOLUME("Digital Mic Capture Volume", 0x05, 0x0, HDA_INPUT),
 	HDA_CODEC_MUTE("Digital Mic Capture Switch", 0x05, 0x0, HDA_INPUT),
 	HDA_CODEC_VOLUME_IDX("Digital Mic Capture Volume", 1, 0x06, 0x0,
@@ -3206,7 +3428,7 @@ static struct snd_kcontrol_new ad1984_dmic_mixers[] = {
 /*
  * initialization verbs
  */
-static struct hda_verb ad1884_init_verbs[] = {
+static const struct hda_verb ad1884_init_verbs[] = {
 	/* DACs; mute as default */
 	{0x03, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_ZERO},
 	{0x04, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_ZERO},
@@ -3252,7 +3474,7 @@ static struct hda_verb ad1884_init_verbs[] = {
 };
 
 #ifdef CONFIG_SND_HDA_POWER_SAVE
-static struct hda_amp_list ad1884_loopbacks[] = {
+static const struct hda_amp_list ad1884_loopbacks[] = {
 	{ 0x20, HDA_INPUT, 0 }, /* Front Mic */
 	{ 0x20, HDA_INPUT, 1 }, /* Mic */
 	{ 0x20, HDA_INPUT, 2 }, /* CD */
@@ -3261,7 +3483,7 @@ static struct hda_amp_list ad1884_loopbacks[] = {
 };
 #endif
 
-static const char *ad1884_slave_vols[] = {
+static const char * const ad1884_slave_vols[] = {
 	"PCM Playback Volume",
 	"Mic Playback Volume",
 	"Mono Playback Volume",
@@ -3315,13 +3537,16 @@ static int patch_ad1884(struct hda_codec *codec)
 
 	codec->patch_ops = ad198x_patch_ops;
 
+	codec->no_trigger_sense = 1;
+	codec->no_sticky_stream = 1;
+
 	return 0;
 }
 
 /*
  * Lenovo Thinkpad T61/X61
  */
-static struct hda_input_mux ad1984_thinkpad_capture_source = {
+static const struct hda_input_mux ad1984_thinkpad_capture_source = {
 	.num_items = 4,
 	.items = {
 		{ "Mic", 0x0 },
@@ -3335,7 +3560,7 @@ static struct hda_input_mux ad1984_thinkpad_capture_source = {
 /*
  * Dell Precision T3400
  */
-static struct hda_input_mux ad1984_dell_desktop_capture_source = {
+static const struct hda_input_mux ad1984_dell_desktop_capture_source = {
 	.num_items = 3,
 	.items = {
 		{ "Front Mic", 0x0 },
@@ -3345,7 +3570,7 @@ static struct hda_input_mux ad1984_dell_desktop_capture_source = {
 };
 
 
-static struct snd_kcontrol_new ad1984_thinkpad_mixers[] = {
+static const struct snd_kcontrol_new ad1984_thinkpad_mixers[] = {
 	HDA_CODEC_VOLUME("PCM Playback Volume", 0x04, 0x0, HDA_OUTPUT),
 	/* HDA_CODEC_VOLUME_IDX("PCM Playback Volume", 1, 0x03, 0x0, HDA_OUTPUT), */
 	HDA_CODEC_MUTE("Headphone Playback Switch", 0x11, 0x0, HDA_OUTPUT),
@@ -3354,11 +3579,13 @@ static struct snd_kcontrol_new ad1984_thinkpad_mixers[] = {
 	HDA_CODEC_MUTE("Mic Playback Switch", 0x20, 0x00, HDA_INPUT),
 	HDA_CODEC_VOLUME("Internal Mic Playback Volume", 0x20, 0x01, HDA_INPUT),
 	HDA_CODEC_MUTE("Internal Mic Playback Switch", 0x20, 0x01, HDA_INPUT),
+	HDA_CODEC_VOLUME("Beep Playback Volume", 0x20, 0x03, HDA_INPUT),
+	HDA_CODEC_MUTE("Beep Playback Switch", 0x20, 0x03, HDA_INPUT),
 	HDA_CODEC_VOLUME("Docking Mic Playback Volume", 0x20, 0x04, HDA_INPUT),
 	HDA_CODEC_MUTE("Docking Mic Playback Switch", 0x20, 0x04, HDA_INPUT),
-	HDA_CODEC_VOLUME("Mic Boost", 0x14, 0x0, HDA_INPUT),
-	HDA_CODEC_VOLUME("Internal Mic Boost", 0x15, 0x0, HDA_INPUT),
-	HDA_CODEC_VOLUME("Docking Mic Boost", 0x25, 0x0, HDA_OUTPUT),
+	HDA_CODEC_VOLUME("Mic Boost Volume", 0x14, 0x0, HDA_INPUT),
+	HDA_CODEC_VOLUME("Internal Mic Boost Volume", 0x15, 0x0, HDA_INPUT),
+	HDA_CODEC_VOLUME("Dock Mic Boost Volume", 0x25, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("Capture Volume", 0x0c, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Capture Switch", 0x0c, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME_IDX("Capture Volume", 1, 0x0d, 0x0, HDA_OUTPUT),
@@ -3389,12 +3616,14 @@ static struct snd_kcontrol_new ad1984_thinkpad_mixers[] = {
 };
 
 /* additional verbs */
-static struct hda_verb ad1984_thinkpad_init_verbs[] = {
+static const struct hda_verb ad1984_thinkpad_init_verbs[] = {
 	/* Port-E (docking station mic) pin */
 	{0x1c, AC_VERB_SET_PIN_WIDGET_CONTROL, PIN_VREF80},
 	{0x1c, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_MUTE},
 	/* docking mic boost */
 	{0x25, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_ZERO},
+	/* Analog PC Beeper - allow firmware/ACPI beeps */
+	{0x20, AC_VERB_SET_AMP_GAIN_MUTE, AMP_IN_UNMUTE(3) | 0x1a},
 	/* Analog mixer - docking mic; mute as default */
 	{0x20, AC_VERB_SET_AMP_GAIN_MUTE, AMP_IN_MUTE(4)},
 	/* enable EAPD bit */
@@ -3405,7 +3634,7 @@ static struct hda_verb ad1984_thinkpad_init_verbs[] = {
 /*
  * Dell Precision T3400
  */
-static struct snd_kcontrol_new ad1984_dell_desktop_mixers[] = {
+static const struct snd_kcontrol_new ad1984_dell_desktop_mixers[] = {
 	HDA_CODEC_VOLUME("PCM Playback Volume", 0x04, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Headphone Playback Switch", 0x11, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Speaker Playback Switch", 0x12, 0x0, HDA_OUTPUT),
@@ -3415,8 +3644,8 @@ static struct snd_kcontrol_new ad1984_dell_desktop_mixers[] = {
 	HDA_CODEC_MUTE("Front Mic Playback Switch", 0x20, 0x00, HDA_INPUT),
 	HDA_CODEC_VOLUME("Line-In Playback Volume", 0x20, 0x01, HDA_INPUT),
 	HDA_CODEC_MUTE("Line-In Playback Switch", 0x20, 0x01, HDA_INPUT),
-	HDA_CODEC_VOLUME("Line-In Boost", 0x15, 0x0, HDA_INPUT),
-	HDA_CODEC_VOLUME("Front Mic Boost", 0x14, 0x0, HDA_INPUT),
+	HDA_CODEC_VOLUME("Line-In Boost Volume", 0x15, 0x0, HDA_INPUT),
+	HDA_CODEC_VOLUME("Front Mic Boost Volume", 0x14, 0x0, HDA_INPUT),
 	HDA_CODEC_VOLUME("Capture Volume", 0x0c, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Capture Switch", 0x0c, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME_IDX("Capture Volume", 1, 0x0d, 0x0, HDA_OUTPUT),
@@ -3456,7 +3685,7 @@ static int ad1984_pcm_dmic_cleanup(struct hda_pcm_stream *hinfo,
 	return 0;
 }
 
-static struct hda_pcm_stream ad1984_pcm_dmic_capture = {
+static const struct hda_pcm_stream ad1984_pcm_dmic_capture = {
 	.substreams = 2,
 	.channels_min = 2,
 	.channels_max = 2,
@@ -3492,16 +3721,17 @@ enum {
 	AD1984_MODELS
 };
 
-static const char *ad1984_models[AD1984_MODELS] = {
+static const char * const ad1984_models[AD1984_MODELS] = {
 	[AD1984_BASIC]		= "basic",
 	[AD1984_THINKPAD]	= "thinkpad",
 	[AD1984_DELL_DESKTOP]	= "dell_desktop",
 };
 
-static struct snd_pci_quirk ad1984_cfg_tbl[] = {
+static const struct snd_pci_quirk ad1984_cfg_tbl[] = {
 	/* Lenovo Thinkpad T61/X61 */
 	SND_PCI_QUIRK_VENDOR(0x17aa, "Lenovo Thinkpad", AD1984_THINKPAD),
 	SND_PCI_QUIRK(0x1028, 0x0214, "Dell T3400", AD1984_DELL_DESKTOP),
+	SND_PCI_QUIRK(0x1028, 0x0233, "Dell Latitude E6400", AD1984_DELL_DESKTOP),
 	{}
 };
 
@@ -3523,10 +3753,16 @@ static int patch_ad1984(struct hda_codec *codec)
 		codec->patch_ops.build_pcms = ad1984_build_pcms;
 		break;
 	case AD1984_THINKPAD:
-		spec->multiout.dig_out_nid = AD1884_SPDIF_OUT;
+		if (codec->subsystem_id == 0x17aa20fb) {
+			/* Thinpad X300 does not have the ability to do SPDIF,
+			   or attach to docking station to use SPDIF */
+			spec->multiout.dig_out_nid = 0;
+		} else
+			spec->multiout.dig_out_nid = AD1884_SPDIF_OUT;
 		spec->input_mux = &ad1984_thinkpad_capture_source;
 		spec->mixers[0] = ad1984_thinkpad_mixers;
 		spec->init_verbs[spec->num_init_verbs++] = ad1984_thinkpad_init_verbs;
+		spec->analog_beep = 1;
 		break;
 	case AD1984_DELL_DESKTOP:
 		spec->multiout.dig_out_nid = 0;
@@ -3556,7 +3792,7 @@ static int patch_ad1984(struct hda_codec *codec)
  * We share the single DAC for both HP and line-outs (see AD1884/1984).
  */
 
-static hda_nid_t ad1884a_dac_nids[1] = {
+static const hda_nid_t ad1884a_dac_nids[1] = {
 	0x03,
 };
 
@@ -3565,7 +3801,7 @@ static hda_nid_t ad1884a_dac_nids[1] = {
 
 #define AD1884A_SPDIF_OUT	0x02
 
-static struct hda_input_mux ad1884a_capture_source = {
+static const struct hda_input_mux ad1884a_capture_source = {
 	.num_items = 5,
 	.items = {
 		{ "Front Mic", 0x0 },
@@ -3576,7 +3812,7 @@ static struct hda_input_mux ad1884a_capture_source = {
 	},
 };
 
-static struct snd_kcontrol_new ad1884a_base_mixers[] = {
+static const struct snd_kcontrol_new ad1884a_base_mixers[] = {
 	HDA_CODEC_VOLUME("Master Playback Volume", 0x21, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Master Playback Switch", 0x21, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Headphone Playback Switch", 0x11, 0x0, HDA_OUTPUT),
@@ -3593,9 +3829,9 @@ static struct snd_kcontrol_new ad1884a_base_mixers[] = {
 	HDA_CODEC_MUTE("Mic Playback Switch", 0x20, 0x04, HDA_INPUT),
 	HDA_CODEC_VOLUME("CD Playback Volume", 0x20, 0x02, HDA_INPUT),
 	HDA_CODEC_MUTE("CD Playback Switch", 0x20, 0x02, HDA_INPUT),
-	HDA_CODEC_VOLUME("Front Mic Boost", 0x14, 0x0, HDA_INPUT),
-	HDA_CODEC_VOLUME("Line Boost", 0x15, 0x0, HDA_INPUT),
-	HDA_CODEC_VOLUME("Mic Boost", 0x25, 0x0, HDA_OUTPUT),
+	HDA_CODEC_VOLUME("Front Mic Boost Volume", 0x14, 0x0, HDA_INPUT),
+	HDA_CODEC_VOLUME("Line Boost Volume", 0x15, 0x0, HDA_INPUT),
+	HDA_CODEC_VOLUME("Mic Boost Volume", 0x25, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("Capture Volume", 0x0c, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Capture Switch", 0x0c, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME_IDX("Capture Volume", 1, 0x0d, 0x0, HDA_OUTPUT),
@@ -3628,7 +3864,7 @@ static struct snd_kcontrol_new ad1884a_base_mixers[] = {
 /*
  * initialization verbs
  */
-static struct hda_verb ad1884a_init_verbs[] = {
+static const struct hda_verb ad1884a_init_verbs[] = {
 	/* DACs; unmute as default */
 	{0x03, AC_VERB_SET_AMP_GAIN_MUTE, 0x27}, /* 0dB */
 	{0x04, AC_VERB_SET_AMP_GAIN_MUTE, 0x27}, /* 0dB */
@@ -3683,7 +3919,7 @@ static struct hda_verb ad1884a_init_verbs[] = {
 };
 
 #ifdef CONFIG_SND_HDA_POWER_SAVE
-static struct hda_amp_list ad1884a_loopbacks[] = {
+static const struct hda_amp_list ad1884a_loopbacks[] = {
 	{ 0x20, HDA_INPUT, 0 }, /* Front Mic */
 	{ 0x20, HDA_INPUT, 1 }, /* Mic */
 	{ 0x20, HDA_INPUT, 2 }, /* CD */
@@ -3716,11 +3952,12 @@ static int ad1884a_mobile_master_sw_put(struct snd_kcontrol *kcontrol,
 	return ret;
 }
 
-static struct snd_kcontrol_new ad1884a_laptop_mixers[] = {
+static const struct snd_kcontrol_new ad1884a_laptop_mixers[] = {
 	HDA_CODEC_VOLUME("Master Playback Volume", 0x21, 0x0, HDA_OUTPUT),
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = "Master Playback Switch",
+		.subdevice = HDA_SUBDEV_AMP_FLAG,
 		.info = snd_hda_mixer_amp_switch_info,
 		.get = snd_hda_mixer_amp_switch_get,
 		.put = ad1884a_mobile_master_sw_put,
@@ -3735,20 +3972,21 @@ static struct snd_kcontrol_new ad1884a_laptop_mixers[] = {
 	HDA_CODEC_MUTE("Internal Mic Playback Switch", 0x20, 0x01, HDA_INPUT),
 	HDA_CODEC_VOLUME("Dock Mic Playback Volume", 0x20, 0x04, HDA_INPUT),
 	HDA_CODEC_MUTE("Dock Mic Playback Switch", 0x20, 0x04, HDA_INPUT),
-	HDA_CODEC_VOLUME("Mic Boost", 0x14, 0x0, HDA_INPUT),
-	HDA_CODEC_VOLUME("Internal Mic Boost", 0x15, 0x0, HDA_INPUT),
-	HDA_CODEC_VOLUME("Dock Mic Boost", 0x25, 0x0, HDA_OUTPUT),
+	HDA_CODEC_VOLUME("Mic Boost Volume", 0x14, 0x0, HDA_INPUT),
+	HDA_CODEC_VOLUME("Internal Mic Boost Volume", 0x15, 0x0, HDA_INPUT),
+	HDA_CODEC_VOLUME("Dock Mic Boost Volume", 0x25, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("Capture Volume", 0x0c, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Capture Switch", 0x0c, 0x0, HDA_OUTPUT),
 	{ } /* end */
 };
 
-static struct snd_kcontrol_new ad1884a_mobile_mixers[] = {
+static const struct snd_kcontrol_new ad1884a_mobile_mixers[] = {
 	HDA_CODEC_VOLUME("Master Playback Volume", 0x21, 0x0, HDA_OUTPUT),
 	/*HDA_CODEC_MUTE("Master Playback Switch", 0x21, 0x0, HDA_OUTPUT),*/
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = "Master Playback Switch",
+		.subdevice = HDA_SUBDEV_AMP_FLAG,
 		.info = snd_hda_mixer_amp_switch_info,
 		.get = snd_hda_mixer_amp_switch_get,
 		.put = ad1884a_mobile_master_sw_put,
@@ -3768,8 +4006,7 @@ static void ad1884a_hp_automute(struct hda_codec *codec)
 {
 	unsigned int present;
 
-	present = snd_hda_codec_read(codec, 0x11, 0,
-				     AC_VERB_GET_PIN_SENSE, 0) & 0x80000000;
+	present = snd_hda_jack_detect(codec, 0x11);
 	snd_hda_codec_amp_stereo(codec, 0x16, HDA_OUTPUT, 0,
 				 HDA_AMP_MUTE, present ? HDA_AMP_MUTE : 0);
 	snd_hda_codec_write(codec, 0x16, 0, AC_VERB_SET_EAPD_BTLENABLE,
@@ -3781,8 +4018,7 @@ static void ad1884a_hp_automic(struct hda_codec *codec)
 {
 	unsigned int present;
 
-	present = snd_hda_codec_read(codec, 0x14, 0,
-				     AC_VERB_GET_PIN_SENSE, 0) & 0x80000000;
+	present = snd_hda_jack_detect(codec, 0x14);
 	snd_hda_codec_write(codec, 0x0c, 0, AC_VERB_SET_CONNECT_SEL,
 			    present ? 0 : 1);
 }
@@ -3817,13 +4053,9 @@ static void ad1884a_laptop_automute(struct hda_codec *codec)
 {
 	unsigned int present;
 
-	present = snd_hda_codec_read(codec, 0x11, 0, AC_VERB_GET_PIN_SENSE, 0);
-	present &= AC_PINSENSE_PRESENCE;
-	if (!present) {
-		present = snd_hda_codec_read(codec, 0x12, 0,
-					     AC_VERB_GET_PIN_SENSE, 0);
-		present &= AC_PINSENSE_PRESENCE;
-	}
+	present = snd_hda_jack_detect(codec, 0x11);
+	if (!present)
+		present = snd_hda_jack_detect(codec, 0x12);
 	snd_hda_codec_amp_stereo(codec, 0x16, HDA_OUTPUT, 0,
 				 HDA_AMP_MUTE, present ? HDA_AMP_MUTE : 0);
 	snd_hda_codec_write(codec, 0x16, 0, AC_VERB_SET_EAPD_BTLENABLE,
@@ -3835,11 +4067,9 @@ static void ad1884a_laptop_automic(struct hda_codec *codec)
 {
 	unsigned int idx;
 
-	if (snd_hda_codec_read(codec, 0x14, 0, AC_VERB_GET_PIN_SENSE, 0) &
-	    AC_PINSENSE_PRESENCE)
+	if (snd_hda_jack_detect(codec, 0x14))
 		idx = 0;
-	else if (snd_hda_codec_read(codec, 0x1c, 0, AC_VERB_GET_PIN_SENSE, 0) &
-		 AC_PINSENSE_PRESENCE)
+	else if (snd_hda_jack_detect(codec, 0x1c))
 		idx = 4;
 	else
 		idx = 1;
@@ -3870,7 +4100,7 @@ static int ad1884a_laptop_init(struct hda_codec *codec)
 }
 
 /* additional verbs for laptop model */
-static struct hda_verb ad1884a_laptop_verbs[] = {
+static const struct hda_verb ad1884a_laptop_verbs[] = {
 	/* Port-A (HP) pin - always unmuted */
 	{0x11, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_UNMUTE},
 	/* Port-F (int speaker) mixer - route only from analog mixer */
@@ -3901,7 +4131,7 @@ static struct hda_verb ad1884a_laptop_verbs[] = {
 	{ } /* end */
 };
 
-static struct hda_verb ad1884a_mobile_verbs[] = {
+static const struct hda_verb ad1884a_mobile_verbs[] = {
 	/* DACs; unmute as default */
 	{0x03, AC_VERB_SET_AMP_GAIN_MUTE, 0x27}, /* 0dB */
 	{0x04, AC_VERB_SET_AMP_GAIN_MUTE, 0x27}, /* 0dB */
@@ -3956,7 +4186,7 @@ static struct hda_verb ad1884a_mobile_verbs[] = {
  * 0x17 - built-in mic
  */
 
-static struct hda_verb ad1984a_thinkpad_verbs[] = {
+static const struct hda_verb ad1984a_thinkpad_verbs[] = {
 	/* HP unmute */
 	{0x11, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_UNMUTE},
 	/* analog mix */
@@ -3973,15 +4203,15 @@ static struct hda_verb ad1984a_thinkpad_verbs[] = {
 	{ } /* end */
 };
 
-static struct snd_kcontrol_new ad1984a_thinkpad_mixers[] = {
+static const struct snd_kcontrol_new ad1984a_thinkpad_mixers[] = {
 	HDA_CODEC_VOLUME("Master Playback Volume", 0x21, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Master Playback Switch", 0x21, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("PCM Playback Volume", 0x20, 0x5, HDA_INPUT),
 	HDA_CODEC_MUTE("PCM Playback Switch", 0x20, 0x5, HDA_INPUT),
 	HDA_CODEC_VOLUME("Mic Playback Volume", 0x20, 0x00, HDA_INPUT),
 	HDA_CODEC_MUTE("Mic Playback Switch", 0x20, 0x00, HDA_INPUT),
-	HDA_CODEC_VOLUME("Mic Boost", 0x14, 0x0, HDA_INPUT),
-	HDA_CODEC_VOLUME("Internal Mic Boost", 0x17, 0x0, HDA_INPUT),
+	HDA_CODEC_VOLUME("Mic Boost Volume", 0x14, 0x0, HDA_INPUT),
+	HDA_CODEC_VOLUME("Internal Mic Boost Volume", 0x17, 0x0, HDA_INPUT),
 	HDA_CODEC_VOLUME("Capture Volume", 0x0c, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Capture Switch", 0x0c, 0x0, HDA_OUTPUT),
 	{
@@ -3994,7 +4224,7 @@ static struct snd_kcontrol_new ad1984a_thinkpad_mixers[] = {
 	{ } /* end */
 };
 
-static struct hda_input_mux ad1984a_thinkpad_capture_source = {
+static const struct hda_input_mux ad1984a_thinkpad_capture_source = {
 	.num_items = 3,
 	.items = {
 		{ "Mic", 0x0 },
@@ -4008,8 +4238,7 @@ static void ad1984a_thinkpad_automute(struct hda_codec *codec)
 {
 	unsigned int present;
 
-	present = snd_hda_codec_read(codec, 0x11, 0, AC_VERB_GET_PIN_SENSE, 0)
-		& AC_PINSENSE_PRESENCE;
+	present = snd_hda_jack_detect(codec, 0x11);
 	snd_hda_codec_amp_stereo(codec, 0x12, HDA_OUTPUT, 0,
 				 HDA_AMP_MUTE, present ? HDA_AMP_MUTE : 0);
 }
@@ -4032,6 +4261,84 @@ static int ad1984a_thinkpad_init(struct hda_codec *codec)
 }
 
 /*
+ * Precision R5500
+ * 0x12 - HP/line-out
+ * 0x13 - speaker (mono)
+ * 0x15 - mic-in
+ */
+
+static const struct hda_verb ad1984a_precision_verbs[] = {
+	/* Unmute main output path */
+	{0x03, AC_VERB_SET_AMP_GAIN_MUTE, 0x27}, /* 0dB */
+	{0x21, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_UNMUTE + 0x1f}, /* 0dB */
+	{0x20, AC_VERB_SET_AMP_GAIN_MUTE, AMP_IN_UNMUTE(5) + 0x17}, /* 0dB */
+	/* Analog mixer; mute as default */
+	{0x20, AC_VERB_SET_AMP_GAIN_MUTE, AMP_IN_MUTE(0)},
+	{0x20, AC_VERB_SET_AMP_GAIN_MUTE, AMP_IN_MUTE(1)},
+	{0x20, AC_VERB_SET_AMP_GAIN_MUTE, AMP_IN_MUTE(2)},
+	{0x20, AC_VERB_SET_AMP_GAIN_MUTE, AMP_IN_MUTE(3)},
+	{0x20, AC_VERB_SET_AMP_GAIN_MUTE, AMP_IN_MUTE(4)},
+	/* Select mic as input */
+	{0x0c, AC_VERB_SET_CONNECT_SEL, 0x1},
+	{0x0c, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_UNMUTE + 0x27}, /* 0dB */
+	/* Configure as mic */
+	{0x15, AC_VERB_SET_PIN_WIDGET_CONTROL, PIN_VREF80},
+	{0x15, AC_VERB_SET_AMP_GAIN_MUTE, 0x7002}, /* raise mic as default */
+	/* HP unmute */
+	{0x12, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_UNMUTE},
+	/* turn on EAPD */
+	{0x13, AC_VERB_SET_EAPD_BTLENABLE, 0x02},
+	/* unsolicited event for pin-sense */
+	{0x12, AC_VERB_SET_UNSOLICITED_ENABLE, AC_USRSP_EN | AD1884A_HP_EVENT},
+	{ } /* end */
+};
+
+static const struct snd_kcontrol_new ad1984a_precision_mixers[] = {
+	HDA_CODEC_VOLUME("Master Playback Volume", 0x21, 0x0, HDA_OUTPUT),
+	HDA_CODEC_MUTE("Master Playback Switch", 0x21, 0x0, HDA_OUTPUT),
+	HDA_CODEC_VOLUME("PCM Playback Volume", 0x20, 0x5, HDA_INPUT),
+	HDA_CODEC_MUTE("PCM Playback Switch", 0x20, 0x5, HDA_INPUT),
+	HDA_CODEC_VOLUME("Mic Playback Volume", 0x20, 0x01, HDA_INPUT),
+	HDA_CODEC_MUTE("Mic Playback Switch", 0x20, 0x01, HDA_INPUT),
+	HDA_CODEC_VOLUME("Mic Boost Volume", 0x15, 0x0, HDA_INPUT),
+	HDA_CODEC_MUTE("Front Playback Switch", 0x12, 0x0, HDA_OUTPUT),
+	HDA_CODEC_VOLUME("Speaker Playback Volume", 0x13, 0x0, HDA_OUTPUT),
+	HDA_CODEC_VOLUME("Capture Volume", 0x0c, 0x0, HDA_OUTPUT),
+	HDA_CODEC_MUTE("Capture Switch", 0x0c, 0x0, HDA_OUTPUT),
+	{ } /* end */
+};
+
+
+/* mute internal speaker if HP is plugged */
+static void ad1984a_precision_automute(struct hda_codec *codec)
+{
+	unsigned int present;
+
+	present = snd_hda_jack_detect(codec, 0x12);
+	snd_hda_codec_amp_stereo(codec, 0x13, HDA_OUTPUT, 0,
+				 HDA_AMP_MUTE, present ? HDA_AMP_MUTE : 0);
+}
+
+
+/* unsolicited event for HP jack sensing */
+static void ad1984a_precision_unsol_event(struct hda_codec *codec,
+					 unsigned int res)
+{
+	if ((res >> 26) != AD1884A_HP_EVENT)
+		return;
+	ad1984a_precision_automute(codec);
+}
+
+/* initialize jack-sensing, too */
+static int ad1984a_precision_init(struct hda_codec *codec)
+{
+	ad198x_init(codec);
+	ad1984a_precision_automute(codec);
+	return 0;
+}
+
+
+/*
  * HP Touchsmart
  * port-A (0x11)      - front hp-out
  * port-B (0x14)      - unused
@@ -4042,7 +4349,7 @@ static int ad1984a_thinkpad_init(struct hda_codec *codec)
  * digital-mic (0x17) - Internal mic
  */
 
-static struct hda_verb ad1984a_touchsmart_verbs[] = {
+static const struct hda_verb ad1984a_touchsmart_verbs[] = {
 	/* DACs; unmute as default */
 	{0x03, AC_VERB_SET_AMP_GAIN_MUTE, 0x27}, /* 0dB */
 	{0x04, AC_VERB_SET_AMP_GAIN_MUTE, 0x27}, /* 0dB */
@@ -4094,11 +4401,12 @@ static struct hda_verb ad1984a_touchsmart_verbs[] = {
 	{ } /* end */
 };
 
-static struct snd_kcontrol_new ad1984a_touchsmart_mixers[] = {
+static const struct snd_kcontrol_new ad1984a_touchsmart_mixers[] = {
 	HDA_CODEC_VOLUME("Master Playback Volume", 0x21, 0x0, HDA_OUTPUT),
 /*	HDA_CODEC_MUTE("Master Playback Switch", 0x21, 0x0, HDA_OUTPUT),*/
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.subdevice = HDA_SUBDEV_AMP_FLAG,
 		.name = "Master Playback Switch",
 		.info = snd_hda_mixer_amp_switch_info,
 		.get = snd_hda_mixer_amp_switch_get,
@@ -4109,22 +4417,20 @@ static struct snd_kcontrol_new ad1984a_touchsmart_mixers[] = {
 	HDA_CODEC_MUTE("PCM Playback Switch", 0x20, 0x5, HDA_INPUT),
 	HDA_CODEC_VOLUME("Capture Volume", 0x0c, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Capture Switch", 0x0c, 0x0, HDA_OUTPUT),
-	HDA_CODEC_VOLUME("Mic Boost", 0x25, 0x0, HDA_OUTPUT),
-	HDA_CODEC_VOLUME("Internal Mic Boost", 0x17, 0x0, HDA_INPUT),
+	HDA_CODEC_VOLUME("Mic Boost Volume", 0x25, 0x0, HDA_OUTPUT),
+	HDA_CODEC_VOLUME("Internal Mic Boost Volume", 0x17, 0x0, HDA_INPUT),
 	{ } /* end */
 };
 
 /* switch to external mic if plugged */
 static void ad1984a_touchsmart_automic(struct hda_codec *codec)
 {
-	if (snd_hda_codec_read(codec, 0x1c, 0,
-				     AC_VERB_GET_PIN_SENSE, 0) & 0x80000000) {
+	if (snd_hda_jack_detect(codec, 0x1c))
 		snd_hda_codec_write(codec, 0x0c, 0,
 				     AC_VERB_SET_CONNECT_SEL, 0x4);
-	} else {
+	else
 		snd_hda_codec_write(codec, 0x0c, 0,
 				     AC_VERB_SET_CONNECT_SEL, 0x5);
-	}
 }
 
 
@@ -4161,18 +4467,21 @@ enum {
 	AD1884A_MOBILE,
 	AD1884A_THINKPAD,
 	AD1984A_TOUCHSMART,
+	AD1984A_PRECISION,
 	AD1884A_MODELS
 };
 
-static const char *ad1884a_models[AD1884A_MODELS] = {
+static const char * const ad1884a_models[AD1884A_MODELS] = {
 	[AD1884A_DESKTOP]	= "desktop",
 	[AD1884A_LAPTOP]	= "laptop",
 	[AD1884A_MOBILE]	= "mobile",
 	[AD1884A_THINKPAD]	= "thinkpad",
 	[AD1984A_TOUCHSMART]	= "touchsmart",
+	[AD1984A_PRECISION]	= "precision",
 };
 
-static struct snd_pci_quirk ad1884a_cfg_tbl[] = {
+static const struct snd_pci_quirk ad1884a_cfg_tbl[] = {
+	SND_PCI_QUIRK(0x1028, 0x04ac, "Precision R5500", AD1984A_PRECISION),
 	SND_PCI_QUIRK(0x103c, 0x3030, "HP", AD1884A_MOBILE),
 	SND_PCI_QUIRK(0x103c, 0x3037, "HP 2230s", AD1884A_LAPTOP),
 	SND_PCI_QUIRK(0x103c, 0x3056, "HP", AD1884A_MOBILE),
@@ -4266,6 +4575,14 @@ static int patch_ad1884a(struct hda_codec *codec)
 		codec->patch_ops.unsol_event = ad1984a_thinkpad_unsol_event;
 		codec->patch_ops.init = ad1984a_thinkpad_init;
 		break;
+	case AD1984A_PRECISION:
+		spec->mixers[0] = ad1984a_precision_mixers;
+		spec->init_verbs[spec->num_init_verbs++] =
+			ad1984a_precision_verbs;
+		spec->multiout.dig_out_nid = 0;
+		codec->patch_ops.unsol_event = ad1984a_precision_unsol_event;
+		codec->patch_ops.init = ad1984a_precision_init;
+		break;
 	case AD1984A_TOUCHSMART:
 		spec->mixers[0] = ad1984a_touchsmart_mixers;
 		spec->init_verbs[0] = ad1984a_touchsmart_verbs;
@@ -4283,6 +4600,9 @@ static int patch_ad1884a(struct hda_codec *codec)
 		break;
 	}
 
+	codec->no_trigger_sense = 1;
+	codec->no_sticky_stream = 1;
+
 	return 0;
 }
 
@@ -4299,22 +4619,22 @@ static int patch_ad1884a(struct hda_codec *codec)
  * port-G - rear clfe-out (6stack)
  */
 
-static hda_nid_t ad1882_dac_nids[3] = {
+static const hda_nid_t ad1882_dac_nids[3] = {
 	0x04, 0x03, 0x05
 };
 
-static hda_nid_t ad1882_adc_nids[2] = {
+static const hda_nid_t ad1882_adc_nids[2] = {
 	0x08, 0x09,
 };
 
-static hda_nid_t ad1882_capsrc_nids[2] = {
+static const hda_nid_t ad1882_capsrc_nids[2] = {
 	0x0c, 0x0d,
 };
 
 #define AD1882_SPDIF_OUT	0x02
 
 /* list: 0x11, 0x39, 0x3a, 0x18, 0x3c, 0x3b, 0x12, 0x20 */
-static struct hda_input_mux ad1882_capture_source = {
+static const struct hda_input_mux ad1882_capture_source = {
 	.num_items = 5,
 	.items = {
 		{ "Front Mic", 0x1 },
@@ -4326,7 +4646,7 @@ static struct hda_input_mux ad1882_capture_source = {
 };
 
 /* list: 0x11, 0x39, 0x3a, 0x3c, 0x18, 0x1f, 0x12, 0x20 */
-static struct hda_input_mux ad1882a_capture_source = {
+static const struct hda_input_mux ad1882a_capture_source = {
 	.num_items = 5,
 	.items = {
 		{ "Front Mic", 0x1 },
@@ -4337,7 +4657,7 @@ static struct hda_input_mux ad1882a_capture_source = {
 	},
 };
 
-static struct snd_kcontrol_new ad1882_base_mixers[] = {
+static const struct snd_kcontrol_new ad1882_base_mixers[] = {
 	HDA_CODEC_VOLUME("Front Playback Volume", 0x04, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("Surround Playback Volume", 0x03, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME_MONO("Center Playback Volume", 0x05, 1, 0x0, HDA_OUTPUT),
@@ -4347,9 +4667,9 @@ static struct snd_kcontrol_new ad1882_base_mixers[] = {
 	HDA_CODEC_VOLUME_MONO("Mono Playback Volume", 0x13, 1, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE_MONO("Mono Playback Switch", 0x13, 1, 0x0, HDA_OUTPUT),
 
-	HDA_CODEC_VOLUME("Mic Boost", 0x3c, 0x0, HDA_OUTPUT),
-	HDA_CODEC_VOLUME("Front Mic Boost", 0x39, 0x0, HDA_OUTPUT),
-	HDA_CODEC_VOLUME("Line-In Boost", 0x3a, 0x0, HDA_OUTPUT),
+	HDA_CODEC_VOLUME("Mic Boost Volume", 0x3c, 0x0, HDA_OUTPUT),
+	HDA_CODEC_VOLUME("Front Mic Boost Volume", 0x39, 0x0, HDA_OUTPUT),
+	HDA_CODEC_VOLUME("Line-In Boost Volume", 0x3a, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME("Capture Volume", 0x0c, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE("Capture Switch", 0x0c, 0x0, HDA_OUTPUT),
 	HDA_CODEC_VOLUME_IDX("Capture Volume", 1, 0x0d, 0x0, HDA_OUTPUT),
@@ -4379,7 +4699,7 @@ static struct snd_kcontrol_new ad1882_base_mixers[] = {
 	{ } /* end */
 };
 
-static struct snd_kcontrol_new ad1882_loopback_mixers[] = {
+static const struct snd_kcontrol_new ad1882_loopback_mixers[] = {
 	HDA_CODEC_VOLUME("Front Mic Playback Volume", 0x20, 0x00, HDA_INPUT),
 	HDA_CODEC_MUTE("Front Mic Playback Switch", 0x20, 0x00, HDA_INPUT),
 	HDA_CODEC_VOLUME("Mic Playback Volume", 0x20, 0x01, HDA_INPUT),
@@ -4391,7 +4711,7 @@ static struct snd_kcontrol_new ad1882_loopback_mixers[] = {
 	{ } /* end */
 };
 
-static struct snd_kcontrol_new ad1882a_loopback_mixers[] = {
+static const struct snd_kcontrol_new ad1882a_loopback_mixers[] = {
 	HDA_CODEC_VOLUME("Front Mic Playback Volume", 0x20, 0x00, HDA_INPUT),
 	HDA_CODEC_MUTE("Front Mic Playback Switch", 0x20, 0x00, HDA_INPUT),
 	HDA_CODEC_VOLUME("Mic Playback Volume", 0x20, 0x04, HDA_INPUT),
@@ -4400,11 +4720,11 @@ static struct snd_kcontrol_new ad1882a_loopback_mixers[] = {
 	HDA_CODEC_MUTE("Line Playback Switch", 0x20, 0x01, HDA_INPUT),
 	HDA_CODEC_VOLUME("CD Playback Volume", 0x20, 0x06, HDA_INPUT),
 	HDA_CODEC_MUTE("CD Playback Switch", 0x20, 0x06, HDA_INPUT),
-	HDA_CODEC_VOLUME("Digital Mic Boost", 0x1f, 0x0, HDA_INPUT),
+	HDA_CODEC_VOLUME("Digital Mic Boost Volume", 0x1f, 0x0, HDA_INPUT),
 	{ } /* end */
 };
 
-static struct snd_kcontrol_new ad1882_3stack_mixers[] = {
+static const struct snd_kcontrol_new ad1882_3stack_mixers[] = {
 	HDA_CODEC_MUTE("Surround Playback Switch", 0x15, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE_MONO("Center Playback Switch", 0x17, 1, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE_MONO("LFE Playback Switch", 0x17, 2, 0x0, HDA_OUTPUT),
@@ -4418,14 +4738,14 @@ static struct snd_kcontrol_new ad1882_3stack_mixers[] = {
 	{ } /* end */
 };
 
-static struct snd_kcontrol_new ad1882_6stack_mixers[] = {
+static const struct snd_kcontrol_new ad1882_6stack_mixers[] = {
 	HDA_CODEC_MUTE("Surround Playback Switch", 0x16, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE_MONO("Center Playback Switch", 0x24, 1, 0x0, HDA_OUTPUT),
 	HDA_CODEC_MUTE_MONO("LFE Playback Switch", 0x24, 2, 0x0, HDA_OUTPUT),
 	{ } /* end */
 };
 
-static struct hda_verb ad1882_ch2_init[] = {
+static const struct hda_verb ad1882_ch2_init[] = {
 	{0x15, AC_VERB_SET_PIN_WIDGET_CONTROL, PIN_IN},
 	{0x2c, AC_VERB_SET_AMP_GAIN_MUTE, AMP_IN_MUTE(0)},
 	{0x2c, AC_VERB_SET_AMP_GAIN_MUTE, AMP_IN_MUTE(1)},
@@ -4435,7 +4755,7 @@ static struct hda_verb ad1882_ch2_init[] = {
 	{ } /* end */
 };
 
-static struct hda_verb ad1882_ch4_init[] = {
+static const struct hda_verb ad1882_ch4_init[] = {
 	{0x15, AC_VERB_SET_PIN_WIDGET_CONTROL, PIN_OUT},
 	{0x2c, AC_VERB_SET_AMP_GAIN_MUTE, AMP_IN_UNMUTE(0)},
 	{0x2c, AC_VERB_SET_AMP_GAIN_MUTE, AMP_IN_UNMUTE(1)},
@@ -4445,7 +4765,7 @@ static struct hda_verb ad1882_ch4_init[] = {
 	{ } /* end */
 };
 
-static struct hda_verb ad1882_ch6_init[] = {
+static const struct hda_verb ad1882_ch6_init[] = {
 	{0x15, AC_VERB_SET_PIN_WIDGET_CONTROL, PIN_OUT},
 	{0x2c, AC_VERB_SET_AMP_GAIN_MUTE, AMP_IN_UNMUTE(0)},
 	{0x2c, AC_VERB_SET_AMP_GAIN_MUTE, AMP_IN_UNMUTE(1)},
@@ -4455,7 +4775,7 @@ static struct hda_verb ad1882_ch6_init[] = {
 	{ } /* end */
 };
 
-static struct hda_channel_mode ad1882_modes[3] = {
+static const struct hda_channel_mode ad1882_modes[3] = {
 	{ 2, ad1882_ch2_init },
 	{ 4, ad1882_ch4_init },
 	{ 6, ad1882_ch6_init },
@@ -4464,7 +4784,7 @@ static struct hda_channel_mode ad1882_modes[3] = {
 /*
  * initialization verbs
  */
-static struct hda_verb ad1882_init_verbs[] = {
+static const struct hda_verb ad1882_init_verbs[] = {
 	/* DACs; mute as default */
 	{0x03, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_ZERO},
 	{0x04, AC_VERB_SET_AMP_GAIN_MUTE, AMP_OUT_ZERO},
@@ -4533,7 +4853,7 @@ static struct hda_verb ad1882_init_verbs[] = {
 };
 
 #ifdef CONFIG_SND_HDA_POWER_SAVE
-static struct hda_amp_list ad1882_loopbacks[] = {
+static const struct hda_amp_list ad1882_loopbacks[] = {
 	{ 0x20, HDA_INPUT, 0 }, /* Front Mic */
 	{ 0x20, HDA_INPUT, 1 }, /* Mic */
 	{ 0x20, HDA_INPUT, 4 }, /* Line */
@@ -4549,7 +4869,7 @@ enum {
 	AD1882_MODELS
 };
 
-static const char *ad1882_models[AD1986A_MODELS] = {
+static const char * const ad1882_models[AD1986A_MODELS] = {
 	[AD1882_3STACK]		= "3stack",
 	[AD1882_6STACK]		= "6stack",
 };
@@ -4619,6 +4939,10 @@ static int patch_ad1882(struct hda_codec *codec)
 		spec->mixers[2] = ad1882_6stack_mixers;
 		break;
 	}
+
+	codec->no_trigger_sense = 1;
+	codec->no_sticky_stream = 1;
+
 	return 0;
 }
 
@@ -4626,7 +4950,7 @@ static int patch_ad1882(struct hda_codec *codec)
 /*
  * patch entries
  */
-static struct hda_codec_preset snd_hda_preset_analog[] = {
+static const struct hda_codec_preset snd_hda_preset_analog[] = {
 	{ .id = 0x11d4184a, .name = "AD1884A", .patch = patch_ad1884a },
 	{ .id = 0x11d41882, .name = "AD1882", .patch = patch_ad1882 },
 	{ .id = 0x11d41883, .name = "AD1883", .patch = patch_ad1884a },

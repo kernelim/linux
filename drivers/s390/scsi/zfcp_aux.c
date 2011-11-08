@@ -189,6 +189,11 @@ static int __init zfcp_module_init(void)
 	mutex_init(&zfcp_data.config_mutex);
 	rwlock_init(&zfcp_data.config_lock);
 
+	zfcp_data.adisc_cache = zfcp_cache_hw_align("zfcp_adisc",
+					sizeof(struct zfcp_els_adisc));
+	if (!zfcp_data.adisc_cache)
+		goto out_adisc_cache;
+
 	zfcp_data.scsi_transport_template =
 		fc_attach_transport(&zfcp_transport_functions);
 	if (!zfcp_data.scsi_transport_template)
@@ -216,6 +221,8 @@ out_ccw_register:
 out_misc:
 	fc_release_transport(zfcp_data.scsi_transport_template);
 out_transport:
+	kmem_cache_destroy(zfcp_data.adisc_cache);
+out_adisc_cache:
 	kmem_cache_destroy(zfcp_data.gid_pn_cache);
 out_gid_cache:
 	kmem_cache_destroy(zfcp_data.sr_buffer_cache);
@@ -297,7 +304,7 @@ struct zfcp_unit *zfcp_unit_enqueue(struct zfcp_port *port, u64 fcp_lun)
 
 	atomic_set(&unit->refcount, 0);
 	init_waitqueue_head(&unit->remove_wq);
-	INIT_WORK(&unit->scsi_work, zfcp_scsi_scan);
+	INIT_WORK(&unit->scsi_work, zfcp_scsi_scan_work);
 
 	unit->port = port;
 	unit->fcp_lun = fcp_lun;
@@ -485,7 +492,7 @@ static int zfcp_setup_adapter_work_queue(struct zfcp_adapter *adapter)
 	return -ENOMEM;
 }
 
-static void zfcp_destroy_adapter_work_queue(struct zfcp_adapter *adapter)
+void zfcp_destroy_adapter_work_queue(struct zfcp_adapter *adapter)
 {
 	if (adapter->work_queue)
 		destroy_workqueue(adapter->work_queue);
@@ -546,6 +553,10 @@ int zfcp_adapter_enqueue(struct ccw_device *ccw_device)
 	INIT_LIST_HEAD(&adapter->port_list_head);
 	INIT_LIST_HEAD(&adapter->erp_ready_head);
 	INIT_LIST_HEAD(&adapter->erp_running_head);
+	INIT_LIST_HEAD(&adapter->events.list);
+
+	INIT_WORK(&adapter->events.work, zfcp_fc_post_event);
+	spin_lock_init(&adapter->events.list_lock);
 
 	spin_lock_init(&adapter->req_list_lock);
 
@@ -556,7 +567,7 @@ int zfcp_adapter_enqueue(struct ccw_device *ccw_device)
 		goto erp_thread_failed;
 
 	INIT_WORK(&adapter->stat_work, _zfcp_status_read_scheduler);
-	INIT_WORK(&adapter->scan_work, _zfcp_fc_scan_ports_later);
+	INIT_WORK(&adapter->scan_work, zfcp_fc_scan_ports);
 
 	adapter->service_level.seq_print = zfcp_print_sl;
 
@@ -596,18 +607,14 @@ qdio_failed:
 /**
  * zfcp_adapter_dequeue - remove the adapter from the resource list
  * @adapter: pointer to struct zfcp_adapter which should be removed
- * locks:	adapter list write lock is assumed to be held by caller
  */
 void zfcp_adapter_dequeue(struct zfcp_adapter *adapter)
 {
 	int retval = 0;
 	unsigned long flags;
 
-	cancel_work_sync(&adapter->stat_work);
-	zfcp_fc_wka_ports_force_offline(adapter->gs);
 	sysfs_remove_group(&adapter->ccw_device->dev.kobj,
 			   &zfcp_sysfs_adapter_attrs);
-	dev_set_drvdata(&adapter->ccw_device->dev, NULL);
 	/* sanity check: no pending FSF requests */
 	spin_lock_irqsave(&adapter->req_list_lock, flags);
 	retval = zfcp_reqlist_isempty(adapter);
@@ -615,9 +622,7 @@ void zfcp_adapter_dequeue(struct zfcp_adapter *adapter)
 	if (!retval)
 		return;
 
-	zfcp_fc_gs_destroy(adapter);
 	zfcp_erp_thread_kill(adapter);
-	zfcp_destroy_adapter_work_queue(adapter);
 	zfcp_dbf_adapter_unregister(adapter->dbf);
 	zfcp_free_low_mem_buffers(adapter);
 	zfcp_qdio_destroy(adapter->qdio);
@@ -718,8 +723,13 @@ void zfcp_port_dequeue(struct zfcp_port *port)
 	write_lock_irq(&zfcp_data.config_lock);
 	list_del(&port->list);
 	write_unlock_irq(&zfcp_data.config_lock);
+	if (cancel_work_sync(&port->gid_pn_work))
+		zfcp_port_put(port);
+	if (cancel_work_sync(&port->rport_work))
+		zfcp_port_put(port);
+	if (cancel_work_sync(&port->test_link_work))
+		zfcp_port_put(port);
 	wait_event(port->remove_wq, atomic_read(&port->refcount) == 0);
-	cancel_work_sync(&port->rport_work); /* usually not necessary */
 	zfcp_adapter_put(port->adapter);
 	sysfs_remove_group(&port->sysfs_device.kobj, &zfcp_sysfs_port_attrs);
 	device_unregister(&port->sysfs_device);

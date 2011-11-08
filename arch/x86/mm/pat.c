@@ -20,6 +20,7 @@
 #include <asm/cacheflush.h>
 #include <asm/processor.h>
 #include <asm/tlbflush.h>
+#include <asm/x86_init.h>
 #include <asm/pgtable.h>
 #include <asm/fcntl.h>
 #include <asm/e820.h>
@@ -263,7 +264,7 @@ chk_conflict(struct memtype *new, struct memtype *entry, unsigned long *type)
 	return -EBUSY;
 }
 
-static int pat_pagerange_is_ram(unsigned long start, unsigned long end)
+static int pat_pagerange_is_ram(resource_size_t start, resource_size_t end)
 {
 	int ram_page = 0, not_rampage = 0;
 	unsigned long page_nr;
@@ -295,8 +296,6 @@ static int pat_pagerange_is_ram(unsigned long start, unsigned long end)
  * Here we do two pass:
  * - Find the memtype of all the pages in the range, look for any conflicts
  * - In case of no conflicts, set the new memtype for pages in the range
- *
- * Caller must hold memtype_lock for atomicity.
  */
 static int reserve_ram_pages_type(u64 start, u64 end, unsigned long req_type,
 				  unsigned long *new_type)
@@ -388,7 +387,7 @@ int reserve_memtype(u64 start, u64 end, unsigned long req_type,
 	}
 
 	/* Low ISA region is always mapped WB in page table. No need to track */
-	if (is_ISA_range(start, end - 1)) {
+	if (x86_platform.is_untracked_pat_range(start, end)) {
 		if (new_type)
 			*new_type = _PAGE_CACHE_WB;
 		return 0;
@@ -408,9 +407,7 @@ int reserve_memtype(u64 start, u64 end, unsigned long req_type,
 	is_range_ram = pat_pagerange_is_ram(start, end);
 	if (is_range_ram == 1) {
 
-		spin_lock(&memtype_lock);
 		err = reserve_ram_pages_type(start, end, req_type, new_type);
-		spin_unlock(&memtype_lock);
 
 		return err;
 	} else if (is_range_ram < 0) {
@@ -499,15 +496,13 @@ int free_memtype(u64 start, u64 end)
 		return 0;
 
 	/* Low ISA region is always mapped WB. No need to track */
-	if (is_ISA_range(start, end - 1))
+	if (x86_platform.is_untracked_pat_range(start, end))
 		return 0;
 
 	is_range_ram = pat_pagerange_is_ram(start, end);
 	if (is_range_ram == 1) {
 
-		spin_lock(&memtype_lock);
 		err = free_ram_pages_type(start, end);
-		spin_unlock(&memtype_lock);
 
 		return err;
 	} else if (is_range_ram < 0) {
@@ -582,15 +577,13 @@ static unsigned long lookup_memtype(u64 paddr)
 	int rettype = _PAGE_CACHE_WB;
 	struct memtype *entry;
 
-	if (is_ISA_range(paddr, paddr + PAGE_SIZE - 1))
+	if (x86_platform.is_untracked_pat_range(paddr, paddr + PAGE_SIZE))
 		return rettype;
 
 	if (pat_pagerange_is_ram(paddr, paddr + PAGE_SIZE)) {
 		struct page *page;
-		spin_lock(&memtype_lock);
 		page = pfn_to_page(paddr >> PAGE_SHIFT);
 		rettype = get_page_memtype(page);
-		spin_unlock(&memtype_lock);
 		/*
 		 * -1 from get_page_memtype() implies RAM page is in its
 		 * default state and not reserved, and hence of type WB

@@ -293,7 +293,7 @@ struct sock {
 	void			*sk_security;
 #endif
 	__u32			sk_mark;
-	/* XXX 4 bytes hole on 64 bit */
+	u32			sk_classid;
 	void			(*sk_state_change)(struct sock *sk);
 	void			(*sk_data_ready)(struct sock *sk, int bytes);
 	void			(*sk_write_space)(struct sock *sk);
@@ -302,6 +302,53 @@ struct sock {
 						  struct sk_buff *skb);  
 	void                    (*sk_destruct)(struct sock *sk);
 };
+
+/*
+ * To prevent KABI-breakage, struct sock_extended is added here to extend
+ * the original struct sock. Also two helpers are added:
+ * sk_alloc_size
+ *     - is used to adjust prot->obj_size
+ * sk_extended
+ *     - should be used to access items in struct sock_extended
+ */
+
+struct sock_extended {
+
+	/*
+	 * Expansion for the sock common structure
+	 *	@skc_tx_queue_mapping: tx queue number for this connection
+	 */
+	struct {
+		int			skc_tx_queue_mapping;
+	} __sk_common_extended;
+
+	/*
+	 * Expansion space for proto specific sock types
+	 */
+	union {
+		struct {
+			__u32 rxhash;
+		} inet_sock_extended;
+	};
+
+	/*
+	 * Expansion space for sock backlog length
+	 */
+	struct {
+		int len;
+	} sk_backlog;
+};
+
+#define __sk_tx_queue_mapping(sk) \
+	sk_extended(sk)->__sk_common_extended.skc_tx_queue_mapping
+
+#define SOCK_EXTENDED_SIZE ALIGN(sizeof(struct sock_extended), sizeof(long))
+static inline struct sock_extended *sk_extended(const struct sock *sk);
+
+static inline unsigned int sk_alloc_size(unsigned int prot_sock_size)
+{
+	return ALIGN(prot_sock_size, sizeof(long)) + SOCK_EXTENDED_SIZE;
+}
 
 /*
  * Hashed lists helper routines
@@ -504,6 +551,8 @@ enum sock_flags {
 	SOCK_TIMESTAMPING_SOFTWARE,     /* %SOF_TIMESTAMPING_SOFTWARE */
 	SOCK_TIMESTAMPING_RAW_HARDWARE, /* %SOF_TIMESTAMPING_RAW_HARDWARE */
 	SOCK_TIMESTAMPING_SYS_HARDWARE, /* %SOF_TIMESTAMPING_SYS_HARDWARE */
+	SOCK_RXQ_OVFL,
+	SOCK_ZEROCOPY, /* buffers from userspace */
 };
 
 static inline void sock_copy_flags(struct sock *nsk, struct sock *osk)
@@ -561,8 +610,8 @@ static inline int sk_stream_memory_free(struct sock *sk)
 	return sk->sk_wmem_queued < sk->sk_sndbuf;
 }
 
-/* The per-socket spinlock must be held here. */
-static inline void sk_add_backlog(struct sock *sk, struct sk_buff *skb)
+/* OOB backlog add */
+static inline void __sk_add_backlog(struct sock *sk, struct sk_buff *skb)
 {
 	if (!sk->sk_backlog.tail) {
 		sk->sk_backlog.head = sk->sk_backlog.tail = skb;
@@ -573,9 +622,50 @@ static inline void sk_add_backlog(struct sock *sk, struct sk_buff *skb)
 	skb->next = NULL;
 }
 
+/*
+ * Take into account size of receive queue and backlog queue
+ */
+static inline bool sk_rcvqueues_full(const struct sock *sk, const struct sk_buff *skb)
+{
+	unsigned int qsize = sk_extended(sk)->sk_backlog.len +
+			     atomic_read(&sk->sk_rmem_alloc);
+
+	return qsize + skb->truesize > sk->sk_rcvbuf;
+}
+
+/* The per-socket spinlock must be held here. */
+static inline __must_check int sk_add_backlog(struct sock *sk, struct sk_buff *skb)
+{
+	if (sk_rcvqueues_full(sk, skb))
+		return -ENOBUFS;
+
+	__sk_add_backlog(sk, skb);
+	sk_extended(sk)->sk_backlog.len += skb->truesize;
+	return 0;
+}
+
 static inline int sk_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 {
 	return sk->sk_backlog_rcv(sk, skb);
+}
+
+static inline void sock_rps_reset_flow(const struct sock *sk)
+{
+	struct rps_sock_flow_table *sock_flow_table;
+
+	rcu_read_lock();
+	sock_flow_table = rcu_dereference(rps_sock_flow_table);
+	rps_reset_sock_flow(sock_flow_table, sk_extended(sk)->inet_sock_extended.rxhash);
+	rcu_read_unlock();
+}
+
+
+static inline void sock_rps_save_rxhash(struct sock *sk, u32 rxhash)
+{
+	if (unlikely(sk_extended(sk)->inet_sock_extended.rxhash != rxhash)) {
+		sock_rps_reset_flow(sk);
+		sk_extended(sk)->inet_sock_extended.rxhash = rxhash;
+	}
 }
 
 #define sk_wait_event(__sk, __timeo, __condition)			\
@@ -702,6 +792,13 @@ struct proto {
 	atomic_t		socks;
 #endif
 };
+
+static inline struct sock_extended *sk_extended(const struct sock *sk)
+{
+	unsigned int obj_size = sk->sk_prot_creator->obj_size;
+
+	return (struct sock_extended *) (((char *) sk) + obj_size);
+}
 
 extern int proto_register(struct proto *prot, int alloc_slab);
 extern void proto_unregister(struct proto *prot);
@@ -970,6 +1067,14 @@ extern void *sock_kmalloc(struct sock *sk, int size,
 extern void sock_kfree_s(struct sock *sk, void *mem, int size);
 extern void sk_send_sigurg(struct sock *sk);
 
+#ifdef CONFIG_CGROUPS
+extern void sock_update_classid(struct sock *sk);
+#else
+static inline void sock_update_classid(struct sock *sk)
+{
+}
+#endif
+
 /*
  * Functions to fill in entries in struct proto_ops when a protocol
  * does not implement a particular function.
@@ -1092,8 +1197,24 @@ static inline void sock_put(struct sock *sk)
 extern int sk_receive_skb(struct sock *sk, struct sk_buff *skb,
 			  const int nested);
 
+static inline void sk_tx_queue_set(struct sock *sk, int tx_queue)
+{
+	__sk_tx_queue_mapping(sk) = tx_queue;
+}
+
+static inline void sk_tx_queue_clear(struct sock *sk)
+{
+	__sk_tx_queue_mapping(sk) = -1;
+}
+
+static inline int sk_tx_queue_get(const struct sock *sk)
+{
+	return sk ? __sk_tx_queue_mapping(sk) : -1;
+}
+
 static inline void sk_set_socket(struct sock *sk, struct socket *sock)
 {
+	sk_tx_queue_clear(sk);
 	sk->sk_socket = sock;
 }
 
@@ -1150,6 +1271,7 @@ __sk_dst_set(struct sock *sk, struct dst_entry *dst)
 {
 	struct dst_entry *old_dst;
 
+	sk_tx_queue_clear(sk);
 	old_dst = sk->sk_dst_cache;
 	sk->sk_dst_cache = dst;
 	dst_release(old_dst);
@@ -1168,6 +1290,7 @@ __sk_dst_reset(struct sock *sk)
 {
 	struct dst_entry *old_dst;
 
+	sk_tx_queue_clear(sk);
 	old_dst = sk->sk_dst_cache;
 	sk->sk_dst_cache = NULL;
 	dst_release(old_dst);
@@ -1491,6 +1614,8 @@ sock_recv_timestamp(struct msghdr *msg, struct sock *sk, struct sk_buff *skb)
 	else
 		sk->sk_stamp = kt;
 }
+
+extern void sock_recv_ts_and_drops(struct msghdr *msg, struct sock *sk, struct sk_buff *skb);
 
 /**
  * sock_tx_timestamp - checks whether the outgoing packet is to be time stamped

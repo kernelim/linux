@@ -58,6 +58,7 @@ config KVM_E500
 
 	  If unsure, say N.
 
+source drivers/vhost/Kconfig
 source drivers/virtio/Kconfig
 
 endif # VIRTUALIZATION

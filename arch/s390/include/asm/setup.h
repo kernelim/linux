@@ -2,7 +2,7 @@
  *  include/asm-s390/setup.h
  *
  *  S390 version
- *    Copyright IBM Corp. 1999,2006
+ *    Copyright IBM Corp. 1999,2010
  */
 
 #ifndef _ASM_S390_SETUP_H
@@ -49,17 +49,12 @@ extern unsigned long memory_end;
 
 void detect_memory_layout(struct mem_chunk chunk[]);
 
-#ifdef CONFIG_S390_SWITCH_AMODE
-extern unsigned int switch_amode;
-#else
-#define switch_amode	(0)
-#endif
+#define PRIMARY_SPACE_MODE	0
+#define ACCESS_REGISTER_MODE	1
+#define SECONDARY_SPACE_MODE	2
+#define HOME_SPACE_MODE		3
 
-#ifdef CONFIG_S390_EXEC_PROTECT
-extern unsigned int s390_noexec;
-#else
-#define s390_noexec	(0)
-#endif
+extern unsigned int user_mode;
 
 /*
  * Machine features detected in head.S
@@ -76,6 +71,7 @@ extern unsigned int s390_noexec;
 #define MACHINE_FLAG_KVM	(1UL << 9)
 #define MACHINE_FLAG_HPAGE	(1UL << 10)
 #define MACHINE_FLAG_PFMF	(1UL << 11)
+#define MACHINE_FLAG_SPP	(1UL << 13)
 
 #define MACHINE_IS_VM		(S390_lowcore.machine_flags & MACHINE_FLAG_VM)
 #define MACHINE_IS_KVM		(S390_lowcore.machine_flags & MACHINE_FLAG_KVM)
@@ -90,6 +86,7 @@ extern unsigned int s390_noexec;
 #define MACHINE_HAS_MVCOS	(0)
 #define MACHINE_HAS_HPAGE	(0)
 #define MACHINE_HAS_PFMF	(0)
+#define MACHINE_HAS_SPP		(0)
 #else /* __s390x__ */
 #define MACHINE_HAS_IEEE	(1)
 #define MACHINE_HAS_CSP		(1)
@@ -99,6 +96,7 @@ extern unsigned int s390_noexec;
 #define MACHINE_HAS_MVCOS	(S390_lowcore.machine_flags & MACHINE_FLAG_MVCOS)
 #define MACHINE_HAS_HPAGE	(S390_lowcore.machine_flags & MACHINE_FLAG_HPAGE)
 #define MACHINE_HAS_PFMF	(S390_lowcore.machine_flags & MACHINE_FLAG_PFMF)
+#define MACHINE_HAS_SPP		(S390_lowcore.machine_flags & MACHINE_FLAG_SPP)
 #endif /* __s390x__ */
 
 #define ZFCPDUMP_HSA_SIZE	(32UL<<20)

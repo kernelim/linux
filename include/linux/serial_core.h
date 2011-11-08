@@ -505,32 +505,48 @@ uart_handle_dcd_change(struct uart_port *uport, unsigned int status)
 }
 
 /**
- *	uart_handle_cts_change - handle a change of clear-to-send state
+ *	uart_handle_flow_control_change - handle a change of CTS or DSR
  *	@uport: uart_port structure for the open port
- *	@status: new clear to send status, nonzero if active
+ *	@status: new CTS/DTR status, nonzero if active
  */
 static inline void
-uart_handle_cts_change(struct uart_port *uport, unsigned int status)
+uart_handle_flow_control_change(struct uart_port *uport, unsigned int status)
 {
 	struct tty_port *port = &uport->state->port;
 	struct tty_struct *tty = port->tty;
 
-	uport->icount.cts++;
-
-	if (port->flags & ASYNC_CTS_FLOW) {
-		if (tty->hw_stopped) {
-			if (status) {
-				tty->hw_stopped = 0;
-				uport->ops->start_tx(uport);
-				uart_write_wakeup(uport);
-			}
-		} else {
-			if (!status) {
-				tty->hw_stopped = 1;
-				uport->ops->stop_tx(uport);
-			}
+	if (tty->hw_stopped) {
+		if (status) {
+			tty->hw_stopped = 0;
+			uport->ops->start_tx(uport);
+			uart_write_wakeup(uport);
+		}
+	} else {
+		if (!status) {
+			tty->hw_stopped = 1;
+			uport->ops->stop_tx(uport);
 		}
 	}
+}
+
+static inline void
+uart_handle_cts_change(struct uart_port *uport, unsigned int status)
+{
+	struct tty_port *port = &uport->state->port;
+
+	uport->icount.cts++;
+	if (port->flags & ASYNC_CTS_FLOW)
+		uart_handle_flow_control_change(uport, status);
+}
+
+static inline void
+uart_handle_dsr_change(struct uart_port *uport, unsigned int status)
+{
+	struct tty_port *port = &uport->state->port;
+
+	uport->icount.dsr++;
+	if (port->flags & ASYNC_DSR_FLOW)
+		uart_handle_flow_control_change(uport, status);
 }
 
 #include <linux/tty_flip.h>
@@ -556,7 +572,7 @@ uart_insert_char(struct uart_port *port, unsigned int status,
  *	UART_ENABLE_MS - determine if port should enable modem status irqs
  */
 #define UART_ENABLE_MS(port,cflag)	((port)->flags & UPF_HARDPPS_CD || \
-					 (cflag) & CRTSCTS || \
+					 (cflag) & (CRTSCTS | CDTRDSR) || \
 					 !((cflag) & CLOCAL))
 
 #endif

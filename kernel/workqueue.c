@@ -930,15 +930,19 @@ void destroy_workqueue(struct workqueue_struct *wq)
 	const struct cpumask *cpu_map = wq_cpu_map(wq);
 	int cpu;
 
-	cpu_maps_update_begin();
-	spin_lock(&workqueue_lock);
-	list_del(&wq->list);
-	spin_unlock(&workqueue_lock);
+	if (is_wq_single_threaded(wq))
+		cleanup_workqueue_thread(per_cpu_ptr(wq->cpu_wq,
+					 singlethread_cpu));
+	else {
+		cpu_maps_update_begin();
+		spin_lock(&workqueue_lock);
+		list_del(&wq->list);
+		spin_unlock(&workqueue_lock);
 
-	for_each_cpu(cpu, cpu_map)
-		cleanup_workqueue_thread(per_cpu_ptr(wq->cpu_wq, cpu));
- 	cpu_maps_update_done();
-
+		for_each_cpu(cpu, cpu_map)
+			cleanup_workqueue_thread(per_cpu_ptr(wq->cpu_wq, cpu));
+		cpu_maps_update_done();
+	}
 	free_percpu(wq->cpu_wq);
 	kfree(wq);
 }

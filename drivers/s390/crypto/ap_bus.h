@@ -6,6 +6,7 @@
  *	      Martin Schwidefsky <schwidefsky@de.ibm.com>
  *	      Ralph Wuerthner <rwuerthn@de.ibm.com>
  *	      Felix Beck <felix.beck@de.ibm.com>
+ *	      Holger Dengler <hd@linux.vnet.ibm.com>
  *
  * Adjunct processor bus header file.
  *
@@ -72,7 +73,24 @@ struct ap_queue_status {
 	unsigned int int_enabled	: 1;
 	unsigned int response_code	: 8;
 	unsigned int pad2		: 16;
-};
+} __packed;
+
+#define AP_QUEUE_STATUS_INVALID \
+		{ 1, 1, 1, 0xF, 1, 0xFF, 0xFFFF }
+
+static inline
+int ap_queue_status_invalid_test(struct ap_queue_status *status) {
+	struct ap_queue_status invalid = AP_QUEUE_STATUS_INVALID;
+	return (!(memcmp(status, &invalid, sizeof(struct ap_queue_status))));
+}
+
+#define MAX_AP_FACILITY 31
+
+static inline int test_ap_facility(unsigned int function, unsigned int nr) {
+	if (nr > MAX_AP_FACILITY)
+		return 0;
+	return function & (unsigned int)(0x80000000 >> nr);
+}
 
 #define AP_RESPONSE_NORMAL		0x00
 #define AP_RESPONSE_Q_NOT_AVAIL		0x01
@@ -87,6 +105,7 @@ struct ap_queue_status {
 #define AP_RESPONSE_INDEX_TOO_BIG	0x11
 #define AP_RESPONSE_NO_FIRST_PART	0x13
 #define AP_RESPONSE_MESSAGE_TOO_BIG	0x15
+#define AP_RESPONSE_REQ_FAC_NOT_INST	0x16
 
 /*
  * Known device types
@@ -96,8 +115,8 @@ struct ap_queue_status {
 #define AP_DEVICE_TYPE_PCIXCC	5
 #define AP_DEVICE_TYPE_CEX2A	6
 #define AP_DEVICE_TYPE_CEX2C	7
-#define AP_DEVICE_TYPE_CEX2A2	8
-#define AP_DEVICE_TYPE_CEX2C2	9
+#define AP_DEVICE_TYPE_CEX3A	8
+#define AP_DEVICE_TYPE_CEX3C	9
 
 /*
  * AP reset flag states
@@ -161,11 +180,24 @@ struct ap_message {
 	size_t length;			/* Message length. */
 
 	void *private;			/* ap driver private pointer. */
+	unsigned int special:1;		/* Used for special commands. */
 };
 
 #define AP_DEVICE(dt)					\
 	.dev_type=(dt),					\
 	.match_flags=AP_DEVICE_ID_MATCH_DEVICE_TYPE,
+
+/**
+ * ap_init_message() - Initialize ap_message.
+ * Initialize a message before using. Otherwise this might result in
+ * unexpected behaviour.
+ */
+static inline void ap_init_message(struct ap_message *ap_msg)
+{
+	ap_msg->psmid = 0;
+	ap_msg->length = 0;
+	ap_msg->special = 0;
+}
 
 /*
  * Note: don't use ap_send/ap_recv after using ap_queue_message
@@ -181,5 +213,7 @@ void ap_flush_queue(struct ap_device *ap_dev);
 
 int ap_module_init(void);
 void ap_module_exit(void);
+
+int ap_4096_commands_available(ap_qid_t qid);
 
 #endif /* _AP_BUS_H_ */

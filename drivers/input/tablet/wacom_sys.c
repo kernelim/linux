@@ -1,7 +1,7 @@
 /*
  * drivers/input/tablet/wacom_sys.c
  *
- *  USB Wacom Graphire and Wacom Intuos tablet support - system specific code
+ *  USB Wacom tablet support - system specific code
  */
 
 /*
@@ -213,6 +213,13 @@ void input_dev_g(struct input_dev *input_dev, struct wacom_wac *wacom_wac)
 	input_set_abs_params(input_dev, ABS_DISTANCE, 0, wacom_wac->features->distance_max, 0, 0);
 }
 
+void input_dev_c21ux2(struct input_dev *input_dev, struct wacom_wac *wacom_wac)
+{
+	input_dev->keybit[BIT_WORD(BTN_GAMEPAD)] |= BIT_MASK(BTN_A) | BIT_MASK(BTN_B) | BIT_MASK(BTN_C);
+	input_dev->keybit[BIT_WORD(BTN_GAMEPAD)] |= BIT_MASK(BTN_X) | BIT_MASK(BTN_Y) | BIT_MASK(BTN_Z);
+	input_dev->keybit[BIT_WORD(BTN_JOYSTICK)] |= BIT_MASK(BTN_BASE) | BIT_MASK(BTN_BASE2);
+}
+
 void input_dev_i3s(struct input_dev *input_dev, struct wacom_wac *wacom_wac)
 {
 	input_dev->keybit[BIT_WORD(BTN_DIGI)] |= BIT_MASK(BTN_TOOL_FINGER);
@@ -246,6 +253,30 @@ void input_dev_bee(struct input_dev *input_dev, struct wacom_wac *wacom_wac)
 {
 	input_dev->keybit[BIT_WORD(BTN_MISC)] |= BIT_MASK(BTN_8) | BIT_MASK(BTN_9);
 }
+
+void input_dev_cintiq(struct input_dev *input_dev, struct wacom_wac *wacom_wac)
+{
+	input_dev->keybit[BIT_WORD(BTN_MISC)] |= BIT_MASK(BTN_0) | BIT_MASK(BTN_1) | BIT_MASK(BTN_2) | BIT_MASK(BTN_3);
+	input_dev->keybit[BIT_WORD(BTN_MISC)] |= BIT_MASK(BTN_4) | BIT_MASK(BTN_5) | BIT_MASK(BTN_6) | BIT_MASK(BTN_7);
+	input_dev->keybit[BIT_WORD(BTN_DIGI)] |= BIT_MASK(BTN_TOOL_FINGER);
+
+	input_set_abs_params(input_dev, ABS_RX, 0, 4096, 0, 0);
+	input_set_abs_params(input_dev, ABS_RY, 0, 4096, 0, 0);
+	input_set_abs_params(input_dev, ABS_Z, -900, 899, 0, 0);
+
+	input_dev->evbit[0] |= BIT_MASK(EV_MSC);
+	input_dev->mscbit[0] |= BIT_MASK(MSC_SERIAL);
+	input_dev->keybit[BIT_WORD(BTN_DIGI)] |= BIT_MASK(BTN_TOOL_RUBBER) |
+		BIT_MASK(BTN_TOOL_PEN) | BIT_MASK(BTN_TOOL_BRUSH) |
+		BIT_MASK(BTN_TOOL_PENCIL) | BIT_MASK(BTN_TOOL_AIRBRUSH);
+	input_dev->keybit[BIT_WORD(BTN_DIGI)] |= BIT_MASK(BTN_STYLUS) | BIT_MASK(BTN_STYLUS2);
+
+	input_set_abs_params(input_dev, ABS_DISTANCE, 0, wacom_wac->features->distance_max, 0, 0);
+	input_set_abs_params(input_dev, ABS_WHEEL, 0, 1023, 0, 0);
+	input_set_abs_params(input_dev, ABS_TILT_X, 0, 127, 0, 0);
+	input_set_abs_params(input_dev, ABS_TILT_Y, 0, 127, 0, 0);
+}
+
 
 void input_dev_i(struct input_dev *input_dev, struct wacom_wac *wacom_wac)
 {
@@ -562,10 +593,15 @@ static int wacom_resume(struct usb_interface *intf)
 	int rv;
 
 	mutex_lock(&wacom->lock);
+
+	/* switch to wacom mode first */
+	wacom_query_tablet_data(intf);
+
 	if (wacom->open)
 		rv = usb_submit_urb(wacom->irq, GFP_NOIO);
 	else
 		rv = 0;
+
 	mutex_unlock(&wacom->lock);
 
 	return rv;

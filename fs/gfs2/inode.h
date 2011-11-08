@@ -19,6 +19,8 @@ extern int gfs2_releasepage(struct page *page, gfp_t gfp_mask);
 extern int gfs2_internal_read(struct gfs2_inode *ip,
 			      struct file_ra_state *ra_state,
 			      char *buf, loff_t *pos, unsigned size);
+extern void gfs2_page_add_databufs(struct gfs2_inode *ip, struct page *page,
+				   unsigned int from, unsigned int to);
 extern void gfs2_set_aops(struct inode *inode);
 
 static inline int gfs2_is_stuffed(const struct gfs2_inode *ip)
@@ -81,15 +83,16 @@ static inline void gfs2_inum_out(const struct gfs2_inode *ip,
 }
 
 
-extern void gfs2_set_iop(struct inode *inode);
 extern struct inode *gfs2_inode_lookup(struct super_block *sb, unsigned type, 
 				       u64 no_addr, u64 no_formal_ino,
-				       int skip_freeing);
-extern struct inode *gfs2_ilookup(struct super_block *sb, u64 no_addr);
+				       int non_block);
+extern struct inode *gfs2_lookup_by_inum(struct gfs2_sbd *sdp, u64 no_addr,
+					 u64 *no_formal_ino,
+					 unsigned int blktype);
+extern struct inode *gfs2_ilookup(struct super_block *sb, u64 no_addr, int nonblock);
 
 extern int gfs2_inode_refresh(struct gfs2_inode *ip);
 
-extern int gfs2_dinode_dealloc(struct gfs2_inode *inode);
 extern int gfs2_change_nlink(struct gfs2_inode *ip, int diff);
 extern struct inode *gfs2_lookupi(struct inode *dir, const struct qstr *name,
 				  int is_root);

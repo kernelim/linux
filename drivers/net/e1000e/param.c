@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel PRO/1000 Linux driver
-  Copyright(c) 1999 - 2008 Intel Corporation.
+  Copyright(c) 1999 - 2011 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -62,10 +62,9 @@ MODULE_PARM_DESC(copybreak,
 	module_param_array_named(X, X, int, &num_##X, 0);	\
 	MODULE_PARM_DESC(X, desc);
 
-
 /*
  * Transmit Interrupt Delay in units of 1.024 microseconds
- * Tx interrupt delay needs to typically be set to something non zero
+ * Tx interrupt delay needs to typically be set to something non-zero
  *
  * Valid Range: 0-65535
  */
@@ -91,7 +90,6 @@ E1000_PARAM(TxAbsIntDelay, "Transmit Absolute Interrupt Delay");
  * Valid Range: 0-65535
  */
 E1000_PARAM(RxIntDelay, "Receive Interrupt Delay");
-#define DEFAULT_RDTR 0
 #define MAX_RXDELAY 0xFFFF
 #define MIN_RXDELAY 0
 
@@ -101,7 +99,6 @@ E1000_PARAM(RxIntDelay, "Receive Interrupt Delay");
  * Valid Range: 0-65535
  */
 E1000_PARAM(RxAbsIntDelay, "Receive Absolute Interrupt Delay");
-#define DEFAULT_RADV 8
 #define MAX_RXABSDELAY 0xFFFF
 #define MIN_RXABSDELAY 0
 
@@ -114,6 +111,7 @@ E1000_PARAM(InterruptThrottleRate, "Interrupt Throttling Rate");
 #define DEFAULT_ITR 3
 #define MAX_ITR 100000
 #define MIN_ITR 100
+
 /* IntMode (Interrupt Mode)
  *
  * Valid Range: 0 - 2
@@ -160,6 +158,15 @@ E1000_PARAM(WriteProtectNVM, "Write-protect NVM [WARNING: disabling this can lea
  */
 E1000_PARAM(CrcStripping, "Enable CRC Stripping, disable if your BMC needs " \
                           "the CRC");
+
+/*
+ * Enable/disable EEE (a.k.a. IEEE802.3az)
+ *
+ * Valid Range: 0, 1
+ *
+ * Default Value: 1
+ */
+E1000_PARAM(EEE, "Enable/disable on parts that support the feature");
 
 struct e1000_option {
 	enum { enable_option, range_option, list_option } type;
@@ -248,7 +255,7 @@ void __devinit e1000e_check_options(struct e1000_adapter *adapter)
 	}
 
 	{ /* Transmit Interrupt Delay */
-		const struct e1000_option opt = {
+		static const struct e1000_option opt = {
 			.type = range_option,
 			.name = "Transmit Interrupt Delay",
 			.err  = "using default of "
@@ -267,7 +274,7 @@ void __devinit e1000e_check_options(struct e1000_adapter *adapter)
 		}
 	}
 	{ /* Transmit Absolute Interrupt Delay */
-		const struct e1000_option opt = {
+		static const struct e1000_option opt = {
 			.type = range_option,
 			.name = "Transmit Absolute Interrupt Delay",
 			.err  = "using default of "
@@ -286,7 +293,7 @@ void __devinit e1000e_check_options(struct e1000_adapter *adapter)
 		}
 	}
 	{ /* Receive Interrupt Delay */
-		struct e1000_option opt = {
+		static struct e1000_option opt = {
 			.type = range_option,
 			.name = "Receive Interrupt Delay",
 			.err  = "using default of "
@@ -305,7 +312,7 @@ void __devinit e1000e_check_options(struct e1000_adapter *adapter)
 		}
 	}
 	{ /* Receive Absolute Interrupt Delay */
-		const struct e1000_option opt = {
+		static const struct e1000_option opt = {
 			.type = range_option,
 			.name = "Receive Absolute Interrupt Delay",
 			.err  = "using default of "
@@ -324,7 +331,7 @@ void __devinit e1000e_check_options(struct e1000_adapter *adapter)
 		}
 	}
 	{ /* Interrupt Throttling Rate */
-		const struct e1000_option opt = {
+		static const struct e1000_option opt = {
 			.type = range_option,
 			.name = "Interrupt Throttling Rate (ints/sec)",
 			.err  = "using default of "
@@ -350,6 +357,11 @@ void __devinit e1000e_check_options(struct e1000_adapter *adapter)
 					opt.name);
 				adapter->itr_setting = adapter->itr;
 				adapter->itr = 20000;
+				break;
+			case 4:
+				e_info("%s set to simplified (2000-8000 ints) "
+				       "mode\n", opt.name);
+				adapter->itr_setting = 4;
 				break;
 			default:
 				/*
@@ -381,7 +393,7 @@ void __devinit e1000e_check_options(struct e1000_adapter *adapter)
 		}
 	}
 	{ /* Interrupt Mode */
-		struct e1000_option opt = {
+		static struct e1000_option opt = {
 			.type = range_option,
 			.name = "Interrupt Mode",
 			.err  = "defaulting to 2 (MSI-X)",
@@ -399,7 +411,7 @@ void __devinit e1000e_check_options(struct e1000_adapter *adapter)
 		}
 	}
 	{ /* Smart Power Down */
-		const struct e1000_option opt = {
+		static const struct e1000_option opt = {
 			.type = enable_option,
 			.name = "PHY Smart Power Down",
 			.err  = "defaulting to Disabled",
@@ -415,10 +427,10 @@ void __devinit e1000e_check_options(struct e1000_adapter *adapter)
 		}
 	}
 	{ /* CRC Stripping */
-		const struct e1000_option opt = {
+		static const struct e1000_option opt = {
 			.type = enable_option,
 			.name = "CRC Stripping",
-			.err  = "defaulting to enabled",
+			.err  = "defaulting to Enabled",
 			.def  = OPTION_ENABLED
 		};
 
@@ -432,7 +444,7 @@ void __devinit e1000e_check_options(struct e1000_adapter *adapter)
 		}
 	}
 	{ /* Kumeran Lock Loss Workaround */
-		const struct e1000_option opt = {
+		static const struct e1000_option opt = {
 			.type = enable_option,
 			.name = "Kumeran Lock Loss Workaround",
 			.err  = "defaulting to Enabled",
@@ -452,7 +464,7 @@ void __devinit e1000e_check_options(struct e1000_adapter *adapter)
 		}
 	}
 	{ /* Write-protect NVM */
-		const struct e1000_option opt = {
+		static const struct e1000_option opt = {
 			.type = enable_option,
 			.name = "Write-protect NVM",
 			.err  = "defaulting to Enabled",
@@ -469,6 +481,25 @@ void __devinit e1000e_check_options(struct e1000_adapter *adapter)
 			} else {
 				if (opt.def)
 					adapter->flags |= FLAG_READ_ONLY_NVM;
+			}
+		}
+	}
+	{ /* EEE for parts supporting the feature */
+		static const struct e1000_option opt = {
+			.type = enable_option,
+			.name = "EEE Support",
+			.err  = "defaulting to Enabled",
+			.def  = OPTION_ENABLED
+		};
+
+		if (adapter->flags2 & FLAG2_HAS_EEE) {
+			/* Currently only supported on 82579 */
+			if (num_EEE > bd) {
+				unsigned int eee = EEE[bd];
+				e1000_validate_option(&eee, &opt, adapter);
+				hw->dev_spec.ich8lan.eee_disable = !eee;
+			} else {
+				hw->dev_spec.ich8lan.eee_disable = !opt.def;
 			}
 		}
 	}

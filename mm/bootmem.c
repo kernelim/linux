@@ -143,6 +143,30 @@ unsigned long __init init_bootmem(unsigned long start, unsigned long pages)
 	return init_bootmem_core(NODE_DATA(0)->bdata, start, 0, pages);
 }
 
+/*
+ * free_bootmem_late - free bootmem pages directly to page allocator
+ * @addr: starting address of the range
+ * @size: size of the range in bytes
+ *
+ * This is only useful when the bootmem allocator has already been torn
+ * down, but we are still initializing the system.  Pages are given directly
+ * to the page allocator, no bootmem metadata is updated because it is gone.
+ */
+void __init free_bootmem_late(unsigned long addr, unsigned long size)
+{
+	unsigned long cursor, end;
+
+	kmemleak_free_part(__va(addr), size);
+
+	cursor = PFN_UP(addr);
+	end = PFN_DOWN(addr + size);
+
+	for (; cursor < end; cursor++) {
+		__free_pages_bootmem(pfn_to_page(cursor), 0);
+		totalram_pages++;
+	}
+}
+
 static unsigned long __init free_all_bootmem_core(bootmem_data_t *bdata)
 {
 	int aligned;
@@ -239,7 +263,11 @@ static void __init __free(bootmem_data_t *bdata,
 		bdata->hint_idx = sidx;
 
 	for (idx = sidx; idx < eidx; idx++)
+#ifdef CONFIG_X86_64
+		if (!test_and_clear_bit_long(idx, bdata->node_bootmem_map))
+#else
 		if (!test_and_clear_bit(idx, bdata->node_bootmem_map))
+#endif
 			BUG();
 }
 

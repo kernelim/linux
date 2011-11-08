@@ -47,6 +47,7 @@ enum {
 	INTERCEPT_MONITOR,
 	INTERCEPT_MWAIT,
 	INTERCEPT_MWAIT_COND,
+	INTERCEPT_XSETBV,
 };
 
 
@@ -57,7 +58,8 @@ struct __attribute__ ((__packed__)) vmcb_control_area {
 	u16 intercept_dr_write;
 	u32 intercept_exceptions;
 	u64 intercept;
-	u8 reserved_1[44];
+	u8 reserved_1[42];
+	u16 pause_filter_count;
 	u64 iopm_base_pa;
 	u64 msrpm_base_pa;
 	u64 tsc_offset;
@@ -80,12 +82,19 @@ struct __attribute__ ((__packed__)) vmcb_control_area {
 	u32 event_inj_err;
 	u64 nested_cr3;
 	u64 lbr_ctl;
-	u8 reserved_5[832];
+	u32 clean;
+	u32 reserved_5;
+	u64 next_rip;
+	u8 insn_len;
+	u8 insn_bytes[15];
+	u8 reserved_6[800];
 };
 
 
 #define TLB_CONTROL_DO_NOTHING 0
 #define TLB_CONTROL_FLUSH_ALL_ASID 1
+#define TLB_CONTROL_FLUSH_ASID 3
+#define TLB_CONTROL_FLUSH_ASID_LOCAL 7
 
 #define V_TPR_MASK 0x0f
 
@@ -237,6 +246,9 @@ struct __attribute__ ((__packed__)) vmcb {
 
 #define SVM_EXITINFOSHIFT_TS_REASON_IRET 36
 #define SVM_EXITINFOSHIFT_TS_REASON_JMP 38
+#define SVM_EXITINFOSHIFT_TS_HAS_ERROR_CODE 44
+
+#define SVM_EXITINFO_REG_MASK 0x0F
 
 #define	SVM_EXIT_READ_CR0 	0x000
 #define	SVM_EXIT_READ_CR3 	0x003
@@ -308,6 +320,7 @@ struct __attribute__ ((__packed__)) vmcb {
 #define SVM_EXIT_MONITOR	0x08a
 #define SVM_EXIT_MWAIT		0x08b
 #define SVM_EXIT_MWAIT_COND	0x08c
+#define SVM_EXIT_XSETBV		0x08d
 #define SVM_EXIT_NPF  		0x400
 
 #define SVM_EXIT_ERR		-1

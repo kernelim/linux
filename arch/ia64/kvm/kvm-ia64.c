@@ -124,7 +124,7 @@ long ia64_pal_vp_create(u64 *vpd, u64 *host_iva, u64 *opt_handler)
 
 static  DEFINE_SPINLOCK(vp_lock);
 
-void kvm_arch_hardware_enable(void *garbage)
+int kvm_arch_hardware_enable(void *garbage)
 {
 	long  status;
 	long  tmp_base;
@@ -137,7 +137,7 @@ void kvm_arch_hardware_enable(void *garbage)
 	slot = ia64_itr_entry(0x3, KVM_VMM_BASE, pte, KVM_VMM_SHIFT);
 	local_irq_restore(saved_psr);
 	if (slot < 0)
-		return;
+		return -EINVAL;
 
 	spin_lock(&vp_lock);
 	status = ia64_pal_vp_init_env(kvm_vsa_base ?
@@ -145,7 +145,7 @@ void kvm_arch_hardware_enable(void *garbage)
 			__pa(kvm_vm_buffer), KVM_VM_BUFFER_BASE, &tmp_base);
 	if (status != 0) {
 		printk(KERN_WARNING"kvm: Failed to Enable VT Support!!!!\n");
-		return ;
+		return -EINVAL;
 	}
 
 	if (!kvm_vsa_base) {
@@ -154,6 +154,8 @@ void kvm_arch_hardware_enable(void *garbage)
 	}
 	spin_unlock(&vp_lock);
 	ia64_ptr_entry(0x3, slot);
+
+	return 0;
 }
 
 void kvm_arch_hardware_disable(void *garbage)
@@ -239,10 +241,10 @@ static int handle_mmio(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
 	return 0;
 mmio:
 	if (p->dir)
-		r = kvm_io_bus_read(&vcpu->kvm->mmio_bus, p->addr,
+		r = kvm_io_bus_read(vcpu->kvm, KVM_MMIO_BUS, p->addr,
 				    p->size, &p->data);
 	else
-		r = kvm_io_bus_write(&vcpu->kvm->mmio_bus, p->addr,
+		r = kvm_io_bus_write(vcpu->kvm, KVM_MMIO_BUS, p->addr,
 				     p->size, &p->data);
 	if (r)
 		printk(KERN_ERR"kvm: No iodevice found! addr:%lx\n", p->addr);
@@ -634,12 +636,9 @@ static void kvm_vcpu_post_transition(struct kvm_vcpu *vcpu)
 static int __vcpu_run(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
 {
 	union context *host_ctx, *guest_ctx;
-	int r;
+	int r, idx;
 
-	/*
-	 * down_read() may sleep and return with interrupts enabled
-	 */
-	down_read(&vcpu->kvm->slots_lock);
+	idx = srcu_read_lock(&vcpu->kvm->srcu);
 
 again:
 	if (signal_pending(current)) {
@@ -661,7 +660,7 @@ again:
 	if (r < 0)
 		goto vcpu_run_fail;
 
-	up_read(&vcpu->kvm->slots_lock);
+	srcu_read_unlock(&vcpu->kvm->srcu, idx);
 	kvm_guest_enter();
 
 	/*
@@ -685,7 +684,7 @@ again:
 	kvm_guest_exit();
 	preempt_enable();
 
-	down_read(&vcpu->kvm->slots_lock);
+	idx = srcu_read_lock(&vcpu->kvm->srcu);
 
 	r = kvm_handle_exit(kvm_run, vcpu);
 
@@ -695,10 +694,10 @@ again:
 	}
 
 out:
-	up_read(&vcpu->kvm->slots_lock);
+	srcu_read_unlock(&vcpu->kvm->srcu, idx);
 	if (r > 0) {
 		kvm_resched(vcpu);
-		down_read(&vcpu->kvm->slots_lock);
+		idx = srcu_read_lock(&vcpu->kvm->srcu);
 		goto again;
 	}
 
@@ -851,8 +850,7 @@ static int kvm_vm_ioctl_get_irqchip(struct kvm *kvm,
 	r = 0;
 	switch (chip->chip_id) {
 	case KVM_IRQCHIP_IOAPIC:
-		memcpy(&chip->chip.ioapic, ioapic_irqchip(kvm),
-				sizeof(struct kvm_ioapic_state));
+		r = kvm_get_ioapic(kvm, &chip->chip.ioapic);
 		break;
 	default:
 		r = -EINVAL;
@@ -868,9 +866,7 @@ static int kvm_vm_ioctl_set_irqchip(struct kvm *kvm, struct kvm_irqchip *chip)
 	r = 0;
 	switch (chip->chip_id) {
 	case KVM_IRQCHIP_IOAPIC:
-		memcpy(ioapic_irqchip(kvm),
-				&chip->chip.ioapic,
-				sizeof(struct kvm_ioapic_state));
+		r = kvm_set_ioapic(kvm, &chip->chip.ioapic);
 		break;
 	default:
 		r = -EINVAL;
@@ -985,10 +981,8 @@ long kvm_arch_vm_ioctl(struct file *filp,
 			goto out;
 		if (irqchip_in_kernel(kvm)) {
 			__s32 status;
-			mutex_lock(&kvm->irq_lock);
 			status = kvm_set_irq(kvm, KVM_USERSPACE_IRQ_SOURCE_ID,
 				    irq_event.irq, irq_event.level);
-			mutex_unlock(&kvm->irq_lock);
 			if (ioctl == KVM_IRQ_LINE_STATUS) {
 				irq_event.status = status;
 				if (copy_to_user(argp, &irq_event,
@@ -1380,12 +1374,14 @@ static void free_kvm(struct kvm *kvm)
 
 static void kvm_release_vm_pages(struct kvm *kvm)
 {
+	struct kvm_memslots *slots;
 	struct kvm_memory_slot *memslot;
 	int i, j;
 	unsigned long base_gfn;
 
-	for (i = 0; i < kvm->nmemslots; i++) {
-		memslot = &kvm->memslots[i];
+	slots = rcu_dereference(kvm->memslots);
+	for (i = 0; i < slots->nmemslots; i++) {
+		memslot = &slots->memslots[i];
 		base_gfn = memslot->base_gfn;
 
 		for (j = 0; j < memslot->npages; j++) {
@@ -1408,6 +1404,7 @@ void kvm_arch_destroy_vm(struct kvm *kvm)
 	kfree(kvm->arch.vioapic);
 	kvm_release_vm_pages(kvm);
 	kvm_free_physmem(kvm);
+	cleanup_srcu_struct(&kvm->srcu);
 	free_kvm(kvm);
 }
 
@@ -1579,15 +1576,15 @@ out:
 	return r;
 }
 
-int kvm_arch_set_memory_region(struct kvm *kvm,
-		struct kvm_userspace_memory_region *mem,
+int kvm_arch_prepare_memory_region(struct kvm *kvm,
+		struct kvm_memory_slot *memslot,
 		struct kvm_memory_slot old,
+		struct kvm_userspace_memory_region *mem,
 		int user_alloc)
 {
 	unsigned long i;
 	unsigned long pfn;
-	int npages = mem->memory_size >> PAGE_SHIFT;
-	struct kvm_memory_slot *memslot = &kvm->memslots[mem->slot];
+	int npages = memslot->npages;
 	unsigned long base_gfn = memslot->base_gfn;
 
 	if (base_gfn + npages > (KVM_MAX_MEM_SIZE >> PAGE_SHIFT))
@@ -1609,6 +1606,14 @@ int kvm_arch_set_memory_region(struct kvm *kvm,
 	}
 
 	return 0;
+}
+
+void kvm_arch_commit_memory_region(struct kvm *kvm,
+		struct kvm_userspace_memory_region *mem,
+		struct kvm_memory_slot old,
+		int user_alloc)
+{
+	return;
 }
 
 void kvm_arch_flush_shadow(struct kvm *kvm)
@@ -1797,7 +1802,8 @@ static int kvm_ia64_sync_dirty_log(struct kvm *kvm,
 {
 	struct kvm_memory_slot *memslot;
 	int r, i;
-	long n, base;
+	long base;
+	unsigned long n;
 	unsigned long *dirty_bitmap = (unsigned long *)(kvm->arch.vm_base +
 			offsetof(struct kvm_vm_data, kvm_mem_dirty_log));
 
@@ -1805,12 +1811,12 @@ static int kvm_ia64_sync_dirty_log(struct kvm *kvm,
 	if (log->slot >= KVM_MEMORY_SLOTS)
 		goto out;
 
-	memslot = &kvm->memslots[log->slot];
+	memslot = &kvm->memslots->memslots[log->slot];
 	r = -ENOENT;
 	if (!memslot->dirty_bitmap)
 		goto out;
 
-	n = ALIGN(memslot->npages, BITS_PER_LONG) / 8;
+	n = kvm_dirty_bitmap_bytes(memslot);
 	base = memslot->base_gfn / BITS_PER_LONG;
 
 	for (i = 0; i < n/sizeof(long); ++i) {
@@ -1826,10 +1832,11 @@ int kvm_vm_ioctl_get_dirty_log(struct kvm *kvm,
 		struct kvm_dirty_log *log)
 {
 	int r;
-	int n;
+	unsigned long n;
 	struct kvm_memory_slot *memslot;
 	int is_dirty = 0;
 
+	mutex_lock(&kvm->slots_lock);
 	spin_lock(&kvm->arch.dirty_log_lock);
 
 	r = kvm_ia64_sync_dirty_log(kvm, log);
@@ -1843,12 +1850,13 @@ int kvm_vm_ioctl_get_dirty_log(struct kvm *kvm,
 	/* If nothing is dirty, don't bother messing with page tables. */
 	if (is_dirty) {
 		kvm_flush_remote_tlbs(kvm);
-		memslot = &kvm->memslots[log->slot];
-		n = ALIGN(memslot->npages, BITS_PER_LONG) / 8;
+		memslot = &kvm->memslots->memslots[log->slot];
+		n = kvm_dirty_bitmap_bytes(memslot);
 		memset(memslot->dirty_bitmap, 0, n);
 	}
 	r = 0;
 out:
+	mutex_unlock(&kvm->slots_lock);
 	spin_unlock(&kvm->arch.dirty_log_lock);
 	return r;
 }

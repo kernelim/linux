@@ -1,5 +1,5 @@
 /*
- * Copyright 2008 Cisco Systems, Inc.  All rights reserved.
+ * Copyright 2008-2010 Cisco Systems, Inc.  All rights reserved.
  * Copyright 2007 Nuova Systems, Inc.  All rights reserved.
  *
  * This program is free software; you may redistribute it and/or modify
@@ -57,6 +57,7 @@ struct vnic_cq {
 	struct vnic_dev_ring ring;
 	unsigned int to_clean;
 	unsigned int last_color;
+	unsigned int interrupt_offset;
 };
 
 static inline unsigned int vnic_cq_service(struct vnic_cq *cq,

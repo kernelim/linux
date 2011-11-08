@@ -162,6 +162,44 @@ void arch_crash_save_vmcoreinfo(void)
 #endif
 }
 
+#ifdef CONFIG_KEXEC_AUTO_RESERVE
+#define MBYTES(n) ((n)*1024*1024ULL)
+#define GBYTES(n) ((n)*1024*1024*1024ULL)
+/*
+       Memory size     Reserved memory
+       ===========     ===============
+       [4G, 12G)       256M
+       [12G, 128G)     512M
+       [128G, 256G)    768M
+       [256G, 378G)    1024M
+       [378G, 512G)    1536M
+       [512G, 768G)    2048M
+       [768G, )        3072M
+ */
+unsigned long long __init arch_default_crash_size(unsigned long long total_size)
+{
+	unsigned long long ret;
+
+	if (total_size >= GBYTES(4) && total_size < GBYTES(12))
+		ret = MBYTES(256);
+	else if (total_size >= GBYTES(12) && total_size < GBYTES(128))
+		ret = MBYTES(512);
+	else if (total_size >= GBYTES(128) && total_size < GBYTES(256))
+		ret = MBYTES(768);
+	else if (total_size >= GBYTES(256) && total_size < GBYTES(378))
+		ret = MBYTES(1024);
+	else if (total_size >= GBYTES(318) && total_size < GBYTES(512))
+		ret = MBYTES(1536);
+	else if (total_size >= GBYTES(512) && total_size < GBYTES(768))
+		ret = MBYTES(2048);
+	else
+		ret = MBYTES(3072);
+	return ret;
+}
+#undef GBYTES
+#undef MBYTES
+#endif
+
 unsigned long paddr_vmcoreinfo_note(void)
 {
 	return ia64_tpa((unsigned long)(char *)&vmcoreinfo_note);

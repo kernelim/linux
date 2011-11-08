@@ -2,6 +2,7 @@
 #include <linux/string.h>
 #include <linux/init.h>
 #include <linux/module.h>
+#include <linux/ctype.h>
 #include <linux/dmi.h>
 #include <linux/efi.h>
 #include <linux/bootmem.h>
@@ -193,6 +194,59 @@ static void __init dmi_save_type(const struct dmi_header *dm, int slot, int inde
 	dmi_ident[slot] = s;
 }
 
+static void __init dmi_save_smbios_ver(int slot)
+{
+	u8 *buf = NULL;
+	int fp, smbios_present = 0;
+	unsigned long smbios_addr;
+	char *s = NULL;
+
+	if (dmi_ident[slot])
+		return;
+
+	/*
+	 * The SMBIOS version is not in the DMI region.  We're just
+	 * abusing the DMI code for now.
+	 */
+
+	if (efi_enabled) {
+		if (efi.smbios == EFI_INVALID_TABLE_ADDR)
+			goto error;
+		smbios_addr = efi.smbios;
+	} else {
+		/* "Legacy" SMBIOS is mapped @ 0xF0000 */
+		smbios_addr = 0xF0000;
+	}
+	buf = early_ioremap(smbios_addr, 0x10000);
+	if (!buf)
+		goto error;
+
+	/* Find the entry point */
+	for (fp = 0; fp <= 0xFFF0; fp += 0x10)
+		if (!memcmp(buf + fp, "_SM_", 4)) {
+			printk("SMBIOS version %u.%u @ 0x%lX\n",
+			       buf[fp + 0x6], buf[fp + 0x7], smbios_addr + fp);
+			smbios_present = 1;
+			break;
+		}
+
+	/* Continue DMI abuse ... */
+	s = dmi_alloc(8);
+	if (!s) {
+		early_iounmap(buf, 0x10000);
+		return;
+	}
+	sprintf(s, "%u.%u", buf[fp + 0x6], buf[fp + 0x7]);
+	dmi_ident[slot] = s;
+
+	early_iounmap(buf, 0x10000);
+error:
+	if (!smbios_present)
+		printk("SMBIOS not found.");
+
+	return;
+}
+
 static void __init dmi_save_one_device(int type, const char *name)
 {
 	struct dmi_device *dev;
@@ -281,6 +335,29 @@ static void __init dmi_save_ipmi_device(const struct dmi_header *dm)
 	list_add_tail(&dev->list, &dmi_devices);
 }
 
+static void __init dmi_save_dev_onboard(int instance, int segment, int bus,
+					int devfn, const char *name)
+{
+	struct dmi_dev_onboard *onboard_dev;
+
+	onboard_dev = dmi_alloc(sizeof(*onboard_dev) + strlen(name) + 1);
+	if (!onboard_dev) {
+		printk(KERN_ERR "dmi_save_dev_onboard: out of memory.\n");
+		return;
+	}
+	onboard_dev->instance = instance;
+	onboard_dev->segment = segment;
+	onboard_dev->bus = bus;
+	onboard_dev->devfn = devfn;
+
+	strcpy((char *)&onboard_dev[1], name);
+	onboard_dev->dev.type = DMI_DEV_TYPE_DEV_ONBOARD;
+	onboard_dev->dev.name = (char *)&onboard_dev[1];
+	onboard_dev->dev.device_data = onboard_dev;
+
+	list_add(&onboard_dev->dev.list, &dmi_devices);
+}
+
 static void __init dmi_save_extended_devices(const struct dmi_header *dm)
 {
 	const u8 *d = (u8*) dm + 5;
@@ -289,6 +366,8 @@ static void __init dmi_save_extended_devices(const struct dmi_header *dm)
 	if ((*d & 0x80) == 0)
 		return;
 
+	dmi_save_dev_onboard(*(d+1), *(u16 *)(d+2), *(d+4), *(d+5),
+			     dmi_string_nosave(dm, *(d-1)));
 	dmi_save_one_device(*d & 0x7f, dmi_string_nosave(dm, *(d - 1)));
 }
 
@@ -303,6 +382,11 @@ static void __init dmi_decode(const struct dmi_header *dm, void *dummy)
 	case 0:		/* BIOS Information */
 		dmi_save_ident(dm, DMI_BIOS_VENDOR, 4);
 		dmi_save_ident(dm, DMI_BIOS_VERSION, 5);
+		/*
+		 * This is grotesque hack for RHEL6 to make biosdevname
+		 * happy.  My apologies to anyone who has to see this.
+		 */
+		dmi_save_smbios_ver(DMI_SMBIOS_VERSION);
 		dmi_save_ident(dm, DMI_BIOS_DATE, 8);
 		break;
 	case 1:		/* System Information */
@@ -340,6 +424,40 @@ static void __init dmi_decode(const struct dmi_header *dm, void *dummy)
 	}
 }
 
+static void __init print_filtered(const char *info)
+{
+	const char *p;
+
+	if (!info)
+		return;
+
+	for (p = info; *p; p++)
+		if (isprint(*p))
+			printk(KERN_CONT "%c", *p);
+		else
+			printk(KERN_CONT "\\x%02x", *p & 0xff);
+}
+
+static void __init dmi_dump_ids(void)
+{
+	const char *board;	/* Board Name is optional */
+
+	printk(KERN_DEBUG "DMI: ");
+	print_filtered(dmi_get_system_info(DMI_SYS_VENDOR));
+	printk(KERN_CONT " ");
+	print_filtered(dmi_get_system_info(DMI_PRODUCT_NAME));
+	board = dmi_get_system_info(DMI_BOARD_NAME);
+	if (board) {
+		printk(KERN_CONT "/");
+		print_filtered(board);
+	}
+	printk(KERN_CONT ", BIOS ");
+	print_filtered(dmi_get_system_info(DMI_BIOS_VERSION));
+	printk(KERN_CONT " ");
+	print_filtered(dmi_get_system_info(DMI_BIOS_DATE));
+	printk(KERN_CONT "\n");
+}
+
 static int __init dmi_present(const char __iomem *p)
 {
 	u8 buf[15];
@@ -360,8 +478,10 @@ static int __init dmi_present(const char __iomem *p)
 			       buf[14] >> 4, buf[14] & 0xF);
 		else
 			printk(KERN_INFO "DMI present.\n");
-		if (dmi_walk_early(dmi_decode) == 0)
+		if (dmi_walk_early(dmi_decode) == 0) {
+			dmi_dump_ids();
 			return 0;
+		}
 	}
 	return 1;
 }
@@ -429,7 +549,7 @@ static bool dmi_matches(const struct dmi_system_id *dmi)
 	for (i = 0; i < ARRAY_SIZE(dmi->matches); i++) {
 		int s = dmi->matches[i].slot;
 		if (s == DMI_NONE)
-			continue;
+			break;
 		if (dmi_ident[s]
 		    && strstr(dmi_ident[s], dmi->matches[i].substr))
 			continue;
@@ -437,6 +557,15 @@ static bool dmi_matches(const struct dmi_system_id *dmi)
 		return false;
 	}
 	return true;
+}
+
+/**
+ *	dmi_is_end_of_table - check for end-of-table marker
+ *	@dmi: pointer to the dmi_system_id structure to check
+ */
+static bool dmi_is_end_of_table(const struct dmi_system_id *dmi)
+{
+	return dmi->matches[0].slot == DMI_NONE;
 }
 
 /**
@@ -457,7 +586,7 @@ int dmi_check_system(const struct dmi_system_id *list)
 	int count = 0;
 	const struct dmi_system_id *d;
 
-	for (d = list; d->ident; d++)
+	for (d = list; !dmi_is_end_of_table(d); d++)
 		if (dmi_matches(d)) {
 			count++;
 			if (d->callback && d->callback(d))
@@ -484,7 +613,7 @@ const struct dmi_system_id *dmi_first_match(const struct dmi_system_id *list)
 {
 	const struct dmi_system_id *d;
 
-	for (d = list; d->ident; d++)
+	for (d = list; !dmi_is_end_of_table(d); d++)
 		if (dmi_matches(d))
 			return d;
 

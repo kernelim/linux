@@ -36,17 +36,27 @@
 #ifndef _DRM_H_
 #define _DRM_H_
 
-#include <linux/types.h>
-#include <asm/ioctl.h>		/* For _IO* macros */
-#define DRM_IOCTL_NR(n)		_IOC_NR(n)
-#define DRM_IOC_VOID		_IOC_NONE
-#define DRM_IOC_READ		_IOC_READ
-#define DRM_IOC_WRITE		_IOC_WRITE
-#define DRM_IOC_READWRITE	_IOC_READ|_IOC_WRITE
-#define DRM_IOC(dir, group, nr, size) _IOC(dir, group, nr, size)
+#if defined(__linux__)
 
-#define DRM_MAJOR       226
-#define DRM_MAX_MINOR   15
+#include <linux/types.h>
+#include <asm/ioctl.h>
+typedef unsigned int drm_handle_t;
+
+#else /* One of the BSDs */
+
+#include <sys/ioccom.h>
+#include <sys/types.h>
+typedef int8_t   __s8;
+typedef uint8_t  __u8;
+typedef int16_t  __s16;
+typedef uint16_t __u16;
+typedef int32_t  __s32;
+typedef uint32_t __u32;
+typedef int64_t  __s64;
+typedef uint64_t __u64;
+typedef unsigned long drm_handle_t;
+
+#endif
 
 #define DRM_NAME	"drm"	  /**< Name in kernel, /dev, and /proc */
 #define DRM_MIN_ORDER	5	  /**< At least 2^5 bytes = 32 bytes */
@@ -59,7 +69,6 @@
 #define _DRM_LOCK_IS_CONT(lock)	   ((lock) & _DRM_LOCK_CONT)
 #define _DRM_LOCKING_CONTEXT(lock) ((lock) & ~(_DRM_LOCK_HELD|_DRM_LOCK_CONT))
 
-typedef unsigned int drm_handle_t;
 typedef unsigned int drm_context_t;
 typedef unsigned int drm_drawable_t;
 typedef unsigned int drm_magic_t;
@@ -454,15 +463,19 @@ struct drm_irq_busid {
 enum drm_vblank_seq_type {
 	_DRM_VBLANK_ABSOLUTE = 0x0,	/**< Wait for specific vblank sequence number */
 	_DRM_VBLANK_RELATIVE = 0x1,	/**< Wait for given number of vblanks */
+	/* bits 1-6 are reserved for high crtcs */
+	_DRM_VBLANK_HIGH_CRTC_MASK = 0x0000003e,
+	_DRM_VBLANK_EVENT = 0x4000000,   /**< Send event instead of blocking */
 	_DRM_VBLANK_FLIP = 0x8000000,   /**< Scheduled buffer swap should flip */
 	_DRM_VBLANK_NEXTONMISS = 0x10000000,	/**< If missed, wait for next vblank */
 	_DRM_VBLANK_SECONDARY = 0x20000000,	/**< Secondary display controller */
 	_DRM_VBLANK_SIGNAL = 0x40000000	/**< Send signal instead of blocking, unsupported */
 };
+#define _DRM_VBLANK_HIGH_CRTC_SHIFT 1
 
 #define _DRM_VBLANK_TYPES_MASK (_DRM_VBLANK_ABSOLUTE | _DRM_VBLANK_RELATIVE)
-#define _DRM_VBLANK_FLAGS_MASK (_DRM_VBLANK_SIGNAL | _DRM_VBLANK_SECONDARY | \
-				_DRM_VBLANK_NEXTONMISS)
+#define _DRM_VBLANK_FLAGS_MASK (_DRM_VBLANK_EVENT | _DRM_VBLANK_SIGNAL | \
+				_DRM_VBLANK_SECONDARY | _DRM_VBLANK_NEXTONMISS)
 
 struct drm_wait_vblank_request {
 	enum drm_vblank_seq_type type;
@@ -598,6 +611,12 @@ struct drm_gem_open {
 	__u64 size;
 };
 
+/** DRM_IOCTL_GET_CAP ioctl argument type */
+struct drm_get_cap {
+	__u64 capability;
+	__u64 value;
+};
+
 #include "drm_mode.h"
 
 #define DRM_IOCTL_BASE			'd'
@@ -618,6 +637,7 @@ struct drm_gem_open {
 #define DRM_IOCTL_GEM_CLOSE		DRM_IOW (0x09, struct drm_gem_close)
 #define DRM_IOCTL_GEM_FLINK		DRM_IOWR(0x0a, struct drm_gem_flink)
 #define DRM_IOCTL_GEM_OPEN		DRM_IOWR(0x0b, struct drm_gem_open)
+#define DRM_IOCTL_GET_CAP		DRM_IOWR(0x0c, struct drm_get_cap)
 
 #define DRM_IOCTL_SET_UNIQUE		DRM_IOW( 0x10, struct drm_unique)
 #define DRM_IOCTL_AUTH_MAGIC		DRM_IOW( 0x11, struct drm_auth)
@@ -653,6 +673,8 @@ struct drm_gem_open {
 #define DRM_IOCTL_UNLOCK		DRM_IOW( 0x2b, struct drm_lock)
 #define DRM_IOCTL_FINISH		DRM_IOW( 0x2c, struct drm_lock)
 
+#define DRM_IOCTL_GEM_PRIME_OPEN        DRM_IOWR(0x2e, struct drm_gem_open)
+
 #define DRM_IOCTL_AGP_ACQUIRE		DRM_IO(  0x30)
 #define DRM_IOCTL_AGP_RELEASE		DRM_IO(  0x31)
 #define DRM_IOCTL_AGP_ENABLE		DRM_IOW( 0x32, struct drm_agp_mode)
@@ -686,6 +708,12 @@ struct drm_gem_open {
 #define DRM_IOCTL_MODE_GETFB		DRM_IOWR(0xAD, struct drm_mode_fb_cmd)
 #define DRM_IOCTL_MODE_ADDFB		DRM_IOWR(0xAE, struct drm_mode_fb_cmd)
 #define DRM_IOCTL_MODE_RMFB		DRM_IOWR(0xAF, unsigned int)
+#define DRM_IOCTL_MODE_PAGE_FLIP	DRM_IOWR(0xB0, struct drm_mode_crtc_page_flip)
+#define DRM_IOCTL_MODE_DIRTYFB		DRM_IOWR(0xB1, struct drm_mode_fb_dirty_cmd)
+
+#define DRM_IOCTL_MODE_CREATE_DUMB DRM_IOWR(0xB2, struct drm_mode_create_dumb)
+#define DRM_IOCTL_MODE_MAP_DUMB    DRM_IOWR(0xB3, struct drm_mode_map_dumb)
+#define DRM_IOCTL_MODE_DESTROY_DUMB    DRM_IOWR(0xB4, struct drm_mode_destroy_dumb)
 
 /**
  * Device specific ioctls should only be in their respective headers
@@ -697,6 +725,38 @@ struct drm_gem_open {
  */
 #define DRM_COMMAND_BASE                0x40
 #define DRM_COMMAND_END			0xA0
+
+/**
+ * Header for events written back to userspace on the drm fd.  The
+ * type defines the type of event, the length specifies the total
+ * length of the event (including the header), and user_data is
+ * typically a 64 bit value passed with the ioctl that triggered the
+ * event.  A read on the drm fd will always only return complete
+ * events, that is, if for example the read buffer is 100 bytes, and
+ * there are two 64 byte events pending, only one will be returned.
+ *
+ * Event types 0 - 0x7fffffff are generic drm events, 0x80000000 and
+ * up are chipset specific.
+ */
+struct drm_event {
+	__u32 type;
+	__u32 length;
+};
+
+#define DRM_EVENT_VBLANK 0x01
+#define DRM_EVENT_FLIP_COMPLETE 0x02
+
+struct drm_event_vblank {
+	struct drm_event base;
+	__u64 user_data;
+	__u32 tv_sec;
+	__u32 tv_usec;
+	__u32 sequence;
+	__u32 reserved;
+};
+
+#define DRM_CAP_DUMB_BUFFER 0x1
+#define DRM_CAP_VBLANK_HIGH_CRTC 0x2
 
 /* typedef area */
 #ifndef __KERNEL__

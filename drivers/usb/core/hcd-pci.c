@@ -20,6 +20,7 @@
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/usb.h>
+#include <linux/usb/hcd.h>
 
 #include <asm/io.h>
 #include <asm/irq.h>
@@ -32,7 +33,6 @@
 #endif
 
 #include "usb.h"
-#include "hcd.h"
 
 
 /* PCI-based HCs are common, but plenty of non-PCI HCs are used too */
@@ -173,6 +173,14 @@ void usb_hcd_pci_remove(struct pci_dev *dev)
 	if (!hcd)
 		return;
 
+	/* Fake an interrupt request in order to give the driver a chance
+	 * to test whether the controller hardware has been removed (e.g.,
+	 * cardbus physical eject).
+	 */
+	local_irq_disable();
+	usb_hcd_irq(0, hcd);
+	local_irq_enable();
+
 	usb_remove_hcd(hcd);
 	if (hcd->driver->flags & HCD_MEMORY) {
 		iounmap(hcd->regs);
@@ -209,10 +217,16 @@ static int check_root_hub_suspended(struct device *dev)
 	struct pci_dev		*pci_dev = to_pci_dev(dev);
 	struct usb_hcd		*hcd = pci_get_drvdata(pci_dev);
 
-	if (!(hcd->state == HC_STATE_SUSPENDED ||
-			hcd->state == HC_STATE_HALT)) {
+	if (HCD_RH_RUNNING(hcd)) {
 		dev_warn(dev, "Root hub is not suspended\n");
 		return -EBUSY;
+	}
+	if (hcd->shared_hcd) {
+		hcd = hcd->shared_hcd;
+		if (HCD_RH_RUNNING(hcd)) {
+			dev_warn(dev, "Secondary root hub is not suspended\n");
+			return -EBUSY;
+		}
 	}
 	return 0;
 }
@@ -236,14 +250,19 @@ static int hcd_pci_suspend(struct device *dev)
 	if (pci_dev->current_state != PCI_D0)
 		return retval;
 
-	if (hcd->driver->pci_suspend) {
+	if (hcd->driver->pci_suspend && !HCD_DEAD(hcd)) {
 		retval = hcd->driver->pci_suspend(hcd);
 		suspend_report_result(hcd->driver->pci_suspend, retval);
 		if (retval)
 			return retval;
 	}
 
-	synchronize_irq(pci_dev->irq);
+	/* If MSI-X is enabled, the driver will have synchronized all vectors
+	 * in pci_suspend(). If MSI or legacy PCI is enabled, that will be
+	 * synchronized here.
+	 */
+	if (!hcd->msix_enabled)
+		synchronize_irq(pci_dev->irq);
 
 	/* Downstream ports from this root hub should already be quiesced, so
 	 * there will be no DMA activity.  Now we can shut down the upstream
@@ -266,10 +285,11 @@ static int hcd_pci_suspend_noirq(struct device *dev)
 
 	pci_save_state(pci_dev);
 
-	/* If the root hub is HALTed rather than SUSPENDed,
-	 * disallow remote wakeup.
+	/* If the root hub is dead rather than suspended, disallow remote
+	 * wakeup.  usb_hc_died() should ensure that both hosts are marked as
+	 * dying, so we only need to check the primary roothub.
 	 */
-	if (hcd->state == HC_STATE_HALT)
+	if (HCD_DEAD(hcd))
 		device_set_wakeup_enable(dev, 0);
 	dev_dbg(dev, "wakeup: %d\n", device_may_wakeup(dev));
 
@@ -328,7 +348,9 @@ static int resume_common(struct device *dev, bool hibernated)
 	struct usb_hcd		*hcd = pci_get_drvdata(pci_dev);
 	int			retval;
 
-	if (hcd->state != HC_STATE_SUSPENDED) {
+	if (HCD_RH_RUNNING(hcd) ||
+			(hcd->shared_hcd &&
+			 HCD_RH_RUNNING(hcd->shared_hcd))) {
 		dev_dbg(dev, "can't resume, not suspended!\n");
 		return 0;
 	}
@@ -342,11 +364,15 @@ static int resume_common(struct device *dev, bool hibernated)
 	pci_set_master(pci_dev);
 
 	clear_bit(HCD_FLAG_SAW_IRQ, &hcd->flags);
+	if (hcd->shared_hcd)
+		clear_bit(HCD_FLAG_SAW_IRQ, &hcd->shared_hcd->flags);
 
-	if (hcd->driver->pci_resume) {
+	if (hcd->driver->pci_resume && !HCD_DEAD(hcd)) {
 		retval = hcd->driver->pci_resume(hcd, hibernated);
 		if (retval) {
 			dev_err(dev, "PCI post-resume error %d!\n", retval);
+			if (hcd->shared_hcd)
+				usb_hc_died(hcd->shared_hcd);
 			usb_hc_died(hcd);
 		}
 	}

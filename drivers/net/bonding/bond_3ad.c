@@ -287,23 +287,23 @@ static inline int __check_agg_selection_timer(struct port *port)
 }
 
 /**
- * __get_rx_machine_lock - lock the port's RX machine
+ * __get_state_machine_lock - lock the port's state machines
  * @port: the port we're looking at
  *
  */
-static inline void __get_rx_machine_lock(struct port *port)
+static inline void __get_state_machine_lock(struct port *port)
 {
-	spin_lock_bh(&(SLAVE_AD_INFO(port->slave).rx_machine_lock));
+	spin_lock_bh(&(SLAVE_AD_INFO(port->slave).state_machine_lock));
 }
 
 /**
- * __release_rx_machine_lock - unlock the port's RX machine
+ * __release_state_machine_lock - unlock the port's state machines
  * @port: the port we're looking at
  *
  */
-static inline void __release_rx_machine_lock(struct port *port)
+static inline void __release_state_machine_lock(struct port *port)
 {
-	spin_unlock_bh(&(SLAVE_AD_INFO(port->slave).rx_machine_lock));
+	spin_unlock_bh(&(SLAVE_AD_INFO(port->slave).state_machine_lock));
 }
 
 /**
@@ -391,14 +391,14 @@ static u8 __get_duplex(struct port *port)
 }
 
 /**
- * __initialize_port_locks - initialize a port's RX machine spinlock
+ * __initialize_port_locks - initialize a port's STATE machine spinlock
  * @port: the port we're looking at
  *
  */
 static inline void __initialize_port_locks(struct port *port)
 {
 	// make sure it isn't called twice
-	spin_lock_init(&(SLAVE_AD_INFO(port->slave).rx_machine_lock));
+	spin_lock_init(&(SLAVE_AD_INFO(port->slave).state_machine_lock));
 }
 
 //conversions
@@ -1024,9 +1024,6 @@ static void ad_rx_machine(struct lacpdu *lacpdu, struct port *port)
 {
 	rx_states_t last_state;
 
-	// Lock to prevent 2 instances of this function to run simultaneously(rx interrupt and periodic machine callback)
-	__get_rx_machine_lock(port);
-
 	// keep current State Machine state to compare later if it was changed
 	last_state = port->sm_rx_state;
 
@@ -1128,7 +1125,6 @@ static void ad_rx_machine(struct lacpdu *lacpdu, struct port *port)
 				       "adapter (%s). Check the configuration to verify that all "
 				       "Adapters are connected to 802.3ad compliant switch ports\n",
 				       port->slave->dev->master->name, port->slave->dev->name);
-				__release_rx_machine_lock(port);
 				return;
 			}
 			__update_selected(lacpdu, port);
@@ -1148,7 +1144,6 @@ static void ad_rx_machine(struct lacpdu *lacpdu, struct port *port)
 			break;
 		}
 	}
-	__release_rx_machine_lock(port);
 }
 
 /**
@@ -1849,11 +1844,10 @@ static u16 aggregator_identifier;
  * bond_3ad_initialize - initialize a bond's 802.3ad parameters and structures
  * @bond: bonding struct to work on
  * @tick_resolution: tick duration (millisecond resolution)
- * @lacp_fast: boolean. whether fast periodic should be used
  *
  * Can be called only after the mac address of the bond is set.
  */
-void bond_3ad_initialize(struct bonding *bond, u16 tick_resolution, int lacp_fast)
+void bond_3ad_initialize(struct bonding *bond, u16 tick_resolution)
 {
 	// check that the bond is not initialized yet
 	if (MAC_ADDRESS_COMPARE(&(BOND_AD_INFO(bond).system.sys_mac_addr),
@@ -1861,7 +1855,6 @@ void bond_3ad_initialize(struct bonding *bond, u16 tick_resolution, int lacp_fas
 
 		aggregator_identifier = 0;
 
-		BOND_AD_INFO(bond).lacp_fast = lacp_fast;
 		BOND_AD_INFO(bond).system.sys_priority = 0xFFFF;
 		BOND_AD_INFO(bond).system.sys_mac_addr = *((struct mac_addr *)bond->dev->dev_addr);
 
@@ -1900,7 +1893,7 @@ int bond_3ad_bind_slave(struct slave *slave)
 		// port initialization
 		port = &(SLAVE_AD_INFO(slave).port);
 
-		ad_initialize_port(port, BOND_AD_INFO(bond).lacp_fast);
+		ad_initialize_port(port, bond->params.lacp_fast);
 
 		port->slave = slave;
 		port->actor_port_number = SLAVE_AD_INFO(slave).id;
@@ -2133,6 +2126,12 @@ void bond_3ad_state_machine_handler(struct work_struct *work)
 			goto re_arm;
 		}
 
+		/* Lock around state machines to protect data accessed
+		 * by all (e.g., port->sm_vars).  ad_rx_machine may run
+		 * concurrently due to incoming LACPDU.
+		 */
+		__get_state_machine_lock(port);
+
 		ad_rx_machine(NULL, port);
 		ad_periodic_machine(port);
 		ad_port_selection_logic(port);
@@ -2143,10 +2142,13 @@ void bond_3ad_state_machine_handler(struct work_struct *work)
 		if (port->sm_vars & AD_PORT_BEGIN) {
 			port->sm_vars &= ~AD_PORT_BEGIN;
 		}
+
+		__release_state_machine_lock(port);
 	}
 
 re_arm:
-	queue_delayed_work(bond->wq, &bond->ad_work, ad_delta_in_ticks);
+	if (!bond->kill_timers)
+		queue_delayed_work(bond->wq, &bond->ad_work, ad_delta_in_ticks);
 out:
 	read_unlock(&bond->lock);
 }
@@ -2179,7 +2181,10 @@ static void bond_3ad_rx_indication(struct lacpdu *lacpdu, struct slave *slave, u
 		switch (lacpdu->subtype) {
 		case AD_TYPE_LACPDU:
 			pr_debug("Received LACPDU on port %d\n", port->actor_port_number);
+			/* Protect against concurrent state machines */
+			__get_state_machine_lock(port);
 			ad_rx_machine(lacpdu, port);
+			__release_state_machine_lock(port);
 			break;
 
 		case AD_TYPE_MARKER:
@@ -2451,6 +2456,13 @@ int bond_3ad_lacpdu_recv(struct sk_buff *skb, struct net_device *dev, struct pac
 	if (!(dev->flags & IFF_MASTER))
 		goto out;
 
+	skb = skb_share_check(skb, GFP_ATOMIC);
+	if (!skb)
+		goto out;
+
+	if (!pskb_may_pull(skb, sizeof(struct lacpdu)))
+		goto out;
+
 	read_lock(&bond->lock);
 	slave = bond_get_slave_by_dev((struct bonding *)netdev_priv(dev),
 					orig_dev);
@@ -2469,3 +2481,33 @@ out:
 	return ret;
 }
 
+/*
+ * When modify lacp_rate parameter via sysfs,
+ * update actor_oper_port_state of each port.
+ *
+ * Hold slave->state_machine_lock,
+ * so we can modify port->actor_oper_port_state,
+ * no matter bond is up or down.
+ */
+void bond_3ad_update_lacp_rate(struct bonding *bond)
+{
+	int i;
+	struct slave *slave;
+	struct port *port = NULL;
+	int lacp_fast;
+
+	read_lock(&bond->lock);
+	lacp_fast = bond->params.lacp_fast;
+
+	bond_for_each_slave(bond, slave, i) {
+		port = &(SLAVE_AD_INFO(slave).port);
+		__get_state_machine_lock(port);
+		if (lacp_fast)
+			port->actor_oper_port_state |= AD_STATE_LACP_TIMEOUT;
+		else
+			port->actor_oper_port_state &= ~AD_STATE_LACP_TIMEOUT;
+		__release_state_machine_lock(port);
+	}
+
+	read_unlock(&bond->lock);
+}

@@ -1,3 +1,136 @@
+Release Date    : Thu. Aug 4, 2011 17:00:00 PST 2010 -
+	 	   (emaild-id:megaraidlinux@lsi.com)
+				Adam Radford
+Current Version : 00.00.05.40-rh1
+Old Version     : 00.00.05.38-rh1
+    1. Fix FastPath I/O to work with degraded RAID 1.
+    2. Add .change_queue_depth support.
+-------------------------------------------------------------------------------
+Release Date    : Wed. May 11, 2011 17:00:00 PST 2010 -
+	 	   (emaild-id:megaraidlinux@lsi.com)
+				Adam Radford
+Current Version : 00.00.05.38-rh1
+Old Version     : 00.00.05.34-rh1
+    1. Remove MSI-X black list, use MFI_REG_STATE.ready.msiEnable.
+    2. Remove un-used function megasas_return_cmd_for_smid().
+    3. Check MFI_REG_STATE.fault.resetAdapter in megasas_reset_fusion().
+    4. Disable interrupts/free_irq() in megasas_shutdown().
+    5. Fix bug where AENs could be lost in probe() and resume().
+    6. Convert 6,10,12 byte CDB's to 16 byte CDB for large LBA's for FastPath
+       IO.
+    7. Add 1078 OCR support.
+-------------------------------------------------------------------------------
+Release Date    : Thu. Feb 24, 2011 17:00:00 PST 2010 -
+			(emaild-id:megaraidlinux@lsi.com)
+			Adam Radford
+Current Version : 00.00.05.34-rh1
+Old Version     : 00.00.05.29-rh1
+    1. Fix some failure gotos from megasas_probe_one(), etc.
+    2. Add missing check_and_restore_queue_depth() call in
+       complete_cmd_fusion().
+    3. Enable MSI-X before calling megasas_init_fw().
+    4. Call tasklet_schedule() even if outbound_intr_status == 0 for MFI based
+       boards in MSI-X mode.
+    5. Fix megasas_probe_one() to clear PCI_MSIX_FLAGS_ENABLE in msi control
+       register in kdump kernel.
+    6. Fix megasas_get_cmd() to only print "Command pool empty" if
+       megasas_dbg_lvl is set.
+    7. Fix megasas_build_dcdb_fusion() to not filter by TYPE_DISK.
+    8. Fix megasas_build_dcdb_fusion() to use io_request->LUN[1] field.
+    9. Add MR_EVT_CFG_CLEARED to megasas_aen_polling().
+    10. Fix tasklet_init() in megasas_init_fw() to use instancet->tasklet.
+    11. Fix fault state handling in megasas_transition_to_ready().
+    12. Fix max_sectors setting for IEEE SGL's.
+    13. Fix iMR OCR support to work correctly.
+-------------------------------------------------------------------------------
+
+1 Release Date    : Thur.  Feb. 18, 2010 09:12:45 PST 2009 -
+                        (emaild-id:megaraidlinux@lsi.com)
+                        Bo Yang
+
+2 Current Version : 00.00.04.28-RH1
+3 Older Version   : 00.00.04.17
+
+1.      Add the CTIO support to the driver.
+
+2.      Add the ontime controller reset to the driver.
+
+3.      megaraid application will look at the device support flag to decide if application will
+        do the ontime device add/delete.
+
+4.      Fixed some issiues: OS hang during MSM create device.
+
+1 Release Date    : Mon.  Aug 31, 2009 10:12:45 PST 2009 -
+			(emaild-id:megaraidlinux@lsi.com)
+			Bo Yang
+
+2 Current Version : 00.00.04.17
+3 Older Version   : 00.00.04.10
+
+1.	Add the online controller reset support to the driver.
+
+2.	Add the support for logic drives delete and add, driver will automatic
+	update the system.
+
+3.	Add the fix for system PDs support.  Driver will automatically update the system devices for system pds add/delete.
+
+4.	Add the pad_0 in mfi frame structure to 0 to fix the
+	context value larger than 32bit value issue.
+
+1 Release Date    : Tues.  June 02, 2009 10:12:45 PST 2009 -
+			(emaild-id:megaraidlinux@lsi.com)
+			Bo Yang
+
+2 Current Version : 00.00.04.10
+3 Older Version   : 00.00.04.08
+
+1.	Add the 3 mins timeout during the controller initialize.
+2. 	Add the fix for 64bit sense date errors.
+
+1 Release Date    : Tues. May 05, 2009 10:12:45 PST 2009 -
+			(emaild-id:megaraidlinux@lsi.com)
+			Bo Yang
+
+2 Current Version : 00.00.04.08
+3 Older Version   : 00.00.04.06
+
+1.	Add the fix of pending in FW after deleted the logic drives.
+2.	Add the fix of deallocating memory after get pdlist.
+
+1 Release Date    : Tues. March 26, 2009 10:12:45 PST 2009 -
+			(emaild-id:megaraidlinux@lsi.com)
+			Bo Yang
+
+2 Current Version : 00.00.04.06
+3 Older Version   : 00.00.04.04
+
+1.	Add the fix of the driver cmd empty fix of the driver cmd empty.
+2.	Add the fix of the driver MSM AEN CMD cause the system slow.
+
+1 Release Date    : Tues. March 03, 2009 10:12:45 PST 2009 -
+			(emaild-id:megaraidlinux@lsi.com)
+			Bo Yang
+
+2 Current Version : 00.00.04.04
+3 Older Version   : 00.00.04.01
+
+1.	Add the Tape drive fix to the driver: If the command is for the tape device, set the
+	pthru timeout to the os layer timeout value.
+
+2.	Add Poll_wait mechanism to Gen-2 Linux driv.
+		In the aen handler, driver needs to wakeup poll handler similar to the way it raises SIGIO.
+		Driver needs to reregister for AEN with the FW when it receives AEN. This will ensure AEN
+		continuity and avoid depending upon storelib to continue events.
+
+3.	Add new controller 0x73(new SAS2)  support to the driver.
+
+4.	Add memory support required by 0x73 controller.
+
+5.	Report the unconfigured PD (system PD) to OS.
+
+6.	Add the IEEE SGL support to the driver
+
+7.	Reasign the Application cmds to 0x73 controller
 
 1 Release Date    : Thur.July. 24 11:41:51 PST 2008 -
                        (emaild-id:megaraidlinux@lsi.com)

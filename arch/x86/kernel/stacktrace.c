@@ -53,17 +53,19 @@ save_stack_address_nosched(void *data, unsigned long addr, int reliable)
 }
 
 static const struct stacktrace_ops save_stack_ops = {
-	.warning = save_stack_warning,
-	.warning_symbol = save_stack_warning_symbol,
-	.stack = save_stack_stack,
-	.address = save_stack_address,
+	.warning	= save_stack_warning,
+	.warning_symbol	= save_stack_warning_symbol,
+	.stack		= save_stack_stack,
+	.address	= save_stack_address,
+	.walk_stack	= print_context_stack,
 };
 
 static const struct stacktrace_ops save_stack_ops_nosched = {
-	.warning = save_stack_warning,
-	.warning_symbol = save_stack_warning_symbol,
-	.stack = save_stack_stack,
-	.address = save_stack_address_nosched,
+	.warning	= save_stack_warning,
+	.warning_symbol	= save_stack_warning_symbol,
+	.stack		= save_stack_stack,
+	.address	= save_stack_address_nosched,
+	.walk_stack	= print_context_stack,
 };
 
 /*
@@ -71,22 +73,22 @@ static const struct stacktrace_ops save_stack_ops_nosched = {
  */
 void save_stack_trace(struct stack_trace *trace)
 {
-	dump_trace(current, NULL, NULL, 0, &save_stack_ops, trace);
+	dump_trace(current, NULL, NULL, &save_stack_ops, trace);
 	if (trace->nr_entries < trace->max_entries)
 		trace->entries[trace->nr_entries++] = ULONG_MAX;
 }
 EXPORT_SYMBOL_GPL(save_stack_trace);
 
-void save_stack_trace_bp(struct stack_trace *trace, unsigned long bp)
+void save_stack_trace_regs(struct stack_trace *trace, struct pt_regs *regs)
 {
-	dump_trace(current, NULL, NULL, bp, &save_stack_ops, trace);
+	dump_trace(current, regs, NULL, &save_stack_ops, trace);
 	if (trace->nr_entries < trace->max_entries)
 		trace->entries[trace->nr_entries++] = ULONG_MAX;
 }
 
 void save_stack_trace_tsk(struct task_struct *tsk, struct stack_trace *trace)
 {
-	dump_trace(tsk, NULL, NULL, 0, &save_stack_ops_nosched, trace);
+	dump_trace(tsk, NULL, NULL, &save_stack_ops_nosched, trace);
 	if (trace->nr_entries < trace->max_entries)
 		trace->entries[trace->nr_entries++] = ULONG_MAX;
 }
@@ -94,12 +96,13 @@ EXPORT_SYMBOL_GPL(save_stack_trace_tsk);
 
 /* Userspace stacktrace - based on kernel/trace/trace_sysprof.c */
 
-struct stack_frame {
+struct stack_frame_user {
 	const void __user	*next_fp;
 	unsigned long		ret_addr;
 };
 
-static int copy_stack_frame(const void __user *fp, struct stack_frame *frame)
+static int
+copy_stack_frame(const void __user *fp, struct stack_frame_user *frame)
 {
 	int ret;
 
@@ -124,7 +127,7 @@ static inline void __save_stack_trace_user(struct stack_trace *trace)
 		trace->entries[trace->nr_entries++] = regs->ip;
 
 	while (trace->nr_entries < trace->max_entries) {
-		struct stack_frame frame;
+		struct stack_frame_user frame;
 
 		frame.next_fp = NULL;
 		frame.ret_addr = 0;

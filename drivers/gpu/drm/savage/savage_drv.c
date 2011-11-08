@@ -42,23 +42,16 @@ static struct drm_driver driver = {
 	.lastclose = savage_driver_lastclose,
 	.unload = savage_driver_unload,
 	.reclaim_buffers = savage_reclaim_buffers,
-	.get_map_ofs = drm_core_get_map_ofs,
-	.get_reg_ofs = drm_core_get_reg_ofs,
 	.ioctls = savage_ioctls,
 	.dma_ioctl = savage_bci_buffers,
 	.fops = {
 		 .owner = THIS_MODULE,
 		 .open = drm_open,
 		 .release = drm_release,
-		 .ioctl = drm_ioctl,
+		 .unlocked_ioctl = drm_ioctl,
 		 .mmap = drm_mmap,
 		 .poll = drm_poll,
 		 .fasync = drm_fasync,
-	},
-
-	.pci_driver = {
-		 .name = DRIVER_NAME,
-		 .id_table = pciidlist,
 	},
 
 	.name = DRIVER_NAME,
@@ -69,15 +62,20 @@ static struct drm_driver driver = {
 	.patchlevel = DRIVER_PATCHLEVEL,
 };
 
+static struct pci_driver savage_pci_driver = {
+	.name = DRIVER_NAME,
+	.id_table = pciidlist,
+};
+
 static int __init savage_init(void)
 {
 	driver.num_ioctls = savage_max_ioctl;
-	return drm_init(&driver);
+	return drm_pci_init(&driver, &savage_pci_driver);
 }
 
 static void __exit savage_exit(void)
 {
-	drm_exit(&driver);
+	drm_pci_exit(&driver, &savage_pci_driver);
 }
 
 module_init(savage_init);

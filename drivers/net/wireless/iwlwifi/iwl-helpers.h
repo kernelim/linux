@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- * Copyright(c) 2003 - 2009 Intel Corporation. All rights reserved.
+ * Copyright(c) 2003 - 2010 Intel Corporation. All rights reserved.
  *
  * Portions of this file are derived from the ipw3945 project, as well
  * as portions of the ieee80211 subsystem header files.
@@ -31,6 +31,9 @@
 #define __iwl_helpers_h__
 
 #include <linux/ctype.h>
+#include <net/mac80211.h>
+
+#include "iwl-io.h"
 
 #define IWL_MASK(lo, hi) ((1 << (hi)) | ((1 << (hi)) - (1 << (lo))))
 
@@ -39,11 +42,6 @@ static inline struct ieee80211_conf *ieee80211_get_hw_conf(
 	struct ieee80211_hw *hw)
 {
 	return &hw->conf;
-}
-
-static inline int iwl_check_bits(unsigned long field, unsigned long mask)
-{
-	return ((field & mask) == mask) ? 1 : 0;
 }
 
 static inline unsigned long elapsed_jiffies(unsigned long start,
@@ -80,8 +78,8 @@ static inline void iwl_free_fw_desc(struct pci_dev *pci_dev,
 				    struct fw_desc *desc)
 {
 	if (desc->v_addr)
-		pci_free_consistent(pci_dev, desc->len,
-				    desc->v_addr, desc->p_addr);
+		dma_free_coherent(&pci_dev->dev, desc->len,
+				  desc->v_addr, desc->p_addr);
 	desc->v_addr = NULL;
 	desc->len = 0;
 }
@@ -89,7 +87,13 @@ static inline void iwl_free_fw_desc(struct pci_dev *pci_dev,
 static inline int iwl_alloc_fw_desc(struct pci_dev *pci_dev,
 				    struct fw_desc *desc)
 {
-	desc->v_addr = pci_alloc_consistent(pci_dev, desc->len, &desc->p_addr);
+	if (!desc->len) {
+		desc->v_addr = NULL;
+		return -EINVAL;
+	}
+
+	desc->v_addr = dma_alloc_coherent(&pci_dev->dev, desc->len,
+					  &desc->p_addr, GFP_KERNEL);
 	return (desc->v_addr != NULL) ? 0 : -ENOMEM;
 }
 
@@ -159,11 +163,39 @@ static inline void iwl_disable_interrupts(struct iwl_priv *priv)
 	IWL_DEBUG_ISR(priv, "Disabled interrupts\n");
 }
 
+static inline void iwl_enable_rfkill_int(struct iwl_priv *priv)
+{
+	IWL_DEBUG_ISR(priv, "Enabling rfkill interrupt\n");
+	iwl_write32(priv, CSR_INT_MASK, CSR_INT_BIT_RF_KILL);
+}
+
 static inline void iwl_enable_interrupts(struct iwl_priv *priv)
 {
 	IWL_DEBUG_ISR(priv, "Enabling interrupts\n");
 	set_bit(STATUS_INT_ENABLED, &priv->status);
 	iwl_write32(priv, CSR_INT_MASK, priv->inta_mask);
+}
+
+/**
+ * iwl_beacon_time_mask_low - mask of lower 32 bit of beacon time
+ * @priv -- pointer to iwl_priv data structure
+ * @tsf_bits -- number of bits need to shift for masking)
+ */
+static inline u32 iwl_beacon_time_mask_low(struct iwl_priv *priv,
+					   u16 tsf_bits)
+{
+	return (1 << tsf_bits) - 1;
+}
+
+/**
+ * iwl_beacon_time_mask_high - mask of higher 32 bit of beacon time
+ * @priv -- pointer to iwl_priv data structure
+ * @tsf_bits -- number of bits need to shift for masking)
+ */
+static inline u32 iwl_beacon_time_mask_high(struct iwl_priv *priv,
+					    u16 tsf_bits)
+{
+	return ((1 << (32 - tsf_bits)) - 1) << tsf_bits;
 }
 
 #endif				/* __iwl_helpers_h__ */

@@ -68,6 +68,7 @@ extern unsigned long mem_cgroup_isolate_pages(unsigned long nr_to_scan,
 extern void mem_cgroup_out_of_memory(struct mem_cgroup *mem, gfp_t gfp_mask);
 int task_in_mem_cgroup(struct task_struct *task, const struct mem_cgroup *mem);
 
+extern struct mem_cgroup *try_get_mem_cgroup_from_page(struct page *page);
 extern struct mem_cgroup *mem_cgroup_from_task(struct task_struct *p);
 
 static inline
@@ -80,10 +81,13 @@ int mm_match_cgroup(const struct mm_struct *mm, const struct mem_cgroup *cgroup)
 	return cgroup == mem;
 }
 
+extern struct cgroup_subsys_state *mem_cgroup_css(struct mem_cgroup *mem);
+
 extern int
-mem_cgroup_prepare_migration(struct page *page, struct mem_cgroup **ptr);
+mem_cgroup_prepare_migration(struct page *page,
+	struct page *newpage, struct mem_cgroup **ptr);
 extern void mem_cgroup_end_migration(struct mem_cgroup *mem,
-	struct page *oldpage, struct page *newpage);
+	struct page *oldpage, struct page *newpage, bool migration_ok);
 
 /*
  * For memory reclaim.
@@ -116,11 +120,15 @@ static inline bool mem_cgroup_disabled(void)
 	return false;
 }
 
-extern bool mem_cgroup_oom_called(struct task_struct *task);
-void mem_cgroup_update_mapped_file_stat(struct page *page, int val);
+void mem_cgroup_update_file_mapped(struct page *page, int val);
 unsigned long mem_cgroup_soft_limit_reclaim(struct zone *zone, int order,
 						gfp_t gfp_mask, int nid,
 						int zid);
+
+void mem_cgroup_split_hugepage_commit(struct page *page, struct page *head);
+
+u64 mem_cgroup_get_limit(struct mem_cgroup *mem);
+
 #else /* CONFIG_CGROUP_MEM_RES_CTLR */
 struct mem_cgroup;
 
@@ -189,6 +197,11 @@ mem_cgroup_move_lists(struct page *page, enum lru_list from, enum lru_list to)
 {
 }
 
+static inline struct mem_cgroup *try_get_mem_cgroup_from_page(struct page *page)
+{
+	return NULL;
+}
+
 static inline int mm_match_cgroup(struct mm_struct *mm, struct mem_cgroup *mem)
 {
 	return 1;
@@ -200,15 +213,20 @@ static inline int task_in_mem_cgroup(struct task_struct *task,
 	return 1;
 }
 
+static inline struct cgroup_subsys_state *mem_cgroup_css(struct mem_cgroup *mem)
+{
+	return NULL;
+}
+
 static inline int
-mem_cgroup_prepare_migration(struct page *page, struct mem_cgroup **ptr)
+mem_cgroup_prepare_migration(struct page *page, struct page *newpage,
+	struct mem_cgroup **ptr)
 {
 	return 0;
 }
 
 static inline void mem_cgroup_end_migration(struct mem_cgroup *mem,
-					struct page *oldpage,
-					struct page *newpage)
+		struct page *oldpage, struct page *newpage, bool migration_ok)
 {
 }
 
@@ -230,11 +248,6 @@ static inline void mem_cgroup_record_reclaim_priority(struct mem_cgroup *mem,
 static inline bool mem_cgroup_disabled(void)
 {
 	return true;
-}
-
-static inline bool mem_cgroup_oom_called(struct task_struct *task)
-{
-	return false;
 }
 
 static inline int
@@ -274,7 +287,7 @@ mem_cgroup_print_oom_info(struct mem_cgroup *memcg, struct task_struct *p)
 {
 }
 
-static inline void mem_cgroup_update_mapped_file_stat(struct page *page,
+static inline void mem_cgroup_update_file_mapped(struct page *page,
 							int val)
 {
 }
@@ -282,6 +295,16 @@ static inline void mem_cgroup_update_mapped_file_stat(struct page *page,
 static inline
 unsigned long mem_cgroup_soft_limit_reclaim(struct zone *zone, int order,
 					    gfp_t gfp_mask, int nid, int zid)
+{
+	return 0;
+}
+
+void mem_cgroup_split_hugepage_commit(struct page *page, struct page *head)
+{
+}
+
+static inline
+u64 mem_cgroup_get_limit(struct mem_cgroup *mem)
 {
 	return 0;
 }

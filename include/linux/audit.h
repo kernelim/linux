@@ -26,6 +26,7 @@
 
 #include <linux/types.h>
 #include <linux/elf-em.h>
+#include <linux/ptrace.h>
 
 /* The netlink messages for the audit system is divided into blocks:
  * 1000 - 1099 are for commanding the audit system
@@ -102,6 +103,9 @@
 #define AUDIT_EOE		1320	/* End of multi-record event */
 #define AUDIT_BPRM_FCAPS	1321	/* Information about fcaps increasing perms */
 #define AUDIT_CAPSET		1322	/* Record showing argument to sys_capset */
+#define AUDIT_MMAP		1323	/* Record showing descriptor and flags in mmap */
+#define AUDIT_NETFILTER_PKT	1324	/* Packets traversing netfilter chains */
+#define AUDIT_NETFILTER_CFG	1325	/* Netfilter chain modifications */
 
 #define AUDIT_AVC		1400	/* SE Linux avc denial or grant */
 #define AUDIT_SELINUX_ERR	1401	/* Internal SE Linux Errors */
@@ -404,10 +408,6 @@ struct audit_field {
 	void				*lsm_rule;
 };
 
-#define AUDITSC_INVALID 0
-#define AUDITSC_SUCCESS 1
-#define AUDITSC_FAILURE 2
-#define AUDITSC_RESULT(x) ( ((long)(x))<0?AUDITSC_FAILURE:AUDITSC_SUCCESS )
 extern int __init audit_register_class(int class, unsigned *list);
 extern int audit_classify_syscall(int abi, unsigned syscall);
 extern int audit_classify_arch(int arch);
@@ -420,7 +420,7 @@ extern void audit_free(struct task_struct *task);
 extern void audit_syscall_entry(int arch,
 				int major, unsigned long a0, unsigned long a1,
 				unsigned long a2, unsigned long a3);
-extern void audit_syscall_exit(int failed, long return_code);
+extern void __audit_syscall_exit(int ret_success, long ret_value);
 extern void __audit_getname(const char *name);
 extern void audit_putname(const char *name);
 extern void __audit_inode(const char *name, const struct dentry *dentry);
@@ -432,6 +432,15 @@ static inline int audit_dummy_context(void)
 {
 	void *p = current->audit_context;
 	return !p || *(int *)p;
+}
+static inline void audit_syscall_exit(void *pt_regs)
+{
+	if (unlikely(current->audit_context)) {
+		int success = is_syscall_success(pt_regs);
+		int return_code = regs_return_value(pt_regs);
+
+		__audit_syscall_exit(success, return_code);
+	}
 }
 static inline void audit_getname(const char *name)
 {
@@ -479,6 +488,7 @@ extern int __audit_log_bprm_fcaps(struct linux_binprm *bprm,
 				  const struct cred *new,
 				  const struct cred *old);
 extern void __audit_log_capset(pid_t pid, const struct cred *new, const struct cred *old);
+extern void __audit_mmap_fd(int fd, int flags);
 
 static inline void audit_ipc_obj(struct kern_ipc_perm *ipcp)
 {
@@ -532,14 +542,20 @@ static inline void audit_log_capset(pid_t pid, const struct cred *new,
 		__audit_log_capset(pid, new, old);
 }
 
+static inline void audit_mmap_fd(int fd, int flags)
+{
+	if (unlikely(!audit_dummy_context()))
+		__audit_mmap_fd(fd, flags);
+}
+
 extern int audit_n_rules;
 extern int audit_signals;
-#else
+#else /* CONFIG_AUDITSYSCALL */
 #define audit_finish_fork(t)
 #define audit_alloc(t) ({ 0; })
 #define audit_free(t) do { ; } while (0)
 #define audit_syscall_entry(ta,a,b,c,d,e) do { ; } while (0)
-#define audit_syscall_exit(f,r) do { ; } while (0)
+#define audit_syscall_exit(r) do { ; } while (0)
 #define audit_dummy_context() 1
 #define audit_getname(n) do { ; } while (0)
 #define audit_putname(n) do { ; } while (0)
@@ -565,10 +581,11 @@ extern int audit_signals;
 #define audit_mq_getsetattr(d,s) ((void)0)
 #define audit_log_bprm_fcaps(b, ncr, ocr) ({ 0; })
 #define audit_log_capset(pid, ncr, ocr) ((void)0)
+#define audit_mmap_fd(fd, flags) ((void)0)
 #define audit_ptrace(t) ((void)0)
 #define audit_n_rules 0
 #define audit_signals 0
-#endif
+#endif /* CONFIG_AUDITSYSCALL */
 
 #ifdef CONFIG_AUDIT
 /* These are defined in audit.c */

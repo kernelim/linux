@@ -85,7 +85,6 @@ static void ecryptfs_destroy_inode(struct inode *inode)
 		if (lower_dentry->d_inode) {
 			fput(inode_info->lower_file);
 			inode_info->lower_file = NULL;
-			d_drop(lower_dentry);
 		}
 	}
 	ecryptfs_destroy_crypt_stat(&inode_info->crypt_stat);
@@ -138,7 +137,11 @@ static void ecryptfs_put_super(struct super_block *sb)
  */
 static int ecryptfs_statfs(struct dentry *dentry, struct kstatfs *buf)
 {
-	return vfs_statfs(ecryptfs_dentry_to_lower(dentry), buf);
+	struct dentry *lower_dentry = ecryptfs_dentry_to_lower(dentry);
+
+	if (!lower_dentry->d_sb->s_op->statfs)
+		return -ENOSYS;
+	return lower_dentry->d_sb->s_op->statfs(lower_dentry, buf);
 }
 
 /**

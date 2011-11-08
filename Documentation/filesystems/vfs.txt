@@ -401,10 +401,15 @@ otherwise noted.
   	started might not be in the page cache at the end of the
   	walk).
 
-  truncate: called by the VFS to change the size of a file.  The
+  truncate: Deprecated. This will not be called if ->setsize is defined.
+	Called by the VFS to change the size of a file.  The
  	i_size field of the inode is set to the desired size by the
  	VFS before this method is called.  This method is called by
  	the truncate(2) system call and related functionality.
+
+	Note: ->truncate and vmtruncate are deprecated. Do not add new
+	instances/calls of these. Filesystems should be converted to do their
+	truncate sequence via ->setattr().
 
   permission: called by the VFS to check for access rights on a POSIX-like
   	filesystem.
@@ -529,6 +534,7 @@ struct address_space_operations {
 	sector_t (*bmap)(struct address_space *, sector_t);
 	int (*invalidatepage) (struct page *, unsigned long);
 	int (*releasepage) (struct page *, int);
+	void (*freepage)(struct page *);
 	ssize_t (*direct_IO)(int, struct kiocb *, const struct iovec *iov,
 			loff_t offset, unsigned long nr_segs);
 	struct page* (*get_xip_page)(struct address_space *, sector_t,
@@ -673,6 +679,12 @@ struct address_space_operations {
         that all pages are invalidated, then its releasepage will
         need to ensure this.  Possibly it can clear the PageUptodate
         bit if it cannot free private data yet.
+
+  freepage: freepage is called once the page is no longer visible in
+        the page cache in order to allow the cleanup of any private
+	data. Since it may be called by the memory reclaimer, it
+	should not assume that the original address_space mapping still
+	exists, and it should not block.
 
   direct_IO: called by the generic read/write routines to perform
         direct_IO - that is IO requests which bypass the page cache
@@ -846,6 +858,8 @@ struct dentry_operations {
 	void (*d_release)(struct dentry *);
 	void (*d_iput)(struct dentry *, struct inode *);
 	char *(*d_dname)(struct dentry *, char *, int);
+	struct vfsmount *(*d_automount)(struct path *);
+	int (*d_manage)(struct dentry *, bool);
 };
 
   d_revalidate: called when the VFS needs to revalidate a dentry. This
@@ -879,6 +893,42 @@ struct dentry_operations {
 	tricky. The correct way to return for example "Hello" is to put it
 	at the end of the buffer, and returns a pointer to the first char.
 	dynamic_dname() helper function is provided to take care of this.
+
+  d_automount: called when an automount dentry is to be traversed (optional).
+	This should create a new VFS mount record and return the record to the
+	caller.  The caller is supplied with a path parameter giving the
+	automount directory to describe the automount target and the parent
+	VFS mount record to provide inheritable mount parameters.  NULL should
+	be returned if someone else managed to make the automount first.  If
+	the vfsmount creation failed, then an error code should be returned.
+	If -EISDIR is returned, then the directory will be treated as an
+	ordinary directory and returned to pathwalk to continue walking.
+
+	If a vfsmount is returned, the caller will attempt to mount it on the
+	mountpoint and will remove the vfsmount from its expiration list in
+	the case of failure.  The vfsmount should be returned with 2 refs on
+	it to prevent automatic expiration - the caller will clean up the
+	additional ref.
+
+	This function is only used if DCACHE_NEED_AUTOMOUNT is set on the
+	dentry.  This is set by __d_instantiate() if S_AUTOMOUNT is set on the
+	inode being added.
+
+  d_manage: called to allow the filesystem to manage the transition from a
+	dentry (optional).  This allows autofs, for example, to hold up clients
+	waiting to explore behind a 'mountpoint' whilst letting the daemon go
+	past and construct the subtree there.  0 should be returned to let the
+	calling process continue.  -EISDIR can be returned to tell pathwalk to
+	use this directory as an ordinary directory and to ignore anything
+	mounted on it and not to check the automount flag.  Any other error
+	code will abort pathwalk completely.
+
+	If the 'mounting_here' parameter is true, then namespace_sem is being
+	held by the caller and the function should not initiate any mounts or
+	unmounts that it will then wait for.
+
+	This function is only used if DCACHE_MANAGE_TRANSIT is set on the
+	dentry being transited from.
 
 Example :
 

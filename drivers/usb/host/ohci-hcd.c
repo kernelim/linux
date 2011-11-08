@@ -32,6 +32,7 @@
 #include <linux/list.h>
 #include <linux/usb.h>
 #include <linux/usb/otg.h>
+#include <linux/usb/hcd.h>
 #include <linux/dma-mapping.h>
 #include <linux/dmapool.h>
 #include <linux/workqueue.h>
@@ -43,7 +44,6 @@
 #include <asm/unaligned.h>
 #include <asm/byteorder.h>
 
-#include "../core/hcd.h"
 
 #define DRIVER_AUTHOR "Roman Weissgaerber, David Brownell"
 #define DRIVER_DESC "USB 1.1 'Open' Host Controller (OHCI) Driver"
@@ -75,6 +75,7 @@ static const char	hcd_name [] = "ohci_hcd";
 #define	STATECHANGE_DELAY	msecs_to_jiffies(300)
 
 #include "ohci.h"
+#include "pci-quirks.h"
 
 static void ohci_dump (struct ohci_hcd *ohci, int verbose);
 static int ohci_init (struct ohci_hcd *ohci);
@@ -85,18 +86,8 @@ static int ohci_restart (struct ohci_hcd *ohci);
 #endif
 
 #ifdef CONFIG_PCI
-static void quirk_amd_pll(int state);
-static void amd_iso_dev_put(void);
 static void sb800_prefetch(struct ohci_hcd *ohci, int on);
 #else
-static inline void quirk_amd_pll(int state)
-{
-	return;
-}
-static inline void amd_iso_dev_put(void)
-{
-	return;
-}
 static inline void sb800_prefetch(struct ohci_hcd *ohci, int on)
 {
 	return;
@@ -212,7 +203,7 @@ static int ohci_urb_enqueue (
 	spin_lock_irqsave (&ohci->lock, flags);
 
 	/* don't submit to a dead HC */
-	if (!test_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags)) {
+	if (!HCD_HW_ACCESSIBLE(hcd)) {
 		retval = -ENODEV;
 		goto fail;
 	}
@@ -685,7 +676,7 @@ retry:
 	}
 
 	/* use rhsc irqs after khubd is fully initialized */
-	hcd->poll_rh = 1;
+	set_bit(HCD_FLAG_POLL_RH, &hcd->flags);
 	hcd->uses_new_polling = 1;
 
 	/* start controller operations */
@@ -767,6 +758,7 @@ static irqreturn_t ohci_irq (struct usb_hcd *hcd)
 	if (ints == ~(u32)0) {
 		disable (ohci);
 		ohci_dbg (ohci, "device removed!\n");
+		usb_hc_died(hcd);
 		return IRQ_HANDLED;
 	}
 
@@ -774,7 +766,7 @@ static irqreturn_t ohci_irq (struct usb_hcd *hcd)
 	ints &= ohci_readl(ohci, &regs->intrenable);
 
 	/* interrupt for some other device? */
-	if (ints == 0)
+	if (ints == 0 || unlikely(hcd->state == HC_STATE_HALT))
 		return IRQ_NOTMINE;
 
 	if (ints & OHCI_INTR_UE) {
@@ -791,6 +783,7 @@ static irqreturn_t ohci_irq (struct usb_hcd *hcd)
 		} else {
 			disable (ohci);
 			ohci_err (ohci, "OHCI Unrecoverable Error, disabled\n");
+			usb_hc_died(hcd);
 		}
 
 		ohci_dump (ohci, 1);
@@ -822,7 +815,7 @@ static irqreturn_t ohci_irq (struct usb_hcd *hcd)
 	else if (ints & OHCI_INTR_RD) {
 		ohci_vdbg(ohci, "resume detect\n");
 		ohci_writel(ohci, OHCI_INTR_RD, &regs->intrstatus);
-		hcd->poll_rh = 1;
+		set_bit(HCD_FLAG_POLL_RH, &hcd->flags);
 		if (ohci->autostop) {
 			spin_lock (&ohci->lock);
 			ohci_rh_resume (ohci);
@@ -905,7 +898,7 @@ static void ohci_stop (struct usb_hcd *hcd)
 	if (quirk_zfmicro(ohci))
 		del_timer(&ohci->unlink_watchdog);
 	if (quirk_amdiso(ohci))
-		amd_iso_dev_put();
+		usb_amd_dev_put();
 
 	remove_debug_files (ohci);
 	ohci_mem_cleanup (ohci);

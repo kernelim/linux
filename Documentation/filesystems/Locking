@@ -16,6 +16,8 @@ prototypes:
 	void (*d_release)(struct dentry *);
 	void (*d_iput)(struct dentry *, struct inode *);
 	char *(*d_dname)((struct dentry *dentry, char *buffer, int buflen);
+	struct vfsmount *(*d_automount)(struct path *path);
+	int (*d_manage)(struct dentry *, bool);
 
 locking rules:
 	none have BKL
@@ -27,6 +29,8 @@ d_delete:	yes		no		yes		no
 d_release:	no		no		no		yes
 d_iput:		no		no		no		yes
 d_dname:	no		no		no		no
+d_automount:	no		no		no		yes
+d_manage:	no		no		no		yes
 
 --------------------------- inode_operations --------------------------- 
 prototypes:
@@ -171,12 +175,13 @@ prototypes:
 	sector_t (*bmap)(struct address_space *, sector_t);
 	int (*invalidatepage) (struct page *, unsigned long);
 	int (*releasepage) (struct page *, int);
+	void (*freepage)(struct page *);
 	int (*direct_IO)(int, struct kiocb *, const struct iovec *iov,
 			loff_t offset, unsigned long nr_segs);
 	int (*launder_page) (struct page *);
 
 locking rules:
-	All except set_page_dirty may block
+	All except set_page_dirty and freepage may block
 
 			BKL	PageLocked(page)	i_sem
 writepage:		no	yes, unlocks (see below)
@@ -191,6 +196,7 @@ perform_write:		no	n/a			yes
 bmap:			no
 invalidatepage:		no	yes
 releasepage:		no	yes
+freepage:		no	yes
 direct_IO:		no
 launder_page:		no	yes
 
@@ -285,6 +291,9 @@ block_invalidatepage() instead.
 buffers from the page in preparation for freeing it.  It returns zero to
 indicate that the buffers are (or may be) freeable.  If ->releasepage is zero,
 the kernel assumes that the fs has no private interest in the buffers.
+
+	->freepage() is called when the kernel is done dropping the page
+from the page cache.
 
 	->launder_page() may be called prior to releasing a page if
 it is still found to be dirty. It returns zero if the page was successfully

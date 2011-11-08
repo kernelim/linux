@@ -32,6 +32,15 @@
 	&__get_cpu_var(var); }))
 #define put_cpu_var(var) preempt_enable()
 
+#define get_cpu_ptr(var) ({				\
+	preempt_disable();				\
+	this_cpu_ptr(var); })
+
+#define put_cpu_ptr(var) do {				\
+	(void)(var);					\
+	preempt_enable();				\
+} while (0)
+
 #ifdef CONFIG_SMP
 
 #ifndef CONFIG_HAVE_LEGACY_PER_CPU_AREA
@@ -128,6 +137,7 @@ extern int __init pcpu_page_first_chunk(size_t reserved_size,
  * version should probably be combined with get_cpu()/put_cpu().
  */
 #define per_cpu_ptr(ptr, cpu)	SHIFT_PERCPU_PTR((ptr), per_cpu_offset((cpu)))
+#define this_cpu_ptr(ptr)	SHIFT_PERCPU_PTR((ptr), my_cpu_offset)
 
 extern void *__alloc_reserved_percpu(size_t size, size_t align);
 
@@ -150,6 +160,8 @@ struct percpu_data {
         (__typeof__(ptr))__p->ptrs[(cpu)];				\
 })
 
+#define this_cpu_ptr(ptr) per_cpu_ptr((ptr), smp_processor_id())
+
 #endif /* CONFIG_HAVE_LEGACY_PER_CPU_AREA */
 
 extern void *__alloc_percpu(size_t size, size_t align);
@@ -162,6 +174,7 @@ extern void __init setup_per_cpu_areas(void);
 #else /* CONFIG_SMP */
 
 #define per_cpu_ptr(ptr, cpu) ({ (void)(cpu); (ptr); })
+#define this_cpu_ptr(ptr) ({ (ptr); })
 
 static inline void *__alloc_percpu(size_t size, size_t align)
 {

@@ -350,6 +350,14 @@ config ACPI_HOTPLUG_MEMORY
 	  To compile this driver as a module, choose M here:
 	  the module will be called acpi_memhotplug.
 
+config ACPI_HOTPLUG_MEMORY_AUTO_ONLINE
+	bool "Automatically online hotplugged memory"
+	depends on ACPI_HOTPLUG_MEMORY
+	default n
+	help
+	  This forces memory that is brought into service by ACPI
+	  to be automatically onlined.
+
 config ACPI_SBS
 	tristate "Smart Battery System"
 	depends on X86
@@ -359,5 +367,14 @@ config ACPI_SBS
 
 	  To compile this driver as a module, choose M here:
 	  the modules will be called sbs and sbshc.
+
+config ACPI_HED
+	tristate "Hardware Error Device"
+	help
+	  This driver supports the Hardware Error Device (PNP0C33),
+	  which is used to report some hardware errors notified via
+	  SCI, mainly the corrected errors.
+
+source "drivers/acpi/apei/Kconfig"
 
 endif	# ACPI

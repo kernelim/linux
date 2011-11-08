@@ -27,6 +27,26 @@
 #define PTRACE_GETSIGINFO	0x4202
 #define PTRACE_SETSIGINFO	0x4203
 
+/*
+ * Generic ptrace interface that exports the architecture specific regsets
+ * using the corresponding NT_* types (which are also used in the core dump).
+ * Please note that the NT_PRSTATUS note type in a core dump contains a full
+ * 'struct elf_prstatus'. But the user_regset for NT_PRSTATUS contains just the
+ * elf_gregset_t that is the pr_reg field of 'struct elf_prstatus'. For all the
+ * other user_regset flavors, the user_regset layout and the ELF core dump note
+ * payload are exactly the same layout.
+ *
+ * This interface usage is as follows:
+ * 	struct iovec iov = { buf, len};
+ *
+ * 	ret = ptrace(PTRACE_GETREGSET/PTRACE_SETREGSET, pid, NT_XXX_TYPE, &iov);
+ *
+ * On the successful completion, iov.len will be updated by the kernel,
+ * specifying how much the kernel has written/read to/from the user's iov.buf.
+ */
+#define PTRACE_GETREGSET	0x4204
+#define PTRACE_SETREGSET	0x4205
+
 /* options set using PTRACE_SETOPTIONS */
 #define PTRACE_O_TRACESYSGOOD	0x00000001
 #define PTRACE_O_TRACEFORK	0x00000002
@@ -78,13 +98,15 @@
 
 #include <linux/compiler.h>		/* For unlikely.  */
 #include <linux/sched.h>		/* For struct task_struct.  */
+#include <linux/err.h>			/* for IS_ERR_VALUE */
 
-
+extern void ptrace_notify_stop(struct task_struct *tracee);
 extern long arch_ptrace(struct task_struct *child, long request, long addr, long data);
 extern int ptrace_traceme(void);
 extern int ptrace_readdata(struct task_struct *tsk, unsigned long src, char __user *dst, int len);
 extern int ptrace_writedata(struct task_struct *tsk, char __user *src, unsigned long dst, int len);
 extern int ptrace_attach(struct task_struct *tsk);
+extern bool __ptrace_detach(struct task_struct *tracer, struct task_struct *tracee);
 extern int ptrace_detach(struct task_struct *, unsigned int);
 extern void ptrace_disable(struct task_struct *);
 extern int ptrace_check_attach(struct task_struct *task, int kill);
@@ -105,12 +127,7 @@ static inline int ptrace_reparented(struct task_struct *child)
 {
 	return child->real_parent != child->parent;
 }
-static inline void ptrace_link(struct task_struct *child,
-			       struct task_struct *new_parent)
-{
-	if (unlikely(child->ptrace))
-		__ptrace_link(child, new_parent);
-}
+
 static inline void ptrace_unlink(struct task_struct *child)
 {
 	if (unlikely(child->ptrace))
@@ -169,9 +186,9 @@ static inline void ptrace_init_task(struct task_struct *child, bool ptrace)
 	INIT_LIST_HEAD(&child->ptraced);
 	child->parent = child->real_parent;
 	child->ptrace = 0;
-	if (unlikely(ptrace)) {
+	if (unlikely(ptrace) && (current->ptrace & PT_PTRACED)) {
 		child->ptrace = current->ptrace;
-		ptrace_link(child, current->parent);
+		__ptrace_link(child, current->parent);
 	}
 }
 
@@ -201,6 +218,15 @@ static inline void ptrace_release_task(struct task_struct *task)
  * syscall handler, or something along those lines).
  */
 #define force_successful_syscall_return() do { } while (0)
+#endif
+
+#ifndef is_syscall_success
+/*
+ * On most systems we can tell if a syscall is a success based on if the retval
+ * is an error value.  On some systems like ia64 and powerpc they have different
+ * indicators of success/failure and must define their own.
+ */
+#define is_syscall_success(regs) (!IS_ERR_VALUE((unsigned long)(regs_return_value(regs))))
 #endif
 
 /*
@@ -277,6 +303,18 @@ static inline void user_enable_block_step(struct task_struct *task)
 	BUG();			/* This can never be called.  */
 }
 #endif	/* arch_has_block_step */
+
+#ifdef ARCH_HAS_USER_SINGLE_STEP_INFO
+extern void user_single_step_siginfo(struct task_struct *tsk,
+				struct pt_regs *regs, siginfo_t *info);
+#else
+static inline void user_single_step_siginfo(struct task_struct *tsk,
+				struct pt_regs *regs, siginfo_t *info)
+{
+	memset(info, 0, sizeof(*info));
+	info->si_signo = SIGTRAP;
+}
+#endif
 
 #ifndef arch_ptrace_stop_needed
 /**

@@ -126,6 +126,11 @@ static int ieee80211_add_key(struct wiphy *wiphy, struct net_device *dev,
 		return -EINVAL;
 	}
 
+	/* reject WEP and TKIP keys if WEP failed to initialize */
+	if ((alg == ALG_WEP || alg == ALG_TKIP) &&
+	    IS_ERR(sdata->local->wep_tx_tfm))
+		return -EINVAL;
+
 	key = ieee80211_key_alloc(alg, key_idx, params->key_len, params->key,
 				  params->seq_len, params->seq);
 	if (!key)
@@ -338,7 +343,8 @@ static void sta_set_sinfo(struct sta_info *sta, struct station_info *sinfo)
 	sinfo->rx_packets = sta->rx_packets;
 	sinfo->tx_packets = sta->tx_packets;
 
-	if (sta->local->hw.flags & IEEE80211_HW_SIGNAL_DBM) {
+	if ((sta->local->hw.flags & IEEE80211_HW_SIGNAL_DBM) ||
+	    (sta->local->hw.flags & IEEE80211_HW_SIGNAL_UNSPEC)) {
 		sinfo->filled |= STATION_INFO_SIGNAL;
 		sinfo->signal = (s8)sta->last_signal;
 	}
@@ -734,9 +740,7 @@ static int ieee80211_add_station(struct wiphy *wiphy, struct net_device *dev,
 	layer2_update = sdata->vif.type == NL80211_IFTYPE_AP_VLAN ||
 		sdata->vif.type == NL80211_IFTYPE_AP;
 
-	rcu_read_lock();
-
-	err = sta_info_insert(sta);
+	err = sta_info_insert_rcu(sta);
 	if (err) {
 		/* STA has been freed */
 		if (err == -EEXIST && layer2_update) {
@@ -762,27 +766,13 @@ static int ieee80211_del_station(struct wiphy *wiphy, struct net_device *dev,
 {
 	struct ieee80211_local *local = wiphy_priv(wiphy);
 	struct ieee80211_sub_if_data *sdata;
-	struct sta_info *sta;
 
 	sdata = IEEE80211_DEV_TO_SUB_IF(dev);
 
-	if (mac) {
-		rcu_read_lock();
+	if (mac)
+		return sta_info_destroy_addr_bss(sdata, mac);
 
-		/* XXX: get sta belonging to dev */
-		sta = sta_info_get(local, mac);
-		if (!sta) {
-			rcu_read_unlock();
-			return -ENOENT;
-		}
-
-		sta_info_unlink(&sta);
-		rcu_read_unlock();
-
-		sta_info_destroy(sta);
-	} else
-		sta_info_flush(local, sdata);
-
+	sta_info_flush(local, sdata);
 	return 0;
 }
 
@@ -1304,6 +1294,9 @@ static int ieee80211_set_power_mgmt(struct wiphy *wiphy, struct net_device *dev,
 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
 	struct ieee80211_local *local = wdev_priv(dev->ieee80211_ptr);
 	struct ieee80211_conf *conf = &local->hw.conf;
+
+	if (sdata->vif.type != NL80211_IFTYPE_STATION)
+		return -EOPNOTSUPP;
 
 	if (!(local->hw.flags & IEEE80211_HW_SUPPORTS_PS))
 		return -EOPNOTSUPP;

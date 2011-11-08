@@ -365,7 +365,7 @@ static void do_viodasd_request(struct request_queue *q)
 		if (req == NULL)
 			return;
 		/* check that request contains a valid command */
-		if (!blk_fs_request(req)) {
+		if (req->cmd_type != REQ_TYPE_FS) {
 			viodasd_end_request(req, -EIO, blk_rq_sectors(req));
 			continue;
 		}
@@ -471,9 +471,8 @@ retry:
 	}
 
 	d->disk = g;
-	blk_queue_max_hw_segments(q, VIOMAXBLOCKDMA);
-	blk_queue_max_phys_segments(q, VIOMAXBLOCKDMA);
-	blk_queue_max_sectors(q, VIODASD_MAXSECTORS);
+	blk_queue_max_segments(q, VIOMAXBLOCKDMA);
+	blk_queue_max_hw_sectors(q, VIODASD_MAXSECTORS);
 	g->major = VIODASD_MAJOR;
 	g->first_minor = dev_no << PARTITION_SHIFT;
 	if (dev_no >= 26)

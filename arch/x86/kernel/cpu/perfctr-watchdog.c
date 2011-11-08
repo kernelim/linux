@@ -17,6 +17,7 @@
 #include <linux/bitops.h>
 #include <linux/smp.h>
 #include <linux/nmi.h>
+#include <asm/nmi.h>
 #include <linux/kprobes.h>
 
 #include <asm/apic.h>
@@ -68,6 +69,8 @@ static inline unsigned int nmi_perfctr_msr_to_bit(unsigned int msr)
 	/* returns the bit offset of the performance counter register */
 	switch (boot_cpu_data.x86_vendor) {
 	case X86_VENDOR_AMD:
+		if (msr >= MSR_F15H_PERF_CTR)
+			return (msr - MSR_F15H_PERF_CTR) >> 1;
 		return msr - MSR_K7_PERFCTR0;
 	case X86_VENDOR_INTEL:
 		if (cpu_has(&boot_cpu_data, X86_FEATURE_ARCH_PERFMON))
@@ -92,6 +95,8 @@ static inline unsigned int nmi_evntsel_msr_to_bit(unsigned int msr)
 	/* returns the bit offset of the event selection register */
 	switch (boot_cpu_data.x86_vendor) {
 	case X86_VENDOR_AMD:
+		if (msr >= MSR_F15H_PERF_CTL)
+			return (msr - MSR_F15H_PERF_CTL) >> 1;
 		return msr - MSR_K7_EVNTSEL0;
 	case X86_VENDOR_INTEL:
 		if (cpu_has(&boot_cpu_data, X86_FEATURE_ARCH_PERFMON))
@@ -111,17 +116,6 @@ static inline unsigned int nmi_evntsel_msr_to_bit(unsigned int msr)
 /* checks for a bit availability (hack for oprofile) */
 int avail_to_resrv_perfctr_nmi_bit(unsigned int counter)
 {
-	BUG_ON(counter > NMI_MAX_COUNTER_BITS);
-
-	return !test_bit(counter, perfctr_nmi_owner);
-}
-
-/* checks the an msr for availability */
-int avail_to_resrv_perfctr_nmi(unsigned int msr)
-{
-	unsigned int counter;
-
-	counter = nmi_perfctr_msr_to_bit(msr);
 	BUG_ON(counter > NMI_MAX_COUNTER_BITS);
 
 	return !test_bit(counter, perfctr_nmi_owner);
@@ -691,7 +685,7 @@ static int setup_intel_arch_watchdog(unsigned nmi_hz)
 	cpu_nmi_set_wd_enabled();
 
 	apic_write(APIC_LVTPC, APIC_DM_NMI);
-	evntsel |= ARCH_PERFMON_EVENTSEL0_ENABLE;
+	evntsel |= ARCH_PERFMON_EVENTSEL_ENABLE;
 	wrmsr(evntsel_msr, evntsel, 0);
 	intel_arch_wd_ops.checkbit = 1ULL << (eax.split.bit_width - 1);
 	return 1;
@@ -711,11 +705,10 @@ static void probe_nmi_watchdog(void)
 {
 	switch (boot_cpu_data.x86_vendor) {
 	case X86_VENDOR_AMD:
-		if (boot_cpu_data.x86 != 6 && boot_cpu_data.x86 != 15 &&
-		    boot_cpu_data.x86 != 16)
-			return;
-		wd_ops = &k7_wd_ops;
-		break;
+		if (boot_cpu_data.x86 == 6 ||
+		    (boot_cpu_data.x86 >= 0xf && boot_cpu_data.x86 <= 0x15))
+			wd_ops = &k7_wd_ops;
+		return;
 	case X86_VENDOR_INTEL:
 		/* Work around where perfctr1 doesn't have a working enable
 		 * bit as described in the following errata:

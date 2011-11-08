@@ -88,8 +88,8 @@ int udp_v6_get_port(struct sock *sk, unsigned short snum)
 
 static inline int compute_score(struct sock *sk, struct net *net,
 				unsigned short hnum,
-				struct in6_addr *saddr, __be16 sport,
-				struct in6_addr *daddr, __be16 dport,
+				const struct in6_addr *saddr, __be16 sport,
+				const struct in6_addr *daddr, __be16 dport,
 				int dif)
 {
 	int score = -1;
@@ -125,8 +125,8 @@ static inline int compute_score(struct sock *sk, struct net *net,
 }
 
 static struct sock *__udp6_lib_lookup(struct net *net,
-				      struct in6_addr *saddr, __be16 sport,
-				      struct in6_addr *daddr, __be16 dport,
+				      const struct in6_addr *saddr, __be16 sport,
+				      const struct in6_addr *daddr, __be16 dport,
 				      int dif, struct udp_table *udptable)
 {
 	struct sock *sk, *result;
@@ -181,6 +181,14 @@ static struct sock *__udp6_lib_lookup_skb(struct sk_buff *skb,
 				 &iph->daddr, dport, inet6_iif(skb),
 				 udptable);
 }
+
+struct sock *udp6_lib_lookup(struct net *net, const struct in6_addr *saddr, __be16 sport,
+			     const struct in6_addr *daddr, __be16 dport, int dif)
+{
+	return __udp6_lib_lookup(net, saddr, sport, daddr, dport, dif, &udp_table);
+}
+EXPORT_SYMBOL_GPL(udp6_lib_lookup);
+
 
 /*
  * 	This should be easy, if there is something there we
@@ -252,7 +260,7 @@ try_again:
 					UDP_MIB_INDATAGRAMS, is_udplite);
 	}
 
-	sock_recv_timestamp(msg, sk, skb);
+	sock_recv_ts_and_drops(msg, sk, skb);
 
 	/* Copy the address. */
 	if (msg->msg_name) {
@@ -470,16 +478,20 @@ static int __udp6_lib_mcast_deliver(struct net *net, struct sk_buff *skb,
 			bh_lock_sock(sk2);
 			if (!sock_owned_by_user(sk2))
 				udpv6_queue_rcv_skb(sk2, buff);
-			else
-				sk_add_backlog(sk2, buff);
+			else if (sk_add_backlog(sk2, buff))
+				kfree_skb(buff);
 			bh_unlock_sock(sk2);
 		}
+	}
+	if (sk_rcvqueues_full(sk, skb)) {
+		kfree_skb(skb);
+		goto out;
 	}
 	bh_lock_sock(sk);
 	if (!sock_owned_by_user(sk))
 		udpv6_queue_rcv_skb(sk, skb);
-	else
-		sk_add_backlog(sk, skb);
+	else if (sk_add_backlog(sk, skb))
+		kfree_skb(skb);
 	bh_unlock_sock(sk);
 out:
 	spin_unlock(&hslot->lock);
@@ -595,11 +607,19 @@ int __udp6_lib_rcv(struct sk_buff *skb, struct udp_table *udptable,
 
 	/* deliver */
 
+	if (sk_rcvqueues_full(sk, skb)) {
+		sock_put(sk);
+		goto discard;
+	}
 	bh_lock_sock(sk);
 	if (!sock_owned_by_user(sk))
 		udpv6_queue_rcv_skb(sk, skb);
-	else
-		sk_add_backlog(sk, skb);
+	else if (sk_add_backlog(sk, skb)) {
+		atomic_inc(&sk->sk_drops);
+		bh_unlock_sock(sk);
+		sock_put(sk);
+		goto discard;
+	}
 	bh_unlock_sock(sk);
 	sock_put(sk);
 	return 0;
@@ -1109,6 +1129,7 @@ static struct sk_buff *udp6_ufo_fragment(struct sk_buff *skb, int features)
 	u8 frag_hdr_sz = sizeof(struct frag_hdr);
 	int offset;
 	__wsum csum;
+	struct rt6_info *rt = (struct rt6_info *)skb_dst(skb);
 
 	mss = skb_shinfo(skb)->gso_size;
 	if (unlikely(skb->len <= mss))
@@ -1138,7 +1159,7 @@ static struct sk_buff *udp6_ufo_fragment(struct sk_buff *skb, int features)
 	skb->ip_summed = CHECKSUM_NONE;
 
 	/* Check if there is enough headroom to insert fragment header. */
-	if ((skb_headroom(skb) < frag_hdr_sz) &&
+	if ((skb_mac_header(skb) < skb->head + frag_hdr_sz) &&
 	    pskb_expand_head(skb, frag_hdr_sz, 0, GFP_ATOMIC))
 		goto out;
 
@@ -1159,7 +1180,8 @@ static struct sk_buff *udp6_ufo_fragment(struct sk_buff *skb, int features)
 	fptr = (struct frag_hdr *)(skb_network_header(skb) + unfrag_ip6hlen);
 	fptr->nexthdr = nexthdr;
 	fptr->reserved = 0;
-	ipv6_select_ident(fptr);
+	ipv6_select_ident(fptr,
+			  rt ? &rt->rt6i_dst.addr : &ipv6_hdr(skb)->daddr);
 
 	/* Fragment the skb. ipv6 header and the remaining fields of the
 	 * fragment header are updated in ipv6_gso_segment()
@@ -1282,7 +1304,6 @@ static struct inet_protosw udpv6_protosw = {
 	.protocol =  IPPROTO_UDP,
 	.prot =      &udpv6_prot,
 	.ops =       &inet6_dgram_ops,
-	.capability =-1,
 	.no_check =  UDP_CSUM_DEFAULT,
 	.flags =     INET_PROTOSW_PERMANENT,
 };

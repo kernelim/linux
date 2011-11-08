@@ -340,3 +340,10 @@ SYSCALL(sys_preadv,sys_preadv,compat_sys_preadv_wrapper)
 SYSCALL(sys_pwritev,sys_pwritev,compat_sys_pwritev_wrapper)
 SYSCALL(sys_rt_tgsigqueueinfo,sys_rt_tgsigqueueinfo,compat_sys_rt_tgsigqueueinfo_wrapper) /* 330 */
 SYSCALL(sys_perf_event_open,sys_perf_event_open,sys_perf_event_open_wrapper)
+NI_SYSCALL	/* fanotify_init */
+NI_SYSCALL	/* fanotify_mark */
+NI_SYSCALL	/* prlimit64 */
+NI_SYSCALL	/* name_to_handle_at */
+NI_SYSCALL	/* open_by_handle_at */
+NI_SYSCALL	/* clock_adjtime */
+SYSCALL(sys_syncfs,sys_syncfs,sys_syncfs_wrapper)

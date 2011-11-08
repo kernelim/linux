@@ -238,7 +238,7 @@ static int extend_credit_for_blkdel(handle_t *handle, struct inode *inode)
 	 * So allocate a credit of 3. We may update
 	 * quota (user and group).
 	 */
-	needed = 3 + 2*EXT4_QUOTA_TRANS_BLOCKS(inode->i_sb);
+	needed = 3 + EXT4_MAXQUOTAS_TRANS_BLOCKS(inode->i_sb);
 
 	if (ext4_journal_extend(handle, needed) != 0)
 		retval = ext4_journal_restart(handle, needed);
@@ -357,17 +357,17 @@ static int ext4_ext_swap_inode_data(handle_t *handle, struct inode *inode,
 	 * happened after we started the migrate. We need to
 	 * fail the migrate
 	 */
-	if (!(EXT4_I(inode)->i_state & EXT4_STATE_EXT_MIGRATE)) {
+	if (!ext4_test_inode_state(inode, EXT4_STATE_EXT_MIGRATE)) {
 		retval = -EAGAIN;
 		up_write(&EXT4_I(inode)->i_data_sem);
 		goto err_out;
 	} else
-		EXT4_I(inode)->i_state &= ~EXT4_STATE_EXT_MIGRATE;
+		ext4_clear_inode_state(inode, EXT4_STATE_EXT_MIGRATE);
 	/*
 	 * We have the extent map build with the tmp inode.
 	 * Now copy the i_data across
 	 */
-	ei->i_flags |= EXT4_EXTENTS_FL;
+	ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS);
 	memcpy(ei->i_data, tmp_ei->i_data, sizeof(ei->i_data));
 
 	/*
@@ -465,7 +465,7 @@ int ext4_ext_migrate(struct inode *inode)
 	 */
 	if (!EXT4_HAS_INCOMPAT_FEATURE(inode->i_sb,
 				       EXT4_FEATURE_INCOMPAT_EXTENTS) ||
-	    (EXT4_I(inode)->i_flags & EXT4_EXTENTS_FL))
+	    (ext4_test_inode_flag(inode, EXT4_INODE_EXTENTS)))
 		return -EINVAL;
 
 	if (S_ISLNK(inode->i_mode) && inode->i_blocks == 0)
@@ -477,7 +477,7 @@ int ext4_ext_migrate(struct inode *inode)
 	handle = ext4_journal_start(inode,
 					EXT4_DATA_TRANS_BLOCKS(inode->i_sb) +
 					EXT4_INDEX_EXTRA_TRANS_BLOCKS + 3 +
-					2 * EXT4_QUOTA_INIT_BLOCKS(inode->i_sb)
+					EXT4_MAXQUOTAS_INIT_BLOCKS(inode->i_sb)
 					+ 1);
 	if (IS_ERR(handle)) {
 		retval = PTR_ERR(handle);
@@ -524,7 +524,7 @@ int ext4_ext_migrate(struct inode *inode)
 	 * allocation.
 	 */
 	down_read((&EXT4_I(inode)->i_data_sem));
-	EXT4_I(inode)->i_state |= EXT4_STATE_EXT_MIGRATE;
+	ext4_set_inode_state(inode, EXT4_STATE_EXT_MIGRATE);
 	up_read((&EXT4_I(inode)->i_data_sem));
 
 	handle = ext4_journal_start(inode, 1);

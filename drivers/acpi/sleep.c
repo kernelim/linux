@@ -222,6 +222,7 @@ static int acpi_suspend_begin(suspend_state_t pm_state)
 static int acpi_suspend_enter(suspend_state_t pm_state)
 {
 	acpi_status status = AE_OK;
+	acpi_status enable_status = AE_OK;
 	unsigned long flags = 0;
 	u32 acpi_state = acpi_target_sleep_state;
 
@@ -249,10 +250,19 @@ static int acpi_suspend_enter(suspend_state_t pm_state)
 	}
 
 	/* If ACPI is not enabled by the BIOS, we need to enable it here. */
-	if (set_sci_en_on_resume)
+	if (!set_sci_en_on_resume)
+		enable_status = acpi_enable();
+
+	if (set_sci_en_on_resume || enable_status == AE_NO_HARDWARE_RESPONSE)
+		/* If we're still in legacy mode then we have a problem. The
+		 * spec tells us that this bit is under hardware control, but
+		 * there's no plausible way that the OS can transition back to
+		 * legacy mode so our choices here are to either ignore the
+		 * spec or crash and burn horribly. The latter doesn't seem
+		 * like it's ever going to be the preferable choice, so let's
+		 * live dangerously.
+		 */
 		acpi_write_bit_register(ACPI_BITREG_SCI_ENABLE, 1);
-	else
-		acpi_enable();
 
 	/* Reprogram control registers and execute _BFS */
 	acpi_leave_sleep_state_prep(acpi_state);

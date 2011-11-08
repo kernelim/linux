@@ -22,6 +22,7 @@
 #include <linux/jbd2.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
+#include <linux/blkdev.h>
 #include <trace/events/jbd2.h>
 
 /*
@@ -254,7 +255,9 @@ __flush_batch(journal_t *journal, int *batch_count)
 {
 	int i;
 
-	ll_rw_block(SWRITE, *batch_count, journal->j_chkpt_bhs);
+	for (i = 0; i < *batch_count; i++)
+		write_dirty_buffer(journal->j_chkpt_bhs[i], WRITE);
+
 	for (i = 0; i < *batch_count; i++) {
 		struct buffer_head *bh = journal->j_chkpt_bhs[i];
 		clear_buffer_jwrite(bh);
@@ -515,6 +518,20 @@ int jbd2_cleanup_journal_tail(journal_t *journal)
 	journal->j_tail_sequence = first_tid;
 	journal->j_tail = blocknr;
 	spin_unlock(&journal->j_state_lock);
+
+	/*
+	 * If there is an external journal, we need to make sure that
+	 * any data blocks that were recently written out --- perhaps
+	 * by jbd2_log_do_checkpoint() --- are flushed out before we
+	 * drop the transactions from the external journal.  It's
+	 * unlikely this will be necessary, especially with a
+	 * appropriately sized journal, but we need this to guarantee
+	 * correctness.  Fortunately jbd2_cleanup_journal_tail()
+	 * doesn't get called all that often.
+	 */
+	if ((journal->j_fs_dev != journal->j_dev) &&
+	    (journal->j_flags & JBD2_BARRIER))
+		blkdev_issue_flush(journal->j_fs_dev, NULL);
 	if (!(journal->j_flags & JBD2_ABORT))
 		jbd2_journal_update_superblock(journal, 1);
 	return 0;

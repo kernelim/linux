@@ -13,7 +13,7 @@
 enum blktrace_cat {
 	BLK_TC_READ	= 1 << 0,	/* reads */
 	BLK_TC_WRITE	= 1 << 1,	/* writes */
-	BLK_TC_BARRIER	= 1 << 2,	/* barrier */
+	BLK_TC_FLUSH	= 1 << 2,	/* flush */
 	BLK_TC_SYNC	= 1 << 3,	/* sync IO */
 	BLK_TC_SYNCIO	= BLK_TC_SYNC,
 	BLK_TC_QUEUE	= 1 << 4,	/* queueing/merging */
@@ -27,8 +27,9 @@ enum blktrace_cat {
 	BLK_TC_META	= 1 << 12,	/* metadata */
 	BLK_TC_DISCARD	= 1 << 13,	/* discard requests */
 	BLK_TC_DRV_DATA	= 1 << 14,	/* binary per-driver data */
+	BLK_TC_FUA	= 1 << 15,	/* fua requests */
 
-	BLK_TC_END	= 1 << 15,	/* only 16-bits, reminder */
+	BLK_TC_END	= 1 << 15,	/* we've run out of bits! */
 };
 
 #define BLK_TC_SHIFT		(16)
@@ -224,7 +225,7 @@ static inline int blk_trace_init_sysfs(struct device *dev)
 
 static inline int blk_cmd_buf_len(struct request *rq)
 {
-	return blk_pc_request(rq) ? rq->cmd_len * 3 : 1;
+	return (rq->cmd_type == REQ_TYPE_BLOCK_PC) ? rq->cmd_len * 3 : 1;
 }
 
 extern void blk_dump_cmd(char *buf, struct request *rq);

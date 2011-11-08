@@ -303,6 +303,7 @@ config SCSI_FC_TGT_ATTRS
 config SCSI_ISCSI_ATTRS
 	tristate "iSCSI Transport Attributes"
 	depends on SCSI && NET
+	select BLK_DEV_BSGLIB
 	help
 	  If you wish to export transport-specific information about
 	  each attached iSCSI device to sysfs, say Y.
@@ -364,8 +365,17 @@ config ISCSI_TCP
 
 	 http://open-iscsi.org
 
-source "drivers/scsi/cxgb3i/Kconfig"
+config ISCSI_BOOT_SYSFS
+	tristate "iSCSI Boot Sysfs Interface"
+	default	n
+	help
+	  This option enables support for exposing iSCSI boot information
+	  via sysfs to userspace. If you wish to export this information,
+	  say Y. Otherwise, say N.
+
+source "drivers/scsi/cxgbi/Kconfig"
 source "drivers/scsi/bnx2i/Kconfig"
+source "drivers/scsi/bnx2fc/Kconfig"
 source "drivers/scsi/be2iscsi/Kconfig"
 
 config SGIWD93_SCSI
@@ -388,6 +398,16 @@ config BLK_DEV_3W_XXXX_RAID
 	  Please read the comments at the top of
 	  <file:drivers/scsi/3w-xxxx.c>.
 
+config SCSI_HPSA
+	tristate "HP Smart Array SCSI driver"
+	depends on PCI && SCSI
+	help
+	  This driver supports HP Smart Array Controllers (circa 2009).
+	  It is a SCSI alternative to the cciss driver, which is a block
+	  driver.  Anyone wishing to use HP Smart Array controllers who
+	  would prefer the devices be presented to linux as SCSI devices,
+	  rather than as generic block devices should say Y here.
+
 config SCSI_3W_9XXX
 	tristate "3ware 9xxx SATA-RAID support"
 	depends on PCI && SCSI
@@ -398,6 +418,17 @@ config SCSI_3W_9XXX
 
 	  Please read the comments at the top of
 	  <file:drivers/scsi/3w-9xxx.c>.
+
+config SCSI_3W_SAS
+	tristate "3ware 97xx SAS/SATA-RAID support"
+	depends on PCI && SCSI
+	help
+	  This driver supports the LSI 3ware 9750 6Gb/s SAS/SATA-RAID cards.
+
+	  <http://www.lsi.com>
+
+	  Please read the comments at the top of
+	  <file:drivers/scsi/3w-sas.c>.
 
 config SCSI_7000FASST
 	tristate "7000FASST SCSI support"
@@ -621,6 +652,14 @@ config SCSI_FLASHPOINT
 	  substantial, so users of MultiMaster Host Adapters may not
 	  wish to include it.
 
+config VMWARE_PVSCSI
+	tristate "VMware PVSCSI driver support"
+	depends on PCI && SCSI && X86
+	help
+	  This driver supports VMware's para virtualized SCSI HBA.
+	  To compile this driver as a module, choose M here: the
+	  module will be called vmw_pvscsi.
+
 config LIBFC
 	tristate "LibFC module"
 	select SCSI_FC_ATTRS
@@ -784,6 +823,19 @@ config SCSI_GDTH
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called gdth.
+
+config SCSI_ISCI
+	tristate "Intel(R) C600 Series Chipset SAS Controller"
+	depends on PCI && SCSI
+	depends on X86
+	# (temporary): known alpha quality driver
+	depends on EXPERIMENTAL
+	select SCSI_SAS_LIBSAS
+	---help---
+	  This driver supports the 6Gb/s SAS capabilities of the storage
+	  control unit found in the Intel(R) C600 series chipset.
+
+	  The experimental tag will be removed after the driver exits alpha
 
 config SCSI_GENERIC_NCR5380
 	tristate "Generic NCR5380/53c400 SCSI PIO support"

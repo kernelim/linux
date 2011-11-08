@@ -43,6 +43,12 @@ struct blk_queue_tags;
 #define DISABLE_CLUSTERING 0
 #define ENABLE_CLUSTERING 1
 
+enum {
+	SCSI_QDEPTH_DEFAULT,	/* default requested change, e.g. from sysfs */
+	SCSI_QDEPTH_QFULL,	/* scsi-ml requested due to queue full */
+	SCSI_QDEPTH_RAMP_UP,	/* scsi-ml requested due to threshhold event */
+};
+
 struct scsi_host_template {
 	struct module *module;
 	const char *name;
@@ -118,6 +124,11 @@ struct scsi_host_template {
 	 * this device/host completes, or a period of time determined by
 	 * I/O pressure in the system if there are no other outstanding
 	 * commands.
+	 *
+	 * NOTE: The 'lockless' flag in the scsi_host_template indicates
+	 * whether the host_lock should be held before calling this
+	 * routine. Also, the lockless queuecommand, as implemented
+	 * upstream has a different signature.
 	 *
 	 * STATUS: REQUIRED
 	 */
@@ -294,7 +305,7 @@ struct scsi_host_template {
 	 *
 	 * Status: OPTIONAL
 	 */
-	int (* change_queue_depth)(struct scsi_device *, int);
+	int (* change_queue_depth)(struct scsi_device *, int, int);
 
 	/*
 	 * Fill in this function to allow the changing of tag types
@@ -445,6 +456,15 @@ struct scsi_host_template {
 	 * True if we are using ordered write support.
 	 */
 	unsigned ordered_tag:1;
+
+#ifndef __GENKSYMS__
+	/*
+	 * True if we are calling queuecommand without the
+	 * host_lock held. LLDs may want to do this for
+	 * performance reasons.
+	 */
+	unsigned lockless:1;
+#endif /* __GENKSYMS__ */
 
 	/*
 	 * Countdown for host blocking with no commands outstanding.
@@ -677,6 +697,12 @@ struct Scsi_Host {
 	void *shost_data;
 
 	/*
+	 * Points to the physical bus device we'd use to do DMA
+	 * Needed just in case we have virtual hosts.
+	 */
+	struct device *dma_dev;
+
+	/*
 	 * We should ensure that this is aligned, both for better performance
 	 * and also because some compilers (m68k) don't automatically force
 	 * alignment to a long boundary.
@@ -720,7 +746,9 @@ extern int scsi_queue_work(struct Scsi_Host *, struct work_struct *);
 extern void scsi_flush_work(struct Scsi_Host *);
 
 extern struct Scsi_Host *scsi_host_alloc(struct scsi_host_template *, int);
-extern int __must_check scsi_add_host(struct Scsi_Host *, struct device *);
+extern int __must_check scsi_add_host_with_dma(struct Scsi_Host *,
+					       struct device *,
+					       struct device *);
 extern void scsi_scan_host(struct Scsi_Host *);
 extern void scsi_rescan_device(struct device *);
 extern void scsi_remove_host(struct Scsi_Host *);
@@ -730,6 +758,12 @@ extern struct Scsi_Host *scsi_host_lookup(unsigned short);
 extern const char *scsi_host_state_name(enum scsi_host_state);
 
 extern u64 scsi_calculate_bounce_limit(struct Scsi_Host *);
+
+static inline int __must_check scsi_add_host(struct Scsi_Host *host,
+					     struct device *dev)
+{
+	return scsi_add_host_with_dma(host, dev, dev);
+}
 
 static inline struct device *scsi_get_device(struct Scsi_Host *shost)
 {
@@ -742,7 +776,8 @@ static inline struct device *scsi_get_device(struct Scsi_Host *shost)
  **/
 static inline int scsi_host_scan_allowed(struct Scsi_Host *shost)
 {
-	return shost->shost_state == SHOST_RUNNING;
+	return shost->shost_state == SHOST_RUNNING ||
+	       shost->shost_state == SHOST_RECOVERY;
 }
 
 extern void scsi_unblock_requests(struct Scsi_Host *);

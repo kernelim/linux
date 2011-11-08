@@ -70,6 +70,16 @@
 #define IFF_XMIT_DST_RELEASE 0x400	/* dev_hard_start_xmit() is allowed to
 					 * release skb->dst
 					 */
+#define IFF_IN_NETPOLL 0x800		/* whether we are processing netpoll */
+#define IFF_DISABLE_NETPOLL    0x1000	/* disable netpoll at run-time */
+#define IFF_BRIDGE_PORT		0x2000	/* is it a port of a bridge */
+#define IFF_MACVLAN_PORT	0x4000	/* device used as macvlan port */
+#define IFF_OVS_DATAPATH	0x8000	/* device used as Open vSwitch
+					 * datapath port */
+					/* NOTE - THE BELOW FIELDS ARE IN
+					 * EXT_PRIV_FLAGS */
+#define IFF_TX_SKB_SHARING	0x10000	/* The interface supports sharing
+					 * skbs on transmit */
 
 #define IF_GET_IFACE	0x0001		/* for querying only */
 #define IF_GET_PROTO	0x0002

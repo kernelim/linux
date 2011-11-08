@@ -41,7 +41,7 @@ static void print_name_offset(struct seq_file *m, void *sym)
 	char symname[KSYM_NAME_LEN];
 
 	if (lookup_symbol_name((unsigned long)sym, symname) < 0)
-		SEQ_printf(m, "<%p>", sym);
+		SEQ_printf(m, "<%pK>", sym);
 	else
 		SEQ_printf(m, "%s", symname);
 }
@@ -112,7 +112,7 @@ next_one:
 static void
 print_base(struct seq_file *m, struct hrtimer_clock_base *base, u64 now)
 {
-	SEQ_printf(m, "  .base:       %p\n", base);
+	SEQ_printf(m, "  .base:       %pK\n", base);
 	SEQ_printf(m, "  .index:      %d\n",
 			base->index);
 	SEQ_printf(m, "  .resolution: %Lu nsecs\n",
@@ -150,6 +150,9 @@ static void print_cpu(struct seq_file *m, int cpu, u64 now)
 	P_ns(expires_next);
 	P(hres_active);
 	P(nr_events);
+	P(nr_retries);
+	P(nr_hangs);
+	P_ns(max_hang_time);
 #endif
 #undef P
 #undef P_ns
@@ -173,6 +176,7 @@ static void print_cpu(struct seq_file *m, int cpu, u64 now)
 		P_ns(idle_waketime);
 		P_ns(idle_exittime);
 		P_ns(idle_sleeptime);
+		P_ns(iowait_sleeptime);
 		P(last_jiffies);
 		P(next_jiffies);
 		P_ns(idle_expires);
@@ -252,7 +256,7 @@ static int timer_list_show(struct seq_file *m, void *v)
 	u64 now = ktime_to_ns(ktime_get());
 	int cpu;
 
-	SEQ_printf(m, "Timer List Version: v0.4\n");
+	SEQ_printf(m, "Timer List Version: v0.5\n");
 	SEQ_printf(m, "HRTIMER_MAX_CLOCK_BASES: %d\n", HRTIMER_MAX_CLOCK_BASES);
 	SEQ_printf(m, "now at %Ld nsecs\n", (unsigned long long)now);
 

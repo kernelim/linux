@@ -556,32 +556,27 @@ int hash_huge_page(struct mm_struct *mm, unsigned long access,
 	unsigned long old_pte, new_pte;
 	unsigned long va, rflags, pa, sz;
 	long slot;
-	int err = 1;
 	int ssize = user_segment_size(ea);
 	unsigned int mmu_psize;
 	int shift;
+
 	mmu_psize = get_slice_psize(mm, ea);
 
 	if (!mmu_huge_psizes[mmu_psize])
-		goto out;
+		return 1;
 	ptep = huge_pte_offset(mm, ea);
 
 	/* Search the Linux page table for a match with va */
 	va = hpt_va(ea, vsid, ssize);
 
-	/*
-	 * If no pte found or not present, send the problem up to
-	 * do_page_fault
+	/* If no pte found send the problem up to do_page_fault
 	 */
-	if (unlikely(!ptep || pte_none(*ptep)))
-		goto out;
+	if (unlikely(!ptep))
+		return 1;
 
-	/* 
-	 * Check the user's access rights to the page.  If access should be
-	 * prevented then send the problem up to do_page_fault.
-	 */
-	if (unlikely(access & ~pte_val(*ptep)))
-		goto out;
+	/* We need _PAGE_PRESENT as part of our access check */
+	access |= _PAGE_PRESENT;
+
 	/*
 	 * At this point, we have a pte (old_pte) which can be used to build
 	 * or update an HPTE. There are 2 cases:
@@ -593,13 +588,19 @@ int hash_huge_page(struct mm_struct *mm, unsigned long access,
 	 *	because we are doing software DIRTY bit management and the
 	 *	page is currently not DIRTY. 
 	 */
-
-
 	do {
 		old_pte = pte_val(*ptep);
-		if (old_pte & _PAGE_BUSY)
-			goto out;
+		/* If PTE busy, retry the access */
+		if (unlikely(old_pte & _PAGE_BUSY))
+			return 0;
+		/* If PTE permissions don't match, take page fault */
+		if (unlikely(access & ~old_pte))
+			return 1;
+		/* Try to lock the PTE, add ACCESSED and DIRTY if it was
+		 * a write access */
 		new_pte = old_pte | _PAGE_BUSY | _PAGE_ACCESSED;
+		if (access & _PAGE_RW)
+			new_pte |= _PAGE_DIRTY;
 	} while(old_pte != __cmpxchg_u64((unsigned long *)ptep,
 					 old_pte, new_pte));
 
@@ -671,8 +672,16 @@ repeat:
                         }
 		}
 
-		if (unlikely(slot == -2))
-			panic("hash_huge_page: pte_insert failed\n");
+		/*
+		 * Hypervisor failure. Restore old pte and return -1
+		 * similar to __hash_page_*
+		 */
+		if (unlikely(slot == -2)) {
+			*ptep = __pte(old_pte);
+			hash_failure_debug(ea, access, vsid, trap, ssize,
+					   mmu_psize, old_pte);
+			return -1;
+		}
 
 		new_pte |= (slot << 12) & (_PAGE_F_SECOND | _PAGE_F_GIX);
 	}
@@ -681,11 +690,7 @@ repeat:
 	 * No need to use ldarx/stdcx here
 	 */
 	*ptep = __pte(new_pte & ~_PAGE_BUSY);
-
-	err = 0;
-
- out:
-	return err;
+	return 0;
 }
 
 static void __init set_huge_psize(int psize)

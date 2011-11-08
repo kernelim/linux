@@ -2,6 +2,7 @@
 #include <linux/dmar.h>
 #include <linux/spinlock.h>
 #include <linux/jiffies.h>
+#include <linux/hpet.h>
 #include <linux/pci.h>
 #include <linux/irq.h>
 #include <asm/io_apic.h>
@@ -14,16 +15,44 @@
 #include "pci.h"
 
 static struct ioapic_scope ir_ioapic[MAX_IO_APICS];
-static int ir_ioapic_num;
+static struct hpet_scope ir_hpet[MAX_HPET_TBS];
+static int ir_ioapic_num, ir_hpet_num;
 int intr_remapping_enabled;
 
 static int disable_intremap;
+static int disable_sourceid_checking;
+static int no_x2apic_optout;
+
 static __init int setup_nointremap(char *str)
 {
 	disable_intremap = 1;
 	return 0;
 }
 early_param("nointremap", setup_nointremap);
+
+static __init int setup_intremap(char *str)
+{
+	if (!str)
+		return -EINVAL;
+
+	while (*str) {
+		if (!strncmp(str, "on", 2))
+			disable_intremap = 0;
+		else if (!strncmp(str, "off", 3))
+			disable_intremap = 1;
+		else if (!strncmp(str, "nosid", 5))
+			disable_sourceid_checking = 1;
+		else if (!strncmp(str, "no_x2apic_optout", 16))
+			no_x2apic_optout = 1;
+
+		str += strcspn(str, ",");
+		while (*str == ',')
+			str++;
+	}
+
+	return 0;
+}
+early_param("intremap", setup_intremap);
 
 struct irq_2_iommu {
 	struct intel_iommu *iommu;
@@ -343,6 +372,16 @@ int flush_irte(int irq)
 	return rc;
 }
 
+struct intel_iommu *map_hpet_to_ir(u8 hpet_id)
+{
+	int i;
+
+	for (i = 0; i < MAX_HPET_TBS; i++)
+		if (ir_hpet[i].id == hpet_id)
+			return ir_hpet[i].iommu;
+	return NULL;
+}
+
 struct intel_iommu *map_ioapic_to_ir(int apic)
 {
 	int i;
@@ -440,6 +479,8 @@ int free_irte(int irq)
 static void set_irte_sid(struct irte *irte, unsigned int svt,
 			 unsigned int sq, unsigned int sid)
 {
+	if (disable_sourceid_checking)
+		svt = SVT_NO_VERIFY;
 	irte->svt = svt;
 	irte->sq = sq;
 	irte->sid = sid;
@@ -470,6 +511,36 @@ int set_ioapic_sid(struct irte *irte, int apic)
 	return 0;
 }
 
+int set_hpet_sid(struct irte *irte, u8 id)
+{
+	int i;
+	u16 sid = 0;
+
+	if (!irte)
+		return -1;
+
+	for (i = 0; i < MAX_HPET_TBS; i++) {
+		if (ir_hpet[i].id == id) {
+			sid = (ir_hpet[i].bus << 8) | ir_hpet[i].devfn;
+			break;
+		}
+	}
+
+	if (sid == 0) {
+		pr_warning("Failed to set source-id of HPET block (%d)\n", id);
+		return -1;
+	}
+
+	/*
+	 * Should really use SQ_ALL_16. Some platforms are broken.
+	 * While we figure out the right quirks for these broken platforms, use
+	 * SQ_13_IGNORE_3 for now.
+	 */
+	set_irte_sid(irte, SVT_VERIFY_SID_SQ, SQ_13_IGNORE_3, sid);
+
+	return 0;
+}
+
 int set_msi_sid(struct irte *irte, struct pci_dev *dev)
 {
 	struct pci_dev *bridge;
@@ -478,7 +549,7 @@ int set_msi_sid(struct irte *irte, struct pci_dev *dev)
 		return -1;
 
 	/* PCIe device or Root Complex integrated PCI device */
-	if (dev->is_pcie || !dev->bus->parent) {
+	if (pci_is_pcie(dev) || !dev->bus->parent) {
 		set_irte_sid(irte, SVT_VERIFY_SID_SQ, SQ_ALL_16,
 			     (dev->bus->number << 8) | dev->devfn);
 		return 0;
@@ -486,7 +557,7 @@ int set_msi_sid(struct irte *irte, struct pci_dev *dev)
 
 	bridge = pci_find_upstream_pcie_bridge(dev);
 	if (bridge) {
-		if (bridge->is_pcie) /* this is a PCIE-to-PCI/PCIX bridge */
+		if (pci_is_pcie(bridge))/* this is a PCIe-to-PCI/PCIX bridge */
 			set_irte_sid(irte, SVT_VERIFY_BUS, SQ_ALL_16,
 				(bridge->bus->number << 8) | dev->bus->number);
 		else /* this is a legacy PCI bridge */
@@ -596,6 +667,15 @@ end:
 	spin_unlock_irqrestore(&iommu->register_lock, flags);
 }
 
+static int __init dmar_x2apic_optout(void)
+{
+	struct acpi_table_dmar *dmar;
+	dmar = (struct acpi_table_dmar *)dmar_tbl;
+	if (!dmar || no_x2apic_optout)
+		return 0;
+	return dmar->flags & DMAR_X2APIC_OPT_OUT;
+}
+
 int __init intr_remapping_supported(void)
 {
 	struct dmar_drhd_unit *drhd;
@@ -616,14 +696,23 @@ int __init intr_remapping_supported(void)
 	return 1;
 }
 
-int __init enable_intr_remapping(int eim)
+int __init enable_intr_remapping(void)
 {
 	struct dmar_drhd_unit *drhd;
 	int setup = 0;
+	int eim = 0;
 
 	if (parse_ioapics_under_ir() != 1) {
 		printk(KERN_INFO "Not enable interrupt remapping\n");
 		return -1;
+	}
+
+	if (x2apic_supported()) {
+		eim = !dmar_x2apic_optout();
+		WARN(!eim, KERN_WARNING
+			   "Your BIOS has requested that x2apic be disabled.\n"
+			   "This will leave your machine vulnerable to irq-injection attacks.\n"
+			   "Use 'intremap=no_x2apic_optout' to override BIOS request.\n");
 	}
 
 	for_each_drhd_unit(drhd) {
@@ -701,14 +790,43 @@ int __init enable_intr_remapping(int eim)
 		goto error;
 
 	intr_remapping_enabled = 1;
+	pr_info("Enabled IRQ remapping in %s mode\n", eim ? "x2apic" : "xapic");
 
-	return 0;
+	return eim ? IRQ_REMAP_X2APIC_MODE : IRQ_REMAP_XAPIC_MODE;
 
 error:
 	/*
 	 * handle error condition gracefully here!
 	 */
 	return -1;
+}
+
+static void ir_parse_one_hpet_scope(struct acpi_dmar_device_scope *scope,
+				      struct intel_iommu *iommu)
+{
+	struct acpi_dmar_pci_path *path;
+	u8 bus;
+	int count;
+
+	bus = scope->bus;
+	path = (struct acpi_dmar_pci_path *)(scope + 1);
+	count = (scope->length - sizeof(struct acpi_dmar_device_scope))
+		/ sizeof(struct acpi_dmar_pci_path);
+
+	while (--count > 0) {
+		/*
+		 * Access PCI directly due to the PCI
+		 * subsystem isn't initialized yet.
+		 */
+		bus = read_pci_config_byte(bus, path->dev, path->fn,
+					   PCI_SECONDARY_BUS);
+		path++;
+	}
+	ir_hpet[ir_hpet_num].bus   = bus;
+	ir_hpet[ir_hpet_num].devfn = PCI_DEVFN(path->dev, path->fn);
+	ir_hpet[ir_hpet_num].iommu = iommu;
+	ir_hpet[ir_hpet_num].id    = scope->enumeration_id;
+	ir_hpet_num++;
 }
 
 static void ir_parse_one_ioapic_scope(struct acpi_dmar_device_scope *scope,
@@ -740,8 +858,8 @@ static void ir_parse_one_ioapic_scope(struct acpi_dmar_device_scope *scope,
 	ir_ioapic_num++;
 }
 
-static int ir_parse_ioapic_scope(struct acpi_dmar_header *header,
-				 struct intel_iommu *iommu)
+static int ir_parse_ioapic_hpet_scope(struct acpi_dmar_header *header,
+				      struct intel_iommu *iommu)
 {
 	struct acpi_dmar_hardware_unit *drhd;
 	struct acpi_dmar_device_scope *scope;
@@ -765,6 +883,17 @@ static int ir_parse_ioapic_scope(struct acpi_dmar_header *header,
 			       drhd->address);
 
 			ir_parse_one_ioapic_scope(scope, iommu);
+		} else if (scope->entry_type == ACPI_DMAR_SCOPE_TYPE_HPET) {
+			if (ir_hpet_num == MAX_HPET_TBS) {
+				printk(KERN_WARNING "Exceeded Max HPET blocks\n");
+				return -1;
+			}
+
+			printk(KERN_INFO "HPET id %d under DRHD base"
+			       " 0x%Lx\n", scope->enumeration_id,
+			       drhd->address);
+
+			ir_parse_one_hpet_scope(scope, iommu);
 		}
 		start += scope->length;
 	}
@@ -785,7 +914,7 @@ int __init parse_ioapics_under_ir(void)
 		struct intel_iommu *iommu = drhd->iommu;
 
 		if (ecap_ir_support(iommu->ecap)) {
-			if (ir_parse_ioapic_scope(drhd->hdr, iommu))
+			if (ir_parse_ioapic_hpet_scope(drhd->hdr, iommu))
 				return -1;
 
 			ir_supported = 1;

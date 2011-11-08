@@ -95,8 +95,13 @@ struct seq_file;
 extern int cap_netlink_send(struct sock *sk, struct sk_buff *skb);
 extern int cap_netlink_recv(struct sk_buff *skb, int cap);
 
+#ifdef CONFIG_MMU
 extern unsigned long mmap_min_addr;
 extern unsigned long dac_mmap_min_addr;
+#else
+#define dac_mmap_min_addr	0UL
+#endif
+
 /*
  * Values used in the task_security_ops calls
  */
@@ -121,6 +126,7 @@ struct request_sock;
 #define LSM_UNSAFE_PTRACE	2
 #define LSM_UNSAFE_PTRACE_CAP	4
 
+#ifdef CONFIG_MMU
 /*
  * If a hint addr is less than mmap_min_addr change hint to be as
  * low as possible but still greater than mmap_min_addr
@@ -135,6 +141,7 @@ static inline unsigned long round_hint_to_min(unsigned long hint)
 }
 extern int mmap_min_addr_handler(struct ctl_table *table, int write,
 				 void __user *buffer, size_t *lenp, loff_t *ppos);
+#endif
 
 #ifdef CONFIG_SECURITY
 
@@ -263,6 +270,12 @@ static inline void security_free_mnt_opts(struct security_mnt_opts *opts)
  *	on the mount point named by @nd.
  *	@mnt contains the vfsmount for device being mounted.
  *	@path contains the path for the mount point.
+ *	Return 0 if permission is granted.
+ * @sb_remount:
+ *	Extracts security system specifc mount options and verifys no changes
+ *	are being made to those options.
+ *	@sb superblock being remounted
+ *	@data contains the filesystem-specific data.
  *	Return 0 if permission is granted.
  * @sb_umount:
  *	Check permission before the @mnt file system is unmounted.
@@ -690,6 +703,7 @@ static inline void security_free_mnt_opts(struct security_mnt_opts *opts)
  * @kernel_module_request:
  *	Ability to trigger the kernel to automatically upcall to userspace for
  *	userspace to load a kernel module with the given name.
+ *	@kmod_name name of the module requested by the kernel
  *	Return 0 if successful.
  * @task_setuid:
  *	Check permission before setting one or more of the user identity
@@ -1451,6 +1465,7 @@ struct security_operations {
 	int (*sb_alloc_security) (struct super_block *sb);
 	void (*sb_free_security) (struct super_block *sb);
 	int (*sb_copy_data) (char *orig, char *copy);
+	int (*sb_remount) (struct super_block *sb, void *data);
 	int (*sb_kern_mount) (struct super_block *sb, int flags, void *data);
 	int (*sb_show_options) (struct seq_file *m, struct super_block *sb);
 	int (*sb_statfs) (struct dentry *dentry);
@@ -1480,8 +1495,6 @@ struct security_operations {
 	int (*path_rmdir) (struct path *dir, struct dentry *dentry);
 	int (*path_mknod) (struct path *dir, struct dentry *dentry, int mode,
 			   unsigned int dev);
-	int (*path_truncate) (struct path *path, loff_t length,
-			      unsigned int time_attrs);
 	int (*path_symlink) (struct path *dir, struct dentry *dentry,
 			     const char *old_name);
 	int (*path_link) (struct dentry *old_dentry, struct path *new_dir,
@@ -1489,6 +1502,9 @@ struct security_operations {
 	int (*path_rename) (struct path *old_dir, struct dentry *old_dentry,
 			    struct path *new_dir, struct dentry *new_dentry);
 #endif
+
+	int (*path_truncate) (struct path *path, loff_t length,
+			      unsigned int time_attrs);
 
 	int (*inode_alloc_security) (struct inode *inode);
 	void (*inode_free_security) (struct inode *inode);
@@ -1557,7 +1573,7 @@ struct security_operations {
 	void (*cred_transfer)(struct cred *new, const struct cred *old);
 	int (*kernel_act_as)(struct cred *new, u32 secid);
 	int (*kernel_create_files_as)(struct cred *new, struct inode *inode);
-	int (*kernel_module_request)(void);
+	int (*kernel_module_request)(char *kmod_name);
 	int (*task_setuid) (uid_t id0, uid_t id1, uid_t id2, int flags);
 	int (*task_fix_setuid) (struct cred *new, const struct cred *old,
 				int flags);
@@ -1570,7 +1586,8 @@ struct security_operations {
 	int (*task_setnice) (struct task_struct *p, int nice);
 	int (*task_setioprio) (struct task_struct *p, int ioprio);
 	int (*task_getioprio) (struct task_struct *p);
-	int (*task_setrlimit) (unsigned int resource, struct rlimit *new_rlim);
+	int (*task_setrlimit) (struct task_struct *p, unsigned int resource,
+			struct rlimit *new_rlim);
 	int (*task_setscheduler) (struct task_struct *p, int policy,
 				  struct sched_param *lp);
 	int (*task_getscheduler) (struct task_struct *p);
@@ -1746,6 +1763,7 @@ int security_bprm_secureexec(struct linux_binprm *bprm);
 int security_sb_alloc(struct super_block *sb);
 void security_sb_free(struct super_block *sb);
 int security_sb_copy_data(char *orig, char *copy);
+int security_sb_remount(struct super_block *sb, void *data);
 int security_sb_kern_mount(struct super_block *sb, int flags, void *data);
 int security_sb_show_options(struct seq_file *m, struct super_block *sb);
 int security_sb_statfs(struct dentry *dentry);
@@ -1822,7 +1840,7 @@ void security_commit_creds(struct cred *new, const struct cred *old);
 void security_transfer_creds(struct cred *new, const struct cred *old);
 int security_kernel_act_as(struct cred *new, u32 secid);
 int security_kernel_create_files_as(struct cred *new, struct inode *inode);
-int security_kernel_module_request(void);
+int security_kernel_module_request(char *kmod_name);
 int security_task_setuid(uid_t id0, uid_t id1, uid_t id2, int flags);
 int security_task_fix_setuid(struct cred *new, const struct cred *old,
 			     int flags);
@@ -1835,7 +1853,8 @@ int security_task_setgroups(struct group_info *group_info);
 int security_task_setnice(struct task_struct *p, int nice);
 int security_task_setioprio(struct task_struct *p, int ioprio);
 int security_task_getioprio(struct task_struct *p);
-int security_task_setrlimit(unsigned int resource, struct rlimit *new_rlim);
+int security_task_setrlimit(struct task_struct *p, unsigned int resource,
+		struct rlimit *new_rlim);
 int security_task_setscheduler(struct task_struct *p,
 				int policy, struct sched_param *lp);
 int security_task_getscheduler(struct task_struct *p);
@@ -1881,6 +1900,9 @@ void security_release_secctx(char *secdata, u32 seclen);
 int security_inode_notifysecctx(struct inode *inode, void *ctx, u32 ctxlen);
 int security_inode_setsecctx(struct dentry *dentry, void *ctx, u32 ctxlen);
 int security_inode_getsecctx(struct inode *inode, void **ctx, u32 *ctxlen);
+
+int security_path_truncate(struct path *path, loff_t length,
+			   unsigned int time_attrs);
 #else /* CONFIG_SECURITY */
 struct security_mnt_opts {
 };
@@ -2040,6 +2062,11 @@ static inline void security_sb_free(struct super_block *sb)
 { }
 
 static inline int security_sb_copy_data(char *orig, char *copy)
+{
+	return 0;
+}
+
+static inline int security_sb_remount(struct super_block *sb, void *data)
 {
 	return 0;
 }
@@ -2387,7 +2414,7 @@ static inline int security_kernel_create_files_as(struct cred *cred,
 	return 0;
 }
 
-static inline int security_kernel_module_request(void)
+static inline int security_kernel_module_request(char *kmod_name)
 {
 	return 0;
 }
@@ -2451,7 +2478,8 @@ static inline int security_task_getioprio(struct task_struct *p)
 	return 0;
 }
 
-static inline int security_task_setrlimit(unsigned int resource,
+static inline int security_task_setrlimit(struct task_struct *p,
+					  unsigned int resource,
 					  struct rlimit *new_rlim)
 {
 	return 0;
@@ -2649,6 +2677,12 @@ static inline int security_inode_setsecctx(struct dentry *dentry, void *ctx, u32
 static inline int security_inode_getsecctx(struct inode *inode, void **ctx, u32 *ctxlen)
 {
 	return -EOPNOTSUPP;
+}
+
+static inline int security_path_truncate(struct path *path, loff_t length,
+					 unsigned int time_attrs)
+{
+	return 0;
 }
 #endif	/* CONFIG_SECURITY */
 
@@ -2944,8 +2978,6 @@ int security_path_mkdir(struct path *dir, struct dentry *dentry, int mode);
 int security_path_rmdir(struct path *dir, struct dentry *dentry);
 int security_path_mknod(struct path *dir, struct dentry *dentry, int mode,
 			unsigned int dev);
-int security_path_truncate(struct path *path, loff_t length,
-			   unsigned int time_attrs);
 int security_path_symlink(struct path *dir, struct dentry *dentry,
 			  const char *old_name);
 int security_path_link(struct dentry *old_dentry, struct path *new_dir,
@@ -2971,12 +3003,6 @@ static inline int security_path_rmdir(struct path *dir, struct dentry *dentry)
 
 static inline int security_path_mknod(struct path *dir, struct dentry *dentry,
 				      int mode, unsigned int dev)
-{
-	return 0;
-}
-
-static inline int security_path_truncate(struct path *path, loff_t length,
-					 unsigned int time_attrs)
 {
 	return 0;
 }

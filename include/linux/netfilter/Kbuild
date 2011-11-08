@@ -1,8 +1,12 @@
+header-y += ipset/
+
 header-y += nf_conntrack_sctp.h
 header-y += nf_conntrack_tuple_common.h
 header-y += nfnetlink_conntrack.h
 header-y += nfnetlink_log.h
 header-y += nfnetlink_queue.h
+header-y += xt_AUDIT.h
+header-y += xt_CHECKSUM.h
 header-y += xt_CLASSIFY.h
 header-y += xt_CONNMARK.h
 header-y += xt_CONNSECMARK.h
@@ -40,6 +44,7 @@ header-y += xt_quota.h
 header-y += xt_rateest.h
 header-y += xt_realm.h
 header-y += xt_recent.h
+header-y += xt_set.h
 header-y += xt_sctp.h
 header-y += xt_state.h
 header-y += xt_statistic.h

@@ -1,6 +1,7 @@
 #ifndef _ASM_IA64_KEXEC_H
 #define _ASM_IA64_KEXEC_H
 
+#include <asm-generic/kexec.h>
 
 /* Maximum physical address we can use pages from */
 #define KEXEC_SOURCE_MEMORY_LIMIT (-1UL)
@@ -18,6 +19,12 @@
                 unsigned long page_addr = (unsigned long)page_address(page); \
                 flush_icache_range(page_addr, page_addr + PAGE_SIZE); \
         } while(0)
+
+#ifdef CONFIG_KEXEC_AUTO_RESERVE
+extern
+unsigned long long __init arch_default_crash_size(unsigned long long);
+#define arch_default_crash_size arch_default_crash_size
+#endif
 
 extern struct kimage *ia64_kimage;
 extern const unsigned int relocate_new_kernel_size;

@@ -84,6 +84,9 @@ EXPORT_SYMBOL(ia64_save_scratch_fpregs);
 #include <asm/unwind.h>
 EXPORT_SYMBOL(unw_init_running);
 
+#include <linux/efi.h>
+EXPORT_SYMBOL_GPL(efi_mem_type);
+
 #if defined(CONFIG_IA64_ESI) || defined(CONFIG_IA64_ESI_MODULE)
 extern void esi_call_phys (void);
 EXPORT_SYMBOL_GPL(esi_call_phys);

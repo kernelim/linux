@@ -178,25 +178,18 @@ SYSCALL_DEFINE6(osf_mmap, unsigned long, addr, unsigned long, len,
 		unsigned long, prot, unsigned long, flags, unsigned long, fd,
 		unsigned long, off)
 {
-	struct file *file = NULL;
-	unsigned long ret = -EBADF;
+	unsigned long ret = -EINVAL;
 
 #if 0
 	if (flags & (_MAP_HASSEMAPHORE | _MAP_INHERIT | _MAP_UNALIGNED))
 		printk("%s: unimplemented OSF mmap flags %04lx\n", 
 			current->comm, flags);
 #endif
-	if (!(flags & MAP_ANONYMOUS)) {
-		file = fget(fd);
-		if (!file)
-			goto out;
-	}
-	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
-	down_write(&current->mm->mmap_sem);
-	ret = do_mmap(file, addr, len, prot, flags, off);
-	up_write(&current->mm->mmap_sem);
-	if (file)
-		fput(file);
+	if ((off + PAGE_ALIGN(len)) < off)
+		goto out;
+	if (off & ~PAGE_MASK)
+		goto out;
+	ret = sys_mmap_pgoff(addr, len, prot, flags, fd, off >> PAGE_SHIFT);
  out:
 	return ret;
 }
@@ -241,11 +234,11 @@ linux_to_osf_statfs(struct kstatfs *linux_stat, struct osf_statfs __user *osf_st
 }
 
 static int
-do_osf_statfs(struct dentry * dentry, struct osf_statfs __user *buffer,
+do_osf_statfs(struct path *path, struct osf_statfs __user *buffer,
 	      unsigned long bufsiz)
 {
 	struct kstatfs linux_stat;
-	int error = vfs_statfs(dentry, &linux_stat);
+	int error = vfs_statfs(path, &linux_stat);
 	if (!error)
 		error = linux_to_osf_statfs(&linux_stat, buffer, bufsiz);
 	return error;	
@@ -259,7 +252,7 @@ SYSCALL_DEFINE3(osf_statfs, char __user *, pathname,
 
 	retval = user_path(pathname, &path);
 	if (!retval) {
-		retval = do_osf_statfs(path.dentry, buffer, bufsiz);
+		retval = do_osf_statfs(&path, buffer, bufsiz);
 		path_put(&path);
 	}
 	return retval;
@@ -274,7 +267,7 @@ SYSCALL_DEFINE3(osf_fstatfs, unsigned long, fd,
 	retval = -EBADF;
 	file = fget(fd);
 	if (file) {
-		retval = do_osf_statfs(file->f_path.dentry, buffer, bufsiz);
+		retval = do_osf_statfs(&file->f_path, buffer, bufsiz);
 		fput(file);
 	}
 	return retval;

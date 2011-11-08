@@ -326,3 +326,30 @@ SYSCALL_SPU(perf_event_open)
 COMPAT_SYS_SPU(preadv)
 COMPAT_SYS_SPU(pwritev)
 COMPAT_SYS(rt_tgsigqueueinfo)
+SYSCALL_SPU(ni_syscall)		/* fanotify_init */
+SYSCALL_SPU(ni_syscall)		/* fanotify_mark */
+SYSCALL_SPU(ni_syscall)		/* prlimit64 */
+SYSCALL_SPU(ni_syscall)		/* socket */
+SYSCALL_SPU(ni_syscall)		/* bind */
+SYSCALL_SPU(ni_syscall)		/* connect */
+SYSCALL_SPU(ni_syscall)		/* listen */
+SYSCALL_SPU(ni_syscall)		/* accept */
+SYSCALL_SPU(ni_syscall)		/* getsockname */
+SYSCALL_SPU(ni_syscall)		/* getpeername */
+SYSCALL_SPU(ni_syscall)		/* socketpair */
+SYSCALL_SPU(ni_syscall)		/* send */
+SYSCALL_SPU(ni_syscall)		/* sendto */
+SYSCALL_SPU(ni_syscall)		/* recv */
+SYSCALL_SPU(ni_syscall)		/* recvfrom */
+SYSCALL_SPU(ni_syscall)		/* shutdown */
+SYSCALL_SPU(ni_syscall)		/* setsockopt */
+SYSCALL_SPU(ni_syscall)		/* getsockopt */
+SYSCALL_SPU(ni_syscall)		/* sendmsg */
+SYSCALL_SPU(ni_syscall)		/* recvmsg */
+SYSCALL_SPU(ni_syscall)		/* recvmmsg */
+SYSCALL_SPU(ni_syscall)		/* accept4 */
+SYSCALL_SPU(ni_syscall)		/* name_to_handle_at */
+SYSCALL_SPU(ni_syscall)		/* open_by_handle_at */
+SYSCALL_SPU(ni_syscall)		/* clock_adjtime */
+SYSCALL_SPU(syncfs)
+COMPAT_SYS_SPU(sendmmsg)

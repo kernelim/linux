@@ -26,8 +26,13 @@
 #include <linux/msi.h>
 #include <linux/irqreturn.h>
 
+/* DMAR Flags */
+#define DMAR_INTR_REMAP		0x1
+#define DMAR_X2APIC_OPT_OUT	0x2
+
 struct intel_iommu;
 #if defined(CONFIG_DMAR) || defined(CONFIG_INTR_REMAP)
+extern struct acpi_table_header *dmar_tbl;
 struct dmar_drhd_unit {
 	struct list_head list;		/* list of drhd units	*/
 	struct  acpi_dmar_header *hdr;	/* ACPI header		*/
@@ -109,7 +114,7 @@ struct irte {
 #ifdef CONFIG_INTR_REMAP
 extern int intr_remapping_enabled;
 extern int intr_remapping_supported(void);
-extern int enable_intr_remapping(int);
+extern int enable_intr_remapping(void);
 extern void disable_intr_remapping(void);
 extern int reenable_intr_remapping(int);
 
@@ -126,7 +131,9 @@ extern int free_irte(int irq);
 extern int irq_remapped(int irq);
 extern struct intel_iommu *map_dev_to_ir(struct pci_dev *dev);
 extern struct intel_iommu *map_ioapic_to_ir(int apic);
+extern struct intel_iommu *map_hpet_to_ir(u8 id);
 extern int set_ioapic_sid(struct irte *irte, int apic);
+extern int set_hpet_sid(struct irte *irte, u8 id);
 extern int set_msi_sid(struct irte *irte, struct pci_dev *dev);
 #else
 static inline int alloc_irte(struct intel_iommu *iommu, int irq, u16 count)
@@ -158,9 +165,17 @@ static inline struct intel_iommu *map_ioapic_to_ir(int apic)
 {
 	return NULL;
 }
+static inline struct intel_iommu *map_hpet_to_ir(unsigned int hpet_id)
+{
+	return NULL;
+}
 static inline int set_ioapic_sid(struct irte *irte, int apic)
 {
 	return 0;
+}
+static inline int set_hpet_sid(struct irte *irte, u8 id)
+{
+	return -1;
 }
 static inline int set_msi_sid(struct irte *irte, struct pci_dev *dev)
 {
@@ -168,11 +183,27 @@ static inline int set_msi_sid(struct irte *irte, struct pci_dev *dev)
 }
 
 #define irq_remapped(irq)		(0)
-#define enable_intr_remapping(mode)	(-1)
-#define disable_intr_remapping()	(0)
-#define reenable_intr_remapping(mode)	(0)
 #define intr_remapping_enabled		(0)
+
+static inline int enable_intr_remapping(void)
+{
+	return -1;
+}
+
+static inline void disable_intr_remapping(void)
+{
+}
+
+static inline int reenable_intr_remapping(int eim)
+{
+	return 0;
+}
 #endif
+
+enum {
+	IRQ_REMAP_XAPIC_MODE,
+	IRQ_REMAP_X2APIC_MODE,
+};
 
 /* Can't use the common MSI interrupt functions
  * since DMAR is not a pci device

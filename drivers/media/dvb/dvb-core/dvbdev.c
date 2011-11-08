@@ -35,6 +35,7 @@
 #include <linux/smp_lock.h>
 #include "dvbdev.h"
 
+static DEFINE_MUTEX(dvbdev_mutex);
 static int dvbdev_debug;
 
 module_param(dvbdev_debug, int, 0644);
@@ -68,7 +69,7 @@ static int dvb_device_open(struct inode *inode, struct file *file)
 {
 	struct dvb_device *dvbdev;
 
-	lock_kernel();
+	mutex_lock(&dvbdev_mutex);
 	down_read(&minor_rwsem);
 	dvbdev = dvb_minors[iminor(inode)];
 
@@ -91,12 +92,12 @@ static int dvb_device_open(struct inode *inode, struct file *file)
 		}
 		fops_put(old_fops);
 		up_read(&minor_rwsem);
-		unlock_kernel();
+		mutex_unlock(&dvbdev_mutex);
 		return err;
 	}
 fail:
 	up_read(&minor_rwsem);
-	unlock_kernel();
+	mutex_unlock(&dvbdev_mutex);
 	return -ENODEV;
 }
 
@@ -155,7 +156,7 @@ EXPORT_SYMBOL(dvb_generic_release);
 
 
 int dvb_generic_ioctl(struct inode *inode, struct file *file,
-		      unsigned int cmd, unsigned long arg)
+		       unsigned int cmd, unsigned long arg)
 {
 	struct dvb_device *dvbdev = file->private_data;
 
@@ -165,7 +166,7 @@ int dvb_generic_ioctl(struct inode *inode, struct file *file,
 	if (!dvbdev->kernel_ioctl)
 		return -EINVAL;
 
-	return dvb_usercopy (inode, file, cmd, arg, dvbdev->kernel_ioctl);
+	return dvb_usercopy(inode, file, cmd, arg, dvbdev->kernel_ioctl);
 }
 EXPORT_SYMBOL(dvb_generic_ioctl);
 
@@ -363,9 +364,54 @@ int dvb_register_adapter(struct dvb_adapter *adap, const char *name,
 EXPORT_SYMBOL(dvb_register_adapter);
 
 
+/* shadow struct operations, necessary to retain kabi compliance */
+static LIST_HEAD(adapter_shadow_list);
+
+/* called to find or allocate dvb_adapter shadow struct as needed */
+struct dvb_adapter_shadow *dvb_adapter_shadow_get(struct dvb_adapter *adapter)
+{
+	struct dvb_adapter_shadow *shadapter;
+
+	list_for_each_entry(shadapter, &adapter_shadow_list, shadow_node) {
+		if (shadapter->adapter == adapter)
+			return shadapter;
+	}
+
+	shadapter = kzalloc(sizeof(*shadapter), GFP_KERNEL);
+	if (!shadapter)
+		return NULL;
+
+	shadapter->adapter = adapter;
+	INIT_LIST_HEAD(&shadapter->shadow_node);
+	list_add(&shadapter->shadow_node, &adapter_shadow_list);
+
+	return shadapter;
+}
+EXPORT_SYMBOL(dvb_adapter_shadow_get);
+
+/* called to release dvb_adapter shadow struct as needed */
+void dvb_adapter_shadow_release(struct dvb_adapter *adapter)
+{
+	struct dvb_adapter_shadow *shadapter = NULL, *shtmp;
+
+	list_for_each_entry(shtmp, &adapter_shadow_list, shadow_node) {
+		if (shtmp->adapter == adapter) {
+			shadapter = shtmp;
+			break;
+		}
+	}
+	if (!shadapter)
+		return;
+
+	list_del(&shadapter->shadow_node);
+	kfree(shadapter);
+}
+EXPORT_SYMBOL(dvb_adapter_shadow_release);
+
 int dvb_unregister_adapter(struct dvb_adapter *adap)
 {
 	mutex_lock(&dvbdev_register_lock);
+	dvb_adapter_shadow_release(adap);
 	list_del (&adap->list_head);
 	mutex_unlock(&dvbdev_register_lock);
 	return 0;
@@ -416,8 +462,10 @@ int dvb_usercopy(struct inode *inode, struct file *file,
 	}
 
 	/* call driver */
+	mutex_lock(&dvbdev_mutex);
 	if ((err = func(inode, file, cmd, parg)) == -ENOIOCTLCMD)
 		err = -EINVAL;
+	mutex_unlock(&dvbdev_mutex);
 
 	if (err < 0)
 		goto out;

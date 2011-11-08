@@ -467,6 +467,27 @@ static void __touch_mnt_namespace(struct mnt_namespace *ns)
 	}
 }
 
+/*
+ * Clear dentry's mounted state if it has no remaining mounts.
+ * vfsmount_lock must be held for write.
+ */
+static void dentry_reset_mounted(struct vfsmount *mnt, struct dentry *dentry)
+{
+	unsigned u;
+
+	for (u = 0; u < HASH_SIZE; u++) {
+		struct vfsmount *p;
+
+		list_for_each_entry(p, &mount_hashtable[u], mnt_hash) {
+			if (p->mnt_mountpoint == dentry)
+				return;
+		}
+	}
+	spin_lock(&dentry->d_lock);
+	dentry->d_flags &= ~DCACHE_MOUNTED;
+	spin_unlock(&dentry->d_lock);
+}
+
 static void detach_mnt(struct vfsmount *mnt, struct path *old_path)
 {
 	old_path->dentry = mnt->mnt_mountpoint;
@@ -475,7 +496,7 @@ static void detach_mnt(struct vfsmount *mnt, struct path *old_path)
 	mnt->mnt_mountpoint = mnt->mnt_root;
 	list_del_init(&mnt->mnt_child);
 	list_del_init(&mnt->mnt_hash);
-	old_path->dentry->d_mounted--;
+	dentry_reset_mounted(old_path->mnt, old_path->dentry);
 }
 
 void mnt_set_mountpoint(struct vfsmount *mnt, struct dentry *dentry,
@@ -483,7 +504,9 @@ void mnt_set_mountpoint(struct vfsmount *mnt, struct dentry *dentry,
 {
 	child_mnt->mnt_parent = mntget(mnt);
 	child_mnt->mnt_mountpoint = dget(dentry);
-	dentry->d_mounted++;
+	spin_lock(&dentry->d_lock);
+	dentry->d_flags |= DCACHE_MOUNTED;
+	spin_unlock(&dentry->d_lock);
 }
 
 static void attach_mnt(struct vfsmount *mnt, struct path *path)
@@ -1015,7 +1038,7 @@ void umount_tree(struct vfsmount *mnt, int propagate, struct list_head *kill)
 		list_del_init(&p->mnt_child);
 		if (p->mnt_parent != p) {
 			p->mnt_parent->mnt_ghosts++;
-			p->mnt_mountpoint->d_mounted--;
+			dentry_reset_mounted(p->mnt_parent, p->mnt_mountpoint);
 		}
 		change_mnt_propagation(p, MS_PRIVATE);
 	}
@@ -1119,8 +1142,15 @@ SYSCALL_DEFINE2(umount, char __user *, name, int, flags)
 {
 	struct path path;
 	int retval;
+	int lookup_flags = 0;
 
-	retval = user_path(name, &path);
+	if (flags & ~(MNT_FORCE | MNT_DETACH | MNT_EXPIRE | UMOUNT_NOFOLLOW))
+		return -EINVAL;
+
+	if (!(flags & UMOUNT_NOFOLLOW))
+		lookup_flags |= LOOKUP_FOLLOW;
+
+	retval = user_path_at(AT_FDCWD, name, lookup_flags, &path);
 	if (retval)
 		goto out;
 	retval = -EINVAL;
@@ -1529,6 +1559,10 @@ static int do_remount(struct path *path, int flags, int mnt_flags,
 	if (path->dentry != path->mnt->mnt_root)
 		return -EINVAL;
 
+	err = security_sb_remount(sb, data);
+	if (err)
+		return err;
+
 	down_write(&sb->s_umount);
 	if (flags & MS_BIND)
 		err = change_mount_flags(path->mnt, flags);
@@ -1571,9 +1605,10 @@ static int do_move_mount(struct path *path, char *old_name)
 		return err;
 
 	down_write(&namespace_sem);
-	while (d_mountpoint(path->dentry) &&
-	       follow_down(path))
-		;
+	err = __follow_down(path, true);
+	if (err < 0)
+		goto out;
+
 	err = -EINVAL;
 	if (!check_mnt(path->mnt) || !check_mnt(old_path.mnt))
 		goto out;
@@ -1631,6 +1666,8 @@ out:
 	return err;
 }
 
+static int __do_add_mount(struct vfsmount *, struct path *, int);
+
 /*
  * create a new mount for userspace and request it to be added into the
  * namespace's tree
@@ -1639,6 +1676,7 @@ static int do_new_mount(struct path *path, char *type, int flags,
 			int mnt_flags, char *name, void *data)
 {
 	struct vfsmount *mnt;
+	int err;
 
 	if (!type)
 		return -EINVAL;
@@ -1653,23 +1691,55 @@ static int do_new_mount(struct path *path, char *type, int flags,
 	if (IS_ERR(mnt))
 		return PTR_ERR(mnt);
 
-	return do_add_mount(mnt, path, mnt_flags, NULL);
+	err = __do_add_mount(mnt, path, mnt_flags);
+	if (err)
+		mntput(mnt);
+	return err;
+}
+
+int finish_automount(struct vfsmount *m, struct path *path)
+{
+	int err;
+	/* The new mount record should have at least 2 refs to prevent it being
+	 * expired before we get a chance to add it
+	 */
+	BUG_ON(atomic_read(&m->mnt_count) < 2);
+
+	if (m->mnt_sb == path->mnt->mnt_sb &&
+	    m->mnt_root == path->dentry) {
+		err = -ELOOP;
+		goto fail;
+	}
+
+	err = __do_add_mount(m, path, path->mnt->mnt_flags | MNT_SHRINKABLE);
+	if (!err)
+		return 0;
+fail:
+	/* remove m from any expiration list it may be on */
+	if (!list_empty(&m->mnt_expire)) {
+		down_write(&namespace_sem);
+		spin_lock(&vfsmount_lock);
+		list_del_init(&m->mnt_expire);
+		spin_unlock(&vfsmount_lock);
+		up_write(&namespace_sem);
+	}
+	mntput(m);
+	mntput(m);
+	return err;
 }
 
 /*
  * add a mount into a namespace's mount tree
- * - provide the option of adding the new mount to an expiration list
  */
-int do_add_mount(struct vfsmount *newmnt, struct path *path,
-		 int mnt_flags, struct list_head *fslist)
+static int do_add_mount_unlocked(struct vfsmount *newmnt, struct path *path, int mnt_flags)
 {
 	int err;
 
-	down_write(&namespace_sem);
 	/* Something was mounted here while we slept */
-	while (d_mountpoint(path->dentry) &&
-	       follow_down(path))
-		;
+	err = __follow_down(path, true);
+	if (err < 0)
+		goto unlock;
+
 	err = -EINVAL;
 	if (!(mnt_flags & MNT_SHRINKABLE) && !check_mnt(path->mnt))
 		goto unlock;
@@ -1685,22 +1755,59 @@ int do_add_mount(struct vfsmount *newmnt, struct path *path,
 		goto unlock;
 
 	newmnt->mnt_flags = mnt_flags;
-	if ((err = graft_tree(newmnt, path)))
-		goto unlock;
-
-	if (fslist) /* add to the specified expiration list */
-		list_add_tail(&newmnt->mnt_expire, fslist);
-
-	up_write(&namespace_sem);
-	return 0;
+	err = graft_tree(newmnt, path);
 
 unlock:
-	up_write(&namespace_sem);
-	mntput(newmnt);
 	return err;
 }
 
+/*
+ * add a mount into a namespace's mount tree
+ */
+static int __do_add_mount(struct vfsmount *newmnt, struct path *path, int mnt_flags)
+{
+	int err;
+
+	down_write(&namespace_sem);
+	err = do_add_mount_unlocked(newmnt, path, mnt_flags);
+	up_write(&namespace_sem);
+	return err;
+}
+
+int do_add_mount(struct vfsmount *newmnt, struct path *path,
+		 int mnt_flags, struct list_head *fslist)
+{
+	int err;
+
+	down_write(&namespace_sem);
+	err = do_add_mount_unlocked(newmnt, path, mnt_flags);
+	if (!err) {
+		if (fslist) /* add to the specified expiration list */
+			list_add_tail(&newmnt->mnt_expire, fslist);
+	}
+	up_write(&namespace_sem);
+	if (err)
+		mntput(newmnt);
+	return err;
+}
 EXPORT_SYMBOL_GPL(do_add_mount);
+
+/**
+ * mnt_set_expiry - Put a mount on an expiration list
+ * @mnt: The mount to list.
+ * @expiry_list: The list to add the mount to.
+ */
+void mnt_set_expiry(struct vfsmount *mnt, struct list_head *expiry_list)
+{
+	down_write(&namespace_sem);
+	spin_lock(&vfsmount_lock);
+
+	list_add_tail(&mnt->mnt_expire, expiry_list);
+
+	spin_unlock(&vfsmount_lock);
+	up_write(&namespace_sem);
+}
+EXPORT_SYMBOL(mnt_set_expiry);
 
 /*
  * process a list of expirable mountpoints with the intent of discarding any

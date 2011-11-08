@@ -19,8 +19,8 @@
  * along with this program; if not, write to the Free Software Foundation,
  * Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
-/* Up to 16 microframes to halt an HC - one microframe is 125 microsectonds */
-#define XHCI_MAX_HALT_USEC	(16*125)
+/* Up to 16 ms to halt an HC */
+#define XHCI_MAX_HALT_USEC	(16*1000)
 /* HC not running - set to 1 when run/stop bit is cleared. */
 #define XHCI_STS_HALT		(1<<0)
 
@@ -101,12 +101,15 @@ static inline int xhci_find_next_cap_offset(void __iomem *base, int ext_offset)
 
 	next = readl(base + ext_offset);
 
-	if (ext_offset == XHCI_HCC_PARAMS_OFFSET)
+	if (ext_offset == XHCI_HCC_PARAMS_OFFSET) {
 		/* Find the first extended capability */
 		next = XHCI_HCC_EXT_CAPS(next);
-	else
+		ext_offset = 0;
+	} else {
 		/* Find the next extended capability */
 		next = XHCI_EXT_CAPS_NEXT(next);
+	}
+
 	if (!next)
 		return 0;
 	/*

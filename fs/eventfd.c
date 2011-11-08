@@ -135,6 +135,41 @@ static unsigned int eventfd_poll(struct file *file, poll_table *wait)
 	return events;
 }
 
+static void eventfd_ctx_do_read(struct eventfd_ctx *ctx, __u64 *cnt)
+{
+	*cnt = (ctx->flags & EFD_SEMAPHORE) ? 1 : ctx->count;
+	ctx->count -= *cnt;
+}
+
+/**
+ * eventfd_ctx_remove_wait_queue - Read the current counter and removes wait queue.
+ * @ctx: [in] Pointer to eventfd context.
+ * @wait: [in] Wait queue to be removed.
+ * @cnt: [out] Pointer to the 64bit conter value.
+ *
+ * Returns zero if successful, or the following error codes:
+ *
+ * -EAGAIN      : The operation would have blocked.
+ *
+ * This is used to atomically remove a wait queue entry from the eventfd wait
+ * queue head, and read/reset the counter value.
+ */
+int eventfd_ctx_remove_wait_queue(struct eventfd_ctx *ctx, wait_queue_t *wait,
+				  __u64 *cnt)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&ctx->wqh.lock, flags);
+	eventfd_ctx_do_read(ctx, cnt);
+	__remove_wait_queue(&ctx->wqh, wait);
+	if (*cnt != 0 && waitqueue_active(&ctx->wqh))
+		wake_up_locked_poll(&ctx->wqh, POLLOUT);
+	spin_unlock_irqrestore(&ctx->wqh.lock, flags);
+
+	return *cnt != 0 ? 0 : -EAGAIN;
+}
+EXPORT_SYMBOL_GPL(eventfd_ctx_remove_wait_queue);
+
 static ssize_t eventfd_read(struct file *file, char __user *buf, size_t count,
 			    loff_t *ppos)
 {

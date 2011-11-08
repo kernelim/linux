@@ -643,7 +643,7 @@ static void gdrom_request(struct request_queue *rq)
 	struct request *req;
 
 	while ((req = blk_fetch_request(rq)) != NULL) {
-		if (!blk_fs_request(req)) {
+		if (req->cmd_type != REQ_TYPE_FS) {
 			printk(KERN_DEBUG "GDROM: Non-fs request ignored\n");
 			__blk_end_request_all(req, -EIO);
 			continue;
@@ -741,7 +741,7 @@ static int __devinit probe_gdrom_setupqueue(void)
 {
 	blk_queue_logical_block_size(gd.gdrom_rq, GDROM_HARD_SECTOR);
 	/* using DMA so memory will need to be contiguous */
-	blk_queue_max_hw_segments(gd.gdrom_rq, 1);
+	blk_queue_max_segments(gd.gdrom_rq, 1);
 	/* set a large max size to get most from DMA */
 	blk_queue_max_segment_size(gd.gdrom_rq, 0x40000);
 	gd.disk->queue = gd.gdrom_rq;

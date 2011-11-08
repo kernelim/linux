@@ -48,6 +48,8 @@ extern int eth_validate_addr(struct net_device *dev);
 
 
 
+extern struct net_device *alloc_etherdev_mqs(int sizeof_priv, unsigned int txqs,
+					     unsigned int rxqs);
 extern struct net_device *alloc_etherdev_mq(int sizeof_priv, unsigned int queue_count);
 #define alloc_etherdev(sizeof_priv) alloc_etherdev_mq(sizeof_priv, 1)
 
@@ -124,6 +126,20 @@ static inline void random_ether_addr(u8 *addr)
 	get_random_bytes (addr, ETH_ALEN);
 	addr [0] &= 0xfe;	/* clear multicast bit */
 	addr [0] |= 0x02;	/* set local assignment bit (IEEE802) */
+}
+
+/**
+ * dev_hw_addr_random - Create random MAC and set device flag
+ * @dev: pointer to net_device structure
+ * @addr: Pointer to a six-byte array containing the Ethernet address
+ *
+ * Generate random MAC to be used by a device and set addr_assign_type
+ * so the state can be read by sysfs and be used by udev.
+ */
+static inline void dev_hw_addr_random(struct net_device *dev, u8 *hwaddr)
+{
+	dev->addr_assign_type |= NET_ADDR_RANDOM;
+	random_ether_addr(hwaddr);
 }
 
 /**

@@ -572,11 +572,15 @@ struct ieee80211_rx_status {
  *	may turn the device off as much as possible. Typically, this flag will
  *	be set when an interface is set UP but not associated or scanning, but
  *	it can also be unset in that case when monitor interfaces are active.
+ * @IEEE80211_CONF_QOS: Enable 802.11e QoS also know as WMM (Wireless
+ *      Multimedia). On some drivers (iwlwifi is one of know) we have
+ *      to enable/disable QoS explicitly.
  */
 enum ieee80211_conf_flags {
 	IEEE80211_CONF_RADIOTAP		= (1<<0),
 	IEEE80211_CONF_PS		= (1<<1),
 	IEEE80211_CONF_IDLE		= (1<<2),
+	IEEE80211_CONF_QOS		= (1<<3),
 };
 
 
@@ -599,6 +603,7 @@ enum ieee80211_conf_changed {
 	IEEE80211_CONF_CHANGE_CHANNEL		= BIT(6),
 	IEEE80211_CONF_CHANGE_RETRY_LIMITS	= BIT(7),
 	IEEE80211_CONF_CHANGE_IDLE		= BIT(8),
+	IEEE80211_CONF_CHANGE_QOS		= BIT(9),
 };
 
 /**
@@ -792,7 +797,7 @@ enum set_key_cmd {
  * mac80211, any ieee80211_sta pointer you get access to must
  * either be protected by rcu_read_lock() explicitly or implicitly,
  * or you must take good care to not use such a pointer after a
- * call to your sta_notify callback that removed it.
+ * call to your sta_remove callback that removed it.
  *
  * @addr: MAC address
  * @aid: AID we assigned to the station if we're an AP
@@ -818,8 +823,8 @@ struct ieee80211_sta {
  * indicates addition and removal of a station to station table,
  * or if a associated station made a power state transition.
  *
- * @STA_NOTIFY_ADD: a station was added to the station table
- * @STA_NOTIFY_REMOVE: a station being removed from the station table
+ * @STA_NOTIFY_ADD: (DEPRECATED) a station was added to the station table
+ * @STA_NOTIFY_REMOVE: (DEPRECATED) a station being removed from the station table
  * @STA_NOTIFY_SLEEP: a station is now sleeping
  * @STA_NOTIFY_AWAKE: a sleeping station woke up
  */
@@ -908,6 +913,9 @@ enum ieee80211_tkip_key_type {
  * @IEEE80211_HW_BEACON_FILTER:
  *	Hardware supports dropping of irrelevant beacon frames to
  *	avoid waking up cpu.
+ * @IEEE80211_HW_REPORTS_TX_ACK_STATUS:
+ *	Hardware can provide ack status reports of Tx frames to
+ *	the stack.
  */
 enum ieee80211_hw_flags {
 	IEEE80211_HW_RX_INCLUDES_FCS			= 1<<1,
@@ -924,6 +932,7 @@ enum ieee80211_hw_flags {
 	IEEE80211_HW_SUPPORTS_DYNAMIC_PS		= 1<<12,
 	IEEE80211_HW_MFP_CAPABLE			= 1<<13,
 	IEEE80211_HW_BEACON_FILTER			= 1<<14,
+	IEEE80211_HW_REPORTS_TX_ACK_STATUS		= 1<<15,
 };
 
 /**
@@ -1418,9 +1427,8 @@ enum ieee80211_ampdu_mlme_action {
  *
  * @set_rts_threshold: Configuration of RTS threshold (if device needs it)
  *
- * @sta_notify: Notifies low level driver about addition, removal or power
- *	state transition of an associated station, AP,  IBSS/WDS/mesh peer etc.
- *	Must be atomic.
+ * @sta_notify: Notifies low level driver about power state transition of an
+ *	associated station, AP,  IBSS/WDS/mesh peer etc. Must be atomic.
  *
  * @conf_tx: Configure TX queue parameters (EDCF (aifs, cw_min, cw_max),
  *	bursting) for a hardware TX queue.
@@ -1521,6 +1529,27 @@ struct ieee80211_ops {
 };
 
 /**
+ * struct ieee80211_ops2 - more callbacks from mac80211 to the driver
+ *
+ * This structure contains various callbacks that the driver may
+ * handle or, in some cases, must handle, for example to configure
+ * the hardware to a new channel or to transmit a frame.
+ *
+ * @sta_add: Notifies low level driver about addition of an associated station,
+ *	AP, IBSS/WDS/mesh peer etc. This callback can sleep.
+ *
+ * @sta_remove: Notifies low level driver about removal of an associated
+ *	station, AP, IBSS/WDS/mesh peer etc. This callback can sleep.
+ *
+ */
+struct ieee80211_ops2 {
+	int (*sta_add)(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+		       struct ieee80211_sta *sta);
+	int (*sta_remove)(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+			  struct ieee80211_sta *sta);
+};
+
+/**
  * ieee80211_alloc_hw -  Allocate a new hardware device
  *
  * This must be called once for each hardware device. The returned pointer
@@ -1534,6 +1563,20 @@ struct ieee80211_ops {
  */
 struct ieee80211_hw *ieee80211_alloc_hw(size_t priv_data_len,
 					const struct ieee80211_ops *ops);
+
+/**
+ * ieee80211_alloc_hw2 -  Allocate a new hardware device
+ *
+ * This alternative to ieee80211_alloc_hw includes support for the
+ * newer sta_add and sta_remove operations.
+ *
+ * @priv_data_len: length of private data
+ * @ops: callbacks for this device
+ * @ops2: more callbacks for this device
+ */
+struct ieee80211_hw *ieee80211_alloc_hw2(size_t priv_data_len,
+					 const struct ieee80211_ops *ops,
+					 const struct ieee80211_ops2 *ops2);
 
 /**
  * ieee80211_register_hw - Register hardware device
@@ -1917,7 +1960,8 @@ void ieee80211_wake_queues(struct ieee80211_hw *hw);
  *
  * When hardware scan offload is used (i.e. the hw_scan() callback is
  * assigned) this function needs to be called by the driver to notify
- * mac80211 that the scan finished.
+ * mac80211 that the scan finished. This function can be called from
+ * any context, including hardirq context.
  *
  * @hw: the hardware that finished the scan
  * @aborted: set to true if scan was aborted
@@ -2075,6 +2119,38 @@ void ieee80211_stop_tx_ba_cb_irqsafe(struct ieee80211_hw *hw, const u8 *ra,
  */
 struct ieee80211_sta *ieee80211_find_sta(struct ieee80211_hw *hw,
 					 const u8 *addr);
+
+/**
+ * ieee80211_sta_block_awake - block station from waking up
+ * @hw: the hardware
+ * @pubsta: the station
+ * @block: whether to block or unblock
+ *
+ * Some devices require that all frames that are on the queues
+ * for a specific station that went to sleep are flushed before
+ * a poll response or frames after the station woke up can be
+ * delivered to that it. Note that such frames must be rejected
+ * by the driver as filtered, with the appropriate status flag.
+ *
+ * This function allows implementing this mode in a race-free
+ * manner.
+ *
+ * To do this, a driver must keep track of the number of frames
+ * still enqueued for a specific station. If this number is not
+ * zero when the station goes to sleep, the driver must call
+ * this function to force mac80211 to consider the station to
+ * be asleep regardless of the station's actual state. Once the
+ * number of outstanding frames reaches zero, the driver must
+ * call this function again to unblock the station. That will
+ * cause mac80211 to be able to send ps-poll responses, and if
+ * the station queried in the meantime then frames will also
+ * be sent out as a result of this. Additionally, the driver
+ * will be notified that the station woke up some time after
+ * it is unblocked, regardless of whether the station actually
+ * woke up while blocked or not.
+ */
+void ieee80211_sta_block_awake(struct ieee80211_hw *hw,
+			       struct ieee80211_sta *pubsta, bool block);
 
 /**
  * ieee80211_beacon_loss - inform hardware does not receive beacons

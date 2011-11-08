@@ -11,6 +11,7 @@
 #include <linux/list.h>
 #include <linux/mm.h>
 #include <linux/suspend.h>
+#include <linux/acpi_io.h>
 
 /*
  * Platforms, like ACPI, may want us to save some memory used by them during
@@ -112,7 +113,8 @@ void hibernate_nvs_save(void)
 
 	list_for_each_entry(entry, &nvs_list, node)
 		if (entry->data) {
-			entry->kaddr = ioremap(entry->phys_start, entry->size);
+			entry->kaddr = acpi_os_ioremap(entry->phys_start,
+						       entry->size);
 			memcpy(entry->data, entry->kaddr, entry->size);
 		}
 }

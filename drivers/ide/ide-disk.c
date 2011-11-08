@@ -184,7 +184,7 @@ static ide_startstop_t ide_do_rw_disk(ide_drive_t *drive, struct request *rq,
 	ide_hwif_t *hwif = drive->hwif;
 
 	BUG_ON(drive->dev_flags & IDE_DFLAG_BLOCKED);
-	BUG_ON(!blk_fs_request(rq));
+	BUG_ON(rq->cmd_type != REQ_TYPE_FS);
 
 	ledtrig_ide_activity();
 
@@ -679,7 +679,7 @@ static void ide_disk_setup(ide_drive_t *drive)
 		if (max_s > hwif->rqsize)
 			max_s = hwif->rqsize;
 
-		blk_queue_max_sectors(q, max_s);
+		blk_queue_max_hw_sectors(q, max_s);
 	}
 
 	printk(KERN_INFO "%s: max request size: %dKiB\n", drive->name,

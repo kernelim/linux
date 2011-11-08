@@ -154,9 +154,10 @@ void unregister_vlan_dev(struct net_device *dev)
 	BUG_ON(!grp);
 
 	/* Take it out of our own structures, but be sure to interlock with
-	 * HW accelerating devices or SW vlan input packet processing.
+	 * HW accelerating devices or SW vlan input packet processing if
+	 * VLAN is not 0 (leave it there for 802.1p).
 	 */
-	if (real_dev->features & NETIF_F_HW_VLAN_FILTER)
+	if (vlan_id && (real_dev->features & NETIF_F_HW_VLAN_FILTER))
 		ops->ndo_vlan_rx_kill_vid(real_dev, vlan_id);
 
 	vlan_group_set_device(grp, vlan_id, NULL);
@@ -333,13 +334,12 @@ static int register_vlan_device(struct net_device *real_dev, u16 vlan_id)
 		snprintf(name, IFNAMSIZ, "vlan%.4i", vlan_id);
 	}
 
-	new_dev = alloc_netdev_mq(sizeof(struct vlan_dev_info), name,
-				  vlan_setup, real_dev->num_tx_queues);
+	new_dev = alloc_netdev(sizeof(struct vlan_dev_info), name,
+				  vlan_setup);
 
 	if (new_dev == NULL)
 		return -ENOBUFS;
 
-	new_dev->real_num_tx_queues = real_dev->real_num_tx_queues;
 	dev_net_set(new_dev, net);
 	/* need 4 bytes for extra VLAN header info,
 	 * hope the underlying device can handle it.
@@ -398,7 +398,6 @@ static void vlan_transfer_features(struct net_device *dev,
 #if defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE)
 	vlandev->fcoe_ddp_xid = dev->fcoe_ddp_xid;
 #endif
-
 	if (old_features != vlandev->features)
 		netdev_features_change(vlandev);
 }
@@ -433,6 +432,14 @@ static int vlan_device_event(struct notifier_block *unused, unsigned long event,
 
 	if (is_vlan_dev(dev))
 		__vlan_device_event(dev, event);
+
+	if ((event == NETDEV_UP) &&
+	    (dev->features & NETIF_F_HW_VLAN_FILTER) &&
+	    dev->netdev_ops->ndo_vlan_rx_add_vid) {
+		pr_info("8021q: adding VLAN 0 to HW filter on device %s\n",
+			dev->name);
+		dev->netdev_ops->ndo_vlan_rx_add_vid(dev, 0);
+	}
 
 	grp = __vlan_find_group(dev);
 	if (!grp)

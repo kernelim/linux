@@ -140,7 +140,8 @@ int vlan_skb_recv(struct sk_buff *skb, struct net_device *dev,
 		  struct packet_type *ptype, struct net_device *orig_dev)
 {
 	struct vlan_hdr *vhdr;
-	struct net_device_stats *stats;
+	struct vlan_rx_stats *rx_stats;
+	struct net_device *vlan_dev;
 	u16 vlan_id;
 	u16 vlan_tci;
 
@@ -156,52 +157,69 @@ int vlan_skb_recv(struct sk_buff *skb, struct net_device *dev,
 	vlan_id = vlan_tci & VLAN_VID_MASK;
 
 	rcu_read_lock();
-	skb->dev = __find_vlan_dev(dev, vlan_id);
-	if (!skb->dev) {
-		pr_debug("%s: ERROR: No net_device for VID: %u on dev: %s\n",
-			 __func__, vlan_id, dev->name);
-		goto err_unlock;
-	}
+	vlan_dev = __find_vlan_dev(dev, vlan_id);
 
-	stats = &skb->dev->stats;
-	stats->rx_packets++;
-	stats->rx_bytes += skb->len;
+	/* If the VLAN device is defined, we use it.
+	 * If not, and the VID is 0, it is a 802.1p packet (not
+	 * really a VLAN), so we will just netif_rx it later to the
+	 * original interface, but with the skb->proto set to the
+	 * wrapped proto: we do nothing here.
+	 */
+
+	if (!vlan_dev) {
+		if (vlan_id) {
+			pr_debug("%s: ERROR: No net_device for VID: %u on dev: %s\n",
+				 __func__, vlan_id, dev->name);
+			goto err_unlock;
+		}
+		rx_stats = NULL;
+	} else {
+		skb->dev = vlan_dev;
+ 
+		rx_stats = per_cpu_ptr(vlan_dev_info(skb->dev)->vlan_rx_stats,
+					smp_processor_id());
+		rx_stats->rx_packets++;
+		rx_stats->rx_bytes += skb->len;
+ 
+		skb->priority = vlan_get_ingress_priority(skb->dev, vlan_tci);
+ 
+		pr_debug("%s: priority: %u for TCI: %hu\n",
+			 __func__, skb->priority, vlan_tci);
+ 
+		switch (skb->pkt_type) {
+		case PACKET_BROADCAST:
+			/* Yeah, stats collect these together.. */
+			/* stats->broadcast ++; // no such counter :-( */
+			break;
+ 
+		case PACKET_MULTICAST:
+			rx_stats->multicast++;
+			break;
+ 
+		case PACKET_OTHERHOST:
+			/* Our lower layer thinks this is not local, let's make
+			 * sure.
+			 * This allows the VLAN to have a different MAC than the
+			 * underlying device, and still route correctly.
+			 */
+			if (!compare_ether_addr(eth_hdr(skb)->h_dest,
+						skb->dev->dev_addr))
+				skb->pkt_type = PACKET_HOST;
+			break;
+		default:
+			break;
+		}
+	}
 
 	skb_pull_rcsum(skb, VLAN_HLEN);
-
-	skb->priority = vlan_get_ingress_priority(skb->dev, vlan_tci);
-
-	pr_debug("%s: priority: %u for TCI: %hu\n",
-		 __func__, skb->priority, vlan_tci);
-
-	switch (skb->pkt_type) {
-	case PACKET_BROADCAST: /* Yeah, stats collect these together.. */
-		/* stats->broadcast ++; // no such counter :-( */
-		break;
-
-	case PACKET_MULTICAST:
-		stats->multicast++;
-		break;
-
-	case PACKET_OTHERHOST:
-		/* Our lower layer thinks this is not local, let's make sure.
-		 * This allows the VLAN to have a different MAC than the
-		 * underlying device, and still route correctly.
-		 */
-		if (!compare_ether_addr(eth_hdr(skb)->h_dest,
-					skb->dev->dev_addr))
-			skb->pkt_type = PACKET_HOST;
-		break;
-	default:
-		break;
-	}
-
 	vlan_set_encap_proto(skb, vhdr);
 
-	skb = vlan_check_reorder_header(skb);
-	if (!skb) {
-		stats->rx_errors++;
-		goto err_unlock;
+	if (vlan_dev) {
+		skb = vlan_check_reorder_header(skb);
+		if (!skb) {
+			rx_stats->rx_errors++;
+			goto err_unlock;
+		}
 	}
 
 	netif_rx(skb);
@@ -393,7 +411,7 @@ int vlan_dev_set_egress_priority(const struct net_device *dev,
 	struct vlan_dev_info *vlan = vlan_dev_info(dev);
 	struct vlan_priority_tci_mapping *mp = NULL;
 	struct vlan_priority_tci_mapping *np;
-	u32 vlan_qos = (vlan_prio << 13) & 0xE000;
+	u32 vlan_qos = (vlan_prio << VLAN_PRIO_SHIFT) & VLAN_PRIO_MASK;
 
 	/* See if a priority mapping exists.. */
 	mp = vlan->egress_priority_map[skb_prio & 0xF];
@@ -626,6 +644,17 @@ static int vlan_dev_fcoe_disable(struct net_device *dev)
 		rc = ops->ndo_fcoe_disable(real_dev);
 	return rc;
 }
+
+static int vlan_dev_fcoe_get_wwn(struct net_device *dev, u64 *wwn, int type)
+{
+	struct net_device *real_dev = vlan_dev_info(dev)->real_dev;
+	const struct net_device_ops *ops = real_dev->netdev_ops;
+	int rc = -EINVAL;
+
+	if (ops->ndo_fcoe_get_wwn)
+		rc = ops->ndo_fcoe_get_wwn(real_dev, wwn, type);
+	return rc;
+}
 #endif
 
 static void vlan_dev_change_rx_flags(struct net_device *dev, int change)
@@ -709,17 +738,22 @@ static int vlan_dev_init(struct net_device *dev)
 	if (real_dev->features & NETIF_F_HW_VLAN_TX) {
 		dev->header_ops      = real_dev->header_ops;
 		dev->hard_header_len = real_dev->hard_header_len;
-		dev->netdev_ops         = &vlan_netdev_accel_ops;
+		dev->netdev_ops = &vlan_netdev_accel_ops;
 	} else {
 		dev->header_ops      = &vlan_header_ops;
 		dev->hard_header_len = real_dev->hard_header_len + VLAN_HLEN;
-		dev->netdev_ops         = &vlan_netdev_ops;
+		dev->netdev_ops = &vlan_netdev_ops;
 	}
 
 	if (is_vlan_dev(real_dev))
 		subclass = 1;
 
 	vlan_dev_set_lockdep_class(dev, subclass);
+
+	vlan_dev_info(dev)->vlan_rx_stats = alloc_percpu(struct vlan_rx_stats);
+	if (!vlan_dev_info(dev)->vlan_rx_stats)
+		return -ENOMEM;
+
 	return 0;
 }
 
@@ -729,6 +763,8 @@ static void vlan_dev_uninit(struct net_device *dev)
 	struct vlan_dev_info *vlan = vlan_dev_info(dev);
 	int i;
 
+	free_percpu(vlan->vlan_rx_stats);
+	vlan->vlan_rx_stats = NULL;
 	for (i = 0; i < ARRAY_SIZE(vlan->egress_priority_map); i++) {
 		while ((pm = vlan->egress_priority_map[i]) != NULL) {
 			vlan->egress_priority_map[i] = pm->next;
@@ -764,12 +800,57 @@ static u32 vlan_ethtool_get_flags(struct net_device *dev)
 	return dev_ethtool_get_flags(vlan->real_dev);
 }
 
+static struct net_device_stats *vlan_dev_get_stats(struct net_device *dev)
+{
+	struct net_device_stats *stats = &dev->stats;
+
+	dev_txq_stats_fold(dev, stats);
+
+	if (vlan_dev_info(dev)->vlan_rx_stats) {
+		struct vlan_rx_stats *p, rx = {0};
+		int i;
+
+		for_each_possible_cpu(i) {
+			p = per_cpu_ptr(vlan_dev_info(dev)->vlan_rx_stats, i);
+			rx.rx_packets += p->rx_packets;
+			rx.rx_bytes   += p->rx_bytes;
+			rx.rx_errors  += p->rx_errors;
+			rx.multicast  += p->multicast;
+		}
+		stats->rx_packets = rx.rx_packets;
+		stats->rx_bytes   = rx.rx_bytes;
+		stats->rx_errors  = rx.rx_errors;
+		stats->multicast  = rx.multicast;
+	}
+	return stats;
+}
+
+static int vlan_ethtool_set_tso(struct net_device *dev, u32 data)
+{
+       if (data) {
+		struct net_device *real_dev = vlan_dev_info(dev)->real_dev;
+
+		/* Underlying device must support TSO for VLAN-tagged packets
+		 * and must have TSO enabled now.
+		 */
+		if (!(real_dev->vlan_features & NETIF_F_TSO))
+			return -EOPNOTSUPP;
+		if (!(real_dev->features & NETIF_F_TSO))
+			return -EINVAL;
+		dev->features |= NETIF_F_TSO;
+	} else {
+		dev->features &= ~NETIF_F_TSO;
+	}
+	return 0;
+}
+
 static const struct ethtool_ops vlan_ethtool_ops = {
 	.get_settings	        = vlan_ethtool_get_settings,
 	.get_drvinfo	        = vlan_ethtool_get_drvinfo,
 	.get_link		= ethtool_op_get_link,
 	.get_rx_csum		= vlan_ethtool_get_rx_csum,
 	.get_flags		= vlan_ethtool_get_flags,
+	.set_tso                = vlan_ethtool_set_tso,
 };
 
 static const struct net_device_ops vlan_netdev_ops = {
@@ -786,11 +867,13 @@ static const struct net_device_ops vlan_netdev_ops = {
 	.ndo_change_rx_flags	= vlan_dev_change_rx_flags,
 	.ndo_do_ioctl		= vlan_dev_ioctl,
 	.ndo_neigh_setup	= vlan_dev_neigh_setup,
+	.ndo_get_stats		= vlan_dev_get_stats,
 #if defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE)
 	.ndo_fcoe_ddp_setup	= vlan_dev_fcoe_ddp_setup,
 	.ndo_fcoe_ddp_done	= vlan_dev_fcoe_ddp_done,
 	.ndo_fcoe_enable	= vlan_dev_fcoe_enable,
 	.ndo_fcoe_disable	= vlan_dev_fcoe_disable,
+	.ndo_fcoe_get_wwn	= vlan_dev_fcoe_get_wwn,
 #endif
 };
 
@@ -808,11 +891,13 @@ static const struct net_device_ops vlan_netdev_accel_ops = {
 	.ndo_change_rx_flags	= vlan_dev_change_rx_flags,
 	.ndo_do_ioctl		= vlan_dev_ioctl,
 	.ndo_neigh_setup	= vlan_dev_neigh_setup,
+	.ndo_get_stats		= vlan_dev_get_stats,
 #if defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE)
 	.ndo_fcoe_ddp_setup	= vlan_dev_fcoe_ddp_setup,
 	.ndo_fcoe_ddp_done	= vlan_dev_fcoe_ddp_done,
 	.ndo_fcoe_enable	= vlan_dev_fcoe_enable,
 	.ndo_fcoe_disable	= vlan_dev_fcoe_disable,
+	.ndo_fcoe_get_wwn	= vlan_dev_fcoe_get_wwn,
 #endif
 };
 
@@ -822,6 +907,7 @@ void vlan_setup(struct net_device *dev)
 
 	dev->priv_flags		|= IFF_802_1Q_VLAN;
 	dev->priv_flags		&= ~IFF_XMIT_DST_RELEASE;
+	netdev_extended(dev)->ext_priv_flags &= ~IFF_TX_SKB_SHARING;
 	dev->tx_queue_len	= 0;
 
 	dev->netdev_ops		= &vlan_netdev_ops;

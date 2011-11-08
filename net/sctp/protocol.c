@@ -474,13 +474,17 @@ static struct dst_entry *sctp_v4_get_dst(struct sctp_association *asoc,
 
 	memset(&fl, 0x0, sizeof(struct flowi));
 	fl.fl4_dst  = daddr->v4.sin_addr.s_addr;
+	fl.fl_ip_dport = daddr->v4.sin_port;
 	fl.proto = IPPROTO_SCTP;
 	if (asoc) {
 		fl.fl4_tos = RT_CONN_FLAGS(asoc->base.sk);
 		fl.oif = asoc->base.sk->sk_bound_dev_if;
+		fl.fl_ip_sport = htons(asoc->base.bind_addr.port);
 	}
-	if (saddr)
+	if (saddr) {
 		fl.fl4_src = saddr->v4.sin_addr.s_addr;
+		fl.fl_ip_sport = saddr->v4.sin_port;
+	}
 
 	SCTP_DEBUG_PRINTK("%s: DST:%pI4, SRC:%pI4 - ",
 			  __func__, &fl.fl4_dst, &fl.fl4_src);
@@ -528,6 +532,7 @@ static struct dst_entry *sctp_v4_get_dst(struct sctp_association *asoc,
 		if ((laddr->state == SCTP_ADDR_SRC) &&
 		    (AF_INET == laddr->a.sa.sa_family)) {
 			fl.fl4_src = laddr->a.v4.sin_addr.s_addr;
+			fl.fl_ip_sport = laddr->a.v4.sin_port;
 			if (!ip_route_output_key(&init_net, &rt, &fl)) {
 				dst = &rt->u.dst;
 				goto out_unlock;
@@ -909,7 +914,6 @@ static struct inet_protosw sctp_seqpacket_protosw = {
 	.protocol   = IPPROTO_SCTP,
 	.prot       = &sctp_prot,
 	.ops        = &inet_seqpacket_ops,
-	.capability = -1,
 	.no_check   = 0,
 	.flags      = SCTP_PROTOSW_FLAG
 };
@@ -918,7 +922,6 @@ static struct inet_protosw sctp_stream_protosw = {
 	.protocol   = IPPROTO_SCTP,
 	.prot       = &sctp_prot,
 	.ops        = &inet_seqpacket_ops,
-	.capability = -1,
 	.no_check   = 0,
 	.flags      = SCTP_PROTOSW_FLAG
 };
@@ -1198,7 +1201,7 @@ SCTP_STATIC __init int sctp_init(void)
 		if ((sctp_assoc_hashsize > (64 * 1024)) && order > 0)
 			continue;
 		sctp_assoc_hashtable = (struct sctp_hashbucket *)
-					__get_free_pages(GFP_ATOMIC, order);
+			__get_free_pages(GFP_ATOMIC|__GFP_NOWARN, order);
 	} while (!sctp_assoc_hashtable && --order > 0);
 	if (!sctp_assoc_hashtable) {
 		printk(KERN_ERR "SCTP: Failed association hash alloc.\n");
@@ -1231,7 +1234,7 @@ SCTP_STATIC __init int sctp_init(void)
 		if ((sctp_port_hashsize > (64 * 1024)) && order > 0)
 			continue;
 		sctp_port_hashtable = (struct sctp_bind_hashbucket *)
-					__get_free_pages(GFP_ATOMIC, order);
+			__get_free_pages(GFP_ATOMIC|__GFP_NOWARN, order);
 	} while (!sctp_port_hashtable && --order > 0);
 	if (!sctp_port_hashtable) {
 		printk(KERN_ERR "SCTP: Failed bind hash alloc.");
@@ -1259,6 +1262,9 @@ SCTP_STATIC __init int sctp_init(void)
 
 	/* Set SCOPE policy to enabled */
 	sctp_scope_policy = SCTP_SCOPE_POLICY_ENABLE;
+
+	/* Set the default rwnd update threshold */
+	sctp_rwnd_upd_shift		= SCTP_DEFAULT_RWND_SHIFT;
 
 	sctp_sysctl_register();
 

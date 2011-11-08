@@ -37,6 +37,9 @@
 #include <linux/proc_fs.h>
 #include <linux/debugfs.h>
 
+#define CREATE_TRACE_POINTS
+#include <trace/events/jbd.h>
+
 #include <asm/uaccess.h>
 #include <asm/page.h>
 
@@ -84,6 +87,7 @@ EXPORT_SYMBOL(journal_force_commit);
 
 static int journal_convert_superblock_v1(journal_t *, journal_superblock_t *);
 static void __journal_abort_soft (journal_t *journal, int errno);
+static const char *journal_dev_name(journal_t *journal, char *buffer);
 
 /*
  * Helper function used to manage commit timeouts
@@ -978,6 +982,23 @@ void journal_update_superblock(journal_t *journal, int wait)
 		goto out;
 	}
 
+	if (buffer_write_io_error(bh)) {
+		char b[BDEVNAME_SIZE];
+		/*
+		 * Oh, dear.  A previous attempt to write the journal
+		 * superblock failed.  This could happen because the
+		 * USB device was yanked out.  Or it could happen to
+		 * be a transient write error and maybe the block will
+		 * be remapped.  Nothing we can do but to retry the
+		 * write and hope for the best.
+		 */
+		printk(KERN_ERR "JBD: previous I/O error detected "
+		       "for journal superblock update for %s.\n",
+		       journal_dev_name(journal, b));
+		clear_buffer_write_io_error(bh);
+		set_buffer_uptodate(bh);
+	}
+
 	spin_lock(&journal->j_state_lock);
 	jbd_debug(1,"JBD: updating superblock (start %u, seq %d, errno %d)\n",
 		  journal->j_tail, journal->j_tail_sequence, journal->j_errno);
@@ -989,11 +1010,20 @@ void journal_update_superblock(journal_t *journal, int wait)
 
 	BUFFER_TRACE(bh, "marking dirty");
 	mark_buffer_dirty(bh);
-	if (wait)
+	if (wait) {
 		sync_dirty_buffer(bh);
-	else
-		ll_rw_block(SWRITE, 1, &bh);
+		if (buffer_write_io_error(bh)) {
+			char b[BDEVNAME_SIZE];
+			printk(KERN_ERR "JBD: I/O error detected "
+			       "when updating journal superblock for %s.\n",
+			       journal_dev_name(journal, b));
+			clear_buffer_write_io_error(bh);
+			set_buffer_uptodate(bh);
+		}
+	} else
+		write_dirty_buffer(bh, WRITE);
 
+	trace_jbd_update_superblock_end(journal, wait);
 out:
 	/* If we have just flushed the log (by marking s_start==0), then
 	 * any future commit will have to be careful to update the
@@ -1913,7 +1943,7 @@ static void __init jbd_create_debugfs_entry(void)
 {
 	jbd_debugfs_dir = debugfs_create_dir("jbd", NULL);
 	if (jbd_debugfs_dir)
-		jbd_debug = debugfs_create_u8("jbd-debug", S_IRUGO,
+		jbd_debug = debugfs_create_u8("jbd-debug", S_IRUGO | S_IWUSR,
 					       jbd_debugfs_dir,
 					       &journal_enable_debug);
 }

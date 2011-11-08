@@ -218,6 +218,11 @@ static int do_gfs2_set_flags(struct file *filp, u32 reqflags, u32 mask)
 	if (error)
 		goto out_drop_write;
 
+	error = -EACCES;
+	if (!is_owner_or_cap(inode))
+		goto out;
+
+	error = 0;
 	flags = ip->i_diskflags;
 	new_flags = (flags & ~mask) | (reqflags & mask);
 	if ((new_flags ^ flags) == 0)
@@ -275,8 +280,10 @@ static int gfs2_set_flags(struct file *filp, u32 __user *ptr)
 {
 	struct inode *inode = filp->f_path.dentry->d_inode;
 	u32 fsflags, gfsflags;
+
 	if (get_user(fsflags, ptr))
 		return -EFAULT;
+
 	gfsflags = fsflags_cvt(fsflags_to_gfs2, fsflags);
 	if (!S_ISDIR(inode->i_mode)) {
 		if (gfsflags & GFS2_DIF_INHERIT_JDATA)
@@ -347,7 +354,14 @@ static int gfs2_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf)
 	int alloc_required = 0;
 	struct gfs2_holder gh;
 	struct gfs2_alloc *al;
+	loff_t size;
 	int ret;
+
+	/* Wait if fs is frozen. This is racy so we check again later on
+	 * and retry if the fs has been frozen after the page lock has
+	 * been acquired
+	 */
+	vfs_check_frozen(inode->i_sb, SB_FREEZE_WRITE);
 
 	gfs2_holder_init(ip->i_gl, LM_ST_EXCLUSIVE, 0, &gh);
 	ret = gfs2_glock_nq(&gh);
@@ -358,8 +372,18 @@ static int gfs2_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf)
 	set_bit(GIF_SW_PAGED, &ip->i_flags);
 
 	ret = gfs2_write_alloc_required(ip, pos, PAGE_CACHE_SIZE, &alloc_required);
-	if (ret || !alloc_required)
+	if (ret)
 		goto out_unlock;
+
+	if (!alloc_required) {
+		lock_page(page);
+		if (!PageUptodate(page) || page->mapping != inode->i_mapping) {
+			ret = -EAGAIN;
+			unlock_page(page);
+		}
+		goto out_unlock;
+	}
+
 	ret = -ENOMEM;
 	al = gfs2_alloc_get(ip);
 	if (al == NULL)
@@ -377,29 +401,39 @@ static int gfs2_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf)
 	rblocks = RES_DINODE + ind_blocks;
 	if (gfs2_is_jdata(ip))
 		rblocks += data_blocks ? data_blocks : 1;
-	if (ind_blocks || data_blocks)
+	if (ind_blocks || data_blocks) {
 		rblocks += RES_STATFS + RES_QUOTA;
+		rblocks += gfs2_rg_blocks(al);
+	}
 	ret = gfs2_trans_begin(sdp, rblocks, 0);
 	if (ret)
 		goto out_trans_fail;
 
 	lock_page(page);
 	ret = -EINVAL;
-	last_index = ip->i_inode.i_size >> PAGE_CACHE_SHIFT;
-	if (page->index > last_index)
-		goto out_unlock_page;
-	ret = 0;
-	if (!PageUptodate(page) || page->mapping != ip->i_inode.i_mapping)
-		goto out_unlock_page;
-	if (gfs2_is_stuffed(ip)) {
-		ret = gfs2_unstuff_dinode(ip, page);
-		if (ret)
-			goto out_unlock_page;
-	}
-	ret = gfs2_allocate_page_backing(page);
+	size = i_size_read(inode);
+	last_index = (size - 1) >> PAGE_CACHE_SHIFT;
+	/* Check page index against inode size */
+	if (size == 0 || (page->index > last_index))
+		goto out_trans_end;
 
-out_unlock_page:
-	unlock_page(page);
+	ret = -EAGAIN;
+	/* If truncated, we must retry the operation, we may have raced
+	 * with the glock demotion code.
+	 */
+	if (!PageUptodate(page) || page->mapping != inode->i_mapping)
+		goto out_trans_end;
+
+	/* Unstuff, if required, and allocate backing blocks for page */
+	ret = 0;
+	if (gfs2_is_stuffed(ip))
+		ret = gfs2_unstuff_dinode(ip, page);
+	if (ret == 0)
+		ret = gfs2_allocate_page_backing(page);
+
+out_trans_end:
+	if (ret)
+		unlock_page(page);
 	gfs2_trans_end(sdp);
 out_trans_fail:
 	gfs2_inplace_release(ip);
@@ -411,11 +445,17 @@ out_unlock:
 	gfs2_glock_dq(&gh);
 out:
 	gfs2_holder_uninit(&gh);
-	if (ret == -ENOMEM)
-		ret = VM_FAULT_OOM;
-	else if (ret)
-		ret = VM_FAULT_SIGBUS;
-	return ret;
+	if (ret == 0) {
+		set_page_dirty(page);
+		/* This check must be post dropping of transaction lock */
+		if (inode->i_sb->s_frozen == SB_UNFROZEN) {
+			wait_on_page_writeback(page);
+		} else {
+			ret = -EAGAIN;
+			unlock_page(page);
+		}
+	}
+	return block_page_mkwrite_return(ret);
 }
 
 static const struct vm_operations_struct gfs2_vm_ops = {
@@ -439,15 +479,20 @@ static int gfs2_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	struct gfs2_inode *ip = GFS2_I(file->f_mapping->host);
 
-	if (!(file->f_flags & O_NOATIME)) {
+	if (!(file->f_flags & O_NOATIME) &&
+	    !IS_NOATIME(&ip->i_inode)) {
 		struct gfs2_holder i_gh;
 		int error;
 
-		gfs2_holder_init(ip->i_gl, LM_ST_EXCLUSIVE, 0, &i_gh);
+		gfs2_holder_init(ip->i_gl, LM_ST_SHARED, LM_FLAG_ANY, &i_gh);
 		error = gfs2_glock_nq(&i_gh);
-		file_accessed(file);
-		if (error == 0)
-			gfs2_glock_dq_uninit(&i_gh);
+		if (error == 0) {
+			file_accessed(file);
+			gfs2_glock_dq(&i_gh);
+		}
+		gfs2_holder_uninit(&i_gh);
+		if (error)
+			return error;
 	}
 	vma->vm_ops = &gfs2_vm_ops;
 	vma->vm_flags |= VM_CAN_NONLINEAR;
@@ -531,18 +576,10 @@ static int gfs2_close(struct inode *inode, struct file *file)
 /**
  * gfs2_fsync - sync the dirty data for a file (across the cluster)
  * @file: the file that points to the dentry (we ignore this)
- * @dentry: the dentry that points to the inode to sync
+ * @datasync: set if we can ignore timestamp changes
  *
- * The VFS will flush "normal" data for us. We only need to worry
- * about metadata here. For journaled data, we just do a log flush
- * as we can't avoid it. Otherwise we can just bale out if datasync
- * is set. For stuffed inodes we must flush the log in order to
- * ensure that all data is on disk.
- *
- * The call to write_inode_now() is there to write back metadata and
- * the inode itself. It does also try and write the data, but thats
- * (hopefully) a no-op due to the VFS having already called filemap_fdatawrite()
- * for us.
+ * The VFS will flush data for us. We only need to worry
+ * about metadata here.
  *
  * Returns: errno
  */
@@ -551,22 +588,56 @@ static int gfs2_fsync(struct file *file, struct dentry *dentry, int datasync)
 {
 	struct inode *inode = dentry->d_inode;
 	int sync_state = inode->i_state & (I_DIRTY_SYNC|I_DIRTY_DATASYNC);
-	int ret = 0;
+	struct gfs2_inode *ip = GFS2_I(inode);
+	int ret;
 
-	if (gfs2_is_jdata(GFS2_I(inode))) {
-		gfs2_log_flush(GFS2_SB(inode), GFS2_I(inode)->i_gl);
-		return 0;
+	if (datasync)
+		sync_state &= ~I_DIRTY_SYNC;
+
+	if (sync_state) {
+		ret = sync_inode_metadata(inode, 1);
+		if (ret)
+			return ret;
+		if (gfs2_is_jdata(ip))
+			filemap_write_and_wait(inode->i_mapping);
+		gfs2_ail_flush(ip->i_gl, 1);
 	}
 
-	if (sync_state != 0) {
-		if (!datasync)
-			ret = write_inode_now(inode, 0);
+	return 0;
+}
 
-		if (gfs2_is_stuffed(GFS2_I(inode)))
-			gfs2_log_flush(GFS2_SB(inode), GFS2_I(inode)->i_gl);
+/**
+ * gfs2_file_aio_write - Perform a write to a file
+ * @iocb: The io context
+ * @iov: The data to write
+ * @nr_segs: Number of @iov segments
+ * @pos: The file position
+ *
+ * We have to do a lock/unlock here to refresh the inode size for
+ * O_APPEND writes, otherwise we can land up writing at the wrong
+ * offset. There is still a race, but provided the app is using its
+ * own file locking, this will make O_APPEND work as expected.
+ *
+ */
+
+static ssize_t gfs2_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
+				   unsigned long nr_segs, loff_t pos)
+{
+	struct file *file = iocb->ki_filp;
+
+	if (file->f_flags & O_APPEND) {
+		struct dentry *dentry = file->f_dentry;
+		struct gfs2_inode *ip = GFS2_I(dentry->d_inode);
+		struct gfs2_holder gh;
+		int ret;
+
+		ret = gfs2_glock_nq_init(ip->i_gl, LM_ST_SHARED, 0, &gh);
+		if (ret)
+			return ret;
+		gfs2_glock_dq_uninit(&gh);
 	}
 
-	return ret;
+	return generic_file_aio_write(iocb, iov, nr_segs, pos);
 }
 
 #ifdef CONFIG_GFS2_FS_LOCKING_DLM
@@ -606,7 +677,7 @@ static int gfs2_lock(struct file *file, int cmd, struct file_lock *fl)
 
 	if (!(fl->fl_flags & FL_POSIX))
 		return -ENOLCK;
-	if (__mandatory_lock(&ip->i_inode))
+	if (__mandatory_lock(&ip->i_inode) && fl->fl_type != F_UNLCK)
 		return -ENOLCK;
 
 	if (cmd == F_CANCELLK) {
@@ -677,8 +748,10 @@ static void do_unflock(struct file *file, struct file_lock *fl)
 
 	mutex_lock(&fp->f_fl_mutex);
 	flock_lock_file_wait(file, fl);
-	if (fl_gh->gh_gl)
-		gfs2_glock_dq_uninit(fl_gh);
+	if (fl_gh->gh_gl) {
+		gfs2_glock_dq_wait(fl_gh);
+		gfs2_holder_uninit(fl_gh);
+	}
 	mutex_unlock(&fp->f_fl_mutex);
 }
 
@@ -711,7 +784,7 @@ const struct file_operations gfs2_file_fops = {
 	.read		= do_sync_read,
 	.aio_read	= generic_file_aio_read,
 	.write		= do_sync_write,
-	.aio_write	= generic_file_aio_write,
+	.aio_write	= gfs2_file_aio_write,
 	.unlocked_ioctl	= gfs2_ioctl,
 	.mmap		= gfs2_mmap,
 	.open		= gfs2_open,
@@ -741,7 +814,7 @@ const struct file_operations gfs2_file_fops_nolock = {
 	.read		= do_sync_read,
 	.aio_read	= generic_file_aio_read,
 	.write		= do_sync_write,
-	.aio_write	= generic_file_aio_write,
+	.aio_write	= gfs2_file_aio_write,
 	.unlocked_ioctl	= gfs2_ioctl,
 	.mmap		= gfs2_mmap,
 	.open		= gfs2_open,

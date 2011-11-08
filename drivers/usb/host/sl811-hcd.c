@@ -45,6 +45,7 @@
 #include <linux/interrupt.h>
 #include <linux/usb.h>
 #include <linux/usb/sl811.h>
+#include <linux/usb/hcd.h>
 #include <linux/platform_device.h>
 
 #include <asm/io.h>
@@ -52,7 +53,6 @@
 #include <asm/system.h>
 #include <asm/byteorder.h>
 
-#include "../core/hcd.h"
 #include "sl811.h"
 
 
@@ -1106,9 +1106,9 @@ sl811h_hub_descriptor (
 
 	desc->wHubCharacteristics = cpu_to_le16(temp);
 
-	/* two bitmaps:  ports removable, and legacy PortPwrCtrlMask */
-	desc->bitmap[0] = 0 << 1;
-	desc->bitmap[1] = ~0;
+	/* ports removable, and legacy PortPwrCtrlMask */
+	desc->u.hs.DeviceRemovable[0] = 0 << 1;
+	desc->u.hs.DeviceRemovable[1] = ~0;
 }
 
 static void

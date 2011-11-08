@@ -73,6 +73,8 @@
 /* Quota format type IDs */
 #define	QFMT_VFS_OLD 1
 #define	QFMT_VFS_V0 2
+#define QFMT_OCFS2 3
+#define	QFMT_VFS_V1 4
 
 /* Size of block in which space limits are passed through the quota
  * interface */
@@ -313,8 +315,9 @@ struct dquot_operations {
 	int (*claim_space) (struct inode *, qsize_t);
 	/* release rsved quota for delayed alloc */
 	void (*release_rsv) (struct inode *, qsize_t);
-	/* get reserved quota for delayed alloc */
-	qsize_t (*get_reserved_space) (struct inode *);
+	/* get reserved quota for delayed alloc, value returned is managed by
+	 * quota code only */
+	qsize_t *(*get_reserved_space) (struct inode *);
 };
 
 /* Operations handling requests from userspace */
@@ -375,6 +378,17 @@ static inline unsigned int dquot_generic_flag(unsigned int flags, int type)
 		return flags;
 	return flags >> _DQUOT_STATE_FLAGS;
 }
+
+#ifdef CONFIG_QUOTA_NETLINK_INTERFACE
+extern void quota_send_warning(short type, unsigned int id, dev_t dev,
+			       const char warntype);
+#else
+static inline void quota_send_warning(short type, unsigned int id, dev_t dev,
+				      const char warntype)
+{
+	return;
+}
+#endif /* CONFIG_QUOTA_NETLINK_INTERFACE */
 
 struct quota_info {
 	unsigned int flags;			/* Flags for diskquotas on this device */

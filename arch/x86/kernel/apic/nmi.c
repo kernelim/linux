@@ -36,7 +36,6 @@
 
 #include <asm/mach_traps.h>
 
-int unknown_nmi_panic;
 int nmi_watchdog_enabled;
 
 static cpumask_t backtrace_mask __read_mostly;
@@ -50,14 +49,76 @@ static cpumask_t backtrace_mask __read_mostly;
 atomic_t nmi_active = ATOMIC_INIT(0);		/* oprofile uses this */
 EXPORT_SYMBOL(nmi_active);
 
+#ifdef CONFIG_X86_64
+unsigned int nmi_watchdog = NMI_DEFAULT;
+#else
 unsigned int nmi_watchdog = NMI_NONE;
+#endif
 EXPORT_SYMBOL(nmi_watchdog);
 
 static int panic_on_timeout;
 
 static unsigned int nmi_hz = HZ;
 static DEFINE_PER_CPU(short, wd_enabled);
+static DEFINE_PER_CPU(struct hrtimer, nmi_watchdog_hrtimer);
+static DEFINE_PER_CPU(unsigned long, hrtimer_interrupts);
 static int endflag __initdata;
+
+static unsigned long get_sample_period(void)
+{
+	unsigned long count = NSEC_PER_SEC;
+
+	/*
+	 * for the NMI_LOCAL_APIC case:
+	 * nmi_hz is set to the period of the nmi watchdog
+	 * a timer is needed to match that frequency otherwise
+	 * the nmi watchdog thinks the cpu is deadlock
+	 * nb: the nmi watchdog can handle 5 misses before declaring a
+	 * deadlock, so match the frequency in this case is ok
+	 */
+	if (nmi_watchdog == NMI_LOCAL_APIC)
+		do_div(count, nmi_hz);
+
+	return count;
+}
+
+/* watchdog kicker functions */
+static enum hrtimer_restart nmi_watchdog_timer_fn(struct hrtimer *hrtimer)
+{
+	/* kick the hardlockup detector */
+	__get_cpu_var(hrtimer_interrupts)++;
+
+	/* .. and repeat */
+	hrtimer_forward_now(hrtimer, ns_to_ktime(get_sample_period()));
+
+	return HRTIMER_RESTART;
+}
+
+#ifdef CONFIG_X86_64
+void __cpuinit nmi_watchdog_default(void)
+{
+	struct hrtimer *hrtimer = &__get_cpu_var(nmi_watchdog_hrtimer);
+
+	if (nmi_watchdog != NMI_DEFAULT)
+		return;
+	/* if not specified, probe it */
+	if (!lapic_watchdog_init(nmi_hz))
+		nmi_watchdog = NMI_LOCAL_APIC;
+	else {
+		cpu_nmi_set_wd_enabled();
+		nmi_watchdog = NMI_IO_APIC;
+	}
+	atomic_inc(&nmi_active);
+
+	/* kick off hrtimers to use to determine if interrupts are working */
+	hrtimer_init(hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	hrtimer->function = nmi_watchdog_timer_fn;
+	hrtimer_start(hrtimer, ns_to_ktime(get_sample_period()),
+		      HRTIMER_MODE_REL_PINNED);
+}
+#else
+void __cpuinit nmi_watchdog_default(void) { return; }
+#endif
 
 static inline unsigned int get_nmi_count(int cpu)
 {
@@ -78,8 +139,7 @@ static inline int mce_in_progress(void)
  */
 static inline unsigned int get_timer_irqs(int cpu)
 {
-	return per_cpu(irq_stat, cpu).apic_timer_irqs +
-		per_cpu(irq_stat, cpu).irq0_irqs;
+	return per_cpu(hrtimer_interrupts, cpu);
 }
 
 #ifdef CONFIG_SMP
@@ -106,6 +166,8 @@ static __init void nmi_cpu_busy(void *data)
 
 static void report_broken_nmi(int cpu, unsigned int *prev_nmi_count)
 {
+	struct hrtimer *hrtimer = &per_cpu(nmi_watchdog_hrtimer, cpu);
+
 	printk(KERN_CONT "\n");
 
 	printk(KERN_WARNING
@@ -119,6 +181,7 @@ static void report_broken_nmi(int cpu, unsigned int *prev_nmi_count)
 
 	per_cpu(wd_enabled, cpu) = 0;
 	atomic_dec(&nmi_active);
+	hrtimer_cancel(hrtimer);
 }
 
 static void __acpi_nmi_disable(void *__unused)
@@ -140,20 +203,20 @@ int __init check_nmi_watchdog(void)
 
 	printk(KERN_INFO "Testing NMI watchdog ... ");
 
+	for_each_possible_cpu(cpu)
+		prev_nmi_count[cpu] = get_nmi_count(cpu);
 #ifdef CONFIG_SMP
 	if (nmi_watchdog == NMI_LOCAL_APIC)
 		smp_call_function(nmi_cpu_busy, (void *)&endflag, 0);
 #endif
 
-	for_each_possible_cpu(cpu)
-		prev_nmi_count[cpu] = get_nmi_count(cpu);
 	local_irq_enable();
-	mdelay((20 * 1000) / nmi_hz); /* wait 20 ticks */
+	mdelay((40 * 1000) / nmi_hz); /* wait 40 ticks */
 
 	for_each_online_cpu(cpu) {
 		if (!per_cpu(wd_enabled, cpu))
 			continue;
-		if (get_nmi_count(cpu) - prev_nmi_count[cpu] <= 5)
+		if (get_nmi_count(cpu) - prev_nmi_count[cpu] == 0)
 			report_broken_nmi(cpu, prev_nmi_count);
 	}
 	endflag = 1;
@@ -309,6 +372,8 @@ void cpu_nmi_set_wd_enabled(void)
 
 void setup_apic_nmi_watchdog(void *unused)
 {
+	struct hrtimer *hrtimer = &__get_cpu_var(nmi_watchdog_hrtimer);
+
 	if (__get_cpu_var(wd_enabled))
 		return;
 
@@ -327,16 +392,28 @@ void setup_apic_nmi_watchdog(void *unused)
 	case NMI_IO_APIC:
 		__get_cpu_var(wd_enabled) = 1;
 		atomic_inc(&nmi_active);
+
+		/* kick off hrtimers to use to determine if interrupts are working */
+		hrtimer_init(hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+		hrtimer->function = nmi_watchdog_timer_fn;
+		hrtimer_start(hrtimer, ns_to_ktime(get_sample_period()),
+			      HRTIMER_MODE_REL_PINNED);
 	}
 }
 
 void stop_apic_nmi_watchdog(void *unused)
 {
+	struct hrtimer *hrtimer = &__get_cpu_var(nmi_watchdog_hrtimer);
+
 	/* only support LOCAL and IO APICs for now */
 	if (!nmi_watchdog_active())
 		return;
 	if (__get_cpu_var(wd_enabled) == 0)
 		return;
+
+	/* disable the hrtimer */
+	hrtimer_cancel(hrtimer);
+
 	if (nmi_watchdog == NMI_LOCAL_APIC)
 		lapic_watchdog_stop();
 	else
@@ -399,13 +476,6 @@ nmi_watchdog_tick(struct pt_regs *regs, unsigned reason)
 	int cpu = smp_processor_id();
 	int rc = 0;
 
-	/* check for other users first */
-	if (notify_die(DIE_NMI, "nmi", regs, reason, 2, SIGINT)
-			== NOTIFY_STOP) {
-		rc = 1;
-		touched = 1;
-	}
-
 	sum = get_timer_irqs(cpu);
 
 	if (__get_cpu_var(nmi_touch)) {
@@ -438,7 +508,7 @@ nmi_watchdog_tick(struct pt_regs *regs, unsigned reason)
 		 * wait a few IRQs (5 seconds) before doing the oops ...
 		 */
 		local_inc(&__get_cpu_var(alert_counter));
-		if (local_read(&__get_cpu_var(alert_counter)) == 5 * nmi_hz)
+		if (local_read(&__get_cpu_var(alert_counter)) == CONFIG_DEBUG_NMI_TIMEOUT * nmi_hz)
 			/*
 			 * die_nmi will return ONLY if NOTIFY_STOP happens..
 			 */
@@ -487,13 +557,6 @@ static void disable_ioapic_nmi_watchdog(void)
 {
 	on_each_cpu(stop_apic_nmi_watchdog, NULL, 1);
 }
-
-static int __init setup_unknown_nmi_panic(char *str)
-{
-	unknown_nmi_panic = 1;
-	return 1;
-}
-__setup("unknown_nmi_panic", setup_unknown_nmi_panic);
 
 static int unknown_nmi_panic_callback(struct pt_regs *regs, int cpu)
 {

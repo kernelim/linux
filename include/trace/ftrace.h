@@ -18,6 +18,26 @@
 
 #include <linux/ftrace_event.h>
 
+/*
+ * DECLARE_EVENT_CLASS can be used to add a generic function
+ * handlers for events. That is, if all events have the same
+ * parameters and just have distinct trace points.
+ * Each tracepoint can be defined with DEFINE_EVENT and that
+ * will map the DECLARE_EVENT_CLASS to the tracepoint.
+ *
+ * TRACE_EVENT is a one to one mapping between tracepoint and template.
+ */
+#undef TRACE_EVENT
+#define TRACE_EVENT(name, proto, args, tstruct, assign, print) \
+	DECLARE_EVENT_CLASS(name,			       \
+			     PARAMS(proto),		       \
+			     PARAMS(args),		       \
+			     PARAMS(tstruct),		       \
+			     PARAMS(assign),		       \
+			     PARAMS(print));		       \
+	DEFINE_EVENT(name, name, PARAMS(proto), PARAMS(args));
+
+
 #undef __field
 #define __field(type, item)		type	item;
 
@@ -36,14 +56,20 @@
 #undef TP_STRUCT__entry
 #define TP_STRUCT__entry(args...) args
 
-#undef TRACE_EVENT
-#define TRACE_EVENT(name, proto, args, tstruct, assign, print)	\
-	struct ftrace_raw_##name {				\
-		struct trace_entry	ent;			\
-		tstruct						\
-		char			__data[0];		\
-	};							\
+#undef DECLARE_EVENT_CLASS
+#define DECLARE_EVENT_CLASS(name, proto, args, tstruct, assign, print)	\
+	struct ftrace_raw_##name {					\
+		struct trace_entry	ent;				\
+		tstruct							\
+		char			__data[0];			\
+	};
+#undef DEFINE_EVENT
+#define DEFINE_EVENT(template, name, proto, args)	\
 	static struct ftrace_event_call event_##name
+
+#undef DEFINE_EVENT_PRINT
+#define DEFINE_EVENT_PRINT(template, name, proto, args, print)	\
+	DEFINE_EVENT(template, name, PARAMS(proto), PARAMS(args))
 
 #undef __cpparg
 #define __cpparg(arg...) arg
@@ -89,11 +115,18 @@
 #undef __string
 #define __string(item, src) __dynamic_array(char, item, -1)
 
-#undef TRACE_EVENT
-#define TRACE_EVENT(call, proto, args, tstruct, assign, print)		\
+#undef DECLARE_EVENT_CLASS
+#define DECLARE_EVENT_CLASS(call, proto, args, tstruct, assign, print)	\
 	struct ftrace_data_offsets_##call {				\
 		tstruct;						\
 	};
+
+#undef DEFINE_EVENT
+#define DEFINE_EVENT(template, name, proto, args)
+
+#undef DEFINE_EVENT_PRINT
+#define DEFINE_EVENT_PRINT(template, name, proto, args, print)	\
+	DEFINE_EVENT(template, name, PARAMS(proto), PARAMS(args))
 
 #include TRACE_INCLUDE(TRACE_INCLUDE_FILE)
 
@@ -120,9 +153,10 @@
 #undef __field
 #define __field(type, item)					\
 	ret = trace_seq_printf(s, "\tfield:" #type " " #item ";\t"	\
-			       "offset:%u;\tsize:%u;\n",		\
+			       "offset:%u;\tsize:%u;\tsigned:%u;\n",	\
 			       (unsigned int)offsetof(typeof(field), item), \
-			       (unsigned int)sizeof(field.item));	\
+			       (unsigned int)sizeof(field.item),	\
+			       (unsigned int)is_signed_type(type));	\
 	if (!ret)							\
 		return 0;
 
@@ -132,19 +166,21 @@
 #undef __array
 #define __array(type, item, len)						\
 	ret = trace_seq_printf(s, "\tfield:" #type " " #item "[" #len "];\t"	\
-			       "offset:%u;\tsize:%u;\n",		\
+			       "offset:%u;\tsize:%u;\tsigned:%u;\n",	\
 			       (unsigned int)offsetof(typeof(field), item), \
-			       (unsigned int)sizeof(field.item));	\
+			       (unsigned int)sizeof(field.item),	\
+			       (unsigned int)is_signed_type(type));	\
 	if (!ret)							\
 		return 0;
 
 #undef __dynamic_array
 #define __dynamic_array(type, item, len)				       \
 	ret = trace_seq_printf(s, "\tfield:__data_loc " #type "[] " #item ";\t"\
-			       "offset:%u;\tsize:%u;\n",		       \
+			       "offset:%u;\tsize:%u;\tsigned:%u;\n",	       \
 			       (unsigned int)offsetof(typeof(field),	       \
 					__data_loc_##item),		       \
-			       (unsigned int)sizeof(field.__data_loc_##item)); \
+			       (unsigned int)sizeof(field.__data_loc_##item), \
+			       (unsigned int)is_signed_type(type));	\
 	if (!ret)							       \
 		return 0;
 
@@ -159,7 +195,7 @@
 #undef __get_str
 
 #undef TP_printk
-#define TP_printk(fmt, args...) "%s, %s\n", #fmt, __stringify(args)
+#define TP_printk(fmt, args...) "\"%s\", %s\n", fmt, __stringify(args)
 
 #undef TP_fast_assign
 #define TP_fast_assign(args...) args
@@ -167,16 +203,49 @@
 #undef TP_perf_assign
 #define TP_perf_assign(args...)
 
-#undef TRACE_EVENT
-#define TRACE_EVENT(call, proto, args, tstruct, func, print)		\
+#undef DECLARE_EVENT_CLASS
+#define DECLARE_EVENT_CLASS(call, proto, args, tstruct, func, print)	\
 static int								\
-ftrace_format_##call(struct ftrace_event_call *unused,			\
-		      struct trace_seq *s)				\
+ftrace_format_setup_##call(struct ftrace_event_call *unused,		\
+			   struct trace_seq *s)				\
 {									\
 	struct ftrace_raw_##call field __attribute__((unused));		\
 	int ret = 0;							\
 									\
 	tstruct;							\
+									\
+	return ret;							\
+}									\
+									\
+static int								\
+ftrace_format_##call(struct ftrace_event_call *unused,			\
+		     struct trace_seq *s)				\
+{									\
+	int ret = 0;							\
+									\
+	ret = ftrace_format_setup_##call(unused, s);			\
+	if (!ret)							\
+		return ret;						\
+									\
+	ret = trace_seq_printf(s, "\nprint fmt: " print);		\
+									\
+	return ret;							\
+}
+
+#undef DEFINE_EVENT
+#define DEFINE_EVENT(template, name, proto, args)
+
+#undef DEFINE_EVENT_PRINT
+#define DEFINE_EVENT_PRINT(template, name, proto, args, print)		\
+static int								\
+ftrace_format_##name(struct ftrace_event_call *unused,			\
+		      struct trace_seq *s)				\
+{									\
+	int ret = 0;							\
+									\
+	ret = ftrace_format_setup_##template(unused, s);		\
+	if (!ret)							\
+		return ret;						\
 									\
 	trace_seq_printf(s, "\nprint fmt: " print);			\
 									\
@@ -252,13 +321,58 @@ ftrace_format_##call(struct ftrace_event_call *unused,			\
 		ftrace_print_symbols_seq(p, value, symbols);		\
 	})
 
-#undef TRACE_EVENT
-#define TRACE_EVENT(call, proto, args, tstruct, assign, print)		\
-static enum print_line_t						\
-ftrace_raw_output_##call(struct trace_iterator *iter, int flags)	\
+#undef __print_hex
+#define __print_hex(buf, buf_len) ftrace_print_hex_seq(p, buf, buf_len)
+
+#undef DECLARE_EVENT_CLASS
+#define DECLARE_EVENT_CLASS(call, proto, args, tstruct, assign, print)	\
+static notrace enum print_line_t					\
+ftrace_raw_output_id_##call(int event_id, const char *name,		\
+			    struct trace_iterator *iter, int flags)	\
 {									\
 	struct trace_seq *s = &iter->seq;				\
 	struct ftrace_raw_##call *field;				\
+	struct trace_entry *entry;					\
+	struct trace_seq *p;						\
+	int ret;							\
+									\
+	entry = iter->ent;						\
+									\
+	if (entry->type != event_id) {					\
+		WARN_ON_ONCE(1);					\
+		return TRACE_TYPE_UNHANDLED;				\
+	}								\
+									\
+	field = (typeof(field))entry;					\
+									\
+	p = &get_cpu_var(ftrace_event_seq);				\
+	trace_seq_init(p);						\
+	ret = trace_seq_printf(s, "%s: ", name);			\
+	if (ret)							\
+		ret = trace_seq_printf(s, print);			\
+	put_cpu();							\
+	if (!ret)							\
+		return TRACE_TYPE_PARTIAL_LINE;				\
+									\
+	return TRACE_TYPE_HANDLED;					\
+}
+
+#undef DEFINE_EVENT
+#define DEFINE_EVENT(template, name, proto, args)			\
+static notrace enum print_line_t					\
+ftrace_raw_output_##name(struct trace_iterator *iter, int flags)	\
+{									\
+	return ftrace_raw_output_id_##template(event_##name.id,		\
+					       #name, iter, flags);	\
+}
+
+#undef DEFINE_EVENT_PRINT
+#define DEFINE_EVENT_PRINT(template, call, proto, args, print)		\
+static notrace enum print_line_t					\
+ftrace_raw_output_##call(struct trace_iterator *iter, int flags)	\
+{									\
+	struct trace_seq *s = &iter->seq;				\
+	struct ftrace_raw_##template *field;				\
 	struct trace_entry *entry;					\
 	struct trace_seq *p;						\
 	int ret;							\
@@ -274,14 +388,16 @@ ftrace_raw_output_##call(struct trace_iterator *iter, int flags)	\
 									\
 	p = &get_cpu_var(ftrace_event_seq);				\
 	trace_seq_init(p);						\
-	ret = trace_seq_printf(s, #call ": " print);			\
+	ret = trace_seq_printf(s, "%s: ", #call);			\
+	if (ret)							\
+		ret = trace_seq_printf(s, print);			\
 	put_cpu();							\
 	if (!ret)							\
 		return TRACE_TYPE_PARTIAL_LINE;				\
 									\
 	return TRACE_TYPE_HANDLED;					\
 }
-	
+
 #include TRACE_INCLUDE(TRACE_INCLUDE_FILE)
 
 #undef __field_ext
@@ -315,9 +431,9 @@ ftrace_raw_output_##call(struct trace_iterator *iter, int flags)	\
 #undef __string
 #define __string(item, src) __dynamic_array(char, item, -1)
 
-#undef TRACE_EVENT
-#define TRACE_EVENT(call, proto, args, tstruct, func, print)		\
-static int								\
+#undef DECLARE_EVENT_CLASS
+#define DECLARE_EVENT_CLASS(call, proto, args, tstruct, func, print)	\
+static int notrace							\
 ftrace_define_fields_##call(struct ftrace_event_call *event_call)	\
 {									\
 	struct ftrace_raw_##call field;					\
@@ -331,6 +447,13 @@ ftrace_define_fields_##call(struct ftrace_event_call *event_call)	\
 									\
 	return ret;							\
 }
+
+#undef DEFINE_EVENT
+#define DEFINE_EVENT(template, name, proto, args)
+
+#undef DEFINE_EVENT_PRINT
+#define DEFINE_EVENT_PRINT(template, name, proto, args, print)	\
+	DEFINE_EVENT(template, name, PARAMS(proto), PARAMS(args))
 
 #include TRACE_INCLUDE(TRACE_INCLUDE_FILE)
 
@@ -358,11 +481,11 @@ ftrace_define_fields_##call(struct ftrace_event_call *event_call)	\
 	__data_size += (len) * sizeof(type);
 
 #undef __string
-#define __string(item, src) __dynamic_array(char, item, strlen(src) + 1)       \
+#define __string(item, src) __dynamic_array(char, item, strlen(src) + 1)
 
-#undef TRACE_EVENT
-#define TRACE_EVENT(call, proto, args, tstruct, assign, print)		\
-static inline int ftrace_get_offsets_##call(				\
+#undef DECLARE_EVENT_CLASS
+#define DECLARE_EVENT_CLASS(call, proto, args, tstruct, assign, print)	\
+static inline notrace int ftrace_get_offsets_##call(			\
 	struct ftrace_data_offsets_##call *__data_offsets, proto)       \
 {									\
 	int __data_size = 0;						\
@@ -372,6 +495,13 @@ static inline int ftrace_get_offsets_##call(				\
 									\
 	return __data_size;						\
 }
+
+#undef DEFINE_EVENT
+#define DEFINE_EVENT(template, name, proto, args)
+
+#undef DEFINE_EVENT_PRINT
+#define DEFINE_EVENT_PRINT(template, name, proto, args, print)	\
+	DEFINE_EVENT(template, name, PARAMS(proto), PARAMS(args))
 
 #include TRACE_INCLUDE(TRACE_INCLUDE_FILE)
 
@@ -394,20 +524,29 @@ static inline int ftrace_get_offsets_##call(				\
  *
  */
 
-#undef TRACE_EVENT
-#define TRACE_EVENT(call, proto, args, tstruct, assign, print)		\
+#undef DECLARE_EVENT_CLASS
+#define DECLARE_EVENT_CLASS(call, proto, args, tstruct, assign, print)
+
+#undef DEFINE_EVENT
+#define DEFINE_EVENT(template, name, proto, args)			\
 									\
-static void ftrace_profile_##call(proto);				\
+static void ftrace_profile_##name(proto);				\
 									\
-static int ftrace_profile_enable_##call(void)				\
+static notrace int							\
+ftrace_profile_enable_##name(struct ftrace_event_call *unused)		\
 {									\
-	return register_trace_##call(ftrace_profile_##call);		\
+	return register_trace_##name(ftrace_profile_##name);		\
 }									\
 									\
-static void ftrace_profile_disable_##call(void)				\
+static notrace void							\
+ftrace_profile_disable_##name(struct ftrace_event_call *unused)		\
 {									\
-	unregister_trace_##call(ftrace_profile_##call);			\
+	unregister_trace_##name(ftrace_profile_##name);			\
 }
+
+#undef DEFINE_EVENT_PRINT
+#define DEFINE_EVENT_PRINT(template, name, proto, args, print)	\
+	DEFINE_EVENT(template, name, PARAMS(proto), PARAMS(args))
 
 #include TRACE_INCLUDE(TRACE_INCLUDE_FILE)
 
@@ -423,18 +562,12 @@ static void ftrace_profile_disable_##call(void)				\
  *	event_trace_printk(_RET_IP_, "<call>: " <fmt>);
  * }
  *
- * static int ftrace_reg_event_<call>(void)
+ * static int ftrace_reg_event_<call>(struct ftrace_event_call *unused)
  * {
- *	int ret;
- *
- *	ret = register_trace_<call>(ftrace_event_<call>);
- *	if (!ret)
- *		pr_info("event trace: Could not activate trace point "
- *			"probe to  <call>");
- *	return ret;
+ *	return register_trace_<call>(ftrace_event_<call>);
  * }
  *
- * static void ftrace_unreg_event_<call>(void)
+ * static void ftrace_unreg_event_<call>(struct ftrace_event_call *unused)
  * {
  *	unregister_trace_<call>(ftrace_event_<call>);
  * }
@@ -469,7 +602,7 @@ static void ftrace_profile_disable_##call(void)				\
  *	trace_current_buffer_unlock_commit(buffer, event, irq_flags, pc);
  * }
  *
- * static int ftrace_raw_reg_event_<call>(void)
+ * static int ftrace_raw_reg_event_<call>(struct ftrace_event_call *unused)
  * {
  *	int ret;
  *
@@ -480,7 +613,7 @@ static void ftrace_profile_disable_##call(void)				\
  *	return ret;
  * }
  *
- * static void ftrace_unreg_event_<call>(void)
+ * static void ftrace_unreg_event_<call>(struct ftrace_event_call *unused)
  * {
  *	unregister_trace_<call>(ftrace_raw_event_<call>);
  * }
@@ -489,7 +622,7 @@ static void ftrace_profile_disable_##call(void)				\
  *	.trace			= ftrace_raw_output_<call>, <-- stage 2
  * };
  *
- * static int ftrace_raw_init_event_<call>(void)
+ * static int ftrace_raw_init_event_<call>(struct ftrace_event_call *unused)
  * {
  *	int id;
  *
@@ -547,15 +680,14 @@ static void ftrace_profile_disable_##call(void)				\
 #define __assign_str(dst, src)						\
 	strcpy(__get_str(dst), src);
 
-#undef TRACE_EVENT
-#define TRACE_EVENT(call, proto, args, tstruct, assign, print)		\
+#undef DECLARE_EVENT_CLASS
+#define DECLARE_EVENT_CLASS(call, proto, args, tstruct, assign, print)	\
 									\
-static struct ftrace_event_call event_##call;				\
-									\
-static void ftrace_raw_event_##call(proto)				\
+static notrace void							\
+ftrace_raw_event_id_##call(struct ftrace_event_call *event_call,	\
+				       proto)				\
 {									\
 	struct ftrace_data_offsets_##call __maybe_unused __data_offsets;\
-	struct ftrace_event_call *event_call = &event_##call;		\
 	struct ring_buffer_event *event;				\
 	struct ftrace_raw_##call *entry;				\
 	struct ring_buffer *buffer;					\
@@ -569,7 +701,7 @@ static void ftrace_raw_event_##call(proto)				\
 	__data_size = ftrace_get_offsets_##call(&__data_offsets, args); \
 									\
 	event = trace_current_buffer_lock_reserve(&buffer,		\
-				 event_##call.id,			\
+				 event_call->id,			\
 				 sizeof(*entry) + __data_size,		\
 				 irq_flags, pc);			\
 	if (!event)							\
@@ -584,20 +716,24 @@ static void ftrace_raw_event_##call(proto)				\
 	if (!filter_current_check_discard(buffer, event_call, entry, event)) \
 		trace_nowake_buffer_unlock_commit(buffer,		\
 						  event, irq_flags, pc); \
-}									\
+}
+
+#undef DEFINE_EVENT
+#define DEFINE_EVENT(template, call, proto, args)			\
 									\
-static int ftrace_raw_reg_event_##call(void *ptr)			\
+static notrace void ftrace_raw_event_##call(proto)			\
 {									\
-	int ret;							\
-									\
-	ret = register_trace_##call(ftrace_raw_event_##call);		\
-	if (ret)							\
-		pr_info("event trace: Could not activate trace point "	\
-			"probe to " #call "\n");			\
-	return ret;							\
+	ftrace_raw_event_id_##template(&event_##call, args);		\
 }									\
 									\
-static void ftrace_raw_unreg_event_##call(void *ptr)			\
+static notrace int							\
+ftrace_raw_reg_event_##call(struct ftrace_event_call *unused)		\
+{									\
+	return register_trace_##call(ftrace_raw_event_##call);		\
+}									\
+									\
+static notrace void							\
+ftrace_raw_unreg_event_##call(struct ftrace_event_call *unused)		\
 {									\
 	unregister_trace_##call(ftrace_raw_event_##call);		\
 }									\
@@ -606,7 +742,7 @@ static struct trace_event ftrace_event_type_##call = {			\
 	.trace			= ftrace_raw_output_##call,		\
 };									\
 									\
-static int ftrace_raw_init_event_##call(void)				\
+static int ftrace_raw_init_event_##call(struct ftrace_event_call *unused)\
 {									\
 	int id;								\
 									\
@@ -616,7 +752,36 @@ static int ftrace_raw_init_event_##call(void)				\
 	event_##call.id = id;						\
 	INIT_LIST_HEAD(&event_##call.fields);				\
 	return 0;							\
-}									\
+}
+
+#undef DEFINE_EVENT_PRINT
+#define DEFINE_EVENT_PRINT(template, name, proto, args, print)	\
+	DEFINE_EVENT(template, name, PARAMS(proto), PARAMS(args))
+
+#include TRACE_INCLUDE(TRACE_INCLUDE_FILE)
+
+#undef DECLARE_EVENT_CLASS
+#define DECLARE_EVENT_CLASS(call, proto, args, tstruct, assign, print)
+
+#undef DEFINE_EVENT
+#define DEFINE_EVENT(template, call, proto, args)			\
+									\
+static struct ftrace_event_call __used					\
+__attribute__((__aligned__(4)))						\
+__attribute__((section("_ftrace_events"))) event_##call = {		\
+	.name			= #call,				\
+	.system			= __stringify(TRACE_SYSTEM),		\
+	.event			= &ftrace_event_type_##call,		\
+	.raw_init		= ftrace_raw_init_event_##call,		\
+	.regfunc		= ftrace_raw_reg_event_##call,		\
+	.unregfunc		= ftrace_raw_unreg_event_##call,	\
+	.show_format		= ftrace_format_##template,		\
+	.define_fields		= ftrace_define_fields_##template,	\
+	_TRACE_PROFILE_INIT(call)					\
+}
+
+#undef DEFINE_EVENT_PRINT
+#define DEFINE_EVENT_PRINT(template, call, proto, args, print)		\
 									\
 static struct ftrace_event_call __used					\
 __attribute__((__aligned__(4)))						\
@@ -628,7 +793,7 @@ __attribute__((section("_ftrace_events"))) event_##call = {		\
 	.regfunc		= ftrace_raw_reg_event_##call,		\
 	.unregfunc		= ftrace_raw_unreg_event_##call,	\
 	.show_format		= ftrace_format_##call,			\
-	.define_fields		= ftrace_define_fields_##call,		\
+	.define_fields		= ftrace_define_fields_##template,	\
 	_TRACE_PROFILE_INIT(call)					\
 }
 
@@ -704,13 +869,16 @@ __attribute__((section("_ftrace_events"))) event_##call = {		\
 #undef __perf_count
 #define __perf_count(c) __count = (c)
 
-#undef TRACE_EVENT
-#define TRACE_EVENT(call, proto, args, tstruct, assign, print)		\
-static void ftrace_profile_##call(proto)				\
+#undef DECLARE_EVENT_CLASS
+#define DECLARE_EVENT_CLASS(call, proto, args, tstruct, assign, print)	\
+static notrace void							\
+ftrace_profile_templ_##call(struct ftrace_event_call *event_call,	\
+			    proto)					\
 {									\
 	struct ftrace_data_offsets_##call __maybe_unused __data_offsets;\
-	struct ftrace_event_call *event_call = &event_##call;		\
-	extern void perf_tp_event(int, u64, u64, void *, int);	\
+	extern void perf_tp_event(int, u64, u64, void *, int);		\
+	extern int perf_swevent_get_recursion_context(void);		\
+	extern void perf_swevent_put_recursion_context(int);		\
 	struct ftrace_raw_##call *entry;				\
 	u64 __addr = 0, __count = 1;					\
 	unsigned long irq_flags;					\
@@ -720,6 +888,7 @@ static void ftrace_profile_##call(proto)				\
 	char *raw_data;							\
 	int __cpu;							\
 	int pc;								\
+	int rctx;							\
 									\
 	pc = preempt_count();						\
 									\
@@ -730,6 +899,10 @@ static void ftrace_profile_##call(proto)				\
 									\
 	if (WARN_ONCE(__entry_size > FTRACE_MAX_PROFILE_SIZE,		\
 		      "profile buffer not large enough"))		\
+		return;							\
+									\
+	rctx = perf_swevent_get_recursion_context();			\
+	if (rctx == -1)							\
 		return;							\
 									\
 	local_irq_save(irq_flags);					\
@@ -757,11 +930,25 @@ static void ftrace_profile_##call(proto)				\
 									\
 	perf_tp_event(event_call->id, __addr, __count, entry,		\
 			     __entry_size);				\
+	perf_swevent_put_recursion_context(rctx);			\
 									\
 end:									\
 	local_irq_restore(irq_flags);					\
 									\
 }
+
+#undef DEFINE_EVENT
+#define DEFINE_EVENT(template, call, proto, args)		\
+static notrace void ftrace_profile_##call(proto)		\
+{								\
+	struct ftrace_event_call *event_call = &event_##call;	\
+								\
+	ftrace_profile_templ_##template(event_call, args);	\
+}
+
+#undef DEFINE_EVENT_PRINT
+#define DEFINE_EVENT_PRINT(template, name, proto, args, print)	\
+	DEFINE_EVENT(template, name, PARAMS(proto), PARAMS(args))
 
 #include TRACE_INCLUDE(TRACE_INCLUDE_FILE)
 #endif /* CONFIG_EVENT_PROFILE */

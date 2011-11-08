@@ -60,3 +60,13 @@ SUBSYS(net_cls)
 #endif
 
 /* */
+
+#ifdef CONFIG_BLK_CGROUP
+SUBSYS(blkio)
+#endif
+
+#ifdef CONFIG_CGROUP_PERF
+SUBSYS(perf)
+#endif
+
+/* */

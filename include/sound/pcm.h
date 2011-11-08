@@ -262,6 +262,8 @@ struct snd_pcm_hw_constraint_list {
 	unsigned int mask;
 };
 
+struct snd_pcm_hwptr_log;
+
 struct snd_pcm_runtime {
 	/* -- Status -- */
 	struct snd_pcm_substream *trigger_master;
@@ -310,7 +312,9 @@ struct snd_pcm_runtime {
 	struct snd_pcm_mmap_control *control;
 
 	/* -- locking / scheduling -- */
-	wait_queue_head_t sleep;
+	unsigned int twake: 1;		/* do transfer (!poll) wakeup */
+	wait_queue_head_t sleep;	/* poll sleep */
+	wait_queue_head_t tsleep;	/* transfer sleep */
 	struct fasync_struct *fasync;
 
 	/* -- private section -- */
@@ -339,6 +343,10 @@ struct snd_pcm_runtime {
 #if defined(CONFIG_SND_PCM_OSS) || defined(CONFIG_SND_PCM_OSS_MODULE)
 	/* -- OSS things -- */
 	struct snd_pcm_oss_runtime oss;
+#endif
+
+#ifdef CONFIG_SND_PCM_XRUN_DEBUG
+	struct snd_pcm_hwptr_log *hwptr_log;
 #endif
 };
 
@@ -831,6 +839,8 @@ void snd_pcm_set_sync(struct snd_pcm_substream *substream);
 int snd_pcm_lib_interleave_len(struct snd_pcm_substream *substream);
 int snd_pcm_lib_ioctl(struct snd_pcm_substream *substream,
 		      unsigned int cmd, void *arg);                      
+int snd_pcm_update_state(struct snd_pcm_substream *substream,
+			 struct snd_pcm_runtime *runtime);
 int snd_pcm_update_hw_ptr(struct snd_pcm_substream *substream);
 int snd_pcm_playback_xrun_check(struct snd_pcm_substream *substream);
 int snd_pcm_capture_xrun_check(struct snd_pcm_substream *substream);

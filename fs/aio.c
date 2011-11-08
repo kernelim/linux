@@ -32,6 +32,12 @@
 #include <linux/workqueue.h>
 #include <linux/security.h>
 #include <linux/eventfd.h>
+#include <linux/blkdev.h>
+#include <linux/mempool.h>
+#include <linux/hash.h>
+#ifndef __GENKSYMS__
+#include <linux/compat.h>
+#endif
 
 #include <asm/kmap_types.h>
 #include <asm/uaccess.h>
@@ -60,6 +66,14 @@ static DECLARE_WORK(fput_work, aio_fput_routine);
 static DEFINE_SPINLOCK(fput_lock);
 static LIST_HEAD(fput_head);
 
+#define AIO_BATCH_HASH_BITS	3 /* allocated on-stack, so don't go crazy */
+#define AIO_BATCH_HASH_SIZE	(1 << AIO_BATCH_HASH_BITS)
+struct aio_batch_entry {
+	struct hlist_node list;
+	struct address_space *mapping;
+};
+mempool_t *abe_pool;
+
 static void aio_kick_handler(struct work_struct *);
 static void aio_queue_work(struct kioctx *);
 
@@ -73,6 +87,8 @@ static int __init aio_setup(void)
 	kioctx_cachep = KMEM_CACHE(kioctx,SLAB_HWCACHE_ALIGN|SLAB_PANIC);
 
 	aio_wq = create_workqueue("aio");
+	abe_pool = mempool_create_kmalloc_pool(1, sizeof(struct aio_batch_entry));
+	BUG_ON(!abe_pool);
 
 	pr_debug("aio_setup: sizeof(struct page) = %d\n", (int)sizeof(struct page));
 
@@ -1379,13 +1395,22 @@ static ssize_t aio_fsync(struct kiocb *iocb)
 	return ret;
 }
 
-static ssize_t aio_setup_vectored_rw(int type, struct kiocb *kiocb)
+static ssize_t aio_setup_vectored_rw(int type, struct kiocb *kiocb, bool compat)
 {
 	ssize_t ret;
 
-	ret = rw_copy_check_uvector(type, (struct iovec __user *)kiocb->ki_buf,
-				    kiocb->ki_nbytes, 1,
-				    &kiocb->ki_inline_vec, &kiocb->ki_iovec);
+#ifdef CONFIG_COMPAT
+	if (compat)
+		ret = compat_rw_copy_check_uvector(type,
+				(struct compat_iovec __user *)kiocb->ki_buf,
+				kiocb->ki_nbytes, 1, &kiocb->ki_inline_vec,
+				&kiocb->ki_iovec);
+	else
+#endif
+		ret = rw_copy_check_uvector(type,
+				(struct iovec __user *)kiocb->ki_buf,
+				kiocb->ki_nbytes, 1, &kiocb->ki_inline_vec,
+				&kiocb->ki_iovec);
 	if (ret < 0)
 		goto out;
 
@@ -1415,7 +1440,7 @@ static ssize_t aio_setup_single_vector(struct kiocb *kiocb)
  *	Performs the initial checks and aio retry method
  *	setup for the kiocb at the time of io submission.
  */
-static ssize_t aio_setup_iocb(struct kiocb *kiocb)
+static ssize_t aio_setup_iocb(struct kiocb *kiocb, bool compat)
 {
 	struct file *file = kiocb->ki_filp;
 	ssize_t ret = 0;
@@ -1464,7 +1489,7 @@ static ssize_t aio_setup_iocb(struct kiocb *kiocb)
 		ret = security_file_permission(file, MAY_READ);
 		if (unlikely(ret))
 			break;
-		ret = aio_setup_vectored_rw(READ, kiocb);
+		ret = aio_setup_vectored_rw(READ, kiocb, compat);
 		if (ret)
 			break;
 		ret = -EINVAL;
@@ -1478,7 +1503,7 @@ static ssize_t aio_setup_iocb(struct kiocb *kiocb)
 		ret = security_file_permission(file, MAY_WRITE);
 		if (unlikely(ret))
 			break;
-		ret = aio_setup_vectored_rw(WRITE, kiocb);
+		ret = aio_setup_vectored_rw(WRITE, kiocb, compat);
 		if (ret)
 			break;
 		ret = -EINVAL;
@@ -1531,8 +1556,58 @@ static int aio_wake_function(wait_queue_t *wait, unsigned mode,
 	return 1;
 }
 
+static void aio_batch_add(struct address_space *mapping,
+			  struct hlist_head *batch_hash)
+{
+	struct aio_batch_entry *abe;
+	struct hlist_node *pos;
+	unsigned bucket;
+
+	bucket = hash_ptr(mapping, AIO_BATCH_HASH_BITS);
+	hlist_for_each_entry(abe, pos, &batch_hash[bucket], list) {
+		if (abe->mapping == mapping)
+			return;
+	}
+
+	abe = mempool_alloc(abe_pool, GFP_KERNEL);
+
+	/*
+	 * we should be using igrab here, but
+	 * we don't want to hammer on the global
+	 * inode spinlock just to take an extra
+	 * reference on a file that we must already
+	 * have a reference to.
+	 *
+	 * When we're called, we always have a reference
+	 * on the file, so we must always have a reference
+	 * on the inode, so igrab must always just
+	 * bump the count and move on.
+	 */
+	atomic_inc(&mapping->host->i_count);
+	abe->mapping = mapping;
+	hlist_add_head(&abe->list, &batch_hash[bucket]);
+	return;
+}
+
+static void aio_batch_free(struct hlist_head *batch_hash)
+{
+	struct aio_batch_entry *abe;
+	struct hlist_node *pos, *n;
+	int i;
+
+	for (i = 0; i < AIO_BATCH_HASH_SIZE; i++) {
+		hlist_for_each_entry_safe(abe, pos, n, &batch_hash[i], list) {
+			blk_run_address_space(abe->mapping);
+			iput(abe->mapping->host);
+			hlist_del(&abe->list);
+			mempool_free(abe, abe_pool);
+		}
+	}
+}
+
 static int io_submit_one(struct kioctx *ctx, struct iocb __user *user_iocb,
-			 struct iocb *iocb)
+			 struct iocb *iocb, struct hlist_head *batch_hash,
+			 bool compat)
 {
 	struct kiocb *req;
 	struct file *file;
@@ -1595,7 +1670,7 @@ static int io_submit_one(struct kioctx *ctx, struct iocb __user *user_iocb,
 	init_waitqueue_func_entry(&req->ki_wait, aio_wake_function);
 	INIT_LIST_HEAD(&req->ki_wait.task_list);
 
-	ret = aio_setup_iocb(req);
+	ret = aio_setup_iocb(req, compat);
 
 	if (ret)
 		goto out_put_req;
@@ -1608,6 +1683,12 @@ static int io_submit_one(struct kioctx *ctx, struct iocb __user *user_iocb,
 			;
 	}
 	spin_unlock_irq(&ctx->ctx_lock);
+	if (req->ki_opcode == IOCB_CMD_PREAD ||
+	    req->ki_opcode == IOCB_CMD_PREADV ||
+	    req->ki_opcode == IOCB_CMD_PWRITE ||
+	    req->ki_opcode == IOCB_CMD_PWRITEV)
+		aio_batch_add(file->f_mapping, batch_hash);
+
 	aio_put_req(req);	/* drop extra ref to req */
 	return 0;
 
@@ -1617,27 +1698,20 @@ out_put_req:
 	return ret;
 }
 
-/* sys_io_submit:
- *	Queue the nr iocbs pointed to by iocbpp for processing.  Returns
- *	the number of iocbs queued.  May return -EINVAL if the aio_context
- *	specified by ctx_id is invalid, if nr is < 0, if the iocb at
- *	*iocbpp[0] is not properly initialized, if the operation specified
- *	is invalid for the file descriptor in the iocb.  May fail with
- *	-EFAULT if any of the data structures point to invalid data.  May
- *	fail with -EBADF if the file descriptor specified in the first
- *	iocb is invalid.  May fail with -EAGAIN if insufficient resources
- *	are available to queue any iocbs.  Will return 0 if nr is 0.  Will
- *	fail with -ENOSYS if not implemented.
- */
-SYSCALL_DEFINE3(io_submit, aio_context_t, ctx_id, long, nr,
-		struct iocb __user * __user *, iocbpp)
+long do_io_submit(aio_context_t ctx_id, long nr,
+		  struct iocb __user *__user *iocbpp, bool compat)
 {
 	struct kioctx *ctx;
 	long ret = 0;
 	int i;
+	struct hlist_head batch_hash[AIO_BATCH_HASH_SIZE] = { { 0, }, };
 
 	if (unlikely(nr < 0))
 		return -EINVAL;
+
+	/* Check for overflow */
+	if (unlikely(nr > LONG_MAX/sizeof(*iocbpp)))
+		nr = LONG_MAX/sizeof(*iocbpp);
 
 	if (unlikely(!access_ok(VERIFY_READ, iocbpp, (nr*sizeof(*iocbpp)))))
 		return -EFAULT;
@@ -1666,13 +1740,32 @@ SYSCALL_DEFINE3(io_submit, aio_context_t, ctx_id, long, nr,
 			break;
 		}
 
-		ret = io_submit_one(ctx, user_iocb, &tmp);
+		ret = io_submit_one(ctx, user_iocb, &tmp, batch_hash, compat);
 		if (ret)
 			break;
 	}
+	aio_batch_free(batch_hash);
 
 	put_ioctx(ctx);
 	return i ? i : ret;
+}
+
+/* sys_io_submit:
+ *	Queue the nr iocbs pointed to by iocbpp for processing.  Returns
+ *	the number of iocbs queued.  May return -EINVAL if the aio_context
+ *	specified by ctx_id is invalid, if nr is < 0, if the iocb at
+ *	*iocbpp[0] is not properly initialized, if the operation specified
+ *	is invalid for the file descriptor in the iocb.  May fail with
+ *	-EFAULT if any of the data structures point to invalid data.  May
+ *	fail with -EBADF if the file descriptor specified in the first
+ *	iocb is invalid.  May fail with -EAGAIN if insufficient resources
+ *	are available to queue any iocbs.  Will return 0 if nr is 0.  Will
+ *	fail with -ENOSYS if not implemented.
+ */
+SYSCALL_DEFINE3(io_submit, aio_context_t, ctx_id, long, nr,
+		struct iocb __user * __user *, iocbpp)
+{
+	return do_io_submit(ctx_id, nr, iocbpp, 0);
 }
 
 /* lookup_kiocb

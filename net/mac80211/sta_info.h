@@ -12,6 +12,7 @@
 #include <linux/list.h>
 #include <linux/types.h>
 #include <linux/if_ether.h>
+#include <linux/workqueue.h>
 #include "key.h"
 
 /**
@@ -21,7 +22,7 @@
  *
  * @WLAN_STA_AUTH: Station is authenticated.
  * @WLAN_STA_ASSOC: Station is associated.
- * @WLAN_STA_PS: Station is in power-save mode
+ * @WLAN_STA_PS_STA: Station is in power-save mode
  * @WLAN_STA_AUTHORIZED: Station is authorized to send/receive traffic.
  *	This bit is always checked so needs to be enabled for all stations
  *	when virtual port control is not in use.
@@ -36,11 +37,16 @@
  * @WLAN_STA_MFP: Management frame protection is used with this STA.
  * @WLAN_STA_SUSPEND: Set/cleared during a suspend/resume cycle.
  *	Used to deny ADDBA requests (both TX and RX).
+ * @WLAN_STA_PS_DRIVER: driver requires keeping this station in
+ *	power-save mode logically to flush frames that might still
+ *	be in the queues
+ * @WLAN_STA_PSPOLL: Station sent PS-poll while driver was keeping
+ *	station in power-save mode, reply when the driver unblocks.
  */
 enum ieee80211_sta_info_flags {
 	WLAN_STA_AUTH		= 1<<0,
 	WLAN_STA_ASSOC		= 1<<1,
-	WLAN_STA_PS		= 1<<2,
+	WLAN_STA_PS_STA		= 1<<2,
 	WLAN_STA_AUTHORIZED	= 1<<3,
 	WLAN_STA_SHORT_PREAMBLE	= 1<<4,
 	WLAN_STA_ASSOC_AP	= 1<<5,
@@ -48,7 +54,9 @@ enum ieee80211_sta_info_flags {
 	WLAN_STA_WDS		= 1<<7,
 	WLAN_STA_CLEAR_PS_FILT	= 1<<9,
 	WLAN_STA_MFP		= 1<<10,
-	WLAN_STA_SUSPEND	= 1<<11
+	WLAN_STA_SUSPEND	= 1<<11,
+	WLAN_STA_PS_DRIVER	= 1<<12,
+	WLAN_STA_PSPOLL		= 1<<13,
 };
 
 #define STA_TID_NUM 16
@@ -154,11 +162,6 @@ struct sta_ampdu_mlme {
 };
 
 
-/* see __sta_info_unlink */
-#define STA_INFO_PIN_STAT_NORMAL	0
-#define STA_INFO_PIN_STAT_PINNED	1
-#define STA_INFO_PIN_STAT_DESTROY	2
-
 /**
  * struct sta_info - STA information
  *
@@ -178,7 +181,6 @@ struct sta_ampdu_mlme {
  *	in the header file.
  * @flaglock: spinlock for flags accesses
  * @listen_interval: listen interval of this station, when we're acting as AP
- * @pin_status: used internally for pinning a STA struct into memory
  * @flags: STA flags, see &enum ieee80211_sta_info_flags
  * @ps_tx_buf: buffer of frames to transmit to this station
  *	when it leaves power saving state
@@ -217,6 +219,9 @@ struct sta_ampdu_mlme {
  * @plink_timer_was_running: used by suspend/resume to restore timers
  * @debugfs: debug filesystem info
  * @sta: station information we share with the driver
+ * @dead: set to true when sta is unlinked
+ * @uploaded: set to true when sta is uploaded to the driver
+ * @drv_unblock_wk used for driver PS unblocking
  */
 struct sta_info {
 	/* General information, mostly static */
@@ -230,13 +235,13 @@ struct sta_info {
 	spinlock_t lock;
 	spinlock_t flaglock;
 
+	struct work_struct drv_unblock_wk;
+
 	u16 listen_interval;
 
-	/*
-	 * for use by the internal lifetime management,
-	 * see __sta_info_unlink
-	 */
-	u8 pin_status;
+	bool dead;
+
+	bool uploaded;
 
 	/*
 	 * frequently updated, locked with own spinlock (flaglock),
@@ -431,18 +436,19 @@ struct sta_info *sta_info_alloc(struct ieee80211_sub_if_data *sdata,
  * Insert STA info into hash table/list, returns zero or a
  * -EEXIST if (if the same MAC address is already present).
  *
- * Calling this without RCU protection makes the caller
- * relinquish its reference to @sta.
+ * Calling the non-rcu version makes the caller relinquish,
+ * the _rcu version calls read_lock_rcu() and must be called
+ * without it held.
  */
 int sta_info_insert(struct sta_info *sta);
-/*
- * Unlink a STA info from the hash table/list.
- * This can NULL the STA pointer if somebody else
- * has already unlinked it.
- */
-void sta_info_unlink(struct sta_info **sta);
+int sta_info_insert_rcu(struct sta_info *sta) __acquires(RCU);
+int sta_info_insert_atomic(struct sta_info *sta);
 
-void sta_info_destroy(struct sta_info *sta);
+int sta_info_destroy_addr(struct ieee80211_sub_if_data *sdata,
+			  const u8 *addr);
+int sta_info_destroy_addr_bss(struct ieee80211_sub_if_data *sdata,
+			      const u8 *addr);
+
 void sta_info_set_tim_bit(struct sta_info *sta);
 void sta_info_clear_tim_bit(struct sta_info *sta);
 
@@ -453,5 +459,8 @@ int sta_info_flush(struct ieee80211_local *local,
 		   struct ieee80211_sub_if_data *sdata);
 void ieee80211_sta_expire(struct ieee80211_sub_if_data *sdata,
 			  unsigned long exp_time);
+
+void ieee80211_sta_ps_deliver_wakeup(struct sta_info *sta);
+void ieee80211_sta_ps_deliver_poll_response(struct sta_info *sta);
 
 #endif /* STA_INFO_H */

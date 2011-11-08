@@ -47,15 +47,13 @@
 #include <linux/platform_device.h>
 #include <linux/usb.h>
 #include <linux/usb/gadget.h>
+#include <linux/usb/hcd.h>
 
 #include <asm/byteorder.h>
 #include <asm/io.h>
 #include <asm/irq.h>
 #include <asm/system.h>
 #include <asm/unaligned.h>
-
-
-#include "../core/hcd.h"
 
 
 #define DRIVER_DESC	"USB Host+Gadget Emulator"
@@ -1544,7 +1542,7 @@ static int dummy_hub_status (struct usb_hcd *hcd, char *buf)
 	dum = hcd_to_dummy (hcd);
 
 	spin_lock_irqsave (&dum->lock, flags);
-	if (!test_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags))
+	if (!HCD_HW_ACCESSIBLE(hcd))
 		goto done;
 
 	if (dum->resuming && time_after_eq (jiffies, dum->re_timeout)) {
@@ -1574,8 +1572,8 @@ hub_descriptor (struct usb_hub_descriptor *desc)
 	desc->bDescLength = 9;
 	desc->wHubCharacteristics = cpu_to_le16(0x0001);
 	desc->bNbrPorts = 1;
-	desc->bitmap [0] = 0xff;
-	desc->bitmap [1] = 0xff;
+	desc->u.hs.DeviceRemovable[0] = 0xff;
+	desc->u.hs.DeviceRemovable[1] = 0xff;
 }
 
 static int dummy_hub_control (
@@ -1590,7 +1588,7 @@ static int dummy_hub_control (
 	int		retval = 0;
 	unsigned long	flags;
 
-	if (!test_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags))
+	if (!HCD_HW_ACCESSIBLE(hcd))
 		return -ETIMEDOUT;
 
 	dum = hcd_to_dummy (hcd);
@@ -1741,7 +1739,7 @@ static int dummy_bus_resume (struct usb_hcd *hcd)
 	dev_dbg (&hcd->self.root_hub->dev, "%s\n", __func__);
 
 	spin_lock_irq (&dum->lock);
-	if (!test_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags)) {
+	if (!HCD_HW_ACCESSIBLE(hcd)) {
 		rc = -ESHUTDOWN;
 	} else {
 		dum->rh_state = DUMMY_RH_RUNNING;

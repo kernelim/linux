@@ -220,6 +220,8 @@ int fscache_add_cache(struct fscache_cache *cache,
 {
 	struct fscache_cache_tag *tag;
 
+	mark_tech_preview(NULL, THIS_MODULE);
+
 	BUG_ON(!cache->ops);
 	BUG_ON(!ifsdef);
 

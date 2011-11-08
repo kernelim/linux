@@ -21,6 +21,7 @@
 #include <linux/list.h>
 #include <linux/sysctl.h>
 #include <linux/ctype.h>
+#include <linux/string.h>
 #include <linux/uaccess.h>
 #include <linux/dynamic_debug.h>
 #include <linux/debugfs.h>
@@ -209,8 +210,7 @@ static int ddebug_tokenize(char *buf, char *words[], int maxwords)
 		char *end;
 
 		/* Skip leading whitespace */
-		while (*buf && isspace(*buf))
-			buf++;
+		buf = skip_spaces(buf);
 		if (!*buf)
 			break;	/* oh, it was trailing whitespace */
 
@@ -691,7 +691,7 @@ static void ddebug_table_free(struct ddebug_table *dt)
  * Called in response to a module being unloaded.  Removes
  * any ddebug_table's which point at the module.
  */
-int ddebug_remove_module(char *mod_name)
+int ddebug_remove_module(const char *mod_name)
 {
 	struct ddebug_table *dt, *nextdt;
 	int ret = -ENOENT;

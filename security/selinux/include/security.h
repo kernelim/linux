@@ -81,6 +81,8 @@ extern int selinux_policycap_openperm;
 #define POLICYDB_BOUNDS_MAXDEPTH	4
 
 int security_load_policy(void *data, size_t len);
+int security_read_policy(void **data, ssize_t *len);
+size_t security_policydb_len(void);
 
 int security_policycap_supported(unsigned int req_cap);
 
@@ -96,12 +98,17 @@ struct av_decision {
 /* definitions of av_decision.flags */
 #define AVD_FLAGS_PERMISSIVE	0x0001
 
-int security_compute_av(u32 ssid, u32 tsid,
-	u16 tclass, u32 requested,
-	struct av_decision *avd);
+void security_compute_av(u32 ssid, u32 tsid,
+			 u16 tclass, struct av_decision *avd);
+
+void security_compute_av_user(u32 ssid, u32 tsid,
+			     u16 tclass, struct av_decision *avd);
 
 int security_transition_sid(u32 ssid, u32 tsid,
-	u16 tclass, u32 *out_sid);
+			    u16 tclass, u32 *out_sid);
+
+int security_transition_sid_user(u32 ssid, u32 tsid,
+				 u16 tclass, u32 *out_sid);
 
 int security_member_sid(u32 ssid, u32 tsid,
 	u16 tclass, u32 *out_sid);
@@ -184,6 +191,26 @@ static inline int security_netlbl_sid_to_secattr(u32 sid,
 #endif /* CONFIG_NETLABEL */
 
 const char *security_get_initial_sid_context(u32 sid);
+
+/*
+ * status notifier using mmap interface
+ */
+extern struct page *selinux_kernel_status_page(void);
+
+#define SELINUX_KERNEL_STATUS_VERSION	1
+struct selinux_kernel_status {
+	u32	version;	/* version number of thie structure */
+	u32	sequence;	/* sequence number of seqlock logic */
+	u32	enforcing;	/* current setting of enforcing mode */
+	u32	policyload;	/* times of policy reloaded */
+	u32	deny_unknown;	/* current setting of deny_unknown */
+	/*
+	 * The version > 0 supports above members.
+	 */
+} __attribute__((packed));
+
+extern void selinux_status_update_setenforce(int enforcing);
+extern void selinux_status_update_policyload(int seqno);
 
 #endif /* _SELINUX_SECURITY_H_ */
 

@@ -385,13 +385,13 @@ static void ieee80211_handle_filtered_frame(struct ieee80211_local *local,
 	 *      can be unknown, for example with different interrupt status
 	 *	bits.
 	 */
-	if (test_sta_flags(sta, WLAN_STA_PS) &&
+	if (test_sta_flags(sta, WLAN_STA_PS_STA) &&
 	    skb_queue_len(&sta->tx_filtered) < STA_MAX_TX_BUFFER) {
 		skb_queue_tail(&sta->tx_filtered, skb);
 		return;
 	}
 
-	if (!test_sta_flags(sta, WLAN_STA_PS) &&
+	if (!test_sta_flags(sta, WLAN_STA_PS_STA) &&
 	    !(info->flags & IEEE80211_TX_INTFL_RETRIED)) {
 		/* Software retry the packet once */
 		info->flags |= IEEE80211_TX_INTFL_RETRIED;
@@ -406,7 +406,7 @@ static void ieee80211_handle_filtered_frame(struct ieee80211_local *local,
 		       "queue_len=%d PS=%d @%lu\n",
 		       wiphy_name(local->hw.wiphy),
 		       skb_queue_len(&sta->tx_filtered),
-		       !!test_sta_flags(sta, WLAN_STA_PS), jiffies);
+		       !!test_sta_flags(sta, WLAN_STA_PS_STA), jiffies);
 #endif
 	dev_kfree_skb(skb);
 }
@@ -441,12 +441,13 @@ void ieee80211_tx_status(struct ieee80211_hw *hw, struct sk_buff *skb)
 	rcu_read_lock();
 
 	sband = local->hw.wiphy->bands[info->band];
+	fc = hdr->frame_control;
 
 	sta = sta_info_get(local, hdr->addr1);
 
 	if (sta) {
 		if (!(info->flags & IEEE80211_TX_STAT_ACK) &&
-		    test_sta_flags(sta, WLAN_STA_PS)) {
+		    test_sta_flags(sta, WLAN_STA_PS_STA)) {
 			/*
 			 * The STA is in power save mode, so assume
 			 * that this TX packet failed because of that.
@@ -520,6 +521,20 @@ void ieee80211_tx_status(struct ieee80211_hw *hw, struct sk_buff *skb)
 	} else {
 		if (frag == 0)
 			local->dot11FailedCount++;
+	}
+
+	if (ieee80211_is_nullfunc(fc) && ieee80211_has_pm(fc) &&
+	    (local->hw.flags & IEEE80211_HW_REPORTS_TX_ACK_STATUS) &&
+	    !(info->flags & IEEE80211_TX_CTL_INJECTED) &&
+	    local->ps_sdata && !(local->scanning)) {
+		if (info->flags & IEEE80211_TX_STAT_ACK) {
+			local->ps_sdata->u.mgd.flags |=
+				IEEE80211_STA_NULLFUNC_ACKED;
+			ieee80211_queue_work(&local->hw,
+					     &local->dynamic_ps_enable_work);
+		} else
+			mod_timer(&local->dynamic_ps_timer, jiffies +
+				  msecs_to_jiffies(10));
 	}
 
 	/* this was a transmitted frame, but now we want to reuse it */
@@ -612,6 +627,9 @@ static void ieee80211_restart_work(struct work_struct *work)
 {
 	struct ieee80211_local *local =
 		container_of(work, struct ieee80211_local, restart_work);
+
+	/* wait for scan work complete */
+	flush_workqueue(local->workqueue);
 
 	rtnl_lock();
 	ieee80211_reconfig(local);
@@ -729,12 +747,30 @@ struct ieee80211_hw *ieee80211_alloc_hw(size_t priv_data_len,
 }
 EXPORT_SYMBOL(ieee80211_alloc_hw);
 
+struct ieee80211_hw *ieee80211_alloc_hw2(size_t priv_data_len,
+					 const struct ieee80211_ops *ops,
+					 const struct ieee80211_ops2 *ops2)
+{
+	struct ieee80211_hw *hw;
+	struct ieee80211_local *local;
+
+	hw = ieee80211_alloc_hw(priv_data_len, ops);
+
+	if (hw) {
+		local = hw_to_local(hw);
+		local->ops2 = ops2;
+	}
+
+	return hw;
+}
+EXPORT_SYMBOL(ieee80211_alloc_hw2);
+
 int ieee80211_register_hw(struct ieee80211_hw *hw)
 {
 	struct ieee80211_local *local = hw_to_local(hw);
 	int result;
 	enum ieee80211_band band;
-	int channels, i, j, max_bitrates;
+	int channels, max_bitrates;
 	bool supp_ht;
 	static const u32 cipher_suites[] = {
 		WLAN_CIPHER_SUITE_WEP40,
@@ -859,11 +895,9 @@ int ieee80211_register_hw(struct ieee80211_hw *hw)
 		goto fail_sta_info;
 
 	result = ieee80211_wep_init(local);
-	if (result < 0) {
+	if (result < 0)
 		printk(KERN_DEBUG "%s: Failed to initialize wep: %d\n",
 		       wiphy_name(local->hw.wiphy), result);
-		goto fail_wep;
-	}
 
 	rtnl_lock();
 
@@ -888,20 +922,6 @@ int ieee80211_register_hw(struct ieee80211_hw *hw)
 
 	ieee80211_led_init(local);
 
-	/* alloc internal scan request */
-	i = 0;
-	local->int_scan_req->ssids = &local->scan_ssid;
-	local->int_scan_req->n_ssids = 1;
-	for (band = 0; band < IEEE80211_NUM_BANDS; band++) {
-		if (!hw->wiphy->bands[band])
-			continue;
-		for (j = 0; j < hw->wiphy->bands[band]->n_channels; j++) {
-			local->int_scan_req->channels[i] =
-				&hw->wiphy->bands[band]->channels[j];
-			i++;
-		}
-	}
-
 	local->network_latency_notifier.notifier_call =
 		ieee80211_max_network_latency;
 	result = pm_qos_add_notifier(PM_QOS_NETWORK_LATENCY,
@@ -920,7 +940,6 @@ int ieee80211_register_hw(struct ieee80211_hw *hw)
  fail_rate:
 	rtnl_unlock();
 	ieee80211_wep_free(local);
- fail_wep:
 	sta_info_stop(local);
  fail_sta_info:
 	debugfs_hw_del(local);

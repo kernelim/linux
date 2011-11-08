@@ -31,6 +31,8 @@ struct ipc_namespace init_ipc_ns = {
 	.mq_queues_max   = DFLT_QUEUESMAX,
 	.mq_msg_max      = DFLT_MSGMAX,
 	.mq_msgsize_max  = DFLT_MSGSIZEMAX,
+	.mq_msg_default	    = DFLT_MSG,
+	.mq_msgsize_default = DFLT_MSGSIZE,
 #endif
 };
 

@@ -1,6 +1,4 @@
 /*
- * linux/fs/nfsd/lockd.c
- *
  * This file contains all the stubs needed when communicating with lockd.
  * This level of indirection is necessary so we can run nfsd+lockd without
  * requiring the nfs client to be compiled in/loaded, and vice versa.
@@ -8,14 +6,10 @@
  * Copyright (C) 1996, Olaf Kirch <okir@monad.swb.de>
  */
 
-#include <linux/types.h>
-#include <linux/fs.h>
 #include <linux/file.h>
-#include <linux/mount.h>
-#include <linux/sunrpc/clnt.h>
-#include <linux/sunrpc/svc.h>
-#include <linux/nfsd/nfsd.h>
 #include <linux/lockd/bind.h>
+#include "nfsd.h"
+#include "vfs.h"
 
 #define NFSDDBG_FACILITY		NFSDDBG_LOCKD
 
@@ -44,7 +38,6 @@ nlm_fopen(struct svc_rqst *rqstp, struct nfs_fh *f, struct file **filp)
 	exp_readlock();
 	nfserr = nfsd_open(rqstp, &fh, S_IFREG, NFSD_MAY_LOCK, filp);
 	fh_put(&fh);
-	rqstp->rq_client = NULL;
 	exp_readunlock();
  	/* We return nlm error codes as nlm doesn't know
 	 * about nfsd, but nfsd does know about nlm..

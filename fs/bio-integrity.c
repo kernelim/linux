@@ -61,7 +61,7 @@ static inline unsigned int vecs_to_idx(unsigned int nr)
 
 static inline int use_bip_pool(unsigned int idx)
 {
-	if (idx == BIOVEC_NR_POOLS)
+	if (idx == BIOVEC_MAX_IDX)
 		return 1;
 
 	return 0;
@@ -95,6 +95,7 @@ struct bio_integrity_payload *bio_integrity_alloc_bioset(struct bio *bio,
 
 	/* Use mempool if lower order alloc failed or max vecs were requested */
 	if (bip == NULL) {
+		idx = BIOVEC_MAX_IDX;  /* so we free the payload properly later */
 		bip = mempool_alloc(bs->bio_integrity_pool, gfp_mask);
 
 		if (unlikely(bip == NULL)) {
@@ -758,6 +759,9 @@ EXPORT_SYMBOL(bio_integrity_clone);
 int bioset_integrity_create(struct bio_set *bs, int pool_size)
 {
 	unsigned int max_slab = vecs_to_idx(BIO_MAX_PAGES);
+
+	if (bs->bio_integrity_pool)
+		return 0;
 
 	bs->bio_integrity_pool =
 		mempool_create_slab_pool(pool_size, bip_slab[max_slab].slab);

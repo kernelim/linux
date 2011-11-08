@@ -19,6 +19,7 @@
  *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
+#include <linux/slab.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/jiffies.h>
@@ -291,10 +292,19 @@ s32 cx88_dsp_detect_stereo_sap(struct cx88_core *core)
 	switch (core->tvaudio) {
 	case WW_BG:
 	case WW_DK:
+	case WW_EIAJ:
+	case WW_M:
 		ret = detect_a2_a2m_eiaj(core, samples, N);
 		break;
 	case WW_BTSC:
 		ret = detect_btsc(core, samples, N);
+		break;
+	case WW_NONE:
+	case WW_I:
+	case WW_L:
+	case WW_I2SPT:
+	case WW_FM:
+	case WW_I2SADC:
 		break;
 	}
 

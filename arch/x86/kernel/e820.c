@@ -33,9 +33,9 @@
  * and that is also registered with modifications in the kernel resource tree
  * with the iomem_resource as parent.
  *
- * The e820_saved is directly saved after the BIOS-provided memory map is
- * copied. It doesn't get modified afterwards. It's registered for the
- * /sys/firmware/memmap interface.
+ * The e820_saved is saved after the BIOS-provided memory map is copied as
+ * well as the optional add_efi_memmap entries are processed.  It doesn't get
+ * modified afterwards. It's registered for the /sys/firmware/memmap interface.
  *
  * That memory map is not modified and is used as base for kexec. The kexec'd
  * kernel should get the same memory map as the firmware provides. Then the
@@ -129,6 +129,11 @@ static void __init __e820_add_region(struct e820map *e820x, u64 start, u64 size,
 void __init e820_add_region(u64 start, u64 size, int type)
 {
 	__e820_add_region(&e820, start, size, type);
+}
+
+void __init e820_saved_add_region(u64 start, u64 size, int type)
+{
+	__e820_add_region(&e820_saved, start, size, type);
 }
 
 static void __init e820_print_type(u32 type)
@@ -517,10 +522,18 @@ u64 __init e820_remove_range(u64 start, u64 size, unsigned old_type,
 			     int checktype)
 {
 	int i;
+	u64 end;
 	u64 real_removed_size = 0;
 
 	if (size > (ULLONG_MAX - start))
 		size = ULLONG_MAX - start;
+
+	end = start + size;
+	printk(KERN_DEBUG "e820 remove range: %016Lx - %016Lx ",
+		       (unsigned long long) start,
+		       (unsigned long long) end);
+	e820_print_type(old_type);
+	printk(KERN_CONT "\n");
 
 	for (i = 0; i < e820.nr_map; i++) {
 		struct e820entry *ei = &e820.map[i];
@@ -1097,7 +1110,7 @@ u64 __init early_reserve_e820(u64 startt, u64 sizet, u64 align)
 
 #ifdef CONFIG_X86_32
 # ifdef CONFIG_X86_PAE
-#  define MAX_ARCH_PFN		(1ULL<<(36-PAGE_SHIFT))
+#  define MAX_ARCH_PFN		(1ULL<<(34-PAGE_SHIFT))
 # else
 #  define MAX_ARCH_PFN		(1ULL<<(32-PAGE_SHIFT))
 # endif

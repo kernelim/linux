@@ -21,7 +21,6 @@ struct mm_struct;
 #include <asm/msr.h>
 #include <asm/desc_defs.h>
 #include <asm/nops.h>
-#include <asm/ds.h>
 
 #include <linux/personality.h>
 #include <linux/cpumask.h>
@@ -29,6 +28,7 @@ struct mm_struct;
 #include <linux/threads.h>
 #include <linux/math64.h>
 #include <linux/init.h>
+#include <linux/err.h>
 
 /*
  * Default implementation of macro that returns current
@@ -113,6 +113,19 @@ struct cpuinfo_x86 {
 	u16			cpu_index;
 #endif
 	unsigned int		x86_hyper_vendor;
+#ifndef __GENKSYMS__
+	/* RHEL6:
+	   There are only 4 bytes of space before the end of this struct. */
+#ifdef CONFIG_SMP
+	/* Compute unit id */
+	u8			compute_unit_id;
+#endif /* CONFIG_SMP */
+#endif /* !__GENKSYMS__ */
+} __attribute__((__aligned__(SMP_CACHE_BYTES)));
+
+/* This struct never should be on a kabi whitelist. */
+struct cpuinfo_x86_rh {
+	__u32			x86_capability[RH_EXT_NCAPINTS];
 } __attribute__((__aligned__(SMP_CACHE_BYTES)));
 
 #define X86_VENDOR_INTEL	0
@@ -133,16 +146,21 @@ struct cpuinfo_x86 {
  * capabilities of CPUs
  */
 extern struct cpuinfo_x86	boot_cpu_data;
+extern struct cpuinfo_x86_rh	boot_cpu_data_rh;
 extern struct cpuinfo_x86	new_cpu_data;
+extern struct cpuinfo_x86_rh	new_cpu_data_rh;
 
 extern struct tss_struct	doublefault_tss;
-extern __u32			cpu_caps_cleared[NCAPINTS];
-extern __u32			cpu_caps_set[NCAPINTS];
+extern __u32			cpu_caps_cleared[RHNCAPINTS];
+extern __u32			cpu_caps_set[RHNCAPINTS];
 
 #ifdef CONFIG_SMP
 DECLARE_PER_CPU_SHARED_ALIGNED(struct cpuinfo_x86, cpu_info);
+DECLARE_PER_CPU_SHARED_ALIGNED(struct cpuinfo_x86_rh, cpu_info_rh);
 #define cpu_data(cpu)		per_cpu(cpu_info, cpu)
 #define current_cpu_data	__get_cpu_var(cpu_info)
+#define cpu_data_rh(cpu)	per_cpu(cpu_info_rh, cpu)
+#define current_cpu_data_rh	__get_cpu_var(cpu_info_rh)
 #else
 #define cpu_data(cpu)		boot_cpu_data
 #define current_cpu_data	boot_cpu_data
@@ -160,6 +178,9 @@ static inline int hlt_works(int cpu)
 }
 
 #define cache_line_size()	(boot_cpu_data.x86_cache_alignment)
+
+#define __HAVE_ARCH_ALIGN_STACK
+extern unsigned long arch_align_stack(unsigned long sp);
 
 extern void cpu_detect(struct cpuinfo_x86 *c);
 
@@ -180,7 +201,7 @@ static inline void native_cpuid(unsigned int *eax, unsigned int *ebx,
 				unsigned int *ecx, unsigned int *edx)
 {
 	/* ecx is often an input as well as an output. */
-	asm("cpuid"
+	asm volatile("cpuid"
 	    : "=a" (*eax),
 	      "=b" (*ebx),
 	      "=c" (*ecx),
@@ -379,6 +400,10 @@ union thread_xstate {
 	struct xsave_struct		xsave;
 };
 
+struct fpu {
+       union thread_xstate *state;
+};
+
 #ifdef CONFIG_X86_64
 DECLARE_PER_CPU(struct orig_ist, orig_ist);
 
@@ -471,10 +496,6 @@ struct thread_struct {
 	unsigned long		iopl;
 	/* Max allowed port in the bitmap, in bytes: */
 	unsigned		io_bitmap_max;
-/* MSR_IA32_DEBUGCTLMSR value to switch in if TIF_DEBUGCTLMSR is set.  */
-	unsigned long	debugctlmsr;
-	/* Debug Store context; see asm/ds.h */
-	struct ds_context	*ds_ctx;
 };
 
 static inline unsigned long native_get_debugreg(int regno)
@@ -765,29 +786,6 @@ extern unsigned long		boot_option_idle_override;
 extern unsigned long		idle_halt;
 extern unsigned long		idle_nomwait;
 
-/*
- * on systems with caches, caches must be flashed as the absolute
- * last instruction before going into a suspended halt.  Otherwise,
- * dirty data can linger in the cache and become stale on resume,
- * leading to strange errors.
- *
- * perform a variety of operations to guarantee that the compiler
- * will not reorder instructions.  wbinvd itself is serializing
- * so the processor will not reorder.
- *
- * Systems without cache can just go into halt.
- */
-static inline void wbinvd_halt(void)
-{
-	mb();
-	/* check for clflush to determine if wbinvd is legal */
-	if (cpu_has_clflush)
-		asm volatile("cli; wbinvd; 1: hlt; jmp 1b" : : : "memory");
-	else
-		while (1)
-			halt();
-}
-
 extern void enable_sep_cpu(void);
 extern int sysenter_setup(void);
 
@@ -801,28 +799,13 @@ extern void cpu_init(void);
 
 static inline unsigned long get_debugctlmsr(void)
 {
-    unsigned long debugctlmsr = 0;
+	unsigned long debugctlmsr = 0;
 
 #ifndef CONFIG_X86_DEBUGCTLMSR
 	if (boot_cpu_data.x86 < 6)
 		return 0;
 #endif
 	rdmsrl(MSR_IA32_DEBUGCTLMSR, debugctlmsr);
-
-    return debugctlmsr;
-}
-
-static inline unsigned long get_debugctlmsr_on_cpu(int cpu)
-{
-	u64 debugctlmsr = 0;
-	u32 val1, val2;
-
-#ifndef CONFIG_X86_DEBUGCTLMSR
-	if (boot_cpu_data.x86 < 6)
-		return 0;
-#endif
-	rdmsr_on_cpu(cpu, MSR_IA32_DEBUGCTLMSR, &val1, &val2);
-	debugctlmsr = val1 | ((u64)val2 << 32);
 
 	return debugctlmsr;
 }
@@ -834,18 +817,6 @@ static inline void update_debugctlmsr(unsigned long debugctlmsr)
 		return;
 #endif
 	wrmsrl(MSR_IA32_DEBUGCTLMSR, debugctlmsr);
-}
-
-static inline void update_debugctlmsr_on_cpu(int cpu,
-					     unsigned long debugctlmsr)
-{
-#ifndef CONFIG_X86_DEBUGCTLMSR
-	if (boot_cpu_data.x86 < 6)
-		return;
-#endif
-	wrmsr_on_cpu(cpu, MSR_IA32_DEBUGCTLMSR,
-		     (u32)((u64)debugctlmsr),
-		     (u32)((u64)debugctlmsr >> 32));
 }
 
 /*

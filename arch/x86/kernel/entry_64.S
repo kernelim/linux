@@ -53,6 +53,7 @@
 #include <asm/paravirt.h>
 #include <asm/ftrace.h>
 #include <asm/percpu.h>
+#include <linux/err.h>
 
 /* Avoid __ASSEMBLER__'ifying <linux/audit.h> just for this.  */
 #include <linux/elf-em.h>
@@ -566,17 +567,16 @@ auditsys:
 	jmp system_call_fastpath
 
 	/*
-	 * Return fast path for syscall audit.  Call audit_syscall_exit()
+	 * Return fast path for syscall audit.  Call __audit_syscall_exit()
 	 * directly and then jump back to the fast path with TIF_SYSCALL_AUDIT
 	 * masked off.
 	 */
 sysret_audit:
-	movq %rax,%rsi		/* second arg, syscall return value */
-	cmpq $0,%rax		/* is it < 0? */
-	setl %al		/* 1 if so, 0 if not */
+	movq RAX-ARGOFFSET(%rsp), %rsi /* second arg, syscall return value */
+	cmpq $-MAX_ERRNO,%rsi	/* is it < -MAX_ERRNO? */
+	setbe %al		/* 1 if so, 0 if not */
 	movzbl %al,%edi		/* zero-extend that into %edi */
-	inc %edi /* first arg, 0->1(AUDITSC_SUCCESS), 1->2(AUDITSC_FAILURE) */
-	call audit_syscall_exit
+	call __audit_syscall_exit
 	movl $(_TIF_ALLWORK_MASK & ~_TIF_SYSCALL_AUDIT),%edi
 	jmp sysret_check
 #endif	/* CONFIG_AUDITSYSCALL */
@@ -969,8 +969,8 @@ apicinterrupt UV_BAU_MESSAGE \
 #endif
 apicinterrupt LOCAL_TIMER_VECTOR \
 	apic_timer_interrupt smp_apic_timer_interrupt
-apicinterrupt GENERIC_INTERRUPT_VECTOR \
-	generic_interrupt smp_generic_interrupt
+apicinterrupt X86_PLATFORM_IPI_VECTOR \
+	x86_platform_ipi smp_x86_platform_ipi
 
 #ifdef CONFIG_SMP
 apicinterrupt INVALIDATE_TLB_VECTOR_START+0 \
@@ -1363,6 +1363,9 @@ ENTRY(xen_failsafe_callback)
 	jmp error_exit
 	CFI_ENDPROC
 END(xen_failsafe_callback)
+
+apicinterrupt XEN_HVM_EVTCHN_CALLBACK \
+	xen_hvm_callback_vector xen_evtchn_do_upcall
 
 #endif /* CONFIG_XEN */
 

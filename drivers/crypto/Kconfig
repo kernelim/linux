@@ -74,6 +74,8 @@ config ZCRYPT
 	  + PCI-X Cryptographic Coprocessor (PCIXCC)
 	  + Crypto Express2 Coprocessor (CEX2C)
 	  + Crypto Express2 Accelerator (CEX2A)
+	  + Crypto Express3 Coprocessor (CEX3C)
+	  + Crypto Express3 Accelerator (CEX3A)
 
 config ZCRYPT_MONOLITHIC
 	bool "Monolithic zcrypt module"
@@ -121,8 +123,11 @@ config CRYPTO_DES_S390
 	select CRYPTO_ALGAPI
 	select CRYPTO_BLKCIPHER
 	help
-	  This us the s390 hardware accelerated implementation of the
+	  This is the s390 hardware accelerated implementation of the
 	  DES cipher algorithm (FIPS 46-2), and Triple DES EDE (FIPS 46-3).
+
+	  As of z990 the ECB and CBC mode are hardware accelerated.
+	  As of z196 the CTR mode is hardware accelerated.
 
 config CRYPTO_AES_S390
 	tristate "AES cipher algorithms"
@@ -131,20 +136,15 @@ config CRYPTO_AES_S390
 	select CRYPTO_BLKCIPHER
 	help
 	  This is the s390 hardware accelerated implementation of the
-	  AES cipher algorithms (FIPS-197). AES uses the Rijndael
-	  algorithm.
+	  AES cipher algorithms (FIPS-197).
 
-	  Rijndael appears to be consistently a very good performer in
-	  both hardware and software across a wide range of computing
-	  environments regardless of its use in feedback or non-feedback
-	  modes. Its key setup time is excellent, and its key agility is
-	  good. Rijndael's very low memory requirements make it very well
-	  suited for restricted-space environments, in which it also
-	  demonstrates excellent performance. Rijndael's operations are
-	  among the easiest to defend against power and timing attacks.
-
-	  On s390 the System z9-109 currently only supports the key size
-	  of 128 bit.
+	  As of z9 the ECB and CBC modes are hardware accelerated
+	  for 128 bit keys.
+	  As of z10 the ECB and CBC modes are hardware accelerated
+	  for all AES key sizes.
+	  As of z196 the CTR mode is hardware accelerated for all AES
+	  key sizes and XTS mode is hardware accelerated for 256 and
+	  512 bit keys.
 
 config S390_PRNG
 	tristate "Pseudo random number generator device driver"
@@ -156,6 +156,16 @@ config S390_PRNG
 	  and uses triple-DES to generate secure random numbers like the
 	  ANSI X9.17 standard. The PRNG is usable via the char device
 	  /dev/prandom.
+
+config CRYPTO_GHASH_S390
+	tristate "GHASH digest algorithm"
+	depends on S390
+	select CRYPTO_HASH
+	help
+	  This is the s390 hardware accelerated implementation of the
+	  GHASH message digest algorithm for GCM (Galois/Counter Mode).
+
+	  It is available as of z196.
 
 config CRYPTO_DEV_MV_CESA
 	tristate "Marvell's Cryptographic Engine"

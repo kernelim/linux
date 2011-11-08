@@ -135,8 +135,10 @@ static int snapshot_release(struct inode *inode, struct file *filp)
 	free_basic_memory_bitmaps();
 	data = filp->private_data;
 	free_all_swap_pages(data->swap);
-	if (data->frozen)
+	if (data->frozen) {
+		pm_restore_gfp_mask();
 		thaw_processes();
+	}
 	pm_notifier_call_chain(data->mode == O_WRONLY ?
 			PM_POST_HIBERNATION : PM_POST_RESTORE);
 	atomic_inc(&snapshot_device_available);
@@ -241,6 +243,7 @@ static long snapshot_ioctl(struct file *filp, unsigned int cmd,
 	case SNAPSHOT_UNFREEZE:
 		if (!data->frozen || data->ready)
 			break;
+		pm_restore_gfp_mask();
 		thaw_processes();
 		usermodehelper_enable();
 		data->frozen = 0;
@@ -252,6 +255,7 @@ static long snapshot_ioctl(struct file *filp, unsigned int cmd,
 			error = -EPERM;
 			break;
 		}
+		pm_restore_gfp_mask();
 		error = hibernation_snapshot(data->platform_support);
 		if (!error)
 			error = put_user(in_suspend, (int __user *)arg);

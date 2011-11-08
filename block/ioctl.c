@@ -122,10 +122,9 @@ static int blk_ioctl_discard(struct block_device *bdev, uint64_t start,
 	start >>= 9;
 	len >>= 9;
 
-	if (start + len > (bdev->bd_inode->i_size >> 9))
+	if (start + len > (i_size_read(bdev->bd_inode) >> 9))
 		return -EINVAL;
-	return blkdev_issue_discard(bdev, start, len, GFP_KERNEL,
-				    DISCARD_FL_WAIT);
+	return blkdev_issue_discard(bdev, start, len, GFP_KERNEL, 0);
 }
 
 static int put_ushort(unsigned long arg, unsigned short val)
@@ -280,6 +279,8 @@ int blkdev_ioctl(struct block_device *bdev, fmode_t mode, unsigned cmd,
 		return put_uint(arg, bdev_io_opt(bdev));
 	case BLKALIGNOFF:
 		return put_int(arg, bdev_alignment_offset(bdev));
+	case BLKDISCARDZEROES:
+		return put_uint(arg, bdev_discard_zeroes_data(bdev));
 	case BLKSECTGET:
 		return put_ushort(arg, queue_max_sectors(bdev_get_queue(bdev)));
 	case BLKRASET:
@@ -316,12 +317,12 @@ int blkdev_ioctl(struct block_device *bdev, fmode_t mode, unsigned cmd,
 		unlock_kernel();
 		break;
 	case BLKGETSIZE:
-		size = bdev->bd_inode->i_size;
+		size = i_size_read(bdev->bd_inode);
 		if ((size >> 9) > ~0UL)
 			return -EFBIG;
 		return put_ulong(arg, size >> 9);
 	case BLKGETSIZE64:
-		return put_u64(arg, bdev->bd_inode->i_size);
+		return put_u64(arg, i_size_read(bdev->bd_inode));
 	case BLKTRACESTART:
 	case BLKTRACESTOP:
 	case BLKTRACESETUP:

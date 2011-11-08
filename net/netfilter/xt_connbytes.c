@@ -112,6 +112,15 @@ static bool connbytes_mt_check(const struct xt_mtchk_param *par)
 		return false;
 	}
 
+	/*
+	 * This filter cannot function correctly unless connection tracking
+	 * accounting is enabled, so complain in the hope that someone notices.
+	 */
+	if (!nf_ct_acct_enabled(&init_net)) {
+		pr_warning("Forcing CT accounting to be enabled\n");
+		nf_ct_set_acct(&init_net, true);
+	}
+
 	return true;
 }
 

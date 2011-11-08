@@ -90,6 +90,18 @@
 #define IPV6_ADDR_SCOPE_GLOBAL		0x0e
 
 /*
+ *	Addr flags
+ */
+#ifdef __KERNEL__
+#define IPV6_ADDR_MC_FLAG_TRANSIENT(a)	\
+	((a)->s6_addr[1] & 0x10)
+#define IPV6_ADDR_MC_FLAG_PREFIX(a)	\
+	((a)->s6_addr[1] & 0x20)
+#define IPV6_ADDR_MC_FLAG_RENDEZVOUS(a)	\
+	((a)->s6_addr[1] & 0x40)
+#endif
+
+/*
  *	fragmentation header
  */
 
@@ -354,8 +366,16 @@ static inline int ipv6_prefix_equal(const struct in6_addr *a1,
 
 struct inet_frag_queue;
 
+enum ip6_defrag_users {
+	IP6_DEFRAG_LOCAL_DELIVER,
+	IP6_DEFRAG_CONNTRACK_IN,
+	IP6_DEFRAG_CONNTRACK_OUT,
+	IP6_DEFRAG_CONNTRACK_BRIDGE_IN,
+};
+
 struct ip6_create_arg {
 	__be32 id;
+	u32 user;
 	struct in6_addr *src;
 	struct in6_addr *dst;
 };
@@ -441,17 +461,7 @@ static inline int ipv6_addr_diff(const struct in6_addr *a1, const struct in6_add
 	return __ipv6_addr_diff(a1, a2, sizeof(struct in6_addr));
 }
 
-static __inline__ void ipv6_select_ident(struct frag_hdr *fhdr)
-{
-	static u32 ipv6_fragmentation_id = 1;
-	static DEFINE_SPINLOCK(ip6_id_lock);
-
-	spin_lock_bh(&ip6_id_lock);
-	fhdr->identification = htonl(ipv6_fragmentation_id);
-	if (++ipv6_fragmentation_id == 0)
-		ipv6_fragmentation_id = 1;
-	spin_unlock_bh(&ip6_id_lock);
-}
+extern void ipv6_select_ident(struct frag_hdr *fhdr, struct in6_addr *addr);
 
 /*
  *	Prototypes exported by ipv6

@@ -209,6 +209,10 @@ mptspi_setTargetNegoParms(MPT_SCSI_HOST *hd, VirtTarget *target,
 	target->maxOffset = offset;
 	target->maxWidth = width;
 
+	spi_min_period(scsi_target(sdev)) = factor;
+	spi_max_offset(scsi_target(sdev)) = offset;
+	spi_max_width(scsi_target(sdev)) = width;
+
 	target->tflags |= MPT_TARGET_FLAGS_VALID_NEGO;
 
 	/* Disable unused features.
@@ -557,6 +561,7 @@ static int mptspi_read_spi_device_pg0(struct scsi_target *starget,
 	cfg.action = MPI_CONFIG_ACTION_PAGE_READ_CURRENT;
 	cfg.dir = 0;
 	cfg.pageAddr = starget->id;
+	cfg.timeout = 60;
 
 	if (mpt_config(ioc, &cfg)) {
 		starget_printk(KERN_ERR, starget, MYIOC_s_FMT "mpt_config failed\n", ioc->name);
@@ -859,6 +864,10 @@ static int mptspi_write_spi_device_pg1(struct scsi_target *starget,
 	struct _x_config_parms cfg;
 	struct _CONFIG_PAGE_HEADER hdr;
 	int err = -EBUSY;
+	u32 nego_parms;
+	u32 period;
+	struct scsi_device *sdev;
+	int i;
 
 	/* don't allow updating nego parameters on RAID devices */
 	if (starget->channel == 0 &&
@@ -895,6 +904,24 @@ static int mptspi_write_spi_device_pg1(struct scsi_target *starget,
 	pg1->Header.PageLength = hdr.PageLength;
 	pg1->Header.PageNumber = hdr.PageNumber;
 	pg1->Header.PageType = hdr.PageType;
+
+	nego_parms = le32_to_cpu(pg1->RequestedParameters);
+	period = (nego_parms & MPI_SCSIDEVPAGE1_RP_MIN_SYNC_PERIOD_MASK) >>
+		MPI_SCSIDEVPAGE1_RP_SHIFT_MIN_SYNC_PERIOD;
+	if (period == 8) {
+		/* Turn on inline data padding for TAPE when running U320 */
+		for (i = 0 ; i < 16; i++) {
+			sdev = scsi_device_lookup_by_target(starget, i);
+			if (sdev && sdev->type == TYPE_TAPE) {
+				sdev_printk(KERN_DEBUG, sdev, MYIOC_s_FMT
+					    "IDP:ON\n", ioc->name);
+				nego_parms |= MPI_SCSIDEVPAGE1_RP_IDP;
+				pg1->RequestedParameters =
+				    cpu_to_le32(nego_parms);
+				break;
+			}
+		}
+	}
 
 	mptspi_print_write_nego(hd, starget, le32_to_cpu(pg1->RequestedParameters));
 
@@ -1151,6 +1178,9 @@ mptspi_event_process(MPT_ADAPTER *ioc, EventNotificationReply_t *pEvReply)
 	u8 event = le32_to_cpu(pEvReply->Event) & 0xFF;
 	struct _MPT_SCSI_HOST *hd = shost_priv(ioc->sh);
 
+	if (ioc->bus_type != SPI)
+		return 0;
+
 	if (hd && event ==  MPI_EVENT_INTEGRATED_RAID) {
 		int reason
 			= (le32_to_cpu(pEvReply->Data[0]) & 0x00FF0000) >> 16;
@@ -1282,6 +1312,8 @@ mptspi_ioc_reset(MPT_ADAPTER *ioc, int reset_phase)
 	int rc;
 
 	rc = mptscsih_ioc_reset(ioc, reset_phase);
+	if ((ioc->bus_type != SPI) || (!rc))
+		return rc;
 
 	/* only try to do a renegotiation if we're properly set up
 	 * if we get an ioc fault on bringup, ioc->sh will be NULL */
@@ -1540,9 +1572,12 @@ mptspi_init(void)
 	if (!mptspi_transport_template)
 		return -ENODEV;
 
-	mptspiDoneCtx = mpt_register(mptscsih_io_done, MPTSPI_DRIVER);
-	mptspiTaskCtx = mpt_register(mptscsih_taskmgmt_complete, MPTSPI_DRIVER);
-	mptspiInternalCtx = mpt_register(mptscsih_scandv_complete, MPTSPI_DRIVER);
+	mptspiDoneCtx = mpt_register(mptscsih_io_done, MPTSPI_DRIVER,
+	    "mptscsih_io_done");
+	mptspiTaskCtx = mpt_register(mptscsih_taskmgmt_complete, MPTSPI_DRIVER,
+	    "mptscsih_taskmgmt_complete");
+	mptspiInternalCtx = mpt_register(mptscsih_scandv_complete,
+	    MPTSPI_DRIVER, "mptscsih_scandv_complete");
 
 	mpt_event_register(mptspiDoneCtx, mptspi_event_process);
 	mpt_reset_register(mptspiDoneCtx, mptspi_ioc_reset);

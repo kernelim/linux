@@ -684,7 +684,7 @@ static void pci_read_irq(struct pci_dev *dev)
 	dev->irq = irq;
 }
 
-static void set_pcie_port_type(struct pci_dev *pdev)
+void set_pcie_port_type(struct pci_dev *pdev)
 {
 	int pos;
 	u16 reg16;
@@ -693,11 +693,12 @@ static void set_pcie_port_type(struct pci_dev *pdev)
 	if (!pos)
 		return;
 	pdev->is_pcie = 1;
+	pdev->pcie_cap = pos;
 	pci_read_config_word(pdev, pos + PCI_EXP_FLAGS, &reg16);
 	pdev->pcie_type = (reg16 & PCI_EXP_FLAGS_TYPE) >> 4;
 }
 
-static void set_pcie_hotplug_bridge(struct pci_dev *pdev)
+void set_pcie_hotplug_bridge(struct pci_dev *pdev)
 {
 	int pos;
 	u16 reg16;
@@ -867,7 +868,7 @@ static void pci_release_dev(struct device *dev)
 
 	pci_dev = to_pci_dev(dev);
 	pci_release_capabilities(pci_dev);
-	kfree(pci_dev);
+	kfree_pci_dev(pci_dev);
 }
 
 /**
@@ -937,11 +938,24 @@ struct pci_dev *alloc_pci_dev(void)
 	if (!dev)
 		return NULL;
 
+	dev->rh_reserved1 = kzalloc(sizeof(struct pci_dev_rh1), GFP_KERNEL);
+	if (!dev->rh_reserved1) {
+		kfree(dev);
+		return NULL;
+	}
+
 	INIT_LIST_HEAD(&dev->bus_list);
 
 	return dev;
 }
 EXPORT_SYMBOL(alloc_pci_dev);
+
+void kfree_pci_dev(struct pci_dev *dev)
+{
+	kfree(dev->rh_reserved1);
+	kfree(dev);
+}
+EXPORT_SYMBOL(kfree_pci_dev);
 
 /*
  * Read the config data for a PCI device, sanity-check it
@@ -987,7 +1001,7 @@ static struct pci_dev *pci_scan_device(struct pci_bus *bus, int devfn)
 	dev->device = (l >> 16) & 0xffff;
 
 	if (pci_setup_device(dev)) {
-		kfree(dev);
+		kfree_pci_dev(dev);
 		return NULL;
 	}
 
@@ -1014,6 +1028,9 @@ static void pci_init_capabilities(struct pci_dev *dev)
 
 	/* Single Root I/O Virtualization */
 	pci_iov_init(dev);
+
+	/* Enable ACS P2P upstream forwarding */
+	pci_enable_acs(dev);
 }
 
 void pci_device_add(struct pci_dev *dev, struct pci_bus *bus)

@@ -1,7 +1,7 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
  * Fibre Channel Host Bus Adapters.                                *
- * Copyright (C) 2004-2009 Emulex.  All rights reserved.           *
+ * Copyright (C) 2004-2011 Emulex.  All rights reserved.           *
  * EMULEX and SLI are trademarks of Emulex.                        *
  * www.emulex.com                                                  *
  * Portions Copyright (C) 2004-2005 Christoph Hellwig              *
@@ -21,6 +21,10 @@
 
 #include <scsi/scsi_host.h>
 
+#if defined(CONFIG_DEBUG_FS) && !defined(CONFIG_SCSI_LPFC_DEBUG_FS)
+#define CONFIG_SCSI_LPFC_DEBUG_FS
+#endif
+
 struct lpfc_sli2_slim;
 
 #define LPFC_PCI_DEV_LP		0x1
@@ -37,8 +41,12 @@ struct lpfc_sli2_slim;
 					   the NameServer  before giving up. */
 #define LPFC_CMD_PER_LUN	3	/* max outstanding cmds per lun */
 #define LPFC_DEFAULT_SG_SEG_CNT 64	/* sg element count per scsi cmnd */
+#define LPFC_DEFAULT_MENLO_SG_SEG_CNT 128	/* sg element count per scsi
+		cmnd for menlo needs nearly twice as for firmware
+		downloads using bsg */
 #define LPFC_DEFAULT_PROT_SG_SEG_CNT 4096 /* sg protection elements count */
 #define LPFC_MAX_SG_SEG_CNT	4096	/* sg element count per scsi cmnd */
+#define LPFC_MAX_SGE_SIZE       0x80000000 /* Maximum data allowed in a SGE */
 #define LPFC_MAX_PROT_SG_SEG_CNT 4096	/* prot sg element count per scsi cmd*/
 #define LPFC_IOCB_LIST_CNT	2250	/* list of IOCBs for fast-path usage. */
 #define LPFC_Q_RAMP_UP_INTERVAL 120     /* lun q_depth ramp up interval */
@@ -51,6 +59,7 @@ struct lpfc_sli2_slim;
 
 #define  LPFC_MAX_BUCKET_COUNT 20	/* Maximum no. of buckets for stat data
 					   collection. */
+
 /*
  * Following time intervals are used of adjusting SCSI device
  * queue depths when there are driver resource error or Firmware
@@ -109,7 +118,8 @@ struct hbq_dmabuf {
 	struct lpfc_dmabuf dbuf;
 	uint32_t size;
 	uint32_t tag;
-	struct lpfc_rcqe rcqe;
+	struct lpfc_cq_event cq_event;
+	unsigned long time_stamp;
 };
 
 /* Priority bit.  Set value to exceed low water mark in lpfc_mem. */
@@ -199,8 +209,12 @@ struct lpfc_stats {
 	uint32_t elsRcvPRLO;
 	uint32_t elsRcvPRLI;
 	uint32_t elsRcvLIRR;
+	uint32_t elsRcvRLS;
 	uint32_t elsRcvRPS;
 	uint32_t elsRcvRPL;
+	uint32_t elsRcvRRQ;
+	uint32_t elsRcvRTV;
+	uint32_t elsRcvECHO;
 	uint32_t elsXmitFLOGI;
 	uint32_t elsXmitFDISC;
 	uint32_t elsXmitPLOGI;
@@ -289,8 +303,8 @@ struct lpfc_vport {
 
 	uint16_t vpi;
 	uint16_t vfi;
-	uint8_t vfi_state;
-#define LPFC_VFI_REGISTERED	0x1
+	uint8_t vpi_state;
+#define LPFC_VPI_REGISTERED	0x1
 
 	uint32_t fc_flag;	/* FC flags */
 /* Several of these flags are HBA centric and should be moved to
@@ -305,7 +319,9 @@ struct lpfc_vport {
 #define FC_NLP_MORE             0x40	 /* More node to process in node tbl */
 #define FC_OFFLINE_MODE         0x80	 /* Interface is offline for diag */
 #define FC_FABRIC               0x100	 /* We are fabric attached */
+#define FC_VPORT_LOGO_RCVD      0x200    /* LOGO received on vport */
 #define FC_RSCN_DISCOVERY       0x400	 /* Auth all devices after RSCN */
+#define FC_LOGO_RCVD_DID_CHNG   0x800    /* FDISC on phys port detect DID chng*/
 #define FC_SCSI_SCAN_TMO        0x4000	 /* scsi scan timer running */
 #define FC_ABORT_DISCOVERY      0x8000	 /* we want to abort discovery */
 #define FC_NDISC_ACTIVE         0x10000	 /* NPort discovery active */
@@ -313,6 +329,10 @@ struct lpfc_vport {
 #define FC_VPORT_NEEDS_REG_VPI	0x80000  /* Needs to have its vpi registered */
 #define FC_RSCN_DEFERRED	0x100000 /* A deferred RSCN being processed */
 #define FC_VPORT_NEEDS_INIT_VPI 0x200000 /* Need to INIT_VPI before FDISC */
+#define FC_VPORT_CVL_RCVD	0x400000 /* VLink failed due to CVL	 */
+#define FC_VFI_REGISTERED	0x800000 /* VFI is registered */
+#define FC_FDISC_COMPLETED	0x1000000/* FDISC completed */
+#define FC_DISC_DELAYED		0x2000000/* Delay NPort discovery */
 
 	uint32_t ct_flags;
 #define FC_CT_RFF_ID		0x1	 /* RFF_ID accepted by switch */
@@ -336,6 +356,8 @@ struct lpfc_vport {
 
 	uint32_t fc_myDID;	/* fibre channel S_ID */
 	uint32_t fc_prevDID;	/* previous fibre channel S_ID */
+	struct lpfc_name fabric_portname;
+	struct lpfc_name fabric_nodename;
 
 	int32_t stopped;   /* HBA has not been restarted since last ERATT */
 	uint8_t fc_linkspeed;	/* Link speed after last READ_LA */
@@ -360,15 +382,18 @@ struct lpfc_vport {
 #define WORKER_DISC_TMO                0x1	/* vport: Discovery timeout */
 #define WORKER_ELS_TMO                 0x2	/* vport: ELS timeout */
 #define WORKER_FDMI_TMO                0x4	/* vport: FDMI timeout */
+#define WORKER_DELAYED_DISC_TMO        0x8	/* vport: delayed discovery */
 
 #define WORKER_MBOX_TMO                0x100	/* hba: MBOX timeout */
 #define WORKER_HB_TMO                  0x200	/* hba: Heart beat timeout */
 #define WORKER_FABRIC_BLOCK_TMO        0x400	/* hba: fabric block timeout */
 #define WORKER_RAMP_DOWN_QUEUE         0x800	/* hba: Decrease Q depth */
 #define WORKER_RAMP_UP_QUEUE           0x1000	/* hba: Increase Q depth */
+#define WORKER_SERVICE_TXQ             0x2000	/* hba: IOCBs on the txq */
 
 	struct timer_list fc_fdmitmo;
 	struct timer_list els_tmofunc;
+	struct timer_list delayed_disc_tmo;
 
 	int unreg_vpi_cmpl;
 
@@ -405,6 +430,7 @@ struct lpfc_vport {
 	uint8_t stat_data_enabled;
 	uint8_t stat_data_blocked;
 	struct list_head rcv_buffer_list;
+	unsigned long rcv_buffer_time_stamp;
 	uint32_t vport_flag;
 #define STATIC_VPORT	1
 };
@@ -445,6 +471,61 @@ struct unsol_rcv_ct_ctx {
 	uint32_t ctxt_id;
 	uint32_t SID;
 	uint32_t oxid;
+	uint32_t flags;
+#define UNSOL_VALID	0x00000001
+};
+
+#define LPFC_USER_LINK_SPEED_AUTO	0	/* auto select (default)*/
+#define LPFC_USER_LINK_SPEED_1G		1	/* 1 Gigabaud */
+#define LPFC_USER_LINK_SPEED_2G		2	/* 2 Gigabaud */
+#define LPFC_USER_LINK_SPEED_4G		4	/* 4 Gigabaud */
+#define LPFC_USER_LINK_SPEED_8G		8	/* 8 Gigabaud */
+#define LPFC_USER_LINK_SPEED_10G	10	/* 10 Gigabaud */
+#define LPFC_USER_LINK_SPEED_16G	16	/* 16 Gigabaud */
+#define LPFC_USER_LINK_SPEED_MAX	LPFC_USER_LINK_SPEED_16G
+#define LPFC_USER_LINK_SPEED_BITMAP ((1 << LPFC_USER_LINK_SPEED_16G) | \
+				     (1 << LPFC_USER_LINK_SPEED_10G) | \
+				     (1 << LPFC_USER_LINK_SPEED_8G) | \
+				     (1 << LPFC_USER_LINK_SPEED_4G) | \
+				     (1 << LPFC_USER_LINK_SPEED_2G) | \
+				     (1 << LPFC_USER_LINK_SPEED_1G) | \
+				     (1 << LPFC_USER_LINK_SPEED_AUTO))
+#define LPFC_LINK_SPEED_STRING "0, 1, 2, 4, 8, 10, 16"
+
+enum nemb_type {
+	nemb_mse = 1,
+	nemb_hbd
+};
+
+enum mbox_type {
+	mbox_rd = 1,
+	mbox_wr
+};
+
+enum dma_type {
+	dma_mbox = 1,
+	dma_ebuf
+};
+
+enum sta_type {
+	sta_pre_addr = 1,
+	sta_pos_addr
+};
+
+struct lpfc_mbox_ext_buf_ctx {
+	uint32_t state;
+#define LPFC_BSG_MBOX_IDLE		0
+#define LPFC_BSG_MBOX_HOST              1
+#define LPFC_BSG_MBOX_PORT		2
+#define LPFC_BSG_MBOX_DONE		3
+#define LPFC_BSG_MBOX_ABTS		4
+	enum nemb_type nembType;
+	enum mbox_type mboxType;
+	uint32_t numBuf;
+	uint32_t mbxTag;
+	uint32_t seqNum;
+	struct lpfc_dmabuf *mbx_dmabuf;
+	struct list_head ext_dmabuf_list;
 };
 
 struct lpfc_hba {
@@ -452,7 +533,7 @@ struct lpfc_hba {
 	int (*lpfc_new_scsi_buf)
 		(struct lpfc_vport *, int);
 	struct lpfc_scsi_buf * (*lpfc_get_scsi_buf)
-		(struct lpfc_hba *);
+		(struct lpfc_hba *, struct lpfc_nodelist *);
 	int (*lpfc_scsi_prep_dma_buf)
 		(struct lpfc_hba *, struct lpfc_scsi_buf *);
 	void (*lpfc_scsi_unprep_dma_buf)
@@ -496,7 +577,12 @@ struct lpfc_hba {
 		(struct lpfc_hba *);
 	void (*lpfc_stop_port)
 		(struct lpfc_hba *);
-
+	int (*lpfc_hba_init_link)
+		(struct lpfc_hba *);
+	int (*lpfc_hba_down_link)
+		(struct lpfc_hba *);
+	int (*lpfc_selective_reset)
+		(struct lpfc_hba *);
 
 	/* SLI4 specific HBA data structure */
 	struct lpfc_sli4_hba sli4_hba;
@@ -509,9 +595,10 @@ struct lpfc_hba {
 #define LPFC_SLI3_NPIV_ENABLED		0x02
 #define LPFC_SLI3_VPORT_TEARDOWN	0x04
 #define LPFC_SLI3_CRP_ENABLED		0x08
-#define LPFC_SLI3_INB_ENABLED		0x10
 #define LPFC_SLI3_BG_ENABLED		0x20
 #define LPFC_SLI3_DSS_ENABLED		0x40
+#define LPFC_SLI4_PERFH_ENABLED		0x80
+#define LPFC_SLI4_PHWQ_ENABLED		0x100
 	uint32_t iocb_cmd_size;
 	uint32_t iocb_rsp_size;
 
@@ -526,20 +613,25 @@ struct lpfc_hba {
 	uint32_t hba_flag;	/* hba generic flags */
 #define HBA_ERATT_HANDLED	0x1 /* This flag is set when eratt handled */
 #define DEFER_ERATT		0x2 /* Deferred error attention in progress */
-#define HBA_FCOE_SUPPORT	0x4 /* HBA function supports FCOE */
-#define HBA_RECEIVE_BUFFER	0x8 /* Rcv buffer posted to worker thread */
+#define HBA_FCOE_MODE		0x4 /* HBA function in FCoE Mode */
+#define HBA_SP_QUEUE_EVT	0x8 /* Slow-path qevt posted to worker thread*/
 #define HBA_POST_RECEIVE_BUFFER 0x10 /* Rcv buffers need to be posted */
 #define FCP_XRI_ABORT_EVENT	0x20
 #define ELS_XRI_ABORT_EVENT	0x40
 #define ASYNC_EVENT		0x80
 #define LINK_DISABLED		0x100 /* Link disabled by user */
-#define FCF_DISC_INPROGRESS	0x200 /* FCF discovery in progress */
+#define FCF_TS_INPROG           0x200 /* FCF table scan in progress */
+#define FCF_RR_INPROG           0x400 /* FCF roundrobin flogi in progress */
+#define HBA_FIP_SUPPORT		0x800 /* FIP support in HBA */
+#define HBA_AER_ENABLED		0x1000 /* AER enabled with HBA */
+#define HBA_DEVLOSS_TMO         0x2000 /* HBA in devloss timeout */
+#define HBA_RRQ_ACTIVE		0x4000 /* process the rrq active list */
+	uint32_t fcp_ring_in_use; /* When polling test if intr-hndlr active*/
 	struct lpfc_dmabuf slim2p;
 
 	MAILBOX_t *mbox;
-	uint32_t *inb_ha_copy;
-	uint32_t *inb_counter;
-	uint32_t inb_last_counter;
+	uint32_t *mbox_ext;
+	struct lpfc_mbox_ext_buf_ctx mbox_ext_buf_ctx;
 	uint32_t ha_copy;
 	struct _PCB *pcb;
 	struct _IOCB *IOCBs;
@@ -551,10 +643,12 @@ struct lpfc_hba {
 	uint8_t fc_linkspeed;	/* Link speed after last READ_LA */
 
 	uint32_t fc_eventTag;	/* event tag for link attention */
+	uint32_t link_events;
 
 	/* These fields used to be binfo */
 	uint32_t fc_pref_DID;	/* preferred D_ID */
 	uint8_t  fc_pref_ALPA;	/* preferred AL_PA */
+	uint32_t fc_edtovResol; /* E_D_TOV timer resolution */
 	uint32_t fc_edtov;	/* E_D_TOV timer value */
 	uint32_t fc_arbtov;	/* ARB_TOV timer value */
 	uint32_t fc_ratov;	/* R_A_TOV timer value */
@@ -582,6 +676,7 @@ struct lpfc_hba {
 	/* HBA Config Parameters */
 	uint32_t cfg_ack0;
 	uint32_t cfg_enable_npiv;
+	uint32_t cfg_enable_rrq;
 	uint32_t cfg_topology;
 	uint32_t cfg_link_speed;
 	uint32_t cfg_cr_delay;
@@ -604,9 +699,16 @@ struct lpfc_hba {
 	uint32_t cfg_enable_hba_reset;
 	uint32_t cfg_enable_hba_heartbeat;
 	uint32_t cfg_enable_bg;
-	uint32_t cfg_enable_fip;
+	uint32_t cfg_hostmem_hgp;
 	uint32_t cfg_log_verbose;
-
+	uint32_t cfg_aer_support;
+	uint32_t cfg_sriov_nr_virtfn;
+	uint32_t cfg_iocb_cnt;
+	uint32_t cfg_suppress_link_up;
+#define LPFC_INITIALIZE_LINK              0	/* do normal init_link mbox */
+#define LPFC_DELAY_INIT_LINK              1	/* layered driver hold off */
+#define LPFC_DELAY_INIT_LINK_INDEFINITELY 2	/* wait, manual intervention */
+	uint32_t cfg_enable_dss;
 	lpfc_vpd_t vpd;		/* vital product data */
 
 	struct pci_dev *pcidev;
@@ -648,7 +750,6 @@ struct lpfc_hba {
 	uint32_t          *hbq_get;     /* Host mem address of HBQ get ptrs */
 
 	int brd_no;			/* FC board number */
-
 	char SerialNumber[32];		/* adapter Serial Number */
 	char OptionROMVersion[32];	/* adapter BIOS / Fcode version */
 	char ModelDesc[256];		/* Model Description */
@@ -686,6 +787,7 @@ struct lpfc_hba {
 	uint32_t total_scsi_bufs;
 	struct list_head lpfc_iocb_list;
 	uint32_t total_iocbq_bufs;
+	struct list_head active_rrq_list;
 	spinlock_t hbalock;
 
 	/* pci_mem_pools */
@@ -698,6 +800,7 @@ struct lpfc_hba {
 
 	mempool_t *mbox_mem_pool;
 	mempool_t *nlp_mem_pool;
+	mempool_t *rrq_pool;
 
 	struct fc_host_statistics link_stats;
 	enum intr_type_t intr_type;
@@ -718,6 +821,9 @@ struct lpfc_hba {
 	uint16_t vpi_base;
 	uint16_t vfi_base;
 	unsigned long *vpi_bmask;	/* vpi allocation table */
+	uint16_t *vpi_ids;
+	uint16_t vpi_count;
+	struct list_head lpfc_vpi_blk_list;
 
 	/* Data structure used by fabric iocb scheduler */
 	struct list_head fabric_iocb_list;
@@ -741,6 +847,15 @@ struct lpfc_hba {
 	struct dentry *debug_slow_ring_trc;
 	struct lpfc_debugfs_trc *slow_ring_trc;
 	atomic_t slow_ring_trc_cnt;
+	/* iDiag debugfs sub-directory */
+	struct dentry *idiag_root;
+	struct dentry *idiag_pci_cfg;
+	struct dentry *idiag_que_info;
+	struct dentry *idiag_que_acc;
+	struct dentry *idiag_drb_acc;
+	struct dentry *idiag_ctl_acc;
+	struct dentry *idiag_mbx_acc;
+	struct dentry *idiag_ext_acc;
 #endif
 
 	/* Used for deferred freeing of ELS data buffers */
@@ -751,8 +866,10 @@ struct lpfc_hba {
 	uint8_t temp_sensor_support;
 	/* Fields used for heart beat. */
 	unsigned long last_completion_time;
+	unsigned long skipped_hb;
 	struct timer_list hb_tmofunc;
 	uint8_t hb_outstanding;
+	struct timer_list rrq_tmr;
 	enum hba_temp_state over_temp_state;
 	/* ndlp reference management */
 	spinlock_t ndlp_lock;
@@ -783,10 +900,18 @@ struct lpfc_hba {
 	uint16_t vlan_id;
 	struct list_head fcf_conn_rec_list;
 
-	struct mutex ct_event_mutex; /* synchronize access to ct_ev_waiters */
+	spinlock_t ct_ev_lock; /* synchronize access to ct_ev_waiters */
 	struct list_head ct_ev_waiters;
 	struct unsol_rcv_ct_ctx ct_ctx[64];
 	uint32_t ctx_idx;
+
+	uint8_t menlo_flag;	/* menlo generic flags */
+#define HBA_MENLO_SUPPORT	0x1 /* HBA supports menlo commands */
+	uint32_t iocb_cnt;
+	uint32_t iocb_max;
+	atomic_t sdev_cnt;
+	uint8_t fips_spec_rev;
+	uint8_t fips_level;
 };
 
 static inline struct Scsi_Host *
@@ -823,7 +948,18 @@ lpfc_worker_wake_up(struct lpfc_hba *phba)
 	return;
 }
 
-static inline void
+static inline int
+lpfc_readl(void __iomem *addr, uint32_t *data)
+{
+	uint32_t temp;
+	temp = readl(addr);
+	if (temp == 0xffffffff)
+		return -EIO;
+	*data = temp;
+	return 0;
+}
+
+static inline int
 lpfc_sli_read_hs(struct lpfc_hba *phba)
 {
 	/*
@@ -832,15 +968,17 @@ lpfc_sli_read_hs(struct lpfc_hba *phba)
 	 */
 	phba->sli.slistat.err_attn_event++;
 
-	/* Save status info */
-	phba->work_hs = readl(phba->HSregaddr);
-	phba->work_status[0] = readl(phba->MBslimaddr + 0xa8);
-	phba->work_status[1] = readl(phba->MBslimaddr + 0xac);
+	/* Save status info and check for unplug error */
+	if (lpfc_readl(phba->HSregaddr, &phba->work_hs) ||
+		lpfc_readl(phba->MBslimaddr + 0xa8, &phba->work_status[0]) ||
+		lpfc_readl(phba->MBslimaddr + 0xac, &phba->work_status[1])) {
+		return -EIO;
+	}
 
 	/* Clear chip Host Attention error bit */
 	writel(HA_ERATT, phba->HAregaddr);
 	readl(phba->HAregaddr); /* flush */
 	phba->pport->stopped = 1;
 
-	return;
+	return 0;
 }

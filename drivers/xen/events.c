@@ -27,7 +27,10 @@
 #include <linux/module.h>
 #include <linux/string.h>
 #include <linux/bootmem.h>
+#include <linux/slab.h>
+#include <linux/irqnr.h>
 
+#include <asm/desc.h>
 #include <asm/ptrace.h>
 #include <asm/irq.h>
 #include <asm/idle.h>
@@ -35,10 +38,14 @@
 #include <asm/xen/hypercall.h>
 #include <asm/xen/hypervisor.h>
 
+#include <xen/xen.h>
+#include <xen/hvm.h>
 #include <xen/xen-ops.h>
 #include <xen/events.h>
 #include <xen/interface/xen.h>
 #include <xen/interface/event_channel.h>
+#include <xen/interface/hvm/hvm_op.h>
+#include <xen/interface/hvm/params.h>
 
 /*
  * This lock protects updates to the following mapping and reference-count
@@ -88,15 +95,18 @@ struct irq_info
 	} u;
 };
 
-static struct irq_info irq_info[NR_IRQS];
+static struct irq_info *irq_info;
 
-static int evtchn_to_irq[NR_EVENT_CHANNELS] = {
-	[0 ... NR_EVENT_CHANNELS-1] = -1
-};
+static int *evtchn_to_irq;
 struct cpu_evtchn_s {
 	unsigned long bits[NR_EVENT_CHANNELS/BITS_PER_LONG];
 };
-static struct cpu_evtchn_s *cpu_evtchn_mask_p;
+
+static __initdata struct cpu_evtchn_s init_evtchn_mask = {
+	.bits[0 ... (NR_EVENT_CHANNELS/BITS_PER_LONG)-1] = ~0ul,
+};
+static struct cpu_evtchn_s __refdata *cpu_evtchn_mask_p = &init_evtchn_mask;
+
 static inline unsigned long *cpu_evtchn_mask(int cpu)
 {
 	return cpu_evtchn_mask_p[cpu].bits;
@@ -106,6 +116,7 @@ static inline unsigned long *cpu_evtchn_mask(int cpu)
 #define VALID_EVTCHN(chn)	((chn) != 0)
 
 static struct irq_chip xen_dynamic_chip;
+static struct irq_chip xen_percpu_chip;
 
 /* Constructor for packed IRQ information. */
 static struct irq_info mk_unbound_info(void)
@@ -131,7 +142,7 @@ static struct irq_info mk_virq_info(unsigned short evtchn, unsigned short virq)
 			.cpu = 0, .u.virq = virq };
 }
 
-static struct irq_info mk_pirq_info(unsigned short evtchn,
+static __used struct irq_info mk_pirq_info(unsigned short evtchn,
 				    unsigned short gsi, unsigned short vector)
 {
 	return (struct irq_info) { .type = IRQT_PIRQ, .evtchn = evtchn,
@@ -177,7 +188,7 @@ static unsigned virq_from_irq(unsigned irq)
 	return info->u.virq;
 }
 
-static unsigned gsi_from_irq(unsigned irq)
+static __used unsigned gsi_from_irq(unsigned irq)
 {
 	struct irq_info *info = info_for_irq(irq);
 
@@ -187,7 +198,7 @@ static unsigned gsi_from_irq(unsigned irq)
 	return info->u.pirq.gsi;
 }
 
-static unsigned vector_from_irq(unsigned irq)
+static __used unsigned vector_from_irq(unsigned irq)
 {
 	struct irq_info *info = info_for_irq(irq);
 
@@ -236,17 +247,17 @@ static void bind_evtchn_to_cpu(unsigned int chn, unsigned int cpu)
 	cpumask_copy(irq_to_desc(irq)->affinity, cpumask_of(cpu));
 #endif
 
-	__clear_bit(chn, cpu_evtchn_mask(cpu_from_irq(irq)));
-	__set_bit(chn, cpu_evtchn_mask(cpu));
+	clear_bit(chn, cpu_evtchn_mask(cpu_from_irq(irq)));
+	set_bit(chn, cpu_evtchn_mask(cpu));
 
 	irq_info[irq].cpu = cpu;
 }
 
 static void init_evtchn_cpu_bindings(void)
 {
+	int i;
 #ifdef CONFIG_SMP
 	struct irq_desc *desc;
-	int i;
 
 	/* By default all event channels notify CPU#0. */
 	for_each_irq_desc(i, desc) {
@@ -254,7 +265,10 @@ static void init_evtchn_cpu_bindings(void)
 	}
 #endif
 
-	memset(cpu_evtchn_mask(0), ~0, sizeof(cpu_evtchn_mask(0)));
+	for_each_possible_cpu(i)
+		memset(cpu_evtchn_mask(i),
+		       (i == 0) ? ~0 : 0, sizeof(struct cpu_evtchn_s));
+
 }
 
 static inline void clear_evtchn(int port)
@@ -334,9 +348,18 @@ static int find_unbound_irq(void)
 	int irq;
 	struct irq_desc *desc;
 
-	for (irq = 0; irq < nr_irqs; irq++)
+	for (irq = 0; irq < nr_irqs; irq++) {
+		desc = irq_to_desc(irq);
+		/* only 0->15 have init'd desc; handle irq > 16 */
+		if (desc == NULL)
+			break;
+		if (desc->chip == &no_irq_chip)
+			break;
+		if (desc->chip != &xen_dynamic_chip)
+			continue;
 		if (irq_info[irq].type == IRQT_UNBOUND)
 			break;
+	}
 
 	if (irq == nr_irqs)
 		panic("No available IRQ to bind to: increase nr_irqs!\n");
@@ -345,7 +368,7 @@ static int find_unbound_irq(void)
 	if (WARN_ON(desc == NULL))
 		return -1;
 
-	dynamic_irq_init(irq);
+	dynamic_irq_init_keep_chip_data(irq);
 
 	return irq;
 }
@@ -362,7 +385,7 @@ int bind_evtchn_to_irq(unsigned int evtchn)
 		irq = find_unbound_irq();
 
 		set_irq_chip_and_handler_name(irq, &xen_dynamic_chip,
-					      handle_level_irq, "event");
+					      handle_edge_irq, "event");
 
 		evtchn_to_irq[evtchn] = irq;
 		irq_info[irq] = mk_evtchn_info(evtchn);
@@ -388,8 +411,8 @@ static int bind_ipi_to_irq(unsigned int ipi, unsigned int cpu)
 		if (irq < 0)
 			goto out;
 
-		set_irq_chip_and_handler_name(irq, &xen_dynamic_chip,
-					      handle_level_irq, "ipi");
+		set_irq_chip_and_handler_name(irq, &xen_percpu_chip,
+					      handle_percpu_irq, "ipi");
 
 		bind_ipi.vcpu = cpu;
 		if (HYPERVISOR_event_channel_op(EVTCHNOP_bind_ipi,
@@ -420,17 +443,17 @@ static int bind_virq_to_irq(unsigned int virq, unsigned int cpu)
 	irq = per_cpu(virq_to_irq, cpu)[virq];
 
 	if (irq == -1) {
+		irq = find_unbound_irq();
+
+		set_irq_chip_and_handler_name(irq, &xen_percpu_chip,
+					      handle_percpu_irq, "virq");
+
 		bind_virq.virq = virq;
 		bind_virq.vcpu = cpu;
 		if (HYPERVISOR_event_channel_op(EVTCHNOP_bind_virq,
 						&bind_virq) != 0)
 			BUG();
 		evtchn = bind_virq.port;
-
-		irq = find_unbound_irq();
-
-		set_irq_chip_and_handler_name(irq, &xen_dynamic_chip,
-					      handle_level_irq, "virq");
 
 		evtchn_to_irq[evtchn] = irq;
 		irq_info[irq] = mk_virq_info(evtchn, virq);
@@ -474,6 +497,9 @@ static void unbind_from_irq(unsigned int irq)
 		bind_evtchn_to_cpu(evtchn, 0);
 
 		evtchn_to_irq[evtchn] = -1;
+	}
+
+	if (irq_info[irq].type != IRQT_UNBOUND) {
 		irq_info[irq] = mk_unbound_info();
 
 		dynamic_irq_cleanup(irq);
@@ -532,6 +558,7 @@ int bind_ipi_to_irqhandler(enum ipi_vector ipi,
 	if (irq < 0)
 		return irq;
 
+	irqflags |= IRQF_NO_SUSPEND;
 	retval = request_irq(irq, handler, irqflags, devname, dev_id);
 	if (retval != 0) {
 		unbind_from_irq(irq);
@@ -559,41 +586,75 @@ irqreturn_t xen_debug_interrupt(int irq, void *dev_id)
 {
 	struct shared_info *sh = HYPERVISOR_shared_info;
 	int cpu = smp_processor_id();
+	unsigned long *cpu_evtchn = cpu_evtchn_mask(cpu);
 	int i;
 	unsigned long flags;
 	static DEFINE_SPINLOCK(debug_lock);
+	struct vcpu_info *v;
 
 	spin_lock_irqsave(&debug_lock, flags);
 
-	printk("vcpu %d\n  ", cpu);
+	printk("\nvcpu %d\n  ", cpu);
 
 	for_each_online_cpu(i) {
-		struct vcpu_info *v = per_cpu(xen_vcpu, i);
-		printk("%d: masked=%d pending=%d event_sel %08lx\n  ", i,
-			(get_irq_regs() && i == cpu) ? xen_irqs_disabled(get_irq_regs()) : v->evtchn_upcall_mask,
-			v->evtchn_upcall_pending,
-			v->evtchn_pending_sel);
+		int pending;
+		v = per_cpu(xen_vcpu, i);
+		pending = (get_irq_regs() && i == cpu)
+			? xen_irqs_disabled(get_irq_regs())
+			: v->evtchn_upcall_mask;
+		printk("%d: masked=%d pending=%d event_sel %0*lx\n  ", i,
+		       pending, v->evtchn_upcall_pending,
+		       (int)(sizeof(v->evtchn_pending_sel)*2),
+		       v->evtchn_pending_sel);
 	}
-	printk("pending:\n   ");
-	for(i = ARRAY_SIZE(sh->evtchn_pending)-1; i >= 0; i--)
-		printk("%08lx%s", sh->evtchn_pending[i],
-			i % 8 == 0 ? "\n   " : " ");
-	printk("\nmasks:\n   ");
-	for(i = ARRAY_SIZE(sh->evtchn_mask)-1; i >= 0; i--)
-		printk("%08lx%s", sh->evtchn_mask[i],
-			i % 8 == 0 ? "\n   " : " ");
+	v = per_cpu(xen_vcpu, cpu);
 
-	printk("\nunmasked:\n   ");
-	for(i = ARRAY_SIZE(sh->evtchn_mask)-1; i >= 0; i--)
-		printk("%08lx%s", sh->evtchn_pending[i] & ~sh->evtchn_mask[i],
-			i % 8 == 0 ? "\n   " : " ");
+	printk("\npending:\n   ");
+	for (i = ARRAY_SIZE(sh->evtchn_pending)-1; i >= 0; i--)
+		printk("%0*lx%s", (int)sizeof(sh->evtchn_pending[0])*2,
+		       sh->evtchn_pending[i],
+		       i % 8 == 0 ? "\n   " : " ");
+	printk("\nglobal mask:\n   ");
+	for (i = ARRAY_SIZE(sh->evtchn_mask)-1; i >= 0; i--)
+		printk("%0*lx%s",
+		       (int)(sizeof(sh->evtchn_mask[0])*2),
+		       sh->evtchn_mask[i],
+		       i % 8 == 0 ? "\n   " : " ");
+
+	printk("\nglobally unmasked:\n   ");
+	for (i = ARRAY_SIZE(sh->evtchn_mask)-1; i >= 0; i--)
+		printk("%0*lx%s", (int)(sizeof(sh->evtchn_mask[0])*2),
+		       sh->evtchn_pending[i] & ~sh->evtchn_mask[i],
+		       i % 8 == 0 ? "\n   " : " ");
+
+	printk("\nlocal cpu%d mask:\n   ", cpu);
+	for (i = (NR_EVENT_CHANNELS/BITS_PER_LONG)-1; i >= 0; i--)
+		printk("%0*lx%s", (int)(sizeof(cpu_evtchn[0])*2),
+		       cpu_evtchn[i],
+		       i % 8 == 0 ? "\n   " : " ");
+
+	printk("\nlocally unmasked:\n   ");
+	for (i = ARRAY_SIZE(sh->evtchn_mask)-1; i >= 0; i--) {
+		unsigned long pending = sh->evtchn_pending[i]
+			& ~sh->evtchn_mask[i]
+			& cpu_evtchn[i];
+		printk("%0*lx%s", (int)(sizeof(sh->evtchn_mask[0])*2),
+		       pending, i % 8 == 0 ? "\n   " : " ");
+	}
 
 	printk("\npending list:\n");
-	for(i = 0; i < NR_EVENT_CHANNELS; i++) {
+	for (i = 0; i < NR_EVENT_CHANNELS; i++) {
 		if (sync_test_bit(i, sh->evtchn_pending)) {
-			printk("  %d: event %d -> irq %d\n",
+			int word_idx = i / BITS_PER_LONG;
+			printk("  %d: event %d -> irq %d%s%s%s\n",
 			       cpu_from_evtchn(i), i,
-			       evtchn_to_irq[i]);
+			       evtchn_to_irq[i],
+			       sync_test_bit(word_idx, &v->evtchn_pending_sel)
+					     ? "" : " l2-clear",
+			       !sync_test_bit(i, sh->evtchn_mask)
+					     ? "" : " globally-masked",
+			       sync_test_bit(i, cpu_evtchn)
+					     ? "" : " locally-masked");
 		}
 	}
 
@@ -613,16 +674,12 @@ static DEFINE_PER_CPU(unsigned, xed_nesting_count);
  * a bitset of words which contain pending event bits.  The second
  * level is a bitset of pending events themselves.
  */
-void xen_evtchn_do_upcall(struct pt_regs *regs)
+static void __xen_evtchn_do_upcall(void)
 {
 	int cpu = get_cpu();
-	struct pt_regs *old_regs = set_irq_regs(regs);
 	struct shared_info *s = HYPERVISOR_shared_info;
 	struct vcpu_info *vcpu_info = __get_cpu_var(xen_vcpu);
  	unsigned count;
-
-	exit_idle();
-	irq_enter();
 
 	do {
 		unsigned long pending_words;
@@ -646,9 +703,13 @@ void xen_evtchn_do_upcall(struct pt_regs *regs)
 				int bit_idx = __ffs(pending_bits);
 				int port = (word_idx * BITS_PER_LONG) + bit_idx;
 				int irq = evtchn_to_irq[port];
+				struct irq_desc *desc;
 
-				if (irq != -1)
-					handle_irq(irq, regs);
+				if (irq != -1) {
+					desc = irq_to_desc(irq);
+					if (desc)
+						generic_handle_irq_desc(irq, desc);
+				}
 			}
 		}
 
@@ -656,14 +717,31 @@ void xen_evtchn_do_upcall(struct pt_regs *regs)
 
 		count = __get_cpu_var(xed_nesting_count);
 		__get_cpu_var(xed_nesting_count) = 0;
-	} while(count != 1);
+	} while (count != 1 || vcpu_info->evtchn_upcall_pending);
 
 out:
-	irq_exit();
-	set_irq_regs(old_regs);
 
 	put_cpu();
 }
+
+void xen_evtchn_do_upcall(struct pt_regs *regs)
+{
+	struct pt_regs *old_regs = set_irq_regs(regs);
+
+	exit_idle();
+	irq_enter();
+
+	__xen_evtchn_do_upcall();
+
+	irq_exit();
+	set_irq_regs(old_regs);
+}
+
+void xen_hvm_evtchn_do_upcall(void)
+{
+	__xen_evtchn_do_upcall();
+}
+EXPORT_SYMBOL_GPL(xen_hvm_evtchn_do_upcall);
 
 /* Rebind a new event channel to an existing irq. */
 void rebind_evtchn_irq(int evtchn, int irq)
@@ -700,7 +778,10 @@ static int rebind_irq_to_cpu(unsigned irq, unsigned tcpu)
 	struct evtchn_bind_vcpu bind_vcpu;
 	int evtchn = evtchn_from_irq(irq);
 
-	if (!VALID_EVTCHN(evtchn))
+	/* events delivered via platform PCI interrupts are always
+	 * routed to vcpu 0 */
+	if (!VALID_EVTCHN(evtchn) ||
+		(xen_hvm_domain() && !xen_have_vector_callback))
 		return -1;
 
 	/* Send future instances of this interrupt to other vcpu. */
@@ -767,6 +848,26 @@ static void ack_dynirq(unsigned int irq)
 		clear_evtchn(evtchn);
 }
 
+static void mask_ack_dynirq(unsigned int irq)
+{
+	/*
+	 * Upstream has irq_move_irq and uses it in ack_dynirq; we do not.
+	 * However, we know that in ack_dynirq the interrupt will never be
+	 * masked (see mask_ack_irq and handle_edge_irq in kernel/irq/chip.c).
+	 * So, use the same code twice except with move_native_irq there and
+	 * move_masked_irq here.
+	 */
+
+	int evtchn = evtchn_from_irq(irq);
+
+	disable_dynirq(irq);
+
+	move_masked_irq(irq);
+
+	if (VALID_EVTCHN(evtchn))
+		clear_evtchn(evtchn);
+}
+
 static int retrigger_dynirq(unsigned int irq)
 {
 	int evtchn = evtchn_from_irq(irq);
@@ -809,9 +910,6 @@ static void restore_cpu_virqs(unsigned int cpu)
 		evtchn_to_irq[evtchn] = irq;
 		irq_info[irq] = mk_virq_info(evtchn, virq);
 		bind_evtchn_to_cpu(evtchn, cpu);
-
-		/* Ready for use. */
-		unmask_evtchn(evtchn);
 	}
 }
 
@@ -837,10 +935,6 @@ static void restore_cpu_ipis(unsigned int cpu)
 		evtchn_to_irq[evtchn] = irq;
 		irq_info[irq] = mk_ipi_info(evtchn, ipi);
 		bind_evtchn_to_cpu(evtchn, cpu);
-
-		/* Ready for use. */
-		unmask_evtchn(evtchn);
-
 	}
 }
 
@@ -893,6 +987,7 @@ void xen_poll_irq(int irq)
 void xen_irq_resume(void)
 {
 	unsigned int cpu, irq, evtchn;
+	struct irq_desc *desc;
 
 	init_evtchn_cpu_bindings();
 
@@ -911,6 +1006,24 @@ void xen_irq_resume(void)
 		restore_cpu_virqs(cpu);
 		restore_cpu_ipis(cpu);
 	}
+
+	/*
+	 * Unmask any IRQF_TIMER or IRQF_NO_SUSPEND IRQs which are enabled.
+	 * These are not handled by the IRQ core.
+	 */
+	for_each_irq_desc(irq, desc) {
+		if (!desc->action ||
+		    !(desc->action->flags & (IRQF_TIMER|IRQF_NO_SUSPEND)))
+			continue;
+		if (desc->status & IRQ_DISABLED)
+			continue;
+
+		evtchn = evtchn_from_irq(irq);
+		if (evtchn == -1)
+			continue;
+
+		unmask_evtchn(evtchn);
+	}
 }
 
 static struct irq_chip xen_dynamic_chip __read_mostly = {
@@ -921,9 +1034,54 @@ static struct irq_chip xen_dynamic_chip __read_mostly = {
 	.unmask		= enable_dynirq,
 
 	.ack		= ack_dynirq,
+	.mask_ack	= mask_ack_dynirq,
 	.set_affinity	= set_affinity_irq,
 	.retrigger	= retrigger_dynirq,
 };
+
+static struct irq_chip xen_percpu_chip __read_mostly = {
+	.name		= "xen-percpu",
+
+	.disable	= disable_dynirq,
+	.mask		= disable_dynirq,
+	.unmask		= enable_dynirq,
+
+	.ack		= ack_dynirq,
+};
+
+int xen_set_callback_via(uint64_t via)
+{
+	struct xen_hvm_param a;
+	a.domid = DOMID_SELF;
+	a.index = HVM_PARAM_CALLBACK_IRQ;
+	a.value = via;
+	return HYPERVISOR_hvm_op(HVMOP_set_param, &a);
+}
+EXPORT_SYMBOL_GPL(xen_set_callback_via);
+
+/* Vector callbacks are better than PCI interrupts to receive event
+ * channel notifications because we can receive vector callbacks on any
+ * vcpu and we don't need PCI support or APIC interactions. */
+void xen_callback_vector(void)
+{
+	int rc;
+	uint64_t callback_via;
+	if (xen_have_vector_callback) {
+		callback_via = HVM_CALLBACK_VECTOR(XEN_HVM_EVTCHN_CALLBACK);
+		rc = xen_set_callback_via(callback_via);
+		if (rc) {
+			printk(KERN_ERR "Request for Xen HVM callback vector"
+					" failed.\n");
+			xen_have_vector_callback = 0;
+			return;
+		}
+		printk(KERN_INFO "Xen HVM callback vector for event delivery is "
+				"enabled\n");
+		/* in the restore case the vector has already been allocated */
+		if (!test_bit(XEN_HVM_EVTCHN_CALLBACK, used_vectors))
+			alloc_intr_gate(XEN_HVM_EVTCHN_CALLBACK, xen_hvm_callback_vector);
+	}
+}
 
 void __init xen_init_IRQ(void)
 {
@@ -931,7 +1089,12 @@ void __init xen_init_IRQ(void)
 
 	cpu_evtchn_mask_p = kcalloc(nr_cpu_ids, sizeof(struct cpu_evtchn_s),
 				    GFP_KERNEL);
-	BUG_ON(cpu_evtchn_mask_p == NULL);
+	irq_info = kcalloc(nr_irqs, sizeof(*irq_info), GFP_KERNEL);
+
+	evtchn_to_irq = kcalloc(NR_EVENT_CHANNELS, sizeof(*evtchn_to_irq),
+				    GFP_KERNEL);
+	for (i = 0; i < NR_EVENT_CHANNELS; i++)
+		evtchn_to_irq[i] = -1;
 
 	init_evtchn_cpu_bindings();
 
@@ -939,5 +1102,10 @@ void __init xen_init_IRQ(void)
 	for (i = 0; i < NR_EVENT_CHANNELS; i++)
 		mask_evtchn(i);
 
-	irq_ctx_init(smp_processor_id());
+	if (xen_hvm_domain()) {
+		xen_callback_vector();
+		native_init_IRQ();
+	} else {
+		irq_ctx_init(smp_processor_id());
+	}
 }

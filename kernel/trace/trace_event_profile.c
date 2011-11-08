@@ -45,7 +45,7 @@ static int ftrace_profile_enable_event(struct ftrace_event_call *event)
 		rcu_assign_pointer(trace_profile_buf_nmi, buf);
 	}
 
-	ret = event->profile_enable();
+	ret = event->profile_enable(event);
 	if (!ret) {
 		total_profile_count++;
 		return 0;
@@ -89,7 +89,7 @@ static void ftrace_profile_disable_event(struct ftrace_event_call *event)
 	if (!atomic_add_negative(-1, &event->profile_count))
 		return;
 
-	event->profile_disable();
+	event->profile_disable(event);
 
 	if (!--total_profile_count) {
 		buf = trace_profile_buf;

@@ -438,7 +438,7 @@ static char *pd_buf;		/* buffer for request in progress */
 
 static enum action do_pd_io_start(void)
 {
-	if (blk_special_request(pd_req)) {
+	if (pd_req->cmd_type == REQ_TYPE_SPECIAL) {
 		phase = pd_special;
 		return pd_special();
 	}
@@ -906,7 +906,7 @@ static int __init pd_init(void)
 	if (!pd_queue)
 		goto out1;
 
-	blk_queue_max_sectors(pd_queue, cluster);
+	blk_queue_max_hw_sectors(pd_queue, cluster);
 
 	if (register_blkdev(major, name))
 		goto out2;

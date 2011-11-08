@@ -18,7 +18,6 @@
 #include <linux/hash.h>
 #include <linux/swap.h>
 #include <linux/security.h>
-#include <linux/ima.h>
 #include <linux/pagemap.h>
 #include <linux/cdev.h>
 #include <linux/bootmem.h>
@@ -157,11 +156,6 @@ int inode_init_always(struct super_block *sb, struct inode *inode)
 
 	if (security_inode_alloc(inode))
 		goto out;
-
-	/* allocate and initialize an i_integrity */
-	if (ima_inode_alloc(inode))
-		goto out_free_security;
-
 	spin_lock_init(&inode->i_lock);
 	lockdep_set_class(&inode->i_lock, &sb->s_type->i_lock_key);
 
@@ -201,9 +195,6 @@ int inode_init_always(struct super_block *sb, struct inode *inode)
 #endif
 
 	return 0;
-
-out_free_security:
-	security_inode_free(inode);
 out:
 	return -ENOMEM;
 }
@@ -235,7 +226,6 @@ static struct inode *alloc_inode(struct super_block *sb)
 void __destroy_inode(struct inode *inode)
 {
 	BUG_ON(inode_has_buffers(inode));
-	ima_inode_free(inode);
 	security_inode_free(inode);
 	fsnotify_inode_delete(inode);
 #ifdef CONFIG_FS_POSIX_ACL
@@ -307,6 +297,15 @@ void __iget(struct inode *inode)
 	inodes_stat.nr_unused--;
 }
 
+/*
+ * get additional reference to inode; caller must already hold one.
+ */
+void ihold(struct inode *inode)
+{
+	WARN_ON(atomic_inc_return(&inode->i_count) < 2);
+}
+EXPORT_SYMBOL(ihold);
+
 /**
  * clear_inode - clear an inode
  * @inode: inode to clear
@@ -373,7 +372,8 @@ static void dispose_list(struct list_head *head)
 /*
  * Invalidate all inodes for a device.
  */
-static int invalidate_list(struct list_head *head, struct list_head *dispose)
+static int invalidate_list(struct list_head *head, struct list_head *dispose,
+			   bool kill_dirty)
 {
 	struct list_head *next;
 	int busy = 0, count = 0;
@@ -397,6 +397,10 @@ static int invalidate_list(struct list_head *head, struct list_head *dispose)
 		inode = list_entry(tmp, struct inode, i_sb_list);
 		if (inode->i_state & I_NEW)
 			continue;
+		if (inode->i_state & I_DIRTY && !kill_dirty) {
+			busy = 1;
+			continue;
+		}
 		invalidate_inode_buffers(inode);
 		if (!atomic_read(&inode->i_count)) {
 			list_move(&inode->i_list, dispose);
@@ -415,12 +419,15 @@ static int invalidate_list(struct list_head *head, struct list_head *dispose)
 /**
  *	invalidate_inodes	- discard the inodes on a device
  *	@sb: superblock
+ *	@kill_dirty: flag to guide handling of dirty inodes
  *
  *	Discard all of the inodes for a given superblock. If the discard
  *	fails because there are busy inodes then a non zero value is returned.
  *	If the discard is successful all the inodes have been discarded.
+ *	If @kill_dirty is set, discard dirty inodes too, otherwise treat
+ *	them as busy.
  */
-int invalidate_inodes(struct super_block *sb)
+int invalidate_inodes(struct super_block *sb, bool kill_dirty)
 {
 	int busy;
 	LIST_HEAD(throw_away);
@@ -429,7 +436,7 @@ int invalidate_inodes(struct super_block *sb)
 	spin_lock(&inode_lock);
 	inotify_unmount_inodes(&sb->s_inodes);
 	fsnotify_unmount_inodes(&sb->s_inodes);
-	busy = invalidate_list(&sb->s_inodes, &throw_away);
+	busy = invalidate_list(&sb->s_inodes, &throw_away, kill_dirty);
 	spin_unlock(&inode_lock);
 
 	dispose_list(&throw_away);
@@ -526,7 +533,7 @@ static void prune_icache(int nr_to_scan)
  * This function is passed the number of inodes to scan, and it returns the
  * total number of remaining possibly-reclaimable inodes.
  */
-static int shrink_icache_memory(int nr, gfp_t gfp_mask)
+static int shrink_icache_memory(struct shrinker *shrink, int nr, gfp_t gfp_mask)
 {
 	if (nr) {
 		/*

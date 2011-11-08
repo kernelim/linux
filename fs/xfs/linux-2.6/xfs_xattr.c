@@ -45,7 +45,7 @@ __xfs_xattr_get(struct inode *inode, const char *name,
 		value = NULL;
 	}
 
-	error = -xfs_attr_get(ip, name, value, &asize, xflags);
+	error = -xfs_attr_get(ip, (unsigned char *)name, value, &asize, xflags);
 	if (error)
 		return error;
 	return asize;
@@ -67,8 +67,9 @@ __xfs_xattr_set(struct inode *inode, const char *name, const void *value,
 		xflags |= ATTR_REPLACE;
 
 	if (!value)
-		return -xfs_attr_remove(ip, name, xflags);
-	return -xfs_attr_set(ip, name, (void *)value, size, xflags);
+		return -xfs_attr_remove(ip, (unsigned char *)name, xflags);
+	return -xfs_attr_set(ip, (unsigned char *)name,
+				(void *)value, size, xflags);
 }
 
 static int
@@ -165,8 +166,13 @@ static const char *xfs_xattr_prefix(int flags)
 }
 
 static int
-xfs_xattr_put_listent(struct xfs_attr_list_context *context, int flags,
-		char *name, int namelen, int valuelen, char *value)
+xfs_xattr_put_listent(
+	struct xfs_attr_list_context *context,
+	int		flags,
+	unsigned char	*name,
+	int		namelen,
+	int		valuelen,
+	unsigned char	*value)
 {
 	unsigned int prefix_len = xfs_xattr_prefix_len(flags);
 	char *offset;
@@ -189,7 +195,7 @@ xfs_xattr_put_listent(struct xfs_attr_list_context *context, int flags,
 	offset = (char *)context->alist + context->count;
 	strncpy(offset, xfs_xattr_prefix(flags), prefix_len);
 	offset += prefix_len;
-	strncpy(offset, name, namelen);			/* real name */
+	strncpy(offset, (char *)name, namelen);			/* real name */
 	offset += namelen;
 	*offset = '\0';
 	context->count += prefix_len + namelen + 1;
@@ -197,8 +203,13 @@ xfs_xattr_put_listent(struct xfs_attr_list_context *context, int flags,
 }
 
 static int
-xfs_xattr_put_listent_sizes(struct xfs_attr_list_context *context, int flags,
-		char *name, int namelen, int valuelen, char *value)
+xfs_xattr_put_listent_sizes(
+	struct xfs_attr_list_context *context,
+	int		flags,
+	unsigned char	*name,
+	int		namelen,
+	int		valuelen,
+	unsigned char	*value)
 {
 	context->count += xfs_xattr_prefix_len(flags) + namelen + 1;
 	return 0;

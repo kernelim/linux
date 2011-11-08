@@ -50,6 +50,9 @@ struct thread_info {
 	struct restart_block	restart_block;
 	__u64			user_timer;
 	__u64			system_timer;
+#ifndef __GENKSYMS__
+	unsigned long		last_break;	/* last breaking-event-address. */
+#endif
 };
 
 /*
@@ -116,6 +119,12 @@ static inline struct thread_info *current_thread_info(void)
 #define _TIF_POLLING_NRFLAG	(1<<TIF_POLLING_NRFLAG)
 #define _TIF_31BIT		(1<<TIF_31BIT)
 #define _TIF_FREEZE		(1<<TIF_FREEZE)
+
+#ifdef CONFIG_64BIT
+#define is_32bit_task()		(test_thread_flag(TIF_31BIT))
+#else
+#define is_32bit_task()		(1)
+#endif
 
 #endif /* __KERNEL__ */
 

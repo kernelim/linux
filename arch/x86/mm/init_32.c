@@ -31,6 +31,10 @@
 #include <linux/initrd.h>
 #include <linux/cpumask.h>
 
+#ifdef CONFIG_XEN
+#include <xen/page.h>
+#endif
+
 #include <asm/asm.h>
 #include <asm/bios_ebda.h>
 #include <asm/processor.h>
@@ -444,6 +448,13 @@ static int __init add_highpages_work_fn(unsigned long start_pfn,
 	     node_pfn++) {
 		if (!pfn_valid(node_pfn))
 			continue;
+#ifdef CONFIG_XEN
+		/* Do not initialize and ignore not present at boot time pfn */
+		if (node_pfn >= PFN_DOWN(xen_extra_mem_start) &&
+			node_pfn < PFN_DOWN(xen_extra_mem_start +
+			xen_extra_mem_size))
+			continue;
+#endif	/* CONFIG_XEN */
 		page = pfn_to_page(node_pfn);
 		add_one_highpage_init(page, node_pfn);
 	}
@@ -997,7 +1008,7 @@ static noinline int do_test_wp_bit(void)
 const int rodata_test_data = 0xC3;
 EXPORT_SYMBOL_GPL(rodata_test_data);
 
-static int kernel_set_to_readonly;
+int kernel_set_to_readonly __read_mostly;
 
 void set_kernel_text_rw(void)
 {

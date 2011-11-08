@@ -9,14 +9,17 @@
 #include <linux/pm.h>
 #include <linux/clockchips.h>
 #include <linux/random.h>
+#include <linux/user-return-notifier.h>
+#include <linux/dmi.h>
+#include <linux/utsname.h>
 #include <trace/events/power.h>
+#include <asm/cpu.h>
 #include <asm/system.h>
 #include <asm/apic.h>
 #include <asm/syscalls.h>
 #include <asm/idle.h>
 #include <asm/uaccess.h>
 #include <asm/i387.h>
-#include <asm/ds.h>
 
 unsigned long idle_halt;
 EXPORT_SYMBOL(idle_halt);
@@ -24,29 +27,26 @@ unsigned long idle_nomwait;
 EXPORT_SYMBOL(idle_nomwait);
 
 struct kmem_cache *task_xstate_cachep;
+EXPORT_SYMBOL_GPL(task_xstate_cachep);
 
 int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 {
+	int ret;
+
 	*dst = *src;
-	if (src->thread.xstate) {
-		dst->thread.xstate = kmem_cache_alloc(task_xstate_cachep,
-						      GFP_KERNEL);
-		if (!dst->thread.xstate)
-			return -ENOMEM;
-		WARN_ON((unsigned long)dst->thread.xstate & 15);
-		memcpy(dst->thread.xstate, src->thread.xstate, xstate_size);
+	if (fpu_allocated((struct fpu *)&src->thread.xstate)) {
+		memset(&dst->thread.xstate, 0, sizeof(dst->thread.xstate));
+		ret = fpu_alloc((struct fpu *)&dst->thread.xstate);
+		if (ret)
+			return ret;
+		fpu_copy((struct fpu *)&dst->thread.xstate, (struct fpu *)&src->thread.xstate);
 	}
 	return 0;
 }
 
 void free_thread_xstate(struct task_struct *tsk)
 {
-	if (tsk->thread.xstate) {
-		kmem_cache_free(task_xstate_cachep, tsk->thread.xstate);
-		tsk->thread.xstate = NULL;
-	}
-
-	WARN(tsk->thread.ds_ctx, "leaking DS context\n");
+	fpu_free((struct fpu *)&tsk->thread.xstate);
 }
 
 void free_thread_info(struct thread_info *ti)
@@ -87,21 +87,35 @@ void exit_thread(void)
 	}
 }
 
+void show_regs_common(void)
+{
+	const char *vendor, *product, *board;
+
+	vendor = dmi_get_system_info(DMI_SYS_VENDOR);
+	if (!vendor)
+		vendor = "";
+	product = dmi_get_system_info(DMI_PRODUCT_NAME);
+	if (!product)
+		product = "";
+
+	/* Board Name is optional */
+	board = dmi_get_system_info(DMI_BOARD_NAME);
+
+	printk(KERN_CONT "\n");
+	printk(KERN_DEFAULT "Pid: %d, comm: %.20s %s %s %.*s",
+		current->pid, current->comm, print_tainted(),
+		init_utsname()->release,
+		(int)strcspn(init_utsname()->version, " "),
+		init_utsname()->version);
+	printk(KERN_CONT " %s %s", vendor, product);
+	if (board)
+		printk(KERN_CONT "/%s", board);
+	printk(KERN_CONT "\n");
+}
+
 void flush_thread(void)
 {
 	struct task_struct *tsk = current;
-
-#ifdef CONFIG_X86_64
-	if (test_tsk_thread_flag(tsk, TIF_ABI_PENDING)) {
-		clear_tsk_thread_flag(tsk, TIF_ABI_PENDING);
-		if (test_tsk_thread_flag(tsk, TIF_IA32)) {
-			clear_tsk_thread_flag(tsk, TIF_IA32);
-		} else {
-			set_tsk_thread_flag(tsk, TIF_IA32);
-			current_thread_info()->status |= TS_COMPAT;
-		}
-	}
-#endif
 
 	clear_tsk_thread_flag(tsk, TIF_DEBUG);
 
@@ -186,12 +200,6 @@ void __switch_to_xtra(struct task_struct *prev_p, struct task_struct *next_p,
 	prev = &prev_p->thread;
 	next = &next_p->thread;
 
-	if (test_tsk_thread_flag(next_p, TIF_DS_AREA_MSR) ||
-	    test_tsk_thread_flag(prev_p, TIF_DS_AREA_MSR))
-		ds_switch_to(prev_p, next_p);
-	else if (next->debugctlmsr != prev->debugctlmsr)
-		update_debugctlmsr(next->debugctlmsr);
-
 	if (test_tsk_thread_flag(next_p, TIF_DEBUG)) {
 		set_debugreg(next->debugreg0, 0);
 		set_debugreg(next->debugreg1, 1);
@@ -200,6 +208,17 @@ void __switch_to_xtra(struct task_struct *prev_p, struct task_struct *next_p,
 		/* no 4 and 5 */
 		set_debugreg(next->debugreg6, 6);
 		set_debugreg(next->debugreg7, 7);
+	}
+
+	if (test_tsk_thread_flag(prev_p, TIF_BLOCKSTEP) ^
+	    test_tsk_thread_flag(next_p, TIF_BLOCKSTEP)) {
+		unsigned long debugctl = get_debugctlmsr();
+
+		debugctl &= ~DEBUGCTLMSR_BTF;
+		if (test_tsk_thread_flag(next_p, TIF_BLOCKSTEP))
+			debugctl |= DEBUGCTLMSR_BTF;
+
+		update_debugctlmsr(debugctl);
 	}
 
 	if (test_tsk_thread_flag(prev_p, TIF_NOTSC) ^
@@ -224,6 +243,7 @@ void __switch_to_xtra(struct task_struct *prev_p, struct task_struct *next_p,
 		 */
 		memset(tss->io_bitmap, 0xff, prev->io_bitmap_max);
 	}
+	propagate_user_return_notify(prev_p, next_p);
 }
 
 int sys_fork(struct pt_regs *regs)
@@ -296,7 +316,7 @@ static inline int hlt_use_halt(void)
 void default_idle(void)
 {
 	if (hlt_use_halt()) {
-		trace_power_start(POWER_CSTATE, 1);
+		trace_power_start(POWER_CSTATE, 1, smp_processor_id());
 		current_thread_info()->status &= ~TS_POLLING;
 		/*
 		 * TS_POLLING-cleared state must be visible before we
@@ -366,7 +386,7 @@ EXPORT_SYMBOL_GPL(cpu_idle_wait);
  */
 void mwait_idle_with_hints(unsigned long ax, unsigned long cx)
 {
-	trace_power_start(POWER_CSTATE, (ax>>4)+1);
+	trace_power_start(POWER_CSTATE, (ax>>4)+1, smp_processor_id());
 	if (!need_resched()) {
 		if (cpu_has(&current_cpu_data, X86_FEATURE_CLFLUSH_MONITOR))
 			clflush((void *)&current_thread_info()->flags);
@@ -382,7 +402,7 @@ void mwait_idle_with_hints(unsigned long ax, unsigned long cx)
 static void mwait_idle(void)
 {
 	if (!need_resched()) {
-		trace_power_start(POWER_CSTATE, 1);
+		trace_power_start(POWER_CSTATE, 1, smp_processor_id());
 		if (cpu_has(&current_cpu_data, X86_FEATURE_CLFLUSH_MONITOR))
 			clflush((void *)&current_thread_info()->flags);
 
@@ -403,7 +423,7 @@ static void mwait_idle(void)
  */
 static void poll_idle(void)
 {
-	trace_power_start(POWER_CSTATE, 0);
+	trace_power_start(POWER_CSTATE, 0, smp_processor_id());
 	local_irq_enable();
 	while (!need_resched())
 		cpu_relax();
@@ -422,13 +442,13 @@ static void poll_idle(void)
  *
  * idle=mwait overrides this decision and forces the usage of mwait.
  */
-static int __cpuinitdata force_mwait;
+static int force_mwait;
 
 #define MWAIT_INFO			0x05
 #define MWAIT_ECX_EXTENDED_INFO		0x01
 #define MWAIT_EDX_C1			0xf0
 
-static int __cpuinit mwait_usable(const struct cpuinfo_x86 *c)
+int mwait_usable(const struct cpuinfo_x86 *c)
 {
 	u32 eax, ebx, ecx, edx;
 
@@ -451,21 +471,39 @@ static int __cpuinit mwait_usable(const struct cpuinfo_x86 *c)
 }
 
 /*
- * Check for AMD CPUs, which have potentially C1E support
+ * Check for AMD CPUs, where APIC timer interrupt does not wake up CPU from C1e.
+ * For more information see
+ * - Erratum #400 for NPT family 0xf and family 0x10 CPUs
+ * - Erratum #365 for family 0x11 (not affected because C1e not in use)
  */
 static int __cpuinit check_c1e_idle(const struct cpuinfo_x86 *c)
 {
+	u64 val;
 	if (c->x86_vendor != X86_VENDOR_AMD)
-		return 0;
-
-	if (c->x86 < 0x0F)
-		return 0;
+		goto no_c1e_idle;
 
 	/* Family 0x0f models < rev F do not have C1E */
-	if (c->x86 == 0x0f && c->x86_model < 0x40)
-		return 0;
+	if (c->x86 == 0x0F && c->x86_model >= 0x40)
+		return 1;
 
-	return 1;
+	if (c->x86 == 0x10) {
+		/*
+		 * check OSVW bit for CPUs that are not affected
+		 * by erratum #400
+		 */
+		if (cpu_has(c, X86_FEATURE_OSVW)) {
+			rdmsrl(MSR_AMD64_OSVW_ID_LENGTH, val);
+			if (val >= 2) {
+				rdmsrl(MSR_AMD64_OSVW_STATUS, val);
+				if (!(val & BIT(1)))
+					goto no_c1e_idle;
+			}
+		}
+		return 1;
+	}
+
+no_c1e_idle:
+	return 0;
 }
 
 static cpumask_var_t c1e_mask;

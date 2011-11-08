@@ -557,6 +557,19 @@ static void __init_timer(struct timer_list *timer,
 	lockdep_init_map(&timer->lockdep_map, name, key, 0);
 }
 
+void setup_deferrable_timer_on_stack_key(struct timer_list *timer,
+					 const char *name,
+					 struct lock_class_key *key,
+					 void (*function)(unsigned long),
+					 unsigned long data)
+{
+	timer->function = function;
+	timer->data = data;
+	init_timer_on_stack_key(timer, name, key);
+	timer_set_deferrable(timer);
+}
+EXPORT_SYMBOL_GPL(setup_deferrable_timer_on_stack_key);
+
 /**
  * init_timer_key - initialize a timer
  * @timer: the timer to be initialized
@@ -661,12 +674,8 @@ __mod_timer(struct timer_list *timer, unsigned long expires,
 	cpu = smp_processor_id();
 
 #if defined(CONFIG_NO_HZ) && defined(CONFIG_SMP)
-	if (!pinned && get_sysctl_timer_migration() && idle_cpu(cpu)) {
-		int preferred_cpu = get_nohz_load_balancer();
-
-		if (preferred_cpu >= 0)
-			cpu = preferred_cpu;
-	}
+	if (!pinned && get_sysctl_timer_migration() && idle_cpu(cpu))
+		cpu = get_nohz_timer_target();
 #endif
 	new_base = per_cpu(tvec_bases, cpu);
 
@@ -1173,6 +1182,12 @@ unsigned long get_next_timer_interrupt(unsigned long now)
 	struct tvec_base *base = __get_cpu_var(tvec_bases);
 	unsigned long expires;
 
+	/*
+	 * Pretend that there is no timer pending if the cpu is offline.
+	 * Possible pending timers will be migrated later to an active cpu.
+	 */
+	if (cpu_is_offline(smp_processor_id()))
+		return now + NEXT_TIMER_MAX_DELTA;
 	spin_lock(&base->lock);
 	if (time_before_eq(base->next_timer, base->timer_jiffies))
 		base->next_timer = __next_timer_interrupt(base);
@@ -1226,7 +1241,6 @@ void run_local_timers(void)
 {
 	hrtimer_run_queues();
 	raise_softirq(TIMER_SOFTIRQ);
-	softlockup_tick();
 }
 
 /*

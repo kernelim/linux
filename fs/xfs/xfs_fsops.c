@@ -24,14 +24,10 @@
 #include "xfs_trans.h"
 #include "xfs_sb.h"
 #include "xfs_ag.h"
-#include "xfs_dir2.h"
-#include "xfs_dmapi.h"
 #include "xfs_mount.h"
 #include "xfs_bmap_btree.h"
 #include "xfs_alloc_btree.h"
 #include "xfs_ialloc_btree.h"
-#include "xfs_dir2_sf.h"
-#include "xfs_attr_sf.h"
 #include "xfs_dinode.h"
 #include "xfs_inode.h"
 #include "xfs_inode_item.h"
@@ -45,6 +41,7 @@
 #include "xfs_rtalloc.h"
 #include "xfs_rw.h"
 #include "xfs_filestream.h"
+#include "xfs_trace.h"
 
 /*
  * File system operations
@@ -56,6 +53,9 @@ xfs_fs_geometry(
 	xfs_fsop_geom_t		*geo,
 	int			new_version)
 {
+
+	memset(geo, 0, sizeof(*geo));
+
 	geo->blocksize = mp->m_sb.sb_blocksize;
 	geo->rtextsize = mp->m_sb.sb_rextsize;
 	geo->agblocks = mp->m_sb.sb_agblocks;
@@ -147,12 +147,11 @@ xfs_growfs_data_private(
 	if ((error = xfs_sb_validate_fsb_count(&mp->m_sb, nb)))
 		return error;
 	dpct = pct - mp->m_sb.sb_imax_pct;
-	error = xfs_read_buf(mp, mp->m_ddev_targp,
-			XFS_FSB_TO_BB(mp, nb) - XFS_FSS_TO_BB(mp, 1),
-			XFS_FSS_TO_BB(mp, 1), 0, &bp);
-	if (error)
-		return error;
-	ASSERT(bp);
+	bp = xfs_buf_read_uncached(mp, mp->m_ddev_targp,
+				XFS_FSB_TO_BB(mp, nb) - XFS_FSS_TO_BB(mp, 1),
+				BBTOB(XFS_FSS_TO_BB(mp, 1)), 0);
+	if (!bp)
+		return EIO;
 	xfs_buf_relse(bp);
 
 	new = nb;	/* use new as a temporary here */
@@ -166,27 +165,14 @@ xfs_growfs_data_private(
 	}
 	new = nb - mp->m_sb.sb_dblocks;
 	oagcount = mp->m_sb.sb_agcount;
+
+	/* allocate the new per-ag structures */
 	if (nagcount > oagcount) {
-		void *new_perag, *old_perag;
-
-		xfs_filestream_flush(mp);
-
-		new_perag = kmem_zalloc(sizeof(xfs_perag_t) * nagcount,
-					KM_MAYFAIL);
-		if (!new_perag)
-			return XFS_ERROR(ENOMEM);
-
-		down_write(&mp->m_peraglock);
-		memcpy(new_perag, mp->m_perag, sizeof(xfs_perag_t) * oagcount);
-		old_perag = mp->m_perag;
-		mp->m_perag = new_perag;
-
-		mp->m_flags |= XFS_MOUNT_32BITINODES;
-		nagimax = xfs_initialize_perag(mp, nagcount);
-		up_write(&mp->m_peraglock);
-
-		kmem_free(old_perag);
+		error = xfs_initialize_perag(mp, nagcount, &nagimax);
+		if (error)
+			return error;
 	}
+
 	tp = xfs_trans_alloc(mp, XFS_TRANS_GROWFS);
 	tp->t_flags |= XFS_TRANS_RESERVE;
 	if ((error = xfs_trans_reserve(tp, XFS_GROWFS_SPACE_RES(mp),
@@ -195,14 +181,19 @@ xfs_growfs_data_private(
 		return error;
 	}
 
+	/*
+	 * Write new AG headers to disk. Non-transactional, but written
+	 * synchronously so they are completed prior to the growfs transaction
+	 * being logged.
+	 */
 	nfree = 0;
 	for (agno = nagcount - 1; agno >= oagcount; agno--, new -= agsize) {
 		/*
 		 * AG freelist header block
 		 */
 		bp = xfs_buf_get(mp->m_ddev_targp,
-				  XFS_AG_DADDR(mp, agno, XFS_AGF_DADDR(mp)),
-				  XFS_FSS_TO_BB(mp, 1), 0);
+				 XFS_AG_DADDR(mp, agno, XFS_AGF_DADDR(mp)),
+				 XFS_FSS_TO_BB(mp, 1), XBF_LOCK | XBF_MAPPED);
 		agf = XFS_BUF_TO_AGF(bp);
 		memset(agf, 0, mp->m_sb.sb_sectsize);
 		agf->agf_magicnum = cpu_to_be32(XFS_AGF_MAGIC);
@@ -233,8 +224,8 @@ xfs_growfs_data_private(
 		 * AG inode header block
 		 */
 		bp = xfs_buf_get(mp->m_ddev_targp,
-				  XFS_AG_DADDR(mp, agno, XFS_AGI_DADDR(mp)),
-				  XFS_FSS_TO_BB(mp, 1), 0);
+				 XFS_AG_DADDR(mp, agno, XFS_AGI_DADDR(mp)),
+				 XFS_FSS_TO_BB(mp, 1), XBF_LOCK | XBF_MAPPED);
 		agi = XFS_BUF_TO_AGI(bp);
 		memset(agi, 0, mp->m_sb.sb_sectsize);
 		agi->agi_magicnum = cpu_to_be32(XFS_AGI_MAGIC);
@@ -257,8 +248,9 @@ xfs_growfs_data_private(
 		 * BNO btree root block
 		 */
 		bp = xfs_buf_get(mp->m_ddev_targp,
-			XFS_AGB_TO_DADDR(mp, agno, XFS_BNO_BLOCK(mp)),
-			BTOBB(mp->m_sb.sb_blocksize), 0);
+				 XFS_AGB_TO_DADDR(mp, agno, XFS_BNO_BLOCK(mp)),
+				 BTOBB(mp->m_sb.sb_blocksize),
+				 XBF_LOCK | XBF_MAPPED);
 		block = XFS_BUF_TO_BLOCK(bp);
 		memset(block, 0, mp->m_sb.sb_blocksize);
 		block->bb_magic = cpu_to_be32(XFS_ABTB_MAGIC);
@@ -278,8 +270,9 @@ xfs_growfs_data_private(
 		 * CNT btree root block
 		 */
 		bp = xfs_buf_get(mp->m_ddev_targp,
-			XFS_AGB_TO_DADDR(mp, agno, XFS_CNT_BLOCK(mp)),
-			BTOBB(mp->m_sb.sb_blocksize), 0);
+				 XFS_AGB_TO_DADDR(mp, agno, XFS_CNT_BLOCK(mp)),
+				 BTOBB(mp->m_sb.sb_blocksize),
+				 XBF_LOCK | XBF_MAPPED);
 		block = XFS_BUF_TO_BLOCK(bp);
 		memset(block, 0, mp->m_sb.sb_blocksize);
 		block->bb_magic = cpu_to_be32(XFS_ABTC_MAGIC);
@@ -300,8 +293,9 @@ xfs_growfs_data_private(
 		 * INO btree root block
 		 */
 		bp = xfs_buf_get(mp->m_ddev_targp,
-			XFS_AGB_TO_DADDR(mp, agno, XFS_IBT_BLOCK(mp)),
-			BTOBB(mp->m_sb.sb_blocksize), 0);
+				 XFS_AGB_TO_DADDR(mp, agno, XFS_IBT_BLOCK(mp)),
+				 BTOBB(mp->m_sb.sb_blocksize),
+				 XBF_LOCK | XBF_MAPPED);
 		block = XFS_BUF_TO_BLOCK(bp);
 		memset(block, 0, mp->m_sb.sb_blocksize);
 		block->bb_magic = cpu_to_be32(XFS_IBT_MAGIC);
@@ -344,6 +338,7 @@ xfs_growfs_data_private(
 		be32_add_cpu(&agf->agf_length, new);
 		ASSERT(be32_to_cpu(agf->agf_length) ==
 		       be32_to_cpu(agi->agi_length));
+
 		xfs_alloc_log_agf(tp, bp, XFS_AGF_LENGTH);
 		/*
 		 * Free the new space.
@@ -354,6 +349,12 @@ xfs_growfs_data_private(
 			goto error0;
 		}
 	}
+
+	/*
+	 * Update changed superblock fields transactionally. These are not
+	 * seen by the rest of the world until the transaction commit applies
+	 * them atomically to the superblock.
+	 */
 	if (nagcount > oagcount)
 		xfs_trans_mod_sb(tp, XFS_TRANS_SB_AGCOUNT, nagcount - oagcount);
 	if (nb > mp->m_sb.sb_dblocks)
@@ -364,9 +365,9 @@ xfs_growfs_data_private(
 	if (dpct)
 		xfs_trans_mod_sb(tp, XFS_TRANS_SB_IMAXPCT, dpct);
 	error = xfs_trans_commit(tp, 0);
-	if (error) {
+	if (error)
 		return error;
-	}
+
 	/* New allocation groups fully initialized, so update mount struct */
 	if (nagimax)
 		mp->m_maxagi = nagimax;
@@ -376,13 +377,16 @@ xfs_growfs_data_private(
 		mp->m_maxicount = icount << mp->m_sb.sb_inopblog;
 	} else
 		mp->m_maxicount = 0;
+	xfs_set_low_space_thresholds(mp);
+
+	/* update secondary superblocks. */
 	for (agno = 1; agno < nagcount; agno++) {
 		error = xfs_read_buf(mp, mp->m_ddev_targp,
 				  XFS_AGB_TO_DADDR(mp, agno, XFS_SB_BLOCK(mp)),
 				  XFS_FSS_TO_BB(mp, 1), 0, &bp);
 		if (error) {
-			xfs_fs_cmn_err(CE_WARN, mp,
-			"error %d reading secondary superblock for ag %d",
+			xfs_warn(mp,
+		"error %d reading secondary superblock for ag %d",
 				error, agno);
 			break;
 		}
@@ -395,7 +399,7 @@ xfs_growfs_data_private(
 		if (!(error = xfs_bwrite(mp, bp))) {
 			continue;
 		} else {
-			xfs_fs_cmn_err(CE_WARN, mp,
+			xfs_warn(mp,
 		"write error %d updating secondary superblock for ag %d",
 				error, agno);
 			break; /* no point in continuing */
@@ -596,39 +600,44 @@ out:
 		 * the extra reserve blocks from the reserve.....
 		 */
 		int error;
-		error = xfs_mod_incore_sb(mp, XFS_SBS_FDBLOCKS, fdblks_delta, 0);
+		error = xfs_icsb_modify_counters(mp, XFS_SBS_FDBLOCKS,
+						 fdblks_delta, 0);
 		if (error == ENOSPC)
 			goto retry;
 	}
 	return 0;
 }
 
+/*
+ * Dump a transaction into the log that contains no real change. This is needed
+ * to be able to make the log dirty or stamp the current tail LSN into the log
+ * during the covering operation.
+ *
+ * We cannot use an inode here for this - that will push dirty state back up
+ * into the VFS and then periodic inode flushing will prevent log covering from
+ * making progress. Hence we log a field in the superblock instead and use a
+ * synchronous transaction to ensure the superblock is immediately unpinned
+ * and can be written back.
+ */
 int
 xfs_fs_log_dummy(
 	xfs_mount_t	*mp)
 {
 	xfs_trans_t	*tp;
-	xfs_inode_t	*ip;
 	int		error;
 
-	tp = _xfs_trans_alloc(mp, XFS_TRANS_DUMMY1);
-	error = xfs_trans_reserve(tp, 0, XFS_ICHANGE_LOG_RES(mp), 0, 0, 0);
+	tp = _xfs_trans_alloc(mp, XFS_TRANS_DUMMY1, KM_SLEEP);
+	error = xfs_trans_reserve(tp, 0, mp->m_sb.sb_sectsize + 128, 0, 0,
+					XFS_DEFAULT_LOG_COUNT);
 	if (error) {
 		xfs_trans_cancel(tp, 0);
 		return error;
 	}
 
-	ip = mp->m_rootip;
-	xfs_ilock(ip, XFS_ILOCK_EXCL);
-
-	xfs_trans_ijoin(tp, ip, XFS_ILOCK_EXCL);
-	xfs_trans_ihold(tp, ip);
-	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
+	/* log the UUID because it is an unchanging field */
+	xfs_mod_sb(tp, XFS_SB_UUID);
 	xfs_trans_set_sync(tp);
-	error = xfs_trans_commit(tp, 0);
-
-	xfs_iunlock(ip, XFS_ILOCK_EXCL);
-	return error;
+	return xfs_trans_commit(tp, 0);
 }
 
 int

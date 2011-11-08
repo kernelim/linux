@@ -23,6 +23,7 @@
 #include <linux/tcp.h>
 #include <linux/init.h>
 #include <linux/dma-mapping.h>
+#include <linux/pci-aspm.h>
 
 #include <asm/system.h>
 #include <asm/io.h>
@@ -186,7 +187,12 @@ static struct pci_device_id rtl8169_pci_tbl[] = {
 
 MODULE_DEVICE_TABLE(pci, rtl8169_pci_tbl);
 
-static int rx_copybreak = 200;
+/*
+ * we set our copybreak very high so that we don't have
+ * to allocate 16k frames all the time (see note in
+ * rtl8169_open()
+ */
+static int rx_copybreak = 16383;
 static int use_dac;
 static struct {
 	u32 msg_enable;
@@ -744,8 +750,8 @@ static void rtl8169_check_link_status(struct net_device *dev,
 	spin_lock_irqsave(&tp->lock, flags);
 	if (tp->link_ok(ioaddr)) {
 		netif_carrier_on(dev);
-		if (netif_msg_ifup(tp))
-			printk(KERN_INFO PFX "%s: link up\n", dev->name);
+		if (net_ratelimit())
+			netif_info(tp, ifup, dev, "link up\n");
 	} else {
 		if (netif_msg_ifdown(tp))
 			printk(KERN_INFO PFX "%s: link down\n", dev->name);
@@ -2827,8 +2833,13 @@ static void rtl_rar_set(struct rtl8169_private *tp, u8 *addr)
 	spin_lock_irq(&tp->lock);
 
 	RTL_W8(Cfg9346, Cfg9346_Unlock);
-	RTL_W32(MAC0, low);
+
 	RTL_W32(MAC4, high);
+	RTL_R32(MAC4);
+
+	RTL_W32(MAC0, low);
+	RTL_R32(MAC0);
+
 	RTL_W8(Cfg9346, Cfg9346_Lock);
 
 	spin_unlock_irq(&tp->lock);
@@ -3008,6 +3019,9 @@ rtl8169_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	mii->phy_id_mask = 0x1f;
 	mii->reg_num_mask = 0x1f;
 	mii->supports_gmii = !!(cfg->features & RTL_FEATURE_GMII);
+
+	pci_disable_link_state(pdev, PCIE_LINK_STATE_L0S | PCIE_LINK_STATE_L1 |
+			       PCIE_LINK_STATE_CLKPM);
 
 	/* enable device (incl. PCI PM wakeup and hotplug setup) */
 	rc = pci_enable_device(pdev);
@@ -3245,9 +3259,13 @@ static void __devexit rtl8169_remove_one(struct pci_dev *pdev)
 }
 
 static void rtl8169_set_rxbufsize(struct rtl8169_private *tp,
-				  struct net_device *dev)
+				  unsigned int mtu)
 {
-	unsigned int max_frame = dev->mtu + VLAN_ETH_HLEN + ETH_FCS_LEN;
+	unsigned int max_frame = mtu + VLAN_ETH_HLEN + ETH_FCS_LEN;
+
+	if (max_frame != 16383)
+		printk(KERN_WARNING PFX "WARNING! Changing of MTU on this "
+			"NIC may lead to frame reception errors!\n");
 
 	tp->rx_buf_sz = (max_frame > RX_BUF_SIZE) ? max_frame : RX_BUF_SIZE;
 }
@@ -3259,7 +3277,17 @@ static int rtl8169_open(struct net_device *dev)
 	int retval = -ENOMEM;
 
 
-	rtl8169_set_rxbufsize(tp, dev);
+	/*
+	 * Note that we use a magic value here, its wierd I know
+	 * its done because, some subset of rtl8169 hardware suffers from
+	 * a problem in which frames received that are longer than
+	 * the size set in RxMaxSize register return garbage sizes
+	 * when received.  To avoid this we need to turn off filtering,
+	 * which is done by setting a value of 16383 in the RxMaxSize register
+	 * and allocating 16k frames to handle the largest possible rx value
+	 * thats what the magic math below does.
+	 */
+	rtl8169_set_rxbufsize(tp, 16383 - VLAN_ETH_HLEN - ETH_FCS_LEN);
 
 	/*
 	 * Rx and Tx desscriptors needs 256 bytes alignment.
@@ -3700,7 +3728,8 @@ static void rtl_hw_start_8168(struct net_device *dev)
 	RTL_W16(IntrMitigate, 0x5151);
 
 	/* Work around for RxFIFO overflow. */
-	if (tp->mac_version == RTL_GIGA_MAC_VER_11) {
+	if (tp->mac_version == RTL_GIGA_MAC_VER_11 ||
+	    tp->mac_version == RTL_GIGA_MAC_VER_22) {
 		tp->intr_event |= RxFIFOOver | PCSTimeout;
 		tp->intr_event &= ~RxOverflow;
 	}
@@ -3912,7 +3941,7 @@ static int rtl8169_change_mtu(struct net_device *dev, int new_mtu)
 
 	rtl8169_down(dev);
 
-	rtl8169_set_rxbufsize(tp, dev);
+	rtl8169_set_rxbufsize(tp, dev->mtu);
 
 	ret = rtl8169_init_ring(dev);
 	if (ret < 0)
@@ -4297,7 +4326,7 @@ static netdev_tx_t rtl8169_start_xmit(struct sk_buff *skb,
 
 	tp->cur_tx += frags + 1;
 
-	smp_wmb();
+	wmb();
 
 	RTL_W8(TxPoll, NPQ);	/* set polling bit */
 
@@ -4424,14 +4453,12 @@ static inline int rtl8169_fragmented_frame(u32 status)
 	return (status & (FirstFrag | LastFrag)) != (FirstFrag | LastFrag);
 }
 
-static inline void rtl8169_rx_csum(struct sk_buff *skb, struct RxDesc *desc)
+static inline void rtl8169_rx_csum(struct sk_buff *skb, u32 opts1)
 {
-	u32 opts1 = le32_to_cpu(desc->opts1);
 	u32 status = opts1 & RxProtoMask;
 
 	if (((status == RxProtoTCP) && !(opts1 & TCPFail)) ||
-	    ((status == RxProtoUDP) && !(opts1 & UDPFail)) ||
-	    ((status == RxProtoIP) && !(opts1 & IPFail)))
+	    ((status == RxProtoUDP) && !(opts1 & UDPFail)))
 		skb->ip_summed = CHECKSUM_UNNECESSARY;
 	else
 		skb->ip_summed = CHECKSUM_NONE;
@@ -4516,8 +4543,6 @@ static int rtl8169_rx_interrupt(struct net_device *dev,
 				continue;
 			}
 
-			rtl8169_rx_csum(skb, desc);
-
 			if (rtl8169_try_rx_copy(&skb, tp, pkt_size, addr)) {
 				pci_dma_sync_single_for_device(pdev, addr,
 					pkt_size, PCI_DMA_FROMDEVICE);
@@ -4528,6 +4553,7 @@ static int rtl8169_rx_interrupt(struct net_device *dev,
 				tp->Rx_skbuff[entry] = NULL;
 			}
 
+			rtl8169_rx_csum(skb, status);
 			skb_put(skb, pkt_size);
 			skb->protocol = eth_type_trans(skb, dev);
 
@@ -4590,12 +4616,32 @@ static irqreturn_t rtl8169_interrupt(int irq, void *dev_instance)
 			break;
 		}
 
-		/* Work around for rx fifo overflow */
-		if (unlikely(status & RxFIFOOver) &&
-		(tp->mac_version == RTL_GIGA_MAC_VER_11)) {
-			netif_stop_queue(dev);
-			rtl8169_tx_timeout(dev);
-			break;
+		if (unlikely(status & RxFIFOOver)) {
+			switch (tp->mac_version) {
+			/* Work around for rx fifo overflow */
+			case RTL_GIGA_MAC_VER_11:
+			case RTL_GIGA_MAC_VER_22:
+			case RTL_GIGA_MAC_VER_26:
+				netif_stop_queue(dev);
+				rtl8169_tx_timeout(dev);
+				goto done;
+			/* Testers needed. */
+			case RTL_GIGA_MAC_VER_17:
+			case RTL_GIGA_MAC_VER_19:
+			case RTL_GIGA_MAC_VER_20:
+			case RTL_GIGA_MAC_VER_21:
+			case RTL_GIGA_MAC_VER_23:
+			case RTL_GIGA_MAC_VER_24:
+			case RTL_GIGA_MAC_VER_27:
+			/* Experimental science. Pktgen proof. */
+			case RTL_GIGA_MAC_VER_12:
+			case RTL_GIGA_MAC_VER_25:
+				if (status == RxFIFOOver)
+					goto done;
+				break;
+			default:
+				break;
+			}
 		}
 
 		if (unlikely(status & SYSErr)) {
@@ -4632,7 +4678,7 @@ static irqreturn_t rtl8169_interrupt(int irq, void *dev_instance)
 			(status & RxFIFOOver) ? (status | RxOverflow) : status);
 		status = RTL_R16(IntrStatus);
 	}
-
+done:
 	return IRQ_RETVAL(handled);
 }
 
@@ -4657,7 +4703,7 @@ static int rtl8169_poll(struct napi_struct *napi, int budget)
 		 * until it does.
 		 */
 		tp->intr_mask = 0xffff;
-		smp_wmb();
+		wmb();
 		RTL_W16(IntrMask, tp->intr_event);
 	}
 
@@ -4795,8 +4841,8 @@ static void rtl_set_rx_mode(struct net_device *dev)
 		mc_filter[1] = swab32(data);
 	}
 
-	RTL_W32(MAR0 + 0, mc_filter[0]);
 	RTL_W32(MAR0 + 4, mc_filter[1]);
+	RTL_W32(MAR0 + 0, mc_filter[0]);
 
 	RTL_W32(RxConfig, tmp);
 

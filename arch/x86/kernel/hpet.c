@@ -33,6 +33,10 @@
  * HPET address is set in acpi/boot.c, when an ACPI entry exists
  */
 unsigned long				hpet_address;
+u8					hpet_blockid; /* OS timer block num */
+u8					hpet_msi_disable;
+u8					hpet_readback_cmp;
+
 #ifdef CONFIG_PCI_MSI
 static unsigned long			hpet_num_timers;
 #endif
@@ -383,11 +387,32 @@ static int hpet_next_event(unsigned long delta,
 	hpet_writel(cnt, HPET_Tn_CMP(timer));
 
 	/*
-	 * We need to read back the CMP register to make sure that
-	 * what we wrote hit the chip before we compare it to the
-	 * counter.
+	 * We need to read back the CMP register on certain HPET
+	 * implementations (ATI chipsets) which seem to delay the
+	 * transfer of the compare register into the internal compare
+	 * logic. With small deltas this might actually be too late as
+	 * the counter could already be higher than the compare value
+	 * at that point and we would wait for the next hpet interrupt
+	 * forever. We found out that reading the CMP register back
+	 * forces the transfer so we can rely on the comparison with
+	 * the counter register below.
+	 *
+	 * That works fine on those ATI chipsets, but on newer Intel
+	 * chipsets (ICH9...) this triggers due to an erratum: Reading
+	 * the comparator immediately following a write is returning
+	 * the old value.
+	 *
+	 * We restrict the read back to the affected ATI chipsets (set
+	 * by quirks) and also run it with hpet=verbose for debugging
+	 * purposes.
 	 */
-	WARN_ON_ONCE((u32)hpet_readl(HPET_Tn_CMP(timer)) != cnt);
+	if (hpet_readback_cmp || hpet_verbose) {
+		u32 cmp = hpet_readl(HPET_Tn_CMP(timer));
+
+		if (cmp != cnt)
+			printk_once(KERN_WARNING
+			    "hpet: compare register read back failed.\n");
+	}
 
 	return (s32)((u32)hpet_readl(HPET_COUNTER) - cnt) >= 0 ? -ETIME : 0;
 }
@@ -467,7 +492,7 @@ static int hpet_msi_next_event(unsigned long delta,
 
 static int hpet_setup_msi_irq(unsigned int irq)
 {
-	if (arch_setup_hpet_msi(irq)) {
+	if (arch_setup_hpet_msi(irq, hpet_blockid)) {
 		destroy_irq(irq);
 		return -EINVAL;
 	}
@@ -583,6 +608,9 @@ static void hpet_msi_capability_lookup(unsigned int start_timer)
 	unsigned int num_timers;
 	unsigned int num_timers_used = 0;
 	int i;
+
+	if (hpet_msi_disable)
+		return;
 
 	id = hpet_readl(HPET_ID);
 
@@ -911,6 +939,9 @@ static __init int hpet_late_init(void)
 	hpet_reserve_platform_timers(hpet_readl(HPET_ID));
 	hpet_print_config();
 
+	if (hpet_msi_disable)
+		return 0;
+
 	for_each_online_cpu(cpu) {
 		hpet_cpuhp_notify(NULL, CPU_ONLINE, (void *)(long)cpu);
 	}
@@ -924,16 +955,18 @@ fs_initcall(hpet_late_init);
 
 void hpet_disable(void)
 {
-	if (is_hpet_capable()) {
-		unsigned long cfg = hpet_readl(HPET_CFG);
+	unsigned long cfg;
 
-		if (hpet_legacy_int_enabled) {
-			cfg &= ~HPET_CFG_LEGACY;
-			hpet_legacy_int_enabled = 0;
-		}
-		cfg &= ~HPET_CFG_ENABLE;
-		hpet_writel(cfg, HPET_CFG);
+	if (!is_hpet_capable() || !hpet_address || !hpet_virt_address)
+		return;
+
+	cfg = hpet_readl(HPET_CFG);
+	if (hpet_legacy_int_enabled) {
+		cfg &= ~HPET_CFG_LEGACY;
+		hpet_legacy_int_enabled = 0;
 	}
+	cfg &= ~HPET_CFG_ENABLE;
+	hpet_writel(cfg, HPET_CFG);
 }
 
 #ifdef CONFIG_HPET_EMULATE_RTC

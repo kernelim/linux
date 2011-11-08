@@ -11,10 +11,24 @@
 extern int pci_uevent(struct device *dev, struct kobj_uevent_env *env);
 extern int pci_create_sysfs_dev_files(struct pci_dev *pdev);
 extern void pci_remove_sysfs_dev_files(struct pci_dev *pdev);
+#if !defined(CONFIG_DMI) && !defined(CONFIG_ACPI)
+static inline void pci_create_firmware_label_files(struct pci_dev *pdev)
+{ return; }
+static inline void pci_remove_firmware_label_files(struct pci_dev *pdev)
+{ return; }
+#else
+extern void pci_create_firmware_label_files(struct pci_dev *pdev);
+extern void pci_remove_firmware_label_files(struct pci_dev *pdev);
+#endif
 extern void pci_cleanup_rom(struct pci_dev *dev);
 #ifdef HAVE_PCI_MMAP
+enum pci_mmap_api {
+	PCI_MMAP_SYSFS,	/* mmap on /sys/bus/pci/devices/<BDF>/resource<N> */
+	PCI_MMAP_PROCFS	/* mmap on /proc/bus/pci/<BDF> */
+};
 extern int pci_mmap_fits(struct pci_dev *pdev, int resno,
-			 struct vm_area_struct *vma);
+			 struct vm_area_struct *vmai,
+			 enum pci_mmap_api mmap_api);
 #endif
 int pci_probe_reset_function(struct pci_dev *dev);
 
@@ -44,6 +58,7 @@ struct pci_platform_pm_ops {
 	pci_power_t (*choose_state)(struct pci_dev *dev);
 	bool (*can_wakeup)(struct pci_dev *dev);
 	int (*sleep_wake)(struct pci_dev *dev, bool enable);
+	int (*run_wake)(struct pci_dev *dev, bool enable);
 };
 
 extern int pci_set_platform_pm(struct pci_platform_pm_ops *ops);
@@ -113,16 +128,12 @@ extern unsigned int pci_pm_d3_delay;
 
 #ifdef CONFIG_PCI_MSI
 void pci_no_msi(void);
+void pci_yes_msi(void);
 extern void pci_msi_init_pci_dev(struct pci_dev *dev);
 #else
 static inline void pci_no_msi(void) { }
+static inline void pci_yes_msi(void) { }
 static inline void pci_msi_init_pci_dev(struct pci_dev *dev) { }
-#endif
-
-#ifdef CONFIG_PCIEAER
-void pci_no_aer(void);
-#else
-static inline void pci_no_aer(void) { }
 #endif
 
 static inline int pci_no_d1d2(struct pci_dev *dev)
@@ -208,6 +219,9 @@ extern int pci_is_reassigndev(struct pci_dev *dev);
 resource_size_t pci_specified_resource_alignment(struct pci_dev *dev);
 extern void pci_disable_bridge_window(struct pci_dev *dev);
 #endif
+
+/* Use "pci=[nosriov|sriov]" to disable or enable SRIOV */
+extern unsigned int pci_sriov_enabled;
 
 /* Single Root I/O Virtualization */
 struct pci_sriov {
@@ -310,5 +324,15 @@ static inline int pci_resource_alignment(struct pci_dev *dev,
 #endif
 	return resource_alignment(res);
 }
+
+extern void pci_enable_acs(struct pci_dev *dev);
+
+struct pci_dev_reset_methods {
+	u16 vendor;
+	u16 device;
+	int (*reset)(struct pci_dev *dev, int probe);
+};
+
+extern int pci_dev_specific_reset(struct pci_dev *dev, int probe);
 
 #endif /* DRIVERS_PCI_H */

@@ -6,6 +6,8 @@
 
 #include <asm/hpet.h>
 
+struct pci_dev *mcp55_rewrite = NULL;
+
 #if defined(CONFIG_X86_IO_APIC) && defined(CONFIG_SMP) && defined(CONFIG_PCI)
 
 static void __devinit quirk_intel_irqbalance(struct pci_dev *dev)
@@ -45,12 +47,52 @@ static void __devinit quirk_intel_irqbalance(struct pci_dev *dev)
 	if (!(config & 0x2))
 		pci_write_config_byte(dev, 0xf4, config);
 }
+
+static void __devinit check_mcp55_legacy_irq_routing(struct pci_dev *dev)
+{
+	u32 cfg;
+	printk(KERN_WARNING "FOUND MCP55 CHIP\n");
+	/*
+	 *Some MCP55 chips have a legacy irq routing config register, and most
+	 *BIOS engineers have set it so that legacy interrupts are only routed
+	 *to the BSP. While this makes sense in most cases, it doesn't work
+	 *for kexec, since we might wind up booting on a processor other than
+	 *the BSP.  The right fix for this is to move to symmetric io mode,
+	 *and enable the ioapics very early in the boot process.
+	 *That seems like far to invasive a fix in RHEL5, so here, we're just
+	 *going to check for the appropriate configuration, and tell kexec to
+	 *rewrite the config register if we find that we need to broadcast
+	 *legacy interrupts.
+	 */
+	pci_read_config_dword(dev, 0x74, &cfg);
+	/*
+	 * We expect legacy interrupts to be routed to INTIN0 on the lapics of
+	 * all processors (not just the BSP).  To ensure this, bit 2 must be
+	 * clear, and bit 15 must be clear.  if either of these conditions is
+	 * not met, we have fixups we need to preform a fixup on crash
+	 */
+	if (cfg & ((1 << 2) | (1 << 15))) {
+		/*
+		 * Either bit 2 or 15 wasn't clear, so we need to
+		 * rewrite this cfg register when starting kexec
+		 */
+		printk(KERN_WARNING
+			"DETECTED RESTRICTED ROUTING ON MCP55!  FLAGGING\n");
+		mcp55_rewrite = dev;
+	}
+}
+
+
 DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_E7320_MCH,
 			quirk_intel_irqbalance);
 DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_E7525_MCH,
 			quirk_intel_irqbalance);
 DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_E7520_MCH,
 			quirk_intel_irqbalance);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x0360,
+			check_mcp55_legacy_irq_routing);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x0364,
+			check_mcp55_legacy_irq_routing);
 #endif
 
 #if defined(CONFIG_HPET_TIMER)
@@ -491,6 +533,24 @@ void force_hpet_resume(void)
 		break;
 	}
 }
+
+/*
+ * HPET MSI on some boards (ATI SB700/SB800) has side effect on
+ * floppy DMA. Disable HPET MSI on such platforms.
+ *
+ * Also force the read back of the CMP register in hpet_next_event()
+ * to work around the problem that the CMP register write seems to be
+ * delayed. See hpet_next_event() for details.
+ */
+static void force_disable_hpet_msi(struct pci_dev *unused)
+{
+	hpet_msi_disable = 1;
+	hpet_readback_cmp = 1;
+}
+
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_ATI, PCI_DEVICE_ID_ATI_SBX00_SMBUS,
+			 force_disable_hpet_msi);
+
 #endif
 
 #if defined(CONFIG_PCI) && defined(CONFIG_NUMA)
@@ -499,6 +559,7 @@ static void __init quirk_amd_nb_node(struct pci_dev *dev)
 {
 	struct pci_dev *nb_ht;
 	unsigned int devfn;
+	u32 node;
 	u32 val;
 
 	devfn = PCI_DEVFN(PCI_SLOT(dev->devfn), 0);
@@ -507,7 +568,13 @@ static void __init quirk_amd_nb_node(struct pci_dev *dev)
 		return;
 
 	pci_read_config_dword(nb_ht, 0x60, &val);
-	set_dev_node(&dev->dev, val & 7);
+	node = val & 7;
+	/*
+	 * Some hardware may return an invalid node ID,
+	 * so check it first:
+	 */
+	if (node_online(node))
+		set_dev_node(&dev->dev, node);
 	pci_dev_put(nb_ht);
 }
 

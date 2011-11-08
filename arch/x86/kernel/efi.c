@@ -57,6 +57,7 @@ struct efi_memory_map memmap;
 
 static struct efi efi_phys __initdata;
 static efi_system_table_t efi_systab __initdata;
+static efi_runtime_services_t phys_runtime;
 
 static int __init setup_noefi(char *arg)
 {
@@ -144,17 +145,6 @@ static void virt_efi_reset_system(int reset_type,
 		       data_size, data);
 }
 
-static efi_status_t virt_efi_set_virtual_address_map(
-	unsigned long memory_map_size,
-	unsigned long descriptor_size,
-	u32 descriptor_version,
-	efi_memory_desc_t *virtual_map)
-{
-	return efi_call_virt4(set_virtual_address_map,
-			      memory_map_size, descriptor_size,
-			      descriptor_version, virtual_map);
-}
-
 static efi_status_t __init phys_efi_set_virtual_address_map(
 	unsigned long memory_map_size,
 	unsigned long descriptor_size,
@@ -171,7 +161,7 @@ static efi_status_t __init phys_efi_set_virtual_address_map(
 	return status;
 }
 
-static efi_status_t __init phys_efi_get_time(efi_time_t *tm,
+static efi_status_t __init phys_efi_get_time_early(efi_time_t *tm,
 					     efi_time_cap_t *tc)
 {
 	efi_status_t status;
@@ -180,6 +170,112 @@ static efi_status_t __init phys_efi_get_time(efi_time_t *tm,
 	status = efi_call_phys2(efi_phys.get_time, tm, tc);
 	efi_call_phys_epilog();
 	return status;
+}
+
+static efi_status_t phys_efi_get_time(efi_time_t *tm,
+				      efi_time_cap_t *tc)
+{
+	efi_status_t status;
+
+	efi_call_phys_prelog_in_physmode();
+	status = efi_call_phys2((void*)phys_runtime.get_time, tm, tc);
+	efi_call_phys_epilog_in_physmode();
+	return status;
+}
+
+static efi_status_t __init phys_efi_set_time(efi_time_t *tm)
+{
+	efi_status_t status;
+
+	efi_call_phys_prelog_in_physmode();
+	status = efi_call_phys1((void*)phys_runtime.set_time, tm);
+	efi_call_phys_epilog_in_physmode();
+	return status;
+}
+
+static efi_status_t phys_efi_get_wakeup_time(efi_bool_t *enabled,
+                                             efi_bool_t *pending,
+                                             efi_time_t *tm)
+{
+	efi_status_t status;
+
+	efi_call_phys_prelog_in_physmode();
+	status = efi_call_phys3((void*)phys_runtime.get_wakeup_time, enabled,
+				pending, tm);
+	efi_call_phys_epilog_in_physmode();
+	return status;
+}
+
+static efi_status_t phys_efi_set_wakeup_time(efi_bool_t enabled, efi_time_t *tm)
+{
+	efi_status_t status;
+	efi_call_phys_prelog_in_physmode();
+	status = efi_call_phys2((void*)phys_runtime.set_wakeup_time, enabled,
+				tm);
+	efi_call_phys_epilog_in_physmode();
+	return status;
+}
+
+static efi_status_t phys_efi_get_variable(efi_char16_t *name,
+					  efi_guid_t *vendor,
+					  u32 *attr,
+					  unsigned long *data_size,
+					  void *data)
+{
+	efi_status_t status;
+	efi_call_phys_prelog_in_physmode();
+	status = efi_call_phys5((void*)phys_runtime.get_variable, name, vendor,
+				attr, data_size, data);
+	efi_call_phys_epilog_in_physmode();
+	return status;
+}
+
+static efi_status_t phys_efi_get_next_variable(unsigned long *name_size,
+					       efi_char16_t *name,
+					       efi_guid_t *vendor)
+{
+	efi_status_t status;
+
+	efi_call_phys_prelog_in_physmode();
+	status = efi_call_phys3((void*)phys_runtime.get_next_variable,
+				name_size, name, vendor);
+	efi_call_phys_epilog_in_physmode();
+	return status;
+}
+
+static efi_status_t phys_efi_set_variable(efi_char16_t *name,
+					  efi_guid_t *vendor,
+					  unsigned long attr,
+					  unsigned long data_size,
+					  void *data)
+{
+	efi_status_t status;
+	efi_call_phys_prelog_in_physmode();
+	status = efi_call_phys5((void*)phys_runtime.set_variable, name,
+				vendor, attr, data_size, data);
+	efi_call_phys_epilog_in_physmode();
+	return status;
+}
+
+static efi_status_t phys_efi_get_next_high_mono_count(u32 *count)
+{
+	efi_status_t status;
+	efi_call_phys_prelog_in_physmode();
+	status = efi_call_phys1((void*)phys_runtime.get_next_high_mono_count,
+				count);
+	efi_call_phys_epilog_in_physmode();
+	return status;
+}
+
+static void phys_efi_reset_system(int reset_type,
+                                  efi_status_t status,
+                                  unsigned long data_size,
+                                  efi_char16_t *data)
+{
+	efi_call_phys_prelog_in_physmode();
+	efi_call_phys4((void*)phys_runtime.reset_system, reset_type, status,
+				data_size, data);
+	efi_call_phys_epilog_in_physmode();
 }
 
 int efi_set_rtc_mmss(unsigned long nowtime)
@@ -271,6 +367,7 @@ static void __init do_add_efi_memmap(void)
 			break;
 		}
 		e820_add_region(start, size, e820_type);
+		e820_saved_add_region(start, size, e820_type);
 	}
 	sanitize_e820_map(e820.map, ARRAY_SIZE(e820.map), &e820.nr_map);
 }
@@ -313,6 +410,57 @@ static void __init print_efi_memmap(void)
 	}
 }
 #endif  /*  EFI_DEBUG  */
+
+void __init efi_reserve_boot_services(void)
+{
+	void *p;
+
+	for (p = memmap.map; p < memmap.map_end; p += memmap.desc_size) {
+		efi_memory_desc_t *md = p;
+		u64 start = md->phys_addr;
+		u64 size = md->num_pages << EFI_PAGE_SHIFT;
+
+		if (md->type != EFI_BOOT_SERVICES_CODE &&
+		    md->type != EFI_BOOT_SERVICES_DATA)
+			continue;
+
+		/* Only reserve where possible:
+		 * - Not within any already allocated areas
+		 * - Not over any memory area (really needed, if above?)
+		 * - Not within any part of the kernel
+		 * - Not the bios reserved area
+		 */
+
+		if ((start+size >= virt_to_phys(_text) &&
+		     start <= virt_to_phys(_end)) ||
+		    !e820_all_mapped(start, start+size, E820_RAM)) {
+			/* Could not reserve, skip it */
+			md->num_pages = 0;
+		} else {
+			if (reserve_bootmem_generic(start, size,
+						    BOOTMEM_EXCLUSIVE)) {
+				md->num_pages = 0;
+			}
+		}
+	}
+}
+
+static void __init efi_free_boot_services(void)
+{
+	void *p;
+
+	for (p = memmap.map; p < memmap.map_end; p += memmap.desc_size) {
+		efi_memory_desc_t *md = p;
+		unsigned long long start = md->phys_addr;
+		unsigned long long size = md->num_pages << EFI_PAGE_SHIFT;
+
+		if (md->type != EFI_BOOT_SERVICES_CODE &&
+		    md->type != EFI_BOOT_SERVICES_DATA)
+			continue;
+
+		free_bootmem_late(start, size);
+	}
+}
 
 void __init efi_init(void)
 {
@@ -362,7 +510,7 @@ void __init efi_init(void)
 		printk(KERN_ERR PFX "Could not map the firmware vendor!\n");
 	early_iounmap(tmp, 2);
 
-	printk(KERN_INFO "EFI v%u.%.02u by %s \n",
+	printk(KERN_INFO "EFI v%u.%.02u by %s\n",
 	       efi.systab->hdr.revision >> 16,
 	       efi.systab->hdr.revision & 0xffff, vendor);
 
@@ -434,7 +582,9 @@ void __init efi_init(void)
 		 * Make efi_get_time can be called before entering
 		 * virtual mode.
 		 */
-		efi.get_time = phys_efi_get_time;
+		efi.get_time = phys_efi_get_time_early;
+
+		memcpy(&phys_runtime, runtime, sizeof(efi_runtime_services_t));
 	} else
 		printk(KERN_ERR "Could not map the EFI runtime service "
 		       "table!\n");
@@ -459,19 +609,41 @@ void __init efi_init(void)
 	x86_platform.set_wallclock = efi_set_rtc_mmss;
 #endif
 
-	/* Setup for EFI runtime service */
-	reboot_type = BOOT_EFI;
-
 #if EFI_DEBUG
 	print_efi_memmap();
 #endif
+
+#ifndef CONFIG_X86_64
+	/*
+	 * Only x86_64 supports physical mode as of now. Use virtual mode
+	 * forcibly.
+	 */
+	usevirtefi = 1;
+#endif
+}
+
+void __init efi_set_executable(efi_memory_desc_t *md, bool executable)
+{
+	u64 addr, npages;
+
+	if (md->phys_addr == 0)
+		return;
+
+	addr = md->virt_addr;
+	npages = md->num_pages;
+
+	memrange_efi_to_native(&addr, &npages);
+
+	if (executable)
+		set_memory_x(addr, npages);
+	else
+		set_memory_nx(addr, npages);
 }
 
 static void __init runtime_code_page_mkexec(void)
 {
 	efi_memory_desc_t *md;
 	void *p;
-	u64 addr, npages;
 
 	/* Make EFI runtime service code area executable */
 	for (p = memmap.map; p < memmap.map_end; p += memmap.desc_size) {
@@ -480,10 +652,7 @@ static void __init runtime_code_page_mkexec(void)
 		if (md->type != EFI_RUNTIME_SERVICES_CODE)
 			continue;
 
-		addr = md->virt_addr;
-		npages = md->num_pages;
-		memrange_efi_to_native(&addr, &npages);
-		set_memory_x(addr, npages);
+		efi_set_executable(md, true);
 	}
 }
 
@@ -497,16 +666,46 @@ static void __init runtime_code_page_mkexec(void)
  */
 void __init efi_enter_virtual_mode(void)
 {
-	efi_memory_desc_t *md;
+	efi_memory_desc_t *md, *prev_md = NULL;
 	efi_status_t status;
 	unsigned long size;
 	u64 end, systab, addr, npages, end_pfn;
 	void *p, *va;
 
 	efi.systab = NULL;
+
+	/* Merge contiguous regions of the same type and attribute */
+	for (p = memmap.map; p < memmap.map_end; p += memmap.desc_size) {
+		u64 prev_size;
+		md = p;
+
+		if (!prev_md) {
+			prev_md = md;
+			continue;
+		}
+
+		if (prev_md->type != md->type ||
+		    prev_md->attribute != md->attribute) {
+			prev_md = md;
+			continue;
+		}
+
+		prev_size = prev_md->num_pages << EFI_PAGE_SHIFT;
+
+		if (md->phys_addr == (prev_md->phys_addr + prev_size)) {
+			prev_md->num_pages += md->num_pages;
+			md->type = EFI_RESERVED_TYPE;
+			md->attribute = 0;
+			continue;
+		}
+		prev_md = md;
+	}
+
 	for (p = memmap.map; p < memmap.map_end; p += memmap.desc_size) {
 		md = p;
-		if (!(md->attribute & EFI_MEMORY_RUNTIME))
+		if (!(md->attribute & EFI_MEMORY_RUNTIME) &&
+		    md->type != EFI_BOOT_SERVICES_CODE &&
+		    md->type != EFI_BOOT_SERVICES_DATA)
 			continue;
 
 		size = md->num_pages << EFI_PAGE_SHIFT;
@@ -557,6 +756,13 @@ void __init efi_enter_virtual_mode(void)
 	}
 
 	/*
+	 * Thankfully, it does seem that no runtime services other than
+	 * SetVirtualAddressMap() will touch boot services code, so we can
+	 * get rid of it all at this point
+	 */
+	efi_free_boot_services();
+
+	/*
 	 * Now that EFI is in virtual mode, update the function
 	 * pointers in the runtime service table to the new virtual addresses.
 	 *
@@ -571,9 +777,30 @@ void __init efi_enter_virtual_mode(void)
 	efi.set_variable = virt_efi_set_variable;
 	efi.get_next_high_mono_count = virt_efi_get_next_high_mono_count;
 	efi.reset_system = virt_efi_reset_system;
-	efi.set_virtual_address_map = virt_efi_set_virtual_address_map;
+	efi.set_virtual_address_map = NULL;
 	if (__supported_pte_mask & _PAGE_NX)
 		runtime_code_page_mkexec();
+	early_iounmap(memmap.map, memmap.nr_map * memmap.desc_size);
+	memmap.map = NULL;
+}
+
+void __init efi_setup_physical_mode(void)
+{
+#ifdef CONFIG_X86_64
+	efi_pagetable_init();
+#endif
+	efi.get_time = phys_efi_get_time;
+	efi.set_time = phys_efi_set_time;
+	efi.get_wakeup_time = phys_efi_get_wakeup_time;
+	efi.set_wakeup_time = phys_efi_set_wakeup_time;
+	efi.get_variable = phys_efi_get_variable;
+	efi.get_next_variable = phys_efi_get_next_variable;
+	efi.set_variable = phys_efi_set_variable;
+	efi.get_next_high_mono_count =
+		phys_efi_get_next_high_mono_count;
+	efi.reset_system = phys_efi_reset_system;
+	efi.set_virtual_address_map = NULL; /* Not needed */
+
 	early_iounmap(memmap.map, memmap.nr_map * memmap.desc_size);
 	memmap.map = NULL;
 }

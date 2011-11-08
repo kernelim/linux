@@ -23,6 +23,7 @@
 #include <linux/buffer_head.h>
 #include <linux/random.h>
 #include <linux/bitops.h>
+#include <trace/events/ext3.h>
 
 #include <asm/byteorder.h>
 
@@ -118,6 +119,7 @@ void ext3_free_inode (handle_t *handle, struct inode * inode)
 
 	ino = inode->i_ino;
 	ext3_debug ("freeing inode %lu\n", ino);
+	trace_ext3_free_inode(inode);
 
 	/*
 	 * Note: we must free any quota before locking the superblock,
@@ -437,6 +439,7 @@ struct inode *ext3_new_inode(handle_t *handle, struct inode * dir, int mode)
 		return ERR_PTR(-EPERM);
 
 	sb = dir->i_sb;
+	trace_ext3_request_inode(dir, mode);
 	inode = new_inode(sb);
 	if (!inode)
 		return ERR_PTR(-ENOMEM);
@@ -583,9 +586,14 @@ got:
 	spin_unlock(&sbi->s_next_gen_lock);
 
 	ei->i_state = EXT3_STATE_NEW;
-	ei->i_extra_isize =
-		(EXT3_INODE_SIZE(inode->i_sb) > EXT3_GOOD_OLD_INODE_SIZE) ?
-		sizeof(struct ext3_inode) - EXT3_GOOD_OLD_INODE_SIZE : 0;
+	/* See comment in ext3_iget for explanation */
+	if (ino >= EXT3_FIRST_INO(sb) + 1 &&
+	    EXT3_INODE_SIZE(sb) > EXT3_GOOD_OLD_INODE_SIZE) {
+		ei->i_extra_isize =
+			sizeof(struct ext3_inode) - EXT3_GOOD_OLD_INODE_SIZE;
+	} else {
+		ei->i_extra_isize = 0;
+	}
 
 	ret = inode;
 	if (vfs_dq_alloc_inode(inode)) {
@@ -608,6 +616,7 @@ got:
 	}
 
 	ext3_debug("allocating inode %lu\n", inode->i_ino);
+	trace_ext3_allocate_inode(inode, dir, mode);
 	goto really_out;
 fail:
 	ext3_std_error(sb, err);

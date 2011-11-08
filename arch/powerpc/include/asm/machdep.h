@@ -102,6 +102,9 @@ struct machdep_calls {
 	void		(*pci_dma_dev_setup)(struct pci_dev *dev);
 	void		(*pci_dma_bus_setup)(struct pci_bus *bus);
 
+	/* Platform set_dma_mask override */
+	int		(*dma_set_mask)(struct device *dev, u64 dma_mask);
+
 	int		(*probe)(void);
 	void		(*setup_arch)(void); /* Optional, may be NULL */
 	void		(*init_early)(void);
@@ -265,6 +268,11 @@ struct machdep_calls {
 	 */
 	void (*suspend_disable_irqs)(void);
 	void (*suspend_enable_irqs)(void);
+#endif
+
+#ifdef CONFIG_ARCH_CPU_PROBE_RELEASE
+	ssize_t (*cpu_probe)(const char *, size_t);
+	ssize_t (*cpu_release)(const char *, size_t);
 #endif
 };
 

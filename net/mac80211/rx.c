@@ -792,7 +792,7 @@ static void ap_sta_ps_start(struct sta_info *sta)
 	struct ieee80211_local *local = sdata->local;
 
 	atomic_inc(&sdata->bss->num_sta_ps);
-	set_sta_flags(sta, WLAN_STA_PS);
+	set_sta_flags(sta, WLAN_STA_PS_STA);
 	drv_sta_notify(local, &sdata->vif, STA_NOTIFY_SLEEP, &sta->sta);
 #ifdef CONFIG_MAC80211_VERBOSE_PS_DEBUG
 	printk(KERN_DEBUG "%s: STA %pM aid %d enters power save mode\n",
@@ -800,38 +800,28 @@ static void ap_sta_ps_start(struct sta_info *sta)
 #endif /* CONFIG_MAC80211_VERBOSE_PS_DEBUG */
 }
 
-static int ap_sta_ps_end(struct sta_info *sta)
+static void ap_sta_ps_end(struct sta_info *sta)
 {
 	struct ieee80211_sub_if_data *sdata = sta->sdata;
-	struct ieee80211_local *local = sdata->local;
-	int sent, buffered;
 
 	atomic_dec(&sdata->bss->num_sta_ps);
 
-	clear_sta_flags(sta, WLAN_STA_PS);
-	drv_sta_notify(local, &sdata->vif, STA_NOTIFY_AWAKE, &sta->sta);
-
-	if (!skb_queue_empty(&sta->ps_tx_buf))
-		sta_info_clear_tim_bit(sta);
+	clear_sta_flags(sta, WLAN_STA_PS_STA);
 
 #ifdef CONFIG_MAC80211_VERBOSE_PS_DEBUG
 	printk(KERN_DEBUG "%s: STA %pM aid %d exits power save mode\n",
 	       sdata->dev->name, sta->sta.addr, sta->sta.aid);
 #endif /* CONFIG_MAC80211_VERBOSE_PS_DEBUG */
 
-	/* Send all buffered frames to the station */
-	sent = ieee80211_add_pending_skbs(local, &sta->tx_filtered);
-	buffered = ieee80211_add_pending_skbs(local, &sta->ps_tx_buf);
-	sent += buffered;
-	local->total_ps_buffered -= buffered;
-
+	if (test_sta_flags(sta, WLAN_STA_PS_DRIVER)) {
 #ifdef CONFIG_MAC80211_VERBOSE_PS_DEBUG
-	printk(KERN_DEBUG "%s: STA %pM aid %d sending %d filtered/%d PS frames "
-	       "since STA not sleeping anymore\n", sdata->dev->name,
-	       sta->sta.addr, sta->sta.aid, sent - buffered, buffered);
+		printk(KERN_DEBUG "%s: STA %pM aid %d driver-ps-blocked\n",
+		       sdata->dev->name, sta->sta.addr, sta->sta.aid);
 #endif /* CONFIG_MAC80211_VERBOSE_PS_DEBUG */
+		return;
+	}
 
-	return sent;
+	ieee80211_sta_ps_deliver_wakeup(sta);
 }
 
 static ieee80211_rx_result debug_noinline
@@ -880,7 +870,7 @@ ieee80211_rx_h_sta_process(struct ieee80211_rx_data *rx)
 	if (!ieee80211_has_morefrags(hdr->frame_control) &&
 	    (rx->sdata->vif.type == NL80211_IFTYPE_AP ||
 	     rx->sdata->vif.type == NL80211_IFTYPE_AP_VLAN)) {
-		if (test_sta_flags(sta, WLAN_STA_PS)) {
+		if (test_sta_flags(sta, WLAN_STA_PS_STA)) {
 			/*
 			 * Ignore doze->wake transitions that are
 			 * indicated by non-data frames, the standard
@@ -891,7 +881,7 @@ ieee80211_rx_h_sta_process(struct ieee80211_rx_data *rx)
 			 */
 			if (ieee80211_is_data(hdr->frame_control) &&
 			    !ieee80211_has_pm(hdr->frame_control))
-				rx->sent_ps_buffered += ap_sta_ps_end(sta);
+				ap_sta_ps_end(sta);
 		} else {
 			if (ieee80211_has_pm(hdr->frame_control))
 				ap_sta_ps_start(sta);
@@ -1103,9 +1093,7 @@ ieee80211_rx_h_defragment(struct ieee80211_rx_data *rx)
 static ieee80211_rx_result debug_noinline
 ieee80211_rx_h_ps_poll(struct ieee80211_rx_data *rx)
 {
-	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(rx->dev);
-	struct sk_buff *skb;
-	int no_pending_pkts;
+	struct ieee80211_sub_if_data *sdata = rx->sdata;
 	__le16 fc = ((struct ieee80211_hdr *)rx->skb->data)->frame_control;
 
 	if (likely(!rx->sta || !ieee80211_is_pspoll(fc) ||
@@ -1116,56 +1104,10 @@ ieee80211_rx_h_ps_poll(struct ieee80211_rx_data *rx)
 	    (sdata->vif.type != NL80211_IFTYPE_AP_VLAN))
 		return RX_DROP_UNUSABLE;
 
-	skb = skb_dequeue(&rx->sta->tx_filtered);
-	if (!skb) {
-		skb = skb_dequeue(&rx->sta->ps_tx_buf);
-		if (skb)
-			rx->local->total_ps_buffered--;
-	}
-	no_pending_pkts = skb_queue_empty(&rx->sta->tx_filtered) &&
-		skb_queue_empty(&rx->sta->ps_tx_buf);
-
-	if (skb) {
-		struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
-		struct ieee80211_hdr *hdr =
-			(struct ieee80211_hdr *) skb->data;
-
-		/*
-		 * Tell TX path to send this frame even though the STA may
-		 * still remain is PS mode after this frame exchange.
-		 */
-		info->flags |= IEEE80211_TX_CTL_PSPOLL_RESPONSE;
-
-#ifdef CONFIG_MAC80211_VERBOSE_PS_DEBUG
-		printk(KERN_DEBUG "STA %pM aid %d: PS Poll (entries after %d)\n",
-		       rx->sta->sta.addr, rx->sta->sta.aid,
-		       skb_queue_len(&rx->sta->ps_tx_buf));
-#endif /* CONFIG_MAC80211_VERBOSE_PS_DEBUG */
-
-		/* Use MoreData flag to indicate whether there are more
-		 * buffered frames for this STA */
-		if (no_pending_pkts)
-			hdr->frame_control &= cpu_to_le16(~IEEE80211_FCTL_MOREDATA);
-		else
-			hdr->frame_control |= cpu_to_le16(IEEE80211_FCTL_MOREDATA);
-
-		ieee80211_add_pending_skb(rx->local, skb);
-
-		if (no_pending_pkts)
-			sta_info_clear_tim_bit(rx->sta);
-#ifdef CONFIG_MAC80211_VERBOSE_PS_DEBUG
-	} else if (!rx->sent_ps_buffered) {
-		/*
-		 * FIXME: This can be the result of a race condition between
-		 *	  us expiring a frame and the station polling for it.
-		 *	  Should we send it a null-func frame indicating we
-		 *	  have nothing buffered for it?
-		 */
-		printk(KERN_DEBUG "%s: STA %pM sent PS Poll even "
-		       "though there are no buffered frames for it\n",
-		       rx->dev->name, rx->sta->sta.addr);
-#endif /* CONFIG_MAC80211_VERBOSE_PS_DEBUG */
-	}
+	if (!test_sta_flags(rx->sta, WLAN_STA_PS_DRIVER))
+		ieee80211_sta_ps_deliver_poll_response(rx->sta);
+	else
+		set_sta_flags(rx->sta, WLAN_STA_PSPOLL);
 
 	/* Free PS Poll skb here instead of returning RX_DROP that would
 	 * count as an dropped frame. */
@@ -1220,7 +1162,8 @@ ieee80211_drop_unencrypted(struct ieee80211_rx_data *rx, __le16 fc)
 		     (rx->key || rx->sdata->drop_unencrypted)))
 		return -EACCES;
 	if (rx->sta && test_sta_flags(rx->sta, WLAN_STA_MFP)) {
-		if (unlikely(ieee80211_is_unicast_robust_mgmt_frame(rx->skb) &&
+		if (unlikely(!ieee80211_has_protected(fc) &&
+			     ieee80211_is_unicast_robust_mgmt_frame(rx->skb) &&
 			     rx->key))
 			return -EACCES;
 		/* BIP does not use Protected field, so need to check MMIE */
@@ -1514,7 +1457,6 @@ ieee80211_rx_h_mesh_fwding(struct ieee80211_rx_data *rx)
 			mpp_path_add(mesh_hdr->eaddr2, hdr->addr4, sdata);
 		} else {
 			spin_lock_bh(&mppath->state_lock);
-			mppath->exp_time = jiffies;
 			if (compare_ether_addr(mppath->mpp, hdr->addr4) != 0)
 				memcpy(mppath->mpp, hdr->addr4, ETH_ALEN);
 			spin_unlock_bh(&mppath->state_lock);
@@ -1549,7 +1491,9 @@ ieee80211_rx_h_mesh_fwding(struct ieee80211_rx_data *rx)
 			memset(info, 0, sizeof(*info));
 			info->flags |= IEEE80211_TX_INTFL_NEED_TXPROCESSING;
 			info->control.vif = &rx->sdata->vif;
-			ieee80211_select_queue(local, fwd_skb);
+			skb_set_queue_mapping(skb,
+				ieee80211_select_queue(rx->sdata, fwd_skb));
+			ieee80211_set_qos_hdr(local, skb);
 			if (is_multicast_ether_addr(fwd_hdr->addr1))
 				IEEE80211_IFSTA_MESH_CTR_INC(&sdata->u.mesh,
 								fwded_mcast);
@@ -1589,6 +1533,7 @@ static ieee80211_rx_result debug_noinline
 ieee80211_rx_h_data(struct ieee80211_rx_data *rx)
 {
 	struct net_device *dev = rx->dev;
+	struct ieee80211_local *local = rx->local;
 	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)rx->skb->data;
 	__le16 fc = hdr->frame_control;
 	int err;
@@ -1610,6 +1555,13 @@ ieee80211_rx_h_data(struct ieee80211_rx_data *rx)
 
 	dev->stats.rx_packets++;
 	dev->stats.rx_bytes += rx->skb->len;
+
+	if (ieee80211_is_data(hdr->frame_control) &&
+	    !is_multicast_ether_addr(hdr->addr1) &&
+	    local->hw.conf.dynamic_ps_timeout > 0 && local->ps_sdata) {
+		mod_timer(&local->dynamic_ps_timer, jiffies +
+			  msecs_to_jiffies(local->hw.conf.dynamic_ps_timeout));
+	}
 
 	ieee80211_deliver_skb(rx);
 
@@ -1809,6 +1761,10 @@ ieee80211_rx_h_action(struct ieee80211_rx_data *rx)
 		}
 		break;
 	default:
+		/* do not process rejected action frames */
+		if (mgmt->u.action.category & 0x80)
+			return RX_DROP_MONITOR;
+
 		return RX_CONTINUE;
 	}
 
@@ -2070,8 +2026,8 @@ static int prepare_for_handlers(struct ieee80211_sub_if_data *sdata,
 				rate_idx = 0; /* TODO: HT rates */
 			else
 				rate_idx = rx->status->rate_idx;
-			rx->sta = ieee80211_ibss_add_sta(sdata, bssid, hdr->addr2,
-				BIT(rate_idx));
+			rx->sta = ieee80211_ibss_add_sta(sdata, bssid,
+					hdr->addr2, BIT(rate_idx), GFP_ATOMIC);
 		}
 		break;
 	case NL80211_IFTYPE_MESH_POINT:

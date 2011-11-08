@@ -11,6 +11,7 @@
  */
 
 #define KMSG_COMPONENT "tape"
+#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
 
 #include <linux/fs.h>
 #include <linux/module.h>
@@ -218,15 +219,13 @@ tapeblock_setup_device(struct tape_device * device)
 	if (!blkdat->request_queue)
 		return -ENOMEM;
 
-	elevator_exit(blkdat->request_queue->elevator);
-	rc = elevator_init(blkdat->request_queue, "noop");
+	rc = elevator_change(blkdat->request_queue, "noop");
 	if (rc)
 		goto cleanup_queue;
 
 	blk_queue_logical_block_size(blkdat->request_queue, TAPEBLOCK_HSEC_SIZE);
-	blk_queue_max_sectors(blkdat->request_queue, TAPEBLOCK_MAX_SEC);
-	blk_queue_max_phys_segments(blkdat->request_queue, -1L);
-	blk_queue_max_hw_segments(blkdat->request_queue, -1L);
+	blk_queue_max_hw_sectors(blkdat->request_queue, TAPEBLOCK_MAX_SEC);
+	blk_queue_max_segments(blkdat->request_queue, -1L);
 	blk_queue_max_segment_size(blkdat->request_queue, -1L);
 	blk_queue_segment_boundary(blkdat->request_queue, -1L);
 

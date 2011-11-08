@@ -440,6 +440,15 @@ config CRYPTO_WP512
 	  See also:
 	  <http://planeta.terra.com.br/informatica/paulobarreto/WhirlpoolPage.html>
 
+config CRYPTO_GHASH_CLMUL_NI_INTEL
+	tristate "GHASH digest algorithm (CLMUL-NI accelerated)"
+	depends on (X86 || UML_X86) && 64BIT
+	select CRYPTO_SHASH
+	select CRYPTO_CRYPTD
+	help
+	  GHASH is message digest algorithm for GCM (Galois/Counter Mode).
+	  The implementation is accelerated by CLMUL-NI of Intel.
+
 comment "Ciphers"
 
 config CRYPTO_AES
@@ -809,6 +818,25 @@ config CRYPTO_ANSI_CPRNG
 	  for cryptographic modules.  Uses the Algorithm specified in
 	  ANSI X9.31 A.2.4. Not this option must be enabled if CRYPTO_FIPS 
 	  is selected
+
+config CRYPTO_MPILIB
+	bool "Multiprecision maths library (EXPERIMENTAL)"
+	depends on CRYPTO
+	help
+	  Multiprecision maths library from GnuPG
+
+config CRYPTO_SIGNATURE
+	bool "In-kernel signature checker (EXPERIMENTAL)"
+	depends on CRYPTO
+	help
+	  Signature checker (used for module sig checking).
+
+config CRYPTO_SIGNATURE_DSA
+	bool "Handle DSA signatures (EXPERIMENTAL)"
+	depends on CRYPTO_SIGNATURE
+	select CRYPTO_MPILIB
+	help
+	  DSA Signature checker.
 
 source "drivers/crypto/Kconfig"
 

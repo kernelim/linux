@@ -114,7 +114,8 @@ static void can_sock_destruct(struct sock *sk)
 	skb_queue_purge(&sk->sk_receive_queue);
 }
 
-static int can_create(struct net *net, struct socket *sock, int protocol)
+static int can_create(struct net *net, struct socket *sock, int protocol,
+		      int kern)
 {
 	struct sock *sk;
 	struct can_proto *cp;
@@ -134,13 +135,9 @@ static int can_create(struct net *net, struct socket *sock, int protocol)
 		err = request_module("can-proto-%d", protocol);
 
 		/*
-		 * In case of error we only print a message but don't
-		 * return the error code immediately.  Below we will
-		 * return -EPROTONOSUPPORT
+		 * In case of error we don't return the error code immediately.
+		 * Below we will return -EPROTONOSUPPORT
 		 */
-		if (err && printk_ratelimit())
-			printk(KERN_ERR "can: request_module "
-			       "(can-proto-%d) failed.\n", protocol);
 	}
 #endif
 
@@ -157,11 +154,6 @@ static int can_create(struct net *net, struct socket *sock, int protocol)
 
 	if (cp->type != sock->type) {
 		err = -EPROTONOSUPPORT;
-		goto errout;
-	}
-
-	if (cp->capability >= 0 && !capable(cp->capability)) {
-		err = -EPERM;
 		goto errout;
 	}
 

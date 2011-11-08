@@ -21,6 +21,7 @@ unsigned int pci_probe = PCI_PROBE_BIOS | PCI_PROBE_CONF1 | PCI_PROBE_CONF2 |
 
 unsigned int pci_early_dump_regs;
 static int pci_bf_sort;
+static int smbios_type_b1_flag;
 int pci_routeirq;
 int noioapicquirk;
 #ifdef CONFIG_X86_REROUTE_FOR_BROKEN_BOOT_IRQS
@@ -173,6 +174,39 @@ static int __devinit set_bf_sort(const struct dmi_system_id *d)
 	return 0;
 }
 
+static void __devinit read_dmi_type_b1(const struct dmi_header *dm,
+				       void *private_data)
+{
+	u8 *d = (u8 *)dm + 4;
+
+	if (dm->type != 0xB1)
+		return;
+	switch (((*(u32 *)d) >> 9) & 0x03) {
+	case 0x00:
+		printk(KERN_INFO "dmi type 0xB1 record - unknown flag\n");
+		break;
+	case 0x01: /* set pci=bfsort */
+		smbios_type_b1_flag = 1;
+		break;
+	case 0x02: /* do not set pci=bfsort */
+		smbios_type_b1_flag = 2;
+		break;
+	default:
+		break;
+	}
+}
+
+static int __devinit find_sort_method(const struct dmi_system_id *d)
+{
+	dmi_walk(read_dmi_type_b1, NULL);
+
+	if (smbios_type_b1_flag == 1) {
+		set_bf_sort(d);
+		return 0;
+	}
+	return -1;
+}
+
 /*
  * Enable renumbering of PCI bus# ranges to reach all PCI busses (Cardbus)
  */
@@ -238,6 +272,13 @@ static const struct dmi_system_id __devinitconst pciprobe_dmi_table[] = {
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "Dell"),
 			DMI_MATCH(DMI_PRODUCT_NAME, "PowerEdge R900"),
+		},
+	},
+	{
+		.callback = find_sort_method,
+		.ident = "Dell System",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc"),
 		},
 	},
 	{
@@ -431,6 +472,22 @@ int __init pcibios_init(void)
 		pci_cache_line_size = 64 >> 2;	/* K7 & K8 */
 	else if (c->x86 > 6 && c->x86_vendor == X86_VENDOR_INTEL)
 		pci_cache_line_size = 128 >> 2;	/* P4 */
+
+	if (c->x86_clflush_size != (pci_cache_line_size <<2))
+		printk(KERN_DEBUG "PCI: old code would have set cacheline "
+			"size to %d bytes, but clflush_size = %d\n",
+			pci_cache_line_size << 2,
+			c->x86_clflush_size);
+
+	/* Once we know this logic works, all the above code can be deleted. */
+	if (c->x86_clflush_size > 0) {
+		pci_cache_line_size = c->x86_clflush_size >> 2;
+		printk(KERN_DEBUG "PCI: pci_cache_line_size set to %d bytes\n",
+			pci_cache_line_size << 2);
+	} else {
+		pci_cache_line_size = 32 >> 2;
+		printk(KERN_DEBUG "PCI: Unknown cacheline size. Setting to 32 bytes\n");
+	}
 
 	pcibios_resource_survey();
 

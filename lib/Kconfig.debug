@@ -103,7 +103,6 @@ config HEADERS_CHECK
 
 config DEBUG_SECTION_MISMATCH
 	bool "Enable full Section mismatch analysis"
-	depends on UNDEFINED
 	# This option is on purpose disabled for now.
 	# It will be enabled when we are down to a resonable number
 	# of section mismatch warnings (< 10 for an allyesconfig build)
@@ -152,7 +151,7 @@ config DEBUG_SHIRQ
 	  points; some don't and need to be caught.
 
 config DETECT_SOFTLOCKUP
-	bool "Detect Soft Lockups"
+	bool
 	depends on DEBUG_KERNEL && !S390
 	default y
 	help
@@ -169,6 +168,73 @@ config DETECT_SOFTLOCKUP
 	  (Note that "hard lockups" are separate type of bugs that
 	   can be detected via the NMI-watchdog, on platforms that
 	   support it.)
+
+config LOCKUP_DETECTOR
+	bool "Detect Hard and Soft Lockups"
+	depends on DEBUG_KERNEL && DETECT_SOFTLOCKUP
+	default DETECT_SOFTLOCKUP
+	help
+	  Say Y here to enable the kernel to act as a watchdog to detect
+	  hard and soft lockups.
+
+	  Softlockups are bugs that cause the kernel to loop in kernel
+	  mode for more than 60 seconds, without giving other tasks a
+	  chance to run.  The current stack trace is displayed upon
+	  detection and the system will stay locked up.
+
+	  Hardlockups are bugs that cause the CPU to loop in kernel mode
+	  for more than 60 seconds, without letting other interrupts have a
+	  chance to run.  The current stack trace is displayed upon detection
+	  and the system will stay locked up.
+
+	  The overhead should be minimal.  A periodic hrtimer runs to
+	  generate interrupts and kick the watchdog task every 10-12 seconds.
+	  An NMI is generated every 60 seconds or so to check for hardlockups.
+
+config HARDLOCKUP_DETECTOR
+	bool "Detect Hard Lockups"
+	depends on LOCKUP_DETECTOR && PERF_EVENTS && HAVE_PERF_EVENTS_NMI
+	help
+	  Say Y here to enable the kernel to act as a watchdog to detect
+	  hard lockups.
+
+	  Hardlockups are bugs that cause the CPU to loop in kernel mode
+	  for more than 60 seconds, without letting other interrupts have a
+	  chance to run.  The current stack trace is displayed upon detection
+	  and the system will stay locked up.
+
+config BOOTPARAM_HARDLOCKUP_ENABLED
+	bool "Enable Hard Lockups on Boot"
+	depends on HARDLOCKUP_DETECTOR
+	help
+	  Say Y here to enable the hardlockup detector on boot.
+
+	  Say N to compile the hardlockup detector but leave it
+	  disabled on boot.
+
+config BOOTPARAM_HARDLOCKUP_ENABLED_VALUE
+	int
+	depends on HARDLOCKUP_DETECTOR
+	range 0 1
+	default 0 if !BOOTPARAM_HARDLOCKUP_ENABLED
+	default 1 if BOOTPARAM_HARDLOCKUP_ENABLED
+
+config BOOTPARAM_HARDLOCKUP_PANIC
+	bool "Panic (Reboot) On Hard Lockups"
+	depends on LOCKUP_DETECTOR
+	help
+	  Say Y here to enable the kernel to panic on "hard lockups",
+	  which are bugs that cause the kernel to loop in kernel
+	  mode with interrupts disabled for more than 60 seconds.
+
+	  Say N if unsure.
+
+config BOOTPARAM_HARDLOCKUP_PANIC_VALUE
+	int
+	depends on LOCKUP_DETECTOR
+	range 0 1
+	default 0 if !BOOTPARAM_HARDLOCKUP_PANIC
+	default 1 if BOOTPARAM_HARDLOCKUP_PANIC
 
 config BOOTPARAM_SOFTLOCKUP_PANIC
 	bool "Panic (Reboot) On Soft Lockups"
@@ -252,6 +318,14 @@ config SCHEDSTATS
 	  If you aren't debugging the scheduler or trying to tune a specific
 	  application, you can say N to avoid the very slight overhead
 	  this adds.
+
+config DEBUG_NMI_TIMEOUT
+	int "Number of seconds before NMI timeout"
+	depends on X86
+	default 5
+	help
+	  This value is the number of seconds the NMI watchdog will tick
+	  before it decides the machine has hung.
 
 config TIMER_STATS
 	bool "Collect kernel timers statistics"
@@ -346,7 +420,7 @@ config SLUB_STATS
 
 config DEBUG_KMEMLEAK
 	bool "Kernel memory leak detector"
-	depends on DEBUG_KERNEL && EXPERIMENTAL && !MEMORY_HOTPLUG && \
+	depends on DEBUG_KERNEL && EXPERIMENTAL && \
 		(X86 || ARM || PPC || S390)
 
 	select DEBUG_FS if SYSFS
@@ -389,6 +463,13 @@ config DEBUG_KMEMLEAK_TEST
 	  memory.
 
 	  If unsure, say N.
+
+config DEBUG_KMEMLEAK_DEFAULT_OFF
+	bool "Default kmemleak to off"
+	depends on DEBUG_KMEMLEAK
+	help
+	  Say Y here to disable kmemleak by default. It can then be enabled
+	  on the command line via kmemleak=on.
 
 config DEBUG_PREEMPT
 	bool "Debug preemptible kernel"
@@ -510,6 +591,12 @@ config LOCK_STAT
 	 This feature enables tracking lock contention points
 
 	 For more details, see Documentation/lockstat.txt
+
+	 You can analyze lock events with "perf lock", subcommand of perf.
+	 If you want to use "perf lock", you need to turn on CONFIG_EVENT_TRACING.
+
+	 CONFIG_LOCK_STAT defines "contended" and "acquired" lock events.
+ 	 (CONFIG_LOCKDEP defines "acquire" and "release" events.)
 
 config DEBUG_LOCKDEP
 	bool "Lock dependency engine debugging"

@@ -71,6 +71,8 @@
 #include <linux/dma-mapping.h>
 #include <linux/delay.h>
 #include <linux/of.h>
+#include <linux/pm.h>
+#include <linux/kthread.h>
 #include <asm/firmware.h>
 #include <asm/vio.h>
 #include <scsi/scsi.h>
@@ -321,16 +323,6 @@ static void set_srp_direction(struct scsi_cmnd *cmd,
 		srp_cmd->buf_fmt = fmt;
 }
 
-static void unmap_sg_list(int num_entries,
-		struct device *dev,
-		struct srp_direct_buf *md)
-{
-	int i;
-
-	for (i = 0; i < num_entries; ++i)
-		dma_unmap_single(dev, md[i].va, md[i].len, DMA_BIDIRECTIONAL);
-}
-
 /**
  * unmap_cmd_data: - Unmap data pointed in srp_cmd based on the format
  * @cmd:	srp_cmd whose additional_data member will be unmapped
@@ -348,24 +340,9 @@ static void unmap_cmd_data(struct srp_cmd *cmd,
 
 	if (out_fmt == SRP_NO_DATA_DESC && in_fmt == SRP_NO_DATA_DESC)
 		return;
-	else if (out_fmt == SRP_DATA_DESC_DIRECT ||
-		 in_fmt == SRP_DATA_DESC_DIRECT) {
-		struct srp_direct_buf *data =
-			(struct srp_direct_buf *) cmd->add_data;
-		dma_unmap_single(dev, data->va, data->len, DMA_BIDIRECTIONAL);
-	} else {
-		struct srp_indirect_buf *indirect =
-			(struct srp_indirect_buf *) cmd->add_data;
-		int num_mapped = indirect->table_desc.len /
-			sizeof(struct srp_direct_buf);
 
-		if (num_mapped <= MAX_INDIRECT_BUFS) {
-			unmap_sg_list(num_mapped, dev, &indirect->desc_list[0]);
-			return;
-		}
-
-		unmap_sg_list(num_mapped, dev, evt_struct->ext_list);
-	}
+	if (evt_struct->cmnd)
+		scsi_dma_unmap(evt_struct->cmnd);
 }
 
 static int map_sg_list(struct scsi_cmnd *cmd, int nseg,
@@ -527,14 +504,8 @@ static void ibmvscsi_reset_host(struct ibmvscsi_host_data *hostdata)
 	atomic_set(&hostdata->request_limit, 0);
 
 	purge_requests(hostdata, DID_ERROR);
-	if ((ibmvscsi_ops->reset_crq_queue(&hostdata->queue, hostdata)) ||
-	    (ibmvscsi_ops->send_crq(hostdata, 0xC001000000000000LL, 0)) ||
-	    (vio_enable_interrupts(to_vio_dev(hostdata->dev)))) {
-		atomic_set(&hostdata->request_limit, -1);
-		dev_err(hostdata->dev, "error after reset\n");
-	}
-
-	scsi_unblock_requests(hostdata->host);
+	hostdata->reset_crq = 1;
+	wake_up(&hostdata->work_wait_q);
 }
 
 /**
@@ -1460,7 +1431,7 @@ void ibmvscsi_handle_crq(struct viosrp_crq *crq,
 			dev_info(hostdata->dev, "partner initialized\n");
 			/* Send back a response */
 			if ((rc = ibmvscsi_ops->send_crq(hostdata,
-							 0xC002000000000000LL, 0)) == 0) {
+							 IBMVSCSI_CRQ_INIT_COMPLETE, 0)) == 0) {
 				/* Now login */
 				init_adapter(hostdata);
 			} else {
@@ -1485,30 +1456,14 @@ void ibmvscsi_handle_crq(struct viosrp_crq *crq,
 			/* We need to re-setup the interpartition connection */
 			dev_info(hostdata->dev, "Re-enabling adapter!\n");
 			hostdata->client_migrated = 1;
+			hostdata->reenable_crq = 1;
 			purge_requests(hostdata, DID_REQUEUE);
-			if ((ibmvscsi_ops->reenable_crq_queue(&hostdata->queue,
-							      hostdata)) ||
-			    (ibmvscsi_ops->send_crq(hostdata,
-						    0xC001000000000000LL, 0))) {
-					atomic_set(&hostdata->request_limit,
-						   -1);
-					dev_err(hostdata->dev, "error after enable\n");
-			}
+			wake_up(&hostdata->work_wait_q);
 		} else {
 			dev_err(hostdata->dev, "Virtual adapter failed rc %d!\n",
 				crq->format);
-
-			purge_requests(hostdata, DID_ERROR);
-			if ((ibmvscsi_ops->reset_crq_queue(&hostdata->queue,
-							   hostdata)) ||
-			    (ibmvscsi_ops->send_crq(hostdata,
-						    0xC001000000000000LL, 0))) {
-					atomic_set(&hostdata->request_limit,
-						   -1);
-					dev_err(hostdata->dev, "error after reset\n");
-			}
+			ibmvscsi_reset_host(hostdata);
 		}
-		scsi_unblock_requests(hostdata->host);
 		return;
 	case 0x80:		/* real payload */
 		break;
@@ -1637,12 +1592,17 @@ static int ibmvscsi_slave_configure(struct scsi_device *sdev)
  * ibmvscsi_change_queue_depth - Change the device's queue depth
  * @sdev:	scsi device struct
  * @qdepth:	depth to set
+ * @reason:	calling context
  *
  * Return value:
  * 	actual depth set
  **/
-static int ibmvscsi_change_queue_depth(struct scsi_device *sdev, int qdepth)
+static int ibmvscsi_change_queue_depth(struct scsi_device *sdev, int qdepth,
+				       int reason)
 {
+	if (reason != SCSI_QDEPTH_DEFAULT)
+		return -EOPNOTSUPP;
+
 	if (qdepth > IBMVSCSI_MAX_CMDS_PER_LUN)
 		qdepth = IBMVSCSI_MAX_CMDS_PER_LUN;
 
@@ -1868,6 +1828,72 @@ static unsigned long ibmvscsi_get_desired_dma(struct vio_dev *vdev)
 	return desired_io;
 }
 
+static void ibmvscsi_do_work(struct ibmvscsi_host_data *hostdata)
+{
+	int rc;
+	const char *action = "reset";
+
+	if (hostdata->reset_crq) {
+		hostdata->reset_crq = 0;
+		smp_mb();
+
+		rc = ibmvscsi_ops->reset_crq_queue(&hostdata->queue, hostdata);
+		if (!rc)
+			rc = ibmvscsi_ops->send_crq(hostdata, IBMVSCSI_CRQ_INIT, 0);
+		vio_enable_interrupts(to_vio_dev(hostdata->dev));
+	} else if (hostdata->reenable_crq) {
+		hostdata->reenable_crq = 0;
+		smp_mb();
+		action = "enable";
+		rc = ibmvscsi_ops->reenable_crq_queue(&hostdata->queue, hostdata);
+		if (!rc)
+			rc = ibmvscsi_ops->send_crq(hostdata, IBMVSCSI_CRQ_INIT, 0);
+	} else
+		return;
+
+	if (rc) {
+		atomic_set(&hostdata->request_limit, -1);
+		dev_err(hostdata->dev, "error after %s\n", action);
+	}
+
+	scsi_unblock_requests(hostdata->host);
+}
+
+static int ibmvscsi_work_to_do(struct ibmvscsi_host_data *hostdata)
+{
+	if (kthread_should_stop())
+		return 1;
+	else if (hostdata->reset_crq) {
+		return 1;
+	} else if (hostdata->reenable_crq) {
+		return 1;
+	}
+
+	return 0;
+}
+
+static int ibmvscsi_work(void *data)
+{
+	struct ibmvscsi_host_data *hostdata = data;
+	int rc;
+
+	set_user_nice(current, -20);
+
+	while (1) {
+		rc = wait_event_interruptible(hostdata->work_wait_q,
+					      ibmvscsi_work_to_do(hostdata));
+
+		BUG_ON(rc);
+
+		if (kthread_should_stop())
+			break;
+
+		ibmvscsi_do_work(hostdata);
+	}
+
+	return 0;
+}
+
 /**
  * Called by bus code for each adapter
  */
@@ -1893,6 +1919,7 @@ static int ibmvscsi_probe(struct vio_dev *vdev, const struct vio_device_id *id)
 	hostdata = shost_priv(host);
 	memset(hostdata, 0x00, sizeof(*hostdata));
 	INIT_LIST_HEAD(&hostdata->sent);
+	init_waitqueue_head(&hostdata->work_wait_q);
 	hostdata->host = host;
 	hostdata->dev = dev;
 	atomic_set(&hostdata->request_limit, -1);
@@ -1903,10 +1930,19 @@ static int ibmvscsi_probe(struct vio_dev *vdev, const struct vio_device_id *id)
 		goto persist_bufs_failed;
 	}
 
+	hostdata->work_thread = kthread_run(ibmvscsi_work, hostdata, "%s_%d",
+					    "ibmvscsi", host->host_no);
+
+	if (IS_ERR(hostdata->work_thread)) {
+		dev_err(&vdev->dev, "couldn't initialize kthread. rc=%ld\n",
+			PTR_ERR(hostdata->work_thread));
+		goto init_crq_failed;
+	}
+
 	rc = ibmvscsi_ops->init_crq_queue(&hostdata->queue, hostdata, max_events);
 	if (rc != 0 && rc != H_RESOURCE) {
 		dev_err(&vdev->dev, "couldn't initialize crq. rc=%d\n", rc);
-		goto init_crq_failed;
+		goto kill_kthread;
 	}
 	if (initialize_event_pool(&hostdata->pool, max_events, hostdata) != 0) {
 		dev_err(&vdev->dev, "couldn't initialize event pool\n");
@@ -1933,7 +1969,7 @@ static int ibmvscsi_probe(struct vio_dev *vdev, const struct vio_device_id *id)
 	 * to fail if the other end is not acive.  In that case we don't
 	 * want to scan
 	 */
-	if (ibmvscsi_ops->send_crq(hostdata, 0xC001000000000000LL, 0) == 0
+	if (ibmvscsi_ops->send_crq(hostdata, IBMVSCSI_CRQ_INIT, 0) == 0
 	    || rc == H_RESOURCE) {
 		/*
 		 * Wait around max init_timeout secs for the adapter to finish
@@ -1962,6 +1998,8 @@ static int ibmvscsi_probe(struct vio_dev *vdev, const struct vio_device_id *id)
 	release_event_pool(&hostdata->pool, hostdata);
       init_pool_failed:
 	ibmvscsi_ops->release_crq_queue(&hostdata->queue, hostdata, max_events);
+      kill_kthread:
+      kthread_stop(hostdata->work_thread);
       init_crq_failed:
 	unmap_persist_bufs(hostdata);
       persist_bufs_failed:
@@ -1978,11 +2016,25 @@ static int ibmvscsi_remove(struct vio_dev *vdev)
 	ibmvscsi_ops->release_crq_queue(&hostdata->queue, hostdata,
 					max_events);
 
+	kthread_stop(hostdata->work_thread);
 	srp_remove_host(hostdata->host);
 	scsi_remove_host(hostdata->host);
 	scsi_host_put(hostdata->host);
 
 	return 0;
+}
+
+/**
+ * ibmvscsi_resume: Resume from suspend
+ * @dev:	device struct
+ *
+ * We may have lost an interrupt across suspend/resume, so kick the
+ * interrupt handler
+ */
+static int ibmvscsi_resume(struct device *dev)
+{
+	struct ibmvscsi_host_data *hostdata = dev_get_drvdata(dev);
+	return ibmvscsi_ops->resume(hostdata);
 }
 
 /**
@@ -1995,6 +2047,10 @@ static struct vio_device_id ibmvscsi_device_table[] __devinitdata = {
 };
 MODULE_DEVICE_TABLE(vio, ibmvscsi_device_table);
 
+static struct dev_pm_ops ibmvscsi_pm_ops = {
+	.resume = ibmvscsi_resume
+};
+
 static struct vio_driver ibmvscsi_driver = {
 	.id_table = ibmvscsi_device_table,
 	.probe = ibmvscsi_probe,
@@ -2003,6 +2059,7 @@ static struct vio_driver ibmvscsi_driver = {
 	.driver = {
 		.name = "ibmvscsi",
 		.owner = THIS_MODULE,
+		.pm = &ibmvscsi_pm_ops,
 	}
 };
 

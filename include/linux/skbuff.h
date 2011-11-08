@@ -122,8 +122,14 @@ struct sk_buff_head {
 
 struct sk_buff;
 
-/* To allow 64K frame to be packed as single skb without frag_list */
+/* To allow 64K frame to be packed as single skb without frag_list. Since
+ * GRO uses frags we allocate at least 16 regardless of page size.
+ */
+#if (65536/PAGE_SIZE + 2) < 16
+#define MAX_SKB_FRAGS 16UL
+#else
 #define MAX_SKB_FRAGS (65536/PAGE_SIZE + 2)
+#endif
 
 typedef struct skb_frag_struct skb_frag_t;
 
@@ -169,6 +175,9 @@ struct skb_shared_hwtstamps {
  * @software:		generate software time stamp
  * @in_progress:	device driver is going to provide
  *			hardware time stamp
+ * @reserved:		SKBTX_DRV_NEEDS_SK_REF upstream: used to make
+ *			the memory layout bit-for-bit upstream compatible
+ * @dev_zerocopy:	device driver supports tx zero-copy buffers
  * @flags:		all shared_tx flags
  *
  * These flags are attached to packets as part of the
@@ -178,9 +187,22 @@ union skb_shared_tx {
 	struct {
 		__u8	hardware:1,
 			software:1,
-			in_progress:1;
+			in_progress:1,
+			reserved:1,
+			dev_zerocopy:1;
 	};
 	__u8 flags;
+};
+
+/*
+ * The callback notifies userspace to release buffers when skb DMA is done in
+ * lower device, the skb last reference should be 0 when calling this.
+ * The desc is used to track userspace buffer index.
+ */
+struct ubuf_info {
+	void (*callback)(void *);
+	void *arg;
+	unsigned long desc;
 };
 
 /* This data is invariant across clones and lives at
@@ -190,9 +212,6 @@ struct skb_shared_info {
 	atomic_t	dataref;
 	unsigned short	nr_frags;
 	unsigned short	gso_size;
-#ifdef CONFIG_HAS_DMA
-	dma_addr_t	dma_head;
-#endif
 	/* Warning: this field is not always filled in (UFO)! */
 	unsigned short	gso_segs;
 	unsigned short  gso_type;
@@ -201,9 +220,6 @@ struct skb_shared_info {
 	struct sk_buff	*frag_list;
 	struct skb_shared_hwtstamps hwtstamps;
 	skb_frag_t	frags[MAX_SKB_FRAGS];
-#ifdef CONFIG_HAS_DMA
-	dma_addr_t	dma_maps[MAX_SKB_FRAGS];
-#endif
 	/* Intermediate layers must ensure that destructor_arg
 	 * remains valid until skb destructor */
 	void *		destructor_arg;
@@ -377,11 +393,17 @@ struct sk_buff {
 	kmemcheck_bitfield_begin(flags2);
 	__u16			queue_mapping:16;
 #ifdef CONFIG_IPV6_NDISC_NODETYPE
-	__u8			ndisc_nodetype:2;
+	__u8			ndisc_nodetype:2,
+				deliver_no_wcard:1;
+#else
+	__u8			deliver_no_wcard:1;
+#endif
+#ifndef __GENKSYMS__
+	__u8			ooo_okay:1;
 #endif
 	kmemcheck_bitfield_end(flags2);
 
-	/* 0/14 bit hole */
+	/* 0/13 bit hole */
 
 #ifdef CONFIG_NET_DMA
 	dma_cookie_t		dma_cookie;
@@ -389,11 +411,15 @@ struct sk_buff {
 #ifdef CONFIG_NETWORK_SECMARK
 	__u32			secmark;
 #endif
-
-	__u32			mark;
+	union {
+		__u32		mark;
+		__u32		dropcount;
+	};
 
 	__u16			vlan_tci;
-
+#ifndef __GENKSYMS__
+	__u16			rxhash;
+#endif
 	sk_buff_data_t		transport_header;
 	sk_buff_data_t		network_header;
 	sk_buff_data_t		mac_header;
@@ -413,14 +439,6 @@ struct sk_buff {
 #include <linux/slab.h>
 
 #include <asm/system.h>
-
-#ifdef CONFIG_HAS_DMA
-#include <linux/dma-mapping.h>
-extern int skb_dma_map(struct device *dev, struct sk_buff *skb,
-		       enum dma_data_direction dir);
-extern void skb_dma_unmap(struct device *dev, struct sk_buff *skb,
-			  enum dma_data_direction dir);
-#endif
 
 static inline struct dst_entry *skb_dst(const struct sk_buff *skb)
 {
@@ -1491,6 +1509,22 @@ static inline struct sk_buff *netdev_alloc_skb(struct net_device *dev,
 
 extern struct page *__netdev_alloc_page(struct net_device *dev, gfp_t gfp_mask);
 
+static inline struct sk_buff *__netdev_alloc_skb_ip_align(struct net_device *dev,
+		unsigned int length, gfp_t gfp)
+{
+	struct sk_buff *skb = __netdev_alloc_skb(dev, length + NET_IP_ALIGN, gfp);
+
+	if (NET_IP_ALIGN && skb)
+		skb_reserve(skb, NET_IP_ALIGN);
+	return skb;
+}
+
+static inline struct sk_buff *netdev_alloc_skb_ip_align(struct net_device *dev,
+		unsigned int length)
+{
+	return __netdev_alloc_skb_ip_align(dev, length, GFP_ATOMIC);
+}
+
 /**
  *	netdev_alloc_page - allocate a page for ps-rx on a specific device
  *	@dev: network device to receive on
@@ -2040,6 +2074,9 @@ static inline bool skb_rx_queue_recorded(const struct sk_buff *skb)
 
 extern u16 skb_tx_hash(const struct net_device *dev,
 		       const struct sk_buff *skb);
+extern u16 __skb_tx_hash(const struct net_device *dev,
+			 const struct sk_buff *skb,
+			 unsigned int num_tx_queues);
 
 #ifdef CONFIG_XFRM
 static inline struct sec_path *skb_sec_path(struct sk_buff *skb)
@@ -2084,6 +2121,22 @@ static inline void skb_forward_csum(struct sk_buff *skb)
 		skb->ip_summed = CHECKSUM_NONE;
 }
 
+/**
+ * skb_checksum_none_assert - make sure skb ip_summed is CHECKSUM_NONE
+ * @skb: skb to check
+ *
+ * fresh skbs have their ip_summed set to CHECKSUM_NONE.
+ * Instead of forcing ip_summed to CHECKSUM_NONE, we can
+ * use this helper, to document places where we make this assertion.
+ */
+static inline void skb_checksum_none_assert(struct sk_buff *skb)
+{
+#ifdef DEBUG
+	BUG_ON(skb->ip_summed != CHECKSUM_NONE);
+#endif
+}
+
 bool skb_partial_csum_set(struct sk_buff *skb, u16 start, u16 off);
+
 #endif	/* __KERNEL__ */
 #endif	/* _LINUX_SKBUFF_H */

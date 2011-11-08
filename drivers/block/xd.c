@@ -236,7 +236,7 @@ static int __init xd_init(void)
 	}
 
 	/* xd_maxsectors depends on controller - so set after detection */
-	blk_queue_max_sectors(xd_queue, xd_maxsectors);
+	blk_queue_max_hw_sectors(xd_queue, xd_maxsectors);
 
 	for (i = 0; i < xd_drives; i++)
 		add_disk(xd_gendisk[i]);
@@ -313,7 +313,7 @@ static void do_xd_request (struct request_queue * q)
 		int res = -EIO;
 		int retry;
 
-		if (!blk_fs_request(req))
+		if (req->cmd_type != REQ_TYPE_FS) {
 			goto done;
 		if (block + count > get_capacity(req->rq_disk))
 			goto done;

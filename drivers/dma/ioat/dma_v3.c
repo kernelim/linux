@@ -293,7 +293,7 @@ static void __cleanup(struct ioat2_dma_chan *ioat, unsigned long phys_complete)
 		}
 	}
 	ioat->tail += i;
-	BUG_ON(!seen_current); /* no active descs have written a completion? */
+	BUG_ON(active && !seen_current); /* no active descs have written a completion? */
 	chan->last_completion = phys_complete;
 	if (ioat->head == ioat->tail) {
 		dev_dbg(to_dev(chan), "%s: cancel completion timeout\n",
@@ -380,7 +380,10 @@ static void ioat3_timer_event(unsigned long data)
 			chanerr = readl(chan->reg_base + IOAT_CHANERR_OFFSET);
 			dev_err(to_dev(chan), "%s: Channel halted (%x)\n",
 				__func__, chanerr);
-			BUG_ON(is_ioat_bug(chanerr));
+			if (test_bit(IOAT_RUN, &chan->state))
+				BUG_ON(is_ioat_bug(chanerr));
+			else /* we never got off the ground */
+				return;
 		}
 
 		/* if we haven't made progress and we have already
@@ -650,9 +653,11 @@ __ioat3_prep_pq_lock(struct dma_chan *c, enum sum_check_flags *result,
 
 	num_descs = ioat2_xferlen_to_descs(ioat, len);
 	/* we need 2x the number of descriptors to cover greater than 3
-	 * sources
+	 * sources (we need 1 extra source in the q-only continuation
+	 * case and 3 extra sources in the p+q continuation case.
 	 */
-	if (src_cnt > 3 || flags & DMA_PREP_CONTINUE) {
+	if (src_cnt + dmaf_p_disabled_continue(flags) > 3 ||
+	    (dmaf_continue(flags) && !dmaf_p_disabled_continue(flags))) {
 		with_ext = 1;
 		num_descs *= 2;
 	} else
@@ -1128,6 +1133,45 @@ static int __devinit ioat3_dma_self_test(struct ioatdma_device *device)
 	return 0;
 }
 
+static int ioat3_reset_hw(struct ioat_chan_common *chan)
+{
+	/* throw away whatever the channel was doing and get it
+	 * initialized, with ioat3 specific workarounds
+	 */
+	struct ioatdma_device *device = chan->device;
+	struct pci_dev *pdev = device->pdev;
+	u32 chanerr;
+	u16 dev_id;
+	int err;
+
+	ioat2_quiesce(chan, msecs_to_jiffies(100));
+
+	chanerr = readl(chan->reg_base + IOAT_CHANERR_OFFSET);
+	writel(chanerr, chan->reg_base + IOAT_CHANERR_OFFSET);
+
+	/* -= IOAT ver.3 workarounds =- */
+	/* Write CHANERRMSK_INT with 3E07h to mask out the errors
+	 * that can cause stability issues for IOAT ver.3, and clear any
+	 * pending errors
+	 */
+	pci_write_config_dword(pdev, IOAT_PCI_CHANERRMASK_INT_OFFSET, 0x3e07);
+	err = pci_read_config_dword(pdev, IOAT_PCI_CHANERR_INT_OFFSET, &chanerr);
+	if (err) {
+		dev_err(&pdev->dev, "channel error register unreachable\n");
+		return err;
+	}
+	pci_write_config_dword(pdev, IOAT_PCI_CHANERR_INT_OFFSET, chanerr);
+
+	/* Clear DMAUNCERRSTS Cfg-Reg Parity Error status bit
+	 * (workaround for spurious config parity error after restart)
+	 */
+	pci_read_config_word(pdev, IOAT_PCI_DEVICE_ID_OFFSET, &dev_id);
+	if (dev_id == PCI_DEVICE_ID_INTEL_IOAT_TBG0)
+		pci_write_config_dword(pdev, IOAT_PCI_DMAUNCERRSTS_OFFSET, 0x10);
+
+	return ioat2_reset_sync(chan, msecs_to_jiffies(200));
+}
+
 int __devinit ioat3_dma_probe(struct ioatdma_device *device, int dca)
 {
 	struct pci_dev *pdev = device->pdev;
@@ -1137,10 +1181,10 @@ int __devinit ioat3_dma_probe(struct ioatdma_device *device, int dca)
 	struct ioat_chan_common *chan;
 	bool is_raid_device = false;
 	int err;
-	u16 dev_id;
 	u32 cap;
 
 	device->enumerate_channels = ioat2_enumerate_channels;
+	device->reset_hw = ioat3_reset_hw;
 	device->self_test = ioat3_dma_self_test;
 	dma = &device->common;
 	dma->device_prep_dma_memcpy = ioat2_dma_prep_memcpy_lock;
@@ -1160,7 +1204,7 @@ int __devinit ioat3_dma_probe(struct ioatdma_device *device, int dca)
 	if (cap & IOAT_CAP_XOR) {
 		is_raid_device = true;
 		dma->max_xor = 8;
-		dma->xor_align = 2;
+		dma->xor_align = 6;
 
 		dma_cap_set(DMA_XOR, dma->cap_mask);
 		dma->device_prep_dma_xor = ioat3_prep_xor;
@@ -1171,7 +1215,7 @@ int __devinit ioat3_dma_probe(struct ioatdma_device *device, int dca)
 	if (cap & IOAT_CAP_PQ) {
 		is_raid_device = true;
 		dma_set_maxpq(dma, 8, 0);
-		dma->pq_align = 2;
+		dma->pq_align = 6;
 
 		dma_cap_set(DMA_PQ, dma->cap_mask);
 		dma->device_prep_dma_pq = ioat3_prep_pq;
@@ -1181,7 +1225,7 @@ int __devinit ioat3_dma_probe(struct ioatdma_device *device, int dca)
 
 		if (!(cap & IOAT_CAP_XOR)) {
 			dma->max_xor = 8;
-			dma->xor_align = 2;
+			dma->xor_align = 6;
 
 			dma_cap_set(DMA_XOR, dma->cap_mask);
 			dma->device_prep_dma_xor = ioat3_prep_pqxor;
@@ -1215,19 +1259,6 @@ int __devinit ioat3_dma_probe(struct ioatdma_device *device, int dca)
 	dma_cap_clear(DMA_XOR_VAL, dma->cap_mask);
 	dma->device_prep_dma_xor_val = NULL;
 	#endif
-
-	/* -= IOAT ver.3 workarounds =- */
-	/* Write CHANERRMSK_INT with 3E07h to mask out the errors
-	 * that can cause stability issues for IOAT ver.3
-	 */
-	pci_write_config_dword(pdev, IOAT_PCI_CHANERRMASK_INT_OFFSET, 0x3e07);
-
-	/* Clear DMAUNCERRSTS Cfg-Reg Parity Error status bit
-	 * (workaround for spurious config parity error after restart)
-	 */
-	pci_read_config_word(pdev, IOAT_PCI_DEVICE_ID_OFFSET, &dev_id);
-	if (dev_id == PCI_DEVICE_ID_INTEL_IOAT_TBG0)
-		pci_write_config_dword(pdev, IOAT_PCI_DMAUNCERRSTS_OFFSET, 0x10);
 
 	err = ioat_probe(device);
 	if (err)

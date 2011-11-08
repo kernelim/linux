@@ -43,7 +43,7 @@ static mempool_t *bio_split_pool __read_mostly;
  * unsigned short
  */
 #define BV(x) { .nr_vecs = x, .name = "biovec-"__stringify(x) }
-struct biovec_slab bvec_slabs[BIOVEC_NR_POOLS] __read_mostly = {
+static struct biovec_slab bvec_slabs[BIOVEC_NR_POOLS] __read_mostly = {
 	BV(1), BV(4), BV(16), BV(64), BV(128), BV(BIO_MAX_PAGES),
 };
 #undef BV
@@ -507,10 +507,8 @@ int bio_get_nr_vecs(struct block_device *bdev)
 	int nr_pages;
 
 	nr_pages = ((queue_max_sectors(q) << 9) + PAGE_SIZE - 1) >> PAGE_SHIFT;
-	if (nr_pages > queue_max_phys_segments(q))
-		nr_pages = queue_max_phys_segments(q);
-	if (nr_pages > queue_max_hw_segments(q))
-		nr_pages = queue_max_hw_segments(q);
+	if (nr_pages > queue_max_segments(q))
+		nr_pages = queue_max_segments(q);
 
 	return nr_pages;
 }
@@ -542,17 +540,22 @@ static int __bio_add_page(struct request_queue *q, struct bio *bio, struct page
 
 		if (page == prev->bv_page &&
 		    offset == prev->bv_offset + prev->bv_len) {
+			unsigned int prev_bv_len = prev->bv_len;
 			prev->bv_len += len;
 
 			if (q->merge_bvec_fn) {
 				struct bvec_merge_data bvm = {
+					/* prev_bvec is already charged in
+					   bi_size, discharge it in order to
+					   simulate merging updated prev_bvec
+					   as new bvec. */
 					.bi_bdev = bio->bi_bdev,
 					.bi_sector = bio->bi_sector,
-					.bi_size = bio->bi_size,
+					.bi_size = bio->bi_size - prev_bv_len,
 					.bi_rw = bio->bi_rw,
 				};
 
-				if (q->merge_bvec_fn(q, &bvm, prev) < len) {
+				if (q->merge_bvec_fn(q, &bvm, prev) < prev->bv_len) {
 					prev->bv_len -= len;
 					return 0;
 				}
@@ -570,8 +573,7 @@ static int __bio_add_page(struct request_queue *q, struct bio *bio, struct page
 	 * make this too complex.
 	 */
 
-	while (bio->bi_phys_segments >= queue_max_phys_segments(q)
-	       || bio->bi_phys_segments >= queue_max_hw_segments(q)) {
+	while (bio->bi_phys_segments >= queue_max_segments(q)) {
 
 		if (retried_segments)
 			return 0;
@@ -606,7 +608,7 @@ static int __bio_add_page(struct request_queue *q, struct bio *bio, struct page
 		 * merge_bvec_fn() returns number of bytes it can accept
 		 * at this offset
 		 */
-		if (q->merge_bvec_fn(q, &bvm, bvec) < len) {
+		if (q->merge_bvec_fn(q, &bvm, bvec) < bvec->bv_len) {
 			bvec->bv_page = NULL;
 			bvec->bv_len = 0;
 			bvec->bv_offset = 0;
@@ -826,6 +828,12 @@ struct bio *bio_copy_user_iov(struct request_queue *q,
 		end = (uaddr + iov[i].iov_len + PAGE_SIZE - 1) >> PAGE_SHIFT;
 		start = uaddr >> PAGE_SHIFT;
 
+		/*
+		 * Overflow, abort
+		 */
+		if (end < start)
+			return ERR_PTR(-EINVAL);
+
 		nr_pages += end - start;
 		len += iov[i].iov_len;
 	}
@@ -842,7 +850,8 @@ struct bio *bio_copy_user_iov(struct request_queue *q,
 	if (!bio)
 		goto out_bmd;
 
-	bio->bi_rw |= (!write_to_vm << BIO_RW);
+	if (!write_to_vm)
+		bio->bi_rw |= (1 << BIO_RW);
 
 	ret = 0;
 
@@ -953,6 +962,12 @@ static struct bio *__bio_map_user_iov(struct request_queue *q,
 		unsigned long end = (uaddr + len + PAGE_SIZE - 1) >> PAGE_SHIFT;
 		unsigned long start = uaddr >> PAGE_SHIFT;
 
+		/*
+		 * Overflow, abort
+		 */
+		if (end < start)
+			return ERR_PTR(-EINVAL);
+
 		nr_pages += end - start;
 		/*
 		 * buffer must be aligned to at least hardsector size for now
@@ -980,7 +995,7 @@ static struct bio *__bio_map_user_iov(struct request_queue *q,
 		unsigned long start = uaddr >> PAGE_SHIFT;
 		const int local_nr_pages = end - start;
 		const int page_limit = cur_page + local_nr_pages;
-		
+
 		ret = get_user_pages_fast(uaddr, local_nr_pages,
 				write_to_vm, &pages[cur_page]);
 		if (ret < local_nr_pages) {
@@ -1603,9 +1618,6 @@ struct bio_set *bioset_create(unsigned int pool_size, unsigned int front_pad)
 	if (!bs->bio_pool)
 		goto bad;
 
-	if (bioset_integrity_create(bs, pool_size))
-		goto bad;
-
 	if (!biovec_create_pools(bs, pool_size))
 		return bs;
 
@@ -1623,12 +1635,10 @@ static void __init biovec_init_slabs(void)
 		int size;
 		struct biovec_slab *bvs = bvec_slabs + i;
 
-#ifndef CONFIG_BLK_DEV_INTEGRITY
 		if (bvs->nr_vecs <= BIO_INLINE_VECS) {
 			bvs->slab = NULL;
 			continue;
 		}
-#endif
 
 		size = bvs->nr_vecs * sizeof(struct bio_vec);
 		bvs->slab = kmem_cache_create(bvs->name, size, 0,
@@ -1650,6 +1660,9 @@ static int __init init_bio(void)
 	fs_bio_set = bioset_create(BIO_POOL_SIZE, 0);
 	if (!fs_bio_set)
 		panic("bio: can't allocate bios\n");
+
+	if (bioset_integrity_create(fs_bio_set, BIO_POOL_SIZE))
+		panic("bio: can't create integrity pool\n");
 
 	bio_split_pool = mempool_create_kmalloc_pool(BIO_SPLIT_ENTRIES,
 						     sizeof(struct bio_pair));

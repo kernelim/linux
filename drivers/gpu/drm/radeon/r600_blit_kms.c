@@ -1,3 +1,28 @@
+/*
+ * Copyright 2009 Advanced Micro Devices, Inc.
+ * Copyright 2009 Red Hat Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE COPYRIGHT HOLDER(S) AND/OR ITS SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ *
+ */
+
 #include "drmP.h"
 #include "drm.h"
 #include "radeon_drm.h"
@@ -25,11 +50,11 @@ set_render_target(struct radeon_device *rdev, int format,
 	u32 cb_color_info;
 	int pitch, slice;
 
-	h = (h + 7) & ~7;
+	h = ALIGN(h, 8);
 	if (h < 8)
 		h = 8;
 
-	cb_color_info = ((format << 2) | (1 << 27));
+	cb_color_info = ((format << 2) | (1 << 27) | (1 << 8));
 	pitch = (w / 8) - 1;
 	slice = ((w * h) / 64) - 1;
 
@@ -140,6 +165,9 @@ set_vtx_resource(struct radeon_device *rdev, u64 gpu_addr)
 	u32 sq_vtx_constant_word2;
 
 	sq_vtx_constant_word2 = ((upper_32_bits(gpu_addr) & 0xff) | (16 << 8));
+#ifdef __BIG_ENDIAN
+	sq_vtx_constant_word2 |= (2 << 30);
+#endif
 
 	radeon_ring_write(rdev, PACKET3(PACKET3_SET_RESOURCE, 7));
 	radeon_ring_write(rdev, 0x460);
@@ -174,7 +202,7 @@ set_tex_resource(struct radeon_device *rdev,
 	if (h < 1)
 		h = 1;
 
-	sq_tex_resource_word0 = (1 << 0);
+	sq_tex_resource_word0 = (1 << 0) | (1 << 3);
 	sq_tex_resource_word0 |= ((((pitch >> 3) - 1) << 8) |
 				  ((w - 1) << 19));
 
@@ -228,7 +256,11 @@ draw_auto(struct radeon_device *rdev)
 	radeon_ring_write(rdev, DI_PT_RECTLIST);
 
 	radeon_ring_write(rdev, PACKET3(PACKET3_INDEX_TYPE, 0));
-	radeon_ring_write(rdev, DI_INDEX_SIZE_16_BIT);
+	radeon_ring_write(rdev,
+#ifdef __BIG_ENDIAN
+			  (2 << 2) |
+#endif
+			  DI_INDEX_SIZE_16_BIT);
 
 	radeon_ring_write(rdev, PACKET3(PACKET3_NUM_INSTANCES, 0));
 	radeon_ring_write(rdev, 1);
@@ -396,15 +428,17 @@ set_default_state(struct radeon_device *rdev)
 				    NUM_ES_STACK_ENTRIES(num_es_stack_entries));
 
 	/* emit an IB pointing at default state */
-	dwords = (rdev->r600_blit.state_len + 0xf) & ~0xf;
+	dwords = ALIGN(rdev->r600_blit.state_len, 0x10);
 	gpu_addr = rdev->r600_blit.shader_gpu_addr + rdev->r600_blit.state_offset;
 	radeon_ring_write(rdev, PACKET3(PACKET3_INDIRECT_BUFFER, 2));
-	radeon_ring_write(rdev, gpu_addr & 0xFFFFFFFC);
+	radeon_ring_write(rdev,
+#ifdef __BIG_ENDIAN
+			  (2 << 0) |
+#endif
+			  (gpu_addr & 0xFFFFFFFC));
 	radeon_ring_write(rdev, upper_32_bits(gpu_addr) & 0xFF);
 	radeon_ring_write(rdev, dwords);
 
-	radeon_ring_write(rdev, PACKET3(PACKET3_EVENT_WRITE, 0));
-	radeon_ring_write(rdev, CACHE_FLUSH_AND_INV_EVENT);
 	/* SQ config */
 	radeon_ring_write(rdev, PACKET3(PACKET3_SET_CONFIG_REG, 6));
 	radeon_ring_write(rdev, (SQ_CONFIG - PACKET3_SET_CONFIG_REG_OFFSET) >> 2);
@@ -444,11 +478,16 @@ static inline uint32_t i2f(uint32_t input)
 int r600_blit_init(struct radeon_device *rdev)
 {
 	u32 obj_size;
-	int r, dwords;
+	int i, r, dwords;
 	void *ptr;
 	u32 packet2s[16];
 	int num_packet2s = 0;
 
+	/* pin copy shader into vram if already initialized */
+	if (rdev->r600_blit.shader_obj)
+		goto done;
+
+	mutex_init(&rdev->r600_blit.mutex);
 	rdev->r600_blit.state_offset = 0;
 
 	if (rdev->family >= CHIP_RV770)
@@ -458,7 +497,7 @@ int r600_blit_init(struct radeon_device *rdev)
 
 	dwords = rdev->r600_blit.state_len;
 	while (dwords & 0xf) {
-		packet2s[num_packet2s++] = PACKET2(0);
+		packet2s[num_packet2s++] = cpu_to_le32(PACKET2(0));
 		dwords++;
 	}
 
@@ -473,9 +512,8 @@ int r600_blit_init(struct radeon_device *rdev)
 	obj_size += r6xx_ps_size * 4;
 	obj_size = ALIGN(obj_size, 256);
 
-	r = radeon_object_create(rdev, NULL, obj_size,
-				 true, RADEON_GEM_DOMAIN_VRAM,
-				 false, &rdev->r600_blit.shader_obj);
+	r = radeon_bo_create(rdev, obj_size, PAGE_SIZE, true, RADEON_GEM_DOMAIN_VRAM,
+				&rdev->r600_blit.shader_obj);
 	if (r) {
 		DRM_ERROR("r600 failed to allocate shader\n");
 		return r;
@@ -485,12 +523,14 @@ int r600_blit_init(struct radeon_device *rdev)
 		  obj_size,
 		  rdev->r600_blit.vs_offset, rdev->r600_blit.ps_offset);
 
-	r = radeon_object_kmap(rdev->r600_blit.shader_obj, &ptr);
+	r = radeon_bo_reserve(rdev->r600_blit.shader_obj, false);
+	if (unlikely(r != 0))
+		return r;
+	r = radeon_bo_kmap(rdev->r600_blit.shader_obj, &ptr);
 	if (r) {
 		DRM_ERROR("failed to map blit object %d\n", r);
 		return r;
 	}
-
 	if (rdev->family >= CHIP_RV770)
 		memcpy_toio(ptr + rdev->r600_blit.state_offset,
 			    r7xx_default_state, rdev->r600_blit.state_len * 4);
@@ -500,22 +540,47 @@ int r600_blit_init(struct radeon_device *rdev)
 	if (num_packet2s)
 		memcpy_toio(ptr + rdev->r600_blit.state_offset + (rdev->r600_blit.state_len * 4),
 			    packet2s, num_packet2s * 4);
+	for (i = 0; i < r6xx_vs_size; i++)
+		*(u32 *)((unsigned long)ptr + rdev->r600_blit.vs_offset + i * 4) = cpu_to_le32(r6xx_vs[i]);
+	for (i = 0; i < r6xx_ps_size; i++)
+		*(u32 *)((unsigned long)ptr + rdev->r600_blit.ps_offset + i * 4) = cpu_to_le32(r6xx_ps[i]);
+	radeon_bo_kunmap(rdev->r600_blit.shader_obj);
+	radeon_bo_unreserve(rdev->r600_blit.shader_obj);
 
-
-	memcpy(ptr + rdev->r600_blit.vs_offset, r6xx_vs, r6xx_vs_size * 4);
-	memcpy(ptr + rdev->r600_blit.ps_offset, r6xx_ps, r6xx_ps_size * 4);
-
-	radeon_object_kunmap(rdev->r600_blit.shader_obj);
+done:
+	r = radeon_bo_reserve(rdev->r600_blit.shader_obj, false);
+	if (unlikely(r != 0))
+		return r;
+	r = radeon_bo_pin(rdev->r600_blit.shader_obj, RADEON_GEM_DOMAIN_VRAM,
+			  &rdev->r600_blit.shader_gpu_addr);
+	radeon_bo_unreserve(rdev->r600_blit.shader_obj);
+	if (r) {
+		dev_err(rdev->dev, "(%d) pin blit object failed\n", r);
+		return r;
+	}
+	radeon_ttm_set_active_vram_size(rdev, rdev->mc.real_vram_size);
 	return 0;
 }
 
 void r600_blit_fini(struct radeon_device *rdev)
 {
-	radeon_object_unpin(rdev->r600_blit.shader_obj);
-	radeon_object_unref(&rdev->r600_blit.shader_obj);
+	int r;
+
+	radeon_ttm_set_active_vram_size(rdev, rdev->mc.visible_vram_size);
+	if (rdev->r600_blit.shader_obj == NULL)
+		return;
+	/* If we can't reserve the bo, unref should be enough to destroy
+	 * it when it becomes idle.
+	 */
+	r = radeon_bo_reserve(rdev->r600_blit.shader_obj, false);
+	if (!r) {
+		radeon_bo_unpin(rdev->r600_blit.shader_obj);
+		radeon_bo_unreserve(rdev->r600_blit.shader_obj);
+	}
+	radeon_bo_unref(&rdev->r600_blit.shader_obj);
 }
 
-int r600_vb_ib_get(struct radeon_device *rdev)
+static int r600_vb_ib_get(struct radeon_device *rdev)
 {
 	int r;
 	r = radeon_ib_get(rdev, &rdev->r600_blit.vb_ib);
@@ -529,12 +594,9 @@ int r600_vb_ib_get(struct radeon_device *rdev)
 	return 0;
 }
 
-void r600_vb_ib_put(struct radeon_device *rdev)
+static void r600_vb_ib_put(struct radeon_device *rdev)
 {
 	radeon_fence_emit(rdev, rdev->r600_blit.vb_ib->fence);
-	mutex_lock(&rdev->ib_pool.mutex);
-	list_add_tail(&rdev->r600_blit.vb_ib->list, &rdev->ib_pool.scheduled_ibs);
-	mutex_unlock(&rdev->ib_pool.mutex);
 	radeon_ib_free(rdev, &rdev->r600_blit.vb_ib);
 }
 
@@ -547,7 +609,8 @@ int r600_blit_prepare_copy(struct radeon_device *rdev, int size_bytes)
 	int dwords_per_loop = 76, num_loops;
 
 	r = r600_vb_ib_get(rdev);
-	WARN_ON(r);
+	if (r)
+		return r;
 
 	/* set_render_target emits 2 extra dwords on rv6xx */
 	if (rdev->family > CHIP_R600 && rdev->family < CHIP_RV770)
@@ -569,11 +632,12 @@ int r600_blit_prepare_copy(struct radeon_device *rdev, int size_bytes)
 	ring_size = num_loops * dwords_per_loop;
 	/* set default  + shaders */
 	ring_size += 40; /* shaders + def state */
-	ring_size += 3; /* fence emit for VB IB */
+	ring_size += 10; /* fence emit for VB IB */
 	ring_size += 5; /* done copy */
-	ring_size += 3; /* fence emit for done copy */
+	ring_size += 10; /* fence emit for done copy */
 	r = radeon_ring_lock(rdev, ring_size);
-	WARN_ON(r);
+	if (r)
+		return r;
 
 	set_default_state(rdev); /* 14 */
 	set_shaders(rdev); /* 26 */
@@ -583,13 +647,6 @@ int r600_blit_prepare_copy(struct radeon_device *rdev, int size_bytes)
 void r600_blit_done_copy(struct radeon_device *rdev, struct radeon_fence *fence)
 {
 	int r;
-
-	radeon_ring_write(rdev, PACKET3(PACKET3_EVENT_WRITE, 0));
-	radeon_ring_write(rdev, CACHE_FLUSH_AND_INV_EVENT);
-	/* wait for 3D idle clean */
-	radeon_ring_write(rdev, PACKET3(PACKET3_SET_CONFIG_REG, 1));
-	radeon_ring_write(rdev, (WAIT_UNTIL - PACKET3_SET_CONFIG_REG_OFFSET) >> 2);
-	radeon_ring_write(rdev, WAIT_3D_IDLE_bit | WAIT_3D_IDLECLEAN_bit);
 
 	if (rdev->r600_blit.vb_ib)
 		r600_vb_ib_put(rdev);
@@ -619,8 +676,8 @@ void r600_kms_blit_copy(struct radeon_device *rdev,
 			int src_x = src_gpu_addr & 255;
 			int dst_x = dst_gpu_addr & 255;
 			int h = 1;
-			src_gpu_addr = src_gpu_addr & ~255;
-			dst_gpu_addr = dst_gpu_addr & ~255;
+			src_gpu_addr = src_gpu_addr & ~255ULL;
+			dst_gpu_addr = dst_gpu_addr & ~255ULL;
 
 			if (!src_x && !dst_x) {
 				h = (cur_size / max_bytes);
@@ -641,17 +698,6 @@ void r600_kms_blit_copy(struct radeon_device *rdev,
 
 			if ((rdev->r600_blit.vb_used + 48) > rdev->r600_blit.vb_total) {
 				WARN_ON(1);
-
-#if 0
-				r600_vb_ib_put(rdev);
-
-				r600_nomm_put_vb(dev);
-				r600_nomm_get_vb(dev);
-				if (!dev_priv->blit_vb)
-					return;
-				set_shaders(dev);
-				vb = r600_nomm_get_vb_ptr(dev);
-#endif
 			}
 
 			vb[0] = i2f(dst_x);
@@ -713,8 +759,8 @@ void r600_kms_blit_copy(struct radeon_device *rdev,
 			int src_x = (src_gpu_addr & 255);
 			int dst_x = (dst_gpu_addr & 255);
 			int h = 1;
-			src_gpu_addr = src_gpu_addr & ~255;
-			dst_gpu_addr = dst_gpu_addr & ~255;
+			src_gpu_addr = src_gpu_addr & ~255ULL;
+			dst_gpu_addr = dst_gpu_addr & ~255ULL;
 
 			if (!src_x && !dst_x) {
 				h = (cur_size / max_bytes);
@@ -736,17 +782,6 @@ void r600_kms_blit_copy(struct radeon_device *rdev,
 			if ((rdev->r600_blit.vb_used + 48) > rdev->r600_blit.vb_total) {
 				WARN_ON(1);
 			}
-#if 0
-			if ((rdev->blit_vb->used + 48) > rdev->blit_vb->total) {
-				r600_nomm_put_vb(dev);
-				r600_nomm_get_vb(dev);
-				if (!rdev->blit_vb)
-					return;
-
-				set_shaders(dev);
-				vb = r600_nomm_get_vb_ptr(dev);
-			}
-#endif
 
 			vb[0] = i2f(dst_x / 4);
 			vb[1] = 0;

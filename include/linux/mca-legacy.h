@@ -9,7 +9,11 @@
 
 #include <linux/mca.h>
 
+#if 0
+/* In RHEL6 x86 32-bit, we know that we are using MCA legacy.  In order to get
+to a 0 warning compile, let's turn this off ... it is informational only */
 #warning "MCA legacy - please move your driver to the new sysfs api"
+#endif
 
 /* MCA_NOTFOUND is an error condition.  The other two indicate
  * motherboard POS registers contain the adapter.  They might be

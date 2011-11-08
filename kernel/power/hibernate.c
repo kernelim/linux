@@ -304,6 +304,7 @@ int hibernation_snapshot(int platform_mode)
 		goto Close;
 
 	suspend_console();
+	pm_restrict_gfp_mask();
 	error = dpm_suspend_start(PMSG_FREEZE);
 	if (error)
 		goto Recover_platform;
@@ -312,7 +313,10 @@ int hibernation_snapshot(int platform_mode)
 		goto Recover_platform;
 
 	error = create_image(platform_mode);
-	/* Control returns here after successful restore */
+	/*
+	 * Control returns here (1) after the image has been created or the
+	 * image creation has failed and (2) after a successful restore.
+	 */
 
  Resume_devices:
 	/* We may need to release the preallocated image pages here. */
@@ -321,6 +325,10 @@ int hibernation_snapshot(int platform_mode)
 
 	dpm_resume_end(in_suspend ?
 		(error ? PMSG_RECOVER : PMSG_THAW) : PMSG_RESTORE);
+
+	if (error || !in_suspend)
+		pm_restore_gfp_mask();
+
 	resume_console();
  Close:
 	platform_end(platform_mode);
@@ -418,11 +426,13 @@ int hibernation_restore(int platform_mode)
 
 	pm_prepare_console();
 	suspend_console();
+	pm_restrict_gfp_mask();
 	error = dpm_suspend_start(PMSG_QUIESCE);
 	if (!error) {
 		error = resume_target_kernel(platform_mode);
 		dpm_resume_end(PMSG_RECOVER);
 	}
+	pm_restore_gfp_mask();
 	resume_console();
 	pm_restore_console();
 	return error;
@@ -595,6 +605,8 @@ int hibernate(void)
 		swsusp_free();
 		if (!error)
 			power_down();
+		in_suspend = 0;
+		pm_restore_gfp_mask();
 	} else {
 		pr_debug("PM: Image restored successfully.\n");
 	}

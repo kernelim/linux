@@ -20,8 +20,23 @@ extern struct list_head dpm_list;	/* The active device list */
 
 static inline struct device *to_device(struct list_head *entry)
 {
+#ifdef CONFIG_PPC_PSERIES
+	return (container_of(entry, struct dev_pm_info_entry, entry))->dev;
+#else  /* !CONFIG_PPC_PSERIES */
 	return container_of(entry, struct device, power.entry);
+#endif /* !CONFIG_PPC_PSERIES */
 }
+
+#ifdef CONFIG_PPC_PSERIES
+extern int device_pm_pre_add(struct device *dev);
+extern void device_pm_pre_add_cleanup(struct device *dev);
+#else /* !CONFIG_PPC_PSERIES */
+static inline int device_pm_pre_add(struct device *dev)
+{
+	return 0;
+}
+static inline void device_pm_pre_add_cleanup(struct device *dev) {}
+#endif /* !CONFIG_PPC_PSERIES */
 
 extern void device_pm_init(struct device *dev);
 extern void device_pm_add(struct device *);
@@ -41,6 +56,12 @@ static inline void device_pm_remove(struct device *dev)
 {
 	pm_runtime_remove(dev);
 }
+
+static inline int device_pm_pre_add(struct device *dev)
+{
+	return 0;
+}
+static inline void device_pm_pre_add_cleanup(struct device *dev) {}
 
 static inline void device_pm_add(struct device *dev) {}
 static inline void device_pm_move_before(struct device *deva,

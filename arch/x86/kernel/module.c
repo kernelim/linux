@@ -206,7 +206,7 @@ int module_finalize(const Elf_Ehdr *hdr,
 		    struct module *me)
 {
 	const Elf_Shdr *s, *text = NULL, *alt = NULL, *locks = NULL,
-		*para = NULL;
+		*para = NULL, *rhel = NULL;
 	char *secstrings = (void *)hdr + sechdrs[hdr->e_shstrndx].sh_offset;
 
 	for (s = sechdrs; s < sechdrs + hdr->e_shnum; s++) {
@@ -218,12 +218,32 @@ int module_finalize(const Elf_Ehdr *hdr,
 			locks = s;
 		if (!strcmp(".parainstructions", secstrings + s->sh_name))
 			para = s;
+		if (!strcmp(".rheldata", secstrings + s->sh_name))
+			rhel = s;
 	}
 
 	if (alt) {
 		/* patch .altinstructions */
 		void *aseg = (void *)alt->sh_addr;
-		apply_alternatives(aseg, aseg + alt->sh_size);
+		int fixup = 0;
+
+		/*
+		 * RHEL6: We had to modify the alt_instr struct's cpuid
+		 * field so that we could account for future X86 cpu features.
+		 *
+		 * In order to protect KABI we must modify the values in
+		 * modules 6.1 or older that maybe loaded at this time.
+		 */
+
+		if (!rhel) {
+			/* modules older than 6.2 do not have .rheldata */
+			printk(KERN_DEBUG
+			       "%s module is older than RHEL 6.2 ... applying fixups\n",
+			       me->name);
+			fixup = 1;
+		}
+
+		apply_alternatives(aseg, aseg + alt->sh_size, fixup);
 	}
 	if (locks && text) {
 		void *lseg = (void *)locks->sh_addr;

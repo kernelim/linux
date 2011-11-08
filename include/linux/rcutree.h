@@ -39,6 +39,16 @@ extern int rcu_cpu_notify(struct notifier_block *self,
 extern int rcu_needs_cpu(int cpu);
 extern int rcu_expedited_torture_stats(char *page);
 
+/*
+ * Note a virtualization-based context switch.  This is simply a
+ * wrapper around rcu_note_context_switch(), which allows TINY_RCU
+ * to save a few bytes.
+ */
+static inline void rcu_virt_note_context_switch(int cpu)
+{
+	rcu_sched_qs(cpu);
+}
+
 #ifdef CONFIG_TREE_PREEMPT_RCU
 
 extern void __rcu_read_lock(void);

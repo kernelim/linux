@@ -190,7 +190,7 @@ acpi_status acpi_get_parent(acpi_handle handle, acpi_handle * ret_handle)
 
 	/* Get the parent entry */
 
-	parent_node = acpi_ns_get_parent_node(node);
+	parent_node = node->parent;
 	*ret_handle = acpi_ns_convert_entry_to_handle(parent_node);
 
 	/* Return exception if parent is null */

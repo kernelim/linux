@@ -257,7 +257,9 @@ extern int hash_page(unsigned long ea, unsigned long access, unsigned long trap)
 extern int hash_huge_page(struct mm_struct *mm, unsigned long access,
 			  unsigned long ea, unsigned long vsid, int local,
 			  unsigned long trap);
-
+extern void hash_failure_debug(unsigned long ea, unsigned long access,
+			       unsigned long vsid, unsigned long trap,
+			       int ssize, int psize, unsigned long pte);
 extern int htab_bolt_mapping(unsigned long vstart, unsigned long vend,
 			     unsigned long pstart, unsigned long prot,
 			     int psize, int ssize);

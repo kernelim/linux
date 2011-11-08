@@ -30,11 +30,11 @@
 
 struct cpu_features cpu;
 static u32 cpu_vendor[3];
-static u32 err_flags[NCAPINTS];
+static u32 err_flags[RHNCAPINTS];
 
 static const int req_level = CONFIG_X86_MINIMUM_CPU_FAMILY;
 
-static const u32 req_flags[NCAPINTS] =
+static const u32 req_flags[RHNCAPINTS] =
 {
 	REQUIRED_MASK0,
 	REQUIRED_MASK1,
@@ -160,7 +160,7 @@ static int check_flags(void)
 	int i;
 
 	err = 0;
-	for (i = 0; i < NCAPINTS; i++) {
+	for (i = 0; i < RHNCAPINTS; i++) {
 		err_flags[i] = req_flags[i] & ~cpu.flags[i];
 		if (err_flags[i])
 			err |= 1 << i;

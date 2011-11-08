@@ -38,19 +38,19 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/netdevice.h>
-#include <linux/inet_lro.h>
 
 #include <linux/mlx4/device.h>
 #include <linux/mlx4/qp.h>
 #include <linux/mlx4/cq.h>
 #include <linux/mlx4/srq.h>
 #include <linux/mlx4/doorbell.h>
+#include <linux/mlx4/cmd.h>
 
 #include "en_port.h"
 
 #define DRV_NAME	"mlx4_en"
-#define DRV_VERSION	"1.4.1.1"
-#define DRV_RELDATE	"June 2009"
+#define DRV_VERSION	"1.5.4.1"
+#define DRV_RELDATE	"March 2011"
 
 
 #define MLX4_EN_MSG_LEVEL	(NETIF_MSG_LINK | NETIF_MSG_IFDOWN)
@@ -75,6 +75,8 @@
 	en_print(KERN_WARNING, priv, format, ## arg)
 #define en_err(priv, format, arg...)				\
 	en_print(KERN_ERR, priv, format, ## arg)
+#define en_info(priv, format, arg...)				\
+	en_print(KERN_INFO, priv, format, ## arg)
 
 #define mlx4_err(mdev, format, arg...) \
 	printk(KERN_ERR "%s %s: " format , DRV_NAME ,\
@@ -93,8 +95,8 @@
 
 #define MLX4_EN_PAGE_SHIFT	12
 #define MLX4_EN_PAGE_SIZE	(1 << MLX4_EN_PAGE_SHIFT)
-#define MAX_TX_RINGS		16
 #define MAX_RX_RINGS		16
+#define MIN_RX_RINGS		4
 #define TXBB_SIZE		64
 #define HEADROOM		(2048 / TXBB_SIZE + 1)
 #define STAMP_STRIDE		64
@@ -139,6 +141,7 @@ enum {
 #define MLX4_EN_SMALL_PKT_SIZE		64
 #define MLX4_EN_NUM_TX_RINGS		8
 #define MLX4_EN_NUM_PPP_RINGS		8
+#define MAX_TX_RINGS			(MLX4_EN_NUM_TX_RINGS + MLX4_EN_NUM_PPP_RINGS)
 #define MLX4_EN_DEF_TX_RING_SIZE	512
 #define MLX4_EN_DEF_RX_RING_SIZE  	1024
 
@@ -156,6 +159,7 @@ enum {
 #define MLX4_EN_RX_SIZE_THRESH		1024
 #define MLX4_EN_RX_RATE_THRESH		(1000000 / MLX4_EN_RX_COAL_TIME_HIGH)
 #define MLX4_EN_SAMPLE_INTERVAL		0
+#define MLX4_EN_AVG_PKT_SMALL		256
 
 #define MLX4_EN_AUTO_CONF	0xffff
 
@@ -171,9 +175,13 @@ enum {
 
 #define SMALL_PACKET_SIZE      (256 - NET_IP_ALIGN)
 #define HEADER_COPY_SIZE       (128 - NET_IP_ALIGN)
+#define MLX4_LOOPBACK_TEST_PAYLOAD (HEADER_COPY_SIZE - ETH_HLEN)
 
 #define MLX4_EN_MIN_MTU		46
 #define ETH_BCAST		0xffffffffffffULL
+
+#define MLX4_EN_LOOPBACK_RETRIES	5
+#define MLX4_EN_LOOPBACK_TIMEOUT	100
 
 #ifdef MLX4_EN_PERF_STAT
 /* Number of samples to 'average' */
@@ -242,6 +250,9 @@ struct mlx4_en_tx_desc {
 
 #define MLX4_EN_USE_SRQ		0x01000000
 
+#define MLX4_EN_CX3_LOW_ID	0x1000
+#define MLX4_EN_CX3_HIGH_ID	0x1005
+
 struct mlx4_en_rx_alloc {
 	struct page *page;
 	u16 offset;
@@ -271,6 +282,8 @@ struct mlx4_en_tx_ring {
 	unsigned long bytes;
 	unsigned long packets;
 	spinlock_t comp_lock;
+	struct mlx4_bf bf;
+	bool bf_enabled;
 };
 
 struct mlx4_en_rx_desc {
@@ -281,7 +294,6 @@ struct mlx4_en_rx_desc {
 struct mlx4_en_rx_ring {
 	struct mlx4_hwq_resources wqres;
 	struct mlx4_en_rx_alloc page_alloc[MLX4_EN_MAX_RX_FRAGS];
-	struct net_lro_mgr lro;
 	u32 size ;	/* number of Rx descs*/
 	u32 actual_size;
 	u32 size_mask;
@@ -345,7 +357,6 @@ struct mlx4_en_port_profile {
 
 struct mlx4_en_profile {
 	int rss_xor;
-	int num_lro;
 	u8 rss_mask;
 	u32 active_ports;
 	u32 small_pkt_int;
@@ -369,6 +380,7 @@ struct mlx4_en_dev {
 	struct mlx4_mr		mr;
 	u32                     priv_pdn;
 	spinlock_t              uar_lock;
+	u8			mac_removed[MLX4_MAX_PORTS + 1];
 };
 
 
@@ -389,6 +401,12 @@ struct mlx4_en_rss_context {
 	__be32 rss_key[10];
 };
 
+struct mlx4_en_port_state {
+	int link_state;
+	int link_speed;
+	int transciver;
+};
+
 struct mlx4_en_pkt_stats {
 	unsigned long broadcast;
 	unsigned long rx_prio[8];
@@ -397,9 +415,6 @@ struct mlx4_en_pkt_stats {
 };
 
 struct mlx4_en_port_stats {
-	unsigned long lro_aggregated;
-	unsigned long lro_flushed;
-	unsigned long lro_no_desc;
 	unsigned long tso_packets;
 	unsigned long queue_stopped;
 	unsigned long wake_queue;
@@ -408,7 +423,7 @@ struct mlx4_en_port_stats {
 	unsigned long rx_chksum_good;
 	unsigned long rx_chksum_none;
 	unsigned long tx_chksum_offload;
-#define NUM_PORT_STATS		11
+#define NUM_PORT_STATS		8
 };
 
 struct mlx4_en_perf_stats {
@@ -437,6 +452,7 @@ struct mlx4_en_priv {
 	struct vlan_group *vlgrp;
 	struct net_device_stats stats;
 	struct net_device_stats ret_stats;
+	struct mlx4_en_port_state port_state;
 	spinlock_t stats_lock;
 
 	unsigned long last_moder_packets;
@@ -455,6 +471,8 @@ struct mlx4_en_priv {
 	u16 sample_interval;
 	u16 adaptive_rx_coal;
 	u32 msg_enable;
+	u32 loopback_ok;
+	u32 validate_loopback;
 
 	struct mlx4_hwq_resources res;
 	int link_state;
@@ -481,6 +499,7 @@ struct mlx4_en_priv {
 	u16 log_rx_info;
 
 	struct mlx4_en_tx_ring tx_ring[MAX_TX_RINGS];
+	int tx_vector;
 	struct mlx4_en_rx_ring rx_ring[MAX_RX_RINGS];
 	struct mlx4_en_cq tx_cq[MAX_TX_RINGS];
 	struct mlx4_en_cq rx_cq[MAX_RX_RINGS];
@@ -492,8 +511,17 @@ struct mlx4_en_priv {
 	struct mlx4_en_perf_stats pstats;
 	struct mlx4_en_pkt_stats pkstats;
 	struct mlx4_en_port_stats port_stats;
-	struct dev_mc_list *mc_list;
+	char *mc_addrs;
+	int mc_addrs_cnt;
 	struct mlx4_en_stat_out_mbox hw_stats;
+	int vids[128];
+	bool wol;
+};
+
+enum mlx4_en_wol {
+	MLX4_EN_WOL_MAGIC = (1ULL << 61),
+	MLX4_EN_WOL_ENABLED = (1ULL << 62),
+	MLX4_EN_WOL_DO_MODIFY = (1ULL << 63),
 };
 
 
@@ -504,12 +532,13 @@ int mlx4_en_init_netdev(struct mlx4_en_dev *mdev, int port,
 int mlx4_en_start_port(struct net_device *dev);
 void mlx4_en_stop_port(struct net_device *dev);
 
-void mlx4_en_free_resources(struct mlx4_en_priv *priv);
+void mlx4_en_free_resources(struct mlx4_en_priv *priv, bool reserve_vectors);
 int mlx4_en_alloc_resources(struct mlx4_en_priv *priv);
 
 int mlx4_en_create_cq(struct mlx4_en_priv *priv, struct mlx4_en_cq *cq,
 		      int entries, int ring, enum cq_type mode);
-void mlx4_en_destroy_cq(struct mlx4_en_priv *priv, struct mlx4_en_cq *cq);
+void mlx4_en_destroy_cq(struct mlx4_en_priv *priv, struct mlx4_en_cq *cq,
+			bool reserve_vectors);
 int mlx4_en_activate_cq(struct mlx4_en_priv *priv, struct mlx4_en_cq *cq);
 void mlx4_en_deactivate_cq(struct mlx4_en_priv *priv, struct mlx4_en_cq *cq);
 int mlx4_en_set_cq_moder(struct mlx4_en_priv *priv, struct mlx4_en_cq *cq);
@@ -521,7 +550,7 @@ u16 mlx4_en_select_queue(struct net_device *dev, struct sk_buff *skb);
 netdev_tx_t mlx4_en_xmit(struct sk_buff *skb, struct net_device *dev);
 
 int mlx4_en_create_tx_ring(struct mlx4_en_priv *priv, struct mlx4_en_tx_ring *ring,
-			   u32 size, u16 stride);
+			   int qpn, u32 size, u16 stride);
 void mlx4_en_destroy_tx_ring(struct mlx4_en_priv *priv, struct mlx4_en_tx_ring *ring);
 int mlx4_en_activate_tx_ring(struct mlx4_en_priv *priv,
 			     struct mlx4_en_tx_ring *ring,
@@ -562,6 +591,11 @@ int mlx4_SET_PORT_qpn_calc(struct mlx4_dev *dev, u8 port, u32 base_qpn,
 			   u8 promisc);
 
 int mlx4_en_DUMP_ETH_STATS(struct mlx4_en_dev *mdev, u8 port, u8 reset);
+int mlx4_en_QUERY_PORT(struct mlx4_en_dev *mdev, u8 port);
+
+#define MLX4_EN_NUM_SELF_TEST	5
+void mlx4_en_ex_selftest(struct net_device *dev, u32 *flags, u64 *buf);
+u64 mlx4_en_mac_to_u64(u8 *addr);
 
 /*
  * Globals

@@ -66,6 +66,12 @@
 
 #define MMU_UPDATE_HISTO	30
 
+/*
+ * Protects atomic reservation decrease/increase against concurrent increases.
+ * Also protects non-atomic updates of current_pages and balloon lists.
+ */
+DEFINE_SPINLOCK(xen_reservation_lock);
+
 #ifdef CONFIG_XEN_DEBUG_FS
 
 static struct {
@@ -155,6 +161,7 @@ DEFINE_PER_CPU(unsigned long, xen_current_cr3);	 /* actual vcpu cr3 */
  */
 #define USER_LIMIT	((STACK_TOP_MAX + PGDIR_SIZE - 1) & PGDIR_MASK)
 
+unsigned long xen_max_p2m_pfn __read_mostly = MAX_DOMAIN_PAGES;
 
 #define P2M_ENTRIES_PER_PAGE	(PAGE_SIZE / sizeof(unsigned long))
 #define TOP_ENTRIES		(MAX_DOMAIN_PAGES / P2M_ENTRIES_PER_PAGE)
@@ -185,7 +192,7 @@ static inline unsigned p2m_index(unsigned long pfn)
 }
 
 /* Build the parallel p2m_top_mfn structures */
-static void __init xen_build_mfn_list_list(void)
+void xen_build_mfn_list_list(void)
 {
 	unsigned pfn, idx;
 
@@ -207,7 +214,7 @@ void xen_setup_mfn_list_list(void)
 
 	HYPERVISOR_shared_info->arch.pfn_to_mfn_frame_list_list =
 		virt_to_mfn(p2m_top_mfn_list);
-	HYPERVISOR_shared_info->arch.max_pfn = xen_start_info->nr_pages;
+	HYPERVISOR_shared_info->arch.max_pfn = xen_max_p2m_pfn;
 }
 
 /* Set up p2m_top to point to the domain-builder provided p2m pages */
@@ -216,6 +223,8 @@ void __init xen_build_dynamic_phys_to_machine(void)
 	unsigned long *mfn_list = (unsigned long *)xen_start_info->mfn_list;
 	unsigned long max_pfn = min(MAX_DOMAIN_PAGES, xen_start_info->nr_pages);
 	unsigned pfn;
+
+	xen_max_p2m_pfn = max_pfn;
 
 	for (pfn = 0; pfn < max_pfn; pfn += P2M_ENTRIES_PER_PAGE) {
 		unsigned topidx = p2m_top_index(pfn);
@@ -230,7 +239,7 @@ unsigned long get_phys_to_machine(unsigned long pfn)
 {
 	unsigned topidx, idx;
 
-	if (unlikely(pfn >= MAX_DOMAIN_PAGES))
+	if (unlikely(pfn >= xen_max_p2m_pfn))
 		return INVALID_P2M_ENTRY;
 
 	topidx = p2m_top_index(pfn);
@@ -276,7 +285,12 @@ bool __set_phys_to_machine(unsigned long pfn, unsigned long mfn)
 {
 	unsigned topidx, idx;
 
-	if (unlikely(pfn >= MAX_DOMAIN_PAGES)) {
+	if (unlikely(xen_feature(XENFEAT_auto_translated_physmap))) {
+		BUG_ON(pfn != mfn && mfn != INVALID_P2M_ENTRY);
+		return true;
+	}
+
+	if (unlikely(pfn >= xen_max_p2m_pfn)) {
 		BUG_ON(mfn != INVALID_P2M_ENTRY);
 		return true;
 	}
@@ -296,11 +310,6 @@ bool __set_phys_to_machine(unsigned long pfn, unsigned long mfn)
 
 void set_phys_to_machine(unsigned long pfn, unsigned long mfn)
 {
-	if (unlikely(xen_feature(XENFEAT_auto_translated_physmap))) {
-		BUG_ON(pfn != mfn && mfn != INVALID_P2M_ENTRY);
-		return;
-	}
-
 	if (unlikely(!__set_phys_to_machine(pfn, mfn)))  {
 		alloc_p2m(pfn);
 
@@ -516,7 +525,20 @@ static pteval_t pte_pfn_to_mfn(pteval_t val)
 	if (val & _PAGE_PRESENT) {
 		unsigned long pfn = (val & PTE_PFN_MASK) >> PAGE_SHIFT;
 		pteval_t flags = val & PTE_FLAGS_MASK;
-		val = ((pteval_t)pfn_to_mfn(pfn) << PAGE_SHIFT) | flags;
+		unsigned long mfn = pfn_to_mfn(pfn);
+
+		/*
+		 * If there's no mfn for the pfn, then just create an
+		 * empty non-present pte.  Unfortunately this loses
+		 * information about the original pfn, so
+		 * pte_mfn_to_pfn is asymmetric.
+		 */
+		if (unlikely(mfn == INVALID_P2M_ENTRY)) {
+			mfn = 0;
+			flags = 0;
+		}
+
+		val = ((pteval_t)mfn << PAGE_SHIFT) | flags;
 	}
 
 	return val;
@@ -934,8 +956,6 @@ static int xen_pin_page(struct mm_struct *mm, struct page *page,
    read-only, and can be pinned. */
 static void __xen_pgd_pin(struct mm_struct *mm, pgd_t *pgd)
 {
-	vm_unmap_aliases();
-
 	xen_mc_batch();
 
 	if (__xen_pgd_walk(mm, pgd, xen_pin_page, USER_LIMIT)) {
@@ -987,10 +1007,9 @@ static void xen_pgd_pin(struct mm_struct *mm)
  */
 void xen_mm_pin_all(void)
 {
-	unsigned long flags;
 	struct page *page;
 
-	spin_lock_irqsave(&pgd_lock, flags);
+	spin_lock(&pgd_lock);
 
 	list_for_each_entry(page, &pgd_list, lru) {
 		if (!PagePinned(page)) {
@@ -999,7 +1018,7 @@ void xen_mm_pin_all(void)
 		}
 	}
 
-	spin_unlock_irqrestore(&pgd_lock, flags);
+	spin_unlock(&pgd_lock);
 }
 
 /*
@@ -1100,10 +1119,9 @@ static void xen_pgd_unpin(struct mm_struct *mm)
  */
 void xen_mm_unpin_all(void)
 {
-	unsigned long flags;
 	struct page *page;
 
-	spin_lock_irqsave(&pgd_lock, flags);
+	spin_lock(&pgd_lock);
 
 	list_for_each_entry(page, &pgd_list, lru) {
 		if (PageSavePinned(page)) {
@@ -1113,7 +1131,7 @@ void xen_mm_unpin_all(void)
 		}
 	}
 
-	spin_unlock_irqrestore(&pgd_lock, flags);
+	spin_unlock(&pgd_lock);
 }
 
 void xen_activate_mm(struct mm_struct *prev, struct mm_struct *next)
@@ -1141,7 +1159,7 @@ static void drop_other_mm_ref(void *info)
 
 	active_mm = percpu_read(cpu_tlbstate.active_mm);
 
-	if (active_mm == mm)
+	if (active_mm == mm && percpu_read(cpu_tlbstate.state) != TLBSTATE_OK)
 		leave_mm(smp_processor_id());
 
 	/* If this cpu still has a stale cr3 reference, then make sure
@@ -1293,7 +1311,7 @@ static void xen_flush_tlb_others(const struct cpumask *cpus,
 {
 	struct {
 		struct mmuext_op op;
-		DECLARE_BITMAP(mask, NR_CPUS);
+		DECLARE_BITMAP(mask, num_processors);
 	} *args;
 	struct multicall_space mcs;
 
@@ -1427,23 +1445,6 @@ static void xen_pgd_free(struct mm_struct *mm, pgd_t *pgd)
 #endif
 }
 
-#ifdef CONFIG_HIGHPTE
-static void *xen_kmap_atomic_pte(struct page *page, enum km_type type)
-{
-	pgprot_t prot = PAGE_KERNEL;
-
-	if (PagePinned(page))
-		prot = PAGE_KERNEL_RO;
-
-	if (0 && PageHighMem(page))
-		printk("mapping highpte %lx type %d prot %s\n",
-		       page_to_pfn(page), type,
-		       (unsigned long)pgprot_val(prot) & _PAGE_RW ? "WRITE" : "READ");
-
-	return kmap_atomic_prot(page, type, prot);
-}
-#endif
-
 #ifdef CONFIG_X86_32
 static __init pte_t mask_rw_pte(pte_t *ptep, pte_t pte)
 {
@@ -1516,7 +1517,6 @@ static void xen_alloc_ptpage(struct mm_struct *mm, unsigned long pfn, unsigned l
 	if (PagePinned(virt_to_page(mm->pgd))) {
 		SetPagePinned(page);
 
-		vm_unmap_aliases();
 		if (!PageHighMem(page)) {
 			make_lowmem_page_readonly(__va(PFN_PHYS((unsigned long)pfn)));
 			if (level == PT_PTE && USE_SPLIT_PTLOCKS)
@@ -1901,10 +1901,6 @@ static const struct pv_mmu_ops xen_mmu_ops __initdata = {
 	.alloc_pmd = xen_alloc_pmd_init,
 	.alloc_pmd_clone = paravirt_nop,
 	.release_pmd = xen_release_pmd_init,
-
-#ifdef CONFIG_HIGHPTE
-	.kmap_atomic_pte = xen_kmap_atomic_pte,
-#endif
 
 #ifdef CONFIG_X86_64
 	.set_pte = xen_set_pte,

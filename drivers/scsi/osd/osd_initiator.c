@@ -784,7 +784,7 @@ void osd_req_write(struct osd_request *or,
 {
 	_osd_req_encode_common(or, OSD_ACT_WRITE, obj, offset, len);
 	WARN_ON(or->out.bio || or->out.total_bytes);
-	WARN_ON(0 ==  bio_rw_flagged(bio, BIO_RW));
+	WARN_ON(0 == bio_rw_flagged(bio, BIO_RW));
 	or->out.bio = bio;
 	or->out.total_bytes = len;
 }

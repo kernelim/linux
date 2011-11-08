@@ -363,10 +363,7 @@ static int blkvsc_probe(struct device *device)
 	blkdev->gd->queue = blk_init_queue(blkvsc_request, &blkdev->lock);
 
 	blk_queue_max_segment_size(blkdev->gd->queue, PAGE_SIZE);
-	blk_queue_max_phys_segments(blkdev->gd->queue,
-				    MAX_MULTIPAGE_BUFFER_COUNT);
-	blk_queue_max_hw_segments(blkdev->gd->queue,
-				  MAX_MULTIPAGE_BUFFER_COUNT);
+	blk_queue_max_segments(blkdev->gd->queue, MAX_MULTIPAGE_BUFFER_COUNT);
 	blk_queue_segment_boundary(blkdev->gd->queue, PAGE_SIZE-1);
 	blk_queue_bounce_limit(blkdev->gd->queue, BLK_BOUNCE_ANY);
 	blk_queue_dma_alignment(blkdev->gd->queue, 511);
@@ -823,7 +820,8 @@ static void blkvsc_init_rw(struct blkvsc_request *blkvsc_req)
 			blkvsc_req->cmnd[0] = READ_16;
 		}
 
-		blkvsc_req->cmnd[1] |= blk_fua_rq(blkvsc_req->req) ? 0x8 : 0;
+		blkvsc_req->cmnd[1] |=
+			(blkvsc_req->req->cmd_flags & REQ_FUA) ? 0x8 : 0;
 
 		*(unsigned long long *)&blkvsc_req->cmnd[2] =
 				cpu_to_be64(blkvsc_req->sector_start);
@@ -839,7 +837,8 @@ static void blkvsc_init_rw(struct blkvsc_request *blkvsc_req)
 			blkvsc_req->cmnd[0] = READ_10;
 		}
 
-		blkvsc_req->cmnd[1] |= blk_fua_rq(blkvsc_req->req) ? 0x8 : 0;
+		blkvsc_req->cmnd[1] |=
+			(blkvsc_req->req->cmd_flags & REQ_FUA) ? 0x8 : 0;
 
 		*(unsigned int *)&blkvsc_req->cmnd[2] =
 				cpu_to_be32(blkvsc_req->sector_start);
@@ -1282,7 +1281,7 @@ static void blkvsc_request(struct request_queue *queue)
 		DPRINT_DBG(BLKVSC_DRV, "- req %p\n", req);
 
 		blkdev = req->rq_disk->private_data;
-		if (blkdev->shutting_down || !blk_fs_request(req) ||
+		if (blkdev->shutting_down || req->cmd_type != REQ_TYPE_FS ||
 		    blkdev->media_not_present) {
 			__blk_end_request_cur(req, 0);
 			continue;

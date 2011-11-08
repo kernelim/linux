@@ -55,7 +55,7 @@ int validate_cpu(void)
 
 		msg_strs = (const unsigned char *)x86_cap_strs;
 
-		for (i = 0; i < NCAPINTS; i++) {
+		for (i = 0; i < RHNCAPINTS; i++) {
 			u32 e = err_flags[i];
 
 			for (j = 0; j < 32; j++) {

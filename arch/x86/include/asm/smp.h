@@ -21,6 +21,15 @@
 extern int smp_num_siblings;
 extern unsigned int num_processors;
 
+static inline bool cpu_has_ht_siblings(void)
+{
+	bool has_siblings = false;
+#ifdef CONFIG_SMP
+	has_siblings = cpu_has_ht && smp_num_siblings > 1;
+#endif
+	return has_siblings;
+}
+
 DECLARE_PER_CPU(cpumask_var_t, cpu_sibling_map);
 DECLARE_PER_CPU(cpumask_var_t, cpu_core_map);
 DECLARE_PER_CPU(u16, cpu_llc_id);
@@ -50,7 +59,7 @@ struct smp_ops {
 	void (*smp_prepare_cpus)(unsigned max_cpus);
 	void (*smp_cpus_done)(unsigned max_cpus);
 
-	void (*smp_send_stop)(void);
+	void (*stop_other_cpus)(int wait);
 	void (*smp_send_reschedule)(int cpu);
 
 	int (*cpu_up)(unsigned cpu);
@@ -73,7 +82,12 @@ extern struct smp_ops smp_ops;
 
 static inline void smp_send_stop(void)
 {
-	smp_ops.smp_send_stop();
+	smp_ops.stop_other_cpus(0);
+}
+
+static inline void stop_other_cpus(void)
+{
+	smp_ops.stop_other_cpus(1);
 }
 
 static inline void smp_prepare_boot_cpu(void)
@@ -135,6 +149,8 @@ int native_cpu_disable(void);
 void native_cpu_die(unsigned int cpu);
 void native_play_dead(void);
 void play_dead_common(void);
+void wbinvd_on_cpu(int cpu);
+int wbinvd_on_all_cpus(void);
 
 void native_send_call_func_ipi(const struct cpumask *mask);
 void native_send_call_func_single_ipi(int cpu);
@@ -146,6 +162,13 @@ void smp_store_cpu_info(int id);
 static inline int num_booting_cpus(void)
 {
 	return cpumask_weight(cpu_callout_mask);
+}
+#else /* !CONFIG_SMP */
+#define wbinvd_on_cpu(cpu)	wbinvd()
+static inline int wbinvd_on_all_cpus (void)
+{
+	wbinvd();
+	return 0;
 }
 #endif /* CONFIG_SMP */
 

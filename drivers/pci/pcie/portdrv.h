@@ -45,4 +45,20 @@ extern void pcie_port_device_remove(struct pci_dev *dev);
 extern int __must_check pcie_port_bus_register(void);
 extern void pcie_port_bus_unregister(void);
 
+struct pci_dev;
+
+#ifdef CONFIG_ACPI
+extern int pcie_port_acpi_setup(struct pci_dev *port, int *mask);
+
+static inline int pcie_port_platform_notify(struct pci_dev *port, int *mask)
+{
+	return pcie_port_acpi_setup(port, mask);
+}
+#else /* !CONFIG_ACPI */
+static inline int pcie_port_platform_notify(struct pci_dev *port, int *mask)
+{
+	return 0;
+}
+#endif /* !CONFIG_ACPI */
+
 #endif /* _PORTDRV_H_ */

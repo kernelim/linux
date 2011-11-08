@@ -65,24 +65,8 @@ extern kmem_zone_t	*qm_dqtrxzone;
  * block in the dquot/xqm code.
  */
 #define XFS_DQUOT_CLUSTER_SIZE_FSB	(xfs_filblks_t)1
-/*
- * When doing a quotacheck, we log dquot clusters of this many FSBs at most
- * in a single transaction. We don't want to ask for too huge a log reservation.
- */
-#define XFS_QM_MAX_DQCLUSTER_LOGSZ	3
 
 typedef xfs_dqhash_t	xfs_dqlist_t;
-/*
- * The freelist head. The first two fields match the first two in the
- * xfs_dquot_t structure (in xfs_dqmarker_t)
- */
-typedef struct xfs_frlist {
-       struct xfs_dquot *qh_next;
-       struct xfs_dquot *qh_prev;
-       struct mutex	 qh_lock;
-       uint		 qh_version;
-       uint		 qh_nelems;
-} xfs_frlist_t;
 
 /*
  * Quota Manager (global) structure. Lives only in core.
@@ -91,7 +75,9 @@ typedef struct xfs_qm {
 	xfs_dqlist_t	*qm_usr_dqhtable;/* udquot hash table */
 	xfs_dqlist_t	*qm_grp_dqhtable;/* gdquot hash table */
 	uint		 qm_dqhashmask;	 /* # buckets in dq hashtab - 1 */
-	xfs_frlist_t	 qm_dqfreelist;	 /* freelist of dquots */
+	struct list_head qm_dqfrlist;	 /* freelist of dquots */
+	struct mutex	 qm_dqfrlist_lock;
+	int		 qm_dqfrlist_cnt;
 	atomic_t	 qm_totaldquots; /* total incore dquots */
 	uint		 qm_nrefs;	 /* file systems with quota on */
 	int		 qm_dqfree_ratio;/* ratio of free to inuse dquots */
@@ -106,7 +92,9 @@ typedef struct xfs_qm {
 typedef struct xfs_quotainfo {
 	xfs_inode_t	*qi_uquotaip;	 /* user quota inode */
 	xfs_inode_t	*qi_gquotaip;	 /* group quota inode */
-	xfs_dqlist_t	 qi_dqlist;	 /* all dquots in filesys */
+	struct list_head qi_dqlist;	 /* all dquots in filesys */
+	struct mutex	 qi_dqlist_lock;
+	int		 qi_dquots;
 	int		 qi_dqreclaims;	 /* a change here indicates
 					    a removal in the dqlist */
 	time_t		 qi_btimelimit;	 /* limit for blks timer */
@@ -174,10 +162,6 @@ extern int		xfs_qm_scall_setqlim(xfs_mount_t *, xfs_dqid_t, uint,
 extern int		xfs_qm_scall_getqstat(xfs_mount_t *, fs_quota_stat_t *);
 extern int		xfs_qm_scall_quotaon(xfs_mount_t *, uint);
 extern int		xfs_qm_scall_quotaoff(xfs_mount_t *, uint);
-
-/* list stuff */
-extern void		xfs_qm_freelist_append(xfs_frlist_t *, xfs_dquot_t *);
-extern void		xfs_qm_freelist_unlink(xfs_dquot_t *);
 
 #ifdef DEBUG
 extern int		xfs_qm_internalqcheck(xfs_mount_t *);

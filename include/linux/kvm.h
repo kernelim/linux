@@ -39,7 +39,7 @@ struct kvm_userspace_memory_region {
 
 /* for kvm_memory_region::flags */
 #define KVM_MEM_LOG_DIRTY_PAGES  1UL
-
+#define KVM_MEMSLOT_INVALID      (1UL << 1)
 
 /* for KVM_IRQ_LINE */
 struct kvm_irq_level {
@@ -99,6 +99,7 @@ struct kvm_pit_config {
 
 /* For KVM_EXIT_INTERNAL_ERROR */
 #define KVM_INTERNAL_ERROR_EMULATION 1
+#define KVM_INTERNAL_ERROR_SIMUL_EX 2
 
 /* for KVM_RUN, returned by mmap(vcpu_fd, offset=0) */
 struct kvm_run {
@@ -116,6 +117,11 @@ struct kvm_run {
 	__u64 cr8;
 	__u64 apic_base;
 
+#ifdef __KVM_S390
+	/* the processor status word for s390 */
+	__u64 psw_mask; /* psw upper half */
+	__u64 psw_addr; /* psw lower half */
+#endif
 	union {
 		/* KVM_EXIT_UNKNOWN */
 		struct {
@@ -167,8 +173,6 @@ struct kvm_run {
 		/* KVM_EXIT_S390_SIEIC */
 		struct {
 			__u8 icptcode;
-			__u64 mask; /* psw upper half */
-			__u64 addr; /* psw lower half */
 			__u16 ipa;
 			__u32 ipb;
 		} s390_sieic;
@@ -187,6 +191,9 @@ struct kvm_run {
 		} dcr;
 		struct {
 			__u32 suberror;
+			/* Available with KVM_CAP_INTERNAL_ERROR_DATA: */
+			__u32 ndata;
+			__u64 data[16];
 		} internal;
 		/* Fix the size of the union. */
 		char padding[256];
@@ -436,6 +443,17 @@ struct kvm_ioeventfd {
 #endif
 #define KVM_CAP_IOEVENTFD 36
 #define KVM_CAP_SET_IDENTITY_MAP_ADDR 37
+#define KVM_CAP_ADJUST_CLOCK 39
+#define KVM_CAP_INTERNAL_ERROR_DATA 40
+#ifdef __KVM_HAVE_VCPU_EVENTS
+#define KVM_CAP_VCPU_EVENTS 41
+#endif
+#ifdef __KVM_HAVE_XSAVE
+#define KVM_CAP_XSAVE 55
+#endif
+#ifdef __KVM_HAVE_XCRS
+#define KVM_CAP_XCRS 56
+#endif
 
 #ifdef KVM_CAP_IRQ_ROUTING
 
@@ -474,6 +492,7 @@ struct kvm_irq_routing {
 };
 
 #endif
+#define KVM_CAP_S390_PSW 42
 
 #ifdef KVM_CAP_MCE
 /* x86 MCE */
@@ -495,6 +514,12 @@ struct kvm_irqfd {
 	__u32 gsi;
 	__u32 flags;
 	__u8  pad[20];
+};
+
+struct kvm_clock_data {
+	__u64 clock;
+	__u32 flags;
+	__u32 pad[9];
 };
 
 /*
@@ -546,6 +571,9 @@ struct kvm_irqfd {
 #define KVM_CREATE_PIT2		   _IOW(KVMIO, 0x77, struct kvm_pit_config)
 #define KVM_SET_BOOT_CPU_ID        _IO(KVMIO, 0x78)
 #define KVM_IOEVENTFD             _IOW(KVMIO, 0x79, struct kvm_ioeventfd)
+#define KVM_SET_CLOCK             _IOW(KVMIO, 0x7b, struct kvm_clock_data)
+#define KVM_GET_CLOCK             _IOR(KVMIO, 0x7c, struct kvm_clock_data)
+
 
 /*
  * ioctls for vcpu fds
@@ -614,9 +642,18 @@ struct kvm_debug_guest {
 
 #define KVM_IA64_VCPU_GET_STACK   _IOR(KVMIO,  0x9a, void *)
 #define KVM_IA64_VCPU_SET_STACK   _IOW(KVMIO,  0x9b, void *)
+/* Available with KVM_CAP_VCPU_EVENTS */
+#define KVM_GET_VCPU_EVENTS       _IOR(KVMIO,  0x9f, struct kvm_vcpu_events)
+#define KVM_SET_VCPU_EVENTS       _IOW(KVMIO,  0xa0, struct kvm_vcpu_events)
 
 #define KVM_GET_PIT2   _IOR(KVMIO,   0x9f, struct kvm_pit_state2)
 #define KVM_SET_PIT2   _IOW(KVMIO,   0xa0, struct kvm_pit_state2)
+/* Available with KVM_CAP_XSAVE */
+#define KVM_GET_XSAVE		  _IOR(KVMIO,  0xa4, struct kvm_xsave)
+#define KVM_SET_XSAVE		  _IOW(KVMIO,  0xa5, struct kvm_xsave)
+/* Available with KVM_CAP_XCRS */
+#define KVM_GET_XCRS		  _IOR(KVMIO,  0xa6, struct kvm_xcrs)
+#define KVM_SET_XCRS		  _IOW(KVMIO,  0xa7, struct kvm_xcrs)
 
 #define KVM_TRC_INJ_VIRQ         (KVM_TRC_HANDLER + 0x02)
 #define KVM_TRC_REDELIVER_EVT    (KVM_TRC_HANDLER + 0x03)

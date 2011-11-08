@@ -176,7 +176,6 @@ struct ieee80211_rx_data {
 	struct ieee80211_rate *rate;
 
 	unsigned int flags;
-	int sent_ps_buffered;
 	int queue;
 	u32 tkip_iv32;
 	u16 tkip_iv16;
@@ -229,7 +228,7 @@ struct mesh_preq_queue {
 };
 
 enum ieee80211_mgd_state {
-	IEEE80211_MGD_STATE_IDLE,
+	IEEE80211_MGD_STATE_INVALID,
 	IEEE80211_MGD_STATE_PROBE,
 	IEEE80211_MGD_STATE_AUTH,
 	IEEE80211_MGD_STATE_ASSOC,
@@ -264,6 +263,7 @@ enum ieee80211_sta_flags {
 	IEEE80211_STA_DISABLE_11N	= BIT(4),
 	IEEE80211_STA_CSA_RECEIVED	= BIT(5),
 	IEEE80211_STA_MFP_ENABLED	= BIT(6),
+	IEEE80211_STA_NULLFUNC_ACKED	= BIT(7),
 };
 
 /* flags for MLME request */
@@ -286,7 +286,6 @@ struct ieee80211_if_managed {
 
 	struct mutex mtx;
 	struct ieee80211_bss *associated;
-	struct ieee80211_mgd_work *old_associate_work;
 	struct list_head work_list;
 
 	u8 bssid[ETH_ALEN];
@@ -588,11 +587,17 @@ enum queue_stop_reason {
  *	determine if we are on the operating channel or not
  * @SCAN_OFF_CHANNEL: We're off our operating channel for scanning,
  *	gets only set in conjunction with SCAN_SW_SCANNING
+ * @SCAN_COMPLETED: Set for our scan work function when the driver reported
+ *	that the scan completed.
+ * @SCAN_ABORTED: Set for our scan work function when the driver reported
+ *	a scan complete for an aborted scan.
  */
 enum {
 	SCAN_SW_SCANNING,
 	SCAN_HW_SCANNING,
 	SCAN_OFF_CHANNEL,
+	SCAN_COMPLETED,
+	SCAN_ABORTED,
 };
 
 /**
@@ -623,6 +628,7 @@ struct ieee80211_local {
 	struct ieee80211_hw hw;
 
 	const struct ieee80211_ops *ops;
+	const struct ieee80211_ops2 *ops2;
 
 	/*
 	 * private workqueue to mac80211. mac80211 makes this accessible
@@ -691,15 +697,18 @@ struct ieee80211_local {
 
 	/* Station data */
 	/*
-	 * The lock only protects the list, hash, timer and counter
-	 * against manipulation, reads are done in RCU. Additionally,
-	 * the lock protects each BSS's TIM bitmap.
+	 * The mutex only protects the list and counter,
+	 * reads are done in RCU.
+	 * Additionally, the lock protects the hash table,
+	 * the pending list and each BSS's TIM bitmap.
 	 */
+	struct mutex sta_mtx;
 	spinlock_t sta_lock;
 	unsigned long num_sta;
-	struct list_head sta_list;
+	struct list_head sta_list, sta_pending_list;
 	struct sta_info *sta_hash[STA_HASH_SIZE];
 	struct timer_list sta_cleanup;
+	struct work_struct sta_finish_work;
 	int sta_generation;
 
 	struct sk_buff_head pending[IEEE80211_MAX_QUEUES];
@@ -738,10 +747,9 @@ struct ieee80211_local {
 	unsigned long scanning;
 	struct cfg80211_ssid scan_ssid;
 	struct cfg80211_scan_request *int_scan_req;
-	struct cfg80211_scan_request *scan_req;
+	struct cfg80211_scan_request *scan_req, *hw_scan_req;
 	struct ieee80211_channel *scan_channel;
-	const u8 *orig_ies;
-	int orig_ies_len;
+	enum ieee80211_band hw_scan_band;
 	int scan_channel_idx;
 	int scan_ies_len;
 
@@ -768,10 +776,6 @@ struct ieee80211_local {
 	struct led_trigger *tx_led, *rx_led, *assoc_led, *radio_led;
 	char tx_led_name[32], rx_led_name[32],
 	     assoc_led_name[32], radio_led_name[32];
-#endif
-
-#ifdef CONFIG_MAC80211_DEBUGFS
-	struct work_struct sta_debugfs_add;
 #endif
 
 #ifdef CONFIG_MAC80211_DEBUG_COUNTERS
@@ -808,6 +812,7 @@ struct ieee80211_local {
 	unsigned int wmm_acm; /* bit field of ACM bits (BIT(802.1D tag)) */
 
 	bool pspolling;
+	bool scan_ps_enabled;
 	/*
 	 * PS can only be enabled when we have exactly one managed
 	 * interface (and monitors) in PS, this then points there.
@@ -1012,7 +1017,8 @@ void ieee80211_ibss_setup_sdata(struct ieee80211_sub_if_data *sdata);
 ieee80211_rx_result
 ieee80211_ibss_rx_mgmt(struct ieee80211_sub_if_data *sdata, struct sk_buff *skb);
 struct sta_info *ieee80211_ibss_add_sta(struct ieee80211_sub_if_data *sdata,
-					u8 *bssid, u8 *addr, u32 supp_rates);
+					u8 *bssid, u8 *addr, u32 supp_rates,
+					gfp_t gfp);
 int ieee80211_ibss_join(struct ieee80211_sub_if_data *sdata,
 			struct cfg80211_ibss_params *params);
 int ieee80211_ibss_leave(struct ieee80211_sub_if_data *sdata);
@@ -1022,7 +1028,8 @@ void ieee80211_ibss_restart(struct ieee80211_sub_if_data *sdata);
 /* scan/BSS handling */
 void ieee80211_scan_work(struct work_struct *work);
 int ieee80211_request_internal_scan(struct ieee80211_sub_if_data *sdata,
-				    const u8 *ssid, u8 ssid_len);
+				    const u8 *ssid, u8 ssid_len,
+				    struct ieee80211_channel *chan);
 int ieee80211_request_scan(struct ieee80211_sub_if_data *sdata,
 			   struct cfg80211_scan_request *req);
 void ieee80211_scan_cancel(struct ieee80211_local *local);
@@ -1170,7 +1177,8 @@ void ieee80211_send_auth(struct ieee80211_sub_if_data *sdata,
 			 u8 *extra, size_t extra_len, const u8 *bssid,
 			 const u8 *key, u8 key_len, u8 key_idx);
 int ieee80211_build_preq_ies(struct ieee80211_local *local, u8 *buffer,
-			     const u8 *ie, size_t ie_len);
+			     const u8 *ie, size_t ie_len,
+			     enum ieee80211_band band);
 void ieee80211_send_probe_req(struct ieee80211_sub_if_data *sdata, u8 *dst,
 			      const u8 *ssid, size_t ssid_len,
 			      const u8 *ie, size_t ie_len);

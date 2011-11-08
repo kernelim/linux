@@ -38,6 +38,8 @@
 #include <linux/errno.h>
 #include <linux/pci.h>
 #include <linux/dma-mapping.h>
+#include <linux/slab.h>
+#include <linux/io-mapping.h>
 
 #include <linux/mlx4/device.h>
 #include <linux/mlx4/doorbell.h>
@@ -102,7 +104,57 @@ MODULE_PARM_DESC(use_prio, "Enable steering by VLAN priority on ETH ports "
 
 static int log_mtts_per_seg = ilog2(MLX4_MTT_ENTRY_PER_SEG);
 module_param_named(log_mtts_per_seg, log_mtts_per_seg, int, 0444);
-MODULE_PARM_DESC(log_mtts_per_seg, "Log2 number of MTT entries per segment (1-5)");
+MODULE_PARM_DESC(log_mtts_per_seg, "Log2 number of MTT entries per segment (1-7)");
+
+static struct mlx4_profile mod_param_profile = { 0 };
+
+module_param_named(log_num_qp, mod_param_profile.num_qp, int, 0444);
+MODULE_PARM_DESC(log_num_qp, "log maximum number of QPs per HCA ");
+
+module_param_named(log_num_srq, mod_param_profile.num_srq, int, 0444);
+MODULE_PARM_DESC(log_num_srq, "log maximum number of SRQs per HCA ");
+
+module_param_named(log_rdmarc_per_qp, mod_param_profile.rdmarc_per_qp, int, 0444);
+MODULE_PARM_DESC(log_rdmarc_per_qp, "log number of RDMARC buffers per QP ");
+
+module_param_named(log_num_cq, mod_param_profile.num_cq, int, 0444);
+MODULE_PARM_DESC(log_num_cq, "log maximum number of CQs per HCA ");
+
+module_param_named(log_num_mcg, mod_param_profile.num_mcg, int, 0444);
+MODULE_PARM_DESC(log_num_mcg, "log maximum number of multicast groups per HCA ");
+
+module_param_named(log_num_mpt, mod_param_profile.num_mpt, int, 0444);
+MODULE_PARM_DESC(log_num_mpt,
+		"log maximum number of memory protection table entries per HCA ");
+
+module_param_named(log_num_mtt, mod_param_profile.num_mtt, int, 0444);
+MODULE_PARM_DESC(log_num_mtt,
+		 "log maximum number of memory translation table segments per HCA ");
+
+static void process_mod_param_profile(void)
+{
+	default_profile.num_qp = (mod_param_profile.num_qp ?
+				  1 << mod_param_profile.num_qp :
+				  default_profile.num_qp);
+	default_profile.num_srq = (mod_param_profile.num_srq ?
+				  1 << mod_param_profile.num_srq :
+				  default_profile.num_srq);
+	default_profile.rdmarc_per_qp = (mod_param_profile.rdmarc_per_qp ?
+				  1 << mod_param_profile.rdmarc_per_qp :
+				  default_profile.rdmarc_per_qp);
+	default_profile.num_cq = (mod_param_profile.num_cq ?
+				  1 << mod_param_profile.num_cq :
+				  default_profile.num_cq);
+	default_profile.num_mcg = (mod_param_profile.num_mcg ?
+				  1 << mod_param_profile.num_mcg :
+				  default_profile.num_mcg);
+	default_profile.num_mpt = (mod_param_profile.num_mpt ?
+				  1 << mod_param_profile.num_mpt :
+				  default_profile.num_mpt);
+	default_profile.num_mtt = (mod_param_profile.num_mtt ?
+				  1 << mod_param_profile.num_mtt :
+				  default_profile.num_mtt);
+}
 
 int mlx4_check_port_params(struct mlx4_dev *dev,
 			   enum mlx4_port_type *port_type)
@@ -220,6 +272,8 @@ static int mlx4_dev_cap(struct mlx4_dev *dev, struct mlx4_dev_cap *dev_cap)
 	dev->caps.bmme_flags	     = dev_cap->bmme_flags;
 	dev->caps.reserved_lkey	     = dev_cap->reserved_lkey;
 	dev->caps.stat_rate_support  = dev_cap->stat_rate_support;
+	dev->caps.loopback_support   = dev_cap->loopback_support;
+	dev->caps.wol		     = dev_cap->wol;
 	dev->caps.max_gso_sz	     = dev_cap->max_gso_sz;
 
 	dev->caps.log_num_macs  = log_num_mac;
@@ -711,8 +765,31 @@ static void mlx4_free_icms(struct mlx4_dev *dev)
 	mlx4_free_icm(dev, priv->fw.aux_icm, 0);
 }
 
+static int map_bf_area(struct mlx4_dev *dev)
+{
+	struct mlx4_priv *priv = mlx4_priv(dev);
+	resource_size_t bf_start;
+	resource_size_t bf_len;
+	int err = 0;
+
+	bf_start = pci_resource_start(dev->pdev, 2) + (dev->caps.num_uars << PAGE_SHIFT);
+	bf_len = pci_resource_len(dev->pdev, 2) - (dev->caps.num_uars << PAGE_SHIFT);
+	priv->bf_mapping = io_mapping_create_wc(bf_start, bf_len);
+	if (!priv->bf_mapping)
+		err = -ENOMEM;
+
+	return err;
+}
+
+static void unmap_bf_area(struct mlx4_dev *dev)
+{
+	if (mlx4_priv(dev)->bf_mapping)
+		io_mapping_free(mlx4_priv(dev)->bf_mapping);
+}
+
 static void mlx4_close_hca(struct mlx4_dev *dev)
 {
+	unmap_bf_area(dev);
 	mlx4_CLOSE_HCA(dev, 0);
 	mlx4_free_icms(dev);
 	mlx4_UNMAP_FA(dev);
@@ -757,6 +834,7 @@ static int mlx4_init_hca(struct mlx4_dev *dev)
 		goto err_stop_fw;
 	}
 
+	process_mod_param_profile();
 	profile = default_profile;
 
 	icm_size = mlx4_make_profile(dev, &profile, &dev_cap, &init_hca);
@@ -764,6 +842,9 @@ static int mlx4_init_hca(struct mlx4_dev *dev)
 		err = icm_size;
 		goto err_stop_fw;
 	}
+
+	if (map_bf_area(dev))
+		mlx4_dbg(dev, "Failed to map blue flame area\n");
 
 	init_hca.log_uar_sz = ilog2(dev->caps.num_uars);
 
@@ -795,6 +876,7 @@ err_free_icm:
 	mlx4_free_icms(dev);
 
 err_stop_fw:
+	unmap_bf_area(dev);
 	mlx4_UNMAP_FA(dev);
 	mlx4_free_icm(dev, priv->fw.fw_icm, 0);
 
@@ -822,7 +904,7 @@ static int mlx4_setup_hca(struct mlx4_dev *dev)
 		goto err_uar_table_free;
 	}
 
-	priv->kar = ioremap(priv->driver_uar.pfn << PAGE_SHIFT, PAGE_SIZE);
+	priv->kar = ioremap((phys_addr_t) priv->driver_uar.pfn << PAGE_SHIFT, PAGE_SIZE);
 	if (!priv->kar) {
 		mlx4_err(dev, "Couldn't map kernel access region, "
 			 "aborting.\n");
@@ -906,6 +988,10 @@ static int mlx4_setup_hca(struct mlx4_dev *dev)
 	}
 
 	for (port = 1; port <= dev->caps.num_ports; port++) {
+		enum mlx4_port_type port_type = 0;
+		mlx4_SENSE_PORT(dev, port, &port_type);
+		if (port_type)
+			dev->caps.port_type[port] = port_type;
 		ib_port_default_caps = 0;
 		err = mlx4_get_port_ib_caps(dev, port, &ib_port_default_caps);
 		if (err)
@@ -920,6 +1006,7 @@ static int mlx4_setup_hca(struct mlx4_dev *dev)
 			goto err_mcg_table_free;
 		}
 	}
+	mlx4_set_port_mask(dev);
 
 	return 0;
 
@@ -962,13 +1049,15 @@ static void mlx4_enable_msi_x(struct mlx4_dev *dev)
 {
 	struct mlx4_priv *priv = mlx4_priv(dev);
 	struct msix_entry *entries;
-	int nreq;
+	int nreq = min_t(int, dev->caps.num_ports *
+			 min_t(int, num_online_cpus() + 1, MAX_MSIX_P_PORT)
+				+ MSIX_LEGACY_SZ, MAX_MSIX);
 	int err;
 	int i;
 
 	if (msi_x) {
 		nreq = min_t(int, dev->caps.num_eqs - dev->caps.reserved_eqs,
-			     num_possible_cpus() + 1);
+			     nreq);
 		entries = kcalloc(nreq, sizeof *entries, GFP_KERNEL);
 		if (!entries)
 			goto no_msi;
@@ -991,7 +1080,15 @@ static void mlx4_enable_msi_x(struct mlx4_dev *dev)
 			goto no_msi;
 		}
 
-		dev->caps.num_comp_vectors = nreq - 1;
+		if (nreq <
+		    MSIX_LEGACY_SZ + dev->caps.num_ports * MIN_MSIX_P_PORT) {
+			/*Working in legacy mode , all EQ's shared*/
+			dev->caps.comp_pool           = 0;
+			dev->caps.num_comp_vectors = nreq - 1;
+		} else {
+			dev->caps.comp_pool           = nreq - MSIX_LEGACY_SZ;
+			dev->caps.num_comp_vectors = MSIX_LEGACY_SZ - 1;
+		}
 		for (i = 0; i < nreq; ++i)
 			priv->eq_table.eq[i].irq = entries[i].vector;
 
@@ -1003,6 +1100,7 @@ static void mlx4_enable_msi_x(struct mlx4_dev *dev)
 
 no_msi:
 	dev->caps.num_comp_vectors = 1;
+	dev->caps.comp_pool	   = 0;
 
 	for (i = 0; i < 2; ++i)
 		priv->eq_table.eq[i].irq = dev->pdev->irq;
@@ -1102,6 +1200,9 @@ static int __mlx4_init_one(struct pci_dev *pdev, const struct pci_device_id *id)
 		}
 	}
 
+	/* Allow large DMA segments, up to the firmware limit of 1 GB */
+	dma_set_max_seg_size(&pdev->dev, 1024 * 1024 * 1024);
+
 	priv = kzalloc(sizeof *priv, GFP_KERNEL);
 	if (!priv) {
 		dev_err(&pdev->dev, "Device struct alloc failed, "
@@ -1119,6 +1220,11 @@ static int __mlx4_init_one(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	INIT_LIST_HEAD(&priv->pgdir_list);
 	mutex_init(&priv->pgdir_mutex);
+
+	pci_read_config_byte(pdev, PCI_REVISION_ID, &dev->rev_id);
+
+	INIT_LIST_HEAD(&priv->bf_list);
+	mutex_init(&priv->bf_mutex);
 
 	/*
 	 * Now reset the HCA before we touch the PCI capabilities or
@@ -1143,6 +1249,9 @@ static int __mlx4_init_one(struct pci_dev *pdev, const struct pci_device_id *id)
 	err = mlx4_alloc_eq_table(dev);
 	if (err)
 		goto err_close;
+
+	priv->msix_ctl.pool_bm = 0;
+	spin_lock_init(&priv->msix_ctl.pool_lock);
 
 	mlx4_enable_msi_x(dev);
 
@@ -1174,7 +1283,7 @@ static int __mlx4_init_one(struct pci_dev *pdev, const struct pci_device_id *id)
 	return 0;
 
 err_port:
-	for (port = 1; port <= dev->caps.num_ports; port++)
+	for (--port; port >= 1; --port)
 		mlx4_cleanup_port_info(&priv->port[port]);
 
 	mlx4_cleanup_mcg_table(dev);
@@ -1284,6 +1393,21 @@ static struct pci_device_id mlx4_pci_table[] = {
 	{ PCI_VDEVICE(MELLANOX, 0x6764) }, /* MT26468 ConnectX EN 10GigE PCIe gen2*/
 	{ PCI_VDEVICE(MELLANOX, 0x6746) }, /* MT26438 ConnectX EN 40GigE PCIe gen2 5GT/s */
 	{ PCI_VDEVICE(MELLANOX, 0x676e) }, /* MT26478 ConnectX2 40GigE PCIe gen2 */
+	{ PCI_VDEVICE(MELLANOX, 0x1002) }, /* MT25400 Family [ConnectX-2 Virtual Function] */
+	{ PCI_VDEVICE(MELLANOX, 0x1003) }, /* MT27500 Family [ConnectX-3] */
+	{ PCI_VDEVICE(MELLANOX, 0x1004) }, /* MT27500 Family [ConnectX-3 Virtual Function] */
+	{ PCI_VDEVICE(MELLANOX, 0x1005) }, /* MT27510 Family */
+	{ PCI_VDEVICE(MELLANOX, 0x1006) }, /* MT27511 Family */
+	{ PCI_VDEVICE(MELLANOX, 0x1007) }, /* MT27520 Family */
+	{ PCI_VDEVICE(MELLANOX, 0x1008) }, /* MT27521 Family */
+	{ PCI_VDEVICE(MELLANOX, 0x1009) }, /* MT27530 Family */
+	{ PCI_VDEVICE(MELLANOX, 0x100a) }, /* MT27531 Family */
+	{ PCI_VDEVICE(MELLANOX, 0x100b) }, /* MT27540 Family */
+	{ PCI_VDEVICE(MELLANOX, 0x100c) }, /* MT27541 Family */
+	{ PCI_VDEVICE(MELLANOX, 0x100d) }, /* MT27550 Family */
+	{ PCI_VDEVICE(MELLANOX, 0x100e) }, /* MT27551 Family */
+	{ PCI_VDEVICE(MELLANOX, 0x100f) }, /* MT27560 Family */
+	{ PCI_VDEVICE(MELLANOX, 0x1010) }, /* MT27561 Family */
 	{ 0, }
 };
 
@@ -1308,7 +1432,7 @@ static int __init mlx4_verify_params(void)
 		return -1;
 	}
 
-	if ((log_mtts_per_seg < 1) || (log_mtts_per_seg > 5)) {
+	if ((log_mtts_per_seg < 1) || (log_mtts_per_seg > 7)) {
 		printk(KERN_WARNING "mlx4_core: bad log_mtts_per_seg: %d\n", log_mtts_per_seg);
 		return -1;
 	}

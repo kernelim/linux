@@ -274,8 +274,71 @@ static struct notifier_block pci_dn_reconfig_nb = {
 	.notifier_call = pci_dn_reconfig_notifier,
 };
 
+#ifdef CONFIG_VIRT_CPU_ACCOUNTING
+/*
+ * Allocate space for the dispatch trace log for all possible cpus
+ * and register the buffers with the hypervisor.  This is used for
+ * computing time stolen by the hypervisor.
+ */
+static int alloc_dispatch_logs(void)
+{
+	int cpu, ret;
+	struct paca_struct *pp;
+	struct dtl_entry *dtl;
+	struct kmem_cache *dtl_cache;
+
+	if (!firmware_has_feature(FW_FEATURE_SPLPAR))
+		return 0;
+
+	dtl_cache = kmem_cache_create("dtl", DISPATCH_LOG_BYTES,
+						DISPATCH_LOG_BYTES, 0, NULL);
+	if (!dtl_cache) {
+		pr_warn("Failed to create dispatch trace log buffer cache\n");
+		pr_warn("Stolen time statistics will be unreliable\n");
+		return 0;
+	}
+
+	for_each_possible_cpu(cpu) {
+		pp = &paca[cpu];
+		dtl = kmem_cache_alloc(dtl_cache, GFP_KERNEL);
+		if (!dtl) {
+			pr_warning("Failed to allocate dispatch trace log for cpu %d\n",
+				cpu);
+			pr_warning("Stolen time statistics will be unreliable\n");
+			break;
+		}
+
+		pp->dtl_ridx = 0;
+		pp->dispatch_log = dtl;
+		pp->dispatch_log_end = dtl + N_DISPATCH_LOG;
+		pp->dtl_curr = dtl;
+	}
+
+	/* Register the DTL for the current (boot) cpu */
+	dtl = get_paca()->dispatch_log;
+	get_paca()->dtl_ridx = 0;
+	get_paca()->dtl_curr = dtl;
+	get_paca()->lppaca_ptr->dtl_idx = 0;
+
+	/* hypervisor reads buffer length from this field */
+	dtl->enqueue_to_dispatch_time = DISPATCH_LOG_BYTES;
+	ret = register_dtl(hard_smp_processor_id(), __pa(dtl));
+	if (ret)
+		pr_warning("DTL registration failed for boot cpu %d (%d)\n",
+			   smp_processor_id(), ret);
+	get_paca()->lppaca_ptr->dtl_enable_mask = 2;
+
+	return 0;
+}
+
+early_initcall(alloc_dispatch_logs);
+#endif /* CONFIG_VIRT_CPU_ACCOUNTING */
+
 static void __init pSeries_setup_arch(void)
 {
+	if (!strncmp(cur_cpu_spec->platform, "power5", 6))
+		mark_hardware_unsupported("Power5 Processor");
+			
 	/* Discover PIC type and setup ppc_md accordingly */
 	pseries_discover_pic();
 
@@ -340,6 +403,16 @@ static int pseries_set_xdabr(unsigned long dabr)
 
 #define CMO_CHARACTERISTICS_TOKEN 44
 #define CMO_MAXLENGTH 1026
+
+void pSeries_coalesce_init(void)
+{
+	struct hvcall_mpp_x_data mpp_x_data;
+
+	if (firmware_has_feature(FW_FEATURE_CMO) && !h_get_mpp_x(&mpp_x_data))
+		powerpc_firmware_features |= FW_FEATURE_XCMO;
+	else
+		powerpc_firmware_features &= ~FW_FEATURE_XCMO;
+}
 
 /**
  * fw_cmo_feature_init - FW_FEATURE_CMO is not stored in ibm,hypertas-functions,
@@ -410,6 +483,7 @@ void pSeries_cmo_feature_init(void)
 		pr_debug("CMO enabled, PrPSP=%d, SecPSP=%d\n", CMO_PrPSP,
 		         CMO_SecPSP);
 		powerpc_firmware_features |= FW_FEATURE_CMO;
+		pSeries_coalesce_init();
 	} else
 		pr_debug("CMO not enabled, PrPSP=%d, SecPSP=%d\n", CMO_PrPSP,
 		         CMO_SecPSP);

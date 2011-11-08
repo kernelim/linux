@@ -88,7 +88,7 @@ void cfg80211_scan_done(struct cfg80211_scan_request *request, bool aborted)
 	WARN_ON(request != wiphy_to_dev(request->wiphy)->scan_req);
 
 	request->aborted = aborted;
-	schedule_work(&wiphy_to_dev(request->wiphy)->scan_done_wk);
+	queue_work(cfg80211_wq, &wiphy_to_dev(request->wiphy)->scan_done_wk);
 }
 EXPORT_SYMBOL(cfg80211_scan_done);
 
@@ -270,6 +270,7 @@ struct cfg80211_bss *cfg80211_get_bss(struct wiphy *wiphy,
 {
 	struct cfg80211_registered_device *dev = wiphy_to_dev(wiphy);
 	struct cfg80211_internal_bss *bss, *res = NULL;
+	unsigned long now = jiffies;
 
 	spin_lock_bh(&dev->bss_lock);
 
@@ -277,6 +278,10 @@ struct cfg80211_bss *cfg80211_get_bss(struct wiphy *wiphy,
 		if ((bss->pub.capability & capa_mask) != capa_val)
 			continue;
 		if (channel && bss->pub.channel != channel)
+			continue;
+		/* Don't get expired BSS structs */
+		if (time_after(now, bss->ts + IEEE80211_SCAN_RESULT_EXPIRE) &&
+		    !atomic_read(&bss->hold))
 			continue;
 		if (is_bss(&bss->pub, bssid, ssid, ssid_len)) {
 			res = bss;

@@ -97,6 +97,24 @@ system_call_common:
 	addi	r9,r1,STACK_FRAME_OVERHEAD
 	ld	r11,exception_marker@toc(r2)
 	std	r11,-16(r9)		/* "regshere" marker */
+#if defined(CONFIG_VIRT_CPU_ACCOUNTING) && defined(CONFIG_PPC_SPLPAR)
+BEGIN_FW_FTR_SECTION
+	beq	33f
+	/* if from user, see if there are any DTL entries to process */
+	ld	r10,PACALPPACAPTR(r13)	/* get ptr to VPA */
+	ld	r11,PACA_DTL_RIDX(r13)	/* get log read index */
+	ld	r10,LPPACA_DTLIDX(r10)	/* get log write index */
+	cmpd	cr1,r11,r10
+	beq+	cr1,33f
+	bl	.accumulate_stolen_time
+	REST_GPR(0,r1)
+	REST_4GPRS(3,r1)
+	REST_2GPRS(7,r1)
+	addi	r9,r1,STACK_FRAME_OVERHEAD
+33:
+END_FW_FTR_SECTION_IFSET(FW_FEATURE_SPLPAR)
+#endif /* CONFIG_VIRT_CPU_ACCOUNTING && CONFIG_PPC_SPLPAR */
+
 #ifdef CONFIG_TRACE_IRQFLAGS
 	bl	.trace_hardirqs_on
 	REST_GPR(0,r1)
@@ -555,15 +573,6 @@ FW_FTR_SECTION_ELSE
 ALT_FW_FTR_SECTION_END_IFCLR(FW_FEATURE_ISERIES)
 2:
 	TRACE_AND_RESTORE_IRQ(r5);
-
-#ifdef CONFIG_PERF_EVENTS
-	/* check paca->perf_event_pending if we're enabling ints */
-	lbz	r3,PACAPERFPEND(r13)
-	and.	r3,r3,r5
-	beq	27f
-	bl	.perf_event_do_pending
-27:
-#endif /* CONFIG_PERF_EVENTS */
 
 	/* extract EE bit and use it to restore paca->hard_enabled */
 	ld	r3,_MSR(r1)

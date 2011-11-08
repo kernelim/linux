@@ -73,10 +73,6 @@
 #define MMCR1_PMCSEL_MSK	0x7f
 
 /*
- * Bits in MMCRA
- */
-
-/*
  * Layout of constraint bits:
  * 6666555555555544444444443333333333222222222211111111110000000000
  * 3210987654321098765432109876543210987654321098765432109876543210
@@ -686,4 +682,4 @@ static int init_power5p_pmu(void)
 	return register_power_pmu(&power5p_pmu);
 }
 
-arch_initcall(init_power5p_pmu);
+early_initcall(init_power5p_pmu);

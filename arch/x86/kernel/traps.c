@@ -82,6 +82,8 @@ EXPORT_SYMBOL_GPL(used_vectors);
 
 static int ignore_nmis;
 
+int unknown_nmi_panic;
+
 static inline void conditional_sti(struct pt_regs *regs)
 {
 	if (regs->flags & X86_EFLAGS_IF)
@@ -109,11 +111,74 @@ static inline void preempt_conditional_cli(struct pt_regs *regs)
 }
 
 #ifdef CONFIG_X86_32
-static inline void
-die_if_kernel(const char *str, struct pt_regs *regs, long err)
+static inline int
+__compare_user_cs_desc(const struct desc_struct *desc1,
+	const struct desc_struct *desc2)
 {
-	if (!user_mode_vm(regs))
-		die(str, regs, err);
+	return ((desc1->limit0 != desc2->limit0) ||
+		(desc1->limit != desc2->limit) ||
+		(desc1->base0 != desc2->base0) ||
+		(desc1->base1 != desc2->base1) ||
+		(desc1->base2 != desc2->base2));
+}
+
+/*
+ * lazy-check for CS validity on exec-shield binaries:
+ *
+ * the original non-exec stack patch was written by
+ * Solar Designer <solar at openwall.com>. Thanks!
+ */
+static int
+check_lazy_exec_limit(int cpu, struct pt_regs *regs, long error_code)
+{
+	struct desc_struct *desc1, *desc2;
+	struct vm_area_struct *vma;
+	unsigned long limit;
+
+	if (current->mm == NULL)
+		return 0;
+
+	limit = -1UL;
+	if (current->mm->context.exec_limit != -1UL) {
+		limit = PAGE_SIZE;
+		spin_lock(&current->mm->page_table_lock);
+		for (vma = current->mm->mmap; vma; vma = vma->vm_next)
+			if ((vma->vm_flags & VM_EXEC) && (vma->vm_end > limit))
+				limit = vma->vm_end;
+		vma = get_gate_vma(current->mm);
+		if (vma && (vma->vm_flags & VM_EXEC) && (vma->vm_end > limit))
+			limit = vma->vm_end;
+		spin_unlock(&current->mm->page_table_lock);
+		if (limit >= TASK_SIZE)
+			limit = -1UL;
+		current->mm->context.exec_limit = limit;
+	}
+	set_user_cs(&current->mm->context.user_cs, limit);
+
+	desc1 = &current->mm->context.user_cs;
+	desc2 = get_cpu_gdt_table(cpu) + GDT_ENTRY_DEFAULT_USER_CS;
+
+	if (__compare_user_cs_desc(desc1, desc2)) {
+		/*
+		 * The CS was not in sync - reload it and retry the
+		 * instruction. If the instruction still faults then
+		 * we won't hit this branch next time around.
+		 */
+		if (print_fatal_signals >= 2) {
+			printk(KERN_ERR "#GPF fixup (%ld[seg:%lx]) at %08lx, CPU#%d.\n",
+				error_code, error_code/8, regs->ip,
+				smp_processor_id());
+			printk(KERN_ERR "exec_limit: %08lx, user_cs: %08x/%08x, CPU_cs: %08x/%08x.\n",
+				current->mm->context.exec_limit,
+				desc1->a, desc1->b, desc2->a, desc2->b);
+		}
+
+		load_user_cs_desc(cpu, current->mm);
+
+		return 1;
+	}
+
+	return 0;
 }
 #endif
 
@@ -273,6 +338,29 @@ do_general_protection(struct pt_regs *regs, long error_code)
 	if (!user_mode(regs))
 		goto gp_in_kernel;
 
+#ifdef CONFIG_X86_32
+{
+	int cpu;
+	int ok;
+
+	cpu = get_cpu();
+	ok = check_lazy_exec_limit(cpu, regs, error_code);
+	put_cpu();
+
+	if (ok)
+		return;
+
+	if (print_fatal_signals) {
+		printk(KERN_ERR "#GPF(%ld[seg:%lx]) at %08lx, CPU#%d.\n",
+			error_code, error_code/8, regs->ip, smp_processor_id());
+		printk(KERN_ERR "exec_limit: %08lx, user_cs: %08x/%08x.\n",
+			current->mm->context.exec_limit,
+			current->mm->context.user_cs.a,
+			current->mm->context.user_cs.b);
+	}
+}
+#endif /*CONFIG_X86_32*/
+
 	tsk->thread.error_code = error_code;
 	tsk->thread.trap_no = 13;
 
@@ -307,6 +395,13 @@ gp_in_kernel:
 		return;
 	die("general protection fault", regs, error_code);
 }
+
+static int __init setup_unknown_nmi_panic(char *str)
+{
+	unknown_nmi_panic = 1;
+	return 1;
+}
+__setup("unknown_nmi_panic", setup_unknown_nmi_panic);
 
 static notrace __kprobes void
 mem_parity_error(unsigned char reason, struct pt_regs *regs)
@@ -379,7 +474,7 @@ unknown_nmi_error(unsigned char reason, struct pt_regs *regs)
 			reason, smp_processor_id());
 
 	printk(KERN_EMERG "Do you have a strange power saving mode enabled?\n");
-	if (panic_on_unrecovered_nmi)
+	if (unknown_nmi_panic || panic_on_unrecovered_nmi)
 		panic("NMI: Not continuing");
 
 	printk(KERN_EMERG "Dazed and confused, but trying to continue\n");
@@ -400,7 +495,13 @@ static notrace __kprobes void default_do_nmi(struct pt_regs *regs)
 		if (notify_die(DIE_NMI_IPI, "nmi_ipi", regs, reason, 2, SIGINT)
 								== NOTIFY_STOP)
 			return;
+
 #ifdef CONFIG_X86_LOCAL_APIC
+		if (notify_die(DIE_NMI, "nmi", regs, reason, 2, SIGINT)
+							== NOTIFY_STOP)
+			return;
+
+#ifndef CONFIG_LOCKUP_DETECTOR
 		/*
 		 * Ok, so this is none of the documented NMI sources,
 		 * so it must be the NMI watchdog.
@@ -408,6 +509,7 @@ static notrace __kprobes void default_do_nmi(struct pt_regs *regs)
 		if (nmi_watchdog_tick(regs, reason))
 			return;
 		if (!do_nmi_callback(regs, cpu))
+#endif /* !CONFIG_LOCKUP_DETECTOR */
 			unknown_nmi_error(reason, regs);
 #else
 		unknown_nmi_error(reason, regs);
@@ -538,12 +640,6 @@ dotraplinkage void __kprobes do_debug(struct pt_regs *regs, long error_code)
 	if (condition & DR_STEP && kmemcheck_trap(regs))
 		return;
 
-	/*
-	 * The processor cleared BTF, so don't mark that we need it set.
-	 */
-	clear_tsk_thread_flag(tsk, TIF_DEBUGCTLMSR);
-	tsk->thread.debugctlmsr = 0;
-
 	if (notify_die(DIE_DEBUG, "debug", regs, condition, error_code,
 						SIGTRAP) == NOTIFY_STOP)
 		return;
@@ -561,6 +657,10 @@ dotraplinkage void __kprobes do_debug(struct pt_regs *regs, long error_code)
 	if (regs->flags & X86_VM_MASK)
 		goto debug_vm86;
 #endif
+	/*
+	 * The processor cleared BTF, so don't mark that we need it set.
+	 */
+	clear_tsk_thread_flag(tsk, TIF_BLOCKSTEP);
 
 	/* Save debug status register where ptrace can see it */
 	tsk->thread.debugreg6 = condition;
@@ -747,30 +847,14 @@ do_simd_coprocessor_error(struct pt_regs *regs, long error_code)
 	conditional_sti(regs);
 
 #ifdef CONFIG_X86_32
-	if (cpu_has_xmm) {
-		/* Handle SIMD FPU exceptions on PIII+ processors. */
-		ignore_fpu_irq = 1;
-		simd_math_error((void __user *)regs->ip);
-		return;
-	}
-	/*
-	 * Handle strange cache flush from user space exception
-	 * in all other cases.  This is undocumented behaviour.
-	 */
-	if (regs->flags & X86_VM_MASK) {
-		handle_vm86_fault((struct kernel_vm86_regs *)regs, error_code);
-		return;
-	}
-	current->thread.trap_no = 19;
-	current->thread.error_code = error_code;
-	die_if_kernel("cache flush denied", regs, error_code);
-	force_sig(SIGSEGV, current);
+	ignore_fpu_irq = 1;
 #else
 	if (!user_mode(regs) &&
 			kernel_math_error(regs, "kernel simd math error", 19))
 		return;
-	simd_math_error((void __user *)regs->ip);
 #endif
+
+	simd_math_error((void __user *)regs->ip);
 }
 
 dotraplinkage void
@@ -881,19 +965,37 @@ do_device_not_available(struct pt_regs *regs, long error_code)
 }
 
 #ifdef CONFIG_X86_32
+/*
+ * The fixup code for errors in iret jumps to here (iret_exc). It loses
+ * the original trap number and erorr code. The bogus trap 32 and error
+ * code 0 are what the vanilla kernel delivers via:
+ * DO_ERROR_INFO(32, SIGSEGV, "iret exception", iret_error, ILL_BADSTK, 0, 1)
+ *
+ * NOTE: Because of the final "1" in the macro we need to enable interrupts.
+ *
+ * In case of a general protection fault in the iret instruction, we
+ * need to check for a lazy CS update for exec-shield.
+ */
 dotraplinkage void do_iret_error(struct pt_regs *regs, long error_code)
 {
-	siginfo_t info;
+	int ok;
+	int cpu;
+
 	local_irq_enable();
 
-	info.si_signo = SIGILL;
-	info.si_errno = 0;
-	info.si_code = ILL_BADSTK;
-	info.si_addr = NULL;
-	if (notify_die(DIE_TRAP, "iret exception",
-			regs, error_code, 32, SIGILL) == NOTIFY_STOP)
-		return;
-	do_trap(32, SIGILL, "iret exception", regs, error_code, &info);
+	cpu = get_cpu();
+	ok = check_lazy_exec_limit(cpu, regs, error_code);
+	put_cpu();
+
+	if (!ok && notify_die(DIE_TRAP, "iret exception", regs,
+		error_code, 32, SIGSEGV) != NOTIFY_STOP) {
+			siginfo_t info;
+			info.si_signo = SIGSEGV;
+			info.si_errno = 0;
+			info.si_code = ILL_BADSTK;
+			info.si_addr = 0;
+			do_trap(32, SIGSEGV, "iret exception", regs, error_code, &info);
+	}
 }
 #endif
 

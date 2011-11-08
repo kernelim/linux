@@ -38,7 +38,7 @@
 
 static struct kmem_cache *rds_tcp_incoming_slab;
 
-void rds_tcp_inc_purge(struct rds_incoming *inc)
+static void rds_tcp_inc_purge(struct rds_incoming *inc)
 {
 	struct rds_tcp_incoming *tinc;
 	tinc = container_of(inc, struct rds_tcp_incoming, ti_inc);
@@ -97,6 +97,7 @@ int rds_tcp_inc_copy_to_user(struct rds_incoming *inc, struct iovec *first_iov,
 				goto out;
 			}
 
+			rds_stats_add(s_copy_to_user, to_copy);
 			size -= to_copy;
 			ret += to_copy;
 			skb_off += to_copy;
@@ -188,10 +189,10 @@ static int rds_tcp_data_recv(read_descriptor_t *desc, struct sk_buff *skb,
 	 * processing.
 	 */
 	while (left) {
-		if (tinc == NULL) {
+		if (!tinc) {
 			tinc = kmem_cache_alloc(rds_tcp_incoming_slab,
 					        arg->gfp);
-			if (tinc == NULL) {
+			if (!tinc) {
 				desc->error = -ENOMEM;
 				goto out;
 			}
@@ -227,7 +228,7 @@ static int rds_tcp_data_recv(read_descriptor_t *desc, struct sk_buff *skb,
 
 		if (left && tc->t_tinc_data_rem) {
 			clone = skb_clone(skb, arg->gfp);
-			if (clone == NULL) {
+			if (!clone) {
 				desc->error = -ENOMEM;
 				goto out;
 			}
@@ -270,7 +271,8 @@ out:
 }
 
 /* the caller has to hold the sock lock */
-int rds_tcp_read_sock(struct rds_connection *conn, gfp_t gfp, enum km_type km)
+static int rds_tcp_read_sock(struct rds_connection *conn, gfp_t gfp,
+			     enum km_type km)
 {
 	struct rds_tcp_connection *tc = conn->c_transport_data;
 	struct socket *sock = tc->t_sock;
@@ -322,9 +324,9 @@ void rds_tcp_data_ready(struct sock *sk, int bytes)
 
 	rdsdebug("data ready sk %p bytes %d\n", sk, bytes);
 
-	read_lock(&sk->sk_callback_lock);
+	read_lock_bh(&sk->sk_callback_lock);
 	conn = sk->sk_user_data;
-	if (conn == NULL) { /* check for teardown race */
+	if (!conn) { /* check for teardown race */
 		ready = sk->sk_data_ready;
 		goto out;
 	}
@@ -336,16 +338,16 @@ void rds_tcp_data_ready(struct sock *sk, int bytes)
 	if (rds_tcp_read_sock(conn, GFP_ATOMIC, KM_SOFTIRQ0) == -ENOMEM)
 		queue_delayed_work(rds_wq, &conn->c_recv_w, 0);
 out:
-	read_unlock(&sk->sk_callback_lock);
+	read_unlock_bh(&sk->sk_callback_lock);
 	ready(sk, bytes);
 }
 
-int __init rds_tcp_recv_init(void)
+int rds_tcp_recv_init(void)
 {
 	rds_tcp_incoming_slab = kmem_cache_create("rds_tcp_incoming",
 					sizeof(struct rds_tcp_incoming),
 					0, 0, NULL);
-	if (rds_tcp_incoming_slab == NULL)
+	if (!rds_tcp_incoming_slab)
 		return -ENOMEM;
 	return 0;
 }

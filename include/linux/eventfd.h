@@ -10,6 +10,7 @@
 
 #include <linux/fcntl.h>
 #include <linux/file.h>
+#include <linux/wait.h>
 
 /*
  * CAREFUL: Check include/asm-generic/fcntl.h when defining
@@ -34,6 +35,8 @@ struct file *eventfd_fget(int fd);
 struct eventfd_ctx *eventfd_ctx_fdget(int fd);
 struct eventfd_ctx *eventfd_ctx_fileget(struct file *file);
 int eventfd_signal(struct eventfd_ctx *ctx, int n);
+int eventfd_ctx_remove_wait_queue(struct eventfd_ctx *ctx, wait_queue_t *wait,
+				  __u64 *cnt);
 
 #else /* CONFIG_EVENTFD */
 
@@ -59,6 +62,12 @@ static inline int eventfd_signal(struct eventfd_ctx *ctx, int n)
 static inline void eventfd_ctx_put(struct eventfd_ctx *ctx)
 {
 
+}
+
+static inline int eventfd_ctx_remove_wait_queue(struct eventfd_ctx *ctx,
+						wait_queue_t *wait, __u64 *cnt)
+{
+	return -ENOSYS;
 }
 
 #endif

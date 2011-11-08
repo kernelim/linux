@@ -70,4 +70,7 @@ struct nfs_mount_data {
 #define NFS_MOUNT_LOOKUP_CACHE_NONE	0x20000
 #define NFS_MOUNT_NORESVPORT		0x40000
 
+#define NFS_MOUNT_LOCAL_FLOCK	0x100000
+#define NFS_MOUNT_LOCAL_FCNTL	0x200000
+
 #endif

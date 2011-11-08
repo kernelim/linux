@@ -374,19 +374,26 @@ static ssize_t bonding_store_mode(struct device *d,
 		       (int)strlen(buf) - 1, buf);
 		ret = -EINVAL;
 		goto out;
-	} else {
-		if (bond->params.mode == BOND_MODE_8023AD)
-			bond_unset_master_3ad_flags(bond);
-
-		if (bond->params.mode == BOND_MODE_ALB)
-			bond_unset_master_alb_flags(bond);
-
-		bond->params.mode = new_value;
-		bond_set_mode_ops(bond, bond->params.mode);
-		pr_info(DRV_NAME ": %s: setting mode to %s (%d).\n",
-		       bond->dev->name, bond_mode_tbl[new_value].modename,
-		       new_value);
 	}
+	if ((new_value == BOND_MODE_ALB ||
+	     new_value == BOND_MODE_TLB) &&
+	    bond->params.arp_interval) {
+		pr_err("%s: %s mode is incompatible with arp monitoring.\n",
+		       bond->dev->name, bond_mode_tbl[new_value].modename);
+		ret = -EINVAL;
+		goto out;
+	}
+	if (bond->params.mode == BOND_MODE_8023AD)
+		bond_unset_master_3ad_flags(bond);
+
+	if (bond->params.mode == BOND_MODE_ALB)
+		bond_unset_master_alb_flags(bond);
+
+	bond->params.mode = new_value;
+	bond_set_mode_ops(bond, bond->params.mode);
+	pr_info(DRV_NAME ": %s: setting mode to %s (%d).\n",
+		bond->dev->name, bond_mode_tbl[new_value].modename,
+		new_value);
 out:
 	return ret;
 }
@@ -579,7 +586,13 @@ static ssize_t bonding_store_arp_interval(struct device *d,
 		ret = -EINVAL;
 		goto out;
 	}
-
+	if (bond->params.mode == BOND_MODE_ALB ||
+	    bond->params.mode == BOND_MODE_TLB) {
+		pr_info("%s: ARP monitoring cannot be used with ALB/TLB. Only MII monitoring is supported on %s.\n",
+			bond->dev->name, bond->dev->name);
+		ret = -EINVAL;
+		goto out;
+	}
 	pr_info(DRV_NAME
 	       ": %s: Setting ARP monitoring interval to %d.\n",
 	       bond->dev->name, new_value);
@@ -903,6 +916,7 @@ static ssize_t bonding_store_lacp(struct device *d,
 
 	if ((new_value == 1) || (new_value == 0)) {
 		bond->params.lacp_fast = new_value;
+		bond_3ad_update_lacp_rate(bond);
 		pr_info(DRV_NAME ": %s: Setting LACP rate to %s (%d).\n",
 			bond->dev->name, bond_lacp_tbl[new_value].modename,
 			new_value);
@@ -1164,54 +1178,112 @@ static ssize_t bonding_store_primary(struct device *d,
 	int i;
 	struct slave *slave;
 	struct bonding *bond = to_bond(d);
+	char ifname[IFNAMSIZ];
 
 	if (!rtnl_trylock())
 		return restart_syscall();
+	block_netpoll_tx();
 	read_lock(&bond->lock);
 	write_lock_bh(&bond->curr_slave_lock);
 
 	if (!USES_PRIMARY(bond->params.mode)) {
 		pr_info(DRV_NAME
-		       ": %s: Unable to set primary slave; %s is in mode %d\n",
-		       bond->dev->name, bond->dev->name, bond->params.mode);
-	} else {
-		bond_for_each_slave(bond, slave, i) {
-			if (strnicmp
-			    (slave->dev->name, buf,
-			     strlen(slave->dev->name)) == 0) {
-				pr_info(DRV_NAME
-				       ": %s: Setting %s as primary slave.\n",
-				       bond->dev->name, slave->dev->name);
-				bond->primary_slave = slave;
-				strcpy(bond->params.primary, slave->dev->name);
-				bond_select_active_slave(bond);
-				goto out;
-			}
-		}
+			": %s: Unable to set primary slave; %s is in mode %d\n",
+			bond->dev->name, bond->dev->name, bond->params.mode);
+		goto out;
+	}
 
-		/* if we got here, then we didn't match the name of any slave */
+	sscanf(buf, "%16s", ifname); /* IFNAMSIZ */
 
-		if (strlen(buf) == 0 || buf[0] == '\n') {
+	/* check to see if we are clearing primary */
+	if (!strlen(ifname) || buf[0] == '\n') {
+		pr_info(DRV_NAME
+		       ": %s: Setting primary slave to None.\n",
+		       bond->dev->name);
+		bond->primary_slave = NULL;
+		bond_select_active_slave(bond);
+		goto out;
+	}
+
+	bond_for_each_slave(bond, slave, i) {
+		if (strncmp(slave->dev->name, ifname, IFNAMSIZ) == 0) {
 			pr_info(DRV_NAME
-			       ": %s: Setting primary slave to None.\n",
-			       bond->dev->name);
-			bond->primary_slave = NULL;
-				bond_select_active_slave(bond);
-		} else {
-			pr_info(DRV_NAME
-			       ": %s: Unable to set %.*s as primary slave as it is not a slave.\n",
-			       bond->dev->name, (int)strlen(buf) - 1, buf);
+			       ": %s: Setting %s as primary slave.\n",
+			       bond->dev->name, slave->dev->name);
+			bond->primary_slave = slave;
+			strcpy(bond->params.primary, slave->dev->name);
+			bond_select_active_slave(bond);
+			goto out;
 		}
 	}
+
+	pr_info(DRV_NAME
+		": %s: Unable to set %.*s as primary slave.\n",
+		bond->dev->name, (int)strlen(buf) - 1, buf);
 out:
 	write_unlock_bh(&bond->curr_slave_lock);
 	read_unlock(&bond->lock);
+	unblock_netpoll_tx();
 	rtnl_unlock();
 
 	return count;
 }
 static DEVICE_ATTR(primary, S_IRUGO | S_IWUSR,
 		   bonding_show_primary, bonding_store_primary);
+
+/*
+ * Show and set the primary_reselect flag.
+ */
+static ssize_t bonding_show_primary_reselect(struct device *d,
+					     struct device_attribute *attr,
+					     char *buf)
+{
+	struct bonding *bond = to_bond(d);
+
+	return sprintf(buf, "%s %d\n",
+		       pri_reselect_tbl[bond->params.primary_reselect].modename,
+		       bond->params.primary_reselect);
+}
+
+static ssize_t bonding_store_primary_reselect(struct device *d,
+					      struct device_attribute *attr,
+					      const char *buf, size_t count)
+{
+	int new_value, ret = count;
+	struct bonding *bond = to_bond(d);
+
+	if (!rtnl_trylock())
+		return restart_syscall();
+
+	new_value = bond_parse_parm(buf, pri_reselect_tbl);
+	if (new_value < 0)  {
+		pr_err(DRV_NAME
+		       ": %s: Ignoring invalid primary_reselect value %.*s.\n",
+		       bond->dev->name,
+		       (int) strlen(buf) - 1, buf);
+		ret = -EINVAL;
+		goto out;
+	}
+
+	bond->params.primary_reselect = new_value;
+	pr_info(DRV_NAME ": %s: setting primary_reselect to %s (%d).\n",
+		bond->dev->name, pri_reselect_tbl[new_value].modename,
+		new_value);
+
+	block_netpoll_tx();
+	read_lock(&bond->lock);
+	write_lock_bh(&bond->curr_slave_lock);
+	bond_select_active_slave(bond);
+	write_unlock_bh(&bond->curr_slave_lock);
+	read_unlock(&bond->lock);
+	unblock_netpoll_tx();
+out:
+	rtnl_unlock();
+	return ret;
+}
+static DEVICE_ATTR(primary_reselect, S_IRUGO | S_IWUSR,
+		   bonding_show_primary_reselect,
+		   bonding_store_primary_reselect);
 
 /*
  * Show and set the use_carrier flag.
@@ -1285,69 +1357,82 @@ static ssize_t bonding_store_active_slave(struct device *d,
 	struct slave *old_active = NULL;
 	struct slave *new_active = NULL;
 	struct bonding *bond = to_bond(d);
+	char ifname[IFNAMSIZ];
 
 	if (!rtnl_trylock())
 		return restart_syscall();
+
+	block_netpoll_tx();
 	read_lock(&bond->lock);
 	write_lock_bh(&bond->curr_slave_lock);
 
-	if (!USES_PRIMARY(bond->params.mode))
-		pr_info(DRV_NAME ": %s: Unable to change active slave;"
+	if (!USES_PRIMARY(bond->params.mode)) {
+		pr_info(DRV_NAME
+			": %s: Unable to change active slave;"
 			" %s is in mode %d\n",
 			bond->dev->name, bond->dev->name, bond->params.mode);
-	else {
-		bond_for_each_slave(bond, slave, i) {
-			if (strnicmp
-			    (slave->dev->name, buf,
-			     strlen(slave->dev->name)) == 0) {
-        			old_active = bond->curr_active_slave;
-        			new_active = slave;
-        			if (new_active == old_active) {
-					/* do nothing */
+		goto out;
+	}
+
+	sscanf(buf, "%16s", ifname); /* IFNAMSIZ */
+
+	/* check to see if we are clearing primary */
+	if (!strlen(ifname) || buf[0] == '\n') {
+		pr_info(DRV_NAME
+			": %s: Clearing current active slave.\n",
+			bond->dev->name);
+		bond->curr_active_slave = NULL;
+		bond_select_active_slave(bond);
+		goto out;
+	}
+
+	bond_for_each_slave(bond, slave, i) {
+		if (strncmp(slave->dev->name, ifname, IFNAMSIZ) == 0) {
+			old_active = bond->curr_active_slave;
+			new_active = slave;
+			if (new_active == old_active) {
+				/* do nothing */
+				pr_info(DRV_NAME
+					": %s: %s is already the current"
+					" active slave.\n",
+					bond->dev->name,
+					slave->dev->name);
+				goto out;
+			}
+			else {
+				if ((new_active) &&
+				    (old_active) &&
+				    (new_active->link == BOND_LINK_UP) &&
+				    IS_UP(new_active->dev)) {
 					pr_info(DRV_NAME
-						": %s: %s is already the current active slave.\n",
-						bond->dev->name, slave->dev->name);
-					goto out;
+						": %s: Setting %s as active"
+						" slave.\n",
+						bond->dev->name,
+						slave->dev->name);
+					bond_change_active_slave(bond,
+								 new_active);
 				}
 				else {
-        				if ((new_active) &&
-            				    (old_active) &&
-				            (new_active->link == BOND_LINK_UP) &&
-				            IS_UP(new_active->dev)) {
-						pr_info(DRV_NAME
-							": %s: Setting %s as active slave.\n",
-							bond->dev->name, slave->dev->name);
-							bond_change_active_slave(bond, new_active);
-        				}
-					else {
-						pr_info(DRV_NAME
-							": %s: Could not set %s as active slave; "
-							"either %s is down or the link is down.\n",
-							bond->dev->name, slave->dev->name,
-							slave->dev->name);
-					}
-					goto out;
+					pr_info(DRV_NAME
+						": %s: Could not set %s as"
+						" active slave; either %s is"
+						" down or the link is down.\n",
+						bond->dev->name,
+						slave->dev->name,
+						slave->dev->name);
 				}
+				goto out;
 			}
 		}
-
-		/* if we got here, then we didn't match the name of any slave */
-
-		if (strlen(buf) == 0 || buf[0] == '\n') {
-			pr_info(DRV_NAME
-				": %s: Setting active slave to None.\n",
-				bond->dev->name);
-			bond->primary_slave = NULL;
-			bond_select_active_slave(bond);
-		} else {
-			pr_info(DRV_NAME ": %s: Unable to set %.*s"
-				" as active slave as it is not a slave.\n",
-				bond->dev->name, (int)strlen(buf) - 1, buf);
-		}
 	}
+
+	pr_info("%s: Unable to set %.*s as active slave.\n",
+		bond->dev->name, (int)strlen(buf) - 1, buf);
  out:
 	write_unlock_bh(&bond->curr_slave_lock);
 	read_unlock(&bond->lock);
+	unblock_netpoll_tx();
+
 	rtnl_unlock();
 
 	return count;
@@ -1484,7 +1569,216 @@ static ssize_t bonding_show_ad_partner_mac(struct device *d,
 }
 static DEVICE_ATTR(ad_partner_mac, S_IRUGO, bonding_show_ad_partner_mac, NULL);
 
+/*
+ * Show the queue_ids of the slaves in the current bond.
+ */
+static ssize_t bonding_show_queue_id(struct device *d,
+				     struct device_attribute *attr,
+				     char *buf)
+{
+	struct slave *slave;
+	int i, res = 0;
+	struct bonding *bond = to_bond(d);
 
+	if (!rtnl_trylock())
+		return restart_syscall();
+
+	read_lock(&bond->lock);
+	bond_for_each_slave(bond, slave, i) {
+		if (res > (PAGE_SIZE - 6)) {
+			/* not enough space for another interface name */
+			if ((PAGE_SIZE - res) > 10)
+				res = PAGE_SIZE - 10;
+			res += sprintf(buf + res, "++more++ ");
+			break;
+		}
+		res += sprintf(buf + res, "%s:%d ",
+			       slave->dev->name, slave->queue_id);
+	}
+	read_unlock(&bond->lock);
+	if (res)
+		buf[res-1] = '\n'; /* eat the leftover space */
+	rtnl_unlock();
+	return res;
+}
+
+/*
+ * Set the queue_ids of the  slaves in the current bond.  The bond
+ * interface must be enslaved for this to work.
+ */
+static ssize_t bonding_store_queue_id(struct device *d,
+				      struct device_attribute *attr,
+				      const char *buffer, size_t count)
+{
+	struct slave *slave, *update_slave;
+	struct bonding *bond = to_bond(d);
+	u16 qid;
+	int i, ret = count;
+	char *delim;
+	struct net_device *sdev = NULL;
+
+	if (!rtnl_trylock())
+		return restart_syscall();
+
+	/* delim will point to queue id if successful */
+	delim = strchr(buffer, ':');
+	if (!delim)
+		goto err_no_cmd;
+
+	/*
+	 * Terminate string that points to device name and bump it
+	 * up one, so we can read the queue id there.
+	 */
+	*delim = '\0';
+	if (sscanf(++delim, "%hd\n", &qid) != 1)
+		goto err_no_cmd;
+
+	/* Check buffer length, valid ifname and queue id */
+	if (strlen(buffer) > IFNAMSIZ ||
+	    !dev_valid_name(buffer) ||
+	    qid > bond->params.tx_queues)
+		goto err_no_cmd;
+
+	/* Get the pointer to that interface if it exists */
+	sdev = __dev_get_by_name(dev_net(bond->dev), buffer);
+	if (!sdev)
+		goto err_no_cmd;
+
+	read_lock(&bond->lock);
+
+	/* Search for thes slave and check for duplicate qids */
+	update_slave = NULL;
+	bond_for_each_slave(bond, slave, i) {
+		if (sdev == slave->dev)
+			/*
+			 * We don't need to check the matching
+			 * slave for dups, since we're overwriting it
+			 */
+			update_slave = slave;
+		else if (qid && qid == slave->queue_id) {
+			goto err_no_cmd_unlock;
+		}
+	}
+
+	if (!update_slave)
+		goto err_no_cmd_unlock;
+
+	/* Actually set the qids for the slave */
+	update_slave->queue_id = qid;
+
+	read_unlock(&bond->lock);
+out:
+	rtnl_unlock();
+	return ret;
+
+err_no_cmd_unlock:
+	read_unlock(&bond->lock);
+err_no_cmd:
+	pr_info("invalid input for queue_id set for %s.\n",
+		bond->dev->name);
+	ret = -EPERM;
+	goto out;
+}
+
+static DEVICE_ATTR(queue_id, S_IRUGO | S_IWUSR, bonding_show_queue_id,
+		   bonding_store_queue_id);
+
+
+/*
+ * Show and set the all_slaves_active flag.
+ */
+static ssize_t bonding_show_slaves_active(struct device *d,
+					  struct device_attribute *attr,
+					  char *buf)
+{
+	struct bonding *bond = to_bond(d);
+
+	return sprintf(buf, "%d\n", bond->params.all_slaves_active);
+}
+
+static ssize_t bonding_store_slaves_active(struct device *d,
+					   struct device_attribute *attr,
+					   const char *buf, size_t count)
+{
+	int i, new_value, ret = count;
+	struct bonding *bond = to_bond(d);
+	struct slave *slave;
+
+	if (sscanf(buf, "%d", &new_value) != 1) {
+		pr_err("%s: no all_slaves_active value specified.\n",
+		       bond->dev->name);
+		ret = -EINVAL;
+		goto out;
+	}
+
+	if (new_value == bond->params.all_slaves_active)
+		goto out;
+
+	if ((new_value == 0) || (new_value == 1)) {
+		bond->params.all_slaves_active = new_value;
+	} else {
+		pr_info("%s: Ignoring invalid all_slaves_active value %d.\n",
+			bond->dev->name, new_value);
+		ret = -EINVAL;
+		goto out;
+	}
+
+	bond_for_each_slave(bond, slave, i) {
+		if (slave->state == BOND_STATE_BACKUP) {
+			if (new_value)
+				slave->dev->priv_flags &= ~IFF_SLAVE_INACTIVE;
+			else
+				slave->dev->priv_flags |= IFF_SLAVE_INACTIVE;
+		}
+	}
+out:
+	return count;
+}
+static DEVICE_ATTR(all_slaves_active, S_IRUGO | S_IWUSR,
+		   bonding_show_slaves_active, bonding_store_slaves_active);
+
+/*
+ * Show and set the number of IGMP membership reports to send on link failure
+ */
+static ssize_t bonding_show_resend_igmp(struct device *d,
+					struct device_attribute *attr,
+					char *buf)
+{
+	struct bonding *bond = to_bond(d);
+
+	return sprintf(buf, "%d\n", bond->params.resend_igmp);
+}
+
+static ssize_t bonding_store_resend_igmp(struct device *d,
+					 struct device_attribute *attr,
+					 const char *buf, size_t count)
+{
+	int new_value, ret = count;
+	struct bonding *bond = to_bond(d);
+
+	if (sscanf(buf, "%d", &new_value) != 1) {
+		pr_err("%s: no resend_igmp value specified.\n",
+		       bond->dev->name);
+		ret = -EINVAL;
+		goto out;
+	}
+
+	if (new_value < 0 || new_value > 255) {
+		pr_err("%s: Invalid resend_igmp value %d not in range 0-255; rejected.\n",
+		       bond->dev->name, new_value);
+		ret = -EINVAL;
+		goto out;
+	}
+
+	pr_info("%s: Setting resend_igmp to %d.\n",
+		bond->dev->name, new_value);
+	bond->params.resend_igmp = new_value;
+out:
+	return ret;
+}
+
+static DEVICE_ATTR(resend_igmp, S_IRUGO | S_IWUSR,
+		   bonding_show_resend_igmp, bonding_store_resend_igmp);
 
 static struct attribute *per_bond_attrs[] = {
 	&dev_attr_slaves.attr,
@@ -1502,6 +1796,7 @@ static struct attribute *per_bond_attrs[] = {
 	&dev_attr_num_unsol_na.attr,
 	&dev_attr_miimon.attr,
 	&dev_attr_primary.attr,
+	&dev_attr_primary_reselect.attr,
 	&dev_attr_use_carrier.attr,
 	&dev_attr_active_slave.attr,
 	&dev_attr_mii_status.attr,
@@ -1510,6 +1805,9 @@ static struct attribute *per_bond_attrs[] = {
 	&dev_attr_ad_actor_key.attr,
 	&dev_attr_ad_partner_key.attr,
 	&dev_attr_ad_partner_mac.attr,
+	&dev_attr_queue_id.attr,
+	&dev_attr_all_slaves_active.attr,
+	&dev_attr_resend_igmp.attr,
 	NULL,
 };
 

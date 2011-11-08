@@ -220,6 +220,7 @@ static const struct trans_ctl_table trans_net_ipv4_conf_vars_table[] = {
 	{ NET_IPV4_CONF_PROMOTE_SECONDARIES,	"promote_secondaries" },
 	{ NET_IPV4_CONF_ARP_ACCEPT,		"arp_accept" },
 	{ NET_IPV4_CONF_ARP_NOTIFY,		"arp_notify" },
+	{ NET_IPV4_CONF_SRC_VMARK,		"src_valid_mark" },
 	{}
 };
 
@@ -1503,15 +1504,6 @@ int sysctl_check_table(struct nsproxy *namespaces, struct ctl_table *table)
 					set_fail(&fail, table, "No data");
 				if (!table->maxlen)
 					set_fail(&fail, table, "No maxlen");
-			}
-			if ((table->proc_handler == proc_doulongvec_minmax) ||
-			    (table->proc_handler == proc_doulongvec_ms_jiffies_minmax)) {
-				if (table->maxlen > sizeof (unsigned long)) {
-					if (!table->extra1)
-						set_fail(&fail, table, "No min");
-					if (!table->extra2)
-						set_fail(&fail, table, "No max");
-				}
 			}
 #ifdef CONFIG_SYSCTL_SYSCALL
 			if (table->ctl_name && !table->strategy)

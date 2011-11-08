@@ -1393,9 +1393,10 @@ M:	Andy Whitcroft <apw@canonical.com>
 S:	Supported
 F:	scripts/checkpatch.pl
 
-CISCO 10G ETHERNET DRIVER
+CISCO VIC ETHERNET NIC DRIVER
 M:	Scott Feldman <scofeldm@cisco.com>
-M:	Joe Eykholt <jeykholt@cisco.com>
+M:	Vasanthy Kolluri <vkolluri@cisco.com>
+M:	Roopa Prabhu <roprabhu@cisco.com>
 S:	Supported
 F:	drivers/net/enic/
 
@@ -1612,6 +1613,20 @@ L:	linux-rdma@vger.kernel.org
 W:	http://www.openfabrics.org
 S:	Supported
 F:	drivers/infiniband/hw/cxgb3/
+
+CXGB4 ETHERNET DRIVER (CXGB4)
+M:	Dimitris Michailidis <dm@chelsio.com>
+L:	netdev@vger.kernel.org
+W:	http://www.chelsio.com
+S:	Supported
+F:	drivers/net/cxgb4/
+
+CXGB4 IWARP RNIC DRIVER (IW_CXGB4)
+M:	Steve Wise <swise@chelsio.com>
+L:	linux-rdma@vger.kernel.org
+W:	http://www.openfabrics.org
+S:	Supported
+F:	drivers/infiniband/hw/cxgb4/
 
 CYBERPRO FB DRIVER
 M:	Russell King <linux@arm.linux.org.uk>
@@ -1944,6 +1959,13 @@ L:	bluesmoke-devel@lists.sourceforge.net (moderated for non-subscribers)
 W:	bluesmoke.sourceforge.net
 S:	Maintained
 F:	drivers/edac/i5400_edac.c
+
+EDAC-I7300
+M:	Mauro Carvalho Chehab <mchehab@redhat.com>
+L:	linux-edac@vger.kernel.org
+W:	bluesmoke.sourceforge.net
+S:	Maintained
+F:	drivers/edac/i7300_edac.c
 
 EDAC-I82975X
 M:	Ranganathan Desikan <ravi@jetztechnologies.com>
@@ -2322,6 +2344,15 @@ W:	http://www.kernel.org/pub/linux/kernel/people/fseidel/hdaps/
 S:	Maintained
 F:	drivers/hwmon/hdaps.c
 
+HWPOISON MEMORY FAILURE HANDLING
+M:	Andi Kleen <andi@firstfloor.org>
+L:	linux-mm@kvack.org
+L:	linux-kernel@vger.kernel.org
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/ak/linux-mce-2.6.git hwpoison
+S:	Maintained
+F:	mm/memory-failure.c
+F:	mm/hwpoison-inject.c
+
 HYPERVISOR VIRTUAL CONSOLE DRIVER
 L:	linuxppc-dev@ozlabs.org
 S:	Odd Fixes
@@ -2601,6 +2632,12 @@ M:	Brian King <brking@us.ibm.com>
 S:	Supported
 F:	drivers/scsi/ipr.*
 
+IBM Power Virtual Ethernet Device Driver
+M:	Santiago Leon <santil@linux.vnet.ibm.com>
+L:	netdev@vger.kernel.org
+S:	Supported
+F:	drivers/net/ibmveth.*
+
 IBM ServeRAID RAID DRIVER
 P:	Jack Hammer
 M:	Dave Jeffery <ipslinux@adaptec.com>
@@ -2796,6 +2833,17 @@ W:	http://ipw2200.sourceforge.net
 S:	Odd Fixes
 F:	Documentation/networking/README.ipw2200
 F:	drivers/net/wireless/ipw2x00/ipw2200.*
+
+INTEL(R) TRUSTED EXECUTION TECHNOLOGY (TXT)
+M:	Joseph Cihula <joseph.cihula@intel.com>
+M:	Shane Wang <shane.wang@intel.com>
+L:	tboot-devel@lists.sourceforge.net
+W:	http://tboot.sourceforge.net
+T:	Mercurial http://www.bughost.org/repos.hg/tboot.hg
+S:	Supported
+F:	Documentation/intel_txt.txt
+F:	include/linux/tboot.h
+F:	arch/x86/kernel/tboot.c
 
 INTEL WIRELESS WIMAX CONNECTION 2400
 M:	Inaky Perez-Gonzalez <inaky.perez-gonzalez@intel.com>
@@ -4327,6 +4375,13 @@ S:	Supported
 F:	Documentation/networking/LICENSE.qla3xxx
 F:	drivers/net/qla3xxx.*
 
+QLOGIC QLCNIC (1/10)Gb ETHERNET DRIVER
+M:	Amit Kumar Salecha <amit.salecha@qlogic.com>
+M:	linux-driver@qlogic.com
+L:	netdev@vger.kernel.org
+S:	Supported
+F:	drivers/net/qlcnic/
+
 QLOGIC QLGE 10Gb ETHERNET DRIVER
 M:	Ron Mercer <ron.mercer@qlogic.com>
 M:	linux-driver@qlogic.com
@@ -4448,6 +4503,11 @@ L:	linux-wireless@vger.kernel.org
 S:	Maintained
 F:	Documentation/rfkill.txt
 F:	net/rfkill/
+
+RICOH R5C592 MEMORYSTICK DRIVER
+M:	Maxim Levitsky <maximlevitsky@gmail.com>
+S:	Maintained
+F:	drivers/memstick/host/r592.*
 
 RISCOM8 DRIVER
 S:	Orphan
@@ -4702,9 +4762,9 @@ F:	include/linux/ata.h
 F:	include/linux/libata.h
 
 SERVER ENGINES 10Gbps iSCSI - BladeEngine 2 DRIVER
-M:	Jayamohan Kallickal <jayamohank@serverengines.com>
+M:	Jayamohan Kallickal <jayamohan.kallickal@emulex.com>
 L:	linux-scsi@vger.kernel.org
-W:	http://www.serverengines.com
+W:	http://www.emulex.com
 S:	Supported
 F:	drivers/scsi/be2iscsi/
 
@@ -5594,9 +5654,11 @@ S:	Maintained
 F:	drivers/net/wireless/rndis_wlan.c
 
 USB XHCI DRIVER
-M:	Sarah Sharp <sarah.a.sharp@intel.com>
+M:	Sarah Sharp <sarah.a.sharp@linux.intel.com>
 L:	linux-usb@vger.kernel.org
 S:	Supported
+F:	drivers/usb/host/xhci*
+F:	drivers/usb/host/pci-quirks*
 
 USB ZC0301 DRIVER
 M:	Luca Risolia <luca.risolia@studio.unibo.it>
@@ -5665,6 +5727,22 @@ S:	Maintained
 F:	Documentation/filesystems/vfat.txt
 F:	fs/fat/
 
+VIRTIO CONSOLE DRIVER
+M:	Amit Shah <amit.shah@redhat.com>
+L:	virtualization@lists.linux-foundation.org
+S:	Maintained
+F:	drivers/char/virtio_console.c
+F:	include/linux/virtio_console.h
+
+VIRTIO HOST (VHOST)
+M:	"Michael S. Tsirkin" <mst@redhat.com>
+L:	kvm@vger.kernel.org
+L:	virtualization@lists.osdl.org
+L:	netdev@vger.kernel.org
+S:	Maintained
+F:	drivers/vhost/
+F:	include/linux/vhost.h
+
 VIA RHINE NETWORK DRIVER
 M:	Roger Luethi <rl@hellgate.ch>
 S:	Maintained
@@ -5717,6 +5795,14 @@ M:	"VMware, Inc." <pv-drivers@vmware.com>
 L:	netdev@vger.kernel.org
 S:	Maintained
 F:	drivers/net/vmxnet3/
+
+VMware PVSCSI driver
+M:	Alok Kataria <akataria@vmware.com>
+M:	VMware PV-Drivers <pv-drivers@vmware.com>
+L:	linux-scsi@vger.kernel.org
+S:	Maintained
+F:	drivers/scsi/vmw_pvscsi.c
+F:	drivers/scsi/vmw_pvscsi.h
 
 VOLTAGE AND CURRENT REGULATOR FRAMEWORK
 M:	Liam Girdwood <lrg@slimlogic.co.uk>

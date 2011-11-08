@@ -79,6 +79,7 @@ config DELL_LAPTOP
 	depends on BACKLIGHT_CLASS_DEVICE
 	depends on RFKILL || RFKILL = n
 	depends on POWER_SUPPLY
+	depends on SERIO_I8042
 	default n
 	---help---
 	This driver adds support for rfkill and backlight control to Dell
@@ -291,9 +292,15 @@ config THINKPAD_ACPI_VIDEO
 	  server running, phase of the moon, and the current mood of
 	  Schroedinger's cat.  If you can use X.org's RandR to control
 	  your ThinkPad's video output ports instead of this feature,
-	  don't think twice: do it and say N here to save some memory.
+	  don't think twice: do it and say N here to save memory and avoid
+	  bad interactions with X.org.
 
-	  If you are not sure, say Y here.
+	  NOTE: access to this feature is limited to processes with the
+	  CAP_SYS_ADMIN capability, to avoid local DoS issues in platforms
+	  where it interacts badly with X.org.
+
+	  If you are not sure, say Y here but do try to check if you could
+	  be using X.org RandR instead.
 
 config THINKPAD_ACPI_HOTKEY_POLL
 	bool "Support NVRAM polling for hot keys"
@@ -435,4 +442,22 @@ config ACPI_TOSHIBA
 
 	  If you have a legacy free Toshiba laptop (such as the Libretto L1
 	  series), say Y.
+
+config INTEL_IPS
+	tristate "Intel Intelligent Power Sharing"
+	depends on ACPI
+	---help---
+	  Intel Calpella platforms support dynamic power sharing between the
+	  CPU and GPU, maximizing performance in a given TDP.  This driver,
+	  along with the CPU frequency and i915 drivers, provides that
+	  functionality.  If in doubt, say Y here; it will only load on
+	  supported platforms.
+
+config MXM_WMI
+       tristate "WMI support for MXM Laptop Graphics"
+       depends on ACPI_WMI
+       ---help---
+          MXM is a standard for laptop graphics cards, the WMI interface
+	  is required for switchable nvidia graphics machines
+
 endif # X86_PLATFORM_DEVICES

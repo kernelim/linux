@@ -150,18 +150,17 @@ static inline void lpar_qirr_info(int n_cpu , u8 value)
 /* Interface to generic irq subsystem */
 
 #ifdef CONFIG_SMP
-static int get_irq_server(unsigned int virq, unsigned int strict_check)
+static int get_irq_server(unsigned int virq, cpumask_t cpumask,
+			  unsigned int strict_check)
 {
 	int server;
 	/* For the moment only implement delivery to all cpus or one cpu */
-	cpumask_t cpumask;
 	cpumask_t tmp = CPU_MASK_NONE;
 
-	cpumask_copy(&cpumask, irq_desc[virq].affinity);
 	if (!distribute_irqs)
 		return default_server;
 
-	if (!cpus_equal(cpumask, CPU_MASK_ALL)) {
+	if (!cpus_subset(cpu_possible_map, cpumask)) {
 		cpus_and(tmp, cpu_online_map, cpumask);
 
 		server = first_cpu(tmp);
@@ -179,7 +178,8 @@ static int get_irq_server(unsigned int virq, unsigned int strict_check)
 	return default_server;
 }
 #else
-static int get_irq_server(unsigned int virq, unsigned int strict_check)
+static int get_irq_server(unsigned int virq, cpumask_t cpumask,
+			  unsigned int strict_check)
 {
 	return default_server;
 }
@@ -198,7 +198,7 @@ static void xics_unmask_irq(unsigned int virq)
 	if (irq == XICS_IPI || irq == XICS_IRQ_SPURIOUS)
 		return;
 
-	server = get_irq_server(virq, 0);
+	server = get_irq_server(virq, *(irq_to_desc(virq)->affinity), 0);
 
 	call_status = rtas_call(ibm_set_xive, 3, 1, NULL, irq, server,
 				DEFAULT_PRIORITY);
@@ -365,7 +365,7 @@ static int xics_set_affinity(unsigned int virq, const struct cpumask *cpumask)
 	 * For the moment only implement delivery to all cpus or one cpu.
 	 * Get current irq_server for the given irq
 	 */
-	irq_server = get_irq_server(virq, 1);
+	irq_server = get_irq_server(virq, *cpumask, 1);
 	if (irq_server == -1) {
 		char cpulist[128];
 		cpumask_scnprintf(cpulist, sizeof(cpulist), cpumask);
@@ -508,8 +508,6 @@ void smp_xics_message_pass(int target, int msg)
 
 static irqreturn_t xics_ipi_dispatch(int cpu)
 {
-	WARN_ON(cpu_is_offline(cpu));
-
 	mb();	/* order mmio clearing qirr */
 	while (xics_ipi_message[cpu].value) {
 		if (test_and_clear_bit(PPC_MSG_CALL_FUNCTION,

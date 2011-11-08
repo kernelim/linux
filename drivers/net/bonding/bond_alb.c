@@ -339,7 +339,8 @@ static void rlb_update_entry_from_arp(struct bonding *bond, struct arp_pkt *arp)
 
 	if ((client_info->assigned) &&
 	    (client_info->ip_src == arp->ip_dst) &&
-	    (client_info->ip_dst == arp->ip_src)) {
+	    (client_info->ip_dst == arp->ip_src) &&
+	    (compare_ether_addr_64bits(client_info->mac_dst, arp->mac_src))) {
 		/* update the clients MAC address */
 		memcpy(client_info->mac_dst, arp->mac_src, ETH_ALEN);
 		client_info->ntt = 1;
@@ -369,6 +370,13 @@ static int rlb_arp_recv(struct sk_buff *skb, struct net_device *bond_dev, struct
 		pr_debug("Packet has no ARP data\n");
 		goto out;
 	}
+
+	skb = skb_share_check(skb, GFP_ATOMIC);
+	if (!skb)
+		goto out;
+
+	if (!pskb_may_pull(skb, arp_hdr_len(bond_dev)))
+		goto out;
 
 	if (skb->len < sizeof(struct arp_pkt)) {
 		pr_debug("Packet is too small to be an ARP\n");
@@ -694,7 +702,7 @@ static struct slave *rlb_choose_channel(struct sk_buff *skb, struct bonding *bon
 			client_info->ntt = 0;
 		}
 
-		if (!list_empty(&bond->vlan_list)) {
+		if (bond->vlgrp) {
 			if (!vlan_get_tag(skb, &client_info->vlan_id))
 				client_info->tag = 1;
 		}
@@ -828,7 +836,7 @@ static int rlb_initialize(struct bonding *bond)
 
 	/*initialize packet type*/
 	pk_type->type = cpu_to_be16(ETH_P_ARP);
-	pk_type->dev = NULL;
+	pk_type->dev = bond->dev;
 	pk_type->func = rlb_arp_recv;
 
 	/* register to receive ARPs */
@@ -917,7 +925,7 @@ static void alb_send_learning_packets(struct slave *slave, u8 mac_addr[])
 		skb->priority = TC_PRIO_CONTROL;
 		skb->dev = slave->dev;
 
-		if (!list_empty(&bond->vlan_list)) {
+		if (bond->vlgrp) {
 			struct vlan_entry *vlan;
 
 			vlan = bond_next_vlan(bond,
@@ -1527,7 +1535,8 @@ void bond_alb_monitor(struct work_struct *work)
 	}
 
 re_arm:
-	queue_delayed_work(bond->wq, &bond->alb_work, alb_delta_in_ticks);
+	if (!bond->kill_timers)
+		queue_delayed_work(bond->wq, &bond->alb_work, alb_delta_in_ticks);
 out:
 	read_unlock(&bond->lock);
 }

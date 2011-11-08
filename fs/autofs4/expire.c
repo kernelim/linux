@@ -26,10 +26,6 @@ static inline int autofs4_can_expire(struct dentry *dentry,
 	if (ino == NULL)
 		return 0;
 
-	/* No point expiring a pending mount */
-	if (dentry->d_flags & DCACHE_AUTOFS_PENDING)
-		return 0;
-
 	if (!do_now) {
 		/* Too young to die */
 		if (!timeout || time_after(ino->last_used + timeout, now))
@@ -264,6 +260,7 @@ struct dentry *autofs4_expire_direct(struct super_block *sb,
 	unsigned long timeout;
 	struct dentry *root = dget(sb->s_root);
 	int do_now = how & AUTOFS_EXP_IMMEDIATE;
+	struct autofs_info *ino;
 
 	if (!root)
 		return NULL;
@@ -272,17 +269,18 @@ struct dentry *autofs4_expire_direct(struct super_block *sb,
 	timeout = sbi->exp_timeout;
 
 	spin_lock(&sbi->fs_lock);
+	ino = autofs4_dentry_ino(root);
+	/* No point expiring a pending mount */
+	if (ino->flags & AUTOFS_INF_PENDING)
+		goto out;
 	if (!autofs4_direct_busy(mnt, root, timeout, do_now)) {
 		struct autofs_info *ino = autofs4_dentry_ino(root);
-		if (d_mountpoint(root)) {
-			ino->flags |= AUTOFS_INF_MOUNTPOINT;
-			root->d_mounted--;
-		}
 		ino->flags |= AUTOFS_INF_EXPIRING;
 		init_completion(&ino->expire_complete);
 		spin_unlock(&sbi->fs_lock);
 		return root;
 	}
+out:
 	spin_unlock(&sbi->fs_lock);
 	dput(root);
 
@@ -334,6 +332,9 @@ struct dentry *autofs4_expire_indirect(struct super_block *sb,
 
 		spin_lock(&sbi->fs_lock);
 		ino = autofs4_dentry_ino(dentry);
+		/* No point expiring a pending mount */
+		if (ino->flags & AUTOFS_INF_PENDING)
+			goto next;
 
 		/*
 		 * Case 1: (i) indirect mount or top level pseudo direct mount
@@ -498,11 +499,16 @@ int autofs4_do_expire_multi(struct super_block *sb, struct vfsmount *mnt,
 		ret = autofs4_wait(sbi, dentry, NFY_EXPIRE);
 
 		spin_lock(&sbi->fs_lock);
-		if (ino->flags & AUTOFS_INF_MOUNTPOINT) {
-			sb->s_root->d_mounted++;
-			ino->flags &= ~AUTOFS_INF_MOUNTPOINT;
-		}
 		ino->flags &= ~AUTOFS_INF_EXPIRING;
+		spin_lock(&dentry->d_lock);
+		if (!ret) {
+			if ((IS_ROOT(dentry) ||
+			    (autofs_type_indirect(sbi->type) &&
+			     IS_ROOT(dentry->d_parent))) &&
+			    !(dentry->d_flags & DCACHE_NEED_AUTOMOUNT))
+				__managed_dentry_set_automount(dentry);
+		}
+		spin_unlock(&dentry->d_lock);
 		complete_all(&ino->expire_complete);
 		spin_unlock(&sbi->fs_lock);
 		dput(dentry);

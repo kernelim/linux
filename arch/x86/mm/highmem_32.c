@@ -44,6 +44,7 @@ void *kmap_atomic_prot(struct page *page, enum km_type type, pgprot_t prot)
 	vaddr = __fix_to_virt(FIX_KMAP_BEGIN + idx);
 	BUG_ON(!pte_none(*(kmap_pte-idx)));
 	set_pte(kmap_pte-idx, mk_pte(page, prot));
+	arch_flush_lazy_mmu_mode();
 
 	return (void *)vaddr;
 }
@@ -64,9 +65,10 @@ void kunmap_atomic(void *kvaddr, enum km_type type)
 	 * also, in case the page changes cacheability attributes or becomes
 	 * a protected page in a hypervisor.
 	 */
-	if (vaddr == __fix_to_virt(FIX_KMAP_BEGIN+idx))
+	if (vaddr == __fix_to_virt(FIX_KMAP_BEGIN+idx)) {
 		kpte_clear_flush(kmap_pte-idx, vaddr);
-	else {
+		arch_flush_lazy_mmu_mode();
+	} else {
 #ifdef CONFIG_DEBUG_HIGHMEM
 		BUG_ON(vaddr < PAGE_OFFSET);
 		BUG_ON(vaddr >= (unsigned long)high_memory);
