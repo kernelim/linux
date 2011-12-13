@@ -142,19 +142,6 @@ static void __cpuinit init_amd_k6(struct cpuinfo_x86 *c)
 		/* placeholder for any needed mods */
 		return;
 	}
-
-	if (c->x86 == 0x15) {
-		unsigned long upperbit;
-		u32 cpuid, assoc;
-
-		cpuid	 = cpuid_edx(0x80000005);
-		assoc	 = cpuid >> 16 & 0xff;
-		upperbit = ((cpuid >> 24) << 10) / assoc;
-
-		va_align.mask	  = (upperbit - 1) & PAGE_MASK;
-		va_align.flags    = ALIGN_VA_32 | ALIGN_VA_64;
-
-	}
 }
 
 static void __cpuinit amd_k7_smp_check(struct cpuinfo_x86 *c)

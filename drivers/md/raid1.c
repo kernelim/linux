@@ -965,8 +965,8 @@ static int make_request(mddev_t *mddev, struct bio * bio)
 		atomic_inc(&r1_bio->remaining);
 		spin_lock_irqsave(&conf->device_lock, flags);
 		bio_list_add(&conf->pending_bio_list, mbio);
-		md_raid1_unplug_device(conf);
 		spin_unlock_irqrestore(&conf->device_lock, flags);
+		md_raid1_unplug_device(conf);
 	}
 	r1_bio_write_done(r1_bio);
 
