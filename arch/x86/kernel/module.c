@@ -58,12 +58,40 @@ void module_free(struct module *mod, void *module_region)
 	vfree(module_region);
 }
 
-/* We don't need anything special. */
 int module_frob_arch_sections(Elf_Ehdr *hdr,
 			      Elf_Shdr *sechdrs,
 			      char *secstrings,
 			      struct module *mod)
 {
+	Elf_Shdr *s, *alt = NULL;
+	unsigned long diff;
+
+	/* RHEL: A bug exists where the ELF headers for kernel modules
+	 * are incorrectly calculated.  The result is that the
+	 * .altinstructions section size is not a multiple of struct alt_instr.
+	 * The fixes introduced in BZs 696457 and 737753 result in the usage of
+	 * the missing memory and when it is used the result is memory
+	 * corruption.  This simple fix calculates how much missing memory
+	 * there is and adjusts the .altinstructions section size by the
+	 * appropriate amount.  As a result module loading no longer
+	 * corrupts memory.
+	 */
+	for (s = sechdrs; s < sechdrs + hdr->e_shnum; s++)
+		if (!strcmp(".altinstructions", secstrings + s->sh_name))
+			alt = s;
+
+	if (!alt)
+		return 0;
+
+	diff = ((unsigned long)alt->sh_size % (sizeof(struct alt_instr)));
+	if (!diff)
+		return 0;
+
+	DEBUGP("%s: .alternatives size is off by 0x%lx ... adjusting\n",
+	       __FUNCTION__, (sizeof(struct alt_instr)) - diff);
+	/* fix it up */
+	alt->sh_size = alt->sh_size + (sizeof(struct alt_instr)) - diff;
+
 	return 0;
 }
 
