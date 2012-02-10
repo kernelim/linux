@@ -1896,8 +1896,8 @@ qla2x00_fw_ready(scsi_qla_host_t *vha)
 
 	rval = QLA_SUCCESS;
 
-	/* 20 seconds for loop down. */
-	min_wait = 20;
+	/* 60 seconds for loop down. */
+	min_wait = 60;
 
 	/*
 	 * Firmware should take at most one RATOV to login, plus 5 seconds for
@@ -2658,7 +2658,7 @@ qla2x00_configure_loop(scsi_qla_host_t *vha)
 			set_bit(LOCAL_LOOP_UPDATE, &vha->dpc_flags);
 		if (test_bit(RSCN_UPDATE, &save_flags)) {
 			set_bit(RSCN_UPDATE, &vha->dpc_flags);
-			if (!IS_ALOGIO_CAPABLE(ha))
+			if (!IS_ALOGIO_CAPABLE(ha) || !ql2xasynclogin)
 				vha->flags.rscn_queue_overflow = 1;
 		}
 	}
@@ -3604,7 +3604,7 @@ qla2x00_fabric_dev_login(scsi_qla_host_t *vha, fc_port_t *fcport,
 	rval = QLA_SUCCESS;
 	retry = 0;
 
-	if (IS_ALOGIO_CAPABLE(ha)) {
+	if (ql2xasynclogin && IS_ALOGIO_CAPABLE(ha)) {
 		if (fcport->flags & FCF_ASYNC_SENT)
 			return rval;
 		fcport->flags |= FCF_ASYNC_SENT;

@@ -1270,7 +1270,7 @@ unsigned long perf_instruction_pointer(struct pt_regs *regs)
 
 static bool pmc_overflow(unsigned long val)
 {
-	if ((unsigned long)val < 0)
+	if ((int)val < 0)
 		return true;
 
 	/*

@@ -1087,7 +1087,7 @@ vmxnet3_rx_csum(struct vmxnet3_adapter *adapter,
 		struct sk_buff *skb,
 		union Vmxnet3_GenericDesc *gdesc)
 {
-	if (!gdesc->rcd.cnc && adapter->netdev->features & NETIF_F_RXCSUM) {
+	if (!gdesc->rcd.cnc && adapter->rxcsum) {
 		/* typical case: TCP/UDP over IP and both csums are correct */
 		if ((le32_to_cpu(gdesc->dword[3]) & VMXNET3_RCD_CSUM_OK) ==
 							VMXNET3_RCD_CSUM_OK) {
@@ -2133,10 +2133,10 @@ vmxnet3_setup_driver_shared(struct vmxnet3_adapter *adapter)
 	devRead->misc.ddLen = cpu_to_le32(sizeof(struct vmxnet3_adapter));
 
 	/* set up feature flags */
-	if (adapter->netdev->features & NETIF_F_RXCSUM)
+	if (adapter->rxcsum)
 		devRead->misc.uptFeatures |= UPT1_F_RXCSUM;
 
-	if (adapter->netdev->features & NETIF_F_LRO) {
+	if (adapter->lro) {
 		devRead->misc.uptFeatures |= UPT1_F_LRO;
 		devRead->misc.maxNumRxSG = cpu_to_le16(1 + MAX_SKB_FRAGS);
 	}
@@ -2645,6 +2645,9 @@ vmxnet3_change_mtu(struct net_device *netdev, int new_mtu)
 	if (new_mtu < VMXNET3_MIN_MTU || new_mtu > VMXNET3_MAX_MTU)
 		return -EINVAL;
 
+	if (new_mtu > 1500 && !adapter->jumbo_frame)
+		return -EINVAL;
+
 	netdev->mtu = new_mtu;
 
 	/*
@@ -2689,19 +2692,28 @@ static void
 vmxnet3_declare_features(struct vmxnet3_adapter *adapter, bool dma64)
 {
 	struct net_device *netdev = adapter->netdev;
+	netdev->features = NETIF_F_SG |
+		NETIF_F_HW_CSUM |
+		NETIF_F_HW_VLAN_TX |
+		NETIF_F_HW_VLAN_RX |
+		NETIF_F_HW_VLAN_FILTER |
+		NETIF_F_TSO |
+		NETIF_F_TSO6 |
+		NETIF_F_LRO;
+ 
+	printk(KERN_INFO "features: sg csum vlan jf tso tsoIPv6 lro");
+ 
+	adapter->rxcsum = true;
+	adapter->jumbo_frame = true;
+	adapter->lro = true;
 
-	netdev->features = NETIF_F_SG | NETIF_F_RXCSUM |
-		NETIF_F_HW_CSUM | NETIF_F_HW_VLAN_TX |
-		NETIF_F_TSO | NETIF_F_TSO6 | NETIF_F_LRO;
-	if (dma64)
+	if (dma64) {
 		netdev->features |= NETIF_F_HIGHDMA;
-	netdev->vlan_features = netdev->features & ~NETIF_F_HW_VLAN_TX;
-	netdev->features |= 
-		NETIF_F_HW_VLAN_RX | NETIF_F_HW_VLAN_FILTER;
+		printk(" highDMA");
+	}
 
-	netdev_info(adapter->netdev,
-		"features: sg csum vlan jf tso tsoIPv6 lro%s\n",
-		dma64 ? " highDMA" : "");
+	netdev->vlan_features = netdev->features;
+	printk("\n");
 }
 
 

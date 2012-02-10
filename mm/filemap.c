@@ -160,6 +160,7 @@ void remove_from_page_cache(struct page *page)
 	if (freepage)
 		freepage(page);
 }
+EXPORT_SYMBOL(remove_from_page_cache);
 
 static int sync_page(void *word)
 {
