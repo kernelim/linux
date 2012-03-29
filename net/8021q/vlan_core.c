@@ -14,7 +14,7 @@ int __vlan_hwaccel_rx(struct sk_buff *skb, struct vlan_group *grp,
 	if (netpoll_rx(skb))
 		return NET_RX_DROP;
 
-	if (skb_bond_should_drop(skb))
+	if (skb_bond_should_drop(skb, ACCESS_ONCE(skb->dev->master)))
 		skb->deliver_no_wcard = 1;
 
 	skb->iif = skb->dev->ifindex;
@@ -106,7 +106,7 @@ vlan_gro_common(struct napi_struct *napi, struct vlan_group *grp,
 	struct net_device *vlan_dev;
 	u16 vlan_id;
 
-	if (skb_bond_should_drop(skb))
+	if (skb_bond_should_drop(skb, ACCESS_ONCE(skb->dev->master)))
 		skb->deliver_no_wcard = 1;
 
 	skb->iif = skb->dev->ifindex;

@@ -61,14 +61,6 @@
 #include <linux/cgroup.h>
 
 /*
- * Workqueue for cpuset related tasks.
- *
- * Using kevent workqueue may cause deadlock when memory_migrate
- * is set. So we create a separate workqueue thread for cpuset.
- */
-static struct workqueue_struct *cpuset_wq;
-
-/*
  * Tracks how many cpusets are currently defined in system.
  * When there is only one cpuset (the root cpuset) we can
  * short circuit some hooks.
@@ -769,7 +761,7 @@ static DECLARE_WORK(rebuild_sched_domains_work, do_rebuild_sched_domains);
  */
 static void async_rebuild_sched_domains(void)
 {
-	queue_work(cpuset_wq, &rebuild_sched_domains_work);
+	cgroup_queue_work(&rebuild_sched_domains_work);
 }
 
 /*
@@ -2168,9 +2160,6 @@ void __init cpuset_init_smp(void)
 
 	hotcpu_notifier(cpuset_track_online_cpus, 0);
 	hotplug_memory_notifier(cpuset_track_online_nodes, 10);
-
-	cpuset_wq = create_singlethread_workqueue("cpuset");
-	BUG_ON(!cpuset_wq);
 }
 
 /**

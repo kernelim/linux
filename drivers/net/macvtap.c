@@ -3,6 +3,7 @@
 #include <linux/interrupt.h>
 #include <linux/nsproxy.h>
 #include <linux/compat.h>
+#include <linux/idr.h>
 #include <linux/if_tun.h>
 #include <linux/module.h>
 #include <linux/skbuff.h>
@@ -48,15 +49,13 @@ static struct proto macvtap_proto = {
 };
 
 /*
- * Minor number matches netdev->ifindex, so need a potentially
- * large value. This also makes it possible to split the
- * tap functionality out again in the future by offering it
- * from other drivers besides macvtap. As long as every device
- * only has one tap, the interface numbers assure that the
- * device nodes are unique.
+ * Variables for dealing with macvtaps device numbers.
  */
 static unsigned int macvtap_major;
-#define MACVTAP_NUM_DEVS 65536
+#define MACVTAP_NUM_DEVS (1U << MINORBITS)
+static DEFINE_MUTEX(minor_lock);
+static DEFINE_IDR(minor_idr);
+
 #define GOODCOPY_LEN 128
 static struct class *macvtap_class;
 static struct cdev macvtap_cdev;
@@ -203,11 +202,64 @@ static int macvtap_receive(struct sk_buff *skb)
 	return macvtap_forward(skb->dev, skb);
 }
 
+static int macvtap_get_minor(struct macvlan_dev *vlan)
+{
+       int retval = -ENOMEM;
+       int id;
+
+       mutex_lock(&minor_lock);
+       if (idr_pre_get(&minor_idr, GFP_KERNEL) == 0)
+               goto exit;
+
+       retval = idr_get_new_above(&minor_idr, vlan, 1, &id);
+       if (retval < 0) {
+               if (retval == -EAGAIN)
+                       retval = -ENOMEM;
+               goto exit;
+       }
+       if (id < MACVTAP_NUM_DEVS) {
+               vlan->minor = id;
+       } else {
+               printk(KERN_ERR "too many macvtap devices\n");
+               retval = -EINVAL;
+               idr_remove(&minor_idr, id);
+       }
+exit:
+       mutex_unlock(&minor_lock);
+       return retval;
+}
+
+static void macvtap_free_minor(struct macvlan_dev *vlan)
+{
+       mutex_lock(&minor_lock);
+       if (vlan->minor) {
+               idr_remove(&minor_idr, vlan->minor);
+               vlan->minor = 0;
+       }
+       mutex_unlock(&minor_lock);
+}
+
+static struct net_device *dev_get_by_macvtap_minor(int minor)
+{
+       struct net_device *dev = NULL;
+       struct macvlan_dev *vlan;
+
+       mutex_lock(&minor_lock);
+       vlan = idr_find(&minor_idr, minor);
+       if (vlan) {
+               dev = vlan->dev;
+               dev_hold(dev);
+       }
+       mutex_unlock(&minor_lock);
+       return dev;
+}
+
 static int macvtap_newlink(struct net_device *dev,
 			   struct nlattr *tb[],
 			   struct nlattr *data[])
 {
 	struct device *classdev;
+	struct macvlan_dev *vlan;
 	dev_t devt;
 	int err;
 
@@ -216,13 +268,19 @@ static int macvtap_newlink(struct net_device *dev,
 	if (err)
 		goto out;
 
-	devt = MKDEV(MAJOR(macvtap_major), dev->ifindex);
+	vlan = netdev_priv(dev);
+	err = macvtap_get_minor(vlan);
+	if (err)
+		return notifier_from_errno(err);
+
+	devt = MKDEV(MAJOR(macvtap_major), vlan->minor);
 
 	classdev = device_create(macvtap_class, &dev->dev, devt,
 				 dev, "tap%d", dev->ifindex);
 	if (IS_ERR(classdev)) {
 		err = PTR_ERR(classdev);
 		macvtap_del_queues(dev);
+		macvtap_free_minor(vlan);
 	}
 
 out:
@@ -231,11 +289,15 @@ out:
 
 static void macvtap_dellink(struct net_device *dev)
 {
+	struct macvlan_dev *vlan;
+
+	vlan = netdev_priv(dev);
 	device_destroy(macvtap_class,
-		       MKDEV(MAJOR(macvtap_major), dev->ifindex));
+		       MKDEV(MAJOR(macvtap_major), vlan->minor));
 
 	macvtap_del_queues(dev);
 	macvlan_dellink(dev);
+	macvtap_free_minor(vlan);
 }
 
 static void macvtap_setup(struct net_device *dev)
@@ -265,18 +327,13 @@ static void macvtap_sock_write_space(struct sock *sk)
 static int macvtap_open(struct inode *inode, struct file *file)
 {
 	struct net *net = current->nsproxy->net_ns;
-	struct net_device *dev = dev_get_by_index(net, iminor(inode));
+	struct net_device *dev = dev_get_by_macvtap_minor(iminor(inode));
 	struct macvlan_dev *vlan = netdev_priv(dev);
 	struct macvtap_queue *q;
 	int err;
 
 	err = -ENODEV;
 	if (!dev)
-		goto out;
-
-	/* check if this is a macvtap device */
-	err = -EINVAL;
-	if (dev->rtnl_link_ops != &macvtap_link_ops)
 		goto out;
 
 	err = -ENOMEM;

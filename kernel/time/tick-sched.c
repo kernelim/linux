@@ -297,8 +297,10 @@ void tick_nohz_stop_sched_tick(int inidle)
 			tick_do_timer_cpu = TICK_DO_TIMER_NONE;
 	}
 
-	if (unlikely(ts->nohz_mode == NOHZ_MODE_INACTIVE))
+	if (unlikely(ts->nohz_mode == NOHZ_MODE_INACTIVE)) {
+		ts->sleep_length = ktime_sub(dev->next_event, now);
 		goto end;
+	}
 
 	if (need_resched())
 		goto end;

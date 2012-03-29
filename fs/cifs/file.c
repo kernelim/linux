@@ -235,7 +235,7 @@ cifs_new_fileinfo(__u16 fileHandle, struct file *file,
 	mutex_init(&pCifsFile->fh_mutex);
 	mutex_init(&pCifsFile->lock_mutex);
 	INIT_LIST_HEAD(&pCifsFile->llist);
-	slow_work_init(&pCifsFile->oplock_break, &cifs_oplock_break_ops);
+	vslow_work_init(&pCifsFile->oplock_break, &cifs_oplock_break_ops);
 
 	spin_lock(&cifs_file_list_lock);
 	list_add(&pCifsFile->tlist, &(tlink_tcon(tlink)->openFileList));

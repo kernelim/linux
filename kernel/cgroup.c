@@ -3351,6 +3351,25 @@ out:
 	return err;
 }
 
+/**
+ * cgroup_wq_init - initialize cgroup_wq
+ *
+ * cgroup_wq is a workqueue for cgroup related tasks.
+ * Using kevent workqueue may cause deadlock when memory_migrate of cpuset
+ * is set. So we create a separate workqueue thread for cgroup.
+ */
+static struct workqueue_struct *cgroup_wq;
+void __init cgroup_wq_init(void)
+{
+	cgroup_wq = create_singlethread_workqueue("cgroup");
+	BUG_ON(!cgroup_wq);
+}
+
+void cgroup_queue_work(struct work_struct *work)
+{
+	queue_work(cgroup_wq, work);
+}
+
 /*
  * proc_cgroup_show()
  *  - Print task's cgroup paths into seq_file, one line for each hierarchy
@@ -3764,7 +3783,7 @@ static void check_for_release(struct cgroup *cgrp)
 		}
 		spin_unlock(&release_list_lock);
 		if (need_schedule_work)
-			schedule_work(&release_agent_work);
+			cgroup_queue_work(&release_agent_work);
 	}
 }
 

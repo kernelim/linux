@@ -2527,7 +2527,8 @@ int ieee80211_mgd_deauth(struct ieee80211_sub_if_data *sdata,
 		bssid = req->bss->bssid;
 		ieee80211_set_disassoc(sdata);
 	} else list_for_each_entry(wk, &ifmgd->work_list, list) {
-		if (wk->state != IEEE80211_MGD_STATE_PROBE)
+		if (wk->state != IEEE80211_MGD_STATE_PROBE &&
+		    wk->state != IEEE80211_MGD_STATE_AUTH)
 			continue;
 		if (req->bss != &wk->bss->cbss)
 			continue;

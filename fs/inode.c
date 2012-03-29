@@ -319,7 +319,14 @@ void clear_inode(struct inode *inode)
 	might_sleep();
 	invalidate_inode_buffers(inode);
 
+	/*
+	 * We have to cycle tree_lock here because reclaim can be still in the
+	 * process of removing the last page (in __delete_from_page_cache())
+	 * and we must not free mapping under it.
+	 */
+	spin_lock_irq(&inode->i_data.tree_lock);
 	BUG_ON(inode->i_data.nrpages);
+	spin_unlock_irq(&inode->i_data.tree_lock);
 	BUG_ON(!(inode->i_state & I_FREEING));
 	BUG_ON(inode->i_state & I_CLEAR);
 	inode_sync_wait(inode);
