@@ -32,8 +32,8 @@
 #include <sound/pcm_params.h>
 #include "pcm_plugin.h"
 
-#define snd_pcm_plug_first(plug) ((plug)->runtime->oss.plugin_first)
-#define snd_pcm_plug_last(plug) ((plug)->runtime->oss.plugin_last)
+#define snd_pcm_plug_first(plug) (((struct snd_pcm_runtime2 *)((plug)->runtime))->oss.plugin_first)
+#define snd_pcm_plug_last(plug) (((struct snd_pcm_runtime2 *)((plug)->runtime))->oss.plugin_last)
 
 /*
  *  because some cards might have rates "very close", we ignore

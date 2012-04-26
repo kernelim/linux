@@ -37,6 +37,11 @@ MODULE_DESCRIPTION("Mixer OSS emulation for ALSA.");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS_SNDRV_MINOR(SNDRV_MINOR_OSS_MIXER);
 
+static inline struct snd_card_oss *card_oss(struct snd_card *card)
+{
+	return (struct snd_card_oss *)card;
+}
+
 static int snd_mixer_oss_open(struct inode *inode, struct file *file)
 {
 	struct snd_card *card;
@@ -47,7 +52,7 @@ static int snd_mixer_oss_open(struct inode *inode, struct file *file)
 					 SNDRV_OSS_DEVICE_TYPE_MIXER);
 	if (card == NULL)
 		return -ENODEV;
-	if (card->mixer_oss == NULL)
+	if (card_oss(card)->mixer_oss == NULL)
 		return -ENODEV;
 	err = snd_card_file_add(card, file);
 	if (err < 0)
@@ -58,7 +63,7 @@ static int snd_mixer_oss_open(struct inode *inode, struct file *file)
 		return -ENOMEM;
 	}
 	fmixer->card = card;
-	fmixer->mixer = card->mixer_oss;
+	fmixer->mixer = card_oss(card)->mixer_oss;
 	file->private_data = fmixer;
 	if (!try_module_get(card->module)) {
 		kfree(fmixer);
@@ -91,7 +96,7 @@ static int snd_mixer_oss_info(struct snd_mixer_oss_file *fmixer,
 	memset(&info, 0, sizeof(info));
 	strlcpy(info.id, mixer && mixer->id[0] ? mixer->id : card->driver, sizeof(info.id));
 	strlcpy(info.name, mixer && mixer->name[0] ? mixer->name : card->mixername, sizeof(info.name));
-	info.modify_counter = card->mixer_oss_change_count;
+	info.modify_counter = card_oss(card)->mixer_oss_change_count;
 	if (copy_to_user(_info, &info, sizeof(info)))
 		return -EFAULT;
 	return 0;
@@ -373,11 +378,11 @@ int snd_mixer_oss_ioctl_card(struct snd_card *card, unsigned int cmd, unsigned l
 	
 	if (snd_BUG_ON(!card))
 		return -ENXIO;
-	if (card->mixer_oss == NULL)
+	if (card_oss(card)->mixer_oss == NULL)
 		return -ENXIO;
 	memset(&fmixer, 0, sizeof(fmixer));
 	fmixer.card = card;
-	fmixer.mixer = card->mixer_oss;
+	fmixer.mixer = card_oss(card)->mixer_oss;
 	return snd_mixer_oss_ioctl1(&fmixer, cmd, arg);
 }
 
@@ -492,7 +497,7 @@ static struct snd_kcontrol *snd_mixer_oss_test_id(struct snd_mixer_oss *mixer, c
 	
 	memset(&id, 0, sizeof(id));
 	id.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
-	strcpy(id.name, name);
+	strlcpy(id.name, name, sizeof(id.name));
 	id.index = index;
 	return snd_ctl_find_id(card, &id);
 }
@@ -613,8 +618,10 @@ static void snd_mixer_oss_put_volume1_vol(struct snd_mixer_oss_file *fmixer,
 	if (numid == ID_UNKNOWN)
 		return;
 	down_read(&card->controls_rwsem);
-	if ((kctl = snd_ctl_find_numid(card, numid)) == NULL)
+	if ((kctl = snd_ctl_find_numid(card, numid)) == NULL) {
+		up_read(&card->controls_rwsem);
 		return;
+	}
 	uinfo = kzalloc(sizeof(*uinfo), GFP_KERNEL);
 	uctl = kzalloc(sizeof(*uctl), GFP_KERNEL);
 	if (uinfo == NULL || uctl == NULL)
@@ -653,7 +660,7 @@ static void snd_mixer_oss_put_volume1_sw(struct snd_mixer_oss_file *fmixer,
 		return;
 	down_read(&card->controls_rwsem);
 	if ((kctl = snd_ctl_find_numid(card, numid)) == NULL) {
-		up_read(&fmixer->card->controls_rwsem);
+		up_read(&card->controls_rwsem);
 		return;
 	}
 	uinfo = kzalloc(sizeof(*uinfo), GFP_KERNEL);
@@ -792,7 +799,7 @@ static int snd_mixer_oss_get_recsrc2(struct snd_mixer_oss_file *fmixer, unsigned
 	uctl = kzalloc(sizeof(*uctl), GFP_KERNEL);
 	if (uinfo == NULL || uctl == NULL) {
 		err = -ENOMEM;
-		goto __unlock;
+		goto __free_only;
 	}
 	down_read(&card->controls_rwsem);
 	kctl = snd_mixer_oss_test_id(mixer, "Capture Source", 0);
@@ -821,6 +828,7 @@ static int snd_mixer_oss_get_recsrc2(struct snd_mixer_oss_file *fmixer, unsigned
 	err = 0;
       __unlock:
      	up_read(&card->controls_rwsem);
+      __free_only:
       	kfree(uctl);
       	kfree(uinfo);
       	return err;
@@ -842,7 +850,7 @@ static int snd_mixer_oss_put_recsrc2(struct snd_mixer_oss_file *fmixer, unsigned
 	uctl = kzalloc(sizeof(*uctl), GFP_KERNEL);
 	if (uinfo == NULL || uctl == NULL) {
 		err = -ENOMEM;
-		goto __unlock;
+		goto __free_only;
 	}
 	down_read(&card->controls_rwsem);
 	kctl = snd_mixer_oss_test_id(mixer, "Capture Source", 0);
@@ -875,6 +883,7 @@ static int snd_mixer_oss_put_recsrc2(struct snd_mixer_oss_file *fmixer, unsigned
 	err = 0;
       __unlock:
 	up_read(&card->controls_rwsem);
+      __free_only:
 	kfree(uctl);
 	kfree(uinfo);
 	return err;
@@ -1251,7 +1260,9 @@ static void snd_mixer_oss_build(struct snd_mixer_oss *mixer)
 		{ SOUND_MIXER_SYNTH,	"FM",			0 }, /* fallback */
 		{ SOUND_MIXER_SYNTH,	"Music",		0 }, /* fallback */
 		{ SOUND_MIXER_PCM,	"PCM",			0 },
-		{ SOUND_MIXER_SPEAKER,	"PC Speaker", 		0 },
+		{ SOUND_MIXER_SPEAKER,	"Beep", 		0 },
+		{ SOUND_MIXER_SPEAKER,	"PC Speaker", 		0 }, /* fallback */
+		{ SOUND_MIXER_SPEAKER,	"Speaker", 		0 }, /* fallback */
 		{ SOUND_MIXER_LINE,	"Line", 		0 },
 		{ SOUND_MIXER_MIC,	"Mic", 			0 },
 		{ SOUND_MIXER_CD,	"CD", 			0 },
@@ -1303,9 +1314,9 @@ static int snd_mixer_oss_free1(void *private)
 	if (!mixer)
 		return 0;
 	card = mixer->card;
-	if (snd_BUG_ON(mixer != card->mixer_oss))
+	if (snd_BUG_ON(mixer != card_oss(card)->mixer_oss))
 		return -ENXIO;
-	card->mixer_oss = NULL;
+	card_oss(card)->mixer_oss = NULL;
 	for (idx = 0; idx < SNDRV_OSS_MAX_MIXERS; idx++) {
 		struct snd_mixer_oss_slot *chn = &mixer->slots[idx];
 		if (chn->private_free)
@@ -1350,11 +1361,11 @@ static int snd_mixer_oss_notify_handler(struct snd_card *card, int cmd)
 #endif
 		for (idx = 0; idx < SNDRV_OSS_MAX_MIXERS; idx++)
 			mixer->slots[idx].number = idx;
-		card->mixer_oss = mixer;
+		card_oss(card)->mixer_oss = mixer;
 		snd_mixer_oss_build(mixer);
 		snd_mixer_oss_proc_init(mixer);
 	} else {
-		mixer = card->mixer_oss;
+		mixer = card_oss(card)->mixer_oss;
 		if (mixer == NULL)
 			return 0;
 		if (mixer->oss_dev_alloc) {

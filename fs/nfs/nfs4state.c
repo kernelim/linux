@@ -120,6 +120,11 @@ struct rpc_cred *nfs4_get_renew_cred_locked(struct nfs_client *clp)
 	struct rb_node *pos;
 	struct rpc_cred *cred = NULL;
 
+	/* Use machine credentials if available */
+	cred = nfs4_get_machine_cred_locked(clp);
+	if (cred != NULL)
+		goto out;
+
 	for (pos = rb_first(&clp->cl_state_owners); pos != NULL; pos = rb_next(pos)) {
 		sp = rb_entry(pos, struct nfs4_state_owner, so_client_node);
 		if (list_empty(&sp->so_states))
@@ -127,6 +132,8 @@ struct rpc_cred *nfs4_get_renew_cred_locked(struct nfs_client *clp)
 		cred = get_rpccred(sp->so_cred);
 		break;
 	}
+
+out:
 	return cred;
 }
 

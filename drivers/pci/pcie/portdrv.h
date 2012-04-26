@@ -47,6 +47,18 @@ extern void pcie_port_bus_unregister(void);
 
 struct pci_dev;
 
+#ifdef CONFIG_HOTPLUG_PCI_PCIE
+extern bool pciehp_msi_disabled;
+
+static inline bool pciehp_no_msi(void)
+{
+	return pciehp_msi_disabled;
+}
+
+#else  /* !CONFIG_HOTPLUG_PCI_PCIE */
+static inline bool pciehp_no_msi(void) { return false; }
+#endif /* !CONFIG_HOTPLUG_PCI_PCIE */
+
 #ifdef CONFIG_ACPI
 extern int pcie_port_acpi_setup(struct pci_dev *port, int *mask);
 

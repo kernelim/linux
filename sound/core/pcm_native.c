@@ -388,7 +388,7 @@ static int snd_pcm_hw_params(struct snd_pcm_substream *substream,
 	}
 	snd_pcm_stream_unlock_irq(substream);
 #if defined(CONFIG_SND_PCM_OSS) || defined(CONFIG_SND_PCM_OSS_MODULE)
-	if (!substream->oss.oss)
+	if (!((struct snd_pcm_substream2 *)substream)->oss.oss)
 #endif
 		if (atomic_read(&substream->mmap_count))
 			return -EBADFD;
@@ -861,6 +861,8 @@ static void snd_pcm_post_start(struct snd_pcm_substream *substream, int state)
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	snd_pcm_trigger_tstamp(substream);
 	runtime->hw_ptr_jiffies = jiffies;
+	((struct snd_pcm_runtime2 *)runtime)->hw_ptr_buffer_jiffies =
+				(runtime->buffer_size * HZ) / runtime->rate;
 	runtime->status->state = state;
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK &&
 	    runtime->silence_size > 0)

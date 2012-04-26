@@ -31,6 +31,7 @@
 #include <asm/dma.h>
 #include <asm/amd_iommu_types.h>
 #include <asm/amd_iommu.h>
+#include <asm/msidef.h>
 
 #define CMD_SET_TYPE(cmd, t) ((cmd)->data[1] |= ((t) << 28))
 
@@ -782,7 +783,7 @@ static int alloc_new_range(struct amd_iommu *iommu,
 			   bool populate, gfp_t gfp)
 {
 	int index = dma_dom->aperture_size >> APERTURE_RANGE_SHIFT;
-	unsigned long i;
+	unsigned long i, old_size;
 
 #ifdef CONFIG_IOMMU_STRESS
 	populate = false;
@@ -818,7 +819,20 @@ static int alloc_new_range(struct amd_iommu *iommu,
 		}
 	}
 
+	old_size                = dma_dom->aperture_size;
 	dma_dom->aperture_size += APERTURE_RANGE_SIZE;
+
+	/* Reserve address range used for MSI messages */
+	if (old_size < MSI_ADDR_BASE_LO &&
+	    dma_dom->aperture_size > MSI_ADDR_BASE_LO) {
+		unsigned long spage;
+		int pages;
+
+		pages = iommu_num_pages(MSI_ADDR_BASE_LO, 0x10000, PAGE_SIZE);
+		spage = MSI_ADDR_BASE_LO >> PAGE_SHIFT;
+
+		dma_ops_reserve_addresses(dma_dom, spage, pages);
+	}
 
 	/* Intialize the exclusion range if necessary */
 	if (iommu->exclusion_start &&
@@ -844,7 +858,7 @@ static int alloc_new_range(struct amd_iommu *iommu,
 		if (!pte || !IOMMU_PTE_PRESENT(*pte))
 			continue;
 
-		dma_ops_reserve_addresses(dma_dom, i << PAGE_SHIFT, 1);
+		dma_ops_reserve_addresses(dma_dom, i >> PAGE_SHIFT, 1);
 	}
 
 	update_domain(&dma_dom->domain);

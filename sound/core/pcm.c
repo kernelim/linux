@@ -383,13 +383,14 @@ static void snd_pcm_substream_proc_hw_params_read(struct snd_info_entry *entry,
 	snd_iprintf(buffer, "period_size: %lu\n", runtime->period_size);	
 	snd_iprintf(buffer, "buffer_size: %lu\n", runtime->buffer_size);	
 #if defined(CONFIG_SND_PCM_OSS) || defined(CONFIG_SND_PCM_OSS_MODULE)
-	if (substream->oss.oss) {
-		snd_iprintf(buffer, "OSS format: %s\n", snd_pcm_oss_format_name(runtime->oss.format));
-		snd_iprintf(buffer, "OSS channels: %u\n", runtime->oss.channels);	
-		snd_iprintf(buffer, "OSS rate: %u\n", runtime->oss.rate);
-		snd_iprintf(buffer, "OSS period bytes: %lu\n", (unsigned long)runtime->oss.period_bytes);
-		snd_iprintf(buffer, "OSS periods: %u\n", runtime->oss.periods);
-		snd_iprintf(buffer, "OSS period frames: %lu\n", (unsigned long)runtime->oss.period_frames);
+	if (((struct snd_pcm_substream2 *)substream)->oss.oss) {
+		struct snd_pcm_runtime2 *runtime2 = (struct snd_pcm_runtime2 *)runtime;
+		snd_iprintf(buffer, "OSS format: %s\n", snd_pcm_oss_format_name(runtime2->oss.format));
+		snd_iprintf(buffer, "OSS channels: %u\n", runtime2->oss.channels);	
+		snd_iprintf(buffer, "OSS rate: %u\n", runtime2->oss.rate);
+		snd_iprintf(buffer, "OSS period bytes: %lu\n", (unsigned long)runtime2->oss.period_bytes);
+		snd_iprintf(buffer, "OSS periods: %u\n", runtime2->oss.periods);
+		snd_iprintf(buffer, "OSS period frames: %lu\n", (unsigned long)runtime2->oss.period_frames);
 	}
 #endif
 }
@@ -623,7 +624,7 @@ int snd_pcm_new_stream(struct snd_pcm *pcm, int stream, int substream_count)
 	struct snd_pcm_substream *substream, *prev;
 
 #if defined(CONFIG_SND_PCM_OSS) || defined(CONFIG_SND_PCM_OSS_MODULE)
-	mutex_init(&pstr->oss.setup_mutex);
+	mutex_init(&((struct snd_pcm2 *)pcm)->oss_streams[stream].setup_mutex);
 #endif
 	pstr->stream = stream;
 	pstr->pcm = pcm;
@@ -637,7 +638,7 @@ int snd_pcm_new_stream(struct snd_pcm *pcm, int stream, int substream_count)
 	}
 	prev = NULL;
 	for (idx = 0, prev = NULL; idx < substream_count; idx++) {
-		substream = kzalloc(sizeof(*substream), GFP_KERNEL);
+		substream = kzalloc(sizeof(struct snd_pcm_substream2), GFP_KERNEL);
 		if (substream == NULL) {
 			snd_printk(KERN_ERR "Cannot allocate PCM substream\n");
 			return -ENOMEM;
@@ -709,7 +710,7 @@ int snd_pcm_new(struct snd_card *card, const char *id, int device,
 		return -ENXIO;
 	if (rpcm)
 		*rpcm = NULL;
-	pcm = kzalloc(sizeof(*pcm), GFP_KERNEL);
+	pcm = kzalloc(sizeof(struct snd_pcm2), GFP_KERNEL);
 	if (pcm == NULL) {
 		snd_printk(KERN_ERR "Cannot allocate PCM\n");
 		return -ENOMEM;
@@ -755,10 +756,14 @@ static void snd_pcm_free_stream(struct snd_pcm_str * pstr)
 	}
 	snd_pcm_stream_proc_done(pstr);
 #if defined(CONFIG_SND_PCM_OSS) || defined(CONFIG_SND_PCM_OSS_MODULE)
-	for (setup = pstr->oss.setup_list; setup; setup = setupn) {
-		setupn = setup->next;
-		kfree(setup->task_name);
-		kfree(setup);
+	{
+		struct snd_pcm_oss_stream *ostr;
+		ostr = &((struct snd_pcm2 *)(pstr->pcm))->oss_streams[pstr->stream];
+		for (setup = ostr->setup_list; setup; setup = setupn) {
+			setupn = setup->next;
+			kfree(setup->task_name);
+			kfree(setup);
+		}
 	}
 #endif
 }
@@ -870,7 +875,7 @@ int snd_pcm_attach_substream(struct snd_pcm *pcm, int stream,
 	if (substream == NULL)
 		return -EAGAIN;
 
-	runtime = kzalloc(sizeof(*runtime), GFP_KERNEL);
+	runtime = kzalloc(sizeof(struct snd_pcm_runtime2), GFP_KERNEL);
 	if (runtime == NULL)
 		return -ENOMEM;
 

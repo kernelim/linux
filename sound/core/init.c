@@ -157,7 +157,7 @@ int snd_card_create(int idx, const char *xid,
 
 	if (extra_size < 0)
 		extra_size = 0;
-	card = kzalloc(sizeof(*card) + extra_size, GFP_KERNEL);
+	card = kzalloc(sizeof(struct snd_card_oss) + extra_size, GFP_KERNEL);
 	if (!card)
 		return -ENOMEM;
 	if (xid)
@@ -228,7 +228,7 @@ int snd_card_create(int idx, const char *xid,
 		goto __error_ctl;
 	}
 	if (extra_size > 0)
-		card->private_data = (char *)card + sizeof(struct snd_card);
+		card->private_data = (char *)card + sizeof(struct snd_card_oss);
 	*card_ret = card;
 	return 0;
 

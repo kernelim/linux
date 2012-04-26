@@ -27,7 +27,6 @@ enum {
 	IUCV_OPEN,
 	IUCV_BOUND,
 	IUCV_LISTEN,
-	IUCV_SEVERED,
 	IUCV_DISCONN,
 	IUCV_CLOSING,
 	IUCV_CLOSED
@@ -114,6 +113,7 @@ struct iucv_sock {
 	spinlock_t		accept_q_lock;
 	struct sock		*parent;
 	struct iucv_path	*path;
+	struct net_device	*hs_dev;
 	struct sk_buff_head	send_skb_q;
 	struct sk_buff_head	backlog_skb_q;
 	struct sock_msg_q	message_q;
@@ -132,6 +132,7 @@ struct iucv_sock {
 /* iucv socket options (SOL_IUCV) */
 #define SO_IPRMDATA_MSG	0x0080		/* send/recv IPRM_DATA msgs */
 #define SO_MSGLIMIT	0x1000		/* get/set IUCV MSGLIMIT */
+#define SO_MSGSIZE      0x0800		/* get maximum msgsize */
 
 /* iucv related control messages (scm) */
 #define SCM_IUCV_TRGCLS	0x0001		/* target class control message */

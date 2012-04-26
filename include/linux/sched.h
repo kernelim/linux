@@ -278,6 +278,8 @@ static inline void select_nohz_load_balancer(int stop_tick) { }
  */
 extern void show_state_filter(unsigned long state_filter);
 
+extern void wait_for_rqlock(void);
+
 static inline void show_state(void)
 {
 	show_state_filter(0);

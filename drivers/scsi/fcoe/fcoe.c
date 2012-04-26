@@ -134,6 +134,10 @@ static void fcoe_recv_frame(struct sk_buff *skb);
 
 static void fcoe_get_lesb(struct fc_lport *, struct fc_els_lesb *);
 
+static void fcoe_do_destroy(struct fcoe_port *port);
+
+static struct workqueue_struct *fcoe_wq;
+
 /* notification function for packets from net device */
 static struct notifier_block fcoe_notifier = {
 	.notifier_call = fcoe_device_notification,
@@ -1796,7 +1800,8 @@ static int fcoe_device_notification(struct notifier_block *notifier,
 	case NETDEV_UNREGISTER:
 		list_del(&fcoe->list);
 		port = lport_priv(fcoe->ctlr.lp);
-		schedule_work(&port->destroy_work);
+		if (fcoe_wq)
+			queue_work(fcoe_wq, &port->destroy_work);
 		goto out;
 		break;
 	case NETDEV_FEAT_CHANGE:
@@ -1895,16 +1900,13 @@ static int fcoe_destroy(struct net_device *netdev)
 	mutex_lock(&fcoe_config_mutex);
 	rtnl_lock();
 	fcoe = fcoe_hostlist_lookup_port(netdev);
-	if (!fcoe) {
-		rc = -ENODEV;
-		goto out_nodev;
-	}
+	if (!fcoe)
+		return -ENODEV;
 	lport = fcoe->ctlr.lp;
 	port = lport_priv(lport);
 	list_del(&fcoe->list);
-	schedule_work(&port->destroy_work);
-out_nodev:
 	rtnl_unlock();
+	fcoe_do_destroy(port);
 	mutex_unlock(&fcoe_config_mutex);
 	return rc;
 }
@@ -1913,24 +1915,24 @@ out_nodev:
  * fcoe_destroy_work() - Destroy a FCoE port in a deferred work context
  * @work: Handle to the FCoE port to be destroyed
  */
-static void fcoe_destroy_work(struct work_struct *work)
+static void fcoe_do_destroy(struct fcoe_port *port)
 {
-	struct fcoe_port *port;
 	struct fcoe_interface *fcoe;
-	int npiv = 0;
 
-	port = container_of(work, struct fcoe_port, destroy_work);
-	mutex_lock(&fcoe_config_mutex);
-
-	/* set if this is an NPIV port */
-	npiv = port->lport->vport ? 1 : 0;
 	fcoe = port->priv;
 	fcoe_if_destroy(port->lport);
 
-	/* Do not tear down the fcoe interface for NPIV port */
-	if (!npiv)
-		fcoe_interface_cleanup(fcoe);
+	fcoe_interface_cleanup(fcoe);
+}
 
+static void fcoe_destroy_work(struct work_struct *work)
+{
+
+	struct fcoe_port *port;
+
+	port = container_of(work, struct fcoe_port, destroy_work);
+	mutex_lock(&fcoe_config_mutex);
+	fcoe_do_destroy(port);
 	mutex_unlock(&fcoe_config_mutex);
 }
 
@@ -2212,12 +2214,21 @@ static int __init fcoe_init(void)
 	unsigned int cpu;
 	int rc = 0;
 
+	/*
+ 	 * Create a per-cpu workqueue
+ 	 */
+	fcoe_wq = create_workqueue("fcoe_work");
+	if (!fcoe_wq) {
+		printk(KERN_ERR "Failed to create the fcoe_work workqueue\n");
+		return -ENOMEM;
+	}
+
 	/* register as a fcoe transport */
 	rc = fcoe_transport_attach(&fcoe_sw_transport);
 	if (rc) {
 		printk(KERN_ERR "failed to register an fcoe transport, check "
 			"if libfcoe is loaded\n");
-		return rc;
+		goto out_wq;
 	}
 
 	mutex_lock(&fcoe_config_mutex);
@@ -2244,12 +2255,14 @@ static int __init fcoe_init(void)
 
 	mutex_unlock(&fcoe_config_mutex);
 	return 0;
-
+	
 out_free:
 	for_each_online_cpu(cpu) {
 		fcoe_percpu_thread_destroy(cpu);
 	}
 	mutex_unlock(&fcoe_config_mutex);
+out_wq:
+	destroy_workqueue(fcoe_wq);
 	return rc;
 }
 module_init(fcoe_init);
@@ -2264,6 +2277,7 @@ static void __exit fcoe_exit(void)
 	struct fcoe_interface *fcoe, *tmp;
 	struct fcoe_port *port;
 	unsigned int cpu;
+	struct workqueue_struct *tmp_wq = fcoe_wq;
 
 	mutex_lock(&fcoe_config_mutex);
 
@@ -2274,8 +2288,9 @@ static void __exit fcoe_exit(void)
 	list_for_each_entry_safe(fcoe, tmp, &fcoe_hostlist, list) {
 		list_del(&fcoe->list);
 		port = lport_priv(fcoe->ctlr.lp);
-		schedule_work(&port->destroy_work);
+		queue_work(fcoe_wq, &port->destroy_work);
 	}
+	fcoe_wq = NULL;
 	rtnl_unlock();
 
 	unregister_hotcpu_notifier(&fcoe_cpu_notifier);
@@ -2284,6 +2299,11 @@ static void __exit fcoe_exit(void)
 		fcoe_percpu_thread_destroy(cpu);
 
 	mutex_unlock(&fcoe_config_mutex);
+
+	/*
+ 	 * flush and destroy the fcoe_work workqueue
+ 	 */
+	destroy_workqueue(tmp_wq);
 
 	/* flush any asyncronous interface destroys,
 	 * this should happen after the netdev notifier is unregistered */
@@ -2445,12 +2465,15 @@ static int fcoe_vport_destroy(struct fc_vport *vport)
 	struct Scsi_Host *shost = vport_to_shost(vport);
 	struct fc_lport *n_port = shost_priv(shost);
 	struct fc_lport *vn_port = vport->dd_data;
-	struct fcoe_port *port = lport_priv(vn_port);
 
 	mutex_lock(&n_port->lp_mutex);
 	list_del(&vn_port->list);
 	mutex_unlock(&n_port->lp_mutex);
-	schedule_work(&port->destroy_work);
+
+	mutex_lock(&fcoe_config_mutex);
+	fcoe_if_destroy(vn_port);
+	mutex_unlock(&fcoe_config_mutex);
+
 	return 0;
 }
 

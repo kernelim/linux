@@ -3124,13 +3124,29 @@ out:
 }
 EXPORT_SYMBOL(napi_get_frags);
 
+static __be16 __eth_type_trans_no_dev_change(struct sk_buff *skb,
+					     struct net_device *dev)
+{
+	struct net_device *tmp_dev = skb->dev;
+	__be16 ret;
+
+	ret = eth_type_trans(skb, dev);
+	skb->dev = tmp_dev;
+	return ret;
+}
+
 gro_result_t napi_frags_finish(struct napi_struct *napi, struct sk_buff *skb,
 			       gro_result_t ret)
 {
 	switch (ret) {
 	case GRO_NORMAL:
 	case GRO_HELD:
-		skb->protocol = eth_type_trans(skb, skb->dev);
+		/*
+		 * If this is vlan skb, vlan code previously changed skb->dev to
+		 * vlan dev. We need eth_type_trans() to be called with original
+		 * device though because otherwise it would change pkt_type.
+		 */
+		skb->protocol = __eth_type_trans_no_dev_change(skb, napi->dev);
 
 		if (ret == GRO_HELD)
 			skb_gro_pull(skb, -ETH_HLEN);

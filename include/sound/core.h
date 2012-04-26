@@ -142,7 +142,10 @@ struct snd_card {
 	struct mutex power_lock;	/* power lock */
 	wait_queue_head_t power_sleep;
 #endif
+};
 
+struct snd_card_oss {
+	struct snd_card card;
 #if defined(CONFIG_SND_MIXER_OSS) || defined(CONFIG_SND_MIXER_OSS_MODULE)
 	struct snd_mixer_oss *mixer_oss;
 	int mixer_oss_change_count;

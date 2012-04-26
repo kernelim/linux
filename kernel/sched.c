@@ -833,6 +833,26 @@ static inline int cpu_of(struct rq *rq)
 #define cpu_curr(cpu)		(cpu_rq(cpu)->curr)
 #define raw_rq()		(&__raw_get_cpu_var(runqueues))
 
+void wait_for_rqlock(void)
+{
+	struct rq *rq = raw_rq();
+
+	/*
+	 * The setting of TASK_RUNNING by try_to_wake_up() may be delayed
+	 * when the following two conditions become true.
+	 *   - There is race condition of mmap_sem (It is acquired by
+	 *     exit_mm()), and
+	 *   - SMI occurs before setting TASK_RUNINNG.
+	 *     (or hypervisor of virtual machine switches to other guest)
+	 *  As a result, we may become TASK_RUNNING after becoming TASK_DEAD
+	 *
+	 * To avoid it, we have to wait for releasing rq lock which
+	 * is held by try_to_wake_up()
+	 */
+	smp_mb();
+	spin_unlock_wait(&rq->lock);
+}
+
 static void update_rq_clock(struct rq *rq)
 {
 	s64 delta;
