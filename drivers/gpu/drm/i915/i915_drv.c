@@ -401,6 +401,10 @@ static int i915_drm_freeze(struct drm_device *dev)
 	/* Modeset on resume, not lid events */
 	dev_priv->modeset_on_lid = 0;
 
+	acquire_console_sem();
+	intel_fbdev_set_suspend(dev, 1);
+	release_console_sem();
+
 	return 0;
 }
 
@@ -470,6 +474,9 @@ static int i915_drm_thaw(struct drm_device *dev)
 
 	dev_priv->modeset_on_lid = 0;
 
+	acquire_console_sem();
+	intel_fbdev_set_suspend(dev, 0);
+	release_console_sem();
 	return error;
 }
 

@@ -1111,6 +1111,11 @@ static void ieee80211_set_disassoc(struct ieee80211_sub_if_data *sdata)
 	ieee80211_bss_info_change_notify(sdata, changed);
 
 	sta_info_destroy_addr(sdata, bssid);
+
+	del_timer_sync(&sdata->u.mgd.chswitch_timer);
+	del_timer_sync(&sdata->u.mgd.timer);
+	del_timer_sync(&sdata->u.mgd.conn_mon_timer);
+	del_timer_sync(&sdata->u.mgd.bcn_mon_timer);
 }
 
 static enum rx_mgmt_action __must_check

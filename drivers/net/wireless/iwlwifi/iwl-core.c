@@ -299,6 +299,9 @@ int iwlcore_init_geos(struct iwl_priv *priv)
 		priv->cfg->sku &= ~IWL_SKU_A;
 	}
 
+	if (priv->cfg->mod_params->disable_5ghz)
+		priv->bands[IEEE80211_BAND_5GHZ].n_channels = 0;
+
 	IWL_INFO(priv, "Tunable channels: %d 802.11bg, %d 802.11a channels\n",
 		   priv->bands[IEEE80211_BAND_2GHZ].n_channels,
 		   priv->bands[IEEE80211_BAND_5GHZ].n_channels);
@@ -1740,6 +1743,7 @@ int iwl_mac_add_interface(struct ieee80211_hw *hw,
 #endif
 	struct iwl_rxon_context *tmp, *ctx = NULL;
 	int err = 0;
+	bool reset = false;
 
 #if 0 /* Not in RHEL6... */
 	IWL_DEBUG_MAC80211(priv, "enter: type %d\n", vif->type);
@@ -1760,6 +1764,11 @@ int iwl_mac_add_interface(struct ieee80211_hw *hw,
 			tmp->interface_modes | tmp->exclusive_interface_modes;
 
 		if (tmp->vif) {
+			if (tmp->vif == conf->vif) {
+				reset = true;
+				ctx = tmp;
+				break;
+			}
 			/* check if this busy context is exclusive */
 			if (tmp->exclusive_interface_modes &
 						BIT(tmp->vif->type)) {
@@ -1817,7 +1826,7 @@ int iwl_mac_add_interface(struct ieee80211_hw *hw,
 
 	err = iwl_set_mode(priv, conf->vif);
 #endif
-	if (err) {
+	if (err && !reset) {
 		if (!ctx->always_active)
 			ctx->is_active = false;
 		goto out_err;
@@ -1869,13 +1878,14 @@ void iwl_mac_remove_interface(struct ieee80211_hw *hw,
 
 	mutex_lock(&priv->mutex);
 
-	WARN_ON(ctx->vif != vif);
-	ctx->vif = NULL;
-
 	if (priv->scan_vif == vif) {
 		iwl_scan_cancel_timeout(priv, 200);
 		iwl_force_scan_end(priv);
 	}
+
+	WARN_ON(ctx->vif != vif);
+	ctx->vif = NULL;
+
 	iwl_set_mode(priv, vif);
 
 	if (!ctx->always_active)

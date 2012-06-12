@@ -16,49 +16,32 @@ int ip_route_me_harder(struct sk_buff *skb, unsigned addr_type)
 	const struct iphdr *iph = ip_hdr(skb);
 	struct rtable *rt;
 	struct flowi fl = {};
-	struct dst_entry *odst;
+	__be32 saddr = iph->saddr;
+	__u8 flags = skb->sk ? inet_sk_flowi_flags(skb->sk) : 0;
 	unsigned int hh_len;
-	unsigned int type;
 
-	type = inet_addr_type(net, iph->saddr);
-	if (skb->sk && inet_sk(skb->sk)->transparent)
-		type = RTN_LOCAL;
 	if (addr_type == RTN_UNSPEC)
-		addr_type = type;
+		addr_type = inet_addr_type(net, saddr);
+	if (addr_type == RTN_LOCAL || addr_type == RTN_UNICAST)
+		flags |= FLOWI_FLAG_ANYSRC;
+	else
+		saddr = 0;
 
 	/* some non-standard hacks like ipt_REJECT.c:send_reset() can cause
 	 * packets with foreign saddr to appear on the NF_INET_LOCAL_OUT hook.
 	 */
-	if (addr_type == RTN_LOCAL) {
-		fl.nl_u.ip4_u.daddr = iph->daddr;
-		if (type == RTN_LOCAL)
-			fl.nl_u.ip4_u.saddr = iph->saddr;
-		fl.nl_u.ip4_u.tos = RT_TOS(iph->tos);
-		fl.oif = skb->sk ? skb->sk->sk_bound_dev_if : 0;
-		fl.mark = skb->mark;
-		fl.flags = skb->sk ? inet_sk_flowi_flags(skb->sk) : 0;
-		if (ip_route_output_key(net, &rt, &fl) != 0)
-			return -1;
+	fl.nl_u.ip4_u.daddr = iph->daddr;
+	fl.nl_u.ip4_u.saddr = saddr;
+	fl.nl_u.ip4_u.tos = RT_TOS(iph->tos);
+	fl.oif = skb->sk ? skb->sk->sk_bound_dev_if : 0;
+	fl.mark = skb->mark;
+	fl.flags = flags;
+	if (ip_route_output_key(net, &rt, &fl) != 0)
+		return -1;
 
-		/* Drop old route. */
-		skb_dst_drop(skb);
-		skb_dst_set(skb, &rt->u.dst);
-	} else {
-		/* non-local src, find valid iif to satisfy
-		 * rp-filter when calling ip_route_input. */
-		fl.nl_u.ip4_u.daddr = iph->saddr;
-		if (ip_route_output_key(net, &rt, &fl) != 0)
-			return -1;
-
-		odst = skb_dst(skb);
-		if (ip_route_input(skb, iph->daddr, iph->saddr,
-				   RT_TOS(iph->tos), rt->u.dst.dev) != 0) {
-			dst_release(&rt->u.dst);
-			return -1;
-		}
-		dst_release(&rt->u.dst);
-		dst_release(odst);
-	}
+	/* Drop old route. */
+	skb_dst_drop(skb);
+	skb_dst_set(skb, &rt->u.dst);
 
 	if (skb_dst(skb)->error)
 		return -1;

@@ -39,7 +39,6 @@ static void send_reset(struct sk_buff *oldskb, int hook)
 	struct iphdr *niph;
 	const struct tcphdr *oth;
 	struct tcphdr _otcph, *tcph;
-	unsigned int addr_type;
 
 	/* IP header checks: fragment. */
 	if (ip_hdr(oldskb)->frag_off & htons(IP_OFFSET))
@@ -52,6 +51,9 @@ static void send_reset(struct sk_buff *oldskb, int hook)
 
 	/* No RST for RST. */
 	if (oth->rst)
+		return;
+
+	if (skb_rtable(oldskb)->rt_flags & (RTCF_BROADCAST | RTCF_MULTICAST))
 		return;
 
 	/* Check checksum */
@@ -99,18 +101,10 @@ static void send_reset(struct sk_buff *oldskb, int hook)
 				       csum_partial(tcph,
 						    sizeof(struct tcphdr), 0));
 
-	addr_type = RTN_UNSPEC;
-	if (hook != NF_INET_FORWARD
-#ifdef CONFIG_BRIDGE_NETFILTER
-	    || (nskb->nf_bridge && nskb->nf_bridge->mask & BRNF_BRIDGED)
-#endif
-	   )
-		addr_type = RTN_LOCAL;
-
 	/* ip_route_me_harder expects skb->dst to be set */
 	skb_dst_set(nskb, dst_clone(skb_dst(oldskb)));
 
-	if (ip_route_me_harder(nskb, addr_type))
+	if (ip_route_me_harder(nskb, RTN_UNSPEC))
 		goto free_nskb;
 
 	niph->ttl	= dst_metric(skb_dst(nskb), RTAX_HOPLIMIT);

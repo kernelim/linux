@@ -953,7 +953,14 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 			}
 			/* fall through */
 		}
-		if (pmd_none_or_clear_bad(pmd)) {
+		/*
+		 * Here there can be other concurrent MADV_DONTNEED or
+		 * trans huge page faults running, and if the pmd is
+		 * none or trans huge it can change under us. This is
+		 * because MADV_DONTNEED holds the mmap_sem in read
+		 * mode.
+		 */
+		if (pmd_none_or_trans_huge_or_clear_bad(pmd)) {
 			(*zap_work)--;
 			continue;
 		}

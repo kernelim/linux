@@ -848,6 +848,7 @@ static int update_ipv6_gids(struct mlx4_ib_dev *dev, int port, int clear)
 		goto out;
 	}
 
+	read_lock(&dev_base_lock);
 	for_each_netdev_safe(&init_net, tmp, prev_dev) {
 		if (ndev && (tmp == ndev || rdma_vlan_dev_real_dev(tmp) == ndev)) {
 			gid.global.subnet_prefix = cpu_to_be64(0xfe80000000000000LL);
@@ -883,6 +884,7 @@ static int update_ipv6_gids(struct mlx4_ib_dev *dev, int port, int clear)
 			}
 		}
 	}
+	read_unlock(&dev_base_lock);
 
 	for (i = 0; i < 128; ++i)
 		if (!hits[i]) {

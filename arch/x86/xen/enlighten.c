@@ -30,6 +30,7 @@
 #include <linux/console.h>
 #include <linux/pci.h>
 #include <linux/gfp.h>
+#include <linux/crash_dump.h>
 
 #include <xen/xen.h>
 #include <xen/interface/xen.h>
@@ -1376,6 +1377,9 @@ void __init xen_hvm_guest_init(void)
 	int major, minor;
 
 	if (xen_pv_domain())
+		return;
+
+	if (is_kdump_kernel())
 		return;
 
 	r = init_hvm_pv_info(&major, &minor);

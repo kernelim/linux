@@ -1563,6 +1563,7 @@ int bond_enslave(struct net_device *bond_dev, struct net_device *slave_dev)
 	int link_reporting;
 	int old_features = bond_dev->features;
 	int res = 0;
+	u32 flags, orig_flags;
 
 	if (!bond->params.use_carrier && slave_dev->ethtool_ops == NULL &&
 		slave_ops->ndo_do_ioctl == NULL) {
@@ -1582,6 +1583,20 @@ int bond_enslave(struct net_device *bond_dev, struct net_device *slave_dev)
 	if (slave_dev->flags & IFF_SLAVE) {
 		pr_debug("Error, Device was already enslaved\n");
 		return -EBUSY;
+	}
+
+	/*
+	 * Sync the slaves vlan state with the bonds vlan state
+	 */
+	if (slave_dev->ethtool_ops->get_flags &&
+	    slave_dev->ethtool_ops->set_flags) {
+		orig_flags = slave_dev->ethtool_ops->get_flags(slave_dev);	
+		if (bond_dev->features & NETIF_F_LRO)
+			flags = orig_flags | NETIF_F_LRO;
+		else
+			flags = orig_flags & ~NETIF_F_LRO;
+		if (flags != orig_flags)
+			slave_dev->ethtool_ops->set_flags(slave_dev, flags);
 	}
 
 	/* vlan challenged mutual exclusion */
@@ -2695,39 +2710,19 @@ out:
 	read_unlock(&bond->lock);
 }
 
-static __be32 bond_glean_dev_ip(struct net_device *dev)
-{
-	struct in_device *idev;
-	struct in_ifaddr *ifa;
-	__be32 addr = 0;
-
-	if (!dev)
-		return 0;
-
-	rcu_read_lock();
-	idev = __in_dev_get_rcu(dev);
-	if (!idev)
-		goto out;
-
-	ifa = idev->ifa_list;
-	if (!ifa)
-		goto out;
-
-	addr = ifa->ifa_local;
-out:
-	rcu_read_unlock();
-	return addr;
-}
-
 static int bond_has_this_ip(struct bonding *bond, __be32 ip)
 {
 	struct vlan_entry *vlan;
+	struct net_device *vlan_dev;
 
-	if (ip == bond->master_ip)
+	if (ip == bond_confirm_addr(bond->dev, 0, ip))
 		return 1;
 
 	list_for_each_entry(vlan, &bond->vlan_list, vlan_list) {
-		if (ip == vlan->vlan_ip)
+		if (!bond->vlgrp)
+			continue;
+		vlan_dev = vlan_group_get_device(bond->vlgrp, vlan->vlan_id);
+		if (vlan_dev && ip == bond_confirm_addr(vlan_dev, 0, ip))
 			return 1;
 	}
 
@@ -2769,18 +2764,20 @@ static void bond_arp_send_all(struct bonding *bond, struct slave *slave)
 	int i, vlan_id, rv;
 	__be32 *targets = bond->params.arp_targets;
 	struct vlan_entry *vlan;
-	struct net_device *vlan_dev;
+	struct net_device *vlan_dev = NULL;
 	struct flowi fl;
 	struct rtable *rt;
 
 	for (i = 0; (i < BOND_MAX_ARP_TARGETS); i++) {
+		__be32 addr;
 		if (!targets[i])
 			break;
 		pr_debug("basa: target %x\n", targets[i]);
 		if (!bond->vlgrp) {
 			pr_debug("basa: empty vlan: arp_send\n");
+			addr = bond_confirm_addr(bond->dev, targets[i], 0);
 			bond_arp_send(slave->dev, ARPOP_REQUEST, targets[i],
-				      bond->master_ip, 0);
+				      addr, 0);
 			continue;
 		}
 
@@ -2809,8 +2806,9 @@ static void bond_arp_send_all(struct bonding *bond, struct slave *slave)
 		if (rt->u.dst.dev == bond->dev) {
 			ip_rt_put(rt);
 			pr_debug("basa: rtdev == bond->dev: arp_send\n");
+			addr = bond_confirm_addr(bond->dev, targets[i], 0);
 			bond_arp_send(slave->dev, ARPOP_REQUEST, targets[i],
-				      bond->master_ip, 0);
+				      addr, 0);
 			continue;
 		}
 
@@ -2825,10 +2823,11 @@ static void bond_arp_send_all(struct bonding *bond, struct slave *slave)
 			}
 		}
 
-		if (vlan_id) {
+		if (vlan_id && vlan_dev) {
 			ip_rt_put(rt);
+			addr = bond_confirm_addr(vlan_dev, targets[i], 0);
 			bond_arp_send(slave->dev, ARPOP_REQUEST, targets[i],
-				      vlan->vlan_ip, vlan_id);
+				      addr, vlan_id);
 			continue;
 		}
 
@@ -2853,6 +2852,8 @@ static void bond_send_gratuitous_arp(struct bonding *bond)
 	struct slave *slave = bond->curr_active_slave;
 	struct vlan_entry *vlan;
 	struct net_device *vlan_dev;
+	struct in_device *in_dev;
+	__be32 ip;
 
 	pr_debug("bond_send_grat_arp: bond %s slave %s\n", bond->dev->name,
 				slave ? slave->dev->name : "NULL");
@@ -2863,21 +2864,33 @@ static void bond_send_gratuitous_arp(struct bonding *bond)
 
 	bond->send_grat_arp--;
 
-	if (bond->master_ip) {
-		bond_arp_send(slave->dev, ARPOP_REPLY, bond->master_ip,
-				bond->master_ip, 0);
+	/* need to run through list of addresses on the device */
+	rcu_read_lock();
+	if ((in_dev = __in_dev_get_rcu(bond->dev))) {
+		for_ifa(in_dev) {
+			if ((ip = ifa->ifa_local))
+				bond_arp_send(slave->dev, ARPOP_REPLY, ip, ip, 0);
+		} endfor_ifa(in_dev);
 	}
+	rcu_read_unlock();
 
 	if (!bond->vlgrp)
 		return;
 
-	list_for_each_entry(vlan, &bond->vlan_list, vlan_list) {
+	rcu_read_lock();
+	list_for_each_entry_rcu(vlan, &bond->vlan_list, vlan_list) {
 		vlan_dev = vlan_group_get_device(bond->vlgrp, vlan->vlan_id);
-		if (vlan->vlan_ip) {
-			bond_arp_send(slave->dev, ARPOP_REPLY, vlan->vlan_ip,
-				      vlan->vlan_ip, vlan->vlan_id);
+		if (vlan_dev && (in_dev = __in_dev_get_rcu(vlan_dev))) {
+			if (in_dev) {
+				for_ifa(in_dev) {
+					if ((ip = ifa->ifa_local))
+						bond_arp_send(slave->dev, ARPOP_REPLY, ip,
+							      ip, vlan->vlan_id);
+				} endfor_ifa(in_dev);
+			}
 		}
 	}
+	rcu_read_unlock();
 }
 
 static void bond_validate_arp(struct bonding *bond, struct slave *slave, __be32 sip, __be32 tip)
@@ -3825,70 +3838,11 @@ static int bond_netdev_event(struct notifier_block *this,
 		pr_debug("IFF_SLAVE\n");
 		return bond_slave_netdev_event(event, event_dev);
 	}
-
-	return NOTIFY_DONE;
-}
-
-/*
- * bond_inetaddr_event: handle inetaddr notifier chain events.
- *
- * We keep track of device IPs primarily to use as source addresses in
- * ARP monitor probes (rather than spewing out broadcasts all the time).
- *
- * We track one IP for the main device (if it has one), plus one per VLAN.
- */
-static int bond_inetaddr_event(struct notifier_block *this, unsigned long event, void *ptr)
-{
-	struct in_ifaddr *ifa = ptr;
-	struct net_device *vlan_dev, *event_dev = ifa->ifa_dev->dev;
-	struct bonding *bond;
-	struct vlan_entry *vlan;
-
-	if (dev_net(ifa->ifa_dev->dev) != &init_net)
-		return NOTIFY_DONE;
-
-	list_for_each_entry(bond, &bond_dev_list, bond_list) {
-		if (bond->dev == event_dev) {
-			switch (event) {
-			case NETDEV_UP:
-				bond->master_ip = ifa->ifa_local;
-				return NOTIFY_OK;
-			case NETDEV_DOWN:
-				bond->master_ip = bond_glean_dev_ip(bond->dev);
-				return NOTIFY_OK;
-			default:
-				return NOTIFY_DONE;
-			}
-		}
-
-		list_for_each_entry(vlan, &bond->vlan_list, vlan_list) {
-			if (!bond->vlgrp)
-				continue;
-			vlan_dev = vlan_group_get_device(bond->vlgrp, vlan->vlan_id);
-			if (vlan_dev == event_dev) {
-				switch (event) {
-				case NETDEV_UP:
-					vlan->vlan_ip = ifa->ifa_local;
-					return NOTIFY_OK;
-				case NETDEV_DOWN:
-					vlan->vlan_ip =
-						bond_glean_dev_ip(vlan_dev);
-					return NOTIFY_OK;
-				default:
-					return NOTIFY_DONE;
-				}
-			}
-		}
-	}
 	return NOTIFY_DONE;
 }
 
 static struct notifier_block bond_netdev_notifier = {
 	.notifier_call = bond_netdev_event,
-};
-
-static struct notifier_block bond_inetaddr_notifier = {
-	.notifier_call = bond_inetaddr_event,
 };
 
 /*-------------------------- Packet type handling ---------------------------*/
@@ -4848,6 +4802,36 @@ static void bond_ethtool_get_drvinfo(struct net_device *bond_dev,
 	snprintf(drvinfo->fw_version, 32, "%d", BOND_ABI_VERSION);
 }
 
+static int bond_ethtool_set_flags(struct net_device *dev, u32 flags)
+{
+	struct bonding *bond = netdev_priv(dev);
+	struct slave *slave;
+	u32 dflags, ndflags;
+	int i;
+
+	bond_for_each_slave(bond, slave, i) {
+		if (!slave->dev->ethtool_ops->get_flags)
+			continue;
+		if (!slave->dev->ethtool_ops->set_flags)
+			continue;
+		dflags = slave->dev->ethtool_ops->get_flags(slave->dev);
+		if (flags & ETH_FLAG_LRO)
+			ndflags = dflags | ETH_FLAG_LRO;
+		else
+			ndflags = dflags & ~ETH_FLAG_LRO;
+		if (ndflags != dflags)
+			slave->dev->ethtool_ops->set_flags(slave->dev, ndflags);
+	}
+
+	if (flags & ETH_FLAG_LRO)
+		dev->features |= NETIF_F_LRO;
+	else
+		dev->features &= ~NETIF_F_LRO;
+
+
+	return 0;
+}
+
 static const struct ethtool_ops bond_ethtool_ops = {
 	.get_drvinfo		= bond_ethtool_get_drvinfo,
 	.get_link		= ethtool_op_get_link,
@@ -4856,6 +4840,7 @@ static const struct ethtool_ops bond_ethtool_ops = {
 	.get_tso		= ethtool_op_get_tso,
 	.get_ufo		= ethtool_op_get_ufo,
 	.get_flags		= ethtool_op_get_flags,
+	.set_flags		= bond_ethtool_set_flags,
 };
 
 static const struct net_device_ops bond_netdev_ops = {
@@ -4930,6 +4915,11 @@ static void bond_setup(struct net_device *bond_dev)
 	/* don't acquire bond device's netif_tx_lock when
 	 * transmitting */
 	bond_dev->features |= NETIF_F_LLTX;
+
+	/*
+	 * Mark bond as supporting LRO
+	 */
+	bond_dev->features |= NETIF_F_LRO;
 
 	/* By default, we declare the bond to be fully
 	 * VLAN hardware accelerated capable. Special
@@ -5539,7 +5529,6 @@ static int __init bonding_init(void)
 		goto err;
 
 	register_netdevice_notifier(&bond_netdev_notifier);
-	register_inetaddr_notifier(&bond_inetaddr_notifier);
 	bond_register_ipv6_notifier();
 
 	goto out;
@@ -5555,7 +5544,6 @@ out:
 static void __exit bonding_exit(void)
 {
 	unregister_netdevice_notifier(&bond_netdev_notifier);
-	unregister_inetaddr_notifier(&bond_inetaddr_notifier);
 	bond_unregister_ipv6_notifier();
 
 	bond_destroy_sysfs();

@@ -1453,6 +1453,7 @@ struct sk_buff *sock_alloc_send_pskb(struct sock *sk, unsigned long header_len,
 
 	timeo = sock_sndtimeo(sk, noblock);
 	while (1) {
+		int npages;
 		err = sock_error(sk);
 		if (err != 0)
 			goto failure;
@@ -1461,17 +1462,20 @@ struct sk_buff *sock_alloc_send_pskb(struct sock *sk, unsigned long header_len,
 		if (sk->sk_shutdown & SEND_SHUTDOWN)
 			goto failure;
 
+		err = -EMSGSIZE;
+		npages = (data_len + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
+		if (npages > MAX_SKB_FRAGS)
+			goto failure;
+
 		if (atomic_read(&sk->sk_wmem_alloc) < sk->sk_sndbuf) {
 			skb = alloc_skb(header_len, gfp_mask);
 			if (skb) {
-				int npages;
 				int i;
 
 				/* No pages, we're done... */
 				if (!data_len)
 					break;
 
-				npages = (data_len + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
 				skb->truesize += data_len;
 				skb_shinfo(skb)->nr_frags = npages;
 				for (i = 0; i < npages; i++) {

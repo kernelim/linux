@@ -3208,15 +3208,12 @@ static void iwl_bg_restart(struct work_struct *data)
 		return;
 
 	if (test_and_clear_bit(STATUS_FW_ERROR, &priv->status)) {
-		struct iwl_rxon_context *ctx;
 		bool bt_sco, bt_full_concurrent;
 		u8 bt_ci_compliance;
 		u8 bt_load;
 		u8 bt_status;
 
 		mutex_lock(&priv->mutex);
-		for_each_context(priv, ctx)
-			ctx->vif = NULL;
 		priv->is_open = 0;
 
 		/*
@@ -4794,3 +4791,6 @@ MODULE_PARM_DESC(plcp_check, "Check plcp health (default: 1 [enabled])");
 
 module_param_named(ack_check, iwlagn_mod_params.ack_check, bool, S_IRUGO);
 MODULE_PARM_DESC(ack_check, "Check ack health (default: 0 [disabled])");
+
+module_param_named(5ghz_disable, iwlagn_mod_params.disable_5ghz, int, S_IRUGO);
+MODULE_PARM_DESC(5ghz_disable, "disable 5GHz band");
