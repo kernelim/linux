@@ -353,3 +353,6 @@ SYSCALL_SPU(ni_syscall)		/* open_by_handle_at */
 SYSCALL_SPU(ni_syscall)		/* clock_adjtime */
 SYSCALL_SPU(syncfs)
 COMPAT_SYS_SPU(sendmmsg)
+SYSCALL_SPU(ni_syscall)		/* set_ns */
+COMPAT_SYS(process_vm_readv)
+COMPAT_SYS(process_vm_writev)

@@ -68,15 +68,19 @@ struct strlist;
 
 struct symbol_conf {
 	unsigned short	priv_size;
+	unsigned short	nr_events;
 	bool		try_vmlinux_path,
 			use_modules,
 			sort_by_name,
 			show_nr_samples,
+			show_total_period,
 			use_callchain,
 			exclude_other,
 			show_cpu_utilization,
 			initialized,
-			kptr_restrict;
+			kptr_restrict,
+			annotate_asm_raw,
+			annotate_src;
 	const char	*vmlinux_name,
 			*kallsyms_name,
 			*source_prefix,

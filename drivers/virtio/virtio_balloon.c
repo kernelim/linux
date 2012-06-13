@@ -275,32 +275,21 @@ static int balloon(void *_vballoon)
 	return 0;
 }
 
-static int virtballoon_probe(struct virtio_device *vdev)
+static int init_vqs(struct virtio_balloon *vb)
 {
-	struct virtio_balloon *vb;
 	struct virtqueue *vqs[3];
 	vq_callback_t *callbacks[] = { balloon_ack, balloon_ack, stats_request };
 	const char *names[] = { "inflate", "deflate", "stats" };
 	int err, nvqs;
 
-	vdev->priv = vb = kmalloc(sizeof(*vb), GFP_KERNEL);
-	if (!vb) {
-		err = -ENOMEM;
-		goto out;
-	}
-
-	INIT_LIST_HEAD(&vb->pages);
-	vb->num_pages = 0;
-	init_waitqueue_head(&vb->config_change);
-	vb->vdev = vdev;
-	vb->need_stats_update = 0;
-
-	/* We expect two virtqueues: inflate and deflate,
-	 * and optionally stat. */
+	/*
+	 * We expect two virtqueues: inflate and deflate, and
+	 * optionally stat.
+	 */
 	nvqs = virtio_has_feature(vb->vdev, VIRTIO_BALLOON_F_STATS_VQ) ? 3 : 2;
-	err = vdev->config->find_vqs(vdev, nvqs, vqs, callbacks, names);
+	err = vb->vdev->config->find_vqs(vb->vdev, nvqs, vqs, callbacks, names);
 	if (err)
-		goto out_free_vb;
+		return err;
 
 	vb->inflate_vq = vqs[0];
 	vb->deflate_vq = vqs[1];
@@ -318,6 +307,29 @@ static int virtballoon_probe(struct virtio_device *vdev)
 			BUG();
 		virtqueue_kick(vb->stats_vq);
 	}
+	return 0;
+}
+
+static int virtballoon_probe(struct virtio_device *vdev)
+{
+	struct virtio_balloon *vb;
+	int err;
+
+	vdev->priv = vb = kmalloc(sizeof(*vb), GFP_KERNEL);
+	if (!vb) {
+		err = -ENOMEM;
+		goto out;
+	}
+
+	INIT_LIST_HEAD(&vb->pages);
+	vb->num_pages = 0;
+	init_waitqueue_head(&vb->config_change);
+	vb->vdev = vdev;
+	vb->need_stats_update = 0;
+
+	err = init_vqs(vb);
+	if (err)
+		goto out_free_vb;
 
 	vb->thread = kthread_run(balloon, vb, "vballoon");
 	if (IS_ERR(vb->thread)) {
@@ -355,6 +367,46 @@ static void __devexit virtballoon_remove(struct virtio_device *vdev)
 	kfree(vb);
 }
 
+#ifdef CONFIG_PM
+static int virtballoon_freeze(struct virtio_device *vdev)
+{
+	struct virtio_balloon *vb = vdev->priv;
+
+	/*
+	 * The kthread is already frozen by the PM core before this
+	 * function is called.
+	 */
+
+	while (vb->num_pages)
+		leak_balloon(vb, vb->num_pages);
+	update_balloon_size(vb);
+
+	/* Ensure we don't get any more requests from the host */
+	vdev->config->reset(vdev);
+	vdev->config->del_vqs(vdev);
+	return 0;
+}
+
+static int restore_common(struct virtio_device *vdev)
+{
+	struct virtio_balloon *vb = vdev->priv;
+	int ret;
+
+	ret = init_vqs(vdev->priv);
+	if (ret)
+		return ret;
+
+	fill_balloon(vb, towards_target(vb));
+	update_balloon_size(vb);
+	return 0;
+}
+
+static int virtballoon_restore(struct virtio_device *vdev)
+{
+	return restore_common(vdev);
+}
+#endif
+
 static unsigned int features[] = {
 	VIRTIO_BALLOON_F_MUST_TELL_HOST,
 	VIRTIO_BALLOON_F_STATS_VQ,
@@ -369,6 +421,10 @@ static struct virtio_driver virtio_balloon_driver = {
 	.probe =	virtballoon_probe,
 	.remove =	__devexit_p(virtballoon_remove),
 	.config_changed = virtballoon_changed,
+#ifdef CONFIG_PM
+	.freeze	=	virtballoon_freeze,
+	.restore =	virtballoon_restore,
+#endif
 };
 
 static int __init init(void)

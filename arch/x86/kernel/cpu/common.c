@@ -14,6 +14,7 @@
 
 #include <asm/stackprotector.h>
 #include <asm/mmu_context.h>
+#include <asm/archrandom.h>
 #include <asm/hypervisor.h>
 #include <asm/processor.h>
 #include <asm/sections.h>
@@ -38,7 +39,9 @@
 #include <asm/uv/uv.h>
 #endif
 
+#ifdef CONFIG_XEN
 #include <xen/xen.h>
+#endif
 
 #include "cpu.h"
 
@@ -284,6 +287,7 @@ struct cpuid_dependent_feature {
 	u32 level;
 };
 
+#ifdef CONFIG_XEN
 static const u32
 xen_dangerous_cpuid_features[] = {
 	/* Mask out GBPAGES & RDTSCP for Xen BZ#703055 */
@@ -294,6 +298,8 @@ xen_dangerous_cpuid_features[] = {
 	/* Mask out features masked by BZ#711317 */
 	X86_FEATURE_CONSTANT_TSC,
 	X86_FEATURE_NONSTOP_TSC,
+	/* Mask out features masked by BZ#752382 */
+	X86_FEATURE_SMEP,
 	0
 };
 
@@ -314,6 +320,7 @@ static void __cpuinit fltr_xen_cpuid_features(struct cpuinfo_x86 *c, bool warn)
 				x86_cap_flags[*df]);
 	}
 }
+#endif /* CONFIG_XEN */
 
 static const struct cpuid_dependent_feature __cpuinitconst
 cpuid_dependent_features[] = {
@@ -352,12 +359,14 @@ static void __cpuinit filter_cpuid_features(struct cpuinfo_x86 *c, bool warn)
 				x86_cap_flags[df->feature], df->level);
 	}
 
+#ifdef CONFIG_XEN
 	/*
 	 * RHEL Xen HVM guests must filter out additional not masked
 	 * by old kernel-xen features, to avoid crashes.
 	 */
 	if (xen_cpuid_base() != 0)
 		fltr_xen_cpuid_features(c, warn);
+#endif /* CONFIG_XEN */
 }
 
 /*
@@ -620,7 +629,7 @@ static void __cpuinit get_cpu_cap(struct cpuinfo_x86 *c)
 	/* Additional Intel-defined flags: level 0x00000007 */
 	if (c->cpuid_level >= 0x00000007) {
 		u32 eax, ebx, ecx, edx;
-		struct cpuinfo_x86_rh *rh = &cpu_data_rh(c->cpu_index);
+		struct cpuinfo_x86_rh *rh = get_cpuinfo_x86_rh(c);
 
 		cpuid_count(0x00000007, 0, &eax, &ebx, &ecx, &edx);
 
@@ -691,7 +700,7 @@ static void __cpuinit identify_cpu_without_cpuid(struct cpuinfo_x86 *c)
  */
 static void __init early_identify_cpu(struct cpuinfo_x86 *c)
 {
-	struct cpuinfo_x86_rh *rh = &cpu_data_rh(c->cpu_index);
+	struct cpuinfo_x86_rh *rh = get_cpuinfo_x86_rh(c);
 
 #ifdef CONFIG_X86_64
 	c->x86_clflush_size = 64;
@@ -806,8 +815,6 @@ static void __cpuinit generic_identify(struct cpuinfo_x86 *c)
 #endif
 	}
 
-	setup_smep(c);
-
 	get_model_name(c); /* Default name */
 
 	init_scattered_cpuid_features(c);
@@ -820,7 +827,7 @@ static void __cpuinit generic_identify(struct cpuinfo_x86 *c)
 static void __cpuinit identify_cpu(struct cpuinfo_x86 *c)
 {
 	int i;
-	struct cpuinfo_x86_rh *rh = &cpu_data_rh(c->cpu_index);
+	struct cpuinfo_x86_rh *rh = get_cpuinfo_x86_rh(c);
 
 	c->loops_per_jiffy = loops_per_jiffy;
 	c->x86_cache_size = -1;
@@ -887,6 +894,8 @@ static void __cpuinit identify_cpu(struct cpuinfo_x86 *c)
 	/* Filter out anything that depends on CPUID levels we don't have */
 	filter_cpuid_features(c, true);
 
+	setup_smep(c);
+
 	/*
 	 *  emulation of NX with segment limits unfortunately means
 	 *  we have to disable the fast system calls, due to the way that
@@ -918,6 +927,7 @@ static void __cpuinit identify_cpu(struct cpuinfo_x86 *c)
 #endif
 
 	init_hypervisor(c);
+	x86_init_rdrand(c);
 
 	/*
 	 * Clear/Set all flags overriden by options, need do it

@@ -74,9 +74,7 @@ struct mlx4_dev_cap {
 	u64 def_mac[MLX4_MAX_PORTS + 1];
 	u16 eth_mtu[MLX4_MAX_PORTS + 1];
 	u16 stat_rate_support;
-	int loopback_support;
-	int wol;
-	u32 flags;
+	u64 flags;
 	int reserved_uars;
 	int uar_size;
 	int min_page_sz;
@@ -91,6 +89,8 @@ struct mlx4_dev_cap {
 	int max_mcgs;
 	int reserved_pds;
 	int max_pds;
+	int reserved_xrcds;
+	int max_xrcds;
 	int qpc_entry_sz;
 	int rdmarc_entry_sz;
 	int altc_entry_sz;
@@ -107,8 +107,27 @@ struct mlx4_dev_cap {
 	u64 max_icm_sz;
 	int max_gso_sz;
 	u8  supported_port_types[MLX4_MAX_PORTS + 1];
+	u8  suggested_type[MLX4_MAX_PORTS + 1];
+	u8  default_sense[MLX4_MAX_PORTS + 1];
 	u8  log_max_macs[MLX4_MAX_PORTS + 1];
 	u8  log_max_vlans[MLX4_MAX_PORTS + 1];
+	u32 max_counters;
+};
+
+struct mlx4_func_cap {
+	u8	num_ports;
+	u8	flags;
+	u32	pf_context_behaviour;
+	int	qp_quota;
+	int	cq_quota;
+	int	srq_quota;
+	int	mpt_quota;
+	int	mtt_quota;
+	int	max_eq;
+	int	reserved_eq;
+	int	mcg_quota;
+	u8	physical_port[MLX4_MAX_PORTS + 1];
+	u8	port_flags[MLX4_MAX_PORTS + 1];
 };
 
 struct mlx4_adapter {
@@ -128,6 +147,7 @@ struct mlx4_init_hca_param {
 	u64 dmpt_base;
 	u64 cmpt_base;
 	u64 mtt_base;
+	u64 global_caps;
 	u16 log_mc_entry_sz;
 	u16 log_mc_hash_sz;
 	u8  log_num_qps;
@@ -138,6 +158,7 @@ struct mlx4_init_hca_param {
 	u8  log_mc_table_sz;
 	u8  log_mpt_sz;
 	u8  log_uar_sz;
+	u8  uar_page_sz; /* log pg sz in 4k chunks */
 };
 
 struct mlx4_init_ib_param {
@@ -162,12 +183,19 @@ struct mlx4_set_ib_param {
 };
 
 int mlx4_QUERY_DEV_CAP(struct mlx4_dev *dev, struct mlx4_dev_cap *dev_cap);
+int mlx4_QUERY_FUNC_CAP(struct mlx4_dev *dev, struct mlx4_func_cap *func_cap);
+int mlx4_QUERY_FUNC_CAP_wrapper(struct mlx4_dev *dev, int slave,
+				struct mlx4_vhcr *vhcr,
+				struct mlx4_cmd_mailbox *inbox,
+				struct mlx4_cmd_mailbox *outbox,
+				struct mlx4_cmd_info *cmd);
 int mlx4_MAP_FA(struct mlx4_dev *dev, struct mlx4_icm *icm);
 int mlx4_UNMAP_FA(struct mlx4_dev *dev);
 int mlx4_RUN_FW(struct mlx4_dev *dev);
 int mlx4_QUERY_FW(struct mlx4_dev *dev);
 int mlx4_QUERY_ADAPTER(struct mlx4_dev *dev, struct mlx4_adapter *adapter);
 int mlx4_INIT_HCA(struct mlx4_dev *dev, struct mlx4_init_hca_param *param);
+int mlx4_QUERY_HCA(struct mlx4_dev *dev, struct mlx4_init_hca_param *param);
 int mlx4_CLOSE_HCA(struct mlx4_dev *dev, int panic);
 int mlx4_map_cmd(struct mlx4_dev *dev, u16 op, struct mlx4_icm *icm, u64 virt);
 int mlx4_SET_ICM_SIZE(struct mlx4_dev *dev, u64 icm_size, u64 *aux_pages);

@@ -6,4 +6,8 @@
 #define DECLARE_BITMAP(name,bits) \
 	unsigned long name[BITS_TO_LONGS(bits)]
 
+struct list_head {
+	struct list_head *next, *prev;
+};
+
 #endif

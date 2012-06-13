@@ -407,7 +407,9 @@ enum {
 #define QLCNIC_CRB_SRE		QLCNIC_PCI_CRB_WINDOW(QLCNIC_HW_PX_MAP_CRB_SRE)
 #define QLCNIC_CRB_ROMUSB	\
 	QLCNIC_PCI_CRB_WINDOW(QLCNIC_HW_PX_MAP_CRB_ROMUSB)
+#define QLCNIC_CRB_EPG		QLCNIC_PCI_CRB_WINDOW(QLCNIC_HW_PX_MAP_CRB_EG)
 #define QLCNIC_CRB_I2Q		QLCNIC_PCI_CRB_WINDOW(QLCNIC_HW_PX_MAP_CRB_I2Q)
+#define QLCNIC_CRB_TIMER	QLCNIC_PCI_CRB_WINDOW(QLCNIC_HW_PX_MAP_CRB_TIMR)
 #define QLCNIC_CRB_I2C0 	QLCNIC_PCI_CRB_WINDOW(QLCNIC_HW_PX_MAP_CRB_I2C0)
 #define QLCNIC_CRB_SMB		QLCNIC_PCI_CRB_WINDOW(QLCNIC_HW_PX_MAP_CRB_SMB)
 #define QLCNIC_CRB_MAX		QLCNIC_PCI_CRB_WINDOW(64)
@@ -492,10 +494,10 @@ enum {
 
 #define TEST_AGT_CTRL	(0x00)
 
-#define TA_CTL_START	1
-#define TA_CTL_ENABLE	2
-#define TA_CTL_WRITE	4
-#define TA_CTL_BUSY	8
+#define TA_CTL_START	BIT_0
+#define TA_CTL_ENABLE	BIT_1
+#define TA_CTL_WRITE	BIT_2
+#define TA_CTL_BUSY	BIT_3
 
 /*
  *   Register offsets for MN
@@ -608,6 +610,7 @@ enum {
 	QLCNIC_TEMP_WARN,	/* Sound alert, temperature getting high */
 	QLCNIC_TEMP_PANIC	/* Fatal error, hardware has shut down. */
 };
+
 
 /* Lock IDs for PHY lock */
 #define PHY_LOCK_DRIVER		0x44524956
@@ -723,7 +726,8 @@ enum {
 #define QLCNIC_RCODE_DRIVER_CAN_RELOAD		BIT_30
 #define QLCNIC_RCODE_FATAL_ERROR		BIT_31
 #define QLCNIC_FWERROR_PEGNUM(code)		((code) & 0xff)
-#define QLCNIC_FWERROR_CODE(code)		((code >> 8) & 0xfffff)
+#define QLCNIC_FWERROR_CODE(code)		((code >> 8) & 0x1fffff)
+#define QLCNIC_FWERROR_FAN_FAILURE		0x16
 
 #define FW_POLL_DELAY		(1 * HZ)
 #define FW_FAIL_THRESH		2
@@ -764,6 +768,38 @@ struct qlcnic_legacy_intr_set {
 #define QLCNIC_MSIX_BASE	0x132110
 #define QLCNIC_MAX_PCI_FUNC	8
 #define QLCNIC_MAX_VLAN_FILTERS	64
+
+/* FW dump defines */
+#define MIU_TEST_CTR		0x41000090
+#define MIU_TEST_ADDR_LO	0x41000094
+#define MIU_TEST_ADDR_HI	0x41000098
+#define FLASH_ROM_WINDOW	0x42110030
+#define FLASH_ROM_DATA		0x42150000
+
+static const u32 MIU_TEST_READ_DATA[] = {
+	0x410000A8, 0x410000AC, 0x410000B8, 0x410000BC, };
+
+#define QLCNIC_FW_DUMP_REG1	0x00130060
+#define QLCNIC_FW_DUMP_REG2	0x001e0000
+#define QLCNIC_FLASH_SEM2_LK	0x0013C010
+#define QLCNIC_FLASH_SEM2_ULK	0x0013C014
+#define QLCNIC_FLASH_LOCK_ID	0x001B2100
+
+#define QLCNIC_RD_DUMP_REG(addr, bar0, data) do {			\
+	writel((addr & 0xFFFF0000), (void *) (bar0 +			\
+		QLCNIC_FW_DUMP_REG1));					\
+	readl((void *) (bar0 + QLCNIC_FW_DUMP_REG1));			\
+	*data = readl((void *) (bar0 + QLCNIC_FW_DUMP_REG2 +		\
+		LSW(addr)));						\
+} while (0)
+
+#define QLCNIC_WR_DUMP_REG(addr, bar0, data) do {			\
+	writel((addr & 0xFFFF0000), (void *) (bar0 +			\
+		QLCNIC_FW_DUMP_REG1));					\
+	readl((void *) (bar0 + QLCNIC_FW_DUMP_REG1));			\
+	writel(data, (void *) (bar0 + QLCNIC_FW_DUMP_REG2 + LSW(addr)));\
+	readl((void *) (bar0 + QLCNIC_FW_DUMP_REG2 + LSW(addr)));	\
+} while (0)
 
 /* PCI function operational mode */
 enum {

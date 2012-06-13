@@ -24,6 +24,16 @@
 #include <asm/setup.h>
 #include "pci.h"
 
+u8 rh_get_mpss(struct pci_dev *dev)
+{
+	return ((struct pci_dev_rh1 *) dev->rh_reserved1)->pcie_mpss;
+}
+
+void rh_set_mpss(struct pci_dev *dev, u8 mpss)
+{
+	((struct pci_dev_rh1 *) dev->rh_reserved1)->pcie_mpss = mpss;
+}
+
 const char *pci_power_names[] = {
 	"error", "D0", "D1", "D2", "D3hot", "D3cold", "unknown",
 };
@@ -361,10 +371,9 @@ pci_find_parent_resource(const struct pci_dev *dev, struct resource *res)
 {
 	const struct pci_bus *bus = dev->bus;
 	int i;
-	struct resource *best = NULL;
+	struct resource *best = NULL, *r;
 
-	for(i = 0; i < PCI_BUS_NUM_RESOURCES; i++) {
-		struct resource *r = bus->resource[i];
+	pci_bus_for_each_resource(bus, r, i) {
 		if (!r)
 			continue;
 		if (res->start && !(res->start >= r->start && res->end <= r->end))
@@ -970,6 +979,8 @@ int pci_enable_device(struct pci_dev *dev)
 {
 	return __pci_enable_device_flags(dev, IORESOURCE_MEM | IORESOURCE_IO);
 }
+
+enum pcie_bus_config_types pcie_bus_config = PCIE_BUS_TUNE_OFF;
 
 /*
  * Managed PCI resources.  This manages device on/off, intx/msi/msix
@@ -2012,9 +2023,7 @@ static int __pci_request_region(struct pci_dev *pdev, int bar, const char *res_n
 	return 0;
 
 err_out:
-	dev_warn(&pdev->dev, "BAR %d: can't reserve %s region %pR\n",
-		 bar,
-		 pci_resource_flags(pdev, bar) & IORESOURCE_IO ? "I/O" : "mem",
+	dev_warn(&pdev->dev, "BAR %d: can't reserve %pR\n", bar,
 		 &pdev->resource[bar]);
 	return -EBUSY;
 }
@@ -2368,6 +2377,116 @@ pci_intx(struct pci_dev *pdev, int enable)
 }
 
 /**
+ * pci_intx_mask_supported - probe for INTx masking support
+ * @pdev: the PCI device to operate on
+ *
+ * Check if the device dev support INTx masking via the config space
+ * command word.
+ */
+bool pci_intx_mask_supported(struct pci_dev *dev)
+{
+	bool mask_supported = false;
+	u16 orig, new;
+
+	pci_cfg_access_lock(dev);
+
+	pci_read_config_word(dev, PCI_COMMAND, &orig);
+	pci_write_config_word(dev, PCI_COMMAND,
+			      orig ^ PCI_COMMAND_INTX_DISABLE);
+	pci_read_config_word(dev, PCI_COMMAND, &new);
+
+	/*
+	 * There's no way to protect against hardware bugs or detect them
+	 * reliably, but as long as we know what the value should be, let's
+	 * go ahead and check it.
+	 */
+	if ((new ^ orig) & ~PCI_COMMAND_INTX_DISABLE) {
+		dev_err(&dev->dev, "Command register changed from "
+			"0x%x to 0x%x: driver or hardware bug?\n", orig, new);
+	} else if ((new ^ orig) & PCI_COMMAND_INTX_DISABLE) {
+		mask_supported = true;
+		pci_write_config_word(dev, PCI_COMMAND, orig);
+	}
+
+	pci_cfg_access_unlock(dev);
+	return mask_supported;
+}
+EXPORT_SYMBOL_GPL(pci_intx_mask_supported);
+
+static bool pci_check_and_set_intx_mask(struct pci_dev *dev, bool mask)
+{
+	struct pci_bus *bus = dev->bus;
+	bool mask_updated = true;
+	u32 cmd_status_dword;
+	u16 origcmd, newcmd;
+	unsigned long flags;
+	bool irq_pending;
+
+	/*
+	 * We do a single dword read to retrieve both command and status.
+	 * Document assumptions that make this possible.
+	 */
+	BUILD_BUG_ON(PCI_COMMAND % 4);
+	BUILD_BUG_ON(PCI_COMMAND + 2 != PCI_STATUS);
+
+	spin_lock_irqsave(&pci_lock, flags);
+
+	bus->ops->read(bus, dev->devfn, PCI_COMMAND, 4, &cmd_status_dword);
+
+	irq_pending = (cmd_status_dword >> 16) & PCI_STATUS_INTERRUPT;
+
+	/*
+	 * Check interrupt status register to see whether our device
+	 * triggered the interrupt (when masking) or the next IRQ is
+	 * already pending (when unmasking).
+	 */
+	if (mask != irq_pending) {
+		mask_updated = false;
+		goto done;
+	}
+
+	origcmd = cmd_status_dword;
+	newcmd = origcmd & ~PCI_COMMAND_INTX_DISABLE;
+	if (mask)
+		newcmd |= PCI_COMMAND_INTX_DISABLE;
+	if (newcmd != origcmd)
+		bus->ops->write(bus, dev->devfn, PCI_COMMAND, 2, newcmd);
+
+done:
+	spin_unlock_irqrestore(&pci_lock, flags);
+
+	return mask_updated;
+}
+
+/**
+ * pci_check_and_mask_intx - mask INTx on pending interrupt
+ * @pdev: the PCI device to operate on
+ *
+ * Check if the device dev has its INTx line asserted, mask it and
+ * return true in that case. False is returned if not interrupt was
+ * pending.
+ */
+bool pci_check_and_mask_intx(struct pci_dev *dev)
+{
+	return pci_check_and_set_intx_mask(dev, true);
+}
+EXPORT_SYMBOL_GPL(pci_check_and_mask_intx);
+
+/**
+ * pci_check_and_mask_intx - unmask INTx of no interrupt is pending
+ * @pdev: the PCI device to operate on
+ *
+ * Check if the device dev has its INTx line asserted, unmask it if not
+ * and return true. False is returned and the mask remains active if
+ * there was still an interrupt pending.
+ */
+bool pci_check_and_unmask_intx(struct pci_dev *dev)
+{
+	return pci_check_and_set_intx_mask(dev, false);
+}
+EXPORT_SYMBOL_GPL(pci_check_and_unmask_intx);
+
+/**
  * pci_msi_off - disables any msi or msix capabilities
  * @dev: the PCI device to operate on
  *
@@ -2578,7 +2697,7 @@ static int pci_dev_reset(struct pci_dev *dev, int probe)
 	might_sleep();
 
 	if (!probe) {
-		pci_block_user_cfg_access(dev);
+		pci_cfg_access_lock(dev);
 		/* block PM suspend, driver probe, etc. */
 		down(&dev->dev.sem);
 	}
@@ -2603,7 +2722,7 @@ static int pci_dev_reset(struct pci_dev *dev, int probe)
 done:
 	if (!probe) {
 		up(&dev->dev.sem);
-		pci_unblock_user_cfg_access(dev);
+		pci_cfg_access_unlock(dev);
 	}
 
 	return rc;
@@ -2813,7 +2932,7 @@ EXPORT_SYMBOL(pcie_get_readrq);
  * @rq: maximum memory read count in bytes
  *    valid values are 128, 256, 512, 1024, 2048, 4096
  *
- * If possible sets maximum read byte count
+ * If possible sets maximum memory read request in bytes
  */
 int pcie_set_readrq(struct pci_dev *dev, int rq)
 {
@@ -2823,8 +2942,6 @@ int pcie_set_readrq(struct pci_dev *dev, int rq)
 	if (rq < 128 || rq > 4096 || !is_power_of_2(rq))
 		goto out;
 
-	v = (ffs(rq) - 8) << 12;
-
 	cap = pci_find_capability(dev, PCI_CAP_ID_EXP);
 	if (!cap)
 		goto out;
@@ -2833,16 +2950,94 @@ int pcie_set_readrq(struct pci_dev *dev, int rq)
 	if (err)
 		goto out;
 
+	/*
+	 * If using the "performance" PCIe config, we clamp the
+	 * read rq size to the max packet size to prevent the
+	 * host bridge generating requests larger than we can
+	 * cope with
+	 */
+	if (pcie_bus_config == PCIE_BUS_PERFORMANCE) {
+		int mps = pcie_get_mps(dev);
+
+		if (mps < 0)
+			return mps;
+		if (mps < rq)
+			rq = mps;
+	}
+
+	v = (ffs(rq) - 8) << 12;
+
 	if ((ctl & PCI_EXP_DEVCTL_READRQ) != v) {
 		ctl &= ~PCI_EXP_DEVCTL_READRQ;
 		ctl |= v;
-		err = pci_write_config_dword(dev, cap + PCI_EXP_DEVCTL, ctl);
+		err = pci_write_config_word(dev, cap + PCI_EXP_DEVCTL, ctl);
 	}
 
 out:
 	return err;
 }
 EXPORT_SYMBOL(pcie_set_readrq);
+
+/**
+ * pcie_get_mps - get PCI Express maximum payload size
+ * @dev: PCI device to query
+ *
+ * Returns maximum payload size in bytes
+ *    or appropriate error value.
+ */
+int pcie_get_mps(struct pci_dev *dev)
+{
+	int ret, cap;
+	u16 ctl;
+
+	cap = pci_pcie_cap(dev);
+	if (!cap)
+		return -EINVAL;
+
+	ret = pci_read_config_word(dev, cap + PCI_EXP_DEVCTL, &ctl);
+	if (!ret)
+		ret = 128 << ((ctl & PCI_EXP_DEVCTL_PAYLOAD) >> 5);
+
+	return ret;
+}
+
+/**
+ * pcie_set_mps - set PCI Express maximum payload size
+ * @dev: PCI device to query
+ * @rq: maximum payload size in bytes
+ *    valid values are 128, 256, 512, 1024, 2048, 4096
+ *
+ * If possible sets maximum payload size
+ */
+int pcie_set_mps(struct pci_dev *dev, int mps)
+{
+	int cap, err = -EINVAL;
+	u16 ctl, v;
+
+	if (mps < 128 || mps > 4096 || !is_power_of_2(mps))
+		goto out;
+
+	v = ffs(mps) - 8;
+	if (v > rh_get_mpss(dev))
+		goto out;
+	v <<= 5;
+
+	cap = pci_pcie_cap(dev);
+	if (!cap)
+		goto out;
+
+	err = pci_read_config_word(dev, cap + PCI_EXP_DEVCTL, &ctl);
+	if (err)
+		goto out;
+
+	if ((ctl & PCI_EXP_DEVCTL_PAYLOAD) != v) {
+		ctl &= ~PCI_EXP_DEVCTL_PAYLOAD;
+		ctl |= v;
+		err = pci_write_config_word(dev, cap + PCI_EXP_DEVCTL, ctl);
+	}
+out:
+	return err;
+}
 
 /**
  * pci_select_bars - Make BAR mask from the type of resource
@@ -2885,7 +3080,7 @@ int pci_resource_bar(struct pci_dev *dev, int resno, enum pci_bar_type *type)
 			return reg;
 	}
 
-	dev_err(&dev->dev, "BAR: invalid resource #%d\n", resno);
+	dev_err(&dev->dev, "BAR %d: invalid resource\n", resno);
 	return 0;
 }
 
@@ -3111,6 +3306,8 @@ static int __init pci_setup(char *str)
 				pci_yes_msi();
 			} else if (!strcmp(str, "noaer")) {
 				pci_no_aer();
+			} else if (!strncmp(str, "realloc", 7)) {
+				pci_realloc();
 			} else if (!strcmp(str, "nodomains")) {
 				pci_no_domains();
 			} else if (!strncmp(str, "cbiosize=", 9)) {
@@ -3126,6 +3323,14 @@ static int __init pci_setup(char *str)
 				pci_hotplug_io_size = memparse(str + 9, &str);
 			} else if (!strncmp(str, "hpmemsize=", 10)) {
 				pci_hotplug_mem_size = memparse(str + 10, &str);
+			} else if (!strncmp(str, "pcie_bus_tune_off", 17)) {
+				pcie_bus_config = PCIE_BUS_TUNE_OFF;
+			} else if (!strncmp(str, "pcie_bus_safe", 13)) {
+				pcie_bus_config = PCIE_BUS_SAFE;
+			} else if (!strncmp(str, "pcie_bus_perf", 13)) {
+				pcie_bus_config = PCIE_BUS_PERFORMANCE;
+			} else if (!strncmp(str, "pcie_bus_peer2peer", 18)) {
+				pcie_bus_config = PCIE_BUS_PEER2PEER;
 			} else if (!strncmp(str, "nosriov", 7)) {
 				pci_sriov_enabled = 0;
 			} else if (!strncmp(str, "sriov", 5)) {

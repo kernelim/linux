@@ -12,7 +12,8 @@ fhci-objs := fhci-hcd.o fhci-hub.o fhci-q.o fhci-mem.o \
 ifeq ($(CONFIG_FHCI_DEBUG),y)
 fhci-objs += fhci-dbg.o
 endif
-xhci-hcd-objs := xhci.o xhci-mem.o xhci-pci.o xhci-ring.o xhci-hub.o xhci-dbg.o
+xhci-hcd-objs := xhci.o xhci-mem.o xhci-ring.o xhci-hub.o xhci-dbg.o
+xhci-hcd-$(CONFIG_PCI)	+= xhci-pci.o
 
 obj-$(CONFIG_USB_WHCI_HCD)	+= whci/
 

@@ -15,17 +15,19 @@
 #include <linux/mm.h>
 #include <linux/mmu_notifier.h>
 #include <linux/tracepoint.h>
+#include <linux/irq_work.h>
 
 #include <linux/kvm.h>
 #include <linux/kvm_para.h>
 #include <linux/kvm_types.h>
+#include <linux/perf_event.h>
 
 #include <asm/pvclock-abi.h>
 #include <asm/desc.h>
 #include <asm/mtrr.h>
 #include <asm/msr-index.h>
 
-#define KVM_MAX_VCPUS 64
+#define KVM_MAX_VCPUS 160
 #define KVM_MEMORY_SLOTS 32
 /* memory slots that does not exposed to userspace */
 #define KVM_PRIVATE_MEM_SLOTS 4
@@ -275,6 +277,37 @@ struct kvm_mmu {
 	u64 rsvd_bits_mask[2][4];
 };
 
+enum pmc_type {
+	KVM_PMC_GP = 0,
+	KVM_PMC_FIXED,
+};
+
+struct kvm_pmc {
+	enum pmc_type type;
+	u8 idx;
+	u64 counter;
+	u64 eventsel;
+	struct perf_event *perf_event;
+	struct kvm_vcpu *vcpu;
+};
+
+struct kvm_pmu {
+	unsigned nr_arch_gp_counters;
+	unsigned nr_arch_fixed_counters;
+	unsigned available_event_types;
+	u64 fixed_ctr_ctrl;
+	u64 global_ctrl;
+	u64 global_status;
+	u64 global_ovf_ctrl;
+	u64 counter_bitmask[2];
+	u64 global_ctrl_mask;
+	u8 version;
+	struct kvm_pmc gp_counters[X86_PMC_MAX_GENERIC];
+	struct kvm_pmc fixed_counters[X86_PMC_MAX_FIXED];
+	struct irq_work irq_work;
+	u64 reprogram_pmi;
+};
+
 struct kvm_vcpu_arch {
 	/*
 	 * rip and regs accesses must go through
@@ -357,13 +390,25 @@ struct kvm_vcpu_arch {
 	unsigned int hw_tsc_khz;
 	unsigned int time_offset;
 	struct page *time_page;
+
+	struct {
+		u64 msr_val;
+		u64 last_steal;
+		u64 accum_steal;
+		gpa_t stime;
+		struct kvm_steal_time steal;
+	} st;
+
 	u64 last_host_tsc;
 	u64 last_guest_tsc;
 	u64 last_kernel_ns;
 	u64 last_tsc_nsec;
 	u64 last_tsc_write;
 	u64 tsc_offset_adjustment;
+	u32 virtual_tsc_khz;
 	bool tsc_catchup;
+	u32 tsc_catchup_mult;
+	s8 tsc_catchup_shift;
 
 	bool singlestep; /* guest is single stepped by KVM */
 	bool nmi_pending;
@@ -382,6 +427,8 @@ struct kvm_vcpu_arch {
 	u64 mcg_status;
 	u64 mcg_ctl;
 	u64 *mce_banks;
+
+	struct kvm_pmu pmu;
 };
 
 struct kvm_mem_alias {
@@ -433,9 +480,6 @@ struct kvm_arch {
 	u64 last_tsc_nsec;
 	u64 last_tsc_offset;
 	u64 last_tsc_write;
-	u32 virtual_tsc_khz;
-	u32 virtual_tsc_mult;
-	s8 virtual_tsc_shift;
 };
 
 struct kvm_vm_stat {
@@ -555,13 +599,26 @@ struct kvm_x86_ops {
 	u64 (*get_mt_mask)(struct kvm_vcpu *vcpu, gfn_t gfn, bool is_mmio);
 	bool (*gb_page_enable)(void);
 
+	void (*set_tsc_khz)(struct kvm_vcpu *vcpu, u32 user_tsc_khz);
 	void (*write_tsc_offset)(struct kvm_vcpu *vcpu, u64 offset);
-	void (*adjust_tsc_offset)(struct kvm_vcpu *vcpu, s64 adjustment);
+	void (*adjust_tsc_offset)(struct kvm_vcpu *vcpu, s64 adjustment, bool host);
+	u64 (*compute_tsc_offset)(struct kvm_vcpu *vcpu, u64 target_tsc);
 
 	const struct trace_print_flags *exit_reasons_str;
 };
 
 extern struct kvm_x86_ops *kvm_x86_ops;
+
+static inline void adjust_tsc_offset_guest(struct kvm_vcpu *vcpu,
+					   s64 adjustment)
+{
+	kvm_x86_ops->adjust_tsc_offset(vcpu, adjustment, false);
+}
+
+static inline void adjust_tsc_offset_host(struct kvm_vcpu *vcpu, s64 adjustment)
+{
+	kvm_x86_ops->adjust_tsc_offset(vcpu, adjustment, true);
+}
 
 int kvm_mmu_module_init(void);
 void kvm_mmu_module_exit(void);
@@ -589,6 +646,13 @@ int kvm_pv_mmu_op(struct kvm_vcpu *vcpu, unsigned long bytes,
 u8 kvm_get_guest_memory_type(struct kvm_vcpu *vcpu, gfn_t gfn);
 
 extern bool tdp_enabled;
+
+/* control of guest tsc rate supported? */
+extern bool kvm_has_tsc_control;
+/* minimum supported tsc_khz for guests */
+extern u32  kvm_min_guest_tsc_khz;
+/* maximum supported tsc_khz for guests */
+extern u32  kvm_max_guest_tsc_khz;
 
 enum emulation_result {
 	EMULATE_DONE,       /* no further processing */
@@ -655,6 +719,8 @@ int kvm_set_xcr(struct kvm_vcpu *vcpu, u32 index, u64 xcr);
 
 int kvm_get_msr_common(struct kvm_vcpu *vcpu, u32 msr, u64 *pdata);
 int kvm_set_msr_common(struct kvm_vcpu *vcpu, u32 msr, u64 data);
+
+bool kvm_rdpmc(struct kvm_vcpu *vcpu);
 
 void kvm_queue_exception(struct kvm_vcpu *vcpu, unsigned nr);
 void kvm_queue_exception_e(struct kvm_vcpu *vcpu, unsigned nr, u32 error_code);
@@ -815,5 +881,18 @@ int kvm_cpu_get_interrupt(struct kvm_vcpu *v);
 
 void kvm_define_shared_msr(unsigned index, u32 msr);
 void kvm_set_shared_msr(unsigned index, u64 val, u64 mask);
+
+int kvm_is_in_guest(void);
+
+void kvm_pmu_init(struct kvm_vcpu *vcpu);
+void kvm_pmu_destroy(struct kvm_vcpu *vcpu);
+void kvm_pmu_reset(struct kvm_vcpu *vcpu);
+void kvm_pmu_cpuid_update(struct kvm_vcpu *vcpu);
+bool kvm_pmu_msr(struct kvm_vcpu *vcpu, u32 msr);
+int kvm_pmu_get_msr(struct kvm_vcpu *vcpu, u32 msr, u64 *data);
+int kvm_pmu_set_msr(struct kvm_vcpu *vcpu, u32 msr, u64 data);
+int kvm_pmu_read_pmc(struct kvm_vcpu *vcpu, unsigned pmc, u64 *data);
+void kvm_handle_pmu_event(struct kvm_vcpu *vcpu);
+void kvm_deliver_pmi(struct kvm_vcpu *vcpu);
 
 #endif /* _ASM_X86_KVM_HOST_H */

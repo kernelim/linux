@@ -131,7 +131,7 @@ int snd_hda_codec_amp_update(struct hda_codec *codec, hda_nid_t nid, int ch,
 			     int direction, int idx, int mask, int val);
 int snd_hda_codec_amp_stereo(struct hda_codec *codec, hda_nid_t nid,
 			     int dir, int idx, int mask, int val);
-#ifdef SND_HDA_NEEDS_RESUME
+#ifdef CONFIG_PM
 void snd_hda_codec_resume_amp(struct hda_codec *codec);
 #endif
 
@@ -140,7 +140,8 @@ void snd_hda_set_vmaster_tlv(struct hda_codec *codec, hda_nid_t nid, int dir,
 struct snd_kcontrol *snd_hda_find_mixer_ctl(struct hda_codec *codec,
 					    const char *name);
 int snd_hda_add_vmaster(struct hda_codec *codec, char *name,
-			unsigned int *tlv, const char * const *slaves);
+			unsigned int *tlv, const char * const *slaves,
+			const char *suffix);
 int snd_hda_codec_reset(struct hda_codec *codec);
 
 /* amp value bits */
@@ -267,11 +268,14 @@ int snd_hda_ch_mode_put(struct hda_codec *codec,
 enum { HDA_FRONT, HDA_REAR, HDA_CLFE, HDA_SIDE }; /* index for dac_nidx */
 enum { HDA_DIG_NONE, HDA_DIG_EXCLUSIVE, HDA_DIG_ANALOG_DUP }; /* dig_out_used */
 
+#define HDA_MAX_OUTS	5
+
 struct hda_multi_out {
 	int num_dacs;		/* # of DACs, must be more than 1 */
 	const hda_nid_t *dac_nids;	/* DAC list */
 	hda_nid_t hp_nid;	/* optional DAC for HP, 0 when not exists */
-	hda_nid_t extra_out_nid[3];	/* optional DACs, 0 when not exists */
+	hda_nid_t hp_out_nid[HDA_MAX_OUTS];	/* DACs for multiple HPs */
+	hda_nid_t extra_out_nid[HDA_MAX_OUTS];	/* other (e.g. speaker) DACs */
 	hda_nid_t dig_out_nid;	/* digital out audio widget */
 	const hda_nid_t *slave_dig_outs;
 	int max_channels;	/* currently supported analog channels */
@@ -333,9 +337,6 @@ int snd_hda_codec_proc_new(struct hda_codec *codec);
 static inline int snd_hda_codec_proc_new(struct hda_codec *codec) { return 0; }
 #endif
 
-#define SND_PRINT_RATES_ADVISED_BUFSIZE	80
-void snd_print_pcm_rates(int pcm, char *buf, int buflen);
-
 #define SND_PRINT_BITS_ADVISED_BUFSIZE	16
 void snd_print_pcm_bits(int pcm, char *buf, int buflen);
 
@@ -385,7 +386,7 @@ enum {
 	AUTO_PIN_HP_OUT
 };
 
-#define AUTO_CFG_MAX_OUTS	5
+#define AUTO_CFG_MAX_OUTS	HDA_MAX_OUTS
 #define AUTO_CFG_MAX_INS	8
 
 struct auto_pin_cfg_item {
@@ -394,11 +395,12 @@ struct auto_pin_cfg_item {
 };
 
 struct auto_pin_cfg;
-const char *hda_get_input_pin_label(struct hda_codec *codec, hda_nid_t pin,
-				    int check_location);
 const char *hda_get_autocfg_input_label(struct hda_codec *codec,
 					const struct auto_pin_cfg *cfg,
 					int input);
+int snd_hda_get_pin_label(struct hda_codec *codec, hda_nid_t nid,
+			  const struct auto_pin_cfg *cfg,
+			  char *label, int maxlen, int *indexp);
 int snd_hda_add_imux_item(struct hda_input_mux *imux, const char *label,
 			  int index, int *type_index_ret);
 
@@ -442,10 +444,21 @@ struct auto_pin_cfg {
 	(cfg & AC_DEFCFG_SEQUENCE)
 #define get_defcfg_device(cfg) \
 	((cfg & AC_DEFCFG_DEVICE) >> AC_DEFCFG_DEVICE_SHIFT)
+#define get_defcfg_misc(cfg) \
+	((cfg & AC_DEFCFG_MISC) >> AC_DEFCFG_MISC_SHIFT)
 
-int snd_hda_parse_pin_def_config(struct hda_codec *codec,
-				 struct auto_pin_cfg *cfg,
-				 const hda_nid_t *ignore_nids);
+/* bit-flags for snd_hda_parse_pin_def_config() behavior */
+#define HDA_PINCFG_NO_HP_FIXUP	(1 << 0) /* no HP-split */
+#define HDA_PINCFG_NO_LO_FIXUP	(1 << 1) /* don't take other outs as LO */
+
+int snd_hda_parse_pin_defcfg(struct hda_codec *codec,
+			     struct auto_pin_cfg *cfg,
+			     const hda_nid_t *ignore_nids,
+			     unsigned int cond_flags);
+
+/* older function */
+#define snd_hda_parse_pin_def_config(codec, cfg, ignore) \
+	snd_hda_parse_pin_defcfg(codec, cfg, ignore, 0)
 
 /* amp values */
 #define AMP_IN_MUTE(idx)	(0x7080 | ((idx)<<8))
@@ -476,7 +489,12 @@ static inline u32 get_wcaps(struct hda_codec *codec, hda_nid_t nid)
 }
 
 /* get the widget type from widget capability bits */
-#define get_wcaps_type(wcaps) (((wcaps) & AC_WCAP_TYPE) >> AC_WCAP_TYPE_SHIFT)
+static inline int get_wcaps_type(unsigned int wcaps)
+{
+	if (!wcaps)
+		return -1; /* invalid type */
+	return (wcaps & AC_WCAP_TYPE) >> AC_WCAP_TYPE_SHIFT;
+}
 
 static inline unsigned int get_wcaps_channels(u32 wcaps)
 {
@@ -492,14 +510,8 @@ u32 query_amp_caps(struct hda_codec *codec, hda_nid_t nid, int direction);
 int snd_hda_override_amp_caps(struct hda_codec *codec, hda_nid_t nid, int dir,
 			      unsigned int caps);
 u32 snd_hda_query_pin_caps(struct hda_codec *codec, hda_nid_t nid);
-u32 snd_hda_pin_sense(struct hda_codec *codec, hda_nid_t nid);
-int snd_hda_jack_detect(struct hda_codec *codec, hda_nid_t nid);
-
-static inline bool is_jack_detectable(struct hda_codec *codec, hda_nid_t nid)
-{
-	return (snd_hda_query_pin_caps(codec, nid) & AC_PINCAP_PRES_DETECT) &&
-		(get_wcaps(codec, nid) & AC_WCAP_UNSOL_CAP);
-}
+int snd_hda_override_pin_caps(struct hda_codec *codec, hda_nid_t nid,
+			      unsigned int caps);
 
 /* flags for hda_nid_item */
 #define HDA_NID_ITEM_AMP	(1<<0)
@@ -589,7 +601,8 @@ int snd_hda_check_amp_list_power(struct hda_codec *codec,
 #define get_amp_nid_(pv)	((pv) & 0xffff)
 #define get_amp_nid(kc)		get_amp_nid_((kc)->private_value)
 #define get_amp_channels(kc)	(((kc)->private_value >> 16) & 0x3)
-#define get_amp_direction(kc)	(((kc)->private_value >> 18) & 0x1)
+#define get_amp_direction_(pv)	(((pv) >> 18) & 0x1)
+#define get_amp_direction(kc)	get_amp_direction_((kc)->private_value)
 #define get_amp_index(kc)	(((kc)->private_value >> 19) & 0xf)
 #define get_amp_offset(kc)	(((kc)->private_value >> 23) & 0x3f)
 #define get_amp_min_mute(kc)	(((kc)->private_value >> 29) & 0x1)
@@ -607,6 +620,7 @@ struct cea_sad {
 };
 
 #define ELD_FIXED_BYTES	20
+#define ELD_MAX_SIZE    256
 #define ELD_MAX_MNL	16
 #define ELD_MAX_SAD	16
 
@@ -631,6 +645,10 @@ struct hdmi_eld {
 	int	spk_alloc;
 	int	sad_count;
 	struct cea_sad sad[ELD_MAX_SAD];
+	/*
+	 * all fields above eld_buffer will be cleared before updating ELD
+	 */
+	char    eld_buffer[ELD_MAX_SIZE];
 #ifdef CONFIG_PROC_FS
 	struct snd_info_entry *proc_entry;
 #endif
@@ -661,29 +679,5 @@ static inline void snd_hda_eld_proc_free(struct hda_codec *codec,
 
 #define SND_PRINT_CHANNEL_ALLOCATION_ADVISED_BUFSIZE 80
 void snd_print_channel_allocation(int spk_alloc, char *buf, int buflen);
-
-/*
- * Input-jack notification support
- */
-#ifdef CONFIG_SND_HDA_INPUT_JACK
-int snd_hda_input_jack_add(struct hda_codec *codec, hda_nid_t nid, int type,
-			   const char *name);
-void snd_hda_input_jack_report(struct hda_codec *codec, hda_nid_t nid);
-void snd_hda_input_jack_free(struct hda_codec *codec);
-#else /* CONFIG_SND_HDA_INPUT_JACK */
-static inline int snd_hda_input_jack_add(struct hda_codec *codec,
-					 hda_nid_t nid, int type,
-					 const char *name)
-{
-	return 0;
-}
-static inline void snd_hda_input_jack_report(struct hda_codec *codec,
-					     hda_nid_t nid)
-{
-}
-static inline void snd_hda_input_jack_free(struct hda_codec *codec)
-{
-}
-#endif /* CONFIG_SND_HDA_INPUT_JACK */
 
 #endif /* __SOUND_HDA_LOCAL_H */

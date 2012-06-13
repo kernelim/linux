@@ -324,6 +324,8 @@ static void kvm_free_assigned_device(struct kvm *kvm,
 
 	pci_reset_function(assigned_dev->dev);
 
+	assigned_dev->dev->dev_flags &= ~PCI_DEV_FLAGS_ASSIGNED;
+
 	pci_release_regions(assigned_dev->dev);
 	pci_disable_device(assigned_dev->dev);
 	pci_dev_put(assigned_dev->dev);
@@ -3102,7 +3104,7 @@ static void kvm_sched_out(struct preempt_notifier *pn,
 	kvm_arch_vcpu_put(vcpu);
 }
 
-int kvm_init(void *opaque, unsigned int vcpu_size,
+int kvm_init(void *opaque, unsigned vcpu_size, unsigned vcpu_align,
 		  struct module *module)
 {
 	int r;
@@ -3170,8 +3172,9 @@ int kvm_init(void *opaque, unsigned int vcpu_size,
 		goto out_free_4;
 
 	/* A kmem cache lets us meet the alignment requirements of fx_save. */
-	kvm_vcpu_cache = kmem_cache_create("kvm_vcpu", vcpu_size,
-					   __alignof__(struct kvm_vcpu),
+	if (!vcpu_align)
+		vcpu_align = __alignof__(struct kvm_vcpu);
+	kvm_vcpu_cache = kmem_cache_create("kvm_vcpu", vcpu_size, vcpu_align,
 					   0, NULL);
 	if (!kvm_vcpu_cache) {
 		r = -ENOMEM;

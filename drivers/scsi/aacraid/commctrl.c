@@ -5,7 +5,8 @@
  * based on the old aacraid driver that is..
  * Adaptec aacraid device driver for Linux.
  *
- * Copyright (c) 2000-2007 Adaptec, Inc. (aacraid@adaptec.com)
+ * Copyright (c) 2011 PMC-Sierra, Inc. (aacraid@pmc-sierra.com)
+ *		  2000-2010 Adaptec, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -153,7 +154,7 @@ cleanup:
 		fibptr->hw_fib_pa = hw_fib_pa;
 		fibptr->hw_fib_va = hw_fib;
 	}
-	if (retval != -EINTR)
+	if (retval != -ERESTARTSYS)
 		aac_fib_free(fibptr);
 	return retval;
 }
@@ -322,7 +323,7 @@ return_fib:
 		}
 		if (f.wait) {
 			if(down_interruptible(&fibctx->wait_sem) < 0) {
-				status = -EINTR;
+				status = -ERESTARTSYS;
 			} else {
 				/* Lock again and retry */
 				spin_lock_irqsave(&dev->fib_lock, flags);
@@ -593,10 +594,10 @@ static int aac_send_raw_srb(struct aac_dev* dev, void __user * arg)
 				u64 addr;
 				void* p;
 				if (upsg->sg[i].count >
-				    (dev->adapter_info.options &
+				    ((dev->adapter_info.options &
 				     AAC_OPT_NEW_COMM) ?
 				      (dev->scsi_host_ptr->max_sectors << 9) :
-				      65536) {
+				      65536)) {
 					rcode = -EINVAL;
 					goto cleanup;
 				}
@@ -645,10 +646,10 @@ static int aac_send_raw_srb(struct aac_dev* dev, void __user * arg)
 				u64 addr;
 				void* p;
 				if (usg->sg[i].count >
-				    (dev->adapter_info.options &
+				    ((dev->adapter_info.options &
 				     AAC_OPT_NEW_COMM) ?
 				      (dev->scsi_host_ptr->max_sectors << 9) :
-				      65536) {
+				      65536)) {
 					rcode = -EINVAL;
 					goto cleanup;
 				}
@@ -695,10 +696,10 @@ static int aac_send_raw_srb(struct aac_dev* dev, void __user * arg)
 				uintptr_t addr;
 				void* p;
 				if (usg->sg[i].count >
-				    (dev->adapter_info.options &
+				    ((dev->adapter_info.options &
 				     AAC_OPT_NEW_COMM) ?
 				      (dev->scsi_host_ptr->max_sectors << 9) :
-				      65536) {
+				      65536)) {
 					rcode = -EINVAL;
 					goto cleanup;
 				}
@@ -734,10 +735,10 @@ static int aac_send_raw_srb(struct aac_dev* dev, void __user * arg)
 				dma_addr_t addr;
 				void* p;
 				if (upsg->sg[i].count >
-				    (dev->adapter_info.options &
+				    ((dev->adapter_info.options &
 				     AAC_OPT_NEW_COMM) ?
 				      (dev->scsi_host_ptr->max_sectors << 9) :
-				      65536) {
+				      65536)) {
 					rcode = -EINVAL;
 					goto cleanup;
 				}
@@ -772,8 +773,8 @@ static int aac_send_raw_srb(struct aac_dev* dev, void __user * arg)
 		psg->count = cpu_to_le32(sg_indx+1);
 		status = aac_fib_send(ScsiPortCommand, srbfib, actual_fibsize, FsaNormal, 1, 1, NULL, NULL);
 	}
-	if (status == -EINTR) {
-		rcode = -EINTR;
+	if (status == -ERESTARTSYS) {
+		rcode = -ERESTARTSYS;
 		goto cleanup;
 	}
 
@@ -810,7 +811,7 @@ cleanup:
 	for(i=0; i <= sg_indx; i++){
 		kfree(sg_list[i]);
 	}
-	if (rcode != -EINTR) {
+	if (rcode != -ERESTARTSYS) {
 		aac_fib_complete(srbfib);
 		aac_fib_free(srbfib);
 	}
@@ -848,7 +849,7 @@ int aac_do_ioctl(struct aac_dev * dev, int cmd, void __user *arg)
 	 */
 
 	status = aac_dev_ioctl(dev, cmd, arg);
-	if(status != -ENOTTY)
+	if (status != -ENOTTY)
 		return status;
 
 	switch (cmd) {

@@ -33,9 +33,9 @@
 /*
  * MegaRAID SAS Driver meta data
  */
-#define MEGASAS_VERSION				"00.00.05.40-rh2"
-#define MEGASAS_RELDATE				"Aug. 4, 2011"
-#define MEGASAS_EXT_VERSION			"Thu. Aug. 4 17:00:00 PDT 2011"
+#define MEGASAS_VERSION				"00.00.06.14-rh1"
+#define MEGASAS_RELDATE				"Jan. 6, 2012"
+#define MEGASAS_EXT_VERSION			"Fri. Jan. 6 17:00:00 PDT 2012"
 
 /*
  * Device IDs
@@ -48,6 +48,7 @@
 #define	PCI_DEVICE_ID_LSI_SAS0073SKINNY		0x0073
 #define	PCI_DEVICE_ID_LSI_SAS0071SKINNY		0x0071
 #define	PCI_DEVICE_ID_LSI_FUSION		0x005b
+#define PCI_DEVICE_ID_LSI_INVADER		0x005d
 
 /*
  * =====================================
@@ -222,6 +223,7 @@ enum MFI_STAT {
 	MFI_STAT_RESERVATION_IN_PROGRESS = 0x36,
 	MFI_STAT_I2C_ERRORS_DETECTED = 0x37,
 	MFI_STAT_PCI_ERRORS_DETECTED = 0x38,
+	MFI_STAT_CONFIG_SEQ_MISMATCH = 0x67,
 
 	MFI_STAT_INVALID_STATUS = 0xFF
 };
@@ -717,7 +719,7 @@ struct megasas_ctrl_info {
 #define MEGASAS_DEFAULT_INIT_ID			-1
 #define MEGASAS_MAX_LUN				8
 #define MEGASAS_MAX_LD				64
-#define MEGASAS_DEFAULT_CMD_PER_LUN		128
+#define MEGASAS_DEFAULT_CMD_PER_LUN		256
 #define MEGASAS_MAX_PD                          (MEGASAS_MAX_PD_CHANNELS * \
 						MEGASAS_MAX_DEV_PER_CHANNEL)
 #define MEGASAS_MAX_LD_IDS			(MEGASAS_MAX_LD_CHANNELS * \
@@ -756,6 +758,7 @@ struct megasas_ctrl_info {
 #define MEGASAS_INT_CMDS			32
 #define MEGASAS_SKINNY_INT_CMDS			5
 
+#define MEGASAS_MAX_MSIX_QUEUES			16
 /*
  * FW can accept both 32 and 64 bit SGLs. We want to allocate 32/64 bit
  * SGLs based on the size of dma_addr_t
@@ -770,11 +773,10 @@ struct megasas_ctrl_info {
 
 #define MFI_OB_INTR_STATUS_MASK			0x00000002
 #define MFI_POLL_TIMEOUT_SECS			60
-#define MEGASAS_COMPLETION_TIMER_INTERVAL      (HZ/10)
 
 #define MFI_REPLY_1078_MESSAGE_INTERRUPT	0x80000000
 #define MFI_REPLY_GEN2_MESSAGE_INTERRUPT	0x00000001
-#define MFI_GEN2_ENABLE_INTERRUPT_MASK		0x00000001
+#define MFI_GEN2_ENABLE_INTERRUPT_MASK		(0x00000001 | 0x00000004)
 #define MFI_REPLY_SKINNY_MESSAGE_INTERRUPT	0x40000000
 #define MFI_SKINNY_ENABLE_INTERRUPT_MASK	(0x00000001)
 
@@ -1277,6 +1279,11 @@ struct megasas_aen_event {
 	struct megasas_instance *instance;
 };
 
+struct megasas_irq_context {
+	struct megasas_instance *instance;
+	u32 MSIxIndex;
+};
+
 struct megasas_instance {
 
 	u32 *producer;
@@ -1345,13 +1352,13 @@ struct megasas_instance {
 	u32 mfiStatus;
 	u32 last_seq_num;
 
-	struct timer_list io_completion_timer;
 	struct list_head internal_reset_pending_q;
 
 	/* Ptr to hba specific information */
 	void *ctrl_context;
-	u8	msi_flag;
-	struct msix_entry msixentry;
+	unsigned int msix_vectors;
+	struct msix_entry msixentry[MEGASAS_MAX_MSIX_QUEUES];
+	struct megasas_irq_context irq_context[MEGASAS_MAX_MSIX_QUEUES];
 	u64 map_id;
 	struct megasas_cmd *map_update_cmd;
 	unsigned long bar;

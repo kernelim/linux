@@ -395,14 +395,6 @@ static pageout_t pageout(struct page *page, struct address_space *mapping,
 			return PAGE_ACTIVATE;
 		}
 
-		/*
-		 * Wait on writeback if requested to. This happens when
-		 * direct reclaiming a large contiguous area and the
-		 * first attempt to free a range of pages fails.
-		 */
-		if (PageWriteback(page) && sync_writeback == PAGEOUT_IO_SYNC)
-			wait_on_page_writeback(page);
-
 		if (!PageWriteback(page)) {
 			/* synchronous write or broken a_ops? */
 			ClearPageReclaim(page);
@@ -643,7 +635,10 @@ static enum page_references page_check_references(struct page *page,
 static unsigned long shrink_page_list(struct list_head *page_list,
 					struct scan_control *sc,
 					struct zone *zone,
-					enum pageout_io sync_writeback)
+					enum pageout_io sync_writeback,
+					int priority,
+					unsigned long *ret_nr_dirty,
+					unsigned long *ret_nr_writeback)
 {
 	LIST_HEAD(ret_pages);
 	struct pagevec freed_pvec;
@@ -651,6 +646,7 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 	unsigned long nr_dirty = 0;
 	unsigned long nr_congested = 0;
 	unsigned long nr_reclaimed = 0;
+	unsigned long nr_writeback = 0;
 
 	cond_resched();
 
@@ -688,13 +684,12 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 			(PageSwapCache(page) && (sc->gfp_mask & __GFP_IO));
 
 		if (PageWriteback(page)) {
+			nr_writeback++;
 			/*
-			 * Synchronous reclaim is performed in two passes,
-			 * first an asynchronous pass over the list to
-			 * start parallel writeback, and a second synchronous
-			 * pass to wait for the IO to complete.  Wait here
-			 * for any page for which writeback has already
-			 * started.
+			 * Synchronous reclaim cannot queue pages for
+			 * writeback due to the possibility of stack overflow
+			 * but if it encounters a page under writeback, wait
+			 * for the IO to complete.
 			 */
 			if (sync_writeback == PAGEOUT_IO_SYNC && may_enter_fs)
 				wait_on_page_writeback(page);
@@ -746,6 +741,25 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 
 		if (PageDirty(page)) {
 			nr_dirty++;
+
+			/*
+			 * Only kswapd can writeback filesystem pages to
+			 * avoid risk of stack overflow but do not writeback
+			 * unless under significant pressure.
+			 */
+			if (page_is_file_cache(page) &&
+					(!current_is_kswapd() || priority >= DEF_PRIORITY - 2)) {
+				/*
+				 * Immediately reclaim when written back.
+				 * Similar in principal to deactivate_page()
+				 * except we already have the page isolated
+				 * and know it's dirty
+				 */
+				inc_zone_page_state(page, NR_VMSCAN_IMMEDIATE);
+				SetPageReclaim(page);
+
+				goto keep_locked;
+			}
 
 			if (references == PAGEREF_RECLAIM_CLEAN)
 				goto keep_locked;
@@ -874,6 +888,8 @@ keep:
 		__pagevec_free(&freed_pvec);
 	count_vm_events(PGACTIVATE, pgactivate);
 	trace_mm_pagereclaim_free(nr_reclaimed);
+        *ret_nr_dirty += nr_dirty;
+        *ret_nr_writeback += nr_writeback;
 	return nr_reclaimed;
 }
 
@@ -1194,6 +1210,8 @@ static unsigned long shrink_inactive_list(unsigned long max_scan,
 	struct pagevec pvec;
 	unsigned long nr_scanned = 0;
 	unsigned long nr_reclaimed = 0;
+        unsigned long nr_dirty = 0;
+        unsigned long nr_writeback = 0;
 	struct zone_reclaim_stat *reclaim_stat = get_reclaim_stat(zone, sc);
 
 	while (unlikely(too_many_isolated(zone, file, sc))) {
@@ -1260,7 +1278,9 @@ static unsigned long shrink_inactive_list(unsigned long max_scan,
 		spin_unlock_irq(&zone->lru_lock);
 
 		nr_scanned += nr_scan;
-		nr_freed = shrink_page_list(&page_list, sc, zone, PAGEOUT_IO_ASYNC);
+		nr_freed = shrink_page_list(&page_list, sc, zone,
+					PAGEOUT_IO_ASYNC, priority,
+					&nr_dirty, &nr_writeback);
 
 		nr_reclaimed += nr_freed;
 
@@ -1301,6 +1321,35 @@ static unsigned long shrink_inactive_list(unsigned long max_scan,
 		__mod_zone_page_state(zone, NR_ISOLATED_ANON, -nr_anon);
 		__mod_zone_page_state(zone, NR_ISOLATED_FILE, -nr_file);
 
+		/*
+		 * If reclaim is isolating dirty pages under writeback, it implies
+		 * that the long-lived page allocation rate is exceeding the page
+		 * laundering rate. Either the global limits are not being effective
+		 * at throttling processes due to the page distribution throughout
+		 * zones or there is heavy usage of a slow backing device. The
+		 * only option is to throttle from reclaim context which is not ideal
+		 * as there is no guarantee the dirtying process is throttled in the
+		 * same way balance_dirty_pages() manages.
+		 *
+		 * This scales the number of dirty pages that must be under writeback
+		 * before throttling depending on priority. It is a simple backoff
+		 * function that has the most effect in the range DEF_PRIORITY to
+		 * DEF_PRIORITY-2 which is the priority reclaim is considered to be
+		 * in trouble and reclaim is considered to be in trouble.
+		 *
+		 * DEF_PRIORITY   100% isolated pages must be PageWriteback to throttle
+		 * DEF_PRIORITY-1  50% must be PageWriteback
+		 * DEF_PRIORITY-2  25% must be PageWriteback, kswapd in trouble
+		 * ...
+		 * DEF_PRIORITY-6 For SWAP_CLUSTER_MAX isolated pages, throttle if any
+		 *                     isolated page is PageWriteback
+		 */
+		if (nr_writeback && nr_writeback >=
+			(nr_taken >> (DEF_PRIORITY-priority))) {
+			spin_unlock_irq(&zone->lru_lock);
+			wait_iff_congested(zone, BLK_RW_ASYNC, HZ/10);
+			spin_lock_irq(&zone->lru_lock);
+		}
   	} while (nr_scanned < max_scan);
 
 done:

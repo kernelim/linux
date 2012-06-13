@@ -328,33 +328,20 @@ static int audit_match_perm(struct audit_context *ctx, int mask)
 	}
 }
 
-static int audit_match_filetype(struct audit_context *ctx, int which)
+static int audit_match_filetype(struct audit_context *ctx, int val)
 {
 	struct audit_names *n;
-	unsigned i = 0;
-	unsigned index = which & ~S_IFMT;
-	mode_t mode = which & S_IFMT;
+	mode_t mode = (mode_t)(val & S_IFMT);
 
 	if (unlikely(!ctx))
 		return 0;
 
-	if (index >= ctx->name_count)
-		return 0;
-
 	list_for_each_entry(n, &ctx->names_list, list) {
-		if (i != index) {
-			i++;
-			continue;
-		}
-
-		if (n->ino == -1)
-			return 0;
-		if ((n->mode ^ mode) & S_IFMT)
-			return 0;
-		return 1;
+		if ((n->ino != -1) &&
+		    ((n->mode & S_IFMT) == mode))
+			return 1;
 	}
 
-	/* we should not get here since we should eventually hit i == index */
 	return 0;
 }
 
@@ -477,6 +464,134 @@ static int match_tree_refs(struct audit_context *ctx, struct audit_tree *tree)
 	return 0;
 }
 
+static int audit_compare_id(uid_t uid1,
+			    struct audit_names *name,
+			    unsigned long name_offset,
+			    struct audit_field *f,
+			    struct audit_context *ctx)
+{
+	struct audit_names *n;
+	unsigned long addr;
+	uid_t uid2;
+	int rc;
+
+	BUILD_BUG_ON(sizeof(uid_t) != sizeof(gid_t));
+
+	if (name) {
+		addr = (unsigned long)name;
+		addr += name_offset;
+
+		uid2 = *(uid_t *)addr;
+		rc = audit_comparator(uid1, f->op, uid2);
+		if (rc)
+			return rc;
+	}
+
+	if (ctx) {
+		list_for_each_entry(n, &ctx->names_list, list) {
+			addr = (unsigned long)n;
+			addr += name_offset;
+
+			uid2 = *(uid_t *)addr;
+
+			rc = audit_comparator(uid1, f->op, uid2);
+			if (rc)
+				return rc;
+		}
+	}
+	return 0;
+}
+
+static int audit_field_compare(struct task_struct *tsk,
+			       const struct cred *cred,
+			       struct audit_field *f,
+			       struct audit_context *ctx,
+			       struct audit_names *name)
+{
+	switch (f->val) {
+	/* process to file object comparisons */
+	case AUDIT_COMPARE_UID_TO_OBJ_UID:
+		return audit_compare_id(cred->uid,
+					name, offsetof(struct audit_names, uid),
+					f, ctx);
+	case AUDIT_COMPARE_GID_TO_OBJ_GID:
+		return audit_compare_id(cred->gid,
+					name, offsetof(struct audit_names, gid),
+					f, ctx);
+	case AUDIT_COMPARE_EUID_TO_OBJ_UID:
+		return audit_compare_id(cred->euid,
+					name, offsetof(struct audit_names, uid),
+					f, ctx);
+	case AUDIT_COMPARE_EGID_TO_OBJ_GID:
+		return audit_compare_id(cred->egid,
+					name, offsetof(struct audit_names, gid),
+					f, ctx);
+	case AUDIT_COMPARE_AUID_TO_OBJ_UID:
+		return audit_compare_id(tsk->loginuid,
+					name, offsetof(struct audit_names, uid),
+					f, ctx);
+	case AUDIT_COMPARE_SUID_TO_OBJ_UID:
+		return audit_compare_id(cred->suid,
+					name, offsetof(struct audit_names, uid),
+					f, ctx);
+	case AUDIT_COMPARE_SGID_TO_OBJ_GID:
+		return audit_compare_id(cred->sgid,
+					name, offsetof(struct audit_names, gid),
+					f, ctx);
+	case AUDIT_COMPARE_FSUID_TO_OBJ_UID:
+		return audit_compare_id(cred->fsuid,
+					name, offsetof(struct audit_names, uid),
+					f, ctx);
+	case AUDIT_COMPARE_FSGID_TO_OBJ_GID:
+		return audit_compare_id(cred->fsgid,
+					name, offsetof(struct audit_names, gid),
+					f, ctx);
+	/* uid comparisons */
+	case AUDIT_COMPARE_UID_TO_AUID:
+		return audit_comparator(cred->uid, f->op, tsk->loginuid);
+	case AUDIT_COMPARE_UID_TO_EUID:
+		return audit_comparator(cred->uid, f->op, cred->euid);
+	case AUDIT_COMPARE_UID_TO_SUID:
+		return audit_comparator(cred->uid, f->op, cred->suid);
+	case AUDIT_COMPARE_UID_TO_FSUID:
+		return audit_comparator(cred->uid, f->op, cred->fsuid);
+	/* auid comparisons */
+	case AUDIT_COMPARE_AUID_TO_EUID:
+		return audit_comparator(tsk->loginuid, f->op, cred->euid);
+	case AUDIT_COMPARE_AUID_TO_SUID:
+		return audit_comparator(tsk->loginuid, f->op, cred->suid);
+	case AUDIT_COMPARE_AUID_TO_FSUID:
+		return audit_comparator(tsk->loginuid, f->op, cred->fsuid);
+	/* euid comparisons */
+	case AUDIT_COMPARE_EUID_TO_SUID:
+		return audit_comparator(cred->euid, f->op, cred->suid);
+	case AUDIT_COMPARE_EUID_TO_FSUID:
+		return audit_comparator(cred->euid, f->op, cred->fsuid);
+	/* suid comparisons */
+	case AUDIT_COMPARE_SUID_TO_FSUID:
+		return audit_comparator(cred->suid, f->op, cred->fsuid);
+	/* gid comparisons */
+	case AUDIT_COMPARE_GID_TO_EGID:
+		return audit_comparator(cred->gid, f->op, cred->egid);
+	case AUDIT_COMPARE_GID_TO_SGID:
+		return audit_comparator(cred->gid, f->op, cred->sgid);
+	case AUDIT_COMPARE_GID_TO_FSGID:
+		return audit_comparator(cred->gid, f->op, cred->fsgid);
+	/* egid comparisons */
+	case AUDIT_COMPARE_EGID_TO_SGID:
+		return audit_comparator(cred->egid, f->op, cred->sgid);
+	case AUDIT_COMPARE_EGID_TO_FSGID:
+		return audit_comparator(cred->egid, f->op, cred->fsgid);
+	/* sgid comparison */
+	case AUDIT_COMPARE_SGID_TO_FSGID:
+		return audit_comparator(cred->sgid, f->op, cred->fsgid);
+	default:
+		WARN(1, "Missing AUDIT_COMPARE define.  Report as a bug\n");
+		return 0;
+	}
+	return 0;
+}
+
 /* Determine if any context name data matches a rule's watch data */
 /* Compare a task_struct with an audit_rule.  Return 1 on match, 0
  * otherwise. */
@@ -551,12 +666,14 @@ static int audit_filter_rules(struct task_struct *tsk,
 			}
 			break;
 		case AUDIT_DEVMAJOR:
-			if (name)
-				result = audit_comparator(MAJOR(name->dev),
-							  f->op, f->val);
-			else if (ctx) {
+			if (name) {
+				if (audit_comparator(MAJOR(name->dev), f->op, f->val) ||
+				    audit_comparator(MAJOR(name->rdev), f->op, f->val))
+					++result;
+			} else if (ctx) {
 				list_for_each_entry(n, &ctx->names_list, list) {
-					if (audit_comparator(MAJOR(n->dev), f->op, f->val)) {
+					if (audit_comparator(MAJOR(n->dev), f->op, f->val) ||
+					    audit_comparator(MAJOR(n->rdev), f->op, f->val)) {
 						++result;
 						break;
 					}
@@ -564,12 +681,14 @@ static int audit_filter_rules(struct task_struct *tsk,
 			}
 			break;
 		case AUDIT_DEVMINOR:
-			if (name)
-				result = audit_comparator(MINOR(name->dev),
-							  f->op, f->val);
-			else if (ctx) {
+			if (name) {
+				if (audit_comparator(MINOR(name->dev), f->op, f->val) ||
+				    audit_comparator(MINOR(name->rdev), f->op, f->val))
+					++result;
+			} else if (ctx) {
 				list_for_each_entry(n, &ctx->names_list, list) {
-					if (audit_comparator(MINOR(n->dev), f->op, f->val)) {
+					if (audit_comparator(MINOR(n->dev), f->op, f->val) ||
+					    audit_comparator(MINOR(n->rdev), f->op, f->val)) {
 						++result;
 						break;
 					}
@@ -582,6 +701,30 @@ static int audit_filter_rules(struct task_struct *tsk,
 			else if (ctx) {
 				list_for_each_entry(n, &ctx->names_list, list) {
 					if (audit_comparator(n->ino, f->op, f->val)) {
+						++result;
+						break;
+					}
+				}
+			}
+			break;
+		case AUDIT_OBJ_UID:
+			if (name) {
+				result = audit_comparator(name->uid, f->op, f->val);
+			} else if (ctx) {
+				list_for_each_entry(n, &ctx->names_list, list) {
+					if (audit_comparator(n->uid, f->op, f->val)) {
+						++result;
+						break;
+					}
+				}
+			}
+			break;
+		case AUDIT_OBJ_GID:
+			if (name) {
+				result = audit_comparator(name->gid, f->op, f->val);
+			} else if (ctx) {
+				list_for_each_entry(n, &ctx->names_list, list) {
+					if (audit_comparator(n->gid, f->op, f->val)) {
 						++result;
 						break;
 					}
@@ -671,6 +814,9 @@ static int audit_filter_rules(struct task_struct *tsk,
 			break;
 		case AUDIT_FILETYPE:
 			result = audit_match_filetype(ctx, f->val);
+			break;
+		case AUDIT_FIELD_COMPARE:
+			result = audit_field_compare(tsk, cred, f, ctx, name);
 			break;
 		}
 
@@ -1214,8 +1360,8 @@ static void audit_log_execve_info(struct audit_context *context,
 				  struct audit_buffer **ab,
 				  struct audit_aux_data_execve *axi)
 {
-	int i;
-	size_t len, len_sent = 0;
+	int i, len;
+	size_t len_sent = 0;
 	const char __user *p;
 	char *buf;
 

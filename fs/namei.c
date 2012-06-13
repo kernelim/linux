@@ -682,35 +682,21 @@ static int follow_automount(struct path *path, unsigned flags,
 	if (!path->dentry->d_op || !path->dentry->d_op->d_automount)
 		return -EREMOTE;
 
-	/* We don't want to mount if someone supplied AT_NO_AUTOMOUNT
-	 * and this is the terminal part of the path.
+	/* We don't want to mount if someone's just doing a stat -
+	 * unless they're stat'ing a directory and appended a '/' to
+	 * the name.
+	 *
+	 * We do, however, want to mount if someone wants to open or
+	 * create a file of any type under the mountpoint, wants to
+	 * traverse through the mountpoint or wants to open the
+	 * mounted directory.  Also, autofs may mark negative dentries
+	 * as being automount points.  These will need the attentions
+	 * of the daemon to instantiate them before they can be used.
 	 */
-	if ((flags & LOOKUP_NO_AUTOMOUNT) && !(flags & LOOKUP_CONTINUE))
-		return -EISDIR; /* we actually want to stop here */
-
-	/* We don't want to mount if someone's just doing a stat and they've
-	 * set AT_SYMLINK_NOFOLLOW - unless they're stat'ing a directory and
-	 * appended a '/' to the name.
-	 */
-	if (!(flags & LOOKUP_FOLLOW)) {
-		/* We do, however, want to mount if someone wants to open or
-		 * create a file of any type under the mountpoint, wants to
-		 * traverse through the mountpoint or wants to open the mounted
-		 * directory.
-		 */
-		if (flags & (LOOKUP_CONTINUE | LOOKUP_DIRECTORY |
-			     LOOKUP_OPEN | LOOKUP_CREATE))
-			goto need_automount;
-
-		/* Also, autofs may mark negative dentries as being automount
-		 * points.  These will need the attentions of the daemon to
-		 * instantiate them before they can be used.
-		 */
-		if (!path->dentry->d_inode)
-			goto need_automount;
+	if (!(flags & (LOOKUP_CONTINUE | LOOKUP_DIRECTORY |
+		     LOOKUP_OPEN | LOOKUP_CREATE | LOOKUP_AUTOMOUNT)) &&
+	    path->dentry->d_inode)
 		return -EISDIR;
-	}
-need_automount:
 
 	current->total_link_count++;
 	if (current->total_link_count >= 40)
@@ -955,6 +941,7 @@ static int do_lookup(struct nameidata *nd, struct qstr *name,
 {
 	struct vfsmount *mnt = nd->path.mnt;
 	struct dentry *dentry = __d_lookup(nd->path.dentry, name);
+	int flags = nd->flags;
 	struct dentry *parent;
 	struct inode *dir;
 	int err;
@@ -967,7 +954,13 @@ found:
 done:
 	path->mnt = mnt;
 	path->dentry = dentry;
-	err = follow_managed(path, nd->flags);
+	/*
+	 * Make sure follow_automount() knows about the trailing
+	 * "/" but only for the real last path component.
+	 */
+	if (!(nd->flags & LOOKUP_CONTINUE) && name->name[name->len] == '/')
+		flags |= LOOKUP_DIRECTORY;
+	err = follow_managed(path, flags);
 	if (unlikely(err < 0))
 		path_put_conditional(path, nd);
 	return err;

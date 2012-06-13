@@ -1,10 +1,6 @@
 #ifndef __NET_WEXT_H
 #define __NET_WEXT_H
 
-/*
- * wireless extensions interface to the core code
- */
-
 struct net;
 
 #ifdef CONFIG_WIRELESS_EXT

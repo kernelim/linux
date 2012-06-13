@@ -14,6 +14,8 @@
 
 #include <asm/ftrace.h>
 
+struct ftrace_hash;
+
 #ifdef CONFIG_FUNCTION_TRACER
 
 extern int ftrace_enabled;
@@ -24,9 +26,20 @@ ftrace_enable_sysctl(struct ctl_table *table, int write,
 
 typedef void (*ftrace_func_t)(unsigned long ip, unsigned long parent_ip);
 
+enum {
+	FTRACE_OPS_FL_ENABLED		= 1 << 0,
+	FTRACE_OPS_FL_GLOBAL		= 1 << 1,
+	FTRACE_OPS_FL_DYNAMIC		= 1 << 2,
+};
+
 struct ftrace_ops {
-	ftrace_func_t	  func;
-	struct ftrace_ops *next;
+	ftrace_func_t			func;
+	struct ftrace_ops		*next;
+	unsigned long			flags;
+#ifdef CONFIG_DYNAMIC_FTRACE
+	struct ftrace_hash		*notrace_hash;
+	struct ftrace_hash		*filter_hash;
+#endif
 };
 
 extern int function_trace_stop;
@@ -82,9 +95,13 @@ void clear_ftrace_function(void);
 extern void ftrace_stub(unsigned long a0, unsigned long a1);
 
 #else /* !CONFIG_FUNCTION_TRACER */
-# define register_ftrace_function(ops) do { } while (0)
-# define unregister_ftrace_function(ops) do { } while (0)
-# define clear_ftrace_function(ops) do { } while (0)
+/*
+ * (un)register_ftrace_function must be a macro since the ops parameter
+ * must not be evaluated.
+ */
+#define register_ftrace_function(ops) ({ 0; })
+#define unregister_ftrace_function(ops) ({ 0; })
+static inline void clear_ftrace_function(void) { }
 static inline void ftrace_kill(void) { }
 static inline void ftrace_stop(void) { }
 static inline void ftrace_start(void) { }
@@ -101,7 +118,8 @@ stack_trace_sysctl(struct ctl_table *table, int write,
 struct ftrace_func_command {
 	struct list_head	list;
 	char			*name;
-	int			(*func)(char *func, char *cmd,
+	int			(*func)(struct ftrace_hash *hash,
+					char *func, char *cmd,
 					char *params, int enable);
 };
 
@@ -137,14 +155,13 @@ extern void unregister_ftrace_function_probe_all(char *glob);
 extern int ftrace_text_reserved(void *start, void *end);
 
 enum {
-	FTRACE_FL_FREE		= (1 << 0),
-	FTRACE_FL_FAILED	= (1 << 1),
-	FTRACE_FL_FILTER	= (1 << 2),
-	FTRACE_FL_ENABLED	= (1 << 3),
-	FTRACE_FL_NOTRACE	= (1 << 4),
-	FTRACE_FL_CONVERTED	= (1 << 5),
-	FTRACE_FL_FROZEN	= (1 << 6),
+	FTRACE_FL_ENABLED	= (1 << 29),
+	FTRACE_FL_FROZEN	= (1 << 30),
+	FTRACE_FL_FREE		= (1 << 31),
 };
+
+#define FTRACE_FL_MASK		(0x7UL << 29)
+#define FTRACE_REF_MAX		((1 << 29) - 1)
 
 struct dyn_ftrace {
 	union {
@@ -159,7 +176,12 @@ struct dyn_ftrace {
 };
 
 int ftrace_force_update(void);
-void ftrace_set_filter(unsigned char *buf, int len, int reset);
+void ftrace_set_filter(struct ftrace_ops *ops, unsigned char *buf,
+		       int len, int reset);
+void ftrace_set_notrace(struct ftrace_ops *ops, unsigned char *buf,
+			int len, int reset);
+void ftrace_set_global_filter(unsigned char *buf, int len, int reset);
+void ftrace_set_global_notrace(unsigned char *buf, int len, int reset);
 
 int register_ftrace_command(struct ftrace_func_command *cmd);
 int unregister_ftrace_command(struct ftrace_func_command *cmd);
@@ -238,11 +260,13 @@ extern int skip_trace(unsigned long ip);
 extern void ftrace_disable_daemon(void);
 extern void ftrace_enable_daemon(void);
 #else
-# define skip_trace(ip)				({ 0; })
-# define ftrace_force_update()			({ 0; })
-# define ftrace_set_filter(buf, len, reset)	do { } while (0)
-# define ftrace_disable_daemon()		do { } while (0)
-# define ftrace_enable_daemon()			do { } while (0)
+static inline int skip_trace(unsigned long ip) { return 0; }
+static inline int ftrace_force_update(void) { return 0; }
+static inline void ftrace_set_filter(unsigned char *buf, int len, int reset)
+{
+}
+static inline void ftrace_disable_daemon(void) { }
+static inline void ftrace_enable_daemon(void) { }
 static inline void ftrace_release_mod(struct module *mod) {}
 static inline int register_ftrace_command(struct ftrace_func_command *cmd)
 {
@@ -315,16 +339,16 @@ static inline void __ftrace_enabled_restore(int enabled)
   extern void time_hardirqs_on(unsigned long a0, unsigned long a1);
   extern void time_hardirqs_off(unsigned long a0, unsigned long a1);
 #else
-# define time_hardirqs_on(a0, a1)		do { } while (0)
-# define time_hardirqs_off(a0, a1)		do { } while (0)
+  static inline void time_hardirqs_on(unsigned long a0, unsigned long a1) { }
+  static inline void time_hardirqs_off(unsigned long a0, unsigned long a1) { }
 #endif
 
 #ifdef CONFIG_PREEMPT_TRACER
   extern void trace_preempt_on(unsigned long a0, unsigned long a1);
   extern void trace_preempt_off(unsigned long a0, unsigned long a1);
 #else
-# define trace_preempt_on(a0, a1)		do { } while (0)
-# define trace_preempt_off(a0, a1)		do { } while (0)
+  static inline void trace_preempt_on(unsigned long a0, unsigned long a1) { }
+  static inline void trace_preempt_off(unsigned long a0, unsigned long a1) { }
 #endif
 
 #ifdef CONFIG_FTRACE_MCOUNT_RECORD

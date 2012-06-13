@@ -983,7 +983,7 @@ static inline unsigned int make_sgl(const struct sk_buff *skb,
 		skb_frag_t *frag = &skb_shinfo(skb)->frags[i];
 
 		mapping = pci_map_page(pdev, frag->page, frag->page_offset,
-				       frag->size, PCI_DMA_TODEVICE);
+				       frag->size, DMA_TO_DEVICE);
 		sgp->len[j] = cpu_to_be32(frag->size);
 		sgp->addr[j] = cpu_to_be64(mapping);
 		j ^= 1;

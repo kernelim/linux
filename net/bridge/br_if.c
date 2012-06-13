@@ -155,14 +155,8 @@ static void del_nbp(struct net_bridge_port *p)
 	kobject_uevent(&p->kobj, KOBJ_REMOVE);
 	kobject_del(&p->kobj);
 
-#ifdef CONFIG_NET_POLL_CONTROLLER
-	if (br_devices_support_netpoll(br))
-		br->dev->priv_flags &= ~IFF_DISABLE_NETPOLL;
-	if (dev->netdev_ops->ndo_netpoll_cleanup)
-		dev->netdev_ops->ndo_netpoll_cleanup(dev);
-	else
-		dev->npinfo = NULL;
-#endif
+	br_netpoll_disable(p);
+
 	call_rcu(&p->rcu, destroy_nbp_rcu);
 }
 
@@ -174,8 +168,6 @@ static void del_br(struct net_bridge *br)
 	list_for_each_entry_safe(p, n, &br->port_list, list) {
 		del_nbp(p);
 	}
-
-	br_netpoll_cleanup(br->dev);
 
 	del_timer_sync(&br->gc_timer);
 
@@ -407,6 +399,10 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 	if (dev->br_port != NULL)
 		return -EBUSY;
 
+	/* No bridging devices that dislike that (e.g. wireless) */
+	if (dev->priv_flags & IFF_DONT_BRIDGE)
+		return -EOPNOTSUPP;
+
 	p = new_nbp(br, dev);
 	if (IS_ERR(p))
 		return PTR_ERR(p);
@@ -430,7 +426,11 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 	if (err)
 		goto err2;
 
+	if (br_netpoll_info(br) && ((err = br_netpoll_enable(p))))
+		goto err3;
+
 	rcu_assign_pointer(dev->br_port, p);
+
 	dev_disable_lro(dev);
 
 	dev->priv_flags |= IFF_BRIDGE_PORT;
@@ -452,21 +452,9 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 
 	kobject_uevent(&p->kobj, KOBJ_ADD);
 
-#ifdef CONFIG_NET_POLL_CONTROLLER
-	if (br_devices_support_netpoll(br)) {
-		br->dev->priv_flags &= ~IFF_DISABLE_NETPOLL;
-		if (br->dev->npinfo)
-			dev->npinfo = br->dev->npinfo;
-	} else if (!(br->dev->priv_flags & IFF_DISABLE_NETPOLL)) {
-		br->dev->priv_flags |= IFF_DISABLE_NETPOLL;
-		printk(KERN_INFO "New device %s does not support netpoll\n",
-			dev->name);
-		printk(KERN_INFO "Disabling netpoll for %s\n",
-			br->dev->name);
-	}
-#endif
-
 	return 0;
+err3:
+	sysfs_remove_link(br->ifobj, p->dev->name);
 err2:
 	br_fdb_delete_by_port(br, p, 1);
 err1:

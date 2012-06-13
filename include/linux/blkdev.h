@@ -444,7 +444,7 @@ struct request_queue
 #define QUEUE_FLAG_ELVSWITCH	8	/* don't use elevator, just do FIFO */
 #define QUEUE_FLAG_BIDI		9	/* queue supports bidi requests */
 #define QUEUE_FLAG_NOMERGES    10	/* disable merge attempts */
-#define QUEUE_FLAG_SAME_COMP   11	/* force complete on same CPU */
+#define QUEUE_FLAG_SAME_COMP   11	/* complete on same CPU-group */
 #define QUEUE_FLAG_FAIL_IO     12	/* fake timeout */
 #define QUEUE_FLAG_STACKABLE   13	/* supports request stacking */
 #define QUEUE_FLAG_NONROT      14	/* non-rotational device (SSD) */
@@ -453,6 +453,7 @@ struct request_queue
 #define QUEUE_FLAG_CQ	       16	/* hardware does queuing */
 #define QUEUE_FLAG_DISCARD     17	/* supports DISCARD */
 #define QUEUE_FLAG_ADD_RANDOM  18	/* Contributes to random pool */
+#define QUEUE_FLAG_SAME_FORCE  19	/* force complete on same CPU */
 
 #define QUEUE_FLAG_DEFAULT	((1 << QUEUE_FLAG_IO_STAT) |		\
 				 (1 << QUEUE_FLAG_CLUSTER) |		\
@@ -582,6 +583,7 @@ enum {
 #define blk_queue_tagged(q)	test_bit(QUEUE_FLAG_QUEUED, &(q)->queue_flags)
 #define blk_queue_queuing(q)	test_bit(QUEUE_FLAG_CQ, &(q)->queue_flags)
 #define blk_queue_stopped(q)	test_bit(QUEUE_FLAG_STOPPED, &(q)->queue_flags)
+#define blk_queue_dead(q)	test_bit(QUEUE_FLAG_DEAD, &(q)->queue_flags)
 #define blk_queue_nomerges(q)	test_bit(QUEUE_FLAG_NOMERGES, &(q)->queue_flags)
 #define blk_queue_nonrot(q)	test_bit(QUEUE_FLAG_NONROT, &(q)->queue_flags)
 #define blk_queue_io_stat(q)	test_bit(QUEUE_FLAG_IO_STAT, &(q)->queue_flags)
@@ -936,6 +938,7 @@ extern void blk_queue_io_min(struct request_queue *q, unsigned int min);
 extern void blk_limits_io_opt(struct queue_limits *limits, unsigned int opt);
 extern void blk_queue_io_opt(struct request_queue *q, unsigned int opt);
 extern void blk_set_default_limits(struct queue_limits *lim);
+extern void blk_set_stacking_limits(struct queue_limits *lim);
 extern int blk_stack_limits(struct queue_limits *t, struct queue_limits *b,
 			    sector_t offset);
 extern int bdev_stack_limits(struct queue_limits *t, struct block_device *bdev,
@@ -1248,20 +1251,6 @@ static inline uint64_t rq_io_start_time_ns(struct request *req)
 	return 0;
 }
 #endif
-
-#ifdef CONFIG_BLK_DEV_THROTTLING
-extern int blk_throtl_init(struct request_queue *q);
-extern void blk_throtl_exit(struct request_queue *q);
-extern int blk_throtl_bio(struct request_queue *q, struct bio **bio);
-#else /* CONFIG_BLK_DEV_THROTTLING */
-static inline int blk_throtl_bio(struct request_queue *q, struct bio **bio)
-{
-	return 0;
-}
-
-static inline int blk_throtl_init(struct request_queue *q) { return 0; }
-static inline int blk_throtl_exit(struct request_queue *q) { return 0; }
-#endif /* CONFIG_BLK_DEV_THROTTLING */
 
 #define MODULE_ALIAS_BLOCKDEV(major,minor) \
 	MODULE_ALIAS("block-major-" __stringify(major) "-" __stringify(minor))

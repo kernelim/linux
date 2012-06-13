@@ -1,28 +1,25 @@
-obj-$(CONFIG_IWLWIFI)	+= iwlcore.o
-iwlcore-objs 		:= iwl-core.o iwl-eeprom.o iwl-hcmd.o iwl-power.o
-iwlcore-objs 		+= iwl-rx.o iwl-tx.o iwl-sta.o
-iwlcore-objs 		+= iwl-scan.o iwl-led.o
-iwlcore-$(CONFIG_IWLWIFI_DEBUGFS) += iwl-debugfs.o
-iwlcore-$(CONFIG_IWLWIFI_DEVICE_TRACING) += iwl-devtrace.o
+# WIFI
+obj-$(CONFIG_IWLWIFI)	+= iwlwifi.o
+iwlwifi-objs		:= iwl-agn.o iwl-agn-rs.o
+iwlwifi-objs		+= iwl-agn-ucode.o iwl-agn-tx.o
+iwlwifi-objs		+= iwl-agn-lib.o iwl-agn-calib.o iwl-io.o
+iwlwifi-objs		+= iwl-agn-tt.o iwl-agn-sta.o iwl-agn-rx.o
+
+iwlwifi-objs		+= iwl-core.o iwl-eeprom.o iwl-power.o
+iwlwifi-objs		+= iwl-scan.o iwl-led.o
+iwlwifi-objs		+= iwl-agn-rxon.o
+iwlwifi-objs		+= iwl-5000.o
+iwlwifi-objs		+= iwl-6000.o
+iwlwifi-objs		+= iwl-1000.o
+iwlwifi-objs		+= iwl-2000.o
+iwlwifi-objs		+= iwl-pci.o
+iwlwifi-objs		+= iwl-trans.o
+iwlwifi-objs		+= iwl-trans-pcie.o iwl-trans-pcie-rx.o iwl-trans-pcie-tx.o
+
+iwlwifi-$(CONFIG_IWLWIFI_DEBUGFS) += iwl-debugfs.o
+iwlwifi-$(CONFIG_IWLWIFI_DEVICE_TRACING) += iwl-devtrace.o
+iwlwifi-$(CONFIG_IWLWIFI_DEVICE_SVTOOL) += iwl-sv-open.o
 
 CFLAGS_iwl-devtrace.o := -I$(src)
-
-# AGN
-obj-$(CONFIG_IWLAGN)	+= iwlagn.o
-iwlagn-objs		:= iwl-agn.o iwl-agn-rs.o iwl-agn-led.o iwl-agn-ict.o
-iwlagn-objs		+= iwl-agn-ucode.o iwl-agn-hcmd.o iwl-agn-tx.o
-iwlagn-objs		+= iwl-agn-lib.o iwl-agn-rx.o iwl-agn-calib.o
-iwlagn-objs		+= iwl-agn-tt.o iwl-agn-sta.o iwl-agn-eeprom.o
-iwlagn-$(CONFIG_IWLWIFI_DEBUGFS) += iwl-agn-debugfs.o
-
-iwlagn-$(CONFIG_IWL4965) += iwl-4965.o
-iwlagn-$(CONFIG_IWL5000) += iwl-5000.o
-iwlagn-$(CONFIG_IWL5000) += iwl-6000.o
-iwlagn-$(CONFIG_IWL5000) += iwl-1000.o
-
-# 3945
-obj-$(CONFIG_IWL3945)	+= iwl3945.o
-iwl3945-objs		:= iwl3945-base.o iwl-3945.o iwl-3945-rs.o iwl-3945-led.o
-iwl3945-$(CONFIG_IWLWIFI_DEBUGFS) += iwl-3945-debugfs.o
 
 ccflags-y += -D__CHECK_ENDIAN__

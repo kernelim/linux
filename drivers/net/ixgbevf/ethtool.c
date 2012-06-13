@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel 82599 Virtual Function driver
-  Copyright(c) 1999 - 2009 Intel Corporation.
+  Copyright(c) 1999 - 2012 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -26,6 +26,8 @@
 *******************************************************************************/
 
 /* ethtool support for ixgbevf */
+
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/types.h>
 #include <linux/module.h>
@@ -54,7 +56,7 @@ struct ixgbe_stats {
 			    offsetof(struct ixgbevf_adapter, m),         \
 			    offsetof(struct ixgbevf_adapter, b),         \
 			    offsetof(struct ixgbevf_adapter, r)
-static struct ixgbe_stats ixgbe_gstrings_stats[] = {
+static const struct ixgbe_stats ixgbe_gstrings_stats[] = {
 	{"rx_packets", IXGBEVF_STAT(stats.vfgprc, stats.base_vfgprc,
 				    stats.saved_reset_vfgprc)},
 	{"tx_packets", IXGBEVF_STAT(stats.vfgptc, stats.base_vfgptc,
@@ -303,11 +305,11 @@ static void ixgbevf_get_drvinfo(struct net_device *netdev,
 {
 	struct ixgbevf_adapter *adapter = netdev_priv(netdev);
 
-	strlcpy(drvinfo->driver, ixgbevf_driver_name, 32);
-	strlcpy(drvinfo->version, ixgbevf_driver_version, 32);
-
-	strlcpy(drvinfo->fw_version, "N/A", 4);
-	strlcpy(drvinfo->bus_info, pci_name(adapter->pdev), 32);
+	strlcpy(drvinfo->driver, ixgbevf_driver_name, sizeof(drvinfo->driver));
+	strlcpy(drvinfo->version, ixgbevf_driver_version,
+		sizeof(drvinfo->version));
+	strlcpy(drvinfo->bus_info, pci_name(adapter->pdev),
+		sizeof(drvinfo->bus_info));
 }
 
 static void ixgbevf_get_ringparam(struct net_device *netdev,
@@ -319,12 +321,8 @@ static void ixgbevf_get_ringparam(struct net_device *netdev,
 
 	ring->rx_max_pending = IXGBEVF_MAX_RXD;
 	ring->tx_max_pending = IXGBEVF_MAX_TXD;
-	ring->rx_mini_max_pending = 0;
-	ring->rx_jumbo_max_pending = 0;
 	ring->rx_pending = rx_ring->count;
 	ring->tx_pending = tx_ring->count;
-	ring->rx_mini_pending = 0;
-	ring->rx_jumbo_pending = 0;
 }
 
 static int ixgbevf_set_ringparam(struct net_device *netdev,
@@ -591,8 +589,8 @@ static const u32 register_test_patterns[] = {
 	writel((W & M), (adapter->hw.hw_addr + R));                           \
 	val = readl(adapter->hw.hw_addr + R);                                 \
 	if ((W & M) != (val & M)) {                                           \
-		printk(KERN_ERR "set/check reg %04X test failed: got 0x%08X " \
-				 "expected 0x%08X\n", R, (val & M), (W & M)); \
+		pr_err("set/check reg %04X test failed: got 0x%08X expected " \
+		       "0x%08X\n", R, (val & M), (W & M));                    \
 		*data = R;                                                    \
 		writel(before, (adapter->hw.hw_addr + R));                    \
 		return 1;                                                     \

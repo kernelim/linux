@@ -36,27 +36,29 @@
  */
 
 /*
- * Defintions for the Atheros Wireless LAN controller driver.
+ * Definitions for the Atheros Wireless LAN controller driver.
  */
-#ifndef _DEV_ATH_ATHVAR_H
-#define _DEV_ATH_ATHVAR_H
+#ifndef _DEV_ATH5K_BASE_H
+#define _DEV_ATH5K_BASE_H
 
-#include <linux/interrupt.h>
-#include <linux/list.h>
-#include <linux/wireless.h>
-#include <linux/if_ether.h>
-#include <linux/leds.h>
-#include <linux/rfkill.h>
+struct ieee80211_vif;
+struct ieee80211_hw;
+struct ath5k_hw;
+struct ath5k_txq;
+struct ieee80211_channel;
+struct ath_bus_ops;
+enum nl80211_iftype;
 
-#include "ath5k.h"
-#include "debug.h"
+enum ath5k_srev_type {
+	AR5K_VERSION_MAC,
+	AR5K_VERSION_RAD,
+};
 
-#include "../regd.h"
-#include "../ath.h"
-
-#define	ATH_RXBUF	40		/* number of RX buffers */
-#define	ATH_TXBUF	200		/* number of TX buffers */
-#define ATH_BCBUF	1		/* number of beacon buffers */
+struct ath5k_srev_name {
+	const char		*sr_name;
+	enum ath5k_srev_type	sr_type;
+	u_int			sr_val;
+};
 
 struct ath5k_buf {
 	struct list_head	list;
@@ -66,151 +68,52 @@ struct ath5k_buf {
 	dma_addr_t		skbaddr;/* physical addr of skb data */
 };
 
-/*
- * Data transmit queue state.  One of these exists for each
- * hardware transmit queue.  Packets sent to us from above
- * are assigned to queues based on their priority.  Not all
- * devices support a complete set of hardware transmit queues.
- * For those devices the array sc_ac2q will map multiple
- * priorities to fewer hardware queues (typically all to one
- * hardware queue).
- */
-struct ath5k_txq {
-	unsigned int		qnum;	/* hardware q number */
-	u32			*link;	/* link ptr in last TX desc */
-	struct list_head	q;	/* transmit queue */
-	spinlock_t		lock;	/* lock on q and link */
-	bool			setup;
-};
-
-#define ATH5K_LED_MAX_NAME_LEN 31
-
-/*
- * State for LED triggers
- */
-struct ath5k_led
-{
-	char name[ATH5K_LED_MAX_NAME_LEN + 1];	/* name of the LED in sysfs */
-	struct ath5k_softc *sc;			/* driver state */
-	struct led_classdev led_dev;		/* led classdev */
-};
-
-/* Rfkill */
-struct ath5k_rfkill {
-	/* GPIO PIN for rfkill */
-	u16 gpio;
-	/* polarity of rfkill GPIO PIN */
-	bool polarity;
-	/* RFKILL toggle tasklet */
-	struct tasklet_struct toggleq;
-};
-
-#if CHAN_DEBUG
-#define ATH_CHAN_MAX	(26+26+26+200+200)
-#else
-#define ATH_CHAN_MAX	(14+14+14+252+20)
-#endif
-
-/* Software Carrier, keeps track of the driver state
- * associated with an instance of a device */
-struct ath5k_softc {
-	struct pci_dev		*pdev;		/* for dma mapping */
-	struct ath_common	common;
-	void __iomem		*iobase;	/* address of the device */
-	struct mutex		lock;		/* dev-level lock */
-	struct ieee80211_tx_queue_stats tx_stats[AR5K_NUM_TX_QUEUES];
-	struct ieee80211_low_level_stats ll_stats;
-	struct ieee80211_hw	*hw;		/* IEEE 802.11 common */
-	struct ieee80211_supported_band sbands[IEEE80211_NUM_BANDS];
-	struct ieee80211_channel channels[ATH_CHAN_MAX];
-	struct ieee80211_rate	rates[IEEE80211_NUM_BANDS][AR5K_MAX_RATES];
-	s8			rate_idx[IEEE80211_NUM_BANDS][AR5K_MAX_RATES];
+struct ath5k_vif {
+	bool			assoc; /* are we associated or not */
 	enum nl80211_iftype	opmode;
-	struct ath5k_hw		*ah;		/* Atheros HW */
-
-	struct ieee80211_supported_band		*curband;
-
-#ifdef CONFIG_ATH5K_DEBUG
-	struct ath5k_dbg_info	debug;		/* debug info */
-#endif /* CONFIG_ATH5K_DEBUG */
-
-	struct ath5k_buf	*bufptr;	/* allocated buffer ptr */
-	struct ath5k_desc	*desc;		/* TX/RX descriptors */
-	dma_addr_t		desc_daddr;	/* DMA (physical) address */
-	size_t			desc_len;	/* size of TX/RX descriptors */
-
-	DECLARE_BITMAP(status, 5);
-#define ATH_STAT_INVALID	0		/* disable hardware accesses */
-#define ATH_STAT_MRRETRY	1		/* multi-rate retry support */
-#define ATH_STAT_PROMISC	2
-#define ATH_STAT_LEDSOFT	3		/* enable LED gpio status */
-#define ATH_STAT_STARTED	4		/* opened & irqs enabled */
-
-	unsigned int		filter_flags;	/* HW flags, AR5K_RX_FILTER_* */
-	unsigned int		curmode;	/* current phy mode */
-	struct ieee80211_channel *curchan;	/* current h/w channel */
-
-	struct ieee80211_vif *vif;
-
-	enum ath5k_int		imask;		/* interrupt mask copy */
-
-	DECLARE_BITMAP(keymap, AR5K_KEYCACHE_SIZE); /* key use bit map */
-
-	u8			bssidmask[ETH_ALEN];
-
-	unsigned int		led_pin,	/* GPIO pin for driving LED */
-				led_on;		/* pin setting for LED on */
-
-	struct tasklet_struct	restq;		/* reset tasklet */
-
-	unsigned int		rxbufsize;	/* rx size based on mtu */
-	struct list_head	rxbuf;		/* receive buffer */
-	spinlock_t		rxbuflock;
-	u32			*rxlink;	/* link ptr in last RX desc */
-	struct tasklet_struct	rxtq;		/* rx intr tasklet */
-	struct ath5k_led	rx_led;		/* rx led */
-
-	struct list_head	txbuf;		/* transmit buffer */
-	spinlock_t		txbuflock;
-	unsigned int		txbuf_len;	/* buf count in txbuf list */
-	struct ath5k_txq	txqs[AR5K_NUM_TX_QUEUES];	/* tx queues */
-	struct ath5k_txq	*txq;		/* main tx queue */
-	struct tasklet_struct	txtq;		/* tx intr tasklet */
-	struct ath5k_led	tx_led;		/* tx led */
-
-	struct ath5k_rfkill	rf_kill;
-
-	struct tasklet_struct	calib;		/* calibration tasklet */
-
-	spinlock_t		block;		/* protects beacon */
-	struct tasklet_struct	beacontq;	/* beacon intr tasklet */
-	struct ath5k_buf	*bbuf;		/* beacon buffer */
-	unsigned int		bhalq,		/* SW q for outgoing beacons */
-				bmisscount,	/* missed beacon transmits */
-				bintval,	/* beacon interval in TU */
-				bsent;
-	unsigned int		nexttbtt;	/* next beacon time in TU */
-	struct ath5k_txq	*cabq;		/* content after beacon */
-
-	int 			power_level;	/* Requested tx power in dbm */
-	bool			assoc;		/* assocate state */
-	bool			enable_beacon;	/* true if beacons are on */
+	int			bslot;
+	struct ath5k_buf	*bbuf; /* beacon buffer */
 };
 
-#define ath5k_hw_hasbssidmask(_ah) \
-	(ath5k_hw_get_capability(_ah, AR5K_CAP_BSSIDMASK, 0, NULL) == 0)
-#define ath5k_hw_hasveol(_ah) \
-	(ath5k_hw_get_capability(_ah, AR5K_CAP_VEOL, 0, NULL) == 0)
+struct ath5k_vif_iter_data {
+	const u8	*hw_macaddr;
+	u8		mask[ETH_ALEN];
+	u8		active_mac[ETH_ALEN]; /* first active MAC */
+	bool		need_set_hw_addr;
+	bool		found_active;
+	bool		any_assoc;
+	enum nl80211_iftype opmode;
+	int n_stas;
+};
 
-static inline struct ath_common *ath5k_hw_common(struct ath5k_hw *ah)
-{
-	return &ah->ah_sc->common;
-}
+void ath5k_vif_iter(void *data, u8 *mac, struct ieee80211_vif *vif);
+bool ath5k_any_vif_assoc(struct ath5k_hw *ah);
 
-static inline struct ath_regulatory *ath5k_hw_regulatory(struct ath5k_hw *ah)
-{
-	return &(ath5k_hw_common(ah)->regulatory);
+int ath5k_start(struct ieee80211_hw *hw);
+void ath5k_stop(struct ieee80211_hw *hw);
 
-}
+void ath5k_beacon_update_timers(struct ath5k_hw *ah, u64 bc_tsf);
+int ath5k_beacon_update(struct ieee80211_hw *hw, struct ieee80211_vif *vif);
+void ath5k_beacon_config(struct ath5k_hw *ah);
+void ath5k_set_beacon_filter(struct ieee80211_hw *hw, bool enable);
 
-#endif
+void ath5k_update_bssid_mask_and_opmode(struct ath5k_hw *ah,
+					struct ieee80211_vif *vif);
+int ath5k_chan_set(struct ath5k_hw *ah, struct ieee80211_channel *chan);
+void ath5k_txbuf_free_skb(struct ath5k_hw *ah, struct ath5k_buf *bf);
+void ath5k_rxbuf_free_skb(struct ath5k_hw *ah, struct ath5k_buf *bf);
+void ath5k_tx_queue(struct ieee80211_hw *hw, struct sk_buff *skb,
+		    struct ath5k_txq *txq);
+
+const char *ath5k_chip_name(enum ath5k_srev_type type, u_int16_t val);
+
+int ath5k_init_ah(struct ath5k_hw *ah, const struct ath_bus_ops *bus_ops);
+void ath5k_deinit_ah(struct ath5k_hw *ah);
+
+/* Check whether BSSID mask is supported */
+#define ath5k_hw_hasbssidmask(_ah) (ah->ah_version == AR5K_AR5212)
+
+/* Check whether virtual EOL is supported */
+#define ath5k_hw_hasveol(_ah) (ah->ah_version != AR5K_AR5210)
+
+#endif	/* _DEV_ATH5K_BASE_H */

@@ -349,11 +349,16 @@ static unsigned int hpet_poll(struct file *file, poll_table * wait)
 	return 0;
 }
 
+static int hpet_mmap_enable = 0; /* disabled by default */
+
 static int hpet_mmap(struct file *file, struct vm_area_struct *vma)
 {
 #ifdef	CONFIG_HPET_MMAP
 	struct hpet_dev *devp;
 	unsigned long addr;
+
+	if (!hpet_mmap_enable)
+		return -ENOSYS;
 
 	if (((vma->vm_end - vma->vm_start) != PAGE_SIZE) || vma->vm_pgoff)
 		return -EINVAL;
@@ -379,6 +384,21 @@ static int hpet_mmap(struct file *file, struct vm_area_struct *vma)
 	return -ENOSYS;
 #endif
 }
+
+/*
+ * RHEL only -- Mapping the HPET registers into application space is not
+ * a problem, however, it is possible on some systems that other information
+ * is in the page that gets mapped.  To avoid any possible security issues,
+ * make this HPET_MMAP user configurable as a kernel parameter and keep it
+ * off by default.
+ */
+static int __init hpet_mmap_enabled(char *str)
+{
+	hpet_mmap_enable = 1;
+	printk(KERN_INFO "Enabling HPET userspace mmap capability\n");
+	return 1;
+}
+__setup("hpet_mmap", hpet_mmap_enabled);
 
 static int hpet_fasync(int fd, struct file *file, int on)
 {

@@ -215,6 +215,8 @@ int scsi_execute(struct scsi_device *sdev, const unsigned char *cmd,
 	int ret = DRIVER_ERROR << 24;
 
 	req = blk_get_request(sdev->request_queue, write, __GFP_WAIT);
+	if (!req)
+		return ret;
 
 	if (bufflen &&	blk_rq_map_kern(sdev->request_queue, req,
 					buffer, bufflen, __GFP_WAIT))
@@ -400,10 +402,12 @@ static inline int scsi_host_is_busy(struct Scsi_Host *shost)
 static void scsi_run_queue(struct request_queue *q)
 {
 	struct scsi_device *sdev = q->queuedata;
-	struct Scsi_Host *shost = sdev->host;
+	struct Scsi_Host *shost;
 	LIST_HEAD(starved_list);
 	unsigned long flags;
 
+	BUG_ON(!sdev);
+	shost = sdev->host;
 	if (scsi_target(sdev)->single_lun)
 		scsi_single_lun_run(sdev);
 
@@ -675,11 +679,11 @@ static int __scsi_error_from_host_byte(struct scsi_cmnd *cmd, int result)
 		error = -ENOLINK;
 		break;
 	case DID_TARGET_FAILURE:
-		cmd->result |= (DID_OK << 16);
+		set_host_byte(cmd, DID_OK);
 		error = -EREMOTEIO;
 		break;
 	case DID_NEXUS_FAILURE:
-		cmd->result |= (DID_OK << 16);
+		set_host_byte(cmd, DID_OK);
 		error = -EBADE;
 		break;
 	default:
@@ -748,7 +752,6 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes)
 	}
 
 	if (req->cmd_type == REQ_TYPE_BLOCK_PC) { /* SG_IO ioctl from block level */
-		req->errors = result;
 		if (result) {
 			if (sense_valid && req->sense) {
 				/*
@@ -764,6 +767,10 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes)
 			if (!sense_deferred)
 				error = __scsi_error_from_host_byte(cmd, result);
 		}
+		/*
+		 * __scsi_error_from_host_byte may have reset the host_byte
+		 */
+		req->errors = cmd->result;
 
 		req->resid_len = scsi_get_resid(cmd);
 
@@ -875,6 +882,7 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes)
 				    cmd->cmnd[0] == WRITE_SAME)) {
 				description = "Discard failure";
 				action = ACTION_FAIL;
+				error = -EREMOTEIO;
 			} else
 				action = ACTION_FAIL;
 			break;
@@ -1367,9 +1375,9 @@ static inline int scsi_host_queue_ready(struct request_queue *q,
  * may be changed after request stacking drivers call the function,
  * regardless of taking lock or not.
  *
- * When scsi can't dispatch I/Os anymore and needs to kill I/Os
- * (e.g. !sdev), scsi needs to return 'not busy'.
- * Otherwise, request stacking drivers may hold requests forever.
+ * When scsi can't dispatch I/Os anymore and needs to kill I/Os scsi
+ * needs to return 'not busy'. Otherwise, request stacking drivers
+ * may hold requests forever.
  */
 static int scsi_lld_busy(struct request_queue *q)
 {
@@ -1377,9 +1385,10 @@ static int scsi_lld_busy(struct request_queue *q)
 	struct Scsi_Host *shost;
 	struct scsi_target *starget;
 
-	if (!sdev)
+	if (blk_queue_dead(q))
 		return 0;
 
+	BUG_ON(!sdev);
 	shost = sdev->host;
 	starget = scsi_target(sdev);
 
@@ -1401,6 +1410,8 @@ static void scsi_kill_request(struct request *req, struct request_queue *q)
 	struct Scsi_Host *shost = sdev->host;
 
 	blk_start_request(req);
+
+	scmd_printk(KERN_INFO, cmd, "killing request\n");
 
 	if (unlikely(cmd == NULL)) {
 		printk(KERN_CRIT "impossible request in %s.\n",
@@ -1490,12 +1501,7 @@ static void scsi_request_fn(struct request_queue *q)
 	struct scsi_cmnd *cmd;
 	struct request *req;
 
-	if (!sdev) {
-		printk("scsi: killing requests for dead queue\n");
-		while ((req = blk_peek_request(q)) != NULL)
-			scsi_kill_request(req, q);
-		return;
-	}
+	BUG_ON(!sdev);
 
 	if(!get_device(&sdev->sdev_gendev))
 		/* We must be tearing the block queue down already */
@@ -1697,11 +1703,6 @@ struct request_queue *scsi_alloc_queue(struct scsi_device *sdev)
 	blk_queue_rq_timed_out(q, scsi_times_out);
 	blk_queue_lld_busy(q, scsi_lld_busy);
 	return q;
-}
-
-void scsi_free_queue(struct request_queue *q)
-{
-	blk_cleanup_queue(q);
 }
 
 /*

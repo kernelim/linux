@@ -100,12 +100,16 @@ iscsi_iser_recv(struct iscsi_conn *conn,
 
 	/* verify PDU length */
 	datalen = ntoh24(hdr->dlength);
-	if (datalen != rx_data_len) {
-		printk(KERN_ERR "iscsi_iser: datalen %d (hdr) != %d (IB) \n",
-		       datalen, rx_data_len);
+	if (datalen > rx_data_len || (datalen + 4) < rx_data_len) {
+		iser_err("wrong datalen %d (hdr), %d (IB)\n",
+			datalen, rx_data_len);
 		rc = ISCSI_ERR_DATALEN;
 		goto error;
 	}
+
+	if (datalen != rx_data_len)
+		iser_dbg("aligned datalen (%d) hdr, %d (IB)\n",
+			datalen, rx_data_len);
 
 	/* read AHS */
 	ahslen = hdr->hlength * 4;
@@ -146,7 +150,6 @@ int iser_initialize_task_headers(struct iscsi_task *task,
 	tx_desc->tx_sg[0].length = ISER_HEADERS_LEN;
 	tx_desc->tx_sg[0].lkey   = device->mr->lkey;
 
-	iser_task->headers_initialized	= 1;
 	iser_task->iser_conn		= iser_conn;
 	return 0;
 }
@@ -161,8 +164,7 @@ iscsi_iser_task_init(struct iscsi_task *task)
 {
 	struct iscsi_iser_task *iser_task = task->dd_data;
 
-	if (!iser_task->headers_initialized)
-		if (iser_initialize_task_headers(task, &iser_task->desc))
+	if (iser_initialize_task_headers(task, &iser_task->desc))
 			return -ENOMEM;
 
 	/* mgmt task */
@@ -273,6 +275,13 @@ iscsi_iser_task_xmit(struct iscsi_task *task)
 static void iscsi_iser_cleanup_task(struct iscsi_task *task)
 {
 	struct iscsi_iser_task *iser_task = task->dd_data;
+	struct iser_tx_desc	*tx_desc = &iser_task->desc;
+
+	struct iscsi_iser_conn *iser_conn = task->conn->dd_data;
+	struct iser_device     *device    = iser_conn->ib_conn->device;
+
+	ib_dma_unmap_single(device->ib_device,
+		tx_desc->dma_addr, ISER_HEADERS_LEN, DMA_TO_DEVICE);
 
 	/* mgmt tasks do not need special cleanup */
 	if (!task->sc)
@@ -353,6 +362,9 @@ iscsi_iser_conn_bind(struct iscsi_cls_session *cls_session,
 	}
 	ib_conn = ep->dd_data;
 
+	if (iser_alloc_rx_descriptors(ib_conn))
+		return -ENOMEM;
+
 	/* binds the iSER connection retrieved from the previously
 	 * connected ep_handle to the iSCSI layer connection. exchanges
 	 * connection pointers */
@@ -385,19 +397,6 @@ iscsi_iser_conn_stop(struct iscsi_cls_conn *cls_conn, int flag)
 		iser_conn_put(ib_conn, 1); /* deref iscsi/ib conn unbinding */
 	}
 	iser_conn->ib_conn = NULL;
-}
-
-static int
-iscsi_iser_conn_start(struct iscsi_cls_conn *cls_conn)
-{
-	struct iscsi_conn *conn = cls_conn->dd_data;
-	int err;
-
-	err = iser_conn_set_full_featured_mode(conn);
-	if (err)
-		return err;
-
-	return iscsi_conn_start(cls_conn);
 }
 
 static void iscsi_iser_session_destroy(struct iscsi_cls_session *cls_session)
@@ -713,7 +712,7 @@ static struct iscsi_transport iscsi_iser_transport = {
 	.get_conn_param		= iscsi_conn_get_param,
 	.get_ep_param		= iscsi_iser_get_ep_param,
 	.get_session_param	= iscsi_session_get_param,
-	.start_conn             = iscsi_iser_conn_start,
+	.start_conn             = iscsi_conn_start,
 	.stop_conn              = iscsi_iser_conn_stop,
 	/* iscsi host params */
 	.get_host_param		= iscsi_host_get_param,

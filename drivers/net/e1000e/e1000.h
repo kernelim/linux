@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel PRO/1000 Linux driver
-  Copyright(c) 1999 - 2011 Intel Corporation.
+  Copyright(c) 1999 - 2012 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -154,6 +154,9 @@ struct e1000_info;
 #define HV_M_STATUS_SPEED_1000            0x0200
 #define HV_M_STATUS_LINK_UP               0x0040
 
+#define E1000_ICH_FWSM_PCIM2PCI		0x01000000 /* ME PCIm-to-PCI active */
+#define E1000_ICH_FWSM_PCIM2PCI_COUNT	2000
+
 #define DEFAULT_RDTR			0
 #define DEFAULT_RADV			8
 #define BURST_RDTR			0x20
@@ -195,11 +198,6 @@ enum e1000_boards {
 	board_pch2lan,
 };
 
-struct e1000_queue_stats {
-	u64 packets;
-	u64 bytes;
-};
-
 struct e1000_ps_page {
 	struct page *page;
 	u64 dma; /* must be u64 - written to hw */
@@ -232,6 +230,7 @@ struct e1000_buffer {
 };
 
 struct e1000_ring {
+	struct e1000_adapter *adapter;	/* back pointer to adapter */
 	void *desc;			/* pointer to ring memory  */
 	dma_addr_t dma;			/* phys address of ring    */
 	unsigned int size;		/* length of ring in bytes */
@@ -240,8 +239,8 @@ struct e1000_ring {
 	u16 next_to_use;
 	u16 next_to_clean;
 
-	u16 head;
-	u16 tail;
+	void __iomem *head;
+	void __iomem *tail;
 
 	/* array of buffer information structs */
 	struct e1000_buffer *buffer_info;
@@ -249,12 +248,10 @@ struct e1000_ring {
 	char name[IFNAMSIZ + 5];
 	u32 ims_val;
 	u32 itr_val;
-	u16 itr_register;
+	void __iomem *itr_register;
 	int set_itr;
 
 	struct sk_buff *rx_skb_top;
-
-	struct e1000_queue_stats stats;
 };
 
 /* PHY register snapshot values */
@@ -334,11 +331,10 @@ struct e1000_adapter {
 	/*
 	 * Rx
 	 */
-	bool (*clean_rx) (struct e1000_adapter *adapter,
-			  int *work_done, int work_to_do)
-						____cacheline_aligned_in_smp;
-	void (*alloc_rx_buf) (struct e1000_adapter *adapter,
-			      int cleaned_count, gfp_t gfp);
+	bool (*clean_rx) (struct e1000_ring *ring, int *work_done,
+			  int work_to_do) ____cacheline_aligned_in_smp;
+	void (*alloc_rx_buf) (struct e1000_ring *ring, int cleaned_count,
+			      gfp_t gfp);
 	struct e1000_ring *rx_ring;
 
 	u32 rx_int_delay;
@@ -398,6 +394,9 @@ struct e1000_adapter {
 	struct work_struct led_blink_task;
 	struct work_struct print_hang_task;
 	int phy_hang_count;
+
+	u16 tx_ring_count;
+	u16 rx_ring_count;
 };
 
 struct e1000_info {
@@ -407,9 +406,9 @@ struct e1000_info {
 	u32			pba;
 	u32			max_hw_frame_size;
 	s32			(*get_variants)(struct e1000_adapter *);
-	struct e1000_mac_operations *mac_ops;
-	struct e1000_phy_operations *phy_ops;
-	struct e1000_nvm_operations *nvm_ops;
+	const struct e1000_mac_operations *mac_ops;
+	const struct e1000_phy_operations *phy_ops;
+	const struct e1000_nvm_operations *nvm_ops;
 };
 
 /* hardware capability, feature, and workaround flags */
@@ -417,7 +416,7 @@ struct e1000_info {
 #define FLAG_HAS_FLASH                    (1 << 1)
 #define FLAG_HAS_HW_VLAN_FILTER           (1 << 2)
 #define FLAG_HAS_WOL                      (1 << 3)
-#define FLAG_HAS_ERT                      (1 << 4)
+/* reserved bit4 */
 #define FLAG_HAS_CTRLEXT_ON_LOAD          (1 << 5)
 #define FLAG_HAS_SWSM_ON_LOAD             (1 << 6)
 #define FLAG_HAS_JUMBO_FRAMES             (1 << 7)
@@ -427,7 +426,7 @@ struct e1000_info {
 #define FLAG_HAS_SMART_POWER_DOWN         (1 << 11)
 #define FLAG_IS_QUAD_PORT_A               (1 << 12)
 #define FLAG_IS_QUAD_PORT                 (1 << 13)
-#define FLAG_TIPG_MEDIUM_FOR_80003ESLAN   (1 << 14)
+/* reserved bit14 */
 #define FLAG_APME_IN_WUC                  (1 << 15)
 #define FLAG_APME_IN_CTRL3                (1 << 16)
 #define FLAG_APME_CHECK_PORT_B            (1 << 17)
@@ -458,17 +457,20 @@ struct e1000_info {
 #define FLAG2_DISABLE_AIM                 (1 << 8)
 #define FLAG2_CHECK_PHY_HANG              (1 << 9)
 #define FLAG2_NO_DISABLE_RX               (1 << 10)
+#define FLAG2_PCIM2PCI_ARBITER_WA         (1 << 11)
 
 #define E1000_RX_DESC_PS(R, i)	    \
 	(&(((union e1000_rx_desc_packet_split *)((R).desc))[i]))
+#define E1000_RX_DESC_EXT(R, i)	    \
+	(&(((union e1000_rx_desc_extended *)((R).desc))[i]))
 #define E1000_GET_DESC(R, i, type)	(&(((struct type *)((R).desc))[i]))
-#define E1000_RX_DESC(R, i)		E1000_GET_DESC(R, i, e1000_rx_desc)
 #define E1000_TX_DESC(R, i)		E1000_GET_DESC(R, i, e1000_tx_desc)
 #define E1000_CONTEXT_DESC(R, i)	E1000_GET_DESC(R, i, e1000_context_desc)
 
 enum e1000_state_t {
 	__E1000_TESTING,
 	__E1000_RESETTING,
+	__E1000_ACCESS_SHARED_RESOURCE,
 	__E1000_DOWN
 };
 
@@ -491,10 +493,10 @@ extern void e1000e_down(struct e1000_adapter *adapter);
 extern void e1000e_reinit_locked(struct e1000_adapter *adapter);
 extern void e1000e_reset(struct e1000_adapter *adapter);
 extern void e1000e_power_up_phy(struct e1000_adapter *adapter);
-extern int e1000e_setup_rx_resources(struct e1000_adapter *adapter);
-extern int e1000e_setup_tx_resources(struct e1000_adapter *adapter);
-extern void e1000e_free_rx_resources(struct e1000_adapter *adapter);
-extern void e1000e_free_tx_resources(struct e1000_adapter *adapter);
+extern int e1000e_setup_rx_resources(struct e1000_ring *ring);
+extern int e1000e_setup_tx_resources(struct e1000_ring *ring);
+extern void e1000e_free_rx_resources(struct e1000_ring *ring);
+extern void e1000e_free_tx_resources(struct e1000_ring *ring);
 extern void e1000e_update_stats(struct e1000_adapter *adapter);
 extern void e1000e_set_interrupt_capability(struct e1000_adapter *adapter);
 extern void e1000e_reset_interrupt_capability(struct e1000_adapter *adapter);
@@ -505,17 +507,17 @@ extern unsigned int copybreak;
 
 extern char *e1000e_get_hw_dev_name(struct e1000_hw *hw);
 
-extern struct e1000_info e1000_82571_info;
-extern struct e1000_info e1000_82572_info;
-extern struct e1000_info e1000_82573_info;
-extern struct e1000_info e1000_82574_info;
-extern struct e1000_info e1000_82583_info;
-extern struct e1000_info e1000_ich8_info;
-extern struct e1000_info e1000_ich9_info;
-extern struct e1000_info e1000_ich10_info;
-extern struct e1000_info e1000_pch_info;
-extern struct e1000_info e1000_pch2_info;
-extern struct e1000_info e1000_es2_info;
+extern const struct e1000_info e1000_82571_info;
+extern const struct e1000_info e1000_82572_info;
+extern const struct e1000_info e1000_82573_info;
+extern const struct e1000_info e1000_82574_info;
+extern const struct e1000_info e1000_82583_info;
+extern const struct e1000_info e1000_ich8_info;
+extern const struct e1000_info e1000_ich9_info;
+extern const struct e1000_info e1000_ich10_info;
+extern const struct e1000_info e1000_pch_info;
+extern const struct e1000_info e1000_pch2_info;
+extern const struct e1000_info e1000_es2_info;
 
 extern s32 e1000_read_pba_string_generic(struct e1000_hw *hw, u8 *pba_num,
 					 u32 pba_num_size);

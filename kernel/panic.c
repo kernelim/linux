@@ -46,6 +46,15 @@ static long no_blink(long time)
 long (*panic_blink)(long time);
 EXPORT_SYMBOL(panic_blink);
 
+/*
+ * Stop ourself in panic -- architecture code may override this
+ */
+void __attribute__ ((weak)) panic_smp_self_stop(void)
+{
+	while (1)
+		cpu_relax();
+}
+
 /**
  *	panic - halt the system
  *	@fmt: The text string to print
@@ -56,6 +65,7 @@ EXPORT_SYMBOL(panic_blink);
  */
 NORET_TYPE void panic(const char * fmt, ...)
 {
+	static DEFINE_SPINLOCK(panic_lock);
 	static char buf[1024];
 	va_list args;
 	long i;
@@ -64,9 +74,16 @@ NORET_TYPE void panic(const char * fmt, ...)
 	 * It's possible to come here directly from a panic-assertion and
 	 * not have preempt disabled. Some functions called from here want
 	 * preempt to be disabled. No point enabling it later though...
+	 *
+	 * Only one CPU is allowed to execute the panic code from here. For
+	 * multiple parallel invocations of panic, all other CPUs either
+	 * stop themself or will wait until they are stopped by the 1st CPU
+	 * with smp_send_stop().
 	 */
-	preempt_disable();
+	if (!spin_trylock(&panic_lock))
+		panic_smp_self_stop();
 
+	console_verbose();
 	bust_spinlocks(1);
 	va_start(args, fmt);
 	vsnprintf(buf, sizeof(buf), fmt, args);
@@ -181,7 +198,7 @@ static const struct tnt tnts[] = {
 	{ TAINT_24,			'?', '-' },
 	{ TAINT_25,			'?', '-' },
 	{ TAINT_26,			'?', '-' },
-	{ TAINT_27,			'?', '-' },
+	{ TAINT_BIT_BY_ZOMBIE,		'Z', ' ' },
 	{ TAINT_HARDWARE_UNSUPPORTED,	'H', ' ' },
 	{ TAINT_TECH_PREVIEW,		'T', ' ' },
 };

@@ -55,7 +55,7 @@ EXPORT_SYMBOL(__per_cpu_offset);
 #define PERCPU_FIRST_CHUNK_RESERVE	0
 #endif
 
-#ifdef CONFIG_X86_32
+#if defined(CONFIG_X86_32) && !defined(CONFIG_DEBUG_VM)
 /**
  * pcpu_need_numa - determine percpu allocation needs to consider NUMA
  *
@@ -181,10 +181,14 @@ void __init setup_per_cpu_areas(void)
 	 * Allocate percpu area.  Embedding allocator is our favorite;
 	 * however, on NUMA configurations, it can result in very
 	 * sparse unit mapping and vmalloc area isn't spacious enough
-	 * on 32bit.  Use page in that case.
+	 * on 32bit.  Use page in that case and for the debug kernel.
 	 */
 #ifdef CONFIG_X86_32
+#ifdef CONFIG_DEBUG_VM
+	if (pcpu_chosen_fc == PCPU_FC_AUTO)
+#else
 	if (pcpu_chosen_fc == PCPU_FC_AUTO && pcpu_need_numa())
+#endif
 		pcpu_chosen_fc = PCPU_FC_PAGE;
 #endif
 	rc = -EINVAL;

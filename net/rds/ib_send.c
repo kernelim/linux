@@ -34,6 +34,7 @@
 #include <linux/in.h>
 #include <linux/device.h>
 #include <linux/dmapool.h>
+#include <linux/ratelimit.h>
 
 #include "rds.h"
 #include "ib.h"
@@ -207,8 +208,7 @@ static struct rds_message *rds_ib_send_unmap_op(struct rds_ib_connection *ic,
 		}
 		break;
 	default:
-		if (printk_ratelimit())
-			printk(KERN_NOTICE
+		printk_ratelimited(KERN_NOTICE
 			       "RDS/IB: %s: unexpected opcode 0x%x in WR!\n",
 			       __func__, send->s_wr.opcode);
 		break;
@@ -355,7 +355,7 @@ void rds_ib_send_cq_comp_handler(struct ib_cq *cq, void *context)
  *
  * Conceptually, we have two counters:
  *  -	send credits: this tells us how many WRs we're allowed
- *	to submit without overruning the reciever's queue. For
+ *	to submit without overruning the receiver's queue. For
  *	each SEND WR we post, we decrement this by one.
  *
  *  -	posted credits: this tells us how many WRs we recently

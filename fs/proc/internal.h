@@ -63,6 +63,14 @@ extern const struct inode_operations proc_net_inode_operations;
 
 void free_proc_entry(struct proc_dir_entry *de);
 
+struct proc_maps_private {
+	struct pid *pid;
+	struct task_struct *task;
+#ifdef CONFIG_MMU
+	struct vm_area_struct *tail_vma;
+#endif
+};
+
 void proc_init_inodecache(void);
 
 static inline struct pid *proc_pid(struct inode *inode)

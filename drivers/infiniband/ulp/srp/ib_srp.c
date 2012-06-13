@@ -38,6 +38,7 @@
 #include <linux/parser.h>
 #include <linux/random.h>
 #include <linux/jiffies.h>
+#include <linux/scatterlist.h>
 
 #include <asm/atomic.h>
 

@@ -105,17 +105,6 @@ static inline void get_head_page_multiple(struct page *page, int nr)
 	atomic_add(nr, &page->_count);
 }
 
-static inline void pin_huge_page_tail(struct page *page)
-{
-	/*
-	 * __split_huge_page_refcount() cannot run
-	 * from under us.
-	 */
-	VM_BUG_ON(page_mapcount(page) < 0);
-	VM_BUG_ON(atomic_read(&page->_count) != 0);
-	atomic_inc(&page->_mapcount);
-}
-
 static noinline int gup_huge_pmd(pmd_t pmd, unsigned long addr,
 		unsigned long end, int write, struct page **pages, int *nr)
 {
@@ -140,7 +129,7 @@ static noinline int gup_huge_pmd(pmd_t pmd, unsigned long addr,
 		VM_BUG_ON(compound_head(page) != head);
 		pages[*nr] = page;
 		if (PageTail(page))
-			pin_huge_page_tail(page);
+			get_huge_page_tail(page);
 		(*nr)++;
 		page++;
 		refs++;

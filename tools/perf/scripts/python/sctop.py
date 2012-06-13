@@ -42,7 +42,7 @@ def trace_begin():
 	thread.start_new_thread(print_syscall_totals, (interval,))
 	pass
 
-def raw_syscalls__sys_enter(event_name, context, common_cpu,
+def syscalls__sys_enter(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	id, args):
 	if for_comm is not None:

@@ -11,7 +11,7 @@
  *  Copyright (c) 2000 Daniel Egger		<egger@suse.de>
  *  Copyright (c) 2001 Frederic Lepied		<flepied@mandrakesoft.com>
  *  Copyright (c) 2004 Panagiotis Issaris	<panagiotis.issaris@mech.kuleuven.ac.be>
- *  Copyright (c) 2002-2009 Ping Cheng		<pingc@wacom.com>
+ *  Copyright (c) 2002-2011 Ping Cheng		<pingc@wacom.com>
  *
  *  ChangeLog:
  *      v0.1 (vp)  - Initial release
@@ -90,7 +90,7 @@
 /*
  * Version Information
  */
-#define DRIVER_VERSION "v1.52"
+#define DRIVER_VERSION "v1.53"
 #define DRIVER_AUTHOR "Vojtech Pavlik <vojtech@ucw.cz>"
 #define DRIVER_DESC "USB Wacom tablet driver"
 #define DRIVER_LICENSE "GPL"
@@ -111,6 +111,12 @@ struct wacom {
 	struct mutex lock;
 	unsigned int open:1;
 	char phys[32];
+	struct wacom_led {
+		u8 select[2]; /* status led selector (0..3) */
+		u8 llv;       /* status led brightness no button (1..127) */
+		u8 hlv;       /* status led brightness button pressed (1..127) */
+		u8 img_lum;   /* OLED matrix display brightness */
+	} led;
 };
 
 struct wacom_combo {
@@ -127,6 +133,7 @@ extern void wacom_input_sync(void *wcombo);
 extern void wacom_init_input_dev(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
 extern void input_dev_g4(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
 extern void input_dev_g(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
+extern void input_dev_24hd(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
 extern void input_dev_c21ux2(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
 extern void input_dev_i3s(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
 extern void input_dev_i3(struct input_dev *input_dev, struct wacom_wac *wacom_wac);

@@ -40,6 +40,9 @@
 #define KVM_REQ_CLOCK_UPDATE       8
 #define KVM_REQ_KICK               9
 #define KVM_REQ_DEACTIVATE_FPU    10
+#define KVM_REQ_STEAL_UPDATE      13
+#define KVM_REQ_PMU               16
+#define KVM_REQ_PMI               17
 
 #define KVM_USERSPACE_IRQ_SOURCE_ID	0
 
@@ -251,7 +254,7 @@ void kvm_vcpu_uninit(struct kvm_vcpu *vcpu);
 void vcpu_load(struct kvm_vcpu *vcpu);
 void vcpu_put(struct kvm_vcpu *vcpu);
 
-int kvm_init(void *opaque, unsigned int vcpu_size,
+int kvm_init(void *opaque, unsigned vcpu_size, unsigned vcpu_align,
 		  struct module *module);
 void kvm_exit(void);
 

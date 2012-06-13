@@ -244,6 +244,7 @@ extern char *get_options(const char *str, int nints, int *ints);
 extern unsigned long long memparse(const char *ptr, char **retptr);
 
 extern int core_kernel_text(unsigned long addr);
+extern int core_kernel_data(unsigned long addr);
 extern int __kernel_text_address(unsigned long addr);
 extern int kernel_text_address(unsigned long addr);
 extern int func_ptr_is_kernel_text(void *ptr);
@@ -332,6 +333,13 @@ static inline void log_buf_kexec_setup(void)
 
 void __init setup_log_buf(unsigned long (*alloc_fn)(unsigned long len));
 
+/*
+ * Dummy printk for disabled debugging statements to use whilst maintaining
+ * gcc's format and side-effect checking.
+ */
+static inline __attribute__ ((format (printf, 1, 2)))
+int no_printk(const char *s, ...) { return 0; }
+
 extern int printk_needs_cpu(int cpu);
 extern void printk_tick(void);
 
@@ -401,7 +409,7 @@ extern enum system_states {
 #define TAINT_24			24
 #define TAINT_25			25
 #define TAINT_26			26
-#define TAINT_27			27
+#define TAINT_BIT_BY_ZOMBIE		27
 /* Reserving bits for vendor specific uses */
 #define TAINT_HARDWARE_UNSUPPORTED	28
 #define TAINT_TECH_PREVIEW		29

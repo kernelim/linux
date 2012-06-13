@@ -86,9 +86,7 @@ static struct gfs2_sbd *init_sbd(struct super_block *sb)
 	spin_lock_init(&sdp->sd_statfs_spin);
 
 	spin_lock_init(&sdp->sd_rindex_spin);
-	mutex_init(&sdp->sd_rindex_mutex);
-	INIT_LIST_HEAD(&sdp->sd_rindex_list);
-	INIT_LIST_HEAD(&sdp->sd_rindex_mru_list);
+	sdp->sd_rindex_tree.rb_node = NULL;
 
 	INIT_LIST_HEAD(&sdp->sd_jindex_list);
 	spin_lock_init(&sdp->sd_jindex_spin);
@@ -715,7 +713,6 @@ static int init_journal(struct gfs2_sbd *sdp, int undo)
 		fs_err(sdp, "can't lookup journal index: %d\n", error);
 		return PTR_ERR(sdp->sd_jindex);
 	}
-	ip = GFS2_I(sdp->sd_jindex);
 
 	/* Load in the journal index special file */
 
@@ -822,7 +819,6 @@ fail:
 static int init_inodes(struct gfs2_sbd *sdp, int undo)
 {
 	int error = 0;
-	struct gfs2_inode *ip;
 	struct inode *master = sdp->sd_master_dir->d_inode;
 
 	if (undo)
@@ -847,7 +843,6 @@ static int init_inodes(struct gfs2_sbd *sdp, int undo)
 		fs_err(sdp, "can't get resource index inode: %d\n", error);
 		goto fail_statfs;
 	}
-	ip = GFS2_I(sdp->sd_rindex);
 	sdp->sd_rindex_uptodate = 0;
 
 	/* Read in the quota inode */
@@ -857,6 +852,11 @@ static int init_inodes(struct gfs2_sbd *sdp, int undo)
 		fs_err(sdp, "can't get quota file inode: %d\n", error);
 		goto fail_rindex;
 	}
+
+	error = gfs2_rindex_update(sdp);
+	if (error)
+		goto fail_qinode;
+
 	return 0;
 
 fail_qinode:

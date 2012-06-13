@@ -252,9 +252,21 @@ struct ethtool_gstrings {
 	__u8	data[0];
 };
 
+/**
+ * enum ethtool_test_flags - flags definition of ethtool_test
+ * @ETH_TEST_FL_OFFLINE: if set perform online and offline tests, otherwise
+ *	only online tests.
+ * @ETH_TEST_FL_FAILED: Driver set this flag if test fails.
+ * @ETH_TEST_FL_EXTERNAL_LB: Application request to perform external loopback
+ *	test.
+ * @ETH_TEST_FL_EXTERNAL_LB_DONE: Driver performed the external loopback test
+ */
+
 enum ethtool_test_flags {
-	ETH_TEST_FL_OFFLINE	= (1 << 0),	/* online / offline */
-	ETH_TEST_FL_FAILED	= (1 << 1),	/* test passed / failed */
+	ETH_TEST_FL_OFFLINE	= (1 << 0),
+	ETH_TEST_FL_FAILED	= (1 << 1),
+	ETH_TEST_FL_EXTERNAL_LB	= (1 << 2),
+	ETH_TEST_FL_EXTERNAL_LB_DONE	= (1 << 3),
 };
 
 /* for requesting NIC test and getting results*/
@@ -629,10 +641,12 @@ struct ethtool_ops {
 #define SPEED_1000		1000
 #define SPEED_2500		2500
 #define SPEED_10000		10000
+#define SPEED_UNKNOWN		-1
 
 /* Duplex, half or full. */
 #define DUPLEX_HALF		0x00
 #define DUPLEX_FULL		0x01
+#define DUPLEX_UNKNOWN		0xff
 
 /* Which connector port. */
 #define PORT_TP			0x00

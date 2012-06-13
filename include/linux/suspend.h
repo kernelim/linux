@@ -260,7 +260,7 @@ static inline bool system_entering_hibernation(void) { return false; }
 extern int hibernate_nvs_register(unsigned long start, unsigned long size);
 extern int hibernate_nvs_alloc(void);
 extern void hibernate_nvs_free(void);
-extern void hibernate_nvs_save(void);
+extern int hibernate_nvs_save(void);
 extern void hibernate_nvs_restore(void);
 #else /* CONFIG_HIBERNATION_NVS */
 static inline int hibernate_nvs_register(unsigned long a, unsigned long b)
@@ -269,7 +269,7 @@ static inline int hibernate_nvs_register(unsigned long a, unsigned long b)
 }
 static inline int hibernate_nvs_alloc(void) { return 0; }
 static inline void hibernate_nvs_free(void) {}
-static inline void hibernate_nvs_save(void) {}
+static inline int hibernate_nvs_save(void) { return 0; }
 static inline void hibernate_nvs_restore(void) {}
 #endif /* CONFIG_HIBERNATION_NVS */
 

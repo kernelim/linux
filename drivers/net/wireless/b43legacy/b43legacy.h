@@ -14,7 +14,6 @@
 #include <linux/ssb/ssb.h>
 #include <linux/ssb/ssb_driver_chipcommon.h>
 
-#include <linux/wireless.h>
 #include <net/mac80211.h>
 
 #include "debugfs.h"
@@ -23,13 +22,7 @@
 #include "phy.h"
 
 
-/* The unique identifier of the firmware that's officially supported by this
- * driver version. */
-#define B43legacy_SUPPORTED_FIRMWARE_ID	"FW10"
-
 #define B43legacy_IRQWAIT_MAX_RETRIES	20
-
-#define B43legacy_RX_MAX_SSI		60 /* best guess at max ssi */
 
 /* MMIO offsets */
 #define B43legacy_MMIO_DMA0_REASON	0x20
@@ -374,7 +367,7 @@ struct b43legacy_fw_header {
 	/* Size of the data. For ucode and PCM this is in bytes.
 	 * For IV this is number-of-ivs. */
 	__be32 size;
-} __attribute__((__packed__));
+} __packed;
 
 /* Initial Value file format */
 #define B43legacy_IV_OFFSET_MASK	0x7FFF
@@ -384,8 +377,8 @@ struct b43legacy_iv {
 	union {
 		__be16 d16;
 		__be32 d32;
-	} data __attribute__((__packed__));
-} __attribute__((__packed__));
+	} data __packed;
+} __packed;
 
 #define B43legacy_PHYMODE(phytype)	(1 << (phytype))
 #define B43legacy_PHYMODE_B		B43legacy_PHYMODE	\
@@ -490,7 +483,7 @@ struct b43legacy_phy {
 	/* Current Interference Mitigation mode */
 	int interfmode;
 	/* Stack of saved values from the Interference Mitigation code.
-	 * Each value in the stack is layed out as follows:
+	 * Each value in the stack is laid out as follows:
 	 * bit 0-11:  offset
 	 * bit 12-15: register ID
 	 * bit 16-32: value
@@ -534,6 +527,8 @@ struct b43legacy_dma {
 
 	struct b43legacy_dmaring *rx_ring0;
 	struct b43legacy_dmaring *rx_ring3; /* only on core.rev < 5 */
+
+	u32 translation; /* Routing bits */
 };
 
 /* Data structures for PIO transmission, per 80211 core. */
@@ -815,15 +810,15 @@ struct b43legacy_lopair *b43legacy_get_lopair(struct b43legacy_phy *phy,
 
 
 /* Message printing */
-void b43legacyinfo(struct b43legacy_wl *wl, const char *fmt, ...)
-		__attribute__((format(printf, 2, 3)));
-void b43legacyerr(struct b43legacy_wl *wl, const char *fmt, ...)
-		__attribute__((format(printf, 2, 3)));
-void b43legacywarn(struct b43legacy_wl *wl, const char *fmt, ...)
-		__attribute__((format(printf, 2, 3)));
+__printf(2, 3)
+void b43legacyinfo(struct b43legacy_wl *wl, const char *fmt, ...);
+__printf(2, 3)
+void b43legacyerr(struct b43legacy_wl *wl, const char *fmt, ...);
+__printf(2, 3)
+void b43legacywarn(struct b43legacy_wl *wl, const char *fmt, ...);
 #if B43legacy_DEBUG
-void b43legacydbg(struct b43legacy_wl *wl, const char *fmt, ...)
-		__attribute__((format(printf, 2, 3)));
+__printf(2, 3)
+void b43legacydbg(struct b43legacy_wl *wl, const char *fmt, ...);
 #else /* DEBUG */
 # define b43legacydbg(wl, fmt...) do { /* nothing */ } while (0)
 #endif /* DEBUG */

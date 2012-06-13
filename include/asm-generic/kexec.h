@@ -7,7 +7,7 @@
 #define KEXEC_AUTO_RESERVED_SIZE (1ULL<<27) /* 128M */
 #endif
 #ifndef KEXEC_AUTO_THRESHOLD
-#define KEXEC_AUTO_THRESHOLD (1ULL<<32) /* 4G */
+#define KEXEC_AUTO_THRESHOLD (1ULL<<31) /* 2G */
 #endif
 
 

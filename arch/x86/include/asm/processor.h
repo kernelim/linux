@@ -161,6 +161,13 @@ DECLARE_PER_CPU_SHARED_ALIGNED(struct cpuinfo_x86_rh, cpu_info_rh);
 #define current_cpu_data	__get_cpu_var(cpu_info)
 #define cpu_data_rh(cpu)	per_cpu(cpu_info_rh, cpu)
 #define current_cpu_data_rh	__get_cpu_var(cpu_info_rh)
+static inline struct cpuinfo_x86_rh *get_cpuinfo_x86_rh(struct cpuinfo_x86 *c)
+{
+	if (c == &boot_cpu_data)
+		return &boot_cpu_data_rh;
+	else
+		return &cpu_data_rh(c->cpu_index);
+}
 #else
 #define cpu_data(cpu)		boot_cpu_data
 #define current_cpu_data	boot_cpu_data

@@ -164,8 +164,12 @@ static int read_user_stack_64(unsigned long __user *ptr, unsigned long *ret)
 	    ((unsigned long)ptr & 7))
 		return -EFAULT;
 
-	if (!__get_user_inatomic(*ret, ptr))
+	pagefault_disable();
+	if (!__get_user_inatomic(*ret, ptr)) {
+		pagefault_enable();
 		return 0;
+	}
+	pagefault_enable();
 
 	return read_user_stack_slow(ptr, ret, 8);
 }
@@ -176,8 +180,12 @@ static int read_user_stack_32(unsigned int __user *ptr, unsigned int *ret)
 	    ((unsigned long)ptr & 3))
 		return -EFAULT;
 
-	if (!__get_user_inatomic(*ret, ptr))
+	pagefault_disable();
+	if (!__get_user_inatomic(*ret, ptr)) {
+		pagefault_enable();
 		return 0;
+	}
+	pagefault_enable();
 
 	return read_user_stack_slow(ptr, ret, 4);
 }
@@ -240,10 +248,8 @@ static void perf_callchain_user_64(struct perf_callchain_entry *entry,
 	struct signal_frame_64 __user *sigframe;
 	unsigned long __user *fp, *uregs;
 
-	next_ip = regs->nip;
 	lr = regs->link;
 	sp = regs->gpr[1];
-	perf_callchain_store(entry, next_ip);
 
 	for (;;) {
 		fp = (unsigned long __user *) sp;
@@ -304,11 +310,17 @@ static inline int current_is_64bit(void)
  */
 static int read_user_stack_32(unsigned int __user *ptr, unsigned int *ret)
 {
+	int rc;
+
 	if ((unsigned long)ptr > TASK_SIZE - sizeof(unsigned int) ||
 	    ((unsigned long)ptr & 3))
 		return -EFAULT;
 
-	return __get_user_inatomic(*ret, ptr);
+	pagefault_disable();
+	rc = __get_user_inatomic(*ret, ptr);
+	pagefault_enable();
+
+	return rc;
 }
 
 static inline void perf_callchain_user_64(struct perf_callchain_entry *entry,
@@ -440,10 +452,8 @@ static void perf_callchain_user_32(struct perf_callchain_entry *entry,
 	long level = 0;
 	unsigned int __user *fp, *uregs;
 
-	next_ip = regs->nip;
 	lr = regs->link;
 	sp = regs->gpr[1];
-	perf_callchain_store(entry, next_ip);
 
 	while (entry->nr < PERF_MAX_STACK_DEPTH) {
 		fp = (unsigned int __user *) (unsigned long) sp;
@@ -481,6 +491,11 @@ static void perf_callchain_user_32(struct perf_callchain_entry *entry,
 void
 perf_callchain_user(struct perf_callchain_entry *entry, struct pt_regs *regs)
 {
+       perf_callchain_store(entry, regs->nip);
+
+       if (!current->mm)
+               return;
+
 	if (current_is_64bit())
 		perf_callchain_user_64(entry, regs);
 	else

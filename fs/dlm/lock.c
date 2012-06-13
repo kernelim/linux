@@ -349,7 +349,7 @@ static struct dlm_rsb *create_rsb(struct dlm_ls *ls, char *name, int len)
 	return r;
 }
 
-static int search_rsb_list(struct list_head *head, char *name, int len,
+int search_rsb_list(struct list_head *head, char *name, int len,
 			   unsigned int flags, struct dlm_rsb **r_ret)
 {
 	struct dlm_rsb *r;
@@ -851,7 +851,7 @@ void dlm_scan_waiters(struct dlm_ls *ls)
 
 		if (!num_nodes) {
 			num_nodes = ls->ls_num_nodes;
-			warned = kmalloc(GFP_KERNEL, num_nodes * sizeof(int));
+			warned = kmalloc(num_nodes * sizeof(int), GFP_KERNEL);
 			if (warned)
 				memset(warned, 0, num_nodes * sizeof(int));
 		}
@@ -1670,6 +1670,18 @@ static int _can_be_granted(struct dlm_rsb *r, struct dlm_lkb *lkb, int now)
 
 	if (now && conv && !(lkb->lkb_exflags & DLM_LKF_QUECVT))
 		return 1;
+
+	/*
+	 * Even if the convert is compat with all granted locks,
+	 * QUECVT forces it behind other locks on the convert queue.
+	 */
+
+	if (now && conv && (lkb->lkb_exflags & DLM_LKF_QUECVT)) {
+		if (list_empty(&r->res_convertqueue))
+			return 1;
+		else
+			goto out;
+	}
 
 	/*
 	 * The NOORDER flag is set to avoid the standard vms rules on grant

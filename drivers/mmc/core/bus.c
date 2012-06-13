@@ -36,6 +36,8 @@ static ssize_t mmc_type_show(struct device *dev,
 		return sprintf(buf, "SD\n");
 	case MMC_TYPE_SDIO:
 		return sprintf(buf, "SDIO\n");
+	case MMC_TYPE_SD_COMBO:
+		return sprintf(buf, "SDcombo\n");
 	default:
 		return -EFAULT;
 	}
@@ -72,6 +74,9 @@ mmc_bus_uevent(struct device *dev, struct kobj_uevent_env *env)
 		break;
 	case MMC_TYPE_SDIO:
 		type = "SDIO";
+		break;
+	case MMC_TYPE_SD_COMBO:
+		type = "SDcombo";
 		break;
 	default:
 		type = NULL;
@@ -232,12 +237,20 @@ int mmc_add_card(struct mmc_card *card)
 		break;
 	case MMC_TYPE_SD:
 		type = "SD";
-		if (mmc_card_blockaddr(card))
-			type = "SDHC";
+		if (mmc_card_blockaddr(card)) {
+			if (mmc_card_ext_capacity(card))
+				type = "SDXC";
+			else
+				type = "SDHC";
+		}
 		break;
 	case MMC_TYPE_SDIO:
 		type = "SDIO";
 		break;
+	case MMC_TYPE_SD_COMBO:
+		type = "SD-combo";
+		if (mmc_card_blockaddr(card))
+			type = "SDHC-combo";
 	default:
 		type = "?";
 		break;
@@ -251,7 +264,8 @@ int mmc_add_card(struct mmc_card *card)
 	} else {
 		printk(KERN_INFO "%s: new %s%s card at address %04x\n",
 			mmc_hostname(card->host),
-			mmc_card_highspeed(card) ? "high speed " : "",
+			mmc_sd_card_uhs(card) ? "ultra high speed " :
+			(mmc_card_highspeed(card) ? "high speed " : ""),
 			type, card->rca);
 	}
 

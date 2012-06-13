@@ -263,11 +263,7 @@ static void __init __free(bootmem_data_t *bdata,
 		bdata->hint_idx = sidx;
 
 	for (idx = sidx; idx < eidx; idx++)
-#ifdef CONFIG_X86_64
-		if (!test_and_clear_bit_long(idx, bdata->node_bootmem_map))
-#else
-		if (!test_and_clear_bit(idx, bdata->node_bootmem_map))
-#endif
+		if (!bootmem_test_and_clear_bit(idx, bdata->node_bootmem_map))
 			BUG();
 }
 
@@ -284,7 +280,7 @@ static int __init __reserve(bootmem_data_t *bdata, unsigned long sidx,
 		flags);
 
 	for (idx = sidx; idx < eidx; idx++)
-		if (test_and_set_bit(idx, bdata->node_bootmem_map)) {
+		if (bootmem_test_and_set_bit(idx, bdata->node_bootmem_map)) {
 			if (exclusive) {
 				__free(bdata, sidx, idx);
 				return -EBUSY;

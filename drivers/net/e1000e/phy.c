@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel PRO/1000 Linux driver
-  Copyright(c) 1999 - 2011 Intel Corporation.
+  Copyright(c) 1999 - 2012 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -1136,8 +1136,7 @@ static s32 e1000_copper_link_autoneg(struct e1000_hw *hw)
 	if (phy->autoneg_wait_to_complete) {
 		ret_val = e1000_wait_autoneg(hw);
 		if (ret_val) {
-			e_dbg("Error while waiting for "
-				 "autoneg to complete\n");
+			e_dbg("Error while waiting for autoneg to complete\n");
 			return ret_val;
 		}
 	}
@@ -2392,7 +2391,7 @@ s32 e1000e_determine_phy_address(struct e1000_hw *hw)
 				ret_val = 0;
 				goto out;
 			}
-			msleep(1);
+			usleep_range(1000, 2000);
 			i++;
 		} while (i < 10);
 	}
@@ -2819,7 +2818,7 @@ void e1000_power_down_phy_copper(struct e1000_hw *hw)
 	e1e_rphy(hw, PHY_CONTROL, &mii_reg);
 	mii_reg |= MII_CR_POWER_DOWN;
 	e1e_wphy(hw, PHY_CONTROL, mii_reg);
-	msleep(1);
+	usleep_range(1000, 2000);
 }
 
 /**

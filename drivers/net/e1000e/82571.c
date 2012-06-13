@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel PRO/1000 Linux driver
-  Copyright(c) 1999 - 2011 Intel Corporation.
+  Copyright(c) 1999 - 2012 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -239,26 +239,39 @@ static s32 e1000_init_mac_params_82571(struct e1000_adapter *adapter)
 {
 	struct e1000_hw *hw = &adapter->hw;
 	struct e1000_mac_info *mac = &hw->mac;
-	struct e1000_mac_operations *func = &mac->ops;
 	u32 swsm = 0;
 	u32 swsm2 = 0;
 	bool force_clear_smbi = false;
 
-	/* Set media type */
+	/* Set media type and media-dependent function pointers */
 	switch (adapter->pdev->device) {
 	case E1000_DEV_ID_82571EB_FIBER:
 	case E1000_DEV_ID_82572EI_FIBER:
 	case E1000_DEV_ID_82571EB_QUAD_FIBER:
 		hw->phy.media_type = e1000_media_type_fiber;
+		mac->ops.setup_physical_interface =
+		    e1000_setup_fiber_serdes_link_82571;
+		mac->ops.check_for_link = e1000e_check_for_fiber_link;
+		mac->ops.get_link_up_info =
+		    e1000e_get_speed_and_duplex_fiber_serdes;
 		break;
 	case E1000_DEV_ID_82571EB_SERDES:
-	case E1000_DEV_ID_82572EI_SERDES:
 	case E1000_DEV_ID_82571EB_SERDES_DUAL:
 	case E1000_DEV_ID_82571EB_SERDES_QUAD:
+	case E1000_DEV_ID_82572EI_SERDES:
 		hw->phy.media_type = e1000_media_type_internal_serdes;
+		mac->ops.setup_physical_interface =
+		    e1000_setup_fiber_serdes_link_82571;
+		mac->ops.check_for_link = e1000_check_for_serdes_link_82571;
+		mac->ops.get_link_up_info =
+		    e1000e_get_speed_and_duplex_fiber_serdes;
 		break;
 	default:
 		hw->phy.media_type = e1000_media_type_copper;
+		mac->ops.setup_physical_interface =
+		    e1000_setup_copper_link_82571;
+		mac->ops.check_for_link = e1000e_check_for_copper_link;
+		mac->ops.get_link_up_info = e1000e_get_speed_and_duplex_copper;
 		break;
 	}
 
@@ -269,37 +282,12 @@ static s32 e1000_init_mac_params_82571(struct e1000_adapter *adapter)
 	/* Adaptive IFS supported */
 	mac->adaptive_ifs = true;
 
-	/* check for link */
-	switch (hw->phy.media_type) {
-	case e1000_media_type_copper:
-		func->setup_physical_interface = e1000_setup_copper_link_82571;
-		func->check_for_link = e1000e_check_for_copper_link;
-		func->get_link_up_info = e1000e_get_speed_and_duplex_copper;
-		break;
-	case e1000_media_type_fiber:
-		func->setup_physical_interface =
-			e1000_setup_fiber_serdes_link_82571;
-		func->check_for_link = e1000e_check_for_fiber_link;
-		func->get_link_up_info =
-			e1000e_get_speed_and_duplex_fiber_serdes;
-		break;
-	case e1000_media_type_internal_serdes:
-		func->setup_physical_interface =
-			e1000_setup_fiber_serdes_link_82571;
-		func->check_for_link = e1000_check_for_serdes_link_82571;
-		func->get_link_up_info =
-			e1000e_get_speed_and_duplex_fiber_serdes;
-		break;
-	default:
-		return -E1000_ERR_CONFIG;
-		break;
-	}
-
+	/* MAC-specific function pointers */
 	switch (hw->mac.type) {
 	case e1000_82573:
-		func->set_lan_id = e1000_set_lan_id_single_port;
-		func->check_mng_mode = e1000e_check_mng_mode_generic;
-		func->led_on = e1000e_led_on_generic;
+		mac->ops.set_lan_id = e1000_set_lan_id_single_port;
+		mac->ops.check_mng_mode = e1000e_check_mng_mode_generic;
+		mac->ops.led_on = e1000e_led_on_generic;
 
 		/* FWSM register */
 		mac->has_fwsm = true;
@@ -313,13 +301,13 @@ static s32 e1000_init_mac_params_82571(struct e1000_adapter *adapter)
 		break;
 	case e1000_82574:
 	case e1000_82583:
-		func->set_lan_id = e1000_set_lan_id_single_port;
-		func->check_mng_mode = e1000_check_mng_mode_82574;
-		func->led_on = e1000_led_on_82574;
+		mac->ops.set_lan_id = e1000_set_lan_id_single_port;
+		mac->ops.check_mng_mode = e1000_check_mng_mode_82574;
+		mac->ops.led_on = e1000_led_on_82574;
 		break;
 	default:
-		func->check_mng_mode = e1000e_check_mng_mode_generic;
-		func->led_on = e1000e_led_on_generic;
+		mac->ops.check_mng_mode = e1000e_check_mng_mode_generic;
+		mac->ops.led_on = e1000e_led_on_generic;
 
 		/* FWSM register */
 		mac->has_fwsm = true;
@@ -340,11 +328,11 @@ static s32 e1000_init_mac_params_82571(struct e1000_adapter *adapter)
 
 		if (!(swsm2 & E1000_SWSM2_LOCK)) {
 			/* Only do this for the first interface on this card */
-			ew32(SWSM2,
-			    swsm2 | E1000_SWSM2_LOCK);
+			ew32(SWSM2, swsm2 | E1000_SWSM2_LOCK);
 			force_clear_smbi = true;
-		} else
+		} else {
 			force_clear_smbi = false;
+		}
 		break;
 	default:
 		force_clear_smbi = true;
@@ -589,7 +577,7 @@ static s32 e1000_get_hw_semaphore_82573(struct e1000_hw *hw)
 
 		extcnf_ctrl |= E1000_EXTCNF_CTRL_MDIO_SW_OWNERSHIP;
 
-		msleep(2);
+		usleep_range(2000, 4000);
 		i++;
 	} while (i < MDIO_OWNERSHIP_TIMEOUT);
 
@@ -811,7 +799,7 @@ static s32 e1000_update_nvm_checksum_82571(struct e1000_hw *hw)
 
 	/* Check for pending operations. */
 	for (i = 0; i < E1000_FLASH_UPDATES; i++) {
-		msleep(1);
+		usleep_range(1000, 2000);
 		if ((er32(EECD) & E1000_EECD_FLUPD) == 0)
 			break;
 	}
@@ -835,7 +823,7 @@ static s32 e1000_update_nvm_checksum_82571(struct e1000_hw *hw)
 	ew32(EECD, eecd);
 
 	for (i = 0; i < E1000_FLASH_UPDATES; i++) {
-		msleep(1);
+		usleep_range(1000, 2000);
 		if ((er32(EECD) & E1000_EECD_FLUPD) == 0)
 			break;
 	}
@@ -925,7 +913,7 @@ static s32 e1000_get_cfg_done_82571(struct e1000_hw *hw)
 		if (er32(EEMNGCTL) &
 		    E1000_NVM_CFG_DONE_PORT_0)
 			break;
-		msleep(1);
+		usleep_range(1000, 2000);
 		timeout--;
 	}
 	if (!timeout) {
@@ -1032,7 +1020,7 @@ static s32 e1000_reset_hw_82571(struct e1000_hw *hw)
 	ew32(TCTL, E1000_TCTL_PSP);
 	e1e_flush();
 
-	msleep(10);
+	usleep_range(10000, 20000);
 
 	/*
 	 * Must acquire the MDIO ownership before MAC reset.
@@ -1224,6 +1212,10 @@ static void e1000_initialize_hw_bits_82571(struct e1000_hw *hw)
 	case e1000_82571:
 	case e1000_82572:
 		reg |= (1 << 23) | (1 << 24) | (1 << 25) | (1 << 26);
+		break;
+	case e1000_82574:
+	case e1000_82583:
+		reg |= (1 << 26);
 		break;
 	default:
 		break;
@@ -1925,7 +1917,7 @@ static void e1000_clear_hw_cntrs_82571(struct e1000_hw *hw)
 	er32(ICRXDMTC);
 }
 
-static struct e1000_mac_operations e82571_mac_ops = {
+static const struct e1000_mac_operations e82571_mac_ops = {
 	/* .check_mng_mode: mac type dependent */
 	/* .check_for_link: media type dependent */
 	.id_led_init		= e1000e_id_led_init,
@@ -1947,7 +1939,7 @@ static struct e1000_mac_operations e82571_mac_ops = {
 	.read_mac_addr		= e1000_read_mac_addr_82571,
 };
 
-static struct e1000_phy_operations e82_phy_ops_igp = {
+static const struct e1000_phy_operations e82_phy_ops_igp = {
 	.acquire		= e1000_get_hw_semaphore_82571,
 	.check_polarity		= e1000_check_polarity_igp,
 	.check_reset_block	= e1000e_check_reset_block_generic,
@@ -1965,7 +1957,7 @@ static struct e1000_phy_operations e82_phy_ops_igp = {
 	.cfg_on_link_up      	= NULL,
 };
 
-static struct e1000_phy_operations e82_phy_ops_m88 = {
+static const struct e1000_phy_operations e82_phy_ops_m88 = {
 	.acquire		= e1000_get_hw_semaphore_82571,
 	.check_polarity		= e1000_check_polarity_m88,
 	.check_reset_block	= e1000e_check_reset_block_generic,
@@ -1983,7 +1975,7 @@ static struct e1000_phy_operations e82_phy_ops_m88 = {
 	.cfg_on_link_up      	= NULL,
 };
 
-static struct e1000_phy_operations e82_phy_ops_bm = {
+static const struct e1000_phy_operations e82_phy_ops_bm = {
 	.acquire		= e1000_get_hw_semaphore_82571,
 	.check_polarity		= e1000_check_polarity_m88,
 	.check_reset_block	= e1000e_check_reset_block_generic,
@@ -2001,7 +1993,7 @@ static struct e1000_phy_operations e82_phy_ops_bm = {
 	.cfg_on_link_up      	= NULL,
 };
 
-static struct e1000_nvm_operations e82571_nvm_ops = {
+static const struct e1000_nvm_operations e82571_nvm_ops = {
 	.acquire		= e1000_acquire_nvm_82571,
 	.read			= e1000e_read_nvm_eerd,
 	.release		= e1000_release_nvm_82571,
@@ -2011,7 +2003,7 @@ static struct e1000_nvm_operations e82571_nvm_ops = {
 	.write			= e1000_write_nvm_82571,
 };
 
-struct e1000_info e1000_82571_info = {
+const struct e1000_info e1000_82571_info = {
 	.mac			= e1000_82571,
 	.flags			= FLAG_HAS_HW_VLAN_FILTER
 				  | FLAG_HAS_JUMBO_FRAMES
@@ -2033,7 +2025,7 @@ struct e1000_info e1000_82571_info = {
 	.nvm_ops		= &e82571_nvm_ops,
 };
 
-struct e1000_info e1000_82572_info = {
+const struct e1000_info e1000_82572_info = {
 	.mac			= e1000_82572,
 	.flags			= FLAG_HAS_HW_VLAN_FILTER
 				  | FLAG_HAS_JUMBO_FRAMES
@@ -2052,7 +2044,7 @@ struct e1000_info e1000_82572_info = {
 	.nvm_ops		= &e82571_nvm_ops,
 };
 
-struct e1000_info e1000_82573_info = {
+const struct e1000_info e1000_82573_info = {
 	.mac			= e1000_82573,
 	.flags			= FLAG_HAS_HW_VLAN_FILTER
 				  | FLAG_HAS_WOL
@@ -2071,7 +2063,7 @@ struct e1000_info e1000_82573_info = {
 	.nvm_ops		= &e82571_nvm_ops,
 };
 
-struct e1000_info e1000_82574_info = {
+const struct e1000_info e1000_82574_info = {
 	.mac			= e1000_82574,
 	.flags			= FLAG_HAS_HW_VLAN_FILTER
 				  | FLAG_HAS_MSIX
@@ -2093,7 +2085,7 @@ struct e1000_info e1000_82574_info = {
 	.nvm_ops		= &e82571_nvm_ops,
 };
 
-struct e1000_info e1000_82583_info = {
+const struct e1000_info e1000_82583_info = {
 	.mac			= e1000_82583,
 	.flags			= FLAG_HAS_HW_VLAN_FILTER
 				  | FLAG_HAS_WOL

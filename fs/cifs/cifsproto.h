@@ -88,6 +88,7 @@ extern int SendReceiveBlockingLock(const unsigned int xid,
 extern int checkSMB(struct smb_hdr *smb, __u16 mid, unsigned int length);
 extern bool is_valid_oplock_break(struct smb_hdr *smb,
 				  struct TCP_Server_Info *);
+extern bool backup_cred(struct cifs_sb_info *);
 extern bool is_size_safe_to_change(struct cifsInodeInfo *, __u64 eof);
 extern void cifs_update_eof(struct cifsInodeInfo *cifsi, loff_t offset,
                            unsigned int bytes_written);
@@ -147,7 +148,7 @@ extern int mode_to_cifs_acl(struct inode *inode, const char *path, __u64);
 extern struct cifs_ntsd *get_cifs_acl(struct cifs_sb_info *, struct inode *,
 					const char *, u32 *);
 
-extern int cifs_mount(struct super_block *, struct cifs_sb_info *, char *,
+extern int cifs_mount(struct super_block *, struct cifs_sb_info *,
 			const char *);
 extern int cifs_umount(struct super_block *, struct cifs_sb_info *);
 extern void cifs_dfs_release_automount_timer(void);

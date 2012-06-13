@@ -169,14 +169,19 @@ void gfs2_glock_add_to_lru(struct gfs2_glock *gl)
 	spin_unlock(&lru_lock);
 }
 
-static void gfs2_glock_remove_from_lru(struct gfs2_glock *gl)
+static void __gfs2_glock_remove_from_lru(struct gfs2_glock *gl)
 {
-	spin_lock(&lru_lock);
 	if (!list_empty(&gl->gl_lru)) {
 		list_del_init(&gl->gl_lru);
 		atomic_dec(&lru_count);
 		clear_bit(GLF_LRU, &gl->gl_flags);
 	}
+}
+
+static void gfs2_glock_remove_from_lru(struct gfs2_glock *gl)
+{
+	spin_lock(&lru_lock);
+	__gfs2_glock_remove_from_lru(gl);
 	spin_unlock(&lru_lock);
 }
 
@@ -219,11 +224,12 @@ void gfs2_glock_put(struct gfs2_glock *gl)
 	struct gfs2_sbd *sdp = gl->gl_sbd;
 	struct address_space *mapping = gfs2_glock2aspace(gl);
 
-	if (atomic_dec_and_test(&gl->gl_ref)) {
+	if (atomic_dec_and_lock(&gl->gl_ref, &lru_lock)) {
+		__gfs2_glock_remove_from_lru(gl);
+		spin_unlock(&lru_lock);
 		spin_lock_bucket(gl->gl_hash);
 		hlist_bl_del_rcu(&gl->gl_list);
 		spin_unlock_bucket(gl->gl_hash);
-		gfs2_glock_remove_from_lru(gl);
 		GLOCK_BUG_ON(gl, !list_empty(&gl->gl_holders));
 		GLOCK_BUG_ON(gl, mapping && mapping->nrpages);
 		trace_gfs2_glock_put(gl);
@@ -553,6 +559,12 @@ __acquires(&gl->gl_spin)
 		set_bit(GLF_INVALIDATE_IN_PROGRESS, &gl->gl_flags);
 		do_error(gl, 0); /* Fail queued try locks */
 	}
+	gl->gl_req = target;
+	set_bit(GLF_BLOCKING, &gl->gl_flags);
+	if ((gl->gl_req == LM_ST_UNLOCKED) ||
+	    (gl->gl_state == LM_ST_EXCLUSIVE) ||
+	    (lck_flags & (LM_FLAG_TRY|LM_FLAG_TRY_1CB)))
+		clear_bit(GLF_BLOCKING, &gl->gl_flags);
 	spin_unlock(&gl->gl_spin);
 	if (glops->go_xmote_th)
 		glops->go_xmote_th(gl);
@@ -561,10 +573,6 @@ __acquires(&gl->gl_spin)
 	clear_bit(GLF_INVALIDATE_IN_PROGRESS, &gl->gl_flags);
 
 	gfs2_glock_hold(gl);
-	if (target != LM_ST_UNLOCKED && (gl->gl_state == LM_ST_SHARED ||
-	    gl->gl_state == LM_ST_DEFERRED) &&
-	    !(lck_flags & (LM_FLAG_TRY | LM_FLAG_TRY_1CB)))
-		lck_flags |= LM_FLAG_TRY_1CB;
 	ret = gfs2_lm_lock(sdp, gl, target, lck_flags);
 
 	if (!(ret & LM_OUT_ASYNC)) {
@@ -1670,6 +1678,8 @@ static const char *gflags2str(char *buf, const struct gfs2_glock *gl)
 		*p++ = 'L';
 	if (gl->gl_object)
 		*p++ = 'o';
+	if (test_bit(GLF_BLOCKING, gflags))
+		*p++ = 'b';
 	*p = 0;
 	return buf;
 }

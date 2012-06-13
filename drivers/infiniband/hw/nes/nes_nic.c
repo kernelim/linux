@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006 - 2009 Intel Corporation.  All rights reserved.
+ * Copyright (c) 2006 - 2011 Intel Corporation.  All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -440,11 +440,11 @@ static int nes_nic_send(struct sk_buff *skb, struct net_device *netdev)
 		nesnic->tx_skb[nesnic->sq_head] = skb;
 		for (skb_fragment_index = 0; skb_fragment_index < skb_shinfo(skb)->nr_frags;
 				skb_fragment_index++) {
-			bus_address = pci_map_page( nesdev->pcidev,
-					skb_shinfo(skb)->frags[skb_fragment_index].page,
-					skb_shinfo(skb)->frags[skb_fragment_index].page_offset,
-					skb_shinfo(skb)->frags[skb_fragment_index].size,
-					PCI_DMA_TODEVICE);
+			skb_frag_t *frag =
+				&skb_shinfo(skb)->frags[skb_fragment_index];
+			bus_address = skb_frag_dma_map(&nesdev->pcidev->dev,
+						       frag, 0, frag->size,
+						       DMA_TO_DEVICE);
 			wqe_fragment_length[wqe_fragment_index] =
 					cpu_to_le16(skb_shinfo(skb)->frags[skb_fragment_index].size);
 			set_wqe_64bit_value(nic_sqe->wqe_words, NES_NIC_SQ_WQE_FRAG0_LOW_IDX+(2*wqe_fragment_index),
@@ -560,11 +560,12 @@ tso_sq_no_longer_full:
 			/* Map all the buffers */
 			for (tso_frag_count=0; tso_frag_count < skb_shinfo(skb)->nr_frags;
 					tso_frag_count++) {
-				tso_bus_address[tso_frag_count] = pci_map_page( nesdev->pcidev,
-						skb_shinfo(skb)->frags[tso_frag_count].page,
-						skb_shinfo(skb)->frags[tso_frag_count].page_offset,
-						skb_shinfo(skb)->frags[tso_frag_count].size,
-						PCI_DMA_TODEVICE);
+				skb_frag_t *frag =
+					&skb_shinfo(skb)->frags[tso_frag_count];
+				tso_bus_address[tso_frag_count] =
+					skb_frag_dma_map(&nesdev->pcidev->dev,
+							 frag, 0, frag->size,
+							 DMA_TO_DEVICE);
 			}
 
 			tso_frag_index = 0;
@@ -901,7 +902,7 @@ static void nes_netdev_set_multicast_list(struct net_device *netdev)
 		nes_write_indexed(nesdev, NES_IDX_NIC_UNICAST_ALL, nic_active);
 	}
 
-	nes_debug(NES_DBG_NIC_RX, "Number of MC entries = %d, Promiscous = %d, All Multicast = %d.\n",
+	nes_debug(NES_DBG_NIC_RX, "Number of MC entries = %d, Promiscuous = %d, All Multicast = %d.\n",
 		  mc_count, !!(netdev->flags & IFF_PROMISC),
 		  !!(netdev->flags & IFF_ALLMULTI));
 	if (!mc_all_on) {
@@ -1090,6 +1091,8 @@ static const char nes_ethtool_stringset[][ETH_GSTRING_LEN] = {
 	"LRO aggregated",
 	"LRO flushed",
 	"LRO no_desc",
+	"PAU CreateQPs",
+	"PAU DestroyQPs",
 };
 #define NES_ETHTOOL_STAT_COUNT  ARRAY_SIZE(nes_ethtool_stringset)
 
@@ -1330,6 +1333,8 @@ static void nes_netdev_get_ethtool_stats(struct net_device *netdev,
 	target_stat_values[++index] = nesvnic->lro_mgr.stats.aggregated;
 	target_stat_values[++index] = nesvnic->lro_mgr.stats.flushed;
 	target_stat_values[++index] = nesvnic->lro_mgr.stats.no_desc;
+	target_stat_values[++index] = atomic_read(&pau_qps_created);
+	target_stat_values[++index] = atomic_read(&pau_qps_destroyed);
 }
 
 /**
@@ -1519,7 +1524,7 @@ static int nes_netdev_get_settings(struct net_device *netdev, struct ethtool_cmd
 	et_cmd->maxrxpkt = 511;
 
 	if (nesadapter->OneG_Mode) {
-		et_cmd->speed = SPEED_1000;
+		ethtool_cmd_speed_set(et_cmd, SPEED_1000);
 		if (phy_type == NES_PHY_TYPE_PUMA_1G) {
 			et_cmd->supported   = SUPPORTED_1000baseT_Full;
 			et_cmd->advertising = ADVERTISED_1000baseT_Full;
@@ -1558,7 +1563,7 @@ static int nes_netdev_get_settings(struct net_device *netdev, struct ethtool_cmd
 		et_cmd->advertising = ADVERTISED_10000baseT_Full;
 		et_cmd->phy_address = mac_index;
 	}
-	et_cmd->speed = SPEED_10000;
+	ethtool_cmd_speed_set(et_cmd, SPEED_10000);
 	et_cmd->autoneg = AUTONEG_DISABLE;
 	return 0;
 }

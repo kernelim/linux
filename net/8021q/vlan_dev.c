@@ -443,13 +443,24 @@ int vlan_dev_set_egress_priority(const struct net_device *dev,
 }
 
 /* Flags are defined in the vlan_flags enum in include/linux/if_vlan.h file. */
-int vlan_dev_change_flags(const struct net_device *dev, u32 flags, u32 mask)
+int vlan_dev_change_flags(struct net_device *dev, u32 flags, u32 mask)
 {
 	struct vlan_dev_info *vlan = vlan_dev_info(dev);
 	u32 old_flags = vlan->flags;
 
 	if (mask & ~(VLAN_FLAG_REORDER_HDR | VLAN_FLAG_GVRP))
 		return -EINVAL;
+
+	/* TX checksum offload cannot work if both TX VLAN tag offload
+	 * and reorder_hdr are off.  To avoid racing with the TX path,
+	 * do not allow the device to enter or exit this state while
+	 * it is running.
+	 */
+	if (netif_running(dev) &&
+	    !(vlan->real_dev->features & NETIF_F_HW_VLAN_TX) &&
+	    (vlan->real_dev->vlan_features & NETIF_F_ALL_CSUM) &&
+	    ((flags ^ old_flags) & VLAN_FLAG_REORDER_HDR))
+		return -EBUSY;
 
 	vlan->flags = (old_flags & ~mask) | (flags & mask);
 
@@ -459,6 +470,8 @@ int vlan_dev_change_flags(const struct net_device *dev, u32 flags, u32 mask)
 		else
 			vlan_gvrp_request_leave(dev);
 	}
+	if ((vlan->flags ^ old_flags) & VLAN_FLAG_REORDER_HDR)
+		vlan_transfer_features(vlan->real_dev, dev);
 	return 0;
 }
 
@@ -735,6 +748,7 @@ static int vlan_dev_init(struct net_device *dev)
 	dev->fcoe_ddp_xid = real_dev->fcoe_ddp_xid;
 #endif
 
+	dev->needed_headroom = real_dev->needed_headroom;
 	if (real_dev->features & NETIF_F_HW_VLAN_TX) {
 		dev->header_ops      = real_dev->header_ops;
 		dev->hard_header_len = real_dev->hard_header_len;
@@ -743,6 +757,13 @@ static int vlan_dev_init(struct net_device *dev)
 		dev->header_ops      = &vlan_header_ops;
 		dev->hard_header_len = real_dev->hard_header_len + VLAN_HLEN;
 		dev->netdev_ops = &vlan_netdev_ops;
+		/* TX checksum offload cannot work if both TX VLAN tag offload
+		 * and reorder_hdr are off.
+		 */
+		if (!(vlan_dev_info(dev)->flags & VLAN_FLAG_REORDER_HDR))
+			dev->features &= ~(NETIF_F_ALL_CSUM | NETIF_F_SG |
+					   NETIF_F_GSO | NETIF_F_GSO_MASK |
+					   NETIF_F_FCOE_CRC);
 	}
 
 	if (is_vlan_dev(real_dev))

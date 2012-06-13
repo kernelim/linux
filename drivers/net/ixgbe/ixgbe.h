@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel 10 Gigabit PCI Express Linux driver
-  Copyright(c) 1999 - 2011 Intel Corporation.
+  Copyright(c) 1999 - 2012 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -51,6 +51,7 @@
 
 /* TX/RX descriptor defines */
 #define IXGBE_DEFAULT_TXD		    512
+#define IXGBE_DEFAULT_TX_WORK		    256
 #define IXGBE_MAX_TXD			   4096
 #define IXGBE_MIN_TXD			     64
 
@@ -69,10 +70,13 @@
 
 /* Supported Rx Buffer Sizes */
 #define IXGBE_RXBUFFER_512   512    /* Used for packet split */
-#define IXGBE_RXBUFFER_2048  2048
-#define IXGBE_RXBUFFER_4096  4096
-#define IXGBE_RXBUFFER_8192  8192
-#define IXGBE_MAX_RXBUFFER   16384  /* largest size for a single descriptor */
+#define IXGBE_RXBUFFER_2K   2048
+#define IXGBE_RXBUFFER_3K   3072
+#define IXGBE_RXBUFFER_4K   4096
+#define IXGBE_RXBUFFER_7K   7168
+#define IXGBE_RXBUFFER_8K   8192
+#define IXGBE_RXBUFFER_15K  15360
+#define IXGBE_MAX_RXBUFFER  16384  /* largest size for a single descriptor */
 
 /*
  * NOTE: netdev_alloc_skb reserves up to 64 bytes, NET_IP_ALIGN mans we
@@ -89,13 +93,17 @@
 #define IXGBE_RX_BUFFER_WRITE	16	/* Must be power of 2 */
 
 #define IXGBE_TX_FLAGS_CSUM		(u32)(1)
-#define IXGBE_TX_FLAGS_VLAN		(u32)(1 << 1)
-#define IXGBE_TX_FLAGS_TSO		(u32)(1 << 2)
-#define IXGBE_TX_FLAGS_IPV4		(u32)(1 << 3)
-#define IXGBE_TX_FLAGS_FCOE		(u32)(1 << 4)
-#define IXGBE_TX_FLAGS_FSO		(u32)(1 << 5)
+#define IXGBE_TX_FLAGS_HW_VLAN		(u32)(1 << 1)
+#define IXGBE_TX_FLAGS_SW_VLAN		(u32)(1 << 2)
+#define IXGBE_TX_FLAGS_TSO		(u32)(1 << 3)
+#define IXGBE_TX_FLAGS_IPV4		(u32)(1 << 4)
+#define IXGBE_TX_FLAGS_FCOE		(u32)(1 << 5)
+#define IXGBE_TX_FLAGS_FSO		(u32)(1 << 6)
+#define IXGBE_TX_FLAGS_TXSW		(u32)(1 << 7)
+#define IXGBE_TX_FLAGS_MAPPED_AS_PAGE	(u32)(1 << 8)
 #define IXGBE_TX_FLAGS_VLAN_MASK	0xffff0000
-#define IXGBE_TX_FLAGS_VLAN_PRIO_MASK   0x0000e000
+#define IXGBE_TX_FLAGS_VLAN_PRIO_MASK	0xe0000000
+#define IXGBE_TX_FLAGS_VLAN_PRIO_SHIFT  29
 #define IXGBE_TX_FLAGS_VLAN_SHIFT	16
 
 #define IXGBE_MAX_RSC_INT_RATE          162760
@@ -106,6 +114,8 @@
 #define MAX_EMULATION_MAC_ADDRS         16
 #define IXGBE_MAX_PF_MACVLANS           15
 #define VMDQ_P(p)   ((p) + adapter->num_vfs)
+#define IXGBE_82599_VF_DEVICE_ID        0x10ED
+#define IXGBE_X540_VF_DEVICE_ID         0x1515
 
 struct vf_data_storage {
 	unsigned char vf_mac_addresses[ETH_ALEN];
@@ -118,6 +128,7 @@ struct vf_data_storage {
 	u16 pf_vlan; /* When set, guest VLAN config not allowed. */
 	u16 pf_qos;
 	u16 tx_rate;
+	struct pci_dev *vfdev;
 };
 
 struct vf_macvlans {
@@ -139,14 +150,14 @@ struct vf_macvlans {
 /* wrapper around a pointer to a socket buffer,
  * so a DMA handle can be stored along with the buffer */
 struct ixgbe_tx_buffer {
-	struct sk_buff *skb;
-	dma_addr_t dma;
+	union ixgbe_adv_tx_desc *next_to_watch;
 	unsigned long time_stamp;
-	u16 length;
-	u16 next_to_watch;
-	unsigned int bytecount;
+	dma_addr_t dma;
+	u32 length;
+	u32 tx_flags;
+	struct sk_buff *skb;
+	u32 bytecount;
 	u16 gso_segs;
-	u8 mapped_as_page;
 };
 
 struct ixgbe_rx_buffer {
@@ -204,6 +215,7 @@ enum ixbge_ring_state_t {
 #define clear_ring_rsc_enabled(ring) \
 	clear_bit(__IXGBE_RX_RSC_ENABLED, &(ring)->state)
 struct ixgbe_ring {
+	struct ixgbe_ring *next;	/* pointer to next ring in q_vector */
 	void *desc;			/* descriptor ring memory */
 	struct device *dev;             /* device for DMA mapping */
 	struct net_device *netdev;      /* netdev ring belongs to */
@@ -212,12 +224,10 @@ struct ixgbe_ring {
 		struct ixgbe_rx_buffer *rx_buffer_info;
 	};
 	unsigned long state;
-	u8 atr_sample_rate;
-	u8 atr_count;
+	u8 __iomem *tail;
+
 	u16 count;			/* amount of descriptors */
 	u16 rx_buf_len;
-	u16 next_to_use;
-	u16 next_to_clean;
 
 	u8 queue_index; /* needed for multiqueue queue management */
 	u8 reg_idx;			/* holds the special value that gets
@@ -225,15 +235,13 @@ struct ixgbe_ring {
 					 * associated with this ring, which is
 					 * different for DCB and RSS modes
 					 */
+	u8 atr_sample_rate;
+	u8 atr_count;
+
+	u16 next_to_use;
+	u16 next_to_clean;
+
 	u8 dcb_tc;
-
-	u16 work_limit;			/* max work per interrupt */
-
-	u8 __iomem *tail;
-
-	unsigned int total_bytes;
-	unsigned int total_packets;
-
 	struct ixgbe_queue_stats stats;
 	union {
 		struct ixgbe_tx_queue_stats tx_stats;
@@ -274,6 +282,14 @@ struct ixgbe_ring_feature {
 	int mask;
 } ____cacheline_internodealigned_in_smp;
 
+struct ixgbe_ring_container {
+	struct ixgbe_ring *ring;	/* pointer to linked list of rings */
+	unsigned int total_bytes;	/* total bytes processed this int */
+	unsigned int total_packets;	/* total packets processed this int */
+	u16 work_limit;			/* total work allowed per interrupt */
+	u8 count;			/* total number of rings in vector */
+	u8 itr;				/* current ITR setting for ring */
+};
 
 #define MAX_RX_PACKET_BUFFERS ((adapter->flags & IXGBE_FLAG_DCB_ENABLED) \
                               ? 8 : 1)
@@ -284,31 +300,29 @@ struct ixgbe_ring_feature {
  */
 struct ixgbe_q_vector {
 	struct ixgbe_adapter *adapter;
-	unsigned int v_idx; /* index of q_vector within array, also used for
-	                     * finding the bit in EICR and friends that
-	                     * represents the vector for this ring */
 #ifdef CONFIG_IXGBE_DCA
 	int cpu;	    /* CPU for DCA */
 #endif
+	u16 v_idx;		/* index of q_vector within array, also used for
+				 * finding the bit in EICR and friends that
+				 * represents the vector for this ring */
+	u16 itr;		/* Interrupt throttle rate written to EITR */
+	struct ixgbe_ring_container rx, tx;
+
 	struct napi_struct napi;
-	DECLARE_BITMAP(rxr_idx, MAX_RX_QUEUES); /* Rx ring indices */
-	DECLARE_BITMAP(txr_idx, MAX_TX_QUEUES); /* Tx ring indices */
-	u8 rxr_count;     /* Rx ring count assigned to this vector */
-	u8 txr_count;     /* Tx ring count assigned to this vector */
-	u8 tx_itr;
-	u8 rx_itr;
-	u32 eitr;
 	cpumask_var_t affinity_mask;
 	char name[IFNAMSIZ + 9];
 };
 
-/* Helper macros to switch between ints/sec and what the register uses.
- * And yes, it's the same math going both ways.  The lowest value
- * supported by all of the ixgbe hardware is 8.
+/*
+ * microsecond values for various ITR rates shifted by 2 to fit itr register
+ * with the first 3 bits reserved 0
  */
-#define EITR_INTS_PER_SEC_TO_REG(_eitr) \
-	((_eitr) ? (1000000000 / ((_eitr) * 256)) : 8)
-#define EITR_REG_TO_INTS_PER_SEC EITR_INTS_PER_SEC_TO_REG
+#define IXGBE_MIN_RSC_ITR	24
+#define IXGBE_100K_ITR		40
+#define IXGBE_20K_ITR		200
+#define IXGBE_10K_ITR		400
+#define IXGBE_8K_ITR		500
 
 static inline u16 ixgbe_desc_unused(struct ixgbe_ring *ring)
 {
@@ -410,6 +424,9 @@ struct ixgbe_adapter {
 	u16 eitr_low;
 	u16 eitr_high;
 
+	/* Work limits */
+	u16 tx_work_limit;
+
 	/* TX */
 	struct ixgbe_ring *tx_ring[MAX_TX_QUEUES] ____cacheline_aligned_in_smp;
 	int num_tx_queues;
@@ -475,11 +492,12 @@ struct ixgbe_adapter {
 	u64 rsc_total_count;
 	u64 rsc_total_flush;
 	u32 wol;
-	u16 eeprom_version;
+	u16 eeprom_verh;
+	u16 eeprom_verl;
+	u16 eeprom_cap;
 
 	int node;
 	u32 interrupt_event;
-	char lsc_int_name[IFNAMSIZ + 9];
 
 	/* SR-IOV */
 	DECLARE_BITMAP(active_vfs, IXGBE_MAX_VF_FUNCTIONS);
@@ -493,6 +511,8 @@ struct ixgbe_adapter {
 	struct hlist_head fdir_filter_list;
 	union ixgbe_atr_input fdir_mask;
 	int fdir_filter_count;
+	u32 timer_event_accumulator;
+	u32 vferr_refcount;
 };
 
 struct ixgbe_fdir_filter {
@@ -536,7 +556,7 @@ extern int ixgbe_copy_dcb_cfg(struct ixgbe_dcb_config *src_dcb_cfg,
 extern char ixgbe_driver_name[];
 extern const char ixgbe_driver_version[];
 
-extern int ixgbe_up(struct ixgbe_adapter *adapter);
+extern void ixgbe_up(struct ixgbe_adapter *adapter);
 extern void ixgbe_down(struct ixgbe_adapter *adapter);
 extern void ixgbe_reinit_locked(struct ixgbe_adapter *adapter);
 extern void ixgbe_reset(struct ixgbe_adapter *adapter);
@@ -591,8 +611,9 @@ extern int ixgbe_fso(struct ixgbe_ring *tx_ring, struct sk_buff *skb,
                      u32 tx_flags, u8 *hdr_len);
 extern void ixgbe_cleanup_fcoe(struct ixgbe_adapter *adapter);
 extern int ixgbe_fcoe_ddp(struct ixgbe_adapter *adapter,
-                          union ixgbe_adv_rx_desc *rx_desc,
-                          struct sk_buff *skb);
+			  union ixgbe_adv_rx_desc *rx_desc,
+			  struct sk_buff *skb,
+			  u32 staterr);
 extern int ixgbe_fcoe_ddp_get(struct net_device *netdev, u16 xid,
                               struct scatterlist *sgl, unsigned int sgc);
 extern int ixgbe_fcoe_ddp_target(struct net_device *netdev, u16 xid,

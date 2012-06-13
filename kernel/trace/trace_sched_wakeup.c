@@ -33,6 +33,8 @@ static raw_spinlock_t wakeup_lock =
 
 static void wakeup_reset(struct trace_array *tr);
 static void __wakeup_reset(struct trace_array *tr);
+static int wakeup_graph_entry(struct ftrace_graph_ent *trace);
+static void wakeup_graph_return(struct ftrace_graph_ret *trace);
 
 static int save_lat_flag;
 
@@ -54,9 +56,6 @@ static struct tracer_flags tracer_flags = {
 #define is_graph() (tracer_flags.val & TRACE_DISPLAY_GRAPH)
 
 #ifdef CONFIG_FUNCTION_TRACER
-
-static int wakeup_graph_entry(struct ftrace_graph_ent *trace);
-static void wakeup_graph_return(struct ftrace_graph_ret *trace);
 
 /*
  * wakeup uses its own tracer function to keep the overhead down:
@@ -102,7 +101,9 @@ wakeup_tracer_call(unsigned long ip, unsigned long parent_ip)
 static struct ftrace_ops trace_ops __read_mostly =
 {
 	.func = wakeup_tracer_call,
+	.flags = FTRACE_OPS_FL_GLOBAL,
 };
+#endif /* CONFIG_FUNCTION_TRACER */
 
 static int start_func_tracer(int graph)
 {
@@ -131,16 +132,6 @@ static void stop_func_tracer(int graph)
 	else
 		unregister_ftrace_graph();
 }
-#else
-static int start_func_tracer(int graph)
-{
-	return 0;
-}
-
-static void stop_func_tracer(int graph)
-{
-}
-#endif /* CONFIG_FUNCTION_TRACER */
 
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 static int wakeup_set_flag(u32 old_flags, u32 bit, int set)
@@ -280,14 +271,31 @@ static int wakeup_set_flag(u32 old_flags, u32 bit, int set)
 	return -EINVAL;
 }
 
+static int wakeup_graph_entry(struct ftrace_graph_ent *trace)
+{
+	return -1;
+}
+
 static enum print_line_t wakeup_print_line(struct trace_iterator *iter)
 {
 	return TRACE_TYPE_UNHANDLED;
 }
 
-static void wakeup_print_header(struct seq_file *s) { }
+static void wakeup_graph_return(struct ftrace_graph_ret *trace) { }
 static void wakeup_trace_open(struct trace_iterator *iter) { }
 static void wakeup_trace_close(struct trace_iterator *iter) { }
+
+#ifdef CONFIG_FUNCTION_TRACER
+static void wakeup_print_header(struct seq_file *s)
+{
+	trace_default_header(s);
+}
+#else
+static void wakeup_print_header(struct seq_file *s)
+{
+	trace_latency_header(s);
+}
+#endif /* CONFIG_FUNCTION_TRACER */
 #endif /* CONFIG_FUNCTION_GRAPH_TRACER */
 
 /*

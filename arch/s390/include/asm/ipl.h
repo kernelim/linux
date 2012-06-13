@@ -88,6 +88,8 @@ extern u32 ipl_flags;
 extern u32 dump_prefix_page;
 extern unsigned int zfcpdump_prefix_array[];
 
+extern unsigned long long elfcorehdr_size;
+
 extern void do_reipl(void);
 extern void do_halt(void);
 extern void do_poff(void);
@@ -167,5 +169,6 @@ enum diag308_rc {
 };
 
 extern int diag308(unsigned long subcode, void *addr);
+extern void store_status(void);
 
 #endif /* _ASM_S390_IPL_H */

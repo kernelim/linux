@@ -35,6 +35,7 @@ typedef struct
 extern void machine_restart_smp(char *);
 extern void machine_halt_smp(void);
 extern void machine_power_off_smp(void);
+extern void smp_restart_with_online_cpu(void);
 
 #define NO_PROC_ID		0xFF		/* No processor magic marker */
 

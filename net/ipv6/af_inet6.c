@@ -199,7 +199,7 @@ lookup_protocol:
 
 	inet_sk(sk)->pinet6 = np = inet6_sk_generic(sk);
 	np->hop_limit	= -1;
-	np->mcast_hops	= -1;
+	np->mcast_hops	= IPV6_DEFAULT_MCASTHOPS;
 	np->mc_loop	= 1;
 	np->pmtudisc	= IPV6_PMTUDISC_WANT;
 	np->ipv6only	= net->ipv6.sysctl.bindv6only;
@@ -213,6 +213,7 @@ lookup_protocol:
 	inet->mc_ttl	= 1;
 	inet->mc_index	= 0;
 	inet->mc_list	= NULL;
+	sk_extended(sk)->rcv_tos = 0;
 
 	if (ipv4_config.no_pmtu_disc)
 		inet->pmtudisc = IP_PMTUDISC_DONT;

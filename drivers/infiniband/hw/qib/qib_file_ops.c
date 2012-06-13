@@ -1283,6 +1283,7 @@ static int setup_ctxt(struct qib_pportdata *ppd, int ctxt,
 	strlcpy(rcd->comm, current->comm, sizeof(rcd->comm));
 	ctxt_fp(fp) = rcd;
 	qib_stats.sps_ctxts++;
+	dd->freectxts--;
 	ret = 0;
 	goto bail;
 
@@ -1539,13 +1540,13 @@ done_chk_sdma:
 
 		/*
 		 * If process has NOT already set it's affinity, select and
-		 * reserve a processor for it, as a rendevous for all
+		 * reserve a processor for it, as a rendezvous for all
 		 * users of the driver.  If they don't actually later
 		 * set affinity to this cpu, or set it to some other cpu,
 		 * it just means that sooner or later we don't recommend
 		 * a cpu, and let the scheduler do it's best.
 		 */
-		weight = cpumask_weight(&current->cpus_allowed);
+		weight = cpumask_weight(tsk_cpus_allowed(current));
 		if (!ret && weight >= qib_cpulist_count) {
 			int cpu;
 			cpu = find_first_zero_bit(qib_cpulist,
@@ -1555,12 +1556,12 @@ done_chk_sdma:
 				fd->rec_cpu_num = cpu;
 			}
 		} else if (weight == 1 &&
-			test_bit(cpumask_first(&current->cpus_allowed),
+			test_bit(cpumask_first(tsk_cpus_allowed(current)),
 				 qib_cpulist))
 			qib_devinfo(dd->pcidev, "%s PID %u affinity "
 				    "set to cpu %d; already allocated\n",
 				    current->comm, current->pid,
-				    cpumask_first(&current->cpus_allowed));
+				    cpumask_first(tsk_cpus_allowed(current)));
 	}
 
 	mutex_unlock(&qib_mutex);
@@ -1657,7 +1658,7 @@ static int qib_do_user_init(struct file *fp,
 	 * 0 to 1.  So for those chips, we turn it off and then back on.
 	 * This will (very briefly) affect any other open ctxts, but the
 	 * duration is very short, and therefore isn't an issue.  We
-	 * explictly set the in-memory tail copy to 0 beforehand, so we
+	 * explicitly set the in-memory tail copy to 0 beforehand, so we
 	 * don't have to wait to be sure the DMA update has happened
 	 * (chip resets head/tail to 0 on transition to enable).
 	 */
@@ -1791,6 +1792,7 @@ static int qib_close(struct inode *in, struct file *fp)
 		if (dd->pageshadow)
 			unlock_expected_tids(rcd);
 		qib_stats.sps_ctxts--;
+		dd->freectxts++;
 	}
 
 	mutex_unlock(&qib_mutex);

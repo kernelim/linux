@@ -50,6 +50,9 @@
 #ifdef CONFIG_DCB
 #include <net/dcbnl.h>
 #endif
+#ifndef __GENKSYMS__
+#include <net/netprio_cgroup.h>
+#endif
 
 struct vlan_group;
 struct netpoll_info;
@@ -623,6 +626,23 @@ struct netdev_tc_txq {
 	u16 offset;
 };
 
+#if defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE)
+/*
+ * This structure is to hold information about the device
+ * configured to run FCoE protocol stack.
+ */
+struct netdev_fcoe_hbainfo {
+	char	manufacturer[64];
+	char	serial_number[64];
+	char	hardware_version[64];
+	char	driver_version[64];
+	char	optionrom_version[64];
+	char	firmware_version[64];
+	char	model[256];
+	char	model_description[256];
+};
+#endif
+
 /*
  * This structure defines the management hooks for network devices.
  * The following hooks can be defined; unless noted otherwise, they are
@@ -1129,6 +1149,23 @@ struct netdev_qos_info {
 	u8 prio_tc_map[TC_BITMASK + 1];
 };
 
+struct netdev_netpoll_ext_info {
+	int (*ndo_netpoll_setup)(struct net_device *dev,
+	     struct netpoll_info *info);
+};
+
+struct netdev_priomap_info {
+#ifdef CONFIG_NETPRIO_CGROUP
+	struct netprio_map *priomap;
+#endif
+};
+
+struct ipv4_devconf_extensions {
+	int accept_local;
+};
+
+extern struct ipv4_devconf_extensions ipv4_devconf_ext;
+
 /* Only append, do not change existing! */
 struct net_device_extended {
 	struct xps_dev_maps			*xps_maps;
@@ -1136,6 +1173,13 @@ struct net_device_extended {
 	struct netdev_rps_info			rps_data;
 	struct netdev_qos_info			qos_data;
 	unsigned long				ext_priv_flags;
+	struct netdev_priomap_info		priomap_data;
+#if defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE)
+	int                     (*ndo_fcoe_get_hbainfo)(struct net_device *dev,
+					struct netdev_fcoe_hbainfo *hbainfo);
+#endif
+	struct netdev_netpoll_ext_info		netpoll_data;
+	struct ipv4_devconf_extensions		ipv4_devconf_ext;
 };
 
 #define NET_DEVICE_EXTENDED_SIZE \
@@ -1168,6 +1212,12 @@ static inline struct net_device_extended *
 netdev_extended(const struct net_device *dev)
 {
 	return netdev_extended_frozen(dev)->dev_ext;
+}
+
+static inline struct ipv4_devconf_extensions *
+netdev_ipv4_devconf_extended(const struct net_device *dev)
+{
+	return &(netdev_extended(dev)->ipv4_devconf_ext);
 }
 
 static inline
@@ -2319,6 +2369,8 @@ static inline int skb_bond_should_drop(struct sk_buff *skb,
 	}
 	return 0;
 }
+
+extern struct net_device *br_get_br_dev_for_port_rcu(struct net_device *port_dev);
 
 extern struct pernet_operations __net_initdata loopback_net_ops;
 

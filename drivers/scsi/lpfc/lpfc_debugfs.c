@@ -926,7 +926,7 @@ lpfc_debugfs_dumpData_open(struct inode *inode, struct file *file)
 	if (!debug)
 		goto out;
 
-	/* Round to page boundry */
+	/* Round to page boundary */
 	printk(KERN_ERR "9059 BLKGRD:  %s: _dump_buf_data=0x%p\n",
 			__func__, _dump_buf_data);
 	debug->buffer = _dump_buf_data;
@@ -956,7 +956,7 @@ lpfc_debugfs_dumpDif_open(struct inode *inode, struct file *file)
 	if (!debug)
 		goto out;
 
-	/* Round to page boundry */
+	/* Round to page boundary */
 	printk(KERN_ERR	"9060 BLKGRD: %s: _dump_buf_dif=0x%p file=%s\n",
 		__func__, _dump_buf_dif, file->f_dentry->d_name.name);
 	debug->buffer = _dump_buf_dif;
@@ -994,6 +994,85 @@ lpfc_debugfs_dumpDataDif_write(struct file *file, const char __user *buf,
 	spin_unlock(&_dump_buf_lock);
 
 	return nbytes;
+}
+
+static int
+lpfc_debugfs_dif_err_open(struct inode *inode, struct file *file)
+{
+	file->private_data = inode->i_private;
+	return 0;
+}
+
+static ssize_t
+lpfc_debugfs_dif_err_read(struct file *file, char __user *buf,
+	size_t nbytes, loff_t *ppos)
+{
+	struct dentry *dent = file->f_dentry;
+	struct lpfc_hba *phba = file->private_data;
+	char cbuf[16];
+	int cnt = 0;
+
+	if (dent == phba->debug_writeGuard)
+		cnt = snprintf(cbuf, 16, "%u\n", phba->lpfc_injerr_wgrd_cnt);
+	else if (dent == phba->debug_writeApp)
+		cnt = snprintf(cbuf, 16, "%u\n", phba->lpfc_injerr_wapp_cnt);
+	else if (dent == phba->debug_writeRef)
+		cnt = snprintf(cbuf, 16, "%u\n", phba->lpfc_injerr_wref_cnt);
+	else if (dent == phba->debug_readApp)
+		cnt = snprintf(cbuf, 16, "%u\n", phba->lpfc_injerr_rapp_cnt);
+	else if (dent == phba->debug_readRef)
+		cnt = snprintf(cbuf, 16, "%u\n", phba->lpfc_injerr_rref_cnt);
+	else if (dent == phba->debug_InjErrLBA)
+		cnt = snprintf(cbuf, 16, "0x%lx\n",
+				 (unsigned long) phba->lpfc_injerr_lba);
+	else
+		lpfc_printf_log(phba, KERN_ERR, LOG_INIT,
+			 "0547 Unknown debugfs error injection entry\n");
+
+	return simple_read_from_buffer(buf, nbytes, ppos, &cbuf, cnt);
+}
+
+static ssize_t
+lpfc_debugfs_dif_err_write(struct file *file, const char __user *buf,
+	size_t nbytes, loff_t *ppos)
+{
+	struct dentry *dent = file->f_dentry;
+	struct lpfc_hba *phba = file->private_data;
+	char dstbuf[32];
+	unsigned long tmp;
+	int size;
+
+	memset(dstbuf, 0, 32);
+	size = (nbytes < 32) ? nbytes : 32;
+	if (copy_from_user(dstbuf, buf, size))
+		return 0;
+
+	if (strict_strtoul(dstbuf, 0, &tmp))
+		return 0;
+
+	if (dent == phba->debug_writeGuard)
+		phba->lpfc_injerr_wgrd_cnt = (uint32_t)tmp;
+	else if (dent == phba->debug_writeApp)
+		phba->lpfc_injerr_wapp_cnt = (uint32_t)tmp;
+	else if (dent == phba->debug_writeRef)
+		phba->lpfc_injerr_wref_cnt = (uint32_t)tmp;
+	else if (dent == phba->debug_readApp)
+		phba->lpfc_injerr_rapp_cnt = (uint32_t)tmp;
+	else if (dent == phba->debug_readRef)
+		phba->lpfc_injerr_rref_cnt = (uint32_t)tmp;
+	else if (dent == phba->debug_InjErrLBA)
+		phba->lpfc_injerr_lba = (sector_t)tmp;
+	else
+		lpfc_printf_log(phba, KERN_ERR, LOG_INIT,
+			 "0548 Unknown debugfs error injection entry\n");
+
+	return nbytes;
+}
+
+static int
+lpfc_debugfs_dif_err_release(struct inode *inode, struct file *file)
+{
+	return 0;
 }
 
 /**
@@ -1165,7 +1244,8 @@ static int lpfc_idiag_cmd_get(const char __user *buf, size_t nbytes,
 {
 	char mybuf[64];
 	char *pbuf, *step_str;
-	int bsize, i;
+	int i;
+	size_t bsize;
 
 	/* Protect copy from user */
 	if (!access_ok(VERIFY_READ, buf, nbytes))
@@ -1344,8 +1424,8 @@ lpfc_idiag_pcicfg_read(struct file *file, char __user *buf, size_t nbytes,
 		return 0;
 
 	if (idiag.cmd.opcode == LPFC_IDIAG_CMD_PCICFG_RD) {
-		where = idiag.cmd.data[0];
-		count = idiag.cmd.data[1];
+		where = idiag.cmd.data[IDIAG_PCICFG_WHERE_INDX];
+		count = idiag.cmd.data[IDIAG_PCICFG_COUNT_INDX];
 	} else
 		return 0;
 
@@ -1390,6 +1470,11 @@ pcicfg_browse:
 		len += snprintf(pbuffer+len, LPFC_PCI_CFG_SIZE-len,
 				"%08x ", u32val);
 		offset += sizeof(uint32_t);
+		if (offset >= LPFC_PCI_CFG_SIZE) {
+			len += snprintf(pbuffer+len,
+					LPFC_PCI_CFG_SIZE-len, "\n");
+			break;
+		}
 		index -= sizeof(uint32_t);
 		if (!index)
 			len += snprintf(pbuffer+len, LPFC_PCI_CFG_SIZE-len,
@@ -1402,8 +1487,11 @@ pcicfg_browse:
 	}
 
 	/* Set up the offset for next portion of pci cfg read */
-	idiag.offset.last_rd += LPFC_PCI_CFG_RD_SIZE;
-	if (idiag.offset.last_rd >= LPFC_PCI_CFG_SIZE)
+	if (index == 0) {
+		idiag.offset.last_rd += LPFC_PCI_CFG_RD_SIZE;
+		if (idiag.offset.last_rd >= LPFC_PCI_CFG_SIZE)
+			idiag.offset.last_rd = 0;
+	} else
 		idiag.offset.last_rd = 0;
 
 	return simple_read_from_buffer(buf, nbytes, ppos, pbuffer, len);
@@ -1456,8 +1544,8 @@ lpfc_idiag_pcicfg_write(struct file *file, const char __user *buf,
 		if (rc != LPFC_PCI_CFG_RD_CMD_ARG)
 			goto error_out;
 		/* Read command from PCI config space, set up command fields */
-		where = idiag.cmd.data[0];
-		count = idiag.cmd.data[1];
+		where = idiag.cmd.data[IDIAG_PCICFG_WHERE_INDX];
+		count = idiag.cmd.data[IDIAG_PCICFG_COUNT_INDX];
 		if (count == LPFC_PCI_CFG_BROWSE) {
 			if (where % sizeof(uint32_t))
 				goto error_out;
@@ -1492,9 +1580,9 @@ lpfc_idiag_pcicfg_write(struct file *file, const char __user *buf,
 		if (rc != LPFC_PCI_CFG_WR_CMD_ARG)
 			goto error_out;
 		/* Write command to PCI config space, read-modify-write */
-		where = idiag.cmd.data[0];
-		count = idiag.cmd.data[1];
-		value = idiag.cmd.data[2];
+		where = idiag.cmd.data[IDIAG_PCICFG_WHERE_INDX];
+		count = idiag.cmd.data[IDIAG_PCICFG_COUNT_INDX];
+		value = idiag.cmd.data[IDIAG_PCICFG_VALUE_INDX];
 		/* Sanity checks */
 		if ((count != sizeof(uint8_t)) &&
 		    (count != sizeof(uint16_t)) &&
@@ -1587,6 +1675,292 @@ error_out:
 }
 
 /**
+ * lpfc_idiag_baracc_read - idiag debugfs pci bar access read
+ * @file: The file pointer to read from.
+ * @buf: The buffer to copy the data to.
+ * @nbytes: The number of bytes to read.
+ * @ppos: The position in the file to start reading from.
+ *
+ * Description:
+ * This routine reads data from the @phba pci bar memory mapped space
+ * according to the idiag command, and copies to user @buf.
+ *
+ * Returns:
+ * This function returns the amount of data that was read (this could be less
+ * than @nbytes if the end of the file was reached) or a negative error value.
+ **/
+static ssize_t
+lpfc_idiag_baracc_read(struct file *file, char __user *buf, size_t nbytes,
+		       loff_t *ppos)
+{
+	struct lpfc_debug *debug = file->private_data;
+	struct lpfc_hba *phba = (struct lpfc_hba *)debug->i_private;
+	int offset_label, offset, offset_run, len = 0, index;
+	int bar_num, acc_range, bar_size;
+	char *pbuffer;
+	void __iomem *mem_mapped_bar;
+	uint32_t if_type;
+	struct pci_dev *pdev;
+	uint32_t u32val;
+
+	pdev = phba->pcidev;
+	if (!pdev)
+		return 0;
+
+	/* This is a user read operation */
+	debug->op = LPFC_IDIAG_OP_RD;
+
+	if (!debug->buffer)
+		debug->buffer = kmalloc(LPFC_PCI_BAR_RD_BUF_SIZE, GFP_KERNEL);
+	if (!debug->buffer)
+		return 0;
+	pbuffer = debug->buffer;
+
+	if (*ppos)
+		return 0;
+
+	if (idiag.cmd.opcode == LPFC_IDIAG_CMD_BARACC_RD) {
+		bar_num   = idiag.cmd.data[IDIAG_BARACC_BAR_NUM_INDX];
+		offset    = idiag.cmd.data[IDIAG_BARACC_OFF_SET_INDX];
+		acc_range = idiag.cmd.data[IDIAG_BARACC_ACC_MOD_INDX];
+		bar_size = idiag.cmd.data[IDIAG_BARACC_BAR_SZE_INDX];
+	} else
+		return 0;
+
+	if (acc_range == 0)
+		return 0;
+
+	if_type = bf_get(lpfc_sli_intf_if_type, &phba->sli4_hba.sli_intf);
+	if (if_type == LPFC_SLI_INTF_IF_TYPE_0) {
+		if (bar_num == IDIAG_BARACC_BAR_0)
+			mem_mapped_bar = phba->sli4_hba.conf_regs_memmap_p;
+		else if (bar_num == IDIAG_BARACC_BAR_1)
+			mem_mapped_bar = phba->sli4_hba.ctrl_regs_memmap_p;
+		else if (bar_num == IDIAG_BARACC_BAR_2)
+			mem_mapped_bar = phba->sli4_hba.drbl_regs_memmap_p;
+		else
+			return 0;
+	} else if (if_type == LPFC_SLI_INTF_IF_TYPE_2) {
+		if (bar_num == IDIAG_BARACC_BAR_0)
+			mem_mapped_bar = phba->sli4_hba.conf_regs_memmap_p;
+		else
+			return 0;
+	} else
+		return 0;
+
+	/* Read single PCI bar space register */
+	if (acc_range == SINGLE_WORD) {
+		offset_run = offset;
+		u32val = readl(mem_mapped_bar + offset_run);
+		len += snprintf(pbuffer+len, LPFC_PCI_BAR_RD_BUF_SIZE-len,
+				"%05x: %08x\n", offset_run, u32val);
+	} else
+		goto baracc_browse;
+
+	return simple_read_from_buffer(buf, nbytes, ppos, pbuffer, len);
+
+baracc_browse:
+
+	/* Browse all PCI bar space registers */
+	offset_label = idiag.offset.last_rd;
+	offset_run = offset_label;
+
+	/* Read PCI bar memory mapped space */
+	len += snprintf(pbuffer+len, LPFC_PCI_BAR_RD_BUF_SIZE-len,
+			"%05x: ", offset_label);
+	index = LPFC_PCI_BAR_RD_SIZE;
+	while (index > 0) {
+		u32val = readl(mem_mapped_bar + offset_run);
+		len += snprintf(pbuffer+len, LPFC_PCI_BAR_RD_BUF_SIZE-len,
+				"%08x ", u32val);
+		offset_run += sizeof(uint32_t);
+		if (acc_range == LPFC_PCI_BAR_BROWSE) {
+			if (offset_run >= bar_size) {
+				len += snprintf(pbuffer+len,
+					LPFC_PCI_BAR_RD_BUF_SIZE-len, "\n");
+				break;
+			}
+		} else {
+			if (offset_run >= offset +
+			    (acc_range * sizeof(uint32_t))) {
+				len += snprintf(pbuffer+len,
+					LPFC_PCI_BAR_RD_BUF_SIZE-len, "\n");
+				break;
+			}
+		}
+		index -= sizeof(uint32_t);
+		if (!index)
+			len += snprintf(pbuffer+len,
+					LPFC_PCI_BAR_RD_BUF_SIZE-len, "\n");
+		else if (!(index % (8 * sizeof(uint32_t)))) {
+			offset_label += (8 * sizeof(uint32_t));
+			len += snprintf(pbuffer+len,
+					LPFC_PCI_BAR_RD_BUF_SIZE-len,
+					"\n%05x: ", offset_label);
+		}
+	}
+
+	/* Set up the offset for next portion of pci bar read */
+	if (index == 0) {
+		idiag.offset.last_rd += LPFC_PCI_BAR_RD_SIZE;
+		if (acc_range == LPFC_PCI_BAR_BROWSE) {
+			if (idiag.offset.last_rd >= bar_size)
+				idiag.offset.last_rd = 0;
+		} else {
+			if (offset_run >= offset +
+			    (acc_range * sizeof(uint32_t)))
+				idiag.offset.last_rd = offset;
+		}
+	} else {
+		if (acc_range == LPFC_PCI_BAR_BROWSE)
+			idiag.offset.last_rd = 0;
+		else
+			idiag.offset.last_rd = offset;
+	}
+
+	return simple_read_from_buffer(buf, nbytes, ppos, pbuffer, len);
+}
+
+/**
+ * lpfc_idiag_baracc_write - Syntax check and set up idiag bar access commands
+ * @file: The file pointer to read from.
+ * @buf: The buffer to copy the user data from.
+ * @nbytes: The number of bytes to get.
+ * @ppos: The position in the file to start reading from.
+ *
+ * This routine get the debugfs idiag command struct from user space and
+ * then perform the syntax check for PCI bar memory mapped space read or
+ * write command accordingly. In the case of PCI bar memory mapped space
+ * read command, it sets up the command in the idiag command struct for
+ * the debugfs read operation. In the case of PCI bar memorpy mapped space
+ * write operation, it executes the write operation into the PCI bar memory
+ * mapped space accordingly.
+ *
+ * It returns the @nbytges passing in from debugfs user space when successful.
+ * In case of error conditions, it returns proper error code back to the user
+ * space.
+ */
+static ssize_t
+lpfc_idiag_baracc_write(struct file *file, const char __user *buf,
+			size_t nbytes, loff_t *ppos)
+{
+	struct lpfc_debug *debug = file->private_data;
+	struct lpfc_hba *phba = (struct lpfc_hba *)debug->i_private;
+	uint32_t bar_num, bar_size, offset, value, acc_range;
+	struct pci_dev *pdev;
+	void __iomem *mem_mapped_bar;
+	uint32_t if_type;
+	uint32_t u32val;
+	int rc;
+
+	pdev = phba->pcidev;
+	if (!pdev)
+		return -EFAULT;
+
+	/* This is a user write operation */
+	debug->op = LPFC_IDIAG_OP_WR;
+
+	rc = lpfc_idiag_cmd_get(buf, nbytes, &idiag.cmd);
+	if (rc < 0)
+		return rc;
+
+	if_type = bf_get(lpfc_sli_intf_if_type, &phba->sli4_hba.sli_intf);
+	bar_num = idiag.cmd.data[IDIAG_BARACC_BAR_NUM_INDX];
+
+	if (if_type == LPFC_SLI_INTF_IF_TYPE_0) {
+		if ((bar_num != IDIAG_BARACC_BAR_0) &&
+		    (bar_num != IDIAG_BARACC_BAR_1) &&
+		    (bar_num != IDIAG_BARACC_BAR_2))
+			goto error_out;
+	} else if (if_type == LPFC_SLI_INTF_IF_TYPE_2) {
+		if (bar_num != IDIAG_BARACC_BAR_0)
+			goto error_out;
+	} else
+		goto error_out;
+
+	if (if_type == LPFC_SLI_INTF_IF_TYPE_0) {
+		if (bar_num == IDIAG_BARACC_BAR_0) {
+			idiag.cmd.data[IDIAG_BARACC_BAR_SZE_INDX] =
+				LPFC_PCI_IF0_BAR0_SIZE;
+			mem_mapped_bar = phba->sli4_hba.conf_regs_memmap_p;
+		} else if (bar_num == IDIAG_BARACC_BAR_1) {
+			idiag.cmd.data[IDIAG_BARACC_BAR_SZE_INDX] =
+				LPFC_PCI_IF0_BAR1_SIZE;
+			mem_mapped_bar = phba->sli4_hba.ctrl_regs_memmap_p;
+		} else if (bar_num == IDIAG_BARACC_BAR_2) {
+			idiag.cmd.data[IDIAG_BARACC_BAR_SZE_INDX] =
+				LPFC_PCI_IF0_BAR2_SIZE;
+			mem_mapped_bar = phba->sli4_hba.drbl_regs_memmap_p;
+		} else
+			goto error_out;
+	} else if (if_type == LPFC_SLI_INTF_IF_TYPE_2) {
+		if (bar_num == IDIAG_BARACC_BAR_0) {
+			idiag.cmd.data[IDIAG_BARACC_BAR_SZE_INDX] =
+				LPFC_PCI_IF2_BAR0_SIZE;
+			mem_mapped_bar = phba->sli4_hba.conf_regs_memmap_p;
+		} else
+			goto error_out;
+	} else
+		goto error_out;
+
+	offset = idiag.cmd.data[IDIAG_BARACC_OFF_SET_INDX];
+	if (offset % sizeof(uint32_t))
+		goto error_out;
+
+	bar_size = idiag.cmd.data[IDIAG_BARACC_BAR_SZE_INDX];
+	if (idiag.cmd.opcode == LPFC_IDIAG_CMD_BARACC_RD) {
+		/* Sanity check on PCI config read command line arguments */
+		if (rc != LPFC_PCI_BAR_RD_CMD_ARG)
+			goto error_out;
+		acc_range = idiag.cmd.data[IDIAG_BARACC_ACC_MOD_INDX];
+		if (acc_range == LPFC_PCI_BAR_BROWSE) {
+			if (offset > bar_size - sizeof(uint32_t))
+				goto error_out;
+			/* Starting offset to browse */
+			idiag.offset.last_rd = offset;
+		} else if (acc_range > SINGLE_WORD) {
+			if (offset + acc_range * sizeof(uint32_t) > bar_size)
+				goto error_out;
+			/* Starting offset to browse */
+			idiag.offset.last_rd = offset;
+		} else if (acc_range != SINGLE_WORD)
+			goto error_out;
+	} else if (idiag.cmd.opcode == LPFC_IDIAG_CMD_BARACC_WR ||
+		   idiag.cmd.opcode == LPFC_IDIAG_CMD_BARACC_ST ||
+		   idiag.cmd.opcode == LPFC_IDIAG_CMD_BARACC_CL) {
+		/* Sanity check on PCI bar write command line arguments */
+		if (rc != LPFC_PCI_BAR_WR_CMD_ARG)
+			goto error_out;
+		/* Write command to PCI bar space, read-modify-write */
+		acc_range = SINGLE_WORD;
+		value = idiag.cmd.data[IDIAG_BARACC_REG_VAL_INDX];
+		if (idiag.cmd.opcode == LPFC_IDIAG_CMD_BARACC_WR) {
+			writel(value, mem_mapped_bar + offset);
+			readl(mem_mapped_bar + offset);
+		}
+		if (idiag.cmd.opcode == LPFC_IDIAG_CMD_BARACC_ST) {
+			u32val = readl(mem_mapped_bar + offset);
+			u32val |= value;
+			writel(u32val, mem_mapped_bar + offset);
+			readl(mem_mapped_bar + offset);
+		}
+		if (idiag.cmd.opcode == LPFC_IDIAG_CMD_BARACC_CL) {
+			u32val = readl(mem_mapped_bar + offset);
+			u32val &= ~value;
+			writel(u32val, mem_mapped_bar + offset);
+			readl(mem_mapped_bar + offset);
+		}
+	} else
+		/* All other opecodes are illegal for now */
+		goto error_out;
+
+	return nbytes;
+error_out:
+	memset(&idiag, 0, sizeof(idiag));
+	return -EINVAL;
+}
+
+/**
  * lpfc_idiag_queinfo_read - idiag debugfs read queue information
  * @file: The file pointer to read from.
  * @buf: The buffer to copy the data to.
@@ -1622,7 +1996,8 @@ lpfc_idiag_queinfo_read(struct file *file, char __user *buf, size_t nbytes,
 	/* Get slow-path event queue information */
 	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
 			"Slow-path EQ information:\n");
-	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
+	if (phba->sli4_hba.sp_eq) {
+		len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
 			"\tEQID[%02d], "
 			"QE-COUNT[%04d], QE-SIZE[%04d], "
 			"HOST-INDEX[%04d], PORT-INDEX[%04d]\n\n",
@@ -1631,12 +2006,17 @@ lpfc_idiag_queinfo_read(struct file *file, char __user *buf, size_t nbytes,
 			phba->sli4_hba.sp_eq->entry_size,
 			phba->sli4_hba.sp_eq->host_index,
 			phba->sli4_hba.sp_eq->hba_index);
+	}
 
 	/* Get fast-path event queue information */
 	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
 			"Fast-path EQ information:\n");
-	for (fcp_qidx = 0; fcp_qidx < phba->cfg_fcp_eq_count; fcp_qidx++) {
-		len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
+	if (phba->sli4_hba.fp_eq) {
+		for (fcp_qidx = 0; fcp_qidx < phba->cfg_fcp_eq_count;
+		     fcp_qidx++) {
+			if (phba->sli4_hba.fp_eq[fcp_qidx]) {
+				len += snprintf(pbuffer+len,
+					LPFC_QUE_INFO_GET_BUF_SIZE-len,
 				"\tEQID[%02d], "
 				"QE-COUNT[%04d], QE-SIZE[%04d], "
 				"HOST-INDEX[%04d], PORT-INDEX[%04d]\n",
@@ -1645,16 +2025,19 @@ lpfc_idiag_queinfo_read(struct file *file, char __user *buf, size_t nbytes,
 				phba->sli4_hba.fp_eq[fcp_qidx]->entry_size,
 				phba->sli4_hba.fp_eq[fcp_qidx]->host_index,
 				phba->sli4_hba.fp_eq[fcp_qidx]->hba_index);
+			}
+		}
 	}
 	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len, "\n");
 
 	/* Get mailbox complete queue information */
 	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
 			"Slow-path MBX CQ information:\n");
-	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
+	if (phba->sli4_hba.mbx_cq) {
+		len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
 			"Associated EQID[%02d]:\n",
 			phba->sli4_hba.mbx_cq->assoc_qid);
-	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
+		len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
 			"\tCQID[%02d], "
 			"QE-COUNT[%04d], QE-SIZE[%04d], "
 			"HOST-INDEX[%04d], PORT-INDEX[%04d]\n\n",
@@ -1663,14 +2046,16 @@ lpfc_idiag_queinfo_read(struct file *file, char __user *buf, size_t nbytes,
 			phba->sli4_hba.mbx_cq->entry_size,
 			phba->sli4_hba.mbx_cq->host_index,
 			phba->sli4_hba.mbx_cq->hba_index);
+	}
 
 	/* Get slow-path complete queue information */
 	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
 			"Slow-path ELS CQ information:\n");
-	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
+	if (phba->sli4_hba.els_cq) {
+		len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
 			"Associated EQID[%02d]:\n",
 			phba->sli4_hba.els_cq->assoc_qid);
-	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
+		len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
 			"\tCQID [%02d], "
 			"QE-COUNT[%04d], QE-SIZE[%04d], "
 			"HOST-INDEX[%04d], PORT-INDEX[%04d]\n\n",
@@ -1679,16 +2064,21 @@ lpfc_idiag_queinfo_read(struct file *file, char __user *buf, size_t nbytes,
 			phba->sli4_hba.els_cq->entry_size,
 			phba->sli4_hba.els_cq->host_index,
 			phba->sli4_hba.els_cq->hba_index);
+	}
 
 	/* Get fast-path complete queue information */
 	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
 			"Fast-path FCP CQ information:\n");
 	fcp_qidx = 0;
-	do {
-		len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
+	if (phba->sli4_hba.fcp_cq) {
+		do {
+			if (phba->sli4_hba.fcp_cq[fcp_qidx]) {
+				len += snprintf(pbuffer+len,
+					LPFC_QUE_INFO_GET_BUF_SIZE-len,
 				"Associated EQID[%02d]:\n",
 				phba->sli4_hba.fcp_cq[fcp_qidx]->assoc_qid);
-		len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
+				len += snprintf(pbuffer+len,
+					LPFC_QUE_INFO_GET_BUF_SIZE-len,
 				"\tCQID[%02d], "
 				"QE-COUNT[%04d], QE-SIZE[%04d], "
 				"HOST-INDEX[%04d], PORT-INDEX[%04d]\n",
@@ -1697,16 +2087,20 @@ lpfc_idiag_queinfo_read(struct file *file, char __user *buf, size_t nbytes,
 				phba->sli4_hba.fcp_cq[fcp_qidx]->entry_size,
 				phba->sli4_hba.fcp_cq[fcp_qidx]->host_index,
 				phba->sli4_hba.fcp_cq[fcp_qidx]->hba_index);
-	} while (++fcp_qidx < phba->cfg_fcp_eq_count);
-	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len, "\n");
+			}
+		} while (++fcp_qidx < phba->cfg_fcp_eq_count);
+		len += snprintf(pbuffer+len,
+				LPFC_QUE_INFO_GET_BUF_SIZE-len, "\n");
+	}
 
 	/* Get mailbox queue information */
 	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
 			"Slow-path MBX MQ information:\n");
-	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
+	if (phba->sli4_hba.mbx_wq) {
+		len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
 			"Associated CQID[%02d]:\n",
 			phba->sli4_hba.mbx_wq->assoc_qid);
-	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
+		len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
 			"\tWQID[%02d], "
 			"QE-COUNT[%04d], QE-SIZE[%04d], "
 			"HOST-INDEX[%04d], PORT-INDEX[%04d]\n\n",
@@ -1715,14 +2109,16 @@ lpfc_idiag_queinfo_read(struct file *file, char __user *buf, size_t nbytes,
 			phba->sli4_hba.mbx_wq->entry_size,
 			phba->sli4_hba.mbx_wq->host_index,
 			phba->sli4_hba.mbx_wq->hba_index);
+	}
 
 	/* Get slow-path work queue information */
 	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
 			"Slow-path ELS WQ information:\n");
-	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
+	if (phba->sli4_hba.els_wq) {
+		len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
 			"Associated CQID[%02d]:\n",
 			phba->sli4_hba.els_wq->assoc_qid);
-	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
+		len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
 			"\tWQID[%02d], "
 			"QE-COUNT[%04d], QE-SIZE[%04d], "
 			"HOST-INDEX[%04d], PORT-INDEX[%04d]\n\n",
@@ -1731,15 +2127,22 @@ lpfc_idiag_queinfo_read(struct file *file, char __user *buf, size_t nbytes,
 			phba->sli4_hba.els_wq->entry_size,
 			phba->sli4_hba.els_wq->host_index,
 			phba->sli4_hba.els_wq->hba_index);
+	}
 
 	/* Get fast-path work queue information */
 	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
 			"Fast-path FCP WQ information:\n");
-	for (fcp_qidx = 0; fcp_qidx < phba->cfg_fcp_wq_count; fcp_qidx++) {
-		len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
+	if (phba->sli4_hba.fcp_wq) {
+		for (fcp_qidx = 0; fcp_qidx < phba->cfg_fcp_wq_count;
+		     fcp_qidx++) {
+			if (!phba->sli4_hba.fcp_wq[fcp_qidx])
+				continue;
+			len += snprintf(pbuffer+len,
+					LPFC_QUE_INFO_GET_BUF_SIZE-len,
 				"Associated CQID[%02d]:\n",
 				phba->sli4_hba.fcp_wq[fcp_qidx]->assoc_qid);
-		len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
+			len += snprintf(pbuffer+len,
+					LPFC_QUE_INFO_GET_BUF_SIZE-len,
 				"\tWQID[%02d], "
 				"QE-COUNT[%04d], WQE-SIZE[%04d], "
 				"HOST-INDEX[%04d], PORT-INDEX[%04d]\n",
@@ -1748,16 +2151,19 @@ lpfc_idiag_queinfo_read(struct file *file, char __user *buf, size_t nbytes,
 				phba->sli4_hba.fcp_wq[fcp_qidx]->entry_size,
 				phba->sli4_hba.fcp_wq[fcp_qidx]->host_index,
 				phba->sli4_hba.fcp_wq[fcp_qidx]->hba_index);
+		}
+		len += snprintf(pbuffer+len,
+				LPFC_QUE_INFO_GET_BUF_SIZE-len, "\n");
 	}
-	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len, "\n");
 
 	/* Get receive queue information */
 	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
 			"Slow-path RQ information:\n");
-	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
+	if (phba->sli4_hba.hdr_rq && phba->sli4_hba.dat_rq) {
+		len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
 			"Associated CQID[%02d]:\n",
 			phba->sli4_hba.hdr_rq->assoc_qid);
-	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
+		len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
 			"\tHQID[%02d], "
 			"QE-COUNT[%04d], QE-SIZE[%04d], "
 			"HOST-INDEX[%04d], PORT-INDEX[%04d]\n",
@@ -1766,7 +2172,7 @@ lpfc_idiag_queinfo_read(struct file *file, char __user *buf, size_t nbytes,
 			phba->sli4_hba.hdr_rq->entry_size,
 			phba->sli4_hba.hdr_rq->host_index,
 			phba->sli4_hba.hdr_rq->hba_index);
-	len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
+		len += snprintf(pbuffer+len, LPFC_QUE_INFO_GET_BUF_SIZE-len,
 			"\tDQID[%02d], "
 			"QE-COUNT[%04d], QE-SIZE[%04d], "
 			"HOST-INDEX[%04d], PORT-INDEX[%04d]\n",
@@ -1775,7 +2181,7 @@ lpfc_idiag_queinfo_read(struct file *file, char __user *buf, size_t nbytes,
 			phba->sli4_hba.dat_rq->entry_size,
 			phba->sli4_hba.dat_rq->host_index,
 			phba->sli4_hba.dat_rq->hba_index);
-
+	}
 	return simple_read_from_buffer(buf, nbytes, ppos, pbuffer, len);
 }
 
@@ -1888,8 +2294,8 @@ lpfc_idiag_queacc_read(struct file *file, char __user *buf, size_t nbytes,
 		return 0;
 
 	if (idiag.cmd.opcode == LPFC_IDIAG_CMD_QUEACC_RD) {
-		index = idiag.cmd.data[2];
-		count = idiag.cmd.data[3];
+		index = idiag.cmd.data[IDIAG_QUEACC_INDEX_INDX];
+		count = idiag.cmd.data[IDIAG_QUEACC_COUNT_INDX];
 		pque = (struct lpfc_queue *)idiag.ptr_private;
 	} else
 		return 0;
@@ -1961,12 +2367,12 @@ lpfc_idiag_queacc_write(struct file *file, const char __user *buf,
 		return rc;
 
 	/* Get and sanity check on command feilds */
-	quetp  = idiag.cmd.data[0];
-	queid  = idiag.cmd.data[1];
-	index  = idiag.cmd.data[2];
-	count  = idiag.cmd.data[3];
-	offset = idiag.cmd.data[4];
-	value  = idiag.cmd.data[5];
+	quetp  = idiag.cmd.data[IDIAG_QUEACC_QUETP_INDX];
+	queid  = idiag.cmd.data[IDIAG_QUEACC_QUEID_INDX];
+	index  = idiag.cmd.data[IDIAG_QUEACC_INDEX_INDX];
+	count  = idiag.cmd.data[IDIAG_QUEACC_COUNT_INDX];
+	offset = idiag.cmd.data[IDIAG_QUEACC_OFFST_INDX];
+	value  = idiag.cmd.data[IDIAG_QUEACC_VALUE_INDX];
 
 	/* Sanity check on command line arguments */
 	if (idiag.cmd.opcode == LPFC_IDIAG_CMD_QUEACC_WR ||
@@ -1985,7 +2391,8 @@ lpfc_idiag_queacc_write(struct file *file, const char __user *buf,
 	switch (quetp) {
 	case LPFC_IDIAG_EQ:
 		/* Slow-path event queue */
-		if (phba->sli4_hba.sp_eq->queue_id == queid) {
+		if (phba->sli4_hba.sp_eq &&
+		    phba->sli4_hba.sp_eq->queue_id == queid) {
 			/* Sanity check */
 			rc = lpfc_idiag_que_param_check(
 					phba->sli4_hba.sp_eq, index, count);
@@ -1995,23 +2402,29 @@ lpfc_idiag_queacc_write(struct file *file, const char __user *buf,
 			goto pass_check;
 		}
 		/* Fast-path event queue */
-		for (qidx = 0; qidx < phba->cfg_fcp_eq_count; qidx++) {
-			if (phba->sli4_hba.fp_eq[qidx]->queue_id == queid) {
-				/* Sanity check */
-				rc = lpfc_idiag_que_param_check(
+		if (phba->sli4_hba.fp_eq) {
+			for (qidx = 0; qidx < phba->cfg_fcp_eq_count; qidx++) {
+				if (phba->sli4_hba.fp_eq[qidx] &&
+				    phba->sli4_hba.fp_eq[qidx]->queue_id ==
+				    queid) {
+					/* Sanity check */
+					rc = lpfc_idiag_que_param_check(
 						phba->sli4_hba.fp_eq[qidx],
 						index, count);
-				if (rc)
-					goto error_out;
-				idiag.ptr_private = phba->sli4_hba.fp_eq[qidx];
-				goto pass_check;
+					if (rc)
+						goto error_out;
+					idiag.ptr_private =
+						phba->sli4_hba.fp_eq[qidx];
+					goto pass_check;
+				}
 			}
 		}
 		goto error_out;
 		break;
 	case LPFC_IDIAG_CQ:
 		/* MBX complete queue */
-		if (phba->sli4_hba.mbx_cq->queue_id == queid) {
+		if (phba->sli4_hba.mbx_cq &&
+		    phba->sli4_hba.mbx_cq->queue_id == queid) {
 			/* Sanity check */
 			rc = lpfc_idiag_que_param_check(
 					phba->sli4_hba.mbx_cq, index, count);
@@ -2021,7 +2434,8 @@ lpfc_idiag_queacc_write(struct file *file, const char __user *buf,
 			goto pass_check;
 		}
 		/* ELS complete queue */
-		if (phba->sli4_hba.els_cq->queue_id == queid) {
+		if (phba->sli4_hba.els_cq &&
+		    phba->sli4_hba.els_cq->queue_id == queid) {
 			/* Sanity check */
 			rc = lpfc_idiag_que_param_check(
 					phba->sli4_hba.els_cq, index, count);
@@ -2031,25 +2445,30 @@ lpfc_idiag_queacc_write(struct file *file, const char __user *buf,
 			goto pass_check;
 		}
 		/* FCP complete queue */
-		qidx = 0;
-		do {
-			if (phba->sli4_hba.fcp_cq[qidx]->queue_id == queid) {
-				/* Sanity check */
-				rc = lpfc_idiag_que_param_check(
+		if (phba->sli4_hba.fcp_cq) {
+			qidx = 0;
+			do {
+				if (phba->sli4_hba.fcp_cq[qidx] &&
+				    phba->sli4_hba.fcp_cq[qidx]->queue_id ==
+				    queid) {
+					/* Sanity check */
+					rc = lpfc_idiag_que_param_check(
 						phba->sli4_hba.fcp_cq[qidx],
 						index, count);
-				if (rc)
-					goto error_out;
-				idiag.ptr_private =
+					if (rc)
+						goto error_out;
+					idiag.ptr_private =
 						phba->sli4_hba.fcp_cq[qidx];
-				goto pass_check;
-			}
-		} while (++qidx < phba->cfg_fcp_eq_count);
+					goto pass_check;
+				}
+			} while (++qidx < phba->cfg_fcp_eq_count);
+		}
 		goto error_out;
 		break;
 	case LPFC_IDIAG_MQ:
 		/* MBX work queue */
-		if (phba->sli4_hba.mbx_wq->queue_id == queid) {
+		if (phba->sli4_hba.mbx_wq &&
+		    phba->sli4_hba.mbx_wq->queue_id == queid) {
 			/* Sanity check */
 			rc = lpfc_idiag_que_param_check(
 					phba->sli4_hba.mbx_wq, index, count);
@@ -2058,10 +2477,12 @@ lpfc_idiag_queacc_write(struct file *file, const char __user *buf,
 			idiag.ptr_private = phba->sli4_hba.mbx_wq;
 			goto pass_check;
 		}
+		goto error_out;
 		break;
 	case LPFC_IDIAG_WQ:
 		/* ELS work queue */
-		if (phba->sli4_hba.els_wq->queue_id == queid) {
+		if (phba->sli4_hba.els_wq &&
+		    phba->sli4_hba.els_wq->queue_id == queid) {
 			/* Sanity check */
 			rc = lpfc_idiag_que_param_check(
 					phba->sli4_hba.els_wq, index, count);
@@ -2071,24 +2492,30 @@ lpfc_idiag_queacc_write(struct file *file, const char __user *buf,
 			goto pass_check;
 		}
 		/* FCP work queue */
-		for (qidx = 0; qidx < phba->cfg_fcp_wq_count; qidx++) {
-			if (phba->sli4_hba.fcp_wq[qidx]->queue_id == queid) {
-				/* Sanity check */
-				rc = lpfc_idiag_que_param_check(
+		if (phba->sli4_hba.fcp_wq) {
+			for (qidx = 0; qidx < phba->cfg_fcp_wq_count; qidx++) {
+				if (!phba->sli4_hba.fcp_wq[qidx])
+					continue;
+				if (phba->sli4_hba.fcp_wq[qidx]->queue_id ==
+				    queid) {
+					/* Sanity check */
+					rc = lpfc_idiag_que_param_check(
 						phba->sli4_hba.fcp_wq[qidx],
 						index, count);
-				if (rc)
-					goto error_out;
-				idiag.ptr_private =
-					phba->sli4_hba.fcp_wq[qidx];
-				goto pass_check;
+					if (rc)
+						goto error_out;
+					idiag.ptr_private =
+						phba->sli4_hba.fcp_wq[qidx];
+					goto pass_check;
+				}
 			}
 		}
 		goto error_out;
 		break;
 	case LPFC_IDIAG_RQ:
 		/* HDR queue */
-		if (phba->sli4_hba.hdr_rq->queue_id == queid) {
+		if (phba->sli4_hba.hdr_rq &&
+		    phba->sli4_hba.hdr_rq->queue_id == queid) {
 			/* Sanity check */
 			rc = lpfc_idiag_que_param_check(
 					phba->sli4_hba.hdr_rq, index, count);
@@ -2098,7 +2525,8 @@ lpfc_idiag_queacc_write(struct file *file, const char __user *buf,
 			goto pass_check;
 		}
 		/* DAT queue */
-		if (phba->sli4_hba.dat_rq->queue_id == queid) {
+		if (phba->sli4_hba.dat_rq &&
+		    phba->sli4_hba.dat_rq->queue_id == queid) {
 			/* Sanity check */
 			rc = lpfc_idiag_que_param_check(
 					phba->sli4_hba.dat_rq, index, count);
@@ -2235,7 +2663,7 @@ lpfc_idiag_drbacc_read(struct file *file, char __user *buf, size_t nbytes,
 		return 0;
 
 	if (idiag.cmd.opcode == LPFC_IDIAG_CMD_DRBACC_RD)
-		drb_reg_id = idiag.cmd.data[0];
+		drb_reg_id = idiag.cmd.data[IDIAG_DRBACC_REGID_INDX];
 	else
 		return 0;
 
@@ -2286,8 +2714,8 @@ lpfc_idiag_drbacc_write(struct file *file, const char __user *buf,
 		return rc;
 
 	/* Sanity check on command line arguments */
-	drb_reg_id = idiag.cmd.data[0];
-	value = idiag.cmd.data[1];
+	drb_reg_id = idiag.cmd.data[IDIAG_DRBACC_REGID_INDX];
+	value = idiag.cmd.data[IDIAG_DRBACC_VALUE_INDX];
 
 	if (idiag.cmd.opcode == LPFC_IDIAG_CMD_DRBACC_WR ||
 	    idiag.cmd.opcode == LPFC_IDIAG_CMD_DRBACC_ST ||
@@ -2450,7 +2878,7 @@ lpfc_idiag_ctlacc_read(struct file *file, char __user *buf, size_t nbytes,
 		return 0;
 
 	if (idiag.cmd.opcode == LPFC_IDIAG_CMD_CTLACC_RD)
-		ctl_reg_id = idiag.cmd.data[0];
+		ctl_reg_id = idiag.cmd.data[IDIAG_CTLACC_REGID_INDX];
 	else
 		return 0;
 
@@ -2498,8 +2926,8 @@ lpfc_idiag_ctlacc_write(struct file *file, const char __user *buf,
 		return rc;
 
 	/* Sanity check on command line arguments */
-	ctl_reg_id = idiag.cmd.data[0];
-	value = idiag.cmd.data[1];
+	ctl_reg_id = idiag.cmd.data[IDIAG_CTLACC_REGID_INDX];
+	value = idiag.cmd.data[IDIAG_CTLACC_VALUE_INDX];
 
 	if (idiag.cmd.opcode == LPFC_IDIAG_CMD_CTLACC_WR ||
 	    idiag.cmd.opcode == LPFC_IDIAG_CMD_CTLACC_ST ||
@@ -2589,13 +3017,10 @@ lpfc_idiag_mbxacc_get_setup(struct lpfc_hba *phba, char *pbuffer)
 	uint32_t mbx_dump_map, mbx_dump_cnt, mbx_word_cnt, mbx_mbox_cmd;
 	int len = 0;
 
-	mbx_dump_map = idiag.cmd.data[0];
-	mbx_dump_cnt = idiag.cmd.data[1];
-	mbx_word_cnt = idiag.cmd.data[2];
-	if (mbx_dump_map & LPFC_MBX_DMP_ISSUE_MBX_ALL)
-		mbx_mbox_cmd = idiag.cmd.data[3];
-	else
-		mbx_mbox_cmd = 0;
+	mbx_mbox_cmd = idiag.cmd.data[IDIAG_MBXACC_MBCMD_INDX];
+	mbx_dump_map = idiag.cmd.data[IDIAG_MBXACC_DPMAP_INDX];
+	mbx_dump_cnt = idiag.cmd.data[IDIAG_MBXACC_DPCNT_INDX];
+	mbx_word_cnt = idiag.cmd.data[IDIAG_MBXACC_WDCNT_INDX];
 
 	len += snprintf(pbuffer+len, LPFC_MBX_ACC_BUF_SIZE-len,
 			"mbx_dump_map: 0x%08x\n", mbx_dump_map);
@@ -2645,7 +3070,8 @@ lpfc_idiag_mbxacc_read(struct file *file, char __user *buf, size_t nbytes,
 	if (*ppos)
 		return 0;
 
-	if (idiag.cmd.opcode != LPFC_IDIAG_CMD_MBXACC_DP)
+	if ((idiag.cmd.opcode != LPFC_IDIAG_CMD_MBXACC_DP) &&
+	    (idiag.cmd.opcode != LPFC_IDIAG_BSG_MBXACC_DP))
 		return 0;
 
 	len = lpfc_idiag_mbxacc_get_setup(phba, pbuffer);
@@ -2684,39 +3110,42 @@ lpfc_idiag_mbxacc_write(struct file *file, const char __user *buf,
 		return rc;
 
 	/* Sanity check on command line arguments */
-	mbx_dump_map = idiag.cmd.data[0];
-	mbx_dump_cnt = idiag.cmd.data[1];
-	mbx_word_cnt = idiag.cmd.data[2];
-	mbx_mbox_cmd = idiag.cmd.data[3];
+	mbx_mbox_cmd = idiag.cmd.data[IDIAG_MBXACC_MBCMD_INDX];
+	mbx_dump_map = idiag.cmd.data[IDIAG_MBXACC_DPMAP_INDX];
+	mbx_dump_cnt = idiag.cmd.data[IDIAG_MBXACC_DPCNT_INDX];
+	mbx_word_cnt = idiag.cmd.data[IDIAG_MBXACC_WDCNT_INDX];
 
 	if (idiag.cmd.opcode == LPFC_IDIAG_CMD_MBXACC_DP) {
-		if (!(mbx_dump_map & LPFC_MBX_DMP_ALL))
+		if (!(mbx_dump_map & LPFC_MBX_DMP_MBX_ALL))
 			goto error_out;
-		if (mbx_dump_map & ~LPFC_MBX_DMP_ALL)
+		if ((mbx_dump_map & ~LPFC_MBX_DMP_MBX_ALL) &&
+		    (mbx_dump_map != LPFC_MBX_DMP_ALL))
 			goto error_out;
-		if (mbx_word_cnt == 0)
+		if (mbx_word_cnt > sizeof(MAILBOX_t))
 			goto error_out;
-		if (mbx_dump_map & LPFC_BSG_MBX_DMP_ALL) {
-			if (mbx_dump_cnt > (BSG_MBOX_SIZE)/4)
-				goto error_out;
-			if ((rc != LPFC_BSG_MBX_DMP_CMD_ARG) &&
-			    (rc != LPFC_MBX_DMP_ISSUE_MBX_CMD_ARG))
-				goto error_out;
-		}
-		if (mbx_dump_map & LPFC_MBX_DMP_ISSUE_MBX_ALL) {
-			if (mbx_dump_cnt > sizeof(MAILBOX_t))
-				goto error_out;
-			if (rc != LPFC_MBX_DMP_ISSUE_MBX_CMD_ARG)
-				goto error_out;
-		}
-		if ((mbx_dump_map & LPFC_MBX_DMP_ISSUE_MBX_ALL) &&
-		    (mbx_mbox_cmd & ~0xff))
+	} else if (idiag.cmd.opcode == LPFC_IDIAG_BSG_MBXACC_DP) {
+		if (!(mbx_dump_map & LPFC_BSG_DMP_MBX_ALL))
 			goto error_out;
-		/* as condition for stop mailbox dump */
-		if (mbx_dump_cnt == 0)
-			goto reset_out;
+		if ((mbx_dump_map & ~LPFC_BSG_DMP_MBX_ALL) &&
+		    (mbx_dump_map != LPFC_MBX_DMP_ALL))
+			goto error_out;
+		if (mbx_word_cnt > (BSG_MBOX_SIZE)/4)
+			goto error_out;
+		if (mbx_mbox_cmd != 0x9b)
+			goto error_out;
 	} else
 		goto error_out;
+
+	if (mbx_word_cnt == 0)
+		goto error_out;
+	if (rc != LPFC_MBX_DMP_ARG)
+		goto error_out;
+	if (mbx_mbox_cmd & ~0xff)
+		goto error_out;
+
+	/* condition for stop mailbox dump */
+	if (mbx_dump_cnt == 0)
+		goto reset_out;
 
 	return nbytes;
 
@@ -2954,7 +3383,7 @@ lpfc_idiag_extacc_write(struct file *file, const char __user *buf,
 	if (rc < 0)
 		return rc;
 
-	ext_map = idiag.cmd.data[0];
+	ext_map = idiag.cmd.data[IDIAG_EXTACC_EXMAP_INDX];
 
 	if (idiag.cmd.opcode != LPFC_IDIAG_CMD_EXTACC_RD)
 		goto error_out;
@@ -3008,7 +3437,7 @@ lpfc_idiag_extacc_read(struct file *file, char __user *buf, size_t nbytes,
 	if (idiag.cmd.opcode != LPFC_IDIAG_CMD_EXTACC_RD)
 		return 0;
 
-	ext_map = idiag.cmd.data[0];
+	ext_map = idiag.cmd.data[IDIAG_EXTACC_EXMAP_INDX];
 	if (ext_map & LPFC_EXT_ACC_AVAIL)
 		len = lpfc_idiag_extacc_avail_get(phba, pbuffer, len);
 	if (ext_map & LPFC_EXT_ACC_ALLOC)
@@ -3084,6 +3513,16 @@ static const struct file_operations lpfc_debugfs_op_dumpDif = {
 	.release =      lpfc_debugfs_dumpDataDif_release,
 };
 
+#undef lpfc_debugfs_op_dif_err
+static const struct file_operations lpfc_debugfs_op_dif_err = {
+	.owner =	THIS_MODULE,
+	.open =		lpfc_debugfs_dif_err_open,
+	.llseek =	lpfc_debugfs_lseek,
+	.read =		lpfc_debugfs_dif_err_read,
+	.write =	lpfc_debugfs_dif_err_write,
+	.release =	lpfc_debugfs_dif_err_release,
+};
+
 #undef lpfc_debugfs_op_slow_ring_trc
 static const struct file_operations lpfc_debugfs_op_slow_ring_trc = {
 	.owner =        THIS_MODULE,
@@ -3106,6 +3545,16 @@ static const struct file_operations lpfc_idiag_op_pciCfg = {
 	.llseek =       lpfc_debugfs_lseek,
 	.read =         lpfc_idiag_pcicfg_read,
 	.write =        lpfc_idiag_pcicfg_write,
+	.release =      lpfc_idiag_cmd_release,
+};
+
+#undef lpfc_idiag_op_barAcc
+static const struct file_operations lpfc_idiag_op_barAcc = {
+	.owner =        THIS_MODULE,
+	.open =         lpfc_idiag_open,
+	.llseek =       lpfc_debugfs_lseek,
+	.read =         lpfc_idiag_baracc_read,
+	.write =        lpfc_idiag_baracc_write,
 	.release =      lpfc_idiag_cmd_release,
 };
 
@@ -3184,51 +3633,56 @@ lpfc_idiag_mbxacc_dump_bsg_mbox(struct lpfc_hba *phba, enum nemb_type nemb_tp,
 				struct lpfc_dmabuf *dmabuf, uint32_t ext_buf)
 {
 #ifdef CONFIG_SCSI_LPFC_DEBUG_FS
-	uint32_t *mbx_dump_map, *mbx_dump_cnt, *mbx_word_cnt;
+	uint32_t *mbx_mbox_cmd, *mbx_dump_map, *mbx_dump_cnt, *mbx_word_cnt;
 	char line_buf[LPFC_MBX_ACC_LBUF_SZ];
 	int len = 0;
 	uint32_t do_dump = 0;
 	uint32_t *pword;
 	uint32_t i;
 
-	if (idiag.cmd.opcode != LPFC_IDIAG_CMD_MBXACC_DP)
+	if (idiag.cmd.opcode != LPFC_IDIAG_BSG_MBXACC_DP)
 		return;
 
-	mbx_dump_map = &idiag.cmd.data[0];
-	mbx_dump_cnt = &idiag.cmd.data[1];
-	mbx_word_cnt = &idiag.cmd.data[2];
+	mbx_mbox_cmd = &idiag.cmd.data[IDIAG_MBXACC_MBCMD_INDX];
+	mbx_dump_map = &idiag.cmd.data[IDIAG_MBXACC_DPMAP_INDX];
+	mbx_dump_cnt = &idiag.cmd.data[IDIAG_MBXACC_DPCNT_INDX];
+	mbx_word_cnt = &idiag.cmd.data[IDIAG_MBXACC_WDCNT_INDX];
 
-	if (!(*mbx_dump_map & LPFC_MBX_DMP_ALL) || (*mbx_dump_cnt == 0) ||
+	if (!(*mbx_dump_map & LPFC_MBX_DMP_ALL) ||
+	    (*mbx_dump_cnt == 0) ||
 	    (*mbx_word_cnt == 0))
 		return;
 
+	if (*mbx_mbox_cmd != 0x9B)
+		return;
+
 	if ((mbox_tp == mbox_rd) && (dma_tp == dma_mbox)) {
-		if (*mbx_dump_map & LPFC_BSG_MBX_DMP_RD_MBX) {
-			do_dump |= LPFC_BSG_MBX_DMP_RD_MBX;
+		if (*mbx_dump_map & LPFC_BSG_DMP_MBX_RD_MBX) {
+			do_dump |= LPFC_BSG_DMP_MBX_RD_MBX;
 			printk(KERN_ERR "\nRead mbox command (x%x), "
 			       "nemb:0x%x, extbuf_cnt:%d:\n",
 			       sta_tp, nemb_tp, ext_buf);
 		}
 	}
 	if ((mbox_tp == mbox_rd) && (dma_tp == dma_ebuf)) {
-		if (*mbx_dump_map & LPFC_BSG_MBX_DMP_RD_BUF) {
-			do_dump |= LPFC_BSG_MBX_DMP_RD_BUF;
+		if (*mbx_dump_map & LPFC_BSG_DMP_MBX_RD_BUF) {
+			do_dump |= LPFC_BSG_DMP_MBX_RD_BUF;
 			printk(KERN_ERR "\nRead mbox buffer (x%x), "
 			       "nemb:0x%x, extbuf_seq:%d:\n",
 			       sta_tp, nemb_tp, ext_buf);
 		}
 	}
 	if ((mbox_tp == mbox_wr) && (dma_tp == dma_mbox)) {
-		if (*mbx_dump_map & LPFC_BSG_MBX_DMP_WR_MBX) {
-			do_dump |= LPFC_BSG_MBX_DMP_WR_MBX;
+		if (*mbx_dump_map & LPFC_BSG_DMP_MBX_WR_MBX) {
+			do_dump |= LPFC_BSG_DMP_MBX_WR_MBX;
 			printk(KERN_ERR "\nWrite mbox command (x%x), "
 			       "nemb:0x%x, extbuf_cnt:%d:\n",
 			       sta_tp, nemb_tp, ext_buf);
 		}
 	}
 	if ((mbox_tp == mbox_wr) && (dma_tp == dma_ebuf)) {
-		if (*mbx_dump_map & LPFC_BSG_MBX_DMP_WR_BUF) {
-			do_dump |= LPFC_BSG_MBX_DMP_WR_MBX;
+		if (*mbx_dump_map & LPFC_BSG_DMP_MBX_WR_BUF) {
+			do_dump |= LPFC_BSG_DMP_MBX_WR_BUF;
 			printk(KERN_ERR "\nWrite mbox buffer (x%x), "
 			       "nemb:0x%x, extbuf_seq:%d:\n",
 			       sta_tp, nemb_tp, ext_buf);
@@ -3285,21 +3739,22 @@ lpfc_idiag_mbxacc_dump_issue_mbox(struct lpfc_hba *phba, MAILBOX_t *pmbox)
 	if (idiag.cmd.opcode != LPFC_IDIAG_CMD_MBXACC_DP)
 		return;
 
-	mbx_dump_map = &idiag.cmd.data[0];
-	mbx_dump_cnt = &idiag.cmd.data[1];
-	mbx_word_cnt = &idiag.cmd.data[2];
-	mbx_mbox_cmd = &idiag.cmd.data[3];
+	mbx_mbox_cmd = &idiag.cmd.data[IDIAG_MBXACC_MBCMD_INDX];
+	mbx_dump_map = &idiag.cmd.data[IDIAG_MBXACC_DPMAP_INDX];
+	mbx_dump_cnt = &idiag.cmd.data[IDIAG_MBXACC_DPCNT_INDX];
+	mbx_word_cnt = &idiag.cmd.data[IDIAG_MBXACC_WDCNT_INDX];
 
-	if (!(*mbx_dump_map & LPFC_MBX_DMP_ISSUE_MBX_ALL) ||
+	if (!(*mbx_dump_map & LPFC_MBX_DMP_MBX_ALL) ||
 	    (*mbx_dump_cnt == 0) ||
 	    (*mbx_word_cnt == 0))
 		return;
 
-	if ((*mbx_mbox_cmd != 0xff) && (*mbx_mbox_cmd != pmbox->mbxCommand))
+	if ((*mbx_mbox_cmd != LPFC_MBX_ALL_CMD) &&
+	    (*mbx_mbox_cmd != pmbox->mbxCommand))
 		return;
 
 	/* dump buffer content */
-	if (*mbx_dump_map & LPFC_MBX_DMP_ISSUE_MBX_WORD) {
+	if (*mbx_dump_map & LPFC_MBX_DMP_MBX_WORD) {
 		printk(KERN_ERR "Mailbox command:0x%x dump by word:\n",
 		       pmbox->mbxCommand);
 		pword = (uint32_t *)pmbox;
@@ -3322,7 +3777,7 @@ lpfc_idiag_mbxacc_dump_issue_mbox(struct lpfc_hba *phba, MAILBOX_t *pmbox)
 			printk(KERN_ERR "%s\n", line_buf);
 		printk(KERN_ERR "\n");
 	}
-	if (*mbx_dump_map & LPFC_MBX_DMP_ISSUE_MBX_BYTE) {
+	if (*mbx_dump_map & LPFC_MBX_DMP_MBX_BYTE) {
 		printk(KERN_ERR "Mailbox command:0x%x dump by byte:\n",
 		       pmbox->mbxCommand);
 		pbyte = (uint8_t *)pmbox;
@@ -3476,6 +3931,74 @@ lpfc_debugfs_initialize(struct lpfc_vport *vport)
 			goto debug_failed;
 		}
 
+		/* Setup DIF Error Injections */
+		snprintf(name, sizeof(name), "InjErrLBA");
+		phba->debug_InjErrLBA =
+			debugfs_create_file(name, S_IFREG|S_IRUGO|S_IWUSR,
+			phba->hba_debugfs_root,
+			phba, &lpfc_debugfs_op_dif_err);
+		if (!phba->debug_InjErrLBA) {
+			lpfc_printf_vlog(vport, KERN_ERR, LOG_INIT,
+				"0807 Cannot create debugfs InjErrLBA\n");
+			goto debug_failed;
+		}
+		phba->lpfc_injerr_lba = LPFC_INJERR_LBA_OFF;
+
+		snprintf(name, sizeof(name), "writeGuardInjErr");
+		phba->debug_writeGuard =
+			debugfs_create_file(name, S_IFREG|S_IRUGO|S_IWUSR,
+			phba->hba_debugfs_root,
+			phba, &lpfc_debugfs_op_dif_err);
+		if (!phba->debug_writeGuard) {
+			lpfc_printf_vlog(vport, KERN_ERR, LOG_INIT,
+				"0802 Cannot create debugfs writeGuard\n");
+			goto debug_failed;
+		}
+
+		snprintf(name, sizeof(name), "writeAppInjErr");
+		phba->debug_writeApp =
+			debugfs_create_file(name, S_IFREG|S_IRUGO|S_IWUSR,
+			phba->hba_debugfs_root,
+			phba, &lpfc_debugfs_op_dif_err);
+		if (!phba->debug_writeApp) {
+			lpfc_printf_vlog(vport, KERN_ERR, LOG_INIT,
+				"0803 Cannot create debugfs writeApp\n");
+			goto debug_failed;
+		}
+
+		snprintf(name, sizeof(name), "writeRefInjErr");
+		phba->debug_writeRef =
+			debugfs_create_file(name, S_IFREG|S_IRUGO|S_IWUSR,
+			phba->hba_debugfs_root,
+			phba, &lpfc_debugfs_op_dif_err);
+		if (!phba->debug_writeRef) {
+			lpfc_printf_vlog(vport, KERN_ERR, LOG_INIT,
+				"0804 Cannot create debugfs writeRef\n");
+			goto debug_failed;
+		}
+
+		snprintf(name, sizeof(name), "readAppInjErr");
+		phba->debug_readApp =
+			debugfs_create_file(name, S_IFREG|S_IRUGO|S_IWUSR,
+			phba->hba_debugfs_root,
+			phba, &lpfc_debugfs_op_dif_err);
+		if (!phba->debug_readApp) {
+			lpfc_printf_vlog(vport, KERN_ERR, LOG_INIT,
+				"0805 Cannot create debugfs readApp\n");
+			goto debug_failed;
+		}
+
+		snprintf(name, sizeof(name), "readRefInjErr");
+		phba->debug_readRef =
+			debugfs_create_file(name, S_IFREG|S_IRUGO|S_IWUSR,
+			phba->hba_debugfs_root,
+			phba, &lpfc_debugfs_op_dif_err);
+		if (!phba->debug_readRef) {
+			lpfc_printf_vlog(vport, KERN_ERR, LOG_INIT,
+				"0806 Cannot create debugfs readApp\n");
+			goto debug_failed;
+		}
+
 		/* Setup slow ring trace */
 		if (lpfc_debugfs_max_slow_ring_trc) {
 			num = lpfc_debugfs_max_slow_ring_trc - 1;
@@ -3529,7 +4052,7 @@ lpfc_debugfs_initialize(struct lpfc_vport *vport)
 			debugfs_create_dir(name, phba->hba_debugfs_root);
 		if (!vport->vport_debugfs_root) {
 			lpfc_printf_vlog(vport, KERN_ERR, LOG_INIT,
-					 "0417 Cant create debugfs\n");
+					 "0417 Can't create debugfs\n");
 			goto debug_failed;
 		}
 		atomic_inc(&phba->debugfs_vport_count);
@@ -3614,6 +4137,20 @@ lpfc_debugfs_initialize(struct lpfc_vport *vport)
 		if (!phba->idiag_pci_cfg) {
 			lpfc_printf_vlog(vport, KERN_ERR, LOG_INIT,
 					 "2923 Can't create idiag debugfs\n");
+			goto debug_failed;
+		}
+		idiag.offset.last_rd = 0;
+	}
+
+	/* iDiag PCI BAR access */
+	snprintf(name, sizeof(name), "barAcc");
+	if (!phba->idiag_bar_acc) {
+		phba->idiag_bar_acc =
+			debugfs_create_file(name, S_IFREG|S_IRUGO|S_IWUSR,
+				phba->idiag_root, phba, &lpfc_idiag_op_barAcc);
+		if (!phba->idiag_bar_acc) {
+			lpfc_printf_vlog(vport, KERN_ERR, LOG_INIT,
+					"3056 Can't create idiag debugfs\n");
 			goto debug_failed;
 		}
 		idiag.offset.last_rd = 0;
@@ -3764,6 +4301,30 @@ lpfc_debugfs_terminate(struct lpfc_vport *vport)
 			debugfs_remove(phba->debug_dumpDif); /* dumpDif */
 			phba->debug_dumpDif = NULL;
 		}
+		if (phba->debug_InjErrLBA) {
+			debugfs_remove(phba->debug_InjErrLBA); /* InjErrLBA */
+			phba->debug_InjErrLBA = NULL;
+		}
+		if (phba->debug_writeGuard) {
+			debugfs_remove(phba->debug_writeGuard); /* writeGuard */
+			phba->debug_writeGuard = NULL;
+		}
+		if (phba->debug_writeApp) {
+			debugfs_remove(phba->debug_writeApp); /* writeApp */
+			phba->debug_writeApp = NULL;
+		}
+		if (phba->debug_writeRef) {
+			debugfs_remove(phba->debug_writeRef); /* writeRef */
+			phba->debug_writeRef = NULL;
+		}
+		if (phba->debug_readApp) {
+			debugfs_remove(phba->debug_readApp); /* readApp */
+			phba->debug_readApp = NULL;
+		}
+		if (phba->debug_readRef) {
+			debugfs_remove(phba->debug_readRef); /* readRef */
+			phba->debug_readRef = NULL;
+		}
 
 		if (phba->slow_ring_trc) {
 			kfree(phba->slow_ring_trc);
@@ -3808,6 +4369,11 @@ lpfc_debugfs_terminate(struct lpfc_vport *vport)
 				/* iDiag queInfo */
 				debugfs_remove(phba->idiag_que_info);
 				phba->idiag_que_info = NULL;
+			}
+			if (phba->idiag_bar_acc) {
+				/* iDiag barAcc */
+				debugfs_remove(phba->idiag_bar_acc);
+				phba->idiag_bar_acc = NULL;
 			}
 			if (phba->idiag_pci_cfg) {
 				/* iDiag pciCfg */

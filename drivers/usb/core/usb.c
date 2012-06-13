@@ -228,6 +228,7 @@ static void usb_release_dev(struct device *dev)
 	hcd = bus_to_hcd(udev->bus);
 
 	usb_destroy_configuration(udev);
+	usb_release_bos_descriptor(udev);
 	usb_put_hcd(hcd);
 	kfree(udev->product);
 	kfree(udev->manufacturer);
@@ -482,6 +483,13 @@ struct usb_device *usb_alloc_dev(struct usb_device *parent,
 		dev->authorized = usb_hcd->authorized_default;
 		dev->wusb = usb_bus_is_wusb(bus)? 1 : 0;
 	}
+
+	/* RedHat KABI
+	 * struct allocated internally, mark the BOS bit to allow
+	 * us to use it
+	 */
+	dev->bos_kabi_bit = 1;
+
 	return dev;
 }
 

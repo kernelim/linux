@@ -3,7 +3,7 @@
  * Broadcom MIPS core driver
  *
  * Copyright 2005, Broadcom Corporation
- * Copyright 2006, 2007, Michael Buesch <mb@bu3sch.de>
+ * Copyright 2006, 2007, Michael Buesch <m@bues.ch>
  *
  * Licensed under the GNU/GPL. See COPYING for details.
  */
@@ -270,7 +270,6 @@ void ssb_mipscore_init(struct ssb_mipscore *mcore)
 				set_irq(dev, irq++);
 			}
 			break;
-			/* fallthrough */
 		case SSB_DEV_PCI:
 		case SSB_DEV_ETHERNET:
 		case SSB_DEV_ETHERNET_GBIT:
@@ -281,6 +280,10 @@ void ssb_mipscore_init(struct ssb_mipscore *mcore)
 				set_irq(dev, irq++);
 				break;
 			}
+			/* fallthrough */
+		case SSB_DEV_EXTIF:
+			set_irq(dev, 0);
+			break;
 		}
 	}
 	ssb_dprintk(KERN_INFO PFX "after irq reconfiguration\n");

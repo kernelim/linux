@@ -4,7 +4,7 @@
 
   Copyright (c) 2005 Martin Langer <martin-langer@gmx.de>,
 		     Stefano Brivio <stefano.brivio@polimi.it>
-		     Michael Buesch <mbuesch@freenet.de>
+		     Michael Buesch <m@bues.ch>
 		     Danny van Dyk <kugelfang@gentoo.org>
      Andreas Jaggi <andreas.jaggi@waterwave.ch>
   Copyright (c) 2007 Larry Finger <Larry.Finger@lwfinger.net>
@@ -32,6 +32,7 @@
 #include <linux/delay.h>
 #include <linux/pci.h>
 #include <linux/sched.h>
+#include <linux/slab.h>
 #include <linux/types.h>
 
 #include "b43legacy.h"
@@ -152,7 +153,7 @@ void b43legacy_phy_calibrate(struct b43legacy_wldev *dev)
 	phy->calibrated = 1;
 }
 
-/* intialize B PHY power control
+/* initialize B PHY power control
  * as described in http://bcm-specs.sipsolutions.net/InitPowerControl
  */
 static void b43legacy_phy_init_pctl(struct b43legacy_wldev *dev)

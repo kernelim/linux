@@ -33,7 +33,6 @@ static ctl_table nfs_cb_sysctls[] = {
 		.extra1 = (int *)&nfs_set_port_min,
 		.extra2 = (int *)&nfs_set_port_max,
 	},
-#ifndef CONFIG_NFS_USE_NEW_IDMAPPER
 	{
 		.ctl_name = CTL_UNNUMBERED,
 		.procname = "idmap_cache_timeout",
@@ -43,7 +42,6 @@ static ctl_table nfs_cb_sysctls[] = {
 		.proc_handler = &proc_dointvec_jiffies,
 		.strategy = &sysctl_jiffies,
 	},
-#endif /* CONFIG_NFS_USE_NEW_IDMAPPER */
 #endif
 	{
 		.ctl_name	= CTL_UNNUMBERED,

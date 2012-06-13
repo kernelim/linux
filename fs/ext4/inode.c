@@ -58,6 +58,7 @@ static inline int ext4_begin_ordered_truncate(struct inode *inode,
 }
 
 static void ext4_invalidatepage(struct page *page, unsigned long offset);
+static int ext4_writepage(struct page *page, struct writeback_control *wbc);
 
 /*
  * Test whether an inode is a fast symlink.
@@ -1791,7 +1792,11 @@ static int ext4_ordered_write_end(struct file *file,
 			ext4_orphan_add(handle, inode);
 		if (ret2 < 0)
 			ret = ret2;
+	} else {
+		unlock_page(page);
+		page_cache_release(page);
 	}
+
 	ret2 = ext4_journal_stop(handle);
 	if (!ret)
 		ret = ret2;
@@ -2083,7 +2088,7 @@ static int mpage_da_submit_io(struct mpage_da_data *mpd)
 			BUG_ON(PageWriteback(page));
 
 			pages_skipped = mpd->wbc->pages_skipped;
-			err = mapping->a_ops->writepage(page, mpd->wbc);
+			err = ext4_writepage(page, mpd->wbc);
 			if (!err && (pages_skipped == mpd->wbc->pages_skipped))
 				/*
 				 * have successfully written the page
@@ -2207,8 +2212,7 @@ static inline void __unmap_underlying_blocks(struct inode *inode,
 		unmap_underlying_metadata(bdev, bh->b_blocknr + i);
 }
 
-static void ext4_da_block_invalidatepages(struct mpage_da_data *mpd,
-					sector_t logical, long blk_cnt)
+static void ext4_da_block_invalidatepages(struct mpage_da_data *mpd)
 {
 	int nr_pages, i;
 	pgoff_t index, end;
@@ -2216,9 +2220,8 @@ static void ext4_da_block_invalidatepages(struct mpage_da_data *mpd,
 	struct inode *inode = mpd->inode;
 	struct address_space *mapping = inode->i_mapping;
 
-	index = logical >> (PAGE_CACHE_SHIFT - inode->i_blkbits);
-	end   = (logical + blk_cnt - 1) >>
-				(PAGE_CACHE_SHIFT - inode->i_blkbits);
+	index = mpd->first_page;
+	end   = mpd->next_page - 1;
 	while (index <= end) {
 		nr_pages = pagevec_lookup(&pvec, mapping, index, PAGEVEC_SIZE);
 		if (nr_pages == 0)
@@ -2258,14 +2261,15 @@ static void ext4_print_free_blocks(struct inode *inode)
 }
 
 /*
- * mpage_da_map_blocks - go through given space
+ * mpage_da_map_and_submit - go through given space, map them
+ *       if necessary, and then submit them for I/O
  *
  * @mpd - bh describing space
  *
  * The function skips space we know is already mapped to disk blocks.
  *
  */
-static int mpage_da_map_blocks(struct mpage_da_data *mpd)
+static void mpage_da_map_and_submit(struct mpage_da_data *mpd)
 {
 	int err, blks, get_blocks_flags;
 	struct buffer_head new;
@@ -2275,18 +2279,14 @@ static int mpage_da_map_blocks(struct mpage_da_data *mpd)
 	handle_t *handle = NULL;
 
 	/*
-	 * We consider only non-mapped and non-allocated blocks
+	 * If the blocks are mapped already, or we couldn't accumulate
+	 * any blocks, then proceed immediately to the submission stage.
 	 */
-	if ((mpd->b_state  & (1 << BH_Mapped)) &&
-		!(mpd->b_state & (1 << BH_Delay)) &&
-		!(mpd->b_state & (1 << BH_Unwritten)))
-		return 0;
-
-	/*
-	 * If we didn't accumulate anything to write simply return
-	 */
-	if (!mpd->b_size)
-		return 0;
+	if ((mpd->b_size == 0) ||
+	    ((mpd->b_state  & (1 << BH_Mapped)) &&
+	     !(mpd->b_state & (1 << BH_Delay)) &&
+	     !(mpd->b_state & (1 << BH_Unwritten))))
+		goto submit_io;
 
 	handle = ext4_journal_current_handle();
 	BUG_ON(!handle);
@@ -2319,17 +2319,18 @@ static int mpage_da_map_blocks(struct mpage_da_data *mpd)
 	if (blks < 0) {
 		err = blks;
 		/*
-		 * If get block returns with error we simply
-		 * return. Later writepage will redirty the page and
-		 * writepages will find the dirty page again
+		 * If get block returns EAGAIN or ENOSPC and there
+		 * appears to be free blocks we will call
+		 * ext4_writepage() for all of the pages which will
+		 * just redirty the pages.
 		 */
 		if (err == -EAGAIN)
-			return 0;
+			goto submit_io;
 
 		if (err == -ENOSPC &&
 		    ext4_count_free_blocks(mpd->inode->i_sb)) {
 			mpd->retval = err;
-			return 0;
+			goto submit_io;
 		}
 
 		/*
@@ -2351,9 +2352,11 @@ static int mpage_da_map_blocks(struct mpage_da_data *mpd)
 			ext4_print_free_blocks(mpd->inode);
 		}
 		/* invalidate all the pages */
-		ext4_da_block_invalidatepages(mpd, next,
-				mpd->b_size >> mpd->inode->i_blkbits);
-		return err;
+		ext4_da_block_invalidatepages(mpd);
+
+		/* Mark this page range as having been completed */
+		mpd->io_done = 1;
+		return;
 	}
 	BUG_ON(blks == 0);
 
@@ -2372,8 +2375,11 @@ static int mpage_da_map_blocks(struct mpage_da_data *mpd)
 
 	if (ext4_should_order_data(mpd->inode)) {
 		err = ext4_jbd2_file_inode(handle, mpd->inode);
-		if (err)
-			return err;
+		if (err) {
+			/* This only happens if the journal is aborted */
+			mpd->retval = err;
+			goto submit_io;
+		}
 	}
 
 	/*
@@ -2384,10 +2390,16 @@ static int mpage_da_map_blocks(struct mpage_da_data *mpd)
 		disksize = i_size_read(mpd->inode);
 	if (disksize > EXT4_I(mpd->inode)->i_disksize) {
 		ext4_update_i_disksize(mpd->inode, disksize);
-		return ext4_mark_inode_dirty(handle, mpd->inode);
+		err = ext4_mark_inode_dirty(handle, mpd->inode);
+		if (err)
+			ext4_error(mpd->inode->i_sb,
+				   "Failed to mark inode %lu dirty",
+				   mpd->inode->i_ino);
 	}
 
-	return 0;
+submit_io:
+	mpage_da_submit_io(mpd);
+	mpd->io_done = 1;
 }
 
 #define BH_FLAGS ((1 << BH_Uptodate) | (1 << BH_Mapped) | \
@@ -2464,9 +2476,7 @@ flush_it:
 	 * We couldn't merge the block to our extent, so we
 	 * need to flush current  extent and start new one
 	 */
-	if (mpage_da_map_blocks(mpd) == 0)
-		mpage_da_submit_io(mpd);
-	mpd->io_done = 1;
+	mpage_da_map_and_submit(mpd);
 	return;
 }
 
@@ -2498,15 +2508,13 @@ static int __mpage_da_writepage(struct page *page,
 	if (mpd->next_page != page->index) {
 		/*
 		 * Nope, we can't. So, we map non-allocated blocks
-		 * and start IO on them using writepage()
+		 * and start IO on them
 		 */
 		if (mpd->next_page != mpd->first_page) {
-			if (mpage_da_map_blocks(mpd) == 0)
-				mpage_da_submit_io(mpd);
+			mpage_da_map_and_submit(mpd);
 			/*
 			 * skip rest of the page in the page_vec
 			 */
-			mpd->io_done = 1;
 			redirty_page_for_writepage(wbc, page);
 			unlock_page(page);
 			return MPAGE_DA_EXTENT_TAIL;
@@ -2793,7 +2801,11 @@ static int ext4_writepage(struct page *page,
 			 * via journal_submit_inode_data_buffers.
 			 * If we don't have mapping block we just ignore
 			 * them. We can also reach here via shrink_page_list
+			 * but it should never be for direct reclaim so warn
+			 * if that happens
 			 */
+			WARN_ON_ONCE((current->flags & (PF_MEMALLOC|PF_KSWAPD)) ==
+				PF_MEMALLOC);
 			redirty_page_for_writepage(wbc, page);
 			unlock_page(page);
 			return 0;
@@ -3153,9 +3165,7 @@ retry:
 		 * them for I/O.
 		 */
 		if (!mpd.io_done && mpd.next_page != mpd.first_page) {
-			if (mpage_da_map_blocks(&mpd) == 0)
-				mpage_da_submit_io(&mpd);
-			mpd.io_done = 1;
+			mpage_da_map_and_submit(&mpd);
 			ret = MPAGE_DA_EXTENT_TAIL;
 		}
 		trace_ext4_da_write_pages(inode, &mpd);
@@ -3173,12 +3183,13 @@ retry:
 			ret = 0;
 		} else if (ret == MPAGE_DA_EXTENT_TAIL) {
 			/*
-			 * got one extent now try with
-			 * rest of the pages
+			 * Got one extent now try with rest of the pages.
+			 * If mpd.retval is set -EIO, journal is aborted.
+			 * So we don't need to write any more.
 			 */
 			pages_written += mpd.pages_written;
 			wbc->pages_skipped = pages_skipped;
-			ret = 0;
+			ret = mpd.retval;
 			io_done = 1;
 		} else if (wbc->nr_to_write)
 			/*
@@ -3354,13 +3365,14 @@ static int ext4_da_write_end(struct file *file,
 	int write_mode = (int)(unsigned long)fsdata;
 
 	if (write_mode == FALL_BACK_TO_NONDELALLOC) {
-		if (ext4_should_order_data(inode)) {
+		switch (ext4_inode_journal_mode(inode)) {
+		case EXT4_INODE_ORDER_DATA_MODE:
 			return ext4_ordered_write_end(file, mapping, pos,
 					len, copied, page, fsdata);
-		} else if (ext4_should_writeback_data(inode)) {
+		case EXT4_INODE_WRITEBACK_DATA_MODE:
 			return ext4_writeback_write_end(file, mapping, pos,
 					len, copied, page, fsdata);
-		} else {
+		default:
 			BUG();
 		}
 	}
@@ -4154,18 +4166,25 @@ static const struct address_space_operations ext4_da_aops = {
 
 void ext4_set_aops(struct inode *inode)
 {
-	if (ext4_should_order_data(inode) &&
-		test_opt(inode->i_sb, DELALLOC))
-		inode->i_mapping->a_ops = &ext4_da_aops;
-	else if (ext4_should_order_data(inode))
-		inode->i_mapping->a_ops = &ext4_ordered_aops;
-	else if (ext4_should_writeback_data(inode) &&
-		 test_opt(inode->i_sb, DELALLOC))
-		inode->i_mapping->a_ops = &ext4_da_aops;
-	else if (ext4_should_writeback_data(inode))
-		inode->i_mapping->a_ops = &ext4_writeback_aops;
-	else
+	switch (ext4_inode_journal_mode(inode)) {
+	case EXT4_INODE_ORDER_DATA_MODE:
+		if (test_opt(inode->i_sb, DELALLOC))
+			inode->i_mapping->a_ops = &ext4_da_aops;
+		else
+			inode->i_mapping->a_ops = &ext4_ordered_aops;
+		break;
+	case EXT4_INODE_WRITEBACK_DATA_MODE:
+		if (test_opt(inode->i_sb, DELALLOC))
+			inode->i_mapping->a_ops = &ext4_da_aops;
+		else
+			inode->i_mapping->a_ops = &ext4_writeback_aops;
+		break;
+	case EXT4_INODE_JOURNAL_DATA_MODE:
 		inode->i_mapping->a_ops = &ext4_journalled_aops;
+		break;
+	default:
+		BUG();
+	}
 }
 
 /*
@@ -6080,6 +6099,8 @@ int ext4_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf)
 	if (page_has_buffers(page)) {
 		if (!walk_page_buffers(NULL, page_buffers(page), 0, len, NULL,
 					ext4_bh_unmapped)) {
+			/* Wait so that we don't change page under IO */
+			wait_on_page_writeback(page);
 			ret = VM_FAULT_LOCKED;
 			goto out;
 		}

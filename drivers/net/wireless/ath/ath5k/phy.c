@@ -20,15 +20,107 @@
  *
  */
 
-#define _ATH5K_PHY
-
 #include <linux/delay.h>
+#include <linux/slab.h>
+#include <asm/unaligned.h>
 
 #include "ath5k.h"
 #include "reg.h"
-#include "base.h"
 #include "rfbuffer.h"
 #include "rfgain.h"
+#include "../regd.h"
+
+
+/******************\
+* Helper functions *
+\******************/
+
+/*
+ * Get the PHY Chip revision
+ */
+u16 ath5k_hw_radio_revision(struct ath5k_hw *ah, enum ieee80211_band band)
+{
+	unsigned int i;
+	u32 srev;
+	u16 ret;
+
+	/*
+	 * Set the radio chip access register
+	 */
+	switch (band) {
+	case IEEE80211_BAND_2GHZ:
+		ath5k_hw_reg_write(ah, AR5K_PHY_SHIFT_2GHZ, AR5K_PHY(0));
+		break;
+	case IEEE80211_BAND_5GHZ:
+		ath5k_hw_reg_write(ah, AR5K_PHY_SHIFT_5GHZ, AR5K_PHY(0));
+		break;
+	default:
+		return 0;
+	}
+
+	mdelay(2);
+
+	/* ...wait until PHY is ready and read the selected radio revision */
+	ath5k_hw_reg_write(ah, 0x00001c16, AR5K_PHY(0x34));
+
+	for (i = 0; i < 8; i++)
+		ath5k_hw_reg_write(ah, 0x00010000, AR5K_PHY(0x20));
+
+	if (ah->ah_version == AR5K_AR5210) {
+		srev = ath5k_hw_reg_read(ah, AR5K_PHY(256) >> 28) & 0xf;
+		ret = (u16)ath5k_hw_bitswap(srev, 4) + 1;
+	} else {
+		srev = (ath5k_hw_reg_read(ah, AR5K_PHY(0x100)) >> 24) & 0xff;
+		ret = (u16)ath5k_hw_bitswap(((srev & 0xf0) >> 4) |
+				((srev & 0x0f) << 4), 8);
+	}
+
+	/* Reset to the 5GHz mode */
+	ath5k_hw_reg_write(ah, AR5K_PHY_SHIFT_5GHZ, AR5K_PHY(0));
+
+	return ret;
+}
+
+/*
+ * Check if a channel is supported
+ */
+bool ath5k_channel_ok(struct ath5k_hw *ah, struct ieee80211_channel *channel)
+{
+	u16 freq = channel->center_freq;
+
+	/* Check if the channel is in our supported range */
+	if (channel->band == IEEE80211_BAND_2GHZ) {
+		if ((freq >= ah->ah_capabilities.cap_range.range_2ghz_min) &&
+		    (freq <= ah->ah_capabilities.cap_range.range_2ghz_max))
+			return true;
+	} else if (channel->band == IEEE80211_BAND_5GHZ)
+		if ((freq >= ah->ah_capabilities.cap_range.range_5ghz_min) &&
+		    (freq <= ah->ah_capabilities.cap_range.range_5ghz_max))
+			return true;
+
+	return false;
+}
+
+bool ath5k_hw_chan_has_spur_noise(struct ath5k_hw *ah,
+				struct ieee80211_channel *channel)
+{
+	u8 refclk_freq;
+
+	if ((ah->ah_radio == AR5K_RF5112) ||
+	(ah->ah_radio == AR5K_RF5413) ||
+	(ah->ah_radio == AR5K_RF2413) ||
+	(ah->ah_mac_version == (AR5K_SREV_AR2417 >> 4)))
+		refclk_freq = 40;
+	else
+		refclk_freq = 32;
+
+	if ((channel->center_freq % refclk_freq != 0) &&
+	((channel->center_freq % refclk_freq < 10) ||
+	(channel->center_freq % refclk_freq > 22)))
+		return true;
+	else
+		return false;
+}
 
 /*
  * Used to modify RF Banks before writing them to AR5K_RF_BUFFER
@@ -85,7 +177,7 @@ static unsigned int ath5k_hw_rfb_op(struct ath5k_hw *ah,
 		data = ath5k_hw_bitswap(val, num_bits);
 
 	for (bits_shifted = 0, bits_left = num_bits; bits_left > 0;
-	position = 0, entry++) {
+	     position = 0, entry++) {
 
 		last_bit = (position + bits_left > 8) ? 8 :
 					position + bits_left;
@@ -111,13 +203,125 @@ static unsigned int ath5k_hw_rfb_op(struct ath5k_hw *ah,
 	return data;
 }
 
+/**
+ * ath5k_hw_write_ofdm_timings - set OFDM timings on AR5212
+ *
+ * @ah: the &struct ath5k_hw
+ * @channel: the currently set channel upon reset
+ *
+ * Write the delta slope coefficient (used on pilot tracking ?) for OFDM
+ * operation on the AR5212 upon reset. This is a helper for ath5k_hw_phy_init.
+ *
+ * Since delta slope is floating point we split it on its exponent and
+ * mantissa and provide these values on hw.
+ *
+ * For more infos i think this patent is related
+ * http://www.freepatentsonline.com/7184495.html
+ */
+static inline int ath5k_hw_write_ofdm_timings(struct ath5k_hw *ah,
+	struct ieee80211_channel *channel)
+{
+	/* Get exponent and mantissa and set it */
+	u32 coef_scaled, coef_exp, coef_man,
+		ds_coef_exp, ds_coef_man, clock;
+
+	BUG_ON(!(ah->ah_version == AR5K_AR5212) ||
+		(channel->hw_value == AR5K_MODE_11B));
+
+	/* Get coefficient
+	 * ALGO: coef = (5 * clock / carrier_freq) / 2
+	 * we scale coef by shifting clock value by 24 for
+	 * better precision since we use integers */
+	switch (ah->ah_bwmode) {
+	case AR5K_BWMODE_40MHZ:
+		clock = 40 * 2;
+		break;
+	case AR5K_BWMODE_10MHZ:
+		clock = 40 / 2;
+		break;
+	case AR5K_BWMODE_5MHZ:
+		clock = 40 / 4;
+		break;
+	default:
+		clock = 40;
+		break;
+	}
+	coef_scaled = ((5 * (clock << 24)) / 2) / channel->center_freq;
+
+	/* Get exponent
+	 * ALGO: coef_exp = 14 - highest set bit position */
+	coef_exp = ilog2(coef_scaled);
+
+	/* Doesn't make sense if it's zero*/
+	if (!coef_scaled || !coef_exp)
+		return -EINVAL;
+
+	/* Note: we've shifted coef_scaled by 24 */
+	coef_exp = 14 - (coef_exp - 24);
+
+
+	/* Get mantissa (significant digits)
+	 * ALGO: coef_mant = floor(coef_scaled* 2^coef_exp+0.5) */
+	coef_man = coef_scaled +
+		(1 << (24 - coef_exp - 1));
+
+	/* Calculate delta slope coefficient exponent
+	 * and mantissa (remove scaling) and set them on hw */
+	ds_coef_man = coef_man >> (24 - coef_exp);
+	ds_coef_exp = coef_exp - 16;
+
+	AR5K_REG_WRITE_BITS(ah, AR5K_PHY_TIMING_3,
+		AR5K_PHY_TIMING_3_DSC_MAN, ds_coef_man);
+	AR5K_REG_WRITE_BITS(ah, AR5K_PHY_TIMING_3,
+		AR5K_PHY_TIMING_3_DSC_EXP, ds_coef_exp);
+
+	return 0;
+}
+
+int ath5k_hw_phy_disable(struct ath5k_hw *ah)
+{
+	/*Just a try M.F.*/
+	ath5k_hw_reg_write(ah, AR5K_PHY_ACT_DISABLE, AR5K_PHY_ACT);
+
+	return 0;
+}
+
+/*
+ * Wait for synth to settle
+ */
+static void ath5k_hw_wait_for_synth(struct ath5k_hw *ah,
+			struct ieee80211_channel *channel)
+{
+	/*
+	 * On 5211+ read activation -> rx delay
+	 * and use it (100ns steps).
+	 */
+	if (ah->ah_version != AR5K_AR5210) {
+		u32 delay;
+		delay = ath5k_hw_reg_read(ah, AR5K_PHY_RX_DELAY) &
+			AR5K_PHY_RX_DELAY_M;
+		delay = (channel->hw_value == AR5K_MODE_11B) ?
+			((delay << 2) / 22) : (delay / 10);
+		if (ah->ah_bwmode == AR5K_BWMODE_10MHZ)
+			delay = delay << 1;
+		if (ah->ah_bwmode == AR5K_BWMODE_5MHZ)
+			delay = delay << 2;
+		/* XXX: /2 on turbo ? Let's be safe
+		 * for now */
+		udelay(100 + delay);
+	} else {
+		mdelay(1);
+	}
+}
+
+
 /**********************\
 * RF Gain optimization *
 \**********************/
 
 /*
- * This code is used to optimize rf gain on different environments
- * (temprature mostly) based on feedback from a power detector.
+ * This code is used to optimize RF gain on different environments
+ * (temperature mostly) based on feedback from a power detector.
  *
  * It's only used on RF5111 and RF5112, later RF chips seem to have
  * auto adjustment on hw -notice they have a much smaller BANK 7 and
@@ -135,11 +339,11 @@ static unsigned int ath5k_hw_rfb_op(struct ath5k_hw *ah,
  * http://madwifi-project.org/ticket/1659
  * with various measurements and diagrams
  *
- * TODO: Deal with power drops due to probes by setting an apropriate
+ * TODO: Deal with power drops due to probes by setting an appropriate
  * tx power on the probe packets ! Make this part of the calibration process.
  */
 
-/* Initialize ah_gain durring attach */
+/* Initialize ah_gain during attach */
 int ath5k_hw_rfgain_opt_init(struct ath5k_hw *ah)
 {
 	/* Initialize the gain optimization values */
@@ -163,7 +367,7 @@ int ath5k_hw_rfgain_opt_init(struct ath5k_hw *ah)
 	return 0;
 }
 
-/* Schedule a gain probe check on the next transmited packet.
+/* Schedule a gain probe check on the next transmitted packet.
  * That means our next packet is going to be sent with lower
  * tx power and a Peak to Average Power Detector (PAPD) will try
  * to measure the gain.
@@ -272,7 +476,7 @@ static bool ath5k_hw_rf_check_gainf_readback(struct ath5k_hw *ah)
 		level[0] = 0;
 		level[1] = (step == 63) ? 50 : step + 4;
 		level[2] = (step != 63) ? 64 : level[0];
-		level[3] = level[2] + 50 ;
+		level[3] = level[2] + 50;
 
 		ah->ah_gain.g_high = level[3] -
 			(step == 63 ? AR5K_GAIN_DYN_ADJUST_HI_MARGIN : -5);
@@ -303,7 +507,7 @@ static bool ath5k_hw_rf_check_gainf_readback(struct ath5k_hw *ah)
 }
 
 /* Perform gain_F adjustment by choosing the right set
- * of parameters from rf gain optimization ladder */
+ * of parameters from RF gain optimization ladder */
 static s8 ath5k_hw_rf_gainf_adjust(struct ath5k_hw *ah)
 {
 	const struct ath5k_gain_opt *go;
@@ -349,7 +553,7 @@ static s8 ath5k_hw_rf_gainf_adjust(struct ath5k_hw *ah)
 
 		for (ah->ah_gain.g_target = ah->ah_gain.g_current;
 				ah->ah_gain.g_target <= ah->ah_gain.g_low &&
-				ah->ah_gain.g_step_idx < go->go_steps_count-1;
+				ah->ah_gain.g_step_idx < go->go_steps_count - 1;
 				g_step = &go->go_step[ah->ah_gain.g_step_idx])
 			ah->ah_gain.g_target -= 2 *
 			    (go->go_step[++ah->ah_gain.g_step_idx].gos_gain -
@@ -360,7 +564,7 @@ static s8 ath5k_hw_rf_gainf_adjust(struct ath5k_hw *ah)
 	}
 
 done:
-	ATH5K_DBG(ah->ah_sc, ATH5K_DEBUG_CALIBRATE,
+	ATH5K_DBG(ah, ATH5K_DEBUG_CALIBRATE,
 		"ret %d, gain step %u, current gain %u, target gain %u\n",
 		ret, ah->ah_gain.g_step_idx, ah->ah_gain.g_current,
 		ah->ah_gain.g_target);
@@ -368,7 +572,7 @@ done:
 	return ret;
 }
 
-/* Main callback for thermal rf gain calibration engine
+/* Main callback for thermal RF gain calibration engine
  * Check for a new gain reading and schedule an adjustment
  * if needed.
  *
@@ -378,8 +582,6 @@ enum ath5k_rfgain ath5k_hw_gainf_calibrate(struct ath5k_hw *ah)
 {
 	u32 data, type;
 	struct ath5k_eeprom_info *ee = &ah->ah_capabilities.cap_eeprom;
-
-	ATH5K_TRACE(ah->ah_sc);
 
 	if (ah->ah_rf_banks == NULL ||
 	ah->ah_gain.g_state == AR5K_RFGAIN_INACTIVE)
@@ -416,13 +618,13 @@ enum ath5k_rfgain ath5k_hw_gainf_calibrate(struct ath5k_hw *ah)
 			ath5k_hw_rf_gainf_corr(ah);
 			ah->ah_gain.g_current =
 				ah->ah_gain.g_current >= ah->ah_gain.g_f_corr ?
-				(ah->ah_gain.g_current-ah->ah_gain.g_f_corr) :
+				(ah->ah_gain.g_current - ah->ah_gain.g_f_corr) :
 				0;
 		}
 
 		/* Check if measurement is ok and if we need
 		 * to adjust gain, schedule a gain adjustment,
-		 * else switch back to the acive state */
+		 * else switch back to the active state */
 		if (ath5k_hw_rf_check_gainf_readback(ah) &&
 		AR5K_GAIN_CHECK_ADJUST(&ah->ah_gain) &&
 		ath5k_hw_rf_gainf_adjust(ah)) {
@@ -436,13 +638,13 @@ done:
 	return ah->ah_gain.g_state;
 }
 
-/* Write initial rf gain table to set the RF sensitivity
+/* Write initial RF gain table to set the RF sensitivity
  * this one works on all RF chips and has nothing to do
  * with gain_F calibration */
-int ath5k_hw_rfgain_init(struct ath5k_hw *ah, unsigned int freq)
+static int ath5k_hw_rfgain_init(struct ath5k_hw *ah, enum ieee80211_band band)
 {
 	const struct ath5k_ini_rfgain *ath5k_rfg;
-	unsigned int i, size;
+	unsigned int i, size, index;
 
 	switch (ah->ah_radio) {
 	case AR5K_RF5111:
@@ -474,17 +676,11 @@ int ath5k_hw_rfgain_init(struct ath5k_hw *ah, unsigned int freq)
 		return -EINVAL;
 	}
 
-	switch (freq) {
-	case AR5K_INI_RFGAIN_2GHZ:
-	case AR5K_INI_RFGAIN_5GHZ:
-		break;
-	default:
-		return -EINVAL;
-	}
+	index = (band == IEEE80211_BAND_2GHZ) ? 1 : 0;
 
 	for (i = 0; i < size; i++) {
 		AR5K_REG_WAIT(i);
-		ath5k_hw_reg_write(ah, ath5k_rfg[i].rfg_value[freq],
+		ath5k_hw_reg_write(ah, ath5k_rfg[i].rfg_value[index],
 			(u32)ath5k_rfg[i].rfg_register);
 	}
 
@@ -497,12 +693,11 @@ int ath5k_hw_rfgain_init(struct ath5k_hw *ah, unsigned int freq)
 * RF Registers setup *
 \********************/
 
-
 /*
- * Setup RF registers by writing rf buffer on hw
+ * Setup RF registers by writing RF buffer on hw
  */
-int ath5k_hw_rfregs_init(struct ath5k_hw *ah, struct ieee80211_channel *channel,
-		unsigned int mode)
+static int ath5k_hw_rfregs_init(struct ath5k_hw *ah,
+	struct ieee80211_channel *channel, unsigned int mode)
 {
 	const struct ath5k_rf_reg *rf_regs;
 	const struct ath5k_ini_rfbuffer *ini_rfb;
@@ -574,14 +769,14 @@ int ath5k_hw_rfregs_init(struct ath5k_hw *ah, struct ieee80211_channel *channel,
 		return -EINVAL;
 	}
 
-	/* If it's the first time we set rf buffer, allocate
+	/* If it's the first time we set RF buffer, allocate
 	 * ah->ah_rf_banks based on ah->ah_rf_banks_size
 	 * we set above */
 	if (ah->ah_rf_banks == NULL) {
 		ah->ah_rf_banks = kmalloc(sizeof(u32) * ah->ah_rf_banks_size,
 								GFP_KERNEL);
 		if (ah->ah_rf_banks == NULL) {
-			ATH5K_ERR(ah->ah_sc, "out of memory\n");
+			ATH5K_ERR(ah, "out of memory\n");
 			return -ENOMEM;
 		}
 	}
@@ -591,7 +786,7 @@ int ath5k_hw_rfregs_init(struct ath5k_hw *ah, struct ieee80211_channel *channel,
 
 	for (i = 0; i < ah->ah_rf_banks_size; i++) {
 		if (ini_rfb[i].rfb_bank >= AR5K_MAX_RF_BANKS) {
-			ATH5K_ERR(ah->ah_sc, "invalid bank\n");
+			ATH5K_ERR(ah, "invalid bank\n");
 			return -EINVAL;
 		}
 
@@ -605,9 +800,9 @@ int ath5k_hw_rfregs_init(struct ath5k_hw *ah, struct ieee80211_channel *channel,
 	}
 
 	/* Set Output and Driver bias current (OB/DB) */
-	if (channel->hw_value & CHANNEL_2GHZ) {
+	if (channel->band == IEEE80211_BAND_2GHZ) {
 
-		if (channel->hw_value & CHANNEL_CCK)
+		if (channel->hw_value == AR5K_MODE_11B)
 			ee_mode = AR5K_EEPROM_MODE_11B;
 		else
 			ee_mode = AR5K_EEPROM_MODE_11G;
@@ -616,7 +811,7 @@ int ath5k_hw_rfregs_init(struct ath5k_hw *ah, struct ieee80211_channel *channel,
 		 * use b_OB and b_DB parameters stored
 		 * in eeprom on ee->ee_ob[ee_mode][0]
 		 *
-		 * For all other chips we use OB/DB for 2Ghz
+		 * For all other chips we use OB/DB for 2GHz
 		 * stored in the b/g modal section just like
 		 * 802.11a on ee->ee_ob[ee_mode][1] */
 		if ((ah->ah_radio == AR5K_RF5111) ||
@@ -632,7 +827,7 @@ int ath5k_hw_rfregs_init(struct ath5k_hw *ah, struct ieee80211_channel *channel,
 						AR5K_RF_DB_2GHZ, true);
 
 	/* RF5111 always needs OB/DB for 5GHz, even if we use 2GHz */
-	} else if ((channel->hw_value & CHANNEL_5GHZ) ||
+	} else if ((channel->band == IEEE80211_BAND_5GHZ) ||
 			(ah->ah_radio == AR5K_RF5111)) {
 
 		/* For 11a, Turbo and XR we need to choose
@@ -655,11 +850,16 @@ int ath5k_hw_rfregs_init(struct ath5k_hw *ah, struct ieee80211_channel *channel,
 
 	g_step = &go->go_step[ah->ah_gain.g_step_idx];
 
+	/* Set turbo mode (N/A on RF5413) */
+	if ((ah->ah_bwmode == AR5K_BWMODE_40MHZ) &&
+	(ah->ah_radio != AR5K_RF5413))
+		ath5k_hw_rfb_op(ah, rf_regs, 1, AR5K_RF_TURBO, false);
+
 	/* Bank Modifications (chip-specific) */
 	if (ah->ah_radio == AR5K_RF5111) {
 
 		/* Set gain_F settings according to current step */
-		if (channel->hw_value & CHANNEL_OFDM) {
+		if (channel->hw_value != AR5K_MODE_11B) {
 
 			AR5K_REG_WRITE_BITS(ah, AR5K_PHY_FRAME_CTL,
 					AR5K_PHY_FRAME_CTL_TX_CLIP,
@@ -694,13 +894,29 @@ int ath5k_hw_rfregs_init(struct ath5k_hw *ah, struct ieee80211_channel *channel,
 		ath5k_hw_rfb_op(ah, rf_regs, ee->ee_xpd[ee_mode],
 						AR5K_RF_PLO_SEL, true);
 
-		/* TODO: Half/quarter channel support */
+		/* Tweak power detectors for half/quarter rate support */
+		if (ah->ah_bwmode == AR5K_BWMODE_5MHZ ||
+		ah->ah_bwmode == AR5K_BWMODE_10MHZ) {
+			u8 wait_i;
+
+			ath5k_hw_rfb_op(ah, rf_regs, 0x1f,
+						AR5K_RF_WAIT_S, true);
+
+			wait_i = (ah->ah_bwmode == AR5K_BWMODE_5MHZ) ?
+							0x1f : 0x10;
+
+			ath5k_hw_rfb_op(ah, rf_regs, wait_i,
+						AR5K_RF_WAIT_I, true);
+			ath5k_hw_rfb_op(ah, rf_regs, 3,
+						AR5K_RF_MAX_TIME, true);
+
+		}
 	}
 
 	if (ah->ah_radio == AR5K_RF5112) {
 
 		/* Set gain_F settings according to current step */
-		if (channel->hw_value & CHANNEL_OFDM) {
+		if (channel->hw_value != AR5K_MODE_11B) {
 
 			ath5k_hw_rfb_op(ah, rf_regs, g_step->gos_param[0],
 						AR5K_RF_MIXGAIN_OVR, true);
@@ -758,17 +974,20 @@ int ath5k_hw_rfregs_init(struct ath5k_hw *ah, struct ieee80211_channel *channel,
 			}
 
 			/* Lower synth voltage on Rev 2 */
-			ath5k_hw_rfb_op(ah, rf_regs, 2,
-					AR5K_RF_HIGH_VC_CP, true);
+			if (ah->ah_radio == AR5K_RF5112 &&
+			    (ah->ah_radio_5ghz_revision & AR5K_SREV_REV) > 0) {
+				ath5k_hw_rfb_op(ah, rf_regs, 2,
+						AR5K_RF_HIGH_VC_CP, true);
 
-			ath5k_hw_rfb_op(ah, rf_regs, 2,
-					AR5K_RF_MID_VC_CP, true);
+				ath5k_hw_rfb_op(ah, rf_regs, 2,
+						AR5K_RF_MID_VC_CP, true);
 
-			ath5k_hw_rfb_op(ah, rf_regs, 2,
-					AR5K_RF_LOW_VC_CP, true);
+				ath5k_hw_rfb_op(ah, rf_regs, 2,
+						AR5K_RF_LOW_VC_CP, true);
 
-			ath5k_hw_rfb_op(ah, rf_regs, 2,
-					AR5K_RF_PUSH_UP, true);
+				ath5k_hw_rfb_op(ah, rf_regs, 2,
+						AR5K_RF_PUSH_UP, true);
+			}
 
 			/* Decrease power consumption on 5213+ BaseBand */
 			if (ah->ah_phy_revision >= AR5K_SREV_PHY_5212A) {
@@ -792,12 +1011,24 @@ int ath5k_hw_rfregs_init(struct ath5k_hw *ah, struct ieee80211_channel *channel,
 		ath5k_hw_rfb_op(ah, rf_regs, ee->ee_i_gain[ee_mode],
 						AR5K_RF_GAIN_I, true);
 
-		/* TODO: Half/quarter channel support */
+		/* Tweak power detector for half/quarter rates */
+		if (ah->ah_bwmode == AR5K_BWMODE_5MHZ ||
+		ah->ah_bwmode == AR5K_BWMODE_10MHZ) {
+			u8 pd_delay;
 
+			pd_delay = (ah->ah_bwmode == AR5K_BWMODE_5MHZ) ?
+							0xf : 0x8;
+
+			ath5k_hw_rfb_op(ah, rf_regs, pd_delay,
+						AR5K_RF_PD_PERIOD_A, true);
+			ath5k_hw_rfb_op(ah, rf_regs, 0xf,
+						AR5K_RF_PD_DELAY_A, true);
+
+		}
 	}
 
 	if (ah->ah_radio == AR5K_RF5413 &&
-	channel->hw_value & CHANNEL_2GHZ) {
+	channel->band == IEEE80211_BAND_2GHZ) {
 
 		ath5k_hw_rfb_op(ah, rf_regs, 1, AR5K_RF_DERBY_CHAN_SEL_MODE,
 									true);
@@ -825,25 +1056,7 @@ int ath5k_hw_rfregs_init(struct ath5k_hw *ah, struct ieee80211_channel *channel,
 \**************************/
 
 /*
- * Check if a channel is supported
- */
-bool ath5k_channel_ok(struct ath5k_hw *ah, u16 freq, unsigned int flags)
-{
-	/* Check if the channel is in our supported range */
-	if (flags & CHANNEL_2GHZ) {
-		if ((freq >= ah->ah_capabilities.cap_range.range_2ghz_min) &&
-		    (freq <= ah->ah_capabilities.cap_range.range_2ghz_max))
-			return true;
-	} else if (flags & CHANNEL_5GHZ)
-		if ((freq >= ah->ah_capabilities.cap_range.range_5ghz_min) &&
-		    (freq <= ah->ah_capabilities.cap_range.range_5ghz_max))
-			return true;
-
-	return false;
-}
-
-/*
- * Convertion needed for RF5110
+ * Conversion needed for RF5110
  */
 static u32 ath5k_hw_rf5110_chan2athchan(struct ieee80211_channel *channel)
 {
@@ -882,7 +1095,7 @@ static int ath5k_hw_rf5110_channel(struct ath5k_hw *ah,
 }
 
 /*
- * Convertion needed for 5111
+ * Conversion needed for 5111
  */
 static int ath5k_hw_rf5111_chan2athchan(unsigned int ieee,
 		struct ath5k_athchan_2ghz *athchan)
@@ -927,7 +1140,7 @@ static int ath5k_hw_rf5111_channel(struct ath5k_hw *ah,
 	 */
 	data0 = data1 = 0;
 
-	if (channel->hw_value & CHANNEL_2GHZ) {
+	if (channel->band == IEEE80211_BAND_2GHZ) {
 		/* Map 2GHz channel to 5GHz Atheros channel ID */
 		ret = ath5k_hw_rf5111_chan2athchan(
 			ieee80211_frequency_to_channel(channel->center_freq),
@@ -981,7 +1194,7 @@ static int ath5k_hw_rf5112_channel(struct ath5k_hw *ah,
 			return -EINVAL;
 
 		data0 = ath5k_hw_bitswap((data0 << 2) & 0xff, 8);
-	} else if ((c - (c % 5)) != 2 || c > 5435) {
+	} else if ((c % 5) != 2 || c > 5435) {
 		if (!(c % 20) && c >= 5120) {
 			data0 = ath5k_hw_bitswap(((c - 4800) / 20 << 2), 8);
 			data2 = ath5k_hw_bitswap(3, 2);
@@ -994,7 +1207,7 @@ static int ath5k_hw_rf5112_channel(struct ath5k_hw *ah,
 		} else
 			return -EINVAL;
 	} else {
-		data0 = ath5k_hw_bitswap((10 * (c - 2) - 4800) / 25 + 1, 8);
+		data0 = ath5k_hw_bitswap((10 * (c - 2 - 4800)) / 25 + 1, 8);
 		data2 = ath5k_hw_bitswap(0, 2);
 	}
 
@@ -1022,7 +1235,7 @@ static int ath5k_hw_rf2425_channel(struct ath5k_hw *ah,
 		data0 = ath5k_hw_bitswap((c - 2272), 8);
 		data2 = 0;
 	/* ? 5GHz ? */
-	} else if ((c - (c % 5)) != 2 || c > 5435) {
+	} else if ((c % 5) != 2 || c > 5435) {
 		if (!(c % 20) && c < 5120)
 			data0 = ath5k_hw_bitswap(((c - 4800) / 20 << 2), 8);
 		else if (!(c % 10))
@@ -1033,7 +1246,7 @@ static int ath5k_hw_rf2425_channel(struct ath5k_hw *ah,
 			return -EINVAL;
 		data2 = ath5k_hw_bitswap(1, 2);
 	} else {
-		data0 = ath5k_hw_bitswap((10 * (c - 2) - 4800) / 25 + 1, 8);
+		data0 = ath5k_hw_bitswap((10 * (c - 2 - 4800)) / 25 + 1, 8);
 		data2 = ath5k_hw_bitswap(0, 2);
 	}
 
@@ -1048,16 +1261,16 @@ static int ath5k_hw_rf2425_channel(struct ath5k_hw *ah,
 /*
  * Set a channel on the radio chip
  */
-int ath5k_hw_channel(struct ath5k_hw *ah, struct ieee80211_channel *channel)
+static int ath5k_hw_channel(struct ath5k_hw *ah,
+		struct ieee80211_channel *channel)
 {
 	int ret;
 	/*
-	 * Check bounds supported by the PHY (we don't care about regultory
-	 * restrictions at this point). Note: hw_value already has the band
-	 * (CHANNEL_2GHZ, or CHANNEL_5GHZ) so we inform ath5k_channel_ok()
-	 * of the band by that */
-	if (!ath5k_channel_ok(ah, channel->center_freq, channel->hw_value)) {
-		ATH5K_ERR(ah->ah_sc,
+	 * Check bounds supported by the PHY (we don't care about regulatory
+	 * restrictions at this point).
+	 */
+	if (!ath5k_channel_ok(ah, channel)) {
+		ATH5K_ERR(ah,
 			"channel frequency (%u MHz) out of supported "
 			"band range\n",
 			channel->center_freq);
@@ -1074,6 +1287,7 @@ int ath5k_hw_channel(struct ath5k_hw *ah, struct ieee80211_channel *channel)
 	case AR5K_RF5111:
 		ret = ath5k_hw_rf5111_channel(ah, channel);
 		break;
+	case AR5K_RF2317:
 	case AR5K_RF2425:
 		ret = ath5k_hw_rf2425_channel(ah, channel);
 		break;
@@ -1095,7 +1309,6 @@ int ath5k_hw_channel(struct ath5k_hw *ah, struct ieee80211_channel *channel)
 	}
 
 	ah->ah_current_channel = channel;
-	ah->ah_turbo = channel->hw_value == CHANNEL_T ? true : false;
 
 	return 0;
 }
@@ -1104,103 +1317,130 @@ int ath5k_hw_channel(struct ath5k_hw *ah, struct ieee80211_channel *channel)
   PHY calibration
 \*****************/
 
-void
-ath5k_hw_calibration_poll(struct ath5k_hw *ah)
+static s32 ath5k_hw_read_measured_noise_floor(struct ath5k_hw *ah)
 {
-	/* Calibration interval in jiffies */
-	unsigned long cal_intval;
+	s32 val;
 
-	cal_intval = msecs_to_jiffies(ah->ah_cal_intval * 1000);
-
-	/* Initialize timestamp if needed */
-	if (!ah->ah_cal_tstamp)
-		ah->ah_cal_tstamp = jiffies;
-
-	/* For now we always do full calibration
-	 * Mark software interrupt mask and fire software
-	 * interrupt (bit gets auto-cleared) */
-	if (time_is_before_eq_jiffies(ah->ah_cal_tstamp + cal_intval)) {
-		ah->ah_cal_tstamp = jiffies;
-		ah->ah_swi_mask = AR5K_SWI_FULL_CALIBRATION;
-		AR5K_REG_ENABLE_BITS(ah, AR5K_CR, AR5K_CR_SWI);
-	}
-
+	val = ath5k_hw_reg_read(ah, AR5K_PHY_NF);
+	return sign_extend32(AR5K_REG_MS(val, AR5K_PHY_NF_MINCCA_PWR), 8);
 }
 
-/**
- * ath5k_hw_noise_floor_calibration - perform PHY noise floor calibration
- *
- * @ah: struct ath5k_hw pointer we are operating on
- * @freq: the channel frequency, just used for error logging
- *
- * This function performs a noise floor calibration of the PHY and waits for
- * it to complete. Then the noise floor value is compared to some maximum
- * noise floor we consider valid.
- *
- * Note that this is different from what the madwifi HAL does: it reads the
- * noise floor and afterwards initiates the calibration. Since the noise floor
- * calibration can take some time to finish, depending on the current channel
- * use, that avoids the occasional timeout warnings we are seeing now.
- *
- * See the following link for an Atheros patent on noise floor calibration:
- * http://patft.uspto.gov/netacgi/nph-Parser?Sect1=PTO1&Sect2=HITOFF&d=PALL \
- * &p=1&u=%2Fnetahtml%2FPTO%2Fsrchnum.htm&r=1&f=G&l=50&s1=7245893.PN.&OS=PN/7
- *
- * XXX: Since during noise floor calibration antennas are detached according to
- * the patent, we should stop tx queues here.
- */
-int
-ath5k_hw_noise_floor_calibration(struct ath5k_hw *ah, short freq)
+void ath5k_hw_init_nfcal_hist(struct ath5k_hw *ah)
 {
-	int ret;
-	unsigned int i;
-	s32 noise_floor;
+	int i;
 
-	/*
-	 * Enable noise floor calibration
-	 */
-	AR5K_REG_ENABLE_BITS(ah, AR5K_PHY_AGCCTL,
-				AR5K_PHY_AGCCTL_NF);
+	ah->ah_nfcal_hist.index = 0;
+	for (i = 0; i < ATH5K_NF_CAL_HIST_MAX; i++)
+		ah->ah_nfcal_hist.nfval[i] = AR5K_TUNE_CCA_MAX_GOOD_VALUE;
+}
 
-	ret = ath5k_hw_register_timeout(ah, AR5K_PHY_AGCCTL,
-			AR5K_PHY_AGCCTL_NF, 0, false);
-	if (ret) {
-		ATH5K_ERR(ah->ah_sc,
-			"noise floor calibration timeout (%uMHz)\n", freq);
-		return -EAGAIN;
-	}
+static void ath5k_hw_update_nfcal_hist(struct ath5k_hw *ah, s16 noise_floor)
+{
+	struct ath5k_nfcal_hist *hist = &ah->ah_nfcal_hist;
+	hist->index = (hist->index + 1) & (ATH5K_NF_CAL_HIST_MAX - 1);
+	hist->nfval[hist->index] = noise_floor;
+}
 
-	/* Wait until the noise floor is calibrated and read the value */
-	for (i = 20; i > 0; i--) {
-		mdelay(1);
-		noise_floor = ath5k_hw_reg_read(ah, AR5K_PHY_NF);
-		noise_floor = AR5K_PHY_NF_RVAL(noise_floor);
-		if (noise_floor & AR5K_PHY_NF_ACTIVE) {
-			noise_floor = AR5K_PHY_NF_AVAL(noise_floor);
+static s16 ath5k_hw_get_median_noise_floor(struct ath5k_hw *ah)
+{
+	s16 sort[ATH5K_NF_CAL_HIST_MAX];
+	s16 tmp;
+	int i, j;
 
-			if (noise_floor <= AR5K_TUNE_NOISE_FLOOR)
-				break;
+	memcpy(sort, ah->ah_nfcal_hist.nfval, sizeof(sort));
+	for (i = 0; i < ATH5K_NF_CAL_HIST_MAX - 1; i++) {
+		for (j = 1; j < ATH5K_NF_CAL_HIST_MAX - i; j++) {
+			if (sort[j] > sort[j - 1]) {
+				tmp = sort[j];
+				sort[j] = sort[j - 1];
+				sort[j - 1] = tmp;
+			}
 		}
 	}
+	for (i = 0; i < ATH5K_NF_CAL_HIST_MAX; i++) {
+		ATH5K_DBG(ah, ATH5K_DEBUG_CALIBRATE,
+			"cal %d:%d\n", i, sort[i]);
+	}
+	return sort[(ATH5K_NF_CAL_HIST_MAX - 1) / 2];
+}
 
-	ATH5K_DBG_UNLIMIT(ah->ah_sc, ATH5K_DEBUG_CALIBRATE,
-		"noise floor %d\n", noise_floor);
+/*
+ * When we tell the hardware to perform a noise floor calibration
+ * by setting the AR5K_PHY_AGCCTL_NF bit, it will periodically
+ * sample-and-hold the minimum noise level seen at the antennas.
+ * This value is then stored in a ring buffer of recently measured
+ * noise floor values so we have a moving window of the last few
+ * samples.
+ *
+ * The median of the values in the history is then loaded into the
+ * hardware for its own use for RSSI and CCA measurements.
+ */
+void ath5k_hw_update_noise_floor(struct ath5k_hw *ah)
+{
+	struct ath5k_eeprom_info *ee = &ah->ah_capabilities.cap_eeprom;
+	u32 val;
+	s16 nf, threshold;
+	u8 ee_mode;
 
-	if (noise_floor > AR5K_TUNE_NOISE_FLOOR) {
-		ATH5K_ERR(ah->ah_sc,
-			"noise floor calibration failed (%uMHz)\n", freq);
-		return -EAGAIN;
+	/* keep last value if calibration hasn't completed */
+	if (ath5k_hw_reg_read(ah, AR5K_PHY_AGCCTL) & AR5K_PHY_AGCCTL_NF) {
+		ATH5K_DBG(ah, ATH5K_DEBUG_CALIBRATE,
+			"NF did not complete in calibration window\n");
+
+		return;
 	}
 
-	ah->ah_noise_floor = noise_floor;
+	ee_mode = ath5k_eeprom_mode_from_channel(ah->ah_current_channel);
 
-	return 0;
+	/* completed NF calibration, test threshold */
+	nf = ath5k_hw_read_measured_noise_floor(ah);
+	threshold = ee->ee_noise_floor_thr[ee_mode];
+
+	if (nf > threshold) {
+		ATH5K_DBG(ah, ATH5K_DEBUG_CALIBRATE,
+			"noise floor failure detected; "
+			"read %d, threshold %d\n",
+			nf, threshold);
+
+		nf = AR5K_TUNE_CCA_MAX_GOOD_VALUE;
+	}
+
+	ath5k_hw_update_nfcal_hist(ah, nf);
+	nf = ath5k_hw_get_median_noise_floor(ah);
+
+	/* load noise floor (in .5 dBm) so the hardware will use it */
+	val = ath5k_hw_reg_read(ah, AR5K_PHY_NF) & ~AR5K_PHY_NF_M;
+	val |= (nf * 2) & AR5K_PHY_NF_M;
+	ath5k_hw_reg_write(ah, val, AR5K_PHY_NF);
+
+	AR5K_REG_MASKED_BITS(ah, AR5K_PHY_AGCCTL, AR5K_PHY_AGCCTL_NF,
+		~(AR5K_PHY_AGCCTL_NF_EN | AR5K_PHY_AGCCTL_NF_NOUPDATE));
+
+	ath5k_hw_register_timeout(ah, AR5K_PHY_AGCCTL, AR5K_PHY_AGCCTL_NF,
+		0, false);
+
+	/*
+	 * Load a high max CCA Power value (-50 dBm in .5 dBm units)
+	 * so that we're not capped by the median we just loaded.
+	 * This will be used as the initial value for the next noise
+	 * floor calibration.
+	 */
+	val = (val & ~AR5K_PHY_NF_M) | ((-50 * 2) & AR5K_PHY_NF_M);
+	ath5k_hw_reg_write(ah, val, AR5K_PHY_NF);
+	AR5K_REG_ENABLE_BITS(ah, AR5K_PHY_AGCCTL,
+		AR5K_PHY_AGCCTL_NF_EN |
+		AR5K_PHY_AGCCTL_NF_NOUPDATE |
+		AR5K_PHY_AGCCTL_NF);
+
+	ah->ah_noise_floor = nf;
+
+	ATH5K_DBG(ah, ATH5K_DEBUG_CALIBRATE,
+		"noise floor calibrated: %d\n", nf);
 }
 
 /*
  * Perform a PHY calibration on RF5110
  * -Fix BPSK/QAM Constellation (I/Q correction)
- * -Calculate Noise Floor
  */
 static int ath5k_hw_rf5110_calibrate(struct ath5k_hw *ah,
 		struct ieee80211_channel *channel)
@@ -1212,7 +1452,7 @@ static int ath5k_hw_rf5110_calibrate(struct ath5k_hw *ah,
 	 * Disable beacons and RX/TX queues, wait
 	 */
 	AR5K_REG_ENABLE_BITS(ah, AR5K_DIAG_SW_5210,
-		AR5K_DIAG_SW_DIS_TX | AR5K_DIAG_SW_DIS_RX_5210);
+		AR5K_DIAG_SW_DIS_TX_5210 | AR5K_DIAG_SW_DIS_RX_5210);
 	beacon = ath5k_hw_reg_read(ah, AR5K_BEACON_5210);
 	ath5k_hw_reg_write(ah, beacon & ~AR5K_BEACON_ENABLE, AR5K_BEACON_5210);
 
@@ -1282,88 +1522,81 @@ static int ath5k_hw_rf5110_calibrate(struct ath5k_hw *ah,
 	ath5k_hw_reg_write(ah, phy_sat, AR5K_PHY_ADCSAT);
 
 	if (ret) {
-		ATH5K_ERR(ah->ah_sc, "calibration timeout (%uMHz)\n",
+		ATH5K_ERR(ah, "calibration timeout (%uMHz)\n",
 				channel->center_freq);
 		return ret;
 	}
-
-	ath5k_hw_noise_floor_calibration(ah, channel->center_freq);
 
 	/*
 	 * Re-enable RX/TX and beacons
 	 */
 	AR5K_REG_DISABLE_BITS(ah, AR5K_DIAG_SW_5210,
-		AR5K_DIAG_SW_DIS_TX | AR5K_DIAG_SW_DIS_RX_5210);
+		AR5K_DIAG_SW_DIS_TX_5210 | AR5K_DIAG_SW_DIS_RX_5210);
 	ath5k_hw_reg_write(ah, beacon, AR5K_BEACON_5210);
 
 	return 0;
 }
 
 /*
- * Perform a PHY calibration on RF5111/5112 and newer chips
+ * Perform I/Q calibration on RF5111/5112 and newer chips
  */
-static int ath5k_hw_rf511x_calibrate(struct ath5k_hw *ah,
-		struct ieee80211_channel *channel)
+static int
+ath5k_hw_rf511x_iq_calibrate(struct ath5k_hw *ah)
 {
 	u32 i_pwr, q_pwr;
 	s32 iq_corr, i_coff, i_coffd, q_coff, q_coffd;
 	int i;
-	ATH5K_TRACE(ah->ah_sc);
 
 	if (!ah->ah_calibration ||
 		ath5k_hw_reg_read(ah, AR5K_PHY_IQ) & AR5K_PHY_IQ_RUN)
-		goto done;
+		return 0;
 
 	/* Calibration has finished, get the results and re-run */
+	/* work around empty results which can apparently happen on 5212 */
 	for (i = 0; i <= 10; i++) {
 		iq_corr = ath5k_hw_reg_read(ah, AR5K_PHY_IQRES_CAL_CORR);
 		i_pwr = ath5k_hw_reg_read(ah, AR5K_PHY_IQRES_CAL_PWR_I);
 		q_pwr = ath5k_hw_reg_read(ah, AR5K_PHY_IQRES_CAL_PWR_Q);
+		ATH5K_DBG_UNLIMIT(ah, ATH5K_DEBUG_CALIBRATE,
+			"iq_corr:%x i_pwr:%x q_pwr:%x", iq_corr, i_pwr, q_pwr);
+		if (i_pwr && q_pwr)
+			break;
 	}
 
 	i_coffd = ((i_pwr >> 1) + (q_pwr >> 1)) >> 7;
-	q_coffd = q_pwr >> 7;
 
-	/* No correction */
-	if (i_coffd == 0 || q_coffd == 0)
-		goto done;
+	if (ah->ah_version == AR5K_AR5211)
+		q_coffd = q_pwr >> 6;
+	else
+		q_coffd = q_pwr >> 7;
 
-	i_coff = ((-iq_corr) / i_coffd) & 0x3f;
+	/* protect against divide by 0 and loss of sign bits */
+	if (i_coffd == 0 || q_coffd < 2)
+		return 0;
 
-	/* Boundary check */
-	if (i_coff > 31)
-		i_coff = 31;
-	if (i_coff < -32)
-		i_coff = -32;
+	i_coff = (-iq_corr) / i_coffd;
+	i_coff = clamp(i_coff, -32, 31); /* signed 6 bit */
 
-	q_coff = (((s32)i_pwr / q_coffd) - 128) & 0x1f;
+	if (ah->ah_version == AR5K_AR5211)
+		q_coff = (i_pwr / q_coffd) - 64;
+	else
+		q_coff = (i_pwr / q_coffd) - 128;
+	q_coff = clamp(q_coff, -16, 15); /* signed 5 bit */
 
-	/* Boundary check */
-	if (q_coff > 15)
-		q_coff = 15;
-	if (q_coff < -16)
-		q_coff = -16;
+	ATH5K_DBG_UNLIMIT(ah, ATH5K_DEBUG_CALIBRATE,
+			"new I:%d Q:%d (i_coffd:%x q_coffd:%x)",
+			i_coff, q_coff, i_coffd, q_coffd);
 
-	/* Commit new I/Q value */
-	AR5K_REG_ENABLE_BITS(ah, AR5K_PHY_IQ, AR5K_PHY_IQ_CORR_ENABLE |
-		((u32)q_coff) | ((u32)i_coff << AR5K_PHY_IQ_CORR_Q_I_COFF_S));
+	/* Commit new I/Q values (set enable bit last to match HAL sources) */
+	AR5K_REG_WRITE_BITS(ah, AR5K_PHY_IQ, AR5K_PHY_IQ_CORR_Q_I_COFF, i_coff);
+	AR5K_REG_WRITE_BITS(ah, AR5K_PHY_IQ, AR5K_PHY_IQ_CORR_Q_Q_COFF, q_coff);
+	AR5K_REG_ENABLE_BITS(ah, AR5K_PHY_IQ, AR5K_PHY_IQ_CORR_ENABLE);
 
 	/* Re-enable calibration -if we don't we'll commit
 	 * the same values again and again */
 	AR5K_REG_WRITE_BITS(ah, AR5K_PHY_IQ,
 			AR5K_PHY_IQ_CAL_NUM_LOG_MAX, 15);
 	AR5K_REG_ENABLE_BITS(ah, AR5K_PHY_IQ, AR5K_PHY_IQ_RUN);
-
-done:
-
-	/* TODO: Separate noise floor calibration from I/Q calibration
-	 * since noise floor calibration interrupts rx path while I/Q
-	 * calibration doesn't. We don't need to run noise floor calibration
-	 * as often as I/Q calibration.*/
-	ath5k_hw_noise_floor_calibration(ah, channel->center_freq);
-
-	/* Initiate a gain_F calibration */
-	ath5k_hw_request_rfgain_probe(ah);
 
 	return 0;
 }
@@ -1377,38 +1610,23 @@ int ath5k_hw_phy_calibrate(struct ath5k_hw *ah,
 	int ret;
 
 	if (ah->ah_radio == AR5K_RF5110)
-		ret = ath5k_hw_rf5110_calibrate(ah, channel);
-	else
-		ret = ath5k_hw_rf511x_calibrate(ah, channel);
+		return ath5k_hw_rf5110_calibrate(ah, channel);
+
+	ret = ath5k_hw_rf511x_iq_calibrate(ah);
+
+	if ((ah->ah_radio == AR5K_RF5111 || ah->ah_radio == AR5K_RF5112) &&
+	    (channel->hw_value != AR5K_MODE_11B))
+		ath5k_hw_request_rfgain_probe(ah);
 
 	return ret;
 }
+
 
 /***************************\
 * Spur mitigation functions *
 \***************************/
 
-bool ath5k_hw_chan_has_spur_noise(struct ath5k_hw *ah,
-				struct ieee80211_channel *channel)
-{
-	u8 refclk_freq;
-
-	if ((ah->ah_radio == AR5K_RF5112) ||
-	(ah->ah_radio == AR5K_RF5413) ||
-	(ah->ah_mac_version == (AR5K_SREV_AR2417 >> 4)))
-		refclk_freq = 40;
-	else
-		refclk_freq = 32;
-
-	if ((channel->center_freq % refclk_freq != 0) &&
-	((channel->center_freq % refclk_freq < 10) ||
-	(channel->center_freq % refclk_freq > 22)))
-		return true;
-	else
-		return false;
-}
-
-void
+static void
 ath5k_hw_set_spur_mitigation_filter(struct ath5k_hw *ah,
 				struct ieee80211_channel *channel)
 {
@@ -1424,7 +1642,7 @@ ath5k_hw_set_spur_mitigation_filter(struct ath5k_hw *ah,
 	/* Convert current frequency to fbin value (the same way channels
 	 * are stored on EEPROM, check out ath5k_eeprom_bin2freq) and scale
 	 * up by 2 so we can compare it later */
-	if (channel->hw_value & CHANNEL_2GHZ) {
+	if (channel->band == IEEE80211_BAND_2GHZ) {
 		chan_fbin = (channel->center_freq - 2300) * 10;
 		freq_band = AR5K_EEPROM_BAND_2GHZ;
 	} else {
@@ -1437,7 +1655,7 @@ ath5k_hw_set_spur_mitigation_filter(struct ath5k_hw *ah,
 	spur_chan_fbin = AR5K_EEPROM_NO_SPUR;
 	spur_detection_window = AR5K_SPUR_CHAN_WIDTH;
 	/* XXX: Half/Quarter channels ?*/
-	if (channel->hw_value & CHANNEL_TURBO)
+	if (ah->ah_bwmode == AR5K_BWMODE_40MHZ)
 		spur_detection_window *= 2;
 
 	for (i = 0; i < AR5K_EEPROM_N_SPUR_CHANS; i++) {
@@ -1466,32 +1684,43 @@ ath5k_hw_set_spur_mitigation_filter(struct ath5k_hw *ah,
 		 * Calculate deltas:
 		 * spur_freq_sigma_delta -> spur_offset / sample_freq << 21
 		 * spur_delta_phase -> spur_offset / chip_freq << 11
-		 * Note: Both values have 100KHz resolution
+		 * Note: Both values have 100Hz resolution
 		 */
-		/* XXX: Half/Quarter rate channels ? */
-		switch (channel->hw_value) {
-		case CHANNEL_A:
-			/* Both sample_freq and chip_freq are 40MHz */
-			spur_delta_phase = (spur_offset << 17) / 25;
-			spur_freq_sigma_delta = (spur_delta_phase >> 10);
-			symbol_width = AR5K_SPUR_SYMBOL_WIDTH_BASE_100Hz;
-			break;
-		case CHANNEL_G:
-			/* sample_freq -> 40MHz chip_freq -> 44MHz
-			 * (for b compatibility) */
-			spur_freq_sigma_delta = (spur_offset << 8) / 55;
-			spur_delta_phase = (spur_offset << 17) / 25;
-			symbol_width = AR5K_SPUR_SYMBOL_WIDTH_BASE_100Hz;
-			break;
-		case CHANNEL_T:
-		case CHANNEL_TG:
+		switch (ah->ah_bwmode) {
+		case AR5K_BWMODE_40MHZ:
 			/* Both sample_freq and chip_freq are 80MHz */
 			spur_delta_phase = (spur_offset << 16) / 25;
 			spur_freq_sigma_delta = (spur_delta_phase >> 10);
-			symbol_width = AR5K_SPUR_SYMBOL_WIDTH_TURBO_100Hz;
+			symbol_width = AR5K_SPUR_SYMBOL_WIDTH_BASE_100Hz * 2;
 			break;
+		case AR5K_BWMODE_10MHZ:
+			/* Both sample_freq and chip_freq are 20MHz (?) */
+			spur_delta_phase = (spur_offset << 18) / 25;
+			spur_freq_sigma_delta = (spur_delta_phase >> 10);
+			symbol_width = AR5K_SPUR_SYMBOL_WIDTH_BASE_100Hz / 2;
+		case AR5K_BWMODE_5MHZ:
+			/* Both sample_freq and chip_freq are 10MHz (?) */
+			spur_delta_phase = (spur_offset << 19) / 25;
+			spur_freq_sigma_delta = (spur_delta_phase >> 10);
+			symbol_width = AR5K_SPUR_SYMBOL_WIDTH_BASE_100Hz / 4;
 		default:
-			return;
+			if (channel->band == IEEE80211_BAND_5GHZ) {
+				/* Both sample_freq and chip_freq are 40MHz */
+				spur_delta_phase = (spur_offset << 17) / 25;
+				spur_freq_sigma_delta =
+						(spur_delta_phase >> 10);
+				symbol_width =
+					AR5K_SPUR_SYMBOL_WIDTH_BASE_100Hz;
+			} else {
+				/* sample_freq -> 40MHz chip_freq -> 44MHz
+				 * (for b compatibility) */
+				spur_delta_phase = (spur_offset << 17) / 25;
+				spur_freq_sigma_delta =
+						(spur_offset << 8) / 55;
+				symbol_width =
+					AR5K_SPUR_SYMBOL_WIDTH_BASE_100Hz;
+			}
+			break;
 		}
 
 		/* Calculate pilot and magnitude masks */
@@ -1542,7 +1771,7 @@ ath5k_hw_set_spur_mitigation_filter(struct ath5k_hw *ah,
 			else if (curr_sym_off >= 31 && curr_sym_off <= 46)
 				mag_mask[2] |=
 					plt_mag_map << (curr_sym_off - 31) * 2;
-			else if (curr_sym_off >= 46 && curr_sym_off <= 53)
+			else if (curr_sym_off >= 47 && curr_sym_off <= 53)
 				mag_mask[3] |=
 					plt_mag_map << (curr_sym_off - 47) * 2;
 
@@ -1594,7 +1823,7 @@ ath5k_hw_set_spur_mitigation_filter(struct ath5k_hw *ah,
 
 	} else if (ath5k_hw_reg_read(ah, AR5K_PHY_IQ) &
 	AR5K_PHY_IQ_SPUR_FILT_EN) {
-		/* Clean up spur mitigation settings and disable fliter */
+		/* Clean up spur mitigation settings and disable filter */
 		AR5K_REG_WRITE_BITS(ah, AR5K_PHY_BIN_MASK_CTL,
 					AR5K_PHY_BIN_MASK_CTL_RATE, 0);
 		AR5K_REG_DISABLE_BITS(ah, AR5K_PHY_IQ,
@@ -1631,88 +1860,16 @@ ath5k_hw_set_spur_mitigation_filter(struct ath5k_hw *ah,
 	}
 }
 
-/********************\
-  Misc PHY functions
-\********************/
-
-int ath5k_hw_phy_disable(struct ath5k_hw *ah)
-{
-	ATH5K_TRACE(ah->ah_sc);
-	/*Just a try M.F.*/
-	ath5k_hw_reg_write(ah, AR5K_PHY_ACT_DISABLE, AR5K_PHY_ACT);
-
-	return 0;
-}
-
-/*
- * Get the PHY Chip revision
- */
-u16 ath5k_hw_radio_revision(struct ath5k_hw *ah, unsigned int chan)
-{
-	unsigned int i;
-	u32 srev;
-	u16 ret;
-
-	ATH5K_TRACE(ah->ah_sc);
-
-	/*
-	 * Set the radio chip access register
-	 */
-	switch (chan) {
-	case CHANNEL_2GHZ:
-		ath5k_hw_reg_write(ah, AR5K_PHY_SHIFT_2GHZ, AR5K_PHY(0));
-		break;
-	case CHANNEL_5GHZ:
-		ath5k_hw_reg_write(ah, AR5K_PHY_SHIFT_5GHZ, AR5K_PHY(0));
-		break;
-	default:
-		return 0;
-	}
-
-	mdelay(2);
-
-	/* ...wait until PHY is ready and read the selected radio revision */
-	ath5k_hw_reg_write(ah, 0x00001c16, AR5K_PHY(0x34));
-
-	for (i = 0; i < 8; i++)
-		ath5k_hw_reg_write(ah, 0x00010000, AR5K_PHY(0x20));
-
-	if (ah->ah_version == AR5K_AR5210) {
-		srev = ath5k_hw_reg_read(ah, AR5K_PHY(256) >> 28) & 0xf;
-		ret = (u16)ath5k_hw_bitswap(srev, 4) + 1;
-	} else {
-		srev = (ath5k_hw_reg_read(ah, AR5K_PHY(0x100)) >> 24) & 0xff;
-		ret = (u16)ath5k_hw_bitswap(((srev & 0xf0) >> 4) |
-				((srev & 0x0f) << 4), 8);
-	}
-
-	/* Reset to the 5GHz mode */
-	ath5k_hw_reg_write(ah, AR5K_PHY_SHIFT_5GHZ, AR5K_PHY(0));
-
-	return ret;
-}
 
 /*****************\
 * Antenna control *
 \*****************/
 
-void /*TODO:Boundary check*/
+static void /*TODO:Boundary check*/
 ath5k_hw_set_def_antenna(struct ath5k_hw *ah, u8 ant)
 {
-	ATH5K_TRACE(ah->ah_sc);
-
 	if (ah->ah_version != AR5K_AR5210)
 		ath5k_hw_reg_write(ah, ant & 0x7, AR5K_DEFAULT_ANTENNA);
-}
-
-unsigned int ath5k_hw_get_def_antenna(struct ath5k_hw *ah)
-{
-	ATH5K_TRACE(ah->ah_sc);
-
-	if (ah->ah_version != AR5K_AR5210)
-		return ath5k_hw_reg_read(ah, AR5K_DEFAULT_ANTENNA) & 0x7;
-
-	return false; /*XXX: What do we return for 5210 ?*/
 }
 
 /*
@@ -1743,17 +1900,48 @@ ath5k_hw_set_fast_div(struct ath5k_hw *ah, u8 ee_mode, bool enable)
 
 	if (enable) {
 		AR5K_REG_WRITE_BITS(ah, AR5K_PHY_RESTART,
-				AR5K_PHY_RESTART_DIV_GC, 0xc);
+				AR5K_PHY_RESTART_DIV_GC, 4);
 
 		AR5K_REG_ENABLE_BITS(ah, AR5K_PHY_FAST_ANT_DIV,
 					AR5K_PHY_FAST_ANT_DIV_EN);
 	} else {
 		AR5K_REG_WRITE_BITS(ah, AR5K_PHY_RESTART,
-				AR5K_PHY_RESTART_DIV_GC, 0x8);
+				AR5K_PHY_RESTART_DIV_GC, 0);
 
 		AR5K_REG_DISABLE_BITS(ah, AR5K_PHY_FAST_ANT_DIV,
 					AR5K_PHY_FAST_ANT_DIV_EN);
 	}
+}
+
+void
+ath5k_hw_set_antenna_switch(struct ath5k_hw *ah, u8 ee_mode)
+{
+	u8 ant0, ant1;
+
+	/*
+	 * In case a fixed antenna was set as default
+	 * use the same switch table twice.
+	 */
+	if (ah->ah_ant_mode == AR5K_ANTMODE_FIXED_A)
+		ant0 = ant1 = AR5K_ANT_SWTABLE_A;
+	else if (ah->ah_ant_mode == AR5K_ANTMODE_FIXED_B)
+		ant0 = ant1 = AR5K_ANT_SWTABLE_B;
+	else {
+		ant0 = AR5K_ANT_SWTABLE_A;
+		ant1 = AR5K_ANT_SWTABLE_B;
+	}
+
+	/* Set antenna idle switch table */
+	AR5K_REG_WRITE_BITS(ah, AR5K_PHY_ANT_CTL,
+			AR5K_PHY_ANT_CTL_SWTABLE_IDLE,
+			(ah->ah_ant_ctl[ee_mode][AR5K_ANT_CTL] |
+			AR5K_PHY_ANT_CTL_TXRX_EN));
+
+	/* Set antenna switch tables */
+	ath5k_hw_reg_write(ah, ah->ah_ant_ctl[ee_mode][ant0],
+		AR5K_PHY_ANT_SWITCH_TABLE_0);
+	ath5k_hw_reg_write(ah, ah->ah_ant_ctl[ee_mode][ant1],
+		AR5K_PHY_ANT_SWITCH_TABLE_1);
 }
 
 /*
@@ -1765,28 +1953,22 @@ ath5k_hw_set_antenna_mode(struct ath5k_hw *ah, u8 ant_mode)
 	struct ieee80211_channel *channel = ah->ah_current_channel;
 	bool use_def_for_tx, update_def_on_tx, use_def_for_rts, fast_div;
 	bool use_def_for_sg;
-	u8 def_ant, tx_ant, ee_mode;
+	int ee_mode;
+	u8 def_ant, tx_ant;
 	u32 sta_id1 = 0;
+
+	/* if channel is not initialized yet we can't set the antennas
+	 * so just store the mode. it will be set on the next reset */
+	if (channel == NULL) {
+		ah->ah_ant_mode = ant_mode;
+		return;
+	}
 
 	def_ant = ah->ah_def_ant;
 
-	ATH5K_TRACE(ah->ah_sc);
-
-	switch (channel->hw_value & CHANNEL_MODES) {
-	case CHANNEL_A:
-	case CHANNEL_T:
-	case CHANNEL_XR:
-		ee_mode = AR5K_EEPROM_MODE_11A;
-		break;
-	case CHANNEL_G:
-	case CHANNEL_TG:
-		ee_mode = AR5K_EEPROM_MODE_11G;
-		break;
-	case CHANNEL_B:
-		ee_mode = AR5K_EEPROM_MODE_11B;
-		break;
-	default:
-		ATH5K_ERR(ah->ah_sc,
+	ee_mode = ath5k_eeprom_mode_from_channel(channel);
+	if (ee_mode < 0) {
+		ATH5K_ERR(ah,
 			"invalid channel: %d\n", channel->center_freq);
 		return;
 	}
@@ -1802,7 +1984,7 @@ ath5k_hw_set_antenna_mode(struct ath5k_hw *ah, u8 ant_mode)
 		break;
 	case AR5K_ANTMODE_FIXED_A:
 		def_ant = 1;
-		tx_ant = 0;
+		tx_ant = 1;
 		use_def_for_tx = true;
 		update_def_on_tx = false;
 		use_def_for_rts = true;
@@ -1811,7 +1993,7 @@ ath5k_hw_set_antenna_mode(struct ath5k_hw *ah, u8 ant_mode)
 		break;
 	case AR5K_ANTMODE_FIXED_B:
 		def_ant = 2;
-		tx_ant = 0;
+		tx_ant = 2;
 		use_def_for_tx = true;
 		update_def_on_tx = false;
 		use_def_for_rts = true;
@@ -1858,6 +2040,7 @@ ath5k_hw_set_antenna_mode(struct ath5k_hw *ah, u8 ant_mode)
 
 	ah->ah_tx_ant = tx_ant;
 	ah->ah_ant_mode = ant_mode;
+	ah->ah_def_ant = def_ant;
 
 	sta_id1 |= use_def_for_tx ? AR5K_STA_ID1_DEFAULT_ANTENNA : 0;
 	sta_id1 |= update_def_on_tx ? AR5K_STA_ID1_DESC_ANTENNA : 0;
@@ -1869,6 +2052,7 @@ ath5k_hw_set_antenna_mode(struct ath5k_hw *ah, u8 ant_mode)
 	if (sta_id1)
 		AR5K_REG_ENABLE_BITS(ah, AR5K_STA_ID1, sta_id1);
 
+	ath5k_hw_set_antenna_switch(ah, ee_mode);
 	/* Note: set diversity before default antenna
 	 * because it won't work correctly */
 	ath5k_hw_set_fast_div(ah, ee_mode, fast_div);
@@ -1904,7 +2088,7 @@ ath5k_get_interpolated_value(s16 target, s16 x_left, s16 x_right,
 	 * always 1 instead of 1.25, 1.75 etc). We scale up by 100
 	 * to have some accuracy both for 0.5 and 0.25 steps.
 	 */
-	ratio = ((100 * y_right - 100 * y_left)/(x_right - x_left));
+	ratio = ((100 * y_right - 100 * y_left) / (x_right - x_left));
 
 	/* Now scale down to be in range */
 	result = y_left + (ratio * (target - x_left) / 100);
@@ -1983,7 +2167,7 @@ ath5k_create_power_curve(s16 pmin, s16 pmax,
 			u8 *vpd_table, u8 type)
 {
 	u8 idx[2] = { 0, 1 };
-	s16 pwr_i = 2*pmin;
+	s16 pwr_i = 2 * pmin;
 	int i;
 
 	if (num_points < 2)
@@ -2025,7 +2209,7 @@ ath5k_create_power_curve(s16 pmin, s16 pmax,
 /*
  * Get the surrounding per-channel power calibration piers
  * for a given frequency so that we can interpolate between
- * them and come up with an apropriate dataset for our current
+ * them and come up with an appropriate dataset for our current
  * channel.
  */
 static void
@@ -2043,15 +2227,20 @@ ath5k_get_chan_pcal_surrounding_piers(struct ath5k_hw *ah,
 	idx_l = 0;
 	idx_r = 0;
 
-	if (!(channel->hw_value & CHANNEL_OFDM)) {
-		pcinfo = ee->ee_pwr_cal_b;
-		mode = AR5K_EEPROM_MODE_11B;
-	} else if (channel->hw_value & CHANNEL_2GHZ) {
-		pcinfo = ee->ee_pwr_cal_g;
-		mode = AR5K_EEPROM_MODE_11G;
-	} else {
+	switch (channel->hw_value) {
+	case AR5K_EEPROM_MODE_11A:
 		pcinfo = ee->ee_pwr_cal_a;
 		mode = AR5K_EEPROM_MODE_11A;
+		break;
+	case AR5K_EEPROM_MODE_11B:
+		pcinfo = ee->ee_pwr_cal_b;
+		mode = AR5K_EEPROM_MODE_11B;
+		break;
+	case AR5K_EEPROM_MODE_11G:
+	default:
+		pcinfo = ee->ee_pwr_cal_g;
+		mode = AR5K_EEPROM_MODE_11G;
+		break;
 	}
 	max = ee->ee_n_piers[mode] - 1;
 
@@ -2098,8 +2287,6 @@ ath5k_get_chan_pcal_surrounding_piers(struct ath5k_hw *ah,
 done:
 	*pcinfo_l = &pcinfo[idx_l];
 	*pcinfo_r = &pcinfo[idx_r];
-
-	return;
 }
 
 /*
@@ -2122,15 +2309,20 @@ ath5k_get_rate_pcal_data(struct ath5k_hw *ah,
 	idx_l = 0;
 	idx_r = 0;
 
-	if (!(channel->hw_value & CHANNEL_OFDM)) {
-		rpinfo = ee->ee_rate_tpwr_b;
-		mode = AR5K_EEPROM_MODE_11B;
-	} else if (channel->hw_value & CHANNEL_2GHZ) {
-		rpinfo = ee->ee_rate_tpwr_g;
-		mode = AR5K_EEPROM_MODE_11G;
-	} else {
+	switch (channel->hw_value) {
+	case AR5K_MODE_11A:
 		rpinfo = ee->ee_rate_tpwr_a;
 		mode = AR5K_EEPROM_MODE_11A;
+		break;
+	case AR5K_MODE_11B:
+		rpinfo = ee->ee_rate_tpwr_b;
+		mode = AR5K_EEPROM_MODE_11B;
+		break;
+	case AR5K_MODE_11G:
+	default:
+		rpinfo = ee->ee_rate_tpwr_g;
+		mode = AR5K_EEPROM_MODE_11G;
+		break;
 	}
 	max = ee->ee_rate_target_pwr_num[mode] - 1;
 
@@ -2211,24 +2403,22 @@ ath5k_get_max_ctl_power(struct ath5k_hw *ah,
 
 	ctl_mode = ath_regd_get_band_ctl(regulatory, channel->band);
 
-	switch (channel->hw_value & CHANNEL_MODES) {
-	case CHANNEL_A:
-		ctl_mode |= AR5K_CTL_11A;
+	switch (channel->hw_value) {
+	case AR5K_MODE_11A:
+		if (ah->ah_bwmode == AR5K_BWMODE_40MHZ)
+			ctl_mode |= AR5K_CTL_TURBO;
+		else
+			ctl_mode |= AR5K_CTL_11A;
 		break;
-	case CHANNEL_G:
-		ctl_mode |= AR5K_CTL_11G;
+	case AR5K_MODE_11G:
+		if (ah->ah_bwmode == AR5K_BWMODE_40MHZ)
+			ctl_mode |= AR5K_CTL_TURBOG;
+		else
+			ctl_mode |= AR5K_CTL_11G;
 		break;
-	case CHANNEL_B:
+	case AR5K_MODE_11B:
 		ctl_mode |= AR5K_CTL_11B;
 		break;
-	case CHANNEL_T:
-		ctl_mode |= AR5K_CTL_TURBO;
-		break;
-	case CHANNEL_TG:
-		ctl_mode |= AR5K_CTL_TURBOG;
-		break;
-	case CHANNEL_XR:
-		/* Fall through */
 	default:
 		return;
 	}
@@ -2263,7 +2453,7 @@ ath5k_get_max_ctl_power(struct ath5k_hw *ah,
 	}
 
 	if (edge_pwr)
-		ah->ah_txpower.txp_max_pwr = 4*min(edge_pwr, max_chan_pwr);
+		ah->ah_txpower.txp_max_pwr = 4 * min(edge_pwr, max_chan_pwr);
 }
 
 
@@ -2282,7 +2472,7 @@ static void
 ath5k_fill_pwr_to_pcdac_table(struct ath5k_hw *ah, s16* table_min,
 							s16 *table_max)
 {
-	u8 	*pcdac_out = ah->ah_txpower.txp_pd_table;
+	u8	*pcdac_out = ah->ah_txpower.txp_pd_table;
 	u8	*pcdac_tmp = ah->ah_txpower.tmpL[0];
 	u8	pcdac_0, pcdac_n, pcdac_i, pwr_idx, i;
 	s16	min_pwr, max_pwr;
@@ -2301,8 +2491,8 @@ ath5k_fill_pwr_to_pcdac_table(struct ath5k_hw *ah, s16* table_min,
 
 	/* Copy values from pcdac_tmp */
 	pwr_idx = min_pwr;
-	for (i = 0 ; pwr_idx <= max_pwr &&
-	pcdac_i < AR5K_EEPROM_POWER_TABLE_SIZE; i++) {
+	for (i = 0; pwr_idx <= max_pwr &&
+		    pcdac_i < AR5K_EEPROM_POWER_TABLE_SIZE; i++) {
 		pcdac_out[pcdac_i++] = pcdac_tmp[i];
 		pwr_idx++;
 	}
@@ -2328,7 +2518,7 @@ static void
 ath5k_combine_linear_pcdac_curves(struct ath5k_hw *ah, s16* table_min,
 						s16 *table_max, u8 pdcurves)
 {
-	u8 	*pcdac_out = ah->ah_txpower.txp_pd_table;
+	u8	*pcdac_out = ah->ah_txpower.txp_pd_table;
 	u8	*pcdac_low_pwr;
 	u8	*pcdac_high_pwr;
 	u8	*pcdac_tmp;
@@ -2336,8 +2526,8 @@ ath5k_combine_linear_pcdac_curves(struct ath5k_hw *ah, s16* table_min,
 	s16	max_pwr_idx;
 	s16	min_pwr_idx;
 	s16	mid_pwr_idx = 0;
-	/* Edge flag turs on the 7nth bit on the PCDAC
-	 * to delcare the higher power curve (force values
+	/* Edge flag turns on the 7nth bit on the PCDAC
+	 * to declare the higher power curve (force values
 	 * to be greater than 64). If we only have one curve
 	 * we don't need to set this, if we have 2 curves and
 	 * fill the table backwards this can also be used to
@@ -2368,19 +2558,6 @@ ath5k_combine_linear_pcdac_curves(struct ath5k_hw *ah, s16* table_min,
 		pcdac_tmp = pcdac_high_pwr;
 
 		edge_flag = 0x40;
-#if 0
-		/* If both min and max power limits are in lower
-		 * power curve's range, only use the low power curve.
-		 * TODO: min/max levels are related to target
-		 * power values requested from driver/user
-		 * XXX: Is this really needed ? */
-		if (min_pwr < table_max[1] &&
-		max_pwr < table_max[1]) {
-			edge_flag = 0;
-			pcdac_tmp = pcdac_low_pwr;
-			max_pwr_idx = (table_max[1] - table_min[1])/2;
-		}
-#endif
 	} else {
 		pcdac_low_pwr = ah->ah_txpower.tmpL[1]; /* Zeroed */
 		pcdac_high_pwr = ah->ah_txpower.tmpL[0];
@@ -2391,7 +2568,7 @@ ath5k_combine_linear_pcdac_curves(struct ath5k_hw *ah, s16* table_min,
 	}
 
 	/* This is used when setting tx power*/
-	ah->ah_txpower.txp_min_idx = min_pwr_idx/2;
+	ah->ah_txpower.txp_min_idx = min_pwr_idx / 2;
 
 	/* Fill Power to PCDAC table backwards */
 	pwr = max_pwr_idx;
@@ -2400,14 +2577,14 @@ ath5k_combine_linear_pcdac_curves(struct ath5k_hw *ah, s16* table_min,
 		 * edge flag and set pcdac_tmp to lower
 		 * power curve.*/
 		if (edge_flag == 0x40 &&
-		(2*pwr <= (table_max[1] - table_min[0]) || pwr == 0)) {
+		(2 * pwr <= (table_max[1] - table_min[0]) || pwr == 0)) {
 			edge_flag = 0x00;
 			pcdac_tmp = pcdac_low_pwr;
-			pwr = mid_pwr_idx/2;
+			pwr = mid_pwr_idx / 2;
 		}
 
 		/* Don't go below 1, extrapolate below if we have
-		 * already swithced to the lower power curve -or
+		 * already switched to the lower power curve -or
 		 * we only have one curve and edge_flag is zero
 		 * anyway */
 		if (pcdac_tmp[pwr] < 1 && (edge_flag == 0x00)) {
@@ -2433,9 +2610,9 @@ ath5k_combine_linear_pcdac_curves(struct ath5k_hw *ah, s16* table_min,
 
 /* Write PCDAC values on hw */
 static void
-ath5k_setup_pcdac_table(struct ath5k_hw *ah)
+ath5k_write_pcdac_table(struct ath5k_hw *ah)
 {
-	u8 	*pcdac_out = ah->ah_txpower.txp_pd_table;
+	u8	*pcdac_out = ah->ah_txpower.txp_pd_table;
 	int	i;
 
 	/*
@@ -2443,8 +2620,8 @@ ath5k_setup_pcdac_table(struct ath5k_hw *ah)
 	 */
 	for (i = 0; i < (AR5K_EEPROM_POWER_TABLE_SIZE / 2); i++) {
 		ath5k_hw_reg_write(ah,
-			(((pcdac_out[2*i + 0] << 8 | 0xff) & 0xffff) << 0) |
-			(((pcdac_out[2*i + 1] << 8 | 0xff) & 0xffff) << 16),
+			(((pcdac_out[2 * i + 0] << 8 | 0xff) & 0xffff) << 0) |
+			(((pcdac_out[2 * i + 1] << 8 | 0xff) & 0xffff) << 16),
 			AR5K_PHY_PCDAC_TXPOWER(i));
 	}
 }
@@ -2457,7 +2634,7 @@ ath5k_setup_pcdac_table(struct ath5k_hw *ah)
 /*
  * Set the gain boundaries and create final Power to PDADC table
  *
- * We can have up to 4 pd curves, we need to do a simmilar process
+ * We can have up to 4 pd curves, we need to do a similar process
  * as we do for RF5112. This time we don't have an edge_flag but we
  * set the gain boundaries on a separate register.
  */
@@ -2527,7 +2704,7 @@ ath5k_combine_pwr_to_pdadc_curves(struct ath5k_hw *ah,
 		max_idx = (pdadc_n < table_size) ? pdadc_n : table_size;
 
 		/* Fill pdadc_out table */
-		while (pdadc_0 < max_idx)
+		while (pdadc_0 < max_idx && pdadc_i < 128)
 			pdadc_out[pdadc_i++] = pdadc_tmp[pdadc_0++];
 
 		/* Need to extrapolate above this pdgain? */
@@ -2582,10 +2759,12 @@ ath5k_combine_pwr_to_pdadc_curves(struct ath5k_hw *ah,
 
 /* Write PDADC values on hw */
 static void
-ath5k_setup_pwr_to_pdadc_table(struct ath5k_hw *ah,
-			u8 pdcurves, u8 *pdg_to_idx)
+ath5k_write_pwr_to_pdadc_table(struct ath5k_hw *ah, u8 ee_mode)
 {
+	struct ath5k_eeprom_info *ee = &ah->ah_capabilities.cap_eeprom;
 	u8 *pdadc_out = ah->ah_txpower.txp_pd_table;
+	u8 *pdg_to_idx = ee->ee_pdc_to_idx[ee_mode];
+	u8 pdcurves = ee->ee_pd_gains[ee_mode];
 	u32 reg;
 	u8 i;
 
@@ -2625,12 +2804,8 @@ ath5k_setup_pwr_to_pdadc_table(struct ath5k_hw *ah,
 	 * Write TX power values
 	 */
 	for (i = 0; i < (AR5K_EEPROM_POWER_TABLE_SIZE / 2); i++) {
-		ath5k_hw_reg_write(ah,
-			((pdadc_out[4*i + 0] & 0xff) << 0) |
-			((pdadc_out[4*i + 1] & 0xff) << 8) |
-			((pdadc_out[4*i + 2] & 0xff) << 16) |
-			((pdadc_out[4*i + 3] & 0xff) << 24),
-			AR5K_PHY_PDADC_TXPOWER(i));
+		u32 val = get_unaligned_le32(&pdadc_out[4 * i]);
+		ath5k_hw_reg_write(ah, val, AR5K_PHY_PDADC_TXPOWER(i));
 	}
 }
 
@@ -2642,7 +2817,7 @@ ath5k_setup_pwr_to_pdadc_table(struct ath5k_hw *ah,
 /*
  * This is the main function that uses all of the above
  * to set PCDAC/PDADC table on hw for the current channel.
- * This table is used for tx power calibration on the basband,
+ * This table is used for tx power calibration on the baseband,
  * without it we get weird tx power levels and in some cases
  * distorted spectral mask
  */
@@ -2663,19 +2838,19 @@ ath5k_setup_channel_powertable(struct ath5k_hw *ah,
 	u32 target = channel->center_freq;
 	int pdg, i;
 
-	/* Get surounding freq piers for this channel */
+	/* Get surrounding freq piers for this channel */
 	ath5k_get_chan_pcal_surrounding_piers(ah, channel,
 						&pcinfo_L,
 						&pcinfo_R);
 
 	/* Loop over pd gain curves on
-	 * surounding freq piers by index */
+	 * surrounding freq piers by index */
 	for (pdg = 0; pdg < ee->ee_pd_gains[ee_mode]; pdg++) {
 
 		/* Fill curves in reverse order
 		 * from lower power (max gain)
 		 * to higher power. Use curve -> idx
-		 * backmaping we did on eeprom init */
+		 * backmapping we did on eeprom init */
 		u8 idx = pdg_curve_to_idx[pdg];
 
 		/* Grab the needed curves by index */
@@ -2760,7 +2935,7 @@ ath5k_setup_channel_powertable(struct ath5k_hw *ah,
 		}
 
 		/* Interpolate between curves
-		 * of surounding freq piers to
+		 * of surrounding freq piers to
 		 * get the final curve for this
 		 * pd gain. Re-use tmpL for interpolation
 		 * output */
@@ -2777,14 +2952,14 @@ ath5k_setup_channel_powertable(struct ath5k_hw *ah,
 	/* Now we have a set of curves for this
 	 * channel on tmpL (x range is table_max - table_min
 	 * and y values are tmpL[pdg][]) sorted in the same
-	 * order as EEPROM (because we've used the backmaping).
+	 * order as EEPROM (because we've used the backmapping).
 	 * So for RF5112 it's from higher power to lower power
 	 * and for RF2413 it's from lower power to higher power.
 	 * For RF5111 we only have one curve. */
 
 	/* Fill min and max power levels for this
 	 * channel by interpolating the values on
-	 * surounding channels to complete the dataset */
+	 * surrounding channels to complete the dataset */
 	ah->ah_txpower.txp_min_pwr = ath5k_get_interpolated_value(target,
 					(s16) pcinfo_L->freq,
 					(s16) pcinfo_R->freq,
@@ -2795,8 +2970,7 @@ ath5k_setup_channel_powertable(struct ath5k_hw *ah,
 					(s16) pcinfo_R->freq,
 					pcinfo_L->max_pwr, pcinfo_R->max_pwr);
 
-	/* We are ready to go, fill PCDAC/PDADC
-	 * table and write settings on hardware */
+	/* Fill PCDAC/PDADC table */
 	switch (type) {
 	case AR5K_PWRTABLE_LINEAR_PCDAC:
 		/* For RF5112 we can have one or two curves
@@ -2809,9 +2983,6 @@ ath5k_setup_channel_powertable(struct ath5k_hw *ah,
 		 * match max power value with max
 		 * table index */
 		ah->ah_txpower.txp_offset = 64 - (table_max[0] / 2);
-
-		/* Write settings on hw */
-		ath5k_setup_pcdac_table(ah);
 		break;
 	case AR5K_PWRTABLE_PWR_TO_PCDAC:
 		/* We are done for RF5111 since it has only
@@ -2821,18 +2992,12 @@ ath5k_setup_channel_powertable(struct ath5k_hw *ah,
 		/* No rate powertable adjustment for RF5111 */
 		ah->ah_txpower.txp_min_idx = 0;
 		ah->ah_txpower.txp_offset = 0;
-
-		/* Write settings on hw */
-		ath5k_setup_pcdac_table(ah);
 		break;
 	case AR5K_PWRTABLE_PWR_TO_PDADC:
 		/* Set PDADC boundaries and fill
 		 * final PDADC table */
 		ath5k_combine_pwr_to_pdadc_curves(ah, table_min, table_max,
 						ee->ee_pd_gains[ee_mode]);
-
-		/* Write settings on hw */
-		ath5k_setup_pwr_to_pdadc_table(ah, pdg, pdg_curve_to_idx);
 
 		/* Set txp.offset, note that table_min
 		 * can be negative */
@@ -2842,9 +3007,20 @@ ath5k_setup_channel_powertable(struct ath5k_hw *ah,
 		return -EINVAL;
 	}
 
+	ah->ah_txpower.txp_setup = true;
+
 	return 0;
 }
 
+/* Write power table for current channel to hw */
+static void
+ath5k_write_channel_powertable(struct ath5k_hw *ah, u8 ee_mode, u8 type)
+{
+	if (type == AR5K_PWRTABLE_PWR_TO_PDADC)
+		ath5k_write_pwr_to_pdadc_table(ah, ee_mode);
+	else
+		ath5k_write_pcdac_table(ah);
+}
 
 /*
  * Per-rate tx power setting
@@ -2933,36 +3109,41 @@ ath5k_setup_rate_powertable(struct ath5k_hw *ah, u16 max_pwr,
 
 	/* Min/max in 0.25dB units */
 	ah->ah_txpower.txp_min_pwr = 2 * rates[7];
-	ah->ah_txpower.txp_max_pwr = 2 * rates[0];
+	ah->ah_txpower.txp_cur_pwr = 2 * rates[0];
 	ah->ah_txpower.txp_ofdm = rates[7];
 }
 
 
 /*
- * Set transmition power
+ * Set transmission power
  */
-int
+static int
 ath5k_hw_txpower(struct ath5k_hw *ah, struct ieee80211_channel *channel,
-		u8 ee_mode, u8 txpower)
+		 u8 txpower)
 {
 	struct ath5k_rate_pcal_info rate_info;
+	struct ieee80211_channel *curr_channel = ah->ah_current_channel;
+	int ee_mode;
 	u8 type;
 	int ret;
 
-	ATH5K_TRACE(ah->ah_sc);
 	if (txpower > AR5K_TUNE_MAX_TXPOWER) {
-		ATH5K_ERR(ah->ah_sc, "invalid tx power: %u\n", txpower);
+		ATH5K_ERR(ah, "invalid tx power: %u\n", txpower);
 		return -EINVAL;
 	}
 
-	/* Reset TX power values */
-	memset(&ah->ah_txpower, 0, sizeof(ah->ah_txpower));
-	ah->ah_txpower.txp_tpc = AR5K_TUNE_TPC_TXPOWER;
-	ah->ah_txpower.txp_min_pwr = 0;
-	ah->ah_txpower.txp_max_pwr = AR5K_TUNE_MAX_TXPOWER;
+	ee_mode = ath5k_eeprom_mode_from_channel(channel);
+	if (ee_mode < 0) {
+		ATH5K_ERR(ah,
+			"invalid channel: %d\n", channel->center_freq);
+		return -EINVAL;
+	}
 
 	/* Initialize TX power table */
 	switch (ah->ah_radio) {
+	case AR5K_RF5110:
+		/* TODO */
+		return 0;
 	case AR5K_RF5111:
 		type = AR5K_PWRTABLE_PWR_TO_PCDAC;
 		break;
@@ -2980,16 +3161,29 @@ ath5k_hw_txpower(struct ath5k_hw *ah, struct ieee80211_channel *channel,
 		return -EINVAL;
 	}
 
-	/* FIXME: Only on channel/mode change */
-	ret = ath5k_setup_channel_powertable(ah, channel, ee_mode, type);
-	if (ret)
-		return ret;
+	/*
+	 * If we don't change channel/mode skip tx powertable calculation
+	 * and use the cached one.
+	 */
+	if (!ah->ah_txpower.txp_setup ||
+	    (channel->hw_value != curr_channel->hw_value) ||
+	    (channel->center_freq != curr_channel->center_freq)) {
+		/* Reset TX power values */
+		memset(&ah->ah_txpower, 0, sizeof(ah->ah_txpower));
+		ah->ah_txpower.txp_tpc = AR5K_TUNE_TPC_TXPOWER;
+
+		/* Calculate the powertable */
+		ret = ath5k_setup_channel_powertable(ah, channel,
+							ee_mode, type);
+		if (ret)
+			return ret;
+	}
+
+	/* Write table on hw */
+	ath5k_write_channel_powertable(ah, ee_mode, type);
 
 	/* Limit max power if we have a CTL available */
 	ath5k_get_max_ctl_power(ah, channel);
-
-	/* FIXME: Tx power limit for this regdomain
-	 * XXX: Mac80211/CRDA will do that anyway ? */
 
 	/* FIXME: Antenna reduction stuff */
 
@@ -2997,7 +3191,7 @@ ath5k_hw_txpower(struct ath5k_hw *ah, struct ieee80211_channel *channel,
 
 	/* FIXME: TPC scale reduction */
 
-	/* Get surounding channels for per-rate power table
+	/* Get surrounding channels for per-rate power table
 	 * calibration */
 	ath5k_get_rate_pcal_data(ah, channel, &rate_info);
 
@@ -3041,35 +3235,223 @@ ath5k_hw_txpower(struct ath5k_hw *ah, struct ieee80211_channel *channel,
 
 int ath5k_hw_set_txpower_limit(struct ath5k_hw *ah, u8 txpower)
 {
-	/*Just a try M.F.*/
-	struct ieee80211_channel *channel = ah->ah_current_channel;
-	u8 ee_mode;
-
-	ATH5K_TRACE(ah->ah_sc);
-
-	switch (channel->hw_value & CHANNEL_MODES) {
-	case CHANNEL_A:
-	case CHANNEL_T:
-	case CHANNEL_XR:
-		ee_mode = AR5K_EEPROM_MODE_11A;
-		break;
-	case CHANNEL_G:
-	case CHANNEL_TG:
-		ee_mode = AR5K_EEPROM_MODE_11G;
-		break;
-	case CHANNEL_B:
-		ee_mode = AR5K_EEPROM_MODE_11B;
-		break;
-	default:
-		ATH5K_ERR(ah->ah_sc,
-			"invalid channel: %d\n", channel->center_freq);
-		return -EINVAL;
-	}
-
-	ATH5K_DBG(ah->ah_sc, ATH5K_DEBUG_TXPOWER,
+	ATH5K_DBG(ah, ATH5K_DEBUG_TXPOWER,
 		"changing txpower to %d\n", txpower);
 
-	return ath5k_hw_txpower(ah, channel, ee_mode, txpower);
+	return ath5k_hw_txpower(ah, ah->ah_current_channel, txpower);
 }
 
-#undef _ATH5K_PHY
+/*************\
+ Init function
+\*************/
+
+int ath5k_hw_phy_init(struct ath5k_hw *ah, struct ieee80211_channel *channel,
+		      u8 mode, bool fast)
+{
+	struct ieee80211_channel *curr_channel;
+	int ret, i;
+	u32 phy_tst1;
+	ret = 0;
+
+	/*
+	 * Sanity check for fast flag
+	 * Don't try fast channel change when changing modulation
+	 * mode/band. We check for chip compatibility on
+	 * ath5k_hw_reset.
+	 */
+	curr_channel = ah->ah_current_channel;
+	if (fast && (channel->hw_value != curr_channel->hw_value))
+		return -EINVAL;
+
+	/*
+	 * On fast channel change we only set the synth parameters
+	 * while PHY is running, enable calibration and skip the rest.
+	 */
+	if (fast) {
+		AR5K_REG_ENABLE_BITS(ah, AR5K_PHY_RFBUS_REQ,
+				    AR5K_PHY_RFBUS_REQ_REQUEST);
+		for (i = 0; i < 100; i++) {
+			if (ath5k_hw_reg_read(ah, AR5K_PHY_RFBUS_GRANT))
+				break;
+			udelay(5);
+		}
+		/* Failed */
+		if (i >= 100)
+			return -EIO;
+
+		/* Set channel and wait for synth */
+		ret = ath5k_hw_channel(ah, channel);
+		if (ret)
+			return ret;
+
+		ath5k_hw_wait_for_synth(ah, channel);
+	}
+
+	/*
+	 * Set TX power
+	 *
+	 * Note: We need to do that before we set
+	 * RF buffer settings on 5211/5212+ so that we
+	 * properly set curve indices.
+	 */
+	ret = ath5k_hw_txpower(ah, channel, ah->ah_txpower.txp_cur_pwr ?
+			ah->ah_txpower.txp_cur_pwr / 2 : AR5K_TUNE_MAX_TXPOWER);
+	if (ret)
+		return ret;
+
+	/* Write OFDM timings on 5212*/
+	if (ah->ah_version == AR5K_AR5212 &&
+		channel->hw_value != AR5K_MODE_11B) {
+
+		ret = ath5k_hw_write_ofdm_timings(ah, channel);
+		if (ret)
+			return ret;
+
+		/* Spur info is available only from EEPROM versions
+		 * greater than 5.3, but the EEPROM routines will use
+		 * static values for older versions */
+		if (ah->ah_mac_srev >= AR5K_SREV_AR5424)
+			ath5k_hw_set_spur_mitigation_filter(ah,
+							    channel);
+	}
+
+	/* If we used fast channel switching
+	 * we are done, release RF bus and
+	 * fire up NF calibration.
+	 *
+	 * Note: Only NF calibration due to
+	 * channel change, not AGC calibration
+	 * since AGC is still running !
+	 */
+	if (fast) {
+		/*
+		 * Release RF Bus grant
+		 */
+		AR5K_REG_DISABLE_BITS(ah, AR5K_PHY_RFBUS_REQ,
+				    AR5K_PHY_RFBUS_REQ_REQUEST);
+
+		/*
+		 * Start NF calibration
+		 */
+		AR5K_REG_ENABLE_BITS(ah, AR5K_PHY_AGCCTL,
+					AR5K_PHY_AGCCTL_NF);
+
+		return ret;
+	}
+
+	/*
+	 * For 5210 we do all initialization using
+	 * initvals, so we don't have to modify
+	 * any settings (5210 also only supports
+	 * a/aturbo modes)
+	 */
+	if (ah->ah_version != AR5K_AR5210) {
+
+		/*
+		 * Write initial RF gain settings
+		 * This should work for both 5111/5112
+		 */
+		ret = ath5k_hw_rfgain_init(ah, channel->band);
+		if (ret)
+			return ret;
+
+		mdelay(1);
+
+		/*
+		 * Write RF buffer
+		 */
+		ret = ath5k_hw_rfregs_init(ah, channel, mode);
+		if (ret)
+			return ret;
+
+		/*Enable/disable 802.11b mode on 5111
+		(enable 2111 frequency converter + CCK)*/
+		if (ah->ah_radio == AR5K_RF5111) {
+			if (mode == AR5K_MODE_11B)
+				AR5K_REG_ENABLE_BITS(ah, AR5K_TXCFG,
+				    AR5K_TXCFG_B_MODE);
+			else
+				AR5K_REG_DISABLE_BITS(ah, AR5K_TXCFG,
+				    AR5K_TXCFG_B_MODE);
+		}
+
+	} else if (ah->ah_version == AR5K_AR5210) {
+		mdelay(1);
+		/* Disable phy and wait */
+		ath5k_hw_reg_write(ah, AR5K_PHY_ACT_DISABLE, AR5K_PHY_ACT);
+		mdelay(1);
+	}
+
+	/* Set channel on PHY */
+	ret = ath5k_hw_channel(ah, channel);
+	if (ret)
+		return ret;
+
+	/*
+	 * Enable the PHY and wait until completion
+	 * This includes BaseBand and Synthesizer
+	 * activation.
+	 */
+	ath5k_hw_reg_write(ah, AR5K_PHY_ACT_ENABLE, AR5K_PHY_ACT);
+
+	ath5k_hw_wait_for_synth(ah, channel);
+
+	/*
+	 * Perform ADC test to see if baseband is ready
+	 * Set tx hold and check adc test register
+	 */
+	phy_tst1 = ath5k_hw_reg_read(ah, AR5K_PHY_TST1);
+	ath5k_hw_reg_write(ah, AR5K_PHY_TST1_TXHOLD, AR5K_PHY_TST1);
+	for (i = 0; i <= 20; i++) {
+		if (!(ath5k_hw_reg_read(ah, AR5K_PHY_ADC_TEST) & 0x10))
+			break;
+		udelay(200);
+	}
+	ath5k_hw_reg_write(ah, phy_tst1, AR5K_PHY_TST1);
+
+	/*
+	 * Start automatic gain control calibration
+	 *
+	 * During AGC calibration RX path is re-routed to
+	 * a power detector so we don't receive anything.
+	 *
+	 * This method is used to calibrate some static offsets
+	 * used together with on-the fly I/Q calibration (the
+	 * one performed via ath5k_hw_phy_calibrate), which doesn't
+	 * interrupt rx path.
+	 *
+	 * While rx path is re-routed to the power detector we also
+	 * start a noise floor calibration to measure the
+	 * card's noise floor (the noise we measure when we are not
+	 * transmitting or receiving anything).
+	 *
+	 * If we are in a noisy environment, AGC calibration may time
+	 * out and/or noise floor calibration might timeout.
+	 */
+	AR5K_REG_ENABLE_BITS(ah, AR5K_PHY_AGCCTL,
+				AR5K_PHY_AGCCTL_CAL | AR5K_PHY_AGCCTL_NF);
+
+	/* At the same time start I/Q calibration for QAM constellation
+	 * -no need for CCK- */
+	ah->ah_calibration = false;
+	if (!(mode == AR5K_MODE_11B)) {
+		ah->ah_calibration = true;
+		AR5K_REG_WRITE_BITS(ah, AR5K_PHY_IQ,
+				AR5K_PHY_IQ_CAL_NUM_LOG_MAX, 15);
+		AR5K_REG_ENABLE_BITS(ah, AR5K_PHY_IQ,
+				AR5K_PHY_IQ_RUN);
+	}
+
+	/* Wait for gain calibration to finish (we check for I/Q calibration
+	 * during ath5k_phy_calibrate) */
+	if (ath5k_hw_register_timeout(ah, AR5K_PHY_AGCCTL,
+			AR5K_PHY_AGCCTL_CAL, 0, false)) {
+		ATH5K_ERR(ah, "gain calibration timeout (%uMHz)\n",
+			channel->center_freq);
+	}
+
+	/* Restore antenna mode */
+	ath5k_hw_set_antenna_mode(ah, ah->ah_ant_mode);
+
+	return ret;
+}

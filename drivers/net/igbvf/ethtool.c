@@ -240,12 +240,12 @@ static void igbvf_get_drvinfo(struct net_device *netdev,
                               struct ethtool_drvinfo *drvinfo)
 {
 	struct igbvf_adapter *adapter = netdev_priv(netdev);
-	char firmware_version[32] = "N/A";
 
-	strncpy(drvinfo->driver,  igbvf_driver_name, 32);
-	strncpy(drvinfo->version, igbvf_driver_version, 32);
-	strncpy(drvinfo->fw_version, firmware_version, 32);
-	strncpy(drvinfo->bus_info, pci_name(adapter->pdev), 32);
+	strlcpy(drvinfo->driver,  igbvf_driver_name, sizeof(drvinfo->driver));
+	strlcpy(drvinfo->version, igbvf_driver_version,
+		sizeof(drvinfo->version));
+	strlcpy(drvinfo->bus_info, pci_name(adapter->pdev),
+		sizeof(drvinfo->bus_info));
 	drvinfo->regdump_len = igbvf_get_regs_len(netdev);
 	drvinfo->eedump_len = igbvf_get_eeprom_len(netdev);
 }
@@ -259,12 +259,8 @@ static void igbvf_get_ringparam(struct net_device *netdev,
 
 	ring->rx_max_pending = IGBVF_MAX_RXD;
 	ring->tx_max_pending = IGBVF_MAX_TXD;
-	ring->rx_mini_max_pending = 0;
-	ring->rx_jumbo_max_pending = 0;
 	ring->rx_pending = rx_ring->count;
 	ring->tx_pending = tx_ring->count;
-	ring->rx_mini_pending = 0;
-	ring->rx_jumbo_pending = 0;
 }
 
 static int igbvf_set_ringparam(struct net_device *netdev,

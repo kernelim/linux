@@ -115,7 +115,7 @@ static int gfs2_get_name(struct dentry *parent, char *name,
 	if (error)
 		return error;
 
-	error = gfs2_dir_read(dir, &offset, &gnfd, get_name_filldir);
+	error = gfs2_dir_read(dir, &offset, &gnfd, get_name_filldir, NULL);
 
 	gfs2_glock_dq_uninit(&gh);
 

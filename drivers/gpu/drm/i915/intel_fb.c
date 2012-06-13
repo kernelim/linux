@@ -62,7 +62,7 @@ static int intelfb_create(struct intel_fbdev *ifbdev,
 	struct drm_device *dev = ifbdev->helper.dev;
 	struct fb_info *info;
 	struct drm_framebuffer *fb;
-	struct drm_mode_fb_cmd mode_cmd;
+	struct drm_mode_fb_cmd2 mode_cmd;
 	struct drm_i915_gem_object *obj;
 	struct device *device = &dev->pdev->dev;
 	int size, ret;
@@ -74,11 +74,12 @@ static int intelfb_create(struct intel_fbdev *ifbdev,
 	mode_cmd.width = sizes->surface_width;
 	mode_cmd.height = sizes->surface_height;
 
-	mode_cmd.bpp = sizes->surface_bpp;
-	mode_cmd.pitch = ALIGN(mode_cmd.width * ((mode_cmd.bpp + 7) / 8), 64);
-	mode_cmd.depth = sizes->surface_depth;
+	mode_cmd.pitches[0] = ALIGN(mode_cmd.width * ((sizes->surface_bpp + 7) /
+						      8), 64);
+	mode_cmd.pixel_format = drm_mode_legacy_fb_format(sizes->surface_bpp,
+							  sizes->surface_depth);
 
-	size = mode_cmd.pitch * mode_cmd.height;
+	size = mode_cmd.pitches[0] * mode_cmd.height;
 	size = ALIGN(size, PAGE_SIZE);
 	obj = i915_gem_alloc_object(dev, size);
 	if (!obj) {
@@ -142,7 +143,7 @@ static int intelfb_create(struct intel_fbdev *ifbdev,
 
 //	memset(info->screen_base, 0, size);
 
-	drm_fb_helper_fill_fix(info, fb->pitch, fb->depth);
+	drm_fb_helper_fill_fix(info, fb->pitches[0], fb->depth);
 	drm_fb_helper_fill_var(info, &ifbdev->helper, sizes->fb_width, sizes->fb_height);
 
 	info->pixmap.size = 64*1024;
@@ -273,8 +274,14 @@ void intel_fb_restore_mode(struct drm_device *dev)
 {
 	int ret;
 	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_mode_config *config = &dev->mode_config;
+	struct drm_plane *plane;
 
 	ret = drm_fb_helper_restore_fbdev_mode(&dev_priv->fbdev->helper);
 	if (ret)
 		DRM_DEBUG("failed to restore crtc mode\n");
+
+	/* Be sure to shut off any planes that may be active */
+	list_for_each_entry(plane, &config->plane_list, head)
+		plane->funcs->disable_plane(plane);
 }

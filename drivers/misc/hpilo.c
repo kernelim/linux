@@ -29,6 +29,7 @@
 
 static struct class *ilo_class;
 static unsigned int ilo_major;
+static unsigned int max_ccb = MIN_CCB;
 static char ilo_hwdev[MAX_ILO_DEV];
 
 static inline int get_entry_id(int entry)
@@ -423,7 +424,7 @@ static void ilo_set_reset(struct ilo_hwinfo *hw)
 	 * Mapped memory is zeroed on ilo reset, so set a per ccb flag
 	 * to indicate that this ccb needs to be closed and reopened.
 	 */
-	for (slot = 0; slot < MAX_CCB; slot++) {
+	for (slot = 0; slot < max_ccb; slot++) {
 		if (!hw->ccb_alloc[slot])
 			continue;
 		set_channel_reset(&hw->ccb_alloc[slot]->driver_ccb);
@@ -534,7 +535,7 @@ static int ilo_close(struct inode *ip, struct file *fp)
 	struct ilo_hwinfo *hw;
 	unsigned long flags;
 
-	slot = iminor(ip) % MAX_CCB;
+	slot = iminor(ip) % max_ccb;
 	hw = container_of(ip->i_cdev, struct ilo_hwinfo, cdev);
 
 	spin_lock(&hw->open_lock);
@@ -565,7 +566,7 @@ static int ilo_open(struct inode *ip, struct file *fp)
 	struct ilo_hwinfo *hw;
 	unsigned long flags;
 
-	slot = iminor(ip) % MAX_CCB;
+	slot = iminor(ip) % max_ccb;
 	hw = container_of(ip->i_cdev, struct ilo_hwinfo, cdev);
 
 	/* new ccb allocation */
@@ -661,7 +662,7 @@ static irqreturn_t ilo_isr(int irq, void *data)
 		ilo_set_reset(hw);
 	}
 
-	for (i = 0; i < MAX_CCB; i++) {
+	for (i = 0; i < max_ccb; i++) {
 		if (!hw->ccb_alloc[i])
 			continue;
 		if (pending & (1 << i))
@@ -695,14 +696,14 @@ static int __devinit ilo_map_device(struct pci_dev *pdev, struct ilo_hwinfo *hw)
 	}
 
 	/* map the adapter shared memory region */
-	hw->ram_vaddr = pci_iomap(pdev, 2, MAX_CCB * ILOHW_CCB_SZ);
+	hw->ram_vaddr = pci_iomap(pdev, 2, max_ccb * ILOHW_CCB_SZ);
 	if (hw->ram_vaddr == NULL) {
 		dev_err(&pdev->dev, "Error mapping shared mem\n");
 		goto mmio_free;
 	}
 
 	/* map the doorbell aperture */
-	hw->db_vaddr = pci_iomap(pdev, 3, MAX_CCB * ONE_DB_SIZE);
+	hw->db_vaddr = pci_iomap(pdev, 3, max_ccb * ONE_DB_SIZE);
 	if (hw->db_vaddr == NULL) {
 		dev_err(&pdev->dev, "Error mapping doorbell\n");
 		goto ram_free;
@@ -725,7 +726,7 @@ static void ilo_remove(struct pci_dev *pdev)
 	clear_device(ilo_hw);
 
 	minor = MINOR(ilo_hw->cdev.dev);
-	for (i = minor; i < minor + MAX_CCB; i++)
+	for (i = minor; i < minor + max_ccb; i++)
 		device_destroy(ilo_class, MKDEV(ilo_major, i));
 
 	cdev_del(&ilo_hw->cdev);
@@ -735,7 +736,7 @@ static void ilo_remove(struct pci_dev *pdev)
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
 	kfree(ilo_hw);
-	ilo_hwdev[(minor / MAX_CCB)] = 0;
+	ilo_hwdev[(minor / max_ccb)] = 0;
 }
 
 static int __devinit ilo_probe(struct pci_dev *pdev,
@@ -743,6 +744,11 @@ static int __devinit ilo_probe(struct pci_dev *pdev,
 {
 	int devnum, minor, start, error;
 	struct ilo_hwinfo *ilo_hw;
+
+	if (max_ccb > MAX_CCB)
+		max_ccb = MAX_CCB;
+	else if (max_ccb < MIN_CCB)
+		max_ccb = MIN_CCB;
 
 	/* find a free range for device files */
 	for (devnum = 0; devnum < MAX_ILO_DEV; devnum++) {
@@ -793,14 +799,14 @@ static int __devinit ilo_probe(struct pci_dev *pdev,
 
 	cdev_init(&ilo_hw->cdev, &ilo_fops);
 	ilo_hw->cdev.owner = THIS_MODULE;
-	start = devnum * MAX_CCB;
-	error = cdev_add(&ilo_hw->cdev, MKDEV(ilo_major, start), MAX_CCB);
+	start = devnum * max_ccb;
+	error = cdev_add(&ilo_hw->cdev, MKDEV(ilo_major, start), max_ccb);
 	if (error) {
 		dev_err(&pdev->dev, "Could not add cdev\n");
 		goto remove_isr;
 	}
 
-	for (minor = 0 ; minor < MAX_CCB; minor++) {
+	for (minor = 0 ; minor < max_ccb; minor++) {
 		struct device *dev;
 		dev = device_create(ilo_class, &pdev->dev,
 				    MKDEV(ilo_major, minor), NULL,
@@ -881,6 +887,10 @@ MODULE_VERSION("1.2");
 MODULE_ALIAS(ILO_NAME);
 MODULE_DESCRIPTION(ILO_NAME);
 MODULE_AUTHOR("David Altobelli <david.altobelli@hp.com>");
+
+module_param(max_ccb, uint, 0444);
+MODULE_PARM_DESC(max_ccb, "Maximum number of HP iLO channels to attach (8)");
+
 MODULE_LICENSE("GPL v2");
 
 module_init(ilo_init);

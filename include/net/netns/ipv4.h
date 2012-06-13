@@ -57,9 +57,20 @@ struct netns_ipv4 {
 	atomic_t rt_genid;
 
 #ifdef CONFIG_IP_MROUTE
+#ifndef __GENKSYMS__
+#ifndef CONFIG_IP_MROUTE_MULTIPLE_TABLES
+	struct mr_table		*mrt;
+	void			*pad1;
+	void			*pad2;
+#else
+	struct list_head	mr_tables;
+	struct fib_rules_ops	*mr_rules_ops;
+#endif
+#else
 	struct sock		*mroute_sk;
 	struct mfc_cache	**mfc_cache_array;
 	struct vif_device	*vif_table;
+#endif
 	int			maxvif;
 	atomic_t		cache_resolve_queue_len;
 	int			mroute_do_assert;

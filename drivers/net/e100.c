@@ -2402,10 +2402,10 @@ static void e100_get_drvinfo(struct net_device *netdev,
 	struct ethtool_drvinfo *info)
 {
 	struct nic *nic = netdev_priv(netdev);
-	strcpy(info->driver, DRV_NAME);
-	strcpy(info->version, DRV_VERSION);
-	strcpy(info->fw_version, "N/A");
-	strcpy(info->bus_info, pci_name(nic->pdev));
+	strlcpy(info->driver, DRV_NAME, sizeof(info->driver));
+	strlcpy(info->version, DRV_VERSION, sizeof(info->version));
+	strlcpy(info->bus_info, pci_name(nic->pdev),
+		sizeof(info->bus_info));
 }
 
 #define E100_PHY_REGS 0x1C
@@ -2528,12 +2528,8 @@ static void e100_get_ringparam(struct net_device *netdev,
 
 	ring->rx_max_pending = rfds->max;
 	ring->tx_max_pending = cbs->max;
-	ring->rx_mini_max_pending = 0;
-	ring->rx_jumbo_max_pending = 0;
 	ring->rx_pending = rfds->count;
 	ring->tx_pending = cbs->count;
-	ring->rx_mini_pending = 0;
-	ring->rx_jumbo_pending = 0;
 }
 
 static int e100_set_ringparam(struct net_device *netdev,
@@ -2762,11 +2758,8 @@ static int __devinit e100_probe(struct pci_dev *pdev,
 	struct nic *nic;
 	int err;
 
-	if (!(netdev = alloc_etherdev(sizeof(struct nic)))) {
-		if (((1 << debug) - 1) & NETIF_MSG_PROBE)
-			pr_err("Etherdev alloc failed, aborting\n");
+	if (!(netdev = alloc_etherdev(sizeof(struct nic))))
 		return -ENOMEM;
-	}
 
 	netdev->netdev_ops = &e100_netdev_ops;
 	SET_ETHTOOL_OPS(netdev, &e100_ethtool_ops);
@@ -2820,6 +2813,10 @@ static int __devinit e100_probe(struct pci_dev *pdev,
 		nic->flags &= ~ich;
 
 	e100_get_defaults(nic);
+
+	/* D100 MAC doesn't allow rx of vlan packets with normal MTU */
+	if (nic->mac < mac_82558_D101_A4)
+		netdev->features |= NETIF_F_VLAN_CHALLENGED;
 
 	/* locks must be initialized before calling hw_reset */
 	spin_lock_init(&nic->cb_lock);

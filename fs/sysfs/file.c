@@ -28,7 +28,7 @@
 static char last_sysfs_file[PATH_MAX];
 void sysfs_printk_last_file(void)
 {
-	printk(KERN_EMERG "last sysfs file: %s\n", last_sysfs_file);
+	printk(KERN_DEFAULT "last sysfs file: %s\n", last_sysfs_file);
 }
 
 /*

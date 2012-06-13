@@ -595,14 +595,15 @@ EXPORT_SYMBOL(jiffies_to_timeval);
  */
 clock_t jiffies_to_clock_t(long x)
 {
+	unsigned long x_ulong = (unsigned long) x;
 #if (TICK_NSEC % (NSEC_PER_SEC / USER_HZ)) == 0
 # if HZ < USER_HZ
-	return x * (USER_HZ / HZ);
+	return x_ulong * (USER_HZ / HZ);
 # else
-	return x / (HZ / USER_HZ);
+	return x_ulong / (HZ / USER_HZ);
 # endif
 #else
-	return div_u64((u64)x * TICK_NSEC, NSEC_PER_SEC / USER_HZ);
+	return div_u64((u64)x_ulong * TICK_NSEC, NSEC_PER_SEC / USER_HZ);
 #endif
 }
 EXPORT_SYMBOL(jiffies_to_clock_t);

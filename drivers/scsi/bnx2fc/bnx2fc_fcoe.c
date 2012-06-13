@@ -22,7 +22,7 @@ DEFINE_PER_CPU(struct bnx2fc_percpu_s, bnx2fc_percpu);
 
 #define DRV_MODULE_NAME		"bnx2fc"
 #define DRV_MODULE_VERSION	BNX2FC_VERSION
-#define DRV_MODULE_RELDATE	"Oct 02, 2011"
+#define DRV_MODULE_RELDATE	"Apr 24, 2012"
 
 
 static char version[] __devinitdata =
@@ -940,8 +940,14 @@ static int bnx2fc_libfc_config(struct fc_lport *lport)
 
 static int bnx2fc_em_config(struct fc_lport *lport)
 {
+	int max_xid;
+
+	if (nr_cpu_ids <= 2)
+		max_xid = FCOE_XIDS_PER_CPU;
+	else
+		max_xid = FCOE_MAX_XID;
 	if (!fc_exch_mgr_alloc(lport, FC_CLASS_3, FCOE_MIN_XID,
-				FCOE_MAX_XID, NULL)) {
+				max_xid, NULL)) {
 		printk(KERN_ERR PFX "em_config:fc_exch_mgr_alloc failed\n");
 		return -ENOMEM;
 	}
@@ -953,8 +959,8 @@ static int bnx2fc_lport_config(struct fc_lport *lport)
 {
 	lport->link_up = 0;
 	lport->qfull = 0;
-	lport->max_retry_count = 3;
-	lport->max_rport_retry_count = 3;
+	lport->max_retry_count = BNX2FC_MAX_RETRY_CNT;
+	lport->max_rport_retry_count = BNX2FC_MAX_RPORT_RETRY_CNT;
 	lport->e_d_tov = 2 * 1000;
 	lport->r_a_tov = 10 * 1000;
 
@@ -1535,6 +1541,7 @@ static void __bnx2fc_destroy(struct bnx2fc_interface *interface)
 static int bnx2fc_destroy(struct net_device *netdev)
 {
 	struct bnx2fc_interface *interface = NULL;
+	struct workqueue_struct *timer_work_queue;
 	int rc = 0;
 
 	rtnl_lock();
@@ -1547,9 +1554,9 @@ static int bnx2fc_destroy(struct net_device *netdev)
 		goto netdev_err;
 	}
 
-
-	destroy_workqueue(interface->timer_work_queue);
+	timer_work_queue = interface->timer_work_queue;
 	__bnx2fc_destroy(interface);
+	destroy_workqueue(timer_work_queue);
 
 netdev_err:
 	mutex_unlock(&bnx2fc_dev_lock);
@@ -2053,6 +2060,7 @@ if_create_err:
 ifput_err:
 	bnx2fc_net_cleanup(interface);
 	bnx2fc_interface_put(interface);
+	goto mod_err;
 netdev_err:
 	module_put(THIS_MODULE);
 mod_err:

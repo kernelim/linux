@@ -16,11 +16,13 @@
  */
 #include <asm/bitops.h>
 
-#define for_each_bit(bit, addr, size) \
+#define for_each_set_bit(bit, addr, size) \
 	for ((bit) = find_first_bit((addr), (size)); \
 	     (bit) < (size); \
 	     (bit) = find_next_bit((addr), (size), (bit) + 1))
 
+/* Temporary */
+#define for_each_bit(bit, addr, size) for_each_set_bit(bit, addr, size)
 
 static __inline__ int get_bitmask_order(unsigned int count)
 {
@@ -128,6 +130,17 @@ static inline __u8 rol8(__u8 word, unsigned int shift)
 static inline __u8 ror8(__u8 word, unsigned int shift)
 {
 	return (word >> shift) | (word << (8 - shift));
+}
+
+/**
+ * sign_extend32 - sign extend a 32-bit value using specified bit as sign-bit
+ * @value: value to sign extend
+ * @index: 0 based bit index (0<=index<32) to sign bit
+ */
+static inline __s32 sign_extend32(__u32 value, int index)
+{
+	__u8 shift = 31 - index;
+	return (__s32)(value << shift) >> shift;
 }
 
 static inline unsigned fls_long(unsigned long l)

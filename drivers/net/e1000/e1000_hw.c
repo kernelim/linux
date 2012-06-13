@@ -446,6 +446,7 @@ s32 e1000_reset_hw(struct e1000_hw *hw)
 	/* Must reset the PHY before resetting the MAC */
 	if ((hw->mac_type == e1000_82541) || (hw->mac_type == e1000_82547)) {
 		ew32(CTRL, (ctrl | E1000_CTRL_PHY_RST));
+		E1000_WRITE_FLUSH();
 		msleep(5);
 	}
 
@@ -3752,6 +3753,7 @@ static s32 e1000_acquire_eeprom(struct e1000_hw *hw)
 		/* Clear SK and CS */
 		eecd &= ~(E1000_EECD_CS | E1000_EECD_SK);
 		ew32(EECD, eecd);
+		E1000_WRITE_FLUSH();
 		udelay(1);
 	}
 
@@ -3824,6 +3826,7 @@ static void e1000_release_eeprom(struct e1000_hw *hw)
 		eecd &= ~E1000_EECD_SK;	/* Lower SCK */
 
 		ew32(EECD, eecd);
+		E1000_WRITE_FLUSH();
 
 		udelay(hw->eeprom.delay_usec);
 	} else if (hw->eeprom.type == e1000_eeprom_microwire) {
@@ -4023,6 +4026,12 @@ s32 e1000_validate_eeprom_checksum(struct e1000_hw *hw)
 		checksum += eeprom_data;
 	}
 
+#ifdef CONFIG_PARISC
+	/* This is a signature and not a checksum on HP c8000 */
+	if ((hw->subsystem_vendor_id == 0x103C) && (eeprom_data == 0x16d6))
+		return E1000_SUCCESS;
+
+#endif
 	if (checksum == (u16) EEPROM_SUM)
 		return E1000_SUCCESS;
 	else {
@@ -5376,7 +5385,7 @@ static s32 e1000_config_dsp_after_link_change(struct e1000_hw *hw, bool link_up)
 			if (ret_val)
 				return ret_val;
 
-			mdelay(20);
+			msleep(20);
 
 			ret_val = e1000_write_phy_reg(hw, 0x0000,
 						      IGP01E1000_IEEE_FORCE_GIGA);
@@ -5404,7 +5413,7 @@ static s32 e1000_config_dsp_after_link_change(struct e1000_hw *hw, bool link_up)
 			if (ret_val)
 				return ret_val;
 
-			mdelay(20);
+			msleep(20);
 
 			/* Now enable the transmitter */
 			ret_val =
@@ -5431,7 +5440,7 @@ static s32 e1000_config_dsp_after_link_change(struct e1000_hw *hw, bool link_up)
 			if (ret_val)
 				return ret_val;
 
-			mdelay(20);
+			msleep(20);
 
 			ret_val = e1000_write_phy_reg(hw, 0x0000,
 						      IGP01E1000_IEEE_FORCE_GIGA);
@@ -5448,7 +5457,7 @@ static s32 e1000_config_dsp_after_link_change(struct e1000_hw *hw, bool link_up)
 			if (ret_val)
 				return ret_val;
 
-			mdelay(20);
+			msleep(20);
 
 			/* Now enable the transmitter */
 			ret_val =
@@ -5741,26 +5750,26 @@ static s32 e1000_polarity_reversal_workaround(struct e1000_hw *hw)
 
 		if ((mii_status_reg & ~MII_SR_LINK_STATUS) == 0)
 			break;
-		mdelay(100);
+		msleep(100);
 	}
 
 	/* Recommended delay time after link has been lost */
-	mdelay(1000);
+	msleep(1000);
 
 	/* Now we will re-enable th transmitter on the PHY */
 
 	ret_val = e1000_write_phy_reg(hw, M88E1000_PHY_PAGE_SELECT, 0x0019);
 	if (ret_val)
 		return ret_val;
-	mdelay(50);
+	msleep(50);
 	ret_val = e1000_write_phy_reg(hw, M88E1000_PHY_GEN_CONTROL, 0xFFF0);
 	if (ret_val)
 		return ret_val;
-	mdelay(50);
+	msleep(50);
 	ret_val = e1000_write_phy_reg(hw, M88E1000_PHY_GEN_CONTROL, 0xFF00);
 	if (ret_val)
 		return ret_val;
-	mdelay(50);
+	msleep(50);
 	ret_val = e1000_write_phy_reg(hw, M88E1000_PHY_GEN_CONTROL, 0x0000);
 	if (ret_val)
 		return ret_val;
@@ -5785,7 +5794,7 @@ static s32 e1000_polarity_reversal_workaround(struct e1000_hw *hw)
 
 		if (mii_status_reg & MII_SR_LINK_STATUS)
 			break;
-		mdelay(100);
+		msleep(100);
 	}
 	return E1000_SUCCESS;
 }
@@ -5816,6 +5825,6 @@ static s32 e1000_get_auto_rd_done(struct e1000_hw *hw)
 static s32 e1000_get_phy_cfg_done(struct e1000_hw *hw)
 {
 	e_dbg("e1000_get_phy_cfg_done");
-	mdelay(10);
+	msleep(10);
 	return E1000_SUCCESS;
 }

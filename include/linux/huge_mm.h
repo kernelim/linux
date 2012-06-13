@@ -127,10 +127,27 @@ static inline int PageTransHuge(struct page *page)
 	VM_BUG_ON(PageTail(page));
 	return PageHead(page);
 }
+
+/*
+ * PageTransCompound returns true for both transparent huge pages
+ * and hugetlbfs pages, so it should only be called when it's known
+ * that hugetlbfs pages aren't involved.
+ */
 static inline int PageTransCompound(struct page *page)
 {
 	return PageCompound(page);
 }
+
+/*
+ * PageTransTail returns true for both transparent huge pages
+ * and hugetlbfs pages, so it should only be called when it's known
+ * that hugetlbfs pages aren't involved.
+ */
+static inline int PageTransTail(struct page *page)
+{
+	return PageTail(page);
+}
+
 static inline int hpage_nr_pages(struct page *page)
 {
 	if (unlikely(PageTransHuge(page)))
@@ -175,6 +192,12 @@ static inline int split_huge_page(struct page *page)
 #define compound_trans_head(page) compound_head(page)
 #define PageTransHuge(page) 0
 #define PageTransCompound(page) 0
+
+static inline int PageTransTail(struct page *page)
+{
+	return 0;
+}
+
 static inline void vma_adjust_trans_huge(struct vm_area_struct *vma,
 					 unsigned long start,
 					 unsigned long end,

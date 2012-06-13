@@ -27,6 +27,7 @@
 #include <linux/etherdevice.h>
 #include <linux/wireless.h>
 #include <linux/ieee80211.h>
+#include <linux/slab.h>
 #include <net/cfg80211.h>
 
 #include "iwm.h"
@@ -160,7 +161,7 @@ static int iwm_key_init(struct iwm_key *key, u8 key_index,
 }
 
 static int iwm_cfg80211_add_key(struct wiphy *wiphy, struct net_device *ndev,
-				u8 key_index, const u8 *mac_addr,
+				u8 key_index, bool pairwise, const u8 *mac_addr,
 				struct key_params *params)
 {
 	struct iwm_priv *iwm = ndev_to_iwm(ndev);
@@ -180,18 +181,23 @@ static int iwm_cfg80211_add_key(struct wiphy *wiphy, struct net_device *ndev,
 }
 
 static int iwm_cfg80211_get_key(struct wiphy *wiphy, struct net_device *ndev,
-				u8 key_index, const u8 *mac_addr, void *cookie,
+				u8 key_index, bool pairwise, const u8 *mac_addr,
+				void *cookie,
 				void (*callback)(void *cookie,
 						 struct key_params*))
 {
 	struct iwm_priv *iwm = ndev_to_iwm(ndev);
-	struct iwm_key *key = &iwm->keys[key_index];
+	struct iwm_key *key;
 	struct key_params params;
 
 	IWM_DBG_WEXT(iwm, DBG, "Getting key %d\n", key_index);
 
+	if (key_index >= IWM_NUM_KEYS)
+		return -ENOENT;
+
 	memset(&params, 0, sizeof(params));
 
+	key = &iwm->keys[key_index];
 	params.cipher = key->cipher;
 	params.key_len = key->key_len;
 	params.seq_len = key->seq_len;
@@ -205,7 +211,7 @@ static int iwm_cfg80211_get_key(struct wiphy *wiphy, struct net_device *ndev,
 
 
 static int iwm_cfg80211_del_key(struct wiphy *wiphy, struct net_device *ndev,
-				u8 key_index, const u8 *mac_addr)
+				u8 key_index, bool pairwise, const u8 *mac_addr)
 {
 	struct iwm_priv *iwm = ndev_to_iwm(ndev);
 	struct iwm_key *key = &iwm->keys[key_index];
@@ -223,7 +229,8 @@ static int iwm_cfg80211_del_key(struct wiphy *wiphy, struct net_device *ndev,
 
 static int iwm_cfg80211_set_default_key(struct wiphy *wiphy,
 					struct net_device *ndev,
-					u8 key_index)
+					u8 key_index, bool unicast,
+					bool multicast)
 {
 	struct iwm_priv *iwm = ndev_to_iwm(ndev);
 
@@ -263,7 +270,7 @@ static int iwm_cfg80211_get_station(struct wiphy *wiphy,
 int iwm_cfg80211_inform_bss(struct iwm_priv *iwm)
 {
 	struct wiphy *wiphy = iwm_to_wiphy(iwm);
-	struct iwm_bss_info *bss, *next;
+	struct iwm_bss_info *bss;
 	struct iwm_umac_notif_bss_info *umac_bss;
 	struct ieee80211_mgmt *mgmt;
 	struct ieee80211_channel *channel;
@@ -271,7 +278,7 @@ int iwm_cfg80211_inform_bss(struct iwm_priv *iwm)
 	s32 signal;
 	int freq;
 
-	list_for_each_entry_safe(bss, next, &iwm->bss_list, node) {
+	list_for_each_entry(bss, &iwm->bss_list, node) {
 		umac_bss = bss->bss;
 		mgmt = (struct ieee80211_mgmt *)(umac_bss->frame_buf);
 
@@ -284,7 +291,8 @@ int iwm_cfg80211_inform_bss(struct iwm_priv *iwm)
 			return -EINVAL;
 		}
 
-		freq = ieee80211_channel_to_frequency(umac_bss->channel);
+		freq = ieee80211_channel_to_frequency(umac_bss->channel,
+						      band->band);
 		channel = ieee80211_get_channel(wiphy, freq);
 		signal = umac_bss->rssi * 100;
 
@@ -405,38 +413,20 @@ static int iwm_cfg80211_join_ibss(struct wiphy *wiphy, struct net_device *dev,
 {
 	struct iwm_priv *iwm = wiphy_to_iwm(wiphy);
 	struct ieee80211_channel *chan = params->channel;
-	struct cfg80211_bss *bss;
 
 	if (!test_bit(IWM_STATUS_READY, &iwm->status))
 		return -EIO;
 
-	/* UMAC doesn't support creating IBSS network with specified bssid.
-	 * This should be removed after we have join only mode supported. */
+	/* UMAC doesn't support creating or joining an IBSS network
+	 * with specified bssid. */
 	if (params->bssid)
 		return -EOPNOTSUPP;
-
-	bss = cfg80211_get_ibss(iwm_to_wiphy(iwm), NULL,
-				params->ssid, params->ssid_len);
-	if (!bss) {
-		iwm_scan_one_ssid(iwm, params->ssid, params->ssid_len);
-		schedule_timeout_interruptible(2 * HZ);
-		bss = cfg80211_get_ibss(iwm_to_wiphy(iwm), NULL,
-					params->ssid, params->ssid_len);
-	}
-	/* IBSS join only mode is not supported by UMAC ATM */
-	if (bss) {
-		cfg80211_put_bss(bss);
-		return -EOPNOTSUPP;
-	}
 
 	iwm->channel = ieee80211_frequency_to_channel(chan->center_freq);
 	iwm->umac_profile->ibss.band = chan->band;
 	iwm->umac_profile->ibss.channel = iwm->channel;
 	iwm->umac_profile->ssid.ssid_len = params->ssid_len;
 	memcpy(iwm->umac_profile->ssid.ssid, params->ssid, params->ssid_len);
-
-	if (params->bssid)
-		memcpy(&iwm->umac_profile->bssid[0], params->bssid, ETH_ALEN);
 
 	return iwm_send_mlme_profile(iwm);
 }
@@ -490,11 +480,11 @@ static int iwm_set_wpa_version(struct iwm_priv *iwm, u32 wpa_version)
 		return 0;
 	}
 
+	if (wpa_version & NL80211_WPA_VERSION_1)
+		iwm->umac_profile->sec.flags = UMAC_SEC_FLG_WPA_ON_MSK;
+
 	if (wpa_version & NL80211_WPA_VERSION_2)
 		iwm->umac_profile->sec.flags = UMAC_SEC_FLG_RSNA_ON_MSK;
-
-	if (wpa_version & NL80211_WPA_VERSION_1)
-		iwm->umac_profile->sec.flags |= UMAC_SEC_FLG_WPA_ON_MSK;
 
 	return 0;
 }
@@ -646,6 +636,13 @@ static int iwm_cfg80211_connect(struct wiphy *wiphy, struct net_device *dev,
 		iwm->default_key = sme->key_idx;
 	}
 
+	/* WPA and open AUTH type from wpa_s means WPS (a.k.a. WSC) */
+	if ((iwm->umac_profile->sec.flags &
+	     (UMAC_SEC_FLG_WPA_ON_MSK | UMAC_SEC_FLG_RSNA_ON_MSK)) &&
+	    iwm->umac_profile->sec.auth_type == UMAC_AUTH_TYPE_OPEN) {
+			iwm->umac_profile->sec.flags = UMAC_SEC_FLG_WSC_ON_MSK;
+	}
+
 	ret = iwm_send_mlme_profile(iwm);
 
 	if (iwm->umac_profile->sec.auth_type != UMAC_AUTH_TYPE_LEGACY_PSK ||
@@ -680,12 +677,30 @@ static int iwm_cfg80211_disconnect(struct wiphy *wiphy, struct net_device *dev,
 }
 
 static int iwm_cfg80211_set_txpower(struct wiphy *wiphy,
-				    enum tx_power_setting type, int dbm)
+				    enum nl80211_tx_power_setting type, int mbm)
 {
+	struct iwm_priv *iwm = wiphy_to_iwm(wiphy);
+	int ret;
+
 	switch (type) {
-	case TX_POWER_AUTOMATIC:
+	case NL80211_TX_POWER_AUTOMATIC:
 		return 0;
+	case NL80211_TX_POWER_FIXED:
+		if (mbm < 0 || (mbm % 100))
+			return -EOPNOTSUPP;
+
+		if (!test_bit(IWM_STATUS_READY, &iwm->status))
+			return 0;
+
+		ret = iwm_umac_set_config_fix(iwm, UMAC_PARAM_TBL_CFG_FIX,
+					      CFG_TX_PWR_LIMIT_USR,
+					      MBM_TO_DBM(mbm) * 2);
+		if (ret < 0)
+			return ret;
+
+		return iwm_tx_power_trigger(iwm);
 	default:
+		IWM_ERR(iwm, "Unsupported power type: %d\n", type);
 		return -EOPNOTSUPP;
 	}
 
@@ -696,7 +711,7 @@ static int iwm_cfg80211_get_txpower(struct wiphy *wiphy, int *dbm)
 {
 	struct iwm_priv *iwm = wiphy_to_iwm(wiphy);
 
-	*dbm = iwm->txpower;
+	*dbm = iwm->txpower >> 1;
 
 	return 0;
 }
@@ -722,6 +737,36 @@ static int iwm_cfg80211_set_power_mgmt(struct wiphy *wiphy,
 				       CFG_POWER_INDEX, iwm->conf.power_index);
 }
 
+static int iwm_cfg80211_set_pmksa(struct wiphy *wiphy,
+				  struct net_device *netdev,
+				  struct cfg80211_pmksa *pmksa)
+{
+	struct iwm_priv *iwm = wiphy_to_iwm(wiphy);
+
+	return iwm_send_pmkid_update(iwm, pmksa, IWM_CMD_PMKID_ADD);
+}
+
+static int iwm_cfg80211_del_pmksa(struct wiphy *wiphy,
+				  struct net_device *netdev,
+				  struct cfg80211_pmksa *pmksa)
+{
+	struct iwm_priv *iwm = wiphy_to_iwm(wiphy);
+
+	return iwm_send_pmkid_update(iwm, pmksa, IWM_CMD_PMKID_DEL);
+}
+
+static int iwm_cfg80211_flush_pmksa(struct wiphy *wiphy,
+				    struct net_device *netdev)
+{
+	struct iwm_priv *iwm = wiphy_to_iwm(wiphy);
+	struct cfg80211_pmksa pmksa;
+
+	memset(&pmksa, 0, sizeof(struct cfg80211_pmksa));
+
+	return iwm_send_pmkid_update(iwm, &pmksa, IWM_CMD_PMKID_FLUSH);
+}
+
+
 static struct cfg80211_ops iwm_cfg80211_ops = {
 	.change_virtual_intf = iwm_cfg80211_change_iface,
 	.add_key = iwm_cfg80211_add_key,
@@ -738,6 +783,9 @@ static struct cfg80211_ops iwm_cfg80211_ops = {
 	.set_tx_power = iwm_cfg80211_set_txpower,
 	.get_tx_power = iwm_cfg80211_get_txpower,
 	.set_power_mgmt = iwm_cfg80211_set_power_mgmt,
+	.set_pmksa = iwm_cfg80211_set_pmksa,
+	.del_pmksa = iwm_cfg80211_del_pmksa,
+	.flush_pmksa = iwm_cfg80211_flush_pmksa,
 };
 
 static const u32 cipher_suites[] = {
@@ -783,6 +831,7 @@ struct wireless_dev *iwm_wdev_alloc(int sizeof_bus, struct device *dev)
 
 	set_wiphy_dev(wdev->wiphy, dev);
 	wdev->wiphy->max_scan_ssids = UMAC_WIFI_IF_PROBE_OPTION_MAX;
+	wdev->wiphy->max_num_pmkids = UMAC_MAX_NUM_PMKIDS;
 	wdev->wiphy->interface_modes = BIT(NL80211_IFTYPE_STATION) |
 				       BIT(NL80211_IFTYPE_ADHOC);
 	wdev->wiphy->bands[IEEE80211_BAND_2GHZ] = &iwm_band_2ghz;

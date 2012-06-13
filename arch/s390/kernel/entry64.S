@@ -238,6 +238,7 @@ __switch_to_no_mcck:
 	lmg	%r6,%r15,__SF_GPRS(%r15)# load __switch_to registers of next task
 	stg	%r3,__LC_CURRENT	# __LC_CURRENT = current task struct
 	lctl	%c4,%c4,__TASK_pid(%r3) # load pid to control reg. 4
+	mvc	__LC_CURRENT_PID+4(4,%r0),__TASK_pid(%r3) # store pid of next
 	lg	%r3,__THREAD_info(%r3)	# load thread_info from task struct
 	stg	%r3,__LC_THREAD_INFO
 	aghi	%r3,STACK_SIZE
@@ -884,6 +885,28 @@ restart_crash:
 	.long  0x000a0000,0x00000000,0x00000000,0x00000000
 restart_go:
 #endif
+
+#
+# PSW restart interrupt handler
+#
+	.globl psw_restart_int_handler
+psw_restart_int_handler:
+	stg	%r15,__LC_SAVE_AREA+120(%r0)	# save r15
+	larl	%r15,restart_stack		# load restart stack
+	lg	%r15,0(%r15)
+	aghi	%r15,-SP_SIZE			# make room for pt_regs
+	stmg	%r0,%r14,SP_R0(%r15)		# store gprs %r0-%r14 to stack
+	mvc	SP_R15(8,%r15),__LC_SAVE_AREA+120(%r0)# store saved %r15 to stack
+	mvc	SP_PSW(16,%r15),__LC_RST_OLD_PSW(%r0)# store restart old psw
+	xc	__SF_BACKCHAIN(8,%r15),__SF_BACKCHAIN(%r15) # set backchain to 0
+	brasl	%r14,do_restart
+
+	larl	%r14,restart_psw_crash		# load disabled wait PSW if
+	lpswe	0(%r14)				# do_restart returns
+	.align 8
+restart_psw_crash:
+	.quad	0x0002000080000000,0x0000000000000000 + restart_psw_crash
+
 
 #ifdef CONFIG_CHECK_STACK
 /*

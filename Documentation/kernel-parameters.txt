@@ -496,6 +496,9 @@ and is between 256 and 4096 characters. It is defined in the file
 			[SPARC64] tick
 			[X86-64] hpet,tsc
 
+	clocksource_failover [GENERIC_TIME] Switch the clocksource if the
+			     current clocksource is found to be unstable.
+
 	clearcpuid=BITNUM [X86]
 			Disable CPUID feature X for the kernel. See
 			arch/x86/include/asm/cpufeature.h for the valid bit
@@ -732,10 +735,10 @@ and is between 256 and 4096 characters. It is defined in the file
 			See Documentation/block/as-iosched.txt and
 			Documentation/block/deadline-iosched.txt for details.
 
-	elfcorehdr=	[IA64,PPC,SH,X86]
+	elfcorehdr=[size[KMG]@]offset[KMG] [IA64,PPC,SH,X86,S390]
 			Specifies physical address of start of kernel core
-			image elf header. Generally kexec loader will
-			pass this option to capture kernel.
+			image elf header and optionally the size. Generally
+			kexec loader will pass this option to capture kernel.
 			See Documentation/kdump/kdump.txt for details.
 
 	enable_mtrr_cleanup [X86]
@@ -873,6 +876,10 @@ and is between 256 and 4096 characters. It is defined in the file
 			force: allow force enabled of undocumented chips (ICH4,
 				VIA, nVidia)
 			verbose: show contents of HPET registers during setup
+
+	hpet_mmap	[HW, X86_64] Enable userspace mapping of HPET
+			registers for faster HPET access by userspace
+			processes.
 
 	hugepages=	[HW,X86-32,IA-64] HugeTLB pages to allocate at boot.
 	hugepagesz=	[HW,IA-64,PPC,X86-64] The size of the HugeTLB pages.
@@ -1249,6 +1256,9 @@ and is between 256 and 4096 characters. It is defined in the file
 			* nohrst, nosrst, norst: suppress hard, soft
                           and both resets.
 
+			* rstonce: only attempt one reset during
+			  hot-unplug link recovery
+
 			If there are multiple matching configurations changing
 			the same attribute, the last one is used.
 
@@ -1618,6 +1628,19 @@ and is between 256 and 4096 characters. It is defined in the file
 			of returning the full 64-bit number.
 			The default is to return 64-bit inode numbers.
 
+	nfs.nfs4_disable_idmapping=
+			[NFSv4] When set to the default of '1', this option
+			ensures that both the RPC level authentication
+			scheme and the NFS level operations agree to use
+			numeric uids/gids if the mount is using the
+			'sec=sys' security flavour. In effect it is
+			disabling idmapping, which can make migration from
+			legacy NFSv2/v3 systems to NFSv4 easier.
+			Servers that do not support this mode of operation
+			will be autodetected by the client, and it will fall
+			back to using the idmapper.
+			To turn off this behaviour, set the value to '0'.
+
 	nmi_debug=	[KNL,AVR32,SH] Specify one or more actions to take
 			when a NMI is triggered.
 			Format: [state][,regs][,debounce][,die]
@@ -1773,6 +1796,11 @@ and is between 256 and 4096 characters. It is defined in the file
 
 	noresidual	[PPC] Don't use residual data on PReP machines.
 
+	nordrand	[X86] Disable the direct use of the RDRAND
+			instruction even if it is supported by the
+			processor.  RDRAND is still available to user
+			space applications.
+
 	noresume	[SWSUSP] Disables resume and restores original swap
 			space.
 
@@ -1831,6 +1859,8 @@ and is between 256 and 4096 characters. It is defined in the file
 			of the timeout.  We have interrupts disabled while
 			waiting for the ACK, so if this is set too high
 			interrupts *may* be lost!
+
+	OMGZOMBIES	BRRRAAAAAAIIIIINNNNNSSSSSSSS
 
 	opl3=		[HW,OSS]
 			Format: <io>
@@ -1979,8 +2009,12 @@ and is between 256 and 4096 characters. It is defined in the file
 				IRQ routing is enabled.
 		noacpi		[X86] Do not use ACPI for IRQ routing
 				or for PCI scanning.
-		use_crs		[X86] Use _CRS for PCI resource
-				allocation.
+		use_crs		[X86] Use PCI host bridge window information
+				from ACPI.  On BIOSes from 2008 or later, this
+				is enabled by default.  If you need to use this,
+				please report a bug.
+		nocrs		[X86] Ignore PCI host bridge windows from ACPI.
+			        If you need to use this, please report a bug.
 		routeirq	Do IRQ routing for all PCI devices.
 				This is normally done in pci_enable_device(),
 				so this option is a temporary workaround
@@ -2022,6 +2056,8 @@ and is between 256 and 4096 characters. It is defined in the file
 				the default.
 				off: Turn ECRC off
 				on: Turn ECRC on.
+		realloc		reallocate PCI resources if allocations done by BIOS
+				are erroneous.
 		nosriov		[HW]
 				Disable SRIOV support in kernel.
 				Please report a bug if you use this parameter.
@@ -2114,6 +2150,12 @@ and is between 256 and 4096 characters. It is defined in the file
 			print-fatal-signals=1: print segfault info to
 			the kernel console.
 			default: off.
+
+	printk.always_kmsg_dump=
+			Trigger kmsg_dump for cases other than kernel oops or
+			panics
+			Format: <bool>  (1/Y/y=enable, 0/N/n=disable)
+			default: disabled
 
 	printk.time=	Show timing data prefixed to each printk message line
 			Format: <bool>  (1/Y/y=enable, 0/N/n=disable)
@@ -2863,7 +2905,6 @@ and is between 256 and 4096 characters. It is defined in the file
 	xirc2ps_cs=	[NET,PCMCIA]
 			Format:
 			<irq>,<irq_mask>,<io>,<full_duplex>,<do_sound>,<lockup_hack>[,<irq2>[,<irq3>[,<irq4>]]]
-
 ______________________________________________________________________
 
 TODO:

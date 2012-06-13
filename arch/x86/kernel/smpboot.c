@@ -244,21 +244,27 @@ static void __cpuinit smp_callin(void)
 	end_local_APIC_setup();
 	map_cpu_to_logical_apicid();
 
+
+	/*
+	 * Save our processor parameters. Note: this information
+	 * is needed for clock calibration.
+	 */
+	smp_store_cpu_info(cpuid);
+
 	/*
 	 * Get our bogomips.
+	 * Update loops_per_jiffy in cpu_data. Previous call to
+	 * smp_store_cpu_info() stored a value that is close but not as
+	 * accurate as the value just calculated.
 	 *
 	 * Need to enable IRQs because it can take longer and then
 	 * the NMI watchdog might kill us.
 	 */
 	local_irq_enable();
 	calibrate_delay();
+	cpu_data(cpuid).loops_per_jiffy = loops_per_jiffy;
 	local_irq_disable();
 	pr_debug("Stack at about %p\n", &cpuid);
-
-	/*
-	 * Save our processor parameters
-	 */
-	smp_store_cpu_info(cpuid);
 
 	notify_cpu_starting(cpuid);
 
@@ -292,6 +298,7 @@ notrace static void __cpuinit start_secondary(void *unused)
 
 	vmi_bringup();
 	cpu_init();
+	x86_cpuinit.early_percpu_clock_init();
 	preempt_disable();
 	smp_callin();
 
@@ -359,6 +366,12 @@ static inline void copy_cpuinfo_x86(struct cpuinfo_x86 *dst,
 }
 #endif /* CONFIG_CPUMASK_OFFSTACK */
 
+static inline void copy_cpuinfo_x86_rh(struct cpuinfo_x86_rh *dst,
+				       const struct cpuinfo_x86_rh *src)
+{
+	*dst = *src;
+}
+
 /*
  * The bootstrap kernel entry code has set these up. Save them for
  * a given CPU
@@ -367,8 +380,10 @@ static inline void copy_cpuinfo_x86(struct cpuinfo_x86 *dst,
 void __cpuinit smp_store_cpu_info(int id)
 {
 	struct cpuinfo_x86 *c = &cpu_data(id);
+	struct cpuinfo_x86_rh *rh = &cpu_data_rh(id);
 
 	copy_cpuinfo_x86(c, &boot_cpu_data);
+	copy_cpuinfo_x86_rh(rh, &boot_cpu_data_rh);
 	c->cpu_index = id;
 	if (id != 0)
 		identify_secondary_cpu(c);

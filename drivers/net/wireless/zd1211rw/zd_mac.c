@@ -22,6 +22,7 @@
 
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
+#include <linux/slab.h>
 #include <linux/usb.h>
 #include <linux/jiffies.h>
 #include <net/ieee80211_radiotap.h>
@@ -41,7 +42,8 @@ static struct zd_reg_alpha2_map reg_alpha2_map[] = {
 	{ ZD_REGDOMAIN_IC, "CA" },
 	{ ZD_REGDOMAIN_ETSI, "DE" }, /* Generic ETSI, use most restrictive */
 	{ ZD_REGDOMAIN_JAPAN, "JP" },
-	{ ZD_REGDOMAIN_JAPAN_ADD, "JP" },
+	{ ZD_REGDOMAIN_JAPAN_2, "JP" },
+	{ ZD_REGDOMAIN_JAPAN_3, "JP" },
 	{ ZD_REGDOMAIN_SPAIN, "ES" },
 	{ ZD_REGDOMAIN_FRANCE, "FR" },
 };
@@ -88,6 +90,34 @@ static const struct ieee80211_rate zd_rates[] = {
 	  .flags = 0 },
 };
 
+/*
+ * Zydas retry rates table. Each line is listed in the same order as
+ * in zd_rates[] and contains all the rate used when a packet is sent
+ * starting with a given rates. Let's consider an example :
+ *
+ * "11 Mbits : 4, 3, 2, 1, 0" means :
+ * - packet is sent using 4 different rates
+ * - 1st rate is index 3 (ie 11 Mbits)
+ * - 2nd rate is index 2 (ie 5.5 Mbits)
+ * - 3rd rate is index 1 (ie 2 Mbits)
+ * - 4th rate is index 0 (ie 1 Mbits)
+ */
+
+static const struct tx_retry_rate zd_retry_rates[] = {
+	{ /*  1 Mbits */	1, { 0 }},
+	{ /*  2 Mbits */	2, { 1,  0 }},
+	{ /*  5.5 Mbits */	3, { 2,  1, 0 }},
+	{ /* 11 Mbits */	4, { 3,  2, 1, 0 }},
+	{ /*  6 Mbits */	5, { 4,  3, 2, 1, 0 }},
+	{ /*  9 Mbits */	6, { 5,  4, 3, 2, 1, 0}},
+	{ /* 12 Mbits */	5, { 6,  3, 2, 1, 0 }},
+	{ /* 18 Mbits */	6, { 7,  6, 3, 2, 1, 0 }},
+	{ /* 24 Mbits */	6, { 8,  6, 3, 2, 1, 0 }},
+	{ /* 36 Mbits */	7, { 9,  8, 6, 3, 2, 1, 0 }},
+	{ /* 48 Mbits */	8, {10,  9, 8, 6, 3, 2, 1, 0 }},
+	{ /* 54 Mbits */	9, {11, 10, 9, 8, 6, 3, 2, 1, 0 }}
+};
+
 static const struct ieee80211_channel zd_channels[] = {
 	{ .center_freq = 2412, .hw_value = 1 },
 	{ .center_freq = 2417, .hw_value = 2 },
@@ -108,6 +138,12 @@ static const struct ieee80211_channel zd_channels[] = {
 static void housekeeping_init(struct zd_mac *mac);
 static void housekeeping_enable(struct zd_mac *mac);
 static void housekeeping_disable(struct zd_mac *mac);
+static void beacon_init(struct zd_mac *mac);
+static void beacon_enable(struct zd_mac *mac);
+static void beacon_disable(struct zd_mac *mac);
+static void set_rts_cts(struct zd_mac *mac, unsigned int short_preamble);
+static int zd_mac_config_beacon(struct ieee80211_hw *hw,
+				struct sk_buff *beacon, bool in_intr);
 
 static int zd_reg2alpha2(u8 regdomain, char *alpha2)
 {
@@ -122,6 +158,22 @@ static int zd_reg2alpha2(u8 regdomain, char *alpha2)
 		}
 	}
 	return 1;
+}
+
+static int zd_check_signal(struct ieee80211_hw *hw, int signal)
+{
+	struct zd_mac *mac = zd_hw_mac(hw);
+
+	dev_dbg_f_cond(zd_mac_dev(mac), signal < 0 || signal > 100,
+			"%s: signal value from device not in range 0..100, "
+			"but %d.\n", __func__, signal);
+
+	if (signal < 0)
+		signal = 0;
+	else if (signal > 100)
+		signal = 100;
+
+	return signal;
 }
 
 int zd_mac_preinit_hw(struct ieee80211_hw *hw)
@@ -201,6 +253,26 @@ static int set_rx_filter(struct zd_mac *mac)
 	return zd_iowrite32(&mac->chip, CR_RX_FILTER, filter);
 }
 
+static int set_mac_and_bssid(struct zd_mac *mac)
+{
+	int r;
+
+	if (!mac->vif)
+		return -1;
+
+	r = zd_write_mac_addr(&mac->chip, mac->vif->addr);
+	if (r)
+		return r;
+
+	/* Vendor driver after setting MAC either sets BSSID for AP or
+	 * filter for other modes.
+	 */
+	if (mac->type != NL80211_IFTYPE_AP)
+		return set_rx_filter(mac);
+	else
+		return zd_write_bssid(&mac->chip, mac->vif->addr);
+}
+
 static int set_mc_hash(struct zd_mac *mac)
 {
 	struct zd_mc_hash hash;
@@ -208,7 +280,7 @@ static int set_mc_hash(struct zd_mac *mac)
 	return zd_chip_set_multicast_hash(&mac->chip, &hash);
 }
 
-static int zd_op_start(struct ieee80211_hw *hw)
+int zd_op_start(struct ieee80211_hw *hw)
 {
 	struct zd_mac *mac = zd_hw_mac(hw);
 	struct zd_chip *chip = &mac->chip;
@@ -245,6 +317,8 @@ static int zd_op_start(struct ieee80211_hw *hw)
 		goto disable_rxtx;
 
 	housekeeping_enable(mac);
+	beacon_enable(mac);
+	set_bit(ZD_DEVICE_RUNNING, &mac->flags);
 	return 0;
 disable_rxtx:
 	zd_chip_disable_rxtx(chip);
@@ -256,12 +330,14 @@ out:
 	return r;
 }
 
-static void zd_op_stop(struct ieee80211_hw *hw)
+void zd_op_stop(struct ieee80211_hw *hw)
 {
 	struct zd_mac *mac = zd_hw_mac(hw);
 	struct zd_chip *chip = &mac->chip;
 	struct sk_buff *skb;
 	struct sk_buff_head *ack_wait_queue = &mac->ack_wait_queue;
+
+	clear_bit(ZD_DEVICE_RUNNING, &mac->flags);
 
 	/* The order here deliberately is a little different from the open()
 	 * method, since we need to make sure there is no opportunity for RX
@@ -269,6 +345,7 @@ static void zd_op_stop(struct ieee80211_hw *hw)
 	 */
 
 	zd_chip_disable_rxtx(chip);
+	beacon_disable(mac);
 	housekeeping_disable(mac);
 	flush_workqueue(zd_workqueue);
 
@@ -281,8 +358,68 @@ static void zd_op_stop(struct ieee80211_hw *hw)
 		dev_kfree_skb_any(skb);
 }
 
+int zd_restore_settings(struct zd_mac *mac)
+{
+	struct sk_buff *beacon;
+	struct zd_mc_hash multicast_hash;
+	unsigned int short_preamble;
+	int r, beacon_interval, beacon_period;
+	u8 channel;
+
+	dev_dbg_f(zd_mac_dev(mac), "\n");
+
+	spin_lock_irq(&mac->lock);
+	multicast_hash = mac->multicast_hash;
+	short_preamble = mac->short_preamble;
+	beacon_interval = mac->beacon.interval;
+	beacon_period = mac->beacon.period;
+	channel = mac->channel;
+	spin_unlock_irq(&mac->lock);
+
+	r = set_mac_and_bssid(mac);
+	if (r < 0) {
+		dev_dbg_f(zd_mac_dev(mac), "set_mac_and_bssid failed, %d\n", r);
+		return r;
+	}
+
+	r = zd_chip_set_channel(&mac->chip, channel);
+	if (r < 0) {
+		dev_dbg_f(zd_mac_dev(mac), "zd_chip_set_channel failed, %d\n",
+			  r);
+		return r;
+	}
+
+	set_rts_cts(mac, short_preamble);
+
+	r = zd_chip_set_multicast_hash(&mac->chip, &multicast_hash);
+	if (r < 0) {
+		dev_dbg_f(zd_mac_dev(mac),
+			  "zd_chip_set_multicast_hash failed, %d\n", r);
+		return r;
+	}
+
+	if (mac->type == NL80211_IFTYPE_MESH_POINT ||
+	    mac->type == NL80211_IFTYPE_ADHOC ||
+	    mac->type == NL80211_IFTYPE_AP) {
+		if (mac->vif != NULL) {
+			beacon = ieee80211_beacon_get(mac->hw, mac->vif);
+			if (beacon)
+				zd_mac_config_beacon(mac->hw, beacon, false);
+		}
+
+		zd_set_beacon_interval(&mac->chip, beacon_interval,
+					beacon_period, mac->type);
+
+		spin_lock_irq(&mac->lock);
+		mac->beacon.last_update = jiffies;
+		spin_unlock_irq(&mac->lock);
+	}
+
+	return 0;
+}
+
 /**
- * tx_status - reports tx status of a packet if required
+ * zd_mac_tx_status - reports tx status of a packet if required
  * @hw - a &struct ieee80211_hw pointer
  * @skb - a sk-buffer
  * @flags: extra flags to set in the TX status info
@@ -295,16 +432,50 @@ static void zd_op_stop(struct ieee80211_hw *hw)
  *
  * If no status information has been requested, the skb is freed.
  */
-static void tx_status(struct ieee80211_hw *hw, struct sk_buff *skb,
-		      int ackssi, bool success)
+static void zd_mac_tx_status(struct ieee80211_hw *hw, struct sk_buff *skb,
+		      int ackssi, struct tx_status *tx_status)
 {
 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
+	int i;
+	int success = 1, retry = 1;
+	int first_idx;
+	const struct tx_retry_rate *retries;
 
 	ieee80211_tx_info_clear_status(info);
 
-	if (success)
+	if (tx_status) {
+		success = !tx_status->failure;
+		retry = tx_status->retry + success;
+	}
+
+	if (success) {
+		/* success */
 		info->flags |= IEEE80211_TX_STAT_ACK;
-	info->status.ack_signal = ackssi;
+	} else {
+		/* failure */
+		info->flags &= ~IEEE80211_TX_STAT_ACK;
+	}
+
+	first_idx = info->status.rates[0].idx;
+	ZD_ASSERT(0<=first_idx && first_idx<ARRAY_SIZE(zd_retry_rates));
+	retries = &zd_retry_rates[first_idx];
+	ZD_ASSERT(1 <= retry && retry <= retries->count);
+
+	info->status.rates[0].idx = retries->rate[0];
+	info->status.rates[0].count = 1; // (retry > 1 ? 2 : 1);
+
+	for (i=1; i<IEEE80211_TX_MAX_RATES-1 && i<retry; i++) {
+		info->status.rates[i].idx = retries->rate[i];
+		info->status.rates[i].count = 1; // ((i==retry-1) && success ? 1:2);
+	}
+	for (; i<IEEE80211_TX_MAX_RATES && i<retry; i++) {
+		info->status.rates[i].idx = retries->rate[retry - 1];
+		info->status.rates[i].count = 1; // (success ? 1:2);
+	}
+	if (i<IEEE80211_TX_MAX_RATES)
+		info->status.rates[i].idx = -1; /* terminate */
+
+	info->status.ack_signal = zd_check_signal(hw, ackssi);
 	ieee80211_tx_status_irqsafe(hw, skb);
 }
 
@@ -312,20 +483,81 @@ static void tx_status(struct ieee80211_hw *hw, struct sk_buff *skb,
  * zd_mac_tx_failed - callback for failed frames
  * @dev: the mac80211 wireless device
  *
- * This function is called if a frame couldn't be succesfully be
+ * This function is called if a frame couldn't be successfully
  * transferred. The first frame from the tx queue, will be selected and
  * reported as error to the upper layers.
  */
-void zd_mac_tx_failed(struct ieee80211_hw *hw)
+void zd_mac_tx_failed(struct urb *urb)
 {
-	struct sk_buff_head *q = &zd_hw_mac(hw)->ack_wait_queue;
+	struct ieee80211_hw * hw = zd_usb_to_hw(urb->context);
+	struct zd_mac *mac = zd_hw_mac(hw);
+	struct sk_buff_head *q = &mac->ack_wait_queue;
 	struct sk_buff *skb;
+	struct tx_status *tx_status = (struct tx_status *)urb->transfer_buffer;
+	unsigned long flags;
+	int success = !tx_status->failure;
+	int retry = tx_status->retry + success;
+	int found = 0;
+	int i, position = 0;
 
-	skb = skb_dequeue(q);
-	if (skb == NULL)
-		return;
+	q = &mac->ack_wait_queue;
+	spin_lock_irqsave(&q->lock, flags);
 
-	tx_status(hw, skb, 0, 0);
+	skb_queue_walk(q, skb) {
+		struct ieee80211_hdr *tx_hdr;
+		struct ieee80211_tx_info *info;
+		int first_idx, final_idx;
+		const struct tx_retry_rate *retries;
+		u8 final_rate;
+
+		position ++;
+
+		/* if the hardware reports a failure and we had a 802.11 ACK
+		 * pending, then we skip the first skb when searching for a
+		 * matching frame */
+		if (tx_status->failure && mac->ack_pending &&
+		    skb_queue_is_first(q, skb)) {
+			continue;
+		}
+
+		tx_hdr = (struct ieee80211_hdr *)skb->data;
+
+		/* we skip all frames not matching the reported destination */
+		if (unlikely(memcmp(tx_hdr->addr1, tx_status->mac, ETH_ALEN))) {
+			continue;
+		}
+
+		/* we skip all frames not matching the reported final rate */
+
+		info = IEEE80211_SKB_CB(skb);
+		first_idx = info->status.rates[0].idx;
+		ZD_ASSERT(0<=first_idx && first_idx<ARRAY_SIZE(zd_retry_rates));
+		retries = &zd_retry_rates[first_idx];
+		if (retry <= 0 || retry > retries->count)
+			continue;
+
+		final_idx = retries->rate[retry - 1];
+		final_rate = zd_rates[final_idx].hw_value;
+
+		if (final_rate != tx_status->rate) {
+			continue;
+		}
+
+		found = 1;
+		break;
+	}
+
+	if (found) {
+		for (i=1; i<=position; i++) {
+			skb = __skb_dequeue(q);
+			zd_mac_tx_status(hw, skb,
+					 mac->ack_pending ? mac->ack_signal : 0,
+					 i == position ? tx_status : NULL);
+			mac->ack_pending = 0;
+		}
+	}
+
+	spin_unlock_irqrestore(&q->lock, flags);
 }
 
 /**
@@ -342,18 +574,27 @@ void zd_mac_tx_to_dev(struct sk_buff *skb, int error)
 {
 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
 	struct ieee80211_hw *hw = info->rate_driver_data[0];
+	struct zd_mac *mac = zd_hw_mac(hw);
+
+	ieee80211_tx_info_clear_status(info);
 
 	skb_pull(skb, sizeof(struct zd_ctrlset));
 	if (unlikely(error ||
 	    (info->flags & IEEE80211_TX_CTL_NO_ACK))) {
-		tx_status(hw, skb, 0, !error);
+		/*
+		 * FIXME : do we need to fill in anything ?
+		 */
+		ieee80211_tx_status_irqsafe(hw, skb);
 	} else {
-		struct sk_buff_head *q =
-			&zd_hw_mac(hw)->ack_wait_queue;
+		struct sk_buff_head *q = &mac->ack_wait_queue;
 
 		skb_queue_tail(q, skb);
-		while (skb_queue_len(q) > ZD_MAC_MAX_ACK_WAITERS)
-			zd_mac_tx_failed(hw);
+		while (skb_queue_len(q) > ZD_MAC_MAX_ACK_WAITERS) {
+			zd_mac_tx_status(hw, skb_dequeue(q),
+					 mac->ack_pending ? mac->ack_signal : 0,
+					 NULL);
+			mac->ack_pending = 0;
+		}
 	}
 }
 
@@ -437,67 +678,178 @@ static void cs_set_control(struct zd_mac *mac, struct zd_ctrlset *cs,
 	/* FIXME: Management frame? */
 }
 
-static int zd_mac_config_beacon(struct ieee80211_hw *hw, struct sk_buff *beacon)
+static bool zd_mac_match_cur_beacon(struct zd_mac *mac, struct sk_buff *beacon)
+{
+	if (!mac->beacon.cur_beacon)
+		return false;
+
+	if (mac->beacon.cur_beacon->len != beacon->len)
+		return false;
+
+	return !memcmp(beacon->data, mac->beacon.cur_beacon->data, beacon->len);
+}
+
+static void zd_mac_free_cur_beacon_locked(struct zd_mac *mac)
+{
+	ZD_ASSERT(mutex_is_locked(&mac->chip.mutex));
+
+	kfree_skb(mac->beacon.cur_beacon);
+	mac->beacon.cur_beacon = NULL;
+}
+
+static void zd_mac_free_cur_beacon(struct zd_mac *mac)
+{
+	mutex_lock(&mac->chip.mutex);
+	zd_mac_free_cur_beacon_locked(mac);
+	mutex_unlock(&mac->chip.mutex);
+}
+
+static int zd_mac_config_beacon(struct ieee80211_hw *hw, struct sk_buff *beacon,
+				bool in_intr)
 {
 	struct zd_mac *mac = zd_hw_mac(hw);
-	int r;
+	int r, ret, num_cmds, req_pos = 0;
 	u32 tmp, j = 0;
 	/* 4 more bytes for tail CRC */
 	u32 full_len = beacon->len + 4;
+	unsigned long end_jiffies, message_jiffies;
+	struct zd_ioreq32 *ioreqs;
 
-	r = zd_iowrite32(&mac->chip, CR_BCN_FIFO_SEMAPHORE, 0);
-	if (r < 0)
-		return r;
-	r = zd_ioread32(&mac->chip, CR_BCN_FIFO_SEMAPHORE, &tmp);
-	if (r < 0)
-		return r;
+	mutex_lock(&mac->chip.mutex);
 
-	while (tmp & 0x2) {
-		r = zd_ioread32(&mac->chip, CR_BCN_FIFO_SEMAPHORE, &tmp);
-		if (r < 0)
-			return r;
-		if ((++j % 100) == 0) {
-			printk(KERN_ERR "CR_BCN_FIFO_SEMAPHORE not ready\n");
-			if (j >= 500)  {
-				printk(KERN_ERR "Giving up beacon config.\n");
-				return -ETIMEDOUT;
-			}
-		}
-		msleep(1);
+	/* Check if hw already has this beacon. */
+	if (zd_mac_match_cur_beacon(mac, beacon)) {
+		r = 0;
+		goto out_nofree;
 	}
 
-	r = zd_iowrite32(&mac->chip, CR_BCN_FIFO, full_len - 1);
+	/* Alloc memory for full beacon write at once. */
+	num_cmds = 1 + zd_chip_is_zd1211b(&mac->chip) + full_len;
+	ioreqs = kmalloc(num_cmds * sizeof(struct zd_ioreq32), GFP_KERNEL);
+	if (!ioreqs) {
+		r = -ENOMEM;
+		goto out_nofree;
+	}
+
+	r = zd_iowrite32_locked(&mac->chip, 0, CR_BCN_FIFO_SEMAPHORE);
 	if (r < 0)
-		return r;
-	if (zd_chip_is_zd1211b(&mac->chip)) {
-		r = zd_iowrite32(&mac->chip, CR_BCN_LENGTH, full_len - 1);
+		goto out;
+	r = zd_ioread32_locked(&mac->chip, &tmp, CR_BCN_FIFO_SEMAPHORE);
+	if (r < 0)
+		goto release_sema;
+	if (in_intr && tmp & 0x2) {
+		r = -EBUSY;
+		goto release_sema;
+	}
+
+	end_jiffies = jiffies + HZ / 2; /*~500ms*/
+	message_jiffies = jiffies + HZ / 10; /*~100ms*/
+	while (tmp & 0x2) {
+		r = zd_ioread32_locked(&mac->chip, &tmp, CR_BCN_FIFO_SEMAPHORE);
 		if (r < 0)
-			return r;
+			goto release_sema;
+		if (time_is_before_eq_jiffies(message_jiffies)) {
+			message_jiffies = jiffies + HZ / 10;
+			dev_err(zd_mac_dev(mac),
+					"CR_BCN_FIFO_SEMAPHORE not ready\n");
+			if (time_is_before_eq_jiffies(end_jiffies))  {
+				dev_err(zd_mac_dev(mac),
+						"Giving up beacon config.\n");
+				r = -ETIMEDOUT;
+				goto reset_device;
+			}
+		}
+		msleep(20);
+	}
+
+	ioreqs[req_pos].addr = CR_BCN_FIFO;
+	ioreqs[req_pos].value = full_len - 1;
+	req_pos++;
+	if (zd_chip_is_zd1211b(&mac->chip)) {
+		ioreqs[req_pos].addr = CR_BCN_LENGTH;
+		ioreqs[req_pos].value = full_len - 1;
+		req_pos++;
 	}
 
 	for (j = 0 ; j < beacon->len; j++) {
-		r = zd_iowrite32(&mac->chip, CR_BCN_FIFO,
-				*((u8 *)(beacon->data + j)));
-		if (r < 0)
-			return r;
+		ioreqs[req_pos].addr = CR_BCN_FIFO;
+		ioreqs[req_pos].value = *((u8 *)(beacon->data + j));
+		req_pos++;
 	}
 
 	for (j = 0; j < 4; j++) {
-		r = zd_iowrite32(&mac->chip, CR_BCN_FIFO, 0x0);
-		if (r < 0)
-			return r;
+		ioreqs[req_pos].addr = CR_BCN_FIFO;
+		ioreqs[req_pos].value = 0x0;
+		req_pos++;
 	}
 
-	r = zd_iowrite32(&mac->chip, CR_BCN_FIFO_SEMAPHORE, 1);
-	if (r < 0)
-		return r;
+	BUG_ON(req_pos != num_cmds);
+
+	r = zd_iowrite32a_locked(&mac->chip, ioreqs, num_cmds);
+
+release_sema:
+	/*
+	 * Try very hard to release device beacon semaphore, as otherwise
+	 * device/driver can be left in unusable state.
+	 */
+	end_jiffies = jiffies + HZ / 2; /*~500ms*/
+	ret = zd_iowrite32_locked(&mac->chip, 1, CR_BCN_FIFO_SEMAPHORE);
+	while (ret < 0) {
+		if (in_intr || time_is_before_eq_jiffies(end_jiffies)) {
+			ret = -ETIMEDOUT;
+			break;
+		}
+
+		msleep(20);
+		ret = zd_iowrite32_locked(&mac->chip, 1, CR_BCN_FIFO_SEMAPHORE);
+	}
+
+	if (ret < 0)
+		dev_err(zd_mac_dev(mac), "Could not release "
+					 "CR_BCN_FIFO_SEMAPHORE!\n");
+	if (r < 0 || ret < 0) {
+		if (r >= 0)
+			r = ret;
+
+		/* We don't know if beacon was written successfully or not,
+		 * so clear current. */
+		zd_mac_free_cur_beacon_locked(mac);
+
+		goto out;
+	}
+
+	/* Beacon has now been written successfully, update current. */
+	zd_mac_free_cur_beacon_locked(mac);
+	mac->beacon.cur_beacon = beacon;
+	beacon = NULL;
 
 	/* 802.11b/g 2.4G CCK 1Mb
 	 * 802.11a, not yet implemented, uses different values (see GPL vendor
 	 * driver)
 	 */
-	return zd_iowrite32(&mac->chip, CR_BCN_PLCP_CFG, 0x00000400 |
-			(full_len << 19));
+	r = zd_iowrite32_locked(&mac->chip, 0x00000400 | (full_len << 19),
+				CR_BCN_PLCP_CFG);
+out:
+	kfree(ioreqs);
+out_nofree:
+	kfree_skb(beacon);
+	mutex_unlock(&mac->chip.mutex);
+
+	return r;
+
+reset_device:
+	zd_mac_free_cur_beacon_locked(mac);
+	kfree_skb(beacon);
+
+	mutex_unlock(&mac->chip.mutex);
+	kfree(ioreqs);
+
+	/* semaphore stuck, reset device to avoid fw freeze later */
+	dev_warn(zd_mac_dev(mac), "CR_BCN_FIFO_SEMAPHORE stuck, "
+				  "reseting device...");
+	usb_queue_reset_device(mac->chip.usb.intf);
+
+	return r;
 }
 
 static int fill_ctrlset(struct zd_mac *mac,
@@ -567,7 +919,7 @@ static int fill_ctrlset(struct zd_mac *mac,
  * control block of the skbuff will be initialized. If necessary the incoming
  * mac80211 queues will be stopped.
  */
-static int zd_op_tx(struct ieee80211_hw *hw, struct sk_buff *skb)
+static void zd_op_tx(struct ieee80211_hw *hw, struct sk_buff *skb)
 {
 	struct zd_mac *mac = zd_hw_mac(hw);
 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
@@ -582,11 +934,10 @@ static int zd_op_tx(struct ieee80211_hw *hw, struct sk_buff *skb)
 	r = zd_usb_tx(&mac->chip.usb, skb);
 	if (r)
 		goto fail;
-	return 0;
+	return;
 
 fail:
 	dev_kfree_skb(skb);
-	return 0;
 }
 
 /**
@@ -606,27 +957,54 @@ fail:
 static int filter_ack(struct ieee80211_hw *hw, struct ieee80211_hdr *rx_hdr,
 		      struct ieee80211_rx_status *stats)
 {
+	struct zd_mac *mac = zd_hw_mac(hw);
 	struct sk_buff *skb;
 	struct sk_buff_head *q;
 	unsigned long flags;
+	int found = 0;
+	int i, position = 0;
 
 	if (!ieee80211_is_ack(rx_hdr->frame_control))
 		return 0;
 
-	q = &zd_hw_mac(hw)->ack_wait_queue;
+	q = &mac->ack_wait_queue;
 	spin_lock_irqsave(&q->lock, flags);
 	skb_queue_walk(q, skb) {
 		struct ieee80211_hdr *tx_hdr;
 
+		position ++;
+
+		if (mac->ack_pending && skb_queue_is_first(q, skb))
+		    continue;
+
 		tx_hdr = (struct ieee80211_hdr *)skb->data;
 		if (likely(!memcmp(tx_hdr->addr2, rx_hdr->addr1, ETH_ALEN)))
 		{
-			__skb_unlink(skb, q);
-			tx_status(hw, skb, stats->signal, 1);
-			goto out;
+			found = 1;
+			break;
 		}
 	}
-out:
+
+	if (found) {
+		for (i=1; i<position; i++) {
+			skb = __skb_dequeue(q);
+			zd_mac_tx_status(hw, skb,
+					 mac->ack_pending ? mac->ack_signal : 0,
+					 NULL);
+			mac->ack_pending = 0;
+		}
+
+		mac->ack_pending = 1;
+		mac->ack_signal = stats->signal;
+
+		/* Prevent pending tx-packet on AP-mode */
+		if (mac->type == NL80211_IFTYPE_AP) {
+			skb = __skb_dequeue(q);
+			zd_mac_tx_status(hw, skb, mac->ack_signal, NULL);
+			mac->ack_pending = 0;
+		}
+	}
+
 	spin_unlock_irqrestore(&q->lock, flags);
 	return 1;
 }
@@ -673,10 +1051,7 @@ int zd_mac_rx(struct ieee80211_hw *hw, const u8 *buffer, unsigned int length)
 
 	stats.freq = zd_channels[_zd_chip_get_channel(&mac->chip) - 1].center_freq;
 	stats.band = IEEE80211_BAND_2GHZ;
-	stats.signal = status->signal_strength;
-	stats.qual = zd_rx_qual_percent(buffer,
-		                          length - sizeof(struct rx_status),
-		                          status);
+	stats.signal = zd_check_signal(hw, status->signal_strength);
 
 	rate = zd_rx_rate(buffer, status);
 
@@ -705,10 +1080,11 @@ int zd_mac_rx(struct ieee80211_hw *hw, const u8 *buffer, unsigned int length)
 	if (skb == NULL)
 		return -ENOMEM;
 	if (need_padding) {
-		/* Make sure the the payload data is 4 byte aligned. */
+		/* Make sure the payload data is 4 byte aligned. */
 		skb_reserve(skb, 2);
 	}
 
+	/* FIXME : could we avoid this big memcpy ? */
 	memcpy(skb_put(skb, length), buffer, length);
 
 	memcpy(IEEE80211_SKB_RXCB(skb), &stats, sizeof(stats));
@@ -717,7 +1093,7 @@ int zd_mac_rx(struct ieee80211_hw *hw, const u8 *buffer, unsigned int length)
 }
 
 static int zd_op_add_interface(struct ieee80211_hw *hw,
-				struct ieee80211_if_init_conf *conf)
+				struct ieee80211_vif *vif)
 {
 	struct zd_mac *mac = zd_hw_mac(hw);
 
@@ -725,27 +1101,33 @@ static int zd_op_add_interface(struct ieee80211_hw *hw,
 	if (mac->type != NL80211_IFTYPE_UNSPECIFIED)
 		return -EOPNOTSUPP;
 
-	switch (conf->type) {
+	switch (vif->type) {
 	case NL80211_IFTYPE_MONITOR:
 	case NL80211_IFTYPE_MESH_POINT:
 	case NL80211_IFTYPE_STATION:
 	case NL80211_IFTYPE_ADHOC:
-		mac->type = conf->type;
+	case NL80211_IFTYPE_AP:
+		mac->type = vif->type;
 		break;
 	default:
 		return -EOPNOTSUPP;
 	}
 
-	return zd_write_mac_addr(&mac->chip, conf->mac_addr);
+	mac->vif = vif;
+
+	return set_mac_and_bssid(mac);
 }
 
 static void zd_op_remove_interface(struct ieee80211_hw *hw,
-				    struct ieee80211_if_init_conf *conf)
+				    struct ieee80211_vif *vif)
 {
 	struct zd_mac *mac = zd_hw_mac(hw);
 	mac->type = NL80211_IFTYPE_UNSPECIFIED;
-	zd_set_beacon_interval(&mac->chip, 0);
+	mac->vif = NULL;
+	zd_set_beacon_interval(&mac->chip, 0, 0, NL80211_IFTYPE_UNSPECIFIED);
 	zd_write_mac_addr(&mac->chip, NULL);
+
+	zd_mac_free_cur_beacon(mac);
 }
 
 static int zd_op_config(struct ieee80211_hw *hw, u32 changed)
@@ -753,51 +1135,67 @@ static int zd_op_config(struct ieee80211_hw *hw, u32 changed)
 	struct zd_mac *mac = zd_hw_mac(hw);
 	struct ieee80211_conf *conf = &hw->conf;
 
+	spin_lock_irq(&mac->lock);
+	mac->channel = conf->channel->hw_value;
+	spin_unlock_irq(&mac->lock);
+
 	return zd_chip_set_channel(&mac->chip, conf->channel->hw_value);
+}
+
+static void zd_beacon_done(struct zd_mac *mac)
+{
+	struct sk_buff *skb, *beacon;
+
+	if (!test_bit(ZD_DEVICE_RUNNING, &mac->flags))
+		return;
+	if (!mac->vif || mac->vif->type != NL80211_IFTYPE_AP)
+		return;
+
+	/*
+	 * Send out buffered broad- and multicast frames.
+	 */
+	while (!ieee80211_queue_stopped(mac->hw, 0)) {
+		skb = ieee80211_get_buffered_bc(mac->hw, mac->vif);
+		if (!skb)
+			break;
+		zd_op_tx(mac->hw, skb);
+	}
+
+	/*
+	 * Fetch next beacon so that tim_count is updated.
+	 */
+	beacon = ieee80211_beacon_get(mac->hw, mac->vif);
+	if (beacon)
+		zd_mac_config_beacon(mac->hw, beacon, true);
+
+	spin_lock_irq(&mac->lock);
+	mac->beacon.last_update = jiffies;
+	spin_unlock_irq(&mac->lock);
 }
 
 static void zd_process_intr(struct work_struct *work)
 {
 	u16 int_status;
+	unsigned long flags;
 	struct zd_mac *mac = container_of(work, struct zd_mac, process_intr);
 
-	int_status = le16_to_cpu(*(__le16 *)(mac->intr_buffer+4));
-	if (int_status & INT_CFG_NEXT_BCN)
-		dev_dbg_f_limit(zd_mac_dev(mac), "INT_CFG_NEXT_BCN\n");
-	else
+	spin_lock_irqsave(&mac->lock, flags);
+	int_status = le16_to_cpu(*(__le16 *)(mac->intr_buffer + 4));
+	spin_unlock_irqrestore(&mac->lock, flags);
+
+	if (int_status & INT_CFG_NEXT_BCN) {
+		/*dev_dbg_f_limit(zd_mac_dev(mac), "INT_CFG_NEXT_BCN\n");*/
+		zd_beacon_done(mac);
+	} else {
 		dev_dbg_f(zd_mac_dev(mac), "Unsupported interrupt\n");
+	}
 
 	zd_chip_enable_hwint(&mac->chip);
 }
 
 
-static void set_multicast_hash_handler(struct work_struct *work)
-{
-	struct zd_mac *mac =
-		container_of(work, struct zd_mac, set_multicast_hash_work);
-	struct zd_mc_hash hash;
-
-	spin_lock_irq(&mac->lock);
-	hash = mac->multicast_hash;
-	spin_unlock_irq(&mac->lock);
-
-	zd_chip_set_multicast_hash(&mac->chip, &hash);
-}
-
-static void set_rx_filter_handler(struct work_struct *work)
-{
-	struct zd_mac *mac =
-		container_of(work, struct zd_mac, set_rx_filter_work);
-	int r;
-
-	dev_dbg_f(zd_mac_dev(mac), "\n");
-	r = set_rx_filter(mac);
-	if (r)
-		dev_err(zd_mac_dev(mac), "set_rx_filter_handler error %d\n", r);
-}
-
 static u64 zd_op_prepare_multicast(struct ieee80211_hw *hw,
-				   int mc_count, struct dev_addr_list *mclist)
+				   int mc_count, struct dev_addr_list *ha)
 {
 	struct zd_mac *mac = zd_hw_mac(hw);
 	struct zd_mc_hash hash;
@@ -806,11 +1204,11 @@ static u64 zd_op_prepare_multicast(struct ieee80211_hw *hw,
 	zd_mc_clear(&hash);
 
 	for (i = 0; i < mc_count; i++) {
-		if (!mclist)
+		if (!ha)
 			break;
-		dev_dbg_f(zd_mac_dev(mac), "mc addr %pM\n", mclist->dmi_addr);
-		zd_mc_add_addr(&hash, mclist->dmi_addr);
-		mclist = mclist->next;
+		dev_dbg_f(zd_mac_dev(mac), "mc addr %pM\n", ha->dmi_addr);
+		zd_mc_add_addr(&hash, ha->dmi_addr);
+		ha = ha->next;
 	}
 
 	return hash.low | ((u64)hash.high << 32);
@@ -830,17 +1228,19 @@ static void zd_op_configure_filter(struct ieee80211_hw *hw,
 	};
 	struct zd_mac *mac = zd_hw_mac(hw);
 	unsigned long flags;
+	int r;
 
 	/* Only deal with supported flags */
 	changed_flags &= SUPPORTED_FIF_FLAGS;
 	*new_flags &= SUPPORTED_FIF_FLAGS;
 
-	/* changed_flags is always populated but this driver
-	 * doesn't support all FIF flags so its possible we don't
-	 * need to do anything */
-	if (!changed_flags)
-		return;
-
+	/*
+	 * If multicast parameter (as returned by zd_op_prepare_multicast)
+	 * has changed, no bit in changed_flags is set. To handle this
+	 * situation, we do not return if changed_flags is 0. If we do so,
+	 * we will have some issue with IPv6 which uses multicast for link
+	 * layer address resolution.
+	 */
 	if (*new_flags & (FIF_PROMISC_IN_BSS | FIF_ALLMULTI))
 		zd_mc_add_all(&hash);
 
@@ -850,11 +1250,13 @@ static void zd_op_configure_filter(struct ieee80211_hw *hw,
 	mac->multicast_hash = hash;
 	spin_unlock_irqrestore(&mac->lock, flags);
 
-	/* XXX: these can be called here now, can sleep now! */
-	queue_work(zd_workqueue, &mac->set_multicast_hash_work);
+	zd_chip_set_multicast_hash(&mac->chip, &hash);
 
-	if (changed_flags & FIF_CONTROL)
-		queue_work(zd_workqueue, &mac->set_rx_filter_work);
+	if (changed_flags & FIF_CONTROL) {
+		r = set_rx_filter(mac);
+		if (r)
+			dev_err(zd_mac_dev(mac), "set_rx_filter error %d\n", r);
+	}
 
 	/* no handling required for FIF_OTHER_BSS as we don't currently
 	 * do BSSID filtering */
@@ -866,20 +1268,9 @@ static void zd_op_configure_filter(struct ieee80211_hw *hw,
 	 * time. */
 }
 
-static void set_rts_cts_work(struct work_struct *work)
+static void set_rts_cts(struct zd_mac *mac, unsigned int short_preamble)
 {
-	struct zd_mac *mac =
-		container_of(work, struct zd_mac, set_rts_cts_work);
-	unsigned long flags;
-	unsigned int short_preamble;
-
 	mutex_lock(&mac->chip.mutex);
-
-	spin_lock_irqsave(&mac->lock, flags);
-	mac->updating_rts_rate = 0;
-	short_preamble = mac->short_preamble;
-	spin_unlock_irqrestore(&mac->lock, flags);
-
 	zd_chip_set_rts_cts_rate_locked(&mac->chip, short_preamble);
 	mutex_unlock(&mac->chip.mutex);
 }
@@ -890,33 +1281,41 @@ static void zd_op_bss_info_changed(struct ieee80211_hw *hw,
 				   u32 changes)
 {
 	struct zd_mac *mac = zd_hw_mac(hw);
-	unsigned long flags;
 	int associated;
 
 	dev_dbg_f(zd_mac_dev(mac), "changes: %x\n", changes);
 
 	if (mac->type == NL80211_IFTYPE_MESH_POINT ||
-	    mac->type == NL80211_IFTYPE_ADHOC) {
+	    mac->type == NL80211_IFTYPE_ADHOC ||
+	    mac->type == NL80211_IFTYPE_AP) {
 		associated = true;
 		if (changes & BSS_CHANGED_BEACON) {
 			struct sk_buff *beacon = ieee80211_beacon_get(hw, vif);
 
 			if (beacon) {
-				zd_mac_config_beacon(hw, beacon);
-				kfree_skb(beacon);
+				zd_chip_disable_hwint(&mac->chip);
+				zd_mac_config_beacon(hw, beacon, false);
+				zd_chip_enable_hwint(&mac->chip);
 			}
 		}
 
 		if (changes & BSS_CHANGED_BEACON_ENABLED) {
-			u32 interval;
+			u16 interval = 0;
+			u8 period = 0;
 
-			if (bss_conf->enable_beacon)
-				interval = BCN_MODE_IBSS |
-						bss_conf->beacon_int;
-			else
-				interval = 0;
+			if (bss_conf->enable_beacon) {
+				period = bss_conf->dtim_period;
+				interval = bss_conf->beacon_int;
+			}
 
-			zd_set_beacon_interval(&mac->chip, interval);
+			spin_lock_irq(&mac->lock);
+			mac->beacon.period = period;
+			mac->beacon.interval = interval;
+			mac->beacon.last_update = jiffies;
+			spin_unlock_irq(&mac->lock);
+
+			zd_set_beacon_interval(&mac->chip, interval, period,
+					       mac->type);
 		}
 	} else
 		associated = is_valid_ether_addr(bss_conf->bssid);
@@ -928,19 +1327,15 @@ static void zd_op_bss_info_changed(struct ieee80211_hw *hw,
 	/* TODO: do hardware bssid filtering */
 
 	if (changes & BSS_CHANGED_ERP_PREAMBLE) {
-		spin_lock_irqsave(&mac->lock, flags);
+		spin_lock_irq(&mac->lock);
 		mac->short_preamble = bss_conf->use_short_preamble;
-		if (!mac->updating_rts_rate) {
-			mac->updating_rts_rate = 1;
-			/* FIXME: should disable TX here, until work has
-			 * completed and RTS_CTS reg is updated */
-			queue_work(zd_workqueue, &mac->set_rts_cts_work);
-		}
-		spin_unlock_irqrestore(&mac->lock, flags);
+		spin_unlock_irq(&mac->lock);
+
+		set_rts_cts(mac, bss_conf->use_short_preamble);
 	}
 }
 
-static u64 zd_op_get_tsf(struct ieee80211_hw *hw)
+static u64 zd_op_get_tsf(struct ieee80211_hw *hw, struct ieee80211_vif *vif)
 {
 	struct zd_mac *mac = zd_hw_mac(hw);
 	return zd_chip_get_tsf(&mac->chip);
@@ -988,28 +1383,108 @@ struct ieee80211_hw *zd_mac_alloc_hw(struct usb_interface *intf)
 	hw->wiphy->bands[IEEE80211_BAND_2GHZ] = &mac->band;
 
 	hw->flags = IEEE80211_HW_RX_INCLUDES_FCS |
-		    IEEE80211_HW_SIGNAL_UNSPEC;
+		    IEEE80211_HW_SIGNAL_UNSPEC |
+		    IEEE80211_HW_HOST_BROADCAST_PS_BUFFERING;
 
 	hw->wiphy->interface_modes =
 		BIT(NL80211_IFTYPE_MESH_POINT) |
 		BIT(NL80211_IFTYPE_STATION) |
-		BIT(NL80211_IFTYPE_ADHOC);
+		BIT(NL80211_IFTYPE_ADHOC) |
+		BIT(NL80211_IFTYPE_AP);
 
 	hw->max_signal = 100;
 	hw->queues = 1;
 	hw->extra_tx_headroom = sizeof(struct zd_ctrlset);
 
+	/*
+	 * Tell mac80211 that we support multi rate retries
+	 */
+	hw->max_rates = IEEE80211_TX_MAX_RATES;
+	hw->max_rate_tries = 18;	/* 9 rates * 2 retries/rate */
+
 	skb_queue_head_init(&mac->ack_wait_queue);
+	mac->ack_pending = 0;
 
 	zd_chip_init(&mac->chip, hw, intf);
 	housekeeping_init(mac);
-	INIT_WORK(&mac->set_multicast_hash_work, set_multicast_hash_handler);
-	INIT_WORK(&mac->set_rts_cts_work, set_rts_cts_work);
-	INIT_WORK(&mac->set_rx_filter_work, set_rx_filter_handler);
+	beacon_init(mac);
 	INIT_WORK(&mac->process_intr, zd_process_intr);
 
 	SET_IEEE80211_DEV(hw, &intf->dev);
 	return hw;
+}
+
+#define BEACON_WATCHDOG_DELAY round_jiffies_relative(HZ)
+
+static void beacon_watchdog_handler(struct work_struct *work)
+{
+	struct zd_mac *mac =
+		container_of(work, struct zd_mac, beacon.watchdog_work.work);
+	struct sk_buff *beacon;
+	unsigned long timeout;
+	int interval, period;
+
+	if (!test_bit(ZD_DEVICE_RUNNING, &mac->flags))
+		goto rearm;
+	if (mac->type != NL80211_IFTYPE_AP || !mac->vif)
+		goto rearm;
+
+	spin_lock_irq(&mac->lock);
+	interval = mac->beacon.interval;
+	period = mac->beacon.period;
+	timeout = mac->beacon.last_update +
+			msecs_to_jiffies(interval * 1024 / 1000) * 3;
+	spin_unlock_irq(&mac->lock);
+
+	if (interval > 0 && time_is_before_jiffies(timeout)) {
+		dev_dbg_f(zd_mac_dev(mac), "beacon interrupt stalled, "
+					   "restarting. "
+					   "(interval: %d, dtim: %d)\n",
+					   interval, period);
+
+		zd_chip_disable_hwint(&mac->chip);
+
+		beacon = ieee80211_beacon_get(mac->hw, mac->vif);
+		if (beacon) {
+			zd_mac_free_cur_beacon(mac);
+
+			zd_mac_config_beacon(mac->hw, beacon, false);
+		}
+
+		zd_set_beacon_interval(&mac->chip, interval, period, mac->type);
+
+		zd_chip_enable_hwint(&mac->chip);
+
+		spin_lock_irq(&mac->lock);
+		mac->beacon.last_update = jiffies;
+		spin_unlock_irq(&mac->lock);
+	}
+
+rearm:
+	queue_delayed_work(zd_workqueue, &mac->beacon.watchdog_work,
+			   BEACON_WATCHDOG_DELAY);
+}
+
+static void beacon_init(struct zd_mac *mac)
+{
+	INIT_DELAYED_WORK(&mac->beacon.watchdog_work, beacon_watchdog_handler);
+}
+
+static void beacon_enable(struct zd_mac *mac)
+{
+	dev_dbg_f(zd_mac_dev(mac), "\n");
+
+	mac->beacon.last_update = jiffies;
+	queue_delayed_work(zd_workqueue, &mac->beacon.watchdog_work,
+			   BEACON_WATCHDOG_DELAY);
+}
+
+static void beacon_disable(struct zd_mac *mac)
+{
+	dev_dbg_f(zd_mac_dev(mac), "\n");
+	cancel_delayed_work_sync(&mac->beacon.watchdog_work);
+
+	zd_mac_free_cur_beacon(mac);
 }
 
 #define LINK_LED_WORK_DELAY HZ
@@ -1022,6 +1497,9 @@ static void link_led_handler(struct work_struct *work)
 	int is_associated;
 	int r;
 
+	if (!test_bit(ZD_DEVICE_RUNNING, &mac->flags))
+		goto requeue;
+
 	spin_lock_irq(&mac->lock);
 	is_associated = mac->associated;
 	spin_unlock_irq(&mac->lock);
@@ -1031,6 +1509,7 @@ static void link_led_handler(struct work_struct *work)
 	if (r)
 		dev_dbg_f(zd_mac_dev(mac), "zd_chip_control_leds error %d\n", r);
 
+requeue:
 	queue_delayed_work(zd_workqueue, &mac->housekeeping.link_led_work,
 		           LINK_LED_WORK_DELAY);
 }
@@ -1050,7 +1529,6 @@ static void housekeeping_enable(struct zd_mac *mac)
 static void housekeeping_disable(struct zd_mac *mac)
 {
 	dev_dbg_f(zd_mac_dev(mac), "\n");
-	cancel_rearming_delayed_workqueue(zd_workqueue,
-		&mac->housekeeping.link_led_work);
+	cancel_delayed_work_sync(&mac->housekeeping.link_led_work);
 	zd_chip_control_leds(&mac->chip, ZD_LED_OFF);
 }

@@ -17,6 +17,7 @@
 #include <linux/errno.h>
 #include <linux/if_arp.h>
 #include <linux/in6.h>
+#include <linux/gfp.h>
 #include <linux/in.h>
 #include <linux/ip.h>
 #include <linux/kernel.h>
@@ -24,7 +25,6 @@
 #include <linux/netdevice.h>
 #include <linux/proc_fs.h>
 #include <linux/skbuff.h>
-#include <linux/slab.h>
 #include <linux/tcp.h>
 #include <linux/types.h>
 #include <linux/wireless.h>
@@ -442,7 +442,7 @@ int libipw_rx(struct libipw_device *ieee, struct sk_buff *skb,
 		 * 802.11, but makes it easier to use different keys with
 		 * stations that do not support WEP key mapping). */
 
-		if (!(hdr->addr1[0] & 0x01) || local->bcrx_sta_key)
+		if (is_unicast_ether_addr(hdr->addr1) || local->bcrx_sta_key)
 			(void)hostap_handle_sta_crypto(local, hdr, &crypt,
 						       &sta);
 #endif
@@ -772,7 +772,7 @@ int libipw_rx(struct libipw_device *ieee, struct sk_buff *skb,
 
 #ifdef NOT_YET
 	if (ieee->iw_mode == IW_MODE_MASTER && !wds && ieee->ap->bridge_packets) {
-		if (dst[0] & 0x01) {
+		if (is_multicast_ether_addr(dst)) {
 			/* copy multicast frame both to the higher layers and
 			 * to the wireless media */
 			ieee->ap->bridged_multicast++;
@@ -918,7 +918,6 @@ void libipw_rx_any(struct libipw_device *ieee,
 drop_free:
 	dev_kfree_skb_irq(skb);
 	ieee->dev->stats.rx_dropped++;
-	return;
 }
 
 #define MGMT_FRAME_FIXED_PART_LENGTH		0x24
@@ -926,7 +925,7 @@ drop_free:
 static u8 qos_oui[QOS_OUI_LEN] = { 0x00, 0x50, 0xF2 };
 
 /*
-* Make ther structure we read from the beacon packet has
+* Make the structure we read from the beacon packet to have
 * the right values
 */
 static int libipw_verify_qos_info(struct libipw_qos_information_element

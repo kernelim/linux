@@ -320,6 +320,7 @@ static void fcoe_ctlr_solicit(struct fcoe_ctlr *fip, struct fcoe_fcf *fcf)
 
 	skb_put(skb, sizeof(*sol));
 	skb->protocol = htons(ETH_P_FIP);
+	skb->priority = fip->priority;
 	skb_reset_mac_header(skb);
 	skb_reset_network_header(skb);
 	fip->send(fip, skb);
@@ -474,6 +475,7 @@ static void fcoe_ctlr_send_keep_alive(struct fcoe_ctlr *fip,
 	}
 	skb_put(skb, len);
 	skb->protocol = htons(ETH_P_FIP);
+	skb->priority = fip->priority;
 	skb_reset_mac_header(skb);
 	skb_reset_network_header(skb);
 	fip->send(fip, skb);
@@ -566,6 +568,7 @@ static int fcoe_ctlr_encaps(struct fcoe_ctlr *fip, struct fc_lport *lport,
 	cap->fip.fip_dl_len = htons(dlen / FIP_BPW);
 
 	skb->protocol = htons(ETH_P_FIP);
+	skb->priority = fip->priority;
 	skb_reset_mac_header(skb);
 	skb_reset_network_header(skb);
 	return 0;
@@ -1272,17 +1275,17 @@ static void fcoe_ctlr_recv_clr_vlink(struct fcoe_ctlr *fip,
 		 * No Vx_Port description. Clear all NPIV ports,
 		 * followed by physical port
 		 */
-		mutex_lock(&lport->lp_mutex);
-		list_for_each_entry(vn_port, &lport->vports, list)
-			fc_lport_reset(vn_port);
-		mutex_unlock(&lport->lp_mutex);
-
 		mutex_lock(&fip->ctlr_mutex);
 		per_cpu_ptr(lport->dev_stats,
 			    get_cpu())->VLinkFailureCount++;
 		put_cpu();
 		fcoe_ctlr_reset(fip);
 		mutex_unlock(&fip->ctlr_mutex);
+
+		mutex_lock(&lport->lp_mutex);
+		list_for_each_entry(vn_port, &lport->vports, list)
+			fc_lport_reset(vn_port);
+		mutex_unlock(&lport->lp_mutex);
 
 		fc_lport_reset(fip->lp);
 		fcoe_ctlr_solicit(fip, NULL);
@@ -1913,6 +1916,7 @@ static void fcoe_ctlr_vn_send(struct fcoe_ctlr *fip,
 
 	skb_put(skb, len);
 	skb->protocol = htons(ETH_P_FIP);
+	skb->priority = fip->priority;
 	skb_reset_mac_header(skb);
 	skb_reset_network_header(skb);
 

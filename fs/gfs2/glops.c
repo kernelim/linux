@@ -27,6 +27,7 @@
 #include "rgrp.h"
 #include "util.h"
 #include "trans.h"
+#include "dir.h"
 
 static void gfs2_ail_error(struct gfs2_glock *gl, const struct buffer_head *bh)
 {
@@ -134,6 +135,7 @@ void gfs2_ail_flush(struct gfs2_glock *gl, bool fsync)
 static void rgrp_go_sync(struct gfs2_glock *gl)
 {
 	struct address_space *metamapping = gfs2_glock2aspace(gl);
+	struct gfs2_rgrpd *rgd;
 	int error;
 
 	if (!test_and_clear_bit(GLF_DIRTY, &gl->gl_flags))
@@ -145,6 +147,12 @@ static void rgrp_go_sync(struct gfs2_glock *gl)
 	error = filemap_fdatawait(metamapping);
         mapping_set_error(metamapping, error);
 	gfs2_ail_empty_gl(gl);
+
+	spin_lock(&gl->gl_spin);
+	rgd = gl->gl_object;
+	if (rgd)
+		gfs2_free_clones(rgd);
+	spin_unlock(&gl->gl_spin);
 }
 
 /**
@@ -234,6 +242,7 @@ static void inode_go_inval(struct gfs2_glock *gl, int flags)
 		if (ip) {
 			set_bit(GIF_INVALID, &ip->i_flags);
 			forget_all_cached_acls(&ip->i_inode);
+			gfs2_dir_hash_inval(ip);
 		}
 	}
 
@@ -328,33 +337,6 @@ static int inode_go_dump(struct seq_file *seq, const struct gfs2_glock *gl)
 		  (unsigned long long)ip->i_inode.i_size,
 		  (unsigned long long)ip->i_disksize);
 	return 0;
-}
-
-/**
- * rgrp_go_lock - operation done after an rgrp lock is locked by
- *    a first holder on this node.
- * @gl: the glock
- * @flags:
- *
- * Returns: errno
- */
-
-static int rgrp_go_lock(struct gfs2_holder *gh)
-{
-	return gfs2_rgrp_bh_get(gh->gh_gl->gl_object);
-}
-
-/**
- * rgrp_go_unlock - operation done before an rgrp lock is unlocked by
- *    a last holder on this node.
- * @gl: the glock
- * @flags:
- *
- */
-
-static void rgrp_go_unlock(struct gfs2_holder *gh)
-{
-	gfs2_rgrp_bh_put(gh->gh_gl->gl_object);
 }
 
 /**
@@ -459,8 +441,8 @@ const struct gfs2_glock_operations gfs2_inode_glops = {
 const struct gfs2_glock_operations gfs2_rgrp_glops = {
 	.go_xmote_th = rgrp_go_sync,
 	.go_inval = rgrp_go_inval,
-	.go_lock = rgrp_go_lock,
-	.go_unlock = rgrp_go_unlock,
+	.go_lock = gfs2_rgrp_go_lock,
+	.go_unlock = gfs2_rgrp_go_unlock,
 	.go_dump = gfs2_rgrp_dump,
 	.go_type = LM_TYPE_RGRP,
 	.go_flags = GLOF_ASPACE,

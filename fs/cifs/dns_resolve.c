@@ -147,7 +147,7 @@ dns_resolve_server_name_to_ip(const char *unc, char **ip_addr)
 		len = rkey->type_data.x[0];
 		data = rkey->payload.data;
 	} else {
-		cERROR(1, "%s: unable to resolve: %s", __func__, name);
+		cFYI(1, "%s: unable to resolve: %s", __func__, name);
 		goto out;
 	}
 

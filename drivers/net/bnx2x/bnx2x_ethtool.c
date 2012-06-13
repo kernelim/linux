@@ -1,6 +1,6 @@
 /* bnx2x_ethtool.c: Broadcom Everest network driver.
  *
- * Copyright (c) 2007-2011 Broadcom Corporation
+ * Copyright (c) 2007-2012 Broadcom Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,6 +14,9 @@
  * Statistics and Link management by Yitchak Gertner
  *
  */
+
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/ethtool.h>
 #include <linux/netdevice.h>
 #include <linux/types.h>
@@ -104,6 +107,10 @@ static const struct {
 				4, STATS_FLAGS_PORT, "rx_filtered_packets" },
 	{ STATS_OFFSET32(mf_tag_discard),
 				4, STATS_FLAGS_PORT, "rx_mf_tag_discard" },
+	{ STATS_OFFSET32(pfc_frames_received_hi),
+				8, STATS_FLAGS_PORT, "pfc_frames_received" },
+	{ STATS_OFFSET32(pfc_frames_sent_hi),
+				8, STATS_FLAGS_PORT, "pfc_frames_sent" },
 	{ STATS_OFFSET32(brb_drop_hi),
 				8, STATS_FLAGS_PORT, "rx_brb_discard" },
 	{ STATS_OFFSET32(brb_truncate_hi),
@@ -168,7 +175,11 @@ static const struct {
 	{ STATS_OFFSET32(total_tpa_aggregated_frames_hi),
 			8, STATS_FLAGS_FUNC, "tpa_aggregated_frames"},
 	{ STATS_OFFSET32(total_tpa_bytes_hi),
-			8, STATS_FLAGS_FUNC, "tpa_bytes"}
+			8, STATS_FLAGS_FUNC, "tpa_bytes"},
+	{ STATS_OFFSET32(recoverable_error),
+			4, STATS_FLAGS_FUNC, "recoverable_errors" },
+	{ STATS_OFFSET32(unrecoverable_error),
+			4, STATS_FLAGS_FUNC, "unrecoverable_errors" },
 };
 
 #define BNX2X_NUM_STATS		ARRAY_SIZE(bnx2x_stats_arr)
@@ -239,9 +250,9 @@ static int bnx2x_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 	cmd->maxrxpkt = 0;
 
 	DP(NETIF_MSG_LINK, "ethtool_cmd: cmd %d\n"
-	   DP_LEVEL "  supported 0x%x  advertising 0x%x  speed %u\n"
-	   DP_LEVEL "  duplex %d  port %d  phy_address %d  transceiver %d\n"
-	   DP_LEVEL "  autoneg %d  maxtxpkt %d  maxrxpkt %d\n",
+	   "  supported 0x%x  advertising 0x%x  speed %u\n"
+	   "  duplex %d  port %d  phy_address %d  transceiver %d\n"
+	   "  autoneg %d  maxtxpkt %d  maxrxpkt %d\n",
 	   cmd->cmd, cmd->supported, cmd->advertising,
 	   ethtool_cmd_speed(cmd),
 	   cmd->duplex, cmd->port, cmd->phy_address, cmd->transceiver,
@@ -326,6 +337,7 @@ static int bnx2x_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 			PORT_HW_CFG_PHY_SELECTION_FIRST_PHY;
 		break;
 	case PORT_FIBRE:
+	case PORT_DA:
 		if (bp->port.supported[cfg_idx] & SUPPORTED_FIBRE)
 			break; /* no port change */
 
@@ -348,7 +360,7 @@ static int bnx2x_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 		DP(NETIF_MSG_LINK, "Unsupported port type\n");
 		return -EINVAL;
 	}
-	/* Save new config in case command complete successuly */
+	/* Save new config in case command complete successully */
 	new_multi_phy_config = bp->link_params.multi_phy_config;
 	/* Get the new cfg_idx */
 	cfg_idx = bnx2x_get_link_cfg_idx(bp);
@@ -357,13 +369,18 @@ static int bnx2x_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 	DP(NETIF_MSG_LINK, "cfg_idx = %x\n", cfg_idx);
 
 	if (cmd->autoneg == AUTONEG_ENABLE) {
+		u32 an_supported_speed = bp->port.supported[cfg_idx];
+		if (bp->link_params.phy[EXT_PHY1].type ==
+		    PORT_HW_CFG_XGXS_EXT_PHY_TYPE_BCM84833)
+			an_supported_speed |= (SUPPORTED_100baseT_Half |
+					       SUPPORTED_100baseT_Full);
 		if (!(bp->port.supported[cfg_idx] & SUPPORTED_Autoneg)) {
 			DP(NETIF_MSG_LINK, "Autoneg not supported\n");
 			return -EINVAL;
 		}
 
 		/* advertise the requested speed and duplex if supported */
-		if (cmd->advertising & ~(bp->port.supported[cfg_idx])) {
+		if (cmd->advertising & ~an_supported_speed) {
 			DP(NETIF_MSG_LINK, "Advertisement parameters "
 					   "are not supported\n");
 			return -EINVAL;
@@ -519,7 +536,7 @@ static int bnx2x_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 	}
 
 	DP(NETIF_MSG_LINK, "req_line_speed %d\n"
-	   DP_LEVEL "  req_duplex %d  advertising 0x%x\n",
+	   "  req_duplex %d  advertising 0x%x\n",
 	   bp->link_params.req_line_speed[cfg_idx],
 	   bp->link_params.req_duplex[cfg_idx],
 	   bp->port.advertising[cfg_idx]);
@@ -757,8 +774,8 @@ static void bnx2x_get_drvinfo(struct net_device *dev,
 	struct bnx2x *bp = netdev_priv(dev);
 	u8 phy_fw_ver[PHY_FW_VER_LEN];
 
-	strcpy(info->driver, DRV_MODULE_NAME);
-	strcpy(info->version, DRV_MODULE_VERSION);
+	strlcpy(info->driver, DRV_MODULE_NAME, sizeof(info->driver));
+	strlcpy(info->version, DRV_MODULE_VERSION, sizeof(info->version));
 
 	phy_fw_ver[0] = '\0';
 	if (bp->port.pmf) {
@@ -769,14 +786,14 @@ static void bnx2x_get_drvinfo(struct net_device *dev,
 		bnx2x_release_phy_lock(bp);
 	}
 
-	strncpy(info->fw_version, bp->fw_ver, 32);
+	strlcpy(info->fw_version, bp->fw_ver, sizeof(info->fw_version));
 	snprintf(info->fw_version + strlen(bp->fw_ver), 32 - strlen(bp->fw_ver),
 		 "bc %d.%d.%d%s%s",
 		 (bp->common.bc_ver & 0xff0000) >> 16,
 		 (bp->common.bc_ver & 0xff00) >> 8,
 		 (bp->common.bc_ver & 0xff),
 		 ((phy_fw_ver[0] != '\0') ? " phy " : ""), phy_fw_ver);
-	strcpy(info->bus_info, pci_name(bp->pdev));
+	strlcpy(info->bus_info, pci_name(bp->pdev), sizeof(info->bus_info));
 	info->n_stats = BNX2X_NUM_STATS;
 	info->testinfo_len = BNX2X_NUM_TESTS;
 	info->eedump_len = bp->common.flash_size;
@@ -869,11 +886,27 @@ static int bnx2x_get_eeprom_len(struct net_device *dev)
 	return bp->common.flash_size;
 }
 
+/* Per pf misc lock must be aquired before the per port mcp lock. Otherwise, had
+ * we done things the other way around, if two pfs from the same port would
+ * attempt to access nvram at the same time, we could run into a scenario such
+ * as:
+ * pf A takes the port lock.
+ * pf B succeeds in taking the same lock since they are from the same port.
+ * pf A takes the per pf misc lock. Performs eeprom access.
+ * pf A finishes. Unlocks the per pf misc lock.
+ * Pf B takes the lock and proceeds to perform it's own access.
+ * pf A unlocks the per port lock, while pf B is still working (!).
+ * mcp takes the per port lock and corrupts pf B's access (and/or has it's own
+ * acess corrupted by pf B).*
+ */
 static int bnx2x_acquire_nvram_lock(struct bnx2x *bp)
 {
 	int port = BP_PORT(bp);
 	int count, i;
-	u32 val = 0;
+	u32 val;
+
+	/* acquire HW lock: protect against other PFs in PF Direct Assignment */
+	bnx2x_acquire_hw_lock(bp, HW_LOCK_RESOURCE_NVRAM);
 
 	/* adjust timeout for emulation/FPGA */
 	count = BNX2X_NVRAM_TIMEOUT_COUNT;
@@ -904,7 +937,7 @@ static int bnx2x_release_nvram_lock(struct bnx2x *bp)
 {
 	int port = BP_PORT(bp);
 	int count, i;
-	u32 val = 0;
+	u32 val;
 
 	/* adjust timeout for emulation/FPGA */
 	count = BNX2X_NVRAM_TIMEOUT_COUNT;
@@ -928,6 +961,8 @@ static int bnx2x_release_nvram_lock(struct bnx2x *bp)
 		return -EBUSY;
 	}
 
+	/* release HW lock: protect against other PFs in PF Direct Assignment */
+	bnx2x_release_hw_lock(bp, HW_LOCK_RESOURCE_NVRAM);
 	return 0;
 }
 
@@ -1065,7 +1100,7 @@ static int bnx2x_get_eeprom(struct net_device *dev,
 		return -EAGAIN;
 
 	DP(BNX2X_MSG_NVM, "ethtool_eeprom: cmd %d\n"
-	   DP_LEVEL "  magic 0x%x  offset 0x%x (%d)  len 0x%x (%d)\n",
+	   "  magic 0x%x  offset 0x%x (%d)  len 0x%x (%d)\n",
 	   eeprom->cmd, eeprom->magic, eeprom->offset, eeprom->offset,
 	   eeprom->len, eeprom->len);
 
@@ -1236,7 +1271,7 @@ static int bnx2x_set_eeprom(struct net_device *dev,
 		return -EAGAIN;
 
 	DP(BNX2X_MSG_NVM, "ethtool_eeprom: cmd %d\n"
-	   DP_LEVEL "  magic 0x%x  offset 0x%x (%d)  len 0x%x (%d)\n",
+	   "  magic 0x%x  offset 0x%x (%d)  len 0x%x (%d)\n",
 	   eeprom->cmd, eeprom->magic, eeprom->offset, eeprom->offset,
 	   eeprom->len, eeprom->len);
 
@@ -1341,16 +1376,11 @@ static void bnx2x_get_ringparam(struct net_device *dev,
 	struct bnx2x *bp = netdev_priv(dev);
 
 	ering->rx_max_pending = MAX_RX_AVAIL;
-	ering->rx_mini_max_pending = 0;
-	ering->rx_jumbo_max_pending = 0;
 
 	if (bp->rx_ring_size)
 		ering->rx_pending = bp->rx_ring_size;
 	else
 		ering->rx_pending = MAX_RX_AVAIL;
-
-	ering->rx_mini_pending = 0;
-	ering->rx_jumbo_pending = 0;
 
 	ering->tx_max_pending = MAX_TX_AVAIL;
 	ering->tx_pending = bp->tx_ring_size;
@@ -1362,7 +1392,8 @@ static int bnx2x_set_ringparam(struct net_device *dev,
 	struct bnx2x *bp = netdev_priv(dev);
 
 	if (bp->recovery_state != BNX2X_RECOVERY_DONE) {
-		printk(KERN_ERR "Handling parity error recovery. Try again later\n");
+		netdev_err(dev, "Handling parity error recovery. "
+				"Try again later\n");
 		return -EAGAIN;
 	}
 
@@ -1393,7 +1424,7 @@ static void bnx2x_get_pauseparam(struct net_device *dev,
 			    BNX2X_FLOW_CTRL_TX);
 
 	DP(NETIF_MSG_LINK, "ethtool_pauseparam: cmd %d\n"
-	   DP_LEVEL "  autoneg %d  rx_pause %d  tx_pause %d\n",
+	   "  autoneg %d  rx_pause %d  tx_pause %d\n",
 	   epause->cmd, epause->autoneg, epause->rx_pause, epause->tx_pause);
 }
 
@@ -1406,7 +1437,7 @@ static int bnx2x_set_pauseparam(struct net_device *dev,
 		return 0;
 
 	DP(NETIF_MSG_LINK, "ethtool_pauseparam: cmd %d\n"
-	   DP_LEVEL "  autoneg %d  rx_pause %d  tx_pause %d\n",
+	   "  autoneg %d  rx_pause %d  tx_pause %d\n",
 	   epause->cmd, epause->autoneg, epause->rx_pause, epause->tx_pause);
 
 	bp->link_params.req_flow_ctrl[cfg_idx] = BNX2X_FLOW_CTRL_AUTO;
@@ -1449,7 +1480,7 @@ static int bnx2x_set_flags(struct net_device *dev, u32 data)
 	int changed = 0;
 	int rc = 0;
 
-	if (data & ~(ETH_FLAG_LRO))
+	if (data & ~(ETH_FLAG_LRO|ETH_FLAG_RXHASH))
 		return -EINVAL;
 
 	if (bp->recovery_state != BNX2X_RECOVERY_DONE) {
@@ -1472,6 +1503,11 @@ static int bnx2x_set_flags(struct net_device *dev, u32 data)
 		bp->flags &= ~TPA_ENABLE_FLAG;
 		changed = 1;
 	}
+
+	if (data & ETH_FLAG_RXHASH)
+		dev->features |= NETIF_F_RXHASH;
+	else
+		dev->features &= ~NETIF_F_RXHASH;
 
 	if (changed && netif_running(dev)) {
 		bnx2x_nic_unload(bp, UNLOAD_NORMAL);
@@ -1811,7 +1847,7 @@ static int bnx2x_run_loopback(struct bnx2x *bp, int loopback_mode)
 	struct bnx2x_fp_txdata *txdata = &fp_tx->txdata[0];
 	u16 tx_start_idx, tx_idx;
 	u16 rx_start_idx, rx_idx;
-	u16 pkt_prod, bd_prod, rx_comp_cons;
+	u16 pkt_prod, bd_prod;
 	struct sw_tx_bd *tx_buf;
 	struct eth_tx_start_bd *tx_start_bd;
 	struct eth_tx_parse_bd_e1x  *pbd_e1x = NULL;
@@ -1822,6 +1858,7 @@ static int bnx2x_run_loopback(struct bnx2x *bp, int loopback_mode)
 	struct sw_rx_bd *rx_buf;
 	u16 len;
 	int rc = -ENODEV;
+	u8 *data;
 
 	/* check the loopback mode */
 	switch (loopback_mode) {
@@ -1830,8 +1867,18 @@ static int bnx2x_run_loopback(struct bnx2x *bp, int loopback_mode)
 			return -EINVAL;
 		break;
 	case BNX2X_MAC_LOOPBACK:
-		bp->link_params.loopback_mode = CHIP_IS_E3(bp) ?
-						LOOPBACK_XMAC : LOOPBACK_BMAC;
+		if (CHIP_IS_E3(bp)) {
+			int cfg_idx = bnx2x_get_link_cfg_idx(bp);
+			if (bp->port.supported[cfg_idx] &
+			    (SUPPORTED_10000baseT_Full |
+			     SUPPORTED_20000baseMLD2_Full |
+			     SUPPORTED_20000baseKR2_Full))
+				bp->link_params.loopback_mode = LOOPBACK_XMAC;
+			else
+				bp->link_params.loopback_mode = LOOPBACK_UMAC;
+		} else
+			bp->link_params.loopback_mode = LOOPBACK_BMAC;
+
 		bnx2x_phy_init(&bp->link_params, &bp->link_vars);
 		break;
 	default:
@@ -1932,14 +1979,13 @@ static int bnx2x_run_loopback(struct bnx2x *bp, int loopback_mode)
 	if (rx_idx != rx_start_idx + num_pkts)
 		goto test_loopback_exit;
 
-	rx_comp_cons = le16_to_cpu(fp_rx->rx_comp_cons);
-	cqe = &fp_rx->rx_comp_ring[RCQ_BD(rx_comp_cons)];
+	cqe = &fp_rx->rx_comp_ring[RCQ_BD(fp_rx->rx_comp_cons)];
 	cqe_fp_flags = cqe->fast_path_cqe.type_error_flags;
 	cqe_fp_type = cqe_fp_flags & ETH_FAST_PATH_RX_CQE_TYPE;
 	if (!CQE_TYPE_FAST(cqe_fp_type) || (cqe_fp_flags & ETH_RX_ERROR_FALGS))
 		goto test_loopback_rx_exit;
 
-	len = le16_to_cpu(cqe->fast_path_cqe.pkt_len);
+	len = le16_to_cpu(cqe->fast_path_cqe.pkt_len_or_gro_seg_len);
 	if (len != pkt_size)
 		goto test_loopback_rx_exit;
 
@@ -1947,10 +1993,9 @@ static int bnx2x_run_loopback(struct bnx2x *bp, int loopback_mode)
 	dma_sync_single_for_cpu(&bp->pdev->dev,
 				   pci_unmap_addr(rx_buf, mapping),
 				   fp_rx->rx_buf_size, DMA_FROM_DEVICE);
-	skb = rx_buf->skb;
-	skb_reserve(skb, cqe->fast_path_cqe.placement_offset);
+	data = rx_buf->data + NET_SKB_PAD + cqe->fast_path_cqe.placement_offset;
 	for (i = ETH_HLEN; i < pkt_size; i++)
-		if (*(skb->data + i) != (unsigned char) (i & 0xff))
+		if (*(data + i) != (unsigned char) (i & 0xff))
 			goto test_loopback_rx_exit;
 
 	rc = 0;
@@ -2085,7 +2130,8 @@ static void bnx2x_self_test(struct net_device *dev,
 	struct bnx2x *bp = netdev_priv(dev);
 	u8 is_serdes;
 	if (bp->recovery_state != BNX2X_RECOVERY_DONE) {
-		printk(KERN_ERR "Handling parity error recovery. Try again later\n");
+		netdev_err(bp->dev, "Handling parity error recovery. "
+				    "Try again later\n");
 		etest->flags |= ETH_TEST_FL_FAILED;
 		return;
 	}
@@ -2181,18 +2227,16 @@ static int bnx2x_get_sset_count(struct net_device *dev, int stringset)
 	case ETH_SS_STATS:
 		if (is_multi(bp)) {
 			num_stats = bnx2x_num_stat_queues(bp) *
-				BNX2X_NUM_Q_STATS;
-			if (!IS_MF_MODE_STAT(bp))
-				num_stats += BNX2X_NUM_STATS;
-		} else {
-			if (IS_MF_MODE_STAT(bp)) {
-				num_stats = 0;
-				for (i = 0; i < BNX2X_NUM_STATS; i++)
-					if (IS_FUNC_STAT(i))
-						num_stats++;
-			} else
-				num_stats = BNX2X_NUM_STATS;
-		}
+						BNX2X_NUM_Q_STATS;
+		} else
+			num_stats = 0;
+		if (IS_MF_MODE_STAT(bp)) {
+			for (i = 0; i < BNX2X_NUM_STATS; i++)
+				if (IS_FUNC_STAT(i))
+					num_stats++;
+		} else
+			num_stats += BNX2X_NUM_STATS;
+
 		return num_stats;
 
 	case ETH_SS_TEST:
@@ -2211,8 +2255,8 @@ static void bnx2x_get_strings(struct net_device *dev, u32 stringset, u8 *buf)
 
 	switch (stringset) {
 	case ETH_SS_STATS:
+		k = 0;
 		if (is_multi(bp)) {
-			k = 0;
 			for_each_eth_queue(bp, i) {
 				memset(queue_name, 0, sizeof(queue_name));
 				sprintf(queue_name, "%d", i);
@@ -2223,20 +2267,17 @@ static void bnx2x_get_strings(struct net_device *dev, u32 stringset, u8 *buf)
 						queue_name);
 				k += BNX2X_NUM_Q_STATS;
 			}
-			if (IS_MF_MODE_STAT(bp))
-				break;
-			for (j = 0; j < BNX2X_NUM_STATS; j++)
-				strcpy(buf + (k + j)*ETH_GSTRING_LEN,
-				       bnx2x_stats_arr[j].string);
-		} else {
-			for (i = 0, j = 0; i < BNX2X_NUM_STATS; i++) {
-				if (IS_MF_MODE_STAT(bp) && IS_PORT_STAT(i))
-					continue;
-				strcpy(buf + j*ETH_GSTRING_LEN,
-				       bnx2x_stats_arr[i].string);
-				j++;
-			}
 		}
+
+
+		for (i = 0, j = 0; i < BNX2X_NUM_STATS; i++) {
+			if (IS_MF_MODE_STAT(bp) && IS_PORT_STAT(i))
+				continue;
+			strcpy(buf + (k + j)*ETH_GSTRING_LEN,
+				   bnx2x_stats_arr[i].string);
+			j++;
+		}
+
 		break;
 
 	case ETH_SS_TEST:
@@ -2250,10 +2291,9 @@ static void bnx2x_get_ethtool_stats(struct net_device *dev,
 {
 	struct bnx2x *bp = netdev_priv(dev);
 	u32 *hw_stats, *offset;
-	int i, j, k;
+	int i, j, k = 0;
 
 	if (is_multi(bp)) {
-		k = 0;
 		for_each_eth_queue(bp, i) {
 			hw_stats = (u32 *)&bp->fp[i].eth_q_stats;
 			for (j = 0; j < BNX2X_NUM_Q_STATS; j++) {
@@ -2274,46 +2314,28 @@ static void bnx2x_get_ethtool_stats(struct net_device *dev,
 			}
 			k += BNX2X_NUM_Q_STATS;
 		}
-		if (IS_MF_MODE_STAT(bp))
-			return;
-		hw_stats = (u32 *)&bp->eth_stats;
-		for (j = 0; j < BNX2X_NUM_STATS; j++) {
-			if (bnx2x_stats_arr[j].size == 0) {
-				/* skip this counter */
-				buf[k + j] = 0;
-				continue;
-			}
-			offset = (hw_stats + bnx2x_stats_arr[j].offset);
-			if (bnx2x_stats_arr[j].size == 4) {
-				/* 4-byte counter */
-				buf[k + j] = (u64) *offset;
-				continue;
-			}
-			/* 8-byte counter */
-			buf[k + j] = HILO_U64(*offset, *(offset + 1));
-		}
-	} else {
-		hw_stats = (u32 *)&bp->eth_stats;
-		for (i = 0, j = 0; i < BNX2X_NUM_STATS; i++) {
-			if (IS_MF_MODE_STAT(bp) && IS_PORT_STAT(i))
-				continue;
-			if (bnx2x_stats_arr[i].size == 0) {
-				/* skip this counter */
-				buf[j] = 0;
-				j++;
-				continue;
-			}
-			offset = (hw_stats + bnx2x_stats_arr[i].offset);
-			if (bnx2x_stats_arr[i].size == 4) {
-				/* 4-byte counter */
-				buf[j] = (u64) *offset;
-				j++;
-				continue;
-			}
-			/* 8-byte counter */
-			buf[j] = HILO_U64(*offset, *(offset + 1));
+	}
+
+	hw_stats = (u32 *)&bp->eth_stats;
+	for (i = 0, j = 0; i < BNX2X_NUM_STATS; i++) {
+		if (IS_MF_MODE_STAT(bp) && IS_PORT_STAT(i))
+			continue;
+		if (bnx2x_stats_arr[i].size == 0) {
+			/* skip this counter */
+			buf[k + j] = 0;
 			j++;
+			continue;
 		}
+		offset = (hw_stats + bnx2x_stats_arr[i].offset);
+		if (bnx2x_stats_arr[i].size == 4) {
+			/* 4-byte counter */
+			buf[k + j] = (u64) *offset;
+			j++;
+			continue;
+		}
+		/* 8-byte counter */
+		buf[k + j] = HILO_U64(*offset, *(offset + 1));
+		j++;
 	}
 }
 

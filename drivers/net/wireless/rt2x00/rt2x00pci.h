@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2004 - 2009 rt2x00 SourceForge Project
+	Copyright (C) 2004 - 2009 Ivo van Doorn <IvDoorn@gmail.com>
 	<http://rt2x00.serialmonkey.com>
 
 	This program is free software; you can redistribute it and/or modify
@@ -27,21 +27,13 @@
 #define RT2X00PCI_H
 
 #include <linux/io.h>
+#include <linux/pci.h>
 
 /*
  * This variable should be used with the
  * pci_driver structure initialization.
  */
 #define PCI_DEVICE_DATA(__ops)	.driver_data = (kernel_ulong_t)(__ops)
-
-/*
- * Register defines.
- * Some registers require multiple attempts before success,
- * in those cases REGISTER_BUSY_COUNT attempts should be
- * taken with a REGISTER_BUSY_DELAY interval.
- */
-#define REGISTER_BUSY_COUNT	5
-#define REGISTER_BUSY_DELAY	100
 
 /*
  * Register access.
@@ -53,10 +45,9 @@ static inline void rt2x00pci_register_read(struct rt2x00_dev *rt2x00dev,
 	*value = readl(rt2x00dev->csr.base + offset);
 }
 
-static inline void
-rt2x00pci_register_multiread(struct rt2x00_dev *rt2x00dev,
-			     const unsigned int offset,
-			     void *value, const u16 length)
+static inline void rt2x00pci_register_multiread(struct rt2x00_dev *rt2x00dev,
+						const unsigned int offset,
+						void *value, const u32 length)
 {
 	memcpy_fromio(value, rt2x00dev->csr.base + offset, length);
 }
@@ -68,12 +59,12 @@ static inline void rt2x00pci_register_write(struct rt2x00_dev *rt2x00dev,
 	writel(value, rt2x00dev->csr.base + offset);
 }
 
-static inline void
-rt2x00pci_register_multiwrite(struct rt2x00_dev *rt2x00dev,
-			      const unsigned int offset,
-			      const void *value, const u16 length)
+static inline void rt2x00pci_register_multiwrite(struct rt2x00_dev *rt2x00dev,
+						 const unsigned int offset,
+						 const void *value,
+						 const u32 length)
 {
-	memcpy_toio(rt2x00dev->csr.base + offset, value, length);
+	__iowrite32_copy(rt2x00dev->csr.base + offset, value, length >> 2);
 }
 
 /**
@@ -95,15 +86,6 @@ int rt2x00pci_regbusy_read(struct rt2x00_dev *rt2x00dev,
 			   u32 *reg);
 
 /**
- * rt2x00pci_write_tx_data - Initialize data for TX operation
- * @entry: The entry where the frame is located
- *
- * This function will initialize the DMA and skb descriptor
- * to prepare the entry for the actual TX operation.
- */
-int rt2x00pci_write_tx_data(struct queue_entry *entry);
-
-/**
  * struct queue_entry_priv_pci: Per entry PCI specific information
  *
  * @desc: Pointer to device descriptor
@@ -119,8 +101,21 @@ struct queue_entry_priv_pci {
 /**
  * rt2x00pci_rxdone - Handle RX done events
  * @rt2x00dev: Device pointer, see &struct rt2x00_dev.
+ *
+ * Returns true if there are still rx frames pending and false if all
+ * pending rx frames were processed.
  */
-void rt2x00pci_rxdone(struct rt2x00_dev *rt2x00dev);
+bool rt2x00pci_rxdone(struct rt2x00_dev *rt2x00dev);
+
+/**
+ * rt2x00pci_flush_queue - Flush data queue
+ * @queue: Data queue to stop
+ * @drop: True to drop all pending frames.
+ *
+ * This will wait for a maximum of 100ms, waiting for the queues
+ * to become empty.
+ */
+void rt2x00pci_flush_queue(struct data_queue *queue, bool drop);
 
 /*
  * Device initialization handlers.
@@ -131,7 +126,7 @@ void rt2x00pci_uninitialize(struct rt2x00_dev *rt2x00dev);
 /*
  * PCI driver handlers.
  */
-int rt2x00pci_probe(struct pci_dev *pci_dev, const struct pci_device_id *id);
+int rt2x00pci_probe(struct pci_dev *pci_dev, const struct rt2x00_ops *ops);
 void rt2x00pci_remove(struct pci_dev *pci_dev);
 #ifdef CONFIG_PM
 int rt2x00pci_suspend(struct pci_dev *pci_dev, pm_message_t state);

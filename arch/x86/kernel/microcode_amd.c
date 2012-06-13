@@ -344,8 +344,6 @@ static enum ucode_state request_microcode_fw(int cpu, struct device *device)
 static enum ucode_state
 request_microcode_user(int cpu, const void __user *buf, size_t size)
 {
-	printk(KERN_INFO "microcode: AMD microcode update via "
-	       "/dev/cpu/microcode not supported\n");
 	return UCODE_ERROR;
 }
 
@@ -357,10 +355,32 @@ static void microcode_fini_cpu_amd(int cpu)
 	uci->mc = NULL;
 }
 
+/*
+ * AMD microcode firmware naming convention, up to family 15h they are in
+ * the legacy file:
+ *
+ *    amd-ucode/microcode_amd.bin
+ *
+ * This legacy file is always smaller than 2K in size.
+ *
+ * Starting at family 15h they are in family specific firmware files:
+ *
+ *    amd-ucode/microcode_amd_fam15h.bin
+ *    amd-ucode/microcode_amd_fam16h.bin
+ *    ...
+ *
+ * These might be larger than 2K.
+ */
 void init_microcode_amd(struct device *device)
 {
-	const char *fw_name = "amd-ucode/microcode_amd.bin";
-	if (request_firmware(&firmware, fw_name, device))
+	char fw_name[36] = "amd-ucode/microcode_amd.bin";
+
+	if (boot_cpu_data.x86 >= 0x15)
+		snprintf(fw_name, sizeof(fw_name),
+			 "amd-ucode/microcode_amd_fam%.2xh.bin",
+			 boot_cpu_data.x86);
+
+	if (request_firmware(&firmware, (const char *)fw_name, device))
 		printk(KERN_ERR "microcode: failed to load file %s\n", fw_name);
 }
 

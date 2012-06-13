@@ -23,7 +23,6 @@
 #include "ath5k.h"
 #include "reg.h"
 #include "debug.h"
-#include "base.h"
 
 /*
  * Set led state
@@ -33,8 +32,6 @@ void ath5k_hw_set_ledstate(struct ath5k_hw *ah, unsigned int state)
 	u32 led;
 	/*5210 has different led mode handling*/
 	u32 led_5210;
-
-	ATH5K_TRACE(ah->ah_sc);
 
 	/*Reset led status*/
 	if (ah->ah_version != AR5K_AR5210)
@@ -82,7 +79,6 @@ void ath5k_hw_set_ledstate(struct ath5k_hw *ah, unsigned int state)
  */
 int ath5k_hw_set_gpio_input(struct ath5k_hw *ah, u32 gpio)
 {
-	ATH5K_TRACE(ah->ah_sc);
 	if (gpio >= AR5K_NUM_GPIO)
 		return -EINVAL;
 
@@ -98,7 +94,6 @@ int ath5k_hw_set_gpio_input(struct ath5k_hw *ah, u32 gpio)
  */
 int ath5k_hw_set_gpio_output(struct ath5k_hw *ah, u32 gpio)
 {
-	ATH5K_TRACE(ah->ah_sc);
 	if (gpio >= AR5K_NUM_GPIO)
 		return -EINVAL;
 
@@ -114,7 +109,6 @@ int ath5k_hw_set_gpio_output(struct ath5k_hw *ah, u32 gpio)
  */
 u32 ath5k_hw_get_gpio(struct ath5k_hw *ah, u32 gpio)
 {
-	ATH5K_TRACE(ah->ah_sc);
 	if (gpio >= AR5K_NUM_GPIO)
 		return 0xffffffff;
 
@@ -129,7 +123,6 @@ u32 ath5k_hw_get_gpio(struct ath5k_hw *ah, u32 gpio)
 int ath5k_hw_set_gpio(struct ath5k_hw *ah, u32 gpio, u32 val)
 {
 	u32 data;
-	ATH5K_TRACE(ah->ah_sc);
 
 	if (gpio >= AR5K_NUM_GPIO)
 		return -EINVAL;
@@ -153,7 +146,6 @@ void ath5k_hw_set_gpio_intr(struct ath5k_hw *ah, unsigned int gpio,
 {
 	u32 data;
 
-	ATH5K_TRACE(ah->ah_sc);
 	if (gpio >= AR5K_NUM_GPIO)
 		return;
 

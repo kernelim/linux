@@ -49,15 +49,7 @@ int br_dev_queue_push_xmit(struct sk_buff *skb)
 			kfree_skb(skb);
 		else {
 			skb_push(skb, ETH_HLEN);
-
-#ifdef CONFIG_NET_POLL_CONTROLLER
-			if (unlikely(netpoll_tx_running(skb->dev))) {
-				if (skb->dev->npinfo)
-					netpoll_send_skb(skb->dev->npinfo->netpoll, skb);
-				skb->dev->priv_flags &= ~IFF_IN_NETPOLL;
-			} else
-#endif
-				dev_queue_xmit(skb);
+			dev_queue_xmit(skb);
 		}
 	}
 
@@ -73,31 +65,20 @@ int br_forward_finish(struct sk_buff *skb)
 
 static void __br_deliver(const struct net_bridge_port *to, struct sk_buff *skb)
 {
-#ifdef CONFIG_NET_POLL_CONTROLLER
-	struct net_device *to_dev = to->dev;
-	struct net_device *old_dev = NULL;
-	if (unlikely(netpoll_tx_running(to->dev))) {
-		struct netpoll *np;
-		if (skb->dev->npinfo) {
-			to->dev->npinfo = skb->dev->npinfo;
-			np = skb->dev->npinfo->netpoll;
-			old_dev = np->dev;
-			np->real_dev = np->dev = to->dev;
-			to->dev->priv_flags |= IFF_IN_NETPOLL;
-		} else {
-			skb->dev->priv_flags &= ~IFF_IN_NETPOLL;
-		}
-	}
-#endif
 	skb->dev = to->dev;
-	NF_HOOK(PF_BRIDGE, NF_BR_LOCAL_OUT, skb, NULL, skb->dev,
-			br_forward_finish);
-#ifdef CONFIG_NET_POLL_CONTROLLER
-	if (to_dev->npinfo) {
-		to_dev->npinfo->netpoll->dev = old_dev;
-		to_dev->npinfo = NULL;
+
+	if (unlikely(netpoll_tx_running(to->dev))) {
+		if (packet_length(skb) > skb->dev->mtu && !skb_is_gso(skb))
+			kfree_skb(skb);
+		else {
+			skb_push(skb, ETH_HLEN);
+			br_netpoll_send_skb(to, skb);
+		}
+		return;
 	}
-#endif
+
+	NF_HOOK(NFPROTO_BRIDGE, NF_BR_LOCAL_OUT, skb, NULL, skb->dev,
+		br_forward_finish);
 }
 
 static void __br_forward(const struct net_bridge_port *to, struct sk_buff *skb)

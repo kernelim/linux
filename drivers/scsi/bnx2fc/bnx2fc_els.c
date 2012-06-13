@@ -268,17 +268,6 @@ void bnx2fc_srr_compl(struct bnx2fc_els_cb_arg *cb_arg)
 
 	orig_io_req = cb_arg->aborted_io_req;
 	srr_req = cb_arg->io_req;
-	if (test_bit(BNX2FC_FLAG_IO_COMPL, &orig_io_req->req_flags)) {
-		BNX2FC_IO_DBG(srr_req, "srr_compl: xid - 0x%x completed",
-			orig_io_req->xid);
-		goto srr_compl_done;
-	}
-	if (test_bit(BNX2FC_FLAG_ISSUE_ABTS, &orig_io_req->req_flags)) {
-		BNX2FC_IO_DBG(srr_req, "rec abts in prog "
-		       "orig_io - 0x%x\n",
-			orig_io_req->xid);
-		goto srr_compl_done;
-	}
 	if (test_and_clear_bit(BNX2FC_FLAG_ELS_TIMEOUT, &srr_req->req_flags)) {
 		/* SRR timedout */
 		BNX2FC_IO_DBG(srr_req, "srr timed out, abort "
@@ -289,6 +278,12 @@ void bnx2fc_srr_compl(struct bnx2fc_els_cb_arg *cb_arg)
 			BNX2FC_IO_DBG(srr_req, "srr_compl: initiate_abts "
 				"failed. issue cleanup\n");
 			bnx2fc_initiate_cleanup(srr_req);
+		}
+		if (test_bit(BNX2FC_FLAG_IO_COMPL, &orig_io_req->req_flags) ||
+		    test_bit(BNX2FC_FLAG_ISSUE_ABTS, &orig_io_req->req_flags)) {
+			BNX2FC_IO_DBG(srr_req, "srr_compl:xid 0x%x flags = %lx",
+				      orig_io_req->xid, orig_io_req->req_flags);
+			goto srr_compl_done;
 		}
 		orig_io_req->srr_retry++;
 		if (orig_io_req->srr_retry <= SRR_RETRY_COUNT) {
@@ -309,6 +304,12 @@ void bnx2fc_srr_compl(struct bnx2fc_els_cb_arg *cb_arg)
 				orig_io_req->xid);
 			bnx2fc_initiate_cleanup(orig_io_req);
 		}
+		goto srr_compl_done;
+	}
+	if (test_bit(BNX2FC_FLAG_IO_COMPL, &orig_io_req->req_flags) ||
+	    test_bit(BNX2FC_FLAG_ISSUE_ABTS, &orig_io_req->req_flags)) {
+		BNX2FC_IO_DBG(srr_req, "srr_compl:xid - 0x%x flags = %lx",
+			      orig_io_req->xid, orig_io_req->req_flags);
 		goto srr_compl_done;
 	}
 	mp_req = &(srr_req->mp_req);
@@ -854,7 +855,6 @@ static void bnx2fc_flogi_resp(struct fc_seq *seq, struct fc_frame *fp,
 	struct fc_exch *exch = fc_seq_exch(seq);
 	struct fc_lport *lport = exch->lp;
 	u8 *mac;
-	struct fc_frame_header *fh;
 	u8 op;
 
 	if (IS_ERR(fp))
@@ -862,13 +862,6 @@ static void bnx2fc_flogi_resp(struct fc_seq *seq, struct fc_frame *fp,
 
 	mac = fr_cb(fp)->granted_mac;
 	if (is_zero_ether_addr(mac)) {
-		fh = fc_frame_header_get(fp);
-		if (fh->fh_type != FC_TYPE_ELS) {
-			printk(KERN_ERR PFX "bnx2fc_flogi_resp:"
-				"fh_type != FC_TYPE_ELS\n");
-			fc_frame_free(fp);
-			return;
-		}
 		op = fc_frame_payload_op(fp);
 		if (lport->vport) {
 			if (op == ELS_LS_RJT) {
@@ -878,12 +871,10 @@ static void bnx2fc_flogi_resp(struct fc_seq *seq, struct fc_frame *fp,
 				return;
 			}
 		}
-		if (fcoe_ctlr_recv_flogi(fip, lport, fp)) {
-			fc_frame_free(fp);
-			return;
-		}
+		fcoe_ctlr_recv_flogi(fip, lport, fp);
 	}
-	fip->update_mac(lport, mac);
+	if (!is_zero_ether_addr(mac))
+		fip->update_mac(lport, mac);
 done:
 	fc_lport_flogi_resp(seq, fp, lport);
 }

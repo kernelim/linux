@@ -186,7 +186,7 @@ int _snd_ctl_add_slave(struct snd_kcontrol *master, struct snd_kcontrol *slave,
  * Returns zero if successful or a negative error code.
  *
  * All slaves must be the same type (returning the same information
- * via info callback).  The fucntion doesn't check it, so it's your
+ * via info callback).  The function doesn't check it, so it's your
  * responsibility.
  *
  * Also, some additional limitations:
@@ -220,5 +220,13 @@ snd_ctl_add_slave_uncached(struct snd_kcontrol *master,
 {
 	return _snd_ctl_add_slave(master, slave, SND_CTL_SLAVE_NEED_UPDATE);
 }
+
+/*
+ * Helper functions for jack-detection controls
+ */
+struct snd_kcontrol *
+snd_kctl_jack_new(const char *name, int idx, void *private_data);
+void snd_kctl_jack_report(struct snd_card *card,
+			  struct snd_kcontrol *kctl, bool status);
 
 #endif	/* __SOUND_CONTROL_H */

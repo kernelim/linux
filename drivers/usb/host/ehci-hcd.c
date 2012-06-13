@@ -36,6 +36,7 @@
 #include <linux/moduleparam.h>
 #include <linux/dma-mapping.h>
 #include <linux/debugfs.h>
+#include <linux/uaccess.h>
 
 #include <asm/byteorder.h>
 #include <asm/io.h>
@@ -99,6 +100,11 @@ MODULE_PARM_DESC (park, "park setting; 1-3 back-to-back async packets");
 static int ignore_oc = 0;
 module_param (ignore_oc, bool, S_IRUGO);
 MODULE_PARM_DESC (ignore_oc, "ignore bogus hardware overcurrent indications");
+
+/* for link power management(LPM) feature */
+static unsigned int hird;
+module_param(hird, int, S_IRUGO);
+MODULE_PARM_DESC(hird, "host initiated resume duration, +1 for each 75us\n");
 
 #define	INTR_MASK (STS_IAA | STS_FATAL | STS_PCD | STS_ERR | STS_INT)
 
@@ -305,6 +311,7 @@ static void end_unlink_async(struct ehci_hcd *ehci);
 static void ehci_work(struct ehci_hcd *ehci);
 
 #include "ehci-hub.c"
+#include "ehci-lpm.c"
 #include "ehci-mem.c"
 #include "ehci-q.c"
 #include "ehci-sched.c"
@@ -581,6 +588,11 @@ static int ehci_init(struct usb_hcd *hcd)
 	if (log2_irq_thresh < 0 || log2_irq_thresh > 6)
 		log2_irq_thresh = 0;
 	temp = 1 << (16 + log2_irq_thresh);
+	if (HCC_PER_PORT_CHANGE_EVENT(hcc_params)) {
+		ehci->has_ppcd = 1;
+		ehci_dbg(ehci, "enable per-port change event\n");
+		temp |= CMD_PPCEE;
+	}
 	if (HCC_CANPARK(hcc_params)) {
 		/* HW default park == 3, on hardware that supports it (like
 		 * NVidia and ALI silicon), maximizes throughput on the async
@@ -606,6 +618,17 @@ static int ehci_init(struct usb_hcd *hcd)
 		case 2: ehci->periodic_size = 256; break;
 		default:	BUG();
 		}
+	}
+	if (HCC_LPM(hcc_params)) {
+		/* support link power management EHCI 1.1 addendum */
+		ehci_dbg(ehci, "support lpm\n");
+		ehci->has_lpm = 1;
+		if (hird > 0xf) {
+			ehci_dbg(ehci, "hird %d invalid, use default 0",
+			hird);
+			hird = 0;
+		}
+		temp |= hird << 24;
 	}
 	ehci->command = temp;
 
@@ -766,6 +789,7 @@ static irqreturn_t ehci_irq (struct usb_hcd *hcd)
 	/* remote wakeup [4.3.1] */
 	if (status & STS_PCD) {
 		unsigned	i = HCS_N_PORTS (ehci->hcs_params);
+		u32		ppcd = 0;
 
 		/* kick root hub later */
 		pcd_status = status;
@@ -774,9 +798,18 @@ static irqreturn_t ehci_irq (struct usb_hcd *hcd)
 		if (!(cmd & CMD_RUN))
 			usb_hcd_resume_root_hub(hcd);
 
+		/* get per-port change detect bits */
+		if (ehci->has_ppcd)
+			ppcd = status >> 16;
+
 		while (i--) {
-			int pstatus = ehci_readl(ehci,
-						 &ehci->regs->port_status [i]);
+			int pstatus;
+
+			/* leverage per-port change bits feature */
+			if (ehci->has_ppcd && !(ppcd & (1 << i)))
+				continue;
+			pstatus = ehci_readl(ehci,
+					 &ehci->regs->port_status[i]);
 
 			if (pstatus & PORT_OWNER)
 				continue;

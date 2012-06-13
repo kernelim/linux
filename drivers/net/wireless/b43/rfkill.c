@@ -3,7 +3,7 @@
   Broadcom B43 wireless driver
   RFKILL support
 
-  Copyright (c) 2007 Michael Buesch <mb@bu3sch.de>
+  Copyright (c) 2007 Michael Buesch <m@bues.ch>
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -28,23 +28,8 @@
 /* Returns TRUE, if the radio is enabled in hardware. */
 bool b43_is_hw_radio_enabled(struct b43_wldev *dev)
 {
-	if (dev->phy.rev >= 3 || dev->phy.type == B43_PHYTYPE_LP) {
-		if (!(b43_read32(dev, B43_MMIO_RADIO_HWENABLED_HI)
-		      & B43_MMIO_RADIO_HWENABLED_HI_MASK))
-			return 1;
-	} else {
-		/* To prevent CPU fault on PPC, do not read a register
-		 * unless the interface is started; however, on resume
-		 * for hibernation, this routine is entered early. When
-		 * that happens, unconditionally return TRUE.
-		 */
-		if (b43_status(dev) < B43_STAT_STARTED)
-			return 1;
-		if (b43_read16(dev, B43_MMIO_RADIO_HWENABLED_LO)
-		    & B43_MMIO_RADIO_HWENABLED_LO_MASK)
-			return 1;
-	}
-	return 0;
+	return !(b43_read32(dev, B43_MMIO_RADIO_HWENABLED_HI)
+		& B43_MMIO_RADIO_HWENABLED_HI_MASK);
 }
 
 /* The poll callback for the hardware button. */
@@ -52,17 +37,16 @@ void b43_rfkill_poll(struct ieee80211_hw *hw)
 {
 	struct b43_wl *wl = hw_to_b43_wl(hw);
 	struct b43_wldev *dev = wl->current_dev;
-	struct ssb_bus *bus = dev->dev->bus;
 	bool enabled;
 	bool brought_up = false;
 
 	mutex_lock(&wl->mutex);
 	if (unlikely(b43_status(dev) < B43_STAT_INITIALIZED)) {
-		if (ssb_bus_powerup(bus, 0)) {
+		if (b43_bus_powerup(dev, 0)) {
 			mutex_unlock(&wl->mutex);
 			return;
 		}
-		ssb_device_enable(dev->dev, 0);
+		b43_device_enable(dev, 0);
 		brought_up = true;
 	}
 
@@ -78,8 +62,8 @@ void b43_rfkill_poll(struct ieee80211_hw *hw)
 	}
 
 	if (brought_up) {
-		ssb_device_disable(dev->dev, 0);
-		ssb_bus_may_powerdown(bus);
+		b43_device_disable(dev, 0);
+		b43_bus_may_powerdown(dev);
 	}
 
 	mutex_unlock(&wl->mutex);

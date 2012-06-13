@@ -36,6 +36,7 @@
 #include <linux/cpu.h>
 #include <linux/timex.h>
 #include <linux/bootmem.h>
+#include <linux/crash_dump.h>
 #include <asm/ipl.h>
 #include <asm/setup.h>
 #include <asm/sigp.h>
@@ -90,22 +91,75 @@ static int cpu_stopped(int cpu)
 	return 0;
 }
 
+/*
+ * Ensure that PSW restart is done on an online CPU
+ */
+void smp_restart_with_online_cpu(void)
+{
+	int cpu;
+
+	for_each_online_cpu(cpu) {
+		if (stap() == __cpu_logical_map[cpu]) {
+			/* We are online: Enable DAT again and return */
+			__load_psw_mask(psw_kernel_bits & ~PSW_MASK_MCHECK);
+			return;
+		}
+	}
+	/* We are not online: Do PSW restart on an online CPU */
+	while (signal_processor(cpu, sigp_restart) == sigp_busy)
+		cpu_relax();
+	/* And stop ourself */
+	while (raw_sigp(stap(), sigp_stop) == sigp_busy)
+		cpu_relax();
+	for (;;);
+}
+
+static void smp_stop_cpu(void)
+{
+	while (signal_processor(smp_processor_id(), sigp_stop) == sigp_busy)
+		cpu_relax();
+}
+
 void smp_send_stop(void)
 {
-	int cpu, rc;
+	cpumask_t cpumask;
+	int cpu;
+	u64 end;
 
 	/* Disable all interrupts/machine checks */
 	__load_psw_mask(psw_kernel_bits & ~PSW_MASK_MCHECK);
 	trace_hardirqs_off();
 
-	/* stop all processors */
-	for_each_online_cpu(cpu) {
-		if (cpu == smp_processor_id())
-			continue;
-		do {
-			rc = signal_processor(cpu, sigp_stop);
-		} while (rc == sigp_busy);
+	cpumask_copy(&cpumask, cpu_online_mask);
+	cpumask_clear_cpu(smp_processor_id(), &cpumask);
 
+	if (oops_in_progress) {
+		/*
+		 * Give the other cpus the opportunity to complete
+		 * outstanding interrupts before stopping them.
+		 */
+		end = get_clock() + (1000000UL << 12);
+		for_each_cpu(cpu, &cpumask) {
+			set_bit(ec_stop_cpu, (unsigned long *)
+				&lowcore_ptr[cpu]->ext_call_fast);
+			while (signal_processor(cpu, sigp_emergency_signal)
+			       == sigp_busy && get_clock() < end)
+				cpu_relax();
+		}
+		while (get_clock() < end) {
+			for_each_cpu(cpu, &cpumask)
+				if (cpu_stopped(cpu))
+					cpumask_clear_cpu(cpu, &cpumask);
+			if (cpumask_empty(&cpumask))
+				break;
+			cpu_relax();
+		}
+	}
+
+	/* stop all processors */
+	for_each_cpu(cpu, &cpumask) {
+		while (signal_processor(cpu, sigp_stop) == sigp_busy)
+			cpu_relax();
 		while (!cpu_stopped(cpu))
 			cpu_relax();
 	}
@@ -130,6 +184,9 @@ static void do_ext_call_interrupt(__u16 code)
 
 	if (test_bit(ec_schedule, &bits))
 		scheduler_ipi();
+
+	if (test_bit(ec_stop_cpu, &bits))
+		smp_stop_cpu();
 
 	if (test_bit(ec_call_function, &bits))
 		generic_smp_call_function_interrupt();
@@ -249,7 +306,7 @@ EXPORT_SYMBOL(smp_ctl_clear_bit);
  */
 #define CPU_INIT_NO	1
 
-#ifdef CONFIG_ZFCPDUMP
+#if defined(CONFIG_ZFCPDUMP) || defined(CONFIG_CRASH_DUMP)
 
 /*
  * zfcpdump_prefix_array holds prefix registers for the following scenario:
@@ -262,7 +319,9 @@ unsigned int zfcpdump_prefix_array[NR_CPUS + 1] \
 
 static void __init smp_get_save_area(unsigned int cpu, unsigned int phy_cpu)
 {
-	if (ipl_info.type != IPL_TYPE_FCP_DUMP)
+	if (ipl_info.type != IPL_TYPE_FCP_DUMP && !OLDMEM_BASE)
+		return;
+	if (is_kdump_kernel())
 		return;
 	if (cpu >= NR_CPUS) {
 		pr_warning("CPU %i exceeds the maximum %i and is excluded from "
@@ -278,6 +337,8 @@ static void __init smp_get_save_area(unsigned int cpu, unsigned int phy_cpu)
 		    (void *)(unsigned long) store_prefix() + SAVE_AREA_BASE,
 		    SAVE_AREA_SIZE);
 #ifdef CONFIG_64BIT
+	if (OLDMEM_BASE)
+		return;
 	/* copy original prefix register */
 	zfcpdump_save_areas[cpu]->s390x.pref_reg = zfcpdump_prefix_array[cpu];
 #endif
@@ -386,6 +447,18 @@ static void __init smp_detect_cpus(void)
 	info = kmalloc(sizeof(*info), GFP_KERNEL);
 	if (!info)
 		panic("smp_detect_cpus failed to allocate memory\n");
+#ifdef CONFIG_CRASH_DUMP
+	if (OLDMEM_BASE && !is_kdump_kernel()) {
+		union save_area *save_area;
+
+		save_area = kmalloc(sizeof(*save_area), GFP_KERNEL);
+		if (!save_area)
+			panic("could not allocate memory for save area\n");
+		copy_oldmem_page(1, (void *) save_area, sizeof(*save_area),
+				 0x200, 0);
+		zfcpdump_save_areas[0] = save_area;
+	}
+#endif
 	/* Use sigp detection algorithm if sclp doesn't work. */
 	if (sclp_get_cpu_info(info)) {
 		smp_use_sigp_detection = 1;
@@ -453,6 +526,11 @@ int __cpuinit start_secondary(void *cpuvoid)
 	ipi_call_lock();
 	cpu_set(smp_processor_id(), cpu_online_map);
 	ipi_call_unlock();
+	__ctl_clear_bit(0, 28); /* Disable lowcore protection */
+	S390_lowcore.restart_psw.mask = PSW_BASE_BITS | PSW_DEFAULT_KEY;
+	S390_lowcore.restart_psw.addr =
+		PSW_ADDR_AMODE | (unsigned long) psw_restart_int_handler;
+	__ctl_set_bit(0, 28); /* Enable lowcore protection */
 	/* Switch on interrupts */
 	local_irq_enable();
 	/* Print info about this processor */
@@ -492,7 +570,11 @@ static int __cpuinit smp_alloc_lowcore(int cpu)
 	memset((char *)lowcore + 512, 0, sizeof(*lowcore) - 512);
 	lowcore->async_stack = async_stack + ASYNC_SIZE;
 	lowcore->panic_stack = panic_stack + PAGE_SIZE;
-
+	lowcore->restart_psw.mask = PSW_BASE_BITS | PSW_DEFAULT_KEY;
+	lowcore->restart_psw.addr =
+		PSW_ADDR_AMODE | (unsigned long) restart_int_handler;
+	if (user_mode != HOME_SPACE_MODE)
+		lowcore->restart_psw.mask |= PSW_ASC_HOME;
 #ifndef CONFIG_64BIT
 	if (MACHINE_HAS_IEEE) {
 		unsigned long save_area;

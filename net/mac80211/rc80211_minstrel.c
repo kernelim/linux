@@ -50,6 +50,7 @@
 #include <linux/debugfs.h>
 #include <linux/random.h>
 #include <linux/ieee80211.h>
+#include <linux/slab.h>
 #include <net/mac80211.h>
 #include "rate.h"
 #include "rc80211_minstrel.h"
@@ -66,7 +67,6 @@ rix_to_ndx(struct minstrel_sta_info *mi, int rix)
 	for (i = rix; i >= 0; i--)
 		if (mi->r[i].rix == rix)
 			break;
-	WARN_ON(i < 0);
 	return i;
 }
 
@@ -417,8 +417,8 @@ minstrel_rate_init(void *priv, struct ieee80211_supported_band *sband,
 			tx_time_single = mr->ack_time + mr->perfect_tx_time;
 
 			/* contention window */
-			tx_time_single += t_slot + min(cw, mp->cw_max);
-			cw = (cw << 1) | 1;
+			tx_time_single += (t_slot * cw) >> 1;
+			cw = min((cw << 1) | 1, mp->cw_max);
 
 			tx_time += tx_time_single;
 			tx_time_cts += tx_time_single + mi->sp_ack_dur;
@@ -532,16 +532,25 @@ minstrel_alloc(struct ieee80211_hw *hw, struct dentry *debugfsdir)
 	mp->hw = hw;
 	mp->update_interval = 100;
 
+#ifdef CONFIG_MAC80211_DEBUGFS
+	mp->fixed_rate_idx = (u32) -1;
+	mp->dbg_fixed_rate = debugfs_create_u32("fixed_rate_idx",
+			S_IRUGO | S_IWUGO, debugfsdir, &mp->fixed_rate_idx);
+#endif
+
 	return mp;
 }
 
 static void
 minstrel_free(void *priv)
 {
+#ifdef CONFIG_MAC80211_DEBUGFS
+	debugfs_remove(((struct minstrel_priv *)priv)->dbg_fixed_rate);
+#endif
 	kfree(priv);
 }
 
-static struct rate_control_ops mac80211_minstrel = {
+struct rate_control_ops mac80211_minstrel = {
 	.name = "minstrel",
 	.tx_status = minstrel_tx_status,
 	.get_rate = minstrel_get_rate,

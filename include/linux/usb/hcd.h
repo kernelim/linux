@@ -326,6 +326,11 @@ struct hc_driver {
 	int	(*update_hub_device)(struct usb_hcd *, struct usb_device *hdev,
 			struct usb_tt *tt, gfp_t mem_flags);
 	int	(*reset_device)(struct usb_hcd *, struct usb_device *);
+		/* Notifies the HCD after a device is connected and its
+		 * address is set
+		 */
+	int	(*update_device)(struct usb_hcd *, struct usb_device *);
+	int	(*set_usb2_hw_lpm)(struct usb_hcd *, struct usb_device *, int);
 };
 
 extern int usb_hcd_link_urb_to_ep(struct usb_hcd *hcd, struct urb *urb);

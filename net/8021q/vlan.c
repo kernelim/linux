@@ -78,6 +78,12 @@ static struct vlan_group *__vlan_find_group(struct net_device *real_dev)
 	return NULL;
 }
 
+struct vlan_group *vlan_find_group(struct net_device *dev)
+{
+	return __vlan_find_group(dev);
+}
+EXPORT_SYMBOL(vlan_find_group);
+
 /*  Find the protocol handler.  Assumes VID < VLAN_VID_MASK.
  *
  * Must be invoked with RCU read lock (no preempt)
@@ -92,7 +98,7 @@ struct net_device *__find_vlan_dev(struct net_device *real_dev, u16 vlan_id)
 	return NULL;
 }
 
-static void vlan_group_free(struct vlan_group *grp)
+void vlan_group_free(struct vlan_group *grp)
 {
 	int i;
 
@@ -100,8 +106,9 @@ static void vlan_group_free(struct vlan_group *grp)
 		kfree(grp->vlan_devices_arrays[i]);
 	kfree(grp);
 }
+EXPORT_SYMBOL(vlan_group_free);
 
-static struct vlan_group *vlan_group_alloc(struct net_device *real_dev)
+struct vlan_group *vlan_group_alloc(struct net_device *real_dev)
 {
 	struct vlan_group *grp;
 
@@ -114,8 +121,9 @@ static struct vlan_group *vlan_group_alloc(struct net_device *real_dev)
 			&vlan_group_hash[vlan_grp_hashfn(real_dev->ifindex)]);
 	return grp;
 }
+EXPORT_SYMBOL(vlan_group_alloc);
 
-static int vlan_group_prealloc_vid(struct vlan_group *vg, u16 vlan_id)
+int vlan_group_prealloc_vid(struct vlan_group *vg, u16 vlan_id)
 {
 	struct net_device **array;
 	unsigned int size;
@@ -134,6 +142,7 @@ static int vlan_group_prealloc_vid(struct vlan_group *vg, u16 vlan_id)
 	vg->vlan_devices_arrays[vlan_id / VLAN_GROUP_ARRAY_PART_LEN] = array;
 	return 0;
 }
+EXPORT_SYMBOL(vlan_group_prealloc_vid);
 
 static void vlan_rcu_free(struct rcu_head *rcu)
 {
@@ -387,13 +396,21 @@ static void vlan_sync_address(struct net_device *dev,
 	memcpy(vlan->real_dev_addr, dev->dev_addr, ETH_ALEN);
 }
 
-static void vlan_transfer_features(struct net_device *dev,
-				   struct net_device *vlandev)
+void vlan_transfer_features(struct net_device *dev, struct net_device *vlandev)
 {
 	unsigned long old_features = vlandev->features;
+	unsigned long new_features = ((old_features & ~dev->vlan_features) |
+				      (dev->features & dev->vlan_features));
 
-	vlandev->features &= ~dev->vlan_features;
-	vlandev->features |= dev->features & dev->vlan_features;
+	/* TX checksum offload cannot work if both TX VLAN tag offload
+	 * and reorder_hdr are off.
+	 */
+	if (!(dev->features & NETIF_F_HW_VLAN_TX) &&
+	    !(vlan_dev_info(vlandev)->flags & VLAN_FLAG_REORDER_HDR))
+		new_features &= ~(NETIF_F_ALL_CSUM | NETIF_F_SG |
+				  NETIF_F_GSO | NETIF_F_GSO_MASK |
+				  NETIF_F_FCOE_CRC);
+	vlandev->features = new_features;
 	vlandev->gso_max_size = dev->gso_max_size;
 #if defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE)
 	vlandev->fcoe_ddp_xid = dev->fcoe_ddp_xid;

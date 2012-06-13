@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel PRO/1000 Linux driver
-  Copyright(c) 1999 - 2011 Intel Corporation.
+  Copyright(c) 1999 - 2012 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -205,15 +205,20 @@ static s32 e1000_init_mac_params_80003es2lan(struct e1000_adapter *adapter)
 {
 	struct e1000_hw *hw = &adapter->hw;
 	struct e1000_mac_info *mac = &hw->mac;
-	struct e1000_mac_operations *func = &mac->ops;
 
-	/* Set media type */
+	/* Set media type and media-dependent function pointers */
 	switch (adapter->pdev->device) {
 	case E1000_DEV_ID_80003ES2LAN_SERDES_DPT:
 		hw->phy.media_type = e1000_media_type_internal_serdes;
+		mac->ops.check_for_link = e1000e_check_for_serdes_link;
+		mac->ops.setup_physical_interface =
+		    e1000e_setup_fiber_serdes_link;
 		break;
 	default:
 		hw->phy.media_type = e1000_media_type_copper;
+		mac->ops.check_for_link = e1000e_check_for_copper_link;
+		mac->ops.setup_physical_interface =
+		    e1000_setup_copper_link_80003es2lan;
 		break;
 	}
 
@@ -229,25 +234,6 @@ static s32 e1000_init_mac_params_80003es2lan(struct e1000_adapter *adapter)
 	                ? true : false;
 	/* Adaptive IFS not supported */
 	mac->adaptive_ifs = false;
-
-	/* check for link */
-	switch (hw->phy.media_type) {
-	case e1000_media_type_copper:
-		func->setup_physical_interface = e1000_setup_copper_link_80003es2lan;
-		func->check_for_link = e1000e_check_for_copper_link;
-		break;
-	case e1000_media_type_fiber:
-		func->setup_physical_interface = e1000e_setup_fiber_serdes_link;
-		func->check_for_link = e1000e_check_for_fiber_link;
-		break;
-	case e1000_media_type_internal_serdes:
-		func->setup_physical_interface = e1000e_setup_fiber_serdes_link;
-		func->check_for_link = e1000e_check_for_serdes_link;
-		break;
-	default:
-		return -E1000_ERR_CONFIG;
-		break;
-	}
 
 	/* set lan id for port to determine which phy lock to use */
 	hw->mac.ops.set_lan_id(hw);
@@ -612,7 +598,7 @@ static s32 e1000_get_cfg_done_80003es2lan(struct e1000_hw *hw)
 	while (timeout) {
 		if (er32(EEMNGCTL) & mask)
 			break;
-		msleep(1);
+		usleep_range(1000, 2000);
 		timeout--;
 	}
 	if (!timeout) {
@@ -667,8 +653,7 @@ static s32 e1000_phy_force_speed_duplex_80003es2lan(struct e1000_hw *hw)
 	udelay(1);
 
 	if (hw->phy.autoneg_wait_to_complete) {
-		e_dbg("Waiting for forced speed/duplex link "
-			 "on GG82563 phy.\n");
+		e_dbg("Waiting for forced speed/duplex link on GG82563 phy.\n");
 
 		ret_val = e1000e_phy_has_link_generic(hw, PHY_FORCE_LIMIT,
 						     100000, &link);
@@ -802,7 +787,7 @@ static s32 e1000_reset_hw_80003es2lan(struct e1000_hw *hw)
 	ew32(TCTL, E1000_TCTL_PSP);
 	e1e_flush();
 
-	msleep(10);
+	usleep_range(10000, 20000);
 
 	ctrl = er32(CTRL);
 
@@ -1441,7 +1426,7 @@ static void e1000_clear_hw_cntrs_80003es2lan(struct e1000_hw *hw)
 	er32(ICRXDMTC);
 }
 
-static struct e1000_mac_operations es2_mac_ops = {
+static const struct e1000_mac_operations es2_mac_ops = {
 	.read_mac_addr		= e1000_read_mac_addr_80003es2lan,
 	.id_led_init		= e1000e_id_led_init,
 	.check_mng_mode		= e1000e_check_mng_mode_generic,
@@ -1463,7 +1448,7 @@ static struct e1000_mac_operations es2_mac_ops = {
 	.setup_led		= e1000e_setup_led_generic,
 };
 
-static struct e1000_phy_operations es2_phy_ops = {
+static const struct e1000_phy_operations es2_phy_ops = {
 	.acquire		= e1000_acquire_phy_80003es2lan,
 	.check_polarity		= e1000_check_polarity_m88,
 	.check_reset_block	= e1000e_check_reset_block_generic,
@@ -1481,7 +1466,7 @@ static struct e1000_phy_operations es2_phy_ops = {
 	.cfg_on_link_up      	= e1000_cfg_on_link_up_80003es2lan,
 };
 
-static struct e1000_nvm_operations es2_nvm_ops = {
+static const struct e1000_nvm_operations es2_nvm_ops = {
 	.acquire		= e1000_acquire_nvm_80003es2lan,
 	.read			= e1000e_read_nvm_eerd,
 	.release		= e1000_release_nvm_80003es2lan,
@@ -1491,7 +1476,7 @@ static struct e1000_nvm_operations es2_nvm_ops = {
 	.write			= e1000_write_nvm_80003es2lan,
 };
 
-struct e1000_info e1000_es2_info = {
+const struct e1000_info e1000_es2_info = {
 	.mac			= e1000_80003es2lan,
 	.flags			= FLAG_HAS_HW_VLAN_FILTER
 				  | FLAG_HAS_JUMBO_FRAMES
@@ -1502,8 +1487,7 @@ struct e1000_info e1000_es2_info = {
 				  | FLAG_RX_NEEDS_RESTART /* errata */
 				  | FLAG_TARC_SET_BIT_ZERO /* errata */
 				  | FLAG_APME_CHECK_PORT_B
-				  | FLAG_DISABLE_FC_PAUSE_TIME /* errata */
-				  | FLAG_TIPG_MEDIUM_FOR_80003ESLAN,
+				  | FLAG_DISABLE_FC_PAUSE_TIME, /* errata */
 	.flags2			= FLAG2_DMA_BURST,
 	.pba			= 38,
 	.max_hw_frame_size	= DEFAULT_JUMBO,

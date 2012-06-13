@@ -36,3 +36,11 @@ void mark_tech_preview(const char *msg, struct module *mod)
         	mod->taints |= (1U << TAINT_TECH_PREVIEW);
 }
 EXPORT_SYMBOL(mark_tech_preview);
+
+/* You've been bitten by a zombie.  There's nothing we can do for you. */
+static int bitten_by_zombie(char *str)
+{
+	WARN_TAINT(1, TAINT_BIT_BY_ZOMBIE, "... ... ... BRAAAAIIIINNNNSSSSS\n");
+	return 1;
+}
+__setup("OMGZOMBIES", bitten_by_zombie);

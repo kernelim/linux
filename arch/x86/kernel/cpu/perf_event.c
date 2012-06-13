@@ -156,6 +156,13 @@ struct cpu_hw_events {
 	struct perf_branch_entry	lbr_entries[MAX_LBR_ENTRIES];
 
 	/*
+	 * Intel host/guest exclude bits
+	 */
+	u64                             intel_ctrl_guest_mask;
+	u64                             intel_ctrl_host_mask;
+	struct perf_guest_switch_msr    guest_switch_msrs[X86_PMC_IDX_MAX];
+
+	/*
 	 * manage shared (per-core, per-cpu) registers
 	 * used on Intel NHM/WSM/SNB
 	 */
@@ -164,7 +171,9 @@ struct cpu_hw_events {
 	/*
 	 * AMD specific bits
 	 */
-	struct amd_nb		*amd_nb;
+	struct amd_nb			*amd_nb;
+	/* Inverted mask of bits to clear in the perf_ctr ctrl registers */
+	u64				perf_ctr_virt_mask;
 };
 
 #define __EVENT_CONSTRAINT(c, n, m, w) {\
@@ -285,6 +294,11 @@ struct x86_pmu {
 	int		num_counters_fixed;
 	int		cntval_bits;
 	u64		cntval_mask;
+	union {
+		unsigned long events_maskl;
+		unsigned long events_mask[BITS_TO_LONGS(ARCH_PERFMON_EVENTS_COUNT)];
+	};
+	int		events_mask_len;
 	int		apic;
 	u64		max_period;
 	struct event_constraint *
@@ -328,6 +342,10 @@ struct x86_pmu {
 	 */
 	struct extra_reg *extra_regs;
 	unsigned int er_flags;
+	/*
+	 * Intel host/guest support (KVM)
+	 */
+	struct perf_guest_switch_msr *(*guest_get_msrs)(int *nr);
 };
 
 #define ERF_NO_HT_SHARING	1
@@ -797,9 +815,11 @@ static void x86_pmu_disable(struct pmu *pmu)
 static inline void __x86_pmu_enable_event(struct hw_perf_event *hwc,
 					  u64 enable_mask)
 {
+	u64 disable_mask = __get_cpu_var(cpu_hw_events).perf_ctr_virt_mask;
+
 	if (hwc->extra_reg.reg)
 		wrmsrl(hwc->extra_reg.reg, hwc->extra_reg.config);
-	wrmsrl(hwc->config_base, hwc->config | enable_mask);
+	wrmsrl(hwc->config_base, (hwc->config | enable_mask) & ~disable_mask);
 }
 
 static void x86_pmu_enable_all(int added)
@@ -1395,25 +1415,6 @@ static int x86_pmu_handle_irq(struct pt_regs *regs)
 	return handled;
 }
 
-void smp_perf_pending_interrupt(struct pt_regs *regs)
-{
-	irq_enter();
-	ack_APIC_irq();
-	inc_irq_stat(apic_pending_irqs);
-	perf_event_do_pending();
-	irq_exit();
-}
-
-void set_perf_event_pending(void)
-{
-#ifdef CONFIG_X86_LOCAL_APIC
-	if (!x86_pmu.apic || !x86_pmu_initialized())
-		return;
-
-	apic->send_IPI_self(LOCAL_PENDING_VECTOR);
-#endif
-}
-
 void perf_events_lapic_init(void)
 {
 	if (!x86_pmu.apic || !x86_pmu_initialized())
@@ -1963,6 +1964,9 @@ perf_callchain_user(struct perf_callchain_entry *entry, struct pt_regs *regs)
 
 	perf_callchain_store(entry, regs->ip);
 
+	if (!current->mm)
+		return;
+
 	if (perf_callchain_user32(regs, entry))
 		return;
 
@@ -2016,3 +2020,14 @@ unsigned long perf_misc_flags(struct pt_regs *regs)
 
 	return misc;
 }
+
+void perf_get_x86_pmu_capability(struct x86_pmu_capability *cap)
+{
+	cap->version = x86_pmu.version;
+	cap->num_counters_gp = x86_pmu.num_counters;
+	cap->num_counters_fixed = x86_pmu.num_counters_fixed;
+	cap->bit_width_gp = cap->bit_width_fixed = x86_pmu.cntval_bits;
+	cap->events_mask = (unsigned int)x86_pmu.events_maskl;
+	cap->events_mask_len = x86_pmu.events_mask_len;
+}
+EXPORT_SYMBOL_GPL(perf_get_x86_pmu_capability);

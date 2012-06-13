@@ -69,6 +69,7 @@
 #define __LC_INT_CLOCK			0x02c8
 #define __LC_MACHINE_FLAGS		0x02d8
 #define __LC_FTRACE_FUNC		0x02dc
+#define __LC_CURRENT_PID		0x02f0
 #define __LC_IRB			0x0300
 #define __LC_PFAULT_INTPARM		0x0080
 #define __LC_CPU_TIMER_SAVE_AREA	0x00d8
@@ -118,6 +119,7 @@
 #define __LC_FTRACE_FUNC		0x0360
 #define __LC_SIE_HOOK			0x0368
 #define __LC_CMF_HPP			0x0370
+#define __LC_CURRENT_PID		0x0378
 #define __LC_IRB			0x0380
 #define __LC_PASTE			0x03c0
 #define __LC_PFAULT_INTPARM		0x11b8
@@ -145,6 +147,7 @@ void system_call(void);
 void pgm_check_handler(void);
 void mcck_int_handler(void);
 void io_int_handler(void);
+void psw_restart_int_handler(void);
 
 struct save_area_s390 {
 	u32	ext_save;
@@ -295,7 +298,8 @@ struct _lowcore
 	__u64	clock_comparator;		/* 0x02d0 */
 	__u32	machine_flags;			/* 0x02d8 */
 	__u32	ftrace_func;			/* 0x02dc */
-	__u8	pad_0x02f0[0x0300-0x02f0];	/* 0x02f0 */
+	__u32	current_pid;			/* 0x02f0 */
+	__u8	pad_0x02f4[0x0300-0x02f4];	/* 0x02f4 */
 
 	/* Interrupt response block */
 	__u8	irb[64];			/* 0x0300 */
@@ -309,9 +313,10 @@ struct _lowcore
 	 */
 	__u32	ipib;				/* 0x0e00 */
 	__u32	ipib_checksum;			/* 0x0e04 */
+	__u32	vmcore_info;			/* 0x0e08 */
 
 	/* Align to the top 1k of prefix area */
-	__u8	pad_0x0e08[0x1000-0x0e08];	/* 0x0e08 */
+	__u8	pad_0x0e0c[0x1000-0x0e0c];	/* 0x0e0c */
 #else /* !__s390x__ */
 	/* 0x0000 - 0x01ff: defined by architecture */
 	__u32	ccw1[2];			/* 0x0000 */
@@ -403,7 +408,7 @@ struct _lowcore
 	__u64	ftrace_func;			/* 0x0360 */
 	__u64	sie_hook;			/* 0x0368 */
 	__u64	cmf_hpp;			/* 0x0370 */
-	__u8	pad_0x0378[0x0380-0x0378];	/* 0x0378 */
+	__u64   current_pid;			/* 0x0378 */
 
 	/* Interrupt response block. */
 	__u8	irb[64];			/* 0x0380 */
@@ -420,7 +425,8 @@ struct _lowcore
 	 */
 	__u64	ipib;				/* 0x0e00 */
 	__u32	ipib_checksum;			/* 0x0e08 */
-	__u8	pad_0x0e0c[0x11b8-0x0e0c];	/* 0x0e0c */
+	__u64	vmcore_info;			/* 0x0e0c */
+	__u8	pad_0x0e14[0x11b8-0x0e14];	/* 0x0e14 */
 
 	/* 64 bit extparam used for pfault/diag 250: defined by architecture */
 	__u64	ext_params2;			/* 0x11B8 */

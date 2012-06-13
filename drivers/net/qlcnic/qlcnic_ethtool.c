@@ -84,7 +84,8 @@ static const char qlcnic_device_gstrings_stats[][ETH_GSTRING_LEN] = {
 static const char qlcnic_gstrings_test[][ETH_GSTRING_LEN] = {
 	"Register_Test_on_offline",
 	"Link_Test_on_offline",
-	"Interrupt_Test_offline"
+	"Interrupt_Test_offline",
+	"Internal_Loopback_offline"
 };
 
 #define QLCNIC_TEST_LEN	ARRAY_SIZE(qlcnic_gstrings_test)
@@ -138,11 +139,14 @@ qlcnic_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *drvinfo)
 	fw_major = QLCRD32(adapter, QLCNIC_FW_VERSION_MAJOR);
 	fw_minor = QLCRD32(adapter, QLCNIC_FW_VERSION_MINOR);
 	fw_build = QLCRD32(adapter, QLCNIC_FW_VERSION_SUB);
-	sprintf(drvinfo->fw_version, "%d.%d.%d", fw_major, fw_minor, fw_build);
+	snprintf(drvinfo->fw_version, sizeof(drvinfo->fw_version),
+		"%d.%d.%d", fw_major, fw_minor, fw_build);
 
-	strlcpy(drvinfo->bus_info, pci_name(adapter->pdev), 32);
-	strlcpy(drvinfo->driver, qlcnic_driver_name, 32);
-	strlcpy(drvinfo->version, QLCNIC_LINUX_VERSIONID, 32);
+	strlcpy(drvinfo->bus_info, pci_name(adapter->pdev),
+		sizeof(drvinfo->bus_info));
+	strlcpy(drvinfo->driver, qlcnic_driver_name, sizeof(drvinfo->driver));
+	strlcpy(drvinfo->version, QLCNIC_LINUX_VERSIONID,
+		sizeof(drvinfo->version));
 }
 
 static int
@@ -150,7 +154,6 @@ qlcnic_get_settings(struct net_device *dev, struct ethtool_cmd *ecmd)
 {
 	struct qlcnic_adapter *adapter = netdev_priv(dev);
 	int check_sfp_module = 0;
-	u16 pcifn = adapter->ahw->pci_func;
 
 	/* read which mode */
 	if (adapter->ahw->port_type == QLCNIC_GBE) {
@@ -166,7 +169,7 @@ qlcnic_get_settings(struct net_device *dev, struct ethtool_cmd *ecmd)
 				     ADVERTISED_1000baseT_Half |
 				     ADVERTISED_1000baseT_Full);
 
-		ecmd->speed = adapter->link_speed;
+		ethtool_cmd_speed_set(ecmd, adapter->link_speed);
 		ecmd->duplex = adapter->link_duplex;
 		ecmd->autoneg = adapter->link_autoneg;
 
@@ -183,16 +186,14 @@ qlcnic_get_settings(struct net_device *dev, struct ethtool_cmd *ecmd)
 		}
 
 		if (netif_running(dev) && adapter->has_link_events) {
-			ecmd->speed = adapter->link_speed;
+			ethtool_cmd_speed_set(ecmd, adapter->link_speed);
 			ecmd->autoneg = adapter->link_autoneg;
 			ecmd->duplex = adapter->link_duplex;
 			goto skip;
 		}
 
-		val = QLCRD32(adapter, P3P_LINK_SPEED_REG(pcifn));
-		ecmd->speed = P3P_LINK_SPEED_MHZ *
-			P3P_LINK_SPEED_VAL(pcifn, val);
-		ecmd->duplex = DUPLEX_FULL;
+		ethtool_cmd_speed_set(ecmd, SPEED_UNKNOWN);
+		ecmd->duplex = DUPLEX_UNKNOWN;
 		ecmd->autoneg = AUTONEG_DISABLE;
 	} else
 		return -EIO;
@@ -416,9 +417,6 @@ qlcnic_get_ringparam(struct net_device *dev,
 	ring->rx_max_pending = adapter->max_rxd;
 	ring->rx_jumbo_max_pending = adapter->max_jumbo_rxd;
 	ring->tx_max_pending = MAX_CMD_DESCRIPTORS;
-
-	ring->rx_mini_max_pending = 0;
-	ring->rx_mini_pending = 0;
 }
 
 static u32
@@ -624,6 +622,7 @@ static int qlcnic_irq_test(struct net_device *netdev)
 	struct qlcnic_adapter *adapter = netdev_priv(netdev);
 	int max_sds_rings = adapter->max_sds_rings;
 	int ret;
+	struct qlcnic_cmd_args cmd;
 
 	if (test_and_set_bit(__QLCNIC_RESETTING, &adapter->state))
 		return -EIO;
@@ -633,9 +632,12 @@ static int qlcnic_irq_test(struct net_device *netdev)
 		goto clear_it;
 
 	adapter->diag_cnt = 0;
-	ret = qlcnic_issue_cmd(adapter, adapter->ahw->pci_func,
-			adapter->fw_hal_version, adapter->ahw->pci_func,
-			0, 0, 0x00000011);
+	memset(&cmd, 0, sizeof(cmd));
+	cmd.req.cmd = QLCNIC_CDRP_CMD_INTRPT_TEST;
+	cmd.req.arg1 = adapter->ahw->pci_func;
+	qlcnic_issue_cmd(adapter, &cmd);
+	ret = cmd.rsp.cmd;
+
 	if (ret)
 		goto done;
 
@@ -647,6 +649,135 @@ done:
 	qlcnic_diag_free_res(netdev, max_sds_rings);
 
 clear_it:
+	adapter->max_sds_rings = max_sds_rings;
+	clear_bit(__QLCNIC_RESETTING, &adapter->state);
+	return ret;
+}
+
+#define QLCNIC_ILB_PKT_SIZE 64
+#define QLCNIC_NUM_ILB_PKT	16
+#define QLCNIC_ILB_MAX_RCV_LOOP 10
+
+static void qlcnic_create_loopback_buff(unsigned char *data, u8 mac[])
+{
+	unsigned char random_data[] = {0xa8, 0x06, 0x45, 0x00};
+
+	memset(data, 0x4e, QLCNIC_ILB_PKT_SIZE);
+
+	memcpy(data, mac, ETH_ALEN);
+	memcpy(data + ETH_ALEN, mac, ETH_ALEN);
+
+	memcpy(data + 2 * ETH_ALEN, random_data, sizeof(random_data));
+}
+
+int qlcnic_check_loopback_buff(unsigned char *data, u8 mac[])
+{
+	unsigned char buff[QLCNIC_ILB_PKT_SIZE];
+	qlcnic_create_loopback_buff(buff, mac);
+	return memcmp(data, buff, QLCNIC_ILB_PKT_SIZE);
+}
+
+static int qlcnic_do_lb_test(struct qlcnic_adapter *adapter, u8 mode)
+{
+	struct qlcnic_recv_context *recv_ctx = adapter->recv_ctx;
+	struct qlcnic_host_sds_ring *sds_ring = &recv_ctx->sds_rings[0];
+	struct sk_buff *skb;
+	int i, loop, cnt = 0;
+
+	for (i = 0; i < QLCNIC_NUM_ILB_PKT; i++) {
+		skb = netdev_alloc_skb(adapter->netdev, QLCNIC_ILB_PKT_SIZE);
+		qlcnic_create_loopback_buff(skb->data, adapter->mac_addr);
+		skb_put(skb, QLCNIC_ILB_PKT_SIZE);
+
+		adapter->diag_cnt = 0;
+		qlcnic_xmit_frame(skb, adapter->netdev);
+
+		loop = 0;
+		do {
+			msleep(1);
+			qlcnic_process_rcv_ring_diag(sds_ring);
+			if (loop++ > QLCNIC_ILB_MAX_RCV_LOOP)
+				break;
+		} while (!adapter->diag_cnt);
+
+		dev_kfree_skb_any(skb);
+
+		if (!adapter->diag_cnt)
+			QLCDB(adapter, DRV,
+			"LB Test: packet #%d was not received\n", i + 1);
+		else
+			cnt++;
+	}
+	if (cnt != i) {
+		dev_warn(&adapter->pdev->dev, "LB Test failed\n");
+		if (mode != QLCNIC_ILB_MODE) {
+			dev_warn(&adapter->pdev->dev,
+				"WARNING: Please make sure external"
+				"loopback connector is plugged in\n");
+		}
+		return -1;
+	}
+	return 0;
+}
+
+int qlcnic_loopback_test(struct net_device *netdev, u8 mode)
+{
+	struct qlcnic_adapter *adapter = netdev_priv(netdev);
+	int max_sds_rings = adapter->max_sds_rings;
+	struct qlcnic_host_sds_ring *sds_ring;
+	int loop = 0;
+	int ret;
+
+	if (!(adapter->capabilities & QLCNIC_FW_CAPABILITY_MULTI_LOOPBACK)) {
+		dev_info(&adapter->pdev->dev,
+				"Firmware is not loopback test capable\n");
+		return -EOPNOTSUPP;
+	}
+
+	QLCDB(adapter, DRV, "%s loopback test in progress\n",
+		mode == QLCNIC_ILB_MODE ? "internal" : "external");
+	if (adapter->op_mode == QLCNIC_NON_PRIV_FUNC) {
+		dev_warn(&adapter->pdev->dev, "Loopback test not supported "
+				"for non privilege function\n");
+		return 0;
+	}
+
+	if (test_and_set_bit(__QLCNIC_RESETTING, &adapter->state))
+		return -EBUSY;
+
+	ret = qlcnic_diag_alloc_res(netdev, QLCNIC_LOOPBACK_TEST);
+	if (ret)
+		goto clear_it;
+
+	sds_ring = &adapter->recv_ctx->sds_rings[0];
+
+	ret = qlcnic_set_lb_mode(adapter, mode);
+	if (ret)
+		goto free_res;
+
+	adapter->diag_cnt = 0;
+	do {
+		msleep(500);
+		qlcnic_process_rcv_ring_diag(sds_ring);
+		if (loop++ > QLCNIC_ILB_MAX_RCV_LOOP) {
+			dev_info(&adapter->pdev->dev, "Firmware didn't respond "
+				"to loopback configure request\n");
+			ret = -QLCNIC_FW_NOT_RESPOND;
+			goto free_res;
+		} else if (adapter->diag_cnt) {
+			ret = adapter->diag_cnt;
+			goto free_res;
+		}
+	} while (!QLCNIC_IS_LB_CONFIGURED(adapter->ahw->loopback_state));
+
+	ret = qlcnic_do_lb_test(adapter, mode);
+
+	qlcnic_clear_lb_mode(adapter);
+
+ free_res:
+	qlcnic_diag_free_res(netdev, max_sds_rings);
+
+ clear_it:
 	adapter->max_sds_rings = max_sds_rings;
 	clear_bit(__QLCNIC_RESETTING, &adapter->state);
 	return ret;
@@ -671,7 +802,9 @@ qlcnic_diag_test(struct net_device *dev, struct ethtool_test *eth_test,
 		if (data[2])
 			eth_test->flags |= ETH_TEST_FL_FAILED;
 
-
+		data[3] = qlcnic_loopback_test(dev, QLCNIC_ILB_MODE);
+		if (data[3])
+			eth_test->flags |= ETH_TEST_FL_FAILED;
 	}
 }
 
@@ -829,19 +962,25 @@ static int qlcnic_blink_led(struct net_device *dev, u32 val)
 {
 	struct qlcnic_adapter *adapter = netdev_priv(dev);
 	int max_sds_rings = adapter->max_sds_rings;
-	int dev_down = 0;
-	int ret;
+	int ret = 0;
+
+	if (adapter->op_mode == QLCNIC_NON_PRIV_FUNC) {
+		netdev_warn(dev,
+			"LED test not supported for non privilege function\n");
+		return -EOPNOTSUPP;
+	}
+
+	if (test_and_set_bit(__QLCNIC_LED_ENABLE, &adapter->state))
+		return -EBUSY;
+
+	if (test_bit(__QLCNIC_RESETTING, &adapter->state))
+		goto done;
 
 	if (!test_bit(__QLCNIC_DEV_UP, &adapter->state)) {
-		dev_down = 1;
-		if (test_and_set_bit(__QLCNIC_RESETTING, &adapter->state))
-			return -EIO;
-
 		ret = qlcnic_diag_alloc_res(dev, QLCNIC_LED_TEST);
-		if (ret) {
-			clear_bit(__QLCNIC_RESETTING, &adapter->state);
-			return ret;
-		}
+		if (ret)
+			goto done;
+		set_bit(__QLCNIC_DIAG_RES_ALLOC, &adapter->state);
 	}
 
 	ret = adapter->nic_ops->config_led(adapter, 1, 0xf);
@@ -851,20 +990,31 @@ static int qlcnic_blink_led(struct net_device *dev, u32 val)
 		goto done;
 	}
 
+	if (test_and_clear_bit(__QLCNIC_DIAG_RES_ALLOC, &adapter->state))
+		qlcnic_diag_free_res(dev, max_sds_rings);
+
 	msleep_interruptible(val * 1000);
 
-	ret = adapter->nic_ops->config_led(adapter, 0, 0xf);
-	if (ret) {
-		dev_err(&adapter->pdev->dev,
-			"Failed to reset LED blink state.\n");
+	if (test_bit(__QLCNIC_RESETTING, &adapter->state))
 		goto done;
+
+	if (!test_bit(__QLCNIC_DEV_UP, &adapter->state)) {
+		ret = qlcnic_diag_alloc_res(dev, QLCNIC_LED_TEST);
+		if (ret)
+			goto done;
+		set_bit(__QLCNIC_DIAG_RES_ALLOC, &adapter->state);
 	}
 
+	ret = adapter->nic_ops->config_led(adapter, 0, 0xf);
+	if (ret)
+		dev_err(&adapter->pdev->dev,
+			"Failed to reset LED blink state.\n");
+
 done:
-	if (dev_down) {
+	if (test_and_clear_bit(__QLCNIC_DIAG_RES_ALLOC, &adapter->state))
 		qlcnic_diag_free_res(dev, max_sds_rings);
-		clear_bit(__QLCNIC_RESETTING, &adapter->state);
-	}
+
+	clear_bit(__QLCNIC_LED_ENABLE, &adapter->state);
 	return ret;
 
 }
@@ -1041,13 +1191,18 @@ static void qlcnic_set_msglevel(struct net_device *netdev, u32 msglvl)
 	adapter->msg_enable = msglvl;
 }
 
+static u32 qlcnic_get_link(struct net_device *dev)
+{
+	return netif_running(dev) && netif_carrier_ok(dev);
+}
+
 const struct ethtool_ops qlcnic_ethtool_ops = {
 	.get_settings = qlcnic_get_settings,
 	.set_settings = qlcnic_set_settings,
 	.get_drvinfo = qlcnic_get_drvinfo,
 	.get_regs_len = qlcnic_get_regs_len,
 	.get_regs = qlcnic_get_regs,
-	.get_link = ethtool_op_get_link,
+	.get_link = qlcnic_get_link,
 	.get_eeprom_len = qlcnic_get_eeprom_len,
 	.get_eeprom = qlcnic_get_eeprom,
 	.get_ringparam = qlcnic_get_ringparam,

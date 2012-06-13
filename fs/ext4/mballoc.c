@@ -2531,16 +2531,9 @@ static void release_blocks_on_commit(journal_t *journal, transaction_t *txn)
 		mb_debug(1, "gonna free %u blocks in group %u (0x%p):",
 			 entry->count, entry->group, entry);
 
-		if (test_opt(sb, DISCARD)) {
-			int ret;
-			ret = ext4_issue_discard(sb, entry->group,
-					entry->start_blk, entry->count);
-			if (unlikely(ret == -EOPNOTSUPP)) {
-				ext4_warning(sb, "discard not supported, "
-						 "disabling");
-				clear_opt(EXT4_SB(sb)->s_mount_opt, DISCARD);
-			}
-		}
+		if (test_opt(sb, DISCARD))
+			ext4_issue_discard(sb, entry->group,
+					   entry->start_blk, entry->count);
 
 		err = ext4_mb_load_buddy(sb, entry->group, &e4b);
 		/* we expect to find existing buddy because it's pinned */
@@ -2554,6 +2547,15 @@ static void release_blocks_on_commit(journal_t *journal, transaction_t *txn)
 		/* Take it out of per group rb tree */
 		rb_erase(&entry->node, &(db->bb_free_root));
 		mb_free_blocks(NULL, &e4b, entry->start_blk, entry->count);
+
+		/*
+		 * Clear the trimmed flag for the group so that the next
+		 * ext4_trim_fs can trim it.
+		 * If the volume is mounted with -o discard, online discard
+		 * is supported and the free blocks will be trimmed online.
+		 */
+		if (!test_opt(sb, DISCARD))
+			EXT4_MB_GRP_CLEAR_TRIMMED(db);
 
 		if (!db->bb_free_root.rb_node) {
 			/* No more items in the per group rb tree
@@ -4742,11 +4744,12 @@ error_return:
  * one will allocate those blocks, mark it as used in buddy bitmap. This must
  * be called with under the group lock.
  */
-static int ext4_trim_extent(struct super_block *sb, int start, int count,
-		ext4_group_t group, struct ext4_buddy *e4b)
+static void ext4_trim_extent(struct super_block *sb, int start, int count,
+			     ext4_group_t group, struct ext4_buddy *e4b)
 {
 	struct ext4_free_extent ex;
-	int ret = 0;
+
+	trace_ext4_trim_extent(sb, group, start, count);
 
 	assert_spin_locked(ext4_group_lock_ptr(sb, group));
 
@@ -4760,18 +4763,15 @@ static int ext4_trim_extent(struct super_block *sb, int start, int count,
 	 */
 	mb_mark_used(e4b, &ex);
 	ext4_unlock_group(sb, group);
-
-	ret = ext4_issue_discard(sb, group, start, count);
-
+	ext4_issue_discard(sb, group, start, count);
 	ext4_lock_group(sb, group);
 	mb_free_blocks(NULL, e4b, start, ex.fe_len);
-	return ret;
 }
 
 /**
  * ext4_trim_all_free -- function to trim all free space in alloc. group
  * @sb:			super block for file system
- * @e4b:		ext4 buddy
+ * @group:		group to be trimmed
  * @start:		first group block to examine
  * @max:		last group block to examine
  * @minblocks:		minimum extent block count
@@ -4787,21 +4787,32 @@ static int ext4_trim_extent(struct super_block *sb, int start, int count,
  * the group buddy bitmap. This is done until whole group is scanned.
  */
 static ext4_grpblk_t
-ext4_trim_all_free(struct super_block *sb, struct ext4_buddy *e4b,
-		ext4_grpblk_t start, ext4_grpblk_t max, ext4_grpblk_t minblocks)
+ext4_trim_all_free(struct super_block *sb, ext4_group_t group,
+		   ext4_grpblk_t start, ext4_grpblk_t max,
+		   ext4_grpblk_t minblocks)
 {
 	void *bitmap;
-	ext4_grpblk_t next, count = 0;
-	ext4_group_t group;
-	int ret = 0;
+	ext4_grpblk_t next, count = 0, free_count = 0;
+	struct ext4_buddy e4b;
+	int ret;
 
-	BUG_ON(e4b == NULL);
+	trace_ext4_trim_all_free(sb, group, start, max);
 
-	bitmap = e4b->bd_bitmap;
-	group = e4b->bd_group;
-	start = (e4b->bd_info->bb_first_free > start) ?
-		e4b->bd_info->bb_first_free : start;
+	ret = ext4_mb_load_buddy(sb, group, &e4b);
+	if (ret) {
+		ext4_error(sb, "Error in loading buddy "
+				"information for %u", group);
+		return ret;
+	}
+	bitmap = e4b.bd_bitmap;
+
 	ext4_lock_group(sb, group);
+	if (EXT4_MB_GRP_WAS_TRIMMED(e4b.bd_info) &&
+	    minblocks >= atomic_read(&EXT4_SB(sb)->s_last_trim_minblks))
+		goto out;
+
+	start = (e4b.bd_info->bb_first_free > start) ?
+		e4b.bd_info->bb_first_free : start;
 
 	while (start < max) {
 		start = mb_find_next_zero_bit(bitmap, max, start);
@@ -4810,12 +4821,11 @@ ext4_trim_all_free(struct super_block *sb, struct ext4_buddy *e4b,
 		next = mb_find_next_bit(bitmap, max, start);
 
 		if ((next - start) >= minblocks) {
-			ret = ext4_trim_extent(sb, start,
-				next - start, group, e4b);
-			if (ret < 0)
-				break;
+			ext4_trim_extent(sb, start,
+					 next - start, group, &e4b);
 			count += next - start;
 		}
+		free_count += next - start;
 		start = next + 1;
 
 		if (fatal_signal_pending(current)) {
@@ -4829,16 +4839,18 @@ ext4_trim_all_free(struct super_block *sb, struct ext4_buddy *e4b,
 			ext4_lock_group(sb, group);
 		}
 
-		if ((e4b->bd_info->bb_free - count) < minblocks)
+		if ((e4b.bd_info->bb_free - free_count) < minblocks)
 			break;
 	}
+
+	if (!ret)
+		EXT4_MB_GRP_SET_TRIMMED(e4b.bd_info);
+out:
 	ext4_unlock_group(sb, group);
+	ext4_mb_release_desc(&e4b);
 
 	ext4_debug("trimmed %d blocks in the group %d\n",
 		count, group);
-
-	if (ret < 0)
-		count = ret;
 
 	return count;
 }
@@ -4857,69 +4869,77 @@ ext4_trim_all_free(struct super_block *sb, struct ext4_buddy *e4b,
  */
 int ext4_trim_fs(struct super_block *sb, struct fstrim_range *range)
 {
-	struct ext4_buddy e4b;
-	ext4_group_t first_group, last_group;
-	ext4_group_t group, ngroups = ext4_get_groups_count(sb);
+	struct ext4_group_info *grp;
+	ext4_group_t group, first_group, last_group;
 	ext4_grpblk_t cnt = 0, first_block, last_block;
-	uint64_t start, len, minlen, trimmed;
-	ext4_fsblk_t blocks_count = ext4_blocks_count(EXT4_SB(sb)->s_es);
+	uint64_t start, end, minlen, trimmed = 0;
 	ext4_fsblk_t first_data_blk =
 			le32_to_cpu(EXT4_SB(sb)->s_es->s_first_data_block);
+	ext4_fsblk_t max_blks = ext4_blocks_count(EXT4_SB(sb)->s_es);
 	int ret = 0;
 
 	start = range->start >> sb->s_blocksize_bits;
-	len = range->len >> sb->s_blocksize_bits;
+	end = start + (range->len >> sb->s_blocksize_bits) - 1;
 	minlen = range->minlen >> sb->s_blocksize_bits;
-	trimmed = 0;
 
-	if (unlikely(minlen > EXT4_BLOCKS_PER_GROUP(sb)))
+	if (unlikely(minlen > EXT4_BLOCKS_PER_GROUP(sb)) ||
+	    unlikely(start >= max_blks))
 		return -EINVAL;
-	if (start < first_data_blk) {
-		len -= first_data_blk - start;
+	if (unlikely(end >= max_blks))
+		end = max_blks - 1;
+	if (end <= first_data_blk)
+		goto out;
+	if (start < first_data_blk)
 		start = first_data_blk;
-	}
-	if (len > blocks_count)
-		len = blocks_count - start;
-
 
 	/* Determine first and last group to examine based on start and len */
 	ext4_get_group_no_and_offset(sb, (ext4_fsblk_t) start,
 				     &first_group, &first_block);
-	ext4_get_group_no_and_offset(sb, (ext4_fsblk_t) (start + len),
+	ext4_get_group_no_and_offset(sb, (ext4_fsblk_t) end,
 				     &last_group, &last_block);
-	last_group = (last_group > ngroups - 1) ? ngroups - 1 : last_group;
-	last_block = EXT4_BLOCKS_PER_GROUP(sb);
 
-	if (first_group > last_group)
-		return -EINVAL;
+	/* The last block to discard in the group */
+	end = EXT4_BLOCKS_PER_GROUP(sb);
 
 	for (group = first_group; group <= last_group; group++) {
-		ret = ext4_mb_load_buddy(sb, group, &e4b);
-		if (ret) {
-			ext4_error(sb, "Error in loading buddy "
-					"information for %u", group);
-			break;
+		grp = ext4_get_group_info(sb, group);
+		/* We only do this if the grp has never been initialized */
+		if (unlikely(EXT4_MB_GRP_NEED_INIT(grp))) {
+			ret = ext4_mb_init_group(sb, group);
+			if (ret)
+				break;
 		}
 
-		if (len >= EXT4_BLOCKS_PER_GROUP(sb))
-			len -= (EXT4_BLOCKS_PER_GROUP(sb) - first_block);
-		else
-			last_block = first_block + len;
+		/*
+		 * For all the groups except the last one, last block will
+		 * always be EXT4_BLOCKS_PER_GROUP(sb), so we only need to
+		 * change it for the last group, note that last_block is
+		 * already computed earlier by ext4_get_group_no_and_offset()
+		 */
+		if (group == last_group)
+			end = last_block;
 
-		if (e4b.bd_info->bb_free >= minlen) {
-			cnt = ext4_trim_all_free(sb, &e4b, first_block,
-						last_block, minlen);
+		if (grp->bb_free >= minlen) {
+			cnt = ext4_trim_all_free(sb, group, first_block,
+						end, minlen);
 			if (cnt < 0) {
 				ret = cnt;
-				ext4_mb_release_desc(&e4b);
 				break;
 			}
 		}
-		ext4_mb_release_desc(&e4b);
 		trimmed += cnt;
+
+		/*
+		 * For every group except the first one, we are sure
+		 * that the first block to discard will be block #0.
+		 */
 		first_block = 0;
 	}
 	range->len = trimmed * sb->s_blocksize;
 
+	if (!ret)
+		atomic_set(&EXT4_SB(sb)->s_last_trim_minblks, minlen);
+
+out:
 	return ret;
 }

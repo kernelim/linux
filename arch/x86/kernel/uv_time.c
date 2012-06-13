@@ -36,7 +36,7 @@ static void uv_rtc_timer_setup(enum clock_event_mode,
 
 static struct clocksource clocksource_uv = {
 	.name		= RTC_NAME,
-	.rating		= 400,
+	.rating		= 299,
 	.read		= uv_read_rtc,
 	.mask		= (cycle_t)UVH_RTC_REAL_TIME_CLOCK_MASK,
 	.shift		= 10,
@@ -381,10 +381,6 @@ static __init int uv_rtc_setup_clock(void)
 
 	clocksource_uv.mult = clocksource_hz2mult(sn_rtc_cycles_per_second,
 				clocksource_uv.shift);
-
-	/* If single blade, prefer tsc */
-	if (uv_num_possible_blades() == 1)
-		clocksource_uv.rating = 250;
 
 	rc = clocksource_register(&clocksource_uv);
 	if (rc)

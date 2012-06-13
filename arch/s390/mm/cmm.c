@@ -92,7 +92,7 @@ cmm_alloc_pages(long nr, long *counter, struct cmm_page_array **list)
 			} else
 				free_page((unsigned long) npa);
 		}
-		diag10(addr);
+		diag10_range(addr >> PAGE_SHIFT, 1);
 		pa->pages[pa->index++] = addr;
 		(*counter)++;
 		spin_unlock(&cmm_lock);

@@ -33,7 +33,7 @@ def trace_begin():
 def trace_end():
 	print_syscall_totals()
 
-def raw_syscalls__sys_enter(event_name, context, common_cpu,
+def syscalls__sys_enter(event_name, context, common_cpu,
 	common_secs, common_nsecs, common_pid, common_comm,
 	id, args):
 	if for_comm is not None:

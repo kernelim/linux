@@ -45,6 +45,7 @@
 #include <xen/xenbus.h>
 #include <xen/events.h>
 #include <xen/page.h>
+#include <xen/platform_pci.h>
 #include <xen/grant_table.h>
 
 #include <xen/interface/io/netif.h>
@@ -71,7 +72,7 @@ struct netfront_cb {
 
 #define NET_TX_RING_SIZE __RING_SIZE((struct xen_netif_tx_sring *)0, PAGE_SIZE)
 #define NET_RX_RING_SIZE __RING_SIZE((struct xen_netif_rx_sring *)0, PAGE_SIZE)
-#define TX_MAX_TARGET min_t(int, NET_RX_RING_SIZE, 256)
+#define TX_MAX_TARGET min_t(int, NET_TX_RING_SIZE, 256)
 
 struct netfront_info {
 	struct list_head list;
@@ -1874,6 +1875,9 @@ static int __init netif_init(void)
 
 	if (xen_initial_domain())
 		return 0;
+
+	if (xen_hvm_domain() && !xen_platform_pci_unplug)
+		return -ENODEV;
 
 	printk(KERN_INFO "Initialising Xen virtual ethernet driver.\n");
 

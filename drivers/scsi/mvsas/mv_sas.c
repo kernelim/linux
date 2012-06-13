@@ -385,40 +385,6 @@ static void mvs_bytes_dmaed(struct mvs_info *mvi, int i)
 				   PORTE_BYTES_DMAED);
 }
 
-int mvs_slave_alloc(struct scsi_device *scsi_dev)
-{
-	struct domain_device *dev = sdev_to_domain_dev(scsi_dev);
-	if (dev_is_sata(dev)) {
-		/* We don't need to rescan targets
-		 * if REPORT_LUNS request is failed
-		 */
-		if (scsi_dev->lun > 0)
-			return -ENXIO;
-		scsi_dev->tagged_supported = 1;
-	}
-
-	return sas_slave_alloc(scsi_dev);
-}
-
-int mvs_slave_configure(struct scsi_device *sdev)
-{
-	struct domain_device *dev = sdev_to_domain_dev(sdev);
-	int ret = sas_slave_configure(sdev);
-
-	if (ret)
-		return ret;
-	if (dev_is_sata(dev)) {
-		/* may set PIO mode */
-	#if MV_DISABLE_NCQ
-		struct ata_port *ap = dev->sata_dev.ap;
-		struct ata_device *adev = ap->link.device;
-		adev->flags |= ATA_DFLAG_NCQ_OFF;
-		scsi_adjust_queue_depth(sdev, MSG_SIMPLE_TAG, 1);
-	#endif
-	}
-	return 0;
-}
-
 void mvs_scan_start(struct Scsi_Host *shost)
 {
 	int i, j;
@@ -442,7 +408,7 @@ int mvs_scan_finished(struct Scsi_Host *shost, unsigned long time)
 	if (time < HZ)
 		return 0;
 	/* Wait for discovery to finish */
-	sas_flush_discovery(shost);
+	sas_drain_work(SHOST_TO_SAS_HA(shost));
 	return 1;
 }
 
@@ -1380,33 +1346,11 @@ void mvs_dev_gone(struct domain_device *dev)
 	mvs_dev_gone_notify(dev, 1);
 }
 
-static  struct sas_task *mvs_alloc_task(void)
-{
-	struct sas_task *task = kzalloc(sizeof(struct sas_task), GFP_KERNEL);
-
-	if (task) {
-		INIT_LIST_HEAD(&task->list);
-		spin_lock_init(&task->task_state_lock);
-		task->task_state_flags = SAS_TASK_STATE_PENDING;
-		init_timer(&task->timer);
-		init_completion(&task->completion);
-	}
-	return task;
-}
-
-static  void mvs_free_task(struct sas_task *task)
-{
-	if (task) {
-		BUG_ON(!list_empty(&task->list));
-		kfree(task);
-	}
-}
-
 static void mvs_task_done(struct sas_task *task)
 {
-	if (!del_timer(&task->timer))
+	if (!del_timer(&task->slow_task->timer))
 		return;
-	complete(&task->completion);
+	complete(&task->slow_task->completion);
 }
 
 static void mvs_tmf_timedout(unsigned long data)
@@ -1414,7 +1358,7 @@ static void mvs_tmf_timedout(unsigned long data)
 	struct sas_task *task = (struct sas_task *)data;
 
 	task->task_state_flags |= SAS_TASK_STATE_ABORTED;
-	complete(&task->completion);
+	complete(&task->slow_task->completion);
 }
 
 /* XXX */
@@ -1426,7 +1370,7 @@ static int mvs_exec_internal_tmf_task(struct domain_device *dev,
 	struct sas_task *task = NULL;
 
 	for (retry = 0; retry < 3; retry++) {
-		task = mvs_alloc_task();
+		task = sas_alloc_slow_task(GFP_KERNEL);
 		if (!task)
 			return -ENOMEM;
 
@@ -1436,20 +1380,20 @@ static int mvs_exec_internal_tmf_task(struct domain_device *dev,
 		memcpy(&task->ssp_task, parameter, para_len);
 		task->task_done = mvs_task_done;
 
-		task->timer.data = (unsigned long) task;
-		task->timer.function = mvs_tmf_timedout;
-		task->timer.expires = jiffies + MVS_TASK_TIMEOUT*HZ;
-		add_timer(&task->timer);
+		task->slow_task->timer.data = (unsigned long) task;
+		task->slow_task->timer.function = mvs_tmf_timedout;
+		task->slow_task->timer.expires = jiffies + MVS_TASK_TIMEOUT*HZ;
+		add_timer(&task->slow_task->timer);
 
 		res = mvs_task_exec(task, 1, GFP_KERNEL, NULL, 1, tmf);
 
 		if (res) {
-			del_timer(&task->timer);
+			del_timer(&task->slow_task->timer);
 			mv_printk("executing internel task failed:%d\n", res);
 			goto ex_err;
 		}
 
-		wait_for_completion(&task->completion);
+		wait_for_completion(&task->slow_task->completion);
 		res = -TMF_RESP_FUNC_FAILED;
 		/* Even TMF timed out, return direct. */
 		if ((task->task_state_flags & SAS_TASK_STATE_ABORTED)) {
@@ -1484,15 +1428,14 @@ static int mvs_exec_internal_tmf_task(struct domain_device *dev,
 				    SAS_ADDR(dev->sas_addr),
 				    task->task_status.resp,
 				    task->task_status.stat);
-			mvs_free_task(task);
+			sas_free_task(task);
 			task = NULL;
 
 		}
 	}
 ex_err:
 	BUG_ON(retry == 3 && task != NULL);
-	if (task != NULL)
-		mvs_free_task(task);
+	sas_free_task(task);
 	return res;
 }
 
@@ -1516,10 +1459,11 @@ static int mvs_debug_issue_ssp_tmf(struct domain_device *dev,
 static int mvs_debug_I_T_nexus_reset(struct domain_device *dev)
 {
 	int rc;
-	struct sas_phy *phy = sas_find_local_phy(dev);
+	struct sas_phy *phy = sas_get_local_phy(dev);
 	int reset_type = (dev->dev_type == SATA_DEV ||
 			(dev->tproto & SAS_PROTOCOL_STP)) ? 0 : 1;
 	rc = sas_phy_reset(phy, reset_type);
+	sas_put_local_phy(phy);
 	msleep(2000);
 	return rc;
 }

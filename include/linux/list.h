@@ -1,6 +1,7 @@
 #ifndef _LINUX_LIST_H
 #define _LINUX_LIST_H
 
+#include <linux/types.h>
 #include <linux/stddef.h>
 #include <linux/poison.h>
 #include <linux/prefetch.h>
@@ -15,10 +16,6 @@
  * generate better code by using them directly rather than
  * using the generic single-entry routines.
  */
-
-struct list_head {
-	struct list_head *next, *prev;
-};
 
 #define LIST_HEAD_INIT(name) { &(name), &(name) }
 

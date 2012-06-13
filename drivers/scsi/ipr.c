@@ -2900,7 +2900,7 @@ static void ipr_get_ioa_dump(struct ipr_ioa_cfg *ioa_cfg, struct ipr_dump *dump)
 
 	spin_lock_irqsave(ioa_cfg->host->host_lock, lock_flags);
 
-	if (ioa_cfg->sdt_state != GET_DUMP) {
+	if (ioa_cfg->sdt_state != READ_DUMP) {
 		spin_unlock_irqrestore(ioa_cfg->host->host_lock, lock_flags);
 		return;
 	}
@@ -3096,7 +3096,7 @@ static void ipr_worker_thread(struct work_struct *work)
 	ENTER;
 	spin_lock_irqsave(ioa_cfg->host->host_lock, lock_flags);
 
-	if (ioa_cfg->sdt_state == GET_DUMP) {
+	if (ioa_cfg->sdt_state == READ_DUMP) {
 		dump = ioa_cfg->dump;
 		if (!dump) {
 			spin_unlock_irqrestore(ioa_cfg->host->host_lock, lock_flags);
@@ -3108,7 +3108,7 @@ static void ipr_worker_thread(struct work_struct *work)
 		kref_put(&dump->kref, ipr_release_dump);
 
 		spin_lock_irqsave(ioa_cfg->host->host_lock, lock_flags);
-		if (ioa_cfg->sdt_state == DUMP_OBTAINED)
+		if (ioa_cfg->sdt_state == DUMP_OBTAINED && !ioa_cfg->dump_timeout)
 			ipr_initiate_ioa_reset(ioa_cfg, IPR_SHUTDOWN_NONE);
 		spin_unlock_irqrestore(ioa_cfg->host->host_lock, lock_flags);
 		return;
@@ -3750,14 +3750,6 @@ static ssize_t ipr_store_update_fw(struct device *dev,
 
 	image_hdr = (struct ipr_ucode_image_header *)fw_entry->data;
 
-	if (be32_to_cpu(image_hdr->header_length) > fw_entry->size ||
-	    (ioa_cfg->vpd_cbs->page3_data.card_type &&
-	     ioa_cfg->vpd_cbs->page3_data.card_type != image_hdr->card_type)) {
-		dev_err(&ioa_cfg->pdev->dev, "Invalid microcode buffer\n");
-		release_firmware(fw_entry);
-		return -EINVAL;
-	}
-
 	src = (u8 *)image_hdr + be32_to_cpu(image_hdr->header_length);
 	dnld_size = fw_entry->size - be32_to_cpu(image_hdr->header_length);
 	sglist = ipr_alloc_ucode_buffer(dnld_size);
@@ -3775,6 +3767,8 @@ static ssize_t ipr_store_update_fw(struct device *dev,
 			"Microcode buffer copy to DMA buffer failed\n");
 		goto out;
 	}
+
+	ipr_info("Updating microcode, please be patient.  This may take up to 30 minutes.\n");
 
 	result = ipr_update_ioa_ucode(ioa_cfg, sglist);
 
@@ -4551,8 +4545,12 @@ static int ipr_ata_slave_alloc(struct scsi_device *sdev)
 	ENTER;
 	if (sdev->sdev_target)
 		sata_port = sdev->sdev_target->hostdata;
-	if (sata_port)
+	if (sata_port) {
 		rc = ata_sas_port_init(sata_port->ap);
+		if (rc == 0)
+			rc = ata_sas_sync_probe(sata_port->ap);
+	}
+
 	if (rc)
 		ipr_slave_destroy(sdev);
 
@@ -4618,11 +4616,13 @@ static int __ipr_eh_host_reset(struct scsi_cmnd * scsi_cmd)
 	ENTER;
 	ioa_cfg = (struct ipr_ioa_cfg *) scsi_cmd->device->host->hostdata;
 
-	dev_err(&ioa_cfg->pdev->dev,
-		"Adapter being reset as a result of error recovery.\n");
+	if (!ioa_cfg->in_reset_reload) {
+		dev_err(&ioa_cfg->pdev->dev,
+			"Adapter being reset as a result of error recovery.\n");
 
-	if (WAIT_FOR_DUMP == ioa_cfg->sdt_state)
-		ioa_cfg->sdt_state = GET_DUMP;
+		if (WAIT_FOR_DUMP == ioa_cfg->sdt_state)
+			ioa_cfg->sdt_state = GET_DUMP;
+	}
 
 	rc = ipr_reset_reload(ioa_cfg, IPR_SHUTDOWN_ABBREV);
 
@@ -4912,7 +4912,7 @@ static int ipr_cancel_op(struct scsi_cmnd * scsi_cmd)
 	struct ipr_ioa_cfg *ioa_cfg;
 	struct ipr_resource_entry *res;
 	struct ipr_cmd_pkt *cmd_pkt;
-	u32 ioasc;
+	u32 ioasc, int_reg;
 	int op_found = 0;
 
 	ENTER;
@@ -4925,7 +4925,17 @@ static int ipr_cancel_op(struct scsi_cmnd * scsi_cmd)
 	 */
 	if (ioa_cfg->in_reset_reload || ioa_cfg->ioa_is_dead)
 		return FAILED;
-	if (!res || !ipr_is_gscsi(res))
+	if (!res)
+		return FAILED;
+
+	/*
+	 * If we are aborting a timed out op, chances are that the timeout was caused
+	 * by a still not detected EEH error. In such cases, reading a register will
+	 * trigger the EEH recovery infrastructure.
+	 */
+	int_reg = readl(ioa_cfg->regs.sense_interrupt_reg);
+
+	if (!ipr_is_gscsi(res))
 		return FAILED;
 
 	list_for_each_entry(ipr_cmd, &ioa_cfg->pending_q, queue) {
@@ -7446,8 +7456,11 @@ static int ipr_reset_wait_for_dump(struct ipr_cmnd *ipr_cmd)
 	struct ipr_ioa_cfg *ioa_cfg = ipr_cmd->ioa_cfg;
 
 	if (ioa_cfg->sdt_state == GET_DUMP)
+		ioa_cfg->sdt_state = WAIT_FOR_DUMP;
+	else if (ioa_cfg->sdt_state == READ_DUMP)
 		ioa_cfg->sdt_state = ABORT_DUMP;
 
+	ioa_cfg->dump_timeout = 1;
 	ipr_cmd->job_step = ipr_reset_alert;
 
 	return IPR_RC_JOB_CONTINUE;
@@ -7616,6 +7629,8 @@ static int ipr_reset_restore_cfg_space(struct ipr_cmnd *ipr_cmd)
 		ipr_cmd->job_step = ipr_reset_enable_ioa;
 
 		if (GET_DUMP == ioa_cfg->sdt_state) {
+			ioa_cfg->sdt_state = READ_DUMP;
+			ioa_cfg->dump_timeout = 0;
 			if (ioa_cfg->sis64)
 				ipr_reset_start_timer(ipr_cmd, IPR_SIS64_DUMP_TIMEOUT);
 			else
@@ -7641,8 +7656,12 @@ static int ipr_reset_restore_cfg_space(struct ipr_cmnd *ipr_cmd)
  **/
 static int ipr_reset_bist_done(struct ipr_cmnd *ipr_cmd)
 {
+	struct ipr_ioa_cfg *ioa_cfg = ipr_cmd->ioa_cfg;
+
 	ENTER;
-	pci_unblock_user_cfg_access(ipr_cmd->ioa_cfg->pdev);
+	if (ioa_cfg->cfg_locked)
+		pci_cfg_access_unlock(ioa_cfg->pdev);
+	ioa_cfg->cfg_locked = 0;
 	ipr_cmd->job_step = ipr_reset_restore_cfg_space;
 	LEAVE;
 	return IPR_RC_JOB_CONTINUE;
@@ -7663,8 +7682,6 @@ static int ipr_reset_start_bist(struct ipr_cmnd *ipr_cmd)
 	int rc = PCIBIOS_SUCCESSFUL;
 
 	ENTER;
-	pci_block_user_cfg_access(ioa_cfg->pdev);
-
 	if (ioa_cfg->ipr_chip->bist_method == IPR_MMIO)
 		writel(IPR_UPROCI_SIS64_START_BIST,
 		       ioa_cfg->regs.set_uproc_interrupt_reg32);
@@ -7676,7 +7693,9 @@ static int ipr_reset_start_bist(struct ipr_cmnd *ipr_cmd)
 		ipr_reset_start_timer(ipr_cmd, IPR_WAIT_FOR_BIST_TIMEOUT);
 		rc = IPR_RC_JOB_RETURN;
 	} else {
-		pci_unblock_user_cfg_access(ipr_cmd->ioa_cfg->pdev);
+		if (ioa_cfg->cfg_locked)
+			pci_cfg_access_unlock(ipr_cmd->ioa_cfg->pdev);
+		ioa_cfg->cfg_locked = 0;
 		ipr_cmd->s.ioasa.hdr.ioasc = cpu_to_be32(IPR_IOASC_PCI_ACCESS_ERROR);
 		rc = IPR_RC_JOB_CONTINUE;
 	}
@@ -7719,12 +7738,61 @@ static int ipr_reset_slot_reset(struct ipr_cmnd *ipr_cmd)
 	struct pci_dev *pdev = ioa_cfg->pdev;
 
 	ENTER;
-	pci_block_user_cfg_access(pdev);
 	pci_set_pcie_reset_state(pdev, pcie_warm_reset);
 	ipr_cmd->job_step = ipr_reset_slot_reset_done;
 	ipr_reset_start_timer(ipr_cmd, IPR_PCI_RESET_TIMEOUT);
 	LEAVE;
 	return IPR_RC_JOB_RETURN;
+}
+
+/**
+ * ipr_reset_block_config_access_wait - Wait for permission to block config access
+ * @ipr_cmd:   ipr command struct
+ *
+ * Description: This attempts to block config access to the IOA.
+ *
+ * Return value:
+ *     IPR_RC_JOB_CONTINUE / IPR_RC_JOB_RETURN
+ **/
+static int ipr_reset_block_config_access_wait(struct ipr_cmnd *ipr_cmd)
+{
+	struct ipr_ioa_cfg *ioa_cfg = ipr_cmd->ioa_cfg;
+	int rc = IPR_RC_JOB_CONTINUE;
+
+	if (pci_cfg_access_trylock(ioa_cfg->pdev)) {
+		ioa_cfg->cfg_locked = 1;
+		ipr_cmd->job_step = ioa_cfg->reset;
+	} else {
+		if (ipr_cmd->u.time_left) {
+			rc = IPR_RC_JOB_RETURN;
+			ipr_cmd->u.time_left -= IPR_CHECK_FOR_RESET_TIMEOUT;
+			ipr_reset_start_timer(ipr_cmd,
+					      IPR_CHECK_FOR_RESET_TIMEOUT);
+		} else {
+			ipr_cmd->job_step = ioa_cfg->reset;
+			dev_err(&ioa_cfg->pdev->dev,
+				"Timed out waiting to lock config access. Resetting anyway.\n");
+		}
+	}
+
+	return rc;
+}
+
+/**
+ * ipr_reset_block_config_access - Block config access to the IOA
+ * @ipr_cmd:   ipr command struct
+ *
+ * Description: This attempts to block config access to the IOA
+ *
+ * Return value:
+ *     IPR_RC_JOB_CONTINUE
+ **/
+static int ipr_reset_block_config_access(struct ipr_cmnd *ipr_cmd)
+{
+	ipr_cmd->ioa_cfg->cfg_locked = 0;
+	ipr_cmd->job_step = ipr_reset_block_config_access_wait;
+	ipr_cmd->u.time_left = IPR_WAIT_FOR_RESET_TIMEOUT;
+	return IPR_RC_JOB_CONTINUE;
 }
 
 /**
@@ -7766,7 +7834,7 @@ static int ipr_reset_wait_to_start_bist(struct ipr_cmnd *ipr_cmd)
 		ipr_cmd->u.time_left -= IPR_CHECK_FOR_RESET_TIMEOUT;
 		ipr_reset_start_timer(ipr_cmd, IPR_CHECK_FOR_RESET_TIMEOUT);
 	} else {
-		ipr_cmd->job_step = ioa_cfg->reset;
+		ipr_cmd->job_step = ipr_reset_block_config_access;
 		rc = IPR_RC_JOB_CONTINUE;
 	}
 
@@ -7799,7 +7867,7 @@ static int ipr_reset_alert(struct ipr_cmnd *ipr_cmd)
 		writel(IPR_UPROCI_RESET_ALERT, ioa_cfg->regs.set_uproc_interrupt_reg32);
 		ipr_cmd->job_step = ipr_reset_wait_to_start_bist;
 	} else {
-		ipr_cmd->job_step = ioa_cfg->reset;
+		ipr_cmd->job_step = ipr_reset_block_config_access;
 	}
 
 	ipr_cmd->u.time_left = IPR_WAIT_FOR_RESET_TIMEOUT;
@@ -8005,8 +8073,12 @@ static void ipr_initiate_ioa_reset(struct ipr_ioa_cfg *ioa_cfg,
 	if (ioa_cfg->ioa_is_dead)
 		return;
 
-	if (ioa_cfg->in_reset_reload && ioa_cfg->sdt_state == GET_DUMP)
-		ioa_cfg->sdt_state = ABORT_DUMP;
+	if (ioa_cfg->in_reset_reload) {
+		if (ioa_cfg->sdt_state == GET_DUMP)
+			ioa_cfg->sdt_state = WAIT_FOR_DUMP;
+		else if (ioa_cfg->sdt_state == READ_DUMP)
+			ioa_cfg->sdt_state = ABORT_DUMP;
+	}
 
 	if (ioa_cfg->reset_retries++ >= IPR_NUM_RESET_RELOAD_RETRIES) {
 		dev_err(&ioa_cfg->pdev->dev,
@@ -9121,6 +9193,8 @@ static struct pci_device_id ipr_pci_table[] __devinitdata = {
 		PCI_VENDOR_ID_IBM, IPR_SUBS_DEV_ID_574D, 0, 0, 0 },
 	{ PCI_VENDOR_ID_IBM, PCI_DEVICE_ID_IBM_CROC_FPGA_E2,
 		PCI_VENDOR_ID_IBM, IPR_SUBS_DEV_ID_57B2, 0, 0, 0 },
+	{ PCI_VENDOR_ID_IBM, PCI_DEVICE_ID_IBM_CROC_FPGA_E2,
+		PCI_VENDOR_ID_IBM, IPR_SUBS_DEV_ID_57C3, 0, 0, 0 },
 	{ PCI_VENDOR_ID_IBM, PCI_DEVICE_ID_IBM_CROC_FPGA_E2,
 		PCI_VENDOR_ID_IBM, IPR_SUBS_DEV_ID_57C4, 0, 0, 0 },
 	{ PCI_VENDOR_ID_IBM, PCI_DEVICE_ID_IBM_CROC_ASIC_E2,

@@ -858,4 +858,7 @@ ia32_sys_call_table:
 	.quad quiet_ni_syscall		/* compat_sys_clock_adjtime */
 	.quad sys_syncfs
 	.quad compat_sys_sendmmsg	/* 345 */
+	.quad quiet_ni_syscall		/* set_ns */
+	.quad compat_sys_process_vm_readv
+	.quad compat_sys_process_vm_writev
 ia32_syscall_end:

@@ -25,6 +25,8 @@
 
 *******************************************************************************/
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/init.h>
@@ -45,13 +47,13 @@
 
 #include "igbvf.h"
 
-#define DRV_VERSION "2.0.0-k"
+#define DRV_VERSION "2.0.1-k"
 char igbvf_driver_name[] = "igbvf";
 const char igbvf_driver_version[] = DRV_VERSION;
 static const char igbvf_driver_string[] =
-				"Intel(R) Virtual Function Network Driver";
+		  "Intel(R) Gigabit Virtual Function Network Driver";
 static const char igbvf_copyright[] =
-				"Copyright (c) 2009 - 2010 Intel Corporation.";
+		  "Copyright (c) 2009 - 2011 Intel Corporation.";
 
 static int igbvf_poll(struct napi_struct *napi, int budget);
 static void igbvf_reset(struct igbvf_adapter *);
@@ -312,7 +314,7 @@ static bool igbvf_clean_rx_irq(struct igbvf_adapter *adapter,
 
 			skb->len += length;
 			skb->data_len += length;
-			skb->truesize += length;
+			skb->truesize += PAGE_SIZE / 2;
 		}
 send_up:
 		i++;
@@ -1243,6 +1245,7 @@ static void igbvf_configure_tx(struct igbvf_adapter *adapter)
 	/* disable transmits */
 	txdctl = er32(TXDCTL(0));
 	ew32(TXDCTL(0), txdctl & ~E1000_TXDCTL_QUEUE_ENABLE);
+	e1e_flush();
 	msleep(10);
 
 	/* Setup the HW Tx Head and Tail descriptor pointers */
@@ -1323,6 +1326,7 @@ static void igbvf_configure_rx(struct igbvf_adapter *adapter)
 	/* disable receives */
 	rxdctl = er32(RXDCTL(0));
 	ew32(RXDCTL(0), rxdctl & ~E1000_RXDCTL_QUEUE_ENABLE);
+	e1e_flush();
 	msleep(10);
 
 	rdlen = rx_ring->count * sizeof(union e1000_adv_rx_desc);
@@ -1761,10 +1765,9 @@ void igbvf_update_stats(struct igbvf_adapter *adapter)
 
 static void igbvf_print_link_info(struct igbvf_adapter *adapter)
 {
-	dev_info(&adapter->pdev->dev, "Link is Up %d Mbps %s\n",
-	         adapter->link_speed,
-	         ((adapter->link_duplex == FULL_DUPLEX) ?
-	          "Full Duplex" : "Half Duplex"));
+	dev_info(&adapter->pdev->dev, "Link is Up %d Mbps %s Duplex\n",
+		 adapter->link_speed,
+		 adapter->link_duplex == FULL_DUPLEX ? "Full" : "Half");
 }
 
 static bool igbvf_has_link(struct igbvf_adapter *adapter)
@@ -2543,9 +2546,11 @@ static void igbvf_print_device_info(struct igbvf_adapter *adapter)
 	struct net_device *netdev = adapter->netdev;
 	struct pci_dev *pdev = adapter->pdev;
 
-	dev_info(&pdev->dev, "Intel(R) 82576 Virtual Function\n");
+	if (hw->mac.type == e1000_vfadapt_i350)
+		dev_info(&pdev->dev, "Intel(R) I350 Virtual Function\n");
+	else
+		dev_info(&pdev->dev, "Intel(R) 82576 Virtual Function\n");
 	dev_info(&pdev->dev, "Address: %pM\n", netdev->dev_addr);
-	dev_info(&pdev->dev, "MAC: %d\n", hw->mac.type);
 }
 
 static const struct net_device_ops igbvf_netdev_ops = {
@@ -2675,6 +2680,7 @@ static int __devinit igbvf_probe(struct pci_dev *pdev,
 	                   NETIF_F_IP_CSUM |
 	                   NETIF_F_HW_VLAN_TX |
 	                   NETIF_F_HW_VLAN_RX |
+	                   NETIF_F_GRO |
 	                   NETIF_F_HW_VLAN_FILTER;
 
 	netdev->features |= NETIF_F_IPV6_CSUM;
@@ -2844,9 +2850,8 @@ static struct pci_driver igbvf_driver = {
 static int __init igbvf_init_module(void)
 {
 	int ret;
-	printk(KERN_INFO "%s - version %s\n",
-	       igbvf_driver_string, igbvf_driver_version);
-	printk(KERN_INFO "%s\n", igbvf_copyright);
+	pr_info("%s - version %s\n", igbvf_driver_string, igbvf_driver_version);
+	pr_info("%s\n", igbvf_copyright);
 
 	ret = pci_register_driver(&igbvf_driver);
 
@@ -2868,7 +2873,7 @@ module_exit(igbvf_exit_module);
 
 
 MODULE_AUTHOR("Intel Corporation, <e1000-devel@lists.sourceforge.net>");
-MODULE_DESCRIPTION("Intel(R) 82576 Virtual Function Network Driver");
+MODULE_DESCRIPTION("Intel(R) Gigabit Virtual Function Network Driver");
 MODULE_LICENSE("GPL");
 MODULE_VERSION(DRV_VERSION);
 

@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel PRO/1000 Linux driver
-  Copyright(c) 1999 - 2011 Intel Corporation.
+  Copyright(c) 1999 - 2012 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -963,8 +963,8 @@ struct e1000_dev_spec_ich8lan {
 struct e1000_hw {
 	struct e1000_adapter *adapter;
 
-	u8 __iomem *hw_addr;
-	u8 __iomem *flash_address;
+	void __iomem *hw_addr;
+	void __iomem *flash_address;
 
 	struct e1000_mac_info  mac;
 	struct e1000_fc_info   fc;

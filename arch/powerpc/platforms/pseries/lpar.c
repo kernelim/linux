@@ -391,7 +391,7 @@ static void pSeries_lpar_hptab_clear(void)
 	unsigned long hpte_count = size_bytes >> 4;
 	unsigned long dummy1, dummy2, dword0;
 	long lpar_rc;
-	int i;
+	unsigned long i;
 
 	/* TODO: Use bulk call */
 	for (i = 0; i < hpte_count; i++) {

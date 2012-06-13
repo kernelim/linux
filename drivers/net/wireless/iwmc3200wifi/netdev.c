@@ -46,6 +46,7 @@
  *              -> sdio_disable_func()
  */
 #include <linux/netdevice.h>
+#include <linux/slab.h>
 
 #include "iwm.h"
 #include "commands.h"
@@ -75,6 +76,14 @@ static int iwm_stop(struct net_device *ndev)
  * AC_BK -> queue 0
  */
 static const u16 iwm_1d_to_queue[8] = { 1, 0, 0, 1, 2, 2, 3, 3 };
+
+int iwm_tid_to_queue(u16 tid)
+{
+	if (tid > IWM_UMAC_TID_NR - 2)
+		return -EINVAL;
+
+	return iwm_1d_to_queue[tid];
+}
 
 static u16 iwm_select_queue(struct net_device *dev, struct sk_buff *skb)
 {
@@ -117,6 +126,7 @@ void *iwm_if_alloc(int sizeof_bus, struct device *dev,
 	ndev = alloc_netdev_mq(0, "wlan%d", ether_setup, IWM_TX_QUEUES);
 	if (!ndev) {
 		dev_err(dev, "no memory for network device instance\n");
+		ret = -ENOMEM;
 		goto out_priv;
 	}
 
@@ -129,6 +139,7 @@ void *iwm_if_alloc(int sizeof_bus, struct device *dev,
 				    GFP_KERNEL);
 	if (!iwm->umac_profile) {
 		dev_err(dev, "Couldn't alloc memory for profile\n");
+		ret = -ENOMEM;
 		goto out_profile;
 	}
 
@@ -152,6 +163,7 @@ void iwm_if_free(struct iwm_priv *iwm)
 	if (!iwm_to_ndev(iwm))
 		return;
 
+	cancel_delayed_work_sync(&iwm->ct_kill_delay);
 	free_netdev(iwm_to_ndev(iwm));
 	iwm_priv_deinit(iwm);
 	kfree(iwm->umac_profile);

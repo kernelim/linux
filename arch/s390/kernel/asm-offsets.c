@@ -67,5 +67,6 @@ int main(void)
 	DEFINE(__SIGP_RESTART, sigp_restart);
 	DEFINE(__SIGP_SENSE, sigp_sense);
 	DEFINE(__SIGP_INITIAL_CPU_RESET, sigp_initial_cpu_reset);
+	DEFINE(__LC_RST_OLD_PSW, offsetof(struct _lowcore, restart_old_psw));
 	return 0;
 }

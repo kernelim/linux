@@ -46,6 +46,13 @@
  *	PNODE   - the low N bits of the GNODE. The PNODE is the most useful variant
  *		  of the nasid for socket usage.
  *
+ *	GPA	- (global physical address) a socket physical address converted
+ *		  so that it can be used by the GRU as a global address. Socket
+ *		  physical addresses 1) need additional NASID (node) bits added
+ *		  to the high end of the address, and 2) unaliased if the
+ *		  partition does not have a physical address 0. In addition, on
+ *		  UV2 rev 1, GPAs need the gnode left shifted to bits 39 or 40.
+ *
  *
  *  NumaLink Global Physical Address Format:
  *  +--------------------------------+---------------------+
@@ -96,6 +103,7 @@
  *	      processor APICID register.
  */
 
+#define UV2_HUB_KABI_HACKS      1
 
 /*
  * Maximum number of bricks in all partitions and in all coherency domains.
@@ -139,13 +147,17 @@ struct uv_hub_info_s {
 	unsigned long		global_mmr_base;
 	unsigned long		gpa_mask;
 	unsigned int		gnode_extra;
+#ifndef UV2_HUB_KABI_HACKS
 	/*
 	 * The following breaks the KABI. The fields exist in holes
 	 * in the original structure. They are accessed thru
 	 * macros that use casting hacks.
+	 */
 	unsigned char		hub_revision;
 	unsigned char		apic_pnode_shift;
-	*/
+	unsigned char		m_shift;
+	unsigned char		n_lshift;
+#endif
 	unsigned long		gnode_upper;
 	unsigned long		lowmem_remap_top;
 	unsigned long		lowmem_remap_base;
@@ -159,12 +171,16 @@ struct uv_hub_info_s {
 	struct uv_scir_s	scir;
 };
 
+#ifdef UV2_HUB_KABI_HACKS
 /* ---------------------- BEGIN UGLY HACK --------------------------*/
 /* Temp hacks to prevent breaking the KABI. Use casting macros
  * to access unused space in the original definition of uv_hub_info_s.
  */
 #define uv_hub_info_base       (void *)(&uv_hub_info->global_mmr_base)
 #define uv_cpu_hub_info_base(c)        (void *)(&uv_cpu_hub_info(c)->global_mmr_base)
+
+#define uv_hub_info_n_lshift_offset		22
+#define uv_hub_info_m_shift_offset		23
 
 struct uv_hub_info_k {
 	unsigned long		global_mmr_base;
@@ -191,11 +207,25 @@ struct uv_hub_info_k {
 #define uv_cpu_hub_info_apic_pnode_shift(c)				\
 		(((struct uv_hub_info_k *)uv_cpu_hub_info(c))->apic_pnode_shift)
 
+#define uv_cpu_hub_info_m_shift(c)				\
+		*((unsigned char *)(uv_cpu_hub_info_base(c) + uv_hub_info_m_shift_offset))
+
+#define uv_cpu_hub_info_n_lshift(c)				\
+		*((unsigned char *)(uv_cpu_hub_info_base(c) + uv_hub_info_n_lshift_offset))
+
 #define uv_hub_info_hub_revision				\
 		(((struct uv_hub_info_k *)uv_hub_info)->hub_revision)
 
 #define uv_hub_info_apic_pnode_shift				\
 		(((struct uv_hub_info_k *)uv_hub_info)->apic_pnode_shift)
+
+#define uv_hub_info_m_shift				\
+		*((unsigned char *)(uv_hub_info_base + uv_hub_info_m_shift_offset))
+
+#define uv_hub_info_n_lshift				\
+		*((unsigned char *)(uv_hub_info_base + uv_hub_info_n_lshift_offset))
+
+#endif
 
 /* ---------------------- END   UGLY HACK --------------------------*/
 
@@ -224,7 +254,6 @@ static inline int is_uv2_hub(void)
 	if (uv_hub_info_hub_revision == 0)
 		return 0;
 	return uv_hub_info_hub_revision >= UV2_HUB_REVISION_BASE;
-
 }
 
 #define UV_HUB_INFO_EXTRA_FIELDS	L1_CACHE_BYTES-2
@@ -237,6 +266,20 @@ struct uv_hub_info_extra_s {
 DECLARE_PER_CPU(struct uv_hub_info_extra_s, __uv_hub_info_extra);
 #define uv_hub_info_extra		(&__get_cpu_var(__uv_hub_info_extra))
 #define uv_cpu_hub_info_extra(cpu)	(&per_cpu(__uv_hub_info_extra, cpu))
+
+static inline int is_uv2_1_hub(void)
+{
+	if (uv_hub_info_hub_revision == 0)
+		return 0;
+	return uv_hub_info_hub_revision == UV2_HUB_REVISION_BASE;
+}
+
+static inline int is_uv2_2_hub(void)
+{
+	if (uv_hub_info_hub_revision == 0)
+		return 0;
+	return uv_hub_info_hub_revision == UV2_HUB_REVISION_BASE + 1;
+}
 
 union uvh_apicid {
     unsigned long       v;
@@ -337,7 +380,10 @@ static inline unsigned long uv_soc_phys_ram_to_gpa(unsigned long paddr)
 {
 	if (paddr < uv_hub_info->lowmem_remap_top)
 		paddr |= uv_hub_info->lowmem_remap_base;
-	return paddr | uv_hub_info->gnode_upper;
+	paddr |= uv_hub_info->gnode_upper;
+	paddr = ((paddr << uv_hub_info_m_shift) >> uv_hub_info_m_shift) |
+		((paddr >> uv_hub_info->m_val) << uv_hub_info_n_lshift);
+	return paddr;
 }
 
 
@@ -357,20 +403,23 @@ uv_gpa_in_mmr_space(unsigned long gpa)
 /* UV global physical address --> socket phys RAM */
 static inline unsigned long uv_gpa_to_soc_phys_ram(unsigned long gpa)
 {
-	unsigned long paddr = gpa & uv_hub_info->gpa_mask;
+	unsigned long paddr;
 	unsigned long remap_base = uv_hub_info->lowmem_remap_base;
 	unsigned long remap_top =  uv_hub_info->lowmem_remap_top;
 
+	gpa = ((gpa << uv_hub_info_m_shift) >> uv_hub_info_m_shift) |
+		((gpa >> uv_hub_info_n_lshift) << uv_hub_info->m_val);
+	paddr = gpa & uv_hub_info->gpa_mask;
 	if (paddr >= remap_base && paddr < remap_base + remap_top)
 		paddr -= remap_base;
 	return paddr;
 }
 
 
-/* gnode -> pnode */
+/* gpa -> pnode */
 static inline unsigned long uv_gpa_to_gnode(unsigned long gpa)
 {
-	return gpa >> uv_hub_info->m_val;
+	return gpa >> uv_hub_info_n_lshift;
 }
 
 /* gpa -> pnode */
@@ -379,6 +428,12 @@ static inline int uv_gpa_to_pnode(unsigned long gpa)
 	unsigned long n_mask = (1UL << uv_hub_info->n_val) - 1;
 
 	return uv_gpa_to_gnode(gpa) & n_mask;
+}
+
+/* gpa -> node offset*/
+static inline unsigned long uv_gpa_to_offset(unsigned long gpa)
+{
+	return (gpa << uv_hub_info_m_shift) >> uv_hub_info_m_shift;
 }
 
 /* pnode, offset --> socket virtual */

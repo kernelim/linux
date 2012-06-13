@@ -46,6 +46,7 @@
 #define  SDHCI_CMD_RESP_SHORT_BUSY 0x03
 
 #define SDHCI_MAKE_CMD(c, f) (((c & 0xff) << 8) | (f & 0xff))
+#define SDHCI_GET_CMD(c) ((c>>8) & 0x3f)
 
 #define SDHCI_RESPONSE		0x10
 
@@ -60,8 +61,10 @@
 #define  SDHCI_DATA_AVAILABLE	0x00000800
 #define  SDHCI_CARD_PRESENT	0x00010000
 #define  SDHCI_WRITE_PROTECT	0x00080000
+#define  SDHCI_DATA_LVL_MASK	0x00F00000
+#define   SDHCI_DATA_LVL_SHIFT	20
 
-#define SDHCI_HOST_CONTROL 	0x28
+#define SDHCI_HOST_CONTROL	0x28
 #define  SDHCI_CTRL_LED		0x01
 #define  SDHCI_CTRL_4BITBUS	0x02
 #define  SDHCI_CTRL_HISPD	0x04
@@ -84,6 +87,11 @@
 
 #define SDHCI_CLOCK_CONTROL	0x2C
 #define  SDHCI_DIVIDER_SHIFT	8
+#define  SDHCI_DIVIDER_HI_SHIFT	6
+#define  SDHCI_DIV_MASK	0xFF
+#define  SDHCI_DIV_MASK_LEN	8
+#define  SDHCI_DIV_HI_MASK	0x300
+#define  SDHCI_PROG_CLOCK_MODE	0x0020
 #define  SDHCI_CLOCK_CARD_EN	0x0004
 #define  SDHCI_CLOCK_INT_STABLE	0x0002
 #define  SDHCI_CLOCK_INT_EN	0x0001
@@ -131,13 +139,29 @@
 
 #define SDHCI_ACMD12_ERR	0x3C
 
-/* 3E-3F reserved */
+#define SDHCI_HOST_CONTROL2		0x3E
+#define  SDHCI_CTRL_UHS_MASK		0x0007
+#define   SDHCI_CTRL_UHS_SDR12		0x0000
+#define   SDHCI_CTRL_UHS_SDR25		0x0001
+#define   SDHCI_CTRL_UHS_SDR50		0x0002
+#define   SDHCI_CTRL_UHS_SDR104		0x0003
+#define   SDHCI_CTRL_UHS_DDR50		0x0004
+#define  SDHCI_CTRL_VDD_180		0x0008
+#define  SDHCI_CTRL_DRV_TYPE_MASK	0x0030
+#define   SDHCI_CTRL_DRV_TYPE_B		0x0000
+#define   SDHCI_CTRL_DRV_TYPE_A		0x0010
+#define   SDHCI_CTRL_DRV_TYPE_C		0x0020
+#define   SDHCI_CTRL_DRV_TYPE_D		0x0030
+#define  SDHCI_CTRL_EXEC_TUNING		0x0040
+#define  SDHCI_CTRL_TUNED_CLK		0x0080
+#define  SDHCI_CTRL_PRESET_VAL_ENABLE	0x8000
 
 #define SDHCI_CAPABILITIES	0x40
 #define  SDHCI_TIMEOUT_CLK_MASK	0x0000003F
 #define  SDHCI_TIMEOUT_CLK_SHIFT 0
 #define  SDHCI_TIMEOUT_CLK_UNIT	0x00000080
 #define  SDHCI_CLOCK_BASE_MASK	0x00003F00
+#define  SDHCI_CLOCK_V3_BASE_MASK	0x0000FF00
 #define  SDHCI_CLOCK_BASE_SHIFT	8
 #define  SDHCI_MAX_BLOCK_MASK	0x00030000
 #define  SDHCI_MAX_BLOCK_SHIFT  16
@@ -150,9 +174,30 @@
 #define  SDHCI_CAN_VDD_180	0x04000000
 #define  SDHCI_CAN_64BIT	0x10000000
 
-/* 44-47 reserved for more caps */
+#define  SDHCI_SUPPORT_SDR50	0x00000001
+#define  SDHCI_SUPPORT_SDR104	0x00000002
+#define  SDHCI_SUPPORT_DDR50	0x00000004
+#define  SDHCI_DRIVER_TYPE_A	0x00000010
+#define  SDHCI_DRIVER_TYPE_C	0x00000020
+#define  SDHCI_DRIVER_TYPE_D	0x00000040
+#define  SDHCI_RETUNING_TIMER_COUNT_MASK	0x00000F00
+#define  SDHCI_RETUNING_TIMER_COUNT_SHIFT	8
+#define  SDHCI_USE_SDR50_TUNING			0x00002000
+#define  SDHCI_RETUNING_MODE_MASK		0x0000C000
+#define  SDHCI_RETUNING_MODE_SHIFT		14
+#define  SDHCI_CLOCK_MUL_MASK	0x00FF0000
+#define  SDHCI_CLOCK_MUL_SHIFT	16
 
-#define SDHCI_MAX_CURRENT	0x48
+#define SDHCI_CAPABILITIES_1	0x44
+
+#define SDHCI_MAX_CURRENT		0x48
+#define  SDHCI_MAX_CURRENT_330_MASK	0x0000FF
+#define  SDHCI_MAX_CURRENT_330_SHIFT	0
+#define  SDHCI_MAX_CURRENT_300_MASK	0x00FF00
+#define  SDHCI_MAX_CURRENT_300_SHIFT	8
+#define  SDHCI_MAX_CURRENT_180_MASK	0xFF0000
+#define  SDHCI_MAX_CURRENT_180_SHIFT	16
+#define   SDHCI_MAX_CURRENT_MULTIPLIER	4
 
 /* 4C-4F reserved for more max current */
 
@@ -176,6 +221,14 @@
 #define  SDHCI_SPEC_VER_SHIFT	0
 #define   SDHCI_SPEC_100	0
 #define   SDHCI_SPEC_200	1
+#define   SDHCI_SPEC_300	2
+
+/*
+ * End of controller registers.
+ */
+
+#define SDHCI_MAX_DIV_SPEC_200	256
+#define SDHCI_MAX_DIV_SPEC_300	2046
 
 struct sdhci_ops;
 
@@ -261,11 +314,14 @@ struct sdhci_host {
 #define SDHCI_USE_ADMA		(1<<1)		/* Host is ADMA capable */
 #define SDHCI_REQ_USE_DMA	(1<<2)		/* Use DMA for this req. */
 #define SDHCI_DEVICE_DEAD	(1<<3)		/* Device unresponsive */
+#define SDHCI_SDR50_NEEDS_TUNING (1<<4)        /* SDR50 needs tuning */
+#define SDHCI_NEEDS_RETUNING	(1<<5)		/* Host needs retuning */
 
 	unsigned int		version;	/* SDHCI spec. version */
 
 	unsigned int		max_clk;	/* Max possible freq (MHz) */
 	unsigned int		timeout_clk;	/* Timeout freq (KHz) */
+	unsigned int		clk_mul;	/* Clock Muliplier value */
 
 	unsigned int		clock;		/* Current clock (MHz) */
 	u8			pwr;		/* Current voltage */
@@ -292,6 +348,14 @@ struct sdhci_host {
 	struct timer_list	timer;		/* Timer for timeouts */
 
 	unsigned int		caps;		/* Alternative capabilities */
+
+	wait_queue_head_t	buf_ready_int;	/* Waitqueue for Buffer Read Ready interrupt */
+	unsigned int		tuning_done;	/* Condition flag set when CMD19 succeeds */
+
+	unsigned int		tuning_count;	/* Timer count for re-tuning */
+	unsigned int		tuning_mode;	/* Re-tuning mode supported by host */
+#define SDHCI_TUNING_MODE_1    0
+	struct timer_list	tuning_timer;	/* Timer for tuning */
 
 	unsigned long		private[0] ____cacheline_aligned;
 };

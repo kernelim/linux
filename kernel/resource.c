@@ -219,6 +219,23 @@ static int __release_resource(struct resource *old)
 }
 
 /**
+ * request_resource_conflict - request and reserve an I/O or memory resource
+ * @root: root resource descriptor
+ * @new: resource descriptor desired by caller
+ *
+ * Returns 0 for success, conflict resource on error.
+ */
+struct resource *request_resource_conflict(struct resource *root, struct resource *new)
+{
+	struct resource *conflict;
+
+	write_lock(&resource_lock);
+	conflict = __request_resource(root, new);
+	write_unlock(&resource_lock);
+	return conflict;
+}
+
+/**
  * request_resource - request and reserve an I/O or memory resource
  * @root: root resource descriptor
  * @new: resource descriptor desired by caller
@@ -229,9 +246,7 @@ int request_resource(struct resource *root, struct resource *new)
 {
 	struct resource *conflict;
 
-	write_lock(&resource_lock);
-	conflict = __request_resource(root, new);
-	write_unlock(&resource_lock);
+	conflict = request_resource_conflict(root, new);
 	return conflict ? -EBUSY : 0;
 }
 
@@ -342,6 +357,31 @@ int __weak page_is_ram(unsigned long pfn)
 }
 EXPORT_SYMBOL_GPL(page_is_ram);
 
+void __weak arch_remove_reservations(struct resource *avail)
+{
+}
+
+static void simple_align_resource(void *data,
+				  struct resource *avail,
+				  resource_size_t size,
+				  resource_size_t align)
+{
+}
+
+static void resource_clip(struct resource *res, resource_size_t min,
+			  resource_size_t max)
+{
+	if (res->start < min)
+		res->start = min;
+	if (res->end > max)
+		res->end = max;
+}
+
+static bool resource_contains(struct resource *res1, struct resource *res2)
+{
+	return res1->start <= res2->start && res1->end >= res2->end;
+}
+
 /*
  * Find empty slot in the resource tree given range and alignment.
  */
@@ -353,8 +393,9 @@ static int find_resource(struct resource *root, struct resource *new,
 			 void *alignf_data)
 {
 	struct resource *this = root->child;
-	struct resource tmp = *new;
+	struct resource tmp = *new, avail, alloc;
 
+	tmp.flags = new->flags;
 	tmp.start = root->start;
 	/*
 	 * Skip past an allocated resource that starts at 0, since the assignment
@@ -369,17 +410,23 @@ static int find_resource(struct resource *root, struct resource *new,
 			tmp.end = this->start - 1;
 		else
 			tmp.end = root->end;
-		if (tmp.start < min)
-			tmp.start = min;
-		if (tmp.end > max)
-			tmp.end = max;
-		tmp.start = ALIGN(tmp.start, align);
-		if (alignf)
-			alignf(alignf_data, &tmp, size, align);
-		if (tmp.start < tmp.end && tmp.end - tmp.start >= size - 1) {
-			new->start = tmp.start;
-			new->end = tmp.start + size - 1;
-			return 0;
+
+		resource_clip(&tmp, min, max);
+		arch_remove_reservations(&tmp);
+
+		/* Check for overflow after ALIGN() */
+		avail = *new;
+		avail.start = ALIGN(tmp.start, align);
+		avail.end = tmp.end;
+		if (avail.start >= tmp.start) {
+			alloc = avail;
+			alignf(alignf_data, &alloc, size, align);
+			alloc.end = alloc.start + size - 1;
+			if (resource_contains(&avail, &alloc)) {
+				new->start = alloc.start;
+				new->end = alloc.end;
+				return 0;
+			}
 		}
 		if (!this)
 			break;
@@ -408,6 +455,9 @@ int allocate_resource(struct resource *root, struct resource *new,
 		      void *alignf_data)
 {
 	int err;
+
+	if (!alignf)
+		alignf = simple_align_resource;
 
 	write_lock(&resource_lock);
 	err = find_resource(root, new, size, min, max, align, alignf, alignf_data);
@@ -471,25 +521,40 @@ static struct resource * __insert_resource(struct resource *parent, struct resou
 }
 
 /**
- * insert_resource - Inserts a resource in the resource tree
+ * insert_resource_conflict - Inserts resource in the resource tree
  * @parent: parent of the new resource
  * @new: new resource to insert
  *
- * Returns 0 on success, -EBUSY if the resource can't be inserted.
+ * Returns 0 on success, conflict resource if the resource can't be inserted.
  *
- * This function is equivalent to request_resource when no conflict
+ * This function is equivalent to request_resource_conflict when no conflict
  * happens. If a conflict happens, and the conflicting resources
  * entirely fit within the range of the new resource, then the new
  * resource is inserted and the conflicting resources become children of
  * the new resource.
  */
-int insert_resource(struct resource *parent, struct resource *new)
+struct resource *insert_resource_conflict(struct resource *parent, struct resource *new)
 {
 	struct resource *conflict;
 
 	write_lock(&resource_lock);
 	conflict = __insert_resource(parent, new);
 	write_unlock(&resource_lock);
+	return conflict;
+}
+
+/**
+ * insert_resource - Inserts a resource in the resource tree
+ * @parent: parent of the new resource
+ * @new: new resource to insert
+ *
+ * Returns 0 on success, -EBUSY if the resource can't be inserted.
+ */
+int insert_resource(struct resource *parent, struct resource *new)
+{
+	struct resource *conflict;
+
+	conflict = insert_resource_conflict(parent, new);
 	return conflict ? -EBUSY : 0;
 }
 

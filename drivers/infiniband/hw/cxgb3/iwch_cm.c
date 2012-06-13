@@ -763,6 +763,11 @@ static void connect_request_upcall(struct iwch_ep *ep)
 	event.private_data_len = ep->plen;
 	event.private_data = ep->mpa_pkt + sizeof(struct mpa_message);
 	event.provider_data = ep;
+	/*
+	 * Until ird/ord negotiation via MPAv2 support is added, send max
+	 * supported values
+	 */
+	event.ird = event.ord = 8;
 	if (state_read(&ep->parent_ep->com) != DEAD) {
 		get_ep(&ep->com);
 		ep->parent_ep->com.cm_id->event_handler(
@@ -780,6 +785,11 @@ static void established_upcall(struct iwch_ep *ep)
 	PDBG("%s ep %p\n", __func__, ep);
 	memset(&event, 0, sizeof(event));
 	event.event = IW_CM_EVENT_ESTABLISHED;
+	/*
+	 * Until ird/ord negotiation via MPAv2 support is added, send max
+	 * supported values
+	 */
+	event.ird = event.ord = 8;
 	if (ep->com.cm_id) {
 		PDBG("%s ep %p tid %d\n", __func__, ep, ep->hwtid);
 		ep->com.cm_id->event_handler(ep->com.cm_id, &event);
@@ -1374,7 +1384,7 @@ static int pass_accept_req(struct t3cdev *tdev, struct sk_buff *skb, void *ctx)
 		goto reject;
 	}
 	dst = &rt->u.dst;
-	l2t = t3_l2t_get(tdev, dst->neighbour, dst->neighbour->dev);
+	l2t = t3_l2t_get(tdev, dst, dst->neighbour->dev);
 	if (!l2t) {
 		printk(KERN_ERR MOD "%s - failed to allocate l2t entry!\n",
 		       __func__);
@@ -1944,7 +1954,7 @@ int iwch_connect(struct iw_cm_id *cm_id, struct iw_cm_conn_param *conn_param)
 	ep->dst = &rt->u.dst;
 
 	/* get a l2t entry */
-	ep->l2t = t3_l2t_get(ep->com.tdev, ep->dst->neighbour,
+	ep->l2t = t3_l2t_get(ep->com.tdev, ep->dst,
 			     ep->dst->neighbour->dev);
 	if (!ep->l2t) {
 		printk(KERN_ERR MOD "%s - cannot alloc l2e.\n", __func__);

@@ -9,6 +9,7 @@
  * published by the Free Software Foundation.
  */
 
+#include <linux/slab.h>
 #include "core.h"
 #include "debugfs.h"
 
@@ -33,6 +34,7 @@ static ssize_t name## _read(struct file *file, char __user *userbuf,	\
 static const struct file_operations name## _ops = {			\
 	.read = name## _read,						\
 	.open = cfg80211_open_file_generic,				\
+	.llseek = generic_file_llseek,					\
 };
 
 DEBUGFS_READONLY_FILE(rts_threshold, 20, "%d",
@@ -101,14 +103,11 @@ static ssize_t ht40allow_map_read(struct file *file,
 static const struct file_operations ht40allow_map_ops = {
 	.read = ht40allow_map_read,
 	.open = cfg80211_open_file_generic,
+	.llseek = default_llseek,
 };
 
 #define DEBUGFS_ADD(name)						\
-	rdev->debugfs.name = debugfs_create_file(#name, S_IRUGO, phyd,	\
-						  &rdev->wiphy, &name## _ops);
-#define DEBUGFS_DEL(name)						\
-	debugfs_remove(rdev->debugfs.name);				\
-	rdev->debugfs.name = NULL;
+	debugfs_create_file(#name, S_IRUGO, phyd, &rdev->wiphy, &name## _ops);
 
 void cfg80211_debugfs_rdev_add(struct cfg80211_registered_device *rdev)
 {
@@ -119,13 +118,4 @@ void cfg80211_debugfs_rdev_add(struct cfg80211_registered_device *rdev)
 	DEBUGFS_ADD(short_retry_limit);
 	DEBUGFS_ADD(long_retry_limit);
 	DEBUGFS_ADD(ht40allow_map);
-}
-
-void cfg80211_debugfs_rdev_del(struct cfg80211_registered_device *rdev)
-{
-	DEBUGFS_DEL(rts_threshold);
-	DEBUGFS_DEL(fragmentation_threshold);
-	DEBUGFS_DEL(short_retry_limit);
-	DEBUGFS_DEL(long_retry_limit);
-	DEBUGFS_DEL(ht40allow_map);
 }

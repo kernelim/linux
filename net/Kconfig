@@ -203,6 +203,12 @@ source "net/ieee802154/Kconfig"
 source "net/sched/Kconfig"
 source "net/dcb/Kconfig"
 
+config NETPRIO_CGROUP
+	tristate "Network priority cgroup"
+	depends on CGROUPS
+	---help---
+	  Cgroup subsystem for use in assigning processes to network priorities on
+	  a per-interface basis
 menu "Network testing"
 
 config NET_PKTGEN

@@ -77,6 +77,8 @@ const struct ata_port_operations ata_base_port_ops = {
 	.prereset		= ata_std_prereset,
 	.postreset		= ata_std_postreset,
 	.error_handler		= ata_std_error_handler,
+	.sched_eh		= ata_std_sched_eh,
+	.end_eh			= ata_std_end_eh,
 };
 
 const struct ata_port_operations sata_port_ops = {
@@ -94,7 +96,7 @@ static unsigned int ata_dev_set_feature(struct ata_device *dev,
 static void ata_dev_xfermask(struct ata_device *dev);
 static unsigned long ata_dev_blacklisted(const struct ata_device *dev);
 
-unsigned int ata_print_id = 1;
+atomic_t ata_print_id = ATOMIC_INIT(0);
 static struct workqueue_struct *ata_wq;
 
 struct workqueue_struct *ata_aux_wq;
@@ -5372,13 +5374,15 @@ bool ata_link_offline(struct ata_link *link)
 		(!slave || ata_phys_link_offline(slave));
 }
 
+static int ata_pm_result_ignore;
+
 #ifdef CONFIG_PM
 static int ata_host_request_pm(struct ata_host *host, pm_message_t mesg,
 			       unsigned int action, unsigned int ehi_flags,
-			       int wait)
+			       int *async)
 {
 	unsigned long flags;
-	int i, rc;
+	int i, rc = 0;
 
 	for (i = 0; i < host->n_ports; i++) {
 		struct ata_port *ap = host->ports[i];
@@ -5396,10 +5400,16 @@ static int ata_host_request_pm(struct ata_host *host, pm_message_t mesg,
 		spin_lock_irqsave(ap->lock, flags);
 
 		ap->pm_mesg = mesg;
-		if (wait) {
-			rc = 0;
+
+		/* in the async case caller guarantees 1 port per host,
+		 * and we force the issue below
+		 */
+		if (async && async != &ata_pm_result_ignore)
+			ap->pm_result = async;
+		else if (!async)
 			ap->pm_result = &rc;
-		}
+		else
+			ap->pm_result = NULL;
 
 		ap->pflags |= ATA_PFLAG_PM_PENDING;
 		ata_for_each_link(link, ap, HOST_FIRST) {
@@ -5412,7 +5422,7 @@ static int ata_host_request_pm(struct ata_host *host, pm_message_t mesg,
 		spin_unlock_irqrestore(ap->lock, flags);
 
 		/* wait and check result */
-		if (wait) {
+		if (!async) {
 			ata_port_wait_eh(ap);
 			WARN_ON(ap->pflags & ATA_PFLAG_PM_PENDING);
 			if (rc)
@@ -5422,6 +5432,26 @@ static int ata_host_request_pm(struct ata_host *host, pm_message_t mesg,
 
 	return 0;
 }
+
+/* sas ports don't participate in pm runtime management of ata_ports,
+ * and need to resume ata devices at the domain level, not the per-port
+ * level. sas suspend/resume is async to allow parallel port recovery
+ * since sas has multiple ata_port instances per Scsi_Host.
+ */
+int ata_sas_port_async_suspend(struct ata_port *ap, int *async)
+{
+	return ata_host_request_pm(ap->host, PMSG_SUSPEND, 0, ATA_EHI_QUIET,
+				   async);
+}
+EXPORT_SYMBOL_GPL(ata_sas_port_async_suspend);
+
+int ata_sas_port_async_resume(struct ata_port *ap, int *async)
+{
+	return ata_host_request_pm(ap->host, PMSG_ON, ATA_EH_RESET,
+				   ATA_EHI_NO_AUTOPSY | ATA_EHI_QUIET,
+				   async);
+}
+EXPORT_SYMBOL_GPL(ata_sas_port_async_resume);
 
 /**
  *	ata_host_suspend - suspend host
@@ -5448,7 +5478,7 @@ int ata_host_suspend(struct ata_host *host, pm_message_t mesg)
 	 */
 	ata_lpm_enable(host);
 
-	rc = ata_host_request_pm(host, mesg, 0, ATA_EHI_QUIET, 1);
+	rc = ata_host_request_pm(host, mesg, 0, ATA_EHI_QUIET, NULL);
 	if (rc == 0)
 		host->dev->power.power_state = mesg;
 	return rc;
@@ -5468,7 +5498,8 @@ int ata_host_suspend(struct ata_host *host, pm_message_t mesg)
 void ata_host_resume(struct ata_host *host)
 {
 	ata_host_request_pm(host, PMSG_ON, ATA_EH_RESET,
-			    ATA_EHI_NO_AUTOPSY | ATA_EHI_QUIET, 0);
+			    ATA_EHI_NO_AUTOPSY | ATA_EHI_QUIET,
+			    &ata_pm_result_ignore);
 	host->dev->power.power_state = PMSG_ON;
 
 	/* reenable link pm */
@@ -6035,29 +6066,31 @@ void ata_host_init(struct ata_host *host, struct device *dev,
 	host->ops = ops;
 }
 
+void __ata_port_probe(struct ata_port *ap)
+{
+	struct ata_eh_info *ehi = &ap->link.eh_info;
+	unsigned long flags;
+
+	/* kick EH for boot probing */
+	spin_lock_irqsave(ap->lock, flags);
+
+	ehi->probe_mask |= ATA_ALL_DEVICES;
+	ehi->action |= ATA_EH_RESET;
+	ehi->flags |= ATA_EHI_NO_AUTOPSY | ATA_EHI_QUIET;
+
+	ap->pflags &= ~ATA_PFLAG_INITIALIZING;
+	ap->pflags |= ATA_PFLAG_LOADING;
+	ata_port_schedule_eh(ap);
+
+	spin_unlock_irqrestore(ap->lock, flags);
+}
+
 int ata_port_probe(struct ata_port *ap)
 {
 	int rc = 0;
 
-	/* probe */
 	if (ap->ops->error_handler) {
-		struct ata_eh_info *ehi = &ap->link.eh_info;
-		unsigned long flags;
-
-		/* kick EH for boot probing */
-		spin_lock_irqsave(ap->lock, flags);
-
-		ehi->probe_mask |= ATA_ALL_DEVICES;
-		ehi->action |= ATA_EH_RESET | ATA_EH_LPM;
-		ehi->flags |= ATA_EHI_NO_AUTOPSY | ATA_EHI_QUIET;
-
-		ap->pflags &= ~ATA_PFLAG_INITIALIZING;
-		ap->pflags |= ATA_PFLAG_LOADING;
-		ata_port_schedule_eh(ap);
-
-		spin_unlock_irqrestore(ap->lock, flags);
-
-		/* wait for EH to finish */
+		__ata_port_probe(ap);
 		ata_port_wait_eh(ap);
 	} else {
 		DPRINTK("ata%u: bus probe begin\n", ap->print_id);
@@ -6127,7 +6160,7 @@ int ata_host_register(struct ata_host *host, struct scsi_host_template *sht)
 
 	/* give ports names and add SCSI hosts */
 	for (i = 0; i < host->n_ports; i++)
-		host->ports[i]->print_id = ata_print_id++;
+		host->ports[i]->print_id = atomic_inc_return(&ata_print_id);
 
 	rc = ata_scsi_add_hosts(host, sht);
 	if (rc)
@@ -6454,6 +6487,7 @@ static int __init ata_parse_force_one(char **cur,
 		{ "nohrst",	.lflags		= ATA_LFLAG_NO_HRST },
 		{ "nosrst",	.lflags		= ATA_LFLAG_NO_SRST },
 		{ "norst",	.lflags		= ATA_LFLAG_NO_HRST | ATA_LFLAG_NO_SRST },
+		{ "rstonce",	.lflags		= ATA_LFLAG_RST_ONCE },
 	};
 	char *start = *cur, *p = *cur;
 	char *id, *val, *endp;
@@ -6690,6 +6724,8 @@ struct ata_port_operations ata_dummy_port_ops = {
 	.qc_prep		= ata_noop_qc_prep,
 	.qc_issue		= ata_dummy_qc_issue,
 	.error_handler		= ata_dummy_error_handler,
+	.sched_eh		= ata_std_sched_eh,
+	.end_eh			= ata_std_end_eh,
 };
 
 const struct ata_port_info ata_dummy_port_info = {
@@ -6754,6 +6790,7 @@ EXPORT_SYMBOL_GPL(ata_scsi_queuecmd);
 EXPORT_SYMBOL_GPL(ata_scsi_slave_config);
 EXPORT_SYMBOL_GPL(ata_scsi_slave_destroy);
 EXPORT_SYMBOL_GPL(ata_scsi_change_queue_depth);
+EXPORT_SYMBOL_GPL(__ata_change_queue_depth);
 EXPORT_SYMBOL_GPL(sata_scr_valid);
 EXPORT_SYMBOL_GPL(sata_scr_read);
 EXPORT_SYMBOL_GPL(sata_scr_write);

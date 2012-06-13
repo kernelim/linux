@@ -59,11 +59,11 @@
 #include "bnx2_fw.h"
 
 #define DRV_MODULE_NAME		"bnx2"
-#define DRV_MODULE_VERSION	"2.1.11"
-#define DRV_MODULE_RELDATE	"July 20, 2011"
-#define FW_MIPS_FILE_06		"bnx2/bnx2-mips-06-6.2.1.fw"
+#define DRV_MODULE_VERSION	"2.2.1"
+#define DRV_MODULE_RELDATE	"Dec 18, 2011"
+#define FW_MIPS_FILE_06		"bnx2/bnx2-mips-06-6.2.3.fw"
 #define FW_RV2P_FILE_06		"bnx2/bnx2-rv2p-06-6.0.15.fw"
-#define FW_MIPS_FILE_09		"bnx2/bnx2-mips-09-6.2.1a.fw"
+#define FW_MIPS_FILE_09		"bnx2/bnx2-mips-09-6.2.1b.fw"
 #define FW_RV2P_FILE_09_Ax	"bnx2/bnx2-rv2p-09ax-6.0.17.fw"
 #define FW_RV2P_FILE_09		"bnx2/bnx2-rv2p-09-6.0.17.fw"
 
@@ -2059,8 +2059,8 @@ __acquires(&bp->phy_lock)
 
 	if (bp->autoneg & AUTONEG_SPEED) {
 		u32 adv_reg, adv1000_reg;
-		u32 new_adv_reg = 0;
-		u32 new_adv1000_reg = 0;
+		u32 new_adv = 0;
+		u32 new_adv1000 = 0;
 
 		bnx2_read_phy(bp, bp->mii_adv, &adv_reg);
 		adv_reg &= (PHY_ALL_10_100_SPEED | ADVERTISE_PAUSE_CAP |
@@ -2069,27 +2069,17 @@ __acquires(&bp->phy_lock)
 		bnx2_read_phy(bp, MII_CTRL1000, &adv1000_reg);
 		adv1000_reg &= PHY_ALL_1000_SPEED;
 
-		if (bp->advertising & ADVERTISED_10baseT_Half)
-			new_adv_reg |= ADVERTISE_10HALF;
-		if (bp->advertising & ADVERTISED_10baseT_Full)
-			new_adv_reg |= ADVERTISE_10FULL;
-		if (bp->advertising & ADVERTISED_100baseT_Half)
-			new_adv_reg |= ADVERTISE_100HALF;
-		if (bp->advertising & ADVERTISED_100baseT_Full)
-			new_adv_reg |= ADVERTISE_100FULL;
-		if (bp->advertising & ADVERTISED_1000baseT_Full)
-			new_adv1000_reg |= ADVERTISE_1000FULL;
+		new_adv = ethtool_adv_to_mii_adv_t(bp->advertising);
+		new_adv |= ADVERTISE_CSMA;
+		new_adv |= bnx2_phy_get_pause_adv(bp);
 
-		new_adv_reg |= ADVERTISE_CSMA;
+		new_adv1000 |= ethtool_adv_to_mii_ctrl1000_t(bp->advertising);
 
-		new_adv_reg |= bnx2_phy_get_pause_adv(bp);
-
-		if ((adv1000_reg != new_adv1000_reg) ||
-			(adv_reg != new_adv_reg) ||
-			((bmcr & BMCR_ANENABLE) == 0)) {
-
-			bnx2_write_phy(bp, bp->mii_adv, new_adv_reg);
-			bnx2_write_phy(bp, MII_CTRL1000, new_adv1000_reg);
+		if ((adv1000_reg != new_adv1000) ||
+		    (adv_reg != new_adv) ||
+	 	    ((bmcr & BMCR_ANENABLE) == 0)) {
+			bnx2_write_phy(bp, bp->mii_adv, new_adv);
+			bnx2_write_phy(bp, MII_CTRL1000, new_adv1000);
 			bnx2_write_phy(bp, bp->mii_bmcr, BMCR_ANRESTART |
 				BMCR_ANENABLE);
 		}
@@ -3056,7 +3046,6 @@ bnx2_rx_skb(struct bnx2 *bp, struct bnx2_rx_ring_info *rxr, struct sk_buff *skb,
 						&skb_shinfo(skb)->frags[i - 1];
 					frag->size -= tail;
 					skb->data_len -= tail;
-					skb->truesize -= tail;
 				}
 				return 0;
 			}
@@ -3088,7 +3077,7 @@ bnx2_rx_skb(struct bnx2 *bp, struct bnx2_rx_ring_info *rxr, struct sk_buff *skb,
 
 			frag_size -= frag_len;
 			skb->data_len += frag_len;
-			skb->truesize += frag_len;
+			skb->truesize += PAGE_SIZE;
 			skb->len += frag_len;
 
 			pg_prod = NEXT_RX_BD(pg_prod);
@@ -6577,6 +6566,9 @@ bnx2_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 	txbd->tx_bd_vlan_tag_flags |= TX_BD_FLAGS_END;
 
+	/* Sync BD data before updating TX mailbox */
+	wmb();
+
 	prod = NEXT_TX_BD(prod);
 	txr->tx_prod_bseq += skb->len;
 
@@ -6909,10 +6901,10 @@ bnx2_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)
 {
 	struct bnx2 *bp = netdev_priv(dev);
 
-	strcpy(info->driver, DRV_MODULE_NAME);
-	strcpy(info->version, DRV_MODULE_VERSION);
-	strcpy(info->bus_info, pci_name(bp->pdev));
-	strcpy(info->fw_version, bp->fw_version);
+	strlcpy(info->driver, DRV_MODULE_NAME, sizeof(info->driver));
+	strlcpy(info->version, DRV_MODULE_VERSION, sizeof(info->version));
+	strlcpy(info->bus_info, pci_name(bp->pdev), sizeof(info->bus_info));
+	strlcpy(info->fw_version, bp->fw_version, sizeof(info->fw_version));
 }
 
 #define BNX2_REGDUMP_LEN		(32 * 1024)
@@ -7190,11 +7182,9 @@ bnx2_get_ringparam(struct net_device *dev, struct ethtool_ringparam *ering)
 	struct bnx2 *bp = netdev_priv(dev);
 
 	ering->rx_max_pending = MAX_TOTAL_RX_DESC_CNT;
-	ering->rx_mini_max_pending = 0;
 	ering->rx_jumbo_max_pending = MAX_TOTAL_RX_PG_DESC_CNT;
 
 	ering->rx_pending = bp->rx_ring_size;
-	ering->rx_mini_pending = 0;
 	ering->rx_jumbo_pending = bp->rx_pg_ring_size;
 
 	ering->tx_max_pending = MAX_TX_DESC_CNT;

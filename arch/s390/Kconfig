@@ -87,13 +87,14 @@ config S390
 	select HAVE_SYSCALL_TRACEPOINTS
 	select HAVE_DYNAMIC_FTRACE
 	select HAVE_FUNCTION_GRAPH_TRACER
-	select HAVE_DEFAULT_NO_SPIN_MUTEXES
+	select HAVE_ARCH_MUTEX_CPU_RELAX
 	select HAVE_OPROFILE
 	select HAVE_KPROBES
 	select HAVE_KRETPROBES
 	select HAVE_KVM if 64BIT
 	select HAVE_ARCH_TRACEHOOK
 	select INIT_ALL_POSSIBLE
+	select HAVE_IRQ_WORK
 	select HAVE_PERF_EVENTS
 
 config SCHED_OMIT_FRAME_POINTER
@@ -549,6 +550,30 @@ config KEXEC
 	  current kernel, and to start another kernel.  It is like a reboot
 	  but is independent of hardware/microcode support.
 
+config KEXEC_AUTO_RESERVE
+	bool "automatically reserve memory for kexec kernel"
+	depends on KEXEC
+	default y
+	---help---
+	  Automatically reserve memory for a kexec kernel, so that you don't
+	  need to specify numbers for the "crashkernel=X@Y" boot option,
+	  instead you can use "crashkernel=auto". This option works for
+	  systems that have at least 4 GiB memory. Then 128 MiB plus a small
+	  amount of additional memory that grows linearly with the 1st kernel
+	  memory size is reserved. When "crashkernel=auto" is used for
+	  systems with less than 4 GiB memory, no crashkernel memory will be
+	  reserved.
+
+config CRASH_DUMP
+	bool "kernel crash dumps"
+	depends on 64BIT
+	help
+	  Generate crash dump after being started by kexec.
+	  Crash dump kernels are loaded in the main kernel with kexec-tools
+	  into a specially reserved region and then later executed after
+	  a crash by kdump/kexec.
+	  For more details see Documentation/kdump/kdump.txt
+
 config ZFCPDUMP
 	bool "zfcpdump support"
 	select SMP
@@ -609,6 +634,11 @@ source "fs/Kconfig"
 source "arch/s390/Kconfig.debug"
 
 source "security/Kconfig"
+
+config KEYS_COMPAT
+	bool
+	depends on COMPAT && KEYS
+	default y
 
 source "crypto/Kconfig"
 

@@ -25,7 +25,6 @@
 
 #include <linux/types.h>
 #include <linux/list.h>
-#include <linux/module.h>
 #include <asm/atomic.h>
 #include <linux/if.h>
 #include <linux/skbuff.h>
@@ -42,6 +41,8 @@ enum {
 	IEEE80211_CRYPTO_TKIP_COUNTERMEASURES = (1 << 0),
 };
 
+struct module;
+
 struct lib80211_crypto_ops {
 	const char *name;
 	struct list_head list;
@@ -53,9 +54,6 @@ struct lib80211_crypto_ops {
 
 	/* deinitialize crypto context and free allocated private data */
 	void (*deinit) (void *priv);
-
-	int (*build_iv) (struct sk_buff * skb, int hdr_len,
-			 u8 *key, int keylen, void *priv);
 
 	/* encrypt/decrypt return < 0 on error or >= 0 on success. The return
 	 * value from decrypt_mpdu is passed as the keyidx value for
@@ -120,10 +118,7 @@ void lib80211_crypt_info_free(struct lib80211_crypt_info *info);
 int lib80211_register_crypto_ops(struct lib80211_crypto_ops *ops);
 int lib80211_unregister_crypto_ops(struct lib80211_crypto_ops *ops);
 struct lib80211_crypto_ops *lib80211_get_crypto_ops(const char *name);
-void lib80211_crypt_deinit_entries(struct lib80211_crypt_info *, int);
-void lib80211_crypt_deinit_handler(unsigned long);
 void lib80211_crypt_delayed_deinit(struct lib80211_crypt_info *info,
 				    struct lib80211_crypt_data **crypt);
-void lib80211_crypt_quiescing(struct lib80211_crypt_info *info);
 
 #endif /* LIB80211_H */

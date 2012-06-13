@@ -268,6 +268,8 @@ struct super_block *freeze_bdev(struct block_device *bdev)
 			printk(KERN_ERR
 				"VFS:Filesystem freeze failed\n");
 			sb->s_frozen = SB_UNFROZEN;
+			smp_wmb();
+			wake_up(&sb->s_wait_unfrozen);
 			deactivate_locked_super(sb);
 			bdev->bd_fsfreeze_count--;
 			mutex_unlock(&bdev->bd_fsfreeze_mutex);
@@ -1181,6 +1183,7 @@ static int __blkdev_put(struct block_device *bdev, fmode_t mode, int for_part);
 static int __blkdev_get(struct block_device *bdev, fmode_t mode, int for_part)
 {
 	struct gendisk *disk;
+	struct module *owner;
 	int ret;
 	int partno;
 	int perm = 0;
@@ -1207,6 +1210,7 @@ static int __blkdev_get(struct block_device *bdev, fmode_t mode, int for_part)
 	disk = get_gendisk(bdev->bd_dev, &partno);
 	if (!disk)
 		goto out_unlock_kernel;
+	owner = disk->fops->owner;
 
 	mutex_lock_nested(&bdev->bd_mutex, for_part);
 	if (!bdev->bd_openers) {
@@ -1229,8 +1233,8 @@ static int __blkdev_get(struct block_device *bdev, fmode_t mode, int for_part)
 					 */
 					disk_put_part(bdev->bd_part);
 					bdev->bd_part = NULL;
-					module_put(disk->fops->owner);
 					put_disk(disk);
+					module_put(disk->fops->owner);
 					bdev->bd_disk = NULL;
 					mutex_unlock(&bdev->bd_mutex);
 					goto restart;
@@ -1269,8 +1273,8 @@ static int __blkdev_get(struct block_device *bdev, fmode_t mode, int for_part)
 			bd_set_size(bdev, (loff_t)bdev->bd_part->nr_sects << 9);
 		}
 	} else {
-		module_put(disk->fops->owner);
 		put_disk(disk);
+		module_put(disk->fops->owner);
 		disk = NULL;
 		if (bdev->bd_contains == bdev) {
 			if (bdev->bd_disk->fops->open) {
@@ -1302,9 +1306,9 @@ static int __blkdev_get(struct block_device *bdev, fmode_t mode, int for_part)
  out_unlock_kernel:
 	unlock_kernel();
 
+	put_disk(disk);
 	if (disk)
 		module_put(disk->fops->owner);
-	put_disk(disk);
 	bdput(bdev);
 
 	return ret;
@@ -1381,8 +1385,6 @@ static int __blkdev_put(struct block_device *bdev, fmode_t mode, int for_part)
 	if (!bdev->bd_openers) {
 		struct module *owner = disk->fops->owner;
 
-		put_disk(disk);
-		module_put(owner);
 		disk_put_part(bdev->bd_part);
 		bdev->bd_part = NULL;
 		bdev->bd_disk = NULL;
@@ -1390,6 +1392,9 @@ static int __blkdev_put(struct block_device *bdev, fmode_t mode, int for_part)
 		if (bdev != bdev->bd_contains)
 			victim = bdev->bd_contains;
 		bdev->bd_contains = NULL;
+
+		put_disk(disk);
+		module_put(owner);
 	}
 	unlock_kernel();
 	mutex_unlock(&bdev->bd_mutex);

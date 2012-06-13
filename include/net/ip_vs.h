@@ -220,6 +220,26 @@ enum {
 };
 
 /*
+ *	SCTP State Values
+ */
+enum ip_vs_sctp_states {
+	IP_VS_SCTP_S_NONE,
+	IP_VS_SCTP_S_INIT_CLI,
+	IP_VS_SCTP_S_INIT_SER,
+	IP_VS_SCTP_S_INIT_ACK_CLI,
+	IP_VS_SCTP_S_INIT_ACK_SER,
+	IP_VS_SCTP_S_ECHO_CLI,
+	IP_VS_SCTP_S_ECHO_SER,
+	IP_VS_SCTP_S_ESTABLISHED,
+	IP_VS_SCTP_S_SHUT_CLI,
+	IP_VS_SCTP_S_SHUT_SER,
+	IP_VS_SCTP_S_SHUT_ACK_CLI,
+	IP_VS_SCTP_S_SHUT_ACK_SER,
+	IP_VS_SCTP_S_CLOSED,
+	IP_VS_SCTP_S_LAST
+};
+
+/*
  *	Delta sequence info structure
  *	Each ip_vs_conn has 2 (output AND input seq. changes).
  *      Only used in the VS/NAT.
@@ -620,9 +640,21 @@ extern struct ip_vs_conn *ip_vs_ct_in_get
 (int af, int protocol, const union nf_inet_addr *s_addr, __be16 s_port,
  const union nf_inet_addr *d_addr, __be16 d_port);
 
+struct ip_vs_conn * ip_vs_conn_in_get_proto(int af, const struct sk_buff *skb,
+					    struct ip_vs_protocol *pp,
+					    const struct ip_vs_iphdr *iph,
+					    unsigned int proto_off,
+					    int inverse);
+
 extern struct ip_vs_conn *ip_vs_conn_out_get
 (int af, int protocol, const union nf_inet_addr *s_addr, __be16 s_port,
  const union nf_inet_addr *d_addr, __be16 d_port);
+
+struct ip_vs_conn * ip_vs_conn_out_get_proto(int af, const struct sk_buff *skb,
+					     struct ip_vs_protocol *pp,
+					     const struct ip_vs_iphdr *iph,
+					     unsigned int proto_off,
+					     int inverse);
 
 /* put back the conn without restarting its timer */
 static inline void __ip_vs_conn_put(struct ip_vs_conn *cp)
@@ -749,7 +781,7 @@ extern struct ip_vs_protocol ip_vs_protocol_udp;
 extern struct ip_vs_protocol ip_vs_protocol_icmp;
 extern struct ip_vs_protocol ip_vs_protocol_esp;
 extern struct ip_vs_protocol ip_vs_protocol_ah;
-
+extern struct ip_vs_protocol ip_vs_protocol_sctp;
 
 /*
  *      Registering/unregistering scheduler functions

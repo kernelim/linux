@@ -35,7 +35,7 @@ struct zd_ctrlset {
 	__le16 current_length;
 	u8     service;
 	__le16  next_frame_length;
-} __attribute__((packed));
+} __packed;
 
 #define ZD_CS_RESERVED_SIZE	25
 
@@ -106,7 +106,7 @@ struct zd_ctrlset {
 struct rx_length_info {
 	__le16 length[3];
 	__le16 tag;
-} __attribute__((packed));
+} __packed;
 
 #define RX_LENGTH_INFO_TAG		0x697e
 
@@ -117,7 +117,7 @@ struct rx_status {
 	u8 signal_quality_ofdm;
 	u8 decryption_type;
 	u8 frame_status;
-} __attribute__((packed));
+} __packed;
 
 /* rx_status field decryption_type */
 #define ZD_RX_NO_WEP	0
@@ -140,6 +140,21 @@ struct rx_status {
 #define ZD_RX_CRC16_ERROR		0x40
 #define ZD_RX_ERROR			0x80
 
+struct tx_retry_rate {
+	int count;	/* number of valid element in rate[] array */
+	int rate[10];	/* retry rates, described by an index in zd_rates[] */
+};
+
+struct tx_status {
+	u8 type;	/* must always be 0x01 : USB_INT_TYPE */
+	u8 id;		/* must always be 0xa0 : USB_INT_ID_RETRY_FAILED */
+	u8 rate;
+	u8 pad;
+	u8 mac[ETH_ALEN];
+	u8 retry;
+	u8 failure;
+} __packed;
+
 enum mac_flags {
 	MAC_FIXED_CHANNEL = 0x01,
 };
@@ -148,26 +163,40 @@ struct housekeeping {
 	struct delayed_work link_led_work;
 };
 
+struct beacon {
+	struct delayed_work watchdog_work;
+	struct sk_buff *cur_beacon;
+	unsigned long last_update;
+	u16 interval;
+	u8 period;
+};
+
+enum zd_device_flags {
+	ZD_DEVICE_RUNNING,
+};
+
 #define ZD_MAC_STATS_BUFFER_SIZE 16
 
-#define ZD_MAC_MAX_ACK_WAITERS 10
+#define ZD_MAC_MAX_ACK_WAITERS 50
 
 struct zd_mac {
 	struct zd_chip chip;
 	spinlock_t lock;
 	spinlock_t intr_lock;
 	struct ieee80211_hw *hw;
+	struct ieee80211_vif *vif;
 	struct housekeeping housekeeping;
-	struct work_struct set_multicast_hash_work;
+	struct beacon beacon;
 	struct work_struct set_rts_cts_work;
-	struct work_struct set_rx_filter_work;
 	struct work_struct process_intr;
 	struct zd_mc_hash multicast_hash;
 	u8 intr_buffer[USB_MAX_EP_INT_BUFFER];
 	u8 regdomain;
 	u8 default_regdomain;
+	u8 channel;
 	int type;
 	int associated;
+	unsigned long flags;
 	struct sk_buff_head ack_wait_queue;
 	struct ieee80211_channel channels[14];
 	struct ieee80211_rate rates[12];
@@ -176,14 +205,17 @@ struct zd_mac {
 	/* Short preamble (used for RTS/CTS) */
 	unsigned int short_preamble:1;
 
-	/* flags to indicate update in progress */
-	unsigned int updating_rts_rate:1;
-
 	/* whether to pass frames with CRC errors to stack */
 	unsigned int pass_failed_fcs:1;
 
 	/* whether to pass control frames to stack */
 	unsigned int pass_ctrl:1;
+
+	/* whether we have received a 802.11 ACK that is pending */
+	unsigned int ack_pending:1;
+
+	/* signal strength of the last 802.11 ACK received */
+	int ack_signal;
 };
 
 #define ZD_REGDOMAIN_FCC	0x10
@@ -191,8 +223,9 @@ struct zd_mac {
 #define ZD_REGDOMAIN_ETSI	0x30
 #define ZD_REGDOMAIN_SPAIN	0x31
 #define ZD_REGDOMAIN_FRANCE	0x32
-#define ZD_REGDOMAIN_JAPAN_ADD	0x40
+#define ZD_REGDOMAIN_JAPAN_2	0x40
 #define ZD_REGDOMAIN_JAPAN	0x41
+#define ZD_REGDOMAIN_JAPAN_3	0x49
 
 enum {
 	MIN_CHANNEL24 = 1,
@@ -204,7 +237,7 @@ enum {
 struct ofdm_plcp_header {
 	u8 prefix[3];
 	__le16 service;
-} __attribute__((packed));
+} __packed;
 
 static inline u8 zd_ofdm_plcp_header_rate(const struct ofdm_plcp_header *header)
 {
@@ -231,7 +264,7 @@ struct cck_plcp_header {
 	u8 service;
 	__le16 length;
 	__le16 crc16;
-} __attribute__((packed));
+} __packed;
 
 static inline u8 zd_cck_plcp_header_signal(const struct cck_plcp_header *header)
 {
@@ -279,8 +312,12 @@ int zd_mac_preinit_hw(struct ieee80211_hw *hw);
 int zd_mac_init_hw(struct ieee80211_hw *hw);
 
 int zd_mac_rx(struct ieee80211_hw *hw, const u8 *buffer, unsigned int length);
-void zd_mac_tx_failed(struct ieee80211_hw *hw);
+void zd_mac_tx_failed(struct urb *urb);
 void zd_mac_tx_to_dev(struct sk_buff *skb, int error);
+
+int zd_op_start(struct ieee80211_hw *hw);
+void zd_op_stop(struct ieee80211_hw *hw);
+int zd_restore_settings(struct zd_mac *mac);
 
 #ifdef DEBUG
 void zd_dump_rx_status(const struct rx_status *status);

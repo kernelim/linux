@@ -106,9 +106,11 @@ struct x86_init_ops {
 /**
  * struct x86_cpuinit_ops - platform specific cpu hotplug setups
  * @setup_percpu_clockev:	set up the per cpu clock event device
+ * @early_percpu_clock_init:	early init of the per cpu clock event device
  */
 struct x86_cpuinit_ops {
 	void (*setup_percpu_clockev)(void);
+	void (*early_percpu_clock_init)(void);
 };
 
 /**
@@ -118,6 +120,9 @@ struct x86_cpuinit_ops {
  * @set_wallclock:		set time back to HW clock
  * @is_untracked_pat_range	exclude from PAT logic
  * @nmi_init			enable NMI on cpus
+ * @save_sched_clock_state:	save state for sched_clock() on suspend
+ * @restore_sched_clock_state:	restore state for sched_clock() on resume
+ *
  */
 struct x86_platform_ops {
 	unsigned long (*calibrate_tsc)(void);
@@ -125,6 +130,8 @@ struct x86_platform_ops {
 	int (*set_wallclock)(unsigned long nowtime);
 	bool (*is_untracked_pat_range)(u64 start, u64 end);
 	void (*nmi_init)(void);
+	void (*save_sched_clock_state)(void);
+	void (*restore_sched_clock_state)(void);
 };
 
 extern struct x86_init_ops x86_init;

@@ -23,11 +23,15 @@
 #define ARCH_PERFMON_EVENTSEL_USR			(1ULL << 16)
 #define ARCH_PERFMON_EVENTSEL_OS			(1ULL << 17)
 #define ARCH_PERFMON_EVENTSEL_EDGE			(1ULL << 18)
+#define ARCH_PERFMON_EVENTSEL_PIN_CONTROL		(1ULL << 19)
 #define ARCH_PERFMON_EVENTSEL_INT			(1ULL << 20)
 #define ARCH_PERFMON_EVENTSEL_ANY			(1ULL << 21)
 #define ARCH_PERFMON_EVENTSEL_ENABLE			(1ULL << 22)
 #define ARCH_PERFMON_EVENTSEL_INV			(1ULL << 23)
 #define ARCH_PERFMON_EVENTSEL_CMASK			0xFF000000ULL
+
+#define AMD_PERFMON_EVENTSEL_GUESTONLY			(1ULL << 40)
+#define AMD_PERFMON_EVENTSEL_HOSTONLY			(1ULL << 41)
 
 #define AMD64_EVENTSEL_EVENT	\
 	(ARCH_PERFMON_EVENTSEL_EVENT | (0x0FULL << 32))
@@ -51,6 +55,7 @@
 		(1 << (ARCH_PERFMON_UNHALTED_CORE_CYCLES_INDEX))
 
 #define ARCH_PERFMON_BRANCH_MISSES_RETIRED			 6
+#define ARCH_PERFMON_EVENTS_COUNT				 7
 
 /*
  * Intel "Architectural Performance Monitoring" CPUID
@@ -66,6 +71,19 @@ union cpuid10_eax {
 	unsigned int full;
 };
 
+union cpuid10_ebx {
+	struct {
+		unsigned int no_unhalted_core_cycles:1;
+		unsigned int no_instructions_retired:1;
+		unsigned int no_unhalted_reference_cycles:1;
+		unsigned int no_llc_reference:1;
+		unsigned int no_llc_misses:1;
+		unsigned int no_branch_instruction_retired:1;
+		unsigned int no_branch_misses_retired:1;
+	} split;
+	unsigned int full;
+};
+
 union cpuid10_edx {
 	struct {
 		unsigned int num_counters_fixed:5;
@@ -75,6 +93,15 @@ union cpuid10_edx {
 	unsigned int full;
 };
 
+struct x86_pmu_capability {
+	int version;
+	int num_counters_gp;
+	int num_counters_fixed;
+	int bit_width_gp;
+	int bit_width_fixed;
+	unsigned int events_mask;
+	int events_mask_len;
+};
 
 /*
  * Fixed-purpose performance events:
@@ -167,8 +194,34 @@ extern unsigned long perf_misc_flags(struct pt_regs *regs);
 	regs->flags = 0;					\
 }
 
+struct perf_guest_switch_msr {
+	unsigned msr;
+	u64 host, guest;
+};
+
+extern struct perf_guest_switch_msr *perf_guest_get_msrs(int *nr);
+extern void perf_get_x86_pmu_capability(struct x86_pmu_capability *cap);
 #else
+static inline perf_guest_switch_msr *perf_guest_get_msrs(int *nr)
+{
+	*nr = 0;
+	return NULL;
+}
+
+static inline void perf_get_x86_pmu_capability(struct x86_pmu_capability *cap)
+{
+	memset(cap, 0, sizeof(*cap));
+}
+
 static inline void perf_events_lapic_init(void)	{ }
+#endif
+
+#if defined(CONFIG_PERF_EVENTS) && defined(CONFIG_CPU_SUP_AMD)
+ extern void amd_pmu_enable_virt(void);
+ extern void amd_pmu_disable_virt(void);
+#else
+ static inline void amd_pmu_enable_virt(void) { }
+ static inline void amd_pmu_disable_virt(void) { }
 #endif
 
 #endif /* _ASM_X86_PERF_EVENT_H */

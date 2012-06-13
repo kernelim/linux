@@ -27,6 +27,7 @@
 #include <linux/sched.h>
 #include <linux/ftrace_event.h>
 
+#include <asm/perf_event.h>
 #include <asm/tlbflush.h>
 #include <asm/desc.h>
 
@@ -48,6 +49,7 @@ MODULE_LICENSE("GPL");
 #define SVM_FEATURE_LBRV           (1 <<  1)
 #define SVM_FEATURE_SVML           (1 <<  2)
 #define SVM_FEATURE_NRIP           (1 <<  3)
+#define SVM_FEATURE_TSC_RATE       (1 <<  4)
 #define SVM_FEATURE_FLUSH_ASID     (1 <<  6)
 #define SVM_FEATURE_DECODE_ASSIST  (1 <<  7)
 #define SVM_FEATURE_PAUSE_FILTER   (1 << 10)
@@ -66,6 +68,10 @@ MODULE_LICENSE("GPL");
 #else
 #define nsvm_printk(fmt, args...) do {} while(0)
 #endif
+
+#define TSC_RATIO_RSVD          0xffffff0000000000ULL
+#define TSC_RATIO_MIN		0x0000000000000001ULL
+#define TSC_RATIO_MAX		0x000000ffffffffffULL
 
 static bool erratum_383_found __read_mostly;
 
@@ -124,7 +130,12 @@ struct vcpu_svm {
 	ulong nmi_iret_rip;
 
 	struct nested_state nested;
+
+	u64  tsc_ratio;
 };
+
+static DEFINE_PER_CPU(u64, current_tsc_ratio);
+#define TSC_RATIO_DEFAULT	0x100000000ULL
 
 /* enable NPT for AMD64 and X86 with PAE */
 #if defined(CONFIG_X86_64) || defined(CONFIG_X86_PAE)
@@ -146,6 +157,7 @@ static int nested_svm_exit_handled(struct vcpu_svm *svm);
 static int nested_svm_vmexit(struct vcpu_svm *svm);
 static int nested_svm_check_exception(struct vcpu_svm *svm, unsigned nr,
 				      bool has_error_code, u32 error_code);
+static u64 __scale_tsc(u64 ratio, u64 tsc);
 
 enum {
 	VMCB_INTERCEPTS, /* Intercept vectors, TSC offset,
@@ -379,7 +391,13 @@ static int has_svm(void)
 
 static void svm_hardware_disable(void *garbage)
 {
+	/* Make sure we clean up behind us */
+	if (svm_has(SVM_FEATURE_TSC_RATE))
+		wrmsrl(MSR_AMD64_TSC_RATIO, TSC_RATIO_DEFAULT);
+
 	cpu_svm_disable();
+
+	amd_pmu_disable_virt();
 }
 
 static int svm_hardware_enable(void *garbage)
@@ -420,7 +438,14 @@ static int svm_hardware_enable(void *garbage)
 	wrmsrl(MSR_VM_HSAVE_PA,
 	       page_to_pfn(svm_data->save_area) << PAGE_SHIFT);
 
+	if (svm_has(SVM_FEATURE_TSC_RATE)) {
+		wrmsrl(MSR_AMD64_TSC_RATIO, TSC_RATIO_DEFAULT);
+		__get_cpu_var(current_tsc_ratio) = TSC_RATIO_DEFAULT;
+	}
+
 	svm_init_erratum_383();
+
+	amd_pmu_enable_virt();
 
 	return 0;
 }
@@ -557,6 +582,23 @@ static __init int svm_hardware_setup(void)
 
 	svm_features = cpuid_edx(SVM_CPUID_FUNC);
 
+	if (svm_has(SVM_FEATURE_TSC_RATE)) {
+		u64 max;
+
+		kvm_has_tsc_control = true;
+
+		/*
+		 * Make sure the user can only configure tsc_khz values that
+		 * fit into a signed integer.
+		 * A min value is not calculated needed because it will always
+		 * be 1 on all machines and a value of 0 is used to disable
+		 * tsc-scaling for the vcpu.
+		 */
+		max = min(0x7fffffffULL, __scale_tsc(tsc_khz, TSC_RATIO_MAX));
+
+		kvm_max_guest_tsc_khz = max;
+	}
+
 	if (!svm_has(SVM_FEATURE_NPT))
 		npt_enabled = false;
 
@@ -607,6 +649,64 @@ static void init_sys_seg(struct vmcb_seg *seg, uint32_t type)
 	seg->base = 0;
 }
 
+static u64 __scale_tsc(u64 ratio, u64 tsc)
+{
+	u64 mult, frac, _tsc;
+
+	mult  = ratio >> 32;
+	frac  = ratio & ((1ULL << 32) - 1);
+
+	_tsc  = tsc;
+	_tsc *= mult;
+	_tsc += (tsc >> 32) * frac;
+	_tsc += ((tsc & ((1ULL << 32) - 1)) * frac) >> 32;
+
+	return _tsc;
+}
+
+static u64 svm_scale_tsc(struct kvm_vcpu *vcpu, u64 tsc)
+{
+	struct vcpu_svm *svm = to_svm(vcpu);
+	u64 _tsc = tsc;
+
+	if (svm->tsc_ratio != TSC_RATIO_DEFAULT)
+		_tsc = __scale_tsc(svm->tsc_ratio, tsc);
+
+	return _tsc;
+}
+
+static void svm_set_tsc_khz(struct kvm_vcpu *vcpu, u32 user_tsc_khz)
+{
+	struct vcpu_svm *svm = to_svm(vcpu);
+	u64 ratio;
+	u64 khz;
+
+	/* TSC scaling supported? */
+	if (!svm_has(SVM_FEATURE_TSC_RATE))
+		return;
+
+	/* TSC-Scaling disabled or guest TSC same frequency as host TSC? */
+	if (user_tsc_khz == 0) {
+		vcpu->arch.virtual_tsc_khz = 0;
+		svm->tsc_ratio = TSC_RATIO_DEFAULT;
+		return;
+	}
+
+	khz = user_tsc_khz;
+
+	/* TSC scaling required  - calculate ratio */
+	ratio = khz << 32;
+	do_div(ratio, tsc_khz);
+
+	if (ratio == 0 || ratio & TSC_RATIO_RSVD) {
+		WARN_ONCE(1, "Invalid TSC ratio - virtual-tsc-khz=%u\n",
+				user_tsc_khz);
+		return;
+	}
+	vcpu->arch.virtual_tsc_khz = user_tsc_khz;
+	svm->tsc_ratio             = ratio;
+}
+
 static void svm_write_tsc_offset(struct kvm_vcpu *vcpu, u64 offset)
 {
 	struct vcpu_svm *svm = to_svm(vcpu);
@@ -622,14 +722,35 @@ static void svm_write_tsc_offset(struct kvm_vcpu *vcpu, u64 offset)
 	mark_dirty(svm->vmcb, VMCB_INTERCEPTS);
 }
 
-static void svm_adjust_tsc_offset(struct kvm_vcpu *vcpu, s64 adjustment)
+static void svm_adjust_tsc_offset(struct kvm_vcpu *vcpu, s64 adjustment, bool host)
 {
 	struct vcpu_svm *svm = to_svm(vcpu);
+	bool negative = false;
+
+	if (adjustment < 0) {
+		adjustment = -adjustment;
+		negative = true;
+	}
+	if (host)
+		adjustment = svm_scale_tsc(vcpu, adjustment);
+
+	if (negative) {
+		adjustment = -adjustment;
+	}
 
 	svm->vmcb->control.tsc_offset += adjustment;
 	mark_dirty(svm->vmcb, VMCB_INTERCEPTS);
 	if (is_nested(svm))
 		svm->nested.hsave->control.tsc_offset += adjustment;
+}
+
+static u64 svm_compute_tsc_offset(struct kvm_vcpu *vcpu, u64 target_tsc)
+{
+	u64 tsc;
+
+	tsc = svm_scale_tsc(vcpu, native_read_tsc());
+
+	return target_tsc - tsc;
 }
 
 static void init_vmcb(struct vcpu_svm *svm)
@@ -668,6 +789,7 @@ static void init_vmcb(struct vcpu_svm *svm)
 	control->intercept = 	(1ULL << INTERCEPT_INTR) |
 				(1ULL << INTERCEPT_NMI) |
 				(1ULL << INTERCEPT_SMI) |
+				(1ULL << INTERCEPT_RDPMC) |
 				(1ULL << INTERCEPT_CPUID) |
 				(1ULL << INTERCEPT_INVD) |
 				(1ULL << INTERCEPT_HLT) |
@@ -796,6 +918,8 @@ static struct kvm_vcpu *svm_create_vcpu(struct kvm *kvm, unsigned int id)
 		goto out;
 	}
 
+	svm->tsc_ratio = TSC_RATIO_DEFAULT;
+
 	err = kvm_vcpu_init(&svm->vcpu, kvm, id);
 	if (err)
 		goto free_svm;
@@ -876,6 +1000,12 @@ static void svm_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
 
 	for (i = 0; i < NR_HOST_SAVE_USER_MSRS; i++)
 		rdmsrl(host_save_user_msrs[i], svm->host_user_msrs[i]);
+
+	if (svm_has(SVM_FEATURE_TSC_RATE) &&
+	    svm->tsc_ratio != __get_cpu_var(current_tsc_ratio)) {
+		__get_cpu_var(current_tsc_ratio) = svm->tsc_ratio;
+		wrmsrl(MSR_AMD64_TSC_RATIO, svm->tsc_ratio);
+	}
 }
 
 static void svm_vcpu_put(struct kvm_vcpu *vcpu)
@@ -2267,6 +2397,22 @@ static int emulate_on_interception(struct vcpu_svm *svm)
 	return 1;
 }
 
+static int rdpmc_interception(struct vcpu_svm *svm)
+{
+	int err;
+
+	if (!static_cpu_has(X86_FEATURE_NRIPS))
+		return emulate_on_interception(svm);
+
+	err = kvm_rdpmc(&svm->vcpu);
+	if (err)
+		kvm_inject_gp(&svm->vcpu, 0);
+	else
+		skip_emulated_instruction(&svm->vcpu);
+
+	return 1;
+}
+
 #define CR_VALID (1ULL << 63)
 
 static int cr_interception(struct vcpu_svm *svm)
@@ -2290,18 +2436,16 @@ static int cr_interception(struct vcpu_svm *svm)
 		val = kvm_register_read(&svm->vcpu, reg);
 		switch (cr) {
 		case 0:
-			kvm_set_cr0(&svm->vcpu, val);
+			err = kvm_set_cr0(&svm->vcpu, val);
 			break;
 		case 3:
-			kvm_set_cr3(&svm->vcpu, val);
+			err = kvm_set_cr3(&svm->vcpu, val);
 			break;
 		case 4:
-			kvm_set_cr4(&svm->vcpu, val);
+			err = kvm_set_cr4(&svm->vcpu, val);
 			break;
 		case 8:
 			err = kvm_set_cr8(&svm->vcpu, val);
-			if (err)
-			kvm_inject_gp(&svm->vcpu, 0);
 			break;
 		default:
 			WARN(1, "unhandled write to CR%d", cr);
@@ -2332,7 +2476,9 @@ static int cr_interception(struct vcpu_svm *svm)
 		}
 		kvm_register_write(&svm->vcpu, reg, val);
 	}
-	if (!err)
+	if (err)
+		kvm_inject_gp(&svm->vcpu, 0);
+	else
 		skip_emulated_instruction(&svm->vcpu);
 
 	return 1;
@@ -2394,7 +2540,7 @@ static int svm_get_msr(struct kvm_vcpu *vcpu, unsigned ecx, u64 *data)
 		else
 			tsc_offset = svm->vmcb->control.tsc_offset;
 
-		*data = tsc_offset + native_read_tsc();
+		*data = tsc_offset + svm_scale_tsc(vcpu, native_read_tsc());
 		break;
 	}
 	case MSR_K6_STAR:
@@ -2628,6 +2774,7 @@ static int (*svm_exit_handlers[])(struct vcpu_svm *svm) = {
 	[SVM_EXIT_SMI]				= nop_on_interception,
 	[SVM_EXIT_INIT]				= nop_on_interception,
 	[SVM_EXIT_VINTR]			= interrupt_window_interception,
+	[SVM_EXIT_RDPMC]			= rdpmc_interception,
 	/* [SVM_EXIT_CR0_SEL_WRITE]		= emulate_on_interception, */
 	[SVM_EXIT_CPUID]			= cpuid_interception,
 	[SVM_EXIT_IRET]                         = iret_interception,
@@ -3094,7 +3241,15 @@ static void svm_vcpu_run(struct kvm_vcpu *vcpu)
 
 	local_irq_disable();
 
+	if (unlikely(svm->vmcb->control.exit_code == SVM_EXIT_NMI))
+		kvm_before_handle_nmi(&svm->vcpu);
+
 	stgi();
+
+	/* Any pending NMI will happen here */
+
+	if (unlikely(svm->vmcb->control.exit_code == SVM_EXIT_NMI))
+		kvm_after_handle_nmi(&svm->vcpu);
 
 	sync_cr8_to_lapic(vcpu);
 
@@ -3326,14 +3481,16 @@ static struct kvm_x86_ops svm_x86_ops = {
 	.exit_reasons_str = svm_exit_reasons_str,
 	.gb_page_enable = svm_gb_page_enable,
 
+	.set_tsc_khz = svm_set_tsc_khz,
 	.write_tsc_offset = svm_write_tsc_offset,
 	.adjust_tsc_offset = svm_adjust_tsc_offset,
+	.compute_tsc_offset = svm_compute_tsc_offset,
 };
 
 static int __init svm_init(void)
 {
 	return kvm_init(&svm_x86_ops, sizeof(struct vcpu_svm),
-			      THIS_MODULE);
+			__alignof__(struct vcpu_svm), THIS_MODULE);
 }
 
 static void __exit svm_exit(void)

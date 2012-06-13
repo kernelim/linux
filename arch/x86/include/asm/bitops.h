@@ -307,7 +307,24 @@ static inline int test_and_change_bit(int nr, volatile unsigned long *addr)
 }
 
 #ifdef CONFIG_X86_64
-#define LONG_INT_MAX ((long)((int)(~1U>>1)))
+#define INT_MAX ((int)(~0U>>1))
+#define LONG_INT_MAX ((long)INT_MAX)
+#define INT_MAX_PLUS_1 (LONG_INT_MAX + 1UL)
+
+static inline int test_and_set_bit_long(unsigned long nr, volatile unsigned long *addr)
+{
+        unsigned long oldbit;
+
+	if (unlikely(nr >= INT_MAX_PLUS_1)) {
+		addr += (nr / INT_MAX_PLUS_1) * (INT_MAX_PLUS_1 / BITS_PER_LONG);
+		nr &= INT_MAX;
+	}
+	asm volatile(LOCK_PREFIX "bts %2,%1\n\t"
+		     "sbb %0,%0"
+		     : "=r" (oldbit), ADDR : "Ir" (nr) : "memory");
+
+	return oldbit;
+}
 
 static inline int test_and_clear_bit_long(unsigned long nr, volatile unsigned long *addr)
 {

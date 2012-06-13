@@ -50,7 +50,18 @@ static inline u64 apei_exec_ctx_get_output(struct apei_exec_context *ctx)
 	return ctx->value;
 }
 
-int apei_exec_run(struct apei_exec_context *ctx, u8 action);
+int __apei_exec_run(struct apei_exec_context *ctx, u8 action, bool optional);
+
+static inline int apei_exec_run(struct apei_exec_context *ctx, u8 action)
+{
+	return __apei_exec_run(ctx, action, 0);
+}
+
+/* It is optional whether the firmware provides the action */
+static inline int apei_exec_run_optional(struct apei_exec_context *ctx, u8 action)
+{
+	return __apei_exec_run(ctx, action, 1);
+}
 
 /* Common instruction implementation */
 
@@ -84,6 +95,9 @@ static inline void apei_resources_init(struct apei_resources *resources)
 }
 
 void apei_resources_fini(struct apei_resources *resources);
+int apei_resources_add(struct apei_resources *resources,
+		       unsigned long start, unsigned long size,
+		       bool iomem);
 int apei_resources_sub(struct apei_resources *resources1,
 		       struct apei_resources *resources2);
 int apei_resources_request(struct apei_resources *resources,

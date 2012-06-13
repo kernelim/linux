@@ -743,6 +743,19 @@ static void __init trim_bios_range(void)
 	sanitize_e820_map(e820.map, ARRAY_SIZE(e820.map), &e820.nr_map);
 }
 
+static void rh_check_supported(void)
+{
+	/* The RHEL kernel does not support this hardware. */
+
+	/* Intel CPU family 6, model greater than 59 */
+	if ((boot_cpu_data.x86_vendor == X86_VENDOR_INTEL) &&
+	    ((boot_cpu_data.x86 == 6) && (boot_cpu_data.x86_model > 59))) {
+		printk(KERN_CRIT "Detected CPU family %d model %d\n",
+		       boot_cpu_data.x86, boot_cpu_data.x86_model);
+		mark_hardware_unsupported("CPU family 6 model > 59");
+	}
+}
+
 /*
  * Determine if we were loaded by an EFI loader.  If so, then we have also been
  * passed the efi memmap, systab, etc., so we should use these data structures
@@ -813,6 +826,7 @@ void __init setup_arch(char **cmdline_p)
 
 	x86_init.oem.arch_setup();
 
+	iomem_resource.end = (1ULL << boot_cpu_data.x86_phys_bits) - 1;
 	setup_memory_map();
 	parse_setup_data();
 	/* update the e820_saved too */
@@ -1105,6 +1119,8 @@ void __init setup_arch(char **cmdline_p)
 	x86_init.oem.banner();
 
 	mcheck_init();
+
+	rh_check_supported();
 }
 
 #ifdef CONFIG_X86_32

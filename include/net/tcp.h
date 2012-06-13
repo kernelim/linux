@@ -130,7 +130,13 @@ extern void tcp_time_wait(struct sock *sk, int state, int timeo);
 #endif
 #define TCP_RTO_MAX	((unsigned)(120*HZ))
 #define TCP_RTO_MIN	((unsigned)(HZ/5))
-#define TCP_TIMEOUT_INIT ((unsigned)(3*HZ))	/* RFC 1122 initial RTO value	*/
+#define TCP_TIMEOUT_INIT ((unsigned)(1*HZ))	/* RFC2988bis initial RTO value	*/
+#define TCP_TIMEOUT_FALLBACK ((unsigned)(3*HZ))	/* RFC 1122 initial RTO value, now
+						 * used as a fallback RTO for the
+						 * initial data transmission if no
+						 * valid RTT sample has been acquired,
+						 * most likely due to retrans in 3WHS.
+						 */
 
 #define TCP_RESOURCE_PROBE_INTERVAL ((unsigned)(HZ/2U)) /* Maximal interval between probes
 					                 * for local resources.
@@ -287,7 +293,7 @@ static inline void tcp_synq_overflow(struct sock *sk)
 static inline int tcp_synq_no_recent_overflow(const struct sock *sk)
 {
 	unsigned long last_overflow = tcp_sk(sk)->rx_opt.ts_recent_stamp;
-	return time_after(jiffies, last_overflow + TCP_TIMEOUT_INIT);
+	return time_after(jiffies, last_overflow + TCP_TIMEOUT_FALLBACK);
 }
 
 extern struct proto tcp_prot;
@@ -362,6 +368,7 @@ static inline void tcp_clear_options(struct tcp_options_received *rx_opt)
 #define	TCP_ECN_OK		1
 #define	TCP_ECN_QUEUE_CWR	2
 #define	TCP_ECN_DEMAND_CWR	4
+#define	TCP_ECN_SEEN		8
 
 static __inline__ void
 TCP_ECN_create_request(struct request_sock *req, struct tcphdr *th)
@@ -532,6 +539,7 @@ extern void tcp_initialize_rcv_mss(struct sock *sk);
 extern int tcp_mtu_to_mss(struct sock *sk, int pmtu);
 extern int tcp_mss_to_mtu(struct sock *sk, int mss);
 extern void tcp_mtup_init(struct sock *sk);
+extern void tcp_valid_rtt_meas(struct sock *sk, u32 seq_rtt);
 
 static inline void tcp_bound_rto(const struct sock *sk)
 {
@@ -1280,13 +1288,16 @@ static inline struct sk_buff *tcp_write_queue_prev(struct sock *sk, struct sk_bu
 
 /* This function calculates a "timeout" which is equivalent to the timeout of a
  * TCP connection after "boundary" unsucessful, exponentially backed-off
- * retransmissions with an initial RTO of TCP_RTO_MIN.
+ * retransmissions with an initial RTO of TCP_RTO_MIN or TCP_TIMEOUT_INIT if
+ * syn_set flag is set.
  */
 static inline bool retransmits_timed_out(struct sock *sk,
-					 unsigned int boundary)
+					 unsigned int boundary,
+					 bool syn_set)
 {
 	unsigned int timeout, linear_backoff_thresh;
 	unsigned int start_ts;
+	unsigned int rto_base = syn_set ? TCP_TIMEOUT_INIT : TCP_RTO_MIN;
 
 	if (!inet_csk(sk)->icsk_retransmits)
 		return false;
@@ -1296,12 +1307,12 @@ static inline bool retransmits_timed_out(struct sock *sk,
 	else
 		start_ts = tcp_sk(sk)->retrans_stamp;
 
-	linear_backoff_thresh = ilog2(TCP_RTO_MAX/TCP_RTO_MIN);
+	linear_backoff_thresh = ilog2(TCP_RTO_MAX/rto_base);
 
 	if (boundary <= linear_backoff_thresh)
-		timeout = ((2 << boundary) - 1) * TCP_RTO_MIN;
+		timeout = ((2 << boundary) - 1) * rto_base;
 	else
-		timeout = ((2 << linear_backoff_thresh) - 1) * TCP_RTO_MIN +
+		timeout = ((2 << linear_backoff_thresh) - 1) * rto_base +
 			  (boundary - linear_backoff_thresh) * TCP_RTO_MAX;
 
 	return (tcp_time_stamp - start_ts) >= timeout;

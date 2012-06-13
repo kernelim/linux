@@ -174,6 +174,8 @@ enum pci_dev_flags {
 	PCI_DEV_FLAGS_MSI_INTX_DISABLE_BUG = (__force pci_dev_flags_t) 1,
 	/* Device configuration is irrevocably lost if disabled into D3 */
 	PCI_DEV_FLAGS_NO_D3 = (__force pci_dev_flags_t) 2,
+	/* Provide indication device is assigned by a Virtual Machine Manager */
+	PCI_DEV_FLAGS_ASSIGNED = (__force pci_dev_flags_t) 4,
 };
 
 enum pci_irq_reroute_variant {
@@ -314,10 +316,17 @@ struct pci_dev_rh1 {
 	unsigned int    __aer_firmware_first_valid:1;
 	unsigned int	__pcie_osc_capabilities_valid:1;
 	unsigned int	pcie_osc_capabilities;
+	resource_size_t	fw_addr[DEVICE_COUNT_RESOURCE];	/* FW-assigned addr */
+#ifdef CONFIG_PCI_MSI
+	struct kset *msi_kset;
+#endif
+	u8		pcie_mpss:3;	/* PCI-E Max Payload Size Supported */
 };
 
 extern struct pci_dev *alloc_pci_dev(void);
 extern void kfree_pci_dev(struct pci_dev *);
+extern u8 rh_get_mpss(struct pci_dev *);
+extern void rh_set_mpss(struct pci_dev *, u8);
 
 #define pci_dev_b(n) list_entry(n, struct pci_dev, bus_list)
 #define	to_pci_dev(n) container_of(n, struct pci_dev, dev)
@@ -350,6 +359,28 @@ static inline void pci_add_saved_cap(struct pci_dev *pci_dev,
 #ifndef PCI_BUS_NUM_RESOURCES
 #define PCI_BUS_NUM_RESOURCES	16
 #endif
+/*
+ * The first PCI_BUS_NUM_RESOURCES PCI bus resources (the first four of
+ * which correspond to P2P or CardBus bridge windows) go in a table.
+ * Additional ones (for buses below host bridges or subtractive decode
+ * bridges) go into the remaining entries of the table or, if the table
+ * becomes full, in the list.
+ * Use pci_bus_for_each_resource() to iterate through all the resources.
+ */
+
+/*
+ * PCI_SUBTRACTIVE_DECODE means the bridge forwards the window implicitly
+ * and there's no way to program the bridge with the details of the window.
+ * This does not apply to ACPI _CRS windows, even with the _DEC subtractive-
+ * decode bit set, because they are explicit and can be programmed with _SRS.
+ */
+#define PCI_SUBTRACTIVE_DECODE	0x1
+
+struct pci_bus_resource {
+	struct list_head list;
+	struct resource *res;
+	unsigned int flags;
+};
 
 #define PCI_REGION_FLAG_MASK	0x0fU	/* These bits of resource flags tell us the PCI region flags */
 
@@ -361,8 +392,7 @@ struct pci_bus {
 	struct pci_dev	*self;		/* bridge device as seen by parent */
 	struct list_head slots;		/* list of slots on this bus */
 	struct resource	*resource[PCI_BUS_NUM_RESOURCES];
-					/* address space routed to this bus */
-	struct list_head resources;	/* unimplemented in RHEL6 */
+	struct list_head resources;	/* address space routed to this bus */
 
 	struct pci_ops	*ops;		/* configuration access functions */
 	void		*sysdata;	/* hook for sys-specific extension */
@@ -571,6 +601,17 @@ struct pci_driver {
 /* these external functions are only available when PCI support is enabled */
 #ifdef CONFIG_PCI
 
+extern void pcie_bus_configure_settings(struct pci_bus *bus, u8 smpss);
+
+enum pcie_bus_config_types {
+	PCIE_BUS_TUNE_OFF,
+	PCIE_BUS_SAFE,
+	PCIE_BUS_PERFORMANCE,
+	PCIE_BUS_PEER2PEER,
+};
+
+extern enum pcie_bus_config_types pcie_bus_config;
+
 extern struct bus_type pci_bus_type;
 
 /* Do NOT directly access these two variables, unless you are arch specific pci
@@ -739,6 +780,9 @@ int __must_check pci_set_mwi(struct pci_dev *dev);
 int pci_try_set_mwi(struct pci_dev *dev);
 void pci_clear_mwi(struct pci_dev *dev);
 void pci_intx(struct pci_dev *dev, int enable);
+bool pci_intx_mask_supported(struct pci_dev *dev);
+bool pci_check_and_mask_intx(struct pci_dev *dev);
+bool pci_check_and_unmask_intx(struct pci_dev *dev);
 void pci_msi_off(struct pci_dev *dev);
 int pci_set_dma_mask(struct pci_dev *dev, u64 mask);
 int pci_set_consistent_dma_mask(struct pci_dev *dev, u64 mask);
@@ -749,6 +793,8 @@ int pcix_get_mmrbc(struct pci_dev *dev);
 int pcix_set_mmrbc(struct pci_dev *dev, int mmrbc);
 int pcie_get_readrq(struct pci_dev *dev);
 int pcie_set_readrq(struct pci_dev *dev, int rq);
+int pcie_get_mps(struct pci_dev *dev);
+int pcie_set_mps(struct pci_dev *dev, int mps);
 int __pci_reset_function(struct pci_dev *dev);
 int pci_reset_function(struct pci_dev *dev);
 void pci_update_resource(struct pci_dev *dev, int resno);
@@ -830,6 +876,15 @@ int pci_request_selected_regions_exclusive(struct pci_dev *, int, const char *);
 void pci_release_selected_regions(struct pci_dev *, int);
 
 /* drivers/pci/bus.c */
+void pci_bus_add_resource(struct pci_bus *bus, struct resource *res, unsigned int flags);
+struct resource *pci_bus_resource_n(const struct pci_bus *bus, int n);
+void pci_bus_remove_resources(struct pci_bus *bus);
+
+#define pci_bus_for_each_resource(bus, res, i)				\
+	for (i = 0;							\
+	    (res = pci_bus_resource_n(bus, i)) || i < PCI_BUS_NUM_RESOURCES; \
+	     i++)
+
 int __must_check pci_bus_alloc_resource(struct pci_bus *bus,
 			struct resource *res, resource_size_t size,
 			resource_size_t align, resource_size_t min,
@@ -986,6 +1041,11 @@ int  ht_create_irq(struct pci_dev *dev, int idx);
 void ht_destroy_irq(unsigned int irq);
 #endif /* CONFIG_HT_IRQ */
 
+extern void pci_cfg_access_lock(struct pci_dev *dev);
+extern bool pci_cfg_access_trylock(struct pci_dev *dev);
+extern void pci_cfg_access_unlock(struct pci_dev *dev);
+
+/* kabi wrapper to pci_cfg_access_[un]lock */
 extern void pci_block_user_cfg_access(struct pci_dev *dev);
 extern void pci_unblock_user_cfg_access(struct pci_dev *dev);
 
@@ -1188,10 +1248,13 @@ static inline void pci_release_regions(struct pci_dev *dev)
 
 #define pci_dma_burst_advice(pdev, strat, strategy_parameter) do { } while (0)
 
-static inline void pci_block_user_cfg_access(struct pci_dev *dev)
+static inline void pci_block_cfg_access(struct pci_dev *dev)
 { }
 
-static inline void pci_unblock_user_cfg_access(struct pci_dev *dev)
+static inline int pci_block_cfg_access_in_atomic(struct pci_dev *dev)
+{ return 0;}
+
+static inline void pci_unblock_cfg_access(struct pci_dev *dev)
 { }
 
 static inline struct pci_bus *pci_find_next_bus(const struct pci_bus *from)

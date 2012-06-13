@@ -9,6 +9,12 @@
 #include <asm/lowcore.h>
 
 #
+# store_status: Empty implementation until kdump is supported on 31 bit
+#
+ENTRY(store_status)
+		br	%r14
+
+#
 # do_reipl_asm
 # Parameter: r2 = schid of reipl device
 #

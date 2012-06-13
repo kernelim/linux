@@ -518,4 +518,31 @@ struct tc_drr_stats
 	__u32	deficit;
 };
 
+/* MQPRIO */
+#define TC_QOPT_BITMASK 15
+#define TC_QOPT_MAX_QUEUE 16
+
+struct tc_mqprio_qopt {
+	__u8	num_tc;
+	__u8	prio_tc_map[TC_QOPT_BITMASK + 1];
+	__u8	hw;
+	__u16	count[TC_QOPT_MAX_QUEUE];
+	__u16	offset[TC_QOPT_MAX_QUEUE];
+};
+
+/* QFQ */
+enum {
+	TCA_QFQ_UNSPEC,
+	TCA_QFQ_WEIGHT,
+	TCA_QFQ_LMAX,
+	__TCA_QFQ_MAX
+};
+
+#define TCA_QFQ_MAX	(__TCA_QFQ_MAX - 1)
+
+struct tc_qfq_stats {
+	__u32 weight;
+	__u32 lmax;
+};
+
 #endif

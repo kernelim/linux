@@ -451,7 +451,7 @@ int netxen_pinit_from_rom(struct netxen_adapter *adapter)
 
 	/* resetall */
 	netxen_rom_lock(adapter);
-	NXWR32(adapter, NETXEN_ROMUSB_GLB_SW_RESET, 0xffffffff);
+	NXWR32(adapter, NETXEN_ROMUSB_GLB_SW_RESET, 0xfeffffff);
 	netxen_rom_unlock(adapter);
 
 	if (NX_IS_REVISION_P3(adapter->ahw.revision_id)) {
@@ -1355,7 +1355,6 @@ int netxen_phantom_init(struct netxen_adapter *adapter, int pegtune_val)
 
 	do {
 		val = NXRD32(adapter, CRB_CMDPEG_STATE);
-
 		switch (val) {
 		case PHAN_INITIALIZE_COMPLETE:
 		case PHAN_INITIALIZE_ACK:
@@ -1496,7 +1495,7 @@ netxen_alloc_rx_skb(struct netxen_adapter *adapter,
 	dma_addr_t dma;
 	struct pci_dev *pdev = adapter->pdev;
 
-	buffer->skb = dev_alloc_skb(rds_ring->skb_size);
+	buffer->skb = netdev_alloc_skb(adapter->netdev, rds_ring->skb_size);
 	if (!buffer->skb)
 		return 1;
 

@@ -149,6 +149,10 @@ struct ports_device {
 	int chr_major;
 };
 
+struct port_stats {
+	unsigned long bytes_sent, bytes_received, bytes_discarded;
+};
+
 /* This struct holds the per-port data */
 struct port {
 	/* Next port in the list, head is in the ports_device */
@@ -175,6 +179,13 @@ struct port {
 
 	/* File in the debugfs directory that exposes this port's information */
 	struct dentry *debugfs_file;
+
+	/*
+	 * Keep count of the bytes sent, received and discarded for
+	 * this port for accounting and debugging purposes.  These
+	 * counts are not reset across port open / close events.
+	 */
+	struct port_stats stats;
 
 	/*
 	 * The entries in this struct will be valid if this port is
@@ -345,17 +356,19 @@ fail:
 }
 
 /* Callers should take appropriate locks */
-static void *get_inbuf(struct port *port)
+static struct port_buffer *get_inbuf(struct port *port)
 {
 	struct port_buffer *buf;
-	struct virtqueue *vq;
 	unsigned int len;
 
-	vq = port->in_vq;
-	buf = virtqueue_get_buf(vq, &len);
+	if (port->inbuf)
+		return port->inbuf;
+
+	buf = virtqueue_get_buf(port->in_vq, &len);
 	if (buf) {
 		buf->len = len;
 		buf->offset = 0;
+		port->stats.bytes_received += len;
 	}
 	return buf;
 }
@@ -382,32 +395,27 @@ static int add_inbuf(struct virtqueue *vq, struct port_buffer *buf)
 static void discard_port_data(struct port *port)
 {
 	struct port_buffer *buf;
-	struct virtqueue *vq;
-	unsigned int len;
-	int ret;
+	unsigned int err;
 
 	if (!port->portdev) {
 		/* Device has been unplugged.  vqs are already gone. */
 		return;
 	}
-	vq = port->in_vq;
-	if (port->inbuf)
-		buf = port->inbuf;
-	else
-		buf = virtqueue_get_buf(vq, &len);
+	buf = get_inbuf(port);
 
-	ret = 0;
+	err = 0;
 	while (buf) {
-		if (add_inbuf(vq, buf) < 0) {
-			ret++;
+		port->stats.bytes_discarded += buf->len - buf->offset;
+		if (add_inbuf(port->in_vq, buf) < 0) {
+			err++;
 			free_buf(buf);
 		}
-		buf = virtqueue_get_buf(vq, &len);
+		port->inbuf = NULL;
+		buf = get_inbuf(port);
 	}
-	port->inbuf = NULL;
-	if (ret)
+	if (err)
 		dev_warn(port->dev, "Errors adding %d buffers back to vq\n",
-			 ret);
+			 err);
 }
 
 static bool port_has_data(struct port *port)
@@ -415,18 +423,12 @@ static bool port_has_data(struct port *port)
 	unsigned long flags;
 	bool ret;
 
-	spin_lock_irqsave(&port->inbuf_lock, flags);
-	if (port->inbuf) {
-		ret = true;
-		goto out;
-	}
-	port->inbuf = get_inbuf(port);
-	if (port->inbuf) {
-		ret = true;
-		goto out;
-	}
 	ret = false;
-out:
+	spin_lock_irqsave(&port->inbuf_lock, flags);
+	port->inbuf = get_inbuf(port);
+	if (port->inbuf)
+		ret = true;
+
 	spin_unlock_irqrestore(&port->inbuf_lock, flags);
 	return ret;
 }
@@ -527,6 +529,8 @@ static ssize_t send_buf(struct port *port, void *in_buf, size_t in_count,
 		cpu_relax();
 done:
 	spin_unlock_irqrestore(&port->outvq_lock, flags);
+
+	port->stats.bytes_sent += in_count;
 	/*
 	 * We're expected to return the amount of data we wrote -- all
 	 * of it
@@ -1057,6 +1061,14 @@ static ssize_t debugfs_read(struct file *filp, char __user *ubuf,
 	out_offset += snprintf(buf + out_offset, out_count - out_offset,
 			       "outvq_full: %d\n", port->outvq_full);
 	out_offset += snprintf(buf + out_offset, out_count - out_offset,
+			       "bytes_sent: %lu\n", port->stats.bytes_sent);
+	out_offset += snprintf(buf + out_offset, out_count - out_offset,
+			       "bytes_received: %lu\n",
+			       port->stats.bytes_received);
+	out_offset += snprintf(buf + out_offset, out_count - out_offset,
+			       "bytes_discarded: %lu\n",
+			       port->stats.bytes_discarded);
+	out_offset += snprintf(buf + out_offset, out_count - out_offset,
 			       "is_console: %s\n",
 			       is_console_port(port) ? "yes" : "no");
 	out_offset += snprintf(buf + out_offset, out_count - out_offset,
@@ -1141,6 +1153,7 @@ static int add_port(struct ports_device *portdev, u32 id)
 	port->cons.ws.ws_row = port->cons.ws.ws_col = 0;
 
 	port->host_connected = port->guest_connected = false;
+	port->stats = (struct port_stats) { 0 };
 
 	port->outvq_full = false;
 
@@ -1252,6 +1265,20 @@ static void remove_port(struct kref *kref)
 	kfree(port);
 }
 
+static void remove_port_data(struct port *port)
+{
+	struct port_buffer *buf;
+
+	/* Remove unused data this port might have received. */
+	discard_port_data(port);
+
+	reclaim_consumed_buffers(port);
+
+	/* Remove buffers we queued up for the Host to send us data in. */
+	while ((buf = virtqueue_detach_unused_buf(port->in_vq)))
+		free_buf(buf);
+}
+
 /*
  * Port got unplugged.  Remove port from portdev's list and drop the
  * kref reference.  If no userspace has this port opened, it will
@@ -1259,8 +1286,6 @@ static void remove_port(struct kref *kref)
  */
 static void unplug_port(struct port *port)
 {
-	struct port_buffer *buf;
-
 	spin_lock_irq(&port->portdev->ports_lock);
 	list_del(&port->list);
 	spin_unlock_irq(&port->portdev->ports_lock);
@@ -1281,14 +1306,7 @@ static void unplug_port(struct port *port)
 		hvc_remove(port->cons.hvc);
 	}
 
-	/* Remove unused data this port might have received. */
-	discard_port_data(port);
-
-	reclaim_consumed_buffers(port);
-
-	/* Remove buffers we queued up for the Host to send us data in. */
-	while ((buf = virtqueue_detach_unused_buf(port->in_vq)))
-		free_buf(buf);
+	remove_port_data(port);
 
 	/*
 	 * We should just assume the device itself has gone off --
@@ -1479,8 +1497,7 @@ static void in_intr(struct virtqueue *vq)
 		return;
 
 	spin_lock_irqsave(&port->inbuf_lock, flags);
-	if (!port->inbuf)
-		port->inbuf = get_inbuf(port);
+	port->inbuf = get_inbuf(port);
 
 	/*
 	 * Don't queue up data when port is closed.  This condition
@@ -1561,7 +1578,7 @@ static int init_vqs(struct ports_device *portdev)
 	portdev->out_vqs = kmalloc(nr_ports * sizeof(struct virtqueue *),
 				   GFP_KERNEL);
 	if (!vqs || !io_callbacks || !io_names || !portdev->in_vqs ||
-			!portdev->out_vqs) {
+	    !portdev->out_vqs) {
 		err = -ENOMEM;
 		goto free;
 	}
@@ -1632,6 +1649,28 @@ free:
 static const struct file_operations portdev_fops = {
 	.owner = THIS_MODULE,
 };
+
+static void remove_vqs(struct ports_device *portdev)
+{
+	portdev->vdev->config->del_vqs(portdev->vdev);
+	kfree(portdev->in_vqs);
+	kfree(portdev->out_vqs);
+}
+
+static void remove_controlq_data(struct ports_device *portdev)
+{
+	struct port_buffer *buf;
+	unsigned int len;
+
+	if (!use_multiport(portdev))
+		return;
+
+	while ((buf = virtqueue_get_buf(portdev->c_ivq, &len)))
+		free_buf(buf);
+
+	while ((buf = virtqueue_detach_unused_buf(portdev->c_ivq)))
+		free_buf(buf);
+}
 
 /*
  * Once we're further in boot, we get probed like any other virtio
@@ -1728,9 +1767,7 @@ free_vqs:
 	/* The host might want to notify mgmt sw about device add failure */
 	__send_control_msg(portdev, VIRTIO_CONSOLE_BAD_ID,
 			   VIRTIO_CONSOLE_DEVICE_READY, 0);
-	vdev->config->del_vqs(vdev);
-	kfree(portdev->in_vqs);
-	kfree(portdev->out_vqs);
+	remove_vqs(portdev);
 free_chrdev:
 	unregister_chrdev(portdev->chr_major, "virtio-portsdev");
 free:
@@ -1768,21 +1805,8 @@ static void virtcons_remove(struct virtio_device *vdev)
 	 * have to just stop using the port, as the vqs are going
 	 * away.
 	 */
-	if (use_multiport(portdev)) {
-		struct port_buffer *buf;
-		unsigned int len;
-
-		while ((buf = virtqueue_get_buf(portdev->c_ivq, &len)))
-			free_buf(buf);
-
-		while ((buf = virtqueue_detach_unused_buf(portdev->c_ivq)))
-			free_buf(buf);
-	}
-
-	vdev->config->del_vqs(vdev);
-	kfree(portdev->in_vqs);
-	kfree(portdev->out_vqs);
-
+	remove_controlq_data(portdev);
+	remove_vqs(portdev);
 	kfree(portdev);
 }
 
@@ -1796,6 +1820,75 @@ static unsigned int features[] = {
 	VIRTIO_CONSOLE_F_MULTIPORT,
 };
 
+#ifdef CONFIG_PM
+static int virtcons_freeze(struct virtio_device *vdev)
+{
+	struct ports_device *portdev;
+	struct port *port;
+
+	portdev = vdev->priv;
+
+	vdev->config->reset(vdev);
+
+	virtqueue_disable_cb(portdev->c_ivq);
+	cancel_work_sync(&portdev->control_work);
+	/*
+	 * Once more: if control_work_handler() was running, it would
+	 * enable the cb as the last step.
+	 */
+	virtqueue_disable_cb(portdev->c_ivq);
+	remove_controlq_data(portdev);
+
+	list_for_each_entry(port, &portdev->ports, list) {
+		virtqueue_disable_cb(port->in_vq);
+		virtqueue_disable_cb(port->out_vq);
+		/*
+		 * We'll ask the host later if the new invocation has
+		 * the port opened or closed.
+		 */
+		port->host_connected = false;
+		remove_port_data(port);
+	}
+	remove_vqs(portdev);
+
+	return 0;
+}
+
+static int virtcons_restore(struct virtio_device *vdev)
+{
+	struct ports_device *portdev;
+	struct port *port;
+	int ret;
+
+	portdev = vdev->priv;
+
+	ret = init_vqs(portdev);
+	if (ret)
+		return ret;
+
+	if (use_multiport(portdev))
+		fill_queue(portdev->c_ivq, &portdev->cvq_lock);
+
+	list_for_each_entry(port, &portdev->ports, list) {
+		port->in_vq = portdev->in_vqs[port->id];
+		port->out_vq = portdev->out_vqs[port->id];
+
+		fill_queue(port->in_vq, &port->inbuf_lock);
+
+		/* Get port open/close status on the host */
+		send_control_msg(port, VIRTIO_CONSOLE_PORT_READY, 1);
+
+		/*
+		 * If a port was open at the time of suspending, we
+		 * have to let the host know that it's still open.
+		 */
+		if (port->guest_connected)
+			send_control_msg(port, VIRTIO_CONSOLE_PORT_OPEN, 1);
+	}
+	return 0;
+}
+#endif
+
 static struct virtio_driver virtio_console = {
 	.feature_table = features,
 	.feature_table_size = ARRAY_SIZE(features),
@@ -1805,6 +1898,10 @@ static struct virtio_driver virtio_console = {
 	.probe =	virtcons_probe,
 	.remove =	virtcons_remove,
 	.config_changed = config_intr,
+#ifdef CONFIG_PM
+	.freeze =	virtcons_freeze,
+	.restore =	virtcons_restore,
+#endif
 };
 
 static int __init init(void)

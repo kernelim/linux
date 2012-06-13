@@ -200,6 +200,20 @@ struct scsi_device_handler {
 	int (*set_params)(struct scsi_device *, const char *);
 };
 
+/*
+ * RHEL specific structure needed to extend 'struct scsi_device_handler'
+ * because that structure is statically allocated by each hardware handler.
+ * - hardware handlers must allocate this structure and pass it when calling
+ *   scsi_register_device_handler() -- avoids further static allocations.
+ */
+struct scsi_device_handler_aux {
+	struct list_head list; /* list of scsi_device_handler_auxs */
+	struct scsi_device_handler *scsi_dh;
+
+	/* Filled by the hardware handler */
+	bool (*match)(struct scsi_device *);
+};
+
 struct scsi_dh_data {
 	struct scsi_device_handler *scsi_dh;
 	struct scsi_device *sdev;
@@ -283,7 +297,8 @@ extern struct scsi_device *__scsi_add_device(struct Scsi_Host *,
 		uint, uint, uint, void *hostdata);
 extern int scsi_add_device(struct Scsi_Host *host, uint channel,
 			   uint target, uint lun);
-extern int scsi_register_device_handler(struct scsi_device_handler *scsi_dh);
+extern int scsi_register_device_handler(struct scsi_device_handler *scsi_dh,
+					struct scsi_device_handler_aux *scsi_dh_aux);
 extern void scsi_remove_device(struct scsi_device *);
 extern int scsi_unregister_device_handler(struct scsi_device_handler *scsi_dh);
 
@@ -462,6 +477,11 @@ static inline int scsi_device_enclosure(struct scsi_device *sdev)
 static inline int scsi_device_protection(struct scsi_device *sdev)
 {
 	return sdev->scsi_level > SCSI_2 && sdev->inquiry[5] & (1<<0);
+}
+
+static inline int scsi_device_tpgs(struct scsi_device *sdev)
+{
+	return sdev->inquiry ? (sdev->inquiry[5] >> 4) & 0x3 : 0;
 }
 
 #define MODULE_ALIAS_SCSI_DEVICE(type) \

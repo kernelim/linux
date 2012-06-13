@@ -1075,8 +1075,11 @@ static int is_offloading(struct net_device *dev)
 
 static void cxgb_neigh_update(struct neighbour *neigh)
 {
-	struct net_device *dev = neigh->dev;
+	struct net_device *dev;
 
+	if (!neigh)
+		return;
+	dev = neigh->dev;
 	if (dev && (is_offloading(dev))) {
 		struct t3cdev *tdev = dev2t3cdev(dev);
 
@@ -1110,6 +1113,7 @@ static void set_l2t_ix(struct t3cdev *tdev, u32 tid, struct l2t_entry *e)
 static void cxgb_redirect(struct dst_entry *old, struct dst_entry *new)
 {
 	struct net_device *olddev, *newdev;
+	struct neighbour *n;
 	struct tid_info *ti;
 	struct t3cdev *tdev;
 	u32 tid;
@@ -1117,8 +1121,16 @@ static void cxgb_redirect(struct dst_entry *old, struct dst_entry *new)
 	struct l2t_entry *e;
 	struct t3c_tid_entry *te;
 
-	olddev = old->neighbour->dev;
-	newdev = new->neighbour->dev;
+	n = old->neighbour;
+	if (!n)
+		return;
+	olddev = n->dev;
+
+	n = new->neighbour;
+	if (!n)
+		return;
+	newdev = n->dev;
+
 	if (!is_offloading(olddev))
 		return;
 	if (!is_offloading(newdev)) {
@@ -1135,7 +1147,7 @@ static void cxgb_redirect(struct dst_entry *old, struct dst_entry *new)
 	}
 
 	/* Add new L2T entry */
-	e = t3_l2t_get(tdev, new->neighbour, newdev);
+	e = t3_l2t_get(tdev, new, newdev);
 	if (!e) {
 		printk(KERN_ERR "%s: couldn't allocate new l2t entry!\n",
 		       __func__);

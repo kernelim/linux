@@ -109,6 +109,12 @@ extern struct sk_buff *(*br_handle_frame_hook)(struct net_bridge_port *p,
 					       struct sk_buff *skb);
 extern int (*br_should_route_hook)(struct sk_buff *skb);
 
+/*
+ * RHEL speciality. Upstream stores pointer to bridge device which
+ * cointains the port in dev->master. We handle that using following hook.
+ */
+extern struct net_device *(*br_get_br_dev_for_port_hook)(struct net_device *);
+
 #endif
 
 #endif

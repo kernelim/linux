@@ -2113,6 +2113,7 @@ bnad_netdev_qstats_fill(struct bnad *bnad, struct net_device_stats *stats)
 {
 	int i, j;
 
+	stats->rx_packets = stats->rx_bytes = 0;
 	for (i = 0; i < bnad->num_rx; i++) {
 		for (j = 0; j < bnad->num_rxp_per_rx; j++) {
 			if (bnad->rx_info[i].rx_ctrl[j].ccb) {
@@ -2133,6 +2134,8 @@ bnad_netdev_qstats_fill(struct bnad *bnad, struct net_device_stats *stats)
 			}
 		}
 	}
+
+	stats->tx_packets = stats->tx_bytes = 0;
 	for (i = 0; i < bnad->num_tx; i++) {
 		for (j = 0; j < bnad->num_txq_per_tx; j++) {
 			if (bnad->tx_info[i].tcb[j]) {
@@ -2175,6 +2178,7 @@ bnad_netdev_hwstats_fill(struct bnad *bnad, struct net_device_stats *stats)
 	stats->rx_frame_errors = mac_stats->rx_alignment_error;
 	/* recv'r fifo overrun */
 	bmap = bna_rx_rid_mask(&bnad->bna);
+	stats->rx_fifo_errors = 0;
 	for (i = 0; bmap; i++) {
 		if (bmap & 1) {
 			stats->rx_fifo_errors +=
@@ -3503,8 +3507,6 @@ static int __init
 bnad_module_init(void)
 {
 	int err;
-
-	mark_tech_preview(NULL, THIS_MODULE);
 
 	pr_info("Brocade 10G Ethernet driver - version: %s\n",
 			BNAD_VERSION);

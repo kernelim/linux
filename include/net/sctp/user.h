@@ -121,6 +121,8 @@ enum sctp_optname {
 #define SCTP_LOCAL_AUTH_CHUNKS SCTP_LOCAL_AUTH_CHUNKS
 	SCTP_GET_ASSOC_NUMBER,		/* Read only */
 #define SCTP_GET_ASSOC_NUMBER SCTP_GET_ASSOC_NUMBER
+	SCTP_GET_ASSOC_ID_LIST,  	/* Read only */
+#define SCTP_GET_ASSOC_ID_LIST SCTP_GET_ASSOC_ID_LIST
 
 
 	/* Internal Socket Options. Some of the sctp library functions are 
@@ -399,6 +401,20 @@ struct sctp_authkey_event {
 
 enum { SCTP_AUTH_NEWKEY = 0, };
 
+/*
+ * 6.1.9. SCTP_SENDER_DRY_EVENT
+ *
+ * When the SCTP stack has no more user data to send or retransmit, this
+ * notification is given to the user. Also, at the time when a user app
+ * subscribes to this event, if there is no data to be sent or
+ * retransmit, the stack will immediately send up this notification.
+ */
+struct sctp_sender_dry_event {
+	__u16 sender_dry_type;
+	__u16 sender_dry_flags;
+	__u32 sender_dry_length;
+	sctp_assoc_t sender_dry_assoc_id;
+};
 
 /*
  * Described in Section 7.3
@@ -414,6 +430,7 @@ struct sctp_event_subscribe {
 	__u8 sctp_partial_delivery_event;
 	__u8 sctp_adaptation_layer_event;
 	__u8 sctp_authentication_event;
+	__u8 sctp_sender_dry_event;
 };
 
 /*
@@ -437,6 +454,7 @@ union sctp_notification {
 	struct sctp_adaptation_event sn_adaptation_event;
 	struct sctp_pdapi_event sn_pdapi_event;
 	struct sctp_authkey_event sn_authkey_event;
+	struct sctp_sender_dry_event sn_sender_dry_event;
 };
 
 /* Section 5.3.1
@@ -454,6 +472,7 @@ enum sctp_sn_type {
 	SCTP_PARTIAL_DELIVERY_EVENT,
 	SCTP_ADAPTATION_INDICATION,
 	SCTP_AUTHENTICATION_INDICATION,
+	SCTP_SENDER_DRY_EVENT,
 };
 
 /* Notification error codes used to fill up the error fields in some
@@ -712,6 +731,18 @@ struct sctp_authchunks {
 	sctp_assoc_t	gauth_assoc_id;
 	__u32		gauth_number_of_chunks;
 	uint8_t		gauth_chunks[];
+};
+
+/*
+ * 8.2.6. Get the Current Identifiers of Associations
+ *        (SCTP_GET_ASSOC_ID_LIST)
+ *
+ * This option gets the current list of SCTP association identifiers of
+ * the SCTP associations handled by a one-to-many style socket.
+ */
+struct sctp_assoc_ids {
+	__u32		gaids_number_of_ids;
+	sctp_assoc_t	gaids_assoc_id[];
 };
 
 /*

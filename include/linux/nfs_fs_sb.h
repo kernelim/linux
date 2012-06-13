@@ -177,15 +177,16 @@ struct nfs_server {
 #define NFS_CAP_CTIME		(1U << 12)
 #define NFS_CAP_MTIME		(1U << 13)
 #define NFS_CAP_POSIX_LOCK	(1U << 14)
+#define NFS_CAP_UIDGID_NOMAP	(1U << 15)
 
 
 /* maximum number of slots to use */
-#define NFS4_MAX_SLOT_TABLE RPC_MAX_SLOT_TABLE
+#define NFS4_MAX_SLOT_TABLE (250U)
 
 #if defined(CONFIG_NFS_V4)
 
 /* Sessions */
-#define SLOT_TABLE_SZ (NFS4_MAX_SLOT_TABLE/(8*sizeof(long)))
+#define SLOT_TABLE_SZ ((NFS4_MAX_SLOT_TABLE + (8 * sizeof(long) - 1))/(8*sizeof(long)))
 struct nfs4_slot_table {
 	struct nfs4_slot *slots;		/* seqid per slot */
 	unsigned long   used_slots[SLOT_TABLE_SZ]; /* used/unused bitmap */

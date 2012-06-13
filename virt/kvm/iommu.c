@@ -133,6 +133,8 @@ int kvm_assign_device(struct kvm *kvm,
 			goto out_unmap;
 	}
 
+	pdev->dev_flags |= PCI_DEV_FLAGS_ASSIGNED;
+
 	printk(KERN_DEBUG "assign device: host bdf = %x:%x:%x\n",
 		assigned_dev->host_busnr,
 		PCI_SLOT(assigned_dev->host_devfn),
@@ -159,6 +161,8 @@ int kvm_deassign_device(struct kvm *kvm,
 		return -ENODEV;
 
 	iommu_detach_device(domain, &pdev->dev);
+
+	pdev->dev_flags &= ~PCI_DEV_FLAGS_ASSIGNED;
 
 	printk(KERN_DEBUG "deassign device: host bdf = %x:%x:%x\n",
 		assigned_dev->host_busnr,

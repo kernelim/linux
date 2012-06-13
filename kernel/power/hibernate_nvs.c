@@ -24,6 +24,7 @@ struct nvs_page {
 	unsigned int size;
 	void *kaddr;
 	void *data;
+	bool unmap;
 	struct list_head node;
 };
 
@@ -41,6 +42,9 @@ static LIST_HEAD(nvs_list);
 int hibernate_nvs_register(unsigned long start, unsigned long size)
 {
 	struct nvs_page *entry, *next;
+
+	pr_info("PM: Registering ACPI NVS region at %lx (%ld bytes)\n",
+		start, size);
 
 	while (size > 0) {
 		unsigned int nr_bytes;
@@ -79,7 +83,13 @@ void hibernate_nvs_free(void)
 			free_page((unsigned long)entry->data);
 			entry->data = NULL;
 			if (entry->kaddr) {
-				iounmap(entry->kaddr);
+				if (entry->unmap) {
+					iounmap(entry->kaddr);
+					entry->unmap = false;
+				} else {
+					acpi_os_unmap_memory(entry->kaddr,
+							     entry->size);
+				}
 				entry->kaddr = NULL;
 			}
 		}
@@ -105,7 +115,7 @@ int hibernate_nvs_alloc(void)
 /**
  *	hibernate_nvs_save - save NVS memory regions
  */
-void hibernate_nvs_save(void)
+int hibernate_nvs_save(void)
 {
 	struct nvs_page *entry;
 
@@ -113,10 +123,22 @@ void hibernate_nvs_save(void)
 
 	list_for_each_entry(entry, &nvs_list, node)
 		if (entry->data) {
-			entry->kaddr = acpi_os_ioremap(entry->phys_start,
-						       entry->size);
+			unsigned long phys = entry->phys_start;
+			unsigned int size = entry->size;
+
+			entry->kaddr = acpi_os_get_iomem(phys, size);
+			if (!entry->kaddr) {
+				entry->kaddr = acpi_os_ioremap(phys, size);
+				entry->unmap = !!entry->kaddr;
+			}
+			if (!entry->kaddr) {
+				hibernate_nvs_free();
+				return -ENOMEM;
+			}
 			memcpy(entry->data, entry->kaddr, entry->size);
 		}
+
+	return 0;
 }
 
 /**

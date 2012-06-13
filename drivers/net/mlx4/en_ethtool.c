@@ -45,13 +45,16 @@ mlx4_en_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *drvinfo)
 	struct mlx4_en_priv *priv = netdev_priv(dev);
 	struct mlx4_en_dev *mdev = priv->mdev;
 
-	strncpy(drvinfo->driver, DRV_NAME, 32);
-	strncpy(drvinfo->version, DRV_VERSION " (" DRV_RELDATE ")", 32);
-	sprintf(drvinfo->fw_version, "%d.%d.%d",
+	strlcpy(drvinfo->driver, DRV_NAME, sizeof(drvinfo->driver));
+	strlcpy(drvinfo->version, DRV_VERSION " (" DRV_RELDATE ")",
+		sizeof(drvinfo->version));
+	snprintf(drvinfo->fw_version, sizeof(drvinfo->fw_version),
+		"%d.%d.%d",
 		(u16) (mdev->dev->caps.fw_ver >> 32),
 		(u16) ((mdev->dev->caps.fw_ver >> 16) & 0xffff),
 		(u16) (mdev->dev->caps.fw_ver & 0xffff));
-	strncpy(drvinfo->bus_info, pci_name(mdev->dev->pdev), 32);
+	strlcpy(drvinfo->bus_info, pci_name(mdev->dev->pdev),
+		sizeof(drvinfo->bus_info));
 	drvinfo->n_stats = 0;
 	drvinfo->regdump_len = 0;
 	drvinfo->eedump_len = 0;
@@ -134,8 +137,17 @@ static void mlx4_en_get_wol(struct net_device *netdev,
 	struct mlx4_en_priv *priv = netdev_priv(netdev);
 	int err = 0;
 	u64 config = 0;
+	u64 mask;
 
-	if (!priv->mdev->dev->caps.wol) {
+	if ((priv->port < 1) || (priv->port > 2)) {
+		en_err(priv, "Failed to get WoL information\n");
+		return;
+	}
+
+	mask = (priv->port == 1) ? MLX4_DEV_CAP_FLAG_WOL_PORT1 :
+		MLX4_DEV_CAP_FLAG_WOL_PORT2;
+
+	if (!(priv->mdev->dev->caps.flags & mask)) {
 		wol->supported = 0;
 		wol->wolopts = 0;
 		return;
@@ -164,8 +176,15 @@ static int mlx4_en_set_wol(struct net_device *netdev,
 	struct mlx4_en_priv *priv = netdev_priv(netdev);
 	u64 config = 0;
 	int err = 0;
+	u64 mask;
 
-	if (!priv->mdev->dev->caps.wol)
+	if ((priv->port < 1) || (priv->port > 2))
+		return -EOPNOTSUPP;
+
+	mask = (priv->port == 1) ? MLX4_DEV_CAP_FLAG_WOL_PORT1 :
+		MLX4_DEV_CAP_FLAG_WOL_PORT2;
+
+	if (!(priv->mdev->dev->caps.flags & mask))
 		return -EOPNOTSUPP;
 
 	if (wol->supported & ~WAKE_MAGIC)
@@ -195,13 +214,15 @@ static int mlx4_en_set_wol(struct net_device *netdev,
 static int mlx4_en_get_sset_count(struct net_device *dev, int sset)
 {
 	struct mlx4_en_priv *priv = netdev_priv(dev);
+	int bit_count = hweight64(priv->stats_bitmap);
 
 	switch (sset) {
 	case ETH_SS_STATS:
-		return NUM_ALL_STATS +
+		return (priv->stats_bitmap ? bit_count : NUM_ALL_STATS) +
 			(priv->tx_ring_num + priv->rx_ring_num) * 2;
 	case ETH_SS_TEST:
-		return MLX4_EN_NUM_SELF_TEST - !(priv->mdev->dev->caps.loopback_support) * 2;
+		return MLX4_EN_NUM_SELF_TEST - !(priv->mdev->dev->caps.flags
+					& MLX4_DEV_CAP_FLAG_UC_LOOPBACK) * 2;
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -212,14 +233,34 @@ static void mlx4_en_get_ethtool_stats(struct net_device *dev,
 {
 	struct mlx4_en_priv *priv = netdev_priv(dev);
 	int index = 0;
-	int i;
+	int i, j = 0;
 
 	spin_lock_bh(&priv->stats_lock);
 
-	for (i = 0; i < NUM_MAIN_STATS; i++)
-		data[index++] = ((unsigned long *) &priv->stats)[i];
-	for (i = 0; i < NUM_PORT_STATS; i++)
-		data[index++] = ((unsigned long *) &priv->port_stats)[i];
+	if (!(priv->stats_bitmap)) {
+		for (i = 0; i < NUM_MAIN_STATS; i++)
+			data[index++] =
+				((unsigned long *) &priv->stats)[i];
+		for (i = 0; i < NUM_PORT_STATS; i++)
+			data[index++] =
+				((unsigned long *) &priv->port_stats)[i];
+		for (i = 0; i < NUM_PKT_STATS; i++)
+			data[index++] =
+				((unsigned long *) &priv->pkstats)[i];
+	} else {
+		for (i = 0; i < NUM_MAIN_STATS; i++) {
+			if ((priv->stats_bitmap >> j) & 1)
+				data[index++] =
+				((unsigned long *) &priv->stats)[i];
+			j++;
+		}
+		for (i = 0; i < NUM_PORT_STATS; i++) {
+			if ((priv->stats_bitmap >> j) & 1)
+				data[index++] =
+				((unsigned long *) &priv->port_stats)[i];
+			j++;
+		}
+	}
 	for (i = 0; i < priv->tx_ring_num; i++) {
 		data[index++] = priv->tx_ring[i].packets;
 		data[index++] = priv->tx_ring[i].bytes;
@@ -228,8 +269,6 @@ static void mlx4_en_get_ethtool_stats(struct net_device *dev,
 		data[index++] = priv->rx_ring[i].packets;
 		data[index++] = priv->rx_ring[i].bytes;
 	}
-	for (i = 0; i < NUM_PKT_STATS; i++)
-		data[index++] = ((unsigned long *) &priv->pkstats)[i];
 	spin_unlock_bh(&priv->stats_lock);
 
 }
@@ -251,18 +290,36 @@ static void mlx4_en_get_strings(struct net_device *dev,
 	case ETH_SS_TEST:
 		for (i = 0; i < MLX4_EN_NUM_SELF_TEST - 2; i++)
 			strcpy(data + i * ETH_GSTRING_LEN, mlx4_en_test_names[i]);
-		if (priv->mdev->dev->caps.loopback_support)
+		if (priv->mdev->dev->caps.flags & MLX4_DEV_CAP_FLAG_UC_LOOPBACK)
 			for (; i < MLX4_EN_NUM_SELF_TEST; i++)
 				strcpy(data + i * ETH_GSTRING_LEN, mlx4_en_test_names[i]);
 		break;
 
 	case ETH_SS_STATS:
 		/* Add main counters */
-		for (i = 0; i < NUM_MAIN_STATS; i++)
-			strcpy(data + (index++) * ETH_GSTRING_LEN, main_strings[i]);
-		for (i = 0; i< NUM_PORT_STATS; i++)
-			strcpy(data + (index++) * ETH_GSTRING_LEN,
-			main_strings[i + NUM_MAIN_STATS]);
+		if (!priv->stats_bitmap) {
+			for (i = 0; i < NUM_MAIN_STATS; i++)
+				strcpy(data + (index++) * ETH_GSTRING_LEN,
+					main_strings[i]);
+			for (i = 0; i < NUM_PORT_STATS; i++)
+				strcpy(data + (index++) * ETH_GSTRING_LEN,
+					main_strings[i +
+					NUM_MAIN_STATS]);
+			for (i = 0; i < NUM_PKT_STATS; i++)
+				strcpy(data + (index++) * ETH_GSTRING_LEN,
+					main_strings[i +
+					NUM_MAIN_STATS +
+					NUM_PORT_STATS]);
+		} else
+			for (i = 0; i < NUM_MAIN_STATS + NUM_PORT_STATS; i++) {
+				if ((priv->stats_bitmap >> i) & 1) {
+					strcpy(data +
+					       (index++) * ETH_GSTRING_LEN,
+					       main_strings[i]);
+				}
+				if (!(priv->stats_bitmap >> i))
+					break;
+			}
 		for (i = 0; i < priv->tx_ring_num; i++) {
 			sprintf(data + (index++) * ETH_GSTRING_LEN,
 				"tx%d_packets", i);
@@ -275,9 +332,6 @@ static void mlx4_en_get_strings(struct net_device *dev,
 			sprintf(data + (index++) * ETH_GSTRING_LEN,
 				"rx%d_bytes", i);
 		}
-		for (i = 0; i< NUM_PKT_STATS; i++)
-			strcpy(data + (index++) * ETH_GSTRING_LEN,
-			main_strings[i + NUM_MAIN_STATS + NUM_PORT_STATS]);
 		break;
 	}
 }
@@ -296,10 +350,10 @@ static int mlx4_en_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 
 	trans_type = priv->port_state.transciver;
 	if (netif_carrier_ok(dev)) {
-		cmd->speed = priv->port_state.link_speed;
+		ethtool_cmd_speed_set(cmd, priv->port_state.link_speed);
 		cmd->duplex = DUPLEX_FULL;
 	} else {
-		cmd->speed = -1;
+		ethtool_cmd_speed_set(cmd, -1);
 		cmd->duplex = -1;
 	}
 
@@ -323,7 +377,8 @@ static int mlx4_en_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 static int mlx4_en_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 {
 	if ((cmd->autoneg == AUTONEG_ENABLE) ||
-	    (cmd->speed != SPEED_10000) || (cmd->duplex != DUPLEX_FULL))
+	    (ethtool_cmd_speed(cmd) != SPEED_10000) ||
+	    (cmd->duplex != DUPLEX_FULL))
 		return -EINVAL;
 
 	/* Nothing to change */

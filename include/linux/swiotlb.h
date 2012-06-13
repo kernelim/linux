@@ -22,6 +22,7 @@ struct scatterlist;
 
 extern void
 swiotlb_init(void);
+extern unsigned long swiotlb_nr_tbl(void);
 
 extern void
 *swiotlb_alloc_coherent(struct device *hwdev, size_t size,

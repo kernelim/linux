@@ -32,6 +32,13 @@ static struct pernet_operations br_net_ops = {
 	.exit	= br_net_exit,
 };
 
+
+static struct net_device *__br_get_br_dev_for_port_rcu(struct net_device *port_dev)
+{
+	struct net_bridge_port *port = rcu_dereference(port_dev->br_port);
+	return port ? port->br->dev : NULL;
+}
+
 static int __init br_init(void)
 {
 	int err;
@@ -64,6 +71,7 @@ static int __init br_init(void)
 
 	brioctl_set(br_ioctl_deviceless_stub);
 	br_handle_frame_hook = br_handle_frame;
+	br_get_br_dev_for_port_hook = __br_get_br_dev_for_port_rcu;
 
 #if defined(CONFIG_ATM_LANE) || defined(CONFIG_ATM_LANE_MODULE)
 	br_fdb_test_addr_hook = br_fdb_test_addr;
@@ -101,6 +109,7 @@ static void __exit br_deinit(void)
 #endif
 
 	br_handle_frame_hook = NULL;
+	br_get_br_dev_for_port_hook = NULL;
 	br_fdb_fini();
 }
 

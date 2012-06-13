@@ -49,8 +49,8 @@
 #include "en_port.h"
 
 #define DRV_NAME	"mlx4_en"
-#define DRV_VERSION	"1.5.4.1"
-#define DRV_RELDATE	"March 2011"
+#define DRV_VERSION	"2.0"
+#define DRV_RELDATE	"Dec 2011"
 
 
 #define MLX4_EN_MSG_LEVEL	(NETIF_MSG_LINK | NETIF_MSG_IFDOWN)
@@ -115,8 +115,9 @@
 
 #define MLX4_EN_WATCHDOG_TIMEOUT	(15 * HZ)
 
-#define MLX4_EN_ALLOC_ORDER	2
-#define MLX4_EN_ALLOC_SIZE	(PAGE_SIZE << MLX4_EN_ALLOC_ORDER)
+/* Use the maximum between 16384 and a single page */
+#define MLX4_EN_ALLOC_SIZE	PAGE_ALIGN(16384)
+#define MLX4_EN_ALLOC_ORDER	get_order(MLX4_EN_ALLOC_SIZE)
 
 #define MLX4_EN_MAX_LRO_DESCRIPTORS	32
 
@@ -357,6 +358,8 @@ struct mlx4_en_port_profile {
 
 struct mlx4_en_profile {
 	int rss_xor;
+	int tcp_rss;
+	int udp_rss;
 	u8 rss_mask;
 	u32 active_ports;
 	u32 small_pkt_int;
@@ -390,15 +393,6 @@ struct mlx4_en_rss_map {
 	enum mlx4_qp_state state[MAX_RX_RINGS];
 	struct mlx4_qp indir_qp;
 	enum mlx4_qp_state indir_state;
-};
-
-struct mlx4_en_rss_context {
-	__be32 base_qpn;
-	__be32 default_qpn;
-	u16 reserved;
-	u8 hash_fn;
-	u8 flags;
-	__be32 rss_key[10];
 };
 
 struct mlx4_en_port_state {
@@ -491,6 +485,7 @@ struct mlx4_en_priv {
 	struct mlx4_en_rss_map rss_map;
 	u32 flags;
 #define MLX4_EN_FLAG_PROMISC	0x1
+#define MLX4_EN_FLAG_MC_PROMISC	0x2
 	u32 tx_ring_num;
 	u32 rx_ring_num;
 	u32 rx_skb_size;
@@ -511,6 +506,7 @@ struct mlx4_en_priv {
 	struct mlx4_en_perf_stats pstats;
 	struct mlx4_en_pkt_stats pkstats;
 	struct mlx4_en_port_stats port_stats;
+	u64 stats_bitmap;
 	char *mc_addrs;
 	int mc_addrs_cnt;
 	struct mlx4_en_stat_out_mbox hw_stats;
@@ -521,9 +517,9 @@ struct mlx4_en_priv {
 enum mlx4_en_wol {
 	MLX4_EN_WOL_MAGIC = (1ULL << 61),
 	MLX4_EN_WOL_ENABLED = (1ULL << 62),
-	MLX4_EN_WOL_DO_MODIFY = (1ULL << 63),
 };
 
+#define MLX4_EN_WOL_DO_MODIFY (1ULL << 63)
 
 void mlx4_en_destroy_netdev(struct net_device *dev);
 int mlx4_en_init_netdev(struct mlx4_en_dev *mdev, int port,
@@ -562,7 +558,8 @@ int mlx4_en_create_rx_ring(struct mlx4_en_priv *priv,
 			   struct mlx4_en_rx_ring *ring,
 			   u32 size, u16 stride);
 void mlx4_en_destroy_rx_ring(struct mlx4_en_priv *priv,
-			     struct mlx4_en_rx_ring *ring);
+			     struct mlx4_en_rx_ring *ring,
+			     u32 size, u16 stride);
 int mlx4_en_activate_rx_rings(struct mlx4_en_priv *priv);
 void mlx4_en_deactivate_rx_ring(struct mlx4_en_priv *priv,
 				struct mlx4_en_rx_ring *ring);

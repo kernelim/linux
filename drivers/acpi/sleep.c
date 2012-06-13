@@ -509,7 +509,7 @@ static int acpi_hibernation_pre_snapshot(void)
 	int error = acpi_pm_prepare();
 
 	if (!error)
-		hibernate_nvs_save();
+		error = hibernate_nvs_save();
 
 	return error;
 }
@@ -606,7 +606,7 @@ static int acpi_hibernation_pre_snapshot_old(void)
 	int error = acpi_pm_disable_gpes();
 
 	if (!error)
-		hibernate_nvs_save();
+		error = hibernate_nvs_save();
 
 	return error;
 }

@@ -21,6 +21,7 @@
 #include <asm/byteorder.h>
 
 struct lpfc_hba;
+#define LPFC_FCP_CDB_LEN 16
 
 #define list_remove_head(list, entry, type, member)		\
 	do {							\
@@ -102,7 +103,7 @@ struct fcp_cmnd {
 #define  WRITE_DATA      0x01	/* Bit 0 */
 #define  READ_DATA       0x02	/* Bit 1 */
 
-	uint8_t fcpCdb[16];	/* SRB cdb field is copied here */
+	uint8_t fcpCdb[LPFC_FCP_CDB_LEN]; /* SRB cdb field is copied here */
 	uint32_t fcpDl;		/* Total transfer length */
 
 };
@@ -130,7 +131,7 @@ struct lpfc_scsi_buf {
 	dma_addr_t nonsg_phys;	/* Non scatter-gather physical address. */
 
 	/*
-	 * data and dma_handle are the kernel virutal and bus address of the
+	 * data and dma_handle are the kernel virtual and bus address of the
 	 * dma-able buffer containing the fcp_cmd, fcp_rsp and a scatter
 	 * gather bde list that supports the sg_tablesize value.
 	 */

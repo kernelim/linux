@@ -16,17 +16,6 @@
 
 #ifdef __HAVE_ARCH_PTE_SPECIAL
 
-static inline void pin_huge_page_tail(struct page *page)
-{
-	/*
-	 * __split_huge_page_refcount() cannot run
-	 * from under us.
-	 */
-	VM_BUG_ON(page_mapcount(page) < 0);
-	VM_BUG_ON(atomic_read(&page->_count) != 0);
-	atomic_inc(&page->_mapcount);
-}
-
 /*
  * The performance critical leaf functions are made noinline otherwise gcc
  * inlines everything into a single function which results in too much
@@ -58,8 +47,6 @@ static noinline int gup_pte_range(pmd_t pmd, unsigned long addr,
 			put_page(page);
 			return 0;
 		}
-		if (PageTail(page))
-			pin_huge_page_tail(page);
 		pages[*nr] = page;
 		(*nr)++;
 
@@ -75,7 +62,7 @@ static noinline int gup_huge_pte(pte_t *ptep, struct hstate *hstate,
 {
 	unsigned long mask;
 	unsigned long pte_end;
-	struct page *head, *page;
+	struct page *head, *page, *tail;
 	pte_t pte;
 	int refs;
 
@@ -95,6 +82,7 @@ static noinline int gup_huge_pte(pte_t *ptep, struct hstate *hstate,
 	refs = 0;
 	head = pte_page(pte);
 	page = head + ((*addr & ~huge_page_mask(hstate)) >> PAGE_SHIFT);
+	tail = page;
 	do {
 		VM_BUG_ON(compound_head(page) != head);
 		pages[*nr] = page;
@@ -109,10 +97,20 @@ static noinline int gup_huge_pte(pte_t *ptep, struct hstate *hstate,
 	}
 	if (unlikely(pte_val(pte) != pte_val(*ptep))) {
 		/* Could be optimized better */
-		while (*nr) {
-			put_page(page);
-			(*nr)--;
-		}
+		*nr -= refs;
+		while (refs--)
+			put_page(head);
+		return 0;
+	}
+
+	/*
+	 * Any tail page need their mapcount reference taken before we
+	 * return.
+	 */
+	while (refs--) {
+		if (PageTail(tail))
+			get_huge_page_tail(tail);
+		tail++;
 	}
 
 	return 1;

@@ -552,6 +552,8 @@ static void intel_lvds_destroy(struct drm_connector *connector)
 	struct drm_device *dev = connector->dev;
 	struct drm_i915_private *dev_priv = dev->dev_private;
 
+	intel_panel_destroy_backlight(dev);
+
 	if (dev_priv->lid_notifier.notifier_call)
 		acpi_lid_notifier_unregister(&dev_priv->lid_notifier);
 	drm_sysfs_connector_remove(connector);
@@ -660,6 +662,14 @@ static const struct dmi_system_id intel_no_lvds[] = {
 	},
 	{
 		.callback = intel_no_lvds_dmi_callback,
+		.ident = "Dell OptiPlex FX170",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
+			DMI_MATCH(DMI_PRODUCT_NAME, "OptiPlex FX170"),
+		},
+	},
+	{
+		.callback = intel_no_lvds_dmi_callback,
 		.ident = "AOpen Mini PC",
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "AOpen"),
@@ -698,11 +708,27 @@ static const struct dmi_system_id intel_no_lvds[] = {
 		},
 	},
 	{
+                .callback = intel_no_lvds_dmi_callback,
+                .ident = "Clientron E830",
+                .matches = {
+                        DMI_MATCH(DMI_SYS_VENDOR, "Clientron"),
+                        DMI_MATCH(DMI_PRODUCT_NAME, "E830"),
+                },
+        },
+        {
 		.callback = intel_no_lvds_dmi_callback,
 		.ident = "Asus EeeBox PC EB1007",
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK Computer INC."),
 			DMI_MATCH(DMI_PRODUCT_NAME, "EB1007"),
+		},
+	},
+	{
+		.callback = intel_no_lvds_dmi_callback,
+		.ident = "Asus AT5NM10T-I",
+		.matches = {
+			DMI_MATCH(DMI_BOARD_VENDOR, "ASUSTeK Computer INC."),
+			DMI_MATCH(DMI_BOARD_NAME, "AT5NM10T-I"),
 		},
 	},
 
@@ -878,9 +904,11 @@ bool intel_lvds_init(struct drm_device *dev)
 	intel_encoder->type = INTEL_OUTPUT_LVDS;
 
 	intel_encoder->clone_mask = (1 << INTEL_LVDS_CLONE_BIT);
-	intel_encoder->crtc_mask = (1 << 1);
-	if (INTEL_INFO(dev)->gen >= 5)
-		intel_encoder->crtc_mask |= (1 << 0);
+	if (HAS_PCH_SPLIT(dev))
+		intel_encoder->crtc_mask = (1 << 0) | (1 << 1) | (1 << 2);
+	else
+		intel_encoder->crtc_mask = (1 << 1);
+
 	drm_encoder_helper_add(encoder, &intel_lvds_helper_funcs);
 	drm_connector_helper_add(connector, &intel_lvds_connector_helper_funcs);
 	connector->display_info.subpixel_order = SubPixelHorizontalRGB;
@@ -1024,6 +1052,9 @@ out:
 	/* keep the LVDS connector */
 	dev_priv->int_lvds_connector = connector;
 	drm_sysfs_connector_add(connector);
+
+	intel_panel_setup_backlight(dev);
+
 	return true;
 
 failed:

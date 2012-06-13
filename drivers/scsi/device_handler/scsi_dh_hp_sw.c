@@ -318,6 +318,24 @@ static const struct scsi_dh_devlist hp_sw_dh_data_list[] = {
 	{NULL, NULL},
 };
 
+static bool hp_sw_match(struct scsi_device *sdev)
+{
+	int i;
+
+	if (scsi_device_tpgs(sdev))
+		return false;
+
+	for (i = 0; hp_sw_dh_data_list[i].vendor; i++) {
+		if (!strncmp(sdev->vendor, hp_sw_dh_data_list[i].vendor,
+			strlen(hp_sw_dh_data_list[i].vendor)) &&
+		    !strncmp(sdev->model, hp_sw_dh_data_list[i].model,
+			strlen(hp_sw_dh_data_list[i].model))) {
+			return true;
+		}
+	}
+	return false;
+}
+
 static int hp_sw_bus_attach(struct scsi_device *sdev);
 static void hp_sw_bus_detach(struct scsi_device *sdev);
 
@@ -394,7 +412,21 @@ static void hp_sw_bus_detach( struct scsi_device *sdev )
 
 static int __init hp_sw_init(void)
 {
-	return scsi_register_device_handler(&hp_sw_dh);
+	int r;
+	struct scsi_device_handler_aux *scsi_dh_aux = NULL;
+
+	scsi_dh_aux = kzalloc(sizeof(struct scsi_device_handler_aux), GFP_KERNEL);
+	if (!scsi_dh_aux)
+		return -ENOMEM;
+	scsi_dh_aux->match = hp_sw_match;
+
+	r = scsi_register_device_handler(&hp_sw_dh, scsi_dh_aux);
+	if (r != 0) {
+		kfree(scsi_dh_aux);
+		printk(KERN_ERR "%s: Failed to register scsi device handler.",
+			HP_SW_NAME);
+	}
+	return r;
 }
 
 static void __exit hp_sw_exit(void)

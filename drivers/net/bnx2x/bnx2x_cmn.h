@@ -1,6 +1,6 @@
 /* bnx2x_cmn.h: Broadcom Everest network driver.
  *
- * Copyright (c) 2007-2011 Broadcom Corporation
+ * Copyright (c) 2007-2012 Broadcom Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,6 +20,7 @@
 #include <linux/types.h>
 #include <linux/pci.h>
 #include <linux/netdevice.h>
+#include <linux/etherdevice.h>
 
 
 #include "bnx2x.h"
@@ -378,8 +379,8 @@ void bnx2x_set_q_rx_mode(struct bnx2x *bp, u8 cl_id,
 			 unsigned long ramrod_flags);
 
 /* Parity errors related */
-void bnx2x_inc_load_cnt(struct bnx2x *bp);
-u32 bnx2x_dec_load_cnt(struct bnx2x *bp);
+void bnx2x_set_pf_load(struct bnx2x *bp);
+bool bnx2x_clear_pf_load(struct bnx2x *bp);
 bool bnx2x_chk_parity_attn(struct bnx2x *bp, bool *global, bool print);
 bool bnx2x_reset_is_done(struct bnx2x *bp, int engine);
 void bnx2x_set_reset_in_progress(struct bnx2x *bp);
@@ -519,7 +520,7 @@ void bnx2x_free_mem_bp(struct bnx2x *bp);
  */
 int bnx2x_change_mtu(struct net_device *dev, int new_mtu);
 
-#if defined(BCM_CNIC) && (defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE))
+#if defined(NETDEV_FCOE_WWNN) && defined(BCM_CNIC)
 /**
  * bnx2x_fcoe_get_wwn - return the requested WWN value for this port
  *
@@ -879,8 +880,7 @@ static inline void bnx2x_clear_sge_mask_next_elems(struct bnx2x_fastpath *fp)
 static inline void bnx2x_init_sge_ring_bit_mask(struct bnx2x_fastpath *fp)
 {
 	/* Set the mask to all 1-s: it's faster to compare to 0 than to 0xf-s */
-	memset(fp->sge_mask, 0xff,
-	       (NUM_RX_SGE >> BIT_VEC64_ELEM_SHIFT)*sizeof(u64));
+	memset(fp->sge_mask, 0xff, sizeof(fp->sge_mask));
 
 	/* Clear the two last indices in the page to 1:
 	   these are the indices that correspond to the "next" element,
@@ -916,26 +916,27 @@ static inline int bnx2x_alloc_rx_sge(struct bnx2x *bp,
 	return 0;
 }
 
-static inline int bnx2x_alloc_rx_skb(struct bnx2x *bp,
-				     struct bnx2x_fastpath *fp, u16 index)
+static inline int bnx2x_alloc_rx_data(struct bnx2x *bp,
+				      struct bnx2x_fastpath *fp, u16 index)
 {
-	struct sk_buff *skb;
+	u8 *data;
 	struct sw_rx_bd *rx_buf = &fp->rx_buf_ring[index];
 	struct eth_rx_bd *rx_bd = &fp->rx_desc_ring[index];
 	dma_addr_t mapping;
 
-	skb = netdev_alloc_skb(bp->dev, fp->rx_buf_size);
-	if (unlikely(skb == NULL))
+	data = kmalloc(fp->rx_buf_size + NET_SKB_PAD, GFP_ATOMIC);
+	if (unlikely(data == NULL))
 		return -ENOMEM;
 
-	mapping = dma_map_single(&bp->pdev->dev, skb->data, fp->rx_buf_size,
+	mapping = dma_map_single(&bp->pdev->dev, data + NET_SKB_PAD,
+				 fp->rx_buf_size,
 				 DMA_FROM_DEVICE);
 	if (unlikely(dma_mapping_error(&bp->pdev->dev, mapping))) {
-		dev_kfree_skb_any(skb);
+		kfree(data);
 		return -ENOMEM;
 	}
 
-	rx_buf->skb = skb;
+	rx_buf->data = data;
 	pci_unmap_addr_set(rx_buf, mapping, mapping);
 
 	rx_bd->addr_hi = cpu_to_le32(U64_HI(mapping));
@@ -944,12 +945,12 @@ static inline int bnx2x_alloc_rx_skb(struct bnx2x *bp,
 	return 0;
 }
 
-/* note that we are not allocating a new skb,
+/* note that we are not allocating a new buffer,
  * we are just moving one from cons to prod
  * we are not creating a new mapping,
  * so there is no need to check for dma_mapping_error().
  */
-static inline void bnx2x_reuse_rx_skb(struct bnx2x_fastpath *fp,
+static inline void bnx2x_reuse_rx_data(struct bnx2x_fastpath *fp,
 				      u16 cons, u16 prod)
 {
 	struct sw_rx_bd *cons_rx_buf = &fp->rx_buf_ring[cons];
@@ -959,7 +960,7 @@ static inline void bnx2x_reuse_rx_skb(struct bnx2x_fastpath *fp,
 
 	pci_unmap_addr_set(prod_rx_buf, mapping,
 			   pci_unmap_addr(cons_rx_buf, mapping));
-	prod_rx_buf->skb = cons_rx_buf->skb;
+	prod_rx_buf->data = cons_rx_buf->data;
 	*prod_bd = *cons_bd;
 }
 
@@ -1032,9 +1033,9 @@ static inline void bnx2x_free_tpa_pool(struct bnx2x *bp,
 	for (i = 0; i < last; i++) {
 		struct bnx2x_agg_info *tpa_info = &fp->tpa_info[i];
 		struct sw_rx_bd *first_buf = &tpa_info->first_buf;
-		struct sk_buff *skb = first_buf->skb;
+		u8 *data = first_buf->data;
 
-		if (skb == NULL) {
+		if (data == NULL) {
 			DP(NETIF_MSG_IFDOWN, "tpa bin %d empty on free\n", i);
 			continue;
 		}
@@ -1042,8 +1043,8 @@ static inline void bnx2x_free_tpa_pool(struct bnx2x *bp,
 			dma_unmap_single(&bp->pdev->dev,
 					 pci_unmap_addr(first_buf, mapping),
 					 fp->rx_buf_size, DMA_FROM_DEVICE);
-		dev_kfree_skb(skb);
-		first_buf->skb = NULL;
+		kfree(data);
+		first_buf->data = NULL;
 	}
 }
 
@@ -1151,7 +1152,7 @@ static inline int bnx2x_alloc_rx_bds(struct bnx2x_fastpath *fp,
 	 * fp->eth_q_stats.rx_skb_alloc_failed = 0
 	 */
 	for (i = 0; i < rx_ring_size; i++) {
-		if (bnx2x_alloc_rx_skb(bp, fp, ring_prod) < 0) {
+		if (bnx2x_alloc_rx_data(bp, fp, ring_prod) < 0) {
 			fp->eth_q_stats.rx_skb_alloc_failed++;
 			continue;
 		}
@@ -1179,10 +1180,16 @@ static inline int bnx2x_alloc_rx_bds(struct bnx2x_fastpath *fp,
  */
 static inline u8 bnx2x_stats_id(struct bnx2x_fastpath *fp)
 {
-	if (!CHIP_IS_E1x(fp->bp))
+	struct bnx2x *bp = fp->bp;
+	if (!CHIP_IS_E1x(bp)) {
+#ifdef BCM_CNIC
+		/* there are special statistics counters for FCoE 136..140 */
+		if (IS_FCOE_FP(fp))
+			return bp->cnic_base_cl_id + (bp->pf_num >> 1);
+#endif
 		return fp->cl_id;
-	else
-		return fp->cl_id + BP_PORT(fp->bp) * FP_SB_MAX_E1x;
+	}
+	return fp->cl_id + BP_PORT(bp) * FP_SB_MAX_E1x;
 }
 
 static inline void bnx2x_init_vlan_mac_fp_objs(struct bnx2x_fastpath *fp,
@@ -1291,7 +1298,7 @@ static inline void bnx2x_init_txdata(struct bnx2x *bp,
 	txdata->txq_index = txq_index;
 	txdata->tx_cons_sb = tx_cons_sb;
 
-	DP(BNX2X_MSG_SP, "created tx data cid %d, txq %d",
+	DP(BNX2X_MSG_SP, "created tx data cid %d, txq %d\n",
 	   txdata->cid, txdata->txq_index);
 }
 
@@ -1320,6 +1327,7 @@ static inline void bnx2x_init_fcoe_fp(struct bnx2x *bp)
 	struct bnx2x_fastpath *fp = bnx2x_fcoe_fp(bp);
 	unsigned long q_type = 0;
 
+	bnx2x_fcoe(bp, rx_queue) = BNX2X_NUM_ETH_QUEUES(bp);
 	bnx2x_fcoe(bp, cl_id) = bnx2x_cnic_eth_cl_id(bp,
 						     BNX2X_FCOE_ETH_CL_ID_IDX);
 	/** Current BNX2X_FCOE_ETH_CID deffinition implies not more than
@@ -1335,7 +1343,7 @@ static inline void bnx2x_init_fcoe_fp(struct bnx2x *bp)
 	bnx2x_init_txdata(bp, &bnx2x_fcoe(bp, txdata[0]),
 			  fp->cid, FCOE_TXQ_IDX(bp), BNX2X_FCOE_L2_TX_INDEX);
 
-	DP(BNX2X_MSG_SP, "created fcoe tx data (fp index %d)", fp->index);
+	DP(BNX2X_MSG_SP, "created fcoe tx data (fp index %d)\n", fp->index);
 
 	/* qZone id equals to FW (per path) client id */
 	bnx2x_fcoe(bp, cl_qzone_id) = bnx2x_fp_qzone_id(fp);
@@ -1482,9 +1490,177 @@ static inline u16 bnx2x_extract_max_cfg(struct bnx2x *bp, u32 mf_cfg)
 {
 	u16 max_cfg = (mf_cfg & FUNC_MF_CFG_MAX_BW_MASK) >>
 			      FUNC_MF_CFG_MAX_BW_SHIFT;
-	if (!max_cfg)
+	if (!max_cfg) {
+		DP(NETIF_MSG_LINK,
+		   "Max BW configured to 0 - using 100 instead\n");
 		max_cfg = 100;
+	}
 	return max_cfg;
+}
+
+/* checks if HW supports GRO for given MTU */
+static inline bool bnx2x_mtu_allows_gro(int mtu)
+{
+	/* gro frags per page */
+	int fpp = SGE_PAGE_SIZE / (mtu - ETH_MAX_TPA_HEADER_SIZE);
+
+	/*
+	 * 1. number of frags should not grow above MAX_SKB_FRAGS
+	 * 2. frag must fit the page
+	 */
+	return mtu <= SGE_PAGE_SIZE && (U_ETH_SGL_SIZE * fpp) <= MAX_SKB_FRAGS;
+}
+/**
+ * bnx2x_bz_fp - zero content of the fastpath structure.
+ *
+ * @bp:		driver handle
+ * @index:	fastpath index to be zeroed
+ *
+ * Makes sure the contents of the bp->fp[index].napi is kept
+ * intact.
+ */
+static inline void bnx2x_bz_fp(struct bnx2x *bp, int index)
+{
+	struct bnx2x_fastpath *fp = &bp->fp[index];
+	struct napi_struct orig_napi = fp->napi;
+	/* bzero bnx2x_fastpath contents */
+	if (bp->stats_init)
+		memset(fp, 0, sizeof(*fp));
+	else {
+		/* Keep Queue statistics */
+		struct bnx2x_eth_q_stats *tmp_eth_q_stats;
+		struct bnx2x_eth_q_stats_old *tmp_eth_q_stats_old;
+
+		tmp_eth_q_stats = kzalloc(sizeof(struct bnx2x_eth_q_stats),
+					  GFP_KERNEL);
+		if (tmp_eth_q_stats)
+			memcpy(tmp_eth_q_stats, &fp->eth_q_stats,
+			       sizeof(struct bnx2x_eth_q_stats));
+
+		tmp_eth_q_stats_old =
+			kzalloc(sizeof(struct bnx2x_eth_q_stats_old),
+				GFP_KERNEL);
+		if (tmp_eth_q_stats_old)
+			memcpy(tmp_eth_q_stats_old, &fp->eth_q_stats_old,
+			       sizeof(struct bnx2x_eth_q_stats_old));
+
+		memset(fp, 0, sizeof(*fp));
+
+		if (tmp_eth_q_stats) {
+			memcpy(&fp->eth_q_stats, tmp_eth_q_stats,
+				   sizeof(struct bnx2x_eth_q_stats));
+			kfree(tmp_eth_q_stats);
+		}
+
+		if (tmp_eth_q_stats_old) {
+			memcpy(&fp->eth_q_stats_old, tmp_eth_q_stats_old,
+			       sizeof(struct bnx2x_eth_q_stats_old));
+			kfree(tmp_eth_q_stats_old);
+		}
+
+	}
+
+	/* Restore the NAPI object as it has been already initialized */
+	fp->napi = orig_napi;
+
+	fp->bp = bp;
+	fp->index = index;
+	if (IS_ETH_FP(fp))
+		fp->max_cos = bp->max_cos;
+	else
+		/* Special queues support only one CoS */
+		fp->max_cos = 1;
+
+	/*
+	 * set the tpa flag for each queue. The tpa flag determines the queue
+	 * minimal size so it must be set prior to queue memory allocation
+	 */
+	fp->disable_tpa = !(bp->flags & TPA_ENABLE_FLAG ||
+				  (bp->flags & GRO_ENABLE_FLAG &&
+				   bnx2x_mtu_allows_gro(bp->dev->mtu)));
+	if (bp->flags & TPA_ENABLE_FLAG)
+		fp->mode = TPA_MODE_LRO;
+	else if (bp->flags & GRO_ENABLE_FLAG)
+		fp->mode = TPA_MODE_GRO;
+
+#ifdef BCM_CNIC
+	/* We don't want TPA on an FCoE L2 ring */
+	if (IS_FCOE_FP(fp))
+		fp->disable_tpa = 1;
+#endif
+}
+
+/**
+ * bnx2x_get_iscsi_info - update iSCSI params according to licensing info.
+ *
+ * @bp:		driver handle
+ *
+ */
+void bnx2x_get_iscsi_info(struct bnx2x *bp);
+
+/* returns func by VN for current port */
+static inline int func_by_vn(struct bnx2x *bp, int vn)
+{
+	return 2 * vn + BP_PORT(bp);
+}
+
+/**
+ * bnx2x_link_sync_notify - send notification to other functions.
+ *
+ * @bp:		driver handle
+ *
+ */
+static inline void bnx2x_link_sync_notify(struct bnx2x *bp)
+{
+	int func;
+	int vn;
+
+	/* Set the attention towards other drivers on the same port */
+	for (vn = VN_0; vn < BP_MAX_VN_NUM(bp); vn++) {
+		if (vn == BP_VN(bp))
+			continue;
+
+		func = func_by_vn(bp, vn);
+		REG_WR(bp, MISC_REG_AEU_GENERAL_ATTN_0 +
+		       (LINK_SYNC_ATTENTION_BIT_FUNC_0 + func)*4, 1);
+	}
+}
+
+/**
+ * bnx2x_update_drv_flags - update flags in shmem
+ *
+ * @bp:		driver handle
+ * @flags:	flags to update
+ * @set:	set or clear
+ *
+ */
+static inline void bnx2x_update_drv_flags(struct bnx2x *bp, u32 flags, u32 set)
+{
+	if (SHMEM2_HAS(bp, drv_flags)) {
+		u32 drv_flags;
+		bnx2x_acquire_hw_lock(bp, HW_LOCK_RESOURCE_DRV_FLAGS);
+		drv_flags = SHMEM2_RD(bp, drv_flags);
+
+		if (set)
+			SET_FLAGS(drv_flags, flags);
+		else
+			RESET_FLAGS(drv_flags, flags);
+
+		SHMEM2_WR(bp, drv_flags, drv_flags);
+		DP(NETIF_MSG_HW, "drv_flags 0x%08x\n", drv_flags);
+		bnx2x_release_hw_lock(bp, HW_LOCK_RESOURCE_DRV_FLAGS);
+	}
+}
+
+static inline bool bnx2x_is_valid_ether_addr(struct bnx2x *bp, u8 *addr)
+{
+	if (is_valid_ether_addr(addr))
+		return true;
+#ifdef BCM_CNIC
+	if (is_zero_ether_addr(addr) && IS_MF_ISCSI_SD(bp))
+		return true;
+#endif
+	return false;
 }
 
 #endif /* BNX2X_CMN_H */

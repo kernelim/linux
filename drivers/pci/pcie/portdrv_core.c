@@ -300,53 +300,39 @@ int pcie_get_port_device_capability(struct pci_dev *dev)
 }
 
 /**
- * pcie_device_init - initialize PCI Express port service device
- * @dev: Port service device to initialize
- * @parent: PCI Express port to associate the service device with
- * @service_type: Type of service to associate with the service device
+ * pcie_device_init - allocate and initialize PCI Express port service device
+ * @pdev: PCI Express port to associate the service device with
+ * @service: Type of service to associate with the service device
  * @irq: Interrupt vector to associate with the service device
  */
-static void pcie_device_init(struct pci_dev *parent, struct pcie_device *dev,
-			     int service_type, int irq)
+static int pcie_device_init(struct pci_dev *pdev, int service, int irq)
 {
+	int retval;
+	struct pcie_device *pcie;
 	struct device *device;
-	struct pci_dev *pdev;
 
-	dev->port = parent;
-	dev->irq = irq;
-	dev->service = service_type;
+	pcie = kzalloc(sizeof(*pcie), GFP_KERNEL);
+	if (!pcie)
+		return -ENOMEM;
+	pcie->port = pdev;
+	pcie->irq = irq;
+	pcie->service = service;
 
 	/* Initialize generic device interface */
-	device = &dev->device;
-	memset(device, 0, sizeof(struct device));
+	device = &pcie->device;
 	device->bus = &pcie_port_bus_type;
-	device->driver = NULL;
-	dev_set_drvdata(device, NULL);
 	device->release = release_pcie_device;	/* callback to free pcie dev */
-	pdev = to_pci_dev(device);
 	dev_set_name(device, "%s:pcie%02x",
-		 pci_name(parent),
-		 get_descriptor_id(pdev->pcie_type, service_type));
-	device->parent = &parent->dev;
-}
+		     pci_name(pdev),
+		     get_descriptor_id(pdev->pcie_type, service));
+	device->parent = &pdev->dev;
 
-/**
- * alloc_pcie_device - allocate PCI Express port service device structure
- * @parent: PCI Express port to associate the service device with
- * @service_type: Type of service to associate with the service device
- * @irq: Interrupt vector to associate with the service device
- */
-static struct pcie_device* alloc_pcie_device(struct pci_dev *parent,
-	int service_type, int irq)
-{
-	struct pcie_device *device;
-
-	device = kzalloc(sizeof(struct pcie_device), GFP_KERNEL);
-	if (!device)
-		return NULL;
-
-	pcie_device_init(parent, device, service_type, irq);
-	return device;
+	retval = device_register(device);
+	if (retval)
+		kfree(pcie);
+	else
+		get_device(device);
+	return retval;
 }
 
 /**
@@ -384,24 +370,14 @@ int pcie_port_device_register(struct pci_dev *dev)
 
 	/* Allocate child services if any */
 	for (i = 0, nr_serv = 0; i < PCIE_PORT_DEVICE_MAXSERVICES; i++) {
-		struct pcie_device *child;
 		int service = 1 << i;
 
 		if (!(capabilities & service))
 			continue;
 
-		child = alloc_pcie_device(dev, service, irqs[i]);
-		if (!child)
-			continue;
-
-		status = device_register(&child->device);
-		if (status) {
-			kfree(child);
-			continue;
-		}
-
-		get_device(&child->device);
-		nr_serv++;
+		status = pcie_device_init(dev, service, irqs[i]);
+		if (!status)
+			nr_serv++;
 	}
 	if (!nr_serv) {
 		pci_disable_device(dev);

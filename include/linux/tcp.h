@@ -239,6 +239,7 @@ struct tcp_request_sock {
 #endif
 	u32			 	rcv_isn;
 	u32			 	snt_isn;
+	u32				snt_synack; /* synack sent time */
 };
 
 static inline struct tcp_request_sock *tcp_rsk(const struct request_sock *req)
@@ -413,6 +414,11 @@ struct tcp_sock {
 	u8	thin_lto    : 1,/* Use linear timeouts for thin streams */
 		thin_dupack : 1,/* Fast retransmit on first dupack      */
 		unused      : 6;
+
+	u32	prior_cwnd;	/* Congestion window at start of Recovery. */
+	u32	prr_delivered;	/* Number of newly delivered packets to
+				 * receiver in Recovery. */
+	u32	prr_out;	/* Total number of pkts sent during Recovery. */
 #endif
 };
 

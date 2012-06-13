@@ -1,5 +1,6 @@
 #ifndef P54PCI_H
 #define P54PCI_H
+#include <linux/interrupt.h>
 
 /*
  * Defines for PCI based mac80211 Prism54 driver
@@ -65,7 +66,7 @@ struct p54p_csr {
 	u8 unused_6[1924];
 	u8 cardbus_cis[0x800];
 	u8 direct_mem_win[0x1000];
-} __attribute__ ((packed));
+} __packed;
 
 /* usb backend only needs the register defines above */
 #ifndef P54USB_H
@@ -74,7 +75,7 @@ struct p54p_desc {
 	__le32 device_addr;
 	__le16 len;
 	__le16 flags;
-} __attribute__ ((packed));
+} __packed;
 
 struct p54p_ring_control {
 	__le32 host_idx[4];
@@ -83,7 +84,7 @@ struct p54p_ring_control {
 	struct p54p_desc tx_data[32];
 	struct p54p_desc rx_mgmt[4];
 	struct p54p_desc tx_mgmt[4];
-} __attribute__ ((packed));
+} __packed;
 
 #define P54P_READ(r) (__force __le32)__raw_readl(&priv->map->r)
 #define P54P_WRITE(r, val) __raw_writel((__force u32)(__le32)(val), &priv->map->r)

@@ -2,14 +2,16 @@
 #define B43_XMIT_H_
 
 #include "main.h"
+#include <net/mac80211.h>
+
 
 #define _b43_declare_plcp_hdr(size) \
 	struct b43_plcp_hdr##size {		\
 		union {				\
 			__le32 data;		\
 			__u8 raw[size];		\
-		} __attribute__((__packed__));	\
-	} __attribute__((__packed__))
+		} __packed;	\
+	} __packed
 
 /* struct b43_plcp_hdr4 */
 _b43_declare_plcp_hdr(4);
@@ -44,7 +46,24 @@ struct b43_txhdr {
 	__le32 timeout;			/* Timeout */
 
 	union {
-		/* The new r410 format. */
+		/* Tested with 598.314, 644.1001 and 666.2 */
+		struct {
+			__le16 mimo_antenna;            /* MIMO antenna select */
+			__le16 preload_size;            /* Preload size */
+			PAD_BYTES(2);
+			__le16 cookie;                  /* TX frame cookie */
+			__le16 tx_status;               /* TX status */
+			__le16 max_n_mpdus;
+			__le16 max_a_bytes_mrt;
+			__le16 max_a_bytes_fbr;
+			__le16 min_m_bytes;
+			struct b43_plcp_hdr6 rts_plcp;  /* RTS PLCP header */
+			__u8 rts_frame[16];             /* The RTS frame (if used) */
+			PAD_BYTES(2);
+			struct b43_plcp_hdr6 plcp;      /* Main PLCP header */
+		} format_598 __packed;
+
+		/* Tested with 410.2160, 478.104 and 508.* */
 		struct {
 			__le16 mimo_antenna;		/* MIMO antenna select */
 			__le16 preload_size;		/* Preload size */
@@ -55,9 +74,9 @@ struct b43_txhdr {
 			__u8 rts_frame[16];		/* The RTS frame (if used) */
 			PAD_BYTES(2);
 			struct b43_plcp_hdr6 plcp;	/* Main PLCP header */
-		} new_format __attribute__ ((__packed__));
+		} format_410 __packed;
 
-		/* The old r351 format. */
+		/* Tested with 351.126 */
 		struct {
 			PAD_BYTES(2);
 			__le16 cookie;			/* TX frame cookie */
@@ -66,10 +85,16 @@ struct b43_txhdr {
 			__u8 rts_frame[16];		/* The RTS frame (if used) */
 			PAD_BYTES(2);
 			struct b43_plcp_hdr6 plcp;	/* Main PLCP header */
-		} old_format __attribute__ ((__packed__));
+		} format_351 __packed;
 
-	} __attribute__ ((__packed__));
-} __attribute__ ((__packed__));
+	} __packed;
+} __packed;
+
+struct b43_tx_legacy_rate_phy_ctl_entry {
+	u8 bitrate;
+	u16 coding_rate;
+	u16 modulation;
+};
 
 /* MAC TX control */
 #define B43_TXH_MAC_USEFBR		0x10000000 /* Use fallback rate for this AMPDU */
@@ -158,19 +183,18 @@ struct b43_txhdr {
 #define  B43_TXH_PHY1_MODUL_QAM256	0x2000 /* QAM256 */
 
 
-/* r351 firmware compatibility stuff. */
-static inline
-bool b43_is_old_txhdr_format(struct b43_wldev *dev)
-{
-	return (dev->fw.rev <= 351);
-}
-
 static inline
 size_t b43_txhdr_size(struct b43_wldev *dev)
 {
-	if (b43_is_old_txhdr_format(dev))
+	switch (dev->fw.hdr_format) {
+	case B43_FW_HDR_598:
+		return 112 + sizeof(struct b43_plcp_hdr6);
+	case B43_FW_HDR_410:
+		return 104 + sizeof(struct b43_plcp_hdr6);
+	case B43_FW_HDR_351:
 		return 100 + sizeof(struct b43_plcp_hdr6);
-	return 104 + sizeof(struct b43_plcp_hdr6);
+	}
+	return 0;
 }
 
 
@@ -216,20 +240,56 @@ struct b43_rxhdr_fw4 {
 		struct {
 			__u8 jssi;	/* PHY RX Status 1: JSSI */
 			__u8 sig_qual;	/* PHY RX Status 1: Signal Quality */
-		} __attribute__ ((__packed__));
+		} __packed;
 
 		/* RSSI for N-PHYs */
 		struct {
 			__s8 power0;	/* PHY RX Status 1: Power 0 */
 			__s8 power1;	/* PHY RX Status 1: Power 1 */
-		} __attribute__ ((__packed__));
-	} __attribute__ ((__packed__));
-	__le16 phy_status2;	/* PHY RX Status 2 */
-	__le16 phy_status3;	/* PHY RX Status 3 */
-	__le32 mac_status;	/* MAC RX status */
-	__le16 mac_time;
-	__le16 channel;
-} __attribute__ ((__packed__));
+		} __packed;
+	} __packed;
+	union {
+		/* HT-PHY */
+		struct {
+			PAD_BYTES(1);
+			__s8 phy_ht_power0;
+		} __packed;
+
+		/* RSSI for N-PHYs */
+		struct {
+			__s8 power2;
+			PAD_BYTES(1);
+		} __packed;
+
+		__le16 phy_status2;	/* PHY RX Status 2 */
+	} __packed;
+	union {
+		/* HT-PHY */
+		struct {
+			__s8 phy_ht_power1;
+			__s8 phy_ht_power2;
+		} __packed;
+
+		__le16 phy_status3;	/* PHY RX Status 3 */
+	} __packed;
+	union {
+		/* Tested with 598.314, 644.1001 and 666.2 */
+		struct {
+			__le16 phy_status4;	/* PHY RX Status 4 */
+			__le16 phy_status5;	/* PHY RX Status 5 */
+			__le32 mac_status;	/* MAC RX status */
+			__le16 mac_time;
+			__le16 channel;
+		} format_598 __packed;
+
+		/* Tested with 351.126, 410.2160, 478.104 and 508.* */
+		struct {
+			__le32 mac_status;	/* MAC RX status */
+			__le16 mac_time;
+			__le16 channel;
+		} format_351 __packed;
+	} __packed;
+} __packed;
 
 /* PHY RX Status 0 */
 #define B43_RX_PHYST0_GAINCTL		0x4000 /* Gain Control */
@@ -330,6 +390,23 @@ static inline u8 b43_kidx_to_raw(struct b43_wldev *dev, u8 firmware_kidx)
 	else
 		raw_kidx = firmware_kidx + 4;	/* RX default keys or per STA keys */
 	return raw_kidx;
+}
+
+/* struct b43_private_tx_info - TX info private to b43.
+ * The structure is placed in (struct ieee80211_tx_info *)->rate_driver_data
+ *
+ * @bouncebuffer: DMA Bouncebuffer (if used)
+ */
+struct b43_private_tx_info {
+	void *bouncebuffer;
+};
+
+static inline struct b43_private_tx_info *
+b43_get_priv_tx_info(struct ieee80211_tx_info *info)
+{
+	BUILD_BUG_ON(sizeof(struct b43_private_tx_info) >
+		     sizeof(info->rate_driver_data));
+	return (struct b43_private_tx_info *)info->rate_driver_data;
 }
 
 #endif /* B43_XMIT_H_ */

@@ -5,7 +5,8 @@
  * based on the old aacraid driver that is..
  * Adaptec aacraid device driver for Linux.
  *
- * Copyright (c) 2000-2007 Adaptec, Inc. (aacraid@adaptec.com)
+ * Copyright (c) 2011 PMC-Sierra, Inc. (aacraid@pmc-sierra.com)
+ *		  2000-2010 Adaptec, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -293,7 +294,9 @@ int aac_get_config_status(struct aac_dev *dev, int commit_flag)
 			status = -EINVAL;
 		}
 	}
-	aac_fib_complete(fibptr);
+	/* Do not set XferState to zero unless receives a response from F/W */
+	if (status >= 0)
+		aac_fib_complete(fibptr);
 	/* Send a CT_COMMIT_CONFIG to enable discovery of devices */
 	if (status >= 0) {
 		if ((aac_commit == 1) || commit_flag) {
@@ -310,13 +313,18 @@ int aac_get_config_status(struct aac_dev *dev, int commit_flag)
 				    FsaNormal,
 				    1, 1,
 				    NULL, NULL);
-			aac_fib_complete(fibptr);
+			/* Do not set XferState to zero unless
+			 * receives a response from F/W */
+			if (status >= 0)
+				aac_fib_complete(fibptr);
 		} else if (aac_commit == 0) {
 			printk(KERN_WARNING
 			  "aac_get_config_status: Foreign device configurations are being ignored\n");
 		}
 	}
-	aac_fib_free(fibptr);
+	/* FIB should be freed only after getting the response from the F/W */
+	if (status != -ERESTARTSYS)
+		aac_fib_free(fibptr);
 	return status;
 }
 
@@ -355,7 +363,9 @@ int aac_get_containers(struct aac_dev *dev)
 		maximum_num_containers = le32_to_cpu(dresp->ContainerSwitchEntries);
 		aac_fib_complete(fibptr);
 	}
-	aac_fib_free(fibptr);
+	/* FIB should be freed only after getting the response from the F/W */
+	if (status != -ERESTARTSYS)
+		aac_fib_free(fibptr);
 
 	if (maximum_num_containers < MAXIMUM_NUM_CONTAINERS)
 		maximum_num_containers = MAXIMUM_NUM_CONTAINERS;
@@ -1245,8 +1255,12 @@ int aac_get_adapter_info(struct aac_dev* dev)
 			 NULL);
 
 	if (rcode < 0) {
-		aac_fib_complete(fibptr);
-		aac_fib_free(fibptr);
+		/* FIB should be freed only after
+		 * getting the response from the F/W */
+		if (rcode != -ERESTARTSYS) {
+			aac_fib_complete(fibptr);
+			aac_fib_free(fibptr);
+		}
 		return rcode;
 	}
 	memcpy(&dev->adapter_info, info, sizeof(*info));
@@ -1270,6 +1284,11 @@ int aac_get_adapter_info(struct aac_dev* dev)
 
 		if (rcode >= 0)
 			memcpy(&dev->supplement_adapter_info, sinfo, sizeof(*sinfo));
+		if (rcode == -ERESTARTSYS) {
+			fibptr = aac_fib_alloc(dev);
+			if (!fibptr)
+				return -ENOMEM;
+		}
 	}
 
 
@@ -1456,7 +1475,9 @@ int aac_get_adapter_info(struct aac_dev* dev)
 			dev->a_ops.adapter_write = aac_write_block;
 		}
 		dev->scsi_host_ptr->max_sectors = AAC_MAX_32BIT_SGBCOUNT;
-		if(!(dev->adapter_info.options & AAC_OPT_NEW_COMM)) {
+		if (dev->adapter_info.options & AAC_OPT_NEW_COMM_TYPE1)
+			dev->adapter_info.options |= AAC_OPT_NEW_COMM;
+		if (!(dev->adapter_info.options & AAC_OPT_NEW_COMM)) {
 			/*
 			 * Worst case size that could cause sg overflow when
 			 * we break up SG elements that are larger than 64KB.
@@ -1470,9 +1491,11 @@ int aac_get_adapter_info(struct aac_dev* dev)
 			  (dev->scsi_host_ptr->sg_tablesize * 8) + 112;
 		}
 	}
-
-	aac_fib_complete(fibptr);
-	aac_fib_free(fibptr);
+	/* FIB should be freed only after getting the response from the F/W */
+	if (rcode != -ERESTARTSYS) {
+		aac_fib_complete(fibptr);
+		aac_fib_free(fibptr);
+	}
 
 	return rcode;
 }
@@ -1633,6 +1656,7 @@ static int aac_read(struct scsi_cmnd * scsicmd)
 	 *	Alocate and initialize a Fib
 	 */
 	if (!(cmd_fibcontext = aac_fib_alloc(dev))) {
+		printk(KERN_WARNING "aac_read: fib allocation failed\n");
 		return -1;
 	}
 
@@ -1712,9 +1736,14 @@ static int aac_write(struct scsi_cmnd * scsicmd)
 	 *	Allocate and initialize a Fib then setup a BlockWrite command
 	 */
 	if (!(cmd_fibcontext = aac_fib_alloc(dev))) {
-		scsicmd->result = DID_ERROR << 16;
-		scsicmd->scsi_done(scsicmd);
-		return 0;
+		/* FIB temporarily unavailable,not catastrophic failure */
+
+		/* scsicmd->result = DID_ERROR << 16;
+		 * scsicmd->scsi_done(scsicmd);
+		 * return 0;
+		 */
+		printk(KERN_WARNING "aac_write: fib allocation failed\n");
+		return -1;
 	}
 
 	status = aac_adapter_write(cmd_fibcontext, scsicmd, lba, count, fua);

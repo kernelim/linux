@@ -125,28 +125,21 @@ cifs_read_super(struct super_block *sb, void *data,
 	spin_lock_init(&cifs_sb->tlink_tree_lock);
 	cifs_sb->tlink_tree = RB_ROOT;
 
-#ifdef CONFIG_CIFS_DFS_UPCALL
-	/* copy mount params to sb for use in submounts */
-	/* BB: should we move this after the mount so we
-	 * do not have to do the copy on failed mounts?
-	 * BB: May be it is better to do simple copy before
-	 * complex operation (mount), and in case of fail
-	 * just exit instead of doing mount and attempting
-	 * undo it if this copy fails?*/
+	/*
+	 * Copy mount params to sb for use in submounts. Better to do
+	 * the copy here and deal with the error before cleanup gets
+	 * complicated post-mount.
+	 */
 	if (data) {
-		int len = strlen(data);
-		cifs_sb->mountdata = kzalloc(len + 1, GFP_KERNEL);
+		cifs_sb->mountdata = kstrndup(data, PAGE_SIZE, GFP_KERNEL);
 		if (cifs_sb->mountdata == NULL) {
 			kfree(sb->s_fs_info);
 			sb->s_fs_info = NULL;
 			return -ENOMEM;
 		}
-		strncpy(cifs_sb->mountdata, data, len + 1);
-		cifs_sb->mountdata[len] = '\0';
 	}
-#endif
 
-	rc = cifs_mount(sb, cifs_sb, data, devname);
+	rc = cifs_mount(sb, cifs_sb, devname);
 
 	if (rc) {
 		if (!silent)
@@ -191,12 +184,10 @@ out_no_root:
 
 out_mount_failed:
 	if (cifs_sb) {
-#ifdef CONFIG_CIFS_DFS_UPCALL
 		if (cifs_sb->mountdata) {
 			kfree(cifs_sb->mountdata);
 			cifs_sb->mountdata = NULL;
 		}
-#endif
 		unload_nls(cifs_sb->local_nls);
 		kfree(cifs_sb);
 	}
@@ -221,12 +212,10 @@ cifs_put_super(struct super_block *sb)
 	rc = cifs_umount(sb, cifs_sb);
 	if (rc)
 		cERROR(1, "cifs_umount failed with return code %d", rc);
-#ifdef CONFIG_CIFS_DFS_UPCALL
 	if (cifs_sb->mountdata) {
 		kfree(cifs_sb->mountdata);
 		cifs_sb->mountdata = NULL;
 	}
-#endif
 
 	unload_nls(cifs_sb->local_nls);
 	kfree(cifs_sb);
@@ -441,13 +430,13 @@ cifs_show_options(struct seq_file *s, struct vfsmount *m)
 				   (int)(srcaddr->sa_family));
 	}
 
-	seq_printf(s, ",uid=%d", cifs_sb->mnt_uid);
+	seq_printf(s, ",uid=%u", cifs_sb->mnt_uid);
 	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_OVERR_UID)
 		seq_printf(s, ",forceuid");
 	else
 		seq_printf(s, ",noforceuid");
 
-	seq_printf(s, ",gid=%d", cifs_sb->mnt_gid);
+	seq_printf(s, ",gid=%u", cifs_sb->mnt_gid);
 	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_OVERR_GID)
 		seq_printf(s, ",forcegid");
 	else
@@ -493,9 +482,17 @@ cifs_show_options(struct seq_file *s, struct vfsmount *m)
 		seq_printf(s, ",mfsymlinks");
 	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_FSCACHE)
 		seq_printf(s, ",fsc");
+	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_NOSSYNC)
+		seq_printf(s, ",nostrictsync");
+	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_NO_PERM)
+		seq_printf(s, ",noperm");
+	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_CIFS_BACKUPUID)
+		seq_printf(s, ",backupuid=%u", cifs_sb->mnt_backupuid);
+	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_CIFS_BACKUPGID)
+		seq_printf(s, ",backupgid=%u", cifs_sb->mnt_backupgid);
 
-	seq_printf(s, ",rsize=%d", cifs_sb->rsize);
-	seq_printf(s, ",wsize=%d", cifs_sb->wsize);
+	seq_printf(s, ",rsize=%u", cifs_sb->rsize);
+	seq_printf(s, ",wsize=%u", cifs_sb->wsize);
 
 	return 0;
 }

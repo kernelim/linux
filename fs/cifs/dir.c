@@ -252,6 +252,9 @@ cifs_create(struct inode *inode, struct dentry *direntry, int mode,
 	if (!tcon->unix_ext && (mode & S_IWUGO) == 0)
 		create_options |= CREATE_OPTION_READONLY;
 
+	if (backup_cred(cifs_sb))
+		create_options |= CREATE_OPEN_BACKUP_INTENT;
+
 	if (tcon->ses->capabilities & CAP_NT_SMBS)
 		rc = CIFSSMBOpen(xid, tcon, full_path, disposition,
 			 desiredAccess, create_options,
@@ -367,6 +370,7 @@ int cifs_mknod(struct inode *inode, struct dentry *direntry, int mode,
 {
 	int rc = -EPERM;
 	int xid;
+	int create_options = CREATE_NOT_DIR | CREATE_OPTION_SPECIAL;
 	struct cifs_sb_info *cifs_sb;
 	struct tcon_link *tlink;
 	struct cifsTconInfo *pTcon;
@@ -434,13 +438,13 @@ int cifs_mknod(struct inode *inode, struct dentry *direntry, int mode,
 				return rc;
 			}
 
+			if (backup_cred(cifs_sb))
+				create_options |= CREATE_OPEN_BACKUP_INTENT;
+
 			rc = CIFSSMBOpen(xid, pTcon, full_path,
 					 FILE_CREATE, /* fail if exists */
-					 GENERIC_WRITE /* BB would
-					  WRITE_OWNER | WRITE_DAC be better? */,
-					 /* Create a file and set the
-					    file attribute to SYSTEM */
-					 CREATE_NOT_DIR | CREATE_OPTION_SPECIAL,
+					 GENERIC_WRITE,
+					 create_options,
 					 &fileHandle, &oplock, buf,
 					 cifs_sb->local_nls,
 					 cifs_sb->mnt_cifs_flags &
@@ -673,22 +677,49 @@ lookup_out:
 static int
 cifs_d_revalidate(struct dentry *direntry, struct nameidata *nd)
 {
-	int isValid = 1;
-
 	if (direntry->d_inode) {
 		if (cifs_revalidate_dentry(direntry))
 			return 0;
-	} else {
-		cFYI(1, "neg dentry 0x%p name = %s",
-			 direntry, direntry->d_name.name);
-		if (time_after(jiffies, direntry->d_time + HZ) ||
-			!lookupCacheEnabled) {
-			d_drop(direntry);
-			isValid = 0;
+		else {
+			/*
+			 * If the inode wasn't known to be a dfs entry when
+			 * the dentry was instantiated, such as when created
+			 * via ->readdir(), it needs to be set now since the
+			 * attributes will have been updated by
+			 * cifs_revalidate_dentry().
+			 */
+			if (IS_AUTOMOUNT(direntry->d_inode) &&
+			   !(direntry->d_flags & DCACHE_NEED_AUTOMOUNT)) {
+				spin_lock(&direntry->d_lock);
+				direntry->d_flags |= DCACHE_NEED_AUTOMOUNT;
+				spin_unlock(&direntry->d_lock);
+			}
+
+			return 1;
 		}
 	}
 
-	return isValid;
+	/*
+	 * This may be nfsd (or something), anyway, we can't see the
+	 * intent of this. So, since this can be for creation, drop it.
+	 */
+	if (!nd)
+		return 0;
+
+	/*
+	 * Drop the negative dentry, in order to make sure to use the
+	 * case sensitive name which is specified by user if this is
+	 * for creation.
+	 */
+	if (!(nd->flags & (LOOKUP_CONTINUE | LOOKUP_PARENT))) {
+		if (nd->flags & (LOOKUP_CREATE | LOOKUP_RENAME_TARGET))
+			return 0;
+	}
+
+	if (time_after(jiffies, direntry->d_time + HZ) || !lookupCacheEnabled)
+		return 0;
+
+	return 1;
 }
 
 /* static int cifs_d_delete(struct dentry *direntry)
@@ -727,15 +758,8 @@ static int cifs_ci_compare(struct dentry *dentry, struct qstr *a,
 	struct nls_table *codepage = CIFS_SB(dentry->d_inode->i_sb)->local_nls;
 
 	if ((a->len == b->len) &&
-	    (nls_strnicmp(codepage, a->name, b->name, a->len) == 0)) {
-		/*
-		 * To preserve case, don't let an existing negative dentry's
-		 * case take precedence.  If a is not a negative dentry, this
-		 * should have no side effects
-		 */
-		memcpy((void *)a->name, b->name, a->len);
+	    (nls_strnicmp(codepage, a->name, b->name, a->len) == 0))
 		return 0;
-	}
 	return 1;
 }
 

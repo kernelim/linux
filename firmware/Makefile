@@ -44,7 +44,13 @@ fw-shipped-$(CONFIG_BNX2X) += bnx2x-e1-5.2.13.0.fw bnx2x-e1h-5.2.13.0.fw \
 			      bnx2x/bnx2x-e2-7.0.20.0.fw \
 			      bnx2x/bnx2x-e1-7.0.23.0.fw \
 			      bnx2x/bnx2x-e1h-7.0.23.0.fw \
-			      bnx2x/bnx2x-e2-7.0.23.0.fw
+			      bnx2x/bnx2x-e2-7.0.23.0.fw \
+			      bnx2x/bnx2x-e1-7.0.29.0.fw \
+			      bnx2x/bnx2x-e1h-7.0.29.0.fw \
+			      bnx2x/bnx2x-e2-7.0.29.0.fw \
+			      bnx2x/bnx2x-e1-7.2.16.0.fw \
+			      bnx2x/bnx2x-e1h-7.2.16.0.fw \
+			      bnx2x/bnx2x-e2-7.2.16.0.fw
 fw-shipped-$(CONFIG_BNX2) += bnx2/bnx2-mips-09-6.0.17.fw \
 			     bnx2/bnx2-rv2p-09-6.0.17.fw \
 			     bnx2/bnx2-rv2p-09ax-6.0.17.fw \
@@ -56,7 +62,9 @@ fw-shipped-$(CONFIG_BNX2) += bnx2/bnx2-mips-09-6.0.17.fw \
 			     bnx2/bnx2-mips-06-5.0.0.j6.fw \
 			     bnx2/bnx2-rv2p-06-5.0.0.j3.fw \
 			     bnx2/bnx2-mips-09-6.2.1a.fw \
+			     bnx2/bnx2-mips-09-6.2.1b.fw \
 			     bnx2/bnx2-mips-06-6.2.1.fw \
+			     bnx2/bnx2-mips-06-6.2.3.fw \
 			     bnx2/bnx2-mips-09-5.0.0.j3.fw 
 fw-shipped-$(CONFIG_CASSINI) += sun/cassini.bin
 fw-shipped-$(CONFIG_COMPUTONE) += intelliport2.bin
@@ -64,11 +72,13 @@ fw-shipped-$(CONFIG_CHELSIO_T3) += cxgb3/t3b_psram-1.1.0.bin \
 				   cxgb3/t3c_psram-1.1.0.bin \
 				   cxgb3/t3fw-7.4.0.bin \
 				   cxgb3/t3fw-7.10.0.bin \
+				   cxgb3/t3fw-7.12.0.bin \
 				   cxgb3/ael2005_opt_edc.bin \
 				   cxgb3/ael2005_twx_edc.bin \
 				   cxgb3/ael2020_twx_edc.bin
 fw-shipped-$(CONFIG_CHELSO_T4) += cxgb4/t4fw.bin \
-				  cxgb4/t4fw-1.3.10.0.bin
+				  cxgb4/t4fw-1.3.10.0.bin\
+				  cxgb4/t4fw-1.4.16.0.bin
 fw-shipped-$(CONFIG_DRM_MGA) += matrox/g200_warp.fw matrox/g400_warp.fw
 fw-shipped-$(CONFIG_DRM_R128) += r128/r128_cce.bin
 fw-shipped-$(CONFIG_DRM_RADEON) += radeon/R100_cp.bin radeon/R200_cp.bin \
@@ -97,6 +107,16 @@ fw-shipped-$(CONFIG_PCMCIA_PCNET) += cis/LA-PCM.cis cis/PCMLM28.cis \
 				     cis/tamarack.cis cis/PE-200.cis
 fw-shipped-$(CONFIG_PCMCIA_3C589) += cis/3CXEM556.cis
 fw-shipped-$(CONFIG_PCMCIA_3C574) += cis/3CCFEM556.cis
+fw-shipped-$(CONFIG_R8169) += rtl_nic/rtl_nic_rtl8168d-1.fw \
+			      rtl_nic/rtl_nic_rtl8168d-2.fw \
+			      rtl_nic/rtl_nic_rtl8105e-1.fw \
+			      rtl_nic/rtl_nic_rtl8168e-1.fw \
+			      rtl_nic/rtl_nic_rtl8168e-2.fw \
+			      rtl_nic/rtl_nic_rtl8168e-3.fw
+fw-shipped-$(CONFIG_MYRI10GE) += myri10ge_eth_z8e.dat \
+				 myri10ge_ethp_z8e.dat \
+				 myri10ge_rss_eth_z8e.dat \
+				 myri10ge_rss_ethp_z8e.dat
 fw-shipped-$(CONFIG_SERIAL_8250_CS) += cis/MT5634ZLX.cis cis/RS-COM-2P.cis \
 				       cis/COMpad2.cis cis/COMpad4.cis \
 				       cis/SW_555_SER.cis cis/SW_7xx_SER.cis \
@@ -163,6 +183,12 @@ fw-shipped-$(CONFIG_USB_SERIAL_XIRCOM) += keyspan_pda/xircom_pgs.fw
 fw-shipped-$(CONFIG_USB_VICAM) += vicam/firmware.fw
 fw-shipped-$(CONFIG_VIDEO_CPIA2) += cpia2/stv0672_vp4.bin
 fw-shipped-$(CONFIG_YAM) += yam/1200.bin yam/9600.bin
+
+# This section is firmware required by the integrated compat-wireless
+# build.  All of those drivers are modules, and their config is turned-off
+# in the base kernel.  So, force them to fw-shipped-m below.
+fw-shipped-m += iwlwifi-105-6.ucode iwlwifi-135-6.ucode iwlwifi-2000-6.ucode \
+		iwlwifi-2030-6.ucode iwlwifi-6000g2b-6.ucode
 
 fw-shipped-all := $(fw-shipped-y) $(fw-shipped-m) $(fw-shipped-)
 

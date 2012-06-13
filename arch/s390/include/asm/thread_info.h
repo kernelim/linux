@@ -31,6 +31,7 @@
 #define ASYNC_SIZE  (PAGE_SIZE << ASYNC_ORDER)
 
 #ifndef __ASSEMBLY__
+#include <linux/types.h>
 #include <asm/lowcore.h>
 #include <asm/page.h>
 #include <asm/processor.h>
@@ -52,6 +53,7 @@ struct thread_info {
 	__u64			system_timer;
 #ifndef __GENKSYMS__
 	unsigned long		last_break;	/* last breaking-event-address. */
+	struct list_head	list;		/* pfault task list */
 #endif
 };
 

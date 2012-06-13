@@ -288,8 +288,7 @@ nfs_xdr_readres(struct rpc_rqst *req, __be32 *p, struct nfs_readres *res)
 	}
 
 	dprintk("RPC:      readres OK count %u\n", count);
-	if (count < res->count)
-		res->count = count;
+	res->count = count;
 
 	return count;
 }

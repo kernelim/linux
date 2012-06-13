@@ -3111,8 +3111,8 @@ static const struct vm_operations_struct snd_pcm_vm_ops_data =
 /*
  * mmap the DMA buffer on RAM
  */
-static int snd_pcm_default_mmap(struct snd_pcm_substream *substream,
-				struct vm_area_struct *area)
+int snd_pcm_lib_default_mmap(struct snd_pcm_substream *substream,
+			     struct vm_area_struct *area)
 {
 	area->vm_ops = &snd_pcm_vm_ops_data;
 	area->vm_private_data = substream;
@@ -3120,6 +3120,7 @@ static int snd_pcm_default_mmap(struct snd_pcm_substream *substream,
 	atomic_inc(&substream->mmap_count);
 	return 0;
 }
+EXPORT_SYMBOL_GPL(snd_pcm_lib_default_mmap);
 
 /*
  * mmap the DMA buffer on I/O memory area
@@ -3193,7 +3194,7 @@ int snd_pcm_mmap_data(struct snd_pcm_substream *substream, struct file *file,
 	if (substream->ops->mmap)
 		return substream->ops->mmap(substream, area);
 	else
-		return snd_pcm_default_mmap(substream, area);
+		return snd_pcm_lib_default_mmap(substream, area);
 }
 
 EXPORT_SYMBOL(snd_pcm_mmap_data);

@@ -19,6 +19,8 @@
 #include <linux/freezer.h>
 #include <linux/bio.h>
 #include <linux/writeback.h>
+#include <linux/list_sort.h>
+#include <linux/mempool.h>
 
 #include "gfs2.h"
 #include "incore.h"
@@ -512,7 +514,7 @@ static void gfs2_fake_write_endio(struct buffer_head *bh, int uptodate)
 	struct gfs2_sbd *sdp = bd->bd_gl->gl_sbd;
 
 	end_buffer_write_sync(bh, uptodate);
-	free_buffer_head(bh);
+	mempool_free(bh, gfs2_bh_pool);
 	unlock_buffer(real_bh);
 	brelse(real_bh);
 	if (atomic_dec_and_test(&sdp->sd_log_in_flight))
@@ -533,7 +535,7 @@ struct buffer_head *gfs2_log_fake_buf(struct gfs2_sbd *sdp,
 	u64 blkno = log_bmap(sdp, sdp->sd_log_flush_head);
 	struct buffer_head *bh;
 
-	bh = alloc_buffer_head(GFP_NOFS | __GFP_NOFAIL);
+	bh = mempool_alloc(gfs2_bh_pool, GFP_NOFS);
 	atomic_set(&bh->b_count, 1);
 	bh->b_state = (1 << BH_Mapped) | (1 << BH_Uptodate) | (1 << BH_Lock);
 	set_bh_page(bh, real->b_page, bh_offset(real));
@@ -640,6 +642,20 @@ static void log_flush_commit(struct gfs2_sbd *sdp)
 	log_write_header(sdp, 0, 0);
 }
 
+int bd_cmp(void *priv, struct list_head *a, struct list_head *b)
+{
+	struct gfs2_bufdata *bda, *bdb;
+
+	bda = list_entry(a, struct gfs2_bufdata, bd_le.le_list);
+	bdb = list_entry(b, struct gfs2_bufdata, bd_le.le_list);
+
+	if (bda->bd_bh->b_blocknr < bdb->bd_bh->b_blocknr)
+		return -1;
+	if (bda->bd_bh->b_blocknr > bdb->bd_bh->b_blocknr)
+		return 1;
+	return 0;
+}
+
 static void gfs2_ordered_write(struct gfs2_sbd *sdp)
 {
 	struct gfs2_bufdata *bd;
@@ -647,6 +663,7 @@ static void gfs2_ordered_write(struct gfs2_sbd *sdp)
 	LIST_HEAD(written);
 
 	gfs2_log_lock(sdp);
+	list_sort(NULL, &sdp->sd_log_le_ordered, &bd_cmp);
 	while (!list_empty(&sdp->sd_log_le_ordered)) {
 		bd = list_entry(sdp->sd_log_le_ordered.next, struct gfs2_bufdata, bd_le.le_list);
 		list_move(&bd->bd_le.le_list, &written);

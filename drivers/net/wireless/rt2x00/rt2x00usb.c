@@ -1,5 +1,6 @@
 /*
-	Copyright (C) 2004 - 2009 rt2x00 SourceForge Project
+	Copyright (C) 2010 Willow Garage <http://www.willowgarage.com>
+	Copyright (C) 2004 - 2010 Ivo van Doorn <IvDoorn@gmail.com>
 	<http://rt2x00.serialmonkey.com>
 
 	This program is free software; you can redistribute it and/or modify
@@ -25,6 +26,7 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/slab.h>
 #include <linux/usb.h>
 #include <linux/bug.h>
 
@@ -112,26 +114,6 @@ int rt2x00usb_vendor_request_buff(struct rt2x00_dev *rt2x00dev,
 				  const u16 offset, void *buffer,
 				  const u16 buffer_length, const int timeout)
 {
-	int status;
-
-	mutex_lock(&rt2x00dev->csr_mutex);
-
-	status = rt2x00usb_vendor_req_buff_lock(rt2x00dev, request,
-						requesttype, offset, buffer,
-						buffer_length, timeout);
-
-	mutex_unlock(&rt2x00dev->csr_mutex);
-
-	return status;
-}
-EXPORT_SYMBOL_GPL(rt2x00usb_vendor_request_buff);
-
-int rt2x00usb_vendor_request_large_buff(struct rt2x00_dev *rt2x00dev,
-					const u8 request, const u8 requesttype,
-					const u16 offset, const void *buffer,
-					const u16 buffer_length,
-					const int timeout)
-{
 	int status = 0;
 	unsigned char *tb;
 	u16 off, len, bsize;
@@ -156,11 +138,11 @@ int rt2x00usb_vendor_request_large_buff(struct rt2x00_dev *rt2x00dev,
 
 	return status;
 }
-EXPORT_SYMBOL_GPL(rt2x00usb_vendor_request_large_buff);
+EXPORT_SYMBOL_GPL(rt2x00usb_vendor_request_buff);
 
 int rt2x00usb_regbusy_read(struct rt2x00_dev *rt2x00dev,
 			   const unsigned int offset,
-			   struct rt2x00_field32 field,
+			   const struct rt2x00_field32 field,
 			   u32 *reg)
 {
 	unsigned int i;
@@ -183,58 +165,137 @@ int rt2x00usb_regbusy_read(struct rt2x00_dev *rt2x00dev,
 }
 EXPORT_SYMBOL_GPL(rt2x00usb_regbusy_read);
 
+
+struct rt2x00_async_read_data {
+	__le32 reg;
+	struct usb_ctrlrequest cr;
+	struct rt2x00_dev *rt2x00dev;
+	bool (*callback)(struct rt2x00_dev *, int, u32);
+};
+
+static void rt2x00usb_register_read_async_cb(struct urb *urb)
+{
+	struct rt2x00_async_read_data *rd = urb->context;
+	if (rd->callback(rd->rt2x00dev, urb->status, le32_to_cpu(rd->reg))) {
+		if (usb_submit_urb(urb, GFP_ATOMIC) < 0)
+			kfree(rd);
+	} else
+		kfree(rd);
+}
+
+void rt2x00usb_register_read_async(struct rt2x00_dev *rt2x00dev,
+				   const unsigned int offset,
+				   bool (*callback)(struct rt2x00_dev*, int, u32))
+{
+	struct usb_device *usb_dev = to_usb_device_intf(rt2x00dev->dev);
+	struct urb *urb;
+	struct rt2x00_async_read_data *rd;
+
+	rd = kmalloc(sizeof(*rd), GFP_ATOMIC);
+	if (!rd)
+		return;
+
+	urb = usb_alloc_urb(0, GFP_ATOMIC);
+	if (!urb) {
+		kfree(rd);
+		return;
+	}
+
+	rd->rt2x00dev = rt2x00dev;
+	rd->callback = callback;
+	rd->cr.bRequestType = USB_VENDOR_REQUEST_IN;
+	rd->cr.bRequest = USB_MULTI_READ;
+	rd->cr.wValue = 0;
+	rd->cr.wIndex = cpu_to_le16(offset);
+	rd->cr.wLength = cpu_to_le16(sizeof(u32));
+
+	usb_fill_control_urb(urb, usb_dev, usb_rcvctrlpipe(usb_dev, 0),
+			     (unsigned char *)(&rd->cr), &rd->reg, sizeof(rd->reg),
+			     rt2x00usb_register_read_async_cb, rd);
+	if (usb_submit_urb(urb, GFP_ATOMIC) < 0)
+		kfree(rd);
+	usb_free_urb(urb);
+}
+EXPORT_SYMBOL_GPL(rt2x00usb_register_read_async);
+
 /*
  * TX data handlers.
  */
-static void rt2x00usb_interrupt_txdone(struct urb *urb)
+static void rt2x00usb_work_txdone_entry(struct queue_entry *entry)
 {
-	struct queue_entry *entry = (struct queue_entry *)urb->context;
-	struct rt2x00_dev *rt2x00dev = entry->queue->rt2x00dev;
-	struct txdone_entry_desc txdesc;
-
-	if (!test_bit(DEVICE_STATE_ENABLED_RADIO, &rt2x00dev->flags) ||
-	    !test_bit(ENTRY_OWNER_DEVICE_DATA, &entry->flags))
-		return;
-
 	/*
-	 * Obtain the status about this packet.
-	 * Note that when the status is 0 it does not mean the
+	 * If the transfer to hardware succeeded, it does not mean the
 	 * frame was send out correctly. It only means the frame
-	 * was succesfully pushed to the hardware, we have no
+	 * was successfully pushed to the hardware, we have no
 	 * way to determine the transmission status right now.
 	 * (Only indirectly by looking at the failed TX counters
 	 * in the register).
 	 */
-	txdesc.flags = 0;
-	if (!urb->status)
-		__set_bit(TXDONE_UNKNOWN, &txdesc.flags);
+	if (test_bit(ENTRY_DATA_IO_FAILED, &entry->flags))
+		rt2x00lib_txdone_noinfo(entry, TXDONE_FAILURE);
 	else
-		__set_bit(TXDONE_FAILURE, &txdesc.flags);
-	txdesc.retry = 0;
-
-	rt2x00lib_txdone(entry, &txdesc);
+		rt2x00lib_txdone_noinfo(entry, TXDONE_UNKNOWN);
 }
 
-int rt2x00usb_write_tx_data(struct queue_entry *entry)
+static void rt2x00usb_work_txdone(struct work_struct *work)
+{
+	struct rt2x00_dev *rt2x00dev =
+	    container_of(work, struct rt2x00_dev, txdone_work);
+	struct data_queue *queue;
+	struct queue_entry *entry;
+
+	tx_queue_for_each(rt2x00dev, queue) {
+		while (!rt2x00queue_empty(queue)) {
+			entry = rt2x00queue_get_entry(queue, Q_INDEX_DONE);
+
+			if (test_bit(ENTRY_OWNER_DEVICE_DATA, &entry->flags) ||
+			    !test_bit(ENTRY_DATA_STATUS_PENDING, &entry->flags))
+				break;
+
+			rt2x00usb_work_txdone_entry(entry);
+		}
+	}
+}
+
+static void rt2x00usb_interrupt_txdone(struct urb *urb)
+{
+	struct queue_entry *entry = (struct queue_entry *)urb->context;
+	struct rt2x00_dev *rt2x00dev = entry->queue->rt2x00dev;
+
+	if (!test_bit(ENTRY_OWNER_DEVICE_DATA, &entry->flags))
+		return;
+	/*
+	 * Check if the frame was correctly uploaded
+	 */
+	if (urb->status)
+		set_bit(ENTRY_DATA_IO_FAILED, &entry->flags);
+	/*
+	 * Report the frame as DMA done
+	 */
+	rt2x00lib_dmadone(entry);
+
+	if (rt2x00dev->ops->lib->tx_dma_done)
+		rt2x00dev->ops->lib->tx_dma_done(entry);
+	/*
+	 * Schedule the delayed work for reading the TX status
+	 * from the device.
+	 */
+	if (!test_bit(REQUIRE_TXSTATUS_FIFO, &rt2x00dev->cap_flags) ||
+	    !kfifo_is_empty(&rt2x00dev->txstatus_fifo))
+		ieee80211_queue_work(rt2x00dev->hw, &rt2x00dev->txdone_work);
+}
+
+static bool rt2x00usb_kick_tx_entry(struct queue_entry *entry, void* data)
 {
 	struct rt2x00_dev *rt2x00dev = entry->queue->rt2x00dev;
 	struct usb_device *usb_dev = to_usb_device_intf(rt2x00dev->dev);
 	struct queue_entry_priv_usb *entry_priv = entry->priv_data;
-	struct skb_frame_desc *skbdesc;
 	u32 length;
+	int status;
 
-	/*
-	 * Add the descriptor in front of the skb.
-	 */
-	skb_push(entry->skb, entry->queue->desc_size);
-	memset(entry->skb->data, 0, entry->queue->desc_size);
-
-	/*
-	 * Fill in skb descriptor
-	 */
-	skbdesc = get_skb_frame_desc(entry->skb);
-	skbdesc->desc = entry->skb->data;
-	skbdesc->desc_len = entry->queue->desc_size;
+	if (!test_and_clear_bit(ENTRY_DATA_PENDING, &entry->flags) ||
+	    test_bit(ENTRY_DATA_STATUS_PENDING, &entry->flags))
+		return false;
 
 	/*
 	 * USB devices cannot blindly pass the skb->len as the
@@ -248,132 +309,251 @@ int rt2x00usb_write_tx_data(struct queue_entry *entry)
 			  entry->skb->data, length,
 			  rt2x00usb_interrupt_txdone, entry);
 
-	/*
-	 * Make sure the skb->data pointer points to the frame, not the
-	 * descriptor.
-	 */
-	skb_pull(entry->skb, entry->queue->desc_size);
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(rt2x00usb_write_tx_data);
-
-static inline void rt2x00usb_kick_tx_entry(struct queue_entry *entry)
-{
-	struct queue_entry_priv_usb *entry_priv = entry->priv_data;
-
-	if (test_and_clear_bit(ENTRY_DATA_PENDING, &entry->flags))
-		usb_submit_urb(entry_priv->urb, GFP_ATOMIC);
-}
-
-void rt2x00usb_kick_tx_queue(struct rt2x00_dev *rt2x00dev,
-			     const enum data_queue_qid qid)
-{
-	struct data_queue *queue = rt2x00queue_get_queue(rt2x00dev, qid);
-	unsigned long irqflags;
-	unsigned int index;
-	unsigned int index_done;
-	unsigned int i;
-
-	/*
-	 * Only protect the range we are going to loop over,
-	 * if during our loop a extra entry is set to pending
-	 * it should not be kicked during this run, since it
-	 * is part of another TX operation.
-	 */
-	spin_lock_irqsave(&queue->lock, irqflags);
-	index = queue->index[Q_INDEX];
-	index_done = queue->index[Q_INDEX_DONE];
-	spin_unlock_irqrestore(&queue->lock, irqflags);
-
-	/*
-	 * Start from the TX done pointer, this guarentees that we will
-	 * send out all frames in the correct order.
-	 */
-	if (index_done < index) {
-		for (i = index_done; i < index; i++)
-			rt2x00usb_kick_tx_entry(&queue->entries[i]);
-	} else {
-		for (i = index_done; i < queue->limit; i++)
-			rt2x00usb_kick_tx_entry(&queue->entries[i]);
-
-		for (i = 0; i < index; i++)
-			rt2x00usb_kick_tx_entry(&queue->entries[i]);
+	status = usb_submit_urb(entry_priv->urb, GFP_ATOMIC);
+	if (status) {
+		if (status == -ENODEV)
+			clear_bit(DEVICE_STATE_PRESENT, &rt2x00dev->flags);
+		set_bit(ENTRY_DATA_IO_FAILED, &entry->flags);
+		rt2x00lib_dmadone(entry);
 	}
+
+	return false;
 }
-EXPORT_SYMBOL_GPL(rt2x00usb_kick_tx_queue);
-
-void rt2x00usb_kill_tx_queue(struct rt2x00_dev *rt2x00dev,
-			     const enum data_queue_qid qid)
-{
-	struct data_queue *queue = rt2x00queue_get_queue(rt2x00dev, qid);
-	struct queue_entry_priv_usb *entry_priv;
-	struct queue_entry_priv_usb_bcn *bcn_priv;
-	unsigned int i;
-	bool kill_guard;
-
-	/*
-	 * When killing the beacon queue, we must also kill
-	 * the beacon guard byte.
-	 */
-	kill_guard =
-	    (qid == QID_BEACON) &&
-	    (test_bit(DRIVER_REQUIRE_BEACON_GUARD, &rt2x00dev->flags));
-
-	/*
-	 * Cancel all entries.
-	 */
-	for (i = 0; i < queue->limit; i++) {
-		entry_priv = queue->entries[i].priv_data;
-		usb_kill_urb(entry_priv->urb);
-
-		/*
-		 * Kill guardian urb (if required by driver).
-		 */
-		if (kill_guard) {
-			bcn_priv = queue->entries[i].priv_data;
-			usb_kill_urb(bcn_priv->guardian_urb);
-		}
-	}
-}
-EXPORT_SYMBOL_GPL(rt2x00usb_kill_tx_queue);
 
 /*
  * RX data handlers.
  */
+static void rt2x00usb_work_rxdone(struct work_struct *work)
+{
+	struct rt2x00_dev *rt2x00dev =
+	    container_of(work, struct rt2x00_dev, rxdone_work);
+	struct queue_entry *entry;
+	struct skb_frame_desc *skbdesc;
+	u8 rxd[32];
+
+	while (!rt2x00queue_empty(rt2x00dev->rx)) {
+		entry = rt2x00queue_get_entry(rt2x00dev->rx, Q_INDEX_DONE);
+
+		if (test_bit(ENTRY_OWNER_DEVICE_DATA, &entry->flags) ||
+		    !test_bit(ENTRY_DATA_STATUS_PENDING, &entry->flags))
+			break;
+
+		/*
+		 * Fill in desc fields of the skb descriptor
+		 */
+		skbdesc = get_skb_frame_desc(entry->skb);
+		skbdesc->desc = rxd;
+		skbdesc->desc_len = entry->queue->desc_size;
+
+		/*
+		 * Send the frame to rt2x00lib for further processing.
+		 */
+		rt2x00lib_rxdone(entry);
+	}
+}
+
 static void rt2x00usb_interrupt_rxdone(struct urb *urb)
 {
 	struct queue_entry *entry = (struct queue_entry *)urb->context;
 	struct rt2x00_dev *rt2x00dev = entry->queue->rt2x00dev;
-	struct skb_frame_desc *skbdesc = get_skb_frame_desc(entry->skb);
-	u8 rxd[32];
 
-	if (!test_bit(DEVICE_STATE_ENABLED_RADIO, &rt2x00dev->flags) ||
-	    !test_bit(ENTRY_OWNER_DEVICE_DATA, &entry->flags))
+	if (!test_and_clear_bit(ENTRY_OWNER_DEVICE_DATA, &entry->flags))
 		return;
+
+	/*
+	 * Report the frame as DMA done
+	 */
+	rt2x00lib_dmadone(entry);
 
 	/*
 	 * Check if the received data is simply too small
 	 * to be actually valid, or if the urb is signaling
 	 * a problem.
 	 */
-	if (urb->actual_length < entry->queue->desc_size || urb->status) {
-		set_bit(ENTRY_OWNER_DEVICE_DATA, &entry->flags);
-		usb_submit_urb(urb, GFP_ATOMIC);
+	if (urb->actual_length < entry->queue->desc_size || urb->status)
+		set_bit(ENTRY_DATA_IO_FAILED, &entry->flags);
+
+	/*
+	 * Schedule the delayed work for reading the RX status
+	 * from the device.
+	 */
+	ieee80211_queue_work(rt2x00dev->hw, &rt2x00dev->rxdone_work);
+}
+
+static bool rt2x00usb_kick_rx_entry(struct queue_entry *entry, void* data)
+{
+	struct rt2x00_dev *rt2x00dev = entry->queue->rt2x00dev;
+	struct usb_device *usb_dev = to_usb_device_intf(rt2x00dev->dev);
+	struct queue_entry_priv_usb *entry_priv = entry->priv_data;
+	int status;
+
+	if (test_and_set_bit(ENTRY_OWNER_DEVICE_DATA, &entry->flags) ||
+	    test_bit(ENTRY_DATA_STATUS_PENDING, &entry->flags))
+		return false;
+
+	rt2x00lib_dmastart(entry);
+
+	usb_fill_bulk_urb(entry_priv->urb, usb_dev,
+			  usb_rcvbulkpipe(usb_dev, entry->queue->usb_endpoint),
+			  entry->skb->data, entry->skb->len,
+			  rt2x00usb_interrupt_rxdone, entry);
+
+	status = usb_submit_urb(entry_priv->urb, GFP_ATOMIC);
+	if (status) {
+		if (status == -ENODEV)
+			clear_bit(DEVICE_STATE_PRESENT, &rt2x00dev->flags);
+		set_bit(ENTRY_DATA_IO_FAILED, &entry->flags);
+		rt2x00lib_dmadone(entry);
+	}
+
+	return false;
+}
+
+void rt2x00usb_kick_queue(struct data_queue *queue)
+{
+	switch (queue->qid) {
+	case QID_AC_VO:
+	case QID_AC_VI:
+	case QID_AC_BE:
+	case QID_AC_BK:
+		if (!rt2x00queue_empty(queue))
+			rt2x00queue_for_each_entry(queue,
+						   Q_INDEX_DONE,
+						   Q_INDEX,
+						   NULL,
+						   rt2x00usb_kick_tx_entry);
+		break;
+	case QID_RX:
+		if (!rt2x00queue_full(queue))
+			rt2x00queue_for_each_entry(queue,
+						   Q_INDEX_DONE,
+						   Q_INDEX,
+						   NULL,
+						   rt2x00usb_kick_rx_entry);
+		break;
+	default:
+		break;
+	}
+}
+EXPORT_SYMBOL_GPL(rt2x00usb_kick_queue);
+
+static bool rt2x00usb_flush_entry(struct queue_entry *entry, void* data)
+{
+	struct rt2x00_dev *rt2x00dev = entry->queue->rt2x00dev;
+	struct queue_entry_priv_usb *entry_priv = entry->priv_data;
+	struct queue_entry_priv_usb_bcn *bcn_priv = entry->priv_data;
+
+	if (!test_bit(ENTRY_OWNER_DEVICE_DATA, &entry->flags))
+		return false;
+
+	usb_kill_urb(entry_priv->urb);
+
+	/*
+	 * Kill guardian urb (if required by driver).
+	 */
+	if ((entry->queue->qid == QID_BEACON) &&
+	    (test_bit(REQUIRE_BEACON_GUARD, &rt2x00dev->cap_flags)))
+		usb_kill_urb(bcn_priv->guardian_urb);
+
+	return false;
+}
+
+void rt2x00usb_flush_queue(struct data_queue *queue, bool drop)
+{
+	struct work_struct *completion;
+	unsigned int i;
+
+	if (drop)
+		rt2x00queue_for_each_entry(queue, Q_INDEX_DONE, Q_INDEX, NULL,
+					   rt2x00usb_flush_entry);
+
+	/*
+	 * Obtain the queue completion handler
+	 */
+	switch (queue->qid) {
+	case QID_AC_VO:
+	case QID_AC_VI:
+	case QID_AC_BE:
+	case QID_AC_BK:
+		completion = &queue->rt2x00dev->txdone_work;
+		break;
+	case QID_RX:
+		completion = &queue->rt2x00dev->rxdone_work;
+		break;
+	default:
 		return;
 	}
 
-	/*
-	 * Fill in desc fields of the skb descriptor
-	 */
-	skbdesc->desc = rxd;
-	skbdesc->desc_len = entry->queue->desc_size;
+	for (i = 0; i < 10; i++) {
+		/*
+		 * Check if the driver is already done, otherwise we
+		 * have to sleep a little while to give the driver/hw
+		 * the oppurtunity to complete interrupt process itself.
+		 */
+		if (rt2x00queue_empty(queue))
+			break;
 
-	/*
-	 * Send the frame to rt2x00lib for further processing.
-	 */
-	rt2x00lib_rxdone(rt2x00dev, entry);
+		/*
+		 * Schedule the completion handler manually, when this
+		 * worker function runs, it should cleanup the queue.
+		 */
+		ieee80211_queue_work(queue->rt2x00dev->hw, completion);
+
+		/*
+		 * Wait for a little while to give the driver
+		 * the oppurtunity to recover itself.
+		 */
+		msleep(10);
+	}
 }
+EXPORT_SYMBOL_GPL(rt2x00usb_flush_queue);
+
+static void rt2x00usb_watchdog_tx_dma(struct data_queue *queue)
+{
+	WARNING(queue->rt2x00dev, "TX queue %d DMA timed out,"
+		" invoke forced forced reset\n", queue->qid);
+
+	rt2x00queue_flush_queue(queue, true);
+}
+
+static void rt2x00usb_watchdog_tx_status(struct data_queue *queue)
+{
+	WARNING(queue->rt2x00dev, "TX queue %d status timed out,"
+		" invoke forced tx handler\n", queue->qid);
+
+	ieee80211_queue_work(queue->rt2x00dev->hw, &queue->rt2x00dev->txdone_work);
+}
+
+static int rt2x00usb_status_timeout(struct data_queue *queue)
+{
+	struct queue_entry *entry;
+
+	entry = rt2x00queue_get_entry(queue, Q_INDEX_DONE);
+	return rt2x00queue_status_timeout(entry);
+}
+
+static int rt2x00usb_dma_timeout(struct data_queue *queue)
+{
+	struct queue_entry *entry;
+
+	entry = rt2x00queue_get_entry(queue, Q_INDEX_DMA_DONE);
+	return rt2x00queue_dma_timeout(entry);
+}
+
+void rt2x00usb_watchdog(struct rt2x00_dev *rt2x00dev)
+{
+	struct data_queue *queue;
+
+	tx_queue_for_each(rt2x00dev, queue) {
+		if (!rt2x00queue_empty(queue)) {
+			if (rt2x00usb_dma_timeout(queue))
+				rt2x00usb_watchdog_tx_dma(queue);
+			if (rt2x00usb_status_timeout(queue))
+				rt2x00usb_watchdog_tx_status(queue);
+		}
+	}
+}
+EXPORT_SYMBOL_GPL(rt2x00usb_watchdog);
 
 /*
  * Radio handlers
@@ -382,12 +562,6 @@ void rt2x00usb_disable_radio(struct rt2x00_dev *rt2x00dev)
 {
 	rt2x00usb_vendor_request_sw(rt2x00dev, USB_RX_CONTROL, 0, 0,
 				    REGISTER_TIMEOUT);
-
-	/*
-	 * The USB version of kill_tx_queue also works
-	 * on the RX queue.
-	 */
-	rt2x00dev->ops->lib->kill_tx_queue(rt2x00dev, QID_RX);
 }
 EXPORT_SYMBOL_GPL(rt2x00usb_disable_radio);
 
@@ -396,22 +570,10 @@ EXPORT_SYMBOL_GPL(rt2x00usb_disable_radio);
  */
 void rt2x00usb_clear_entry(struct queue_entry *entry)
 {
-	struct usb_device *usb_dev =
-	    to_usb_device_intf(entry->queue->rt2x00dev->dev);
-	struct queue_entry_priv_usb *entry_priv = entry->priv_data;
-	int pipe;
+	entry->flags = 0;
 
-	if (entry->queue->qid == QID_RX) {
-		pipe = usb_rcvbulkpipe(usb_dev, entry->queue->usb_endpoint);
-		usb_fill_bulk_urb(entry_priv->urb, usb_dev, pipe,
-				entry->skb->data, entry->skb->len,
-				rt2x00usb_interrupt_rxdone, entry);
-
-		set_bit(ENTRY_OWNER_DEVICE_DATA, &entry->flags);
-		usb_submit_urb(entry_priv->urb, GFP_ATOMIC);
-	} else {
-		entry->flags = 0;
-	}
+	if (entry->queue->qid == QID_RX)
+		rt2x00usb_kick_rx_entry(entry, NULL);
 }
 EXPORT_SYMBOL_GPL(rt2x00usb_clear_entry);
 
@@ -485,9 +647,9 @@ static int rt2x00usb_find_endpoints(struct rt2x00_dev *rt2x00dev)
 	return 0;
 }
 
-static int rt2x00usb_alloc_urb(struct rt2x00_dev *rt2x00dev,
-			       struct data_queue *queue)
+static int rt2x00usb_alloc_entries(struct data_queue *queue)
 {
+	struct rt2x00_dev *rt2x00dev = queue->rt2x00dev;
 	struct queue_entry_priv_usb *entry_priv;
 	struct queue_entry_priv_usb_bcn *bcn_priv;
 	unsigned int i;
@@ -504,8 +666,8 @@ static int rt2x00usb_alloc_urb(struct rt2x00_dev *rt2x00dev,
 	 * no guardian byte was required for the beacon,
 	 * then we are done.
 	 */
-	if (rt2x00dev->bcn != queue ||
-	    !test_bit(DRIVER_REQUIRE_BEACON_GUARD, &rt2x00dev->flags))
+	if (queue->qid != QID_BEACON ||
+	    !test_bit(REQUIRE_BEACON_GUARD, &rt2x00dev->cap_flags))
 		return 0;
 
 	for (i = 0; i < queue->limit; i++) {
@@ -518,9 +680,9 @@ static int rt2x00usb_alloc_urb(struct rt2x00_dev *rt2x00dev,
 	return 0;
 }
 
-static void rt2x00usb_free_urb(struct rt2x00_dev *rt2x00dev,
-			       struct data_queue *queue)
+static void rt2x00usb_free_entries(struct data_queue *queue)
 {
+	struct rt2x00_dev *rt2x00dev = queue->rt2x00dev;
 	struct queue_entry_priv_usb *entry_priv;
 	struct queue_entry_priv_usb_bcn *bcn_priv;
 	unsigned int i;
@@ -539,8 +701,8 @@ static void rt2x00usb_free_urb(struct rt2x00_dev *rt2x00dev,
 	 * no guardian byte was required for the beacon,
 	 * then we are done.
 	 */
-	if (rt2x00dev->bcn != queue ||
-	    !test_bit(DRIVER_REQUIRE_BEACON_GUARD, &rt2x00dev->flags))
+	if (queue->qid != QID_BEACON ||
+	    !test_bit(REQUIRE_BEACON_GUARD, &rt2x00dev->cap_flags))
 		return;
 
 	for (i = 0; i < queue->limit; i++) {
@@ -566,7 +728,7 @@ int rt2x00usb_initialize(struct rt2x00_dev *rt2x00dev)
 	 * Allocate DMA
 	 */
 	queue_for_each(rt2x00dev, queue) {
-		status = rt2x00usb_alloc_urb(rt2x00dev, queue);
+		status = rt2x00usb_alloc_entries(queue);
 		if (status)
 			goto exit;
 	}
@@ -585,7 +747,7 @@ void rt2x00usb_uninitialize(struct rt2x00_dev *rt2x00dev)
 	struct data_queue *queue;
 
 	queue_for_each(rt2x00dev, queue)
-		rt2x00usb_free_urb(rt2x00dev, queue);
+		rt2x00usb_free_entries(queue);
 }
 EXPORT_SYMBOL_GPL(rt2x00usb_uninitialize);
 
@@ -629,15 +791,15 @@ exit:
 }
 
 int rt2x00usb_probe(struct usb_interface *usb_intf,
-		    const struct usb_device_id *id)
+		    const struct rt2x00_ops *ops)
 {
 	struct usb_device *usb_dev = interface_to_usbdev(usb_intf);
-	struct rt2x00_ops *ops = (struct rt2x00_ops *)id->driver_info;
 	struct ieee80211_hw *hw;
 	struct rt2x00_dev *rt2x00dev;
 	int retval;
 
 	usb_dev = usb_get_dev(usb_dev);
+	usb_reset_device(usb_dev);
 
 	hw = ieee80211_alloc_hw(sizeof(struct rt2x00_dev), ops->hw);
 	if (!hw) {
@@ -652,6 +814,12 @@ int rt2x00usb_probe(struct usb_interface *usb_intf,
 	rt2x00dev->dev = &usb_intf->dev;
 	rt2x00dev->ops = ops;
 	rt2x00dev->hw = hw;
+
+	rt2x00_set_chip_intf(rt2x00dev, RT2X00_CHIP_INTF_USB);
+
+	INIT_WORK(&rt2x00dev->rxdone_work, rt2x00usb_work_rxdone);
+	INIT_WORK(&rt2x00dev->txdone_work, rt2x00usb_work_txdone);
+	init_timer(&rt2x00dev->txstatus_timer);
 
 	retval = rt2x00usb_alloc_reg(rt2x00dev);
 	if (retval)
@@ -703,18 +871,8 @@ int rt2x00usb_suspend(struct usb_interface *usb_intf, pm_message_t state)
 {
 	struct ieee80211_hw *hw = usb_get_intfdata(usb_intf);
 	struct rt2x00_dev *rt2x00dev = hw->priv;
-	int retval;
 
-	retval = rt2x00lib_suspend(rt2x00dev, state);
-	if (retval)
-		return retval;
-
-	/*
-	 * Decrease usbdev refcount.
-	 */
-	usb_put_dev(interface_to_usbdev(usb_intf));
-
-	return 0;
+	return rt2x00lib_suspend(rt2x00dev, state);
 }
 EXPORT_SYMBOL_GPL(rt2x00usb_suspend);
 
@@ -722,8 +880,6 @@ int rt2x00usb_resume(struct usb_interface *usb_intf)
 {
 	struct ieee80211_hw *hw = usb_get_intfdata(usb_intf);
 	struct rt2x00_dev *rt2x00dev = hw->priv;
-
-	usb_get_dev(interface_to_usbdev(usb_intf));
 
 	return rt2x00lib_resume(rt2x00dev);
 }

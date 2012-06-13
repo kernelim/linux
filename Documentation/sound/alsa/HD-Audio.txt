@@ -57,9 +57,11 @@ dead.  However, this detection isn't perfect on some devices.  In such
 a case, you can change the default method via `position_fix` option.
 
 `position_fix=1` means to use LPIB method explicitly.
-`position_fix=2` means to use the position-buffer.  0 is the default
-value, the automatic check and fallback to LPIB as described in the
-above.  If you get a problem of repeated sounds, this option might
+`position_fix=2` means to use the position-buffer.
+`position_fix=3` means to use a combination of both methods, needed
+for some VIA and ATI controllers.  0 is the default value for all other
+controllers, the automatic check and fallback to LPIB as described in
+the above.  If you get a problem of repeated sounds, this option might
 help.
 
 In addition to that, every controller is known to be broken regarding
@@ -119,10 +121,18 @@ the codec slots 0 and 1 no matter what the hardware reports.
 
 Interrupt Handling
 ~~~~~~~~~~~~~~~~~~
-In rare but some cases, the interrupt isn't properly handled as
-default.  You would notice this by the DMA transfer error reported by
-ALSA PCM core, for example.  Using MSI might help in such a case.
-Pass `enable_msi=1` option for enabling MSI.
+HD-audio driver uses MSI as default (if available) since 2.6.33
+kernel as MSI works better on some machines, and in general, it's
+better for performance.  However, Nvidia controllers showed bad
+regressions with MSI (especially in a combination with AMD chipset),
+thus we disabled MSI for them.
+
+There seem also still other devices that don't work with MSI.  If you
+see a regression wrt the sound quality (stuttering, etc) or a lock-up
+in the recent kernel, try to pass `enable_msi=0` option to disable
+MSI.  If it works, you can add the known bad device to the blacklist
+defined in hda_intel.c.  In such a case, please report and give the
+patch back to the upstream developer.
 
 
 HD-AUDIO CODEC
@@ -195,7 +205,6 @@ Note that `model=generic` has a special meaning.  It means to use the
 generic parser regardless of the codec.  Usually the codec-specific
 parser is much better than the generic parser (as now).  Thus this
 option is more about the debugging purpose.
-
 
 Speaker and Headphone Output
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -438,7 +447,10 @@ The file needs to have a line `[codec]`.  The next line should contain
 three numbers indicating the codec vendor-id (0x12345678 in the
 example), the codec subsystem-id (0xabcd1234) and the address (2) of
 the codec.  The rest patch entries are applied to this specified codec
-until another codec entry is given.
+until another codec entry is given.  Passing 0 or a negative number to
+the first or the second value will make the check of the corresponding
+field be skipped.  It'll be useful for really broken devices that don't
+initialize SSID properly.
 
 The `[model]` line allows to change the model name of the each codec.
 In the example above, it will be changed to model=auto.
@@ -452,10 +464,37 @@ Similarly, the lines after `[verb]` are parsed as `init_verbs`
 sysfs entries, and the lines after `[hint]` are parsed as `hints`
 sysfs entries, respectively.
 
+Another example to override the codec vendor id from 0x12345678 to
+0xdeadbeef is like below:
+------------------------------------------------------------------------
+  [codec]
+  0x12345678 0xabcd1234 2
+
+  [vendor_id]
+  0xdeadbeef
+------------------------------------------------------------------------
+
+In the similar way, you can override the codec subsystem_id via
+`[subsystem_id]`, the revision id via `[revision_id]` line.
+Also, the codec chip name can be rewritten via `[chip_name]` line.
+------------------------------------------------------------------------
+  [codec]
+  0x12345678 0xabcd1234 2
+
+  [subsystem_id]
+  0xffff1111
+
+  [revision_id]
+  0x10
+
+  [chip_name]
+  My-own NEWS-0002
+------------------------------------------------------------------------
+
 The hd-audio driver reads the file via request_firmware().  Thus,
 a patch file has to be located on the appropriate firmware path,
 typically, /lib/firmware.  For example, when you pass the option
-`patch=hda-init.fw`, the file /lib/firmware/hda-init-fw must be
+`patch=hda-init.fw`, the file /lib/firmware/hda-init.fw must be
 present.
 
 The patch module option is specific to each card instance, and you
@@ -488,11 +527,59 @@ power-saving.  See /sys/module/snd_hda_intel/parameters/power_save to
 check the current value.  If it's non-zero, the feature is turned on.
 
 
+Tracepoints
+~~~~~~~~~~~
+The hd-audio driver gives a few basic tracepoints.
+`hda:hda_send_cmd` traces each CORB write while `hda:hda_get_response`
+traces the response from RIRB (only when read from the codec driver).
+`hda:hda_bus_reset` traces the bus-reset due to fatal error, etc,
+`hda:hda_unsol_event` traces the unsolicited events, and
+`hda:hda_power_down` and `hda:hda_power_up` trace the power down/up
+via power-saving behavior.
+
+Enabling all tracepoints can be done like
+------------------------------------------------------------------------
+  # echo 1 > /sys/kernel/debug/tracing/events/hda/enable
+------------------------------------------------------------------------
+then after some commands, you can traces from
+/sys/kernel/debug/tracing/trace file.  For example, when you want to
+trace what codec command is sent, enable the tracepoint like:
+------------------------------------------------------------------------
+  # cat /sys/kernel/debug/tracing/trace
+  # tracer: nop
+  #
+  #       TASK-PID    CPU#    TIMESTAMP  FUNCTION
+  #          | |       |          |         |
+         <...>-7807  [002] 105147.774889: hda_send_cmd: [0:0] val=e3a019
+         <...>-7807  [002] 105147.774893: hda_send_cmd: [0:0] val=e39019
+         <...>-7807  [002] 105147.999542: hda_send_cmd: [0:0] val=e3a01a
+         <...>-7807  [002] 105147.999543: hda_send_cmd: [0:0] val=e3901a
+         <...>-26764 [001] 349222.837143: hda_send_cmd: [0:0] val=e3a019
+         <...>-26764 [001] 349222.837148: hda_send_cmd: [0:0] val=e39019
+         <...>-26764 [001] 349223.058539: hda_send_cmd: [0:0] val=e3a01a
+         <...>-26764 [001] 349223.058541: hda_send_cmd: [0:0] val=e3901a
+------------------------------------------------------------------------
+Here `[0:0]` indicates the card number and the codec address, and
+`val` shows the value sent to the codec, respectively.  The value is
+a packed value, and you can decode it via hda-decode-verb program
+included in hda-emu package below.  For example, the value e3a019 is
+to set the left output-amp value to 25.
+------------------------------------------------------------------------
+  % hda-decode-verb 0xe3a019
+  raw value = 0x00e3a019
+  cid = 0, nid = 0x0e, verb = 0x3a0, parm = 0x19
+  raw value: verb = 0x3a0, parm = 0x19
+  verbname = set_amp_gain_mute
+  amp raw val = 0xa019
+  output, left, idx=0, mute=0, val=25
+------------------------------------------------------------------------
+
+
 Development Tree
 ~~~~~~~~~~~~~~~~
 The latest development codes for HD-audio are found on sound git tree:
 
-- git://git.kernel.org/pub/scm/linux/kernel/git/tiwai/sound-2.6.git
+- git://git.kernel.org/pub/scm/linux/kernel/git/tiwai/sound.git
 
 The master branch or for-next branches can be used as the main
 development branches in general while the HD-audio specific patches
@@ -507,7 +594,7 @@ is, installed via the usual spells: configure, make and make
 install(-modules).  See INSTALL in the package.  The snapshot tarballs
 are found at:
 
-- ftp://ftp.kernel.org/pub/linux/kernel/people/tiwai/snapshot/
+- ftp://ftp.suse.com/pub/people/tiwai/snapshot/
 
 
 Sending a Bug Report
@@ -528,7 +615,7 @@ compare the codec registers directly.
 Send a bug report either the followings:
 
 kernel-bugzilla::
-  http://bugme.linux-foundation.org/
+  https://bugzilla.kernel.org/
 alsa-devel ML::
   alsa-devel@alsa-project.org
 
@@ -565,6 +652,9 @@ probing, the proc file is available, so you can get the raw codec
 information before modified by the driver.  Of course, the driver
 isn't usable with `probe_only=1`.  But you can continue the
 configuration via hwdep sysfs file if hda-reconfig option is enabled.
+Using `probe_only` mask 2 skips the reset of HDA codecs (use
+`probe_only=3` as module option). The hwdep interface can be used
+to determine the BIOS codec initialization.
 
 
 hda-verb
@@ -606,7 +696,7 @@ via hda-verb won't change the mixer value.
 
 The hda-verb program is found in the ftp directory:
 
-- ftp://ftp.kernel.org/pub/linux/kernel/people/tiwai/misc/
+- ftp://ftp.suse.com/pub/people/tiwai/misc/
 
 Also a git repository is available:
 
@@ -624,11 +714,13 @@ hda-verb.  The program gives you an easy-to-use GUI stuff for showing
 the widget information and adjusting the amp values, as well as the
 proc-compatible output.
 
-The hda-analyzer is a part of alsa.git repository in
-alsa-project.org:
+The hda-analyzer:
 
 - http://git.alsa-project.org/?p=alsa.git;a=tree;f=hda-analyzer
 
+is a part of alsa.git repository in alsa-project.org:
+
+- git://git.alsa-project.org/alsa.git
 
 Codecgraph
 ~~~~~~~~~~
@@ -672,7 +764,7 @@ operation, the jack plugging simulation, etc.
 
 The package is found in:
 
-- ftp://ftp.kernel.org/pub/linux/kernel/people/tiwai/misc/
+- ftp://ftp.suse.com/pub/people/tiwai/misc/
 
 A git repository is available:
 

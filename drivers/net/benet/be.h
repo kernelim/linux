@@ -33,13 +33,14 @@
 
 #include "be_hw.h"
 
-#define DRV_VER			"4.0.160r"
+#define DRV_VER			"4.1.307r"
 #define DRV_NAME		"be2net"
 #define BE_NAME			"ServerEngines BladeEngine2 10Gbps NIC"
 #define BE3_NAME		"ServerEngines BladeEngine3 10Gbps NIC"
 #define OC_NAME			"Emulex OneConnect 10Gbps NIC"
 #define OC_NAME_BE		OC_NAME	"(be3)"
 #define OC_NAME_LANCER		OC_NAME "(Lancer)"
+#define OC_NAME_SH		OC_NAME "(Skyhawk)"
 #define DRV_DESC		"ServerEngines BladeEngine 10Gbps NIC Driver"
 
 #define BE_VENDOR_ID 		0x19a2
@@ -50,6 +51,7 @@
 #define OC_DEVICE_ID2		0x710	/* Device Id for BE3 cards */
 #define OC_DEVICE_ID3		0xe220	/* Device id for Lancer cards */
 #define OC_DEVICE_ID4           0xe228   /* Device id for VF in Lancer */
+#define OC_DEVICE_ID5		0x720	/* Device Id for Skyhawk cards */
 
 static inline char *nic_name(struct pci_dev *pdev)
 {
@@ -63,6 +65,8 @@ static inline char *nic_name(struct pci_dev *pdev)
 		return OC_NAME_LANCER;
 	case BE_DEVICE_ID2:
 		return BE3_NAME;
+	case OC_DEVICE_ID5:
+		return OC_NAME_SH;
 	default:
 		return BE_NAME;
 	}
@@ -137,9 +141,19 @@ static inline void *queue_tail_node(struct be_queue_info *q)
 	return q->dma_mem.va + q->tail * q->entry_size;
 }
 
+static inline void *queue_index_node(struct be_queue_info *q, u16 index)
+{
+	return q->dma_mem.va + index * q->entry_size;
+}
+
 static inline void queue_head_inc(struct be_queue_info *q)
 {
 	index_inc(&q->head, q->len);
+}
+
+static inline void index_dec(u16 *index, u16 limit)
+{
+	*index = MODULO((*index - 1), limit);
 }
 
 static inline void queue_tail_inc(struct be_queue_info *q)
@@ -168,15 +182,13 @@ struct be_mcc_obj {
 };
 
 struct be_tx_stats {
-	u32 be_tx_reqs;		/* number of TX requests initiated */
-	u32 be_tx_stops;	/* number of times TX Q was stopped */
-	u32 be_tx_wrbs;		/* number of tx WRBs used */
-	u32 be_tx_compl;	/* number of tx completion entries processed */
-	ulong be_tx_jiffies;
-	u64 be_tx_bytes;
-	u64 be_tx_bytes_prev;
-	u64 be_tx_pkts;
-	u32 be_tx_rate;
+	u64 tx_bytes;
+	u64 tx_pkts;
+	u64 tx_reqs;
+	u64 tx_wrbs;
+	u64 tx_compl;
+	ulong tx_jiffies;
+	u32 tx_stops;
 };
 
 struct be_tx_obj {
@@ -196,22 +208,19 @@ struct be_rx_page_info {
 };
 
 struct be_rx_stats {
-	u32 rx_post_fail;/* number of ethrx buffer alloc failures */
-	u32 rx_polls;	/* number of times NAPI called poll function */
-	u32 rx_events;	/* number of ucast rx completion events  */
-	u32 rx_compl;	/* number of rx completion entries processed */
-	ulong rx_dropped; /* number of skb allocation errors */
-	ulong rx_jiffies;
 	u64 rx_bytes;
-	u64 rx_bytes_prev;
 	u64 rx_pkts;
-	u32 rx_rate;
+	u64 rx_pkts_prev;
+	ulong rx_jiffies;
+	u32 rx_drops_no_skbs;	/* skb allocation errors */
+	u32 rx_drops_no_frags;	/* HW has no fetched frags */
+	u32 rx_post_fail;	/* page post alloc failures */
+	u32 rx_polls;		/* NAPI calls */
+	u32 rx_events;
+	u32 rx_compl;
 	u32 rx_mcast_pkts;
-	u32 rxcp_err;	/* Num rx completion entries w/ err set. */
-	ulong rx_fps_jiffies;	/* jiffies at last FPS calc */
-	u32 rx_frags;
-	u32 prev_rx_frags;
-	u32 rx_fps;		/* Rx frags per second */
+	u32 rx_compl_err;	/* completions with err set */
+	u32 rx_pps;		/* pkts per second */
 };
 
 struct be_rx_compl_info {
@@ -219,7 +228,7 @@ struct be_rx_compl_info {
 	u16 vlan_tag;
 	u16 pkt_size;
 	u16 rxq_idx;
-	u16 mac_id;
+	u16 port;
 	u8 vlanf;
 	u8 num_rcvd;
 	u8 err;
@@ -247,55 +256,53 @@ struct be_rx_obj {
 };
 
 struct be_drv_stats {
-	u8 be_on_die_temperature;
-	u64 be_tx_events;
-	u64 eth_red_drops;
-	u64 rx_drops_no_pbuf;
-	u64 rx_drops_no_txpb;
-	u64 rx_drops_no_erx_descr;
-	u64 rx_drops_no_tpre_descr;
-	u64 rx_drops_too_many_frags;
-	u64 rx_drops_invalid_ring;
-	u64 forwarded_packets;
-	u64 rx_drops_mtu;
-	u64 rx_crc_errors;
-	u64 rx_alignment_symbol_errors;
-	u64 rx_pause_frames;
-	u64 rx_priority_pause_frames;
-	u64 rx_control_frames;
-	u64 rx_in_range_errors;
-	u64 rx_out_range_errors;
-	u64 rx_frame_too_long;
-	u64 rx_address_match_errors;
-	u64 rx_dropped_too_small;
-	u64 rx_dropped_too_short;
-	u64 rx_dropped_header_too_small;
-	u64 rx_dropped_tcp_length;
-	u64 rx_dropped_runt;
-	u64 rx_ip_checksum_errs;
-	u64 rx_tcp_checksum_errs;
-	u64 rx_udp_checksum_errs;
-	u64 rx_switched_unicast_packets;
-	u64 rx_switched_multicast_packets;
-	u64 rx_switched_broadcast_packets;
-	u64 tx_pauseframes;
-	u64 tx_priority_pauseframes;
-	u64 tx_controlframes;
-	u64 rxpp_fifo_overflow_drop;
-	u64 rx_input_fifo_overflow_drop;
-	u64 pmem_fifo_overflow_drop;
-	u64 jabber_events;
+	u32 be_on_die_temperature;
+	u32 tx_events;
+	u32 eth_red_drops;
+	u32 rx_drops_no_pbuf;
+	u32 rx_drops_no_txpb;
+	u32 rx_drops_no_erx_descr;
+	u32 rx_drops_no_tpre_descr;
+	u32 rx_drops_too_many_frags;
+	u32 forwarded_packets;
+	u32 rx_drops_mtu;
+	u32 rx_crc_errors;
+	u32 rx_alignment_symbol_errors;
+	u32 rx_pause_frames;
+	u32 rx_priority_pause_frames;
+	u32 rx_control_frames;
+	u32 rx_in_range_errors;
+	u32 rx_out_range_errors;
+	u32 rx_frame_too_long;
+	u32 rx_address_mismatch_drops;
+	u32 rx_dropped_too_small;
+	u32 rx_dropped_too_short;
+	u32 rx_dropped_header_too_small;
+	u32 rx_dropped_tcp_length;
+	u32 rx_dropped_runt;
+	u32 rx_ip_checksum_errs;
+	u32 rx_tcp_checksum_errs;
+	u32 rx_udp_checksum_errs;
+	u32 tx_pauseframes;
+	u32 tx_priority_pauseframes;
+	u32 tx_controlframes;
+	u32 rxpp_fifo_overflow_drop;
+	u32 rx_input_fifo_overflow_drop;
+	u32 pmem_fifo_overflow_drop;
+	u32 jabber_events;
 };
 
 struct be_vf_cfg {
-	unsigned char vf_mac_addr[ETH_ALEN];
-	u32 vf_if_handle;
-	u32 vf_pmac_id;
-	u16 vf_vlan_tag;
-	u32 vf_tx_rate;
+	unsigned char mac_addr[ETH_ALEN];
+	int if_handle;
+	int pmac_id;
+	u16 def_vid;
+	u16 vlan_tag;
+	u32 tx_rate;
 };
 
-#define BE_INVALID_PMAC_ID		0xffffffff
+#define BE_FLAGS_LINK_STATUS_INIT		1
+#define BE_FLAGS_WORKER_SCHEDULED		(1 << 3)
 
 struct be_adapter {
 	struct pci_dev *pdev;
@@ -303,7 +310,6 @@ struct be_adapter {
 
 	u8 __iomem *csr;
 	u8 __iomem *db;		/* Door Bell */
-	u8 __iomem *pcicfg;	/* PCI config space */
 
 	struct mutex mbox_lock; /* For serializing mbox cmds to BE card */
 	struct be_dma_mem mbox_mem;
@@ -340,21 +346,23 @@ struct be_adapter {
 	u8 vlan_tag[VLAN_GROUP_ARRAY_LEN];
 	u8 vlan_prio_bmap;	/* Available Priority BitMap */
 	u16 recommended_prio;	/* Recommended Priority */
-	struct be_dma_mem mc_cmd_mem;
+	struct be_dma_mem rx_filter; /* Cmd DMA mem for rx-filter */
 
 	struct be_dma_mem stats_cmd;
 	/* Work queue used to perform periodic tasks like getting statistics */
 	struct delayed_work work;
 	u16 work_counter;
 
+	u32 flags;
 	/* Ethtool knobs and info */
 	bool rx_csum; 		/* BE card must perform rx-checksumming */
 	char fw_ver[FW_VER_LEN];
-	u32 if_handle;		/* Used to configure filtering */
+	int if_handle;		/* Used to configure filtering */
 	u32 pmac_id;		/* MAC addr handle used by BE card */
 
 	bool eeh_err;
-	bool link_up;
+	bool ue_detected;
+	bool fw_timeout;
 	u32 port_num;
 	bool promiscuous;
 	bool wol;
@@ -362,7 +370,6 @@ struct be_adapter {
 	u32 function_caps;
 	u32 rx_fc;		/* Rx flow control */
 	u32 tx_fc;		/* Tx flow control */
-	bool ue_detected;
 	bool stats_cmd_sent;
 	int link_speed;
 	u8 port_type;
@@ -372,21 +379,27 @@ struct be_adapter {
 	u32 flash_status;
 	struct completion flash_compl;
 
-	bool be3_native;
-	bool sriov_enabled;
-	struct be_vf_cfg *vf_cfg;
+	u32 num_vfs;
 	u8 is_virtfn;
+	struct be_vf_cfg *vf_cfg;
+	bool be3_native;
 	u32 sli_family;
 	u8 hba_port_num;
 	u16 pvid;
 };
 
 #define be_physfn(adapter) (!adapter->is_virtfn)
+#define	sriov_enabled(adapter)		(adapter->num_vfs > 0)
+#define for_all_vfs(adapter, vf_cfg, i)					\
+	for (i = 0, vf_cfg = &adapter->vf_cfg[i]; i < adapter->num_vfs;	\
+		i++, vf_cfg++)
 
 /* BladeEngine Generation numbers */
 #define BE_GEN2 2
 #define BE_GEN3 3
 
+#define ON				1
+#define OFF				0
 #define lancer_chip(adapter)	((adapter->pdev->device == OC_DEVICE_ID3) || \
 				 (adapter->pdev->device == OC_DEVICE_ID4))
 
@@ -525,10 +538,14 @@ static inline bool be_multi_rxq(const struct be_adapter *adapter)
 	return adapter->num_rx_qs > 1;
 }
 
+static inline bool be_error(struct be_adapter *adapter)
+{
+	return adapter->eeh_err || adapter->ue_detected || adapter->fw_timeout;
+}
+
 extern void be_cq_notify(struct be_adapter *adapter, u16 qid, bool arm,
 		u16 num_popped);
-extern void be_link_status_update(struct be_adapter *adapter, bool link_up);
-extern void netdev_stats_update(struct be_adapter *adapter);
+extern void be_link_status_update(struct be_adapter *adapter, u8 link_status);
 extern void be_parse_stats(struct be_adapter *adapter);
 extern int be_load_fw(struct be_adapter *adapter, u8 *func);
 #endif				/* BE_H */

@@ -89,7 +89,7 @@ struct pv_lazy_ops {
 
 struct pv_time_ops {
 	unsigned long long (*sched_clock)(void);
-	unsigned long (*get_tsc_khz)(void);
+	unsigned long long (*steal_clock)(int cpu);
 };
 
 struct pv_cpu_ops {

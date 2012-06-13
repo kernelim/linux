@@ -10,7 +10,7 @@ kvm-y			+= $(addprefix ../../../virt/kvm/, kvm_main.o ioapic.o \
 kvm-$(CONFIG_IOMMU_API)	+= $(addprefix ../../../virt/kvm/, iommu.o)
 
 kvm-y			+= x86.o mmu.o emulate.o i8259.o irq.o lapic.o \
-			   i8254.o timer.o
+			   i8254.o timer.o pmu.o
 kvm-intel-y		+= vmx.o
 kvm-amd-y		+= svm.o
 

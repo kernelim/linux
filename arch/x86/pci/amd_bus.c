@@ -18,8 +18,8 @@
 #ifdef CONFIG_X86_64
 
 /*
- * sub bus (transparent) will use entres from 3 to store extra from root,
- * so need to make sure have enought slot there, increase PCI_BUS_NUM_RESOURCES?
+ * sub bus (transparent) will use entres from 3 to store extra from
+ * root, so need to make sure have enought slot there.
  */
 #define RES_NUM 16
 struct pci_root_info {
@@ -63,13 +63,14 @@ void x86_pci_root_bus_res_quirks(struct pci_bus *b)
 	printk(KERN_DEBUG "PCI: peer root bus %02x res updated from pci conf\n",
 			b->number);
 
+	pci_bus_remove_resources(b);
 	info = &pci_root_info[i];
 	for (j = 0; j < info->res_num; j++) {
 		struct resource *res;
 		struct resource *root;
 
 		res = &info->res[j];
-		b->resource[j] = res;
+		pci_bus_add_resource(b, res, 0);
 		if (res->flags & IORESOURCE_IO)
 			root = &ioport_resource;
 		else

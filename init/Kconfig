@@ -21,6 +21,13 @@ config CONSTRUCTORS
 	depends on !UML
 	default y
 
+config HAVE_IRQ_WORK
+	bool
+
+config IRQ_WORK
+	bool
+	depends on HAVE_IRQ_WORK
+
 menu "General setup"
 
 config EXPERIMENTAL
@@ -501,6 +508,7 @@ endchoice
 
 menuconfig CGROUPS
 	boolean "Control Group support"
+	depends on EVENTFD
 	help
 	  This option adds support for grouping sets of processes together, for
 	  use with process control subsystems such as Cpusets, CFS, memory
@@ -1008,6 +1016,7 @@ config PERF_EVENTS
 	default y if (PROFILING || PERF_COUNTERS)
 	depends on HAVE_PERF_EVENTS
 	select ANON_INODES
+	select IRQ_WORK
 	help
 	  Enable kernel support for various performance events provided
 	  by software and hardware.

@@ -32,6 +32,11 @@
 #include <linux/errqueue.h>
 #include <asm/uaccess.h>
 
+static inline int ipv6_mapped_addr_any(const struct in6_addr *a)
+{
+	return (ipv6_addr_v4mapped(a) && (a->s6_addr32[3] == 0));
+}
+
 int ip6_datagram_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 {
 	struct sockaddr_in6	*usin = (struct sockaddr_in6 *) uaddr;
@@ -100,12 +105,14 @@ ipv4_connected:
 
 		ipv6_addr_set(&np->daddr, 0, 0, htonl(0x0000ffff), inet->daddr);
 
-		if (ipv6_addr_any(&np->saddr)) {
+		if (ipv6_addr_any(&np->saddr) ||
+		    ipv6_mapped_addr_any(&np->saddr)) {
 			ipv6_addr_set(&np->saddr, 0, 0, htonl(0x0000ffff),
 				      inet->saddr);
 		}
 
-		if (ipv6_addr_any(&np->rcv_saddr)) {
+		if (ipv6_addr_any(&np->rcv_saddr) ||
+		    ipv6_mapped_addr_any(&np->rcv_saddr)) {
 			ipv6_addr_set(&np->rcv_saddr, 0, 0, htonl(0x0000ffff),
 				      inet->rcv_saddr);
 		}
@@ -404,7 +411,7 @@ int datagram_recv_ctl(struct sock *sk, struct msghdr *msg, struct sk_buff *skb)
 	}
 
 	if (np->rxopt.bits.rxtclass) {
-		int tclass = (ntohl(*(__be32 *)ipv6_hdr(skb)) >> 20) & 0xff;
+		int tclass = ipv6_tclass(ipv6_hdr(skb));
 		put_cmsg(msg, SOL_IPV6, IPV6_TCLASS, sizeof(tclass), &tclass);
 	}
 

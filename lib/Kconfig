@@ -206,4 +206,7 @@ config NLATTR
 config GENERIC_ATOMIC64
        bool
 
+config AVERAGE
+	bool
+
 endmenu

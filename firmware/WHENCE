@@ -942,3 +942,55 @@ SOLELY OR IN COMBINATION WITH THIS PROGRAM.
 
 Found in hex form in kernel source.
 --------------------------------------------------------------------------
+
+Driver: r8169 - RealTek 8169/8168/8101 ethernet driver.
+
+File: rtl_nic/rtl8168d-1.fw
+File: rtl_nic/rtl8168d-2.fw
+File: rtl_nic/rtl8105e-1.fw
+File: rtl_nic/rtl8168e-1.fw
+File: rtl_nic/rtl8168e-2.fw
+File: rtl_nic/rtl8168e-3.fw
+
+Licence:
+ * Copyright (c) 2010, Realtek Semiconductor Corporation
+ *
+ * Permission is hereby granted for the distribution of this firmware
+ * data in hexadecimal or equivalent format, provided this copyright
+ * notice is accompanying it.
+--------------------------------------------------------------------------
+
+Driver: iwlwifi - Intel Wireless Wifi
+ 
+File: iwlwifi-6000g2b-6.ucode
+Info: v18.168.6.1
+
+File: iwlwifi-135-6.ucode
+Info: v18.168.6.1
+
+File: iwlwifi-105-6.ucode
+Info: v18.168.6.1
+
+File: iwlwifi-2030-6.ucode
+Info: v18.168.6.1
+
+File: iwlwifi-2000-6.ucode
+Info: v18.168.6.1
+
+License: Redistributable. See LICENCE.iwlwifi_firmware for details
+
+Also available from http://intellinuxwireless.org/?n=Downloads
+
+--------------------------------------------------------------------------
+
+Driver: myri10ge - Myri10GE 10GbE NIC driver
+
+File: myri10ge_eth_z8e.dat
+File: myri10ge_ethp_z8e.dat
+File: myri10ge_rss_eth_z8e.dat
+File: myri10ge_rss_ethp_z8e.dat
+Info: v1.4.52
+
+License: Redistributable.  See LICENCE.myri10ge_firmware for details.
+
+--------------------------------------------------------------------------

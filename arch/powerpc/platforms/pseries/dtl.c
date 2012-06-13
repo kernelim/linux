@@ -180,7 +180,7 @@ static void dtl_stop(struct dtl *dtl)
 
 	lppaca[dtl->cpu].dtl_enable_mask = 0x0;
 
-	unregister_dtl(hwcpu, __pa(dtl->buf));
+	unregister_dtl(hwcpu);
 }
 
 static u64 dtl_current_index(struct dtl *dtl)

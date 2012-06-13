@@ -842,12 +842,53 @@ u32 mmc_select_voltage(struct mmc_host *host, u32 ocr)
 	return ocr;
 }
 
+int mmc_set_signal_voltage(struct mmc_host *host, int signal_voltage)
+{
+	struct mmc_command cmd = {0};
+	int err = 0;
+
+	BUG_ON(!host);
+
+	/*
+	 * Send CMD11 only if the request is to switch the card to
+	 * 1.8V signalling.
+	 */
+	if (signal_voltage == MMC_SIGNAL_VOLTAGE_180) {
+		cmd.opcode = SD_SWITCH_VOLTAGE;
+		cmd.arg = 0;
+		cmd.flags = MMC_RSP_R1 | MMC_CMD_AC;
+
+		err = mmc_wait_for_cmd(host, &cmd, 0);
+		if (err)
+			return err;
+
+		if (!mmc_host_is_spi(host) && (cmd.resp[0] & R1_ERROR))
+			return -EIO;
+	}
+
+	host->ios.signal_voltage = signal_voltage;
+
+	if (host->ops->start_signal_voltage_switch)
+		err = host->ops->start_signal_voltage_switch(host, &host->ios);
+
+	return err;
+}
+
 /*
  * Select timing parameters for host.
  */
 void mmc_set_timing(struct mmc_host *host, unsigned int timing)
 {
 	host->ios.timing = timing;
+	mmc_set_ios(host);
+}
+
+/*
+ * Select appropriate driver type for host.
+ */
+void mmc_set_driver_type(struct mmc_host *host, unsigned int drv_type)
+{
+	host->ios.drv_type = drv_type;
 	mmc_set_ios(host);
 }
 
@@ -1082,8 +1123,15 @@ void mmc_rescan(struct work_struct *work)
 	 */
 	err = mmc_send_io_op_cond(host, 0, &ocr);
 	if (!err) {
-		if (mmc_attach_sdio(host, ocr))
-			mmc_power_off(host);
+		if (mmc_attach_sdio(host, ocr)) {
+			mmc_claim_host(host);
+			/* try SDMEM (but not MMC) even if SDIO is broken */
+			if (mmc_send_app_op_cond(host, 0, &ocr))
+				goto out_fail;
+
+			if (mmc_attach_sd(host, ocr))
+				mmc_power_off(host);
+		}
 		goto out;
 	}
 
@@ -1107,6 +1155,7 @@ void mmc_rescan(struct work_struct *work)
 		goto out;
 	}
 
+out_fail:
 	mmc_release_host(host);
 	mmc_power_off(host);
 

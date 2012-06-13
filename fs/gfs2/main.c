@@ -18,6 +18,7 @@
 #include <linux/rculist_bl.h>
 #include <asm/atomic.h>
 #include <linux/slow-work.h>
+#include <linux/mempool.h>
 
 #include "gfs2.h"
 #include "incore.h"
@@ -39,7 +40,9 @@ static void gfs2_init_inode_once(void *foo)
 	inode_init_once(&ip->i_inode);
 	init_rwsem(&ip->i_rw_mutex);
 	INIT_LIST_HEAD(&ip->i_trunc_list);
-	ip->i_alloc = NULL;
+	ip->i_qadata = NULL;
+	ip->i_res = NULL;
+	ip->i_hash_cache = NULL;
 }
 
 static void gfs2_init_glock_once(void *foo)
@@ -69,6 +72,16 @@ static void gfs2_init_gl_aspace_once(void *foo)
 	spin_lock_init(&mapping->private_lock);
 	INIT_RAW_PRIO_TREE_ROOT(&mapping->i_mmap);
 	INIT_LIST_HEAD(&mapping->i_mmap_nonlinear);
+}
+
+static void *gfs2_bh_alloc(gfp_t mask, void *data)
+{
+	return alloc_buffer_head(mask);
+}
+
+static void gfs2_bh_free(void *ptr, void *data)
+{
+	return free_buffer_head(ptr);
 }
 
 /**
@@ -145,12 +158,18 @@ static int __init init_gfs2_fs(void)
 	if (error)
 		goto fail_slow;
 
+	gfs2_bh_pool = mempool_create(1024, gfs2_bh_alloc, gfs2_bh_free, NULL);
+	if (!gfs2_bh_pool)
+		goto fail_mempool;
+
 	gfs2_register_debugfs();
 
 	printk("GFS2 (built %s %s) installed\n", __DATE__, __TIME__);
 
 	return 0;
 
+fail_mempool:
+	slow_work_unregister_user(THIS_MODULE);
 fail_slow:
 	unregister_filesystem(&gfs2meta_fs_type);
 fail_unregister:
@@ -197,6 +216,7 @@ static void __exit exit_gfs2_fs(void)
 
 	rcu_barrier();
 
+	mempool_destroy(gfs2_bh_pool);
 	kmem_cache_destroy(gfs2_quotad_cachep);
 	kmem_cache_destroy(gfs2_rgrpd_cachep);
 	kmem_cache_destroy(gfs2_bufdata_cachep);

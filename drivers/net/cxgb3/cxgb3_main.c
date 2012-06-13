@@ -1596,12 +1596,11 @@ static void get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)
 	t3_get_tp_version(adapter, &tp_vers);
 	spin_unlock(&adapter->stats_lock);
 
-	strcpy(info->driver, DRV_NAME);
-	strcpy(info->version, DRV_VERSION);
-	strcpy(info->bus_info, pci_name(adapter->pdev));
-	if (!fw_vers)
-		strcpy(info->fw_version, "N/A");
-	else {
+	strlcpy(info->driver, DRV_NAME, sizeof(info->driver));
+	strlcpy(info->version, DRV_VERSION, sizeof(info->version));
+	strlcpy(info->bus_info, pci_name(adapter->pdev),
+		sizeof(info->bus_info));
+	if (fw_vers)
 		snprintf(info->fw_version, sizeof(info->fw_version),
 			 "%s %u.%u.%u TP %u.%u.%u",
 			 G_FW_VERSION_TYPE(fw_vers) ? "T" : "N",
@@ -1611,7 +1610,6 @@ static void get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)
 			 G_TP_VERSION_MAJOR(tp_vers),
 			 G_TP_VERSION_MINOR(tp_vers),
 			 G_TP_VERSION_MICRO(tp_vers));
-	}
 }
 
 static void get_strings(struct net_device *dev, u32 stringset, u8 * data)
@@ -1938,7 +1936,6 @@ static void get_sge_param(struct net_device *dev, struct ethtool_ringparam *e)
 	const struct qset_params *q = &adapter->params.sge.qset[pi->first_qset];
 
 	e->rx_max_pending = MAX_RX_BUFFERS;
-	e->rx_mini_max_pending = 0;
 	e->rx_jumbo_max_pending = MAX_RX_JUMBO_BUFFERS;
 	e->tx_max_pending = MAX_TXQ_ENTRIES;
 

@@ -148,6 +148,7 @@ extern pgprot_t protection_map[16];
 #define FAULT_FLAG_NONLINEAR	0x02	/* Fault was via a nonlinear mapping */
 #define FAULT_FLAG_MKWRITE	0x04	/* Fault was mkwrite of existing pte */
 #define FAULT_FLAG_ALLOW_RETRY	0x08	/* Retry fault if blocking */
+#define FAULT_FLAG_KILLABLE	0x20	/* The fault task is in SIGKILL killable region */
 
 /*
  * This interface is used by x86 PAT code to identify a pfn mapping that is
@@ -399,6 +400,20 @@ static inline int compound_order(struct page *page)
 	if (!PageHead(page))
 		return 0;
 	return (unsigned long)page[1].lru.prev;
+}
+
+static inline int compound_trans_order(struct page *page)
+{
+	int order;
+	unsigned long flags;
+
+	if (!PageHead(page))
+		return 0;
+
+	flags = compound_lock_irqsave(page);
+	order = compound_order(page);
+	compound_unlock_irqrestore(page, flags);
+	return order;
 }
 
 static inline void set_compound_order(struct page *page, unsigned long order)
@@ -744,6 +759,17 @@ static inline void reset_page_mapcount(struct page *page)
 static inline int page_mapcount(struct page *page)
 {
 	return atomic_read(&(page)->_mapcount) + 1;
+}
+
+static inline void get_huge_page_tail(struct page *page)
+{
+	/*
+	 * __split_huge_page_refcount() cannot run
+	 * from under us.
+	 */
+	VM_BUG_ON(page_mapcount(page) < 0);
+	VM_BUG_ON(atomic_read(&page->_count) != 0);
+	atomic_inc(&page->_mapcount);
 }
 
 /*

@@ -32,12 +32,15 @@
 #include <linux/slab.h>
 #include <linux/utsname.h>
 #include <linux/workqueue.h>
+#include <linux/in.h>
 #include <linux/in6.h>
+#include <linux/un.h>
 
 #include <linux/sunrpc/clnt.h>
 #include <linux/sunrpc/rpc_pipe_fs.h>
 #include <linux/sunrpc/metrics.h>
 #include <linux/sunrpc/bc_xprt.h>
+#include <trace/events/sunrpc.h>
 
 #include "sunrpc.h"
 
@@ -56,9 +59,6 @@ static LIST_HEAD(all_clients);
 static DEFINE_SPINLOCK(rpc_client_lock);
 
 static DECLARE_WAIT_QUEUE_HEAD(destroy_wait);
-
-#define CREATE_TRACE_POINTS
-#include <trace/events/sunrpc.h>
 
 static void	call_start(struct rpc_task *task);
 static void	call_reserve(struct rpc_task *task);
@@ -300,22 +300,27 @@ struct rpc_clnt *rpc_create(struct rpc_create_args *args)
 	 * up a string representation of the passed-in address.
 	 */
 	if (args->servername == NULL) {
+		struct sockaddr_un *sun =
+				(struct sockaddr_un *)args->address;
+		struct sockaddr_in *sin =
+				(struct sockaddr_in *)args->address;
+		struct sockaddr_in6 *sin6 =
+				(struct sockaddr_in6 *)args->address;
+
 		servername[0] = '\0';
 		switch (args->address->sa_family) {
-		case AF_INET: {
-			struct sockaddr_in *sin =
-					(struct sockaddr_in *)args->address;
+		case AF_LOCAL:
+			snprintf(servername, sizeof(servername), "%s",
+				 sun->sun_path);
+			break;
+		case AF_INET:
 			snprintf(servername, sizeof(servername), "%pI4",
 				 &sin->sin_addr.s_addr);
 			break;
-		}
-		case AF_INET6: {
-			struct sockaddr_in6 *sin =
-					(struct sockaddr_in6 *)args->address;
+		case AF_INET6: 
 			snprintf(servername, sizeof(servername), "%pI6",
-				 &sin->sin6_addr);
+				 &sin6->sin6_addr);
 			break;
-		}
 		default:
 			/* caller wants default server name, but
 			 * address family isn't recognized. */
@@ -957,6 +962,8 @@ call_reserveresult(struct rpc_task *task)
 	}
 
 	switch (status) {
+	case -ENOMEM:
+		rpc_delay(task, HZ >> 2);
 	case -EAGAIN:	/* woken up; retry */
 		task->tk_action = call_reserve;
 		return;

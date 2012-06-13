@@ -78,9 +78,32 @@ struct minstrel_priv {
 	unsigned int update_interval;
 	unsigned int lookaround_rate;
 	unsigned int lookaround_rate_mrr;
+
+#ifdef CONFIG_MAC80211_DEBUGFS
+	/*
+	 * enable fixed rate processing per RC
+	 *   - write static index to debugfs:ieee80211/phyX/rc/fixed_rate_idx
+	 *   - write -1 to enable RC processing again
+	 *   - setting will be applied on next update
+	 */
+	u32 fixed_rate_idx;
+	struct dentry *dbg_fixed_rate;
+#endif
+
 };
 
+struct minstrel_debugfs_info {
+	size_t len;
+	char buf[];
+};
+
+extern struct rate_control_ops mac80211_minstrel;
 void minstrel_add_sta_debugfs(void *priv, void *priv_sta, struct dentry *dir);
 void minstrel_remove_sta_debugfs(void *priv, void *priv_sta);
+
+/* debugfs */
+int minstrel_stats_open(struct inode *inode, struct file *file);
+ssize_t minstrel_stats_read(struct file *file, char __user *buf, size_t len, loff_t *ppos);
+int minstrel_stats_release(struct inode *inode, struct file *file);
 
 #endif

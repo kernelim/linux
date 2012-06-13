@@ -293,6 +293,30 @@ TRACE_EVENT(ext3_invalidatepage,
 		  __entry->index, __entry->offset)
 );
 
+TRACE_EVENT(ext3_discard_blocks,
+	TP_PROTO(struct super_block *sb, unsigned long blk,
+			unsigned long count),
+
+	TP_ARGS(sb, blk, count),
+
+	TP_STRUCT__entry(
+		__field(	dev_t,		dev		)
+		__field(	unsigned long,	blk		)
+		__field(	unsigned long,	count		)
+
+	),
+
+	TP_fast_assign(
+		__entry->dev	= sb->s_dev;
+		__entry->blk	= blk;
+		__entry->count	= count;
+	),
+
+	TP_printk("dev %d,%d blk %lu count %lu",
+		  MAJOR(__entry->dev), MINOR(__entry->dev),
+		  __entry->blk, __entry->count)
+);
+
 TRACE_EVENT(ext3_request_blocks,
 	TP_PROTO(struct inode *inode, unsigned long goal,
 		 unsigned long count),

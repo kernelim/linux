@@ -250,7 +250,7 @@ err:
 		walker->error_code |= PFERR_WRITE_MASK;
 	if (user_fault)
 		walker->error_code |= PFERR_USER_MASK;
-	if (fetch_fault && (read_cr4() & X86_CR4_SMEP))
+	if (fetch_fault && (is_nx(vcpu) || (read_cr4() & X86_CR4_SMEP)))
 		walker->error_code |= PFERR_FETCH_MASK;
 	if (rsvd_fault)
 		walker->error_code |= PFERR_RSVD_MASK;

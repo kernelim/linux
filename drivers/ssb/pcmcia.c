@@ -3,7 +3,7 @@
  * PCMCIA-Hostbus related functions
  *
  * Copyright 2006 Johannes Berg <johannes@sipsolutions.net>
- * Copyright 2007-2008 Michael Buesch <mb@bu3sch.de>
+ * Copyright 2007-2008 Michael Buesch <m@bues.ch>
  *
  * Licensed under the GNU/GPL. See COPYING for details.
  */
@@ -14,13 +14,41 @@
 #include <linux/etherdevice.h>
 
 #include <pcmcia/cs_types.h>
-#include <pcmcia/cs.h>
 #include <pcmcia/cistpl.h>
 #include <pcmcia/ciscode.h>
 #include <pcmcia/ds.h>
 #include <pcmcia/cisreg.h>
 
 #include "ssb_private.h"
+
+
+/**
+ * pcmcia_read_config_byte() - read a byte from a card configuration register
+ *
+ * pcmcia_read_config_byte() reads a byte from a configuration register in
+ * attribute memory.
+ */
+static inline int pcmcia_read_config_byte(struct pcmcia_device *p_dev, off_t where, u8 *val)
+{
+        int ret;
+        conf_reg_t reg = { 0, CS_READ, where, 0 };
+        ret = pcmcia_access_configuration_register(p_dev, &reg);
+        *val = reg.Value;
+        return ret;
+}
+
+/**
+ * pcmcia_write_config_byte() - write a byte to a card configuration register
+ *
+ * pcmcia_write_config_byte() writes a byte to a configuration register in
+ * attribute memory.
+ */
+static inline int pcmcia_write_config_byte(struct pcmcia_device *p_dev, off_t where, u8 val)
+{
+	conf_reg_t reg = { 0, CS_WRITE, where, val };
+	return pcmcia_access_configuration_register(p_dev, &reg);
+}
+
 
 
 /* Define the following to 1 to enable a printk on each coreswitch. */
@@ -72,14 +100,9 @@
 /* Write to a PCMCIA configuration register. */
 static int ssb_pcmcia_cfg_write(struct ssb_bus *bus, u8 offset, u8 value)
 {
-	conf_reg_t reg;
 	int res;
 
-	memset(&reg, 0, sizeof(reg));
-	reg.Offset = offset;
-	reg.Action = CS_WRITE;
-	reg.Value = value;
-	res = pcmcia_access_configuration_register(bus->host_pcmcia, &reg);
+	res = pcmcia_write_config_byte(bus->host_pcmcia, offset, value);
 	if (unlikely(res != 0))
 		return -EBUSY;
 
@@ -89,16 +112,11 @@ static int ssb_pcmcia_cfg_write(struct ssb_bus *bus, u8 offset, u8 value)
 /* Read from a PCMCIA configuration register. */
 static int ssb_pcmcia_cfg_read(struct ssb_bus *bus, u8 offset, u8 *value)
 {
-	conf_reg_t reg;
 	int res;
 
-	memset(&reg, 0, sizeof(reg));
-	reg.Offset = offset;
-	reg.Action = CS_READ;
-	res = pcmcia_access_configuration_register(bus->host_pcmcia, &reg);
+	res = pcmcia_read_config_byte(bus->host_pcmcia, offset, value);
 	if (unlikely(res != 0))
 		return -EBUSY;
-	*value = reg.Value;
 
 	return 0;
 }

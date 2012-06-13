@@ -47,6 +47,7 @@
 #include <asm/sparsemem.h>
 #include <asm/vdso.h>
 #include <asm/fixmap.h>
+#include <asm/rtas.h>
 
 #include "mmu_decl.h"
 
@@ -127,7 +128,8 @@ int arch_add_memory(int nid, u64 start, u64 size)
 	pgdata = NODE_DATA(nid);
 
 	start = (unsigned long)__va(start);
-	create_section_mapping(start, start + size);
+	if (create_section_mapping(start, start + size))
+		return -EINVAL;
 
 	/* this should work for most non-highmem platforms */
 	zone = pgdata->node_zones;
@@ -511,3 +513,23 @@ void update_mmu_cache(struct vm_area_struct *vma, unsigned long address,
 	hash_preload(vma->vm_mm, address, access, trap);
 #endif /* CONFIG_PPC_STD_MMU */
 }
+
+#ifdef CONFIG_STRICT_DEVMEM
+/*
+ * devmem_is_allowed(): check to see if /dev/mem access to a certain address
+ * is valid. The argument is a physical page number.
+ *
+ * Access has to be given to non-kernel-ram areas as well, these contain the
+ * PCI mmio resources as well as potential bios/acpi data regions.
+ */
+int devmem_is_allowed(unsigned long pfn)
+{
+	if (iomem_is_exclusive(pfn << PAGE_SHIFT))
+		return 0;
+	if (!page_is_ram(pfn))
+		return 1;
+	if (page_is_rtas_user_buf(pfn))
+		return 1;
+	return 0;
+}
+#endif /* CONFIG_STRICT_DEVMEM */

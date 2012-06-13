@@ -4,7 +4,7 @@
 
   debugfs driver debugging code
 
-  Copyright (c) 2005-2007 Michael Buesch <mb@bu3sch.de>
+  Copyright (c) 2005-2007 Michael Buesch <m@bues.ch>
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -334,6 +334,7 @@ out_unlock:
 			.open	= b43legacy_debugfs_open,		\
 			.read	= b43legacy_debugfs_read,		\
 			.write	= b43legacy_debugfs_write,		\
+			.llseek = generic_file_llseek,			\
 		},						\
 		.file_struct_offset = offsetof(struct b43legacy_dfsentry, \
 					       file_##name),	\

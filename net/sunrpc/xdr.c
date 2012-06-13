@@ -295,7 +295,7 @@ _copy_to_pages(struct page **pages, size_t pgbase, const char *p, size_t len)
  * Copies data into an arbitrary memory location from an array of pages
  * The copy is assumed to be non-overlapping.
  */
-static void
+void
 _copy_from_pages(char *p, struct page **pages, size_t pgbase, size_t len)
 {
 	struct page **pgfrom;
@@ -323,6 +323,7 @@ _copy_from_pages(char *p, struct page **pages, size_t pgbase, size_t len)
 
 	} while ((len -= copy) != 0);
 }
+EXPORT_SYMBOL_GPL(_copy_from_pages);
 
 /*
  * xdr_shrink_bufhead

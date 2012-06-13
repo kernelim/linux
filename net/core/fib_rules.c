@@ -38,6 +38,24 @@ int fib_default_rule_add(struct fib_rules_ops *ops,
 }
 EXPORT_SYMBOL(fib_default_rule_add);
 
+u32 fib_default_rule_pref(struct fib_rules_ops *ops)
+{
+	struct list_head *pos;
+	struct fib_rule *rule;
+
+	if (!list_empty(&ops->rules_list)) {
+		pos = ops->rules_list.next;
+		if (pos->next != &ops->rules_list) {
+			rule = list_entry(pos->next, struct fib_rule, list);
+			if (rule->pref)
+				return rule->pref - 1;
+		}
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(fib_default_rule_pref);
+
 static void notify_rule_change(int event, struct fib_rule *rule,
 			       struct fib_rules_ops *ops, struct nlmsghdr *nlh,
 			       u32 pid);
@@ -311,6 +329,11 @@ static int fib_nl_newrule(struct sk_buff *skb, struct nlmsghdr* nlh, void *arg)
 
 	fib_rule_get(rule);
 
+	if (last)
+		list_add_rcu(&rule->list, &last->list);
+	else
+		list_add_rcu(&rule->list, &ops->rules_list);
+
 	if (ops->unresolved_rules) {
 		/*
 		 * There are unresolved goto rules in the list, check if
@@ -318,8 +341,8 @@ static int fib_nl_newrule(struct sk_buff *skb, struct nlmsghdr* nlh, void *arg)
 		 */
 		list_for_each_entry(r, &ops->rules_list, list) {
 			if (r->action == FR_ACT_GOTO &&
-			    r->target == rule->pref) {
-				BUG_ON(r->ctarget != NULL);
+			    r->target == rule->pref &&
+			    rcu_dereference(r->ctarget) == NULL) {
 				rcu_assign_pointer(r->ctarget, rule);
 				if (--ops->unresolved_rules == 0)
 					break;
@@ -332,11 +355,6 @@ static int fib_nl_newrule(struct sk_buff *skb, struct nlmsghdr* nlh, void *arg)
 
 	if (unresolved)
 		ops->unresolved_rules++;
-
-	if (last)
-		list_add_rcu(&rule->list, &last->list);
-	else
-		list_add_rcu(&rule->list, &ops->rules_list);
 
 	notify_rule_change(RTM_NEWRULE, rule, ops, nlh, NETLINK_CB(skb).pid);
 	flush_route_cache(ops);
@@ -471,6 +489,7 @@ static int fib_nl_fill_rule(struct sk_buff *skb, struct fib_rule *rule,
 		return -EMSGSIZE;
 
 	frh = nlmsg_data(nlh);
+	frh->family = ops->family;
 	frh->table = rule->table;
 	NLA_PUT_U32(skb, FRA_TABLE, rule->table);
 	frh->res1 = 0;

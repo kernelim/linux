@@ -54,6 +54,11 @@ extern void mem_cgroup_rotate_lru_list(struct page *page, enum lru_list lru);
 extern void mem_cgroup_del_lru(struct page *page);
 extern void mem_cgroup_move_lists(struct page *page,
 				  enum lru_list from, enum lru_list to);
+
+/* For coalescing uncharge for reducing memcg' overhead*/
+extern void mem_cgroup_uncharge_start(void);
+extern void mem_cgroup_uncharge_end(void);
+
 extern void mem_cgroup_uncharge_page(struct page *page);
 extern void mem_cgroup_uncharge_cache_page(struct page *page);
 extern int mem_cgroup_shmem_charge_fallback(struct page *page,
@@ -129,6 +134,11 @@ void mem_cgroup_split_hugepage_commit(struct page *page, struct page *head);
 
 u64 mem_cgroup_get_limit(struct mem_cgroup *mem);
 
+#ifdef CONFIG_DEBUG_VM
+bool mem_cgroup_bad_page_check(struct page *page);
+void mem_cgroup_print_bad_page(struct page *page);
+#endif
+
 #else /* CONFIG_CGROUP_MEM_RES_CTLR */
 struct mem_cgroup;
 
@@ -156,6 +166,14 @@ static inline void mem_cgroup_commit_charge_swapin(struct page *page,
 }
 
 static inline void mem_cgroup_cancel_charge_swapin(struct mem_cgroup *ptr)
+{
+}
+
+static inline void mem_cgroup_uncharge_start(void)
+{
+}
+
+static inline void mem_cgroup_uncharge_end(void)
 {
 }
 
@@ -310,6 +328,19 @@ u64 mem_cgroup_get_limit(struct mem_cgroup *mem)
 }
 
 #endif /* CONFIG_CGROUP_MEM_CONT */
+
+#if !defined(CONFIG_CGROUP_MEM_RES_CTLR) || !defined(CONFIG_DEBUG_VM)
+static inline bool
+mem_cgroup_bad_page_check(struct page *page)
+{
+	return false;
+}
+
+static inline void
+mem_cgroup_print_bad_page(struct page *page)
+{
+}
+#endif
 
 #endif /* _LINUX_MEMCONTROL_H */
 

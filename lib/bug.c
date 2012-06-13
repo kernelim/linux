@@ -136,7 +136,7 @@ enum bug_trap_type report_bug(unsigned long bugaddr, struct pt_regs *regs)
 
 	bug = find_bug(bugaddr);
 
-	printk(KERN_EMERG "------------[ cut here ]------------\n");
+	printk(KERN_DEFAULT "------------[ cut here ]------------\n");
 
 	file = NULL;
 	line = 0;

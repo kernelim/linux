@@ -785,7 +785,7 @@ sys32_getresuid16_wrapper:
 sys32_poll_wrapper:
 	llgtr	%r2,%r2			# struct pollfd *
 	llgfr	%r3,%r3			# unsigned int
-	lgfr	%r4,%r4			# long
+	lgfr	%r4,%r4			# int
 	jg	sys_poll		# branch to system call
 
 	.globl	compat_sys_nfsservctl_wrapper

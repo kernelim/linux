@@ -202,6 +202,13 @@ static void native_flush_tlb_single(unsigned long addr)
 	__native_flush_tlb_single(addr);
 }
 
+bool paravirt_steal_enabled;
+
+static u64 native_steal_clock(int cpu)
+{
+	return 0;
+}
+
 /* These are in entry.S */
 extern void native_iret(void);
 extern void native_irq_enable_sysexit(void);
@@ -307,6 +314,7 @@ struct pv_init_ops pv_init_ops = {
 
 struct pv_time_ops pv_time_ops = {
 	.sched_clock = native_sched_clock,
+	.steal_clock = native_steal_clock,
 };
 
 struct pv_irq_ops pv_irq_ops = {

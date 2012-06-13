@@ -749,7 +749,7 @@ gfn_t unalias_gfn(struct kvm *kvm, gfn_t gfn)
 static int __init kvm_s390_init(void)
 {
 	int ret;
-	ret = kvm_init(NULL, sizeof(struct kvm_vcpu), THIS_MODULE);
+	ret = kvm_init(NULL, sizeof(struct kvm_vcpu), 0, THIS_MODULE);
 	if (ret)
 		return ret;
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006 - 2009 Intel Corporation.  All rights reserved.
+ * Copyright (c) 2006 - 2011 Intel Corporation.  All rights reserved.
  * Copyright (c) 2005 Open Grid Computing, Inc. All rights reserved.
  *
  * This software is available to you under a choice of one of two
@@ -83,7 +83,7 @@ module_param(send_first, int, 0644);
 MODULE_PARM_DESC(send_first, "Send RDMA Message First on Active Connection");
 
 
-unsigned int nes_drv_opt = 0;
+unsigned int nes_drv_opt = NES_DRV_OPT_DISABLE_INT_MOD | NES_DRV_OPT_ENABLE_PAU;
 module_param(nes_drv_opt, int, 0644);
 MODULE_PARM_DESC(nes_drv_opt, "Driver option parameters");
 
@@ -128,9 +128,6 @@ static struct notifier_block nes_inetaddr_notifier = {
 static struct notifier_block nes_net_notifier = {
 	.notifier_call = nes_net_event
 };
-
-
-
 
 /**
  * nes_inetaddr_event
@@ -319,6 +316,9 @@ void nes_rem_ref(struct ib_qp *ibqp)
 	}
 
 	if (atomic_dec_and_test(&nesqp->refcount)) {
+		if (nesqp->pau_mode)
+			nes_destroy_pau_qp(nesdev, nesqp);
+
 		/* Destroy the QP */
 		cqp_request = nes_get_cqp_request(nesdev);
 		if (cqp_request == NULL) {

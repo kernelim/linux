@@ -70,6 +70,7 @@ typedef enum
 	ec_schedule=0,
 	ec_call_function,
 	ec_call_function_single,
+	ec_stop_cpu,
 	ec_bit_last
 } ec_bit_sig;
 
@@ -129,6 +130,24 @@ signal_processor_ps(__u32 *statusptr, __u32 parameter, __u16 cpu_addr,
 		: "d" (cpu_logical_map(cpu_addr)), "a" (order_code)
 		: "cc" , "memory");
 	*statusptr = reg1;
+	return ccode;
+}
+
+/*
+ * Signal processor
+ */
+static inline int raw_sigp(u16 cpu, int order)
+{
+	register unsigned long reg1 asm ("1") = 0;
+	int ccode;
+
+	asm volatile(
+		"       sigp    %1,%2,0(%3)\n"
+		"       ipm     %0\n"
+		"       srl     %0,28\n"
+		:       "=d"    (ccode)
+		: "d" (reg1), "d" (cpu),
+		  "a" (order) : "cc" , "memory");
 	return ccode;
 }
 

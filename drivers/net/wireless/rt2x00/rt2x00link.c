@@ -1,5 +1,5 @@
 /*
-	Copyright (C) 2004 - 2009 rt2x00 SourceForge Project
+	Copyright (C) 2004 - 2009 Ivo van Doorn <IvDoorn@gmail.com>
 	<http://rt2x00.serialmonkey.com>
 
 	This program is free software; you can redistribute it and/or modify
@@ -36,24 +36,6 @@
 #define DEFAULT_RSSI		-128
 
 /*
- * When no TX/RX percentage could be calculated due to lack of
- * frames on the air, we fallback to a percentage of 50%.
- * This will assure we will get at least get some decent value
- * when the link tuner starts.
- * The value will be dropped and overwritten with the correct (measured)
- * value anyway during the first run of the link tuner.
- */
-#define DEFAULT_PERCENTAGE	50
-
-/*
- * Small helper macro for percentage calculation
- * This is a very simple macro with the only catch that it will
- * produce a default value in case no total value was provided.
- */
-#define PERCENTAGE(__value, __total) \
-	( (__total) ? (((__value) * 100) / (__total)) : (DEFAULT_PERCENTAGE) )
-
-/*
  * Helper struct and macro to work with moving/walking averages.
  * When adding a value to the average value the following calculation
  * is needed:
@@ -85,32 +67,11 @@
 	    (__avg).avg_weight  ? \
 		((((__avg).avg_weight * ((AVG_SAMPLES) - 1)) + \
 		  ((__val) * (AVG_FACTOR))) / \
-		 (AVG_SAMPLES) ) : \
+		 (AVG_SAMPLES)) : \
 		((__val) * (AVG_FACTOR)); \
 	__new.avg = __new.avg_weight / (AVG_FACTOR); \
 	__new; \
 })
-
-/*
- * For calculating the Signal quality we have determined
- * the total number of success and failed RX and TX frames.
- * With the addition of the average RSSI value we can determine
- * the link quality using the following algorithm:
- *
- *         rssi_percentage = (avg_rssi * 100) / rssi_offset
- *         rx_percentage = (rx_success * 100) / rx_total
- *         tx_percentage = (tx_success * 100) / tx_total
- *         avg_signal = ((WEIGHT_RSSI * avg_rssi) +
- *                       (WEIGHT_TX * tx_percentage) +
- *                       (WEIGHT_RX * rx_percentage)) / 100
- *
- * This value should then be checked to not be greater then 100.
- * This means the values of WEIGHT_RSSI, WEIGHT_RX, WEIGHT_TX must
- * sum up to 100 as well.
- */
-#define WEIGHT_RSSI	20
-#define WEIGHT_RX	40
-#define WEIGHT_TX	40
 
 static int rt2x00link_antenna_get_link_rssi(struct rt2x00_dev *rt2x00dev)
 {
@@ -227,30 +188,16 @@ static void rt2x00lib_antenna_diversity_eval(struct rt2x00_dev *rt2x00dev)
 static bool rt2x00lib_antenna_diversity(struct rt2x00_dev *rt2x00dev)
 {
 	struct link_ant *ant = &rt2x00dev->link.ant;
-	unsigned int flags = ant->flags;
 
 	/*
 	 * Determine if software diversity is enabled for
 	 * either the TX or RX antenna (or both).
-	 * Always perform this check since within the link
-	 * tuner interval the configuration might have changed.
 	 */
-	flags &= ~ANTENNA_RX_DIVERSITY;
-	flags &= ~ANTENNA_TX_DIVERSITY;
-
-	if (rt2x00dev->default_ant.rx == ANTENNA_SW_DIVERSITY)
-		flags |= ANTENNA_RX_DIVERSITY;
-	if (rt2x00dev->default_ant.tx == ANTENNA_SW_DIVERSITY)
-		flags |= ANTENNA_TX_DIVERSITY;
-
 	if (!(ant->flags & ANTENNA_RX_DIVERSITY) &&
 	    !(ant->flags & ANTENNA_TX_DIVERSITY)) {
 		ant->flags = 0;
 		return true;
 	}
-
-	/* Update flags */
-	ant->flags = flags;
 
 	/*
 	 * If we have only sampled the data over the last period
@@ -279,6 +226,12 @@ void rt2x00link_update_stats(struct rt2x00_dev *rt2x00dev,
 	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)skb->data;
 
 	/*
+	 * No need to update the stats for !=STA interfaces
+	 */
+	if (!rt2x00dev->intf_sta_count)
+		return;
+
+	/*
 	 * Frame was received successfully since non-succesfull
 	 * frames would have been dropped by the hardware.
 	 */
@@ -304,61 +257,27 @@ void rt2x00link_update_stats(struct rt2x00_dev *rt2x00dev,
 	ant->rssi_ant = MOVING_AVERAGE(ant->rssi_ant, rxdesc->rssi);
 }
 
-static void rt2x00link_precalculate_signal(struct rt2x00_dev *rt2x00dev)
-{
-	struct link *link = &rt2x00dev->link;
-	struct link_qual *qual = &rt2x00dev->link.qual;
-
-	link->rx_percentage =
-	    PERCENTAGE(qual->rx_success, qual->rx_failed + qual->rx_success);
-	link->tx_percentage =
-	    PERCENTAGE(qual->tx_success, qual->tx_failed + qual->tx_success);
-}
-
-int rt2x00link_calculate_signal(struct rt2x00_dev *rt2x00dev, int rssi)
-{
-	struct link *link = &rt2x00dev->link;
-	int rssi_percentage = 0;
-	int signal;
-
-	/*
-	 * We need a positive value for the RSSI.
-	 */
-	if (rssi < 0)
-		rssi += rt2x00dev->rssi_offset;
-
-	/*
-	 * Calculate the different percentages,
-	 * which will be used for the signal.
-	 */
-	rssi_percentage = PERCENTAGE(rssi, rt2x00dev->rssi_offset);
-
-	/*
-	 * Add the individual percentages and use the WEIGHT
-	 * defines to calculate the current link signal.
-	 */
-	signal = ((WEIGHT_RSSI * rssi_percentage) +
-		  (WEIGHT_TX * link->tx_percentage) +
-		  (WEIGHT_RX * link->rx_percentage)) / 100;
-
-	return max_t(int, signal, 100);
-}
-
 void rt2x00link_start_tuner(struct rt2x00_dev *rt2x00dev)
 {
 	struct link *link = &rt2x00dev->link;
 
 	/*
 	 * Link tuning should only be performed when
-	 * an active sta or master interface exists.
-	 * Single monitor mode interfaces should never have
-	 * work with link tuners.
+	 * an active sta interface exists. AP interfaces
+	 * don't need link tuning and monitor mode interfaces
+	 * should never have to work with link tuners.
 	 */
-	if (!rt2x00dev->intf_ap_count && !rt2x00dev->intf_sta_count)
+	if (!rt2x00dev->intf_sta_count)
 		return;
 
-	link->rx_percentage = DEFAULT_PERCENTAGE;
-	link->tx_percentage = DEFAULT_PERCENTAGE;
+	/**
+	 * While scanning, link tuning is disabled. By default
+	 * the most sensitive settings will be used to make sure
+	 * that all beacons and probe responses will be received
+	 * during the scan.
+	 */
+	if (test_bit(DEVICE_STATE_SCANNING, &rt2x00dev->flags))
+		return;
 
 	rt2x00link_reset_tuner(rt2x00dev, false);
 
@@ -375,6 +294,7 @@ void rt2x00link_stop_tuner(struct rt2x00_dev *rt2x00dev)
 void rt2x00link_reset_tuner(struct rt2x00_dev *rt2x00dev, bool antenna)
 {
 	struct link_qual *qual = &rt2x00dev->link.qual;
+	u8 vgc_level = qual->vgc_level_reg;
 
 	if (!test_bit(DEVICE_STATE_ENABLED_RADIO, &rt2x00dev->flags))
 		return;
@@ -389,6 +309,13 @@ void rt2x00link_reset_tuner(struct rt2x00_dev *rt2x00dev, bool antenna)
 	 */
 	rt2x00dev->link.count = 0;
 	memset(qual, 0, sizeof(*qual));
+
+	/*
+	 * Restore the VGC level as stored in the registers,
+	 * the driver can use this to determine if the register
+	 * must be updated during reset or not.
+	 */
+	qual->vgc_level_reg = vgc_level;
 
 	/*
 	 * Reset the link tuner.
@@ -420,7 +347,8 @@ static void rt2x00link_tuner(struct work_struct *work)
 	 * When the radio is shutting down we should
 	 * immediately cease all link tuning.
 	 */
-	if (!test_bit(DEVICE_STATE_ENABLED_RADIO, &rt2x00dev->flags))
+	if (!test_bit(DEVICE_STATE_ENABLED_RADIO, &rt2x00dev->flags) ||
+	    test_bit(DEVICE_STATE_SCANNING, &rt2x00dev->flags))
 		return;
 
 	/*
@@ -441,17 +369,12 @@ static void rt2x00link_tuner(struct work_struct *work)
 		qual->rssi = link->avg_rssi.avg;
 
 	/*
-	 * Only perform the link tuning when Link tuning
-	 * has been enabled (This could have been disabled from the EEPROM).
+	 * Check if link tuning is supported by the hardware, some hardware
+	 * do not support link tuning at all, while other devices can disable
+	 * the feature from the EEPROM.
 	 */
-	if (!test_bit(CONFIG_DISABLE_LINK_TUNING, &rt2x00dev->flags))
+	if (test_bit(CAPABILITY_LINK_TUNING, &rt2x00dev->cap_flags))
 		rt2x00dev->ops->lib->link_tuner(rt2x00dev, qual, link->count);
-
-	/*
-	 * Precalculate a portion of the link signal which is
-	 * in based on the tx/rx success/failure counters.
-	 */
-	rt2x00link_precalculate_signal(rt2x00dev);
 
 	/*
 	 * Send a signal to the led to update the led signal strength.
@@ -476,7 +399,81 @@ static void rt2x00link_tuner(struct work_struct *work)
 					     &link->work, LINK_TUNE_INTERVAL);
 }
 
+void rt2x00link_start_watchdog(struct rt2x00_dev *rt2x00dev)
+{
+	struct link *link = &rt2x00dev->link;
+
+	if (test_bit(DEVICE_STATE_PRESENT, &rt2x00dev->flags) &&
+	    rt2x00dev->ops->lib->watchdog)
+		ieee80211_queue_delayed_work(rt2x00dev->hw,
+					     &link->watchdog_work,
+					     WATCHDOG_INTERVAL);
+}
+
+void rt2x00link_stop_watchdog(struct rt2x00_dev *rt2x00dev)
+{
+	cancel_delayed_work_sync(&rt2x00dev->link.watchdog_work);
+}
+
+static void rt2x00link_watchdog(struct work_struct *work)
+{
+	struct rt2x00_dev *rt2x00dev =
+	    container_of(work, struct rt2x00_dev, link.watchdog_work.work);
+	struct link *link = &rt2x00dev->link;
+
+	/*
+	 * When the radio is shutting down we should
+	 * immediately cease the watchdog monitoring.
+	 */
+	if (!test_bit(DEVICE_STATE_ENABLED_RADIO, &rt2x00dev->flags))
+		return;
+
+	rt2x00dev->ops->lib->watchdog(rt2x00dev);
+
+	if (test_bit(DEVICE_STATE_PRESENT, &rt2x00dev->flags))
+		schedule_delayed_work(&link->watchdog_work, WATCHDOG_INTERVAL);
+}
+
+void rt2x00link_start_agc(struct rt2x00_dev *rt2x00dev)
+{
+	struct link *link = &rt2x00dev->link;
+
+	if (test_bit(DEVICE_STATE_PRESENT, &rt2x00dev->flags) &&
+	    rt2x00dev->ops->lib->gain_calibration)
+		ieee80211_queue_delayed_work(rt2x00dev->hw,
+					     &link->agc_work,
+					     AGC_INTERVAL);
+}
+
+void rt2x00link_stop_agc(struct rt2x00_dev *rt2x00dev)
+{
+	cancel_delayed_work_sync(&rt2x00dev->link.agc_work);
+}
+
+static void rt2x00link_agc(struct work_struct *work)
+{
+	struct rt2x00_dev *rt2x00dev =
+	    container_of(work, struct rt2x00_dev, link.agc_work.work);
+	struct link *link = &rt2x00dev->link;
+
+	/*
+	 * When the radio is shutting down we should
+	 * immediately cease the watchdog monitoring.
+	 */
+	if (!test_bit(DEVICE_STATE_ENABLED_RADIO, &rt2x00dev->flags))
+		return;
+
+	rt2x00dev->ops->lib->gain_calibration(rt2x00dev);
+
+	if (test_bit(DEVICE_STATE_PRESENT, &rt2x00dev->flags))
+		ieee80211_queue_delayed_work(rt2x00dev->hw,
+					     &link->agc_work,
+					     AGC_INTERVAL);
+}
+
 void rt2x00link_register(struct rt2x00_dev *rt2x00dev)
 {
+	INIT_DELAYED_WORK(&rt2x00dev->link.agc_work, rt2x00link_agc);
+	INIT_DELAYED_WORK(&rt2x00dev->link.watchdog_work, rt2x00link_watchdog);
 	INIT_DELAYED_WORK(&rt2x00dev->link.work, rt2x00link_tuner);
 }

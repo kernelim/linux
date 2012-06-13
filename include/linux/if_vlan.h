@@ -90,6 +90,11 @@ struct vlan_group {
 	struct rcu_head		rcu;
 };
 
+struct vlan_group* vlan_find_group(struct net_device *dev);
+struct vlan_group *vlan_group_alloc(struct net_device *real_dev);
+void vlan_group_free(struct vlan_group *grp);
+int vlan_group_prealloc_vid(struct vlan_group *vg, u16 vlan_id);
+
 static inline struct net_device *vlan_group_get_device(struct vlan_group *vg,
 						       u16 vlan_id)
 {
@@ -107,6 +112,11 @@ static inline void vlan_group_set_device(struct vlan_group *vg,
 		return;
 	array = vg->vlan_devices_arrays[vlan_id / VLAN_GROUP_ARRAY_PART_LEN];
 	array[vlan_id % VLAN_GROUP_ARRAY_PART_LEN] = dev;
+}
+
+static inline int is_vlan_dev(struct net_device *dev)
+{
+        return dev->priv_flags & IFF_802_1Q_VLAN;
 }
 
 #define vlan_tx_tag_present(__skb)	((__skb)->vlan_tci & VLAN_TAG_PRESENT)

@@ -1,6 +1,6 @@
 /* bnx2x_sp.h: Broadcom Everest network driver.
  *
- * Copyright 2011 Broadcom Corporation
+ * Copyright (c) 2011-2012 Broadcom Corporation
  *
  * Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -161,6 +161,10 @@ typedef int (*exe_q_validate)(struct bnx2x *bp,
 			      union bnx2x_qable_obj *o,
 			      struct bnx2x_exeq_elem *elem);
 
+typedef int (*exe_q_remove)(struct bnx2x *bp,
+			    union bnx2x_qable_obj *o,
+			    struct bnx2x_exeq_elem *elem);
+
 /**
  * @return positive is entry was optimized, 0 - if not, negative
  *         in case of an error.
@@ -203,10 +207,17 @@ struct bnx2x_exe_queue_obj {
 	 */
 	exe_q_validate		validate;
 
+	/**
+	 * Called before removing pending commands, cleaning allocated
+	 * resources (e.g., credits from validate)
+	 */
+	 exe_q_remove		remove;
 
 	/**
 	 * This will try to cancel the current pending commands list
 	 * considering the new command.
+	 *
+	 * Returns the number of optimized commands or a negative error code
 	 *
 	 * Must run under exe_queue->lock
 	 */
@@ -284,6 +295,19 @@ struct bnx2x_vlan_mac_obj {
 
 	/* RAMROD command to be used */
 	int				ramrod_cmd;
+
+	/* copy first n elements onto preallocated buffer
+	 *
+	 * @param n number of elements to get
+	 * @param buf buffer preallocated by caller into which elements
+	 *            will be copied. Note elements are 4-byte aligned
+	 *            so buffer size must be able to accomodate the
+	 *            aligned elements.
+	 *
+	 * @return number of copied bytes
+	 */
+	int (*get_n_elements)(struct bnx2x *bp, struct bnx2x_vlan_mac_obj *o,
+			      int n, u8 *buf);
 
 	/**
 	 * Checks if ADD-ramrod with the given params may be performed.
@@ -750,6 +774,7 @@ enum bnx2x_queue_cmd {
 enum {
 	BNX2X_Q_FLG_TPA,
 	BNX2X_Q_FLG_TPA_IPV6,
+	BNX2X_Q_FLG_TPA_GRO,
 	BNX2X_Q_FLG_STATS,
 	BNX2X_Q_FLG_ZERO_STATS,
 	BNX2X_Q_FLG_ACTIVE,

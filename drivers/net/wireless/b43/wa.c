@@ -5,7 +5,7 @@
   PHY workarounds.
 
   Copyright (c) 2005-2007 Stefano Brivio <stefano.brivio@polimi.it>
-  Copyright (c) 2005-2007 Michael Buesch <mbuesch@freenet.de>
+  Copyright (c) 2005-2007 Michael Buesch <m@bues.ch>
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -382,7 +382,7 @@ static void b43_wa_altagc(struct b43_wldev *dev)
 		b43_ofdmtab_write16(dev, B43_OFDMTAB_AGC1, 3, 25);
 	}
 
-	b43_phy_maskset(dev, B43_PHY_CCKSHIFTBITS_WA, (u16)~0xFF00, 0x5700);
+	b43_phy_maskset(dev, B43_PHY_CCKSHIFTBITS_WA, 0x00FF, 0x5700);
 	b43_phy_maskset(dev, B43_PHY_OFDM(0x1A), ~0x007F, 0x000F);
 	b43_phy_maskset(dev, B43_PHY_OFDM(0x1A), ~0x3F80, 0x2B80);
 	b43_phy_maskset(dev, B43_PHY_ANTWRSETT, 0xF0FF, 0x0300);
@@ -400,9 +400,9 @@ static void b43_wa_altagc(struct b43_wldev *dev)
 	b43_phy_maskset(dev, B43_PHY_OFDM(0x89), ~0x00FF, 0x0020);
 	b43_phy_maskset(dev, B43_PHY_OFDM(0x89), ~0x3F00, 0x0200);
 	b43_phy_maskset(dev, B43_PHY_OFDM(0x82), ~0x00FF, 0x002E);
-	b43_phy_maskset(dev, B43_PHY_OFDM(0x96), (u16)~0xFF00, 0x1A00);
+	b43_phy_maskset(dev, B43_PHY_OFDM(0x96), 0x00FF, 0x1A00);
 	b43_phy_maskset(dev, B43_PHY_OFDM(0x81), ~0x00FF, 0x0028);
-	b43_phy_maskset(dev, B43_PHY_OFDM(0x81), (u16)~0xFF00, 0x2C00);
+	b43_phy_maskset(dev, B43_PHY_OFDM(0x81), 0x00FF, 0x2C00);
 	if (phy->rev == 1) {
 		b43_phy_write(dev, B43_PHY_PEAK_COUNT, 0x092B);
 		b43_phy_maskset(dev, B43_PHY_OFDM(0x1B), ~0x001E, 0x0002);
@@ -412,7 +412,7 @@ static void b43_wa_altagc(struct b43_wldev *dev)
 		b43_phy_maskset(dev, B43_PHY_LPFGAINCTL, ~0x000F, 0x0004);
 		if (phy->rev >= 6) {
 			b43_phy_write(dev, B43_PHY_OFDM(0x22), 0x287A);
-			b43_phy_maskset(dev, B43_PHY_LPFGAINCTL, (u16)~0xF000, 0x3000);
+			b43_phy_maskset(dev, B43_PHY_LPFGAINCTL, 0x0FFF, 0x3000);
 		}
 	}
 	b43_phy_maskset(dev, B43_PHY_DIVSRCHIDX, 0x8080, 0x7874);
@@ -458,17 +458,15 @@ static void b43_wa_rssi_adc(struct b43_wldev *dev)
 
 static void b43_wa_boards_a(struct b43_wldev *dev)
 {
-	struct ssb_bus *bus = dev->dev->bus;
-
-	if (bus->boardinfo.vendor == SSB_BOARDVENDOR_BCM &&
-	    bus->boardinfo.type == SSB_BOARD_BU4306 &&
-	    bus->boardinfo.rev < 0x30) {
+	if (dev->dev->board_vendor == SSB_BOARDVENDOR_BCM &&
+	    dev->dev->board_type == SSB_BOARD_BU4306 &&
+	    dev->dev->board_rev < 0x30) {
 		b43_phy_write(dev, 0x0010, 0xE000);
 		b43_phy_write(dev, 0x0013, 0x0140);
 		b43_phy_write(dev, 0x0014, 0x0280);
 	} else {
-		if (bus->boardinfo.type == SSB_BOARD_MP4318 &&
-		    bus->boardinfo.rev < 0x20) {
+		if (dev->dev->board_type == SSB_BOARD_MP4318 &&
+		    dev->dev->board_rev < 0x20) {
 			b43_phy_write(dev, 0x0013, 0x0210);
 			b43_phy_write(dev, 0x0014, 0x0840);
 		} else {
@@ -486,19 +484,19 @@ static void b43_wa_boards_a(struct b43_wldev *dev)
 
 static void b43_wa_boards_g(struct b43_wldev *dev)
 {
-	struct ssb_bus *bus = dev->dev->bus;
+	struct ssb_sprom *sprom = dev->dev->bus_sprom;
 	struct b43_phy *phy = &dev->phy;
 
-	if (bus->boardinfo.vendor != SSB_BOARDVENDOR_BCM ||
-	    bus->boardinfo.type != SSB_BOARD_BU4306 ||
-	    bus->boardinfo.rev != 0x17) {
+	if (dev->dev->board_vendor != SSB_BOARDVENDOR_BCM ||
+	    dev->dev->board_type != SSB_BOARD_BU4306 ||
+	    dev->dev->board_rev != 0x17) {
 		if (phy->rev < 2) {
 			b43_ofdmtab_write16(dev, B43_OFDMTAB_GAINX_R1, 1, 0x0002);
 			b43_ofdmtab_write16(dev, B43_OFDMTAB_GAINX_R1, 2, 0x0001);
 		} else {
 			b43_ofdmtab_write16(dev, B43_OFDMTAB_GAINX, 1, 0x0002);
 			b43_ofdmtab_write16(dev, B43_OFDMTAB_GAINX, 2, 0x0001);
-			if ((bus->sprom.boardflags_lo & B43_BFL_EXTLNA) &&
+			if ((sprom->boardflags_lo & B43_BFL_EXTLNA) &&
 			    (phy->rev >= 7)) {
 				b43_phy_mask(dev, B43_PHY_EXTG(0x11), 0xF7FF);
 				b43_ofdmtab_write16(dev, B43_OFDMTAB_GAINX, 0x0020, 0x0001);
@@ -510,7 +508,7 @@ static void b43_wa_boards_g(struct b43_wldev *dev)
 			}
 		}
 	}
-	if (bus->sprom.boardflags_lo & B43_BFL_FEM) {
+	if (sprom->boardflags_lo & B43_BFL_FEM) {
 		b43_phy_write(dev, B43_PHY_GTABCTL, 0x3120);
 		b43_phy_write(dev, B43_PHY_GTABDATA, 0xC480);
 	}

@@ -212,7 +212,6 @@ static ssize_t bonding_store_slaves(struct device *d,
 	char command[IFNAMSIZ + 1] = { 0, };
 	char *ifname;
 	int i, res, found, ret = count;
-	u32 original_mtu;
 	struct slave *slave;
 	struct net_device *dev = NULL;
 	struct bonding *bond = to_bond(d);
@@ -273,25 +272,7 @@ static ssize_t bonding_store_slaves(struct device *d,
 		pr_info(DRV_NAME ": %s: Adding slave %s.\n",
 			bond->dev->name, ifname);
 
-		/* If this is the first slave, then we need to set
-		   the master's hardware address to be the same as the
-		   slave's. */
-		if (is_zero_ether_addr(bond->dev->dev_addr))
-			memcpy(bond->dev->dev_addr, dev->dev_addr,
-			       dev->addr_len);
-
-		/* Set the slave's MTU to match the bond */
-		original_mtu = dev->mtu;
-		res = dev_set_mtu(dev, bond->dev->mtu);
-		if (res) {
-			ret = res;
-			goto out;
-		}
-
 		res = bond_enslave(bond->dev, dev);
-		bond_for_each_slave(bond, slave, i)
-			if (strnicmp(slave->dev->name, ifname, IFNAMSIZ) == 0)
-				slave->original_mtu = original_mtu;
 		if (res)
 			ret = res;
 
@@ -300,23 +281,17 @@ static ssize_t bonding_store_slaves(struct device *d,
 
 	if (command[0] == '-') {
 		dev = NULL;
-		original_mtu = 0;
 		bond_for_each_slave(bond, slave, i)
 			if (strnicmp(slave->dev->name, ifname, IFNAMSIZ) == 0) {
 				dev = slave->dev;
-				original_mtu = slave->original_mtu;
 				break;
 			}
 		if (dev) {
 			pr_info(DRV_NAME ": %s: Removing slave %s\n",
 				bond->dev->name, dev->name);
-				res = bond_release(bond->dev, dev);
-			if (res) {
+			res = bond_release(bond->dev, dev);
+			if (res)
 				ret = res;
-				goto out;
-			}
-			/* set the slave MTU to the default */
-			dev_set_mtu(dev, original_mtu);
 		} else {
 			pr_err(DRV_NAME ": unable to remove non-existent"
 			       " slave %s for bond %s.\n",
@@ -362,6 +337,13 @@ static ssize_t bonding_store_mode(struct device *d,
 	if (bond->dev->flags & IFF_UP) {
 		pr_err(DRV_NAME ": unable to update mode of %s"
 		       " because interface is up.\n", bond->dev->name);
+		ret = -EPERM;
+		goto out;
+	}
+
+	if (bond->slave_cnt > 0) {
+		pr_err("unable to update mode of %s because it has slaves.\n",
+			bond->dev->name);
 		ret = -EPERM;
 		goto out;
 	}

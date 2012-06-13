@@ -446,7 +446,8 @@ static void wacom_intuos_general(struct wacom_wac *wacom, void *wcombo)
 	if ((data[1] & 0xb8) == 0xa0) {
 		t = (data[6] << 2) | ((data[7] >> 6) & 3);
 		if ((wacom->features->type >= INTUOS4S && wacom->features->type <= INTUOS4L) ||
-			wacom->features->type == WACOM_21UX2) {
+			wacom->features->type == WACOM_21UX2 ||
+			wacom->features->type == WACOM_24HD) {
 			t = (t << 1) | (data[1] & 1);
 		}
 		wacom_report_abs(wcombo, ABS_PRESSURE, t);
@@ -509,6 +510,56 @@ static int wacom_intuos_irq(struct wacom_wac *wacom, void *wcombo)
 				wacom_report_key(wcombo, BTN_8, (data[3] & 0x80));
 			}
 			if (data[1] | (data[2] & 0x01) | data[3]) {
+				wacom_report_key(wcombo, wacom->tool[1], 1);
+				wacom_report_abs(wcombo, ABS_MISC, PAD_DEVICE_ID);
+			} else {
+				wacom_report_key(wcombo, wacom->tool[1], 0);
+				wacom_report_abs(wcombo, ABS_MISC, 0);
+			}
+		} else if (wacom->features->type == WACOM_24HD) {
+			wacom_report_key(wcombo, BTN_0, (data[6] & 0x01));
+			wacom_report_key(wcombo, BTN_1, (data[6] & 0x02));
+			wacom_report_key(wcombo, BTN_2, (data[6] & 0x04));
+			wacom_report_key(wcombo, BTN_3, (data[6] & 0x08));
+			wacom_report_key(wcombo, BTN_4, (data[6] & 0x10));
+			wacom_report_key(wcombo, BTN_5, (data[6] & 0x20));
+			wacom_report_key(wcombo, BTN_6, (data[6] & 0x40));
+			wacom_report_key(wcombo, BTN_7, (data[6] & 0x80));
+			wacom_report_key(wcombo, BTN_8, (data[8] & 0x01));
+			wacom_report_key(wcombo, BTN_9, (data[8] & 0x02));
+			wacom_report_key(wcombo, BTN_A, (data[8] & 0x04));
+			wacom_report_key(wcombo, BTN_B, (data[8] & 0x08));
+			wacom_report_key(wcombo, BTN_C, (data[8] & 0x10));
+			wacom_report_key(wcombo, BTN_X, (data[8] & 0x20));
+			wacom_report_key(wcombo, BTN_Y, (data[8] & 0x40));
+			wacom_report_key(wcombo, BTN_Z, (data[8] & 0x80));
+
+			/*
+			 * Three "buttons" are available on the 24HD which are
+			 * physically implemented as a touchstrip. Each button
+			 * is approximately 3 bits wide with a 2 bit spacing.
+			 * The raw touchstrip bits are stored at:
+			 *    ((data[3] & 0x1f) << 8) | data[4])
+			 */
+			wacom_report_key(wcombo, KEY_PROG1, data[4] & 0x07);
+			wacom_report_key(wcombo, KEY_PROG2, data[4] & 0xE0);
+			wacom_report_key(wcombo, KEY_PROG3, data[3] & 0x1C);
+
+			if (data[1] & 0x80) {
+				wacom_report_abs(wcombo, ABS_WHEEL, (data[1] & 0x7f));
+			} else {
+				/* Out of proximity, clear wheel value. */
+				wacom_report_abs(wcombo, ABS_WHEEL, 0);
+			}
+
+			if (data[2] & 0x80) {
+				wacom_report_abs(wcombo, ABS_THROTTLE, (data[2] & 0x7f));
+			} else {
+				/* Out of proximity, clear second wheel value. */
+				wacom_report_abs(wcombo, ABS_THROTTLE, 0);
+			}
+
+			if (data[1] | data[2] | (data[3] & 0x1f) | data[4] | data[6] | data[8]) {
 				wacom_report_key(wcombo, wacom->tool[1], 1);
 				wacom_report_abs(wcombo, ABS_MISC, PAD_DEVICE_ID);
 			} else {
@@ -817,6 +868,7 @@ int wacom_wac_irq(struct wacom_wac *wacom_wac, void *wcombo)
 		case CINTIQ:
 		case WACOM_BEE:
 		case WACOM_21UX2:
+		case WACOM_24HD:
 			return wacom_intuos_irq(wacom_wac, wcombo);
 
 		case TABLETPC:
@@ -838,6 +890,9 @@ void wacom_init_input_dev(struct input_dev *input_dev, struct wacom_wac *wacom_w
 			/* fall through */
 		case GRAPHIRE:
 			input_dev_g(input_dev, wacom_wac);
+			break;
+		case WACOM_24HD:
+			input_dev_24hd(input_dev, wacom_wac);
 			break;
 		case WACOM_21UX2:
 			input_dev_c21ux2(input_dev, wacom_wac);
@@ -944,6 +999,7 @@ static struct wacom_features wacom_features[] = {
 	{ "Wacom Intuos2 6x8",   10, 20320, 16240, 1023, 31, INTUOS },
 	{ "Wacom DTU2231",        8, 47864, 27011,  511,  0, DTU },
 	{ "Wacom DTU1631",        8, 34623, 19553,  511,  0, DTU },
+	{ "Wacom Cintiq 24HD",   10,104480, 65600, 2047, 63, WACOM_24HD },
 	{ }
 };
 
@@ -1021,6 +1077,7 @@ static struct usb_device_id wacom_ids[] = {
 			      USB_INTERFACE_SUBCLASS_BOOT,
 			      USB_INTERFACE_PROTOCOL_MOUSE) },
 	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0xF0) },
+	{ USB_DEVICE(USB_VENDOR_ID_WACOM, 0xF4) },
 	{ }
 };
 

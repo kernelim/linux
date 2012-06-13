@@ -437,7 +437,7 @@ restart:
  *	mounted on the device given. %NULL is returned if no match is found.
  */
 
-struct super_block * get_super(struct block_device *bdev)
+struct super_block *get_super(struct block_device *bdev)
 {
 	struct super_block *sb;
 
@@ -451,13 +451,14 @@ rescan:
 			sb->s_count++;
 			spin_unlock(&sb_lock);
 			down_read(&sb->s_umount);
+			/* still alive? */
 			if (sb->s_root)
 				return sb;
 			up_read(&sb->s_umount);
-			/* restart only when sb is no longer on the list */
+			/* nope, got unmounted */
 			spin_lock(&sb_lock);
-			if (__put_super_and_need_restart(sb))
-				goto rescan;
+			__put_super(sb);
+			goto rescan;
 		}
 	}
 	spin_unlock(&sb_lock);
@@ -465,6 +466,28 @@ rescan:
 }
 
 EXPORT_SYMBOL(get_super);
+
+/**
+ *	get_super_thawed - get thawed superblock of a device
+ *	@bdev: device to get the superblock for
+ *
+ *	Scans the superblock list and finds the superblock of the file system
+ *	mounted on the device. The superblock is returned once it is thawed
+ *	(or immediately if it was not frozen). %NULL is returned if no match
+ *	is found.
+ */
+
+struct super_block *get_super_thawed(struct block_device *bdev)
+{
+	while (1) {
+		struct super_block *s = get_super(bdev);
+		if (!s || s->s_frozen == SB_UNFROZEN)
+			return s;
+		up_read(&s->s_umount);
+		vfs_check_frozen(s, SB_FREEZE_WRITE);
+		put_super(s);
+	}
+}
 
 /**
  * get_active_super - get an active reference to the superblock of a device
@@ -508,7 +531,7 @@ struct super_block *get_active_super(struct block_device *bdev)
 	return NULL;
 }
  
-struct super_block * user_get_super(dev_t dev)
+struct super_block *user_get_super(dev_t dev)
 {
 	struct super_block *sb;
 
@@ -519,13 +542,14 @@ rescan:
 			sb->s_count++;
 			spin_unlock(&sb_lock);
 			down_read(&sb->s_umount);
+			/* still alive? */
 			if (sb->s_root)
 				return sb;
 			up_read(&sb->s_umount);
-			/* restart only when sb is no longer on the list */
+			/* nope, got unmounted */
 			spin_lock(&sb_lock);
-			if (__put_super_and_need_restart(sb))
-				goto rescan;
+			__put_super(sb);
+			goto rescan;
 		}
 	}
 	spin_unlock(&sb_lock);

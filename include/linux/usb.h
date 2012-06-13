@@ -307,6 +307,16 @@ struct usb_host_config {
 	int extralen;
 };
 
+/* USB2.0 and USB3.0 device BOS descriptor set */
+struct usb_host_bos {
+	struct usb_bos_descriptor	*desc;
+
+	/* wireless cap descriptor is handled by wusb */
+	struct usb_ext_cap_descriptor	*ext_cap;
+	struct usb_ss_cap_descriptor	*ss_cap;
+	struct usb_ss_container_id_descriptor	*ss_id;
+};
+
 int __usb_get_extra_descriptor(char *buffer, unsigned size,
 	unsigned char type, void **ptr);
 #define usb_get_extra_descriptor(ifpoint, type, ptr) \
@@ -391,6 +401,7 @@ struct usb_tt;
  * @ep0: endpoint 0 data (default control pipe)
  * @dev: generic device interface
  * @descriptor: USB device descriptor
+ * @bos: USB device BOS descriptor set
  * @config: all of the device's configs
  * @actconfig: the active configuration
  * @ep_in: array of IN endpoints
@@ -410,6 +421,9 @@ struct usb_tt;
  *	FIXME -- complete doc
  * @authenticated: Crypto authentication passed
  * @wusb: device is Wireless USB
+ * @lpm_capable: device supports LPM
+ * @usb2_hw_lpm_capable: device can perform USB2 hardware LPM
+ * @usb2_hw_lpm_enabled: USB2 hardware LPM enabled
  * @string_langid: language ID for strings
  * @product: iProduct string, if present (static)
  * @manufacturer: iManufacturer string, if present (static)
@@ -482,6 +496,12 @@ struct usb_device {
 	unsigned authorized:1;
  	unsigned authenticated:1;
 	unsigned wusb:1;
+#ifndef __GENKSYMS__
+	unsigned bos_kabi_bit:1;
+	unsigned lpm_capable:1;
+	unsigned usb2_hw_lpm_capable:1;
+	unsigned usb2_hw_lpm_enabled:1;
+#endif
 	int string_langid;
 
 	/* static strings from the device */
@@ -524,6 +544,9 @@ struct usb_device {
 #endif
 	struct wusb_dev *wusb_dev;
 	int slot_id;
+#ifndef __GENKSYMS__
+	struct usb_host_bos *bos;
+#endif
 };
 #define	to_usb_device(d) container_of(d, struct usb_device, dev)
 
@@ -1571,6 +1594,14 @@ static inline unsigned int __create_pipe(struct usb_device *dev,
 	((PIPE_INTERRUPT << 30) | __create_pipe(dev, endpoint))
 #define usb_rcvintpipe(dev,endpoint)	\
 	((PIPE_INTERRUPT << 30) | __create_pipe(dev, endpoint) | USB_DIR_IN)
+
+static inline struct usb_host_endpoint *
+usb_pipe_endpoint(struct usb_device *dev, unsigned int pipe)
+{
+	struct usb_host_endpoint **eps;
+	eps = usb_pipein(pipe) ? dev->ep_in : dev->ep_out;
+	return eps[usb_pipeendpoint(pipe)];
+}
 
 /*-------------------------------------------------------------------------*/
 

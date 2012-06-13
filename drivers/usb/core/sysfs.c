@@ -115,7 +115,7 @@ show_speed(struct device *dev, struct device_attribute *attr, char *buf)
 	case USB_SPEED_HIGH:
 		speed = "480";
 		break;
-	case USB_SPEED_VARIABLE:
+	case USB_SPEED_WIRELESS:
 		speed = "480";
 		break;
 	case USB_SPEED_SUPER:
@@ -397,11 +397,53 @@ set_level(struct device *dev, struct device_attribute *attr,
 
 static DEVICE_ATTR(level, S_IRUGO | S_IWUSR, show_level, set_level);
 
+static ssize_t
+show_usb2_hardware_lpm(struct device *dev, struct device_attribute *attr,
+				char *buf)
+{
+	struct usb_device *udev = to_usb_device(dev);
+	const char *p;
+
+	if (udev->usb2_hw_lpm_enabled == 1)
+		p = "enabled";
+	else
+		p = "disabled";
+
+	return sprintf(buf, "%s\n", p);
+}
+
+static ssize_t
+set_usb2_hardware_lpm(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	struct usb_device *udev = to_usb_device(dev);
+	bool value;
+	int ret;
+
+	usb_lock_device(udev);
+
+	ret = strtobool(buf, &value);
+
+	if (!ret)
+		ret = usb_set_usb2_hardware_lpm(udev, value);
+
+	usb_unlock_device(udev);
+
+	if (!ret)
+		return count;
+
+	return ret;
+}
+
+static DEVICE_ATTR(usb2_hardware_lpm, S_IRUGO | S_IWUSR, show_usb2_hardware_lpm,
+			set_usb2_hardware_lpm);
+
 static int add_power_attributes(struct device *dev)
 {
 	int rc = 0;
 
 	if (is_usb_device(dev)) {
+		struct usb_device *udev = to_usb_device(dev);
 		rc = sysfs_add_file_to_group(&dev->kobj,
 				&dev_attr_autosuspend.attr,
 				power_group);
@@ -417,12 +459,20 @@ static int add_power_attributes(struct device *dev)
 			rc = sysfs_add_file_to_group(&dev->kobj,
 					&dev_attr_active_duration.attr,
 					power_group);
+		if (udev->usb2_hw_lpm_capable == 1)
+			rc = sysfs_add_file_to_group(&dev->kobj,
+					&dev_attr_usb2_hardware_lpm.attr,
+					power_group);
 	}
+
 	return rc;
 }
 
 static void remove_power_attributes(struct device *dev)
 {
+	sysfs_remove_file_from_group(&dev->kobj,
+			&dev_attr_usb2_hardware_lpm.attr,
+			power_group);
 	sysfs_remove_file_from_group(&dev->kobj,
 			&dev_attr_active_duration.attr,
 			power_group);

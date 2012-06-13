@@ -176,6 +176,13 @@ static int setup_affinity(unsigned int irq, struct irq_desc *desc)
 	}
 
 	cpumask_and(desc->affinity, cpu_online_mask, irq_default_affinity);
+	if (desc->node != NUMA_NO_NODE) {
+		const struct cpumask *nodemask = cpumask_of_node(desc->node);
+		/* make sure at least one of the cpus in nodemask is online */
+		if (cpumask_intersects(desc->affinity, nodemask))
+				cpumask_and(desc->affinity, desc->affinity,
+					    nodemask);
+	}
 set_affinity:
 	desc->chip->set_affinity(irq, desc->affinity);
 

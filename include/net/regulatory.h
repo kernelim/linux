@@ -3,11 +3,19 @@
 /*
  * regulatory support structures
  *
- * Copyright 2008-2009	Luis R. Rodriguez <lrodriguez@atheros.com>
+ * Copyright 2008-2009	Luis R. Rodriguez <mcgrof@qca.qualcomm.com>
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
+ * Permission to use, copy, modify, and/or distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 
@@ -39,9 +47,16 @@ enum environment_cap {
  * 	00 - World regulatory domain
  * 	99 - built by driver but a specific alpha2 cannot be determined
  * 	98 - result of an intersection between two regulatory domains
+ *	97 - regulatory domain has not yet been configured
  * @intersect: indicates whether the wireless core should intersect
  * 	the requested regulatory domain with the presently set regulatory
  * 	domain.
+ * @processed: indicates whether or not this requests has already been
+ *	processed. When the last request is processed it means that the
+ *	currently regulatory domain set on cfg80211 is updated from
+ *	CRDA and can be used by other regulatory requests. When a
+ *	the last request is not yet processed we must yield until it
+ *	is processed before processing any new requests.
  * @country_ie_checksum: checksum of the last processed and accepted
  * 	country IE
  * @country_ie_env: lets us know if the AP is telling us we are outdoor,
@@ -53,7 +68,7 @@ struct regulatory_request {
 	enum nl80211_reg_initiator initiator;
 	char alpha2[2];
 	bool intersect;
-	u32 country_ie_checksum;
+	bool processed;
 	enum environment_cap country_ie_env;
 	struct list_head list;
 };

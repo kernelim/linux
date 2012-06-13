@@ -2,6 +2,7 @@
 #include <linux/spinlock.h>
 #include <linux/blkdev.h>
 #include <linux/hdreg.h>
+#include <linux/mutex.h>
 #include <linux/virtio.h>
 #include <linux/virtio_blk.h>
 #include <linux/scatterlist.h>
@@ -33,6 +34,12 @@ struct virtio_blk
 
 	/* Process context for config space updates */
 	struct work_struct config_work;
+
+	/* Lock for config space updates */
+	struct mutex config_lock;
+
+	/* enable config space updates */
+	bool config_enable;
 
 	/* What host tells us, plus 2 for header & tailer. */
 	unsigned int sg_elems;
@@ -289,6 +296,10 @@ static void virtblk_config_changed_work(struct work_struct *work)
 	char cap_str_2[10], cap_str_10[10];
 	u64 capacity, size;
 
+	mutex_lock(&vblk->config_lock);
+	if (!vblk->config_enable)
+		goto done;
+
 	/* Host must always specify the capacity. */
 	vdev->config->get(vdev, offsetof(struct virtio_blk_config, capacity),
 			  &capacity, sizeof(capacity));
@@ -311,6 +322,8 @@ static void virtblk_config_changed_work(struct work_struct *work)
 		  cap_str_10, cap_str_2);
 
 	set_capacity(vblk->disk, capacity);
+done:
+	mutex_unlock(&vblk->config_lock);
 }
 
 static void virtblk_config_changed(struct virtio_device *vdev)
@@ -340,6 +353,18 @@ static ssize_t virtblk_serial_show(struct device *dev,
 	return err;
 }
 DEVICE_ATTR(serial, S_IRUGO, virtblk_serial_show, NULL);
+
+static int init_vq(struct virtio_blk *vblk)
+{
+	int err = 0;
+
+	/* We expect one virtqueue, for output. */
+	vblk->vq = virtio_find_single_vq(vblk->vdev, blk_done, "requests");
+	if (IS_ERR(vblk->vq))
+		err = PTR_ERR(vblk->vq);
+
+	return err;
+}
 
 static int __devinit virtblk_probe(struct virtio_device *vdev)
 {
@@ -378,14 +403,13 @@ static int __devinit virtblk_probe(struct virtio_device *vdev)
 	vblk->vdev = vdev;
 	vblk->sg_elems = sg_elems;
 	sg_init_table(vblk->sg, vblk->sg_elems);
+	mutex_init(&vblk->config_lock);
 	INIT_WORK(&vblk->config_work, virtblk_config_changed_work);
+	vblk->config_enable = true;
 
-	/* We expect one virtqueue, for output. */
-	vblk->vq = virtio_find_single_vq(vdev, blk_done, "requests");
-	if (IS_ERR(vblk->vq)) {
-		err = PTR_ERR(vblk->vq);
+	err = init_vq(vblk);
+	if (err)
 		goto out_free_vblk;
-	}
 
 	vblk->pool = mempool_create_kmalloc_pool(1,sizeof(struct virtblk_req));
 	if (!vblk->pool) {
@@ -532,13 +556,18 @@ static void __devexit virtblk_remove(struct virtio_device *vdev)
 	struct virtio_blk *vblk = vdev->priv;
 	int index = vblk->index;
 
-	flush_work(&vblk->config_work);
+	/* Prevent config work handler from accessing the device. */
+	mutex_lock(&vblk->config_lock);
+	vblk->config_enable = false;
+	mutex_unlock(&vblk->config_lock);
 
 	/* Nothing should be pending. */
 	BUG_ON(!list_empty(&vblk->reqs));
 
 	/* Stop all the virtqueues. */
 	vdev->config->reset(vdev);
+
+	flush_work(&vblk->config_work);
 
 	del_gendisk(vblk->disk);
 	blk_cleanup_queue(vblk->disk->queue);
@@ -548,6 +577,46 @@ static void __devexit virtblk_remove(struct virtio_device *vdev)
 	kfree(vblk);
 	ida_simple_remove(&vd_index_ida, index);
 }
+
+#ifdef CONFIG_PM
+static int virtblk_freeze(struct virtio_device *vdev)
+{
+	struct virtio_blk *vblk = vdev->priv;
+
+	/* Ensure we don't receive any more interrupts */
+	vdev->config->reset(vdev);
+
+	/* Prevent config work handler from accessing the device. */
+	mutex_lock(&vblk->config_lock);
+	vblk->config_enable = false;
+	mutex_unlock(&vblk->config_lock);
+
+	flush_work(&vblk->config_work);
+
+	spin_lock_irq(vblk->disk->queue->queue_lock);
+	blk_stop_queue(vblk->disk->queue);
+	spin_unlock_irq(vblk->disk->queue->queue_lock);
+	blk_sync_queue(vblk->disk->queue);
+
+	vdev->config->del_vqs(vdev);
+	return 0;
+}
+
+static int virtblk_restore(struct virtio_device *vdev)
+{
+	struct virtio_blk *vblk = vdev->priv;
+	int ret;
+
+	vblk->config_enable = true;
+	ret = init_vq(vdev->priv);
+	if (!ret) {
+		spin_lock_irq(vblk->disk->queue->queue_lock);
+		blk_start_queue(vblk->disk->queue);
+		spin_unlock_irq(vblk->disk->queue->queue_lock);
+	}
+	return ret;
+}
+#endif
 
 static struct virtio_device_id id_table[] = {
 	{ VIRTIO_ID_BLOCK, VIRTIO_DEV_ANY_ID },
@@ -574,6 +643,10 @@ static struct virtio_driver __refdata virtio_blk = {
 	.probe			= virtblk_probe,
 	.remove			= __devexit_p(virtblk_remove),
 	.config_changed		= virtblk_config_changed,
+#ifdef CONFIG_PM
+	.freeze			= virtblk_freeze,
+	.restore		= virtblk_restore,
+#endif
 };
 
 static int __init init(void)

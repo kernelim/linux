@@ -91,6 +91,11 @@ static int max_lun = MPTSAS_MAX_LUN;
 module_param(max_lun, int, 0);
 MODULE_PARM_DESC(max_lun, " max lun, default=16895 ");
 
+static int mpt_loadtime_max_sectors = 8192;
+module_param(mpt_loadtime_max_sectors, int, 0);
+MODULE_PARM_DESC(mpt_loadtime_max_sectors,
+		" Maximum sector define for Host Bus Adaptor.Range 64 to 8192 default=8192");
+
 static u8	mptsasDoneCtx = MPT_MAX_PROTOCOL_DRIVERS;
 static u8	mptsasTaskCtx = MPT_MAX_PROTOCOL_DRIVERS;
 static u8	mptsasInternalCtx = MPT_MAX_PROTOCOL_DRIVERS; /* Used only for internal commands */
@@ -284,10 +289,11 @@ mptsas_add_fw_event(MPT_ADAPTER *ioc, struct fw_event_work *fw_event,
 	spin_lock_irqsave(&ioc->fw_event_lock, flags);
 	list_add_tail(&fw_event->list, &ioc->fw_event_list);
 	INIT_DELAYED_WORK(&fw_event->work, mptsas_firmware_event_work);
-	devtprintk(ioc, printk(MYIOC_s_DEBUG_FMT "%s: add (fw_event=0x%p)\n",
-	    ioc->name, __func__, fw_event));
-	queue_delayed_work(ioc->fw_event_q, &fw_event->work,
-	    delay);
+	devtprintk(ioc, printk(MYIOC_s_DEBUG_FMT "%s: add (fw_event=0x%p)"
+		"on cpuid %d\n", ioc->name, __func__,
+		fw_event, smp_processor_id()));
+	queue_delayed_work_on(smp_processor_id(), ioc->fw_event_q,
+	    &fw_event->work, delay);
 	spin_unlock_irqrestore(&ioc->fw_event_lock, flags);
 }
 
@@ -299,10 +305,11 @@ mptsas_requeue_fw_event(MPT_ADAPTER *ioc, struct fw_event_work *fw_event,
 	unsigned long flags;
 	spin_lock_irqsave(&ioc->fw_event_lock, flags);
 	devtprintk(ioc, printk(MYIOC_s_DEBUG_FMT "%s: reschedule task "
-	    "(fw_event=0x%p)\n", ioc->name, __func__, fw_event));
+	    "(fw_event=0x%p)on cpuid %d\n", ioc->name, __func__,
+		fw_event, smp_processor_id()));
 	fw_event->retries++;
-	queue_delayed_work(ioc->fw_event_q, &fw_event->work,
-	    msecs_to_jiffies(delay));
+	queue_delayed_work_on(smp_processor_id(), ioc->fw_event_q,
+	    &fw_event->work, msecs_to_jiffies(delay));
 	spin_unlock_irqrestore(&ioc->fw_event_lock, flags);
 }
 
@@ -1942,6 +1949,15 @@ static enum blk_eh_timer_return mptsas_eh_timed_out(struct scsi_cmnd *sc)
 		goto done;
 	}
 
+	/* In case if IOC is in reset from internal context.
+	*  Do not execute EEH for the same IOC. SML should to reset timer.
+	*/
+	if (ioc->ioc_reset_in_progress) {
+		dtmprintk(ioc, printk(MYIOC_s_WARN_FMT ": %s: ioc is in reset,"
+		    "SML need to reset the timer (sc=%p)\n",
+		    ioc->name, __func__, sc));
+		rc = BLK_EH_RESET_TIMER;
+	}
 	vdevice = sc->device->hostdata;
 	if (vdevice && vdevice->vtarget && (vdevice->vtarget->inDMD
 		|| vdevice->vtarget->deleted)) {
@@ -5008,7 +5024,6 @@ mptsas_event_process(MPT_ADAPTER *ioc, EventNotificationReply_t *reply)
 			(ioc_stat & MPI_IOCSTATUS_FLAG_LOG_INFO_AVAILABLE)) {
 			VirtTarget *vtarget = NULL;
 			u8		id, channel;
-			u32	 log_info = le32_to_cpu(reply->IOCLogInfo);
 
 			id = sas_event_data->TargetID;
 			channel = sas_event_data->Bus;
@@ -5017,7 +5032,8 @@ mptsas_event_process(MPT_ADAPTER *ioc, EventNotificationReply_t *reply)
 			if(vtarget) {
 				printk("LSI debug LogInfo (0x%x) available for "
 				   "INTERNAL_DEVICE_RESET"
-				   "fw_id %d fw_channel %d\n", log_info,
+				   "fw_id %d fw_channel %d\n",
+					le32_to_cpu(reply->IOCLogInfo),
 				   id, channel);
 				if (vtarget->raidVolume)
 					printk(KERN_INFO
@@ -5232,6 +5248,21 @@ mptsas_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		sh->sg_tablesize = numSGE;
 	}
 
+	if (mpt_loadtime_max_sectors) {
+		if (mpt_loadtime_max_sectors < 64 ||
+			mpt_loadtime_max_sectors > 8192) {
+			printk(MYIOC_s_INFO_FMT "Invalid value passed for"
+				"mpt_loadtime_max_sectors %d."
+				"Range from 64 to 8192\n", ioc->name,
+				mpt_loadtime_max_sectors);
+		}
+		mpt_loadtime_max_sectors &=  0xFFFFFFFE;
+		dprintk(ioc, printk(MYIOC_s_DEBUG_FMT
+			"Resetting max sector to %d from %d\n",
+		  ioc->name, mpt_loadtime_max_sectors, sh->max_sectors));
+		sh->max_sectors = mpt_loadtime_max_sectors;
+	}
+
 	hd = shost_priv(sh);
 	hd->ioc = ioc;
 
@@ -5335,6 +5366,8 @@ static struct pci_device_id mptsas_pci_table[] = {
 	{ PCI_VENDOR_ID_LSI_LOGIC, MPI_MANUFACTPAGE_DEVID_SAS1068E,
 		PCI_ANY_ID, PCI_ANY_ID },
 	{ PCI_VENDOR_ID_LSI_LOGIC, MPI_MANUFACTPAGE_DEVID_SAS1078,
+		PCI_ANY_ID, PCI_ANY_ID },
+	{ PCI_VENDOR_ID_LSI_LOGIC, MPI_MANUFACTPAGE_DEVID_SAS1068_820XELP,
 		PCI_ANY_ID, PCI_ANY_ID },
 	{0}	/* Terminating entry */
 };

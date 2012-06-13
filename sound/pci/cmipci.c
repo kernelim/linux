@@ -27,7 +27,7 @@
 #include <linux/pci.h>
 #include <linux/slab.h>
 #include <linux/gameport.h>
-#include <linux/moduleparam.h>
+#include <linux/module.h>
 #include <linux/mutex.h>
 #include <sound/core.h>
 #include <sound/info.h>
@@ -54,10 +54,10 @@ MODULE_SUPPORTED_DEVICE("{{C-Media,CMI8738},"
 
 static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	/* Index 0-MAX */
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;	/* ID for this card */
-static int enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP;	/* Enable switches */
+static bool enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE_PNP;	/* Enable switches */
 static long mpu_port[SNDRV_CARDS];
 static long fm_port[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS-1)]=1};
-static int soft_ac3[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS-1)]=1};
+static bool soft_ac3[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS-1)]=1};
 #ifdef SUPPORT_JOYSTICK
 static int joystick_port[SNDRV_CARDS];
 #endif
@@ -73,7 +73,7 @@ MODULE_PARM_DESC(mpu_port, "MPU-401 port.");
 module_param_array(fm_port, long, NULL, 0444);
 MODULE_PARM_DESC(fm_port, "FM port.");
 module_param_array(soft_ac3, bool, NULL, 0444);
-MODULE_PARM_DESC(soft_ac3, "Sofware-conversion of raw SPDIF packets (model 033 only).");
+MODULE_PARM_DESC(soft_ac3, "Software-conversion of raw SPDIF packets (model 033 only).");
 #ifdef SUPPORT_JOYSTICK
 module_param_array(joystick_port, int, NULL, 0444);
 MODULE_PARM_DESC(joystick_port, "Joystick port address.");
@@ -656,8 +656,8 @@ out:
 }
 
 /*
- * Program pll register bits, I assume that the 8 registers 0xf8 upto 0xff
- * are mapped onto the 8 ADC/DAC sampling frequency which can be choosen
+ * Program pll register bits, I assume that the 8 registers 0xf8 up to 0xff
+ * are mapped onto the 8 ADC/DAC sampling frequency which can be chosen
  * at the register CM_REG_FUNCTRL1 (0x04).
  * Problem: other ways are also possible (any information about that?)
  */
@@ -666,7 +666,7 @@ static void snd_cmipci_set_pll(struct cmipci *cm, unsigned int rate, unsigned in
 	unsigned int reg = CM_REG_PLL + slot;
 	/*
 	 * Guess that this programs at reg. 0x04 the pos 15:13/12:10
-	 * for DSFC/ASFC (000 upto 111).
+	 * for DSFC/ASFC (000 up to 111).
 	 */
 
 	/* FIXME: Init (Do we've to set an other register first before programming?) */
@@ -941,13 +941,21 @@ static snd_pcm_uframes_t snd_cmipci_pcm_pointer(struct cmipci *cm, struct cmipci
 						struct snd_pcm_substream *substream)
 {
 	size_t ptr;
-	unsigned int reg;
+	unsigned int reg, rem, tries;
+
 	if (!rec->running)
 		return 0;
 #if 1 // this seems better..
 	reg = rec->ch ? CM_REG_CH1_FRAME2 : CM_REG_CH0_FRAME2;
-	ptr = rec->dma_size - (snd_cmipci_read_w(cm, reg) + 1);
-	ptr >>= rec->shift;
+	for (tries = 0; tries < 3; tries++) {
+		rem = snd_cmipci_read_w(cm, reg);
+		if (rem < rec->dma_size)
+			goto ok;
+	}
+	printk(KERN_ERR "cmipci: invalid PCM pointer: %#x\n", rem);
+	return SNDRV_PCM_POS_XRUN;
+ok:
+	ptr = (rec->dma_size - (rem + 1)) >> rec->shift;
 #else
 	reg = rec->ch ? CM_REG_CH1_FRAME1 : CM_REG_CH0_FRAME1;
 	ptr = snd_cmipci_read(cm, reg) - rec->offset;
@@ -2302,7 +2310,7 @@ static struct snd_kcontrol_new snd_cmipci_mixers[] __devinitdata = {
 	CMIPCI_SB_VOL_MONO("Mic Playback Volume", SB_DSP4_MIC_DEV, 3, 31),
 	CMIPCI_SB_SW_MONO("Mic Playback Switch", 0),
 	CMIPCI_DOUBLE("Mic Capture Switch", SB_DSP4_INPUT_LEFT, SB_DSP4_INPUT_RIGHT, 0, 0, 1, 0, 0),
-	CMIPCI_SB_VOL_MONO("PC Speaker Playback Volume", SB_DSP4_SPEAKER_DEV, 6, 3),
+	CMIPCI_SB_VOL_MONO("Beep Playback Volume", SB_DSP4_SPEAKER_DEV, 6, 3),
 	CMIPCI_MIXER_VOL_STEREO("Aux Playback Volume", CM_REG_AUX_VOL, 4, 0, 15),
 	CMIPCI_MIXER_SW_STEREO("Aux Playback Switch", CM_REG_MIXER2, CM_VAUXLM_SHIFT, CM_VAUXRM_SHIFT, 0),
 	CMIPCI_MIXER_SW_STEREO("Aux Capture Switch", CM_REG_MIXER2, CM_RAUXLEN_SHIFT, CM_RAUXREN_SHIFT, 0),
@@ -2310,7 +2318,7 @@ static struct snd_kcontrol_new snd_cmipci_mixers[] __devinitdata = {
 	CMIPCI_MIXER_VOL_MONO("Mic Capture Volume", CM_REG_MIXER2, CM_VADMIC_SHIFT, 7),
 	CMIPCI_SB_VOL_MONO("Phone Playback Volume", CM_REG_EXTENT_IND, 5, 7),
 	CMIPCI_DOUBLE("Phone Playback Switch", CM_REG_EXTENT_IND, CM_REG_EXTENT_IND, 4, 4, 1, 0, 0),
-	CMIPCI_DOUBLE("PC Speaker Playback Switch", CM_REG_EXTENT_IND, CM_REG_EXTENT_IND, 3, 3, 1, 0, 0),
+	CMIPCI_DOUBLE("Beep Playback Switch", CM_REG_EXTENT_IND, CM_REG_EXTENT_IND, 3, 3, 1, 0, 0),
 	CMIPCI_DOUBLE("Mic Boost Capture Switch", CM_REG_EXTENT_IND, CM_REG_EXTENT_IND, 0, 0, 1, 0, 0),
 };
 
@@ -2796,7 +2804,7 @@ static inline void snd_cmipci_proc_init(struct cmipci *cm) {}
 #endif
 
 
-static struct pci_device_id snd_cmipci_ids[] = {
+static DEFINE_PCI_DEVICE_TABLE(snd_cmipci_ids) = {
 	{PCI_VDEVICE(CMEDIA, PCI_DEVICE_ID_CMEDIA_CM8338A), 0},
 	{PCI_VDEVICE(CMEDIA, PCI_DEVICE_ID_CMEDIA_CM8338B), 0},
 	{PCI_VDEVICE(CMEDIA, PCI_DEVICE_ID_CMEDIA_CM8738), 0},
@@ -3018,7 +3026,7 @@ static int __devinit snd_cmipci_create(struct snd_card *card, struct pci_dev *pc
 	int integrated_midi = 0;
 	char modelstr[16];
 	int pcm_index, pcm_spdif_index;
-	static struct pci_device_id intel_82437vx[] = {
+	static DEFINE_PCI_DEVICE_TABLE(intel_82437vx) = {
 		{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82437VX) },
 		{ },
 	};
@@ -3052,7 +3060,7 @@ static int __devinit snd_cmipci_create(struct snd_card *card, struct pci_dev *pc
 	cm->iobase = pci_resource_start(pci, 0);
 
 	if (request_irq(pci->irq, snd_cmipci_interrupt,
-			IRQF_SHARED, card->driver, cm)) {
+			IRQF_SHARED, KBUILD_MODNAME, cm)) {
 		snd_printk(KERN_ERR "unable to grab IRQ %d\n", pci->irq);
 		snd_cmipci_free(cm);
 		return -EBUSY;
@@ -3397,7 +3405,7 @@ static int snd_cmipci_resume(struct pci_dev *pci)
 #endif /* CONFIG_PM */
 
 static struct pci_driver driver = {
-	.name = "C-Media PCI",
+	.name = KBUILD_MODNAME,
 	.id_table = snd_cmipci_ids,
 	.probe = snd_cmipci_probe,
 	.remove = __devexit_p(snd_cmipci_remove),

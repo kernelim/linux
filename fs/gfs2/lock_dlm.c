@@ -104,10 +104,11 @@ static int make_mode(const unsigned int lmstate)
 	return -1;
 }
 
-static u32 make_flags(const u32 lkid, const unsigned int gfs_flags,
+static u32 make_flags(struct gfs2_glock *gl, const unsigned int gfs_flags,
 		      const int req)
 {
-	u32 lkf = 0;
+	u32 lkf = DLM_LKF_VALBLK;
+	u32 lkid = gl->gl_lksb.sb_lkid;
 
 	if (gfs_flags & LM_FLAG_TRY)
 		lkf |= DLM_LKF_NOQUEUE;
@@ -131,10 +132,11 @@ static u32 make_flags(const u32 lkid, const unsigned int gfs_flags,
 			BUG();
 	}
 
-	if (lkid != 0) 
+	if (lkid != 0) {
 		lkf |= DLM_LKF_CONVERT;
-
-	lkf |= DLM_LKF_VALBLK;
+		if (test_bit(GLF_BLOCKING, &gl->gl_flags))
+			lkf |= DLM_LKF_QUECVT;
+	}
 
 	return lkf;
 }
@@ -147,9 +149,8 @@ static unsigned int gdlm_lock(struct gfs2_glock *gl,
 	int req;
 	u32 lkf;
 
-	gl->gl_req = req_state;
 	req = make_mode(req_state);
-	lkf = make_flags(gl->gl_lksb.sb_lkid, flags, req);
+	lkf = make_flags(gl, flags, req);
 
 	/*
 	 * Submit the actual lock request.
@@ -175,6 +176,7 @@ static void gdlm_put_lock(struct gfs2_glock *gl)
 		return;
 	}
 
+	clear_bit(GLF_BLOCKING, &gl->gl_flags);
 	error = dlm_unlock(ls->ls_dlm, gl->gl_lksb.sb_lkid, DLM_LKF_VALBLK,
 			   NULL, gl);
 	if (error) {

@@ -17,8 +17,10 @@
  */
 
 #include <linux/init.h>
+#include <linux/slab.h>
 #include <linux/firmware.h>
 #include <linux/etherdevice.h>
+#include <linux/module.h>
 
 #include <net/mac80211.h>
 
@@ -33,21 +35,29 @@ MODULE_DESCRIPTION("Softmac Prism54 common code");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("prism54common");
 
+static int p54_sta_add_remove(struct ieee80211_hw *hw,
+			      struct ieee80211_vif *vif,
+			      struct ieee80211_sta *sta)
+{
+	struct p54_common *priv = hw->priv;
+
+	/*
+	 * Notify the firmware that we don't want or we don't
+	 * need to buffer frames for this station anymore.
+	 */
+
+	p54_sta_unlock(priv, sta->addr);
+
+	return 0;
+}
+
 static void p54_sta_notify(struct ieee80211_hw *dev, struct ieee80211_vif *vif,
 			      enum sta_notify_cmd notify_cmd,
 			      struct ieee80211_sta *sta)
 {
 	struct p54_common *priv = dev->priv;
-	switch (notify_cmd) {
-	case STA_NOTIFY_ADD:
-	case STA_NOTIFY_REMOVE:
-		/*
-		 * Notify the firmware that we don't want or we don't
-		 * need to buffer frames for this station anymore.
-		 */
 
-		p54_sta_unlock(priv, sta->addr);
-		break;
+	switch (notify_cmd) {
 	case STA_NOTIFY_AWAKE:
 		/* update the firmware's filter table */
 		p54_sta_unlock(priv, sta->addr);
@@ -148,7 +158,7 @@ static int p54_beacon_update(struct p54_common *priv,
 	 * to cancel the old beacon template by hand, instead the firmware
 	 * will release the previous one through the feedback mechanism.
 	 */
-	WARN_ON(p54_tx_80211(priv->hw, beacon));
+	p54_tx_80211(priv->hw, beacon);
 	priv->tsf_high32 = 0;
 	priv->tsf_low32 = 0;
 
@@ -195,13 +205,11 @@ static void p54_stop(struct ieee80211_hw *dev)
 	struct p54_common *priv = dev->priv;
 	int i;
 
-	mutex_lock(&priv->conf_mutex);
 	priv->mode = NL80211_IFTYPE_UNSPECIFIED;
 	priv->softled_state = 0;
-	p54_set_leds(priv);
-
 	cancel_delayed_work_sync(&priv->work);
-
+	mutex_lock(&priv->conf_mutex);
+	p54_set_leds(priv);
 	priv->stop(dev);
 	skb_queue_purge(&priv->tx_pending);
 	skb_queue_purge(&priv->tx_queue);
@@ -216,7 +224,7 @@ static void p54_stop(struct ieee80211_hw *dev)
 }
 
 static int p54_add_interface(struct ieee80211_hw *dev,
-			     struct ieee80211_if_init_conf *conf)
+			     struct ieee80211_vif *vif)
 {
 	struct p54_common *priv = dev->priv;
 
@@ -226,28 +234,28 @@ static int p54_add_interface(struct ieee80211_hw *dev,
 		return -EOPNOTSUPP;
 	}
 
-	priv->vif = conf->vif;
+	priv->vif = vif;
 
-	switch (conf->type) {
+	switch (vif->type) {
 	case NL80211_IFTYPE_STATION:
 	case NL80211_IFTYPE_ADHOC:
 	case NL80211_IFTYPE_AP:
 	case NL80211_IFTYPE_MESH_POINT:
-		priv->mode = conf->type;
+		priv->mode = vif->type;
 		break;
 	default:
 		mutex_unlock(&priv->conf_mutex);
 		return -EOPNOTSUPP;
 	}
 
-	memcpy(priv->mac_addr, conf->mac_addr, ETH_ALEN);
+	memcpy(priv->mac_addr, vif->addr, ETH_ALEN);
 	p54_setup_mac(priv);
 	mutex_unlock(&priv->conf_mutex);
 	return 0;
 }
 
 static void p54_remove_interface(struct ieee80211_hw *dev,
-				 struct ieee80211_if_init_conf *conf)
+				 struct ieee80211_vif *vif)
 {
 	struct p54_common *priv = dev->priv;
 
@@ -269,6 +277,42 @@ static void p54_remove_interface(struct ieee80211_hw *dev,
 	mutex_unlock(&priv->conf_mutex);
 }
 
+static int p54_wait_for_stats(struct ieee80211_hw *dev)
+{
+	struct p54_common *priv = dev->priv;
+	int ret;
+
+	priv->update_stats = true;
+	ret = p54_fetch_statistics(priv);
+	if (ret)
+		return ret;
+
+	ret = wait_for_completion_interruptible_timeout(&priv->stat_comp, HZ);
+	if (ret == 0)
+		return -ETIMEDOUT;
+
+	return 0;
+}
+
+static void p54_reset_stats(struct p54_common *priv)
+{
+	struct ieee80211_channel *chan = priv->curchan;
+
+	if (chan) {
+		struct survey_info *info = &priv->survey[chan->hw_value];
+
+		/* only reset channel statistics, don't touch .filled, etc. */
+		info->channel_time = 0;
+		info->channel_time_busy = 0;
+		info->channel_time_tx = 0;
+	}
+
+	priv->update_stats = true;
+	priv->survey_raw.active = 0;
+	priv->survey_raw.cca = 0;
+	priv->survey_raw.tx = 0;
+}
+
 static int p54_config(struct ieee80211_hw *dev, u32 changed)
 {
 	int ret = 0;
@@ -279,24 +323,68 @@ static int p54_config(struct ieee80211_hw *dev, u32 changed)
 	if (changed & IEEE80211_CONF_CHANGE_POWER)
 		priv->output_power = conf->power_level << 2;
 	if (changed & IEEE80211_CONF_CHANGE_CHANNEL) {
+		struct ieee80211_channel *oldchan;
+		WARN_ON(p54_wait_for_stats(dev));
+		oldchan = priv->curchan;
+		priv->curchan = NULL;
 		ret = p54_scan(priv, P54_SCAN_EXIT, 0);
-		if (ret)
+		if (ret) {
+			priv->curchan = oldchan;
 			goto out;
+		}
+		/*
+		 * TODO: Use the LM_SCAN_TRAP to determine the current
+		 * operating channel.
+		 */
+		priv->curchan = priv->hw->conf.channel;
+		p54_reset_stats(priv);
+		WARN_ON(p54_fetch_statistics(priv));
 	}
 	if (changed & IEEE80211_CONF_CHANGE_PS) {
+		WARN_ON(p54_wait_for_stats(dev));
 		ret = p54_set_ps(priv);
 		if (ret)
 			goto out;
+		WARN_ON(p54_wait_for_stats(dev));
 	}
 	if (changed & IEEE80211_CONF_CHANGE_IDLE) {
+		WARN_ON(p54_wait_for_stats(dev));
 		ret = p54_setup_mac(priv);
 		if (ret)
 			goto out;
+		WARN_ON(p54_wait_for_stats(dev));
 	}
 
 out:
 	mutex_unlock(&priv->conf_mutex);
 	return ret;
+}
+
+static u64 p54_prepare_multicast(struct ieee80211_hw *dev, int mc_count,
+				 struct dev_addr_list *ha)
+{
+	struct p54_common *priv = dev->priv;
+	int i;
+
+	BUILD_BUG_ON(ARRAY_SIZE(priv->mc_maclist) !=
+		ARRAY_SIZE(((struct p54_group_address_table *)NULL)->mac_list));
+	/*
+	 * The first entry is reserved for the global broadcast MAC.
+	 * Otherwise the firmware will drop it and ARP will no longer work.
+	 */
+	i = 1;
+	priv->mc_maclist_num = mc_count + i;
+	while (i <= mc_count) {
+		if (!ha)
+			break;
+		memcpy(&priv->mc_maclist[i], ha->dmi_addr, ETH_ALEN);
+		i++;
+		if (i >= ARRAY_SIZE(priv->mc_maclist))
+			break;
+		ha = ha->next;
+	}
+
+	return 1; /* update */
 }
 
 static void p54_configure_filter(struct ieee80211_hw *dev,
@@ -307,15 +395,20 @@ static void p54_configure_filter(struct ieee80211_hw *dev,
 	struct p54_common *priv = dev->priv;
 
 	*total_flags &= FIF_PROMISC_IN_BSS |
+			FIF_ALLMULTI |
 			FIF_OTHER_BSS;
 
 	priv->filter_flags = *total_flags;
 
 	if (changed_flags & (FIF_PROMISC_IN_BSS | FIF_OTHER_BSS))
 		p54_setup_mac(priv);
+
+	if (changed_flags & FIF_ALLMULTI || multicast)
+		p54_set_groupfilter(priv);
 }
 
-static int p54_conf_tx(struct ieee80211_hw *dev, u16 queue,
+static int p54_conf_tx(struct ieee80211_hw *dev,
+		       struct ieee80211_vif *vif, u16 queue,
 		       const struct ieee80211_tx_queue_params *params)
 {
 	struct p54_common *priv = dev->priv;
@@ -346,7 +439,9 @@ static void p54_work(struct work_struct *work)
 	 *      2. cancel stuck frames / reset the device if necessary.
 	 */
 
-	p54_fetch_statistics(priv);
+	mutex_lock(&priv->conf_mutex);
+	WARN_ON_ONCE(p54_fetch_statistics(priv));
+	mutex_unlock(&priv->conf_mutex);
 }
 
 static int p54_get_stats(struct ieee80211_hw *dev,
@@ -355,16 +450,6 @@ static int p54_get_stats(struct ieee80211_hw *dev,
 	struct p54_common *priv = dev->priv;
 
 	memcpy(stats, &priv->stats, sizeof(*stats));
-	return 0;
-}
-
-static int p54_get_tx_stats(struct ieee80211_hw *dev,
-			    struct ieee80211_tx_queue_stats *stats)
-{
-	struct p54_common *priv = dev->priv;
-
-	memcpy(stats, &priv->tx_stats[P54_QUEUE_DATA],
-	       sizeof(stats[0]) * dev->queues);
 	return 0;
 }
 
@@ -430,8 +515,8 @@ static int p54_set_key(struct ieee80211_hw *dev, enum set_key_cmd cmd,
 
 	mutex_lock(&priv->conf_mutex);
 	if (cmd == SET_KEY) {
-		switch (key->alg) {
-		case ALG_TKIP:
+		switch (key->cipher) {
+		case WLAN_CIPHER_SUITE_TKIP:
 			if (!(priv->privacy_caps & (BR_DESC_PRIV_CAP_MICHAEL |
 			      BR_DESC_PRIV_CAP_TKIP))) {
 				ret = -EOPNOTSUPP;
@@ -440,7 +525,8 @@ static int p54_set_key(struct ieee80211_hw *dev, enum set_key_cmd cmd,
 			key->flags |= IEEE80211_KEY_FLAG_GENERATE_IV;
 			algo = P54_CRYPTO_TKIPMICHAEL;
 			break;
-		case ALG_WEP:
+		case WLAN_CIPHER_SUITE_WEP40:
+		case WLAN_CIPHER_SUITE_WEP104:
 			if (!(priv->privacy_caps & BR_DESC_PRIV_CAP_WEP)) {
 				ret = -EOPNOTSUPP;
 				goto out_unlock;
@@ -448,7 +534,7 @@ static int p54_set_key(struct ieee80211_hw *dev, enum set_key_cmd cmd,
 			key->flags |= IEEE80211_KEY_FLAG_GENERATE_IV;
 			algo = P54_CRYPTO_WEP;
 			break;
-		case ALG_CCMP:
+		case WLAN_CIPHER_SUITE_CCMP:
 			if (!(priv->privacy_caps & BR_DESC_PRIV_CAP_AESCCMP)) {
 				ret = -EOPNOTSUPP;
 				goto out_unlock;
@@ -465,7 +551,7 @@ static int p54_set_key(struct ieee80211_hw *dev, enum set_key_cmd cmd,
 
 		if (slot < 0) {
 			/*
-			 * The device supports the choosen algorithm, but the
+			 * The device supports the chosen algorithm, but the
 			 * firmware does not provide enough key slots to store
 			 * all of them.
 			 * But encryption offload for outgoing frames is always
@@ -508,6 +594,106 @@ out_unlock:
 	return ret;
 }
 
+static int p54_get_survey(struct ieee80211_hw *dev, int idx,
+				struct survey_info *survey)
+{
+	struct p54_common *priv = dev->priv;
+	struct ieee80211_channel *chan;
+	int err, tries;
+	bool in_use = false;
+
+	if (idx >= priv->chan_num)
+		return -ENOENT;
+
+#define MAX_TRIES 1
+	for (tries = 0; tries < MAX_TRIES; tries++) {
+		chan = priv->curchan;
+		if (chan && chan->hw_value == idx) {
+			mutex_lock(&priv->conf_mutex);
+			err = p54_wait_for_stats(dev);
+			mutex_unlock(&priv->conf_mutex);
+			if (err)
+				return err;
+
+			in_use = true;
+		}
+
+		memcpy(survey, &priv->survey[idx], sizeof(*survey));
+
+		if (in_use) {
+			/* test if the reported statistics are valid. */
+			if  (survey->channel_time != 0) {
+				survey->filled |= SURVEY_INFO_IN_USE;
+			} else {
+				/*
+				 * hw/fw has not accumulated enough sample sets.
+				 * Wait for 100ms, this ought to be enough to
+				 * to get at least one non-null set of channel
+				 * usage statistics.
+				 */
+				msleep(100);
+				continue;
+			}
+		}
+		return 0;
+	}
+	return -ETIMEDOUT;
+#undef MAX_TRIES
+}
+
+static unsigned int p54_flush_count(struct p54_common *priv)
+{
+	unsigned int total = 0, i;
+
+	BUILD_BUG_ON(P54_QUEUE_NUM > ARRAY_SIZE(priv->tx_stats));
+
+	/*
+	 * Because the firmware has the sole control over any frames
+	 * in the P54_QUEUE_BEACON or P54_QUEUE_SCAN queues, they
+	 * don't really count as pending or active.
+	 */
+	for (i = P54_QUEUE_MGMT; i < P54_QUEUE_NUM; i++)
+		total += priv->tx_stats[i].len;
+	return total;
+}
+
+static void p54_flush(struct ieee80211_hw *dev, bool drop)
+{
+	struct p54_common *priv = dev->priv;
+	unsigned int total, i;
+
+	/*
+	 * Currently, it wouldn't really matter if we wait for one second
+	 * or 15 minutes. But once someone gets around and completes the
+	 * TODOs [ancel stuck frames / reset device] in p54_work, it will
+	 * suddenly make sense to wait that long.
+	 */
+	i = P54_STATISTICS_UPDATE * 2 / 20;
+
+	/*
+	 * In this case no locking is required because as we speak the
+	 * queues have already been stopped and no new frames can sneak
+	 * up from behind.
+	 */
+	while ((total = p54_flush_count(priv) && i--)) {
+		/* waste time */
+		msleep(20);
+	}
+
+	WARN(total, "tx flush timeout, unresponsive firmware");
+}
+
+static void p54_set_coverage_class(struct ieee80211_hw *dev, u8 coverage_class)
+{
+	struct p54_common *priv = dev->priv;
+
+	mutex_lock(&priv->conf_mutex);
+	/* support all coverage class values as in 802.11-2007 Table 7-27 */
+	priv->coverage_class = clamp_t(u8, coverage_class, 0, 31);
+	p54_set_edcf(priv);
+	mutex_unlock(&priv->conf_mutex);
+}
+
 static const struct ieee80211_ops p54_ops = {
 	.tx			= p54_tx_80211,
 	.start			= p54_start,
@@ -516,13 +702,18 @@ static const struct ieee80211_ops p54_ops = {
 	.remove_interface	= p54_remove_interface,
 	.set_tim		= p54_set_tim,
 	.sta_notify		= p54_sta_notify,
+	.sta_add		= p54_sta_add_remove,
+	.sta_remove		= p54_sta_add_remove,
 	.set_key		= p54_set_key,
 	.config			= p54_config,
+	.flush			= p54_flush,
 	.bss_info_changed	= p54_bss_info_changed,
+	.prepare_multicast	= p54_prepare_multicast,
 	.configure_filter	= p54_configure_filter,
 	.conf_tx		= p54_conf_tx,
 	.get_stats		= p54_get_stats,
-	.get_tx_stats		= p54_get_tx_stats
+	.get_survey		= p54_get_survey,
+	.set_coverage_class	= p54_set_coverage_class,
 };
 
 struct ieee80211_hw *p54_init_common(size_t priv_data_len)
@@ -546,7 +737,7 @@ struct ieee80211_hw *p54_init_common(size_t priv_data_len)
 		     IEEE80211_HW_SUPPORTS_PS |
 		     IEEE80211_HW_PS_NULLFUNC_STACK |
 		     IEEE80211_HW_BEACON_FILTER |
-		     IEEE80211_HW_NOISE_DBM;
+		     IEEE80211_HW_REPORTS_TX_ACK_STATUS;
 
 	dev->wiphy->interface_modes = BIT(NL80211_IFTYPE_STATION) |
 				      BIT(NL80211_IFTYPE_ADHOC) |
@@ -579,21 +770,25 @@ struct ieee80211_hw *p54_init_common(size_t priv_data_len)
 	 * For now, disable PS by default because it affects
 	 * link stability significantly.
 	 */
-	dev->wiphy->ps_default = false;
+	dev->wiphy->flags &= ~WIPHY_FLAG_PS_ON_BY_DEFAULT;
 
 	mutex_init(&priv->conf_mutex);
 	mutex_init(&priv->eeprom_mutex);
+	init_completion(&priv->stat_comp);
 	init_completion(&priv->eeprom_comp);
 	init_completion(&priv->beacon_comp);
 	INIT_DELAYED_WORK(&priv->work, p54_work);
 
+	memset(&priv->mc_maclist[0], ~0, ETH_ALEN);
+	priv->curchan = NULL;
+	p54_reset_stats(priv);
 	return dev;
 }
 EXPORT_SYMBOL_GPL(p54_init_common);
 
 int p54_register_common(struct ieee80211_hw *dev, struct device *pdev)
 {
-	struct p54_common *priv = dev->priv;
+	struct p54_common __maybe_unused *priv = dev->priv;
 	int err;
 
 	err = ieee80211_register_hw(dev);
@@ -624,11 +819,15 @@ void p54_free_common(struct ieee80211_hw *dev)
 	kfree(priv->iq_autocal);
 	kfree(priv->output_limit);
 	kfree(priv->curve_data);
+	kfree(priv->rssi_db);
 	kfree(priv->used_rxkeys);
+	kfree(priv->survey);
 	priv->iq_autocal = NULL;
 	priv->output_limit = NULL;
 	priv->curve_data = NULL;
+	priv->rssi_db = NULL;
 	priv->used_rxkeys = NULL;
+	priv->survey = NULL;
 	ieee80211_free_hw(dev);
 }
 EXPORT_SYMBOL_GPL(p54_free_common);

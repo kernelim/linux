@@ -454,6 +454,8 @@ struct kvm_ioeventfd {
 #ifdef __KVM_HAVE_XCRS
 #define KVM_CAP_XCRS 56
 #endif
+#define KVM_CAP_TSC_CONTROL 60
+#define KVM_CAP_GET_TSC_KHZ 61
 
 #ifdef KVM_CAP_IRQ_ROUTING
 
@@ -573,6 +575,9 @@ struct kvm_clock_data {
 #define KVM_IOEVENTFD             _IOW(KVMIO, 0x79, struct kvm_ioeventfd)
 #define KVM_SET_CLOCK             _IOW(KVMIO, 0x7b, struct kvm_clock_data)
 #define KVM_GET_CLOCK             _IOR(KVMIO, 0x7c, struct kvm_clock_data)
+/* Available with KVM_CAP_TSC_CONTROL */
+#define KVM_SET_TSC_KHZ           _IO(KVMIO,  0xa2)
+#define KVM_GET_TSC_KHZ           _IO(KVMIO,  0xa3)
 
 
 /*

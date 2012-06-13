@@ -20,8 +20,6 @@ module - for modules, use THIS_MODULE. If built-in, then use NULL here (but
 LIST (provide full path)
 ========================
 DIF/DIX			block/blk-integrity.c
-bna			drivers/net/bna/bnad.c
-bfa			drivers/scsi/bfa/bfad_im.c
 btrfs			fs/btrfs/super.c
 ecryptfs		fs/ecryptfs/main.c
 fscache			fs/fscache/main.c

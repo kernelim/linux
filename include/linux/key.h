@@ -155,6 +155,7 @@ struct key {
 #define KEY_FLAG_IN_QUOTA	3	/* set if key consumes quota */
 #define KEY_FLAG_USER_CONSTRUCT	4	/* set if key is being constructed in userspace */
 #define KEY_FLAG_NEGATIVE	5	/* set if key is negative */
+#define KEY_FLAG_ROOT_CAN_CLEAR	6	/* set if key can be cleared by root without permission */
 
 	/* the description string
 	 * - this is used to match a key against search criteria
@@ -269,10 +270,29 @@ extern int keyring_add_key(struct key *keyring,
 
 extern struct key *key_lookup(key_serial_t id);
 
-static inline key_serial_t key_serial(struct key *key)
+static inline key_serial_t key_serial(const struct key *key)
 {
 	return key ? key->serial : 0;
 }
+
+/**
+ * key_is_instantiated - Determine if a key has been positively instantiated
+ * @key: The key to check.
+ *
+ * Return true if the specified key has been positively instantiated, false
+ * otherwise.
+ */
+static inline bool key_is_instantiated(const struct key *key)
+{
+	return test_bit(KEY_FLAG_INSTANTIATED, &key->flags) &&
+		!test_bit(KEY_FLAG_NEGATIVE, &key->flags);
+}
+
+#define rcu_dereference_key(KEY)					\
+	(rcu_dereference((KEY)->payload.data))
+
+#define rcu_assign_keypointer(KEY, PAYLOAD)				\
+	(rcu_assign_pointer((KEY)->payload.data, PAYLOAD))
 
 #ifdef CONFIG_SYSCTL
 extern ctl_table key_sysctls[];

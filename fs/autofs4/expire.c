@@ -301,6 +301,7 @@ struct dentry *autofs4_expire_indirect(struct super_block *sb,
 	unsigned long timeout;
 	struct dentry *root = sb->s_root;
 	struct dentry *expired = NULL;
+	struct dentry *last;
 	struct list_head *next;
 	int do_now = how & AUTOFS_EXP_IMMEDIATE;
 	int exp_leaves = how & AUTOFS_EXP_LEAVES;
@@ -315,6 +316,7 @@ struct dentry *autofs4_expire_indirect(struct super_block *sb,
 
 	spin_lock(&dcache_lock);
 	next = root->d_subdirs.next;
+	last = NULL;
 
 	/* On exit from the loop expire is set to a dgot dentry
 	 * to expire or it's NULL */
@@ -329,6 +331,11 @@ struct dentry *autofs4_expire_indirect(struct super_block *sb,
 
 		dentry = dget(dentry);
 		spin_unlock(&dcache_lock);
+
+		if (last) {
+			dput(last);
+			last = NULL;
+		}
 
 		spin_lock(&sbi->fs_lock);
 		ino = autofs4_dentry_ino(dentry);
@@ -395,11 +402,13 @@ struct dentry *autofs4_expire_indirect(struct super_block *sb,
 		}
 next:
 		spin_unlock(&sbi->fs_lock);
-		dput(dentry);
 		spin_lock(&dcache_lock);
 		next = next->next;
+		last = dentry;
 	}
 	spin_unlock(&dcache_lock);
+	if (last)
+		dput(last);
 	return NULL;
 
 found:

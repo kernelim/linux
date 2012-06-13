@@ -230,8 +230,7 @@ static inline int qeth_is_ipa_enabled(struct qeth_ipa_info *ipa,
 #define QETH_IN_BUF_COUNT_MAX 128
 #define QETH_MAX_BUFFER_ELEMENTS(card) ((card)->qdio.in_buf_size >> 12)
 #define QETH_IN_BUF_REQUEUE_THRESHOLD(card) \
-		((card)->ssqd.qdioac1 & AC1_SIGA_INPUT_NEEDED ? 1 : \
-		 ((card)->qdio.in_buf_pool.buf_count / 2))
+		 ((card)->qdio.in_buf_pool.buf_count / 2)
 
 /* buffers we have to be behind before we get a PCI */
 #define QETH_PCI_THRESHOLD_A(card) ((card)->qdio.in_buf_pool.buf_count+1)
@@ -462,7 +461,6 @@ struct qeth_qdio_out_q {
 	 * index of buffer to be filled by driver; state EMPTY or PACKING
 	 */
 	int next_buf_to_fill;
-	int sync_iqdio_error;
 	/*
 	 * number of buffers that are currently filled (PRIMED)
 	 * -> these buffers are hardware-owned
@@ -668,6 +666,8 @@ struct qeth_card_info {
 	__u32 csum_mask;
 	__u32 tx_csum_mask;
 	enum qeth_ipa_promisc_modes promisc_mode;
+	__u32 diagass_support;
+	__u32 hwtrap;
 };
 
 struct qeth_card_options {
@@ -727,14 +727,6 @@ struct qeth_mc_mac {
 	unsigned char mc_addrlen;
 	int is_vmac;
 };
-
-struct qeth_skb_data {
-	__u32 magic;
-	int count;
-};
-
-#define QETH_SKB_MAGIC 0x71657468
-#define QETH_SIGA_CC2_RETRIES 3
 
 struct qeth_rx {
 	int b_count;
@@ -802,6 +794,14 @@ struct qeth_card_list_struct {
 	rwlock_t rwlock;
 };
 
+struct qeth_trap_id {
+	__u16 lparnr;
+	char vmname[8];
+	__u8 chpid;
+	__u8 ssid;
+	__u16 devno;
+} __packed;
+
 /*some helper functions*/
 #define QETH_CARD_IFNAME(card) (((card)->dev)? (card)->dev->name : "")
 
@@ -834,6 +834,12 @@ static inline void qeth_put_buffer_pool_entry(struct qeth_card *card,
 		struct qeth_buffer_pool_entry *entry)
 {
 	list_add_tail(&entry->list, &card->qdio.in_buf_pool.entry_list);
+}
+
+static inline int qeth_is_diagass_supported(struct qeth_card *card,
+		enum qeth_diags_cmds cmd)
+{
+	return card->info.diagass_support & (__u32)cmd;
 }
 
 struct qeth_eddp_context;
@@ -923,6 +929,8 @@ void qeth_dbf_longtext(enum qeth_dbf_names dbf_nix, int level, char *text, ...);
 int qeth_core_ethtool_get_settings(struct net_device *, struct ethtool_cmd *);
 int qeth_set_access_ctrl_online(struct qeth_card *card);
 int qeth_configure_cq(struct qeth_card *, enum qeth_cq);
+int qeth_hw_trap(struct qeth_card *, enum qeth_diags_trap_action);
+int qeth_query_ipassists(struct qeth_card *, enum qeth_prot_versions prot);
 
 /* exports for OSN */
 int qeth_osn_assist(struct net_device *, void *, int);

@@ -79,8 +79,6 @@ int vfs_fstatat(int dfd, char __user *filename, struct kstat *stat, int flag)
 
 	if (!(flag & AT_SYMLINK_NOFOLLOW))
 		lookup_flags |= LOOKUP_FOLLOW;
-	if (flag & AT_NO_AUTOMOUNT)
-		lookup_flags |= LOOKUP_NO_AUTOMOUNT;
 
 	error = user_path_at(dfd, filename, lookup_flags, &path);
 	if (error)

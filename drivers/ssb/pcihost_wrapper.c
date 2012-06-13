@@ -6,12 +6,13 @@
  * Copyright (c) 2005 Stefano Brivio <st3@riseup.net>
  * Copyright (c) 2005 Danny van Dyk <kugelfang@gentoo.org>
  * Copyright (c) 2005 Andreas Jaggi <andreas.jaggi@waterwave.ch>
- * Copyright (c) 2005-2007 Michael Buesch <mbuesch@freenet.de>
+ * Copyright (c) 2005-2007 Michael Buesch <m@bues.ch>
  *
  * Licensed under the GNU/GPL. See COPYING for details.
  */
 
 #include <linux/pci.h>
+#include <linux/slab.h>
 #include <linux/ssb/ssb.h>
 
 
@@ -52,12 +53,13 @@ static int ssb_pcihost_resume(struct pci_dev *dev)
 # define ssb_pcihost_resume	NULL
 #endif /* CONFIG_PM */
 
-static int ssb_pcihost_probe(struct pci_dev *dev,
-			     const struct pci_device_id *id)
+static int __devinit ssb_pcihost_probe(struct pci_dev *dev,
+				       const struct pci_device_id *id)
 {
 	struct ssb_bus *ssb;
 	int err = -ENOMEM;
 	const char *name;
+	u32 val;
 
 	ssb = kzalloc(sizeof(*ssb), GFP_KERNEL);
 	if (!ssb)
@@ -72,6 +74,12 @@ static int ssb_pcihost_probe(struct pci_dev *dev,
 	if (err)
 		goto err_pci_disable;
 	pci_set_master(dev);
+
+	/* Disable the RETRY_TIMEOUT register (0x41) to keep
+	 * PCI Tx retries from interfering with C3 CPU state */
+	pci_read_config_dword(dev, 0x40, &val);
+	if ((val & 0x0000ff00) != 0)
+		pci_write_config_dword(dev, 0x40, val & 0xffff00ff);
 
 	err = ssb_bus_pcibus_register(ssb, dev);
 	if (err)
@@ -102,7 +110,7 @@ static void ssb_pcihost_remove(struct pci_dev *dev)
 	pci_set_drvdata(dev, NULL);
 }
 
-int ssb_pcihost_register(struct pci_driver *driver)
+int __devinit ssb_pcihost_register(struct pci_driver *driver)
 {
 	driver->probe = ssb_pcihost_probe;
 	driver->remove = ssb_pcihost_remove;

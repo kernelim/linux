@@ -53,7 +53,7 @@
 #include "hpsa.h"
 
 /* HPSA_DRIVER_VERSION must be 3 byte values (0-255) separated by '.' */
-#define HPSA_DRIVER_VERSION "2.0.2-3"
+#define HPSA_DRIVER_VERSION "2.0.2-4"
 #define DRIVER_NAME "HP HPSA Driver (v " HPSA_DRIVER_VERSION ")"
 
 /* How long to wait (in milliseconds) for board to go into simple mode */
@@ -213,7 +213,8 @@ static int check_for_unit_attention(struct ctlr_info *h,
 		dev_warn(&h->pdev->dev, "hpsa%d: report LUN data "
 			"changed, action required\n", h->ctlr);
 	/*
-	 * Note: this REPORT_LUNS_CHANGED condition only occurs on the MSA2012.
+	 * Note: this REPORT_LUNS_CHANGED condition only occurs on the external
+	 * target (array) devices.
 	 */
 		break;
 	case POWER_OR_RESET:
@@ -293,12 +294,26 @@ static u32 unresettable_controller[] = {
 	0x3215103C, /* Smart Array E200i */
 	0x3237103C, /* Smart Array E500 */
 	0x323D103C, /* Smart Array P700m */
+	0x40800E11, /* Smart Array 5i */
 	0x409C0E11, /* Smart Array 6400 */
 	0x409D0E11, /* Smart Array 6400 EM */
+	0x40700E11, /* Smart Array 5300 */
+	0x40820E11, /* Smart Array 532 */
+	0x40830E11, /* Smart Array 5312 */
+	0x409A0E11, /* Smart Array 641 */
+	0x409B0E11, /* Smart Array 642 */
+	0x40910E11, /* Smart Array 6i */
 };
 
 /* List of controllers which cannot even be soft reset */
 static u32 soft_unresettable_controller[] = {
+	0x40800E11, /* Smart Array 5i */
+	0x40700E11, /* Smart Array 5300 */
+	0x40820E11, /* Smart Array 532 */
+	0x40830E11, /* Smart Array 5312 */
+	0x409A0E11, /* Smart Array 641 */
+	0x409B0E11, /* Smart Array 642 */
+	0x40910E11, /* Smart Array 6i */
 	/* Exclude 640x boards.  These are two pci devices in one slot
 	 * which share a battery backed cache module.  One controls the
 	 * cache, the other accesses the cache through the one that controls
@@ -590,16 +605,16 @@ static int hpsa_find_target_lun(struct ctlr_info *h,
 	 * assumes h->devlock is held
 	 */
 	int i, found = 0;
-	DECLARE_BITMAP(lun_taken, HPSA_MAX_SCSI_DEVS_PER_HBA);
+	DECLARE_BITMAP(lun_taken, HPSA_MAX_DEVICES);
 
-	memset(&lun_taken[0], 0, HPSA_MAX_SCSI_DEVS_PER_HBA >> 3);
+	memset(&lun_taken[0], 0, HPSA_MAX_DEVICES >> 3);
 
 	for (i = 0; i < h->ndevices; i++) {
 		if (h->dev[i]->bus == bus && h->dev[i]->target != -1)
 			set_bit(h->dev[i]->target, lun_taken);
 	}
 
-	for (i = 0; i < HPSA_MAX_SCSI_DEVS_PER_HBA; i++) {
+	for (i = 0; i < HPSA_MAX_DEVICES; i++) {
 		if (!test_bit(i, lun_taken)) {
 			/* *bus = 1; */
 			*target = i;
@@ -622,7 +637,7 @@ static int hpsa_scsi_add_entry(struct ctlr_info *h, int hostno,
 	unsigned char addr1[8], addr2[8];
 	struct hpsa_scsi_dev_t *sd;
 
-	if (n >= HPSA_MAX_SCSI_DEVS_PER_HBA) {
+	if (n >= HPSA_MAX_DEVICES) {
 		dev_err(&h->pdev->dev, "too many devices, some will be "
 			"inaccessible.\n");
 		return -1;
@@ -690,6 +705,20 @@ lun_assigned:
 	return 0;
 }
 
+/* Update an entry in h->dev[] array. */
+static void hpsa_scsi_update_entry(struct ctlr_info *h, int hostno,
+	int entry, struct hpsa_scsi_dev_t *new_entry)
+{
+	/* assumes h->devlock is held */
+	BUG_ON(entry < 0 || entry >= HPSA_MAX_DEVICES);
+
+	/* Raid level changed. */
+	h->dev[entry]->raid_level = new_entry->raid_level;
+	dev_info(&h->pdev->dev, "%s device c%db%dt%dl%d updated.\n",
+		scsi_device_type(new_entry->devtype), hostno, new_entry->bus,
+		new_entry->target, new_entry->lun);
+}
+
 /* Replace an entry from h->dev[] array. */
 static void hpsa_scsi_replace_entry(struct ctlr_info *h, int hostno,
 	int entry, struct hpsa_scsi_dev_t *new_entry,
@@ -697,7 +726,7 @@ static void hpsa_scsi_replace_entry(struct ctlr_info *h, int hostno,
 	struct hpsa_scsi_dev_t *removed[], int *nremoved)
 {
 	/* assumes h->devlock is held */
-	BUG_ON(entry < 0 || entry >= HPSA_MAX_SCSI_DEVS_PER_HBA);
+	BUG_ON(entry < 0 || entry >= HPSA_MAX_DEVICES);
 	removed[*nremoved] = h->dev[entry];
 	(*nremoved)++;
 	h->dev[entry] = new_entry;
@@ -716,7 +745,7 @@ static void hpsa_scsi_remove_entry(struct ctlr_info *h, int hostno, int entry,
 	int i;
 	struct hpsa_scsi_dev_t *sd;
 
-	BUG_ON(entry < 0 || entry >= HPSA_MAX_SCSI_DEVS_PER_HBA);
+	BUG_ON(entry < 0 || entry >= HPSA_MAX_DEVICES);
 
 	sd = h->dev[entry];
 	removed[*nremoved] = h->dev[entry];
@@ -786,10 +815,25 @@ static inline int device_is_the_same(struct hpsa_scsi_dev_t *dev1,
 	return 1;
 }
 
+static inline int device_updated(struct hpsa_scsi_dev_t *dev1,
+	struct hpsa_scsi_dev_t *dev2)
+{
+	/* Device attributes that can change, but don't mean
+	 * that the device is a different device, nor that the OS
+	 * needs to be told anything about the change.
+	 */
+	if (dev1->raid_level != dev2->raid_level)
+		return 1;
+	return 0;
+}
+
 /* Find needle in haystack.  If exact match found, return DEVICE_SAME,
  * and return needle location in *index.  If scsi3addr matches, but not
  * vendor, model, serial num, etc. return DEVICE_CHANGED, and return needle
- * location in *index.  If needle not found, return DEVICE_NOT_FOUND.
+ * location in *index.
+ * In the case of a minor device attribute change, such as RAID level, just
+ * return DEVICE_UPDATED, along with the updated device's location in index.
+ * If needle not found, return DEVICE_NOT_FOUND.
  */
 static int hpsa_scsi_find_entry(struct hpsa_scsi_dev_t *needle,
 	struct hpsa_scsi_dev_t *haystack[], int haystack_size,
@@ -799,15 +843,19 @@ static int hpsa_scsi_find_entry(struct hpsa_scsi_dev_t *needle,
 #define DEVICE_NOT_FOUND 0
 #define DEVICE_CHANGED 1
 #define DEVICE_SAME 2
+#define DEVICE_UPDATED 3
 	for (i = 0; i < haystack_size; i++) {
 		if (haystack[i] == NULL) /* previously removed. */
 			continue;
 		if (SCSI3ADDR_EQ(needle->scsi3addr, haystack[i]->scsi3addr)) {
 			*index = i;
-			if (device_is_the_same(needle, haystack[i]))
+			if (device_is_the_same(needle, haystack[i])) {
+				if (device_updated(needle, haystack[i]))
+					return DEVICE_UPDATED;
 				return DEVICE_SAME;
-			else
+			} else {
 				return DEVICE_CHANGED;
+			}
 		}
 	}
 	*index = -1;
@@ -828,10 +876,8 @@ static void adjust_hpsa_scsi_table(struct ctlr_info *h, int hostno,
 	int nadded, nremoved;
 	struct Scsi_Host *sh = NULL;
 
-	added = kzalloc(sizeof(*added) * HPSA_MAX_SCSI_DEVS_PER_HBA,
-		GFP_KERNEL);
-	removed = kzalloc(sizeof(*removed) * HPSA_MAX_SCSI_DEVS_PER_HBA,
-		GFP_KERNEL);
+	added = kzalloc(sizeof(*added) * HPSA_MAX_DEVICES, GFP_KERNEL);
+	removed = kzalloc(sizeof(*removed) * HPSA_MAX_DEVICES, GFP_KERNEL);
 
 	if (!added || !removed) {
 		dev_warn(&h->pdev->dev, "out of memory in "
@@ -845,6 +891,8 @@ static void adjust_hpsa_scsi_table(struct ctlr_info *h, int hostno,
 	 * sd[] and remove them from h->dev[], and for any
 	 * devices which have changed, remove the old device
 	 * info and add the new device info.
+         * If minor device attributes change, just update
+         * the existing device structure.
 	 */
 	i = 0;
 	nremoved = 0;
@@ -865,6 +913,8 @@ static void adjust_hpsa_scsi_table(struct ctlr_info *h, int hostno,
 			 * at the bottom of hpsa_update_scsi_devices()
 			 */
 			sd[entry] = NULL;
+		} else if (device_change == DEVICE_UPDATED) {
+			hpsa_scsi_update_entry(h, hostno, i, sd[entry]);
 		}
 		i++;
 	}
@@ -1618,86 +1668,63 @@ bail_out:
 	return 1;
 }
 
-static unsigned char *msa2xxx_model[] = {
+static unsigned char *ext_target_model[] = { 
 	"MSA2012",
 	"MSA2024",
 	"MSA2312",
 	"MSA2324",
+	"P2000 G3 SAS",
 	NULL,
 };
 
-static int is_msa2xxx(struct ctlr_info *h, struct hpsa_scsi_dev_t *device)
+static int is_ext_target(struct ctlr_info *h, struct hpsa_scsi_dev_t *device)
 {
 	int i;
 
-	for (i = 0; msa2xxx_model[i]; i++)
-		if (strncmp(device->model, msa2xxx_model[i],
-			strlen(msa2xxx_model[i])) == 0)
+	for (i = 0; ext_target_model[i]; i++) 
+		if (strncmp(device->model, ext_target_model[i],
+			strlen(ext_target_model[i])) == 0)
 			return 1;
 	return 0;
 }
 
 /* Helper function to assign bus, target, lun mapping of devices.
- * Puts non-msa2xxx logical volumes on bus 0, msa2xxx logical
+ * Puts non-external target logical volumes on bus 0, external target logical 
  * volumes on bus 1, physical devices on bus 2. and the hba on bus 3.
  * Logical drive target and lun are assigned at this time, but
  * physical device lun and target assignment are deferred (assigned
  * in hpsa_find_target_lun, called by hpsa_scsi_add_entry.)
  */
 static void figure_bus_target_lun(struct ctlr_info *h,
-	u8 *lunaddrbytes, int *bus, int *target, int *lun,
-	struct hpsa_scsi_dev_t *device)
+	u8 *lunaddrbytes, struct hpsa_scsi_dev_t *device)
 {
-	u32 lunid;
+	u32 lunid = le32_to_cpu(*((__le32 *) lunaddrbytes));
 
-	if (is_logical_dev_addr_mode(lunaddrbytes)) {
-		/* logical device */
-		if (unlikely(is_scsi_rev_5(h))) {
-			/* p1210m, logical drives lun assignments
-			 * match SCSI REPORT LUNS data.
-			 */
-			lunid = le32_to_cpu(*((__le32 *) lunaddrbytes));
-			*bus = 0;
-			*target = 0;
-			*lun = (lunid & 0x3fff) + 1;
-		} else {
-			/* not p1210m... */
-			lunid = le32_to_cpu(*((__le32 *) lunaddrbytes));
-			if (is_msa2xxx(h, device)) {
-				/* msa2xxx way, put logicals on bus 1
-				 * and match target/lun numbers box
-				 * reports.
-				 */
-				*bus = 1;
-				*target = (lunid >> 16) & 0x3fff;
-				*lun = lunid & 0x00ff;
-			} else {
-				/* Traditional smart array way. */
-				*bus = 0;
-				*lun = 0;
-				*target = lunid & 0x3fff;
-			}
-		}
-	} else {
-		/* physical device */
+	if (!is_logical_dev_addr_mode(lunaddrbytes)) {
+		/* physical device, target and lun filled in later */
 		if (is_hba_lunid(lunaddrbytes))
-			if (unlikely(is_scsi_rev_5(h))) {
-				*bus = 0; /* put p1210m ctlr at 0,0,0 */
-				*target = 0;
-				*lun = 0;
-				return;
-			} else
-				*bus = 3; /* traditional smartarray */
+			hpsa_set_bus_target_lun(device, 3, 0, lunid & 0x3fff);
 		else
-			*bus = 2; /* physical disk */
-		*target = -1;
-		*lun = -1; /* we will fill these in later. */
+			/* defer target, lun assignment for physical devices */
+			hpsa_set_bus_target_lun(device, 2, -1, -1);
+		return;
 	}
+	/* It's a logical device */
+	if (is_ext_target(h, device)) {
+		/* external target way, put logicals on bus 1
+		 * and match target/lun numbers box
+		 * reports, other smart array, bus 0, target 0, match lunid
+		 */
+		hpsa_set_bus_target_lun(device,
+			1, (lunid >> 16) & 0x3fff, lunid & 0x00ff);
+		return;
+	}
+	hpsa_set_bus_target_lun(device, 0, 0, lunid & 0x3fff);
 }
 
 /*
  * If there is no lun 0 on a target, linux won't find any devices.
- * For the MSA2xxx boxes, we have to manually detect the enclosure
+ * For the external targets (arrays), we have to manually detect the enclosure
  * which is at lun zero, as CCISS_REPORT_PHYSICAL_LUNS doesn't report
  * it for some reason.  *tmpdevice is the target we're adding,
  * this_device is a pointer into the current element of currentsd[]
@@ -1706,47 +1733,46 @@ static void figure_bus_target_lun(struct ctlr_info *h,
  * lun 0 assigned.
  * Returns 1 if an enclosure was added, 0 if not.
  */
-static int add_msa2xxx_enclosure_device(struct ctlr_info *h,
+static int add_ext_target_dev(struct ctlr_info *h,
 	struct hpsa_scsi_dev_t *tmpdevice,
 	struct hpsa_scsi_dev_t *this_device, u8 *lunaddrbytes,
-	int bus, int target, int lun, unsigned long lunzerobits[],
-	int *nmsa2xxx_enclosures)
+	unsigned long lunzerobits[], int *n_ext_target_devs)
 {
 	unsigned char scsi3addr[8];
 
-	if (test_bit(target, lunzerobits))
+	if (test_bit(tmpdevice->target, lunzerobits))
 		return 0; /* There is already a lun 0 on this target. */
 
 	if (!is_logical_dev_addr_mode(lunaddrbytes))
 		return 0; /* It's the logical targets that may lack lun 0. */
 
-	if (!is_msa2xxx(h, tmpdevice))
-		return 0; /* It's only the MSA2xxx that have this problem. */
+	if (!is_ext_target(h, tmpdevice))
+		return 0; /* Only external target devices have this problem. */
 
-	if (lun == 0) /* if lun is 0, then obviously we have a lun 0. */
+	if (tmpdevice->lun == 0) /* if lun is 0, then we have a lun 0. */
 		return 0;
 
 	memset(scsi3addr, 0, 8);
-	scsi3addr[3] = target;
+	scsi3addr[3] = tmpdevice->target;
 	if (is_hba_lunid(scsi3addr))
 		return 0; /* Don't add the RAID controller here. */
 
 	if (is_scsi_rev_5(h))
 		return 0; /* p1210m doesn't need to do this. */
 
-#define MAX_MSA2XXX_ENCLOSURES 32
-	if (*nmsa2xxx_enclosures >= MAX_MSA2XXX_ENCLOSURES) {
-		dev_warn(&h->pdev->dev, "Maximum number of MSA2XXX "
-			"enclosures exceeded.  Check your hardware "
+	if (*n_ext_target_devs >= MAX_EXT_TARGETS) {
+		dev_warn(&h->pdev->dev, "Maximum number of external "
+			"target devices exceeded.  Check your hardware "
 			"configuration.");
 		return 0;
 	}
 
 	if (hpsa_update_device_info(h, scsi3addr, this_device))
 		return 0;
-	(*nmsa2xxx_enclosures)++;
-	hpsa_set_bus_target_lun(this_device, bus, target, 0);
-	set_bit(target, lunzerobits);
+	(*n_ext_target_devs)++;
+	hpsa_set_bus_target_lun(this_device,
+				tmpdevice->bus, tmpdevice->target, 0);
+	set_bit(tmpdevice->target, lunzerobits);
 	return 1;
 }
 
@@ -1841,13 +1867,11 @@ static void hpsa_update_scsi_devices(struct ctlr_info *h, int hostno)
 	struct hpsa_scsi_dev_t **currentsd, *this_device, *tmpdevice;
 	int ncurrent = 0;
 	int reportlunsize = sizeof(*physdev_list) + HPSA_MAX_PHYS_LUN * 8;
-	int i, nmsa2xxx_enclosures, ndevs_to_allocate;
-	int bus, target, lun;
+	int i, n_ext_target_devs, ndevs_to_allocate;
 	int raid_ctlr_position;
-	DECLARE_BITMAP(lunzerobits, HPSA_MAX_TARGETS_PER_CTLR);
+	DECLARE_BITMAP(lunzerobits, MAX_EXT_TARGETS);
 
-	currentsd = kzalloc(sizeof(*currentsd) * HPSA_MAX_SCSI_DEVS_PER_HBA,
-		GFP_KERNEL);
+	currentsd = kzalloc(sizeof(*currentsd) * HPSA_MAX_DEVICES, GFP_KERNEL);
 	physdev_list = kzalloc(reportlunsize, GFP_KERNEL);
 	logdev_list = kzalloc(reportlunsize, GFP_KERNEL);
 	inq_buff = kmalloc(OBDR_TAPE_INQ_SIZE, GFP_KERNEL);
@@ -1864,14 +1888,21 @@ static void hpsa_update_scsi_devices(struct ctlr_info *h, int hostno)
 			logdev_list, &nlogicals))
 		goto out;
 
-	/* We might see up to 32 MSA2xxx enclosures, actually 8 of them
-	 * but each of them 4 times through different paths.  The plus 1
-	 * is for the RAID controller.
+	/* We might see up to the maximum number of logical and physical disks
+	 * plus external target devices, and a device for the local RAID
+	 * controller.
 	 */
-	ndevs_to_allocate = nphysicals + nlogicals + MAX_MSA2XXX_ENCLOSURES + 1;
+	ndevs_to_allocate = nphysicals + nlogicals + MAX_EXT_TARGETS + 1;
 
 	/* Allocate the per device structures */
 	for (i = 0; i < ndevs_to_allocate; i++) {
+		if (i >= HPSA_MAX_DEVICES) {
+			dev_warn(&h->pdev->dev, "maximum devices (%d) exceeded."
+			    "  %d devices ignored.\n", HPSA_MAX_DEVICES,
+				ndevs_to_allocate - HPSA_MAX_DEVICES);
+			break;
+		}
+
 		currentsd[i] = kzalloc(sizeof(*currentsd[i]), GFP_KERNEL);
 		if (!currentsd[i]) {
 			dev_warn(&h->pdev->dev, "out of memory at %s:%d\n",
@@ -1887,7 +1918,7 @@ static void hpsa_update_scsi_devices(struct ctlr_info *h, int hostno)
 		raid_ctlr_position = nphysicals + nlogicals;
 
 	/* adjust our table of devices */
-	nmsa2xxx_enclosures = 0;
+	n_ext_target_devs = 0;
 	for (i = 0; i < nphysicals + nlogicals + 1; i++) {
 		u8 *lunaddrbytes;
 
@@ -1902,26 +1933,24 @@ static void hpsa_update_scsi_devices(struct ctlr_info *h, int hostno)
 		/* Get device type, vendor, model, device id */
 		if (hpsa_update_device_info(h, lunaddrbytes, tmpdevice))
 			continue; /* skip it if we can't talk to it. */
-		figure_bus_target_lun(h, lunaddrbytes, &bus, &target, &lun,
-			tmpdevice);
+		figure_bus_target_lun(h, lunaddrbytes, tmpdevice);
 		this_device = currentsd[ncurrent];
 
 		/*
-		 * For the msa2xxx boxes, we have to insert a LUN 0 which
+		 * For external target devices, we have to insert a LUN 0 which
 		 * doesn't show up in CCISS_REPORT_PHYSICAL data, but there
 		 * is nonetheless an enclosure device there.  We have to
 		 * present that otherwise linux won't find anything if
 		 * there is no lun 0.
 		 */
-		if (add_msa2xxx_enclosure_device(h, tmpdevice, this_device,
-				lunaddrbytes, bus, target, lun, lunzerobits,
-				&nmsa2xxx_enclosures)) {
+		if (add_ext_target_dev(h, tmpdevice, this_device,
+				lunaddrbytes, lunzerobits,
+				&n_ext_target_devs)) {
 			ncurrent++;
 			this_device = currentsd[ncurrent];
 		}
 
 		*this_device = *tmpdevice;
-		hpsa_set_bus_target_lun(this_device, bus, target, lun);
 
 		switch (this_device->devtype) {
 		case TYPE_ROM: {
@@ -1964,7 +1993,7 @@ static void hpsa_update_scsi_devices(struct ctlr_info *h, int hostno)
 		default:
 			break;
 		}
-		if (ncurrent >= HPSA_MAX_SCSI_DEVS_PER_HBA)
+		if (ncurrent >= HPSA_MAX_DEVICES)
 			break;
 	}
 	adjust_hpsa_scsi_table(h, hostno, currentsd, ncurrent);
@@ -3307,6 +3336,13 @@ static int hpsa_controller_hard_reset(struct pci_dev *pdev,
 		pmcsr &= ~PCI_PM_CTRL_STATE_MASK;
 		pmcsr |= PCI_D0;
 		pci_write_config_word(pdev, pos + PCI_PM_CTRL, pmcsr);
+
+		/*
+		 * The P600 requires a small delay when changing states.
+		 * Otherwise we may think the board did not reset and we bail.
+		 * This for kdump only and is particular to the P600.
+		 */
+		msleep(500);
 	}
 	return 0;
 }
@@ -4041,7 +4077,7 @@ static int hpsa_request_irq(struct ctlr_info *h,
 				IRQF_DISABLED, h->devname, h);
 	else
 		rc = request_irq(h->intr[h->intr_mode], intxhandler,
-				IRQF_DISABLED, h->devname, h);
+				IRQF_DISABLED | IRQF_SHARED, h->devname, h);
 	if (rc) {
 		dev_err(&h->pdev->dev, "unable to get irq %d for %s\n",
 		       h->intr[h->intr_mode], h->devname);

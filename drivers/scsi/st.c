@@ -17,7 +17,7 @@
    Last modified: 18-JAN-1998 Richard Gooch <rgooch@atnf.csiro.au> Devfs support
  */
 
-static const char *verstr = "20081215";
+static const char *verstr = "20101219rh";
 
 #include <linux/module.h>
 
@@ -461,14 +461,16 @@ static void st_scsi_execute_end(struct request *req, int uptodate)
 {
 	struct st_request *SRpnt = req->end_io_data;
 	struct scsi_tape *STp = SRpnt->stp;
+	struct bio *tmp;
 
 	STp->buffer->cmdstat.midlevel_result = SRpnt->result = req->errors;
 	STp->buffer->cmdstat.residual = req->resid_len;
 
+	tmp = SRpnt->bio;
 	if (SRpnt->waiting)
 		complete(SRpnt->waiting);
 
-	blk_rq_unmap_user(SRpnt->bio);
+	blk_rq_unmap_user(tmp);
 	__blk_put_request(req->q, req);
 }
 
@@ -3724,9 +3726,11 @@ static int enlarge_buffer(struct st_buffer * STbuffer, int new_size, int need_dm
 		b_size = PAGE_SIZE << order;
 	} else {
 		for (b_size = PAGE_SIZE, order = 0;
-		     order < ST_MAX_ORDER && b_size < new_size;
+		     order < ST_MAX_ORDER &&
+			     max_segs * (PAGE_SIZE << order) < new_size;
 		     order++, b_size *= 2)
 			;  /* empty */
+		STbuffer->reserved_page_order = order;
 	}
 	if (max_segs * (PAGE_SIZE << order) < new_size) {
 		if (order == ST_MAX_ORDER)
@@ -3753,7 +3757,6 @@ static int enlarge_buffer(struct st_buffer * STbuffer, int new_size, int need_dm
 		segs++;
 	}
 	STbuffer->b_data = page_address(STbuffer->reserved_pages[0]);
-	STbuffer->reserved_page_order = order;
 
 	return 1;
 }

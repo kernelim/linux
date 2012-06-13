@@ -89,6 +89,8 @@ static int __init early_get_pnodeid(void)
 
 	if (node_id.s.part_number == UV2_HUB_PART_NUMBER)
 		uv_min_hub_revision_id += UV2_HUB_REVISION_BASE - 1;
+	if (node_id.s.part_number == UV2_HUB_PART_NUMBER_X)
+		uv_min_hub_revision_id += UV2_HUB_REVISION_BASE - 1;
 
 	uv_hub_info_hub_revision = uv_min_hub_revision_id;
 	pnode = (node_id.s.node_id >> 1) & ((1 << m_n_config.s.n_skt) - 1);
@@ -209,7 +211,6 @@ static int __cpuinit uv_wakeup_secondary(int phys_apicid, unsigned long start_ri
 	    ((start_rip << UVH_IPI_INT_VECTOR_SHFT) >> 12) |
 	    APIC_DM_INIT;
 	uv_write_global_mmr64(pnode, UVH_IPI_INT, val);
-	mdelay(10);
 
 	val = (1UL << UVH_IPI_INT_SEND_SHFT) |
 	    (phys_apicid << UVH_IPI_INT_APIC_ID_SHFT) |
@@ -809,7 +810,12 @@ void __init uv_system_init(void)
 	for(i = 0; i < UVH_NODE_PRESENT_TABLE_DEPTH; i++)
 		uv_possible_blades +=
 		  hweight64(uv_read_local_mmr( UVH_NODE_PRESENT_TABLE + i * 8));
-	printk(KERN_DEBUG "UV: Found %d blades\n", uv_num_possible_blades());
+
+	/* uv_num_possible_blades() is really the hub count */
+	printk(KERN_INFO "UV: Found %d blades, %d hubs\n",
+			is_uv1_hub() ? uv_num_possible_blades() :
+			(uv_num_possible_blades() + 1) / 2,
+			uv_num_possible_blades());
 
 	bytes = sizeof(struct uv_blade_info) * uv_num_possible_blades();
 	uv_blade_info = kzalloc(bytes, GFP_KERNEL);
@@ -866,6 +872,10 @@ void __init uv_system_init(void)
 		uv_cpu_hub_info_apic_pnode_shift(cpu) = uvh_apicid.s.pnode_shift;
 		uv_cpu_hub_info_hub_revision(cpu) = uv_hub_info_hub_revision;
 
+		uv_cpu_hub_info_m_shift(cpu) = 64 - m_val;
+		uv_cpu_hub_info_n_lshift(cpu) = is_uv2_1_hub() ?
+				(m_val == 40 ? 40 : 39) : m_val;
+
 		for (i = 0; i < UV_HUB_INFO_EXTRA_FIELDS; i++)
 			uv_cpu_hub_info_extra(cpu)->future[i] = 0;
 		pnode = uv_apicid_to_pnode(apicid);
@@ -898,8 +908,7 @@ void __init uv_system_init(void)
 		if (uv_node_to_blade[nid] >= 0)
 			continue;
 		paddr = node_start_pfn(nid) << PAGE_SHIFT;
-		paddr = uv_soc_phys_ram_to_gpa(paddr);
-		pnode = (paddr >> m_val) & pnode_mask;
+		pnode = uv_gpa_to_pnode(uv_soc_phys_ram_to_gpa(paddr));
 		blade = boot_pnode_to_blade(pnode);
 		uv_node_to_blade[nid] = blade;
 	}

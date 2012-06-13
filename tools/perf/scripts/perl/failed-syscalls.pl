@@ -15,7 +15,7 @@ my $for_comm = shift;
 
 my %failed_syscalls;
 
-sub raw_syscalls::sys_exit
+sub syscalls::sys_exit
 {
 	my ($event_name, $context, $common_cpu, $common_secs, $common_nsecs,
 	    $common_pid, $common_comm,
