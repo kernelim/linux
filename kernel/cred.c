@@ -439,6 +439,7 @@ int copy_creds(struct task_struct *p, unsigned long clone_flags)
 	int ret;
 
 	mutex_init(&p->cred_guard_mutex);
+	p->replacement_session_keyring = NULL;
 
 	if (
 #ifdef CONFIG_KEYS

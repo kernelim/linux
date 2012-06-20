@@ -107,12 +107,12 @@ fw-shipped-$(CONFIG_PCMCIA_PCNET) += cis/LA-PCM.cis cis/PCMLM28.cis \
 				     cis/tamarack.cis cis/PE-200.cis
 fw-shipped-$(CONFIG_PCMCIA_3C589) += cis/3CXEM556.cis
 fw-shipped-$(CONFIG_PCMCIA_3C574) += cis/3CCFEM556.cis
-fw-shipped-$(CONFIG_R8169) += rtl_nic/rtl_nic_rtl8168d-1.fw \
-			      rtl_nic/rtl_nic_rtl8168d-2.fw \
-			      rtl_nic/rtl_nic_rtl8105e-1.fw \
-			      rtl_nic/rtl_nic_rtl8168e-1.fw \
-			      rtl_nic/rtl_nic_rtl8168e-2.fw \
-			      rtl_nic/rtl_nic_rtl8168e-3.fw
+fw-shipped-$(CONFIG_R8169) += rtl_nic/rtl8168d-1.fw \
+			      rtl_nic/rtl8168d-2.fw \
+			      rtl_nic/rtl8105e-1.fw \
+			      rtl_nic/rtl8168e-1.fw \
+			      rtl_nic/rtl8168e-2.fw \
+			      rtl_nic/rtl8168e-3.fw
 fw-shipped-$(CONFIG_MYRI10GE) += myri10ge_eth_z8e.dat \
 				 myri10ge_ethp_z8e.dat \
 				 myri10ge_rss_eth_z8e.dat \
