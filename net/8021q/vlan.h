@@ -113,15 +113,11 @@ static inline u32 vlan_get_ingress_priority(struct net_device *dev,
 #ifdef CONFIG_VLAN_8021Q_GVRP
 extern int vlan_gvrp_request_join(const struct net_device *dev);
 extern void vlan_gvrp_request_leave(const struct net_device *dev);
-extern int vlan_gvrp_init_applicant(struct net_device *dev);
-extern void vlan_gvrp_uninit_applicant(struct net_device *dev);
 extern int vlan_gvrp_init(void);
 extern void vlan_gvrp_uninit(void);
 #else
 static inline int vlan_gvrp_request_join(const struct net_device *dev) { return 0; }
 static inline void vlan_gvrp_request_leave(const struct net_device *dev) {}
-static inline int vlan_gvrp_init_applicant(struct net_device *dev) { return 0; }
-static inline void vlan_gvrp_uninit_applicant(struct net_device *dev) {}
 static inline int vlan_gvrp_init(void) { return 0; }
 static inline void vlan_gvrp_uninit(void) {}
 #endif

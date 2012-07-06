@@ -95,6 +95,14 @@ struct vlan_group *vlan_group_alloc(struct net_device *real_dev);
 void vlan_group_free(struct vlan_group *grp);
 int vlan_group_prealloc_vid(struct vlan_group *vg, u16 vlan_id);
 
+#ifdef CONFIG_VLAN_8021Q_GVRP
+extern int vlan_gvrp_init_applicant(struct net_device *dev);
+extern void vlan_gvrp_uninit_applicant(struct net_device *dev);
+#else
+static inline int vlan_gvrp_init_applicant(struct net_device *dev) { return 0; }
+static inline void vlan_gvrp_uninit_applicant(struct net_device *dev) {}
+#endif
+
 static inline struct net_device *vlan_group_get_device(struct vlan_group *vg,
 						       u16 vlan_id)
 {
