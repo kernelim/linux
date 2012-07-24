@@ -439,6 +439,55 @@ static void __vlan_device_event(struct net_device *dev, unsigned long event)
 	}
 }
 
+/*
+ * Since bonding slaves have their own vlan groups now, we need
+ * to make sure that, when we process an event for a device, that its
+ * actually relevant to a particular vid.  If the bond actually owns the vid
+ * and the slave just holds a copy of it, then we need to ignore the event,
+ * because the vlan treats the bond, not the slave as its lower layer device
+ */
+static int ignore_slave_event(struct net_device *dev, int i)
+{
+	struct vlan_group *sgrp, *mgrp;
+	struct net_device *svdev, *mvdev;
+
+	/* process if this isn't a slave */
+	if (!dev->master)
+		return 0;
+
+	/* This is just a check for bonding */
+	if (!(dev->master->priv_flags & IFF_BONDING))
+		return 0;
+
+	sgrp = __vlan_find_group(dev);
+	mgrp = __vlan_find_group(dev->master);
+
+	/* process if either the slave or master doesn't have a vlan group */
+	if (!sgrp || !mgrp)
+		return 0;
+
+	svdev = vlan_group_get_device(sgrp, i);
+	mvdev = vlan_group_get_device(mgrp, i);
+
+	/* process If a vlan isn't found on either the slave or master */
+	if (!svdev || !mvdev)
+		return 0;
+
+	/*
+	 * If, and only if, we have the same vlan device attached to both
+	 * the slave and the master device, then we know for certain that
+	 * this event is coming from a slave, and that the vlan is actually
+	 * attached to the master.  In this case, vlan_device_event should
+	 * ignore the event process and not transfer the operstate, because
+	 * the bonds operstate won't actually change, it will just fail over
+	 * to another slave
+	 */
+	if (svdev == mvdev)
+		return 1;
+
+	return 0;
+}
+
 static int vlan_device_event(struct notifier_block *unused, unsigned long event,
 			     void *ptr)
 {
@@ -470,6 +519,8 @@ static int vlan_device_event(struct notifier_block *unused, unsigned long event,
 	case NETDEV_CHANGE:
 		/* Propagate real device state to vlan devices */
 		for (i = 0; i < VLAN_GROUP_ARRAY_LEN; i++) {
+			if (ignore_slave_event(dev, i))
+				continue;
 			vlandev = vlan_group_get_device(grp, i);
 			if (!vlandev)
 				continue;
@@ -481,6 +532,8 @@ static int vlan_device_event(struct notifier_block *unused, unsigned long event,
 	case NETDEV_CHANGEADDR:
 		/* Adjust unicast filters on underlying device */
 		for (i = 0; i < VLAN_GROUP_ARRAY_LEN; i++) {
+			if (ignore_slave_event(dev, i))
+				continue;
 			vlandev = vlan_group_get_device(grp, i);
 			if (!vlandev)
 				continue;
@@ -495,6 +548,8 @@ static int vlan_device_event(struct notifier_block *unused, unsigned long event,
 
 	case NETDEV_CHANGEMTU:
 		for (i = 0; i < VLAN_GROUP_ARRAY_LEN; i++) {
+			if (ignore_slave_event(dev, i))
+				continue;
 			vlandev = vlan_group_get_device(grp, i);
 			if (!vlandev)
 				continue;
@@ -509,6 +564,8 @@ static int vlan_device_event(struct notifier_block *unused, unsigned long event,
 	case NETDEV_FEAT_CHANGE:
 		/* Propagate device features to underlying device */
 		for (i = 0; i < VLAN_GROUP_ARRAY_LEN; i++) {
+			if (ignore_slave_event(dev, i))
+				continue;
 			vlandev = vlan_group_get_device(grp, i);
 			if (!vlandev)
 				continue;
@@ -521,6 +578,8 @@ static int vlan_device_event(struct notifier_block *unused, unsigned long event,
 	case NETDEV_DOWN:
 		/* Put all VLANs for this dev in the down state too.  */
 		for (i = 0; i < VLAN_GROUP_ARRAY_LEN; i++) {
+			if (ignore_slave_event(dev, i))
+				continue;
 			vlandev = vlan_group_get_device(grp, i);
 			if (!vlandev)
 				continue;
@@ -537,6 +596,8 @@ static int vlan_device_event(struct notifier_block *unused, unsigned long event,
 	case NETDEV_UP:
 		/* Put all VLANs for this dev in the up state too.  */
 		for (i = 0; i < VLAN_GROUP_ARRAY_LEN; i++) {
+			if (ignore_slave_event(dev, i))
+				continue;
 			vlandev = vlan_group_get_device(grp, i);
 			if (!vlandev)
 				continue;
@@ -553,6 +614,8 @@ static int vlan_device_event(struct notifier_block *unused, unsigned long event,
 	case NETDEV_UNREGISTER:
 		/* Delete all VLANs for this dev. */
 		for (i = 0; i < VLAN_GROUP_ARRAY_LEN; i++) {
+			if (ignore_slave_event(dev, i))
+				continue;
 			vlandev = vlan_group_get_device(grp, i);
 			if (!vlandev)
 				continue;

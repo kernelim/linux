@@ -1912,7 +1912,7 @@ static int nl80211_set_key(struct sk_buff *skb, struct genl_info *info)
 		if (err)
 			goto out;
 
-#ifdef CONFIG_CFG80211_WEXT
+#ifdef CONFIG_WIRELESS_EXT
 		dev->ieee80211_ptr->wext.default_mgmt_key = key.idx;
 #endif
 	}
