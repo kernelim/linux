@@ -167,6 +167,7 @@ struct hrtimer_clock_base {
  * @nr_retries:		Total number of hrtimer interrupt retries
  * @nr_hangs:		Total number of hrtimer interrupt hangs
  * @max_hang_time:	Maximum time spent in hrtimer_interrupt
+ * @clock_was_set:	Indicates that clock was set from irq context.
  */
 struct hrtimer_cpu_base {
 	spinlock_t			lock;
@@ -179,6 +180,9 @@ struct hrtimer_cpu_base {
 	unsigned long			nr_retries;
 	unsigned long			nr_hangs;
 	ktime_t				max_hang_time;
+#endif
+#ifndef __GENKSYMS__
+	unsigned int			clock_was_set;
 #endif
 };
 
@@ -285,6 +289,8 @@ extern void hrtimer_peek_ahead_timers(void);
 # define MONOTONIC_RES_NSEC	HIGH_RES_NSEC
 # define KTIME_MONOTONIC_RES	KTIME_HIGH_RES
 
+extern void clock_was_set_delayed(void);
+
 #else
 
 # define MONOTONIC_RES_NSEC	LOW_RES_NSEC
@@ -313,6 +319,9 @@ static inline int hrtimer_is_hres_active(struct hrtimer *timer)
 {
 	return 0;
 }
+
+static inline void clock_was_set_delayed(void) { }
+
 #endif
 
 extern ktime_t ktime_get(void);

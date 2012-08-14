@@ -19,6 +19,9 @@
  * NTP timekeeping variables:
  */
 
+DEFINE_SPINLOCK(ntp_lock);
+
+
 /* USER_HZ period (usecs): */
 unsigned long			tick_usec = TICK_USEC;
 
@@ -163,11 +166,13 @@ static void ntp_update_offset(long offset)
 
 /**
  * ntp_clear - Clears the NTP state variables
- *
- * Must be called while holding a write on the xtime_lock
  */
 void ntp_clear(void)
 {
+	unsigned long flags;
+
+	spin_lock_irqsave(&ntp_lock, flags);
+
 	time_adjust	= 0;		/* stop active adjtime() */
 	time_status	|= STA_UNSYNC;
 	time_maxerror	= NTP_PHASE_LIMIT;
@@ -177,6 +182,8 @@ void ntp_clear(void)
 
 	tick_length	= tick_length_base;
 	time_offset	= 0;
+	spin_unlock_irqrestore(&ntp_lock, flags);
+
 }
 
 /*
@@ -187,14 +194,15 @@ void ntp_clear(void)
 static enum hrtimer_restart ntp_leap_second(struct hrtimer *timer)
 {
 	enum hrtimer_restart res = HRTIMER_NORESTART;
+	unsigned long flags;
+	int leap = 0;
 
-	write_seqlock(&xtime_lock);
-
+	spin_lock_irqsave(&ntp_lock, flags);
 	switch (time_state) {
 	case TIME_OK:
 		break;
 	case TIME_INS:
-		timekeeping_leap_insert(-1);
+		leap = -1;
 		time_state = TIME_OOP;
 		printk(KERN_NOTICE
 			"Clock: inserting leap second 23:59:60 UTC\n");
@@ -202,7 +210,7 @@ static enum hrtimer_restart ntp_leap_second(struct hrtimer *timer)
 		res = HRTIMER_RESTART;
 		break;
 	case TIME_DEL:
-		timekeeping_leap_insert(1);
+		leap = 1;
 		time_tai--;
 		time_state = TIME_WAIT;
 		printk(KERN_NOTICE
@@ -217,8 +225,14 @@ static enum hrtimer_restart ntp_leap_second(struct hrtimer *timer)
 			time_state = TIME_OK;
 		break;
 	}
+	spin_unlock_irqrestore(&ntp_lock, flags);
 
-	write_sequnlock(&xtime_lock);
+	/*
+	 * We have to call this outside of the ntp_lock to keep
+	 * the proper locking hierarchy
+	 */
+	if (leap)
+		timekeeping_leap_insert(leap);
 
 	return res;
 }
@@ -234,6 +248,9 @@ static enum hrtimer_restart ntp_leap_second(struct hrtimer *timer)
 void second_overflow(void)
 {
 	s64 delta;
+	unsigned long flags;
+
+	spin_lock_irqsave(&ntp_lock, flags);
 
 	/* Bump the maxerror field */
 	time_maxerror += MAXFREQ / NSEC_PER_USEC;
@@ -253,23 +270,25 @@ void second_overflow(void)
 	tick_length	+= delta;
 
 	if (!time_adjust)
-		return;
+		goto out;
 
 	if (time_adjust > MAX_TICKADJ) {
 		time_adjust -= MAX_TICKADJ;
 		tick_length += MAX_TICKADJ_SCALED;
-		return;
+		goto out;
 	}
 
 	if (time_adjust < -MAX_TICKADJ) {
 		time_adjust += MAX_TICKADJ;
 		tick_length -= MAX_TICKADJ_SCALED;
-		return;
+		goto out;
 	}
 
 	tick_length += (s64)(time_adjust * NSEC_PER_USEC / NTP_INTERVAL_FREQ)
 							 << NTP_SCALE_SHIFT;
 	time_adjust = 0;
+out:
+	spin_unlock_irqrestore(&ntp_lock, flags);
 }
 
 #ifdef CONFIG_GENERIC_CMOS_UPDATE
@@ -476,7 +495,7 @@ int do_adjtimex(struct timex *txc)
 
 	getnstimeofday(&ts);
 
-	write_seqlock_irq(&xtime_lock);
+	spin_lock_irq(&ntp_lock);
 
 	if (txc->modes & ADJ_ADJTIME) {
 		long save_adjust = time_adjust;
@@ -524,7 +543,7 @@ int do_adjtimex(struct timex *txc)
 	txc->errcnt	   = 0;
 	txc->stbcnt	   = 0;
 
-	write_sequnlock_irq(&xtime_lock);
+	spin_unlock_irq(&ntp_lock);
 
 	txc->time.tv_sec = ts.tv_sec;
 	txc->time.tv_usec = ts.tv_nsec;
