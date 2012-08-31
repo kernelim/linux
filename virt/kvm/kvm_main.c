@@ -2002,7 +2002,7 @@ void kvm_vcpu_on_spin(struct kvm_vcpu *me)
 		kvm_for_each_vcpu(i, vcpu, kvm) {
 			struct task_struct *task = NULL;
 			struct pid *pid;
-			if (!pass && i < last_boosted_vcpu) {
+			if (!pass && i <= last_boosted_vcpu) {
 				i = last_boosted_vcpu;
 				continue;
 			} else if (pass && i > last_boosted_vcpu)

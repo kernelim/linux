@@ -59,6 +59,43 @@ struct ip_options {
 
 #define optlength(opt) (sizeof(struct ip_options) + opt->optlen)
 
+struct ip_options_rcu {
+	struct rcu_head rcu;
+	struct ip_options opt;
+};
+
+struct ip_options_data {
+	struct ip_options	opt;
+	char			data[40];
+};
+
+static inline struct ip_options_rcu *get_ip_options_rcu(struct ip_options *opt)
+{
+	if (!opt)
+		return NULL;
+	return container_of(opt, struct ip_options_rcu, opt);
+}
+
+static inline struct ip_options *kmalloc_ip_options(size_t opt_len, gfp_t flags)
+{
+	struct ip_options_rcu *opt_rcu;
+
+	opt_rcu = kmalloc(sizeof(struct ip_options_rcu) + opt_len, flags);
+	if (!opt_rcu)
+		return NULL;
+	return &opt_rcu->opt;
+}
+
+static inline struct ip_options *kzalloc_ip_options(size_t opt_len, gfp_t flags)
+{
+	return kmalloc_ip_options(opt_len, flags | __GFP_ZERO);
+}
+
+static inline void kfree_ip_options(struct ip_options *opt)
+{
+	kfree(get_ip_options_rcu(opt));
+}
+
 struct inet_request_sock {
 	struct request_sock	req;
 #if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)

@@ -157,6 +157,12 @@ struct e1000_info;
 #define E1000_ICH_FWSM_PCIM2PCI		0x01000000 /* ME PCIm-to-PCI active */
 #define E1000_ICH_FWSM_PCIM2PCI_COUNT	2000
 
+/*
+ * Count for polling __E1000_RESET condition every 10-20msec.
+ * Experimentation has shown the reset can take approximately 210msec.
+ */
+#define E1000_CHECK_RESET_COUNT		25
+
 #define DEFAULT_RDTR			0
 #define DEFAULT_RADV			8
 #define BURST_RDTR			0x20

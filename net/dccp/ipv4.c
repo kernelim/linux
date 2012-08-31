@@ -47,6 +47,7 @@ int dccp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 	__be32 daddr, nexthop;
 	int tmp;
 	int err;
+	struct ip_options *inet_opt;
 
 	dp->dccps_role = DCCP_ROLE_CLIENT;
 
@@ -57,10 +58,11 @@ int dccp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 		return -EAFNOSUPPORT;
 
 	nexthop = daddr = usin->sin_addr.s_addr;
-	if (inet->opt != NULL && inet->opt->srr) {
+	inet_opt = rcu_dereference(inet->opt);
+	if (inet_opt != NULL && inet_opt->srr) {
 		if (daddr == 0)
 			return -EINVAL;
-		nexthop = inet->opt->faddr;
+		nexthop = inet_opt->faddr;
 	}
 
 	tmp = ip_route_connect(&rt, nexthop, inet->saddr,
@@ -75,7 +77,7 @@ int dccp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 		return -ENETUNREACH;
 	}
 
-	if (inet->opt == NULL || !inet->opt->srr)
+	if (inet_opt == NULL || !inet_opt->srr)
 		daddr = rt->rt_dst;
 
 	if (inet->saddr == 0)
@@ -86,8 +88,8 @@ int dccp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 	inet->daddr = daddr;
 
 	inet_csk(sk)->icsk_ext_hdr_len = 0;
-	if (inet->opt != NULL)
-		inet_csk(sk)->icsk_ext_hdr_len = inet->opt->optlen;
+	if (inet_opt != NULL)
+		inet_csk(sk)->icsk_ext_hdr_len = inet_opt->optlen;
 	/*
 	 * Socket identity is still unknown (sport may be zero).
 	 * However we set state to DCCP_REQUESTING and not releasing socket
@@ -551,7 +553,7 @@ out:
 static void dccp_v4_reqsk_destructor(struct request_sock *req)
 {
 	dccp_feat_list_purge(&dccp_rsk(req)->dreq_featneg);
-	kfree(inet_rsk(req)->opt);
+	kfree_ip_options(inet_rsk(req)->opt);
 }
 
 static struct request_sock_ops dccp_request_sock_ops __read_mostly = {

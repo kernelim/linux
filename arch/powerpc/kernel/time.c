@@ -186,6 +186,8 @@ u64 __cputime_jiffies_factor;
 EXPORT_SYMBOL(__cputime_jiffies_factor);
 u64 __cputime_msec_factor;
 EXPORT_SYMBOL(__cputime_msec_factor);
+u64 __cputime_usec_factor;
+EXPORT_SYMBOL(__cputime_usec_factor);
 u64 __cputime_sec_factor;
 EXPORT_SYMBOL(__cputime_sec_factor);
 u64 __cputime_clockt_factor;
@@ -203,8 +205,8 @@ static void calc_cputime_factors(void)
 
 	div128_by_32(HZ, 0, tb_ticks_per_sec, &res);
 	__cputime_jiffies_factor = res.result_low;
-	div128_by_32(1000, 0, tb_ticks_per_sec, &res);
-	__cputime_msec_factor = res.result_low;
+	div128_by_32(1000000, 0, tb_ticks_per_sec, &res);
+	__cputime_usec_factor = res.result_low;
 	div128_by_32(1, 0, tb_ticks_per_sec, &res);
 	__cputime_sec_factor = res.result_low;
 	div128_by_32(USER_HZ, 0, tb_ticks_per_sec, &res);

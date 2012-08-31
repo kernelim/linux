@@ -8,9 +8,9 @@
  *
  * Each stripe contains one buffer per device.  Each buffer can be in
  * one of a number of states stored in "flags".  Changes between
- * these states happen *almost* exclusively under the protection of the
- * STRIPE_ACTIVE flag.  Some very specific changes can happen in bi_end_io, and
- * these are not protected by STRIPE_ACTIVE.
+ * these states happen *almost* exclusively under a per-stripe
+ * spinlock.  Some very specific changes can happen in bi_end_io, and
+ * these are not protected by the spin lock.
  *
  * The flag bits that are used to represent these states are:
  *   R5_UPTODATE and R5_LOCKED
@@ -94,6 +94,7 @@
  *
  * The inactive_list, handle_list and hash bucket lists are all protected by the
  * device_lock.
+ *  - stripes on the inactive_list never have their stripe_lock held.
  *  - stripes have a reference counter. If count==0, they are on a list.
  *  - If a stripe might need handling, STRIPE_HANDLE is set.
  *  - When refcount reaches zero, then if STRIPE_HANDLE it is put on
@@ -113,10 +114,10 @@
  *  attach a request to an active stripe (add_stripe_bh())
  *     lockdev attach-buffer unlockdev
  *  handle a stripe (handle_stripe())
- *     setSTRIPE_ACTIVE,  clrSTRIPE_HANDLE ...
+ *     lockstripe clrSTRIPE_HANDLE ...
  *		(lockdev check-buffers unlockdev) ..
  *		change-state ..
- *		record io/ops needed clearSTRIPE_ACTIVE schedule io/ops
+ *		record io/ops needed unlockstripe schedule io/ops
  *  release an active stripe (release_stripe())
  *     lockdev if (!--cnt) { if  STRIPE_HANDLE, add to handle_list else add to inactive-list } unlockdev
  *
@@ -125,7 +126,8 @@
  * on a cached buffer, and plus one if the stripe is undergoing stripe
  * operations.
  *
- * The stripe operations are:
+ * Stripe operations are performed outside the stripe lock,
+ * the stripe operations are:
  * -copying data between the stripe cache and user application buffers
  * -computing blocks to save a disk access, or to recover a missing block
  * -updating the parity on a write operation (reconstruct write and
@@ -206,6 +208,7 @@ struct stripe_head {
 	short			ddf_layout;/* use DDF ordering to calculate Q */
 	unsigned long		state;		/* state flags */
 	atomic_t		count;	      /* nr of active thread/requests */
+	spinlock_t		lock;
 	int			bm_seq;	/* sequence number for bitmap flushes */
 	int			disks;		/* disks in stripe */
 	enum check_states	check_state;
@@ -236,7 +239,7 @@ struct stripe_head {
 };
 
 /* stripe_head_state - collects and tracks the dynamic state of a stripe_head
- *     for handle_stripe.
+ *     for handle_stripe.  It is only valid under spin_lock(sh->lock);
  */
 struct stripe_head_state {
 	int syncing, expanding, expanded;
@@ -289,7 +292,6 @@ struct stripe_head_state {
  * Stripe state
  */
 enum {
-	STRIPE_ACTIVE,
 	STRIPE_HANDLE,
 	STRIPE_SYNC_REQUESTED,
 	STRIPE_SYNCING,

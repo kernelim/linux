@@ -51,6 +51,8 @@ static struct protection_domain *pt_domain;
 
 static struct iommu_ops amd_iommu_ops;
 
+static struct dma_map_ops amd_iommu_dma_ops;
+
 /*
  * general struct to manage commands send to an IOMMU
  */
@@ -1303,6 +1305,12 @@ static int device_change_notifier(struct notifier_block *nb,
 		detach_device(domain, devid);
 		break;
 	case BUS_NOTIFY_ADD_DEVICE:
+
+		if (iommu_pass_through) {
+			attach_device(iommu, pt_domain, devid);
+			break;
+		}
+
 		/* allocate a protection domain if a device is added */
 		dma_domain = find_protection_domain(devid);
 		if (dma_domain)
@@ -1315,6 +1323,8 @@ static int device_change_notifier(struct notifier_block *nb,
 		spin_lock_irqsave(&iommu_pd_list_lock, flags);
 		list_add_tail(&dma_domain->list, &iommu_pd_list);
 		spin_unlock_irqrestore(&iommu_pd_list_lock, flags);
+
+		dev->archdata.dma_ops = &amd_iommu_dma_ops;
 
 		break;
 	default:

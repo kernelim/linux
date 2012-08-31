@@ -66,7 +66,7 @@ extern unsigned long io_apic_irqs;
 
 extern void init_VISWS_APIC_irqs(void);
 extern void setup_IO_APIC(void);
-extern void disable_IO_APIC(void);
+extern void disable_IO_APIC(int);
 
 struct io_apic_irq_attr {
 	int ioapic;

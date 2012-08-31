@@ -212,7 +212,7 @@ void machine_kexec(struct kimage *image)
 		 * one form or other. kexec jump path also need
 		 * one.
 		 */
-		disable_IO_APIC();
+		disable_IO_APIC(0);
 #endif
 	}
 

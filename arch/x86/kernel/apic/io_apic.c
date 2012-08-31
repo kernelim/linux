@@ -2038,8 +2038,24 @@ void __init enable_IO_APIC(void)
 /*
  * Not an __init, needed by the reboot code
  */
-void disable_IO_APIC(void)
+void disable_IO_APIC(int force)
 {
+	/*
+	 * Use force to bust the io_apic spinlock
+	 *
+	 * There is a case where kdump can race with irq
+	 * migration such that kdump will inject an NMI
+	 * while another cpu holds the ioapic_lock to
+	 * migrate the irq.  This would cause a deadlock.
+	 *
+	 * Because kdump stops all the cpus, we can safely
+	 * bust the spinlock as we are just clearing the
+	 * io apic anyway.
+	 */
+	if (force && spin_is_locked(&ioapic_lock))
+		/* only one cpu should be running now */
+		spin_lock_init(&ioapic_lock);
+
 	/*
 	 * Clear the IO-APIC before rebooting:
 	 */

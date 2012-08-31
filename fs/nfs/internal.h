@@ -43,6 +43,7 @@ static inline int nfs_attr_use_mounted_on_fileid(struct nfs_fattr *fattr)
 {
 	if (((fattr->valid & NFS_ATTR_FATTR_MOUNTED_ON_FILEID) == 0) ||
 	     ((fattr->valid & NFS_ATTR_FATTR_V4_REFERRAL) == 0))
+		return 0;
 
 	fattr->fileid = fattr->mounted_on_fileid;
 	return 1;

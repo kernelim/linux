@@ -1211,7 +1211,7 @@ static int mirror_end_io(struct dm_target *ti, struct bio *bio,
 	 * We need to dec pending if this was a write.
 	 */
 	if (rw == WRITE) {
-		if (!(bio->bi_rw & BIO_FLUSH))
+		if (!(bio->bi_rw & (BIO_FLUSH | BIO_DISCARD)))
 			dm_rh_dec(ms->rh, map_context->ll);
 		return error;
 	}

@@ -1044,12 +1044,14 @@ ops_run_biodrain(struct stripe_head *sh, struct dma_async_tx_descriptor *tx)
 		if (test_and_clear_bit(R5_Wantdrain, &dev->flags)) {
 			struct bio *wbi;
 
+			spin_lock(&sh->lock);
 			spin_lock_irq(&sh->raid_conf->device_lock);
 			chosen = dev->towrite;
 			dev->towrite = NULL;
 			BUG_ON(dev->written);
 			wbi = dev->written = chosen;
 			spin_unlock_irq(&sh->raid_conf->device_lock);
+			spin_unlock(&sh->lock);
 
 			while (wbi && wbi->bi_sector <
 				dev->sector + STRIPE_SECTORS) {
@@ -1344,6 +1346,7 @@ static int grow_one_stripe(struct r5conf *conf)
 		return 0;
 
 	sh->raid_conf = conf;
+	spin_lock_init(&sh->lock);
 	#ifdef CONFIG_MULTICORE_RAID456
 	init_waitqueue_head(&sh->ops.wait_for_ops);
 	#endif
@@ -1463,6 +1466,7 @@ static int resize_stripes(struct r5conf *conf, int newsize)
 			break;
 
 		nsh->raid_conf = conf;
+		spin_lock_init(&nsh->lock);
 		#ifdef CONFIG_MULTICORE_RAID456
 		init_waitqueue_head(&nsh->ops.wait_for_ops);
 		#endif
@@ -2181,6 +2185,7 @@ static int add_stripe_bio(struct stripe_head *sh, struct bio *bi, int dd_idx, in
 		(unsigned long long)sh->sector);
 
 
+	spin_lock(&sh->lock);
 	spin_lock_irq(&conf->device_lock);
 	if (forwrite) {
 		bip = &sh->dev[dd_idx].towrite;
@@ -2216,6 +2221,7 @@ static int add_stripe_bio(struct stripe_head *sh, struct bio *bi, int dd_idx, in
 			set_bit(R5_OVERWRITE, &sh->dev[dd_idx].flags);
 	}
 	spin_unlock_irq(&conf->device_lock);
+	spin_unlock(&sh->lock);
 
 	pr_debug("added bi b#%llu to stripe s#%llu, disk %d.\n",
 		(unsigned long long)(*bip)->bi_sector,
@@ -2232,6 +2238,7 @@ static int add_stripe_bio(struct stripe_head *sh, struct bio *bi, int dd_idx, in
  overlap:
 	set_bit(R5_Overlap, &sh->dev[dd_idx].flags);
 	spin_unlock_irq(&conf->device_lock);
+	spin_unlock(&sh->lock);
 	return 0;
 }
 
@@ -3123,18 +3130,12 @@ static void handle_stripe(struct stripe_head *sh)
 	int disks = sh->disks;
 	struct r5dev *pdev, *qdev;
 
-	clear_bit(STRIPE_HANDLE, &sh->state);
-	if (test_and_set_bit_lock(STRIPE_ACTIVE, &sh->state)) {
-		/* already being handled, ensure it gets handled
-		 * again when current action finishes */
-		set_bit(STRIPE_HANDLE, &sh->state);
-		return;
-	}
-
+	spin_lock(&sh->lock);
 	if (test_and_clear_bit(STRIPE_SYNC_REQUESTED, &sh->state)) {
 		set_bit(STRIPE_SYNCING, &sh->state);
 		clear_bit(STRIPE_INSYNC, &sh->state);
 	}
+	clear_bit(STRIPE_HANDLE, &sh->state);
 	clear_bit(STRIPE_DELAYED, &sh->state);
 
 	pr_debug("handling stripe %llu, state=%#lx cnt=%d, "
@@ -3347,6 +3348,8 @@ static void handle_stripe(struct stripe_head *sh)
 		handle_stripe_expansion(conf, sh);
 
 finish:
+	spin_unlock(&sh->lock);
+
 	/* wait for this device to become unblocked */
 	if (conf->mddev->external && unlikely(s.blocked_rdev))
 		md_wait_for_blocked_rdev(s.blocked_rdev, conf->mddev);
@@ -3388,8 +3391,6 @@ finish:
 	}
 
 	return_io(s.return_bi);
-
-	clear_bit_unlock(STRIPE_ACTIVE, &sh->state);
 }
 
 static void raid5_activate_delayed(struct r5conf *conf)

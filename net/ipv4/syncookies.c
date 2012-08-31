@@ -310,11 +310,9 @@ struct sock *cookie_v4_check(struct sock *sk, struct sk_buff *skb,
 	 * the ACK carries the same options again (see RFC1122 4.2.3.8)
 	 */
 	if (opt && opt->optlen) {
-		int opt_size = sizeof(struct ip_options) + opt->optlen;
-
-		ireq->opt = kmalloc(opt_size, GFP_ATOMIC);
+		ireq->opt = kmalloc_ip_options(opt->optlen, GFP_ATOMIC);
 		if (ireq->opt != NULL && ip_options_echo(ireq->opt, skb)) {
-			kfree(ireq->opt);
+			kfree_ip_options(ireq->opt);
 			ireq->opt = NULL;
 		}
 	}

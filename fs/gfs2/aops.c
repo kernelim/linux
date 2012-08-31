@@ -869,6 +869,7 @@ static int gfs2_write_end(struct file *file, struct address_space *mapping,
 	unsigned int from = pos & (PAGE_CACHE_SIZE - 1);
 	unsigned int to = from + len;
 	int ret;
+	int i_size_changed = 0;
 
 	BUG_ON(gfs2_glock_is_locked_by_me(ip->i_gl) == NULL);
 
@@ -887,10 +888,19 @@ static int gfs2_write_end(struct file *file, struct address_space *mapping,
 	if (!gfs2_is_writeback(ip))
 		gfs2_page_add_databufs(ip, page, from, to);
 
-	ret = generic_write_end(file, mapping, pos, len, copied, page, fsdata);
-	if (ret > 0) {
-		if (inode->i_size > ip->i_disksize)
-			ip->i_disksize = inode->i_size;
+	/* inlined bits of generic_write_end to avoid marking the inode dirty
+	   a second time: */
+	ret = block_write_end(file, mapping, pos, len, copied, page, fsdata);
+	if (pos + ret > ip->i_disksize) {
+		ip->i_disksize = pos + ret;
+		i_size_write(inode, pos + ret);
+		i_size_changed = 1;
+	}
+
+	unlock_page(page);
+	page_cache_release(page);
+
+	if (i_size_changed) {
 		gfs2_dinode_out(ip, dibh->b_data);
 		mark_inode_dirty(inode);
 	}

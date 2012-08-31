@@ -680,7 +680,14 @@ static int netconsole_netdev_event(struct notifier_block *this,
 			case NETDEV_RELEASE:
 			case NETDEV_JOIN:
 			case NETDEV_UNREGISTER:
-				netpoll_cleanup(&nt->np);
+				/*
+				 * rtnl_lock already held
+				 */
+				if (nt->np.dev) {
+					__netpoll_cleanup(&nt->np);
+					dev_put(nt->np.dev);
+					nt->np.dev = NULL;
+				}
 				/* Fall through */
 				nt->enabled = 0;
 				stopped = true;

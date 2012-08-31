@@ -661,7 +661,7 @@ void native_machine_shutdown(void)
 	lapic_shutdown();
 
 #ifdef CONFIG_X86_IO_APIC
-	disable_IO_APIC();
+	disable_IO_APIC(0);
 #endif
 
 #ifdef CONFIG_HPET_TIMER

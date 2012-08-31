@@ -94,10 +94,8 @@ int ip_options_echo(struct ip_options * dopt, struct sk_buff * skb)
 
 	sopt = &(IPCB(skb)->opt);
 
-	if (sopt->optlen == 0) {
-		dopt->optlen = 0;
+	if (sopt->optlen == 0)
 		return 0;
-	}
 
 	sptr = skb_network_header(skb);
 	dptr = dopt->__data;
@@ -501,8 +499,7 @@ void ip_options_undo(struct ip_options * opt)
 
 static struct ip_options *ip_options_get_alloc(const int optlen)
 {
-	return kzalloc(sizeof(struct ip_options) + ((optlen + 3) & ~3),
-		       GFP_KERNEL);
+	return kzalloc_ip_options(((optlen + 3) & ~3), GFP_KERNEL);
 }
 
 static int ip_options_get_finish(struct net *net, struct ip_options **optp,
@@ -512,10 +509,10 @@ static int ip_options_get_finish(struct net *net, struct ip_options **optp,
 		opt->__data[optlen++] = IPOPT_END;
 	opt->optlen = optlen;
 	if (optlen && ip_options_compile(net, opt, NULL)) {
-		kfree(opt);
+		kfree_ip_options(opt);
 		return -EINVAL;
 	}
-	kfree(*optp);
+	kfree_ip_options(*optp);
 	*optp = opt;
 	return 0;
 }
@@ -528,7 +525,7 @@ int ip_options_get_from_user(struct net *net, struct ip_options **optp,
 	if (!opt)
 		return -ENOMEM;
 	if (optlen && copy_from_user(opt->__data, data, optlen)) {
-		kfree(opt);
+		kfree_ip_options(opt);
 		return -EFAULT;
 	}
 	return ip_options_get_finish(net, optp, opt, optlen);

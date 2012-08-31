@@ -472,10 +472,10 @@ struct ioctl_data {
 };
 
 struct mii_data {
-	__u16 reserved;
+	__u16 phy_id;
 	__u16 reg_num;
-	__u16 in_value;
-	__u16 out_value;
+	__u16 val_in;
+	__u16 val_out;
 };
 
 /* The Rx and Tx buffer descriptors. */

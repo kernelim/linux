@@ -322,13 +322,16 @@ int ip_queue_xmit(struct sk_buff *skb, int ipfragok)
 {
 	struct sock *sk = skb->sk;
 	struct inet_sock *inet = inet_sk(sk);
-	struct ip_options *opt = inet->opt;
+	struct ip_options *opt;
 	struct rtable *rt;
 	struct iphdr *iph;
+	int res;
 
 	/* Skip all of this if the packet is already routed,
 	 * f.e. by something like SCTP.
 	 */
+	rcu_read_lock();
+	opt = rcu_dereference(inet->opt);
 	rt = skb_rtable(skb);
 	if (rt != NULL)
 		goto packet_routed;
@@ -398,9 +401,12 @@ packet_routed:
 	skb->priority = sk->sk_priority;
 	skb->mark = sk->sk_mark;
 
-	return ip_local_out(skb);
+	res = ip_local_out(skb);
+	rcu_read_unlock();
+	return res;
 
 no_route:
+	rcu_read_unlock();
 	IP_INC_STATS(sock_net(sk), IPSTATS_MIB_OUTNOROUTES);
 	kfree_skb(skb);
 	return -EHOSTUNREACH;

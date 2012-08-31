@@ -3133,7 +3133,7 @@ static void be_netdev_init(struct net_device *netdev)
 
 	adapter->rx_csum = true;
 
-	netif_set_gso_max_size(netdev, 65535);
+	netif_set_gso_max_size(netdev, 65535 - ETH_HLEN);
 
 	BE_SET_NETDEV_OPS(netdev, &be_netdev_ops);
 

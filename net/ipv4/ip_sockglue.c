@@ -434,6 +434,11 @@ out:
 }
 
 
+static void opt_kfree_rcu(struct rcu_head *head)
+{
+	kfree(container_of(head, struct ip_options_rcu, rcu));
+}
+
 /*
  *	Socket option code for IP. This is the end of the line after any
  *	TCP,UDP etc options on an IP socket.
@@ -480,13 +485,15 @@ static int do_ip_setsockopt(struct sock *sk, int level,
 	switch (optname) {
 	case IP_OPTIONS:
 	{
-		struct ip_options *opt = NULL;
+		struct ip_options *old, *opt = NULL;
+
 		if (optlen > 40 || optlen < 0)
 			goto e_inval;
 		err = ip_options_get_from_user(sock_net(sk), &opt,
 					       optval, optlen);
 		if (err)
 			break;
+		old = rcu_dereference(inet->opt);
 		if (inet->is_icsk) {
 			struct inet_connection_sock *icsk = inet_csk(sk);
 #if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
@@ -495,8 +502,8 @@ static int do_ip_setsockopt(struct sock *sk, int level,
 			       (TCPF_LISTEN | TCPF_CLOSE)) &&
 			     inet->daddr != LOOPBACK4_IPV6)) {
 #endif
-				if (inet->opt)
-					icsk->icsk_ext_hdr_len -= inet->opt->optlen;
+				if (old)
+					icsk->icsk_ext_hdr_len -= old->optlen;
 				if (opt)
 					icsk->icsk_ext_hdr_len += opt->optlen;
 				icsk->icsk_sync_mss(sk, icsk->icsk_pmtu_cookie);
@@ -504,8 +511,9 @@ static int do_ip_setsockopt(struct sock *sk, int level,
 			}
 #endif
 		}
-		opt = xchg(&inet->opt, opt);
-		kfree(opt);
+		rcu_assign_pointer(inet->opt, opt);
+		if (old)
+			call_rcu(&get_ip_options_rcu(old)->rcu, opt_kfree_rcu);
 		break;
 	}
 	case IP_PKTINFO:
@@ -1041,12 +1049,15 @@ static int do_ip_getsockopt(struct sock *sk, int level, int optname,
 	case IP_OPTIONS:
 	{
 		unsigned char optbuf[sizeof(struct ip_options)+40];
-		struct ip_options * opt = (struct ip_options *)optbuf;
+		struct ip_options *opt = (struct ip_options *)optbuf;
+		struct ip_options *inet_opt;
+
+		inet_opt = rcu_dereference(inet->opt);
 		opt->optlen = 0;
-		if (inet->opt)
-			memcpy(optbuf, inet->opt,
+		if (inet_opt)
+			memcpy(optbuf, inet_opt,
 			       sizeof(struct ip_options)+
-			       inet->opt->optlen);
+			       inet_opt->optlen);
 		release_sock(sk);
 
 		if (opt->optlen == 0)
