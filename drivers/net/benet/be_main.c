@@ -3493,7 +3493,9 @@ static void be_worker(struct work_struct *work)
 	if (!netif_running(adapter->netdev)) {
 		int mcc_compl, status = 0;
 
+		local_bh_disable();
 		mcc_compl = be_process_mcc(adapter, &status);
+		local_bh_enable();
 
 		if (mcc_compl) {
 			struct be_mcc_obj *mcc_obj = &adapter->mcc_obj;

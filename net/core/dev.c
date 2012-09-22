@@ -2975,7 +2975,7 @@ gro_result_t dev_gro_receive(struct napi_struct *napi, struct sk_buff *skb)
 	int mac_len;
 	gro_result_t ret;
 
-	if (!(skb->dev->features & NETIF_F_GRO))
+	if (!(skb->dev->features & NETIF_F_GRO) || netpoll_rx_on(skb))
 		goto normal;
 
 	if (skb_is_gso(skb) || skb_has_frags(skb))
@@ -3062,9 +3062,6 @@ __napi_gro_receive(struct napi_struct *napi, struct sk_buff *skb)
 {
 	struct sk_buff *p;
 	unsigned int maclen = skb->dev->hard_header_len;
-
-	if (netpoll_rx_on(skb))
-		return GRO_NORMAL;
 
 	for (p = napi->gro_list; p; p = p->next) {
 		unsigned long diffs;

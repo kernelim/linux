@@ -109,6 +109,8 @@ extern void zfcp_fc_gs_destroy(struct zfcp_adapter *);
 extern int zfcp_fc_execute_els_fc_job(struct fc_bsg_job *);
 extern int zfcp_fc_execute_ct_fc_job(struct fc_bsg_job *);
 extern int zfcp_fc_timeout_bsg_job(struct fc_bsg_job *);
+extern void zfcp_fc_conditional_port_scan(struct zfcp_adapter *);
+extern void zfcp_fc_inverse_conditional_port_scan(struct zfcp_adapter *);
 
 /* zfcp_fsf.c */
 extern int zfcp_fsf_open_port(struct zfcp_erp_action *);

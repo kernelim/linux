@@ -26,6 +26,7 @@ struct route_info {
 
 #include <net/flow.h>
 #include <net/ip6_fib.h>
+#include <net/if_inet6.h>
 #include <net/sock.h>
 #include <linux/ip.h>
 #include <linux/ipv6.h>
@@ -54,6 +55,13 @@ extern int			ipv6_route_ioctl(struct net *net,
 extern int			ip6_route_add(struct fib6_config *cfg);
 extern int			ip6_ins_rt(struct rt6_info *);
 extern int			ip6_del_rt(struct rt6_info *);
+
+extern int                     ip6_route_get_saddr(struct net *net,
+						   struct rt6_info *rt,
+						   struct in6_addr *daddr,
+						   unsigned int prefs,
+						   struct in6_addr *saddr);
+
 
 extern struct rt6_info		*rt6_lookup(struct net *net,
 					    const struct in6_addr *daddr,
@@ -113,7 +121,7 @@ struct rt6_rtnl_dump_arg
 extern int rt6_dump_route(struct rt6_info *rt, void *p_arg);
 extern void rt6_ifdown(struct net *net, struct net_device *dev);
 extern void rt6_mtu_change(struct net_device *dev, unsigned mtu);
-
+extern void rt6_remove_prefsrc(struct inet6_ifaddr *ifp);
 
 /*
  *	Store a destination cache entry in a socket

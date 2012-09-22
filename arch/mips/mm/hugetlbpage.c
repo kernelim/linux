@@ -24,7 +24,7 @@
 #include <asm/tlbflush.h>
 
 pte_t *huge_pte_alloc(struct mm_struct *mm, unsigned long addr,
-		      unsigned long sz)
+		      unsigned long sz, bool *shared)
 {
 	pgd_t *pgd;
 	pud_t *pud;

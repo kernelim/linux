@@ -2147,6 +2147,7 @@ int copy_hugetlb_page_range(struct mm_struct *dst, struct mm_struct *src,
 	int cow;
 	struct hstate *h = hstate_vma(vma);
 	unsigned long sz = huge_page_size(h);
+	bool shared = false;
 
 	cow = (vma->vm_flags & (VM_SHARED | VM_MAYWRITE)) == VM_MAYWRITE;
 
@@ -2154,12 +2155,12 @@ int copy_hugetlb_page_range(struct mm_struct *dst, struct mm_struct *src,
 		src_pte = huge_pte_offset(src, addr);
 		if (!src_pte)
 			continue;
-		dst_pte = huge_pte_alloc(dst, addr, sz);
+		dst_pte = huge_pte_alloc(dst, addr, sz, &shared);
 		if (!dst_pte)
 			goto nomem;
 
 		/* If the pagetables are shared don't copy or take references */
-		if (dst_pte == src_pte)
+		if (shared)
 			continue;
 
 		spin_lock(&dst->page_table_lock);
@@ -2292,6 +2293,17 @@ void unmap_hugepage_range(struct vm_area_struct *vma, unsigned long start,
 {
 	spin_lock(&vma->vm_file->f_mapping->i_mmap_lock);
 	__unmap_hugepage_range(vma, start, end, ref_page);
+	/*
+	 * Clear this flag so that x86's huge_pmd_share page_table_shareable
+	 * test will fail on a vma being torn down, and not grab a page table
+	 * on its way out.  We're lucky that the flag has such an appropriate
+	 * name, and can in fact be safely cleared here. We could clear it
+	 * before the __unmap_hugepage_range above, but all that's necessary
+	 * is to clear it before releasing the i_mmap_lock. This works
+	 * because in the context this is called, the VMA is about to be
+	 * destroyed and the i_mmap_lock is held.
+	 */
+	vma->vm_flags &= ~VM_MAYSHARE;
 	spin_unlock(&vma->vm_file->f_mapping->i_mmap_lock);
 }
 
@@ -2627,6 +2639,7 @@ int hugetlb_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	struct page *pagecache_page = NULL;
 	static DEFINE_MUTEX(hugetlb_instantiation_mutex);
 	struct hstate *h = hstate_vma(vma);
+	bool shared = false;
 
 	ptep = huge_pte_offset(mm, address);
 	if (ptep) {
@@ -2639,9 +2652,13 @@ int hugetlb_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 			       VM_FAULT_SET_HINDEX(h - hstates);
 	}
 
-	ptep = huge_pte_alloc(mm, address, huge_page_size(h));
+	ptep = huge_pte_alloc(mm, address, huge_page_size(h), &shared);
 	if (!ptep)
 		return VM_FAULT_OOM;
+
+	/* If the pagetable is shared, no other work is necessary */
+	if (shared)
+		return 0;
 
 	/*
 	 * Serialize hugepage allocation and instantiation, so that we don't
@@ -2841,9 +2858,14 @@ void hugetlb_change_protection(struct vm_area_struct *vma,
 		}
 	}
 	spin_unlock(&mm->page_table_lock);
-	spin_unlock(&vma->vm_file->f_mapping->i_mmap_lock);
-
+	/*
+	 * Must flush TLB before releasing i_mmap_lock: x86's huge_pmd_unshare
+	 * may have cleared our pud entry and done put_page on the page table:
+	 * once we release i_mmap_lock, another task can do the final put_page
+	 * and that page table be reused and filled with junk.
+	 */
 	flush_tlb_range(vma, start, end);
+	spin_unlock(&vma->vm_file->f_mapping->i_mmap_lock);
 }
 
 int hugetlb_reserve_pages(struct inode *inode,

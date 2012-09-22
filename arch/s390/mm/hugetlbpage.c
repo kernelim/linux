@@ -73,7 +73,8 @@ void arch_release_hugepage(struct page *page)
 }
 
 pte_t *huge_pte_alloc(struct mm_struct *mm,
-			unsigned long addr, unsigned long sz)
+			unsigned long addr, unsigned long sz,
+			bool *shared)
 {
 	pgd_t *pgdp;
 	pud_t *pudp;

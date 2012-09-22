@@ -59,7 +59,8 @@ static int vma_shareable(struct vm_area_struct *vma, unsigned long addr)
 /*
  * search for a shareable pmd page for hugetlb.
  */
-static void huge_pmd_share(struct mm_struct *mm, unsigned long addr, pud_t *pud)
+static void huge_pmd_share(struct mm_struct *mm, unsigned long addr, pud_t *pud,
+			   bool *shared)
 {
 	struct vm_area_struct *vma = find_vma(mm, addr);
 	struct address_space *mapping = vma->vm_file->f_mapping;
@@ -92,9 +93,10 @@ static void huge_pmd_share(struct mm_struct *mm, unsigned long addr, pud_t *pud)
 		goto out;
 
 	spin_lock(&mm->page_table_lock);
-	if (pud_none(*pud))
+	if (pud_none(*pud)) {
 		pud_populate(mm, pud, (pmd_t *)((unsigned long)spte & PAGE_MASK));
-	else
+		*shared = true;
+	} else
 		put_page(virt_to_page(spte));
 	spin_unlock(&mm->page_table_lock);
 out:
@@ -129,7 +131,8 @@ int huge_pmd_unshare(struct mm_struct *mm, unsigned long *addr, pte_t *ptep)
 }
 
 pte_t *huge_pte_alloc(struct mm_struct *mm,
-			unsigned long addr, unsigned long sz)
+			unsigned long addr, unsigned long sz,
+			bool *shared)
 {
 	pgd_t *pgd;
 	pud_t *pud;
@@ -143,7 +146,7 @@ pte_t *huge_pte_alloc(struct mm_struct *mm,
 		} else {
 			BUG_ON(sz != PMD_SIZE);
 			if (pud_none(*pud))
-				huge_pmd_share(mm, addr, pud);
+				huge_pmd_share(mm, addr, pud, shared);
 			pte = (pte_t *) pmd_alloc(mm, pud, addr);
 		}
 	}

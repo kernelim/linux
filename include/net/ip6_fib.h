@@ -49,6 +49,7 @@ struct fib6_config
 	int		fc_mx_len;
 
 	struct nl_info	fc_nlinfo;
+	struct in6_addr	fc_prefsrc;
 };
 
 struct fib6_node
@@ -120,6 +121,9 @@ struct rt6_info
 #endif
 
 	struct rt6key			rt6i_src;
+#ifndef __GENKSYMS__
+	struct rt6key                   rt6i_prefsrc;
+#endif
 };
 
 static inline struct inet6_dev *ip6_dst_idev(struct dst_entry *dst)

@@ -50,7 +50,7 @@ STATIC void xfs_ail_check(struct xfs_ail *, xfs_log_item_t *);
  * lsn of the last item in the AIL.
  */
 xfs_lsn_t
-xfs_trans_ail_tail(
+xfs_ail_min_lsn(
 	struct xfs_ail	*ailp)
 {
 	xfs_lsn_t	lsn;
@@ -85,7 +85,7 @@ xfs_trans_ail_tail(
  * any of the objects, so the lock is not needed.
  */
 void
-xfs_trans_ail_push(
+xfs_ail_push(
 	struct xfs_ail	*ailp,
 	xfs_lsn_t	threshold_lsn)
 {
@@ -96,6 +96,39 @@ xfs_trans_ail_push(
 		if (XFS_LSN_CMP(threshold_lsn, ailp->xa_target) > 0)
 			xfsaild_wakeup(ailp, threshold_lsn);
 	}
+}
+
+ /*
+ * Return a pointer to the last item in the AIL.  If the AIL is empty, then
+ * return NULL.
+ */
+static xfs_log_item_t *
+xfs_ail_max(
+	struct xfs_ail  *ailp)
+{
+	if (list_empty(&ailp->xa_ail))
+		return NULL;
+
+	return list_entry(ailp->xa_ail.prev, xfs_log_item_t, li_ail);
+}
+
+/*
+ * Return the maximum lsn held in the AIL, or zero if the AIL is empty.
+ */
+static xfs_lsn_t
+xfs_ail_max_lsn(
+	struct xfs_ail  *ailp)
+{
+	xfs_lsn_t       lsn = 0;
+	xfs_log_item_t  *lip;
+
+	spin_lock(&ailp->xa_lock);
+	lip = xfs_ail_max(ailp);
+	if (lip)
+		lsn = lip->li_lsn;
+	spin_unlock(&ailp->xa_lock);
+
+	return lsn;
 }
 
 /*
@@ -405,6 +438,19 @@ xfsaild_push(
 	return tout;
 }
 
+
+/*
+ * Push out all items in the AIL immediately
+ */
+void
+xfs_ail_push_all(
+	struct xfs_ail  *ailp)
+{
+	xfs_lsn_t       threshold_lsn = xfs_ail_max_lsn(ailp);
+
+	if (threshold_lsn)
+		xfs_ail_push(ailp, threshold_lsn);
+}
 
 /*
  * This is to be called when an item is unlocked that may have
