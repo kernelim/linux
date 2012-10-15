@@ -723,7 +723,7 @@ static int gfs2_write_inode(struct inode *inode, struct writeback_control *wbc)
 	struct buffer_head *bh;
 	struct timespec atime;
 	struct gfs2_dinode *di;
-	int ret = -EAGAIN;
+	int ret = 0;
 	int unlock_required = 0;
 
 	/* Skip timestamp update, if this is from a memalloc */
@@ -759,10 +759,13 @@ do_flush:
 		gfs2_ail1_flush(sdp, wbc);
 	else
 		filemap_fdatawrite(metamapping);
-	if (!ret && (wbc->sync_mode == WB_SYNC_ALL))
+	if (wbc->sync_mode == WB_SYNC_ALL)
 		ret = filemap_fdatawait(metamapping);
-	if (ret)
+	if ((ret || (current->flags & PF_MEMALLOC)) &&
+	    !(inode->i_state & (I_WILL_FREE|I_FREEING))) {
 		mark_inode_dirty_sync(inode);
+		return ret ? ret : -EAGAIN;
+	}
 	return ret;
 }
 
@@ -1504,7 +1507,33 @@ static void gfs2_delete_inode(struct inode *inode)
 	goto out_unlock;
 
 out_truncate:
+	if (test_bit(GLF_DIRTY, &ip->i_gl->gl_flags) &&
+            !(current->flags & PF_MEMALLOC)) {
+		struct buffer_head *bh;
+		struct gfs2_dinode *di;
+		struct timespec atime;
+		error = gfs2_meta_inode_buffer(ip, &bh);
+		if (!error) {
+			di = (struct gfs2_dinode *)bh->b_data;
+			atime.tv_sec = be64_to_cpu(di->di_atime);
+			atime.tv_nsec = be32_to_cpu(di->di_atime_nsec);
+			if (timespec_compare(&inode->i_atime, &atime) > 0) {
+				error = gfs2_trans_begin(sdp, RES_DINODE, 0);
+				if (error == 0) {
+					gfs2_trans_add_bh(ip->i_gl, bh, 1);
+					gfs2_dinode_out(ip, bh->b_data);
+					gfs2_trans_end(sdp);
+				}
+			}
+			brelse(bh);
+		}
+	}
 	gfs2_log_flush(sdp, ip->i_gl);
+	if (test_bit(GLF_DIRTY, &ip->i_gl->gl_flags)) {
+		struct address_space *metamapping = gfs2_glock2aspace(ip->i_gl);
+		filemap_fdatawrite(metamapping);
+		filemap_fdatawait(metamapping);
+	}
 	write_inode_now(inode, 1);
 	gfs2_ail_flush(ip->i_gl, 0);
 
@@ -1528,7 +1557,6 @@ out:
 	/* Case 3 starts here */
 	truncate_inode_pages(&inode->i_data, 0);
 	clear_inode(inode);
-	gfs2_dir_hash_inval(ip);
 }
 
 static struct inode *gfs2_alloc_inode(struct super_block *sb)

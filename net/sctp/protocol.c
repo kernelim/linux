@@ -1151,6 +1151,12 @@ SCTP_STATIC __init int sctp_init(void)
 	sctp_max_instreams    		= SCTP_DEFAULT_INSTREAMS;
 	sctp_max_outstreams   		= SCTP_DEFAULT_OUTSTREAMS;
 
+	/* This is a RHEL6 specific setting.  Upstream defaults the PF feature
+	 * to on.  In RHEL we should default it off to avoid unintentionally
+	 * altering the behavior of our install base
+	 */
+	sctp_pf_retrans			= INT_MAX;
+
 	/* Initialize handle used for association ids. */
 	idr_init(&sctp_assocs_id);
 

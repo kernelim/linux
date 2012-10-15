@@ -276,6 +276,7 @@ static void scsi_host_dev_release(struct device *dev)
 	struct Scsi_Host *shost = dev_to_shost(dev);
 	struct device *parent = dev->parent;
 	struct request_queue *q;
+	void *queuedata;
 
 	scsi_proc_hostdir_rm(shost->hostt);
 
@@ -285,15 +286,9 @@ static void scsi_host_dev_release(struct device *dev)
 		destroy_workqueue(shost->work_q);
 	q = shost->uspace_req_q;
 	if (q) {
-		/*
-		 * Note: freeing queuedata before invoking blk_cleanup_queue()
-		 * is safe here because no request function is associated with
-		 * uspace_req_q. See also the __scsi_alloc_queue() call in
-		 * drivers/scsi/scsi_tgt_lib.c.
-		 */
-		kfree(q->queuedata);
-		q->queuedata = NULL;
+		queuedata = q->queuedata;
 		blk_cleanup_queue(q);
+		kfree(queuedata);
 	}
 
 	scsi_destroy_command_freelist(shost);

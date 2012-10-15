@@ -123,7 +123,13 @@ static int ehci_pci_setup(struct usb_hcd *hcd)
 
 	switch (pdev->vendor) {
 	case PCI_VENDOR_ID_INTEL:
-		ehci->need_io_watchdog = 0;
+		if (io_watchdog_force) {
+			ehci_info(ehci, "Forcing IO watchdog ON for INTEL hardware\n");
+			ehci->need_io_watchdog = 1;
+		}
+		else 
+			ehci->need_io_watchdog = 0;
+
 		if (pdev->device == 0x27cc) {
 			ehci->broken_periodic = 1;
 			ehci_info(ehci, "using broken periodic workaround\n");

@@ -748,7 +748,7 @@ int mlx4_en_start_port(struct net_device *dev)
 	}
 
 	/* Must redo promiscuous mode setup. */
-	priv->flags &= ~MLX4_EN_FLAG_PROMISC;
+	priv->flags &= ~(MLX4_EN_FLAG_PROMISC | MLX4_EN_FLAG_MC_PROMISC);
 
 	/* Attach rx QP to bradcast address */
 	memset(&mc_list[10], 0xff, ETH_ALEN);

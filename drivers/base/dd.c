@@ -241,6 +241,10 @@ int device_attach(struct device *dev)
 
 	down(&dev->sem);
 	if (dev->driver) {
+		if (klist_node_attached(&dev->p->knode_driver)) {
+			ret = 1;
+			goto out_unlock;
+		}
 		ret = device_bind_driver(dev);
 		if (ret == 0)
 			ret = 1;
@@ -253,6 +257,7 @@ int device_attach(struct device *dev)
 		ret = bus_for_each_drv(dev->bus, NULL, dev, __device_attach);
 		pm_runtime_put_sync(dev);
 	}
+out_unlock:
 	up(&dev->sem);
 	return ret;
 }

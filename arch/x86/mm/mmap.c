@@ -95,6 +95,8 @@ static unsigned long mmap_base(void)
 	return PAGE_ALIGN(TASK_SIZE - gap - mmap_rnd());
 }
 
+#define SHLIB_BASE             0x00110000
+
 /*
  * Bottom-up (legacy) layout on X86_32 did not support randomization, X86_64
  * does, but not when emulating X86_32
@@ -121,8 +123,10 @@ void arch_pick_mmap_layout(struct mm_struct *mm)
 		mm->mmap_base = mmap_base();
 		mm->get_unmapped_area = arch_get_unmapped_area_topdown;
 		if (!(current->personality & READ_IMPLIES_EXEC)
-		    && mmap_is_ia32())
+		    && mmap_is_ia32()) {
 			mm->get_unmapped_exec_area = arch_get_unmapped_exec_area;
+			mm->shlib_base = SHLIB_BASE + mmap_rnd();
+		}
 		mm->unmap_area = arch_unmap_area_topdown;
 	}
 }

@@ -106,6 +106,11 @@ static unsigned int hird;
 module_param(hird, int, S_IRUGO);
 MODULE_PARM_DESC(hird, "host initiated resume duration, +1 for each 75us\n");
 
+/* To force IO watchdog to be on all the time */
+unsigned int io_watchdog_force;
+module_param(io_watchdog_force, uint, S_IRUGO);
+MODULE_PARM_DESC(io_watchdog_force, "Force IO watchdog to be on for all devices\n");
+
 #define	INTR_MASK (STS_IAA | STS_FATAL | STS_PCD | STS_ERR | STS_INT)
 
 /*-------------------------------------------------------------------------*/

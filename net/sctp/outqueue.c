@@ -784,7 +784,8 @@ static int sctp_outq_flush(struct sctp_outq *q, int rtx_timeout)
 			if (!new_transport)
 				new_transport = asoc->peer.active_path;
 		} else if ((new_transport->state == SCTP_INACTIVE) ||
-			   (new_transport->state == SCTP_UNCONFIRMED)) {
+			   (new_transport->state == SCTP_UNCONFIRMED) ||
+			   (new_transport->state == SCTP_PF)) {
 			/* If the chunk is Heartbeat or Heartbeat Ack,
 			 * send it to chunk->transport, even if it's
 			 * inactive.
@@ -974,7 +975,8 @@ static int sctp_outq_flush(struct sctp_outq *q, int rtx_timeout)
 			new_transport = chunk->transport;
 			if (!new_transport ||
 			    ((new_transport->state == SCTP_INACTIVE) ||
-			     (new_transport->state == SCTP_UNCONFIRMED)))
+			     (new_transport->state == SCTP_UNCONFIRMED) ||
+			     (new_transport->state == SCTP_PF)))
 				new_transport = asoc->peer.active_path;
 
 			/* Change packets if necessary.  */

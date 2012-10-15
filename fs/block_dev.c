@@ -1234,7 +1234,7 @@ static int __blkdev_get(struct block_device *bdev, fmode_t mode, int for_part)
 					disk_put_part(bdev->bd_part);
 					bdev->bd_part = NULL;
 					put_disk(disk);
-					module_put(disk->fops->owner);
+					module_put(owner);
 					bdev->bd_disk = NULL;
 					mutex_unlock(&bdev->bd_mutex);
 					goto restart;
@@ -1274,7 +1274,7 @@ static int __blkdev_get(struct block_device *bdev, fmode_t mode, int for_part)
 		}
 	} else {
 		put_disk(disk);
-		module_put(disk->fops->owner);
+		module_put(owner);
 		disk = NULL;
 		if (bdev->bd_contains == bdev) {
 			if (bdev->bd_disk->fops->open) {
@@ -1308,7 +1308,7 @@ static int __blkdev_get(struct block_device *bdev, fmode_t mode, int for_part)
 
 	put_disk(disk);
 	if (disk)
-		module_put(disk->fops->owner);
+		module_put(owner);
 	bdput(bdev);
 
 	return ret;

@@ -165,6 +165,9 @@ struct ehci_hcd {			/* one per controller */
 #endif
 };
 
+/* Force IO watchdog to be always enabled */
+extern unsigned int io_watchdog_force;
+
 /* convert between an HCD pointer and the corresponding EHCI_HCD */
 static inline struct ehci_hcd *hcd_to_ehci (struct usb_hcd *hcd)
 {

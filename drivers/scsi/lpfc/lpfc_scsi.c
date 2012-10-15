@@ -2818,12 +2818,15 @@ lpfc_scsi_cmd_iocb_cmpl(struct lpfc_hba *phba, struct lpfc_iocbq *pIocbIn,
 	cmd->scsi_done(cmd);
 
 	if (phba->cfg_poll & ENABLE_FCP_RING_POLLING) {
+		spin_lock_irq(&phba->hbalock);
+		lpfc_cmd->pCmd = NULL;
+		spin_unlock_irq(&phba->hbalock);
+
 		/*
 		 * If there is a thread waiting for command completion
 		 * wake up the thread.
 		 */
 		spin_lock_irqsave(shost->host_lock, flags);
-		lpfc_cmd->pCmd = NULL;
 		if (lpfc_cmd->waitq)
 			wake_up(lpfc_cmd->waitq);
 		spin_unlock_irqrestore(shost->host_lock, flags);
@@ -2857,12 +2860,15 @@ lpfc_scsi_cmd_iocb_cmpl(struct lpfc_hba *phba, struct lpfc_iocbq *pIocbIn,
 		}
 	}
 
+	spin_lock_irq(&phba->hbalock);
+	lpfc_cmd->pCmd = NULL;
+	spin_unlock_irq(&phba->hbalock);
+
 	/*
 	 * If there is a thread waiting for command completion
 	 * wake up the thread.
 	 */
 	spin_lock_irqsave(shost->host_lock, flags);
-	lpfc_cmd->pCmd = NULL;
 	if (lpfc_cmd->waitq)
 		wake_up(lpfc_cmd->waitq);
 	spin_unlock_irqrestore(shost->host_lock, flags);
@@ -3414,12 +3420,12 @@ lpfc_abort_handler(struct scsi_cmnd *cmnd)
 	struct lpfc_iocbq *abtsiocb;
 	struct lpfc_scsi_buf *lpfc_cmd;
 	IOCB_t *cmd, *icmd;
-	int ret = SUCCESS;
+	int ret = SUCCESS, status = 0;
 	DECLARE_WAIT_QUEUE_HEAD_ONSTACK(waitq);
 
-	ret = fc_block_scsi_eh(cmnd);
-	if (ret)
-		return ret;
+	status = fc_block_scsi_eh(cmnd);
+	if (status)
+		return status;
 
 	spin_lock_irq(&phba->hbalock);
 	/* driver queued commands are in process of being flushed */
@@ -3432,12 +3438,12 @@ lpfc_abort_handler(struct scsi_cmnd *cmnd)
 	}
 
 	lpfc_cmd = (struct lpfc_scsi_buf *)cmnd->host_scribble;
-	if (!lpfc_cmd) {
+	if (!lpfc_cmd || !lpfc_cmd->pCmd) {
 		spin_unlock_irq(&phba->hbalock);
 		lpfc_printf_vlog(vport, KERN_WARNING, LOG_FCP,
 			 "2873 SCSI Layer I/O Abort Request IO CMPL Status "
 			 "x%x ID %d LUN %d\n",
-			 ret, cmnd->device->id, cmnd->device->lun);
+			 SUCCESS, cmnd->device->id, cmnd->device->lun);
 		return SUCCESS;
 	}
 
@@ -3764,7 +3770,7 @@ lpfc_device_reset_handler(struct scsi_cmnd *cmnd)
 	unsigned tgt_id = cmnd->device->id;
 	unsigned int lun_id = cmnd->device->lun;
 	struct lpfc_scsi_event_header scsi_event;
-	int status;
+	int status = 0, ret = SUCCESS;
 
 	if (!rdata) {
 		lpfc_printf_vlog(vport, KERN_ERR, LOG_FCP,
@@ -3805,9 +3811,9 @@ lpfc_device_reset_handler(struct scsi_cmnd *cmnd)
 	 * So, continue on.
 	 * We will report success if all the i/o aborts successfully.
 	 */
-	status = lpfc_reset_flush_io_context(vport, tgt_id, lun_id,
+	ret = lpfc_reset_flush_io_context(vport, tgt_id, lun_id,
 						LPFC_CTX_LUN);
-	return status;
+	return ret;
 }
 
 /**
@@ -3831,7 +3837,7 @@ lpfc_target_reset_handler(struct scsi_cmnd *cmnd)
 	unsigned tgt_id = cmnd->device->id;
 	unsigned int lun_id = cmnd->device->lun;
 	struct lpfc_scsi_event_header scsi_event;
-	int status;
+	int status = 0, ret = SUCCESS;
 
 	if (!rdata) {
 		lpfc_printf_vlog(vport, KERN_ERR, LOG_FCP,
@@ -3872,9 +3878,9 @@ lpfc_target_reset_handler(struct scsi_cmnd *cmnd)
 	 * So, continue on.
 	 * We will report success if all the i/o aborts successfully.
 	 */
-	status = lpfc_reset_flush_io_context(vport, tgt_id, lun_id,
-					LPFC_CTX_TGT);
-	return status;
+	ret = lpfc_reset_flush_io_context(vport, tgt_id, lun_id,
+					  LPFC_CTX_TGT);
+	return ret;
 }
 
 /**

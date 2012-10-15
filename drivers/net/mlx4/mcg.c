@@ -103,11 +103,11 @@ static int mlx4_GID_HASH(struct mlx4_dev *dev, struct mlx4_cmd_mailbox *mailbox,
 	return err;
 }
 
-static struct mlx4_promisc_qp *get_promisc_qp(struct mlx4_dev *dev, u8 pf_num,
+static struct mlx4_promisc_qp *get_promisc_qp(struct mlx4_dev *dev, u8 port,
 					      enum mlx4_steer_type steer,
 					      u32 qpn)
 {
-	struct mlx4_steer *s_steer = &mlx4_priv(dev)->steer[pf_num];
+	struct mlx4_steer *s_steer = &mlx4_priv(dev)->steer[port - 1];
 	struct mlx4_promisc_qp *pqp;
 
 	list_for_each_entry(pqp, &s_steer->promisc_qps[steer], list) {
@@ -148,7 +148,7 @@ static int new_steering_entry(struct mlx4_dev *dev, u8 port,
 	/* If the given qpn is also a promisc qp,
 	 * it should be inserted to duplicates list
 	 */
-	pqp = get_promisc_qp(dev, 0, steer, qpn);
+	pqp = get_promisc_qp(dev, port, steer, qpn);
 	if (pqp) {
 		dqp = kmalloc(sizeof *dqp, GFP_KERNEL);
 		if (!dqp) {
@@ -222,7 +222,7 @@ static int existing_steering_entry(struct mlx4_dev *dev, u8 port,
 
 	s_steer = &mlx4_priv(dev)->steer[port - 1];
 
-	pqp = get_promisc_qp(dev, 0, steer, qpn);
+	pqp = get_promisc_qp(dev, port, steer, qpn);
 	if (!pqp)
 		return 0; /* nothing to do */
 
@@ -268,7 +268,7 @@ static bool check_duplicate_entry(struct mlx4_dev *dev, u8 port,
 	s_steer = &mlx4_priv(dev)->steer[port - 1];
 
 	/* if qp is not promisc, it cannot be duplicated */
-	if (!get_promisc_qp(dev, 0, steer, qpn))
+	if (!get_promisc_qp(dev, port, steer, qpn))
 		return false;
 
 	/* The qp is promisc qp so it is a duplicate on this index
@@ -318,7 +318,7 @@ static bool can_remove_steering_entry(struct mlx4_dev *dev, u8 port,
 	members_count = be32_to_cpu(mgm->members_count) & 0xffffff;
 	for (i = 0;  i < members_count; i++) {
 		qpn = be32_to_cpu(mgm->qp[i]) & MGM_QPN_MASK;
-		if (!get_promisc_qp(dev, 0, steer, qpn) && qpn != tqpn) {
+		if (!get_promisc_qp(dev, port, steer, qpn) && qpn != tqpn) {
 			/* the qp is not promisc, the entry can't be removed */
 			goto out;
 		}
@@ -365,7 +365,7 @@ static int add_promisc_qp(struct mlx4_dev *dev, u8 port,
 
 	mutex_lock(&priv->mcg_table.mutex);
 
-	if (get_promisc_qp(dev, 0, steer, qpn)) {
+	if (get_promisc_qp(dev, port, steer, qpn)) {
 		err = 0;  /* Noting to do, already exists */
 		goto out_mutex;
 	}
@@ -469,7 +469,7 @@ static int remove_promisc_qp(struct mlx4_dev *dev, u8 port,
 	s_steer = &mlx4_priv(dev)->steer[port - 1];
 	mutex_lock(&priv->mcg_table.mutex);
 
-	pqp = get_promisc_qp(dev, 0, steer, qpn);
+	pqp = get_promisc_qp(dev, port, steer, qpn);
 	if (unlikely(!pqp)) {
 		mlx4_warn(dev, "QP %x is not promiscuous QP\n", qpn);
 		/* nothing to do */
@@ -872,44 +872,36 @@ static int mlx4_QP_ATTACH(struct mlx4_dev *dev, struct mlx4_qp *qp,
 int mlx4_multicast_attach(struct mlx4_dev *dev, struct mlx4_qp *qp, u8 gid[16],
 			  int block_mcast_loopback, enum mlx4_protocol prot)
 {
-	enum mlx4_steer_type steer;
-
-	steer = (is_valid_ether_addr(&gid[10])) ? MLX4_UC_STEER : MLX4_MC_STEER;
-
 	if (prot == MLX4_PROT_ETH &&
 			!(dev->caps.flags & MLX4_DEV_CAP_FLAG_VEP_MC_STEER))
 		return 0;
 
 	if (prot == MLX4_PROT_ETH)
-		gid[7] |= (steer << 1);
+		gid[7] |= (MLX4_MC_STEER << 1);
 
 	if (mlx4_is_mfunc(dev))
 		return mlx4_QP_ATTACH(dev, qp, gid, 1,
 					block_mcast_loopback, prot);
 
 	return mlx4_qp_attach_common(dev, qp, gid, block_mcast_loopback,
-					prot, steer);
+					prot, MLX4_MC_STEER);
 }
 EXPORT_SYMBOL_GPL(mlx4_multicast_attach);
 
 int mlx4_multicast_detach(struct mlx4_dev *dev, struct mlx4_qp *qp, u8 gid[16],
 			  enum mlx4_protocol prot)
 {
-	enum mlx4_steer_type steer;
-
-	steer = (is_valid_ether_addr(&gid[10])) ? MLX4_UC_STEER : MLX4_MC_STEER;
-
 	if (prot == MLX4_PROT_ETH &&
 			!(dev->caps.flags & MLX4_DEV_CAP_FLAG_VEP_MC_STEER))
 		return 0;
 
 	if (prot == MLX4_PROT_ETH)
-		gid[7] |= (steer << 1);
+		gid[7] |= (MLX4_MC_STEER << 1);
 
 	if (mlx4_is_mfunc(dev))
 		return mlx4_QP_ATTACH(dev, qp, gid, 0, 0, prot);
 
-	return mlx4_qp_detach_common(dev, qp, gid, prot, steer);
+	return mlx4_qp_detach_common(dev, qp, gid, prot, MLX4_MC_STEER);
 }
 EXPORT_SYMBOL_GPL(mlx4_multicast_detach);
 

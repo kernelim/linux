@@ -65,6 +65,8 @@ static struct sctp_transport *sctp_transport_init(struct sctp_transport *peer,
 	peer->af_specific = sctp_get_af_specific(addr->sa.sa_family);
 	memset(&peer->saddr, 0, sizeof(union sctp_addr));
 
+	peer->sack_generation = 0;
+
 	/* From 6.3.1 RTO Calculation:
 	 *
 	 * C1) Until an RTT measurement has been made for a packet sent to the
@@ -82,6 +84,7 @@ static struct sctp_transport *sctp_transport_init(struct sctp_transport *peer,
 
 	/* Initialize the default path max_retrans.  */
 	peer->pathmaxrxt  = sctp_max_retrans_path;
+	peer->pf_retrans  = sctp_pf_retrans;
 
 	INIT_LIST_HEAD(&peer->transmitted);
 	INIT_LIST_HEAD(&peer->send_ready);
@@ -610,7 +613,8 @@ unsigned long sctp_transport_timeout(struct sctp_transport *t)
 {
 	unsigned long timeout;
 	timeout = t->rto + sctp_jitter(t->rto);
-	if (t->state != SCTP_UNCONFIRMED)
+	if ((t->state != SCTP_UNCONFIRMED) &&
+	    (t->state != SCTP_PF))
 		timeout += t->hbinterval;
 	timeout += jiffies;
 	return timeout;

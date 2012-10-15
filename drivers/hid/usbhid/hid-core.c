@@ -309,8 +309,12 @@ static int hid_submit_out(struct hid_device *hid)
 	if (!test_bit(HID_REPORTED_IDLE, &usbhid->iofl)) {
 		usbhid->urbout->transfer_buffer_length = ((report->size - 1) >> 3) + 1 + (report->id > 0);
 		usbhid->urbout->dev = hid_to_usb_dev(hid);
-		memcpy(usbhid->outbuf, raw_report, usbhid->urbout->transfer_buffer_length);
-		kfree(raw_report);
+		if (raw_report) {
+			memcpy(usbhid->outbuf, raw_report,
+				usbhid->urbout->transfer_buffer_length);
+			kfree(raw_report);
+			usbhid->out[usbhid->outtail].raw_report = NULL;
+		}
 
 		dbg_hid("submitting out urb\n");
 
@@ -348,8 +352,11 @@ static int hid_submit_ctrl(struct hid_device *hid)
 		if (dir == USB_DIR_OUT) {
 			usbhid->urbctrl->pipe = usb_sndctrlpipe(hid_to_usb_dev(hid), 0);
 			usbhid->urbctrl->transfer_buffer_length = len;
-			memcpy(usbhid->ctrlbuf, raw_report, len);
-			kfree(raw_report);
+			if (raw_report) {
+				memcpy(usbhid->ctrlbuf, raw_report, len);
+				kfree(raw_report);
+				usbhid->ctrl[usbhid->ctrltail].raw_report = NULL;
+			}
 		} else {
 			int maxpacket, padlen;
 

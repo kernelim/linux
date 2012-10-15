@@ -307,7 +307,8 @@ struct mm_struct {
 		atomic_t oom_disable_count;
 	};
 
-	unsigned long rh_reserved;
+	/* base of lib map area (ASCII armour) */
+	unsigned long shlib_base;
 #endif
 };
 

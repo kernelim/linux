@@ -102,7 +102,7 @@ static void scsi_unprep_request(struct request *req)
  * for a requeue after completion, which should only occur in this
  * file.
  */
-static int __scsi_queue_insert(struct scsi_cmnd *cmd, int reason, int unbusy)
+static void __scsi_queue_insert(struct scsi_cmnd *cmd, int reason, int unbusy)
 {
 	struct Scsi_Host *host = cmd->device->host;
 	struct scsi_device *device = cmd->device;
@@ -148,22 +148,14 @@ static int __scsi_queue_insert(struct scsi_cmnd *cmd, int reason, int unbusy)
 
 	/*
 	 * Requeue this command.  It will go before all other commands
-	 * that are already in the queue.
-	 *
-	 * NOTE: there is magic here about the way the queue is plugged if
-	 * we have no outstanding commands.
-	 * 
-	 * Although we *don't* plug the queue, we call the request
-	 * function.  The SCSI request function detects the blocked condition
-	 * and plugs the queue appropriately.
+	 * that are already in the queue. Schedule requeue work under
+	 * lock such that the kblockd_schedule_work() call happens
+	 * before blk_cleanup_queue() finishes.
          */
 	spin_lock_irqsave(q->queue_lock, flags);
 	blk_requeue_request(q, cmd->request);
-	spin_unlock_irqrestore(q->queue_lock, flags);
-
 	kblockd_schedule_work(q, &device->requeue_work);
-
-	return 0;
+	spin_unlock_irqrestore(q->queue_lock, flags);
 }
 
 /*
@@ -185,9 +177,9 @@ static int __scsi_queue_insert(struct scsi_cmnd *cmd, int reason, int unbusy)
  * Notes:       This could be called either from an interrupt context or a
  *              normal process context.
  */
-int scsi_queue_insert(struct scsi_cmnd *cmd, int reason)
+void scsi_queue_insert(struct scsi_cmnd *cmd, int reason)
 {
-	return __scsi_queue_insert(cmd, reason, 1);
+	__scsi_queue_insert(cmd, reason, 1);
 }
 /**
  * scsi_execute - insert request and wait for the result
@@ -406,7 +398,6 @@ static void scsi_run_queue(struct request_queue *q)
 	LIST_HEAD(starved_list);
 	unsigned long flags;
 
-	BUG_ON(!sdev);
 	shost = sdev->host;
 	if (scsi_target(sdev)->single_lun)
 		scsi_single_lun_run(sdev);
@@ -480,8 +471,17 @@ void scsi_requeue_run_queue(struct work_struct *work)
  */
 static void scsi_requeue_command(struct request_queue *q, struct scsi_cmnd *cmd)
 {
+	struct scsi_device *sdev = cmd->device;
 	struct request *req = cmd->request;
 	unsigned long flags;
+
+	/*
+	 * We need to hold a reference on the device to avoid the queue being
+	 * killed after the unlock and before scsi_run_queue is invoked which
+	 * may happen because scsi_unprep_request() puts the command which
+	 * releases its reference on the device.
+	 */
+	get_device(&sdev->sdev_gendev);
 
 	spin_lock_irqsave(q->queue_lock, flags);
 	scsi_unprep_request(req);
@@ -489,6 +489,8 @@ static void scsi_requeue_command(struct request_queue *q, struct scsi_cmnd *cmd)
 	spin_unlock_irqrestore(q->queue_lock, flags);
 
 	scsi_run_queue(q);
+
+	put_device(&sdev->sdev_gendev);
 }
 
 void scsi_next_command(struct scsi_cmnd *cmd)
@@ -1388,7 +1390,6 @@ static int scsi_lld_busy(struct request_queue *q)
 	if (blk_queue_dead(q))
 		return 0;
 
-	BUG_ON(!sdev);
 	shost = sdev->host;
 	starget = scsi_target(sdev);
 
@@ -1500,8 +1501,6 @@ static void scsi_request_fn(struct request_queue *q)
 	struct Scsi_Host *shost;
 	struct scsi_cmnd *cmd;
 	struct request *req;
-
-	BUG_ON(!sdev);
 
 	if(!get_device(&sdev->sdev_gendev))
 		/* We must be tearing the block queue down already */
