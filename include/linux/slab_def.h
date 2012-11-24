@@ -14,7 +14,18 @@
 #include <asm/page.h>		/* kmalloc_sizes.h needs PAGE_SIZE */
 #include <asm/cache.h>		/* kmalloc_sizes.h needs L1_CACHE_BYTES */
 #include <linux/compiler.h>
+
+/*
+ * The linux/kmemtrace.h include was moved into the c files that used it
+ * (mm/slab.c and mm/util.c).  However, the kabi checker will complain if
+ * struct address_space (which gets included via kmemtrace.h ->
+ * trace/events/kmem.h -> fs.h) is not defined.  So, to avoid the
+ * warnings from the kabi checker, just include the file when __GENKSYMS__
+ * is defined.
+ */
+#ifdef __GENKSYMS__
 #include <linux/kmemtrace.h>
+#endif
 
 /*
  * struct kmem_cache
@@ -112,10 +123,16 @@ void *__kmalloc(size_t size, gfp_t flags);
 
 #ifdef CONFIG_KMEMTRACE
 extern void *kmem_cache_alloc_notrace(struct kmem_cache *cachep, gfp_t flags);
+extern void *kmem_cache_alloc_trace(size_t size,
+				    struct kmem_cache *cachep, gfp_t flags);
 extern size_t slab_buffer_size(struct kmem_cache *cachep);
 #else
 static __always_inline void *
 kmem_cache_alloc_notrace(struct kmem_cache *cachep, gfp_t flags)
+{
+	return kmem_cache_alloc(cachep, flags);
+}
+kmem_cache_alloc_trace(size_t size, struct kmem_cache *cachep, gfp_t flags)
 {
 	return kmem_cache_alloc(cachep, flags);
 }
@@ -152,10 +169,7 @@ found:
 #endif
 			cachep = malloc_sizes[i].cs_cachep;
 
-		ret = kmem_cache_alloc_notrace(cachep, flags);
-
-		trace_kmalloc(_THIS_IP_, ret,
-			      size, slab_buffer_size(cachep), flags);
+		ret = kmem_cache_alloc_trace(size, cachep, flags);
 
 		return ret;
 	}
@@ -170,11 +184,19 @@ extern void *kmem_cache_alloc_node(struct kmem_cache *, gfp_t flags, int node);
 extern void *kmem_cache_alloc_node_notrace(struct kmem_cache *cachep,
 					   gfp_t flags,
 					   int nodeid);
+extern void *kmem_cache_alloc_node_trace(size_t size,
+					 struct kmem_cache *cachep,
+					 gfp_t flags,
+					 int nodeid);
 #else
 static __always_inline void *
 kmem_cache_alloc_node_notrace(struct kmem_cache *cachep,
 			      gfp_t flags,
 			      int nodeid)
+kmem_cache_alloc_node_trace(size_t size,
+			    struct kmem_cache *cachep,
+			    gfp_t flags,
+			    int nodeid)
 {
 	return kmem_cache_alloc_node(cachep, flags, nodeid);
 }
@@ -183,7 +205,6 @@ kmem_cache_alloc_node_notrace(struct kmem_cache *cachep,
 static __always_inline void *kmalloc_node(size_t size, gfp_t flags, int node)
 {
 	struct kmem_cache *cachep;
-	void *ret;
 
 	if (__builtin_constant_p(size)) {
 		int i = 0;
@@ -207,13 +228,7 @@ found:
 #endif
 			cachep = malloc_sizes[i].cs_cachep;
 
-		ret = kmem_cache_alloc_node_notrace(cachep, flags, node);
-
-		trace_kmalloc_node(_THIS_IP_, ret,
-				   size, slab_buffer_size(cachep),
-				   flags, node);
-
-		return ret;
+		return kmem_cache_alloc_node_trace(size, cachep, flags, node);
 	}
 	return __kmalloc_node(size, flags, node);
 }

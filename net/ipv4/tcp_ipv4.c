@@ -818,6 +818,8 @@ static struct ip_options *tcp_v4_save_options(struct sock *sk,
 			if (ip_options_echo(dopt, skb)) {
 				kfree_ip_options(dopt);
 				dopt = NULL;
+			} else {
+				rhel_ip_options_set_alloc_flag(dopt);
 			}
 		}
 	}

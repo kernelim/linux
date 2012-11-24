@@ -2335,7 +2335,7 @@ static int amd_iommu_attach_device(struct iommu_domain *dom,
 
 	devid = calc_devid(pdev->bus->number, pdev->devfn);
 
-	if (devid >= amd_iommu_last_bdf ||
+	if (devid > amd_iommu_last_bdf ||
 			devid != amd_iommu_alias_table[devid])
 		return -EINVAL;
 

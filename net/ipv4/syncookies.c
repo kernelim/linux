@@ -311,9 +311,13 @@ struct sock *cookie_v4_check(struct sock *sk, struct sk_buff *skb,
 	 */
 	if (opt && opt->optlen) {
 		ireq->opt = kmalloc_ip_options(opt->optlen, GFP_ATOMIC);
-		if (ireq->opt != NULL && ip_options_echo(ireq->opt, skb)) {
-			kfree_ip_options(ireq->opt);
-			ireq->opt = NULL;
+		if (ireq->opt != NULL) {
+			if (ip_options_echo(ireq->opt, skb)) {
+				kfree_ip_options(ireq->opt);
+				ireq->opt = NULL;
+			} else {
+				rhel_ip_options_set_alloc_flag(ireq->opt);
+			}
 		}
 	}
 

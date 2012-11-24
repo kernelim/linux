@@ -2874,7 +2874,7 @@ out_overflow:
 	return -EIO;
 }
 
-static inline int decode_attr_length(struct xdr_stream *xdr, uint32_t *attrlen, __be32 **savep)
+static inline int decode_attr_length(struct xdr_stream *xdr, uint32_t *attrlen, unsigned int *savep)
 {
 	__be32 *p;
 
@@ -2882,7 +2882,7 @@ static inline int decode_attr_length(struct xdr_stream *xdr, uint32_t *attrlen, 
 	if (unlikely(!p))
 		goto out_overflow;
 	*attrlen = be32_to_cpup(p);
-	*savep = xdr->p;
+	*savep = xdr_stream_pos(xdr);
 	return 0;
 out_overflow:
 	print_overflow_msg(__func__, xdr);
@@ -3836,10 +3836,10 @@ static int decode_attr_time_modify(struct xdr_stream *xdr, uint32_t *bitmap, str
 	return status;
 }
 
-static int verify_attr_len(struct xdr_stream *xdr, __be32 *savep, uint32_t attrlen)
+static int verify_attr_len(struct xdr_stream *xdr, unsigned int savep, uint32_t attrlen)
 {
 	unsigned int attrwords = XDR_QUADLEN(attrlen);
-	unsigned int nwords = xdr->p - savep;
+	unsigned int nwords = (xdr_stream_pos(xdr) - savep) >> 2;
 
 	if (unlikely(attrwords != nwords)) {
 		dprintk("%s: server returned incorrect attribute length: "
@@ -3961,7 +3961,7 @@ out_overflow:
 
 static int decode_server_caps(struct xdr_stream *xdr, struct nfs4_server_caps_res *res)
 {
-	__be32 *savep;
+	unsigned int savep;
 	uint32_t attrlen, bitmap[2] = {0};
 	int status;
 
@@ -3987,7 +3987,7 @@ xdr_error:
 
 static int decode_statfs(struct xdr_stream *xdr, struct nfs_fsstat *fsstat)
 {
-	__be32 *savep;
+	unsigned int savep;
 	uint32_t attrlen, bitmap[2] = {0};
 	int status;
 
@@ -4019,7 +4019,7 @@ xdr_error:
 
 static int decode_pathconf(struct xdr_stream *xdr, struct nfs_pathconf *pathconf)
 {
-	__be32 *savep;
+	unsigned int savep;
 	uint32_t attrlen, bitmap[2] = {0};
 	int status;
 
@@ -4154,7 +4154,7 @@ xdr_error:
 static int decode_getfattr_generic(struct xdr_stream *xdr, struct nfs_fattr *fattr,
 		struct nfs_fh *fh, const struct nfs_server *server)
 {
-	__be32 *savep;
+	unsigned int savep;
 	uint32_t attrlen,
 		 bitmap[2] = {0};
 	int status;
@@ -4244,7 +4244,7 @@ static int decode_attr_pnfstype(struct xdr_stream *xdr, uint32_t *bitmap,
 
 static int decode_fsinfo(struct xdr_stream *xdr, struct nfs_fsinfo *fsinfo)
 {
-	__be32 *savep;
+	unsigned int savep;
 	uint32_t attrlen, bitmap[2];
 	int status;
 
@@ -4690,16 +4690,21 @@ decode_restorefh(struct xdr_stream *xdr)
 static int decode_getacl(struct xdr_stream *xdr, struct rpc_rqst *req,
 			struct nfs_getaclres *res)
 {
-	__be32 *savep, *bm_p;
+	unsigned int savep;
 	uint32_t attrlen,
 		 bitmap[2] = {0};
-	struct kvec *iov = req->rq_rcv_buf.head;
 	int status;
+	unsigned int pg_offset;
 
 	res->acl_len = 0;
 	if ((status = decode_op_hdr(xdr, OP_GETATTR)) != 0)
 		goto out;
-	bm_p = xdr->p;
+
+	xdr_enter_page(xdr, xdr->buf->page_len);
+
+	/* Calculate the offset of the page data */
+	pg_offset = xdr->buf->head[0].iov_len;
+
 	if ((status = decode_attr_bitmap(xdr, bitmap)) != 0)
 		goto out;
 	if ((status = decode_attr_length(xdr, &attrlen, &savep)) != 0)
@@ -4708,33 +4713,20 @@ static int decode_getacl(struct xdr_stream *xdr, struct rpc_rqst *req,
 	if (unlikely(bitmap[0] & (FATTR4_WORD0_ACL - 1U)))
 		return -EIO;
 	if (likely(bitmap[0] & FATTR4_WORD0_ACL)) {
-		size_t hdrlen;
-		u32 recvd;
 
 		/* The bitmap (xdr len + bitmaps) and the attr xdr len words
 		 * are stored with the acl data to handle the problem of
 		 * variable length bitmaps.*/
-		xdr->p = bm_p;
-		res->acl_data_offset = be32_to_cpup(bm_p) + 2;
-		res->acl_data_offset <<= 2;
-
-		/* We ignore &savep and don't do consistency checks on
-		 * the attr length.  Let userspace figure it out.... */
-		hdrlen = (u8 *)xdr->p - (u8 *)iov->iov_base;
-		attrlen += res->acl_data_offset;
-		recvd = req->rq_rcv_buf.len - hdrlen;
-		if (attrlen > recvd) {
-			if (res->acl_flags & NFS4_ACL_LEN_REQUEST) {
-				/* getxattr interface called with a NULL buf */
-				res->acl_len = attrlen;
-				goto out;
-			}
-			dprintk("NFS: acl reply: attrlen %u > recvd %u\n",
-					attrlen, recvd);
-			return -EINVAL;
-		}
-		xdr_read_pages(xdr, attrlen);
+		res->acl_data_offset = xdr_stream_pos(xdr) - pg_offset;
 		res->acl_len = attrlen;
+
+		/* Check for receive buffer overflow */
+		if (res->acl_len > (xdr->nwords << 2) ||
+		    res->acl_len + res->acl_data_offset > xdr->buf->page_len) {
+			res->acl_flags |= NFS4_ACL_TRUNC;
+			dprintk("NFS: acl reply: attrlen %u > page_len %u\n",
+					attrlen, xdr->nwords << 2);
+		}
 	} else
 		status = -EOPNOTSUPP;
 
@@ -6310,6 +6302,7 @@ out:
 __be32 *nfs4_decode_dirent(struct xdr_stream *xdr, struct nfs_entry *entry,
 			   struct nfs_server *server, int plus)
 {
+	unsigned int savep;
 	uint32_t bitmap[2] = {0};
 	uint32_t len;
 	__be32 *p = xdr_inline_decode(xdr, 4);
@@ -6348,7 +6341,7 @@ __be32 *nfs4_decode_dirent(struct xdr_stream *xdr, struct nfs_entry *entry,
 	if (decode_attr_bitmap(xdr, bitmap) < 0)
 		goto out_overflow;
 
-	if (decode_attr_length(xdr, &len, &p) < 0)
+	if (decode_attr_length(xdr, &len, &savep) < 0)
 		goto out_overflow;
 
 	if (decode_getfattr_attrs(xdr, bitmap, entry->fattr, entry->fh,

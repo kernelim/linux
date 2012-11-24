@@ -1101,7 +1101,7 @@ static struct task_struct *_pick_next_task_rt(struct rq *rq)
 	if (unlikely(!rt_rq->rt_nr_running))
 		return NULL;
 
-	if (rt_rq_throttled(rt_rq))
+	if (rt_rq_throttled(rt_rq) && !task_has_rt_policy(rq->idle))
 		return NULL;
 
 	do {

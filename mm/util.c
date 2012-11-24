@@ -10,6 +10,7 @@
 #include <linux/file.h>
 #include <linux/audit.h>
 #include <asm/uaccess.h>
+#include <linux/kmemtrace.h>
 
 /**
  * kstrdup - allocate space for and copy an existing string
