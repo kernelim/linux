@@ -90,7 +90,7 @@ static struct inode *fuse_alloc_inode(struct super_block *sb)
 	INIT_LIST_HEAD(&fi->queued_writes);
 	INIT_LIST_HEAD(&fi->writepages);
 	init_waitqueue_head(&fi->page_waitq);
-	fi->forget_req = fuse_request_alloc();
+	fi->forget_req = fuse_request_alloc(0);
 	if (!fi->forget_req) {
 		kmem_cache_free(fuse_inode_cachep, inode);
 		return NULL;
@@ -376,7 +376,7 @@ static int fuse_statfs(struct dentry *dentry, struct kstatfs *buf)
 		return 0;
 	}
 
-	req = fuse_get_req(fc);
+	req = fuse_get_req_nopages(fc);
 	if (IS_ERR(req))
 		return PTR_ERR(req);
 
@@ -989,12 +989,12 @@ static int fuse_fill_super(struct super_block *sb, void *data, int silent)
 		goto err_put_conn;
 	}
 
-	init_req = fuse_request_alloc();
+	init_req = fuse_request_alloc(0);
 	if (!init_req)
 		goto err_put_root;
 
 	if (is_bdev) {
-		fc->destroy_req = fuse_request_alloc();
+		fc->destroy_req = fuse_request_alloc(0);
 		if (!fc->destroy_req)
 			goto err_free_init_req;
 	}

@@ -9575,15 +9575,8 @@ static bool tg3_enable_msix(struct tg3 *tp)
 		tp->napi[i].irq_vec = msix_ent[i].vector;
 
 	netif_set_real_num_tx_queues(tp->dev, 1);
-	if (tp->irq_cnt > 1) {
+	if (tp->irq_cnt > 1)
 		tg3_flag_set(tp, ENABLE_RSS);
-
-		if (GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5719 ||
-		    GET_ASIC_REV(tp->pci_chip_rev_id) == ASIC_REV_5720) {
-			tg3_flag_set(tp, ENABLE_TSS);
-			netif_set_real_num_tx_queues(tp->dev, tp->irq_cnt - 1);
-		}
-	}
 
 	return true;
 }

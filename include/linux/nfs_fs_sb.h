@@ -53,7 +53,6 @@ struct nfs_client {
 	struct rb_root		cl_openowner_id;
 	struct rb_root		cl_lockowner_id;
 
-	struct list_head	cl_delegations;
 	struct rb_root		cl_state_owners;
 	spinlock_t		cl_lock;
 
@@ -149,6 +148,7 @@ struct nfs_server {
 	struct pnfs_layoutdriver_type  *pnfs_curr_ld; /* Active layout driver */
 	struct rpc_wait_queue	roc_rpcwaitq;
 #endif
+	struct list_head        delegations;
 	void (*destroy)(struct nfs_server *);
 
 	atomic_t active; /* Keep trace of any activity to this server */

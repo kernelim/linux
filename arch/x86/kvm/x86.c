@@ -513,6 +513,9 @@ static bool guest_cpuid_has_xsave(struct kvm_vcpu *vcpu)
 {
 	struct kvm_cpuid_entry2 *best;
 
+	if (!static_cpu_has(X86_FEATURE_XSAVE))
+		return 0;
+
 	best = kvm_find_cpuid_entry(vcpu, 1, 0);
 	return best && (best->ecx & bit(X86_FEATURE_XSAVE));
 }
@@ -5923,9 +5926,15 @@ int kvm_arch_vcpu_ioctl_set_sregs(struct kvm_vcpu *vcpu,
 {
 	int mmu_reset_needed = 0;
 	int pending_vec, max_bits;
+	int ret = 0;
 	struct descriptor_table dt;
 
 	vcpu_load(vcpu);
+
+	if (!guest_cpuid_has_xsave(vcpu) && (sregs->cr4 & X86_CR4_OSXSAVE)) {
+		ret = -EINVAL;
+		goto out;
+	}
 
 	dt.limit = sregs->idt.limit;
 	dt.base = sregs->idt.base;
@@ -5988,9 +5997,10 @@ int kvm_arch_vcpu_ioctl_set_sregs(struct kvm_vcpu *vcpu,
 	    !(kvm_read_cr0_bits(vcpu, X86_CR0_PE)))
 		vcpu->arch.mp_state = KVM_MP_STATE_RUNNABLE;
 
+out:
 	vcpu_put(vcpu);
 
-	return 0;
+	return ret;
 }
 
 int kvm_arch_vcpu_ioctl_set_guest_debug(struct kvm_vcpu *vcpu,

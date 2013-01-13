@@ -1667,6 +1667,7 @@ static int bond_compute_features(struct bonding *bond)
 	unsigned long vlan_features = 0;
 	unsigned short max_hard_header_len = max((u16)ETH_HLEN,
 						bond_dev->hard_header_len);
+	unsigned int gso_max_size = GSO_MAX_SIZE;
 	int i;
 
 	features &= ~(NETIF_F_ALL_CSUM | BOND_VLAN_FEATURES);
@@ -1687,6 +1688,8 @@ static int bond_compute_features(struct bonding *bond)
 							NETIF_F_ONE_FOR_ALL);
 		if (slave->dev->hard_header_len > max_hard_header_len)
 			max_hard_header_len = slave->dev->hard_header_len;
+
+		gso_max_size = min(gso_max_size, slave->dev->gso_max_size);
 	}
 
 done:
@@ -1694,6 +1697,7 @@ done:
 	bond_dev->features = netdev_fix_features(features, NULL);
 	bond_dev->vlan_features = netdev_fix_features(vlan_features, NULL);
 	bond_dev->hard_header_len = max_hard_header_len;
+	netif_set_gso_max_size(bond_dev, gso_max_size);
 
 	return 0;
 }

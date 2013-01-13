@@ -35,6 +35,7 @@ extern void __chk_io_ptr(const volatile void __iomem *);
 #endif
 
 #define __percpu
+#define __rcu
 
 #ifdef __KERNEL__
 

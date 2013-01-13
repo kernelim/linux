@@ -177,7 +177,6 @@ static struct nfs_client *nfs_alloc_client(const struct nfs_client_initdata *cl_
 	if (err)
 		goto error_cleanup;
 
-	INIT_LIST_HEAD(&clp->cl_delegations);
 	spin_lock_init(&clp->cl_lock);
 	INIT_DELAYED_WORK(&clp->cl_renewd, nfs4_renew_state);
 	rpc_init_wait_queue(&clp->cl_rpcwaitq, "NFS client");
@@ -1062,6 +1061,7 @@ static struct nfs_server *nfs_alloc_server(void)
 	/* Zero out the NFS state stuff */
 	INIT_LIST_HEAD(&server->client_link);
 	INIT_LIST_HEAD(&server->master_link);
+	INIT_LIST_HEAD(&server->delegations);
 
 	atomic_set(&server->active, 0);
 

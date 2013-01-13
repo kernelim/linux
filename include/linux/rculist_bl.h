@@ -7,8 +7,6 @@
 #include <linux/list_bl.h>
 #include <linux/rcupdate.h>
 
-#define rcu_dereference_raw(x) rcu_dereference(x)
-
 static inline void hlist_bl_set_first_rcu(struct hlist_bl_head *h,
 					struct hlist_bl_node *n)
 {
