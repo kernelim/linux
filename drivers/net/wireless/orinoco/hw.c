@@ -45,9 +45,9 @@ static const struct {
 /* Firmware version encoding */
 struct comp_id {
 	u16 id, variant, major, minor;
-} __attribute__ ((packed));
+} __packed;
 
-static inline fwtype_t determine_firmware_type(struct comp_id *nic_id)
+static inline enum fwtype determine_firmware_type(struct comp_id *nic_id)
 {
 	if (nic_id->id < 0x8000)
 		return FIRMWARE_TYPE_AGERE;
@@ -60,15 +60,22 @@ static inline fwtype_t determine_firmware_type(struct comp_id *nic_id)
 /* Set priv->firmware type, determine firmware properties
  * This function can be called before we have registerred with netdev,
  * so all errors go out with dev_* rather than printk
+ *
+ * If non-NULL stores a firmware description in fw_name.
+ * If non-NULL stores a HW version in hw_ver
+ *
+ * These are output via generic cfg80211 ethtool support.
  */
-int determine_fw_capabilities(struct orinoco_private *priv)
+int determine_fw_capabilities(struct orinoco_private *priv,
+			      char *fw_name, size_t fw_name_len,
+			      u32 *hw_ver)
 {
 	struct device *dev = priv->dev;
-	hermes_t *hw = &priv->hw;
+	struct hermes *hw = &priv->hw;
 	int err;
 	struct comp_id nic_id, sta_id;
 	unsigned int firmver;
-	char tmp[SYMBOL_MAX_VER_LEN+1] __attribute__((aligned(2)));
+	char tmp[SYMBOL_MAX_VER_LEN + 1] __attribute__((aligned(2)));
 
 	/* Get the hardware version */
 	err = HERMES_READ_RECORD(hw, USER_BAP, HERMES_RID_NICID, &nic_id);
@@ -84,6 +91,12 @@ int determine_fw_capabilities(struct orinoco_private *priv)
 	le16_to_cpus(&nic_id.minor);
 	dev_info(dev, "Hardware identity %04x:%04x:%04x:%04x\n",
 		 nic_id.id, nic_id.variant, nic_id.major, nic_id.minor);
+
+	if (hw_ver)
+		*hw_ver = (((nic_id.id & 0xff) << 24) |
+			   ((nic_id.variant & 0xff) << 16) |
+			   ((nic_id.major & 0xff) << 8) |
+			   (nic_id.minor & 0xff));
 
 	priv->firmware_type = determine_firmware_type(&nic_id);
 
@@ -135,8 +148,9 @@ int determine_fw_capabilities(struct orinoco_private *priv)
 	case FIRMWARE_TYPE_AGERE:
 		/* Lucent Wavelan IEEE, Lucent Orinoco, Cabletron RoamAbout,
 		   ELSA, Melco, HP, IBM, Dell 1150, Compaq 110/210 */
-		snprintf(priv->fw_name, sizeof(priv->fw_name) - 1,
-			 "Lucent/Agere %d.%02d", sta_id.major, sta_id.minor);
+		if (fw_name)
+			snprintf(fw_name, fw_name_len, "Lucent/Agere %d.%02d",
+				 sta_id.major, sta_id.minor);
 
 		firmver = ((unsigned long)sta_id.major << 16) | sta_id.minor;
 
@@ -163,9 +177,9 @@ int determine_fw_capabilities(struct orinoco_private *priv)
 		/* 3Com MAC : 00:50:DA:* */
 		memset(tmp, 0, sizeof(tmp));
 		/* Get the Symbol firmware version */
-		err = hermes_read_ltv(hw, USER_BAP,
-				      HERMES_RID_SECONDARYVERSION_SYMBOL,
-				      SYMBOL_MAX_VER_LEN, NULL, &tmp);
+		err = hw->ops->read_ltv(hw, USER_BAP,
+					HERMES_RID_SECONDARYVERSION_SYMBOL,
+					SYMBOL_MAX_VER_LEN, NULL, &tmp);
 		if (err) {
 			dev_warn(dev, "Error %d reading Symbol firmware info. "
 				 "Wildly guessing capabilities...\n", err);
@@ -185,8 +199,8 @@ int determine_fw_capabilities(struct orinoco_private *priv)
 			tmp[SYMBOL_MAX_VER_LEN] = '\0';
 		}
 
-		snprintf(priv->fw_name, sizeof(priv->fw_name) - 1,
-			 "Symbol %s", tmp);
+		if (fw_name)
+			snprintf(fw_name, fw_name_len, "Symbol %s", tmp);
 
 		priv->has_ibss = (firmver >= 0x20000);
 		priv->has_wep = (firmver >= 0x15012);
@@ -224,9 +238,9 @@ int determine_fw_capabilities(struct orinoco_private *priv)
 		 * different and less well tested */
 		/* D-Link MAC : 00:40:05:* */
 		/* Addtron MAC : 00:90:D1:* */
-		snprintf(priv->fw_name, sizeof(priv->fw_name) - 1,
-			 "Intersil %d.%d.%d", sta_id.major, sta_id.minor,
-			 sta_id.variant);
+		if (fw_name)
+			snprintf(fw_name, fw_name_len, "Intersil %d.%d.%d",
+				 sta_id.major, sta_id.minor, sta_id.variant);
 
 		firmver = ((unsigned long)sta_id.major << 16) |
 			((unsigned long)sta_id.minor << 8) | sta_id.variant;
@@ -245,7 +259,15 @@ int determine_fw_capabilities(struct orinoco_private *priv)
 		}
 		break;
 	}
-	dev_info(dev, "Firmware determined as %s\n", priv->fw_name);
+	if (fw_name)
+		dev_info(dev, "Firmware determined as %s\n", fw_name);
+
+#ifndef CONFIG_HERMES_PRISM
+	if (priv->firmware_type == FIRMWARE_TYPE_INTERSIL) {
+		dev_err(dev, "Support for Prism chipset is not enabled\n");
+		return -ENODEV;
+	}
+#endif
 
 	return 0;
 }
@@ -258,14 +280,14 @@ int orinoco_hw_read_card_settings(struct orinoco_private *priv, u8 *dev_addr)
 {
 	struct device *dev = priv->dev;
 	struct hermes_idstring nickbuf;
-	hermes_t *hw = &priv->hw;
+	struct hermes *hw = &priv->hw;
 	int len;
 	int err;
 	u16 reclen;
 
 	/* Get the MAC address */
-	err = hermes_read_ltv(hw, USER_BAP, HERMES_RID_CNFOWNMACADDR,
-			      ETH_ALEN, NULL, dev_addr);
+	err = hw->ops->read_ltv(hw, USER_BAP, HERMES_RID_CNFOWNMACADDR,
+				ETH_ALEN, NULL, dev_addr);
 	if (err) {
 		dev_warn(dev, "Failed to read MAC address!\n");
 		goto out;
@@ -274,8 +296,8 @@ int orinoco_hw_read_card_settings(struct orinoco_private *priv, u8 *dev_addr)
 	dev_dbg(dev, "MAC address %pM\n", dev_addr);
 
 	/* Get the station name */
-	err = hermes_read_ltv(hw, USER_BAP, HERMES_RID_CNFOWNNAME,
-			      sizeof(nickbuf), &reclen, &nickbuf);
+	err = hw->ops->read_ltv(hw, USER_BAP, HERMES_RID_CNFOWNNAME,
+				sizeof(nickbuf), &reclen, &nickbuf);
 	if (err) {
 		dev_err(dev, "failed to read station name\n");
 		goto out;
@@ -352,6 +374,32 @@ int orinoco_hw_read_card_settings(struct orinoco_private *priv, u8 *dev_addr)
 		err = hermes_read_wordrec(hw, USER_BAP,
 					  HERMES_RID_CNFPREAMBLE_SYMBOL,
 					  &priv->preamble);
+		if (err) {
+			dev_err(dev, "Failed to read preamble setup\n");
+			goto out;
+		}
+	}
+
+	/* Retry settings */
+	err = hermes_read_wordrec(hw, USER_BAP, HERMES_RID_SHORTRETRYLIMIT,
+				  &priv->short_retry_limit);
+	if (err) {
+		dev_err(dev, "Failed to read short retry limit\n");
+		goto out;
+	}
+
+	err = hermes_read_wordrec(hw, USER_BAP, HERMES_RID_LONGRETRYLIMIT,
+				  &priv->long_retry_limit);
+	if (err) {
+		dev_err(dev, "Failed to read long retry limit\n");
+		goto out;
+	}
+
+	err = hermes_read_wordrec(hw, USER_BAP, HERMES_RID_MAXTRANSMITLIFETIME,
+				  &priv->retry_lifetime);
+	if (err) {
+		dev_err(dev, "Failed to read max retry lifetime\n");
+		goto out;
 	}
 
 out:
@@ -365,11 +413,11 @@ int orinoco_hw_allocate_fid(struct orinoco_private *priv)
 	struct hermes *hw = &priv->hw;
 	int err;
 
-	err = hermes_allocate(hw, priv->nicbuf_size, &priv->txfid);
+	err = hw->ops->allocate(hw, priv->nicbuf_size, &priv->txfid);
 	if (err == -EIO && priv->nicbuf_size > TX_NICBUF_SIZE_BUG) {
 		/* Try workaround for old Symbol firmware bug */
 		priv->nicbuf_size = TX_NICBUF_SIZE_BUG;
-		err = hermes_allocate(hw, priv->nicbuf_size, &priv->txfid);
+		err = hw->ops->allocate(hw, priv->nicbuf_size, &priv->txfid);
 
 		dev_warn(dev, "Firmware ALLOC bug detected "
 			 "(old Symbol firmware?). Work around %s\n",
@@ -410,13 +458,14 @@ int orinoco_hw_program_rids(struct orinoco_private *priv)
 {
 	struct net_device *dev = priv->ndev;
 	struct wireless_dev *wdev = netdev_priv(dev);
-	hermes_t *hw = &priv->hw;
+	struct hermes *hw = &priv->hw;
 	int err;
 	struct hermes_idstring idbuf;
 
 	/* Set the MAC address */
-	err = hermes_write_ltv(hw, USER_BAP, HERMES_RID_CNFOWNMACADDR,
-			       HERMES_BYTES_TO_RECLEN(ETH_ALEN), dev->dev_addr);
+	err = hw->ops->write_ltv(hw, USER_BAP, HERMES_RID_CNFOWNMACADDR,
+				 HERMES_BYTES_TO_RECLEN(ETH_ALEN),
+				 dev->dev_addr);
 	if (err) {
 		printk(KERN_ERR "%s: Error %d setting MAC address\n",
 		       dev->name, err);
@@ -479,16 +528,16 @@ int orinoco_hw_program_rids(struct orinoco_private *priv)
 	idbuf.len = cpu_to_le16(strlen(priv->desired_essid));
 	memcpy(&idbuf.val, priv->desired_essid, sizeof(idbuf.val));
 	/* WinXP wants partner to configure OWNSSID even in IBSS mode. (jimc) */
-	err = hermes_write_ltv(hw, USER_BAP, HERMES_RID_CNFOWNSSID,
-			HERMES_BYTES_TO_RECLEN(strlen(priv->desired_essid)+2),
+	err = hw->ops->write_ltv(hw, USER_BAP, HERMES_RID_CNFOWNSSID,
+			HERMES_BYTES_TO_RECLEN(strlen(priv->desired_essid) + 2),
 			&idbuf);
 	if (err) {
 		printk(KERN_ERR "%s: Error %d setting OWNSSID\n",
 		       dev->name, err);
 		return err;
 	}
-	err = hermes_write_ltv(hw, USER_BAP, HERMES_RID_CNFDESIREDSSID,
-			HERMES_BYTES_TO_RECLEN(strlen(priv->desired_essid)+2),
+	err = hw->ops->write_ltv(hw, USER_BAP, HERMES_RID_CNFDESIREDSSID,
+			HERMES_BYTES_TO_RECLEN(strlen(priv->desired_essid) + 2),
 			&idbuf);
 	if (err) {
 		printk(KERN_ERR "%s: Error %d setting DESIREDSSID\n",
@@ -499,9 +548,9 @@ int orinoco_hw_program_rids(struct orinoco_private *priv)
 	/* Set the station name */
 	idbuf.len = cpu_to_le16(strlen(priv->nick));
 	memcpy(&idbuf.val, priv->nick, sizeof(idbuf.val));
-	err = hermes_write_ltv(hw, USER_BAP, HERMES_RID_CNFOWNNAME,
-			       HERMES_BYTES_TO_RECLEN(strlen(priv->nick)+2),
-			       &idbuf);
+	err = hw->ops->write_ltv(hw, USER_BAP, HERMES_RID_CNFOWNNAME,
+				 HERMES_BYTES_TO_RECLEN(strlen(priv->nick) + 2),
+				 &idbuf);
 	if (err) {
 		printk(KERN_ERR "%s: Error %d setting nickname\n",
 		       dev->name, err);
@@ -616,12 +665,12 @@ int orinoco_hw_program_rids(struct orinoco_private *priv)
 	if (priv->iw_mode == NL80211_IFTYPE_MONITOR) {
 		/* Enable monitor mode */
 		dev->type = ARPHRD_IEEE80211;
-		err = hermes_docmd_wait(hw, HERMES_CMD_TEST |
+		err = hw->ops->cmd_wait(hw, HERMES_CMD_TEST |
 					    HERMES_TEST_MONITOR, 0, NULL);
 	} else {
 		/* Disable monitor mode */
 		dev->type = ARPHRD_ETHER;
-		err = hermes_docmd_wait(hw, HERMES_CMD_TEST |
+		err = hw->ops->cmd_wait(hw, HERMES_CMD_TEST |
 					    HERMES_TEST_STOP, 0, NULL);
 	}
 	if (err)
@@ -640,15 +689,15 @@ int orinoco_hw_program_rids(struct orinoco_private *priv)
 /* Get tsc from the firmware */
 int orinoco_hw_get_tkip_iv(struct orinoco_private *priv, int key, u8 *tsc)
 {
-	hermes_t *hw = &priv->hw;
+	struct hermes *hw = &priv->hw;
 	int err = 0;
 	u8 tsc_arr[4][ORINOCO_SEQ_LEN];
 
 	if ((key < 0) || (key >= 4))
 		return -EINVAL;
 
-	err = hermes_read_ltv(hw, USER_BAP, HERMES_RID_CURRENT_TKIP_IV,
-			      sizeof(tsc_arr), NULL, &tsc_arr);
+	err = hw->ops->read_ltv(hw, USER_BAP, HERMES_RID_CURRENT_TKIP_IV,
+				sizeof(tsc_arr), NULL, &tsc_arr);
 	if (!err)
 		memcpy(tsc, &tsc_arr[key][0], sizeof(tsc_arr[0]));
 
@@ -657,7 +706,7 @@ int orinoco_hw_get_tkip_iv(struct orinoco_private *priv, int key, u8 *tsc)
 
 int __orinoco_hw_set_bitrate(struct orinoco_private *priv)
 {
-	hermes_t *hw = &priv->hw;
+	struct hermes *hw = &priv->hw;
 	int ratemode = priv->bitratemode;
 	int err = 0;
 
@@ -688,7 +737,7 @@ int __orinoco_hw_set_bitrate(struct orinoco_private *priv)
 
 int orinoco_hw_get_act_bitrate(struct orinoco_private *priv, int *bitrate)
 {
-	hermes_t *hw = &priv->hw;
+	struct hermes *hw = &priv->hw;
 	int i;
 	int err = 0;
 	u16 val;
@@ -713,14 +762,17 @@ int orinoco_hw_get_act_bitrate(struct orinoco_private *priv, int *bitrate)
 	case FIRMWARE_TYPE_INTERSIL: /* Intersil style rate */
 	case FIRMWARE_TYPE_SYMBOL: /* Symbol style rate */
 		for (i = 0; i < BITRATE_TABLE_SIZE; i++)
-			if (bitrate_table[i].intersil_txratectrl == val)
+			if (bitrate_table[i].intersil_txratectrl == val) {
+				*bitrate = bitrate_table[i].bitrate * 100000;
 				break;
+			}
 
-		if (i >= BITRATE_TABLE_SIZE)
+		if (i >= BITRATE_TABLE_SIZE) {
 			printk(KERN_INFO "%s: Unable to determine current bitrate (0x%04hx)\n",
 			       priv->ndev->name, val);
+			err = -EIO;
+		}
 
-		*bitrate = bitrate_table[i].bitrate * 100000;
 		break;
 	default:
 		BUG();
@@ -734,7 +786,7 @@ int __orinoco_hw_set_wap(struct orinoco_private *priv)
 {
 	int roaming_flag;
 	int err = 0;
-	hermes_t *hw = &priv->hw;
+	struct hermes *hw = &priv->hw;
 
 	switch (priv->firmware_type) {
 	case FIRMWARE_TYPE_AGERE:
@@ -766,7 +818,7 @@ int __orinoco_hw_set_wap(struct orinoco_private *priv)
  * which is needed for 802.1x implementations. */
 int __orinoco_hw_setup_wepkeys(struct orinoco_private *priv)
 {
-	hermes_t *hw = &priv->hw;
+	struct hermes *hw = &priv->hw;
 	int err = 0;
 	int i;
 
@@ -827,7 +879,7 @@ int __orinoco_hw_setup_wepkeys(struct orinoco_private *priv)
 				memcpy(key, priv->keys[i].key,
 				       priv->keys[i].key_len);
 
-				err = hermes_write_ltv(hw, USER_BAP,
+				err = hw->ops->write_ltv(hw, USER_BAP,
 						HERMES_RID_CNFDEFAULTKEY0 + i,
 						HERMES_BYTES_TO_RECLEN(keylen),
 						key);
@@ -850,7 +902,7 @@ int __orinoco_hw_setup_wepkeys(struct orinoco_private *priv)
 
 int __orinoco_hw_setup_enc(struct orinoco_private *priv)
 {
-	hermes_t *hw = &priv->hw;
+	struct hermes *hw = &priv->hw;
 	int err = 0;
 	int master_wep_flag;
 	int auth_flag;
@@ -946,8 +998,8 @@ int __orinoco_hw_set_tkip_key(struct orinoco_private *priv, int key_idx,
 		u8 tx_mic[MIC_KEYLEN];
 		u8 rx_mic[MIC_KEYLEN];
 		u8 tsc[ORINOCO_SEQ_LEN];
-	} __attribute__ ((packed)) buf;
-	hermes_t *hw = &priv->hw;
+	} __packed buf;
+	struct hermes *hw = &priv->hw;
 	int ret;
 	int err;
 	int k;
@@ -979,7 +1031,7 @@ int __orinoco_hw_set_tkip_key(struct orinoco_private *priv, int key_idx,
 	else
 		buf.tsc[4] = 0x10;
 
-	/* Wait upto 100ms for tx queue to empty */
+	/* Wait up to 100ms for tx queue to empty */
 	for (k = 100; k > 0; k--) {
 		udelay(1000);
 		ret = hermes_read_wordrec(hw, USER_BAP, HERMES_RID_TXQUEUEEMPTY,
@@ -1000,7 +1052,7 @@ int __orinoco_hw_set_tkip_key(struct orinoco_private *priv, int key_idx,
 
 int orinoco_clear_tkip_key(struct orinoco_private *priv, int key_idx)
 {
-	hermes_t *hw = &priv->hw;
+	struct hermes *hw = &priv->hw;
 	int err;
 
 	err = hermes_write_wordrec(hw, USER_BAP,
@@ -1013,10 +1065,10 @@ int orinoco_clear_tkip_key(struct orinoco_private *priv, int key_idx)
 }
 
 int __orinoco_hw_set_multicast_list(struct orinoco_private *priv,
-				    struct dev_addr_list *mc_list,
+				    struct net_device *dev,
 				    int mc_count, int promisc)
 {
-	hermes_t *hw = &priv->hw;
+	struct hermes *hw = &priv->hw;
 	int err = 0;
 
 	if (promisc != priv->promiscuous) {
@@ -1034,25 +1086,25 @@ int __orinoco_hw_set_multicast_list(struct orinoco_private *priv,
 	 * group address if either we want to multicast, or if we were
 	 * multicasting and want to stop */
 	if (!promisc && (mc_count || priv->mc_count)) {
-		struct dev_mc_list *p = mc_list;
+#if 0 /* Not in RHEL */
+		struct netdev_hw_addr *ha;
+#else
+		struct dev_addr_list *ha;
+#endif
 		struct hermes_multicast mclist;
-		int i;
+		int i = 0;
 
-		for (i = 0; i < mc_count; i++) {
-			/* paranoia: is list shorter than mc_count? */
-			BUG_ON(!p);
-			/* paranoia: bad address size in list? */
-			BUG_ON(p->dmi_addrlen != ETH_ALEN);
-
-			memcpy(mclist.addr[i], p->dmi_addr, ETH_ALEN);
-			p = p->next;
+		netdev_for_each_mc_addr(ha, dev) {
+			if (i == mc_count)
+				break;
+#if 0 /* Not in RHEL */
+			memcpy(mclist.addr[i++], ha->addr, ETH_ALEN);
+#else
+			memcpy(mclist.addr[i++], ha->dmi_addr, ETH_ALEN);
+#endif
 		}
 
-		if (p)
-			printk(KERN_WARNING "%s: Multicast list is "
-			       "longer than mc_count\n", priv->ndev->name);
-
-		err = hermes_write_ltv(hw, USER_BAP,
+		err = hw->ops->write_ltv(hw, USER_BAP,
 				   HERMES_RID_CNFGROUPADDRESSES,
 				   HERMES_BYTES_TO_RECLEN(mc_count * ETH_ALEN),
 				   &mclist);
@@ -1067,9 +1119,9 @@ int __orinoco_hw_set_multicast_list(struct orinoco_private *priv,
 
 /* Return : < 0 -> error code ; >= 0 -> length */
 int orinoco_hw_get_essid(struct orinoco_private *priv, int *active,
-			 char buf[IW_ESSID_MAX_SIZE+1])
+			 char buf[IW_ESSID_MAX_SIZE + 1])
 {
-	hermes_t *hw = &priv->hw;
+	struct hermes *hw = &priv->hw;
 	int err = 0;
 	struct hermes_idstring essidbuf;
 	char *p = (char *)(&essidbuf.val);
@@ -1094,15 +1146,15 @@ int orinoco_hw_get_essid(struct orinoco_private *priv, int *active,
 		rid = (priv->port_type == 3) ? HERMES_RID_CNFOWNSSID :
 			HERMES_RID_CNFDESIREDSSID;
 
-		err = hermes_read_ltv(hw, USER_BAP, rid, sizeof(essidbuf),
-				      NULL, &essidbuf);
+		err = hw->ops->read_ltv(hw, USER_BAP, rid, sizeof(essidbuf),
+					NULL, &essidbuf);
 		if (err)
 			goto fail_unlock;
 	} else {
 		*active = 0;
 
-		err = hermes_read_ltv(hw, USER_BAP, HERMES_RID_CURRENTSSID,
-				      sizeof(essidbuf), NULL, &essidbuf);
+		err = hw->ops->read_ltv(hw, USER_BAP, HERMES_RID_CURRENTSSID,
+					sizeof(essidbuf), NULL, &essidbuf);
 		if (err)
 			goto fail_unlock;
 	}
@@ -1122,7 +1174,7 @@ int orinoco_hw_get_essid(struct orinoco_private *priv, int *active,
 
 int orinoco_hw_get_freq(struct orinoco_private *priv)
 {
-	hermes_t *hw = &priv->hw;
+	struct hermes *hw = &priv->hw;
 	int err = 0;
 	u16 channel;
 	int freq = 0;
@@ -1162,7 +1214,7 @@ int orinoco_hw_get_freq(struct orinoco_private *priv)
 int orinoco_hw_get_bitratelist(struct orinoco_private *priv,
 			       int *numrates, s32 *rates, int max)
 {
-	hermes_t *hw = &priv->hw;
+	struct hermes *hw = &priv->hw;
 	struct hermes_idstring list;
 	unsigned char *p = (unsigned char *)&list.val;
 	int err = 0;
@@ -1173,8 +1225,8 @@ int orinoco_hw_get_bitratelist(struct orinoco_private *priv,
 	if (orinoco_lock(priv, &flags) != 0)
 		return -EBUSY;
 
-	err = hermes_read_ltv(hw, USER_BAP, HERMES_RID_SUPPORTEDDATARATES,
-			      sizeof(list), NULL, &list);
+	err = hw->ops->read_ltv(hw, USER_BAP, HERMES_RID_SUPPORTEDDATARATES,
+				sizeof(list), NULL, &list);
 	orinoco_unlock(priv, &flags);
 
 	if (err)
@@ -1194,7 +1246,7 @@ int orinoco_hw_trigger_scan(struct orinoco_private *priv,
 			    const struct cfg80211_ssid *ssid)
 {
 	struct net_device *dev = priv->ndev;
-	hermes_t *hw = &priv->hw;
+	struct hermes *hw = &priv->hw;
 	unsigned long flags;
 	int err = 0;
 
@@ -1241,7 +1293,7 @@ int orinoco_hw_trigger_scan(struct orinoco_private *priv,
 				idbuf.len = cpu_to_le16(len);
 				memcpy(idbuf.val, ssid->ssid, len);
 
-				err = hermes_write_ltv(hw, USER_BAP,
+				err = hw->ops->write_ltv(hw, USER_BAP,
 					       HERMES_RID_CNFSCANSSID_AGERE,
 					       HERMES_BYTES_TO_RECLEN(len + 2),
 					       &idbuf);
@@ -1279,13 +1331,13 @@ int orinoco_hw_trigger_scan(struct orinoco_private *priv,
 int orinoco_hw_disassociate(struct orinoco_private *priv,
 			    u8 *addr, u16 reason_code)
 {
-	hermes_t *hw = &priv->hw;
+	struct hermes *hw = &priv->hw;
 	int err;
 
 	struct {
 		u8 addr[ETH_ALEN];
 		__le16 reason_code;
-	} __attribute__ ((packed)) buf;
+	} __packed buf;
 
 	/* Currently only supported by WPA enabled Agere fw */
 	if (!priv->has_wpa)
@@ -1302,11 +1354,11 @@ int orinoco_hw_disassociate(struct orinoco_private *priv,
 int orinoco_hw_get_current_bssid(struct orinoco_private *priv,
 				 u8 *addr)
 {
-	hermes_t *hw = &priv->hw;
+	struct hermes *hw = &priv->hw;
 	int err;
 
-	err = hermes_read_ltv(hw, USER_BAP, HERMES_RID_CURRENTBSSID,
-			      ETH_ALEN, NULL, addr);
+	err = hw->ops->read_ltv(hw, USER_BAP, HERMES_RID_CURRENTBSSID,
+				ETH_ALEN, NULL, addr);
 
 	return err;
 }

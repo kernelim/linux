@@ -185,7 +185,8 @@ static void setup_queues(struct qdio_irq *irq_ptr,
 		setup_queues_misc(q, irq_ptr, qdio_init->input_handler, i);
 
 		q->is_input_q = 1;
-		q->u.in.queue_start_poll = qdio_init->queue_start_poll[i];
+		q->u.in.queue_start_poll = qdio_init->queue_start_poll_array ?
+				qdio_init->queue_start_poll_array[i] : NULL;
 
 		setup_storage_lists(q, irq_ptr, input_sbal_array, i);
 		input_sbal_array += QDIO_MAX_BUFFERS_PER_Q;
@@ -390,6 +391,7 @@ static void setup_qdr(struct qdio_irq *irq_ptr,
 	int i;
 
 	irq_ptr->qdr->qfmt = qdio_init->q_format;
+	irq_ptr->qdr->ac = qdio_init->qdr_ac;
 	irq_ptr->qdr->iqdcnt = qdio_init->no_input_qs;
 	irq_ptr->qdr->oqdcnt = qdio_init->no_output_qs;
 	irq_ptr->qdr->iqdsz = sizeof(struct qdesfmt0) / 4; /* size in words */
@@ -410,6 +412,8 @@ static void setup_qib(struct qdio_irq *irq_ptr,
 {
 	if (qebsm_possible())
 		irq_ptr->qib.rflags |= QIB_RFLAGS_ENABLE_QEBSM;
+
+	irq_ptr->qib.rflags |= init_data->qib_rflags;
 
 	irq_ptr->qib.qfmt = init_data->q_format;
 	if (init_data->no_input_qs)

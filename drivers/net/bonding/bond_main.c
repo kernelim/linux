@@ -1738,13 +1738,6 @@ int bond_enslave(struct net_device *bond_dev, struct net_device *slave_dev)
 		       bond_dev->name, slave_dev->name);
 	}
 
-	/* bond must be initialized by bond_open() before enslaving */
-	if (!(bond_dev->flags & IFF_UP)) {
-		pr_warning(DRV_NAME
-			" %s: master_dev is not up in bond_enslave\n",
-			bond_dev->name);
-	}
-
 	/* already enslaved */
 	if (slave_dev->flags & IFF_SLAVE) {
 		pr_debug("Error, Device was already enslaved\n");
@@ -1754,16 +1747,14 @@ int bond_enslave(struct net_device *bond_dev, struct net_device *slave_dev)
 	/*
 	 * Sync the slaves vlan state with the bonds vlan state
 	 */
-	if (slave_dev->ethtool_ops->get_flags &&
-	    slave_dev->ethtool_ops->set_flags) {
-		orig_flags = slave_dev->ethtool_ops->get_flags(slave_dev);	
-		if (bond_dev->features & NETIF_F_LRO)
-			flags = orig_flags | NETIF_F_LRO;
-		else
-			flags = orig_flags & ~NETIF_F_LRO;
-		if (flags != orig_flags)
-			slave_dev->ethtool_ops->set_flags(slave_dev, flags);
-	}
+	orig_flags = dev_ethtool_get_flags(slave_dev);
+	if (bond_dev->features & NETIF_F_LRO)
+		flags = orig_flags | NETIF_F_LRO;
+	else
+		flags = orig_flags & ~NETIF_F_LRO;
+	if (flags != orig_flags && slave_dev->ethtool_ops
+	    && slave_dev->ethtool_ops->set_flags)
+		slave_dev->ethtool_ops->set_flags(slave_dev, flags);
 
 	/* vlan challenged mutual exclusion */
 	/* no need to lock since we're protected by rtnl_lock */
@@ -3728,14 +3719,25 @@ static void bond_info_show_master(struct seq_file *seq)
 	}
 }
 
+static const char *bond_slave_link_status(s8 link)
+{
+	static const char * const status[] = {
+		[BOND_LINK_UP] = "up",
+		[BOND_LINK_FAIL] = "going down",
+		[BOND_LINK_DOWN] = "down",
+		[BOND_LINK_BACK] = "going back",
+	};
+
+	return status[link];
+}
+
 static void bond_info_show_slave(struct seq_file *seq,
 				 const struct slave *slave)
 {
 	struct bonding *bond = seq->private;
 
 	seq_printf(seq, "\nSlave Interface: %s\n", slave->dev->name);
-	seq_printf(seq, "MII Status: %s\n",
-		   (slave->link == BOND_LINK_UP) ?  "up" : "down");
+	seq_printf(seq, "MII Status: %s\n", bond_slave_link_status(slave->link));
 	if (slave->speed == SPEED_UNKNOWN)
 		seq_printf(seq, "Speed: %s\n", "Unknown");
 	else
@@ -4987,16 +4989,13 @@ static int bond_ethtool_set_flags(struct net_device *dev, u32 flags)
 	int i;
 
 	bond_for_each_slave(bond, slave, i) {
-		if (!slave->dev->ethtool_ops->get_flags)
-			continue;
-		if (!slave->dev->ethtool_ops->set_flags)
-			continue;
-		dflags = slave->dev->ethtool_ops->get_flags(slave->dev);
+		dflags = dev_ethtool_get_flags(slave->dev);
 		if (flags & ETH_FLAG_LRO)
 			ndflags = dflags | ETH_FLAG_LRO;
 		else
 			ndflags = dflags & ~ETH_FLAG_LRO;
-		if (ndflags != dflags)
+		if (ndflags != dflags && slave->dev->ethtool_ops
+		    && slave->dev->ethtool_ops->set_flags)
 			slave->dev->ethtool_ops->set_flags(slave->dev, ndflags);
 	}
 
@@ -5609,8 +5608,18 @@ static void bond_set_lockdep_class(struct net_device *dev)
 static int bond_init(struct net_device *bond_dev)
 {
 	struct bonding *bond = netdev_priv(bond_dev);
+	struct alb_bond_info *bond_info = &(BOND_ALB_INFO(bond));
 
 	pr_debug("Begin bond_init for %s\n", bond_dev->name);
+
+	/*
+	 * Initialize locks that may be required during
+	 * en/deslave operations.  All of the bond_open work
+	 * (of which this is part) should really be moved to
+	 * a phase prior to dev_open
+	 */
+	spin_lock_init(&(bond_info->tx_hashtbl_lock));
+	spin_lock_init(&(bond_info->rx_hashtbl_lock));
 
 	bond->wq = create_singlethread_workqueue(bond_dev->name);
 	if (!bond->wq)

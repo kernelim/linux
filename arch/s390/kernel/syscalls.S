@@ -347,3 +347,7 @@ NI_SYSCALL	/* name_to_handle_at */
 NI_SYSCALL	/* open_by_handle_at */
 NI_SYSCALL	/* clock_adjtime */
 SYSCALL(sys_syncfs,sys_syncfs,sys_syncfs_wrapper)
+NI_SYSCALL	/* setns */
+NI_SYSCALL	/* process_vm_readv */
+NI_SYSCALL	/* process_vm_writev */
+SYSCALL(sys_ni_syscall,sys_s390_runtime_instr,sys_s390_runtime_instr_wrapper)

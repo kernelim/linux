@@ -61,10 +61,6 @@ static const char mlx4_en_version[] =
  * Device scope module parameters
  */
 
-
-/* Enable RSS TCP traffic */
-MLX4_EN_PARM_INT(tcp_rss, 1,
-		 "Enable RSS for incomming TCP traffic or disabled (0)");
 /* Enable RSS UDP traffic */
 MLX4_EN_PARM_INT(udp_rss, 1,
 		 "Enable RSS for incomming UDP traffic or disabled (0)");
@@ -78,14 +74,17 @@ MLX4_EN_PARM_INT(pfcrx, 0, "Priority based Flow Control policy on RX[7:0]."
 MLX4_EN_PARM_INT(num_lro, ~0, "Dummy parameter for backward compatibility" );
 MLX4_EN_PARM_INT(rss_mask, ~0, "Dummy parameter for backward compatibility" );
 MLX4_EN_PARM_INT(rss_xor, ~0, "Dummy parameter for backward compatibility" );
+MLX4_EN_PARM_INT(enable_tc, 1, "Enable separate queues for traffic classes" );
 
 static int mlx4_en_get_profile(struct mlx4_en_dev *mdev)
 {
 	struct mlx4_en_profile *params = &mdev->profile;
 	int i;
 
-	params->tcp_rss = tcp_rss;
 	params->udp_rss = udp_rss;
+	params->num_tx_rings_p_up = min_t(int, num_online_cpus(),
+			MLX4_EN_MAX_TX_RING_P_UP);
+	params->enable_tc = enable_tc;
 	if (params->udp_rss && !(mdev->dev->caps.flags
 					& MLX4_DEV_CAP_FLAG_UDP_RSS)) {
 		mlx4_warn(mdev, "UDP RSS is not supported on this device.\n");
@@ -98,8 +97,8 @@ static int mlx4_en_get_profile(struct mlx4_en_dev *mdev)
 		params->prof[i].tx_ppp = pfctx;
 		params->prof[i].tx_ring_size = MLX4_EN_DEF_TX_RING_SIZE;
 		params->prof[i].rx_ring_size = MLX4_EN_DEF_RX_RING_SIZE;
-		params->prof[i].tx_ring_num = MLX4_EN_NUM_TX_RINGS +
-			(!!pfcrx) * MLX4_EN_NUM_PPP_RINGS;
+		params->prof[i].tx_ring_num = params->num_tx_rings_p_up *
+			MLX4_EN_NUM_UP;
 	}
 
 	if ( num_lro != ~0 || rss_mask != ~0 || rss_xor != ~0 )
@@ -115,18 +114,17 @@ static void *mlx4_en_get_netdev(struct mlx4_dev *dev, void *ctx, u8 port)
 }
 
 static void mlx4_en_event(struct mlx4_dev *dev, void *endev_ptr,
-			  enum mlx4_dev_event event, int port)
+			  enum mlx4_dev_event event, unsigned long port)
 {
 	struct mlx4_en_dev *mdev = (struct mlx4_en_dev *) endev_ptr;
 	struct mlx4_en_priv *priv;
 
-	if (!mdev->pndev[port])
-		return;
-
-	priv = netdev_priv(mdev->pndev[port]);
 	switch (event) {
 	case MLX4_DEV_EVENT_PORT_UP:
 	case MLX4_DEV_EVENT_PORT_DOWN:
+		if (!mdev->pndev[port])
+			return;
+		priv = netdev_priv(mdev->pndev[port]);
 		/* To prevent races, we poll the link state in a separate
 		  task rather than changing it here */
 		priv->link_state = event;
@@ -138,7 +136,11 @@ static void mlx4_en_event(struct mlx4_dev *dev, void *endev_ptr,
 		break;
 
 	default:
-		mlx4_warn(mdev, "Unhandled event: %d\n", event);
+		if (port < 1 || port > dev->caps.num_ports ||
+		    !mdev->pndev[port])
+			return;
+		mlx4_warn(mdev, "Unhandled event %d for port %d\n", event,
+			  (int) port);
 	}
 }
 

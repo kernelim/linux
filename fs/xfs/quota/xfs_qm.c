@@ -518,31 +518,18 @@ xfs_qm_detach_gdquots(
 {
 	struct xfs_quotainfo	*q = mp->m_quotainfo;
 	struct xfs_dquot	*dqp, *gdqp;
-	int			nrecl;
 
- again:
 	ASSERT(mutex_is_locked(&q->qi_dqlist_lock));
 	list_for_each_entry(dqp, &q->qi_dqlist, q_mplist) {
 		xfs_dqlock(dqp);
-		if ((gdqp = dqp->q_gdquot)) {
-			xfs_dqlock(gdqp);
+
+		gdqp = dqp->q_gdquot;
+		if (gdqp)
 			dqp->q_gdquot = NULL;
-		}
 		xfs_dqunlock(dqp);
+		if (gdqp)
+			xfs_qm_dqrele(gdqp);
 
-		if (gdqp) {
-			/*
-			 * Can't hold the mplist lock across a dqput.
-			 * XXXmust convert to marker based iterations here.
-			 */
-			nrecl = q->qi_dqreclaims;
-			mutex_unlock(&q->qi_dqlist_lock);
-			xfs_qm_dqput(gdqp);
-
-			mutex_lock(&q->qi_dqlist_lock);
-			if (nrecl != q->qi_dqreclaims)
-				goto again;
-		}
 	}
 }
 
@@ -714,7 +701,8 @@ xfs_qm_dqattach_one(
 	 * disk and we didn't ask it to allocate;
 	 * ESRCH if quotas got turned off suddenly.
 	 */
-	error = xfs_qm_dqget(ip->i_mount, ip, id, type, XFS_QMOPT_DOWARN, &dqp);
+	error = xfs_qm_dqget(ip->i_mount, ip, id, type,
+			     doalloc | XFS_QMOPT_DOWARN, &dqp);
 	if (error)
 		return error;
 
@@ -789,6 +777,23 @@ xfs_qm_dqattach_grouphint(
 	xfs_dqunlock(udq);
 }
 
+static bool
+xfs_qm_need_dqattach(
+	struct xfs_inode	*ip)
+{
+	struct xfs_mount	*mp = ip->i_mount;
+
+	if (!XFS_IS_QUOTA_RUNNING(mp))
+		return false;
+	if (!XFS_IS_QUOTA_ON(mp))
+		return false;
+	if (!XFS_NOT_DQATTACHED(mp, ip))
+		return false;
+	if (ip->i_ino == mp->m_sb.sb_uquotino ||
+	    ip->i_ino == mp->m_sb.sb_gquotino)
+		return false;
+	return true;
+}
 
 /*
  * Given a locked inode, attach dquot(s) to it, taking U/G/P-QUOTAON
@@ -806,11 +811,7 @@ xfs_qm_dqattach_locked(
 	uint		nquotas = 0;
 	int		error = 0;
 
-	if (!XFS_IS_QUOTA_RUNNING(mp) ||
-	    !XFS_IS_QUOTA_ON(mp) ||
-	    !XFS_NOT_DQATTACHED(mp, ip) ||
-	    ip->i_ino == mp->m_sb.sb_uquotino ||
-	    ip->i_ino == mp->m_sb.sb_gquotino)
+	if (!xfs_qm_need_dqattach(ip))
 		return 0;
 
 	ASSERT(xfs_isilocked(ip, XFS_ILOCK_EXCL));
@@ -884,6 +885,9 @@ xfs_qm_dqattach(
 	uint			flags)
 {
 	int			error;
+
+	if (!xfs_qm_need_dqattach(ip))
+		return 0;
 
 	xfs_ilock(ip, XFS_ILOCK_EXCL);
 	error = xfs_qm_dqattach_locked(ip, flags);
@@ -1917,7 +1921,7 @@ again:
 			 * We flush it delayed write, so don't bother
 			 * releasing the freelist lock.
 			 */
-			error = xfs_qm_dqflush(dqp, 0);
+			error = xfs_qm_dqflush(dqp, SYNC_TRYLOCK);
 			if (error) {
 				xfs_warn(mp, "%s: dquot %p flush failed",
 					__func__, dqp);

@@ -58,6 +58,7 @@
 #ifdef CONFIG_FSL_BOOKE
 #include <asm/dbell.h>
 #endif
+#include <asm/fadump.h>
 
 #if defined(CONFIG_DEBUGGER) || defined(CONFIG_KEXEC)
 int (*__debugger)(struct pt_regs *regs);
@@ -156,6 +157,8 @@ int die(const char *str, struct pt_regs *regs, long err)
 	die.lock_owner = -1;
 	add_taint(TAINT_DIE);
 	spin_unlock_irqrestore(&die.lock, flags);
+
+	crash_fadump(regs, str);
 
 	if (kexec_should_crash(current) ||
 		kexec_sr_activated(smp_processor_id()))

@@ -34,12 +34,12 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/acpi.h>
+#include <linux/acpi_io.h>
 #include <linux/io.h>
 #include <linux/kref.h>
 #include <linux/rculist.h>
 #include <linux/interrupt.h>
 #include <linux/debugfs.h>
-#include <acpi/atomicio.h>
 
 #include "apei-internal.h"
 
@@ -69,7 +69,7 @@ int __apei_exec_read_register(struct acpi_whea_header *entry, u64 *val)
 {
 	int rc;
 
-	rc = acpi_atomic_read(val, &entry->register_region);
+	rc = apei_read(val, &entry->register_region);
 	if (rc)
 		return rc;
 	*val >>= entry->register_region.bit_offset;
@@ -115,13 +115,13 @@ int __apei_exec_write_register(struct acpi_whea_header *entry, u64 val)
 	val <<= entry->register_region.bit_offset;
 	if (entry->flags & APEI_EXEC_PRESERVE_REGISTER) {
 		u64 valr = 0;
-		rc = acpi_atomic_read(&valr, &entry->register_region);
+		rc = apei_read(&valr, &entry->register_region);
 		if (rc)
 			return rc;
 		valr &= ~(entry->mask << entry->register_region.bit_offset);
 		val |= valr;
 	}
-	rc = acpi_atomic_write(val, &entry->register_region);
+	rc = apei_write(val, &entry->register_region);
 
 	return rc;
 }
@@ -242,7 +242,7 @@ static int pre_map_gar_callback(struct apei_exec_context *ctx,
 	u8 ins = entry->instruction;
 
 	if (ctx->ins_table[ins].flags & APEI_EXEC_INS_ACCESS_REGISTER)
-		return acpi_pre_map_gar(&entry->register_region);
+		return apei_map_generic_address(&entry->register_region);
 
 	return 0;
 }
@@ -275,7 +275,7 @@ static int post_unmap_gar_callback(struct apei_exec_context *ctx,
 	u8 ins = entry->instruction;
 
 	if (ctx->ins_table[ins].flags & APEI_EXEC_INS_ACCESS_REGISTER)
-		acpi_post_unmap_gar(&entry->register_region);
+		apei_unmap_generic_address(&entry->register_region);
 
 	return 0;
 }
@@ -470,9 +470,9 @@ int apei_resources_request(struct apei_resources *resources,
 				       desc);
 		if (!r) {
 			pr_err(APEI_PFX
-		"Can not request iomem region <%016llx-%016llx> for GARs.\n",
+		"Can not request [mem %#010llx-%#010llx] for %s registers\n",
 			       (unsigned long long)res->start,
-			       (unsigned long long)res->end);
+			       (unsigned long long)res->end - 1, desc);
 			res_bak = res;
 			goto err_unmap_iomem;
 		}
@@ -482,9 +482,9 @@ int apei_resources_request(struct apei_resources *resources,
 		r = request_region(res->start, res->end - res->start, desc);
 		if (!r) {
 			pr_err(APEI_PFX
-		"Can not request ioport region <%016llx-%016llx> for GARs.\n",
+		"Can not request [io  %#06llx-%#06llx] for %s registers\n",
 			       (unsigned long long)res->start,
-			       (unsigned long long)res->end);
+			       (unsigned long long)res->end - 1, desc);
 			res_bak = res;
 			goto err_unmap_ioport;
 		}
@@ -530,38 +530,137 @@ void apei_resources_release(struct apei_resources *resources)
 }
 EXPORT_SYMBOL_GPL(apei_resources_release);
 
-static int apei_check_gar(struct acpi_generic_address *reg, u64 *paddr)
+static int apei_check_gar(struct acpi_generic_address *reg, u64 *paddr,
+				u32 *access_bit_width)
 {
-	u32 width, space_id;
+	u32 bit_width, bit_offset, access_size_code, space_id;
 
-	width = reg->bit_width;
+	bit_width = reg->bit_width;
+	bit_offset = reg->bit_offset;
+	access_size_code = reg->access_width;
 	space_id = reg->space_id;
 	/* Handle possible alignment issues */
 	memcpy(paddr, &reg->address, sizeof(*paddr));
 	if (!*paddr) {
 		pr_warning(FW_BUG APEI_PFX
-			   "Invalid physical address in GAR [0x%llx/%u/%u]\n",
-			   *paddr, width, space_id);
+			   "Invalid physical address in GAR [0x%llx/%u/%u/%u/%u]\n",
+			   *paddr, bit_width, bit_offset, access_size_code,
+			   space_id);
 		return -EINVAL;
 	}
 
-	if ((width != 8) && (width != 16) && (width != 32) && (width != 64)) {
+	if (access_size_code < 1 || access_size_code > 4) {
 		pr_warning(FW_BUG APEI_PFX
-			   "Invalid bit width in GAR [0x%llx/%u/%u]\n",
-			   *paddr, width, space_id);
+			   "Invalid access size code in GAR [0x%llx/%u/%u/%u/%u]\n",
+			   *paddr, bit_width, bit_offset, access_size_code,
+			   space_id);
+		return -EINVAL;
+	}
+	*access_bit_width = 1UL << (access_size_code + 2);
+
+	/* Fixup common BIOS bug */
+	if (bit_width == 32 && bit_offset == 0 && (*paddr & 0x03) == 0 &&
+	    *access_bit_width < 32)
+		*access_bit_width = 32;
+
+	if ((bit_width + bit_offset) > *access_bit_width) {
+		pr_warning(FW_BUG APEI_PFX
+			   "Invalid bit width + offset in GAR [0x%llx/%u/%u/%u/%u]\n",
+			   *paddr, bit_width, bit_offset, access_size_code,
+			   space_id);
 		return -EINVAL;
 	}
 
 	if (space_id != ACPI_ADR_SPACE_SYSTEM_MEMORY &&
 	    space_id != ACPI_ADR_SPACE_SYSTEM_IO) {
 		pr_warning(FW_BUG APEI_PFX
-			   "Invalid address space type in GAR [0x%llx/%u/%u]\n",
-			   *paddr, width, space_id);
+			   "Invalid address space type in GAR [0x%llx/%u/%u/%u/%u]\n",
+			   *paddr, bit_width, bit_offset, access_size_code,
+			   space_id);
 		return -EINVAL;
 	}
 
 	return 0;
 }
+
+int apei_map_generic_address(struct acpi_generic_address *reg)
+{
+	int rc;
+	u32 access_bit_width;
+	u64 address;
+
+	rc = apei_check_gar(reg, &address, &access_bit_width);
+	if (rc)
+		return rc;
+	return acpi_os_map_generic_address(reg);
+}
+EXPORT_SYMBOL_GPL(apei_map_generic_address);
+
+/* read GAR in interrupt (including NMI) or process context */
+int apei_read(u64 *val, struct acpi_generic_address *reg)
+{
+	int rc;
+	u32 access_bit_width;
+	u64 address;
+	acpi_status status;
+
+	rc = apei_check_gar(reg, &address, &access_bit_width);
+	if (rc)
+		return rc;
+
+	*val = 0;
+	switch(reg->space_id) {
+	case ACPI_ADR_SPACE_SYSTEM_MEMORY:
+		status = acpi_os_read_memory((acpi_physical_address) address,
+					       val, access_bit_width);
+		if (ACPI_FAILURE(status))
+			return -EIO;
+		break;
+	case ACPI_ADR_SPACE_SYSTEM_IO:
+		status = acpi_os_read_port(address, (u32 *)val,
+					   access_bit_width);
+		if (ACPI_FAILURE(status))
+			return -EIO;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(apei_read);
+
+/* write GAR in interrupt (including NMI) or process context */
+int apei_write(u64 val, struct acpi_generic_address *reg)
+{
+	int rc;
+	u32 access_bit_width;
+	u64 address;
+	acpi_status status;
+
+	rc = apei_check_gar(reg, &address, &access_bit_width);
+	if (rc)
+		return rc;
+
+	switch (reg->space_id) {
+	case ACPI_ADR_SPACE_SYSTEM_MEMORY:
+		status = acpi_os_write_memory((acpi_physical_address) address,
+						val, access_bit_width);
+		if (ACPI_FAILURE(status))
+			return -EIO;
+		break;
+	case ACPI_ADR_SPACE_SYSTEM_IO:
+		status = acpi_os_write_port(address, val, access_bit_width);
+		if (ACPI_FAILURE(status))
+			return -EIO;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(apei_write);
 
 static int collect_res_callback(struct apei_exec_context *ctx,
 				struct acpi_whea_header *entry,
@@ -570,23 +669,24 @@ static int collect_res_callback(struct apei_exec_context *ctx,
 	struct apei_resources *resources = data;
 	struct acpi_generic_address *reg = &entry->register_region;
 	u8 ins = entry->instruction;
+	u32 access_bit_width;
 	u64 paddr;
 	int rc;
 
 	if (!(ctx->ins_table[ins].flags & APEI_EXEC_INS_ACCESS_REGISTER))
 		return 0;
 
-	rc = apei_check_gar(reg, &paddr);
+	rc = apei_check_gar(reg, &paddr, &access_bit_width);
 	if (rc)
 		return rc;
 
 	switch (reg->space_id) {
 	case ACPI_ADR_SPACE_SYSTEM_MEMORY:
 		return apei_res_add(&resources->iomem, paddr,
-				    reg->bit_width / 8);
+				    access_bit_width / 8);
 	case ACPI_ADR_SPACE_SYSTEM_IO:
 		return apei_res_add(&resources->ioport, paddr,
-				    reg->bit_width / 8);
+				    access_bit_width / 8);
 	default:
 		return -EINVAL;
 	}

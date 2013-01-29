@@ -177,12 +177,12 @@ xlog_bread_noalign(
 	XFS_BUF_BUSY(bp);
 	XFS_BUF_SET_COUNT(bp, BBTOB(nbblks));
 	XFS_BUF_SET_TARGET(bp, log->l_mp->m_logdev_targp);
+	bp->b_error = 0;
 
 	xfsbdstrat(log->l_mp, bp);
 	error = xfs_buf_iowait(bp);
 	if (error)
-		xfs_ioerror_alert("xlog_bread", log->l_mp,
-				  bp, XFS_BUF_ADDR(bp));
+		xfs_buf_ioerror_alert(bp, __func__);
 	return error;
 }
 
@@ -267,10 +267,11 @@ xlog_bwrite(
 	XFS_BUF_PSEMA(bp, PRIBIO);
 	XFS_BUF_SET_COUNT(bp, BBTOB(nbblks));
 	XFS_BUF_SET_TARGET(bp, log->l_mp->m_logdev_targp);
+	bp->b_error = 0;
 
-	if ((error = xfs_bwrite(log->l_mp, bp)))
-		xfs_ioerror_alert("xlog_bwrite", log->l_mp,
-				  bp, XFS_BUF_ADDR(bp));
+	error = xfs_bwrite(log->l_mp, bp);
+	if (error)
+		xfs_buf_ioerror_alert(bp, __func__);
 	return error;
 }
 
@@ -367,9 +368,7 @@ xlog_recover_iodone(
 		 * We're not going to bother about retrying
 		 * this during recovery. One strike!
 		 */
-		xfs_ioerror_alert("xlog_recover_iodone",
-					bp->b_target->bt_mount, bp,
-					XFS_BUF_ADDR(bp));
+		xfs_buf_ioerror_alert(bp, __func__);
 		xfs_force_shutdown(bp->b_target->bt_mount,
 					SHUTDOWN_META_IO_ERROR);
 	}
@@ -448,6 +447,8 @@ xlog_find_verify_cycle(
 	 * a log sector, or we're out of luck.
 	 */
 	bufblks = 1 << ffs(nbblks);
+	while (bufblks > log->l_logBBsize)
+		bufblks >>= 1;
 	while (!(bp = xlog_get_bp(log, bufblks))) {
 		bufblks >>= 1;
 		if (bufblks < log->l_sectBBsize)
@@ -973,9 +974,9 @@ xlog_find_tail(
 		log->l_curr_cycle++;
 	atomic64_set(&log->l_tail_lsn, be64_to_cpu(rhead->h_tail_lsn));
 	atomic64_set(&log->l_last_sync_lsn, be64_to_cpu(rhead->h_lsn));
-	xlog_assign_grant_head(&log->l_grant_reserve_head, log->l_curr_cycle,
+	xlog_assign_grant_head(&log->l_reserve_head.grant, log->l_curr_cycle,
 					BBTOB(log->l_curr_block));
-	xlog_assign_grant_head(&log->l_grant_write_head, log->l_curr_cycle,
+	xlog_assign_grant_head(&log->l_write_head.grant, log->l_curr_cycle,
 					BBTOB(log->l_curr_block));
 
 	/*
@@ -1233,6 +1234,8 @@ xlog_write_log_records(
 	 * log sector, or we're out of luck.
 	 */
 	bufblks = 1 << ffs(blocks);
+	while (bufblks > log->l_logBBsize)
+		bufblks >>= 1;
 	while (!(bp = xlog_get_bp(log, bufblks))) {
 		bufblks >>= 1;
 		if (bufblks < sectbb)
@@ -1497,7 +1500,7 @@ xlog_recover_add_to_cont_trans(
 	old_ptr = item->ri_buf[item->ri_cnt-1].i_addr;
 	old_len = item->ri_buf[item->ri_cnt-1].i_len;
 
-	ptr = kmem_realloc(old_ptr, len+old_len, old_len, 0u);
+	ptr = kmem_realloc(old_ptr, len+old_len, old_len, KM_SLEEP);
 	memcpy(&ptr[old_len], dp, len); /* d, s, l */
 	item->ri_buf[item->ri_cnt-1].i_len += len;
 	item->ri_buf[item->ri_cnt-1].i_addr = ptr;
@@ -2138,8 +2141,7 @@ xlog_recover_buffer_pass2(
 	bp = xfs_buf_read(mp->m_ddev_targp, buf_f->blf_blkno, buf_f->blf_len,
 			  buf_flags);
 	if (XFS_BUF_ISERROR(bp)) {
-		xfs_ioerror_alert("xlog_recover_do..(read#1)", mp,
-				  bp, buf_f->blf_blkno);
+		xfs_buf_ioerror_alert(bp, "xlog_recover_do..(read#1)");
 		error = XFS_BUF_GETERROR(bp);
 		xfs_buf_relse(bp);
 		return error;
@@ -2230,8 +2232,7 @@ xlog_recover_inode_pass2(
 	bp = xfs_buf_read(mp->m_ddev_targp, in_f->ilf_blkno, in_f->ilf_len,
 			  XBF_LOCK);
 	if (XFS_BUF_ISERROR(bp)) {
-		xfs_ioerror_alert("xlog_recover_do..(read#2)", mp,
-				  bp, in_f->ilf_blkno);
+		xfs_buf_ioerror_alert(bp, "xlog_recover_do..(read#2)");
 		error = XFS_BUF_GETERROR(bp);
 		xfs_buf_relse(bp);
 		goto error;
@@ -2539,8 +2540,7 @@ xlog_recover_dquot_pass2(
 			     XFS_FSB_TO_BB(mp, dq_f->qlf_len),
 			     0, &bp);
 	if (error) {
-		xfs_ioerror_alert("xlog_recover_do..(read#3)", mp,
-				  bp, dq_f->qlf_blkno);
+		xfs_buf_ioerror_alert(bp, "xlog_recover_do..(read#3)");
 		return error;
 	}
 	ASSERT(bp);
@@ -3165,37 +3165,26 @@ xlog_recover_process_iunlinks(
 			 */
 			continue;
 		}
+		/*
+		 * Unlock the buffer so that it can be acquired in the normal
+		 * course of the transaction to truncate and free each inode.
+		 * Because we are not racing with anyone else here for the AGI
+		 * buffer, we don't even need to hold it locked to read the
+		 * initial unlinked bucket entries out of the buffer. We keep
+		 * buffer reference though, so that it stays pinned in memory
+		 * while we need the buffer.
+		 */
 		agi = XFS_BUF_TO_AGI(agibp);
+		xfs_buf_unlock(agibp);
 
 		for (bucket = 0; bucket < XFS_AGI_UNLINKED_BUCKETS; bucket++) {
 			agino = be32_to_cpu(agi->agi_unlinked[bucket]);
 			while (agino != NULLAGINO) {
-				/*
-				 * Release the agi buffer so that it can
-				 * be acquired in the normal course of the
-				 * transaction to truncate and free the inode.
-				 */
-				xfs_buf_relse(agibp);
-
 				agino = xlog_recover_process_one_iunlink(mp,
 							agno, agino, bucket);
-
-				/*
-				 * Reacquire the agibuffer and continue around
-				 * the loop. This should never fail as we know
-				 * the buffer was good earlier on.
-				 */
-				error = xfs_read_agi(mp, NULL, agno, &agibp);
-				ASSERT(error == 0);
-				agi = XFS_BUF_TO_AGI(agibp);
 			}
 		}
-
-		/*
-		 * Release the buffer for the current agi so we can
-		 * go on to the next one.
-		 */
-		xfs_buf_relse(agibp);
+		xfs_buf_rele(agibp);
 	}
 
 	mp->m_dmevmask = mp_dmevmask;
@@ -3691,8 +3680,7 @@ xlog_do_recover(
 	xfsbdstrat(log->l_mp, bp);
 	error = xfs_buf_iowait(bp);
 	if (error) {
-		xfs_ioerror_alert("xlog_do_recover",
-				  log->l_mp, bp, XFS_BUF_ADDR(bp));
+		xfs_buf_ioerror_alert(bp, __func__);
 		ASSERT(0);
 		xfs_buf_relse(bp);
 		return error;

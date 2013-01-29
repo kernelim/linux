@@ -82,6 +82,8 @@ netdevices.txt
 	- info on network device driver functions exported to the kernel.
 olympic.txt
 	- IBM PCI Pit/Pit-Phy/Olympic Token Ring driver info.
+openvswitch.txt
+	- Open vSwitch developer documentation.
 policy-routing.txt
 	- IP policy-based routing
 ray_cs.txt

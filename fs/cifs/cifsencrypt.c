@@ -240,7 +240,7 @@ int cifs_verify_signature(struct smb_hdr *cifs_pdu,
 }
 
 /* first calculate 24 bytes ntlm response and then 16 byte session key */
-int setup_ntlm_response(struct cifsSesInfo *ses)
+int setup_ntlm_response(struct cifs_ses *ses)
 {
 	int rc = 0;
 	unsigned int temp_len = CIFS_SESS_KEY_SIZE + CIFS_AUTH_RESP_SIZE;
@@ -323,7 +323,7 @@ int calc_lanman_hash(const char *password, const char *cryptkey, bool encrypt,
  * Allocate domain name which gets freed when session struct is deallocated.
  */
 static int
-build_avpair_blob(struct cifsSesInfo *ses, const struct nls_table *nls_cp)
+build_avpair_blob(struct cifs_ses *ses, const struct nls_table *nls_cp)
 {
 	unsigned int dlen;
 	unsigned int wlen;
@@ -411,7 +411,7 @@ build_avpair_blob(struct cifsSesInfo *ses, const struct nls_table *nls_cp)
  * about target string i.e. for some, just user name might suffice.
  */
 static int
-find_domain_name(struct cifsSesInfo *ses, const struct nls_table *nls_cp)
+find_domain_name(struct cifs_ses *ses, const struct nls_table *nls_cp)
 {
 	unsigned int attrsize;
 	unsigned int type;
@@ -456,7 +456,7 @@ find_domain_name(struct cifsSesInfo *ses, const struct nls_table *nls_cp)
 	return 0;
 }
 
-static int calc_ntlmv2_hash(struct cifsSesInfo *ses, char *ntlmv2_hash,
+static int calc_ntlmv2_hash(struct cifs_ses *ses, char *ntlmv2_hash,
 			    const struct nls_table *nls_cp)
 {
 	int rc = 0;
@@ -538,7 +538,7 @@ calc_exit_2:
 }
 
 static int
-CalcNTLMv2_response(const struct cifsSesInfo *ses, char *ntlmv2_hash)
+CalcNTLMv2_response(const struct cifs_ses *ses, char *ntlmv2_hash)
 {
 	int rc;
 	unsigned int offset = CIFS_SESS_KEY_SIZE + 8;
@@ -574,7 +574,7 @@ CalcNTLMv2_response(const struct cifsSesInfo *ses, char *ntlmv2_hash)
 
 
 int
-setup_ntlmv2_rsp(struct cifsSesInfo *ses, const struct nls_table *nls_cp)
+setup_ntlmv2_rsp(struct cifs_ses *ses, const struct nls_table *nls_cp)
 {
 	int rc;
 	int baselen;
@@ -660,7 +660,7 @@ setup_ntlmv2_rsp_ret:
 }
 
 int
-calc_seckey(struct cifsSesInfo *ses)
+calc_seckey(struct cifs_ses *ses)
 {
 	int rc;
 	struct crypto_blkcipher *tfm_arc4;

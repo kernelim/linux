@@ -445,6 +445,14 @@ struct ipmi_smi_watcher {
 int ipmi_smi_watcher_register(struct ipmi_smi_watcher *watcher);
 int ipmi_smi_watcher_unregister(struct ipmi_smi_watcher *watcher);
 
+struct ipmi_smi_probe_complete {
+	struct list_head link;
+	void (*probe_complete)(void);
+};
+
+int ipmi_smi_probe_complete_register(struct ipmi_smi_probe_complete *watcher);
+int ipmi_smi_probe_complete_unregister(struct ipmi_smi_probe_complete *watcher);
+
 /* The following are various helper functions for dealing with IPMI
    addresses. */
 
@@ -453,6 +461,44 @@ unsigned int ipmi_addr_length(int addr_type);
 
 /* Validate that the given IPMI address is valid. */
 int ipmi_validate_addr(struct ipmi_addr *addr, int len);
+
+/*
+ * How did the IPMI driver find out about the device?
+ */
+enum ipmi_addr_src {
+	SI_INVALID = 0, SI_HOTMOD, SI_HARDCODED, SI_SPMI, SI_ACPI, SI_SMBIOS,
+	SI_PCI,	SI_DEVICETREE, SI_DEFAULT
+};
+
+union ipmi_smi_info_union {
+	/*
+	 * the acpi_info element is defined for the SI_ACPI
+	 * address type
+	 */
+	struct {
+		void *acpi_handle;
+	} acpi_info;
+};
+
+struct ipmi_smi_info {
+	enum ipmi_addr_src addr_src;
+
+	/*
+	 * Base device for the interface.  Don't forget to put this when
+	 * you are done.
+	 */
+	struct device *dev;
+
+	/*
+	 * The addr_info provides more detailed info for some IPMI
+	 * devices, depending on the addr_src.  Currently only SI_ACPI
+	 * info is provided.
+	 */
+	union ipmi_smi_info_union addr_info;
+};
+
+/* This is to get the private info of ipmi_smi_t */
+extern int ipmi_get_smi_info(int if_num, struct ipmi_smi_info *data);
 
 #endif /* __KERNEL__ */
 

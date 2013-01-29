@@ -266,9 +266,9 @@ enum {
 #define DM_DEV_SET_GEOMETRY	_IOWR(DM_IOCTL, DM_DEV_SET_GEOMETRY_CMD, struct dm_ioctl)
 
 #define DM_VERSION_MAJOR	4
-#define DM_VERSION_MINOR	22
+#define DM_VERSION_MINOR	23
 #define DM_VERSION_PATCHLEVEL	6
-#define DM_VERSION_EXTRA	"-ioctl (2011-10-19)"
+#define DM_VERSION_EXTRA	"-ioctl (2012-07-25)"
 
 /* Status bits */
 #define DM_READONLY_FLAG	(1 << 0) /* In/Out */
@@ -306,6 +306,8 @@ enum {
 
 /*
  * Set this to suspend without flushing queued ios.
+ * Also disables flushing uncommitted changes in the thin target before
+ * generating statistics for DM_TABLE_STATUS and DM_DEV_WAIT.
  */
 #define DM_NOFLUSH_FLAG		(1 << 11) /* In */
 

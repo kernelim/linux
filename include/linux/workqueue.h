@@ -193,7 +193,10 @@ __create_workqueue_key(const char *name, int singlethread,
 #define create_workqueue(name) __create_workqueue((name), 0, 0, 0)
 #define create_rt_workqueue(name) __create_workqueue((name), 0, 0, 1)
 #define create_freezeable_workqueue(name) __create_workqueue((name), 1, 1, 0)
+#define create_freezable_workqueue(name) create_freezeable_workqueue(name)
 #define create_singlethread_workqueue(name) __create_workqueue((name), 1, 0, 0)
+
+#define alloc_ordered_workqueue(name, flags) create_singlethread_workqueue(name)
 
 extern void destroy_workqueue(struct workqueue_struct *wq);
 

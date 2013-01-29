@@ -105,7 +105,8 @@ typedef unsigned int ext4_group_t;
 #define EXT4_MB_DELALLOC_RESERVED	0x0400
 /* We are doing stream allocation */
 #define EXT4_MB_STREAM_ALLOC		0x0800
-
+/* Use reserved root blocks if needed */
+#define EXT4_MB_USE_ROOT_BLOCKS		0x1000
 
 struct ext4_allocation_request {
 	/* target inode for block we're allocating */
@@ -126,6 +127,29 @@ struct ext4_allocation_request {
 	ext4_fsblk_t pright;
 	/* flags. see above EXT4_MB_HINT_* */
 	unsigned int flags;
+};
+
+/*
+ * Logical to physical block mapping, used by ext4_map_blocks()
+ *
+ * This structure is used to pass requests into ext4_map_blocks() as
+ * well as to store the information returned by ext4_map_blocks().  It
+ * takes less room on the stack than a struct buffer_head.
+ */
+#define EXT4_MAP_NEW		(1 << BH_New)
+#define EXT4_MAP_MAPPED		(1 << BH_Mapped)
+#define EXT4_MAP_UNWRITTEN	(1 << BH_Unwritten)
+#define EXT4_MAP_BOUNDARY	(1 << BH_Boundary)
+#define EXT4_MAP_UNINIT		(1 << BH_Uninit)
+#define EXT4_MAP_FLAGS		(EXT4_MAP_NEW | EXT4_MAP_MAPPED |\
+				 EXT4_MAP_UNWRITTEN | EXT4_MAP_BOUNDARY |\
+				 EXT4_MAP_UNINIT)
+
+struct ext4_map_blocks {
+	ext4_fsblk_t m_pblk;
+	ext4_lblk_t m_lblk;
+	unsigned int m_len;
+	unsigned int m_flags;
 };
 
 /*
@@ -461,6 +485,19 @@ struct ext4_new_group_data {
 	/* Convert extent to initialized after direct IO complete */
 #define EXT4_GET_BLOCKS_DIO_CONVERT_EXT		(EXT4_GET_BLOCKS_CONVERT|\
 					 EXT4_GET_BLOCKS_DIO_CREATE_EXT)
+	/* Punch out blocks of an extent */
+#define EXT4_GET_BLOCKS_PUNCH_OUT_EXT		0x0020
+
+/*
+ * Flags used by ext4_free_blocks
+ */
+#define EXT4_FREE_BLOCKS_METADATA	0x0001
+#define EXT4_FREE_BLOCKS_NO_QUOT_UPDATE	0x0008
+
+/*
+ * Flags used by ext4_discard_partial_page_buffers
+ */
+#define EXT4_DISCARD_PARTIAL_PG_ZERO_UNMAPPED	0x0001
 
 /*
  * ioctl commands
@@ -1557,11 +1594,12 @@ extern int ext4_bg_has_super(struct super_block *sb, ext4_group_t group);
 extern unsigned long ext4_bg_num_gdb(struct super_block *sb,
 			ext4_group_t group);
 extern ext4_fsblk_t ext4_new_meta_blocks(handle_t *handle, struct inode *inode,
-			ext4_fsblk_t goal, unsigned long *count, int *errp);
-extern int ext4_claim_free_blocks(struct ext4_sb_info *sbi, s64 nblocks);
-extern int ext4_has_free_blocks(struct ext4_sb_info *sbi, s64 nblocks);
-extern void ext4_free_blocks(handle_t *handle, struct inode *inode,
-			ext4_fsblk_t block, unsigned long count, int metadata);
+					 ext4_fsblk_t goal,
+					 unsigned int flags,
+					 unsigned long *count,
+					 int *errp);
+extern int ext4_claim_free_blocks(struct ext4_sb_info *sbi,
+				  s64 nblocks, unsigned int flags);
 extern ext4_fsblk_t ext4_count_free_blocks(struct super_block *);
 extern void ext4_check_blocks_bitmap(struct super_block *);
 extern struct ext4_group_desc * ext4_get_group_desc(struct super_block * sb,
@@ -1620,8 +1658,9 @@ extern int ext4_mb_reserve_blocks(struct super_block *, int);
 extern void ext4_discard_preallocations(struct inode *);
 extern int __init init_ext4_mballoc(void);
 extern void exit_ext4_mballoc(void);
-extern void ext4_mb_free_blocks(handle_t *, struct inode *,
-		ext4_fsblk_t, unsigned long, int, unsigned long *);
+extern void ext4_free_blocks(handle_t *handle, struct inode *inode,
+			     ext4_fsblk_t block, unsigned long count,
+			     int flags);
 extern int ext4_mb_add_groupinfo(struct super_block *sb,
 		ext4_group_t i, struct ext4_group_desc *desc);
 extern void ext4_add_groupblocks(handle_t *handle, struct super_block *sb,
@@ -1650,6 +1689,7 @@ extern int ext4_change_inode_journal_flag(struct inode *, int);
 extern int ext4_get_inode_loc(struct inode *, struct ext4_iloc *);
 extern int ext4_can_truncate(struct inode *inode);
 extern void ext4_truncate(struct inode *);
+extern int ext4_punch_hole(struct inode *inode, loff_t offset, loff_t length);
 extern int ext4_truncate_restart_trans(handle_t *, struct inode *, int nblocks);
 extern void ext4_set_inode_flags(struct inode *);
 extern void ext4_get_inode_flags(struct ext4_inode_info *);
@@ -1660,6 +1700,14 @@ extern int ext4_meta_trans_blocks(struct inode *, int nrblocks, int idxblocks);
 extern int ext4_chunk_trans_blocks(struct inode *, int nrblocks);
 extern int ext4_block_truncate_page(handle_t *handle,
 		struct address_space *mapping, loff_t from);
+extern int ext4_block_zero_page_range(handle_t *handle,
+		struct address_space *mapping, loff_t from, loff_t length);
+extern int ext4_discard_partial_page_buffers(handle_t *handle,
+		struct address_space *mapping, loff_t from,
+		loff_t length, int flags);
+extern int ext4_discard_partial_page_buffers_no_lock(handle_t *handle,
+		struct inode *inode, struct page *page, loff_t from,
+		loff_t length, int flags);
 extern int ext4_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf);
 extern qsize_t *ext4_get_reserved_space(struct inode *inode);
 extern int flush_aio_dio_completed_IO(struct inode *inode);
@@ -1977,6 +2025,8 @@ extern int ext4_ext_get_blocks(handle_t *handle, struct inode *inode,
 			       ext4_lblk_t iblock, unsigned int max_blocks,
 			       struct buffer_head *bh_result, int flags);
 extern void ext4_ext_truncate(struct inode *);
+extern int ext4_ext_punch_hole(struct inode *inode, loff_t offset,
+				loff_t length);
 extern void ext4_ext_init(struct super_block *);
 extern void ext4_ext_release(struct super_block *);
 extern long ext4_fallocate(struct inode *inode, int mode, loff_t offset,

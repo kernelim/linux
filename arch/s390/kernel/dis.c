@@ -90,6 +90,7 @@ enum {
 	U8_16,	/* 8 bit unsigned value starting at 16 */
 	I16_16,	/* 16 bit signed value starting at 16 */
 	U16_16,	/* 16 bit unsigned value starting at 16 */
+	U16_32, /* 32 bit unsigned value starting at 16 */
 	J16_16,	/* PC relative jump offset at 16 */
 	J32_16,	/* PC relative long offset at 16 */
 	I32_16,	/* 32 bit signed value starting at 16 */
@@ -116,7 +117,8 @@ enum {
 	INSTR_RSY_RURD, INSTR_RS_AARD, INSTR_RS_CCRD, INSTR_RS_R0RD,
 	INSTR_RS_RRRD, INSTR_RS_RURD, INSTR_RXE_FRRD, INSTR_RXE_RRRD,
 	INSTR_RXF_FRRDF, INSTR_RXY_FRRD, INSTR_RXY_RRRD, INSTR_RX_FRRD,
-	INSTR_RX_RRRD, INSTR_RX_URRD, INSTR_SIY_URD, INSTR_SI_URD,
+	INSTR_RX_RRRD, INSTR_RX_URRD, INSTR_SIL_RDU,
+	INSTR_SIY_URD, INSTR_SI_URD,
 	INSTR_SSE_RDRD, INSTR_SSF_RRDRD, INSTR_SS_L0RDRD, INSTR_SS_LIRDRD,
 	INSTR_SS_LLRDRD, INSTR_SS_RRRDRD, INSTR_SS_RRRDRD2, INSTR_SS_RRRDRD3,
 	INSTR_S_00, INSTR_S_RD,
@@ -174,6 +176,7 @@ static const struct operand operands[] =
 	[U8_16]  = {  8, 16, 0 },
 	[I16_16] = { 16, 16, OPERAND_SIGNED },
 	[U16_16] = { 16, 16, 0 },
+	[U16_32] = { 16, 32, 0 },
 	[J16_16] = { 16, 16, OPERAND_PCREL },
 	[J32_16] = { 32, 16, OPERAND_PCREL },
 	[I32_16] = { 32, 16, OPERAND_SIGNED },
@@ -240,6 +243,7 @@ static const unsigned char formats[][7] = {
 	[INSTR_RX_FRRD]	  = { 0xff, F_8,D_20,X_12,B_16,0,0 },  /* e.g. ae    */
 	[INSTR_RX_RRRD]	  = { 0xff, R_8,D_20,X_12,B_16,0,0 },  /* e.g. l     */
 	[INSTR_RX_URRD]	  = { 0xff, U4_8,D_20,X_12,B_16,0,0 }, /* e.g. bc    */
+	[INSTR_SIL_RDU]   = { 0xff, D_20,B_16,U16_32,0,0,0 },  /* e.g. tbegin*/
 	[INSTR_SI_URD]	  = { 0xff, D_20,B_16,U8_8,0,0,0 },    /* e.g. cli   */
 	[INSTR_SIY_URD]	  = { 0xff, D20_20,B_16,U8_8,0,0,0 },  /* e.g. tmy   */
 	[INSTR_SSE_RDRD]  = { 0xff, D_20,B_16,D_36,B_32,0,0 }, /* e.g. mvsdk */
@@ -259,6 +263,18 @@ static const unsigned char formats[][7] = {
 	[INSTR_S_RD]	  = { 0xff, D_20,B_16,0,0,0,0 },       /* e.g. lpsw  */
 	[INSTR_SSF_RRDRD] = { 0x00, D_20,B_16,D_36,B_32,R_8,0 },
 							       /* e.g. mvcos */
+};
+
+enum {
+	LONG_INSN_TABORT,
+	LONG_INSN_TBEGIN,
+	LONG_INSN_TBEGINC,
+};
+
+static char *long_insn_name[] = {
+	[LONG_INSN_TABORT] = "tabort",
+	[LONG_INSN_TBEGIN] = "tbegin",
+	[LONG_INSN_TBEGINC] = "tbeginc",
 };
 
 static struct insn opcode[] = {
@@ -519,6 +535,9 @@ static struct insn opcode_b2[] = {
 	{ "cutfu", 0xa7, INSTR_RRF_M0RR },
 	{ "stfle", 0xb0, INSTR_S_RD },
 	{ "lpswe", 0xb2, INSTR_S_RD },
+	{ "etndg", 0xec, INSTR_RRE_R0 },
+	{ { 0, LONG_INSN_TABORT }, 0xfc, INSTR_S_RD },
+	{ "tend", 0xf8, INSTR_S_RD },
 #endif
 	{ "stidp", 0x02, INSTR_S_RD },
 	{ "sck", 0x04, INSTR_S_RD },
@@ -917,6 +936,7 @@ static struct insn opcode_e3[] = {
 	{ "llgh", 0x91, INSTR_RXY_RRRD },
 	{ "llc", 0x94, INSTR_RXY_RRRD },
 	{ "llh", 0x95, INSTR_RXY_RRRD },
+	{ "ntstg", 0x25, INSTR_RXY_RRRD },
 #endif
 	{ "lrv", 0x1e, INSTR_RXY_RRRD },
 	{ "lrvh", 0x1f, INSTR_RXY_RRRD },
@@ -931,6 +951,8 @@ static struct insn opcode_e3[] = {
 static struct insn opcode_e5[] = {
 #ifdef CONFIG_64BIT
 	{ "strag", 0x02, INSTR_SSE_RDRD },
+	{ { 0, LONG_INSN_TBEGIN }, 0x60, INSTR_SIL_RDU },
+	{ { 0, LONG_INSN_TBEGINC }, 0x61, INSTR_SIL_RDU },
 #endif
 	{ "lasp", 0x00, INSTR_SSE_RDRD },
 	{ "tprot", 0x01, INSTR_SSE_RDRD },
@@ -1166,7 +1188,11 @@ static int print_insn(char *buffer, unsigned char *code, unsigned long addr)
 	ptr = buffer;
 	insn = find_insn(code);
 	if (insn) {
-		ptr += sprintf(ptr, "%.5s\t", insn->name);
+		if (insn->name[0] == '\0')
+			ptr += sprintf(ptr, "%s\t",
+				       long_insn_name[(int) insn->name[1]]);
+		else
+			ptr += sprintf(ptr, "%.5s\t", insn->name);
 		/* Extract the operands. */
 		separator = 0;
 		for (ops = formats[insn->format] + 1, i = 0;

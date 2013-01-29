@@ -356,7 +356,7 @@ qlcnic_send_cmd_descs(struct qlcnic_adapter *adapter,
 	return 0;
 }
 
-static int
+int
 qlcnic_sre_macaddr_change(struct qlcnic_adapter *adapter, u8 *addr,
 				__le16 vlan_id, unsigned op)
 {
@@ -510,6 +510,21 @@ void qlcnic_prune_lb_filters(struct qlcnic_adapter *adapter)
 				adapter->fhash.fnum--;
 				hlist_del(&tmp_fil->fnode);
 				spin_unlock_bh(&adapter->mac_learn_lock);
+				kfree(tmp_fil);
+			}
+		}
+	}
+	for (i = 0; i < adapter->rx_fhash.fmax; i++) {
+		head = &(adapter->rx_fhash.fhead[i]);
+
+		hlist_for_each_entry_safe(tmp_fil, tmp_hnode, n, head, fnode)
+		{
+			if (jiffies >
+				(QLCNIC_FILTER_AGE * HZ + tmp_fil->ftime)) {
+				spin_lock_bh(&adapter->rx_mac_learn_lock);
+				adapter->rx_fhash.fnum--;
+				hlist_del(&tmp_fil->fnode);
+				spin_unlock_bh(&adapter->rx_mac_learn_lock);
 				kfree(tmp_fil);
 			}
 		}
@@ -1738,8 +1753,8 @@ int qlcnic_dump_fw(struct qlcnic_adapter *adapter)
 		fw_dump->clr = 1;
 		snprintf(mesg, sizeof(mesg), "FW_DUMP=%s",
 			adapter->netdev->name);
-		dev_info(&adapter->pdev->dev, "Dump data, %d bytes captured\n",
-			fw_dump->size);
+		dev_info(&adapter->pdev->dev, "%s: Dump data, %d size\n",
+			adapter->netdev->name, fw_dump->size);
 		/* Send a udev event to notify availability of FW dump */
 		kobject_uevent_env(&adapter->pdev->dev.kobj, KOBJ_CHANGE, msg);
 		return 0;

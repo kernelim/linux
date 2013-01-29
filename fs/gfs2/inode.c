@@ -295,8 +295,7 @@ static int gfs2_dinode_in(struct gfs2_inode *ip, const void *buf)
 	ip->i_inode.i_uid = be32_to_cpu(str->di_uid);
 	ip->i_inode.i_gid = be32_to_cpu(str->di_gid);
 	gfs2_set_nlink(&ip->i_inode, be32_to_cpu(str->di_nlink));
-	ip->i_disksize = be64_to_cpu(str->di_size);
-	i_size_write(&ip->i_inode, ip->i_disksize);
+	i_size_write(&ip->i_inode, be64_to_cpu(str->di_size));
 	gfs2_set_inode_blocks(&ip->i_inode, be64_to_cpu(str->di_blocks));
 	atime.tv_sec = be64_to_cpu(str->di_atime);
 	atime.tv_nsec = be32_to_cpu(str->di_atime_nsec);
@@ -349,11 +348,6 @@ int gfs2_inode_refresh(struct gfs2_inode *ip)
 	error = gfs2_meta_inode_buffer(ip, &dibh);
 	if (error)
 		return error;
-
-	if (gfs2_metatype_check(GFS2_SB(&ip->i_inode), dibh, GFS2_METATYPE_DI)) {
-		brelse(dibh);
-		return -EIO;
-	}
 
 	error = gfs2_dinode_in(ip, dibh->b_data);
 	brelse(dibh);
@@ -650,12 +644,13 @@ static int make_dinode(struct gfs2_inode *dip, struct gfs2_glock *gl,
 	int error;
 
 	munge_mode_uid_gid(dip, &mode, &uid, &gid);
-	if (!gfs2_qadata_get(dip))
-		return -ENOMEM;
+	error = gfs2_rindex_update(sdp);
+	if (error)
+		return error;
 
 	error = gfs2_quota_lock(dip, uid, gid);
 	if (error)
-		goto out;
+		return error;
 
 	error = gfs2_quota_check(dip, uid, gid);
 	if (error)
@@ -671,8 +666,6 @@ static int make_dinode(struct gfs2_inode *dip, struct gfs2_glock *gl,
 
 out_quota:
 	gfs2_quota_unlock(dip);
-out:
-	gfs2_qadata_put(dip);
 	return error;
 }
 
@@ -680,14 +673,13 @@ static int link_dinode(struct gfs2_inode *dip, const struct qstr *name,
 		       struct gfs2_inode *ip)
 {
 	struct gfs2_sbd *sdp = GFS2_SB(&dip->i_inode);
-	struct gfs2_qadata *qa;
 	int alloc_required;
 	struct buffer_head *dibh;
 	int error;
 
-	qa = gfs2_qadata_get(dip);
-	if (!qa)
-		return -ENOMEM;
+	error = gfs2_rindex_update(sdp);
+	if (error)
+		return error;
 
 	error = gfs2_quota_lock(dip, NO_QUOTA_CHANGE, NO_QUOTA_CHANGE);
 	if (error)
@@ -706,7 +698,7 @@ static int link_dinode(struct gfs2_inode *dip, const struct qstr *name,
 			goto fail_quota_locks;
 
 		error = gfs2_trans_begin(sdp, sdp->sd_max_dirres +
-					 gfs2_rg_blocks(dip) +
+					 dip->i_rgd->rd_length +
 					 2 * RES_DINODE +
 					 RES_STATFS + RES_QUOTA, 0);
 		if (error)
@@ -734,13 +726,13 @@ fail_end_trans:
 	gfs2_trans_end(sdp);
 
 fail_ipreserv:
-	gfs2_inplace_release(dip);
+	if (alloc_required)
+		gfs2_inplace_release(dip);
 
 fail_quota_locks:
 	gfs2_quota_unlock(dip);
 
 fail:
-	gfs2_qadata_put(dip);
 	return error;
 }
 
@@ -787,7 +779,7 @@ struct inode *gfs2_createi(struct gfs2_holder *ghs, const struct qstr *name,
 			   unsigned int mode, dev_t dev)
 {
 	struct inode *inode = NULL;
-	struct gfs2_inode *dip = ghs->gh_gl->gl_object;
+	struct gfs2_inode *dip = ghs->gh_gl->gl_object, *ip;
 	struct inode *dir = &dip->i_inode;
 	struct gfs2_sbd *sdp = GFS2_SB(&dip->i_inode);
 	struct gfs2_inum_host inum = { .no_addr = 0, .no_formal_ino = 0 };
@@ -797,6 +789,15 @@ struct inode *gfs2_createi(struct gfs2_holder *ghs, const struct qstr *name,
 
 	if (!name->len || name->len > GFS2_FNAMESIZE)
 		return ERR_PTR(-ENAMETOOLONG);
+
+	/* We need a reservation to allocate the new dinode block. The
+	   directory ip temporarily points to the reservation, but this is
+	   being done to get a set of contiguous blocks for the new dinode.
+	   Since this is a create, we don't have a sizehint yet, so it will
+	   have to use the minimum reservation size. */
+	error = gfs2_rs_alloc(dip);
+	if (error)
+		return ERR_PTR(error);
 
 	gfs2_holder_reinit(LM_ST_EXCLUSIVE, 0, ghs);
 	error = gfs2_glock_nq(ghs);
@@ -826,19 +827,28 @@ struct inode *gfs2_createi(struct gfs2_holder *ghs, const struct qstr *name,
 	if (IS_ERR(inode))
 		goto fail_gunlock2;
 
-	error = gfs2_inode_refresh(GFS2_I(inode));
+	ip = GFS2_I(inode);
+	error = gfs2_inode_refresh(ip);
 	if (error)
 		goto fail_gunlock2;
+
+	/* The newly created inode needs a reservation so it can allocate
+	   xattrs. At the same time, we want new blocks allocated to the new
+	   dinode to be as contiguous as possible. Since we allocated the
+	   dinode block under the directory's reservation, we transfer
+	   ownership of that reservation to the new inode. The directory
+	   doesn't need a reservation unless it needs a new allocation. */
+	error = gfs2_rs_alloc(ip);
 
 	error = gfs2_acl_create(dip, inode);
 	if (error)
 		goto fail_gunlock2;
 
-	error = gfs2_security_init(dip, GFS2_I(inode));
+	error = gfs2_security_init(dip, ip);
 	if (error)
 		goto fail_gunlock2;
 
-	error = link_dinode(dip, name, GFS2_I(inode));
+	error = link_dinode(dip, name, ip);
 	if (error)
 		goto fail_gunlock2;
 
@@ -855,6 +865,7 @@ fail_gunlock:
 		iput(inode);
 	}
 fail:
+	gfs2_rs_delete(dip);
 	if (bh)
 		brelse(bh);
 	return ERR_PTR(error);
@@ -915,7 +926,7 @@ void gfs2_dinode_out(const struct gfs2_inode *ip, void *buf)
 	str->di_uid = cpu_to_be32(ip->i_inode.i_uid);
 	str->di_gid = cpu_to_be32(ip->i_inode.i_gid);
 	str->di_nlink = cpu_to_be32(ip->i_inode.i_nlink);
-	str->di_size = cpu_to_be64(ip->i_disksize);
+	str->di_size = cpu_to_be64(i_size_read(&ip->i_inode));
 	str->di_blocks = cpu_to_be64(gfs2_get_inode_blocks(&ip->i_inode));
 	str->di_atime = cpu_to_be64(ip->i_inode.i_atime.tv_sec);
 	str->di_mtime = cpu_to_be64(ip->i_inode.i_mtime.tv_sec);
@@ -945,8 +956,8 @@ void gfs2_dinode_print(const struct gfs2_inode *ip)
 	       (unsigned long long)ip->i_no_formal_ino);
 	printk(KERN_INFO "  no_addr = %llu\n",
 	       (unsigned long long)ip->i_no_addr);
-	printk(KERN_INFO "  i_disksize = %llu\n",
-	       (unsigned long long)ip->i_disksize);
+	printk(KERN_INFO "  i_size = %llu\n",
+	       (unsigned long long)i_size_read(&ip->i_inode));
 	printk(KERN_INFO "  blocks = %llu\n",
 	       (unsigned long long)gfs2_get_inode_blocks(&ip->i_inode));
 	printk(KERN_INFO "  i_goal = %llu\n",

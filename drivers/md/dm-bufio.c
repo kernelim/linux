@@ -12,7 +12,6 @@
 #include <linux/dm-io.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
-#include <linux/version.h>
 
 #define DM_MSG_PREFIX "bufio"
 

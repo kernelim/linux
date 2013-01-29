@@ -332,22 +332,23 @@ void fc_fcp_ddp_done(struct fc_fcp_pkt *fsp)
 /**
  * fc_fcp_can_queue_ramp_up() - increases can_queue
  * @lport: lport to ramp up can_queue
- *
- * Locking notes: Called with Scsi_Host lock held
  */
 static void fc_fcp_can_queue_ramp_up(struct fc_lport *lport)
 {
 	struct fc_fcp_internal *si = fc_get_scsi_internal(lport);
+	unsigned long flags;
 	int can_queue;
+
+	spin_lock_irqsave(lport->host->host_lock, flags);
 
 	if (si->last_can_queue_ramp_up_time &&
 	    (time_before(jiffies, si->last_can_queue_ramp_up_time +
 			 FC_CAN_QUEUE_PERIOD)))
-		return;
+		goto unlock;
 
 	if (time_before(jiffies, si->last_can_queue_ramp_down_time +
 			FC_CAN_QUEUE_PERIOD))
-		return;
+		goto unlock;
 
 	si->last_can_queue_ramp_up_time = jiffies;
 
@@ -359,6 +360,9 @@ static void fc_fcp_can_queue_ramp_up(struct fc_lport *lport)
 	lport->host->can_queue = can_queue;
 	shost_printk(KERN_ERR, lport->host, "libfc: increased "
 		     "can_queue to %d.\n", can_queue);
+
+unlock:
+	spin_unlock_irqrestore(lport->host->host_lock, flags);
 }
 
 /**
@@ -370,18 +374,19 @@ static void fc_fcp_can_queue_ramp_up(struct fc_lport *lport)
  * commands complete or timeout, then try again with a reduced
  * can_queue. Eventually we will hit the point where we run
  * on all reserved structs.
- *
- * Locking notes: Called with Scsi_Host lock held
  */
 static void fc_fcp_can_queue_ramp_down(struct fc_lport *lport)
 {
 	struct fc_fcp_internal *si = fc_get_scsi_internal(lport);
+	unsigned long flags;
 	int can_queue;
+
+	spin_lock_irqsave(lport->host->host_lock, flags);
 
 	if (si->last_can_queue_ramp_down_time &&
 	    (time_before(jiffies, si->last_can_queue_ramp_down_time +
 			 FC_CAN_QUEUE_PERIOD)))
-		return;
+		goto unlock;
 
 	si->last_can_queue_ramp_down_time = jiffies;
 
@@ -392,6 +397,9 @@ static void fc_fcp_can_queue_ramp_down(struct fc_lport *lport)
 	lport->host->can_queue = can_queue;
 	shost_printk(KERN_ERR, lport->host, "libfc: Could not allocate frame.\n"
 		     "Reducing can_queue to %d.\n", can_queue);
+
+unlock:
+	spin_unlock_irqrestore(lport->host->host_lock, flags);
 }
 
 /*
@@ -406,16 +414,13 @@ static inline struct fc_frame *fc_fcp_frame_alloc(struct fc_lport *lport,
 						  size_t len)
 {
 	struct fc_frame *fp;
-	unsigned long flags;
 
 	fp = fc_frame_alloc(lport, len);
 	if (likely(fp))
 		return fp;
 
 	/* error case */
-	spin_lock_irqsave(lport->host->host_lock, flags);
 	fc_fcp_can_queue_ramp_down(lport);
-	spin_unlock_irqrestore(lport->host->host_lock, flags);
 	return NULL;
 }
 
@@ -837,7 +842,8 @@ static void fc_fcp_resp(struct fc_fcp_pkt *fsp, struct fc_frame *fp)
 			fc_rp_info = (struct fcp_resp_rsp_info *)(rp_ex + 1);
 			if (flags & FCP_RSP_LEN_VAL) {
 				respl = ntohl(rp_ex->fr_rsp_len);
-				if (respl != sizeof(*fc_rp_info))
+				if ((respl != FCP_RESP_RSP_INFO_LEN4) &&
+				    (respl != FCP_RESP_RSP_INFO_LEN8))
 					goto len_err;
 				if (fsp->wait_for_comp) {
 					/* Abuse cdb_status for rsp code */

@@ -100,7 +100,9 @@ xfs_fs_geometry(
 			(xfs_sb_version_haslazysbcount(&mp->m_sb) ?
 				XFS_FSOP_GEOM_FLAGS_LAZYSB : 0) |
 			(xfs_sb_version_hasattr2(&mp->m_sb) ?
-				XFS_FSOP_GEOM_FLAGS_ATTR2 : 0);
+				XFS_FSOP_GEOM_FLAGS_ATTR2 : 0) |
+			(xfs_sb_version_hasprojid32bit(&mp->m_sb) ?
+				XFS_FSOP_GEOM_FLAGS_PROJID32 : 0);
 		geo->logsectsize = xfs_sb_version_hassector(&mp->m_sb) ?
 				mp->m_sb.sb_logsectsize : BBSIZE;
 		geo->rtsectsize = mp->m_sb.sb_blocksize;
@@ -194,6 +196,10 @@ xfs_growfs_data_private(
 		bp = xfs_buf_get(mp->m_ddev_targp,
 				 XFS_AG_DADDR(mp, agno, XFS_AGF_DADDR(mp)),
 				 XFS_FSS_TO_BB(mp, 1), XBF_LOCK | XBF_MAPPED);
+		if (!bp) {
+			error = ENOMEM;
+			goto error0;
+		}
 		agf = XFS_BUF_TO_AGF(bp);
 		memset(agf, 0, mp->m_sb.sb_sectsize);
 		agf->agf_magicnum = cpu_to_be32(XFS_AGF_MAGIC);
@@ -226,6 +232,10 @@ xfs_growfs_data_private(
 		bp = xfs_buf_get(mp->m_ddev_targp,
 				 XFS_AG_DADDR(mp, agno, XFS_AGI_DADDR(mp)),
 				 XFS_FSS_TO_BB(mp, 1), XBF_LOCK | XBF_MAPPED);
+		if (!bp) {
+			error = ENOMEM;
+			goto error0;
+		}
 		agi = XFS_BUF_TO_AGI(bp);
 		memset(agi, 0, mp->m_sb.sb_sectsize);
 		agi->agi_magicnum = cpu_to_be32(XFS_AGI_MAGIC);
@@ -251,6 +261,10 @@ xfs_growfs_data_private(
 				 XFS_AGB_TO_DADDR(mp, agno, XFS_BNO_BLOCK(mp)),
 				 BTOBB(mp->m_sb.sb_blocksize),
 				 XBF_LOCK | XBF_MAPPED);
+		if (!bp) {
+			error = ENOMEM;
+			goto error0;
+		}
 		block = XFS_BUF_TO_BLOCK(bp);
 		memset(block, 0, mp->m_sb.sb_blocksize);
 		block->bb_magic = cpu_to_be32(XFS_ABTB_MAGIC);
@@ -273,6 +287,10 @@ xfs_growfs_data_private(
 				 XFS_AGB_TO_DADDR(mp, agno, XFS_CNT_BLOCK(mp)),
 				 BTOBB(mp->m_sb.sb_blocksize),
 				 XBF_LOCK | XBF_MAPPED);
+		if (!bp) {
+			error = ENOMEM;
+			goto error0;
+		}
 		block = XFS_BUF_TO_BLOCK(bp);
 		memset(block, 0, mp->m_sb.sb_blocksize);
 		block->bb_magic = cpu_to_be32(XFS_ABTC_MAGIC);
@@ -296,6 +314,10 @@ xfs_growfs_data_private(
 				 XFS_AGB_TO_DADDR(mp, agno, XFS_IBT_BLOCK(mp)),
 				 BTOBB(mp->m_sb.sb_blocksize),
 				 XBF_LOCK | XBF_MAPPED);
+		if (!bp) {
+			error = ENOMEM;
+			goto error0;
+		}
 		block = XFS_BUF_TO_BLOCK(bp);
 		memset(block, 0, mp->m_sb.sb_blocksize);
 		block->bb_magic = cpu_to_be32(XFS_IBT_MAGIC);

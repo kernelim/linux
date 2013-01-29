@@ -44,7 +44,7 @@ ssize_t __btrfs_getxattr(struct inode *inode, const char *name,
 		return -ENOMEM;
 
 	/* lookup the xattr by name */
-	di = btrfs_lookup_xattr(NULL, root, path, inode->i_ino, name,
+	di = btrfs_lookup_xattr(NULL, root, path, btrfs_ino(inode), name,
 				strlen(name), 0);
 	if (!di) {
 		ret = -ENODATA;
@@ -102,48 +102,82 @@ static int do_setxattr(struct btrfs_trans_handle *trans,
 	if (!path)
 		return -ENOMEM;
 
-	/* first lets see if we already have this xattr */
-	di = btrfs_lookup_xattr(trans, root, path, inode->i_ino, name,
-				strlen(name), -1);
-	if (IS_ERR(di)) {
-		ret = PTR_ERR(di);
-		goto out;
-	}
-
-	/* ok we already have this xattr, lets remove it */
-	if (di) {
-		/* if we want create only exit */
-		if (flags & XATTR_CREATE) {
-			ret = -EEXIST;
+	if (flags & XATTR_REPLACE) {
+		di = btrfs_lookup_xattr(trans, root, path, btrfs_ino(inode), name,
+					name_len, -1);
+		if (IS_ERR(di)) {
+			ret = PTR_ERR(di);
 			goto out;
-		}
-
-		ret = btrfs_delete_one_dir_name(trans, root, path, di);
-		BUG_ON(ret);
-		btrfs_release_path(root, path);
-
-		/* if we don't have a value then we are removing the xattr */
-		if (!value)
-			goto out;
-	} else {
-		btrfs_release_path(root, path);
-
-		if (flags & XATTR_REPLACE) {
-			/* we couldn't find the attr to replace */
+		} else if (!di) {
 			ret = -ENODATA;
 			goto out;
 		}
+		ret = btrfs_delete_one_dir_name(trans, root, path, di);
+		if (ret)
+			goto out;
+		btrfs_release_path(path);
+
+		/*
+		 * remove the attribute
+		 */
+		if (!value)
+			goto out;
 	}
 
-	/* ok we have to create a completely new xattr */
-	ret = btrfs_insert_xattr_item(trans, root, path, inode->i_ino,
+again:
+	ret = btrfs_insert_xattr_item(trans, root, path, btrfs_ino(inode),
 				      name, name_len, value, size);
-	BUG_ON(ret);
+	/*
+	 * If we're setting an xattr to a new value but the new value is say
+	 * exactly BTRFS_MAX_XATTR_SIZE, we could end up with EOVERFLOW getting
+	 * back from split_leaf.  This is because it thinks we'll be extending
+	 * the existing item size, but we're asking for enough space to add the
+	 * item itself.  So if we get EOVERFLOW just set ret to EEXIST and let
+	 * the rest of the function figure it out.
+	 */
+	if (ret == -EOVERFLOW)
+		ret = -EEXIST;
+
+	if (ret == -EEXIST) {
+		if (flags & XATTR_CREATE)
+			goto out;
+		/*
+		 * We can't use the path we already have since we won't have the
+		 * proper locking for a delete, so release the path and
+		 * re-lookup to delete the thing.
+		 */
+		btrfs_release_path(path);
+		di = btrfs_lookup_xattr(trans, root, path, btrfs_ino(inode),
+					name, name_len, -1);
+		if (IS_ERR(di)) {
+			ret = PTR_ERR(di);
+			goto out;
+		} else if (!di) {
+			/* Shouldn't happen but just in case... */
+			btrfs_release_path(path);
+			goto again;
+		}
+
+		ret = btrfs_delete_one_dir_name(trans, root, path, di);
+		if (ret)
+			goto out;
+
+		/*
+		 * We have a value to set, so go back and try to insert it now.
+		 */
+		if (value) {
+			btrfs_release_path(path);
+			goto again;
+		}
+	}
 out:
 	btrfs_free_path(path);
 	return ret;
 }
 
+/*
+ * @value: "" makes the attribute to empty, NULL removes it
+ */
 int __btrfs_setxattr(struct btrfs_trans_handle *trans,
 		     struct inode *inode, const char *name,
 		     const void *value, size_t size, int flags)
@@ -158,17 +192,16 @@ int __btrfs_setxattr(struct btrfs_trans_handle *trans,
 	if (IS_ERR(trans))
 		return PTR_ERR(trans);
 
-	btrfs_set_trans_block_group(trans, inode);
-
 	ret = do_setxattr(trans, inode, name, value, size, flags);
 	if (ret)
 		goto out;
 
+	inode_inc_iversion(inode);
 	inode->i_ctime = CURRENT_TIME;
 	ret = btrfs_update_inode(trans, root, inode);
 	BUG_ON(ret);
 out:
-	btrfs_end_transaction_throttle(trans, root);
+	btrfs_end_transaction(trans, root);
 	return ret;
 }
 
@@ -180,18 +213,17 @@ ssize_t btrfs_listxattr(struct dentry *dentry, char *buffer, size_t size)
 	struct btrfs_path *path;
 	struct extent_buffer *leaf;
 	struct btrfs_dir_item *di;
-	int ret = 0, slot, advance;
+	int ret = 0, slot;
 	size_t total_size = 0, size_left = size;
 	unsigned long name_ptr;
 	size_t name_len;
-	u32 nritems;
 
 	/*
 	 * ok we want all objects associated with this id.
 	 * NOTE: we set key.offset = 0; because we want to start with the
 	 * first xattr that we find and walk forward
 	 */
-	key.objectid = inode->i_ino;
+	key.objectid = btrfs_ino(inode);
 	btrfs_set_key_type(&key, BTRFS_XATTR_ITEM_KEY);
 	key.offset = 0;
 
@@ -204,34 +236,24 @@ ssize_t btrfs_listxattr(struct dentry *dentry, char *buffer, size_t size)
 	ret = btrfs_search_slot(NULL, root, &key, path, 0, 0);
 	if (ret < 0)
 		goto err;
-	advance = 0;
+
 	while (1) {
 		leaf = path->nodes[0];
-		nritems = btrfs_header_nritems(leaf);
 		slot = path->slots[0];
 
 		/* this is where we start walking through the path */
-		if (advance || slot >= nritems) {
+		if (slot >= btrfs_header_nritems(leaf)) {
 			/*
 			 * if we've reached the last slot in this leaf we need
 			 * to go to the next leaf and reset everything
 			 */
-			if (slot >= nritems-1) {
-				ret = btrfs_next_leaf(root, path);
-				if (ret)
-					break;
-				leaf = path->nodes[0];
-				nritems = btrfs_header_nritems(leaf);
-				slot = path->slots[0];
-			} else {
-				/*
-				 * just walking through the slots on this leaf
-				 */
-				slot++;
-				path->slots[0]++;
-			}
+			ret = btrfs_next_leaf(root, path);
+			if (ret < 0)
+				goto err;
+			else if (ret > 0)
+				break;
+			continue;
 		}
-		advance = 1;
 
 		btrfs_item_key_to_cpu(leaf, &found_key, slot);
 
@@ -242,13 +264,15 @@ ssize_t btrfs_listxattr(struct dentry *dentry, char *buffer, size_t size)
 			break;
 
 		di = btrfs_item_ptr(leaf, slot, struct btrfs_dir_item);
+		if (verify_dir_item(root, leaf, di))
+			continue;
 
 		name_len = btrfs_dir_name_len(leaf, di);
 		total_size += name_len + 1;
 
 		/* we are just looking for how big our buffer needs to be */
 		if (!size)
-			continue;
+			goto next;
 
 		if (!buffer || (name_len + 1) > size_left) {
 			ret = -ERANGE;
@@ -261,6 +285,8 @@ ssize_t btrfs_listxattr(struct dentry *dentry, char *buffer, size_t size)
 
 		size_left -= name_len + 1;
 		buffer += name_len + 1;
+next:
+		path->slots[0]++;
 	}
 	ret = total_size;
 

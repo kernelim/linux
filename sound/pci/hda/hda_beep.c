@@ -186,12 +186,13 @@ static void snd_hda_do_unregister(struct work_struct *work)
 int snd_hda_enable_beep_device(struct hda_codec *codec, int enable)
 {
 	struct hda_beep *beep = codec->beep;
-	enable = !!enable;
-	if (beep == NULL)
+	if (!beep)
 		return 0;
+	enable = !!enable;
 	if (beep->enabled != enable) {
 		beep->enabled = enable;
 		if (!enable) {
+			cancel_work_sync(&beep->beep_work);
 			/* turn off beep */
 			snd_hda_codec_write(beep->codec, beep->nid, 0,
 						  AC_VERB_SET_BEEP_CONTROL, 0);
@@ -265,3 +266,48 @@ void snd_hda_detach_beep_device(struct hda_codec *codec)
 	}
 }
 EXPORT_SYMBOL_HDA(snd_hda_detach_beep_device);
+
+static bool ctl_has_mute(struct snd_kcontrol *kcontrol)
+{
+	struct hda_codec *codec = snd_kcontrol_chip(kcontrol);
+	return query_amp_caps(codec, get_amp_nid(kcontrol),
+			      get_amp_direction(kcontrol)) & AC_AMPCAP_MUTE;
+}
+
+/* get/put callbacks for beep mute mixer switches */
+int snd_hda_mixer_amp_switch_get_beep(struct snd_kcontrol *kcontrol,
+				      struct snd_ctl_elem_value *ucontrol)
+{
+	struct hda_codec *codec = snd_kcontrol_chip(kcontrol);
+	struct hda_beep *beep = codec->beep;
+	if (beep && (!beep->enabled || !ctl_has_mute(kcontrol))) {
+		ucontrol->value.integer.value[0] =
+			ucontrol->value.integer.value[1] = beep->enabled;
+		return 0;
+	}
+	return snd_hda_mixer_amp_switch_get(kcontrol, ucontrol);
+}
+EXPORT_SYMBOL_HDA(snd_hda_mixer_amp_switch_get_beep);
+
+int snd_hda_mixer_amp_switch_put_beep(struct snd_kcontrol *kcontrol,
+				      struct snd_ctl_elem_value *ucontrol)
+{
+	struct hda_codec *codec = snd_kcontrol_chip(kcontrol);
+	struct hda_beep *beep = codec->beep;
+	if (beep) {
+		u8 chs = get_amp_channels(kcontrol);
+		int enable = 0;
+		long *valp = ucontrol->value.integer.value;
+		if (chs & 1) {
+			enable |= *valp;
+			valp++;
+		}
+		if (chs & 2)
+			enable |= *valp;
+		snd_hda_enable_beep_device(codec, enable);
+	}
+	if (!ctl_has_mute(kcontrol))
+		return 0;
+	return snd_hda_mixer_amp_switch_put(kcontrol, ucontrol);
+}
+EXPORT_SYMBOL_HDA(snd_hda_mixer_amp_switch_put_beep);

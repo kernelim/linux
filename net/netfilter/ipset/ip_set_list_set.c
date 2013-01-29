@@ -285,7 +285,7 @@ list_set_uadt(struct ip_set *set, struct nlattr *tb[],
 				continue;
 			else if (with_timeout && list_set_expired(map, i))
 				ret = -IPSET_ERR_REF_EXIST;
-			else if (before)
+			else if (before > 0)
 				ret = list_set_add(map, i, id, timeout);
 			else if (i + 1 < map->size)
 				ret = list_set_add(map, i + 1, id, timeout);

@@ -6,7 +6,7 @@
  * hermes registers, as well as the COR register.
  *
  * Current maintainers are:
- * 	Pavel Roskin <proski AT gnu.org>
+ *	Pavel Roskin <proski AT gnu.org>
  * and	David Gibson <hermes AT gibson.dropbear.id.au>
  *
  * Some of this code is borrowed from orinoco_plx.c
@@ -81,7 +81,7 @@
  */
 static int orinoco_pci_cor_reset(struct orinoco_private *priv)
 {
-	hermes_t *hw = &priv->hw;
+	struct hermes *hw = &priv->hw;
 	unsigned long timeout;
 	u16 reg;
 
@@ -170,7 +170,7 @@ static int orinoco_pci_init_one(struct pci_dev *pdev,
 		goto fail;
 	}
 
-	err = orinoco_if_add(priv, 0, 0);
+	err = orinoco_if_add(priv, 0, 0, NULL);
 	if (err) {
 		printk(KERN_ERR PFX "orinoco_if_add() failed\n");
 		goto fail;
@@ -212,7 +212,7 @@ static void __devexit orinoco_pci_remove_one(struct pci_dev *pdev)
 	pci_disable_device(pdev);
 }
 
-static struct pci_device_id orinoco_pci_id_table[] = {
+static DEFINE_PCI_DEVICE_TABLE(orinoco_pci_id_table) = {
 	/* Intersil Prism 3 */
 	{0x1260, 0x3872, PCI_ANY_ID, PCI_ANY_ID,},
 	/* Intersil Prism 2.5 */

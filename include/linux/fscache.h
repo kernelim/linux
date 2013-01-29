@@ -135,14 +135,14 @@ struct fscache_cookie_def {
 	 */
 	void (*put_context)(void *cookie_netfs_data, void *context);
 
-	/* indicate pages that now have cache metadata retained
-	 * - this function should mark the specified pages as now being cached
-	 * - the pages will have been marked with PG_fscache before this is
+	/* indicate page that now have cache metadata retained
+	 * - this function should mark the specified page as now being cached
+	 * - the page will have been marked with PG_fscache before this is
 	 *   called, so this is optional
 	 */
-	void (*mark_pages_cached)(void *cookie_netfs_data,
-				  struct address_space *mapping,
-				  struct pagevec *cached_pvec);
+	void (*mark_page_cached)(void *cookie_netfs_data,
+				 struct address_space *mapping,
+				 struct page *page);
 
 	/* indicate the cookie is no longer cached
 	 * - this function is called when the backing store currently caching
@@ -185,6 +185,8 @@ extern struct fscache_cookie *__fscache_acquire_cookie(
 extern void __fscache_relinquish_cookie(struct fscache_cookie *, int);
 extern void __fscache_update_cookie(struct fscache_cookie *);
 extern int __fscache_attr_changed(struct fscache_cookie *);
+extern void __fscache_invalidate(struct fscache_cookie *);
+extern void __fscache_wait_on_invalidate(struct fscache_cookie *);
 extern int __fscache_read_or_alloc_page(struct fscache_cookie *,
 					struct page *,
 					fscache_rw_complete_t,
@@ -204,6 +206,8 @@ extern bool __fscache_check_page_write(struct fscache_cookie *, struct page *);
 extern void __fscache_wait_on_page_write(struct fscache_cookie *, struct page *);
 extern bool __fscache_maybe_release_page(struct fscache_cookie *, struct page *,
 					 gfp_t);
+extern void __fscache_uncache_all_inode_pages(struct fscache_cookie *,
+					      struct inode *);
 
 /**
  * fscache_register_netfs - Register a filesystem as desiring caching services
@@ -385,6 +389,42 @@ int fscache_attr_changed(struct fscache_cookie *cookie)
 		return __fscache_attr_changed(cookie);
 	else
 		return -ENOBUFS;
+}
+
+/**
+ * fscache_invalidate - Notify cache that an object needs invalidation
+ * @cookie: The cookie representing the cache object
+ *
+ * Notify the cache that an object is needs to be invalidated and that it
+ * should abort any retrievals or stores it is doing on the cache.  The object
+ * is then marked non-caching until such time as the invalidation is complete.
+ *
+ * This can be called with spinlocks held.
+ *
+ * See Documentation/filesystems/caching/netfs-api.txt for a complete
+ * description.
+ */
+static inline
+void fscache_invalidate(struct fscache_cookie *cookie)
+{
+	if (fscache_cookie_valid(cookie))
+		__fscache_invalidate(cookie);
+}
+
+/**
+ * fscache_wait_on_invalidate - Wait for invalidation to complete
+ * @cookie: The cookie representing the cache object
+ *
+ * Wait for the invalidation of an object to complete.
+ *
+ * See Documentation/filesystems/caching/netfs-api.txt for a complete
+ * description.
+ */
+static inline
+void fscache_wait_on_invalidate(struct fscache_cookie *cookie)
+{
+	if (fscache_cookie_valid(cookie))
+		__fscache_wait_on_invalidate(cookie);
 }
 
 /**
@@ -640,6 +680,25 @@ bool fscache_maybe_release_page(struct fscache_cookie *cookie,
 	if (fscache_cookie_valid(cookie) && PageFsCache(page))
 		return __fscache_maybe_release_page(cookie, page, gfp);
 	return false;
+}
+
+/**
+ * fscache_uncache_all_inode_pages - Uncache all an inode's pages
+ * @cookie: The cookie representing the inode's cache object.
+ * @inode: The inode to uncache pages from.
+ *
+ * Uncache all the pages in an inode that are marked PG_fscache, assuming them
+ * to be associated with the given cookie.
+ *
+ * This function may sleep.  It will wait for pages that are being written out
+ * and will wait whilst the PG_fscache mark is removed by the cache.
+ */
+static inline
+void fscache_uncache_all_inode_pages(struct fscache_cookie *cookie,
+				     struct inode *inode)
+{
+	if (fscache_cookie_valid(cookie))
+		__fscache_uncache_all_inode_pages(cookie, inode);
 }
 
 #endif /* _LINUX_FSCACHE_H */

@@ -58,17 +58,47 @@ enum s390_regset {
 	REGSET_GENERAL,
 	REGSET_FP,
 	REGSET_LAST_BREAK,
+	REGSET_TDB,
 	REGSET_GENERAL_EXTENDED,
 };
 
-static void
-FixPerRegisters(struct task_struct *task)
+void update_per_regs(struct task_struct *task)
 {
-	struct pt_regs *regs;
-	per_struct *per_info;
+	struct pt_regs *regs = task_pt_regs(task);
+	per_struct *per_info = (per_struct *) &task->thread.per_info;
 	per_cr_words cr_words;
 
-	regs = task_pt_regs(task);
+	/* Take care of the enable/disable of transactional execution. */
+	if (MACHINE_HAS_TE) {
+		unsigned long cr0, cr0_new;
+
+		__ctl_store(cr0, 0, 0);
+		/* set or clear transaction execution bits 8 and 9. */
+		if (task->thread.per_flags & PER_FLAG_NO_TE)
+			cr0_new = cr0 & ~(3UL << 54);
+		else
+			cr0_new = cr0 | (3UL << 54);
+		/* Only load control register 0 if necessary. */
+		if (cr0 != cr0_new)
+			__ctl_load(cr0_new, 0, 0);
+	}
+
+	/* Take care of the PER enablement bit in the PSW. */
+	if (!(per_info->control_regs.words.cr[0] & PER_EM_MASK)) {
+		regs->psw.mask &= ~PSW_MASK_PER;
+		return;
+	}
+	regs->psw.mask |= PSW_MASK_PER;
+	__ctl_store(cr_words, 9, 11);
+	if (memcmp(&cr_words, &per_info->control_regs.words,
+		   sizeof(cr_words)) != 0)
+		__ctl_load(per_info->control_regs.words, 9, 11);
+}
+
+static void FixPerRegisters(struct task_struct *task)
+{
+	per_struct *per_info;
+
 	per_info = (per_struct *) &task->thread.per_info;
 	per_info->control_regs.bits.em_instruction_fetch =
 		per_info->single_step | per_info->instruction_fetch;
@@ -81,32 +111,24 @@ FixPerRegisters(struct task_struct *task)
 		else
 #endif
 			per_info->control_regs.bits.ending_addr = PSW_ADDR_INSN;
+#ifdef CONFIG_64_BIT
+		per_info->control_regs.suspension_ctl = 1;
+		per_info->control_regs.transaction_end = 1;
+#endif
 	} else {
 		per_info->control_regs.bits.starting_addr =
 			per_info->starting_addr;
 		per_info->control_regs.bits.ending_addr =
 			per_info->ending_addr;
 	}
-	/*
-	 * if any of the control reg tracing bits are on 
-	 * we switch on per in the psw
-	 */
-	if (per_info->control_regs.words.cr[0] & PER_EM_MASK)
-		regs->psw.mask |= PSW_MASK_PER;
-	else
-		regs->psw.mask &= ~PSW_MASK_PER;
 
 	if (per_info->control_regs.bits.em_storage_alteration)
 		per_info->control_regs.bits.storage_alt_space_ctl = 1;
 	else
 		per_info->control_regs.bits.storage_alt_space_ctl = 0;
 
-	if (task == current) {
-		__ctl_store(cr_words, 9, 11);
-		if (memcmp(&cr_words, &per_info->control_regs.words,
-			   sizeof(cr_words)) != 0)
-			__ctl_load(per_info->control_regs.words, 9, 11);
-	}
+	if (task == current)
+		update_per_regs(task);
 }
 
 void user_enable_single_step(struct task_struct *task)
@@ -130,6 +152,7 @@ void
 ptrace_disable(struct task_struct *child)
 {
 	/* make sure the single step bit is not set. */
+	child->thread.per_flags = 0;
 	user_disable_single_step(child);
 }
 
@@ -385,6 +408,16 @@ long arch_ptrace(struct task_struct *child, long request, long addr, long data)
 	case PTRACE_GET_LAST_BREAK:
 		put_user(task_thread_info(child)->last_break,
 			 (unsigned long __user *) data);
+		return 0;
+	case PTRACE_ENABLE_TE:
+		if (!MACHINE_HAS_TE)
+			return -EIO;
+		child->thread.per_flags &= ~PER_FLAG_NO_TE;
+		return 0;
+	case PTRACE_DISABLE_TE:
+		if (!MACHINE_HAS_TE)
+			return -EIO;
+		child->thread.per_flags |= PER_FLAG_NO_TE;
 		return 0;
 	default:
 		/* Removing high order bit from addr (only for 31 bit). */
@@ -824,6 +857,25 @@ static int s390_last_break_get(struct task_struct *target,
 	return 0;
 }
 
+static int s390_tdb_get(struct task_struct *target,
+			const struct user_regset *regset,
+			unsigned int pos, unsigned int count,
+			void *kbuf, void __user *ubuf)
+{
+	unsigned char *data;
+
+	data = target->thread.trap_tdb;
+	return user_regset_copyout(&pos, &count, &kbuf, &ubuf, data, 0, 256);
+}
+
+static int s390_tdb_set(struct task_struct *target,
+			const struct user_regset *regset,
+			unsigned int pos, unsigned int count,
+			const void *kbuf, const void __user *ubuf)
+{
+	return 0;
+}
+
 #endif
 
 static const struct user_regset s390_regsets[] = {
@@ -850,6 +902,14 @@ static const struct user_regset s390_regsets[] = {
 		.size = sizeof(long),
 		.align = sizeof(long),
 		.get = s390_last_break_get,
+	},
+	[REGSET_TDB] = {
+		.core_note_type = NT_S390_TDB,
+		.n = 1,
+		.size = 256,
+		.align = 1,
+		.get = s390_tdb_get,
+		.set = s390_tdb_set,
 	},
 #endif
 };
@@ -1030,6 +1090,14 @@ static const struct user_regset s390_compat_regsets[] = {
 		.size = sizeof(long),
 		.align = sizeof(long),
 		.get = s390_compat_last_break_get,
+	},
+	[REGSET_TDB] = {
+		.core_note_type = NT_S390_TDB,
+		.n = 1,
+		.size = 256,
+		.align = 1,
+		.get = s390_tdb_get,
+		.set = s390_tdb_set,
 	},
 	[REGSET_GENERAL_EXTENDED] = {
 		.core_note_type = NT_PRXSTATUS,

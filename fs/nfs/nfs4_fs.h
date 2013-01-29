@@ -58,7 +58,8 @@ enum nfs4_session_state {
 struct nfs4_minor_version_ops {
 	u32	minor_version;
 
-	int	(*call_sync)(struct nfs_server *server,
+	int	(*call_sync)(struct rpc_clnt *clnt,
+			struct nfs_server *server,
 			struct rpc_message *msg,
 			struct nfs4_sequence_args *args,
 			struct nfs4_sequence_res *res,
@@ -234,6 +235,9 @@ extern ssize_t nfs4_getxattr(struct dentry *, const char *, void *, size_t);
 extern int nfs4_setxattr(struct dentry *, const char *, const void *, size_t, int);
 extern ssize_t nfs4_listxattr(struct dentry *, char *, size_t);
 
+/* nfs4namespace.c */
+rpc_authflavor_t nfs_find_best_sec(struct nfs4_secinfo_flavors *);
+struct rpc_clnt *nfs4_create_sec_client(struct rpc_clnt *, struct inode *, struct qstr *);
 
 /* nfs4proc.c */
 extern int nfs4_proc_setclientid(struct nfs_client *, u32, unsigned short, struct rpc_cred *, struct nfs4_setclientid_res *);
@@ -243,10 +247,13 @@ extern int nfs4_proc_async_renew(struct nfs_client *, struct rpc_cred *);
 extern int nfs4_proc_renew(struct nfs_client *, struct rpc_cred *);
 extern int nfs4_init_clientid(struct nfs_client *, struct rpc_cred *);
 extern int nfs41_init_clientid(struct nfs_client *, struct rpc_cred *);
-extern int nfs4_do_close(struct path *path, struct nfs4_state *state, gfp_t gfp_mask, int wait, bool roc);
+extern int nfs4_do_close(struct nfs4_state *state, gfp_t gfp_mask, int wait, bool roc);
 extern int nfs4_server_capabilities(struct nfs_server *server, struct nfs_fh *fhandle);
-extern int nfs4_proc_fs_locations(struct inode *dir, const struct qstr *name,
-		struct nfs4_fs_locations *fs_locations, struct page *page);
+extern int nfs4_proc_fs_locations(struct rpc_clnt *, struct inode *, const struct qstr *,
+				  struct nfs4_fs_locations *, struct page *);
+extern struct rpc_clnt *nfs4_proc_lookup_mountpoint(struct inode *, struct qstr *,
+			    struct nfs_fh *, struct nfs_fattr *);
+extern int nfs4_proc_secinfo(struct inode *, const struct qstr *, struct nfs4_secinfo_flavors *);
 extern void nfs4_release_lockowner(const struct nfs4_lock_state *);
 
 #if defined(CONFIG_NFS_V4_1)
@@ -257,10 +264,10 @@ static inline struct nfs4_session *nfs4_get_session(const struct nfs_server *ser
 
 extern int nfs4_setup_sequence(const struct nfs_server *server,
 		struct nfs4_sequence_args *args, struct nfs4_sequence_res *res,
-		int cache_reply, struct rpc_task *task);
+		struct rpc_task *task);
 extern int nfs41_setup_sequence(struct nfs4_session *session,
 		struct nfs4_sequence_args *args, struct nfs4_sequence_res *res,
-		int cache_reply, struct rpc_task *task);
+		struct rpc_task *task);
 extern void nfs4_destroy_session(struct nfs4_session *session);
 extern struct nfs4_session *nfs4_alloc_session(struct nfs_client *clp);
 extern int nfs4_proc_create_session(struct nfs_client *);
@@ -291,7 +298,7 @@ static inline struct nfs4_session *nfs4_get_session(const struct nfs_server *ser
 
 static inline int nfs4_setup_sequence(const struct nfs_server *server,
 		struct nfs4_sequence_args *args, struct nfs4_sequence_res *res,
-		int cache_reply, struct rpc_task *task)
+		struct rpc_task *task)
 {
 	return 0;
 }
@@ -345,8 +352,8 @@ extern struct nfs4_state_owner * nfs4_get_state_owner(struct nfs_server *, struc
 extern void nfs4_put_state_owner(struct nfs4_state_owner *);
 extern struct nfs4_state * nfs4_get_open_state(struct inode *, struct nfs4_state_owner *);
 extern void nfs4_put_open_state(struct nfs4_state *);
-extern void nfs4_close_state(struct path *, struct nfs4_state *, fmode_t);
-extern void nfs4_close_sync(struct path *, struct nfs4_state *, fmode_t);
+extern void nfs4_close_state(struct nfs4_state *, fmode_t);
+extern void nfs4_close_sync(struct nfs4_state *, fmode_t);
 extern void nfs4_state_set_mode_locked(struct nfs4_state *, fmode_t);
 extern void nfs_inode_find_state_and_recover(struct inode *inode,
 		const nfs4_stateid *stateid);
@@ -380,8 +387,8 @@ extern struct svc_version nfs4_callback_version4;
 
 #else
 
-#define nfs4_close_state(a, b, c) do { } while (0)
-#define nfs4_close_sync(a, b, c) do { } while (0)
+#define nfs4_close_state(a, b) do { } while (0)
+#define nfs4_close_sync(a, b) do { } while (0)
 
 #endif /* CONFIG_NFS_V4 */
 #endif /* __LINUX_FS_NFS_NFS4_FS.H */

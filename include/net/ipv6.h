@@ -395,6 +395,26 @@ static inline int ipv6_addr_loopback(const struct in6_addr *a)
 		 a->s6_addr32[2] | (a->s6_addr32[3] ^ htonl(1))) == 0);
 }
 
+
+/*
+ *	Equivalent of ipv4 struct ip
+ */
+struct frag_queue {
+	struct inet_frag_queue	q;
+
+	__be32			id;		/* fragment id		*/
+	u32			user;
+	struct in6_addr		saddr;
+	struct in6_addr		daddr;
+
+	int			iif;
+	unsigned int		csum;
+	__u16			nhoffset;
+};
+
+void ip6_expire_frag_queue(struct net *net, struct frag_queue *fq,
+			   struct inet_frags *frags);
+
 static inline int ipv6_addr_v4mapped(const struct in6_addr *a)
 {
 	return ((a->s6_addr32[0] | a->s6_addr32[1] |
@@ -548,6 +568,9 @@ extern void			ipv6_push_frag_opts(struct sk_buff *skb,
 
 extern int			ipv6_skip_exthdr(const struct sk_buff *, int start,
 					         u8 *nexthdrp);
+extern int			ipv6_skip_exthdr_fragoff(
+					const struct sk_buff *, int start,
+					u8 *nexthdrp, __be16 *frag_offp);
 
 extern int 			ipv6_ext_hdr(u8 nexthdr);
 

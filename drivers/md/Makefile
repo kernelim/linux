@@ -1,5 +1,4 @@
-#
-# Makefile for the kernel software RAID and LVM drivers.
+## Makefile for the kernel software RAID and LVM drivers.
 #
 
 dm-mod-y	+= dm.o dm-table.o dm-target.o dm-linear.o dm-stripe.o \
@@ -8,7 +7,6 @@ dm-multipath-y	+= dm-path-selector.o dm-mpath.o
 dm-snapshot-y	+= dm-snap.o dm-exception-store.o dm-snap-transient.o \
 		    dm-snap-persistent.o
 dm-mirror-y	+= dm-raid1.o
-dm-replicator-y	+= dm-repl.o
 dm-log-userspace-y \
 		+= dm-log-userspace-base.o dm-log-userspace-transfer.o
 dm-thin-pool-y	+= dm-thin.o dm-thin-metadata.o
@@ -45,10 +43,6 @@ obj-$(CONFIG_DM_RAID)		+= dm-raid.o
 obj-$(CONFIG_DM_THIN_PROVISIONING)	+= dm-thin-pool.o
 obj-$(CONFIG_DM_RAID45)		+= dm-raid45.o dm-log.o dm-memcache.o \
 				   dm-region-hash.o
-obj-$(CONFIG_DM_REPLICATOR)	+= dm-replicator.o \
-				   dm-repl-log-ringbuffer.o \
-				   dm-repl-slink-blockdev.o \
-				   dm-log.o dm-registry.o
 
 ifeq ($(CONFIG_DM_UEVENT),y)
 dm-mod-objs			+= dm-uevent.o

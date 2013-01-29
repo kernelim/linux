@@ -68,7 +68,6 @@ static void zcrypt_pcica_receive(struct ap_device *, struct ap_message *,
 static struct ap_driver zcrypt_pcica_driver = {
 	.probe = zcrypt_pcica_probe,
 	.remove = zcrypt_pcica_remove,
-	.receive = zcrypt_pcica_receive,
 	.ids = zcrypt_pcica_ids,
 	.request_timeout = PCICA_CLEANUP_TIME,
 };
@@ -285,6 +284,7 @@ static long zcrypt_pcica_modexpo(struct zcrypt_device *zdev,
 	ap_msg.message = kmalloc(PCICA_MAX_MESSAGE_SIZE, GFP_KERNEL);
 	if (!ap_msg.message)
 		return -ENOMEM;
+	ap_msg.receive = zcrypt_pcica_receive;
 	ap_msg.psmid = (((unsigned long long) current->pid) << 32) +
 				atomic_inc_return(&zcrypt_step);
 	ap_msg.private = &work;
@@ -323,6 +323,7 @@ static long zcrypt_pcica_modexpo_crt(struct zcrypt_device *zdev,
 	ap_msg.message = kmalloc(PCICA_MAX_MESSAGE_SIZE, GFP_KERNEL);
 	if (!ap_msg.message)
 		return -ENOMEM;
+	ap_msg.receive = zcrypt_pcica_receive;
 	ap_msg.psmid = (((unsigned long long) current->pid) << 32) +
 				atomic_inc_return(&zcrypt_step);
 	ap_msg.private = &work;

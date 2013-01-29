@@ -68,5 +68,8 @@ int main(void)
 	DEFINE(__SIGP_SENSE, sigp_sense);
 	DEFINE(__SIGP_INITIAL_CPU_RESET, sigp_initial_cpu_reset);
 	DEFINE(__LC_RST_OLD_PSW, offsetof(struct _lowcore, restart_old_psw));
+	/* constants for transactional execution */
+	DEFINE(__LC_PGM_TDB, offsetof(struct _lowcore, pgm_tdb));
+	DEFINE(__THREAD_trap_tdb, offsetof(struct task_struct, thread.trap_tdb));
 	return 0;
 }

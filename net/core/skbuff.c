@@ -339,12 +339,12 @@ struct page *__netdev_alloc_page(struct net_device *dev, gfp_t gfp_mask)
 EXPORT_SYMBOL(__netdev_alloc_page);
 
 void skb_add_rx_frag(struct sk_buff *skb, int i, struct page *page, int off,
-		int size)
+		     int size, unsigned int truesize)
 {
 	skb_fill_page_desc(skb, i, page, off, size);
 	skb->len += size;
 	skb->data_len += size;
-	skb->truesize += size;
+	skb->truesize += truesize;
 }
 EXPORT_SYMBOL(skb_add_rx_frag);
 

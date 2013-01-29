@@ -577,18 +577,23 @@ xfs_trans_alloc(
 	xfs_mount_t	*mp,
 	uint		type)
 {
-	xfs_wait_for_freeze(mp, SB_FREEZE_TRANS);
-	return _xfs_trans_alloc(mp, type, KM_SLEEP);
+	xfs_trans_t     *tp;
+
+	sb_start_intwrite(mp->m_super);
+	tp = _xfs_trans_alloc(mp, type, KM_SLEEP);
+	tp->t_flags |= XFS_TRANS_FREEZE_PROT;
+	return tp;
 }
 
 xfs_trans_t *
 _xfs_trans_alloc(
 	xfs_mount_t	*mp,
 	uint		type,
-	uint		memflags)
+	xfs_km_flags_t	memflags)
 {
 	xfs_trans_t	*tp;
 
+	WARN_ON(mp->m_super->s_writers.frozen == SB_FREEZE_COMPLETE);
 	atomic_inc(&mp->m_active_trans);
 
 	tp = kmem_zone_zalloc(xfs_trans_zone, memflags);
@@ -609,9 +614,11 @@ xfs_trans_free(
 	struct xfs_trans	*tp)
 {
 	xfs_alloc_busy_sort(&tp->t_busy);
-	xfs_alloc_busy_clear(tp->t_mountp, &tp->t_busy);
+	xfs_alloc_busy_clear(tp->t_mountp, &tp->t_busy, false);
 
 	atomic_dec(&tp->t_mountp->m_active_trans);
+	if (tp->t_flags & XFS_TRANS_FREEZE_PROT)
+		sb_end_intwrite(tp->t_mountp->m_super);
 	xfs_trans_free_dqinfo(tp);
 	kmem_zone_free(xfs_trans_zone, tp);
 }
@@ -644,7 +651,11 @@ xfs_trans_dup(
 	ASSERT(tp->t_flags & XFS_TRANS_PERM_LOG_RES);
 	ASSERT(tp->t_ticket != NULL);
 
-	ntp->t_flags = XFS_TRANS_PERM_LOG_RES | (tp->t_flags & XFS_TRANS_RESERVE);
+	ntp->t_flags = XFS_TRANS_PERM_LOG_RES |
+		       (tp->t_flags & XFS_TRANS_RESERVE) |
+		       (tp->t_flags & XFS_TRANS_FREEZE_PROT);
+	/* We gave our writer reference to the new transaction */
+	tp->t_flags &= ~XFS_TRANS_FREEZE_PROT;
 	ntp->t_ticket = xfs_log_ticket_get(tp->t_ticket);
 	ntp->t_blk_res = tp->t_blk_res - tp->t_blk_res_used;
 	tp->t_blk_res = tp->t_blk_res_used;
@@ -681,7 +692,6 @@ xfs_trans_reserve(
 	uint		flags,
 	uint		logcount)
 {
-	int		log_flags;
 	int		error = 0;
 	int		rsvd = (tp->t_flags & XFS_TRANS_RESERVE) != 0;
 
@@ -707,24 +717,32 @@ xfs_trans_reserve(
 	 * Reserve the log space needed for this transaction.
 	 */
 	if (logspace > 0) {
-		ASSERT((tp->t_log_res == 0) || (tp->t_log_res == logspace));
-		ASSERT((tp->t_log_count == 0) ||
-			(tp->t_log_count == logcount));
+		bool	permanent = false;
+
+		ASSERT(tp->t_log_res == 0 || tp->t_log_res == logspace);
+		ASSERT(tp->t_log_count == 0 || tp->t_log_count == logcount);
+
 		if (flags & XFS_TRANS_PERM_LOG_RES) {
-			log_flags = XFS_LOG_PERM_RESERV;
 			tp->t_flags |= XFS_TRANS_PERM_LOG_RES;
+			permanent = true;
 		} else {
 			ASSERT(tp->t_ticket == NULL);
 			ASSERT(!(tp->t_flags & XFS_TRANS_PERM_LOG_RES));
-			log_flags = 0;
 		}
 
-		error = xfs_log_reserve(tp->t_mountp, logspace, logcount,
-					&tp->t_ticket,
-					XFS_TRANSACTION, log_flags, tp->t_type);
-		if (error) {
-			goto undo_blocks;
+		if (tp->t_ticket != NULL) {
+			ASSERT(flags & XFS_TRANS_PERM_LOG_RES);
+			error = xfs_log_regrant(tp->t_mountp, tp->t_ticket);
+		} else {
+			error = xfs_log_reserve(tp->t_mountp, logspace,
+						logcount, &tp->t_ticket,
+						XFS_TRANSACTION, permanent,
+						tp->t_type);
 		}
+
+		if (error)
+			goto undo_blocks;
+
 		tp->t_log_res = logspace;
 		tp->t_log_count = logcount;
 	}
@@ -752,6 +770,8 @@ xfs_trans_reserve(
 	 */
 undo_log:
 	if (logspace > 0) {
+		int		log_flags;
+
 		if (flags & XFS_TRANS_PERM_LOG_RES) {
 			log_flags = XFS_LOG_REL_PERM_RESERV;
 		} else {
@@ -1151,8 +1171,8 @@ xfs_trans_add_item(
 {
 	struct xfs_log_item_desc *lidp;
 
-	ASSERT(lip->li_mountp = tp->t_mountp);
-	ASSERT(lip->li_ailp = tp->t_mountp->m_ail);
+	ASSERT(lip->li_mountp == tp->t_mountp);
+	ASSERT(lip->li_ailp == tp->t_mountp->m_ail);
 
 	lidp = kmem_zone_zalloc(xfs_log_item_desc_zone, KM_SLEEP | KM_NOFS);
 
@@ -1426,6 +1446,7 @@ xfs_trans_committed(
 static inline void
 xfs_log_item_batch_insert(
 	struct xfs_ail		*ailp,
+	struct xfs_ail_cursor	*cur,
 	struct xfs_log_item	**log_items,
 	int			nr_items,
 	xfs_lsn_t		commit_lsn)
@@ -1434,7 +1455,7 @@ xfs_log_item_batch_insert(
 
 	spin_lock(&ailp->xa_lock);
 	/* xfs_trans_ail_update_bulk drops ailp->xa_lock */
-	xfs_trans_ail_update_bulk(ailp, log_items, nr_items, commit_lsn);
+	xfs_trans_ail_update_bulk(ailp, cur, log_items, nr_items, commit_lsn);
 
 	for (i = 0; i < nr_items; i++)
 		IOP_UNPIN(log_items[i], 0);
@@ -1452,6 +1473,13 @@ xfs_log_item_batch_insert(
  * as an iclog write error even though we haven't started any IO yet. Hence in
  * this case all we need to do is IOP_COMMITTED processing, followed by an
  * IOP_UNPIN(aborted) call.
+ *
+ * The AIL cursor is used to optimise the insert process. If commit_lsn is not
+ * at the end of the AIL, the insert cursor avoids the need to walk
+ * the AIL to find the insertion point on every xfs_log_item_batch_insert()
+ * call. This saves a lot of needless list walking and is a net win, even
+ * though it slightly increases that amount of AIL lock traffic to set it up
+ * and tear it down.
  */
 void
 xfs_trans_committed_bulk(
@@ -1463,7 +1491,12 @@ xfs_trans_committed_bulk(
 #define LOG_ITEM_BATCH_SIZE	32
 	struct xfs_log_item	*log_items[LOG_ITEM_BATCH_SIZE];
 	struct xfs_log_vec	*lv;
+	struct xfs_ail_cursor	cur;
 	int			i = 0;
+
+	spin_lock(&ailp->xa_lock);
+	xfs_trans_ail_cursor_last(ailp, &cur, commit_lsn);
+	spin_unlock(&ailp->xa_lock);
 
 	/* unpin all the log items */
 	for (lv = log_vector; lv; lv = lv->lv_next ) {
@@ -1493,7 +1526,9 @@ xfs_trans_committed_bulk(
 			/*
 			 * Not a bulk update option due to unusual item_lsn.
 			 * Push into AIL immediately, rechecking the lsn once
-			 * we have the ail lock. Then unpin the item.
+			 * we have the ail lock. Then unpin the item. This does
+			 * not affect the AIL cursor the bulk insert path is
+			 * using.
 			 */
 			spin_lock(&ailp->xa_lock);
 			if (XFS_LSN_CMP(item_lsn, lip->li_lsn) > 0)
@@ -1507,7 +1542,7 @@ xfs_trans_committed_bulk(
 		/* Item is a candidate for bulk AIL insert.  */
 		log_items[i++] = lv->lv_item;
 		if (i >= LOG_ITEM_BATCH_SIZE) {
-			xfs_log_item_batch_insert(ailp, log_items,
+			xfs_log_item_batch_insert(ailp, &cur, log_items,
 					LOG_ITEM_BATCH_SIZE, commit_lsn);
 			i = 0;
 		}
@@ -1515,7 +1550,11 @@ xfs_trans_committed_bulk(
 
 	/* make sure we insert the remainder! */
 	if (i)
-		xfs_log_item_batch_insert(ailp, log_items, i, commit_lsn);
+		xfs_log_item_batch_insert(ailp, &cur, log_items, i, commit_lsn);
+
+	spin_lock(&ailp->xa_lock);
+	xfs_trans_ail_cursor_done(ailp, &cur);
+	spin_unlock(&ailp->xa_lock);
 }
 
 /*

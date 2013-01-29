@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- * Copyright(c) 2003 - 2011 Intel Corporation. All rights reserved.
+ * Copyright(c) 2003 - 2012 Intel Corporation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License as
@@ -30,6 +30,7 @@
 #include <net/mac80211.h>
 
 #include "iwl-commands.h"
+#include "iwl-config.h"
 
 struct iwl_rate_info {
 	u8 plcp;	/* uCode API:  IWL_RATE_6M_PLCP, etc. */
@@ -174,32 +175,6 @@ enum {
 	IWL_RATE_11M_IEEE = 22,
 };
 
-#define IWL_CCK_BASIC_RATES_MASK    \
-       (IWL_RATE_1M_MASK          | \
-	IWL_RATE_2M_MASK)
-
-#define IWL_CCK_RATES_MASK          \
-       (IWL_CCK_BASIC_RATES_MASK  | \
-	IWL_RATE_5M_MASK          | \
-	IWL_RATE_11M_MASK)
-
-#define IWL_OFDM_BASIC_RATES_MASK   \
-	(IWL_RATE_6M_MASK         | \
-	IWL_RATE_12M_MASK         | \
-	IWL_RATE_24M_MASK)
-
-#define IWL_OFDM_RATES_MASK         \
-       (IWL_OFDM_BASIC_RATES_MASK | \
-	IWL_RATE_9M_MASK          | \
-	IWL_RATE_18M_MASK         | \
-	IWL_RATE_36M_MASK         | \
-	IWL_RATE_48M_MASK         | \
-	IWL_RATE_54M_MASK)
-
-#define IWL_BASIC_RATES_MASK         \
-	(IWL_OFDM_BASIC_RATES_MASK | \
-	 IWL_CCK_BASIC_RATES_MASK)
-
 #define IWL_RATES_MASK ((1 << IWL_RATE_COUNT) - 1)
 
 #define IWL_INVALID_VALUE    -1
@@ -281,7 +256,6 @@ enum {
 #define TID_QUEUE_CELL_SPACING	50	/*mS */
 #define TID_QUEUE_MAX_SIZE	20
 #define TID_ROUND_VALUE		5	/* mS */
-#define TID_MAX_LOAD_COUNT	8
 
 #define TID_MAX_TIME_DIFF ((TID_QUEUE_MAX_SIZE - 1) * TID_QUEUE_CELL_SPACING)
 #define TIME_WRAP_AROUND(x, y) (((y) > (x)) ? (y) - (x) : (0-(x)) + (y))
@@ -306,15 +280,6 @@ enum iwl_table_type {
 #define is_Ht(tbl) (is_siso(tbl) || is_mimo(tbl))
 #define is_a_band(tbl) ((tbl) == LQ_A)
 #define is_g_and(tbl) ((tbl) == LQ_G)
-
-#define	ANT_NONE	0x0
-#define	ANT_A		BIT(0)
-#define	ANT_B		BIT(1)
-#define	ANT_AB		(ANT_A | ANT_B)
-#define ANT_C		BIT(2)
-#define	ANT_AC		(ANT_A | ANT_C)
-#define ANT_BC		(ANT_B | ANT_C)
-#define ANT_ABC		(ANT_AB | ANT_C)
 
 #define IWL_MAX_MCS_DISPLAY_SIZE	12
 
@@ -402,7 +367,7 @@ struct iwl_lq_sta {
 
 	struct iwl_link_quality_cmd lq;
 	struct iwl_scale_tbl_info lq_info[LQ_SIZE]; /* "active", "search" */
-	struct iwl_traffic_load load[TID_MAX_LOAD_COUNT];
+	struct iwl_traffic_load load[IWL_MAX_TID_COUNT];
 	u8 tx_agg_tid_en;
 #ifdef CONFIG_MAC80211_DEBUGFS
 	struct dentry *rs_sta_dbgfs_scale_table_file;

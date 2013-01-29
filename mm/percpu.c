@@ -74,6 +74,7 @@
 #include <asm/cacheflush.h>
 #include <asm/sections.h>
 #include <asm/tlbflush.h>
+#include <asm/io.h>
 
 #define PCPU_SLOT_BASE_SHIFT		5	/* 1-31 shares the same slot */
 #define PCPU_DFL_MAP_ALLOC		16	/* start a map with 16 ents */
@@ -110,9 +111,9 @@ static int pcpu_atom_size __read_mostly;
 static int pcpu_nr_slots __read_mostly;
 static size_t pcpu_chunk_struct_size __read_mostly;
 
-/* cpus with the lowest and highest unit numbers */
-static unsigned int pcpu_first_unit_cpu __read_mostly;
-static unsigned int pcpu_last_unit_cpu __read_mostly;
+/* cpus with the lowest and highest unit addresses */
+static unsigned int pcpu_low_unit_cpu __read_mostly;
+static unsigned int pcpu_high_unit_cpu __read_mostly;
 
 /* the address of the first chunk which starts with the kernel static area */
 void *pcpu_base_addr __read_mostly;
@@ -746,8 +747,8 @@ static void pcpu_pre_unmap_flush(struct pcpu_chunk *chunk,
 				 int page_start, int page_end)
 {
 	flush_cache_vunmap(
-		pcpu_chunk_addr(chunk, pcpu_first_unit_cpu, page_start),
-		pcpu_chunk_addr(chunk, pcpu_last_unit_cpu, page_end));
+		pcpu_chunk_addr(chunk, pcpu_low_unit_cpu, page_start),
+		pcpu_chunk_addr(chunk, pcpu_high_unit_cpu, page_end));
 }
 
 static void __pcpu_unmap_pages(unsigned long addr, int nr_pages)
@@ -809,8 +810,8 @@ static void pcpu_post_unmap_tlb_flush(struct pcpu_chunk *chunk,
 				      int page_start, int page_end)
 {
 	flush_tlb_kernel_range(
-		pcpu_chunk_addr(chunk, pcpu_first_unit_cpu, page_start),
-		pcpu_chunk_addr(chunk, pcpu_last_unit_cpu, page_end));
+		pcpu_chunk_addr(chunk, pcpu_low_unit_cpu, page_start),
+		pcpu_chunk_addr(chunk, pcpu_high_unit_cpu, page_end));
 }
 
 static int __pcpu_map_pages(unsigned long addr, struct page **pages,
@@ -887,8 +888,8 @@ static void pcpu_post_map_flush(struct pcpu_chunk *chunk,
 				int page_start, int page_end)
 {
 	flush_cache_vmap(
-		pcpu_chunk_addr(chunk, pcpu_first_unit_cpu, page_start),
-		pcpu_chunk_addr(chunk, pcpu_last_unit_cpu, page_end));
+		pcpu_chunk_addr(chunk, pcpu_low_unit_cpu, page_start),
+		pcpu_chunk_addr(chunk, pcpu_high_unit_cpu, page_end));
 }
 
 /**
@@ -1316,6 +1317,61 @@ static inline size_t pcpu_calc_fc_sizes(size_t static_size,
 	return size_sum;
 }
 
+static struct page *pcpu_addr_to_page(void *addr)
+{
+        return vmalloc_to_page(addr);
+}
+
+/**
+ * per_cpu_ptr_to_phys - convert translated percpu address to physical address
+ * @addr: the address to be converted to physical address
+ *
+ * Given @addr which is dereferenceable address obtained via one of
+ * percpu access macros, this function translates it into its physical
+ * address.  The caller is responsible for ensuring @addr stays valid
+ * until this function finishes.
+ *
+ * RETURNS:
+ * The physical address for @addr.
+ */
+phys_addr_t per_cpu_ptr_to_phys(void *addr)
+{
+        void __percpu *base = __addr_to_pcpu_ptr(pcpu_base_addr);
+        bool in_first_chunk = false;
+        unsigned long first_low, first_high;
+        unsigned int cpu;
+
+        /*
+	 * The following test on unit_low/high isn't strictly
+	 * necessary but will speed up lookups of addresses which
+	 * aren't in the first chunk.
+	 */
+        first_low = pcpu_chunk_addr(pcpu_first_chunk, pcpu_low_unit_cpu, 0);
+        first_high = pcpu_chunk_addr(pcpu_first_chunk, pcpu_high_unit_cpu,
+                                     pcpu_unit_pages);
+        if ((unsigned long)addr >= first_low &&
+            (unsigned long)addr < first_high) {
+                for_each_possible_cpu(cpu) {
+                        void *start = per_cpu_ptr(base, cpu);
+
+                        if (addr >= start && addr < start + pcpu_unit_size) {
+                                in_first_chunk = true;
+                                break;
+                        }
+                }
+        }
+
+        if (in_first_chunk) {
+                if (!is_vmalloc_addr(addr))
+                        return __pa(addr);
+                else
+                        return page_to_phys(vmalloc_to_page(addr)) +
+                               offset_in_page(addr);
+        } else
+                return page_to_phys(pcpu_addr_to_page(addr)) +
+                       offset_in_page(addr);
+}
+
 /**
  * pcpu_alloc_alloc_info - allocate percpu allocation info
  * @nr_groups: the number of groups
@@ -1680,7 +1736,9 @@ int __init pcpu_setup_first_chunk(const struct pcpu_alloc_info *ai,
 
 	for (cpu = 0; cpu < nr_cpu_ids; cpu++)
 		unit_map[cpu] = UINT_MAX;
-	pcpu_first_unit_cpu = NR_CPUS;
+
+	pcpu_low_unit_cpu = NR_CPUS;
+	pcpu_high_unit_cpu = NR_CPUS;
 
 	for (group = 0, unit = 0; group < ai->nr_groups; group++, unit += i) {
 		const struct pcpu_group_info *gi = &ai->groups[group];
@@ -1700,11 +1758,15 @@ int __init pcpu_setup_first_chunk(const struct pcpu_alloc_info *ai,
 			unit_map[cpu] = unit + i;
 			unit_off[cpu] = gi->base_offset + i * ai->unit_size;
 
-			if (pcpu_first_unit_cpu == NR_CPUS)
-				pcpu_first_unit_cpu = cpu;
+			/* determine low/high unit_cpu */
+                        if (pcpu_low_unit_cpu == NR_CPUS ||
+                            unit_off[cpu] < unit_off[pcpu_low_unit_cpu])
+                                pcpu_low_unit_cpu = cpu;
+                        if (pcpu_high_unit_cpu == NR_CPUS ||
+                            unit_off[cpu] > unit_off[pcpu_high_unit_cpu])
+                                pcpu_high_unit_cpu = cpu;
 		}
 	}
-	pcpu_last_unit_cpu = cpu;
 	pcpu_nr_units = unit;
 
 	for_each_possible_cpu(cpu)

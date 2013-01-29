@@ -53,6 +53,7 @@
 #include <linux/nfs_xdr.h>
 #include <linux/magic.h>
 #include <linux/parser.h>
+#include <linux/kthread.h>
 
 #include <asm/system.h>
 #include <asm/uaccess.h>
@@ -271,13 +272,14 @@ static void nfs_put_super(struct super_block *);
 static void nfs_kill_super(struct super_block *);
 static int nfs_remount(struct super_block *sb, int *flags, char *raw_data);
 
-static struct file_system_type nfs_fs_type = {
+struct file_system_type nfs_fs_type = {
 	.owner		= THIS_MODULE,
 	.name		= "nfs",
 	.get_sb		= nfs_get_sb,
 	.kill_sb	= nfs_kill_super,
 	.fs_flags	= FS_RENAME_DOES_D_MOVE|FS_REVAL_DOT|FS_BINARY_MOUNTDATA,
 };
+EXPORT_SYMBOL_GPL(nfs_fs_type);
 
 struct file_system_type nfs_xdev_fs_type = {
 	.owner		= THIS_MODULE,
@@ -436,6 +438,54 @@ void nfs_sb_deactive(struct super_block *sb)
 	if (atomic_dec_and_test(&server->active))
 		deactivate_super(sb);
 }
+
+static int nfs_deactivate_super_async_work(void *ptr)
+{
+	struct super_block *sb = ptr;
+
+	deactivate_super(sb);
+	module_put_and_exit(0);
+	return 0;
+}
+
+/*
+ * same effect as deactivate_super, but will do final unmount in kthread
+ * context
+ */
+static void nfs_deactivate_super_async(struct super_block *sb)
+{
+	struct task_struct *task;
+	char buf[INET6_ADDRSTRLEN + 1];
+	struct nfs_server *server = NFS_SB(sb);
+	struct nfs_client *clp = server->nfs_client;
+
+	if (!atomic_add_unless(&sb->s_active, -1, 1)) {
+		rcu_read_lock();
+		snprintf(buf, sizeof(buf),
+			rpc_peeraddr2str(clp->cl_rpcclient, RPC_DISPLAY_ADDR));
+		rcu_read_unlock();
+
+		__module_get(THIS_MODULE);
+		task = kthread_run(nfs_deactivate_super_async_work, sb,
+				"%s-deactivate-super", buf);
+		if (IS_ERR(task)) {
+			pr_err("%s: kthread_run: %ld\n",
+				__func__, PTR_ERR(task));
+			/* make synchronous call and hope for the best */
+			deactivate_super(sb);
+			module_put(THIS_MODULE);
+		}
+	}
+}
+
+void nfs_sb_deactive_async(struct super_block *sb)
+{
+	struct nfs_server *server = NFS_SB(sb);
+
+	if (atomic_dec_and_test(&server->active))
+		nfs_deactivate_super_async(sb);
+}
+EXPORT_SYMBOL_GPL(nfs_sb_deactive_async);
 
 /*
  * Deliver file system statistics to userspace
@@ -988,6 +1038,7 @@ static int nfs_parse_security_flavors(char *value,
 		return 0;
 	}
 
+	mnt->flags |= NFS_MOUNT_SECFLAVOUR;
 	mnt->auth_flavor_len = 1;
 	return 1;
 }
@@ -2432,7 +2483,7 @@ static int nfs_xdev_get_sb(struct file_system_type *fs_type, int flags,
 	dprintk("--> nfs_xdev_get_sb()\n");
 
 	/* create a new volume representation */
-	server = nfs_clone_server(NFS_SB(data->sb), data->fh, data->fattr);
+	server = nfs_clone_server(NFS_SB(data->sb), data->fh, data->fattr, data->authflavor);
 	if (IS_ERR(server)) {
 		error = PTR_ERR(server);
 		goto out_err_noserver;
@@ -2766,11 +2817,15 @@ static struct vfsmount *nfs_do_root_mount(struct file_system_type *fs_type,
 	char *root_devname;
 	size_t len;
 
-	len = strlen(hostname) + 3;
+	len = strlen(hostname) + 5;
 	root_devname = kmalloc(len, GFP_KERNEL);
 	if (root_devname == NULL)
 		return ERR_PTR(-ENOMEM);
-	snprintf(root_devname, len, "%s:/", hostname);
+	/* Does hostname needs to be enclosed in brackets? */
+	if (strchr(hostname, ':'))
+		snprintf(root_devname, len, "[%s]:/", hostname);
+	else
+		snprintf(root_devname, len, "%s:/", hostname);
 	root_mnt = vfs_kern_mount(fs_type, flags, root_devname, data);
 	kfree(root_devname);
 	return root_mnt;
@@ -3001,7 +3056,7 @@ static int nfs4_xdev_get_sb(struct file_system_type *fs_type, int flags,
 	dprintk("--> nfs4_xdev_get_sb()\n");
 
 	/* create a new volume representation */
-	server = nfs_clone_server(NFS_SB(data->sb), data->fh, data->fattr);
+	server = nfs_clone_server(NFS_SB(data->sb), data->fh, data->fattr, data->authflavor);
 	if (IS_ERR(server)) {
 		error = PTR_ERR(server);
 		goto out_err_noserver;

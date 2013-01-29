@@ -40,9 +40,6 @@ config ARCH_HAS_ILOG2_U64
 config GENERIC_HWEIGHT
 	def_bool y
 
-config GENERIC_TIME
-	def_bool y
-
 config GENERIC_TIME_VSYSCALL
 	def_bool y
 
@@ -59,6 +56,9 @@ config NO_IOMEM
 
 config NO_DMA
 	def_bool y
+
+config ARCH_DMA_ADDR_T_64BIT
+	def_bool 64BIT
 
 config GENERIC_LOCKBREAK
 	bool
@@ -96,6 +96,7 @@ config S390
 	select INIT_ALL_POSSIBLE
 	select HAVE_IRQ_WORK
 	select HAVE_PERF_EVENTS
+	select ARCH_HAVE_NMI_SAFE_CMPXCHG
 
 config SCHED_OMIT_FRAME_POINTER
 	bool
@@ -382,6 +383,24 @@ config CHSC_SCH
 	  module will be called chsc_sch.
 
 	  If unsure, say N.
+
+config SCM_BUS
+	def_bool y
+	depends on 64BIT
+	prompt "SCM bus driver"
+	help
+	  Bus driver for Storage Class Memory.
+
+config EADM_SCH
+	def_tristate m
+	prompt "Support for EADM subchannels"
+	depends on SCM_BUS
+	help
+	  This driver allows usage of EADM subchannels. EADM subchannels act
+	  as a communication vehicle for SCM increments.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called eadm_sch.
 
 comment "Misc"
 

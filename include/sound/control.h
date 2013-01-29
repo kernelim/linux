@@ -159,12 +159,14 @@ static inline struct snd_ctl_elem_id *snd_ctl_build_ioff(struct snd_ctl_elem_id 
 }
 
 /*
- * Frequently used control callbacks
+ * Frequently used control callbacks/helpers
  */
 int snd_ctl_boolean_mono_info(struct snd_kcontrol *kcontrol,
 			      struct snd_ctl_elem_info *uinfo);
 int snd_ctl_boolean_stereo_info(struct snd_kcontrol *kcontrol,
 				struct snd_ctl_elem_info *uinfo);
+int snd_ctl_enum_info(struct snd_ctl_elem_info *info, unsigned int channels,
+		      unsigned int items, const char *const names[]);
 
 /*
  * virtual master control
@@ -220,6 +222,11 @@ snd_ctl_add_slave_uncached(struct snd_kcontrol *master,
 {
 	return _snd_ctl_add_slave(master, slave, SND_CTL_SLAVE_NEED_UPDATE);
 }
+
+int snd_ctl_add_vmaster_hook(struct snd_kcontrol *kctl,
+			     void (*hook)(void *private_data, int),
+			     void *private_data);
+void snd_ctl_sync_vmaster_hook(struct snd_kcontrol *kctl);
 
 /*
  * Helper functions for jack-detection controls

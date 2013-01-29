@@ -1,7 +1,7 @@
 /****************************************************************************
  * Driver for Solarflare Solarstorm network controllers and boards
  * Copyright 2005-2006 Fen Systems Ltd.
- * Copyright 2006-2009 Solarflare Communications Inc.
+ * Copyright 2006-2010 Solarflare Communications Inc.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published
@@ -280,7 +280,7 @@ fail:
 		--part;
 		efx_mtd_remove_partition(part);
 	}
-	/* add_mtd_device() returns 1 if the MTD table is full */
+	/* Failure is unlikely here, but probably means we're out of memory */
 	return -ENOMEM;
 }
 
@@ -382,7 +382,7 @@ static int falcon_mtd_sync(struct mtd_info *mtd)
 	return rc;
 }
 
-static struct efx_mtd_ops falcon_mtd_ops = {
+static const struct efx_mtd_ops falcon_mtd_ops = {
 	.read	= falcon_mtd_read,
 	.erase	= falcon_mtd_erase,
 	.write	= falcon_mtd_write,
@@ -496,7 +496,7 @@ static int siena_mtd_erase(struct mtd_info *mtd, loff_t start, size_t len)
 		rc = efx_mcdi_nvram_update_start(efx, part->mcdi.nvram_type);
 		if (rc)
 			goto out;
-		part->mcdi.updating = 1;
+		part->mcdi.updating = true;
 	}
 
 	/* The MCDI interface can in fact do multiple erase blocks at once;
@@ -528,7 +528,7 @@ static int siena_mtd_write(struct mtd_info *mtd, loff_t start,
 		rc = efx_mcdi_nvram_update_start(efx, part->mcdi.nvram_type);
 		if (rc)
 			goto out;
-		part->mcdi.updating = 1;
+		part->mcdi.updating = true;
 	}
 
 	while (offset < end) {
@@ -553,14 +553,14 @@ static int siena_mtd_sync(struct mtd_info *mtd)
 	int rc = 0;
 
 	if (part->mcdi.updating) {
-		part->mcdi.updating = 0;
+		part->mcdi.updating = false;
 		rc = efx_mcdi_nvram_update_finish(efx, part->mcdi.nvram_type);
 	}
 
 	return rc;
 }
 
-static struct efx_mtd_ops siena_mtd_ops = {
+static const struct efx_mtd_ops siena_mtd_ops = {
 	.read	= siena_mtd_read,
 	.erase	= siena_mtd_erase,
 	.write	= siena_mtd_write,
@@ -572,7 +572,7 @@ struct siena_nvram_type_info {
 	const char *name;
 };
 
-static struct siena_nvram_type_info siena_nvram_types[] = {
+static const struct siena_nvram_type_info siena_nvram_types[] = {
 	[MC_CMD_NVRAM_TYPE_DISABLED_CALLISTO]	= { 0, "sfc_dummy_phy" },
 	[MC_CMD_NVRAM_TYPE_MC_FW]		= { 0, "sfc_mcfw" },
 	[MC_CMD_NVRAM_TYPE_MC_FW_BACKUP]	= { 0, "sfc_mcfw_backup" },
@@ -593,7 +593,7 @@ static int siena_mtd_probe_partition(struct efx_nic *efx,
 				     unsigned int type)
 {
 	struct efx_mtd_partition *part = &efx_mtd->part[part_id];
-	struct siena_nvram_type_info *info;
+	const struct siena_nvram_type_info *info;
 	size_t size, erase_size;
 	bool protected;
 	int rc;
@@ -627,11 +627,10 @@ static int siena_mtd_get_fw_subtypes(struct efx_nic *efx,
 				     struct efx_mtd *efx_mtd)
 {
 	struct efx_mtd_partition *part;
-	uint16_t fw_subtype_list[MC_CMD_GET_BOARD_CFG_OUT_FW_SUBTYPE_LIST_LEN /
-				 sizeof(uint16_t)];
+	uint16_t fw_subtype_list[MC_CMD_GET_BOARD_CFG_OUT_FW_SUBTYPE_LIST_MINNUM];
 	int rc;
 
-	rc = efx_mcdi_get_board_cfg(efx, NULL, fw_subtype_list);
+	rc = efx_mcdi_get_board_cfg(efx, NULL, fw_subtype_list, NULL);
 	if (rc)
 		return rc;
 

@@ -1,3 +1,5 @@
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/device.h>
 #include <linux/pci.h>
 
@@ -20,9 +22,11 @@ static ssize_t ath5k_attr_store_##name(struct device *dev,		\
 {									\
 	struct ieee80211_hw *hw = dev_get_drvdata(dev);			\
 	struct ath5k_hw *ah = hw->priv;				\
-	int val;							\
+	int val, ret;							\
 									\
-	val = (int)simple_strtoul(buf, NULL, 10);			\
+	ret = kstrtoint(buf, 10, &val);					\
+	if (ret < 0)							\
+		return ret;						\
 	set(ah, val);						\
 	return count;							\
 }									\

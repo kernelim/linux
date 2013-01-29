@@ -263,12 +263,14 @@ static int free_dind_blocks(handle_t *handle,
 		if (tmp_idata[i]) {
 			extend_credit_for_blkdel(handle, inode);
 			ext4_free_blocks(handle, inode,
-					le32_to_cpu(tmp_idata[i]), 1, 1);
+					le32_to_cpu(tmp_idata[i]), 1,
+					EXT4_FREE_BLOCKS_METADATA);
 		}
 	}
 	put_bh(bh);
 	extend_credit_for_blkdel(handle, inode);
-	ext4_free_blocks(handle, inode, le32_to_cpu(i_data), 1, 1);
+	ext4_free_blocks(handle, inode, le32_to_cpu(i_data), 1,
+			 EXT4_FREE_BLOCKS_METADATA);
 	return 0;
 }
 
@@ -297,7 +299,8 @@ static int free_tind_blocks(handle_t *handle,
 	}
 	put_bh(bh);
 	extend_credit_for_blkdel(handle, inode);
-	ext4_free_blocks(handle, inode, le32_to_cpu(i_data), 1, 1);
+	ext4_free_blocks(handle, inode, le32_to_cpu(i_data), 1,
+			 EXT4_FREE_BLOCKS_METADATA);
 	return 0;
 }
 
@@ -309,7 +312,8 @@ static int free_ind_block(handle_t *handle, struct inode *inode, __le32 *i_data)
 	if (i_data[0]) {
 		extend_credit_for_blkdel(handle, inode);
 		ext4_free_blocks(handle, inode,
-				le32_to_cpu(i_data[0]), 1, 1);
+				le32_to_cpu(i_data[0]), 1,
+				EXT4_FREE_BLOCKS_METADATA);
 	}
 
 	/* ei->i_data[EXT4_DIND_BLOCK] */
@@ -403,7 +407,7 @@ static int free_ext_idx(handle_t *handle, struct inode *inode,
 	struct buffer_head *bh;
 	struct ext4_extent_header *eh;
 
-	block = idx_pblock(ix);
+	block = ext4_idx_pblock(ix);
 	bh = sb_bread(inode->i_sb, block);
 	if (!bh)
 		return -EIO;
@@ -419,7 +423,8 @@ static int free_ext_idx(handle_t *handle, struct inode *inode,
 	}
 	put_bh(bh);
 	extend_credit_for_blkdel(handle, inode);
-	ext4_free_blocks(handle, inode, block, 1, 1);
+	ext4_free_blocks(handle, inode, block, 1,
+			 EXT4_FREE_BLOCKS_METADATA);
 	return retval;
 }
 

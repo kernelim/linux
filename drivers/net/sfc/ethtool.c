@@ -1,7 +1,7 @@
 /****************************************************************************
  * Driver for Solarflare Solarstorm network controllers and boards
  * Copyright 2005-2006 Fen Systems Ltd.
- * Copyright 2006-2009 Solarflare Communications Inc.
+ * Copyright 2006-2010 Solarflare Communications Inc.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published
@@ -11,11 +11,11 @@
 #include <linux/netdevice.h>
 #include <linux/ethtool.h>
 #include <linux/rtnetlink.h>
-#include <linux/in.h>
 #include "net_driver.h"
 #include "workarounds.h"
 #include "selftest.h"
 #include "efx.h"
+#include "filter.h"
 #include "nic.h"
 
 struct ethtool_string {
@@ -27,7 +27,8 @@ struct efx_ethtool_stat {
 	enum {
 		EFX_ETHTOOL_STAT_SOURCE_mac_stats,
 		EFX_ETHTOOL_STAT_SOURCE_nic,
-		EFX_ETHTOOL_STAT_SOURCE_channel
+		EFX_ETHTOOL_STAT_SOURCE_channel,
+		EFX_ETHTOOL_STAT_SOURCE_tx_queue
 	} source;
 	unsigned offset;
 	u64(*get_stat) (void *field); /* Reader function */
@@ -66,11 +67,11 @@ static u64 efx_get_atomic_stat(void *field)
 }
 
 #define EFX_ETHTOOL_ULONG_MAC_STAT(field)			\
-	EFX_ETHTOOL_STAT(field, mac_stats, field, 		\
+	EFX_ETHTOOL_STAT(field, mac_stats, field,		\
 			  unsigned long, efx_get_ulong_stat)
 
 #define EFX_ETHTOOL_U64_MAC_STAT(field)				\
-	EFX_ETHTOOL_STAT(field, mac_stats, field, 		\
+	EFX_ETHTOOL_STAT(field, mac_stats, field,		\
 			  u64, efx_get_u64_stat)
 
 #define EFX_ETHTOOL_UINT_NIC_STAT(name)				\
@@ -85,7 +86,11 @@ static u64 efx_get_atomic_stat(void *field)
 	EFX_ETHTOOL_STAT(field, channel, n_##field,		\
 			 unsigned int, efx_get_uint_stat)
 
-static struct efx_ethtool_stat efx_ethtool_stats[] = {
+#define EFX_ETHTOOL_UINT_TXQ_STAT(field)			\
+	EFX_ETHTOOL_STAT(tx_##field, tx_queue, field,		\
+			 unsigned int, efx_get_uint_stat)
+
+static const struct efx_ethtool_stat efx_ethtool_stats[] = {
 	EFX_ETHTOOL_U64_MAC_STAT(tx_bytes),
 	EFX_ETHTOOL_U64_MAC_STAT(tx_good_bytes),
 	EFX_ETHTOOL_U64_MAC_STAT(tx_bad_bytes),
@@ -115,6 +120,10 @@ static struct efx_ethtool_stat efx_ethtool_stats[] = {
 	EFX_ETHTOOL_ULONG_MAC_STAT(tx_non_tcpudp),
 	EFX_ETHTOOL_ULONG_MAC_STAT(tx_mac_src_error),
 	EFX_ETHTOOL_ULONG_MAC_STAT(tx_ip_src_error),
+	EFX_ETHTOOL_UINT_TXQ_STAT(tso_bursts),
+	EFX_ETHTOOL_UINT_TXQ_STAT(tso_long_headers),
+	EFX_ETHTOOL_UINT_TXQ_STAT(tso_packets),
+	EFX_ETHTOOL_UINT_TXQ_STAT(pushes),
 	EFX_ETHTOOL_U64_MAC_STAT(rx_bytes),
 	EFX_ETHTOOL_U64_MAC_STAT(rx_good_bytes),
 	EFX_ETHTOOL_U64_MAC_STAT(rx_bad_bytes),
@@ -201,7 +210,7 @@ static int efx_ethtool_get_settings(struct net_device *net_dev,
 	ecmd->supported |= SUPPORTED_Pause | SUPPORTED_Asym_Pause;
 
 	if (LOOPBACK_INTERNAL(efx)) {
-		ecmd->speed = link_state->speed;
+		ethtool_cmd_speed_set(ecmd, link_state->speed);
 		ecmd->duplex = link_state->fd ? DUPLEX_FULL : DUPLEX_HALF;
 	}
 
@@ -216,7 +225,8 @@ static int efx_ethtool_set_settings(struct net_device *net_dev,
 	int rc;
 
 	/* GMAC does not support 1000Mbps HD */
-	if (ecmd->speed == SPEED_1000 && ecmd->duplex != DUPLEX_FULL) {
+	if ((ethtool_cmd_speed(ecmd) == SPEED_1000) &&
+	    (ecmd->duplex != DUPLEX_FULL)) {
 		netif_dbg(efx, drv, efx->net_dev,
 			  "rejecting unsupported 1000Mbps HD setting\n");
 		return -EINVAL;
@@ -236,8 +246,8 @@ static void efx_ethtool_get_drvinfo(struct net_device *net_dev,
 	strlcpy(info->driver, KBUILD_MODNAME, sizeof(info->driver));
 	strlcpy(info->version, EFX_DRIVER_VERSION, sizeof(info->version));
 	if (efx_nic_rev(efx) >= EFX_REV_SIENA_A0)
-		siena_print_fwver(efx, info->fw_version,
-				  sizeof(info->fw_version));
+		efx_mcdi_print_fwver(efx, info->fw_version,
+				     sizeof(info->fw_version));
 	strlcpy(info->bus_info, pci_name(efx->pci_dev), sizeof(info->bus_info));
 }
 
@@ -385,10 +395,6 @@ static int efx_ethtool_fill_self_tests(struct efx_nic *efx,
 			      &tests->eventq_int[channel->channel],
 			      EFX_CHANNEL_NAME(channel),
 			      "eventq.int", NULL);
-		efx_fill_test(n++, strings, data,
-			      &tests->eventq_poll[channel->channel],
-			      EFX_CHANNEL_NAME(channel),
-			      "eventq.poll", NULL);
 	}
 
 	efx_fill_test(n++, strings, data, &tests->registers,
@@ -467,14 +473,17 @@ static void efx_ethtool_get_stats(struct net_device *net_dev,
 {
 	struct efx_nic *efx = netdev_priv(net_dev);
 	struct efx_mac_stats *mac_stats = &efx->mac_stats;
-	struct efx_ethtool_stat *stat;
+	const struct efx_ethtool_stat *stat;
 	struct efx_channel *channel;
+	struct efx_tx_queue *tx_queue;
 	int i;
 
 	EFX_BUG_ON_PARANOID(stats->n_stats != EFX_ETHTOOL_NUM_STATS);
 
+	spin_lock_bh(&efx->stats_lock);
+
 	/* Update MAC and NIC statistics */
-	dev_get_stats(net_dev);
+	efx->type->update_stats(efx);
 
 	/* Fill detailed statistics buffer */
 	for (i = 0; i < EFX_ETHTOOL_NUM_STATS; i++) {
@@ -493,8 +502,19 @@ static void efx_ethtool_get_stats(struct net_device *net_dev,
 				data[i] += stat->get_stat((void *)channel +
 							  stat->offset);
 			break;
+		case EFX_ETHTOOL_STAT_SOURCE_tx_queue:
+			data[i] = 0;
+			efx_for_each_channel(channel, efx) {
+				efx_for_each_channel_tx_queue(tx_queue, channel)
+					data[i] +=
+						stat->get_stat((void *)tx_queue
+							       + stat->offset);
+			}
+			break;
 		}
 	}
+
+	spin_unlock_bh(&efx->stats_lock);
 }
 
 static int efx_ethtool_set_tso(struct net_device *net_dev, u32 enable)
@@ -548,14 +568,8 @@ static u32 efx_ethtool_get_rx_csum(struct net_device *net_dev)
 
 static int efx_ethtool_set_flags(struct net_device *net_dev, u32 data)
 {
-#if 0 /* not in RHEL */
 	struct efx_nic *efx = netdev_priv(net_dev);
-	u32 supported = (efx->type->offload_features &
-			 (ETH_FLAG_RXHASH | ETH_FLAG_NTUPLE));
 	int rc;
-
-	if (data & ~supported)
-		return -EINVAL;
 
 	rc = ethtool_op_set_flags(net_dev, data);
 	if (rc)
@@ -565,9 +579,6 @@ static int efx_ethtool_set_flags(struct net_device *net_dev, u32 data)
 		efx_filter_clear_rx(efx, EFX_FILTER_PRI_MANUAL);
 
 	return 0;
-#else
-	return -EINVAL;
-#endif
 }
 
 static void efx_ethtool_self_test(struct net_device *net_dev,
@@ -629,72 +640,89 @@ static int efx_ethtool_nway_reset(struct net_device *net_dev)
 	return mdio45_nway_restart(&efx->mdio);
 }
 
+/*
+ * Each channel has a single IRQ and moderation timer, started by any
+ * completion (or other event).  Unless the module parameter
+ * separate_tx_channels is set, IRQs and moderation are therefore
+ * shared between RX and TX completions.  In this case, when RX IRQ
+ * moderation is explicitly changed then TX IRQ moderation is
+ * automatically changed too, but otherwise we fail if the two values
+ * are requested to be different.
+ *
+ * The hardware does not support a limit on the number of completions
+ * before an IRQ, so we do not use the max_frames fields.  We should
+ * report and require that max_frames == (usecs != 0), but this would
+ * invalidate existing user documentation.
+ *
+ * The hardware does not have distinct settings for interrupt
+ * moderation while the previous IRQ is being handled, so we should
+ * not use the 'irq' fields.  However, an earlier developer
+ * misunderstood the meaning of the 'irq' fields and the driver did
+ * not support the standard fields.  To avoid invalidating existing
+ * user documentation, we report and accept changes through either the
+ * standard or 'irq' fields.  If both are changed at the same time, we
+ * prefer the standard field.
+ *
+ * We implement adaptive IRQ moderation, but use a different algorithm
+ * from that assumed in the definition of struct ethtool_coalesce.
+ * Therefore we do not use any of the adaptive moderation parameters
+ * in it.
+ */
+
 static int efx_ethtool_get_coalesce(struct net_device *net_dev,
 				    struct ethtool_coalesce *coalesce)
 {
 	struct efx_nic *efx = netdev_priv(net_dev);
-	struct efx_channel *channel;
+	unsigned int tx_usecs, rx_usecs;
+	bool rx_adaptive;
 
-	memset(coalesce, 0, sizeof(*coalesce));
+	efx_get_irq_moderation(efx, &tx_usecs, &rx_usecs, &rx_adaptive);
 
-	/* Find lowest IRQ moderation across all used TX queues */
-	coalesce->tx_coalesce_usecs_irq = ~((u32) 0);
-	efx_for_each_channel(channel, efx) {
-		if (!efx_channel_get_tx_queue(channel, 0))
-			continue;
-		if (channel->irq_moderation < coalesce->tx_coalesce_usecs_irq) {
-			if (channel->channel < efx->n_rx_channels)
-				coalesce->tx_coalesce_usecs_irq =
-					channel->irq_moderation;
-			else
-				coalesce->tx_coalesce_usecs_irq = 0;
-		}
-	}
-
-	coalesce->use_adaptive_rx_coalesce = efx->irq_rx_adaptive;
-	coalesce->rx_coalesce_usecs_irq = efx->irq_rx_moderation;
-
-	coalesce->tx_coalesce_usecs_irq *= EFX_IRQ_MOD_RESOLUTION;
-	coalesce->rx_coalesce_usecs_irq *= EFX_IRQ_MOD_RESOLUTION;
+	coalesce->tx_coalesce_usecs = tx_usecs;
+	coalesce->tx_coalesce_usecs_irq = tx_usecs;
+	coalesce->rx_coalesce_usecs = rx_usecs;
+	coalesce->rx_coalesce_usecs_irq = rx_usecs;
+	coalesce->use_adaptive_rx_coalesce = rx_adaptive;
 
 	return 0;
 }
 
-/* Set coalescing parameters
- * The difficulties occur for shared channels
- */
 static int efx_ethtool_set_coalesce(struct net_device *net_dev,
 				    struct ethtool_coalesce *coalesce)
 {
 	struct efx_nic *efx = netdev_priv(net_dev);
 	struct efx_channel *channel;
-	unsigned tx_usecs, rx_usecs, adaptive;
+	unsigned int tx_usecs, rx_usecs;
+	bool adaptive, rx_may_override_tx;
+	int rc;
 
 	if (coalesce->use_adaptive_tx_coalesce)
-		return -EOPNOTSUPP;
+		return -EINVAL;
 
-	if (coalesce->rx_coalesce_usecs || coalesce->tx_coalesce_usecs) {
-		netif_err(efx, drv, efx->net_dev, "invalid coalescing setting. "
-			  "Only rx/tx_coalesce_usecs_irq are supported\n");
-		return -EOPNOTSUPP;
-	}
+	efx_get_irq_moderation(efx, &tx_usecs, &rx_usecs, &adaptive);
 
-	rx_usecs = coalesce->rx_coalesce_usecs_irq;
-	tx_usecs = coalesce->tx_coalesce_usecs_irq;
+	if (coalesce->rx_coalesce_usecs != rx_usecs)
+		rx_usecs = coalesce->rx_coalesce_usecs;
+	else
+		rx_usecs = coalesce->rx_coalesce_usecs_irq;
+
 	adaptive = coalesce->use_adaptive_rx_coalesce;
 
-	/* If the channel is shared only allow RX parameters to be set */
-	efx_for_each_channel(channel, efx) {
-		if (efx_channel_get_rx_queue(channel) &&
-		    efx_channel_get_tx_queue(channel, 0) &&
-		    tx_usecs) {
-			netif_err(efx, drv, efx->net_dev, "Channel is shared. "
-				  "Only RX coalescing may be set\n");
-			return -EOPNOTSUPP;
-		}
-	}
+	/* If channels are shared, TX IRQ moderation can be quietly
+	 * overridden unless it is changed from its old value.
+	 */
+	rx_may_override_tx = (coalesce->tx_coalesce_usecs == tx_usecs &&
+			      coalesce->tx_coalesce_usecs_irq == tx_usecs);
+	if (coalesce->tx_coalesce_usecs != tx_usecs)
+		tx_usecs = coalesce->tx_coalesce_usecs;
+	else
+		tx_usecs = coalesce->tx_coalesce_usecs_irq;
 
-	efx_init_irq_moderation(efx, tx_usecs, rx_usecs, adaptive);
+	rc = efx_init_irq_moderation(efx, tx_usecs, rx_usecs, adaptive,
+				     rx_may_override_tx);
+	if (rc != 0)
+		return rc;
+
 	efx_for_each_channel(channel, efx)
 		efx->type->push_irq_moderation(channel);
 
@@ -708,12 +736,8 @@ static void efx_ethtool_get_ringparam(struct net_device *net_dev,
 
 	ring->rx_max_pending = EFX_MAX_DMAQ_SIZE;
 	ring->tx_max_pending = EFX_MAX_DMAQ_SIZE;
-	ring->rx_mini_max_pending = 0;
-	ring->rx_jumbo_max_pending = 0;
 	ring->rx_pending = efx->rxq_entries;
 	ring->tx_pending = efx->txq_entries;
-	ring->rx_mini_pending = 0;
-	ring->rx_jumbo_pending = 0;
 }
 
 static int efx_ethtool_set_ringparam(struct net_device *net_dev,
@@ -747,7 +771,7 @@ static int efx_ethtool_set_pauseparam(struct net_device *net_dev,
 				      struct ethtool_pauseparam *pause)
 {
 	struct efx_nic *efx = netdev_priv(net_dev);
-	enum efx_fc_type wanted_fc, old_fc;
+	u8 wanted_fc, old_fc;
 	u32 old_adv;
 	bool reset;
 	int rc = 0;
@@ -783,7 +807,7 @@ static int efx_ethtool_set_pauseparam(struct net_device *net_dev,
 			/* Recover by resetting the EM block */
 			falcon_stop_nic_stats(efx);
 			falcon_drain_tx_fifo(efx);
-			efx->mac_op->reconfigure(efx);
+			falcon_reconfigure_xmac(efx);
 			falcon_start_nic_stats(efx);
 		} else {
 			/* Schedule a reset to recover */
@@ -808,7 +832,7 @@ static int efx_ethtool_set_pauseparam(struct net_device *net_dev,
 	/* Reconfigure the MAC. The PHY *may* generate a link state change event
 	 * if the user just changed the advertised capabilities, but there's no
 	 * harm doing this twice */
-	efx->mac_op->reconfigure(efx);
+	efx->type->reconfigure_mac(efx);
 
 out:
 	mutex_unlock(&efx->mac_lock);
@@ -871,11 +895,72 @@ int efx_ethtool_reset(struct net_device *net_dev, u32 *flags)
 	return efx_reset(efx, method);
 }
 
-#if 0 /* not in RHEL6 */
+/* MAC address mask including only MC flag */
+static const u8 mac_addr_mc_mask[ETH_ALEN] = { 0x01, 0, 0, 0, 0, 0 };
+
+static int efx_ethtool_get_class_rule(struct efx_nic *efx,
+				      struct ethtool_rx_flow_spec *rule)
+{
+	struct ethtool_tcpip4_spec *ip_entry = &rule->h_u.tcp_ip4_spec;
+	struct ethtool_tcpip4_spec *ip_mask = &rule->m_u.tcp_ip4_spec;
+	struct ethhdr *mac_entry = &rule->h_u.ether_spec;
+	struct ethhdr *mac_mask = &rule->m_u.ether_spec;
+	struct efx_filter_spec spec;
+	u16 vid;
+	u8 proto;
+	int rc;
+
+	rc = efx_filter_get_filter_safe(efx, EFX_FILTER_PRI_MANUAL,
+					rule->location, &spec);
+	if (rc)
+		return rc;
+
+	if (spec.dmaq_id == 0xfff)
+		rule->ring_cookie = RX_CLS_FLOW_DISC;
+	else
+		rule->ring_cookie = spec.dmaq_id;
+
+	if (spec.type == EFX_FILTER_MC_DEF || spec.type == EFX_FILTER_UC_DEF) {
+		rule->flow_type = ETHER_FLOW;
+		memcpy(mac_mask->h_dest, mac_addr_mc_mask, ETH_ALEN);
+		if (spec.type == EFX_FILTER_MC_DEF)
+			memcpy(mac_entry->h_dest, mac_addr_mc_mask, ETH_ALEN);
+		return 0;
+	}
+
+	rc = efx_filter_get_eth_local(&spec, &vid, mac_entry->h_dest);
+	if (rc == 0) {
+		rule->flow_type = ETHER_FLOW;
+		memset(mac_mask->h_dest, ~0, ETH_ALEN);
+		if (vid != EFX_FILTER_VID_UNSPEC) {
+			rule->flow_type |= FLOW_EXT;
+			rule->h_ext.vlan_tci = htons(vid);
+			rule->m_ext.vlan_tci = htons(0xfff);
+		}
+		return 0;
+	}
+
+	rc = efx_filter_get_ipv4_local(&spec, &proto,
+				       &ip_entry->ip4dst, &ip_entry->pdst);
+	if (rc != 0) {
+		rc = efx_filter_get_ipv4_full(
+			&spec, &proto, &ip_entry->ip4src, &ip_entry->psrc,
+			&ip_entry->ip4dst, &ip_entry->pdst);
+		EFX_WARN_ON_PARANOID(rc);
+		ip_mask->ip4src = ~0;
+		ip_mask->psrc = ~0;
+	}
+	rule->flow_type = (proto == IPPROTO_TCP) ? TCP_V4_FLOW : UDP_V4_FLOW;
+	ip_mask->ip4dst = ~0;
+	ip_mask->pdst = ~0;
+	return rc;
+}
+
 static int
 efx_ethtool_get_rxnfc(struct net_device *net_dev,
-		      struct ethtool_rxnfc *info, void *rules __always_unused)
+		      struct ethtool_rxnfc *info, void *varg)
 {
+	u32 *rule_locs = (u32 *)varg;
 	struct efx_nic *efx = netdev_priv(net_dev);
 
 	switch (info->cmd) {
@@ -916,42 +1001,80 @@ efx_ethtool_get_rxnfc(struct net_device *net_dev,
 		return 0;
 	}
 
+	case ETHTOOL_GRXCLSRLCNT:
+		info->data = efx_filter_get_rx_id_limit(efx);
+		if (info->data == 0)
+			return -EOPNOTSUPP;
+		info->data |= RX_CLS_LOC_SPECIAL;
+		info->rule_cnt =
+			efx_filter_count_rx_used(efx, EFX_FILTER_PRI_MANUAL);
+		return 0;
+
+	case ETHTOOL_GRXCLSRULE:
+		if (efx_filter_get_rx_id_limit(efx) == 0)
+			return -EOPNOTSUPP;
+		return efx_ethtool_get_class_rule(efx, &info->fs);
+
+	case ETHTOOL_GRXCLSRLALL: {
+		s32 rc;
+		info->data = efx_filter_get_rx_id_limit(efx);
+		if (info->data == 0)
+			return -EOPNOTSUPP;
+		rc = efx_filter_get_rx_ids(efx, EFX_FILTER_PRI_MANUAL,
+					   rule_locs, info->rule_cnt);
+		if (rc < 0)
+			return rc;
+		info->rule_cnt = rc;
+		return 0;
+	}
+
 	default:
 		return -EOPNOTSUPP;
 	}
 }
 
-static int efx_ethtool_set_rx_ntuple(struct net_device *net_dev,
-				     struct ethtool_rx_ntuple *ntuple)
+static int efx_ethtool_set_class_rule(struct efx_nic *efx,
+				     struct ethtool_rx_flow_spec *rule)
 {
-	struct efx_nic *efx = netdev_priv(net_dev);
-	struct ethtool_tcpip4_spec *ip_entry = &ntuple->fs.h_u.tcp_ip4_spec;
-	struct ethtool_tcpip4_spec *ip_mask = &ntuple->fs.m_u.tcp_ip4_spec;
-	struct ethhdr *mac_entry = &ntuple->fs.h_u.ether_spec;
-	struct ethhdr *mac_mask = &ntuple->fs.m_u.ether_spec;
-	struct efx_filter_spec filter;
+	struct ethtool_tcpip4_spec *ip_entry = &rule->h_u.tcp_ip4_spec;
+	struct ethtool_tcpip4_spec *ip_mask = &rule->m_u.tcp_ip4_spec;
+	struct ethhdr *mac_entry = &rule->h_u.ether_spec;
+	struct ethhdr *mac_mask = &rule->m_u.ether_spec;
+	struct efx_filter_spec spec;
 	int rc;
-
-	/* Range-check action */
-	if (ntuple->fs.action < ETHTOOL_RXNTUPLE_ACTION_CLEAR ||
-	    ntuple->fs.action >= (s32)efx->n_rx_channels)
+	
+	/* Check that user wants us to choose the location */
+	if (rule->location != RX_CLS_LOC_ANY &&
+	    rule->location != RX_CLS_LOC_FIRST &&
+	    rule->location != RX_CLS_LOC_LAST)
 		return -EINVAL;
 
-	if (~ntuple->fs.data_mask)
+	/* Range-check ring_cookie */
+	if (rule->ring_cookie >= efx->n_rx_channels &&
+	    rule->ring_cookie != RX_CLS_FLOW_DISC)
 		return -EINVAL;
 
-	efx_filter_init_rx(&filter, EFX_FILTER_PRI_MANUAL, 0,
-			   (ntuple->fs.action == ETHTOOL_RXNTUPLE_ACTION_DROP) ?
-			   0xfff : ntuple->fs.action);
+	/* Check for unsupported extensions */
+	if ((rule->flow_type & FLOW_EXT) &&
+	    (rule->m_ext.vlan_etype | rule->m_ext.data[0] |
+	     rule->m_ext.data[1]))
+		return -EINVAL;
 
-	switch (ntuple->fs.flow_type) {
+	efx_filter_init_rx(&spec, EFX_FILTER_PRI_MANUAL,
+			   (rule->location == RX_CLS_LOC_FIRST) ?
+			   EFX_FILTER_FLAG_RX_OVERRIDE_IP : 0,
+			   (rule->ring_cookie == RX_CLS_FLOW_DISC) ?
+			   0xfff : rule->ring_cookie);
+	
+	switch (rule->flow_type) {
 	case TCP_V4_FLOW:
 	case UDP_V4_FLOW: {
-		u8 proto = (ntuple->fs.flow_type == TCP_V4_FLOW ?
+		u8 proto = (rule->flow_type == TCP_V4_FLOW ?
 			    IPPROTO_TCP : IPPROTO_UDP);
-
+			    
 		/* Must match all of destination, */
-		if (ip_mask->ip4dst | ip_mask->pdst)
+		if ((__force u32)~ip_mask->ip4dst |
+		    (__force u16)~ip_mask->pdst)
 			return -EINVAL;
 		/* all or none of source, */
 		if ((ip_mask->ip4src | ip_mask->psrc) &&
@@ -959,94 +1082,119 @@ static int efx_ethtool_set_rx_ntuple(struct net_device *net_dev,
 		     (__force u16)~ip_mask->psrc))
 			return -EINVAL;
 		/* and nothing else */
-		if ((u8)~ip_mask->tos | (u16)~ntuple->fs.vlan_tag_mask)
+		if (ip_mask->tos | rule->m_ext.vlan_tci)
 			return -EINVAL;
-
-		if (!ip_mask->ip4src)
-			rc = efx_filter_set_ipv4_full(&filter, proto,
+		
+		if (ip_mask->ip4src)
+			rc = efx_filter_set_ipv4_full(&spec, proto,
 						      ip_entry->ip4dst,
 						      ip_entry->pdst,
 						      ip_entry->ip4src,
 						      ip_entry->psrc);
 		else
-			rc = efx_filter_set_ipv4_local(&filter, proto,
+			rc = efx_filter_set_ipv4_local(&spec, proto,
 						       ip_entry->ip4dst,
 						       ip_entry->pdst);
 		if (rc)
 			return rc;
 		break;
 	}
+	
+	case ETHER_FLOW | FLOW_EXT:
+	case ETHER_FLOW: {
+		u16 vlan_tag_mask = (rule->flow_type & FLOW_EXT ?
+				     ntohs(rule->m_ext.vlan_tci) : 0);
 
-	case ETHER_FLOW:
-		/* Must match all of destination, */
-		if (!is_zero_ether_addr(mac_mask->h_dest))
-			return -EINVAL;
-		/* all or none of VID, */
-		if (ntuple->fs.vlan_tag_mask != 0xf000 &&
-		    ntuple->fs.vlan_tag_mask != 0xffff)
-			return -EINVAL;
-		/* and nothing else */
-		if (!is_broadcast_ether_addr(mac_mask->h_source) ||
-		    mac_mask->h_proto != htons(0xffff))
+		/* Must not match on source address or Ethertype */
+		if (!is_zero_ether_addr(mac_mask->h_source) ||
+		    mac_mask->h_proto)
 			return -EINVAL;
 
-		rc = efx_filter_set_eth_local(
-			&filter,
-			(ntuple->fs.vlan_tag_mask == 0xf000) ?
-			ntuple->fs.vlan_tag : EFX_FILTER_VID_UNSPEC,
-			mac_entry->h_dest);
+		/* Is it a default UC or MC filter? */
+		if (!compare_ether_addr(mac_mask->h_dest, mac_addr_mc_mask) &&
+		    vlan_tag_mask == 0) {
+			if (is_multicast_ether_addr(mac_entry->h_dest))
+				rc = efx_filter_set_mc_def(&spec);
+			else
+				rc = efx_filter_set_uc_def(&spec);
+		}
+		/* Otherwise, it must match all of destination and all
+		 * or none of VID.
+		 */
+		else if (is_broadcast_ether_addr(mac_mask->h_dest) &&
+			 (vlan_tag_mask == 0xfff || vlan_tag_mask == 0)) {
+			rc = efx_filter_set_eth_local(
+				&spec,
+				vlan_tag_mask ?
+				ntohs(rule->h_ext.vlan_tci) : EFX_FILTER_VID_UNSPEC,
+				mac_entry->h_dest);
+		} else {
+			rc = -EINVAL;
+		}
 		if (rc)
 			return rc;
 		break;
+	}
 
 	default:
 		return -EINVAL;
 	}
 
-	if (ntuple->fs.action == ETHTOOL_RXNTUPLE_ACTION_CLEAR)
-		return efx_filter_remove_filter(efx, &filter);
-	else
-		return efx_filter_insert_filter(efx, &filter, true);
+	rc = efx_filter_insert_filter(efx, &spec, true);
+	if (rc < 0)
+		return rc;
+
+	rule->location = rc;
+	return 0;
 }
 
-static int efx_ethtool_get_rxfh_indir(struct net_device *net_dev,
-				      struct ethtool_rxfh_indir *indir)
+static int efx_ethtool_set_rxnfc(struct net_device *net_dev,
+				 struct ethtool_rxnfc *info)
 {
 	struct efx_nic *efx = netdev_priv(net_dev);
-	size_t copy_size =
-		min_t(size_t, indir->size, ARRAY_SIZE(efx->rx_indir_table));
 
-	if (efx_nic_rev(efx) < EFX_REV_FALCON_B0)
+	if (efx_filter_get_rx_id_limit(efx) == 0)
 		return -EOPNOTSUPP;
 
-	indir->size = ARRAY_SIZE(efx->rx_indir_table);
-	memcpy(indir->ring_index, efx->rx_indir_table,
-	       copy_size * sizeof(indir->ring_index[0]));
+	switch (info->cmd) {
+	case ETHTOOL_SRXCLSRLINS:
+		return efx_ethtool_set_class_rule(efx, &info->fs);
+
+	case ETHTOOL_SRXCLSRLDEL:
+		return efx_filter_remove_id_safe(efx, EFX_FILTER_PRI_MANUAL,
+						 info->fs.location);
+
+	default:
+		return -EOPNOTSUPP;
+	}
+}
+
+static u32 efx_ethtool_get_rxfh_indir_size(struct net_device *net_dev)
+{
+	struct efx_nic *efx = netdev_priv(net_dev);
+	
+	return ((efx_nic_rev(efx) < EFX_REV_FALCON_B0 ||
+		efx->n_rx_channels == 1) ?
+	               0 : ARRAY_SIZE(efx->rx_indir_table));
+}
+
+static int efx_ethtool_get_rxfh_indir(struct net_device *net_dev, u32 *indir)
+{
+	struct efx_nic *efx = netdev_priv(net_dev);
+	
+	memcpy(indir, efx->rx_indir_table, sizeof(efx->rx_indir_table));
 	return 0;
 }
 
 static int efx_ethtool_set_rxfh_indir(struct net_device *net_dev,
-				      const struct ethtool_rxfh_indir *indir)
+				      const u32 *indir)
 {
 	struct efx_nic *efx = netdev_priv(net_dev);
-	size_t i;
-
-	if (efx_nic_rev(efx) < EFX_REV_FALCON_B0)
-		return -EOPNOTSUPP;
-
-	/* Validate size and indices */
-	if (indir->size != ARRAY_SIZE(efx->rx_indir_table))
-		return -EINVAL;
-	for (i = 0; i < ARRAY_SIZE(efx->rx_indir_table); i++)
-		if (indir->ring_index[i] >= efx->n_rx_channels)
-			return -EINVAL;
-
-	memcpy(efx->rx_indir_table, indir->ring_index,
-	       sizeof(efx->rx_indir_table));
+	
+	memcpy(efx->rx_indir_table, indir, sizeof(efx->rx_indir_table));
 	efx_nic_push_rx_indir_table(efx);
 	return 0;
 }
-#endif
 
 const struct ethtool_ops efx_ethtool_ops = {
 	.get_settings		= efx_ethtool_get_settings,
@@ -1083,4 +1231,16 @@ const struct ethtool_ops efx_ethtool_ops = {
 	.get_ethtool_stats	= efx_ethtool_get_stats,
 	.get_wol                = efx_ethtool_get_wol,
 	.set_wol                = efx_ethtool_set_wol,
+	.get_rxnfc              = efx_ethtool_get_rxnfc,
+	.set_rxnfc              = efx_ethtool_set_rxnfc,
 };
+
+const struct ethtool_ops_ext efx_ethtool_ops_ext = {
+	.size			= sizeof(struct ethtool_ops_ext),
+	
+	.get_rxfh_indir_size	= efx_ethtool_get_rxfh_indir_size,
+	.get_rxfh_indir		= efx_ethtool_get_rxfh_indir,
+	.set_rxfh_indir		= efx_ethtool_set_rxfh_indir,
+};
+
+

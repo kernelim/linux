@@ -240,10 +240,6 @@ void transport_subsystem_check_init(void)
 	if (ret != 0)
 		pr_err("Unable to load target_core_pscsi\n");
 
-	ret = request_module("target_core_stgt");
-	if (ret != 0)
-		pr_err("Unable to load target_core_stgt\n");
-
 	sub_api_initialized = 1;
 	return;
 }
@@ -2014,6 +2010,7 @@ static inline int transport_execute_task_attr(struct se_cmd *cmd)
 static int transport_execute_tasks(struct se_cmd *cmd)
 {
 	int add_tasks;
+	struct se_device *se_dev = cmd->se_dev;
 
 	if (se_dev_check_online(cmd->se_dev) != 0) {
 		cmd->scsi_sense_reason = TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
@@ -2046,7 +2043,7 @@ static int transport_execute_tasks(struct se_cmd *cmd)
 	 * storage object.
 	 */
 execute_tasks:
-	__transport_execute_tasks(cmd->se_dev);
+	__transport_execute_tasks(se_dev);
 	return 0;
 }
 

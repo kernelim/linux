@@ -33,8 +33,6 @@
 #include "dir.h"
 #include "trace_gfs2.h"
 
-#define PULL 1
-
 /**
  * gfs2_struct2blk - compute stuff
  * @sdp: the filesystem
@@ -340,7 +338,7 @@ void gfs2_log_release(struct gfs2_sbd *sdp, unsigned int blks)
 	up_read(&sdp->sd_log_flush_lock);
 }
 
-static u64 log_bmap(struct gfs2_sbd *sdp, unsigned int lbn)
+u64 gfs2_log_bmap(struct gfs2_sbd *sdp, unsigned int lbn)
 {
 	struct gfs2_journal_extent *je;
 
@@ -458,99 +456,6 @@ void gfs2_log_incr_head(struct gfs2_sbd *sdp)
 	}
 }
 
-/**
- * gfs2_log_write_endio - End of I/O for a log buffer
- * @bh: The buffer head
- * @uptodate: I/O Status
- *
- */
-
-static void gfs2_log_write_endio(struct buffer_head *bh, int uptodate)
-{
-	struct gfs2_sbd *sdp = bh->b_private;
-	bh->b_private = NULL;
-
-	end_buffer_write_sync(bh, uptodate);
-	if (atomic_dec_and_test(&sdp->sd_log_in_flight))
-		wake_up(&sdp->sd_log_flush_wait);
-}
-
-/**
- * gfs2_log_get_buf - Get and initialize a buffer to use for log control data
- * @sdp: The GFS2 superblock
- *
- * Returns: the buffer_head
- */
-
-struct buffer_head *gfs2_log_get_buf(struct gfs2_sbd *sdp)
-{
-	u64 blkno = log_bmap(sdp, sdp->sd_log_flush_head);
-	struct buffer_head *bh;
-
-	bh = sb_getblk(sdp->sd_vfs, blkno);
-	lock_buffer(bh);
-	memset(bh->b_data, 0, bh->b_size);
-	set_buffer_uptodate(bh);
-	clear_buffer_dirty(bh);
-	gfs2_log_incr_head(sdp);
-	atomic_inc(&sdp->sd_log_in_flight);
-	bh->b_private = sdp;
-	bh->b_end_io = gfs2_log_write_endio;
-
-	return bh;
-}
-
-/**
- * gfs2_fake_write_endio - 
- * @bh: The buffer head
- * @uptodate: The I/O Status
- *
- */
-
-static void gfs2_fake_write_endio(struct buffer_head *bh, int uptodate)
-{
-	struct buffer_head *real_bh = bh->b_private;
-	struct gfs2_bufdata *bd = real_bh->b_private;
-	struct gfs2_sbd *sdp = bd->bd_gl->gl_sbd;
-
-	end_buffer_write_sync(bh, uptodate);
-	mempool_free(bh, gfs2_bh_pool);
-	unlock_buffer(real_bh);
-	brelse(real_bh);
-	if (atomic_dec_and_test(&sdp->sd_log_in_flight))
-		wake_up(&sdp->sd_log_flush_wait);
-}
-
-/**
- * gfs2_log_fake_buf - Build a fake buffer head to write metadata buffer to log
- * @sdp: the filesystem
- * @data: the data the buffer_head should point to
- *
- * Returns: the log buffer descriptor
- */
-
-struct buffer_head *gfs2_log_fake_buf(struct gfs2_sbd *sdp,
-				      struct buffer_head *real)
-{
-	u64 blkno = log_bmap(sdp, sdp->sd_log_flush_head);
-	struct buffer_head *bh;
-
-	bh = mempool_alloc(gfs2_bh_pool, GFP_NOFS);
-	atomic_set(&bh->b_count, 1);
-	bh->b_state = (1 << BH_Mapped) | (1 << BH_Uptodate) | (1 << BH_Lock);
-	set_bh_page(bh, real->b_page, bh_offset(real));
-	bh->b_blocknr = blkno;
-	bh->b_size = sdp->sd_sb.sb_bsize;
-	bh->b_bdev = sdp->sd_vfs->s_bdev;
-	bh->b_private = real;
-	bh->b_end_io = gfs2_fake_write_endio;
-
-	gfs2_log_incr_head(sdp);
-	atomic_inc(&sdp->sd_log_in_flight);
-
-	return bh;
-}
-
 static void log_pull_tail(struct gfs2_sbd *sdp, unsigned int new_tail)
 {
 	unsigned int dist = log_distance(sdp, new_tail, sdp->sd_log_tail);
@@ -573,9 +478,9 @@ static void log_pull_tail(struct gfs2_sbd *sdp, unsigned int new_tail)
  * Returns: the initialized log buffer descriptor
  */
 
-static void log_write_header(struct gfs2_sbd *sdp, u32 flags, int pull)
+static void log_write_header(struct gfs2_sbd *sdp, u32 flags)
 {
-	u64 blkno = log_bmap(sdp, sdp->sd_log_flush_head);
+	u64 blkno = gfs2_log_bmap(sdp, sdp->sd_log_flush_head);
 	struct buffer_head *bh;
 	struct gfs2_log_header *lh;
 	unsigned int tail;
@@ -618,8 +523,6 @@ static void log_write_header(struct gfs2_sbd *sdp, u32 flags, int pull)
 
 	if (sdp->sd_log_tail != tail)
 		log_pull_tail(sdp, tail);
-	else
-		gfs2_assert_withdraw(sdp, !pull);
 
 	sdp->sd_log_idle = (tail == sdp->sd_log_flush_head);
 	gfs2_log_incr_head(sdp);
@@ -639,15 +542,15 @@ static void log_flush_commit(struct gfs2_sbd *sdp)
 		finish_wait(&sdp->sd_log_flush_wait, &wait);
 	}
 
-	log_write_header(sdp, 0, 0);
+	log_write_header(sdp, 0);
 }
 
-int bd_cmp(void *priv, struct list_head *a, struct list_head *b)
+static int bd_cmp(void *priv, struct list_head *a, struct list_head *b)
 {
 	struct gfs2_bufdata *bda, *bdb;
 
-	bda = list_entry(a, struct gfs2_bufdata, bd_le.le_list);
-	bdb = list_entry(b, struct gfs2_bufdata, bd_le.le_list);
+	bda = list_entry(a, struct gfs2_bufdata, bd_list);
+	bdb = list_entry(b, struct gfs2_bufdata, bd_list);
 
 	if (bda->bd_bh->b_blocknr < bdb->bd_bh->b_blocknr)
 		return -1;
@@ -665,8 +568,8 @@ static void gfs2_ordered_write(struct gfs2_sbd *sdp)
 	gfs2_log_lock(sdp);
 	list_sort(NULL, &sdp->sd_log_le_ordered, &bd_cmp);
 	while (!list_empty(&sdp->sd_log_le_ordered)) {
-		bd = list_entry(sdp->sd_log_le_ordered.next, struct gfs2_bufdata, bd_le.le_list);
-		list_move(&bd->bd_le.le_list, &written);
+		bd = list_entry(sdp->sd_log_le_ordered.next, struct gfs2_bufdata, bd_list);
+		list_move(&bd->bd_list, &written);
 		bh = bd->bd_bh;
 		if (!buffer_dirty(bh))
 			continue;
@@ -693,7 +596,7 @@ static void gfs2_ordered_wait(struct gfs2_sbd *sdp)
 
 	gfs2_log_lock(sdp);
 	while (!list_empty(&sdp->sd_log_le_ordered)) {
-		bd = list_entry(sdp->sd_log_le_ordered.prev, struct gfs2_bufdata, bd_le.le_list);
+		bd = list_entry(sdp->sd_log_le_ordered.prev, struct gfs2_bufdata, bd_list);
 		bh = bd->bd_bh;
 		if (buffer_locked(bh)) {
 			get_bh(bh);
@@ -703,7 +606,7 @@ static void gfs2_ordered_wait(struct gfs2_sbd *sdp)
 			gfs2_log_lock(sdp);
 			continue;
 		}
-		list_del_init(&bd->bd_le.le_list);
+		list_del_init(&bd->bd_list);
 	}
 	gfs2_log_unlock(sdp);
 }
@@ -760,7 +663,7 @@ void gfs2_log_flush(struct gfs2_sbd *sdp, struct gfs2_glock *gl)
 		atomic_dec(&sdp->sd_log_blks_free); /* Adjust for unreserved buffer */
 		trace_gfs2_log_blocks(sdp, -1);
 		gfs2_log_unlock(sdp);
-		log_write_header(sdp, 0, PULL);
+		log_write_header(sdp, 0);
 	}
 	lops_after_commit(sdp, ai);
 
@@ -865,8 +768,7 @@ void gfs2_log_shutdown(struct gfs2_sbd *sdp)
 	sdp->sd_log_flush_head = sdp->sd_log_head;
 	sdp->sd_log_flush_wrapped = 0;
 
-	log_write_header(sdp, GFS2_LOG_HEAD_UNMOUNT,
-			 (sdp->sd_log_tail == current_tail(sdp)) ? 0 : PULL);
+	log_write_header(sdp, GFS2_LOG_HEAD_UNMOUNT);
 
 	gfs2_assert_warn(sdp, atomic_read(&sdp->sd_log_blks_free) == sdp->sd_jdesc->jd_blocks);
 	gfs2_assert_warn(sdp, sdp->sd_log_head == sdp->sd_log_tail);

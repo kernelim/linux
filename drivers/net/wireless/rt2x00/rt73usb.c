@@ -40,7 +40,7 @@
 /*
  * Allow hardware encryption to be disabled.
  */
-static int modparam_nohwcrypt;
+static bool modparam_nohwcrypt;
 module_param_named(nohwcrypt, modparam_nohwcrypt, bool, S_IRUGO);
 MODULE_PARM_DESC(nohwcrypt, "Disable hardware encryption.");
 
@@ -2412,6 +2412,7 @@ static struct usb_device_id rt73usb_device_table[] = {
 	{ USB_DEVICE(0x0b05, 0x1723) },
 	{ USB_DEVICE(0x0b05, 0x1724) },
 	/* Belkin */
+	{ USB_DEVICE(0x050d, 0x7050) },	/* FCC ID: K7SF5D7050B ver. 3.x */
 	{ USB_DEVICE(0x050d, 0x705a) },
 	{ USB_DEVICE(0x050d, 0x905b) },
 	{ USB_DEVICE(0x050d, 0x905c) },
@@ -2526,17 +2527,9 @@ static struct usb_driver rt73usb_driver = {
 	.disconnect	= rt2x00usb_disconnect,
 	.suspend	= rt2x00usb_suspend,
 	.resume		= rt2x00usb_resume,
+#if 0 /* Not in RHEL */
+	.disable_hub_initiated_lpm = 1,
+#endif
 };
 
-static int __init rt73usb_init(void)
-{
-	return usb_register(&rt73usb_driver);
-}
-
-static void __exit rt73usb_exit(void)
-{
-	usb_deregister(&rt73usb_driver);
-}
-
-module_init(rt73usb_init);
-module_exit(rt73usb_exit);
+module_usb_driver(rt73usb_driver);

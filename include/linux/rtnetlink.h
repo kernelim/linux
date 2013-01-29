@@ -377,10 +377,18 @@ enum
 #define RTAX_FEATURES RTAX_FEATURES
 	RTAX_RTO_MIN,
 #define RTAX_RTO_MIN RTAX_RTO_MIN
-	__RTAX_MAX
+	__RTAX_MAX,
+#define RTAX_INITRWND __RTAX_MAX /* Red Hat kABI workaround for dst_entry */
+	__RTAX_NEW_MAX
 };
 
-#define RTAX_MAX (__RTAX_MAX - 1)
+/* This Red Hat kABI workaround, requires some subtle details to understand.
+ * We MUST keep the exact string expansion "(__RTAX_MAX - 1)" else the kABI
+ * checker will miss-fire, as its based on gcc's preprocessor and it keeps
+ * the enum literals (not like real defines that gets macro expanded).
+ */
+#define RTAX_MAX_ORIG (__RTAX_MAX - 1)
+#define RTAX_MAX (__RTAX_NEW_MAX - 1)
 
 #define RTAX_FEATURE_ECN	0x00000001
 #define RTAX_FEATURE_SACK	0x00000002
@@ -617,6 +625,9 @@ struct tcamsg
 #define TCA_ACT_TAB 1 /* attr type must be >=1 */	
 #define TCAA_MAX 1
 
+/* New extended info filters for IFLA_EXT_MASK */
+#define RTEXT_FILTER_VF		(1 << 0)
+
 /* End of information exported to user level */
 
 #ifdef __KERNEL__
@@ -762,6 +773,28 @@ extern void rtnl_lock(void);
 extern void rtnl_unlock(void);
 extern int rtnl_trylock(void);
 extern int rtnl_is_locked(void);
+#ifdef CONFIG_PROVE_LOCKING
+extern int lockdep_rtnl_is_held(void);
+#endif /* #ifdef CONFIG_PROVE_LOCKING */
+
+/**
+ * rcu_dereference_rtnl - rcu_dereference with debug checking
+ * @p: The pointer to read, prior to dereferencing
+ *
+ * Do an rcu_dereference(p), but check caller either holds rcu_read_lock()
+ * or RTNL
+ */
+#define rcu_dereference_rtnl(p)					\
+	rcu_dereference(p)
+
+/**
+ * rtnl_dereference - rcu_dereference with debug checking
+ * @p: The pointer to read, prior to dereferencing
+ *
+ * Do an rcu_dereference(p), but check caller holds RTNL
+ */
+#define rtnl_dereference(p)					\
+	rcu_dereference_check(p, lockdep_rtnl_is_held())
 
 extern void rtnetlink_init(void);
 extern void __rtnl_unlock(void);

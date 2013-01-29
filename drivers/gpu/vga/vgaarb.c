@@ -605,10 +605,12 @@ static bool vga_arbiter_del_pci_device(struct pci_dev *pdev)
 		goto bail;
 	}
 
+#ifndef __ARCH_HAS_VGA_DEFAULT_DEVICE
 	if (vga_default == pdev) {
 		pci_dev_put(vga_default);
 		vga_default = NULL;
 	}
+#endif
 
 	if (vgadev->decodes & (VGA_RSRC_LEGACY_IO | VGA_RSRC_LEGACY_MEM))
 		vga_decode_count--;

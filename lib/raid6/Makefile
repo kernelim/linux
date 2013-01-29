@@ -1,6 +1,6 @@
 obj-$(CONFIG_RAID6_PQ)	+= raid6_pq.o
 
-raid6_pq-y	+= raid6algos.o raid6recov.o raid6tables.o \
+raid6_pq-y	+= raid6algos.o raid6recov.o raid6recov_ssse3.o raid6tables.o \
 		   raid6int1.o raid6int2.o raid6int4.o \
 		   raid6int8.o raid6int16.o raid6int32.o \
 		   raid6altivec1.o raid6altivec2.o raid6altivec4.o \

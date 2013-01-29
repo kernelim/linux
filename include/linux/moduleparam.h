@@ -130,6 +130,11 @@ struct kparam_array
 			    &var, __same_type(var, bool), perm)
 #endif /* !MODULE */
 
+#define kparam_block_sysfs_write(name)
+#define kparam_unblock_sysfs_write(name)
+#define kparam_block_sysfs_read(name)
+#define kparam_unblock_sysfs_read(name)
+
 /* Actually copy string: maxlen param is usually sizeof(string). */
 #define module_param_string(name, string, len, perm)			\
 	static const struct kparam_string __param_string_##name		\

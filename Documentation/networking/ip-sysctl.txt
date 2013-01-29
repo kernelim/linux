@@ -821,6 +821,11 @@ accept_local - BOOLEAN
 	local interfaces over the wire and have them accepted properly.
 	default FALSE
 
+route_localnet - BOOLEAN
+	Do not consider loopback addresses as martian source or destination
+	while routing. This enables the use of 127/8 for local routing purposes.
+	default FALSE
+
 rp_filter - INTEGER
 	0 - No source validation.
 	1 - Strict mode as defined in RFC3704 Strict Reverse Path
@@ -836,8 +841,8 @@ rp_filter - INTEGER
 	to prevent IP spoofing from DDos attacks. If using asymmetric routing
 	or other complicated routing, then loose mode is recommended.
 
-	conf/all/rp_filter must also be set to non-zero to do source validation
-	on the interface
+	The max value from conf/{all,interface}/rp_filter is used
+	when doing source validation on the {interface}.
 
 	Default value is 0. Note that some distributions enable it
 	in startup scripts.

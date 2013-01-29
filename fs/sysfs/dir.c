@@ -898,8 +898,10 @@ int sysfs_rename_dir(struct kobject * kobj, const char *new_name)
 	if (!new_name)
 		goto out_unlock;
 
+	sysfs_unlink_sibling(sd);
 	dup_name = sd->s_name;
 	sd->s_name = new_name;
+	sysfs_link_sibling(sd);
 
 	/* rename */
 	d_add(new_dentry, NULL);
@@ -998,11 +1000,62 @@ static inline unsigned char dt_type(struct sysfs_dirent *sd)
 	return (sd->s_mode >> 12) & 15;
 }
 
+static int sysfs_dir_release(struct inode *inode, struct file *filp)
+{
+	sysfs_put(filp->private_data);
+	return 0;
+}
+
+static struct sysfs_dirent *sysfs_dir_pos(struct sysfs_dirent *parent_sd,
+	ino_t ino, struct sysfs_dirent *pos)
+{
+	if (pos) {
+		int valid = !(pos->s_flags & SYSFS_FLAG_REMOVED) &&
+			pos->s_parent == parent_sd &&
+			ino == pos->s_ino;
+		sysfs_put(pos);
+		if (valid)
+			return pos;
+	}
+	pos = NULL;
+	if ((ino > 1) && (ino < INT_MAX)) {
+		struct rb_node *p = parent_sd->s_dir.inode_tree.rb_node;
+		while (p) {
+#define node	rb_entry(p, struct sysfs_dirent, inode_node)
+			if (ino < node->s_ino) {
+				pos = node;
+				p = node->inode_node.rb_left;
+			} else if (ino > node->s_ino) {
+				p = node->inode_node.rb_right;
+			} else {
+				pos = node;
+				break;
+			}
+#undef node
+		}
+	}
+	return pos;
+}
+
+static struct sysfs_dirent *sysfs_dir_next_pos(struct sysfs_dirent *parent_sd,
+	ino_t ino, struct sysfs_dirent *pos)
+{
+	pos = sysfs_dir_pos(parent_sd, ino, pos);
+	if (pos) {
+		struct rb_node *p = rb_next(&pos->inode_node);
+		if (!p)
+			pos = NULL;
+		else
+			pos = rb_entry(p, struct sysfs_dirent, inode_node);
+	}
+	return pos;
+}
+
 static int sysfs_readdir(struct file * filp, void * dirent, filldir_t filldir)
 {
 	struct dentry *dentry = filp->f_path.dentry;
 	struct sysfs_dirent * parent_sd = dentry->d_fsdata;
-	struct sysfs_dirent *pos;
+	struct sysfs_dirent *pos = filp->private_data;
 	ino_t ino;
 
 	if (filp->f_pos == 0) {
@@ -1018,50 +1071,31 @@ static int sysfs_readdir(struct file * filp, void * dirent, filldir_t filldir)
 		if (filldir(dirent, "..", 2, filp->f_pos, ino, DT_DIR) == 0)
 			filp->f_pos++;
 	}
-	if ((filp->f_pos > 1) && (filp->f_pos < INT_MAX)) {
-		struct rb_node *p;
+	mutex_lock(&sysfs_mutex);
+	for (pos = sysfs_dir_pos(parent_sd, filp->f_pos, pos);
+	     pos;
+	     pos = sysfs_dir_next_pos(parent_sd, filp->f_pos, pos)) {
+		const char * name;
+		unsigned int type;
+		int len, ret;
 
-		mutex_lock(&sysfs_mutex);
+		name = pos->s_name;
+		len = strlen(name);
+		ino = pos->s_ino;
+		type = dt_type(pos);
+		filp->f_pos = ino;
+		filp->private_data = sysfs_get(pos);
 
-		/* Skip the dentries we have already reported */
-		pos = NULL;
-
-		p = parent_sd->s_dir.inode_tree.rb_node;
-		while (p) {
-#define node	rb_entry(p, struct sysfs_dirent, inode_node)
-			if (filp->f_pos < node->s_ino) {
-				pos = node;
-				p = node->inode_node.rb_left;
-			} else if (filp->f_pos > node->s_ino) {
-				p = node->inode_node.rb_right;
-			} else {
-				pos = node;
-				break;
-			}
-#undef node
-		}
-
-		while (pos) {
-			const char * name;
-			int len;
-
-			name = pos->s_name;
-			len = strlen(name);
-			filp->f_pos = ino = pos->s_ino;
-
-			if (filldir(dirent, name, len, filp->f_pos, ino,
-					 dt_type(pos)) < 0)
-				break;
-
-			p = rb_next(&pos->inode_node);
-			if (!p)
-				pos = NULL;
-			else
-				pos = rb_entry(p, struct sysfs_dirent, inode_node);
-		}
-		if (!pos)
-			filp->f_pos = INT_MAX;
 		mutex_unlock(&sysfs_mutex);
+		ret = filldir(dirent, name, len, filp->f_pos, ino, type);
+		mutex_lock(&sysfs_mutex);
+		if (ret < 0)
+			break;
+	}
+	mutex_unlock(&sysfs_mutex);
+	if ((filp->f_pos > 1) && !pos) { /* EOF */
+		filp->f_pos = INT_MAX;
+		filp->private_data = NULL;
 	}
 	return 0;
 }
@@ -1070,5 +1104,6 @@ static int sysfs_readdir(struct file * filp, void * dirent, filldir_t filldir)
 const struct file_operations sysfs_dir_operations = {
 	.read		= generic_read_dir,
 	.readdir	= sysfs_readdir,
+	.release	= sysfs_dir_release,
 	.llseek		= generic_file_llseek,
 };

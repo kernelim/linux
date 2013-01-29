@@ -663,7 +663,7 @@ out_overflow_exit:
  * Encode COMMIT arguments
  */
 static int
-nfs3_xdr_commitargs(struct rpc_rqst *req, __be32 *p, struct nfs_writeargs *args)
+nfs3_xdr_commitargs(struct rpc_rqst *req, __be32 *p, struct nfs_commitargs *args)
 {
 	p = xdr_encode_fhandle(p, args->fh);
 	p = xdr_encode_hyper(p, args->offset);
@@ -1074,7 +1074,7 @@ nfs3_xdr_pathconfres(struct rpc_rqst *req, __be32 *p, struct nfs_pathconf *res)
  * Decode COMMIT reply
  */
 static int
-nfs3_xdr_commitres(struct rpc_rqst *req, __be32 *p, struct nfs_writeres *res)
+nfs3_xdr_commitres(struct rpc_rqst *req, __be32 *p, struct nfs_commitres *res)
 {
 	int		status;
 

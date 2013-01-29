@@ -236,12 +236,6 @@ decode_and_add_ds(struct xdr_stream *streamp, struct inode *inode, gfp_t gfp_fla
 	if (unlikely(!p))
 		goto out_err;
 
-	/* Check that netid is "tcp" */
-	if (nlen != 3 ||  memcmp((char *)p, "tcp", 3)) {
-		dprintk("%s: ERROR: non ipv4 TCP r_netid\n", __func__);
-		goto out_err;
-	}
-
 	/* r_addr */
 	p = xdr_inline_decode(streamp, 4);
 	if (unlikely(!p))
@@ -395,6 +389,7 @@ decode_device(struct inode *ino, struct pnfs_device *pdev, gfp_t gfp_flags)
 	for (i = 0; i < dsaddr->ds_num; i++) {
 		int j;
 		u32 mp_count;
+		bool has_ds = false;
 
 		p = xdr_inline_decode(&stream, 4);
 		if (unlikely(!p))
@@ -408,11 +403,12 @@ decode_device(struct inode *ino, struct pnfs_device *pdev, gfp_t gfp_flags)
 				mp_count);
 		}
 		for (j = 0; j < mp_count; j++) {
-			if (j == 0) {
+			if (!has_ds) {
 				dsaddr->ds_list[i] = decode_and_add_ds(&stream,
 					ino, gfp_flags);
-				if (dsaddr->ds_list[i] == NULL)
-					goto out_err_free_deviceid;
+				if (dsaddr->ds_list[i] != NULL) {
+					has_ds = true;
+				}
 			} else {
 				u32 len;
 				/* skip extra multipath */
@@ -438,6 +434,8 @@ decode_device(struct inode *ino, struct pnfs_device *pdev, gfp_t gfp_flags)
 					goto out_err_free_deviceid;
 			}
 		}
+		if (!has_ds)
+			goto out_err_free_deviceid;
 	}
 
 	__free_page(scratch);
@@ -503,7 +501,7 @@ get_device_info(struct inode *inode, struct nfs4_deviceid *dev_id, gfp_t gfp_fla
 	 * GETDEVICEINFO's maxcount
 	 */
 	max_resp_sz = server->nfs_client->cl_session->fc_attrs.max_resp_sz;
-	max_pages = max_resp_sz >> PAGE_SHIFT;
+	max_pages = nfs_page_array_len(0, max_resp_sz);
 	dprintk("%s inode %p max_resp_sz %u max_pages %d\n",
 		__func__, inode, max_resp_sz, max_pages);
 

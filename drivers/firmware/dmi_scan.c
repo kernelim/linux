@@ -230,19 +230,26 @@ static void __init dmi_save_smbios_ver(int slot)
 			break;
 		}
 
+	if (!smbios_present) {
+		early_iounmap(buf, 0x10000);
+		goto error;
+	}
+
 	/* Continue DMI abuse ... */
 	s = dmi_alloc(8);
 	if (!s) {
 		early_iounmap(buf, 0x10000);
+		printk("dmi_alloc failure.\n");
 		return;
 	}
 	sprintf(s, "%u.%u", buf[fp + 0x6], buf[fp + 0x7]);
 	dmi_ident[slot] = s;
 
 	early_iounmap(buf, 0x10000);
+	return;
+
 error:
-	if (!smbios_present)
-		printk("SMBIOS not found.");
+	printk("SMBIOS not found.\n");
 
 	return;
 }

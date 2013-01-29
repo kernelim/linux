@@ -22,14 +22,14 @@ config WORD_SIZE
 config ARCH_PHYS_ADDR_T_64BIT
        def_bool PPC64 || PHYS_64BIT
 
+config ARCH_DMA_ADDR_T_64BIT
+	def_bool ARCH_PHYS_ADDR_T_64BIT
+
 config MMU
 	bool
 	default y
 
 config GENERIC_CMOS_UPDATE
-	def_bool y
-
-config GENERIC_TIME
 	def_bool y
 
 config GENERIC_TIME_VSYSCALL
@@ -131,6 +131,7 @@ config PPC
 	select GENERIC_ATOMIC64 if PPC32
 	select HAVE_IRQ_WORK
 	select HAVE_PERF_EVENTS
+	select ARCH_HAVE_NMI_SAFE_CMPXCHG
 
 config EARLY_PRINTK
 	bool
@@ -371,13 +372,16 @@ config CRASH_DUMP
 	  The same kernel binary can be used as production kernel and dump
 	  capture kernel.
 
-config PHYP_DUMP
-	bool "Hypervisor-assisted dump (EXPERIMENTAL)"
-	depends on PPC_PSERIES && EXPERIMENTAL
+config FA_DUMP
+	bool "Firmware-assisted dump"
+	depends on PPC64 && PPC_RTAS && CRASH_DUMP
 	help
-	  Hypervisor-assisted dump is meant to be a kdump replacement
-	  offering robustness and speed not possible without system
-	  hypervisor assistance.
+	  A robust mechanism to get reliable kernel crash dump with
+	  assistance from firmware. This approach does not use kexec,
+	  instead firmware assists in booting the kdump kernel
+	  while preserving memory contents. Firmware-assisted dump
+	  is meant to be a kdump replacement offering robustness and
+	  speed not possible without system firmware assistance.
 
 	  If unsure, say "N"
 
@@ -642,6 +646,9 @@ config ISA
 config ZONE_DMA
 	bool
 	default y
+
+config NEED_DMA_MAP_STATE
+	def_bool (PPC64 || NOT_COHERENT_CACHE)
 
 config GENERIC_ISA_DMA
 	bool

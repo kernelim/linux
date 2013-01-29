@@ -236,6 +236,7 @@ typedef struct
 #define PSW_MASK_ASC		0x0000C000UL
 #define PSW_MASK_CC		0x00003000UL
 #define PSW_MASK_PM		0x00000F00UL
+#define PSW_MASK_RI		0x00000000UL
 
 #define PSW_ADDR_AMODE		0x80000000UL
 #define PSW_ADDR_INSN		0x7FFFFFFFUL
@@ -261,6 +262,7 @@ typedef struct
 #define PSW_MASK_ASC		0x0000C00000000000UL
 #define PSW_MASK_CC		0x0000300000000000UL
 #define PSW_MASK_PM		0x00000F0000000000UL
+#define PSW_MASK_RI		0x0000008000000000UL
 
 #define PSW_ADDR_AMODE		0x0000000000000000UL
 #define PSW_ADDR_INSN		0xFFFFFFFFFFFFFFFFUL
@@ -290,7 +292,7 @@ extern long psw_user32_bits;
    is the condition code and the program mask bits.  */
 #define PSW_MASK_MERGE(CURRENT,NEW) \
 	(((CURRENT) & ~(PSW_MASK_CC|PSW_MASK_PM)) | \
-	 ((NEW) & (PSW_MASK_CC|PSW_MASK_PM)))
+	 ((NEW) & (PSW_MASK_CC|PSW_MASK_PM|PSW_MASK_RI)))
 
 /*
  * The s390_regs structure is used to define the elf_gregset_t.
@@ -341,7 +343,7 @@ typedef struct
 	unsigned long cr[NUM_CR_WORDS];
 } per_cr_words;
 
-#define PER_EM_MASK 0xE8000000UL
+#define PER_EM_MASK 0xEB000000UL
 
 typedef	struct
 {
@@ -357,9 +359,17 @@ typedef	struct
 	unsigned em_storage_alteration : 1;
 	unsigned em_gpr_alt_unused     : 1;
 	unsigned em_store_real_address : 1;
+#ifdef __GENKSYMS__
 	unsigned                       : 3;
 	unsigned branch_addr_ctl       : 1;
 	unsigned                       : 1;
+#else
+	unsigned                       : 1;
+	unsigned em_transaction_end    : 1;
+	unsigned em_nullification      : 1;
+	unsigned branch_addr_ctl       : 1;
+	unsigned suspension_ctl        : 1;
+#endif
 	unsigned storage_alt_space_ctl : 1;
 	unsigned                       : 21;
 	unsigned long starting_addr;
@@ -437,6 +447,8 @@ typedef struct
 #define PTRACE_POKETEXT_AREA	      0x5004
 #define PTRACE_POKEDATA_AREA 	      0x5005
 #define PTRACE_GET_LAST_BREAK	      0x5006
+#define PTRACE_ENABLE_TE	      0x5009
+#define PTRACE_DISABLE_TE	      0x5010
 
 /*
  * PT_PROT definition is loosely based on hppa bsd definition in

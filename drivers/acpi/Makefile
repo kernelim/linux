@@ -19,7 +19,6 @@ obj-y				+= acpi.o \
 
 # All the builtin files are in the "acpi." module_param namespace.
 acpi-y				+= osl.o utils.o reboot.o
-acpi-y				+= atomicio.o
 
 # sleep related files
 acpi-y				+= wakeup.o
@@ -45,6 +44,7 @@ acpi-y				+= video_detect.o
 endif
 
 # These are (potentially) separate modules
+obj-$(CONFIG_ACPI_IPMI)		+= acpi_ipmi.o
 obj-$(CONFIG_ACPI_AC) 		+= ac.o
 obj-$(CONFIG_ACPI_BUTTON)	+= button.o
 obj-$(CONFIG_ACPI_FAN)		+= fan.o

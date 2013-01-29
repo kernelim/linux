@@ -85,6 +85,8 @@ int seq_write(struct seq_file *seq, const void *data, size_t len);
 
 int seq_printf(struct seq_file *, const char *, ...)
 	__attribute__ ((format (printf,2,3)));
+int seq_vprintf(struct seq_file *, const char *, va_list args)
+	__attribute__ ((format (printf,2,0)));
 
 int seq_path(struct seq_file *, struct path *, char *);
 int seq_dentry(struct seq_file *, struct dentry *, char *);

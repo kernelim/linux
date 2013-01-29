@@ -59,6 +59,7 @@
 #define SECONDARY_EXEC_WBINVD_EXITING		0x00000040
 #define SECONDARY_EXEC_UNRESTRICTED_GUEST	0x00000080
 #define SECONDARY_EXEC_PAUSE_LOOP_EXITING	0x00000400
+#define SECONDARY_EXEC_ENABLE_INVPCID		0x00001000
 
 
 #define PIN_BASED_EXT_INTR_MASK                 0x00000001
@@ -273,6 +274,7 @@ enum vmcs_field {
 #define EXIT_REASON_EPT_MISCONFIG       49
 #define EXIT_REASON_WBINVD		54
 #define EXIT_REASON_XSETBV		55
+#define EXIT_REASON_INVPCID		58
 
 /*
  * Interruption-information format
@@ -383,6 +385,7 @@ enum vmcs_field {
 #define VMX_EPTP_UC_BIT				(1ull << 8)
 #define VMX_EPTP_WB_BIT				(1ull << 14)
 #define VMX_EPT_2MB_PAGE_BIT			(1ull << 16)
+#define VMX_EPT_AD_BIT				(1ull << 21)
 #define VMX_EPT_EXTENT_INDIVIDUAL_BIT		(1ull << 24)
 #define VMX_EPT_EXTENT_CONTEXT_BIT		(1ull << 25)
 #define VMX_EPT_EXTENT_GLOBAL_BIT		(1ull << 26)
@@ -391,11 +394,14 @@ enum vmcs_field {
 #define VMX_EPT_MAX_GAW				0x4
 #define VMX_EPT_MT_EPTE_SHIFT			3
 #define VMX_EPT_GAW_EPTP_SHIFT			3
+#define VMX_EPT_AD_ENABLE_BIT			(1ull << 6)
 #define VMX_EPT_DEFAULT_MT			0x6ull
 #define VMX_EPT_READABLE_MASK			0x1ull
 #define VMX_EPT_WRITABLE_MASK			0x2ull
 #define VMX_EPT_EXECUTABLE_MASK			0x4ull
 #define VMX_EPT_IGMT_BIT    			(1ull << 6)
+#define VMX_EPT_ACCESS_BIT			(1ull << 8)
+#define VMX_EPT_DIRTY_BIT			(1ull << 9)
 
 #define VMX_EPT_IDENTITY_PAGETABLE_ADDR		0xfffbc000ul
 

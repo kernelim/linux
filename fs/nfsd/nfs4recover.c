@@ -139,6 +139,10 @@ nfsd4_create_clid_dir(struct nfs4_client *clp)
 	if (status < 0)
 		return status;
 
+	status = mnt_want_write(rec_dir.mnt);
+	if (status)
+		return status;
+
 	/* lock the parent */
 	mutex_lock(&rec_dir.dentry->d_inode->i_mutex);
 
@@ -152,11 +156,7 @@ nfsd4_create_clid_dir(struct nfs4_client *clp)
 		dprintk("NFSD: nfsd4_create_clid_dir: DIRECTORY EXISTS\n");
 		goto out_put;
 	}
-	status = mnt_want_write(rec_dir.mnt);
-	if (status)
-		goto out_put;
 	status = vfs_mkdir(rec_dir.dentry->d_inode, dentry, S_IRWXU);
-	mnt_drop_write(rec_dir.mnt);
 out_put:
 	dput(dentry);
 out_unlock:
@@ -165,6 +165,7 @@ out_unlock:
 		clp->cl_firststate = 1;
 		nfsd4_sync_rec_dir();
 	}
+	mnt_drop_write(rec_dir.mnt);
 	nfs4_reset_creds(original_cred);
 	dprintk("NFSD: nfsd4_create_clid_dir returns %d\n", status);
 	return status;

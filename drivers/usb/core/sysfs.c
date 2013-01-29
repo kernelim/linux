@@ -191,6 +191,15 @@ show_urbnum(struct device *dev, struct device_attribute *attr, char *buf)
 static DEVICE_ATTR(urbnum, S_IRUGO, show_urbnum, NULL);
 
 
+static ssize_t
+show_ltm_capable(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	if (usb_device_supports_ltm(to_usb_device(dev)))
+		return sprintf(buf, "%s\n", "yes");
+	return sprintf(buf, "%s\n", "no");
+}
+static DEVICE_ATTR(ltm_capable, S_IRUGO, show_ltm_capable, NULL);
+
 #ifdef	CONFIG_PM
 
 static const char power_group[] = "power";
@@ -616,6 +625,7 @@ static struct attribute *dev_attrs[] = {
 	&dev_attr_quirks.attr,
 	&dev_attr_authorized.attr,
 	&dev_attr_remove.attr,
+	&dev_attr_ltm_capable.attr,
 	NULL,
 };
 static struct attribute_group dev_attr_grp = {

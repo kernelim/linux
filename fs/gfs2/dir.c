@@ -129,8 +129,8 @@ static int gfs2_dir_write_stuffed(struct gfs2_inode *ip, const char *buf,
 
 	gfs2_trans_add_bh(ip->i_gl, dibh, 1);
 	memcpy(dibh->b_data + offset + sizeof(struct gfs2_dinode), buf, size);
-	if (ip->i_disksize < offset + size)
-		ip->i_disksize = offset + size;
+	if (ip->i_inode.i_size < offset + size)
+		i_size_write(&ip->i_inode, offset + size);
 	ip->i_inode.i_mtime = ip->i_inode.i_ctime = CURRENT_TIME;
 	gfs2_dinode_out(ip, dibh->b_data);
 
@@ -227,8 +227,8 @@ out:
 	if (error)
 		return error;
 
-	if (ip->i_disksize < offset + copied)
-		ip->i_disksize = offset + copied;
+	if (ip->i_inode.i_size < offset + copied)
+		i_size_write(&ip->i_inode, offset + copied);
 	ip->i_inode.i_mtime = ip->i_inode.i_ctime = CURRENT_TIME;
 
 	gfs2_trans_add_bh(ip->i_gl, dibh, 1);
@@ -277,12 +277,13 @@ static int gfs2_dir_read_data(struct gfs2_inode *ip, char *buf, u64 offset,
 	unsigned int o;
 	int copied = 0;
 	int error = 0;
+	u64 disksize = i_size_read(&ip->i_inode);
 
-	if (offset >= ip->i_disksize)
+	if (offset >= disksize)
 		return 0;
 
-	if (offset + size > ip->i_disksize)
-		size = ip->i_disksize - offset;
+	if (offset + size > disksize)
+		size = disksize - offset;
 
 	if (!size)
 		return 0;
@@ -362,7 +363,7 @@ static __be64 *gfs2_dir_get_hash_table(struct gfs2_inode *ip)
 
 	hsize = 1 << ip->i_depth;
 	hsize *= sizeof(__be64);
-	if (hsize != ip->i_disksize) {
+	if (hsize != i_size_read(inode)) {
 		gfs2_consist_inode(ip);
 		return ERR_PTR(-EIO);
 	}
@@ -817,7 +818,7 @@ static struct gfs2_dirent *gfs2_dirent_search(struct inode *inode,
 		unsigned hsize = 1 << ip->i_depth;
 		unsigned index;
 		u64 ln;
-		if (hsize * sizeof(u64) != ip->i_disksize) {
+		if (hsize * sizeof(u64) != i_size_read(inode)) {
 			gfs2_consist_inode(ip);
 			return ERR_PTR(-EIO);
 		}
@@ -969,7 +970,7 @@ static int dir_make_exhash(struct inode *inode)
 	for (x = sdp->sd_hash_ptrs; x--; lp++)
 		*lp = cpu_to_be64(bn);
 
-	dip->i_disksize = sdp->sd_sb.sb_bsize / 2;
+	i_size_write(inode, sdp->sd_sb.sb_bsize / 2);
 	gfs2_add_inode_blocks(&dip->i_inode, 1);
 	dip->i_diskflags |= GFS2_DIF_EXHASH;
 
@@ -1893,14 +1894,13 @@ static int leaf_dealloc(struct gfs2_inode *dip, u32 index, u32 len,
 	if (!ht)
 		return -ENOMEM;
 
-	if (!gfs2_qadata_get(dip)) {
-		error = -ENOMEM;
+	error = gfs2_rindex_update(sdp);
+	if (error)
 		goto out;
-	}
 
 	error = gfs2_quota_hold(dip, NO_QUOTA_CHANGE, NO_QUOTA_CHANGE);
 	if (error)
-		goto out_put;
+		goto out;
 
 	/*  Count the number of leaves  */
 
@@ -1968,8 +1968,6 @@ out_rg_gunlock:
 out_rlist:
 	gfs2_rlist_free(&rlist);
 	gfs2_quota_unhold(dip);
-out_put:
-	gfs2_qadata_put(dip);
 out:
 	kfree(ht);
 	return error;

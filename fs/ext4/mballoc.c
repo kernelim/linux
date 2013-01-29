@@ -2448,6 +2448,9 @@ int ext4_mb_release(struct super_block *sb)
 	struct ext4_group_info *grinfo;
 	struct ext4_sb_info *sbi = EXT4_SB(sb);
 
+	if (sbi->s_proc)
+		remove_proc_entry("mb_groups", sbi->s_proc);
+
 	if (sbi->s_group_info) {
 		for (i = 0; i < ngroups; i++) {
 			grinfo = ext4_get_group_info(sb, i);
@@ -2495,8 +2498,6 @@ int ext4_mb_release(struct super_block *sb)
 	}
 
 	free_percpu(sbi->s_locality_groups);
-	if (sbi->s_proc)
-		remove_proc_entry("mb_groups", sbi->s_proc);
 
 	return 0;
 }
@@ -4205,7 +4206,7 @@ static int ext4_mb_discard_preallocations(struct super_block *sb, int needed)
  * to usual allocation
  */
 ext4_fsblk_t ext4_mb_new_blocks(handle_t *handle,
-				 struct ext4_allocation_request *ar, int *errp)
+				struct ext4_allocation_request *ar, int *errp)
 {
 	int freed;
 	struct ext4_allocation_context *ac = NULL;
@@ -4232,7 +4233,9 @@ ext4_fsblk_t ext4_mb_new_blocks(handle_t *handle,
 		 * there is enough free blocks to do block allocation
 		 * and verify allocation doesn't exceed the quota limits.
 		 */
-		while (ar->len && ext4_claim_free_blocks(sbi, ar->len)) {
+		while (ar->len &&
+			ext4_claim_free_blocks(sbi, ar->len, ar->flags)) {
+
 			/* let others to free the space */
 			yield();
 			ar->len = ar->len >> 1;
@@ -4242,14 +4245,20 @@ ext4_fsblk_t ext4_mb_new_blocks(handle_t *handle,
 			return 0;
 		}
 		reserv_blks = ar->len;
-		while (ar->len && vfs_dq_alloc_block(ar->inode, ar->len)) {
-			ar->flags |= EXT4_MB_HINT_NOPREALLOC;
-			ar->len--;
+		if (ar->flags & EXT4_MB_USE_ROOT_BLOCKS) {
+			vfs_dq_alloc_block_nofail(ar->inode, ar->len);
+		} else {
+			while (ar->len &&
+			       vfs_dq_alloc_block(ar->inode, ar->len)) {
+
+				ar->flags |= EXT4_MB_HINT_NOPREALLOC;
+				ar->len--;
+			}
 		}
 		inquota = ar->len;
 		if (ar->len == 0) {
 			*errp = -EDQUOT;
-			goto out3;
+			goto out;
 		}
 	}
 
@@ -4257,13 +4266,13 @@ ext4_fsblk_t ext4_mb_new_blocks(handle_t *handle,
 	if (!ac) {
 		ar->len = 0;
 		*errp = -ENOMEM;
-		goto out1;
+		goto out;
 	}
 
 	*errp = ext4_mb_initialize_context(ac, ar);
 	if (*errp) {
 		ar->len = 0;
-		goto out2;
+		goto out;
 	}
 
 	ac->ac_op = EXT4_MB_HISTORY_PREALLOC;
@@ -4272,7 +4281,9 @@ ext4_fsblk_t ext4_mb_new_blocks(handle_t *handle,
 		ext4_mb_normalize_request(ac, ar);
 repeat:
 		/* allocate space in core */
-		ext4_mb_regular_allocator(ac);
+		*errp = ext4_mb_regular_allocator(ac);
+		if (*errp)
+			goto errout;
 
 		/* as we've just preallocated more space than
 		 * user requested orinally, we store allocated
@@ -4283,7 +4294,7 @@ repeat:
 	}
 	if (likely(ac->ac_status == AC_STATUS_FOUND)) {
 		*errp = ext4_mb_mark_diskspace_used(ac, handle, reserv_blks);
-		if (*errp ==  -EAGAIN) {
+		if (*errp == -EAGAIN) {
 			/*
 			 * drop the reference that we took
 			 * in ext4_mb_use_best_found
@@ -4294,12 +4305,10 @@ repeat:
 			ac->ac_b_ex.fe_len = 0;
 			ac->ac_status = AC_STATUS_CONTINUE;
 			goto repeat;
-		} else if (*errp) {
+		} else if (*errp)
+		errout:
 			ext4_discard_allocated_blocks(ac);
-			ac->ac_b_ex.fe_len = 0;
-			ar->len = 0;
-			ext4_mb_show_ac(ac);
-		} else {
+		else {
 			block = ext4_grp_offs_to_block(sb, &ac->ac_b_ex);
 			ar->len = ac->ac_b_ex.fe_len;
 		}
@@ -4308,19 +4317,19 @@ repeat:
 		if (freed)
 			goto repeat;
 		*errp = -ENOSPC;
+	}
+
+	if (*errp) {
 		ac->ac_b_ex.fe_len = 0;
 		ar->len = 0;
 		ext4_mb_show_ac(ac);
 	}
-
 	ext4_mb_release_context(ac);
-
-out2:
-	kmem_cache_free(ext4_ac_cachep, ac);
-out1:
+out:
+	if (ac)
+		kmem_cache_free(ext4_ac_cachep, ac);
 	if (inquota && ar->len < inquota)
 		vfs_dq_free_block(ar->inode, inquota - ar->len);
-out3:
 	if (!ar->len) {
 		if (!EXT4_I(ar->inode)->i_delalloc_reserved_flag)
 			/* release all the reserved blocks if non delalloc */
@@ -4428,18 +4437,24 @@ ext4_mb_free_metadata(handle_t *handle, struct ext4_buddy *e4b,
 	return 0;
 }
 
-/*
- * Main entry point into mballoc to free blocks
+/**
+ * ext4_free_blocks() -- Free given blocks and update quota
+ * @handle:		handle for this transaction
+ * @inode:		inode
+ * @block:		start physical block to free
+ * @count:		number of blocks to count
+ * @flags:		flags used by ext4_free_blocks
  */
-void ext4_mb_free_blocks(handle_t *handle, struct inode *inode,
-			ext4_fsblk_t block, unsigned long count,
-			int metadata, unsigned long *freed)
+void ext4_free_blocks(handle_t *handle, struct inode *inode,
+		      ext4_fsblk_t block, unsigned long count,
+		      int flags)
 {
 	struct buffer_head *bitmap_bh = NULL;
 	struct super_block *sb = inode->i_sb;
 	struct ext4_allocation_context *ac = NULL;
 	struct ext4_group_desc *gdp;
 	struct ext4_super_block *es;
+	unsigned long freed = 0;
 	unsigned int overflow;
 	ext4_grpblk_t bit;
 	struct buffer_head *gd_bh;
@@ -4449,7 +4464,16 @@ void ext4_mb_free_blocks(handle_t *handle, struct inode *inode,
 	int err = 0;
 	int ret;
 
-	*freed = 0;
+	/*
+	 * We need to make sure we don't reuse the freed block until
+	 * after the transaction is committed, which we can do by
+	 * treating the block as metadata, below.  We make an
+	 * exception if the inode is to be written in writeback mode
+	 * since writeback mode has weak data consistency guarantees.
+	 */
+	if (!ext4_should_writeback_data(inode))
+		flags |= EXT4_FREE_BLOCKS_METADATA;
+
 
 	sbi = EXT4_SB(sb);
 	es = EXT4_SB(sb)->s_es;
@@ -4462,7 +4486,7 @@ void ext4_mb_free_blocks(handle_t *handle, struct inode *inode,
 	}
 
 	ext4_debug("freeing block %llu\n", block);
-	trace_ext4_free_blocks(inode, block, count, metadata);
+	trace_ext4_free_blocks(inode, block, count, flags);
 
 	ac = kmem_cache_alloc(ext4_ac_cachep, GFP_NOFS);
 	if (ac) {
@@ -4537,7 +4561,7 @@ do_more:
 	err = ext4_mb_load_buddy(sb, block_group, &e4b);
 	if (err)
 		goto error_return;
-	if (metadata && ext4_handle_valid(handle)) {
+	if ((flags & EXT4_FREE_BLOCKS_METADATA) && ext4_handle_valid(handle)) {
 		struct ext4_free_data *new_entry;
 		/*
 		 * blocks being freed are metadata. these blocks shouldn't
@@ -4576,7 +4600,7 @@ do_more:
 
 	ext4_mb_release_desc(&e4b);
 
-	*freed += count;
+	freed += count;
 
 	/* We dirtied the bitmap block */
 	BUFFER_TRACE(bitmap_bh, "dirtied bitmap block");
@@ -4596,6 +4620,8 @@ do_more:
 	}
 	sb->s_dirt = 1;
 error_return:
+	if (freed && !(flags & EXT4_FREE_BLOCKS_NO_QUOT_UPDATE))
+		vfs_dq_free_block(inode, freed);
 	brelse(bitmap_bh);
 	ext4_std_error(sb, err);
 	if (ac)
@@ -4814,11 +4840,11 @@ ext4_trim_all_free(struct super_block *sb, ext4_group_t group,
 	start = (e4b.bd_info->bb_first_free > start) ?
 		e4b.bd_info->bb_first_free : start;
 
-	while (start < max) {
-		start = mb_find_next_zero_bit(bitmap, max, start);
-		if (start >= max)
+	while (start <= max) {
+		start = mb_find_next_zero_bit(bitmap, max + 1, start);
+		if (start > max)
 			break;
-		next = mb_find_next_bit(bitmap, max, start);
+		next = mb_find_next_bit(bitmap, max + 1, start);
 
 		if ((next - start) >= minblocks) {
 			ext4_trim_extent(sb, start,
@@ -4878,6 +4904,9 @@ int ext4_trim_fs(struct super_block *sb, struct fstrim_range *range)
 	ext4_fsblk_t max_blks = ext4_blocks_count(EXT4_SB(sb)->s_es);
 	int ret = 0;
 
+	if ((range->len >> sb->s_blocksize_bits) == 0)
+		goto out;
+
 	start = range->start >> sb->s_blocksize_bits;
 	end = start + (range->len >> sb->s_blocksize_bits) - 1;
 	minlen = range->minlen >> sb->s_blocksize_bits;
@@ -4899,7 +4928,7 @@ int ext4_trim_fs(struct super_block *sb, struct fstrim_range *range)
 				     &last_group, &last_block);
 
 	/* The last block to discard in the group */
-	end = EXT4_BLOCKS_PER_GROUP(sb);
+	end = EXT4_BLOCKS_PER_GROUP(sb) - 1;
 
 	for (group = first_group; group <= last_group; group++) {
 		grp = ext4_get_group_info(sb, group);
@@ -4926,8 +4955,8 @@ int ext4_trim_fs(struct super_block *sb, struct fstrim_range *range)
 				ret = cnt;
 				break;
 			}
+			trimmed += cnt;
 		}
-		trimmed += cnt;
 
 		/*
 		 * For every group except the first one, we are sure
@@ -4935,11 +4964,11 @@ int ext4_trim_fs(struct super_block *sb, struct fstrim_range *range)
 		 */
 		first_block = 0;
 	}
-	range->len = trimmed * sb->s_blocksize;
 
 	if (!ret)
 		atomic_set(&EXT4_SB(sb)->s_last_trim_minblks, minlen);
 
 out:
+	range->len = trimmed * sb->s_blocksize;
 	return ret;
 }

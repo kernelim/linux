@@ -4,7 +4,7 @@
  * but are connected to the PCI bus by a PLX9052.
  *
  * Current maintainers are:
- * 	Pavel Roskin <proski AT gnu.org>
+ *	Pavel Roskin <proski AT gnu.org>
  * and	David Gibson <hermes AT gibson.dropbear.id.au>
  *
  * (C) Copyright David Gibson, IBM Corp. 2001-2003.
@@ -102,14 +102,14 @@
 #define PLX_RESET_TIME	(500)	/* milliseconds */
 
 #define PLX_INTCSR		0x4c /* Interrupt Control & Status Register */
-#define PLX_INTCSR_INTEN	(1<<6) /* Interrupt Enable bit */
+#define PLX_INTCSR_INTEN	(1 << 6) /* Interrupt Enable bit */
 
 /*
  * Do a soft reset of the card using the Configuration Option Register
  */
 static int orinoco_plx_cor_reset(struct orinoco_private *priv)
 {
-	hermes_t *hw = &priv->hw;
+	struct hermes *hw = &priv->hw;
 	struct orinoco_pci_card *card = priv->card;
 	unsigned long timeout;
 	u16 reg;
@@ -259,7 +259,7 @@ static int orinoco_plx_init_one(struct pci_dev *pdev,
 		goto fail;
 	}
 
-	err = orinoco_if_add(priv, 0, 0);
+	err = orinoco_if_add(priv, 0, 0, NULL);
 	if (err) {
 		printk(KERN_ERR PFX "orinoco_if_add() failed\n");
 		goto fail;
@@ -310,7 +310,7 @@ static void __devexit orinoco_plx_remove_one(struct pci_dev *pdev)
 	pci_disable_device(pdev);
 }
 
-static struct pci_device_id orinoco_plx_id_table[] = {
+static DEFINE_PCI_DEVICE_TABLE(orinoco_plx_id_table) = {
 	{0x111a, 0x1023, PCI_ANY_ID, PCI_ANY_ID,},	/* Siemens SpeedStream SS1023 */
 	{0x1385, 0x4100, PCI_ANY_ID, PCI_ANY_ID,},	/* Netgear MA301 */
 	{0x15e8, 0x0130, PCI_ANY_ID, PCI_ANY_ID,},	/* Correga  - does this work? */

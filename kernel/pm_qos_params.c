@@ -387,10 +387,34 @@ static ssize_t pm_qos_power_write(struct file *filp, const char __user *buf,
 	int pm_qos_class;
 
 	pm_qos_class = (long)filp->private_data;
-	if (count != sizeof(s32))
+	if (count == sizeof(s32)) {
+		if (copy_from_user(&value, buf, sizeof(s32)))
+			return -EFAULT;
+	} else if (count <= 11) { /* ASCII perhaps? */
+		char ascii_value[11];
+		unsigned long int ulval;
+		int ret;
+
+		if (copy_from_user(ascii_value, buf, count))
+			return -EFAULT;
+
+		if (count > 10) {
+			if (ascii_value[10] == '\n')
+				ascii_value[10] = '\0';
+			else
+				return -EINVAL;
+		} else {
+			ascii_value[count] = '\0';
+		}
+		ret = strict_strtoul(ascii_value, 16, &ulval);
+		if (ret) {
+			pr_debug("%s, 0x%lx, 0x%x\n", ascii_value, ulval, ret);
+			return -EINVAL;
+		}
+		value = (s32)lower_32_bits(ulval);
+	} else {
 		return -EINVAL;
-	if (copy_from_user(&value, buf, sizeof(s32)))
-		return -EFAULT;
+	}
 	sprintf(name, "process_%d", current->pid);
 	pm_qos_update_requirement(pm_qos_class, name, value);
 

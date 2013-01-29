@@ -29,7 +29,6 @@
 #include "xfs_trace.h"
 #include "xfs_error.h"
 
-STATIC void xfs_ail_splice(struct xfs_ail *, struct list_head *, xfs_lsn_t);
 STATIC void xfs_ail_delete(struct xfs_ail *, xfs_log_item_t *);
 STATIC xfs_log_item_t * xfs_ail_min(struct xfs_ail *);
 STATIC xfs_log_item_t * xfs_ail_next(struct xfs_ail *, xfs_log_item_t *);
@@ -242,9 +241,9 @@ xfs_trans_ail_cursor_clear(
 }
 
 /*
- * Return the item in the AIL with the current lsn.
- * Return the current tree generation number for use
- * in calls to xfs_trans_next_ail().
+ * Initialise the cursor to the first item in the AIL with the given @lsn.
+ * This searches the list from lowest LSN to highest. Pass a @lsn of zero
+ * to initialise the cursor to the first item in the AIL.
  */
 xfs_log_item_t *
 xfs_trans_ail_cursor_first(
@@ -270,6 +269,100 @@ out:
 }
 
 /*
+ * Initialise the cursor to the last item in the AIL with the given @lsn.
+ * This searches the list from highest LSN to lowest. If there is no item with
+ * the value of @lsn, then it sets the cursor to the last item with an LSN lower
+ * than @lsn.
+ */
+static struct xfs_log_item *
+__xfs_trans_ail_cursor_last(
+	struct xfs_ail		*ailp,
+	xfs_lsn_t		lsn)
+{
+	xfs_log_item_t		*lip;
+
+	list_for_each_entry_reverse(lip, &ailp->xa_ail, li_ail) {
+		if (XFS_LSN_CMP(lip->li_lsn, lsn) <= 0)
+			return lip;
+	}
+	return NULL;
+}
+
+/*
+ * Initialise the cursor to the last item in the AIL with the given @lsn.
+ * This searches the list from highest LSN to lowest.
+ */
+struct xfs_log_item *
+xfs_trans_ail_cursor_last(
+	struct xfs_ail		*ailp,
+	struct xfs_ail_cursor	*cur,
+	xfs_lsn_t		lsn)
+{
+	xfs_trans_ail_cursor_init(ailp, cur);
+	cur->item = __xfs_trans_ail_cursor_last(ailp, lsn);
+	return cur->item;
+}
+
+/*
+ * splice the log item list into the AIL at the given LSN. We splice to the
+ * tail of the given LSN to maintain insert order for push traversals. The
+ * cursor is optional, allowing repeated updates to the same LSN to avoid
+ * repeated traversals.
+ */
+static void
+xfs_ail_splice(
+	struct xfs_ail		*ailp,
+	struct xfs_ail_cursor	*cur,
+	struct list_head	*list,
+	xfs_lsn_t		lsn)
+{
+	struct xfs_log_item	*lip = cur ? cur->item : NULL;
+	struct xfs_log_item	*next_lip;
+
+	/*
+	 * Get a new cursor if we don't have a placeholder or the existing one
+	 * has been invalidated.
+	 */
+	if (!lip || (__psint_t)lip & 1) {
+		lip = __xfs_trans_ail_cursor_last(ailp, lsn);
+
+		if (!lip) {
+			/* The list is empty, so just splice and return.  */
+			if (cur)
+				cur->item = NULL;
+			list_splice(list, &ailp->xa_ail);
+			return;
+		}
+	}
+
+	/*
+	 * Our cursor points to the item we want to insert _after_, so we have
+	 * to update the cursor to point to the end of the list we are splicing
+	 * in so that it points to the correct location for the next splice.
+	 * i.e. before the splice
+	 *
+	 *  lsn -> lsn -> lsn + x -> lsn + x ...
+	 *          ^
+	 *          | cursor points here
+	 *
+	 * After the splice we have:
+	 *
+	 *  lsn -> lsn -> lsn -> lsn -> .... -> lsn -> lsn + x -> lsn + x ...
+	 *          ^                            ^
+	 *          | cursor points here         | needs to move here
+	 *
+	 * So we set the cursor to the last item in the list to be spliced
+	 * before we execute the splice, resulting in the cursor pointing to
+	 * the correct item after the splice occurs.
+	 */
+	if (cur) {
+		next_lip = list_entry(list->prev, struct xfs_log_item, li_ail);
+		cur->item = next_lip;
+	}
+	list_splice(list, &lip->li_ail);
+}
+
+/*
  * xfsaild_push does the work of pushing on the AIL.  Returning a timeout of
  * zero indicates that the caller should sleep until woken.
  */
@@ -288,7 +381,20 @@ xfsaild_push(
 	struct xfs_ail_cursor	*cur = &ailp->xa_cursors;
 	int		push_xfsbufd = 0;
 
+	/*
+	 * If last time we ran we encountered pinned items, force the log first
+	 * and wait for it before pushing again.
+	 */
 	spin_lock(&ailp->xa_lock);
+	if (last_pushed_lsn == 0 && ailp->xa_log_flush &&
+	    !list_empty(&ailp->xa_ail)) {
+		ailp->xa_log_flush = 0;
+		spin_unlock(&ailp->xa_lock);
+		XFS_STATS_INC(xs_push_ail_flush);
+		xfs_log_force(mp, XFS_LOG_SYNC);
+		spin_lock(&ailp->xa_lock);
+	}
+
 	target = ailp->xa_target;
 	xfs_trans_ail_cursor_init(ailp, cur);
 	lip = xfs_trans_ail_cursor_first(ailp, cur, *last_lsn);
@@ -348,7 +454,7 @@ xfsaild_push(
 			if (!IOP_PUSHBUF(lip)) {
 				trace_xfs_ail_pushbuf_pinned(lip);
 				stuck++;
-				flush_log = 1;
+				ailp->xa_log_flush++;
 			} else {
 				last_pushed_lsn = lsn;
 			}
@@ -360,7 +466,7 @@ xfsaild_push(
 			trace_xfs_ail_pinned(lip);
 
 			stuck++;
-			flush_log = 1;
+			ailp->xa_log_flush++;
 			break;
 
 		case XFS_ITEM_LOCKED:
@@ -405,16 +511,6 @@ xfsaild_push(
 	xfs_trans_ail_cursor_done(ailp, cur);
 	spin_unlock(&ailp->xa_lock);
 
-	if (flush_log) {
-		/*
-		 * If something we need to push out was pinned, then
-		 * push out the log so it will become unpinned and
-		 * move forward in the AIL.
-		 */
-		XFS_STATS_INC(xs_push_ail_flush);
-		xfs_log_force(mp, 0);
-	}
-
 	if (push_xfsbufd) {
 		/* we've got delayed write buffers to flush */
 		wake_up_process(mp->m_ddev_targp->bt_task);
@@ -423,6 +519,7 @@ xfsaild_push(
 	if (!count) {
 		/* We're past our target or empty, so idle */
 		last_pushed_lsn = 0;
+		ailp->xa_log_flush = 0;
 
 		tout = 50;
 	} else if (XFS_LSN_CMP(lsn, target) >= 0) {
@@ -441,9 +538,13 @@ xfsaild_push(
 		 * were stuck.
 		 *
 		 * Backoff a bit more to allow some I/O to complete before
-		 * continuing from where we were.
+		 * restarting from the start of the AIL. This prevents us
+		 * from spinning on the same items, and if they are pinned will
+		 * all the restart to issue a log force to unpin the stuck
+		 * items.
 		 */
 		tout = 20;
+		last_pushed_lsn = 0;
 	}
 
 	*last_lsn = last_pushed_lsn;
@@ -463,50 +564,6 @@ xfs_ail_push_all(
 	if (threshold_lsn)
 		xfs_ail_push(ailp, threshold_lsn);
 }
-
-/*
- * This is to be called when an item is unlocked that may have
- * been in the AIL.  It will wake up the first member of the AIL
- * wait list if this item's unlocking might allow it to progress.
- * If the item is in the AIL, then we need to get the AIL lock
- * while doing our checking so we don't race with someone going
- * to sleep waiting for this event in xfs_trans_push_ail().
- */
-void
-xfs_trans_unlocked_item(
-	struct xfs_ail	*ailp,
-	xfs_log_item_t	*lip)
-{
-	xfs_log_item_t	*min_lip;
-
-	/*
-	 * If we're forcibly shutting down, we may have
-	 * unlocked log items arbitrarily. The last thing
-	 * we want to do is to move the tail of the log
-	 * over some potentially valid data.
-	 */
-	if (!(lip->li_flags & XFS_LI_IN_AIL) ||
-	    XFS_FORCED_SHUTDOWN(ailp->xa_mount)) {
-		return;
-	}
-
-	/*
-	 * This is the one case where we can call into xfs_ail_min()
-	 * without holding the AIL lock because we only care about the
-	 * case where we are at the tail of the AIL.  If the object isn't
-	 * at the tail, it doesn't matter what result we get back.  This
-	 * is slightly racy because since we were just unlocked, we could
-	 * go to sleep between the call to xfs_ail_min and the call to
-	 * xfs_log_move_tail, have someone else lock us, commit to us disk,
-	 * move us out of the tail of the AIL, and then we wake up.  However,
-	 * the call to xfs_log_move_tail() doesn't do anything if there's
-	 * not enough free space to wake people up so we're safe calling it.
-	 */
-	min_lip = xfs_ail_min(ailp);
-
-	if (min_lip == lip)
-		xfs_log_move_tail(ailp->xa_mount, 1);
-}	/* xfs_trans_unlocked_item */
 
 /*
  * xfs_trans_ail_update - bulk AIL insertion operation.
@@ -533,12 +590,12 @@ xfs_trans_unlocked_item(
 void
 xfs_trans_ail_update_bulk(
 	struct xfs_ail		*ailp,
+	struct xfs_ail_cursor	*cur,
 	struct xfs_log_item	**log_items,
 	int			nr_items,
 	xfs_lsn_t		lsn) __releases(ailp->xa_lock)
 {
 	xfs_log_item_t		*mlip;
-	xfs_lsn_t		tail_lsn;
 	int			mlip_changed = 0;
 	int			i;
 	LIST_HEAD(tmp);
@@ -562,23 +619,13 @@ xfs_trans_ail_update_bulk(
 		list_add(&lip->li_ail, &tmp);
 	}
 
-	xfs_ail_splice(ailp, &tmp, lsn);
-
-	if (!mlip_changed) {
-		spin_unlock(&ailp->xa_lock);
-		return;
-	}
-
-	/*
-	 * It is not safe to access mlip after the AIL lock is dropped, so we
-	 * must get a copy of li_lsn before we do so.  This is especially
-	 * important on 32-bit platforms where accessing and updating 64-bit
-	 * values like li_lsn is not atomic.
-	 */
-	mlip = xfs_ail_min(ailp);
-	tail_lsn = mlip->li_lsn;
+	xfs_ail_splice(ailp, cur, &tmp, lsn);
 	spin_unlock(&ailp->xa_lock);
-	xfs_log_move_tail(ailp->xa_mount, tail_lsn);
+
+	if (mlip_changed && !XFS_FORCED_SHUTDOWN(ailp->xa_mount)) {
+		xlog_assign_tail_lsn(ailp->xa_mount);
+		xfs_log_space_wake(ailp->xa_mount);
+	}
 }
 
 /*
@@ -609,7 +656,6 @@ xfs_trans_ail_delete_bulk(
 	int			nr_items) __releases(ailp->xa_lock)
 {
 	xfs_log_item_t		*mlip;
-	xfs_lsn_t		tail_lsn;
 	int			mlip_changed = 0;
 	int			i;
 
@@ -636,23 +682,12 @@ xfs_trans_ail_delete_bulk(
 		if (mlip == lip)
 			mlip_changed = 1;
 	}
-
-	if (!mlip_changed) {
-		spin_unlock(&ailp->xa_lock);
-		return;
-	}
-
-	/*
-	 * It is not safe to access mlip after the AIL lock is dropped, so we
-	 * must get a copy of li_lsn before we do so.  This is especially
-	 * important on 32-bit platforms where accessing and updating 64-bit
-	 * values like li_lsn is not atomic. It is possible we've emptied the
-	 * AIL here, so if that is the case, pass an LSN of 0 to the tail move.
-	 */
-	mlip = xfs_ail_min(ailp);
-	tail_lsn = mlip ? mlip->li_lsn : 0;
 	spin_unlock(&ailp->xa_lock);
-	xfs_log_move_tail(ailp->xa_mount, tail_lsn);
+
+	if (mlip_changed && !XFS_FORCED_SHUTDOWN(ailp->xa_mount)) {
+		xlog_assign_tail_lsn(ailp->xa_mount);
+		xfs_log_space_wake(ailp->xa_mount);
+	}
 }
 
 /*
@@ -702,37 +737,6 @@ xfs_trans_ail_destroy(
 
 	xfsaild_stop(ailp);
 	kmem_free(ailp);
-}
-
-/*
- * splice the log item list into the AIL at the given LSN.
- */
-STATIC void
-xfs_ail_splice(
-	struct xfs_ail	*ailp,
-	struct list_head *list,
-	xfs_lsn_t	lsn)
-{
-	xfs_log_item_t	*next_lip;
-
-	/*
-	 * If the list is empty, just insert the item.
-	 */
-	if (list_empty(&ailp->xa_ail)) {
-		list_splice(list, &ailp->xa_ail);
-		return;
-	}
-
-	list_for_each_entry_reverse(next_lip, &ailp->xa_ail, li_ail) {
-		if (XFS_LSN_CMP(next_lip->li_lsn, lsn) <= 0)
-			break;
-	}
-
-	ASSERT((&next_lip->li_ail == &ailp->xa_ail) ||
-	       (XFS_LSN_CMP(next_lip->li_lsn, lsn) <= 0));
-
-	list_splice_init(list, &next_lip->li_ail);
-	return;
 }
 
 /*

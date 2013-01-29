@@ -1,7 +1,7 @@
 /****************************************************************************
  * Driver for Solarflare Solarstorm network controllers and boards
  * Copyright 2005-2006 Fen Systems Ltd.
- * Copyright 2006-2009 Solarflare Communications Inc.
+ * Copyright 2006-2010 Solarflare Communications Inc.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published
@@ -18,7 +18,6 @@
 #include "bitfield.h"
 #include "efx.h"
 #include "nic.h"
-#include "mac.h"
 #include "spi.h"
 #include "regs.h"
 #include "io.h"
@@ -49,15 +48,6 @@ static void siena_push_irq_moderation(struct efx_channel *channel)
 				     FRF_CZ_TC_TIMER_VAL, 0);
 	efx_writed_page_locked(channel->efx, &timer_cmd, FR_BZ_TIMER_COMMAND_P0,
 			       channel->channel);
-}
-
-static void siena_push_multicast_hash(struct efx_nic *efx)
-{
-	WARN_ON(!mutex_is_locked(&efx->mac_lock));
-
-	efx_mcdi_rpc(efx, MC_CMD_SET_MCAST_HASH,
-		     efx->multicast_hash.byte, sizeof(efx->multicast_hash),
-		     NULL, 0, NULL);
 }
 
 static int siena_mdio_write(struct net_device *net_dev,
@@ -194,13 +184,30 @@ static int siena_reset_hw(struct efx_nic *efx, enum reset_type method)
 
 static int siena_probe_nvconfig(struct efx_nic *efx)
 {
-	return efx_mcdi_get_board_cfg(efx, efx->net_dev->perm_addr, NULL);
+	u32 caps = 0;
+	int rc;
+
+	rc = efx_mcdi_get_board_cfg(efx, efx->net_dev->perm_addr, NULL, &caps);
+
+	efx->timer_quantum_ns =
+		(caps & (1 << MC_CMD_CAPABILITIES_TURBO_ACTIVE_LBN)) ?
+		3072 : 6144; /* 768 cycles */
+	return rc;
+}
+
+static void siena_dimension_resources(struct efx_nic *efx)
+{
+	/* Each port has a small block of internal SRAM dedicated to
+	 * the buffer table and descriptor caches.  In theory we can
+	 * map both blocks to one port, but we don't.
+	 */
+	efx_nic_dimension_resources(efx, FR_CZ_BUF_FULL_TBL_ROWS / 2);
 }
 
 static int siena_probe_nic(struct efx_nic *efx)
 {
 	struct siena_nic_data *nic_data;
-	bool already_attached = 0;
+	bool already_attached = false;
 	efx_oword_t reg;
 	int rc;
 
@@ -226,13 +233,6 @@ static int siena_probe_nic(struct efx_nic *efx)
 	rc = efx_mcdi_handle_assertion(efx);
 	if (rc)
 		goto fail1;
-
-	rc = efx_mcdi_fwver(efx, &nic_data->fw_version, &nic_data->fw_build);
-	if (rc) {
-		netif_err(efx, probe, efx->net_dev,
-			  "Failed to read MCPU firmware version - rc %d\n", rc);
-		goto fail1; /* MCPU absent? */
-	}
 
 	/* Let the BMC know that the driver is now in charge of link and
 	 * filter settings. We must do this before we reset the NIC */
@@ -278,6 +278,12 @@ static int siena_probe_nic(struct efx_nic *efx)
 	} else if (rc) {
 		goto fail5;
 	}
+
+	rc = efx_mcdi_mon_probe(efx);
+	if (rc)
+		goto fail5;
+
+	efx_sriov_probe(efx);
 
 	return 0;
 
@@ -325,9 +331,7 @@ static int siena_init_nic(struct efx_nic *efx)
 	/* Enable hash insertion. This is broken for the 'Falcon' hash
 	 * if IPv6 hashing is also enabled, so also select Toeplitz
 	 * TCP/IPv4 and IPv4 hashes. */
-#if 0 /* RHEL: we don't want to receive the hash value */
 	EFX_SET_OWORD_FIELD(temp, FRF_BZ_RX_HASH_INSRT_HDR, 1);
-#endif
 	EFX_SET_OWORD_FIELD(temp, FRF_BZ_RX_HASH_ALG, 1);
 	EFX_SET_OWORD_FIELD(temp, FRF_BZ_RX_IP_HASH, 1);
 	efx_writeo(efx, &temp, FR_AZ_RX_CFG);
@@ -350,11 +354,6 @@ static int siena_init_nic(struct efx_nic *efx)
 	       FRF_CZ_RX_RSS_IPV6_TKEY_HI_WIDTH / 8);
 	efx_writeo(efx, &temp, FR_CZ_RX_RSS_IPV6_REG3);
 
-	if (efx_nic_rx_xoff_thresh >= 0 || efx_nic_rx_xon_thresh >= 0)
-		/* No MCDI operation has been defined to set thresholds */
-		netif_err(efx, hw, efx->net_dev,
-			  "ignoring RX flow control thresholds\n");
-
 	/* Enable event logging */
 	rc = efx_mcdi_log_ctrl(efx, true, false, 0);
 	if (rc)
@@ -373,30 +372,30 @@ static int siena_init_nic(struct efx_nic *efx)
 
 static void siena_remove_nic(struct efx_nic *efx)
 {
+	efx_mcdi_mon_remove(efx);
+
 	efx_nic_free_buffer(efx, &efx->irq_status);
 
 	siena_reset_hw(efx, RESET_TYPE_ALL);
 
 	/* Relinquish the device back to the BMC */
-	if (efx_nic_has_mc(efx))
-		efx_mcdi_drv_attach(efx, false, NULL);
+	efx_mcdi_drv_attach(efx, false, NULL);
 
 	/* Tear down the private nic state */
 	kfree(efx->nic_data);
 	efx->nic_data = NULL;
 }
 
-#define STATS_GENERATION_INVALID ((u64)(-1))
+#define STATS_GENERATION_INVALID ((__force __le64)(-1))
 
 static int siena_try_update_nic_stats(struct efx_nic *efx)
 {
-	u64 *dma_stats;
+	__le64 *dma_stats;
 	struct efx_mac_stats *mac_stats;
-	u64 generation_start;
-	u64 generation_end;
+	__le64 generation_start, generation_end;
 
 	mac_stats = &efx->mac_stats;
-	dma_stats = (u64 *)efx->stats_buffer.addr;
+	dma_stats = efx->stats_buffer.addr;
 
 	generation_end = dma_stats[MC_CMD_MAC_GENERATION_END];
 	if (generation_end == STATS_GENERATION_INVALID)
@@ -404,7 +403,7 @@ static int siena_try_update_nic_stats(struct efx_nic *efx)
 	rmb();
 
 #define MAC_STAT(M, D) \
-	mac_stats->M = dma_stats[MC_CMD_MAC_ ## D]
+	mac_stats->M = le64_to_cpu(dma_stats[MC_CMD_MAC_ ## D])
 
 	MAC_STAT(tx_bytes, TX_BYTES);
 	MAC_STAT(tx_bad_bytes, TX_BAD_BYTES);
@@ -474,7 +473,8 @@ static int siena_try_update_nic_stats(struct efx_nic *efx)
 	MAC_STAT(rx_internal_error, RX_INTERNAL_ERROR_PKTS);
 	mac_stats->rx_good_lt64 = 0;
 
-	efx->n_rx_nodesc_drop_cnt = dma_stats[MC_CMD_MAC_RX_NODESC_DROPS];
+	efx->n_rx_nodesc_drop_cnt =
+		le64_to_cpu(dma_stats[MC_CMD_MAC_RX_NODESC_DROPS]);
 
 #undef MAC_STAT
 
@@ -503,7 +503,7 @@ static void siena_update_nic_stats(struct efx_nic *efx)
 
 static void siena_start_nic_stats(struct efx_nic *efx)
 {
-	u64 *dma_stats = (u64 *)efx->stats_buffer.addr;
+	__le64 *dma_stats = efx->stats_buffer.addr;
 
 	dma_stats[MC_CMD_MAC_GENERATION_END] = STATS_GENERATION_INVALID;
 
@@ -514,16 +514,6 @@ static void siena_start_nic_stats(struct efx_nic *efx)
 static void siena_stop_nic_stats(struct efx_nic *efx)
 {
 	efx_mcdi_mac_stats(efx, efx->stats_buffer.dma_addr, 0, 0, 0);
-}
-
-void siena_print_fwver(struct efx_nic *efx, char *buf, size_t len)
-{
-	struct siena_nic_data *nic_data = efx->nic_data;
-	snprintf(buf, len, "%u.%u.%u.%u",
-		 (unsigned int)(nic_data->fw_version >> 48),
-		 (unsigned int)(nic_data->fw_version >> 32 & 0xffff),
-		 (unsigned int)(nic_data->fw_version >> 16 & 0xffff),
-		 (unsigned int)(nic_data->fw_version & 0xffff));
 }
 
 /**************************************************************************
@@ -605,10 +595,11 @@ static void siena_init_wol(struct efx_nic *efx)
  **************************************************************************
  */
 
-struct efx_nic_type siena_a0_nic_type = {
+const struct efx_nic_type siena_a0_nic_type = {
 	.probe = siena_probe_nic,
 	.remove = siena_remove_nic,
 	.init = siena_init_nic,
+	.dimension_resources = siena_dimension_resources,
 	.fini = efx_port_dummy_op_void,
 	.monitor = NULL,
 	.reset = siena_reset_hw,
@@ -620,14 +611,14 @@ struct efx_nic_type siena_a0_nic_type = {
 	.stop_stats = siena_stop_nic_stats,
 	.set_id_led = efx_mcdi_set_id_led,
 	.push_irq_moderation = siena_push_irq_moderation,
-	.push_multicast_hash = siena_push_multicast_hash,
+	.reconfigure_mac = efx_mcdi_mac_reconfigure,
+	.check_mac_fault = efx_mcdi_mac_check_fault,
 	.reconfigure_port = efx_mcdi_phy_reconfigure,
 	.get_wol = siena_get_wol,
 	.set_wol = siena_set_wol,
 	.resume_wol = siena_init_wol,
 	.test_registers = siena_test_registers,
 	.test_nvram = efx_mcdi_nvram_test_all,
-	.default_mac_ops = &efx_mcdi_mac_operations,
 
 	.revision = EFX_REV_SIENA_A0,
 	.mem_map_size = (FR_CZ_MC_TREG_SMEM +
@@ -638,13 +629,14 @@ struct efx_nic_type siena_a0_nic_type = {
 	.evq_ptr_tbl_base = FR_BZ_EVQ_PTR_TBL,
 	.evq_rptr_tbl_base = FR_BZ_EVQ_RPTR,
 	.max_dma_mask = DMA_BIT_MASK(FSF_AZ_TX_KER_BUF_ADDR_WIDTH),
+	.rx_buffer_hash_size = 0x10,
 	.rx_buffer_padding = 0,
 	.max_interrupt_mode = EFX_INT_MODE_MSIX,
 	.phys_addr_channels = 32, /* Hardware limit is 64, but the legacy
 				   * interrupt handler only supports 32
 				   * channels */
-	.tx_dc_base = 0x88000,
-	.rx_dc_base = 0x68000,
-	.offload_features = (NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM),
+	.timer_period_max = 1 << FRF_CZ_TC_TIMER_VAL_WIDTH,
+	.offload_features = (NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM |
+			     NETIF_F_RXHASH | NETIF_F_NTUPLE),
 	.reset_world_flags = ETH_RESET_MGMT << ETH_RESET_SHARED_SHIFT,
 };

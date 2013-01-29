@@ -1070,6 +1070,8 @@ struct sctp_transport {
 
 	/* 64-bit random number sent with heartbeat. */
 	__u64 hb_nonce;
+
+	struct rcu_head rcu;
 };
 
 struct sctp_transport *sctp_transport_new(const union sctp_addr *,

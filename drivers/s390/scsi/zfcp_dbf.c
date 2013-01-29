@@ -153,6 +153,8 @@ void _zfcp_dbf_hba_fsf_response(const char *tag2, int level,
 		if (scsi_cmnd) {
 			response->u.fcp.cmnd = (unsigned long)scsi_cmnd;
 			response->u.fcp.serial = scsi_cmnd->serial_number;
+			response->u.fcp.data_dir =
+				qtcb->bottom.io.data_direction;
 		}
 		break;
 
@@ -263,12 +265,18 @@ void _zfcp_dbf_hba_fsf_unsol(const char *tag, int level, struct zfcp_dbf *dbf,
  * @qdio_error: as passed by qdio module
  * @sbal_index: first buffer with error condition, as passed by qdio module
  * @sbal_count: number of buffers affected, as passed by qdio module
+ * @req_id: FSF request id of deferred error with data router, or 0
+ * @adapter_scount: number of SBALs of deferred error with data router, or 0
+ * @scount: capped number of SBALs of deferred error with data router, or 0
+ * @pl: payload of deferred error with data router, or NULL
  */
 void zfcp_dbf_hba_qdio(struct zfcp_dbf *dbf, unsigned int qdio_error,
-		       int sbal_index, int sbal_count)
+		       int sbal_index, int sbal_count,
+		       u32 req_id, u8 scount, void *pl[])
 {
 	struct zfcp_dbf_hba_record *r = &dbf->hba_buf;
 	unsigned long flags;
+	int level = 0;
 
 	spin_lock_irqsave(&dbf->hba_lock, flags);
 	memset(r, 0, sizeof(*r));
@@ -276,7 +284,69 @@ void zfcp_dbf_hba_qdio(struct zfcp_dbf *dbf, unsigned int qdio_error,
 	r->u.qdio.qdio_error = qdio_error;
 	r->u.qdio.sbal_index = sbal_index;
 	r->u.qdio.sbal_count = sbal_count;
-	debug_event(dbf->hba, 0, r, sizeof(*r));
+	if (pl) {
+		r->u.qdio.fsf_reqid = req_id;
+		r->u.qdio.scount = scount;
+	}
+	debug_event(dbf->hba, level, r, sizeof(*r));
+	if (pl) {
+		struct zfcp_dbf_dump *dump = (struct zfcp_dbf_dump *)r;
+		int pl_idx, sbal_off, dbf_off, sbal_tail, dbf_tail, chunk,
+			dump_off, dump_chunk;
+		/* The dump consists of one or more dbf records which
+		   are filled densely and copied chunk-wise from one
+		   or more sbals pointed to by pl vector. sbals have a
+		   different size than dbf records. */
+		pl_idx = 0;
+		sbal_off = 0;
+		sbal_tail = sizeof(struct qdio_buffer);
+		dbf_off = 0;
+		dbf_tail = sizeof(*r) - sizeof(*dump)/*headroom*/;
+		dump_off = 0;
+		dump_chunk = 0;
+		memset(r, 0, sizeof(*r));
+		strncpy(dump->tag, "dump", ZFCP_DBF_TAG_SIZE);
+		dump->total_size = scount * sizeof(struct qdio_buffer);
+		dump->offset = dump_off;
+		for (;;) {
+			chunk = min(sbal_tail, dbf_tail);
+			if (pl_idx >= scount || !pl[pl_idx]) {
+				if (dbf_off) { /* last (partial) dbf record */
+					dump->size = dump_chunk;
+					debug_event(dbf->hba, level, dump,
+						    dump->size + sizeof(*dump));
+				}
+				break;
+			}
+			memcpy(dump->data + dbf_off,
+			       pl[pl_idx] + sbal_off, chunk);
+			sbal_off  += chunk;
+			sbal_tail -= chunk;
+			dbf_off   += chunk;
+			dbf_tail  -= chunk;
+			dump_chunk += chunk;
+			if (!sbal_tail) { /* move to next sbal */
+				pl_idx++;
+				sbal_off = 0;
+				sbal_tail = sizeof(struct qdio_buffer);
+			}
+			if (!dbf_tail) { /* move to next dbf record */
+				dump->size = dump_chunk;
+				debug_event(dbf->hba, level, dump,
+					    dump->size + sizeof(*dump));
+				dump_off += dump->size;
+				dump_chunk = 0;
+				dbf_off = 0;
+				dbf_tail = sizeof(*r) - sizeof(*dump);
+				memset(r, 0, sizeof(*r));
+				strncpy(dump->tag, "dump", ZFCP_DBF_TAG_SIZE);
+				dump->total_size =
+					scount * sizeof(struct qdio_buffer);
+				dump->offset = dump_off;
+				/* continue; */
+			}
+		}
+	} /* if (pl) */
 	spin_unlock_irqrestore(&dbf->hba_lock, flags);
 }
 
@@ -325,6 +395,7 @@ static void zfcp_dbf_hba_view_response(char **p,
 	case FSF_QTCB_FCP_CMND:
 		if (r->fsf_req_status & ZFCP_STATUS_FSFREQ_TASK_MANAGEMENT)
 			break;
+		zfcp_dbf_out(p, "data_direction", "0x%04x", r->u.fcp.data_dir);
 		zfcp_dbf_out(p, "scsi_cmnd", "0x%0Lx", r->u.fcp.cmnd);
 		zfcp_dbf_out(p, "scsi_serial", "0x%016Lx", r->u.fcp.serial);
 		p += sprintf(*p, "\n");
@@ -379,6 +450,8 @@ static void zfcp_dbf_hba_view_qdio(char **p, struct zfcp_dbf_hba_record_qdio *r)
 	zfcp_dbf_out(p, "qdio_error", "0x%08x", r->qdio_error);
 	zfcp_dbf_out(p, "sbal_index", "0x%02x", r->sbal_index);
 	zfcp_dbf_out(p, "sbal_count", "0x%02x", r->sbal_count);
+	zfcp_dbf_out(p, "fsf_reqid", "0x%0Lx", r->fsf_reqid);
+	zfcp_dbf_out(p, "scount", "0x%02x", r->scount);
 }
 
 static void zfcp_dbf_hba_view_berr(char **p, struct fsf_bit_error_payload *r)
@@ -870,8 +943,9 @@ void _zfcp_dbf_scsi(const char *tag, const char *tag2, int level,
 	struct zfcp_dbf_scsi_record *rec = &dbf->scsi_buf;
 	struct zfcp_dbf_dump *dump = (struct zfcp_dbf_dump *)rec;
 	unsigned long flags;
-	struct fcp_rsp_iu *fcp_rsp;
-	char *fcp_rsp_info = NULL, *fcp_sns_info = NULL;
+	struct fcp_resp_with_ext *fcp_rsp;
+	struct fcp_resp_rsp_info *fcp_rsp_info = NULL;
+	char *fcp_sns_info = NULL;
 	int offset = 0, buflen = 0;
 
 	spin_lock_irqsave(&dbf->scsi_lock, flags);
@@ -895,20 +969,22 @@ void _zfcp_dbf_scsi(const char *tag, const char *tag2, int level,
 				rec->scsi_allowed = scsi_cmnd->allowed;
 			}
 			if (fsf_req != NULL) {
-				fcp_rsp = (struct fcp_rsp_iu *)
-				    &(fsf_req->qtcb->bottom.io.fcp_rsp);
-				fcp_rsp_info = (unsigned char *) &fcp_rsp[1];
-				fcp_sns_info =
-				    zfcp_get_fcp_sns_info_ptr(fcp_rsp);
+				fcp_rsp = (struct fcp_resp_with_ext *)
+					&(fsf_req->qtcb->bottom.io.fcp_rsp);
+				fcp_rsp_info = (struct fcp_resp_rsp_info *)
+					&fcp_rsp[1];
+				fcp_sns_info = (char *) &fcp_rsp[1];
+				if (fcp_rsp->resp.fr_flags & FCP_RSP_LEN_VAL)
+					fcp_sns_info += fcp_rsp->ext.fr_sns_len;
 
-				rec->rsp_validity = fcp_rsp->validity.value;
-				rec->rsp_scsi_status = fcp_rsp->scsi_status;
-				rec->rsp_resid = fcp_rsp->fcp_resid;
-				if (fcp_rsp->validity.bits.fcp_rsp_len_valid)
-					rec->rsp_code = *(fcp_rsp_info + 3);
-				if (fcp_rsp->validity.bits.fcp_sns_len_valid) {
-					buflen = min((int)fcp_rsp->fcp_sns_len,
-						     ZFCP_DBF_SCSI_MAX_FCP_SNS_INFO);
+				rec->rsp_validity = fcp_rsp->resp.fr_flags;
+				rec->rsp_scsi_status = fcp_rsp->resp.fr_status;
+				rec->rsp_resid = fcp_rsp->ext.fr_resid;
+				if (fcp_rsp->resp.fr_flags & FCP_RSP_LEN_VAL)
+					rec->rsp_code = fcp_rsp_info->rsp_code;
+				if (fcp_rsp->resp.fr_flags & FCP_SNS_LEN_VAL) {
+					buflen = min(fcp_rsp->ext.fr_sns_len,
+					   (u32)ZFCP_DBF_SCSI_MAX_FCP_SNS_INFO);
 					rec->sns_info_len = buflen;
 					memcpy(rec->sns_info, fcp_sns_info,
 					       min(buflen,

@@ -348,7 +348,7 @@
 /* #define __NR_prlimit64		340 */
 /* #define __NR_name_to_handle_at	341 */
 /* #define __NR_open_by_handle_at  	342 */
-/* #define __NR_clock_adjtime		343 */
+#define __NR_clock_adjtime	343
 #define __NR_syncfs             344
 #define __NR_sendmmsg		345
 /* #define __NR_set_ns		346 */

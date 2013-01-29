@@ -1,6 +1,6 @@
 /*
  * QLogic Fibre Channel HBA Driver
- * Copyright (c)  2003-2011 QLogic Corporation
+ * Copyright (c)  2003-2012 QLogic Corporation
  *
  * See LICENSE.qla2xxx for copyright and licensing details.
  */
@@ -26,6 +26,7 @@
 #define CRB_RCVPEG_STATE		QLA82XX_REG(0x13c)
 #define BOOT_LOADER_DIMM_STATUS		QLA82XX_REG(0x54)
 #define CRB_DMA_SHIFT			QLA82XX_REG(0xcc)
+#define CRB_TEMP_STATE			QLA82XX_REG(0x1b4)
 #define	QLA82XX_DMA_SHIFT_VALUE		0x55555555
 
 #define QLA82XX_HW_H0_CH_HUB_ADR    0x05
@@ -542,14 +543,15 @@
 #define QLA82XX_CRB_DRV_IDC_VERSION  (QLA82XX_CAM_RAM(0x174))
 
 /* Every driver should use these Device State */
-#define QLA82XX_DEV_COLD		1
-#define QLA82XX_DEV_INITIALIZING	2
-#define QLA82XX_DEV_READY		3
-#define QLA82XX_DEV_NEED_RESET		4
-#define QLA82XX_DEV_NEED_QUIESCENT	5
-#define QLA82XX_DEV_FAILED		6
-#define QLA82XX_DEV_QUIESCENT		7
+#define QLA8XXX_DEV_COLD		1
+#define QLA8XXX_DEV_INITIALIZING	2
+#define QLA8XXX_DEV_READY		3
+#define QLA8XXX_DEV_NEED_RESET		4
+#define QLA8XXX_DEV_NEED_QUIESCENT	5
+#define QLA8XXX_DEV_FAILED		6
+#define QLA8XXX_DEV_QUIESCENT		7
 #define MAX_STATES			8
+#define QLA8XXX_BAD_VALUE		0xbad0bad0
 
 #define QLA82XX_IDC_VERSION			1
 #define QLA82XX_ROM_DEV_INIT_TIMEOUT		30
@@ -866,7 +868,7 @@ struct fcp_cmnd {
 	struct scsi_lun lun;
 	uint8_t crn;
 	uint8_t task_attribute;
-	uint8_t task_managment;
+	uint8_t task_management;
 	uint8_t additional_cdb_len;
 	uint8_t cdb[260]; /* 256 for CDB len and 4 for FCP_DL */
 };
@@ -1178,4 +1180,16 @@ static const int MD_MIU_TEST_AGT_RDDATA[] = { 0x410000A8, 0x410000AC,
 #define CRB_NIU_XG_PAUSE_CTL_P0        0x1
 #define CRB_NIU_XG_PAUSE_CTL_P1        0x8
 
+#define qla82xx_get_temp_val(x)          ((x) >> 16)
+#define qla82xx_get_temp_state(x)        ((x) & 0xffff)
+#define qla82xx_encode_temp(val, state)  (((val) << 16) | (state))
+
+/*
+ * Temperature control.
+ */
+enum {
+	QLA82XX_TEMP_NORMAL = 0x1,       /* Normal operating range */
+	QLA82XX_TEMP_WARN,       	/* Sound alert, temperature getting high */
+	QLA82XX_TEMP_PANIC       	/* Fatal error, hardware has shut down. */
+};
 #endif

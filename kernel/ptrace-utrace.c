@@ -403,7 +403,7 @@ static u32 ptrace_report_clone(u32 action, struct utrace_engine *engine,
 		return UTRACE_RESUME;
 
 	set_stop_code(ctx, event);
-	ctx->eventmsg = child->pid;
+	ctx->eventmsg = task_pid_vnr(child);
 	/*
 	 * We shouldn't stop now, inside the do_fork() path.
 	 * We will stop later, before return to user-mode.

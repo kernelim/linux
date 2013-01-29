@@ -1,6 +1,6 @@
 /*
  * QLogic Fibre Channel HBA Driver
- * Copyright (c)  2003-2011 QLogic Corporation
+ * Copyright (c)  2003-2012 QLogic Corporation
  *
  * See LICENSE.qla2xxx for copyright and licensing details.
  */
@@ -115,6 +115,82 @@
 #define WRT_REG_DWORD(addr, data)	writel(data,addr)
 
 /*
+ * ISP83XX specific remote register addresses
+ */
+#define QLA83XX_LED_PORT0			0x00201320
+#define QLA83XX_LED_PORT1			0x00201328
+#define QLA83XX_IDC_DEV_STATE		0x22102384
+#define QLA83XX_IDC_MAJOR_VERSION	0x22102380
+#define QLA83XX_IDC_MINOR_VERSION	0x22102398
+#define QLA83XX_IDC_DRV_PRESENCE	0x22102388
+#define QLA83XX_IDC_DRIVER_ACK		0x2210238c
+#define QLA83XX_IDC_CONTROL			0x22102390
+#define QLA83XX_IDC_AUDIT			0x22102394
+#define QLA83XX_IDC_LOCK_RECOVERY	0x2210239c
+#define QLA83XX_DRIVER_LOCKID		0x22102104
+#define QLA83XX_DRIVER_LOCK			0x8111c028
+#define QLA83XX_DRIVER_UNLOCK		0x8111c02c
+#define QLA83XX_FLASH_LOCKID		0x22102100
+#define QLA83XX_FLASH_LOCK			0x8111c010
+#define QLA83XX_FLASH_UNLOCK		0x8111c014
+#define QLA83XX_DEV_PARTINFO1		0x221023e0
+#define QLA83XX_DEV_PARTINFO2		0x221023e4
+#define QLA83XX_FW_HEARTBEAT		0x221020b0
+#define QLA83XX_PEG_HALT_STATUS1	0x221020a8
+#define QLA83XX_PEG_HALT_STATUS2	0x221020ac
+
+/* 83XX: Macros defining 8200 AEN Reason codes */
+#define IDC_DEVICE_STATE_CHANGE BIT_0
+#define IDC_PEG_HALT_STATUS_CHANGE BIT_1
+#define IDC_NIC_FW_REPORTED_FAILURE BIT_2
+#define IDC_HEARTBEAT_FAILURE BIT_3
+
+/* 83XX: Macros defining 8200 AEN Error-levels */
+#define ERR_LEVEL_NON_FATAL 0x1
+#define ERR_LEVEL_RECOVERABLE_FATAL 0x2
+#define ERR_LEVEL_UNRECOVERABLE_FATAL 0x4
+
+/* 83XX: Macros for IDC Version */
+#define QLA83XX_SUPP_IDC_MAJOR_VERSION 0x01
+#define QLA83XX_SUPP_IDC_MINOR_VERSION 0x0
+
+/* 83XX: Macros for scheduling dpc tasks */
+#define QLA83XX_NIC_CORE_RESET 0x1
+#define QLA83XX_IDC_STATE_HANDLER 0x2
+#define QLA83XX_NIC_CORE_UNRECOVERABLE 0x3
+
+/* 83XX: Macros for defining IDC-Control bits */
+#define QLA83XX_IDC_RESET_DISABLED BIT_0
+#define QLA83XX_IDC_GRACEFUL_RESET BIT_1
+
+/* 83XX: Macros for different timeouts */
+#define QLA83XX_IDC_INITIALIZATION_TIMEOUT 30
+#define QLA83XX_IDC_RESET_ACK_TIMEOUT 10
+#define QLA83XX_MAX_LOCK_RECOVERY_WAIT (2 * HZ)
+
+/* 83XX: Macros for defining class in DEV-Partition Info register */
+#define QLA83XX_CLASS_TYPE_NONE		0x0
+#define QLA83XX_CLASS_TYPE_NIC		0x1
+#define QLA83XX_CLASS_TYPE_FCOE		0x2
+#define QLA83XX_CLASS_TYPE_ISCSI	0x3
+
+/* 83XX: Macros for IDC Lock-Recovery stages */
+#define IDC_LOCK_RECOVERY_STAGE1	0x1 /* Stage1: Intent for
+					     * lock-recovery
+					     */
+#define IDC_LOCK_RECOVERY_STAGE2	0x2 /* Stage2: Perform lock-recovery */
+
+/* 83XX: Macros for IDC Audit type */
+#define IDC_AUDIT_TIMESTAMP		0x0 /* IDC-AUDIT: Record timestamp of
+					     * dev-state change to NEED-RESET
+					     * or NEED-QUIESCENT
+					     */
+#define IDC_AUDIT_COMPLETION		0x1 /* IDC-AUDIT: Record duration of
+					     * reset-recovery completion is
+					     * second
+					     */
+
+/*
  * The ISP2312 v2 chip cannot access the FLASH/GPIO registers via MMIO in an
  * 133Mhz slot.
  */
@@ -129,6 +205,7 @@
 #define MAX_FIBRE_DEVICES_2400	2048
 #define MAX_FIBRE_DEVICES_LOOP	128
 #define MAX_FIBRE_DEVICES_MAX	MAX_FIBRE_DEVICES_2400
+#define LOOPID_MAP_SIZE		(ha->max_fibre_devices)
 #define MAX_FIBRE_LUNS  	0xFFFF
 #define	MAX_HOST_COUNT		16
 
@@ -176,8 +253,8 @@
 #define LOOP_DOWN_TIME			255	/* 240 */
 #define	LOOP_DOWN_RESET			(LOOP_DOWN_TIME - 30)
 
-/* Maximum outstanding commands in ISP queues (1-65535) */
-#define MAX_OUTSTANDING_COMMANDS	1024
+#define DEFAULT_OUTSTANDING_COMMANDS	1024
+#define MIN_OUTSTANDING_COMMANDS	128
 
 /* ISP request and response entry counts (37-65535) */
 #define REQUEST_ENTRY_CNT_2100		128	/* Number of request entries. */
@@ -258,6 +335,7 @@ struct srb_iocb {
 #define SRB_ADISC_CMD	6
 #define SRB_TM_CMD	7
 #define SRB_SCSI_CMD	8
+#define SRB_BIDI_CMD	9
 
 typedef struct srb {
 	atomic_t ref_count;
@@ -593,6 +671,18 @@ typedef struct {
 #define MBA_DISCARD_RND_FRAME	0x8048	/* discard RND frame due to error. */
 #define MBA_REJECTED_FCP_CMD	0x8049	/* rejected FCP_CMD. */
 
+/* 83XX FCoE specific */
+#define MBA_IDC_AEN		0x8200  /* FCoE: NIC Core state change AEN */
+
+/* Interrupt type codes */
+#define INTR_ROM_MB_SUCCESS		0x1
+#define INTR_ROM_MB_FAILED		0x2
+#define INTR_MB_SUCCESS			0x10
+#define INTR_MB_FAILED			0x11
+#define INTR_ASYNC_EVENT		0x12
+#define INTR_RSP_QUE_UPDATE		0x13
+#define INTR_RSP_QUE_UPDATE_83XX	0x14
+
 /* ISP mailbox loopback echo diagnostic error code */
 #define MBS_LB_RESET	0x17
 /*
@@ -717,6 +807,7 @@ typedef struct {
 #define MBC_SEND_RNFT_ELS		0x5e	/* Send RNFT ELS request */
 #define MBC_GET_LINK_PRIV_STATS		0x6d	/* Get link & private data. */
 #define MBC_SET_VENDOR_ID		0x76	/* Set Vendor ID. */
+#define MBC_PORT_RESET			0x120	/* Port Reset */
 #define MBC_SET_PORT_CONFIG		0x122	/* Set port configuration */
 #define MBC_GET_PORT_CONFIG		0x123	/* Get port configuration */
 
@@ -1358,9 +1449,10 @@ typedef struct {
 } cont_a64_entry_t;
 
 #define PO_MODE_DIF_INSERT	0
-#define PO_MODE_DIF_REMOVE	BIT_0
-#define PO_MODE_DIF_PASS	BIT_1
-#define PO_MODE_DIF_REPLACE	(BIT_0 + BIT_1)
+#define PO_MODE_DIF_REMOVE	1
+#define PO_MODE_DIF_PASS	2
+#define PO_MODE_DIF_REPLACE	3
+#define PO_MODE_DIF_TCP_CKSUM	6
 #define PO_ENABLE_DIF_BUNDLING	BIT_8
 #define PO_ENABLE_INCR_GUARD_SEED	BIT_3
 #define PO_DISABLE_INCR_REF_TAG	BIT_5
@@ -1492,6 +1584,13 @@ typedef struct {
 #define CS_RETRY		0x82	/* Driver defined */
 #define CS_LOOP_DOWN_ABORT	0x83	/* Driver defined */
 
+#define CS_BIDIR_RD_OVERRUN			0x700
+#define CS_BIDIR_RD_WR_OVERRUN			0x707
+#define CS_BIDIR_RD_OVERRUN_WR_UNDERRUN		0x715
+#define CS_BIDIR_RD_UNDERRUN			0x1500
+#define CS_BIDIR_RD_UNDERRUN_WR_OVERRUN		0x1507
+#define CS_BIDIR_RD_WR_UNDERRUN			0x1515
+#define CS_BIDIR_DMA				0x200
 /*
  * Status entry status flags
  */
@@ -1719,10 +1818,12 @@ typedef struct fc_port {
 	struct fc_rport *rport, *drport;
 	u32 supported_classes;
 
-	uint16_t vp_idx;
 	uint8_t fc4_type;
 	uint8_t scan_state;
 } fc_port_t;
+
+#define QLA_FCPORT_SCAN_NONE	0
+#define QLA_FCPORT_SCAN_FOUND	1
 
 /*
  * Fibre channel port/lun states.
@@ -2353,6 +2454,11 @@ struct qla_statistics {
 	uint64_t output_bytes;
 };
 
+struct bidi_statistics {
+	unsigned long long io_count;
+	unsigned long long transfer_bytes;
+};
+
 /* Multi queue support */
 #define MBC_INITIALIZE_MULTIQ 0x1f
 #define QLA_QUE_PAGE 0X1000
@@ -2407,8 +2513,10 @@ struct req_que {
 	uint16_t  qos;
 	uint16_t  vp_idx;
 	struct rsp_que *rsp;
-	srb_t *outstanding_cmds[MAX_OUTSTANDING_COMMANDS];
+	srb_t **outstanding_cmds;
 	uint32_t current_outstanding_cmd;
+	uint16_t num_outstanding_cmds;
+#define	MAX_Q_DEPTH		32
 	int max_q_depth;
 };
 
@@ -2455,12 +2563,15 @@ struct qla_hw_data {
 		uint32_t	disable_msix_handshake	:1;
 		uint32_t	fcp_prio_enabled	:1;
 		uint32_t	isp82xx_fw_hung:1;
+		uint32_t	nic_core_hung:1;
 
 		uint32_t	quiesce_owner:1;
 		uint32_t	thermal_supported:1;
-		uint32_t	isp82xx_reset_hdlr_active:1;
-		uint32_t	isp82xx_reset_owner:1;
-		/* 28 bits */
+		uint32_t	nic_core_reset_hdlr_active:1;
+		uint32_t	nic_core_reset_owner:1;
+		uint32_t	isp82xx_no_md_cap:1;
+		uint32_t	idc_compl_status:1;
+		/* 31 bits */
 	} flags;
 
 	/* This spinlock is used to protect "io transactions", you must
@@ -2614,6 +2725,16 @@ struct qla_hw_data {
 #define HAS_EXTENDED_IDS(ha)    ((ha)->device_type & DT_EXTENDED_IDS)
 #define IS_CT6_SUPPORTED(ha)	((ha)->device_type & DT_CT6_SUPPORTED)
 #define IS_MQUE_CAPABLE(ha)    	((ha)->mqenable || IS_QLA83XX(ha))
+#define IS_BIDI_CAPABLE(ha)	((IS_QLA25XX(ha) || IS_QLA2031(ha)))
+/* Bit 21 of fw_attributes decides the MCTP capabilities */
+#define IS_MCTP_CAPABLE(ha)	(IS_QLA2031(ha) && \
+				((ha)->fw_attributes_ext[0] & BIT_0))
+#define IS_PI_UNINIT_CAPABLE(ha)	(IS_QLA83XX(ha))
+#define IS_PI_IPGUARD_CAPABLE(ha)	(IS_QLA83XX(ha))
+#define IS_PI_DIFB_DIX0_CAPABLE(ha)	(0)
+#define IS_PI_SPLIT_DET_CAPABLE_HBA(ha)	(IS_QLA83XX(ha))
+#define IS_PI_SPLIT_DET_CAPABLE(ha)	(IS_PI_SPLIT_DET_CAPABLE_HBA(ha) && \
+    (((ha)->fw_attributes_h << 16 | (ha)->fw_attributes) & BIT_22))
 
 	/* HBA serial number */
 	uint8_t		serial0;
@@ -2697,6 +2818,7 @@ struct qla_hw_data {
 	struct completion mbx_intr_comp;  /* Used for completion notification */
 	struct completion dcbx_comp;	/* For set port config notification */
 	int notify_dcbx_comp;
+	struct mutex selflogin_lock;
 
 	/* Basic firmware related information. */
 	uint16_t	fw_major_version;
@@ -2712,6 +2834,7 @@ struct qla_hw_data {
 #define RISC_START_ADDRESS_2300 0x800
 #define RISC_START_ADDRESS_2400 0x100000
 	uint16_t	fw_xcb_count;
+	uint16_t	fw_iocb_count;
 
 	uint16_t	fw_options[16];         /* slots: 1,2,3,10,11 */
 	uint8_t		fw_seriallink_options[4];
@@ -2728,7 +2851,12 @@ struct qla_hw_data {
 	int		fw_dump_reading;
 	dma_addr_t	eft_dma;
 	void		*eft;
-
+/* Current size of mctp dump is 0x086064 bytes */
+#define MCTP_DUMP_SIZE  0x086064
+	dma_addr_t	mctp_dump_dma;
+	void		*mctp_dump;
+	int		mctp_dumped;
+	int		mctp_dump_reading;
 	uint32_t	chain_offset;
 	struct dentry *dfs_dir;
 	struct dentry *dfs_fce;
@@ -2804,7 +2932,6 @@ struct qla_hw_data {
 					/* ISP2322: red, green, amber. */
 	uint16_t        zio_mode;
 	uint16_t        zio_timer;
-	struct fc_host_statistics fc_host_stat;
 
 	struct qla_msix_entry *msix_entries;
 
@@ -2817,7 +2944,6 @@ struct qla_hw_data {
 	int             cur_vport_count;
 
 	struct qla_chip_state_84xx *cs84xx;
-	struct qla_statistics qla_stats;
 	struct isp_operations *isp_ops;
 	struct workqueue_struct *wq;
 	struct qlfc_fw fw_buf;
@@ -2842,8 +2968,8 @@ struct qla_hw_data {
 	unsigned long 	mn_win_crb;
 	unsigned long 	ms_win_crb;
 	int		qdr_sn_window;
-	uint32_t 	nx_dev_init_timeout;
-	uint32_t 	nx_reset_timeout;
+	uint32_t	fcoe_dev_init_timeout;
+	uint32_t	fcoe_reset_timeout;
 	rwlock_t 	hw_lock;
 	uint16_t 	portnum; /* port number */
 	int 		link_width;
@@ -2863,6 +2989,26 @@ struct qla_hw_data {
 	dma_addr_t	md_tmplt_hdr_dma;
 	void		*md_dump;
 	uint32_t        md_dump_size;
+
+	void		*loop_id_map;
+
+	/* QLA83XX IDC specific fields */
+	uint32_t	idc_audit_ts;
+
+	/* DPC low-priority workqueue */
+	struct workqueue_struct *dpc_lp_wq;
+	struct work_struct idc_aen;
+	/* DPC high-priority workqueue */
+	struct workqueue_struct *dpc_hp_wq;
+	struct work_struct nic_core_reset;
+	struct work_struct idc_state_handler;
+	struct work_struct nic_core_unrecoverable;
+
+#define HOST_QUEUE_RAMPDOWN_INTERVAL           (60 * HZ)
+#define HOST_QUEUE_RAMPUP_INTERVAL             (30 * HZ)
+	unsigned long   host_last_rampdown_time;
+	unsigned long   host_last_rampup_time;
+	int             cfg_lun_q_depth;
 };
 
 /*
@@ -2920,6 +3066,8 @@ typedef struct scsi_qla_host {
 #define FCOE_CTX_RESET_NEEDED	18	/* Initiate FCoE context reset */
 #define MPI_RESET_NEEDED	19	/* Initiate MPI FW reset */
 #define ISP_QUIESCE_NEEDED	20	/* Driver need some quiescence */
+#define HOST_RAMP_DOWN_QUEUE_DEPTH	21
+#define HOST_RAMP_UP_QUEUE_DEPTH	22
 
 	uint32_t	device_flags;
 #define SWITCH_FOUND		BIT_0
@@ -2928,6 +3076,13 @@ typedef struct scsi_qla_host {
 
 	/* ISP configuration data. */
 	uint16_t	loop_id;		/* Host adapter loop id */
+	uint16_t        self_login_loop_id;     /* host adapter loop id
+						 * get it on self login
+						 */
+	fc_port_t       bidir_fcport;		/* fcport used for bidir cmnds
+						 * no need of allocating it for
+						 * each command
+						 */
 
 	port_id_t	d_id;			/* Host adapter port id */
 	uint8_t		marker_needed;
@@ -2979,6 +3134,9 @@ typedef struct scsi_qla_host {
 	struct req_que *req;
 	int		fw_heartbeat_counter;
 	int		seconds_since_last_heartbeat;
+	struct fc_host_statistics fc_host_stat;
+	struct qla_statistics qla_stats;
+	struct bidi_statistics bidi_stats;
 
 	atomic_t	vref_count;
 } scsi_qla_host_t;
@@ -3033,8 +3191,6 @@ typedef struct scsi_qla_host {
 #define QLA_ALREADY_REGISTERED		0x109
 
 #define NVRAM_DELAY()		udelay(10)
-
-#define INVALID_HANDLE	(MAX_OUTSTANDING_COMMANDS+1)
 
 /*
  * Flash support definitions

@@ -329,6 +329,12 @@ static int scsi_check_sense(struct scsi_cmnd *scmd)
 				    "changed. The Linux SCSI layer does not "
 				    "automatically adjust these parameters.\n");
 
+		if (sshdr.asc == 0x38 && sshdr.ascq == 0x07)
+			scmd_printk(KERN_WARNING, scmd,
+				    "Warning! Received an indication that the "
+				    "LUN reached a thin provisioning soft "
+				    "threshold.\n");
+
 		/*
 		 * Pass the UA upwards for a determination in the completion
 		 * functions.
@@ -1820,15 +1826,14 @@ int scsi_error_handler(void *data)
 	 * We never actually get interrupted because kthread_run
 	 * disables signal delivery for the created thread.
 	 */
-	set_current_state(TASK_INTERRUPTIBLE);
 	while (!kthread_should_stop()) {
+		set_current_state(TASK_INTERRUPTIBLE);
 		if ((shost->host_failed == 0 && shost->host_eh_scheduled == 0) ||
 		    shost->host_failed != shost->host_busy) {
 			SCSI_LOG_ERROR_RECOVERY(1,
 				printk("Error handler scsi_eh_%d sleeping\n",
 					shost->host_no));
 			schedule();
-			set_current_state(TASK_INTERRUPTIBLE);
 			continue;
 		}
 
@@ -1855,7 +1860,6 @@ int scsi_error_handler(void *data)
 		 * which are still online.
 		 */
 		scsi_restart_operations(shost);
-		set_current_state(TASK_INTERRUPTIBLE);
 	}
 	__set_current_state(TASK_RUNNING);
 

@@ -57,7 +57,7 @@ perf_callchain_kernel(struct perf_callchain_entry *entry, struct pt_regs *regs)
 
 	lr = regs->link;
 	sp = regs->gpr[1];
-	perf_callchain_store(entry, regs->nip);
+	perf_callchain_store(entry, perf_instruction_pointer(regs));
 
 	if (!validate_sp(sp, current, STACK_FRAME_OVERHEAD))
 		return;
@@ -491,7 +491,7 @@ static void perf_callchain_user_32(struct perf_callchain_entry *entry,
 void
 perf_callchain_user(struct perf_callchain_entry *entry, struct pt_regs *regs)
 {
-       perf_callchain_store(entry, regs->nip);
+       perf_callchain_store(entry, perf_instruction_pointer(regs));
 
        if (!current->mm)
                return;

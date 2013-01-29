@@ -295,7 +295,7 @@ static int wait_for_free_request(struct TCP_Server_Info *server,
 	return 0;
 }
 
-static int allocate_mid(struct cifsSesInfo *ses, struct smb_hdr *in_buf,
+static int allocate_mid(struct cifs_ses *ses, struct smb_hdr *in_buf,
 			struct mid_q_entry **ppmidQ)
 {
 	if (ses->server->tcpStatus == CifsExiting) {
@@ -355,7 +355,7 @@ cifs_call_async(struct TCP_Server_Info *server, struct kvec *iov,
 		return rc;
 
 	/* enable signing if server requires it */
-	if (server->secMode & (SECMODE_SIGN_REQUIRED | SECMODE_SIGN_ENABLED))
+	if (server->sec_mode & (SECMODE_SIGN_REQUIRED | SECMODE_SIGN_ENABLED))
 		hdr->Flags2 |= SMBFLG2_SECURITY_SIGNATURE;
 
 	mutex_lock(&server->srv_mutex);
@@ -365,20 +365,22 @@ cifs_call_async(struct TCP_Server_Info *server, struct kvec *iov,
 		return -ENOMEM;
 	}
 
-	/* put it on the pending_mid_q */
-	spin_lock(&GlobalMid_Lock);
-	list_add_tail(&mid->qhead, &server->pending_mid_q);
-	spin_unlock(&GlobalMid_Lock);
-
 	rc = cifs_sign_smb2(iov, nvec, server, &mid->sequence_number);
 	if (rc) {
 		mutex_unlock(&server->srv_mutex);
+		DeleteMidQEntry(mid);
 		goto out_err;
 	}
 
 	mid->callback = callback;
 	mid->callback_data = cbdata;
 	mid->midState = MID_REQUEST_SUBMITTED;
+
+	/* put it on the pending_mid_q */
+	spin_lock(&GlobalMid_Lock);
+	list_add_tail(&mid->qhead, &server->pending_mid_q);
+	spin_unlock(&GlobalMid_Lock);
+
 #ifdef CONFIG_CIFS_STATS2
 	atomic_inc(&server->inSend);
 #endif
@@ -388,12 +390,11 @@ cifs_call_async(struct TCP_Server_Info *server, struct kvec *iov,
 	mid->when_sent = jiffies;
 #endif
 	mutex_unlock(&server->srv_mutex);
-	if (rc)
-		goto out_err;
+	if (rc == 0)
+		return 0;
 
-	return rc;
-out_err:
 	delete_mid(mid);
+out_err:
 	atomic_dec(&server->inFlight);
 	wake_up(&server->request_q);
 	return rc;
@@ -409,7 +410,7 @@ out_err:
  *
  */
 int
-SendReceiveNoRsp(const unsigned int xid, struct cifsSesInfo *ses,
+SendReceiveNoRsp(const unsigned int xid, struct cifs_ses *ses,
 		struct smb_hdr *in_buf, int flags)
 {
 	int rc;
@@ -504,7 +505,7 @@ cifs_check_receive(struct mid_q_entry *mid, struct TCP_Server_Info *server,
 		 min_t(u32, 92, be32_to_cpu(mid->resp_buf->smb_buf_length)));
 
 	/* convert the length into a more usable form */
-	if (server->secMode & (SECMODE_SIGN_REQUIRED | SECMODE_SIGN_ENABLED)) {
+	if (server->sec_mode & (SECMODE_SIGN_REQUIRED | SECMODE_SIGN_ENABLED)) {
 		/* FIXME: add code to kill session */
 		if (cifs_verify_signature(mid->resp_buf, server,
 					  mid->sequence_number + 1) != 0)
@@ -516,7 +517,7 @@ cifs_check_receive(struct mid_q_entry *mid, struct TCP_Server_Info *server,
 }
 
 int
-SendReceive2(const unsigned int xid, struct cifsSesInfo *ses,
+SendReceive2(const unsigned int xid, struct cifs_ses *ses,
 	     struct kvec *iov, int n_vec, int *pRespBufType /* ret */,
 	     const int flags)
 {
@@ -645,7 +646,7 @@ out:
 }
 
 int
-SendReceive(const unsigned int xid, struct cifsSesInfo *ses,
+SendReceive(const unsigned int xid, struct cifs_ses *ses,
 	    struct smb_hdr *in_buf, struct smb_hdr *out_buf,
 	    int *pbytes_returned, const int long_op)
 {
@@ -761,12 +762,12 @@ out:
    blocking lock to return. */
 
 static int
-send_lock_cancel(const unsigned int xid, struct cifsTconInfo *tcon,
+send_lock_cancel(const unsigned int xid, struct cifs_tcon *tcon,
 			struct smb_hdr *in_buf,
 			struct smb_hdr *out_buf)
 {
 	int bytes_returned;
-	struct cifsSesInfo *ses = tcon->ses;
+	struct cifs_ses *ses = tcon->ses;
 	LOCK_REQ *pSMB = (LOCK_REQ *)in_buf;
 
 	/* We just modify the current in_buf to change
@@ -783,14 +784,14 @@ send_lock_cancel(const unsigned int xid, struct cifsTconInfo *tcon,
 }
 
 int
-SendReceiveBlockingLock(const unsigned int xid, struct cifsTconInfo *tcon,
+SendReceiveBlockingLock(const unsigned int xid, struct cifs_tcon *tcon,
 	    struct smb_hdr *in_buf, struct smb_hdr *out_buf,
 	    int *pbytes_returned)
 {
 	int rc = 0;
 	int rstart = 0;
 	struct mid_q_entry *midQ;
-	struct cifsSesInfo *ses;
+	struct cifs_ses *ses;
 
 	if (tcon == NULL || tcon->ses == NULL) {
 		cERROR(1, "Null smb session");

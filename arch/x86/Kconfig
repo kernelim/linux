@@ -54,6 +54,7 @@ config X86
 	select HAVE_PERF_EVENTS_NMI
 	select HAVE_ARCH_KMEMCHECK
 	select HAVE_USER_RETURN_NOTIFIER
+	select ARCH_HAVE_NMI_SAFE_CMPXCHG
 
 config OUTPUT_FORMAT
 	string
@@ -64,9 +65,6 @@ config ARCH_DEFCONFIG
 	string
 	default "arch/x86/configs/i386_defconfig" if X86_32
 	default "arch/x86/configs/x86_64_defconfig" if X86_64
-
-config GENERIC_TIME
-	def_bool y
 
 config GENERIC_CMOS_UPDATE
 	def_bool y
@@ -98,6 +96,9 @@ config ZONE_DMA
 
 config SBUS
 	bool
+
+config NEED_DMA_MAP_STATE
+       def_bool (X86_64 || DMAR || DMA_API_DEBUG)
 
 config GENERIC_ISA_DMA
 	def_bool y
@@ -1114,6 +1115,9 @@ config X86_PAE
 config ARCH_PHYS_ADDR_T_64BIT
 	def_bool X86_64 || X86_PAE
 
+config ARCH_DMA_ADDR_T_64BIT
+	def_bool X86_64 || HIGHMEM64G
+
 config DIRECT_GBPAGES
 	bool "Enable 1GB pages for kernel pagetables" if EMBEDDED
 	default y
@@ -2040,7 +2044,7 @@ config SCx200
 
 config SCx200HR_TIMER
 	tristate "NatSemi SCx200 27MHz High-Resolution Timer Support"
-	depends on SCx200 && GENERIC_TIME
+	depends on SCx200
 	default y
 	---help---
 	  This driver provides a clocksource built upon the on-chip

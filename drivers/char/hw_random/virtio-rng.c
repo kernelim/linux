@@ -60,6 +60,8 @@ static void register_buffer(void)
 /* At least we don't udelay() in a loop like some other drivers. */
 static int virtio_data_present(struct hwrng *rng, int wait)
 {
+	int ret;
+
 	if (data_left >= sizeof(u32))
 		return 1;
 
@@ -67,7 +69,9 @@ again:
 	if (!wait)
 		return 0;
 
-	wait_for_completion(&have_data);
+	ret = wait_for_completion_killable(&have_data);
+	if (ret < 0)
+		return ret;
 
 	/* Not enough?  Re-register. */
 	if (unlikely(data_left < sizeof(u32))) {
@@ -98,7 +102,7 @@ static struct hwrng virtio_hwrng = {
 	.data_read = virtio_data_read,
 };
 
-static int virtrng_probe(struct virtio_device *vdev)
+static int probe_common(struct virtio_device *vdev)
 {
 	int err;
 
@@ -117,12 +121,35 @@ static int virtrng_probe(struct virtio_device *vdev)
 	return 0;
 }
 
-static void __devexit virtrng_remove(struct virtio_device *vdev)
+static void remove_common(struct virtio_device *vdev)
 {
 	vdev->config->reset(vdev);
 	hwrng_unregister(&virtio_hwrng);
 	vdev->config->del_vqs(vdev);
 }
+
+static int virtrng_probe(struct virtio_device *vdev)
+{
+	return probe_common(vdev);
+}
+
+static void __devexit virtrng_remove(struct virtio_device *vdev)
+{
+	remove_common(vdev);
+}
+
+#ifdef CONFIG_PM
+static int virtrng_freeze(struct virtio_device *vdev)
+{
+	remove_common(vdev);
+	return 0;
+}
+
+static int virtrng_restore(struct virtio_device *vdev)
+{
+	return probe_common(vdev);
+}
+#endif
 
 static struct virtio_device_id id_table[] = {
 	{ VIRTIO_ID_RNG, VIRTIO_DEV_ANY_ID },
@@ -135,6 +162,10 @@ static struct virtio_driver virtio_rng_driver = {
 	.id_table =	id_table,
 	.probe =	virtrng_probe,
 	.remove =	__devexit_p(virtrng_remove),
+#ifdef CONFIG_PM
+	.freeze =	virtrng_freeze,
+	.restore =	virtrng_restore,
+#endif
 };
 
 static int __init init(void)

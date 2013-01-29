@@ -2780,7 +2780,7 @@ bfa_ioim_abort(struct bfa_ioim_s *ioim)
 static void
 bfa_tskim_sm_uninit(struct bfa_tskim_s *tskim, enum bfa_tskim_event event)
 {
-	bfa_trc(tskim->bfa, event);
+	bfa_trc(tskim->bfa, tskim->tsk_tag << 16 | event);
 
 	switch (event) {
 	case BFA_TSKIM_SM_START:
@@ -2818,7 +2818,7 @@ bfa_tskim_sm_uninit(struct bfa_tskim_s *tskim, enum bfa_tskim_event event)
 static void
 bfa_tskim_sm_active(struct bfa_tskim_s *tskim, enum bfa_tskim_event event)
 {
-	bfa_trc(tskim->bfa, event);
+	bfa_trc(tskim->bfa, tskim->tsk_tag << 16 | event);
 
 	switch (event) {
 	case BFA_TSKIM_SM_DONE:
@@ -2854,7 +2854,7 @@ bfa_tskim_sm_active(struct bfa_tskim_s *tskim, enum bfa_tskim_event event)
 static void
 bfa_tskim_sm_cleanup(struct bfa_tskim_s *tskim, enum bfa_tskim_event event)
 {
-	bfa_trc(tskim->bfa, event);
+	bfa_trc(tskim->bfa, tskim->tsk_tag << 16 | event);
 
 	switch (event) {
 	case BFA_TSKIM_SM_DONE:
@@ -2882,7 +2882,7 @@ bfa_tskim_sm_cleanup(struct bfa_tskim_s *tskim, enum bfa_tskim_event event)
 static void
 bfa_tskim_sm_iocleanup(struct bfa_tskim_s *tskim, enum bfa_tskim_event event)
 {
-	bfa_trc(tskim->bfa, event);
+	bfa_trc(tskim->bfa, tskim->tsk_tag << 16 | event);
 
 	switch (event) {
 	case BFA_TSKIM_SM_IOS_DONE:
@@ -2914,7 +2914,7 @@ bfa_tskim_sm_iocleanup(struct bfa_tskim_s *tskim, enum bfa_tskim_event event)
 static void
 bfa_tskim_sm_qfull(struct bfa_tskim_s *tskim, enum bfa_tskim_event event)
 {
-	bfa_trc(tskim->bfa, event);
+	bfa_trc(tskim->bfa, tskim->tsk_tag << 16 | event);
 
 	switch (event) {
 	case BFA_TSKIM_SM_QRESUME:
@@ -2951,7 +2951,7 @@ static void
 bfa_tskim_sm_cleanup_qfull(struct bfa_tskim_s *tskim,
 		enum bfa_tskim_event event)
 {
-	bfa_trc(tskim->bfa, event);
+	bfa_trc(tskim->bfa, tskim->tsk_tag << 16 | event);
 
 	switch (event) {
 	case BFA_TSKIM_SM_DONE:
@@ -2982,7 +2982,7 @@ bfa_tskim_sm_cleanup_qfull(struct bfa_tskim_s *tskim,
 static void
 bfa_tskim_sm_hcb(struct bfa_tskim_s *tskim, enum bfa_tskim_event event)
 {
-	bfa_trc(tskim->bfa, event);
+	bfa_trc(tskim->bfa, tskim->tsk_tag << 16 | event);
 
 	switch (event) {
 	case BFA_TSKIM_SM_HCB:

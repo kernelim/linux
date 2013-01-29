@@ -1538,15 +1538,16 @@ static void write_cinfo(__be32 **p, struct nfsd4_change_info *c)
 	} } while (0);
 
 /* Encode as an array of strings the string given with components
- * seperated @sep.
+ * separated @sep, escaped with esc_enter and esc_exit.
  */
-static __be32 nfsd4_encode_components(char sep, char *components,
-				   __be32 **pp, int *buflen)
+static __be32 nfsd4_encode_components_esc(char sep, char *components,
+				   __be32 **pp, int *buflen,
+				   char esc_enter, char esc_exit)
 {
 	__be32 *p = *pp;
 	__be32 *countp = p;
 	int strlen, count=0;
-	char *str, *end;
+	char *str, *end, *next;
 
 	dprintk("nfsd4_encode_components(%s)\n", components);
 	if ((*buflen -= 4) < 0)
@@ -1554,8 +1555,23 @@ static __be32 nfsd4_encode_components(char sep, char *components,
 	WRITE32(0); /* We will fill this in with @count later */
 	end = str = components;
 	while (*end) {
-		for (; *end && (*end != sep); end++)
-			; /* Point to end of component */
+		bool found_esc = false;
+
+		/* try to parse as esc_start, ..., esc_end, sep */
+		if (*str == esc_enter) {
+			for (; *end && (*end != esc_exit); end++)
+				/* find esc_exit or end of string */;
+			next = end + 1;
+			if (*end && (!*next || *next == sep)) {
+				str++;
+				found_esc = true;
+			}
+		}
+
+		if (!found_esc)
+			for (; *end && (*end != sep); end++)
+				/* find sep or end of string */;
+
 		strlen = end - str;
 		if (strlen) {
 			if ((*buflen -= ((XDR_QUADLEN(strlen) << 2) + 4)) < 0)
@@ -1574,6 +1590,15 @@ static __be32 nfsd4_encode_components(char sep, char *components,
 	return 0;
 }
 
+/* Encode as an array of strings the string given with components
+ * separated @sep.
+ */
+static __be32 nfsd4_encode_components(char sep, char *components,
+				   __be32 **pp, int *buflen)
+{
+	return nfsd4_encode_components_esc(sep, components, pp, buflen, 0, 0);
+}
+
 /*
  * encode a location element of a fs_locations structure
  */
@@ -1583,7 +1608,8 @@ static __be32 nfsd4_encode_fs_location4(struct nfsd4_fs_location *location,
 	__be32 status;
 	__be32 *p = *pp;
 
-	status = nfsd4_encode_components(':', location->hosts, &p, buflen);
+	status = nfsd4_encode_components_esc(':', location->hosts, &p, buflen,
+						'[', ']');
 	if (status)
 		return status;
 	status = nfsd4_encode_components('/', location->path, &p, buflen);

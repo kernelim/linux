@@ -70,7 +70,15 @@ struct dst_entry
 
 	struct  dst_ops	        *ops;
 
+/* This Red Hat kABI workaround will shift tclassid 32 bit, while we
+ * still keep the original size of dst_entry and assures alignment
+ * (see further down).
+ */
+#ifdef __GENKSYMS__
+	u32			metrics[RTAX_MAX_ORIG];
+#else
 	u32			metrics[RTAX_MAX];
+#endif
 
 #ifdef CONFIG_NET_CLS_ROUTE
 	__u32			tclassid;
@@ -83,11 +91,23 @@ struct dst_entry
 	 * Align __refcnt to a 64 bytes alignment
 	 * (L1_CACHE_SIZE would be too much)
 	 */
+/* Red Hat kABI workaround to assure aligning __refcnt, while
+ * consuming 32 bit of padding for our metrics expansion above.
+ * On 32bit archs not padding remains.
+ */
+#ifdef __GENKSYMS__
 #ifdef CONFIG_64BIT
 	long			__pad_to_align_refcnt[2];
 #else
 	long			__pad_to_align_refcnt[1];
 #endif
+#else  /* __GENKSYMS__ */
+#ifdef CONFIG_64BIT
+	u32			__pad_hole_in_struct;
+	long			__pad_to_align_refcnt[1];
+#endif
+#endif /* __GENKSYMS__ */
+
 	/*
 	 * __refcnt wants to be on a different cache line from
 	 * input/output/ops or performance tanks badly

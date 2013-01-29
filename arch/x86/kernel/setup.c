@@ -745,14 +745,35 @@ static void __init trim_bios_range(void)
 
 static void rh_check_supported(void)
 {
-	/* The RHEL kernel does not support this hardware. */
+	/* The RHEL kernel does not support this hardware.  The kernel will
+	 * attempt to boot, but no support is given for this hardware */
 
-	/* Intel CPU family 6, model greater than 59 */
+	/* RHEL only supports Intel and AMD processors */
+	if ((boot_cpu_data.x86_vendor != X86_VENDOR_INTEL) &&
+	    (boot_cpu_data.x86_vendor != X86_VENDOR_AMD)) {
+		printk(KERN_CRIT "Detected processor %s %s\n",
+		       boot_cpu_data.x86_vendor_id,
+		       boot_cpu_data.x86_model_id);
+		mark_hardware_unsupported("Processor");
+	}
+
+	/* Intel CPU family 6, model greater than 60 */
 	if ((boot_cpu_data.x86_vendor == X86_VENDOR_INTEL) &&
-	    ((boot_cpu_data.x86 == 6) && (boot_cpu_data.x86_model > 59))) {
-		printk(KERN_CRIT "Detected CPU family %d model %d\n",
-		       boot_cpu_data.x86, boot_cpu_data.x86_model);
-		mark_hardware_unsupported("CPU family 6 model > 59");
+	    ((boot_cpu_data.x86 == 6))) {
+		switch (boot_cpu_data.x86_model) {
+		case 70: /* Crystal Well */
+		case 62: /* Ivy Town */
+			break;
+		default:
+			if (boot_cpu_data.x86_model > 60) {
+				printk(KERN_CRIT
+				       "Detected CPU family %d model %d\n",
+				       boot_cpu_data.x86,
+				       boot_cpu_data.x86_model);
+				mark_hardware_unsupported("Intel CPU model");
+			}
+			break;
+		}
 	}
 }
 

@@ -29,4 +29,7 @@ int unregister_external_interrupt(__u16 code, ext_int_handler_t handler);
 int unregister_early_external_interrupt(__u16 code, ext_int_handler_t handler,
 					ext_int_info_t *info);
 
+void measurement_alert_subclass_register(void);
+void measurement_alert_subclass_unregister(void);
+
 #endif

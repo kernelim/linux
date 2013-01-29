@@ -206,7 +206,7 @@ xfs_swap_extents(
 	xfs_trans_t	*tp;
 	xfs_bstat_t	*sbp = &sxp->sx_stat;
 	xfs_ifork_t	*tempifp, *ifp, *tifp;
-	int		ilf_fields, tilf_fields;
+	int		src_log_flags, target_log_flags;
 	int		error = 0;
 	int		aforkblks = 0;
 	int		taforkblks = 0;
@@ -386,9 +386,8 @@ xfs_swap_extents(
 	tip->i_delayed_blks = ip->i_delayed_blks;
 	ip->i_delayed_blks = 0;
 
-	ilf_fields = XFS_ILOG_CORE;
-
-	switch(ip->i_d.di_format) {
+	src_log_flags = XFS_ILOG_CORE;
+	switch (ip->i_d.di_format) {
 	case XFS_DINODE_FMT_EXTENTS:
 		/* If the extents fit in the inode, fix the
 		 * pointer.  Otherwise it's already NULL or
@@ -398,16 +397,15 @@ xfs_swap_extents(
 			ifp->if_u1.if_extents =
 				ifp->if_u2.if_inline_ext;
 		}
-		ilf_fields |= XFS_ILOG_DEXT;
+		src_log_flags |= XFS_ILOG_DEXT;
 		break;
 	case XFS_DINODE_FMT_BTREE:
-		ilf_fields |= XFS_ILOG_DBROOT;
+		src_log_flags |= XFS_ILOG_DBROOT;
 		break;
 	}
 
-	tilf_fields = XFS_ILOG_CORE;
-
-	switch(tip->i_d.di_format) {
+	target_log_flags = XFS_ILOG_CORE;
+	switch (tip->i_d.di_format) {
 	case XFS_DINODE_FMT_EXTENTS:
 		/* If the extents fit in the inode, fix the
 		 * pointer.  Otherwise it's already NULL or
@@ -417,10 +415,10 @@ xfs_swap_extents(
 			tifp->if_u1.if_extents =
 				tifp->if_u2.if_inline_ext;
 		}
-		tilf_fields |= XFS_ILOG_DEXT;
+		target_log_flags |= XFS_ILOG_DEXT;
 		break;
 	case XFS_DINODE_FMT_BTREE:
-		tilf_fields |= XFS_ILOG_DBROOT;
+		target_log_flags |= XFS_ILOG_DBROOT;
 		break;
 	}
 
@@ -428,8 +426,8 @@ xfs_swap_extents(
 	xfs_trans_ijoin_ref(tp, ip, XFS_ILOCK_EXCL | XFS_IOLOCK_EXCL);
 	xfs_trans_ijoin_ref(tp, tip, XFS_ILOCK_EXCL | XFS_IOLOCK_EXCL);
 
-	xfs_trans_log_inode(tp, ip,  ilf_fields);
-	xfs_trans_log_inode(tp, tip, tilf_fields);
+	xfs_trans_log_inode(tp, ip,  src_log_flags);
+	xfs_trans_log_inode(tp, tip, target_log_flags);
 
 	/*
 	 * If this is a synchronous mount, make sure that the
@@ -438,7 +436,7 @@ xfs_swap_extents(
 	if (mp->m_flags & XFS_MOUNT_WSYNC)
 		xfs_trans_set_sync(tp);
 
-	error = xfs_trans_commit(tp, XFS_TRANS_SWAPEXT);
+	error = xfs_trans_commit(tp, 0);
 
 	trace_xfs_swap_extent_after(ip, 0);
 	trace_xfs_swap_extent_after(tip, 1);

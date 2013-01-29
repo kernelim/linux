@@ -33,7 +33,6 @@
 #include <linux/ethtool.h>
 #include <linux/vmalloc.h>
 #include <linux/if_vlan.h>
-#include <linux/inet_lro.h>
 
 #include <asm/ibmebus.h>
 #include <asm/abs_addr.h>
@@ -58,15 +57,13 @@
 #define EHEA_MIN_ENTRIES_QP  127
 
 #define EHEA_SMALL_QUEUES
-#define EHEA_NUM_TX_QP 1
-#define EHEA_LRO_MAX_AGGR 64
 
 #ifdef EHEA_SMALL_QUEUES
 #define EHEA_MAX_CQE_COUNT      1023
 #define EHEA_DEF_ENTRIES_SQ     1023
-#define EHEA_DEF_ENTRIES_RQ1    4095
+#define EHEA_DEF_ENTRIES_RQ1    1023
 #define EHEA_DEF_ENTRIES_RQ2    1023
-#define EHEA_DEF_ENTRIES_RQ3    1023
+#define EHEA_DEF_ENTRIES_RQ3    511
 #else
 #define EHEA_MAX_CQE_COUNT      4080
 #define EHEA_DEF_ENTRIES_SQ     4080
@@ -83,10 +80,8 @@
 #define EHEA_SG_RQ3 0
 
 #define EHEA_MAX_PACKET_SIZE    9022	/* for jumbo frames */
-#define EHEA_RQ2_PKT_SIZE       1522
+#define EHEA_RQ2_PKT_SIZE       2048
 #define EHEA_L_PKT_SIZE         256	/* low latency */
-
-#define MAX_LRO_DESCRIPTORS 8
 
 /* Send completion signaling */
 
@@ -94,7 +89,7 @@
 #define EHEA_PD_ID        0xaabcdeff
 
 #define EHEA_RQ2_THRESHOLD 	   1
-#define EHEA_RQ3_THRESHOLD 	   9	/* use RQ3 threshold of 1522 bytes */
+#define EHEA_RQ3_THRESHOLD	   4	/* use RQ3 threshold of 2048 bytes */
 
 #define EHEA_SPEED_10G         10000
 #define EHEA_SPEED_1G           1000
@@ -376,7 +371,6 @@ struct ehea_port_res {
 	struct port_stats p_stats;
 	struct ehea_mr send_mr;       	/* send memory region */
 	struct ehea_mr recv_mr;       	/* receive memory region */
-	spinlock_t xmit_lock;
 	struct ehea_port *port;
 	char int_recv_name[EHEA_IRQ_NAME_SIZE];
 	char int_send_name[EHEA_IRQ_NAME_SIZE];
@@ -389,17 +383,14 @@ struct ehea_port_res {
 	struct ehea_q_skb_arr rq3_skba;
 	struct ehea_q_skb_arr sq_skba;
 	int sq_skba_size;
-	spinlock_t netif_queue;
-	int queue_stopped;
 	int swqe_refill_th;
 	atomic_t swqe_avail;
 	int swqe_ll_count;
 	u32 swqe_id_counter;
 	u64 tx_packets;
+	u64 tx_bytes;
 	u64 rx_packets;
-	u32 poll_counter;
-	struct net_lro_mgr lro_mgr;
-	struct net_lro_desc lro_desc[MAX_LRO_DESCRIPTORS];
+	u64 rx_bytes;
 	int sq_restart_flag;
 };
 
@@ -468,15 +459,13 @@ struct ehea_port {
 	struct ehea_port_res port_res[EHEA_MAX_PORT_RES];
 	struct of_device  ofdev; /* Open Firmware Device */
 	struct ehea_mc_list *mc_list;	 /* Multicast MAC addresses */
-	struct vlan_group *vgrp;
 	struct ehea_eq *qp_eq;
 	struct work_struct reset_task;
+	struct delayed_work stats_work;
 	struct mutex port_lock;
 	char int_aff_name[EHEA_IRQ_NAME_SIZE];
 	int allmulti;			 /* Indicates IFF_ALLMULTI state */
 	int promisc;		 	 /* Indicates IFF_PROMISC state */
-	int num_tx_qps;
-	int num_add_tx_qps;
 	int num_mcs;
 	int resets;
 	unsigned long flags;
@@ -486,7 +475,6 @@ struct ehea_port {
 	u32 msg_enable;
 	u32 sig_comp_iv;
 	u32 state;
-	u32 lro_max_aggr;
 	u8 phy_link;
 	u8 full_duplex;
 	u8 autoneg;
@@ -512,7 +500,5 @@ enum ehea_flag_bits {
 void ehea_set_ethtool_ops(struct net_device *netdev);
 int ehea_sense_port_attr(struct ehea_port *port);
 int ehea_set_portspeed(struct ehea_port *port, u32 port_speed);
-
-extern struct work_struct ehea_rereg_mr_task;
 
 #endif	/* __EHEA_H__ */

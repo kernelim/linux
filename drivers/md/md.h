@@ -75,6 +75,7 @@ struct md_rdev {
 	int		sb_loaded;
 	__u64		sb_events;
 	sector_t	data_offset;	/* start of data in array */
+	sector_t	new_data_offset;/* only relevant while reshaping */
 	sector_t 	sb_start;	/* offset of the super block (in 512byte sectors) */
 	int		sb_size;	/* bytes in the superblock */
 	int		preferred_minor;	/* autorun support */
@@ -92,34 +93,7 @@ struct md_rdev {
 	 * This reduces the burden of testing multiple flags in many cases
 	 */
 
-	unsigned long	flags;
-#define	Faulty		1		/* device is known to have a fault */
-#define	In_sync		2		/* device is in_sync with rest of array */
-#define	WriteMostly	4		/* Avoid reading if at all possible */
-#define	AutoDetected	7		/* added by auto-detect */
-#define Blocked		8		/* An error occurred but has not yet
-					 * been acknowledged by the metadata
-					 * handler, so don't allow writes
-					 * until it is cleared */
-#define WriteErrorSeen	9		/* A write error has been seen on this
-					 * device
-					 */
-#define FaultRecorded	10		/* Intermediate state for clearing
-					 * Blocked.  The Fault is/will-be
-					 * recorded in the metadata, but that
-					 * metadata hasn't been stored safely
-					 * on disk yet.
-					 */
-#define BlockedBadBlocks 11		/* A writer is blocked because they
-					 * found an unacknowledged bad-block.
-					 * This can safely be cleared at any
-					 * time, and the writer will re-check.
-					 * It may be set at any time, and at
-					 * worst the writer will timeout and
-					 * re-check.  So setting it as
-					 * accurately as possible is good, but
-					 * not absolutely critical.
-					 */
+	unsigned long	flags;	/* bit set of 'enum flag_bits' bits. */
 	wait_queue_head_t blocked_wait;
 
 	int desc_nr;			/* descriptor index in the superblock */
@@ -172,6 +146,48 @@ struct md_rdev {
 		sector_t size;		/* in sectors */
 	} badblocks;
 };
+enum flag_bits {
+	Faulty,			/* device is known to have a fault */
+	In_sync,		/* device is in_sync with rest of array */
+	Unmerged,		/* device is being added to array and should
+				 * be considerred for bvec_merge_fn but not
+				 * yet for actual IO
+				 */
+	WriteMostly,		/* Avoid reading if at all possible */
+	AutoDetected,		/* added by auto-detect */
+	Blocked,		/* An error occurred but has not yet
+				 * been acknowledged by the metadata
+				 * handler, so don't allow writes
+				 * until it is cleared */
+	WriteErrorSeen,		/* A write error has been seen on this
+				 * device
+				 */
+	FaultRecorded,		/* Intermediate state for clearing
+				 * Blocked.  The Fault is/will-be
+				 * recorded in the metadata, but that
+				 * metadata hasn't been stored safely
+				 * on disk yet.
+				 */
+	BlockedBadBlocks,	/* A writer is blocked because they
+				 * found an unacknowledged bad-block.
+				 * This can safely be cleared at any
+				 * time, and the writer will re-check.
+				 * It may be set at any time, and at
+				 * worst the writer will timeout and
+				 * re-check.  So setting it as
+				 * accurately as possible is good, but
+				 * not absolutely critical.
+				 */
+	WantReplacement,	/* This device is a candidate to be
+				 * hot-replaced, either because it has
+				 * reported some faults, or because
+				 * of explicit request.
+				 */
+	Replacement,		/* This device is a replacement for
+				 * a want_replacement device with same
+				 * raid_disk number.
+				 */
+};
 
 #define BB_LEN_MASK	(0x00000000000001FFULL)
 #define BB_OFFSET_MASK	(0x7FFFFFFFFFFFFE00ULL)
@@ -198,8 +214,9 @@ static inline int is_badblock(struct md_rdev *rdev, sector_t s, int sectors,
 	return 0;
 }
 extern int rdev_set_badblocks(struct md_rdev *rdev, sector_t s, int sectors,
-			      int acknowledged);
-extern int rdev_clear_badblocks(struct md_rdev *rdev, sector_t s, int sectors);
+			      int is_new);
+extern int rdev_clear_badblocks(struct md_rdev *rdev, sector_t s, int sectors,
+				int is_new);
 extern void md_ack_all_badblocks(struct badblocks *bb);
 
 struct mddev {
@@ -267,6 +284,7 @@ struct mddev {
 	sector_t			reshape_position;
 	int				delta_disks, new_level, new_layout;
 	int				new_chunk_sectors;
+	int				reshape_backwards;
 
 	struct md_thread		*thread;	/* management thread */
 	struct md_thread		*sync_thread;	/* doing resync or reconstruct */
@@ -351,6 +369,10 @@ struct mddev {
 	int				degraded;	/* whether md should consider
 							 * adding a spare
 							 */
+	int				merge_check_needed; /* at least one
+							     * member device
+							     * has a
+							     * merge_bvec_fn */
 
 	atomic_t			recovery_active; /* blocks scheduled, but not written */
 	wait_queue_head_t		recovery_wait;
@@ -388,10 +410,13 @@ struct mddev {
 						 * For external metadata, offset
 						 * from start of device. 
 						 */
+		unsigned long		space; /* space available at this offset */
 		loff_t			default_offset; /* this is the offset to use when
 							 * hot-adding a bitmap.  It should
 							 * eventually be settable by sysfs.
 							 */
+		unsigned long		default_space; /* space available at
+							* default offset */
 		struct mutex		mutex;
 		unsigned long		chunksize;
 		unsigned long		daemon_sleep; /* how many jiffies between updates? */
@@ -446,7 +471,7 @@ struct md_personality
 	 */
 	void (*error_handler)(struct mddev *mddev, struct md_rdev *rdev);
 	int (*hot_add_disk) (struct mddev *mddev, struct md_rdev *rdev);
-	int (*hot_remove_disk) (struct mddev *mddev, int number);
+	int (*hot_remove_disk) (struct mddev *mddev, struct md_rdev *rdev);
 	int (*spare_active) (struct mddev *mddev);
 	sector_t (*sync_request)(struct mddev *mddev, sector_t sector_nr, int *skipped, int go_faster);
 	int (*resize) (struct mddev *mddev, sector_t sectors);
@@ -500,15 +525,20 @@ static inline char * mdname (struct mddev * mddev)
 static inline int sysfs_link_rdev(struct mddev *mddev, struct md_rdev *rdev)
 {
 	char nm[20];
-	sprintf(nm, "rd%d", rdev->raid_disk);
-	return sysfs_create_link(&mddev->kobj, &rdev->kobj, nm);
+	if (!test_bit(Replacement, &rdev->flags)) {
+		sprintf(nm, "rd%d", rdev->raid_disk);
+		return sysfs_create_link(&mddev->kobj, &rdev->kobj, nm);
+	} else
+		return 0;
 }
 
 static inline void sysfs_unlink_rdev(struct mddev *mddev, struct md_rdev *rdev)
 {
 	char nm[20];
-	sprintf(nm, "rd%d", rdev->raid_disk);
-	sysfs_remove_link(&mddev->kobj, nm);
+	if (!test_bit(Replacement, &rdev->flags)) {
+		sprintf(nm, "rd%d", rdev->raid_disk);
+		sysfs_remove_link(&mddev->kobj, nm);
+	}
 }
 
 /*
@@ -521,7 +551,10 @@ static inline void sysfs_unlink_rdev(struct mddev *mddev, struct md_rdev *rdev)
 /*
  * iterates through the 'same array disks' ringlist
  */
-#define rdev_for_each(rdev, tmp, mddev)				\
+#define rdev_for_each(rdev, mddev)				\
+	list_for_each_entry(rdev, &((mddev)->disks), same_set)
+
+#define rdev_for_each_safe(rdev, tmp, mddev)				\
 	list_for_each_entry_safe(rdev, tmp, &((mddev)->disks), same_set)
 
 #define rdev_for_each_rcu(rdev, mddev)				\
@@ -582,6 +615,7 @@ extern void md_write_start(struct mddev *mddev, struct bio *bi);
 extern void md_write_end(struct mddev *mddev);
 extern void md_done_sync(struct mddev *mddev, int blocks, int ok);
 extern void md_error(struct mddev *mddev, struct md_rdev *rdev);
+extern void md_finish_reshape(struct mddev *mddev);
 
 extern int mddev_congested(struct mddev *mddev, int bits);
 extern void md_flush_request(struct mddev *mddev, struct bio *bio);
@@ -607,6 +641,7 @@ extern int md_run(struct mddev *mddev);
 extern void md_stop(struct mddev *mddev);
 extern void md_stop_writes(struct mddev *mddev);
 extern int md_rdev_init(struct md_rdev *rdev);
+extern void md_rdev_clear(struct md_rdev *rdev);
 
 extern void mddev_suspend(struct mddev *mddev);
 extern void mddev_resume(struct mddev *mddev);

@@ -2367,6 +2367,9 @@ unlock:
 		if (!page_mkwrite) {
 			wait_on_page_locked(dirty_page);
 			set_page_dirty_balance(dirty_page, page_mkwrite);
+			/* file_update_time outside page_lock */
+			if (vma->vm_file)
+				file_update_time(vma->vm_file);
 		}
 		put_page(dirty_page);
 		if (page_mkwrite) {
@@ -2384,8 +2387,13 @@ unlock:
 			}
 		}
 
+		/*
+		 * If an out-of-tree filesytem does have page_mkwrite but
+		 * it doesn't update time, do it here.
+		 */
 		/* file_update_time outside page_lock */
-		if (vma->vm_file)
+		if (vma->vm_file &&
+		    (page_mkwrite && !vma_mkwrite_updates_time(vma)))
 			file_update_time(vma->vm_file);
 	}
 	return ret;
@@ -2608,30 +2616,6 @@ void unmap_mapping_range(struct address_space *mapping,
 	spin_unlock(&mapping->i_mmap_lock);
 }
 EXPORT_SYMBOL(unmap_mapping_range);
-
-int vmtruncate_range(struct inode *inode, loff_t offset, loff_t end)
-{
-	struct address_space *mapping = inode->i_mapping;
-
-	/*
-	 * If the underlying filesystem is not going to provide
-	 * a way to truncate a range of blocks (punch a hole) -
-	 * we should return failure right now.
-	 */
-	if (!inode->i_op->truncate_range)
-		return -ENOSYS;
-
-	mutex_lock(&inode->i_mutex);
-	down_write(&inode->i_alloc_sem);
-	unmap_mapping_range(mapping, offset, (end - offset), 1);
-	truncate_inode_pages_range(mapping, offset, end);
-	unmap_mapping_range(mapping, offset, (end - offset), 1);
-	inode->i_op->truncate_range(inode, offset, end);
-	up_write(&inode->i_alloc_sem);
-	mutex_unlock(&inode->i_mutex);
-
-	return 0;
-}
 
 /*
  * We enter with non-exclusive mmap_sem (to exclude vma changes,
@@ -3081,12 +3065,13 @@ static int __do_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 out:
 	if (dirty_page) {
 		struct address_space *mapping = page->mapping;
+		int dirtied = 0;
 
 		if (set_page_dirty(dirty_page))
-			page_mkwrite = 1;
+			dirtied = 1;
 		unlock_page(dirty_page);
 		put_page(dirty_page);
-		if (page_mkwrite && mapping) {
+		if ((dirtied || page_mkwrite) && mapping) {
 			/*
 			 * Some device drivers do not set page.mapping but still
 			 * dirty their pages
@@ -3095,8 +3080,15 @@ out:
 		}
 
 		/* file_update_time outside page_lock */
-		if (vma->vm_file)
+		if (vma->vm_file &&
+		    (!page_mkwrite || !vma_mkwrite_updates_time(vma))) {
+			/*
+			 * Filesystems without page_mkwrite, and 
+			 * out-of-tree filesystems w/o file_update_time in
+			 * page_mkwrite, get time updated here
+			 */
 			file_update_time(vma->vm_file);
+		}
 	} else {
 		unlock_page(vmf.page);
 		if (anon)
@@ -3379,13 +3371,7 @@ static int __init gate_vma_init(void)
 	gate_vma.vm_end = FIXADDR_USER_END;
 	gate_vma.vm_flags = VM_READ | VM_MAYREAD | VM_EXEC | VM_MAYEXEC;
 	gate_vma.vm_page_prot = __P101;
-	/*
-	 * Make sure the vDSO gets into every core dump.
-	 * Dumping its contents makes post-mortem fully interpretable later
-	 * without matching up the same kernel and hardware config to see
-	 * what PC values meant.
-	 */
-	gate_vma.vm_flags |= VM_ALWAYSDUMP;
+
 	return 0;
 }
 __initcall(gate_vma_init);

@@ -25,6 +25,7 @@
 #include <linux/capability.h>
 #include <linux/security.h>
 #include <linux/pci-aspm.h>
+#include <linux/vgaarb.h>
 #include "pci.h"
 
 static int sysfs_initialized;	/* = 0 */
@@ -323,6 +324,10 @@ static ssize_t
 boot_vga_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
+	struct pci_dev *vga_dev = vga_default_device();
+
+	if (vga_dev)
+		return sprintf(buf, "%u\n", (pdev == vga_dev));
 
 	return sprintf(buf, "%u\n",
 		!!(pdev->resource[PCI_ROM_RESOURCE].flags &

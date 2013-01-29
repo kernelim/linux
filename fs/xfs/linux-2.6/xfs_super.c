@@ -110,8 +110,10 @@ mempool_t *xfs_ioend_pool;
 #define MNTOPT_GQUOTANOENF "gqnoenforce"/* group quota limit enforcement */
 #define MNTOPT_PQUOTANOENF "pqnoenforce"/* project quota limit enforcement */
 #define MNTOPT_QUOTANOENF  "qnoenforce"	/* same as uqnoenforce */
-#define MNTOPT_DELAYLOG   "delaylog"	/* Delayed loging enabled */
-#define MNTOPT_NODELAYLOG "nodelaylog"	/* Delayed loging disabled */
+#define MNTOPT_DELAYLOG    "delaylog"	/* Delayed logging enabled */
+#define MNTOPT_NODELAYLOG  "nodelaylog"	/* Delayed logging disabled */
+#define MNTOPT_DISCARD	   "discard"	/* Discard unused blocks */
+#define MNTOPT_NODISCARD   "nodiscard"	/* Do not discard unused blocks */
 
 /*
  * Table driven mount option parser.
@@ -355,6 +357,10 @@ xfs_parseargs(
 			mp->m_flags |= XFS_MOUNT_DELAYLOG;
 		} else if (!strcmp(this_char, MNTOPT_NODELAYLOG)) {
 			mp->m_flags &= ~XFS_MOUNT_DELAYLOG;
+		} else if (!strcmp(this_char, MNTOPT_DISCARD)) {
+			mp->m_flags |= XFS_MOUNT_DISCARD;
+		} else if (!strcmp(this_char, MNTOPT_NODISCARD)) {
+			mp->m_flags &= ~XFS_MOUNT_DISCARD;
 		} else if (!strcmp(this_char, "ihashsize")) {
 			xfs_warn(mp,
 	"ihashsize no longer used, option is deprecated.");
@@ -385,6 +391,13 @@ xfs_parseargs(
 	if ((mp->m_flags & XFS_MOUNT_NOALIGN) && (dsunit || dswidth)) {
 		xfs_warn(mp,
 	"sunit and swidth options incompatible with the noalign option");
+		return EINVAL;
+	}
+
+	if ((mp->m_flags & XFS_MOUNT_DISCARD) &&
+	    !(mp->m_flags & XFS_MOUNT_DELAYLOG)) {
+		xfs_warn(mp,
+	"the discard option is incompatible with the nodelaylog option");
 		return EINVAL;
 	}
 
@@ -488,6 +501,7 @@ xfs_showargs(
 		{ XFS_MOUNT_FILESTREAMS,	"," MNTOPT_FILESTREAM },
 		{ XFS_MOUNT_GRPID,		"," MNTOPT_GRPID },
 		{ XFS_MOUNT_DELAYLOG,		"," MNTOPT_DELAYLOG },
+		{ XFS_MOUNT_DISCARD,		"," MNTOPT_DISCARD },
 		{ 0, NULL }
 	};
 	static struct proc_xfs_info xfs_info_unset[] = {
@@ -616,7 +630,7 @@ void
 xfs_blkdev_issue_flush(
 	xfs_buftarg_t		*buftarg)
 {
-	blkdev_issue_flush(buftarg->bt_bdev, NULL);
+	__blkdev_issue_flush(buftarg->bt_bdev, GFP_NOFS, NULL);
 }
 
 STATIC void
@@ -910,124 +924,68 @@ xfs_fs_inode_init_once(
  * Dirty the XFS inode when mark_inode_dirty_sync() is called so that
  * we catch unlogged VFS level updates to the inode.
  *
- * We need the barrier() to maintain correct ordering between unlogged
- * updates and the transaction commit code that clears the i_update_core
- * field. This requires all updates to be completed before marking the
- * inode dirty.
+ * This is called by the VFS when dirtying inode metadata.  This can happen
+ * for a few reasons, but we only care about timestamp updates, given that
+ * we handled the rest ourselves.  In theory no other calls should happen,
+ * but for example generic_write_end() keeps dirtying the inode after
+ * updating i_size.
+ *
+ * RHEL6: In mainline, we can check that the flags are exactly I_DIRTY_SYNC,
+ * and skip this call otherwise. RHEL6 does not pass the dirty flags to this
+ * function, so we have a little more overhead hear to capture timestamp
+ * updates.
+ *
+ * We'll hopefull get a different method just for updating timestamps soon,
+ * at which point this hack can go away, and maybe we'll also get real
+ * error handling here.
  */
 STATIC void
 xfs_fs_dirty_inode(
 	struct inode	*inode)
 {
-	barrier();
-	XFS_I(inode)->i_update_core = 1;
-}
-
-STATIC int
-xfs_log_inode(
-	struct xfs_inode	*ip)
-{
+	struct xfs_inode	*ip = XFS_I(inode);
 	struct xfs_mount	*mp = ip->i_mount;
 	struct xfs_trans	*tp;
 	int			error;
 
-	xfs_iunlock(ip, XFS_ILOCK_SHARED);
+	/* RHEL6: check timestamps instead of I_DIRTY_SYNC */
+	if (!(ip->i_d.di_atime.t_sec != inode->i_atime.tv_sec ||
+	      ip->i_d.di_atime.t_nsec != inode->i_atime.tv_nsec ||
+	      ip->i_d.di_ctime.t_sec != inode->i_ctime.tv_sec ||
+	      ip->i_d.di_ctime.t_nsec != inode->i_ctime.tv_nsec ||
+	      ip->i_d.di_mtime.t_sec != inode->i_mtime.tv_sec ||
+	      ip->i_d.di_mtime.t_nsec != inode->i_mtime.tv_nsec))
+		return;
+
+	trace_xfs_dirty_inode(ip);
+
 	tp = xfs_trans_alloc(mp, XFS_TRANS_FSYNC_TS);
 	error = xfs_trans_reserve(tp, 0, XFS_FSYNC_TS_LOG_RES(mp), 0, 0, 0);
-
 	if (error) {
 		xfs_trans_cancel(tp, 0);
-		/* we need to return with the lock hold shared */
-		xfs_ilock(ip, XFS_ILOCK_SHARED);
-		return error;
+		goto trouble;
 	}
-
 	xfs_ilock(ip, XFS_ILOCK_EXCL);
-
 	/*
-	 * Note - it's possible that we might have pushed ourselves out of the
-	 * way during trans_reserve which would flush the inode.  But there's
-	 * no guarantee that the inode buffer has actually gone out yet (it's
-	 * delwri).  Plus the buffer could be pinned anyway if it's part of
-	 * an inode in another recent transaction.  So we play it safe and
-	 * fire off the transaction anyway.
+	 * Grab all the latest timestamps from the Linux inode.
 	 */
+	ip->i_d.di_atime.t_sec = (__int32_t)inode->i_atime.tv_sec;
+	ip->i_d.di_atime.t_nsec = (__int32_t)inode->i_atime.tv_nsec;
+	ip->i_d.di_ctime.t_sec = (__int32_t)inode->i_ctime.tv_sec;
+	ip->i_d.di_ctime.t_nsec = (__int32_t)inode->i_ctime.tv_nsec;
+	ip->i_d.di_mtime.t_sec = (__int32_t)inode->i_mtime.tv_sec;
+	ip->i_d.di_mtime.t_nsec = (__int32_t)inode->i_mtime.tv_nsec;
+
 	xfs_trans_ijoin(tp, ip);
-	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
+	xfs_trans_log_inode(tp, ip, XFS_ILOG_TIMESTAMP);
 	error = xfs_trans_commit(tp, 0);
-	xfs_ilock_demote(ip, XFS_ILOCK_EXCL);
-
-	return error;
-}
-
-STATIC int
-xfs_fs_write_inode(
-	struct inode		*inode,
-	struct writeback_control *wbc)
-{
-	struct xfs_inode	*ip = XFS_I(inode);
-	struct xfs_mount	*mp = ip->i_mount;
-	int			error = EAGAIN;
-
-	trace_xfs_write_inode(ip);
-
-	if (XFS_FORCED_SHUTDOWN(mp))
-		return XFS_ERROR(EIO);
-
-	if (wbc->sync_mode == WB_SYNC_ALL) {
-		/*
-		 * Make sure the inode has made it it into the log.  Instead
-		 * of forcing it all the way to stable storage using a
-		 * synchronous transaction we let the log force inside the
-		 * ->sync_fs call do that for thus, which reduces the number
-		 * of synchronous log foces dramatically.
-		 */
-		xfs_ioend_wait(ip);
-		xfs_ilock(ip, XFS_ILOCK_SHARED);
-		if (ip->i_update_core) {
-			error = xfs_log_inode(ip);
-			if (error)
-				goto out_unlock;
-		}
-	} else {
-		/*
-		 * We make this non-blocking if the inode is contended, return
-		 * EAGAIN to indicate to the caller that they did not succeed.
-		 * This prevents the flush path from blocking on inodes inside
-		 * another operation right now, they get caught later by
-		 * xfs_sync.
-		 */
-		if (!xfs_ilock_nowait(ip, XFS_ILOCK_SHARED))
-			goto out;
-
-		if (xfs_ipincount(ip) || !xfs_iflock_nowait(ip))
-			goto out_unlock;
-
-		/*
-		 * Now we have the flush lock and the inode is not pinned, we
-		 * can check if the inode is really clean as we know that
-		 * there are no pending transaction completions, it is not
-		 * waiting on the delayed write queue and there is no IO in
-		 * progress.
-		 */
-		if (xfs_inode_clean(ip)) {
-			xfs_ifunlock(ip);
-			error = 0;
-			goto out_unlock;
-		}
-		error = xfs_iflush(ip, SYNC_TRYLOCK);
-	}
-
- out_unlock:
-	xfs_iunlock(ip, XFS_ILOCK_SHARED);
- out:
-	/*
-	 * if we failed to write out the inode then mark
-	 * it dirty again so we'll try again later.
-	 */
+	xfs_iunlock(ip, XFS_ILOCK_EXCL);
 	if (error)
-		xfs_mark_inode_dirty_sync(ip);
-	return -error;
+		goto trouble;
+	return;
+
+trouble:
+	xfs_warn(mp, "failed to update timestamps for inode 0x%llx", ip->i_ino);
 }
 
 STATIC void
@@ -1081,7 +1039,6 @@ xfs_fs_put_super(
 	 * structure so we don't have memory reclaim racing with us here.
 	 */
 	xfs_inode_shrinker_unregister(mp);
-	xfs_syncd_stop(mp);
 
 	/*
 	 * Blow away any referenced inode in the filestreams cache.
@@ -1092,6 +1049,7 @@ xfs_fs_put_super(
 
 	XFS_bflush(mp->m_ddev_targp);
 
+	xfs_syncd_stop(mp);
 	xfs_unmountfs(mp);
 	xfs_freesb(mp);
 	xfs_icsb_destroy_counters(mp);
@@ -1188,7 +1146,7 @@ xfs_fs_statfs(
 
 	spin_unlock(&mp->m_sb_lock);
 
-	if ((ip->i_d.di_flags & XFS_DIFLAG_PROJINHERIT) ||
+	if ((ip->i_d.di_flags & XFS_DIFLAG_PROJINHERIT) &&
 	    ((mp->m_qflags & (XFS_PQUOTA_ACCT|XFS_OQUOTA_ENFD))) ==
 			      (XFS_PQUOTA_ACCT|XFS_OQUOTA_ENFD))
 		xfs_qm_statvfs(ip, statp);
@@ -1476,11 +1434,11 @@ xfs_fs_fill_super(
 	sb->s_time_gran = 1;
 	set_posix_acl_flag(sb);
 
+	xfs_inode_shrinker_register(mp);
+
 	error = xfs_syncd_init(mp);
 	if (error)
 		goto out_filestream_unmount;
-
-	xfs_inode_shrinker_register(mp);
 
 	error = xfs_mountfs(mp);
 	if (error)
@@ -1489,24 +1447,24 @@ xfs_fs_fill_super(
 	root = igrab(VFS_I(mp->m_rootip));
 	if (!root) {
 		error = ENOENT;
-		goto fail_unmount;
+		goto out_unmount;
 	}
 	if (is_bad_inode(root)) {
 		error = EINVAL;
-		goto fail_vnrele;
+		goto out_unmount;
 	}
 	sb->s_root = d_alloc_root(root);
 	if (!sb->s_root) {
 		error = ENOMEM;
-		goto fail_vnrele;
+		goto out_iput;
 	}
 
 	return 0;
 
  out_syncd_stop:
-	xfs_inode_shrinker_unregister(mp);
 	xfs_syncd_stop(mp);
  out_filestream_unmount:
+	xfs_inode_shrinker_unregister(mp);
 	xfs_filestream_unmount(mp);
  out_free_sb:
 	xfs_freesb(mp);
@@ -1520,17 +1478,10 @@ xfs_fs_fill_super(
  out:
 	return -error;
 
- fail_vnrele:
-	if (sb->s_root) {
-		dput(sb->s_root);
-		sb->s_root = NULL;
-	} else {
-		iput(root);
-	}
-
- fail_unmount:
+ out_iput:
+	iput(root);
+ out_unmount:
 	xfs_inode_shrinker_unregister(mp);
-	xfs_syncd_stop(mp);
 
 	/*
 	 * Blow away any referenced inode in the filestreams cache.
@@ -1542,6 +1493,7 @@ xfs_fs_fill_super(
 	XFS_bflush(mp->m_ddev_targp);
 
 	xfs_unmountfs(mp);
+	xfs_syncd_stop(mp);
 	goto out_free_sb;
 }
 
@@ -1561,7 +1513,6 @@ static const struct super_operations xfs_super_operations = {
 	.alloc_inode		= xfs_fs_alloc_inode,
 	.destroy_inode		= xfs_fs_destroy_inode,
 	.dirty_inode		= xfs_fs_dirty_inode,
-	.write_inode		= xfs_fs_write_inode,
 	.clear_inode		= xfs_fs_clear_inode,
 	.put_super		= xfs_fs_put_super,
 	.sync_fs		= xfs_fs_sync_fs,
@@ -1577,7 +1528,7 @@ static struct file_system_type xfs_fs_type = {
 	.name			= "xfs",
 	.get_sb			= xfs_fs_get_sb,
 	.kill_sb		= kill_block_super,
-	.fs_flags		= FS_REQUIRES_DEV,
+	.fs_flags		= FS_REQUIRES_DEV | FS_HAS_NEW_FREEZE,
 };
 
 STATIC int __init
@@ -1757,13 +1708,21 @@ init_xfs_fs(void)
 	if (error)
 		goto out_cleanup_procfs;
 
+	xfs_alloc_wq = create_workqueue("xfsalloc");
+	if (!xfs_alloc_wq) {
+		error = ENOMEM;
+		goto out_sysctl_unregister;
+	}
+
 	vfs_initquota();
 
 	error = register_filesystem(&xfs_fs_type);
 	if (error)
-		goto out_sysctl_unregister;
+		goto out_destroy_alloc_wq;
 	return 0;
 
+ out_destroy_alloc_wq:
+	destroy_workqueue(xfs_alloc_wq);
  out_sysctl_unregister:
 	xfs_sysctl_unregister();
  out_cleanup_procfs:
@@ -1785,6 +1744,7 @@ exit_xfs_fs(void)
 {
 	vfs_exitquota();
 	unregister_filesystem(&xfs_fs_type);
+	destroy_workqueue(xfs_alloc_wq);
 	xfs_sysctl_unregister();
 	xfs_cleanup_procfs();
 	xfs_buf_terminate();

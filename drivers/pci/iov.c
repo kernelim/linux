@@ -567,7 +567,7 @@ int pci_iov_init(struct pci_dev *dev)
 {
 	int pos;
 
-	if (!dev->is_pcie)
+	if (!pci_is_pcie(dev))
 		return -ENODEV;
 
 	pos = pci_find_ext_capability(dev, PCI_EXT_CAP_ID_SRIOV);
@@ -850,6 +850,23 @@ void pci_disable_ats(struct pci_dev *dev)
 	if (!dev->is_physfn)
 		ats_free_one(dev);
 }
+
+void pci_restore_ats_state(struct pci_dev *dev)
+{
+	u16 ctrl;
+
+	if (!pci_ats_enabled(dev))
+		return;
+	if (!pci_find_ext_capability(dev, PCI_EXT_CAP_ID_ATS))
+		BUG();
+
+	ctrl = PCI_ATS_CTRL_ENABLE;
+	if (!dev->is_virtfn)
+		ctrl |= PCI_ATS_CTRL_STU(dev->ats->stu - PCI_ATS_MIN_STU);
+
+	pci_write_config_word(dev, dev->ats->pos + PCI_ATS_CTRL, ctrl);
+}
+EXPORT_SYMBOL_GPL(pci_restore_ats_state);
 
 /**
  * pci_ats_queue_depth - query the ATS Invalidate Queue Depth

@@ -50,7 +50,7 @@ nouveau_pwmfan_get(struct drm_device *dev)
 	ret = nouveau_gpio_find(dev, 0, DCB_GPIO_PWM_FAN, 0xff, &gpio);
 	if (ret == 0) {
 		ret = pm->pwm_get(dev, gpio.line, &divs, &duty);
-		if (ret == 0) {
+		if (ret == 0 && divs) {
 			divs = max(divs, duty);
 			if (dev_priv->card_type <= NV_40 || (gpio.log[0] & 1))
 				duty = divs - duty;
@@ -77,7 +77,7 @@ nouveau_pwmfan_set(struct drm_device *dev, int percent)
 
 	ret = nouveau_gpio_find(dev, 0, DCB_GPIO_PWM_FAN, 0xff, &gpio);
 	if (ret == 0) {
-		divs = pm->pwm_divisor;
+		divs = pm->fan.pwm_divisor;
 		if (pm->fan.pwm_freq) {
 			/*XXX: PNVIO clock more than likely... */
 			divs = 135000 / pm->fan.pwm_freq;
@@ -89,7 +89,10 @@ nouveau_pwmfan_set(struct drm_device *dev, int percent)
 		if (dev_priv->card_type <= NV_40 || (gpio.log[0] & 1))
 			duty = divs - duty;
 
-		return pm->pwm_set(dev, gpio.line, divs, duty);
+		ret = pm->pwm_set(dev, gpio.line, divs, duty);
+		if (!ret)
+			pm->fan.percent = percent;
+		return ret;
 	}
 
 	return -ENODEV;
@@ -144,9 +147,13 @@ nouveau_pm_perflvl_set(struct drm_device *dev, struct nouveau_pm_level *perflvl)
 		return ret;
 
 	state = pm->clocks_pre(dev, perflvl);
-	if (IS_ERR(state))
-		return PTR_ERR(state);
-	pm->clocks_set(dev, state);
+	if (IS_ERR(state)) {
+		ret = PTR_ERR(state);
+		goto error;
+	}
+	ret = pm->clocks_set(dev, state);
+	if (ret)
+		goto error;
 
 	ret = nouveau_pm_perflvl_aux(dev, perflvl, perflvl, pm->cur);
 	if (ret)
@@ -154,6 +161,65 @@ nouveau_pm_perflvl_set(struct drm_device *dev, struct nouveau_pm_level *perflvl)
 
 	pm->cur = perflvl;
 	return 0;
+
+error:
+	/* restore the fan speed and voltage before leaving */
+	nouveau_pm_perflvl_aux(dev, perflvl, perflvl, pm->cur);
+	return ret;
+}
+
+void
+nouveau_pm_trigger(struct drm_device *dev)
+{
+	struct drm_nouveau_private *dev_priv = dev->dev_private;
+	struct nouveau_pm_engine *pm = &dev_priv->engine.pm;
+	struct nouveau_pm_profile *profile = NULL;
+	struct nouveau_pm_level *perflvl = NULL;
+	int ret;
+
+	/* select power profile based on current power source */
+	if (power_supply_is_system_supplied())
+		profile = pm->profile_ac;
+	else
+		profile = pm->profile_dc;
+
+	if (profile != pm->profile) {
+		pm->profile->func->fini(pm->profile);
+		pm->profile = profile;
+		pm->profile->func->init(pm->profile);
+	}
+
+	/* select performance level based on profile */
+	perflvl = profile->func->select(profile);
+
+	/* change perflvl, if necessary */
+	if (perflvl != pm->cur) {
+		struct nouveau_timer_engine *ptimer = &dev_priv->engine.timer;
+		u64 time0 = ptimer->read(dev);
+
+		NV_INFO(dev, "setting performance level: %d", perflvl->id);
+		ret = nouveau_pm_perflvl_set(dev, perflvl);
+		if (ret)
+			NV_INFO(dev, "> reclocking failed: %d\n\n", ret);
+
+		NV_INFO(dev, "> reclocking took %lluns\n\n",
+			     ptimer->read(dev) - time0);
+	}
+}
+
+static struct nouveau_pm_profile *
+profile_find(struct drm_device *dev, const char *string)
+{
+	struct drm_nouveau_private *dev_priv = dev->dev_private;
+	struct nouveau_pm_engine *pm = &dev_priv->engine.pm;
+	struct nouveau_pm_profile *profile;
+
+	list_for_each_entry(profile, &pm->profiles, head) {
+		if (!strncmp(profile->name, string, sizeof(profile->name)))
+			return profile;
+	}
+
+	return NULL;
 }
 
 static int
@@ -161,32 +227,54 @@ nouveau_pm_profile_set(struct drm_device *dev, const char *profile)
 {
 	struct drm_nouveau_private *dev_priv = dev->dev_private;
 	struct nouveau_pm_engine *pm = &dev_priv->engine.pm;
-	struct nouveau_pm_level *perflvl = NULL;
+	struct nouveau_pm_profile *ac = NULL, *dc = NULL;
+	char string[16], *cur = string, *ptr;
 
 	/* safety precaution, for now */
 	if (nouveau_perflvl_wr != 7777)
 		return -EPERM;
 
-	if (!strncmp(profile, "boot", 4))
-		perflvl = &pm->boot;
-	else {
-		int pl = simple_strtol(profile, NULL, 10);
-		int i;
+	strncpy(string, profile, sizeof(string));
+	string[sizeof(string) - 1] = 0;
+	if ((ptr = strchr(string, '\n')))
+		*ptr = '\0';
 
-		for (i = 0; i < pm->nr_perflvl; i++) {
-			if (pm->perflvl[i].id == pl) {
-				perflvl = &pm->perflvl[i];
-				break;
-			}
-		}
+	ptr = strsep(&cur, ",");
+	if (ptr)
+		ac = profile_find(dev, ptr);
 
-		if (!perflvl)
-			return -EINVAL;
-	}
+	ptr = strsep(&cur, ",");
+	if (ptr)
+		dc = profile_find(dev, ptr);
+	else
+		dc = ac;
 
-	NV_INFO(dev, "setting performance level: %s\n", profile);
-	return nouveau_pm_perflvl_set(dev, perflvl);
+	if (ac == NULL || dc == NULL)
+		return -EINVAL;
+
+	pm->profile_ac = ac;
+	pm->profile_dc = dc;
+	nouveau_pm_trigger(dev);
+	return 0;
 }
+
+static void
+nouveau_pm_static_dummy(struct nouveau_pm_profile *profile)
+{
+}
+
+static struct nouveau_pm_level *
+nouveau_pm_static_select(struct nouveau_pm_profile *profile)
+{
+	return container_of(profile, struct nouveau_pm_level, profile);
+}
+
+const struct nouveau_pm_profile_func nouveau_pm_static_profile_func = {
+	.destroy = nouveau_pm_static_dummy,
+	.init = nouveau_pm_static_dummy,
+	.fini = nouveau_pm_static_dummy,
+	.select = nouveau_pm_static_select,
+};
 
 static int
 nouveau_pm_perflvl_get(struct drm_device *dev, struct nouveau_pm_level *perflvl)
@@ -197,9 +285,11 @@ nouveau_pm_perflvl_get(struct drm_device *dev, struct nouveau_pm_level *perflvl)
 
 	memset(perflvl, 0, sizeof(*perflvl));
 
-	ret = pm->clocks_get(dev, perflvl);
-	if (ret)
-		return ret;
+	if (pm->clocks_get) {
+		ret = pm->clocks_get(dev, perflvl);
+		if (ret)
+			return ret;
+	}
 
 	if (pm->voltage.supported && pm->voltage_get) {
 		ret = pm->voltage_get(dev);
@@ -213,13 +303,14 @@ nouveau_pm_perflvl_get(struct drm_device *dev, struct nouveau_pm_level *perflvl)
 	if (ret > 0)
 		perflvl->fanspeed = ret;
 
+	nouveau_mem_timing_read(dev, &perflvl->timing);
 	return 0;
 }
 
 static void
 nouveau_pm_perflvl_info(struct nouveau_pm_level *perflvl, char *ptr, int len)
 {
-	char c[16], s[16], v[32], f[16], t[16], m[16];
+	char c[16], s[16], v[32], f[16], m[16];
 
 	c[0] = '\0';
 	if (perflvl->core)
@@ -247,18 +338,15 @@ nouveau_pm_perflvl_info(struct nouveau_pm_level *perflvl, char *ptr, int len)
 	if (perflvl->fanspeed)
 		snprintf(f, sizeof(f), " fanspeed %d%%", perflvl->fanspeed);
 
-	t[0] = '\0';
-	if (perflvl->timing)
-		snprintf(t, sizeof(t), " timing %d", perflvl->timing->id);
-
-	snprintf(ptr, len, "%s%s%s%s%s%s\n", c, s, m, t, v, f);
+	snprintf(ptr, len, "%s%s%s%s%s\n", c, s, m, v, f);
 }
 
 static ssize_t
 nouveau_pm_get_perflvl_info(struct device *d,
 			    struct device_attribute *a, char *buf)
 {
-	struct nouveau_pm_level *perflvl = (struct nouveau_pm_level *)a;
+	struct nouveau_pm_level *perflvl =
+		container_of(a, struct nouveau_pm_level, dev_attr);
 	char *ptr = buf;
 	int len = PAGE_SIZE;
 
@@ -280,12 +368,8 @@ nouveau_pm_get_perflvl(struct device *d, struct device_attribute *a, char *buf)
 	int len = PAGE_SIZE, ret;
 	char *ptr = buf;
 
-	if (!pm->cur)
-		snprintf(ptr, len, "setting: boot\n");
-	else if (pm->cur == &pm->boot)
-		snprintf(ptr, len, "setting: boot\nc:");
-	else
-		snprintf(ptr, len, "setting: static %d\nc:", pm->cur->id);
+	snprintf(ptr, len, "profile: %s, %s\nc:",
+		 pm->profile_ac->name, pm->profile_dc->name);
 	ptr += strlen(buf);
 	len -= strlen(buf);
 
@@ -330,7 +414,6 @@ nouveau_sysfs_init(struct drm_device *dev)
 		perflvl->dev_attr.attr.mode = S_IRUGO;
 		perflvl->dev_attr.show = nouveau_pm_get_perflvl_info;
 		perflvl->dev_attr.store = NULL;
-#if 0
 		sysfs_attr_init(&perflvl->dev_attr.attr);
 
 		ret = device_create_file(d, &perflvl->dev_attr);
@@ -341,8 +424,8 @@ nouveau_sysfs_init(struct drm_device *dev)
 			nouveau_pm_fini(dev);
 			return ret;
 		}
-#endif
 	}
+
 	return 0;
 }
 
@@ -495,7 +578,7 @@ nouveau_hwmon_show_fan0_input(struct device *d, struct device_attribute *attr,
 			prev = cur;
 		}
 
-		udelay(750);
+		usleep_range(500, 1000); /* supports 0 < rpm < 7500 */
 	} while (ptimer->read(dev) - start < 250000000);
 
 	/* interpolate to get rpm */
@@ -732,8 +815,10 @@ nouveau_hwmon_fini(struct drm_device *dev)
 
 	if (pm->hwmon) {
 		sysfs_remove_group(&dev->pdev->dev.kobj, &hwmon_attrgroup);
-		sysfs_remove_group(&dev->pdev->dev.kobj, &hwmon_pwm_fan_attrgroup);
-		sysfs_remove_group(&dev->pdev->dev.kobj, &hwmon_fan_rpm_attrgroup);
+		sysfs_remove_group(&dev->pdev->dev.kobj,
+				   &hwmon_pwm_fan_attrgroup);
+		sysfs_remove_group(&dev->pdev->dev.kobj,
+				   &hwmon_fan_rpm_attrgroup);
 
 		hwmon_device_unregister(pm->hwmon);
 	}
@@ -753,6 +838,7 @@ nouveau_pm_acpi_event(struct notifier_block *nb, unsigned long val, void *data)
 		bool ac = power_supply_is_system_supplied();
 
 		NV_DEBUG(dev, "power supply changed: %s\n", ac ? "AC" : "DC");
+		nouveau_pm_trigger(dev);
 	}
 
 	return NOTIFY_OK;
@@ -767,35 +853,48 @@ nouveau_pm_init(struct drm_device *dev)
 	char info[256];
 	int ret, i;
 
-	nouveau_mem_timing_init(dev);
+	/* parse aux tables from vbios */
 	nouveau_volt_init(dev);
-	nouveau_perf_init(dev);
 	nouveau_temp_init(dev);
 
+	/* determine current ("boot") performance level */
+	ret = nouveau_pm_perflvl_get(dev, &pm->boot);
+	if (ret) {
+		NV_ERROR(dev, "failed to determine boot perflvl\n");
+		return ret;
+	}
+
+	strncpy(pm->boot.name, "boot", 4);
+	strncpy(pm->boot.profile.name, "boot", 4);
+	pm->boot.profile.func = &nouveau_pm_static_profile_func;
+
+	INIT_LIST_HEAD(&pm->profiles);
+	list_add(&pm->boot.profile.head, &pm->profiles);
+
+	pm->profile_ac = &pm->boot.profile;
+	pm->profile_dc = &pm->boot.profile;
+	pm->profile = &pm->boot.profile;
+	pm->cur = &pm->boot;
+
+	/* add performance levels from vbios */
+	nouveau_perf_init(dev);
+
+	/* display available performance levels */
 	NV_INFO(dev, "%d available performance level(s)\n", pm->nr_perflvl);
 	for (i = 0; i < pm->nr_perflvl; i++) {
 		nouveau_pm_perflvl_info(&pm->perflvl[i], info, sizeof(info));
 		NV_INFO(dev, "%d:%s", pm->perflvl[i].id, info);
 	}
 
-	/* determine current ("boot") performance level */
-	ret = nouveau_pm_perflvl_get(dev, &pm->boot);
-	if (ret == 0) {
-		strncpy(pm->boot.name, "boot", 4);
-		pm->cur = &pm->boot;
-
-		nouveau_pm_perflvl_info(&pm->boot, info, sizeof(info));
-		NV_INFO(dev, "c:%s", info);
-	}
+	nouveau_pm_perflvl_info(&pm->boot, info, sizeof(info));
+	NV_INFO(dev, "c:%s", info);
 
 	/* switch performance levels now if requested */
-	if (nouveau_perflvl != NULL) {
-		ret = nouveau_pm_profile_set(dev, nouveau_perflvl);
-		if (ret) {
-			NV_ERROR(dev, "error setting perflvl \"%s\": %d\n",
-				 nouveau_perflvl, ret);
-		}
-	}
+	if (nouveau_perflvl != NULL)
+		nouveau_pm_profile_set(dev, nouveau_perflvl);
+
+	/* determine the current fan speed */
+	pm->fan.percent = nouveau_pwmfan_get(dev);
 
 	nouveau_sysfs_init(dev);
 	nouveau_hwmon_init(dev);
@@ -812,6 +911,12 @@ nouveau_pm_fini(struct drm_device *dev)
 {
 	struct drm_nouveau_private *dev_priv = dev->dev_private;
 	struct nouveau_pm_engine *pm = &dev_priv->engine.pm;
+	struct nouveau_pm_profile *profile, *tmp;
+
+	list_for_each_entry_safe(profile, tmp, &pm->profiles, head) {
+		list_del(&profile->head);
+		profile->func->destroy(profile);
+	}
 
 	if (pm->cur != &pm->boot)
 		nouveau_pm_perflvl_set(dev, &pm->boot);
@@ -819,7 +924,6 @@ nouveau_pm_fini(struct drm_device *dev)
 	nouveau_temp_fini(dev);
 	nouveau_perf_fini(dev);
 	nouveau_volt_fini(dev);
-	nouveau_mem_timing_fini(dev);
 
 #if defined(CONFIG_ACPI) && defined(CONFIG_POWER_SUPPLY)
 	unregister_acpi_notifier(&pm->acpi_nb);
@@ -841,4 +945,5 @@ nouveau_pm_resume(struct drm_device *dev)
 	perflvl = pm->cur;
 	pm->cur = &pm->boot;
 	nouveau_pm_perflvl_set(dev, perflvl);
+	nouveau_pwmfan_set(dev, pm->fan.percent);
 }

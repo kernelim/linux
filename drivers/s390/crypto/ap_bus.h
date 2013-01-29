@@ -79,17 +79,18 @@ struct ap_queue_status {
 		{ 1, 1, 1, 0xF, 1, 0xFF, 0xFFFF }
 
 static inline
-int ap_queue_status_invalid_test(struct ap_queue_status *status) {
+int ap_queue_status_invalid_test(struct ap_queue_status *status)
+{
 	struct ap_queue_status invalid = AP_QUEUE_STATUS_INVALID;
-	return (!(memcmp(status, &invalid, sizeof(struct ap_queue_status))));
+	return !(memcmp(status, &invalid, sizeof(struct ap_queue_status)));
 }
 
-#define MAX_AP_FACILITY 31
-
-static inline int test_ap_facility(unsigned int function, unsigned int nr) {
-	if (nr > MAX_AP_FACILITY)
+#define AP_MAX_BITS 31
+static inline int ap_test_bit(unsigned int *ptr, unsigned int nr)
+{
+	if (nr > AP_MAX_BITS)
 		return 0;
-	return function & (unsigned int)(0x80000000 >> nr);
+	return (*ptr & (0x80000000u >> nr)) != 0;
 }
 
 #define AP_RESPONSE_NORMAL		0x00
@@ -117,6 +118,15 @@ static inline int test_ap_facility(unsigned int function, unsigned int nr) {
 #define AP_DEVICE_TYPE_CEX2C	7
 #define AP_DEVICE_TYPE_CEX3A	8
 #define AP_DEVICE_TYPE_CEX3C	9
+#define AP_DEVICE_TYPE_CEX4	10
+
+/*
+ * Known function facilities
+ */
+#define AP_FUNC_MEX4K 1
+#define AP_FUNC_CRT4K 2
+#define AP_FUNC_COPRO 3
+#define AP_FUNC_ACCEL 4
 
 /*
  * AP reset flag states
@@ -134,9 +144,6 @@ struct ap_driver {
 
 	int (*probe)(struct ap_device *);
 	void (*remove)(struct ap_device *);
-	/* receive is called from tasklet context */
-	void (*receive)(struct ap_device *, struct ap_message *,
-			struct ap_message *);
 	int request_timeout;		/* request timeout in jiffies */
 };
 
@@ -154,6 +161,7 @@ struct ap_device {
 	ap_qid_t qid;			/* AP queue id. */
 	int queue_depth;		/* AP queue depth.*/
 	int device_type;		/* AP device type. */
+	unsigned int functions;		/* AP device function bitfield. */
 	int unregistered;		/* marks AP device as unregistered */
 	struct timer_list timeout;	/* Timer for request timeouts. */
 	int reset;			/* Reset required after req. timeout. */
@@ -181,7 +189,21 @@ struct ap_message {
 
 	void *private;			/* ap driver private pointer. */
 	unsigned int special:1;		/* Used for special commands. */
+	/* receive is called from tasklet context */
+	void (*receive)(struct ap_device *, struct ap_message *,
+			struct ap_message *);
 };
+
+struct ap_config_info {
+	unsigned int special_command:1;
+	unsigned int ap_extended:1;
+	unsigned char reserved1:6;
+	unsigned char reserved2[15];
+	unsigned int apm[8];		/* AP ID mask */
+	unsigned int aqm[8];		/* AP queue mask */
+	unsigned int adm[8];		/* AP domain mask */
+	unsigned char reserved4[16];
+} __packed;
 
 #define AP_DEVICE(dt)					\
 	.dev_type=(dt),					\
@@ -197,6 +219,7 @@ static inline void ap_init_message(struct ap_message *ap_msg)
 	ap_msg->psmid = 0;
 	ap_msg->length = 0;
 	ap_msg->special = 0;
+	ap_msg->receive = NULL;
 }
 
 /*
@@ -213,7 +236,5 @@ void ap_flush_queue(struct ap_device *ap_dev);
 
 int ap_module_init(void);
 void ap_module_exit(void);
-
-int ap_4096_commands_available(ap_qid_t qid);
 
 #endif /* _AP_BUS_H_ */

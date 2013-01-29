@@ -185,11 +185,13 @@ static int br_rtm_setlink(struct sk_buff *skb,  struct nlmsghdr *nlh, void *arg)
 
 int __init br_netlink_init(void)
 {
-	if (__rtnl_register(PF_BRIDGE, RTM_GETLINK, NULL, br_dump_ifinfo))
+	if (__rtnl_register(PF_BRIDGE, RTM_GETLINK, NULL,
+			      br_dump_ifinfo, NULL))
 		return -ENOBUFS;
 
 	/* Only the first call to __rtnl_register can fail */
-	__rtnl_register(PF_BRIDGE, RTM_SETLINK, br_rtm_setlink, NULL);
+	__rtnl_register(PF_BRIDGE, RTM_SETLINK,
+			      br_rtm_setlink, NULL, NULL);
 
 	return 0;
 }
@@ -198,4 +200,3 @@ void __exit br_netlink_fini(void)
 {
 	rtnl_unregister_all(PF_BRIDGE);
 }
-

@@ -1100,7 +1100,6 @@ ENTRY(xen_failsafe_callback)
 	lea 16(%esp),%esp
 	CFI_ADJUST_CFA_OFFSET -16
 	jz 5f
-	addl $16,%esp
 	jmp iret_exc		# EAX != 0 => Category 2 (Bad IRET)
 5:	pushl $0		# EAX == 0 => Category 1 (Bad segment)
 	CFI_ADJUST_CFA_OFFSET 4

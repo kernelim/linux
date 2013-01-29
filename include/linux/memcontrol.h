@@ -25,6 +25,12 @@ struct page_cgroup;
 struct page;
 struct mm_struct;
 
+struct mem_cgroup_reclaim_cookie {
+	struct zone *zone;
+	int priority;
+	unsigned int generation;
+};
+
 #ifdef CONFIG_CGROUP_MEM_RES_CTLR
 /*
  * All "charge" functions with gfp_mask should use GFP_KERNEL or
@@ -48,12 +54,14 @@ extern void mem_cgroup_cancel_charge_swapin(struct mem_cgroup *ptr);
 
 extern int mem_cgroup_cache_charge(struct page *page, struct mm_struct *mm,
 					gfp_t gfp_mask);
-extern void mem_cgroup_add_lru_list(struct page *page, enum lru_list lru);
-extern void mem_cgroup_del_lru_list(struct page *page, enum lru_list lru);
-extern void mem_cgroup_rotate_lru_list(struct page *page, enum lru_list lru);
-extern void mem_cgroup_del_lru(struct page *page);
-extern void mem_cgroup_move_lists(struct page *page,
-				  enum lru_list from, enum lru_list to);
+
+struct lruvec *mem_cgroup_zone_lruvec(struct zone *, struct mem_cgroup *);
+struct lruvec *mem_cgroup_lru_add_list(struct zone *, struct page *,
+				       enum lru_list);
+void mem_cgroup_lru_del_list(struct page *, enum lru_list);
+void mem_cgroup_lru_del(struct page *);
+struct lruvec *mem_cgroup_lru_move_lists(struct zone *, struct page *,
+					 enum lru_list, enum lru_list);
 
 /* For coalescing uncharge for reducing memcg' overhead*/
 extern void mem_cgroup_uncharge_start(void);
@@ -61,16 +69,10 @@ extern void mem_cgroup_uncharge_end(void);
 
 extern void mem_cgroup_uncharge_page(struct page *page);
 extern void mem_cgroup_uncharge_cache_page(struct page *page);
-extern int mem_cgroup_shmem_charge_fallback(struct page *page,
-			struct mm_struct *mm, gfp_t gfp_mask);
 
-extern unsigned long mem_cgroup_isolate_pages(unsigned long nr_to_scan,
-					struct list_head *dst,
-					unsigned long *scanned, int order,
-					int mode, struct zone *z,
-					struct mem_cgroup *mem_cont,
-					int active, int file);
 extern void mem_cgroup_out_of_memory(struct mem_cgroup *mem, gfp_t gfp_mask);
+bool __mem_cgroup_same_or_subtree(const struct mem_cgroup *root_memcg,
+				  struct mem_cgroup *memcg);
 int task_in_mem_cgroup(struct task_struct *task, const struct mem_cgroup *mem);
 
 extern struct mem_cgroup *try_get_mem_cgroup_from_page(struct page *page);
@@ -80,10 +82,13 @@ static inline
 int mm_match_cgroup(const struct mm_struct *mm, const struct mem_cgroup *cgroup)
 {
 	struct mem_cgroup *mem;
+	int match;
+
 	rcu_read_lock();
 	mem = mem_cgroup_from_task(rcu_dereference((mm)->owner));
+	match = __mem_cgroup_same_or_subtree(cgroup, mem);
 	rcu_read_unlock();
-	return cgroup == mem;
+	return match;
 }
 
 extern struct cgroup_subsys_state *mem_cgroup_css(struct mem_cgroup *mem);
@@ -94,6 +99,11 @@ mem_cgroup_prepare_migration(struct page *page,
 extern void mem_cgroup_end_migration(struct mem_cgroup *mem,
 	struct page *oldpage, struct page *newpage, bool migration_ok);
 
+struct mem_cgroup *mem_cgroup_iter(struct mem_cgroup *,
+				   struct mem_cgroup *,
+				   struct mem_cgroup_reclaim_cookie *);
+void mem_cgroup_iter_break(struct mem_cgroup *, struct mem_cgroup *);
+
 /*
  * For memory reclaim.
  */
@@ -102,8 +112,10 @@ extern void mem_cgroup_note_reclaim_priority(struct mem_cgroup *mem,
 							int priority);
 extern void mem_cgroup_record_reclaim_priority(struct mem_cgroup *mem,
 							int priority);
-int mem_cgroup_inactive_anon_is_low(struct mem_cgroup *memcg);
-int mem_cgroup_inactive_file_is_low(struct mem_cgroup *memcg);
+int mem_cgroup_inactive_anon_is_low(struct mem_cgroup *memcg,
+				    struct zone *zone);
+int mem_cgroup_inactive_file_is_low(struct mem_cgroup *memcg,
+				    struct zone *zone);
 unsigned long mem_cgroup_zone_nr_pages(struct mem_cgroup *memcg,
 				       struct zone *zone,
 				       enum lru_list lru);
@@ -185,34 +197,33 @@ static inline void mem_cgroup_uncharge_cache_page(struct page *page)
 {
 }
 
-static inline int mem_cgroup_shmem_charge_fallback(struct page *page,
-			struct mm_struct *mm, gfp_t gfp_mask)
+static inline struct lruvec *mem_cgroup_zone_lruvec(struct zone *zone,
+						    struct mem_cgroup *memcg)
 {
-	return 0;
+	return &zone->lruvec;
 }
 
-static inline void mem_cgroup_add_lru_list(struct page *page, int lru)
+static inline struct lruvec *mem_cgroup_lru_add_list(struct zone *zone,
+						     struct page *page,
+						     enum lru_list lru)
+{
+	return &zone->lruvec;
+}
+
+static inline void mem_cgroup_lru_del_list(struct page *page, enum lru_list lru)
 {
 }
 
-static inline void mem_cgroup_del_lru_list(struct page *page, int lru)
+static inline void mem_cgroup_lru_del(struct page *page)
 {
-	return ;
 }
 
-static inline void mem_cgroup_rotate_lru_list(struct page *page, int lru)
+static inline struct lruvec *mem_cgroup_lru_move_lists(struct zone *zone,
+						       struct page *page,
+						       enum lru_list from,
+						       enum lru_list to)
 {
-	return ;
-}
-
-static inline void mem_cgroup_del_lru(struct page *page)
-{
-	return ;
-}
-
-static inline void
-mem_cgroup_move_lists(struct page *page, enum lru_list from, enum lru_list to)
-{
+	return &zone->lruvec;
 }
 
 static inline struct mem_cgroup *try_get_mem_cgroup_from_page(struct page *page)
@@ -248,6 +259,19 @@ static inline void mem_cgroup_end_migration(struct mem_cgroup *mem,
 {
 }
 
+static inline struct mem_cgroup *
+mem_cgroup_iter(struct mem_cgroup *root,
+		struct mem_cgroup *prev,
+		struct mem_cgroup_reclaim_cookie *reclaim)
+{
+	return NULL;
+}
+
+static inline void mem_cgroup_iter_break(struct mem_cgroup *root,
+					 struct mem_cgroup *prev)
+{
+}
+
 static inline int mem_cgroup_get_reclaim_priority(struct mem_cgroup *mem)
 {
 	return 0;
@@ -269,13 +293,13 @@ static inline bool mem_cgroup_disabled(void)
 }
 
 static inline int
-mem_cgroup_inactive_anon_is_low(struct mem_cgroup *memcg)
+mem_cgroup_inactive_anon_is_low(struct mem_cgroup *memcg, struct zone *zone)
 {
 	return 1;
 }
 
 static inline int
-mem_cgroup_inactive_file_is_low(struct mem_cgroup *memcg)
+mem_cgroup_inactive_file_is_low(struct mem_cgroup *memcg, struct zone *zone)
 {
 	return 1;
 }

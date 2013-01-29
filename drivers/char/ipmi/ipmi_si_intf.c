@@ -57,6 +57,7 @@
 #include <asm/irq.h>
 #include <linux/interrupt.h>
 #include <linux/rcupdate.h>
+#include <linux/ipmi.h>
 #include <linux/ipmi_smi.h>
 #include <asm/io.h>
 #include "ipmi_si_sm.h"
@@ -64,6 +65,7 @@
 #include <linux/dmi.h>
 #include <linux/string.h>
 #include <linux/ctype.h>
+#include <linux/pnp.h>
 
 #ifdef CONFIG_PPC_OF
 #include <linux/of_device.h>
@@ -106,10 +108,6 @@ enum si_type {
 };
 static char *si_to_str[] = { "kcs", "smic", "bt" };
 
-enum ipmi_addr_src {
-	SI_INVALID, SI_HOTMOD, SI_HARDCODED, SI_SPMI, SI_ACPI, SI_SMBIOS,
-	SI_PCI, SI_DEVICETREE, SI_DEFAULT
-};
 static char *ipmi_addr_src_to_str[] = { NULL, "hotmod", "hardcoded", "SPMI",
 				        "ACPI", "SMBIOS", "PCI", "device-tree",
 					"default" };
@@ -172,7 +170,10 @@ enum si_stat_indexes {
 	SI_NUM_STATS
 };
 
+#define SI_INTF_TOKEN 0x6188709B
+
 struct smi_info {
+	int		       token;
 	int                    intf_num;
 	ipmi_smi_t             intf;
 	struct si_sm_data      *si_sm;
@@ -290,6 +291,7 @@ struct smi_info {
 	struct task_struct *thread;
 
 	struct list_head link;
+	union ipmi_smi_info_union addr_info;
 };
 
 #define smi_inc_stat(smi, stat) \
@@ -327,11 +329,8 @@ static int register_xaction_notifier(struct notifier_block *nb)
 static void deliver_recv_msg(struct smi_info *smi_info,
 			     struct ipmi_smi_msg *msg)
 {
-	/* Deliver the message to the upper layer with the lock
-	   released. */
-	spin_unlock(&(smi_info->si_lock));
+	/* Deliver the message to the upper layer. */
 	ipmi_smi_msg_received(smi_info->intf, msg);
-	spin_lock(&(smi_info->si_lock));
 }
 
 static void return_hosed_msg(struct smi_info *smi_info, int cCode)
@@ -482,9 +481,7 @@ static void handle_flags(struct smi_info *smi_info)
 
 		start_clear_flags(smi_info);
 		smi_info->msg_flags &= ~WDT_PRE_TIMEOUT_INT;
-		spin_unlock(&(smi_info->si_lock));
 		ipmi_smi_watchdog_pretimeout(smi_info->intf);
-		spin_lock(&(smi_info->si_lock));
 	} else if (smi_info->msg_flags & RECEIVE_MSG_AVAIL) {
 		/* Messages available. */
 		smi_info->curr_msg = ipmi_alloc_smi_msg();
@@ -1189,6 +1186,21 @@ static int smi_start_processing(void       *send_info,
 	return 0;
 }
 
+int ipmi_si_get_smi_info(void *send_info, struct ipmi_smi_info *data)
+{
+	struct smi_info *smi = send_info;
+
+	if (!smi || (smi->token != SI_INTF_TOKEN))
+		return -ENOSYS;
+
+	data->addr_src = smi->addr_source;
+	data->dev = smi->dev;
+	data->addr_info = smi->addr_info;
+	get_device(smi->dev);
+
+	return 0;
+}
+
 static void set_maintenance_mode(void *send_info, int enable)
 {
 	struct smi_info   *smi_info = send_info;
@@ -1219,6 +1231,12 @@ static int smi_num; /* Used to sequence the SMIs */
 #define DEFAULT_REGSPACING	1
 #define DEFAULT_REGSIZE		1
 
+#ifdef CONFIG_ACPI
+static int           si_tryacpi = 1;
+#endif
+#ifdef CONFIG_DMI
+static int           si_trydmi = 1;
+#endif
 static int           si_trydefaults = 1;
 static char          *si_type[SI_MAX_PARMS];
 #define MAX_SI_TYPE_STR 30
@@ -1249,6 +1267,16 @@ MODULE_PARM_DESC(hotmod, "Add and remove interfaces.  See"
 		 " Documentation/IPMI.txt in the kernel sources for the"
 		 " gory details.");
 
+#ifdef CONFIG_ACPI
+module_param_named(tryacpi, si_tryacpi, bool, 0);
+MODULE_PARM_DESC(tryacpi, "Setting this to zero will disable the"
+		 " default scan of the interfaces identified via ACPI");
+#endif
+#ifdef CONFIG_DMI
+module_param_named(trydmi, si_trydmi, bool, 0);
+MODULE_PARM_DESC(trydmi, "Setting this to zero will disable the"
+		 " default scan of the interfaces identified via DMI");
+#endif
 module_param_named(trydefaults, si_trydefaults, bool, 0);
 MODULE_PARM_DESC(trydefaults, "Setting this to 'false' will disable the"
 		 " default scan of the KCS and SMIC interface at the standard"
@@ -2124,6 +2152,113 @@ static __devinit void acpi_find_bmc(void)
 		try_init_acpi(spmi);
 	}
 }
+
+static int __devinit ipmi_pnp_probe(struct pnp_dev *dev,
+				    const struct pnp_device_id *dev_id)
+{
+	struct acpi_device *acpi_dev;
+	struct smi_info *info;
+	struct resource *res;
+	acpi_handle handle;
+	acpi_status status;
+	unsigned long long tmp;
+
+	acpi_dev = pnp_acpi_device(dev);
+	if (!acpi_dev)
+		return -ENODEV;
+
+	info = kzalloc(sizeof(*info), GFP_KERNEL);
+	if (!info)
+		return -ENOMEM;
+
+	info->addr_source = SI_ACPI;
+
+	handle = acpi_dev->handle;
+	info->addr_info.acpi_info.acpi_handle = handle;
+
+	/* _IFT tells us the interface type: KCS, BT, etc */
+	status = acpi_evaluate_integer(handle, "_IFT", NULL, &tmp);
+	if (ACPI_FAILURE(status))
+		goto err_free;
+
+	switch (tmp) {
+	case 1:
+		info->si_type = SI_KCS;
+		break;
+	case 2:
+		info->si_type = SI_SMIC;
+		break;
+	case 3:
+		info->si_type = SI_BT;
+		break;
+	default:
+		dev_info(&dev->dev, "unknown interface type %lld\n", tmp);
+		goto err_free;
+	}
+
+	if (pnp_port_valid(dev, 0)) {
+		info->io_setup = port_setup;
+		info->io.addr_type = IPMI_IO_ADDR_SPACE;
+		info->io.addr_data = pnp_port_start(dev, 0);
+	} else if (pnp_mem_valid(dev, 0)) {
+		info->io_setup = mem_setup;
+		info->io.addr_type = IPMI_MEM_ADDR_SPACE;
+		info->io.addr_data = pnp_mem_start(dev, 0);
+	} else {
+		dev_err(&dev->dev, "no I/O or memory address\n");
+		goto err_free;
+	}
+
+	info->io.regspacing = DEFAULT_REGSPACING;
+	res = pnp_get_resource(dev,
+			       (info->io.addr_type == IPMI_IO_ADDR_SPACE) ?
+					IORESOURCE_IO : IORESOURCE_MEM,
+			       1);
+	if (res) {
+		if (res->start > info->io.addr_data)
+			info->io.regspacing = res->start - info->io.addr_data;
+	}
+	info->io.regsize = DEFAULT_REGSPACING;
+	info->io.regshift = 0;
+
+	/* If _GPE exists, use it; otherwise use standard interrupts */
+	status = acpi_evaluate_integer(handle, "_GPE", NULL, &tmp);
+	if (ACPI_SUCCESS(status)) {
+		info->irq = tmp;
+		info->irq_setup = acpi_gpe_irq_setup;
+	} else if (pnp_irq_valid(dev, 0)) {
+		info->irq = pnp_irq(dev, 0);
+		info->irq_setup = std_irq_setup;
+	}
+
+	info->dev = &dev->dev;
+	pnp_set_drvdata(dev, info);
+
+	return add_smi(info);
+
+err_free:
+	kfree(info);
+	return -EINVAL;
+}
+
+static void __devexit ipmi_pnp_remove(struct pnp_dev *dev)
+{
+	struct smi_info *info = pnp_get_drvdata(dev);
+
+	cleanup_one_si(info);
+}
+
+static const struct pnp_device_id pnp_dev_table[] = {
+	{"IPI0001", 0},
+	{"", 0},
+};
+
+static struct pnp_driver ipmi_pnp_driver = {
+	.name		= DEVICE_NAME,
+	.probe		= ipmi_pnp_probe,
+	.remove		= __devexit_p(ipmi_pnp_remove),
+	.id_table	= pnp_dev_table,
+};
 #endif
 
 #ifdef CONFIG_DMI
@@ -3092,6 +3227,8 @@ static int try_smi_init(struct smi_info *new_smi)
 		new_smi->dev_registered = 1;
 	}
 
+	new_smi->token = SI_INTF_TOKEN;
+
 	rv = ipmi_register_smi(&handlers,
 			       new_smi,
 			       &new_smi->device_id,
@@ -3236,6 +3373,20 @@ static __devinit int init_ipmi_si(void)
 	}
 	mutex_unlock(&smi_infos_lock);
 
+#ifdef CONFIG_PNP
+#ifdef CONFIG_ACPI
+	if (si_tryacpi)
+		pnp_register_driver(&ipmi_pnp_driver);
+#else
+	pnp_register_driver(&ipmi_pnp_driver);
+#endif
+#endif
+
+#ifdef CONFIG_DMI
+	if (si_trydmi)
+		dmi_find_bmc();
+#endif
+
 #ifdef CONFIG_PCI
 	rv = pci_register_driver(&ipmi_pci_driver);
 	if (rv)
@@ -3246,12 +3397,9 @@ static __devinit int init_ipmi_si(void)
 		pci_registered = 1;
 #endif
 
-#ifdef CONFIG_DMI
-	dmi_find_bmc();
-#endif
-
 #ifdef CONFIG_ACPI
-	acpi_find_bmc();
+	if (si_tryacpi)
+		acpi_find_bmc();
 #endif
 
 #ifdef CONFIG_PPC_OF
@@ -3282,6 +3430,7 @@ static __devinit int init_ipmi_si(void)
 	/* type will only have been set if we successfully registered an si */
 	if (type) {
 		mutex_unlock(&smi_infos_lock);
+		ipmi_smi_probe_complete();
 		return 0;
 	}
 
@@ -3296,8 +3445,10 @@ static __devinit int init_ipmi_si(void)
 	}
 	mutex_unlock(&smi_infos_lock);
 
-	if (type)
+	if (type) {
+		ipmi_smi_probe_complete();
 		return 0;
+	}
 
 	if (si_trydefaults) {
 		mutex_lock(&smi_infos_lock);
@@ -3328,6 +3479,7 @@ static __devinit int init_ipmi_si(void)
 		return -ENODEV;
 	} else {
 		mutex_unlock(&smi_infos_lock);
+		ipmi_smi_probe_complete();
 		return 0;
 	}
 }
@@ -3414,6 +3566,9 @@ static __exit void cleanup_ipmi_si(void)
 #ifdef CONFIG_PCI
 	if (pci_registered)
 		pci_unregister_driver(&ipmi_pci_driver);
+#endif
+#ifdef CONFIG_PNP
+	pnp_unregister_driver(&ipmi_pnp_driver);
 #endif
 
 #ifdef CONFIG_PPC_OF

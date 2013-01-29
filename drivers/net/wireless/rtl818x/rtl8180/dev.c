@@ -814,10 +814,19 @@ static void rtl8180_bss_info_changed(struct ieee80211_hw *dev,
 	}
 }
 
+#if 0 /* Not in RHEL */
+static u64 rtl8180_prepare_multicast(struct ieee80211_hw *dev,
+				     struct netdev_hw_addr_list *mc_list)
+#else
 static u64 rtl8180_prepare_multicast(struct ieee80211_hw *dev, int mc_count,
 				     struct dev_addr_list *mc_list)
+#endif
 {
+#if 0 /* Not in RHEL */
+	return netdev_hw_addr_list_count(mc_list);
+#else
 	return mc_count;
+#endif
 }
 
 static void rtl8180_configure_filter(struct ieee80211_hw *dev,
@@ -1173,15 +1182,4 @@ static struct pci_driver rtl8180_driver = {
 #endif /* CONFIG_PM */
 };
 
-static int __init rtl8180_init(void)
-{
-	return pci_register_driver(&rtl8180_driver);
-}
-
-static void __exit rtl8180_exit(void)
-{
-	pci_unregister_driver(&rtl8180_driver);
-}
-
-module_init(rtl8180_init);
-module_exit(rtl8180_exit);
+module_pci_driver(rtl8180_driver);

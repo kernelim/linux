@@ -1924,6 +1924,18 @@ struct file *do_filp_open(int dfd, const char *pathname,
 	nd.flags |= LOOKUP_CREATE | LOOKUP_OPEN;
 	if (flag & O_EXCL)
 		nd.flags |= LOOKUP_EXCL;
+
+	/*
+	 * This write is needed to ensure that a
+	 * ro->rw transition does not occur between
+	 * the time when the file is created and when
+	 * a permanent write count is taken through
+	 * the 'struct file' in nameidata_to_filp().
+	 */
+	error = mnt_want_write(nd.path.mnt);
+	if (error)
+		goto exit_parent;
+
 	mutex_lock(&dir->d_inode->i_mutex);
 	path.dentry = lookup_hash(&nd);
 	path.mnt = nd.path.mnt;
@@ -1932,6 +1944,7 @@ do_last:
 	error = PTR_ERR(path.dentry);
 	if (IS_ERR(path.dentry)) {
 		mutex_unlock(&dir->d_inode->i_mutex);
+		mnt_drop_write(nd.path.mnt);
 		goto exit;
 	}
 
@@ -1942,16 +1955,6 @@ do_last:
 
 	/* Negative dentry, just create the file */
 	if (!path.dentry->d_inode) {
-		/*
-		 * This write is needed to ensure that a
-		 * ro->rw transition does not occur between
-		 * the time when the file is created and when
-		 * a permanent write count is taken through
-		 * the 'struct file' in nameidata_to_filp().
-		 */
-		error = mnt_want_write(nd.path.mnt);
-		if (error)
-			goto exit_mutex_unlock;
 		error = __open_namei_create(&nd, &path, open_flag, mode);
 		if (error) {
 			mnt_drop_write(nd.path.mnt);
@@ -1975,6 +1978,7 @@ do_last:
 	 * It already exists.
 	 */
 	mutex_unlock(&dir->d_inode->i_mutex);
+	mnt_drop_write(nd.path.mnt);
 	audit_inode(pathname, path.dentry);
 
 	error = -EEXIST;
@@ -2052,6 +2056,7 @@ ok:
 
 exit_mutex_unlock:
 	mutex_unlock(&dir->d_inode->i_mutex);
+	mnt_drop_write(nd.path.mnt);
 exit_dput:
 	path_put_conditional(&path, &nd);
 exit:
@@ -2108,6 +2113,11 @@ do_link:
 		goto exit;
 	}
 	dir = nd.path.dentry;
+	error = mnt_want_write(nd.path.mnt);
+	if (error) {
+		__putname(nd.last.name);
+		goto exit;
+	}
 	mutex_lock(&dir->d_inode->i_mutex);
 	path.dentry = lookup_hash(&nd);
 	path.mnt = nd.path.mnt;
@@ -2233,7 +2243,7 @@ static int may_mknod(mode_t mode)
 SYSCALL_DEFINE4(mknodat, int, dfd, const char __user *, filename, int, mode,
 		unsigned, dev)
 {
-	int error;
+	int error, err2;
 	char *tmp;
 	struct dentry *dentry;
 	struct nameidata nd;
@@ -2245,22 +2255,27 @@ SYSCALL_DEFINE4(mknodat, int, dfd, const char __user *, filename, int, mode,
 	if (error)
 		return error;
 
+	/* don't fail immediately if it's r/o, at least try to report other errors */
+	err2 = mnt_want_write(nd.path.mnt);
+
 	dentry = lookup_create(&nd, 0);
 	if (IS_ERR(dentry)) {
 		error = PTR_ERR(dentry);
 		goto out_unlock;
+	}
+
+	if (unlikely(err2)) {
+		error = err2;
+		goto out_dput;
 	}
 	if (!IS_POSIXACL(nd.path.dentry->d_inode))
 		mode &= ~current_umask();
 	error = may_mknod(mode);
 	if (error)
 		goto out_dput;
-	error = mnt_want_write(nd.path.mnt);
-	if (error)
-		goto out_dput;
 	error = security_path_mknod(&nd.path, dentry, mode, dev);
 	if (error)
-		goto out_drop_write;
+		goto out_dput;
 	switch (mode & S_IFMT) {
 		case 0: case S_IFREG:
 			error = vfs_create(nd.path.dentry->d_inode,dentry,mode,&nd);
@@ -2273,12 +2288,12 @@ SYSCALL_DEFINE4(mknodat, int, dfd, const char __user *, filename, int, mode,
 			error = vfs_mknod(nd.path.dentry->d_inode,dentry,mode,0);
 			break;
 	}
-out_drop_write:
-	mnt_drop_write(nd.path.mnt);
 out_dput:
 	dput(dentry);
 out_unlock:
 	mutex_unlock(&nd.path.dentry->d_inode->i_mutex);
+	if (!err2)
+		mnt_drop_write(nd.path.mnt);
 	path_put(&nd.path);
 	putname(tmp);
 
@@ -2314,7 +2329,7 @@ int vfs_mkdir(struct inode *dir, struct dentry *dentry, int mode)
 
 SYSCALL_DEFINE3(mkdirat, int, dfd, const char __user *, pathname, int, mode)
 {
-	int error = 0;
+	int error = 0, err2;
 	char * tmp;
 	struct dentry *dentry;
 	struct nameidata nd;
@@ -2323,26 +2338,30 @@ SYSCALL_DEFINE3(mkdirat, int, dfd, const char __user *, pathname, int, mode)
 	if (error)
 		goto out_err;
 
+	/* don't fail immediately if it's r/o, at least try to report other errors */
+	err2 = mnt_want_write(nd.path.mnt);
+
 	dentry = lookup_create(&nd, 1);
 	error = PTR_ERR(dentry);
 	if (IS_ERR(dentry))
 		goto out_unlock;
 
+	if (unlikely(err2)) {
+		error = err2;
+		goto out_dput;
+	}
 	if (!IS_POSIXACL(nd.path.dentry->d_inode))
 		mode &= ~current_umask();
-	error = mnt_want_write(nd.path.mnt);
-	if (error)
-		goto out_dput;
 	error = security_path_mkdir(&nd.path, dentry, mode);
 	if (error)
-		goto out_drop_write;
+		goto out_dput;
 	error = vfs_mkdir(nd.path.dentry->d_inode, dentry, mode);
-out_drop_write:
-	mnt_drop_write(nd.path.mnt);
 out_dput:
 	dput(dentry);
 out_unlock:
 	mutex_unlock(&nd.path.dentry->d_inode->i_mutex);
+	if (!err2)
+		mnt_drop_write(nd.path.mnt);
 	path_put(&nd.path);
 	putname(tmp);
 out_err:
@@ -2438,25 +2457,24 @@ static long do_rmdir(int dfd, const char __user *pathname)
 	}
 
 	nd.flags &= ~LOOKUP_PARENT;
+	error = mnt_want_write(nd.path.mnt);
+	if (error)
+		goto exit1;
 
 	mutex_lock_nested(&nd.path.dentry->d_inode->i_mutex, I_MUTEX_PARENT);
 	dentry = lookup_hash(&nd);
 	error = PTR_ERR(dentry);
 	if (IS_ERR(dentry))
 		goto exit2;
-	error = mnt_want_write(nd.path.mnt);
-	if (error)
-		goto exit3;
 	error = security_path_rmdir(&nd.path, dentry);
 	if (error)
-		goto exit4;
+		goto exit3;
 	error = vfs_rmdir(nd.path.dentry->d_inode, dentry);
-exit4:
-	mnt_drop_write(nd.path.mnt);
 exit3:
 	dput(dentry);
 exit2:
 	mutex_unlock(&nd.path.dentry->d_inode->i_mutex);
+	mnt_drop_write(nd.path.mnt);
 exit1:
 	path_put(&nd.path);
 	putname(name);
@@ -2522,6 +2540,9 @@ static long do_unlinkat(int dfd, const char __user *pathname)
 		goto exit1;
 
 	nd.flags &= ~LOOKUP_PARENT;
+	error = mnt_want_write(nd.path.mnt);
+	if (error)
+		goto exit1;
 
 	mutex_lock_nested(&nd.path.dentry->d_inode->i_mutex, I_MUTEX_PARENT);
 	dentry = lookup_hash(&nd);
@@ -2533,21 +2554,17 @@ static long do_unlinkat(int dfd, const char __user *pathname)
 		inode = dentry->d_inode;
 		if (inode)
 			atomic_inc(&inode->i_count);
-		error = mnt_want_write(nd.path.mnt);
-		if (error)
-			goto exit2;
 		error = security_path_unlink(&nd.path, dentry);
 		if (error)
-			goto exit3;
+			goto exit2;
 		error = vfs_unlink(nd.path.dentry->d_inode, dentry);
-exit3:
-		mnt_drop_write(nd.path.mnt);
-	exit2:
+exit2:
 		dput(dentry);
 	}
 	mutex_unlock(&nd.path.dentry->d_inode->i_mutex);
 	if (inode)
 		iput(inode);	/* truncate the inode here */
+	mnt_drop_write(nd.path.mnt);
 exit1:
 	path_put(&nd.path);
 	putname(name);
@@ -2599,7 +2616,7 @@ int vfs_symlink(struct inode *dir, struct dentry *dentry, const char *oldname)
 SYSCALL_DEFINE3(symlinkat, const char __user *, oldname,
 		int, newdfd, const char __user *, newname)
 {
-	int error;
+	int error, err2;
 	char *from;
 	char *to;
 	struct dentry *dentry;
@@ -2613,24 +2630,28 @@ SYSCALL_DEFINE3(symlinkat, const char __user *, oldname,
 	if (error)
 		goto out_putname;
 
+	/* don't fail immediately if it's r/o, at least try to report other errors */
+	err2 = mnt_want_write(nd.path.mnt);
+
 	dentry = lookup_create(&nd, 0);
 	error = PTR_ERR(dentry);
 	if (IS_ERR(dentry))
 		goto out_unlock;
 
-	error = mnt_want_write(nd.path.mnt);
-	if (error)
+	if (unlikely(err2)) {
+		error = err2;
 		goto out_dput;
+	}
 	error = security_path_symlink(&nd.path, dentry, from);
 	if (error)
-		goto out_drop_write;
+		goto out_dput;
 	error = vfs_symlink(nd.path.dentry->d_inode, dentry, from);
-out_drop_write:
-	mnt_drop_write(nd.path.mnt);
 out_dput:
 	dput(dentry);
 out_unlock:
 	mutex_unlock(&nd.path.dentry->d_inode->i_mutex);
+	if (!err2)
+		mnt_drop_write(nd.path.mnt);
 	path_put(&nd.path);
 	putname(to);
 out_putname:
@@ -2714,23 +2735,22 @@ SYSCALL_DEFINE5(linkat, int, olddfd, const char __user *, oldname,
 	error = -EXDEV;
 	if (old_path.mnt != nd.path.mnt)
 		goto out_release;
+	error = mnt_want_write(nd.path.mnt);
+	if (error)
+		goto out_release;
 	new_dentry = lookup_create(&nd, 0);
 	error = PTR_ERR(new_dentry);
 	if (IS_ERR(new_dentry))
 		goto out_unlock;
-	error = mnt_want_write(nd.path.mnt);
-	if (error)
-		goto out_dput;
 	error = security_path_link(old_path.dentry, &nd.path, new_dentry);
 	if (error)
-		goto out_drop_write;
+		goto out_dput;
 	error = vfs_link(old_path.dentry, nd.path.dentry->d_inode, new_dentry);
-out_drop_write:
-	mnt_drop_write(nd.path.mnt);
 out_dput:
 	dput(new_dentry);
 out_unlock:
 	mutex_unlock(&nd.path.dentry->d_inode->i_mutex);
+	mnt_drop_write(nd.path.mnt);
 out_release:
 	path_put(&nd.path);
 	putname(to);
@@ -2923,6 +2943,10 @@ SYSCALL_DEFINE4(renameat, int, olddfd, const char __user *, oldname,
 	if (newnd.last_type != LAST_NORM)
 		goto exit2;
 
+	error = mnt_want_write(oldnd.path.mnt);
+	if (error)
+		goto exit2;
+
 	oldnd.flags &= ~LOOKUP_PARENT;
 	newnd.flags &= ~LOOKUP_PARENT;
 	newnd.flags |= LOOKUP_RENAME_TARGET;
@@ -2958,23 +2982,19 @@ SYSCALL_DEFINE4(renameat, int, olddfd, const char __user *, oldname,
 	if (new_dentry == trap)
 		goto exit5;
 
-	error = mnt_want_write(oldnd.path.mnt);
-	if (error)
-		goto exit5;
 	error = security_path_rename(&oldnd.path, old_dentry,
 				     &newnd.path, new_dentry);
 	if (error)
-		goto exit6;
+		goto exit5;
 	error = vfs_rename(old_dir->d_inode, old_dentry,
 				   new_dir->d_inode, new_dentry);
-exit6:
-	mnt_drop_write(oldnd.path.mnt);
 exit5:
 	dput(new_dentry);
 exit4:
 	dput(old_dentry);
 exit3:
 	unlock_rename(new_dir, old_dir);
+	mnt_drop_write(oldnd.path.mnt);
 exit2:
 	path_put(&newnd.path);
 	putname(to);

@@ -57,6 +57,9 @@ unsigned long pci_cardbus_mem_size = DEFAULT_CARDBUS_MEM_SIZE;
 unsigned long pci_hotplug_io_size  = DEFAULT_HOTPLUG_IO_SIZE;
 unsigned long pci_hotplug_mem_size = DEFAULT_HOTPLUG_MEM_SIZE;
 
+/* If set, the PCIe ARI capability will not be used. */
+static bool pcie_ari_disabled;
+
 /**
  * pci_bus_max_busnr - returns maximum PCI bus number of given bus' children
  * @bus: pointer to PCI bus structure to search
@@ -232,6 +235,38 @@ int pci_bus_find_capability(struct pci_bus *bus, unsigned int devfn, int cap)
 	pos = __pci_bus_find_cap_start(bus, devfn, hdr_type & 0x7f);
 	if (pos)
 		pos = __pci_find_next_cap(bus, devfn, pos, cap);
+
+	return pos;
+}
+
+/**
+ * pci_pcie_cap2 - query for devices' PCI_CAP_ID_EXP v2 capability structure
+ * @dev: PCI device to check
+ *
+ * Like pci_pcie_cap() but also checks that the PCIe capability version is
+ * >= 2.  Note that v1 capability structures could be sparse in that not
+ * all register fields were required.  v2 requires the entire structure to
+ * be present size wise, while still allowing for non-implemented registers
+ * to exist but they must be hardwired to 0.
+ *
+ * Due to the differences in the versions of capability structures, one
+ * must be careful not to try and access non-existant registers that may
+ * exist in early versions - v1 - of Express devices.
+ *
+ * Returns the offset of the PCIe capability structure as long as the
+ * capability version is >= 2; otherwise 0 is returned.
+ */
+static int pci_pcie_cap2(struct pci_dev *dev)
+{
+	u16 flags;
+	int pos;
+
+	pos = pci_pcie_cap(dev);
+	if (pos) {
+		pci_read_config_word(dev, pos + PCI_EXP_FLAGS, &flags);
+		if ((flags & PCI_EXP_FLAGS_VERS) < 2)
+			pos = 0;
+	}
 
 	return pos;
 }
@@ -580,6 +615,9 @@ static int pci_platform_power_transition(struct pci_dev *dev, pci_power_t state)
 		error = platform_pci_set_power_state(dev, state);
 		if (!error)
 			pci_update_current_state(dev, state);
+		/* Fall back to PCI_D0 if native PM is not supported */
+		if (!dev->pm_cap)
+			dev->current_state = PCI_D0;
 	} else {
 		error = -ENODEV;
 		/* Fall back to PCI_D0 if native PM is not supported */
@@ -733,8 +771,8 @@ static int pci_save_pcie_state(struct pci_dev *dev)
 	u16 *cap;
 	u16 flags;
 
-	pos = pci_find_capability(dev, PCI_CAP_ID_EXP);
-	if (pos <= 0)
+	pos = pci_pcie_cap(dev);
+	if (!pos)
 		return 0;
 
 	save_state = pci_find_saved_cap(dev, PCI_CAP_ID_EXP);
@@ -866,6 +904,7 @@ pci_restore_state(struct pci_dev *dev)
 
 	/* PCI Express register must be restored first */
 	pci_restore_pcie_state(dev);
+	pci_restore_ats_state(dev);
 
 	/*
 	 * The Base Address register should be programmed before the command
@@ -1514,10 +1553,10 @@ void pci_enable_ari(struct pci_dev *dev)
 {
 	int pos;
 	u32 cap;
-	u16 flags, ctrl;
+	u16 ctrl;
 	struct pci_dev *bridge;
 
-	if (!dev->is_pcie || dev->devfn)
+	if (pcie_ari_disabled || !pci_is_pcie(dev) || dev->devfn)
 		return;
 
 	pos = pci_find_ext_capability(dev, PCI_EXT_CAP_ID_ARI);
@@ -1525,16 +1564,12 @@ void pci_enable_ari(struct pci_dev *dev)
 		return;
 
 	bridge = dev->bus->self;
-	if (!bridge || !bridge->is_pcie)
+	if (!bridge)
 		return;
 
-	pos = pci_find_capability(bridge, PCI_CAP_ID_EXP);
+	/* ARI is a PCIe cap v2 feature */
+	pos = pci_pcie_cap2(bridge);
 	if (!pos)
-		return;
-
-	/* ARI is a PCIe v2 feature */
-	pci_read_config_word(bridge, pos + PCI_EXP_FLAGS, &flags);
-	if ((flags & PCI_EXP_FLAGS_VERS) < 2)
 		return;
 
 	pci_read_config_dword(bridge, pos + PCI_EXP_DEVCAP2, &cap);
@@ -1549,7 +1584,7 @@ void pci_enable_ari(struct pci_dev *dev)
 }
 
 /**
- * pci_enable_ido - enable ID-based ordering on a device
+ * pci_enable_ido - enable ID-based Ordering on a device
  * @dev: the PCI device
  * @type: which types of IDO to enable
  *
@@ -1562,7 +1597,8 @@ void pci_enable_ido(struct pci_dev *dev, unsigned long type)
 	int pos;
 	u16 ctrl;
 
-	pos = pci_pcie_cap(dev);
+	/* ID-based Ordering is a PCIe cap v2 feature */
+	pos = pci_pcie_cap2(dev);
 	if (!pos)
 		return;
 
@@ -1585,10 +1621,8 @@ void pci_disable_ido(struct pci_dev *dev, unsigned long type)
 	int pos;
 	u16 ctrl;
 
-	if (!pci_is_pcie(dev))
-		return;
-
-	pos = pci_pcie_cap(dev);
+	/* ID-based Ordering is a PCIe cap v2 feature */
+	pos = pci_pcie_cap2(dev);
 	if (!pos)
 		return;
 
@@ -1627,10 +1661,8 @@ int pci_enable_obff(struct pci_dev *dev, enum pci_obff_signal_type type)
 	u16 ctrl;
 	int ret;
 
-	if (!pci_is_pcie(dev))
-		return -ENOTSUPP;
-
-	pos = pci_pcie_cap(dev);
+	/* OBFF is a PCIe cap v2 feature */
+	pos = pci_pcie_cap2(dev);
 	if (!pos)
 		return -ENOTSUPP;
 
@@ -1639,7 +1671,7 @@ int pci_enable_obff(struct pci_dev *dev, enum pci_obff_signal_type type)
 		return -ENOTSUPP; /* no OBFF support at all */
 
 	/* Make sure the topology supports OBFF as well */
-	if (dev->bus) {
+	if (dev->bus->self) {
 		ret = pci_enable_obff(dev->bus->self, type);
 		if (ret)
 			return ret;
@@ -1680,10 +1712,8 @@ void pci_disable_obff(struct pci_dev *dev)
 	int pos;
 	u16 ctrl;
 
-	if (!pci_is_pcie(dev))
-		return;
-
-	pos = pci_pcie_cap(dev);
+	/* OBFF is a PCIe cap v2 feature */
+	pos = pci_pcie_cap2(dev);
 	if (!pos)
 		return;
 
@@ -1705,10 +1735,8 @@ bool pci_ltr_supported(struct pci_dev *dev)
 	int pos;
 	u32 cap;
 
-	if (!pci_is_pcie(dev))
-		return false;
-
-	pos = pci_pcie_cap(dev);
+	/* LTR is a PCIe cap v2 feature */
+	pos = pci_pcie_cap2(dev);
 	if (!pos)
 		return false;
 
@@ -1737,7 +1765,8 @@ int pci_enable_ltr(struct pci_dev *dev)
 	if (!pci_ltr_supported(dev))
 		return -ENOTSUPP;
 
-	pos = pci_pcie_cap(dev);
+	/* LTR is a PCIe cap v2 feature */
+	pos = pci_pcie_cap2(dev);
 	if (!pos)
 		return -ENOTSUPP;
 
@@ -1746,7 +1775,7 @@ int pci_enable_ltr(struct pci_dev *dev)
 		return -EINVAL;
 
 	/* Enable upstream ports first */
-	if (dev->bus) {
+	if (dev->bus->self) {
 		ret = pci_enable_ltr(dev->bus->self);
 		if (ret)
 			return ret;
@@ -1772,7 +1801,8 @@ void pci_disable_ltr(struct pci_dev *dev)
 	if (!pci_ltr_supported(dev))
 		return;
 
-	pos = pci_pcie_cap(dev);
+	/* LTR is a PCIe cap v2 feature */
+	pos = pci_pcie_cap2(dev);
 	if (!pos)
 		return;
 
@@ -1865,7 +1895,7 @@ void pci_enable_acs(struct pci_dev *dev)
 	if (!pci_acs_enable)
 		return;
 
-	if (!dev->is_pcie)
+	if (!pci_is_pcie(dev))
 		return;
 
 	pos = pci_find_ext_capability(dev, PCI_EXT_CAP_ID_ACS);
@@ -2561,9 +2591,9 @@ static int pcie_flr(struct pci_dev *dev, int probe)
 	int i;
 	int pos;
 	u32 cap;
-	u16 status;
+	u16 status, control;
 
-	pos = pci_find_capability(dev, PCI_CAP_ID_EXP);
+	pos = pci_pcie_cap(dev);
 	if (!pos)
 		return -ENOTTY;
 
@@ -2588,8 +2618,10 @@ static int pcie_flr(struct pci_dev *dev, int probe)
 			"proceeding with reset anyway\n");
 
 clear:
-	pci_write_config_word(dev, pos + PCI_EXP_DEVCTL,
-				PCI_EXP_DEVCTL_BCR_FLR);
+	pci_read_config_word(dev, pos + PCI_EXP_DEVCTL, &control);
+	control |= PCI_EXP_DEVCTL_BCR_FLR;
+	pci_write_config_word(dev, pos + PCI_EXP_DEVCTL, control);
+
 	msleep(100);
 
 	return 0;
@@ -2914,7 +2946,7 @@ int pcie_get_readrq(struct pci_dev *dev)
 	int ret, cap;
 	u16 ctl;
 
-	cap = pci_find_capability(dev, PCI_CAP_ID_EXP);
+	cap = pci_pcie_cap(dev);
 	if (!cap)
 		return -EINVAL;
 
@@ -2942,7 +2974,7 @@ int pcie_set_readrq(struct pci_dev *dev, int rq)
 	if (rq < 128 || rq > 4096 || !is_power_of_2(rq))
 		goto out;
 
-	cap = pci_find_capability(dev, PCI_CAP_ID_EXP);
+	cap = pci_pcie_cap(dev);
 	if (!cap)
 		goto out;
 
@@ -3226,6 +3258,68 @@ int pci_is_reassigndev(struct pci_dev *dev)
 	return (pci_specified_resource_alignment(dev) != 0);
 }
 
+/*
+ * This function disables memory decoding and releases memory resources
+ * of the device specified by kernel's boot parameter 'pci=resource_alignment='.
+ * It also rounds up size to specified alignment.
+ * Later on, the kernel will assign page-aligned memory resource back
+ * to the device.
+ */
+void pci_reassigndev_resource_alignment(struct pci_dev *dev)
+{
+	int i;
+	struct resource *r;
+	resource_size_t align, size;
+	u16 command;
+
+	if (!pci_is_reassigndev(dev))
+		return;
+
+	if (dev->hdr_type == PCI_HEADER_TYPE_NORMAL &&
+	    (dev->class >> 8) == PCI_CLASS_BRIDGE_HOST) {
+		dev_warn(&dev->dev,
+			"Can't reassign resources to host bridge.\n");
+		return;
+	}
+
+	dev_info(&dev->dev,
+		"Disabling memory decoding and releasing memory resources.\n");
+	pci_read_config_word(dev, PCI_COMMAND, &command);
+	command &= ~PCI_COMMAND_MEMORY;
+	pci_write_config_word(dev, PCI_COMMAND, command);
+
+	align = pci_specified_resource_alignment(dev);
+	for (i = 0; i < PCI_BRIDGE_RESOURCES; i++) {
+		r = &dev->resource[i];
+		if (!(r->flags & IORESOURCE_MEM))
+			continue;
+		size = resource_size(r);
+		if (size < align) {
+			size = align;
+			dev_info(&dev->dev,
+				"Rounding up size of resource #%d to %#llx.\n",
+				i, (unsigned long long)size);
+		}
+		r->end = size - 1;
+		r->start = 0;
+	}
+	/* Need to disable bridge's resource window,
+	 * to enable the kernel to reassign new resource
+	 * window later on.
+	 */
+	if (dev->hdr_type == PCI_HEADER_TYPE_BRIDGE &&
+	    (dev->class >> 8) == PCI_CLASS_BRIDGE_PCI) {
+		for (i = PCI_BRIDGE_RESOURCES; i < PCI_NUM_RESOURCES; i++) {
+			r = &dev->resource[i];
+			if (!(r->flags & IORESOURCE_MEM))
+				continue;
+			r->end = resource_size(r) - 1;
+			r->start = 0;
+		}
+		pci_disable_bridge_window(dev);
+	}
+}
+
 ssize_t pci_set_resource_alignment_param(const char *buf, size_t count)
 {
 	if (count > RESOURCE_ALIGNMENT_PARAM_SIZE - 1)
@@ -3310,6 +3404,8 @@ static int __init pci_setup(char *str)
 				pci_realloc();
 			} else if (!strcmp(str, "nodomains")) {
 				pci_no_domains();
+			} else if (!strncmp(str, "noari", 5)) {
+				pcie_ari_disabled = true;
 			} else if (!strncmp(str, "cbiosize=", 9)) {
 				pci_cardbus_io_size = memparse(str + 9, &str);
 			} else if (!strncmp(str, "cbmemsize=", 10)) {

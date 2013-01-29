@@ -131,7 +131,7 @@ error:
 	return err;
 }
 
-static const struct pipe_buf_operations page_cache_pipe_buf_ops = {
+const struct pipe_buf_operations page_cache_pipe_buf_ops = {
 	.can_merge = 0,
 	.map = generic_pipe_buf_map,
 	.unmap = generic_pipe_buf_unmap,
@@ -259,7 +259,7 @@ ssize_t splice_to_pipe(struct pipe_inode_info *pipe,
 	return ret;
 }
 
-static void spd_release_page(struct splice_pipe_desc *spd, unsigned int i)
+void spd_release_page(struct splice_pipe_desc *spd, unsigned int i)
 {
 	page_cache_release(spd->pages[i]);
 }
@@ -957,6 +957,8 @@ generic_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
 	};
 	ssize_t ret;
 
+	sb_start_write(inode->i_sb);
+
 	pipe_lock(pipe);
 
 	splice_from_pipe_begin(&sd);
@@ -993,6 +995,7 @@ generic_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
 			*ppos += ret;
 		balance_dirty_pages_ratelimited_nr(mapping, nr_pages);
 	}
+	sb_end_write(inode->i_sb);
 
 	return ret;
 }

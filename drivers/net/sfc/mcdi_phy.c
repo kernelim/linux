@@ -1,6 +1,6 @@
 /****************************************************************************
  * Driver for Solarflare Solarstorm network controllers and boards
- * Copyright 2009 Solarflare Communications Inc.
+ * Copyright 2009-2010 Solarflare Communications Inc.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published
@@ -116,7 +116,7 @@ static int efx_mcdi_loopback_modes(struct efx_nic *efx, u64 *loopback_modes)
 		goto fail;
 	}
 
-	*loopback_modes = MCDI_QWORD(outbuf, GET_LOOPBACK_MODES_SUGGESTED);
+	*loopback_modes = MCDI_QWORD(outbuf, GET_LOOPBACK_MODES_OUT_SUGGESTED);
 
 	return 0;
 
@@ -264,22 +264,22 @@ static u32 efx_get_mcdi_phy_flags(struct efx_nic *efx)
 
 	/* TODO: Advertise the capabilities supported by this PHY */
 	supported = 0;
-	if (phy_cfg->flags & (1 << MC_CMD_GET_PHY_CFG_TXDIS_LBN))
+	if (phy_cfg->flags & (1 << MC_CMD_GET_PHY_CFG_OUT_TXDIS_LBN))
 		supported |= PHY_MODE_TX_DISABLED;
-	if (phy_cfg->flags & (1 << MC_CMD_GET_PHY_CFG_LOWPOWER_LBN))
+	if (phy_cfg->flags & (1 << MC_CMD_GET_PHY_CFG_OUT_LOWPOWER_LBN))
 		supported |= PHY_MODE_LOW_POWER;
-	if (phy_cfg->flags & (1 << MC_CMD_GET_PHY_CFG_POWEROFF_LBN))
+	if (phy_cfg->flags & (1 << MC_CMD_GET_PHY_CFG_OUT_POWEROFF_LBN))
 		supported |= PHY_MODE_OFF;
 
 	mode = efx->phy_mode & supported;
 
 	flags = 0;
 	if (mode & PHY_MODE_TX_DISABLED)
-		flags |= (1 << MC_CMD_SET_LINK_TXDIS_LBN);
+		flags |= (1 << MC_CMD_SET_LINK_IN_TXDIS_LBN);
 	if (mode & PHY_MODE_LOW_POWER)
-		flags |= (1 << MC_CMD_SET_LINK_LOWPOWER_LBN);
+		flags |= (1 << MC_CMD_SET_LINK_IN_LOWPOWER_LBN);
 	if (mode & PHY_MODE_OFF)
-		flags |= (1 << MC_CMD_SET_LINK_POWEROFF_LBN);
+		flags |= (1 << MC_CMD_SET_LINK_IN_POWEROFF_LBN);
 
 	return flags;
 }
@@ -436,8 +436,8 @@ void efx_mcdi_phy_decode_link(struct efx_nic *efx,
 		break;
 	}
 
-	link_state->up = !!(flags & (1 << MC_CMD_GET_LINK_LINK_UP_LBN));
-	link_state->fd = !!(flags & (1 << MC_CMD_GET_LINK_FULL_DUPLEX_LBN));
+	link_state->up = !!(flags & (1 << MC_CMD_GET_LINK_OUT_LINK_UP_LBN));
+	link_state->fd = !!(flags & (1 << MC_CMD_GET_LINK_OUT_FULL_DUPLEX_LBN));
 	link_state->speed = speed;
 }
 
@@ -449,7 +449,7 @@ void efx_mcdi_phy_check_fcntl(struct efx_nic *efx, u32 lpa)
 	struct efx_mcdi_phy_data *phy_cfg = efx->phy_data;
 	u32 rmtadv;
 
-	/* The link partner capabilities are only relevent if the
+	/* The link partner capabilities are only relevant if the
 	 * link supports flow control autonegotiation */
 	if (~phy_cfg->supported_cap & (1 << MC_CMD_PHY_CAP_AN_LBN))
 		return;
@@ -513,7 +513,7 @@ static void efx_mcdi_phy_get_settings(struct efx_nic *efx, struct ethtool_cmd *e
 	ecmd->supported =
 		mcdi_to_ethtool_cap(phy_cfg->media, phy_cfg->supported_cap);
 	ecmd->advertising = efx->link_advertising;
-	ecmd->speed = efx->link_state.speed;
+	ethtool_cmd_speed_set(ecmd, efx->link_state.speed);
 	ecmd->duplex = efx->link_state.fd;
 	ecmd->port = mcdi_to_ethtool_media(phy_cfg->media);
 	ecmd->phy_address = phy_cfg->port;
@@ -545,7 +545,7 @@ static int efx_mcdi_phy_set_settings(struct efx_nic *efx, struct ethtool_cmd *ec
 		caps = (ethtool_to_mcdi_cap(ecmd->advertising) |
 			 1 << MC_CMD_PHY_CAP_AN_LBN);
 	} else if (ecmd->duplex) {
-		switch (ecmd->speed) {
+		switch (ethtool_cmd_speed(ecmd)) {
 		case 10:    caps = 1 << MC_CMD_PHY_CAP_10FDX_LBN;    break;
 		case 100:   caps = 1 << MC_CMD_PHY_CAP_100FDX_LBN;   break;
 		case 1000:  caps = 1 << MC_CMD_PHY_CAP_1000FDX_LBN;  break;
@@ -553,7 +553,7 @@ static int efx_mcdi_phy_set_settings(struct efx_nic *efx, struct ethtool_cmd *ec
 		default:    return -EINVAL;
 		}
 	} else {
-		switch (ecmd->speed) {
+		switch (ethtool_cmd_speed(ecmd)) {
 		case 10:    caps = 1 << MC_CMD_PHY_CAP_10HDX_LBN;    break;
 		case 100:   caps = 1 << MC_CMD_PHY_CAP_100HDX_LBN;   break;
 		case 1000:  caps = 1 << MC_CMD_PHY_CAP_1000HDX_LBN;  break;
@@ -592,7 +592,7 @@ static int efx_mcdi_phy_test_alive(struct efx_nic *efx)
 
 	if (outlen < MC_CMD_GET_PHY_STATE_OUT_LEN)
 		return -EIO;
-	if (MCDI_DWORD(outbuf, GET_PHY_STATE_STATE) != MC_CMD_PHY_STATE_OK)
+	if (MCDI_DWORD(outbuf, GET_PHY_STATE_OUT_STATE) != MC_CMD_PHY_STATE_OK)
 		return -EINVAL;
 
 	return 0;
@@ -680,7 +680,7 @@ static int efx_mcdi_phy_run_tests(struct efx_nic *efx, int *results,
 	u32 mode;
 	int rc;
 
-	if (phy_cfg->flags & (1 << MC_CMD_GET_PHY_CFG_BIST_LBN)) {
+	if (phy_cfg->flags & (1 << MC_CMD_GET_PHY_CFG_OUT_BIST_LBN)) {
 		rc = efx_mcdi_bist(efx, MC_CMD_PHY_BIST, results);
 		if (rc < 0)
 			return rc;
@@ -691,15 +691,15 @@ static int efx_mcdi_phy_run_tests(struct efx_nic *efx, int *results,
 	/* If we support both LONG and SHORT, then run each in response to
 	 * break or not. Otherwise, run the one we support */
 	mode = 0;
-	if (phy_cfg->flags & (1 << MC_CMD_GET_PHY_CFG_BIST_CABLE_SHORT_LBN)) {
+	if (phy_cfg->flags & (1 << MC_CMD_GET_PHY_CFG_OUT_BIST_CABLE_SHORT_LBN)) {
 		if ((flags & ETH_TEST_FL_OFFLINE) &&
 		    (phy_cfg->flags &
-		     (1 << MC_CMD_GET_PHY_CFG_BIST_CABLE_LONG_LBN)))
+		     (1 << MC_CMD_GET_PHY_CFG_OUT_BIST_CABLE_LONG_LBN)))
 			mode = MC_CMD_PHY_BIST_CABLE_LONG;
 		else
 			mode = MC_CMD_PHY_BIST_CABLE_SHORT;
 	} else if (phy_cfg->flags &
-		   (1 << MC_CMD_GET_PHY_CFG_BIST_CABLE_LONG_LBN))
+		   (1 << MC_CMD_GET_PHY_CFG_OUT_BIST_CABLE_LONG_LBN))
 		mode = MC_CMD_PHY_BIST_CABLE_LONG;
 
 	if (mode != 0) {
@@ -717,14 +717,14 @@ static const char *efx_mcdi_phy_test_name(struct efx_nic *efx,
 {
 	struct efx_mcdi_phy_data *phy_cfg = efx->phy_data;
 
-	if (phy_cfg->flags & (1 << MC_CMD_GET_PHY_CFG_BIST_LBN)) {
+	if (phy_cfg->flags & (1 << MC_CMD_GET_PHY_CFG_OUT_BIST_LBN)) {
 		if (index == 0)
 			return "bist";
 		--index;
 	}
 
-	if (phy_cfg->flags & ((1 << MC_CMD_GET_PHY_CFG_BIST_CABLE_SHORT_LBN) |
-			      (1 << MC_CMD_GET_PHY_CFG_BIST_CABLE_LONG_LBN))) {
+	if (phy_cfg->flags & ((1 << MC_CMD_GET_PHY_CFG_OUT_BIST_CABLE_SHORT_LBN) |
+			      (1 << MC_CMD_GET_PHY_CFG_OUT_BIST_CABLE_LONG_LBN))) {
 		if (index == 0)
 			return "cable";
 		--index;
@@ -739,9 +739,9 @@ static const char *efx_mcdi_phy_test_name(struct efx_nic *efx,
 	return NULL;
 }
 
-struct efx_phy_operations efx_mcdi_phy_ops = {
+const struct efx_phy_operations efx_mcdi_phy_ops = {
 	.probe		= efx_mcdi_phy_probe,
-	.init 	 	= efx_port_dummy_op_int,
+	.init		= efx_port_dummy_op_int,
 	.reconfigure	= efx_mcdi_phy_reconfigure,
 	.poll		= efx_mcdi_phy_poll,
 	.fini		= efx_port_dummy_op_void,

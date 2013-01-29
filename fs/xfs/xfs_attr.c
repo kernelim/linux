@@ -857,6 +857,8 @@ xfs_attr_shortform_addname(xfs_da_args_t *args)
 {
 	int newsize, forkoff, retval;
 
+	trace_xfs_attr_sf_addname(args);
+
 	retval = xfs_attr_shortform_lookup(args);
 	if ((args->flags & ATTR_REPLACE) && (retval == ENOATTR)) {
 		return(retval);
@@ -900,6 +902,8 @@ xfs_attr_leaf_addname(xfs_da_args_t *args)
 	xfs_dabuf_t *bp;
 	int retval, error, committed, forkoff;
 
+	trace_xfs_attr_leaf_addname(args);
+
 	/*
 	 * Read the (only) block in the attribute list in.
 	 */
@@ -924,6 +928,9 @@ xfs_attr_leaf_addname(xfs_da_args_t *args)
 			xfs_da_brelse(args->trans, bp);
 			return(retval);
 		}
+
+		trace_xfs_attr_leaf_replace(args);
+
 		args->op_flags |= XFS_DA_OP_RENAME;	/* an atomic rename */
 		args->blkno2 = args->blkno;		/* set 2nd entry info*/
 		args->index2 = args->index;
@@ -1094,6 +1101,8 @@ xfs_attr_leaf_removename(xfs_da_args_t *args)
 	xfs_dabuf_t *bp;
 	int error, committed, forkoff;
 
+	trace_xfs_attr_leaf_removename(args);
+
 	/*
 	 * Remove the attribute.
 	 */
@@ -1227,6 +1236,8 @@ xfs_attr_node_addname(xfs_da_args_t *args)
 	xfs_mount_t *mp;
 	int committed, retval, error;
 
+	trace_xfs_attr_node_addname(args);
+
 	/*
 	 * Fill in bucket of arguments/results/context to carry around.
 	 */
@@ -1253,6 +1264,9 @@ restart:
 	} else if (retval == EEXIST) {
 		if (args->flags & ATTR_CREATE)
 			goto out;
+
+		trace_xfs_attr_node_replace(args);
+
 		args->op_flags |= XFS_DA_OP_RENAME;	/* atomic rename op */
 		args->blkno2 = args->blkno;		/* set 2nd entry info*/
 		args->index2 = args->index;
@@ -1483,6 +1497,8 @@ xfs_attr_node_removename(xfs_da_args_t *args)
 	xfs_inode_t *dp;
 	xfs_dabuf_t *bp;
 	int retval, error, committed, forkoff;
+
+	trace_xfs_attr_node_removename(args);
 
 	/*
 	 * Tie a string around our finger to remind us where we are.
@@ -2110,8 +2126,8 @@ xfs_attr_rmtval_set(xfs_da_args_t *args)
 
 		bp = xfs_buf_get(mp->m_ddev_targp, dblkno, blkcnt,
 				 XBF_LOCK | XBF_DONT_BLOCK);
-		ASSERT(bp);
-		ASSERT(!XFS_BUF_GETERROR(bp));
+		if (!bp)
+			return ENOMEM;
 
 		tmp = (valuelen < XFS_BUF_SIZE(bp)) ? valuelen :
 							XFS_BUF_SIZE(bp);

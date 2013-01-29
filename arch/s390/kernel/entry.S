@@ -210,13 +210,6 @@ STACK_SIZE  = 1 << STACK_SHIFT
 __switch_to:
 	basr	%r1,0
 __switch_to_base:
-	tm	__THREAD_per(%r3),0xe8		# new process is using per ?
-	bz	__switch_to_noper-__switch_to_base(%r1)	# if not we're fine
-	stctl	%c9,%c11,__SF_EMPTY(%r15)	# We are using per stuff
-	clc	__THREAD_per(12,%r3),__SF_EMPTY(%r15)
-	be	__switch_to_noper-__switch_to_base(%r1)	# we got away w/o bashing TLB's
-	lctl	%c9,%c11,__THREAD_per(%r3)	# Nope we didn't
-__switch_to_noper:
 	l	%r4,__THREAD_info(%r2)		# get thread_info of prev
 	tm	__TI_flags+3(%r4),_TIF_MCCK_PENDING # machine check pending?
 	bz	__switch_to_no_mcck-__switch_to_base(%r1)

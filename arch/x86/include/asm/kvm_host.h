@@ -37,6 +37,7 @@
 
 #define CR3_PAE_RESERVED_BITS ((X86_CR3_PWT | X86_CR3_PCD) - 1)
 #define CR3_NONPAE_RESERVED_BITS ((PAGE_SIZE-1) & ~(X86_CR3_PWT | X86_CR3_PCD))
+#define CR3_PCID_ENABLED_RESERVED_BITS 0xFFFFFF0000000000ULL
 #define CR3_L_MODE_RESERVED_BITS (CR3_NONPAE_RESERVED_BITS |	\
 				  0xFFFFFF0000000000ULL)
 
@@ -50,7 +51,7 @@
 	(KVM_VM_CR0_ALWAYS_ON_UNRESTRICTED_GUEST | X86_CR0_PG | X86_CR0_PE)
 #define KVM_GUEST_CR4_MASK						\
 	(X86_CR4_VME | X86_CR4_PSE | X86_CR4_PAE | X86_CR4_PGE | X86_CR4_VMXE \
-		| X86_CR4_OSXSAVE)
+		| X86_CR4_OSXSAVE | X86_CR4_PCIDE)
 #define KVM_PMODE_VM_CR4_ALWAYS_ON (X86_CR4_PAE | X86_CR4_VMXE)
 #define KVM_RMODE_VM_CR4_ALWAYS_ON (X86_CR4_VME | X86_CR4_PAE | X86_CR4_VMXE)
 
@@ -157,6 +158,16 @@ enum {
 #define DR7_GD		(1 << 13)
 #define DR7_FIXED_1	0x00000400
 #define DR7_VOLATILE	0xffff23ff
+
+/* apic attention bits */
+#define KVM_APIC_CHECK_VAPIC	0
+/*
+ * The following bit is set with PV-EOI, unset on EOI.
+ * We detect PV-EOI changes by guest by comparing
+ * this bit with PV-EOI in guest memory.
+ * See the implementation in apic_update_pv_eoi.
+ */
+#define KVM_APIC_PV_EOI_PENDING	1
 
 /*
  * We don't want allocation failures within the mmu code, so we preallocate
@@ -322,12 +333,14 @@ struct kvm_vcpu_arch {
 	unsigned long cr2;
 	unsigned long cr3;
 	unsigned long cr4;
+	unsigned long cr4_guest_owned_bits;
 	unsigned long cr8;
 	u32 hflags;
 	u64 pdptrs[4]; /* pae */
 	u64 shadow_efer;
 	u64 apic_base;
 	struct kvm_lapic *apic;    /* kernel irqchip context */
+	unsigned long apic_attention;
 	int32_t apic_arb_prio;
 	int mp_state;
 	int sipi_vector;
@@ -390,6 +403,8 @@ struct kvm_vcpu_arch {
 	unsigned int hw_tsc_khz;
 	unsigned int time_offset;
 	struct page *time_page;
+	/* set guest stopped flag in pvclock flags field */
+	bool pvclock_set_guest_stopped_request;
 
 	struct {
 		u64 msr_val;
@@ -429,6 +444,11 @@ struct kvm_vcpu_arch {
 	u64 *mce_banks;
 
 	struct kvm_pmu pmu;
+
+	struct {
+		u64 msr_val;
+		struct gfn_to_hva_cache data;
+	} pv_eoi;
 };
 
 struct kvm_mem_alias {
@@ -480,6 +500,10 @@ struct kvm_arch {
 	u64 last_tsc_nsec;
 	u64 last_tsc_offset;
 	u64 last_tsc_write;
+
+        /* fields used by HYPER-V emulation */
+        u64 hv_guest_os_id;
+        u64 hv_hypercall;
 };
 
 struct kvm_vm_stat {
@@ -535,6 +559,7 @@ struct kvm_x86_ops {
 	int (*hardware_setup)(void);               /* __init */
 	void (*hardware_unsetup)(void);            /* __exit */
 	bool (*cpu_has_accelerated_tpr)(void);
+	void (*cpuid_update)(struct kvm_vcpu *vcpu);
 
 	/* Create, but do not attach this VCPU */
 	struct kvm_vcpu *(*vcpu_create)(struct kvm *kvm, unsigned id);
@@ -598,6 +623,7 @@ struct kvm_x86_ops {
 	int (*get_tdp_level)(void);
 	u64 (*get_mt_mask)(struct kvm_vcpu *vcpu, gfn_t gfn, bool is_mmio);
 	bool (*gb_page_enable)(void);
+	bool (*invpcid_supported)(void);
 
 	void (*set_tsc_khz)(struct kvm_vcpu *vcpu, u32 user_tsc_khz);
 	void (*write_tsc_offset)(struct kvm_vcpu *vcpu, u64 offset);
@@ -646,6 +672,8 @@ int kvm_pv_mmu_op(struct kvm_vcpu *vcpu, unsigned long bytes,
 u8 kvm_get_guest_memory_type(struct kvm_vcpu *vcpu, gfn_t gfn);
 
 extern bool tdp_enabled;
+
+u64 vcpu_tsc_khz(struct kvm_vcpu *vcpu);
 
 /* control of guest tsc rate supported? */
 extern bool kvm_has_tsc_control;
@@ -728,7 +756,20 @@ void kvm_inject_page_fault(struct kvm_vcpu *vcpu, unsigned long cr2,
 			   u32 error_code);
 bool kvm_require_cpl(struct kvm_vcpu *vcpu, int required_cpl);
 
-int kvm_pic_set_irq(void *opaque, int irq, int level);
+static inline int __kvm_irq_line_state(unsigned long *irq_state,
+				       int irq_source_id, int level)
+{
+	/* Logical OR for level trig interrupt */
+	if (level)
+		__set_bit(irq_source_id, irq_state);
+	else
+		__clear_bit(irq_source_id, irq_state);
+
+	return !!(*irq_state);
+}
+
+int kvm_pic_set_irq(struct kvm_pic *pic, int irq, int irq_source_id, int level);
+void kvm_pic_clear_all(struct kvm_pic *pic, int irq_source_id);
 
 void kvm_inject_nmi(struct kvm_vcpu *vcpu);
 

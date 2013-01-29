@@ -6,6 +6,10 @@
 #include <linux/percpu.h>
 #include <linux/hardirq.h>
 
+#ifndef __GENKSYMS__
+#include <linux/perf_event.h>
+#endif
+
 struct trace_array;
 struct tracer;
 struct dentry;
@@ -17,12 +21,24 @@ struct trace_print_flags {
 	const char		*name;
 };
 
+struct trace_print_flags_u64 {
+	unsigned long long	mask;
+	const char		*name;
+};
+
 const char *ftrace_print_flags_seq(struct trace_seq *p, const char *delim,
 				   unsigned long flags,
 				   const struct trace_print_flags *flag_array);
 
 const char *ftrace_print_symbols_seq(struct trace_seq *p, unsigned long val,
 				     const struct trace_print_flags *symbol_array);
+
+#if BITS_PER_LONG == 32
+const char *ftrace_print_symbols_seq_u64(struct trace_seq *p,
+					 unsigned long long val,
+					 const struct trace_print_flags_u64
+								 *symbol_array);
+#endif
 
 const char *ftrace_print_hex_seq(struct trace_seq *p,
 				 const unsigned char *buf, int len);
@@ -106,6 +122,10 @@ void trace_current_buffer_unlock_commit(struct ring_buffer *buffer,
 void trace_nowake_buffer_unlock_commit(struct ring_buffer *buffer,
 				       struct ring_buffer_event *event,
 					unsigned long flags, int pc);
+void trace_nowake_buffer_unlock_commit_regs(struct ring_buffer *buffer,
+					    struct ring_buffer_event *event,
+					    unsigned long flags, int pc,
+					    struct pt_regs *regs);
 void trace_current_buffer_discard_commit(struct ring_buffer *buffer,
 					 struct ring_buffer_event *event);
 
@@ -117,12 +137,23 @@ enum {
 	TRACE_EVENT_FL_ENABLED_BIT,
 	TRACE_EVENT_FL_FILTERED_BIT,
 	TRACE_EVENT_FL_RECORDED_CMD_BIT,
+
+	/*
+	 * RHEL6 specific bit.
+	 *
+	 * Due to KABI constraints, we cannot change ftrace_event_call
+	 * struct. This bit is to differentiate among current RHEL6
+	 * version with 'print_fmt' pointer and older releases versions
+	 * with show_format pointer. Both occupy same place.
+	 */
+	TRACE_EVENT_FL_KABI_PRINT_FMT_BIT = 31,
 };
 
 enum {
 	TRACE_EVENT_FL_ENABLED		= (1 << TRACE_EVENT_FL_ENABLED_BIT),
 	TRACE_EVENT_FL_FILTERED		= (1 << TRACE_EVENT_FL_FILTERED_BIT),
 	TRACE_EVENT_FL_RECORDED_CMD	= (1 << TRACE_EVENT_FL_RECORDED_CMD_BIT),
+	TRACE_EVENT_FL_KABI_PRINT_FMT	= (1 << TRACE_EVENT_FL_KABI_PRINT_FMT_BIT),
 };
 
 struct ftrace_event_call {
@@ -138,8 +169,25 @@ struct ftrace_event_call {
 	void			(*unregfunc)(struct ftrace_event_call *);
 	int			id;
 	int			(*raw_init)(struct ftrace_event_call *);
+#ifdef __GENKSYMS__
 	int			(*show_format)(struct ftrace_event_call *,
 					       struct trace_seq *);
+#else
+	/*
+	 * RHEL6 specific.
+	 *
+	 * TRACE_EVENT_FL_KABI_PRINT_FMT flags bit tells what
+	 * pointer to use. From this version onward RHEL6 uses
+	 * print_fmt and have TRACE_EVENT_FL_KABI_PRINT_FMT
+	 * flags bit enabled by default. Older releases have this
+	 * flags bit set to 0 and use show_format pointer.
+	 */
+	union {
+		int		(*show_format)(struct ftrace_event_call *,
+					       struct trace_seq *);
+		const char	*print_fmt;
+	} fmt;
+#endif
 	int			(*define_fields)(struct ftrace_event_call *);
 	struct list_head	fields;
 #ifdef __GENKSYMS__
@@ -150,6 +198,9 @@ struct ftrace_event_call {
 	 *   bit 1:		enabled
 	 *   bit 2:		filter_active
 	 *   bit 3:		enabled cmd record
+	 *   bit 31:		print_fmt format display
+	 *   			(read TRACE_EVENT_FL_KABI_PRINT_FMT_BIT
+	 *   			enum comment)
 	 *
 	 * Changes to flags must hold the event_mutex.
 	 *
@@ -173,8 +224,8 @@ struct ftrace_event_call {
 
 #define FTRACE_MAX_PROFILE_SIZE	2048
 
-extern char			*trace_profile_buf;
-extern char			*trace_profile_buf_nmi;
+extern char *trace_profile_buf;
+extern char *trace_profile_buf_nmi;
 
 #define MAX_FILTER_PRED		32
 #define MAX_FILTER_STR_VAL	256	/* Should handle KSYM_SYMBOL_LEN */
@@ -230,6 +281,20 @@ extern void ftrace_profile_disable(int event_id);
 extern int ftrace_profile_set_filter(struct perf_event *event, int event_id,
 				     char *filter_str);
 extern void ftrace_profile_free_filter(struct perf_event *event);
+extern void *
+ftrace_perf_buf_prepare(int size, unsigned short type, int *rctxp,
+			 unsigned long *irq_flags);
+
+static inline void
+ftrace_perf_buf_submit(void *raw_data, int size, int rctx, u64 addr,
+		       u64 count, unsigned long irq_flags)
+{
+	struct trace_entry *entry = raw_data;
+
+	perf_tp_event(entry->type, addr, count, raw_data, size);
+	perf_swevent_put_recursion_context(rctx);
+	local_irq_restore(irq_flags);
+}
 #endif
 
 #endif /* _LINUX_FTRACE_EVENT_H */

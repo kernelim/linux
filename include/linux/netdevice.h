@@ -525,7 +525,7 @@ struct rps_map {
 	struct rcu_head rcu;
 	u16 cpus[0];
 };
-#define RPS_MAP_SIZE(_num) (sizeof(struct rps_map) + (_num * sizeof(u16)))
+#define RPS_MAP_SIZE(_num) (sizeof(struct rps_map) + ((_num) * sizeof(u16)))
 
 /*
  * This structure holds an XPS map which can be of variable length.  The
@@ -537,7 +537,7 @@ struct xps_map {
 	struct rcu_head rcu;
 	u16 queues[0];
 };
-#define XPS_MAP_SIZE(_num) (sizeof(struct xps_map) + (_num * sizeof(u16)))
+#define XPS_MAP_SIZE(_num) (sizeof(struct xps_map) + ((_num) * sizeof(u16)))
 #define XPS_MIN_MAP_ALLOC ((L1_CACHE_BYTES - sizeof(struct xps_map))	\
     / sizeof(u16))
 
@@ -572,7 +572,7 @@ struct rps_dev_flow_table {
 };
 
 #define RPS_DEV_FLOW_TABLE_SIZE(_num) (sizeof(struct rps_dev_flow_table) + \
-     (_num * sizeof(struct rps_dev_flow)))
+     ((_num) * sizeof(struct rps_dev_flow)))
 
  /*
   * The rps_sock_flow_table contains mappings of flows to the last CPU
@@ -583,7 +583,7 @@ struct rps_sock_flow_table {
 	u16 ents[0];
 };
 #define	RPS_SOCK_FLOW_TABLE_SIZE(_num) (sizeof(struct rps_sock_flow_table) + \
-     (_num * sizeof(u16)))
+     ((_num) * sizeof(u16)))
 
 #define RPS_NO_CPU 0xffff
 
@@ -907,6 +907,7 @@ struct net_device
 #define NETIF_F_TSO_ECN		(SKB_GSO_TCP_ECN << NETIF_F_GSO_SHIFT)
 #define NETIF_F_TSO6		(SKB_GSO_TCPV6 << NETIF_F_GSO_SHIFT)
 #define NETIF_F_FSO		(SKB_GSO_FCOE << NETIF_F_GSO_SHIFT)
+#define NETIF_F_ALL_TSO 	(NETIF_F_TSO | NETIF_F_TSO6 | NETIF_F_TSO_ECN)
 
 	/* List of features with software fallbacks. */
 #define NETIF_F_GSO_SOFTWARE	(NETIF_F_TSO | NETIF_F_TSO_ECN | \
@@ -995,7 +996,8 @@ struct net_device
 	void                    *dn_ptr;        /* DECnet specific data */
 	void                    *ip6_ptr;       /* IPv6 specific data */
 	void			*ec_ptr;	/* Econet specific data	*/
-	void			*ax25_ptr;	/* AX.25 specific data */
+	void			*ax25_ptr;	/* AX.25 specific data
+						   also used by openvswitch */
 	struct wireless_dev	*ieee80211_ptr;	/* IEEE 802.11 specific data,
 						   assign before registering */
 
@@ -1160,12 +1162,6 @@ struct netdev_priomap_info {
 #endif
 };
 
-struct ipv4_devconf_extensions {
-	int accept_local;
-};
-
-extern struct ipv4_devconf_extensions ipv4_devconf_ext;
-
 /* Only append, do not change existing! */
 struct net_device_extended {
 	struct xps_dev_maps			*xps_maps;
@@ -1179,7 +1175,14 @@ struct net_device_extended {
 					struct netdev_fcoe_hbainfo *hbainfo);
 #endif
 	struct netdev_netpoll_ext_info		netpoll_data;
-	struct ipv4_devconf_extensions		ipv4_devconf_ext;
+	unsigned int				real_num_rx_queues;
+	const struct ethtool_ops_ext		*ethtool_ops_ext;
+#if defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE)
+	int			(*ndo_fcoe_ddp_target)(struct net_device *dev,
+					u16 xid,
+					struct scatterlist *sgl,
+					unsigned int sgc);
+#endif
 };
 
 #define NET_DEVICE_EXTENDED_SIZE \
@@ -1214,11 +1217,13 @@ netdev_extended(const struct net_device *dev)
 	return netdev_extended_frozen(dev)->dev_ext;
 }
 
-static inline struct ipv4_devconf_extensions *
-netdev_ipv4_devconf_extended(const struct net_device *dev)
-{
-	return &(netdev_extended(dev)->ipv4_devconf_ext);
-}
+extern void set_ethtool_ops_ext(struct net_device *, const struct ethtool_ops_ext *);
+extern const struct ethtool_ops_ext *get_ethtool_ops_ext(const struct net_device *);
+
+#define GET_ETHTOOL_OP_EXT(net, op) \
+	({ const struct ethtool_ops_ext *ops = get_ethtool_ops_ext(net); \
+	   ops && (offsetof(struct ethtool_ops_ext, op) < ops->size) ? \
+	   ops->op : NULL; })
 
 static inline
 int netdev_get_prio_tc_map(const struct net_device *dev, u32 prio)
@@ -1817,6 +1822,20 @@ static inline int netif_is_multiqueue(const struct net_device *dev)
 extern void netif_set_real_num_tx_queues(struct net_device *dev,
 					 unsigned int txq);
 
+#ifdef CONFIG_RPS
+extern int netif_set_real_num_rx_queues(struct net_device *dev,
+					unsigned int rxq);
+#else
+static inline int netif_set_real_num_rx_queues(struct net_device *dev,
+						unsigned int rxq)
+{
+	return 0;
+}
+#endif
+
+#define DEFAULT_MAX_NUM_RSS_QUEUES	(8)
+extern int netif_get_num_default_rss_queues(void);
+
 /* Use this variant when it is known for sure that it
  * is executing from hardware interrupt context or with hardware interrupts
  * disabled.
@@ -2293,6 +2312,9 @@ extern void linkwatch_run_queue(void);
 unsigned long netdev_increment_features(unsigned long all, unsigned long one,
 					unsigned long mask);
 unsigned long netdev_fix_features(unsigned long features, const char *name);
+
+void netif_stacked_transfer_operstate(const struct net_device *rootdev,
+					struct net_device *dev);
 
 static inline int net_gso_ok(int features, int gso_type)
 {

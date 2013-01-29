@@ -236,8 +236,10 @@ static int bin_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf)
 	if (!bb->vm_ops)
 		return VM_FAULT_SIGBUS;
 
-	if (!bb->vm_ops->page_mkwrite)
+	if (!bb->vm_ops->page_mkwrite) {
+		file_update_time(file);
 		return 0;
+	}
 
 	if (!sysfs_get_active_two(attr_sd))
 		return VM_FAULT_SIGBUS;

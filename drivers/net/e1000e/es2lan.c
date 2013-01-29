@@ -201,13 +201,12 @@ static s32 e1000_init_nvm_params_80003es2lan(struct e1000_hw *hw)
  *  e1000_init_mac_params_80003es2lan - Init ESB2 MAC func ptrs.
  *  @hw: pointer to the HW structure
  **/
-static s32 e1000_init_mac_params_80003es2lan(struct e1000_adapter *adapter)
+static s32 e1000_init_mac_params_80003es2lan(struct e1000_hw *hw)
 {
-	struct e1000_hw *hw = &adapter->hw;
 	struct e1000_mac_info *mac = &hw->mac;
 
 	/* Set media type and media-dependent function pointers */
-	switch (adapter->pdev->device) {
+	switch (hw->adapter->pdev->device) {
 	case E1000_DEV_ID_80003ES2LAN_SERDES_DPT:
 		hw->phy.media_type = e1000_media_type_internal_serdes;
 		mac->ops.check_for_link = e1000e_check_for_serdes_link;
@@ -229,9 +228,7 @@ static s32 e1000_init_mac_params_80003es2lan(struct e1000_adapter *adapter)
 	/* FWSM register */
 	mac->has_fwsm = true;
 	/* ARC supported; valid only if manageability features are enabled. */
-	mac->arc_subsystem_valid =
-	        (er32(FWSM) & E1000_FWSM_MODE_MASK)
-	                ? true : false;
+	mac->arc_subsystem_valid = !!(er32(FWSM) & E1000_FWSM_MODE_MASK);
 	/* Adaptive IFS not supported */
 	mac->adaptive_ifs = false;
 
@@ -246,7 +243,7 @@ static s32 e1000_get_variants_80003es2lan(struct e1000_adapter *adapter)
 	struct e1000_hw *hw = &adapter->hw;
 	s32 rc;
 
-	rc = e1000_init_mac_params_80003es2lan(adapter);
+	rc = e1000_init_mac_params_80003es2lan(hw);
 	if (rc)
 		return rc;
 
@@ -290,7 +287,7 @@ static void e1000_release_phy_80003es2lan(struct e1000_hw *hw)
 }
 
 /**
- *  e1000_acquire_mac_csr_80003es2lan - Acquire rights to access Kumeran register
+ *  e1000_acquire_mac_csr_80003es2lan - Acquire right to access Kumeran register
  *  @hw: pointer to the HW structure
  *
  *  Acquire the semaphore to access the Kumeran interface.
@@ -306,7 +303,7 @@ static s32 e1000_acquire_mac_csr_80003es2lan(struct e1000_hw *hw)
 }
 
 /**
- *  e1000_release_mac_csr_80003es2lan - Release rights to access Kumeran Register
+ *  e1000_release_mac_csr_80003es2lan - Release right to access Kumeran Register
  *  @hw: pointer to the HW structure
  *
  *  Release the semaphore used to access the Kumeran interface
@@ -459,7 +456,7 @@ static s32 e1000_read_phy_reg_gg82563_80003es2lan(struct e1000_hw *hw,
 		return ret_val;
 	}
 
-	if (hw->dev_spec.e80003es2lan.mdic_wa_enable == true) {
+	if (hw->dev_spec.e80003es2lan.mdic_wa_enable) {
 		/*
 		 * The "ready" bit in the MDIC register may be incorrectly set
 		 * before the device has completed the "Page Select" MDI
@@ -471,9 +468,8 @@ static s32 e1000_read_phy_reg_gg82563_80003es2lan(struct e1000_hw *hw,
 		ret_val = e1000e_read_phy_reg_mdic(hw, page_select, &temp);
 
 		if (((u16)offset >> GG82563_PAGE_SHIFT) != temp) {
-			ret_val = -E1000_ERR_PHY;
 			e1000_release_phy_80003es2lan(hw);
-			return ret_val;
+			return -E1000_ERR_PHY;
 		}
 
 		udelay(200);
@@ -531,7 +527,7 @@ static s32 e1000_write_phy_reg_gg82563_80003es2lan(struct e1000_hw *hw,
 		return ret_val;
 	}
 
-	if (hw->dev_spec.e80003es2lan.mdic_wa_enable == true) {
+	if (hw->dev_spec.e80003es2lan.mdic_wa_enable) {
 		/*
 		 * The "ready" bit in the MDIC register may be incorrectly set
 		 * before the device has completed the "Page Select" MDI
@@ -716,22 +712,19 @@ static s32 e1000_get_cable_length_80003es2lan(struct e1000_hw *hw)
 
 	ret_val = e1e_rphy(hw, GG82563_PHY_DSP_DISTANCE, &phy_data);
 	if (ret_val)
-		goto out;
+		return ret_val;
 
 	index = phy_data & GG82563_DSPD_CABLE_LENGTH;
 
-	if (index >= GG82563_CABLE_LENGTH_TABLE_SIZE - 5) {
-		ret_val = -E1000_ERR_PHY;
-		goto out;
-	}
+	if (index >= GG82563_CABLE_LENGTH_TABLE_SIZE - 5)
+		return -E1000_ERR_PHY;
 
 	phy->min_cable_length = e1000_gg82563_cable_length_table[index];
 	phy->max_cable_length = e1000_gg82563_cable_length_table[index + 5];
 
 	phy->cable_length = (phy->min_cable_length + phy->max_cable_length) / 2;
 
-out:
-	return ret_val;
+	return 0;
 }
 
 /**
@@ -771,6 +764,7 @@ static s32 e1000_reset_hw_80003es2lan(struct e1000_hw *hw)
 {
 	u32 ctrl;
 	s32 ret_val;
+	u16 kum_reg_data;
 
 	/*
 	 * Prevent the PCI-E bus from sticking if there is no TLP connection
@@ -796,6 +790,13 @@ static s32 e1000_reset_hw_80003es2lan(struct e1000_hw *hw)
 	ew32(CTRL, ctrl | E1000_CTRL_RST);
 	e1000_release_phy_80003es2lan(hw);
 
+	/* Disable IBIST slave mode (far-end loopback) */
+	e1000_read_kmrn_reg_80003es2lan(hw, E1000_KMRNCTRLSTA_INBAND_PARAM,
+					&kum_reg_data);
+	kum_reg_data |= E1000_KMRNCTRLSTA_IBIST_DISABLE;
+	e1000_write_kmrn_reg_80003es2lan(hw, E1000_KMRNCTRLSTA_INBAND_PARAM,
+					 kum_reg_data);
+
 	ret_val = e1000e_get_auto_rd_done(hw);
 	if (ret_val)
 		/* We don't want to continue accessing MAC registers. */
@@ -805,9 +806,7 @@ static s32 e1000_reset_hw_80003es2lan(struct e1000_hw *hw)
 	ew32(IMC, 0xffffffff);
 	er32(ICR);
 
-	ret_val = e1000_check_alt_mac_addr_generic(hw);
-
-	return ret_val;
+	return e1000_check_alt_mac_addr_generic(hw);
 }
 
 /**
@@ -827,7 +826,7 @@ static s32 e1000_init_hw_80003es2lan(struct e1000_hw *hw)
 	e1000_initialize_hw_bits_80003es2lan(hw);
 
 	/* Initialize identification LED */
-	ret_val = e1000e_id_led_init(hw);
+	ret_val = mac->ops.id_led_init(hw);
 	if (ret_val)
 		e_dbg("Error initializing identification LED\n");
 		/* This is not fatal and we should not stop init due to this */
@@ -845,7 +844,7 @@ static s32 e1000_init_hw_80003es2lan(struct e1000_hw *hw)
 		E1000_WRITE_REG_ARRAY(hw, E1000_MTA, i, 0);
 
 	/* Setup link and flow control */
-	ret_val = e1000e_setup_link(hw);
+	ret_val = mac->ops.setup_link(hw);
 
 	/* Disable IBIST slave mode (far-end loopback) */
 	e1000_read_kmrn_reg_80003es2lan(hw, E1000_KMRNCTRLSTA_INBAND_PARAM,
@@ -945,6 +944,14 @@ static void e1000_initialize_hw_bits_80003es2lan(struct e1000_hw *hw)
 	else
 		reg |= (1 << 28);
 	ew32(TARC(1), reg);
+
+	/*
+	 * Disable IPv6 extension header parsing because some malformed
+	 * IPv6 headers can hang the Rx.
+	 */
+	reg = er32(RFCTL);
+	reg |= (E1000_RFCTL_IPV6_EX_DIS | E1000_RFCTL_NEW_IPV6_EXT_DIS);
+	ew32(RFCTL, reg);
 }
 
 /**
@@ -1063,7 +1070,7 @@ static s32 e1000_copper_link_setup_gg82563_80003es2lan(struct e1000_hw *hw)
 	 * firmware will have already initialized them.  We only initialize
 	 * them if the HW is not in IAMT mode.
 	 */
-	if (!e1000e_check_mng_mode(hw)) {
+	if (!hw->mac.ops.check_mng_mode(hw)) {
 		/* Enable Electrical Idle on the PHY */
 		data |= GG82563_PMCR_ENABLE_ELECTRICAL_IDLE;
 		ret_val = e1e_wphy(hw, GG82563_PHY_PWR_MGMT_CTRL, data);
@@ -1148,9 +1155,7 @@ static s32 e1000_setup_copper_link_80003es2lan(struct e1000_hw *hw)
 	if (ret_val)
 		return ret_val;
 
-	ret_val = e1000e_setup_copper_link(hw);
-
-	return 0;
+	return e1000e_setup_copper_link(hw);
 }
 
 /**
@@ -1226,9 +1231,7 @@ static s32 e1000_cfg_kmrn_10_100_80003es2lan(struct e1000_hw *hw, u16 duplex)
 	else
 		reg_data &= ~GG82563_KMCR_PASS_FALSE_CARRIER;
 
-	ret_val = e1e_wphy(hw, GG82563_PHY_KMRN_MODE_CTRL, reg_data);
-
-	return 0;
+	return e1e_wphy(hw, GG82563_PHY_KMRN_MODE_CTRL, reg_data);
 }
 
 /**
@@ -1270,9 +1273,8 @@ static s32 e1000_cfg_kmrn_1000_80003es2lan(struct e1000_hw *hw)
 	} while ((reg_data != reg_data2) && (i < GG82563_MAX_KMRN_RETRY));
 
 	reg_data &= ~GG82563_KMCR_PASS_FALSE_CARRIER;
-	ret_val = e1e_wphy(hw, GG82563_PHY_KMRN_MODE_CTRL, reg_data);
 
-	return ret_val;
+	return e1e_wphy(hw, GG82563_PHY_KMRN_MODE_CTRL, reg_data);
 }
 
 /**
@@ -1357,12 +1359,9 @@ static s32 e1000_read_mac_addr_80003es2lan(struct e1000_hw *hw)
 	 */
 	ret_val = e1000_check_alt_mac_addr_generic(hw);
 	if (ret_val)
-		goto out;
+		return ret_val;
 
-	ret_val = e1000_read_mac_addr_generic(hw);
-
-out:
-	return ret_val;
+	return e1000_read_mac_addr_generic(hw);
 }
 
 /**
@@ -1428,7 +1427,7 @@ static void e1000_clear_hw_cntrs_80003es2lan(struct e1000_hw *hw)
 
 static const struct e1000_mac_operations es2_mac_ops = {
 	.read_mac_addr		= e1000_read_mac_addr_80003es2lan,
-	.id_led_init		= e1000e_id_led_init,
+	.id_led_init		= e1000e_id_led_init_generic,
 	.check_mng_mode		= e1000e_check_mng_mode_generic,
 	/* check_for_link dependent on media type */
 	.cleanup_led		= e1000e_cleanup_led_generic,
@@ -1443,9 +1442,11 @@ static const struct e1000_mac_operations es2_mac_ops = {
 	.clear_vfta		= e1000_clear_vfta_generic,
 	.reset_hw		= e1000_reset_hw_80003es2lan,
 	.init_hw		= e1000_init_hw_80003es2lan,
-	.setup_link		= e1000e_setup_link,
+	.setup_link		= e1000e_setup_link_generic,
 	/* setup_physical_interface dependent on media type */
 	.setup_led		= e1000e_setup_led_generic,
+	.config_collision_dist	= e1000e_config_collision_dist_generic,
+	.rar_set		= e1000e_rar_set_generic,
 };
 
 static const struct e1000_phy_operations es2_phy_ops = {
@@ -1470,6 +1471,7 @@ static const struct e1000_nvm_operations es2_nvm_ops = {
 	.acquire		= e1000_acquire_nvm_80003es2lan,
 	.read			= e1000e_read_nvm_eerd,
 	.release		= e1000_release_nvm_80003es2lan,
+	.reload			= e1000e_reload_nvm_generic,
 	.update			= e1000e_update_nvm_checksum_generic,
 	.valid_led_default	= e1000e_valid_led_default,
 	.validate		= e1000e_validate_nvm_checksum_generic,

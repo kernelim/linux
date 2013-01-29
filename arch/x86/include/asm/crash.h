@@ -28,6 +28,11 @@
 #include <linux/highmem.h>
 #include <asm/mmzone.h>
 
+#ifdef __i386__
+#include <xen/xen.h>
+#include <asm/xen/page.h>
+#endif
+
 extern int page_is_ram(unsigned long);
 
 static inline void *
@@ -50,6 +55,14 @@ map_virtual(u64 offset, struct page **pp)
 		    "crash memory driver: invalid pfn: %lx )\n", pfn);
 		return NULL;
 	}
+
+#ifdef __i386__
+	if (xen_pv_domain() && !phys_to_machine_mapping_valid(pfn)) {
+		printk(KERN_INFO "crash memory driver: "
+		       "no machine mapping for pfn: %lx\n", pfn);
+		return NULL;
+	}
+#endif
 
 	page = pfn_to_page(pfn);
 

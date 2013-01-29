@@ -122,6 +122,8 @@ static struct resource data_resource = {
  */
 void __cpuinit cpu_init(void)
 {
+	struct s390_idle_data *idle = &__get_cpu_var(s390_idle);
+
         /*
          * Store processor id in lowcore (used e.g. in timer_interrupt)
          */
@@ -137,6 +139,7 @@ void __cpuinit cpu_init(void)
 	current->active_mm = &init_mm;
 	BUG_ON(current->mm);
         enter_lazy_tlb(&init_mm, current);
+	memset(idle, 0, sizeof(*idle));
 }
 
 /*
@@ -1002,6 +1005,14 @@ static void __init setup_hwcaps(void)
 	 * HWCAP_S390_HIGH_GPRS is bit 9.
 	 */
 	elf_hwcap |= HWCAP_S390_HIGH_GPRS;
+
+#if defined(CONFIG_64BIT)
+	/*
+	 * Transactional execution support HWCAP_S390_TE is bit 10.
+	 */
+	if (MACHINE_HAS_TE)
+		elf_hwcap |= HWCAP_S390_TE;
+#endif
 
 	switch (S390_lowcore.cpu_id.machine) {
 	case 0x9672:

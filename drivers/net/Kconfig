@@ -2109,6 +2109,17 @@ config IGB_DCA
 	  driver.  DCA is a method for warming the CPU cache before data
 	  is used, with the intent of lessening the impact of cache misses.
 
+config IGB_PTP
+	bool "PTP Hardware Clock (PHC)"
+	default y
+	depends on IGB && PTP_1588_CLOCK
+	---help---
+	  Say Y here if you want to use PTP Hardware Clock (PHC) in the
+	  driver.  Only the basic clock operations have been implemented.
+
+	  Every timestamp and clock read operations must consult the
+	  overflow counter to form a correct time value.
+
 config IGBVF
        tristate "Intel(R) 82576 Virtual Function Ethernet support"
        depends on PCI
@@ -2652,6 +2663,14 @@ config IXGBE
 	  To compile this driver as a module, choose M here. The module
 	  will be called ixgbe.
 
+config IXGBE_HWMON
+	bool "Intel(R) 10GbE PCI Express adapters HWMON support"
+	default y
+	depends on IXGBE && HWMON && !(IXGBE=y && HWMON=m)
+	---help---
+	  Say Y if you want to expose the thermal sensor data on some of
+	  our cards, via a hwmon sysfs interface.
+
 config IXGBE_DCA
 	bool "Direct Cache Access (DCA) Support"
 	default y
@@ -2668,6 +2687,17 @@ config IXGBE_DCB
 	---help---
 	  Say Y here if you want to use Data Center Bridging (DCB) in the
 	  driver.
+
+	  If unsure, say N.
+
+config IXGBE_PTP
+	bool "PTP Clock Support"
+	default n
+	depends on IXGBE && PTP_1588_CLOCK
+	---help---
+	  Say Y here if you want support for 1588 Timestamping with a
+	  PHC device, using the PTP 1588 Clock support. This is
+	  required to enable timestamping support for the device.
 
 	  If unsure, say N.
 
@@ -2796,6 +2826,19 @@ config MLX4_EN
 	help
 	  This driver supports Mellanox Technologies ConnectX Ethernet
 	  devices.
+
+config MLX4_EN_DCB
+	bool "Data Center Bridging (DCB) Support"
+	default y
+	depends on MLX4_EN && DCB
+	help
+	  Say Y here if you want to use Data Center Bridging (DCB) in the
+	  driver.
+	  If set to N, it will not be possible to configure QoS and
+	  ratelimit attributes.
+	  This flag is depended on the kernel's DCB support.
+
+	  If unsure, set to Y
 
 config MLX4_CORE
 	tristate
@@ -3340,5 +3383,7 @@ config VMXNET3
          This driver supports VMware's vmxnet3 virtual ethernet NIC.
          To compile this driver as a module, choose M here: the
          module will be called vmxnet3.
+
+source "drivers/net/hyperv/Kconfig"
 
 endif # NETDEVICES

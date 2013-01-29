@@ -251,6 +251,8 @@ nfs4_deviceid_purge_client(const struct nfs_client *clp)
 {
 	long h;
 
+	if (!(clp->cl_exchange_flags & EXCHGID4_FLAG_USE_PNFS_MDS))
+		return;
 	for (h = 0; h < NFS4_DEVICE_ID_HASH_SIZE; h++)
 		_deviceid_purge_client(clp, h);
 }

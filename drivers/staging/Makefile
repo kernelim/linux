@@ -39,7 +39,6 @@ obj-$(CONFIG_OCTEON_ETHERNET)	+= octeon/
 obj-$(CONFIG_VT6655)		+= vt6655/
 obj-$(CONFIG_VT6656)		+= vt6656/
 obj-$(CONFIG_FB_UDL)		+= udlfb/
-obj-$(CONFIG_HYPERV)		+= hv/
 obj-$(CONFIG_VME_BUS)		+= vme/
 obj-$(CONFIG_RAR_REGISTER)	+= rar/
 obj-$(CONFIG_DX_SEP)		+= sep/

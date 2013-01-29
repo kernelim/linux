@@ -259,6 +259,7 @@ void apic_disable(void)
 {
 	apic->read = native_apic_read_dummy;
 	apic->write = native_apic_write_dummy;
+	apic->eoi_write = native_apic_write_dummy;
 }
 
 void native_apic_wait_icr_idle(void)
@@ -701,7 +702,7 @@ static int __init calibrate_APIC_clock(void)
 	lapic_clockevent.mult = div_sc(delta, TICK_NSEC * LAPIC_CAL_LOOPS,
 				       lapic_clockevent.shift);
 	lapic_clockevent.max_delta_ns =
-		clockevent_delta2ns(0x7FFFFF, &lapic_clockevent);
+		clockevent_delta2ns(0x7FFFFFFF, &lapic_clockevent);
 	lapic_clockevent.min_delta_ns =
 		clockevent_delta2ns(0xF, &lapic_clockevent);
 
@@ -2057,6 +2058,23 @@ int default_apicid_to_node(int logical_apicid)
 #endif
 }
 #endif
+
+/*
+ * Override the generic EOI implementation with an optimized version.
+ * Only called during early boot when only one CPU is active and with
+ * interrupts disabled, so we know this does not race with actual APIC driver
+ * use.
+ */
+void __init apic_set_eoi_write(void (*eoi_write)(u32 reg, u32 v))
+{
+	struct apic **drv;
+
+	for (drv = apic_probe; *drv; drv++) {
+		/* Should happen once for each apic */
+		WARN_ON((*drv)->eoi_write == eoi_write);
+		(*drv)->eoi_write = eoi_write;
+	}
+}
 
 /*
  * Power management

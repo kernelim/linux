@@ -1,3 +1,20 @@
+Release Date    : Mon. Oct 8, 2012 17:00:00 PST 2012 -
+			(emaild-id:megaraidlinux@lsi.com)
+			Adam Radford
+Current Version : 06.504.01.00-rh1
+Old Version     : 00.00.06.14-rh1
+    1. Add fpRead/WriteCapable, fpRead/WriteAcrossStripe checks.
+    2. Add throttlequeuedepth module parameter.
+    3. Add resetwaittime module parameter.
+    4. Move poll_aen_lock initializer.
+    5. Removed un-needed completion_lock spinlock calls.
+    6. Add module param for configurable MSI-X vector count.
+    7. Load io_request DataLength in bytes.
+    8. Add array boundary check for SystemPD.
+    9. Add SystemPD FastPath support.
+   10. Remove duplicate code.
+   11. Version, Changelog, Copyright update.
+-------------------------------------------------------------------------------
 Release Date    : Fri. Jan 6, 2012 17:00:00 PST 2012 -
 			(emaild-id:megaraidlinux@lsi.com)
 			Adam Radford

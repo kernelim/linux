@@ -142,6 +142,7 @@ struct fuse_file_lock {
  *
  * FUSE_EXPORT_SUPPORT: filesystem handles lookups of "." and ".."
  * FUSE_DONT_MASK: don't apply umask to file mode on create operations
+ * FUSE_AUTO_INVAL_DATA: automatically invalidate cached pages
  */
 #define FUSE_ASYNC_READ		(1 << 0)
 #define FUSE_POSIX_LOCKS	(1 << 1)
@@ -150,6 +151,8 @@ struct fuse_file_lock {
 #define FUSE_EXPORT_SUPPORT	(1 << 4)
 #define FUSE_BIG_WRITES		(1 << 5)
 #define FUSE_DONT_MASK		(1 << 6)
+#define FUSE_AUTO_INVAL_DATA   (1 << 12)
+#define FUSE_DO_READDIRPLUS    (1 << 13)
 
 /**
  * CUSE INIT request/reply flags
@@ -248,6 +251,7 @@ enum fuse_opcode {
 	FUSE_DESTROY       = 38,
 	FUSE_IOCTL         = 39,
 	FUSE_POLL          = 40,
+	FUSE_READDIRPLUS   = 44,
 
 	/* CUSE specific operations */
 	CUSE_INIT          = 4096,
@@ -552,6 +556,16 @@ struct fuse_dirent {
 #define FUSE_DIRENT_ALIGN(x) (((x) + sizeof(__u64) - 1) & ~(sizeof(__u64) - 1))
 #define FUSE_DIRENT_SIZE(d) \
 	FUSE_DIRENT_ALIGN(FUSE_NAME_OFFSET + (d)->namelen)
+
+struct fuse_direntplus {
+	struct fuse_entry_out entry_out;
+	struct fuse_dirent dirent;
+};
+
+#define FUSE_NAME_OFFSET_DIRENTPLUS \
+	offsetof(struct fuse_direntplus, dirent.name)
+#define FUSE_DIRENTPLUS_SIZE(d) \
+	FUSE_DIRENT_ALIGN(FUSE_NAME_OFFSET_DIRENTPLUS + (d)->dirent.namelen)
 
 struct fuse_notify_inval_inode_out {
 	__u64	ino;

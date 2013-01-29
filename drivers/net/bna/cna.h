@@ -38,14 +38,13 @@
 
 extern char bfa_version[];
 
-#define	CNA_FW_FILE_CT	"ctfw.bin"
-#define	CNA_FW_FILE_CT2	"ct2fw.bin"
+#define	CNA_FW_FILE_CT	"ctfw-3.0.3.1.bin"
+#define	CNA_FW_FILE_CT2	"ct2fw-3.0.3.1.bin"
 #define FC_SYMNAME_MAX	256	/*!< max name server symbolic name size */
 
 #pragma pack(1)
 
-#define MAC_ADDRLEN	(6)
-typedef struct mac { u8 mac[MAC_ADDRLEN]; } mac_t;
+typedef struct mac { u8 mac[ETH_ALEN]; } mac_t;
 
 #pragma pack()
 

@@ -188,9 +188,6 @@ static struct nfs_client *nfs_alloc_client(const struct nfs_client_initdata *cl_
 	cred = rpc_lookup_machine_cred();
 	if (!IS_ERR(cred))
 		clp->cl_machine_cred = cred;
-#if defined(CONFIG_NFS_V4_1)
-	INIT_LIST_HEAD(&clp->cl_layouts);
-#endif
 	nfs_fscache_get_client_cookie(clp);
 
 	return clp;
@@ -205,8 +202,10 @@ error_0:
 #ifdef CONFIG_NFS_V4_1
 static void nfs4_shutdown_session(struct nfs_client *clp)
 {
-	if (nfs4_has_session(clp))
+	if (nfs4_has_session(clp)) {
 		nfs4_destroy_session(clp->cl_session);
+	}
+
 }
 #else /* CONFIG_NFS_V4_1 */
 static void nfs4_shutdown_session(struct nfs_client *clp)
@@ -289,8 +288,6 @@ static void nfs_free_client(struct nfs_client *clp)
 
 	if (clp->cl_machine_cred != NULL)
 		put_rpccred(clp->cl_machine_cred);
-
-	nfs4_deviceid_purge_client(clp);
 
 	kfree(clp->cl_hostname);
 	kfree(clp);
@@ -906,7 +903,9 @@ error:
 /*
  * Load up the server record from information gained in an fsinfo record
  */
-static void nfs_server_set_fsinfo(struct nfs_server *server, struct nfs_fsinfo *fsinfo)
+static void nfs_server_set_fsinfo(struct nfs_server *server,
+				  struct nfs_fh *mntfh,
+				  struct nfs_fsinfo *fsinfo)
 {
 	unsigned long max_rpc_payload;
 
@@ -936,7 +935,7 @@ static void nfs_server_set_fsinfo(struct nfs_server *server, struct nfs_fsinfo *
 	if (server->wsize > NFS_MAX_FILE_IO_SIZE)
 		server->wsize = NFS_MAX_FILE_IO_SIZE;
 	server->wpages = (server->wsize + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
-	set_pnfs_layoutdriver(server, fsinfo->layouttype);
+	set_pnfs_layoutdriver(server, mntfh, fsinfo->layouttype);
 
 	server->wtmult = nfs_block_bits(fsinfo->wtmult, NULL);
 
@@ -982,7 +981,7 @@ static int nfs_probe_fsinfo(struct nfs_server *server, struct nfs_fh *mntfh, str
 	if (error < 0)
 		goto out_error;
 
-	nfs_server_set_fsinfo(server, &fsinfo);
+	nfs_server_set_fsinfo(server, mntfh, &fsinfo);
 
 	/* Get some general file system info */
 	if (server->namelen == 0) {
@@ -1062,6 +1061,7 @@ static struct nfs_server *nfs_alloc_server(void)
 	INIT_LIST_HEAD(&server->client_link);
 	INIT_LIST_HEAD(&server->master_link);
 	INIT_LIST_HEAD(&server->delegations);
+	INIT_LIST_HEAD(&server->layouts);
 
 	atomic_set(&server->active, 0);
 
@@ -1695,7 +1695,8 @@ error:
  */
 struct nfs_server *nfs_clone_server(struct nfs_server *source,
 				    struct nfs_fh *fh,
-				    struct nfs_fattr *fattr)
+				    struct nfs_fattr *fattr,
+				    rpc_authflavor_t flavor)
 {
 	struct nfs_server *server;
 	struct nfs_fattr *fattr_fsinfo;
@@ -1723,7 +1724,7 @@ struct nfs_server *nfs_clone_server(struct nfs_server *source,
 
 	error = nfs_init_server_rpcclient(server,
 			source->client->cl_timeout,
-			source->client->cl_auth->au_flavor);
+			flavor);
 	if (error < 0)
 		goto out_free_server;
 	if (!IS_ERR(source->client_acl))
@@ -1864,6 +1865,10 @@ static int nfs_server_list_show(struct seq_file *m, void *v)
 
 	/* display one transport per line on subsequent lines */
 	clp = list_entry(v, struct nfs_client, cl_share_link);
+
+	/* Check if the client is initialized */
+	if (clp->cl_cons_state != NFS_CS_READY)
+		return 0;
 
 	seq_printf(m, "v%u %s %s %3d %s\n",
 		   clp->rpc_ops->version,

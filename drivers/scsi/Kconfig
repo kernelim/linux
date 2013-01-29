@@ -401,6 +401,7 @@ config BLK_DEV_3W_XXXX_RAID
 config SCSI_HPSA
 	tristate "HP Smart Array SCSI driver"
 	depends on PCI && SCSI
+	select CHECK_SIGNATURE
 	help
 	  This driver supports HP Smart Array Controllers (circa 2009).
 	  It is a SCSI alternative to the cciss driver, which is a block
@@ -659,6 +660,13 @@ config VMWARE_PVSCSI
 	  This driver supports VMware's para virtualized SCSI HBA.
 	  To compile this driver as a module, choose M here: the
 	  module will be called vmw_pvscsi.
+
+config HYPERV_STORAGE
+	tristate "Microsoft Hyper-V virtual storage driver"
+	depends on SCSI && HYPERV
+	default HYPERV
+	help
+	  Select this option to enable the Hyper-V virtual storage driver.
 
 config LIBFC
 	tristate "LibFC module"

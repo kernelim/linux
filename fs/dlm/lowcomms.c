@@ -1611,7 +1611,7 @@ static void work_stop(void)
 static int work_start(void)
 {
 	int error;
-	recv_workqueue = create_workqueue("dlm_recv");
+	recv_workqueue = create_singlethread_workqueue("dlm_recv");
 	error = IS_ERR(recv_workqueue);
 	if (error) {
 		log_print("can't start dlm_recv %d", error);

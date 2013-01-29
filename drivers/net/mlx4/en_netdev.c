@@ -63,6 +63,27 @@ static void mlx4_en_vlan_rx_register(struct net_device *dev, struct vlan_group *
 	mutex_unlock(&mdev->state_lock);
 }
 
+static int mlx4_en_setup_tc(struct net_device *dev, u8 up)
+{
+	struct mlx4_en_priv *priv = netdev_priv(dev);
+	int i;
+	unsigned int q, offset = 0;
+
+	if (up && up != MLX4_EN_NUM_UP)
+		return -EINVAL;
+
+	netdev_set_num_tc(dev, up);
+
+	/* Partition Tx queues evenly amongst UP's */
+	q = priv->tx_ring_num / up;
+	for (i = 0; i < up; i++) {
+		netdev_set_tc_queue(dev, i, q, offset);
+		offset += q;
+	}
+
+	return 0;
+}
+
 static void mlx4_en_vlan_rx_add_vid(struct net_device *dev, unsigned short vid)
 {
 	struct mlx4_en_priv *priv = netdev_priv(dev);
@@ -264,7 +285,7 @@ static void mlx4_en_do_set_multicast(struct work_struct *work)
 	struct mlx4_en_mc_list *mclist, *tmp;
 	u64 mcast_addr = 0;
 	u8 mc_list[16] = {0};
-	int err;
+	int err = 0;
 
 	mutex_lock(&mdev->state_lock);
 	if (!mdev->device_up) {
@@ -299,16 +320,46 @@ static void mlx4_en_do_set_multicast(struct work_struct *work)
 			priv->flags |= MLX4_EN_FLAG_PROMISC;
 
 			/* Enable promiscouos mode */
-			if (!(mdev->dev->caps.flags &
-						MLX4_DEV_CAP_FLAG_VEP_UC_STEER))
-				err = mlx4_SET_PORT_qpn_calc(mdev->dev, priv->port,
-							     priv->base_qpn, 1);
-			else
-				err = mlx4_unicast_promisc_add(mdev->dev, priv->base_qpn,
+			switch (mdev->dev->caps.steering_mode) {
+			case MLX4_STEERING_MODE_DEVICE_MANAGED:
+				err = mlx4_flow_steer_promisc_add(mdev->dev,
+								  priv->port,
+								  priv->base_qpn,
+								  MLX4_FS_PROMISC_UPLINK);
+				if (err)
+					en_err(priv, "Failed enabling promiscuous mode\n");
+				priv->flags |= MLX4_EN_FLAG_MC_PROMISC;
+				break;
+
+			case MLX4_STEERING_MODE_B0:
+				err = mlx4_unicast_promisc_add(mdev->dev,
+							       priv->base_qpn,
 							       priv->port);
-			if (err)
-				en_err(priv, "Failed enabling "
-					     "promiscuous mode\n");
+				if (err)
+					en_err(priv, "Failed enabling unicast promiscuous mode\n");
+
+				/* Add the default qp number as multicast
+				 * promisc
+				 */
+				if (!(priv->flags & MLX4_EN_FLAG_MC_PROMISC)) {
+					err = mlx4_multicast_promisc_add(mdev->dev,
+									 priv->base_qpn,
+									 priv->port);
+					if (err)
+						en_err(priv, "Failed enabling multicast promiscuous mode\n");
+					priv->flags |= MLX4_EN_FLAG_MC_PROMISC;
+				}
+				break;
+
+			case MLX4_STEERING_MODE_A0:
+				err = mlx4_SET_PORT_qpn_calc(mdev->dev,
+							     priv->port,
+							     priv->base_qpn,
+							     1);
+				if (err)
+					en_err(priv, "Failed enabling promiscuous mode\n");
+				break;
+			}
 
 			/* Disable port multicast filter (unconditionally) */
 			err = mlx4_SET_MCAST_FLTR(mdev->dev, priv->port, 0,
@@ -316,15 +367,6 @@ static void mlx4_en_do_set_multicast(struct work_struct *work)
 			if (err)
 				en_err(priv, "Failed disabling "
 					     "multicast filter\n");
-
-			/* Add the default qp number as multicast promisc */
-			if (!(priv->flags & MLX4_EN_FLAG_MC_PROMISC)) {
-				err = mlx4_multicast_promisc_add(mdev->dev, priv->base_qpn,
-								 priv->port);
-				if (err)
-					en_err(priv, "Failed entering multicast promisc mode\n");
-				priv->flags |= MLX4_EN_FLAG_MC_PROMISC;
-			}
 
 			if (priv->vlgrp) {
 				/* Disable port VLAN filter */
@@ -346,22 +388,40 @@ static void mlx4_en_do_set_multicast(struct work_struct *work)
 		priv->flags &= ~MLX4_EN_FLAG_PROMISC;
 
 		/* Disable promiscouos mode */
-		if (!(mdev->dev->caps.flags & MLX4_DEV_CAP_FLAG_VEP_UC_STEER))
-			err = mlx4_SET_PORT_qpn_calc(mdev->dev, priv->port,
-						     priv->base_qpn, 0);
-		else
-			err = mlx4_unicast_promisc_remove(mdev->dev, priv->base_qpn,
-							  priv->port);
-		if (err)
-			en_err(priv, "Failed disabling promiscuous mode\n");
-
-		/* Disable Multicast promisc */
-		if (priv->flags & MLX4_EN_FLAG_MC_PROMISC) {
-			err = mlx4_multicast_promisc_remove(mdev->dev, priv->base_qpn,
-							    priv->port);
+		switch (mdev->dev->caps.steering_mode) {
+		case MLX4_STEERING_MODE_DEVICE_MANAGED:
+			err = mlx4_flow_steer_promisc_remove(mdev->dev,
+							     priv->port,
+							     MLX4_FS_PROMISC_UPLINK);
 			if (err)
-				en_err(priv, "Failed disabling multicast promiscuous mode\n");
+				en_err(priv, "Failed disabling promiscuous mode\n");
 			priv->flags &= ~MLX4_EN_FLAG_MC_PROMISC;
+			break;
+
+		case MLX4_STEERING_MODE_B0:
+			err = mlx4_unicast_promisc_remove(mdev->dev,
+							  priv->base_qpn,
+							  priv->port);
+			if (err)
+				en_err(priv, "Failed disabling unicast promiscuous mode\n");
+			/* Disable Multicast promisc */
+			if (priv->flags & MLX4_EN_FLAG_MC_PROMISC) {
+				err = mlx4_multicast_promisc_remove(mdev->dev,
+								    priv->base_qpn,
+								    priv->port);
+				if (err)
+					en_err(priv, "Failed disabling multicast promiscuous mode\n");
+				priv->flags &= ~MLX4_EN_FLAG_MC_PROMISC;
+			}
+			break;
+
+		case MLX4_STEERING_MODE_A0:
+			err = mlx4_SET_PORT_qpn_calc(mdev->dev,
+						     priv->port,
+						     priv->base_qpn, 0);
+			if (err)
+				en_err(priv, "Failed disabling promiscuous mode\n");
+			break;
 		}
 
 		/* Enable port VLAN filter */
@@ -379,8 +439,23 @@ static void mlx4_en_do_set_multicast(struct work_struct *work)
 
 		/* Add the default qp number as multicast promisc */
 		if (!(priv->flags & MLX4_EN_FLAG_MC_PROMISC)) {
-			err = mlx4_multicast_promisc_add(mdev->dev, priv->base_qpn,
-							 priv->port);
+			switch (mdev->dev->caps.steering_mode) {
+			case MLX4_STEERING_MODE_DEVICE_MANAGED:
+				err = mlx4_flow_steer_promisc_add(mdev->dev,
+								  priv->port,
+								  priv->base_qpn,
+								  MLX4_FS_PROMISC_ALL_MULTI);
+				break;
+
+			case MLX4_STEERING_MODE_B0:
+				err = mlx4_multicast_promisc_add(mdev->dev,
+								 priv->base_qpn,
+								 priv->port);
+				break;
+
+			case MLX4_STEERING_MODE_A0:
+				break;
+			}
 			if (err)
 				en_err(priv, "Failed entering multicast promisc mode\n");
 			priv->flags |= MLX4_EN_FLAG_MC_PROMISC;
@@ -388,8 +463,22 @@ static void mlx4_en_do_set_multicast(struct work_struct *work)
 	} else {
 		/* Disable Multicast promisc */
 		if (priv->flags & MLX4_EN_FLAG_MC_PROMISC) {
-			err = mlx4_multicast_promisc_remove(mdev->dev, priv->base_qpn,
-							    priv->port);
+			switch (mdev->dev->caps.steering_mode) {
+			case MLX4_STEERING_MODE_DEVICE_MANAGED:
+				err = mlx4_flow_steer_promisc_remove(mdev->dev,
+								     priv->port,
+								     MLX4_FS_PROMISC_ALL_MULTI);
+				break;
+
+			case MLX4_STEERING_MODE_B0:
+				err = mlx4_multicast_promisc_remove(mdev->dev,
+								    priv->base_qpn,
+								    priv->port);
+				break;
+
+			case MLX4_STEERING_MODE_A0:
+				break;
+			}
 			if (err)
 				en_err(priv, "Failed disabling multicast promiscuous mode\n");
 			priv->flags &= ~MLX4_EN_FLAG_MC_PROMISC;
@@ -428,23 +517,25 @@ static void mlx4_en_do_set_multicast(struct work_struct *work)
 				err = mlx4_multicast_detach(mdev->dev,
 							    &priv->rss_map.indir_qp,
 							    mc_list,
-							    MLX4_PROT_ETH);
+							    MLX4_PROT_ETH,
+							    mclist->reg_id);
 				if (err)
 					en_err(priv, "Fail to detach multicast address\n");
 
 				/* remove from list */
 				list_del(&mclist->list);
 				kfree(mclist);
-			}
-
-			if (mclist->action == MCLIST_ADD) {
+			} else if (mclist->action == MCLIST_ADD) {
 				/* attach the address */
 				memcpy(&mc_list[10], mclist->addr, ETH_ALEN);
+				/* needed for B0 steering support */
 				mc_list[5] = priv->port;
 				err = mlx4_multicast_attach(mdev->dev,
 							    &priv->rss_map.indir_qp,
-							    mc_list, 0,
-							    MLX4_PROT_ETH);
+							    mc_list,
+							    priv->port, 0,
+							    MLX4_PROT_ETH,
+							    &mclist->reg_id);
 				if (err)
 					en_err(priv, "Fail to attach multicast address\n");
 
@@ -511,6 +602,8 @@ static void mlx4_en_set_default_moderation(struct mlx4_en_priv *priv)
 	 */
 	priv->rx_frames = MLX4_EN_RX_COAL_TARGET;
 	priv->rx_usecs = MLX4_EN_RX_COAL_TIME;
+	priv->tx_frames = MLX4_EN_TX_COAL_PKTS;
+	priv->tx_usecs = MLX4_EN_TX_COAL_TIME;
 	en_dbg(INTR, priv, "Default coalesing params for mtu:%d - "
 			   "rx_frames:%d rx_usecs:%d\n",
 		 priv->dev->mtu, priv->rx_frames, priv->rx_usecs);
@@ -524,8 +617,8 @@ static void mlx4_en_set_default_moderation(struct mlx4_en_priv *priv)
 
 	for (i = 0; i < priv->tx_ring_num; i++) {
 		cq = &priv->tx_cq[i];
-		cq->moder_cnt = MLX4_EN_TX_COAL_PKTS;
-		cq->moder_time = MLX4_EN_TX_COAL_TIME;
+		cq->moder_cnt = priv->tx_frames;
+		cq->moder_time = priv->tx_usecs;
 	}
 
 	/* Reset auto-moderation params */
@@ -758,6 +851,10 @@ int mlx4_en_start_port(struct net_device *dev)
 					"EQ's\n", priv->dev->name);
 		}
 	}
+	err = mlx4_en_create_drop_qp(priv);
+	if (err)
+		goto rss_err;
+
 	/* Configure tx cq's and rings */
 	for (i = 0; i < priv->tx_ring_num; i++) {
 		/* Configure cq */
@@ -779,12 +876,17 @@ int mlx4_en_start_port(struct net_device *dev)
 
 		/* Configure ring */
 		tx_ring = &priv->tx_ring[i];
-		err = mlx4_en_activate_tx_ring(priv, tx_ring, cq->mcq.cqn);
+		err = mlx4_en_activate_tx_ring(priv, tx_ring, cq->mcq.cqn,
+			i / priv->mdev->profile.num_tx_rings_p_up);
 		if (err) {
 			en_err(priv, "Failed allocating Tx ring\n");
 			mlx4_en_deactivate_cq(priv, cq);
 			goto tx_err;
 		}
+
+		/* Arm CQ for TX completions */
+		mlx4_en_arm_cq(priv, cq);
+
 		/* Set initial ownership of all Tx TXBBs to SW (1) */
 		for (j = 0; j < tx_ring->buf_size; j += STAMP_STRIDE)
 			*((u32 *) (tx_ring->buf + j)) = 0xffffffff;
@@ -818,15 +920,25 @@ int mlx4_en_start_port(struct net_device *dev)
 		goto tx_err;
 	}
 
-	/* Must redo promiscuous mode setup. */
-	priv->flags &= ~(MLX4_EN_FLAG_PROMISC | MLX4_EN_FLAG_MC_PROMISC);
-
 	/* Attach rx QP to bradcast address */
 	memset(&mc_list[10], 0xff, ETH_ALEN);
-	mc_list[5] = priv->port;
+	mc_list[5] = priv->port; /* needed for B0 steering support */
 	if (mlx4_multicast_attach(mdev->dev, &priv->rss_map.indir_qp, mc_list,
-				  0, MLX4_PROT_ETH))
+				  priv->port, 0, MLX4_PROT_ETH,
+				  &priv->broadcast_id))
 		mlx4_warn(mdev, "Failed Attaching Broadcast\n");
+
+	/* Must redo promiscuous mode setup. */
+	priv->flags &= ~(MLX4_EN_FLAG_PROMISC | MLX4_EN_FLAG_MC_PROMISC);
+	if (mdev->dev->caps.steering_mode ==
+	    MLX4_STEERING_MODE_DEVICE_MANAGED) {
+		mlx4_flow_steer_promisc_remove(mdev->dev,
+					       priv->port,
+					       MLX4_FS_PROMISC_UPLINK);
+		mlx4_flow_steer_promisc_remove(mdev->dev,
+					       priv->port,
+					       MLX4_FS_PROMISC_ALL_MULTI);
+	}
 
 	/* Schedule multicast task to populate multicast list */
 	queue_work(mdev->workqueue, &priv->mcast_task);
@@ -842,7 +954,8 @@ tx_err:
 		mlx4_en_deactivate_tx_ring(priv, &priv->tx_ring[tx_index]);
 		mlx4_en_deactivate_cq(priv, &priv->tx_cq[tx_index]);
 	}
-
+	mlx4_en_destroy_drop_qp(priv);
+rss_err:
 	mlx4_en_release_rss_steer(priv);
 mac_err:
 	mlx4_put_eth_qp(mdev->dev, priv->port, priv->mac, priv->base_qpn);
@@ -879,14 +992,14 @@ void mlx4_en_stop_port(struct net_device *dev)
 
 	/* Detach All multicasts */
 	memset(&mc_list[10], 0xff, ETH_ALEN);
-	mc_list[5] = priv->port;
+	mc_list[5] = priv->port; /* needed for B0 steering support */
 	mlx4_multicast_detach(mdev->dev, &priv->rss_map.indir_qp, mc_list,
-			      MLX4_PROT_ETH);
+			      MLX4_PROT_ETH, priv->broadcast_id);
 	list_for_each_entry(mclist, &priv->curr_list, list) {
 		memcpy(&mc_list[10], mclist->addr, ETH_ALEN);
 		mc_list[5] = priv->port;
 		mlx4_multicast_detach(mdev->dev, &priv->rss_map.indir_qp,
-				      mc_list, MLX4_PROT_ETH);
+				      mc_list, MLX4_PROT_ETH, mclist->reg_id);
 	}
 	mlx4_en_clear_list(dev);
 	list_for_each_entry_safe(mclist, tmp, &priv->curr_list, list) {
@@ -896,6 +1009,8 @@ void mlx4_en_stop_port(struct net_device *dev)
 
 	/* Flush multicast filter */
 	mlx4_SET_MCAST_FLTR(mdev->dev, priv->port, 0, 1, MLX4_MCAST_CONFIG);
+
+	mlx4_en_destroy_drop_qp(priv);
 
 	/* Free TX Rings */
 	for (i = 0; i < priv->tx_ring_num; i++) {
@@ -1011,7 +1126,7 @@ static int mlx4_en_close(struct net_device *dev)
 	return 0;
 }
 
-void mlx4_en_free_resources(struct mlx4_en_priv *priv, bool reserve_vectors)
+void mlx4_en_free_resources(struct mlx4_en_priv *priv)
 {
 	int i;
 
@@ -1019,7 +1134,7 @@ void mlx4_en_free_resources(struct mlx4_en_priv *priv, bool reserve_vectors)
 		if (priv->tx_ring[i].tx_info)
 			mlx4_en_destroy_tx_ring(priv, &priv->tx_ring[i]);
 		if (priv->tx_cq[i].buf)
-			mlx4_en_destroy_cq(priv, &priv->tx_cq[i], reserve_vectors);
+			mlx4_en_destroy_cq(priv, &priv->tx_cq[i]);
 	}
 
 	for (i = 0; i < priv->rx_ring_num; i++) {
@@ -1027,7 +1142,12 @@ void mlx4_en_free_resources(struct mlx4_en_priv *priv, bool reserve_vectors)
 			mlx4_en_destroy_rx_ring(priv, &priv->rx_ring[i],
 				priv->prof->rx_ring_size, priv->stride);
 		if (priv->rx_cq[i].buf)
-			mlx4_en_destroy_cq(priv, &priv->rx_cq[i], reserve_vectors);
+			mlx4_en_destroy_cq(priv, &priv->rx_cq[i]);
+	}
+
+	if (priv->base_tx_qpn) {
+		mlx4_qp_release_range(priv->mdev->dev, priv->base_tx_qpn, priv->tx_ring_num);
+		priv->base_tx_qpn = 0;
 	}
 }
 
@@ -1035,9 +1155,9 @@ int mlx4_en_alloc_resources(struct mlx4_en_priv *priv)
 {
 	struct mlx4_en_port_profile *prof = priv->prof;
 	int i;
-	int base_tx_qpn, err;
+	int err;
 
-	err = mlx4_qp_reserve_range(priv->mdev->dev, priv->tx_ring_num, 256, &base_tx_qpn);
+	err = mlx4_qp_reserve_range(priv->mdev->dev, priv->tx_ring_num, 256, &priv->base_tx_qpn);
 	if (err) {
 		en_err(priv, "failed reserving range for TX rings\n");
 		return err;
@@ -1049,7 +1169,7 @@ int mlx4_en_alloc_resources(struct mlx4_en_priv *priv)
 				      prof->tx_ring_size, i, TX))
 			goto err;
 
-		if (mlx4_en_create_tx_ring(priv, &priv->tx_ring[i], base_tx_qpn + i,
+		if (mlx4_en_create_tx_ring(priv, &priv->tx_ring[i], priv->base_tx_qpn + i,
 					   prof->tx_ring_size, TXBB_SIZE))
 			goto err;
 	}
@@ -1069,7 +1189,6 @@ int mlx4_en_alloc_resources(struct mlx4_en_priv *priv)
 
 err:
 	en_err(priv, "Failed to allocate NIC resources\n");
-	mlx4_qp_release_range(priv->mdev->dev, base_tx_qpn, priv->tx_ring_num);
 	return -ENOMEM;
 }
 
@@ -1097,7 +1216,11 @@ void mlx4_en_destroy_netdev(struct net_device *dev)
 	mdev->pndev[priv->port] = NULL;
 	mutex_unlock(&mdev->state_lock);
 
-	mlx4_en_free_resources(priv, false);
+	mlx4_en_free_resources(priv);
+
+	kfree(priv->tx_ring);
+	kfree(priv->tx_cq);
+
 	free_netdev(dev);
 }
 
@@ -1181,13 +1304,27 @@ int mlx4_en_init_netdev(struct mlx4_en_dev *mdev, int port,
 	memset(priv, 0, sizeof(struct mlx4_en_priv));
 	priv->dev = dev;
 	priv->mdev = mdev;
+	priv->ddev = &mdev->pdev->dev;
 	priv->prof = prof;
 	priv->port = port;
 	priv->port_up = false;
 	priv->rx_csum = 1;
 	priv->flags = prof->flags;
 	priv->tx_ring_num = prof->tx_ring_num;
+	priv->tx_ring = kzalloc(sizeof(struct mlx4_en_tx_ring) *
+			priv->tx_ring_num, GFP_KERNEL);
+	if (!priv->tx_ring) {
+		err = -ENOMEM;
+		goto out;
+	}
+	priv->tx_cq = kzalloc(sizeof(struct mlx4_en_cq) * priv->tx_ring_num,
+			GFP_KERNEL);
+	if (!priv->tx_cq) {
+		err = -ENOMEM;
+		goto out;
+	}
 	priv->rx_ring_num = prof->rx_ring_num;
+	priv->cqe_factor = (mdev->dev->caps.cqe_size == 64) ? 1 : 0;
 	priv->mac_index = -1;
 	priv->msg_enable = MLX4_EN_MSG_LEVEL;
 	spin_lock_init(&priv->stats_lock);
@@ -1196,6 +1333,10 @@ int mlx4_en_init_netdev(struct mlx4_en_dev *mdev, int port,
 	INIT_WORK(&priv->watchdog_task, mlx4_en_restart);
 	INIT_WORK(&priv->linkstate_task, mlx4_en_linkstate);
 	INIT_DELAYED_WORK(&priv->stats_task, mlx4_en_do_get_stats);
+#ifdef CONFIG_MLX4_EN_DCB
+	if (!mlx4_is_slave(priv->mdev->dev))
+		dev->dcbnl_ops = &mlx4_en_dcbnl_ops;
+#endif
 
 	/* Query for default mac and max mtu */
 	priv->max_mtu = mdev->dev->caps.eth_mtu_cap[priv->port];
@@ -1227,9 +1368,18 @@ int mlx4_en_init_netdev(struct mlx4_en_dev *mdev, int port,
 	 */
 	dev->netdev_ops = &mlx4_netdev_ops;
 	dev->watchdog_timeo = MLX4_EN_WATCHDOG_TIMEOUT;
-	dev->real_num_tx_queues = MLX4_EN_NUM_TX_RINGS;
+	netif_set_real_num_tx_queues(dev, priv->tx_ring_num);
+	netif_set_real_num_rx_queues(dev, priv->rx_ring_num);
 
+	/*
+	 * We don't have an net_device_ops entry to setup_tc, so we use
+	 * a module parameter instead.
+	 */
+	if (mdev->profile.enable_tc)
+		mlx4_en_setup_tc(dev, MLX4_EN_NUM_UP);
+	
 	SET_ETHTOOL_OPS(dev, &mlx4_en_ethtool_ops);
+	set_ethtool_ops_ext(dev, &mlx4_en_ethtool_ops_ext);
 
 	/* Set defualt MAC */
 	dev->addr_len = ETH_ALEN;
@@ -1271,9 +1421,11 @@ int mlx4_en_init_netdev(struct mlx4_en_dev *mdev, int port,
 	en_warn(priv, "Using %d RX rings\n", prof->rx_ring_num);
 
 	/* Configure port */
+	mlx4_en_calc_rx_buf(dev);
 	err = mlx4_SET_PORT_general(mdev->dev, priv->port,
-				    MLX4_EN_MIN_MTU,
-				    0, 0, 0, 0);
+				    priv->rx_skb_size + ETH_FCS_LEN,
+				    prof->tx_pause, prof->tx_ppp,
+				    prof->rx_pause, prof->rx_ppp);
 	if (err) {
 		en_err(priv, "Failed setting port general configurations "
 		       "for port %d, with error %d\n", priv->port, err);

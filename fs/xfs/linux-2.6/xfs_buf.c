@@ -66,10 +66,6 @@ struct workqueue_struct *xfsconvertd_workqueue;
 #define xb_to_km(flags) \
 	 (((flags) & XBF_DONT_BLOCK) ? KM_NOFS : KM_SLEEP)
 
-#define xfs_buf_allocate(flags) \
-	kmem_zone_alloc(xfs_buf_zone, xb_to_km(flags))
-#define xfs_buf_deallocate(bp) \
-	kmem_zone_free(xfs_buf_zone, (bp));
 
 static inline int
 xfs_buf_is_vmapped(
@@ -109,6 +105,7 @@ xfs_buf_lru_add(
 		atomic_inc(&bp->b_hold);
 		list_add_tail(&bp->b_lru, &btp->bt_lru);
 		btp->bt_lru_nr++;
+		bp->b_lru_flags &= ~_XBF_LRU_DISPOSE;
 	}
 	spin_unlock(&btp->bt_lru_lock);
 }
@@ -157,7 +154,8 @@ xfs_buf_stale(
 		struct xfs_buftarg *btp = bp->b_target;
 
 		spin_lock(&btp->bt_lru_lock);
-		if (!list_empty(&bp->b_lru)) {
+		if (!list_empty(&bp->b_lru) &&
+		    !(bp->b_lru_flags & _XBF_LRU_DISPOSE)) {
 			list_del_init(&bp->b_lru);
 			btp->bt_lru_nr--;
 			atomic_dec(&bp->b_hold);
@@ -167,20 +165,26 @@ xfs_buf_stale(
 	ASSERT(atomic_read(&bp->b_hold) >= 1);
 }
 
-STATIC void
-_xfs_buf_initialize(
-	xfs_buf_t		*bp,
-	xfs_buftarg_t		*target,
+struct xfs_buf *
+xfs_buf_alloc(
+	struct xfs_buftarg	*target,
 	xfs_off_t		range_base,
 	size_t			range_length,
 	xfs_buf_flags_t		flags)
 {
-	/*
-	 * We don't want certain flags to appear in b_flags.
-	 */
-	flags &= ~(XBF_LOCK|XBF_MAPPED|XBF_DONT_BLOCK|XBF_READ_AHEAD);
+	struct xfs_buf		*bp;
 
-	memset(bp, 0, sizeof(xfs_buf_t));
+	bp = kmem_zone_zalloc(xfs_buf_zone, xb_to_km(flags));
+	if (unlikely(!bp))
+		return NULL;
+
+	/*
+	 * We don't want certain flags to appear in b_flags unless they are
+	 * specifically set by later operations on the buffer.
+	 */
+	flags &= ~(XBF_LOCK | XBF_MAPPED | XBF_DONT_BLOCK |
+		   XBF_TRYLOCK | XBF_ASYNC | XBF_READ_AHEAD);
+
 	atomic_set(&bp->b_hold, 1);
 	atomic_set(&bp->b_lru_ref, 1);
 	init_completion(&bp->b_iowait);
@@ -203,8 +207,9 @@ _xfs_buf_initialize(
 	init_waitqueue_head(&bp->b_waiters);
 
 	XFS_STATS_INC(xb_create);
-
 	trace_xfs_buf_init(bp, _RET_IP_);
+
+	return bp;
 }
 
 /*
@@ -219,7 +224,6 @@ _xfs_buf_get_pages(
 {
 	/* Make sure that we have a page list */
 	if (bp->b_pages == NULL) {
-		bp->b_offset = xfs_buf_poff(bp->b_file_offset);
 		bp->b_page_count = page_count;
 		if (page_count <= XB_PAGES) {
 			bp->b_pages = bp->b_page_array;
@@ -277,7 +281,7 @@ xfs_buf_free(
 	} else if (bp->b_flags & _XBF_KMEM)
 		kmem_free(bp->b_addr);
 	_xfs_buf_free_pages(bp);
-	xfs_buf_deallocate(bp);
+	kmem_zone_free(xfs_buf_zone, bp);
 }
 
 /*
@@ -481,8 +485,6 @@ _xfs_buf_find(
 
 	/* No match found */
 	if (new_bp) {
-		_xfs_buf_initialize(new_bp, btp, range_base,
-				range_length, flags);
 		rb_link_node(&new_bp->b_rbnode, parent, rbp);
 		rb_insert_color(&new_bp->b_rbnode, &pag->pag_buf_tree);
 		/* the buffer keeps the perag reference until it is freed */
@@ -527,35 +529,53 @@ found:
 }
 
 /*
- *	Assembles a buffer covering the specified range.
- *	Storage in memory for all portions of the buffer will be allocated,
- *	although backing storage may not be.
+ * Assembles a buffer covering the specified range. The code is optimised for
+ * cache hits, as metadata intensive workloads will see 3 orders of magnitude
+ * more hits than misses.
  */
-xfs_buf_t *
+struct xfs_buf *
 xfs_buf_get(
 	xfs_buftarg_t		*target,/* target for buffer		*/
 	xfs_off_t		ioff,	/* starting offset of range	*/
 	size_t			isize,	/* length of range		*/
 	xfs_buf_flags_t		flags)
 {
-	xfs_buf_t		*bp, *new_bp;
+	struct xfs_buf		*bp;
+	struct xfs_buf		*new_bp;
 	int			error = 0;
 
-	new_bp = xfs_buf_allocate(flags);
+	bp = _xfs_buf_find(target, ioff, isize, flags, NULL);
+	if (likely(bp))
+		goto found;
+
+	new_bp = xfs_buf_alloc(target, ioff << BBSHIFT, isize << BBSHIFT,
+			       flags);
 	if (unlikely(!new_bp))
 		return NULL;
 
-	bp = _xfs_buf_find(target, ioff, isize, flags, new_bp);
-	if (bp == new_bp) {
-		error = xfs_buf_allocate_memory(bp, flags);
-		if (error)
-			goto no_buffer;
-	} else {
-		xfs_buf_deallocate(new_bp);
-		if (unlikely(bp == NULL))
-			return NULL;
+	error = xfs_buf_allocate_memory(new_bp, flags);
+	if (error) {
+		kmem_zone_free(xfs_buf_zone, new_bp);
+		return NULL;
 	}
 
+	bp = _xfs_buf_find(target, ioff, isize, flags, new_bp);
+	if (!bp) {
+		xfs_buf_free(new_bp);
+		return NULL;
+	}
+
+	if (bp != new_bp)
+		xfs_buf_free(new_bp);
+
+	/*
+	 * Now we have a workable buffer, fill in the block number so
+	 * that we can do IO on it.
+	 */
+	bp->b_bn = ioff;
+	bp->b_count_desired = bp->b_buffer_length;
+
+found:
 	if (!(bp->b_flags & XBF_MAPPED)) {
 		error = _xfs_buf_map_pages(bp, flags);
 		if (unlikely(error)) {
@@ -566,18 +586,10 @@ xfs_buf_get(
 	}
 
 	XFS_STATS_INC(xb_get);
-
-	/*
-	 * Always fill in the block number now, the mapped cases can do
-	 * their own overlay of this later.
-	 */
-	bp->b_bn = ioff;
-	bp->b_count_desired = bp->b_buffer_length;
-
 	trace_xfs_buf_get(bp, flags, _RET_IP_);
 	return bp;
 
- no_buffer:
+no_buffer:
 	if (flags & (XBF_LOCK | XBF_TRYLOCK))
 		xfs_buf_unlock(bp);
 	xfs_buf_rele(bp);
@@ -589,8 +601,6 @@ _xfs_buf_read(
 	xfs_buf_t		*bp,
 	xfs_buf_flags_t		flags)
 {
-	int			status;
-
 	ASSERT(!(flags & (XBF_DELWRI|XBF_WRITE)));
 	ASSERT(bp->b_bn != XFS_BUF_DADDR_NULL);
 
@@ -599,9 +609,9 @@ _xfs_buf_read(
 	bp->b_flags |= flags & (XBF_READ | XBF_ASYNC | \
 			XBF_READ_AHEAD | _XBF_RUN_QUEUES);
 
-	status = xfs_buf_iorequest(bp);
-	if (status || XFS_BUF_ISERROR(bp) || (flags & XBF_ASYNC))
-		return status;
+	xfs_buf_iorequest(bp);
+	if (flags & XBF_ASYNC)
+		return 0;
 	return xfs_buf_iowait(bp);
 }
 
@@ -688,23 +698,10 @@ xfs_buf_read_uncached(
 
 	xfsbdstrat(mp, bp);
 	error = xfs_buf_iowait(bp);
-	if (error || bp->b_error) {
+	if (error) {
 		xfs_buf_relse(bp);
 		return NULL;
 	}
-	return bp;
-}
-
-xfs_buf_t *
-xfs_buf_get_empty(
-	size_t			len,
-	xfs_buftarg_t		*target)
-{
-	xfs_buf_t		*bp;
-
-	bp = xfs_buf_allocate(0);
-	if (bp)
-		_xfs_buf_initialize(bp, target, 0, len, 0);
 	return bp;
 }
 
@@ -793,10 +790,9 @@ xfs_buf_get_uncached(
 	int			error, i;
 	xfs_buf_t		*bp;
 
-	bp = xfs_buf_allocate(0);
+	bp = xfs_buf_alloc(target, 0, len, 0);
 	if (unlikely(bp == NULL))
 		goto fail;
-	_xfs_buf_initialize(bp, target, 0, len, 0);
 
 	error = _xfs_buf_get_pages(bp, page_count, 0);
 	if (error)
@@ -826,7 +822,7 @@ xfs_buf_get_uncached(
 		__free_page(bp->b_pages[i]);
 	_xfs_buf_free_pages(bp);
  fail_free_buf:
-	xfs_buf_deallocate(bp);
+	kmem_zone_free(xfs_buf_zone, bp);
  fail:
 	return NULL;
 }
@@ -1036,6 +1032,17 @@ xfs_buf_ioerror(
 	ASSERT(error >= 0 && error <= 0xffff);
 	bp->b_error = (unsigned short)error;
 	trace_xfs_buf_ioerror(bp, error, _RET_IP_);
+}
+
+void
+xfs_buf_ioerror_alert(
+	struct xfs_buf		*bp,
+	const char		*func)
+{
+	xfs_alert(bp->b_target->bt_mount,
+"metadata I/O error: block 0x%llx (\"%s\") error %d buf count %zd",
+		(__uint64_t)XFS_BUF_ADDR(bp), func,
+		bp->b_error, XFS_BUF_COUNT(bp));
 }
 
 int
@@ -1279,7 +1286,7 @@ next_chunk:
 	}
 }
 
-int
+void
 xfs_buf_iorequest(
 	xfs_buf_t		*bp)
 {
@@ -1287,7 +1294,7 @@ xfs_buf_iorequest(
 
 	if (bp->b_flags & XBF_DELWRI) {
 		xfs_buf_delwri_queue(bp, 1);
-		return 0;
+		return;
 	}
 
 	if (bp->b_flags & XBF_WRITE) {
@@ -1302,16 +1309,15 @@ xfs_buf_iorequest(
 	 */
 	atomic_set(&bp->b_io_remaining, 1);
 	_xfs_buf_ioapply(bp);
-	_xfs_buf_ioend(bp, 0);
+	_xfs_buf_ioend(bp, 1);
 
 	xfs_buf_rele(bp);
-	return 0;
 }
 
 /*
- *	Waits for I/O to complete on the buffer supplied.
- *	It returns immediately if no I/O is pending.
- *	It returns the I/O error code, if any, or 0 if there was no error.
+ * Waits for I/O to complete on the buffer supplied.  It returns immediately if
+ * no I/O is pending or there is already a pending error on the buffer.  It
+ * returns the I/O error code, if any, or 0 if there was no error.
  */
 int
 xfs_buf_iowait(
@@ -1321,7 +1327,8 @@ xfs_buf_iowait(
 
 	if (atomic_read(&bp->b_io_remaining))
 		blk_run_backing_dev(bp->b_target->bt_bdi, NULL);
-	wait_for_completion(&bp->b_iowait);
+	if (!bp->b_error)
+		wait_for_completion(&bp->b_iowait);
 
 	trace_xfs_buf_iowait_done(bp, _RET_IP_);
 	return bp->b_error;
@@ -1454,6 +1461,7 @@ xfs_buftarg_shrink(
 		 */
 		list_move(&bp->b_lru, &dispose);
 		btp->bt_lru_nr--;
+		bp->b_lru_flags |= _XBF_LRU_DISPOSE;
 	}
 	spin_unlock(&btp->bt_lru_lock);
 
@@ -1663,13 +1671,6 @@ xfs_buf_delwri_promote(
 	spin_unlock(&btp->bt_delwrite_lock);
 }
 
-STATIC void
-xfs_buf_runall_queues(
-	struct workqueue_struct	*queue)
-{
-	flush_workqueue(queue);
-}
-
 /*
  * Move as many buffers as specified to the supplied list
  * idicating if we skipped any buffers to prevent deadlocks.
@@ -1804,9 +1805,7 @@ xfs_flush_buftarg(
 	LIST_HEAD(tmp_list);
 	LIST_HEAD(wait_list);
 
-	xfs_buf_runall_queues(xfsconvertd_workqueue);
-	xfs_buf_runall_queues(xfsdatad_workqueue);
-	xfs_buf_runall_queues(xfslogd_workqueue);
+	flush_workqueue(xfslogd_workqueue);
 
 	set_bit(XBT_FORCE_FLUSH, &target->bt_flags);
 	pincount = xfs_buf_delwri_split(target, &tmp_list, 0);

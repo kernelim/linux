@@ -18,6 +18,7 @@
 #include <asm/page.h>
 #include <asm/ptrace.h>
 #include <asm/setup.h>
+#include <asm/runtime_instr.h>
 
 #ifdef __KERNEL__
 /*
@@ -86,7 +87,18 @@ struct thread_struct {
 	unsigned long ieee_instruction_pointer; 
         /* pfault_wait is used to block the process on a pfault event */
 	unsigned long pfault_wait;
+#ifndef __GENKSYMS__
+	/* cpu runtime instrumentation */
+	struct runtime_instr_cb *ri_cb;
+	int ri_signum;
+	unsigned long per_flags;	/* Flags to control debug behavior */
+#ifdef CONFIG_64BIT
+	unsigned char trap_tdb[256];	/* Transaction abort diagnose block */
+#endif
+#endif
 };
+
+#define PER_FLAG_NO_TE		1UL	/* Flag to disable transactions. */
 
 typedef struct thread_struct thread_struct;
 
@@ -130,7 +142,9 @@ struct stack_frame {
 	regs->psw.mask	= psw_user32_bits;			\
 	regs->psw.addr	= new_psw | PSW_ADDR_AMODE;		\
 	regs->gprs[15]	= new_stackp;				\
+	__tlb_flush_mm(current->mm);				\
 	crst_table_downgrade(current->mm, 1UL << 31);		\
+	update_mm(current->mm, current);			\
 } while (0)
 
 /* Forward declaration, a strange C thing */

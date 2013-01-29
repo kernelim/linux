@@ -6,10 +6,12 @@
  *
  *  For licencing details see kernel-base/COPYING
  */
-
-#ifdef CONFIG_CPU_SUP_INTEL
-
+#include <linux/perf_event.h>
 #include <asm/perf_event_p4.h>
+#include <asm/hardirq.h>
+#include <asm/apic.h>
+
+#include "perf_event.h"
 
 #define P4_CNTR_LIMIT 3
 /*
@@ -544,6 +546,20 @@ static __initconst const u64 p4_hw_cache_event_ids
 						P4_PEBS_METRIC__none),
 		[ C(RESULT_MISS)   ] = P4_GEN_CACHE_EVENT(P4_EVENT_ITLB_REFERENCE, MISS,
 						P4_PEBS_METRIC__none),
+	},
+	[ C(OP_WRITE) ] = {
+		[ C(RESULT_ACCESS) ] = -1,
+		[ C(RESULT_MISS)   ] = -1,
+	},
+	[ C(OP_PREFETCH) ] = {
+		[ C(RESULT_ACCESS) ] = -1,
+		[ C(RESULT_MISS)   ] = -1,
+	},
+ },
+ [ C(NODE) ] = {
+	[ C(OP_READ) ] = {
+		[ C(RESULT_ACCESS) ] = -1,
+		[ C(RESULT_MISS)   ] = -1,
 	},
 	[ C(OP_WRITE) ] = {
 		[ C(RESULT_ACCESS) ] = -1,
@@ -1289,7 +1305,7 @@ static __initconst const struct x86_pmu p4_pmu = {
 	.perfctr_second_write	= 1,
 };
 
-static __init int p4_pmu_init(void)
+__init int p4_pmu_init(void)
 {
 	unsigned int low, high;
 
@@ -1312,5 +1328,3 @@ static __init int p4_pmu_init(void)
 
 	return 0;
 }
-
-#endif /* CONFIG_CPU_SUP_INTEL */

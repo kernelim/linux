@@ -233,10 +233,10 @@ do_open_lookup(struct svc_rqst *rqstp, struct svc_fh *current_fh, struct nfsd4_o
 		status = nfsd_lookup(rqstp, current_fh,
 				     open->op_fname.data, open->op_fname.len, &resfh);
 		fh_unlock(current_fh);
-		if (status)
-			goto out;
-		status = nfsd_check_obj_isreg(&resfh);
 	}
+	if (status)
+		goto out;
+	status = nfsd_check_obj_isreg(&resfh);
 	if (status)
 		goto out;
 
@@ -808,7 +808,7 @@ nfsd4_setattr(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 			return status;
 		}
 	}
-	status = mnt_want_write(cstate->current_fh.fh_export->ex_path.mnt);
+	status = fh_want_write(&cstate->current_fh);
 	if (status)
 		return status;
 	status = nfs_ok;
@@ -826,7 +826,7 @@ nfsd4_setattr(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 	status = nfsd_setattr(rqstp, &cstate->current_fh, &setattr->sa_iattr,
 				0, (time_t)0);
 out:
-	mnt_drop_write(cstate->current_fh.fh_export->ex_path.mnt);
+	fh_drop_write(&cstate->current_fh);
 	return status;
 }
 

@@ -142,6 +142,98 @@ static inline __be64 *bh_ptr_end(struct buffer_head *bh)
 }
 
 
+/**
+ * gfs2_log_write_endio - End of I/O for a log buffer
+ * @bh: The buffer head
+ * @uptodate: I/O Status
+ *
+ */
+
+static void gfs2_log_write_endio(struct buffer_head *bh, int uptodate)
+{
+	struct gfs2_sbd *sdp = bh->b_private;
+	bh->b_private = NULL;
+
+	end_buffer_write_sync(bh, uptodate);
+	if (atomic_dec_and_test(&sdp->sd_log_in_flight))
+		wake_up(&sdp->sd_log_flush_wait);
+}
+
+/**
+ * gfs2_log_get_buf - Get and initialize a buffer to use for log control data
+ * @sdp: The GFS2 superblock
+ *
+ * Returns: the buffer_head
+ */
+
+static struct buffer_head *gfs2_log_get_buf(struct gfs2_sbd *sdp)
+{
+	u64 blkno = gfs2_log_bmap(sdp, sdp->sd_log_flush_head);
+	struct buffer_head *bh;
+
+	bh = sb_getblk(sdp->sd_vfs, blkno);
+	lock_buffer(bh);
+	memset(bh->b_data, 0, bh->b_size);
+	set_buffer_uptodate(bh);
+	clear_buffer_dirty(bh);
+	gfs2_log_incr_head(sdp);
+	atomic_inc(&sdp->sd_log_in_flight);
+	bh->b_private = sdp;
+	bh->b_end_io = gfs2_log_write_endio;
+
+	return bh;
+}
+
+/**
+ * gfs2_fake_write_endio - 
+ * @bh: The buffer head
+ * @uptodate: The I/O Status
+ *
+ */
+
+static void gfs2_fake_write_endio(struct buffer_head *bh, int uptodate)
+{
+	struct buffer_head *real_bh = bh->b_private;
+	struct gfs2_bufdata *bd = real_bh->b_private;
+	struct gfs2_sbd *sdp = bd->bd_gl->gl_sbd;
+
+	end_buffer_write_sync(bh, uptodate);
+	mempool_free(bh, gfs2_bh_pool);
+	unlock_buffer(real_bh);
+	brelse(real_bh);
+	if (atomic_dec_and_test(&sdp->sd_log_in_flight))
+		wake_up(&sdp->sd_log_flush_wait);
+}
+
+/**
+ * gfs2_log_write_buf - write metadata buffer to log
+ * @sdp: the filesystem
+ * @real: the in-place buffer head
+ *
+ * Returns: the log buffer descriptor
+ */
+
+static void gfs2_log_write_buf(struct gfs2_sbd *sdp, struct buffer_head *real)
+{
+	u64 blkno = gfs2_log_bmap(sdp, sdp->sd_log_flush_head);
+	struct buffer_head *bh;
+
+	bh = mempool_alloc(gfs2_bh_pool, GFP_NOFS);
+	atomic_set(&bh->b_count, 1);
+	bh->b_state = (1 << BH_Mapped) | (1 << BH_Uptodate) | (1 << BH_Lock);
+	set_bh_page(bh, real->b_page, bh_offset(real));
+	bh->b_blocknr = blkno;
+	bh->b_size = sdp->sd_sb.sb_bsize;
+	bh->b_bdev = sdp->sd_vfs->s_bdev;
+	bh->b_private = real;
+	bh->b_end_io = gfs2_fake_write_endio;
+
+	gfs2_log_incr_head(sdp);
+	atomic_inc(&sdp->sd_log_in_flight);
+
+	submit_bh(WRITE, bh);
+}
+
 static struct buffer_head *gfs2_get_log_desc(struct gfs2_sbd *sdp, u32 ld_type)
 {
 	struct buffer_head *bh = gfs2_log_get_buf(sdp);
@@ -157,22 +249,19 @@ static struct buffer_head *gfs2_get_log_desc(struct gfs2_sbd *sdp, u32 ld_type)
 	return bh;
 }
 
-static void buf_lo_add(struct gfs2_sbd *sdp, struct gfs2_log_element *le)
+static void buf_lo_add(struct gfs2_sbd *sdp, struct gfs2_bufdata *bd)
 {
-	struct gfs2_bufdata *bd = container_of(le, struct gfs2_bufdata, bd_le);
 	struct gfs2_meta_header *mh;
 	struct gfs2_trans *tr;
 
-	lock_buffer(bd->bd_bh);
-	gfs2_log_lock(sdp);
 	if (!list_empty(&bd->bd_list_tr))
-		goto out;
+		return;
 	tr = current->journal_info;
 	tr->tr_touched = 1;
 	tr->tr_num_buf++;
 	list_add(&bd->bd_list_tr, &tr->tr_list_buf);
-	if (!list_empty(&le->le_list))
-		goto out;
+	if (!list_empty(&bd->bd_list))
+		return;
 	set_bit(GLF_LFLUSH, &bd->bd_gl->gl_flags);
 	set_bit(GLF_DIRTY, &bd->bd_gl->gl_flags);
 	gfs2_meta_check(sdp, bd->bd_bh);
@@ -181,11 +270,8 @@ static void buf_lo_add(struct gfs2_sbd *sdp, struct gfs2_log_element *le)
 	mh->__pad0 = cpu_to_be64(0);
 	mh->mh_jid = cpu_to_be32(sdp->sd_jdesc->jd_jid);
 	sdp->sd_log_num_buf++;
-	list_add(&le->le_list, &sdp->sd_log_le_buf);
+	list_add(&bd->bd_list, &sdp->sd_log_le_buf);
 	tr->tr_num_buf_new++;
-out:
-	gfs2_log_unlock(sdp);
-	unlock_buffer(bd->bd_bh);
 }
 
 static void buf_lo_before_commit(struct gfs2_sbd *sdp)
@@ -204,7 +290,7 @@ static void buf_lo_before_commit(struct gfs2_sbd *sdp)
 
 	gfs2_log_lock(sdp);
 	total = sdp->sd_log_num_buf;
-	bd1 = bd2 = list_prepare_entry(bd1, &sdp->sd_log_le_buf, bd_le.le_list);
+	bd1 = bd2 = list_prepare_entry(bd1, &sdp->sd_log_le_buf, bd_list);
 	while(total) {
 		num = total;
 		if (total > limit)
@@ -218,25 +304,22 @@ static void buf_lo_before_commit(struct gfs2_sbd *sdp)
 		ld->ld_data1 = cpu_to_be32(num);
 
 		n = 0;
-		list_for_each_entry_continue(bd1, &sdp->sd_log_le_buf,
-					     bd_le.le_list) {
+		list_for_each_entry_continue(bd1, &sdp->sd_log_le_buf, bd_list) {
 			*ptr++ = cpu_to_be64(bd1->bd_bh->b_blocknr);
 			if (++n >= num)
 				break;
 		}
 
 		gfs2_log_unlock(sdp);
-		submit_bh(WRITE_SYNC_PLUG, bh);
+		submit_bh(WRITE, bh);
 		gfs2_log_lock(sdp);
 
 		n = 0;
-		list_for_each_entry_continue(bd2, &sdp->sd_log_le_buf,
-					     bd_le.le_list) {
+		list_for_each_entry_continue(bd2, &sdp->sd_log_le_buf, bd_list) {
 			get_bh(bd2->bd_bh);
 			gfs2_log_unlock(sdp);
 			lock_buffer(bd2->bd_bh);
-			bh = gfs2_log_fake_buf(sdp, bd2->bd_bh);
-			submit_bh(WRITE_SYNC_PLUG, bh);
+			gfs2_log_write_buf(sdp, bd2->bd_bh);
 			gfs2_log_lock(sdp);
 			if (++n >= num)
 				break;
@@ -254,8 +337,8 @@ static void buf_lo_after_commit(struct gfs2_sbd *sdp, struct gfs2_ail *ai)
 	struct gfs2_bufdata *bd;
 
 	while (!list_empty(head)) {
-		bd = list_entry(head->next, struct gfs2_bufdata, bd_le.le_list);
-		list_del_init(&bd->bd_le.le_list);
+		bd = list_entry(head->next, struct gfs2_bufdata, bd_list);
+		list_del_init(&bd->bd_list);
 		sdp->sd_log_num_buf--;
 
 		gfs2_unpin(sdp, bd->bd_bh, ai);
@@ -342,9 +425,8 @@ static void buf_lo_after_scan(struct gfs2_jdesc *jd, int error, int pass)
 	        jd->jd_jid, sdp->sd_replayed_blocks, sdp->sd_found_blocks);
 }
 
-static void revoke_lo_add(struct gfs2_sbd *sdp, struct gfs2_log_element *le)
+static void revoke_lo_add(struct gfs2_sbd *sdp, struct gfs2_bufdata *bd)
 {
-	struct gfs2_bufdata *bd = container_of(le, struct gfs2_bufdata, bd_le);
 	struct gfs2_glock *gl = bd->bd_gl;
 	struct gfs2_trans *tr;
 
@@ -354,7 +436,7 @@ static void revoke_lo_add(struct gfs2_sbd *sdp, struct gfs2_log_element *le)
 	sdp->sd_log_num_revoke++;
 	atomic_inc(&gl->gl_revokes);
 	set_bit(GLF_LFLUSH, &gl->gl_flags);
-	list_add(&le->le_list, &sdp->sd_log_le_revoke);
+	list_add(&bd->bd_list, &sdp->sd_log_le_revoke);
 }
 
 static void revoke_lo_before_commit(struct gfs2_sbd *sdp)
@@ -376,11 +458,11 @@ static void revoke_lo_before_commit(struct gfs2_sbd *sdp)
 	ld->ld_data1 = cpu_to_be32(sdp->sd_log_num_revoke);
 	offset = sizeof(struct gfs2_log_descriptor);
 
-	list_for_each_entry(bd, head, bd_le.le_list) {
+	list_for_each_entry(bd, head, bd_list) {
 		sdp->sd_log_num_revoke--;
 
 		if (offset + sizeof(u64) > sdp->sd_sb.sb_bsize) {
-			submit_bh(WRITE_SYNC_PLUG, bh);
+			submit_bh(WRITE, bh);
 
 			bh = gfs2_log_get_buf(sdp);
 			mh = (struct gfs2_meta_header *)bh->b_data;
@@ -395,7 +477,7 @@ static void revoke_lo_before_commit(struct gfs2_sbd *sdp)
 	}
 	gfs2_assert_withdraw(sdp, !sdp->sd_log_num_revoke);
 
-	submit_bh(WRITE_SYNC_PLUG, bh);
+	submit_bh(WRITE, bh);
 }
 
 static void revoke_lo_after_commit(struct gfs2_sbd *sdp, struct gfs2_ail *ai)
@@ -405,8 +487,8 @@ static void revoke_lo_after_commit(struct gfs2_sbd *sdp, struct gfs2_ail *ai)
 	struct gfs2_glock *gl;
 
 	while (!list_empty(head)) {
-		bd = list_entry(head->next, struct gfs2_bufdata, bd_le.le_list);
-		list_del_init(&bd->bd_le.le_list);
+		bd = list_entry(head->next, struct gfs2_bufdata, bd_list);
+		list_del_init(&bd->bd_list);
 		gl = bd->bd_gl;
 		atomic_dec(&gl->gl_revokes);
 		clear_bit(GLF_LFLUSH, &gl->gl_flags);
@@ -509,26 +591,23 @@ static void revoke_lo_after_scan(struct gfs2_jdesc *jd, int error, int pass)
  *    blocks, which isn't an enormous overhead but twice as much as
  *    for normal metadata blocks.
  */
-static void databuf_lo_add(struct gfs2_sbd *sdp, struct gfs2_log_element *le)
+static void databuf_lo_add(struct gfs2_sbd *sdp, struct gfs2_bufdata *bd)
 {
-	struct gfs2_bufdata *bd = container_of(le, struct gfs2_bufdata, bd_le);
 	struct gfs2_trans *tr = current->journal_info;
 	struct address_space *mapping = bd->bd_bh->b_page->mapping;
 	struct gfs2_inode *ip = GFS2_I(mapping->host);
 
-	lock_buffer(bd->bd_bh);
-	gfs2_log_lock(sdp);
 	if (tr) {
 		if (!list_empty(&bd->bd_list_tr))
-			goto out;
+			return;
 		tr->tr_touched = 1;
 		if (gfs2_is_jdata(ip)) {
 			tr->tr_num_buf++;
 			list_add(&bd->bd_list_tr, &tr->tr_list_buf);
 		}
 	}
-	if (!list_empty(&le->le_list))
-		goto out;
+	if (!list_empty(&bd->bd_list))
+		return;
 
 	set_bit(GLF_LFLUSH, &bd->bd_gl->gl_flags);
 	set_bit(GLF_DIRTY, &bd->bd_gl->gl_flags);
@@ -536,13 +615,10 @@ static void databuf_lo_add(struct gfs2_sbd *sdp, struct gfs2_log_element *le)
 		gfs2_pin(sdp, bd->bd_bh);
 		tr->tr_num_databuf_new++;
 		sdp->sd_log_num_databuf++;
-		list_add_tail(&le->le_list, &sdp->sd_log_le_databuf);
+		list_add_tail(&bd->bd_list, &sdp->sd_log_le_databuf);
 	} else {
-		list_add_tail(&le->le_list, &sdp->sd_log_le_ordered);
+		list_add_tail(&bd->bd_list, &sdp->sd_log_le_ordered);
 	}
-out:
-	gfs2_log_unlock(sdp);
-	unlock_buffer(bd->bd_bh);
 }
 
 static void gfs2_check_magic(struct buffer_head *bh)
@@ -577,11 +653,11 @@ static void gfs2_write_blocks(struct gfs2_sbd *sdp, struct buffer_head *bh,
 	ptr = bh_log_ptr(bh);
 	
 	get_bh(bh);
-	submit_bh(WRITE_SYNC_PLUG, bh);
+	submit_bh(WRITE, bh);
 	gfs2_log_lock(sdp);
 	while(!list_empty(list)) {
-		bd = list_entry(list->next, struct gfs2_bufdata, bd_le.le_list);
-		list_move_tail(&bd->bd_le.le_list, done);
+		bd = list_entry(list->next, struct gfs2_bufdata, bd_list);
+		list_move_tail(&bd->bd_list, done);
 		get_bh(bd->bd_bh);
 		while (be64_to_cpu(*ptr) != bd->bd_bh->b_blocknr) {
 			gfs2_log_incr_head(sdp);
@@ -600,10 +676,10 @@ static void gfs2_write_blocks(struct gfs2_sbd *sdp, struct buffer_head *bh,
 			clear_buffer_escaped(bd->bd_bh);
 			unlock_buffer(bd->bd_bh);
 			brelse(bd->bd_bh);
+			submit_bh(WRITE, bh1);
 		} else {
-			bh1 = gfs2_log_fake_buf(sdp, bd->bd_bh);
+			gfs2_log_write_buf(sdp, bd->bd_bh);
 		}
-		submit_bh(WRITE_SYNC_PLUG, bh1);
 		gfs2_log_lock(sdp);
 		ptr += 2;
 	}
@@ -637,8 +713,8 @@ static void databuf_lo_before_commit(struct gfs2_sbd *sdp)
 			gfs2_log_lock(sdp);
 			continue;
 		}
-		bd = list_entry(sdp->sd_log_le_databuf.next, struct gfs2_bufdata, bd_le.le_list);
-		list_move_tail(&bd->bd_le.le_list, &in_progress);
+		bd = list_entry(sdp->sd_log_le_databuf.next, struct gfs2_bufdata, bd_list);
+		list_move_tail(&bd->bd_list, &in_progress);
 		gfs2_check_magic(bd->bd_bh);
 		*ptr++ = cpu_to_be64(bd->bd_bh->b_blocknr);
 		*ptr++ = cpu_to_be64(buffer_escaped(bh) ? 1 : 0);
@@ -727,8 +803,8 @@ static void databuf_lo_after_commit(struct gfs2_sbd *sdp, struct gfs2_ail *ai)
 	struct gfs2_bufdata *bd;
 
 	while (!list_empty(head)) {
-		bd = list_entry(head->next, struct gfs2_bufdata, bd_le.le_list);
-		list_del_init(&bd->bd_le.le_list);
+		bd = list_entry(head->next, struct gfs2_bufdata, bd_list);
+		list_del_init(&bd->bd_list);
 		sdp->sd_log_num_databuf--;
 		gfs2_unpin(sdp, bd->bd_bh, ai);
 	}

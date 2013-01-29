@@ -61,7 +61,7 @@ enum perf_hw_id {
 /*
  * Generalized hardware cache events:
  *
- *       { L1-D, L1-I, LLC, ITLB, DTLB, BPU } x
+ *       { L1-D, L1-I, LLC, ITLB, DTLB, BPU, NODE } x
  *       { read, write, prefetch } x
  *       { accesses, misses }
  */
@@ -72,6 +72,7 @@ enum perf_hw_cache_id {
 	PERF_COUNT_HW_CACHE_DTLB		= 3,
 	PERF_COUNT_HW_CACHE_ITLB		= 4,
 	PERF_COUNT_HW_CACHE_BPU			= 5,
+	PERF_COUNT_HW_CACHE_NODE		= 6,
 
 	PERF_COUNT_HW_CACHE_MAX,		/* non-ABI */
 };
@@ -127,9 +128,38 @@ enum perf_event_sample_format {
 	PERF_SAMPLE_PERIOD			= 1U << 8,
 	PERF_SAMPLE_STREAM_ID			= 1U << 9,
 	PERF_SAMPLE_RAW				= 1U << 10,
+	PERF_SAMPLE_BRANCH_STACK		= 1U << 11,
 
-	PERF_SAMPLE_MAX = 1U << 11,		/* non-ABI */
+	PERF_SAMPLE_MAX = 1U << 12,		/* non-ABI */
 };
+
+/*
+ * values to program into branch_sample_type when PERF_SAMPLE_BRANCH is set
+ *
+ * If the user does not pass priv level information via branch_sample_type,
+ * the kernel uses the event's priv level. Branch and event priv levels do
+ * not have to match. Branch priv level is checked for permissions.
+ *
+ * The branch types can be combined, however BRANCH_ANY covers all types
+ * of branches and therefore it supersedes all the other types.
+ */
+enum perf_branch_sample_type {
+	PERF_SAMPLE_BRANCH_USER		= 1U << 0, /* user branches */
+	PERF_SAMPLE_BRANCH_KERNEL	= 1U << 1, /* kernel branches */
+	PERF_SAMPLE_BRANCH_HV		= 1U << 2, /* hypervisor branches */
+
+	PERF_SAMPLE_BRANCH_ANY		= 1U << 3, /* any branch types */
+	PERF_SAMPLE_BRANCH_ANY_CALL	= 1U << 4, /* any call branch */
+	PERF_SAMPLE_BRANCH_ANY_RETURN	= 1U << 5, /* any return branch */
+	PERF_SAMPLE_BRANCH_IND_CALL	= 1U << 6, /* indirect calls */
+
+	PERF_SAMPLE_BRANCH_MAX		= 1U << 7, /* non-ABI */
+};
+
+#define PERF_SAMPLE_BRANCH_PLM_ALL \
+	(PERF_SAMPLE_BRANCH_USER|\
+	 PERF_SAMPLE_BRANCH_KERNEL|\
+	 PERF_SAMPLE_BRANCH_HV)
 
 /*
  * The format of the data returned by read() on a perf event fd,
@@ -238,6 +268,7 @@ struct perf_event_attr {
 		__u64		bp_len;
 		__u64		config2; /* extension of config1 */
 	};
+	__u64	branch_sample_type; /* enum branch_sample_type */
 };
 
 /*
@@ -454,12 +485,16 @@ enum perf_event_type {
 	 *
 	 *	{ u32			size;
 	 *	  char                  data[size];}&& PERF_SAMPLE_RAW
+	 *
+	 *	{ u64 from, to, flags } lbr[nr];} && PERF_SAMPLE_BRANCH_STACK
 	 * };
 	 */
 	PERF_RECORD_SAMPLE			= 9,
 
 	PERF_RECORD_MAX,			/* non-ABI */
 };
+
+#define PERF_MAX_STACK_DEPTH		255
 
 enum perf_callchain_context {
 	PERF_CONTEXT_HV			= (__u64)-32,
@@ -509,8 +544,6 @@ struct perf_guest_info_callbacks {
 #include <asm/atomic.h>
 #include <asm/local.h>
 
-#define PERF_MAX_STACK_DEPTH		255
-
 struct perf_callchain_entry {
 	__u64				nr;
 	__u64				ip[PERF_MAX_STACK_DEPTH];
@@ -521,12 +554,34 @@ struct perf_raw_record {
 	void				*data;
 };
 
+/*
+ * single taken branch record layout:
+ *
+ *      from: source instruction (may not always be a branch insn)
+ *        to: branch target
+ *   mispred: branch target was mispredicted
+ * predicted: branch target was predicted
+ *
+ * support for mispred, predicted is optional. In case it
+ * is not supported mispred = predicted = 0.
+ */
 struct perf_branch_entry {
-	__u64				from;
-	__u64				to;
-	__u64				flags;
+	__u64	from;
+	__u64	to;
+	__u64	mispred:1,  /* target mispredicted */
+		predicted:1,/* target predicted */
+		reserved:62;
 };
 
+/*
+ * branch stack layout:
+ *  nr: number of taken branches stored in entries[]
+ *
+ * Note that nr can vary from sample to sample
+ * branches (to, from) are stored from most recent
+ * to least recent, i.e., entries[0] contains the most
+ * recent branch.
+ */
 struct perf_branch_stack {
 	__u64				nr;
 	struct perf_branch_entry	entries[0];
@@ -557,7 +612,9 @@ struct hw_perf_event {
 			unsigned long	event_base;
 			int		idx;
 			int		last_cpu;
+
 			struct hw_perf_event_extra extra_reg;
+			struct hw_perf_event_extra branch_reg;
 		};
 		struct { /* software */
 			struct hrtimer	hrtimer;
@@ -580,6 +637,7 @@ struct hw_perf_event {
 	u64				sample_period;
 	u64				last_period;
 	local64_t			period_left;
+	u64                             interrupts_seq;
 	u64				interrupts;
 
 	u64				freq_time_stamp;
@@ -608,6 +666,7 @@ struct pmu {
 	struct list_head		entry;
 
 	struct device			*dev;
+	const struct attribute_group	**attr_groups;
 	char				*name;
 	int				type;
 
@@ -686,33 +745,6 @@ enum perf_event_active_state {
 };
 
 struct file;
-
-#define PERF_BUFFER_WRITABLE		0x01
-
-struct perf_buffer {
-	atomic_t			refcount;
-	struct rcu_head			rcu_head;
-#ifdef CONFIG_PERF_USE_VMALLOC
-	struct work_struct		work;
-	int				page_order;	/* allocation order  */
-#endif
-	int				nr_pages;	/* nr of data pages  */
-	int				writable;	/* are we writable   */
-
-	atomic_t			poll;		/* POLL_ for wakeups */
-
-	local_t				head;		/* write position    */
-	local_t				nest;		/* nested writers    */
-	local_t				events;		/* event limit       */
-	local_t				wakeup;		/* wakeup stamp      */
-	local_t				lost;		/* nr records lost   */
-
-	long				watermark;	/* wakeup watermark  */
-
-	struct perf_event_mmap_page	*user_page;
-	void				*data_pages[0];
-};
-
 struct perf_sample_data;
 
 typedef void (*perf_overflow_handler_t)(struct perf_event *, int,
@@ -750,6 +782,8 @@ struct perf_cgroup {
 	struct				perf_cgroup_info *info;	/* timing info, one per cpu */
 };
 #endif
+
+struct ring_buffer;
 
 /**
  * struct perf_event - performance event kernel representation:
@@ -813,7 +847,7 @@ struct perf_event {
 	struct hw_perf_event		hw;
 
 	struct perf_event_context	*ctx;
-	struct file			*filp;
+	atomic_long_t			refcount;
 
 	/*
 	 * These accumulate total time (in nanoseconds) that children
@@ -840,7 +874,8 @@ struct perf_event {
 	atomic_t			mmap_count;
 	int				mmap_locked;
 	struct user_struct		*mmap_user;
-	struct perf_buffer		*buffer;
+	struct ring_buffer		*rb;
+	struct list_head		rb_entry;
 
 	/* poll related */
 	wait_queue_head_t		waitq;
@@ -911,6 +946,7 @@ struct perf_event_context {
 	int				is_active;
 	int				nr_stat;
 #ifndef __GENKSYMS__ /* kabi tool is crap */
+	int				nr_freq;
 	int				rotate_disable;
 #endif
 	atomic_t			refcount;
@@ -958,7 +994,7 @@ struct perf_cpu_context {
 
 struct perf_output_handle {
 	struct perf_event		*event;
-	struct perf_buffer		*buffer;
+	struct ring_buffer		*rb;
 	unsigned long			wakeup;
 	unsigned long			size;
 	void				*addr;
@@ -993,6 +1029,8 @@ perf_event_create_kernel_counter(struct perf_event_attr *attr,
 				struct task_struct *task,
 				perf_overflow_handler_t callback,
 				void *context);
+extern void perf_pmu_migrate_context(struct pmu *pmu,
+				int src_cpu, int dst_cpu);
 extern u64 perf_event_read_value(struct perf_event *event,
 				 u64 *enabled, u64 *running);
 
@@ -1015,12 +1053,14 @@ struct perf_sample_data {
 	u64				period;
 	struct perf_callchain_entry	*callchain;
 	struct perf_raw_record		*raw;
+	struct perf_branch_stack	*br_stack;
 };
 
 static inline void perf_sample_data_init(struct perf_sample_data *data, u64 addr)
 {
 	data->addr = addr;
 	data->raw  = NULL;
+	data->br_stack = NULL;
 }
 
 extern void perf_output_sample(struct perf_output_handle *handle,
@@ -1155,6 +1195,11 @@ extern void perf_bp_event(struct perf_event *event, void *data);
 # define perf_instruction_pointer(regs)	instruction_pointer(regs)
 #endif
 
+static inline bool has_branch_stack(struct perf_event *event)
+{
+	return event->attr.sample_type & PERF_SAMPLE_BRANCH_STACK;
+}
+
 extern int perf_output_begin(struct perf_output_handle *handle,
 			     struct perf_event *event, unsigned int size,
 			     int nmi, int sample);
@@ -1210,7 +1255,7 @@ static inline void perf_event_task_tick(void)				{ }
 #define perf_cpu_notifier(fn)						\
 do {									\
 	static struct notifier_block fn##_nb __cpuinitdata =		\
-		{ .notifier_call = fn, .priority = 20 };	\
+		{ .notifier_call = fn, .priority = CPU_PRI_PERF };	\
 	fn(&fn##_nb, (unsigned long)CPU_UP_PREPARE,			\
 		(void *)(unsigned long)smp_processor_id());		\
 	fn(&fn##_nb, (unsigned long)CPU_STARTING,			\

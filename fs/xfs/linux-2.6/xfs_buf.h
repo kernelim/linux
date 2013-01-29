@@ -44,27 +44,28 @@ typedef enum {
 	XBRW_ZERO = 3,			/* Zero target memory */
 } xfs_buf_rw_t;
 
-#define XBF_READ	(1 << 0) /* buffer intended for reading from device */
-#define XBF_WRITE	(1 << 1) /* buffer intended for writing to device */
-#define XBF_MAPPED	(1 << 2) /* buffer mapped (b_addr valid) */
-#define XBF_ASYNC	(1 << 4) /* initiator will not wait for completion */
-#define XBF_DONE	(1 << 5) /* all pages in the buffer uptodate */
-#define XBF_DELWRI	(1 << 6) /* buffer has dirty pages */
-#define XBF_STALE	(1 << 7) /* buffer has been staled, do not find it */
-#define XBF_ORDERED	(1 << 11)/* use ordered writes */
-#define XBF_READ_AHEAD	(1 << 12)/* asynchronous read-ahead */
-#define XBF_LOG_BUFFER	(1 << 13)/* this is a buffer used for the log */
+#define XBF_READ	 (1 << 0) /* buffer intended for reading from device */
+#define XBF_WRITE	 (1 << 1) /* buffer intended for writing to device */
+#define XBF_MAPPED	 (1 << 2) /* buffer mapped (b_addr valid) */
+#define XBF_ASYNC	 (1 << 4) /* initiator will not wait for completion */
+#define XBF_DONE	 (1 << 5) /* all pages in the buffer uptodate */
+#define XBF_DELWRI	 (1 << 6) /* buffer has dirty pages */
+#define XBF_STALE	 (1 << 7) /* buffer has been staled, do not find it */
+#define XBF_ORDERED	 (1 << 11)/* use ordered writes */
+#define XBF_READ_AHEAD	 (1 << 12)/* asynchronous read-ahead */
+#define XBF_LOG_BUFFER	 (1 << 13)/* this is a buffer used for the log */
 
 /* flags used only as arguments to access routines */
-#define XBF_LOCK	(1 << 14)/* lock requested */
-#define XBF_TRYLOCK	(1 << 15)/* lock requested, but do not wait */
-#define XBF_DONT_BLOCK	(1 << 16)/* do not block in current thread */
+#define XBF_LOCK	 (1 << 14)/* lock requested */
+#define XBF_TRYLOCK	 (1 << 15)/* lock requested, but do not wait */
+#define XBF_DONT_BLOCK	 (1 << 16)/* do not block in current thread */
 
 /* flags used only internally */
-#define _XBF_PAGES	(1 << 18)/* backed by refcounted pages */
-#define	_XBF_RUN_QUEUES	(1 << 19)/* run block device task queue	*/
-#define	_XBF_KMEM	(1 << 20)/* backed by heap memory */
-#define _XBF_DELWRI_Q	(1 << 21)/* buffer on delwri queue */
+#define _XBF_PAGES	 (1 << 18)/* backed by refcounted pages */
+#define	_XBF_RUN_QUEUES	 (1 << 19)/* run block device task queue */
+#define	_XBF_KMEM	 (1 << 20)/* backed by heap memory */
+#define _XBF_DELWRI_Q	 (1 << 21)/* buffer on delwri queue */
+#define _XBF_LRU_DISPOSE (1 << 24)/* buffer being discarded */
 
 typedef unsigned int xfs_buf_flags_t;
 
@@ -78,13 +79,14 @@ typedef unsigned int xfs_buf_flags_t;
 	{ XBF_STALE,		"STALE" }, \
 	{ XBF_ORDERED,		"ORDERED" }, \
 	{ XBF_READ_AHEAD,	"READ_AHEAD" }, \
-	{ XBF_LOCK,		"LOCK" },  	/* should never be set */\
-	{ XBF_TRYLOCK,		"TRYLOCK" }, 	/* ditto */\
+	{ XBF_LOCK,		"LOCK" },	/* should never be set */\
+	{ XBF_TRYLOCK,		"TRYLOCK" },	/* ditto */\
 	{ XBF_DONT_BLOCK,	"DONT_BLOCK" },	/* ditto */\
 	{ _XBF_PAGES,		"PAGES" }, \
 	{ _XBF_RUN_QUEUES,	"RUN_QUEUES" }, \
 	{ _XBF_KMEM,		"KMEM" }, \
-	{ _XBF_DELWRI_Q,	"DELWRI_Q" }
+	{ _XBF_DELWRI_Q,	"DELWRI_Q" }, \
+	{ _XBF_LRU_DISPOSE,	"LRU_DISPOSE" }
 
 typedef enum {
 	XBT_FORCE_SLEEP = 0,
@@ -139,7 +141,12 @@ typedef struct xfs_buf {
 	xfs_buf_flags_t		b_flags;	/* status flags */
 	struct semaphore	b_sema;		/* semaphore for lockables */
 
+	/*
+	 * concurrent access to b_lru and b_lru_flags are pretected by
+	 * bt_lru_lock and not by b_sema
+	 */
 	struct list_head	b_lru;		/* lru list */
+	xfs_buf_flags_t		b_lru_flags;	/* internal lru status flags */
 	wait_queue_head_t	b_waiters;	/* unpin waiters */
 	struct list_head	b_list;
 	struct xfs_perag	*b_pag;		/* contains rbtree root */
@@ -177,7 +184,8 @@ extern xfs_buf_t *xfs_buf_get(xfs_buftarg_t *, xfs_off_t, size_t,
 extern xfs_buf_t *xfs_buf_read(xfs_buftarg_t *, xfs_off_t, size_t,
 				xfs_buf_flags_t);
 
-extern xfs_buf_t *xfs_buf_get_empty(size_t, xfs_buftarg_t *);
+struct xfs_buf *xfs_buf_alloc(struct xfs_buftarg *, xfs_off_t, size_t,
+			      xfs_buf_flags_t);
 extern void xfs_buf_set_empty(struct xfs_buf *bp, size_t len);
 extern xfs_buf_t *xfs_buf_get_uncached(struct xfs_buftarg *, size_t, int);
 extern int xfs_buf_associate_memory(xfs_buf_t *, void *, size_t);
@@ -206,7 +214,8 @@ extern int xfs_bdstrat_cb(struct xfs_buf *);
 
 extern void xfs_buf_ioend(xfs_buf_t *,	int);
 extern void xfs_buf_ioerror(xfs_buf_t *, int);
-extern int xfs_buf_iorequest(xfs_buf_t *);
+extern void xfs_buf_ioerror_alert(struct xfs_buf *, const char *func);
+extern void xfs_buf_iorequest(xfs_buf_t *);
 extern int xfs_buf_iowait(xfs_buf_t *);
 extern void xfs_buf_iomove(xfs_buf_t *, size_t, size_t, void *,
 				xfs_buf_rw_t);
@@ -346,7 +355,6 @@ extern struct list_head *xfs_get_buftarg_list(void);
 #define xfs_getsize_buftarg(buftarg)	block_size((buftarg)->bt_bdev)
 #define xfs_readonly_buftarg(buftarg)	bdev_read_only((buftarg)->bt_bdev)
 
-#define xfs_binval(buftarg)		xfs_flush_buftarg(buftarg, 1)
 #define XFS_bflush(buftarg)		xfs_flush_buftarg(buftarg, 1)
 
 #endif	/* __XFS_BUF_H__ */

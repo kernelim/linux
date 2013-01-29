@@ -159,13 +159,23 @@ struct fcoe_ctlr {
 };
 
 /**
+ * fcoe_ctlr_priv() - Return the private data from a fcoe_ctlr
+ * @cltr: The fcoe_ctlr whose private data will be returned
+ */
+static inline void *fcoe_ctlr_priv(const struct fcoe_ctlr *ctlr)
+{
+	return (void *)(ctlr + 1);
+}
+
+/**
  * struct fcoe_fcf - Fibre-Channel Forwarder
  * @list:	 list linkage
  * @time:	 system time (jiffies) when an advertisement was last received
  * @switch_name: WWN of switch from advertisement
  * @fabric_name: WWN of fabric from advertisement
  * @fc_map:	 FC_MAP value from advertisement
- * @fcf_mac:	 Ethernet address of the FCF
+ * @fcf_mac:	 Ethernet address of the FCF for FIP traffic
+ * @fcoe_mac:	 Ethernet address of the FCF for FCoE traffic
  * @vfid:	 virtual fabric ID
  * @pri:	 selection priority, smaller values are better
  * @flogi_sent:	 current FLOGI sent to this FCF
@@ -188,6 +198,7 @@ struct fcoe_fcf {
 	u32 fc_map;
 	u16 vfid;
 	u8 fcf_mac[ETH_ALEN];
+	u8 fcoe_mac[ETH_ALEN];
 
 	u8 pri;
 	u8 flogi_sent;
@@ -219,6 +230,8 @@ void fcoe_ctlr_init(struct fcoe_ctlr *, enum fip_state);
 void fcoe_ctlr_destroy(struct fcoe_ctlr *);
 void fcoe_ctlr_link_up(struct fcoe_ctlr *);
 int fcoe_ctlr_link_down(struct fcoe_ctlr *);
+void fcoe_ctlr_enable(struct fcoe_ctlr *);
+int fcoe_ctlr_disable(struct fcoe_ctlr *);
 int fcoe_ctlr_els_send(struct fcoe_ctlr *, struct fc_lport *, struct sk_buff *);
 void fcoe_ctlr_recv(struct fcoe_ctlr *, struct sk_buff *);
 int fcoe_ctlr_recv_flogi(struct fcoe_ctlr *, struct fc_lport *,
@@ -302,7 +315,6 @@ struct fcoe_percpu_s {
  * @lport:		       The associated local port
  * @fcoe_pending_queue:	       The pending Rx queue of skbs
  * @fcoe_pending_queue_active: Indicates if the pending queue is active
- * @priority:		       Packet priority (DCB)
  * @max_queue_depth:	       Max queue depth of pending queue
  * @min_queue_depth:	       Min queue depth of pending queue
  * @timer:		       The queue timer
@@ -318,7 +330,6 @@ struct fcoe_port {
 	struct fc_lport	      *lport;
 	struct sk_buff_head   fcoe_pending_queue;
 	u8		      fcoe_pending_queue_active;
-	u8		      priority;
 	u32		      max_queue_depth;
 	u32		      min_queue_depth;
 	struct timer_list     timer;

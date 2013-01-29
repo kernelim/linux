@@ -33,12 +33,12 @@ static int add_keyblock_key(struct ksign_public_key *pk, void *data)
 {
 	printk("- Added public key %X%X\n", pk->keyid[0], pk->keyid[1]);
 
-	if (pk->expiredate && pk->expiredate < xtime.tv_sec)
+	if (pk->expiredate && pk->expiredate < get_seconds())
 		printk("  - public key has expired\n");
 
-	if (pk->timestamp > xtime.tv_sec )
+	if (pk->timestamp > get_seconds())
 		printk("  - key was been created %lu seconds in future\n",
-		       pk->timestamp - xtime.tv_sec);
+		       pk->timestamp - get_seconds());
 
 	atomic_inc(&pk->count);
 

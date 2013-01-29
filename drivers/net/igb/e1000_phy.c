@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel(R) Gigabit Ethernet Linux driver
-  Copyright(c) 2007-2011 Intel Corporation.
+  Copyright(c) 2007-2012 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -35,6 +35,7 @@ static s32  igb_phy_setup_autoneg(struct e1000_hw *hw);
 static void igb_phy_force_speed_duplex_setup(struct e1000_hw *hw,
 					       u16 *phy_ctrl);
 static s32  igb_wait_autoneg(struct e1000_hw *hw);
+static s32  igb_set_master_slave_mode(struct e1000_hw *hw);
 
 /* Cable length tables */
 static const u16 e1000_m88_cable_length_table[] =
@@ -463,6 +464,32 @@ s32 igb_copper_link_setup_82580(struct e1000_hw *hw)
 	phy_data |= I82580_CFG_ENABLE_DOWNSHIFT;
 
 	ret_val = phy->ops.write_reg(hw, I82580_CFG_REG, phy_data);
+	if (ret_val)
+		goto out;
+
+	/* Set MDI/MDIX mode */
+	ret_val = phy->ops.read_reg(hw, I82580_PHY_CTRL_2, &phy_data);
+	if (ret_val)
+		goto out;
+	phy_data &= ~I82580_PHY_CTRL2_MDIX_CFG_MASK;
+	/*
+	 * Options:
+	 *   0 - Auto (default)
+	 *   1 - MDI mode
+	 *   2 - MDI-X mode
+	 */
+	switch (hw->phy.mdix) {
+	case 1:
+		break;
+	case 2:
+		phy_data |= I82580_PHY_CTRL2_MANUAL_MDIX;
+		break;
+	case 0:
+	default:
+		phy_data |= I82580_PHY_CTRL2_AUTO_MDI_MDIX;
+		break;
+	}
+	ret_val = hw->phy.ops.write_reg(hw, I82580_PHY_CTRL_2, phy_data);
 
 out:
 	return ret_val;
@@ -569,6 +596,11 @@ s32 igb_copper_link_setup_m88(struct e1000_hw *hw)
 	if (ret_val) {
 		hw_dbg("Error committing the PHY changes\n");
 		goto out;
+	}
+	if (phy->type == e1000_phy_i210) {
+		ret_val = igb_set_master_slave_mode(hw);
+		if (ret_val)
+			return ret_val;
 	}
 
 out:
@@ -1213,12 +1245,22 @@ s32 igb_phy_force_speed_duplex_m88(struct e1000_hw *hw)
 			goto out;
 
 		if (!link) {
-			if (hw->phy.type != e1000_phy_m88 ||
-			    hw->phy.id == I347AT4_E_PHY_ID ||
-			    hw->phy.id == M88E1112_E_PHY_ID) {
-				hw_dbg("Link taking longer than expected.\n");
-			} else {
+			bool reset_dsp = true;
 
+			switch (hw->phy.id) {
+			case I347AT4_E_PHY_ID:
+			case M88E1112_E_PHY_ID:
+			case I210_I_PHY_ID:
+				reset_dsp = false;
+				break;
+			default:
+				if (hw->phy.type != e1000_phy_m88)
+					reset_dsp = false;
+				break;
+			}
+			if (!reset_dsp)
+				hw_dbg("Link taking longer than expected.\n");
+			else {
 				/*
 				 * We didn't get link.
 				 * Reset the DSP and cross our fingers.
@@ -1243,7 +1285,8 @@ s32 igb_phy_force_speed_duplex_m88(struct e1000_hw *hw)
 
 	if (hw->phy.type != e1000_phy_m88 ||
 	    hw->phy.id == I347AT4_E_PHY_ID ||
-	    hw->phy.id == M88E1112_E_PHY_ID)
+	    hw->phy.id == M88E1112_E_PHY_ID ||
+	    hw->phy.id == I210_I_PHY_ID)
 		goto out;
 
 	ret_val = phy->ops.read_reg(hw, M88E1000_EXT_PHY_SPEC_CTRL, &phy_data);
@@ -1441,6 +1484,7 @@ s32 igb_check_downshift(struct e1000_hw *hw)
 	u16 phy_data, offset, mask;
 
 	switch (phy->type) {
+	case e1000_phy_i210:
 	case e1000_phy_m88:
 	case e1000_phy_gg82563:
 		offset	= M88E1000_PHY_SPEC_STATUS;
@@ -1476,7 +1520,7 @@ out:
  *
  *  Polarity is determined based on the PHY specific status register.
  **/
-static s32 igb_check_polarity_m88(struct e1000_hw *hw)
+s32 igb_check_polarity_m88(struct e1000_hw *hw)
 {
 	struct e1000_phy_info *phy = &hw->phy;
 	s32 ret_val;
@@ -1665,6 +1709,7 @@ s32 igb_get_cable_length_m88_gen2(struct e1000_hw *hw)
 	u16 phy_data, phy_data2, index, default_page, is_cm;
 
 	switch (hw->phy.id) {
+	case I210_I_PHY_ID:
 	case I347AT4_E_PHY_ID:
 		/* Remember the original page select and set it to 7 */
 		ret_val = phy->ops.read_reg(hw, I347AT4_PAGE_SELECT,
@@ -2129,10 +2174,16 @@ s32 igb_phy_init_script_igp3(struct e1000_hw *hw)
 void igb_power_up_phy_copper(struct e1000_hw *hw)
 {
 	u16 mii_reg = 0;
+	u16 power_reg = 0;
 
 	/* The PHY will retain its settings across a power down/up cycle */
 	hw->phy.ops.read_reg(hw, PHY_CONTROL, &mii_reg);
 	mii_reg &= ~MII_CR_POWER_DOWN;
+	if (hw->phy.type == e1000_phy_i210) {
+		hw->phy.ops.read_reg(hw, GS40G_COPPER_SPEC, &power_reg);
+		power_reg &= ~GS40G_CS_POWER_DOWN;
+		hw->phy.ops.write_reg(hw, GS40G_COPPER_SPEC, power_reg);
+	}
 	hw->phy.ops.write_reg(hw, PHY_CONTROL, mii_reg);
 }
 
@@ -2146,10 +2197,18 @@ void igb_power_up_phy_copper(struct e1000_hw *hw)
 void igb_power_down_phy_copper(struct e1000_hw *hw)
 {
 	u16 mii_reg = 0;
+	u16 power_reg = 0;
 
 	/* The PHY will retain its settings across a power down/up cycle */
 	hw->phy.ops.read_reg(hw, PHY_CONTROL, &mii_reg);
 	mii_reg |= MII_CR_POWER_DOWN;
+
+	/* i210 Phy requires an additional bit for power up/down */
+	if (hw->phy.type == e1000_phy_i210) {
+		hw->phy.ops.read_reg(hw, GS40G_COPPER_SPEC, &power_reg);
+		power_reg |= GS40G_CS_POWER_DOWN;
+		hw->phy.ops.write_reg(hw, GS40G_COPPER_SPEC, power_reg);
+	}
 	hw->phy.ops.write_reg(hw, PHY_CONTROL, mii_reg);
 	msleep(1);
 }
@@ -2213,8 +2272,7 @@ s32 igb_phy_force_speed_duplex_82580(struct e1000_hw *hw)
 	if (ret_val)
 		goto out;
 
-	phy_data &= ~I82580_PHY_CTRL2_AUTO_MDIX;
-	phy_data &= ~I82580_PHY_CTRL2_FORCE_MDI_MDIX;
+	phy_data &= ~I82580_PHY_CTRL2_MDIX_CFG_MASK;
 
 	ret_val = phy->ops.write_reg(hw, I82580_PHY_CTRL_2, phy_data);
 	if (ret_val)
@@ -2344,4 +2402,104 @@ s32 igb_get_cable_length_82580(struct e1000_hw *hw)
 
 out:
 	return ret_val;
+}
+
+/**
+ *  igb_write_phy_reg_gs40g - Write GS40G PHY register
+ *  @hw: pointer to the HW structure
+ *  @offset: lower half is register offset to write to
+ *     upper half is page to use.
+ *  @data: data to write at register offset
+ *
+ *  Acquires semaphore, if necessary, then writes the data to PHY register
+ *  at the offset.  Release any acquired semaphores before exiting.
+ **/
+s32 igb_write_phy_reg_gs40g(struct e1000_hw *hw, u32 offset, u16 data)
+{
+	s32 ret_val;
+	u16 page = offset >> GS40G_PAGE_SHIFT;
+
+	offset = offset & GS40G_OFFSET_MASK;
+	ret_val = hw->phy.ops.acquire(hw);
+	if (ret_val)
+		return ret_val;
+
+	ret_val = igb_write_phy_reg_mdic(hw, GS40G_PAGE_SELECT, page);
+	if (ret_val)
+		goto release;
+	ret_val = igb_write_phy_reg_mdic(hw, offset, data);
+
+release:
+	hw->phy.ops.release(hw);
+	return ret_val;
+}
+
+/**
+ *  igb_read_phy_reg_gs40g - Read GS40G  PHY register
+ *  @hw: pointer to the HW structure
+ *  @offset: lower half is register offset to read to
+ *     upper half is page to use.
+ *  @data: data to read at register offset
+ *
+ *  Acquires semaphore, if necessary, then reads the data in the PHY register
+ *  at the offset.  Release any acquired semaphores before exiting.
+ **/
+s32 igb_read_phy_reg_gs40g(struct e1000_hw *hw, u32 offset, u16 *data)
+{
+	s32 ret_val;
+	u16 page = offset >> GS40G_PAGE_SHIFT;
+
+	offset = offset & GS40G_OFFSET_MASK;
+	ret_val = hw->phy.ops.acquire(hw);
+	if (ret_val)
+		return ret_val;
+
+	ret_val = igb_write_phy_reg_mdic(hw, GS40G_PAGE_SELECT, page);
+	if (ret_val)
+		goto release;
+	ret_val = igb_read_phy_reg_mdic(hw, offset, data);
+
+release:
+	hw->phy.ops.release(hw);
+	return ret_val;
+}
+
+/**
+ *  igb_set_master_slave_mode - Setup PHY for Master/slave mode
+ *  @hw: pointer to the HW structure
+ *
+ *  Sets up Master/slave mode
+ **/
+static s32 igb_set_master_slave_mode(struct e1000_hw *hw)
+{
+	s32 ret_val;
+	u16 phy_data;
+
+	/* Resolve Master/Slave mode */
+	ret_val = hw->phy.ops.read_reg(hw, PHY_1000T_CTRL, &phy_data);
+	if (ret_val)
+		return ret_val;
+
+	/* load defaults for future use */
+	hw->phy.original_ms_type = (phy_data & CR_1000T_MS_ENABLE) ?
+				   ((phy_data & CR_1000T_MS_VALUE) ?
+				    e1000_ms_force_master :
+				    e1000_ms_force_slave) : e1000_ms_auto;
+
+	switch (hw->phy.ms_type) {
+	case e1000_ms_force_master:
+		phy_data |= (CR_1000T_MS_ENABLE | CR_1000T_MS_VALUE);
+		break;
+	case e1000_ms_force_slave:
+		phy_data |= CR_1000T_MS_ENABLE;
+		phy_data &= ~(CR_1000T_MS_VALUE);
+		break;
+	case e1000_ms_auto:
+		phy_data &= ~CR_1000T_MS_ENABLE;
+		/* fall-through */
+	default:
+		break;
+	}
+
+	return hw->phy.ops.write_reg(hw, PHY_1000T_CTRL, phy_data);
 }

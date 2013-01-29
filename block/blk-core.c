@@ -39,8 +39,6 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(block_remap);
 EXPORT_TRACEPOINT_SYMBOL_GPL(block_rq_remap);
 EXPORT_TRACEPOINT_SYMBOL_GPL(block_bio_complete);
 
-static int __make_request(struct request_queue *q, struct bio *bio);
-
 /*
  * For the allocated request tables
  */
@@ -265,9 +263,10 @@ EXPORT_SYMBOL(blk_remove_plug);
  */
 void blk_drain_queue(struct request_queue *q, bool drain_all)
 {
+	int i;
+
 	while (true) {
 		bool drain = false;
-		int i;
 
 		spin_lock_irq(q->queue_lock);
 
@@ -299,6 +298,19 @@ void blk_drain_queue(struct request_queue *q, bool drain_all)
 			break;
 		msleep(10);
 	}
+
+	/*
+	 * With queue marked dead, any woken up waiter will fail the
+	 * allocation path, so the wakeup chaining is lost and we're
+	 * left with hung waiters. We need to wake up those waiters.
+	 */
+	if (q->request_fn) {
+		spin_lock_irq(q->queue_lock);
+		for (i = 0; i < ARRAY_SIZE(q->rq.wait); i++)
+			wake_up_all(&q->rq.wait[i]);
+		spin_unlock_irq(q->queue_lock);
+	}
+
 }
 
 /*
@@ -718,7 +730,7 @@ blk_init_allocated_queue_node(struct request_queue *q, request_fn_proc *rfn,
 	/*
 	 * This also sets hw/phys segments, boundary and size
 	 */
-	blk_queue_make_request(q, __make_request);
+	blk_queue_make_request(q, blk_queue_bio);
 
 	q->sg_reserved_size = INT_MAX;
 
@@ -1362,7 +1374,7 @@ static void blk_account_io_front_merge(struct request *req, sector_t newsector)
 	}
 }
 
-static int __make_request(struct request_queue *q, struct bio *bio)
+int blk_queue_bio(struct request_queue *q, struct bio *bio)
 {
 	struct request *req;
 	int el_ret;
@@ -1513,6 +1525,7 @@ out_unlock:
 	spin_unlock_irq(q->queue_lock);
 	return 0;
 }
+EXPORT_SYMBOL_GPL(blk_queue_bio);	/* for device mapper only */
 
 /*
  * If bio->bi_dev is a partition, remap the location

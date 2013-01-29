@@ -880,6 +880,7 @@ static int dev_set_geometry(struct dm_ioctl *param, size_t param_size)
 	struct hd_geometry geometry;
 	unsigned long indata[4];
 	char *geostr = (char *) param + param->data_start;
+	char dummy;
 
 	md = find_device(param);
 	if (!md)
@@ -891,8 +892,8 @@ static int dev_set_geometry(struct dm_ioctl *param, size_t param_size)
 		goto out;
 	}
 
-	x = sscanf(geostr, "%lu %lu %lu %lu", indata,
-		   indata + 1, indata + 2, indata + 3);
+	x = sscanf(geostr, "%lu %lu %lu %lu%c", indata,
+		   indata + 1, indata + 2, indata + 3, &dummy);
 
 	if (x != 4) {
 		DMWARN("Unable to interpret geometry settings.");
@@ -1053,6 +1054,7 @@ static void retrieve_status(struct dm_table *table,
 	char *outbuf, *outptr;
 	status_type_t type;
 	size_t remaining, len, used = 0;
+	unsigned status_flags = 0;
 
 	outptr = outbuf = get_result_buffer(param, param_size, &len);
 
@@ -1088,7 +1090,20 @@ static void retrieve_status(struct dm_table *table,
 		}
 
 		/* Get the status/table string from the target driver */
-		if (ti->type->status) {
+		if (dm_target_provides_status_with_flags(ti->type) &&
+		    ti->type->status_with_flags) {
+			/*
+			 * Use the RHEL-specific hook for getting status with flags
+			 * - for more details see the comment in device-mapper.h
+			 */
+			if (param->flags & DM_NOFLUSH_FLAG)
+				status_flags |= DM_STATUS_NOFLUSH_FLAG;
+			if (ti->type->status_with_flags(ti, type, status_flags,
+							outptr, remaining)) {
+				param->flags |= DM_BUFFER_FULL_FLAG;
+				break;
+			}
+		} else if (ti->type->status) {
 			if (ti->type->status(ti, type, outptr, remaining)) {
 				param->flags |= DM_BUFFER_FULL_FLAG;
 				break;
@@ -1542,6 +1557,7 @@ static int check_version(unsigned int cmd, struct dm_ioctl __user *user)
 static int copy_params(struct dm_ioctl __user *user, struct dm_ioctl **param)
 {
 	struct dm_ioctl tmp, *dmi;
+	int secure_data;
 
 	if (copy_from_user(&tmp, user, sizeof(tmp) - sizeof(tmp.data)))
 		return -EFAULT;
@@ -1549,23 +1565,27 @@ static int copy_params(struct dm_ioctl __user *user, struct dm_ioctl **param)
 	if (tmp.data_size < (sizeof(tmp) - sizeof(tmp.data)))
 		return -EINVAL;
 
+	secure_data = tmp.flags & DM_SECURE_DATA_FLAG;
+
 	dmi = vmalloc(tmp.data_size);
-	if (!dmi)
+	if (!dmi) {
+		if (secure_data && clear_user(user, tmp.data_size))
+			return -EFAULT;
 		return -ENOMEM;
+	}
 
 	if (copy_from_user(dmi, user, tmp.data_size))
 		goto bad;
 
 	/* Wipe the user buffer so we do not return it to userspace */
-	if ((tmp.flags & DM_SECURE_DATA_FLAG) &&
-	    clear_user(user, tmp.data_size))
+	if (secure_data && clear_user(user, tmp.data_size))
 		goto bad;
 
 	*param = dmi;
 	return 0;
 
 bad:
-	if (tmp.flags & DM_SECURE_DATA_FLAG)
+	if (secure_data)
 		memset(dmi, 0, tmp.data_size);
 	vfree(dmi);
 	return -EFAULT;

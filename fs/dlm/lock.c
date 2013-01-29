@@ -1599,10 +1599,14 @@ static int conversion_deadlock_detect(struct dlm_rsb *r, struct dlm_lkb *lkb2)
  * immediate request, it is 0 if called later, after the lock has been
  * queued.
  *
+ * recover is 1 if dlm_recover_grant() is trying to grant conversions
+ * after recovery.
+ *
  * References are from chapter 6 of "VAXcluster Principles" by Roy Davis
  */
 
-static int _can_be_granted(struct dlm_rsb *r, struct dlm_lkb *lkb, int now)
+static int _can_be_granted(struct dlm_rsb *r, struct dlm_lkb *lkb, int now,
+			   int recover)
 {
 	int8_t conv = (lkb->lkb_grmode != DLM_LOCK_IV);
 
@@ -1634,7 +1638,7 @@ static int _can_be_granted(struct dlm_rsb *r, struct dlm_lkb *lkb, int now)
 	 */
 
 	if (queue_conflict(&r->res_grantqueue, lkb))
-		goto out;
+		return 0;
 
 	/*
 	 * 6-3: By default, a conversion request is immediately granted if the
@@ -1643,7 +1647,24 @@ static int _can_be_granted(struct dlm_rsb *r, struct dlm_lkb *lkb, int now)
 	 */
 
 	if (queue_conflict(&r->res_convertqueue, lkb))
-		goto out;
+		return 0;
+
+	/*
+	 * The RECOVER_GRANT flag means dlm_recover_grant() is granting
+	 * locks for a recovered rsb, on which lkb's have been rebuilt.
+	 * The lkb's may have been rebuilt on the queues in a different
+	 * order than they were in on the previous master.  So, granting
+	 * queued conversions in order after recovery doesn't make sense
+	 * since the order hasn't been preserved anyway.  The new order
+	 * could also have created a new "in place" conversion deadlock.
+	 * (e.g. old, failed master held granted EX, with PR->EX, NL->EX.
+	 * After recovery, there would be no granted locks, and possibly
+	 * NL->EX, PR->EX, an in-place conversion deadlock.)  So, after
+	 * recovery, grant conversions without considering order.
+	 */
+
+	if (conv && recover)
+		return 1;
 
 	/*
 	 * 6-5: But the default algorithm for deciding whether to grant or
@@ -1680,7 +1701,7 @@ static int _can_be_granted(struct dlm_rsb *r, struct dlm_lkb *lkb, int now)
 		if (list_empty(&r->res_convertqueue))
 			return 1;
 		else
-			goto out;
+			return 0;
 	}
 
 	/*
@@ -1726,12 +1747,12 @@ static int _can_be_granted(struct dlm_rsb *r, struct dlm_lkb *lkb, int now)
 	if (!now && !conv && list_empty(&r->res_convertqueue) &&
 	    first_in_list(lkb, &r->res_waitqueue))
 		return 1;
- out:
+
 	return 0;
 }
 
 static int can_be_granted(struct dlm_rsb *r, struct dlm_lkb *lkb, int now,
-			  int *err)
+			  int recover, int *err)
 {
 	int rv;
 	int8_t alt = 0, rqmode = lkb->lkb_rqmode;
@@ -1740,7 +1761,7 @@ static int can_be_granted(struct dlm_rsb *r, struct dlm_lkb *lkb, int now,
 	if (err)
 		*err = 0;
 
-	rv = _can_be_granted(r, lkb, now);
+	rv = _can_be_granted(r, lkb, now, recover);
 	if (rv)
 		goto out;
 
@@ -1781,7 +1802,7 @@ static int can_be_granted(struct dlm_rsb *r, struct dlm_lkb *lkb, int now,
 
 	if (alt) {
 		lkb->lkb_rqmode = alt;
-		rv = _can_be_granted(r, lkb, now);
+		rv = _can_be_granted(r, lkb, now, 0);
 		if (rv)
 			lkb->lkb_sbflags |= DLM_SBF_ALTMODE;
 		else
@@ -1804,6 +1825,7 @@ static int can_be_granted(struct dlm_rsb *r, struct dlm_lkb *lkb, int now,
 static int grant_pending_convert(struct dlm_rsb *r, int high, int *cw)
 {
 	struct dlm_lkb *lkb, *s;
+	int recover = rsb_flag(r, RSB_RECOVER_GRANT);
 	int hi, demoted, quit, grant_restart, demote_restart;
 	int deadlk;
 
@@ -1817,7 +1839,7 @@ static int grant_pending_convert(struct dlm_rsb *r, int high, int *cw)
 		demoted = is_demoted(lkb);
 		deadlk = 0;
 
-		if (can_be_granted(r, lkb, 0, &deadlk)) {
+		if (can_be_granted(r, lkb, 0, recover, &deadlk)) {
 			grant_lock_pending(r, lkb);
 			grant_restart = 1;
 			continue;
@@ -1858,7 +1880,7 @@ static int grant_pending_wait(struct dlm_rsb *r, int high, int *cw)
 	struct dlm_lkb *lkb, *s;
 
 	list_for_each_entry_safe(lkb, s, &r->res_waitqueue, lkb_statequeue) {
-		if (can_be_granted(r, lkb, 0, NULL))
+		if (can_be_granted(r, lkb, 0, 0, NULL))
 			grant_lock_pending(r, lkb);
                 else {
 			high = max_t(int, lkb->lkb_rqmode, high);
@@ -2369,7 +2391,7 @@ static int do_request(struct dlm_rsb *r, struct dlm_lkb *lkb)
 {
 	int error = 0;
 
-	if (can_be_granted(r, lkb, 1, NULL)) {
+	if (can_be_granted(r, lkb, 1, 0, NULL)) {
 		grant_lock(r, lkb);
 		queue_cast(r, lkb, 0);
 		goto out;
@@ -2409,7 +2431,7 @@ static int do_convert(struct dlm_rsb *r, struct dlm_lkb *lkb)
 
 	/* changing an existing lock may allow others to be granted */
 
-	if (can_be_granted(r, lkb, 1, &deadlk)) {
+	if (can_be_granted(r, lkb, 1, 0, &deadlk)) {
 		grant_lock(r, lkb);
 		queue_cast(r, lkb, 0);
 		goto out;
@@ -2438,7 +2460,7 @@ static int do_convert(struct dlm_rsb *r, struct dlm_lkb *lkb)
 
 	if (is_demoted(lkb)) {
 		grant_pending_convert(r, DLM_LOCK_IV, NULL);
-		if (_can_be_granted(r, lkb, 1)) {
+		if (_can_be_granted(r, lkb, 1, 0)) {
 			grant_lock(r, lkb);
 			queue_cast(r, lkb, 0);
 			goto out;
@@ -4340,7 +4362,6 @@ static void purge_queue(struct dlm_rsb *r, struct list_head *queue,
 
 	list_for_each_entry_safe(lkb, safe, queue, lkb_statequeue) {
 		if (test(ls, lkb)) {
-			rsb_set_flag(r, RSB_LOCKS_PURGED);
 			del_lkb(r, lkb);
 			/* this put should free the lkb */
 			if (!dlm_put_lkb(lkb))
@@ -4349,21 +4370,9 @@ static void purge_queue(struct dlm_rsb *r, struct list_head *queue,
 	}
 }
 
-static int purge_dead_test(struct dlm_ls *ls, struct dlm_lkb *lkb)
-{
-	return (is_master_copy(lkb) && dlm_is_removed(ls, lkb->lkb_nodeid));
-}
-
 static int purge_mstcpy_test(struct dlm_ls *ls, struct dlm_lkb *lkb)
 {
 	return is_master_copy(lkb);
-}
-
-static void purge_dead_locks(struct dlm_rsb *r)
-{
-	purge_queue(r, &r->res_grantqueue, &purge_dead_test);
-	purge_queue(r, &r->res_convertqueue, &purge_dead_test);
-	purge_queue(r, &r->res_waitqueue, &purge_dead_test);
 }
 
 void dlm_purge_mstcpy_locks(struct dlm_rsb *r)
@@ -4373,54 +4382,120 @@ void dlm_purge_mstcpy_locks(struct dlm_rsb *r)
 	purge_queue(r, &r->res_waitqueue, &purge_mstcpy_test);
 }
 
+static void purge_dead_list(struct dlm_ls *ls, struct dlm_rsb *r,
+			    struct list_head *list,
+			    int nodeid_gone, unsigned int *count)
+{
+	struct dlm_lkb *lkb, *safe;
+
+	list_for_each_entry_safe(lkb, safe, list, lkb_statequeue) {
+		if (!is_master_copy(lkb))
+			continue;
+
+		if ((lkb->lkb_nodeid == nodeid_gone) ||
+		    dlm_is_removed(ls, lkb->lkb_nodeid)) {
+
+			del_lkb(r, lkb);
+
+			/* this put should free the lkb */
+			if (!dlm_put_lkb(lkb))
+				log_error(ls, "purged dead lkb not released");
+
+			rsb_set_flag(r, RSB_RECOVER_GRANT);
+
+			(*count)++;
+		}
+	}
+}
+
 /* Get rid of locks held by nodes that are gone. */
 
-int dlm_purge_locks(struct dlm_ls *ls)
+void dlm_recover_purge(struct dlm_ls *ls)
 {
 	struct dlm_rsb *r;
+	struct dlm_member *memb;
+	int nodes_count = 0;
+	int nodeid_gone = 0;
+	unsigned int lkb_count = 0;
 
-	log_debug(ls, "dlm_purge_locks");
+	/* cache one removed nodeid to optimize the common
+	   case of a single node removed */
+
+	list_for_each_entry(memb, &ls->ls_nodes_gone, list) {
+		nodes_count++;
+		nodeid_gone = memb->nodeid;
+	}
+
+	if (!nodes_count)
+		return;
 
 	down_write(&ls->ls_root_sem);
 	list_for_each_entry(r, &ls->ls_root_list, res_root_list) {
 		hold_rsb(r);
 		lock_rsb(r);
-		if (is_master(r))
-			purge_dead_locks(r);
+		if (is_master(r)) {
+			purge_dead_list(ls, r, &r->res_grantqueue,
+					nodeid_gone, &lkb_count);
+			purge_dead_list(ls, r, &r->res_convertqueue,
+					nodeid_gone, &lkb_count);
+			purge_dead_list(ls, r, &r->res_waitqueue,
+					nodeid_gone, &lkb_count);
+		}
 		unlock_rsb(r);
 		unhold_rsb(r);
-
-		schedule();
+		cond_resched();
 	}
 	up_write(&ls->ls_root_sem);
 
-	return 0;
+	if (lkb_count)
+		log_debug(ls, "dlm_recover_purge %u locks for %u nodes",
+			  lkb_count, nodes_count);
 }
 
-static struct dlm_rsb *find_purged_rsb(struct dlm_ls *ls, int bucket)
+static struct dlm_rsb *find_grant_rsb(struct dlm_ls *ls, int bucket)
 {
-	struct dlm_rsb *r, *r_ret = NULL;
+	struct dlm_rsb *r;
 
 	spin_lock(&ls->ls_rsbtbl[bucket].lock);
 	list_for_each_entry(r, &ls->ls_rsbtbl[bucket].list, res_hashchain) {
-		if (!rsb_flag(r, RSB_LOCKS_PURGED))
+		if (!rsb_flag(r, RSB_RECOVER_GRANT))
 			continue;
+		if (!is_master(r)) {
+			rsb_clear_flag(r, RSB_RECOVER_GRANT);
+			continue;
+		}
 		hold_rsb(r);
-		rsb_clear_flag(r, RSB_LOCKS_PURGED);
-		r_ret = r;
-		break;
+		spin_unlock(&ls->ls_rsbtbl[bucket].lock);
+		return r;
 	}
 	spin_unlock(&ls->ls_rsbtbl[bucket].lock);
-	return r_ret;
+	return NULL;
 }
 
-void dlm_grant_after_purge(struct dlm_ls *ls)
+/*
+ * Attempt to grant locks on resources that we are the master of.
+ * Locks may have become grantable during recovery because locks
+ * from departed nodes have been purged (or not rebuilt), allowing
+ * previously blocked locks to now be granted.  The subset of rsb's
+ * we are interested in are those with lkb's on either the convert or
+ * waiting queues.
+ *
+ * Simplest would be to go through each master rsb and check for non-empty
+ * convert or waiting queues, and attempt to grant on those rsbs.
+ * Checking the queues requires lock_rsb, though, for which we'd need
+ * to release the rsbtbl lock.  This would make iterating through all
+ * rsb's very inefficient.  So, we rely on earlier recovery routines
+ * to set RECOVER_GRANT on any rsb's that we should attempt to grant
+ * locks for.
+ */
+
+void dlm_recover_grant(struct dlm_ls *ls)
 {
 	struct dlm_rsb *r;
 	int bucket = 0;
 
 	while (1) {
-		r = find_purged_rsb(ls, bucket);
+		r = find_grant_rsb(ls, bucket);
 		if (!r) {
 			if (bucket == ls->ls_rsbtbl_size - 1)
 				break;
@@ -4428,13 +4503,13 @@ void dlm_grant_after_purge(struct dlm_ls *ls)
 			continue;
 		}
 		lock_rsb(r);
-		if (is_master(r)) {
-			grant_pending_locks(r);
-			confirm_master(r, 0);
-		}
+		/* the RECOVER_GRANT flag is checked in the grant path */
+		grant_pending_locks(r);
+		rsb_clear_flag(r, RSB_RECOVER_GRANT);
+		confirm_master(r, 0);
 		unlock_rsb(r);
 		put_rsb(r);
-		schedule();
+		cond_resched();
 	}
 }
 
@@ -4557,6 +4632,9 @@ int dlm_recover_master_copy(struct dlm_ls *ls, struct dlm_rcom *rc)
 	attach_lkb(r, lkb);
 	add_lkb(r, lkb, rl->rl_status);
 	error = 0;
+
+	if (!list_empty(&r->res_waitqueue) || !list_empty(&r->res_convertqueue))
+		rsb_set_flag(r, RSB_RECOVER_GRANT);
 
  out_remid:
 	/* this is the new value returned to the lock holder for

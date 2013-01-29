@@ -134,6 +134,16 @@ cifs_fill_common_info(struct cifs_fattr *fattr, struct cifs_sb_info *cifs_sb)
 	if (fattr->cf_cifsattrs & ATTR_READONLY)
 		fattr->cf_mode &= ~S_IWUGO;
 
+	/*
+	 * We of course don't get ACL info in FIND_FIRST/NEXT results, so
+	 * mark it for revalidation so that "ls -l" will look right. It might
+	 * be super-slow, but if we don't do this then the ownership of files
+	 * may look wrong since the inodes may not have timed out by the time
+	 * "ls" does a stat() call on them.
+	 */
+	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_CIFS_ACL)
+		fattr->cf_flags |= CIFS_FATTR_NEED_REVAL;
+
 	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_UNX_EMUL &&
 	    fattr->cf_cifsattrs & ATTR_SYSTEM) {
 		if (fattr->cf_eof == 0)  {
@@ -198,7 +208,7 @@ int get_symlink_reparse_path(char *full_path, struct cifs_sb_info *cifs_sb,
 	int len;
 	int oplock = 0;
 	int rc;
-	struct cifsTconInfo *ptcon = cifs_sb_tcon(cifs_sb);
+	struct cifs_tcon *ptcon = cifs_sb_tcon(cifs_sb);
 	char *tmpbuffer;
 
 	rc = CIFSSMBOpen(xid, ptcon, full_path, FILE_OPEN, GENERIC_READ,
@@ -226,7 +236,7 @@ static int initiate_cifs_search(const int xid, struct file *file)
 	struct cifsFileInfo *cifsFile;
 	struct cifs_sb_info *cifs_sb = CIFS_SB(file->f_path.dentry->d_sb);
 	struct tcon_link *tlink = NULL;
-	struct cifsTconInfo *pTcon;
+	struct cifs_tcon *pTcon;
 
 	if (file->private_data == NULL) {
 		tlink = cifs_sb_tlink(cifs_sb);
@@ -499,7 +509,7 @@ static int cifs_save_resume_key(const char *current_entry,
    assume that they are located in the findfirst return buffer.*/
 /* We start counting in the buffer with entry 2 and increment for every
    entry (do not increment for . or .. entry) */
-static int find_cifs_entry(const int xid, struct cifsTconInfo *pTcon,
+static int find_cifs_entry(const int xid, struct cifs_tcon *pTcon,
 	struct file *file, char **ppCurrentEntry, int *num_to_ret)
 {
 	int rc = 0;
@@ -780,7 +790,7 @@ int cifs_readdir(struct file *file, void *direntry, filldir_t filldir)
 	int rc = 0;
 	int xid, i;
 	struct cifs_sb_info *cifs_sb;
-	struct cifsTconInfo *pTcon;
+	struct cifs_tcon *pTcon;
 	struct cifsFileInfo *cifsFile = NULL;
 	char *current_entry;
 	int num_to_fill = 0;

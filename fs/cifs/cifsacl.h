@@ -23,11 +23,8 @@
 #define _CIFSACL_H
 
 
-#define NUM_AUTHS 6 /* number of authority fields */
-#define NUM_SUBAUTHS 5 /* number of sub authority fields */
-#define NUM_WK_SIDS 7 /* number of well known sids */
-#define SIDNAMELENGTH 20 /* long enough for the ones we care about */
-#define DEFSECDESCLEN 192 /* sec desc len contaiting a dacl with three aces */
+#define NUM_AUTHS (6)	/* number of authority fields */
+#define SID_MAX_SUB_AUTHORITIES (15) /* max number of sub authority fields */
 
 #define READ_BIT        0x4
 #define WRITE_BIT       0x2
@@ -38,6 +35,33 @@
 
 #define ACCESS_ALLOWED	0
 #define ACCESS_DENIED	1
+
+#define SIDOWNER 1
+#define SIDGROUP 2
+
+/*
+ * Security Descriptor length containing DACL with 3 ACEs (one each for
+ * owner, group and world).
+ */
+#define DEFAULT_SEC_DESC_LEN (sizeof(struct cifs_ntsd) + \
+			      sizeof(struct cifs_acl) + \
+			      (sizeof(struct cifs_ace) * 3))
+
+/*
+ * Maximum size of a string representation of a SID:
+ *
+ * The fields are unsigned values in decimal. So:
+ *
+ * u8:  max 3 bytes in decimal
+ * u32: max 10 bytes in decimal
+ *
+ * "S-" + 3 bytes for version field + 4 bytes for each authority field (3 bytes
+ * per number + 1 for '-') + NULL terminator.
+ *
+ * Add 11 bytes for each subauthority field (10 bytes each + 1 for '-')
+ */
+#define SID_STRING_BASE_SIZE (2 + 3 + (4 * NUM_AUTHS) + 1)
+#define SID_STRING_SUBAUTH_SIZE (11) /* size of a single subauth string */
 
 struct cifs_ntsd {
 	__le16 revision; /* revision level */
@@ -51,9 +75,12 @@ struct cifs_ntsd {
 struct cifs_sid {
 	__u8 revision; /* revision level */
 	__u8 num_subauth;
-	__u8 authority[6];
-	__le32 sub_auth[5]; /* sub_auth[num_subauth] */
+	__u8 authority[NUM_AUTHS];
+	__le32 sub_auth[SID_MAX_SUB_AUTHORITIES]; /* sub_auth[num_subauth] */
 } __attribute__((packed));
+
+/* size of a struct cifs_sid, sans sub_auth array */
+#define CIFS_SID_BASE_SIZE (1 + 1 + NUM_AUTHS)
 
 struct cifs_acl {
 	__le16 revision; /* revision level */
@@ -68,13 +95,5 @@ struct cifs_ace {
 	__le32 access_req;
 	struct cifs_sid sid; /* ie UUID of user or group who gets these perms */
 } __attribute__((packed));
-
-struct cifs_wksid {
-	struct cifs_sid cifssid;
-	char sidname[SIDNAMELENGTH];
-} __attribute__((packed));
-
-extern int match_sid(struct cifs_sid *);
-extern int compare_sids(const struct cifs_sid *, const struct cifs_sid *);
 
 #endif /* _CIFSACL_H */

@@ -156,6 +156,22 @@ static inline int is_unevictable_lru(enum lru_list l)
 	return (l == LRU_UNEVICTABLE);
 }
 
+/* Isolate inactive pages */
+#define ISOLATE_INACTIVE	((__force isolate_mode_t)0x1)
+/* Isolate active pages */
+#define ISOLATE_ACTIVE		((__force isolate_mode_t)0x2)
+/* Isolate clean file */
+#define ISOLATE_CLEAN		((__force isolate_mode_t)0x4)
+/* Isolate for asynchronous migration */
+#define ISOLATE_ASYNC_MIGRATE	((__force isolate_mode_t)0x10)
+
+/* LRU Isolation modes. */
+typedef unsigned __bitwise__ isolate_mode_t;
+
+struct lruvec {
+	struct list_head lists[NR_LRU_LISTS];
+};
+
 enum zone_watermarks {
 	WMARK_MIN,
 	WMARK_LOW,
@@ -351,10 +367,14 @@ struct zone {
 	ZONE_PADDING(_pad1_)
 
 	/* Fields commonly accessed by the page reclaim scanner */
-	spinlock_t		lru_lock;	
+	spinlock_t		lru_lock;
+#ifdef __GENKSYMS__
 	struct zone_lru {
 		struct list_head list;
 	} lru[NR_LRU_LISTS];
+#else
+	struct lruvec		lruvec;
+#endif
 
 	struct zone_reclaim_stat reclaim_stat;
 
@@ -442,7 +462,19 @@ struct zone {
 	 */
 	const char		*name;
 
+#ifndef __GENKSYMS__
+#if defined CONFIG_COMPACTION
+	/* Set to true when the PG_migrate_skip bits should be cleared */
+	bool			compact_blockskip_flush;
+
+	/* pfns where compaction scanners should start */
+	unsigned long		compact_cached_free_pfn;
+	unsigned long		compact_cached_migrate_pfn;
+#endif
+	unsigned long padding[13];
+#else
 	unsigned long padding[16];
+#endif
 } ____cacheline_internodealigned_in_smp;
 
 typedef enum {

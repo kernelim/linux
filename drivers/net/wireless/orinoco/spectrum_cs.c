@@ -11,9 +11,9 @@
  *
  * Copyright (C) 2002-2005 Pavel Roskin <proski@gnu.org>
  * Portions based on orinoco_cs.c:
- * 	Copyright (C) David Gibson, Linuxcare Australia
+ *	Copyright (C) David Gibson, Linuxcare Australia
  * Portions based on Spectrum24tDnld.c from original spectrum24 driver:
- * 	Copyright (C) Symbol Technologies.
+ *	Copyright (C) Symbol Technologies.
  *
  * See copyright notice in file main.c.
  */
@@ -26,7 +26,6 @@
 #include <linux/init.h>
 #include <linux/delay.h>
 #include <pcmcia/cs_types.h>
-#include <pcmcia/cs.h>
 #include <pcmcia/cistpl.h>
 #include <pcmcia/cisreg.h>
 #include <pcmcia/ds.h>
@@ -57,7 +56,6 @@ MODULE_PARM_DESC(ignore_cis_vcc, "Allow voltage mismatch between card and socket
  * struct orinoco_private */
 struct orinoco_pccard {
 	struct pcmcia_device	*p_dev;
-	dev_node_t node;
 };
 
 /********************************************************************/
@@ -73,9 +71,6 @@ static void spectrum_cs_release(struct pcmcia_device *link);
 #define HCR_MEM16	0x10	/* memory width bit, should be preserved */
 
 
-#define CS_CHECK(fn, ret) \
-  do { last_fn = (fn); if ((last_ret = (ret)) != 0) goto cs_failed; } while (0)
-
 /*
  * Reset the card using configuration registers COR and CCSR.
  * If IDLE is 1, stop the firmware, so that it can be safely rewritten.
@@ -83,63 +78,55 @@ static void spectrum_cs_release(struct pcmcia_device *link);
 static int
 spectrum_reset(struct pcmcia_device *link, int idle)
 {
-	int last_ret, last_fn;
-	conf_reg_t reg;
-	u_int save_cor;
+	int ret;
+	u8 save_cor;
+	u8 ccsr;
 
 	/* Doing it if hardware is gone is guaranteed crash */
 	if (!pcmcia_dev_present(link))
 		return -ENODEV;
 
 	/* Save original COR value */
-	reg.Function = 0;
-	reg.Action = CS_READ;
-	reg.Offset = CISREG_COR;
-	CS_CHECK(AccessConfigurationRegister,
-		 pcmcia_access_configuration_register(link, &reg));
-	save_cor = reg.Value;
+	ret = pcmcia_read_config_byte(link, CISREG_COR, &save_cor);
+	if (ret)
+		goto failed;
 
 	/* Soft-Reset card */
-	reg.Action = CS_WRITE;
-	reg.Offset = CISREG_COR;
-	reg.Value = (save_cor | COR_SOFT_RESET);
-	CS_CHECK(AccessConfigurationRegister,
-		 pcmcia_access_configuration_register(link, &reg));
+	ret = pcmcia_write_config_byte(link, CISREG_COR,
+				(save_cor | COR_SOFT_RESET));
+	if (ret)
+		goto failed;
 	udelay(1000);
 
 	/* Read CCSR */
-	reg.Action = CS_READ;
-	reg.Offset = CISREG_CCSR;
-	CS_CHECK(AccessConfigurationRegister,
-		 pcmcia_access_configuration_register(link, &reg));
+	ret = pcmcia_read_config_byte(link, CISREG_CCSR, &ccsr);
+	if (ret)
+		goto failed;
 
 	/*
 	 * Start or stop the firmware.  Memory width bit should be
 	 * preserved from the value we've just read.
 	 */
-	reg.Action = CS_WRITE;
-	reg.Offset = CISREG_CCSR;
-	reg.Value = (idle ? HCR_IDLE : HCR_RUN) | (reg.Value & HCR_MEM16);
-	CS_CHECK(AccessConfigurationRegister,
-		 pcmcia_access_configuration_register(link, &reg));
+	ccsr = (idle ? HCR_IDLE : HCR_RUN) | (ccsr & HCR_MEM16);
+	ret = pcmcia_write_config_byte(link, CISREG_CCSR, ccsr);
+	if (ret)
+		goto failed;
 	udelay(1000);
 
 	/* Restore original COR configuration index */
-	reg.Action = CS_WRITE;
-	reg.Offset = CISREG_COR;
-	reg.Value = (save_cor & ~COR_SOFT_RESET);
-	CS_CHECK(AccessConfigurationRegister,
-		 pcmcia_access_configuration_register(link, &reg));
+	ret = pcmcia_write_config_byte(link, CISREG_COR,
+				(save_cor & ~COR_SOFT_RESET));
+	if (ret)
+		goto failed;
 	udelay(1000);
 	return 0;
 
-cs_failed:
-	cs_error(link, last_fn, last_ret);
+failed:
 	return -ENODEV;
 }
 
 /********************************************************************/
-/* Device methods     						    */
+/* Device methods						    */
 /********************************************************************/
 
 static int
@@ -164,24 +151,16 @@ spectrum_cs_stop_firmware(struct orinoco_private *priv, int idle)
 }
 
 /********************************************************************/
-/* PCMCIA stuff     						    */
+/* PCMCIA stuff							    */
 /********************************************************************/
 
-/*
- * This creates an "instance" of the driver, allocating local data
- * structures for one device.  The device is registered with Card
- * Services.
- *
- * The dev_link structure is initialized, but we don't actually
- * configure the card at this point -- we wait until we receive a card
- * insertion event.  */
 static int
 spectrum_cs_probe(struct pcmcia_device *link)
 {
 	struct orinoco_private *priv;
 	struct orinoco_pccard *card;
 
-	priv = alloc_orinocodev(sizeof(*card), &handle_to_dev(link),
+	priv = alloc_orinocodev(sizeof(*card), &link->dev,
 				spectrum_cs_hard_reset,
 				spectrum_cs_stop_firmware);
 	if (!priv)
@@ -193,46 +172,35 @@ spectrum_cs_probe(struct pcmcia_device *link)
 	link->priv = priv;
 
 	/* Interrupt setup */
-	link->irq.Attributes = IRQ_TYPE_DYNAMIC_SHARING | IRQ_HANDLE_PRESENT;
-	link->irq.IRQInfo1 = IRQ_LEVEL_ID;
+	link->irq.Attributes = IRQ_TYPE_DYNAMIC_SHARING;
 	link->irq.Handler = orinoco_interrupt;
-	link->irq.Instance = priv;
-
-	/* General socket configuration defaults can go here.  In this
-	 * client, we assume very little, and rely on the CIS for
-	 * almost everything.  In most clients, many details (i.e.,
-	 * number, sizes, and attributes of IO windows) are fixed by
-	 * the nature of the device, and can be hard-wired here. */
 	link->conf.Attributes = 0;
 	link->conf.IntType = INT_MEMORY_AND_IO;
 
 	return spectrum_cs_config(link);
 }				/* spectrum_cs_attach */
 
-/*
- * This deletes a driver "instance".  The device is de-registered with
- * Card Services.  If it has been released, all local data structures
- * are freed.  Otherwise, the structures will be freed when the device
- * is released.
- */
 static void spectrum_cs_detach(struct pcmcia_device *link)
 {
 	struct orinoco_private *priv = link->priv;
 
-	if (link->dev_node)
-		orinoco_if_del(priv);
+	orinoco_if_del(priv);
 
 	spectrum_cs_release(link);
 
 	free_orinocodev(priv);
 }				/* spectrum_cs_detach */
 
-/*
- * spectrum_cs_config() is scheduled to run after a CARD_INSERTION
- * event is received, to configure the PCMCIA socket, and to make the
- * device available to the system.
- */
+#if 0 /* Not in RHEL */
+static int spectrum_cs_config_check(struct pcmcia_device *p_dev,
+				    void *priv_data)
+{
+	if (p_dev->config_index == 0)
+		return -EINVAL;
 
+	return pcmcia_request_io(p_dev);
+};
+#else
 static int spectrum_cs_config_check(struct pcmcia_device *p_dev,
 				    cistpl_cftable_entry_t *cfg,
 				    cistpl_cftable_entry_t *dflt,
@@ -273,9 +241,21 @@ static int spectrum_cs_config_check(struct pcmcia_device *p_dev,
 	p_dev->conf.Attributes |= CONF_ENABLE_IRQ;
 
 	/* IO window settings */
+#if 0 /* Not in RHEL */
+	p_dev->resource[0]->end = p_dev->resource[1]->end = 0;
+#else
 	p_dev->io.NumPorts1 = p_dev->io.NumPorts2 = 0;
+#endif
 	if ((cfg->io.nwin > 0) || (dflt->io.nwin > 0)) {
 		cistpl_io_t *io = (cfg->io.nwin) ? &cfg->io : &dflt->io;
+#if 0 /* Not in RHEL */
+		p_dev->io_lines = io->flags & CISTPL_IO_LINES_MASK;
+		p_dev->resource[0]->flags &= ~IO_DATA_PATH_WIDTH;
+		p_dev->resource[0]->flags |=
+			pcmcia_io_cfg_data_width(io->flags);
+		p_dev->resource[0]->start = io->win[0].base;
+		p_dev->resource[0]->end = io->win[0].len;
+#else
 		p_dev->io.Attributes1 = IO_DATA_PATH_WIDTH_AUTO;
 		if (!(io->flags & CISTPL_IO_8BIT))
 			p_dev->io.Attributes1 = IO_DATA_PATH_WIDTH_16;
@@ -284,14 +264,25 @@ static int spectrum_cs_config_check(struct pcmcia_device *p_dev,
 		p_dev->io.IOAddrLines = io->flags & CISTPL_IO_LINES_MASK;
 		p_dev->io.BasePort1 = io->win[0].base;
 		p_dev->io.NumPorts1 = io->win[0].len;
+#endif
 		if (io->nwin > 1) {
+#if 0 /* Not in RHEL */
+			p_dev->resource[1]->flags = p_dev->resource[0]->flags;
+			p_dev->resource[1]->start = io->win[1].base;
+			p_dev->resource[1]->end = io->win[1].len;
+#else
 			p_dev->io.Attributes2 = p_dev->io.Attributes1;
 			p_dev->io.BasePort2 = io->win[1].base;
 			p_dev->io.NumPorts2 = io->win[1].len;
+#endif
 		}
 
 		/* This reserves IO space but doesn't actually enable it */
+#if 0 /* Not in RHEL */
+		if (pcmcia_request_io(p_dev) != 0)
+#else
 		if (pcmcia_request_io(p_dev, &p_dev->io) != 0)
+#endif
 			goto next_entry;
 	}
 	return 0;
@@ -300,66 +291,57 @@ next_entry:
 	pcmcia_disable_device(p_dev);
 	return -ENODEV;
 };
+#endif
 
 static int
 spectrum_cs_config(struct pcmcia_device *link)
 {
 	struct orinoco_private *priv = link->priv;
-	struct orinoco_pccard *card = priv->card;
-	hermes_t *hw = &priv->hw;
-	int last_fn, last_ret;
+	struct hermes *hw = &priv->hw;
+	int ret;
 	void __iomem *mem;
 
-	/*
-	 * In this loop, we scan the CIS for configuration table
-	 * entries, each of which describes a valid card
-	 * configuration, including voltage, IO window, memory window,
-	 * and interrupt settings.
-	 *
-	 * We make no assumptions about the card to be configured: we
-	 * use just the information available in the CIS.  In an ideal
-	 * world, this would work for any PCMCIA card, but it requires
-	 * a complete and accurate CIS.  In practice, a driver usually
-	 * "knows" most of these things without consulting the CIS,
-	 * and most client drivers will only use the CIS to fill in
-	 * implementation-defined details.
-	 */
-	last_ret = pcmcia_loop_config(link, spectrum_cs_config_check, NULL);
-	if (last_ret) {
+#if 0 /* Not in RHEL */
+	link->config_flags |= CONF_AUTO_SET_VPP | CONF_AUTO_CHECK_VCC |
+		CONF_AUTO_SET_IO | CONF_ENABLE_IRQ;
+	if (ignore_cis_vcc)
+		link->config_flags &= ~CONF_AUTO_CHECK_VCC;
+#endif
+	ret = pcmcia_loop_config(link, spectrum_cs_config_check, NULL);
+	if (ret) {
 		if (!ignore_cis_vcc)
 			printk(KERN_ERR PFX "GetNextTuple(): No matching "
 			       "CIS configuration.  Maybe you need the "
 			       "ignore_cis_vcc=1 parameter.\n");
-		cs_error(link, RequestIO, last_ret);
 		goto failed;
 	}
 
-	/*
-	 * Allocate an interrupt line.  Note that this does not assign
-	 * a handler to the interrupt, unless the 'Handler' member of
-	 * the irq structure is initialized.
-	 */
-	CS_CHECK(RequestIRQ, pcmcia_request_irq(link, &link->irq));
+#if 0 /* Not in RHEL */
+	mem = ioport_map(link->resource[0]->start,
+			resource_size(link->resource[0]));
+#else
+	mem = ioport_map(link->io.BasePort1, link->io.NumPorts1);
+#endif
+	if (!mem)
+		goto failed;
 
 	/* We initialize the hermes structure before completing PCMCIA
 	 * configuration just in case the interrupt handler gets
 	 * called. */
-	mem = ioport_map(link->io.BasePort1, link->io.NumPorts1);
-	if (!mem)
-		goto cs_failed;
-
 	hermes_struct_init(hw, mem, HERMES_16BIT_REGSPACING);
+	hw->eeprom_pda = true;
 
-	/*
-	 * This actually configures the PCMCIA socket -- setting up
-	 * the I/O windows and the interrupt mapping, and putting the
-	 * card and host interface into "Memory and IO" mode.
-	 */
-	CS_CHECK(RequestConfiguration,
-		 pcmcia_request_configuration(link, &link->conf));
+#if 0 /* Not in RHEL */
+	ret = pcmcia_request_irq(link, orinoco_interrupt);
+#else
+	ret = pcmcia_request_irq(link, &link->irq);
+#endif
+	if (ret)
+		goto failed;
 
-	/* Ok, we have the configuration, prepare to register the netdev */
-	card->node.major = card->node.minor = 0;
+	ret = pcmcia_enable_device(link);
+	if (ret)
+		goto failed;
 
 	/* Reset card */
 	if (spectrum_cs_hard_reset(priv) != 0)
@@ -372,33 +354,27 @@ spectrum_cs_config(struct pcmcia_device *link)
 	}
 
 	/* Register an interface with the stack */
+#if 0 /* Not in RHEL */
+	if (orinoco_if_add(priv, link->resource[0]->start,
+			   link->irq, NULL) != 0) {
+#elif 0 /* Not in RHEL */
 	if (orinoco_if_add(priv, link->io.BasePort1,
-			   link->irq.AssignedIRQ) != 0) {
+			   link->irq, NULL) != 0) {
+#else
+	if (orinoco_if_add(priv, link->io.BasePort1,
+			   link->irq.AssignedIRQ, NULL) != 0) {
+#endif
 		printk(KERN_ERR PFX "orinoco_if_add() failed\n");
 		goto failed;
 	}
 
-	/* At this point, the dev_node_t structure(s) needs to be
-	 * initialized and arranged in a linked list at link->dev_node. */
-	strcpy(card->node.dev_name, priv->ndev->name);
-	link->dev_node = &card->node; /* link->dev_node being non-NULL is also
-				       * used to indicate that the
-				       * net_device has been registered */
 	return 0;
-
- cs_failed:
-	cs_error(link, last_fn, last_ret);
 
  failed:
 	spectrum_cs_release(link);
 	return -ENODEV;
 }				/* spectrum_cs_config */
 
-/*
- * After a card is removed, spectrum_cs_release() will unregister the
- * device, and release the PCMCIA configuration.  If the device is
- * still open, this will be postponed until it is closed.
- */
 static void
 spectrum_cs_release(struct pcmcia_device *link)
 {
@@ -407,9 +383,9 @@ spectrum_cs_release(struct pcmcia_device *link)
 
 	/* We're committed to taking the device away now, so mark the
 	 * hardware as unavailable */
-	spin_lock_irqsave(&priv->lock, flags);
+	priv->hw.ops->lock_irqsave(&priv->lock, &flags);
 	priv->hw_unavailable++;
-	spin_unlock_irqrestore(&priv->lock, flags);
+	priv->hw.ops->unlock_irqrestore(&priv->lock, &flags);
 
 	pcmcia_disable_device(link);
 	if (priv->hw.iobase)
@@ -443,12 +419,6 @@ spectrum_cs_resume(struct pcmcia_device *link)
 /* Module initialization					    */
 /********************************************************************/
 
-/* Can't be declared "const" or the whole __initdata section will
- * become const */
-static char version[] __initdata = DRIVER_NAME " " DRIVER_VERSION
-	" (Pavel Roskin <proski@gnu.org>,"
-	" David Gibson <hermes@gibson.dropbear.id.au>, et al)";
-
 static struct pcmcia_device_id spectrum_cs_ids[] = {
 	PCMCIA_DEVICE_MANF_CARD(0x026c, 0x0001), /* Symbol Spectrum24 LA4137 */
 	PCMCIA_DEVICE_MANF_CARD(0x0104, 0x0001), /* Socket Communications CF */
@@ -459,9 +429,13 @@ MODULE_DEVICE_TABLE(pcmcia, spectrum_cs_ids);
 
 static struct pcmcia_driver orinoco_driver = {
 	.owner		= THIS_MODULE,
+#if 0 /* Not in RHEL */
+	.name		= DRIVER_NAME,
+#else
 	.drv		= {
 		.name	= DRIVER_NAME,
 	},
+#endif
 	.probe		= spectrum_cs_probe,
 	.remove		= spectrum_cs_detach,
 	.suspend	= spectrum_cs_suspend,
@@ -472,8 +446,6 @@ static struct pcmcia_driver orinoco_driver = {
 static int __init
 init_spectrum_cs(void)
 {
-	printk(KERN_DEBUG "%s\n", version);
-
 	return pcmcia_register_driver(&orinoco_driver);
 }
 

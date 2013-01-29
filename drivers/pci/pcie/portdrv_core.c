@@ -253,7 +253,7 @@ int pcie_get_port_device_capability(struct pci_dev *dev)
 	int services = 0, pos;
 	u16 reg16;
 	u32 reg32;
-	int cap_mask;
+	int cap_mask = 0;
 	int err;
 	struct pci_dev_rh1 *rh1_pci = dev->rh_reserved1;
 

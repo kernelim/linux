@@ -402,7 +402,8 @@ xfs_qm_dqalloc(
 			       dqp->q_blkno,
 			       mp->m_quotainfo->qi_dqchunklen,
 			       0);
-	if (!bp || (error = XFS_BUF_GETERROR(bp)))
+	error = xfs_buf_geterror(bp);
+	if (error)
 		goto error1;
 	/*
 	 * Make a chunk of dquots out of this buffer and log
@@ -1172,7 +1173,7 @@ xfs_qm_dqflush(
 	 * If not dirty, or it's pinned and we are not supposed to block, nada.
 	 */
 	if (!XFS_DQ_IS_DIRTY(dqp) ||
-	    (!(flags & SYNC_WAIT) && atomic_read(&dqp->q_pincount) > 0)) {
+	    ((flags & SYNC_TRYLOCK) && atomic_read(&dqp->q_pincount) > 0)) {
 		xfs_dqfunlock(dqp);
 		return 0;
 	}
@@ -1277,11 +1278,6 @@ xfs_dqunlock(
 	xfs_dquot_t *dqp)
 {
 	mutex_unlock(&(dqp->q_qlock));
-	if (dqp->q_logitem.qli_dquot == dqp) {
-		/* Once was dqp->q_mount, but might just have been cleared */
-		xfs_trans_unlocked_item(dqp->q_logitem.qli_item.li_ailp,
-					(xfs_log_item_t*)&(dqp->q_logitem));
-	}
 }
 
 

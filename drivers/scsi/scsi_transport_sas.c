@@ -33,9 +33,8 @@
 #include <linux/bsg.h>
 
 #include <scsi/scsi.h>
-#include <scsi/scsi_host.h>
-#include <scsi/scsi_scan.h>
 #include <scsi/scsi_device.h>
+#include <scsi/scsi_host.h>
 #include <scsi/scsi_transport.h>
 #include <scsi/scsi_transport_sas.h>
 
@@ -1671,9 +1670,6 @@ void
 sas_rphy_remove(struct sas_rphy *rphy)
 {
 	struct device *dev = &rphy->dev;
-
-	/* prevent device_del() while child device_add() may be in-flight */
-	scsi_complete_async_scans();
 
 	switch (rphy->identify.device_type) {
 	case SAS_END_DEVICE:

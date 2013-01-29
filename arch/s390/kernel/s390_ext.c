@@ -139,3 +139,26 @@ void __irq_entry do_extint(struct pt_regs *regs, unsigned short code)
 
 EXPORT_SYMBOL(register_external_interrupt);
 EXPORT_SYMBOL(unregister_external_interrupt);
+
+static DEFINE_SPINLOCK(ma_subclass_lock);
+static int ma_subclass_refcount;
+
+void measurement_alert_subclass_register(void)
+{
+	spin_lock(&ma_subclass_lock);
+	if (!ma_subclass_refcount)
+		ctl_set_bit(0, 5);
+	ma_subclass_refcount++;
+	spin_unlock(&ma_subclass_lock);
+}
+EXPORT_SYMBOL(measurement_alert_subclass_register);
+
+void measurement_alert_subclass_unregister(void)
+{
+	spin_lock(&ma_subclass_lock);
+	ma_subclass_refcount--;
+	if (!ma_subclass_refcount)
+		ctl_clear_bit(0, 5);
+	spin_unlock(&ma_subclass_lock);
+}
+EXPORT_SYMBOL(measurement_alert_subclass_unregister);

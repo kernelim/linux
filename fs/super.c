@@ -38,11 +38,54 @@
 #include <linux/mutex.h>
 #include <linux/file.h>
 #include <asm/uaccess.h>
+#include <linux/lockdep.h>
 #include "internal.h"
 
+static char *sb_writers_name[SB_FREEZE_LEVELS] = {
+	"sb_writers",
+	"sb_pagefaults",
+	"sb_internal",
+};
 
 LIST_HEAD(super_blocks);
 DEFINE_SPINLOCK(sb_lock);
+
+static int init_sb_writers(struct super_block *s, struct file_system_type *type)
+{
+	int err;
+	int i;
+
+	/* Out of tree modules don't use this mechanism */
+	if (unlikely(!(type->fs_flags & FS_HAS_NEW_FREEZE)))
+		return 0;
+
+	for (i = 0; i < SB_FREEZE_LEVELS; i++) {
+		err = percpu_counter_init(&s->s_writers.counter[i], 0);
+		if (err < 0)
+			goto err_out;
+		lockdep_init_map(&s->s_writers.lock_map[i], sb_writers_name[i],
+				 &type->s_writers_key[i], 0);
+	}
+	init_waitqueue_head(&s->s_writers.wait);
+	init_waitqueue_head(&s->s_writers.wait_unfrozen);
+	return 0;
+err_out:
+	while (--i >= 0)
+		percpu_counter_destroy(&s->s_writers.counter[i]);
+	return err;
+}
+
+static void destroy_sb_writers(struct super_block *s)
+{
+	int i;
+
+	/* Out of tree modules don't use this mechanism */
+	if (unlikely(!sb_has_new_freeze(s)))
+		return;
+
+	for (i = 0; i < SB_FREEZE_LEVELS; i++)
+		percpu_counter_destroy(&s->s_writers.counter[i]);
+}
 
 /**
  *	alloc_super	-	create new superblock
@@ -58,11 +101,17 @@ static struct super_block *alloc_super(struct file_system_type *type)
 
 	if (s) {
 		if (security_sb_alloc(s)) {
+			/*
+			 * We cannot call security_sb_free() without
+			 * security_sb_alloc() succeeding. So bail out manually
+			 */
 			kfree(s);
 			s = NULL;
 			goto out;
 		}
 		INIT_LIST_HEAD(&s->s_files);
+		if (init_sb_writers(s, type))
+			goto err_out;
 		INIT_LIST_HEAD(&s->s_instances);
 		INIT_HLIST_HEAD(&s->s_anon);
 		INIT_LIST_HEAD(&s->s_inodes);
@@ -92,7 +141,7 @@ static struct super_block *alloc_super(struct file_system_type *type)
 		 * subclass.
 		 */
 		down_write_nested(&s->s_umount, SINGLE_DEPTH_NESTING);
-		s->s_count = S_BIAS;
+		s->s_count = 1;
 		atomic_set(&s->s_active, 1);
 		mutex_init(&s->s_vfs_rename_mutex);
 		mutex_init(&s->s_dquot.dqio_mutex);
@@ -107,6 +156,12 @@ static struct super_block *alloc_super(struct file_system_type *type)
 	}
 out:
 	return s;
+err_out:
+	security_sb_free(s);
+	destroy_sb_writers(s);
+	kfree(s);
+	s = NULL;
+	goto out;
 }
 
 /**
@@ -118,6 +173,7 @@ out:
 static inline void destroy_super(struct super_block *s)
 {
 	security_sb_free(s);
+	destroy_sb_writers(s);
 	kfree(s->s_subtype);
 	kfree(s->s_options);
 	kfree(s);
@@ -188,9 +244,7 @@ void put_super(struct super_block *sb)
 void deactivate_super(struct super_block *s)
 {
 	struct file_system_type *fs = s->s_type;
-	if (atomic_dec_and_lock(&s->s_active, &sb_lock)) {
-		s->s_count -= S_BIAS-1;
-		spin_unlock(&sb_lock);
+	if (atomic_dec_and_test(&s->s_active)) {
 		vfs_dq_off(s, 0);
 		down_write(&s->s_umount);
 		fs->kill_sb(s);
@@ -215,9 +269,7 @@ EXPORT_SYMBOL(deactivate_super);
 void deactivate_locked_super(struct super_block *s)
 {
 	struct file_system_type *fs = s->s_type;
-	if (atomic_dec_and_lock(&s->s_active, &sb_lock)) {
-		s->s_count -= S_BIAS-1;
-		spin_unlock(&sb_lock);
+	if (atomic_dec_and_test(&s->s_active)) {
 		vfs_dq_off(s, 0);
 		fs->kill_sb(s);
 		put_filesystem(fs);
@@ -242,21 +294,18 @@ EXPORT_SYMBOL(deactivate_locked_super);
  */
 static int grab_super(struct super_block *s) __releases(sb_lock)
 {
+	if (atomic_inc_not_zero(&s->s_active)) {
+		spin_unlock(&sb_lock);
+		return 1;
+	}
+	/* it's going away */
 	s->s_count++;
 	spin_unlock(&sb_lock);
+	/* usually that'll be enough for it to die... */
 	down_write(&s->s_umount);
-	if (s->s_root) {
-		spin_lock(&sb_lock);
-		if (s->s_count > S_BIAS) {
-			atomic_inc(&s->s_active);
-			s->s_count--;
-			spin_unlock(&sb_lock);
-			return 1;
-		}
-		spin_unlock(&sb_lock);
-	}
 	up_write(&s->s_umount);
 	put_super(s);
+	/* ... but in case it wasn't, let's at least yield() */
 	yield();
 	return 0;
 }
@@ -355,6 +404,12 @@ retry:
 			if (s) {
 				up_write(&s->s_umount);
 				destroy_super(s);
+				s = NULL;
+			}
+			down_write(&old->s_umount);
+			if (unlikely(!(old->s_flags & MS_BORN))) {
+				deactivate_locked_super(old);
+				goto retry;
 			}
 			return old;
 		}
@@ -481,10 +536,23 @@ struct super_block *get_super_thawed(struct block_device *bdev)
 {
 	while (1) {
 		struct super_block *s = get_super(bdev);
-		if (!s || s->s_frozen == SB_UNFROZEN)
+
+		if (!s)
 			return s;
-		up_read(&s->s_umount);
-		vfs_check_frozen(s, SB_FREEZE_WRITE);
+
+		if (likely(sb_has_new_freeze(s))) {
+			if (s->s_writers.frozen == SB_UNFROZEN)
+				return s;
+			up_read(&s->s_umount);
+			wait_event(s->s_writers.wait_unfrozen,
+				   s->s_writers.frozen == SB_UNFROZEN);
+		} else {
+			/* Version for out of tree filesystems w/o s_writers */
+			if (s->s_frozen == SB_UNFROZEN)
+				return s;
+			up_read(&s->s_umount);
+			vfs_check_frozen(s, SB_FREEZE_WRITE);
+		}
 		put_super(s);
 	}
 }
@@ -495,7 +563,7 @@ struct super_block *get_super_thawed(struct block_device *bdev)
  *
  * Scans the superblock list and finds the superblock of the file system
  * mounted on the device given.  Returns the superblock with an active
- * reference and s_umount held exclusively or %NULL if none was found.
+ * reference or %NULL if none was found.
  */
 struct super_block *get_active_super(struct block_device *bdev)
 {
@@ -509,22 +577,9 @@ struct super_block *get_active_super(struct block_device *bdev)
 		if (sb->s_bdev != bdev)
 			continue;
 
-		sb->s_count++;
-		spin_unlock(&sb_lock);
-		down_write(&sb->s_umount);
-		if (sb->s_root) {
-			spin_lock(&sb_lock);
-			if (sb->s_count > S_BIAS) {
-				atomic_inc(&sb->s_active);
-				sb->s_count--;
-				spin_unlock(&sb_lock);
-				return sb;
-			}
-			spin_unlock(&sb_lock);
-		}
-		up_write(&sb->s_umount);
-		put_super(sb);
-		yield();
+		if (grab_super(sb)) /* drops sb_lock */
+			return sb;
+
 		spin_lock(&sb_lock);
 	}
 	spin_unlock(&sb_lock);
@@ -556,6 +611,130 @@ rescan:
 	return NULL;
 }
 
+/*
+ * This is an internal function, please use sb_end_{write,pagefault,intwrite}
+ * instead.
+ */
+void __sb_end_write(struct super_block *sb, int level)
+{
+	/* Out of tree modules don't use this mechanism */
+	if (unlikely(!sb_has_new_freeze(sb)))
+		return;
+
+	percpu_counter_dec(&sb->s_writers.counter[level-1]);
+	/*
+	 * Make sure s_writers are updated before we wake up waiters in
+	 * freeze_super().
+	 */
+	smp_mb();
+	if (waitqueue_active(&sb->s_writers.wait))
+		wake_up(&sb->s_writers.wait);
+	rwsem_release(&sb->s_writers.lock_map[level-1], 1, _RET_IP_);
+}
+EXPORT_SYMBOL(__sb_end_write);
+
+#ifdef CONFIG_LOCKDEP
+/*
+ * We want lockdep to tell us about possible deadlocks with freezing but
+ * it's it bit tricky to properly instrument it. Getting a freeze protection
+ * works as getting a read lock but there are subtle problems. XFS for example
+ * gets freeze protection on internal level twice in some cases, which is OK
+ * only because we already hold a freeze protection also on higher level. Due
+ * to these cases we have to tell lockdep we are doing trylock when we
+ * already hold a freeze protection for a higher freeze level.
+ */
+static void acquire_freeze_lock(struct super_block *sb, int level, bool trylock,
+				unsigned long ip)
+{
+	int i;
+
+	if (!trylock) {
+		for (i = 0; i < level - 1; i++)
+			if (lock_is_held(&sb->s_writers.lock_map[i])) {
+				trylock = true;
+				break;
+			}
+	}
+	rwsem_acquire_read(&sb->s_writers.lock_map[level-1], 0, trylock, ip);
+}
+#endif
+
+/*
+ * This is an internal function, please use sb_start_{write,pagefault,intwrite}
+ * instead.
+ */
+int __sb_start_write(struct super_block *sb, int level, bool wait)
+{
+	/* Out of tree modules don't use this mechanism */
+	if (unlikely(!sb_has_new_freeze(sb)))
+		return 1;
+retry:
+	if (unlikely(sb->s_writers.frozen >= level)) {
+		if (!wait)
+			return 0;
+		wait_event(sb->s_writers.wait_unfrozen,
+			   sb->s_writers.frozen < level);
+	}
+
+#ifdef CONFIG_LOCKDEP
+	acquire_freeze_lock(sb, level, !wait, _RET_IP_);
+#endif
+	percpu_counter_inc(&sb->s_writers.counter[level-1]);
+	/*
+	 * Make sure counter is updated before we check for frozen.
+	 * freeze_super() first sets frozen and then checks the counter.
+	 */
+	smp_mb();
+	if (unlikely(sb->s_writers.frozen >= level)) {
+		__sb_end_write(sb, level);
+		goto retry;
+	}
+	return 1;
+}
+EXPORT_SYMBOL(__sb_start_write);
+
+/**
+ * sb_wait_write - wait until all writers to given file system finish
+ * @sb: the super for which we wait
+ * @level: type of writers we wait for (normal vs page fault)
+ *
+ * This function waits until there are no writers of given type to given file
+ * system. Caller of this function should make sure there can be no new writers
+ * of type @level before calling this function. Otherwise this function can
+ * livelock.
+ */
+void sb_wait_write(struct super_block *sb, int level)
+{
+	s64 writers;
+
+	/* Out of tree modules don't use this mechanism */
+	if (unlikely(!sb_has_new_freeze(sb)))
+		return;
+	/*
+	 * We just cycle-through lockdep here so that it does not complain
+	 * about returning with lock to userspace
+	 */
+	rwsem_acquire(&sb->s_writers.lock_map[level-1], 0, 0, _THIS_IP_);
+	rwsem_release(&sb->s_writers.lock_map[level-1], 1, _THIS_IP_);
+
+	do {
+		DEFINE_WAIT(wait);
+
+		/*
+		 * We use a barrier in prepare_to_wait() to separate setting
+		 * of frozen and checking of the counter
+		 */
+		prepare_to_wait(&sb->s_writers.wait, &wait,
+				TASK_UNINTERRUPTIBLE);
+
+		writers = percpu_counter_sum(&sb->s_writers.counter[level-1]);
+		if (writers)
+			schedule();
+
+		finish_wait(&sb->s_writers.wait, &wait);
+	} while (writers);
+}
+
 /**
  *	do_remount_sb - asks filesystem to change mount options.
  *	@sb:	superblock in question
@@ -570,7 +749,11 @@ int do_remount_sb(struct super_block *sb, int flags, void *data, int force)
 	int retval;
 	int remount_rw, remount_ro;
 
-	if (sb->s_frozen != SB_UNFROZEN)
+	/* Older / out of tree filesystems */
+	if (unlikely(!sb_has_new_freeze(sb)) && (sb->s_frozen != SB_UNFROZEN))
+		return -EBUSY;
+
+	if (sb->s_writers.frozen != SB_UNFROZEN)
 		return -EBUSY;
 
 #ifdef CONFIG_BLOCK
@@ -593,9 +776,11 @@ int do_remount_sb(struct super_block *sb, int flags, void *data, int force)
 			mark_files_ro(sb);
 		else if (!fs_may_remount_ro(sb))
 			return -EBUSY;
-		retval = vfs_dq_off(sb, 1);
-		if (retval < 0 && retval != -ENOSYS)
-			return -EBUSY;
+		if (!(sb->s_type->fs_flags & FS_HANDLE_QUOTA)) {
+			retval = vfs_dq_off(sb, 1);
+			if (retval < 0 && retval != -ENOSYS)
+				return -EBUSY;
+		}
 	}
 
 	if (sb->s_op->remount_fs) {
@@ -604,7 +789,7 @@ int do_remount_sb(struct super_block *sb, int flags, void *data, int force)
 			return retval;
 	}
 	sb->s_flags = (sb->s_flags & ~MS_RMT_MASK) | (flags & MS_RMT_MASK);
-	if (remount_rw)
+	if (remount_rw && !(sb->s_type->fs_flags & FS_HANDLE_QUOTA))
 		vfs_dq_quota_on_remount(sb);
 	/*
 	 * Some filesystems modify their metadata via some other path than the
@@ -951,6 +1136,7 @@ vfs_kern_mount(struct file_system_type *type, int flags, const char *name, void 
 	if (error < 0)
 		goto out_free_secdata;
 	BUG_ON(!mnt->mnt_sb);
+	mnt->mnt_sb->s_flags |= MS_BORN;
 
  	error = security_sb_kern_mount(mnt->mnt_sb, flags, secdata);
  	if (error)

@@ -43,7 +43,7 @@ int ns_cgroup_clone(struct task_struct *task, struct pid *pid)
  *        ancestor cgroup thereof)
  */
 static int ns_can_attach(struct cgroup_subsys *ss, struct cgroup *new_cgroup,
-			 struct task_struct *task, bool threadgroup)
+			 struct task_struct *task)
 {
 	if (current != task) {
 		if (!capable(CAP_SYS_ADMIN))
@@ -53,20 +53,13 @@ static int ns_can_attach(struct cgroup_subsys *ss, struct cgroup *new_cgroup,
 			return -EPERM;
 	}
 
-	if (!cgroup_is_descendant(new_cgroup, task))
-		return -EPERM;
+	return 0;
+}
 
-	if (threadgroup) {
-		struct task_struct *c;
-		rcu_read_lock();
-		list_for_each_entry_rcu(c, &task->thread_group, thread_group) {
-			if (!cgroup_is_descendant(new_cgroup, c)) {
-				rcu_read_unlock();
-				return -EPERM;
-			}
-		}
-		rcu_read_unlock();
-	}
+static int ns_can_attach_task(struct cgroup *cgroup, struct task_struct *task)
+{
+	if (!cgroup_is_descendant(cgroup, task))
+		return -EPERM;
 
 	return 0;
 }
@@ -104,6 +97,7 @@ static void ns_destroy(struct cgroup_subsys *ss,
 struct cgroup_subsys ns_subsys = {
 	.name = "ns",
 	.can_attach = ns_can_attach,
+	.can_attach_task = ns_can_attach_task,
 	.create = ns_create,
 	.destroy  = ns_destroy,
 	.subsys_id = ns_subsys_id,

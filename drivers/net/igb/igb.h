@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel(R) Gigabit Ethernet Linux driver
-  Copyright(c) 2007-2011 Intel Corporation.
+  Copyright(c) 2007-2012 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -34,9 +34,11 @@
 #include "e1000_mac.h"
 #include "e1000_82575.h"
 
+#ifdef CONFIG_IGB_PTP
 #include <linux/clocksource.h>
-#include <linux/timecompare.h>
 #include <linux/net_tstamp.h>
+#include <linux/ptp_clock_kernel.h>
+#endif /* CONFIG_IGB_PTP */
 
 struct igb_adapter;
 
@@ -63,15 +65,29 @@ struct igb_adapter;
 #define MAX_Q_VECTORS                      8
 
 /* Transmit and receive queues */
-#define IGB_MAX_RX_QUEUES                  (adapter->vfs_allocated_count ? 2 : \
-                                           (hw->mac.type > e1000_82575 ? 8 : 4))
-#define IGB_MAX_TX_QUEUES                  16
-
+#define IGB_MAX_RX_QUEUES                  8
+#define IGB_MAX_RX_QUEUES_82575            4
+#define IGB_MAX_RX_QUEUES_I211             2
+#define IGB_MAX_TX_QUEUES                  8
 #define IGB_MAX_VF_MC_ENTRIES              30
 #define IGB_MAX_VF_FUNCTIONS               8
 #define IGB_MAX_VFTA_ENTRIES               128
 #define IGB_82576_VF_DEV_ID                0x10CA
 #define IGB_I350_VF_DEV_ID                 0x1520
+
+/* NVM version defines */
+#define IGB_MAJOR_MASK			0xF000
+#define IGB_MINOR_MASK			0x0FF0
+#define IGB_BUILD_MASK			0x000F
+#define IGB_COMB_VER_MASK		0x00FF
+#define IGB_MAJOR_SHIFT			12
+#define IGB_MINOR_SHIFT			4
+#define IGB_COMB_VER_SHFT		8
+#define IGB_NVM_VER_INVALID		0xFFFF
+#define IGB_ETRACK_SHIFT		16
+#define NVM_ETRACK_WORD			0x0042
+#define NVM_COMB_VER_OFF		0x0083
+#define NVM_COMB_VER_PTR		0x003d
 
 struct vf_data_storage {
 	unsigned char vf_mac_addresses[ETH_ALEN];
@@ -83,7 +99,6 @@ struct vf_data_storage {
 	u16 pf_vlan; /* When set, guest VLAN config not allowed. */
 	u16 pf_qos;
 	u16 tx_rate;
-	struct pci_dev *vfdev;
 };
 
 #define IGB_VF_FLAG_CTS            0x00000001 /* VF is clear to send data */
@@ -115,9 +130,9 @@ struct vf_data_storage {
 #define MAXIMUM_ETHERNET_VLAN_SIZE 1522
 
 /* Supported Rx Buffer Sizes */
-#define IGB_RXBUFFER_512   512
+#define IGB_RXBUFFER_256   256
 #define IGB_RXBUFFER_16384 16384
-#define IGB_RX_HDR_LEN     IGB_RXBUFFER_512
+#define IGB_RX_HDR_LEN     IGB_RXBUFFER_256
 
 /* How many Tx Descriptors do we need to call netif_wake_queue ? */
 #define IGB_TX_QUEUE_WAKE	16
@@ -322,10 +337,6 @@ struct igb_adapter {
 
 	/* OS defined structs */
 	struct pci_dev *pdev;
-	struct cyclecounter cycles;
-	struct timecounter clock;
-	struct timecompare compare;
-	struct hwtstamp_config hwtstamp_config;
 
 	/* structs defined in e1000_hw.h */
 	struct e1000_hw hw;
@@ -355,6 +366,19 @@ struct igb_adapter {
 	u32 wvbr;
 	int node;
 	u32 *shadow_vfta;
+
+#ifdef CONFIG_IGB_PTP
+	struct ptp_clock *ptp_clock;
+	struct ptp_clock_info ptp_caps;
+	struct delayed_work ptp_overflow_work;
+	struct work_struct ptp_tx_work;
+	struct sk_buff *ptp_tx_skb;
+	spinlock_t tmreg_lock;
+	struct cyclecounter cc;
+	struct timecounter tc;
+#endif /* CONFIG_IGB_PTP */
+
+	char fw_version[32];
 };
 
 #define IGB_FLAG_HAS_MSI           (1 << 0)
@@ -362,6 +386,7 @@ struct igb_adapter {
 #define IGB_FLAG_QUAD_PORT_A       (1 << 2)
 #define IGB_FLAG_QUEUE_PAIRS       (1 << 3)
 #define IGB_FLAG_DMAC              (1 << 4)
+#define IGB_FLAG_PTP               (1 << 5)
 
 /* DMA Coalescing defines */
 #define IGB_MIN_TXPBSIZE           20408
@@ -369,7 +394,6 @@ struct igb_adapter {
 #define IGB_DMCTLX_DCFLUSH_DIS     0x80000000  /* Disable DMA Coal Flush */
 
 #define IGB_82576_TSYNC_SHIFT 19
-#define IGB_82580_TSYNC_SHIFT 24
 #define IGB_TS_HDR_LEN        16
 enum e1000_state_t {
 	__IGB_TESTING,
@@ -405,6 +429,19 @@ extern void igb_update_stats(struct igb_adapter *);
 extern bool igb_has_link(struct igb_adapter *adapter);
 extern void igb_set_ethtool_ops(struct net_device *);
 extern void igb_power_up_link(struct igb_adapter *);
+extern void igb_set_fw_version(struct igb_adapter *);
+#ifdef CONFIG_IGB_PTP
+extern void igb_ptp_init(struct igb_adapter *adapter);
+extern void igb_ptp_stop(struct igb_adapter *adapter);
+extern void igb_ptp_reset(struct igb_adapter *adapter);
+extern void igb_ptp_tx_work(struct work_struct *work);
+extern void igb_ptp_tx_hwtstamp(struct igb_adapter *adapter);
+extern void igb_ptp_rx_hwtstamp(struct igb_q_vector *q_vector,
+				union e1000_adv_rx_desc *rx_desc,
+				struct sk_buff *skb);
+extern int igb_ptp_hwtstamp_ioctl(struct net_device *netdev,
+				  struct ifreq *ifr, int cmd);
+#endif /* CONFIG_IGB_PTP */
 
 static inline s32 igb_reset_phy(struct e1000_hw *hw)
 {

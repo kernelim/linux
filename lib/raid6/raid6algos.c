@@ -32,25 +32,6 @@ EXPORT_SYMBOL(raid6_empty_zero_page);
 struct raid6_calls raid6_call;
 EXPORT_SYMBOL_GPL(raid6_call);
 
-/* Various routine sets */
-extern const struct raid6_calls raid6_intx1;
-extern const struct raid6_calls raid6_intx2;
-extern const struct raid6_calls raid6_intx4;
-extern const struct raid6_calls raid6_intx8;
-extern const struct raid6_calls raid6_intx16;
-extern const struct raid6_calls raid6_intx32;
-extern const struct raid6_calls raid6_mmxx1;
-extern const struct raid6_calls raid6_mmxx2;
-extern const struct raid6_calls raid6_sse1x1;
-extern const struct raid6_calls raid6_sse1x2;
-extern const struct raid6_calls raid6_sse2x1;
-extern const struct raid6_calls raid6_sse2x2;
-extern const struct raid6_calls raid6_sse2x4;
-extern const struct raid6_calls raid6_altivec1;
-extern const struct raid6_calls raid6_altivec2;
-extern const struct raid6_calls raid6_altivec4;
-extern const struct raid6_calls raid6_altivec8;
-
 const struct raid6_calls * const raid6_algos[] = {
 	&raid6_intx1,
 	&raid6_intx2,
@@ -82,6 +63,20 @@ const struct raid6_calls * const raid6_algos[] = {
 	NULL
 };
 
+void (*raid6_2data_recov)(int, size_t, int, int, void **);
+EXPORT_SYMBOL_GPL(raid6_2data_recov);
+
+void (*raid6_datap_recov)(int, size_t, int, void **);
+EXPORT_SYMBOL_GPL(raid6_datap_recov);
+
+const struct raid6_recov_calls *const raid6_recov_algos[] = {
+#if (defined(__i386__) || defined(__x86_64__)) && !defined(__arch_um__)
+	&raid6_recov_ssse3,
+#endif
+	&raid6_recov_intx1,
+	NULL
+};
+
 #ifdef __KERNEL__
 #define RAID6_TIME_JIFFIES_LG2	4
 #else
@@ -89,6 +84,26 @@ const struct raid6_calls * const raid6_algos[] = {
 #define RAID6_TIME_JIFFIES_LG2	9
 #define time_before(x, y) ((x) < (y))
 #endif
+
+static inline void raid6_choose_recov(void)
+{
+	const struct raid6_recov_calls *const *algo;
+	const struct raid6_recov_calls *best;
+
+	for (best = NULL, algo = raid6_recov_algos; *algo; algo++)
+		if (!best || (*algo)->priority > best->priority)
+			if (!(*algo)->valid || (*algo)->valid())
+				best = *algo;
+
+	if (best) {
+		raid6_2data_recov = best->data2;
+		raid6_datap_recov = best->datap;
+
+		printk("raid6: using %s recovery algorithm\n", best->name);
+	} else
+		printk("raid6: Yikes! No recovery algorithm found!\n");
+}
+
 
 /* Try to pick the best algorithm */
 /* This code uses the gfmul table as convenient data set to abuse */
@@ -158,6 +173,9 @@ int __init raid6_select_algo(void)
 		printk("raid6: Yikes!  No algorithm found!\n");
 
 	free_pages((unsigned long)syndromes, 1);
+
+	/* select raid recover functions */
+	raid6_choose_recov();
 
 	return best ? 0 : -EINVAL;
 }

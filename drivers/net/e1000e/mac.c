@@ -143,12 +143,12 @@ void e1000e_init_rx_addrs(struct e1000_hw *hw, u16 rar_count)
 	/* Setup the receive address */
 	e_dbg("Programming MAC Address into RAR[0]\n");
 
-	e1000e_rar_set(hw, hw->mac.addr, 0);
+	hw->mac.ops.rar_set(hw, hw->mac.addr, 0);
 
 	/* Zero out the other (rar_entry_count - 1) receive addresses */
 	e_dbg("Clearing RAR[1-%u]\n", rar_count - 1);
 	for (i = 1; i < rar_count; i++)
-		e1000e_rar_set(hw, mac_addr, i);
+		hw->mac.ops.rar_set(hw, mac_addr, i);
 }
 
 /**
@@ -172,23 +172,23 @@ s32 e1000_check_alt_mac_addr_generic(struct e1000_hw *hw)
 
 	ret_val = e1000_read_nvm(hw, NVM_COMPAT, 1, &nvm_data);
 	if (ret_val)
-		goto out;
+		return ret_val;
 
-	/* not supported on older hardware or 82573 */
-	if ((hw->mac.type < e1000_82571) || (hw->mac.type == e1000_82573))
-		goto out;
+	/* not supported on 82573 */
+	if (hw->mac.type == e1000_82573)
+		return 0;
 
 	ret_val = e1000_read_nvm(hw, NVM_ALT_MAC_ADDR_PTR, 1,
 				 &nvm_alt_mac_addr_offset);
 	if (ret_val) {
 		e_dbg("NVM Read Error\n");
-		goto out;
+		return ret_val;
 	}
 
 	if ((nvm_alt_mac_addr_offset == 0xFFFF) ||
 	    (nvm_alt_mac_addr_offset == 0x0000))
 		/* There is no Alternate MAC Address */
-		goto out;
+		return 0;
 
 	if (hw->bus.func == E1000_FUNC_1)
 		nvm_alt_mac_addr_offset += E1000_ALT_MAC_ADDRESS_OFFSET_LAN1;
@@ -197,7 +197,7 @@ s32 e1000_check_alt_mac_addr_generic(struct e1000_hw *hw)
 		ret_val = e1000_read_nvm(hw, offset, 1, &nvm_data);
 		if (ret_val) {
 			e_dbg("NVM Read Error\n");
-			goto out;
+			return ret_val;
 		}
 
 		alt_mac_addr[i] = (u8)(nvm_data & 0xFF);
@@ -207,7 +207,7 @@ s32 e1000_check_alt_mac_addr_generic(struct e1000_hw *hw)
 	/* if multicast bit is set, the alternate address will not be used */
 	if (is_multicast_ether_addr(alt_mac_addr)) {
 		e_dbg("Ignoring Alternate Mac Address with MC bit set\n");
-		goto out;
+		return 0;
 	}
 
 	/*
@@ -215,14 +215,13 @@ s32 e1000_check_alt_mac_addr_generic(struct e1000_hw *hw)
 	 * same as the normal permanent MAC address stored by the HW into the
 	 * RAR. Do this by mapping this address into RAR0.
 	 */
-	e1000e_rar_set(hw, alt_mac_addr, 0);
+	hw->mac.ops.rar_set(hw, alt_mac_addr, 0);
 
-out:
-	return ret_val;
+	return 0;
 }
 
 /**
- *  e1000e_rar_set - Set receive address register
+ *  e1000e_rar_set_generic - Set receive address register
  *  @hw: pointer to the HW structure
  *  @addr: pointer to the receive address
  *  @index: receive address array register
@@ -230,7 +229,7 @@ out:
  *  Sets the receive address array register at index to the address passed
  *  in by addr.
  **/
-void e1000e_rar_set(struct e1000_hw *hw, u8 *addr, u32 index)
+void e1000e_rar_set_generic(struct e1000_hw *hw, u8 *addr, u32 index)
 {
 	u32 rar_low, rar_high;
 
@@ -264,8 +263,7 @@ void e1000e_rar_set(struct e1000_hw *hw, u8 *addr, u32 index)
  *  @mc_addr: pointer to a multicast address
  *
  *  Generates a multicast address hash value which is used to determine
- *  the multicast filter table array address and new table value.  See
- *  e1000_mta_set_generic()
+ *  the multicast filter table array address and new table value.
  **/
 static u32 e1000_hash_mc_addr(struct e1000_hw *hw, u8 *mc_addr)
 {
@@ -444,7 +442,7 @@ s32 e1000e_check_for_copper_link(struct e1000_hw *hw)
 		return ret_val;
 
 	if (!link)
-		return ret_val;	/* No link detected */
+		return 0;	/* No link detected */
 
 	mac->get_link_status = false;
 
@@ -458,17 +456,15 @@ s32 e1000e_check_for_copper_link(struct e1000_hw *hw)
 	 * If we are forcing speed/duplex, then we simply return since
 	 * we have already determined whether we have link or not.
 	 */
-	if (!mac->autoneg) {
-		ret_val = -E1000_ERR_CONFIG;
-		return ret_val;
-	}
+	if (!mac->autoneg)
+		return -E1000_ERR_CONFIG;
 
 	/*
 	 * Auto-Neg is enabled.  Auto Speed Detection takes care
 	 * of MAC speed/duplex configuration.  So we only need to
 	 * configure Collision Distance in the MAC.
 	 */
-	e1000e_config_collision_dist(hw);
+	mac->ops.config_collision_dist(hw);
 
 	/*
 	 * Configure Flow Control now that Auto-Neg has completed.
@@ -511,10 +507,10 @@ s32 e1000e_check_for_fiber_link(struct e1000_hw *hw)
 	 * was just plugged in. The autoneg_failed flag does this.
 	 */
 	/* (ctrl & E1000_CTRL_SWDPIN1) == 1 == have signal */
-	if ((ctrl & E1000_CTRL_SWDPIN1) && (!(status & E1000_STATUS_LU)) &&
-	    (!(rxcw & E1000_RXCW_C))) {
-		if (mac->autoneg_failed == 0) {
-			mac->autoneg_failed = 1;
+	if ((ctrl & E1000_CTRL_SWDPIN1) && !(status & E1000_STATUS_LU) &&
+	    !(rxcw & E1000_RXCW_C)) {
+		if (!mac->autoneg_failed) {
+			mac->autoneg_failed = true;
 			return 0;
 		}
 		e_dbg("NOT Rx'ing /C/, disable AutoNeg and force link.\n");
@@ -577,9 +573,9 @@ s32 e1000e_check_for_serdes_link(struct e1000_hw *hw)
 	 * time to complete.
 	 */
 	/* (ctrl & E1000_CTRL_SWDPIN1) == 1 == have signal */
-	if ((!(status & E1000_STATUS_LU)) && (!(rxcw & E1000_RXCW_C))) {
-		if (mac->autoneg_failed == 0) {
-			mac->autoneg_failed = 1;
+	if (!(status & E1000_STATUS_LU) && !(rxcw & E1000_RXCW_C)) {
+		if (!mac->autoneg_failed) {
+			mac->autoneg_failed = true;
 			return 0;
 		}
 		e_dbg("NOT Rx'ing /C/, disable AutoNeg and force link.\n");
@@ -633,7 +629,7 @@ s32 e1000e_check_for_serdes_link(struct e1000_hw *hw)
 	if (E1000_TXCW_ANE & er32(TXCW)) {
 		status = er32(STATUS);
 		if (status & E1000_STATUS_LU) {
-			/* SYNCH bit and IV bit are sticky, so reread rxcw.  */
+			/* SYNCH bit and IV bit are sticky, so reread rxcw. */
 			udelay(10);
 			rxcw = er32(RXCW);
 			if (rxcw & E1000_RXCW_SYNCH) {
@@ -685,7 +681,7 @@ static s32 e1000_set_default_fc_generic(struct e1000_hw *hw)
 		return ret_val;
 	}
 
-	if ((nvm_data & NVM_WORD0F_PAUSE_MASK) == 0)
+	if (!(nvm_data & NVM_WORD0F_PAUSE_MASK))
 		hw->fc.requested_mode = e1000_fc_none;
 	else if ((nvm_data & NVM_WORD0F_PAUSE_MASK) == NVM_WORD0F_ASM_DIR)
 		hw->fc.requested_mode = e1000_fc_tx_pause;
@@ -696,7 +692,7 @@ static s32 e1000_set_default_fc_generic(struct e1000_hw *hw)
 }
 
 /**
- *  e1000e_setup_link - Setup flow control and link settings
+ *  e1000e_setup_link_generic - Setup flow control and link settings
  *  @hw: pointer to the HW structure
  *
  *  Determines which flow control settings to use, then configures flow
@@ -705,16 +701,15 @@ static s32 e1000_set_default_fc_generic(struct e1000_hw *hw)
  *  should be established.  Assumes the hardware has previously been reset
  *  and the transmitter and receiver are not enabled.
  **/
-s32 e1000e_setup_link(struct e1000_hw *hw)
+s32 e1000e_setup_link_generic(struct e1000_hw *hw)
 {
-	struct e1000_mac_info *mac = &hw->mac;
 	s32 ret_val;
 
 	/*
 	 * In the case of the phy reset being blocked, we already have a link.
 	 * We do not need to set it up again.
 	 */
-	if (e1000_check_reset_block(hw))
+	if (hw->phy.ops.check_reset_block && hw->phy.ops.check_reset_block(hw))
 		return 0;
 
 	/*
@@ -736,7 +731,7 @@ s32 e1000e_setup_link(struct e1000_hw *hw)
 	e_dbg("After fix-ups FlowControl is now = %x\n", hw->fc.current_mode);
 
 	/* Call the necessary media_type subroutine to configure the link. */
-	ret_val = mac->ops.setup_physical_interface(hw);
+	ret_val = hw->mac.ops.setup_physical_interface(hw);
 	if (ret_val)
 		return ret_val;
 
@@ -855,7 +850,7 @@ static s32 e1000_poll_fiber_serdes_link_generic(struct e1000_hw *hw)
 	}
 	if (i == FIBER_LINK_UP_LIMIT) {
 		e_dbg("Never got a valid link from auto-neg!!!\n");
-		mac->autoneg_failed = 1;
+		mac->autoneg_failed = true;
 		/*
 		 * AutoNeg failed to achieve a link, so we'll call
 		 * mac->check_for_link. This routine will force the
@@ -867,9 +862,9 @@ static s32 e1000_poll_fiber_serdes_link_generic(struct e1000_hw *hw)
 			e_dbg("Error while checking for link\n");
 			return ret_val;
 		}
-		mac->autoneg_failed = 0;
+		mac->autoneg_failed = false;
 	} else {
-		mac->autoneg_failed = 0;
+		mac->autoneg_failed = false;
 		e_dbg("Valid Link Found\n");
 	}
 
@@ -893,7 +888,7 @@ s32 e1000e_setup_fiber_serdes_link(struct e1000_hw *hw)
 	/* Take the link out of reset */
 	ctrl &= ~E1000_CTRL_LRST;
 
-	e1000e_config_collision_dist(hw);
+	hw->mac.ops.config_collision_dist(hw);
 
 	ret_val = e1000_commit_fc_settings_generic(hw);
 	if (ret_val)
@@ -924,18 +919,17 @@ s32 e1000e_setup_fiber_serdes_link(struct e1000_hw *hw)
 		e_dbg("No signal detected\n");
 	}
 
-	return 0;
+	return ret_val;
 }
 
 /**
- *  e1000e_config_collision_dist - Configure collision distance
+ *  e1000e_config_collision_dist_generic - Configure collision distance
  *  @hw: pointer to the HW structure
  *
  *  Configures the collision distance to the default value and is used
- *  during link setup. Currently no func pointer exists and all
- *  implementations are handled in the generic version of this function.
+ *  during link setup.
  **/
-void e1000e_config_collision_dist(struct e1000_hw *hw)
+void e1000e_config_collision_dist_generic(struct e1000_hw *hw)
 {
 	u32 tctl;
 
@@ -974,7 +968,9 @@ s32 e1000e_set_fc_watermarks(struct e1000_hw *hw)
 		 * XON frames.
 		 */
 		fcrtl = hw->fc.low_water;
-		fcrtl |= E1000_FCRTL_XONE;
+		if (hw->fc.send_xon)
+			fcrtl |= E1000_FCRTL_XONE;
+
 		fcrth = hw->fc.high_water;
 	}
 	ew32(FCRTL, fcrtl);
@@ -1402,11 +1398,11 @@ s32 e1000e_valid_led_default(struct e1000_hw *hw, u16 *data)
 }
 
 /**
- *  e1000e_id_led_init -
+ *  e1000e_id_led_init_generic -
  *  @hw: pointer to the HW structure
  *
  **/
-s32 e1000e_id_led_init(struct e1000_hw *hw)
+s32 e1000e_id_led_init_generic(struct e1000_hw *hw)
 {
 	struct e1000_mac_info *mac = &hw->mac;
 	s32 ret_val;
@@ -1661,7 +1657,7 @@ void e1000e_reset_adaptive(struct e1000_hw *hw)
 
 	if (!mac->adaptive_ifs) {
 		e_dbg("Not in Adaptive IFS mode!\n");
-		goto out;
+		return;
 	}
 
 	mac->current_ifs_val = 0;
@@ -1672,8 +1668,6 @@ void e1000e_reset_adaptive(struct e1000_hw *hw)
 
 	mac->in_ifs_mode = false;
 	ew32(AIT, 0);
-out:
-	return;
 }
 
 /**
@@ -1689,7 +1683,7 @@ void e1000e_update_adaptive(struct e1000_hw *hw)
 
 	if (!mac->adaptive_ifs) {
 		e_dbg("Not in Adaptive IFS mode!\n");
-		goto out;
+		return;
 	}
 
 	if ((mac->collision_delta * mac->ifs_ratio) > mac->tx_packet_delta) {
@@ -1712,6 +1706,4 @@ void e1000e_update_adaptive(struct e1000_hw *hw)
 			ew32(AIT, 0);
 		}
 	}
-out:
-	return;
 }

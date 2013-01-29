@@ -333,6 +333,29 @@ unsigned long generic_find_next_le_bit(const unsigned long *addr,
 
 #include <asm-generic/bitops/sched.h>
 
+/* Compat macros for RHEL6 */
+#define find_next_zero_bit_le(addr, size, offset) \
+			generic_find_next_zero_le_bit(addr, size, offset)
+#define find_next_bit_le(addr, size, offset) \
+			generic_find_next_le_bit(addr, size, offset)
+#define __set_bit_le(nr,addr) \
+	__set_le_bit(nr, addr)
+#define __clear_bit_le(nr, addr) \
+	__clear_bit((nr) ^ BITOP_LE_SWIZZLE, (addr))
+
+#define test_bit_le(nr, addr) \
+	test_le_bit((nr), (addr))
+
+#define test_and_set_bit_le(nr, addr) \
+	test_and_set_bit((nr) ^ BITOP_LE_SWIZZLE, (addr))
+#define test_and_clear_bit_le(nr, addr) \
+	test_and_clear_bit((nr) ^ BITOP_LE_SWIZZLE, (addr))
+
+#define __test_and_set_bit_le(nr, addr) \
+	__test_and_set_bit((nr) ^ BITOP_LE_SWIZZLE, (addr))
+#define __test_and_clear_bit_le(nr, addr) \
+	__test_and_clear_bit((nr) ^ BITOP_LE_SWIZZLE, (addr))
+
 #endif /* __KERNEL__ */
 
 #endif /* _ASM_POWERPC_BITOPS_H */

@@ -474,17 +474,6 @@ int libipw_wx_set_encode(struct libipw_device *ieee,
 	if (ieee->set_security)
 		ieee->set_security(dev, &sec);
 
-	/* Do not reset port if card is in Managed mode since resetting will
-	 * generate new IEEE 802.11 authentication which may end up in looping
-	 * with IEEE 802.1X.  If your hardware requires a reset after WEP
-	 * configuration (for example... Prism2), implement the reset_port in
-	 * the callbacks structures used to initialize the 802.11 stack. */
-	if (ieee->reset_on_keychange &&
-	    ieee->iw_mode != IW_MODE_INFRA &&
-	    ieee->reset_port && ieee->reset_port(dev)) {
-		printk(KERN_DEBUG "%s: reset_port failed\n", dev->name);
-		return -EINVAL;
-	}
 	return 0;
 }
 
@@ -534,7 +523,6 @@ int libipw_wx_set_encodeext(struct libipw_device *ieee,
 			       struct iw_request_info *info,
 			       union iwreq_data *wrqu, char *extra)
 {
-	struct net_device *dev = ieee->dev;
 	struct iw_point *encoding = &wrqu->encoding;
 	struct iw_encode_ext *ext = (struct iw_encode_ext *)extra;
 	int i, idx, ret = 0;
@@ -687,20 +675,6 @@ int libipw_wx_set_encodeext(struct libipw_device *ieee,
       done:
 	if (ieee->set_security)
 		ieee->set_security(ieee->dev, &sec);
-
-	/*
-	 * Do not reset port if card is in Managed mode since resetting will
-	 * generate new IEEE 802.11 authentication which may end up in looping
-	 * with IEEE 802.1X. If your hardware requires a reset after WEP
-	 * configuration (for example... Prism2), implement the reset_port in
-	 * the callbacks structures used to initialize the 802.11 stack.
-	 */
-	if (ieee->reset_on_keychange &&
-	    ieee->iw_mode != IW_MODE_INFRA &&
-	    ieee->reset_port && ieee->reset_port(dev)) {
-		LIBIPW_DEBUG_WX("%s: reset_port failed\n", dev->name);
-		return -EINVAL;
-	}
 
 	return ret;
 }

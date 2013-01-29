@@ -54,4 +54,27 @@ extern unsigned long generic_find_next_le_bit(const unsigned long *addr,
 #define generic_find_first_zero_le_bit(addr, size) \
         generic_find_next_zero_le_bit((addr), (size), 0)
 
+/* Compat macros for RHEL6 */
+#define find_next_zero_bit_le(addr, size, offset) \
+			generic_find_next_zero_le_bit(addr, size, offset)
+#define find_next_bit_le(addr, size, offset) \
+			generic_find_next_le_bit(addr, size, offset)
+#define __set_bit_le(nr, addr) \
+	generic___set_le_bit(nr, addr)
+#define __clear_bit_le(nr, addr) \
+	generic___clear_le_bit(nr, addr)
+
+#define test_bit_le(nr, addr) \
+	generic_test_le_bit(nr, addr)
+
+#define test_and_set_bit_le(nr, addr) \
+	generic_test_and_set_le_bit(nr, addr)
+#define test_and_clear_bit_le(nr, addr) \
+	generic_test_and_clear_le_bit(nr, addr)
+
+#define __test_and_set_bit_le(nr, addr) \
+	generic___test_and_set_le_bit(nr, addr)
+#define __test_and_clear_bit_le(nr, addr) \
+	generic___test_and_clear_le_bit(nr, addr)
+
 #endif /* _ASM_GENERIC_BITOPS_LE_H_ */

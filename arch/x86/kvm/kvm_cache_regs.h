@@ -56,4 +56,16 @@ static inline u64 kvm_read_edx_eax(struct kvm_vcpu *vcpu)
 		| ((u64)(kvm_register_read(vcpu, VCPU_REGS_RDX) & -1u) << 32);
 }
 
+static inline ulong kvm_read_cr4_bits(struct kvm_vcpu *vcpu, ulong mask)
+{
+	if (mask & vcpu->arch.cr4_guest_owned_bits)
+		kvm_x86_ops->decache_cr4_guest_bits(vcpu);
+	return vcpu->arch.cr4 & mask;
+}
+
+static inline ulong kvm_read_cr4(struct kvm_vcpu *vcpu)
+{
+	return kvm_read_cr4_bits(vcpu, ~0UL);
+}
+
 #endif

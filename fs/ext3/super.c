@@ -413,8 +413,6 @@ static void ext3_put_super (struct super_block * sb)
 	struct ext3_super_block *es = sbi->s_es;
 	int i, err;
 
-	lock_kernel();
-
 	ext3_xattr_put_super(sb);
 	err = journal_destroy(sbi->s_journal);
 	sbi->s_journal = NULL;
@@ -463,8 +461,6 @@ static void ext3_put_super (struct super_block * sb)
 	sb->s_fs_info = NULL;
 	kfree(sbi->s_blockgroup_lock);
 	kfree(sbi);
-
-	unlock_kernel();
 }
 
 static struct kmem_cache *ext3_inode_cachep;
@@ -1458,10 +1454,12 @@ static void ext3_orphan_cleanup (struct super_block * sb,
 	}
 
 	if (EXT3_SB(sb)->s_mount_state & EXT3_ERROR_FS) {
-		if (es->s_last_orphan)
+		/* don't clear list on RO mount w/ errors */
+		if (es->s_last_orphan && !(s_flags & MS_RDONLY)) {
 			jbd_debug(1, "Errors on filesystem, "
 				  "clearing orphan list.\n");
-		es->s_last_orphan = 0;
+			es->s_last_orphan = 0;
+		}
 		jbd_debug(1, "Skipping orphan recovery on fs with errors.\n");
 		return;
 	}
@@ -1947,6 +1945,7 @@ static int ext3_fill_super (struct super_block *sb, void *data, int silent)
 	sb->dq_op = &ext3_quota_operations;
 #endif
 	INIT_LIST_HEAD(&sbi->s_orphan); /* unlinked but open files */
+	mutex_init(&sbi->s_resize_lock);
 
 	sb->s_root = NULL;
 
@@ -2585,12 +2584,11 @@ static int ext3_remount (struct super_block * sb, int * flags, char * data)
 	ext3_fsblk_t n_blocks_count = 0;
 	unsigned long old_sb_flags;
 	struct ext3_mount_options old_opts;
+	int enable_quota = 0;
 	int err;
 #ifdef CONFIG_QUOTA
 	int i;
 #endif
-
-	lock_kernel();
 
 	/* Store the original options */
 	lock_super(sb);
@@ -2631,6 +2629,12 @@ static int ext3_remount (struct super_block * sb, int * flags, char * data)
 		}
 
 		if (*flags & MS_RDONLY) {
+			err = vfs_dq_off(sb, 1);
+			if (err < 0 && err != -ENOSYS) {
+				err = -EBUSY;
+				goto restore_opts;
+			}
+
 			/*
 			 * First of all, the unconditional stuff we have to do
 			 * to disable replay of the journal when we next remount
@@ -2691,6 +2695,7 @@ static int ext3_remount (struct super_block * sb, int * flags, char * data)
 				goto restore_opts;
 			if (!ext3_setup_super (sb, es, 0))
 				sb->s_flags &= ~MS_RDONLY;
+			enable_quota = 1;
 		}
 	}
 #ifdef CONFIG_QUOTA
@@ -2701,7 +2706,9 @@ static int ext3_remount (struct super_block * sb, int * flags, char * data)
 			kfree(old_opts.s_qf_names[i]);
 #endif
 	unlock_super(sb);
-	unlock_kernel();
+
+	if (enable_quota)
+		vfs_dq_quota_on_remount(sb);
 	return 0;
 restore_opts:
 	sb->s_flags = old_sb_flags;
@@ -2719,7 +2726,6 @@ restore_opts:
 	}
 #endif
 	unlock_super(sb);
-	unlock_kernel();
 	return err;
 }
 
@@ -3075,7 +3081,7 @@ static struct file_system_type ext3_fs_type = {
 	.name		= "ext3",
 	.get_sb		= ext3_get_sb,
 	.kill_sb	= kill_block_super,
-	.fs_flags	= FS_REQUIRES_DEV,
+	.fs_flags	= FS_REQUIRES_DEV  | FS_HAS_NEW_FREEZE | FS_HANDLE_QUOTA,
 };
 
 static int __init init_ext3_fs(void)

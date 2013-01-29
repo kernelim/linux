@@ -39,11 +39,17 @@ static inline int nfs4_has_persistent_session(const struct nfs_client *clp)
 	return 0;
 }
 
+static inline void nfs_attr_check_mountpoint(struct super_block *parent, struct nfs_fattr *fattr)
+{
+	if (!nfs_fsid_equal(&NFS_SB(parent)->fsid, &fattr->fsid))
+		fattr->valid |= NFS_ATTR_FATTR_MOUNTPOINT;
+}
 static inline int nfs_attr_use_mounted_on_fileid(struct nfs_fattr *fattr)
 {
 	if (((fattr->valid & NFS_ATTR_FATTR_MOUNTED_ON_FILEID) == 0) ||
-	     ((fattr->valid & NFS_ATTR_FATTR_V4_REFERRAL) == 0))
-		return 0;
+		(((fattr->valid & NFS_ATTR_FATTR_MOUNTPOINT) == 0) &&
+		((fattr->valid & NFS_ATTR_FATTR_V4_REFERRAL) == 0)))
+			return 0;
 
 	fattr->fileid = fattr->mounted_on_fileid;
 	return 1;
@@ -155,7 +161,8 @@ extern struct nfs_server *nfs4_create_referral_server(struct nfs_clone_mount *,
 extern void nfs_free_server(struct nfs_server *server);
 extern struct nfs_server *nfs_clone_server(struct nfs_server *,
 					   struct nfs_fh *,
-					   struct nfs_fattr *);
+					   struct nfs_fattr *,
+					   rpc_authflavor_t);
 extern void nfs_mark_client_ready(struct nfs_client *clp, int state);
 extern int nfs4_check_client_ready(struct nfs_client *clp);
 extern struct nfs_client *nfs4_set_ds_client(struct nfs_client* mds_clp,
@@ -176,10 +183,10 @@ static inline void nfs_fs_proc_exit(void)
 
 /* nfs4namespace.c */
 #ifdef CONFIG_NFS_V4
-extern struct vfsmount *nfs_do_refmount(const struct vfsmount *mnt_parent, struct dentry *dentry);
+extern struct vfsmount *nfs_do_refmount(struct rpc_clnt *client, const struct vfsmount *mnt_parent, struct dentry *dentry);
 #else
 static inline
-struct vfsmount *nfs_do_refmount(const struct vfsmount *mnt_parent, struct dentry *dentry)
+struct vfsmount *nfs_do_refmount(struct rpc_clnt *client, const struct vfsmount *mnt_parent, struct dentry *dentry)
 {
 	return ERR_PTR(-ENOENT);
 }
@@ -189,6 +196,7 @@ struct vfsmount *nfs_do_refmount(const struct vfsmount *mnt_parent, struct dentr
 extern struct svc_version nfs4_callback_version1;
 extern struct svc_version nfs4_callback_version4;
 
+struct nfs_pageio_descriptor;
 /* pagelist.c */
 extern int __init nfs_init_nfspagecache(void);
 extern void nfs_destroy_nfspagecache(void);
@@ -199,6 +207,11 @@ extern void nfs_destroy_writepagecache(void);
 
 extern int __init nfs_init_directcache(void);
 extern void nfs_destroy_directcache(void);
+extern bool nfs_pgarray_set(struct nfs_page_array *p, unsigned int pagecount);
+extern void nfs_pgheader_init(struct nfs_pageio_descriptor *desc,
+			      struct nfs_pgio_header *hdr,
+			      void (*release)(struct nfs_pgio_header *hdr));
+void nfs_set_pgio_error(struct nfs_pgio_header *hdr, int error, loff_t pos);
 
 /* nfs2xdr.c */
 extern int nfs_stat_to_errno(int);
@@ -261,6 +274,7 @@ extern int __init register_nfs_fs(void);
 extern void __exit unregister_nfs_fs(void);
 extern void nfs_sb_active(struct super_block *sb);
 extern void nfs_sb_deactive(struct super_block *sb);
+extern void nfs_sb_deactive_async(struct super_block *sb);
 
 /* namespace.c */
 extern char *nfs_path(const char *base,
@@ -277,30 +291,73 @@ extern struct dentry *nfs4_get_root(struct super_block *, struct nfs_fh *);
 extern int nfs4_get_rootfh(struct nfs_server *server, struct nfs_fh *mntfh);
 #endif
 
+struct nfs_pgio_completion_ops;
 /* read.c */
-extern int nfs_initiate_read(struct nfs_read_data *data, struct rpc_clnt *clnt,
+extern struct nfs_read_header *nfs_readhdr_alloc(void);
+extern void nfs_readhdr_free(struct nfs_pgio_header *hdr);
+extern void nfs_pageio_init_read(struct nfs_pageio_descriptor *pgio,
+			struct inode *inode,
+			const struct nfs_pgio_completion_ops *compl_ops);
+extern int nfs_initiate_read(struct rpc_clnt *clnt,
+			     struct nfs_read_data *data,
 			     const struct rpc_call_ops *call_ops);
 extern void nfs_read_prepare(struct rpc_task *task, void *calldata);
+extern int nfs_generic_pagein(struct nfs_pageio_descriptor *desc,
+			      struct nfs_pgio_header *hdr);
+extern void nfs_pageio_init_read(struct nfs_pageio_descriptor *pgio,
+			struct inode *inode,
+			const struct nfs_pgio_completion_ops *compl_ops);
+extern void nfs_pageio_reset_read_mds(struct nfs_pageio_descriptor *pgio);
+extern void nfs_readdata_release(struct nfs_read_data *rdata);
 
 /* write.c */
-extern void nfs_commit_free(struct nfs_write_data *p);
-extern int nfs_initiate_write(struct nfs_write_data *data,
-			      struct rpc_clnt *clnt,
+extern void nfs_pageio_init_write(struct nfs_pageio_descriptor *pgio,
+			struct inode *inode, int ioflags,
+			const struct nfs_pgio_completion_ops *compl_ops);
+extern struct nfs_write_header *nfs_writehdr_alloc(void);
+extern void nfs_writehdr_free(struct nfs_pgio_header *hdr);
+extern int nfs_generic_flush(struct nfs_pageio_descriptor *desc,
+			     struct nfs_pgio_header *hdr);
+extern void nfs_pageio_init_write(struct nfs_pageio_descriptor *pgio,
+			struct inode *inode, int ioflags,
+			const struct nfs_pgio_completion_ops *compl_ops);
+extern void nfs_pageio_reset_write_mds(struct nfs_pageio_descriptor *pgio);
+extern void nfs_writedata_release(struct nfs_write_data *wdata);
+extern void nfs_commit_free(struct nfs_commit_data *p);
+extern int nfs_initiate_write(struct rpc_clnt *clnt,
+			      struct nfs_write_data *data,
 			      const struct rpc_call_ops *call_ops,
 			      int how);
 extern void nfs_write_prepare(struct rpc_task *task, void *calldata);
-extern int nfs_initiate_commit(struct nfs_write_data *data,
-			       struct rpc_clnt *clnt,
+extern void nfs_commit_prepare(struct rpc_task *task, void *calldata);
+extern int nfs_initiate_commit(struct rpc_clnt *clnt,
+			       struct nfs_commit_data *data,
 			       const struct rpc_call_ops *call_ops,
 			       int how);
-extern void nfs_init_commit(struct nfs_write_data *data,
+extern void nfs_init_commit(struct nfs_commit_data *data,
 			    struct list_head *head,
-			    struct pnfs_layout_segment *lseg);
+			    struct pnfs_layout_segment *lseg,
+			    struct nfs_commit_info *cinfo);
+int nfs_scan_commit_list(struct list_head *src, struct list_head *dst,
+			 struct nfs_commit_info *cinfo, int max);
+int nfs_scan_commit(struct inode *inode, struct list_head *dst,
+		    struct nfs_commit_info *cinfo);
+void nfs_mark_request_commit(struct nfs_page *req,
+			     struct pnfs_layout_segment *lseg,
+			     struct nfs_commit_info *cinfo);
+int nfs_generic_commit_list(struct inode *inode, struct list_head *head,
+			    int how, struct nfs_commit_info *cinfo);
 void nfs_retry_commit(struct list_head *page_list,
-		      struct pnfs_layout_segment *lseg);
-void nfs_commit_clear_lock(struct nfs_inode *nfsi);
-void nfs_commitdata_release(void *data);
-void nfs_commit_release_pages(struct nfs_write_data *data);
+		      struct pnfs_layout_segment *lseg,
+		      struct nfs_commit_info *cinfo);
+void nfs_commitdata_release(struct nfs_commit_data *data);
+void nfs_request_add_commit_list(struct nfs_page *req, struct list_head *dst,
+				 struct nfs_commit_info *cinfo);
+void nfs_request_remove_commit_list(struct nfs_page *req,
+				    struct nfs_commit_info *cinfo);
+void nfs_init_cinfo(struct nfs_commit_info *cinfo,
+		    struct inode *inode,
+		    struct nfs_direct_req *dreq);
 
 #ifdef CONFIG_MIGRATION
 extern int nfs_migrate_page(struct address_space *,
@@ -309,7 +366,12 @@ extern int nfs_migrate_page(struct address_space *,
 #define nfs_migrate_page NULL
 #endif
 
+/* direct.c */
+void nfs_init_cinfo_from_dreq(struct nfs_commit_info *cinfo,
+			      struct nfs_direct_req *dreq);
+
 /* nfs4proc.c */
+extern void __nfs4_read_done_cb(struct nfs_read_data *);
 extern void nfs4_reset_read(struct rpc_task *task, struct nfs_read_data *data);
 extern int nfs4_init_client(struct nfs_client *clp,
 			    const struct rpc_timeout *timeparms,
@@ -317,12 +379,14 @@ extern int nfs4_init_client(struct nfs_client *clp,
 			    rpc_authflavor_t authflavour,
 			    int noresvport);
 extern void nfs4_reset_write(struct rpc_task *task, struct nfs_write_data *data);
-extern int _nfs4_call_sync(struct nfs_server *server,
+extern int _nfs4_call_sync(struct rpc_clnt *clnt,
+			   struct nfs_server *server,
 			   struct rpc_message *msg,
 			   struct nfs4_sequence_args *args,
 			   struct nfs4_sequence_res *res,
 			   int cache_reply);
-extern int _nfs4_call_sync_session(struct nfs_server *server,
+extern int _nfs4_call_sync_session(struct rpc_clnt *clnt,
+				   struct nfs_server *server,
 				   struct rpc_message *msg,
 				   struct nfs4_sequence_args *args,
 				   struct nfs4_sequence_res *res,
@@ -431,13 +495,3 @@ unsigned int nfs_page_array_len(unsigned int base, size_t len)
 		PAGE_SIZE - 1) >> PAGE_SHIFT;
 }
 
-/*
- * Helper for restarting RPC calls in the possible presence of NFSv4.1
- * sessions.
- */
-static inline int nfs_restart_rpc(struct rpc_task *task, const struct nfs_client *clp)
-{
-	if (nfs4_has_session(clp))
-		return rpc_restart_call_prepare(task);
-	return rpc_restart_call(task);
-}

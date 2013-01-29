@@ -14,6 +14,7 @@
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 
+#include <linux/stringify.h>
 #include <linux/kernel.h>
 #include <linux/timer.h>
 #include <linux/errno.h>
@@ -59,8 +60,8 @@
 #include "bnx2_fw.h"
 
 #define DRV_MODULE_NAME		"bnx2"
-#define DRV_MODULE_VERSION	"2.2.1"
-#define DRV_MODULE_RELDATE	"Dec 18, 2011"
+#define DRV_MODULE_VERSION	"2.2.3"
+#define DRV_MODULE_RELDATE	"June 27, 2012"
 #define FW_MIPS_FILE_06		"bnx2/bnx2-mips-06-6.2.3.fw"
 #define FW_RV2P_FILE_06		"bnx2/bnx2-rv2p-06-6.0.15.fw"
 #define FW_MIPS_FILE_09		"bnx2/bnx2-mips-09-6.2.1b.fw"
@@ -877,8 +878,7 @@ bnx2_alloc_mem(struct bnx2 *bp)
 
 			bnapi = &bp->bnx2_napi[i];
 
-			sblk = (void *) (status_blk +
-					 BNX2_SBLK_MSIX_ALIGN_SIZE * i);
+			sblk = (status_blk + BNX2_SBLK_MSIX_ALIGN_SIZE * i);
 			bnapi->status_blk.msix = sblk;
 			bnapi->hw_tx_cons_ptr =
 				&sblk->status_tx_quick_consumer_index;
@@ -1977,22 +1977,26 @@ bnx2_remote_phy_event(struct bnx2 *bp)
 		switch (speed) {
 			case BNX2_LINK_STATUS_10HALF:
 				bp->duplex = DUPLEX_HALF;
+				/* fall through */
 			case BNX2_LINK_STATUS_10FULL:
 				bp->line_speed = SPEED_10;
 				break;
 			case BNX2_LINK_STATUS_100HALF:
 				bp->duplex = DUPLEX_HALF;
+				/* fall through */
 			case BNX2_LINK_STATUS_100BASE_T4:
 			case BNX2_LINK_STATUS_100FULL:
 				bp->line_speed = SPEED_100;
 				break;
 			case BNX2_LINK_STATUS_1000HALF:
 				bp->duplex = DUPLEX_HALF;
+				/* fall through */
 			case BNX2_LINK_STATUS_1000FULL:
 				bp->line_speed = SPEED_1000;
 				break;
 			case BNX2_LINK_STATUS_2500HALF:
 				bp->duplex = DUPLEX_HALF;
+				/* fall through */
 			case BNX2_LINK_STATUS_2500FULL:
 				bp->line_speed = SPEED_2500;
 				break;
@@ -2477,6 +2481,7 @@ bnx2_dump_mcp_state(struct bnx2 *bp)
 		   bnx2_shmem_rd(bp, BNX2_BC_STATE_RESET_TYPE));
 	pr_cont(" condition[%08x]\n",
 		bnx2_shmem_rd(bp, BNX2_BC_STATE_CONDITION));
+	DP_SHMEM_LINE(bp, BNX2_BC_RESET_TYPE);
 	DP_SHMEM_LINE(bp, 0x3cc);
 	DP_SHMEM_LINE(bp, 0x3dc);
 	DP_SHMEM_LINE(bp, 0x3ec);
@@ -5376,7 +5381,7 @@ bnx2_free_tx_skbs(struct bnx2 *bp)
 			int k, last;
 
 			if (skb == NULL) {
-				j++;
+				j = NEXT_TX_BD(j);
 				continue;
 			}
 
@@ -5388,8 +5393,8 @@ bnx2_free_tx_skbs(struct bnx2 *bp)
 			tx_buf->skb = NULL;
 
 			last = tx_buf->nr_frags;
-			j++;
-			for (k = 0; k < last; k++, j++) {
+			j = NEXT_TX_BD(j);
+			for (k = 0; k < last; k++, j = NEXT_TX_BD(j)) {
 				tx_buf = &txr->tx_buf_ring[TX_RING_IDX(j)];
 				dma_unmap_page(&bp->pdev->dev,
 					pci_unmap_addr(tx_buf, mapping),
@@ -6360,6 +6365,7 @@ bnx2_reset_task(struct work_struct *work)
 {
 	struct bnx2 *bp = container_of(work, struct bnx2, reset_task);
 	int rc;
+	u16 pcicmd;
 
 	rtnl_lock();
 	if (!netif_running(bp->dev)) {
@@ -6369,6 +6375,12 @@ bnx2_reset_task(struct work_struct *work)
 
 	bnx2_netif_stop(bp, true);
 
+	pci_read_config_word(bp->pdev, PCI_COMMAND, &pcicmd);
+	if (!(pcicmd & PCI_COMMAND_MEMORY)) {
+		/* in case PCI block has reset */
+		pci_restore_state(bp->pdev);
+		pci_save_state(bp->pdev);
+	}
 	rc = bnx2_init_nic(bp, 1);
 	if (rc) {
 		netdev_err(bp->dev, "failed to reset NIC, closing\n");
@@ -6381,6 +6393,75 @@ bnx2_reset_task(struct work_struct *work)
 	atomic_set(&bp->intr_sem, 1);
 	bnx2_netif_start(bp, true);
 	rtnl_unlock();
+}
+
+#define BNX2_FTQ_ENTRY(ftq) { __stringify(ftq##FTQ_CTL), BNX2_##ftq##FTQ_CTL }
+
+static void
+bnx2_dump_ftq(struct bnx2 *bp)
+{
+	int i;
+	u32 reg, bdidx, cid, valid;
+	struct net_device *dev = bp->dev;
+	static const struct ftq_reg {
+		char *name;
+		u32 off;
+	} ftq_arr[] = {
+		BNX2_FTQ_ENTRY(RV2P_P),
+		BNX2_FTQ_ENTRY(RV2P_T),
+		BNX2_FTQ_ENTRY(RV2P_M),
+		BNX2_FTQ_ENTRY(TBDR_),
+		BNX2_FTQ_ENTRY(TDMA_),
+		BNX2_FTQ_ENTRY(TXP_),
+		BNX2_FTQ_ENTRY(TXP_),
+		BNX2_FTQ_ENTRY(TPAT_),
+		BNX2_FTQ_ENTRY(RXP_C),
+		BNX2_FTQ_ENTRY(RXP_),
+		BNX2_FTQ_ENTRY(COM_COMXQ_),
+		BNX2_FTQ_ENTRY(COM_COMTQ_),
+		BNX2_FTQ_ENTRY(COM_COMQ_),
+		BNX2_FTQ_ENTRY(CP_CPQ_),
+	};
+
+	netdev_err(dev, "<--- start FTQ dump --->\n");
+	for (i = 0; i < ARRAY_SIZE(ftq_arr); i++)
+		netdev_err(dev, "%s %08x\n", ftq_arr[i].name,
+			   bnx2_reg_rd_ind(bp, ftq_arr[i].off));
+
+	netdev_err(dev, "CPU states:\n");
+	for (reg = BNX2_TXP_CPU_MODE; reg <= BNX2_CP_CPU_MODE; reg += 0x40000)
+		netdev_err(dev, "%06x mode %x state %x evt_mask %x pc %x pc %x instr %x\n",
+			   reg, bnx2_reg_rd_ind(bp, reg),
+			   bnx2_reg_rd_ind(bp, reg + 4),
+			   bnx2_reg_rd_ind(bp, reg + 8),
+			   bnx2_reg_rd_ind(bp, reg + 0x1c),
+			   bnx2_reg_rd_ind(bp, reg + 0x1c),
+			   bnx2_reg_rd_ind(bp, reg + 0x20));
+
+	netdev_err(dev, "<--- end FTQ dump --->\n");
+	netdev_err(dev, "<--- start TBDC dump --->\n");
+	netdev_err(dev, "TBDC free cnt: %ld\n",
+		   REG_RD(bp, BNX2_TBDC_STATUS) & BNX2_TBDC_STATUS_FREE_CNT);
+	netdev_err(dev, "LINE     CID  BIDX   CMD  VALIDS\n");
+	for (i = 0; i < 0x20; i++) {
+		int j = 0;
+
+		REG_WR(bp, BNX2_TBDC_BD_ADDR, i);
+		REG_WR(bp, BNX2_TBDC_CAM_OPCODE,
+		       BNX2_TBDC_CAM_OPCODE_OPCODE_CAM_READ);
+		REG_WR(bp, BNX2_TBDC_COMMAND, BNX2_TBDC_COMMAND_CMD_REG_ARB);
+		while ((REG_RD(bp, BNX2_TBDC_COMMAND) &
+			BNX2_TBDC_COMMAND_CMD_REG_ARB) && j < 100)
+			j++;
+
+		cid = REG_RD(bp, BNX2_TBDC_CID);
+		bdidx = REG_RD(bp, BNX2_TBDC_BIDX);
+		valid = REG_RD(bp, BNX2_TBDC_CAM_OPCODE);
+		netdev_err(dev, "%02x    %06x  %04lx   %02x    [%x]\n",
+			   i, cid, bdidx & BNX2_TBDC_BDIDX_BDIDX,
+			   bdidx >> 24, (valid >> 8) & 0x0ff);
+	}
+	netdev_err(dev, "<--- end TBDC dump --->\n");
 }
 
 static void
@@ -6412,6 +6493,7 @@ bnx2_tx_timeout(struct net_device *dev)
 {
 	struct bnx2 *bp = netdev_priv(dev);
 
+	bnx2_dump_ftq(bp);
 	bnx2_dump_state(bp);
 	bnx2_dump_mcp_state(bp);
 
@@ -6627,6 +6709,7 @@ bnx2_close(struct net_device *dev)
 
 	bnx2_disable_int_sync(bp);
 	bnx2_napi_disable(bp);
+	netif_tx_disable(dev);
 	del_timer_sync(&bp->timer);
 	bnx2_shutdown_chip(bp);
 	bnx2_free_irq(bp);
@@ -7372,8 +7455,7 @@ static struct {
 	{ "rx_fw_discards" },
 };
 
-#define BNX2_NUM_STATS (sizeof(bnx2_stats_str_arr)/\
-			sizeof(bnx2_stats_str_arr[0]))
+#define BNX2_NUM_STATS ARRAY_SIZE(bnx2_stats_str_arr)
 
 #define STATS_OFFSET32(offset_name) (offsetof(struct statistics_block, offset_name) / 4)
 
@@ -7734,7 +7816,7 @@ bnx2_change_mac_addr(struct net_device *dev, void *p)
 	struct bnx2 *bp = netdev_priv(dev);
 
 	if (!is_valid_ether_addr(addr->sa_data))
-		return -EINVAL;
+		return -EADDRNOTAVAIL;
 
 	memcpy(dev->dev_addr, addr->sa_data, dev->addr_len);
 	if (netif_running(dev))
@@ -7793,7 +7875,7 @@ bnx2_get_5709_media(struct bnx2 *bp)
 	else
 		strap = (val & BNX2_MISC_DUAL_MEDIA_CTRL_PHY_CTRL_STRAP) >> 8;
 
-	if (PCI_FUNC(bp->pdev->devfn) == 0) {
+	if (bp->func == 0) {
 		switch (strap) {
 		case 0x4:
 		case 0x5:
@@ -7936,7 +8018,6 @@ static int __devinit
 bnx2_init_board(struct pci_dev *pdev, struct net_device *dev)
 {
 	struct bnx2 *bp;
-	unsigned long mem_len;
 	int rc, i, j;
 	u32 reg;
 	u64 dma_mask, persist_dma_mask;
@@ -7996,13 +8077,8 @@ bnx2_init_board(struct pci_dev *pdev, struct net_device *dev)
 #endif
 	INIT_WORK(&bp->reset_task, bnx2_reset_task);
 
-	dev->base_addr = dev->mem_start = pci_resource_start(pdev, 0);
-	mem_len = MB_GET_CID_ADDR(TX_TSS_CID + TX_MAX_TSS_RINGS + 1);
-	dev->mem_end = dev->mem_start + mem_len;
-	dev->irq = pdev->irq;
-
-	bp->regview = ioremap_nocache(dev->base_addr, mem_len);
-
+	bp->regview = pci_iomap(pdev, 0, MB_GET_CID_ADDR(TX_TSS_CID +
+							 TX_MAX_TSS_RINGS + 1));
 	if (!bp->regview) {
 		dev_err(&pdev->dev, "Cannot map register space, aborting\n");
 		rc = -ENOMEM;
@@ -8098,9 +8174,12 @@ bnx2_init_board(struct pci_dev *pdev, struct net_device *dev)
 
 	reg = bnx2_reg_rd_ind(bp, BNX2_SHM_HDR_SIGNATURE);
 
+	if (bnx2_reg_rd_ind(bp, BNX2_MCP_TOE_ID) & BNX2_MCP_TOE_ID_FUNCTION_ID)
+		bp->func = 1;
+
 	if ((reg & BNX2_SHM_HDR_SIGNATURE_SIG_MASK) ==
 	    BNX2_SHM_HDR_SIGNATURE_SIG) {
-		u32 off = PCI_FUNC(pdev->devfn) << 2;
+		u32 off = bp->func << 2;
 
 		bp->shmem_base = bnx2_reg_rd_ind(bp, BNX2_SHM_HDR_ADDR_0 + off);
 	} else
@@ -8308,10 +8387,8 @@ err_out_unmap:
 		bp->flags &= ~BNX2_FLAG_AER_ENABLED;
 	}
 
-	if (bp->regview) {
-		iounmap(bp->regview);
-		bp->regview = NULL;
-	}
+	pci_iounmap(pdev, bp->regview);
+	bp->regview = NULL;
 
 err_out_release:
 	pci_release_regions(pdev);
@@ -8402,7 +8479,7 @@ static int __devinit
 bnx2_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	static int version_printed = 0;
-	struct net_device *dev = NULL;
+	struct net_device *dev;
 	struct bnx2 *bp;
 	int rc;
 	char str[40];
@@ -8412,15 +8489,12 @@ bnx2_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	/* dev zeroed in init_etherdev */
 	dev = alloc_etherdev_mq(sizeof(*bp), TX_MAX_RINGS);
-
 	if (!dev)
 		return -ENOMEM;
 
 	rc = bnx2_init_board(pdev, dev);
-	if (rc < 0) {
-		free_netdev(dev);
-		return rc;
-	}
+	if (rc < 0)
+		goto err_free;
 
 	dev->netdev_ops = &bnx2_netdev_ops;
 	dev->watchdog_timeo = TX_TIMEOUT;
@@ -8457,13 +8531,12 @@ bnx2_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto error;
 	}
 
-	netdev_info(dev, "%s (%c%d) %s found at mem %lx, IRQ %d, node addr %pM\n",
-		    board_info[ent->driver_data].name,
+	netdev_info(dev, "%s (%c%d) %s found at mem %lx, IRQ %d, "
+		    "node addr %pM\n", board_info[ent->driver_data].name,
 		    ((CHIP_ID(bp) & 0xf000) >> 12) + 'A',
 		    ((CHIP_ID(bp) & 0x0ff0) >> 4),
-		    bnx2_bus_string(bp, str),
-		    dev->base_addr,
-		    bp->pdev->irq, dev->dev_addr);
+		    bnx2_bus_string(bp, str), (long)pci_resource_start(pdev, 0),
+		    pdev->irq, dev->dev_addr);
 
 	return 0;
 
@@ -8473,11 +8546,11 @@ error:
 	if (bp->rv2p_firmware)
 		release_firmware(bp->rv2p_firmware);
 
-	if (bp->regview)
-		iounmap(bp->regview);
+	pci_iounmap(pdev, bp->regview);
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
 	pci_set_drvdata(pdev, NULL);
+err_free:
 	free_netdev(dev);
 	return rc;
 }
@@ -8498,8 +8571,7 @@ bnx2_remove_one(struct pci_dev *pdev)
 	if (bp->rv2p_firmware)
 		release_firmware(bp->rv2p_firmware);
 
-	if (bp->regview)
-		iounmap(bp->regview);
+	pci_iounmap(bp->pdev, bp->regview);
 
 	kfree(bp->temp_stats_blk);
 

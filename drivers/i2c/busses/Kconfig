@@ -101,6 +101,7 @@ config I2C_I801
 	    Cougar Point (PCH)
 	    Patsburg (PCH)
 	    Panther Point (PCH)
+	    Lynx Point (PCH)
 
 	  This driver can also be built as a module.  If so, the module
 	  will be called i2c-i801.
@@ -114,6 +115,16 @@ config I2C_ISCH
 
 	  This driver can also be built as a module. If so, the module
 	  will be called i2c-isch.
+
+config I2C_ISMT
+	tristate "Intel iSMT SMBus Controller"
+	depends on PCI
+	help
+	  If you say yes to this option, support will be included for the Intel
+	  iSMT SMBus host controller interface.
+
+	  This driver can also be built as a module.  If so, the module will be
+	  called i2c-ismt.
 
 config I2C_PIIX4
 	tristate "Intel PIIX4 and compatible (ATI/AMD/Serverworks/Broadcom/SMSC)"

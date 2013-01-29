@@ -228,7 +228,7 @@ static noinline __init void detect_machine_type(void)
 		S390_lowcore.machine_flags |= MACHINE_FLAG_VM;
 }
 
-static __init void early_pgm_check_handler(void)
+static void early_pgm_check_handler(void)
 {
 	unsigned long addr;
 	const struct exception_table_entry *fixup;
@@ -419,6 +419,20 @@ static void __init setup_boot_command_line(void)
 	append_to_cmdline(append_ipl_scpdata);
 }
 
+static __init void setup_transactional_execution(void)
+{
+#ifdef CONFIG_64BIT
+	unsigned long long facility_bits[2];
+
+	if (stfle(facility_bits, 2) <= 1)
+		return;
+	if (!(facility_bits[0] & (1ULL << (63 - 50))) ||
+	    !(facility_bits[1] & (1ULL << (127 - 73))))
+		return;
+	S390_lowcore.machine_flags |= MACHINE_FLAG_TE;
+#endif
+}
+
 
 /*
  * Save ipl parameters, clear bss memory, initialize storage keys
@@ -446,6 +460,7 @@ void __init startup_init(void)
 	detect_diag44();
 	detect_machine_facilities();
 	setup_hpage();
+	setup_transactional_execution();
 	sclp_facilities_detect();
 	detect_memory_layout(memory_chunk);
 #ifdef CONFIG_DYNAMIC_FTRACE

@@ -315,7 +315,7 @@ enum rsb_flags {
 	RSB_NEW_MASTER,
 	RSB_NEW_MASTER2,
 	RSB_RECOVER_CONVERT,
-	RSB_LOCKS_PURGED,
+	RSB_RECOVER_GRANT,
 };
 
 static inline void rsb_set_flag(struct dlm_rsb *r, enum rsb_flags flag)

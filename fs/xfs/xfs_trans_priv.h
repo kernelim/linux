@@ -70,12 +70,14 @@ struct xfs_ail {
 	xfs_lsn_t		xa_target;
 	struct xfs_ail_cursor	xa_cursors;
 	spinlock_t		xa_lock;
+	int			xa_log_flush;
 };
 
 /*
  * From xfs_trans_ail.c
  */
 void	xfs_trans_ail_update_bulk(struct xfs_ail *ailp,
+				struct xfs_ail_cursor *cur,
 				struct xfs_log_item **log_items, int nr_items,
 				xfs_lsn_t lsn) __releases(ailp->xa_lock);
 static inline void
@@ -84,7 +86,7 @@ xfs_trans_ail_update(
 	struct xfs_log_item	*lip,
 	xfs_lsn_t		lsn) __releases(ailp->xa_lock)
 {
-	xfs_trans_ail_update_bulk(ailp, &lip, 1, lsn);
+	xfs_trans_ail_update_bulk(ailp, NULL, &lip, 1, lsn);
 }
 
 void	xfs_trans_ail_delete_bulk(struct xfs_ail *ailp,
@@ -102,13 +104,13 @@ void			xfs_ail_push(struct xfs_ail *, xfs_lsn_t);
 void			xfs_ail_push_all(struct xfs_ail *);
 xfs_lsn_t		xfs_ail_min_lsn(struct xfs_ail *ailp);
 
-void			xfs_trans_unlocked_item(struct xfs_ail *,
-					xfs_log_item_t *);
-
-struct xfs_log_item	*xfs_trans_ail_cursor_first(struct xfs_ail *ailp,
+struct xfs_log_item *	xfs_trans_ail_cursor_first(struct xfs_ail *ailp,
 					struct xfs_ail_cursor *cur,
 					xfs_lsn_t lsn);
-struct xfs_log_item	*xfs_trans_ail_cursor_next(struct xfs_ail *ailp,
+struct xfs_log_item *	xfs_trans_ail_cursor_last(struct xfs_ail *ailp,
+					struct xfs_ail_cursor *cur,
+					xfs_lsn_t lsn);
+struct xfs_log_item *	xfs_trans_ail_cursor_next(struct xfs_ail *ailp,
 					struct xfs_ail_cursor *cur);
 void			xfs_trans_ail_cursor_done(struct xfs_ail *ailp,
 					struct xfs_ail_cursor *cur);

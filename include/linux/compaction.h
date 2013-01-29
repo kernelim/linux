@@ -22,10 +22,12 @@ extern int sysctl_extfrag_handler(struct ctl_table *table, int write,
 extern int fragmentation_index(struct zone *zone, unsigned int order);
 extern unsigned long compact_zone_order(struct zone *zone,
 					int order, gfp_t gfp_mask,
-					bool sync);
+					bool sync, bool *contended);
+extern void reset_isolation_suitable(pg_data_t *pgdat);
+extern unsigned long compaction_suitable(struct zone *zone, int order);
 extern unsigned long try_to_compact_pages(struct zonelist *zonelist,
 			int order, gfp_t gfp_mask, nodemask_t *mask,
-			bool sync);
+			bool sync, bool *contended);
 
 /* Do not skip compaction more than 64 times */
 #define COMPACT_MAX_DEFER_SHIFT 6
@@ -56,19 +58,35 @@ static inline bool compaction_deferred(struct zone *zone)
 	return zone->compact_considered < (1UL << zone->compact_defer_shift);
 }
 
+/* Returns true if restarting compaction after many failures */
+static inline bool compaction_restarting(struct zone *zone, int order)
+{
+	return zone->compact_defer_shift == COMPACT_MAX_DEFER_SHIFT &&
+		zone->compact_considered >= 1UL << zone->compact_defer_shift;
+}
+
 #else
 static inline unsigned long try_to_compact_pages(struct zonelist *zonelist,
 			int order, gfp_t gfp_mask, nodemask_t *nodemask,
-			bool sync)
+			bool sync, bool *contended)
 {
 	return COMPACT_CONTINUE;
 }
 
 static inline unsigned long compact_zone_order(struct zone *zone,
 					       int order, gfp_t gfp_mask,
-					       bool sync)
+					       bool sync, bool *contended)
 {
 	return COMPACT_CONTINUE;
+}
+
+static inline void reset_isolation_suitable(pg_data_t *pgdat)
+{
+}
+
+static inline unsigned long compaction_suitable(struct zone *zone, int order)
+{
+	return COMPACT_SKIPPED;
 }
 
 static inline void defer_compaction(struct zone *zone)

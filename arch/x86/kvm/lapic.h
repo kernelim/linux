@@ -13,6 +13,15 @@ struct kvm_lapic {
 	u32 divide_count;
 	struct kvm_vcpu *vcpu;
 	bool irr_pending;
+	/* Number of bits set in ISR. */
+	s16 isr_count;
+	/* The highest vector set in ISR; if -1 - invalid, must scan ISR. */
+	int highest_isr_cache;
+	/**
+	 * APIC register page.  The layout matches the register layout seen by
+	 * the guest 1:1, because it is accessed by the vmx microcode.
+	 * Note: Only one register, the TPR, is used by the microcode.
+	 */
 	struct page *regs_page;
 	void *regs;
 	gpa_t vapic_addr;
@@ -43,10 +52,14 @@ int kvm_lapic_enabled(struct kvm_vcpu *vcpu);
 bool kvm_apic_present(struct kvm_vcpu *vcpu);
 int kvm_lapic_find_highest_irr(struct kvm_vcpu *vcpu);
 
+u64 kvm_get_lapic_tscdeadline_msr(struct kvm_vcpu *vcpu);
+void kvm_set_lapic_tscdeadline_msr(struct kvm_vcpu *vcpu, u64 data);
+
 void kvm_lapic_set_vapic_addr(struct kvm_vcpu *vcpu, gpa_t vapic_addr);
 void kvm_lapic_sync_from_vapic(struct kvm_vcpu *vcpu);
 void kvm_lapic_sync_to_vapic(struct kvm_vcpu *vcpu);
 
 int kvm_x2apic_msr_write(struct kvm_vcpu *vcpu, u32 msr, u64 data);
 int kvm_x2apic_msr_read(struct kvm_vcpu *vcpu, u32 msr, u64 *data);
+int kvm_lapic_enable_pv_eoi(struct kvm_vcpu *vcpu, u64 data);
 #endif

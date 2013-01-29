@@ -207,7 +207,7 @@ static int userspace_ctr(struct dm_dirty_log *log, struct dm_target *ti,
 	}
 
 	/*
-	 * Send table string and get back any required devices
+	 * Send table string and get back any opened device.
 	 */
 	r = dm_consult_userspace(lc->uuid, lc->luid, DM_ULOG_CTR,
 				 ctr_str, str_size,
@@ -235,9 +235,8 @@ static int userspace_ctr(struct dm_dirty_log *log, struct dm_target *ti,
 	lc->region_count = dm_sector_div_up(ti->len, lc->region_size);
 
 	if (devices_rdata_size) {
-		/* Device string must be properly NULL terminated */
 		if (devices_rdata[devices_rdata_size - 1] != '\0') {
-			DMERR("CTR device return string not properly terminated");
+			DMERR("DM_ULOG_CTR device return string not properly terminated");
 			r = -EINVAL;
 			goto out;
 		}

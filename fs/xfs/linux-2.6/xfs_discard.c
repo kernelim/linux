@@ -37,9 +37,9 @@ STATIC int
 xfs_trim_extents(
 	struct xfs_mount	*mp,
 	xfs_agnumber_t		agno,
-	xfs_fsblock_t		start,
-	xfs_fsblock_t		len,
-	xfs_fsblock_t		minlen,
+	xfs_daddr_t		start,
+	xfs_daddr_t		end,
+	xfs_daddr_t		minlen,
 	__uint64_t		*blocks_trimmed)
 {
 	struct block_device	*bdev = mp->m_ddev_targp->bt_bdev;
@@ -67,8 +67,8 @@ xfs_trim_extents(
 	/*
 	 * Look up the longest btree in the AGF and start with it.
 	 */
-	error = xfs_alloc_lookup_le(cur, 0,
-				    XFS_BUF_TO_AGF(agbp)->agf_longest, &i);
+	error = xfs_alloc_lookup_ge(cur, 0,
+			    be32_to_cpu(XFS_BUF_TO_AGF(agbp)->agf_longest), &i);
 	if (error)
 		goto out_del_cursor;
 
@@ -77,19 +77,29 @@ xfs_trim_extents(
 	 * enough to be worth discarding.
 	 */
 	while (i) {
-		xfs_agblock_t fbno;
-		xfs_extlen_t flen;
+		xfs_agblock_t	fbno;
+		xfs_extlen_t	flen;
+		xfs_daddr_t	dbno;
+		xfs_extlen_t	dlen;
 
 		error = xfs_alloc_get_rec(cur, &fbno, &flen, &i);
 		if (error)
 			goto out_del_cursor;
 		XFS_WANT_CORRUPTED_GOTO(i == 1, out_del_cursor);
-		ASSERT(flen <= XFS_BUF_TO_AGF(agbp)->agf_longest);
+		ASSERT(flen <= be32_to_cpu(XFS_BUF_TO_AGF(agbp)->agf_longest));
+
+		/*
+		 * use daddr format for all range/len calculations as that is
+		 * the format the range/len variables are supplied in by
+		 * userspace.
+		 */
+		dbno = XFS_AGB_TO_DADDR(mp, agno, fbno);
+		dlen = XFS_FSB_TO_BB(mp, flen);
 
 		/*
 		 * Too small?  Give up.
 		 */
-		if (flen < minlen) {
+		if (dlen < minlen) {
 			trace_xfs_discard_toosmall(mp, agno, fbno, flen);
 			goto out_del_cursor;
 		}
@@ -99,8 +109,7 @@ xfs_trim_extents(
 		 * supposed to discard skip it.  Do not bother to trim
 		 * down partially overlapping ranges for now.
 		 */
-		if (XFS_AGB_TO_FSB(mp, agno, fbno) + flen < start ||
-		    XFS_AGB_TO_FSB(mp, agno, fbno) >= start + len) {
+		if (dbno + dlen < start || dbno > end) {
 			trace_xfs_discard_exclude(mp, agno, fbno, flen);
 			goto next_extent;
 		}
@@ -115,10 +124,7 @@ xfs_trim_extents(
 		}
 
 		trace_xfs_discard_extent(mp, agno, fbno, flen);
-		error = -blkdev_issue_discard(bdev,
-				XFS_AGB_TO_DADDR(mp, agno, fbno),
-				XFS_FSB_TO_BB(mp, flen),
-				GFP_NOFS, 0);
+		error = -blkdev_issue_discard(bdev, dbno, dlen, GFP_NOFS, 0);
 		if (error)
 			goto out_del_cursor;
 		*blocks_trimmed += flen;
@@ -137,6 +143,15 @@ out_put_perag:
 	return error;
 }
 
+/*
+ * trim a range of the filesystem.
+ *
+ * Note: the parameters passed from userspace are byte ranges into the
+ * filesystem which does not match to the format we use for filesystem block
+ * addressing. FSB addressing is sparse (AGNO|AGBNO), while the incoming format
+ * is a linear address range. Hence we need to use DADDR based conversions and
+ * comparisons for determining the correct offset and regions to trim.
+ */
 int
 xfs_ioc_trim(
 	struct xfs_mount		*mp,
@@ -145,7 +160,7 @@ xfs_ioc_trim(
 	struct request_queue	*q = mp->m_ddev_targp->bt_bdev->bd_disk->queue;
 	unsigned int		granularity = q->limits.discard_granularity;
 	struct fstrim_range	range;
-	xfs_fsblock_t		start, len, minlen;
+	xfs_daddr_t		start, end, minlen;
 	xfs_agnumber_t		start_agno, end_agno, agno;
 	__uint64_t		blocks_trimmed = 0;
 	int			error, last_error = 0;
@@ -159,25 +174,25 @@ xfs_ioc_trim(
 
 	/*
 	 * Truncating down the len isn't actually quite correct, but using
-	 * XFS_B_TO_FSB would mean we trivially get overflows for values
+	 * BBTOB would mean we trivially get overflows for values
 	 * of ULLONG_MAX or slightly lower.  And ULLONG_MAX is the default
 	 * used by the fstrim application.  In the end it really doesn't
 	 * matter as trimming blocks is an advisory interface.
 	 */
-	start = XFS_B_TO_FSBT(mp, range.start);
-	len = XFS_B_TO_FSBT(mp, range.len);
-	minlen = XFS_B_TO_FSB(mp, max_t(u64, granularity, range.minlen));
+	start = BTOBB(range.start);
+	end = start + BTOBBT(range.len) - 1;
+	minlen = BTOBB(max_t(u64, granularity, range.minlen));
 
-	start_agno = XFS_FSB_TO_AGNO(mp, start);
-	if (start_agno >= mp->m_sb.sb_agcount)
+	if (XFS_BB_TO_FSB(mp, start) >= mp->m_sb.sb_dblocks)
 		return -XFS_ERROR(EINVAL);
+	if (end > XFS_FSB_TO_BB(mp, mp->m_sb.sb_dblocks) - 1)
+		end = XFS_FSB_TO_BB(mp, mp->m_sb.sb_dblocks)- 1;
 
-	end_agno = XFS_FSB_TO_AGNO(mp, start + len);
-	if (end_agno >= mp->m_sb.sb_agcount)
-		end_agno = mp->m_sb.sb_agcount - 1;
+	start_agno = xfs_daddr_to_agno(mp, start);
+	end_agno = xfs_daddr_to_agno(mp, end);
 
 	for (agno = start_agno; agno <= end_agno; agno++) {
-		error = -xfs_trim_extents(mp, agno, start, len, minlen,
+		error = -xfs_trim_extents(mp, agno, start, end, minlen,
 					  &blocks_trimmed);
 		if (error)
 			last_error = error;
@@ -189,5 +204,34 @@ xfs_ioc_trim(
 	range.len = XFS_FSB_TO_B(mp, blocks_trimmed);
 	if (copy_to_user(urange, &range, sizeof(range)))
 		return -XFS_ERROR(EFAULT);
+	return 0;
+}
+
+int
+xfs_discard_extents(
+	struct xfs_mount	*mp,
+	struct list_head	*list)
+{
+	struct xfs_busy_extent	*busyp;
+	int			error = 0;
+
+	list_for_each_entry(busyp, list, list) {
+		trace_xfs_discard_extent(mp, busyp->agno, busyp->bno,
+					 busyp->length);
+
+		error = -blkdev_issue_discard(mp->m_ddev_targp->bt_bdev,
+				XFS_AGB_TO_DADDR(mp, busyp->agno, busyp->bno),
+				XFS_FSB_TO_BB(mp, busyp->length),
+				GFP_NOFS, 0);
+		if (error && error != EOPNOTSUPP) {
+			xfs_info(mp,
+	 "discard failed for extent [0x%llu,%u], error %d",
+				 (unsigned long long)busyp->bno,
+				 busyp->length,
+				 error);
+			return error;
+		}
+	}
+
 	return 0;
 }

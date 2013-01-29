@@ -902,12 +902,12 @@ Found in hex form in kernel source.
 
 Driver: netxen_nic - NetXen Multi port (1/10) Gigabit Ethernet NIC
 
-File: phanfw-4.0.579.bin
-Info: v4.0.579
+File: phanfw-4.0.588.bin
+Info: v4.0.588
 
 Licence:
 
-Copyright © 2003-2010 QLogic Corporation
+Copyright © 2003-2012 QLogic Corporation
 QLogic Linux Intelligent Ethernet (3000 and 3100 Series) Adapter Firmware
 
 Redistribution and use in binary form, without modification, for use in
@@ -950,7 +950,27 @@ File: rtl_nic/rtl8168d-2.fw
 File: rtl_nic/rtl8105e-1.fw
 File: rtl_nic/rtl8168e-1.fw
 File: rtl_nic/rtl8168e-2.fw
+
 File: rtl_nic/rtl8168e-3.fw
+Version: 0.0.4
+
+File: rtl_nic/rtl8168f-1.fw
+Version: 0.0.5
+
+File: rtl_nic/rtl8168f-2.fw
+Version: 0.0.4
+
+File: rtl_nic/rtl8411-1.fw
+Version: 0.0.3
+
+File: rtl_nic/rtl8402-1.fw
+Version: 0.0.1
+
+File: rtl_nic/rtl8106e-1.fw
+Version: 0.0.1
+
+File: rtl_nic/rtl8168g-1.fw
+Version: 0.0.2
 
 Licence:
  * Copyright (c) 2010, Realtek Semiconductor Corporation
@@ -962,6 +982,9 @@ Licence:
 
 Driver: iwlwifi - Intel Wireless Wifi
  
+File: iwlwifi-6000g2a-6.ucode
+Info: v18.168.6.1
+
 File: iwlwifi-6000g2b-6.ucode
 Info: v18.168.6.1
 
@@ -992,5 +1015,25 @@ File: myri10ge_rss_ethp_z8e.dat
 Info: v1.4.52
 
 License: Redistributable.  See LICENCE.myri10ge_firmware for details.
+
+--------------------------------------------------------------------------
+
+Driver: rt2800pci - Ralink RT2860, RT2890, RT3090, RT5390 wireless MACs
+
+File: rt2860.bin
+
+Licence: Redistributable. See LICENCE.ralink-firmware.txt for details
+
+Binary file supplied by Shiang Tu <shiang_tu@ralinktech.com>. Firmware Version 34
+
+--------------------------------------------------------------------------
+
+Driver: rt2800usb - Ralink RT2870, RT3070, RT3071, RT3072, RT5370 wireless MACs
+
+File: rt2870.bin
+
+Licence: Redistributable. See LICENCE.ralink-firmware.txt for details
+
+Binary file supplied by Shiang Tu <shiang_tu@ralinktech.com>. Firmware Version 29
 
 --------------------------------------------------------------------------

@@ -326,6 +326,14 @@ config ZEROPLUS_FF
 	  Say Y here if you have a Zeroplus based game controller and want
 	  to have force feedback support for it.
 
+config HYPERV_MOUSE
+	tristate "Microsoft Hyper-V mouse driver"
+	depends on HYPERV
+	---help---
+	Select this option to enable the Hyper-V mouse driver.
+
+
 endmenu
+
 
 endif # HID_SUPPORT

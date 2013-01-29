@@ -1324,8 +1324,7 @@ next:
 void
 qlcnic_release_firmware(struct qlcnic_adapter *adapter)
 {
-	if (adapter->fw)
-		release_firmware(adapter->fw);
+	release_firmware(adapter->fw);
 	adapter->fw = NULL;
 }
 
@@ -1492,8 +1491,6 @@ static struct sk_buff *qlcnic_process_rxbuf(struct qlcnic_adapter *adapter,
 		skb->ip_summed = CHECKSUM_NONE;
 	}
 
-	skb->dev = adapter->netdev;
-
 	buffer->skb = NULL;
 
 	return skb;
@@ -1535,7 +1532,7 @@ qlcnic_process_rcv(struct qlcnic_adapter *adapter,
 	struct sk_buff *skb;
 	struct qlcnic_host_rds_ring *rds_ring;
 	int index, length, cksum, pkt_offset;
-	u16 vid = 0xffff;
+	u16 vid = 0xffff, t_vid;
 
 	if (unlikely(ring >= adapter->max_rds_rings))
 		return NULL;
@@ -1568,6 +1565,11 @@ qlcnic_process_rcv(struct qlcnic_adapter *adapter,
 		adapter->stats.rxdropped++;
 		dev_kfree_skb(skb);
 		return buffer;
+	}
+
+	if (adapter->mac_learn) {
+		t_vid = 0;
+		qlcnic_add_lb_filter(adapter, skb, sts_data0, t_vid);
 	}
 
 	skb->protocol = eth_type_trans(skb, netdev);
@@ -1605,6 +1607,7 @@ qlcnic_process_lro(struct qlcnic_adapter *adapter,
 	u16 lro_length, length, data_offset;
 	u32 seq_number;
 	u16 vid = 0xffff;
+	u16 t_vid;
 
 	if (unlikely(ring > adapter->max_rds_rings))
 		return NULL;
@@ -1643,6 +1646,11 @@ qlcnic_process_lro(struct qlcnic_adapter *adapter,
 		return buffer;
 	}
 
+	if (adapter->mac_learn) {
+		t_vid = 0;
+		qlcnic_add_lb_filter(adapter, skb, sts_data0, t_vid);
+	}
+
 	skb->protocol = eth_type_trans(skb, netdev);
 
 	iph = (struct iphdr *)skb->data;
@@ -1656,6 +1664,9 @@ qlcnic_process_lro(struct qlcnic_adapter *adapter,
 	th->seq = htonl(seq_number);
 
 	length = skb->len;
+
+	if (adapter->flags & QLCNIC_FW_LRO_MSS_CAP)
+		skb_shinfo(skb)->gso_size = qlcnic_get_lro_sts_mss(sts_data1);
 
 	if ((vid != 0xffff) && adapter->vlgrp)
 		vlan_hwaccel_receive_skb(skb, adapter->vlgrp, vid);

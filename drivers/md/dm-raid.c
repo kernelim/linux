@@ -11,6 +11,7 @@
 #include "md.h"
 #include "raid1.h"
 #include "raid5.h"
+#include "raid10.h"
 #include "bitmap.h"
 
 #include <linux/device-mapper.h>
@@ -52,7 +53,10 @@ struct raid_dev {
 #define DMPF_MAX_RECOVERY_RATE 0x20
 #define DMPF_MAX_WRITE_BEHIND  0x40
 #define DMPF_STRIPE_CACHE      0x80
-#define DMPF_REGION_SIZE       0X100
+#define DMPF_REGION_SIZE       0x100
+#define DMPF_RAID10_COPIES     0x200
+#define DMPF_RAID10_FORMAT     0x400
+
 struct raid_set {
 	struct dm_target *ti;
 
@@ -76,6 +80,7 @@ static struct raid_type {
 	const unsigned algorithm;	/* RAID algorithm. */
 } raid_types[] = {
 	{"raid1",    "RAID1 (mirroring)",               0, 2, 1, 0 /* NONE */},
+	{"raid10",   "RAID10 (striped mirrors)",        0, 2, 10, UINT_MAX /* Varies */},
 	{"raid4",    "RAID4 (dedicated parity disk)",	1, 2, 5, ALGORITHM_PARITY_0},
 	{"raid5_la", "RAID5 (left asymmetric)",		1, 2, 5, ALGORITHM_LEFT_ASYMMETRIC},
 	{"raid5_ra", "RAID5 (right asymmetric)",	1, 2, 5, ALGORITHM_RIGHT_ASYMMETRIC},
@@ -85,6 +90,17 @@ static struct raid_type {
 	{"raid6_nr", "RAID6 (N restart)",		2, 4, 6, ALGORITHM_ROTATING_N_RESTART},
 	{"raid6_nc", "RAID6 (N continue)",		2, 4, 6, ALGORITHM_ROTATING_N_CONTINUE}
 };
+
+static unsigned raid10_md_layout_to_copies(int layout)
+{
+	return layout & 0xFF;
+}
+
+static int raid10_format_to_md_layout(char *format, unsigned copies)
+{
+	/* 1 "far" copy, and 'copies' "near" copies */
+	return (1 << 8) | (copies & 0xFF);
+}
 
 static struct raid_type *get_raid_type(char *name)
 {
@@ -101,17 +117,9 @@ static struct raid_set *context_alloc(struct dm_target *ti, struct raid_type *ra
 {
 	unsigned i;
 	struct raid_set *rs;
-	sector_t sectors_per_dev;
 
 	if (raid_devs <= raid_type->parity_devs) {
 		ti->error = "Insufficient number of devices";
-		return ERR_PTR(-EINVAL);
-	}
-
-	sectors_per_dev = ti->len;
-	if ((raid_type->level > 1) &&
-	    sector_div(sectors_per_dev, (raid_devs - raid_type->parity_devs))) {
-		ti->error = "Target length not divisible by number of data devices";
 		return ERR_PTR(-EINVAL);
 	}
 
@@ -128,7 +136,6 @@ static struct raid_set *context_alloc(struct dm_target *ti, struct raid_type *ra
 	rs->md.raid_disks = raid_devs;
 	rs->md.level = raid_type->level;
 	rs->md.new_level = rs->md.level;
-	rs->md.dev_sectors = sectors_per_dev;
 	rs->md.layout = raid_type->algorithm;
 	rs->md.new_layout = rs->md.layout;
 	rs->md.delta_disks = 0;
@@ -143,6 +150,7 @@ static struct raid_set *context_alloc(struct dm_target *ti, struct raid_type *ra
 	 *  rs->md.external
 	 *  rs->md.chunk_sectors
 	 *  rs->md.new_chunk_sectors
+	 *  rs->md.dev_sectors
 	 */
 
 	return rs;
@@ -155,10 +163,7 @@ static void context_free(struct raid_set *rs)
 	for (i = 0; i < rs->md.raid_disks; i++) {
 		if (rs->dev[i].meta_dev)
 			dm_put_device(rs->ti, rs->dev[i].meta_dev);
-		if (rs->dev[i].rdev.sb_page)
-			put_page(rs->dev[i].rdev.sb_page);
-		rs->dev[i].rdev.sb_page = NULL;
-		rs->dev[i].rdev.sb_loaded = 0;
+		md_rdev_clear(&rs->dev[i].rdev);
 		if (rs->dev[i].data_dev)
 			dm_put_device(rs->ti, rs->dev[i].data_dev);
 	}
@@ -333,6 +338,79 @@ static int validate_region_size(struct raid_set *rs, unsigned long region_size)
 }
 
 /*
+ * validate_raid_redundancy
+ * @rs
+ *
+ * Determine if there are enough devices in the array that haven't
+ * failed (or are being rebuilt) to form a usable array.
+ *
+ * Returns: 0 on success, -EINVAL on failure.
+ */
+static int validate_raid_redundancy(struct raid_set *rs)
+{
+	unsigned i, rebuild_cnt = 0;
+	unsigned rebuilds_per_group, copies, d;
+
+	for (i = 0; i < rs->md.raid_disks; i++)
+		if (!test_bit(In_sync, &rs->dev[i].rdev.flags) ||
+		    !rs->dev[i].rdev.sb_page)
+			rebuild_cnt++;
+
+	switch (rs->raid_type->level) {
+	case 1:
+		if (rebuild_cnt >= rs->md.raid_disks)
+			goto too_many;
+		break;
+	case 4:
+	case 5:
+	case 6:
+		if (rebuild_cnt > rs->raid_type->parity_devs)
+			goto too_many;
+		break;
+	case 10:
+		copies = raid10_md_layout_to_copies(rs->md.layout);
+		if (rebuild_cnt < copies)
+			break;
+
+		/*
+		 * It is possible to have a higher rebuild count for RAID10,
+		 * as long as the failed devices occur in different mirror
+		 * groups (i.e. different stripes).
+		 *
+		 * Right now, we only allow for "near" copies.  When other
+		 * formats are added, we will have to check those too.
+		 *
+		 * When checking "near" format, make sure no adjacent devices
+		 * have failed beyond what can be handled.  In addition to the
+		 * simple case where the number of devices is a multiple of the
+		 * number of copies, we must also handle cases where the number
+		 * of devices is not a multiple of the number of copies.
+		 * E.g.    dev1 dev2 dev3 dev4 dev5
+		 *          A    A    B    B    C
+		 *          C    D    D    E    E
+		 */
+		for (i = 0; i < rs->md.raid_disks * copies; i++) {
+			if (!(i % copies))
+				rebuilds_per_group = 0;
+			d = i % rs->md.raid_disks;
+			if ((!rs->dev[d].rdev.sb_page ||
+			     !test_bit(In_sync, &rs->dev[d].rdev.flags)) &&
+			    (++rebuilds_per_group >= copies))
+				goto too_many;
+		}
+		break;
+	default:
+		if (rebuild_cnt)
+			return -EINVAL;
+	}
+
+	return 0;
+
+too_many:
+	return -EINVAL;
+}
+
+/*
  * Possible arguments are...
  *	<chunk_size> [optional_args]
  *
@@ -350,12 +428,20 @@ static int validate_region_size(struct raid_set *rs, unsigned long region_size)
  *    [max_write_behind <sectors>]	See '-write-behind=' (man mdadm)
  *    [stripe_cache <sectors>]		Stripe cache size for higher RAIDs
  *    [region_size <sectors>]           Defines granularity of bitmap
+ *
+ * RAID10-only options:
+ *    [raid10_copies <# copies>]        Number of copies.  (Default: 2)
+ *    [raid10_format <near>]            Layout algorithm.  (Default: near)
  */
 static int parse_raid_params(struct raid_set *rs, char **argv,
 			     unsigned num_raid_params)
 {
-	unsigned i, rebuild_cnt = 0;
+	char *raid10_format = "near";
+	unsigned raid10_copies = 2;
+	unsigned i;
 	unsigned long value, region_size = 0;
+	sector_t sectors_per_dev = rs->ti->len;
+	sector_t max_io_len;
 	char *key;
 
 	/*
@@ -425,21 +511,30 @@ static int parse_raid_params(struct raid_set *rs, char **argv,
 		}
 
 		key = argv[i++];
+
+		/* Parameters that take a string value are checked here. */
+		if (!strcasecmp(key, "raid10_format")) {
+			if (rs->raid_type->level != 10) {
+				rs->ti->error = "'raid10_format' is an invalid parameter for this RAID type";
+				return -EINVAL;
+			}
+			if (strcmp("near", argv[i])) {
+				rs->ti->error = "Invalid 'raid10_format' value given";
+				return -EINVAL;
+			}
+			raid10_format = argv[i];
+			rs->print_flags |= DMPF_RAID10_FORMAT;
+			continue;
+		}
+
 		if (strict_strtoul(argv[i], 10, &value) < 0) {
 			rs->ti->error = "Bad numerical argument given in raid params";
 			return -EINVAL;
 		}
 
+		/* Parameters that take a numeric value are checked here */
 		if (!strcasecmp(key, "rebuild")) {
-			rebuild_cnt++;
-			if (((rs->raid_type->level != 1) &&
-			     (rebuild_cnt > rs->raid_type->parity_devs)) ||
-			    ((rs->raid_type->level == 1) &&
-			     (rebuild_cnt > (rs->md.raid_disks - 1)))) {
-				rs->ti->error = "Too many rebuild devices specified for given RAID type";
-				return -EINVAL;
-			}
-			if (value > rs->md.raid_disks) {
+			if (value >= rs->md.raid_disks) {
 				rs->ti->error = "Invalid rebuild index given";
 				return -EINVAL;
 			}
@@ -489,7 +584,8 @@ static int parse_raid_params(struct raid_set *rs, char **argv,
 			 */
 			value /= 2;
 
-			if (rs->raid_type->level < 5) {
+			if ((rs->raid_type->level != 5) &&
+			    (rs->raid_type->level != 6)) {
 				rs->ti->error = "Inappropriate argument: stripe_cache";
 				return -EINVAL;
 			}
@@ -514,6 +610,14 @@ static int parse_raid_params(struct raid_set *rs, char **argv,
 		} else if (!strcasecmp(key, "region_size")) {
 			rs->print_flags |= DMPF_REGION_SIZE;
 			region_size = value;
+		} else if (!strcasecmp(key, "raid10_copies") &&
+			   (rs->raid_type->level == 10)) {
+			if ((value < 2) || (value > 0xFF)) {
+				rs->ti->error = "Bad value for 'raid10_copies'";
+				return -EINVAL;
+			}
+			rs->print_flags |= DMPF_RAID10_COPIES;
+			raid10_copies = value;
 		} else {
 			DMERR("Unable to parse RAID parameter: %s", key);
 			rs->ti->error = "Unable to parse RAID parameters";
@@ -525,14 +629,33 @@ static int parse_raid_params(struct raid_set *rs, char **argv,
 		return -EINVAL;
 
 	if (rs->md.chunk_sectors)
-		rs->ti->split_io = rs->md.chunk_sectors;
+		max_io_len = rs->md.chunk_sectors;
 	else
-		rs->ti->split_io = region_size;
+		max_io_len = region_size;
 
-	if (rs->md.chunk_sectors)
-		rs->ti->split_io = rs->md.chunk_sectors;
-	else
-		rs->ti->split_io = region_size;
+	if (dm_set_target_max_io_len(rs->ti, max_io_len))
+		return -EINVAL;
+
+	if (rs->raid_type->level == 10) {
+		if (raid10_copies > rs->md.raid_disks) {
+			rs->ti->error = "Not enough devices to satisfy specification";
+			return -EINVAL;
+		}
+
+		/* (Len * #mirrors) / #devices */
+		sectors_per_dev = rs->ti->len * raid10_copies;
+		sector_div(sectors_per_dev, rs->md.raid_disks);
+
+		rs->md.layout = raid10_format_to_md_layout(raid10_format,
+							   raid10_copies);
+		rs->md.new_layout = rs->md.layout;
+	} else if ((rs->raid_type->level > 1) &&
+		   sector_div(sectors_per_dev,
+			      (rs->md.raid_disks - rs->raid_type->parity_devs))) {
+		rs->ti->error = "Target length not divisible by number of data devices";
+		return -EINVAL;
+	}
+	rs->md.dev_sectors = sectors_per_dev;
 
 	/* Assume there are no metadata devices until the drives are parsed */
 	rs->md.persistent = 0;
@@ -555,6 +678,9 @@ static int raid_is_congested(struct dm_target_callbacks *cb, int bits)
 	if (rs->raid_type->level == 1)
 		return md_raid1_congested(&rs->md, bits);
 
+	if (rs->raid_type->level == 10)
+		return md_raid10_congested(&rs->md, bits);
+
 	return md_raid5_congested(&rs->md, bits);
 }
 
@@ -564,6 +690,8 @@ static void raid_unplug(struct dm_target_callbacks *cb)
 
 	if (rs->raid_type->level == 1)
 		md_raid1_unplug_device(rs->md.private);
+	else if (rs->raid_type->level == 10)
+		md_raid10_unplug_device(rs->md.private);
 	else
 		md_raid5_unplug_device(rs->md.private);
 }
@@ -616,7 +744,7 @@ static int read_disk_sb(struct md_rdev *rdev, int size)
 	if (!sync_page_io(rdev, 0, size, rdev->sb_page, READ, 1)) {
 		DMERR("Failed to read superblock of device at position %d",
 		      rdev->raid_disk);
-		set_bit(Faulty, &rdev->flags);
+		md_error(rdev->mddev, rdev);
 		return -EINVAL;
 	}
 
@@ -721,7 +849,7 @@ static int super_init_validation(struct mddev *mddev, struct md_rdev *rdev)
 	struct dm_raid_superblock *sb;
 	uint32_t new_devs = 0;
 	uint32_t rebuilds = 0;
-	struct md_rdev *r, *t;
+	struct md_rdev *r;
 	struct dm_raid_superblock *sb2;
 
 	sb = page_address(rdev->sb_page);
@@ -764,7 +892,7 @@ static int super_init_validation(struct mddev *mddev, struct md_rdev *rdev)
 	 *    case the In_sync bit will /not/ be set and
 	 *    recovery_cp must be MaxSector.
 	 */
-	rdev_for_each(r, t, mddev) {
+	rdev_for_each(r, mddev) {
 		if (!test_bit(In_sync, &r->flags)) {
 			DMINFO("Device %d specified for rebuild: "
 			       "Clearing superblock", r->raid_disk);
@@ -796,7 +924,7 @@ static int super_init_validation(struct mddev *mddev, struct md_rdev *rdev)
 	 * Now we set the Faulty bit for those devices that are
 	 * recorded in the superblock as failed.
 	 */
-	rdev_for_each(r, t, mddev) {
+	rdev_for_each(r, mddev) {
 		if (!r->sb_page)
 			continue;
 		sb2 = page_address(r->sb_page);
@@ -869,27 +997,12 @@ static int super_validate(struct mddev *mddev, struct md_rdev *rdev)
 static int analyse_superblocks(struct dm_target *ti, struct raid_set *rs)
 {
 	int ret;
-	unsigned redundancy = 0;
 	struct raid_dev *dev;
-	struct md_rdev *rdev, *freshest, *tmp;
+	struct md_rdev *rdev, *tmp, *freshest;
 	struct mddev *mddev = &rs->md;
 
-	switch (rs->raid_type->level) {
-	case 1:
-		redundancy = rs->md.raid_disks - 1;
-		break;
-	case 4:
-	case 5:
-	case 6:
-		redundancy = rs->raid_type->parity_devs;
-		break;
-	default:
-		ti->error = "Unknown RAID type";
-		return -EINVAL;
-	}
-
 	freshest = NULL;
-	rdev_for_each(rdev, tmp, mddev) {
+	rdev_for_each_safe(rdev, tmp, mddev) {
 		if (!rdev->meta_bdev)
 			continue;
 
@@ -903,40 +1016,39 @@ static int analyse_superblocks(struct dm_target *ti, struct raid_set *rs)
 			break;
 		default:
 			dev = container_of(rdev, struct raid_dev, rdev);
-			if (redundancy--) {
-				if (dev->meta_dev)
-					dm_put_device(ti, dev->meta_dev);
-				dev->meta_dev = NULL;
-				rdev->meta_bdev = NULL;
+			if (dev->meta_dev)
+				dm_put_device(ti, dev->meta_dev);
+			dev->meta_dev = NULL;
+			rdev->meta_bdev = NULL;
 
-				if (rdev->sb_page)
-					put_page(rdev->sb_page);
-				rdev->sb_page = NULL;
+			if (rdev->sb_page)
+				put_page(rdev->sb_page);
+			rdev->sb_page = NULL;
 
-				rdev->sb_loaded = 0;
+			rdev->sb_loaded = 0;
 
-				/*
-				 * We might be able to salvage the data device
-				 * even though the meta device has failed.  For
-				 * now, we behave as though '- -' had been
-				 * passed in for this device via the CTR table.
-				 */
-				if (dev->data_dev)
-					dm_put_device(ti, dev->data_dev);
-				dev->data_dev = NULL;
-				rdev->bdev = NULL;
+			/*
+			 * We might be able to salvage the data device
+			 * even though the meta device has failed.  For
+			 * now, we behave as though '- -' had been
+			 * passed in for this device via the CTR table.
+			 */
+			if (dev->data_dev)
+				dm_put_device(ti, dev->data_dev);
+			dev->data_dev = NULL;
+			rdev->bdev = NULL;
 
-				list_del(&rdev->same_set);
-
-				continue;
-			}
-			ti->error = "Failed to load superblock";
-			return ret;
+			list_del(&rdev->same_set);
 		}
 	}
 
 	if (!freshest)
 		return 0;
+
+	if (validate_raid_redundancy(rs)) {
+		rs->ti->error = "Insufficient redundancy to activate array";
+		return -EINVAL;
+	}
 
 	/*
 	 * Validation of the freshest device provides the source of
@@ -946,7 +1058,7 @@ static int analyse_superblocks(struct dm_target *ti, struct raid_set *rs)
 	if (super_validate(mddev, freshest))
 		return -EINVAL;
 
-	rdev_for_each(rdev, tmp, mddev)
+	rdev_for_each(rdev, mddev)
 		if ((rdev != freshest) && super_validate(mddev, rdev))
 			return -EINVAL;
 
@@ -1045,6 +1157,11 @@ static int raid_ctr(struct dm_target *ti, unsigned argc, char **argv)
 		goto bad;
 	}
 
+	if (ti->len != rs->md.array_sectors) {
+		ti->error = "Array size does not match requested target length";
+		ret = -EINVAL;
+		goto size_mismatch;
+	}
 	rs->callbacks.congested_fn = raid_is_congested;
 	rs->callbacks.unplug_fn = raid_unplug;
 	dm_table_add_target_callbacks(ti->table, &rs->callbacks);
@@ -1052,6 +1169,8 @@ static int raid_ctr(struct dm_target *ti, unsigned argc, char **argv)
 	mddev_suspend(&rs->md);
 	return 0;
 
+size_mismatch:
+	md_stop(&rs->md);
 bad:
 	context_free(rs);
 
@@ -1200,6 +1319,13 @@ static int raid_status(struct dm_target *ti, status_type_t type,
 			DMEMIT(" region_size %lu",
 			       rs->md.bitmap_info.chunksize >> 9);
 
+		if (rs->print_flags & DMPF_RAID10_COPIES)
+			DMEMIT(" raid10_copies %u",
+			       raid10_md_layout_to_copies(rs->md.layout));
+
+		if (rs->print_flags & DMPF_RAID10_FORMAT)
+			DMEMIT(" raid10_format near");
+
 		DMEMIT(" %d", rs->md.raid_disks);
 		for (i = 0; i < rs->md.raid_disks; i++) {
 			if (rs->dev[i].meta_dev)
@@ -1274,7 +1400,7 @@ static void raid_resume(struct dm_target *ti)
 
 static struct target_type raid_target = {
 	.name = "raid",
-	.version = {1, 1, 0},
+	.version = {1, 3, 2},
 	.module = THIS_MODULE,
 	.ctr = raid_ctr,
 	.dtr = raid_dtr,
@@ -1301,6 +1427,8 @@ module_init(dm_raid_init);
 module_exit(dm_raid_exit);
 
 MODULE_DESCRIPTION(DM_NAME " raid4/5/6 target");
+MODULE_ALIAS("dm-raid1");
+MODULE_ALIAS("dm-raid10");
 MODULE_ALIAS("dm-raid4");
 MODULE_ALIAS("dm-raid5");
 MODULE_ALIAS("dm-raid6");

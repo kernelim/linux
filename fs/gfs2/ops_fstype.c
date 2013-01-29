@@ -57,8 +57,8 @@ static void gfs2_tune_init(struct gfs2_tune *gt)
 {
 	spin_lock_init(&gt->gt_spin);
 
-	gt->gt_incore_log_blocks = 1024;
-	gt->gt_logd_secs = 1;
+	gt->gt_incore_log_blocks = 8192;
+	gt->gt_logd_secs = 30;
 	gt->gt_quota_simul_sync = 64;
 	gt->gt_quota_warn_period = 10;
 	gt->gt_quota_scale_num = 1;
@@ -78,6 +78,11 @@ static struct gfs2_sbd *init_sbd(struct super_block *sb)
 
 	sb->s_fs_info = sdp;
 	sdp->sd_vfs = sb;
+	sdp->sd_lkstats = alloc_percpu(struct gfs2_pcpu_lkstats);
+	if (!sdp->sd_lkstats) {
+		kfree(sdp);
+		return NULL;
+	}
 
 	gfs2_tune_init(&sdp->sd_tune);
 
@@ -102,7 +107,6 @@ static struct gfs2_sbd *init_sbd(struct super_block *sb)
 
 	INIT_LIST_HEAD(&sdp->sd_log_le_buf);
 	INIT_LIST_HEAD(&sdp->sd_log_le_revoke);
-	INIT_LIST_HEAD(&sdp->sd_log_le_rg);
 	INIT_LIST_HEAD(&sdp->sd_log_le_databuf);
 	INIT_LIST_HEAD(&sdp->sd_log_le_ordered);
 
@@ -587,7 +591,7 @@ static int map_journal_extents(struct gfs2_sbd *sdp)
 
 	prev_db = 0;
 
-	for (lb = 0; lb < ip->i_disksize >> sdp->sd_sb.sb_bsize_shift; lb++) {
+	for (lb = 0; lb < i_size_read(jd->jd_inode) >> sdp->sd_sb.sb_bsize_shift; lb++) {
 		bh.b_state = 0;
 		bh.b_blocknr = 0;
 		bh.b_size = 1 << ip->i_inode.i_blkbits;
@@ -1165,18 +1169,31 @@ static int fill_super(struct super_block *sb, struct gfs2_args *args, int silent
 	}
 
 	error = init_names(sdp, silent);
+	if (error) {
+		/* In this case, we haven't initialized sysfs, so we have to
+		   manually free the sdp. */
+		free_percpu(sdp->sd_lkstats);
+		kfree(sdp);
+		sb->s_fs_info = NULL;
+		return error;
+	}
+
+	error = gfs2_sys_fs_add(sdp);
+	/*
+	 * If we hit an error here, gfs2_sys_fs_add will have called function
+	 * kobject_put which causes the sysfs usage count to go to zero, which
+	 * causes sysfs to call function gfs2_sbd_release, which frees sdp.
+	 * Subsequent error paths here will call gfs2_sys_fs_del, which also
+	 * kobject_put to free sdp.
+	 */
 	if (error)
-		goto fail;
+		return error;
 
 	gfs2_create_debugfs_file(sdp);
 
-	error = gfs2_sys_fs_add(sdp);
-	if (error)
-		goto fail;
-
 	error = gfs2_lm_mount(sdp, silent);
 	if (error)
-		goto fail_sys;
+		goto fail_debug;
 
 	error = init_locking(sdp, &mount_gh, DO);
 	if (error)
@@ -1236,11 +1253,12 @@ fail_lm:
 	invalidate_inodes(sb, true);
 	gfs2_gl_hash_clear(sdp);
 	gfs2_lm_unmount(sdp);
-fail_sys:
-	gfs2_sys_fs_del(sdp);
-fail:
+fail_debug:
 	gfs2_delete_debugfs_file(sdp);
-	kfree(sdp);
+	free_percpu(sdp->sd_lkstats);
+	/* gfs2_sys_fs_del must be the last thing we do, since it causes
+	 * sysfs to call function gfs2_sbd_release, which frees sdp. */
+	gfs2_sys_fs_del(sdp);
 	sb->s_fs_info = NULL;
 	return error;
 }
@@ -1417,14 +1435,13 @@ static void gfs2_kill_sb(struct super_block *sb)
 	sdp->sd_root_dir = NULL;
 	sdp->sd_master_dir = NULL;
 	shrink_dcache_sb(sb);
-	kill_block_super(sb);
 	gfs2_delete_debugfs_file(sdp);
-	kfree(sdp);
+	kill_block_super(sb);
 }
 
 struct file_system_type gfs2_fs_type = {
 	.name = "gfs2",
-	.fs_flags = FS_REQUIRES_DEV,
+	.fs_flags = FS_REQUIRES_DEV | FS_HAS_NEW_FREEZE,
 	.get_sb = gfs2_get_sb,
 	.kill_sb = gfs2_kill_sb,
 	.owner = THIS_MODULE,

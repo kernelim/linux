@@ -879,6 +879,29 @@ static inline int ext2_find_next_bit(void *vaddr, unsigned long size,
 
 #include <asm-generic/bitops/minix.h>
 
+/* Compat macros for RHEL6 */
+#define find_next_zero_bit_le(addr, size, offset) \
+			generic_find_next_zero_le_bit(addr, size, offset)
+#define find_next_bit_le(addr, size, offset) \
+			generic_find_next_le_bit(addr, size, offset)
+#define __set_bit_le(nr, addr) \
+	__set_bit((nr) ^ (__BITOPS_WORDSIZE - 8), addr)
+#define __clear_bit_le(nr, addr) \
+	__clear_bit((nr) ^ (__BITOPS_WORDSIZE - 8), addr)
+
+#define test_bit_le(nr, addr) \
+	test_bit((nr) ^ (__BITOPS_WORDSIZE - 8), (addr))
+
+#define test_and_set_bit_le(nr, addr) \
+	test_and_set_bit((nr) ^ (__BITOPS_WORDSIZE - 8), (addr))
+#define test_and_clear_bit_le(nr, addr) \
+	test_and_clear_bit((nr) ^ (__BITOPS_WORDSIZE - 8), (addr))
+
+#define __test_and_set_bit_le(nr, addr) \
+	__test_and_set_bit((nr) ^ (__BITOPS_WORDSIZE - 8), (addr))
+#define __test_and_clear_bit_le(nr, addr) \
+	__test_and_clear_bit((nr) ^ (__BITOPS_WORDSIZE - 8), (addr))
+
 #endif /* __KERNEL__ */
 
 #endif /* _S390_BITOPS_H */

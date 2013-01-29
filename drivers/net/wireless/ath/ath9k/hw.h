@@ -48,6 +48,7 @@
 #define AR9300_DEVID_AR9580	0x0033
 #define AR9300_DEVID_AR9462	0x0034
 #define AR9300_DEVID_AR9330	0x0035
+#define AR9485_DEVID_AR1111	0x0037
 
 #define AR5416_AR9100_DEVID	0x000b
 
@@ -58,9 +59,6 @@
 #define AR9280_COEX2WIRE_SUBSYSID	0x309b
 #define AT9285_COEX3WIRE_SA_SUBSYSID	0x30aa
 #define AT9285_COEX3WIRE_DA_SUBSYSID	0x30ab
-
-#define AR9300_NUM_BT_WEIGHTS   4
-#define AR9300_NUM_WLAN_WEIGHTS 4
 
 #define ATH_AMPDU_LIMIT_MAX        (64 * 1024 - 1)
 
@@ -129,6 +127,16 @@
 #define AR_GPIO_OUTPUT_MUX_AS_RX_CLEAR_EXTERNAL  4
 #define AR_GPIO_OUTPUT_MUX_AS_MAC_NETWORK_LED    5
 #define AR_GPIO_OUTPUT_MUX_AS_MAC_POWER_LED      6
+#define AR_GPIO_OUTPUT_MUX_AS_MCI_WLAN_DATA      0x16
+#define AR_GPIO_OUTPUT_MUX_AS_MCI_WLAN_CLK       0x17
+#define AR_GPIO_OUTPUT_MUX_AS_MCI_BT_DATA        0x18
+#define AR_GPIO_OUTPUT_MUX_AS_MCI_BT_CLK         0x19
+#define AR_GPIO_OUTPUT_MUX_AS_WL_IN_TX           0x14
+#define AR_GPIO_OUTPUT_MUX_AS_WL_IN_RX           0x13
+#define AR_GPIO_OUTPUT_MUX_AS_BT_IN_TX           9
+#define AR_GPIO_OUTPUT_MUX_AS_BT_IN_RX           8
+#define AR_GPIO_OUTPUT_MUX_AS_RUCKUS_STROBE      0x1d
+#define AR_GPIO_OUTPUT_MUX_AS_RUCKUS_DATA        0x1e
 
 #define AR_GPIOD_MASK               0x00001FFF
 #define AR_GPIO_BIT(_gpio)          (1 << (_gpio))
@@ -189,20 +197,21 @@ enum ath_ini_subsys {
 enum ath9k_hw_caps {
 	ATH9K_HW_CAP_HT                         = BIT(0),
 	ATH9K_HW_CAP_RFSILENT                   = BIT(1),
-	ATH9K_HW_CAP_CST                        = BIT(2),
-	ATH9K_HW_CAP_AUTOSLEEP                  = BIT(4),
-	ATH9K_HW_CAP_4KB_SPLITTRANS             = BIT(5),
-	ATH9K_HW_CAP_EDMA			= BIT(6),
-	ATH9K_HW_CAP_RAC_SUPPORTED		= BIT(7),
-	ATH9K_HW_CAP_LDPC			= BIT(8),
-	ATH9K_HW_CAP_FASTCLOCK			= BIT(9),
-	ATH9K_HW_CAP_SGI_20			= BIT(10),
-	ATH9K_HW_CAP_PAPRD			= BIT(11),
-	ATH9K_HW_CAP_ANT_DIV_COMB		= BIT(12),
-	ATH9K_HW_CAP_2GHZ			= BIT(13),
-	ATH9K_HW_CAP_5GHZ			= BIT(14),
-	ATH9K_HW_CAP_APM			= BIT(15),
-	ATH9K_HW_CAP_RTT			= BIT(16),
+	ATH9K_HW_CAP_AUTOSLEEP                  = BIT(2),
+	ATH9K_HW_CAP_4KB_SPLITTRANS             = BIT(3),
+	ATH9K_HW_CAP_EDMA			= BIT(4),
+	ATH9K_HW_CAP_RAC_SUPPORTED		= BIT(5),
+	ATH9K_HW_CAP_LDPC			= BIT(6),
+	ATH9K_HW_CAP_FASTCLOCK			= BIT(7),
+	ATH9K_HW_CAP_SGI_20			= BIT(8),
+	ATH9K_HW_CAP_PAPRD			= BIT(9),
+	ATH9K_HW_CAP_ANT_DIV_COMB		= BIT(10),
+	ATH9K_HW_CAP_2GHZ			= BIT(11),
+	ATH9K_HW_CAP_5GHZ			= BIT(12),
+	ATH9K_HW_CAP_APM			= BIT(13),
+	ATH9K_HW_CAP_RTT			= BIT(14),
+	ATH9K_HW_CAP_MCI			= BIT(15),
+	ATH9K_HW_CAP_DFS			= BIT(16),
 };
 
 struct ath9k_hw_capabilities {
@@ -268,6 +277,7 @@ enum ath9k_int {
 	ATH9K_INT_TX = 0x00000040,
 	ATH9K_INT_TXDESC = 0x00000080,
 	ATH9K_INT_TIM_TIMER = 0x00000100,
+	ATH9K_INT_MCI = 0x00000200,
 	ATH9K_INT_BB_WATCHDOG = 0x00000400,
 	ATH9K_INT_TXURN = 0x00000800,
 	ATH9K_INT_MIB = 0x00001000,
@@ -339,12 +349,6 @@ enum ath9k_int {
 	 CHANNEL_HT40MINUS)
 
 #define MAX_RTT_TABLE_ENTRY     6
-#define RTT_HIST_MAX            3
-struct ath9k_rtt_hist {
-	u32 table[AR9300_MAX_CHAINS][RTT_HIST_MAX][MAX_RTT_TABLE_ENTRY];
-	u8 num_readings;
-};
-
 #define MAX_IQCAL_MEASUREMENT	8
 #define MAX_CL_TAB_ENTRY	16
 
@@ -354,6 +358,7 @@ struct ath9k_hw_cal_data {
 	int32_t CalValid;
 	int8_t iCoff;
 	int8_t qCoff;
+	bool rtt_done;
 	bool paprd_done;
 	bool nfcal_pending;
 	bool nfcal_interference;
@@ -364,8 +369,8 @@ struct ath9k_hw_cal_data {
 	u32 num_measures[AR9300_MAX_CHAINS];
 	int tx_corr_coeff[MAX_IQCAL_MEASUREMENT][AR9300_MAX_CHAINS];
 	u32 tx_clcal[AR9300_MAX_CHAINS][MAX_CL_TAB_ENTRY];
+	u32 rtt_table[AR9300_MAX_CHAINS][MAX_RTT_TABLE_ENTRY];
 	struct ath9k_nfcal_hist nfCalHist[NUM_NF_READINGS];
-	struct ath9k_rtt_hist rtt_hist;
 };
 
 struct ath9k_channel {
@@ -699,7 +704,6 @@ struct ath_hw {
 	struct ar5416Stats stats;
 	struct ath9k_tx_queue_info txq[ATH9K_NUM_TX_QUEUES];
 
-	int16_t curchan_rad_index;
 	enum ath9k_int imask;
 	u32 imrs2_reg;
 	u32 txok_interrupt_mask;
@@ -753,11 +757,6 @@ struct ath_hw {
 
 	u32 sta_id1_defaults;
 	u32 misc_mode;
-	enum {
-		AUTO_32KHZ,
-		USE_32KHZ,
-		DONT_USE_32KHZ,
-	} enable_32kHz_clock;
 
 	/* Private to hardware code */
 	struct ath_hw_private_ops private_ops;
@@ -774,7 +773,6 @@ struct ath_hw {
 	u32 *analogBank7Data;
 	u32 *bank6Temp;
 
-	u8 txpower_limit;
 	int coverage_class;
 	u32 slottime;
 	u32 globaltxtimeout;
@@ -788,10 +786,9 @@ struct ath_hw {
 	int firpwr[5];
 	enum ath9k_ani_cmd ani_function;
 
-	/* Bluetooth coexistance */
+#ifdef CONFIG_ATH9K_BTCOEX_SUPPORT
 	struct ath_btcoex_hw btcoex_hw;
-	u32 bt_coex_bt_weight[AR9300_NUM_BT_WEIGHTS];
-	u32 bt_coex_wlan_weight[AR9300_NUM_WLAN_WEIGHTS];
+#endif
 
 	u32 intr_txqs;
 	u8 txchainmask;
@@ -819,19 +816,14 @@ struct ath_hw {
 	struct ar5416IniArray iniAddac;
 	struct ar5416IniArray iniPcieSerdes;
 	struct ar5416IniArray iniPcieSerdesLowPower;
-	struct ar5416IniArray iniModesAdditional;
-	struct ar5416IniArray iniModesAdditional_40M;
+	struct ar5416IniArray iniModesFastClock;
+	struct ar5416IniArray iniAdditional;
 	struct ar5416IniArray iniModesRxGain;
 	struct ar5416IniArray iniModesTxGain;
-	struct ar5416IniArray iniModes_9271_1_0_only;
 	struct ar5416IniArray iniCckfirNormal;
 	struct ar5416IniArray iniCckfirJapan2484;
 	struct ar5416IniArray ini_japan2484;
-	struct ar5416IniArray iniCommon_normal_cck_fir_coeff_9271;
-	struct ar5416IniArray iniCommon_japan_2484_cck_fir_coeff_9271;
 	struct ar5416IniArray iniModes_9271_ANI_reg;
-	struct ar5416IniArray iniModes_high_power_tx_gain_9271;
-	struct ar5416IniArray iniModes_normal_power_tx_gain_9271;
 	struct ar5416IniArray ini_radio_post_sys2ant;
 	struct ar5416IniArray ini_BTCOEX_MAX_TXPWR;
 
@@ -845,11 +837,10 @@ struct ath_hw {
 	struct ath_gen_timer_table hw_gen_timers;
 
 	struct ar9003_txs *ts_ring;
-	void *ts_start;
 	u32 ts_paddr_start;
 	u32 ts_paddr_end;
 	u16 ts_tail;
-	u8 ts_size;
+	u16 ts_size;
 
 	u32 bb_watchdog_last_status;
 	u32 bb_watchdog_timeout_ms; /* in ms, 0 to disable */
@@ -912,11 +903,10 @@ static inline u8 get_streams(int mask)
 }
 
 /* Initialization, Detach, Reset */
-const char *ath9k_hw_probe(u16 vendorid, u16 devid);
 void ath9k_hw_deinit(struct ath_hw *ah);
 int ath9k_hw_init(struct ath_hw *ah);
 int ath9k_hw_reset(struct ath_hw *ah, struct ath9k_channel *chan,
-		   struct ath9k_hw_cal_data *caldata, bool bChannelChange);
+		   struct ath9k_hw_cal_data *caldata, bool fastcc);
 int ath9k_hw_fill_cap_info(struct ath_hw *ah);
 u32 ath9k_regd_get_ctl(struct ath_regulatory *reg, struct ath9k_channel *chan);
 
@@ -926,10 +916,11 @@ u32 ath9k_hw_gpio_get(struct ath_hw *ah, u32 gpio);
 void ath9k_hw_cfg_output(struct ath_hw *ah, u32 gpio,
 			 u32 ah_signal_type);
 void ath9k_hw_set_gpio(struct ath_hw *ah, u32 gpio, u32 val);
-u32 ath9k_hw_getdefantenna(struct ath_hw *ah);
 void ath9k_hw_setantenna(struct ath_hw *ah, u32 antenna);
 
 /* General Operation */
+void ath9k_hw_synth_delay(struct ath_hw *ah, struct ath9k_channel *chan,
+			  int hw_delay);
 bool ath9k_hw_wait(struct ath_hw *ah, u32 reg, u32 mask, u32 val, u32 timeout);
 void ath9k_hw_write_array(struct ath_hw *ah, struct ar5416IniArray *array,
 			  int column, unsigned int *writecnt);
@@ -947,7 +938,6 @@ bool ath9k_hw_disable(struct ath_hw *ah);
 void ath9k_hw_set_txpowerlimit(struct ath_hw *ah, u32 limit, bool test);
 void ath9k_hw_setopmode(struct ath_hw *ah);
 void ath9k_hw_setmcastfilter(struct ath_hw *ah, u32 filter0, u32 filter1);
-void ath9k_hw_setbssidmask(struct ath_hw *ah);
 void ath9k_hw_write_associd(struct ath_hw *ah);
 u32 ath9k_hw_gettsf32(struct ath_hw *ah);
 u64 ath9k_hw_gettsf64(struct ath_hw *ah);
@@ -963,6 +953,13 @@ void ath9k_hw_set_sta_beacon_timers(struct ath_hw *ah,
 bool ath9k_hw_check_alive(struct ath_hw *ah);
 
 bool ath9k_hw_setpower(struct ath_hw *ah, enum ath9k_power_mode mode);
+
+#ifdef CONFIG_ATH9K_DEBUGFS
+void ath9k_debug_sync_cause(struct ath_common *common, u32 sync_cause);
+#else
+static inline void ath9k_debug_sync_cause(struct ath_common *common,
+					  u32 sync_cause) {}
+#endif
 
 /* Generic hw timer primitives */
 struct ath_gen_timer *ath_gen_timer_alloc(struct ath_hw *ah,
@@ -981,19 +978,16 @@ void ath_gen_timer_isr(struct ath_hw *hw);
 
 void ath9k_hw_name(struct ath_hw *ah, char *hw_name, size_t len);
 
-/* HTC */
-void ath9k_hw_htc_resetinit(struct ath_hw *ah);
-
 /* PHY */
 void ath9k_hw_get_delta_slope_vals(struct ath_hw *ah, u32 coef_scaled,
 				   u32 *coef_mantissa, u32 *coef_exponent);
-void ath9k_hw_apply_txpower(struct ath_hw *ah, struct ath9k_channel *chan);
+void ath9k_hw_apply_txpower(struct ath_hw *ah, struct ath9k_channel *chan,
+			    bool test);
 
 /*
  * Code Specific to AR5008, AR9001 or AR9002,
  * we stuff these here to avoid callbacks for AR9003.
  */
-void ar9002_hw_cck_chan14_spread(struct ath_hw *ah);
 int ar9002_hw_rf_claim(struct ath_hw *ah);
 void ar9002_hw_enable_async_fifo(struct ath_hw *ah);
 
@@ -1014,7 +1008,6 @@ int ar9003_paprd_create_curve(struct ath_hw *ah,
 int ar9003_paprd_setup_gain_table(struct ath_hw *ah, int chain);
 int ar9003_paprd_init_table(struct ath_hw *ah);
 bool ar9003_paprd_is_done(struct ath_hw *ah);
-void ar9003_hw_set_paprd_txdesc(struct ath_hw *ah, void *ds, u8 chains);
 
 /* Hardware family op attach helpers */
 void ar5008_hw_attach_phy_ops(struct ath_hw *ah);
@@ -1039,6 +1032,32 @@ extern int modparam_force_new_ani;
 void ath9k_ani_reset(struct ath_hw *ah, bool is_scanning);
 void ath9k_hw_proc_mib_event(struct ath_hw *ah);
 void ath9k_hw_ani_monitor(struct ath_hw *ah, struct ath9k_channel *chan);
+
+#ifdef CONFIG_ATH9K_BTCOEX_SUPPORT
+static inline bool ath9k_hw_btcoex_is_enabled(struct ath_hw *ah)
+{
+	return ah->btcoex_hw.enabled;
+}
+void ath9k_hw_btcoex_enable(struct ath_hw *ah);
+static inline enum ath_btcoex_scheme
+ath9k_hw_get_btcoex_scheme(struct ath_hw *ah)
+{
+	return ah->btcoex_hw.scheme;
+}
+#else
+static inline bool ath9k_hw_btcoex_is_enabled(struct ath_hw *ah)
+{
+	return false;
+}
+static inline void ath9k_hw_btcoex_enable(struct ath_hw *ah)
+{
+}
+static inline enum ath_btcoex_scheme
+ath9k_hw_get_btcoex_scheme(struct ath_hw *ah)
+{
+	return ATH_BTCOEX_CFG_NONE;
+}
+#endif /* CONFIG_ATH9K_BTCOEX_SUPPORT */
 
 #define ATH9K_CLOCK_RATE_CCK		22
 #define ATH9K_CLOCK_RATE_5GHZ_OFDM	40

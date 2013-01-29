@@ -409,6 +409,13 @@ S:	Maintained for 2.4; PCI support for 2.6.
 L:	linux-alpha@vger.kernel.org
 F:	arch/alpha/
 
+AMD FAM15H PROCESSOR POWER MONITORING DRIVER
+M:	Andreas Herrmann <andreas.herrmann3@amd.com>
+L:	lm-sensors@lm-sensors.org
+S:	Maintained
+F:	Documentation/hwmon/fam15h_power
+F:	drivers/hwmon/fam15h_power.c
+
 AMD GEODE CS5536 USB DEVICE CONTROLLER DRIVER
 M:	Thomas Dahlmann <dahlmann.thomas@arcor.de>
 L:	linux-geode@lists.infradead.org (moderated for non-subscribers)
@@ -3970,6 +3977,14 @@ S:	Maintained
 F:	drivers/of
 F:	include/linux/of*.h
 K:	of_get_property
+
+OPENVSWITCH
+M:	Jesse Gross <jesse@nicira.com>
+L:	dev@openvswitch.org
+W:	http://openvswitch.org
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/jesse/openvswitch.git
+S:	Maintained
+F:	net/openvswitch/
 
 OPROFILE
 M:	Robert Richter <robert.richter@amd.com>

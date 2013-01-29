@@ -79,6 +79,7 @@ typedef	struct xfs_bmap_free
  * from written to unwritten, otherwise convert from unwritten to written.
  */
 #define XFS_BMAPI_CONVERT	0x200
+#define XFS_BMAPI_STACK_SWITCH	0x400
 
 #define XFS_BMAPI_FLAGS \
 	{ XFS_BMAPI_WRITE,	"WRITE" }, \
@@ -89,7 +90,8 @@ typedef	struct xfs_bmap_free
 	{ XFS_BMAPI_PREALLOC,	"PREALLOC" }, \
 	{ XFS_BMAPI_IGSTATE,	"IGSTATE" }, \
 	{ XFS_BMAPI_CONTIG,	"CONTIG" }, \
-	{ XFS_BMAPI_CONVERT,	"CONVERT" }
+	{ XFS_BMAPI_CONVERT,	"CONVERT" }, \
+	{ XFS_BMAPI_STACK_SWITCH, "STACK_SWITCH" }
 
 
 static inline int xfs_bmapi_aflag(int w)
@@ -130,6 +132,11 @@ typedef struct xfs_bmalloca {
 	char			low;	/* low on space, using seq'l ags */
 	char			aeof;	/* allocated space at eof */
 	char			conv;	/* overwriting unwritten extents */
+	char			stack_switch;
+	int			flags;
+	struct completion	*done;
+	struct work_struct	work;
+	int			result;
 } xfs_bmalloca_t;
 
 /*

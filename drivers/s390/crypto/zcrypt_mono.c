@@ -41,6 +41,9 @@
 #include "zcrypt_pcicc.h"
 #include "zcrypt_pcixcc.h"
 #include "zcrypt_cex2a.h"
+#include "zcrypt_msgtype6.h"
+#include "zcrypt_msgtype50.h"
+#include "zcrypt_cex4.h"
 
 /**
  * The module initialization code.
@@ -55,9 +58,15 @@ static int __init zcrypt_init(void)
 	rc = zcrypt_api_init();
 	if (rc)
 		goto out_ap;
-	rc = zcrypt_pcica_init();
+	rc = zcrypt_msgtype6_init();
 	if (rc)
 		goto out_api;
+	rc = zcrypt_msgtype50_init();
+	if (rc)
+		goto out_msgtype6;
+	rc = zcrypt_pcica_init();
+	if (rc)
+		goto out_msgtype50;
 	rc = zcrypt_pcicc_init();
 	if (rc)
 		goto out_pcica;
@@ -67,14 +76,23 @@ static int __init zcrypt_init(void)
 	rc = zcrypt_cex2a_init();
 	if (rc)
 		goto out_pcixcc;
+	rc = zcrypt_cex4_init();
+	if (rc)
+		goto out_cex2a;
 	return 0;
 
+out_cex2a:
+	zcrypt_cex2a_exit();
 out_pcixcc:
 	zcrypt_pcixcc_exit();
 out_pcicc:
 	zcrypt_pcicc_exit();
 out_pcica:
 	zcrypt_pcica_exit();
+out_msgtype50:
+	zcrypt_msgtype50_exit();
+out_msgtype6:
+	zcrypt_msgtype6_exit();
 out_api:
 	zcrypt_api_exit();
 out_ap:
@@ -88,10 +106,13 @@ out:
  */
 static void __exit zcrypt_exit(void)
 {
+	zcrypt_cex4_exit();
 	zcrypt_cex2a_exit();
 	zcrypt_pcixcc_exit();
 	zcrypt_pcicc_exit();
 	zcrypt_pcica_exit();
+	zcrypt_msgtype50_exit();
+	zcrypt_msgtype6_exit();
 	zcrypt_api_exit();
 	ap_module_exit();
 }

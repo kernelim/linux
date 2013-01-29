@@ -395,6 +395,7 @@ typedef struct elf64_shdr {
 #define NT_S390_CTRS	0x304		/* s390 control registers */
 #define NT_S390_PREFIX	0x305		/* s390 prefix register */
 #define NT_S390_LAST_BREAK	0x306	/* s390 breaking event address */
+#define NT_S390_TDB	0x308		/* s390 transaction diagnostic block */
 
 
 /* Note header in a PT_NOTE section */

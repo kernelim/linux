@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel(R) Gigabit Ethernet Linux driver
-  Copyright(c) 2007-2011 Intel Corporation.
+  Copyright(c) 2007-2012 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -299,6 +299,8 @@
 							* transactions */
 #define E1000_DMACR_DMAC_LX_SHIFT       28
 #define E1000_DMACR_DMAC_EN             0x80000000 /* Enable DMA Coalescing */
+/* DMA Coalescing BMC-to-OS Watchdog Enable */
+#define E1000_DMACR_DC_BMC2OSW_EN	0x00008000
 
 #define E1000_DMCTXTH_DMCTTHR_MASK      0x00000FFF /* DMA Coalescing Transmit
 							* Threshold */
@@ -317,6 +319,9 @@
 							* High val */
 #define E1000_FCRTC_RTH_COAL_SHIFT      4
 #define E1000_PCIEMISC_LX_DECISION      0x00000080 /* Lx power decision */
+
+/* Timestamp in Rx buffer */
+#define E1000_RXPBS_CFG_TS_EN           0x80000000
 
 /* SerDes Control */
 #define E1000_SCTL_DISABLE_SERDES_LOOPBACK 0x0400
@@ -356,6 +361,7 @@
 #define E1000_ICR_RXDMT0        0x00000010 /* rx desc min. threshold (0) */
 #define E1000_ICR_RXT0          0x00000080 /* rx timer intr (ring 0) */
 #define E1000_ICR_VMMB          0x00000100 /* VM MB event */
+#define E1000_ICR_TS            0x00080000 /* Time Sync Interrupt */
 #define E1000_ICR_DRSTA         0x40000000 /* Device Reset Asserted */
 /* If this bit asserted, the driver should claim the interrupt */
 #define E1000_ICR_INT_ASSERTED  0x80000000
@@ -395,6 +401,7 @@
 #define E1000_IMS_TXDW      E1000_ICR_TXDW      /* Transmit desc written back */
 #define E1000_IMS_LSC       E1000_ICR_LSC       /* Link Status Change */
 #define E1000_IMS_VMMB      E1000_ICR_VMMB      /* Mail box activity */
+#define E1000_IMS_TS        E1000_ICR_TS        /* Time Sync Interrupt */
 #define E1000_IMS_RXSEQ     E1000_ICR_RXSEQ     /* rx sequence error */
 #define E1000_IMS_RXDMT0    E1000_ICR_RXDMT0    /* rx desc min. threshold */
 #define E1000_IMS_RXT0      E1000_ICR_RXT0      /* rx timer intr */
@@ -456,6 +463,7 @@
 #define E1000_ERR_INVALID_ARGUMENT  16
 #define E1000_ERR_NO_SPACE          17
 #define E1000_ERR_NVM_PBA_SECTION   18
+#define E1000_ERR_INVM_VALUE_NOT_FOUND	19
 
 /* Loop limit on how long we wait for auto-negotiation to complete */
 #define COPPER_LINK_UP_LIMIT              10
@@ -504,6 +512,9 @@
 #define E1000_TSYNCRXCFG_PTP_V2_MANAGEMENT_MESSAGE           0x0D00
 
 #define E1000_TIMINCA_16NS_SHIFT 24
+
+#define E1000_TSICR_TXTS 0x00000002
+#define E1000_TSIM_TXTS 0x00000002
 
 #define E1000_MDICNFG_EXT_MDIO    0x80000000      /* MDI ext/int destination */
 #define E1000_MDICNFG_COM_MDIO    0x40000000      /* MDI shared w/ lan 0 */
@@ -593,6 +604,25 @@
 #define E1000_EECD_AUTO_RD          0x00000200  /* NVM Auto Read done */
 #define E1000_EECD_SIZE_EX_MASK     0x00007800  /* NVM Size */
 #define E1000_EECD_SIZE_EX_SHIFT     11
+#define E1000_EECD_FLUPD_I210		0x00800000 /* Update FLASH */
+#define E1000_EECD_FLUDONE_I210		0x04000000 /* Update FLASH done*/
+#define E1000_FLUDONE_ATTEMPTS		20000
+#define E1000_EERD_EEWR_MAX_COUNT	512 /* buffered EEPROM words rw */
+#define E1000_I210_FIFO_SEL_RX		0x00
+#define E1000_I210_FIFO_SEL_TX_QAV(_i)	(0x02 + (_i))
+#define E1000_I210_FIFO_SEL_TX_LEGACY	E1000_I210_FIFO_SEL_TX_QAV(0)
+#define E1000_I210_FIFO_SEL_BMC2OS_TX	0x06
+#define E1000_I210_FIFO_SEL_BMC2OS_RX	0x01
+#define E1000_EECD_FLUPD_I210		0x00800000 /* Update FLASH */
+#define E1000_EECD_FLUDONE_I210		0x04000000 /* Update FLASH done*/
+#define E1000_FLUDONE_ATTEMPTS		20000
+#define E1000_EERD_EEWR_MAX_COUNT	512 /* buffered EEPROM words rw */
+#define E1000_I210_FIFO_SEL_RX		0x00
+#define E1000_I210_FIFO_SEL_TX_QAV(_i)	(0x02 + (_i))
+#define E1000_I210_FIFO_SEL_TX_LEGACY	E1000_I210_FIFO_SEL_TX_QAV(0)
+#define E1000_I210_FIFO_SEL_BMC2OS_TX	0x06
+#define E1000_I210_FIFO_SEL_BMC2OS_RX	0x01
+
 
 /* Offset to data in NVM read/write registers */
 #define E1000_NVM_RW_REG_DATA   16
@@ -611,6 +641,16 @@
 #define NVM_CHECKSUM_REG           0x003F
 #define NVM_COMPATIBILITY_REG_3    0x0003
 #define NVM_COMPATIBILITY_BIT_MASK 0x8000
+#define NVM_MAC_ADDR               0x0000
+#define NVM_SUB_DEV_ID             0x000B
+#define NVM_SUB_VEN_ID             0x000C
+#define NVM_DEV_ID                 0x000D
+#define NVM_VEN_ID                 0x000E
+#define NVM_INIT_CTRL_2            0x000F
+#define NVM_INIT_CTRL_4            0x0013
+#define NVM_LED_1_CFG              0x001C
+#define NVM_LED_0_2_CFG            0x001F
+
 
 #define E1000_NVM_CFG_DONE_PORT_0  0x040000 /* MNG config cycle done */
 #define E1000_NVM_CFG_DONE_PORT_1  0x080000 /* ...for second port */
@@ -637,6 +677,7 @@
 
 #define NVM_PBA_OFFSET_0           8
 #define NVM_PBA_OFFSET_1           9
+#define NVM_RESERVED_WORD		0xFFFF
 #define NVM_PBA_PTR_GUARD          0xFAFA
 #define NVM_WORD_SIZE_BASE_SHIFT   6
 
@@ -694,6 +735,7 @@
 #define I82580_I_PHY_ID      0x015403A0
 #define I350_I_PHY_ID        0x015403B0
 #define M88_VENDOR           0x0141
+#define I210_I_PHY_ID        0x01410C00
 
 /* M88E1000 Specific Registers */
 #define M88E1000_PHY_SPEC_CTRL     0x10  /* PHY Specific Control Register */
@@ -813,6 +855,7 @@
 #define E1000_IPCNFG_EEE_100M_AN     0x00000004  /* EEE Enable 100M AN */
 #define E1000_EEER_TX_LPI_EN         0x00010000  /* EEE Tx LPI Enable */
 #define E1000_EEER_RX_LPI_EN         0x00020000  /* EEE Rx LPI Enable */
+#define E1000_EEER_FRC_AN            0x10000000 /* Enable EEE in loopback */
 #define E1000_EEER_LPI_FC            0x00040000  /* EEE Enable on FC */
 
 /* SerDes Control */

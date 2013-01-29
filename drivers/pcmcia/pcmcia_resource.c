@@ -958,3 +958,53 @@ next_entry:
 	return ret;
 }
 EXPORT_SYMBOL(pcmcia_loop_config);
+
+struct pcmcia_loop_mem {
+	struct pcmcia_device *p_dev;
+	void *priv_data;
+	int (*loop_tuple) (struct pcmcia_device *p_dev,
+			   tuple_t *tuple,
+			   void *priv_data);
+};
+
+/**
+ * pcmcia_do_loop_tuple() - internal helper for pcmcia_loop_config()
+ *
+ * pcmcia_do_loop_tuple() is the internal callback for the call from
+ * pcmcia_loop_tuple() to pccard_loop_tuple(). Data is transferred
+ * by a struct pcmcia_cfg_mem.
+ */
+static int pcmcia_do_loop_tuple(tuple_t *tuple, cisparse_t *parse, void *priv)
+{
+	struct pcmcia_loop_mem *loop = priv;
+
+	return loop->loop_tuple(loop->p_dev, tuple, loop->priv_data);
+};
+
+/**
+ * pcmcia_loop_tuple() - loop over tuples in the CIS
+ * @p_dev:	the struct pcmcia_device which we need to loop for.
+ * @code:	which CIS code shall we look for?
+ * @priv_data:	private data to be passed to the loop_tuple function.
+ * @loop_tuple:	function to call for each CIS entry of type @function. IT
+ *		gets passed the raw tuple and @priv_data.
+ *
+ * pcmcia_loop_tuple() loops over all CIS entries of type @function, and
+ * calls the @loop_tuple function for each entry. If the call to @loop_tuple
+ * returns 0, the loop exits. Returns 0 on success or errorcode otherwise.
+ */
+int pcmcia_loop_tuple(struct pcmcia_device *p_dev, cisdata_t code,
+		      int (*loop_tuple) (struct pcmcia_device *p_dev,
+					 tuple_t *tuple,
+					 void *priv_data),
+		      void *priv_data)
+{
+	struct pcmcia_loop_mem loop = {
+		.p_dev = p_dev,
+		.loop_tuple = loop_tuple,
+		.priv_data = priv_data};
+
+	return pccard_loop_tuple(p_dev->socket, p_dev->func, code, NULL,
+				 &loop, pcmcia_do_loop_tuple);
+};
+EXPORT_SYMBOL(pcmcia_loop_tuple);

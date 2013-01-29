@@ -242,7 +242,7 @@ static void fcoe_ctlr_announce(struct fcoe_ctlr *fip)
 		printk(KERN_INFO "libfcoe: host%d: FIP selected "
 		       "Fibre-Channel Forwarder MAC %pM\n",
 		       fip->lp->host->host_no, sel->fcf_mac);
-		memcpy(fip->dest_addr, sel->fcf_mac, ETH_ALEN);
+		memcpy(fip->dest_addr, sel->fcoe_mac, ETH_ALEN);
 		fip->map_dest = 0;
 	}
 unlock:
@@ -337,6 +337,7 @@ static void fcoe_ctlr_solicit(struct fcoe_ctlr *fip, struct fcoe_fcf *fcf)
  */
 void fcoe_ctlr_link_up(struct fcoe_ctlr *fip)
 {
+	LIBFCOE_FIP_DBG(fip, "Link up.\n");
 	mutex_lock(&fip->ctlr_mutex);
 	if (fip->state == FIP_ST_NON_FIP || fip->state == FIP_ST_AUTO) {
 		mutex_unlock(&fip->ctlr_mutex);
@@ -368,6 +369,22 @@ void fcoe_ctlr_link_up(struct fcoe_ctlr *fip)
 EXPORT_SYMBOL(fcoe_ctlr_link_up);
 
 /**
+ * fcoe_ctlr_enable() - enables FCoE controller
+ * @fip: The FCoE controller to enable
+ *
+ * Called from the LLD when the network link is ready.
+ */
+void fcoe_ctlr_enable(struct fcoe_ctlr *fip)
+{
+	LIBFCOE_FIP_DBG(fip, "Link enabled.\n");
+	mutex_lock(&fip->ctlr_mutex);
+	fcoe_ctlr_set_state(fip, FIP_ST_LINK_WAIT);
+	mutex_unlock(&fip->ctlr_mutex);
+	fcoe_ctlr_link_up(fip);
+}
+EXPORT_SYMBOL(fcoe_ctlr_enable);
+
+/**
  * fcoe_ctlr_reset() - Reset a FCoE controller
  * @fip:       The FCoE controller to reset
  */
@@ -383,6 +400,37 @@ static void fcoe_ctlr_reset(struct fcoe_ctlr *fip)
 }
 
 /**
+ * fcoe_ctlr_down() - Stop a FCoE controller and set next state
+ * @fip: The FCoE controller to be stopped
+ * @state: next FCoE controller state
+ *
+ * Returns non-zero if the link was up and now isn't.
+ *
+ */
+static int fcoe_ctlr_down(struct fcoe_ctlr *fip, enum fip_state state)
+{
+	int link_dropped;
+
+	LIBFCOE_FIP_DBG(fip, "Link down.\n");
+	mutex_lock(&fip->ctlr_mutex);
+	fcoe_ctlr_reset(fip);
+	link_dropped = fip->state != FIP_ST_LINK_WAIT &&
+		       fip->state != FIP_ST_DISABLED;
+	/*
+	 * change fip state on link being dropped
+	 * or is getting disabled.
+	 */
+	if (link_dropped || state == FIP_ST_DISABLED)
+		fcoe_ctlr_set_state(fip, state);
+	mutex_unlock(&fip->ctlr_mutex);
+
+	if (link_dropped)
+		fc_linkdown(fip->lp);
+	return link_dropped;
+}
+
+
+/**
  * fcoe_ctlr_link_down() - Stop a FCoE controller
  * @fip: The FCoE controller to be stopped
  *
@@ -393,20 +441,23 @@ static void fcoe_ctlr_reset(struct fcoe_ctlr *fip)
  */
 int fcoe_ctlr_link_down(struct fcoe_ctlr *fip)
 {
-	int link_dropped;
-
-	LIBFCOE_FIP_DBG(fip, "link down.\n");
-	mutex_lock(&fip->ctlr_mutex);
-	fcoe_ctlr_reset(fip);
-	link_dropped = fip->state != FIP_ST_LINK_WAIT;
-	fcoe_ctlr_set_state(fip, FIP_ST_LINK_WAIT);
-	mutex_unlock(&fip->ctlr_mutex);
-
-	if (link_dropped)
-		fc_linkdown(fip->lp);
-	return link_dropped;
+	return fcoe_ctlr_down(fip, FIP_ST_LINK_WAIT);
 }
 EXPORT_SYMBOL(fcoe_ctlr_link_down);
+
+/**
+ * fcoe_ctlr_disable() - Disable a FCoE controller
+ * @fip: The FCoE controller to be stopped
+ *
+ * Returns non-zero if the link was up and now isn't.
+ *
+ */
+int fcoe_ctlr_disable(struct fcoe_ctlr *fip)
+{
+	LIBFCOE_FIP_DBG(fip, "Link disabled.\n");
+	return fcoe_ctlr_down(fip, FIP_ST_DISABLED);
+}
+EXPORT_SYMBOL(fcoe_ctlr_disable);
 
 /**
  * fcoe_ctlr_send_keep_alive() - Send a keep-alive to the selected FCF
@@ -824,6 +875,7 @@ static int fcoe_ctlr_parse_adv(struct fcoe_ctlr *fip,
 			memcpy(fcf->fcf_mac,
 			       ((struct fip_mac_desc *)desc)->fd_mac,
 			       ETH_ALEN);
+			memcpy(fcf->fcoe_mac, fcf->fcf_mac, ETH_ALEN);
 			if (!is_valid_ether_addr(fcf->fcf_mac)) {
 				LIBFCOE_FIP_DBG(fip,
 					"Invalid MAC addr %pM in FIP adv\n",
@@ -981,10 +1033,8 @@ static void fcoe_ctlr_recv_adv(struct fcoe_ctlr *fip, struct sk_buff *skb)
 	 * the FCF that answers multicast solicitations, not the others that
 	 * are sending periodic multicast advertisements.
 	 */
-	if (mtu_valid) {
-		list_del(&fcf->list);
-		list_add(&fcf->list, &fip->fcfs);
-	}
+	if (mtu_valid)
+		list_move(&fcf->list, &fip->fcfs);
 
 	/*
 	 * If this is the first validated FCF, note the time and
@@ -1015,6 +1065,7 @@ static void fcoe_ctlr_recv_els(struct fcoe_ctlr *fip, struct sk_buff *skb)
 	struct fip_desc *desc;
 	struct fip_encaps *els;
 	struct fcoe_dev_stats *stats;
+	struct fcoe_fcf *sel;
 	enum fip_desc_type els_dtype = 0;
 	u8 els_op;
 	u8 sub;
@@ -1042,7 +1093,8 @@ static void fcoe_ctlr_recv_els(struct fcoe_ctlr *fip, struct sk_buff *skb)
 			goto drop;
 		/* Drop ELS if there are duplicate critical descriptors */
 		if (desc->fip_dtype < 32) {
-			if (desc_mask & 1U << desc->fip_dtype) {
+			if ((desc->fip_dtype != FIP_DT_MAC) &&
+			    (desc_mask & 1U << desc->fip_dtype)) {
 				LIBFCOE_FIP_DBG(fip, "Duplicate Critical "
 						"Descriptors in FIP ELS\n");
 				goto drop;
@@ -1051,17 +1103,32 @@ static void fcoe_ctlr_recv_els(struct fcoe_ctlr *fip, struct sk_buff *skb)
 		}
 		switch (desc->fip_dtype) {
 		case FIP_DT_MAC:
+			sel = fip->sel_fcf;
 			if (desc_cnt == 1) {
 				LIBFCOE_FIP_DBG(fip, "FIP descriptors "
 						"received out of order\n");
 				goto drop;
 			}
+			/*
+			 * Some switch implementations send two MAC descriptors,
+			 * with first MAC(granted_mac) being the FPMA, and the
+			 * second one(fcoe_mac) is used as destination address
+			 * for sending/receiving FCoE packets. FIP traffic is
+			 * sent using fip_mac. For regular switches, both
+			 * fip_mac and fcoe_mac would be the same.
+			 */
+			if (desc_cnt == 2)
+				memcpy(granted_mac,
+				       ((struct fip_mac_desc *)desc)->fd_mac,
+				       ETH_ALEN);
 
 			if (dlen != sizeof(struct fip_mac_desc))
 				goto len_err;
-			memcpy(granted_mac,
-			       ((struct fip_mac_desc *)desc)->fd_mac,
-			       ETH_ALEN);
+
+			if ((desc_cnt == 3) && (sel))
+				memcpy(sel->fcoe_mac,
+				       ((struct fip_mac_desc *)desc)->fd_mac,
+				       ETH_ALEN);
 			break;
 		case FIP_DT_FLOGI:
 		case FIP_DT_FDISC:

@@ -10,6 +10,7 @@
 
 #include <linux/bio.h>
 #include <linux/blkdev.h>
+#include <linux/ratelimit.h>
 
 struct dm_dev;
 struct dm_target;
@@ -73,6 +74,18 @@ typedef void (*dm_resume_fn) (struct dm_target *ti);
 
 typedef int (*dm_status_fn) (struct dm_target *ti, status_type_t status_type,
 			     char *result, unsigned int maxlen);
+
+/*
+ * DM targets that would like to work with old RHEL kernels (< 6.4) but also
+ * take advantage of the ability to pass status flags to the status method in
+ * new kernels (>= 6.4) must implement both .status and .status_with_flags
+ * - care must also be taken to set DM_TARGET_STATUS_WITH_FLAGS in the
+ *   target's .features
+ */
+typedef int (*dm_status_with_flags_fn) (struct dm_target *ti,
+					status_type_t status_type,
+					unsigned status_flags, char *result,
+					unsigned maxlen);
 
 typedef int (*dm_message_fn) (struct dm_target *ti, unsigned argc, char **argv);
 
@@ -157,6 +170,10 @@ struct target_type {
 
 	/* For internal device-mapper use. */
 	struct list_head list;
+
+#ifndef __GENKSYMS__
+	dm_status_with_flags_fn status_with_flags;
+#endif
 };
 
 /*
@@ -180,6 +197,13 @@ struct target_type {
 #define DM_TARGET_IMMUTABLE		0x00000004
 #define dm_target_is_immutable(type)	((type)->features & DM_TARGET_IMMUTABLE)
 
+/*
+ * Target provides the .status_with_flags method (which is RHEL-specific)
+ */
+#define DM_TARGET_STATUS_WITH_FLAGS	0x00000008
+#define dm_target_provides_status_with_flags(type) \
+		((type)->features & DM_TARGET_STATUS_WITH_FLAGS)
+
 struct dm_target {
 	uint64_t features;	/* 3rd party driver must initialize to zero */
 	struct dm_table *table;
@@ -189,7 +213,15 @@ struct dm_target {
 	sector_t begin;
 	sector_t len;
 
-	/* Always a power of 2 */
+	/*
+	 * If non-zero, maximum size of I/O submitted to a target.
+	 *
+	 * To preserve kABI, retain 'split_io' name rather than use upstream's
+	 * 'max_io_len'.  Also retain the sector_t type rather than use uint32_t.
+	 * In practice no target should be exceeding UINT_MAX for split_io.  All
+	 * targets should be updated to use dm_set_target_max_io_len() to set
+	 * split_io.
+	 */
 	sector_t split_io;
 
 	/*
@@ -219,6 +251,30 @@ struct dm_target {
 	 * whether or not its underlying devices have support.
 	 */
 	unsigned discards_supported:1;
+
+#ifndef __GENKSYMS__
+	/*
+	 * RHEL6ism: continuing to use 'unsigned foo:1' because
+	 * discards_supported cannot change (to bool) due to kABI
+	 */
+
+	/*
+	 * Set if this target needs to receive flushes regardless of
+	 * whether or not its underlying devices have support.
+	 */
+	unsigned flush_supported:1;
+
+	/*
+	 * Set if the target required discard request to be split
+	 * on max_io_len boundary.
+	 */
+	unsigned split_discard_requests:1;
+
+	/*
+	 * Set if this target does not return zeroes on discarded blocks.
+	 */
+	unsigned discard_zeroes_data_unsupported:1;
+#endif
 };
 
 /* Each target can link one of these into the table */
@@ -362,6 +418,11 @@ int dm_table_complete(struct dm_table *t);
 void dm_table_unplug_all(struct dm_table *t);
 
 /*
+ * Target may require that it is never sent I/O larger than len.
+ */
+int __must_check dm_set_target_max_io_len(struct dm_target *ti, sector_t len);
+
+/*
  * Table reference counting.
  */
 struct dm_table *dm_get_live_table(struct mapped_device *md);
@@ -398,6 +459,14 @@ void *dm_vcalloc(unsigned long nmemb, unsigned long elem_size);
  *---------------------------------------------------------------*/
 #define DM_NAME "device-mapper"
 
+#ifdef CONFIG_PRINTK
+extern struct ratelimit_state dm_ratelimit_state;
+
+#define dm_ratelimit()	__ratelimit(&dm_ratelimit_state)
+#else
+#define dm_ratelimit()	0
+#endif
+
 #define DMCRIT(f, arg...) \
 	printk(KERN_CRIT DM_NAME ": " DM_MSG_PREFIX ": " f "\n", ## arg)
 
@@ -405,7 +474,7 @@ void *dm_vcalloc(unsigned long nmemb, unsigned long elem_size);
 	printk(KERN_ERR DM_NAME ": " DM_MSG_PREFIX ": " f "\n", ## arg)
 #define DMERR_LIMIT(f, arg...) \
 	do { \
-		if (printk_ratelimit())	\
+		if (dm_ratelimit())	\
 			printk(KERN_ERR DM_NAME ": " DM_MSG_PREFIX ": " \
 			       f "\n", ## arg); \
 	} while (0)
@@ -414,7 +483,7 @@ void *dm_vcalloc(unsigned long nmemb, unsigned long elem_size);
 	printk(KERN_WARNING DM_NAME ": " DM_MSG_PREFIX ": " f "\n", ## arg)
 #define DMWARN_LIMIT(f, arg...) \
 	do { \
-		if (printk_ratelimit())	\
+		if (dm_ratelimit())	\
 			printk(KERN_WARNING DM_NAME ": " DM_MSG_PREFIX ": " \
 			       f "\n", ## arg); \
 	} while (0)
@@ -423,7 +492,7 @@ void *dm_vcalloc(unsigned long nmemb, unsigned long elem_size);
 	printk(KERN_INFO DM_NAME ": " DM_MSG_PREFIX ": " f "\n", ## arg)
 #define DMINFO_LIMIT(f, arg...) \
 	do { \
-		if (printk_ratelimit())	\
+		if (dm_ratelimit())	\
 			printk(KERN_INFO DM_NAME ": " DM_MSG_PREFIX ": " f \
 			       "\n", ## arg); \
 	} while (0)
@@ -433,7 +502,7 @@ void *dm_vcalloc(unsigned long nmemb, unsigned long elem_size);
 	printk(KERN_DEBUG DM_NAME ": " DM_MSG_PREFIX " DEBUG: " f "\n", ## arg)
 #  define DMDEBUG_LIMIT(f, arg...) \
 	do { \
-		if (printk_ratelimit())	\
+		if (dm_ratelimit())	\
 			printk(KERN_DEBUG DM_NAME ": " DM_MSG_PREFIX ": " f \
 			       "\n", ## arg); \
 	} while (0)

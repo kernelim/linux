@@ -8,11 +8,10 @@
 
 #include <linux/list.h>
 #include <linux/spinlock.h>
+#include <linux/leds.h>
+#include "ieee80211_i.h"
 
 #include "leds-compat.h"
-#include <linux/leds.h>
-
-#include "ieee80211_i.h"
 
 #ifdef CONFIG_MAC80211_LEDS
 void ieee80211_led_rx(struct ieee80211_local *local);

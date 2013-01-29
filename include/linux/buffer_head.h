@@ -231,6 +231,9 @@ int __block_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf,
 				get_block_t get_block);
 int block_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf,
 				get_block_t get_block);
+int __block_prepare_write(struct inode *inode, struct page *page,
+			unsigned from, unsigned to, get_block_t *get_block);
+
 /* Convert errno to return value from ->page_mkwrite() call */
 static inline int block_page_mkwrite_return(int err)
 {

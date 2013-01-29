@@ -1,6 +1,6 @@
 /*
  * QLogic Fibre Channel HBA Driver
- * Copyright (c)  2003-2011 QLogic Corporation
+ * Copyright (c)  2003-2012 QLogic Corporation
  *
  * See LICENSE.qla2xxx for copyright and licensing details.
  */
@@ -11,25 +11,32 @@
  * ----------------------------------------------------------------------
  * |             Level            |   Last Value Used  |     Holes	|
  * ----------------------------------------------------------------------
- * | Module Init and Probe        |       0x0120       | 0x4b,0xba,0xfa |
- * | Mailbox commands             |       0x113e       | 0x112c-0x112e, |
+ * | Module Init and Probe        |       0x0123       | 0x4b,0xba,0xfa |
+ * | Mailbox commands             |       0x114d       | 0x111a-0x111b  |
+ * |                              |                    | 0x112c-0x112e, |
  * |                              |                    | 0x113a         |
- * | Device Discovery             |       0x2086       | 0x2020-0x2022  |
- * | Queue Command and IO tracing |       0x3030       | 0x3006,0x3008  |
+ * | Device Discovery             |       0x2087       | 0x2020-0x2022, |
+ * |                              |                    | 0x2016,0x207d  |
+ * | Queue Command and IO tracing |       0x3031       | 0x3006-0x300b  |
+ * |                              |                    | 0x3027-0x302a  |
  * |                              |                    | 0x302d,0x302e  |
- * | DPC Thread                   |       0x401c       |		|
- * | Async Events                 |       0x505d       | 0x502b-0x502f  |
+ * | DPC Thread                   |       0x401d       | 0x4002,4013    |
+ * | Async Events                 |       0x5071       | 0x502b-0x502f  |
  * |				  | 		       | 0x5047,0x5052  |
- * | Timer Routines               |       0x6011       | 0x600e-0x600f  |
- * | User Space Interactions      |       0x709f       | 0x7018,0x702e  |
+ * | Timer Routines               |       0x6011       |                |
+ * | User Space Interactions      |       0x70c3       | 0x7018,0x702e  |
+ * |                              |                    | 0x7020,0x7024  |
  * |                              |                    | 0x7039,0x7045  |
  * |                              |                    | 0x7073-0x7075  |
  * |                              |                    | 0x708c         |
+ * |                              |                    | 0x70a5-0x70a6  |
+ * |                              |                    | 0x70a8,0x70ab  |
+ * |                              |                    | 0x70ad-0x70ae  |
  * | Task Management              |       0x803c       | 0x8025-0x8026  |
  * |                              |                    | 0x800b,0x8039  |
- * | AER/EEH                      |       0x900f       |                |
+ * | AER/EEH                      |       0x9011       |                |
  * | Virtual Port                 |       0xa007       |		|
- * | ISP82XX Specific             |       0xb053       |    		|
+ * | ISP82XX Specific             |       0xb084       | 0xb002,0xb024  |
  * | MultiQ                       |       0xc00c       |		|
  * | Misc                         |       0xd010       |		|
  * ----------------------------------------------------------------------
@@ -2288,7 +2295,7 @@ ql_dbg(uint32_t level, scsi_qla_host_t *vha, int32_t id, const char *fmt, ...)
 
 /*
  * This function is for formatting and logging debug information.
- * It is to be used when vha is not available and pci is availble,
+ * It is to be used when vha is not available and pci is available,
  * i.e., before host allocation. It formats the message and logs it
  * to the messages file.
  * parameters:
@@ -2377,7 +2384,7 @@ ql_log(uint32_t level, scsi_qla_host_t *vha, int32_t id, const char *fmt, ...)
 
 /*
  * This function is for formatting and logging log messages.
- * It is to be used when vha is not available and pci is availble,
+ * It is to be used when vha is not available and pci is available,
  * i.e., before host allocation. It formats the message and logs
  * it to the messages file. All the messages are logged irrespective
  * of the value of ql2xextended_error_logging.

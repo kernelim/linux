@@ -83,6 +83,11 @@
 #define USB_PORT_FEAT_C_BH_PORT_RESET		29
 #define USB_PORT_FEAT_FORCE_LINKPM_ACCEPT	30
 
+/* USB 3.0 hub remote wake mask bits, see table 10-14 */
+#define USB_PORT_FEAT_REMOTE_WAKE_CONNECT	(1 << 8)
+#define USB_PORT_FEAT_REMOTE_WAKE_DISCONNECT	(1 << 9)
+#define USB_PORT_FEAT_REMOTE_WAKE_OVER_CURRENT	(1 << 10)
+
 /*
  * Hub Status and Hub Change results
  * See USB 2.0 spec Table 11-19 and Table 11-20
@@ -206,6 +211,17 @@ struct usb_hub_status {
 #define USB_DT_SS_HUB			(USB_TYPE_CLASS | 0x0a)
 #define USB_DT_HUB_NONVAR_SIZE		7
 #define USB_DT_SS_HUB_SIZE              12
+
+/*
+ * Hub Device descriptor
+ * USB Hub class device protocols
+ */
+
+#define USB_HUB_PR_FS		0 /* Full speed hub */
+#define USB_HUB_PR_HS_NO_TT	0 /* Hi-speed hub without TT */
+#define USB_HUB_PR_HS_SINGLE_TT	1 /* Hi-speed hub with single TT */
+#define USB_HUB_PR_HS_MULTI_TT	2 /* Hi-speed hub with multiple TT */
+#define USB_HUB_PR_SS		3 /* Super speed hub */
 
 struct usb_hub_descriptor {
 	__u8  bDescLength;

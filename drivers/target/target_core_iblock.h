@@ -20,6 +20,7 @@ struct iblock_dev {
 	struct bio_set	*ibd_bio_set;
 	struct block_device *ibd_bd;
 	struct iblock_hba *ibd_host;
+	bool ibd_readonly;
 } ____cacheline_aligned;
 
 struct iblock_hba {

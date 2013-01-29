@@ -1,6 +1,6 @@
 /****************************************************************************
  * Driver for Solarflare Solarstorm network controllers and boards
- * Copyright 2006-2009 Solarflare Communications Inc.
+ * Copyright 2006-2010 Solarflare Communications Inc.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published
@@ -47,7 +47,7 @@
 #define PMA_PMD_FTX_STATIC_LBN	13
 #define PMA_PMD_VEND1_REG	0xc001
 #define PMA_PMD_VEND1_LBTXD_LBN	15
-#define PCS_VEND1_REG	   	0xc000
+#define PCS_VEND1_REG		0xc000
 #define PCS_VEND1_LBTXD_LBN	5
 
 void falcon_qt202x_set_led(struct efx_nic *p, int led, int mode)
@@ -449,13 +449,13 @@ static void qt202x_phy_remove(struct efx_nic *efx)
 	efx->phy_data = NULL;
 }
 
-struct efx_phy_operations falcon_qt202x_phy_ops = {
+const struct efx_phy_operations falcon_qt202x_phy_ops = {
 	.probe		 = qt202x_phy_probe,
 	.init		 = qt202x_phy_init,
 	.reconfigure	 = qt202x_phy_reconfigure,
-	.poll	     	 = qt202x_phy_poll,
+	.poll		 = qt202x_phy_poll,
 	.fini		 = efx_port_dummy_op_void,
-	.remove	  	 = qt202x_phy_remove,
+	.remove		 = qt202x_phy_remove,
 	.get_settings	 = qt202x_phy_get_settings,
 	.set_settings	 = efx_mdio_set_settings,
 	.test_alive	 = efx_mdio_test_alive,

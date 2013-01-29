@@ -106,7 +106,7 @@ struct ehea_swqe {
 	u8 immediate_data_length;
 	u8 tcp_offset;
 	u8 reserved2;
-	u16 tcp_end;
+	u16 reserved2b;
 	u8 wrap_tag;
 	u8 descriptors;		/* number of valid descriptors in WQE */
 	u16 reserved3;
@@ -150,6 +150,7 @@ struct ehea_rwqe {
 #define EHEA_CQE_TYPE_RQ           0x60
 #define EHEA_CQE_STAT_ERR_MASK     0x700F
 #define EHEA_CQE_STAT_FAT_ERR_MASK 0xF
+#define EHEA_CQE_BLIND_CKSUM       0x8000
 #define EHEA_CQE_STAT_ERR_TCP      0x4000
 #define EHEA_CQE_STAT_ERR_IP       0x2000
 #define EHEA_CQE_STAT_ERR_CRC      0x1000

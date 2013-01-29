@@ -100,6 +100,19 @@ struct syscall_trace_exit {
 	unsigned long		ret;
 };
 
+struct kprobe_trace_entry_head {
+	struct trace_entry	ent;
+	unsigned long		ip;
+};
+
+struct kretprobe_trace_entry_head {
+	struct trace_entry	ent;
+	unsigned long		func;
+	unsigned long		ret_ip;
+};
+
+
+
 /*
  * trace_flag_type is an enumeration that holds different
  * states when a trace occurs. These are:
@@ -388,6 +401,9 @@ void update_max_tr_single(struct trace_array *tr,
 void ftrace_trace_stack(struct ring_buffer *buffer, unsigned long flags,
 			int skip, int pc);
 
+void ftrace_trace_stack_regs(struct ring_buffer *buffer, unsigned long flags,
+			     int skip, int pc, struct pt_regs *regs);
+
 void ftrace_trace_userstack(struct ring_buffer *buffer, unsigned long flags,
 			    int pc);
 
@@ -396,6 +412,12 @@ void __trace_stack(struct trace_array *tr, unsigned long flags, int skip,
 #else
 static inline void ftrace_trace_stack(struct trace_array *tr,
 				      unsigned long flags, int skip, int pc)
+{
+}
+
+static inline void ftrace_trace_stack_regs(struct ring_buffer *buffer,
+					   unsigned long flags, int skip,
+					   int pc, struct pt_regs *regs)
 {
 }
 
@@ -527,12 +549,12 @@ print_graph_function_flags(struct trace_iterator *iter, u32 flags)
 }
 #endif /* CONFIG_FUNCTION_GRAPH_TRACER */
 
-extern struct pid *ftrace_pid_trace;
+extern struct list_head ftrace_pids;
 
 #ifdef CONFIG_FUNCTION_TRACER
 static inline int ftrace_trace_task(struct task_struct *task)
 {
-	if (!ftrace_pid_trace)
+	if (list_empty(&ftrace_pids))
 		return 1;
 
 	return test_tsk_trace_trace(task);

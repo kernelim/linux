@@ -52,7 +52,7 @@
  * Payload-to-userspace:
  *	A single string containing all the argv arguments separated by ' 's
  * Payload-to-kernel:
- *	A NULL-terminated string that is the name of the device that is used
+ *	A NUL-terminated string that is the name of the device that is used
  *	as the backing store for the log data.  'dm_get_device' will be called
  *	on this device.  ('dm_put_device' will be called on this device
  *	automatically after calling DM_ULOG_DTR.)  If there is no device needed

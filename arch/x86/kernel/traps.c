@@ -406,6 +406,10 @@ __setup("unknown_nmi_panic", setup_unknown_nmi_panic);
 static notrace __kprobes void
 mem_parity_error(unsigned char reason, struct pt_regs *regs)
 {
+	if (notify_die(DIE_NMIMEMPARITY, "nmi", regs, reason, 2, SIGINT) ==
+			NOTIFY_STOP)
+		return;
+
 	printk(KERN_EMERG
 		"Uhhuh. NMI received for unknown reason %02x on CPU %d.\n",
 			reason, smp_processor_id());
@@ -434,6 +438,10 @@ static notrace __kprobes void
 io_check_error(unsigned char reason, struct pt_regs *regs)
 {
 	unsigned long i;
+
+	if (notify_die(DIE_NMIIOCHECK, "nmi", regs, reason, 2, SIGINT) ==
+			NOTIFY_STOP)
+		return;
 
 	printk(KERN_EMERG "NMI: IOCK error (debug interrupt?)\n");
 	show_registers(regs);

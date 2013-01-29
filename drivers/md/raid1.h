@@ -1,7 +1,7 @@
 #ifndef _RAID1_H
 #define _RAID1_H
 
-struct mirror_info {
+struct raid1_info {
 	struct md_rdev	*rdev;
 	sector_t	head_position;
 };
@@ -12,6 +12,9 @@ struct mirror_info {
  * pool was allocated for, so they know how much to allocate and free.
  * mddev->raid_disks cannot be used, as it can change while a pool is active
  * These two datums are stored in a kmalloced struct.
+ * The 'raid_disks' here is twice the raid_disks in r1conf.
+ * This allows space for each 'real' device can have a replacement in the
+ * second half of the array.
  */
 
 struct pool_info {
@@ -21,7 +24,9 @@ struct pool_info {
 
 struct r1conf {
 	struct mddev		*mddev;
-	struct mirror_info		*mirrors;
+	struct raid1_info	*mirrors;	/* twice 'raid_disks' to
+						 * allow for replacements.
+						 */
 	int			raid_disks;
 
 	/* When choose the best device for a read (read_balance())
@@ -130,20 +135,6 @@ struct r1bio {
 	struct bio		*bios[0];
 	/* DO NOT PUT ANY NEW FIELDS HERE - bios array is contiguously alloced*/
 };
-
-/* when we get a read error on a read-only array, we redirect to another
- * device without failing the first device, or trying to over-write to
- * correct the read error.  To keep track of bad blocks on a per-bio
- * level, we store IO_BLOCKED in the appropriate 'bios' pointer
- */
-#define IO_BLOCKED ((struct bio *)1)
-/* When we successfully write to a known bad-block, we need to remove the
- * bad-block marking which must be done from process context.  So we record
- * the success by setting bios[n] to IO_MADE_GOOD
- */
-#define IO_MADE_GOOD ((struct bio *)2)
-
-#define BIO_SPECIAL(bio) ((unsigned long)bio <= 2)
 
 /* bits for r1bio.state */
 #define	R1BIO_Uptodate	0

@@ -3,6 +3,7 @@
 
 #include <linux/nfsacl.h>
 #include <linux/nfs3.h>
+#include <linux/sunrpc/gss_api.h>
 
 /*
  * To change the maximum rsize and wsize supported by the NFS client, adjust
@@ -13,6 +14,9 @@
 #define NFS_MAX_FILE_IO_SIZE	(1048576U)
 #define NFS_DEF_FILE_IO_SIZE	(4096U)
 #define NFS_MIN_FILE_IO_SIZE	(1024U)
+
+/* Forward declaration for NFS v3 */
+struct nfs4_secinfo_flavors;
 
 struct nfs4_string {
 	unsigned int len;
@@ -86,6 +90,7 @@ struct nfs_fattr {
 #define NFS_ATTR_FATTR_CHANGE		(1U << 17)
 #define NFS_ATTR_FATTR_PRECHANGE	(1U << 18)
 #define NFS_ATTR_FATTR_V4_REFERRAL	(1U << 19)	/* NFSv4 referral */
+#define NFS_ATTR_FATTR_MOUNTPOINT	(1U << 20)	/* Treat as mountpoint */
 #define NFS_ATTR_FATTR_MOUNTED_ON_FILEID		(1U << 21)
 #define NFS_ATTR_FATTR_OWNER_NAME	(1U << 22)
 #define NFS_ATTR_FATTR_GROUP_NAME	(1U << 23)
@@ -261,15 +266,38 @@ struct nfs4_layoutcommit_res {
 	struct nfs_fattr *fattr;
 	const struct nfs_server *server;
 	struct nfs4_sequence_res seq_res;
+	int status;
 };
 
 struct nfs4_layoutcommit_data {
 	struct rpc_task task;
 	struct nfs_fattr fattr;
-	struct pnfs_layout_segment *lseg;
+	struct list_head lseg_list;
 	struct rpc_cred *cred;
 	struct nfs4_layoutcommit_args args;
 	struct nfs4_layoutcommit_res res;
+};
+
+struct nfs4_layoutreturn_args {
+	struct pnfs_layout_hdr *layout;
+	struct inode *inode;
+	nfs4_stateid stateid;
+	__u32   layout_type;
+	struct nfs4_sequence_args seq_args;
+};
+
+struct nfs4_layoutreturn_res {
+	struct nfs4_sequence_res seq_res;
+	u32 lrs_present;
+	nfs4_stateid stateid;
+};
+
+struct nfs4_layoutreturn {
+	struct nfs4_layoutreturn_args args;
+	struct nfs4_layoutreturn_res res;
+	struct rpc_cred *cred;
+	struct nfs_client *clp;
+	int rpc_status;
 };
 
 /*
@@ -356,6 +384,7 @@ struct nfs_closeres {
 struct nfs_lowner {
 	__u64			clientid;
 	__u64			id;
+	dev_t			s_dev;
 };
 
 struct nfs_lock_args {
@@ -468,6 +497,24 @@ struct nfs_writeres {
 	struct nfs_fattr *	fattr;
 	struct nfs_writeverf *	verf;
 	__u32			count;
+	const struct nfs_server *server;
+	struct nfs4_sequence_res	seq_res;
+};
+
+/*
+ * Arguments to the commit call.
+ */
+struct nfs_commitargs {
+	struct nfs_fh		*fh;
+	__u64			offset;
+	__u32			count;
+	const u32		*bitmask;
+	struct nfs4_sequence_args	seq_args;
+};
+
+struct nfs_commitres {
+	struct nfs_fattr	*fattr;
+	struct nfs_writeverf	*verf;
 	const struct nfs_server *server;
 	struct nfs4_sequence_res	seq_res;
 };
@@ -973,6 +1020,38 @@ struct nfs4_fs_locations_res {
 	struct nfs4_sequence_res	seq_res;
 };
 
+struct nfs4_secinfo_oid {
+	unsigned int len;
+	char data[GSS_OID_MAX_LEN];
+};
+
+struct nfs4_secinfo_gss {
+	struct nfs4_secinfo_oid sec_oid4;
+	unsigned int qop4;
+	unsigned int service;
+};
+
+struct nfs4_secinfo_flavor {
+	unsigned int 		flavor;
+	struct nfs4_secinfo_gss	gss;
+};
+
+struct nfs4_secinfo_flavors {
+	unsigned int num_flavors;
+	struct nfs4_secinfo_flavor flavors[0];
+};
+
+struct nfs4_secinfo_arg {
+	const struct nfs_fh		*dir_fh;
+	const struct qstr		*name;
+	struct nfs4_sequence_args	seq_args;
+};
+
+struct nfs4_secinfo_res {
+	struct nfs4_secinfo_flavors	*flavors;
+	struct nfs4_sequence_res	seq_res;
+};
+
 #endif /* CONFIG_NFS_V4 */
 
 struct nfstime4 {
@@ -981,12 +1060,19 @@ struct nfstime4 {
 };
 
 #ifdef CONFIG_NFS_V4_1
-struct nfs_impl_id4 {
-	u32		domain_len;
-	char		*domain;
-	u32		name_len;
-	char		*name;
-	struct nfstime4	date;
+
+struct pnfs_commit_bucket {
+	struct list_head written;
+	struct list_head committing;
+	struct pnfs_layout_segment *wlseg;
+	struct pnfs_layout_segment *clseg;
+};
+
+struct pnfs_ds_commit_info {
+	int nwritten;
+	int ncommitting;
+	int nbuckets;
+	struct pnfs_commit_bucket *buckets;
 };
 
 #define NFS4_EXCHANGE_ID_LEN	(48)
@@ -1041,54 +1127,133 @@ struct nfs_page;
 
 #define NFS_PAGEVEC_SIZE	(8U)
 
-struct nfs_read_data {
-	int			flags;
-	struct rpc_task		task;
-	struct inode		*inode;
-	struct rpc_cred		*cred;
-	struct nfs_fattr	fattr;	/* fattr storage */
-	struct list_head	pages;	/* Coalesced read requests */
-	struct nfs_page		*req;	/* multi ops per nfs_page */
+struct nfs_page_array {
 	struct page		**pagevec;
-	unsigned int		npages;	/* Max length of pagevec */
-	struct nfs_readargs args;
-	struct nfs_readres  res;
-	unsigned long		timestamp;	/* For lease renewal */
-	struct pnfs_layout_segment *lseg;
-	struct nfs_client	*ds_clp;	/* pNFS data server */
-	const struct rpc_call_ops *mds_ops;
-	int (*read_done_cb) (struct rpc_task *task, struct nfs_read_data *data);
-	__u64			mds_offset;
+	unsigned int		npages;		/* Max length of pagevec */
 	struct page		*page_array[NFS_PAGEVEC_SIZE];
 };
 
+struct nfs_read_data {
+	struct nfs_pgio_header	*header;
+	struct list_head	list;
+	struct rpc_task		task;
+	struct nfs_fattr	fattr;	/* fattr storage */
+	struct nfs_readargs args;
+	struct nfs_readres  res;
+	unsigned long		timestamp;	/* For lease renewal */
+	int (*read_done_cb) (struct rpc_task *task, struct nfs_read_data *data);
+	__u64			mds_offset;
+	struct nfs_page_array	pages;
+	struct nfs_client	*ds_clp;	/* pNFS data server */
+};
+
+/* used as flag bits in nfs_pgio_header */
+enum {
+	NFS_IOHDR_ERROR = 0,
+	NFS_IOHDR_EOF,
+	NFS_IOHDR_REDO,
+	NFS_IOHDR_NEED_COMMIT,
+	NFS_IOHDR_NEED_RESCHED,
+};
+
+struct nfs_pgio_header {
+	struct inode		*inode;
+	struct rpc_cred		*cred;
+	struct list_head	pages;
+	struct list_head	rpc_list;
+	atomic_t		refcnt;
+	struct nfs_page		*req;
+	struct nfs_writeverf	*verf;
+	struct pnfs_layout_segment *lseg;
+	loff_t			io_start;
+	const struct rpc_call_ops *mds_ops;
+	void (*release) (struct nfs_pgio_header *hdr);
+	const struct nfs_pgio_completion_ops *completion_ops;
+	struct nfs_direct_req	*dreq;
+	spinlock_t		lock;
+	/* fields protected by lock */
+	int			pnfs_error;
+	int			error;		/* merge with pnfs_error */
+	unsigned long		good_bytes;	/* boundary of good data */
+	unsigned long		flags;
+};
+
+struct nfs_read_header {
+	struct nfs_pgio_header	header;
+	struct nfs_read_data	rpc_data;
+};
+
 struct nfs_write_data {
-	int			flags;
+	struct nfs_pgio_header	*header;
+	struct list_head	list;
+	struct rpc_task		task;
+	struct nfs_fattr	fattr;
+	struct nfs_writeverf	verf;
+	struct nfs_writeargs	args;		/* argument struct */
+	struct nfs_writeres	res;		/* result struct */
+	unsigned long		timestamp;	/* For lease renewal */
+	int (*write_done_cb) (struct rpc_task *task, struct nfs_write_data *data);
+	__u64			mds_offset;	/* Filelayout dense stripe */
+	struct nfs_page_array	pages;
+	struct nfs_client	*ds_clp;	/* pNFS data server */
+};
+
+struct nfs_write_header {
+	struct nfs_pgio_header	header;
+	struct nfs_write_data	rpc_data;
+	struct nfs_writeverf	verf;
+};
+
+struct nfs_mds_commit_info {
+	atomic_t rpcs_out;
+	unsigned long		ncommit;
+	struct list_head	list;
+};
+
+struct nfs_commit_data;
+struct nfs_inode;
+struct nfs_commit_completion_ops {
+	void (*error_cleanup) (struct nfs_inode *nfsi);
+	void (*completion) (struct nfs_commit_data *data);
+};
+
+struct nfs_commit_info {
+	spinlock_t			*lock;
+	struct nfs_mds_commit_info	*mds;
+	struct pnfs_ds_commit_info	*ds;
+	struct nfs_direct_req		*dreq;	/* O_DIRECT request */
+	const struct nfs_commit_completion_ops *completion_ops;
+};
+
+struct nfs_commit_data {
 	struct rpc_task		task;
 	struct inode		*inode;
 	struct rpc_cred		*cred;
 	struct nfs_fattr	fattr;
 	struct nfs_writeverf	verf;
 	struct list_head	pages;		/* Coalesced requests we wish to flush */
-	struct nfs_page		*req;		/* multi ops per nfs_page */
-	struct page		**pagevec;
-	unsigned int		npages;		/* Max length of pagevec */
-	struct nfs_writeargs	args;		/* argument struct */
-	struct nfs_writeres	res;		/* result struct */
+	struct list_head	list;		/* lists of struct nfs_write_data */
+	struct nfs_direct_req	*dreq;		/* O_DIRECT request */
+	struct nfs_commitargs	args;		/* argument struct */
+	struct nfs_commitres	res;		/* result struct */
+	struct nfs_open_context *context;
 	struct pnfs_layout_segment *lseg;
 	struct nfs_client	*ds_clp;	/* pNFS data server */
 	int			ds_commit_index;
 	const struct rpc_call_ops *mds_ops;
-	int (*write_done_cb) (struct rpc_task *task, struct nfs_write_data *data);
-#ifdef CONFIG_NFS_V4
-	unsigned long		timestamp;	/* For lease renewal */
-#endif
-	__u64			mds_offset;	/* Filelayout dense stripe */
-	struct page		*page_array[NFS_PAGEVEC_SIZE];
+	const struct nfs_commit_completion_ops *completion_ops;
+	int (*commit_done_cb) (struct rpc_task *task, struct nfs_commit_data *data);
+};
+
+struct nfs_pgio_completion_ops {
+	void	(*error_cleanup)(struct list_head *head);
+	void	(*init_hdr)(struct nfs_pgio_header *hdr);
+	void	(*completion)(struct nfs_pgio_header *hdr);
 };
 
 struct nfs_access_entry;
 struct nfs_client;
+struct nfs_pageio_descriptor;
 
 /*
  * RPC procedure vector for NFSv2/NFSv3 demuxing
@@ -1102,14 +1267,11 @@ struct nfs_rpc_ops {
 
 	int	(*getroot) (struct nfs_server *, struct nfs_fh *,
 			    struct nfs_fsinfo *);
-	int	(*lookupfh)(struct nfs_server *, struct nfs_fh *,
-			    struct qstr *, struct nfs_fh *,
-			    struct nfs_fattr *);
 	int	(*getattr) (struct nfs_server *, struct nfs_fh *,
 			    struct nfs_fattr *);
 	int	(*setattr) (struct dentry *, struct nfs_fattr *,
 			    struct iattr *);
-	int	(*lookup)  (struct inode *, struct qstr *,
+	int	(*lookup)  (struct rpc_clnt *clnt, struct inode *, struct qstr *,
 			    struct nfs_fh *, struct nfs_fattr *);
 	int	(*access)  (struct inode *, struct nfs_access_entry *);
 	int	(*readlink)(struct inode *, struct page *, unsigned int,
@@ -1141,11 +1303,18 @@ struct nfs_rpc_ops {
 	int	(*set_capabilities)(struct nfs_server *, struct nfs_fh *);
 	__be32 *(*decode_dirent)(struct xdr_stream *, struct nfs_entry *, struct nfs_server *, int plus);
 	void	(*read_setup)   (struct nfs_read_data *, struct rpc_message *);
+	void	(*read_pageio_init)(struct nfs_pageio_descriptor *, struct inode *,
+				    const struct nfs_pgio_completion_ops *);
+	void	(*read_rpc_prepare)(struct rpc_task *, struct nfs_read_data *);
 	int	(*read_done)  (struct rpc_task *, struct nfs_read_data *);
 	void	(*write_setup)  (struct nfs_write_data *, struct rpc_message *);
+	void	(*write_pageio_init)(struct nfs_pageio_descriptor *, struct inode *, int,
+				     const struct nfs_pgio_completion_ops *);
+	void	(*write_rpc_prepare)(struct rpc_task *, struct nfs_write_data *);
 	int	(*write_done)  (struct rpc_task *, struct nfs_write_data *);
-	void	(*commit_setup) (struct nfs_write_data *, struct rpc_message *);
-	int	(*commit_done) (struct rpc_task *, struct nfs_write_data *);
+	void	(*commit_setup) (struct nfs_commit_data *, struct rpc_message *);
+	void	(*commit_rpc_prepare)(struct rpc_task *, struct nfs_commit_data *);
+	int	(*commit_done) (struct rpc_task *, struct nfs_commit_data *);
 	int	(*lock)(struct file *, int, struct file_lock *);
 	int	(*lock_check_bounds)(const struct file_lock *);
 	void	(*clear_acl_cache)(struct inode *);

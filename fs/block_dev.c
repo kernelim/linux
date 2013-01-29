@@ -48,7 +48,7 @@ inline struct block_device *I_BDEV(struct inode *inode)
 
 EXPORT_SYMBOL(I_BDEV);
 
-static sector_t max_block(struct block_device *bdev)
+sector_t blkdev_max_block(struct block_device *bdev)
 {
 	sector_t retval = ~((sector_t)0);
 	loff_t sz = i_size_read(bdev->bd_inode);
@@ -138,7 +138,7 @@ static int
 blkdev_get_block(struct inode *inode, sector_t iblock,
 		struct buffer_head *bh, int create)
 {
-	if (iblock >= max_block(I_BDEV(inode))) {
+	if (iblock >= blkdev_max_block(I_BDEV(inode))) {
 		if (create)
 			return -EIO;
 
@@ -160,7 +160,7 @@ static int
 blkdev_get_blocks(struct inode *inode, sector_t iblock,
 		struct buffer_head *bh, int create)
 {
-	sector_t end_block = max_block(I_BDEV(inode));
+	sector_t end_block = blkdev_max_block(I_BDEV(inode));
 	unsigned long max_blocks = bh->b_size >> inode->i_blkbits;
 
 	if ((iblock + max_blocks) > end_block) {
@@ -243,27 +243,27 @@ EXPORT_SYMBOL(fsync_bdev);
  * count down in thaw_bdev(). When it becomes 0, thaw_bdev() will unfreeze
  * actually.
  */
-struct super_block *freeze_bdev(struct block_device *bdev)
+
+/*
+ * For old filesystems which are not using the sb_start_write
+ * infrastructure etc - this is for the benefit of precompiled out of tree
+ * filesystem modules, to preserve KABI.  To use the new freeze mechanisms,
+ * fs should set FS_HAS_NEW_FREEZE in fs_flags and follow upstream
+ * freeze handling.
+ *
+ * New freeze paths were added in RHEL6.4 and in-tree freeze capable
+ * fielsystems do not use the _old freeze & thaw variants here
+ *
+ * note: freeze_bdev() already got us an active sb and grabbed bd_fsfreeze_mutex
+ */
+static struct super_block *freeze_bdev_old(struct block_device *bdev,
+					   struct super_block *sb)
 {
-	struct super_block *sb;
 	int error = 0;
 
-	mutex_lock(&bdev->bd_fsfreeze_mutex);
-	if (++bdev->bd_fsfreeze_count > 1) {
-		/*
-		 * We don't even need to grab a reference - the first call
-		 * to freeze_bdev grab an active reference and only the last
-		 * thaw_bdev drops it.
-		 */
-		sb = get_super(bdev);
-		drop_super(sb);
-		mutex_unlock(&bdev->bd_fsfreeze_mutex);
-		return sb;
-	}
+	WARN_ON_ONCE(sb_has_new_freeze(sb));
 
-	sb = get_active_super(bdev);
-	if (!sb)
-		goto out;
+	down_write(&sb->s_umount);
 	if (sb->s_flags & MS_RDONLY) {
 		sb->s_frozen = SB_FREEZE_TRANS;
 		up_write(&sb->s_umount);
@@ -297,6 +297,90 @@ struct super_block *freeze_bdev(struct block_device *bdev)
 	}
 	up_write(&sb->s_umount);
 
+	sync_blockdev(bdev);
+	mutex_unlock(&bdev->bd_fsfreeze_mutex);
+	return sb;      /* thaw_bdev releases s->s_umount */
+}
+
+struct super_block *freeze_bdev(struct block_device *bdev)
+{
+	struct super_block *sb;
+	int error = 0;
+
+	mutex_lock(&bdev->bd_fsfreeze_mutex);
+	if (++bdev->bd_fsfreeze_count > 1) {
+		/*
+		 * We don't even need to grab a reference - the first call
+		 * to freeze_bdev grab an active reference and only the last
+		 * thaw_bdev drops it.
+		 */
+		sb = get_super(bdev);
+		drop_super(sb);
+		mutex_unlock(&bdev->bd_fsfreeze_mutex);
+		return sb;
+	}
+
+	sb = get_active_super(bdev);
+	if (!sb)
+		goto out;
+
+	if (unlikely(!sb_has_new_freeze(sb)))
+		return freeze_bdev_old(bdev, sb);
+
+	down_write(&sb->s_umount);
+	if (sb->s_flags & MS_RDONLY) {
+		/* Nothing to do really... */
+		sb->s_writers.frozen = SB_FREEZE_COMPLETE;
+		up_write(&sb->s_umount);
+		mutex_unlock(&bdev->bd_fsfreeze_mutex);
+		return sb;
+	}
+
+	/* From now on, no new normal writers can start */
+	sb->s_writers.frozen = SB_FREEZE_WRITE;
+	smp_wmb();
+
+	/* Release s_umount to preserve sb_start_write -> s_umount ordering */
+	up_write(&sb->s_umount);
+
+	sb_wait_write(sb, SB_FREEZE_WRITE);
+
+	/* Now we go and block page faults... */
+	down_write(&sb->s_umount);
+	sb->s_writers.frozen = SB_FREEZE_PAGEFAULT;
+	smp_wmb();
+
+	sb_wait_write(sb, SB_FREEZE_PAGEFAULT);
+
+	/* All writers are done so after syncing there won't be dirty data */
+	sync_filesystem(sb);
+
+	/* Now wait for internal filesystem counter */
+	sb->s_writers.frozen = SB_FREEZE_FS;
+	smp_wmb();
+	sb_wait_write(sb, SB_FREEZE_FS);
+
+	if (sb->s_op->freeze_fs) {
+		error = sb->s_op->freeze_fs(sb);
+		if (error) {
+			printk(KERN_ERR
+				"VFS:Filesystem freeze failed\n");
+			sb->s_writers.frozen = SB_UNFROZEN;
+			smp_wmb();
+			wake_up(&sb->s_writers.wait_unfrozen);
+			deactivate_locked_super(sb);
+			bdev->bd_fsfreeze_count--;
+			mutex_unlock(&bdev->bd_fsfreeze_mutex);
+			return ERR_PTR(error);
+		}
+	}
+	/*
+	 * This is just for debugging purposes so that fs can warn if it
+	 * sees write activity when frozen is set to SB_FREEZE_COMPLETE.
+	 */
+	sb->s_writers.frozen = SB_FREEZE_COMPLETE;
+	up_write(&sb->s_umount);
+
  out:
 	sync_blockdev(bdev);
 	mutex_unlock(&bdev->bd_fsfreeze_mutex);
@@ -311,7 +395,7 @@ EXPORT_SYMBOL(freeze_bdev);
  *
  * Unlocks the filesystem and marks it writeable again after freeze_bdev().
  */
-int thaw_bdev(struct block_device *bdev, struct super_block *sb)
+static int thaw_bdev_old(struct block_device *bdev, struct super_block *sb)
 {
 	int error = -EINVAL;
 
@@ -347,6 +431,52 @@ out_unfrozen:
 	sb->s_frozen = SB_UNFROZEN;
 	smp_wmb();
 	wake_up(&sb->s_wait_unfrozen);
+
+	if (sb)
+		deactivate_locked_super(sb);
+out_unlock:
+	mutex_unlock(&bdev->bd_fsfreeze_mutex);
+	return error;
+}
+
+int thaw_bdev(struct block_device *bdev, struct super_block *sb)
+{
+	int error = -EINVAL;
+
+	if (unlikely(sb && !sb_has_new_freeze(sb)))
+		return thaw_bdev_old(bdev, sb);
+
+	mutex_lock(&bdev->bd_fsfreeze_mutex);
+	if (!bdev->bd_fsfreeze_count)
+		goto out_unlock;
+
+	error = 0;
+	if (--bdev->bd_fsfreeze_count > 0)
+		goto out_unlock;
+
+	if (!sb)
+		goto out_unlock;
+
+	BUG_ON(sb->s_bdev != bdev);
+	down_write(&sb->s_umount);
+	if (sb->s_flags & MS_RDONLY)
+		goto out_unfrozen;
+
+	if (sb->s_op->unfreeze_fs) {
+		error = sb->s_op->unfreeze_fs(sb);
+		if (error) {
+			printk(KERN_ERR
+				"VFS:Filesystem thaw failed\n");
+			bdev->bd_fsfreeze_count++;
+			mutex_unlock(&bdev->bd_fsfreeze_mutex);
+			return error;
+		}
+	}
+
+out_unfrozen:
+	sb->s_writers.frozen = SB_UNFROZEN;
+	smp_wmb();
+	wake_up(&sb->s_writers.wait_unfrozen);
 
 	if (sb)
 		deactivate_locked_super(sb);

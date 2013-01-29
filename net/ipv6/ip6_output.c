@@ -784,6 +784,10 @@ int ip6_fragment(struct sk_buff *skb, int (*output)(struct sk_buff *))
 	}
 
 slow_path:
+	if ((skb->ip_summed == CHECKSUM_PARTIAL) &&
+	    skb_checksum_help(skb))
+		goto fail;
+
 	left = skb->len - hlen;		/* Space per frame */
 	ptr = hlen;			/* Where to start from */
 

@@ -119,6 +119,8 @@ EXPORT_PER_CPU_SYMBOL(cpu_info_rh);
 
 atomic_t init_deasserted;
 
+static void remove_siblinginfo(int cpu);
+
 #if defined(CONFIG_NUMA) && defined(CONFIG_X86_32)
 /* which node each logical CPU is on */
 int cpu_to_node_map[NR_CPUS] __read_mostly = { [0 ... NR_CPUS-1] = 0 };
@@ -266,12 +268,40 @@ static void __cpuinit smp_callin(void)
 	local_irq_disable();
 	pr_debug("Stack at about %p\n", &cpuid);
 
-	notify_cpu_starting(cpuid);
-
 	/*
 	 * Allow the master to continue.
 	 */
 	cpumask_set_cpu(cpuid, cpu_callin_mask);
+
+	/*
+	 * Wait for signal from master CPU to continue or abort.
+	 */
+	while (!cpumask_test_cpu(cpuid, cpu_may_complete_boot_mask) &&
+		cpumask_test_cpu(cpuid, cpu_callout_mask)) {
+		cpu_relax();
+	}
+
+	/* die if master cancelled cpu_up */
+	if (!cpumask_test_cpu(cpuid, cpu_may_complete_boot_mask))
+		goto die;
+
+	notify_cpu_starting(cpuid);
+	return;
+
+die:
+#ifdef CONFIG_HOTPLUG_CPU
+	/* was set by smp_store_cpu_info->...->numa_add_cpu */
+	numa_remove_cpu(cpuid);
+	remove_siblinginfo(cpuid);
+	/* was started by end_local_APIC_setup() */
+	stop_apic_nmi_watchdog(NULL);
+	clear_local_APIC();
+	/* was set by cpu_init() */
+	cpumask_clear_cpu(cpuid, cpu_initialized_mask);
+	cpumask_clear_cpu(cpuid, cpu_callin_mask);
+	play_dead();
+#endif
+	panic("%s: Failed to online CPU%d!\n", __func__, cpuid);
 }
 
 /*
@@ -859,9 +889,11 @@ do_rest:
 			schedule();
 		}
 
-		if (cpumask_test_cpu(cpu, cpu_callin_mask))
+		if (cpumask_test_cpu(cpu, cpu_callin_mask)) {
+			/* Signal AP that it may continue to boot */
+			cpumask_set_cpu(cpu, cpu_may_complete_boot_mask);
 			pr_debug("CPU%d: has booted.\n", cpu);
-		else {
+		} else {
 			boot_error = 1;
 			if (*((volatile unsigned char *)trampoline_base)
 					== 0xA5)
@@ -1105,6 +1137,7 @@ void __init native_smp_prepare_cpus(unsigned int max_cpus)
 	smp_cpu_index_default();
 	current_cpu_data = boot_cpu_data;
 	cpumask_copy(cpu_callin_mask, cpumask_of(0));
+	cpumask_copy(cpu_may_complete_boot_mask, cpumask_of(0));
 	mb();
 	/*
 	 * Setup boot CPU information
@@ -1299,6 +1332,8 @@ static void __ref remove_cpu_from_maps(int cpu)
 	cpumask_clear_cpu(cpu, cpu_callin_mask);
 	/* was set by cpu_init() */
 	cpumask_clear_cpu(cpu, cpu_initialized_mask);
+	/* set by do_boot_cpu() */
+	cpumask_clear_cpu(cpu, cpu_may_complete_boot_mask);
 	numa_remove_cpu(cpu);
 }
 

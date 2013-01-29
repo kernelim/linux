@@ -110,9 +110,14 @@ static ssize_t rng_dev_read(struct file *filp, char __user *buf,
 		}
 
 		bytes_read = 0;
-		if (hwrng_data_present(current_rng,
-				       !(filp->f_flags & O_NONBLOCK)))
-			bytes_read = hwrng_data_read(current_rng, &data);
+		err = hwrng_data_present(current_rng,
+					 !(filp->f_flags & O_NONBLOCK));
+		if (err < 0) {
+			mutex_unlock(&rng_mutex);
+			goto out;
+		}
+
+		bytes_read = hwrng_data_read(current_rng, &data);
 		mutex_unlock(&rng_mutex);
 
 		err = -EAGAIN;

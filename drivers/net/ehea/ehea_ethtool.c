@@ -32,6 +32,7 @@
 static int ehea_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 {
 	struct ehea_port *port = netdev_priv(dev);
+	u32 speed;
 	int ret;
 
 	ret = ehea_sense_port_attr(port);
@@ -41,27 +42,44 @@ static int ehea_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 
 	if (netif_carrier_ok(dev)) {
 		switch (port->port_speed) {
-		case EHEA_SPEED_10M: cmd->speed = SPEED_10; break;
-		case EHEA_SPEED_100M: cmd->speed = SPEED_100; break;
-		case EHEA_SPEED_1G: cmd->speed = SPEED_1000; break;
-		case EHEA_SPEED_10G: cmd->speed = SPEED_10000; break;
+		case EHEA_SPEED_10M:
+			speed = SPEED_10;
+			break;
+		case EHEA_SPEED_100M:
+			speed = SPEED_100;
+			break;
+		case EHEA_SPEED_1G:
+			speed = SPEED_1000;
+			break;
+		case EHEA_SPEED_10G:
+			speed = SPEED_10000;
+			break;
+		default:
+			speed = -1;
+			break; /* BUG */
 		}
 		cmd->duplex = port->full_duplex == 1 ?
 						     DUPLEX_FULL : DUPLEX_HALF;
 	} else {
-		cmd->speed = -1;
+		speed = ~0;
 		cmd->duplex = -1;
 	}
+	ethtool_cmd_speed_set(cmd, speed);
 
-	cmd->supported = (SUPPORTED_10000baseT_Full | SUPPORTED_1000baseT_Full
-		       | SUPPORTED_100baseT_Full |  SUPPORTED_100baseT_Half
-		       | SUPPORTED_10baseT_Full | SUPPORTED_10baseT_Half
-		       | SUPPORTED_Autoneg | SUPPORTED_FIBRE);
+	if (cmd->speed == SPEED_10000) {
+		cmd->supported = (SUPPORTED_10000baseT_Full | SUPPORTED_FIBRE);
+		cmd->advertising = (ADVERTISED_10000baseT_Full | ADVERTISED_FIBRE);
+		cmd->port = PORT_FIBRE;
+	} else {
+		cmd->supported = (SUPPORTED_1000baseT_Full | SUPPORTED_100baseT_Full
+			       | SUPPORTED_100baseT_Half | SUPPORTED_10baseT_Full
+			       | SUPPORTED_10baseT_Half | SUPPORTED_Autoneg
+			       | SUPPORTED_TP);
+		cmd->advertising = (ADVERTISED_1000baseT_Full | ADVERTISED_Autoneg
+				 | ADVERTISED_TP);
+		cmd->port = PORT_TP;
+	}
 
-	cmd->advertising = (ADVERTISED_10000baseT_Full | ADVERTISED_Autoneg
-			 | ADVERTISED_FIBRE);
-
-	cmd->port = PORT_FIBRE;
 	cmd->autoneg = port->autoneg == 1 ? AUTONEG_ENABLE : AUTONEG_DISABLE;
 
 	return 0;
@@ -165,7 +183,7 @@ static u32 ehea_get_rx_csum(struct net_device *dev)
 	return 1;
 }
 
-static char ehea_ethtool_stats_keys[][ETH_GSTRING_LEN] = {
+static const char ehea_ethtool_stats_keys[][ETH_GSTRING_LEN] = {
 	{"sig_comp_iv"},
 	{"swqe_refill_th"},
 	{"port resets"},
@@ -174,7 +192,6 @@ static char ehea_ethtool_stats_keys[][ETH_GSTRING_LEN] = {
 	{"IP cksum errors"},
 	{"Frame cksum errors"},
 	{"num SQ stopped"},
-	{"SQ stopped"},
 	{"PR0 free_swqes"},
 	{"PR1 free_swqes"},
 	{"PR2 free_swqes"},
@@ -183,9 +200,14 @@ static char ehea_ethtool_stats_keys[][ETH_GSTRING_LEN] = {
 	{"PR5 free_swqes"},
 	{"PR6 free_swqes"},
 	{"PR7 free_swqes"},
-	{"LRO aggregated"},
-	{"LRO flushed"},
-	{"LRO no_desc"},
+	{"PR8 free_swqes"},
+	{"PR9 free_swqes"},
+	{"PR10 free_swqes"},
+	{"PR11 free_swqes"},
+	{"PR12 free_swqes"},
+	{"PR13 free_swqes"},
+	{"PR14 free_swqes"},
+	{"PR15 free_swqes"},
 };
 
 static void ehea_get_strings(struct net_device *dev, u32 stringset, u8 *data)
@@ -240,28 +262,18 @@ static void ehea_get_ethtool_stats(struct net_device *dev,
 		tmp += port->port_res[k].p_stats.queue_stopped;
 	data[i++] = tmp;
 
-	for (k = 0, tmp = 0; k < EHEA_MAX_PORT_RES; k++)
-		tmp |= port->port_res[k].queue_stopped;
-	data[i++] = tmp;
-
-	for (k = 0; k < 8; k++)
+	for (k = 0; k < 16; k++)
 		data[i++] = atomic_read(&port->port_res[k].swqe_avail);
-
-	for (k = 0, tmp = 0; k < EHEA_MAX_PORT_RES; k++)
-		tmp |= port->port_res[k].lro_mgr.stats.aggregated;
-	data[i++] = tmp;
-
-	for (k = 0, tmp = 0; k < EHEA_MAX_PORT_RES; k++)
-		tmp |= port->port_res[k].lro_mgr.stats.flushed;
-	data[i++] = tmp;
-
-	for (k = 0, tmp = 0; k < EHEA_MAX_PORT_RES; k++)
-		tmp |= port->port_res[k].lro_mgr.stats.no_desc;
-	data[i++] = tmp;
-
 }
 
-const struct ethtool_ops ehea_ethtool_ops = {
+static int ehea_set_flags(struct net_device *dev, u32 data)
+{
+	if (data & ~ETH_FLAG_LRO)
+		return -EINVAL;
+	return ethtool_op_set_flags(dev, data);
+}
+
+static const struct ethtool_ops ehea_ethtool_ops = {
 	.get_settings = ehea_get_settings,
 	.get_drvinfo = ehea_get_drvinfo,
 	.get_msglevel = ehea_get_msglevel,
@@ -273,6 +285,8 @@ const struct ethtool_ops ehea_ethtool_ops = {
 	.get_ethtool_stats = ehea_get_ethtool_stats,
 	.get_rx_csum = ehea_get_rx_csum,
 	.set_settings = ehea_set_settings,
+	.get_flags = ethtool_op_get_flags,
+	.set_flags = ehea_set_flags,
 	.nway_reset = ehea_nway_reset,		/* Restart autonegotiation */
 };
 

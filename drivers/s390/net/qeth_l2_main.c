@@ -602,7 +602,11 @@ static int qeth_l2_send_delmac_cb(struct qeth_card *card,
 	cmd = (struct qeth_ipa_cmd *) data;
 	if (cmd->hdr.return_code) {
 		QETH_DBF_TEXT_(TRACE, 2, "err%d", cmd->hdr.return_code);
-		cmd->hdr.return_code = -EIO;
+		if (cmd->hdr.return_code == IPA_RC_L2_MAC_NOT_FOUND) {
+			card->info.mac_bits &= ~QETH_LAYER2_MAC_REGISTERED;
+			cmd->hdr.return_code = 0;
+		} else
+			cmd->hdr.return_code = -EIO;
 		return 0;
 	}
 	card->info.mac_bits &= ~QETH_LAYER2_MAC_REGISTERED;
@@ -627,10 +631,13 @@ static int qeth_l2_request_initial_mac(struct qeth_card *card)
 	QETH_DBF_TEXT(SETUP, 2, "doL2init");
 	QETH_DBF_TEXT_(SETUP, 2, "doL2%s", CARD_BUS_ID(card));
 
-	rc = qeth_query_setadapterparms(card);
-	if (rc) {
-		QETH_DBF_MESSAGE(2, "could not query adapter parameters on "
-			"device %s: x%x\n", CARD_BUS_ID(card), rc);
+	if (qeth_is_supported(card, IPA_SETADAPTERPARMS)) {
+		rc = qeth_query_setadapterparms(card);
+		if (rc) {
+			QETH_DBF_MESSAGE(2, "could not query adapter "
+				"parameters on device %s: x%x\n",
+				CARD_BUS_ID(card), rc);
+		}
 	}
 
 	if (card->info.type == QETH_CARD_TYPE_IQD ||
@@ -1163,8 +1170,7 @@ static int qeth_l2_recover(void *ptr)
 		dev_info(&card->gdev->dev,
 			"Device successfully recovered!\n");
 	else {
-		if (card->dev) {
-			rtnl_lock();
+		if (card->dev && rtnl_trylock()) {
 			dev_close(card->dev);
 			rtnl_unlock();
 		}

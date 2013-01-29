@@ -15,6 +15,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <linux/export.h>
 #include <asm/unaligned.h>
 #include <net/mac80211.h>
 
@@ -142,7 +143,7 @@ static bool ath_hw_set_keycache_entry(struct ath_common *common, u16 entry,
 		break;
 	case ATH_CIPHER_AES_CCM:
 		if (!(common->crypt_caps & ATH_CRYPT_CAP_CIPHER_AESCCM)) {
-			ath_dbg(common, ATH_DBG_ANY,
+			ath_dbg(common, ANY,
 				"AES-CCM not supported by this mac rev\n");
 			return false;
 		}
@@ -151,15 +152,15 @@ static bool ath_hw_set_keycache_entry(struct ath_common *common, u16 entry,
 	case ATH_CIPHER_TKIP:
 		keyType = AR_KEYTABLE_TYPE_TKIP;
 		if (entry + 64 >= common->keymax) {
-			ath_dbg(common, ATH_DBG_ANY,
+			ath_dbg(common, ANY,
 				"entry %u inappropriate for TKIP\n", entry);
 			return false;
 		}
 		break;
 	case ATH_CIPHER_WEP:
 		if (k->kv_len < WLAN_KEY_LEN_WEP40) {
-			ath_dbg(common, ATH_DBG_ANY,
-				"WEP key length %u too small\n", k->kv_len);
+			ath_dbg(common, ANY, "WEP key length %u too small\n",
+				k->kv_len);
 			return false;
 		}
 		if (k->kv_len <= WLAN_KEY_LEN_WEP40)
@@ -555,6 +556,9 @@ int ath_key_config(struct ath_common *common,
 		return -EIO;
 
 	set_bit(idx, common->keymap);
+	if (key->cipher == WLAN_CIPHER_SUITE_CCMP)
+		set_bit(idx, common->ccmp_keymap);
+
 	if (key->cipher == WLAN_CIPHER_SUITE_TKIP) {
 		set_bit(idx + 64, common->keymap);
 		set_bit(idx, common->tkip_keymap);
@@ -581,6 +585,7 @@ void ath_key_delete(struct ath_common *common, struct ieee80211_key_conf *key)
 		return;
 
 	clear_bit(key->hw_key_idx, common->keymap);
+	clear_bit(key->hw_key_idx, common->ccmp_keymap);
 	if (key->cipher != WLAN_CIPHER_SUITE_TKIP)
 		return;
 

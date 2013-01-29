@@ -77,9 +77,9 @@ airport_resume(struct macio_dev *mdev)
 
 	enable_irq(card->irq);
 
-	spin_lock_irqsave(&priv->lock, flags);
+	priv->hw.ops->lock_irqsave(&priv->lock, &flags);
 	err = orinoco_up(priv);
-	spin_unlock_irqrestore(&priv->lock, flags);
+	priv->hw.ops->unlock_irqrestore(&priv->lock, &flags);
 
 	return err;
 }
@@ -150,7 +150,7 @@ airport_attach(struct macio_dev *mdev, const struct of_device_id *match)
 	struct orinoco_private *priv;
 	struct airport *card;
 	unsigned long phys_addr;
-	hermes_t *hw;
+	struct hermes *hw;
 
 	if (macio_resource_count(mdev) < 1 || macio_irq_count(mdev) < 1) {
 		printk(KERN_ERR PFX "Wrong interrupt/addresses in OF tree\n");
@@ -195,7 +195,7 @@ airport_attach(struct macio_dev *mdev, const struct of_device_id *match)
 	ssleep(1);
 
 	/* Reset it before we get the interrupt */
-	hermes_init(hw);
+	hw->ops->init(hw);
 
 	if (request_irq(card->irq, orinoco_interrupt, 0, DRIVER_NAME, priv)) {
 		printk(KERN_ERR PFX "Couldn't get IRQ %d\n", card->irq);
@@ -210,7 +210,7 @@ airport_attach(struct macio_dev *mdev, const struct of_device_id *match)
 	}
 
 	/* Register an interface with the stack */
-	if (orinoco_if_add(priv, phys_addr, card->irq) != 0) {
+	if (orinoco_if_add(priv, phys_addr, card->irq, NULL) != 0) {
 		printk(KERN_ERR PFX "orinoco_if_add() failed\n");
 		goto failed;
 	}
@@ -228,10 +228,9 @@ MODULE_AUTHOR("Benjamin Herrenschmidt <benh@kernel.crashing.org>");
 MODULE_DESCRIPTION("Driver for the Apple Airport wireless card.");
 MODULE_LICENSE("Dual MPL/GPL");
 
-static struct of_device_id airport_match[] =
-{
+static struct of_device_id airport_match[] = {
 	{
-	.name 		= "radio",
+	.name		= "radio",
 	},
 	{},
 };
@@ -239,8 +238,11 @@ static struct of_device_id airport_match[] =
 MODULE_DEVICE_TABLE(of, airport_match);
 
 static struct macio_driver airport_driver = {
-	.name 		= DRIVER_NAME,
-	.match_table	= airport_match,
+	.driver = {
+		.name		= DRIVER_NAME,
+		.owner		= THIS_MODULE,
+		.of_match_table	= airport_match,
+	},
 	.probe		= airport_attach,
 	.remove		= airport_detach,
 	.suspend	= airport_suspend,

@@ -459,6 +459,7 @@ pipe_write(struct kiocb *iocb, const struct iovec *_iov,
 
 	do_wakeup = 0;
 	ret = 0;
+	sb_start_write(inode->i_sb);
 	mutex_lock(&inode->i_mutex);
 	pipe = inode->i_pipe;
 
@@ -609,6 +610,7 @@ out:
 	}
 	if (ret > 0)
 		file_update_time(filp);
+	sb_end_write(inode->i_sb);
 	return ret;
 }
 

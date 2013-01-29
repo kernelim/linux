@@ -11,6 +11,7 @@
 #include <poll.h>
 #include "cpumap.h"
 #include "thread_map.h"
+#include "target.h"
 #include "evlist.h"
 #include "evsel.h"
 #include <unistd.h>
@@ -51,13 +52,15 @@ struct perf_evlist *perf_evlist__new(struct cpu_map *cpus,
 void perf_evlist__config_attrs(struct perf_evlist *evlist,
 			       struct perf_record_opts *opts)
 {
-	struct perf_evsel *evsel;
+	struct perf_evsel *evsel, *first;
 
 	if (evlist->cpus->map[0] < 0)
 		opts->no_inherit = true;
 
+	first = list_entry(evlist->entries.next, struct perf_evsel, node);
+
 	list_for_each_entry(evsel, &evlist->entries, node) {
-		perf_evsel__config(evsel, opts);
+		perf_evsel__config(evsel, opts, first);
 
 		if (evlist->nr_entries > 1)
 			evsel->attr.sample_type |= PERF_SAMPLE_ID;
@@ -97,12 +100,18 @@ void perf_evlist__add(struct perf_evlist *evlist, struct perf_evsel *entry)
 	++evlist->nr_entries;
 }
 
-static void perf_evlist__splice_list_tail(struct perf_evlist *evlist,
-					  struct list_head *list,
-					  int nr_entries)
+void perf_evlist__splice_list_tail(struct perf_evlist *evlist,
+				   struct list_head *list,
+				   int nr_entries)
 {
 	list_splice_tail(list, &evlist->entries);
 	evlist->nr_entries += nr_entries;
+}
+
+void perf_evlist__group(struct perf_evlist *evlist)
+{
+	if (evlist->nr_entries)
+		parse_events__set_leader(&evlist->entries);
 }
 
 int perf_evlist__add_default(struct perf_evlist *evlist)
@@ -111,8 +120,11 @@ int perf_evlist__add_default(struct perf_evlist *evlist)
 		.type = PERF_TYPE_HARDWARE,
 		.config = PERF_COUNT_HW_CPU_CYCLES,
 	};
-	struct perf_evsel *evsel = perf_evsel__new(&attr, 0);
+	struct perf_evsel *evsel;
 
+	event_attr_init(&attr);
+
+	evsel = perf_evsel__new(&attr, 0);
 	if (evsel == NULL)
 		goto error;
 
@@ -151,6 +163,17 @@ out_delete_partial_list:
 	list_for_each_entry_safe(evsel, n, &head, node)
 		perf_evsel__delete(evsel);
 	return -1;
+}
+
+int __perf_evlist__add_default_attrs(struct perf_evlist *evlist,
+				     struct perf_event_attr *attrs, size_t nr_attrs)
+{
+	size_t i;
+
+	for (i = 0; i < nr_attrs; i++)
+		event_attr_init(attrs + i);
+
+	return perf_evlist__add_attrs(evlist, attrs, nr_attrs);
 }
 
 static int trace_event__id(const char *evname)
@@ -197,7 +220,7 @@ int perf_evlist__add_tracepoints(struct perf_evlist *evlist,
 		attrs[i].type	       = PERF_TYPE_TRACEPOINT;
 		attrs[i].config	       = err;
 	        attrs[i].sample_type   = (PERF_SAMPLE_RAW | PERF_SAMPLE_TIME |
-					  PERF_SAMPLE_CPU);
+					  PERF_SAMPLE_CPU | PERF_SAMPLE_PERIOD);
 		attrs[i].sample_period = 1;
 	}
 
@@ -207,8 +230,8 @@ out_free_attrs:
 	return err;
 }
 
-static struct perf_evsel *
-	perf_evlist__find_tracepoint_by_id(struct perf_evlist *evlist, int id)
+struct perf_evsel *
+perf_evlist__find_tracepoint_by_id(struct perf_evlist *evlist, int id)
 {
 	struct perf_evsel *evsel;
 
@@ -257,7 +280,8 @@ void perf_evlist__disable(struct perf_evlist *evlist)
 	for (cpu = 0; cpu < evlist->cpus->nr; cpu++) {
 		list_for_each_entry(pos, &evlist->entries, node) {
 			for (thread = 0; thread < evlist->threads->nr; thread++)
-				ioctl(FD(pos, cpu, thread), PERF_EVENT_IOC_DISABLE);
+				ioctl(FD(pos, cpu, thread),
+				      PERF_EVENT_IOC_DISABLE, 0);
 		}
 	}
 }
@@ -270,7 +294,8 @@ void perf_evlist__enable(struct perf_evlist *evlist)
 	for (cpu = 0; cpu < evlist->cpus->nr; cpu++) {
 		list_for_each_entry(pos, &evlist->entries, node) {
 			for (thread = 0; thread < evlist->threads->nr; thread++)
-				ioctl(FD(pos, cpu, thread), PERF_EVENT_IOC_ENABLE);
+				ioctl(FD(pos, cpu, thread),
+				      PERF_EVENT_IOC_ENABLE, 0);
 		}
 	}
 }
@@ -346,6 +371,10 @@ struct perf_evsel *perf_evlist__id2evsel(struct perf_evlist *evlist, u64 id)
 	hlist_for_each_entry(sid, pos, head, node)
 		if (sid->id == id)
 			return sid->evsel;
+
+	if (!perf_evlist__sample_id_all(evlist))
+		return list_entry(evlist->entries.next, struct perf_evsel, node);
+
 	return NULL;
 }
 
@@ -590,18 +619,21 @@ int perf_evlist__mmap(struct perf_evlist *evlist, unsigned int pages,
 	return perf_evlist__mmap_per_cpu(evlist, prot, mask);
 }
 
-int perf_evlist__create_maps(struct perf_evlist *evlist, pid_t target_pid,
-			     pid_t target_tid, const char *cpu_list)
+int perf_evlist__create_maps(struct perf_evlist *evlist,
+			     struct perf_target *target)
 {
-	evlist->threads = thread_map__new(target_pid, target_tid);
+	evlist->threads = thread_map__new_str(target->pid, target->tid,
+					      target->uid);
 
 	if (evlist->threads == NULL)
 		return -1;
 
-	if (cpu_list == NULL && target_tid != -1)
+	if (perf_target__has_task(target))
+		evlist->cpus = cpu_map__dummy_new();
+	else if (!perf_target__has_cpu(target) && !target->uses_mmap)
 		evlist->cpus = cpu_map__dummy_new();
 	else
-		evlist->cpus = cpu_map__new(cpu_list);
+		evlist->cpus = cpu_map__new(target->cpu_list);
 
 	if (evlist->cpus == NULL)
 		goto out_delete_threads;
@@ -731,21 +763,13 @@ void perf_evlist__set_selected(struct perf_evlist *evlist,
 	evlist->selected = evsel;
 }
 
-int perf_evlist__open(struct perf_evlist *evlist, bool group)
+int perf_evlist__open(struct perf_evlist *evlist)
 {
-	struct perf_evsel *evsel, *first;
+	struct perf_evsel *evsel;
 	int err, ncpus, nthreads;
 
-	first = list_entry(evlist->entries.next, struct perf_evsel, node);
-
 	list_for_each_entry(evsel, &evlist->entries, node) {
-		struct xyarray *group_fd = NULL;
-
-		if (group && evsel != first)
-			group_fd = first->fd;
-
-		err = perf_evsel__open(evsel, evlist->cpus, evlist->threads,
-				       group, group_fd);
+		err = perf_evsel__open(evsel, evlist->cpus, evlist->threads);
 		if (err < 0)
 			goto out_err;
 	}
@@ -758,6 +782,7 @@ out_err:
 	list_for_each_entry_reverse(evsel, &evlist->entries, node)
 		perf_evsel__close(evsel, ncpus, nthreads);
 
+	errno = -err;
 	return err;
 }
 
@@ -817,7 +842,7 @@ int perf_evlist__prepare_workload(struct perf_evlist *evlist,
 		exit(-1);
 	}
 
-	if (!opts->system_wide && opts->target_tid == -1 && opts->target_pid == -1)
+	if (perf_target__none(&opts->target))
 		evlist->threads->map[0] = evlist->workload.pid;
 
 	close(child_ready_pipe[1]);
@@ -853,4 +878,11 @@ int perf_evlist__start_workload(struct perf_evlist *evlist)
 	}
 
 	return 0;
+}
+
+int perf_evlist__parse_sample(struct perf_evlist *evlist, union perf_event *event,
+			      struct perf_sample *sample, bool swapped)
+{
+	struct perf_evsel *e = list_entry(evlist->entries.next, struct perf_evsel, node);
+	return perf_evsel__parse_sample(e, event, sample, swapped);
 }

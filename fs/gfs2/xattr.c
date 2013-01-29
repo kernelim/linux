@@ -325,12 +325,11 @@ static int ea_remove_unstuffed(struct gfs2_inode *ip, struct buffer_head *bh,
 			       struct gfs2_ea_header *ea,
 			       struct gfs2_ea_header *prev, int leave)
 {
-	struct gfs2_qadata *qa;
 	int error;
 
-	qa = gfs2_qadata_get(ip);
-	if (!qa)
-		return -ENOMEM;
+	error = gfs2_rindex_update(GFS2_SB(&ip->i_inode));
+	if (error)
+		return error;
 
 	error = gfs2_quota_hold(ip, NO_QUOTA_CHANGE, NO_QUOTA_CHANGE);
 	if (error)
@@ -340,7 +339,6 @@ static int ea_remove_unstuffed(struct gfs2_inode *ip, struct buffer_head *bh,
 
 	gfs2_quota_unhold(ip);
 out_alloc:
-	gfs2_qadata_put(ip);
 	return error;
 }
 
@@ -713,24 +711,23 @@ static int ea_alloc_skeleton(struct gfs2_inode *ip, struct gfs2_ea_request *er,
 			     unsigned int blks,
 			     ea_skeleton_call_t skeleton_call, void *private)
 {
-	struct gfs2_qadata *qa;
 	struct buffer_head *dibh;
 	int error;
 
-	qa = gfs2_qadata_get(ip);
-	if (!qa)
-		return -ENOMEM;
+	error = gfs2_rindex_update(GFS2_SB(&ip->i_inode));
+	if (error)
+		return error;
 
 	error = gfs2_quota_lock_check(ip);
 	if (error)
-		goto out;
+		return error;
 
 	error = gfs2_inplace_reserve(ip, blks);
 	if (error)
 		goto out_gunlock_q;
 
 	error = gfs2_trans_begin(GFS2_SB(&ip->i_inode),
-				 blks + gfs2_rg_blocks(ip) +
+				 blks + gfs2_rg_blocks(ip, blks) +
 				 RES_DINODE + RES_STATFS + RES_QUOTA, 0);
 	if (error)
 		goto out_ipres;
@@ -753,8 +750,6 @@ out_ipres:
 	gfs2_inplace_release(ip);
 out_gunlock_q:
 	gfs2_quota_unlock(ip);
-out:
-	gfs2_qadata_put(ip);
 	return error;
 }
 
@@ -1496,16 +1491,15 @@ out_gunlock:
 
 int gfs2_ea_dealloc(struct gfs2_inode *ip)
 {
-	struct gfs2_qadata *qa;
 	int error;
 
-	qa = gfs2_qadata_get(ip);
-	if (!qa)
-		return -ENOMEM;
+	error = gfs2_rindex_update(GFS2_SB(&ip->i_inode));
+	if (error)
+		return error;
 
 	error = gfs2_quota_hold(ip, NO_QUOTA_CHANGE, NO_QUOTA_CHANGE);
 	if (error)
-		goto out_alloc;
+		return error;
 
 	error = ea_foreach(ip, ea_dealloc_unstuffed, NULL);
 	if (error)
@@ -1521,8 +1515,6 @@ int gfs2_ea_dealloc(struct gfs2_inode *ip)
 
 out_quota:
 	gfs2_quota_unhold(ip);
-out_alloc:
-	gfs2_qadata_put(ip);
 	return error;
 }
 

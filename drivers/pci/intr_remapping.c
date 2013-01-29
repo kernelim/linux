@@ -709,10 +709,11 @@ int __init enable_intr_remapping(void)
 
 	if (x2apic_supported()) {
 		eim = !dmar_x2apic_optout();
-		printk(KERN_WARNING
-			   "Your BIOS has requested that x2apic be disabled.\n"
-			   "This will leave your machine vulnerable to irq-injection attacks.\n"
-			   "Use 'intremap=no_x2apic_optout' to override BIOS request.\n");
+		if (!eim)
+			printk(KERN_WARNING
+			       "Your BIOS has requested that x2apic be disabled.\n"
+			       "This will leave your machine vulnerable to irq-injection attacks.\n"
+			       "Use 'intremap=no_x2apic_optout' to override BIOS request.\n");
 	}
 
 	for_each_drhd_unit(drhd) {

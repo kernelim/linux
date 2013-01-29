@@ -2520,12 +2520,6 @@ void sock_unregister(int family)
 static int __init sock_init(void)
 {
 	/*
-	 *      Initialize sock SLAB cache.
-	 */
-
-	sk_init();
-
-	/*
 	 *      Initialize skbuff SLAB cache
 	 */
 	skb_init();

@@ -130,7 +130,7 @@ static int ls_recover(struct dlm_ls *ls, struct dlm_recover *rv)
 		 * Clear lkb's for departed nodes.
 		 */
 
-		dlm_purge_locks(ls);
+		dlm_recover_purge(ls);
 
 		/*
 		 * Get new master nodeid's for rsb's that were mastered on
@@ -220,7 +220,7 @@ static int ls_recover(struct dlm_ls *ls, struct dlm_recover *rv)
 		goto fail;
 	}
 
-	dlm_grant_after_purge(ls);
+	dlm_recover_grant(ls);
 
 	dlm_astd_wake();
 

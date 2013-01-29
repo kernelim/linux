@@ -5,6 +5,7 @@
 #include <linux/spinlock.h>
 #include <linux/interrupt.h>
 #include <linux/hw_random.h>
+#include <linux/bcma/bcma.h>
 #include <linux/ssb/ssb.h>
 #include <net/mac80211.h>
 
@@ -190,6 +191,9 @@
 #define B43_BFH_BUCKBOOST		0x0020	/* has buck/booster */
 #define B43_BFH_FEM_BT			0x0040	/* has FEM and switch to share antenna
 						 * with bluetooth */
+#define B43_BFH_NOCBUCK			0x0080
+#define B43_BFH_PALDO			0x0200
+#define B43_BFH_EXTLNA_5GHZ		0x1000	/* has an external LNA (5GHz mode) */
 
 /* SPROM boardflags2_lo values */
 #define B43_BFL2_RXBB_INT_REG_DIS	0x0001	/* external RX BB regulator present */
@@ -203,6 +207,14 @@
 #define B43_BFL2_SKWRKFEM_BRD		0x0100	/* 4321mcm93 uses Skyworks FEM */
 #define B43_BFL2_SPUR_WAR		0x0200	/* has a workaround for clock-harmonic spurs */
 #define B43_BFL2_GPLL_WAR		0x0400	/* altenative G-band PLL settings implemented */
+#define B43_BFL2_SINGLEANT_CCK		0x1000
+#define B43_BFL2_2G_SPUR_WAR		0x2000
+
+/* SPROM boardflags2_hi values */
+#define B43_BFH2_GPLL_WAR2		0x0001
+#define B43_BFH2_IPALVLSHIFT_3P3	0x0002
+#define B43_BFH2_INTERNDET_TXIQCAL	0x0004
+#define B43_BFH2_XTALBUFOUTEN		0x0008
 
 /* GPIO register offset, in both ChipCommon and PCI core. */
 #define B43_GPIO_CONTROL		0x6c
@@ -666,6 +678,7 @@ struct b43_key {
 };
 
 /* SHM offsets to the QOS data structures for the 4 different queues. */
+#define B43_QOS_QUEUE_NUM	4
 #define B43_QOS_PARAMS(queue)	(B43_SHM_SH_EDCFQ + \
 				 (B43_NR_QOSPARAMS * sizeof(u16) * (queue)))
 #define B43_QOS_BACKGROUND	B43_QOS_PARAMS(0)
@@ -857,12 +870,9 @@ struct b43_wl {
 	 * handler, only. This basically is just the IRQ mask register. */
 	spinlock_t hardirq_lock;
 
-	/* The number of queues that were registered with the mac80211 subsystem
-	 * initially. This is a backup copy of hw->queues in case hw->queues has
-	 * to be dynamically lowered at runtime (Firmware does not support QoS).
-	 * hw->queues has to be restored to the original value before unregistering
-	 * from the mac80211 subsystem. */
-	u16 mac80211_initially_registered_queues;
+	/* Set this if we call ieee80211_register_hw() and check if we call
+	 * ieee80211_unregister_hw(). */
+	bool hw_registred;
 
 	/* We can only have one operating interface (802.11 core)
 	 * at a time. General information about this interface follows.
@@ -903,7 +913,7 @@ struct b43_wl {
 	struct work_struct beacon_update_trigger;
 
 	/* The current QOS parameters for the 4 queues. */
-	struct b43_qos_params qos_params[4];
+	struct b43_qos_params qos_params[B43_QOS_QUEUE_NUM];
 
 	/* Work for adjustment of the transmission power.
 	 * This is scheduled when we determine that the actual TX output
@@ -912,8 +922,15 @@ struct b43_wl {
 
 	/* Packet transmit work */
 	struct work_struct tx_work;
+
 	/* Queue of packets to be transmitted. */
-	struct sk_buff_head tx_queue;
+	struct sk_buff_head tx_queue[B43_QOS_QUEUE_NUM];
+
+	/* Flag that implement the queues stopping. */
+	bool tx_queue_stopped[B43_QOS_QUEUE_NUM];
+
+	/* firmware loading work */
+	struct work_struct firmware_load;
 
 	/* The device LEDs. */
 	struct b43_leds leds;
@@ -982,6 +999,12 @@ static inline void b43_write16(struct b43_wldev *dev, u16 offset, u16 value)
 	dev->dev->write16(dev->dev, offset, value);
 }
 
+static inline void b43_maskset16(struct b43_wldev *dev, u16 offset, u16 mask,
+				 u16 set)
+{
+	b43_write16(dev, offset, (b43_read16(dev, offset) & mask) | set);
+}
+
 static inline u32 b43_read32(struct b43_wldev *dev, u16 offset)
 {
 	return dev->dev->read32(dev->dev, offset);
@@ -990,6 +1013,12 @@ static inline u32 b43_read32(struct b43_wldev *dev, u16 offset)
 static inline void b43_write32(struct b43_wldev *dev, u16 offset, u32 value)
 {
 	dev->dev->write32(dev->dev, offset, value);
+}
+
+static inline void b43_maskset32(struct b43_wldev *dev, u16 offset, u32 mask,
+				 u32 set)
+{
+	b43_write32(dev, offset, (b43_read32(dev, offset) & mask) | set);
 }
 
 static inline void b43_block_read(struct b43_wldev *dev, void *buffer,

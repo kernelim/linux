@@ -298,6 +298,9 @@ struct amd_iommu {
 	/* Pointer to PCI device of this IOMMU */
 	struct pci_dev *dev;
 
+	/* Cache pdev to root device for resume quirks */
+	struct pci_dev *root_pdev;
+
 	/* physical address of MMIO space */
 	u64 mmio_phys;
 	/* virtual address of MMIO space */
@@ -305,6 +308,9 @@ struct amd_iommu {
 
 	/* capabilities of that IOMMU read from ACPI */
 	u32 cap;
+
+	/* flags read from acpi table */
+	u8 acpi_flags;
 
 	/*
 	 * Capability pointer. There could be more than one IOMMU per PCI

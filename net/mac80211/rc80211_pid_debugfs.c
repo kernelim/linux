@@ -13,6 +13,7 @@
 #include <linux/types.h>
 #include <linux/skbuff.h>
 #include <linux/slab.h>
+#include <linux/export.h>
 
 #include <net/mac80211.h>
 #include "rate.h"
@@ -206,6 +207,7 @@ static const struct file_operations rc_pid_fop_events = {
 	.poll = rate_control_pid_events_poll,
 	.open = rate_control_pid_events_open,
 	.release = rate_control_pid_events_release,
+	.llseek = noop_llseek,
 };
 
 void rate_control_pid_add_sta_debugfs(void *priv, void *priv_sta,

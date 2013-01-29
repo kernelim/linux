@@ -2,7 +2,7 @@
 #define _ASM_X86_KVM_PARA_H
 
 #include <linux/types.h>
-
+#include <asm/hyperv.h>
 /* This CPUID returns the signature 'KVMKVMKVM' in ebx, ecx, and edx.  It
  * should be used to determine that a VM is running under KVM.
  */
@@ -20,6 +20,7 @@
  */
 #define KVM_FEATURE_CLOCKSOURCE2        3
 #define KVM_FEATURE_STEAL_TIME		5
+#define KVM_FEATURE_PV_EOI		6
 
 /* The last 8 bits are used to indicate how to interpret the flags field
  * in pvclock structure. If no bits are set, all flags are ignored.
@@ -34,6 +35,7 @@
 #define MSR_KVM_WALL_CLOCK_NEW  0x4b564d00
 #define MSR_KVM_SYSTEM_TIME_NEW 0x4b564d01
 #define MSR_KVM_STEAL_TIME	0x4b564d03
+#define MSR_KVM_PV_EOI_EN      0x4b564d04
 
 struct kvm_steal_time {
 	__u64 steal;
@@ -74,12 +76,26 @@ struct kvm_mmu_op_release_pt {
 	__u64 pt_phys;
 };
 
+#define KVM_PV_EOI_BIT 0
+#define KVM_PV_EOI_MASK (0x1 << KVM_PV_EOI_BIT)
+#define KVM_PV_EOI_ENABLED KVM_PV_EOI_MASK
+#define KVM_PV_EOI_DISABLED 0x0
+
 #ifdef __KERNEL__
 #include <asm/processor.h>
 
 extern void kvmclock_init(void);
 extern void kvm_disable_steal_time(void);
+extern int kvm_register_clock(char *txt);
 
+#ifdef CONFIG_KVM_CLOCK
+bool kvm_check_and_clear_guest_paused(void);
+#else
+static inline bool kvm_check_and_clear_guest_paused(void)
+{
+	return false;
+}
+#endif /* CONFIG_KVMCLOCK */
 
 /* This instruction is vmcall.  On non-VT architectures, it will generate a
  * trap that we will then rewrite to the appropriate instruction.

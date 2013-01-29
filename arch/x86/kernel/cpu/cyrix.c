@@ -170,7 +170,6 @@ static void __cpuinit early_init_cyrix(struct cpuinfo_x86 *c)
 {
 	unsigned char dir0, dir0_msn, dir1 = 0;
 
-	mark_hardware_unsupported("Cyrix Processor");
 	__do_cyrix_devid(&dir0, &dir1);
 	dir0_msn = dir0 >> 4; /* identifies CPU "family"   */
 

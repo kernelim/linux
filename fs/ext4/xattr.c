@@ -483,7 +483,8 @@ ext4_xattr_release_block(handle_t *handle, struct inode *inode,
 		ea_bdebug(bh, "refcount now=0; freeing");
 		if (ce)
 			mb_cache_entry_free(ce);
-		ext4_free_blocks(handle, inode, bh->b_blocknr, 1, 1);
+		ext4_free_blocks(handle, inode, bh->b_blocknr, 1,
+				 EXT4_FREE_BLOCKS_METADATA);
 		get_bh(bh);
 		ext4_forget(handle, 1, inode, bh, bh->b_blocknr);
 	} else {
@@ -824,8 +825,8 @@ inserted:
 			 * i_delalloc_reserved_flag in ext4_mb_new_blocks
 			 */
 			down_read((&EXT4_I(inode)->i_data_sem));
-			block = ext4_new_meta_blocks(handle, inode,
-						  goal, NULL, &error);
+			block = ext4_new_meta_blocks(handle, inode, goal, 0,
+						     NULL, &error);
 			up_read((&EXT4_I(inode)->i_data_sem));
 			if (error)
 				goto cleanup;
@@ -838,7 +839,8 @@ inserted:
 			new_bh = sb_getblk(sb, block);
 			if (!new_bh) {
 getblk_failed:
-				ext4_free_blocks(handle, inode, block, 1, 1);
+				ext4_free_blocks(handle, inode, block, 1,
+						 EXT4_FREE_BLOCKS_METADATA);
 				error = -EIO;
 				goto cleanup;
 			}

@@ -143,7 +143,7 @@ struct cmn_registers {
 }  __attribute__((packed));
 
 static unsigned int hpwdt_nmi_decoding;
-static unsigned int allow_kdump;
+static unsigned int allow_kdump = 1;
 static unsigned int priority;		/* hpwdt at end of die_notify list */
 static unsigned int is_icru;
 static DEFINE_SPINLOCK(rom_lock);
@@ -433,16 +433,16 @@ static void hpwdt_start(void)
 {
 	reload = SECS_TO_TICKS(soft_margin);
 	iowrite16(reload, hpwdt_timer_reg);
-	iowrite16(0x85, hpwdt_timer_con);
+	iowrite8(0x85, hpwdt_timer_con);
 }
 
 static void hpwdt_stop(void)
 {
 	unsigned long data;
 
-	data = ioread16(hpwdt_timer_con);
+	data = ioread8(hpwdt_timer_con);
 	data &= 0xFE;
-	iowrite16(data, hpwdt_timer_con);
+	iowrite8(data, hpwdt_timer_con);
 }
 
 static void hpwdt_ping(void)
@@ -483,7 +483,8 @@ static int hpwdt_pretimeout(struct notifier_block *nb, unsigned long ulReason,
 	unsigned long rom_pl;
 	static int die_nmi_called;
 
-	if (ulReason != DIE_NMIUNKNOWN)
+	if ((ulReason != DIE_NMIUNKNOWN) && (ulReason != DIE_NMIMEMPARITY) &&
+	    (ulReason != DIE_NMIIOCHECK))
 		goto out;
 
 	if (!hpwdt_nmi_decoding)
@@ -823,6 +824,9 @@ static int __devinit hpwdt_init_one(struct pci_dev *dev,
 	}
 	hpwdt_timer_reg = pci_mem_addr + 0x70;
 	hpwdt_timer_con = pci_mem_addr + 0x72;
+
+	/* Make sure that timer is disabled until /dev/watchdog is opened */
+	hpwdt_stop();
 
 	/* Make sure that we have a valid soft_margin */
 	if (hpwdt_change_timer(soft_margin))

@@ -6,19 +6,17 @@
  */
 
 #include <linux/module.h>
+#include <linux/kprobes.h>
 #include "trace.h"
 
-/*
- * We can't use a size but a type in alloc_percpu()
- * So let's create a dummy type that matches the desired size
- */
-typedef struct {char buf[FTRACE_MAX_PROFILE_SIZE];} profile_buf_t;
 
-char		*trace_profile_buf;
+char *trace_profile_buf;
 EXPORT_SYMBOL_GPL(trace_profile_buf);
 
-char		*trace_profile_buf_nmi;
+char *trace_profile_buf_nmi;
 EXPORT_SYMBOL_GPL(trace_profile_buf_nmi);
+
+typedef typeof(char [FTRACE_MAX_PROFILE_SIZE]) perf_trace_t ;
 
 /* Count the events in use (per event id, not per instance) */
 static int	total_profile_count;
@@ -32,13 +30,13 @@ static int ftrace_profile_enable_event(struct ftrace_event_call *event)
 		return 0;
 
 	if (!total_profile_count) {
-		buf = (char *)alloc_percpu(profile_buf_t);
+		buf = (char *)alloc_percpu(perf_trace_t);
 		if (!buf)
 			goto fail_buf;
 
 		rcu_assign_pointer(trace_profile_buf, buf);
 
-		buf = (char *)alloc_percpu(profile_buf_t);
+		buf = (char *)alloc_percpu(perf_trace_t);
 		if (!buf)
 			goto fail_buf_nmi;
 
@@ -123,3 +121,47 @@ void ftrace_profile_disable(int event_id)
 	}
 	mutex_unlock(&event_mutex);
 }
+
+__kprobes void *ftrace_perf_buf_prepare(int size, unsigned short type,
+					int *rctxp, unsigned long *irq_flags)
+{
+	struct trace_entry *entry;
+	char *trace_buf, *raw_data;
+	int pc, cpu;
+
+	pc = preempt_count();
+
+	/* Protect the per cpu buffer, begin the rcu read side */
+	local_irq_save(*irq_flags);
+
+	*rctxp = perf_swevent_get_recursion_context();
+	if (*rctxp < 0)
+		goto err_recursion;
+
+	cpu = smp_processor_id();
+
+	if (in_nmi())
+		trace_buf = rcu_dereference(trace_profile_buf_nmi);
+	else
+		trace_buf = rcu_dereference(trace_profile_buf);
+
+	if (!trace_buf)
+		goto err;
+
+	raw_data = per_cpu_ptr(trace_buf, cpu);
+
+	/* zero the dead bytes from align to not leak stack to user */
+	*(u64 *)(&raw_data[size - sizeof(u64)]) = 0ULL;
+
+	entry = (struct trace_entry *)raw_data;
+	tracing_generic_entry_update(entry, *irq_flags, pc);
+	entry->type = type;
+
+	return raw_data;
+err:
+	perf_swevent_put_recursion_context(*rctxp);
+err_recursion:
+	local_irq_restore(*irq_flags);
+	return NULL;
+}
+EXPORT_SYMBOL_GPL(ftrace_perf_buf_prepare);

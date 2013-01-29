@@ -22,6 +22,9 @@
 #include "net-sysfs.h"
 
 #ifdef CONFIG_SYSFS
+static void remove_queue_kobjects(struct net_device *net);
+static int register_queue_kobjects(struct net_device *net);
+
 static const char fmt_hex[] = "%#x\n";
 static const char fmt_long_hex[] = "%#lx\n";
 static const char fmt_dec[] = "%d\n";
@@ -167,8 +170,21 @@ static ssize_t show_duplex(struct device *dev,
 	    netdev->ethtool_ops->get_settings) {
 		struct ethtool_cmd cmd = { ETHTOOL_GSET };
 
-		if (!netdev->ethtool_ops->get_settings(netdev, &cmd))
-			ret = sprintf(buf, "%s\n", cmd.duplex ? "full" : "half");
+		if (!netdev->ethtool_ops->get_settings(netdev, &cmd)) {
+			const char *duplex;
+			switch (cmd.duplex) {
+			case DUPLEX_HALF:
+				duplex = "half";
+				break;
+			case DUPLEX_FULL:
+				duplex = "full";
+				break;
+			default:
+				duplex = "unknown";
+				break;
+			}
+			ret = sprintf(buf, "%s\n", duplex);
+		}
 	}
 	rtnl_unlock();
 	return ret;
@@ -607,15 +623,15 @@ static ssize_t show_rps_dev_flow_table_cnt(struct netdev_rx_queue *queue,
 					   char *buf)
 {
 	struct rps_dev_flow_table *flow_table;
-	unsigned int val = 0;
+	unsigned long val = 0;
 
 	rcu_read_lock();
 	flow_table = rcu_dereference(queue->rps_flow_table);
 	if (flow_table)
-		val = flow_table->mask + 1;
+		val = (unsigned long)flow_table->mask + 1;
 	rcu_read_unlock();
 
-	return sprintf(buf, "%u\n", val);
+	return sprintf(buf, "%lu\n", val);
 }
 
 static void rps_dev_flow_table_release_work(struct work_struct *work)
@@ -639,7 +655,7 @@ ssize_t store_rps_dev_flow_table_cnt(struct netdev_rx_queue *queue,
 				     struct rx_queue_attribute *attr,
 				     const char *buf, size_t len)
 {
-	unsigned int count;
+	unsigned long mask, count;
 	char *endp;
 	struct rps_dev_flow_table *table, *old_table;
 	static DEFINE_SPINLOCK(rps_dev_flow_lock);
@@ -652,20 +668,33 @@ ssize_t store_rps_dev_flow_table_cnt(struct netdev_rx_queue *queue,
 		return -EINVAL;
 
 	if (count) {
-		int i;
-
-		if (count > 1<<30) {
+		mask = count - 1;
+		/* mask = roundup_pow_of_two(count) - 1;
+		 * without overflows...
+		 */
+		while ((mask | (mask >> 1)) != mask)
+			mask |= (mask >> 1);
+		/* On 64 bit arches, must check mask fits in table->mask (u32),
+		 * and on 32bit arches, must check RPS_DEV_FLOW_TABLE_SIZE(mask + 1)
+		 * doesnt overflow.
+		 */
+#if BITS_PER_LONG > 32
+		if (mask > (unsigned long)(u32)mask)
+			return -EINVAL;
+#else
+		if (mask > (ULONG_MAX - RPS_DEV_FLOW_TABLE_SIZE(1))
+				/ sizeof(struct rps_dev_flow)) {
 			/* Enforce a limit to prevent overflow */
 			return -EINVAL;
 		}
-		count = roundup_pow_of_two(count);
-		table = vmalloc(RPS_DEV_FLOW_TABLE_SIZE(count));
+#endif
+		table = vmalloc(RPS_DEV_FLOW_TABLE_SIZE(mask + 1));
 		if (!table)
 			return -ENOMEM;
 
-		table->mask = count - 1;
-		for (i = 0; i < count; i++)
-			table->flows[i].cpu = RPS_NO_CPU;
+		table->mask = mask;
+		for (count = 0; count <= mask; count++)
+			table->flows[count].cpu = RPS_NO_CPU;
 	} else
 		table = NULL;
 
@@ -1070,11 +1099,37 @@ static int netdev_queue_add_kobject(struct net_device *net, int index)
 int
 netdev_queue_update_kobjects(struct net_device *net, int old_num, int new_num)
 {
+#ifdef CONFIG_SYSFS
+        int i;
+        int error = 0;
+
+        for (i = old_num; i < new_num; i++) {
+                error = netdev_queue_add_kobject(net, i);
+                if (error) {
+                        new_num = old_num;
+                        break;
+                }
+        }
+
+        while (--i >= new_num) {
+		kobject_put(&netdev_extended(net)->_tx_ext[i].kobj);
+        }
+
+        return error;
+#else
+        return 0;
+#endif /* CONFIG_SYSFS */
+}
+
+int
+net_rx_queue_update_kobjects(struct net_device *net, int old_num, int new_num)
+{
 	int i;
 	int error = 0;
+	struct netdev_rps_info *rpinfo = &netdev_extended(net)->rps_data;
 
 	for (i = old_num; i < new_num; i++) {
-		error = netdev_queue_add_kobject(net, i);
+		error = rx_queue_add_kobject(net, i);
 		if (error) {
 			new_num = old_num;
 			break;
@@ -1082,50 +1137,9 @@ netdev_queue_update_kobjects(struct net_device *net, int old_num, int new_num)
 	}
 
 	while (--i >= new_num)
-		kobject_put(&netdev_extended(net)->_tx_ext[i].kobj);
+		kobject_put(&rpinfo->_rx[i].kobj);
 
 	return error;
-}
-
-static int register_queue_kobjects(struct net_device *net)
-{
-	int error = 0, txq = 0;
-	int i;
-
-	netdev_extended(net)->rps_data.queues_kset =
-	    kset_create_and_add("queues", NULL, &net->dev.kobj);
-	if (!netdev_extended(net)->rps_data.queues_kset)
-		return -ENOMEM;
-	for (i = 0; i < netdev_extended(net)->rps_data.num_rx_queues; i++) {
-		error = rx_queue_add_kobject(net, i);
-		if (error)
-			goto error;
-	}
-
-	error = netdev_queue_update_kobjects(net, 0,
-					     net->real_num_tx_queues);
-	if (error)
-		goto error;
-	txq = net->real_num_tx_queues;
-
-	return 0;
-
-error:
-	netdev_queue_update_kobjects(net, txq, 0);
-	while (--i >= 0)
-		kobject_put(&netdev_extended(net)->rps_data._rx[i].kobj);
-
-	return error;
-}
-
-static void remove_queue_kobjects(struct net_device *net)
-{
-	int i;
-
-	for (i = 0; i < netdev_extended(net)->rps_data.num_rx_queues; i++)
-		kobject_put(&netdev_extended(net)->rps_data._rx[i].kobj);
-	netdev_queue_update_kobjects(net, net->real_num_tx_queues, 0);
-	kset_unregister(netdev_extended(net)->rps_data.queues_kset);
 }
 
 #endif /* CONFIG_SYSFS */
@@ -1233,6 +1247,60 @@ int netdev_register_kobject(struct net_device *net)
 		return error;
 	}
 
+	return error;
+}
+
+static void remove_queue_kobjects(struct net_device *net)
+{
+	int real_rx = 0, real_tx = 0;
+	struct netdev_rps_info *rpinfo = &netdev_extended(net)->rps_data;
+
+
+#ifdef CONFIG_RPS
+	real_rx = netdev_extended(net)->real_num_rx_queues;
+#endif
+	real_tx = net->real_num_tx_queues;
+
+	net_rx_queue_update_kobjects(net, real_rx, 0);
+	netdev_queue_update_kobjects(net, real_tx, 0);
+#ifdef CONFIG_SYSFS
+	kset_unregister(rpinfo->queues_kset);
+#endif
+}
+
+static int register_queue_kobjects(struct net_device *net)
+{
+	int error = 0, txq = 0, rxq = 0, real_rx = 0, real_tx = 0;
+	struct netdev_rps_info *rpinfo = &netdev_extended(net)->rps_data;
+
+
+#ifdef CONFIG_SYSFS
+	rpinfo->queues_kset = kset_create_and_add("queues",
+	   NULL, &net->dev.kobj);
+	if (!rpinfo->queues_kset)
+		return -ENOMEM;
+#endif
+
+#ifdef CONFIG_RPS
+	real_rx = netdev_extended(net)->real_num_rx_queues;
+#endif
+	real_tx = net->real_num_tx_queues;
+
+	error = net_rx_queue_update_kobjects(net, 0, real_rx);
+	if (error)
+		goto error;
+	rxq = real_rx;
+
+	error = netdev_queue_update_kobjects(net, 0, real_tx);
+	if (error)
+		goto error;
+	txq = real_tx;
+
+	return 0;
+
+error:
+	netdev_queue_update_kobjects(net, txq, 0);
+	net_rx_queue_update_kobjects(net, rxq, 0);
 	return error;
 }
 

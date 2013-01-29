@@ -1,7 +1,7 @@
 /****************************************************************************
  * Driver for Solarflare Solarstorm network controllers and boards
  * Copyright 2005-2006 Fen Systems Ltd.
- * Copyright 2006-2009 Solarflare Communications Inc.
+ * Copyright 2006-2010 Solarflare Communications Inc.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published
@@ -19,7 +19,6 @@
 #include "net_driver.h"
 #include "bitfield.h"
 #include "efx.h"
-#include "mac.h"
 #include "spi.h"
 #include "nic.h"
 #include "regs.h"
@@ -89,7 +88,7 @@ static int falcon_getscl(void *data)
 	return EFX_OWORD_FIELD(reg, FRF_AB_GPIO0_IN);
 }
 
-static struct i2c_algo_bit_data falcon_i2c_bit_operations = {
+static const struct i2c_algo_bit_data falcon_i2c_bit_operations = {
 	.setsda		= falcon_setsda,
 	.setscl		= falcon_setscl,
 	.getsda		= falcon_getsda,
@@ -175,27 +174,24 @@ irqreturn_t falcon_legacy_interrupt_a1(int irq, void *dev_id)
 		   "IRQ %d on CPU %d status " EFX_OWORD_FMT "\n",
 		   irq, raw_smp_processor_id(), EFX_OWORD_VAL(*int_ker));
 
+	/* Check to see if we have a serious error condition */
+	syserr = EFX_OWORD_FIELD(*int_ker, FSF_AZ_NET_IVEC_FATAL_INT);
+	if (unlikely(syserr))
+		return efx_nic_fatal_interrupt(efx);
+
 	/* Determine interrupting queues, clear interrupt status
 	 * register and acknowledge the device interrupt.
 	 */
 	BUILD_BUG_ON(FSF_AZ_NET_IVEC_INT_Q_WIDTH > EFX_MAX_CHANNELS);
 	queues = EFX_OWORD_FIELD(*int_ker, FSF_AZ_NET_IVEC_INT_Q);
-
-	/* Check to see if we have a serious error condition */
-	if (queues & (1U << efx->fatal_irq_level)) {
-		syserr = EFX_OWORD_FIELD(*int_ker, FSF_AZ_NET_IVEC_FATAL_INT);
-		if (unlikely(syserr))
-			return efx_nic_fatal_interrupt(efx);
-	}
-
 	EFX_ZERO_OWORD(*int_ker);
 	wmb(); /* Ensure the vector is cleared before interrupt ack */
 	falcon_irq_ack_a1(efx);
 
 	if (queues & 1)
-		efx_schedule_channel(efx_get_channel(efx, 0));
+		efx_schedule_channel_irq(efx_get_channel(efx, 0));
 	if (queues & 2)
-		efx_schedule_channel(efx_get_channel(efx, 1));
+		efx_schedule_channel_irq(efx_get_channel(efx, 1));
 	return IRQ_HANDLED;
 }
 /**************************************************************************
@@ -536,7 +532,7 @@ void falcon_reconfigure_mac_wrapper(struct efx_nic *efx)
 	efx_oword_t reg;
 	int link_speed, isolate;
 
-	isolate = (efx->reset_pending != RESET_TYPE_NONE);
+	isolate = !!ACCESS_ONCE(efx->reset_pending);
 
 	switch (link_state->speed) {
 	case 10000: link_speed = 3; break;
@@ -608,10 +604,10 @@ static void falcon_stats_complete(struct efx_nic *efx)
 	if (!nic_data->stats_pending)
 		return;
 
-	nic_data->stats_pending = 0;
+	nic_data->stats_pending = false;
 	if (*nic_data->stats_dma_done == FALCON_STATS_DONE) {
 		rmb(); /* read the done flag before the stats */
-		efx->mac_op->update_stats(efx);
+		falcon_update_stats_xmac(efx);
 	} else {
 		netif_err(efx, hw, efx->net_dev,
 			  "timed out waiting for statistics\n");
@@ -668,7 +664,7 @@ static int falcon_reconfigure_port(struct efx_nic *efx)
 	falcon_reset_macs(efx);
 
 	efx->phy_op->reconfigure(efx);
-	rc = efx->mac_op->reconfigure(efx);
+	rc = falcon_reconfigure_xmac(efx);
 	BUG_ON(rc);
 
 	falcon_start_nic_stats(efx);
@@ -692,7 +688,7 @@ static int falcon_gmii_wait(struct efx_nic *efx)
 	efx_oword_t md_stat;
 	int count;
 
-	/* wait upto 50ms - taken max from datasheet */
+	/* wait up to 50ms - taken max from datasheet */
 	for (count = 0; count < 5000; count++) {
 		efx_reado(efx, &md_stat, FR_AB_MD_STAT);
 		if (EFX_OWORD_FIELD(md_stat, FRF_AB_MD_BSY) == 0) {
@@ -1173,7 +1169,7 @@ static void falcon_monitor(struct efx_nic *efx)
 		falcon_deconfigure_mac_wrapper(efx);
 
 		falcon_reset_macs(efx);
-		rc = efx->mac_op->reconfigure(efx);
+		rc = falcon_reconfigure_xmac(efx);
 		BUG_ON(rc);
 
 		falcon_start_nic_stats(efx);
@@ -1221,7 +1217,7 @@ static int falcon_reset_sram(struct efx_nic *efx)
 
 			return 0;
 		}
-	} while (++count < 20);	/* wait upto 0.4 sec */
+	} while (++count < 20);	/* wait up to 0.4 sec */
 
 	netif_err(efx, hw, efx->net_dev, "timed out waiting for SRAM reset\n");
 	return -ETIMEDOUT;
@@ -1292,6 +1288,12 @@ static int falcon_probe_nvconfig(struct efx_nic *efx)
 out:
 	kfree(nvconfig);
 	return rc;
+}
+
+static void falcon_dimension_resources(struct efx_nic *efx)
+{
+	efx->rx_dc_base = 0x20000;
+	efx->tx_dc_base = 0x26000;
 }
 
 /* Probe all SPI devices on the NIC */
@@ -1426,6 +1428,8 @@ static int falcon_probe_nic(struct efx_nic *efx)
 		goto fail5;
 	}
 
+	efx->timer_quantum_ns = 4968; /* 621 cycles */
+
 	/* Initialise I2C adapter */
 	board = falcon_board(efx);
 	board->i2c_adap.owner = THIS_MODULE;
@@ -1478,36 +1482,26 @@ static void falcon_init_rx_cfg(struct efx_nic *efx)
 	/* RX control FIFO thresholds (32 entries) */
 	const unsigned ctrl_xon_thr = 20;
 	const unsigned ctrl_xoff_thr = 25;
-	/* RX data FIFO thresholds (256-byte units; size varies) */
-	int data_xon_thr = efx_nic_rx_xon_thresh >> 8;
-	int data_xoff_thr = efx_nic_rx_xoff_thresh >> 8;
 	efx_oword_t reg;
 
 	efx_reado(efx, &reg, FR_AZ_RX_CFG);
 	if (efx_nic_rev(efx) <= EFX_REV_FALCON_A1) {
 		/* Data FIFO size is 5.5K */
-		if (data_xon_thr < 0)
-			data_xon_thr = 512 >> 8;
-		if (data_xoff_thr < 0)
-			data_xoff_thr = 2048 >> 8;
 		EFX_SET_OWORD_FIELD(reg, FRF_AA_RX_DESC_PUSH_EN, 0);
 		EFX_SET_OWORD_FIELD(reg, FRF_AA_RX_USR_BUF_SIZE,
 				    huge_buf_size);
-		EFX_SET_OWORD_FIELD(reg, FRF_AA_RX_XON_MAC_TH, data_xon_thr);
-		EFX_SET_OWORD_FIELD(reg, FRF_AA_RX_XOFF_MAC_TH, data_xoff_thr);
+		EFX_SET_OWORD_FIELD(reg, FRF_AA_RX_XON_MAC_TH, 512 >> 8);
+		EFX_SET_OWORD_FIELD(reg, FRF_AA_RX_XOFF_MAC_TH, 2048 >> 8);
 		EFX_SET_OWORD_FIELD(reg, FRF_AA_RX_XON_TX_TH, ctrl_xon_thr);
 		EFX_SET_OWORD_FIELD(reg, FRF_AA_RX_XOFF_TX_TH, ctrl_xoff_thr);
 	} else {
 		/* Data FIFO size is 80K; register fields moved */
-		if (data_xon_thr < 0)
-			data_xon_thr = 27648 >> 8; /* ~3*max MTU */
-		if (data_xoff_thr < 0)
-			data_xoff_thr = 54272 >> 8; /* ~80Kb - 3*max MTU */
 		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_DESC_PUSH_EN, 0);
 		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_USR_BUF_SIZE,
 				    huge_buf_size);
-		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_XON_MAC_TH, data_xon_thr);
-		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_XOFF_MAC_TH, data_xoff_thr);
+		/* Send XON and XOFF at ~3 * max MTU away from empty/full */
+		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_XON_MAC_TH, 27648 >> 8);
+		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_XOFF_MAC_TH, 54272 >> 8);
 		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_XON_TX_TH, ctrl_xon_thr);
 		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_XOFF_TX_TH, ctrl_xoff_thr);
 		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_INGR_EN, 1);
@@ -1515,9 +1509,7 @@ static void falcon_init_rx_cfg(struct efx_nic *efx)
 		/* Enable hash insertion. This is broken for the
 		 * 'Falcon' hash so also select Toeplitz TCP/IPv4 and
 		 * IPv4 hashes. */
-#if 0 /* RHEL: we don't want to receive the hash value */
 		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_HASH_INSRT_HDR, 1);
-#endif
 		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_HASH_ALG, 1);
 		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_IP_HASH, 1);
 	}
@@ -1642,7 +1634,7 @@ static void falcon_update_nic_stats(struct efx_nic *efx)
 	    *nic_data->stats_dma_done == FALCON_STATS_DONE) {
 		nic_data->stats_pending = false;
 		rmb(); /* read the done flag before the stats */
-		efx->mac_op->update_stats(efx);
+		falcon_update_stats_xmac(efx);
 	}
 }
 
@@ -1715,10 +1707,11 @@ static int falcon_set_wol(struct efx_nic *efx, u32 type)
  **************************************************************************
  */
 
-struct efx_nic_type falcon_a1_nic_type = {
+const struct efx_nic_type falcon_a1_nic_type = {
 	.probe = falcon_probe_nic,
 	.remove = falcon_remove_nic,
 	.init = falcon_init_nic,
+	.dimension_resources = falcon_dimension_resources,
 	.fini = efx_port_dummy_op_void,
 	.monitor = falcon_monitor,
 	.reset = falcon_reset_hw,
@@ -1731,13 +1724,13 @@ struct efx_nic_type falcon_a1_nic_type = {
 	.stop_stats = falcon_stop_nic_stats,
 	.set_id_led = falcon_set_id_led,
 	.push_irq_moderation = falcon_push_irq_moderation,
-	.push_multicast_hash = falcon_push_multicast_hash,
 	.reconfigure_port = falcon_reconfigure_port,
+	.reconfigure_mac = falcon_reconfigure_xmac,
+	.check_mac_fault = falcon_xmac_check_fault,
 	.get_wol = falcon_get_wol,
 	.set_wol = falcon_set_wol,
 	.resume_wol = efx_port_dummy_op_void,
 	.test_nvram = falcon_test_nvram,
-	.default_mac_ops = &falcon_xmac_operations,
 
 	.revision = EFX_REV_FALCON_A1,
 	.mem_map_size = 0x20000,
@@ -1750,16 +1743,16 @@ struct efx_nic_type falcon_a1_nic_type = {
 	.rx_buffer_padding = 0x24,
 	.max_interrupt_mode = EFX_INT_MODE_MSI,
 	.phys_addr_channels = 4,
-	.tx_dc_base = 0x130000,
-	.rx_dc_base = 0x100000,
+	.timer_period_max =  1 << FRF_AB_TC_TIMER_VAL_WIDTH,
 	.offload_features = NETIF_F_IP_CSUM,
 	.reset_world_flags = ETH_RESET_IRQ,
 };
 
-struct efx_nic_type falcon_b0_nic_type = {
+const struct efx_nic_type falcon_b0_nic_type = {
 	.probe = falcon_probe_nic,
 	.remove = falcon_remove_nic,
 	.init = falcon_init_nic,
+	.dimension_resources = falcon_dimension_resources,
 	.fini = efx_port_dummy_op_void,
 	.monitor = falcon_monitor,
 	.reset = falcon_reset_hw,
@@ -1772,14 +1765,14 @@ struct efx_nic_type falcon_b0_nic_type = {
 	.stop_stats = falcon_stop_nic_stats,
 	.set_id_led = falcon_set_id_led,
 	.push_irq_moderation = falcon_push_irq_moderation,
-	.push_multicast_hash = falcon_push_multicast_hash,
 	.reconfigure_port = falcon_reconfigure_port,
+	.reconfigure_mac = falcon_reconfigure_xmac,
+	.check_mac_fault = falcon_xmac_check_fault,
 	.get_wol = falcon_get_wol,
 	.set_wol = falcon_set_wol,
 	.resume_wol = efx_port_dummy_op_void,
 	.test_registers = falcon_b0_test_registers,
 	.test_nvram = falcon_test_nvram,
-	.default_mac_ops = &falcon_xmac_operations,
 
 	.revision = EFX_REV_FALCON_B0,
 	/* Map everything up to and including the RSS indirection
@@ -1794,14 +1787,14 @@ struct efx_nic_type falcon_b0_nic_type = {
 	.evq_ptr_tbl_base = FR_BZ_EVQ_PTR_TBL,
 	.evq_rptr_tbl_base = FR_BZ_EVQ_RPTR,
 	.max_dma_mask = DMA_BIT_MASK(FSF_AZ_TX_KER_BUF_ADDR_WIDTH),
+	.rx_buffer_hash_size = 0x10,
 	.rx_buffer_padding = 0,
 	.max_interrupt_mode = EFX_INT_MODE_MSIX,
 	.phys_addr_channels = 32, /* Hardware limit is 64, but the legacy
 				   * interrupt handler only supports 32
 				   * channels */
-	.tx_dc_base = 0x130000,
-	.rx_dc_base = 0x100000,
-	.offload_features = NETIF_F_IP_CSUM,
+	.timer_period_max =  1 << FRF_AB_TC_TIMER_VAL_WIDTH,
+	.offload_features = NETIF_F_IP_CSUM | NETIF_F_RXHASH | NETIF_F_NTUPLE,
 	.reset_world_flags = ETH_RESET_IRQ,
 };
 

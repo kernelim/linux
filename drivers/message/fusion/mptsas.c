@@ -1087,7 +1087,13 @@ mptsas_target_reset(MPT_ADAPTER *ioc, u8 channel, u8 id)
 static void
 mptsas_block_io_sdev(struct scsi_device *sdev, void *data)
 {
-	scsi_device_set_state(sdev, SDEV_BLOCK);
+	scsi_internal_device_block(sdev);
+}
+
+static void
+mptsas_ublock_io_sdev(struct scsi_device *sdev, void *data)
+{
+	scsi_internal_device_unblock(sdev);
 }
 
 static void
@@ -1095,6 +1101,13 @@ mptsas_block_io_starget(struct scsi_target *starget)
 {
 	if (starget)
 		starget_for_each_device(starget, NULL, mptsas_block_io_sdev);
+}
+
+static void
+mptsas_ublock_io_starget(struct scsi_target *starget)
+{
+	if (starget)
+		starget_for_each_device(starget, NULL, mptsas_ublock_io_sdev);
 }
 
 /**
@@ -1501,6 +1514,7 @@ mptsas_del_end_device(MPT_ADAPTER *ioc, struct mptsas_phyinfo *phy_info)
 	char *ds = NULL;
 	u8 fw_id;
 	u64 sas_address;
+	VirtTarget	*vtarget;
 
 	if (!phy_info)
 		return;
@@ -1543,6 +1557,13 @@ mptsas_del_end_device(MPT_ADAPTER *ioc, struct mptsas_phyinfo *phy_info)
 	    "sas_addr 0x%llx\n", ioc->name, ds, phy_info->attached.channel,
 	    phy_info->attached.id, phy_info->attached.phy_id,
 	    (unsigned long long) sas_address);
+
+	vtarget = mptsas_find_vtarget(ioc,
+			 phy_info->attached.channel, phy_info->attached.id);
+	if (vtarget && vtarget->deleted == 1) {
+		mptsas_ublock_io_starget(vtarget->starget);
+		vtarget->deleted = 0; /* unblock IO */
+	}
 
 	port = mptsas_get_port(phy_info);
 	if (!port) {

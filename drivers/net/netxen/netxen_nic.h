@@ -53,8 +53,8 @@
 
 #define _NETXEN_NIC_LINUX_MAJOR 4
 #define _NETXEN_NIC_LINUX_MINOR 0
-#define _NETXEN_NIC_LINUX_SUBVERSION 78
-#define NETXEN_NIC_LINUX_VERSIONID  "4.0.78"
+#define _NETXEN_NIC_LINUX_SUBVERSION 80
+#define NETXEN_NIC_LINUX_VERSIONID  "4.0.80"
 
 #define NETXEN_VERSION_CODE(a, b, c)	(((a) << 24) + ((b) << 16) + (c))
 #define _major(v)	(((v) >> 24) & 0xff)
@@ -419,6 +419,8 @@ struct rcv_desc {
 	(((sts_data) >> 52) & 0x1)
 #define netxen_get_lro_sts_seq_number(sts_data)		\
 	((sts_data) & 0x0FFFFFFFF)
+#define netxen_get_lro_sts_mss(sts_data1)		\
+	((sts_data1 >> 32) & 0x0FFFF)
 
 
 struct status_desc {
@@ -525,7 +527,7 @@ struct uni_data_desc{
 #define NX_P2_MN_ROMIMAGE_NAME		"nxromimg.bin"
 #define NX_P3_CT_ROMIMAGE_NAME		"nx3fwct.bin"
 #define NX_P3_MN_ROMIMAGE_NAME		"nx3fwmn.bin"
-#define NX_UNIFIED_ROMIMAGE_NAME	"phanfw-4.0.579.bin"
+#define NX_UNIFIED_ROMIMAGE_NAME	"phanfw-4.0.588.bin"
 #define NX_FLASH_ROMIMAGE_NAME		"flash"
 
 extern char netxen_nic_driver_name[];
@@ -794,6 +796,7 @@ struct netxen_cmd_args {
 #define NX_CAP0_JUMBO_CONTIGUOUS	NX_CAP_BIT(0, 7)
 #define NX_CAP0_LRO_CONTIGUOUS		NX_CAP_BIT(0, 8)
 #define NX_CAP0_HW_LRO			NX_CAP_BIT(0, 10)
+#define NX_CAP0_HW_LRO_MSS		NX_CAP_BIT(0, 21)
 
 /*
  * Context state
@@ -1068,6 +1071,8 @@ typedef struct {
 #define NX_FW_CAPABILITY_FVLANTX		(1 << 9)
 #define NX_FW_CAPABILITY_HW_LRO			(1 << 10)
 #define NX_FW_CAPABILITY_GBE_LINK_CFG		(1 << 11)
+#define NX_FW_CAPABILITY_MORE_CAPS		(1 << 31)
+#define NX_FW_CAPABILITY_2_LRO_MAX_TCP_SEG	(1 << 2)
 
 /* module types */
 #define LINKEVENT_MODULE_NOT_PRESENT			1
@@ -1150,6 +1155,7 @@ typedef struct {
 #define NETXEN_NIC_BRIDGE_ENABLED       0X10
 #define NETXEN_NIC_DIAG_ENABLED		0x20
 #define NETXEN_FW_RESET_OWNER           0x40
+#define NETXEN_FW_MSS_CAP	        0x80
 #define NETXEN_IS_MSI_FAMILY(adapter) \
 	((adapter)->flags & (NETXEN_NIC_MSI_ENABLED | NETXEN_NIC_MSIX_ENABLED))
 
@@ -1195,6 +1201,9 @@ typedef struct {
 #define NX_DISABLE_FW_DUMP              0xbadfeed
 #define NX_FORCE_FW_RESET               0xdeaddead
 
+
+/* Fw dump levels */
+static const u32 FW_DUMP_LEVELS[] = { 0x3, 0x7, 0xf, 0x1f, 0x3f, 0x7f, 0xff };
 
 /* Flash read/write address */
 #define NX_FW_DUMP_REG1         0x00130060
@@ -1783,7 +1792,7 @@ int netxen_process_rcv_ring(struct nx_host_sds_ring *sds_ring, int max);
 void netxen_p3_free_mac_list(struct netxen_adapter *adapter);
 int netxen_config_intr_coalesce(struct netxen_adapter *adapter);
 int netxen_config_rss(struct netxen_adapter *adapter, int enable);
-int netxen_config_ipaddr(struct netxen_adapter *adapter, u32 ip, int cmd);
+int netxen_config_ipaddr(struct netxen_adapter *adapter, __be32 ip, int cmd);
 int netxen_linkevent_request(struct netxen_adapter *adapter, int enable);
 void netxen_advert_link_change(struct netxen_adapter *adapter, int linkup);
 void netxen_pci_camqm_read_2M(struct netxen_adapter *, u64, u64 *);
@@ -1813,6 +1822,13 @@ struct netxen_brdinfo {
 	int brdtype;	/* type of board */
 	long ports;		/* max no of physical ports */
 	char short_name[NETXEN_MAX_SHORT_NAME];
+};
+
+struct netxen_dimm_cfg {
+	u8 presence;
+	u8 mem_type;
+	u8 dimm_type;
+	u32 size;
 };
 
 static const struct netxen_brdinfo netxen_boards[] = {

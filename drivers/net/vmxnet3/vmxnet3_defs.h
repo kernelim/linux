@@ -472,9 +472,10 @@ struct Vmxnet3_IntrConf {
 	bool		autoMask;
 	u8		numIntrs;      /* # of interrupts */
 	u8		eventIntrIdx;
-	u8		modLevels[VMXNET3_MAX_INTRS];	/* moderation level for*/
+	u8		modLevels[VMXNET3_MAX_INTRS];	/* moderation level for
+							 * each intr */
 	__le32		intrCtrl;
-	u32		reserved[2];
+	__le32		reserved[2];
 };
 
 /* one bit per VLAN ID, the size is in the units of u32	*/

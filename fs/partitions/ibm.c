@@ -239,7 +239,7 @@ ibm_partition(struct parsed_partitions *state, struct block_device *bdev)
 				/* Are we not supposed to report this ? */
 				goto out_readerr;
 		} else
-			printk(KERN_WARNING "Warning, expected Label VOL1 not "
+			printk(KERN_INFO "Expected Label VOL1 not "
 			       "found, treating as CDL formated Disk");
 
 	}

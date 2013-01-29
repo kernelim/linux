@@ -51,6 +51,7 @@
 #include <asm/cputime.h>
 #include <asm/vdso.h>
 #include <asm/cpu.h>
+#include <asm/debug.h>
 #include "entry.h"
 
 /* logical cpu to cpu address */
@@ -106,6 +107,7 @@ void smp_restart_with_online_cpu(void)
 		}
 	}
 	/* We are not online: Do PSW restart on an online CPU */
+	cpu = any_online_cpu(cpu_online_map);
 	while (signal_processor(cpu, sigp_restart) == sigp_busy)
 		cpu_relax();
 	/* And stop ourself */
@@ -130,6 +132,7 @@ void smp_send_stop(void)
 	__load_psw_mask(psw_kernel_bits & ~PSW_MASK_MCHECK);
 	trace_hardirqs_off();
 
+	debug_set_critical();
 	cpumask_copy(&cpumask, cpu_online_mask);
 	cpumask_clear_cpu(smp_processor_id(), &cpumask);
 
@@ -1007,13 +1010,10 @@ static int __cpuinit smp_cpu_notify(struct notifier_block *self,
 	unsigned int cpu = (unsigned int)(long)hcpu;
 	struct cpu *c = &per_cpu(cpu_devices, cpu);
 	struct sys_device *s = &c->sysdev;
-	struct s390_idle_data *idle;
 
 	switch (action) {
 	case CPU_ONLINE:
 	case CPU_ONLINE_FROZEN:
-		idle = &per_cpu(s390_idle, cpu);
-		memset(idle, 0, sizeof(struct s390_idle_data));
 		if (sysfs_create_group(&s->kobj, &cpu_online_attr_group))
 			return NOTIFY_BAD;
 		break;

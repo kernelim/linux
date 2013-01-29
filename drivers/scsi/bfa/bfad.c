@@ -62,9 +62,9 @@ int		max_xfer_size = BFAD_MAX_SECTORS >> 1;
 u32	bfi_image_cb_size, bfi_image_ct_size, bfi_image_ct2_size;
 u32	*bfi_image_cb, *bfi_image_ct, *bfi_image_ct2;
 
-#define BFAD_FW_FILE_CB		"cbfw.bin"
-#define BFAD_FW_FILE_CT		"ctfw.bin"
-#define BFAD_FW_FILE_CT2	"ct2fw.bin"
+#define BFAD_FW_FILE_CB		"cbfw-3.0.3.1.bin"
+#define BFAD_FW_FILE_CT		"ctfw-3.0.3.1.bin"
+#define BFAD_FW_FILE_CT2	"ct2fw-3.0.3.1.bin"
 
 static u32 *bfad_load_fwimg(struct pci_dev *pdev);
 static void bfad_free_fwimg(void);
@@ -454,23 +454,6 @@ bfa_fcb_lport_new(struct bfad_s *bfad, struct bfa_fcs_lport_s *port,
 	}
 
 	return port_drv;
-}
-
-void
-bfa_fcb_lport_delete(struct bfad_s *bfad, enum bfa_lport_role roles,
-		    struct bfad_vf_s *vf_drv, struct bfad_vport_s *vp_drv)
-{
-	struct bfad_port_s    *port_drv;
-
-	/* this will be only called from rmmod context */
-	if (vp_drv && !vp_drv->comp_del) {
-		port_drv = (vp_drv) ? (&(vp_drv)->drv_port) :
-				((vf_drv) ? (&(vf_drv)->base_port) :
-				(&(bfad)->pport));
-		bfa_trc(bfad, roles);
-		if (roles & BFA_LPORT_ROLE_FCP_IM)
-			bfad_im_port_delete(bfad, port_drv);
-	}
 }
 
 /*
@@ -1399,6 +1382,8 @@ bfad_pci_probe(struct pci_dev *pdev, const struct pci_device_id *pid)
 	bfa_sm_set_state(bfad, bfad_sm_uninit);
 
 	spin_lock_init(&bfad->bfad_lock);
+	spin_lock_init(&bfad->bfad_aen_spinlock);
+
 	pci_set_drvdata(pdev, bfad);
 
 	bfad->ref_count = 0;

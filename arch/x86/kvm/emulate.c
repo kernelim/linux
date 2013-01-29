@@ -1359,6 +1359,8 @@ static inline int emulate_grp3(struct x86_emulate_ctxt *ctxt,
 	switch (c->modrm_reg) {
 	case 0 ... 1:	/* test */
 		emulate_2op_SrcV("test", c->src, c->dst, ctxt->eflags);
+		/* Disable writeback. */
+		c->dst.type = OP_NONE;
 		break;
 	case 2:	/* not */
 		c->dst.val = ~c->dst.val;
@@ -2088,6 +2090,8 @@ special_insn:
 		break;
 	case 0x84 ... 0x85:
 		emulate_2op_SrcV("test", c->src, c->dst, ctxt->eflags);
+		/* Disable writeback. */
+		c->dst.type = OP_NONE;
 		break;
 	case 0x86 ... 0x87:	/* xchg */
 	xchg:

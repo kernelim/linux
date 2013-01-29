@@ -46,6 +46,8 @@ struct qdesfmt0 {
 	u32	 : 16;
 } __attribute__ ((packed));
 
+#define QDR_AC_MULTI_BUFFER_ENABLE 0x01
+
 /**
  * struct qdr - queue description record (QDR)
  * @qfmt: queue format
@@ -84,6 +86,7 @@ struct qdr {
 
 #define QIB_AC_OUTBOUND_PCI_SUPPORTED	0x40
 #define QIB_RFLAGS_ENABLE_QEBSM		0x80
+#define QIB_RFLAGS_ENABLE_DATA_DIV	0x02
 
 /**
  * struct qib - queue information block (QIB)
@@ -157,110 +160,47 @@ struct slib {
 	struct slibe slibe[QDIO_MAX_BUFFERS_PER_Q];
 } __attribute__ ((packed, aligned(2048)));
 
-/**
- * struct sbal_flags - storage block address list flags
- * @last: last entry
- * @cont: contiguous storage
- * @frag: fragmentation
- */
-struct sbal_flags {
-	u8	: 1;
-	u8 last : 1;
-	u8 cont : 1;
-	u8	: 1;
-	u8 frag : 2;
-	u8	: 2;
-} __attribute__ ((packed));
+#define SBAL_EFLAGS_LAST_ENTRY		0x40
+#define SBAL_EFLAGS_CONTIGUOUS		0x20
+#define SBAL_EFLAGS_FIRST_FRAG		0x04
+#define SBAL_EFLAGS_MIDDLE_FRAG		0x08
+#define SBAL_EFLAGS_LAST_FRAG		0x0c
+#define SBAL_EFLAGS_MASK		0x6f
 
-#define SBAL_FLAGS_FIRST_FRAG		0x04000000UL
-#define SBAL_FLAGS_MIDDLE_FRAG		0x08000000UL
-#define SBAL_FLAGS_LAST_FRAG		0x0c000000UL
-#define SBAL_FLAGS_LAST_ENTRY		0x40000000UL
-#define SBAL_FLAGS_CONTIGUOUS		0x20000000UL
-
-#define SBAL_FLAGS0_DATA_CONTINUATION	0x20UL
+#define SBAL_SFLAGS0_PCI_REQ		0x40
+#define SBAL_SFLAGS0_DATA_CONTINUATION	0x20
 
 /* Awesome OpenFCP extensions */
-#define SBAL_FLAGS0_TYPE_STATUS		0x00UL
-#define SBAL_FLAGS0_TYPE_WRITE		0x08UL
-#define SBAL_FLAGS0_TYPE_READ		0x10UL
-#define SBAL_FLAGS0_TYPE_WRITE_READ	0x18UL
-#define SBAL_FLAGS0_MORE_SBALS		0x04UL
-#define SBAL_FLAGS0_COMMAND		0x02UL
-#define SBAL_FLAGS0_LAST_SBAL		0x00UL
-#define SBAL_FLAGS0_ONLY_SBAL		SBAL_FLAGS0_COMMAND
-#define SBAL_FLAGS0_MIDDLE_SBAL		SBAL_FLAGS0_MORE_SBALS
-#define SBAL_FLAGS0_FIRST_SBAL SBAL_FLAGS0_MORE_SBALS | SBAL_FLAGS0_COMMAND
-#define SBAL_FLAGS0_PCI			0x40
-
-/**
- * struct sbal_sbalf_0 - sbal flags for sbale 0
- * @pci: PCI indicator
- * @cont: data continuation
- * @sbtype: storage-block type (FCP)
- */
-struct sbal_sbalf_0 {
-	u8	  : 1;
-	u8 pci	  : 1;
-	u8 cont   : 1;
-	u8 sbtype : 2;
-	u8	  : 3;
-} __attribute__ ((packed));
-
-/**
- * struct sbal_sbalf_1 - sbal flags for sbale 1
- * @key: storage key
- */
-struct sbal_sbalf_1 {
-	u8     : 4;
-	u8 key : 4;
-} __attribute__ ((packed));
-
-/**
- * struct sbal_sbalf_14 - sbal flags for sbale 14
- * @erridx: error index
- */
-struct sbal_sbalf_14 {
-	u8	  : 4;
-	u8 erridx : 4;
-} __attribute__ ((packed));
-
-/**
- * struct sbal_sbalf_15 - sbal flags for sbale 15
- * @reason: reason for error state
- */
-struct sbal_sbalf_15 {
-	u8 reason;
-} __attribute__ ((packed));
-
-/**
- * union sbal_sbalf - storage block address list flags
- * @i0: sbalf0
- * @i1: sbalf1
- * @i14: sbalf14
- * @i15: sblaf15
- * @value: raw value
- */
-union sbal_sbalf {
-	struct sbal_sbalf_0  i0;
-	struct sbal_sbalf_1  i1;
-	struct sbal_sbalf_14 i14;
-	struct sbal_sbalf_15 i15;
-	u8 value;
-};
+#define SBAL_SFLAGS0_TYPE_STATUS	0x00
+#define SBAL_SFLAGS0_TYPE_WRITE		0x08
+#define SBAL_SFLAGS0_TYPE_READ		0x10
+#define SBAL_SFLAGS0_TYPE_WRITE_READ	0x18
+#define SBAL_SFLAGS0_MORE_SBALS		0x04
+#define SBAL_SFLAGS0_COMMAND		0x02
+#define SBAL_SFLAGS0_LAST_SBAL		0x00
+#define SBAL_SFLAGS0_ONLY_SBAL		SBAL_SFLAGS0_COMMAND
+#define SBAL_SFLAGS0_MIDDLE_SBAL	SBAL_SFLAGS0_MORE_SBALS
+#define SBAL_SFLAGS0_FIRST_SBAL (SBAL_SFLAGS0_MORE_SBALS | SBAL_SFLAGS0_COMMAND)
 
 /**
  * struct qdio_buffer_element - SBAL entry
- * @flags: flags
+ * @eflags: SBAL entry flags
+ * @scount: SBAL count
+ * @sflags: whole SBAL flags
  * @length: length
  * @addr: address
 */
 struct qdio_buffer_element {
-	u32 flags;
+	u8 eflags;
+	/* private: */
+	u8 res1;
+	/* public: */
+	u8 scount;
+	u8 sflags;
 	u32 length;
 #ifdef CONFIG_32BIT
 	/* private: */
-	void *reserved;
+	void *res2;
 	/* public: */
 #endif
 	void *addr;
@@ -334,6 +274,11 @@ struct qdio_outbuf_state {
 
 #define CHSC_AC3_FORMAT2_CQ_AVAILABLE	0x8000
 
+#define CHSC_AC2_MULTI_BUFFER_AVAILABLE	0x0080
+#define CHSC_AC2_MULTI_BUFFER_ENABLED	0x0040
+#define CHSC_AC2_DATA_DIV_AVAILABLE	0x0010
+#define CHSC_AC2_DATA_DIV_ENABLED	0x0002
+
 struct qdio_ssqd_desc {
 	u8 flags;
 	u8:8;
@@ -386,13 +331,14 @@ typedef void qdio_handler_t(struct ccw_device *, unsigned int, int,
  * @adapter_name: name for the adapter
  * @qib_param_field_format: format for qib_parm_field
  * @qib_param_field: pointer to 128 bytes or NULL, if no param field
+ * @qib_rflags: rflags to set
  * @input_slib_elements: pointer to no_input_qs * 128 words of data or NULL
  * @output_slib_elements: pointer to no_output_qs * 128 words of data or NULL
  * @no_input_qs: number of input queues
  * @no_output_qs: number of output queues
  * @input_handler: handler to be called for input queues
  * @output_handler: handler to be called for output queues
- * @queue_start_poll: polling handlers (one per input queue or NULL)
+ * @queue_start_poll_array: polling handlers (one per input queue or NULL)
  * @int_parm: interruption parameter
  * @flags: initialization flags
  * @input_sbal_addr_array:  address of no_input_qs * 128 pointers
@@ -402,16 +348,19 @@ typedef void qdio_handler_t(struct ccw_device *, unsigned int, int,
 struct qdio_initialize {
 	struct ccw_device *cdev;
 	unsigned char q_format;
+	unsigned char qdr_ac;
 	unsigned char adapter_name[8];
 	unsigned int qib_param_field_format;
 	unsigned char *qib_param_field;
+	unsigned char qib_rflags;
 	unsigned long *input_slib_elements;
 	unsigned long *output_slib_elements;
 	unsigned int no_input_qs;
 	unsigned int no_output_qs;
 	qdio_handler_t *input_handler;
 	qdio_handler_t *output_handler;
-	void (**queue_start_poll) (struct ccw_device *, int, unsigned long);
+	void (**queue_start_poll_array) (struct ccw_device *, int,
+					  unsigned long);
 	unsigned long int_parm;
 	unsigned long flags;
 	void **input_sbal_addr_array;

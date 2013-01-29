@@ -77,9 +77,18 @@ struct nfs4_filelayout_segment {
 	struct nfs4_file_layout_dsaddr *dsaddr; /* Point to GETDEVINFO data */
 	unsigned int num_fh;
 	struct nfs_fh **fh_array;
-	struct list_head *commit_buckets; /* Sort commits to ds */
-	int number_of_buckets;
 };
+
+struct nfs4_filelayout {
+	struct pnfs_layout_hdr generic_hdr;
+	struct pnfs_ds_commit_info commit_info;
+};
+
+static inline struct nfs4_filelayout *
+FILELAYOUT_FROM_HDR(struct pnfs_layout_hdr *lo)
+{
+	return container_of(lo, struct nfs4_filelayout, generic_hdr);
+}
 
 static inline struct nfs4_filelayout_segment *
 FILELAYOUT_LSEG(struct pnfs_layout_segment *lseg)

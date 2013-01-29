@@ -28,6 +28,8 @@ DEFINE_MUTEX(event_mutex);
 
 LIST_HEAD(ftrace_events);
 
+#define COMMON_FIELD_COUNT	5
+
 int trace_define_field(struct ftrace_event_call *call, const char *type,
 		       const char *name, int offset, int size, int is_signed,
 		       int filter_type)
@@ -585,7 +587,7 @@ event_format_read(struct file *filp, char __user *ubuf, size_t cnt,
 	trace_seq_printf(s, "format:\n");
 	trace_write_header(s);
 
-	r = call->show_format(call, s);
+	r = call->fmt.show_format(call, s);
 	if (!r) {
 		/*
 		 * ug!  The format output is bigger than a PAGE!!
@@ -601,6 +603,157 @@ event_format_read(struct file *filp, char __user *ubuf, size_t cnt,
  out:
 	kfree(s);
 	return r;
+}
+
+enum {
+	FORMAT_HEADER		= 1,
+	FORMAT_PRINTFMT		= 2,
+};
+
+static void *f_next(struct seq_file *m, void *v, loff_t *pos)
+{
+	struct ftrace_event_call *call = m->private;
+	struct ftrace_event_field *field;
+	struct list_head *head;
+	loff_t index = *pos;
+
+	(*pos)++;
+
+	head = &call->fields;
+
+	switch ((unsigned long)v) {
+	case FORMAT_HEADER:
+
+		if (unlikely(list_empty(head)))
+			return NULL;
+
+		field = list_entry(head->prev, struct ftrace_event_field, link);
+		return field;
+
+	case FORMAT_PRINTFMT:
+		/* all done */
+		return NULL;
+	}
+
+	/*
+	 * To separate common fields from event fields, the
+	 * LSB is set on the first event field. Clear it in case.
+	 */
+	v = (void *)((unsigned long)v & ~1L);
+
+	field = v;
+	if (field->link.prev == head)
+		return (void *)FORMAT_PRINTFMT;
+
+	field = list_entry(field->link.prev, struct ftrace_event_field, link);
+
+	/* Set the LSB to notify f_show to print an extra newline */
+	if (index == COMMON_FIELD_COUNT)
+		field = (struct ftrace_event_field *)
+			((unsigned long)field | 1);
+
+	return field;
+}
+
+static void *f_start(struct seq_file *m, loff_t *pos)
+{
+	loff_t l = 0;
+	void *p;
+
+	/* Start by showing the header */
+	if (!*pos)
+		return (void *)FORMAT_HEADER;
+
+	p = (void *)FORMAT_HEADER;
+	do {
+		p = f_next(m, p, &l);
+	} while (p && l < *pos);
+
+	return p;
+}
+
+static int f_show(struct seq_file *m, void *v)
+{
+	struct ftrace_event_call *call = m->private;
+	struct ftrace_event_field *field;
+	const char *array_descriptor;
+
+	switch ((unsigned long)v) {
+	case FORMAT_HEADER:
+		seq_printf(m, "name: %s\n", call->name);
+		seq_printf(m, "ID: %d\n", call->id);
+		seq_printf(m, "format:\n");
+		return 0;
+
+	case FORMAT_PRINTFMT:
+		seq_printf(m, "\nprint fmt: %s\n",
+			   call->fmt.print_fmt);
+		return 0;
+	}
+
+	/*
+	 * To separate common fields from event fields, the
+	 * LSB is set on the first event field. Clear it and
+	 * print a newline if it is set.
+	 */
+	if ((unsigned long)v & 1) {
+		seq_putc(m, '\n');
+		v = (void *)((unsigned long)v & ~1L);
+	}
+
+	field = v;
+
+	/*
+	 * Smartly shows the array type(except dynamic array).
+	 * Normal:
+	 *	field:TYPE VAR
+	 * If TYPE := TYPE[LEN], it is shown:
+	 *	field:TYPE VAR[LEN]
+	 */
+	array_descriptor = strchr(field->type, '[');
+
+	if (!strncmp(field->type, "__data_loc", 10))
+		array_descriptor = NULL;
+
+	if (!array_descriptor)
+		seq_printf(m, "\tfield:%s %s;\toffset:%u;\tsize:%u;\tsigned:%d;\n",
+			   field->type, field->name, field->offset,
+			   field->size, !!field->is_signed);
+	else
+		seq_printf(m, "\tfield:%.*s %s%s;\toffset:%u;\tsize:%u;\tsigned:%d;\n",
+			   (int)(array_descriptor - field->type),
+			   field->type, field->name,
+			   array_descriptor, field->offset,
+			   field->size, !!field->is_signed);
+
+	return 0;
+}
+
+static void f_stop(struct seq_file *m, void *p)
+{
+}
+
+static const struct seq_operations trace_format_seq_ops = {
+	.start		= f_start,
+	.next		= f_next,
+	.stop		= f_stop,
+	.show		= f_show,
+};
+
+static int trace_format_open(struct inode *inode, struct file *file)
+{
+	struct ftrace_event_call *call = inode->i_private;
+	struct seq_file *m;
+	int ret;
+
+	ret = seq_open(file, &trace_format_seq_ops);
+	if (ret < 0)
+		return ret;
+
+	m = file->private_data;
+	m->private = call;
+
+	return 0;
 }
 
 static ssize_t
@@ -797,6 +950,13 @@ static const struct file_operations ftrace_enable_fops = {
 	.write = event_enable_write,
 };
 
+static const struct file_operations ftrace_event_format_print_fmt_fops = {
+	.open = trace_format_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = seq_release,
+};
+
 static const struct file_operations ftrace_event_format_fops = {
 	.open = tracing_open_generic,
 	.read = event_format_read,
@@ -917,6 +1077,11 @@ event_subsystem_dir(const char *name, struct dentry *d_events)
 	return system->entry;
 }
 
+static bool is_print_fmt_event(struct ftrace_event_call *call)
+{
+	return call->flags & TRACE_EVENT_FL_KABI_PRINT_FMT;
+}
+
 static int
 event_create_dir(struct ftrace_event_call *call, struct dentry *d_events,
 		 const struct file_operations *id,
@@ -961,7 +1126,7 @@ event_create_dir(struct ftrace_event_call *call, struct dentry *d_events,
 	}
 
 	/* A trace may not want to export its format */
-	if (!call->show_format)
+	if (!(is_print_fmt_event(call)) && !call->fmt.show_format)
 		return 0;
 
 	entry = trace_create_file("format", 0444, call->dir, call,
@@ -973,6 +1138,7 @@ event_create_dir(struct ftrace_event_call *call, struct dentry *d_events,
 static int __trace_add_event_call(struct ftrace_event_call *call)
 {
 	struct dentry *d_events;
+	const struct file_operations *format;
 	int ret;
 
 	if (!call->name)
@@ -992,10 +1158,15 @@ static int __trace_add_event_call(struct ftrace_event_call *call)
 	if (!d_events)
 		return -ENOENT;
 
+	if (is_print_fmt_event(call))
+		format = &ftrace_event_format_print_fmt_fops;
+	else
+		format = &ftrace_event_format_fops;
+
 	list_add(&call->list, &ftrace_events);
 	ret = event_create_dir(call, d_events, &ftrace_event_id_fops,
 				&ftrace_enable_fops, &ftrace_event_filter_fops,
-				&ftrace_event_format_fops);
+				format);
 	if (ret < 0)
 		list_del(&call->list);
 	return ret;
@@ -1085,7 +1256,7 @@ struct ftrace_module_file_ops {
 };
 
 static struct ftrace_module_file_ops *
-trace_create_file_ops(struct module *mod)
+trace_create_file_ops(struct module *mod, bool print_fmt)
 {
 	struct ftrace_module_file_ops *file_ops;
 
@@ -1111,7 +1282,10 @@ trace_create_file_ops(struct module *mod)
 	file_ops->filter = ftrace_event_filter_fops;
 	file_ops->filter.owner = mod;
 
-	file_ops->format = ftrace_event_format_fops;
+	if (print_fmt)
+		file_ops->format = ftrace_event_format_print_fmt_fops;
+	else
+		file_ops->format = ftrace_event_format_fops;
 	file_ops->format.owner = mod;
 
 	list_add(&file_ops->list, &ftrace_module_file_list);
@@ -1154,7 +1328,8 @@ static void trace_module_add_events(struct module *mod)
 		 * if not already done.
 		 */
 		if (!file_ops) {
-			file_ops = trace_create_file_ops(mod);
+			bool print_fmt = is_print_fmt_event(call);
+			file_ops = trace_create_file_ops(mod, print_fmt);
 			if (!file_ops)
 				return;
 		}
@@ -1305,7 +1480,7 @@ static __init int event_trace_init(void)
 		list_add(&call->list, &ftrace_events);
 		event_create_dir(call, d_events, &ftrace_event_id_fops,
 				 &ftrace_enable_fops, &ftrace_event_filter_fops,
-				 &ftrace_event_format_fops);
+				 &ftrace_event_format_print_fmt_fops);
 	}
 
 	while (true) {

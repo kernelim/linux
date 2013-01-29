@@ -1935,9 +1935,10 @@ static unsigned long layout_symtab(struct module *mod,
 	src = (void *)hdr + symsect->sh_offset;
 	nsrc = symsect->sh_size / sizeof(*src);
 	strtab = (void *)hdr + strsect->sh_offset;
-	for (ndst = i = 1; i < nsrc; ++i, ++src)
-		if (is_core_symbol(src, sechdrs, hdr->e_shnum)) {
-			unsigned int j = src->st_name;
+	for (ndst = i = 0; i < nsrc; i++)
+		if (i == 0 ||
+		    is_core_symbol(src + i, sechdrs, hdr->e_shnum)) {
+			unsigned int j = src[i].st_name;
 
 			while(!__test_and_set_bit(j, strmap) && strtab[j])
 				++j;
@@ -1989,12 +1990,14 @@ static void add_kallsyms(struct module *mod,
 	mod->core_symtab = dst = mod->module_core + symoffs;
 	src = mod->symtab;
 	*dst = *src;
-	for (ndst = i = 1; i < mod->num_symtab; ++i, ++src) {
-		if (!is_core_symbol(src, sechdrs, shnum))
-			continue;
-		dst[ndst] = *src;
-		dst[ndst].st_name = bitmap_weight(strmap, dst[ndst].st_name);
-		++ndst;
+	for (ndst = i = 0; i < mod->num_symtab; i++) {
+		if (i == 0 ||
+		    is_core_symbol(src + i, sechdrs, shnum)) {
+			dst[ndst] = src[i];
+			dst[ndst].st_name =
+				bitmap_weight(strmap, dst[ndst].st_name);
+			++ndst;
+		}
 	}
 	mod->core_num_syms = ndst;
 

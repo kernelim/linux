@@ -16,6 +16,10 @@
 #define PCM_AC97	5
 #define PCM_COUNT	6
 
+#define OXYGEN_MCLKS(f_single, f_double, f_quad) ((MCLK_##f_single << 0) | \
+						  (MCLK_##f_double << 2) | \
+						  (MCLK_##f_quad   << 4))
+
 #define OXYGEN_IO_SIZE	0x100
 
 #define OXYGEN_EEPROM_ID	0x434d	/* "CM" */
@@ -34,6 +38,8 @@
      /* CAPTURE_3_FROM_I2S_3		not implemented */
 #define MIDI_OUTPUT		0x0800
 #define MIDI_INPUT		0x1000
+#define AC97_CD_INPUT		0x2000
+#define AC97_FMIC_SWITCH	0x4000
 
 enum {
 	CONTROL_SPDIF_PCM,
@@ -64,6 +70,7 @@ struct snd_pcm_hardware;
 struct snd_pcm_hw_params;
 struct snd_kcontrol_new;
 struct snd_rawmidi;
+struct snd_info_buffer;
 struct oxygen;
 
 struct oxygen_model {
@@ -84,19 +91,26 @@ struct oxygen_model {
 			       struct snd_pcm_hw_params *params);
 	void (*update_dac_volume)(struct oxygen *chip);
 	void (*update_dac_mute)(struct oxygen *chip);
+	void (*update_center_lfe_mix)(struct oxygen *chip, bool mixed);
+	unsigned int (*adjust_dac_routing)(struct oxygen *chip,
+					   unsigned int play_routing);
 	void (*gpio_changed)(struct oxygen *chip);
 	void (*uart_input)(struct oxygen *chip);
 	void (*ac97_switch)(struct oxygen *chip,
 			    unsigned int reg, unsigned int mute);
+	void (*dump_registers)(struct oxygen *chip,
+			       struct snd_info_buffer *buffer);
 	const unsigned int *dac_tlv;
-	unsigned long private_data;
 	size_t model_data_size;
 	unsigned int device_config;
-	u8 dac_channels;
+	u8 dac_channels_pcm;
+	u8 dac_channels_mixer;
 	u8 dac_volume_min;
 	u8 dac_volume_max;
 	u8 misc_flags;
 	u8 function_flags;
+	u8 dac_mclks;
+	u8 adc_mclks;
 	u16 dac_i2s_format;
 	u16 adc_i2s_format;
 };
@@ -117,7 +131,6 @@ struct oxygen {
 	u8 pcm_running;
 	u8 dac_routing;
 	u8 spdif_playback_enable;
-	u8 revision;
 	u8 has_ac97_0;
 	u8 has_ac97_1;
 	u32 spdif_bits;
@@ -152,6 +165,7 @@ void oxygen_pci_remove(struct pci_dev *pci);
 int oxygen_pci_suspend(struct pci_dev *pci, pm_message_t state);
 int oxygen_pci_resume(struct pci_dev *pci);
 #endif
+void oxygen_pci_shutdown(struct pci_dev *pci);
 
 /* oxygen_mixer.c */
 

@@ -38,6 +38,9 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/netdevice.h>
+#ifdef CONFIG_MLX4_EN_DCB
+#include <linux/dcbnl.h>
+#endif
 
 #include <linux/mlx4/device.h>
 #include <linux/mlx4/qp.h>
@@ -104,6 +107,7 @@
 #define STAMP_SHIFT		31
 #define STAMP_VAL		0x7fffffff
 #define STATS_DELAY		(HZ / 4)
+#define MAX_NUM_OF_FS_RULES	256
 
 /* Typical TSO descriptor with 16 gather entries is 352 bytes... */
 #define MAX_DESC_SIZE		512
@@ -135,14 +139,13 @@ enum {
 #define MLX4_EN_MAX_TX_SIZE	8192
 #define MLX4_EN_MAX_RX_SIZE	8192
 
-/* Minimum ring size for our page-allocation sceme to work */
+/* Minimum ring size for our page-allocation scheme to work */
 #define MLX4_EN_MIN_RX_SIZE	(MLX4_EN_ALLOC_SIZE / SMP_CACHE_BYTES)
 #define MLX4_EN_MIN_TX_SIZE	(4096 / TXBB_SIZE)
 
 #define MLX4_EN_SMALL_PKT_SIZE		64
-#define MLX4_EN_NUM_TX_RINGS		8
-#define MLX4_EN_NUM_PPP_RINGS		8
-#define MAX_TX_RINGS			(MLX4_EN_NUM_TX_RINGS + MLX4_EN_NUM_PPP_RINGS)
+#define MLX4_EN_MAX_TX_RING_P_UP	32
+#define MLX4_EN_NUM_UP			8
 #define MLX4_EN_DEF_TX_RING_SIZE	512
 #define MLX4_EN_DEF_RX_RING_SIZE  	1024
 
@@ -150,7 +153,7 @@ enum {
 #define MLX4_EN_RX_COAL_TARGET	44
 #define MLX4_EN_RX_COAL_TIME	0x10
 
-#define MLX4_EN_TX_COAL_PKTS	5
+#define MLX4_EN_TX_COAL_PKTS	16
 #define MLX4_EN_TX_COAL_TIME	0x80
 
 #define MLX4_EN_RX_RATE_LOW		400000
@@ -256,6 +259,7 @@ struct mlx4_en_tx_desc {
 
 struct mlx4_en_rx_alloc {
 	struct page *page;
+	dma_addr_t dma;
 	u16 offset;
 };
 
@@ -282,7 +286,6 @@ struct mlx4_en_tx_ring {
 	struct mlx4_srq dummy;
 	unsigned long bytes;
 	unsigned long packets;
-	spinlock_t comp_lock;
 	struct mlx4_bf bf;
 	bool bf_enabled;
 };
@@ -304,6 +307,7 @@ struct mlx4_en_rx_ring {
 	u32 prod;
 	u32 cons;
 	u32 buf_size;
+	u8  fcs_del;
 	void *buf;
 	void *rx_info;
 	unsigned long bytes;
@@ -332,8 +336,6 @@ struct mlx4_en_cq {
 	spinlock_t              lock;
 	struct net_device      *dev;
 	struct napi_struct	napi;
-	/* Per-core Tx cq processing support */
-	struct timer_list timer;
 	int size;
 	int buf_size;
 	unsigned vector;
@@ -354,16 +356,18 @@ struct mlx4_en_port_profile {
 	u8 rx_ppp;
 	u8 tx_pause;
 	u8 tx_ppp;
+	int rss_rings;
 };
 
 struct mlx4_en_profile {
 	int rss_xor;
-	int tcp_rss;
 	int udp_rss;
+	int enable_tc;
 	u8 rss_mask;
 	u32 active_ports;
 	u32 small_pkt_int;
 	u8 no_reset;
+	u8 num_tx_rings_p_up;
 	struct mlx4_en_port_profile prof[MLX4_MAX_PORTS + 1];
 };
 
@@ -440,6 +444,7 @@ struct mlx4_en_mc_list {
 	struct list_head	list;
 	enum mlx4_en_mclist_act	action;
 	u8			addr[ETH_ALEN];
+	u64			reg_id;
 };
 
 struct mlx4_en_frag_info {
@@ -451,6 +456,20 @@ struct mlx4_en_frag_info {
 
 };
 
+#ifdef CONFIG_MLX4_EN_DCB
+/* Minimal TC BW - setting to 0 will block traffic */
+#define MLX4_EN_BW_MIN 1
+#define MLX4_EN_BW_MAX 100 /* Utilize 100% of the line */
+
+#define MLX4_EN_TC_ETS 7
+
+#endif
+
+struct ethtool_flow_id {
+	struct ethtool_rx_flow_spec flow_spec;
+	u64 id;
+};
+
 struct mlx4_en_priv {
 	struct mlx4_en_dev *mdev;
 	struct mlx4_en_port_profile *prof;
@@ -460,6 +479,7 @@ struct mlx4_en_priv {
 	struct net_device_stats ret_stats;
 	struct mlx4_en_port_state port_state;
 	spinlock_t stats_lock;
+	struct ethtool_flow_id ethtool_rules[MAX_NUM_OF_FS_RULES];
 
 	unsigned long last_moder_packets;
 	unsigned long last_moder_tx_packets;
@@ -493,6 +513,7 @@ struct mlx4_en_priv {
 	int mac_index;
 	unsigned max_mtu;
 	int base_qpn;
+	int cqe_factor;
 
 	struct mlx4_en_rss_map rss_map;
 	u32 flags;
@@ -505,11 +526,12 @@ struct mlx4_en_priv {
 	u16 num_frags;
 	u16 log_rx_info;
 
-	struct mlx4_en_tx_ring tx_ring[MAX_TX_RINGS];
+	struct mlx4_en_tx_ring *tx_ring;
 	int tx_vector;
 	struct mlx4_en_rx_ring rx_ring[MAX_RX_RINGS];
-	struct mlx4_en_cq tx_cq[MAX_TX_RINGS];
+	struct mlx4_en_cq *tx_cq;
 	struct mlx4_en_cq rx_cq[MAX_RX_RINGS];
+	struct mlx4_qp drop_qp;
 	struct work_struct mcast_task;
 	struct work_struct mac_task;
 	struct work_struct watchdog_task;
@@ -521,9 +543,16 @@ struct mlx4_en_priv {
 	u64 stats_bitmap;
 	struct list_head mc_list;
 	struct list_head curr_list;
+	u64 broadcast_id;
 	struct mlx4_en_stat_out_mbox hw_stats;
 	int vids[128];
 	bool wol;
+	struct device *ddev;
+	int base_tx_qpn;
+
+#ifdef CONFIG_MLX4_EN_DCB
+	struct ieee_ets ets;
+#endif
 };
 
 enum mlx4_en_wol {
@@ -540,19 +569,17 @@ int mlx4_en_init_netdev(struct mlx4_en_dev *mdev, int port,
 int mlx4_en_start_port(struct net_device *dev);
 void mlx4_en_stop_port(struct net_device *dev);
 
-void mlx4_en_free_resources(struct mlx4_en_priv *priv, bool reserve_vectors);
+void mlx4_en_free_resources(struct mlx4_en_priv *priv);
 int mlx4_en_alloc_resources(struct mlx4_en_priv *priv);
 
 int mlx4_en_create_cq(struct mlx4_en_priv *priv, struct mlx4_en_cq *cq,
 		      int entries, int ring, enum cq_type mode);
-void mlx4_en_destroy_cq(struct mlx4_en_priv *priv, struct mlx4_en_cq *cq,
-			bool reserve_vectors);
+void mlx4_en_destroy_cq(struct mlx4_en_priv *priv, struct mlx4_en_cq *cq);
 int mlx4_en_activate_cq(struct mlx4_en_priv *priv, struct mlx4_en_cq *cq);
 void mlx4_en_deactivate_cq(struct mlx4_en_priv *priv, struct mlx4_en_cq *cq);
 int mlx4_en_set_cq_moder(struct mlx4_en_priv *priv, struct mlx4_en_cq *cq);
 int mlx4_en_arm_cq(struct mlx4_en_priv *priv, struct mlx4_en_cq *cq);
 
-void mlx4_en_poll_tx_cq(unsigned long data);
 void mlx4_en_tx_irq(struct mlx4_cq *mcq);
 u16 mlx4_en_select_queue(struct net_device *dev, struct sk_buff *skb);
 netdev_tx_t mlx4_en_xmit(struct sk_buff *skb, struct net_device *dev);
@@ -562,7 +589,7 @@ int mlx4_en_create_tx_ring(struct mlx4_en_priv *priv, struct mlx4_en_tx_ring *ri
 void mlx4_en_destroy_tx_ring(struct mlx4_en_priv *priv, struct mlx4_en_tx_ring *ring);
 int mlx4_en_activate_tx_ring(struct mlx4_en_priv *priv,
 			     struct mlx4_en_tx_ring *ring,
-			     int cq);
+			     int cq, int user_prio);
 void mlx4_en_deactivate_tx_ring(struct mlx4_en_priv *priv,
 				struct mlx4_en_tx_ring *ring);
 
@@ -580,8 +607,8 @@ int mlx4_en_process_rx_cq(struct net_device *dev,
 			  int budget);
 int mlx4_en_poll_rx_cq(struct napi_struct *napi, int budget);
 void mlx4_en_fill_qp_context(struct mlx4_en_priv *priv, int size, int stride,
-			     int is_tx, int rss, int qpn, int cqn,
-			     struct mlx4_qp_context *context);
+		int is_tx, int rss, int qpn, int cqn, int user_prio,
+		struct mlx4_qp_context *context);
 void mlx4_en_sqp_event(struct mlx4_qp *qp, enum mlx4_event event);
 int mlx4_en_map_buffer(struct mlx4_buf *buf);
 void mlx4_en_unmap_buffer(struct mlx4_buf *buf);
@@ -589,18 +616,20 @@ void mlx4_en_unmap_buffer(struct mlx4_buf *buf);
 void mlx4_en_calc_rx_buf(struct net_device *dev);
 int mlx4_en_config_rss_steer(struct mlx4_en_priv *priv);
 void mlx4_en_release_rss_steer(struct mlx4_en_priv *priv);
+int mlx4_en_create_drop_qp(struct mlx4_en_priv *priv);
+void mlx4_en_destroy_drop_qp(struct mlx4_en_priv *priv);
 int mlx4_en_free_tx_buf(struct net_device *dev, struct mlx4_en_tx_ring *ring);
 void mlx4_en_rx_irq(struct mlx4_cq *mcq);
 
 int mlx4_SET_MCAST_FLTR(struct mlx4_dev *dev, u8 port, u64 mac, u64 clear, u8 mode);
 int mlx4_SET_VLAN_FLTR(struct mlx4_dev *dev, u8 port, struct vlan_group *grp);
-int mlx4_SET_PORT_general(struct mlx4_dev *dev, u8 port, int mtu,
-			  u8 pptx, u8 pfctx, u8 pprx, u8 pfcrx);
-int mlx4_SET_PORT_qpn_calc(struct mlx4_dev *dev, u8 port, u32 base_qpn,
-			   u8 promisc);
 
 int mlx4_en_DUMP_ETH_STATS(struct mlx4_en_dev *mdev, u8 port, u8 reset);
 int mlx4_en_QUERY_PORT(struct mlx4_en_dev *mdev, u8 port);
+
+#ifdef CONFIG_MLX4_EN_DCB
+extern const struct dcbnl_rtnl_ops mlx4_en_dcbnl_ops;
+#endif
 
 #define MLX4_EN_NUM_SELF_TEST	5
 void mlx4_en_ex_selftest(struct net_device *dev, u32 *flags, u64 *buf);
@@ -610,4 +639,5 @@ u64 mlx4_en_mac_to_u64(u8 *addr);
  * Globals
  */
 extern const struct ethtool_ops mlx4_en_ethtool_ops;
+extern const struct ethtool_ops_ext mlx4_en_ethtool_ops_ext;
 #endif

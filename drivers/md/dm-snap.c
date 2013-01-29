@@ -692,7 +692,7 @@ static int dm_add_exception(void *context, chunk_t old, chunk_t new)
  * Return a minimum chunk size of all snapshots that have the specified origin.
  * Return zero if the origin has no snapshots.
  */
-static sector_t __minimum_chunk_size(struct origin *o)
+static uint32_t __minimum_chunk_size(struct origin *o)
 {
 	struct dm_snapshot *snap;
 	unsigned chunk_size = 0;
@@ -702,7 +702,7 @@ static sector_t __minimum_chunk_size(struct origin *o)
 			chunk_size = min_not_zero(chunk_size,
 						  snap->store->chunk_size);
 
-	return chunk_size;
+	return (uint32_t) chunk_size;
 }
 
 /*
@@ -1173,7 +1173,10 @@ static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		ti->error = "Chunk size not set";
 		goto bad_read_metadata;
 	}
-	ti->split_io = s->store->chunk_size;
+
+	r = dm_set_target_max_io_len(ti, s->store->chunk_size);
+	if (r)
+		goto bad_read_metadata;
 
 	return 0;
 
@@ -1818,9 +1821,9 @@ static void snapshot_resume(struct dm_target *ti)
 	up_write(&s->lock);
 }
 
-static sector_t get_origin_minimum_chunksize(struct block_device *bdev)
+static uint32_t get_origin_minimum_chunksize(struct block_device *bdev)
 {
-	sector_t min_chunksize;
+	uint32_t min_chunksize;
 
 	down_read(&_origins_lock);
 	min_chunksize = __minimum_chunk_size(__lookup_origin(bdev));
@@ -2177,7 +2180,6 @@ static int origin_merge(struct dm_target *ti, struct bvec_merge_data *bvm,
 		return max_size;
 
 	bvm->bi_bdev = dev->bdev;
-	bvm->bi_sector = bvm->bi_sector;
 
 	return min(max_size, q->merge_bvec_fn(q, bvm, biovec));
 }

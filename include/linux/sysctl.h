@@ -493,6 +493,15 @@ enum
 	NET_IPV4_CONF_ACCEPT_LOCAL=23,
 	NET_IPV4_CONF_SRC_VMARK=24,
 	NET_IPV4_CONF_PROXY_ARP_PVLAN=25,
+
+	/*
+	 * KABI Note:
+	 * Growing __NET_IPV4_CONF_MAX would break kABI theoretically because
+	 * struct in_device encapsulates struct ipv4_devconf. The use of
+	 * DECLARE_BITMAP() allows us to let __NET_IPV4_CONF_MAX grow to a
+	 * value of 32 because it is rounded up to the boundary of a long.
+	 */
+	NET_IPV4_CONF_ROUTE_LOCALNET=26,
 	__NET_IPV4_CONF_MAX
 };
 

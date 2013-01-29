@@ -131,7 +131,6 @@ struct cxgbi_ddp_info {
 	unsigned int rsvd_tag_mask;
 	spinlock_t map_lock;
 	struct cxgbi_gather_list **gl_map;
-	struct sk_buff **gl_skb;
 };
 
 #define DDP_PGIDX_MAX		4
@@ -263,9 +262,9 @@ struct cxgbi_skb_tx_cb {
 enum cxgbi_skcb_flags {
 	SKCBF_TX_NEED_HDR,	/* packet needs a header */
 	SKCBF_RX_COALESCED,	/* received whole pdu */
-	SKCBF_RX_HDR,		/* recieved pdu header */
-	SKCBF_RX_DATA,		/* recieved pdu payload */
-	SKCBF_RX_STATUS,	/* recieved ddp status */
+	SKCBF_RX_HDR,		/* received pdu header */
+	SKCBF_RX_DATA,		/* received pdu payload */
+	SKCBF_RX_STATUS,	/* received ddp status */
 	SKCBF_RX_DATA_DDPD,	/* pdu payload ddp'd */
 	SKCBF_RX_HCRC_ERR,	/* header digest error */
 	SKCBF_RX_DCRC_ERR,	/* data digest error */
@@ -536,8 +535,6 @@ struct cxgbi_device {
 	struct cxgbi_ddp_info *ddp;
 
 	void (*dev_ddp_cleanup)(struct cxgbi_device *);
-	void (*csk_ddp_free_gl_skb)(struct cxgbi_ddp_info *, int, int);
-	int (*csk_ddp_alloc_gl_skb)(struct cxgbi_ddp_info *, int, int, gfp_t);
 	int (*csk_ddp_set)(struct cxgbi_sock *, struct cxgbi_pagepod_hdr *,
 				unsigned int, unsigned int,
 				struct cxgbi_gather_list *);

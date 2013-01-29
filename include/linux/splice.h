@@ -82,4 +82,7 @@ extern ssize_t splice_to_pipe(struct pipe_inode_info *,
 extern ssize_t splice_direct_to_actor(struct file *, struct splice_desc *,
 				      splice_direct_actor *);
 
+extern void spd_release_page(struct splice_pipe_desc *, unsigned int);
+
+extern const struct pipe_buf_operations page_cache_pipe_buf_ops;
 #endif

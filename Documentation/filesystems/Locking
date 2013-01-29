@@ -124,8 +124,8 @@ delete_inode:
 put_super:		write
 write_super:		read
 sync_fs:		read
-freeze_fs:		read
-unfreeze_fs:		read
+freeze_fs:             write
+unfreeze_fs:           write
 statfs:			no
 remount_fs:		maybe		(see below)
 clear_inode:

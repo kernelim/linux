@@ -29,6 +29,8 @@
 void pci_update_resource(struct pci_dev *dev, int resno)
 {
 	struct pci_bus_region region;
+	bool disable;
+	u16 cmd;
 	u32 new, check, mask;
 	int reg;
 	enum pci_bar_type type;
@@ -66,6 +68,19 @@ void pci_update_resource(struct pci_dev *dev, int resno)
 		new |= PCI_ROM_ADDRESS_ENABLE;
 	}
 
+	/*
+	 * We can't update a 64-bit BAR automically, so when possible,
+	 * disable decoding so that a half-updated BAR won't conflict
+	 * with another device.
+	 */
+	disable = (res->flags & IORESOURCE_MEM_64) &&
+		  !((struct pci_dev_rh1 *)dev->rh_reserved1)->mmio_always_on;
+	if (disable) {
+		pci_read_config_word(dev, PCI_COMMAND, &cmd);
+		pci_write_config_word(dev, PCI_COMMAND,
+				      cmd & ~PCI_COMMAND_MEMORY);
+	}
+
 	pci_write_config_dword(dev, reg, new);
 	pci_read_config_dword(dev, reg, &check);
 
@@ -74,8 +89,7 @@ void pci_update_resource(struct pci_dev *dev, int resno)
 			resno, new, check);
 	}
 
-	if ((new & (PCI_BASE_ADDRESS_SPACE|PCI_BASE_ADDRESS_MEM_TYPE_MASK)) ==
-	    (PCI_BASE_ADDRESS_SPACE_MEMORY|PCI_BASE_ADDRESS_MEM_TYPE_64)) {
+	if (res->flags & IORESOURCE_MEM_64) {
 		new = region.start >> 16 >> 16;
 		pci_write_config_dword(dev, reg + 4, new);
 		pci_read_config_dword(dev, reg + 4, &check);
@@ -84,6 +98,10 @@ void pci_update_resource(struct pci_dev *dev, int resno)
 			       "(high %#08x != %#08x)\n", resno, new, check);
 		}
 	}
+
+	if (disable)
+		pci_write_config_word(dev, PCI_COMMAND, cmd);
+
 	res->flags &= ~IORESOURCE_UNSET;
 	dev_info(&dev->dev, "BAR %d: set to %pR (PCI address [%#llx-%#llx]\n",
 		 resno, res, (unsigned long long)region.start,
@@ -114,7 +132,6 @@ int pci_claim_resource(struct pci_dev *dev, int resource)
 }
 EXPORT_SYMBOL(pci_claim_resource);
 
-#ifdef CONFIG_PCI_QUIRKS
 void pci_disable_bridge_window(struct pci_dev *dev)
 {
 	dev_info(&dev->dev, "disabling bridge mem windows\n");
@@ -127,7 +144,6 @@ void pci_disable_bridge_window(struct pci_dev *dev)
 	pci_write_config_dword(dev, PCI_PREF_MEMORY_BASE, 0x0000fff0);
 	pci_write_config_dword(dev, PCI_PREF_BASE_UPPER32, 0xffffffff);
 }
-#endif	/* CONFIG_PCI_QUIRKS */
 
 static int __pci_assign_resource(struct pci_bus *bus, struct pci_dev *dev,
 				 int resno)

@@ -866,9 +866,12 @@ static int inet_diag_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 			    inet_diag_bc_audit(nla_data(attr), nla_len(attr)))
 				return -EINVAL;
 		}
-
-		return netlink_dump_start(idiagnl, skb, nlh,
-					  inet_diag_dump, NULL);
+		{
+			struct netlink_dump_control c = {
+				.dump = inet_diag_dump,
+			};
+			return netlink_dump_start(idiagnl, skb, nlh, &c);
+		}
 	}
 
 	return inet_diag_get_exact(skb, nlh);

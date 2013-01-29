@@ -32,7 +32,7 @@ extern struct apic apic_x2apic_cluster;
 struct apic __read_mostly *apic = &apic_flat;
 EXPORT_SYMBOL_GPL(apic);
 
-static struct apic *apic_probe[] __initdata = {
+struct apic *apic_probe[] __initdata = {
 #ifdef CONFIG_X86_UV
 	&apic_x2apic_uv_x,
 #endif
@@ -41,6 +41,7 @@ static struct apic *apic_probe[] __initdata = {
 	&apic_x2apic_cluster,
 #endif
 	&apic_physflat,
+	&apic_flat,	/* must be last */
 	NULL,
 };
 

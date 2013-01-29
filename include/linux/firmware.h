@@ -14,6 +14,12 @@ struct firmware {
 	const u8 *data;
 };
 
+struct firmware_pages {
+	struct list_head list;
+	struct firmware *firmware;
+	struct page **pages;
+};
+
 struct device;
 
 struct builtin_fw {

@@ -240,11 +240,11 @@ void aac_fib_init(struct fib *fibptr)
 {
 	struct hw_fib *hw_fib = fibptr->hw_fib_va;
 
+	memset(&hw_fib->header, 0, sizeof(struct aac_fibhdr));
 	hw_fib->header.StructType = FIB_MAGIC;
 	hw_fib->header.Size = cpu_to_le16(fibptr->dev->max_fib_size);
 	hw_fib->header.XferState = cpu_to_le32(HostOwned | FibInitialized | FibEmpty | FastResponseCapable);
-	hw_fib->header.SenderFibAddress = 0; /* Filled in later if needed */
-	hw_fib->header.ReceiverFibAddress = cpu_to_le32(fibptr->hw_fib_pa);
+	hw_fib->header.u.ReceiverFibAddress = cpu_to_le32(fibptr->hw_fib_pa);
 	hw_fib->header.SenderSize = cpu_to_le16(fibptr->dev->max_fib_size);
 }
 
@@ -259,7 +259,6 @@ void aac_fib_init(struct fib *fibptr)
 static void fib_dealloc(struct fib * fibptr)
 {
 	struct hw_fib *hw_fib = fibptr->hw_fib_va;
-	BUG_ON(hw_fib->header.StructType != FIB_MAGIC);
 	hw_fib->header.XferState = 0;
 }
 
@@ -370,7 +369,7 @@ int aac_queue_get(struct aac_dev * dev, u32 * index, u32 qid, struct hw_fib * hw
 		entry->size = cpu_to_le32(le16_to_cpu(hw_fib->header.Size));
 		entry->addr = hw_fib->header.SenderFibAddress;
 			/* Restore adapters pointer to the FIB */
-		hw_fib->header.ReceiverFibAddress = hw_fib->header.SenderFibAddress;	/* Let the adapter now where to find its data */
+		hw_fib->header.u.ReceiverFibAddress = hw_fib->header.SenderFibAddress;  /* Let the adapter now where to find its data */
 		map = 0;
 	}
 	/*
@@ -416,6 +415,7 @@ int aac_fib_send(u16 command, struct fib *fibptr, unsigned long size,
 	unsigned long flags = 0;
 	unsigned long qflags;
 	unsigned long mflags = 0;
+	unsigned long sflags = 0;
 
 	if (!(hw_fib->header.XferState & cpu_to_le32(HostOwned)))
 		return -EBUSY;
@@ -448,7 +448,7 @@ int aac_fib_send(u16 command, struct fib *fibptr, unsigned long size,
 	 */
 
 	hw_fib->header.SenderFibAddress = cpu_to_le32(((u32)(fibptr - dev->fibs)) << 2);
-	hw_fib->header.SenderData = (u32)(fibptr - dev->fibs);
+	hw_fib->header.Handle = (u32)(fibptr - dev->fibs) + 1;
 	/*
 	 *	Set FIB state to indicate where it came from and if we want a
 	 *	response from the adapter. Also load the command from the
@@ -458,7 +458,6 @@ int aac_fib_send(u16 command, struct fib *fibptr, unsigned long size,
 	 */
 	hw_fib->header.Command = cpu_to_le16(command);
 	hw_fib->header.XferState |= cpu_to_le32(SentFromHost);
-	fibptr->hw_fib_va->header.Flags = 0;	/* 0 the flags field - internal only*/
 	/*
 	 *	Set the size of the Fib we want to send to the adapter
 	 */
@@ -511,6 +510,31 @@ int aac_fib_send(u16 command, struct fib *fibptr, unsigned long size,
 		spin_lock_irqsave(&fibptr->event_lock, flags);
 	}
 
+	if (dev->sync_mode) {
+		if (wait)
+			spin_unlock_irqrestore(&fibptr->event_lock, flags);
+		spin_lock_irqsave(&dev->sync_lock, sflags);
+		if (dev->sync_fib) {
+			list_add_tail(&fibptr->fiblink, &dev->sync_fib_list);
+			spin_unlock_irqrestore(&dev->sync_lock, sflags);
+		} else {
+			dev->sync_fib = fibptr;
+			spin_unlock_irqrestore(&dev->sync_lock, sflags);
+			aac_adapter_sync_cmd(dev, SEND_SYNCHRONOUS_FIB,
+				(u32)fibptr->hw_fib_pa, 0, 0, 0, 0, 0,
+				NULL, NULL, NULL, NULL, NULL);
+		}
+		if (wait) {
+			fibptr->flags |= FIB_CONTEXT_FLAG_WAIT;
+			if (down_interruptible(&fibptr->event_wait)) {
+				fibptr->flags &= ~FIB_CONTEXT_FLAG_WAIT;
+				return -EFAULT;
+			}
+			return 0;
+		}
+		return -EINPROGRESS;
+	}
+
 	if (aac_adapter_deliver(fibptr) != 0) {
 		printk(KERN_ERR "aac_fib_send: returned -EBUSY\n");
 		if (wait) {
@@ -536,10 +560,10 @@ int aac_fib_send(u16 command, struct fib *fibptr, unsigned long size,
 			 * functioning because an interrupt routing or other
 			 * hardware failure has occurred.
 			 */
-			unsigned long count = 36000000L; /* 3 minutes */
+			unsigned long timeout = jiffies + (180 * HZ); /* 3 minutes */
 			while (down_trylock(&fibptr->event_wait)) {
 				int blink;
-				if (--count == 0) {
+				if (time_is_before_eq_jiffies(timeout)) {
 					struct aac_queue * q = &dev->queues->queue[AdapNormCmdQueue];
 					spin_lock_irqsave(q->lock, qflags);
 					q->numpending--;
@@ -560,7 +584,10 @@ int aac_fib_send(u16 command, struct fib *fibptr, unsigned long size,
 					}
 					return -EFAULT;
 				}
-				udelay(5);
+				/* We used to udelay() here but that absorbed
+				 * a CPU when a timeout occured. Not very
+				 * useful. */
+				cpu_relax();
 			}
 		} else if (down_interruptible(&fibptr->event_wait)) {
 			/* Do nothing ... satisfy
@@ -680,7 +707,8 @@ int aac_fib_adapter_complete(struct fib *fibptr, unsigned short size)
 	unsigned long nointr = 0;
 	unsigned long qflags;
 
-	if (dev->comm_interface == AAC_COMM_MESSAGE_TYPE1) {
+	if (dev->comm_interface == AAC_COMM_MESSAGE_TYPE1 ||
+	    dev->comm_interface == AAC_COMM_MESSAGE_TYPE2) {
 		kfree(hw_fib);
 		return 0;
 	}
@@ -693,7 +721,9 @@ int aac_fib_adapter_complete(struct fib *fibptr, unsigned short size)
 	/*
 	 *	If we plan to do anything check the structure type first.
 	 */
-	if (hw_fib->header.StructType != FIB_MAGIC) {
+	if (hw_fib->header.StructType != FIB_MAGIC &&
+	    hw_fib->header.StructType != FIB_MAGIC2 &&
+	    hw_fib->header.StructType != FIB_MAGIC2_64) {
 		if (dev->comm_interface == AAC_COMM_MESSAGE)
 			kfree(hw_fib);
 		return -EINVAL;
@@ -755,7 +785,9 @@ int aac_fib_complete(struct fib *fibptr)
 	 *	If we plan to do anything check the structure type first.
 	 */
 
-	if (hw_fib->header.StructType != FIB_MAGIC)
+	if (hw_fib->header.StructType != FIB_MAGIC &&
+	    hw_fib->header.StructType != FIB_MAGIC2 &&
+	    hw_fib->header.StructType != FIB_MAGIC2_64)
 		return -EINVAL;
 	/*
 	 *	This block completes a cdb which orginated on the host and we
@@ -987,6 +1019,16 @@ static void aac_handle_aif(struct aac_dev * dev, struct fib * fibptr)
 			device_config_needed =
 			  (((__le32 *)aifcmd->data)[0] ==
 			    cpu_to_le32(AifEnAddJBOD)) ? ADD : DELETE;
+			if (device_config_needed == ADD) {
+				device = scsi_device_lookup(dev->scsi_host_ptr,
+					channel,
+					id,
+					lun);
+				if (device) {
+					scsi_remove_device(device);
+					scsi_device_put(device);
+				}
+			}
 			break;
 
 		case AifEnEnclosureManagement:
@@ -1263,6 +1305,8 @@ static int _aac_reset_adapter(struct aac_dev *aac, int forced)
 	kfree(aac->queues);
 	aac->queues = NULL;
 	free_irq(aac->pdev->irq, aac);
+	if (aac->msi)
+		pci_disable_msi(aac->pdev);
 	kfree(aac->fsa_dev);
 	aac->fsa_dev = NULL;
 	quirks = aac_get_driver_ident(index)->quirks;

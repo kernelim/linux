@@ -81,14 +81,6 @@ static struct ipv4_devconf ipv4_devconf_dflt = {
 	},
 };
 
-struct ipv4_devconf_extensions ipv4_devconf_ext = {
-	.accept_local = 0,
-};
-
-static struct ipv4_devconf_extensions ipv4_devconf_dflt_ext = {
-	.accept_local = 0,
-};
-
 #define IPV4_DEVCONF_DFLT(net, attr) \
 	IPV4_DEVCONF((*net->ipv4.devconf_dflt), attr)
 
@@ -157,8 +149,6 @@ void in_dev_finish_destroy(struct in_device *idev)
 static struct in_device *inetdev_init(struct net_device *dev)
 {
 	struct in_device *in_dev;
-	struct ipv4_devconf_extensions *ext = dev ?
-				netdev_ipv4_devconf_extended(dev) : NULL;
 
 	ASSERT_RTNL();
 
@@ -167,8 +157,6 @@ static struct in_device *inetdev_init(struct net_device *dev)
 		goto out;
 	memcpy(&in_dev->cnf, dev_net(dev)->ipv4.devconf_dflt,
 			sizeof(in_dev->cnf));
-	if (ext)
-		memcpy(ext, &ipv4_devconf_dflt_ext, sizeof(ipv4_devconf_dflt_ext));
 
 	in_dev->cnf.sysctl = NULL;
 	in_dev->dev = dev;
@@ -1038,6 +1026,21 @@ static inline bool inetdev_valid_mtu(unsigned mtu)
 	return mtu >= 68;
 }
 
+static void inetdev_send_gratuitous_arp(struct net_device *dev,
+					struct in_device *in_dev)
+
+{
+	struct in_ifaddr *ifa;
+
+	for (ifa = in_dev->ifa_list; ifa;
+	     ifa = ifa->ifa_next) {
+		arp_send(ARPOP_REQUEST, ETH_P_ARP,
+			 ifa->ifa_local, dev,
+			 ifa->ifa_local, NULL,
+			 dev->dev_addr, NULL);
+	}
+}
+
 /* Called only under RTNL semaphore */
 
 static int inetdev_event(struct notifier_block *this, unsigned long event,
@@ -1089,18 +1092,13 @@ static int inetdev_event(struct notifier_block *this, unsigned long event,
 		}
 		ip_mc_up(in_dev);
 		/* fall through */
-	case NETDEV_NOTIFY_PEERS:
 	case NETDEV_CHANGEADDR:
+		if (!IN_DEV_ARP_NOTIFY(in_dev))
+			break;
+		/* fall through */
+	case NETDEV_NOTIFY_PEERS:
 		/* Send gratuitous ARP to notify of link change */
-		if (IN_DEV_ARP_NOTIFY(in_dev)) {
-			struct in_ifaddr *ifa = in_dev->ifa_list;
-
-			if (ifa)
-				arp_send(ARPOP_REQUEST, ETH_P_ARP,
-					 ifa->ifa_address, dev,
-					 ifa->ifa_address, NULL,
-					 dev->dev_addr, NULL);
-		}
+		inetdev_send_gratuitous_arp(dev, in_dev);
 		break;
 	case NETDEV_DOWN:
 		ip_mc_down(in_dev);
@@ -1488,48 +1486,17 @@ static struct devinet_sysctl_table {
 					      "force_igmp_version"),
 		DEVINET_SYSCTL_FLUSHING_ENTRY(PROMOTE_SECONDARIES,
 					      "promote_secondaries"),
-		{
-			.ctl_name	= NET_IPV4_CONF_ACCEPT_LOCAL,
-			.procname	= "accept_local",
-			.data		= &ipv4_devconf_ext.accept_local,
-			.maxlen		= sizeof(int),
-			.mode		= 0644,
-			.proc_handler	= &devinet_conf_proc,
-			.strategy	= &devinet_conf_sysctl,
-			.extra1		= &ipv4_devconf,
-		},
-
+		DEVINET_SYSCTL_RW_ENTRY(ACCEPT_LOCAL, "accept_local"),
+		DEVINET_SYSCTL_FLUSHING_ENTRY(ROUTE_LOCALNET,
+					      "route_localnet"),
 	},
 };
-
-/*
- * Check for conf attribute inside the ipv4_devconf_extensions struct,
- * and prepares their the value storage.
- *
- * Returns 1 if the attribute was extented, 0 otherwise.
- */
-static int check_ipv4_ext_conf(ctl_table *t, struct net_device *dev, int dflt)
-{
-	struct ipv4_devconf_extensions *ipv4_ext = dev ?
-				netdev_ipv4_devconf_extended(dev) : NULL;
-
-	if (t->ctl_name != NET_IPV4_CONF_ACCEPT_LOCAL)
-		return 0;
-
-	if (ipv4_ext)
-		t->data += (char *)ipv4_ext - (char*) &ipv4_devconf_ext;
-	else if (dflt)
-		t->data = &ipv4_devconf_dflt_ext.accept_local;
-
-	return 1;
-}
 
 static int __devinet_sysctl_register(struct net *net, char *dev_name,
 		int ctl_name, struct ipv4_devconf *p)
 {
 	int i;
 	struct devinet_sysctl_table *t;
-	struct net_device *dev = NULL;
 
 #define DEVINET_CTL_PATH_DEV	3
 
@@ -1545,14 +1512,8 @@ static int __devinet_sysctl_register(struct net *net, char *dev_name,
 	if (!t)
 		goto out;
 
-	dev = __dev_get_by_name(net, dev_name);
 	for (i = 0; i < ARRAY_SIZE(t->devinet_vars) - 1; i++) {
-		if (!check_ipv4_ext_conf(&t->devinet_vars[i], dev,
-				   p == &ipv4_devconf_dflt)) {
-			t->devinet_vars[i].data +=
-					(char *)p - (char *)&ipv4_devconf;
-		}
-
+		t->devinet_vars[i].data += (char *)p - (char *)&ipv4_devconf;
 		t->devinet_vars[i].extra1 = p;
 		t->devinet_vars[i].extra2 = net;
 	}
@@ -1736,9 +1697,9 @@ void __init devinet_init(void)
 	register_gifconf(PF_INET, inet_gifconf);
 	register_netdevice_notifier(&ip_netdev_notifier);
 
-	rtnl_register(PF_INET, RTM_NEWADDR, inet_rtm_newaddr, NULL);
-	rtnl_register(PF_INET, RTM_DELADDR, inet_rtm_deladdr, NULL);
-	rtnl_register(PF_INET, RTM_GETADDR, NULL, inet_dump_ifaddr);
+	rtnl_register(PF_INET, RTM_NEWADDR, inet_rtm_newaddr, NULL, NULL);
+	rtnl_register(PF_INET, RTM_DELADDR, inet_rtm_deladdr, NULL, NULL);
+	rtnl_register(PF_INET, RTM_GETADDR, NULL, inet_dump_ifaddr, NULL);
 }
 
 EXPORT_SYMBOL(in_dev_finish_destroy);

@@ -422,6 +422,7 @@ EXPORT_SYMBOL(udelay);
 
 static inline void update_gtod(u64 new_tb_stamp, u64 new_stamp_xsec,
 			       u64 new_tb_to_xs, struct timespec *now,
+			       struct timespec *wall_time,
 			       u32 frac_sec)
 {
 	/*
@@ -438,9 +439,9 @@ static inline void update_gtod(u64 new_tb_stamp, u64 new_stamp_xsec,
 	vdso_data->tb_orig_stamp = new_tb_stamp;
 	vdso_data->stamp_xsec = new_stamp_xsec;
 	vdso_data->tb_to_xs = new_tb_to_xs;
-	vdso_data->wtom_clock_sec = wall_to_monotonic.tv_sec;
-	vdso_data->wtom_clock_nsec = wall_to_monotonic.tv_nsec;
-	vdso_data->stamp_xtime = *now;
+	vdso_data->wtom_clock_sec = now->tv_sec;
+	vdso_data->wtom_clock_nsec = now->tv_nsec;
+	vdso_data->stamp_xtime = *wall_time;
 	vdso_data->stamp_sec_fraction = frac_sec;
 	smp_wmb();
 	++(vdso_data->tb_update_count);
@@ -863,12 +864,11 @@ static cycle_t timebase_read(struct clocksource *cs)
 	return (cycle_t)get_tb();
 }
 
-void update_vsyscall(struct timespec *wall_time, struct clocksource *clock,
-		     u32 mult)
+void update_vsyscall(struct timespec *wall_time, struct timespec *wtm,
+			struct clocksource *clock, u32 mult)
 {
 	u64 t2x, stamp_xsec;
 	u32 frac_sec;
-	struct timespec t;
 
 	if (clock != &clocksource_timebase)
 		return;
@@ -880,18 +880,17 @@ void update_vsyscall(struct timespec *wall_time, struct clocksource *clock,
 	/* XXX this assumes clock->shift == 22 */
 	/* 4611686018 ~= 2^(20+64-22) / 1e9 */
 	t2x = (u64) mult * 4611686018ULL;
-	stamp_xsec = (u64) xtime.tv_nsec * XSEC_PER_SEC;
+	stamp_xsec = (u64) wall_time->tv_nsec * XSEC_PER_SEC;
 	do_div(stamp_xsec, 1000000000);
-	stamp_xsec += (u64) xtime.tv_sec * XSEC_PER_SEC;
+	stamp_xsec += (u64) wall_time->tv_sec * XSEC_PER_SEC;
 
-	t = xtime;
-	if (t.tv_nsec >= 1000000000) {
-		++t.tv_sec;
-		t.tv_nsec -= 1000000000;
+	if (wall_time->tv_nsec >= 1000000000) {
+		++wall_time->tv_sec;
+		wall_time->tv_nsec -= 1000000000;
 	}
 	/* this is tv_nsec / 1e9 as a 0.32 fraction */
-	frac_sec = ((u64) t.tv_nsec * 18446744073ULL) >> 32;
-	update_gtod(clock->cycle_last, stamp_xsec, t2x, &t, frac_sec);
+	frac_sec = ((u64) wall_time->tv_nsec * 18446744073ULL) >> 32;
+	update_gtod(clock->cycle_last, stamp_xsec, t2x, wtm, wall_time, frac_sec);
 }
 
 void update_vsyscall_tz(void)
@@ -1078,8 +1077,6 @@ void __init time_init(void)
 	/* Save the current timebase to pretty up CONFIG_PRINTK_TIME */
 	boot_tb = get_tb_or_rtc();
 
-	write_seqlock_irqsave(&xtime_lock, flags);
-
 	/* If platform provided a timezone (pmac), we correct the time */
         if (timezone_offset) {
 		sys_tz.tz_minuteswest = -timezone_offset / 60;
@@ -1089,10 +1086,8 @@ void __init time_init(void)
 	vdso_data->tb_orig_stamp = tb_last_jiffy;
 	vdso_data->tb_update_count = 0;
 	vdso_data->tb_ticks_per_sec = tb_ticks_per_sec;
-	vdso_data->stamp_xsec = (u64) xtime.tv_sec * XSEC_PER_SEC;
+	vdso_data->stamp_xsec = (u64) get_seconds() * XSEC_PER_SEC;
 	vdso_data->tb_to_xs = tb_to_xs;
-
-	write_sequnlock_irqrestore(&xtime_lock, flags);
 
 	/* Start the decrementer on CPUs that have manual control
 	 * such as BookE

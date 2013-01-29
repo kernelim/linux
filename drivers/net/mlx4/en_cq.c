@@ -51,7 +51,7 @@ int mlx4_en_create_cq(struct mlx4_en_priv *priv,
 	int err;
 
 	cq->size = entries;
-	cq->buf_size = cq->size * sizeof(struct mlx4_cqe);
+	cq->buf_size = cq->size * mdev->dev->caps.cqe_size;
 
 	cq->ring = ring;
 	cq->is_tx = mode;
@@ -118,11 +118,7 @@ int mlx4_en_activate_cq(struct mlx4_en_priv *priv, struct mlx4_en_cq *cq)
 	cq->mcq.comp  = cq->is_tx ? mlx4_en_tx_irq : mlx4_en_rx_irq;
 	cq->mcq.event = mlx4_en_cq_event;
 
-	if (cq->is_tx) {
-		init_timer(&cq->timer);
-		cq->timer.function = mlx4_en_poll_tx_cq;
-		cq->timer.data = (unsigned long) cq;
-	} else {
+	if (!cq->is_tx) {
 		netif_napi_add(cq->dev, &cq->napi, mlx4_en_poll_rx_cq, 64);
 		napi_enable(&cq->napi);
 	}
@@ -130,14 +126,13 @@ int mlx4_en_activate_cq(struct mlx4_en_priv *priv, struct mlx4_en_cq *cq)
 	return 0;
 }
 
-void mlx4_en_destroy_cq(struct mlx4_en_priv *priv, struct mlx4_en_cq *cq,
-			bool reserve_vectors)
+void mlx4_en_destroy_cq(struct mlx4_en_priv *priv, struct mlx4_en_cq *cq)
 {
 	struct mlx4_en_dev *mdev = priv->mdev;
 
 	mlx4_en_unmap_buffer(&cq->wqres.buf);
 	mlx4_free_hwq_res(mdev->dev, &cq->wqres, cq->buf_size);
-	if (priv->mdev->dev->caps.comp_pool && cq->vector && !reserve_vectors)
+	if (priv->mdev->dev->caps.comp_pool && cq->vector)
 		mlx4_release_eq(priv->mdev->dev, cq->vector);
 	cq->buf_size = 0;
 	cq->buf = NULL;
@@ -145,16 +140,12 @@ void mlx4_en_destroy_cq(struct mlx4_en_priv *priv, struct mlx4_en_cq *cq,
 
 void mlx4_en_deactivate_cq(struct mlx4_en_priv *priv, struct mlx4_en_cq *cq)
 {
-	struct mlx4_en_dev *mdev = priv->mdev;
-
-	if (cq->is_tx)
-		del_timer(&cq->timer);
-	else {
+	if (!cq->is_tx) {
 		napi_disable(&cq->napi);
 		netif_napi_del(&cq->napi);
 	}
 
-	mlx4_cq_free(mdev->dev, &cq->mcq);
+	mlx4_cq_free(priv->mdev->dev, &cq->mcq);
 }
 
 /* Set rx cq moderation parameters */

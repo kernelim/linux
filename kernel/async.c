@@ -64,8 +64,10 @@ static async_cookie_t next_cookie = 1;
 #define MAX_WORK	32768
 
 static LIST_HEAD(async_pending);
-static LIST_HEAD(async_running);
+static ASYNC_DOMAIN(async_running);
+static LIST_HEAD(async_domains);
 static DEFINE_SPINLOCK(async_lock);
+static DEFINE_MUTEX(async_register_mutex);
 
 static int async_enabled = 0;
 
@@ -74,7 +76,7 @@ struct async_entry {
 	async_cookie_t   cookie;
 	async_func_ptr	 *func;
 	void             *data;
-	struct list_head *running;
+	struct async_domain *running;
 };
 
 static DECLARE_WAIT_QUEUE_HEAD(async_done);
@@ -83,19 +85,16 @@ static DECLARE_WAIT_QUEUE_HEAD(async_new);
 static atomic_t entry_count;
 static atomic_t thread_count;
 
-extern int initcall_debug;
-
 
 /*
  * MUST be called with the lock held!
  */
-static async_cookie_t  __lowest_in_progress(struct list_head *running)
+static async_cookie_t  __lowest_in_progress(struct async_domain *running)
 {
 	struct async_entry *entry;
 
-	if (!list_empty(running)) {
-		entry = list_first_entry(running,
-			struct async_entry, list);
+	if (!list_empty(&running->domain)) {
+		entry = list_first_entry(&running->domain, typeof(*entry), list);
 		return entry->cookie;
 	}
 
@@ -106,7 +105,7 @@ static async_cookie_t  __lowest_in_progress(struct list_head *running)
 	return next_cookie;	/* "infinity" value */
 }
 
-static async_cookie_t  lowest_in_progress(struct list_head *running)
+static async_cookie_t  lowest_in_progress(struct async_domain *running)
 {
 	unsigned long flags;
 	async_cookie_t ret;
@@ -124,6 +123,7 @@ static void run_one_entry(void)
 	unsigned long flags;
 	struct async_entry *entry;
 	ktime_t calltime, delta, rettime;
+	struct async_domain *running;
 
 	/* 1) pick one task from the pending queue */
 
@@ -131,9 +131,10 @@ static void run_one_entry(void)
 	if (list_empty(&async_pending))
 		goto out;
 	entry = list_first_entry(&async_pending, struct async_entry, list);
+	running = entry->running;
 
 	/* 2) move it to the running queue */
-	list_move_tail(&entry->list, entry->running);
+	list_move_tail(&entry->list, &running->domain);
 	spin_unlock_irqrestore(&async_lock, flags);
 
 	/* 3) run it (and print duration)*/
@@ -155,6 +156,8 @@ static void run_one_entry(void)
 	/* 4) remove it from the running queue */
 	spin_lock_irqsave(&async_lock, flags);
 	list_del(&entry->list);
+	if (running->registered && --running->count == 0)
+		list_del_init(&running->node);
 
 	/* 5) free the entry  */
 	kfree(entry);
@@ -171,7 +174,7 @@ out:
 }
 
 
-static async_cookie_t __async_schedule(async_func_ptr *ptr, void *data, struct list_head *running)
+static async_cookie_t __async_schedule(async_func_ptr *ptr, void *data, struct async_domain *running)
 {
 	struct async_entry *entry;
 	unsigned long flags;
@@ -202,6 +205,8 @@ static async_cookie_t __async_schedule(async_func_ptr *ptr, void *data, struct l
 	spin_lock_irqsave(&async_lock, flags);
 	newcookie = entry->cookie = next_cookie++;
 	list_add_tail(&entry->list, &async_pending);
+	if (running->registered && running->count++ == 0)
+		list_add_tail(&running->node, &async_domains);
 	atomic_inc(&entry_count);
 	spin_unlock_irqrestore(&async_lock, flags);
 	wake_up(&async_new);
@@ -235,7 +240,7 @@ EXPORT_SYMBOL_GPL(async_schedule);
  * Note: This function may be called from atomic or non-atomic contexts.
  */
 async_cookie_t async_schedule_domain(async_func_ptr *ptr, void *data,
-				     struct list_head *running)
+				     struct async_domain *running)
 {
 	return __async_schedule(ptr, data, running);
 }
@@ -248,22 +253,52 @@ EXPORT_SYMBOL_GPL(async_schedule_domain);
  */
 void async_synchronize_full(void)
 {
+	mutex_lock(&async_register_mutex);
 	do {
-		async_synchronize_cookie(next_cookie);
-	} while (!list_empty(&async_running) || !list_empty(&async_pending));
+		struct async_domain *domain = NULL;
+
+		spin_lock_irq(&async_lock);
+		if (!list_empty(&async_domains))
+			domain = list_first_entry(&async_domains, typeof(*domain), node);
+		spin_unlock_irq(&async_lock);
+
+		async_synchronize_cookie_domain(next_cookie, domain);
+	} while (!list_empty(&async_domains));
+	mutex_unlock(&async_register_mutex);
 }
 EXPORT_SYMBOL_GPL(async_synchronize_full);
 
 /**
+ * async_unregister_domain - ensure no more anonymous waiters on this domain
+ * @domain: idle domain to flush out of any async_synchronize_full instances
+ *
+ * async_synchronize_{cookie|full}_domain() are not flushed since callers
+ * of these routines should know the lifetime of @domain
+ *
+ * Prefer ASYNC_DOMAIN_EXCLUSIVE() declarations over flushing
+ */
+void async_unregister_domain(struct async_domain *domain)
+{
+	mutex_lock(&async_register_mutex);
+	spin_lock_irq(&async_lock);
+	WARN_ON(!domain->registered || !list_empty(&domain->node) ||
+		!list_empty(&domain->domain));
+	domain->registered = 0;
+	spin_unlock_irq(&async_lock);
+	mutex_unlock(&async_register_mutex);
+}
+EXPORT_SYMBOL_GPL(async_unregister_domain);
+
+/**
  * async_synchronize_full_domain - synchronize all asynchronous function within a certain domain
- * @list: running list to synchronize on
+ * @domain: running list to synchronize on
  *
  * This function waits until all asynchronous function calls for the
- * synchronization domain specified by the running list @list have been done.
+ * synchronization domain specified by the running list @domain have been done.
  */
-void async_synchronize_full_domain(struct list_head *list)
+void async_synchronize_full_domain(struct async_domain *domain)
 {
-	async_synchronize_cookie_domain(next_cookie, list);
+	async_synchronize_cookie_domain(next_cookie, domain);
 }
 EXPORT_SYMBOL_GPL(async_synchronize_full_domain);
 
@@ -273,13 +308,15 @@ EXPORT_SYMBOL_GPL(async_synchronize_full_domain);
  * @running: running list to synchronize on
  *
  * This function waits until all asynchronous function calls for the
- * synchronization domain specified by the running list @list submitted
+ * synchronization domain specified by running list @running submitted
  * prior to @cookie have been done.
  */
-void async_synchronize_cookie_domain(async_cookie_t cookie,
-				     struct list_head *running)
+void async_synchronize_cookie_domain(async_cookie_t cookie, struct async_domain *running)
 {
 	ktime_t starttime, delta, endtime;
+
+	if (!running)
+		return;
 
 	if (initcall_debug && system_state == SYSTEM_BOOTING) {
 		printk("async_waiting @ %i\n", task_pid_nr(current));

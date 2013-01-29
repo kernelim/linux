@@ -103,21 +103,6 @@ static int __init pcibus_class_init(void)
 }
 postcore_initcall(pcibus_class_init);
 
-/*
- * Translate the low bits of the PCI base
- * to the resource type
- */
-static inline unsigned int pci_calc_resource_flags(unsigned int flags)
-{
-	if (flags & PCI_BASE_ADDRESS_SPACE_IO)
-		return IORESOURCE_IO;
-
-	if (flags & PCI_BASE_ADDRESS_MEM_PREFETCH)
-		return IORESOURCE_MEM | IORESOURCE_PREFETCH;
-
-	return IORESOURCE_MEM;
-}
-
 static u64 pci_size(u64 base, u64 maxbase, u64 mask)
 {
 	u64 size = mask & maxbase;	/* Find the significant bits */
@@ -136,18 +121,39 @@ static u64 pci_size(u64 base, u64 maxbase, u64 mask)
 	return size;
 }
 
-static inline enum pci_bar_type decode_bar(struct resource *res, u32 bar)
+static inline unsigned long decode_bar(struct pci_dev *dev, u32 bar)
 {
+	u32 mem_type;
+	unsigned long flags;
+
 	if ((bar & PCI_BASE_ADDRESS_SPACE) == PCI_BASE_ADDRESS_SPACE_IO) {
-		res->flags = bar & ~PCI_BASE_ADDRESS_IO_MASK;
-		return pci_bar_io;
+		flags = bar & ~PCI_BASE_ADDRESS_IO_MASK;
+		flags |= IORESOURCE_IO;
+		return flags;
 	}
 
-	res->flags = bar & ~PCI_BASE_ADDRESS_MEM_MASK;
+	flags = bar & ~PCI_BASE_ADDRESS_MEM_MASK;
+	flags |= IORESOURCE_MEM;
+	if (flags & PCI_BASE_ADDRESS_MEM_PREFETCH)
+		flags |= IORESOURCE_PREFETCH;
 
-	if (res->flags & PCI_BASE_ADDRESS_MEM_TYPE_64)
-		return pci_bar_mem64;
-	return pci_bar_mem32;
+	mem_type = bar & PCI_BASE_ADDRESS_MEM_TYPE_MASK;
+	switch (mem_type) {
+	case PCI_BASE_ADDRESS_MEM_TYPE_32:
+		break;
+	case PCI_BASE_ADDRESS_MEM_TYPE_1M:
+		dev_info(&dev->dev, "1M mem BAR treated as 32-bit BAR\n");
+		break;
+	case PCI_BASE_ADDRESS_MEM_TYPE_64:
+		flags |= IORESOURCE_MEM_64;
+		break;
+	default:
+		dev_warn(&dev->dev,
+			 "mem unknown type %x treated as 32-bit BAR\n",
+			 mem_type);
+		break;
+	}
+	return flags;
 }
 
 /**
@@ -163,8 +169,15 @@ int __pci_read_base(struct pci_dev *dev, enum pci_bar_type type,
 			struct resource *res, unsigned int pos)
 {
 	u32 l, sz, mask;
+	u16 orig_cmd;
 
 	mask = type ? ~PCI_ROM_ADDRESS_ENABLE : ~0;
+
+	if (!((struct pci_dev_rh1 *)dev->rh_reserved1)->mmio_always_on) {
+		pci_read_config_word(dev, PCI_COMMAND, &orig_cmd);
+		pci_write_config_word(dev, PCI_COMMAND,
+			orig_cmd & ~(PCI_COMMAND_MEMORY | PCI_COMMAND_IO));
+	}
 
 	res->name = pci_name(dev);
 
@@ -190,9 +203,9 @@ int __pci_read_base(struct pci_dev *dev, enum pci_bar_type type,
 		l = 0;
 
 	if (type == pci_bar_unknown) {
-		type = decode_bar(res, l);
-		res->flags |= pci_calc_resource_flags(l) | IORESOURCE_SIZEALIGN;
-		if (type == pci_bar_io) {
+		res->flags = decode_bar(dev, l);
+		res->flags |= IORESOURCE_SIZEALIGN;
+		if (res->flags & IORESOURCE_IO) {
 			l &= PCI_BASE_ADDRESS_IO_MASK;
 			mask = PCI_BASE_ADDRESS_IO_MASK & IO_SPACE_LIMIT;
 		} else {
@@ -205,7 +218,7 @@ int __pci_read_base(struct pci_dev *dev, enum pci_bar_type type,
 		mask = (u32)PCI_ROM_ADDRESS_MASK;
 	}
 
-	if (type == pci_bar_mem64) {
+	if (res->flags & IORESOURCE_MEM_64) {
 		u64 l64 = l;
 		u64 sz64 = sz;
 		u64 mask64 = mask | (u64)~0 << 32;
@@ -229,7 +242,6 @@ int __pci_read_base(struct pci_dev *dev, enum pci_bar_type type,
 			goto fail;
 		}
 
-		res->flags |= IORESOURCE_MEM_64;
 		if ((sizeof(resource_size_t) < 8) && l) {
 			/* Address above 32-bit boundary; disable the BAR */
 			pci_write_config_dword(dev, pos, 0);
@@ -255,7 +267,10 @@ int __pci_read_base(struct pci_dev *dev, enum pci_bar_type type,
 	}
 
  out:
-	return (type == pci_bar_mem64) ? 1 : 0;
+	if (!((struct pci_dev_rh1 *)dev->rh_reserved1)->mmio_always_on)
+		pci_write_config_word(dev, PCI_COMMAND, orig_cmd);
+
+	return (res->flags & IORESOURCE_MEM_64) ? 1 : 0;
  fail:
 	res->flags = 0;
 	goto out;
@@ -761,7 +776,7 @@ void set_pcie_hotplug_bridge(struct pci_dev *pdev)
 	u16 reg16;
 	u32 reg32;
 
-	pos = pci_find_capability(pdev, PCI_CAP_ID_EXP);
+	pos = pci_pcie_cap(pdev);
 	if (!pos)
 		return;
 	pci_read_config_word(pdev, pos + PCI_EXP_FLAGS, &reg16);
@@ -965,7 +980,7 @@ int pci_cfg_space_size(struct pci_dev *dev)
 	if (class == PCI_CLASS_BRIDGE_HOST)
 		return pci_cfg_space_size_ext(dev);
 
-	pos = pci_find_capability(dev, PCI_CAP_ID_EXP);
+	pos = pci_pcie_cap(dev);
 	if (!pos) {
 		pos = pci_find_capability(dev, PCI_CAP_ID_PCIX);
 		if (!pos)
@@ -1105,6 +1120,9 @@ void pci_device_add(struct pci_dev *dev, struct pci_bus *bus)
 
 	/* Fix up broken headers */
 	pci_fixup_device(pci_fixup_header, dev);
+
+	/* moved out from quirk header fixup code */
+	pci_reassigndev_resource_alignment(dev);
 
 	/* Clear the state_saved flag. */
 	dev->state_saved = false;

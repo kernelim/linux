@@ -49,6 +49,7 @@
 cpumask_var_t cpu_initialized_mask;
 cpumask_var_t cpu_callout_mask;
 cpumask_var_t cpu_callin_mask;
+cpumask_var_t cpu_may_complete_boot_mask;
 
 /* representing cpus for which sibling maps can be computed */
 cpumask_var_t cpu_sibling_setup_mask;
@@ -60,6 +61,7 @@ void __init setup_cpu_local_masks(void)
 	alloc_bootmem_cpumask_var(&cpu_callin_mask);
 	alloc_bootmem_cpumask_var(&cpu_callout_mask);
 	alloc_bootmem_cpumask_var(&cpu_sibling_setup_mask);
+	alloc_bootmem_cpumask_var(&cpu_may_complete_boot_mask);
 }
 
 static void __cpuinit default_init(struct cpuinfo_x86 *c)
@@ -904,7 +906,7 @@ static void __cpuinit identify_cpu(struct cpuinfo_x86 *c)
 	 *  or we have NX, then we don't need to do this.
 	 */
 	if (exec_shield != 0) {
-#ifdef CONFIG_X86_PAE
+#if defined(CONFIG_X86_PAE) || defined(CONFIG_X86_64)
 		if (!test_cpu_cap(c, X86_FEATURE_NX))
 #endif
 			clear_cpu_cap(c, X86_FEATURE_SEP);

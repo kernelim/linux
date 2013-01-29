@@ -41,6 +41,8 @@
  *
  */
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <net/mac80211.h>
 #include <asm/unaligned.h>
 
@@ -134,6 +136,8 @@ ath5k_add_interface(struct ieee80211_hw *hw, struct ieee80211_vif *vif)
 			ah->num_ap_vifs++;
 		else if (avf->opmode == NL80211_IFTYPE_ADHOC)
 			ah->num_adhoc_vifs++;
+		else if (avf->opmode == NL80211_IFTYPE_MESH_POINT)
+			ah->num_mesh_vifs++;
 	}
 
 	/* Any MAC address is fine, all others are included through the
@@ -175,6 +179,8 @@ ath5k_remove_interface(struct ieee80211_hw *hw,
 		ah->num_ap_vifs--;
 	else if (avf->opmode == NL80211_IFTYPE_ADHOC)
 		ah->num_adhoc_vifs--;
+	else if (avf->opmode == NL80211_IFTYPE_MESH_POINT)
+		ah->num_mesh_vifs--;
 
 	ath5k_update_bssid_mask_and_opmode(ah, NULL);
 	mutex_unlock(&ah->lock);
@@ -312,22 +318,42 @@ ath5k_bss_info_changed(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 
 static u64
 ath5k_prepare_multicast(struct ieee80211_hw *hw,
+#if 0 /* Not in RHEL */
+			struct netdev_hw_addr_list *mc_list)
+#else
 			int mc_count, struct dev_addr_list *ha)
+#endif
 {
 	u32 mfilt[2], val;
 	u8 pos;
+#if 0 /* Not in RHEL */
+	struct netdev_hw_addr *ha;
+#else
 	int i;
+#endif
 
 	mfilt[0] = 0;
 	mfilt[1] = 1;
 
+#if 0 /* Not in RHEL */
+	netdev_hw_addr_list_for_each(ha, mc_list) {
+#else
 	for (i = 0; i < mc_count; i++) {
 		if (!ha)
 			break;
+#endif
 		/* calculate XOR of eight 6-bit values */
+#if 0 /* Not in RHEL */
+		val = get_unaligned_le32(ha->addr + 0);
+#else
 		val = get_unaligned_le32(ha->dmi_addr + 0);
+#endif
 		pos = (val >> 18) ^ (val >> 12) ^ (val >> 6) ^ val;
+#if 0 /* Not in RHEL */
+		val = get_unaligned_le32(ha->addr + 3);
+#else
 		val = get_unaligned_le32(ha->dmi_addr + 3);
+#endif
 		pos ^= (val >> 18) ^ (val >> 12) ^ (val >> 6) ^ val;
 		pos &= 0x3f;
 		mfilt[pos / 32] |= (1 << (pos % 32));
@@ -336,7 +362,9 @@ ath5k_prepare_multicast(struct ieee80211_hw *hw,
 		* need to inform below not to reset the mcast */
 		/* ath5k_hw_set_mcast_filterindex(ah,
 		 *      ha->addr[5]); */
+#if 1 /* in RHEL */
 		ha = ha->next;
+#endif
 	}
 
 	return ((u64)(mfilt[1]) << 32) | mfilt[0];
@@ -485,6 +513,14 @@ ath5k_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
 
 	if (ath5k_modparam_nohwcrypt)
 		return -EOPNOTSUPP;
+
+	if (vif->type == NL80211_IFTYPE_ADHOC &&
+	    (key->cipher == WLAN_CIPHER_SUITE_TKIP ||
+	     key->cipher == WLAN_CIPHER_SUITE_CCMP) &&
+	    !(key->flags & IEEE80211_KEY_FLAG_PAIRWISE)) {
+		/* don't program group keys when using IBSS_RSN */
+		return -EOPNOTSUPP;
+	}
 
 	switch (key->cipher) {
 	case WLAN_CIPHER_SUITE_WEP40:

@@ -1407,10 +1407,11 @@ xfs_bmap_add_extent_unwritten_real(
 				goto done;
 			if ((error = xfs_btree_decrement(cur, 0, &i)))
 				goto done;
-			if (xfs_bmbt_update(cur, LEFT.br_startoff,
+			error = xfs_bmbt_update(cur, LEFT.br_startoff,
 				LEFT.br_startblock,
 				LEFT.br_blockcount + new->br_blockcount,
-				LEFT.br_state))
+				LEFT.br_state);
+			if (error)
 				goto done;
 		}
 		break;
@@ -2562,6 +2563,7 @@ xfs_bmap_btalloc(
 	 * Normal allocation, done through xfs_alloc_vextent.
 	 */
 	tryagain = isaligned = 0;
+	memset(&args, 0, sizeof(args));
 	args.tp = ap->tp;
 	args.mp = mp;
 	args.fsbno = ap->rval;
@@ -3195,6 +3197,7 @@ xfs_bmap_extents_to_btree(
 	 * Convert to a btree with two levels, one record in root.
 	 */
 	XFS_IFORK_FMT_SET(ip, whichfork, XFS_DINODE_FMT_BTREE);
+	memset(&args, 0, sizeof(args));
 	args.tp = tp;
 	args.mp = mp;
 	args.firstblock = *firstblock;
@@ -3356,6 +3359,7 @@ xfs_bmap_local_to_extents(
 		xfs_buf_t	*bp;	/* buffer for extent block */
 		xfs_bmbt_rec_host_t *ep;/* extent record pointer */
 
+		memset(&args, 0, sizeof(args));
 		args.tp = tp;
 		args.mp = ip->i_mount;
 		args.firstblock = *firstblock;
@@ -4044,11 +4048,8 @@ xfs_bmap_one_block(
 	xfs_bmbt_irec_t	s;		/* internal version of extent */
 
 #ifndef DEBUG
-	if (whichfork == XFS_DATA_FORK) {
-		return ((ip->i_d.di_mode & S_IFMT) == S_IFREG) ?
-			(ip->i_size == ip->i_mount->m_sb.sb_blocksize) :
-			(ip->i_d.di_size == ip->i_mount->m_sb.sb_blocksize);
-	}
+	if (whichfork == XFS_DATA_FORK)
+		return XFS_ISIZE(ip) == ip->i_mount->m_sb.sb_blocksize;
 #endif	/* !DEBUG */
 	if (XFS_IFORK_NEXTENTS(ip, whichfork) != 1)
 		return 0;
@@ -4060,7 +4061,7 @@ xfs_bmap_one_block(
 	xfs_bmbt_get_all(ep, &s);
 	rval = s.br_startoff == 0 && s.br_blockcount == 1;
 	if (rval && whichfork == XFS_DATA_FORK)
-		ASSERT(ip->i_size == ip->i_mount->m_sb.sb_blocksize);
+		ASSERT(XFS_ISIZE(ip) == ip->i_mount->m_sb.sb_blocksize);
 	return rval;
 }
 
@@ -4287,6 +4288,44 @@ xfs_bmap_validate_ret(
 #endif /* DEBUG */
 
 
+static void
+xfs_bmapi_allocate_worker(
+	struct work_struct	*work)
+{
+	struct xfs_bmalloca	*args = container_of(work,
+						struct xfs_bmalloca, work);
+	unsigned long		pflags;
+
+	/* we are in a transaction context here */
+	current_set_flags_nested(&pflags, PF_FSTRANS);
+
+	args->result = xfs_bmap_alloc(args);
+	complete(args->done);
+
+	current_restore_flags_nested(&pflags, PF_FSTRANS);
+}
+
+/*
+ * Some allocation requests often come in with little stack to work on. Push
+ * them off to a worker thread so there is lots of stack to use. Otherwise just
+ * call directly to avoid the context switch overhead here.
+ */
+int
+xfs_bmapi_allocate(
+	struct xfs_bmalloca	*args)
+{
+	DECLARE_COMPLETION_ONSTACK(done);
+
+	if (!args->stack_switch)
+		return xfs_bmap_alloc(args);
+
+	args->done = &done;
+	INIT_WORK(&args->work, xfs_bmapi_allocate_worker);
+	queue_work(xfs_alloc_wq, &args->work);
+	wait_for_completion(&done);
+	return args->result;
+}
+
 /*
  * Map file blocks to filesystem blocks.
  * File range is given by the bno/len pair.
@@ -4453,8 +4492,18 @@ xfs_bmapi(
 					xfs_bmbt_get_all(ep, &prev);
 				}
 			} else {
-				alen = (xfs_extlen_t)
-					XFS_FILBLKS_MIN(len, MAXEXTLEN);
+				/*
+				 * There's a 32/64 bit type mismatch between the
+				 * allocation length request (which can be 64
+				 * bits in length) and the bma length request,
+				 * which is xfs_extlen_t and therefore 32 bits.
+				 * Hence we have to check for 32-bit overflows
+				 * and handle them here.
+				 */
+				if (len > (xfs_filblks_t)MAXEXTLEN)
+					alen = MAXEXTLEN;
+				else
+					alen = len;
 				if (!eof)
 					alen = (xfs_extlen_t)
 						XFS_FILBLKS_MIN(alen,
@@ -4587,6 +4636,7 @@ xfs_bmapi(
 				bma.minlen = minlen;
 				bma.low = flist->xbf_low;
 				bma.minleft = minleft;
+				bma.flags = flags;
 				/*
 				 * Only want to do the alignment at the
 				 * eof if it is userdata and allocation length
@@ -4600,10 +4650,14 @@ xfs_bmapi(
 						goto error0;
 				} else
 					bma.aeof = 0;
+
+				if (flags & XFS_BMAPI_STACK_SWITCH)
+					bma.stack_switch = 1;
+
 				/*
 				 * Call allocator.
 				 */
-				if ((error = xfs_bmap_alloc(&bma)))
+				if ((error = xfs_bmapi_allocate(&bma)))
 					goto error0;
 				/*
 				 * Copy out result fields.
@@ -5031,6 +5085,15 @@ xfs_bunmapi(
 		cur->bc_private.b.flags = 0;
 	} else
 		cur = NULL;
+
+	if (isrt) {
+		/*
+		 * Synchronize by locking the bitmap inode.
+		 */
+		xfs_ilock(mp->m_rbmip, XFS_ILOCK_EXCL);
+		xfs_trans_ijoin(tp, mp->m_rbmip);
+	}
+
 	extno = 0;
 	while (bno != (xfs_fileoff_t)-1 && bno >= start && lastx >= 0 &&
 	       (nexts == 0 || extno < nexts)) {
@@ -5335,7 +5398,7 @@ xfs_getbmapx_fix_eof_hole(
 	if (startblock == HOLESTARTBLOCK) {
 		mp = ip->i_mount;
 		out->bmv_block = -1;
-		fixlen = XFS_FSB_TO_BB(mp, XFS_B_TO_FSB(mp, ip->i_size));
+		fixlen = XFS_FSB_TO_BB(mp, XFS_B_TO_FSB(mp, XFS_ISIZE(ip)));
 		fixlen -= out->bmv_offset;
 		if (prealloced && out->bmv_offset + out->bmv_length == end) {
 			/* Came to hole at EOF. Trim it. */
@@ -5423,7 +5486,7 @@ xfs_getbmap(
 			fixlen = XFS_MAXIOFFSET(mp);
 		} else {
 			prealloced = 0;
-			fixlen = ip->i_size;
+			fixlen = XFS_ISIZE(ip);
 		}
 	}
 
@@ -5447,12 +5510,16 @@ xfs_getbmap(
 	if (bmv->bmv_count > ULONG_MAX / sizeof(struct getbmapx))
 		return XFS_ERROR(ENOMEM);
 	out = kmem_zalloc(bmv->bmv_count * sizeof(struct getbmapx), KM_MAYFAIL);
-	if (!out)
-		return XFS_ERROR(ENOMEM);
+	if (!out) {
+		out = kmem_zalloc_large(bmv->bmv_count *
+					sizeof(struct getbmapx));
+		if (!out)
+			return XFS_ERROR(ENOMEM);
+	}
 
 	xfs_ilock(ip, XFS_IOLOCK_SHARED);
 	if (whichfork == XFS_DATA_FORK && !(iflags & BMV_IF_DELALLOC)) {
-		if (ip->i_delayed_blks || ip->i_size > ip->i_d.di_size) {
+		if (ip->i_delayed_blks || XFS_ISIZE(ip) > ip->i_d.di_size) {
 			error = xfs_flush_pages(ip, 0, -1, 0, FI_REMAPF);
 			if (error)
 				goto out_unlock_iolock;
@@ -5520,8 +5587,20 @@ xfs_getbmap(
 				XFS_FSB_TO_BB(mp, map[i].br_blockcount);
 			out[cur_ext].bmv_unused1 = 0;
 			out[cur_ext].bmv_unused2 = 0;
-			ASSERT(((iflags & BMV_IF_DELALLOC) != 0) ||
-			      (map[i].br_startblock != DELAYSTARTBLOCK));
+
+			/*
+			 * delayed allocation extents that start beyond EOF can
+			 * occur due to speculative EOF allocation when the
+			 * delalloc extent is larger than the largest freespace
+			 * extent at conversion time. These extents cannot be
+			 * converted by data writeback, so can exist here even
+			 * if we are not supposed to be finding delalloc
+			 * extents.
+			 */
+			if (map[i].br_startblock == DELAYSTARTBLOCK &&
+			    map[i].br_startoff <= XFS_B_TO_FSB(mp, XFS_ISIZE(ip)))
+				ASSERT((iflags & BMV_IF_DELALLOC) != 0);
+
                         if (map[i].br_startblock == HOLESTARTBLOCK &&
 			    whichfork == XFS_ATTR_FORK) {
 				/* came to the end of attribute fork */
@@ -5573,7 +5652,10 @@ xfs_getbmap(
 			break;
 	}
 
-	kmem_free(out);
+	if (is_vmalloc_addr(out))
+		kmem_free_large(out);
+	else
+		kmem_free(out);
 	return error;
 }
 

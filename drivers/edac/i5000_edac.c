@@ -495,9 +495,15 @@ static void i5000_process_fatal_error_info(struct mem_ctl_info *mci,
 	ras = NREC_RAS(info->nrecmemb);
 	cas = NREC_CAS(info->nrecmemb);
 
-	debugf0("\t\tCSROW= %d  Channels= %d,%d  (Branch= %d "
+	/*
+	 * According with Intel i5000 datasheet, in the case of
+	 * fatal errors, the FERR_FAT_FBD points to an error at
+	 * channel level, not at branch level. So, there's just
+	 * one channel affected by it
+	 */
+	debugf0("\t\tCSROW= %d  Channel= %d  (Branch= %d "
 		"DRAM Bank= %d rdwr= %s ras= %d cas= %d)\n",
-		rank, channel, channel + 1, branch >> 1, bank,
+		rank, channel, branch >> 1, bank,
 		rdwr ? "Write" : "Read", ras, cas);
 
 	/* Only 1 bit will be on */
@@ -539,7 +545,7 @@ static void i5000_process_fatal_error_info(struct mem_ctl_info *mci,
 		 allErrors, specific);
 
 	/* Call the helper to output message */
-	edac_mc_handle_fbd_ue(mci, rank, channel, channel + 1, msg);
+	edac_mc_handle_fbd_ue(mci, rank, channel, channel, msg);
 }
 
 /*

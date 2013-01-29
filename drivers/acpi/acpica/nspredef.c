@@ -421,6 +421,13 @@ acpi_ns_check_package(struct acpi_predefined_data *data,
 			  data->pathname, package->ret_info.type,
 			  return_object->package.count));
 
+	/*
+	 * For variable-length Packages, we can safely remove all embedded
+	 * and trailing NULL package elements
+	 */
+	acpi_ns_remove_null_elements(data, package->ret_info.type,
+				     return_object);
+
 	/* Extract package count and elements array */
 
 	elements = return_object->package.elements;
@@ -677,8 +684,13 @@ acpi_ns_check_package_list(struct acpi_predefined_data *data,
 	u32 i;
 	u32 j;
 
-	/* Validate each sub-Package in the parent Package */
-
+	/*
+	 * Validate each sub-Package in the parent Package
+	 *
+	 * NOTE: assumes list of sub-packages contains no NULL elements.
+	 * Any NULL elements should have been removed by earlier call
+	 * to acpi_ns_remove_null_elements.
+	 */
 	for (i = 0; i < count; i++) {
 		sub_package = *elements;
 		sub_elements = sub_package->package.elements;

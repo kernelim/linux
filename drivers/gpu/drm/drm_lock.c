@@ -33,6 +33,7 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
+#include <linux/export.h>
 #include "drmP.h"
 
 static int drm_notifier(void *priv);
@@ -68,10 +69,6 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	DRM_DEBUG("%d (pid %d) requests lock (0x%08x), flags = 0x%08x\n",
 		  lock->context, task_pid_nr(current),
 		  master->lock.hw_lock->lock, lock->flags);
-
-	if (drm_core_check_feature(dev, DRIVER_DMA_QUEUE))
-		if (lock->context < 0)
-			return -EINVAL;
 
 	add_wait_queue(&master->lock.lock_queue, &entry);
 	spin_lock_bh(&master->lock.spinlock);
@@ -330,7 +327,7 @@ static int drm_notifier(void *priv)
 
 void drm_idlelock_take(struct drm_lock_data *lock_data)
 {
-	int ret = 0;
+	int ret;
 
 	spin_lock_bh(&lock_data->spinlock);
 	lock_data->kernel_waiters++;

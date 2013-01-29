@@ -12,6 +12,7 @@
 #include <linux/inetdevice.h>
 #include <linux/seqlock.h>
 #include <linux/init.h>
+#include <linux/nsproxy.h>
 #include <net/snmp.h>
 #include <net/icmp.h>
 #include <net/ip.h>
@@ -20,11 +21,14 @@
 #include <net/udp.h>
 #include <net/cipso_ipv4.h>
 #include <net/inet_frag.h>
+#include <net/ping.h>
 
 static int zero;
 static int tcp_retr1_max = 255;
 static int ip_local_port_range_min[] = { 1, 1 };
 static int ip_local_port_range_max[] = { 65535, 65535 };
+static int ip_ping_group_range_min[] = { 0, 0 };
+static int ip_ping_group_range_max[] = { GID_T_MAX, GID_T_MAX };
 
 /* Update system visible IP port range */
 static void set_local_port_range(int range[2])
@@ -90,6 +94,52 @@ static int ipv4_sysctl_local_port_range(ctl_table *table,
 	return ret;
 }
 
+
+static void inet_get_ping_group_range_table(struct ctl_table *table, gid_t *low, gid_t *high)
+{
+	gid_t *data = table->data;
+	unsigned seq;
+	do {
+		seq = read_seqbegin(&sysctl_local_ports.lock);
+
+		*low = data[0];
+		*high = data[1];
+	} while (read_seqretry(&sysctl_local_ports.lock, seq));
+}
+
+/* Update system visible IP port range */
+static void set_ping_group_range(struct ctl_table *table, gid_t range[2])
+{
+	gid_t *data = table->data;
+	write_seqlock(&sysctl_local_ports.lock);
+	data[0] = range[0];
+	data[1] = range[1];
+	write_sequnlock(&sysctl_local_ports.lock);
+}
+
+/* Validate changes from /proc interface. */
+static int ipv4_ping_group_range(ctl_table *table, int write,
+				 void __user *buffer,
+				 size_t *lenp, loff_t *ppos)
+{
+	int ret;
+	gid_t range[2];
+	ctl_table tmp = {
+		.data = &range,
+		.maxlen = sizeof(range),
+		.mode = table->mode,
+		.extra1 = &ip_ping_group_range_min,
+		.extra2 = &ip_ping_group_range_max,
+	};
+
+	inet_get_ping_group_range_table(table, range, range + 1);
+	ret = proc_dointvec_minmax(&tmp, write, buffer, lenp, ppos);
+
+	if (write && ret == 0)
+		set_ping_group_range(table, range);
+
+	return ret;
+}
 
 static int proc_tcp_congestion_control(ctl_table *ctl, int write,
 				       void __user *buffer, size_t *lenp, loff_t *ppos)
@@ -826,6 +876,13 @@ static struct ctl_table ipv4_net_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec
 	},
+	{
+		.procname	= "ping_group_range",
+		.data		= &init_net.ipv4_sysctl_ping_group_range,
+		.maxlen		= sizeof(init_net.ipv4_sysctl_ping_group_range),
+		.mode		= 0644,
+		.proc_handler	= ipv4_ping_group_range,
+	},
 	{ }
 };
 
@@ -860,7 +917,17 @@ static __net_init int ipv4_sysctl_init_net(struct net *net)
 			&net->ipv4.sysctl_icmp_ratemask;
 		table[6].data =
 			&net->ipv4.sysctl_rt_cache_rebuild_count;
+		table[7].data =
+			&net->ipv4_sysctl_ping_group_range;
+
 	}
+
+	/*
+	 * Sane defaults - nobody may create ping sockets.
+	 * Boot scripts should set this to distro-specific group.
+	 */
+	net->ipv4_sysctl_ping_group_range[0] = 1;
+	net->ipv4_sysctl_ping_group_range[1] = 0;
 
 	net->ipv4.sysctl_rt_cache_rebuild_count = 4;
 

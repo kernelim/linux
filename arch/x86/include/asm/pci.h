@@ -90,34 +90,6 @@ extern void pci_iommu_alloc(void);
 
 #define PCI_DMA_BUS_IS_PHYS (dma_ops->is_phys)
 
-#if defined(CONFIG_X86_64) || defined(CONFIG_DMAR) || defined(CONFIG_DMA_API_DEBUG)
-
-#define DECLARE_PCI_UNMAP_ADDR(ADDR_NAME)       \
-	        dma_addr_t ADDR_NAME;
-#define DECLARE_PCI_UNMAP_LEN(LEN_NAME)         \
-	        __u32 LEN_NAME;
-#define pci_unmap_addr(PTR, ADDR_NAME)                  \
-	        ((PTR)->ADDR_NAME)
-#define pci_unmap_addr_set(PTR, ADDR_NAME, VAL)         \
-	        (((PTR)->ADDR_NAME) = (VAL))
-#define pci_unmap_len(PTR, LEN_NAME)                    \
-	        ((PTR)->LEN_NAME)
-#define pci_unmap_len_set(PTR, LEN_NAME, VAL)           \
-	        (((PTR)->LEN_NAME) = (VAL))
-
-#else
-
-#define DECLARE_PCI_UNMAP_ADDR(ADDR_NAME)       dma_addr_t ADDR_NAME[0];
-#define DECLARE_PCI_UNMAP_LEN(LEN_NAME) unsigned LEN_NAME[0];
-#define pci_unmap_addr(PTR, ADDR_NAME)  sizeof((PTR)->ADDR_NAME)
-#define pci_unmap_addr_set(PTR, ADDR_NAME, VAL) \
-	        do { break; } while (pci_unmap_addr(PTR, ADDR_NAME))
-#define pci_unmap_len(PTR, LEN_NAME)            sizeof((PTR)->LEN_NAME)
-#define pci_unmap_len_set(PTR, LEN_NAME, VAL) \
-	        do { break; } while (pci_unmap_len(PTR, LEN_NAME))
-
-#endif
-
 #endif  /* __KERNEL__ */
 
 #ifdef CONFIG_X86_64
@@ -126,6 +98,8 @@ extern void pci_iommu_alloc(void);
 
 /* implement the pci_ DMA API in terms of the generic device dma_ one */
 #include <asm-generic/pci-dma-compat.h>
+
+#include <linux/pci-dma.h>
 
 /* generic pci stuff */
 #include <asm-generic/pci.h>

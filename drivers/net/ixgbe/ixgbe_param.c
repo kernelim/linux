@@ -154,7 +154,6 @@ void __devinit ixgbe_check_options(struct ixgbe_adapter *adapter)
 				/* fall through */
 			case IXGBE_INT_MSI:
 				*aflags &= ~IXGBE_FLAG_MSIX_CAPABLE;
-				*aflags &= ~IXGBE_FLAG_RSS_ENABLED;
 				break;
 			default:
 				*aflags &= ~IXGBE_FLAG_MSIX_CAPABLE;

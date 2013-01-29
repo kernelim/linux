@@ -62,7 +62,6 @@
 #include <linux/notifier.h>
 #include <linux/cpu.h>
 #include <asm/mwait.h>
-#include <asm/msr.h>
 
 #define INTEL_IDLE_VERSION "0.4"
 #define PREFIX "intel_idle: "
@@ -84,12 +83,6 @@ static struct cpuidle_device *intel_idle_cpuidle_devices;
 static int intel_idle(struct cpuidle_device *dev, struct cpuidle_state *state);
 
 static struct cpuidle_state *cpuidle_state_table;
-
-/*
- * Hardware C-state auto-demotion may not always be optimal.
- * Indicate which enable bits to clear here.
- */
-static unsigned long long auto_demotion_disable_flags;
 
 /*
  * States are indexed by the cstate number,
@@ -160,6 +153,38 @@ static struct cpuidle_state snb_cstates[MWAIT_MAX_NUM_CSTATES] = {
 		.flags = CPUIDLE_FLAG_TIME_VALID,
 		.exit_latency = 109,
 		.target_residency = 345,
+		.enter = &intel_idle },
+};
+
+static struct cpuidle_state ivb_cstates[MWAIT_MAX_NUM_CSTATES] = {
+	{ /* MWAIT C0 */ },
+	{ /* MWAIT C1 */
+		.name = "C1-IVB",
+		.desc = "MWAIT 0x00",
+		.flags = CPUIDLE_FLAG_TIME_VALID,
+		.exit_latency = 1,
+		.target_residency = 1,
+		.enter = &intel_idle },
+	{ /* MWAIT C2 */
+		.name = "C3-IVB",
+		.desc = "MWAIT 0x10",
+		.flags = CPUIDLE_FLAG_TIME_VALID,
+		.exit_latency = 59,
+		.target_residency = 156,
+		.enter = &intel_idle },
+	{ /* MWAIT C3 */
+		.name = "C6-IVB",
+		.desc = "MWAIT 0x20",
+		.flags = CPUIDLE_FLAG_TIME_VALID,
+		.exit_latency = 80,
+		.target_residency = 300,
+		.enter = &intel_idle },
+	{ /* MWAIT C4 */
+		.name = "C7-IVB",
+		.desc = "MWAIT 0x30",
+		.flags = CPUIDLE_FLAG_TIME_VALID,
+		.exit_latency = 87,
+		.target_residency = 300,
 		.enter = &intel_idle },
 };
 
@@ -326,8 +351,6 @@ static int intel_idle_probe(void)
 	case 0x25:	/* Westmere */
 	case 0x2C:	/* Westmere */
 		cpuidle_state_table = nehalem_cstates;
-		auto_demotion_disable_flags =
-			(NHM_C1_AUTO_DEMOTE | NHM_C3_AUTO_DEMOTE);
 		break;
 
 	case 0x1C:	/* 28 - Atom Processor */
@@ -338,6 +361,11 @@ static int intel_idle_probe(void)
 	case 0x2A:	/* SNB */
 	case 0x2D:	/* SNB Xeon */
 		cpuidle_state_table = snb_cstates;
+		break;
+
+	case 0x3A:	/* Ivy Bridge */
+	case 0x3E:	/* Ivy Bridge Xeon */
+		cpuidle_state_table = ivb_cstates;
 		break;
 
 	default:
@@ -359,15 +387,6 @@ static int intel_idle_probe(void)
 	pr_debug(PREFIX "lapic_timer_reliable_states 0x%x\n",
 		lapic_timer_reliable_states);
 	return 0;
-}
-
-static void auto_demotion_disable(void *dummy)
-{
-	unsigned long long msr_bits;
-
-	rdmsrl(MSR_NHM_SNB_PKG_CST_CFG_CTL, msr_bits);
-	msr_bits &= ~auto_demotion_disable_flags;
-	wrmsrl(MSR_NHM_SNB_PKG_CST_CFG_CTL, msr_bits);
 }
 
 /*
@@ -449,8 +468,6 @@ static int intel_idle_cpuidle_devices_init(void)
 			return -EIO;
 		}
 	}
-	if (auto_demotion_disable_flags)
-		smp_call_function(auto_demotion_disable, NULL, 1);
 
 	return 0;
 }

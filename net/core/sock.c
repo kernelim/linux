@@ -294,11 +294,7 @@ int sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 	unsigned long flags;
 	struct sk_buff_head *list = &sk->sk_receive_queue;
 
-	/* Cast sk->rcvbuf to unsigned... It's pointless, but reduces
-	   number of warnings when compiling with -W --ANK
-	 */
-	if (atomic_read(&sk->sk_rmem_alloc) + skb->truesize >=
-	    (unsigned)sk->sk_rcvbuf) {
+	if (atomic_read(&sk->sk_rmem_alloc) >= sk->sk_rcvbuf) {
 		err = -ENOMEM;
 		trace_sock_rcvqueue_full(sk, skb);
 		goto out;
@@ -1066,7 +1062,7 @@ void sock_update_classid(struct sock *sk)
 {
 	u32 classid = task_cls_classid(current);
 
-	if (classid && classid != sk->sk_classid)
+	if (classid != sk->sk_classid)
 		sk->sk_classid = classid;
 }
 EXPORT_SYMBOL(sock_update_classid);
@@ -1282,19 +1278,6 @@ void sk_setup_caps(struct sock *sk, struct dst_entry *dst)
 	}
 }
 EXPORT_SYMBOL_GPL(sk_setup_caps);
-
-void __init sk_init(void)
-{
-	if (totalram_pages <= 4096) {
-		sysctl_wmem_max = 32767;
-		sysctl_rmem_max = 32767;
-		sysctl_wmem_default = 32767;
-		sysctl_rmem_default = 32767;
-	} else if (totalram_pages >= 131072) {
-		sysctl_wmem_max = 131071;
-		sysctl_rmem_max = 131071;
-	}
-}
 
 /*
  *	Simple resource managers for sockets.
@@ -2300,7 +2283,7 @@ int proto_register(struct proto *prot, int alloc_slab)
 
 			sprintf(prot->rsk_prot->slab_name, mask, prot->name);
 			prot->rsk_prot->slab = kmem_cache_create(prot->rsk_prot->slab_name,
-								 sk_alloc_size(prot->rsk_prot->obj_size), 0,
+								 prot->rsk_prot->obj_size, 0,
 								 SLAB_HWCACHE_ALIGN, NULL);
 
 			if (prot->rsk_prot->slab == NULL) {
@@ -2321,7 +2304,7 @@ int proto_register(struct proto *prot, int alloc_slab)
 			sprintf(prot->twsk_prot->twsk_slab_name, mask, prot->name);
 			prot->twsk_prot->twsk_slab =
 				kmem_cache_create(prot->twsk_prot->twsk_slab_name,
-						  sk_alloc_size(prot->twsk_prot->twsk_obj_size),
+						  prot->twsk_prot->twsk_obj_size,
 						  0,
 						  SLAB_HWCACHE_ALIGN |
 							prot->slab_flags,

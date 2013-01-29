@@ -218,13 +218,6 @@ _TIF_SYSCALL = (_TIF_SYSCALL_TRACE>>8 | _TIF_SYSCALL_AUDIT>>8 | \
  */
 	.globl	__switch_to
 __switch_to:
-	tm	__THREAD_per+4(%r3),0xe8 # is the new process using per ?
-	jz	__switch_to_noper		# if not we're fine
-	stctg	%c9,%c11,__SF_EMPTY(%r15)# We are using per stuff
-	clc	__THREAD_per(24,%r3),__SF_EMPTY(%r15)
-	je	__switch_to_noper	     # we got away without bashing TLB's
-	lctlg	%c9,%c11,__THREAD_per(%r3)	# Nope we didn't
-__switch_to_noper:
 	lg	%r4,__THREAD_info(%r2)		    # get thread_info of prev
 	tm	__TI_flags+7(%r4),_TIF_MCCK_PENDING # machine check pending?
 	jz	__switch_to_no_mcck
@@ -492,6 +485,11 @@ pgm_check_handler:
 	UPDATE_VTIME __LC_LAST_UPDATE_TIMER,__LC_EXIT_TIMER,__LC_SYSTEM_TIMER
 	mvc	__LC_LAST_UPDATE_TIMER(8),__LC_SYNC_ENTER_TIMER
 	LAST_BREAK
+	lg	%r14,__TI_task(%r12)
+	lghi	%r13,__LC_PGM_TDB
+	tm	__LC_PGM_ILC+2,0x02	# check for transaction abort
+	jz	pgm_no_vtime
+	mvc	__THREAD_trap_tdb(256,%r14),0(%r13)
 pgm_no_vtime:
 	HANDLE_SIE_INTERCEPT
 	TRACE_IRQS_CHECK_OFF
@@ -535,6 +533,11 @@ pgm_per_std:
 	UPDATE_VTIME __LC_LAST_UPDATE_TIMER,__LC_EXIT_TIMER,__LC_SYSTEM_TIMER
 	mvc	__LC_LAST_UPDATE_TIMER(8),__LC_SYNC_ENTER_TIMER
 	LAST_BREAK
+	lg	%r14,__TI_task(%r12)
+	lghi	%r13,__LC_PGM_TDB
+	tm	__LC_PGM_ILC+2,0x02	# check for transaction abort
+	jz	pgm_no_vtime2
+	mvc	__THREAD_trap_tdb(256,%r14),0(%r13)
 pgm_no_vtime2:
 	HANDLE_SIE_INTERCEPT
 	TRACE_IRQS_CHECK_OFF

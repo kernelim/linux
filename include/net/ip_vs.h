@@ -510,6 +510,15 @@ struct ip_vs_dest {
 	union nf_inet_addr	vaddr;		/* virtual IP address */
 	__be16			vport;		/* virtual port number */
 	__u32			vfwmark;	/* firewall mark of service */
+
+	/* Red Hat kABI workaround of upstream commit 714f095f */
+#ifndef __GENKSYMS__
+	u32			dst_cookie;
+#ifdef CONFIG_IP_VS_IPV6
+	struct in6_addr		dst_saddr;
+#endif
+#endif
+
 };
 
 

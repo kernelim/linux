@@ -10,7 +10,7 @@
 #include <linux/module.h>
 
 static LIST_HEAD(percpu_counters);
-static DEFINE_MUTEX(percpu_counters_lock);
+static DEFINE_SPINLOCK(percpu_counters_lock);
 
 void percpu_counter_set(struct percpu_counter *fbc, s64 amount)
 {
@@ -76,9 +76,9 @@ int __percpu_counter_init(struct percpu_counter *fbc, s64 amount,
 	if (!fbc->counters)
 		return -ENOMEM;
 #ifdef CONFIG_HOTPLUG_CPU
-	mutex_lock(&percpu_counters_lock);
+	spin_lock(&percpu_counters_lock);
 	list_add(&fbc->list, &percpu_counters);
-	mutex_unlock(&percpu_counters_lock);
+	spin_unlock(&percpu_counters_lock);
 #endif
 	return 0;
 }
@@ -90,9 +90,9 @@ void percpu_counter_destroy(struct percpu_counter *fbc)
 		return;
 
 #ifdef CONFIG_HOTPLUG_CPU
-	mutex_lock(&percpu_counters_lock);
+	spin_lock(&percpu_counters_lock);
 	list_del(&fbc->list);
-	mutex_unlock(&percpu_counters_lock);
+	spin_unlock(&percpu_counters_lock);
 #endif
 	free_percpu(fbc->counters);
 	fbc->counters = NULL;
@@ -121,7 +121,7 @@ static int __cpuinit percpu_counter_hotcpu_callback(struct notifier_block *nb,
 		return NOTIFY_OK;
 
 	cpu = (unsigned long)hcpu;
-	mutex_lock(&percpu_counters_lock);
+	spin_lock(&percpu_counters_lock);
 	list_for_each_entry(fbc, &percpu_counters, list) {
 		s32 *pcount;
 		unsigned long flags;
@@ -132,7 +132,7 @@ static int __cpuinit percpu_counter_hotcpu_callback(struct notifier_block *nb,
 		*pcount = 0;
 		spin_unlock_irqrestore(&fbc->lock, flags);
 	}
-	mutex_unlock(&percpu_counters_lock);
+	spin_unlock(&percpu_counters_lock);
 #endif
 	return NOTIFY_OK;
 }

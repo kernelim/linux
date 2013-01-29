@@ -84,18 +84,19 @@
  * grp->index is the index of the group; and grp->slot_shift
  * is the shift for the corresponding (scaled) sigma_i.
  */
-#define QFQ_MAX_INDEX		19
-#define QFQ_MAX_WSHIFT		16
+#define QFQ_MAX_INDEX		24
+#define QFQ_MAX_WSHIFT		12
 
 #define	QFQ_MAX_WEIGHT		(1<<QFQ_MAX_WSHIFT)
-#define QFQ_MAX_WSUM		(2*QFQ_MAX_WEIGHT)
+#define QFQ_MAX_WSUM		(16*QFQ_MAX_WEIGHT)
 
 #define FRAC_BITS		30	/* fixed point arithmetic */
 #define ONE_FP			(1UL << FRAC_BITS)
 #define IWSUM			(ONE_FP/QFQ_MAX_WSUM)
 
-#define QFQ_MTU_SHIFT		11
+#define QFQ_MTU_SHIFT		16	/* to support TSO/GSO */
 #define QFQ_MIN_SLOT_SHIFT	(FRAC_BITS + QFQ_MTU_SHIFT - QFQ_MAX_INDEX)
+#define QFQ_MIN_LMAX		256	/* min possible lmax for a class */
 
 /*
  * Possible group states.  These values are used as indexes for the bitmaps
@@ -203,6 +204,60 @@ out:
 	return index;
 }
 
+/* Length of the next packet (0 if the queue is empty). */
+static unsigned int qdisc_peek_len(struct Qdisc *sch)
+{
+	struct sk_buff *skb;
+
+	skb = sch->ops->peek(sch);
+	return skb ? qdisc_pkt_len(skb) : 0;
+}
+
+static void qfq_deactivate_class(struct qfq_sched *, struct qfq_class *);
+static void qfq_activate_class(struct qfq_sched *q, struct qfq_class *cl,
+			       unsigned int len);
+
+static void qfq_update_class_params(struct qfq_sched *q, struct qfq_class *cl,
+				    u32 lmax, u32 inv_w, int delta_w)
+{
+	int i;
+
+	/* update qfq-specific data */
+	cl->lmax = lmax;
+	cl->inv_w = inv_w;
+	i = qfq_calc_index(cl->inv_w, cl->lmax);
+
+	cl->grp = &q->groups[i];
+
+	q->wsum += delta_w;
+}
+
+static void qfq_update_reactivate_class(struct qfq_sched *q,
+					struct qfq_class *cl,
+					u32 inv_w, u32 lmax, int delta_w)
+{
+	bool need_reactivation = false;
+	int i = qfq_calc_index(inv_w, lmax);
+
+	if (&q->groups[i] != cl->grp && cl->qdisc->q.qlen > 0) {
+		/*
+		 * shift cl->F back, to not charge the
+		 * class for the not-yet-served head
+		 * packet
+		 */
+		cl->F = cl->S;
+		/* remove class from its slot in the old group */
+		qfq_deactivate_class(q, cl);
+		need_reactivation = true;
+	}
+
+	qfq_update_class_params(q, cl, lmax, inv_w, delta_w);
+
+	if (need_reactivation) /* activate in new group */
+		qfq_activate_class(q, cl, qdisc_peek_len(cl->qdisc));
+}
+
+
 static int qfq_change_class(struct Qdisc *sch, u32 classid, u32 parentid,
 			    struct nlattr **tca, unsigned long *arg)
 {
@@ -210,7 +265,7 @@ static int qfq_change_class(struct Qdisc *sch, u32 classid, u32 parentid,
 	struct qfq_class *cl = (struct qfq_class *)*arg;
 	struct nlattr *tb[TCA_QFQ_MAX + 1];
 	u32 weight, lmax, inv_w;
-	int i, err;
+	int err;
 	int delta_w;
 
 	if (tca[TCA_OPTIONS] == NULL) {
@@ -242,12 +297,12 @@ static int qfq_change_class(struct Qdisc *sch, u32 classid, u32 parentid,
 
 	if (tb[TCA_QFQ_LMAX]) {
 		lmax = nla_get_u32(tb[TCA_QFQ_LMAX]);
-		if (!lmax || lmax > (1UL << QFQ_MTU_SHIFT)) {
+		if (lmax < QFQ_MIN_LMAX || lmax > (1UL << QFQ_MTU_SHIFT)) {
 			pr_notice("qfq: invalid max length %u\n", lmax);
 			return -EINVAL;
 		}
 	} else
-		lmax = 1UL << QFQ_MTU_SHIFT;
+		lmax = psched_mtu(qdisc_dev(sch));
 
 	if (cl != NULL) {
 		if (tca[TCA_RATE]) {
@@ -258,12 +313,13 @@ static int qfq_change_class(struct Qdisc *sch, u32 classid, u32 parentid,
 				return err;
 		}
 
-		if (inv_w != cl->inv_w) {
-			sch_tree_lock(sch);
-			q->wsum += delta_w;
-			cl->inv_w = inv_w;
-			sch_tree_unlock(sch);
-		}
+		if (lmax == cl->lmax && inv_w == cl->inv_w)
+			return 0; /* nothing to update */
+
+		sch_tree_lock(sch);
+		qfq_update_reactivate_class(q, cl, inv_w, lmax, delta_w);
+		sch_tree_unlock(sch);
+
 		return 0;
 	}
 
@@ -273,11 +329,8 @@ static int qfq_change_class(struct Qdisc *sch, u32 classid, u32 parentid,
 
 	cl->refcnt = 1;
 	cl->common.classid = classid;
-	cl->lmax = lmax;
-	cl->inv_w = inv_w;
-	i = qfq_calc_index(cl->inv_w, cl->lmax);
 
-	cl->grp = &q->groups[i];
+	qfq_update_class_params(q, cl, lmax, inv_w, delta_w);
 
 	cl->qdisc = qdisc_create_dflt(qdisc_dev(sch), sch->dev_queue,
 				      &pfifo_qdisc_ops, classid);
@@ -294,7 +347,6 @@ static int qfq_change_class(struct Qdisc *sch, u32 classid, u32 parentid,
 			return err;
 		}
 	}
-	q->wsum += weight;
 
 	sch_tree_lock(sch);
 	qdisc_class_hash_insert(&q->clhash, &cl->common);
@@ -619,15 +671,48 @@ static void qfq_make_eligible(struct qfq_sched *q, u64 old_V)
 
 
 /*
- * XXX we should make sure that slot becomes less than 32.
- * This is guaranteed by the input values.
- * roundedS is always cl->S rounded on grp->slot_shift bits.
+ * If the weight and lmax (max_pkt_size) of the classes do not change,
+ * then QFQ guarantees that the slot index is never higher than
+ * 2 + ((1<<QFQ_MTU_SHIFT)/QFQ_MIN_LMAX) * (QFQ_MAX_WEIGHT/QFQ_MAX_WSUM).
+ *
+ * With the current values of the above constants, the index is
+ * then guaranteed to never be higher than 2 + 256 * (1 / 16) = 18.
+ *
+ * When the weight of a class is increased or the lmax of the class is
+ * decreased, a new class with smaller slot size may happen to be
+ * activated. The activation of this class should be properly delayed
+ * to when the service of the class has finished in the ideal system
+ * tracked by QFQ. If the activation of the class is not delayed to
+ * this reference time instant, then this class may be unjustly served
+ * before other classes waiting for service. This may cause
+ * (unfrequently) the above bound to the slot index to be violated for
+ * some of these unlucky classes.
+ *
+ * Instead of delaying the activation of the new class, which is quite
+ * complex, the following inaccurate but simple solution is used: if
+ * the slot index is higher than QFQ_MAX_SLOTS-2, then the timestamps
+ * of the class are shifted backward so as to let the slot index
+ * become equal to QFQ_MAX_SLOTS-2. This threshold is used because, if
+ * the slot index is above it, then the data structure implementing
+ * the bucket list either gets immediately corrupted or may get
+ * corrupted on a possible next packet arrival that causes the start
+ * time of the group to be shifted backward.
  */
 static void qfq_slot_insert(struct qfq_group *grp, struct qfq_class *cl,
 			    u64 roundedS)
 {
 	u64 slot = (roundedS - grp->S) >> grp->slot_shift;
-	unsigned int i = (grp->front + slot) % QFQ_MAX_SLOTS;
+	unsigned int i; /* slot index in the bucket list */
+
+	if (unlikely(slot > QFQ_MAX_SLOTS - 2)) {
+		u64 deltaS = roundedS - grp->S -
+			((u64)(QFQ_MAX_SLOTS - 2)<<grp->slot_shift);
+		cl->S -= deltaS;
+		cl->F -= deltaS;
+		slot = QFQ_MAX_SLOTS - 2;
+	}
+
+	i = (grp->front + slot) % QFQ_MAX_SLOTS;
 
 	hlist_add_head(&cl->next, &grp->slots[i]);
 	__set_bit(slot, &grp->full_slots);
@@ -708,15 +793,6 @@ static void qfq_update_eligible(struct qfq_sched *q, u64 old_V)
 		}
 		qfq_make_eligible(q, old_V);
 	}
-}
-
-/* What is length of next packet in queue (0 if queue is empty) */
-static unsigned int qdisc_peek_len(struct Qdisc *sch)
-{
-	struct sk_buff *skb;
-
-	skb = sch->ops->peek(sch);
-	return skb ? qdisc_pkt_len(skb) : 0;
 }
 
 /*
@@ -829,7 +905,10 @@ static void qfq_update_start(struct qfq_sched *q, struct qfq_class *cl)
 		if (mask) {
 			struct qfq_group *next = qfq_ffs(q, mask);
 			if (qfq_gt(roundedF, next->F)) {
-				cl->S = next->F;
+				if (qfq_gt(limit, next->F))
+					cl->S = next->F;
+				else /* preserve timestamp correctness */
+					cl->S = limit;
 				return;
 			}
 		}
@@ -841,11 +920,8 @@ static void qfq_update_start(struct qfq_sched *q, struct qfq_class *cl)
 static int qfq_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 {
 	struct qfq_sched *q = qdisc_priv(sch);
-	struct qfq_group *grp;
 	struct qfq_class *cl;
 	int err;
-	u64 roundedS;
-	int s;
 
 	cl = qfq_classify(skb, sch, &err);
 	if (cl == NULL) {
@@ -855,6 +931,13 @@ static int qfq_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 		return err;
 	}
 	pr_debug("qfq_enqueue: cl = %x\n", cl->common.classid);
+
+	if (unlikely(cl->lmax < qdisc_pkt_len(skb))) {
+		pr_debug("qfq: increasing maxpkt from %u to %u for class %u",
+			  cl->lmax, qdisc_pkt_len(skb), cl->common.classid);
+		qfq_update_reactivate_class(q, cl, cl->inv_w,
+					    qdisc_pkt_len(skb), 0);
+	}
 
 	err = qdisc_enqueue(skb, cl->qdisc);
 	if (unlikely(err != NET_XMIT_SUCCESS)) {
@@ -877,11 +960,25 @@ static int qfq_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 		return err;
 
 	/* If reach this point, queue q was idle */
-	grp = cl->grp;
+	qfq_activate_class(q, cl, qdisc_pkt_len(skb));
+
+	return err;
+}
+
+/*
+ * Handle class switch from idle to backlogged.
+ */
+static void qfq_activate_class(struct qfq_sched *q, struct qfq_class *cl,
+			       unsigned int pkt_len)
+{
+	struct qfq_group *grp = cl->grp;
+	u64 roundedS;
+	int s;
+
 	qfq_update_start(q, cl);
 
 	/* compute new finish time and rounded start. */
-	cl->F = cl->S + (u64)qdisc_pkt_len(skb) * cl->inv_w;
+	cl->F = cl->S + (u64)pkt_len * cl->inv_w;
 	roundedS = qfq_round_down(cl->S, grp->slot_shift);
 
 	/*
@@ -918,8 +1015,6 @@ static int qfq_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 
 skip_update:
 	qfq_slot_insert(grp, cl, roundedS);
-
-	return err;
 }
 
 

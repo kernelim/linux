@@ -72,6 +72,10 @@ typedef	void (*irq_flow_handler_t)(unsigned int irq,
 #define IRQ_ONESHOT		0x08000000	/* IRQ is not unmasked after hardirq */
 #define IRQ_NESTED_THREAD	0x10000000	/* IRQ is nested into another, no own handler thread */
 
+#define IRQF_MODIFY_MASK	\
+	(IRQ_TYPE_SENSE_MASK | IRQ_NOPROBE | IRQ_NOREQUEST | \
+	 IRQ_NOAUTOEN | IRQ_MOVE_PCNTXT | IRQ_LEVEL)
+
 #ifdef CONFIG_IRQ_PER_CPU
 # define CHECK_IRQ_PER_CPU(var) ((var) & IRQ_PER_CPU)
 # define IRQ_NO_BALANCING_MASK	(IRQ_PER_CPU | IRQ_NO_BALANCING)
@@ -384,8 +388,27 @@ set_irq_chained_handler(unsigned int irq,
 
 extern void set_irq_nested_thread(unsigned int irq, int nest);
 
-extern void set_irq_noprobe(unsigned int irq);
-extern void set_irq_probe(unsigned int irq);
+void irq_modify_status(unsigned int irq, unsigned long clr, unsigned long set);
+
+static inline void irq_set_status_flags(unsigned int irq, unsigned long set)
+{
+	irq_modify_status(irq, 0, set);
+}
+
+static inline void irq_clear_status_flags(unsigned int irq, unsigned long clr)
+{
+	irq_modify_status(irq, clr, 0);
+}
+
+static inline void set_irq_noprobe(unsigned int irq)
+{
+	irq_modify_status(irq, 0, IRQ_NOPROBE);
+}
+
+static inline void set_irq_probe(unsigned int irq)
+{
+	irq_modify_status(irq, IRQ_NOPROBE, 0);
+}
 
 /* Handle dynamic irq creation and destruction */
 extern unsigned int create_irq_nr(unsigned int irq_want, int node);
@@ -411,6 +434,8 @@ extern int set_irq_data(unsigned int irq, void *data);
 extern int set_irq_chip_data(unsigned int irq, void *data);
 extern int set_irq_type(unsigned int irq, unsigned int type);
 extern int set_irq_msi(unsigned int irq, struct msi_desc *entry);
+
+#define irq_set_irq_type(irq, type) set_irq_type(irq, type)
 
 #define get_irq_chip(irq)	(irq_to_desc(irq)->chip)
 #define get_irq_chip_data(irq)	(irq_to_desc(irq)->chip_data)

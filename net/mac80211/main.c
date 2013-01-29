@@ -19,7 +19,7 @@
 #include <linux/if_arp.h>
 #include <linux/rtnetlink.h>
 #include <linux/bitmap.h>
-#include <linux/pm_qos_params.h>
+#include <linux/pm_qos.h>
 #include <linux/inetdevice.h>
 #include <net/net_namespace.h>
 #include <net/cfg80211.h>
@@ -47,7 +47,8 @@ void ieee80211_configure_filter(struct ieee80211_local *local)
 	if (atomic_read(&local->iff_allmultis))
 		new_flags |= FIF_ALLMULTI;
 
-	if (local->monitors || local->scanning)
+	if (local->monitors || test_bit(SCAN_SW_SCANNING, &local->scanning) ||
+	    test_bit(SCAN_ONCHANNEL_SCANNING, &local->scanning))
 		new_flags |= FIF_BCN_PRBRESP_PROMISC;
 
 	if (local->fif_probe_req || local->probe_req_reg)
@@ -71,7 +72,11 @@ void ieee80211_configure_filter(struct ieee80211_local *local)
 	spin_lock_bh(&local->filter_lock);
 	changed_flags = local->filter_flags ^ new_flags;
 
+#if 0 /* Not in RHEL */
+	mc = drv_prepare_multicast(local, &local->mc_list);
+#else
 	mc = drv_prepare_multicast(local, local->mc_count, local->mc_list);
+#endif
 	spin_unlock_bh(&local->filter_lock);
 
 	/* be a bit nasty */
@@ -94,7 +99,7 @@ static void ieee80211_reconfig_filter(struct work_struct *work)
 
 int ieee80211_hw_config(struct ieee80211_local *local, u32 changed)
 {
-	struct ieee80211_channel *chan, *scan_chan;
+	struct ieee80211_channel *chan;
 	int ret = 0;
 	int power;
 	enum nl80211_channel_type channel_type;
@@ -102,11 +107,9 @@ int ieee80211_hw_config(struct ieee80211_local *local, u32 changed)
 
 	might_sleep();
 
-	scan_chan = local->scan_channel;
-
 	offchannel_flag = local->hw.conf.flags & IEEE80211_CONF_OFFCHANNEL;
-	if (scan_chan) {
-		chan = scan_chan;
+	if (local->scan_channel) {
+		chan = local->scan_channel;
 		/* If scanning on oper channel, use whatever channel-type
 		 * is currently in use.
 		 */
@@ -114,17 +117,19 @@ int ieee80211_hw_config(struct ieee80211_local *local, u32 changed)
 			channel_type = local->_oper_channel_type;
 		else
 			channel_type = NL80211_CHAN_NO_HT;
-		local->hw.conf.flags |= IEEE80211_CONF_OFFCHANNEL;
-	} else if (local->tmp_channel &&
-		   local->oper_channel != local->tmp_channel) {
-		chan = scan_chan = local->tmp_channel;
+	} else if (local->tmp_channel) {
+		chan = local->tmp_channel;
 		channel_type = local->tmp_channel_type;
-		local->hw.conf.flags |= IEEE80211_CONF_OFFCHANNEL;
 	} else {
 		chan = local->oper_channel;
 		channel_type = local->_oper_channel_type;
-		local->hw.conf.flags &= ~IEEE80211_CONF_OFFCHANNEL;
 	}
+
+	if (chan != local->oper_channel ||
+	    channel_type != local->_oper_channel_type)
+		local->hw.conf.flags |= IEEE80211_CONF_OFFCHANNEL;
+	else
+		local->hw.conf.flags &= ~IEEE80211_CONF_OFFCHANNEL;
 
 	offchannel_flag ^= local->hw.conf.flags & IEEE80211_CONF_OFFCHANNEL;
 
@@ -147,12 +152,14 @@ int ieee80211_hw_config(struct ieee80211_local *local, u32 changed)
 		changed |= IEEE80211_CONF_CHANGE_SMPS;
 	}
 
-	if ((local->scanning & SCAN_SW_SCANNING) ||
-	    (local->scanning & SCAN_HW_SCANNING))
+	if (test_bit(SCAN_SW_SCANNING, &local->scanning) ||
+	    test_bit(SCAN_ONCHANNEL_SCANNING, &local->scanning) ||
+	    test_bit(SCAN_HW_SCANNING, &local->scanning))
 		power = chan->max_power;
 	else
 		power = local->power_constr_level ?
-			(chan->max_power - local->power_constr_level) :
+			min(chan->max_power,
+				(chan->max_reg_power  - local->power_constr_level)) :
 			chan->max_power;
 
 	if (local->user_power_level >= 0)
@@ -195,15 +202,7 @@ void ieee80211_bss_info_change_notify(struct ieee80211_sub_if_data *sdata,
 		return;
 
 	if (sdata->vif.type == NL80211_IFTYPE_STATION) {
-		/*
-		 * While not associated, claim a BSSID of all-zeroes
-		 * so that drivers don't do any weird things with the
-		 * BSSID at that time.
-		 */
-		if (sdata->vif.bss_conf.assoc)
-			sdata->vif.bss_conf.bssid = sdata->u.mgd.bssid;
-		else
-			sdata->vif.bss_conf.bssid = zero;
+		sdata->vif.bss_conf.bssid = sdata->u.mgd.bssid;
 	} else if (sdata->vif.type == NL80211_IFTYPE_ADHOC)
 		sdata->vif.bss_conf.bssid = sdata->u.ibss.bssid;
 	else if (sdata->vif.type == NL80211_IFTYPE_AP)
@@ -233,7 +232,7 @@ void ieee80211_bss_info_change_notify(struct ieee80211_sub_if_data *sdata,
 
 	if (changed & BSS_CHANGED_BEACON_ENABLED) {
 		if (local->quiescing || !ieee80211_sdata_running(sdata) ||
-		    test_bit(SCAN_SW_SCANNING, &local->scanning)) {
+		    test_bit(SDATA_STATE_OFFCHANNEL, &sdata->state)) {
 			sdata->vif.bss_conf.enable_beacon = false;
 		} else {
 			/*
@@ -243,11 +242,11 @@ void ieee80211_bss_info_change_notify(struct ieee80211_sub_if_data *sdata,
 			switch (sdata->vif.type) {
 			case NL80211_IFTYPE_AP:
 				sdata->vif.bss_conf.enable_beacon =
-					!!rcu_dereference(sdata->u.ap.beacon);
+					!!sdata->u.ap.beacon;
 				break;
 			case NL80211_IFTYPE_ADHOC:
 				sdata->vif.bss_conf.enable_beacon =
-					!!rcu_dereference(sdata->u.ibss.presp);
+					!!sdata->u.ibss.presp;
 				break;
 #ifdef CONFIG_MAC80211_MESH
 			case NL80211_IFTYPE_MESH_POINT:
@@ -290,11 +289,11 @@ static void ieee80211_tasklet_handler(unsigned long data)
 			/* Clear skb->pkt_type in order to not confuse kernel
 			 * netstack. */
 			skb->pkt_type = 0;
-			ieee80211_rx(local_to_hw(local), skb);
+			ieee80211_rx(&local->hw, skb);
 			break;
 		case IEEE80211_TX_STATUS_MSG:
 			skb->pkt_type = 0;
-			ieee80211_tx_status(local_to_hw(local), skb);
+			ieee80211_tx_status(&local->hw, skb);
 			break;
 		case IEEE80211_EOSP_MSG:
 			eosp_data = (void *)skb->cb;
@@ -390,9 +389,6 @@ static int ieee80211_ifa_changed(struct notifier_block *nb,
 	sdata = IEEE80211_DEV_TO_SUB_IF(ndev);
 	bss_conf = &sdata->vif.bss_conf;
 
-	if (!ieee80211_sdata_running(sdata))
-		return NOTIFY_DONE;
-
 	/* ARP filtering is only supported in managed mode */
 	if (sdata->vif.type != NL80211_IFTYPE_STATION)
 		return NOTIFY_DONE;
@@ -421,7 +417,7 @@ static int ieee80211_ifa_changed(struct notifier_block *nb,
 	}
 	bss_conf->arp_addr_cnt = c;
 
-	/* Configure driver only if associated */
+	/* Configure driver only if associated (which also implies it is up) */
 	if (ifmgd->associated) {
 		bss_conf->arp_filter_enabled = sdata->arp_filter_state;
 		ieee80211_bss_info_change_notify(sdata,
@@ -514,12 +510,28 @@ ieee80211_default_mgmt_stypes[NUM_NL80211_IFTYPES] = {
 	},
 };
 
+static const struct ieee80211_ht_cap mac80211_ht_capa_mod_mask = {
+	.ampdu_params_info = IEEE80211_HT_AMPDU_PARM_FACTOR |
+			     IEEE80211_HT_AMPDU_PARM_DENSITY,
+
+	.cap_info = cpu_to_le16(IEEE80211_HT_CAP_SUP_WIDTH_20_40 |
+				IEEE80211_HT_CAP_MAX_AMSDU |
+				IEEE80211_HT_CAP_SGI_40),
+	.mcs = {
+		.rx_mask = { 0xff, 0xff, 0xff, 0xff, 0xff,
+			     0xff, 0xff, 0xff, 0xff, 0xff, },
+	},
+};
+
 struct ieee80211_hw *ieee80211_alloc_hw(size_t priv_data_len,
 					const struct ieee80211_ops *ops)
 {
 	struct ieee80211_local *local;
 	int priv_size, i;
 	struct wiphy *wiphy;
+
+	if (WARN_ON(ops->sta_state && (ops->sta_add || ops->sta_remove)))
+		return NULL;
 
 	/* Ensure 32-byte alignment of our private data and hw private data.
 	 * We use the wiphy priv data for both our ieee80211_local and for
@@ -549,7 +561,15 @@ struct ieee80211_hw *ieee80211_alloc_hw(size_t priv_data_len,
 
 	wiphy->flags |= WIPHY_FLAG_NETNS_OK |
 			WIPHY_FLAG_4ADDR_AP |
-			WIPHY_FLAG_4ADDR_STATION;
+			WIPHY_FLAG_4ADDR_STATION |
+			WIPHY_FLAG_REPORTS_OBSS |
+			WIPHY_FLAG_OFFCHAN_TX;
+
+	if (ops->remain_on_channel)
+		wiphy->flags |= WIPHY_FLAG_HAS_REMAIN_ON_CHANNEL;
+
+	wiphy->features = NL80211_FEATURE_SK_TX_STATUS |
+			  NL80211_FEATURE_HT_IBSS;
 
 	if (!ops->set_key)
 		wiphy->flags |= WIPHY_FLAG_IBSS_RSN;
@@ -562,7 +582,7 @@ struct ieee80211_hw *ieee80211_alloc_hw(size_t priv_data_len,
 
 	local->hw.priv = (char *)local + ALIGN(sizeof(*local), NETDEV_ALIGN);
 
-	BUG_ON(!ops->tx);
+	BUG_ON(!ops->tx && !ops->tx_frags);
 	BUG_ON(!ops->start);
 	BUG_ON(!ops->stop);
 	BUG_ON(!ops->config);
@@ -577,13 +597,21 @@ struct ieee80211_hw *ieee80211_alloc_hw(size_t priv_data_len,
 	local->hw.max_report_rates = 0;
 	local->hw.max_rx_aggregation_subframes = IEEE80211_MAX_AMPDU_BUF;
 	local->hw.max_tx_aggregation_subframes = IEEE80211_MAX_AMPDU_BUF;
+	local->hw.offchannel_tx_hw_queue = IEEE80211_INVAL_HW_QUEUE;
 	local->hw.conf.long_frame_max_tx_count = wiphy->retry_long;
 	local->hw.conf.short_frame_max_tx_count = wiphy->retry_short;
+	local->hw.radiotap_mcs_details = IEEE80211_RADIOTAP_MCS_HAVE_MCS |
+					 IEEE80211_RADIOTAP_MCS_HAVE_GI |
+					 IEEE80211_RADIOTAP_MCS_HAVE_BW;
 	local->user_power_level = -1;
-	local->uapsd_queues = IEEE80211_DEFAULT_UAPSD_QUEUES;
-	local->uapsd_max_sp_len = IEEE80211_DEFAULT_MAX_SP_LEN;
+	wiphy->ht_capa_mod_mask = &mac80211_ht_capa_mod_mask;
 
 	INIT_LIST_HEAD(&local->interfaces);
+
+#if 0 /* Not in RHEL */
+	__hw_addr_init(&local->mc_list);
+#endif
+
 	mutex_init(&local->iflist_mtx);
 	mutex_init(&local->mtx);
 
@@ -621,6 +649,11 @@ struct ieee80211_hw *ieee80211_alloc_hw(size_t priv_data_len,
 	INIT_WORK(&local->sched_scan_stopped_work,
 		  ieee80211_sched_scan_stopped_work);
 
+	spin_lock_init(&local->ack_status_lock);
+	idr_init(&local->ack_status_frames);
+	/* preallocate at least one entry */
+	idr_pre_get(&local->ack_status_frames, GFP_KERNEL);
+
 	sta_info_init(local);
 
 	for (i = 0; i < IEEE80211_MAX_QUEUES; i++) {
@@ -644,7 +677,7 @@ struct ieee80211_hw *ieee80211_alloc_hw(size_t priv_data_len,
 
 	ieee80211_hw_roc_setup(local);
 
-	return local_to_hw(local);
+	return &local->hw;
 }
 EXPORT_SYMBOL(ieee80211_alloc_hw);
 
@@ -666,11 +699,19 @@ int ieee80211_register_hw(struct ieee80211_hw *hw)
 		WLAN_CIPHER_SUITE_AES_CMAC
 	};
 
+	if (hw->flags & IEEE80211_HW_QUEUE_CONTROL &&
+	    (local->hw.offchannel_tx_hw_queue == IEEE80211_INVAL_HW_QUEUE ||
+	     local->hw.offchannel_tx_hw_queue >= local->hw.queues))
+		return -EINVAL;
+
 	if ((hw->wiphy->wowlan.flags || hw->wiphy->wowlan.n_patterns)
 #ifdef CONFIG_PM
 	    && (!local->ops->suspend || !local->ops->resume)
 #endif
 	    )
+		return -EINVAL;
+
+	if ((hw->flags & IEEE80211_HW_SCAN_WHILE_IDLE) && !local->ops->hw_scan)
 		return -EINVAL;
 
 	if (hw->max_report_rates == 0)
@@ -850,7 +891,7 @@ int ieee80211_register_hw(struct ieee80211_hw *hw)
 		hw->queues = IEEE80211_MAX_QUEUES;
 
 	local->workqueue =
-		create_singlethread_workqueue(wiphy_name(local->hw.wiphy));
+		alloc_ordered_workqueue(wiphy_name(local->hw.wiphy), 0);
 	if (!local->workqueue) {
 		result = -ENOMEM;
 		goto fail_workqueue;
@@ -1002,6 +1043,13 @@ void ieee80211_unregister_hw(struct ieee80211_hw *hw)
 }
 EXPORT_SYMBOL(ieee80211_unregister_hw);
 
+static int ieee80211_free_ack_frame(int id, void *p, void *data)
+{
+	WARN_ONCE(1, "Have pending ack frames!\n");
+	kfree_skb(p);
+	return 0;
+}
+
 void ieee80211_free_hw(struct ieee80211_hw *hw)
 {
 	struct ieee80211_local *local = hw_to_local(hw);
@@ -1011,6 +1059,10 @@ void ieee80211_free_hw(struct ieee80211_hw *hw)
 
 	if (local->wiphy_ciphers_allocated)
 		kfree(local->hw.wiphy->cipher_suites);
+
+	idr_for_each(&local->ack_status_frames,
+		     ieee80211_free_ack_frame, NULL);
+	idr_destroy(&local->ack_status_frames);
 
 	wiphy_free(local->hw.wiphy);
 }
@@ -1057,12 +1109,6 @@ static void __exit ieee80211_exit(void)
 	rc80211_pid_exit();
 	rc80211_minstrel_ht_exit();
 	rc80211_minstrel_exit();
-
-	/*
-	 * For key todo, it'll be empty by now but the work
-	 * might still be scheduled.
-	 */
-	flush_scheduled_work();
 
 	if (mesh_allocated)
 		ieee80211s_stop();

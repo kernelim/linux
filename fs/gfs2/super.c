@@ -343,17 +343,16 @@ int gfs2_jdesc_check(struct gfs2_jdesc *jd)
 {
 	struct gfs2_inode *ip = GFS2_I(jd->jd_inode);
 	struct gfs2_sbd *sdp = GFS2_SB(jd->jd_inode);
+	u64 size = i_size_read(jd->jd_inode);
 	int ar;
 	int error;
 
-	if (ip->i_disksize < (8 << 20) || ip->i_disksize > (1 << 30) ||
-	    (ip->i_disksize & (sdp->sd_sb.sb_bsize - 1))) {
-		gfs2_consist_inode(ip);
+	if (gfs2_check_internal_file_size(jd->jd_inode, 8 << 20, 1 << 30))
 		return -EIO;
-	}
-	jd->jd_blocks = ip->i_disksize >> sdp->sd_sb.sb_bsize_shift;
 
-	error = gfs2_write_alloc_required(ip, 0, ip->i_disksize, &ar);
+	jd->jd_blocks = size >> sdp->sd_sb.sb_bsize_shift;
+
+	error = gfs2_write_alloc_required(ip, 0, size, &ar);
 	if (!error && ar) {
 		gfs2_consist_inode(ip);
 		error = -EIO;
@@ -661,7 +660,7 @@ out:
  * @sdp: the file system
  *
  * This function flushes data and meta data for all machines by
- * aquiring the transaction log exclusively.  All journals are
+ * acquiring the transaction log exclusively.  All journals are
  * ensured to be in a clean state as well.
  *
  * Returns: errno
@@ -1229,6 +1228,7 @@ static void gfs2_clear_inode(struct inode *inode)
 	struct gfs2_inode *ip = GFS2_I(inode);
 
 	gfs2_dir_hash_inval(ip);
+	gfs2_rs_delete(ip);
 	ip->i_gl->gl_object = NULL;
 	flush_delayed_work(&ip->i_gl->gl_work);
 	gfs2_glock_add_to_lru(ip->i_gl);
@@ -1374,7 +1374,6 @@ static void gfs2_final_release_pages(struct gfs2_inode *ip)
 static int gfs2_dinode_dealloc(struct gfs2_inode *ip)
 {
 	struct gfs2_sbd *sdp = GFS2_SB(&ip->i_inode);
-	struct gfs2_qadata *qa;
 	struct gfs2_rgrpd *rgd;
 	struct gfs2_holder gh;
 	int error;
@@ -1385,13 +1384,13 @@ static int gfs2_dinode_dealloc(struct gfs2_inode *ip)
 		return -EIO;
 	}
 
-	qa = gfs2_qadata_get(ip);
-	if (!qa)
-		return -ENOMEM;
+	error = gfs2_rindex_update(sdp);
+	if (error)
+		return error;
 
 	error = gfs2_quota_hold(ip, NO_QUOTA_CHANGE, NO_QUOTA_CHANGE);
 	if (error)
-		goto out;
+		return error;
 
 	rgd = gfs2_blk2rgrpd(sdp, ip->i_no_addr, 1);
 	if (!rgd) {
@@ -1419,8 +1418,6 @@ out_rg_gunlock:
 	gfs2_glock_dq_uninit(&gh);
 out_qs:
 	gfs2_quota_unhold(ip);
-out:
-	gfs2_qadata_put(ip);
 	return error;
 }
 
@@ -1447,9 +1444,9 @@ out:
 
 static void gfs2_delete_inode(struct inode *inode)
 {
-	struct gfs2_inode *ip = GFS2_I(inode);
 	struct super_block *sb = inode->i_sb;
 	struct gfs2_sbd *sdp = sb->s_fs_info;
+	struct gfs2_inode *ip = GFS2_I(inode);
 	struct gfs2_holder gh;
 	int error;
 
@@ -1547,6 +1544,9 @@ out_truncate:
 
 out_unlock:
 	/* Error path for case 1 */
+	if (gfs2_rs_active(ip->i_res))
+		gfs2_rs_deltree(ip, ip->i_res);
+
 	if (test_bit(HIF_HOLDER, &ip->i_iopen_gh.gh_iflags))
 		gfs2_glock_dq(&ip->i_iopen_gh);
 	gfs2_holder_uninit(&ip->i_iopen_gh);
@@ -1556,6 +1556,7 @@ out_unlock:
 out:
 	/* Case 3 starts here */
 	truncate_inode_pages(&inode->i_data, 0);
+	gfs2_rs_delete(ip);
 	clear_inode(inode);
 }
 
@@ -1568,6 +1569,7 @@ static struct inode *gfs2_alloc_inode(struct super_block *sb)
 		ip->i_flags = 0;
 		ip->i_gl = NULL;
 		ip->i_rgd = NULL;
+		ip->i_res = NULL;
 	}
 	return &ip->i_inode;
 }

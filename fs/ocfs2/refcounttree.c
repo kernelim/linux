@@ -4341,6 +4341,12 @@ int ocfs2_reflink_ioctl(struct inode *inode,
 	error = -EXDEV;
 	if (old_path.mnt != nd.path.mnt)
 		goto out_release;
+	error = mnt_want_write(nd.path.mnt);
+	if (error) {
+		mlog_errno(error);
+		goto out_release;
+	}
+
 	new_dentry = lookup_create(&nd, 0);
 	error = PTR_ERR(new_dentry);
 	if (IS_ERR(new_dentry)) {
@@ -4348,20 +4354,14 @@ int ocfs2_reflink_ioctl(struct inode *inode,
 		goto out_unlock;
 	}
 
-	error = mnt_want_write(nd.path.mnt);
-	if (error) {
-		mlog_errno(error);
-		goto out_dput;
-	}
-
 	error = ocfs2_vfs_reflink(old_path.dentry,
 				  nd.path.dentry->d_inode,
 				  new_dentry, preserve);
-	mnt_drop_write(nd.path.mnt);
 out_dput:
 	dput(new_dentry);
 out_unlock:
 	mutex_unlock(&nd.path.dentry->d_inode->i_mutex);
+	mnt_drop_write(nd.path.mnt);
 out_release:
 	path_put(&nd.path);
 	putname(to);

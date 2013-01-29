@@ -26,7 +26,6 @@
 #ifndef TTM_PAGE_ALLOC
 #define TTM_PAGE_ALLOC
 
-#include <linux/device.h>
 #include "ttm_bo_driver.h"
 #include "ttm_memory.h"
 

@@ -168,7 +168,7 @@ static int get_fs_path(struct task_struct *task, struct path *path, bool root)
 	return result;
 }
 
-static int get_nr_threads(struct task_struct *tsk)
+int get_nr_threads(struct task_struct *tsk)
 {
 	unsigned long flags;
 	int count = 0;

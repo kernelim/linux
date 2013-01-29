@@ -830,6 +830,10 @@ int hid_pidff_init(struct hid_device *hid);
 				__FILE__ , ## arg)
 #define err_hid(format, arg...) printk(KERN_ERR "%s: " format "\n" , \
 		__FILE__ , ## arg)
+
+#define hid_err(hid, fmt, arg...)		\
+	dev_err(&(hid)->dev, fmt, ##arg)
+
 #endif /* HID_FF */
 
 #endif

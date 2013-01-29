@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel(R) Gigabit Ethernet Linux driver
-  Copyright(c) 2007-2011 Intel Corporation.
+  Copyright(c) 2007-2012 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -73,6 +73,9 @@ s32  igb_copper_link_setup_82580(struct e1000_hw *hw);
 s32  igb_get_phy_info_82580(struct e1000_hw *hw);
 s32  igb_phy_force_speed_duplex_82580(struct e1000_hw *hw);
 s32  igb_get_cable_length_82580(struct e1000_hw *hw);
+s32  igb_read_phy_reg_gs40g(struct e1000_hw *hw, u32 offset, u16 *data);
+s32  igb_write_phy_reg_gs40g(struct e1000_hw *hw, u32 offset, u16 data);
+s32  igb_check_polarity_m88(struct e1000_hw *hw);
 
 /* IGP01E1000 Specific Registers */
 #define IGP01E1000_PHY_PORT_CONFIG        0x10 /* Port Config */
@@ -108,12 +111,20 @@ s32  igb_get_cable_length_82580(struct e1000_hw *hw);
 #define I82580_PHY_STATUS2_SPEED_100MBPS  0x0100
 
 /* I82580 PHY Control 2 */
-#define I82580_PHY_CTRL2_AUTO_MDIX        0x0400
-#define I82580_PHY_CTRL2_FORCE_MDI_MDIX   0x0200
+#define I82580_PHY_CTRL2_MANUAL_MDIX      0x0200
+#define I82580_PHY_CTRL2_AUTO_MDI_MDIX    0x0400
+#define I82580_PHY_CTRL2_MDIX_CFG_MASK    0x0600
 
 /* I82580 PHY Diagnostics Status */
 #define I82580_DSTATUS_CABLE_LENGTH       0x03FC
 #define I82580_DSTATUS_CABLE_LENGTH_SHIFT 2
+
+/* 82580 PHY Power Management */
+#define E1000_82580_PHY_POWER_MGMT	0xE14
+#define E1000_82580_PM_SPD		0x0001 /* Smart Power Down */
+#define E1000_82580_PM_D0_LPLU		0x0002 /* For D0a states */
+#define E1000_82580_PM_D3_LPLU		0x0004 /* For all other states */
+
 /* Enable flexible speed on link-up */
 #define IGP02E1000_PM_D0_LPLU             0x0002 /* For D0a states */
 #define IGP02E1000_PM_D3_LPLU             0x0004 /* For all other states */
@@ -132,5 +143,17 @@ s32  igb_get_cable_length_82580(struct e1000_hw *hw);
 #define IGP02E1000_AGC_RANGE              15
 
 #define E1000_CABLE_LENGTH_UNDEFINED      0xFF
+
+/* GS40G - I210 PHY defines */
+#define GS40G_PAGE_SELECT		0x16
+#define GS40G_PAGE_SHIFT		16
+#define GS40G_OFFSET_MASK		0xFFFF
+#define GS40G_PAGE_2			0x20000
+#define GS40G_MAC_REG2			0x15
+#define GS40G_MAC_LB			0x4140
+#define GS40G_MAC_SPEED_1G		0X0006
+#define GS40G_COPPER_SPEC		0x0010
+#define GS40G_CS_POWER_DOWN		0x0002
+#define GS40G_LINE_LB			0x4000
 
 #endif

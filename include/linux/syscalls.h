@@ -164,10 +164,15 @@ static void prof_sysexit_disable_##sname(struct ftrace_event_call *unused)     \
 		num = syscall_name_to_nr("sys"#sname);			\
 		if (num < 0)						\
 			return -ENOSYS;					\
+		if (set_syscall_print_fmt(call) < 0)			\
+			return -ENOMEM;					\
 		id = register_ftrace_event(&enter_syscall_print_##sname);\
-		if (!id)						\
+		if (!id) {						\
+			free_syscall_print_fmt(call);			\
 			return -ENODEV;					\
+		}							\
 		event_enter_##sname.id = id;				\
+		event_enter_##sname.flags = TRACE_EVENT_FL_KABI_PRINT_FMT;\
 		set_syscall_enter_id(num, id);				\
 		INIT_LIST_HEAD(&event_enter_##sname.fields);		\
 		return 0;						\
@@ -181,7 +186,6 @@ static void prof_sysexit_disable_##sname(struct ftrace_event_call *unused)     \
 		.system                 = "syscalls",			\
 		.event                  = &event_syscall_enter,		\
 		.raw_init		= init_enter_##sname,		\
-		.show_format		= syscall_enter_format,		\
 		.define_fields		= syscall_enter_define_fields,	\
 		.regfunc		= reg_event_syscall_enter,	\
 		.unregfunc		= unreg_event_syscall_enter,	\
@@ -200,10 +204,15 @@ static void prof_sysexit_disable_##sname(struct ftrace_event_call *unused)     \
 		num = syscall_name_to_nr("sys"#sname);			\
 		if (num < 0)						\
 			return -ENOSYS;					\
+		if (set_syscall_print_fmt(call) < 0)			\
+			return -ENOMEM;					\
 		id = register_ftrace_event(&exit_syscall_print_##sname);\
-		if (!id)						\
+		if (!id) {						\
+			free_syscall_print_fmt(call);			\
 			return -ENODEV;					\
+		}							\
 		event_exit_##sname.id = id;				\
+		event_exit_##sname.flags = TRACE_EVENT_FL_KABI_PRINT_FMT;\
 		set_syscall_exit_id(num, id);				\
 		INIT_LIST_HEAD(&event_exit_##sname.fields);		\
 		return 0;						\
@@ -217,7 +226,6 @@ static void prof_sysexit_disable_##sname(struct ftrace_event_call *unused)     \
 		.system                 = "syscalls",			\
 		.event                  = &event_syscall_exit,		\
 		.raw_init		= init_exit_##sname,		\
-		.show_format		= syscall_exit_format,		\
 		.define_fields		= syscall_exit_define_fields,	\
 		.regfunc		= reg_event_syscall_exit,	\
 		.unregfunc		= unreg_event_syscall_exit,	\
@@ -382,6 +390,8 @@ asmlinkage long sys_clock_settime(clockid_t which_clock,
 				const struct timespec __user *tp);
 asmlinkage long sys_clock_gettime(clockid_t which_clock,
 				struct timespec __user *tp);
+asmlinkage long sys_clock_adjtime(clockid_t which_clock,
+				struct timex __user *tx);
 asmlinkage long sys_clock_getres(clockid_t which_clock,
 				struct timespec __user *tp);
 asmlinkage long sys_clock_nanosleep(clockid_t which_clock, int flags,

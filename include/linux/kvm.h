@@ -448,6 +448,7 @@ struct kvm_ioeventfd {
 #ifdef __KVM_HAVE_VCPU_EVENTS
 #define KVM_CAP_VCPU_EVENTS 41
 #endif
+#define KVM_CAP_HYPERV 44
 #ifdef __KVM_HAVE_XSAVE
 #define KVM_CAP_XSAVE 55
 #endif
@@ -456,6 +457,8 @@ struct kvm_ioeventfd {
 #endif
 #define KVM_CAP_TSC_CONTROL 60
 #define KVM_CAP_GET_TSC_KHZ 61
+#define KVM_CAP_TSC_DEADLINE_TIMER 72
+#define KVM_CAP_KVMCLOCK_CTRL 76
 
 #ifdef KVM_CAP_IRQ_ROUTING
 
@@ -659,6 +662,8 @@ struct kvm_debug_guest {
 /* Available with KVM_CAP_XCRS */
 #define KVM_GET_XCRS		  _IOR(KVMIO,  0xa6, struct kvm_xcrs)
 #define KVM_SET_XCRS		  _IOW(KVMIO,  0xa7, struct kvm_xcrs)
+/* VM is being stopped by host */
+#define KVM_KVMCLOCK_CTRL	  _IO(KVMIO,   0xad)
 
 #define KVM_TRC_INJ_VIRQ         (KVM_TRC_HANDLER + 0x02)
 #define KVM_TRC_REDELIVER_EVT    (KVM_TRC_HANDLER + 0x03)

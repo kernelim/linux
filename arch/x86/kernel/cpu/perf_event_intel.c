@@ -1,16 +1,12 @@
-#ifdef CONFIG_CPU_SUP_INTEL
+#include <linux/stddef.h>
+#include <linux/types.h>
+#include <linux/init.h>
+#include <linux/slab.h>
 
-/*
- * Per core/cpu state
- *
- * Used to coordinate shared registers between HT threads or
- * among events on a single PMU.
- */
-struct intel_shared_regs {
-	struct er_account       regs[EXTRA_REG_MAX];
-	int                     refcnt;		/* per-core: #HT threads */
-	unsigned                core_id;	/* per-core: core id */
-};
+#include <asm/hardirq.h>
+#include <asm/apic.h>
+
+#include "perf_event.h"
 
 /*
  * Intel PerfMon, used on Core and later.
@@ -131,6 +127,84 @@ static u64 intel_pmu_event_map(int hw_event)
 	return intel_perfmon_event_map[hw_event];
 }
 
+#define SNB_DMND_DATA_RD	(1ULL << 0)
+#define SNB_DMND_RFO		(1ULL << 1)
+#define SNB_DMND_IFETCH		(1ULL << 2)
+#define SNB_DMND_WB		(1ULL << 3)
+#define SNB_PF_DATA_RD		(1ULL << 4)
+#define SNB_PF_RFO		(1ULL << 5)
+#define SNB_PF_IFETCH		(1ULL << 6)
+#define SNB_LLC_DATA_RD		(1ULL << 7)
+#define SNB_LLC_RFO		(1ULL << 8)
+#define SNB_LLC_IFETCH		(1ULL << 9)
+#define SNB_BUS_LOCKS		(1ULL << 10)
+#define SNB_STRM_ST		(1ULL << 11)
+#define SNB_OTHER		(1ULL << 15)
+#define SNB_RESP_ANY		(1ULL << 16)
+#define SNB_NO_SUPP		(1ULL << 17)
+#define SNB_LLC_HITM		(1ULL << 18)
+#define SNB_LLC_HITE		(1ULL << 19)
+#define SNB_LLC_HITS		(1ULL << 20)
+#define SNB_LLC_HITF		(1ULL << 21)
+#define SNB_LOCAL		(1ULL << 22)
+#define SNB_REMOTE		(0xffULL << 23)
+#define SNB_SNP_NONE		(1ULL << 31)
+#define SNB_SNP_NOT_NEEDED	(1ULL << 32)
+#define SNB_SNP_MISS		(1ULL << 33)
+#define SNB_NO_FWD		(1ULL << 34)
+#define SNB_SNP_FWD		(1ULL << 35)
+#define SNB_HITM		(1ULL << 36)
+#define SNB_NON_DRAM		(1ULL << 37)
+
+#define SNB_DMND_READ		(SNB_DMND_DATA_RD|SNB_LLC_DATA_RD)
+#define SNB_DMND_WRITE		(SNB_DMND_RFO|SNB_LLC_RFO)
+#define SNB_DMND_PREFETCH	(SNB_PF_DATA_RD|SNB_PF_RFO)
+
+#define SNB_SNP_ANY		(SNB_SNP_NONE|SNB_SNP_NOT_NEEDED| \
+				 SNB_SNP_MISS|SNB_NO_FWD|SNB_SNP_FWD| \
+				 SNB_HITM)
+
+#define SNB_DRAM_ANY		(SNB_LOCAL|SNB_REMOTE|SNB_SNP_ANY)
+#define SNB_DRAM_REMOTE		(SNB_REMOTE|SNB_SNP_ANY)
+
+#define SNB_L3_ACCESS		SNB_RESP_ANY
+#define SNB_L3_MISS		(SNB_DRAM_ANY|SNB_NON_DRAM)
+
+static __initconst const u64 snb_hw_cache_extra_regs
+				[PERF_COUNT_HW_CACHE_MAX]
+				[PERF_COUNT_HW_CACHE_OP_MAX]
+				[PERF_COUNT_HW_CACHE_RESULT_MAX] =
+{
+ [ C(LL  ) ] = {
+	[ C(OP_READ) ] = {
+		[ C(RESULT_ACCESS) ] = SNB_DMND_READ|SNB_L3_ACCESS,
+		[ C(RESULT_MISS)   ] = SNB_DMND_READ|SNB_L3_MISS,
+	},
+	[ C(OP_WRITE) ] = {
+		[ C(RESULT_ACCESS) ] = SNB_DMND_WRITE|SNB_L3_ACCESS,
+		[ C(RESULT_MISS)   ] = SNB_DMND_WRITE|SNB_L3_MISS,
+	},
+	[ C(OP_PREFETCH) ] = {
+		[ C(RESULT_ACCESS) ] = SNB_DMND_PREFETCH|SNB_L3_ACCESS,
+		[ C(RESULT_MISS)   ] = SNB_DMND_PREFETCH|SNB_L3_MISS,
+	},
+ },
+ [ C(NODE) ] = {
+	[ C(OP_READ) ] = {
+		[ C(RESULT_ACCESS) ] = SNB_DMND_READ|SNB_DRAM_ANY,
+		[ C(RESULT_MISS)   ] = SNB_DMND_READ|SNB_DRAM_REMOTE,
+	},
+	[ C(OP_WRITE) ] = {
+		[ C(RESULT_ACCESS) ] = SNB_DMND_WRITE|SNB_DRAM_ANY,
+		[ C(RESULT_MISS)   ] = SNB_DMND_WRITE|SNB_DRAM_REMOTE,
+	},
+	[ C(OP_PREFETCH) ] = {
+		[ C(RESULT_ACCESS) ] = SNB_DMND_PREFETCH|SNB_DRAM_ANY,
+		[ C(RESULT_MISS)   ] = SNB_DMND_PREFETCH|SNB_DRAM_REMOTE,
+	},
+ },
+};
+
 static __initconst const u64 snb_hw_cache_event_ids
 				[PERF_COUNT_HW_CACHE_MAX]
 				[PERF_COUNT_HW_CACHE_OP_MAX]
@@ -226,6 +300,21 @@ static __initconst const u64 snb_hw_cache_event_ids
 		[ C(RESULT_MISS)   ] = -1,
 	},
  },
+ [ C(NODE) ] = {
+	[ C(OP_READ) ] = {
+		[ C(RESULT_ACCESS) ] = 0x01b7,
+		[ C(RESULT_MISS)   ] = 0x01b7,
+	},
+	[ C(OP_WRITE) ] = {
+		[ C(RESULT_ACCESS) ] = 0x01b7,
+		[ C(RESULT_MISS)   ] = 0x01b7,
+	},
+	[ C(OP_PREFETCH) ] = {
+		[ C(RESULT_ACCESS) ] = 0x01b7,
+		[ C(RESULT_MISS)   ] = 0x01b7,
+	},
+ },
+
 };
 
 static __initconst const u64 westmere_hw_cache_event_ids
@@ -327,6 +416,20 @@ static __initconst const u64 westmere_hw_cache_event_ids
 		[ C(RESULT_MISS)   ] = -1,
 	},
  },
+ [ C(NODE) ] = {
+	[ C(OP_READ) ] = {
+		[ C(RESULT_ACCESS) ] = 0x01b7,
+		[ C(RESULT_MISS)   ] = 0x01b7,
+	},
+	[ C(OP_WRITE) ] = {
+		[ C(RESULT_ACCESS) ] = 0x01b7,
+		[ C(RESULT_MISS)   ] = 0x01b7,
+	},
+	[ C(OP_PREFETCH) ] = {
+		[ C(RESULT_ACCESS) ] = 0x01b7,
+		[ C(RESULT_MISS)   ] = 0x01b7,
+	},
+ },
 };
 
 /*
@@ -379,7 +482,21 @@ static __initconst const u64 nehalem_hw_cache_extra_regs
 		[ C(RESULT_ACCESS) ] = NHM_DMND_PREFETCH|NHM_L3_ACCESS,
 		[ C(RESULT_MISS)   ] = NHM_DMND_PREFETCH|NHM_L3_MISS,
 	},
- }
+ },
+ [ C(NODE) ] = {
+	[ C(OP_READ) ] = {
+		[ C(RESULT_ACCESS) ] = NHM_DMND_READ|NHM_ALL_DRAM,
+		[ C(RESULT_MISS)   ] = NHM_DMND_READ|NHM_REMOTE_DRAM,
+	},
+	[ C(OP_WRITE) ] = {
+		[ C(RESULT_ACCESS) ] = NHM_DMND_WRITE|NHM_ALL_DRAM,
+		[ C(RESULT_MISS)   ] = NHM_DMND_WRITE|NHM_REMOTE_DRAM,
+	},
+	[ C(OP_PREFETCH) ] = {
+		[ C(RESULT_ACCESS) ] = NHM_DMND_PREFETCH|NHM_ALL_DRAM,
+		[ C(RESULT_MISS)   ] = NHM_DMND_PREFETCH|NHM_REMOTE_DRAM,
+	},
+ },
 };
 
 static __initconst const u64 nehalem_hw_cache_event_ids
@@ -479,6 +596,20 @@ static __initconst const u64 nehalem_hw_cache_event_ids
 	[ C(OP_PREFETCH) ] = {
 		[ C(RESULT_ACCESS) ] = -1,
 		[ C(RESULT_MISS)   ] = -1,
+	},
+ },
+ [ C(NODE) ] = {
+	[ C(OP_READ) ] = {
+		[ C(RESULT_ACCESS) ] = 0x01b7,
+		[ C(RESULT_MISS)   ] = 0x01b7,
+	},
+	[ C(OP_WRITE) ] = {
+		[ C(RESULT_ACCESS) ] = 0x01b7,
+		[ C(RESULT_MISS)   ] = 0x01b7,
+	},
+	[ C(OP_PREFETCH) ] = {
+		[ C(RESULT_ACCESS) ] = 0x01b7,
+		[ C(RESULT_MISS)   ] = 0x01b7,
 	},
  },
 };
@@ -894,7 +1025,7 @@ static void intel_pmu_enable_event(struct perf_event *event)
  * Save and restart an expired event. Called by NMI contexts,
  * so it has to be careful about preempting normal event ops:
  */
-static int intel_pmu_save_and_restart(struct perf_event *event)
+int intel_pmu_save_and_restart(struct perf_event *event)
 {
 	x86_perf_event_update(event);
 	return x86_perf_event_set_period(event);
@@ -1146,6 +1277,21 @@ intel_shared_regs_constraints(struct cpu_hw_events *cpuc,
 	return c;
 }
 
+struct event_constraint *
+x86_get_event_constraints(struct cpu_hw_events *cpuc, struct perf_event *event)
+{
+	struct event_constraint *c;
+
+	if (x86_pmu.event_constraints) {
+		for_each_event_constraint(c, x86_pmu.event_constraints) {
+			if ((event->hw.config & c->cmask) == c->code)
+				return c;
+		}
+	}
+
+	return &unconstrained;
+}
+
 static struct event_constraint *
 intel_get_event_constraints(struct cpu_hw_events *cpuc, struct perf_event *event)
 {
@@ -1183,15 +1329,9 @@ static void intel_put_event_constraints(struct cpu_hw_events *cpuc,
 	intel_put_shared_regs_event_constraints(cpuc, event);
 }
 
-static int intel_pmu_hw_config(struct perf_event *event)
+static void intel_pebs_aliases_core2(struct perf_event *event)
 {
-	int ret = x86_pmu_hw_config(event);
-
-	if (ret)
-		return ret;
-
-	if (event->attr.precise_ip &&
-	    (event->hw.config & X86_RAW_EVENT_MASK) == 0x003c) {
+	if ((event->hw.config & X86_RAW_EVENT_MASK) == 0x003c) {
 		/*
 		 * Use an alternative encoding for CPU_CLK_UNHALTED.THREAD_P
 		 * (0x003c) so that we can use it with PEBS.
@@ -1210,11 +1350,51 @@ static int intel_pmu_hw_config(struct perf_event *event)
 		 *
 		 * Thereby we gain a PEBS capable cycle counter.
 		 */
-		u64 alt_config = 0x108000c0; /* INST_RETIRED.TOTAL_CYCLES */
+		u64 alt_config = X86_CONFIG(.event=0xc0, .inv=1, .cmask=16);
+
 
 		alt_config |= (event->hw.config & ~X86_RAW_EVENT_MASK);
 		event->hw.config = alt_config;
 	}
+}
+
+static void intel_pebs_aliases_snb(struct perf_event *event)
+{
+	if ((event->hw.config & X86_RAW_EVENT_MASK) == 0x003c) {
+		/*
+		 * Use an alternative encoding for CPU_CLK_UNHALTED.THREAD_P
+		 * (0x003c) so that we can use it with PEBS.
+		 *
+		 * The regular CPU_CLK_UNHALTED.THREAD_P event (0x003c) isn't
+		 * PEBS capable. However we can use UOPS_RETIRED.ALL
+		 * (0x01c2), which is a PEBS capable event, to get the same
+		 * count.
+		 *
+		 * UOPS_RETIRED.ALL counts the number of cycles that retires
+		 * CNTMASK micro-ops. By setting CNTMASK to a value (16)
+		 * larger than the maximum number of micro-ops that can be
+		 * retired per cycle (4) and then inverting the condition, we
+		 * count all cycles that retire 16 or less micro-ops, which
+		 * is every cycle.
+		 *
+		 * Thereby we gain a PEBS capable cycle counter.
+		 */
+		u64 alt_config = X86_CONFIG(.event=0xc2, .umask=0x01, .inv=1, .cmask=16);
+
+		alt_config |= (event->hw.config & ~X86_RAW_EVENT_MASK);
+		event->hw.config = alt_config;
+	}
+}
+
+static int intel_pmu_hw_config(struct perf_event *event)
+{
+	int ret = x86_pmu_hw_config(event);
+
+	if (ret)
+		return ret;
+
+	if (event->attr.precise_ip && x86_pmu.pebs_aliases)
+		x86_pmu.pebs_aliases(event);
 
 	if (event->attr.type != PERF_TYPE_RAW)
 		return 0;
@@ -1250,8 +1430,16 @@ static struct perf_guest_switch_msr *intel_guest_get_msrs(int *nr)
 	arr[0].msr = MSR_CORE_PERF_GLOBAL_CTRL;
 	arr[0].host = x86_pmu.intel_ctrl & ~cpuc->intel_ctrl_guest_mask;
 	arr[0].guest = x86_pmu.intel_ctrl & ~cpuc->intel_ctrl_host_mask;
+	/*
+	 * If PMU counter has PEBS enabled it is not enough to disable counter
+	 * on a guest entry since PEBS memory write can overshoot guest entry
+	 * and corrupt guest memory. Disabling PEBS solves the problem.
+	 */
+	arr[1].msr = MSR_IA32_PEBS_ENABLE;
+	arr[1].host = cpuc->pebs_enabled;
+	arr[1].guest = 0;
 
-	*nr = 1;
+	*nr = 2;
 	return arr;
 }
 
@@ -1331,7 +1519,7 @@ static __initconst const struct x86_pmu core_pmu = {
 	.guest_get_msrs		= core_guest_get_msrs,
 };
 
-static struct intel_shared_regs *allocate_shared_regs(int cpu)
+struct intel_shared_regs *allocate_shared_regs(int cpu)
 {
 	struct intel_shared_regs *regs;
 	int i;
@@ -1431,6 +1619,7 @@ static __initconst const struct x86_pmu intel_pmu = {
 	.max_period		= (1ULL << 31) - 1,
 	.get_event_constraints	= intel_get_event_constraints,
 	.put_event_constraints	= intel_put_event_constraints,
+	.pebs_aliases		= intel_pebs_aliases_core2,
 
 	.cpu_prepare		= intel_pmu_cpu_prepare,
 	.cpu_starting		= intel_pmu_cpu_starting,
@@ -1438,7 +1627,7 @@ static __initconst const struct x86_pmu intel_pmu = {
 	.guest_get_msrs		= intel_guest_get_msrs,
 };
 
-static void intel_clovertown_quirks(void)
+static __init void intel_clovertown_quirk(void)
 {
 	/*
 	 * PEBS is unreliable due to:
@@ -1464,23 +1653,61 @@ static void intel_clovertown_quirks(void)
 	x86_pmu.pebs_constraints = NULL;
 }
 
-static int intel_event_id_to_hw_id[] = {
-	PERF_COUNT_HW_CPU_CYCLES,
-	PERF_COUNT_HW_INSTRUCTIONS,
-	PERF_COUNT_HW_BUS_CYCLES,
-	PERF_COUNT_HW_CACHE_REFERENCES,
-	PERF_COUNT_HW_CACHE_MISSES,
-	PERF_COUNT_HW_BRANCH_INSTRUCTIONS,
-	PERF_COUNT_HW_BRANCH_MISSES,
+static __init void intel_sandybridge_quirk(void)
+{
+	printk(KERN_WARNING "PEBS disabled due to CPU errata.\n");
+	x86_pmu.pebs = 0;
+	x86_pmu.pebs_constraints = NULL;
+}
+
+static const struct { int id; char *name; } intel_arch_events_map[] __initconst = {
+	{ PERF_COUNT_HW_CPU_CYCLES, "cpu cycles" },
+	{ PERF_COUNT_HW_INSTRUCTIONS, "instructions" },
+	{ PERF_COUNT_HW_BUS_CYCLES, "bus cycles" },
+	{ PERF_COUNT_HW_CACHE_REFERENCES, "cache references" },
+	{ PERF_COUNT_HW_CACHE_MISSES, "cache misses" },
+	{ PERF_COUNT_HW_BRANCH_INSTRUCTIONS, "branch instructions" },
+	{ PERF_COUNT_HW_BRANCH_MISSES, "branch misses" },
 };
 
-static __init int intel_pmu_init(void)
+static __init void intel_arch_events_quirk(void)
+{
+	int bit;
+
+	/* disable event that reported as not presend by cpuid */
+	for_each_set_bit(bit, x86_pmu.events_mask, ARRAY_SIZE(intel_arch_events_map)) {
+		intel_perfmon_event_map[intel_arch_events_map[bit].id] = 0;
+		printk(KERN_WARNING "CPUID marked event: \'%s\' unavailable\n",
+				intel_arch_events_map[bit].name);
+	}
+}
+
+static __init void intel_nehalem_quirk(void)
+{
+	union cpuid10_ebx ebx;
+
+	ebx.full = x86_pmu.events_maskl;
+	if (ebx.split.no_branch_misses_retired) {
+		/*
+		 * Erratum AAJ80 detected, we work it around by using
+		 * the BR_MISP_EXEC.ANY event. This will over-count
+		 * branch-misses, but it's still much better than the
+		 * architectural event which is often completely bogus:
+		 */
+		intel_perfmon_event_map[PERF_COUNT_HW_BRANCH_MISSES] = 0x7f89;
+		ebx.split.no_branch_misses_retired = 0;
+		x86_pmu.events_maskl = ebx.full;
+		printk(KERN_INFO "CPU erratum AAJ80 worked around\n");
+	}
+}
+
+__init int intel_pmu_init(void)
 {
 	union cpuid10_edx edx;
 	union cpuid10_eax eax;
 	union cpuid10_ebx ebx;
 	unsigned int unused;
-	int version, bit;
+	int version;
 
 	if (!cpu_has(&boot_cpu_data, X86_FEATURE_ARCH_PERFMON)) {
 		switch (boot_cpu_data.x86) {
@@ -1511,6 +1738,9 @@ static __init int intel_pmu_init(void)
 	x86_pmu.cntval_bits		= eax.split.bit_width;
 	x86_pmu.cntval_mask		= (1ULL << eax.split.bit_width) - 1;
 
+	x86_pmu.events_maskl		= ebx.full;
+	x86_pmu.events_mask_len		= eax.split.mask_length;
+
 	/*
 	 * Quirk: v2 perfmon does not report fixed-purpose events, so
 	 * assume at least 3 events:
@@ -1530,6 +1760,8 @@ static __init int intel_pmu_init(void)
 
 	intel_ds_init();
 
+	x86_add_quirk(intel_arch_events_quirk); /* Install first, so it runs last */
+
 	/*
 	 * Install the hw-cache-events table:
 	 */
@@ -1539,7 +1771,7 @@ static __init int intel_pmu_init(void)
 		break;
 
 	case 15: /* original 65 nm celeron/pentium/core2/xeon, "Merom"/"Conroe" */
-		x86_pmu.quirks = intel_clovertown_quirks;
+		x86_add_quirk(intel_clovertown_quirk);
 	case 22: /* single-core 65 nm celeron/core2solo "Merom-L"/"Conroe-L" */
 	case 23: /* current 45 nm celeron/core2/xeon "Penryn"/"Wolfdale" */
 	case 29: /* six-core 45 nm xeon "Dunnington" */
@@ -1569,22 +1801,14 @@ static __init int intel_pmu_init(void)
 		x86_pmu.extra_regs = intel_nehalem_extra_regs;
 
 		/* UOPS_ISSUED.STALLED_CYCLES */
-		intel_perfmon_event_map[PERF_COUNT_HW_STALLED_CYCLES_FRONTEND] = 0x180010e;
+		intel_perfmon_event_map[PERF_COUNT_HW_STALLED_CYCLES_FRONTEND] =
+			X86_CONFIG(.event=0x0e, .umask=0x01, .inv=1, .cmask=1);
 		/* UOPS_EXECUTED.CORE_ACTIVE_CYCLES,c=1,i=1 */
-		intel_perfmon_event_map[PERF_COUNT_HW_STALLED_CYCLES_BACKEND] = 0x1803fb1;
+		intel_perfmon_event_map[PERF_COUNT_HW_STALLED_CYCLES_BACKEND] =
+			X86_CONFIG(.event=0xb1, .umask=0x3f, .inv=1, .cmask=1);
 
-		if (ebx.split.no_branch_misses_retired) {
-			/*
-			 * Erratum AAJ80 detected, we work it around by using
-			 * the BR_MISP_EXEC.ANY event. This will over-count
-			 * branch-misses, but it's still much better than the
-			 * architectural event which is often completely bogus:
-			 */
-			intel_perfmon_event_map[PERF_COUNT_HW_BRANCH_MISSES] = 0x7f89;
-			ebx.split.no_branch_misses_retired = 0;
+		x86_add_quirk(intel_nehalem_quirk);
 
-			pr_cont("erratum AAJ80 worked around, ");
-		}
 		pr_cont("Nehalem events, ");
 		break;
 
@@ -1616,31 +1840,40 @@ static __init int intel_pmu_init(void)
 		x86_pmu.er_flags |= ERF_HAS_RSP_1;
 
 		/* UOPS_ISSUED.STALLED_CYCLES */
-		intel_perfmon_event_map[PERF_COUNT_HW_STALLED_CYCLES_FRONTEND] = 0x180010e;
+		intel_perfmon_event_map[PERF_COUNT_HW_STALLED_CYCLES_FRONTEND] =
+			X86_CONFIG(.event=0x0e, .umask=0x01, .inv=1, .cmask=1);
 		/* UOPS_EXECUTED.CORE_ACTIVE_CYCLES,c=1,i=1 */
-		intel_perfmon_event_map[PERF_COUNT_HW_STALLED_CYCLES_BACKEND] = 0x1803fb1;
+		intel_perfmon_event_map[PERF_COUNT_HW_STALLED_CYCLES_BACKEND] =
+			X86_CONFIG(.event=0xb1, .umask=0x3f, .inv=1, .cmask=1);
 
 		pr_cont("Westmere events, ");
 		break;
 
 	case 42: /* SandyBridge */
 	case 45: /* SandyBridge, "Romely-EP" */
+		x86_add_quirk(intel_sandybridge_quirk);
+	case 58: /* IvyBridge */
 		memcpy(hw_cache_event_ids, snb_hw_cache_event_ids,
 		       sizeof(hw_cache_event_ids));
+		memcpy(hw_cache_extra_regs, snb_hw_cache_extra_regs,
+		       sizeof(hw_cache_extra_regs));
 
 		intel_pmu_lbr_init_nhm();
 
 		x86_pmu.event_constraints = intel_snb_event_constraints;
-		x86_pmu.pebs_constraints = intel_snb_pebs_events;
+		x86_pmu.pebs_constraints = intel_snb_pebs_event_constraints;
+		x86_pmu.pebs_aliases = intel_pebs_aliases_snb;
 		x86_pmu.extra_regs = intel_snb_extra_regs;
 		/* all extra regs are per-cpu when HT is on */
 		x86_pmu.er_flags |= ERF_HAS_RSP_1;
 		x86_pmu.er_flags |= ERF_NO_HT_SHARING;
 
 		/* UOPS_ISSUED.ANY,c=1,i=1 to count stall cycles */
-		intel_perfmon_event_map[PERF_COUNT_HW_STALLED_CYCLES_FRONTEND] = 0x180010e;
+		intel_perfmon_event_map[PERF_COUNT_HW_STALLED_CYCLES_FRONTEND] =
+			X86_CONFIG(.event=0x0e, .umask=0x01, .inv=1, .cmask=1);
 		/* UOPS_DISPATCHED.THREAD,c=1,i=1 to count stall cycles*/
-		intel_perfmon_event_map[PERF_COUNT_HW_STALLED_CYCLES_BACKEND] = 0x18001b1;
+		intel_perfmon_event_map[PERF_COUNT_HW_STALLED_CYCLES_BACKEND] =
+			X86_CONFIG(.event=0xb1, .umask=0x01, .inv=1, .cmask=1);
 
 		pr_cont("SandyBridge events, ");
 		break;
@@ -1652,26 +1885,6 @@ static __init int intel_pmu_init(void)
 		x86_pmu.event_constraints = intel_gen_event_constraints;
 		pr_cont("generic architected perfmon, ");
 	}
-	x86_pmu.events_maskl		= ebx.full;
-	x86_pmu.events_mask_len		= eax.split.mask_length;
-
-	/* disable event that reported as not presend by cpuid */
-	for_each_bit(bit, x86_pmu.events_mask,
-			min(x86_pmu.events_mask_len, x86_pmu.max_events))
-		intel_perfmon_event_map[intel_event_id_to_hw_id[bit]] = 0;
 
 	return 0;
 }
-
-#else /* CONFIG_CPU_SUP_INTEL */
-
-static int intel_pmu_init(void)
-{
-	return 0;
-}
-
-static struct intel_shared_regs *allocate_shared_regs(int cpu)
-{
-	return NULL;
-}
-#endif /* CONFIG_CPU_SUP_INTEL */

@@ -48,7 +48,7 @@ int cifs_removexattr(struct dentry *direntry, const char *ea_name)
 	int xid;
 	struct cifs_sb_info *cifs_sb;
 	struct tcon_link *tlink;
-	struct cifsTconInfo *pTcon;
+	struct cifs_tcon *pTcon;
 	struct super_block *sb;
 	char *full_path = NULL;
 
@@ -108,7 +108,7 @@ int cifs_setxattr(struct dentry *direntry, const char *ea_name,
 	int xid;
 	struct cifs_sb_info *cifs_sb;
 	struct tcon_link *tlink;
-	struct cifsTconInfo *pTcon;
+	struct cifs_tcon *pTcon;
 	struct super_block *sb;
 	char *full_path;
 
@@ -165,6 +165,26 @@ int cifs_setxattr(struct dentry *direntry, const char *ea_name,
 		rc = CIFSSMBSetEA(xid, pTcon, full_path, ea_name, ea_value,
 			(__u16)value_size, cifs_sb->local_nls,
 			cifs_sb->mnt_cifs_flags & CIFS_MOUNT_MAP_SPECIAL_CHR);
+	} else if (strncmp(ea_name, CIFS_XATTR_CIFS_ACL,
+			strlen(CIFS_XATTR_CIFS_ACL)) == 0) {
+#ifdef CONFIG_CIFS_ACL
+		struct cifs_ntsd *pacl;
+		pacl = kmalloc(value_size, GFP_KERNEL);
+		if (!pacl) {
+			cFYI(1, "%s: Can't allocate memory for ACL",
+					__func__);
+			rc = -ENOMEM;
+		} else {
+			memcpy(pacl, ea_value, value_size);
+			rc = set_cifs_acl(pacl, value_size,
+				direntry->d_inode, full_path, CIFS_ACL_DACL);
+			if (rc == 0) /* force revalidate of the inode */
+				CIFS_I(direntry->d_inode)->time = 0;
+			kfree(pacl);
+		}
+#else
+			cFYI(1, "Set CIFS ACL not supported yet");
+#endif /* CONFIG_CIFS_ACL */
 	} else {
 		int temp;
 		temp = strncmp(ea_name, POSIX_ACL_XATTR_ACCESS,
@@ -219,7 +239,7 @@ ssize_t cifs_getxattr(struct dentry *direntry, const char *ea_name,
 	int xid;
 	struct cifs_sb_info *cifs_sb;
 	struct tcon_link *tlink;
-	struct cifsTconInfo *pTcon;
+	struct cifs_tcon *pTcon;
 	struct super_block *sb;
 	char *full_path;
 
@@ -351,7 +371,7 @@ ssize_t cifs_listxattr(struct dentry *direntry, char *data, size_t buf_size)
 	int xid;
 	struct cifs_sb_info *cifs_sb;
 	struct tcon_link *tlink;
-	struct cifsTconInfo *pTcon;
+	struct cifs_tcon *pTcon;
 	struct super_block *sb;
 	char *full_path;
 

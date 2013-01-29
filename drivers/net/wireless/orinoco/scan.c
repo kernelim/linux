@@ -3,6 +3,7 @@
  * See copyright notice in main.c
  */
 
+#include <linux/gfp.h>
 #include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/ieee80211.h>
@@ -75,6 +76,7 @@ static void orinoco_add_hostscan_result(struct orinoco_private *priv,
 {
 	struct wiphy *wiphy = priv_to_wiphy(priv);
 	struct ieee80211_channel *channel;
+	struct cfg80211_bss *cbss;
 	u8 *ie;
 	u8 ie_buf[46];
 	u64 timestamp;
@@ -110,14 +112,20 @@ static void orinoco_add_hostscan_result(struct orinoco_private *priv,
 
 	freq = ieee80211_dsss_chan_to_freq(le16_to_cpu(bss->a.channel));
 	channel = ieee80211_get_channel(wiphy, freq);
+	if (!channel) {
+		printk(KERN_DEBUG "Invalid channel designation %04X(%04X)",
+			bss->a.channel, freq);
+		return;	/* Then ignore it for now */
+	}
 	timestamp = 0;
 	capability = le16_to_cpu(bss->a.capabilities);
 	beacon_interval = le16_to_cpu(bss->a.beacon_interv);
 	signal = SIGNAL_TO_MBM(le16_to_cpu(bss->a.level));
 
-	cfg80211_inform_bss(wiphy, channel, bss->a.bssid, timestamp,
-			    capability, beacon_interval, ie_buf, ie_len,
-			    signal, GFP_KERNEL);
+	cbss = cfg80211_inform_bss(wiphy, channel, bss->a.bssid, timestamp,
+				   capability, beacon_interval, ie_buf, ie_len,
+				   signal, GFP_KERNEL);
+	cfg80211_put_bss(cbss);
 }
 
 void orinoco_add_extscan_result(struct orinoco_private *priv,
@@ -126,7 +134,8 @@ void orinoco_add_extscan_result(struct orinoco_private *priv,
 {
 	struct wiphy *wiphy = priv_to_wiphy(priv);
 	struct ieee80211_channel *channel;
-	u8 *ie;
+	struct cfg80211_bss *cbss;
+	const u8 *ie;
 	u64 timestamp;
 	s32 signal;
 	u16 capability;
@@ -135,7 +144,7 @@ void orinoco_add_extscan_result(struct orinoco_private *priv,
 	int chan, freq;
 
 	ie_len = len - sizeof(*bss);
-	ie = orinoco_get_ie(bss->data, ie_len, WLAN_EID_DS_PARAMS);
+	ie = cfg80211_find_ie(WLAN_EID_DS_PARAMS, bss->data, ie_len);
 	chan = ie ? ie[2] : 0;
 	freq = ieee80211_dsss_chan_to_freq(chan);
 	channel = ieee80211_get_channel(wiphy, freq);
@@ -146,9 +155,10 @@ void orinoco_add_extscan_result(struct orinoco_private *priv,
 	ie = bss->data;
 	signal = SIGNAL_TO_MBM(bss->level);
 
-	cfg80211_inform_bss(wiphy, channel, bss->bssid, timestamp,
-			    capability, beacon_interval, ie, ie_len,
-			    signal, GFP_KERNEL);
+	cbss = cfg80211_inform_bss(wiphy, channel, bss->bssid, timestamp,
+				   capability, beacon_interval, ie, ie_len,
+				   signal, GFP_KERNEL);
+	cfg80211_put_bss(cbss);
 }
 
 void orinoco_add_hostscan_results(struct orinoco_private *priv,
@@ -223,6 +233,14 @@ void orinoco_add_hostscan_results(struct orinoco_private *priv,
 	}
 
  scan_abort:
+	if (priv->scan_request) {
+		cfg80211_scan_done(priv->scan_request, abort);
+		priv->scan_request = NULL;
+	}
+}
+
+void orinoco_scan_done(struct orinoco_private *priv, bool abort)
+{
 	if (priv->scan_request) {
 		cfg80211_scan_done(priv->scan_request, abort);
 		priv->scan_request = NULL;

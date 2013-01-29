@@ -585,7 +585,7 @@ void nfs4_put_open_state(struct nfs4_state *state)
 /*
  * Close the current file.
  */
-static void __nfs4_close(struct path *path, struct nfs4_state *state,
+static void __nfs4_close(struct nfs4_state *state,
 		fmode_t fmode, gfp_t gfp_mask, int wait)
 {
 	struct nfs4_state_owner *owner = state->owner;
@@ -629,18 +629,18 @@ static void __nfs4_close(struct path *path, struct nfs4_state *state,
 	} else {
 		bool roc = pnfs_roc(state->inode);
 
-		nfs4_do_close(path, state, gfp_mask, wait, roc);
+		nfs4_do_close(state, gfp_mask, wait, roc);
 	}
 }
 
-void nfs4_close_state(struct path *path, struct nfs4_state *state, fmode_t fmode)
+void nfs4_close_state(struct nfs4_state *state, fmode_t fmode)
 {
-	__nfs4_close(path, state, fmode, GFP_NOFS, 0);
+	__nfs4_close(state, fmode, GFP_NOFS, 0);
 }
 
-void nfs4_close_sync(struct path *path, struct nfs4_state *state, fmode_t fmode)
+void nfs4_close_sync(struct nfs4_state *state, fmode_t fmode)
 {
-	__nfs4_close(path, state, fmode, GFP_KERNEL, 1);
+	__nfs4_close(state, fmode, GFP_KERNEL, 1);
 }
 
 /*

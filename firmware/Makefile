@@ -50,7 +50,10 @@ fw-shipped-$(CONFIG_BNX2X) += bnx2x-e1-5.2.13.0.fw bnx2x-e1h-5.2.13.0.fw \
 			      bnx2x/bnx2x-e2-7.0.29.0.fw \
 			      bnx2x/bnx2x-e1-7.2.16.0.fw \
 			      bnx2x/bnx2x-e1h-7.2.16.0.fw \
-			      bnx2x/bnx2x-e2-7.2.16.0.fw
+			      bnx2x/bnx2x-e2-7.2.16.0.fw \
+			      bnx2x/bnx2x-e1-7.2.51.0.fw \
+			      bnx2x/bnx2x-e1h-7.2.51.0.fw \
+			      bnx2x/bnx2x-e2-7.2.51.0.fw
 fw-shipped-$(CONFIG_BNX2) += bnx2/bnx2-mips-09-6.0.17.fw \
 			     bnx2/bnx2-rv2p-09-6.0.17.fw \
 			     bnx2/bnx2-rv2p-09ax-6.0.17.fw \
@@ -101,7 +104,8 @@ fw-shipped-$(CONFIG_E100) += e100/d101m_ucode.bin e100/d101s_ucode.bin \
 			     e100/d102e_ucode.bin
 fw-shipped-$(CONFIG_MYRI_SBUS) += myricom/lanai.bin
 fw-shipped-$(CONFIG_NETXEN_NIC) += phanfw-4.0.550.bin \
-				   phanfw-4.0.579.bin
+				   phanfw-4.0.579.bin \
+				   phanfw-4.0.588.bin
 fw-shipped-$(CONFIG_PCMCIA_PCNET) += cis/LA-PCM.cis cis/PCMLM28.cis \
 				     cis/DP83903.cis cis/NE2K.cis \
 				     cis/tamarack.cis cis/PE-200.cis
@@ -112,7 +116,13 @@ fw-shipped-$(CONFIG_R8169) += rtl_nic/rtl8168d-1.fw \
 			      rtl_nic/rtl8105e-1.fw \
 			      rtl_nic/rtl8168e-1.fw \
 			      rtl_nic/rtl8168e-2.fw \
-			      rtl_nic/rtl8168e-3.fw
+			      rtl_nic/rtl8168e-3.fw \
+			      rtl_nic/rtl8168f-1.fw \
+			      rtl_nic/rtl8168f-2.fw \
+			      rtl_nic/rtl8402-1.fw \
+			      rtl_nic/rtl8411-1.fw \
+			      rtl_nic/rtl8106e-1.fw \
+			      rtl_nic/rtl8168g-1.fw
 fw-shipped-$(CONFIG_MYRI10GE) += myri10ge_eth_z8e.dat \
 				 myri10ge_ethp_z8e.dat \
 				 myri10ge_rss_eth_z8e.dat \
@@ -172,7 +182,8 @@ fw-shipped- += keyspan/mpr.fw keyspan/usa18x.fw keyspan/usa19.fw	\
 	keyspan/usa28x.fw keyspan/usa49w.fw keyspan/usa49wlc.fw
 endif
 fw-shipped-$(CONFIG_USB_SERIAL_TI) += ti_3410.fw ti_5052.fw \
-				      mts_cdma.fw mts_gsm.fw mts_edge.fw
+				      mts_cdma.fw mts_gsm.fw mts_edge.fw \
+				      mts_mt9234mu.fw mts_mt9234zba.fw
 fw-shipped-$(CONFIG_USB_SERIAL_EDGEPORT) += edgeport/boot.fw edgeport/boot2.fw \
 					    edgeport/down.fw edgeport/down2.fw
 fw-shipped-$(CONFIG_USB_SERIAL_EDGEPORT_TI) += edgeport/down3.bin
@@ -184,11 +195,14 @@ fw-shipped-$(CONFIG_USB_VICAM) += vicam/firmware.fw
 fw-shipped-$(CONFIG_VIDEO_CPIA2) += cpia2/stv0672_vp4.bin
 fw-shipped-$(CONFIG_YAM) += yam/1200.bin yam/9600.bin
 
+fw-shipped-$(CONFIG_RT2800PCI) += rt2860.bin
+fw-shipped-$(CONFIG_RT2800USB) += rt2870.bin
+
 # This section is firmware required by the integrated compat-wireless
 # build.  All of those drivers are modules, and their config is turned-off
 # in the base kernel.  So, force them to fw-shipped-m below.
 fw-shipped-m += iwlwifi-105-6.ucode iwlwifi-135-6.ucode iwlwifi-2000-6.ucode \
-		iwlwifi-2030-6.ucode iwlwifi-6000g2b-6.ucode
+		iwlwifi-2030-6.ucode iwlwifi-6000g2a-6.ucode iwlwifi-6000g2b-6.ucode
 
 fw-shipped-all := $(fw-shipped-y) $(fw-shipped-m) $(fw-shipped-)
 

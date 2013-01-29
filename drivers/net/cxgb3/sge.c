@@ -257,7 +257,7 @@ static inline void unmap_skb(struct sk_buff *skb, struct sge_txq *q,
 
 	while (frag_idx < nfrags && curflit < WR_FLITS) {
 		pci_unmap_page(pdev, be64_to_cpu(sgp->addr[j]),
-			       skb_shinfo(skb)->frags[frag_idx].size,
+			       skb_frag_size(&skb_shinfo(skb)->frags[frag_idx]),
 			       PCI_DMA_TODEVICE);
 		j ^= 1;
 		if (j == 0) {
@@ -980,11 +980,11 @@ static inline unsigned int make_sgl(const struct sk_buff *skb,
 
 	nfrags = skb_shinfo(skb)->nr_frags;
 	for (i = 0; i < nfrags; i++) {
-		skb_frag_t *frag = &skb_shinfo(skb)->frags[i];
+		const skb_frag_t *frag = &skb_shinfo(skb)->frags[i];
 
-		mapping = pci_map_page(pdev, frag->page, frag->page_offset,
-				       frag->size, DMA_TO_DEVICE);
-		sgp->len[j] = cpu_to_be32(frag->size);
+		mapping = skb_frag_dma_map(&pdev->dev, frag, 0, skb_frag_size(frag),
+					   PCI_DMA_TODEVICE);
+		sgp->len[j] = cpu_to_be32(skb_frag_size(frag));
 		sgp->addr[j] = cpu_to_be64(mapping);
 		j ^= 1;
 		if (j == 0)
@@ -1547,7 +1547,7 @@ static void deferred_unmap_destructor(struct sk_buff *skb)
 
 	si = skb_shinfo(skb);
 	for (i = 0; i < si->nr_frags; i++)
-		pci_unmap_page(dui->pdev, *p++, si->frags[i].size,
+		pci_unmap_page(dui->pdev, *p++, skb_frag_size(&si->frags[i]),
 			       PCI_DMA_TODEVICE);
 }
 
@@ -2136,9 +2136,9 @@ static void lro_add_page(struct adapter *adap, struct sge_qset *qs,
 	len -= offset;
 
 	rx_frag += nr_frags;
-	rx_frag->page = sd->pg_chunk.page;
+	__skb_frag_set_page(rx_frag, sd->pg_chunk.page);
 	rx_frag->page_offset = sd->pg_chunk.offset + offset;
-	rx_frag->size = len;
+	skb_frag_size_set(rx_frag, len);
 
 	skb->len += len;
 	skb->data_len += len;

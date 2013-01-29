@@ -1697,6 +1697,7 @@ static struct kobj_attribute on_panic_attr =
 
 static void do_panic(void)
 {
+	lgr_info_log();
 	on_panic_trigger.action->fn(&on_panic_trigger);
 	stop_run(&on_panic_trigger);
 }
@@ -1724,6 +1725,9 @@ static struct kobj_attribute on_restart_attr =
 
 void do_restart(void)
 {
+	tracing_off();
+	debug_locks_off();
+	lgr_info_log();
 	smp_restart_with_online_cpu();
 	smp_send_stop();
 #ifdef CONFIG_CRASH_DUMP

@@ -25,6 +25,7 @@
 #include <net/dst.h>
 #include <net/route.h>
 #include <linux/inetdevice.h>	/* ip_dev_find */
+#include <linux/module.h>
 #include <net/tcp.h>
 
 static unsigned int dbg_level;
@@ -1278,12 +1279,6 @@ static int ddp_tag_reserve(struct cxgbi_sock *csk, unsigned int tid,
 		return idx;
 	}
 
-	if (cdev->csk_ddp_alloc_gl_skb) {
-		err = cdev->csk_ddp_alloc_gl_skb(ddp, idx, npods, gfp);
-		if (err < 0)
-			goto unmark_entries;
-	}
-
 	tag = cxgbi_ddp_tag_base(tformat, sw_tag);
 	tag |= idx << PPOD_IDX_SHIFT;
 
@@ -1294,11 +1289,8 @@ static int ddp_tag_reserve(struct cxgbi_sock *csk, unsigned int tid,
 	hdr.page_offset = htonl(gl->offset);
 
 	err = cdev->csk_ddp_set(csk, &hdr, idx, npods, gl);
-	if (err < 0) {
-		if (cdev->csk_ddp_free_gl_skb)
-			cdev->csk_ddp_free_gl_skb(ddp, idx, npods);
+	if (err < 0)
 		goto unmark_entries;
-	}
 
 	ddp->idx_last = idx;
 	log_debug(1 << CXGBI_DBG_DDP,
@@ -1364,8 +1356,6 @@ static void ddp_destroy(struct kref *kref)
 					>> PPOD_PAGES_SHIFT;
 			pr_info("cdev 0x%p, ddp %d + %d.\n", cdev, i, npods);
 			kfree(gl);
-			if (cdev->csk_ddp_free_gl_skb)
-				cdev->csk_ddp_free_gl_skb(ddp, i, npods);
 			i += npods;
 		} else
 			i++;
@@ -1408,8 +1398,6 @@ int cxgbi_ddp_init(struct cxgbi_device *cdev,
 		return -ENOMEM;
 	}
 	ddp->gl_map = (struct cxgbi_gather_list **)(ddp + 1);
-	ddp->gl_skb = (struct sk_buff **)(((char *)ddp->gl_map) +
-				ppmax * sizeof(struct cxgbi_gather_list *));
 	cdev->ddp = ddp;
 
 	spin_lock_init(&ddp->map_lock);

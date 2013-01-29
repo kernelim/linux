@@ -35,6 +35,7 @@
 #include "xfs_error.h"
 #include "xfs_trace.h"
 
+struct workqueue_struct *xfs_alloc_wq;
 
 #define XFS_ABSDIFF(a,b)	(((a) <= (b)) ? ((b) - (a)) : ((a) - (b)))
 
@@ -68,7 +69,7 @@ xfs_alloc_lookup_eq(
  * Lookup the first record greater than or equal to [bno, len]
  * in the btree given by cur.
  */
-STATIC int				/* error */
+int				/* error */
 xfs_alloc_lookup_ge(
 	struct xfs_btree_cur	*cur,	/* btree cursor */
 	xfs_agblock_t		bno,	/* starting block of extent */
@@ -1080,12 +1081,13 @@ restart:
 	 * If we couldn't get anything, give up.
 	 */
 	if (bno_cur_lt == NULL && bno_cur_gt == NULL) {
+		xfs_btree_del_cursor(cnt_cur, XFS_BTREE_NOERROR);
+
 		if (!forced++) {
 			trace_xfs_alloc_near_busy(args);
 			xfs_log_force(args->mp, XFS_LOG_SYNC);
 			goto restart;
 		}
-
 		trace_xfs_alloc_size_neither(args);
 		args->agbno = NULLAGBLOCK;
 		return 0;
@@ -1871,6 +1873,7 @@ xfs_alloc_fix_freelist(
 	/*
 	 * Initialize the args structure.
 	 */
+	memset(&targs, 0, sizeof(targs));
 	targs.tp = tp;
 	targs.mp = mp;
 	targs.agbp = agbp;
@@ -2469,7 +2472,7 @@ xfs_free_extent(
 
 	error = xfs_free_ag_extent(tp, args.agbp, args.agno, args.agbno, len, 0);
 	if (!error)
-		xfs_alloc_busy_insert(tp, args.agno, args.agbno, len);
+		xfs_alloc_busy_insert(tp, args.agno, args.agbno, len, 0);
 error0:
 	xfs_perag_put(args.pag);
 	return error;
@@ -2480,7 +2483,8 @@ xfs_alloc_busy_insert(
 	struct xfs_trans	*tp,
 	xfs_agnumber_t		agno,
 	xfs_agblock_t		bno,
-	xfs_extlen_t		len)
+	xfs_extlen_t		len,
+	unsigned int		flags)
 {
 	struct xfs_busy_extent	*new;
 	struct xfs_busy_extent	*busyp;
@@ -2504,6 +2508,7 @@ xfs_alloc_busy_insert(
 	new->bno = bno;
 	new->length = len;
 	INIT_LIST_HEAD(&new->list);
+	new->flags = flags;
 
 	/* trace before insert to be able to see failed inserts */
 	trace_xfs_alloc_busy(tp->t_mountp, agno, bno, len);
@@ -2607,6 +2612,18 @@ xfs_alloc_busy_update_extent(
 	xfs_agblock_t		fend = fbno + flen;
 	xfs_agblock_t		bbno = busyp->bno;
 	xfs_agblock_t		bend = bbno + busyp->length;
+
+	/*
+	 * This extent is currently being discarded.  Give the thread
+	 * performing the discard a chance to mark the extent unbusy
+	 * and retry.
+	 */
+	if (busyp->flags & XFS_ALLOC_BUSY_DISCARDED) {
+		spin_unlock(&pag->pagb_lock);
+		delay(1);
+		spin_lock(&pag->pagb_lock);
+		return false;
+	}
 
 	/*
 	 * If there is a busy extent overlapping a user allocation, we have
@@ -2813,7 +2830,8 @@ restart:
 		 * If this is a metadata allocation, try to reuse the busy
 		 * extent instead of trimming the allocation.
 		 */
-		if (!args->userdata) {
+		if (!args->userdata &&
+		    !(busyp->flags & XFS_ALLOC_BUSY_DISCARDED)) {
 			if (!xfs_alloc_busy_update_extent(args->mp, args->pag,
 							  busyp, fbno, flen,
 							  false))
@@ -2979,10 +2997,16 @@ xfs_alloc_busy_clear_one(
 	kmem_free(busyp);
 }
 
+/*
+ * Remove all extents on the passed in list from the busy extents tree.
+ * If do_discard is set skip extents that need to be discarded, and mark
+ * these as undergoing a discard operation instead.
+ */
 void
 xfs_alloc_busy_clear(
 	struct xfs_mount	*mp,
-	struct list_head	*list)
+	struct list_head	*list,
+	bool			do_discard)
 {
 	struct xfs_busy_extent	*busyp, *n;
 	struct xfs_perag	*pag = NULL;
@@ -2999,7 +3023,11 @@ xfs_alloc_busy_clear(
 			agno = busyp->agno;
 		}
 
-		xfs_alloc_busy_clear_one(mp, pag, busyp);
+		if (do_discard && busyp->length &&
+		    !(busyp->flags & XFS_ALLOC_BUSY_SKIP_DISCARD))
+			busyp->flags = XFS_ALLOC_BUSY_DISCARDED;
+		else
+			xfs_alloc_busy_clear_one(mp, pag, busyp);
 	}
 
 	if (pag) {

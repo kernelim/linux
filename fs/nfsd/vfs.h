@@ -103,4 +103,21 @@ struct posix_acl *nfsd_get_posix_acl(struct svc_fh *, int);
 int nfsd_set_posix_acl(struct svc_fh *, int, struct posix_acl *);
 #endif
 
+static inline int fh_want_write(struct svc_fh *fh)
+{
+	int ret = mnt_want_write(fh->fh_export->ex_path.mnt);
+
+	if (!ret)
+		fh->fh_want_write = 1;
+	return ret;
+}
+
+static inline void fh_drop_write(struct svc_fh *fh)
+{
+	if (fh->fh_want_write) {
+		fh->fh_want_write = 0;
+		mnt_drop_write(fh->fh_export->ex_path.mnt);
+	}
+}
+
 #endif /* LINUX_NFSD_VFS_H */

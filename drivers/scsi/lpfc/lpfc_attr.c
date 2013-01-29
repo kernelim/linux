@@ -1,7 +1,7 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
  * Fibre Channel Host Bus Adapters.                                *
- * Copyright (C) 2004-2011 Emulex.  All rights reserved.           *
+ * Copyright (C) 2004-2012 Emulex.  All rights reserved.           *
  * EMULEX and SLI are trademarks of Emulex.                        *
  * www.emulex.com                                                  *
  * Portions Copyright (C) 2004-2005 Christoph Hellwig              *
@@ -23,6 +23,7 @@
 #include <linux/delay.h>
 #include <linux/pci.h>
 #include <linux/interrupt.h>
+#include <linux/module.h>
 #include <linux/aer.h>
 #include <linux/gfp.h>
 
@@ -920,11 +921,15 @@ lpfc_sli4_pdev_reg_request(struct lpfc_hba *phba, uint32_t opcode)
 	rc = lpfc_sli4_pdev_status_reg_wait(phba);
 
 	if (rc == -EPERM) {
-		/* no privilage for reset, restore if needed */
-		if (before_fc_flag & FC_OFFLINE_MODE)
-			goto out;
+		/* no privilage for reset */
+		lpfc_printf_log(phba, KERN_ERR, LOG_SLI,
+				"3150 No privilage to perform the requested "
+				"access: x%x\n", reg_val);
 	} else if (rc == -EIO) {
 		/* reset failed, there is nothing more we can do */
+		lpfc_printf_log(phba, KERN_ERR, LOG_SLI,
+				"3153 Fail to perform the requested "
+				"access: x%x\n", reg_val);
 		return rc;
 	}
 
@@ -2571,7 +2576,7 @@ LPFC_VPORT_ATTR_HEX_RW(log_verbose, 0x0, 0x0, 0xffffffff,
 # lpfc_enable_da_id: This turns on the DA_ID CT command that deregisters
 # objects that have been registered with the nameserver after login.
 */
-LPFC_VPORT_ATTR_R(enable_da_id, 0, 0, 1,
+LPFC_VPORT_ATTR_R(enable_da_id, 1, 0, 1,
 		  "Deregister nameserver objects before LOGO");
 
 /*
@@ -3606,6 +3611,162 @@ lpfc_sriov_nr_virtfn_init(struct lpfc_hba *phba, int val)
 static DEVICE_ATTR(lpfc_sriov_nr_virtfn, S_IRUGO | S_IWUSR,
 		   lpfc_sriov_nr_virtfn_show, lpfc_sriov_nr_virtfn_store);
 
+/**
+ * lpfc_request_firmware_sotre - Request for Linux generic firmware upgrade
+ *
+ * @dev: class device that is converted into a Scsi_host.
+ * @attr: device attribute, not used.
+ * @buf: containing the string the number of vfs to be enabled.
+ * @count: unused variable.
+ *
+ * Description:
+ *
+ * Returns:
+ * length of the buf on success if val is in range the intended mode
+ * is supported.
+ * -EINVAL if val out of range or intended mode is not supported.
+ **/
+static ssize_t
+lpfc_request_firmware_upgrade_store(struct device *dev,
+				    struct device_attribute *attr,
+				    const char *buf, size_t count)
+{
+	struct Scsi_Host *shost = class_to_shost(dev);
+	struct lpfc_vport *vport = (struct lpfc_vport *)shost->hostdata;
+	struct lpfc_hba *phba = vport->phba;
+	int val = 0, rc = -EINVAL;
+
+	/* Sanity check on user data */
+	if (!isdigit(buf[0]))
+		return -EINVAL;
+	if (sscanf(buf, "%i", &val) != 1)
+		return -EINVAL;
+	if (val != 1)
+		return -EINVAL;
+
+	rc = lpfc_sli4_request_firmware_update(phba, RUN_FW_UPGRADE);
+	if (rc)
+		rc = -EPERM;
+	else
+		rc = strlen(buf);
+	return rc;
+}
+
+static int lpfc_req_fw_upgrade;
+module_param(lpfc_req_fw_upgrade, int, S_IRUGO|S_IWUSR);
+MODULE_PARM_DESC(lpfc_req_fw_upgrade, "Enable Linux generic firmware upgrade");
+lpfc_param_show(request_firmware_upgrade)
+
+/**
+ * lpfc_request_firmware_upgrade_init - Enable initial linux generic fw upgrade
+ * @phba: lpfc_hba pointer.
+ * @val: 0 or 1.
+ *
+ * Description:
+ * Set the initial Linux generic firmware upgrade enable or disable flag.
+ *
+ * Returns:
+ * zero if val saved.
+ * -EINVAL val out of range
+ **/
+static int
+lpfc_request_firmware_upgrade_init(struct lpfc_hba *phba, int val)
+{
+	if (val >= 0 && val <= 1) {
+		phba->cfg_request_firmware_upgrade = val;
+		return 0;
+	}
+	return -EINVAL;
+}
+static DEVICE_ATTR(lpfc_req_fw_upgrade, S_IRUGO | S_IWUSR,
+		   lpfc_request_firmware_upgrade_show,
+		   lpfc_request_firmware_upgrade_store);
+
+/**
+ * lpfc_fcp_imax_store
+ *
+ * @dev: class device that is converted into a Scsi_host.
+ * @attr: device attribute, not used.
+ * @buf: string with the number of fast-path FCP interrupts per second.
+ * @count: unused variable.
+ *
+ * Description:
+ * If val is in a valid range [636,651042], then set the adapter's
+ * maximum number of fast-path FCP interrupts per second.
+ *
+ * Returns:
+ * length of the buf on success if val is in range the intended mode
+ * is supported.
+ * -EINVAL if val out of range or intended mode is not supported.
+ **/
+static ssize_t
+lpfc_fcp_imax_store(struct device *dev, struct device_attribute *attr,
+			 const char *buf, size_t count)
+{
+	struct Scsi_Host *shost = class_to_shost(dev);
+	struct lpfc_vport *vport = (struct lpfc_vport *)shost->hostdata;
+	struct lpfc_hba *phba = vport->phba;
+	int val = 0, i;
+
+	/* Sanity check on user data */
+	if (!isdigit(buf[0]))
+		return -EINVAL;
+	if (sscanf(buf, "%i", &val) != 1)
+		return -EINVAL;
+
+	/* Value range is [636,651042] */
+	if (val < LPFC_MIM_IMAX || val > LPFC_DMULT_CONST)
+		return -EINVAL;
+
+	phba->cfg_fcp_imax = (uint32_t)val;
+	for (i = 0; i < phba->cfg_fcp_eq_count; i += LPFC_MAX_EQ_DELAY)
+		lpfc_modify_fcp_eq_delay(phba, i);
+
+	return strlen(buf);
+}
+
+/*
+# lpfc_fcp_imax: The maximum number of fast-path FCP interrupts per second
+#
+# Value range is [636,651042]. Default value is 10000.
+*/
+static int lpfc_fcp_imax = LPFC_FP_DEF_IMAX;
+module_param(lpfc_fcp_imax, int, S_IRUGO|S_IWUSR);
+MODULE_PARM_DESC(lpfc_fcp_imax,
+	    "Set the maximum number of fast-path FCP interrupts per second");
+lpfc_param_show(fcp_imax)
+
+/**
+ * lpfc_fcp_imax_init - Set the initial sr-iov virtual function enable
+ * @phba: lpfc_hba pointer.
+ * @val: link speed value.
+ *
+ * Description:
+ * If val is in a valid range [636,651042], then initialize the adapter's
+ * maximum number of fast-path FCP interrupts per second.
+ *
+ * Returns:
+ * zero if val saved.
+ * -EINVAL val out of range
+ **/
+static int
+lpfc_fcp_imax_init(struct lpfc_hba *phba, int val)
+{
+	if (val >= LPFC_MIM_IMAX && val <= LPFC_DMULT_CONST) {
+		phba->cfg_fcp_imax = val;
+		return 0;
+	}
+
+	lpfc_printf_log(phba, KERN_ERR, LOG_INIT,
+			"3016 fcp_imax: %d out of range, using default\n", val);
+	phba->cfg_fcp_imax = LPFC_FP_DEF_IMAX;
+
+	return 0;
+}
+
+static DEVICE_ATTR(lpfc_fcp_imax, S_IRUGO | S_IWUSR,
+		   lpfc_fcp_imax_show, lpfc_fcp_imax_store);
+
 /*
 # lpfc_fcp_class:  Determines FC class to use for the FCP protocol.
 # Value range is [2,3]. Default value is 3.
@@ -3747,14 +3908,6 @@ LPFC_ATTR_R(use_msi, 2, 0, 2, "Use Message Signaled Interrupts (1) or "
 	    "MSI-X (2), if possible");
 
 /*
-# lpfc_fcp_imax: Set the maximum number of fast-path FCP interrupts per second
-#
-# Value range is [636,651042]. Default value is 10000.
-*/
-LPFC_ATTR_R(fcp_imax, LPFC_FP_DEF_IMAX, LPFC_MIM_IMAX, LPFC_DMULT_CONST,
-	    "Set the maximum number of fast-path FCP interrupts per second");
-
-/*
 # lpfc_fcp_wq_count: Set the number of fast-path FCP work queues
 #
 # Value range is [1,31]. Default value is 4.
@@ -3801,6 +3954,12 @@ LPFC_ATTR_R(enable_bg, 0, 0, 1, "Enable BlockGuard Support");
 # 	- Only meaningful if BG is turned on (lpfc_enable_bg=1).
 #	- Allows you to ultimately specify which profiles to use
 #	- Default will result in registering capabilities for all profiles.
+#	- SHOST_DIF_TYPE1_PROTECTION	1
+#		HBA supports T10 DIF Type 1: HBA to Target Type 1 Protection
+#	- SHOST_DIX_TYPE0_PROTECTION	8
+#		HBA supports DIX Type 0: Host to HBA protection only
+#	- SHOST_DIX_TYPE1_PROTECTION	16
+#		HBA supports DIX Type 1: Host to HBA  Type 1 protection
 #
 */
 unsigned int lpfc_prot_mask = SHOST_DIF_TYPE1_PROTECTION |
@@ -3813,7 +3972,7 @@ MODULE_PARM_DESC(lpfc_prot_mask, "host protection mask");
 /*
 # lpfc_prot_guard: i
 #	- Bit mask of protection guard types to register with the SCSI mid-layer
-# 	- Guard types are currently either 1) IP checksum 2) T10-DIF CRC
+#	- Guard types are currently either 1) T10-DIF CRC 2) IP checksum
 #	- Allows you to ultimately specify which profiles to use
 #	- Default will result in registering capabilities for all guard types
 #
@@ -3926,6 +4085,7 @@ struct device_attribute *lpfc_hba_attrs[] = {
 	&dev_attr_lpfc_aer_support,
 	&dev_attr_lpfc_aer_state_cleanup,
 	&dev_attr_lpfc_sriov_nr_virtfn,
+	&dev_attr_lpfc_req_fw_upgrade,
 	&dev_attr_lpfc_suppress_link_up,
 	&dev_attr_lpfc_iocb_cnt,
 	&dev_attr_iocb_hw,
@@ -4905,6 +5065,7 @@ lpfc_get_cfgparam(struct lpfc_hba *phba)
 	lpfc_hba_log_verbose_init(phba, lpfc_log_verbose);
 	lpfc_aer_support_init(phba, lpfc_aer_support);
 	lpfc_sriov_nr_virtfn_init(phba, lpfc_sriov_nr_virtfn);
+	lpfc_request_firmware_upgrade_init(phba, lpfc_req_fw_upgrade);
 	lpfc_suppress_link_up_init(phba, lpfc_suppress_link_up);
 	lpfc_iocb_cnt_init(phba, lpfc_iocb_cnt);
 	phba->cfg_enable_dss = 1;

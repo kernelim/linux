@@ -317,6 +317,14 @@ config EZX_PCAP
 	  This enables the PCAP ASIC present on EZX Phones. This is
 	  needed for MMC, TouchScreen, Sound, USB, etc..
 
+config LPC_SCH
+	tristate "Intel SCH LPC"
+	depends on PCI
+	select MFD_CORE
+	help
+	  LPC bridge function of the Intel SCH provides support for
+	  System Management Bus and General Purpose I/O.
+
 endmenu
 
 menu "Multimedia Capabilities Port drivers"
