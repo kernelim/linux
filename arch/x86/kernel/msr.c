@@ -172,9 +172,12 @@ static long msr_ioctl(struct file *file, unsigned int ioc, unsigned long arg)
 
 static int msr_open(struct inode *inode, struct file *file)
 {
-	unsigned int cpu = iminor(file->f_path.dentry->d_inode);
-	struct cpuinfo_x86 *c = &cpu_data(cpu);
+	unsigned int cpu;
+	struct cpuinfo_x86 *c;
 	int ret = 0;
+
+	if (!capable(CAP_SYS_RAWIO))
+		return -EPERM;
 
 	lock_kernel();
 	cpu = iminor(file->f_path.dentry->d_inode);

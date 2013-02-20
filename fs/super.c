@@ -403,6 +403,7 @@ retry:
 				goto retry;
 			if (s) {
 				up_write(&s->s_umount);
+				s->s_type = type;
 				destroy_super(s);
 				s = NULL;
 			}
@@ -426,6 +427,7 @@ retry:
 	if (err) {
 		spin_unlock(&sb_lock);
 		up_write(&s->s_umount);
+		s->s_type = type;
 		destroy_super(s);
 		return ERR_PTR(err);
 	}

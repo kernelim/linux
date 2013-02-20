@@ -2832,7 +2832,7 @@ static int nfs4_xdr_enc_layoutget(struct rpc_rqst *req, uint32_t *p,
 /*
  *  Encode LAYOUTCOMMIT request
  */
-static void nfs4_xdr_enc_layoutcommit(struct rpc_rqst *req, uint32_t *p,
+static int nfs4_xdr_enc_layoutcommit(struct rpc_rqst *req, uint32_t *p,
 				     struct nfs4_layoutcommit_args *args)
 {
 	struct xdr_stream xdr;
@@ -2849,12 +2849,13 @@ static void nfs4_xdr_enc_layoutcommit(struct rpc_rqst *req, uint32_t *p,
 	encode_layoutcommit(&xdr, data->args.inode, args, &hdr);
 	encode_getfattr(&xdr, args->bitmask, &hdr);
 	encode_nops(&hdr);
+	return 0;
 }
 
 /*
  * Encode LAYOUTRETURN request
  */
-static void nfs4_xdr_enc_layoutreturn(struct rpc_rqst *req, uint32_t *p,
+static int nfs4_xdr_enc_layoutreturn(struct rpc_rqst *req, uint32_t *p,
 				      struct nfs4_layoutreturn_args *args)
 {
 	struct xdr_stream xdr;
@@ -2868,6 +2869,7 @@ static void nfs4_xdr_enc_layoutreturn(struct rpc_rqst *req, uint32_t *p,
 	encode_putfh(&xdr, NFS_FH(args->inode), &hdr);
 	encode_layoutreturn(&xdr, args, &hdr);
 	encode_nops(&hdr);
+	return 0;
 }
 #endif /* CONFIG_NFS_V4_1 */
 

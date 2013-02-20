@@ -929,6 +929,27 @@ nla_put_failure:
 	return -EMSGSIZE;
 }
 
+static u32 get_ext_mask(struct nlattr *tb[])
+{
+	if (tb[IFLA_EXT_MASK])
+		return nla_get_u32(tb[IFLA_EXT_MASK]);
+
+	/* RHEL6 HACK
+	 *
+	 * IFLA_EXT_MASK did not match the upstream definition in
+	 * RHEL6.4. This was corrected in RHEL6.5. The following
+	 * provides backwards compatibility with binaries that were
+	 * compiled against RHEL6.4.
+	 *
+	 * The following is valid because IFLA_EXT_MASK is never
+	 * used in combination with the conflicting IFLA_AF_SPEC.
+	 */
+	if (tb[IFLA_AF_SPEC] && nla_len(tb[IFLA_AF_SPEC]) == 4)
+		return nla_get_u32(tb[IFLA_AF_SPEC]);
+
+	return 0;
+}
+
 static int rtnl_dump_ifinfo(struct sk_buff *skb, struct netlink_callback *cb)
 {
 	struct net *net = sock_net(skb->sk);
@@ -941,8 +962,7 @@ static int rtnl_dump_ifinfo(struct sk_buff *skb, struct netlink_callback *cb)
 	nlmsg_parse(cb->nlh, sizeof(struct rtgenmsg), tb, IFLA_MAX,
 		    ifla_policy);
 
-	if (tb[IFLA_EXT_MASK])
-		ext_filter_mask = nla_get_u32(tb[IFLA_EXT_MASK]);
+	ext_filter_mask = get_ext_mask(tb);
 
 	idx = 0;
 	for_each_netdev(net, dev) {
@@ -1560,8 +1580,7 @@ static int rtnl_getlink(struct sk_buff *skb, struct nlmsghdr* nlh, void *arg)
 	if (err < 0)
 		return err;
 
-	if (tb[IFLA_EXT_MASK])
-		ext_filter_mask = nla_get_u32(tb[IFLA_EXT_MASK]);
+	ext_filter_mask = get_ext_mask(tb);
 
 	ifm = nlmsg_data(nlh);
 	if (ifm->ifi_index > 0) {
@@ -1602,8 +1621,7 @@ static u16 rtnl_calcit(struct sk_buff *skb, struct nlmsghdr *nlh)
 
 	nlmsg_parse(nlh, sizeof(struct rtgenmsg), tb, IFLA_MAX, ifla_policy);
 
-	if (tb[IFLA_EXT_MASK])
-		ext_filter_mask = nla_get_u32(tb[IFLA_EXT_MASK]);
+	ext_filter_mask = get_ext_mask(tb);
 
 	if (!ext_filter_mask)
 		return NLMSG_GOODSIZE;

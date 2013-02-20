@@ -171,23 +171,22 @@ static int nfs41_setup_state_renewal(struct nfs_client *clp)
 static void nfs4_end_drain_session(struct nfs_client *clp)
 {
 	struct nfs4_session *ses = clp->cl_session;
+	struct nfs4_slot_table *tbl;
 	int max_slots;
 
 	if (ses == NULL)
 		return;
+	tbl = &ses->fc_slot_table;
 	if (test_and_clear_bit(NFS4_SESSION_DRAINING, &ses->session_state)) {
-		spin_lock(&ses->fc_slot_table.slot_tbl_lock);
-		max_slots = ses->fc_slot_table.max_slots;
+		spin_lock(&tbl->slot_tbl_lock);
+		max_slots = tbl->max_slots;
 		while (max_slots--) {
-			struct rpc_task *task;
-
-			task = rpc_wake_up_next(&ses->fc_slot_table.
-						slot_tbl_waitq);
-			if (!task)
+			if (rpc_wake_up_first(&tbl->slot_tbl_waitq,
+						nfs4_set_task_privileged,
+						NULL) == NULL)
 				break;
-			rpc_task_set_priority(task, RPC_PRIORITY_PRIVILEGED);
 		}
-		spin_unlock(&ses->fc_slot_table.slot_tbl_lock);
+		spin_unlock(&tbl->slot_tbl_lock);
 	}
 }
 
@@ -979,6 +978,7 @@ void nfs4_schedule_lease_recovery(struct nfs_client *clp)
 		set_bit(NFS4CLNT_CHECK_LEASE, &clp->cl_state);
 	nfs4_schedule_state_manager(clp);
 }
+EXPORT_SYMBOL_GPL(nfs4_schedule_lease_recovery);
 
 static int nfs4_state_mark_reclaim_reboot(struct nfs_client *clp, struct nfs4_state *state)
 {
@@ -1010,6 +1010,7 @@ void nfs4_schedule_stateid_recovery(const struct nfs_server *server, struct nfs4
 	nfs4_state_mark_reclaim_nograce(clp, state);
 	nfs4_schedule_state_manager(clp);
 }
+EXPORT_SYMBOL_GPL(nfs4_schedule_stateid_recovery);
 
 void nfs_inode_find_state_and_recover(struct inode *inode,
 		const nfs4_stateid *stateid)
@@ -1118,11 +1119,13 @@ restart:
 		if (status >= 0) {
 			status = nfs4_reclaim_locks(state, ops);
 			if (status >= 0) {
+				spin_lock(&state->state_lock);
 				list_for_each_entry(lock, &state->lock_states, ls_locks) {
 					if (!(lock->ls_flags & NFS_LOCK_INITIALIZED))
 						printk("%s: Lock reclaim failed!\n",
 							__func__);
 				}
+				spin_unlock(&state->state_lock);
 				nfs4_put_open_state(state);
 				goto restart;
 			}
@@ -1186,10 +1189,12 @@ static void nfs4_clear_open_state(struct nfs4_state *state)
 	clear_bit(NFS_O_RDONLY_STATE, &state->flags);
 	clear_bit(NFS_O_WRONLY_STATE, &state->flags);
 	clear_bit(NFS_O_RDWR_STATE, &state->flags);
+	spin_lock(&state->state_lock);
 	list_for_each_entry(lock, &state->lock_states, ls_locks) {
 		lock->ls_seqid.flags = 0;
 		lock->ls_flags &= ~NFS_LOCK_INITIALIZED;
 	}
+	spin_unlock(&state->state_lock);
 }
 
 static void nfs4_state_mark_reclaim_helper(struct nfs_client *clp, int (*mark_reclaim)(struct nfs_client *clp, struct nfs4_state *state))
@@ -1389,7 +1394,10 @@ static int nfs4_reclaim_lease(struct nfs_client *clp)
 #ifdef CONFIG_NFS_V4_1
 void nfs4_schedule_session_recovery(struct nfs4_session *session)
 {
-	nfs4_schedule_lease_recovery(session->clp);
+	struct nfs_client *clp = session->clp;
+
+	set_bit(NFS4CLNT_SESSION_RESET, &clp->cl_state);
+	nfs4_schedule_lease_recovery(clp);
 }
 EXPORT_SYMBOL_GPL(nfs4_schedule_session_recovery);
 
@@ -1472,6 +1480,7 @@ static int nfs4_reset_session(struct nfs_client *clp)
 		status = nfs4_recovery_handle_error(clp, status);
 		goto out;
 	}
+	clear_bit(NFS4CLNT_SESSION_RESET, &clp->cl_state);
 	/* create_session negotiated new slot table */
 	clear_bit(NFS4CLNT_RECALL_SLOT, &clp->cl_state);
 

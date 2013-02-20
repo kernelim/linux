@@ -5768,11 +5768,11 @@ void thread_group_times(struct task_struct *p, cputime_t *ut, cputime_t *st)
 # define nsecs_to_cputime(__nsecs)	nsecs_to_jiffies(__nsecs)
 #endif
 
-static cputime_t scale_utime(cputime_t utime, cputime_t rtime, cputime_t total)
+static cputime_t scale_stime(cputime_t stime, cputime_t rtime, cputime_t total)
 {
 	u64 temp = rtime;
 
-	temp *= utime;
+	temp *= stime;
 
 	if (sizeof(cputime_t) == 4)
 		temp = div_u64(temp, (u32) total);
@@ -5784,7 +5784,7 @@ static cputime_t scale_utime(cputime_t utime, cputime_t rtime, cputime_t total)
 
 void task_times(struct task_struct *p, cputime_t *ut, cputime_t *st)
 {
-	cputime_t rtime, utime = p->utime, total = cputime_add(utime, p->stime);
+	cputime_t rtime, stime = p->stime, total = cputime_add(stime, p->utime);
 
 	/*
 	 * Use CFS's precise accounting:
@@ -5792,15 +5792,15 @@ void task_times(struct task_struct *p, cputime_t *ut, cputime_t *st)
 	rtime = nsecs_to_cputime(p->se.sum_exec_runtime);
 
 	if (total)
-		utime = scale_utime(utime, rtime, total);
+		stime = scale_stime(stime, rtime, total);
 	else
-		utime = rtime;
+		stime = rtime;
 
 	/*
 	 * Compare with previous values, to keep monotonicity:
 	 */
-	p->prev_utime = max(p->prev_utime, utime);
-	p->prev_stime = max(p->prev_stime, cputime_sub(rtime, p->prev_utime));
+	p->prev_stime = max(p->prev_stime, stime);
+	p->prev_utime = max(p->prev_utime, cputime_sub(rtime, p->prev_stime));
 
 	*ut = p->prev_utime;
 	*st = p->prev_stime;
@@ -5813,7 +5813,7 @@ void thread_group_times(struct task_struct *p, cputime_t *ut, cputime_t *st)
 {
 	struct signal_struct *sig = p->signal;
 	struct task_cputime cputime;
-	cputime_t rtime, utime, total;
+	cputime_t rtime, stime, total;
 
 	thread_group_cputime(p, &cputime);
 
@@ -5821,13 +5821,13 @@ void thread_group_times(struct task_struct *p, cputime_t *ut, cputime_t *st)
 	rtime = nsecs_to_cputime(cputime.sum_exec_runtime);
 
 	if (total)
-		utime = scale_utime(cputime.utime, rtime, total);
+		stime = scale_stime(cputime.stime, rtime, total);
 	else
-		utime = rtime;
+		stime = rtime;
 
-	sig->prev_utime = max(sig->prev_utime, utime);
-	sig->prev_stime = max(sig->prev_stime,
-			      cputime_sub(rtime, sig->prev_utime));
+	sig->prev_stime = max(sig->prev_stime, stime);
+	sig->prev_utime = max(sig->prev_utime,
+			      cputime_sub(rtime, sig->prev_stime));
 
 	*ut = sig->prev_utime;
 	*st = sig->prev_stime;

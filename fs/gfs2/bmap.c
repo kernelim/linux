@@ -1286,6 +1286,10 @@ int gfs2_setattr_size(struct inode *inode, u64 newsize)
 	if (ret)
 		return ret;
 
+	ret = gfs2_rs_alloc(GFS2_I(inode));
+	if (ret)
+		return ret;
+
 	oldsize = inode->i_size;
 	if (newsize >= oldsize)
 		return do_grow(inode, newsize);

@@ -1395,6 +1395,14 @@ static void igb_irq_enable(struct igb_adapter *adapter)
 			wr32(E1000_MBVFIMR, 0xFF);
 			ims |= E1000_IMS_VMMB;
 		}
+#ifdef CONFIG_IGB_PTP
+		/*
+		* Need to set this here as it might get cleared by the VLAN
+		* code, see igb_vlan_rx_register() and igb_vlan_rx_kill_vid().
+		*/
+		if (hw->mac.type >= e1000_82580)
+			ims |= E1000_IMS_TS;
+#endif /* CONFIG_IGB_PTP */
 		wr32(E1000_IMS, ims);
 	} else {
 		wr32(E1000_IMS, IMS_ENABLE_MASK |
