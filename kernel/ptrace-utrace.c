@@ -646,9 +646,13 @@ int ptrace_check_attach(struct task_struct *child, int kill)
 	 * Make sure our engine has already stopped the child.
 	 * Then wait for it to be off the CPU.
 	 */
+	utrace_freeze_stop(child);
 	if (!utrace_control(child, engine, UTRACE_STOP) &&
 	    !utrace_prepare_examine(child, engine, &exam))
 		ret = 0;
+	else
+		utrace_unfreeze_stop(child);
+
 out:
 	utrace_engine_put(engine);
 	return ret;
@@ -763,6 +767,8 @@ static void ptrace_do_detach(struct task_struct *tracee, unsigned int data)
 
 int ptrace_detach(struct task_struct *child, unsigned int data)
 {
+	utrace_unfreeze_stop(child);
+
 	if (!valid_signal(data))
 		return -EIO;
 

@@ -129,6 +129,13 @@ static inline void task_utrace_proc_status(struct seq_file *m,
 {
 }
 
+static inline void utrace_freeze_stop(struct task_struct *task)
+{
+}
+static inline void utrace_unfreeze_stop(struct task_struct *task)
+{
+}
+
 #else  /* CONFIG_UTRACE */
 
 static inline unsigned long task_utrace_flags(struct task_struct *task)
@@ -621,6 +628,9 @@ int __must_check utrace_prepare_examine(struct task_struct *,
 int __must_check utrace_finish_examine(struct task_struct *,
 				       struct utrace_engine *,
 				       struct utrace_examiner *);
+
+void utrace_freeze_stop(struct task_struct *task);
+void utrace_unfreeze_stop(struct task_struct *task);
 
 /**
  * utrace_control_pid - control a thread being traced by a tracing engine
