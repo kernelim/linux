@@ -405,6 +405,7 @@ xfsaild_push(
 		xfs_trans_ail_cursor_done(ailp, cur);
 		spin_unlock(&ailp->xa_lock);
 		*last_lsn = 0;
+		tout = 50;
 		return tout;
 	}
 

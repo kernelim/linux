@@ -36,6 +36,13 @@ union nf_conntrack_proto {
 	struct nf_ct_gre gre;
 };
 
+/* RHEL only: per conntrack: protocol private data extra space (ABI) */
+struct nf_conntrack_proto_ext {
+	/* For SYN packets while we may be out-of-sync */
+	u_int8_t	last_wscale;	/* Last window scaling factor seen */
+	u_int8_t	last_flags;	/* Last flags set */
+};
+
 union nf_conntrack_expect_proto {
 	/* insert expect proto private data here */
 };
@@ -123,6 +130,11 @@ struct nf_conn {
 	struct nf_ct_ext *ext;
 #ifdef CONFIG_NET_NS
 	struct net *ct_net;
+#endif
+
+#ifndef __GENKSYMS__
+	/* Extra storage reserved for other modules: */
+	struct nf_conntrack_proto_ext proto_ext;
 #endif
 };
 

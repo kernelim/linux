@@ -18,6 +18,7 @@
 #include <asm/hypervisor.h>
 #include <asm/hyperv.h>
 #include <asm/mshyperv.h>
+#include <xen/xen.h>
 
 struct ms_hyperv_info ms_hyperv;
 EXPORT_SYMBOL_GPL(ms_hyperv);
@@ -28,6 +29,13 @@ static bool __init ms_hyperv_platform(void)
 	u32 hyp_signature[3];
 
 	if (!boot_cpu_has(X86_FEATURE_HYPERVISOR))
+		return false;
+
+	/*
+	 * Xen emulates Hyper-V to support enlightened Windows.
+	 * Check to see first if we are on a Xen Hypervisor.
+	 */
+	if (xen_cpuid_base())
 		return false;
 
 	cpuid(HYPERV_CPUID_VENDOR_AND_MAX_FUNCTIONS,

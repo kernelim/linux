@@ -562,13 +562,13 @@ int rndis_filter_set_device_mac(struct hv_device *hdev, char *mac)
 
 	cfg_nwadr = (wchar_t *)((ulong)cpi + cpi->parameter_name_offset);
 	cfg_mac = (wchar_t *)((ulong)cpi + cpi->parameter_value_offset);
-	ret = utf8s_to_utf16s(NWADR_STR, NWADR_STRLEN,
-			      cfg_nwadr);
+	ret = utf8s_to_utf16s(NWADR_STR, NWADR_STRLEN, UTF16_HOST_ENDIAN,
+			      cfg_nwadr, NWADR_STRLEN);
 	if (ret < 0)
 		goto cleanup;
 	snprintf(macstr, 2*ETH_ALEN+1, "%pm", mac);
-	ret = utf8s_to_utf16s(macstr, 2*ETH_ALEN,
-			      cfg_mac);
+	ret = utf8s_to_utf16s(macstr, 2*ETH_ALEN, UTF16_HOST_ENDIAN,
+			      cfg_mac, 2*ETH_ALEN);
 	if (ret < 0)
 		goto cleanup;
 

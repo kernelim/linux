@@ -761,7 +761,6 @@ static int __rtas_suspend_cpu(struct rtas_suspend_me_data *data, int wake_when_d
 	unsigned long msr_save;
 	int cpu;
 
-	stop_topology_update();
 	atomic_inc(&data->working);
 
 	/* really need to ensure MSR.EE is off for H_JOIN */
@@ -793,7 +792,6 @@ static int __rtas_suspend_cpu(struct rtas_suspend_me_data *data, int wake_when_d
 		/* Ensure data->done is seen on all CPUs that are about to wake up
 		 as a result of the H_PROD below */
 		mb();
-		start_topology_update();
 		pSeries_coalesce_init();
 
 		/* This cpu did the suspend or got an error; in either case,
@@ -854,6 +852,7 @@ static int rtas_ibm_suspend_me(struct rtas_args *args)
 	data.error = 0;
 	data.token = rtas_token("ibm,suspend-me");
 	data.complete = &done;
+	stop_topology_update();
 
 	/* Call function on all CPUs.  One of us will make the
 	 * rtas call
@@ -865,6 +864,8 @@ static int rtas_ibm_suspend_me(struct rtas_args *args)
 
 	if (data.error != 0)
 		printk(KERN_ERR "Error doing global join\n");
+
+	start_topology_update();
 
 	return data.error;
 }

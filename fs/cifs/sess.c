@@ -932,7 +932,8 @@ ssetup_ntlmssp_authenticate:
 
 ssetup_exit:
 	if (spnego_key) {
-		key_revoke(spnego_key);
+		/* Use key_invalidate() here once it has been backported */
+		rh_key_invalidate(spnego_key);
 		key_put(spnego_key);
 	}
 	kfree(str_area);

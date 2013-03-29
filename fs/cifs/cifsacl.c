@@ -32,19 +32,6 @@
 #include "cifsproto.h"
 #include "cifs_debug.h"
 
-/* Use in place of key_invalidate which hasn't been backported to RHEL 6 yet */
-static void tmp_key_invalidate(struct key *key)
-{
-	key_revoke(key);
-	/*
-	 * At this time gc has been set by key_revoke() above.
-	 * Simply set expiry time to 0
-	 */
-	down_write(&key->sem);
-	key->expiry = 0;
-	up_write(&key->sem);
-}
-
 /* security id for everyone/world system group */
 static const struct cifs_sid sid_everyone = {
 	1, 1, {0, 0, 0, 0, 0, 1}, {0} };
@@ -254,7 +241,7 @@ out_revert_creds:
 
 invalidate_key:
 	/* Use key_invalidate() here once it has been backported to RHEL 6 */
-	tmp_key_invalidate(sidkey);
+	rh_key_invalidate(sidkey);
 	goto out_key_put;
 }
 
@@ -302,7 +289,7 @@ sid_to_id(struct cifs_sb_info *cifs_sb, struct cifs_sid *psid,
 		cFYI(1, "%s: Downcall contained malformed key "
 			"(datalen=%hu)", __func__, sidkey->datalen);
 		/* Use key_invalidate() here once it has been backported to RHEL 6 */
-		tmp_key_invalidate(sidkey);
+		rh_key_invalidate(sidkey);
 		goto out_key_put;
 	}
 

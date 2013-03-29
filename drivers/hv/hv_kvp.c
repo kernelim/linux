@@ -216,31 +216,41 @@ static int process_ob_ipinfo(void *in_msg, void *out_msg, int op)
 		 */
 		len = utf8s_to_utf16s((char *)in->body.kvp_ip_val.ip_addr,
 				strlen((char *)in->body.kvp_ip_val.ip_addr),
-				(wchar_t *)out->kvp_ip_val.ip_addr);
+				UTF16_HOST_ENDIAN,
+				(wchar_t *)out->kvp_ip_val.ip_addr,
+				MAX_IP_ADDR_SIZE);
 		if (len < 0)
 			return len;
 
 		len = utf8s_to_utf16s((char *)in->body.kvp_ip_val.sub_net,
 				strlen((char *)in->body.kvp_ip_val.sub_net),
-				(wchar_t *)out->kvp_ip_val.sub_net);
+				UTF16_HOST_ENDIAN,
+				(wchar_t *)out->kvp_ip_val.sub_net,
+				MAX_IP_ADDR_SIZE);
 		if (len < 0)
 			return len;
 
 		len = utf8s_to_utf16s((char *)in->body.kvp_ip_val.gate_way,
 				strlen((char *)in->body.kvp_ip_val.gate_way),
-				(wchar_t *)out->kvp_ip_val.gate_way);
+				UTF16_HOST_ENDIAN,
+				(wchar_t *)out->kvp_ip_val.gate_way,
+				MAX_GATEWAY_SIZE);
 		if (len < 0)
 			return len;
 
 		len = utf8s_to_utf16s((char *)in->body.kvp_ip_val.dns_addr,
 				strlen((char *)in->body.kvp_ip_val.dns_addr),
-				(wchar_t *)out->kvp_ip_val.dns_addr);
+				UTF16_HOST_ENDIAN,
+				(wchar_t *)out->kvp_ip_val.dns_addr,
+				MAX_IP_ADDR_SIZE);
 		if (len < 0)
 			return len;
 
 		len = utf8s_to_utf16s((char *)in->body.kvp_ip_val.adapter_id,
 				strlen((char *)in->body.kvp_ip_val.adapter_id),
-				(wchar_t *)out->kvp_ip_val.adapter_id);
+				UTF16_HOST_ENDIAN,
+				(wchar_t *)out->kvp_ip_val.adapter_id,
+				MAX_IP_ADDR_SIZE);
 		if (len < 0)
 			return len;
 
@@ -516,14 +526,16 @@ kvp_respond_to_host(struct hv_kvp_msg *msg_to_host, int error)
 	 * will be less than or equal to the MAX size (including the
 	 * terminating character).
 	 */
-	keylen = utf8s_to_utf16s(key_name, strlen(key_name),
-				(wchar_t *) kvp_data->key);
+	keylen = utf8s_to_utf16s(key_name, strlen(key_name), UTF16_HOST_ENDIAN,
+				(wchar_t *) kvp_data->key,
+				(HV_KVP_EXCHANGE_MAX_KEY_SIZE / 2) - 2);
 	kvp_data->key_size = 2*(keylen + 1); /* utf16 encoding */
 
 copy_value:
 	value = msg_to_host->body.kvp_enum_data.data.value;
-	valuelen = utf8s_to_utf16s(value, strlen(value),
-				(wchar_t *) kvp_data->value);
+	valuelen = utf8s_to_utf16s(value, strlen(value), UTF16_HOST_ENDIAN,
+				(wchar_t *) kvp_data->value,
+				(HV_KVP_EXCHANGE_MAX_VALUE_SIZE / 2) - 2);
 	kvp_data->value_size = 2*(valuelen + 1); /* utf16 encoding */
 
 	/*

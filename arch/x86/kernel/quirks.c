@@ -3,7 +3,7 @@
  */
 #include <linux/pci.h>
 #include <linux/irq.h>
-
+#include <linux/dmar.h>
 #include <asm/hpet.h>
 
 struct pci_dev *mcp55_rewrite = NULL;
@@ -93,6 +93,26 @@ DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x0360,
 			check_mcp55_legacy_irq_routing);
 DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_NVIDIA, 0x0364,
 			check_mcp55_legacy_irq_routing);
+#endif
+
+#ifdef CONFIG_INTR_REMAP
+static void intel_remapping_check(struct pci_dev *dev)
+{
+	u8 revision;
+
+	pci_read_config_byte(dev, PCI_REVISION_ID, &revision);
+
+	if ((revision == 0x13) && intr_remapping_enabled) {
+		pr_warn(HW_ERR "This system BIOS has enabled interrupt remapping\n"
+			"on a chipset that contains an errata making that\n"
+			"feature unstable.  Please reboot with nointremap\n"
+			"added to the kernel command line and contact\n"
+			"your BIOS vendor for an update");
+	}
+}
+
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_5520_IOHUB, intel_remapping_check);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_5500_IOHUB, intel_remapping_check);
 #endif
 
 #if defined(CONFIG_HPET_TIMER)

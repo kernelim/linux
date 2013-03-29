@@ -746,6 +746,7 @@ static int fuse_buffered_write(struct file *file, struct inode *inode,
 	req->num_pages = 1;
 	req->pages[0] = page;
 	req->page_descs[0].offset = offset;
+	req->page_descs[0].length = count;
 	nres = fuse_send_write(req, file, pos, count, NULL);
 	err = req->out.h.error;
 	fuse_put_request(fc, req);

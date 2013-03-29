@@ -185,25 +185,19 @@ static struct tty_buffer *tty_buffer_find(struct tty_struct *tty, size_t size)
 	/* Should possibly check if this fails for the largest buffer we
 	   have queued and recycle that ? */
 }
-
 /**
- *	tty_buffer_request_room		-	grow tty buffer if needed
+ *	__tty_buffer_request_room		-	grow tty buffer if needed
  *	@tty: tty structure
  *	@size: size desired
  *
  *	Make at least size bytes of linear space available for the tty
  *	buffer. If we fail return the size we managed to find.
- *
- *	Locking: Takes tty->buf.lock
+ *      Locking: Caller must hold tty->buf.lock
  */
-int tty_buffer_request_room(struct tty_struct *tty, size_t size)
+static int __tty_buffer_request_room(struct tty_struct *tty, size_t size)
 {
 	struct tty_buffer *b, *n;
 	int left;
-	unsigned long flags;
-
-	spin_lock_irqsave(&tty->buf.lock, flags);
-
 	/* OPTIMISATION: We could keep a per tty "zero" sized buffer to
 	   remove this conditional if its worth it. This would be invisible
 	   to the callers */
@@ -225,8 +219,29 @@ int tty_buffer_request_room(struct tty_struct *tty, size_t size)
 			size = left;
 	}
 
-	spin_unlock_irqrestore(&tty->buf.lock, flags);
 	return size;
+}
+
+
+/**
+ *	tty_buffer_request_room		-	grow tty buffer if needed
+ *	@tty: tty structure
+ *	@size: size desired
+ *
+ *	Make at least size bytes of linear space available for the tty
+ *	buffer. If we fail return the size we managed to find.
+ *
+ *	Locking: Takes tty->buf.lock
+ */
+int tty_buffer_request_room(struct tty_struct *tty, size_t size)
+{
+	unsigned long flags;
+	int length;
+
+	spin_lock_irqsave(&tty->buf.lock, flags);
+	length = __tty_buffer_request_room(tty, size);
+	spin_unlock_irqrestore(&tty->buf.lock, flags);
+	return length;
 }
 EXPORT_SYMBOL_GPL(tty_buffer_request_room);
 
@@ -248,14 +263,22 @@ int tty_insert_flip_string(struct tty_struct *tty, const unsigned char *chars,
 	int copied = 0;
 	do {
 		int goal = min_t(size_t, size - copied, TTY_BUFFER_PAGE);
-		int space = tty_buffer_request_room(tty, goal);
-		struct tty_buffer *tb = tty->buf.tail;
+		int space;
+		unsigned long flags;
+		struct tty_buffer *tb;
+
+		spin_lock_irqsave(&tty->buf.lock, flags);
+		space = __tty_buffer_request_room(tty, goal);
+		tb = tty->buf.tail;
 		/* If there is no space then tb may be NULL */
-		if (unlikely(space == 0))
+		if (unlikely(space == 0)) {
+			spin_unlock_irqrestore(&tty->buf.lock, flags);
 			break;
+		}
 		memcpy(tb->char_buf_ptr + tb->used, chars, space);
 		memset(tb->flag_buf_ptr + tb->used, TTY_NORMAL, space);
 		tb->used += space;
+		spin_unlock_irqrestore(&tty->buf.lock, flags);
 		copied += space;
 		chars += space;
 		/* There is a small chance that we need to split the data over
@@ -285,14 +308,22 @@ int tty_insert_flip_string_flags(struct tty_struct *tty,
 	int copied = 0;
 	do {
 		int goal = min_t(size_t, size - copied, TTY_BUFFER_PAGE);
-		int space = tty_buffer_request_room(tty, goal);
-		struct tty_buffer *tb = tty->buf.tail;
+		int space;
+		unsigned long __flags;
+		struct tty_buffer *tb;
+
+		spin_lock_irqsave(&tty->buf.lock, __flags);
+		space = __tty_buffer_request_room(tty, goal);
+		tb = tty->buf.tail;
 		/* If there is no space then tb may be NULL */
-		if (unlikely(space == 0))
+		if (unlikely(space == 0)) {
+			spin_unlock_irqrestore(&tty->buf.lock, __flags);
 			break;
+		}
 		memcpy(tb->char_buf_ptr + tb->used, chars, space);
 		memcpy(tb->flag_buf_ptr + tb->used, flags, space);
 		tb->used += space;
+		spin_unlock_irqrestore(&tty->buf.lock, __flags);
 		copied += space;
 		chars += space;
 		flags += space;
@@ -343,13 +374,20 @@ EXPORT_SYMBOL(tty_schedule_flip);
 int tty_prepare_flip_string(struct tty_struct *tty, unsigned char **chars,
 								size_t size)
 {
-	int space = tty_buffer_request_room(tty, size);
+	int space;
+	unsigned long flags;
+	struct tty_buffer *tb;
+
+	spin_lock_irqsave(&tty->buf.lock, flags);
+	space = __tty_buffer_request_room(tty, size);
+
+	tb = tty->buf.tail;
 	if (likely(space)) {
-		struct tty_buffer *tb = tty->buf.tail;
 		*chars = tb->char_buf_ptr + tb->used;
 		memset(tb->flag_buf_ptr + tb->used, TTY_NORMAL, space);
 		tb->used += space;
 	}
+	spin_unlock_irqrestore(&tty->buf.lock, flags);
 	return space;
 }
 EXPORT_SYMBOL_GPL(tty_prepare_flip_string);
@@ -373,13 +411,20 @@ EXPORT_SYMBOL_GPL(tty_prepare_flip_string);
 int tty_prepare_flip_string_flags(struct tty_struct *tty,
 			unsigned char **chars, char **flags, size_t size)
 {
-	int space = tty_buffer_request_room(tty, size);
+	int space;
+	unsigned long __flags;
+	struct tty_buffer *tb;
+
+	spin_lock_irqsave(&tty->buf.lock, __flags);
+	space = __tty_buffer_request_room(tty, size);
+
+	tb = tty->buf.tail;
 	if (likely(space)) {
-		struct tty_buffer *tb = tty->buf.tail;
 		*chars = tb->char_buf_ptr + tb->used;
 		*flags = tb->flag_buf_ptr + tb->used;
 		tb->used += space;
 	}
+	spin_unlock_irqrestore(&tty->buf.lock, __flags);
 	return space;
 }
 EXPORT_SYMBOL_GPL(tty_prepare_flip_string_flags);

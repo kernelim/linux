@@ -459,6 +459,7 @@ struct ehea_port {
 	struct ehea_port_res port_res[EHEA_MAX_PORT_RES];
 	struct of_device  ofdev; /* Open Firmware Device */
 	struct ehea_mc_list *mc_list;	 /* Multicast MAC addresses */
+	struct vlan_group *vgrp;
 	struct ehea_eq *qp_eq;
 	struct work_struct reset_task;
 	struct delayed_work stats_work;
