@@ -215,7 +215,16 @@ struct mm_struct {
 	void (*unmap_area) (struct mm_struct *mm, unsigned long addr);
 	unsigned long mmap_base;		/* base of mmap area */
 	unsigned long task_size;		/* size of task vm space */
-	unsigned long cached_hole_size; 	/* if non-zero, the largest hole below free_area_cache */
+	/*
+	 * RHEL6 special for bug 790921: this same variable can mean
+	 * two different things. If sysctl_unmap_area_factor is zero,
+	 * this means the largest hole below free_area_cache. If the
+	 * sysctl is set to a positive value, this variable is used
+	 * to count how much memory has been munmapped from this process
+	 * since the last time free_area_cache was reset back to mmap_base.
+	 * This is ugly, but necessary to preserve kABI.
+	 */
+	unsigned long cached_hole_size;
 	unsigned long free_area_cache;		/* first hole of size cached_hole_size or larger */
 	pgd_t * pgd;
 	atomic_t mm_users;			/* How many users with user space? */

@@ -29,6 +29,7 @@ enum {
 	NFS_DELEGATION_NEED_RECLAIM = 0,
 	NFS_DELEGATION_RETURN,
 	NFS_DELEGATION_REFERENCED,
+	NFS_DELEGATION_RETURNING,
 };
 
 int nfs_inode_set_delegation(struct inode *inode, struct rpc_cred *cred, struct nfs_openres *res);
@@ -67,6 +68,7 @@ static inline int nfs_have_delegation(struct inode *inode, fmode_t flags)
 
 static inline int nfs_inode_return_delegation(struct inode *inode)
 {
+	nfs_wb_all(inode);
 	return 0;
 }
 #endif

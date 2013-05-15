@@ -134,6 +134,7 @@ hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
 	struct vm_area_struct *vma;
 	unsigned long start_addr;
 	struct hstate *h = hstate_file(file);
+	unsigned int unmap_factor = sysctl_unmap_area_factor;
 
 	if (len & ~huge_page_mask(h))
 		return -EINVAL;
@@ -156,7 +157,7 @@ hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
 
 	start_addr = mm->free_area_cache;
 
-	if (len <= mm->cached_hole_size)
+	if (len <= mm->cached_hole_size && !unmap_factor)
 		start_addr = TASK_UNMAPPED_BASE;
 
 full_search:

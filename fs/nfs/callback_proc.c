@@ -131,7 +131,7 @@ static u32 initiate_file_draining(struct nfs_client *clp,
 			/* Without this, layout can be freed as soon
 			 * as we release cl_lock.
 			 */
-			get_layout_hdr(lo);
+			pnfs_get_layout_hdr(lo);
 			break;
 		}
 		if (found)
@@ -153,7 +153,7 @@ static u32 initiate_file_draining(struct nfs_client *clp,
 	pnfs_set_layout_stateid(lo, &args->cbl_stateid, true);
 	spin_unlock(&ino->i_lock);
 	pnfs_free_lseg_list(&free_me_list);
-	put_layout_hdr(lo);
+	pnfs_put_layout_hdr(lo);
 	iput(ino);
 	return rv;
 }
@@ -185,7 +185,7 @@ static u32 initiate_bulk_draining(struct nfs_client *clp,
 		list_for_each_entry(lo, &server->layouts, plh_layouts) {
 			if (!igrab(lo->plh_inode))
 				continue;
-			get_layout_hdr(lo);
+			pnfs_get_layout_hdr(lo);
 			BUG_ON(!list_empty(&lo->plh_bulk_recall));
 			list_add(&lo->plh_bulk_recall, &recall_list);
 		}
@@ -203,7 +203,7 @@ static u32 initiate_bulk_draining(struct nfs_client *clp,
 		list_del_init(&lo->plh_bulk_recall);
 		spin_unlock(&ino->i_lock);
 		pnfs_free_lseg_list(&free_me_list);
-		put_layout_hdr(lo);
+		pnfs_put_layout_hdr(lo);
 		iput(ino);
 	}
 	return rv;

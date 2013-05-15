@@ -322,6 +322,13 @@ static int pv_eoi_put_user(struct kvm_vcpu *vcpu, u8 val)
 				      sizeof(val));
 }
 
+static int pv_eoi_put_user_atomic(struct kvm_vcpu *vcpu, u8 val)
+{
+	return kvm_write_guest_cached_atomic(vcpu->kvm,
+					     &vcpu->arch.pv_eoi.data, &val,
+					     sizeof(val));
+}
+
 static int pv_eoi_get_user(struct kvm_vcpu *vcpu, u8 *val)
 {
 
@@ -345,12 +352,22 @@ static bool pv_eoi_get_pending(struct kvm_vcpu *vcpu)
 
 static void pv_eoi_set_pending(struct kvm_vcpu *vcpu)
 {
-	if (pv_eoi_put_user(vcpu, KVM_PV_EOI_ENABLED) < 0) {
+	/*
+	 * In RHEL6 only, this can get called in atomic context, so use _atomic
+	 * to avoid schedule in atomic error.
+	 * If the atomic access fails nothing was written into guest memory
+	 * (it's a single byte write so no partial failures are possible).
+	 * This means we did not set KVM_PV_EOI_ENABLED: guest will detect this
+	 * by executing test-and-clear on the faulting memory
+	 * and fallback to (slower) non-PV EOI notification handled in
+	 * apic_set_eoi(). The detection in guest will cause this memory to be
+	 * faulted in, and PV EOI will get re-enabled on the next interrupt.
+	 */
+	if (pv_eoi_put_user_atomic(vcpu, KVM_PV_EOI_ENABLED) < 0)
 		apic_debug("Can't set EOI MSR value: 0x%llx\n",
 			   (unsigned long long)vcpi->arch.pv_eoi.msr_val);
-		return;
-	}
-	__set_bit(KVM_APIC_PV_EOI_PENDING, &vcpu->arch.apic_attention);
+	else
+		__set_bit(KVM_APIC_PV_EOI_PENDING, &vcpu->arch.apic_attention);
 }
 
 static void pv_eoi_clr_pending(struct kvm_vcpu *vcpu)

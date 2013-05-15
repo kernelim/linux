@@ -1346,8 +1346,6 @@ hwi_complete_drvr_msgs(struct beiscsi_conn *beiscsi_conn,
 	struct hwi_controller *phwi_ctrlr;
 	struct iscsi_task *task;
 	struct beiscsi_io_task *io_task;
-	struct iscsi_conn *conn = beiscsi_conn->conn;
-	struct iscsi_session *session = conn->session;
 
 	phwi_ctrlr = phba->phwi_ctrlr;
 	pwrb_context = &phwi_ctrlr->wrb_context[((psol->
@@ -1360,12 +1358,8 @@ hwi_complete_drvr_msgs(struct beiscsi_conn *beiscsi_conn,
 	task = pwrb_handle->pio_handle;
 
 	io_task = task->dd_data;
-	spin_lock_bh(&phba->mgmt_sgl_lock);
-	free_mgmt_sgl_handle(phba, io_task->psgl_handle);
-	spin_unlock_bh(&phba->mgmt_sgl_lock);
-	spin_lock_bh(&session->lock);
-	free_wrb_handle(phba, pwrb_context, pwrb_handle);
-	spin_unlock_bh(&session->lock);
+	memset(io_task->pwrb_handle->pwrb, 0, sizeof(struct iscsi_wrb));
+	iscsi_put_task(task);
 }
 
 static void
@@ -2198,10 +2192,14 @@ hwi_write_sgl(struct iscsi_wrb *pwrb, struct scatterlist *sg,
 	AMAP_SET_BITS(struct amap_iscsi_sge, last_sge, psgl, 1);
 }
 
+/**
+ * hwi_write_buffer()- Populate the WRB with task info
+ * @pwrb: ptr to the WRB entry
+ * @task: iscsi task which is to be executed
+ **/
 static void hwi_write_buffer(struct iscsi_wrb *pwrb, struct iscsi_task *task)
 {
 	struct iscsi_sge *psgl;
-	unsigned long long addr;
 	struct beiscsi_io_task *io_task = task->dd_data;
 	struct beiscsi_conn *beiscsi_conn = io_task->conn;
 	struct beiscsi_hba *phba = beiscsi_conn->phba;
@@ -2215,24 +2213,27 @@ static void hwi_write_buffer(struct iscsi_wrb *pwrb, struct iscsi_task *task)
 	if (task->data) {
 		if (task->data_count) {
 			AMAP_SET_BITS(struct amap_iscsi_wrb, dsp, pwrb, 1);
-			addr = (u64) pci_map_single(phba->pcidev,
-						    task->data,
-						    task->data_count, 1);
+			io_task->mtask_addr = pci_map_single(phba->pcidev,
+							     task->data,
+							     task->data_count,
+							     PCI_DMA_TODEVICE);
+
+			io_task->mtask_data_count = task->data_count;
 		} else {
 			AMAP_SET_BITS(struct amap_iscsi_wrb, dsp, pwrb, 0);
-			addr = 0;
+			io_task->mtask_addr = 0;
 		}
 		AMAP_SET_BITS(struct amap_iscsi_wrb, sge0_addr_lo, pwrb,
-						((u32)(addr & 0xFFFFFFFF)));
+			      lower_32_bits(io_task->mtask_addr));
 		AMAP_SET_BITS(struct amap_iscsi_wrb, sge0_addr_hi, pwrb,
-						((u32)(addr >> 32)));
+			      upper_32_bits(io_task->mtask_addr));
 		AMAP_SET_BITS(struct amap_iscsi_wrb, sge0_len, pwrb,
 						task->data_count);
 
 		AMAP_SET_BITS(struct amap_iscsi_wrb, sge0_last, pwrb, 1);
 	} else {
 		AMAP_SET_BITS(struct amap_iscsi_wrb, dsp, pwrb, 0);
-		addr = 0;
+		io_task->mtask_addr = 0;
 	}
 
 	psgl = (struct iscsi_sge *)io_task->psgl_handle->pfrag;
@@ -2255,9 +2256,9 @@ static void hwi_write_buffer(struct iscsi_wrb *pwrb, struct iscsi_task *task)
 		psgl++;
 		if (task->data) {
 			AMAP_SET_BITS(struct amap_iscsi_sge, addr_lo, psgl,
-						((u32)(addr & 0xFFFFFFFF)));
+				      lower_32_bits(io_task->mtask_addr));
 			AMAP_SET_BITS(struct amap_iscsi_sge, addr_hi, psgl,
-						((u32)(addr >> 32)));
+				      upper_32_bits(io_task->mtask_addr));
 		}
 		AMAP_SET_BITS(struct amap_iscsi_sge, len, psgl, 0x106);
 	}
@@ -3849,6 +3850,11 @@ static void beiscsi_clean_port(struct beiscsi_hba *phba)
 	kfree(phba->ep_array);
 }
 
+/**
+ * beiscsi_cleanup_task()- Free driver resources of the task
+ * @task: ptr to the iscsi task
+ *
+ **/
 static void beiscsi_cleanup_task(struct iscsi_task *task)
 {
 	struct beiscsi_io_task *io_task = task->dd_data;
@@ -3885,16 +3891,26 @@ static void beiscsi_cleanup_task(struct iscsi_task *task)
 	} else {
 		if (!beiscsi_conn->login_in_progress) {
 			if (io_task->pwrb_handle) {
+				memset(io_task->pwrb_handle->pwrb, 0,
+				       sizeof(struct iscsi_wrb));
+
 				free_wrb_handle(phba, pwrb_context,
 						io_task->pwrb_handle);
 				io_task->pwrb_handle = NULL;
 			}
 			if (io_task->psgl_handle) {
-				spin_lock(&phba->mgmt_sgl_lock);
+				spin_lock_bh(&phba->mgmt_sgl_lock);
 				free_mgmt_sgl_handle(phba,
 						     io_task->psgl_handle);
-				spin_unlock(&phba->mgmt_sgl_lock);
+				spin_unlock_bh(&phba->mgmt_sgl_lock);
 				io_task->psgl_handle = NULL;
+			}
+			if (io_task->mtask_addr) {
+				pci_unmap_single(phba->pcidev,
+						 io_task->mtask_addr,
+						 io_task->mtask_data_count,
+						 PCI_DMA_TODEVICE);
+				io_task->mtask_addr = 0;
 			}
 		}
 	}

@@ -1287,7 +1287,12 @@ int __kvm_set_memory_region(struct kvm *kvm,
 		goto out;
 	if (mem->guest_phys_addr & (PAGE_SIZE - 1))
 		goto out;
-	if (user_alloc && (mem->userspace_addr & (PAGE_SIZE - 1)))
+	/* We can read the guest memory with __xxx_user() later on. */
+	if (user_alloc &&
+	    ((mem->userspace_addr & (PAGE_SIZE - 1)) ||
+	     !access_ok(VERIFY_WRITE,
+			(void __user *)(unsigned long)mem->userspace_addr,
+			mem->memory_size)))
 		goto out;
 	if (mem->slot >= KVM_MEMORY_SLOTS + KVM_PRIVATE_MEM_SLOTS)
 		goto out;
@@ -1835,7 +1840,7 @@ int kvm_read_guest_page(struct kvm *kvm, gfn_t gfn, void *data, int offset,
 	addr = gfn_to_hva(kvm, gfn);
 	if (kvm_is_error_hva(addr))
 		return -EFAULT;
-	r = copy_from_user(data, (void __user *)addr + offset, len);
+	r = __copy_from_user(data, (void __user *)addr + offset, len);
 	if (r)
 		return -EFAULT;
 	return 0;
@@ -1959,6 +1964,49 @@ int kvm_write_guest_cached(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(kvm_write_guest_cached);
+
+/*
+ * Same as vm_write_guest_cached but OK to use with interrupts disabled.
+ * Returns -EAGAIN if access would require sleeping. In this case no write
+ * takes place; the guest address might or might not be valid.
+ */
+int kvm_write_guest_cached_atomic(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
+				  void *data, unsigned long len)
+{
+	struct kvm_memslots *slots = kvm_memslots(kvm);
+	int r;
+
+	if (slots->generation != ghc->generation)
+		kvm_gfn_to_hva_cache_init(kvm, ghc, ghc->gpa);
+
+	if (kvm_is_error_hva(ghc->hva))
+		return -EFAULT;
+
+	if (!access_ok(VERIFY_WRITE, (void __user *)ghc->hva, len))
+		return -EFAULT;
+
+	pagefault_disable();
+	/*
+	 * In case of a page fault the page fault handler will detect we are in
+	 * atomic context and go directly to fixups instead of processing the
+	 * page fault; __copy_to_user_inatomic() then returns right away with
+	 * error.
+	 */
+	r = __copy_to_user_inatomic((void __user *)ghc->hva, data, len);
+	pagefault_enable();
+	if (r) {
+		/*
+		 * Error means a pagefault is required: e.g. page in swap, or
+		 * an invalid address. No write took place: accesses do not
+		 * cross the page boundary, so failures are never partial.
+		 */
+		return -EAGAIN;
+	}
+	mark_page_dirty_in_slot(kvm, ghc->memslot, ghc->gpa >> PAGE_SHIFT);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(kvm_write_guest_cached_atomic);
 
 int kvm_read_guest_cached(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
 			   void *data, unsigned long len)

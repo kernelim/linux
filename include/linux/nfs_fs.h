@@ -600,6 +600,7 @@ extern struct file_system_type nfs_fs_type;
 #define NFSDBG_FSCACHE		0x0800
 #define NFSDBG_PNFS		0x1000
 #define NFSDBG_PNFS_LD		0x2000
+#define NFSDBG_STATE		0x4000
 #define NFSDBG_ALL		0xFFFF
 
 #ifdef __KERNEL__
