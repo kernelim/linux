@@ -17,6 +17,7 @@
 #include <linux/topology.h>
 #include <linux/bootmem.h>
 #include <linux/mm.h>
+#include <linux/dmi.h>
 #include <asm/proto.h>
 #include <asm/numa.h>
 #include <asm/e820.h>
@@ -254,6 +255,7 @@ acpi_numa_memory_affinity_init(struct acpi_srat_mem_affinity *ma)
 	unsigned long start, end;
 	int node, pxm;
 	int i;
+	const char *dmi_product_name;
 
 	if (srat_disabled())
 		return;
@@ -305,7 +307,10 @@ acpi_numa_memory_affinity_init(struct acpi_srat_mem_affinity *ma)
 	e820_register_active_regions(node, start >> PAGE_SHIFT,
 				     end >> PAGE_SHIFT);
 
-	if (ma->flags & ACPI_SRAT_MEM_HOT_PLUGGABLE) {
+	dmi_product_name = dmi_get_system_info(DMI_PRODUCT_NAME);
+	if (ma->flags & ACPI_SRAT_MEM_HOT_PLUGGABLE &&
+	    (!dmi_match(DMI_SYS_VENDOR, "FUJITSU") ||
+	     !strstr(dmi_product_name, "PRIMEQUEST"))) {
 		update_nodes_add(node, start, end);
 		/* restore nodes[node] */
 		*nd = oldnode;

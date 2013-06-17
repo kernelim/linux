@@ -496,7 +496,7 @@ static void e1000_receive_skb(struct e1000_adapter *adapter,
 {
 	skb->protocol = eth_type_trans(skb, netdev);
 
-	if (adapter->vlgrp && (status & E1000_RXD_STAT_VP))
+	if (status & E1000_RXD_STAT_VP)
 		vlan_gro_receive(&adapter->napi, adapter->vlgrp,
 				 le16_to_cpu(vlan), skb);
 	else
@@ -3229,8 +3229,16 @@ static void e1000e_set_rx_mode(struct net_device *netdev)
 	rctl &= ~(E1000_RCTL_UPE | E1000_RCTL_MPE);
 
 	if (netdev->flags & IFF_PROMISC) {
+		u32 ctrl;
+
 		rctl |= (E1000_RCTL_UPE | E1000_RCTL_MPE);
 		rctl &= ~E1000_RCTL_VFE;
+		/* enable VLAN RX/TX even if no VLAN is registered */
+		ctrl = er32(CTRL);
+		ctrl |= E1000_CTRL_VME;
+		ew32(CTRL, ctrl);
+		if (adapter->flags & FLAG_HAS_HW_VLAN_FILTER)
+			rctl &= ~E1000_RCTL_CFIEN;
 	} else {
 		int count;
 
@@ -5000,7 +5008,7 @@ static netdev_tx_t e1000_xmit_frame(struct sk_buff *skb,
 	if (e1000_maybe_stop_tx(tx_ring, count + 2))
 		return NETDEV_TX_BUSY;
 
-	if (adapter->vlgrp && vlan_tx_tag_present(skb)) {
+	if (vlan_tx_tag_present(skb)) {
 		tx_flags |= E1000_TX_FLAGS_VLAN;
 		tx_flags |= (vlan_tx_tag_get(skb) << E1000_TX_FLAGS_VLAN_SHIFT);
 	}

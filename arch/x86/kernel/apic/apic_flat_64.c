@@ -164,9 +164,14 @@ static int flat_phys_pkg_id(int initial_apic_id, int index_msb)
 	return initial_apic_id >> index_msb;
 }
 
+static int flat_probe(void)
+{
+	return 1;
+}
+
 struct apic apic_flat =  {
 	.name				= "flat",
-	.probe				= NULL,
+	.probe				= flat_probe,
 	.acpi_madt_oem_check		= flat_acpi_madt_oem_check,
 	.apic_id_registered		= flat_apic_id_registered,
 
@@ -315,10 +320,18 @@ physflat_cpu_mask_to_apicid_and(const struct cpumask *cpumask,
 	return per_cpu(x86_cpu_to_apicid, cpu);
 }
 
+static int physflat_probe(void)
+{
+	if (apic == &apic_physflat || num_possible_cpus() > 8)
+		return 1;
+
+	return 0;
+}
+
 struct apic apic_physflat =  {
 
 	.name				= "physical flat",
-	.probe				= NULL,
+	.probe				= physflat_probe,
 	.acpi_madt_oem_check		= physflat_acpi_madt_oem_check,
 	.apic_id_registered		= flat_apic_id_registered,
 

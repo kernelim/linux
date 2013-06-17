@@ -687,8 +687,10 @@ void gfs2_rs_deltree(struct gfs2_inode *ip, struct gfs2_blkreserv *rs)
  */
 void gfs2_rs_delete(struct gfs2_inode *ip)
 {
+	struct inode *inode = &ip->i_inode;
+
 	down_write(&ip->i_rw_mutex);
-	if (ip->i_res) {
+	if (ip->i_res && atomic_read(&inode->i_writecount) <= 1) {
 		gfs2_rs_deltree(ip, ip->i_res);
 		BUG_ON(ip->i_res->rs_free);
 		kmem_cache_free(gfs2_rsrv_cachep, ip->i_res);
@@ -1132,12 +1134,9 @@ int gfs2_rgrp_send_discards(struct gfs2_sbd *sdp, u64 offset,
 			     const struct gfs2_bitmap *bi, unsigned minlen, u64 *ptrimmed)
 {
 	struct super_block *sb = sdp->sd_vfs;
-	struct block_device *bdev = sb->s_bdev;
-	const unsigned int sects_per_blk = sdp->sd_sb.sb_bsize /
-					   bdev_logical_block_size(sb->s_bdev);
 	u64 blk;
 	sector_t start = 0;
-	sector_t nr_sects = 0;
+	sector_t nr_blks = 0;
 	int rv;
 	unsigned int x;
 	u32 trimmed = 0;
@@ -1157,35 +1156,34 @@ int gfs2_rgrp_send_discards(struct gfs2_sbd *sdp, u64 offset,
 		if (diff == 0)
 			continue;
 		blk = offset + ((bi->bi_start + x) * GFS2_NBBY);
-		blk *= sects_per_blk; /* convert to sectors */
 		while(diff) {
 			if (diff & 1) {
-				if (nr_sects == 0)
+				if (nr_blks == 0)
 					goto start_new_extent;
-				if ((start + nr_sects) != blk) {
-					if (nr_sects >= minlen) {
-						rv = blkdev_issue_discard(bdev,
-							start, nr_sects,
+				if ((start + nr_blks) != blk) {
+					if (nr_blks >= minlen) {
+						rv = sb_issue_discard(sb,
+							start, nr_blks,
 							GFP_NOFS, 0);
 						if (rv)
 							goto fail;
-						trimmed += nr_sects;
+						trimmed += nr_blks;
 					}
-					nr_sects = 0;
+					nr_blks = 0;
 start_new_extent:
 					start = blk;
 				}
-				nr_sects += sects_per_blk;
+				nr_blks++;
 			}
 			diff >>= 2;
-			blk += sects_per_blk;
+			blk++;
 		}
 	}
-	if (nr_sects >= minlen) {
-		rv = blkdev_issue_discard(bdev, start, nr_sects, GFP_NOFS, 0);
+	if (nr_blks >= minlen) {
+		rv = sb_issue_discard(sb, start, nr_blks, GFP_NOFS, 0);
 		if (rv)
 			goto fail;
-		trimmed += nr_sects;
+		trimmed += nr_blks;
 	}
 	if (ptrimmed)
 		*ptrimmed = trimmed;

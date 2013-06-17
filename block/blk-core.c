@@ -1100,8 +1100,11 @@ struct request *blk_make_request(struct request_queue *q, struct bio *bio,
 {
 	struct request *rq = blk_get_request(q, bio_data_dir(bio), gfp_mask);
 
-	if (unlikely(!rq))
+	if (unlikely(!rq)) {
+		if (gfp_mask & __GFP_WAIT)
+			return ERR_PTR(-ENODEV);
 		return ERR_PTR(-ENOMEM);
+	}
 
 	for_each_bio(bio) {
 		struct bio *bounce_bio = bio;

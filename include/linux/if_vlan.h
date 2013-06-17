@@ -107,6 +107,10 @@ static inline struct net_device *vlan_group_get_device(struct vlan_group *vg,
 						       u16 vlan_id)
 {
 	struct net_device **array;
+
+	if (!vg)
+		return NULL;
+
 	array = vg->vlan_devices_arrays[vlan_id / VLAN_GROUP_ARRAY_PART_LEN];
 	return array ? array[vlan_id % VLAN_GROUP_ARRAY_PART_LEN] : NULL;
 }

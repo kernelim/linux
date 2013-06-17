@@ -585,8 +585,7 @@ static void bnx2x_tpa_stop(struct bnx2x *bp, struct bnx2x_fastpath *fp,
 
 		if (!bnx2x_fill_frag_skb(bp, fp, tpa_info, pages,
 					 skb, cqe, cqe_idx)) {
-			if ((bp->vlgrp != NULL) &&
-				(tpa_info->parsing_flags & PARSING_FLAGS_VLAN))
+			if (tpa_info->parsing_flags & PARSING_FLAGS_VLAN)
 				vlan_gro_receive(&fp->napi, bp->vlgrp,
 						 tpa_info->vlan_tag, skb);
 			else
@@ -847,6 +846,19 @@ reuse_rx:
 		}
 
 		skb_put(skb, len);
+
+		/* strip VLAN header in PROMISC mode */
+		if (bp->rx_mode == BNX2X_RX_MODE_PROMISC && bp->vlgrp == NULL) {
+			struct ethhdr *eth = (struct ethhdr *) skb->data;
+
+			if (eth->h_proto == htons(ETH_P_8021Q)) {
+				memmove(skb->data + VLAN_HLEN, skb->data,
+					2 * ETH_ALEN);
+				skb_pull(skb, VLAN_HLEN);
+				skb->mac_header += VLAN_HLEN;
+			}
+		}
+
 		skb->protocol = eth_type_trans(skb, bp->dev);
 
 		/* Set Toeplitz hash for a none-LRO skb */
@@ -860,8 +872,7 @@ reuse_rx:
 
 		skb_record_rx_queue(skb, fp->rx_queue);
 
-		if ((bp->vlgrp != NULL) &&
-		    (le16_to_cpu(cqe_fp->pars_flags.flags) &
+		if ((le16_to_cpu(cqe_fp->pars_flags.flags) &
 		     PARSING_FLAGS_VLAN))
 			vlan_gro_receive(&fp->napi, bp->vlgrp,
 				le16_to_cpu(cqe_fp->vlan_tag), skb);

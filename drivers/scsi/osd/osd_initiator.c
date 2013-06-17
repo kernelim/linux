@@ -1314,7 +1314,8 @@ static struct request *_make_request(struct request_queue *q, bool has_write,
 
 		req = blk_get_request(q, has_write ? WRITE : READ, flags);
 		if (unlikely(!req))
-			return ERR_PTR(-ENOMEM);
+			return (flags & __GFP_WAIT) ? ERR_PTR(-ENODEV) :
+						      ERR_PTR(-ENOMEM);
 
 		return req;
 	}

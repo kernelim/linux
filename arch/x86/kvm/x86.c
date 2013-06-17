@@ -3385,7 +3385,7 @@ int kvm_vm_ioctl_get_dirty_log(struct kvm *kvm,
 		kfree(old_slots);
 
 		spin_lock(&kvm->mmu_lock);
-		kvm_mmu_slot_remove_write_access(kvm, log->slot);
+		kvm_mmu_slot_remove_write_access(kvm, log->slot, false);
 		spin_unlock(&kvm->mmu_lock);
 	}
 
@@ -6770,7 +6770,7 @@ void kvm_arch_commit_memory_region(struct kvm *kvm,
 		kvm_mmu_change_mmu_pages(kvm, nr_mmu_pages);
 	}
 
-	kvm_mmu_slot_remove_write_access(kvm, mem->slot);
+	kvm_mmu_slot_remove_write_access(kvm, mem->slot, true);
 	spin_unlock(&kvm->mmu_lock);
 }
 

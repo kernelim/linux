@@ -6024,7 +6024,7 @@ static int tg3_rx(struct tg3_napi *tnapi, int budget)
 		    !(tp->rx_mode & RX_MODE_KEEP_VLAN_TAG)) {
 			vtag = desc->err_vlan & RXD_VLAN_MASK;
 #if TG3_VLAN_TAG_USED
-			if (tp->vlgrp)
+			if (vtag)
 				hw_vlan = true;
 			else
 #endif

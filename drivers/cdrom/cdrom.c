@@ -2112,7 +2112,7 @@ static int cdrom_read_cdda_bpc(struct cdrom_device_info *cdi, __u8 __user *ubuf,
 
 		rq = blk_get_request(q, READ, GFP_KERNEL);
 		if (!rq) {
-			ret = -ENOMEM;
+			ret = -ENODEV;
 			break;
 		}
 

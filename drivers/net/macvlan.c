@@ -149,7 +149,7 @@ static void macvlan_broadcast(struct sk_buff *skb,
 static struct sk_buff *macvlan_handle_frame(struct sk_buff *skb)
 {
 	const struct ethhdr *eth = eth_hdr(skb);
-	const struct macvlan_port *port;
+	struct macvlan_port *port;
 	const struct macvlan_dev *vlan;
 	const struct macvlan_dev *src;
 	struct net_device *dev;
@@ -184,7 +184,8 @@ static struct sk_buff *macvlan_handle_frame(struct sk_buff *skb)
 	}
 
 	if (port->passthru)
-		vlan = list_first_entry(&port->vlans, struct macvlan_dev, list);
+		vlan = list_first_or_null_rcu(&port->vlans,
+					      struct macvlan_dev, list);
 	else
 		vlan = macvlan_hash_lookup(port, eth->h_dest);
 	if (vlan == NULL)
@@ -192,7 +193,7 @@ static struct sk_buff *macvlan_handle_frame(struct sk_buff *skb)
 
 	dev = vlan->dev;
 
-	if (unlikely(!dev && !(dev->flags & IFF_UP))) {
+	if (unlikely(!(dev->flags & IFF_UP))) {
 		kfree_skb(skb);
 		return NULL;
 	}
@@ -704,7 +705,7 @@ int macvlan_common_newlink(struct net_device *dev,
 	if (err < 0)
 		return err;
 
-	list_add_tail(&vlan->list, &port->vlans);
+	list_add_tail_rcu(&vlan->list, &port->vlans);
 	netif_stacked_transfer_operstate(lowerdev, dev);
 	return 0;
 }
@@ -723,7 +724,7 @@ void macvlan_dellink(struct net_device *dev)
 	struct macvlan_dev *vlan = netdev_priv(dev);
 	struct macvlan_port *port = vlan->port;
 
-	list_del(&vlan->list);
+	list_del_rcu(&vlan->list);
 	unregister_netdevice(dev);
 
 	if (list_empty(&port->vlans))
