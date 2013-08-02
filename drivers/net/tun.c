@@ -97,6 +97,8 @@ struct tun_file {
 
 struct tun_sock;
 
+#define TUN_USER_FEATURES	(NETIF_F_HW_CSUM | NETIF_F_TSO_ECN | \
+				 NETIF_F_TSO | NETIF_F_TSO6 | NETIF_F_UFO)
 struct tun_struct {
 	struct tun_file		*tfile;
 	unsigned int 		flags;
@@ -1094,6 +1096,8 @@ static int tun_set_iff(struct net *net, struct file *file, struct ifreq *ifr)
 				goto err_free_sk;
 		}
 
+		dev->vlan_features = NETIF_F_SG | NETIF_F_FRAGLIST |
+				     TUN_USER_FEATURES;
 		err = register_netdevice(tun->dev);
 		if (err < 0)
 			goto err_free_sk;
@@ -1164,9 +1168,8 @@ static int set_offload(struct net_device *dev, unsigned long arg)
 
 	old_features = dev->features;
 	/* Unset features, set them as we chew on the arg. */
-	features = (old_features & ~(NETIF_F_HW_CSUM|NETIF_F_SG|NETIF_F_FRAGLIST
-				    |NETIF_F_TSO_ECN|NETIF_F_TSO|NETIF_F_TSO6
-				    |NETIF_F_UFO));
+	features = (old_features & ~(NETIF_F_SG | NETIF_F_FRAGLIST |
+				     TUN_USER_FEATURES));
 
 	if (arg & TUN_F_CSUM) {
 		features |= NETIF_F_HW_CSUM|NETIF_F_SG|NETIF_F_FRAGLIST;

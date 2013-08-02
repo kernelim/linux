@@ -217,7 +217,6 @@ static int journal_submit_data_buffers(journal_t *journal,
 			ret = err;
 		spin_lock(&journal->j_list_lock);
 		J_ASSERT(jinode->i_transaction == commit_transaction);
-		commit_transaction->t_flushed_data_blocks = 1;
 		clear_bit(__JI_COMMIT_RUNNING, &jinode->i_flags);
 		smp_mb__after_clear_bit();
 		wake_up_bit(&jinode->i_flags, __JI_COMMIT_RUNNING);
@@ -672,12 +671,16 @@ start_journal_io:
 		err = 0;
 	}
 
+	spin_lock(&journal->j_state_lock);
+	J_ASSERT(commit_transaction->t_state == T_COMMIT);
+	commit_transaction->t_state = T_COMMIT_DFLUSH;
+	spin_unlock(&journal->j_state_lock);
 	/* 
 	 * If the journal is not located on the file system device,
 	 * then we must flush the file system device before we issue
 	 * the commit record
 	 */
-	if (commit_transaction->t_flushed_data_blocks &&
+	if (commit_transaction->t_need_data_flush &&
 	    (journal->j_fs_dev != journal->j_dev) &&
 	    (journal->j_flags & JBD2_BARRIER))
 		blkdev_issue_flush(journal->j_fs_dev, NULL);
@@ -797,6 +800,10 @@ wait_for_iobuf:
 		jbd2_journal_abort(journal, err);
 
 	jbd_debug(3, "JBD: commit phase 5\n");
+	spin_lock(&journal->j_state_lock);
+	J_ASSERT(commit_transaction->t_state == T_COMMIT_DFLUSH);
+	commit_transaction->t_state = T_COMMIT_JFLUSH;
+	spin_unlock(&journal->j_state_lock);
 
 	if (!JBD2_HAS_INCOMPAT_FEATURE(journal,
 				       JBD2_FEATURE_INCOMPAT_ASYNC_COMMIT)) {
@@ -953,7 +960,7 @@ restart_loop:
 
 	jbd_debug(3, "JBD: commit phase 7\n");
 
-	J_ASSERT(commit_transaction->t_state == T_COMMIT);
+	J_ASSERT(commit_transaction->t_state == T_COMMIT_JFLUSH);
 
 	commit_transaction->t_start = jiffies;
 	stats.run.rs_logging = jbd2_time_diff(stats.run.rs_logging,

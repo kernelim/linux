@@ -378,6 +378,7 @@ void br_features_recompute(struct net_bridge *br)
 
 done:
 	br->dev->features = netdev_fix_features(features, NULL);
+	netdev_features_change(br->dev);
 }
 
 /* called with RTNL */
@@ -437,9 +438,10 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 
 	list_add_rcu(&p->list, &br->port_list);
 
+	br_features_recompute(br);
+
 	spin_lock_bh(&br->lock);
 	br_stp_recalculate_bridge_id(br);
-	br_features_recompute(br);
 
 	if ((dev->flags & IFF_UP) && netif_carrier_ok(dev) &&
 	    (br->dev->flags & IFF_UP))
@@ -480,8 +482,9 @@ int br_del_if(struct net_bridge *br, struct net_device *dev)
 
 	spin_lock_bh(&br->lock);
 	br_stp_recalculate_bridge_id(br);
-	br_features_recompute(br);
 	spin_unlock_bh(&br->lock);
+
+	br_features_recompute(br);
 
 	return 0;
 }

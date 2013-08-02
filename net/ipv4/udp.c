@@ -811,7 +811,7 @@ do_append_data:
 out:
 	ip_rt_put(rt);
 	if (free)
-		kfree(ipc.opt);
+		kfree_ip_options(ipc.opt);
 	if (!err)
 		return len;
 	/*

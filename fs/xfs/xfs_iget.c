@@ -140,7 +140,8 @@ xfs_inode_free(
 		if (lip->li_flags & XFS_LI_IN_AIL) {
 			spin_lock(&ailp->xa_lock);
 			if (lip->li_flags & XFS_LI_IN_AIL)
-				xfs_trans_ail_delete(ailp, lip);
+				xfs_trans_ail_delete(ailp, lip,
+						     SHUTDOWN_CORRUPT_INCORE);
 			else
 				spin_unlock(&ailp->xa_lock);
 		}

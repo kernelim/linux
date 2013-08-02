@@ -42,8 +42,6 @@ void __sanitize_i387_state(struct task_struct *tsk)
 	if (!fx)
 		return;
 
-	BUG_ON(task_thread_info(tsk)->status & TS_USEDFPU);
-
 	xstate_bv = tsk->thread.xstate->xsave.xsave_hdr.xstate_bv;
 
 	/*

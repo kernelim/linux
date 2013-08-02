@@ -5768,18 +5768,49 @@ void thread_group_times(struct task_struct *p, cputime_t *ut, cputime_t *st)
 # define nsecs_to_cputime(__nsecs)	nsecs_to_jiffies(__nsecs)
 #endif
 
-static cputime_t scale_stime(cputime_t stime, cputime_t rtime, cputime_t total)
+/*
+ * Perform (stime * rtime) / total, but avoid multiplication overflow by
+ * loosing precision when the numbers are big.
+ */
+static cputime_t scale_stime(u64 stime, u64 rtime, u64 total)
 {
-	u64 temp = rtime;
+	u64 scaled;
 
-	temp *= stime;
+	for (;;) {
+		/* Make sure "rtime" is the bigger of stime/rtime */
+		if (stime > rtime) {
+			u64 tmp = rtime; rtime = stime; stime = tmp;
+		}
 
-	if (sizeof(cputime_t) == 4)
-		temp = div_u64(temp, (u32) total);
-	else
-		temp = div64_u64(temp, (u64) total);
+		/* Make sure 'total' fits in 32 bits */
+		if (total >> 32)
+			goto drop_precision;
 
-	return (cputime_t) temp;
+		/* Does rtime (and thus stime) fit in 32 bits? */
+		if (!(rtime >> 32))
+			break;
+
+		/* Can we just balance rtime/stime rather than dropping bits? */
+		if (stime >> 31)
+			goto drop_precision;
+
+		/* We can grow stime and shrink rtime and try to make them both fit */
+		stime <<= 1;
+		rtime >>= 1;
+		continue;
+
+drop_precision:
+		/* We drop from rtime, it has more bits than stime */
+		rtime >>= 1;
+		total >>= 1;
+	}
+
+	/*
+	 * Make sure gcc understands that this is a 32x32->64 multiply,
+	 * followed by a 64/32->64 divide.
+	 */
+	scaled = div_u64((u64) (u32) stime * (u64) (u32) rtime, (u32)total);
+	return (cputime_t) scaled;
 }
 
 void task_times(struct task_struct *p, cputime_t *ut, cputime_t *st)
@@ -5790,6 +5821,14 @@ void task_times(struct task_struct *p, cputime_t *ut, cputime_t *st)
 	 * Use CFS's precise accounting:
 	 */
 	rtime = nsecs_to_cputime(p->se.sum_exec_runtime);
+
+	/*
+	 * Update userspace visible utime/stime values only if actual execution
+	 * time is bigger than already exported. Note that can happen, that we
+	 * provided bigger values due to scaling inaccuracy on big numbers.
+	 */
+	if (p->prev_stime + p->prev_utime >= rtime)
+		goto out;
 
 	if (total)
 		stime = scale_stime(stime, rtime, total);
@@ -5802,6 +5841,7 @@ void task_times(struct task_struct *p, cputime_t *ut, cputime_t *st)
 	p->prev_stime = max(p->prev_stime, stime);
 	p->prev_utime = max(p->prev_utime, cputime_sub(rtime, p->prev_stime));
 
+out:
 	*ut = p->prev_utime;
 	*st = p->prev_stime;
 }
@@ -5820,6 +5860,14 @@ void thread_group_times(struct task_struct *p, cputime_t *ut, cputime_t *st)
 	total = cputime_add(cputime.utime, cputime.stime);
 	rtime = nsecs_to_cputime(cputime.sum_exec_runtime);
 
+	/*
+	 * Update userspace visible utime/stime values only if actual execution
+	 * time is bigger than already exported. Note that can happen, that we
+	 * provided bigger values due to scaling inaccuracy on big numbers.
+	 */
+	if (sig->prev_stime + sig->prev_utime >= rtime)
+		goto out;
+
 	if (total)
 		stime = scale_stime(cputime.stime, rtime, total);
 	else
@@ -5829,6 +5877,7 @@ void thread_group_times(struct task_struct *p, cputime_t *ut, cputime_t *st)
 	sig->prev_utime = max(sig->prev_utime,
 			      cputime_sub(rtime, sig->prev_stime));
 
+out:
 	*ut = sig->prev_utime;
 	*st = sig->prev_stime;
 }

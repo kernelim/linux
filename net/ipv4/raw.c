@@ -608,7 +608,7 @@ back_from_confirm:
 	}
 done:
 	if (free)
-		kfree(ipc.opt);
+		kfree_ip_options(ipc.opt);
 	ip_rt_put(rt);
 
 out:

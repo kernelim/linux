@@ -1768,8 +1768,21 @@ static int coredump_wait(int exit_code, struct core_state *core_state)
 		complete(vfork_done);
 	}
 
-	if (core_waiters)
+	if (core_waiters) {
+		struct core_thread *ptr;
+
 		wait_for_completion(&core_state->startup);
+		/*
+		 * Wait for all the threads to become inactive, so that
+		 * all the thread context (extended register state, like
+		 * fpu etc) gets copied to the memory.
+		 */
+		ptr = core_state->dumper.next;
+		while (ptr != NULL) {
+			wait_task_inactive(ptr->task, 0);
+			ptr = ptr->next;
+		}
+	}
 fail:
 	return core_waiters;
 }

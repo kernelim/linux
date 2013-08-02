@@ -250,6 +250,9 @@ arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
 	if (mm->mmap_base < len)
 		goto bottomup;
 
+	if (likely(!unmap_factor))
+		addr = mm->mmap_base-len;
+
 	do {
 		addr = align_addr(addr, filp, ALIGN_TOPDOWN);
 

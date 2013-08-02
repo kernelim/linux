@@ -1108,6 +1108,30 @@ static int kvm_guest_time_update(struct kvm_vcpu *v)
 	return 0;
 }
 
+/*
+ * kvmclock updates which are isolated to a given vcpu, such as
+ * vcpu->cpu migration, should not allow system_timestamp from
+ * the rest of the vcpus to remain static. Otherwise ntp frequency
+ * correction applies to one vcpu's system_timestamp but not
+ * the others.
+ *
+ * So in those cases, request a kvmclock update for all vcpus.
+ * The worst case for a remote vcpu to update its kvmclock
+ * is then bounded by maximum nohz sleep latency.
+ */
+
+static void kvm_gen_kvmclock_update(struct kvm_vcpu *v)
+{
+	int i;
+	struct kvm *kvm = v->kvm;
+	struct kvm_vcpu *vcpu;
+
+	kvm_for_each_vcpu(i, vcpu, kvm) {
+		set_bit(KVM_REQ_CLOCK_UPDATE, &vcpu->requests);
+		kvm_vcpu_kick(vcpu);
+	}
+}
+
 static bool msr_mtrr_valid(unsigned msr)
 {
 	switch (msr) {
@@ -1400,7 +1424,7 @@ int kvm_set_msr_common(struct kvm_vcpu *vcpu, u32 msr, u64 data)
 		kvmclock_reset(vcpu);
 
 		vcpu->arch.time = data;
-		set_bit(KVM_REQ_CLOCK_UPDATE, &vcpu->requests);
+		set_bit(KVM_REQ_GLOBAL_CLOCK_UPDATE, &vcpu->requests);
 
 		/* we verify if the enable bit is set... */
 		if (!(data & 1))
@@ -2032,7 +2056,7 @@ void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
 			adjust_tsc_offset_host(vcpu, -tsc_delta);
 			vcpu->arch.tsc_catchup = 1;
 		}
-		set_bit(KVM_REQ_CLOCK_UPDATE, &vcpu->requests);
+		set_bit(KVM_REQ_GLOBAL_CLOCK_UPDATE, &vcpu->requests);
 		if (vcpu->cpu != cpu)
 			kvm_migrate_timers(vcpu);
 		vcpu->cpu = cpu;
@@ -5159,6 +5183,9 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	if (vcpu->requests) {
 		if (test_and_clear_bit(KVM_REQ_MIGRATE_TIMER, &vcpu->requests))
 			__kvm_migrate_timers(vcpu);
+		if (test_and_clear_bit(KVM_REQ_GLOBAL_CLOCK_UPDATE,
+		    &vcpu->requests))
+			kvm_gen_kvmclock_update(vcpu);
 		if (test_and_clear_bit(KVM_REQ_CLOCK_UPDATE, &vcpu->requests)) {
 			r = kvm_guest_time_update(vcpu);
 			if (unlikely(r))

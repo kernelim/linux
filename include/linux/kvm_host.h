@@ -43,6 +43,7 @@
 #define KVM_REQ_STEAL_UPDATE      13
 #define KVM_REQ_PMU               16
 #define KVM_REQ_PMI               17
+#define KVM_REQ_GLOBAL_CLOCK_UPDATE 22
 
 #define KVM_USERSPACE_IRQ_SOURCE_ID	0
 

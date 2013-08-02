@@ -597,7 +597,7 @@ back_from_confirm:
 out:
 	ip_rt_put(rt);
 	if (free)
-		kfree(ipc.opt);
+		kfree_ip_options(ipc.opt);
 	if (!err) {
 		icmp_out_count(sock_net(sk), user_icmph.type);
 		return len;

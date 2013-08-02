@@ -466,13 +466,16 @@ int __jbd2_log_space_left(journal_t *journal)
  */
 int __jbd2_log_start_commit(journal_t *journal, tid_t target)
 {
+	/* Return if the txn has already requested to be committed */
+	if (journal->j_commit_request == target)
+		return 0;
+
 	/*
 	 * The only transaction we can possibly wait upon is the
 	 * currently running transaction (if it exists).  Otherwise,
 	 * the target tid must be an old one.
 	 */
-	if (journal->j_commit_request != target &&
-	    journal->j_running_transaction &&
+	if (journal->j_running_transaction &&
 	    journal->j_running_transaction->t_tid == target) {
 		/*
 		 * We want a new commit: OK, mark the request and wakeup the
@@ -572,6 +575,47 @@ int jbd2_journal_start_commit(journal_t *journal, tid_t *ptid)
 }
 
 /*
+ * Return 1 if a given transaction has not yet sent barrier request
+ * connected with a transaction commit. If 0 is returned, transaction
+ * may or may not have sent the barrier. Used to avoid sending barrier
+ * twice in common cases.
+ */
+int jbd2_trans_will_send_data_barrier(journal_t *journal, tid_t tid)
+{
+	int ret = 0;
+	transaction_t *commit_trans;
+
+	if (!(journal->j_flags & JBD2_BARRIER))
+		return 0;
+	spin_lock(&journal->j_state_lock);
+	/* Transaction already committed? */
+	if (tid_geq(journal->j_commit_sequence, tid))
+		goto out;
+	commit_trans = journal->j_committing_transaction;
+	if (!commit_trans || commit_trans->t_tid != tid) {
+		ret = 1;
+		goto out;
+	}
+	/*
+	 * Transaction is being committed and we already proceeded to
+	 * submitting a flush to fs partition?
+	 */
+	if (journal->j_fs_dev != journal->j_dev) {
+		if (!commit_trans->t_need_data_flush ||
+		    commit_trans->t_state >= T_COMMIT_DFLUSH)
+			goto out;
+	} else {
+		if (commit_trans->t_state >= T_COMMIT_JFLUSH)
+			goto out;
+	}
+	ret = 1;
+out:
+	spin_unlock(&journal->j_state_lock);
+	return ret;
+}
+EXPORT_SYMBOL(jbd2_trans_will_send_data_barrier);
+
+/*
  * Wait for a specified commit to complete.
  * The caller may not hold the journal lock.
  */
@@ -606,6 +650,37 @@ int jbd2_log_wait_commit(journal_t *journal, tid_t tid)
 	}
 	return err;
 }
+
+/*
+ * When this function returns the transaction corresponding to tid
+ * will be completed.  If the transaction has currently running, start
+ * committing that transaction before waiting for it to complete.  If
+ * the transaction id is stale, it is by definition already completed,
+ * so just return SUCCESS.
+ */
+int jbd2_complete_transaction(journal_t *journal, tid_t tid)
+{
+	int	need_to_wait = 1;
+
+	spin_lock(&journal->j_state_lock);
+	if (journal->j_running_transaction &&
+	    journal->j_running_transaction->t_tid == tid) {
+		if (journal->j_commit_request != tid) {
+			/* transaction not yet started, so request it */
+			spin_unlock(&journal->j_state_lock);
+			jbd2_log_start_commit(journal, tid);
+			goto wait_commit;
+		}
+	} else if (!(journal->j_committing_transaction &&
+		     journal->j_committing_transaction->t_tid == tid))
+		need_to_wait = 0;
+	spin_unlock(&journal->j_state_lock);
+	if (!need_to_wait)
+		return 0;
+wait_commit:
+	return jbd2_log_wait_commit(journal, tid);
+}
+EXPORT_SYMBOL(jbd2_complete_transaction);
 
 /*
  * Log buffer allocation routines:

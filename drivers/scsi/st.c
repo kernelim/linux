@@ -4050,6 +4050,13 @@ static int st_probe(struct device *dev)
 	sprintf(disk->disk_name, "st%d", i);
 	disk->private_data = &tpnt->driver;
 	disk->queue = SDp->request_queue;
+	/* SCSI tape doesn't register this gendisk via add_disk().  Manually
+	 * take queue reference that release_disk() expects. */
+	if (blk_get_queue(disk->queue)) {
+		write_unlock(&st_dev_arr_lock);
+		goto out_put_disk;
+	}
+
 	tpnt->driver = &st_template;
 	scsi_tapes[i] = tpnt;
 	dev_num = i;
@@ -4179,6 +4186,7 @@ out_free_tape:
 	scsi_tapes[dev_num] = NULL;
 	st_nr_dev--;
 	write_unlock(&st_dev_arr_lock);
+	blk_put_queue(disk->queue);
 out_put_disk:
 	put_disk(disk);
 	kfree(tpnt);

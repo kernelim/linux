@@ -90,7 +90,7 @@ struct dentry {
 	atomic_t d_count;
 	unsigned int d_flags;		/* protected by d_lock */
 	spinlock_t d_lock;		/* per dentry lock */
-	int d_mounted;			/* obsolete, ->d_flags is now used for this */
+	int d_mounted;
 	struct inode *d_inode;		/* Where the name belongs to - NULL is
 					 * negative */
 	/*
@@ -181,21 +181,6 @@ d_automount:	no		no		no	 yes
       * that dentry into place and return that dentry rather than the passed one,
       * typically using d_splice_alias.
       */
-
-#define DCACHE_NFSFS_RENAMED  0x0002
-     /* this dentry has been "silly renamed" and has to be deleted on the last
-      * dput() */
-
-#define	DCACHE_DISCONNECTED	0x0004
-     /* This dentry is possibly not currently connected to the dcache tree, in
-      * which case its parent will either be itself, or will have this flag as
-      * well.  nfsd will not use a dentry with this bit set, but will first
-      * endeavour to clear the bit either by discovering that it is connected,
-      * or by performing lookup operations.   Any filesystem which supports
-      * nfsd_operations MUST have a lookup function which, if it finds a
-      * directory inode with a DCACHE_DISCONNECTED dentry, will d_move that
-      * dentry into place and return that dentry rather than the passed one,
-      * typically using d_splice_alias. */
 
 #define DCACHE_REFERENCED	0x0008  /* Recently used, don't discard. */
 #define DCACHE_UNHASHED		0x0010	
@@ -405,7 +390,7 @@ static inline bool d_managed(struct dentry *dentry)
 
 static inline int d_mountpoint(struct dentry *dentry)
 {
-	return dentry->d_flags & DCACHE_MOUNTED;
+	return dentry->d_mounted ? DCACHE_MOUNTED : 0;
 }
 
 extern struct vfsmount *lookup_mnt(struct path *);
