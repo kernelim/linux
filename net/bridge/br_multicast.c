@@ -33,6 +33,8 @@
 
 #include "br_private.h"
 
+static void br_multicast_start_querier(struct net_bridge *br);
+
 #if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
 static inline int ipv6_is_transient_multicast(const struct in6_addr *addr)
 {
@@ -228,8 +230,7 @@ static void br_multicast_group_expired(unsigned long data)
 	if (!netif_running(br->dev) || timer_pending(&mp->timer))
 		goto out;
 
-	if (!hlist_unhashed(&mp->mglist))
-		hlist_del_init(&mp->mglist);
+	mp->mglist = false;
 
 	if (mp->ports)
 		goto out;
@@ -267,7 +268,7 @@ static void br_multicast_del_pg(struct net_bridge *br,
 		del_timer(&p->query_timer);
 		call_rcu_bh(&p->rcu, br_multicast_free_pg);
 
-		if (!mp->ports && hlist_unhashed(&mp->mglist) &&
+		if (!mp->ports && !mp->mglist && mp->timer_armed &&
 		    netif_running(br->dev))
 			mod_timer(&mp->timer, jiffies);
 
@@ -518,7 +519,7 @@ static void br_multicast_group_query_expired(unsigned long data)
 	struct net_bridge *br = mp->br;
 
 	spin_lock(&br->multicast_lock);
-	if (!netif_running(br->dev) || hlist_unhashed(&mp->mglist) ||
+	if (!netif_running(br->dev) || !mp->mglist ||
 	    mp->queries_sent >= br->multicast_last_member_count)
 		goto out;
 
@@ -677,9 +678,10 @@ rehash:
 
 	mp->br = br;
 	mp->addr = *group;
-	setup_timer(&mp->timer, br_multicast_group_expired,
-		    (unsigned long)mp);
 	setup_timer(&mp->query_timer, br_multicast_group_query_expired,
+		    (unsigned long)mp);
+
+	setup_timer(&mp->timer, br_multicast_group_expired,
 		    (unsigned long)mp);
 
 	hlist_add_head_rcu(&mp->hlist[mdb->ver], &mdb->mhash[hash]);
@@ -696,7 +698,6 @@ static int br_multicast_add_group(struct net_bridge *br,
 	struct net_bridge_mdb_entry *mp;
 	struct net_bridge_port_group *p;
 	struct net_bridge_port_group **pp;
-	unsigned long now = jiffies;
 	int err;
 
 	spin_lock(&br->multicast_lock);
@@ -710,15 +711,13 @@ static int br_multicast_add_group(struct net_bridge *br,
 		goto err;
 
 	if (!port) {
-		if (hlist_unhashed(&mp->mglist))
-			hlist_add_head(&mp->mglist, &br->mglist);
-		mod_timer(&mp->timer, now + br->multicast_membership_interval);
+		mp->mglist = true;
 		goto out;
 	}
 
 	for (pp = &mp->ports; (p = *pp); pp = &p->next) {
 		if (p->port == port)
-			goto found;
+			goto out;
 		if ((unsigned long)p->port < (unsigned long)port)
 			break;
 	}
@@ -739,8 +738,6 @@ static int br_multicast_add_group(struct net_bridge *br,
 
 	rcu_assign_pointer(*pp, p);
 
-found:
-	mod_timer(&p->timer, now + br->multicast_membership_interval);
 out:
 	err = 0;
 
@@ -802,6 +799,20 @@ static void br_multicast_local_router_expired(unsigned long data)
 {
 }
 
+static void br_multicast_querier_expired(unsigned long data)
+{
+	struct net_bridge *br = (void *)data;
+
+	spin_lock(&br->multicast_lock);
+	if (!netif_running(br->dev) || br->multicast_disabled)
+		goto out;
+
+	br_multicast_start_querier(br);
+
+out:
+	spin_unlock(&br->multicast_lock);
+}
+
 static void __br_multicast_send_query(struct net_bridge *br,
 				      struct net_bridge_port *port,
 				      struct br_ip *ip)
@@ -828,6 +839,7 @@ static void br_multicast_send_query(struct net_bridge *br,
 	struct br_ip br_group;
 
 	if (!netif_running(br->dev) || br->multicast_disabled ||
+	    !br->multicast_querier ||
 	    timer_pending(&br->multicast_querier_timer))
 		return;
 
@@ -1151,9 +1163,12 @@ static int br_ip4_multicast_query(struct net_bridge *br,
 	if (!mp)
 		goto out;
 
+	mod_timer(&mp->timer, now + br->multicast_membership_interval);
+	mp->timer_armed = true;
+
 	max_delay *= br->multicast_last_member_count;
 
-	if (!hlist_unhashed(&mp->mglist) &&
+	if (mp->mglist &&
 	    (timer_pending(&mp->timer) ?
 	     time_after(mp->timer.expires, now + max_delay) :
 	     try_to_del_timer_sync(&mp->timer) >= 0))
@@ -1220,8 +1235,11 @@ static int br_ip6_multicast_query(struct net_bridge *br,
 	if (!mp)
 		goto out;
 
+	mod_timer(&mp->timer, now + br->multicast_membership_interval);
+	mp->timer_armed = true;
+
 	max_delay *= br->multicast_last_member_count;
-	if (!hlist_unhashed(&mp->mglist) &&
+	if (mp->mglist &&
 	    (timer_pending(&mp->timer) ?
 	     time_after(mp->timer.expires, now + max_delay) :
 	     try_to_del_timer_sync(&mp->timer) >= 0))
@@ -1261,12 +1279,36 @@ static void br_multicast_leave_group(struct net_bridge *br,
 	if (!mp)
 		goto out;
 
+	if (br->multicast_querier &&
+	    !timer_pending(&br->multicast_querier_timer)) {
+		__br_multicast_send_query(br, port, &mp->addr);
+
+		time = jiffies + br->multicast_last_member_count *
+				 br->multicast_last_member_interval;
+		mod_timer(port ? &port->multicast_query_timer :
+				 &br->multicast_query_timer, time);
+
+		for (p = mp->ports; p; p = p->next) {
+			if (p->port != port)
+				continue;
+
+			if (!hlist_unhashed(&p->mglist) &&
+			    (timer_pending(&p->timer) ?
+			     time_after(p->timer.expires, time) :
+			     try_to_del_timer_sync(&p->timer) >= 0)) {
+				mod_timer(&p->timer, time);
+			}
+
+			break;
+		}
+	}
+
 	now = jiffies;
 	time = now + br->multicast_last_member_count *
 		     br->multicast_last_member_interval;
 
 	if (!port) {
-		if (!hlist_unhashed(&mp->mglist) &&
+		if (mp->mglist && mp->timer_armed &&
 		    (timer_pending(&mp->timer) ?
 		     time_after(mp->timer.expires, time) :
 		     try_to_del_timer_sync(&mp->timer) >= 0)) {
@@ -1275,25 +1317,6 @@ static void br_multicast_leave_group(struct net_bridge *br,
 			mp->queries_sent = 0;
 			mod_timer(&mp->query_timer, now);
 		}
-
-		goto out;
-	}
-
-	for (p = mp->ports; p; p = p->next) {
-		if (p->port != port)
-			continue;
-
-		if (!hlist_unhashed(&p->mglist) &&
-		    (timer_pending(&p->timer) ?
-		     time_after(p->timer.expires, time) :
-		     try_to_del_timer_sync(&p->timer) >= 0)) {
-			mod_timer(&p->timer, time);
-
-			p->queries_sent = 0;
-			mod_timer(&p->query_timer, now);
-		}
-
-		break;
 	}
 
 out:
@@ -1597,6 +1620,7 @@ void br_multicast_init(struct net_bridge *br)
 	br->hash_max = 512;
 
 	br->multicast_router = 1;
+	br->multicast_querier = 0;
 	br->multicast_last_member_count = 2;
 	br->multicast_startup_query_count = 2;
 
@@ -1611,7 +1635,7 @@ void br_multicast_init(struct net_bridge *br)
 	setup_timer(&br->multicast_router_timer,
 		    br_multicast_local_router_expired, 0);
 	setup_timer(&br->multicast_querier_timer,
-		    br_multicast_local_router_expired, 0);
+		    br_multicast_querier_expired, (unsigned long)br);
 	setup_timer(&br->multicast_query_timer, br_multicast_query_expired,
 		    (unsigned long)br);
 }
@@ -1651,6 +1675,7 @@ void br_multicast_stop(struct net_bridge *br)
 					  hlist[ver]) {
 			del_timer(&mp->timer);
 			del_timer(&mp->query_timer);
+			mp->timer_armed = false;
 			call_rcu_bh(&mp->rcu, br_multicast_free_group);
 		}
 	}
@@ -1739,16 +1764,29 @@ unlock:
 	return err;
 }
 
-int br_multicast_toggle(struct net_bridge *br, unsigned long val)
+static void br_multicast_start_querier(struct net_bridge *br)
 {
 	struct net_bridge_port *port;
-	int err = -ENOENT;
+
+	br_multicast_open(br);
+
+	list_for_each_entry(port, &br->port_list, list) {
+		if (port->state == BR_STATE_DISABLED ||
+		    port->state == BR_STATE_BLOCKING)
+			continue;
+
+		__br_multicast_enable_port(port);
+	}
+}
+
+int br_multicast_toggle(struct net_bridge *br, unsigned long val)
+{
+	int err = 0;
 
 	spin_lock(&br->multicast_lock);
 	if (!netif_running(br->dev))
 		goto unlock;
 
-	err = 0;
 	if (br->multicast_disabled == !val)
 		goto unlock;
 
@@ -1770,19 +1808,30 @@ rollback:
 			goto rollback;
 	}
 
-	br_multicast_open(br);
-	list_for_each_entry(port, &br->port_list, list) {
-		if (port->state == BR_STATE_DISABLED ||
-		    port->state == BR_STATE_BLOCKING)
-			continue;
-
-		__br_multicast_enable_port(port);
-	}
+	br_multicast_start_querier(br);
 
 unlock:
 	spin_unlock(&br->multicast_lock);
 
 	return err;
+}
+
+int br_multicast_set_querier(struct net_bridge *br, unsigned long val)
+{
+	val = !!val;
+
+	spin_lock_bh(&br->multicast_lock);
+	if (br->multicast_querier == val)
+		goto unlock;
+
+	br->multicast_querier = val;
+	if (val)
+		br_multicast_start_querier(br);
+
+unlock:
+	spin_unlock_bh(&br->multicast_lock);
+
+	return 0;
 }
 
 int br_multicast_set_hash_max(struct net_bridge *br, unsigned long val)

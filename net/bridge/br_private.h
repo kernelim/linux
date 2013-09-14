@@ -83,14 +83,15 @@ struct net_bridge_port_group {
 struct net_bridge_mdb_entry
 {
 	struct hlist_node		hlist[2];
-	struct hlist_node		mglist;
 	struct net_bridge		*br;
 	struct net_bridge_port_group	*ports;
 	struct rcu_head			rcu;
 	struct timer_list		timer;
 	struct timer_list		query_timer;
 	struct br_ip			addr;
+	bool				mglist;
 	u32				queries_sent;
+	bool				timer_armed;
 };
 
 struct net_bridge_mdb_htable
@@ -195,6 +196,7 @@ struct net_bridge
 	unsigned char			multicast_router;
 
 	u8				multicast_disabled:1;
+	u8				multicast_querier:1;
 
 	u32				hash_elasticity;
 	u32				hash_max;
@@ -213,7 +215,6 @@ struct net_bridge
 	spinlock_t			multicast_lock;
 	struct net_bridge_mdb_htable	*mdb;
 	struct hlist_head		router_list;
-	struct hlist_head		mglist;
 
 	struct timer_list		multicast_router_timer;
 	struct timer_list		multicast_querier_timer;
@@ -361,6 +362,7 @@ extern int br_multicast_set_router(struct net_bridge *br, unsigned long val);
 extern int br_multicast_set_port_router(struct net_bridge_port *p,
 					unsigned long val);
 extern int br_multicast_toggle(struct net_bridge *br, unsigned long val);
+extern int br_multicast_set_querier(struct net_bridge *br, unsigned long val);
 extern int br_multicast_set_hash_max(struct net_bridge *br, unsigned long val);
 
 static inline bool br_multicast_is_router(struct net_bridge *br)

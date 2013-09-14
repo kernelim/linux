@@ -863,6 +863,28 @@ static int nfs_write_pageuptodate(struct page *page, struct inode *inode)
 		!(NFS_I(inode)->cache_validity & (NFS_INO_REVAL_PAGECACHE|NFS_INO_INVALID_DATA));
 }
 
+/* If we know the page is up to date, and we're not using byte range locks (or
+ * if we have the whole file locked for writing), it may be more efficient to
+ * extend the write to cover the entire page in order to avoid fragmentation
+ * inefficiencies.
+ *
+ * If the file is opened O_SYNC or if we have a write delegation from the server
+ * then we can just skip the rest of the checks.
+ */
+static int nfs_can_extend_write(struct file *file, struct page *page, struct inode *inode)
+{
+	if (file->f_flags & O_SYNC)
+		return 0;
+	if (nfs_have_delegation(inode, FMODE_WRITE))
+		return 1;
+	if (nfs_write_pageuptodate(page, inode) && (inode->i_flock == NULL ||
+			(inode->i_flock->fl_start == 0 &&
+			inode->i_flock->fl_end == OFFSET_MAX &&
+			inode->i_flock->fl_type != F_RDLCK)))
+		return 1;
+	return 0;
+}
+
 /*
  * Update and possibly write a cached page of an NFS file.
  *
@@ -883,14 +905,7 @@ int nfs_updatepage(struct file *file, struct page *page,
 		file->f_path.dentry->d_name.name, count,
 		(long long)(page_offset(page) + offset));
 
-	/* If we're not using byte range locks, and we know the page
-	 * is up to date, it may be more efficient to extend the write
-	 * to cover the entire page in order to avoid fragmentation
-	 * inefficiencies.
-	 */
-	if (nfs_write_pageuptodate(page, inode) &&
-			inode->i_flock == NULL &&
-			!(file->f_flags & O_SYNC)) {
+	if (nfs_can_extend_write(file, page, inode)) {
 		count = max(count + offset, nfs_page_length(page));
 		offset = 0;
 	}

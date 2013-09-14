@@ -978,8 +978,10 @@ int register_efivars(struct efivars *efivars,
 	} while (status != EFI_NOT_FOUND);
 
 	error = create_efivars_bin_attributes(efivars);
-	if (error)
+	if (error) {
 		unregister_efivars(efivars);
+		goto out;
+	}
 
 	efivars->efi_pstore_info = efi_pstore_info;
 
@@ -988,7 +990,11 @@ int register_efivars(struct efivars *efivars,
 		efivars->efi_pstore_info.bufsize = 1024;
 		efivars->efi_pstore_info.data = efivars;
 		spin_lock_init(&efivars->efi_pstore_info.buf_lock);
-		pstore_register(&efivars->efi_pstore_info);
+		if (pstore_register(&efivars->efi_pstore_info)) {
+			kfree(efivars->efi_pstore_info.buf);
+			efivars->efi_pstore_info.buf = NULL;
+			efivars->efi_pstore_info.bufsize = 0;
+		}
 	}
 
 out:

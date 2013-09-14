@@ -73,7 +73,7 @@ int br_handle_frame_finish(struct sk_buff *skb)
 	else if (is_multicast_ether_addr(dest)) {
 		mdst = br_mdb_get(br, skb);
 		if (mdst || BR_INPUT_SKB_CB(skb)->mrouters_only) {
-			if ((mdst && !hlist_unhashed(&mdst->mglist)) ||
+			if ((mdst && mdst->mglist) ||
 			    br_multicast_is_router(br))
 				skb2 = skb;
 			br_multicast_forward(mdst, skb, skb2);

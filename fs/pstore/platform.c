@@ -170,15 +170,13 @@ int pstore_register(struct pstore_info *psi)
 {
 	struct module *owner = psi->owner;
 
+	if (backend && strcmp(backend, psi->name))
+		return -EPERM;
+
 	spin_lock(&pstore_lock);
 	if (psinfo) {
 		spin_unlock(&pstore_lock);
 		return -EBUSY;
-	}
-
-	if (backend && strcmp(backend, psi->name)) {
-		spin_unlock(&pstore_lock);
-		return -EINVAL;
 	}
 
 	psinfo = psi;
@@ -197,6 +195,9 @@ int pstore_register(struct pstore_info *psi)
 
 	pstore_timer.expires = jiffies + PSTORE_INTERVAL;
 	add_timer(&pstore_timer);
+
+	pr_info("pstore: Registered %s as persistent store backend\n",
+		psi->name);
 
 	return 0;
 }
