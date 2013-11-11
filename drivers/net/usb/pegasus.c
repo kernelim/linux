@@ -1519,6 +1519,7 @@ static struct usb_driver pegasus_driver = {
 	.id_table = pegasus_ids,
 	.suspend = pegasus_suspend,
 	.resume = pegasus_resume,
+	.disable_hub_initiated_lpm = 1,
 };
 
 static void __init parse_id(char *id)

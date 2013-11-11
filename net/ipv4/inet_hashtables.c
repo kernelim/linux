@@ -39,6 +39,7 @@ struct inet_bind_bucket *inet_bind_bucket_create(struct kmem_cache *cachep,
 		write_pnet(&tb->ib_net, hold_net(net));
 		tb->port      = snum;
 		tb->fastreuse = 0;
+		tb->fastreuseport = 0;
 		tb->num_owners = 0;
 		INIT_HLIST_HEAD(&tb->owners);
 		hlist_add_head(&tb->node, &head->chain);
@@ -154,16 +155,16 @@ static inline int compute_score(struct sock *sk, struct net *net,
 	if (net_eq(sock_net(sk), net) && inet->num == hnum &&
 			!ipv6_only_sock(sk)) {
 		__be32 rcv_saddr = inet->rcv_saddr;
-		score = sk->sk_family == PF_INET ? 1 : 0;
+		score = sk->sk_family == PF_INET ? 2 : 1;
 		if (rcv_saddr) {
 			if (rcv_saddr != daddr)
 				return -1;
-			score += 2;
+			score += 4;
 		}
 		if (sk->sk_bound_dev_if) {
 			if (sk->sk_bound_dev_if != dif)
 				return -1;
-			score += 2;
+			score += 4;
 		}
 	}
 	return score;
@@ -179,6 +180,7 @@ static inline int compute_score(struct sock *sk, struct net *net,
 
 struct sock *__inet_lookup_listener(struct net *net,
 				    struct inet_hashinfo *hashinfo,
+				    const __be32 saddr, __be16 sport,
 				    const __be32 daddr, const unsigned short hnum,
 				    const int dif)
 {
@@ -186,17 +188,29 @@ struct sock *__inet_lookup_listener(struct net *net,
 	struct hlist_nulls_node *node;
 	unsigned int hash = inet_lhashfn(net, hnum);
 	struct inet_listen_hashbucket *ilb = &hashinfo->listening_hash[hash];
-	int score, hiscore;
+	int score, hiscore, matches = 0, reuseport = 0;
+	u32 phash = 0;
 
 	rcu_read_lock();
 begin:
 	result = NULL;
-	hiscore = -1;
+	hiscore = 0;
 	sk_nulls_for_each_rcu(sk, node, &ilb->head) {
 		score = compute_score(sk, net, hnum, daddr, dif);
 		if (score > hiscore) {
 			result = sk;
 			hiscore = score;
+			reuseport = sk->sk_reuseport;
+			if (reuseport) {
+				phash = inet_ehashfn(net, daddr, hnum,
+						     saddr, sport);
+				matches = 1;
+			}
+		} else if (score == hiscore && reuseport) {
+			matches++;
+			if (((u64)phash * matches) >> 32 == 0)
+				result = sk;
+			phash = next_pseudo_random32(phash);
 		}
 	}
 	/*
@@ -310,6 +324,7 @@ static int __inet_check_established(struct inet_timewait_death_row *death_row,
 	struct sock *sk2;
 	const struct hlist_nulls_node *node;
 	struct inet_timewait_sock *tw;
+	int twrefcnt = 0;
 
 	spin_lock(lock);
 
@@ -342,20 +357,23 @@ unique:
 	sk->sk_hash = hash;
 	WARN_ON(!sk_unhashed(sk));
 	__sk_nulls_add_node_rcu(sk, &head->chain);
+	if (tw) {
+		twrefcnt = inet_twsk_unhash(tw);
+		NET_INC_STATS_BH(net, LINUX_MIB_TIMEWAITRECYCLED);
+	}
 	spin_unlock(lock);
+	if (twrefcnt)
+		inet_twsk_put(tw);
 	sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
 
 	if (twp) {
 		*twp = tw;
-		NET_INC_STATS_BH(net, LINUX_MIB_TIMEWAITRECYCLED);
 	} else if (tw) {
 		/* Silly. Should hash-dance instead... */
 		inet_twsk_deschedule(tw, death_row);
-		NET_INC_STATS_BH(net, LINUX_MIB_TIMEWAITRECYCLED);
 
 		inet_twsk_put(tw);
 	}
-
 	return 0;
 
 not_unique:
@@ -480,7 +498,8 @@ int __inet_hash_connect(struct inet_timewait_death_row *death_row,
 			 */
 			inet_bind_bucket_for_each(tb, node, &head->chain) {
 				if (ib_net(tb) == net && tb->port == port) {
-					if (tb->fastreuse >= 0)
+					if (tb->fastreuse >= 0 ||
+					    tb->fastreuseport >= 0)
 						goto next_port;
 					WARN_ON(hlist_empty(&tb->owners));
 					if (!check_established(death_row, sk,
@@ -497,6 +516,7 @@ int __inet_hash_connect(struct inet_timewait_death_row *death_row,
 				break;
 			}
 			tb->fastreuse = -1;
+			tb->fastreuseport = -1;
 			goto ok;
 
 		next_port:

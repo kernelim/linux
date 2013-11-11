@@ -167,6 +167,8 @@ __attribute__((section("_ftrace_events"))) event_##call = {		\
 	.raw_init		= ftrace_raw_init_event,		\
 	.fmt.print_fmt		= print,				\
 	.define_fields		= ftrace_define_fields_##call,		\
-};
+};									\
+struct ftrace_event_call __used						\
+__attribute__((section("_ftrace_events_ptrs"))) *__event_##call = &event_##call;
 
 #include "trace_entries.h"

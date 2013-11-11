@@ -35,6 +35,8 @@ static unsigned long linkwatch_nextevent;
 static void linkwatch_event(struct work_struct *dummy);
 static DECLARE_DELAYED_WORK(linkwatch_work, linkwatch_event);
 
+static struct workqueue_struct *linkwatch_wq;
+
 static struct net_device *lweventlist;
 static DEFINE_SPINLOCK(lweventlist_lock);
 
@@ -99,6 +101,11 @@ static void linkwatch_add_event(struct net_device *dev)
 	spin_unlock_irqrestore(&lweventlist_lock, flags);
 }
 
+static int schedule_delayed_watch(struct delayed_work *dwork,
+					unsigned long delay)
+{
+	return queue_delayed_work(linkwatch_wq, dwork, delay);
+}
 
 static void linkwatch_schedule_work(int urgent)
 {
@@ -122,7 +129,7 @@ static void linkwatch_schedule_work(int urgent)
 	 * This is true if we've scheduled it immeditately or if we don't
 	 * need an immediate execution and it's already pending.
 	 */
-	if (schedule_delayed_work(&linkwatch_work, delay) == !delay)
+	if (schedule_delayed_watch(&linkwatch_work, delay) == !delay)
 		return;
 
 	/* Don't bother if there is nothing urgent. */
@@ -134,7 +141,7 @@ static void linkwatch_schedule_work(int urgent)
 		return;
 
 	/* Otherwise we reschedule it again for immediate exection. */
-	schedule_delayed_work(&linkwatch_work, 0);
+	schedule_delayed_watch(&linkwatch_work, 0);
 }
 
 
@@ -231,3 +238,9 @@ void linkwatch_fire_event(struct net_device *dev)
 }
 
 EXPORT_SYMBOL(linkwatch_fire_event);
+
+int linkwatch_init(void)
+{
+	linkwatch_wq = create_singlethread_workqueue("linkwatch");
+	return linkwatch_wq ? 0 : -ENOMEM;
+}

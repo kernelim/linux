@@ -900,6 +900,10 @@ int kvm_vcpu_init(struct kvm_vcpu *vcpu, struct kvm *kvm, unsigned id)
 	}
 	vcpu->run = page_address(page);
 
+	kvm_vcpu_set_in_spin_loop(vcpu, false);
+	kvm_vcpu_set_dy_eligible(vcpu, false);
+	vcpu->preempted = false;
+
 	r = kvm_arch_vcpu_init(vcpu);
 	if (r < 0)
 		goto fail_free_run;
@@ -1413,7 +1417,7 @@ skip_lpage:
 		new.userspace_addr = mem->userspace_addr;
 #endif /* not defined CONFIG_S390 */
 
-	if (!npages) {
+	if (!npages || base_gfn != old.base_gfn) {
 		r = -ENOMEM;
 		slots = kzalloc(sizeof(struct kvm_memslots), GFP_KERNEL);
 		if (!slots)
@@ -1427,8 +1431,12 @@ skip_lpage:
 		old_memslots = kvm->memslots;
 		rcu_assign_pointer(kvm->memslots, slots);
 		synchronize_srcu_expedited(&kvm->srcu);
-		/* From this point no new shadow pages pointing to a deleted
-		 * memslot will be created.
+#ifdef CONFIG_DMAR
+		/* slot was deleted or moved, clear iommu mapping */
+		kvm_iommu_unmap_pages(kvm, &old);
+#endif
+		/* From this point no new shadow pages pointing to a deleted,
+		 * or moved, memslot will be created.
 		 *
 		 * validation of sp->gfn happens in:
 		 * 	- gfn_to_hva (kvm_read_guest, gfn_to_pfn)
@@ -1442,16 +1450,6 @@ skip_lpage:
 	if (r)
 		goto out_free;
 
-#ifdef CONFIG_DMAR
-	/* map/unmap the pages in iommu page table */
-	if (npages) {
-		r = kvm_iommu_map_pages(kvm, &new);
-		if (r)
-			goto out_free;
-	} else
-		kvm_iommu_unmap_pages(kvm, &old);
-#endif
-
 	r = -ENOMEM;
 	slots = kzalloc(sizeof(struct kvm_memslots), GFP_KERNEL);
 	if (!slots)
@@ -1460,6 +1458,15 @@ skip_lpage:
 	if (mem->slot >= slots->nmemslots)
 		slots->nmemslots = mem->slot + 1;
 	slots->generation++;
+
+#ifdef CONFIG_DMAR
+	/* map new memory slot into the iommu */
+	if (npages) {
+		r = kvm_iommu_map_pages(kvm, &new);
+		if (r)
+			goto out_slots;
+	}
+#endif
 
 	/* actual memory is freed via old in kvm_free_physmem_slot below */
 	if (!npages) {
@@ -1481,6 +1488,8 @@ skip_lpage:
 
 	return 0;
 
+out_slots:
+	kfree(slots);
 out_free:
 	kvm_free_physmem_slot(&new, &old);
 out:
@@ -2102,15 +2111,79 @@ void kvm_resched(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_GPL(kvm_resched);
 
+bool kvm_vcpu_yield_to(struct kvm_vcpu *target)
+{
+	struct pid *pid;
+	struct task_struct *task = NULL;
+	bool ret = false;
+
+	rcu_read_lock();
+	pid = rcu_dereference(target->pid);
+	if (pid)
+		task = get_pid_task(target->pid, PIDTYPE_PID);
+	rcu_read_unlock();
+	if (!task)
+		return ret;
+	if (task->flags & PF_VCPU) {
+		put_task_struct(task);
+		return ret;
+	}
+	ret = yield_to(task, 1);
+	put_task_struct(task);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(kvm_vcpu_yield_to);
+
+#ifdef CONFIG_HAVE_KVM_CPU_RELAX_INTERCEPT
+/*
+ * Helper that checks whether a VCPU is eligible for directed yield.
+ * Most eligible candidate to yield is decided by following heuristics:
+ *
+ *  (a) VCPU which has not done pl-exit or cpu relax intercepted recently
+ *  (preempted lock holder), indicated by @in_spin_loop.
+ *  Set at the beiginning and cleared at the end of interception/PLE handler.
+ *
+ *  (b) VCPU which has done pl-exit/ cpu relax intercepted but did not get
+ *  chance last time (mostly it has become eligible now since we have probably
+ *  yielded to lockholder in last iteration. This is done by toggling
+ *  @dy_eligible each time a VCPU checked for eligibility.)
+ *
+ *  Yielding to a recently pl-exited/cpu relax intercepted VCPU before yielding
+ *  to preempted lock-holder could result in wrong VCPU selection and CPU
+ *  burning. Giving priority for a potential lock-holder increases lock
+ *  progress.
+ *
+ *  Since algorithm is based on heuristics, accessing another VCPU data without
+ *  locking does not harm. It may result in trying to yield to  same VCPU, fail
+ *  and continue with next VCPU and so on.
+ */
+bool kvm_vcpu_eligible_for_directed_yield(struct kvm_vcpu *vcpu)
+{
+	bool eligible;
+
+	eligible = !vcpu->spin_loop.in_spin_loop ||
+			(vcpu->spin_loop.in_spin_loop &&
+			 vcpu->spin_loop.dy_eligible);
+
+	if (vcpu->spin_loop.in_spin_loop)
+		kvm_vcpu_set_dy_eligible(vcpu, !vcpu->spin_loop.dy_eligible);
+
+	return eligible;
+}
+#endif
+
 void kvm_vcpu_on_spin(struct kvm_vcpu *me)
 {
 	struct kvm *kvm = me->kvm;
 	struct kvm_vcpu *vcpu;
 	int last_boosted_vcpu = me->kvm->last_boosted_vcpu;
 	int yielded = 0;
+	int try = 3;
 	int pass;
 	int i;
 
+	kvm_vcpu_set_in_spin_loop(me, true);
 	/*
 	 * We boost the priority of a VCPU that is runnable but not
 	 * currently running, because it got preempted by something
@@ -2118,39 +2191,37 @@ void kvm_vcpu_on_spin(struct kvm_vcpu *me)
 	 * VCPU is holding the lock that we need and will release it.
 	 * We approximate round-robin by starting at the last boosted VCPU.
 	 */
-	for (pass = 0; pass < 2 && !yielded; pass++) {
+	for (pass = 0; pass < 2 && !yielded && try; pass++) {
 		kvm_for_each_vcpu(i, vcpu, kvm) {
-			struct task_struct *task = NULL;
-			struct pid *pid;
 			if (!pass && i <= last_boosted_vcpu) {
 				i = last_boosted_vcpu;
 				continue;
 			} else if (pass && i > last_boosted_vcpu)
 				break;
+			if (!ACCESS_ONCE(vcpu->preempted))
+				continue;
 			if (vcpu == me)
 				continue;
 			if (waitqueue_active(&vcpu->wq))
 				continue;
-			rcu_read_lock();
-			pid = rcu_dereference(vcpu->pid);
-			if (pid)
-				task = get_pid_task(vcpu->pid, PIDTYPE_PID);
-			rcu_read_unlock();
-			if (!task)
+			if (!kvm_vcpu_eligible_for_directed_yield(vcpu))
 				continue;
-			if (task->flags & PF_VCPU) {
-				put_task_struct(task);
-				continue;
-			}
-			if (yield_to(task, 1)) {
-				put_task_struct(task);
+
+			yielded = kvm_vcpu_yield_to(vcpu);
+			if (yielded > 0) {
 				kvm->last_boosted_vcpu = i;
-				yielded = 1;
 				break;
+			} else if (yielded < 0) {
+				try--;
+				if (!try)
+					break;
 			}
-			put_task_struct(task);
 		}
 	}
+	kvm_vcpu_set_in_spin_loop(me, false);
+
+	/* Ensure vcpu is not eligible during next spinloop */
+	kvm_vcpu_set_dy_eligible(me, false);
 }
 EXPORT_SYMBOL_GPL(kvm_vcpu_on_spin);
 
@@ -2262,6 +2333,7 @@ static int kvm_vm_ioctl_create_vcpu(struct kvm *kvm, u32 id)
 		kvm->bsp_vcpu = vcpu;
 #endif
 	mutex_unlock(&kvm->lock);
+	kvm_arch_vcpu_postcreate(vcpu);
 	return r;
 
 vcpu_destroy:
@@ -2934,18 +3006,28 @@ static void hardware_disable_all_nolock(void)
 
 static void hardware_disable_all(void)
 {
+	int count;
+	char count_string[20];
+	char event_string[] = "EVENT=terminate";
+	char *envp[] = { event_string, count_string, NULL };
+
 	spin_lock(&kvm_lock);
 	hardware_disable_all_nolock();
+	count = kvm_usage_count;
 	spin_unlock(&kvm_lock);
+
+	sprintf(count_string, "COUNT=%d", count);
+	kobject_uevent_env(&kvm_dev.this_device->kobj, KOBJ_CHANGE, envp);
 }
 
 static int hardware_enable_all(void)
 {
 	int r = 0;
+	int count;
 
 	spin_lock(&kvm_lock);
 
-	kvm_usage_count++;
+	count = ++kvm_usage_count;
 	if (kvm_usage_count == 1) {
 		atomic_set(&hardware_enable_failed, 0);
 		on_each_cpu(hardware_enable, NULL, 1);
@@ -2958,6 +3040,14 @@ static int hardware_enable_all(void)
 
 	spin_unlock(&kvm_lock);
 
+	if (r == 0) {
+		char count_string[20];
+		char event_string[] = "EVENT=create";
+		char *envp[] = { event_string, count_string, NULL };
+
+		sprintf(count_string, "COUNT=%d", count);
+		kobject_uevent_env(&kvm_dev.this_device->kobj, KOBJ_CHANGE, envp);
+	}
 	return r;
 }
 
@@ -3212,6 +3302,8 @@ struct kvm_vcpu *preempt_notifier_to_vcpu(struct preempt_notifier *pn)
 static void kvm_sched_in(struct preempt_notifier *pn, int cpu)
 {
 	struct kvm_vcpu *vcpu = preempt_notifier_to_vcpu(pn);
+	if (vcpu->preempted)
+		vcpu->preempted = false;
 
 	kvm_arch_vcpu_load(vcpu, cpu);
 }
@@ -3221,6 +3313,8 @@ static void kvm_sched_out(struct preempt_notifier *pn,
 {
 	struct kvm_vcpu *vcpu = preempt_notifier_to_vcpu(pn);
 
+	if (current->state == TASK_RUNNING)
+		vcpu->preempted = true;
 	kvm_arch_vcpu_put(vcpu);
 }
 

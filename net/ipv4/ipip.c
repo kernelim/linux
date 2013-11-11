@@ -110,7 +110,7 @@
 #include <net/sock.h>
 #include <net/ip.h>
 #include <net/icmp.h>
-#include <net/ipip.h>
+#include <net/ip_tunnels.h>
 #include <net/inet_ecn.h>
 #include <net/xfrm.h>
 #include <net/net_namespace.h>
@@ -381,6 +381,23 @@ static int ipip_rcv(struct sk_buff *skb)
 
 	return -1;
 }
+
+#define IPTUNNEL_XMIT() do {						\
+	int err;							\
+	int pkt_len = skb->len - skb_transport_offset(skb);		\
+									\
+	skb->ip_summed = CHECKSUM_NONE;					\
+	ip_select_ident(iph, &rt->u.dst, NULL);				\
+									\
+	err = ip_local_out(skb);					\
+	if (net_xmit_eval(err) == 0) {					\
+		stats->tx_bytes += pkt_len;				\
+		stats->tx_packets++;					\
+	} else {							\
+		stats->tx_errors++;					\
+		stats->tx_aborted_errors++;				\
+	}								\
+} while (0)
 
 /*
  *	This function assumes it is being called from dev_queue_xmit()

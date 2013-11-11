@@ -2053,6 +2053,7 @@ config E1000
 config E1000E
 	tristate "Intel(R) PRO/1000 PCI-Express Gigabit Ethernet support"
 	depends on PCI && (!SPARC32 || BROKEN)
+	select PTP_1588_CLOCK
 	---help---
 	  This driver supports the PCI-Express Intel(R) PRO/1000 gigabit
 	  ethernet family of adapters. For PCI or PCI-X e1000 adapters,
@@ -2082,6 +2083,7 @@ config IP1000
 config IGB
        tristate "Intel(R) 82575/82576 PCI-Express Gigabit Ethernet support"
        depends on PCI
+       select PTP_1588_CLOCK
        ---help---
          This driver supports Intel(R) 82575/82576 gigabit ethernet family of
          adapters.  For more information on how to identify your adapter, go
@@ -2100,6 +2102,17 @@ config IGB
          To compile this driver as a module, choose M here. The module
          will be called igb.
 
+config IGB_HWMON
+	bool "Intel(R) PCI-Express Gigabit adapters HWMON support"
+	default y
+	depends on IGB && HWMON && !(IGB=y && HWMON=m)
+	---help---
+	  Say Y if you want to expose thermal sensor data on Intel devices.
+
+	  Some of our devices contain thermal sensors, both external and internal.
+	  This data is available via the hwmon sysfs interface and exposes
+	  the onboard sensors.
+
 config IGB_DCA
 	bool "Direct Cache Access (DCA) Support"
 	default y
@@ -2108,17 +2121,6 @@ config IGB_DCA
 	  Say Y here if you want to use Direct Cache Access (DCA) in the
 	  driver.  DCA is a method for warming the CPU cache before data
 	  is used, with the intent of lessening the impact of cache misses.
-
-config IGB_PTP
-	bool "PTP Hardware Clock (PHC)"
-	default y
-	depends on IGB && PTP_1588_CLOCK
-	---help---
-	  Say Y here if you want to use PTP Hardware Clock (PHC) in the
-	  driver.  Only the basic clock operations have been implemented.
-
-	  Every timestamp and clock read operations must consult the
-	  overflow counter to form a correct time value.
 
 config IGBVF
        tristate "Intel(R) 82576 Virtual Function Ethernet support"
@@ -2310,6 +2312,8 @@ config TIGON3
 	tristate "Broadcom Tigon3 support"
 	depends on PCI
 	select PHYLIB
+	select HWMON
+	select PTP_1588_CLOCK
 	help
 	  This driver supports Broadcom Tigon3 based gigabit Ethernet cards.
 
@@ -2820,9 +2824,8 @@ config PASEMI_MAC
 
 config MLX4_EN
 	tristate "Mellanox Technologies 10Gbit Ethernet support"
-	depends on PCI && INET
+	depends on PCI
 	select MLX4_CORE
-	select INET_LRO
 	help
 	  This driver supports Mellanox Technologies ConnectX Ethernet
 	  devices.
@@ -2873,12 +2876,31 @@ config BNX2X
 	  To compile this driver as a module, choose M here: the module
 	  will be called bnx2x.  This is recommended.
 
+config BNX2X_SRIOV
+	bool "Broadcom 578xx and 57712 SR-IOV support"
+	depends on BNX2X && PCI_IOV
+	default y
+	---help---
+	  This configuration parameter enables Single Root Input Output
+	  Virtualization support in the 578xx and 57712 products. This
+	  allows for virtual function acceleration in virtual environments.
+
 config QLCNIC
 	tristate "QLOGIC QLCNIC 1/10Gb Converged Ethernet NIC Support"
 	depends on PCI
 	help
 	  This driver supports QLogic QLE8240 and QLE8242 Converged Ethernet
 	  devices.
+
+config QLCNIC_SRIOV
+	bool "QLOGIC QLCNIC 83XX family SR-IOV Support"
+	depends on QLCNIC && PCI_IOV
+	default y
+	---help---
+	This configuration parameter enables Single Root Input Output
+	Virtualization support for QLE83XX Converged Ethernet devices.
+	This allows for virtual function acceleration in virtualized
+	environments.
 
 config QLGE
 	tristate "QLogic QLGE 10Gb Ethernet Driver Support"
@@ -3340,6 +3362,19 @@ config NET_FC
 	  adaptor card in your computer; say Y here and to the driver for your
 	  adaptor below. You also should have said Y to "SCSI support" and
 	  "SCSI generic support".
+
+config VXLAN
+       tristate "Virtual eXtensible Local Area Network (VXLAN)"
+       depends on EXPERIMENTAL && INET
+       ---help---
+	  This allows one to create vxlan virtual interfaces that provide
+	  Layer 2 Networks over Layer 3 Networks. VXLAN is often used
+	  to tunnel virtual network infrastructure in virtualized environments.
+	  For more information see:
+	    http://tools.ietf.org/html/draft-mahalingam-dutt-dcops-vxlan-02
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called vxlan.
 
 config NETCONSOLE
 	tristate "Network console logging support (EXPERIMENTAL)"

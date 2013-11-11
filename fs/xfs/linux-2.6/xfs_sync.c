@@ -40,6 +40,8 @@
 #include <linux/kthread.h>
 #include <linux/freezer.h>
 
+struct workqueue_struct *xfs_eofblocks_wq;
+
 /*
  * The inode lookup is done in batches to keep the amount of lock traffic and
  * radix tree lookups to a minimum. The batch size is a trade off between
@@ -98,8 +100,11 @@ xfs_inode_ag_walk(
 	struct xfs_mount	*mp,
 	struct xfs_perag	*pag,
 	int			(*execute)(struct xfs_inode *ip,
-					   struct xfs_perag *pag, int flags),
-	int			flags)
+					   struct xfs_perag *pag, int flags,
+					   void *args),
+	int			flags,
+	void			*args,
+	int			tag)
 {
 	uint32_t		first_index;
 	int			last_error = 0;
@@ -118,9 +123,17 @@ restart:
 		int		i;
 
 		rcu_read_lock();
-		nr_found = radix_tree_gang_lookup(&pag->pag_ici_root,
+
+		if (tag == -1)
+			nr_found = radix_tree_gang_lookup(&pag->pag_ici_root,
 					(void **)batch, first_index,
 					XFS_LOOKUP_BATCH);
+		else
+			nr_found = radix_tree_gang_lookup_tag(
+					&pag->pag_ici_root,
+					(void **) batch, first_index,
+					XFS_LOOKUP_BATCH, tag);
+
 		if (!nr_found) {
 			rcu_read_unlock();
 			break;
@@ -161,7 +174,7 @@ restart:
 		for (i = 0; i < nr_found; i++) {
 			if (!batch[i])
 				continue;
-			error = execute(batch[i], pag, flags);
+			error = execute(batch[i], pag, flags, args);
 			IRELE(batch[i]);
 			if (error == EAGAIN) {
 				skipped++;
@@ -184,12 +197,40 @@ restart:
 	return last_error;
 }
 
+/*
+ * Background scanning to trim post-EOF preallocated space. This is queued
+ * based on the 'background_prealloc_discard_period' tunable (5m by default).
+ */
+STATIC void
+xfs_queue_eofblocks(
+	struct xfs_mount *mp)
+{
+	rcu_read_lock();
+	if (radix_tree_tagged(&mp->m_perag_tree, XFS_ICI_EOFBLOCKS_TAG))
+		queue_delayed_work(xfs_eofblocks_wq,
+				   &mp->m_eofblocks_work,
+				   msecs_to_jiffies(xfs_eofb_secs * 1000));
+	rcu_read_unlock();
+}
+
+void
+xfs_eofblocks_worker(
+	struct work_struct *work)
+{
+	struct xfs_mount *mp = container_of(to_delayed_work(work),
+				struct xfs_mount, m_eofblocks_work);
+	xfs_icache_free_eofblocks(mp, NULL);
+	xfs_queue_eofblocks(mp);
+}
+
 int
 xfs_inode_ag_iterator(
 	struct xfs_mount	*mp,
 	int			(*execute)(struct xfs_inode *ip,
-					   struct xfs_perag *pag, int flags),
-	int			flags)
+					   struct xfs_perag *pag, int flags,
+					   void *args),
+	int			flags,
+	void			*args)
 {
 	struct xfs_perag	*pag;
 	int			error = 0;
@@ -199,7 +240,36 @@ xfs_inode_ag_iterator(
 	ag = 0;
 	while ((pag = xfs_perag_get(mp, ag))) {
 		ag = pag->pag_agno + 1;
-		error = xfs_inode_ag_walk(mp, pag, execute, flags);
+		error = xfs_inode_ag_walk(mp, pag, execute, flags, args, -1);
+		xfs_perag_put(pag);
+		if (error) {
+			last_error = error;
+			if (error == EFSCORRUPTED)
+				break;
+		}
+	}
+	return XFS_ERROR(last_error);
+}
+
+int
+xfs_inode_ag_iterator_tag(
+	struct xfs_mount	*mp,
+	int			(*execute)(struct xfs_inode *ip,
+					   struct xfs_perag *pag, int flags,
+					   void *args),
+	int			flags,
+	void			*args,
+	int			tag)
+{
+	struct xfs_perag	*pag;
+	int			error = 0;
+	int			last_error = 0;
+	xfs_agnumber_t		ag;
+
+	ag = 0;
+	while ((pag = xfs_perag_get_tag(mp, ag, tag))) {
+		ag = pag->pag_agno + 1;
+		error = xfs_inode_ag_walk(mp, pag, execute, flags, args, tag);
 		xfs_perag_put(pag);
 		if (error) {
 			last_error = error;
@@ -214,7 +284,8 @@ STATIC int
 xfs_sync_inode_data(
 	struct xfs_inode	*ip,
 	struct xfs_perag	*pag,
-	int			flags)
+	int			flags,
+	void			*args)
 {
 	struct inode		*inode = VFS_I(ip);
 	struct address_space *mapping = inode->i_mapping;
@@ -243,7 +314,8 @@ STATIC int
 xfs_sync_inode_attr(
 	struct xfs_inode	*ip,
 	struct xfs_perag	*pag,
-	int			flags)
+	int			flags,
+	void			*args)
 {
 	int			error = 0;
 
@@ -290,7 +362,7 @@ xfs_sync_data(
 
 	ASSERT((flags & ~(SYNC_TRYLOCK|SYNC_WAIT)) == 0);
 
-	error = xfs_inode_ag_iterator(mp, xfs_sync_inode_data, flags);
+	error = xfs_inode_ag_iterator(mp, xfs_sync_inode_data, flags, NULL);
 	if (error)
 		return XFS_ERROR(error);
 
@@ -308,7 +380,7 @@ xfs_sync_attr(
 {
 	ASSERT((flags & ~SYNC_WAIT) == 0);
 
-	return xfs_inode_ag_iterator(mp, xfs_sync_inode_attr, flags);
+	return xfs_inode_ag_iterator(mp, xfs_sync_inode_attr, flags, NULL);
 }
 
 STATIC int
@@ -1098,4 +1170,147 @@ xfs_inode_shrinker_unregister(
 	struct xfs_mount	*mp)
 {
 	unregister_shrinker(&mp->m_inode_shrink);
+}
+
+STATIC int
+xfs_inode_match_id(
+	struct xfs_inode	*ip,
+	struct xfs_eofblocks	*eofb)
+{
+	if (eofb->eof_flags & XFS_EOF_FLAGS_UID &&
+	    ip->i_d.di_uid != eofb->eof_uid)
+		return 0;
+
+	if (eofb->eof_flags & XFS_EOF_FLAGS_GID &&
+	    ip->i_d.di_gid != eofb->eof_gid)
+		return 0;
+
+	if (eofb->eof_flags & XFS_EOF_FLAGS_PRID &&
+	    xfs_get_projid(ip) != eofb->eof_prid)
+		return 0;
+
+	return 1;
+}
+
+STATIC int
+xfs_inode_free_eofblocks(
+	struct xfs_inode	*ip,
+	struct xfs_perag	*pag,
+	int			flags,
+	void			*args)
+{
+	int ret;
+	struct xfs_eofblocks *eofb = args;
+
+	if (!xfs_can_free_eofblocks(ip, false)) {
+		/* inode could be preallocated or append-only */
+		trace_xfs_inode_free_eofblocks_invalid(ip);
+		xfs_inode_clear_eofblocks_tag(ip);
+		return 0;
+	}
+
+	/*
+	 * If the mapping is dirty the operation can block and wait for some
+	 * time. Unless we are waiting, skip it.
+	 */
+	if (!(flags & SYNC_WAIT) &&
+	    mapping_tagged(VFS_I(ip)->i_mapping, PAGECACHE_TAG_DIRTY))
+		return 0;
+
+	if (eofb) {
+		if (!xfs_inode_match_id(ip, eofb))
+			return 0;
+
+		/* skip the inode if the file size is too small */
+		if (eofb->eof_flags & XFS_EOF_FLAGS_MINFILESIZE &&
+		    XFS_ISIZE(ip) < eofb->eof_min_file_size)
+			return 0;
+	}
+
+	ret = xfs_free_eofblocks(ip->i_mount, ip, XFS_FREE_EOF_TRYLOCK);
+
+	/* don't revisit the inode if we're not waiting */
+	if (ret == EAGAIN && !(flags & SYNC_WAIT))
+		ret = 0;
+
+	return ret;
+}
+
+int
+xfs_icache_free_eofblocks(
+	struct xfs_mount	*mp,
+	struct xfs_eofblocks	*eofb)
+{
+	int flags = SYNC_TRYLOCK;
+
+	if (eofb && (eofb->eof_flags & XFS_EOF_FLAGS_SYNC))
+		flags = SYNC_WAIT;
+
+	return xfs_inode_ag_iterator_tag(mp, xfs_inode_free_eofblocks, flags,
+					 eofb, XFS_ICI_EOFBLOCKS_TAG);
+}
+
+void
+xfs_inode_set_eofblocks_tag(
+	xfs_inode_t	*ip)
+{
+	struct xfs_mount *mp = ip->i_mount;
+	struct xfs_perag *pag;
+	int tagged;
+
+	pag = xfs_perag_get(mp, XFS_INO_TO_AGNO(mp, ip->i_ino));
+	spin_lock(&pag->pag_ici_lock);
+	trace_xfs_inode_set_eofblocks_tag(ip);
+
+	tagged = radix_tree_tagged(&pag->pag_ici_root,
+				   XFS_ICI_EOFBLOCKS_TAG);
+	radix_tree_tag_set(&pag->pag_ici_root,
+			   XFS_INO_TO_AGINO(ip->i_mount, ip->i_ino),
+			   XFS_ICI_EOFBLOCKS_TAG);
+	if (!tagged) {
+		/* propagate the eofblocks tag up into the perag radix tree */
+		spin_lock(&ip->i_mount->m_perag_lock);
+		radix_tree_tag_set(&ip->i_mount->m_perag_tree,
+				   XFS_INO_TO_AGNO(ip->i_mount, ip->i_ino),
+				   XFS_ICI_EOFBLOCKS_TAG);
+		spin_unlock(&ip->i_mount->m_perag_lock);
+
+		/* kick off background trimming */
+		xfs_queue_eofblocks(ip->i_mount);
+
+		trace_xfs_perag_set_eofblocks(ip->i_mount, pag->pag_agno,
+					      -1, _RET_IP_);
+	}
+
+	spin_unlock(&pag->pag_ici_lock);
+	xfs_perag_put(pag);
+}
+
+void
+xfs_inode_clear_eofblocks_tag(
+	xfs_inode_t	*ip)
+{
+	struct xfs_mount *mp = ip->i_mount;
+	struct xfs_perag *pag;
+
+	pag = xfs_perag_get(mp, XFS_INO_TO_AGNO(mp, ip->i_ino));
+	spin_lock(&pag->pag_ici_lock);
+	trace_xfs_inode_clear_eofblocks_tag(ip);
+
+	radix_tree_tag_clear(&pag->pag_ici_root,
+			     XFS_INO_TO_AGINO(ip->i_mount, ip->i_ino),
+			     XFS_ICI_EOFBLOCKS_TAG);
+	if (!radix_tree_tagged(&pag->pag_ici_root, XFS_ICI_EOFBLOCKS_TAG)) {
+		/* clear the eofblocks tag from the perag radix tree */
+		spin_lock(&ip->i_mount->m_perag_lock);
+		radix_tree_tag_clear(&ip->i_mount->m_perag_tree,
+				     XFS_INO_TO_AGNO(ip->i_mount, ip->i_ino),
+				     XFS_ICI_EOFBLOCKS_TAG);
+		spin_unlock(&ip->i_mount->m_perag_lock);
+		trace_xfs_perag_clear_eofblocks(ip->i_mount, pag->pag_agno,
+					       -1, _RET_IP_);
+	}
+
+	spin_unlock(&pag->pag_ici_lock);
+	xfs_perag_put(pag);
 }

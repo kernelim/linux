@@ -77,6 +77,7 @@
 #include <linux/preempt.h>
 #include <net/route.h>
 #include <net/net_namespace.h>
+#include <net/pkt_sched.h>
 #include "bonding.h"
 #include "bond_3ad.h"
 #include "bond_alb.h"
@@ -424,8 +425,6 @@ struct vlan_entry *bond_next_vlan(struct bonding *bond, struct vlan_entry *curr)
 	return next;
 }
 
-#define bond_queue_mapping(skb) (*(u16 *)((skb)->cb))
-
 /**
  * bond_dev_queue_xmit - Prepare skb for xmit.
  *
@@ -462,7 +461,7 @@ int bond_dev_queue_xmit(struct bonding *bond, struct sk_buff *skb,
 		skb->dev = slave_dev;
 	}
 
-	skb->queue_mapping = bond_queue_mapping(skb);
+	skb->queue_mapping = qdisc_skb_cb(skb)->bond_queue_mapping;
 #ifdef CONFIG_NET_POLL_CONTROLLER
 	if (unlikely(netpoll_tx_running(bond->dev))) {
 		struct netpoll *np = bond->dev->npinfo->netpoll;
@@ -2181,7 +2180,6 @@ int bond_release(struct net_device *bond_dev, struct net_device *slave_dev)
 	}
 
 	block_netpoll_tx();
-	netdev_bonding_change(bond_dev, NETDEV_RELEASE);
 	write_lock_bh(&bond->lock);
 
 	slave = bond_get_slave_by_dev(bond, slave_dev);
@@ -2298,6 +2296,9 @@ int bond_release(struct net_device *bond_dev, struct net_device *slave_dev)
 
 	write_unlock_bh(&bond->lock);
 	unblock_netpoll_tx();
+
+	if (bond->slave_cnt == 0)
+		call_netdevice_notifiers(NETDEV_RELEASE, bond->dev);
 
 	/* must do this from outside any spinlocks */
 	bond_destroy_slave_symlinks(bond_dev, slave_dev);
@@ -4189,7 +4190,7 @@ static int bond_close(struct net_device *bond_dev)
 		bond_unregister_lacpdu(bond);
 	}
 
-	if (bond->params.arp_validate)
+	if (bond->params.arp_interval && bond->params.arp_validate)
 		bond_unregister_arp(bond);
 
 	write_lock_bh(&bond->lock);
@@ -4890,7 +4891,7 @@ static u16 bond_select_queue(struct net_device *dev, struct sk_buff *skb)
 	/*
 	 * Save the original txq to restore before passing to the driver
 	 */
-	bond_queue_mapping(skb) = skb->queue_mapping;
+	qdisc_skb_cb(skb)->bond_queue_mapping = skb->queue_mapping;
 
 	if (unlikely(txq >= dev->real_num_tx_queues)) {
 		do
@@ -4977,6 +4978,37 @@ void bond_set_mode_ops(struct bonding *bond, int mode)
 	}
 }
 
+static int bond_ethtool_get_settings(struct net_device *bond_dev,
+				     struct ethtool_cmd *ecmd)
+{
+	struct bonding *bond = netdev_priv(bond_dev);
+	struct slave *slave;
+	int i;
+	unsigned long speed = 0;
+
+	ecmd->duplex = DUPLEX_UNKNOWN;
+	ecmd->port = PORT_OTHER;
+
+	/* Since SLAVE_IS_OK returns false for all inactive or down slaves, we
+	 * do not need to check mode.  Though link speed might not represent
+	 * the true receive or transmit bandwidth (not all modes are symmetric)
+	 * this is an accurate maximum.
+	 */
+	read_lock(&bond->lock);
+	bond_for_each_slave(bond, slave, i) {
+		if (SLAVE_IS_OK(slave)) {
+			if (slave->speed != SPEED_UNKNOWN)
+				speed += slave->speed;
+			if (ecmd->duplex == DUPLEX_UNKNOWN &&
+			    slave->duplex != DUPLEX_UNKNOWN)
+				ecmd->duplex = slave->duplex;
+		}
+	}
+	ethtool_cmd_speed_set(ecmd, speed ? : SPEED_UNKNOWN);
+	read_unlock(&bond->lock);
+	return 0;
+}
+
 static void bond_ethtool_get_drvinfo(struct net_device *bond_dev,
 				    struct ethtool_drvinfo *drvinfo)
 {
@@ -5014,6 +5046,7 @@ static int bond_ethtool_set_flags(struct net_device *dev, u32 flags)
 
 static const struct ethtool_ops bond_ethtool_ops = {
 	.get_drvinfo		= bond_ethtool_get_drvinfo,
+	.get_settings		= bond_ethtool_get_settings,
 	.get_link		= ethtool_op_get_link,
 	.get_tx_csum		= ethtool_op_get_tx_csum,
 	.get_sg			= ethtool_op_get_sg,
@@ -5111,6 +5144,10 @@ static void bond_setup(struct net_device *bond_dev)
 			       NETIF_F_HW_VLAN_RX |
 			       NETIF_F_HW_VLAN_FILTER);
 
+	/* By default, we enable GRO on bonding devices.
+	 * Actual support requires lowlevel drivers are GRO ready.
+	 */
+	bond_dev->features |= NETIF_F_GRO;
 }
 
 static void bond_work_cancel_all(struct bonding *bond)

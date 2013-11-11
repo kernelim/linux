@@ -25,7 +25,7 @@ sub syscalls::sys_exit_read
 {
     my ($event_name, $context, $common_cpu, $common_secs, $common_nsecs,
 	$common_pid, $common_comm,
-	$nr, $ret) = @_;
+	$ret) = @_;
 
     if ($ret > 0) {
 	$reads{$common_pid}{bytes_read} += $ret;
@@ -41,7 +41,7 @@ sub syscalls::sys_enter_read
 {
     my ($event_name, $context, $common_cpu, $common_secs, $common_nsecs,
 	$common_pid, $common_comm,
-	$nr, $fd, $buf, $count) = @_;
+	$fd, $buf, $count) = @_;
 
     $reads{$common_pid}{bytes_requested} += $count;
     $reads{$common_pid}{total_reads}++;
@@ -52,7 +52,7 @@ sub syscalls::sys_exit_write
 {
     my ($event_name, $context, $common_cpu, $common_secs, $common_nsecs,
 	$common_pid, $common_comm,
-	$nr, $ret) = @_;
+	$ret) = @_;
 
     if ($ret <= 0) {
 	$writes{$common_pid}{errors}{$ret}++;
@@ -63,7 +63,7 @@ sub syscalls::sys_enter_write
 {
     my ($event_name, $context, $common_cpu, $common_secs, $common_nsecs,
 	$common_pid, $common_comm,
-	$nr, $fd, $buf, $count) = @_;
+	$fd, $buf, $count) = @_;
 
     $writes{$common_pid}{bytes_written} += $count;
     $writes{$common_pid}{total_writes}++;

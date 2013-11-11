@@ -799,7 +799,7 @@ static int __init mce_amd_init(void)
 
 	pr_info("MCE: In-kernel MCE decoding enabled.\n");
 
-	atomic_notifier_chain_register(&x86_mce_decoder_chain, &amd_mce_dec_nb);
+	mce_register_decode_chain(&amd_mce_dec_nb);
 
 	return 0;
 }
@@ -808,7 +808,7 @@ early_initcall(mce_amd_init);
 #ifdef MODULE
 static void __exit mce_amd_exit(void)
 {
-	atomic_notifier_chain_unregister(&x86_mce_decoder_chain, &amd_mce_dec_nb);
+	mce_unregister_decode_chain(&amd_mce_dec_nb);
 	kfree(fam_ops);
 }
 

@@ -109,7 +109,6 @@
 #include <net/sock.h>
 #include <net/raw.h>
 #include <net/icmp.h>
-#include <net/ipip.h>
 #include <net/inet_common.h>
 #include <net/xfrm.h>
 #include <net/net_namespace.h>
@@ -668,6 +667,7 @@ int inet_accept(struct socket *sock, struct socket *newsock, int flags)
 
 	lock_sock(sk2);
 
+	inet_rps_record_flow(sk2);
 	WARN_ON(!((1 << sk2->sk_state) &
 		  (TCPF_ESTABLISHED | TCPF_CLOSE_WAIT | TCPF_CLOSE)));
 
@@ -1198,7 +1198,8 @@ EXPORT_SYMBOL(inet_sk_rebuild_header);
 static int inet_gso_send_check(struct sk_buff *skb)
 {
 	struct iphdr *iph;
-	const struct net_protocol *ops;
+	const struct net_offload *ops;
+	const struct net_protocol *proto_ops;
 	int proto;
 	int ihl;
 	int err = -EINVAL;
@@ -1221,9 +1222,18 @@ static int inet_gso_send_check(struct sk_buff *skb)
 	err = -EPROTONOSUPPORT;
 
 	rcu_read_lock();
-	ops = rcu_dereference(inet_protos[proto]);
+	ops = rcu_dereference(inet_offloads[proto]);
 	if (likely(ops && ops->gso_send_check))
 		err = ops->gso_send_check(skb);
+	else {
+		/* Check protocols array for any protocols
+		 * using old API.
+		 */
+		proto_ops = rcu_dereference(inet_protos[proto]);
+		if (proto_ops && proto_ops->gso_send_check)
+			err = proto_ops->gso_send_check(skb);
+	}
+
 	rcu_read_unlock();
 
 out:
@@ -1234,20 +1244,22 @@ static struct sk_buff *inet_gso_segment(struct sk_buff *skb, int features)
 {
 	struct sk_buff *segs = ERR_PTR(-EINVAL);
 	struct iphdr *iph;
-	const struct net_protocol *ops;
+	const struct net_protocol *proto_ops;
+	const struct net_offload *ops;
 	int proto;
 	int ihl;
 	int id;
 	unsigned int offset = 0;
-
-	if (!(features & NETIF_F_V4_CSUM))
-		features &= ~NETIF_F_SG;
+	bool tunnel;
 
 	if (unlikely(skb_shinfo(skb)->gso_type &
 		     ~(SKB_GSO_TCPV4 |
 		       SKB_GSO_UDP |
 		       SKB_GSO_DODGY |
 		       SKB_GSO_TCP_ECN |
+		       SKB_GSO_GRE |
+		       SKB_GSO_TCPV6 |
+		       SKB_GSO_UDP_TUNNEL |
 		       0)))
 		goto out;
 
@@ -1262,6 +1274,8 @@ static struct sk_buff *inet_gso_segment(struct sk_buff *skb, int features)
 	if (unlikely(!pskb_may_pull(skb, ihl)))
 		goto out;
 
+	tunnel = !!skb->encapsulation;
+
 	__skb_pull(skb, ihl);
 	skb_reset_transport_header(skb);
 	iph = ip_hdr(skb);
@@ -1270,9 +1284,18 @@ static struct sk_buff *inet_gso_segment(struct sk_buff *skb, int features)
 	segs = ERR_PTR(-EPROTONOSUPPORT);
 
 	rcu_read_lock();
-	ops = rcu_dereference(inet_protos[proto]);
+	ops = rcu_dereference(inet_offloads[proto]);
 	if (likely(ops && ops->gso_segment))
 		segs = ops->gso_segment(skb, features);
+	else {
+		/* Check protocols array for any protocols
+		 * using old API.
+		 */
+		proto_ops = rcu_dereference(inet_protos[proto]);
+		if (proto_ops && proto_ops->gso_segment)
+			segs = proto_ops->gso_segment(skb, features);
+	}
+
 	rcu_read_unlock();
 
 	if (!segs || IS_ERR(segs))
@@ -1281,14 +1304,15 @@ static struct sk_buff *inet_gso_segment(struct sk_buff *skb, int features)
 	skb = segs;
 	do {
 		iph = ip_hdr(skb);
-		if (proto == IPPROTO_UDP) {
+		if (!tunnel && proto == IPPROTO_UDP) {
 			iph->id = htons(id);
 			iph->frag_off = htons(offset >> 3);
 			if (skb->next != NULL)
 				iph->frag_off |= htons(IP_MF);
 			offset += (skb->len - skb->mac_len - iph->ihl * 4);
-		} else
+		} else  {
 			iph->id = htons(id++);
+		}
 		iph->tot_len = htons(skb->len - skb->mac_len);
 		iph->check = 0;
 		iph->check = ip_fast_csum(skb_network_header(skb), iph->ihl);
@@ -1301,7 +1325,8 @@ out:
 static struct sk_buff **inet_gro_receive(struct sk_buff **head,
 					 struct sk_buff *skb)
 {
-	const struct net_protocol *ops;
+	const struct net_offload *ops;
+	const struct net_protocol *proto_ops = NULL;
 	struct sk_buff **pp = NULL;
 	struct sk_buff *p;
 	struct iphdr *iph;
@@ -1323,9 +1348,15 @@ static struct sk_buff **inet_gro_receive(struct sk_buff **head,
 	proto = iph->protocol & (MAX_INET_PROTOS - 1);
 
 	rcu_read_lock();
-	ops = rcu_dereference(inet_protos[proto]);
-	if (!ops || !ops->gro_receive)
-		goto out_unlock;
+	ops = rcu_dereference(inet_offloads[proto]);
+	if (!ops || !ops->gro_receive) {
+		/* Try the protocols array */
+		proto_ops = rcu_dereference(inet_protos[proto]);
+		if (!proto_ops || !proto_ops->gro_receive)
+			goto out_unlock;
+
+		ops = NULL;
+	}
 
 	if (*(u8 *)iph != 0x45)
 		goto out_unlock;
@@ -1365,7 +1396,10 @@ static struct sk_buff **inet_gro_receive(struct sk_buff **head,
 	skb_gro_pull(skb, sizeof(*iph));
 	skb_set_transport_header(skb, skb_gro_offset(skb));
 
-	pp = ops->gro_receive(head, skb);
+	if (ops)
+		pp = ops->gro_receive(head, skb);
+	else
+		pp = proto_ops->gro_receive(head, skb);
 
 out_unlock:
 	rcu_read_unlock();
@@ -1378,7 +1412,8 @@ out:
 
 static int inet_gro_complete(struct sk_buff *skb)
 {
-	const struct net_protocol *ops;
+	const struct net_protocol *proto_ops;
+	const struct net_offload *ops;
 	struct iphdr *iph = ip_hdr(skb);
 	int proto = iph->protocol & (MAX_INET_PROTOS - 1);
 	int err = -ENOSYS;
@@ -1388,11 +1423,17 @@ static int inet_gro_complete(struct sk_buff *skb)
 	iph->tot_len = newlen;
 
 	rcu_read_lock();
-	ops = rcu_dereference(inet_protos[proto]);
-	if (WARN_ON(!ops || !ops->gro_complete))
-		goto out_unlock;
-
-	err = ops->gro_complete(skb);
+	ops = rcu_dereference(inet_offloads[proto]);
+	if (unlikely(!ops || !ops->gro_complete)) {
+		/* Check the old protocol array */
+		proto_ops = rcu_dereference(inet_protos[proto]);
+		if (!proto_ops || !proto_ops->gro_complete) {
+			WARN_ON(true);
+			goto out_unlock;
+		}
+		err = proto_ops->gro_complete(skb);
+	} else
+		err = ops->gro_complete(skb);
 
 out_unlock:
 	rcu_read_unlock();
@@ -1472,21 +1513,27 @@ static const struct net_protocol igmp_protocol = {
 static const struct net_protocol tcp_protocol = {
 	.handler =	tcp_v4_rcv,
 	.err_handler =	tcp_v4_err,
-	.gso_send_check = tcp_v4_gso_send_check,
-	.gso_segment =	tcp_tso_segment,
-	.gro_receive =	tcp4_gro_receive,
-	.gro_complete =	tcp4_gro_complete,
 	.no_policy =	1,
 	.netns_ok =	1,
+};
+
+static const struct net_offload tcp_offload = {
+	.gso_send_check	=	tcp_v4_gso_send_check,
+	.gso_segment	=	tcp_tso_segment,
+	.gro_receive	=	tcp4_gro_receive,
+	.gro_complete	=	tcp4_gro_complete,
 };
 
 static const struct net_protocol udp_protocol = {
 	.handler =	udp_rcv,
 	.err_handler =	udp_err,
-	.gso_send_check = udp4_ufo_send_check,
-	.gso_segment = udp4_ufo_fragment,
 	.no_policy =	1,
 	.netns_ok =	1,
+};
+
+static const struct net_offload udp_offload = {
+	.gso_send_check = udp4_ufo_send_check,
+	.gso_segment = udp4_ufo_fragment,
 };
 
 static const struct net_protocol icmp_protocol = {
@@ -1566,13 +1613,33 @@ static int ipv4_proc_init(void);
  *	IP protocol layer initialiser
  */
 
-static struct packet_type ip_packet_type __read_mostly = {
+static struct packet_offload ip_packet_offload __read_mostly = {
 	.type = cpu_to_be16(ETH_P_IP),
-	.func = ip_rcv,
 	.gso_send_check = inet_gso_send_check,
 	.gso_segment = inet_gso_segment,
 	.gro_receive = inet_gro_receive,
 	.gro_complete = inet_gro_complete,
+};
+
+static int __init ipv4_offload_init(void)
+{
+	/*
+	 * Add offloads
+	 */
+	if (inet_add_offload(&udp_offload, IPPROTO_UDP) < 0)
+		pr_crit("%s: Cannot add UDP protocol offload\n", __func__);
+	if (inet_add_offload(&tcp_offload, IPPROTO_TCP) < 0)
+		pr_crit("%s: Cannot add TCP protocol offlaod\n", __func__);
+
+	dev_add_offload(&ip_packet_offload);
+	return 0;
+}
+
+fs_initcall(ipv4_offload_init);
+
+static struct packet_type ip_packet_type __read_mostly = {
+	.type = cpu_to_be16(ETH_P_IP),
+	.func = ip_rcv,
 };
 
 static int __init inet_init(void)

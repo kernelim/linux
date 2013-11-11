@@ -1081,6 +1081,7 @@ static struct usb_driver if_usb_driver = {
 	.suspend = if_usb_suspend,
 	.resume = if_usb_resume,
 	.reset_resume = if_usb_resume,
+	.disable_hub_initiated_lpm = 1,
 };
 
 static int __init if_usb_init_module(void)

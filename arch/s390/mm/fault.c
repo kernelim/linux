@@ -318,7 +318,7 @@ static inline int do_exception(struct pt_regs *regs, int access,
 	 * interrupts again and then search the VMAs
 	 */
 	local_irq_enable();
-	perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS, 1, 0, regs, address);
+	perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS, 1, regs, address);
 	down_read(&mm->mmap_sem);
 
 	fault = VM_FAULT_BADMAP;
@@ -355,11 +355,11 @@ static inline int do_exception(struct pt_regs *regs, int access,
 
 	if (fault & VM_FAULT_MAJOR) {
 		tsk->maj_flt++;
-		perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MAJ, 1, 0,
+		perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MAJ, 1,
 				     regs, address);
 	} else {
 		tsk->min_flt++;
-		perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MIN, 1, 0,
+		perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MIN, 1,
 				     regs, address);
 	}
 	/*
@@ -379,8 +379,13 @@ void __kprobes do_protection_exception(struct pt_regs *regs, long int_code)
 	unsigned long trans_exc_code = S390_lowcore.trans_exc_code;
 	int fault;
 
-	/* Protection exception is supressing, decrement psw address. */
-	regs->psw.addr -= (int_code >> 16);
+	/*
+	 * Protection exceptions are suppressing, decrement psw address.
+	 * The exception to this rule are aborted transactions, for these
+	 * the PSW already points to the correct location.
+	 */
+	if (!(int_code & 0x200))
+		regs->psw.addr -= (int_code >> 16);
 	/*
 	 * Check for low-address protection.  This needs to be treated
 	 * as a special case because the translation exception code

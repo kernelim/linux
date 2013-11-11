@@ -97,6 +97,7 @@ Code	Seq#	Include File		Comments
 					<http://linux01.gwdg.de/~alatham/ppdd.html>
 'M'	all	linux/soundcard.h
 'N'	00-1F	drivers/usb/scanner.h
+'N'	40-7F	drivers/block/nvme.c
 'O'     00-02   include/mtd/ubi-user.h UBI
 'P'	all	linux/soundcard.h
 'Q'	all	linux/soundcard.h

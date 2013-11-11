@@ -68,6 +68,10 @@ config	IP_VS_TAB_BITS
 	  each hash entry uses 8 bytes, so you can estimate how much memory is
 	  needed for your box.
 
+	  You can overwrite this number setting conn_tab_bits module parameter
+	  or by appending ip_vs.conn_tab_bits=? to the kernel command line
+	  if IP VS was compiled built-in.
+
 comment "IPVS transport protocol load balancing support"
 
 config	IP_VS_PROTO_TCP
@@ -244,5 +248,12 @@ config	IP_VS_FTP
 
 	  If you want to compile it in kernel, say Y. To compile it as a
 	  module, choose M here. If unsure, say N.
+
+config	IP_VS_PE_SIP
+	tristate "SIP persistence engine"
+        depends on IP_VS_PROTO_UDP
+	depends on NF_CONNTRACK_SIP
+	---help---
+	  Allow persistence based on the SIP Call-ID
 
 endif # IP_VS

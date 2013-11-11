@@ -15,10 +15,10 @@ YYSTYPE *parse_events_get_lval(yyscan_t yyscanner);
 
 static int __value(YYSTYPE *yylval, char *str, int base, int token)
 {
-	long num;
+	u64 num;
 
 	errno = 0;
-	num = strtoul(str, NULL, base);
+	num = strtoull(str, NULL, base);
 	if (errno)
 		return PE_ERROR;
 
@@ -81,7 +81,8 @@ num_dec		[0-9]+
 num_hex		0x[a-fA-F0-9]+
 num_raw_hex	[a-fA-F0-9]+
 name		[a-zA-Z_*?][a-zA-Z0-9_*?]*
-modifier_event	[ukhpGH]{1,8}
+name_minus	[a-zA-Z_*?][a-zA-Z0-9\-_*?]*
+modifier_event	[ukhpGH]+
 modifier_bp	[rwx]{1,3}
 
 %%
@@ -133,6 +134,7 @@ cache-misses					{ return sym(yyscanner, PERF_TYPE_HARDWARE, PERF_COUNT_HW_CACHE
 branch-instructions|branches			{ return sym(yyscanner, PERF_TYPE_HARDWARE, PERF_COUNT_HW_BRANCH_INSTRUCTIONS); }
 branch-misses					{ return sym(yyscanner, PERF_TYPE_HARDWARE, PERF_COUNT_HW_BRANCH_MISSES); }
 bus-cycles					{ return sym(yyscanner, PERF_TYPE_HARDWARE, PERF_COUNT_HW_BUS_CYCLES); }
+ref-cycles					{ return sym(yyscanner, PERF_TYPE_HARDWARE, PERF_COUNT_HW_REF_CPU_CYCLES); }
 cpu-clock					{ return sym(yyscanner, PERF_TYPE_SOFTWARE, PERF_COUNT_SW_CPU_CLOCK); }
 task-clock					{ return sym(yyscanner, PERF_TYPE_SOFTWARE, PERF_COUNT_SW_TASK_CLOCK); }
 page-faults|faults				{ return sym(yyscanner, PERF_TYPE_SOFTWARE, PERF_COUNT_SW_PAGE_FAULTS); }
@@ -167,6 +169,7 @@ period			{ return term(yyscanner, PARSE_EVENTS__TERM_TYPE_SAMPLE_PERIOD); }
 branch_type		{ return term(yyscanner, PARSE_EVENTS__TERM_TYPE_BRANCH_SAMPLE_TYPE); }
 ,			{ return ','; }
 "/"			{ BEGIN(INITIAL); return '/'; }
+{name_minus}		{ return str(yyscanner, PE_NAME); }
 }
 
 mem:			{ BEGIN(mem); return PE_PREFIX_MEM; }
@@ -206,7 +209,7 @@ r{num_raw_hex}		{ return raw(yyscanner); }
 
 %%
 
-int parse_events_wrap(void *scanner __used)
+int parse_events_wrap(void *scanner __maybe_unused)
 {
 	return 1;
 }

@@ -10,6 +10,7 @@
  * by the Free Software Foundation.
  */
 
+#include <linux/err.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -244,7 +245,7 @@ static int ghash_async_setkey(struct crypto_ahash *tfm, const u8 *key,
 	crypto_ahash_set_flags(tfm, crypto_ahash_get_flags(child)
 			       & CRYPTO_TFM_RES_MASK);
 
-	return 0;
+	return err;
 }
 
 static int ghash_async_init_tfm(struct crypto_tfm *tfm)

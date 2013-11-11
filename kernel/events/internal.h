@@ -1,6 +1,10 @@
 #ifndef _KERNEL_EVENTS_INTERNAL_H
 #define _KERNEL_EVENTS_INTERNAL_H
 
+#include <linux/hardirq.h>
+
+/* Buffer handling */
+
 #define RING_BUFFER_WRITABLE		0x01
 
 struct ring_buffer {
@@ -29,7 +33,6 @@ struct ring_buffer {
 	struct perf_event_mmap_page	*user_page;
 	void				*data_pages[0];
 };
-
 
 extern void rb_free(struct ring_buffer *rb);
 extern struct ring_buffer *
@@ -68,7 +71,7 @@ static inline int page_order(struct ring_buffer *rb)
 }
 #endif
 
-static unsigned long perf_data_size(struct ring_buffer *rb)
+static inline unsigned long perf_data_size(struct ring_buffer *rb)
 {
 	return rb->nr_pages << (PAGE_SHIFT + page_order(rb));
 }
@@ -95,6 +98,39 @@ __output_copy(struct perf_output_handle *handle,
 			handle->size = PAGE_SIZE << page_order(rb);
 		}
 	} while (len);
+}
+
+/* Callchain handling */
+extern struct perf_callchain_entry *perf_callchain(struct pt_regs *regs);
+extern int get_callchain_buffers(void);
+extern void put_callchain_buffers(void);
+
+static inline int get_recursion_context(int *recursion)
+{
+	int rctx;
+
+	if (in_nmi())
+		rctx = 3;
+	else if (in_irq())
+		rctx = 2;
+	else if (in_softirq())
+		rctx = 1;
+	else
+		rctx = 0;
+
+	if (recursion[rctx])
+		return -1;
+
+	recursion[rctx]++;
+	barrier();
+
+	return rctx;
+}
+
+static inline void put_recursion_context(int *recursion, int rctx)
+{
+	barrier();
+	recursion[rctx]--;
 }
 
 #endif /* _KERNEL_EVENTS_INTERNAL_H */

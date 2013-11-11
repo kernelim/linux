@@ -275,6 +275,7 @@ extern struct tpm_chip* tpm_register_hardware(struct device *,
 				 const struct tpm_vendor_specific *);
 extern int tpm_open(struct inode *, struct file *);
 extern int tpm_release(struct inode *, struct file *);
+extern void tpm_dev_release(struct device *dev);
 extern void tpm_dev_vendor_release(struct tpm_chip *);
 extern ssize_t tpm_write(struct file *, const char __user *, size_t,
 			 loff_t *);
@@ -282,16 +283,19 @@ extern ssize_t tpm_read(struct file *, char __user *, size_t, loff_t *);
 extern void tpm_remove_hardware(struct device *);
 extern int tpm_pm_suspend(struct device *, pm_message_t);
 extern int tpm_pm_resume(struct device *);
+extern int wait_for_tpm_stat(struct tpm_chip *, u8, unsigned long,
+			     wait_queue_head_t *);
 
 #ifdef CONFIG_ACPI
-extern struct dentry ** tpm_bios_log_setup(char *);
-extern void tpm_bios_log_teardown(struct dentry **);
+extern int tpm_add_ppi(struct kobject *);
+extern void tpm_remove_ppi(struct kobject *);
 #else
-static inline struct dentry ** tpm_bios_log_setup(char *name)
+static inline int tpm_add_ppi(struct kobject *parent)
 {
-	return NULL;
+	return 0;
 }
-static inline void tpm_bios_log_teardown(struct dentry **dir)
+
+static inline void tpm_remove_ppi(struct kobject *parent)
 {
 }
 #endif

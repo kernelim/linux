@@ -17,6 +17,7 @@
 #include <linux/etherdevice.h>
 #include <linux/ethtool.h>
 #include <linux/list.h>
+#include <linux/if_vlan.h>
 
 #include <asm/uaccess.h>
 #include "br_private.h"
@@ -253,6 +254,63 @@ void br_netpoll_disable(struct net_bridge_port *p)
 
 #endif
 
+static void br_vlan_rx_register(struct net_device *br_dev, struct vlan_group *grp)
+{
+	struct net_bridge *br = netdev_priv(br_dev);
+	struct net_bridge_port *p, *n;
+	const struct net_device_ops *ops;
+
+	br->vlgrp = grp;
+	list_for_each_entry_safe(p, n, &br->port_list, list) {
+		if (!p->dev)
+			continue;
+
+		ops = p->dev->netdev_ops;
+		if ((p->dev->features & NETIF_F_HW_VLAN_RX) &&
+		    ops->ndo_vlan_rx_register)
+			ops->ndo_vlan_rx_register(p->dev, grp);
+	}
+}
+
+static void br_vlan_rx_add_vid(struct net_device *br_dev, unsigned short vid)
+{
+	struct net_bridge *br = netdev_priv(br_dev);
+	struct net_bridge_port *p, *n;
+	const struct net_device_ops *ops;
+
+	list_for_each_entry_safe(p, n, &br->port_list, list) {
+		if (!p->dev)
+			continue;
+
+		ops = p->dev->netdev_ops;
+		if ((p->dev->features & NETIF_F_HW_VLAN_FILTER) &&
+		    ops->ndo_vlan_rx_add_vid)
+			ops->ndo_vlan_rx_add_vid(p->dev, vid);
+	}
+
+}
+
+static void br_vlan_rx_kill_vid(struct net_device *br_dev, unsigned short vid)
+{
+	struct net_bridge *br = netdev_priv(br_dev);
+	struct net_bridge_port *p, *n;
+	const struct net_device_ops *ops;
+	struct net_device *vlan_dev;
+
+	list_for_each_entry_safe(p, n, &br->port_list, list) {
+		if (!p->dev)
+			continue;
+
+		ops = p->dev->netdev_ops;
+		if ((p->dev->features & NETIF_F_HW_VLAN_FILTER) &&
+		    ops->ndo_vlan_rx_kill_vid) {
+			vlan_dev = vlan_group_get_device(br->vlgrp, vid);
+			ops->ndo_vlan_rx_kill_vid(p->dev, vid);
+			vlan_group_set_device(br->vlgrp, vid, vlan_dev);
+		}
+	}
+}
+
 static const struct ethtool_ops br_ethtool_ops = {
 	.get_drvinfo    = br_getinfo,
 	.get_link	= ethtool_op_get_link,
@@ -275,6 +333,9 @@ static const struct net_device_ops br_netdev_ops = {
 	.ndo_set_multicast_list	 = br_dev_set_multicast_list,
 	.ndo_change_mtu		 = br_change_mtu,
 	.ndo_do_ioctl		 = br_dev_ioctl,
+	.ndo_vlan_rx_register	 = br_vlan_rx_register,
+	.ndo_vlan_rx_add_vid	 = br_vlan_rx_add_vid,
+	.ndo_vlan_rx_kill_vid	 = br_vlan_rx_kill_vid,
 #ifdef CONFIG_NET_POLL_CONTROLLER
 	.ndo_netpoll_cleanup	 = br_netpoll_cleanup,
 	.ndo_poll_controller	 = br_poll_controller,
@@ -298,7 +359,9 @@ void br_dev_setup(struct net_device *dev)
 
 	dev->features = NETIF_F_SG | NETIF_F_FRAGLIST | NETIF_F_HIGHDMA |
 			NETIF_F_GSO_MASK | NETIF_F_NO_CSUM | NETIF_F_LLTX |
-			NETIF_F_NETNS_LOCAL | NETIF_F_GSO;
+			NETIF_F_NETNS_LOCAL | NETIF_F_GSO | NETIF_F_GRO |
+			NETIF_F_HW_VLAN_RX | NETIF_F_HW_VLAN_TX |
+			NETIF_F_HW_VLAN_FILTER;
 	dev->vlan_features = NETIF_F_SG | NETIF_F_FRAGLIST | NETIF_F_HIGHDMA |
 			NETIF_F_GSO_MASK | NETIF_F_ALL_CSUM;
 }

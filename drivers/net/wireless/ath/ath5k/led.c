@@ -53,7 +53,12 @@
 #define ATH_POLARITY(data) ((data) & 0xff)
 
 /* Devices we match on for LED config info (typically laptops) */
+
+#if 0 /* Different in RHEL */
 static DEFINE_PCI_DEVICE_TABLE(ath5k_led_devices) = {
+#else
+static const struct pci_device_id ath5k_led_devices[] = {
+#endif
 	/* AR5211 */
 	{ PCI_VDEVICE(ATHEROS, PCI_DEVICE_ID_ATHEROS_AR5211), ATH_LED(0, 0) },
 	/* HP Compaq nc6xx, nc4000, nx6000 */
@@ -158,7 +163,7 @@ void ath5k_unregister_leds(struct ath5k_hw *ah)
 	ath5k_unregister_led(&ah->tx_led);
 }
 
-int __devinit ath5k_init_leds(struct ath5k_hw *ah)
+int ath5k_init_leds(struct ath5k_hw *ah)
 {
 	int ret = 0;
 	struct ieee80211_hw *hw = ah->hw;

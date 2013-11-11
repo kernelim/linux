@@ -1723,7 +1723,8 @@ static __kprobes void kprobe_profile_func(struct kprobe *kp,
 	memset(&entry[1], 0, dsize);
 	store_trace_args(sizeof(*entry), tp, regs, (u8 *)&entry[1], dsize);
 
-	ftrace_perf_buf_submit(entry, size, rctx, entry->ip, 1, irq_flags);
+	ftrace_perf_buf_submit(entry, size, rctx, entry->ip, 1,
+			       irq_flags, regs);
 }
 
 /* Kretprobe profile handler */
@@ -1753,7 +1754,8 @@ static __kprobes void kretprobe_profile_func(struct kretprobe_instance *ri,
 	entry->ret_ip = (unsigned long)ri->ret_addr;
 	store_trace_args(sizeof(*entry), tp, regs, (u8 *)&entry[1], dsize);
 
-	ftrace_perf_buf_submit(entry, size, rctx, entry->ret_ip, 1, irq_flags);
+	ftrace_perf_buf_submit(entry, size, rctx, entry->ret_ip, 1,
+			       irq_flags, regs);
 }
 
 static int probe_profile_enable(struct ftrace_event_call *call)

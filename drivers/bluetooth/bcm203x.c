@@ -270,6 +270,7 @@ static struct usb_driver bcm203x_driver = {
 	.probe		= bcm203x_probe,
 	.disconnect	= bcm203x_disconnect,
 	.id_table	= bcm203x_table,
+	.disable_hub_initiated_lpm = 1,
 };
 
 static int __init bcm203x_init(void)

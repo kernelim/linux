@@ -281,14 +281,14 @@ SYSCALL_DEFINE3(execve, char __user *, name, char __user * __user *, argv,
 		char __user * __user *, envp)
 {
 	struct pt_regs *regs = task_pt_regs(current);
-	char *filename;
+	struct filename *filename;
 	long rc;
 
 	filename = getname(name);
 	rc = PTR_ERR(filename);
 	if (IS_ERR(filename))
 		return rc;
-	rc = do_execve(filename, argv, envp, regs);
+	rc = do_execve(filename->name, argv, envp, regs);
 	if (rc)
 		goto out;
 	execve_tail();

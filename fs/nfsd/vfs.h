@@ -21,6 +21,8 @@
 #define NFSD_MAY_LOCAL_ACCESS	128 /* IRIX doing local access check on device special file*/
 #define NFSD_MAY_BYPASS_GSS_ON_ROOT 256
 #define NFSD_MAY_NOT_BREAK_LEASE 512
+#define NFSD_MAY_BYPASS_GSS	1024
+#define NFSD_MAY_READ_IF_EXEC	2048
 
 #define NFSD_MAY_64BIT_COOKIE		0x1000 /* 64 bit readdir cookies for >= NFSv3 */
 

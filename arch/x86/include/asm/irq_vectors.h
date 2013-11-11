@@ -120,10 +120,9 @@
  */
 #define MCE_SELF_VECTOR			0xeb
 
-#ifdef CONFIG_XEN
-/* Xen vector callback to receive events in a HVM domain */
-#define XEN_HVM_EVTCHN_CALLBACK		0xe9
-#endif
+
+/* Vector on which hypervisor callbacks will be delivered */
+#define HYPERVISOR_CALLBACK_VECTOR	0xe9
 
 /*
  * First APIC vector available to drivers: (vectors 0x30-0xee) we

@@ -223,6 +223,15 @@ typedef union _LUNAddr_struct {
   LogDevAddr_struct  LogDev;
 } LUNAddr_struct;
 
+#define CCISS_ABORT_MSG 0x00
+#define CCISS_RESET_MSG 0x01
+#define CCISS_RESET_TYPE_CONTROLLER 0x00
+#define CCISS_RESET_TYPE_BUS 0x01
+#define CCISS_RESET_TYPE_TARGET 0x03
+#define CCISS_RESET_TYPE_LUN 0x04
+#define CCISS_NOOP_MSG 0x03
+
+/* Command List Structure */
 #define CTLR_LUNID "\0\0\0\0\0\0\0\0"
 
 typedef struct _CommandListHeader_struct {

@@ -135,7 +135,7 @@ xfs_dir_fsync(
 	struct dentry		*dentry,
 	int			datasync)
 {
-	struct xfs_inode	*ip = XFS_I(file->f_mapping->host);
+	struct xfs_inode	*ip = XFS_I(dentry->d_inode);
 	struct xfs_mount	*mp = ip->i_mount;
 	xfs_lsn_t		lsn = 0;
 

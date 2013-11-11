@@ -5,9 +5,9 @@
 #include <asm/byteorder.h>
 
 #define BITOP_WORD(nr)		((nr) / BITS_PER_LONG)
-#define BITOP_LE_SWIZZLE	((BITS_PER_LONG-1) & ~0x7)
-
 #if defined(__LITTLE_ENDIAN)
+
+#define BITOP_LE_SWIZZLE	0
 
 #define generic_test_le_bit(nr, addr) test_bit(nr, addr)
 #define generic___set_le_bit(nr, addr) __set_bit(nr, addr)
@@ -24,6 +24,8 @@
 			find_next_bit(addr, size, offset)
 
 #elif defined(__BIG_ENDIAN)
+
+#define BITOP_LE_SWIZZLE	((BITS_PER_LONG-1) & ~0x7)
 
 #define generic_test_le_bit(nr, addr) \
 	test_bit((nr) ^ BITOP_LE_SWIZZLE, (addr))
@@ -66,6 +68,10 @@ extern unsigned long generic_find_next_le_bit(const unsigned long *addr,
 
 #define test_bit_le(nr, addr) \
 	generic_test_le_bit(nr, addr)
+#define set_bit_le(nr, addr) \
+	set_bit((nr) ^ BITOP_LE_SWIZZLE, (addr))
+#define clear_bit_le(nr, addr) \
+	clear_bit((nr) ^ BITOP_LE_SWIZZLE, (addr))
 
 #define test_and_set_bit_le(nr, addr) \
 	generic_test_and_set_le_bit(nr, addr)

@@ -127,7 +127,7 @@ void br_netfilter_rtable_init(struct net_bridge *br)
 	rt->u.dst.dev = br->dev;
 	rt->u.dst.path = &rt->u.dst;
 	rt->u.dst.metrics[RTAX_MTU - 1] = 1500;
-	rt->u.dst.flags	= DST_NOXFRM;
+	rt->u.dst.flags	= DST_NOXFRM | DST_FAKE_RTABLE;
 	rt->u.dst.ops = &fake_dst_ops;
 }
 
@@ -634,11 +634,7 @@ static unsigned int br_nf_local_in(unsigned int hook, struct sk_buff *skb,
 				   const struct net_device *out,
 				   int (*okfn)(struct sk_buff *))
 {
-	struct rtable *rt = skb_rtable(skb);
-
-	if (rt && rt == bridge_parent_rtable(in))
-		skb_dst_drop(skb);
-
+	br_drop_fake_rtable(skb);
 	return NF_ACCEPT;
 }
 

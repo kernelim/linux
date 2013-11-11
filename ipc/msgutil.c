@@ -14,6 +14,7 @@
 #include <linux/slab.h>
 #include <linux/ipc.h>
 #include <linux/ipc_namespace.h>
+#include <linux/proc_fs.h>
 #include <asm/uaccess.h>
 
 #include "util.h"
@@ -34,6 +35,7 @@ struct ipc_namespace init_ipc_ns = {
 	.mq_msg_default	    = DFLT_MSG,
 	.mq_msgsize_default = DFLT_MSGSIZE,
 #endif
+	.proc_inum = PROC_IPC_INIT_INO,
 };
 
 atomic_t nr_ipc_ns = ATOMIC_INIT(1);

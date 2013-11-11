@@ -73,11 +73,11 @@ void update_per_regs(struct task_struct *task)
 		unsigned long cr0, cr0_new;
 
 		__ctl_store(cr0, 0, 0);
-		/* set or clear transaction execution bits 8 and 9. */
+		/* set or clear transaction execution bit 8. */
 		if (task->thread.per_flags & PER_FLAG_NO_TE)
-			cr0_new = cr0 & ~(3UL << 54);
+			cr0_new = cr0 & ~(1UL << 55);
 		else
-			cr0_new = cr0 | (3UL << 54);
+			cr0_new = cr0 | (1UL << 55);
 		/* Only load control register 0 if necessary. */
 		if (cr0 != cr0_new)
 			__ctl_load(cr0_new, 0, 0);

@@ -89,7 +89,7 @@ static double timeval2double(struct timeval *ts)
 }
 
 int bench_mem_memcpy(int argc, const char **argv,
-		     const char *prefix __used)
+		     const char *prefix __maybe_unused)
 {
 	int i;
 	void *dst, *src;

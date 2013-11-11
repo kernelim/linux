@@ -1726,7 +1726,9 @@ static void at76_mac80211_tx_callback(struct urb *urb)
 	ieee80211_wake_queues(priv->hw);
 }
 
-static void at76_mac80211_tx(struct ieee80211_hw *hw, struct sk_buff *skb)
+static void at76_mac80211_tx(struct ieee80211_hw *hw,
+			     struct ieee80211_tx_control *control,
+			     struct sk_buff *skb)
 {
 	struct at76_priv *priv = hw->priv;
 	struct at76_tx_buffer *tx_buffer = priv->bulk_out_buffer;
@@ -1973,12 +1975,12 @@ static int at76_config(struct ieee80211_hw *hw, u32 changed)
 	struct at76_priv *priv = hw->priv;
 
 	at76_dbg(DBG_MAC80211, "%s(): channel %d",
-		 __func__, hw->conf.channel->hw_value);
+		 __func__, hw->conf.chandef.chan->hw_value);
 	at76_dbg_dump(DBG_MAC80211, priv->bssid, ETH_ALEN, "bssid:");
 
 	mutex_lock(&priv->mtx);
 
-	priv->channel = hw->conf.channel->hw_value;
+	priv->channel = hw->conf.chandef.chan->hw_value;
 
 	if (is_valid_ether_addr(priv->bssid))
 		at76_join(priv);
@@ -2486,6 +2488,7 @@ static struct usb_driver at76_driver = {
 	.probe = at76_probe,
 	.disconnect = at76_disconnect,
 	.id_table = dev_table,
+	.disable_hub_initiated_lpm = 1,
 };
 
 static int __init at76_mod_init(void)

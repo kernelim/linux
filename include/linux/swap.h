@@ -275,10 +275,14 @@ extern long vm_total_pages;
 extern int zone_reclaim_mode;
 extern int sysctl_min_unmapped_ratio;
 extern int sysctl_min_slab_ratio;
-extern int zone_reclaim(struct zone *, gfp_t, unsigned int);
+extern int zone_reclaim(struct zone *, struct zone *, gfp_t, unsigned int,
+			unsigned long, int, int);
 #else
 #define zone_reclaim_mode 0
-static inline int zone_reclaim(struct zone *z, gfp_t mask, unsigned int order)
+static inline int zone_reclaim(struct zone *preferred_zone, struct zone *zone,
+			       gfp_t mask, unsigned int order,
+			       unsigned long mark, int classzone_idx,
+			       int alloc_flags)
 {
 	return 0;
 }

@@ -26,6 +26,9 @@
 #include "xfs_ag.h"
 #include "xfs_mount.h"
 #include "xfs_bmap_btree.h"
+#include "xfs_alloc_btree.h"
+#include "xfs_ialloc_btree.h"
+#include "xfs_btree.h"
 #include "xfs_dinode.h"
 #include "xfs_inode.h"
 #include "xfs_inode_item.h"
@@ -182,14 +185,14 @@ xfs_swap_extents_check_format(
 	 */
 	if (tip->i_d.di_format == XFS_DINODE_FMT_BTREE &&
 	    ((XFS_IFORK_BOFF(ip) &&
-	      tip->i_df.if_broot_bytes > XFS_IFORK_BOFF(ip)) ||
+              XFS_BMAP_BMDR_SPACE(tip->i_df.if_broot) > XFS_IFORK_BOFF(ip)) ||
 	     XFS_IFORK_NEXTENTS(tip, XFS_DATA_FORK) <= ip->i_df.if_ext_max))
 		return EINVAL;
 
 	/* Reciprocal target->temp btree format checks */
 	if (ip->i_d.di_format == XFS_DINODE_FMT_BTREE &&
 	    ((XFS_IFORK_BOFF(tip) &&
-	      ip->i_df.if_broot_bytes > XFS_IFORK_BOFF(tip)) ||
+	      XFS_BMAP_BMDR_SPACE(ip->i_df.if_broot) > XFS_IFORK_BOFF(tip)) ||
 	     XFS_IFORK_NEXTENTS(ip, XFS_DATA_FORK) <= tip->i_df.if_ext_max))
 		return EINVAL;
 

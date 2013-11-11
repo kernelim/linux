@@ -85,6 +85,12 @@ struct trace_iterator {
 	cpumask_var_t		started;
 };
 
+enum trace_iter_flags {
+	TRACE_FILE_LAT_FMT	= 1,
+	TRACE_FILE_ANNOTATE	= 2,
+	TRACE_FILE_TIME_IN_NS	= 4,
+};
+
 
 typedef enum print_line_t (*trace_print_func)(struct trace_iterator *iter,
 					      int flags);
@@ -287,11 +293,12 @@ ftrace_perf_buf_prepare(int size, unsigned short type, int *rctxp,
 
 static inline void
 ftrace_perf_buf_submit(void *raw_data, int size, int rctx, u64 addr,
-		       u64 count, unsigned long irq_flags)
+		       u64 count, unsigned long irq_flags,
+		       struct pt_regs *regs)
 {
 	struct trace_entry *entry = raw_data;
 
-	perf_tp_event(entry->type, addr, count, raw_data, size);
+	perf_tp_event_regs(entry->type, addr, count, raw_data, size, regs);
 	perf_swevent_put_recursion_context(rctx);
 	local_irq_restore(irq_flags);
 }

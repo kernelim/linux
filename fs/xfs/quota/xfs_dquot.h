@@ -42,6 +42,13 @@ typedef struct xfs_dqhash {
 struct xfs_mount;
 struct xfs_trans;
 
+enum {
+	XFS_QLOWSP_1_PCNT = 0,
+	XFS_QLOWSP_3_PCNT,
+	XFS_QLOWSP_5_PCNT,
+	XFS_QLOWSP_MAX
+};
+
 /*
  * The incore dquot structure
  */
@@ -64,6 +71,9 @@ typedef struct xfs_dquot {
 	xfs_qcnt_t	 q_res_bcount;	/* total regular nblks used+reserved */
 	xfs_qcnt_t	 q_res_icount;	/* total inos allocd+reserved */
 	xfs_qcnt_t	 q_res_rtbcount;/* total realtime blks used+reserved */
+	xfs_qcnt_t	 q_prealloc_lo_wmark;/* prealloc throttle wmark */
+	xfs_qcnt_t	 q_prealloc_hi_wmark;/* prealloc disabled wmark */
+	int64_t		 q_low_space[XFS_QLOWSP_MAX];
 	struct mutex	 q_qlock;	/* quota lock */
 	struct completion q_flush;	/* flush completion queue */
 	atomic_t          q_pincount;	/* dquot pin count */
@@ -102,6 +112,32 @@ static inline void xfs_dqfunlock(xfs_dquot_t *dqp)
 	complete(&dqp->q_flush);
 }
 
+static inline int xfs_this_quota_on(struct xfs_mount *mp, int type)
+{
+	switch (type & XFS_DQ_ALLTYPES) {
+	case XFS_DQ_USER:
+		return XFS_IS_UQUOTA_ON(mp);
+	case XFS_DQ_GROUP:
+	case XFS_DQ_PROJ:
+		return XFS_IS_OQUOTA_ON(mp);
+	default:
+		return 0;
+	}
+}
+
+static inline xfs_dquot_t *xfs_inode_dquot(struct xfs_inode *ip, int type)
+{
+	switch (type & XFS_DQ_ALLTYPES) {
+	case XFS_DQ_USER:
+		return ip->i_udquot;
+	case XFS_DQ_GROUP:
+	case XFS_DQ_PROJ:
+		return ip->i_gdquot;
+	default:
+		return NULL;
+	}
+}
+
 #define XFS_DQ_IS_LOCKED(dqp)	(mutex_is_locked(&((dqp)->q_qlock)))
 #define XFS_DQ_IS_DIRTY(dqp)	((dqp)->dq_flags & XFS_DQ_DIRTY)
 #define XFS_QM_ISUDQ(dqp)	((dqp)->dq_flags & XFS_DQ_USER)
@@ -111,10 +147,6 @@ static inline void xfs_dqfunlock(xfs_dquot_t *dqp)
 #define XFS_DQ_TO_QIP(dqp)	(XFS_QM_ISUDQ(dqp) ? \
 				 XFS_DQ_TO_QINF(dqp)->qi_uquotaip : \
 				 XFS_DQ_TO_QINF(dqp)->qi_gquotaip)
-
-#define XFS_IS_THIS_QUOTA_OFF(d) (! (XFS_QM_ISUDQ(d) ? \
-				     (XFS_IS_UQUOTA_ON((d)->q_mount)) : \
-				     (XFS_IS_OQUOTA_ON((d)->q_mount))))
 
 #ifdef QUOTADEBUG
 extern void		xfs_qm_dqprint(xfs_dquot_t *);
@@ -130,13 +162,14 @@ extern int		xfs_qm_dqlock_nowait(xfs_dquot_t *);
 extern void		xfs_qm_dqflock_pushbuf_wait(xfs_dquot_t *dqp);
 extern void		xfs_qm_adjust_dqtimers(xfs_mount_t *,
 					xfs_disk_dquot_t *);
-extern void		xfs_qm_adjust_dqlimits(xfs_mount_t *,
-					xfs_disk_dquot_t *);
+extern void		xfs_qm_adjust_dqlimits(struct xfs_mount *,
+					       struct xfs_dquot *);
 extern int		xfs_qm_dqget(xfs_mount_t *, xfs_inode_t *,
 					xfs_dqid_t, uint, uint, xfs_dquot_t **);
 extern void		xfs_qm_dqput(xfs_dquot_t *);
 extern void		xfs_dqlock(xfs_dquot_t *);
 extern void		xfs_dqlock2(xfs_dquot_t *, xfs_dquot_t *);
+extern void		xfs_dquot_set_prealloc_limits(struct xfs_dquot *);
 extern void		xfs_dqunlock(xfs_dquot_t *);
 extern void		xfs_dqunlock_nonotify(xfs_dquot_t *);
 

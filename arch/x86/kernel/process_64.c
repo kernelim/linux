@@ -484,13 +484,13 @@ long sys_execve(char __user *name, char __user * __user *argv,
 		char __user * __user *envp, struct pt_regs *regs)
 {
 	long error;
-	char *filename;
+	struct filename *filename;
 
 	filename = getname(name);
 	error = PTR_ERR(filename);
 	if (IS_ERR(filename))
 		return error;
-	error = do_execve(filename, argv, envp, regs);
+	error = do_execve(filename->name, argv, envp, regs);
 	putname(filename);
 	return error;
 }

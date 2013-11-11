@@ -276,6 +276,7 @@ void add_taint(unsigned flag)
 	    flag != TAINT_WARN &&
 	    flag != TAINT_TECH_PREVIEW &&
 	    flag != TAINT_HARDWARE_UNSUPPORTED &&
+	    flag != TAINT_TECH_PREVIEW &&
 	    __debug_locks_off())
 		printk(KERN_WARNING "Disabling lock debugging due to kernel taint\n");
 

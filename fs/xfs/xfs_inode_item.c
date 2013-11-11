@@ -507,6 +507,14 @@ xfs_inode_item_trylock(
 	if (!xfs_ilock_nowait(ip, XFS_ILOCK_SHARED))
 		return XFS_ITEM_LOCKED;
 
+	/*
+	 * Stale inode items should force out the iclog.
+	 */
+	if (ip->i_flags & XFS_ISTALE) {
+		xfs_iunlock(ip, XFS_ILOCK_SHARED);
+		return XFS_ITEM_PINNED;
+	}
+
 	if (!xfs_iflock_nowait(ip)) {
 		/*
 		 * inode has already been flushed to the backing buffer,
@@ -514,13 +522,6 @@ xfs_inode_item_trylock(
 		 * unlock it.
 		 */
 		return XFS_ITEM_PUSHBUF;
-	}
-
-	/* Stale items should force out the iclog */
-	if (ip->i_flags & XFS_ISTALE) {
-		xfs_ifunlock(ip);
-		xfs_iunlock(ip, XFS_ILOCK_SHARED);
-		return XFS_ITEM_PINNED;
 	}
 
 #ifdef DEBUG

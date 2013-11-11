@@ -530,15 +530,18 @@ static int rndis_change_virtual_intf(struct wiphy *wiphy,
 					enum nl80211_iftype type, u32 *flags,
 					struct vif_params *params);
 
-static int rndis_scan(struct wiphy *wiphy, struct net_device *dev,
+static int rndis_scan(struct wiphy *wiphy,
 			struct cfg80211_scan_request *request);
 
 static int rndis_set_wiphy_params(struct wiphy *wiphy, u32 changed);
 
 static int rndis_set_tx_power(struct wiphy *wiphy,
+			      struct wireless_dev *wdev,
 			      enum nl80211_tx_power_setting type,
 			      int mbm);
-static int rndis_get_tx_power(struct wiphy *wiphy, int *dbm);
+static int rndis_get_tx_power(struct wiphy *wiphy,
+			      struct wireless_dev *wdev,
+			      int *dbm);
 
 static int rndis_connect(struct wiphy *wiphy, struct net_device *dev,
 				struct cfg80211_connect_params *sme);
@@ -550,9 +553,6 @@ static int rndis_join_ibss(struct wiphy *wiphy, struct net_device *dev,
 					struct cfg80211_ibss_params *params);
 
 static int rndis_leave_ibss(struct wiphy *wiphy, struct net_device *dev);
-
-static int rndis_set_channel(struct wiphy *wiphy, struct net_device *dev,
-	struct ieee80211_channel *chan, enum nl80211_channel_type channel_type);
 
 static int rndis_add_key(struct wiphy *wiphy, struct net_device *netdev,
 			 u8 key_index, bool pairwise, const u8 *mac_addr,
@@ -595,7 +595,6 @@ static const struct cfg80211_ops rndis_config_ops = {
 	.disconnect = rndis_disconnect,
 	.join_ibss = rndis_join_ibss,
 	.leave_ibss = rndis_leave_ibss,
-	.set_channel = rndis_set_channel,
 	.add_key = rndis_add_key,
 	.del_key = rndis_del_key,
 	.set_default_key = rndis_set_default_key,
@@ -1897,6 +1896,7 @@ static int rndis_set_wiphy_params(struct wiphy *wiphy, u32 changed)
 }
 
 static int rndis_set_tx_power(struct wiphy *wiphy,
+			      struct wireless_dev *wdev,
 			      enum nl80211_tx_power_setting type,
 			      int mbm)
 {
@@ -1924,7 +1924,9 @@ static int rndis_set_tx_power(struct wiphy *wiphy,
 	return -ENOTSUPP;
 }
 
-static int rndis_get_tx_power(struct wiphy *wiphy, int *dbm)
+static int rndis_get_tx_power(struct wiphy *wiphy,
+			      struct wireless_dev *wdev,
+			      int *dbm)
 {
 	struct rndis_wlan_private *priv = wiphy_priv(wiphy);
 	struct usbnet *usbdev = priv->usbdev;
@@ -1937,9 +1939,10 @@ static int rndis_get_tx_power(struct wiphy *wiphy, int *dbm)
 }
 
 #define SCAN_DELAY_JIFFIES (6 * HZ)
-static int rndis_scan(struct wiphy *wiphy, struct net_device *dev,
+static int rndis_scan(struct wiphy *wiphy,
 			struct cfg80211_scan_request *request)
 {
+	struct net_device *dev = request->wdev->netdev;
 	struct usbnet *usbdev = netdev_priv(dev);
 	struct rndis_wlan_private *priv = get_rndis_wlan_priv(usbdev);
 	int ret;
@@ -2019,7 +2022,7 @@ static bool rndis_bss_info_update(struct usbnet *usbdev,
 	bss = cfg80211_inform_bss(priv->wdev.wiphy, channel, bssid->mac,
 		timestamp, capability, beacon_interval, ie, ie_len, signal,
 		GFP_KERNEL);
-	cfg80211_put_bss(bss);
+	cfg80211_put_bss(priv->wdev.wiphy, bss);
 
 	return (bss != NULL);
 }
@@ -2282,7 +2285,7 @@ static int rndis_join_ibss(struct wiphy *wiphy, struct net_device *dev,
 {
 	struct rndis_wlan_private *priv = wiphy_priv(wiphy);
 	struct usbnet *usbdev = priv->usbdev;
-	struct ieee80211_channel *channel = params->channel;
+	struct ieee80211_channel *channel = params->chandef.chan;
 	struct ndis_80211_ssid ssid;
 	enum nl80211_auth_type auth_type;
 	int ret, alg, length, chan = -1;
@@ -2387,16 +2390,6 @@ static int rndis_leave_ibss(struct wiphy *wiphy, struct net_device *dev)
 	memset(priv->bssid, 0, ETH_ALEN);
 
 	return deauthenticate(usbdev);
-}
-
-static int rndis_set_channel(struct wiphy *wiphy, struct net_device *netdev,
-	struct ieee80211_channel *chan, enum nl80211_channel_type channel_type)
-{
-	struct rndis_wlan_private *priv = wiphy_priv(wiphy);
-	struct usbnet *usbdev = priv->usbdev;
-
-	return set_channel(usbdev,
-			ieee80211_frequency_to_channel(chan->center_freq));
 }
 
 static int rndis_add_key(struct wiphy *wiphy, struct net_device *netdev,
@@ -2722,7 +2715,7 @@ static void rndis_wlan_craft_connected_bss(struct usbnet *usbdev, u8 *bssid,
 	bss = cfg80211_inform_bss(priv->wdev.wiphy, channel, bssid,
 		timestamp, capability, beacon_interval, ie_buf, ie_len,
 		signal, GFP_KERNEL);
-	cfg80211_put_bss(bss);
+	cfg80211_put_bss(priv->wdev.wiphy, bss);
 }
 
 /*
@@ -3758,6 +3751,7 @@ static struct usb_driver rndis_wlan_driver = {
 	.disconnect =	usbnet_disconnect,
 	.suspend =	usbnet_suspend,
 	.resume =	usbnet_resume,
+	.disable_hub_initiated_lpm = 1,
 };
 
 static int __init rndis_wlan_init(void)

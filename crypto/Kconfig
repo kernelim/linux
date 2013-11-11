@@ -145,6 +145,16 @@ config CRYPTO_TEST
 	help
 	  Quick & dirty crypto test module.
 
+config CRYPTO_ABLK_HELPER_X86
+	tristate
+	depends on X86
+	select CRYPTO_CRYPTD
+
+config CRYPTO_GLUE_HELPER_X86
+	tristate
+	depends on X86
+	select CRYPTO_ALGAPI
+
 comment "Authenticated Encryption with Associated Data"
 
 config CRYPTO_CCM
@@ -212,8 +222,7 @@ config CRYPTO_ECB
 	  the input block by block.
 
 config CRYPTO_LRW
-	tristate "LRW support (EXPERIMENTAL)"
-	depends on EXPERIMENTAL
+	tristate "LRW support"
 	select CRYPTO_BLKCIPHER
 	select CRYPTO_MANAGER
 	select CRYPTO_GF128MUL
@@ -233,8 +242,7 @@ config CRYPTO_PCBC
 	  This block cipher algorithm is required for RxRPC.
 
 config CRYPTO_XTS
-	tristate "XTS support (EXPERIMENTAL)"
-	depends on EXPERIMENTAL
+	tristate "XTS support"
 	select CRYPTO_BLKCIPHER
 	select CRYPTO_MANAGER
 	select CRYPTO_GF128MUL
@@ -242,11 +250,6 @@ config CRYPTO_XTS
 	  XTS: IEEE1619/D16 narrow block cipher use with aes-xts-plain,
 	  key size 256, 384 or 512 bits. This implementation currently
 	  can't handle a sectorsize which is not a multiple of 16 bytes.
-
-config CRYPTO_FPU
-	tristate
-	select CRYPTO_BLKCIPHER
-	select CRYPTO_MANAGER
 
 comment "Hash modes"
 
@@ -517,11 +520,15 @@ config CRYPTO_AES_X86_64
 
 config CRYPTO_AES_NI_INTEL
 	tristate "AES cipher algorithms (AES-NI)"
-	depends on (X86 || UML_X86) && 64BIT
-	select CRYPTO_AES_X86_64
+	depends on (X86 || UML_X86)
+	select CRYPTO_AES_X86_64 if 64BIT
+	select CRYPTO_AES_586 if !64BIT
 	select CRYPTO_CRYPTD
+	select CRYPTO_ABLK_HELPER_X86
 	select CRYPTO_ALGAPI
-	select CRYPTO_FPU
+	select CRYPTO_GLUE_HELPER_X86 if 64BIT
+	select CRYPTO_LRW
+	select CRYPTO_XTS
 	help
 	  Use Intel AES-NI instructions for AES algorithm.
 
@@ -541,9 +548,10 @@ config CRYPTO_AES_NI_INTEL
 
 	  See <http://csrc.nist.gov/encryption/aes/> for more information.
 
-	  In addition to AES cipher algorithm support, the
-	  acceleration for some popular block cipher mode is supported
-	  too, including ECB, CBC, CTR, LRW, PCBC, XTS.
+	  In addition to AES cipher algorithm support, the acceleration
+	  for some popular block cipher mode is supported too, including
+	  ECB, CBC, LRW, PCBC, XTS. The 64 bit version has additional
+	  acceleration for CTR.
 
 config CRYPTO_ANUBIS
 	tristate "Anubis cipher algorithm"

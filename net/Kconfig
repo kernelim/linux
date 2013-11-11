@@ -215,6 +215,13 @@ config NETPRIO_CGROUP
 	---help---
 	  Cgroup subsystem for use in assigning processes to network priorities on
 	  a per-interface basis
+
+config RFS_ACCEL
+	boolean
+	depends on RPS && GENERIC_HARDIRQS
+	select CPU_RMAP
+	default y
+
 menu "Network testing"
 
 config NET_PKTGEN

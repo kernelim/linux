@@ -220,6 +220,7 @@ struct net_bridge
 	struct timer_list		multicast_querier_timer;
 	struct timer_list		multicast_query_timer;
 #endif
+	struct vlan_group		*vlgrp;
 
 	struct timer_list		hello_timer;
 	struct timer_list		tcn_timer;
@@ -237,7 +238,6 @@ struct br_input_skb_cb {
 #define BR_INPUT_SKB_CB(__skb)	((struct br_input_skb_cb *)(__skb)->cb)
 
 extern struct notifier_block br_device_notifier;
-extern const u8 br_group_address[ETH_ALEN];
 
 /* called under bridge lock */
 static inline int br_is_root_bridge(const struct net_bridge *br)
@@ -272,7 +272,7 @@ static inline struct netpoll_info *br_netpoll_info(struct net_bridge *br)
 	return NULL;
 }
 
-static inline void br_netpoll_send_skb(struct net_bridge_port *p,
+static inline void br_netpoll_send_skb(const struct net_bridge_port *p,
 				       struct sk_buff *skb)
 {
 }
@@ -364,6 +364,8 @@ extern int br_multicast_set_port_router(struct net_bridge_port *p,
 extern int br_multicast_toggle(struct net_bridge *br, unsigned long val);
 extern int br_multicast_set_querier(struct net_bridge *br, unsigned long val);
 extern int br_multicast_set_hash_max(struct net_bridge *br, unsigned long val);
+extern void br_mdb_init(void);
+extern void br_mdb_uninit(void);
 
 static inline bool br_multicast_is_router(struct net_bridge *br)
 {

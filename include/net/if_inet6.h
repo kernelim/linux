@@ -72,6 +72,9 @@ struct inet6_ifaddr
 #endif
 
 	int			dead;
+#ifndef __GENKSYMS__
+	bool			tokenized;
+#endif
 };
 
 struct ip6_sf_socklist
@@ -199,6 +202,10 @@ struct inet6_dev
 	struct ipv6_devstat	stats;
 	unsigned long		tstamp; /* ipv6InterfaceTable update timestamp */
 	struct rcu_head		rcu;
+
+#ifndef __GENKSYMS__
+	struct in6_addr		token;
+#endif
 };
 
 static inline void ipv6_eth_mc_map(struct in6_addr *addr, char *buf)

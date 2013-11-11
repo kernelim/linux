@@ -36,6 +36,14 @@ static int __read_mostly tsc_unstable;
    erroneous rdtsc usage on !cpu_has_tsc processors */
 static int __read_mostly tsc_disabled = -1;
 
+/* Intel Sandybridge(6,45) or "E5" processors have some initialization
+ * issues with the TSC.  In order to debug these we may need to know the
+ * some additional information about the TSC at system boot time.
+ * This debug output can also be enabled by addind "tsc_init_debug" as a
+ * kernel parameter.
+ */
+static int __read_mostly tsc_init_debug = 0;
+
 int tsc_clocksource_reliable;
 /*
  * Scheduler clock - returns current time in nanosec units.
@@ -112,6 +120,13 @@ static int __init tsc_setup(char *str)
 }
 
 __setup("tsc=", tsc_setup);
+
+static int __init tsc_init_debug_setup(char *str)
+{
+	tsc_init_debug = 1;
+	return 1;
+}
+__setup("tsc_init_debug", tsc_init_debug_setup);
 
 #define MAX_RETRIES     5
 #define SMI_TRESHOLD    50000
@@ -992,6 +1007,13 @@ void __init tsc_init(void)
 	if (!cpu_has_tsc)
 		return;
 
+	if (tsc_init_debug ||
+	    ((boot_cpu_data.x86 == 6) && (boot_cpu_data.x86_model == 45))) {
+		printk(KERN_INFO
+		       "TSC: cpu family %d model %d, tsc initial value = %llx\n",
+		       boot_cpu_data.x86, boot_cpu_data.x86_model,
+		       (unsigned long long)get_cycles());
+	}
 	tsc_khz = x86_platform.calibrate_tsc();
 	cpu_khz = tsc_khz;
 

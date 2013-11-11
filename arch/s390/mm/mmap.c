@@ -26,6 +26,7 @@
 
 #include <linux/personality.h>
 #include <linux/mm.h>
+#include <linux/mman.h>
 #include <linux/module.h>
 #include <linux/random.h>
 #include <asm/pgalloc.h>
@@ -103,12 +104,15 @@ EXPORT_SYMBOL_GPL(arch_pick_mmap_layout);
 
 #else
 
-int s390_mmap_check(unsigned long addr, unsigned long len)
+int s390_mmap_check(unsigned long addr, unsigned long len, unsigned long flags)
 {
 	int rc;
 
-	if (!is_compat_task() &&
-	    len >= TASK_SIZE && TASK_SIZE < (1UL << 53)) {
+	if (is_compat_task() || (TASK_SIZE >= (1UL << 53)))
+		return 0;
+	if (!(flags & MAP_FIXED))
+		addr = 0;
+	if ((addr + len) >= TASK_SIZE) {
 		rc = crst_table_upgrade(current->mm, 1UL << 53);
 		if (rc)
 			return rc;

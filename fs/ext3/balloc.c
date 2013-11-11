@@ -1732,8 +1732,11 @@ allocated:
 
 	*errp = 0;
 	brelse(bitmap_bh);
-	vfs_dq_free_block(inode, *count-num);
-	*count = num;
+
+	if (num < *count) {
+		vfs_dq_free_block(inode, *count-num);
+		*count = num;
+	}
 
 	trace_ext3_allocate_blocks(inode, goal, num,
 				   (unsigned long long)ret_block);

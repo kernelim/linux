@@ -33,8 +33,8 @@
 #include <linux/delay.h>
 #include <linux/edac.h>
 #include <linux/mmzone.h>
-#include <linux/edac_mce.h>
 #include <linux/smp.h>
+#include <asm/mce.h>
 #include <asm/processor.h>
 
 #include "edac_core.h"
@@ -254,9 +254,6 @@ struct i7core_pvt {
 	int		rdimm_last_ce_count[NUM_CHANS][MAX_DIMMS];
 
 	unsigned int	is_registered;
-
-	/* mcelog glue */
-	struct edac_mce		edac_mce;
 
 	/* Fifo double buffers */
 	struct mce		mce_entry[MCE_LOG_LEN];
@@ -1829,33 +1826,37 @@ check_ce_error:
  * WARNING: As this routine should be called at NMI time, extra care should
  * be taken to avoid deadlocks, and to be as fast as possible.
  */
-static int i7core_mce_check_error(void *priv, struct mce *mce)
+static int i7core_mce_check_error(struct notifier_block *nb, unsigned long val,
+				  void *data)
 {
-	struct mem_ctl_info *mci = priv;
-	struct i7core_pvt *pvt = mci->pvt_info;
+	struct mce *mce = (struct mce *)data;
+	struct i7core_dev *i7_dev;
+	struct mem_ctl_info *mci;
+	struct i7core_pvt *pvt;
+
+	i7_dev = get_i7core_dev(mce->socketid);
+	if (!i7_dev)
+		return NOTIFY_BAD;
+
+	mci = i7_dev->mci;
+	pvt = mci->pvt_info;
 
 	/*
 	 * Just let mcelog handle it if the error is
 	 * outside the memory controller
 	 */
 	if (((mce->status & 0xffff) >> 7) != 1)
-		return 0;
+		return NOTIFY_DONE;
 
 	/* Bank 8 registers are the only ones that we know how to handle */
 	if (mce->bank != 8)
-		return 0;
-
-#ifdef CONFIG_SMP
-	/* Only handle if it is the right mc controller */
-	if (cpu_data(mce->cpu).phys_proc_id != pvt->i7core_dev->socket)
-		return 0;
-#endif
+		return NOTIFY_DONE;
 
 	smp_rmb();
 	if ((pvt->mce_out + 1) % MCE_LOG_LEN == pvt->mce_in) {
 		smp_wmb();
 		pvt->mce_overrun++;
-		return 0;
+		return NOTIFY_DONE;
 	}
 
 	/* Copy memory error at the ringbuffer */
@@ -1868,8 +1869,12 @@ static int i7core_mce_check_error(void *priv, struct mce *mce)
 		i7core_check_error(mci);
 
 	/* Advice mcelog that the error were handled */
-	return 1;
+	return NOTIFY_STOP;
 }
+
+static struct notifier_block i7_mce_dec = {
+	.notifier_call	= i7core_mce_check_error,
+};
 
 static void i7core_pci_ctl_create(struct i7core_pvt *pvt)
 {
@@ -1909,9 +1914,6 @@ static void i7core_unregister_mci(struct i7core_dev *i7core_dev)
 
 	debugf0("MC: " __FILE__ ": %s(): mci = %p, dev = %p\n",
 		__func__, mci, &i7core_dev->pdev[0]->dev);
-
-	/* Disable MCE NMI handler */
-	edac_mce_unregister(&pvt->edac_mce);
 
 	/* Disable EDAC polling */
 	i7core_pci_ctl_release(pvt);
@@ -2006,21 +2008,8 @@ static int i7core_register_mci(struct i7core_dev *i7core_dev)
 	/* allocating generic PCI control info */
 	i7core_pci_ctl_create(pvt);
 
-	/* Registers on edac_mce in order to receive memory errors */
-	pvt->edac_mce.priv = mci;
-	pvt->edac_mce.check_error = i7core_mce_check_error;
-	rc = edac_mce_register(&pvt->edac_mce);
-	if (unlikely(rc < 0)) {
-		debugf0("MC: " __FILE__
-			": %s(): failed edac_mce_register()\n", __func__);
-		goto fail1;
-	}
-
 	return 0;
 
-fail1:
-	i7core_pci_ctl_release(pvt);
-	edac_mc_del_mc(mci->dev);
 fail0:
 	kfree(mci->ctl_name);
 	edac_mc_free(mci);
@@ -2162,8 +2151,10 @@ static int __init i7core_init(void)
 
 	pci_rc = pci_register_driver(&i7core_driver);
 
-	if (pci_rc >= 0)
+	if (pci_rc >= 0) {
+		mce_register_decode_chain(&i7_mce_dec);
 		return 0;
+	}
 
 	i7core_printk(KERN_ERR, "Failed to register device with error %d.\n",
 		      pci_rc);
@@ -2179,6 +2170,7 @@ static void __exit i7core_exit(void)
 {
 	debugf2("MC: " __FILE__ ": %s()\n", __func__);
 	pci_unregister_driver(&i7core_driver);
+	mce_unregister_decode_chain(&i7_mce_dec);
 }
 
 module_init(i7core_init);

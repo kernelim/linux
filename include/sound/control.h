@@ -226,6 +226,7 @@ snd_ctl_add_slave_uncached(struct snd_kcontrol *master,
 int snd_ctl_add_vmaster_hook(struct snd_kcontrol *kctl,
 			     void (*hook)(void *private_data, int),
 			     void *private_data);
+void snd_ctl_sync_vmaster(struct snd_kcontrol *kctl, bool hook_only);
 void snd_ctl_sync_vmaster_hook(struct snd_kcontrol *kctl);
 
 /*

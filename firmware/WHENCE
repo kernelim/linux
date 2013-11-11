@@ -1000,6 +1000,12 @@ Info: v18.168.6.1
 File: iwlwifi-2000-6.ucode
 Info: v18.168.6.1
 
+File: iwlwifi-7260-7.ucode
+Version: 22.0.7.0
+
+File: iwlwifi-3160-7.ucode
+Version: 22.0.7.0
+
 License: Redistributable. See LICENCE.iwlwifi_firmware for details
 
 Also available from http://intellinuxwireless.org/?n=Downloads
@@ -1035,5 +1041,38 @@ File: rt2870.bin
 Licence: Redistributable. See LICENCE.ralink-firmware.txt for details
 
 Binary file supplied by Shiang Tu <shiang_tu@ralinktech.com>. Firmware Version 29
+
+--------------------------------------------------------------------------
+
+Driver: brcmsmac - Broadcom 802.11n softmac wireless LAN driver.
+
+File: brcm/bcm43xx-0.fw
+File: brcm/bcm43xx_hdr-0.fw
+Version: 610.812
+
+Licence: Redistributable. See LICENCE.broadcom_bcm43xx for details.
+
+--------------------------------------------------------------------------
+
+Driver: carl9170 -- Atheros AR9170 802.11 draft-n USB driver
+
+File: carl9170-1.fw
+Version: 1.9.6
+Source: carl9170fw/
+
+Downloaded from http://linuxwireless.org/en/users/Drivers/carl9170
+
+Licence: GPLv2. Some build scripts use the New BSD (3-clause) licence.
+
+--------------------------------------------------------------------------
+ 
+Driver: ath9k_htc - Atheros HTC devices (USB)
+
+File: htc_9271.fw
+Version: 1.3
+File: htc_7010.fw
+Version: 1.3
+
+Licence: Redistributable. See LICENCE.atheros_firmware for details
 
 --------------------------------------------------------------------------

@@ -7,13 +7,21 @@
 #include <linux/highmem.h>
 
 
+/*
+ * For swapped prefix pages get bounce buffer using xlate_dev_mem_ptr()
+ */
 static inline void *map_virtual(u64 offset, struct page **pp)
 {
 	struct page *page;
 	unsigned long pfn;
 	void *vaddr;
 
-	pfn = (unsigned long)(offset >> PAGE_SHIFT);
+	vaddr = xlate_dev_mem_ptr(offset);
+	pfn = ((unsigned long) vaddr) >> PAGE_SHIFT;
+	if ((unsigned long) vaddr != offset)
+		page = pfn_to_page(pfn);
+	else
+		page = NULL;
 
 	if (!page_is_ram(pfn)) {
 		printk(KERN_INFO
@@ -27,23 +35,25 @@ static inline void *map_virtual(u64 offset, struct page **pp)
 		return NULL;
 	}
 
-	page = pfn_to_page(pfn);
-
-	vaddr = kmap(page);
-	if (!vaddr) {
-		printk(KERN_INFO
-		    "crash memory driver: pfn: %lx kmap(page: %lx) failed\n",
-			pfn, (unsigned long) page);
-		return NULL;
-	}
-
 	*pp = page;
-	return (vaddr + (offset & (PAGE_SIZE - 1)));
+	return vaddr;
 }
 
+/*
+ * Free bounce buffer if necessary
+ */
 static inline void unmap_virtual(struct page *page)
 {
-	kunmap(page);
+	void *vaddr;
+
+	if (page) {
+		/*
+		 * Because for bounce buffers vaddr will never be 0
+		 * unxlate_dev_mem_ptr() will always free the bounce buffer.
+		 */
+		vaddr = (void *)(page_to_pfn(page) << PAGE_SHIFT);
+		unxlate_dev_mem_ptr(0, vaddr);
+	}
 }
 
 #endif /* __KERNEL__ */

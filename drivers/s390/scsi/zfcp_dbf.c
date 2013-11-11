@@ -369,6 +369,25 @@ void zfcp_dbf_hba_berr(struct zfcp_dbf *dbf, struct zfcp_fsf_req *req)
 	debug_event(dbf->hba, 0, r, sizeof(*r));
 	spin_unlock_irqrestore(&dbf->hba_lock, flags);
 }
+
+/**
+ * zfcp_dbf_hba_base - trace event for basic adapter events
+ * @dbf: dbf structure affected by this QDIO related event
+ * @tag2: tag indicating which kind of basic adapter event
+ */
+void zfcp_dbf_hba_base(struct zfcp_dbf *dbf, char *tag2)
+{
+	struct zfcp_dbf_hba_record *r = &dbf->hba_buf;
+	unsigned long flags;
+
+	spin_lock_irqsave(&dbf->hba_lock, flags);
+	memset(r, 0, sizeof(*r));
+	strncpy(r->tag, "base", ZFCP_DBF_TAG_SIZE);
+	strncpy(r->tag2, tag2, ZFCP_DBF_TAG_SIZE);
+	debug_event(dbf->hba, 0, r, sizeof(*r));
+	spin_unlock_irqrestore(&dbf->hba_lock, flags);
+}
+
 static void zfcp_dbf_hba_view_response(char **p,
 				       struct zfcp_dbf_hba_record_response *r)
 {

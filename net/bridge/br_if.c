@@ -20,6 +20,8 @@
 #include <linux/init.h>
 #include <linux/rtnetlink.h>
 #include <linux/if_ether.h>
+#include <linux/if_vlan.h>
+#include <linux/etherdevice.h>
 #include <net/sock.h>
 
 #include "br_private.h"
@@ -86,6 +88,60 @@ void br_port_carrier_check(struct net_bridge_port *p)
 	}
 }
 
+void br_add_vlans_to_port(struct net_bridge *br, struct net_bridge_port *p)
+{
+	int vid;
+	struct net_device *vlan_dev;
+	const struct net_device_ops *ops = p->dev->netdev_ops;
+
+	if (!br->vlgrp)
+		return;
+
+	if ((p->dev->features & NETIF_F_HW_VLAN_RX) &&
+	    ops->ndo_vlan_rx_register)
+		ops->ndo_vlan_rx_register(p->dev, br->vlgrp);
+
+	if (!(p->dev->features & NETIF_F_HW_VLAN_FILTER) ||
+	    !ops->ndo_vlan_rx_add_vid)
+		return;
+
+	/* Don't mess with vid 0.  Could keep a separate vlan list
+	 * to make this less expensive, but that adds complexity.
+	 */
+	for (vid = 1; vid < 4096; vid++) {
+		vlan_dev = vlan_group_get_device(br->vlgrp, vid);
+		if (vlan_dev)
+			ops->ndo_vlan_rx_add_vid(p->dev, vid);
+	}
+}
+
+void br_del_vlans_from_port(struct net_bridge *br, struct net_bridge_port *p)
+{
+	int vid;
+	struct net_device *vlan_dev;
+	const struct net_device_ops *ops = p->dev->netdev_ops;
+
+	if (!br->vlgrp)
+		return;
+
+	if (!(p->dev->features & NETIF_F_HW_VLAN_FILTER) ||
+	    !ops->ndo_vlan_rx_kill_vid)
+		goto unreg;
+
+	for (vid = 1; vid < 4096; vid++) {
+		vlan_dev = vlan_group_get_device(br->vlgrp, vid);
+		if (vlan_dev) {
+			ops->ndo_vlan_rx_kill_vid(p->dev, vid);
+			vlan_group_set_device(br->vlgrp, vid, vlan_dev);
+		}
+	}
+
+unreg:
+	if ((p->dev->features & NETIF_F_HW_VLAN_RX) &&
+	    ops->ndo_vlan_rx_register)
+		ops->ndo_vlan_rx_register(p->dev, NULL);
+}
+
 static void release_nbp(struct kobject *kobj)
 {
 	struct net_bridge_port *p
@@ -135,6 +191,8 @@ static void del_nbp(struct net_bridge_port *p)
 	sysfs_remove_link(br->ifobj, dev->name);
 
 	dev_set_promiscuity(dev, -1);
+
+	br_del_vlans_from_port(br, p);
 
 	spin_lock_bh(&br->lock);
 	br_stp_disable_port(p);
@@ -197,7 +255,7 @@ static struct net_device *new_bridge_dev(struct net *net, const char *name)
 	br->bridge_id.prio[0] = 0x80;
 	br->bridge_id.prio[1] = 0x00;
 
-	memcpy(br->group_addr, br_group_address, ETH_ALEN);
+	memcpy(br->group_addr, br_reserved_address, ETH_ALEN);
 
 	br->feature_mask = dev->features;
 	br->stp_enabled = BR_NO_STP;
@@ -401,7 +459,7 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 		return -EBUSY;
 
 	/* No bridging devices that dislike that (e.g. wireless) */
-	if (dev->priv_flags & IFF_DONT_BRIDGE)
+	if (netdev_extended(dev)->ext_priv_flags & IFF_DONT_BRIDGE)
 		return -EOPNOTSUPP;
 
 	p = new_nbp(br, dev);
@@ -437,6 +495,8 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 	dev->priv_flags |= IFF_BRIDGE_PORT;
 
 	list_add_rcu(&p->list, &br->port_list);
+
+	br_add_vlans_to_port(br, p);
 
 	br_features_recompute(br);
 

@@ -5,7 +5,7 @@
  *
  * GPL LICENSE SUMMARY
  *
- * Copyright(c) 2007 - 2012 Intel Corporation. All rights reserved.
+ * Copyright(c) 2007 - 2013 Intel Corporation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -22,7 +22,7 @@
  * USA
  *
  * The full GNU General Public License is included in this distribution
- * in the file called LICENSE.GPL.
+ * in the file called COPYING.
  *
  * Contact Information:
  *  Intel Linux Wireless <ilw@linux.intel.com>
@@ -30,7 +30,7 @@
  *
  * BSD LICENSE
  *
- * Copyright(c) 2005 - 2012 Intel Corporation. All rights reserved.
+ * Copyright(c) 2005 - 2013 Intel Corporation. All rights reserved.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -62,6 +62,8 @@
  *****************************************************************************/
 #ifndef __iwl_op_mode_h__
 #define __iwl_op_mode_h__
+
+#include <linux/debugfs.h>
 
 struct iwl_op_mode;
 struct iwl_trans;
@@ -111,27 +113,30 @@ struct iwl_cfg;
  *	May sleep
  * @rx: Rx notification to the op_mode. rxb is the Rx buffer itself. Cmd is the
  *	HCMD the this Rx responds to.
- *	Must be atomic.
+ *	This callback may sleep, it is called from a threaded IRQ handler.
  * @queue_full: notifies that a HW queue is full.
- *	Must be atomic
+ *	Must be atomic and called with BH disabled.
  * @queue_not_full: notifies that a HW queue is not full any more.
- *	Must be atomic
+ *	Must be atomic and called with BH disabled.
  * @hw_rf_kill:notifies of a change in the HW rf kill switch. True means that
- *	the radio is killed. Must be atomic.
+ *	the radio is killed. May sleep.
  * @free_skb: allows the transport layer to free skbs that haven't been
  *	reclaimed by the op_mode. This can happen when the driver is freed and
  *	there are Tx packets pending in the transport layer.
  *	Must be atomic
- * @nic_error: error notification. Must be atomic
- * @cmd_queue_full: Called when the command queue gets full. Must be atomic.
+ * @nic_error: error notification. Must be atomic and must be called with BH
+ *	disabled.
+ * @cmd_queue_full: Called when the command queue gets full. Must be atomic and
+ *	called with BH disabled.
  * @nic_config: configure NIC, called before firmware is started.
  *	May sleep
- * @wimax_active: invoked when WiMax becomes active.  Must be atomic.
+ * @wimax_active: invoked when WiMax becomes active. May sleep
  */
 struct iwl_op_mode_ops {
 	struct iwl_op_mode *(*start)(struct iwl_trans *trans,
 				     const struct iwl_cfg *cfg,
-				     const struct iwl_fw *fw);
+				     const struct iwl_fw *fw,
+				     struct dentry *dbgfs_dir);
 	void (*stop)(struct iwl_op_mode *op_mode);
 	int (*rx)(struct iwl_op_mode *op_mode, struct iwl_rx_cmd_buffer *rxb,
 		  struct iwl_device_cmd *cmd);
@@ -144,6 +149,9 @@ struct iwl_op_mode_ops {
 	void (*nic_config)(struct iwl_op_mode *op_mode);
 	void (*wimax_active)(struct iwl_op_mode *op_mode);
 };
+
+int iwl_opmode_register(const char *name, const struct iwl_op_mode_ops *ops);
+void iwl_opmode_deregister(const char *name);
 
 /**
  * struct iwl_op_mode - operational mode
@@ -162,7 +170,6 @@ struct iwl_op_mode {
 static inline void iwl_op_mode_stop(struct iwl_op_mode *op_mode)
 {
 	might_sleep();
-
 	op_mode->ops->stop(op_mode);
 }
 
@@ -170,6 +177,7 @@ static inline int iwl_op_mode_rx(struct iwl_op_mode *op_mode,
 				  struct iwl_rx_cmd_buffer *rxb,
 				  struct iwl_device_cmd *cmd)
 {
+	might_sleep();
 	return op_mode->ops->rx(op_mode, rxb, cmd);
 }
 
@@ -188,6 +196,7 @@ static inline void iwl_op_mode_queue_not_full(struct iwl_op_mode *op_mode,
 static inline void iwl_op_mode_hw_rf_kill(struct iwl_op_mode *op_mode,
 					  bool state)
 {
+	might_sleep();
 	op_mode->ops->hw_rf_kill(op_mode, state);
 }
 
@@ -215,12 +224,8 @@ static inline void iwl_op_mode_nic_config(struct iwl_op_mode *op_mode)
 
 static inline void iwl_op_mode_wimax_active(struct iwl_op_mode *op_mode)
 {
+	might_sleep();
 	op_mode->ops->wimax_active(op_mode);
 }
-
-/*****************************************************
-* Op mode layers implementations
-******************************************************/
-extern const struct iwl_op_mode_ops iwl_dvm_ops;
 
 #endif /* __iwl_op_mode_h__ */

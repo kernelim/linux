@@ -52,11 +52,11 @@ static int wme_downgrade_ac(struct sk_buff *skb)
 	}
 }
 
-static u16 ieee80211_downgrade_queue(struct ieee80211_local *local,
+static u16 ieee80211_downgrade_queue(struct ieee80211_sub_if_data *sdata,
 				     struct sk_buff *skb)
 {
 	/* in case we are a client verify acm is not set for this ac */
-	while (unlikely(local->wmm_acm & BIT(skb->priority))) {
+	while (unlikely(sdata->wmm_acm & BIT(skb->priority))) {
 		if (wme_downgrade_ac(skb)) {
 			/*
 			 * This should not really happen. The AP has marked all
@@ -73,10 +73,11 @@ static u16 ieee80211_downgrade_queue(struct ieee80211_local *local,
 }
 
 /* Indicate which queue to use for this fully formed 802.11 frame */
-u16 ieee80211_select_queue_80211(struct ieee80211_local *local,
+u16 ieee80211_select_queue_80211(struct ieee80211_sub_if_data *sdata,
 				 struct sk_buff *skb,
 				 struct ieee80211_hdr *hdr)
 {
+	struct ieee80211_local *local = sdata->local;
 	u8 *p;
 
 	if (local->hw.queues < IEEE80211_NUM_ACS)
@@ -94,7 +95,7 @@ u16 ieee80211_select_queue_80211(struct ieee80211_local *local,
 	p = ieee80211_get_qos_ctl(hdr);
 	skb->priority = *p & IEEE80211_QOS_CTL_TAG1D_MASK;
 
-	return ieee80211_downgrade_queue(local, skb);
+	return ieee80211_downgrade_queue(sdata, skb);
 }
 
 /* Indicate which queue to use. */
@@ -156,34 +157,49 @@ u16 ieee80211_select_queue(struct ieee80211_sub_if_data *sdata,
 	 * data frame has */
 	skb->priority = cfg80211_classify8021d(skb);
 
-	return ieee80211_downgrade_queue(local, skb);
+	return ieee80211_downgrade_queue(sdata, skb);
 }
 
+/**
+ * ieee80211_set_qos_hdr - Fill in the QoS header if there is one.
+ *
+ * @sdata: local subif
+ * @skb: packet to be updated
+ */
 void ieee80211_set_qos_hdr(struct ieee80211_sub_if_data *sdata,
 			   struct sk_buff *skb)
 {
 	struct ieee80211_hdr *hdr = (void *)skb->data;
 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
+	u8 *p;
+	u8 ack_policy, tid;
 
-	/* Fill in the QoS header if there is one. */
-	if (ieee80211_is_data_qos(hdr->frame_control)) {
-		u8 *p = ieee80211_get_qos_ctl(hdr);
-		u8 ack_policy, tid;
+	if (!ieee80211_is_data_qos(hdr->frame_control))
+		return;
 
-		tid = skb->priority & IEEE80211_QOS_CTL_TAG1D_MASK;
+	p = ieee80211_get_qos_ctl(hdr);
+	tid = skb->priority & IEEE80211_QOS_CTL_TAG1D_MASK;
 
-		/* preserve EOSP bit */
-		ack_policy = *p & IEEE80211_QOS_CTL_EOSP;
+	/* preserve EOSP bit */
+	ack_policy = *p & IEEE80211_QOS_CTL_EOSP;
 
-		if (is_multicast_ether_addr(hdr->addr1) ||
-		    sdata->noack_map & BIT(tid)) {
-			ack_policy |= IEEE80211_QOS_CTL_ACK_POLICY_NOACK;
-			info->flags |= IEEE80211_TX_CTL_NO_ACK;
-		}
+	if (is_multicast_ether_addr(hdr->addr1) ||
+	    sdata->noack_map & BIT(tid)) {
+		ack_policy |= IEEE80211_QOS_CTL_ACK_POLICY_NOACK;
+		info->flags |= IEEE80211_TX_CTL_NO_ACK;
+	}
 
-		/* qos header is 2 bytes */
-		*p++ = ack_policy | tid;
-		*p = ieee80211_vif_is_mesh(&sdata->vif) ?
-			(IEEE80211_QOS_CTL_MESH_CONTROL_PRESENT >> 8) : 0;
+	/* qos header is 2 bytes */
+	*p++ = ack_policy | tid;
+	if (ieee80211_vif_is_mesh(&sdata->vif)) {
+		/* preserve RSPI and Mesh PS Level bit */
+		*p &= ((IEEE80211_QOS_CTL_RSPI |
+			IEEE80211_QOS_CTL_MESH_PS_LEVEL) >> 8);
+
+		/* Nulls don't have a mesh header (frame body) */
+		if (!ieee80211_is_qos_nullfunc(hdr->frame_control))
+			*p |= (IEEE80211_QOS_CTL_MESH_CONTROL_PRESENT >> 8);
+	} else {
+		*p = 0;
 	}
 }

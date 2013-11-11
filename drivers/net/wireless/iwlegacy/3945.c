@@ -516,7 +516,7 @@ static void
 il3945_hdl_rx(struct il_priv *il, struct il_rx_buf *rxb)
 {
 	struct ieee80211_hdr *header;
-	struct ieee80211_rx_status rx_status;
+	struct ieee80211_rx_status rx_status = {};
 	struct il_rx_pkt *pkt = rxb_addr(rxb);
 	struct il3945_rx_frame_stats *rx_stats = IL_RX_STATS(pkt);
 	struct il3945_rx_frame_hdr *rx_hdr = IL_RX_HDR(pkt);
@@ -2379,10 +2379,8 @@ il3945_hw_set_hw_params(struct il_priv *il)
 	il->_3945.shared_virt =
 	    dma_alloc_coherent(&il->pci_dev->dev, sizeof(struct il3945_shared),
 			       &il->_3945.shared_phys, GFP_KERNEL);
-	if (!il->_3945.shared_virt) {
-		IL_ERR("failed to allocate pci memory\n");
+	if (!il->_3945.shared_virt)
 		return -ENOMEM;
-	}
 
 	il->hw_params.bcast_id = IL3945_BROADCAST_ID;
 

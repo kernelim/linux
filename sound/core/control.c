@@ -51,6 +51,10 @@ static int snd_ctl_open(struct inode *inode, struct file *file)
 	struct snd_ctl_file *ctl;
 	int err;
 
+	err = nonseekable_open(inode, file);
+	if (err < 0)
+		return err;
+
 	card = snd_lookup_minor_data(iminor(inode), SNDRV_DEVICE_TYPE_CONTROL);
 	if (!card) {
 		err = -ENODEV;
@@ -240,6 +244,7 @@ struct snd_kcontrol *snd_ctl_new1(const struct snd_kcontrol_new *ncontrol,
 	kctl.count = ncontrol->count ? ncontrol->count : 1;
 	access = ncontrol->access == 0 ? SNDRV_CTL_ELEM_ACCESS_READWRITE :
 		 (ncontrol->access & (SNDRV_CTL_ELEM_ACCESS_READWRITE|
+				      SNDRV_CTL_ELEM_ACCESS_VOLATILE|
 				      SNDRV_CTL_ELEM_ACCESS_INACTIVE|
 		 		      SNDRV_CTL_ELEM_ACCESS_TLV_READWRITE|
 		 		      SNDRV_CTL_ELEM_ACCESS_TLV_CALLBACK));
@@ -273,33 +278,31 @@ void snd_ctl_free_one(struct snd_kcontrol *kcontrol)
 
 EXPORT_SYMBOL(snd_ctl_free_one);
 
-static unsigned int snd_ctl_hole_check(struct snd_card *card,
-				       unsigned int count)
+static bool snd_ctl_remove_numid_conflict(struct snd_card *card,
+					  unsigned int count)
 {
 	struct snd_kcontrol *kctl;
 
 	list_for_each_entry(kctl, &card->controls, list) {
-		if ((kctl->id.numid <= card->last_numid &&
-		     kctl->id.numid + kctl->count > card->last_numid) ||
-		    (kctl->id.numid <= card->last_numid + count - 1 &&
-		     kctl->id.numid + kctl->count > card->last_numid + count - 1))
-		    	return card->last_numid = kctl->id.numid + kctl->count - 1;
+		if (kctl->id.numid < card->last_numid + 1 + count &&
+		    kctl->id.numid + kctl->count > card->last_numid + 1) {
+		    	card->last_numid = kctl->id.numid + kctl->count - 1;
+			return true;
+		}
 	}
-	return card->last_numid;
+	return false;
 }
 
 static int snd_ctl_find_hole(struct snd_card *card, unsigned int count)
 {
-	unsigned int last_numid, iter = 100000;
+	unsigned int iter = 100000;
 
-	last_numid = card->last_numid;
-	while (last_numid != snd_ctl_hole_check(card, count)) {
+	while (snd_ctl_remove_numid_conflict(card, count)) {
 		if (--iter == 0) {
 			/* this situation is very unlikely */
 			snd_printk(KERN_ERR "unable to allocate new control numid\n");
 			return -ENOMEM;
 		}
-		last_numid = card->last_numid;
 	}
 	return 0;
 }
@@ -590,13 +593,12 @@ static int snd_ctl_elem_list(struct snd_card *card,
 	struct snd_ctl_elem_list list;
 	struct snd_kcontrol *kctl;
 	struct snd_ctl_elem_id *dst, *id;
-	unsigned int offset, space, first, jidx;
+	unsigned int offset, space, jidx;
 	
 	if (copy_from_user(&list, _list, sizeof(list)))
 		return -EFAULT;
 	offset = list.offset;
 	space = list.space;
-	first = 0;
 	/* try limit maximum space */
 	if (space > 16384)
 		return -ENOMEM;
@@ -961,8 +963,8 @@ static int snd_ctl_elem_add(struct snd_ctl_file *file,
 	long private_size;
 	struct user_element *ue;
 	int idx, err;
-	
-	if (card->user_ctl_count >= MAX_USER_CONTROLS)
+
+	if (!replace && card->user_ctl_count >= MAX_USER_CONTROLS)
 		return -ENOMEM;
 	if (info->count < 1)
 		return -EINVAL;
@@ -1129,7 +1131,7 @@ static int snd_ctl_tlv_ioctl(struct snd_ctl_file *file,
 			err = -EPERM;
 			goto __kctl_end;
 		}
-		err = kctl->tlv.c(kctl, op_flag, tlv.length, _tlv->tlv); 
+		err = kctl->tlv.c(kctl, op_flag, tlv.length, _tlv->tlv);
 		if (err > 0) {
 			up_read(&card->controls_rwsem);
 			snd_ctl_notify(card, SNDRV_CTL_EVENT_MASK_TLV, &kctl->id);
@@ -1249,6 +1251,8 @@ static ssize_t snd_ctl_read(struct file *file, char __user *buffer,
 			spin_unlock_irq(&ctl->read_lock);
 			schedule();
 			remove_wait_queue(&ctl->change_sleep, &wait);
+			if (ctl->card->shutdown)
+				return -ENODEV;
 			if (signal_pending(current))
 				return -ERESTARTSYS;
 			spin_lock_irq(&ctl->read_lock);
@@ -1393,6 +1397,7 @@ static const struct file_operations snd_ctl_f_ops =
 	.read =		snd_ctl_read,
 	.open =		snd_ctl_open,
 	.release =	snd_ctl_release,
+	.llseek =	no_llseek,
 	.poll =		snd_ctl_poll,
 	.unlocked_ioctl =	snd_ctl_ioctl,
 	.compat_ioctl =	snd_ctl_ioctl_compat,

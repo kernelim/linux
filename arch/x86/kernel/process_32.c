@@ -442,13 +442,13 @@ int sys_clone(struct pt_regs *regs)
 int sys_execve(struct pt_regs *regs)
 {
 	int error;
-	char *filename;
+	struct filename *filename;
 
 	filename = getname((char __user *) regs->bx);
 	error = PTR_ERR(filename);
 	if (IS_ERR(filename))
 		goto out;
-	error = do_execve(filename,
+	error = do_execve(filename->name,
 			(char __user * __user *) regs->cx,
 			(char __user * __user *) regs->dx,
 			regs);

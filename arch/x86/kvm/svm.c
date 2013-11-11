@@ -716,7 +716,10 @@ static void svm_write_tsc_offset(struct kvm_vcpu *vcpu, u64 offset)
 		g_tsc_offset = svm->vmcb->control.tsc_offset -
 			       svm->nested.hsave->control.tsc_offset;
 		svm->nested.hsave->control.tsc_offset = offset;
-	}
+	} else
+		trace_kvm_write_tsc_offset(vcpu->vcpu_id,
+					   svm->vmcb->control.tsc_offset,
+					   offset);
 
 	svm->vmcb->control.tsc_offset = offset + g_tsc_offset;
 	mark_dirty(svm->vmcb, VMCB_INTERCEPTS);
@@ -742,6 +745,10 @@ static void svm_adjust_tsc_offset(struct kvm_vcpu *vcpu, s64 adjustment, bool ho
 	mark_dirty(svm->vmcb, VMCB_INTERCEPTS);
 	if (is_nested(svm))
 		svm->nested.hsave->control.tsc_offset += adjustment;
+	else
+		trace_kvm_write_tsc_offset(vcpu->vcpu_id,
+				svm->vmcb->control.tsc_offset - adjustment,
+				svm->vmcb->control.tsc_offset);
 }
 
 static u64 svm_compute_tsc_offset(struct kvm_vcpu *vcpu, u64 target_tsc)
@@ -953,7 +960,6 @@ static struct kvm_vcpu *svm_create_vcpu(struct kvm *kvm, unsigned int id)
 	svm->vmcb_pa = page_to_pfn(page) << PAGE_SHIFT;
 	svm->asid_generation = 0;
 	init_vmcb(svm);
-	kvm_write_tsc(&svm->vcpu, 0);
 
 	fx_init(&svm->vcpu);
 	svm->vcpu.arch.apic_base = 0xfee00000 | MSR_IA32_APICBASE_ENABLE;
@@ -2620,13 +2626,15 @@ static int rdmsr_interception(struct vcpu_svm *svm)
 	return 1;
 }
 
-static int svm_set_msr(struct kvm_vcpu *vcpu, unsigned ecx, u64 data)
+static int svm_set_msr(struct kvm_vcpu *vcpu, struct msr_data *msr)
 {
 	struct vcpu_svm *svm = to_svm(vcpu);
 
+	u32 ecx = msr->index;
+	u64 data = msr->data;
 	switch (ecx) {
 	case MSR_IA32_TSC:
-		kvm_write_tsc(vcpu, data);
+		kvm_write_tsc(vcpu, msr);
 		break;
 	case MSR_K6_STAR:
 		svm->vmcb->save.star = data;
@@ -2680,21 +2688,26 @@ static int svm_set_msr(struct kvm_vcpu *vcpu, unsigned ecx, u64 data)
 		pr_unimpl(vcpu, "unimplemented wrmsr: 0x%x data 0x%llx\n", ecx, data);
 		break;
 	default:
-		return kvm_set_msr_common(vcpu, ecx, data);
+		return kvm_set_msr_common(vcpu, msr);
 	}
 	return 0;
 }
 
 static int wrmsr_interception(struct vcpu_svm *svm)
 {
+	struct msr_data msr;
 	u32 ecx = svm->vcpu.arch.regs[VCPU_REGS_RCX];
 	u64 data = (svm->vcpu.arch.regs[VCPU_REGS_RAX] & -1u)
 		| ((u64)(svm->vcpu.arch.regs[VCPU_REGS_RDX] & -1u) << 32);
 
 	trace_kvm_msr_write(ecx, data);
 
+	msr.data = data;
+	msr.index = ecx;
+	msr.host_initiated = false;
+
 	svm->next_rip = kvm_rip_read(&svm->vcpu) + 2;
-	if (svm_set_msr(&svm->vcpu, ecx, data))
+	if (svm_set_msr(&svm->vcpu, &msr))
 		kvm_inject_gp(&svm->vcpu, 0);
 	else
 		skip_emulated_instruction(&svm->vcpu);
@@ -2807,7 +2820,7 @@ static int handle_exit(struct kvm_vcpu *vcpu)
 	struct kvm_run *kvm_run = vcpu->run;
 	u32 exit_code = svm->vmcb->control.exit_code;
 
-	trace_kvm_exit(exit_code, svm->vmcb->save.rip);
+	trace_kvm_exit(exit_code, svm->vmcb->save.rip, KVM_ISA_SVM);
 
 	if (unlikely(svm->nested.exit_required)) {
 		nested_svm_vmexit(svm);
@@ -3346,60 +3359,6 @@ static bool svm_invpcid_supported(void)
 	return false;
 }
 
-static const struct trace_print_flags svm_exit_reasons_str[] = {
-	{ SVM_EXIT_READ_CR0,           		"read_cr0" },
-	{ SVM_EXIT_READ_CR3,	      		"read_cr3" },
-	{ SVM_EXIT_READ_CR4,	      		"read_cr4" },
-	{ SVM_EXIT_READ_CR8,  	      		"read_cr8" },
-	{ SVM_EXIT_WRITE_CR0,          		"write_cr0" },
-	{ SVM_EXIT_WRITE_CR3,	      		"write_cr3" },
-	{ SVM_EXIT_WRITE_CR4,          		"write_cr4" },
-	{ SVM_EXIT_WRITE_CR8, 	      		"write_cr8" },
-	{ SVM_EXIT_READ_DR0, 	      		"read_dr0" },
-	{ SVM_EXIT_READ_DR1,	      		"read_dr1" },
-	{ SVM_EXIT_READ_DR2,	      		"read_dr2" },
-	{ SVM_EXIT_READ_DR3,	      		"read_dr3" },
-	{ SVM_EXIT_WRITE_DR0,	      		"write_dr0" },
-	{ SVM_EXIT_WRITE_DR1,	      		"write_dr1" },
-	{ SVM_EXIT_WRITE_DR2,	      		"write_dr2" },
-	{ SVM_EXIT_WRITE_DR3,	      		"write_dr3" },
-	{ SVM_EXIT_WRITE_DR5,	      		"write_dr5" },
-	{ SVM_EXIT_WRITE_DR7,	      		"write_dr7" },
-	{ SVM_EXIT_EXCP_BASE + DB_VECTOR,	"DB excp" },
-	{ SVM_EXIT_EXCP_BASE + BP_VECTOR,	"BP excp" },
-	{ SVM_EXIT_EXCP_BASE + UD_VECTOR,	"UD excp" },
-	{ SVM_EXIT_EXCP_BASE + PF_VECTOR,	"PF excp" },
-	{ SVM_EXIT_EXCP_BASE + NM_VECTOR,	"NM excp" },
-	{ SVM_EXIT_EXCP_BASE + MC_VECTOR,	"MC excp" },
-	{ SVM_EXIT_INTR,			"interrupt" },
-	{ SVM_EXIT_NMI,				"nmi" },
-	{ SVM_EXIT_SMI,				"smi" },
-	{ SVM_EXIT_INIT,			"init" },
-	{ SVM_EXIT_VINTR,			"vintr" },
-	{ SVM_EXIT_CPUID,			"cpuid" },
-	{ SVM_EXIT_INVD,			"invd" },
-	{ SVM_EXIT_HLT,				"hlt" },
-	{ SVM_EXIT_INVLPG,			"invlpg" },
-	{ SVM_EXIT_INVLPGA,			"invlpga" },
-	{ SVM_EXIT_IOIO,			"io" },
-	{ SVM_EXIT_MSR,				"msr" },
-	{ SVM_EXIT_TASK_SWITCH,			"task_switch" },
-	{ SVM_EXIT_SHUTDOWN,			"shutdown" },
-	{ SVM_EXIT_VMRUN,			"vmrun" },
-	{ SVM_EXIT_VMMCALL,			"hypercall" },
-	{ SVM_EXIT_VMLOAD,			"vmload" },
-	{ SVM_EXIT_VMSAVE,			"vmsave" },
-	{ SVM_EXIT_STGI,			"stgi" },
-	{ SVM_EXIT_CLGI,			"clgi" },
-	{ SVM_EXIT_SKINIT,			"skinit" },
-	{ SVM_EXIT_WBINVD,			"wbinvd" },
-	{ SVM_EXIT_MONITOR,			"monitor" },
-	{ SVM_EXIT_MWAIT,			"mwait" },
-	{ SVM_EXIT_XSETBV,			"xsetbv" },
-	{ SVM_EXIT_NPF,				"npf" },
-	{ -1, NULL }
-};
-
 static bool svm_gb_page_enable(void)
 {
 	return true;
@@ -3487,7 +3446,6 @@ static struct kvm_x86_ops svm_x86_ops = {
 	.get_tdp_level = get_npt_level,
 	.get_mt_mask = svm_get_mt_mask,
 
-	.exit_reasons_str = svm_exit_reasons_str,
 	.gb_page_enable = svm_gb_page_enable,
 
 	.cpuid_update = svm_cpuid_update,

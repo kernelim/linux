@@ -709,6 +709,11 @@ static void snb_uncore_msr_init_box(struct intel_uncore_box *box)
 	}
 }
 
+static struct uncore_event_desc snb_uncore_events[] = {
+	INTEL_UNCORE_EVENT_DESC(clockticks, "event=0xff,umask=0x00"),
+	{ /* end: all zeroes */ },
+};
+
 static struct attribute *snb_uncore_formats_attr[] = {
 	&format_attr_event.attr,
 	&format_attr_umask.attr,
@@ -752,6 +757,7 @@ static struct intel_uncore_type snb_uncore_cbox = {
 	.constraints	= snb_uncore_cbox_constraints,
 	.ops		= &snb_uncore_msr_ops,
 	.format_group	= &snb_uncore_format_group,
+	.event_descs	= snb_uncore_events,
 };
 
 static struct intel_uncore_type *snb_msr_uncores[] = {
@@ -950,16 +956,21 @@ static struct attribute_group nhmex_uncore_cbox_format_group = {
 	.attrs = nhmex_uncore_cbox_formats_attr,
 };
 
+/* msr offset for each instance of cbox */
+static unsigned nhmex_cbox_msr_offsets[] = {
+	0x0, 0x80, 0x40, 0xc0, 0x20, 0xa0, 0x60, 0xe0, 0x240, 0x2c0,
+};
+
 static struct intel_uncore_type nhmex_uncore_cbox = {
 	.name			= "cbox",
 	.num_counters		= 6,
-	.num_boxes		= 8,
+	.num_boxes		= 10,
 	.perf_ctr_bits		= 48,
 	.event_ctl		= NHMEX_C0_MSR_PMON_EV_SEL0,
 	.perf_ctr		= NHMEX_C0_MSR_PMON_CTR0,
 	.event_mask		= NHMEX_PMON_RAW_EVENT_MASK,
 	.box_ctl		= NHMEX_C0_MSR_PMON_GLOBAL_CTL,
-	.msr_offset		= NHMEX_C_MSR_OFFSET,
+	.msr_offsets		= nhmex_cbox_msr_offsets,
 	.pair_ctr_ctl		= 1,
 	.ops			= &nhmex_uncore_ops,
 	.format_group		= &nhmex_uncore_cbox_format_group
@@ -1190,6 +1201,9 @@ static struct extra_reg nhmex_uncore_mbox_extra_regs[] = {
 	EVENT_EXTRA_END
 };
 
+/* Nehalem-EX or Westmere-EX ? */
+bool uncore_nhmex;
+
 static bool nhmex_mbox_get_shared_reg(struct intel_uncore_box *box, int idx, u64 config)
 {
 	struct intel_uncore_extra_reg *er;
@@ -1219,18 +1233,28 @@ static bool nhmex_mbox_get_shared_reg(struct intel_uncore_box *box, int idx, u64
 		return false;
 
 	/* mask of the shared fields */
-	mask = NHMEX_M_PMON_ZDP_CTL_FVC_MASK;
+	if (uncore_nhmex)
+		mask = NHMEX_M_PMON_ZDP_CTL_FVC_MASK;
+	else
+		mask = WSMEX_M_PMON_ZDP_CTL_FVC_MASK;
 	er = &box->shared_regs[EXTRA_REG_NHMEX_M_ZDP_CTL_FVC];
 
 	spin_lock_irqsave(&er->lock, flags);
 	/* add mask of the non-shared field if it's in use */
-	if (__BITS_VALUE(atomic_read(&er->ref), idx, 8))
-		mask |= NHMEX_M_PMON_ZDP_CTL_FVC_EVENT_MASK(idx);
-
+	if (__BITS_VALUE(atomic_read(&er->ref), idx, 8)) {
+		if (uncore_nhmex)
+			mask |= NHMEX_M_PMON_ZDP_CTL_FVC_EVENT_MASK(idx);
+		else
+			mask |= WSMEX_M_PMON_ZDP_CTL_FVC_EVENT_MASK(idx);
+	}
 	if (!atomic_read(&er->ref) || !((er->config ^ config) & mask)) {
 		atomic_add(1 << (idx * 8), &er->ref);
-		mask = NHMEX_M_PMON_ZDP_CTL_FVC_MASK |
-			NHMEX_M_PMON_ZDP_CTL_FVC_EVENT_MASK(idx);
+		if (uncore_nhmex)
+			mask = NHMEX_M_PMON_ZDP_CTL_FVC_MASK |
+				NHMEX_M_PMON_ZDP_CTL_FVC_EVENT_MASK(idx);
+		else
+			mask = WSMEX_M_PMON_ZDP_CTL_FVC_MASK |
+				WSMEX_M_PMON_ZDP_CTL_FVC_EVENT_MASK(idx);
 		er->config &= ~mask;
 		er->config |= (config & mask);
 		ret = true;
@@ -1264,7 +1288,10 @@ u64 nhmex_mbox_alter_er(struct perf_event *event, int new_idx, bool modify)
 
 	/* get the non-shared control bits and shift them */
 	idx = orig_idx - EXTRA_REG_NHMEX_M_ZDP_CTL_FVC;
-	config &= NHMEX_M_PMON_ZDP_CTL_FVC_EVENT_MASK(idx);
+	if (uncore_nhmex)
+		config &= NHMEX_M_PMON_ZDP_CTL_FVC_EVENT_MASK(idx);
+	else
+		config &= WSMEX_M_PMON_ZDP_CTL_FVC_EVENT_MASK(idx);
 	if (new_idx > orig_idx) {
 		idx = new_idx - orig_idx;
 		config <<= 3 * idx;
@@ -1274,6 +1301,10 @@ u64 nhmex_mbox_alter_er(struct perf_event *event, int new_idx, bool modify)
 	}
 
 	/* add the shared control bits back */
+	if (uncore_nhmex)
+		config |= NHMEX_M_PMON_ZDP_CTL_FVC_MASK & reg1->config;
+	else
+		config |= WSMEX_M_PMON_ZDP_CTL_FVC_MASK & reg1->config;
 	config |= NHMEX_M_PMON_ZDP_CTL_FVC_MASK & reg1->config;
 	if (modify) {
 		/* adjust the main event selector */
@@ -1527,6 +1558,12 @@ static struct attribute_group nhmex_uncore_mbox_format_group = {
 static struct uncore_event_desc nhmex_uncore_mbox_events[] = {
 	INTEL_UNCORE_EVENT_DESC(bbox_cmds_read, "inc_sel=0xd,fvc=0x2800"),
 	INTEL_UNCORE_EVENT_DESC(bbox_cmds_write, "inc_sel=0xd,fvc=0x2820"),
+	{ /* end: all zeroes */ },
+};
+
+static struct uncore_event_desc wsmex_uncore_mbox_events[] = {
+	INTEL_UNCORE_EVENT_DESC(bbox_cmds_read, "inc_sel=0xd,fvc=0x5000"),
+	INTEL_UNCORE_EVENT_DESC(bbox_cmds_write, "inc_sel=0xd,fvc=0x5040"),
 	{ /* end: all zeroes */ },
 };
 
@@ -2866,7 +2903,13 @@ static int __init uncore_cpu_init(void)
 			snbep_uncore_cbox.num_boxes = max_cores;
 		msr_uncores = snbep_msr_uncores;
 		break;
-	case 46:
+	case 46: /* Nehalem-EX */
+		uncore_nhmex = true;
+	case 47: /* Westmere-EX aka. Xeon E7 */
+		if (!uncore_nhmex)
+			nhmex_uncore_mbox.event_descs = wsmex_uncore_mbox_events;
+		if (nhmex_uncore_cbox.num_boxes > max_cores)
+			nhmex_uncore_cbox.num_boxes = max_cores;
 		msr_uncores = nhmex_msr_uncores;
 		break;
 	default:

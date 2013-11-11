@@ -827,6 +827,7 @@ static int nfs_writepage_setup(struct nfs_open_context *ctx, struct page *page,
 int nfs_flush_incompatible(struct file *file, struct page *page)
 {
 	struct nfs_open_context *ctx = nfs_file_open_context(file);
+	struct nfs_lock_context *l_ctx;
 	struct nfs_page	*req;
 	int do_flush, status;
 	/*
@@ -841,9 +842,12 @@ int nfs_flush_incompatible(struct file *file, struct page *page)
 		req = nfs_page_find_request(page);
 		if (req == NULL)
 			return 0;
-		do_flush = req->wb_page != page || req->wb_context != ctx ||
-			req->wb_lock_context->lockowner != current->files ||
-			req->wb_lock_context->pid != current->tgid;
+		l_ctx = req->wb_lock_context;
+		do_flush = req->wb_page != page || req->wb_context != ctx;
+		if (l_ctx) {
+			do_flush |= l_ctx->lockowner.l_owner != current->files
+				|| l_ctx->lockowner.l_pid != current->tgid;
+		}
 		nfs_release_request(req);
 		if (!do_flush)
 			return 0;
@@ -857,10 +861,14 @@ int nfs_flush_incompatible(struct file *file, struct page *page)
  * the PageUptodate() flag. In this case, we will need to turn off
  * write optimisations that depend on the page contents being correct.
  */
-static int nfs_write_pageuptodate(struct page *page, struct inode *inode)
+static bool nfs_write_pageuptodate(struct page *page, struct inode *inode)
 {
-	return PageUptodate(page) &&
-		!(NFS_I(inode)->cache_validity & (NFS_INO_REVAL_PAGECACHE|NFS_INO_INVALID_DATA));
+	if (nfs_have_delegated_attributes(inode))
+		goto out;
+	if (NFS_I(inode)->cache_validity & (NFS_INO_INVALID_DATA|NFS_INO_REVAL_PAGECACHE))
+		return false;
+out:
+	return PageUptodate(page) != 0;
 }
 
 /* If we know the page is up to date, and we're not using byte range locks (or
@@ -1237,6 +1245,8 @@ void nfs_write_prepare(struct rpc_task *task, void *calldata)
 {
 	struct nfs_write_data *data = calldata;
 	NFS_PROTO(data->header->inode)->write_rpc_prepare(task, data);
+	if (unlikely(test_bit(NFS_CONTEXT_BAD, &data->args.context->flags)))
+		rpc_exit(task, -EIO);
 }
 
 void nfs_commit_prepare(struct rpc_task *task, void *calldata)

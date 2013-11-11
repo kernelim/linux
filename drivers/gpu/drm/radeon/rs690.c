@@ -25,7 +25,7 @@
  *          Alex Deucher
  *          Jerome Glisse
  */
-#include "drmP.h"
+#include <drm/drmP.h>
 #include "radeon.h"
 #include "radeon_asic.h"
 #include "atom.h"
@@ -145,7 +145,7 @@ void rs690_pm_info(struct radeon_device *rdev)
 	rdev->pm.sideport_bandwidth.full = dfixed_div(rdev->pm.sideport_bandwidth, tmp);
 }
 
-void rs690_mc_init(struct radeon_device *rdev)
+static void rs690_mc_init(struct radeon_device *rdev)
 {
 	u64 base;
 
@@ -224,7 +224,7 @@ struct rs690_watermark {
 	fixed20_12 sclk;
 };
 
-void rs690_crtc_bandwidth_compute(struct radeon_device *rdev,
+static void rs690_crtc_bandwidth_compute(struct radeon_device *rdev,
 				  struct radeon_crtc *crtc,
 				  struct rs690_watermark *wm)
 {
@@ -581,7 +581,7 @@ void rs690_mc_wreg(struct radeon_device *rdev, uint32_t reg, uint32_t v)
 	WREG32(R_000078_MC_INDEX, 0x7F);
 }
 
-void rs690_mc_program(struct radeon_device *rdev)
+static void rs690_mc_program(struct radeon_device *rdev)
 {
 	struct rv515_mc_save save;
 
@@ -628,6 +628,12 @@ static int rs690_startup(struct radeon_device *rdev)
 	}
 
 	/* Enable IRQ */
+	if (!rdev->irq.installed) {
+		r = radeon_irq_kms_init(rdev);
+		if (r)
+			return r;
+	}
+
 	rs600_irq_set(rdev);
 	rdev->config.r300.hdp_cntl = RREG32(RADEON_HOST_PATH_CNTL);
 	/* 1M ring buffer */
@@ -751,9 +757,6 @@ int rs690_init(struct radeon_device *rdev)
 	rv515_debugfs(rdev);
 	/* Fence driver */
 	r = radeon_fence_driver_init(rdev);
-	if (r)
-		return r;
-	r = radeon_irq_kms_init(rdev);
 	if (r)
 		return r;
 	/* Memory manager */

@@ -362,9 +362,15 @@ module_exit(cleanup_ccwgroup);
 
 /************************** driver stuff ******************************/
 
-static int
-ccwgroup_set_online(struct ccwgroup_device *gdev)
-{
+/**
+ * ccwgroup_set_online() - enable a ccwgroup device
+ * @gdev: target ccwgroup device
+ *
+ * This function attempts to put the ccwgroup device into the online state.
+ * Returns:
+ *  %0 on success and a negative error value on failure.
+ */
+int ccwgroup_set_online(struct ccwgroup_device *gdev){
 	struct ccwgroup_driver *gdrv;
 	int ret;
 
@@ -387,9 +393,17 @@ ccwgroup_set_online(struct ccwgroup_device *gdev)
 	atomic_set(&gdev->onoff, 0);
 	return ret;
 }
+EXPORT_SYMBOL(ccwgroup_set_online);
 
-static int
-ccwgroup_set_offline(struct ccwgroup_device *gdev)
+/**
+ * ccwgroup_set_offline() - disable a ccwgroup device
+ * @gdev: target ccwgroup device
+ *
+ * This function attempts to put the ccwgroup device into the offline state.
+ * Returns:
+ *  %0 on success and a negative error value on failure.
+ */
+int ccwgroup_set_offline(struct ccwgroup_device *gdev)
 {
 	struct ccwgroup_driver *gdrv;
 	int ret;
@@ -413,6 +427,7 @@ ccwgroup_set_offline(struct ccwgroup_device *gdev)
 	atomic_set(&gdev->onoff, 0);
 	return ret;
 }
+EXPORT_SYMBOL(ccwgroup_set_offline);
 
 static ssize_t
 ccwgroup_online_store (struct device *dev, struct device_attribute *attr, const char *buf, size_t count)

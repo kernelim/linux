@@ -33,6 +33,11 @@ struct r10conf {
 					       * far_offset, in which case it is
 					       * 1 stripe.
 					       */
+		int             far_set_size; /* The number of devices in a set,
+					       * where a 'set' are devices that
+					       * contain far/offset copies of
+					       * each other.
+					       */
 		int		chunk_shift; /* shift from chunks to sectors */
 		sector_t	chunk_mask;
 	} prev, geo;
@@ -112,7 +117,7 @@ struct r10bio {
 	 * We choose the number when they are allocated.
 	 * We sometimes need an extra bio to write to the replacement.
 	 */
-	struct {
+	struct r10dev {
 		struct bio	*bio;
 		union {
 			struct bio	*repl_bio; /* used for resync and

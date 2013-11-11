@@ -16,6 +16,7 @@
  */
 static char dmi_empty_string[] = "        ";
 
+static u16 __initdata dmi_ver;
 /*
  * Catch too early calls to dmi_check_system():
  */
@@ -149,6 +150,23 @@ static void __init dmi_save_ident(const struct dmi_header *dm, int slot, int str
 	dmi_ident[slot] = p;
 }
 
+/*
+ * As of version 2.6 of the SMBIOS specification, the first 3 fields of
+ * the UUID are supposed to be little-endian encoded.  The specification
+ * says that this is the defacto standard.
+ *
+ * RHEL6, however, has API restrictions on /proc.  This means that users
+ * will have to select a kernel parameter option to get the 2.6 UUID decoding
+ * to avoid userspace breakage.
+ */
+static int smbios_26_uuid;
+static int __init setup_smbios_26_uuid(char *str)
+{
+	smbios_26_uuid = 1;
+	return 1;
+}
+__setup("smbios_26_uuid", setup_smbios_26_uuid);
+
 static void __init dmi_save_uuid(const struct dmi_header *dm, int slot, int index)
 {
 	const u8 *d = (u8*) dm + index;
@@ -159,8 +177,10 @@ static void __init dmi_save_uuid(const struct dmi_header *dm, int slot, int inde
 		return;
 
 	for (i = 0; i < 16 && (is_ff || is_00); i++) {
-		if(d[i] != 0x00) is_ff = 0;
-		if(d[i] != 0xFF) is_00 = 0;
+		if (d[i] != 0x00)
+			is_00 = 0;
+		if (d[i] != 0xFF)
+			is_ff = 0;
 	}
 
 	if (is_ff || is_00)
@@ -170,10 +190,15 @@ static void __init dmi_save_uuid(const struct dmi_header *dm, int slot, int inde
 	if (!s)
 		return;
 
-	sprintf(s,
-		"%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X",
-		d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7],
-		d[8], d[9], d[10], d[11], d[12], d[13], d[14], d[15]);
+	/*
+	 * As of version 2.6 of the SMBIOS specification, the first 3 fields of
+	 * the UUID are supposed to be little-endian encoded.  The specification
+	 * says that this is the defacto standard.
+	 */
+	if (smbios_26_uuid && dmi_ver >= 0x0206)
+		sprintf(s, "%pUL", d);
+	else
+		sprintf(s, "%pUB", d);
 
         dmi_ident[slot] = s;
 }
@@ -480,6 +505,7 @@ static int __init dmi_present(const char __iomem *p)
 		 * DMI version 0.0 means that the real version is taken from
 		 * the SMBIOS version, which we don't know at this point.
 		 */
+		dmi_ver = (buf[14] & 0xf0) << 4 | (buf[14] & 0x0f);
 		if (buf[14] != 0)
 			printk(KERN_INFO "DMI %d.%d present.\n",
 			       buf[14] >> 4, buf[14] & 0xF);

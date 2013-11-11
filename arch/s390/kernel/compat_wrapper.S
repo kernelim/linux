@@ -1861,6 +1861,12 @@ sys_syncfs_wrapper:
 	lgfr	%r2,%r2			# int
 	jg	sys_syncfs
 
+	.globl	sys_setns_wrapper
+sys_setns_wrapper:
+	lgfr	%r2,%r2			# int
+	lgfr	%r3,%r3			# int
+	jg	sys_setns
+
 	.globl sys_s390_runtime_instr_wrapper
 sys_s390_runtime_instr_wrapper:
 	lgfr	%r2,%r2			# int

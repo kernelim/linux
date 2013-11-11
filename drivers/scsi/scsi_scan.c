@@ -479,19 +479,20 @@ void scsi_target_reap(struct scsi_target *starget)
 	struct Scsi_Host *shost = dev_to_shost(starget->dev.parent);
 	unsigned long flags;
 	enum scsi_target_state state;
-	int empty;
+	int empty = 0;
 
 	spin_lock_irqsave(shost->host_lock, flags);
 	state = starget->state;
-	empty = --starget->reap_ref == 0 &&
-		list_empty(&starget->devices) ? 1 : 0;
+	if (--starget->reap_ref == 0 && list_empty(&starget->devices)) {
+		empty = 1;
+		starget->state = STARGET_DEL;
+	}
 	spin_unlock_irqrestore(shost->host_lock, flags);
 
 	if (!empty)
 		return;
 
 	BUG_ON(state == STARGET_DEL);
-	starget->state = STARGET_DEL;
 	if (state == STARGET_CREATED)
 		scsi_target_destroy(starget);
 	else
@@ -913,6 +914,11 @@ static int scsi_add_lun(struct scsi_device *sdev, unsigned char *inq_result,
 
 	if (*bflags & BLIST_RETRY_HWERROR)
 		sdev->retry_hwerror = 1;
+
+	sdev->eh_timeout = SCSI_DEFAULT_EH_TIMEOUT;
+
+	if (*bflags & BLIST_NO_DIF)
+		sdev->no_dif = 1;
 
 	transport_configure_device(&sdev->sdev_gendev);
 

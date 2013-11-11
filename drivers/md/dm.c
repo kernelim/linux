@@ -374,8 +374,14 @@ out:
 static int dm_blk_close(struct gendisk *disk, fmode_t mode)
 {
 	struct mapped_device *md = disk->private_data;
+
+	spin_lock(&_minor_lock);
+
 	atomic_dec(&md->open_count);
 	dm_put(md);
+
+	spin_unlock(&_minor_lock);
+
 	return 0;
 }
 
@@ -414,10 +420,12 @@ static int dm_blk_ioctl(struct block_device *bdev, fmode_t mode,
 			unsigned int cmd, unsigned long arg)
 {
 	struct mapped_device *md = bdev->bd_disk->private_data;
-	struct dm_table *map = dm_get_live_table(md);
+	struct dm_table *map;
 	struct dm_target *tgt;
 	int r = -ENOTTY;
 
+retry:
+	map = dm_get_live_table(md);
 	if (!map || !dm_table_get_size(map))
 		goto out;
 
@@ -437,6 +445,11 @@ static int dm_blk_ioctl(struct block_device *bdev, fmode_t mode,
 
 out:
 	dm_table_put(map);
+
+	if (r == -ENOTCONN) {
+		msleep(10);
+		goto retry;
+	}
 
 	return r;
 }
@@ -753,8 +766,14 @@ static void rq_completed(struct mapped_device *md, int rw, int run_queue)
 	if (!md_in_flight(md))
 		wake_up(&md->wait);
 
+	/*
+	 * Run this off this callpath, as drivers could invoke end_io while
+	 * inside their request_fn (and holding the queue lock). Calling
+	 * back into ->request_fn() could deadlock attempting to grab the
+	 * queue lock again.
+	 */
 	if (run_queue)
-		blk_run_queue(md->queue);
+		blk_run_queue_async(md->queue);
 
 	/*
 	 * dm_put() must be at the end of this function. See the comment above
@@ -2044,15 +2063,13 @@ static void event_callback(void *context)
 	wake_up(&md->eventq);
 }
 
+/*
+ * Protected by md->suspend_lock obtained by dm_swap_table().
+ */
 static void __set_size(struct mapped_device *md, sector_t size)
 {
 	set_capacity(md->disk, size);
 
-	/*
-	 * Only DM is allowed to change the size of a DM device.
-	 * i_size_write() is protected by the dm_swap_table() critical
-	 * section that uses md->suspend_lock.
-	 */
 	i_size_write(md->bdev->bd_inode, (loff_t)size << SECTOR_SHIFT);
 }
 

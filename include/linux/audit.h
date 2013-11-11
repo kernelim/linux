@@ -367,7 +367,8 @@ struct audit_status {
 };
 
 struct audit_tty_status {
-	__u32		enabled; /* 1 = enabled, 0 = disabled */
+	__u32		enabled;	/* 1 = enabled, 0 = disabled */
+	__u32		log_passwd;	/* 1 = enabled, 0 = disabled */
 };
 
 /* audit_rule_data supports filter rules with both integer and string
@@ -448,6 +449,16 @@ struct audit_field {
 extern int __init audit_register_class(int class, unsigned *list);
 extern int audit_classify_syscall(int abi, unsigned syscall);
 extern int audit_classify_arch(int arch);
+
+/* audit_names->type values */
+#define	AUDIT_TYPE_UNKNOWN	0	/* we don't know yet */
+#define	AUDIT_TYPE_NORMAL	1	/* a "normal" audit record */
+#define	AUDIT_TYPE_PARENT	2	/* a parent audit record */
+#define	AUDIT_TYPE_CHILD_DELETE 3	/* a child being deleted */
+#define	AUDIT_TYPE_CHILD_CREATE 4	/* a child being created */
+
+struct filename;
+
 #ifdef CONFIG_AUDITSYSCALL
 /* These are defined in auditsc.c */
 				/* Public API */
@@ -458,11 +469,17 @@ extern void audit_syscall_entry(int arch,
 				int major, unsigned long a0, unsigned long a1,
 				unsigned long a2, unsigned long a3);
 extern void __audit_syscall_exit(int ret_success, long ret_value);
-extern void __audit_getname(const char *name);
-extern void audit_putname(const char *name);
-extern void __audit_inode(const char *name, const struct dentry *dentry);
-extern void __audit_inode_child(const char *dname, const struct dentry *dentry,
-				const struct inode *parent);
+extern struct filename *__audit_reusename(const __user char *uptr);
+extern void __audit_getname(struct filename *name);
+extern void audit_putname(struct filename *name);
+
+#define AUDIT_INODE_PARENT     1       /* dentry represents the parent */
+#define AUDIT_INODE_HIDDEN     2       /* audit record should be hidden */
+extern void __audit_inode(struct filename *name, const struct dentry *dentry,
+				unsigned int flags);
+extern void __audit_inode_child(const struct inode *parent,
+				const struct dentry *dentry,
+				const unsigned char type);
 extern void __audit_ptrace(struct task_struct *t);
 
 static inline int audit_dummy_context(void)
@@ -479,20 +496,39 @@ static inline void audit_syscall_exit(void *pt_regs)
 		__audit_syscall_exit(success, return_code);
 	}
 }
-static inline void audit_getname(const char *name)
+static inline struct filename *audit_reusename(const __user char *name)
+{
+	if (unlikely(!audit_dummy_context()))
+		return __audit_reusename(name);
+	return NULL;
+}
+static inline void audit_getname(struct filename *name)
 {
 	if (unlikely(!audit_dummy_context()))
 		__audit_getname(name);
 }
-static inline void audit_inode(const char *name, const struct dentry *dentry) {
-	if (unlikely(!audit_dummy_context()))
-		__audit_inode(name, dentry);
+static inline void audit_inode(struct filename *name,
+				const struct dentry *dentry,
+				unsigned int parent) {
+	if (unlikely(!audit_dummy_context())) {
+		unsigned int flags = 0;
+		if (parent)
+			flags |= AUDIT_INODE_PARENT;
+		__audit_inode(name, dentry, flags);
+	}
 }
-static inline void audit_inode_child(const char *dname, 
-				     const struct dentry *dentry,
-				     const struct inode *parent) {
+static inline void audit_inode_parent_hidden(struct filename *name,
+						const struct dentry *dentry)
+{
 	if (unlikely(!audit_dummy_context()))
-		__audit_inode_child(dname, dentry, parent);
+		__audit_inode(name, dentry,
+				AUDIT_INODE_PARENT | AUDIT_INODE_HIDDEN);
+}
+static inline void audit_inode_child(const struct inode *parent,
+				     const struct dentry *dentry,
+				     const unsigned char type) {
+	if (unlikely(!audit_dummy_context()))
+		__audit_inode_child(parent, dentry, type);
 }
 void audit_core_dumps(long signr);
 
@@ -596,10 +632,11 @@ extern int audit_signals;
 #define audit_dummy_context() 1
 #define audit_getname(n) do { ; } while (0)
 #define audit_putname(n) do { ; } while (0)
-#define __audit_inode(n,d) do { ; } while (0)
-#define __audit_inode_child(d,i,p) do { ; } while (0)
-#define audit_inode(n,d) do { ; } while (0)
-#define audit_inode_child(d,i,p) do { ; } while (0)
+#define __audit_inode(n,d,f) do { ; } while (0)
+#define __audit_inode_child(p,d,t) do { ; } while (0)
+#define audit_inode(n,d,p) do { ; } while (0)
+#define audit_inode_parent_hidden(n,d) do { ; } while (0)
+#define audit_inode_child(p,d,t) do { ; } while (0)
 #define audit_core_dumps(i) do { ; } while (0)
 #define auditsc_get_stamp(c,t,s) (0)
 #define audit_get_loginuid(t) (-1)
@@ -622,6 +659,11 @@ extern int audit_signals;
 #define audit_ptrace(t) ((void)0)
 #define audit_n_rules 0
 #define audit_signals 0
+
+static inline struct filename *audit_reusename(const __user char *name)
+{
+	return NULL;
+}
 #endif /* CONFIG_AUDITSYSCALL */
 
 #ifdef CONFIG_AUDIT

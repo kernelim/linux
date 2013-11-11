@@ -950,6 +950,7 @@ static struct usb_driver catc_driver = {
 	.probe =	catc_probe,
 	.disconnect =	catc_disconnect,
 	.id_table =	catc_id_table,
+	.disable_hub_initiated_lpm = 1,
 };
 
 static int __init catc_init(void)

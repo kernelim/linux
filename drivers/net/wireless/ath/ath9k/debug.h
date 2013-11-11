@@ -23,6 +23,7 @@
 
 struct ath_txq;
 struct ath_buf;
+struct fft_sample_tlv;
 
 #ifdef CONFIG_ATH9K_DEBUGFS
 #define TX_STAT_INC(q, c) sc->debug.stats.txstats[q].c++
@@ -31,6 +32,19 @@ struct ath_buf;
 #define TX_STAT_INC(q, c) do { } while (0)
 #define RESET_STAT_INC(sc, type) do { } while (0)
 #endif
+
+enum ath_reset_type {
+	RESET_TYPE_BB_HANG,
+	RESET_TYPE_BB_WATCHDOG,
+	RESET_TYPE_FATAL_INT,
+	RESET_TYPE_TX_ERROR,
+	RESET_TYPE_TX_HANG,
+	RESET_TYPE_PLL_HANG,
+	RESET_TYPE_MAC_HANG,
+	RESET_TYPE_BEACON_STUCK,
+	RESET_TYPE_MCI,
+	__RESET_TYPE_MAX
+};
 
 #ifdef CONFIG_ATH9K_DEBUGFS
 
@@ -61,6 +75,8 @@ struct ath_buf;
  * from a beacon differs from the PCU's internal TSF by more than a
  * (programmable) threshold
  * @local_timeout: Internal bus timeout.
+ * @mci: MCI interrupt, specific to MCI based BTCOEX chipsets
+ * @gen_timer: Generic hardware timer interrupt
  */
 struct ath_interrupt_stats {
 	u32 total;
@@ -86,6 +102,8 @@ struct ath_interrupt_stats {
 	u32 dtim;
 	u32 bb_watchdog;
 	u32 tsfoor;
+	u32 mci;
+	u32 gen_timer;
 
 	/* Sync-cause stats */
 	u32 sync_cause_all;
@@ -124,6 +142,7 @@ struct ath_interrupt_stats {
  * @a_completed: Total AMPDUs completed
  * @a_retries: No. of AMPDUs retried (SW)
  * @a_xretries: No. of AMPDUs dropped due to xretries
+ * @txerr_filtered: No. of frames with TXERR_FILT flag set.
  * @fifo_underrun: FIFO underrun occurrences
 	Valid only for:
 		- non-aggregate condition.
@@ -150,6 +169,7 @@ struct ath_tx_stats {
 	u32 a_completed;
 	u32 a_retries;
 	u32 a_xretries;
+	u32 txerr_filtered;
 	u32 fifo_underrun;
 	u32 xtxop;
 	u32 timer_exp;
@@ -161,6 +181,21 @@ struct ath_tx_stats {
 	u32 txprocdesc;
 	u32 txfailed;
 };
+
+/*
+ * Various utility macros to print TX/Queue counters.
+ */
+#define PR_QNUM(_n) sc->tx.txq_map[_n]->axq_qnum
+#define TXSTATS sc->debug.stats.txstats
+#define PR(str, elem)							\
+	do {								\
+		len += snprintf(buf + len, size - len,			\
+				"%s%13u%11u%10u%10u\n", str,		\
+				TXSTATS[PR_QNUM(IEEE80211_AC_BE)].elem,	\
+				TXSTATS[PR_QNUM(IEEE80211_AC_BK)].elem,	\
+				TXSTATS[PR_QNUM(IEEE80211_AC_VI)].elem,	\
+				TXSTATS[PR_QNUM(IEEE80211_AC_VO)].elem); \
+	} while(0)
 
 #define RX_STAT_INC(c) (sc->debug.stats.rxstats.c++)
 
@@ -184,9 +219,9 @@ struct ath_tx_stats {
  * @rx_oom_err:  No. of frames dropped due to OOM issues.
  * @rx_rate_err:  No. of frames dropped due to rate errors.
  * @rx_too_many_frags_err:  Frames dropped due to too-many-frags received.
- * @rx_drop_rxflush: No. of frames dropped due to RX-FLUSH.
  * @rx_beacons:  No. of beacons received.
  * @rx_frags:  No. of rx-fragements received.
+ * @rx_spectral: No of spectral packets received.
  */
 struct ath_rx_stats {
 	u32 rx_pkts_all;
@@ -203,20 +238,9 @@ struct ath_rx_stats {
 	u32 rx_oom_err;
 	u32 rx_rate_err;
 	u32 rx_too_many_frags_err;
-	u32 rx_drop_rxflush;
 	u32 rx_beacons;
 	u32 rx_frags;
-};
-
-enum ath_reset_type {
-	RESET_TYPE_BB_HANG,
-	RESET_TYPE_BB_WATCHDOG,
-	RESET_TYPE_FATAL_INT,
-	RESET_TYPE_TX_ERROR,
-	RESET_TYPE_TX_HANG,
-	RESET_TYPE_PLL_HANG,
-	RESET_TYPE_MAC_HANG,
-	__RESET_TYPE_MAX
+	u32 rx_spectral;
 };
 
 struct ath_stats {
@@ -280,12 +304,32 @@ struct ath9k_debug {
 };
 
 int ath9k_init_debug(struct ath_hw *ah);
+void ath9k_deinit_debug(struct ath_softc *sc);
 
 void ath_debug_stat_interrupt(struct ath_softc *sc, enum ath9k_int status);
 void ath_debug_stat_tx(struct ath_softc *sc, struct ath_buf *bf,
 		       struct ath_tx_status *ts, struct ath_txq *txq,
 		       unsigned int flags);
 void ath_debug_stat_rx(struct ath_softc *sc, struct ath_rx_status *rs);
+int ath9k_get_et_sset_count(struct ieee80211_hw *hw,
+			    struct ieee80211_vif *vif, int sset);
+void ath9k_get_et_stats(struct ieee80211_hw *hw,
+			struct ieee80211_vif *vif,
+			struct ethtool_stats *stats, u64 *data);
+void ath9k_get_et_strings(struct ieee80211_hw *hw,
+			  struct ieee80211_vif *vif,
+			  u32 sset, u8 *data);
+void ath9k_sta_add_debugfs(struct ieee80211_hw *hw,
+			   struct ieee80211_vif *vif,
+			   struct ieee80211_sta *sta,
+			   struct dentry *dir);
+void ath9k_sta_remove_debugfs(struct ieee80211_hw *hw,
+			      struct ieee80211_vif *vif,
+			      struct ieee80211_sta *sta,
+			      struct dentry *dir);
+
+void ath_debug_send_fft_sample(struct ath_softc *sc,
+			       struct fft_sample_tlv *fft_sample);
 
 #else
 
@@ -294,6 +338,10 @@ void ath_debug_stat_rx(struct ath_softc *sc, struct ath_rx_status *rs);
 static inline int ath9k_init_debug(struct ath_hw *ah)
 {
 	return 0;
+}
+
+static inline void ath9k_deinit_debug(struct ath_softc *sc)
+{
 }
 
 static inline void ath_debug_stat_interrupt(struct ath_softc *sc,

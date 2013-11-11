@@ -73,7 +73,6 @@
 #define IPV6_ADDR_SCOPE_MASK	0x00f0U
 
 #define IPV6_ADDR_MAPPED	0x1000U
-#define IPV6_ADDR_RESERVED	0x2000U	/* reserved address space */
 
 /*
  *	Addr scopes
@@ -258,6 +257,15 @@ struct ipv6_txoptions *ipv6_fixup_options(struct ipv6_txoptions *opt_space,
 					  struct ipv6_txoptions *opt);
 
 extern int ipv6_opt_accepted(struct sock *sk, struct sk_buff *skb);
+
+static inline bool ipv6_accept_ra(struct inet6_dev *idev)
+{
+	/* If forwarding is enabled, RA are not accepted unless the special
+	 * hybrid mode (accept_ra=2) is enabled.
+	 */
+	return idev->cnf.forwarding ? idev->cnf.accept_ra == 2 :
+	    idev->cnf.accept_ra;
+}
 
 int ip6_frag_nqueues(struct net *net);
 int ip6_frag_mem(struct net *net);
@@ -573,6 +581,16 @@ extern int			ipv6_skip_exthdr_fragoff(
 					u8 *nexthdrp, __be16 *frag_offp);
 
 extern int 			ipv6_ext_hdr(u8 nexthdr);
+
+enum {
+	IP6_FH_F_FRAG		= (1 << 0),
+	IP6_FH_F_AUTH		= (1 << 1),
+	IP6_FH_F_SKIP_RH	= (1 << 2),
+};
+
+/* find specified header and get offset to it */
+extern int ipv6_find_hdr(const struct sk_buff *skb, unsigned int *offset,
+			 int target, unsigned short *fragoff, int *fragflg);
 
 extern int ipv6_find_tlv(struct sk_buff *skb, int offset, int type);
 

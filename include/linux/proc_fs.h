@@ -28,7 +28,11 @@ struct mm_struct;
  */
 
 enum {
-	PROC_ROOT_INO = 1,
+	PROC_ROOT_INO		= 1,
+	PROC_IPC_INIT_INO	= 0xEFFFFFFFU,
+	PROC_UTS_INIT_INO	= 0xEFFFFFFEU,
+	PROC_USER_INIT_INO	= 0xEFFFFFFDU,
+	PROC_PID_INIT_INO	= 0xEFFFFFFCU,
 };
 
 /*
@@ -179,6 +183,11 @@ extern void set_mm_exe_file(struct mm_struct *mm, struct file *new_exe_file);
 extern struct file *get_mm_exe_file(struct mm_struct *mm);
 extern void dup_mm_exe_file(struct mm_struct *oldmm, struct mm_struct *newmm);
 
+extern struct file *proc_ns_fget(int fd);
+extern bool proc_ns_inode(struct inode *inode);
+
+extern int proc_alloc_inum(unsigned int *pino);
+extern void proc_free_inum(unsigned int inum);
 #else
 
 #define proc_net_fops_create(net, name, mode, fops)  ({ (void)(mode), NULL; })
@@ -239,6 +248,24 @@ static inline void dup_mm_exe_file(struct mm_struct *oldmm,
 	       			   struct mm_struct *newmm)
 {}
 
+static inline struct file *proc_ns_fget(int fd)
+{
+	return ERR_PTR(-EINVAL);
+}
+
+static inline bool proc_ns_inode(struct inode *inode)
+{
+	return false;
+}
+
+static inline int proc_alloc_inum(unsigned int *inum)
+{
+	*inum = 1;
+	return 0;
+}
+static inline void proc_free_inum(unsigned int inum)
+{
+}
 #endif /* CONFIG_PROC_FS */
 
 #if !defined(CONFIG_PROC_KCORE)
@@ -249,6 +276,21 @@ kclist_add(struct kcore_list *new, void *addr, size_t size, int type)
 #else
 extern void kclist_add(struct kcore_list *, void *, size_t, int type);
 #endif
+
+struct nsproxy;
+struct proc_ns_operations {
+	const char *name;
+	int type;
+	void *(*get)(struct task_struct *task);
+	void (*put)(void *ns);
+	int (*install)(struct nsproxy *nsproxy, void *ns);
+	unsigned int (*inum)(void *ns);
+};
+extern const struct proc_ns_operations netns_operations;
+extern const struct proc_ns_operations utsns_operations;
+extern const struct proc_ns_operations ipcns_operations;
+extern const struct proc_ns_operations mntns_operations;
+extern const struct proc_ns_operations pidns_operations;
 
 union proc_op {
 	int (*proc_get_link)(struct inode *, struct path *);
@@ -269,6 +311,8 @@ struct proc_inode {
 	struct ctl_table_header *sysctl;
 	struct ctl_table *sysctl_entry;
 	struct inode vfs_inode;
+	void *ns;
+	const struct proc_ns_operations *ns_ops;
 };
 
 static inline struct proc_inode *PROC_I(const struct inode *inode)
@@ -279,6 +323,11 @@ static inline struct proc_inode *PROC_I(const struct inode *inode)
 static inline struct proc_dir_entry *PDE(const struct inode *inode)
 {
 	return PROC_I(inode)->pde;
+}
+
+static inline void *PDE_DATA(const struct inode *inode)
+{
+	return PROC_I(inode)->pde->data;
 }
 
 static inline struct net *PDE_NET(struct proc_dir_entry *pde)

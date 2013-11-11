@@ -23,14 +23,44 @@
  *
  */
 
-#include "drmP.h"
-#include "drm.h"
-#include "radeon_drm.h"
+#include <drm/drmP.h>
+#include <drm/radeon_drm.h>
 #include "radeon.h"
 
 #include "r600d.h"
 #include "r600_blit_shaders.h"
 #include "radeon_blit_common.h"
+
+/* 23 bits of float fractional data */
+#define I2F_FRAC_BITS  23
+#define I2F_MASK ((1 << I2F_FRAC_BITS) - 1)
+
+/*
+ * Converts unsigned integer into 32-bit IEEE floating point representation.
+ * Will be exact from 0 to 2^24.  Above that, we round towards zero
+ * as the fractional bits will not fit in a float.  (It would be better to
+ * round towards even as the fpu does, but that is slower.)
+ */
+__pure uint32_t int2float(uint32_t x)
+{
+	uint32_t msb, exponent, fraction;
+
+	/* Zero is special */
+	if (!x) return 0;
+
+	/* Get location of the most significant bit */
+	msb = __fls(x);
+
+	/*
+	 * Use a rotate instead of a shift because that works both leftwards
+	 * and rightwards due to the mod(32) behaviour.  This means we don't
+	 * need to check to see if we are above 2^24 or not.
+	 */
+	fraction = ror32(x, (msb - I2F_FRAC_BITS) & 0x1f) & I2F_MASK;
+	exponent = (127 + msb) << I2F_FRAC_BITS;
+
+	return fraction + exponent;
+}
 
 /* emits 21 on rv770+, 23 on r600 */
 static void
@@ -455,46 +485,6 @@ set_default_state(struct radeon_device *rdev)
 	radeon_ring_write(ring, sq_stack_resource_mgmt_2);
 }
 
-#define I2F_MAX_BITS 15
-#define I2F_MAX_INPUT  ((1 << I2F_MAX_BITS) - 1)
-#define I2F_SHIFT (24 - I2F_MAX_BITS)
-
-/*
- * Converts unsigned integer into 32-bit IEEE floating point representation.
- * Conversion is not universal and only works for the range from 0
- * to 2^I2F_MAX_BITS-1. Currently we only use it with inputs between
- * 0 and 16384 (inclusive), so I2F_MAX_BITS=15 is enough. If necessary,
- * I2F_MAX_BITS can be increased, but that will add to the loop iterations
- * and slow us down. Conversion is done by shifting the input and counting
- * down until the first 1 reaches bit position 23. The resulting counter
- * and the shifted input are, respectively, the exponent and the fraction.
- * The sign is always zero.
- */
-static uint32_t i2f(uint32_t input)
-{
-	u32 result, i, exponent, fraction;
-
-	WARN_ON_ONCE(input > I2F_MAX_INPUT);
-
-	if ((input & I2F_MAX_INPUT) == 0)
-		result = 0;
-	else {
-		exponent = 126 + I2F_MAX_BITS;
-		fraction = (input & I2F_MAX_INPUT) << I2F_SHIFT;
-
-		for (i = 0; i < I2F_MAX_BITS; i++) {
-			if (fraction & 0x800000)
-				break;
-			else {
-				fraction = fraction << 1;
-				exponent = exponent - 1;
-			}
-		}
-		result = exponent << 23 | (fraction & 0x7fffff);
-	}
-	return result;
-}
-
 int r600_blit_init(struct radeon_device *rdev)
 {
 	u32 obj_size;
@@ -766,14 +756,14 @@ void r600_kms_blit_copy(struct radeon_device *rdev,
 		vb_cpu_addr[3] = 0;
 
 		vb_cpu_addr[4] = 0;
-		vb_cpu_addr[5] = i2f(h);
+		vb_cpu_addr[5] = int2float(h);
 		vb_cpu_addr[6] = 0;
-		vb_cpu_addr[7] = i2f(h);
+		vb_cpu_addr[7] = int2float(h);
 
-		vb_cpu_addr[8] = i2f(w);
-		vb_cpu_addr[9] = i2f(h);
-		vb_cpu_addr[10] = i2f(w);
-		vb_cpu_addr[11] = i2f(h);
+		vb_cpu_addr[8] = int2float(w);
+		vb_cpu_addr[9] = int2float(h);
+		vb_cpu_addr[10] = int2float(w);
+		vb_cpu_addr[11] = int2float(h);
 
 		rdev->r600_blit.primitives.set_tex_resource(rdev, FMT_8_8_8_8,
 							    w, h, w, src_gpu_addr, size_in_bytes);

@@ -230,22 +230,12 @@ EXPORT_SYMBOL_GPL(sysdev_driver_register);
 EXPORT_SYMBOL_GPL(sysdev_driver_unregister);
 
 
-
-/**
- *	sysdev_register - add a system device to the tree
- *	@sysdev:	device in question
- *
- */
-int sysdev_register(struct sys_device *sysdev)
+int sysdev_initialize(struct sys_device *sysdev)
 {
-	int error;
 	struct sysdev_class *cls = sysdev->cls;
 
 	if (!cls)
 		return -EINVAL;
-
-	pr_debug("Registering sys device of class '%s'\n",
-		 kobject_name(&cls->kset.kobj));
 
 	/* initialize the kobject to 0, in case it had previously been used */
 	memset(&sysdev->kobj, 0x00, sizeof(struct kobject));
@@ -254,9 +244,22 @@ int sysdev_register(struct sys_device *sysdev)
 	sysdev->kobj.kset = &cls->kset;
 
 	/* Register the object */
-	error = kobject_init_and_add(&sysdev->kobj, &ktype_sysdev, NULL,
-				     "%s%d", kobject_name(&cls->kset.kobj),
-				     sysdev->id);
+	kobject_init(&sysdev->kobj, &ktype_sysdev);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(sysdev_initialize);
+
+int sysdev_add(struct sys_device *sysdev)
+{
+	int error;
+	struct sysdev_class *cls = sysdev->cls;
+
+	if (!cls)
+		return -EINVAL;
+
+	error = kobject_add(&sysdev->kobj, NULL, "%s%d",
+			    kobject_name(&cls->kset.kobj), sysdev->id);
 
 	if (!error) {
 		struct sysdev_driver *drv;
@@ -279,6 +282,25 @@ int sysdev_register(struct sys_device *sysdev)
 	}
 
 	return error;
+}
+EXPORT_SYMBOL_GPL(sysdev_add);
+
+/**
+ *	sysdev_register - add a system device to the tree
+ *	@sysdev:	device in question
+ *
+ */
+int sysdev_register(struct sys_device *sysdev)
+{
+	struct sysdev_class *cls = sysdev->cls;
+
+	if (sysdev_initialize(sysdev))
+		return -EINVAL;
+
+	pr_debug("Registering sys device of class '%s'\n",
+		 kobject_name(&cls->kset.kobj));
+
+	return sysdev_add(sysdev);
 }
 
 void sysdev_unregister(struct sys_device *sysdev)

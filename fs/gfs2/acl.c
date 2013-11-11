@@ -103,7 +103,7 @@ static int gfs2_set_mode(struct inode *inode, mode_t mode)
 		iattr.ia_valid = ATTR_MODE;
 		iattr.ia_mode = mode;
 
-		error = gfs2_setattr_simple(GFS2_I(inode), &iattr);
+		error = gfs2_setattr_simple(inode, &iattr);
 	}
 
 	return error;
@@ -187,6 +187,7 @@ out:
 
 int gfs2_acl_chmod(struct gfs2_inode *ip, struct iattr *attr)
 {
+	struct inode *inode = &ip->i_inode;
 	struct posix_acl *acl, *clone;
 	char *data;
 	unsigned int len;
@@ -196,7 +197,7 @@ int gfs2_acl_chmod(struct gfs2_inode *ip, struct iattr *attr)
 	if (IS_ERR(acl))
 		return PTR_ERR(acl);
 	if (!acl)
-		return gfs2_setattr_simple(ip, attr);
+		return gfs2_setattr_simple(inode, attr);
 
 	clone = posix_acl_clone(acl, GFP_NOFS);
 	error = -ENOMEM;

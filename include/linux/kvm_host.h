@@ -108,6 +108,19 @@ struct kvm_vcpu {
 	gpa_t mmio_phys_addr;
 #endif
 
+#ifdef CONFIG_HAVE_KVM_CPU_RELAX_INTERCEPT
+	/*
+	 * Cpu relax intercept or pause loop exit optimization
+	 * in_spin_loop: set when a vcpu does a pause loop exit
+	 *  or cpu relax intercepted.
+	 * dy_eligible: indicates whether vcpu is eligible for directed yield.
+	 */
+	struct {
+		bool in_spin_loop;
+		bool dy_eligible;
+	} spin_loop;
+#endif
+	bool preempted;
 	struct kvm_vcpu_arch arch;
 };
 
@@ -345,6 +358,7 @@ void mark_page_dirty_in_slot(struct kvm *kvm, struct kvm_memory_slot *memslot,
 			     gfn_t gfn);
 
 void kvm_vcpu_block(struct kvm_vcpu *vcpu);
+bool kvm_vcpu_yield_to(struct kvm_vcpu *target);
 void kvm_vcpu_on_spin(struct kvm_vcpu *vcpu);
 void kvm_resched(struct kvm_vcpu *vcpu);
 void kvm_load_guest_fpu(struct kvm_vcpu *vcpu);
@@ -402,6 +416,7 @@ void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu);
 void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu);
 struct kvm_vcpu *kvm_arch_vcpu_create(struct kvm *kvm, unsigned int id);
 int kvm_arch_vcpu_setup(struct kvm_vcpu *vcpu);
+int kvm_arch_vcpu_postcreate(struct kvm_vcpu *vcpu);
 void kvm_arch_vcpu_destroy(struct kvm_vcpu *vcpu);
 
 int kvm_arch_vcpu_reset(struct kvm_vcpu *vcpu);
@@ -669,4 +684,32 @@ bool kvm_vcpu_compatible(struct kvm_vcpu *vcpu);
 static bool kvm_vcpu_compatible(struct kvm_vcpu *vcpu) { return true; }
 
 #endif
+
+#ifdef CONFIG_HAVE_KVM_CPU_RELAX_INTERCEPT
+
+static inline void kvm_vcpu_set_in_spin_loop(struct kvm_vcpu *vcpu, bool val)
+{
+	vcpu->spin_loop.in_spin_loop = val;
+}
+static inline void kvm_vcpu_set_dy_eligible(struct kvm_vcpu *vcpu, bool val)
+{
+	vcpu->spin_loop.dy_eligible = val;
+}
+
+#else /* !CONFIG_HAVE_KVM_CPU_RELAX_INTERCEPT */
+
+static inline void kvm_vcpu_set_in_spin_loop(struct kvm_vcpu *vcpu, bool val)
+{
+}
+
+static inline void kvm_vcpu_set_dy_eligible(struct kvm_vcpu *vcpu, bool val)
+{
+}
+
+static inline bool kvm_vcpu_eligible_for_directed_yield(struct kvm_vcpu *vcpu)
+{
+	return true;
+}
+
+#endif /* CONFIG_HAVE_KVM_CPU_RELAX_INTERCEPT */
 #endif

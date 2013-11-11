@@ -4,8 +4,7 @@
  * This file contains generic high level protocol identifier and PR
  * handlers for TCM fabric modules
  *
- * Copyright (c) 2010 Rising Tide Systems, Inc.
- * Copyright (c) 2010 Linux-iSCSI.org
+ * (c) Copyright 2010-2012 RisingTide Systems LLC.
  *
  * Nicholas A. Bellinger <nab@linux-iscsi.org>
  *
@@ -25,20 +24,19 @@
  *
  ******************************************************************************/
 
+#include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/ctype.h>
 #include <linux/spinlock.h>
+#include <linux/export.h>
 #include <scsi/scsi.h>
 #include <scsi/scsi_cmnd.h>
 
 #include <target/target_core_base.h>
-#include <target/target_core_device.h>
-#include <target/target_core_transport.h>
-#include <target/target_core_fabric_lib.h>
-#include <target/target_core_fabric_ops.h>
+#include <target/target_core_fabric.h>
 #include <target/target_core_configfs.h>
 
-#include "target_core_hba.h"
+#include "target_core_internal.h"
 #include "target_core_pr.h"
 
 /*
@@ -53,6 +51,34 @@ u8 sas_get_fabric_proto_ident(struct se_portal_group *se_tpg)
 	return 0x6;
 }
 EXPORT_SYMBOL(sas_get_fabric_proto_ident);
+
+static unsigned char transport_asciihex_to_binaryhex(unsigned char val[2])
+{
+	unsigned char result = 0;
+	/*
+	 * MSB
+	 */
+	if ((val[0] >= 'a') && (val[0] <= 'f'))
+		result = ((val[0] - 'a' + 10) & 0xf) << 4;
+	else
+		if ((val[0] >= 'A') && (val[0] <= 'F'))
+			result = ((val[0] - 'A' + 10) & 0xf) << 4;
+		else /* digit */
+			result = ((val[0] - '0') & 0xf) << 4;
+	/*
+	 * LSB
+	 */
+	if ((val[1] >= 'a') && (val[1] <= 'f'))
+		result |= ((val[1] - 'a' + 10) & 0xf);
+	else
+		if ((val[1] >= 'A') && (val[1] <= 'F'))
+			result |= ((val[1] - 'A' + 10) & 0xf);
+		else /* digit */
+			result |= ((val[1] - '0') & 0xf);
+
+	return result;
+}
+
 
 u32 sas_get_pr_transport_id(
 	struct se_portal_group *se_tpg,
@@ -340,7 +366,7 @@ u32 iscsi_get_pr_transport_id_len(
 	 * 00b: iSCSI Initiator device TransportID format
 	 */
 	if (pr_reg->isid_present_at_reg) {
-		len += 5; /* For ",i,0x" ASCII seperator */
+		len += 5; /* For ",i,0x" ASCII separator */
 		len += 7; /* For iSCSI Initiator Session ID + Null terminator */
 		*format_code = 1;
 	} else
@@ -401,7 +427,7 @@ char *iscsi_parse_pr_out_transport_id(
 		add_len = ((buf[2] >> 8) & 0xff);
 		add_len |= (buf[3] & 0xff);
 
-		tid_len = strlen((char *)&buf[4]);
+		tid_len = strlen(&buf[4]);
 		tid_len += 4; /* Add four bytes for iSCSI Transport ID header */
 		tid_len += 1; /* Add one byte for NULL terminator */
 		padding = ((-tid_len) & 3);
@@ -417,20 +443,20 @@ char *iscsi_parse_pr_out_transport_id(
 			*out_tid_len = (add_len + 4);
 	}
 	/*
-	 * Check for ',i,0x' seperator between iSCSI Name and iSCSI Initiator
+	 * Check for ',i,0x' separator between iSCSI Name and iSCSI Initiator
 	 * Session ID as defined in Table 390 - iSCSI initiator port TransportID
 	 * format.
 	 */
 	if (format_code == 0x40) {
-		p = strstr((char *)&buf[4], ",i,0x");
+		p = strstr(&buf[4], ",i,0x");
 		if (!p) {
-			pr_err("Unable to locate \",i,0x\" seperator"
+			pr_err("Unable to locate \",i,0x\" separator"
 				" for Initiator port identifier: %s\n",
-				(char *)&buf[4]);
+				&buf[4]);
 			return NULL;
 		}
 		*p = '\0'; /* Terminate iSCSI Name */
-		p += 5; /* Skip over ",i,0x" seperator */
+		p += 5; /* Skip over ",i,0x" separator */
 
 		*port_nexus_ptr = p;
 		/*

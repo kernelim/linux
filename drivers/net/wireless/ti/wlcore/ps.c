@@ -28,11 +28,15 @@
 
 #define WL1271_WAKEUP_TIMEOUT 500
 
+#define ELP_ENTRY_DELAY  30
+#define ELP_ENTRY_DELAY_FORCE_PS  5
+
 void wl1271_elp_work(struct work_struct *work)
 {
 	struct delayed_work *dwork;
 	struct wl1271 *wl;
 	struct wl12xx_vif *wlvif;
+	int ret;
 
 	dwork = container_of(work, struct delayed_work, work);
 	wl = container_of(dwork, struct wl1271, elp_work);
@@ -41,7 +45,7 @@ void wl1271_elp_work(struct work_struct *work)
 
 	mutex_lock(&wl->mutex);
 
-	if (unlikely(wl->state == WL1271_STATE_OFF))
+	if (unlikely(wl->state != WLCORE_STATE_ON))
 		goto out;
 
 	/* our work might have been already cancelled */
@@ -61,7 +65,12 @@ void wl1271_elp_work(struct work_struct *work)
 	}
 
 	wl1271_debug(DEBUG_PSM, "chip to elp");
-	wl1271_raw_write32(wl, HW_ACCESS_ELP_CTRL_REG, ELPCTRL_SLEEP);
+	ret = wlcore_raw_write32(wl, HW_ACCESS_ELP_CTRL_REG, ELPCTRL_SLEEP);
+	if (ret < 0) {
+		wl12xx_queue_recovery_work(wl);
+		goto out;
+	}
+
 	set_bit(WL1271_FLAG_IN_ELP, &wl->flags);
 
 out:
@@ -72,8 +81,9 @@ out:
 void wl1271_ps_elp_sleep(struct wl1271 *wl)
 {
 	struct wl12xx_vif *wlvif;
+	u32 timeout;
 
-	if (wl->quirks & WLCORE_QUIRK_NO_ELP)
+	if (wl->sleep_auth != WL1271_PSM_ELP)
 		return;
 
 	/* we shouldn't get consecutive sleep requests */
@@ -89,8 +99,10 @@ void wl1271_ps_elp_sleep(struct wl1271 *wl)
 			return;
 	}
 
+	timeout = wl->conf.conn.forced_ps ?
+			ELP_ENTRY_DELAY_FORCE_PS : ELP_ENTRY_DELAY;
 	ieee80211_queue_delayed_work(wl->hw, &wl->elp_work,
-		msecs_to_jiffies(wl->conf.conn.dynamic_ps_timeout));
+				     msecs_to_jiffies(timeout));
 }
 
 int wl1271_ps_elp_wakeup(struct wl1271 *wl)
@@ -127,7 +139,11 @@ int wl1271_ps_elp_wakeup(struct wl1271 *wl)
 		wl->elp_compl = &compl;
 	spin_unlock_irqrestore(&wl->wl_lock, flags);
 
-	wl1271_raw_write32(wl, HW_ACCESS_ELP_CTRL_REG, ELPCTRL_WAKE_UP);
+	ret = wlcore_raw_write32(wl, HW_ACCESS_ELP_CTRL_REG, ELPCTRL_WAKE_UP);
+	if (ret < 0) {
+		wl12xx_queue_recovery_work(wl);
+		goto err;
+	}
 
 	if (!pending) {
 		ret = wait_for_completion_timeout(
@@ -136,9 +152,6 @@ int wl1271_ps_elp_wakeup(struct wl1271 *wl)
 			wl1271_error("ELP wakeup timeout!");
 			wl12xx_queue_recovery_work(wl);
 			ret = -ETIMEDOUT;
-			goto err;
-		} else if (ret < 0) {
-			wl1271_error("ELP wakeup completion error.");
 			goto err;
 		}
 	}
@@ -185,8 +198,12 @@ int wl1271_ps_set_mode(struct wl1271 *wl, struct wl12xx_vif *wlvif,
 
 		set_bit(WLVIF_FLAG_IN_PS, &wlvif->flags);
 
-		/* enable beacon early termination. Not relevant for 5GHz */
-		if (wlvif->band == IEEE80211_BAND_2GHZ) {
+		/*
+		 * enable beacon early termination.
+		 * Not relevant for 5GHz and for high rates.
+		 */
+		if ((wlvif->band == IEEE80211_BAND_2GHZ) &&
+		    (wlvif->basic_rate < CONF_HW_BIT_RATE_9MBPS)) {
 			ret = wl1271_acx_bet_enable(wl, wlvif, true);
 			if (ret < 0)
 				return ret;
@@ -196,7 +213,8 @@ int wl1271_ps_set_mode(struct wl1271 *wl, struct wl12xx_vif *wlvif,
 		wl1271_debug(DEBUG_PSM, "leaving psm");
 
 		/* disable beacon early termination */
-		if (wlvif->band == IEEE80211_BAND_2GHZ) {
+		if ((wlvif->band == IEEE80211_BAND_2GHZ) &&
+		    (wlvif->basic_rate < CONF_HW_BIT_RATE_9MBPS)) {
 			ret = wl1271_acx_bet_enable(wl, wlvif, false);
 			if (ret < 0)
 				return ret;
@@ -223,11 +241,12 @@ static void wl1271_ps_filter_frames(struct wl1271 *wl, u8 hlid)
 	struct ieee80211_tx_info *info;
 	unsigned long flags;
 	int filtered[NUM_TX_QUEUES];
+	struct wl1271_link *lnk = &wl->links[hlid];
 
 	/* filter all frames currently in the low level queues for this hlid */
 	for (i = 0; i < NUM_TX_QUEUES; i++) {
 		filtered[i] = 0;
-		while ((skb = skb_dequeue(&wl->links[hlid].tx_queue[i]))) {
+		while ((skb = skb_dequeue(&lnk->tx_queue[i]))) {
 			filtered[i]++;
 
 			if (WARN_ON(wl12xx_is_dummy_packet(wl, skb)))
@@ -241,8 +260,11 @@ static void wl1271_ps_filter_frames(struct wl1271 *wl, u8 hlid)
 	}
 
 	spin_lock_irqsave(&wl->wl_lock, flags);
-	for (i = 0; i < NUM_TX_QUEUES; i++)
+	for (i = 0; i < NUM_TX_QUEUES; i++) {
 		wl->tx_queue_count[i] -= filtered[i];
+		if (lnk->wlvif)
+			lnk->wlvif->tx_queue_count[i] -= filtered[i];
+	}
 	spin_unlock_irqrestore(&wl->wl_lock, flags);
 
 	wl1271_handle_tx_low_watermark(wl);

@@ -179,7 +179,7 @@ cifs_create(struct inode *inode, struct dentry *direntry, int mode,
 	}
 	tcon = tlink_tcon(tlink);
 
-	if (oplockEnabled)
+	if (tcon->ses->server->oplocks)
 		oplock = REQ_OPLOCK;
 
 	if (nd && (nd->flags & LOOKUP_OPEN))
@@ -528,6 +528,8 @@ cifs_lookup(struct inode *parent_dir_inode, struct dentry *direntry,
 		return (struct dentry *)tlink;
 	}
 	pTcon = tlink_tcon(tlink);
+
+	oplock = pTcon->ses->server->oplocks ? REQ_OPLOCK : 0;
 
 	/*
 	 * Don't allow the separator character in a path component.

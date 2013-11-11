@@ -1,6 +1,6 @@
 /*
  * QLogic Fibre Channel HBA Driver
- * Copyright (c)  2003-2012 QLogic Corporation
+ * Copyright (c)  2003-2013 QLogic Corporation
  *
  * See LICENSE.qla2xxx for copyright and licensing details.
  */
@@ -887,7 +887,10 @@ qla2x00_serial_num_show(struct device *dev, struct device_attribute *attr,
 	struct qla_hw_data *ha = vha->hw;
 	uint32_t sn;
 
-	if (IS_FWI2_CAPABLE(ha)) {
+	if (IS_QLAFX00(vha->hw)) {
+		return snprintf(buf, PAGE_SIZE, "%s\n",
+		    vha->hw->mr.serial_num);
+	} else if (IS_FWI2_CAPABLE(ha)) {
 		qla2xxx_get_vpd_field(vha, "SN", buf, PAGE_SIZE);
 		return snprintf(buf, PAGE_SIZE, "%s\n", buf);
 	}
@@ -911,6 +914,11 @@ qla2x00_isp_id_show(struct device *dev, struct device_attribute *attr,
 {
 	scsi_qla_host_t *vha = shost_priv(class_to_shost(dev));
 	struct qla_hw_data *ha = vha->hw;
+
+	if (IS_QLAFX00(vha->hw))
+		return snprintf(buf, PAGE_SIZE, "%s\n",
+		    vha->hw->mr.hw_version);
+
 	return snprintf(buf, PAGE_SIZE, "%04x %04x %04x %04x\n",
 	    ha->product_id[0], ha->product_id[1], ha->product_id[2],
 	    ha->product_id[3]);
@@ -921,6 +929,11 @@ qla2x00_model_name_show(struct device *dev, struct device_attribute *attr,
 			char *buf)
 {
 	scsi_qla_host_t *vha = shost_priv(class_to_shost(dev));
+
+	if (IS_QLAFX00(vha->hw))
+		return snprintf(buf, PAGE_SIZE, "%s\n",
+		    vha->hw->mr.product_name);
+
 	return snprintf(buf, PAGE_SIZE, "%s\n", vha->hw->model_number);
 }
 
@@ -1271,22 +1284,29 @@ qla2x00_thermal_temp_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	scsi_qla_host_t *vha = shost_priv(class_to_shost(dev));
-	int rval = QLA_FUNCTION_FAILED;
-	uint16_t temp, frac;
+	uint16_t temp = 0;
 
-	if (!vha->hw->flags.thermal_supported)
-		return snprintf(buf, PAGE_SIZE, "\n");
+	if (!vha->hw->thermal_support) {
+		ql_log(ql_log_warn, vha, 0x70db,
+		    "Thermal not supported by this card.\n");
+		goto done;
+	}
 
-	temp = frac = 0;
-	if (qla2x00_reset_active(vha))
-		ql_log(ql_log_warn, vha, 0x707b,
-		    "ISP reset active.\n");
-	else if (!vha->hw->flags.eeh_busy)
-		rval = qla2x00_get_thermal_temp(vha, &temp, &frac);
-	if (rval != QLA_SUCCESS)
-		temp = frac = 0;
+	if (qla2x00_reset_active(vha)) {
+		ql_log(ql_log_warn, vha, 0x70dc, "ISP reset active.\n");
+		goto done;
+	}
 
-	return snprintf(buf, PAGE_SIZE, "%d.%02d\n", temp, frac);
+	if (vha->hw->flags.eeh_busy) {
+		ql_log(ql_log_warn, vha, 0x70dd, "PCI EEH busy.\n");
+		goto done;
+	}
+
+	if (qla2x00_get_thermal_temp(vha, &temp) == QLA_SUCCESS)
+		return snprintf(buf, PAGE_SIZE, "%d\n", temp);
+
+done:
+	return snprintf(buf, PAGE_SIZE, "\n");
 }
 
 static ssize_t
@@ -1296,6 +1316,12 @@ qla2x00_fw_state_show(struct device *dev, struct device_attribute *attr,
 	scsi_qla_host_t *vha = shost_priv(class_to_shost(dev));
 	int rval = QLA_FUNCTION_FAILED;
 	uint16_t state[5];
+	uint32_t pstate;
+
+	if (IS_QLAFX00(vha->hw)) {
+		pstate = qlafx00_fw_state_show(dev, attr, buf);
+		return snprintf(buf, PAGE_SIZE, "0x%x\n", pstate);
+	}
 
 	if (qla2x00_reset_active(vha))
 		ql_log(ql_log_warn, vha, 0x707c,
@@ -1444,6 +1470,11 @@ qla2x00_get_host_speed(struct Scsi_Host *shost)
 	struct qla_hw_data *ha = ((struct scsi_qla_host *)
 					(shost_priv(shost)))->hw;
 	u32 speed = FC_PORTSPEED_UNKNOWN;
+
+	if (IS_QLAFX00(ha)) {
+		qlafx00_get_host_speed(shost);
+		return;
+	}
 
 	switch (ha->link_data_rate) {
 	case PORT_SPEED_1GB:
@@ -1613,8 +1644,7 @@ qla2x00_terminate_rport_io(struct fc_rport *rport)
 	 * At this point all fcport's software-states are cleared.  Perform any
 	 * final cleanup of firmware resources (PCBs and XCBs).
 	 */
-	if (fcport->loop_id != FC_NO_LOOP_ID &&
-	    !test_bit(UNLOADING, &fcport->vha->dpc_flags)) {
+	if (fcport->loop_id != FC_NO_LOOP_ID) {
 		if (IS_FWI2_CAPABLE(fcport->vha->hw))
 			fcport->vha->hw->isp_ops->fabric_logout(fcport->vha,
 			    fcport->loop_id, fcport->d_id.b.domain,
@@ -1628,6 +1658,9 @@ static int
 qla2x00_issue_lip(struct Scsi_Host *shost)
 {
 	scsi_qla_host_t *vha = shost_priv(shost);
+
+	if (IS_QLAFX00(vha->hw))
+		return 0;
 
 	qla2x00_loop_reset(vha);
 	return 0;
@@ -1646,6 +1679,9 @@ qla2x00_get_fc_host_stats(struct Scsi_Host *shost)
 
 	pfc_host_stat = &vha->fc_host_stat;
 	memset(pfc_host_stat, -1, sizeof(struct fc_host_statistics));
+
+	if (IS_QLAFX00(vha->hw))
+		goto done;
 
 	if (test_bit(UNLOADING, &vha->dpc_flags))
 		goto done;
@@ -2080,6 +2116,9 @@ qla2x00_init_host_attr(scsi_qla_host_t *vha)
 		    FC_PORTSPEED_1GBIT;
 	else if (IS_QLA23XX(ha))
 		speed = FC_PORTSPEED_2GBIT | FC_PORTSPEED_1GBIT;
+	else if (IS_QLAFX00(ha))
+		speed = FC_PORTSPEED_8GBIT | FC_PORTSPEED_4GBIT |
+		    FC_PORTSPEED_2GBIT | FC_PORTSPEED_1GBIT;
 	else
 		speed = FC_PORTSPEED_1GBIT;
 	fc_host_supported_speeds(vha->host) = speed;

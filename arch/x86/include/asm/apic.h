@@ -14,6 +14,7 @@
 #include <asm/mpspec.h>
 #include <asm/system.h>
 #include <asm/msr.h>
+#include <asm/idle.h>
 
 #define ARCH_APICTIMER_STOPS_ON_C3	1
 
@@ -611,6 +612,32 @@ static inline physid_mask_t default_apicid_to_cpu_present(int phys_apicid)
 }
 
 #endif /* CONFIG_X86_LOCAL_APIC */
+extern void irq_enter(void);
+extern void irq_exit(void);
+
+static inline void entering_irq(void)
+{
+	exit_idle();
+	irq_enter();
+}
+
+static inline void entering_ack_irq(void)
+{
+	ack_APIC_irq();
+	entering_irq();
+}
+
+static inline void exiting_irq(void)
+{
+	irq_exit();
+}
+
+static inline void exiting_ack_irq(void)
+{
+	irq_exit();
+	/* Ack only at the end to avoid potential reentry */
+	ack_APIC_irq();
+}
 
 #ifdef CONFIG_X86_32
 extern u8 cpu_2_logical_apicid[NR_CPUS];

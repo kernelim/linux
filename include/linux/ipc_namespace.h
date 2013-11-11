@@ -63,6 +63,10 @@ struct ipc_namespace {
 
 	unsigned int    mq_msg_default;
 	unsigned int    mq_msgsize_default;
+
+#ifndef __GENKSYMS__
+	unsigned int	proc_inum;
+#endif
 };
 
 extern struct ipc_namespace init_ipc_ns;

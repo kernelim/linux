@@ -18,6 +18,40 @@
 
 #include "pci.h"
 
+void pci_add_resource_offset(struct list_head *resources, struct resource *res,
+			     resource_size_t offset)
+{
+	struct pci_host_bridge_window *window;
+
+	window = kzalloc(sizeof(struct pci_host_bridge_window), GFP_KERNEL);
+	if (!window) {
+		printk(KERN_ERR "PCI: can't add host bridge window %pR\n", res);
+		return;
+	}
+
+	window->res = res;
+	window->offset = offset;
+	list_add_tail(&window->list, resources);
+}
+EXPORT_SYMBOL(pci_add_resource_offset);
+
+void pci_add_resource(struct list_head *resources, struct resource *res)
+{
+	pci_add_resource_offset(resources, res, 0);
+}
+EXPORT_SYMBOL(pci_add_resource);
+
+void pci_free_resource_list(struct list_head *resources)
+{
+	struct pci_host_bridge_window *window, *tmp;
+
+	list_for_each_entry_safe(window, tmp, resources, list) {
+		list_del(&window->list);
+		kfree(window);
+	}
+}
+EXPORT_SYMBOL(pci_free_resource_list);
+
 void pci_bus_add_resource(struct pci_bus *bus, struct resource *res,
 			  unsigned int flags)
 {
@@ -59,16 +93,12 @@ EXPORT_SYMBOL_GPL(pci_bus_resource_n);
 
 void pci_bus_remove_resources(struct pci_bus *bus)
 {
-	struct pci_bus_resource *bus_res, *tmp;
 	int i;
 
 	for (i = 0; i < PCI_BUS_NUM_RESOURCES; i++)
 		bus->resource[i] = 0;
 
-	list_for_each_entry_safe(bus_res, tmp, &bus->resources, list) {
-		list_del(&bus_res->list);
-		kfree(bus_res);
-	}
+	pci_free_resource_list(&bus->resources);
 }
 
 /**
@@ -167,12 +197,6 @@ int pci_bus_add_child(struct pci_bus *bus)
 		return retval;
 
 	bus->is_added = 1;
-
-	retval = device_create_file(&bus->dev, &dev_attr_cpuaffinity);
-	if (retval)
-		return retval;
-
-	retval = device_create_file(&bus->dev, &dev_attr_cpulistaffinity);
 
 	/* Create legacy_io and legacy_mem files for this bus */
 	pci_create_legacy_files(bus);
@@ -295,10 +319,7 @@ void pci_walk_bus(struct pci_bus *top, int (*cb)(struct pci_dev *, void *),
 		} else
 			next = dev->bus_list.next;
 
-		/* Run device routines with the device locked */
-		down(&dev->dev.sem);
 		retval = cb(dev, userdata);
-		up(&dev->dev.sem);
 		if (retval)
 			break;
 	}

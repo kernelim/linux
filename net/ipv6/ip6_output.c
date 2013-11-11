@@ -557,74 +557,6 @@ static void ip6_copy_metadata(struct sk_buff *to, struct sk_buff *from)
 	skb_copy_secmark(to, from);
 }
 
-int ip6_find_1stfragopt(struct sk_buff *skb, u8 **nexthdr)
-{
-	u16 offset = sizeof(struct ipv6hdr);
-	struct ipv6_opt_hdr *exthdr =
-				(struct ipv6_opt_hdr *)(ipv6_hdr(skb) + 1);
-	unsigned int packet_len = skb->tail - skb->network_header;
-	int found_rhdr = 0;
-	*nexthdr = &ipv6_hdr(skb)->nexthdr;
-
-	while (offset + 1 <= packet_len) {
-
-		switch (**nexthdr) {
-
-		case NEXTHDR_HOP:
-			break;
-		case NEXTHDR_ROUTING:
-			found_rhdr = 1;
-			break;
-		case NEXTHDR_DEST:
-#if defined(CONFIG_IPV6_MIP6) || defined(CONFIG_IPV6_MIP6_MODULE)
-			if (ipv6_find_tlv(skb, offset, IPV6_TLV_HAO) >= 0)
-				break;
-#endif
-			if (found_rhdr)
-				return offset;
-			break;
-		default :
-			return offset;
-		}
-
-		offset += ipv6_optlen(exthdr);
-		*nexthdr = &exthdr->nexthdr;
-		exthdr = (struct ipv6_opt_hdr *)(skb_network_header(skb) +
-						 offset);
-	}
-
-	return offset;
-}
-
-static u32 hashidentrnd __read_mostly;
-#define FID_HASH_SZ 16
-static u32 ipv6_fragmentation_id[FID_HASH_SZ];
-
-void __init initialize_hashidentrnd(void)
-{
-	get_random_bytes(&hashidentrnd, sizeof(hashidentrnd));
-}
-
-static u32 __ipv6_select_ident(const struct in6_addr *addr)
-{
-	u32 newid, oldid, hash = jhash2((u32 *)addr, 4, hashidentrnd);
-	u32 *pid = &ipv6_fragmentation_id[hash % FID_HASH_SZ];
-
-	do {
-		oldid = *pid;
-		newid = oldid + 1;
-		if (!(hash + newid))
-			newid++;
-	} while (cmpxchg(pid, oldid, newid) != oldid);
-
-	return hash + newid;
-}
-
-void ipv6_select_ident(struct frag_hdr *fhdr, struct in6_addr *addr)
-{
-	fhdr->identification = htonl(__ipv6_select_ident(addr));
-}
-
 int ip6_fragment(struct sk_buff *skb, int (*output)(struct sk_buff *))
 {
 	struct sk_buff *frag;
@@ -662,7 +594,7 @@ int ip6_fragment(struct sk_buff *skb, int (*output)(struct sk_buff *))
 	}
 	mtu -= hlen + sizeof(struct frag_hdr);
 
-	if (skb_has_frags(skb)) {
+	if (skb_has_frag_list(skb)) {
 		int first_len = skb_pagelen(skb);
 		int truesizes = 0;
 
@@ -1075,6 +1007,8 @@ static inline int ip6_ufo_append_data(struct sock *sk,
 	 * udp datagram
 	 */
 	if ((skb = skb_peek_tail(&sk->sk_write_queue)) == NULL) {
+		struct frag_hdr fhdr;
+
 		skb = sock_alloc_send_skb(sk,
 			hh_len + fragheaderlen + transhdrlen + 20,
 			(flags & MSG_DONTWAIT), &err);
@@ -1095,12 +1029,6 @@ static inline int ip6_ufo_append_data(struct sock *sk,
 
 		skb->ip_summed = CHECKSUM_PARTIAL;
 		skb->csum = 0;
-	}
-
-	err = skb_append_datato_frags(sk,skb, getfrag, from,
-				      (length - transhdrlen));
-	if (!err) {
-		struct frag_hdr fhdr;
 
 		/* Specify the length of each IPv6 datagram fragment.
 		 * It has to be a multiple of 8.
@@ -1111,15 +1039,10 @@ static inline int ip6_ufo_append_data(struct sock *sk,
 		ipv6_select_ident(&fhdr, &rt->rt6i_dst.addr);
 		skb_shinfo(skb)->ip6_frag_id = fhdr.identification;
 		__skb_queue_tail(&sk->sk_write_queue, skb);
-
-		return 0;
 	}
-	/* There is not enough support do UPD LSO,
-	 * so follow normal path
-	 */
-	kfree_skb(skb);
 
-	return err;
+	return skb_append_datato_frags(sk, skb, getfrag, from,
+				       (length - transhdrlen));
 }
 
 static inline struct ipv6_opt_hdr *ip6_opt_dup(struct ipv6_opt_hdr *src,
@@ -1151,6 +1074,7 @@ int ip6_append_data(struct sock *sk, int getfrag(void *from, char *to,
 	int err;
 	int offset = 0;
 	int csummode = CHECKSUM_NONE;
+	union skb_shared_tx tx_flags = { .flags = 0 };
 
 	if (flags&MSG_PROBE)
 		return 0;
@@ -1235,6 +1159,13 @@ int ip6_append_data(struct sock *sk, int getfrag(void *from, char *to,
 		}
 	}
 
+	/* For UDP, check if TX timestamp is enabled */
+	if (sk->sk_type == SOCK_DGRAM) {
+		err = sock_tx_timestamp(NULL, sk, &tx_flags);
+		if (err)
+			goto error;
+	}
+
 	/*
 	 * Let's try using as much space as possible.
 	 * Use MTU if total length of the message fits into the MTU.
@@ -1251,10 +1182,12 @@ int ip6_append_data(struct sock *sk, int getfrag(void *from, char *to,
 	 * --yoshfuji
 	 */
 
+	skb = skb_peek_tail(&sk->sk_write_queue);
 	inet->cork.length += length;
-	if (((length > mtu) && (sk->sk_protocol == IPPROTO_UDP)) &&
+	if (((length > mtu) ||
+	     (skb && skb_is_gso(skb))) &&
+	    (sk->sk_protocol == IPPROTO_UDP) &&
 	    (rt->u.dst.dev->features & NETIF_F_UFO)) {
-
 		err = ip6_ufo_append_data(sk, getfrag, from, length, hh_len,
 					  fragheaderlen, transhdrlen, mtu,
 					  flags, rt);
@@ -1263,7 +1196,7 @@ int ip6_append_data(struct sock *sk, int getfrag(void *from, char *to,
 		return 0;
 	}
 
-	if ((skb = skb_peek_tail(&sk->sk_write_queue)) == NULL)
+	if (!skb)
 		goto alloc_new_skb;
 
 	while (length > 0) {
@@ -1331,6 +1264,12 @@ alloc_new_skb:
 							   sk->sk_allocation);
 				if (unlikely(skb == NULL))
 					err = -ENOBUFS;
+				else {
+					/* Only the initial fragment
+					 * is time stamped.
+					 */
+					tx_flags.flags = 0;
+				}
 			}
 			if (skb == NULL)
 				goto error;
@@ -1341,6 +1280,9 @@ alloc_new_skb:
 			skb->csum = 0;
 			/* reserve for fragmentation */
 			skb_reserve(skb, hh_len+sizeof(struct frag_hdr));
+
+			if (sk->sk_type == SOCK_DGRAM)
+				skb_shinfo(skb)->tx_flags = tx_flags;
 
 			/*
 			 *	Find where to start putting bytes

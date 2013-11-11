@@ -63,5 +63,6 @@ int genl_unregister_family(struct genl_family *family);
 #define genlmsg_put(_skb, _pid, _seq, _fam, _flags, _cmd) genlmsg_put(_skb, _pid, _seq, &(_fam)->family, _flags, _cmd)
 #define genl_register_mc_group(_fam, _grp) genl_register_mc_group(&(_fam)->family, _grp)
 #define genl_unregister_mc_group(_fam, _grp) genl_unregister_mc_group(&(_fam)->family, _grp)
+#define genl_dump_check_consistent(cb, user_hdr, _fam) genl_dump_check_consistent(cb, user_hdr, &(_fam)->family)
 
 #endif /* GENETLINK_COMPAT_H */

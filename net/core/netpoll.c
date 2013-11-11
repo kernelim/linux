@@ -314,7 +314,7 @@ void netpoll_send_skb_on_dev(struct netpoll *np, struct sk_buff *skb,
 		struct netdev_queue *txq;
 		unsigned long flags;
 
-		txq = netdev_get_tx_queue(dev, skb_get_queue_mapping(skb));
+		txq = netdev_pick_tx(dev, skb);
 
 		local_irq_save(flags);
 		/* try until next clock tick */

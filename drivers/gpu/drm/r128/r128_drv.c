@@ -31,12 +31,11 @@
 
 #include <linux/module.h>
 
-#include "drmP.h"
-#include "drm.h"
-#include "r128_drm.h"
+#include <drm/drmP.h>
+#include <drm/r128_drm.h>
 #include "r128_drv.h"
 
-#include "drm_pciids.h"
+#include <drm/drm_pciids.h>
 
 static struct pci_device_id pciidlist[] = {
 	r128_PCI_IDS
@@ -53,6 +52,7 @@ static const struct file_operations r128_driver_fops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = r128_compat_ioctl,
 #endif
+	.llseek = noop_llseek,
 };
 
 static struct drm_driver driver = {

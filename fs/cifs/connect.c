@@ -140,8 +140,8 @@ cifs_reconnect(struct TCP_Server_Info *server)
 	spin_lock(&GlobalMid_Lock);
 	list_for_each_safe(tmp, tmp2, &server->pending_mid_q) {
 		mid_entry = list_entry(tmp, struct mid_q_entry, qhead);
-		if (mid_entry->midState == MID_REQUEST_SUBMITTED)
-			mid_entry->midState = MID_RETRY_NEEDED;
+		if (mid_entry->mid_state == MID_REQUEST_SUBMITTED)
+			mid_entry->mid_state = MID_RETRY_NEEDED;
 		list_move(&mid_entry->qhead, &retry_list);
 	}
 	spin_unlock(&GlobalMid_Lock);
@@ -180,8 +180,9 @@ cifs_reconnect(struct TCP_Server_Info *server)
 		-EINVAL = invalid transact2
 
  */
-static int check2ndT2(struct smb_hdr *pSMB, unsigned int maxBufSize)
+static int check2ndT2(char *buf)
 {
+	struct smb_hdr *pSMB = (struct smb_hdr *)buf;
 	struct smb_t2_rsp *pSMBt;
 	int remaining;
 	__u16 total_data_size, data_in_this_rsp;
@@ -213,84 +214,100 @@ static int check2ndT2(struct smb_hdr *pSMB, unsigned int maxBufSize)
 
 	cFYI(1, "missing %d bytes from transact2, check next response",
 		remaining);
-	if (total_data_size > maxBufSize) {
+	if (total_data_size > CIFSMaxBufSize) {
 		cERROR(1, "TotalDataSize %d is over maximum buffer %d",
-			total_data_size, maxBufSize);
+			total_data_size, CIFSMaxBufSize);
 		return -EINVAL;
 	}
 	return remaining;
 }
 
-static int coalesce_t2(struct smb_hdr *psecond, struct smb_hdr *pTargetSMB)
+static int coalesce_t2(char *second_buf, struct smb_hdr *target_hdr)
 {
-	struct smb_t2_rsp *pSMB2 = (struct smb_t2_rsp *)psecond;
-	struct smb_t2_rsp *pSMBt  = (struct smb_t2_rsp *)pTargetSMB;
-	char *data_area_of_target;
-	char *data_area_of_buf2;
+	struct smb_t2_rsp *pSMBs = (struct smb_t2_rsp *)second_buf;
+	struct smb_t2_rsp *pSMBt  = (struct smb_t2_rsp *)target_hdr;
+	char *data_area_of_tgt;
+	char *data_area_of_src;
 	int remaining;
-	unsigned int byte_count, total_in_buf;
-	__u16 total_data_size, total_in_buf2;
+	unsigned int byte_count, total_in_tgt;
+	__u16 tgt_total_cnt, src_total_cnt, total_in_src;
 
-	total_data_size = get_unaligned_le16(&pSMBt->t2_rsp.TotalDataCount);
+	src_total_cnt = get_unaligned_le16(&pSMBs->t2_rsp.TotalDataCount);
+	tgt_total_cnt = get_unaligned_le16(&pSMBt->t2_rsp.TotalDataCount);
 
-	if (total_data_size !=
-	    get_unaligned_le16(&pSMB2->t2_rsp.TotalDataCount))
-		cFYI(1, "total data size of primary and secondary t2 differ");
+	if (tgt_total_cnt != src_total_cnt)
+		cFYI(1, "total data count of primary and secondary t2 differ "
+			"source=%hu target=%hu", src_total_cnt, tgt_total_cnt);
 
-	total_in_buf = get_unaligned_le16(&pSMBt->t2_rsp.DataCount);
+	total_in_tgt = get_unaligned_le16(&pSMBt->t2_rsp.DataCount);
 
-	remaining = total_data_size - total_in_buf;
+	remaining = tgt_total_cnt - total_in_tgt;
 
-	if (remaining < 0)
+	if (remaining < 0) {
+		cFYI(1, "Server sent too much data. tgt_total_cnt=%hu "
+			"total_in_tgt=%hu", tgt_total_cnt, total_in_tgt);
 		return -EPROTO;
-
-	if (remaining == 0) /* nothing to do, ignore */
-		return 0;
-
-	total_in_buf2 = get_unaligned_le16(&pSMB2->t2_rsp.DataCount);
-	if (remaining < total_in_buf2) {
-		cFYI(1, "transact2 2nd response contains too much data");
 	}
 
+	if (remaining == 0) {
+		/* nothing to do, ignore */
+		cFYI(1, "no more data remains");
+		return 0;
+	}
+
+	total_in_src = get_unaligned_le16(&pSMBs->t2_rsp.DataCount);
+	if (remaining < total_in_src)
+		cFYI(1, "transact2 2nd response contains too much data");
+
 	/* find end of first SMB data area */
-	data_area_of_target = (char *)&pSMBt->hdr.Protocol +
+	data_area_of_tgt = (char *)&pSMBt->hdr.Protocol +
 				get_unaligned_le16(&pSMBt->t2_rsp.DataOffset);
+
 	/* validate target area */
+	data_area_of_src = (char *)&pSMBs->hdr.Protocol +
+				get_unaligned_le16(&pSMBs->t2_rsp.DataOffset);
 
-	data_area_of_buf2 = (char *)&pSMB2->hdr.Protocol +
-				get_unaligned_le16(&pSMB2->t2_rsp.DataOffset);
+	data_area_of_tgt += total_in_tgt;
 
-	data_area_of_target += total_in_buf;
-
-	/* copy second buffer into end of first buffer */
-	total_in_buf += total_in_buf2;
+	total_in_tgt += total_in_src;
 	/* is the result too big for the field? */
-	if (total_in_buf > USHORT_MAX)
+	if (total_in_tgt > USHRT_MAX) {
+		cFYI(1, "coalesced DataCount too large (%u)", total_in_tgt);
 		return -EPROTO;
-	put_unaligned_le16(total_in_buf, &pSMBt->t2_rsp.DataCount);
+	}
+	put_unaligned_le16(total_in_tgt, &pSMBt->t2_rsp.DataCount);
 
 	/* fix up the BCC */
-	byte_count = get_bcc(pTargetSMB);
-	byte_count += total_in_buf2;
+	byte_count = get_bcc(target_hdr);
+	byte_count += total_in_src;
 	/* is the result too big for the field? */
-	if (byte_count > USHORT_MAX)
+	if (byte_count > USHRT_MAX) {
+		cFYI(1, "coalesced BCC too large (%u)", byte_count);
 		return -EPROTO;
-	put_bcc(byte_count, pTargetSMB);
+	}
+	put_bcc(byte_count, target_hdr);
 
-	byte_count = be32_to_cpu(pTargetSMB->smb_buf_length);
-	byte_count += total_in_buf2;
+	byte_count = be32_to_cpu(target_hdr->smb_buf_length);
+	byte_count += total_in_src;
 	/* don't allow buffer to overflow */
-	if (byte_count > CIFSMaxBufSize)
+	if (byte_count > CIFSMaxBufSize + MAX_CIFS_HDR_SIZE - 4) {
+		cFYI(1, "coalesced BCC exceeds buffer size (%u)", byte_count);
 		return -ENOBUFS;
-	pTargetSMB->smb_buf_length = cpu_to_be32(byte_count);
+	}
+	target_hdr->smb_buf_length = cpu_to_be32(byte_count);
 
-	memcpy(data_area_of_target, data_area_of_buf2, total_in_buf2);
+	/* copy second buffer into end of first buffer */
+	memcpy(data_area_of_tgt, data_area_of_src, total_in_src);
 
-	if (remaining == total_in_buf2) {
-		cFYI(1, "found the last secondary response");
-		return 0; /* we are done */
-	} else /* more responses to go */
+	if (remaining != total_in_src) {
+		/* more responses to go */
+		cFYI(1, "waiting for more secondary responses");
 		return 1;
+	}
+
+	/* we are done */
+	cFYI(1, "found the last secondary response");
+	return 0;
 }
 
 static void
@@ -318,24 +335,456 @@ requeue_echo:
 	queue_delayed_work(cifsiod_workqueue, &server->echo, SMB_ECHO_INTERVAL);
 }
 
-static int
-cifs_demultiplex_thread(struct TCP_Server_Info *server)
+static bool
+allocate_buffers(struct TCP_Server_Info *server)
+{
+	if (!server->bigbuf) {
+		server->bigbuf = (char *)cifs_buf_get();
+		if (!server->bigbuf) {
+			cERROR(1, "No memory for large SMB response");
+			msleep(3000);
+			/* retry will check if exiting */
+			return false;
+		}
+	} else if (server->large_buf) {
+		/* we are reusing a dirty large buf, clear its start */
+		memset(server->bigbuf, 0, header_size());
+	}
+
+	if (!server->smallbuf) {
+		server->smallbuf = (char *)cifs_small_buf_get();
+		if (!server->smallbuf) {
+			cERROR(1, "No memory for SMB response");
+			msleep(1000);
+			/* retry will check if exiting */
+			return false;
+		}
+		/* beginning of smb buffer is cleared in our buf_get */
+	} else {
+		/* if existing small buf clear beginning */
+		memset(server->smallbuf, 0, header_size());
+	}
+
+	return true;
+}
+
+static bool
+server_unresponsive(struct TCP_Server_Info *server)
+{
+	/*
+	 * We need to wait 2 echo intervals to make sure we handle such
+	 * situations right:
+	 * 1s  client sends a normal SMB request
+	 * 2s  client gets a response
+	 * 30s echo workqueue job pops, and decides we got a response recently
+	 *     and don't need to send another
+	 * ...
+	 * 65s kernel_recvmsg times out, and we see that we haven't gotten
+	 *     a response in >60s.
+	 */
+	if (server->tcpStatus == CifsGood &&
+	    time_after(jiffies, server->lstrp + 2 * SMB_ECHO_INTERVAL)) {
+		cERROR(1, "Server %s has not responded in %d seconds. "
+			  "Reconnecting...", server->hostname,
+			  (2 * SMB_ECHO_INTERVAL) / HZ);
+		cifs_reconnect(server);
+		wake_up(&server->response_q);
+		return true;
+	}
+
+	return false;
+}
+
+/*
+ * kvec_array_init - clone a kvec array, and advance into it
+ * @new:	pointer to memory for cloned array
+ * @iov:	pointer to original array
+ * @nr_segs:	number of members in original array
+ * @bytes:	number of bytes to advance into the cloned array
+ *
+ * This function will copy the array provided in iov to a section of memory
+ * and advance the specified number of bytes into the new array. It returns
+ * the number of segments in the new array. "new" must be at least as big as
+ * the original iov array.
+ */
+static unsigned int
+kvec_array_init(struct kvec *new, struct kvec *iov, unsigned int nr_segs,
+		size_t bytes)
+{
+	size_t base = 0;
+
+	while (bytes || !iov->iov_len) {
+		int copy = min(bytes, iov->iov_len);
+
+		bytes -= copy;
+		base += copy;
+		if (iov->iov_len == base) {
+			iov++;
+			nr_segs--;
+			base = 0;
+		}
+	}
+	memcpy(new, iov, sizeof(*iov) * nr_segs);
+	new->iov_base += base;
+	new->iov_len -= base;
+	return nr_segs;
+}
+
+static struct kvec *
+get_server_iovec(struct TCP_Server_Info *server, unsigned int nr_segs)
+{
+	struct kvec *new_iov;
+
+	if (server->iov && nr_segs <= server->nr_iov)
+		return server->iov;
+
+	/* not big enough -- allocate a new one and release the old */
+	new_iov = kmalloc(sizeof(*new_iov) * nr_segs, GFP_NOFS);
+	if (new_iov) {
+		kfree(server->iov);
+		server->iov = new_iov;
+		server->nr_iov = nr_segs;
+	}
+	return new_iov;
+}
+
+int
+cifs_readv_from_socket(struct TCP_Server_Info *server, struct kvec *iov_orig,
+		       unsigned int nr_segs, unsigned int to_read)
+{
+	int length = 0;
+	int total_read;
+	unsigned int segs;
+	struct msghdr smb_msg;
+	struct kvec *iov;
+
+	iov = get_server_iovec(server, nr_segs);
+	if (!iov)
+		return -ENOMEM;
+
+	smb_msg.msg_control = NULL;
+	smb_msg.msg_controllen = 0;
+
+	for (total_read = 0; to_read; total_read += length, to_read -= length) {
+		if (server_unresponsive(server)) {
+			total_read = -EAGAIN;
+			break;
+		}
+
+		segs = kvec_array_init(iov, iov_orig, nr_segs, total_read);
+
+		length = kernel_recvmsg(server->ssocket, &smb_msg,
+					iov, segs, to_read, 0);
+
+		if (server->tcpStatus == CifsExiting) {
+			total_read = -ESHUTDOWN;
+			break;
+		} else if (server->tcpStatus == CifsNeedReconnect) {
+			cifs_reconnect(server);
+			total_read = -EAGAIN;
+			break;
+		} else if (length == -ERESTARTSYS ||
+			   length == -EAGAIN ||
+			   length == -EINTR) {
+			/*
+			 * Minimum sleep to prevent looping, allowing socket
+			 * to clear and app threads to set tcpStatus
+			 * CifsNeedReconnect if server hung.
+			 */
+			usleep_range(1000, 2000);
+			length = 0;
+			continue;
+		} else if (length <= 0) {
+			cFYI(1, "Received no data or error: expecting %d "
+				"got %d", to_read, length);
+			cifs_reconnect(server);
+			total_read = -EAGAIN;
+			break;
+		}
+	}
+	return total_read;
+}
+
+int
+cifs_read_from_socket(struct TCP_Server_Info *server, char *buf,
+		      unsigned int to_read)
+{
+	struct kvec iov;
+
+	iov.iov_base = buf;
+	iov.iov_len = to_read;
+
+	return cifs_readv_from_socket(server, &iov, 1, to_read);
+}
+
+static bool
+is_smb_response(struct TCP_Server_Info *server, unsigned char type)
+{
+	/*
+	 * The first byte big endian of the length field,
+	 * is actually not part of the length but the type
+	 * with the most common, zero, as regular data.
+	 */
+	switch (type) {
+	case RFC1002_SESSION_MESSAGE:
+		/* Regular SMB response */
+		return true;
+	case RFC1002_SESSION_KEEP_ALIVE:
+		cFYI(1, "RFC 1002 session keep alive");
+		break;
+	case RFC1002_POSITIVE_SESSION_RESPONSE:
+		cFYI(1, "RFC 1002 positive session response");
+		break;
+	case RFC1002_NEGATIVE_SESSION_RESPONSE:
+		/*
+		 * We get this from Windows 98 instead of an error on
+		 * SMB negprot response.
+		 */
+		cFYI(1, "RFC 1002 negative session response");
+		/* give server a second to clean up */
+		msleep(1000);
+		/*
+		 * Always try 445 first on reconnect since we get NACK
+		 * on some if we ever connected to port 139 (the NACK
+		 * is since we do not begin with RFC1001 session
+		 * initialize frame).
+		 */
+		cifs_set_port((struct sockaddr *)&server->dstaddr, CIFS_PORT);
+		cifs_reconnect(server);
+		wake_up(&server->response_q);
+		break;
+	default:
+		cERROR(1, "RFC 1002 unknown response type 0x%x", type);
+		cifs_reconnect(server);
+	}
+
+	return false;
+}
+
+static struct mid_q_entry *
+find_mid(struct TCP_Server_Info *server, char *buffer)
+{
+	struct smb_hdr *buf = (struct smb_hdr *)buffer;
+	struct mid_q_entry *mid;
+
+	spin_lock(&GlobalMid_Lock);
+	list_for_each_entry(mid, &server->pending_mid_q, qhead) {
+		if (mid->mid == buf->Mid &&
+		    mid->mid_state == MID_REQUEST_SUBMITTED &&
+		    le16_to_cpu(mid->command) == buf->Command) {
+			spin_unlock(&GlobalMid_Lock);
+			return mid;
+		}
+	}
+	spin_unlock(&GlobalMid_Lock);
+	return NULL;
+}
+
+void
+dequeue_mid(struct mid_q_entry *mid, bool malformed)
+{
+#ifdef CONFIG_CIFS_STATS2
+	mid->when_received = jiffies;
+#endif
+	spin_lock(&GlobalMid_Lock);
+	if (!malformed)
+		mid->mid_state = MID_RESPONSE_RECEIVED;
+	else
+		mid->mid_state = MID_RESPONSE_MALFORMED;
+	list_del_init(&mid->qhead);
+	spin_unlock(&GlobalMid_Lock);
+}
+
+static void
+handle_mid(struct mid_q_entry *mid, struct TCP_Server_Info *server,
+	   char *buf, int malformed)
+{
+	if (malformed == 0 && check2ndT2(buf) > 0) {
+		mid->multiRsp = true;
+		if (mid->resp_buf) {
+			/* merge response - fix up 1st*/
+			malformed = coalesce_t2(buf, mid->resp_buf);
+			if (malformed > 0)
+				return;
+
+			/* All parts received or packet is malformed. */
+			mid->multiEnd = true;
+			return dequeue_mid(mid, malformed);
+		}
+		if (!server->large_buf) {
+			/*FIXME: switch to already allocated largebuf?*/
+			cERROR(1, "1st trans2 resp needs bigbuf");
+		} else {
+			/* Have first buffer */
+			mid->resp_buf = buf;
+			mid->large_buf = true;
+			server->bigbuf = NULL;
+		}
+		return;
+	}
+	mid->resp_buf = buf;
+	mid->large_buf = server->large_buf;
+	/* Was previous buf put in mpx struct for multi-rsp? */
+	if (!mid->multiRsp) {
+		/* smb buffer will be freed by user thread */
+		if (server->large_buf)
+			server->bigbuf = NULL;
+		else
+			server->smallbuf = NULL;
+	}
+	dequeue_mid(mid, malformed);
+}
+
+static void clean_demultiplex_info(struct TCP_Server_Info *server)
 {
 	int length;
-	unsigned int pdu_length, total_read;
-	struct smb_hdr *smb_buffer = NULL;
-	struct smb_hdr *bigbuf = NULL;
-	struct smb_hdr *smallbuf = NULL;
-	struct msghdr smb_msg;
-	struct kvec iov;
-	struct socket *csocket = server->ssocket;
-	struct list_head *tmp, *tmp2;
+
+	/* take it off the list, if it's not already */
+	spin_lock(&cifs_tcp_ses_lock);
+	list_del_init(&server->tcp_ses_list);
+	spin_unlock(&cifs_tcp_ses_lock);
+
+	spin_lock(&GlobalMid_Lock);
+	server->tcpStatus = CifsExiting;
+	spin_unlock(&GlobalMid_Lock);
+	wake_up_all(&server->response_q);
+
+	/* check if we have blocked requests that need to free */
+	spin_lock(&server->req_lock);
+	if (server->credits <= 0)
+		server->credits = 1;
+	spin_unlock(&server->req_lock);
+	/*
+	 * Although there should not be any requests blocked on this queue it
+	 * can not hurt to be paranoid and try to wake up requests that may
+	 * haven been blocked when more than 50 at time were on the wire to the
+	 * same server - they now will see the session is in exit state and get
+	 * out of SendReceive.
+	 */
+	wake_up_all(&server->request_q);
+	/* give those requests time to exit */
+	msleep(125);
+
+	if (server->ssocket) {
+		sock_release(server->ssocket);
+		server->ssocket = NULL;
+	}
+
+	if (!list_empty(&server->pending_mid_q)) {
+		struct list_head dispose_list;
+		struct mid_q_entry *mid_entry;
+		struct list_head *tmp, *tmp2;
+
+		INIT_LIST_HEAD(&dispose_list);
+		spin_lock(&GlobalMid_Lock);
+		list_for_each_safe(tmp, tmp2, &server->pending_mid_q) {
+			mid_entry = list_entry(tmp, struct mid_q_entry, qhead);
+			cFYI(1, "Clearing mid 0x%llx", mid_entry->mid);
+			mid_entry->mid_state = MID_SHUTDOWN;
+			list_move(&mid_entry->qhead, &dispose_list);
+		}
+		spin_unlock(&GlobalMid_Lock);
+
+		/* now walk dispose list and issue callbacks */
+		list_for_each_safe(tmp, tmp2, &dispose_list) {
+			mid_entry = list_entry(tmp, struct mid_q_entry, qhead);
+			cFYI(1, "Callback mid 0x%llx", mid_entry->mid);
+			list_del_init(&mid_entry->qhead);
+			mid_entry->callback(mid_entry);
+		}
+		/* 1/8th of sec is more than enough time for them to exit */
+		msleep(125);
+	}
+
+	if (!list_empty(&server->pending_mid_q)) {
+		/*
+		 * mpx threads have not exited yet give them at least the smb
+		 * send timeout time for long ops.
+		 *
+		 * Due to delays on oplock break requests, we need to wait at
+		 * least 45 seconds before giving up on a request getting a
+		 * response and going ahead and killing cifsd.
+		 */
+		cFYI(1, "Wait for exit from demultiplex thread");
+		msleep(46000);
+		/*
+		 * If threads still have not exited they are probably never
+		 * coming home not much else we can do but free the memory.
+		 */
+	}
+
+	kfree(server->hostname);
+	kfree(server->iov);
+	kfree(server);
+
+	length = atomic_dec_return(&tcpSesAllocCount);
+	if (length > 0)
+		mempool_resize(cifs_req_poolp, length + cifs_min_rcv,
+				GFP_KERNEL);
+}
+
+static int
+standard_receive3(struct TCP_Server_Info *server, struct mid_q_entry *mid)
+{
+	int length;
+	char *buf = server->smallbuf;
+	unsigned int pdu_length = get_rfc1002_length(buf);
+
+	/* make sure this will fit in a large buffer */
+	if (pdu_length > CIFSMaxBufSize + max_header_size() - 4) {
+		cERROR(1, "SMB response too long (%u bytes)",
+			pdu_length);
+		cifs_reconnect(server);
+		wake_up(&server->response_q);
+		return -EAGAIN;
+	}
+
+	/* switch to large buffer if too big for a small one */
+	if (pdu_length > MAX_CIFS_SMALL_BUFFER_SIZE - 4) {
+		server->large_buf = true;
+		memcpy(server->bigbuf, buf, server->total_read);
+		buf = server->bigbuf;
+	}
+
+	/* now read the rest */
+	length = cifs_read_from_socket(server, buf + header_size() - 1,
+				       pdu_length - header_size() + 1 + 4);
+	if (length < 0)
+		return length;
+	server->total_read += length;
+
+	dump_smb(buf, server->total_read);
+
+	/*
+	 * We know that we received enough to get to the MID as we
+	 * checked the pdu_length earlier. Now check to see
+	 * if the rest of the header is OK. We borrow the length
+	 * var for the rest of the loop to avoid a new stack var.
+	 *
+	 * 48 bytes is enough to display the header and a little bit
+	 * into the payload for debugging purposes.
+	 */
+	length = checkSMB(buf, server->total_read);
+	if (length != 0)
+		cifs_dump_mem("Bad SMB: ", buf,
+			min_t(unsigned int, server->total_read, 48));
+
+	if (!mid)
+		return length;
+	
+	handle_mid(mid, server, buf, length);
+	return 0;
+}
+
+static int
+cifs_demultiplex_thread(void *p)
+{
+	int length;
+	struct TCP_Server_Info *server = p;
+	unsigned int pdu_length;
+	char *buf = NULL;
 	struct task_struct *task_to_wake = NULL;
 	struct mid_q_entry *mid_entry;
-	char temp;
-	bool isLargeBuf = false;
-	bool isMultiRsp;
-	int reconnect;
 
 	current->flags |= PF_MEMALLOC;
 	cFYI(1, "Demultiplex PID: %d", task_pid_nr(current));
@@ -349,395 +798,81 @@ cifs_demultiplex_thread(struct TCP_Server_Info *server)
 	while (server->tcpStatus != CifsExiting) {
 		if (try_to_freeze())
 			continue;
-		if (bigbuf == NULL) {
-			bigbuf = cifs_buf_get();
-			if (!bigbuf) {
-				cERROR(1, "No memory for large SMB response");
-				msleep(3000);
-				/* retry will check if exiting */
-				continue;
-			}
-		} else if (isLargeBuf) {
-			/* we are reusing a dirty large buf, clear its start */
-			memset(bigbuf, 0, sizeof(struct smb_hdr));
-		}
 
-		if (smallbuf == NULL) {
-			smallbuf = cifs_small_buf_get();
-			if (!smallbuf) {
-				cERROR(1, "No memory for SMB response");
-				msleep(1000);
-				/* retry will check if exiting */
-				continue;
-			}
-			/* beginning of smb buffer is cleared in our buf_get */
-		} else /* if existing small buf clear beginning */
-			memset(smallbuf, 0, sizeof(struct smb_hdr));
+		if (!allocate_buffers(server))
+			continue;
 
-		isLargeBuf = false;
-		isMultiRsp = false;
-		smb_buffer = smallbuf;
-		iov.iov_base = smb_buffer;
-		iov.iov_len = 4;
-		smb_msg.msg_control = NULL;
-		smb_msg.msg_controllen = 0;
+		server->large_buf = false;
+		buf = server->smallbuf;
 		pdu_length = 4; /* enough to get RFC1001 header */
 
-incomplete_rcv:
-		if (echo_retries > 0 && server->tcpStatus == CifsGood &&
-		    time_after(jiffies, server->lstrp +
-					(echo_retries * SMB_ECHO_INTERVAL))) {
-			cERROR(1, "Server %s has not responded in %d seconds. "
-				  "Reconnecting...", server->hostname,
-				  (echo_retries * SMB_ECHO_INTERVAL / HZ));
-			cifs_reconnect(server);
-			csocket = server->ssocket;
-			wake_up(&server->response_q);
+		length = cifs_read_from_socket(server, buf, pdu_length);
+		if (length < 0)
 			continue;
-		}
-
-		length =
-		    kernel_recvmsg(csocket, &smb_msg,
-				&iov, 1, pdu_length, 0 /* BB other flags? */);
-
-		if (server->tcpStatus == CifsExiting) {
-			break;
-		} else if (server->tcpStatus == CifsNeedReconnect) {
-			cFYI(1, "Reconnect after server stopped responding");
-			cifs_reconnect(server);
-			cFYI(1, "call to reconnect done");
-			csocket = server->ssocket;
-			continue;
-		} else if (length == -ERESTARTSYS ||
-			   length == -EAGAIN ||
-			   length == -EINTR) {
-			msleep(1); /* minimum sleep to prevent looping
-				allowing socket to clear and app threads to set
-				tcpStatus CifsNeedReconnect if server hung */
-			if (pdu_length < 4) {
-				iov.iov_base = (4 - pdu_length) +
-							(char *)smb_buffer;
-				iov.iov_len = pdu_length;
-				smb_msg.msg_control = NULL;
-				smb_msg.msg_controllen = 0;
-				goto incomplete_rcv;
-			} else
-				continue;
-		} else if (length <= 0) {
-			cFYI(1, "Reconnect after unexpected peek error %d",
-				length);
-			cifs_reconnect(server);
-			csocket = server->ssocket;
-			wake_up(&server->response_q);
-			continue;
-		} else if (length < pdu_length) {
-			cFYI(1, "requested %d bytes but only got %d bytes",
-				  pdu_length, length);
-			pdu_length -= length;
-			msleep(1);
-			goto incomplete_rcv;
-		}
-
-		/* The right amount was read from socket - 4 bytes */
-		/* so we can now interpret the length field */
-
-		/* the first byte big endian of the length field,
-		is actually not part of the length but the type
-		with the most common, zero, as regular data */
-		temp = *((char *) smb_buffer);
-
-		/* Note that FC 1001 length is big endian on the wire,
-		but we convert it here so it is always manipulated
-		as host byte order */
-		pdu_length = be32_to_cpu(smb_buffer->smb_buf_length);
-
-		cFYI(1, "rfc1002 length 0x%x", pdu_length+4);
-
-		if (temp == (char) RFC1002_SESSION_KEEP_ALIVE) {
-			continue;
-		} else if (temp == (char)RFC1002_POSITIVE_SESSION_RESPONSE) {
-			cFYI(1, "Good RFC 1002 session rsp");
-			continue;
-		} else if (temp == (char)RFC1002_NEGATIVE_SESSION_RESPONSE) {
-			/* we get this from Windows 98 instead of
-			   an error on SMB negprot response */
-			cFYI(1, "Negative RFC1002 Session Response Error 0x%x)",
-				pdu_length);
-			/* give server a second to clean up  */
-			msleep(1000);
-			/* always try 445 first on reconnect since we get NACK
-			 * on some if we ever connected to port 139 (the NACK
-			 * is since we do not begin with RFC1001 session
-			 * initialize frame)
-			 */
-			cifs_set_port((struct sockaddr *)
-					&server->dstaddr, CIFS_PORT);
-			cifs_reconnect(server);
-			csocket = server->ssocket;
-			wake_up(&server->response_q);
-			continue;
-		} else if (temp != (char) 0) {
-			cERROR(1, "Unknown RFC 1002 frame");
-			cifs_dump_mem(" Received Data: ", (char *)smb_buffer,
-				      length);
-			cifs_reconnect(server);
-			csocket = server->ssocket;
-			continue;
-		}
-
-		/* else we have an SMB response */
-		if ((pdu_length > CIFSMaxBufSize + MAX_CIFS_HDR_SIZE - 4) ||
-			    (pdu_length < sizeof(struct smb_hdr) - 1 - 4)) {
-			cERROR(1, "Invalid size SMB length %d pdu_length %d",
-					length, pdu_length+4);
-			cifs_reconnect(server);
-			csocket = server->ssocket;
-			wake_up(&server->response_q);
-			continue;
-		}
-
-		/* else length ok */
-		reconnect = 0;
-
-		if (pdu_length > MAX_CIFS_SMALL_BUFFER_SIZE - 4) {
-			isLargeBuf = true;
-			memcpy(bigbuf, smallbuf, 4);
-			smb_buffer = bigbuf;
-		}
-		length = 0;
-		iov.iov_base = 4 + (char *)smb_buffer;
-		iov.iov_len = pdu_length;
-		for (total_read = 0; total_read < pdu_length;
-		     total_read += length) {
-			length = kernel_recvmsg(csocket, &smb_msg, &iov, 1,
-						pdu_length - total_read, 0);
-			if (server->tcpStatus == CifsExiting) {
-				/* then will exit */
-				reconnect = 2;
-				break;
-			} else if (server->tcpStatus == CifsNeedReconnect) {
-				cifs_reconnect(server);
-				csocket = server->ssocket;
-				/* Reconnect wakes up rspns q */
-				/* Now we will reread sock */
-				reconnect = 1;
-				break;
-			} else if (length == -ERESTARTSYS ||
-				   length == -EAGAIN ||
-				   length == -EINTR) {
-				msleep(1); /* minimum sleep to prevent looping,
-					      allowing socket to clear and app
-					      threads to set tcpStatus
-					      CifsNeedReconnect if server hung*/
-				length = 0;
-				continue;
-			} else if (length <= 0) {
-				cERROR(1, "Received no data, expecting %d",
-					      pdu_length - total_read);
-				cifs_reconnect(server);
-				csocket = server->ssocket;
-				reconnect = 1;
-				break;
-			}
-		}
-		if (reconnect == 2)
-			break;
-		else if (reconnect == 1)
-			continue;
-
-		total_read += 4; /* account for rfc1002 hdr */
-
-		dump_smb(smb_buffer, total_read);
+		server->total_read = length;
 
 		/*
-		 * We know that we received enough to get to the MID as we
-		 * checked the pdu_length earlier. Now check to see
-		 * if the rest of the header is OK. We borrow the length
-		 * var for the rest of the loop to avoid a new stack var.
-		 *
-		 * 48 bytes is enough to display the header and a little bit
-		 * into the payload for debugging purposes.
+		 * The right amount was read from socket - 4 bytes,
+		 * so we can now interpret the length field.
 		 */
-		length = checkSMB(smb_buffer, smb_buffer->Mid, total_read);
-		if (length != 0)
-			cifs_dump_mem("Bad SMB: ", smb_buffer,
-					min_t(unsigned int, total_read, 48));
+		pdu_length = get_rfc1002_length(buf);
 
-		mid_entry = NULL;
-		server->lstrp = jiffies;
-
-		spin_lock(&GlobalMid_Lock);
-		list_for_each_safe(tmp, tmp2, &server->pending_mid_q) {
-			mid_entry = list_entry(tmp, struct mid_q_entry, qhead);
-
-			if (mid_entry->mid != smb_buffer->Mid ||
-			    mid_entry->midState != MID_REQUEST_SUBMITTED ||
-			    mid_entry->command != smb_buffer->Command) {
-				mid_entry = NULL;
-				continue;
-			}
-
-			if (length == 0 &&
-			    check2ndT2(smb_buffer, server->maxBuf) > 0) {
-				/* We have a multipart transact2 resp */
-				isMultiRsp = true;
-				if (mid_entry->resp_buf) {
-					/* merge response - fix up 1st*/
-					length = coalesce_t2(smb_buffer,
-							mid_entry->resp_buf);
-					if (length > 0) {
-						length = 0;
-						mid_entry->multiRsp = true;
-						break;
-					} else {
-						/* all parts received or
-						 * packet is malformed
-						 */
-						mid_entry->multiEnd = true;
-						goto multi_t2_fnd;
-					}
-				} else {
-					if (!isLargeBuf) {
-						/*
-						 * FIXME: switch to already
-						 *        allocated largebuf?
-						 */
-						cERROR(1, "1st trans2 resp "
-							  "needs bigbuf");
-					} else {
-						/* Have first buffer */
-						mid_entry->resp_buf =
-							 smb_buffer;
-						mid_entry->largeBuf = true;
-						bigbuf = NULL;
-					}
-				}
-				break;
-			}
-			mid_entry->resp_buf = smb_buffer;
-			mid_entry->largeBuf = isLargeBuf;
-multi_t2_fnd:
-			if (length == 0)
-				mid_entry->midState = MID_RESPONSE_RECEIVED;
-			else
-				mid_entry->midState = MID_RESPONSE_MALFORMED;
-#ifdef CONFIG_CIFS_STATS2
-			mid_entry->when_received = jiffies;
-#endif
-			list_del_init(&mid_entry->qhead);
-			break;
-		}
-		spin_unlock(&GlobalMid_Lock);
-
-		if (mid_entry != NULL) {
-			mid_entry->callback(mid_entry);
-			/* Was previous buf put in mpx struct for multi-rsp? */
-			if (!isMultiRsp) {
-				/* smb buffer will be freed by user thread */
-				if (isLargeBuf)
-					bigbuf = NULL;
-				else
-					smallbuf = NULL;
-			}
-		} else if (length != 0) {
-			/* response sanity checks failed */
+		cFYI(1, "RFC1002 header 0x%x", pdu_length);
+		if (!is_smb_response(server, buf[0]))
 			continue;
-		} else if (!is_valid_oplock_break(smb_buffer, server) &&
-			   !isMultiRsp) {
+
+		/* make sure we have enough to get to the MID */
+		if (pdu_length < header_size() - 1 - 4) {
+			cERROR(1, "SMB response too short (%u bytes)",
+				pdu_length);
+			cifs_reconnect(server);
+			wake_up(&server->response_q);
+			continue;
+		}
+
+		/* read down to the MID */
+		length = cifs_read_from_socket(server, buf + 4,
+					       header_size() - 1 - 4);
+		if (length < 0)
+			continue;
+		server->total_read += length;
+
+		mid_entry = find_mid(server, buf);
+
+		if (!mid_entry || !mid_entry->receive)
+			length = standard_receive3(server, mid_entry);
+		else
+			length = mid_entry->receive(server, mid_entry);
+
+		if (length < 0)
+			continue;
+
+		if (server->large_buf)
+			buf = server->bigbuf;
+
+		server->lstrp = jiffies;
+		if (mid_entry != NULL) {
+			if (!mid_entry->multiRsp || mid_entry->multiEnd)
+				mid_entry->callback(mid_entry);
+		} else if (!is_valid_oplock_break(buf, server)) {
 			cERROR(1, "No task to wake, unknown frame received! "
 				   "NumMids %d", atomic_read(&midCount));
-			cifs_dump_mem("Received Data is: ", (char *)smb_buffer,
-				      sizeof(struct smb_hdr));
+			cifs_dump_mem("Received Data is: ", buf, header_size());
 #ifdef CONFIG_CIFS_DEBUG2
-			cifs_dump_detail(smb_buffer);
+			cifs_dump_detail(buf);
 			cifs_dump_mids(server);
 #endif /* CIFS_DEBUG2 */
 
 		}
 	} /* end while !EXITING */
 
-	/* take it off the list, if it's not already */
-	spin_lock(&cifs_tcp_ses_lock);
-	list_del_init(&server->tcp_ses_list);
-	spin_unlock(&cifs_tcp_ses_lock);
+	/* buffer usually freed in free_mid - need to free it here on exit */
+	cifs_buf_release(server->bigbuf);
+	if (server->smallbuf) /* no sense logging a debug message if NULL */
+		cifs_small_buf_release(server->smallbuf);
 
-	spin_lock(&GlobalMid_Lock);
-	server->tcpStatus = CifsExiting;
-	spin_unlock(&GlobalMid_Lock);
-	wake_up_all(&server->response_q);
-
-	/* check if we have blocked requests that need to free */
-	/* Note that cifs_max_pending is normally 50, but
-	can be set at module install time to as little as two */
-	spin_lock(&GlobalMid_Lock);
-	if (atomic_read(&server->inFlight) >= cifs_max_pending)
-		atomic_set(&server->inFlight, cifs_max_pending - 1);
-	/* We do not want to set the max_pending too low or we
-	could end up with the counter going negative */
-	spin_unlock(&GlobalMid_Lock);
-	/* Although there should not be any requests blocked on
-	this queue it can not hurt to be paranoid and try to wake up requests
-	that may haven been blocked when more than 50 at time were on the wire
-	to the same server - they now will see the session is in exit state
-	and get out of SendReceive.  */
-	wake_up_all(&server->request_q);
-	/* give those requests time to exit */
-	msleep(125);
-
-	if (server->ssocket) {
-		sock_release(csocket);
-		server->ssocket = NULL;
-	}
-	/* buffer usuallly freed in free_mid - need to free it here on exit */
-	cifs_buf_release(bigbuf);
-	if (smallbuf) /* no sense logging a debug message if NULL */
-		cifs_small_buf_release(smallbuf);
-
-	if (!list_empty(&server->pending_mid_q)) {
-		struct list_head dispose_list;
-
-		INIT_LIST_HEAD(&dispose_list);
-		spin_lock(&GlobalMid_Lock);
-		list_for_each_safe(tmp, tmp2, &server->pending_mid_q) {
-			mid_entry = list_entry(tmp, struct mid_q_entry, qhead);
-			cFYI(1, "Clearing mid 0x%x", mid_entry->mid);
-			mid_entry->midState = MID_SHUTDOWN;
-			list_move(&mid_entry->qhead, &dispose_list);
-		}
-		spin_unlock(&GlobalMid_Lock);
-
-		/* now walk dispose list and issue callbacks */
-		list_for_each_safe(tmp, tmp2, &dispose_list) {
-			mid_entry = list_entry(tmp, struct mid_q_entry, qhead);
-			cFYI(1, "Callback mid 0x%x", mid_entry->mid);
-			list_del_init(&mid_entry->qhead);
-			mid_entry->callback(mid_entry);
-		}
-		/* 1/8th of sec is more than enough time for them to exit */
-		msleep(125);
-	}
-
-	if (!list_empty(&server->pending_mid_q)) {
-		/* mpx threads have not exited yet give them
-		at least the smb send timeout time for long ops */
-		/* due to delays on oplock break requests, we need
-		to wait at least 45 seconds before giving up
-		on a request getting a response and going ahead
-		and killing cifsd */
-		cFYI(1, "Wait for exit from demultiplex thread");
-		msleep(46000);
-		/* if threads still have not exited they are probably never
-		coming home not much else we can do but free the memory */
-	}
-
-	kfree(server->hostname);
 	task_to_wake = xchg(&server->tsk, NULL);
-	kfree(server);
-
-	length = atomic_dec_return(&tcpSesAllocCount);
-	if (length  > 0)
-		mempool_resize(cifs_req_poolp, length + cifs_min_rcv,
-				GFP_KERNEL);
+	clean_demultiplex_info(server);
 
 	/* if server->tsk was NULL then wait for a signal before exiting */
 	if (!task_to_wake) {
@@ -1184,6 +1319,10 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 				cERROR(1, "no socket option specified");
 				continue;
 			} else if (strnicmp(value, "TCP_NODELAY", 11) == 0) {
+				/*
+				 * FIXME: since we now cork/uncork the socket while
+				 *	sending, should we deprecate this option?
+				 */
 				vol->sockopt_tcp_nodelay = 1;
 			}
 		} else if (strnicmp(data, "netbiosname", 4) == 0) {
@@ -1756,7 +1895,8 @@ cifs_get_tcp_session(struct smb_vol *volume_info)
 	tcp_ses->noblocksnd = volume_info->noblocksnd;
 	tcp_ses->noautotune = volume_info->noautotune;
 	tcp_ses->tcp_nodelay = volume_info->sockopt_tcp_nodelay;
-	atomic_set(&tcp_ses->inFlight, 0);
+	tcp_ses->in_flight = 0;
+	tcp_ses->credits = 1;
 	init_waitqueue_head(&tcp_ses->response_q);
 	init_waitqueue_head(&tcp_ses->request_q);
 	INIT_LIST_HEAD(&tcp_ses->pending_mid_q);
@@ -1768,6 +1908,7 @@ cifs_get_tcp_session(struct smb_vol *volume_info)
 	tcp_ses->session_estab = false;
 	tcp_ses->sequence_number = 0;
 	tcp_ses->lstrp = jiffies;
+	spin_lock_init(&tcp_ses->req_lock);
 	INIT_LIST_HEAD(&tcp_ses->tcp_ses_list);
 	INIT_LIST_HEAD(&tcp_ses->smb_ses_list);
 	INIT_DELAYED_WORK(&tcp_ses->echo, cifs_echo_request);
@@ -1804,7 +1945,7 @@ cifs_get_tcp_session(struct smb_vol *volume_info)
 	 * this will succeed. No need for try_module_get().
 	 */
 	__module_get(THIS_MODULE);
-	tcp_ses->tsk = kthread_run((void *)(void *)cifs_demultiplex_thread,
+	tcp_ses->tsk = kthread_run(cifs_demultiplex_thread,
 				  tcp_ses, "cifsd");
 	if (IS_ERR(tcp_ses->tsk)) {
 		rc = PTR_ERR(tcp_ses->tsk);
@@ -2524,13 +2665,6 @@ void reset_cifs_unix_caps(int xid, struct cifs_tcon *tcon,
 		if (cifs_sb && (cifs_sb->prepathlen > 0))
 			cifs_sb->prepath[0] = CIFS_DIR_SEP(cifs_sb);
 
-		if (cifs_sb && (cifs_sb->rsize > 127 * 1024)) {
-			if ((cap & CIFS_UNIX_LARGE_READ_CAP) == 0) {
-				cifs_sb->rsize = 127 * 1024;
-				cFYI(DBG2, "larger reads not supported by srv");
-			}
-		}
-
 		cFYI(1, "Negotiate caps 0x%x", (int)cap);
 #ifdef CONFIG_CIFS_DEBUG2
 		if (cap & CIFS_UNIX_FCNTL_CAP)
@@ -2595,21 +2729,6 @@ void cifs_setup_cifs_sb(struct smb_vol *pvolume_info,
 	spin_lock_init(&cifs_sb->tlink_tree_lock);
 	cifs_sb->tlink_tree = RB_ROOT;
 
-	if (pvolume_info->rsize > CIFSMaxBufSize) {
-		cERROR(1, "rsize %d too large, using MaxBufSize",
-			pvolume_info->rsize);
-		cifs_sb->rsize = CIFSMaxBufSize;
-	} else if ((pvolume_info->rsize) &&
-			(pvolume_info->rsize <= CIFSMaxBufSize))
-		cifs_sb->rsize = pvolume_info->rsize;
-	else /* default */
-		cifs_sb->rsize = CIFSMaxBufSize;
-
-	if (cifs_sb->rsize < 2048) {
-		cifs_sb->rsize = 2048;
-		/* Windows ME may prefer this */
-		cFYI(1, "readsize set to minimum: 2048");
-	}
 	/* calculate prepath */
 	cifs_sb->prepath = pvolume_info->prepath;
 	if (cifs_sb->prepath) {
@@ -2694,22 +2813,28 @@ void cifs_setup_cifs_sb(struct smb_vol *pvolume_info,
 }
 
 /*
- * When the server supports very large writes via POSIX extensions, we can
- * allow up to 2^24-1, minus the size of a WRITE_AND_X header, not including
- * the RFC1001 length.
+ * When the server supports very large reads and writes via POSIX extensions,
+ * we can allow up to 2^24-1, minus the size of a READ/WRITE_AND_X header, not
+ * including the RFC1001 length.
  *
  * Note that this might make for "interesting" allocation problems during
  * writeback however as we have to allocate an array of pointers for the
  * pages. A 16M write means ~32kb page array with PAGE_CACHE_SIZE == 4096.
+ * 
+ * For reads, there is a similar problem as we need to allocate an array
+ * of kvecs to handle the receive, though that should only need to be done
+ * once.
  */
 #define CIFS_MAX_WSIZE ((1<<24) - 1 - sizeof(WRITE_REQ) + 4)
+#define CIFS_MAX_RSIZE ((1<<24) - sizeof(READ_RSP) + 4)
 
 /*
- * When the server doesn't allow large posix writes, only allow a wsize of
- * 128k minus the size of the WRITE_AND_X header. That allows for a write up
- * to the maximum size described by RFC1002.
+ * When the server doesn't allow large posix writes, only allow a rsize/wsize
+ * of 2^17-1 minus the size of the call header. That allows for a read or
+ * write up to the maximum size described by RFC1002.
  */
 #define CIFS_MAX_RFC1002_WSIZE (128 * 1024 - sizeof(WRITE_REQ) + 4)
+#define CIFS_MAX_RFC1002_RSIZE ((1<<17) - 1 - sizeof(READ_RSP) + 4)
 
 /*
  * The default wsize is 1M. find_get_pages seems to return a maximum of 256
@@ -2729,6 +2854,7 @@ void cifs_setup_cifs_sb(struct smb_vol *pvolume_info,
  *
  * http://blogs.msdn.com/b/openspecification/archive/2009/04/10/smb-maximum-transmit-buffer-size-and-performance-tuning.aspx
  */
+#define CIFS_DEFAULT_NON_POSIX_RSIZE (60 * 1024)
 #define CIFS_DEFAULT_NON_POSIX_WSIZE (65536)
 
 /*
@@ -2773,13 +2899,51 @@ cifs_negotiate_wsize(struct cifs_tcon *tcon, struct smb_vol *pvolume_info)
 		wsize = min_t(unsigned int, wsize,
 				server->maxBuf - sizeof(WRITE_REQ) + 4);
 
-	/* limit to the amount that we can kmap at once */
-	wsize = min_t(unsigned int, wsize, CIFS_KMAP_SIZE_LIMIT);
-
 	/* hard limit of CIFS_MAX_WSIZE */
 	wsize = min_t(unsigned int, wsize, CIFS_MAX_WSIZE);
 
 	return wsize;
+}
+
+static unsigned int
+cifs_negotiate_rsize(struct cifs_tcon *tcon, struct smb_vol *pvolume_info)
+{
+	__u64 unix_cap = le64_to_cpu(tcon->fsUnixInfo.Capability);
+	struct TCP_Server_Info *server = tcon->ses->server;
+	unsigned int rsize, defsize;
+
+	/*
+	 * Set default value...
+	 *
+	 * HACK alert! Ancient servers have very small buffers. Even though
+	 * MS-CIFS indicates that servers are only limited by the client's
+	 * bufsize for reads, testing against win98se shows that it throws
+	 * INVALID_PARAMETER errors if you try to request too large a read.
+	 * OS/2 just sends back short reads.
+	 *
+	 * If the server doesn't advertise CAP_LARGE_READ_X, then assume that
+	 * it can't handle a read request larger than its MaxBufferSize either.
+	 */
+	if (tcon->unix_ext && (unix_cap & CIFS_UNIX_LARGE_READ_CAP))
+		defsize = CIFS_DEFAULT_IOSIZE;
+	else if (server->capabilities & CAP_LARGE_READ_X)
+		defsize = CIFS_DEFAULT_NON_POSIX_RSIZE;
+	else
+		defsize = server->maxBuf - sizeof(READ_RSP);
+
+	rsize = pvolume_info->rsize ? pvolume_info->rsize : defsize;
+
+	/*
+	 * no CAP_LARGE_READ_X? Then MS-CIFS states that we must limit this to
+	 * the client's MaxBufferSize.
+	 */
+	if (!(server->capabilities & CAP_LARGE_READ_X))
+		rsize = min_t(unsigned int, CIFSMaxBufSize, rsize);
+
+	/* hard limit of CIFS_MAX_RSIZE */
+	rsize = min_t(unsigned int, rsize, CIFS_MAX_RSIZE);
+
+	return rsize;
 }
 
 static int
@@ -3070,15 +3234,8 @@ try_mount_again:
 	if ((cifs_sb->mnt_cifs_flags & CIFS_MOUNT_POSIX_PATHS) == 0)
 		convert_delimiter(cifs_sb->prepath, CIFS_DIR_SEP(cifs_sb));
 
-	if ((tcon->unix_ext == 0) && (cifs_sb->rsize > (1024 * 127))) {
-		cifs_sb->rsize = 1024 * 127;
-		cFYI(DBG2, "no very large read support, rsize now 127K");
-	}
-	if (!(tcon->ses->capabilities & CAP_LARGE_READ_X))
-		cifs_sb->rsize = min(cifs_sb->rsize,
-			       (tcon->ses->server->maxBuf - MAX_CIFS_HDR_SIZE));
-
 	cifs_sb->wsize = cifs_negotiate_wsize(tcon, volume_info);
+	cifs_sb->rsize = cifs_negotiate_rsize(tcon, volume_info);
 
 remote_path_check:
 #ifdef CONFIG_CIFS_DFS_UPCALL
@@ -3390,9 +3547,11 @@ int cifs_negotiate_protocol(unsigned int xid, struct cifs_ses *ses)
 	if (server->maxBuf != 0)
 		return 0;
 
+	cifs_set_credits(server, 1);
 	rc = CIFSSMBNegotiate(xid, ses);
 	if (rc == -EAGAIN) {
 		/* retry only once on 1st time connection */
+		cifs_set_credits(server, 1);
 		rc = CIFSSMBNegotiate(xid, ses);
 		if (rc == -EAGAIN)
 			rc = -EHOSTDOWN;

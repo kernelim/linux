@@ -22,6 +22,10 @@ enum
 	NDA_LLADDR,
 	NDA_CACHEINFO,
 	NDA_PROBES,
+	NDA_VLAN,
+	NDA_PORT,
+	NDA_VNI,
+	NDA_IFINDEX,
 	__NDA_MAX
 };
 
@@ -34,6 +38,9 @@ enum
 #define NTF_USE		0x01
 #define NTF_PROXY	0x08	/* == ATF_PUBL */
 #define NTF_ROUTER	0x80
+
+#define NTF_SELF	0x02
+#define NTF_MASTER	0x04
 
 /*
  *	Neighbor Cache Entry States.

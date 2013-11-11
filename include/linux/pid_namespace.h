@@ -33,6 +33,10 @@ struct pid_namespace {
 #ifndef __GENKSYMS__
 	gid_t pid_gid;
 	int hide_pid;
+	int nr_hashed;
+	struct work_struct proc_work;
+	int reboot;	/* group exit code if this pidns was rebooted */
+	unsigned int proc_inum;
 #endif
 };
 
@@ -49,6 +53,7 @@ static inline struct pid_namespace *get_pid_ns(struct pid_namespace *ns)
 extern struct pid_namespace *copy_pid_ns(unsigned long flags, struct pid_namespace *ns);
 extern void free_pid_ns(struct kref *kref);
 extern void zap_pid_ns_processes(struct pid_namespace *pid_ns);
+extern int reboot_pid_ns(struct pid_namespace *pid_ns, int cmd);
 
 static inline void put_pid_ns(struct pid_namespace *ns)
 {
@@ -76,10 +81,14 @@ static inline void put_pid_ns(struct pid_namespace *ns)
 {
 }
 
-
 static inline void zap_pid_ns_processes(struct pid_namespace *ns)
 {
 	BUG();
+}
+
+static inline int reboot_pid_ns(struct pid_namespace *pid_ns, int cmd)
+{
+	return 0;
 }
 #endif /* CONFIG_PID_NS */
 

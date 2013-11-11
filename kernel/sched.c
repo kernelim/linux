@@ -113,14 +113,6 @@
 #define NICE_0_SHIFT		SCHED_LOAD_SHIFT
 
 /*
- * These are the 'tuning knobs' of the scheduler:
- *
- * default timeslice is 100 msecs (used only for SCHED_RR tasks).
- * Timeslices get refilled after they expire.
- */
-#define DEF_TIMESLICE		(100 * HZ / 1000)
-
-/*
  * single value that denotes runtime == period, ie unlimited time.
  */
 #define RUNTIME_INF	((u64)~0ULL)
@@ -2269,7 +2261,7 @@ void set_task_cpu(struct task_struct *p, unsigned int new_cpu)
 	if (old_cpu != new_cpu) {
 		p->se.nr_migrations++;
 		perf_sw_event(PERF_COUNT_SW_CPU_MIGRATIONS,
-				     1, 1, NULL, 0);
+				     1, NULL, 0);
 	}
 
 	__set_task_cpu(p, new_cpu);
@@ -2984,7 +2976,7 @@ static void finish_task_switch(struct rq *rq, struct task_struct *prev)
 	 */
 	prev_state = prev->state;
 	finish_arch_switch(prev);
-	perf_event_task_sched_in(current);
+	perf_event_task_sched_in(prev, current);
 	finish_lock_switch(rq, prev);
 
 	fire_sched_in_preempt_notifiers(current);
@@ -4315,6 +4307,10 @@ static inline void fix_small_imbalance(struct sd_lb_stats *sds,
 	 * moving them.
 	 */
 
+	/* Weird topologies might not set this */
+	if (!sds->this)
+		return;
+
 	pwr_now += sds->busiest->cpu_power *
 			min(sds->busiest_load_per_task, sds->max_load);
 	pwr_now += sds->this->cpu_power *
@@ -4398,8 +4394,8 @@ static inline void calculate_imbalance(struct sd_lb_stats *sds, int this_cpu,
 	max_pull = min(sds->max_load - sds->avg_load, load_above_capacity);
 
 	/* How much load to actually move to equalise the imbalance */
-	*imbalance = min(max_pull * sds->busiest->cpu_power,
-		(sds->avg_load - sds->this_load) * sds->this->cpu_power)
+	*imbalance = min(max_pull * sds->busiest->cpu_power, (!sds->this ? 0 :
+		(sds->avg_load - sds->this_load) * sds->this->cpu_power))
 			/ SCHED_LOAD_SCALE;
 
 	/*
@@ -7453,7 +7449,10 @@ EXPORT_SYMBOL(yield);
  * It's the caller's job to ensure that the target task struct
  * can't go away on us before we can do any checks.
  *
- * Returns true if we indeed boosted the target task.
+ * Returns:
+ *	true (>0) if we indeed boosted the target task.
+ *	false (0) if we failed to boost the target.
+ *	-ESRCH if there's no task to yield to.
  */
 bool __sched yield_to(struct task_struct *p, bool preempt)
 {
@@ -7467,6 +7466,15 @@ bool __sched yield_to(struct task_struct *p, bool preempt)
 
 again:
 	p_rq = task_rq(p);
+	/*
+	 * If we're the only runnable task on the rq and target rq also
+	 * has only one task, there's absolutely no point in yielding.
+	 */
+	if (rq->nr_running == 1 && p_rq->nr_running == 1) {
+		yielded = -ESRCH;
+		goto out_irq;
+	}
+
 	double_rq_lock(rq, p_rq);
 	while (task_rq(p) != p_rq) {
 		double_rq_unlock(rq, p_rq);
@@ -7474,13 +7482,13 @@ again:
 	}
 
 	if (!curr->sched_class->yield_to_task)
-		goto out;
+		goto out_unlock;
 
 	if (curr->sched_class != p->sched_class)
-		goto out;
+		goto out_unlock;
 
 	if (task_running(p_rq, p) || p->state)
-		goto out;
+		goto out_unlock;
 
 	yielded = curr->sched_class->yield_to_task(rq, p, preempt);
 	if (yielded) {
@@ -7493,11 +7501,12 @@ again:
 			resched_task(p_rq->curr);
 	}
 
-out:
+out_unlock:
 	double_rq_unlock(rq, p_rq);
+out_irq:
 	local_irq_restore(flags);
 
-	if (yielded)
+	if (yielded > 0)
 		schedule();
 
 	return yielded;
@@ -9216,7 +9225,8 @@ static int build_numa_sched_groups(struct s_data *d,
 		sd->groups = sg;
 	}
 
-	sg->cpu_power = 0;
+	/* Weird topologies might otherwise result in a /0 trap */
+	sg->cpu_power = SCHED_LOAD_SCALE * cpumask_weight(d->nodemask);
 	cpumask_copy(sched_group_cpus(sg), d->nodemask);
 	sg->next = sg;
 	cpumask_or(d->covered, d->covered, d->nodemask);
@@ -9239,7 +9249,7 @@ static int build_numa_sched_groups(struct s_data *d,
 			       "Can not alloc domain group for node %d\n", j);
 			return -ENOMEM;
 		}
-		sg->cpu_power = 0;
+		sg->cpu_power = SCHED_LOAD_SCALE * cpumask_weight(d->tmpmask);
 		cpumask_copy(sched_group_cpus(sg), d->tmpmask);
 		sg->next = prev->next;
 		cpumask_or(d->covered, d->covered, d->tmpmask);
@@ -11187,6 +11197,25 @@ static int sched_rt_global_constraints(void)
 	return 0;
 }
 #endif /* CONFIG_RT_GROUP_SCHED */
+
+int sched_rr_handler(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp,
+		loff_t *ppos)
+{
+	int ret;
+	static DEFINE_MUTEX(mutex);
+
+	mutex_lock(&mutex);
+	ret = proc_dointvec(table, write, buffer, lenp, ppos);
+	/* make sure that internally we keep jiffies */
+	/* also, writing zero resets timeslice to default */
+	if (!ret && write) {
+		sched_rr_timeslice = sched_rr_timeslice <= 0 ?
+			RR_TIMESLICE : msecs_to_jiffies(sched_rr_timeslice);
+	}
+	mutex_unlock(&mutex);
+	return ret;
+}
 
 int sched_rt_handler(struct ctl_table *table, int write,
 		void __user *buffer, size_t *lenp,

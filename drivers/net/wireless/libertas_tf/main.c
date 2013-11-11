@@ -227,7 +227,9 @@ static void lbtf_free_adapter(struct lbtf_private *priv)
 	lbtf_deb_leave(LBTF_DEB_MAIN);
 }
 
-static void lbtf_op_tx(struct ieee80211_hw *hw, struct sk_buff *skb)
+static void lbtf_op_tx(struct ieee80211_hw *hw,
+		       struct ieee80211_tx_control *control,
+		       struct sk_buff *skb)
 {
 	struct lbtf_private *priv = hw->priv;
 
@@ -410,24 +412,37 @@ static int lbtf_op_config(struct ieee80211_hw *hw, u32 changed)
 	struct ieee80211_conf *conf = &hw->conf;
 	lbtf_deb_enter(LBTF_DEB_MACOPS);
 
-	if (conf->channel->center_freq != priv->cur_freq) {
-		priv->cur_freq = conf->channel->center_freq;
-		lbtf_set_channel(priv, conf->channel->hw_value);
+	if (conf->chandef.chan->center_freq != priv->cur_freq) {
+		priv->cur_freq = conf->chandef.chan->center_freq;
+		lbtf_set_channel(priv, conf->chandef.chan->hw_value);
 	}
 	lbtf_deb_leave(LBTF_DEB_MACOPS);
 	return 0;
 }
 
 static u64 lbtf_op_prepare_multicast(struct ieee80211_hw *hw,
+#if 0 /* Not in RHEL */
+				     struct netdev_hw_addr_list *mc_list)
+#else
 				     int mc_count, struct dev_addr_list *ha)
+#endif
 {
 	struct lbtf_private *priv = hw->priv;
 	int i;
+#if 0 /* Not in RHEL */
+	struct netdev_hw_addr *ha;
+	int mc_count = netdev_hw_addr_list_count(mc_list);
+#endif
 
 	if (!mc_count || mc_count > MRVDRV_MAX_MULTICAST_LIST_SIZE)
 		return mc_count;
 
 	priv->nr_of_multicastmacaddr = mc_count;
+#if 0 /* Not in RHEL */
+	i = 0;
+	netdev_hw_addr_list_for_each(ha, mc_list)
+		memcpy(&priv->multicastlist[i++], ha->addr, ETH_ALEN);
+#else
 	for (i = 0; i < mc_count; i++) {
 		if (!ha)
 			break;
@@ -435,6 +450,7 @@ static u64 lbtf_op_prepare_multicast(struct ieee80211_hw *hw,
 				ETH_ALEN);
 		ha = ha->next;
 	}
+#endif
 
 	return mc_count;
 }
@@ -537,7 +553,7 @@ static int lbtf_op_get_survey(struct ieee80211_hw *hw, int idx,
 	if (idx != 0)
 		return -ENOENT;
 
-	survey->channel = conf->channel;
+	survey->channel = conf->chandef.chan;
 	survey->filled = SURVEY_INFO_NOISE_DBM;
 	survey->noise = priv->noise;
 
@@ -721,11 +737,11 @@ void lbtf_bcn_sent(struct lbtf_private *priv)
 		return;
 
 	if (skb_queue_empty(&priv->bc_ps_buf)) {
-		bool tx_buff_bc = 0;
+		bool tx_buff_bc = false;
 
 		while ((skb = ieee80211_get_buffered_bc(priv->hw, priv->vif))) {
 			skb_queue_tail(&priv->bc_ps_buf, skb);
-			tx_buff_bc = 1;
+			tx_buff_bc = true;
 		}
 		if (tx_buff_bc) {
 			ieee80211_stop_queues(priv->hw);

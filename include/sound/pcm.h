@@ -352,6 +352,7 @@ struct snd_pcm_runtime2 {
 	struct snd_pcm_oss_runtime oss;
 #endif
 	unsigned long hw_ptr_buffer_jiffies; /* buffer time in jiffies */
+	snd_pcm_uframes_t twake;	/* do transfer (!poll) wakeup if non-zero */
 };
 
 struct snd_pcm_group {		/* keep linked substreams */
@@ -959,6 +960,8 @@ static int snd_pcm_lib_alloc_vmalloc_32_buffer
 #define snd_pcm_lib_alloc_vmalloc_32_buffer(subs, size) \
 	_snd_pcm_lib_alloc_vmalloc_buffer \
 			(subs, size, GFP_KERNEL | GFP_DMA32 | __GFP_ZERO)
+
+#define snd_pcm_get_dma_buf(substream) ((substream)->runtime->dma_buffer_p)
 
 #ifdef CONFIG_SND_DMA_SGBUF
 /*

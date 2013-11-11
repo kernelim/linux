@@ -738,9 +738,6 @@ static int ethtool_set_rx_csum(struct net_device *dev, char __user *useraddr)
 	if (copy_from_user(&edata, useraddr, sizeof(edata)))
 		return -EFAULT;
 
-	if (!edata.data && dev->ethtool_ops->set_sg)
-		dev->features &= ~NETIF_F_GRO;
-
 	return dev->ethtool_ops->set_rx_csum(dev, edata.data);
 }
 
@@ -832,12 +829,9 @@ static int ethtool_set_gro(struct net_device *dev, char __user *useraddr)
 	if (copy_from_user(&edata, useraddr, sizeof(edata)))
 		return -EFAULT;
 
-	if (edata.data) {
-		if (!dev->ethtool_ops->get_rx_csum ||
-		    !dev->ethtool_ops->get_rx_csum(dev))
-			return -EINVAL;
+	if (edata.data)
 		dev->features |= NETIF_F_GRO;
-	} else
+	else
 		dev->features &= ~NETIF_F_GRO;
 
 	return 0;
@@ -1456,9 +1450,6 @@ int dev_ethtool(struct net *net, struct ifreq *ifr)
 	case ETHTOOL_GRXCLSRLALL:
 	case ETHTOOL_GET_TS_INFO:
 		break;
-	case ETHTOOL_RESET:
-		rc = ethtool_reset(dev, useraddr);
-		break;
 	default:
 		if (!capable(CAP_NET_ADMIN))
 			return -EPERM;
@@ -1628,6 +1619,9 @@ int dev_ethtool(struct net *net, struct ifreq *ifr)
 	case ETHTOOL_SRXCLSRLDEL:
 	case ETHTOOL_SRXCLSRLINS:
 		rc = ethtool_set_rxnfc(dev, ethcmd, useraddr);
+		break;
+	case ETHTOOL_RESET:
+		rc = ethtool_reset(dev, useraddr);
 		break;
 	case ETHTOOL_GGRO:
 		rc = ethtool_get_gro(dev, useraddr);

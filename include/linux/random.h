@@ -65,9 +65,11 @@ unsigned int get_random_int(void);
 unsigned long randomize_range(unsigned long start, unsigned long end, unsigned long len);
 
 u32 random32(void);
+void prandom_bytes(void *buf, int nbytes);
 void srandom32(u32 seed);
 
 u32 prandom32(struct rnd_state *);
+void prandom_bytes_state(struct rnd_state *state, void *buf, int nbytes);
 
 /*
  * Handle minimum values for seeds
@@ -103,6 +105,12 @@ static inline int arch_get_random_int(unsigned int *v)
 	return 0;
 }
 #endif
+
+/* Pseudo random number generator from numerical recipes. */
+static inline u32 next_pseudo_random32(u32 seed)
+{
+	return seed * 1664525 + 1013904223;
+}
 
 #endif /* __KERNEL___ */
 

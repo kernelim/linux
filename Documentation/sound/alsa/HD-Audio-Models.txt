@@ -29,6 +29,7 @@ ALC269/270/275/276/280/282
   alc271-dmic	Enable ALC271X digital mic workaround
   inv-dmic	Inverted internal mic workaround
   lenovo-dock   Enables docking station I/O for some Lenovos
+  dell-headset-multi	Headset jack, which can also be used as mic-in
 
 ALC662/663/272
 ==============
@@ -40,6 +41,8 @@ ALC662/663/272
   asus-mode6	ASUS
   asus-mode7	ASUS
   asus-mode8	ASUS
+  inv-dmic	Inverted internal mic workaround
+  dell-headset-multi	Headset jack, which can also be used as mic-in
 
 ALC680
 ======
@@ -51,7 +54,7 @@ ALC882/883/885/888/889
   acer-aspire-8930g	Acer Aspire 8330G/6935G
   acer-aspire		Acer Aspire others
   inv-dmic	Inverted internal mic workaround
-  no-primary-hp		VAIO Z workaround (for fixed speaker DAC)
+  no-primary-hp		VAIO Z/VGC-LN51JGB workaround (for fixed speaker DAC)
 
 ALC861/660
 ==========

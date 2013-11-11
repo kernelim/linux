@@ -2,6 +2,8 @@
 #define _TRACE_KVM_H
 
 #include <linux/tracepoint.h>
+#include <asm/vmx.h>
+#include <asm/svm.h>
 
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM kvm
@@ -148,26 +150,32 @@ TRACE_EVENT(kvm_apic,
 #define trace_kvm_apic_read(reg, val)		trace_kvm_apic(0, reg, val)
 #define trace_kvm_apic_write(reg, val)		trace_kvm_apic(1, reg, val)
 
+#define KVM_ISA_VMX   1
+#define KVM_ISA_SVM   2
+
 /*
  * Tracepoint for kvm guest exit:
  */
 TRACE_EVENT(kvm_exit,
-	TP_PROTO(unsigned int exit_reason, unsigned long guest_rip),
-	TP_ARGS(exit_reason, guest_rip),
+	TP_PROTO(unsigned int exit_reason, unsigned long guest_rip, u32 isa),
+	TP_ARGS(exit_reason, guest_rip, isa),
 
 	TP_STRUCT__entry(
 		__field(	unsigned int,	exit_reason	)
 		__field(	unsigned long,	guest_rip	)
+		__field(	u32,	        isa             )
 	),
 
 	TP_fast_assign(
 		__entry->exit_reason	= exit_reason;
 		__entry->guest_rip	= guest_rip;
+		__entry->isa            = isa;
 	),
 
 	TP_printk("reason %s rip 0x%lx",
-		 ftrace_print_symbols_seq(p, __entry->exit_reason,
-					  kvm_x86_ops->exit_reasons_str),
+		 (__entry->isa == KVM_ISA_VMX) ?
+		 __print_symbolic(__entry->exit_reason, VMX_EXIT_REASONS) :
+		 __print_symbolic(__entry->exit_reason, SVM_EXIT_REASONS),
 		 __entry->guest_rip)
 );
 
@@ -413,6 +421,27 @@ TRACE_EVENT(kvm_pv_eoi,
 	),
 
 	TP_printk("apicid %x vector %d", __entry->apicid, __entry->vector)
+);
+
+TRACE_EVENT(kvm_write_tsc_offset,
+	TP_PROTO(unsigned int vcpu_id, __u64 previous_tsc_offset,
+		 __u64 next_tsc_offset),
+	TP_ARGS(vcpu_id, previous_tsc_offset, next_tsc_offset),
+
+	TP_STRUCT__entry(
+		__field( unsigned int,	vcpu_id				)
+		__field(	__u64,	previous_tsc_offset		)
+		__field(	__u64,	next_tsc_offset			)
+	),
+
+	TP_fast_assign(
+		__entry->vcpu_id		= vcpu_id;
+		__entry->previous_tsc_offset	= previous_tsc_offset;
+		__entry->next_tsc_offset	= next_tsc_offset;
+	),
+
+	TP_printk("vcpu=%u prev=%llu next=%llu", __entry->vcpu_id,
+		  __entry->previous_tsc_offset, __entry->next_tsc_offset)
 );
 
 #endif /* _TRACE_KVM_H */

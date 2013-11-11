@@ -297,7 +297,11 @@ void mmu_notifier_unregister(struct mmu_notifier *mn, struct mm_struct *mm)
 		srcu_read_unlock(&srcu, id);
 
 		spin_lock(&mm->mmu_notifier_mm->lock);
-		hlist_del_rcu(&mn->hlist);
+		/*
+		 * Can not use list_del_rcu() since __mmu_notifier_release
+		 * can delete it before we hold the lock.
+		 */
+		hlist_del_init_rcu(&mn->hlist);
 		spin_unlock(&mm->mmu_notifier_mm->lock);
 	}
 

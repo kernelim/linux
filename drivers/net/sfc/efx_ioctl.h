@@ -3,7 +3,7 @@
  *           (including support for SFE4001 10GBT NIC)
  *
  * Copyright 2005-2006: Fen Systems Ltd.
- * Copyright 2006-2009: Solarflare Communications Inc,
+ * Copyright 2006-2010: Solarflare Communications Inc,
  *                      9501 Jeronimo Road, Suite 250,
  *                      Irvine, CA 92618, USA
  *
@@ -41,6 +41,15 @@
  * Efx private ioctls
  */
 
+/* For talking MCDI to siena ************************************************/
+#define EFX_MCDI_REQUEST 0xef0c
+struct efx_mcdi_request {
+	__u32 payload[63];
+	__u8 cmd;
+	__u8 len; /* In and out */
+	__u8 rc;
+};
+
 /* Reset selected components, like ETHTOOL_RESET ****************************/
 #define EFX_RESET_FLAGS 0xef0d
 struct efx_reset_flags {
@@ -50,6 +59,7 @@ struct efx_reset_flags {
 /* Efx private ioctl command structures *************************************/
 
 union efx_ioctl_data {
+	struct efx_mcdi_request mcdi_request;
 	struct efx_reset_flags reset_flags;
 };
 

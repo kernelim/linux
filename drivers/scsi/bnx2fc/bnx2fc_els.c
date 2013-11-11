@@ -3,7 +3,7 @@
  * This file contains helper routines that handle ELS requests
  * and responses.
  *
- * Copyright (c) 2008 - 2011 Broadcom Corporation
+ * Copyright (c) 2008 - 2013 Broadcom Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -811,7 +811,7 @@ void bnx2fc_process_els_compl(struct bnx2fc_cmd *els_req,
 			     &els_req->req_flags)) {
 		BNX2FC_ELS_DBG("Timer context finished processing this "
 			   "els - 0x%x\n", els_req->xid);
-		/* This IO doesnt receive cleanup completion */
+		/* This IO doesn't receive cleanup completion */
 		kref_put(&els_req->refcount, bnx2fc_cmd_release);
 		return;
 	}
@@ -901,7 +901,7 @@ struct fc_seq *bnx2fc_elsct_send(struct fc_lport *lport, u32 did,
 {
 	struct fcoe_port *port = lport_priv(lport);
 	struct bnx2fc_interface *interface = port->priv;
-	struct fcoe_ctlr *fip = &interface->ctlr;
+	struct fcoe_ctlr *fip = bnx2fc_to_ctlr(interface);
 	struct fc_frame_header *fh = fc_frame_header_get(fp);
 
 	switch (op) {

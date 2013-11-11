@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- * Copyright(c) 2008 - 2012 Intel Corporation. All rights reserved.
+ * Copyright(c) 2008 - 2013 Intel Corporation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License as
@@ -27,7 +27,6 @@
 #include <linux/module.h>
 #include <linux/stringify.h>
 #include "iwl-config.h"
-#include "iwl-cfg.h"
 #include "iwl-csr.h"
 #include "iwl-agn-hw.h"
 
@@ -64,13 +63,26 @@ static const struct iwl_base_params iwl1000_base_params = {
 	.support_ct_kill_exit = true,
 	.plcp_delta_threshold = IWL_MAX_PLCP_ERR_EXT_LONG_THRESHOLD_DEF,
 	.chain_noise_scale = 1000,
-	.wd_timeout = IWL_WATCHHDOG_DISABLED,
+	.wd_timeout = IWL_WATCHDOG_DISABLED,
 	.max_event_log_size = 128,
 };
 
 static const struct iwl_ht_params iwl1000_ht_params = {
 	.ht_greenfield_support = true,
 	.use_rts_for_aggregation = true, /* use rts/cts protection */
+	.ht40_bands = BIT(IEEE80211_BAND_2GHZ),
+};
+
+static const struct iwl_eeprom_params iwl1000_eeprom_params = {
+	.regulatory_bands = {
+		EEPROM_REG_BAND_1_CHANNELS,
+		EEPROM_REG_BAND_2_CHANNELS,
+		EEPROM_REG_BAND_3_CHANNELS,
+		EEPROM_REG_BAND_4_CHANNELS,
+		EEPROM_REG_BAND_5_CHANNELS,
+		EEPROM_REG_BAND_24_HT40_CHANNELS,
+		EEPROM_REGULATORY_BAND_NO_HT40,
+	}
 };
 
 #define IWL_DEVICE_1000						\
@@ -81,9 +93,10 @@ static const struct iwl_ht_params iwl1000_ht_params = {
 	.device_family = IWL_DEVICE_FAMILY_1000,		\
 	.max_inst_size = IWLAGN_RTC_INST_SIZE,			\
 	.max_data_size = IWLAGN_RTC_DATA_SIZE,			\
-	.eeprom_ver = EEPROM_1000_EEPROM_VERSION,		\
-	.eeprom_calib_ver = EEPROM_1000_TX_POWER_VERSION,	\
+	.nvm_ver = EEPROM_1000_EEPROM_VERSION,		\
+	.nvm_calib_ver = EEPROM_1000_TX_POWER_VERSION,	\
 	.base_params = &iwl1000_base_params,			\
+	.eeprom_params = &iwl1000_eeprom_params,		\
 	.led_mode = IWL_LED_BLINK
 
 const struct iwl_cfg iwl1000_bgn_cfg = {
@@ -105,9 +118,10 @@ const struct iwl_cfg iwl1000_bg_cfg = {
 	.device_family = IWL_DEVICE_FAMILY_100,			\
 	.max_inst_size = IWLAGN_RTC_INST_SIZE,			\
 	.max_data_size = IWLAGN_RTC_DATA_SIZE,			\
-	.eeprom_ver = EEPROM_1000_EEPROM_VERSION,		\
-	.eeprom_calib_ver = EEPROM_1000_TX_POWER_VERSION,	\
+	.nvm_ver = EEPROM_1000_EEPROM_VERSION,		\
+	.nvm_calib_ver = EEPROM_1000_TX_POWER_VERSION,	\
 	.base_params = &iwl1000_base_params,			\
+	.eeprom_params = &iwl1000_eeprom_params,		\
 	.led_mode = IWL_LED_RF_STATE,				\
 	.rx_with_siso_diversity = true
 

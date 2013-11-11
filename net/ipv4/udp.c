@@ -95,6 +95,7 @@
 #include <linux/mm.h>
 #include <linux/inet.h>
 #include <linux/netdevice.h>
+#include <linux/if_vlan.h>
 #include <net/tcp_states.h>
 #include <linux/skbuff.h>
 #include <linux/proc_fs.h>
@@ -133,6 +134,7 @@ static int udp_lib_lport_inuse(struct net *net, __u16 num,
 {
 	struct sock *sk2;
 	struct hlist_nulls_node *node;
+	uid_t uid = sock_i_uid(sk);
 
 	sk_nulls_for_each(sk2, node, &hslot->head)
 		if (net_eq(sock_net(sk2), net)			&&
@@ -141,6 +143,8 @@ static int udp_lib_lport_inuse(struct net *net, __u16 num,
 		    (!sk2->sk_reuse || !sk->sk_reuse)		&&
 		    (!sk2->sk_bound_dev_if || !sk->sk_bound_dev_if
 			|| sk2->sk_bound_dev_if == sk->sk_bound_dev_if) &&
+		    (!sk2->sk_reuseport || !sk->sk_reuseport ||
+		      uid != sock_i_uid(sk2)) &&
 		    (*saddr_comp)(sk, sk2)) {
 			if (bitmap)
 				__set_bit(sk2->sk_hash / UDP_HTABLE_SIZE,
@@ -250,26 +254,26 @@ static inline int compute_score(struct sock *sk, struct net *net, __be32 saddr,
 			!ipv6_only_sock(sk)) {
 		struct inet_sock *inet = inet_sk(sk);
 
-		score = (sk->sk_family == PF_INET ? 1 : 0);
+		score = (sk->sk_family == PF_INET ? 2 : 1);
 		if (inet->rcv_saddr) {
 			if (inet->rcv_saddr != daddr)
 				return -1;
-			score += 2;
+			score += 4;
 		}
 		if (inet->daddr) {
 			if (inet->daddr != saddr)
 				return -1;
-			score += 2;
+			score += 4;
 		}
 		if (inet->dport) {
 			if (inet->dport != sport)
 				return -1;
-			score += 2;
+			score += 4;
 		}
 		if (sk->sk_bound_dev_if) {
 			if (sk->sk_bound_dev_if != dif)
 				return -1;
-			score += 2;
+			score += 4;
 		}
 	}
 	return score;
@@ -285,20 +289,32 @@ static struct sock *__udp4_lib_lookup(struct net *net, __be32 saddr,
 	struct sock *sk, *result;
 	struct hlist_nulls_node *node;
 	unsigned short hnum = ntohs(dport);
-	unsigned int hash = udp_hashfn(net, hnum);
-	struct udp_hslot *hslot = &udptable->hash[hash];
-	int score, badness;
+	unsigned int slot = udp_hashfn(net, hnum);
+	struct udp_hslot *hslot = &udptable->hash[slot];
+	int score, badness, matches = 0, reuseport = 0;
+	u32 hash = 0;
 
 	rcu_read_lock();
 begin:
 	result = NULL;
-	badness = -1;
+	badness = 0;
 	sk_nulls_for_each_rcu(sk, node, &hslot->head) {
 		score = compute_score(sk, net, saddr, hnum, sport,
 				      daddr, dport, dif);
 		if (score > badness) {
 			result = sk;
 			badness = score;
+			reuseport = sk->sk_reuseport;
+			if (reuseport) {
+				hash = inet_ehashfn(net, daddr, hnum,
+						    saddr, htons(sport));
+				matches = 1;
+			}
+		} else if (score == badness && reuseport) {
+			matches++;
+			if (((u64)hash * matches) >> 32 == 0)
+				result = sk;
+			hash = next_pseudo_random32(hash);
 		}
 	}
 	/*
@@ -306,7 +322,7 @@ begin:
 	 * not the expected one, we must restart lookup.
 	 * We probably met an item that was moved to another chain.
 	 */
-	if (get_nulls_value(node) != hash)
+	if (get_nulls_value(node) != slot)
 		goto begin;
 
 	if (result) {
@@ -1216,7 +1232,7 @@ int udp_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 	}
 
 
-	if (sk_rcvqueues_full(sk, skb))
+	if (sk_rcvqueues_full(sk, skb, sk->sk_rcvbuf))
 		goto drop;
 
 	rc = 0;
@@ -1224,7 +1240,7 @@ int udp_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 	bh_lock_sock(sk);
 	if (!sock_owned_by_user(sk))
 		rc = __udp_queue_rcv_skb(sk, skb);
-	else if (sk_add_backlog(sk, skb)) {
+	else if (sk_add_backlog(sk, skb, sk->sk_rcvbuf)) {
 		bh_unlock_sock(sk);
 		goto drop;
 	}
@@ -1622,6 +1638,8 @@ unsigned int udp_poll(struct file *file, struct socket *sock, poll_table *wait)
 	unsigned int mask = datagram_poll(file, sock, wait);
 	struct sock *sk = sock->sk;
 
+	inet_rps_record_flow(sk);
+
 	/* Check for false positives due to checksum errors */
 	if ((mask & POLLRDNORM) && !(file->f_flags & O_NONBLOCK) &&
 	    !(sk->sk_shutdown & RCV_SHUTDOWN) && !first_packet_length(sk))
@@ -1902,30 +1920,110 @@ void __init udp_init(void)
 
 int udp4_ufo_send_check(struct sk_buff *skb)
 {
-	const struct iphdr *iph;
-	struct udphdr *uh;
-
-	if (!pskb_may_pull(skb, sizeof(*uh)))
+	if (!pskb_may_pull(skb, sizeof(struct udphdr)))
 		return -EINVAL;
 
-	iph = ip_hdr(skb);
-	uh = udp_hdr(skb);
+	if (likely(!skb->encapsulation)) {
+		const struct iphdr *iph;
+		struct udphdr *uh;
 
-	uh->check = ~csum_tcpudp_magic(iph->saddr, iph->daddr, skb->len,
-				       IPPROTO_UDP, 0);
-	skb->csum_start = skb_transport_header(skb) - skb->head;
-	skb->csum_offset = offsetof(struct udphdr, check);
-	skb->ip_summed = CHECKSUM_PARTIAL;
+		iph = ip_hdr(skb);
+		uh = udp_hdr(skb);
+
+		uh->check = ~csum_tcpudp_magic(iph->saddr, iph->daddr, skb->len,
+				IPPROTO_UDP, 0);
+		skb->csum_start = skb_transport_header(skb) - skb->head;
+		skb->csum_offset = offsetof(struct udphdr, check);
+		skb->ip_summed = CHECKSUM_PARTIAL;
+	}
 	return 0;
+}
+
+static struct sk_buff *skb_udp_tunnel_segment(struct sk_buff *skb, int features)
+{
+	struct sk_buff *segs = ERR_PTR(-EINVAL);
+	int mac_len = skb->mac_len;
+	/* tnl_hlen = skb_inner_mac_header(skb) - skb_transport_header(skb);
+	 * Only VXLAN uses this so far, so we can just hardcode this length.
+	 */
+	int tnl_hlen = sizeof(struct udphdr) + 8; /* 8 == sizeof(struct vxlanhdr) */
+	struct vlan_ethhdr *veth;
+	__be16 protocol = skb->protocol;
+	int enc_features;
+	int outer_hlen, inner_mac_len = ETH_HLEN;
+
+	if (unlikely(!pskb_may_pull(skb, tnl_hlen + ETH_HLEN)))
+		goto out;
+
+	/* RHEL specific
+	 *
+	 * Due to lack of inner header marks in struct sk_buff, the
+	 * only way to regain knowledge of the inner header protocol
+	 * and inner mac header boundry is by packet inspection.
+	 */
+	veth = (struct vlan_ethhdr *) (skb_transport_header(skb) + tnl_hlen);
+	if (veth->h_vlan_proto == htons(ETH_P_8021Q)) {
+		if (unlikely(!pskb_may_pull(skb, tnl_hlen + VLAN_ETH_HLEN)))
+			goto out;
+
+		skb->protocol = veth->h_vlan_encapsulated_proto;
+		inner_mac_len += VLAN_HLEN;
+	} else
+		skb->protocol = veth->h_vlan_proto;
+
+	skb->encapsulation = 0;
+	__skb_pull(skb, tnl_hlen);
+
+	skb_reset_mac_header(skb);
+
+	skb_set_network_header(skb, inner_mac_len);
+	skb->mac_len = inner_mac_len;
+
+	/* segment inner packet. */
+	enc_features = NETIF_F_SG & netif_skb_features(skb);
+	segs = skb_mac_gso_segment(skb, enc_features);
+	if (!segs || IS_ERR(segs))
+		goto out;
+
+	outer_hlen = skb_tnl_header_len(skb);
+	skb = segs;
+	do {
+		struct udphdr *uh;
+		int udp_offset = outer_hlen - tnl_hlen;
+
+		skb->mac_len = mac_len;
+
+		skb_push(skb, outer_hlen);
+		skb_reset_mac_header(skb);
+		skb_set_network_header(skb, mac_len);
+		skb_set_transport_header(skb, udp_offset);
+		uh = udp_hdr(skb);
+		uh->len = htons(skb->len - udp_offset);
+
+		/* csum segment if tunnel sets skb with csum. */
+		if (unlikely(uh->check)) {
+			struct iphdr *iph = ip_hdr(skb);
+
+			uh->check = ~csum_tcpudp_magic(iph->saddr, iph->daddr,
+						       skb->len - udp_offset,
+						       IPPROTO_UDP, 0);
+			uh->check = csum_fold(skb_checksum(skb, udp_offset,
+							   skb->len - udp_offset, 0));
+			if (uh->check == 0)
+				uh->check = CSUM_MANGLED_0;
+
+		}
+		skb->ip_summed = CHECKSUM_NONE;
+		skb->protocol = protocol;
+	} while ((skb = skb->next));
+out:
+	return segs;
 }
 
 struct sk_buff *udp4_ufo_fragment(struct sk_buff *skb, int features)
 {
 	struct sk_buff *segs = ERR_PTR(-EINVAL);
 	unsigned int mss;
-	int offset;
-	__wsum csum;
-
 	mss = skb_shinfo(skb)->gso_size;
 	if (unlikely(skb->len <= mss))
 		goto out;
@@ -1934,7 +2032,9 @@ struct sk_buff *udp4_ufo_fragment(struct sk_buff *skb, int features)
 		/* Packet is from an untrusted source, reset gso_segs. */
 		int type = skb_shinfo(skb)->gso_type;
 
-		if (unlikely(type & ~(SKB_GSO_UDP | SKB_GSO_DODGY) ||
+		if (unlikely(type & ~(SKB_GSO_UDP | SKB_GSO_DODGY |
+				      SKB_GSO_UDP_TUNNEL |
+				      SKB_GSO_GRE) ||
 			     !(type & (SKB_GSO_UDP))))
 			goto out;
 
@@ -1944,20 +2044,27 @@ struct sk_buff *udp4_ufo_fragment(struct sk_buff *skb, int features)
 		goto out;
 	}
 
-	/* Do software UFO. Complete and fill in the UDP checksum as HW cannot
-	 * do checksum of UDP packets sent as multiple IP fragments.
-	 */
-	offset = skb->csum_start - skb_headroom(skb);
-	csum = skb_checksum(skb, offset, skb->len - offset, 0);
-	offset += skb->csum_offset;
-	*(__sum16 *)(skb->data + offset) = csum_fold(csum);
-	skb->ip_summed = CHECKSUM_NONE;
-
 	/* Fragment the skb. IP headers of the fragments are updated in
 	 * inet_gso_segment()
 	 */
-	segs = skb_segment(skb, features);
+	if (skb->encapsulation && skb_shinfo(skb)->gso_type & SKB_GSO_UDP_TUNNEL)
+		segs = skb_udp_tunnel_segment(skb, features);
+	else {
+		int offset;
+		__wsum csum;
+
+		/* Do software UFO. Complete and fill in the UDP checksum as
+		 * HW cannot do checksum of UDP packets sent as multiple
+		 * IP fragments.
+		 */
+		offset = skb_checksum_start_offset(skb);
+		csum = skb_checksum(skb, offset, skb->len - offset, 0);
+		offset += skb->csum_offset;
+		*(__sum16 *)(skb->data + offset) = csum_fold(csum);
+		skb->ip_summed = CHECKSUM_NONE;
+
+		segs = skb_segment(skb, features);
+	}
 out:
 	return segs;
 }
-

@@ -175,6 +175,7 @@ static int apply_microcode_amd(int cpu)
 	if (rev != mc_amd->hdr.patch_id) {
 		printk(KERN_ERR "microcode: CPU%d: update failed "
 		       "(for patch_level=0x%x)\n", cpu, mc_amd->hdr.patch_id);
+		uci->cpu_sig.rev = rev;
 		return -1;
 	}
 

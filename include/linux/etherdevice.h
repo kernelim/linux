@@ -42,6 +42,8 @@ extern int eth_header_cache(const struct neighbour *neigh, struct hh_cache *hh);
 extern void eth_header_cache_update(struct hh_cache *hh,
 				    const struct net_device *dev,
 				    const unsigned char *haddr);
+extern int eth_prepare_mac_addr_change(struct net_device *dev, void *p);
+extern void eth_commit_mac_addr_change(struct net_device *dev, void *p);
 extern int eth_mac_addr(struct net_device *dev, void *p);
 extern int eth_change_mtu(struct net_device *dev, int new_mtu);
 extern int eth_validate_addr(struct net_device *dev);
@@ -52,6 +54,25 @@ extern struct net_device *alloc_etherdev_mqs(int sizeof_priv, unsigned int txqs,
 					     unsigned int rxqs);
 extern struct net_device *alloc_etherdev_mq(int sizeof_priv, unsigned int queue_count);
 #define alloc_etherdev(sizeof_priv) alloc_etherdev_mq(sizeof_priv, 1)
+
+/* Reserved Ethernet Addresses per IEEE 802.1Q */
+static const u8 br_reserved_address[ETH_ALEN] = { 0x01, 0x80, 0xc2, 0x00, 0x00, 0x00 };
+
+/**
+ * is_link_local_ether_addr - Determine if given Ethernet address is link-local
+ * @addr: Pointer to a six-byte array containing the Ethernet address
+ *
+ * Return true if address is link local reserved addr (01:80:c2:00:00:0X) per
+ * IEEE 802.1Q 8.6.3 Frame filtering.
+ */
+static inline bool is_link_local_ether_addr(const u8 *addr)
+{
+	__be16 *a = (__be16 *)addr;
+	static const __be16 *b = (const __be16 *)br_reserved_address;
+	static const __be16 m = cpu_to_be16(0xfff0);
+
+	return ((a[0] ^ b[0]) | (a[1] ^ b[1]) | ((a[2] ^ b[2]) & m)) == 0;
+}
 
 /**
  * is_zero_ether_addr - Determine if give Ethernet address is all zeros.
@@ -99,6 +120,17 @@ static inline int is_broadcast_ether_addr(const u8 *addr)
 }
 
 /**
+ * is_unicast_ether_addr - Determine if the Ethernet address is unicast
+ * @addr: Pointer to a six-byte array containing the Ethernet address
+ *
+ * Return true if the address is a unicast address.
+ */
+static inline int is_unicast_ether_addr(const u8 *addr)
+{
+	return !is_multicast_ether_addr(addr);
+}
+
+/**
  * is_valid_ether_addr - Determine if the given Ethernet address is valid
  * @addr: Pointer to a six-byte array containing the Ethernet address
  *
@@ -142,6 +174,28 @@ static inline void dev_hw_addr_random(struct net_device *dev, u8 *hwaddr)
 {
 	dev->addr_assign_type |= NET_ADDR_RANDOM;
 	random_ether_addr(hwaddr);
+}
+
+/**
+ * eth_zero_addr - Assign zero address
+ * @addr: Pointer to a six-byte array containing the Ethernet address
+ *
+ * Assign the zero address to the given address array.
+ */
+static inline void eth_zero_addr(u8 *addr)
+{
+	memset(addr, 0x00, ETH_ALEN);
+}
+
+/**
+ * eth_broadcast_addr - Assign broadcast address
+ * @addr: Pointer to a six-byte array containing the Ethernet address
+ *
+ * Assign the broadcast address to the given address array.
+ */
+static inline void eth_broadcast_addr(u8 *addr)
+{
+	memset(addr, 0xff, ETH_ALEN);
 }
 
 /**
@@ -226,6 +280,26 @@ static inline unsigned compare_ether_addr_64bits(const u8 addr1[6+2],
 #else
 	return compare_ether_addr(addr1, addr2);
 #endif
+}
+
+/**
+ * ether_addr_equal_64bits - Compare two Ethernet addresses
+ * @addr1: Pointer to an array of 8 bytes
+ * @addr2: Pointer to an other array of 8 bytes
+ *
+ * Compare two ethernet addresses, returns true if equal, false otherwise.
+ *
+ * The function doesn't need any conditional branches and possibly uses
+ * word memory accesses on CPU allowing cheap unaligned memory reads.
+ * arrays = { byte1, byte2, byte3, byte4, byte6, byte7, pad1, pad2}
+ *
+ * Please note that alignment of addr1 & addr2 is only guaranted to be 16 bits.
+ */
+
+static inline bool ether_addr_equal_64bits(const u8 addr1[6+2],
+					   const u8 addr2[6+2])
+{
+	return !compare_ether_addr_64bits(addr1, addr2);
 }
 
 /**

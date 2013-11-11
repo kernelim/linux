@@ -366,6 +366,9 @@ static int init_power7_pmu(void)
 	    strcmp(cur_cpu_spec->oprofile_cpu_type, "ppc64/power7"))
 		return -ENODEV;
 
+	if (__is_processor(PVR_POWER7p))
+		power7_pmu.flags |= PPMU_SIAR_VALID;
+
 	return register_power_pmu(&power7_pmu);
 }
 

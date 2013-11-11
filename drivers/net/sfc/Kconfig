@@ -5,7 +5,8 @@ config SFC
 	select CRC32
 	select I2C
 	select I2C_ALGOBIT
-	help
+	select PTP_1588_CLOCK
+	---help---
 	  This driver supports 10-gigabit Ethernet cards based on
 	  the Solarflare SFC4000 and SFC9000-family controllers.
 
@@ -23,7 +24,7 @@ config SFC_MCDI_MON
 	bool "Solarflare SFC9000-family hwmon support"
 	depends on SFC && HWMON && !(SFC=y && HWMON=m)
 	default y
-	----help---
+	---help---
 	  This exposes the on-board firmware-managed sensors as a
 	  hardware monitor device.
 config SFC_SRIOV

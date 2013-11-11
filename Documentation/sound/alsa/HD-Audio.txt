@@ -421,6 +421,63 @@ re-configure based on that state, run like below:
 ------------------------------------------------------------------------
 
 
+Hint Strings
+~~~~~~~~~~~~
+The codec parser have several switches and adjustment knobs for
+matching better with the actual codec or device behavior.  Many of
+them can be adjusted dynamically via "hints" strings as mentioned in
+the section above.  For example, by passing `jack_detect = no` string
+via sysfs or a patch file, you can disable the jack detection, thus
+the codec parser will skip the features like auto-mute or mic
+auto-switch.  As a boolean value, either `yes`, `no`, `true`, `false`,
+`1` or `0` can be passed.
+
+The generic parser supports the following hints:
+
+- jack_detect (bool): specify whether the jack detection is available
+  at all on this machine; default true
+- inv_jack_detect (bool): indicates that the jack detection logic is
+  inverted
+- trigger_sense (bool): indicates that the jack detection needs the
+  explicit call of AC_VERB_SET_PIN_SENSE verb
+- inv_eapd (bool): indicates that the EAPD is implemented in the
+  inverted logic
+- pcm_format_first (bool): sets the PCM format before the stream tag
+  and channel ID
+- sticky_stream (bool): keep the PCM format, stream tag and ID as long
+  as possible; default true
+- spdif_status_reset (bool): reset the SPDIF status bits at each time
+  the SPDIF stream is set up
+-  pin_amp_workaround (bool): the output pin may have multiple amp
+  values
+- single_adc_amp (bool): ADCs can have only single input amps
+- auto_mute (bool): enable/disable the headphone auto-mute feature;
+  default true
+- auto_mic (bool): enable/disable the mic auto-switch feature; default
+  true
+- line_in_auto_switch (bool): enable/disable the line-in auto-switch
+  feature; default false
+- need_dac_fix (bool): limits the DACs depending on the channel count
+- primary_hp (bool): probe headphone jacks as the primary outputs;
+  default true
+- multi_cap_vol (bool): provide multiple capture volumes
+- inv_dmic_split (bool): provide split internal mic volume/switch for
+  phase-inverted digital mics
+- indep_hp (bool): provide the independent headphone PCM stream and
+  the corresponding mixer control, if available
+- add_stereo_mix_input (bool): add the stereo mix (analog-loopback
+  mix) to the input mux if available
+- add_jack_modes (bool): add "xxx Jack Mode" enum controls to each
+  I/O jack for allowing to change the headphone amp and mic bias VREF
+  capabilities
+- power_down_unused (bool): power down the unused widgets
+- add_hp_mic (bool): add the headphone to capture source if possible
+- hp_mic_detect (bool): enable/disable the hp/mic shared input for a
+  single built-in mic case; default true
+- mixer_nid (int): specifies the widget NID of the analog-loopback
+  mixer
+
+
 Early Patching
 ~~~~~~~~~~~~~~
 When CONFIG_SND_HDA_PATCH_LOADER=y is set, you can pass a "patch" as a

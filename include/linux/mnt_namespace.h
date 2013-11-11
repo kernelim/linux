@@ -12,6 +12,10 @@ struct mnt_namespace {
 	struct list_head	list;
 	wait_queue_head_t poll;
 	int event;
+#ifndef __GENKSYMS__
+	u64 seq; /* Sequence number to prevent loops */
+	unsigned int		proc_inum;
+#endif
 };
 
 struct proc_mounts {

@@ -111,6 +111,7 @@ struct net;
  *	@skc_family: network address family
  *	@skc_state: Connection state
  *	@skc_reuse: %SO_REUSEADDR setting
+ *	@skc_reuseport: %SO_REUSEPORT setting
  *	@skc_bound_dev_if: bound device index if != 0
  *	@skc_bind_node: bind hash linkage for various protocol lookup tables
  *	@skc_prot: protocol handlers inside a network family
@@ -132,7 +133,12 @@ struct sock_common {
 	unsigned int		skc_hash;
 	unsigned short		skc_family;
 	volatile unsigned char	skc_state;
+#ifndef __GENKSYMS__
+	unsigned char		skc_reuse:4;
+	unsigned char		skc_reuseport:4;
+#else
 	unsigned char		skc_reuse;
+#endif
 	int			skc_bound_dev_if;
 	struct hlist_node	skc_bind_node;
 	struct proto		*skc_prot;
@@ -221,6 +227,7 @@ struct sock {
 #define sk_family		__sk_common.skc_family
 #define sk_state		__sk_common.skc_state
 #define sk_reuse		__sk_common.skc_reuse
+#define sk_reuseport		__sk_common.skc_reuseport
 #define sk_bound_dev_if		__sk_common.skc_bound_dev_if
 #define sk_bind_node		__sk_common.skc_bind_node
 #define sk_prot			__sk_common.skc_prot
@@ -352,6 +359,10 @@ struct sock_extended {
 	 * existing modules. */
 	__u8			rcv_tos;
 	u32			icsk_user_timeout;
+	struct pid		*sk_peer_pid;
+	const struct cred	*sk_peer_cred;
+	u16			sk_gso_max_segs;
+	u32			sk_pacing_rate; /* bytes per second */
 };
 
 #define __sk_tx_queue_mapping(sk) \
@@ -643,18 +654,20 @@ static inline void __sk_add_backlog(struct sock *sk, struct sk_buff *skb)
  * Do not take into account this skb truesize,
  * to allow even a single big packet to come.
  */
-static inline bool sk_rcvqueues_full(const struct sock *sk, const struct sk_buff *skb)
+static inline bool sk_rcvqueues_full(const struct sock *sk, const struct sk_buff *skb,
+				     unsigned int limit)
 {
 	unsigned int qsize = sk_extended(sk)->sk_backlog.len +
 			     atomic_read(&sk->sk_rmem_alloc);
 
-	return qsize > sk->sk_rcvbuf;
+	return qsize > limit;
 }
 
 /* The per-socket spinlock must be held here. */
-static inline __must_check int sk_add_backlog(struct sock *sk, struct sk_buff *skb)
+static inline __must_check int sk_add_backlog(struct sock *sk, struct sk_buff *skb,
+					      unsigned int limit)
 {
-	if (sk_rcvqueues_full(sk, skb))
+	if (sk_rcvqueues_full(sk, skb, limit))
 		return -ENOBUFS;
 
 	__sk_add_backlog(sk, skb);
@@ -808,6 +821,9 @@ struct proto {
 	struct list_head	node;
 #ifdef SOCK_REFCNT_DEBUG
 	atomic_t		socks;
+#endif
+#ifndef __GENKSYMS__
+	void		(*release_cb)(struct sock *sk);
 #endif
 };
 
@@ -1570,7 +1586,11 @@ static inline void sk_wake_async(struct sock *sk, int how, int band)
 }
 
 #define SOCK_MIN_SNDBUF 2048
-#define SOCK_MIN_RCVBUF 256
+/*
+ * Since sk_rmem_alloc sums skb->truesize, even a small frame might need
+ * sizeof(sk_buff) + MTU + padding, unless net driver perform copybreak
+ */
+#define SOCK_MIN_RCVBUF (2048 + sizeof(struct sk_buff))
 
 static inline void sk_stream_moderate_sndbuf(struct sock *sk)
 {

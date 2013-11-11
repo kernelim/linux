@@ -125,7 +125,7 @@ void __irq_entry do_extint(struct pt_regs *regs, unsigned short code)
 	if (S390_lowcore.int_clock >= S390_lowcore.clock_comparator)
 		/* Serve timer interrupts first. */
 		clock_comparator_work();
-	kstat_cpu(smp_processor_id()).irqs[EXTERNAL_INTERRUPT]++;
+	kstat_incr_irqs_this_cpu(EXTERNAL_INTERRUPT, NULL);
 	if (code != 0x1004)
 		__get_cpu_var(s390_idle).nohz_delay = 1;
         index = ext_hash(code);

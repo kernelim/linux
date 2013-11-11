@@ -138,7 +138,7 @@ static void pstore_dump(struct kmsg_dumper *dumper,
 		memcpy(dst + l1_cpy, s2 + s2_start, l2_cpy);
 
 		ret = psinfo->write(PSTORE_TYPE_DMESG, reason, &id, part,
-				   hsize + l1_cpy + l2_cpy, psinfo);
+				    oopscount, hsize + l1_cpy + l2_cpy, psinfo);
 		if (ret == 0 && reason == KMSG_DUMP_OOPS && pstore_is_mounted())
 			pstore_new_entry = 1;
 		l1 -= l1_cpy;
@@ -215,6 +215,7 @@ void pstore_get_records(int quiet)
 	char			*buf = NULL;
 	ssize_t			size;
 	u64			id;
+	int			count;
 	enum pstore_type_id	type;
 	struct timespec		time;
 	int			failed = 0, rc;
@@ -226,9 +227,9 @@ void pstore_get_records(int quiet)
 	if (psi->open && psi->open(psi))
 		goto out;
 
-	while ((size = psi->read(&id, &type, &time, &buf, psi)) > 0) {
-		rc = pstore_mkfile(type, psi->name, id, buf, (size_t)size,
-				  time, psi);
+	while ((size = psi->read(&id, &type, &count, &time, &buf, psi)) > 0) {
+		rc = pstore_mkfile(type, psi->name, id, count, buf,
+				  (size_t)size, time, psi);
 		kfree(buf);
 		buf = NULL;
 		if (rc && (rc != -EEXIST || !quiet))

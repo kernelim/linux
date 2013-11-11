@@ -155,6 +155,8 @@ do_open_permission(struct svc_rqst *rqstp, struct svc_fh *current_fh, struct nfs
 		!(open->op_share_access & NFS4_SHARE_ACCESS_WRITE))
 		return nfserr_inval;
 
+	accmode |= NFSD_MAY_READ_IF_EXEC;
+
 	if (open->op_share_access & NFS4_SHARE_ACCESS_READ)
 		accmode |= NFSD_MAY_READ;
 	if (open->op_share_access & NFS4_SHARE_ACCESS_WRITE)
@@ -976,6 +978,16 @@ enum nfsd4_op_flags {
 	ALLOWED_WITHOUT_FH = 1 << 0,	/* No current filehandle required */
 	ALLOWED_ON_ABSENT_FS = 2 << 0,	/* ops processed on absent fs */
 	ALLOWED_AS_FIRST_OP = 3 << 0,	/* ops reqired first in compound */
+	/*
+	 * Cache compounds containing these ops in the xid-based drc:
+	 * We use the DRC for compounds containing non-idempotent
+	 * operations, *except* those that are 4.1-specific (since
+	 * sessions provide their own EOS), and except for stateful
+	 * operations other than setclientid and setclientid_confirm
+	 * (since sequence numbers provide EOS for open, lock, etc in
+	 * the v4.0 case).
+	 */
+	OP_CACHEME = 1 << 6,
 };
 
 struct nfsd4_operation {
@@ -1019,6 +1031,16 @@ static __be32 nfs41_check_op_ordering(struct nfsd4_compoundargs *args)
 	if (args->opcnt != 1)
 		return nfserr_not_only_op;
 	return nfs_ok;
+}
+
+static inline struct nfsd4_operation *OPDESC(struct nfsd4_op *op)
+{
+	return &nfsd4_ops[op->opnum];
+}
+
+bool nfsd4_cache_this_op(struct nfsd4_op *op)
+{
+	return OPDESC(op)->op_flags & OP_CACHEME;
 }
 
 /*
@@ -1098,7 +1120,7 @@ nfsd4_proc_compound(struct svc_rqst *rqstp,
 			goto encode_op;
 		}
 
-		opdesc = &nfsd4_ops[op->opnum];
+		opdesc = OPDESC(op);
 
 		if (!cstate->current_fh.fh_dentry) {
 			if (!(opdesc->op_flags & ALLOWED_WITHOUT_FH)) {
@@ -1174,6 +1196,7 @@ static struct nfsd4_operation nfsd4_ops[] = {
 	},
 	[OP_CREATE] = {
 		.op_func = (nfsd4op_func)nfsd4_create,
+		.op_flags = OP_CACHEME,
 		.op_name = "OP_CREATE",
 	},
 	[OP_DELEGRETURN] = {
@@ -1191,6 +1214,7 @@ static struct nfsd4_operation nfsd4_ops[] = {
 	},
 	[OP_LINK] = {
 		.op_func = (nfsd4op_func)nfsd4_link,
+		.op_flags = OP_CACHEME,
 		.op_name = "OP_LINK",
 	},
 	[OP_LOCK] = {
@@ -1258,11 +1282,13 @@ static struct nfsd4_operation nfsd4_ops[] = {
 	},
 	[OP_REMOVE] = {
 		.op_func = (nfsd4op_func)nfsd4_remove,
+		.op_flags = OP_CACHEME,
 		.op_name = "OP_REMOVE",
 	},
 	[OP_RENAME] = {
-		.op_name = "OP_RENAME",
 		.op_func = (nfsd4op_func)nfsd4_rename,
+		.op_flags = OP_CACHEME,
+		.op_name = "OP_RENAME",
 	},
 	[OP_RENEW] = {
 		.op_func = (nfsd4op_func)nfsd4_renew,
@@ -1285,15 +1311,18 @@ static struct nfsd4_operation nfsd4_ops[] = {
 	[OP_SETATTR] = {
 		.op_func = (nfsd4op_func)nfsd4_setattr,
 		.op_name = "OP_SETATTR",
+		.op_flags = OP_CACHEME,
 	},
 	[OP_SETCLIENTID] = {
 		.op_func = (nfsd4op_func)nfsd4_setclientid,
-		.op_flags = ALLOWED_WITHOUT_FH | ALLOWED_ON_ABSENT_FS,
+		.op_flags = ALLOWED_WITHOUT_FH | ALLOWED_ON_ABSENT_FS
+				| OP_CACHEME,
 		.op_name = "OP_SETCLIENTID",
 	},
 	[OP_SETCLIENTID_CONFIRM] = {
 		.op_func = (nfsd4op_func)nfsd4_setclientid_confirm,
-		.op_flags = ALLOWED_WITHOUT_FH | ALLOWED_ON_ABSENT_FS,
+		.op_flags = ALLOWED_WITHOUT_FH | ALLOWED_ON_ABSENT_FS
+				| OP_CACHEME,
 		.op_name = "OP_SETCLIENTID_CONFIRM",
 	},
 	[OP_VERIFY] = {
@@ -1302,6 +1331,7 @@ static struct nfsd4_operation nfsd4_ops[] = {
 	},
 	[OP_WRITE] = {
 		.op_func = (nfsd4op_func)nfsd4_write,
+		.op_flags = OP_CACHEME,
 		.op_name = "OP_WRITE",
 	},
 	[OP_RELEASE_LOCKOWNER] = {
@@ -1348,16 +1378,6 @@ static const char *nfsd4_op_name(unsigned opnum)
 #define nfsd4_voidres			nfsd4_voidargs
 struct nfsd4_voidargs { int dummy; };
 
-/*
- * TODO: At the present time, the NFSv4 server does not do XID caching
- * of requests.  Implementing XID caching would not be a serious problem,
- * although it would require a mild change in interfaces since one
- * doesn't know whether an NFSv4 request is idempotent until after the
- * XDR decode.  However, XID caching totally confuses pynfs (Peter
- * Astrand's regression testsuite for NFSv4 servers), which reuses
- * XID's liberally, so I've left it unimplemented until pynfs generates
- * better XID's.
- */
 static struct svc_procedure		nfsd_procedures4[2] = {
 	[NFSPROC4_NULL] = {
 		.pc_func = (svc_procfunc) nfsd4_proc_null,

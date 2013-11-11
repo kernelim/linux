@@ -328,6 +328,9 @@ static ssize_t bonding_store_mode(struct device *d,
 	int new_value, ret = count;
 	struct bonding *bond = to_bond(d);
 
+	if (!rtnl_trylock())
+		return restart_syscall();
+
 	if (bond->dev->flags & IFF_UP) {
 		pr_err(DRV_NAME ": unable to update mode of %s"
 		       " because interface is up.\n", bond->dev->name);
@@ -365,12 +368,15 @@ static ssize_t bonding_store_mode(struct device *d,
 	if (bond->params.mode == BOND_MODE_ALB)
 		bond_unset_master_alb_flags(bond);
 
+	/* don't cache arp_validate between modes */
+	bond->params.arp_validate = BOND_ARP_VALIDATE_NONE;
 	bond->params.mode = new_value;
 	bond_set_mode_ops(bond, bond->params.mode);
 	pr_info(DRV_NAME ": %s: setting mode to %s (%d).\n",
 		bond->dev->name, bond_mode_tbl[new_value].modename,
 		new_value);
 out:
+	rtnl_unlock();
 	return ret;
 }
 static DEVICE_ATTR(mode, S_IRUGO | S_IWUSR,
@@ -445,34 +451,41 @@ static ssize_t bonding_store_arp_validate(struct device *d,
 					  struct device_attribute *attr,
 					  const char *buf, size_t count)
 {
-	int new_value;
 	struct bonding *bond = to_bond(d);
+	int new_value, ret = count;
 
+	if (!rtnl_trylock())
+		return restart_syscall();
 	new_value = bond_parse_parm(buf, arp_validate_tbl);
 	if (new_value < 0) {
 		pr_err(DRV_NAME
 		       ": %s: Ignoring invalid arp_validate value %s\n",
 		       bond->dev->name, buf);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto out;
 	}
-	if (new_value && (bond->params.mode != BOND_MODE_ACTIVEBACKUP)) {
+	if (bond->params.mode != BOND_MODE_ACTIVEBACKUP) {
 		pr_err(DRV_NAME
 		       ": %s: arp_validate only supported in active-backup mode.\n",
 		       bond->dev->name);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto out;
 	}
 	pr_info(DRV_NAME ": %s: setting arp_validate to %s (%d).\n",
 	       bond->dev->name, arp_validate_tbl[new_value].modename,
 	       new_value);
 
-	if (!bond->params.arp_validate && new_value)
-		bond_register_arp(bond);
-	else if (bond->params.arp_validate && !new_value)
-		bond_unregister_arp(bond);
-
+	if ((bond->dev->flags & IFF_UP) && bond->params.arp_interval) {
+		if (!bond->params.arp_validate && new_value)
+			bond_register_arp(bond);
+		else if (bond->params.arp_validate && !new_value)
+			bond_unregister_arp(bond);
+	}
 	bond->params.arp_validate = new_value;
+out:
+	rtnl_unlock();
 
-	return count;
+	return ret;
 }
 
 static DEVICE_ATTR(arp_validate, S_IRUGO | S_IWUSR, bonding_show_arp_validate,
@@ -545,9 +558,11 @@ static ssize_t bonding_store_arp_interval(struct device *d,
 					  struct device_attribute *attr,
 					  const char *buf, size_t count)
 {
-	int new_value, ret = count;
+	int new_value, old_value, ret = count;
 	struct bonding *bond = to_bond(d);
 
+	if (!rtnl_trylock())
+		return restart_syscall();
 	if (sscanf(buf, "%d", &new_value) != 1) {
 		pr_err(DRV_NAME
 		       ": %s: no arp_interval value specified.\n",
@@ -572,6 +587,7 @@ static ssize_t bonding_store_arp_interval(struct device *d,
 	pr_info(DRV_NAME
 	       ": %s: Setting ARP monitoring interval to %d.\n",
 	       bond->dev->name, new_value);
+	old_value = bond->params.arp_interval;
 	bond->params.arp_interval = new_value;
 	if (bond->params.arp_interval)
 		bond->dev->priv_flags |= IFF_MASTER_ARPMON;
@@ -598,6 +614,10 @@ static ssize_t bonding_store_arp_interval(struct device *d,
 		 * timer will get fired off when the open function
 		 * is called.
 		 */
+		if (!old_value && new_value && bond->params.arp_validate)
+			bond_register_arp(bond);
+		else if (old_value && !new_value && bond->params.arp_validate)
+			bond_unregister_arp(bond);
 		if (!delayed_work_pending(&bond->arp_work)) {
 			if (bond->params.mode == BOND_MODE_ACTIVEBACKUP)
 				INIT_DELAYED_WORK(&bond->arp_work,
@@ -611,6 +631,7 @@ static ssize_t bonding_store_arp_interval(struct device *d,
 	}
 
 out:
+	rtnl_unlock();
 	return ret;
 }
 static DEVICE_ATTR(arp_interval, S_IRUGO | S_IWUSR,
@@ -1177,6 +1198,7 @@ static ssize_t bonding_store_primary(struct device *d,
 		       ": %s: Setting primary slave to None.\n",
 		       bond->dev->name);
 		bond->primary_slave = NULL;
+		memset(bond->params.primary, 0, sizeof(bond->params.primary));
 		bond_select_active_slave(bond);
 		goto out;
 	}

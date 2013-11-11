@@ -1354,6 +1354,11 @@ ctnetlink_new_conntrack(struct sock *ctnl, struct sk_buff *skb,
 			struct nf_conn *ct;
 			enum ip_conntrack_events events;
 
+			if (!cda[CTA_TUPLE_ORIG] || !cda[CTA_TUPLE_REPLY]) {
+				err = -EINVAL;
+				goto out_unlock;
+			}
+
 			ct = ctnetlink_create_conntrack(cda, &otuple,
 							&rtuple, u3);
 			if (IS_ERR(ct)) {

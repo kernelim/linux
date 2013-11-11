@@ -48,6 +48,7 @@ struct sockaddr_ll
 #define PACKET_RESERVE			12
 #define PACKET_TX_RING			13
 #define PACKET_LOSS			14
+#define PACKET_TX_TIMESTAMP		16
 #define PACKET_TIMESTAMP		17
 
 struct tpacket_stats

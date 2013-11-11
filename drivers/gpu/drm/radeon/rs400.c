@@ -242,7 +242,7 @@ int rs400_mc_wait_for_idle(struct radeon_device *rdev)
 	return -1;
 }
 
-void rs400_gpu_init(struct radeon_device *rdev)
+static void rs400_gpu_init(struct radeon_device *rdev)
 {
 	/* FIXME: is this correct ? */
 	r420_pipes_init(rdev);
@@ -252,7 +252,7 @@ void rs400_gpu_init(struct radeon_device *rdev)
 	}
 }
 
-void rs400_mc_init(struct radeon_device *rdev)
+static void rs400_mc_init(struct radeon_device *rdev)
 {
 	u64 base;
 
@@ -370,7 +370,7 @@ static int rs400_debugfs_pcie_gart_info_init(struct radeon_device *rdev)
 #endif
 }
 
-void rs400_mc_program(struct radeon_device *rdev)
+static void rs400_mc_program(struct radeon_device *rdev)
 {
 	struct r100_mc_save save;
 
@@ -417,6 +417,12 @@ static int rs400_startup(struct radeon_device *rdev)
 	}
 
 	/* Enable IRQ */
+	if (!rdev->irq.installed) {
+		r = radeon_irq_kms_init(rdev);
+		if (r)
+			return r;
+	}
+
 	r100_irq_set(rdev);
 	rdev->config.r300.hdp_cntl = RREG32(RADEON_HOST_PATH_CNTL);
 	/* 1M ring buffer */
@@ -533,9 +539,6 @@ int rs400_init(struct radeon_device *rdev)
 	rs400_mc_init(rdev);
 	/* Fence driver */
 	r = radeon_fence_driver_init(rdev);
-	if (r)
-		return r;
-	r = radeon_irq_kms_init(rdev);
 	if (r)
 		return r;
 	/* Memory manager */

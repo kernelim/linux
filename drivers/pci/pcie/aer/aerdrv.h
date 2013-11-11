@@ -13,10 +13,6 @@
 #include <linux/aer.h>
 #include <linux/interrupt.h>
 
-#define AER_NONFATAL			0
-#define AER_FATAL			1
-#define AER_CORRECTABLE			2
-
 #define SYSTEM_ERROR_INTR_ON_MESG_MASK	(PCI_EXP_RTCTL_SECEE|	\
 					PCI_EXP_RTCTL_SENFEE|	\
 					PCI_EXP_RTCTL_SEFEE)
@@ -87,6 +83,9 @@ struct aer_broadcast_data {
 static inline pci_ers_result_t merge_result(enum pci_ers_result orig,
 		enum pci_ers_result new)
 {
+	if (new == PCI_ERS_RESULT_NO_AER_DRIVER)
+		return PCI_ERS_RESULT_NO_AER_DRIVER;
+
 	if (new == PCI_ERS_RESULT_NONE)
 		return orig;
 
@@ -97,7 +96,7 @@ static inline pci_ers_result_t merge_result(enum pci_ers_result orig,
 		break;
 	case PCI_ERS_RESULT_DISCONNECT:
 		if (new == PCI_ERS_RESULT_NEED_RESET)
-			orig = new;
+			orig = PCI_ERS_RESULT_NEED_RESET;
 		break;
 	default:
 		break;

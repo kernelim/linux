@@ -654,10 +654,11 @@ __SYSCALL(__NR_open_by_handle_at, sys_ni_syscall)
 __SYSCALL(__NR_clock_adjtime, sys_ni_syscall)
 #define __NR_syncfs 267
 __SYSCALL(__NR_syncfs, sys_syncfs)
-
+#define __NR_setns 268
+__SYSCALL(__NR_setns, sys_setns)
 
 #undef __NR_syscalls
-#define __NR_syscalls 268
+#define __NR_syscalls 269
 
 /*
  * All syscalls below here should go away really,

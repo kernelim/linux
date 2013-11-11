@@ -198,7 +198,7 @@ asmlinkage ssize_t compat_sys_pwritev(unsigned long fd,
 		const struct compat_iovec __user *vec,
 		unsigned long vlen, u32 pos_low, u32 pos_high);
 
-int compat_do_execve(char * filename, compat_uptr_t __user *argv,
+int compat_do_execve(const char * filename, compat_uptr_t __user *argv,
 	        compat_uptr_t __user *envp, struct pt_regs * regs);
 
 asmlinkage long compat_sys_select(int n, compat_ulong_t __user *inp,

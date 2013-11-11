@@ -8,11 +8,11 @@
 
 struct pci_root_info {
 	struct acpi_device *bridge;
-	char *name;
+	char name[16];
 	unsigned int res_num;
 	struct resource *res;
-	struct pci_bus *bus;
-	int busnum;
+	resource_size_t *res_offset;
+	struct pci_sysdata sd;
 };
 
 static bool pci_use_crs = true;
@@ -137,7 +137,7 @@ setup_resource(struct acpi_resource *acpi_res, void *data)
 	struct acpi_resource_address64 addr;
 	acpi_status status;
 	unsigned long flags;
-	u64 start, end;
+	u64 start, orig_end, end;
 
 	status = resource_to_addr(acpi_res, &addr);
 	if (!ACPI_SUCCESS(status))
@@ -153,14 +153,28 @@ setup_resource(struct acpi_resource *acpi_res, void *data)
 		return AE_OK;
 
 	start = addr.minimum + addr.translation_offset;
-	end = addr.maximum + addr.translation_offset;
+	orig_end = end = addr.maximum + addr.translation_offset;
+
+	/* Exclude non-addressable range or non-addressable portion of range */
+	end = min(end, (u64)iomem_resource.end);
+	if (end <= start) {
+		dev_info(&info->bridge->dev,
+			"host bridge window [%#llx-%#llx] "
+			"(ignored, not CPU addressable)\n", start, orig_end);
+		return AE_OK;
+	} else if (orig_end != end) {
+		dev_info(&info->bridge->dev,
+			"host bridge window [%#llx-%#llx] "
+			"([%#llx-%#llx] ignored, not CPU addressable)\n", 
+			start, orig_end, end + 1, orig_end);
+	}
 
 	res = &info->res[info->res_num];
 	res->name = info->name;
 	res->flags = flags;
 	res->start = start;
 	res->end = end;
-	res->child = NULL;
+	info->res_offset[info->res_num] = addr.translation_offset;
 
 	if (!pci_use_crs) {
 		dev_printk(KERN_DEBUG, &info->bridge->dev,
@@ -222,13 +236,11 @@ static void coalesce_windows(struct pci_root_info *info, int type)
 	}
 }
 
-static void add_resources(struct pci_root_info *info)
+static void add_resources(struct pci_root_info *info,
+			  struct list_head *resources)
 {
 	int i;
 	struct resource *res, *root, *conflict;
-
-	if (!pci_use_crs)
-		return;
 
 	coalesce_windows(info, IORESOURCE_MEM);
 	coalesce_windows(info, IORESOURCE_IO);
@@ -249,56 +261,90 @@ static void add_resources(struct pci_root_info *info)
 				 "ignoring host bridge window %pR (conflicts with %s %pR)\n",
 				 res, conflict->name, conflict);
 		else
-			pci_bus_add_resource(info->bus, res, 0);
+			pci_add_resource_offset(resources, res,
+					info->res_offset[i]);
 	}
 }
 
-static void
-get_current_resources(struct acpi_device *device, int busnum,
-			int domain, struct pci_bus *bus)
+static void free_pci_root_info_res(struct pci_root_info *info)
 {
-	struct pci_root_info info;
+	kfree(info->res);
+	info->res = NULL;
+	kfree(info->res_offset);
+	info->res_offset = NULL;
+	info->res_num = 0;
+}
+
+static void __release_pci_root_info(struct pci_root_info *info)
+{
+	int i;
+	struct resource *res;
+
+	for (i = 0; i < info->res_num; i++) {
+		res = &info->res[i];
+
+		if (!res->parent)
+			continue;
+
+		if (!(res->flags & (IORESOURCE_MEM | IORESOURCE_IO)))
+			continue;
+
+		release_resource(res);
+	}
+
+	free_pci_root_info_res(info);
+
+	kfree(info);
+}
+static void release_pci_root_info(struct pci_host_bridge *bridge)
+{
+	struct pci_root_info *info = bridge->release_data;
+
+	__release_pci_root_info(info);
+}
+
+static void
+probe_pci_root_info(struct pci_root_info *info, struct acpi_device *device,
+		    int busnum, int domain)
+{
 	size_t size;
 
-	if (pci_use_crs)
-		pci_bus_remove_resources(bus);
+	sprintf(info->name, "PCI Bus %04x:%02x", domain, busnum);
+	info->bridge = device;
 
-	info.bridge = device;
-	info.bus = bus;
-	info.res_num = 0;
+	info->res_num = 0;
 	acpi_walk_resources(device->handle, METHOD_NAME__CRS, count_resource,
-				&info);
-	if (!info.res_num)
+				info);
+	if (!info->res_num)
 		return;
 
-	size = sizeof(*info.res) * info.res_num;
-	info.res = kmalloc(size, GFP_KERNEL);
-	if (!info.res)
-		goto res_alloc_fail;
+	size = sizeof(*info->res) * info->res_num;
+	info->res = kzalloc(size, GFP_KERNEL);
+	if (!info->res) {
+		info->res_num = 0;
+		return;
+	}
 
-	info.name = kmalloc(16, GFP_KERNEL);
-	if (!info.name)
-		goto name_alloc_fail;
-	sprintf(info.name, "PCI Bus %04x:%02x", domain, busnum);
+	size = sizeof(*info->res_offset) * info->res_num;
+	info->res_num = 0;
+	info->res_offset = kzalloc(size, GFP_KERNEL);
+	if (!info->res_offset) {
+		kfree(info->res);
+		info->res = NULL;
+		return;
+	}
 
-	info.res_num = 0;
 	acpi_walk_resources(device->handle, METHOD_NAME__CRS, setup_resource,
-				&info);
-
-	add_resources(&info);
-	return;
-
-name_alloc_fail:
-	kfree(info.res);
-res_alloc_fail:
-	return;
+				info);
 }
 
 struct pci_bus * __devinit pci_acpi_scan_root(struct acpi_pci_root *root)
 {
 	struct acpi_device *device = root->device;
+	struct pci_root_info *info = NULL;
 	int domain = root->segment;
 	int busnum = root->secondary.start;
+	LIST_HEAD(resources);
 	struct pci_bus *bus;
 	struct pci_sysdata *sd;
 	int node;
@@ -327,17 +373,14 @@ struct pci_bus * __devinit pci_acpi_scan_root(struct acpi_pci_root *root)
 	if (node != -1 && !node_online(node))
 		node = -1;
 
-	/* Allocate per-root-bus (not per bus) arch-specific data.
-	 * TODO: leak; this memory is never freed.
-	 * It's arguable whether it's worth the trouble to care.
-	 */
-	sd = kzalloc(sizeof(*sd), GFP_KERNEL);
-	if (!sd) {
+	info = kzalloc(sizeof(*info), GFP_KERNEL);
+	if (!info) {
 		printk(KERN_WARNING "pci_bus %04x:%02x: "
 		       "ignored (out of memory)\n", domain, busnum);
 		return NULL;
 	}
 
+	sd = &info->sd;
 	sd->domain = domain;
 	sd->node = node;
 	/*
@@ -351,12 +394,32 @@ struct pci_bus * __devinit pci_acpi_scan_root(struct acpi_pci_root *root)
 		 * be replaced by sd.
 		 */
 		memcpy(bus->sysdata, sd, sizeof(*sd));
-		kfree(sd);
+		kfree(info);
 	} else {
-		bus = pci_create_bus(NULL, busnum, &pci_root_ops, sd);
+		probe_pci_root_info(info, device, busnum, domain);
+
+		/*
+		 * _CRS with no apertures is normal, so only fall back to
+		 * defaults or native bridge info if we're ignoring _CRS.
+		 */
+		if (pci_use_crs)
+			add_resources(info, &resources);
+		else {
+			free_pci_root_info_res(info);
+			x86_pci_root_bus_resources(busnum, &resources);
+		}
+
+		bus = pci_create_root_bus(NULL, busnum, &pci_root_ops, sd,
+					  &resources);
 		if (bus) {
-			get_current_resources(device, busnum, domain, bus);
-			bus->subordinate = pci_scan_child_bus(bus);
+			pci_scan_child_bus(bus);
+			bus->subordinate = root->secondary.end;
+			pci_set_host_bridge_release(
+				to_pci_host_bridge(bus->bridge),
+				release_pci_root_info, info);
+		} else {
+			pci_free_resource_list(&resources);
+			__release_pci_root_info(info);
 		}
 	}
 
@@ -373,9 +436,6 @@ struct pci_bus * __devinit pci_acpi_scan_root(struct acpi_pci_root *root)
 			pcie_bus_configure_settings(child, rh_get_mpss(self));
 		}
 	}
-
-	if (!bus)
-		kfree(sd);
 
 	if (bus && node != -1) {
 #ifdef CONFIG_ACPI_NUMA

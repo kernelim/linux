@@ -77,6 +77,7 @@ static int ext4_freeze(struct super_block *sb);
 static void ext4_destroy_lazyinit_thread(void);
 static void ext4_unregister_li_request(struct super_block *sb);
 static void ext4_clear_request_list(void);
+static int ext4_reserve_blocks(struct ext4_sb_info *, ext4_fsblk_t);
 
 wait_queue_head_t aio_wq[WQ_HASH_SZ];
 
@@ -2244,6 +2245,17 @@ struct ext4_attr {
 	int offset;
 };
 
+static int parse_strtoull(const char *buf,
+		unsigned long long max, unsigned long long *value)
+{
+	int ret;
+
+	ret = kstrtoull(skip_spaces(buf), 0, value);
+	if (!ret && *value > max)
+		ret = -EINVAL;
+	return ret;
+}
+
 static int parse_strtoul(const char *buf,
 		unsigned long max, unsigned long *value)
 {
@@ -2255,6 +2267,27 @@ static int parse_strtoul(const char *buf,
 		return -EINVAL;
 
 	return 0;
+}
+
+static ssize_t reserved_blocks_show(struct ext4_attr *a,
+				  struct ext4_sb_info *sbi, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%llu\n",
+		(unsigned long long) atomic64_read(&sbi->s_resv_blocks));
+}
+
+static ssize_t reserved_blocks_store(struct ext4_attr *a,
+				   struct ext4_sb_info *sbi,
+				   const char *buf, size_t count)
+{
+	unsigned long long val;
+	int ret;
+
+	if (parse_strtoull(buf, -1ULL, &val))
+		return -EINVAL;
+	ret = ext4_reserve_blocks(sbi, val);
+
+	return ret ? ret : count;
 }
 
 static ssize_t delayed_allocation_blocks_show(struct ext4_attr *a,
@@ -2343,6 +2376,7 @@ static struct ext4_attr ext4_attr_##name = __ATTR(name, mode, show, store)
 EXT4_RO_ATTR(delayed_allocation_blocks);
 EXT4_RO_ATTR(session_write_kbytes);
 EXT4_RO_ATTR(lifetime_write_kbytes);
+EXT4_RW_ATTR(reserved_blocks);
 EXT4_ATTR_OFFSET(inode_readahead_blks, 0644, sbi_ui_show,
 		 inode_readahead_blks_store, s_inode_readahead_blks);
 EXT4_RW_ATTR_SBI_UI(inode_goal, s_inode_goal);
@@ -2358,6 +2392,7 @@ static struct attribute *ext4_attrs[] = {
 	ATTR_LIST(delayed_allocation_blocks),
 	ATTR_LIST(session_write_kbytes),
 	ATTR_LIST(lifetime_write_kbytes),
+	ATTR_LIST(reserved_blocks),
 	ATTR_LIST(inode_readahead_blks),
 	ATTR_LIST(inode_goal),
 	ATTR_LIST(mb_stats),
@@ -2810,6 +2845,39 @@ static void ext4_destroy_lazyinit_thread(void)
 		return;
 
 	kthread_stop(ext4_lazyinit_task);
+}
+
+
+static ext4_fsblk_t ext4_calculate_resv_blocks(struct ext4_sb_info *sbi)
+{
+	ext4_fsblk_t resv_blocks;
+
+	/*
+	 * By default we reserve 2% or 4096 blocks, whichever is smaller.
+	 * This should cover the situations where we can not afford to run
+	 * out of space like for example punch hole, or converting
+	 * uninitialized extents in delalloc path. In most cases such
+	 * allocation would require 1, or 2 blocks, higher numbers are
+	 * very rare.
+	 */
+	resv_blocks = ext4_blocks_count(sbi->s_es);
+
+	do_div(resv_blocks, 50);
+	resv_blocks = min_t(ext4_fsblk_t, resv_blocks, 4096);
+
+	return resv_blocks;
+}
+
+
+static int ext4_reserve_blocks(struct ext4_sb_info *sbi, ext4_fsblk_t count)
+{
+	ext4_fsblk_t blocks = ext4_blocks_count(sbi->s_es);
+
+	if (count >= blocks)
+		return -EINVAL;
+
+	atomic64_set(&sbi->s_resv_blocks, count);
+	return 0;
 }
 
 static int ext4_fill_super(struct super_block *sb, void *data, int silent)
@@ -3331,8 +3399,19 @@ static int ext4_fill_super(struct super_block *sb, void *data, int silent)
 	}
 	set_task_ioprio(sbi->s_journal->j_task, journal_ioprio);
 
-no_journal:
+	/*
+	 * The journal may have updated the bg summary counts, so we
+	 * need to update the global counters.
+	 */
+	percpu_counter_set(&sbi->s_freeblocks_counter,
+			    ext4_count_free_blocks(sb));
+	percpu_counter_set(&sbi->s_freeinodes_counter,
+			   ext4_count_free_inodes(sb));
+	percpu_counter_set(&sbi->s_dirs_counter,
+			   ext4_count_dirs(sb));
+	percpu_counter_set(&sbi->s_dirtyblocks_counter, 0);
 
+no_journal:
 	if (test_opt(sb, NOBH)) {
 		if (!(test_opt(sb, DATA_FLAGS) == EXT4_MOUNT_WRITEBACK_DATA)) {
 			ext4_msg(sb, KERN_WARNING, "Ignoring nobh option - "
@@ -3340,7 +3419,7 @@ no_journal:
 			clear_opt(sbi->s_mount_opt, NOBH);
 		}
 	}
-	EXT4_SB(sb)->dio_unwritten_wq = create_workqueue("ext4-dio-unwritten");
+	EXT4_SB(sb)->dio_unwritten_wq = create_singlethread_workqueue("ext4-dio-unwritten");
 	if (!EXT4_SB(sb)->dio_unwritten_wq) {
 		printk(KERN_ERR "EXT4-fs: failed to create DIO workqueue\n");
 		goto failed_mount_wq;
@@ -3403,6 +3482,13 @@ no_journal:
 		ext4_msg(sb, KERN_WARNING, "Ignoring delalloc option - "
 			 "requested data journaling mode");
 		clear_opt(sbi->s_mount_opt, DELALLOC);
+	}
+
+	err = ext4_reserve_blocks(sbi, ext4_calculate_resv_blocks(sbi));
+	if (err) {
+		ext4_msg(sb, KERN_ERR, "failed to reserve %llu blocks for "
+			 "reserved pool", ext4_calculate_resv_blocks(sbi));
+		goto failed_mount4a;
 	}
 
 	err = ext4_setup_system_zone(sb);
@@ -3804,8 +3890,9 @@ static int ext4_commit_super(struct super_block *sb, int sync)
 			      EXT4_SB(sb)->s_sectors_written_start) >> 1));
 	ext4_free_blocks_count_set(es, percpu_counter_sum_positive(
 					&EXT4_SB(sb)->s_freeblocks_counter));
-	es->s_free_inodes_count = cpu_to_le32(percpu_counter_sum_positive(
-					&EXT4_SB(sb)->s_freeinodes_counter));
+	es->s_free_inodes_count =
+		cpu_to_le32(percpu_counter_sum_positive(
+				&EXT4_SB(sb)->s_freeinodes_counter));
 	sb->s_dirt = 0;
 	BUFFER_TRACE(sbh, "marking dirty");
 	mark_buffer_dirty(sbh);
@@ -4191,7 +4278,8 @@ static int ext4_statfs(struct dentry *dentry, struct kstatfs *buf)
 		sbi->s_overhead_last = 0;
 	} else if (sbi->s_blocks_last != ext4_blocks_count(es)) {
 		ext4_group_t i, ngroups = ext4_get_groups_count(sb);
-		ext4_fsblk_t overhead = 0;
+		ext4_fsblk_t overhead = 0, resv_blocks;
+		resv_blocks = atomic64_read(&sbi->s_resv_blocks);
 
 		/*
 		 * Compute the overhead (FS structures).  This is constant

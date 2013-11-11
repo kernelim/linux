@@ -1859,14 +1859,14 @@ static void shrink_mem_cgroup_zone(int priority, struct mem_cgroup_zone *mz,
 	unsigned long nr_to_scan;
 	unsigned long percent[2];	/* anon @ 0; file @ 1 */
 	enum lru_list l;
-	unsigned long nr_reclaimed;
+	unsigned long nr_reclaimed, nr_scanned;
 	unsigned long nr_to_reclaim = sc->nr_to_reclaim;
-	unsigned long nr_scanned = sc->nr_scanned;
 	struct zone_reclaim_stat *reclaim_stat = get_reclaim_stat(mz);
 	int noswap = 0;
 
 restart:
 	nr_reclaimed = 0;
+	nr_scanned = sc->nr_scanned;
 	/* If we have no swap space, do not bother scanning anon pages. */
 	if (!sc->may_swap || (nr_swap_pages <= 0)) {
 		noswap = 1;
@@ -2721,17 +2721,6 @@ static int kswapd(void *p)
 					set_pgdat_percpu_threshold(pgdat,
 						calculate_normal_threshold);
 
-					/*
-					 * Compaction records what page blocks
-					 * it recently failed to isolate pages
-					 * from and skips them in the future
-					 * scanning. When kswapd is going to
-					 * sleep, it is reasonable to assume
-					 * that pages and compaction may succeed
-					 * so reset the cache.
-					 */
-					reset_isolation_suitable(pgdat);
-
 					schedule();
 					set_pgdat_percpu_threshold(pgdat,
 						calculate_pressure_threshold);
@@ -3016,6 +3005,24 @@ static int __zone_reclaim(struct zone *zone, gfp_t gfp_mask, unsigned int order)
 
 	disable_swap_token();
 	cond_resched();
+
+	/*
+	 * Zone reclaim reclaims unmapped file backed pages and
+	 * slab pages if we are over the defined limits.
+	 *
+	 * A small portion of unmapped file backed pages is needed for
+	 * file I/O otherwise pages read by file I/O will be immediately
+	 * thrown out if the zone is overallocated. So we do not reclaim
+	 * if less than a specified percentage of the zone is used by
+	 * unmapped file backed pages.
+	 */
+	if (zone_pagecache_reclaimable(zone) <= zone->min_unmapped_pages &&
+	    zone_page_state(zone, NR_SLAB_RECLAIMABLE) <= zone->min_slab_pages)
+		return ZONE_RECLAIM_FULL;
+
+	if (zone_is_all_unreclaimable(zone))
+		return ZONE_RECLAIM_FULL;
+
 	/*
 	 * We need to be able to allocate from the reserves for RECLAIM_SWAP
 	 * and we also need to be able to write out pages for RECLAIM_WRITE
@@ -3070,27 +3077,35 @@ static int __zone_reclaim(struct zone *zone, gfp_t gfp_mask, unsigned int order)
 	return sc.nr_reclaimed >= nr_pages;
 }
 
-int zone_reclaim(struct zone *zone, gfp_t gfp_mask, unsigned int order)
+static int zone_reclaim_compact(struct zone *preferred_zone,
+				struct zone *zone, gfp_t gfp_mask,
+				unsigned int order,
+				bool sync_compaction,
+				bool *need_compaction)
+{
+	bool contended;
+
+	if (compaction_deferred(preferred_zone) ||
+	    !order ||
+	    (gfp_mask & (__GFP_FS|__GFP_IO)) != (__GFP_FS|__GFP_IO)) {
+		*need_compaction = false;
+		return COMPACT_SKIPPED;
+	}
+
+	*need_compaction = true;
+	return compact_zone_order(zone, order,
+				  gfp_mask,
+				  sync_compaction,
+				  &contended);
+}
+
+int zone_reclaim(struct zone *preferred_zone, struct zone *zone,
+		 gfp_t gfp_mask, unsigned int order,
+		 unsigned long mark, int classzone_idx, int alloc_flags)
 {
 	int node_id;
-	int ret;
-
-	/*
-	 * Zone reclaim reclaims unmapped file backed pages and
-	 * slab pages if we are over the defined limits.
-	 *
-	 * A small portion of unmapped file backed pages is needed for
-	 * file I/O otherwise pages read by file I/O will be immediately
-	 * thrown out if the zone is overallocated. So we do not reclaim
-	 * if less than a specified percentage of the zone is used by
-	 * unmapped file backed pages.
-	 */
-	if (zone_pagecache_reclaimable(zone) <= zone->min_unmapped_pages &&
-	    zone_page_state(zone, NR_SLAB_RECLAIMABLE) <= zone->min_slab_pages)
-		return ZONE_RECLAIM_FULL;
-
-	if (zone_is_all_unreclaimable(zone))
-		return ZONE_RECLAIM_FULL;
+	int ret, c_ret;
+	bool sync_compaction = false, need_compaction = false;
 
 	/*
 	 * Do not scan if the allocation should not be delayed.
@@ -3108,11 +3123,56 @@ int zone_reclaim(struct zone *zone, gfp_t gfp_mask, unsigned int order)
 	if (node_state(node_id, N_CPU) && node_id != numa_node_id())
 		return ZONE_RECLAIM_NOSCAN;
 
-	if (zone_test_and_set_flag(zone, ZONE_RECLAIM_LOCKED))
-		return ZONE_RECLAIM_NOSCAN;
+repeat_compaction:
+	/*
+	 * If this allocation may be satisfied by memory compaction,
+	 * run compaction before reclaim.
+	 */
+	c_ret = zone_reclaim_compact(preferred_zone,
+				     zone, gfp_mask, order,
+				     sync_compaction,
+				     &need_compaction);
+	if (need_compaction &&
+	    c_ret != COMPACT_SKIPPED &&
+	    zone_watermark_ok(zone, order, mark,
+			      classzone_idx,
+			      alloc_flags)) {
+#ifdef CONFIG_COMPACTION
+		zone->compact_considered = 0;
+		zone->compact_defer_shift = 0;
+#endif
+		return ZONE_RECLAIM_SUCCESS;
+	}
 
+	/*
+	 * reclaim if compaction failed because not enough memory was
+	 * available or if compaction didn't run (order 0) or didn't
+	 * succeed.
+	 */
 	ret = __zone_reclaim(zone, gfp_mask, order);
-	zone_clear_flag(zone, ZONE_RECLAIM_LOCKED);
+	if (ret == ZONE_RECLAIM_SUCCESS) {
+		if (zone_watermark_ok(zone, order, mark,
+				      classzone_idx,
+				      alloc_flags))
+			return ZONE_RECLAIM_SUCCESS;
+
+		/*
+		 * If compaction run but it was skipped and reclaim was
+		 * successful keep going.
+		 */
+		if (need_compaction && c_ret == COMPACT_SKIPPED) {
+			/*
+			 * If it's ok to wait for I/O we can as well run sync
+			 * compaction
+			 */
+			sync_compaction = !!(zone_reclaim_mode &
+					     (RECLAIM_WRITE|RECLAIM_SWAP));
+			cond_resched();
+			goto repeat_compaction;
+		}
+	}
+	if (need_compaction)
+		defer_compaction(preferred_zone);
 
 	if (!ret)
 		count_vm_event(PGSCAN_ZONE_RECLAIM_FAILED);

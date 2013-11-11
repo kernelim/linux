@@ -835,7 +835,6 @@ xfsaild_stop(
 	kthread_stop(ailp->xa_task);
 }
 
-
 /* Catch misguided souls that try to use this interface on XFS */
 STATIC struct inode *
 xfs_fs_alloc_inode(
@@ -1033,6 +1032,8 @@ xfs_fs_put_super(
 	struct super_block	*sb)
 {
 	struct xfs_mount	*mp = XFS_M(sb);
+
+	cancel_delayed_work_sync(&mp->m_eofblocks_work);
 
 	/*
 	 * Unregister the memory shrinker before we tear down the mount
@@ -1376,6 +1377,7 @@ xfs_fs_fill_super(
 	INIT_LIST_HEAD(&mp->m_sync_list);
 	spin_lock_init(&mp->m_sync_lock);
 	init_waitqueue_head(&mp->m_wait_single_sync_task);
+	INIT_DELAYED_WORK(&mp->m_eofblocks_work, xfs_eofblocks_worker);
 
 	mp->m_super = sb;
 	sb->s_fs_info = mp;
@@ -1714,13 +1716,21 @@ init_xfs_fs(void)
 		goto out_sysctl_unregister;
 	}
 
+	xfs_eofblocks_wq = create_workqueue("xfseofblocks");
+	if (!xfs_eofblocks_wq) {
+		error = ENOMEM;
+		goto out_destroy_alloc_wq;
+	}
+
 	vfs_initquota();
 
 	error = register_filesystem(&xfs_fs_type);
 	if (error)
-		goto out_destroy_alloc_wq;
+		goto out_destroy_eofb_wq;
 	return 0;
 
+ out_destroy_eofb_wq:
+	destroy_workqueue(xfs_eofblocks_wq);
  out_destroy_alloc_wq:
 	destroy_workqueue(xfs_alloc_wq);
  out_sysctl_unregister:
@@ -1744,6 +1754,7 @@ exit_xfs_fs(void)
 {
 	vfs_exitquota();
 	unregister_filesystem(&xfs_fs_type);
+	destroy_workqueue(xfs_eofblocks_wq);
 	destroy_workqueue(xfs_alloc_wq);
 	xfs_sysctl_unregister();
 	xfs_cleanup_procfs();

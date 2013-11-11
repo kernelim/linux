@@ -61,7 +61,7 @@ static int b43_pcmcia_resume(struct pcmcia_device *dev)
 # define b43_pcmcia_resume		NULL
 #endif /* CONFIG_PM */
 
-static int __devinit b43_pcmcia_probe(struct pcmcia_device *dev)
+static int b43_pcmcia_probe(struct pcmcia_device *dev)
 {
 	struct ssb_bus *ssb;
 #if 1 /* in RHEL */
@@ -95,8 +95,10 @@ static int __devinit b43_pcmcia_probe(struct pcmcia_device *dev)
 	win.AccessSpeed = 250;
 	res = pcmcia_request_window(&dev, &win, &dev->win);
 #endif
+
 	if (res != 0)
 		goto err_kfree_ssb;
+
 #if 0 /* Not in RHEL */
 	res = pcmcia_map_mem_page(dev, dev->resource[2], 0);
 #else
@@ -140,7 +142,7 @@ out_error:
 	return err;
 }
 
-static void __devexit b43_pcmcia_remove(struct pcmcia_device *dev)
+static void b43_pcmcia_remove(struct pcmcia_device *dev)
 {
 	struct ssb_bus *ssb = dev->priv;
 
@@ -161,11 +163,15 @@ static struct pcmcia_driver b43_pcmcia_driver = {
 #endif
 	.id_table	= b43_pcmcia_tbl,
 	.probe		= b43_pcmcia_probe,
-	.remove		= __devexit_p(b43_pcmcia_remove),
+	.remove		= b43_pcmcia_remove,
 	.suspend	= b43_pcmcia_suspend,
 	.resume		= b43_pcmcia_resume,
 };
 
+/*
+ * These are not module init/exit functions!
+ * The module_pcmcia_driver() helper cannot be used here.
+ */
 int b43_pcmcia_init(void)
 {
 	return pcmcia_register_driver(&b43_pcmcia_driver);

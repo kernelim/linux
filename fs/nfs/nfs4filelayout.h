@@ -53,6 +53,8 @@ struct nfs4_pnfs_ds {
 	u32			ds_port;
 	struct nfs_client	*ds_clp;
 	atomic_t		ds_count;
+	unsigned long		ds_state;
+#define NFS4DS_CONNECTING	0	/* ds is establishing connection */
 };
 
 /* nfs4_file_layout_dsaddr flags */

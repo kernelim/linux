@@ -23,3 +23,4 @@ obj-$(CONFIG_TOPSTAR_LAPTOP)	+= topstar-laptop.o
 obj-$(CONFIG_ACPI_TOSHIBA)	+= toshiba_acpi.o
 obj-$(CONFIG_INTEL_IPS)		+= intel_ips.o
 obj-$(CONFIG_MXM_WMI)		+= mxm-wmi.o
+obj-$(CONFIG_PVPANIC)		+= pvpanic.o

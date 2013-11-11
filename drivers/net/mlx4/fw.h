@@ -158,6 +158,7 @@ struct mlx4_init_hca_param {
 	u64 global_caps;
 	u16 log_mc_entry_sz;
 	u16 log_mc_hash_sz;
+	u16 hca_core_clock; /* Internal Clock Frequency (in MHz) */
 	u8  log_num_qps;
 	u8  log_num_srqs;
 	u8  log_num_cqs;
@@ -166,8 +167,8 @@ struct mlx4_init_hca_param {
 	u8  log_mc_table_sz;
 	u8  log_mpt_sz;
 	u8  log_uar_sz;
+	u8  mw_enabled;  /* Enable memory windows */
 	u8  uar_page_sz; /* log pg sz in 4k chunks */
-	u8  fs_hash_enable_bits;
 	u8  steering_mode; /* for QUERY_HCA */
 	u64 dev_cap_enabled;
 };

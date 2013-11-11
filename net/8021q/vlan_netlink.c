@@ -105,6 +105,7 @@ static int vlan_newlink(struct net_device *dev,
 {
 	struct vlan_dev_info *vlan = vlan_dev_info(dev);
 	struct net_device *real_dev;
+	struct net *src_net = netdev_extended(dev)->src_net;
 	int err;
 
 	if (!data[IFLA_VLAN_ID])
@@ -112,7 +113,7 @@ static int vlan_newlink(struct net_device *dev,
 
 	if (!tb[IFLA_LINK])
 		return -EINVAL;
-	real_dev = __dev_get_by_index(dev_net(dev), nla_get_u32(tb[IFLA_LINK]));
+	real_dev = __dev_get_by_index(src_net, nla_get_u32(tb[IFLA_LINK]));
 	if (!real_dev)
 		return -ENODEV;
 

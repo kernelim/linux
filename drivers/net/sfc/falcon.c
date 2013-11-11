@@ -25,8 +25,11 @@
 #include "io.h"
 #include "phy.h"
 #include "workarounds.h"
+#include "selftest.h"
 
 /* Hardware control for SFC4000 (aka Falcon). */
+
+static int falcon_reset_hw(struct efx_nic *efx, enum reset_type method);
 
 static const unsigned int
 /* "Large" EEPROM device: Atmel AT25640 or similar
@@ -1034,10 +1037,34 @@ static const struct efx_nic_register_test falcon_b0_register_tests[] = {
 	  EFX_OWORD32(0x0003FF0F, 0x00000000, 0x00000000, 0x00000000) },
 };
 
-static int falcon_b0_test_registers(struct efx_nic *efx)
+static int
+falcon_b0_test_chip(struct efx_nic *efx, struct efx_self_tests *tests)
 {
-	return efx_nic_test_registers(efx, falcon_b0_register_tests,
-				      ARRAY_SIZE(falcon_b0_register_tests));
+	enum reset_type reset_method = RESET_TYPE_INVISIBLE;
+	int rc, rc2;
+
+	mutex_lock(&efx->mac_lock);
+	if (efx->loopback_modes) {
+		/* We need the 312 clock from the PHY to test the XMAC
+		 * registers, so move into XGMII loopback if available */
+		if (efx->loopback_modes & (1 << LOOPBACK_XGMII))
+			efx->loopback_mode = LOOPBACK_XGMII;
+		else
+			efx->loopback_mode = __ffs(efx->loopback_modes);
+	}
+	__efx_reconfigure_port(efx);
+	mutex_unlock(&efx->mac_lock);
+
+	efx_reset_down(efx, reset_method);
+
+	tests->registers =
+		efx_nic_test_registers(efx, falcon_b0_register_tests,
+				       ARRAY_SIZE(falcon_b0_register_tests))
+		? -1 : 1;
+
+	rc = falcon_reset_hw(efx, reset_method);
+	rc2 = efx_reset_up(efx, reset_method, rc == 0);
+	return rc ? rc : rc2;
 }
 
 /**************************************************************************
@@ -1046,6 +1073,49 @@ static int falcon_b0_test_registers(struct efx_nic *efx)
  *
  **************************************************************************
  */
+
+static enum reset_type falcon_map_reset_reason(enum reset_type reason)
+{
+	switch (reason) {
+	case RESET_TYPE_RX_RECOVERY:
+	case RESET_TYPE_RX_DESC_FETCH:
+	case RESET_TYPE_TX_DESC_FETCH:
+	case RESET_TYPE_TX_SKIP:
+		/* These can occasionally occur due to hardware bugs.
+		 * We try to reset without disrupting the link.
+		 */
+		return RESET_TYPE_INVISIBLE;
+	default:
+		return RESET_TYPE_ALL;
+	}
+}
+
+static int falcon_map_reset_flags(u32 *flags)
+{
+	enum {
+		FALCON_RESET_INVISIBLE = (ETH_RESET_DMA | ETH_RESET_FILTER |
+					  ETH_RESET_OFFLOAD | ETH_RESET_MAC),
+		FALCON_RESET_ALL = FALCON_RESET_INVISIBLE | ETH_RESET_PHY,
+		FALCON_RESET_WORLD = FALCON_RESET_ALL | ETH_RESET_IRQ,
+	};
+
+	if ((*flags & FALCON_RESET_WORLD) == FALCON_RESET_WORLD) {
+		*flags &= ~FALCON_RESET_WORLD;
+		return RESET_TYPE_WORLD;
+	}
+
+	if ((*flags & FALCON_RESET_ALL) == FALCON_RESET_ALL) {
+		*flags &= ~FALCON_RESET_ALL;
+		return RESET_TYPE_ALL;
+	}
+
+	if ((*flags & FALCON_RESET_INVISIBLE) == FALCON_RESET_INVISIBLE) {
+		*flags &= ~FALCON_RESET_INVISIBLE;
+		return RESET_TYPE_INVISIBLE;
+	}
+
+	return -EINVAL;
+}
 
 /* Resets NIC to known state.  This routine must be called in process
  * context and is allowed to sleep. */
@@ -1475,10 +1545,6 @@ static int falcon_probe_nic(struct efx_nic *efx)
 
 static void falcon_init_rx_cfg(struct efx_nic *efx)
 {
-	/* Prior to Siena the RX DMA engine will split each frame at
-	 * intervals of RX_USR_BUF_SIZE (32-byte units). We set it to
-	 * be so large that that never happens. */
-	const unsigned huge_buf_size = (3 * 4096) >> 5;
 	/* RX control FIFO thresholds (32 entries) */
 	const unsigned ctrl_xon_thr = 20;
 	const unsigned ctrl_xoff_thr = 25;
@@ -1486,10 +1552,15 @@ static void falcon_init_rx_cfg(struct efx_nic *efx)
 
 	efx_reado(efx, &reg, FR_AZ_RX_CFG);
 	if (efx_nic_rev(efx) <= EFX_REV_FALCON_A1) {
-		/* Data FIFO size is 5.5K */
+		/* Data FIFO size is 5.5K.  The RX DMA engine only
+		 * supports scattering for user-mode queues, but will
+		 * split DMA writes at intervals of RX_USR_BUF_SIZE
+		 * (32-byte units) even for kernel-mode queues.  We
+		 * set it to be so large that that never happens.
+		 */
 		EFX_SET_OWORD_FIELD(reg, FRF_AA_RX_DESC_PUSH_EN, 0);
 		EFX_SET_OWORD_FIELD(reg, FRF_AA_RX_USR_BUF_SIZE,
-				    huge_buf_size);
+				    (3 * 4096) >> 5);
 		EFX_SET_OWORD_FIELD(reg, FRF_AA_RX_XON_MAC_TH, 512 >> 8);
 		EFX_SET_OWORD_FIELD(reg, FRF_AA_RX_XOFF_MAC_TH, 2048 >> 8);
 		EFX_SET_OWORD_FIELD(reg, FRF_AA_RX_XON_TX_TH, ctrl_xon_thr);
@@ -1498,7 +1569,7 @@ static void falcon_init_rx_cfg(struct efx_nic *efx)
 		/* Data FIFO size is 80K; register fields moved */
 		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_DESC_PUSH_EN, 0);
 		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_USR_BUF_SIZE,
-				    huge_buf_size);
+				    EFX_RX_USR_BUF_SIZE >> 5);
 		/* Send XON and XOFF at ~3 * max MTU away from empty/full */
 		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_XON_MAC_TH, 27648 >> 8);
 		EFX_SET_OWORD_FIELD(reg, FRF_BZ_RX_XOFF_MAC_TH, 54272 >> 8);
@@ -1714,11 +1785,14 @@ const struct efx_nic_type falcon_a1_nic_type = {
 	.dimension_resources = falcon_dimension_resources,
 	.fini = efx_port_dummy_op_void,
 	.monitor = falcon_monitor,
+	.map_reset_reason = falcon_map_reset_reason,
+	.map_reset_flags = falcon_map_reset_flags,
 	.reset = falcon_reset_hw,
 	.probe_port = falcon_probe_port,
 	.remove_port = falcon_remove_port,
 	.handle_global_event = falcon_handle_global_event,
 	.prepare_flush = falcon_prepare_flush,
+	.finish_flush = efx_port_dummy_op_void,
 	.update_stats = falcon_update_nic_stats,
 	.start_stats = falcon_start_nic_stats,
 	.stop_stats = falcon_stop_nic_stats,
@@ -1741,11 +1815,11 @@ const struct efx_nic_type falcon_a1_nic_type = {
 	.evq_rptr_tbl_base = FR_AA_EVQ_RPTR_KER,
 	.max_dma_mask = DMA_BIT_MASK(FSF_AZ_TX_KER_BUF_ADDR_WIDTH),
 	.rx_buffer_padding = 0x24,
+	.can_rx_scatter = false,
 	.max_interrupt_mode = EFX_INT_MODE_MSI,
 	.phys_addr_channels = 4,
 	.timer_period_max =  1 << FRF_AB_TC_TIMER_VAL_WIDTH,
 	.offload_features = NETIF_F_IP_CSUM,
-	.reset_world_flags = ETH_RESET_IRQ,
 };
 
 const struct efx_nic_type falcon_b0_nic_type = {
@@ -1755,11 +1829,14 @@ const struct efx_nic_type falcon_b0_nic_type = {
 	.dimension_resources = falcon_dimension_resources,
 	.fini = efx_port_dummy_op_void,
 	.monitor = falcon_monitor,
+	.map_reset_reason = falcon_map_reset_reason,
+	.map_reset_flags = falcon_map_reset_flags,
 	.reset = falcon_reset_hw,
 	.probe_port = falcon_probe_port,
 	.remove_port = falcon_remove_port,
 	.handle_global_event = falcon_handle_global_event,
 	.prepare_flush = falcon_prepare_flush,
+	.finish_flush = efx_port_dummy_op_void,
 	.update_stats = falcon_update_nic_stats,
 	.start_stats = falcon_start_nic_stats,
 	.stop_stats = falcon_stop_nic_stats,
@@ -1771,7 +1848,7 @@ const struct efx_nic_type falcon_b0_nic_type = {
 	.get_wol = falcon_get_wol,
 	.set_wol = falcon_set_wol,
 	.resume_wol = efx_port_dummy_op_void,
-	.test_registers = falcon_b0_test_registers,
+	.test_chip = falcon_b0_test_chip,
 	.test_nvram = falcon_test_nvram,
 
 	.revision = EFX_REV_FALCON_B0,
@@ -1789,12 +1866,12 @@ const struct efx_nic_type falcon_b0_nic_type = {
 	.max_dma_mask = DMA_BIT_MASK(FSF_AZ_TX_KER_BUF_ADDR_WIDTH),
 	.rx_buffer_hash_size = 0x10,
 	.rx_buffer_padding = 0,
+	.can_rx_scatter = true,
 	.max_interrupt_mode = EFX_INT_MODE_MSIX,
 	.phys_addr_channels = 32, /* Hardware limit is 64, but the legacy
 				   * interrupt handler only supports 32
 				   * channels */
 	.timer_period_max =  1 << FRF_AB_TC_TIMER_VAL_WIDTH,
 	.offload_features = NETIF_F_IP_CSUM | NETIF_F_RXHASH | NETIF_F_NTUPLE,
-	.reset_world_flags = ETH_RESET_IRQ,
 };
 

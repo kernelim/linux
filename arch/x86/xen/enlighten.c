@@ -239,7 +239,9 @@ static __init void xen_init_cpuid_mask(void)
 {
 	unsigned int ax, bx, cx, dx;
 
-	cpuid_leaf1_ecx_mask = ~(1 << (X86_FEATURE_MWAIT % 32));
+	cpuid_leaf1_ecx_mask =
+		~((1 << (X86_FEATURE_MWAIT % 32)) |
+		  (1 << (X86_FEATURE_AVX % 32)));
 
 	cpuid_leaf1_edx_mask =
 		~(1 << X86_FEATURE_ACC);   /* thermal monitoring */

@@ -161,5 +161,11 @@ struct gpio_led_platform_data {
 					unsigned long *delay_off);
 };
 
+extern void led_blink_set(struct led_classdev *led_cdev,
+			  unsigned long *delay_on,
+			  unsigned long *delay_off);
+
+extern void led_set_brightness(struct led_classdev *led_cdev,
+			       enum led_brightness brightness);
 
 #endif		/* __LINUX_LEDS_H_INCLUDED */

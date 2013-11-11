@@ -18,10 +18,10 @@
 #include <linux/delay.h>
 #include <linux/edac.h>
 #include <linux/mmzone.h>
-#include <linux/edac_mce.h>
 #include <linux/smp.h>
 #include <linux/bitmap.h>
 #include <asm/processor.h>
+#include <asm/mce.h>
 
 #include "edac_core.h"
 
@@ -318,9 +318,6 @@ struct sbridge_pvt {
 	/* Memory type detection */
 	bool			is_mirrored, is_lockstep, is_close_pg;
 
-	/* mcelog glue */
-	struct edac_mce		edac_mce;
-
 	/* Fifo double buffers */
 	struct mce		mce_entry[MCE_LOG_LEN];
 	struct mce		mce_outentry[MCE_LOG_LEN];
@@ -335,30 +332,31 @@ struct sbridge_pvt {
 	u64			tolm, tohm;
 };
 
-#define PCI_DESCR(device, function, device_id)	\
-	.dev = (device),			\
-	.func = (function),			\
-	.dev_id = (device_id)
+#define PCI_DESCR(device, function, device_id, opt)	\
+	.dev = (device),				\
+	.func = (function),				\
+	.dev_id = (device_id),				\
+	.optional = opt
 
 static const struct pci_id_descr pci_dev_descr_sbridge[] = {
 		/* Processor Home Agent */
-	{ PCI_DESCR(14, 0, PCI_DEVICE_ID_INTEL_SBRIDGE_IMC_HA0)		},
+	{ PCI_DESCR(14, 0, PCI_DEVICE_ID_INTEL_SBRIDGE_IMC_HA0, 0)	},
 
 		/* Memory controller */
-	{ PCI_DESCR(15, 0, PCI_DEVICE_ID_INTEL_SBRIDGE_IMC_TA)		},
-	{ PCI_DESCR(15, 1, PCI_DEVICE_ID_INTEL_SBRIDGE_IMC_RAS)		},
-	{ PCI_DESCR(15, 2, PCI_DEVICE_ID_INTEL_SBRIDGE_IMC_TAD0)	},
-	{ PCI_DESCR(15, 3, PCI_DEVICE_ID_INTEL_SBRIDGE_IMC_TAD1)	},
-	{ PCI_DESCR(15, 4, PCI_DEVICE_ID_INTEL_SBRIDGE_IMC_TAD2)	},
-	{ PCI_DESCR(15, 5, PCI_DEVICE_ID_INTEL_SBRIDGE_IMC_TAD3)	},
-	{ PCI_DESCR(17, 0, PCI_DEVICE_ID_INTEL_SBRIDGE_IMC_DDRIO)	},
+	{ PCI_DESCR(15, 0, PCI_DEVICE_ID_INTEL_SBRIDGE_IMC_TA, 0)	},
+	{ PCI_DESCR(15, 1, PCI_DEVICE_ID_INTEL_SBRIDGE_IMC_RAS, 0)	},
+	{ PCI_DESCR(15, 2, PCI_DEVICE_ID_INTEL_SBRIDGE_IMC_TAD0, 0)	},
+	{ PCI_DESCR(15, 3, PCI_DEVICE_ID_INTEL_SBRIDGE_IMC_TAD1, 0)	},
+	{ PCI_DESCR(15, 4, PCI_DEVICE_ID_INTEL_SBRIDGE_IMC_TAD2, 0)	},
+	{ PCI_DESCR(15, 5, PCI_DEVICE_ID_INTEL_SBRIDGE_IMC_TAD3, 0)	},
+	{ PCI_DESCR(17, 0, PCI_DEVICE_ID_INTEL_SBRIDGE_IMC_DDRIO, 1)	},
 
 		/* System Address Decoder */
-	{ PCI_DESCR(12, 6, PCI_DEVICE_ID_INTEL_SBRIDGE_SAD0)		},
-	{ PCI_DESCR(12, 7, PCI_DEVICE_ID_INTEL_SBRIDGE_SAD1)		},
+	{ PCI_DESCR(12, 6, PCI_DEVICE_ID_INTEL_SBRIDGE_SAD0, 0)		},
+	{ PCI_DESCR(12, 7, PCI_DEVICE_ID_INTEL_SBRIDGE_SAD1, 0)		},
 
 		/* Broadcast Registers */
-	{ PCI_DESCR(13, 6, PCI_DEVICE_ID_INTEL_SBRIDGE_BR)		},
+	{ PCI_DESCR(13, 6, PCI_DEVICE_ID_INTEL_SBRIDGE_BR, 0)		},
 };
 
 #define PCI_ID_TABLE_ENTRY(A) { .descr=A, .n_devs = ARRAY_SIZE(A) }
@@ -602,14 +600,19 @@ static int get_dimm_config(const struct mem_ctl_info *mci)
 		pvt->is_close_pg = false;
 	}
 
-	pci_read_config_dword(pvt->pci_ta, RANK_CFG_A, &reg);
-	if (IS_RDIMM_ENABLED(reg)) {
-		/* FIXME: Can also be LRDIMM */
-		debugf0("Memory is registered\n");
-		mtype = MEM_RDDR3;
+	if (pvt->pci_ddrio) {
+		pci_read_config_dword(pvt->pci_ddrio, RANK_CFG_A, &reg);
+		if (IS_RDIMM_ENABLED(reg)) {
+			/* FIXME: Can also be LRDIMM */
+			debugf0("Memory is registered\n");
+			mtype = MEM_RDDR3;
+		} else {
+			debugf0("Memory is unregistered\n");
+			mtype = MEM_DDR3;
+		}
 	} else {
-		debugf0("Memory is unregistered\n");
-		mtype = MEM_DDR3;
+		debugf0("Cannot determine memory type\n");
+		mtype = MEM_UNKNOWN;
 	}
 
 	/* On all supported DDR3 DIMM types, there are 8 banks available */
@@ -1367,8 +1370,7 @@ static int mci_bind_devs(struct mem_ctl_info *mci,
 
 	/* Check if everything were registered */
 	if (!pvt->pci_sad0 || !pvt->pci_sad1 || !pvt->pci_ha0 ||
-	    !pvt-> pci_tad || !pvt->pci_ras  || !pvt->pci_ta ||
-	    !pvt->pci_ddrio)
+	    !pvt-> pci_tad || !pvt->pci_ras  || !pvt->pci_ta)
 		goto enodev;
 
 	for (i = 0; i < NUM_CHANNELS; i++) {
@@ -1580,10 +1582,17 @@ static void sbridge_check_error(struct mem_ctl_info *mci)
  * WARNING: As this routine should be called at NMI time, extra care should
  * be taken to avoid deadlocks, and to be as fast as possible.
  */
-static int sbridge_mce_check_error(void *priv, struct mce *mce)
+static int sbridge_mce_check_error(struct notifier_block *nb, unsigned long val,
+				   void *data)
 {
-	struct mem_ctl_info *mci = priv;
-	struct sbridge_pvt *pvt = mci->pvt_info;
+	struct mce *mce = (struct mce *)data;
+	struct mem_ctl_info *mci;
+	struct sbridge_pvt *pvt;
+
+	mci = get_mci_for_node_id(mce->socketid);
+	if (!mci)
+		return NOTIFY_BAD;
+	pvt = mci->pvt_info;
 
 	/*
 	 * Just let mcelog handle it if the error is
@@ -1592,7 +1601,7 @@ static int sbridge_mce_check_error(void *priv, struct mce *mce)
 	 * bit 12 has an special meaning.
 	 */
 	if ((mce->status & 0xefff) >> 7 != 1)
-		return 0;
+		return NOTIFY_DONE;
 
 	printk("sbridge: HANDLING MCE MEMORY ERROR\n");
 
@@ -1609,14 +1618,14 @@ static int sbridge_mce_check_error(void *priv, struct mce *mce)
 #ifdef CONFIG_SMP
 	/* Only handle if it is the right mc controller */
 	if (cpu_data(mce->cpu).phys_proc_id != pvt->sbridge_dev->mc)
-		return 0;
+		return NOTIFY_DONE;
 #endif
 
 	smp_rmb();
 	if ((pvt->mce_out + 1) % MCE_LOG_LEN == pvt->mce_in) {
 		smp_wmb();
 		pvt->mce_overrun++;
-		return 0;
+		return NOTIFY_DONE;
 	}
 
 	/* Copy memory error at the ringbuffer */
@@ -1629,8 +1638,12 @@ static int sbridge_mce_check_error(void *priv, struct mce *mce)
 		sbridge_check_error(mci);
 
 	/* Advice mcelog that the error were handled */
-	return 1;
+	return NOTIFY_STOP;
 }
+
+static struct notifier_block sbridge_mce_dec = {
+	.notifier_call      = sbridge_mce_check_error,
+};
 
 /****************************************************************************
 			EDAC register/unregister logic
@@ -1653,9 +1666,6 @@ static void sbridge_unregister_mci(struct sbridge_dev *sbridge_dev)
 
 	debugf0("MC: " __FILE__ ": %s(): mci = %p, dev = %p\n",
 		__func__, mci, &sbridge_dev->pdev[0]->dev);
-
-	/* Disable MCE NMI handler */
-	edac_mce_unregister(&pvt->edac_mce);
 
 	/* Remove MC sysfs nodes */
 	edac_mc_del_mc(mci->dev);
@@ -1724,19 +1734,7 @@ static int sbridge_register_mci(struct sbridge_dev *sbridge_dev)
 		goto fail0;
 	}
 
-	/* Registers on edac_mce in order to receive memory errors */
-	pvt->edac_mce.priv = mci;
-	pvt->edac_mce.check_error = sbridge_mce_check_error;
-	rc = edac_mce_register(&pvt->edac_mce);
-	if (unlikely(rc < 0)) {
-		debugf0("MC: " __FILE__
-			": %s(): failed edac_mce_register()\n", __func__);
-		goto fail1;
-	}
-
 	return 0;
-fail1:
-	edac_mc_del_mc(mci->dev);
 
 fail0:
 	kfree(mci->ctl_name);
@@ -1864,8 +1862,10 @@ static int __init sbridge_init(void)
 
 	pci_rc = pci_register_driver(&sbridge_driver);
 
-	if (pci_rc >= 0)
+	if (pci_rc >= 0) {
+		mce_register_decode_chain(&sbridge_mce_dec);
 		return 0;
+	}
 
 	sbridge_printk(KERN_ERR, "Failed to register device with error %d.\n",
 		      pci_rc);
@@ -1881,6 +1881,7 @@ static void __exit sbridge_exit(void)
 {
 	debugf2("MC: " __FILE__ ": %s()\n", __func__);
 	pci_unregister_driver(&sbridge_driver);
+	mce_unregister_decode_chain(&sbridge_mce_dec);
 }
 
 module_init(sbridge_init);

@@ -339,10 +339,8 @@ static struct css_device_id eadm_subchannel_ids[] = {
 MODULE_DEVICE_TABLE(css, eadm_subchannel_ids);
 
 static struct css_driver eadm_subchannel_driver = {
-	.drv = {
-		.name = "eadm_subchannel",
-		.owner = THIS_MODULE,
-	},
+	.name = "eadm_subchannel",
+	.owner = THIS_MODULE,
 	.subchannel_type = eadm_subchannel_ids,
 	.irq = eadm_subchannel_irq,
 	.probe = eadm_subchannel_probe,

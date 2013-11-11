@@ -23,6 +23,8 @@ static int zfcp_ccw_suspend(struct ccw_device *cdev)
 
 	mutex_lock(&zfcp_data.config_mutex);
 
+	zfcp_erp_modify_adapter_status(adapter, "ccsusp2", NULL,
+				       ZFCP_STATUS_ADAPTER_SUSPENDED, ZFCP_SET);
 	zfcp_erp_adapter_shutdown(adapter, 0, "ccsusp1", NULL);
 	zfcp_erp_wait(adapter);
 
@@ -31,18 +33,24 @@ static int zfcp_ccw_suspend(struct ccw_device *cdev)
 	return 0;
 }
 
-static int zfcp_ccw_activate(struct ccw_device *cdev)
-
+/**
+ * zfcp_ccw_activate - activate adapter and wait for it to finish
+ * @cdev: pointer to belonging ccw device
+ * @clear: Status flags to clear.
+ * @tag: s390dbf trace record tag
+ */
+static int zfcp_ccw_activate(struct ccw_device *cdev, int clear, char *tag)
 {
 	struct zfcp_adapter *adapter = dev_get_drvdata(&cdev->dev);
 
 	if (!adapter)
 		return 0;
 
-	zfcp_erp_modify_adapter_status(adapter, "ccresu1", NULL,
+	zfcp_erp_modify_adapter_status(adapter, tag, NULL, clear, ZFCP_CLEAR);
+	zfcp_erp_modify_adapter_status(adapter, tag, NULL,
 				       ZFCP_STATUS_COMMON_RUNNING, ZFCP_SET);
 	zfcp_erp_adapter_reopen(adapter, ZFCP_STATUS_COMMON_ERP_FAILED,
-				"ccresu2", NULL);
+				tag, NULL);
 	zfcp_erp_wait(adapter);
 	flush_work(&adapter->scan_work); /* ok to call even if nothing queued */
 
@@ -225,6 +233,11 @@ static int zfcp_ccw_notify(struct ccw_device *ccw_device, int event)
 
 	switch (event) {
 	case CIO_GONE:
+		if (atomic_read(&adapter->status) &
+		    ZFCP_STATUS_ADAPTER_SUSPENDED) { /* notification ignore */
+			zfcp_dbf_hba_base(adapter->dbf, "nigo");
+			break;
+		}
 		dev_warn(&adapter->ccw_device->dev,
 			 "The FCP device has been detached\n");
 		zfcp_erp_adapter_shutdown(adapter, 0, "ccnoti1", NULL);
@@ -235,6 +248,11 @@ static int zfcp_ccw_notify(struct ccw_device *ccw_device, int event)
 		zfcp_erp_adapter_shutdown(adapter, 0, "ccnoti2", NULL);
 		break;
 	case CIO_OPER:
+		if (atomic_read(&adapter->status) &
+		    ZFCP_STATUS_ADAPTER_SUSPENDED) { /* notification ignore */
+			zfcp_dbf_hba_base(adapter->dbf, "niop");
+			break;
+		}
 		dev_info(&adapter->ccw_device->dev,
 			 "The FCP device is operational again\n");
 		zfcp_erp_modify_adapter_status(adapter, "ccnoti3", NULL,
@@ -272,6 +290,22 @@ out:
 	mutex_unlock(&zfcp_data.config_mutex);
 }
 
+static int zfcp_ccw_thaw(struct ccw_device *cdev)
+{
+	/* trace records for thaw and final shutdown during suspend
+	   can only be found in system dump until the end of suspend
+	   but not after resume because it's based on the memory image
+	   right after the very first suspend (freeze) callback */
+	zfcp_ccw_activate(cdev, 0, "ccthaw1");
+	return 0;
+}
+
+static int zfcp_ccw_resume(struct ccw_device *cdev)
+{
+	zfcp_ccw_activate(cdev, ZFCP_STATUS_ADAPTER_SUSPENDED, "ccresu1");
+	return 0;
+}
+
 struct ccw_driver zfcp_ccw_driver = {
 	.owner       = THIS_MODULE,
 	.name        = "zfcp",
@@ -283,8 +317,8 @@ struct ccw_driver zfcp_ccw_driver = {
 	.notify      = zfcp_ccw_notify,
 	.shutdown    = zfcp_ccw_shutdown,
 	.freeze      = zfcp_ccw_suspend,
-	.thaw	     = zfcp_ccw_activate,
-	.restore     = zfcp_ccw_activate,
+	.thaw	     = zfcp_ccw_thaw,
+	.restore     = zfcp_ccw_resume,
 };
 
 /**

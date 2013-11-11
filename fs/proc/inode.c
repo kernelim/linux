@@ -53,6 +53,8 @@ void de_put(struct proc_dir_entry *de)
 static void proc_delete_inode(struct inode *inode)
 {
 	struct proc_dir_entry *de;
+	const struct proc_ns_operations *ns_ops;
+	void *ns;
 
 	truncate_inode_pages(&inode->i_data, 0);
 
@@ -66,6 +68,11 @@ static void proc_delete_inode(struct inode *inode)
 	if (PROC_I(inode)->sysctl)
 		sysctl_head_put(PROC_I(inode)->sysctl);
 	clear_inode(inode);
+	/* Release any associated namespace */
+	ns_ops = PROC_I(inode)->ns_ops;
+	ns = PROC_I(inode)->ns;
+	if (ns_ops && ns)
+		ns_ops->put(ns);
 }
 
 struct vfsmount *proc_mnt;
@@ -86,6 +93,8 @@ static struct inode *proc_alloc_inode(struct super_block *sb)
 	ei->pde = NULL;
 	ei->sysctl = NULL;
 	ei->sysctl_entry = NULL;
+	ei->ns = NULL;
+	ei->ns_ops = NULL;
 	inode = &ei->vfs_inode;
 	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
 	return inode;

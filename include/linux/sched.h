@@ -702,7 +702,10 @@ struct signal_struct {
 				 * Only settable by CAP_SYS_RESOURCE. */
 	
 	cputime_t prev_utime, prev_stime;
-#endif
+#ifdef CONFIG_AUDIT
+	unsigned audit_tty_log_passwd;
+#endif /* CONFIG_AUDIT */
+#endif /* __GENKSYMS__ */
 };
 
 /* Context switch must be unlocked if interrupts are to be enabled */
@@ -717,6 +720,7 @@ struct signal_struct {
 #define SIGNAL_STOP_DEQUEUED	0x00000002 /* stop signal dequeued */
 #define SIGNAL_STOP_CONTINUED	0x00000004 /* SIGCONT since WCONTINUED reap */
 #define SIGNAL_GROUP_EXIT	0x00000008 /* group exit in progress */
+#define SIGNAL_GROUP_COREDUMP	0x00000010 /* coredump in progress */
 /*
  * Pending notifications to parent.
  */
@@ -1294,6 +1298,12 @@ struct sched_rt_entity {
 	struct rt_rq		*my_q;
 #endif
 };
+
+/*
+ * default timeslice is 100 msecs (used only for SCHED_RR tasks).
+ * Timeslices get refilled after they expire.
+ */
+#define RR_TIMESLICE		(100 * HZ / 1000)
 
 struct rcu_node;
 
@@ -2047,10 +2057,23 @@ static inline unsigned int get_sysctl_timer_migration(void)
 	return 1;
 }
 #endif
+
+/*
+ *  control realtime throttling:
+ *
+ *  /proc/sys/kernel/sched_rt_period_us
+ *  /proc/sys/kernel/sched_rt_runtime_us
+ */
 extern unsigned int sysctl_sched_rt_period;
 extern int sysctl_sched_rt_runtime;
 
-int sched_rt_handler(struct ctl_table *table, int write,
+extern int sched_rr_timeslice;
+
+extern int sched_rr_handler(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp,
+		loff_t *ppos);
+
+extern int sched_rt_handler(struct ctl_table *table, int write,
 		void __user *buffer, size_t *lenp,
 		loff_t *ppos);
 
@@ -2232,11 +2255,6 @@ static inline int kill_cad_pid(int sig, int priv)
 #define SEND_SIG_PRIV	((struct siginfo *) 1)
 #define SEND_SIG_FORCED	((struct siginfo *) 2)
 
-static inline int is_si_special(const struct siginfo *info)
-{
-	return info <= SEND_SIG_FORCED;
-}
-
 /*
  * True if we are on the alternate signal stack.
  */
@@ -2303,7 +2321,7 @@ extern void daemonize(const char *, ...);
 extern int allow_signal(int);
 extern int disallow_signal(int);
 
-extern int do_execve(char *, char __user * __user *, char __user * __user *, struct pt_regs *);
+extern int do_execve(const char *, char __user * __user *, char __user * __user *, struct pt_regs *);
 extern long do_fork(unsigned long, unsigned long, struct pt_regs *, unsigned long, int __user *, int __user *);
 struct task_struct *fork_idle(int);
 

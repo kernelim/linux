@@ -25,11 +25,11 @@
 
 #include <linux/module.h>
 
-#include "drmP.h"
-#include "savage_drm.h"
+#include <drm/drmP.h>
+#include <drm/savage_drm.h>
 #include "savage_drv.h"
 
-#include "drm_pciids.h"
+#include <drm/drm_pciids.h>
 
 static struct pci_device_id pciidlist[] = {
 	savage_PCI_IDS
@@ -46,6 +46,7 @@ static const struct file_operations savage_driver_fops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = drm_compat_ioctl,
 #endif
+	.llseek = noop_llseek,
 };
 
 static struct drm_driver driver = {

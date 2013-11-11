@@ -171,11 +171,13 @@ spectrum_cs_probe(struct pcmcia_device *link)
 	card->p_dev = link;
 	link->priv = priv;
 
+#if 1 /* in RHEL */
 	/* Interrupt setup */
 	link->irq.Attributes = IRQ_TYPE_DYNAMIC_SHARING;
 	link->irq.Handler = orinoco_interrupt;
 	link->conf.Attributes = 0;
 	link->conf.IntType = INT_MEMORY_AND_IO;
+#endif
 
 	return spectrum_cs_config(link);
 }				/* spectrum_cs_attach */
@@ -442,18 +444,4 @@ static struct pcmcia_driver orinoco_driver = {
 	.resume		= spectrum_cs_resume,
 	.id_table       = spectrum_cs_ids,
 };
-
-static int __init
-init_spectrum_cs(void)
-{
-	return pcmcia_register_driver(&orinoco_driver);
-}
-
-static void __exit
-exit_spectrum_cs(void)
-{
-	pcmcia_unregister_driver(&orinoco_driver);
-}
-
-module_init(init_spectrum_cs);
-module_exit(exit_spectrum_cs);
+module_pcmcia_driver(orinoco_driver);

@@ -70,15 +70,17 @@ xfs_setattr(
 
 	trace_xfs_setattr(ip);
 
-	if (mp->m_flags & XFS_MOUNT_RDONLY)
-		return XFS_ERROR(EROFS);
+	if (!(flags & XFS_ATTR_NOACL)) {
+		if (mp->m_flags & XFS_MOUNT_RDONLY)
+			return XFS_ERROR(EROFS);
 
-	if (XFS_FORCED_SHUTDOWN(mp))
-		return XFS_ERROR(EIO);
+		if (XFS_FORCED_SHUTDOWN(mp))
+			return XFS_ERROR(EIO);
 
-	code = -inode_change_ok(inode, iattr);
-	if (code)
-		return code;
+		code = -inode_change_ok(inode, iattr);
+		if (code)
+			return code;
+	}
 
 	olddquot1 = olddquot2 = NULL;
 	udqp = gdqp = NULL;
@@ -318,6 +320,9 @@ restart:
 			 * do not wait the usual (long) time for writeout.
 			 */
 			xfs_iflags_set(ip, XFS_ITRUNCATED);
+
+			/* A truncate down always removes post-EOF blocks. */
+			xfs_inode_clear_eofblocks_tag(ip);
 		}
 	} else if (tp) {
 		xfs_trans_ijoin(tp, ip);
@@ -370,9 +375,6 @@ restart:
 	 */
 	if (mask & ATTR_MODE) {
 		umode_t mode = iattr->ia_mode;
-
-		if (!in_group_p(inode->i_gid) && !capable(CAP_FSETID))
-			mode &= ~S_ISGID;
 
 		ip->i_d.di_mode &= S_IFMT;
 		ip->i_d.di_mode |= mode & ~S_IFMT;
@@ -564,16 +566,11 @@ xfs_readlink(
 }
 
 /*
- * Flags for xfs_free_eofblocks
- */
-#define XFS_FREE_EOF_TRYLOCK	(1<<0)
-
-/*
  * This is called by xfs_inactive to free any blocks beyond eof
  * when the link count isn't zero and by xfs_dm_punch_hole() when
  * punching a hole to EOF.
  */
-STATIC int
+int
 xfs_free_eofblocks(
 	xfs_mount_t	*mp,
 	xfs_inode_t	*ip,
@@ -630,7 +627,7 @@ xfs_free_eofblocks(
 		if (flags & XFS_FREE_EOF_TRYLOCK) {
 			if (!xfs_ilock_nowait(ip, XFS_IOLOCK_EXCL)) {
 				xfs_trans_cancel(tp, 0);
-				return 0;
+				return EAGAIN;
 			}
 		} else {
 			xfs_ilock(ip, XFS_IOLOCK_EXCL);
@@ -670,6 +667,8 @@ xfs_free_eofblocks(
 		} else {
 			error = xfs_trans_commit(tp,
 						XFS_TRANS_RELEASE_LOG_RES);
+			if (!error)
+				xfs_inode_clear_eofblocks_tag(ip);
 		}
 		xfs_iunlock(ip, XFS_IOLOCK_EXCL|XFS_ILOCK_EXCL);
 	}
@@ -971,11 +970,7 @@ xfs_release(
 	if (ip->i_d.di_nlink == 0)
 		return 0;
 
-	if ((((ip->i_d.di_mode & S_IFMT) == S_IFREG) &&
-	     ((XFS_ISIZE(ip) > 0) || (VN_CACHED(VFS_I(ip)) > 0 ||
-	       ip->i_delayed_blks > 0)) &&
-	     (ip->i_df.if_flags & XFS_IFEXTENTS))  &&
-	    (!(ip->i_d.di_flags & (XFS_DIFLAG_PREALLOC | XFS_DIFLAG_APPEND)))) {
+	if (xfs_can_free_eofblocks(ip, false)) {
 
 		/*
 		 * If we can't get the iolock just skip truncating the blocks
@@ -1003,7 +998,7 @@ xfs_release(
 
 		error = xfs_free_eofblocks(mp, ip,
 					   XFS_FREE_EOF_TRYLOCK);
-		if (error)
+		if (error && error != EAGAIN)
 			return error;
 
 		/* delalloc blocks after truncation means it really is dirty */
@@ -1063,13 +1058,12 @@ xfs_inactive(
 		goto out;
 
 	if (ip->i_d.di_nlink != 0) {
-		if ((((ip->i_d.di_mode & S_IFMT) == S_IFREG) &&
-                     ((XFS_ISIZE(ip) > 0) || (VN_CACHED(VFS_I(ip)) > 0 ||
-                       ip->i_delayed_blks > 0)) &&
-		      (ip->i_df.if_flags & XFS_IFEXTENTS) &&
-		     (!(ip->i_d.di_flags &
-				(XFS_DIFLAG_PREALLOC | XFS_DIFLAG_APPEND)) ||
-		      (ip->i_delayed_blks != 0)))) {
+		/*
+		 * force is true because we are evicting an inode from the
+		 * cache. Post-eof blocks must be freed, lest we end up with
+		 * broken free space accounting.
+		 */
+		if (xfs_can_free_eofblocks(ip, true)) {
 			error = xfs_free_eofblocks(mp, ip, 0);
 			if (error)
 				return VN_INACTIVE_CACHE;

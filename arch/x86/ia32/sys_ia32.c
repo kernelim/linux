@@ -578,13 +578,13 @@ asmlinkage long sys32_execve(char __user *name, compat_uptr_t __user *argv,
 			     compat_uptr_t __user *envp, struct pt_regs *regs)
 {
 	long error;
-	char *filename;
+	struct filename *filename;
 
 	filename = getname(name);
 	error = PTR_ERR(filename);
 	if (IS_ERR(filename))
 		return error;
-	error = compat_do_execve(filename, argv, envp, regs);
+	error = compat_do_execve(filename->name, argv, envp, regs);
 	putname(filename);
 	return error;
 }

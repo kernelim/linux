@@ -347,7 +347,8 @@ static void __ib_shared_qp_event_handler(struct ib_event *event, void *context)
 	struct ib_qp *qp = context;
 
 	list_for_each_entry(event->element.qp, &qp->open_list, open_list)
-		event->element.qp->event_handler(event, event->element.qp->qp_context);
+		if (event->element.qp->event_handler)
+			event->element.qp->event_handler(event, event->element.qp->qp_context);
 }
 
 static void __ib_insert_xrcd_qp(struct ib_xrcd *xrcd, struct ib_qp *qp)
@@ -1098,18 +1099,19 @@ EXPORT_SYMBOL(ib_free_fast_reg_page_list);
 
 /* Memory windows */
 
-struct ib_mw *ib_alloc_mw(struct ib_pd *pd)
+struct ib_mw *ib_alloc_mw(struct ib_pd *pd, enum ib_mw_type type)
 {
 	struct ib_mw *mw;
 
 	if (!pd->device->alloc_mw)
 		return ERR_PTR(-ENOSYS);
 
-	mw = pd->device->alloc_mw(pd);
+	mw = pd->device->alloc_mw(pd, type);
 	if (!IS_ERR(mw)) {
 		mw->device  = pd->device;
 		mw->pd      = pd;
 		mw->uobject = NULL;
+		mw->type    = type;
 		atomic_inc(&pd->usecnt);
 	}
 

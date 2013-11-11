@@ -9,6 +9,8 @@
 #include <linux/sunrpc/svc.h>
 #include <linux/nfs4.h>
 #include <linux/nfs_fs.h>
+#include <linux/ratelimit.h>
+#include <linux/printk.h>
 #include <linux/sunrpc/bc_xprt.h>
 #include "nfs4_fs.h"
 #include "callback.h"
@@ -72,7 +74,7 @@ static __be32 *read_buf(struct xdr_stream *xdr, int nbytes)
 
 	p = xdr_inline_decode(xdr, nbytes);
 	if (unlikely(p == NULL))
-		printk(KERN_WARNING "NFSv4 callback reply buffer overflowed!\n");
+		printk(KERN_WARNING "NFS: NFSv4 callback reply buffer overflowed!\n");
 	return p;
 }
 
@@ -154,7 +156,7 @@ static __be32 decode_compound_hdr_arg(struct xdr_stream *xdr, struct cb_compound
 		return status;
 	/* We do not like overly long tags! */
 	if (hdr->taglen > CB_OP_TAGLEN_MAXSZ - 12) {
-		printk("NFSv4 CALLBACK %s: client sent tag of length %u\n",
+		printk("NFS: NFSv4 CALLBACK %s: client sent tag of length %u\n",
 				__func__, hdr->taglen);
 		return htonl(NFS4ERR_RESOURCE);
 	}
@@ -166,7 +168,7 @@ static __be32 decode_compound_hdr_arg(struct xdr_stream *xdr, struct cb_compound
 	if (hdr->minorversion <= 1) {
 		hdr->cb_ident = ntohl(*p++); /* ignored by v4.1 */
 	} else {
-		printk(KERN_WARNING "%s: NFSv4 server callback with "
+		pr_warn_ratelimited("NFS: %s: NFSv4 server callback with "
 			"illegal minor version %u!\n",
 			__func__, hdr->minorversion);
 		return htonl(NFS4ERR_MINOR_VERS_MISMATCH);
@@ -753,26 +755,15 @@ static void nfs4_callback_free_slot(struct nfs4_session *session)
 	 * Let the state manager know callback processing done.
 	 * A single slot, so highest used slotid is either 0 or -1
 	 */
-	tbl->highest_used_slotid--;
-	nfs4_check_drain_bc_complete(session);
+	tbl->highest_used_slotid = -1;
+	nfs4_check_drain_bc_complete(tbl);
 	spin_unlock(&tbl->slot_tbl_lock);
 }
 
-static void nfs4_cb_free_slot(struct nfs_client *clp)
+static void nfs4_cb_free_slot(struct cb_process_state *cps)
 {
-	if (clp && clp->cl_session)
-		nfs4_callback_free_slot(clp->cl_session);
-}
-
-/* A single slot, so highest used slotid is either 0 or -1 */
-void nfs4_cb_take_slot(struct nfs_client *clp)
-{
-	struct nfs4_slot_table *tbl = &clp->cl_session->bc_slot_table;
-
-	spin_lock(&tbl->slot_tbl_lock);
-	tbl->highest_used_slotid++;
-	BUG_ON(tbl->highest_used_slotid != 0);
-	spin_unlock(&tbl->slot_tbl_lock);
+	if (cps->slotid != -1)
+		nfs4_callback_free_slot(cps->clp->cl_session);
 }
 
 #else /* CONFIG_NFS_V4_1 */
@@ -783,7 +774,7 @@ preprocess_nfs41_op(int nop, unsigned int op_nr, struct callback_op **op)
 	return htonl(NFS4ERR_MINOR_VERS_MISMATCH);
 }
 
-static void nfs4_cb_free_slot(struct nfs_client *clp)
+static void nfs4_cb_free_slot(struct cb_process_state *cps)
 {
 }
 #endif /* CONFIG_NFS_V4_1 */
@@ -865,6 +856,7 @@ static __be32 nfs4_callback_compound(struct svc_rqst *rqstp, void *argp, void *r
 	struct cb_process_state cps = {
 		.drc_status = 0,
 		.clp = NULL,
+		.slotid = -1,
 	};
 	unsigned int nops = 0;
 
@@ -905,7 +897,7 @@ static __be32 nfs4_callback_compound(struct svc_rqst *rqstp, void *argp, void *r
 
 	*hdr_res.status = status;
 	*hdr_res.nops = htonl(nops);
-	nfs4_cb_free_slot(cps.clp);
+	nfs4_cb_free_slot(&cps);
 	nfs_put_client(cps.clp);
 	dprintk("%s: done, status = %u\n", __func__, ntohl(status));
 	return rpc_success;

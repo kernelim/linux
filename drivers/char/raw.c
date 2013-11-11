@@ -71,11 +71,9 @@ static int raw_open(struct inode *inode, struct file *filp)
 	err = bd_claim(bdev, raw_open);
 	if (err)
 		goto out1;
-	if (bdev->bd_block_size != bdev_logical_block_size(bdev)) {
-		err = set_blocksize(bdev, bdev_logical_block_size(bdev));
-		if (err)
-			goto out2;
-	}
+	err = set_blocksize(bdev, bdev_logical_block_size(bdev));
+	if (err)
+		goto out2;
 	filp->f_flags |= O_DIRECT;
 	filp->f_mapping = bdev->bd_inode->i_mapping;
 	if (++raw_devices[minor].inuse == 1)
@@ -246,7 +244,7 @@ out:
 
 static const struct file_operations raw_fops = {
 	.read	=	do_sync_read,
-	.aio_read = 	blkdev_aio_read,
+	.aio_read = 	generic_file_aio_read,
 	.write	=	do_sync_write,
 	.aio_write =	blkdev_aio_write,
 	.fsync	=	blkdev_fsync,

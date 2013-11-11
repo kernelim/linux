@@ -570,7 +570,11 @@ struct Scsi_Host {
 	unsigned int host_eh_scheduled;    /* EH scheduled without command */
     
 	unsigned int host_no;  /* Used for IOCTL_GET_IDLUN, /proc/scsi et al. */
+#ifdef __GENKSYMS__
 	int resetting; /* if set, it means that last_reset is a valid value */
+#else
+	int eh_deadline;
+#endif
 	unsigned long last_reset;
 
 	/*
@@ -837,6 +841,9 @@ static inline unsigned int scsi_host_dif_capable(struct Scsi_Host *shost, unsign
 				       SHOST_DIF_TYPE2_PROTECTION,
 				       SHOST_DIF_TYPE3_PROTECTION };
 
+	if (target_type > SHOST_DIF_TYPE3_PROTECTION)
+		return 0;
+
 	return shost->prot_capabilities & cap[target_type] ? target_type : 0;
 }
 
@@ -847,6 +854,9 @@ static inline unsigned int scsi_host_dix_capable(struct Scsi_Host *shost, unsign
 				       SHOST_DIX_TYPE1_PROTECTION,
 				       SHOST_DIX_TYPE2_PROTECTION,
 				       SHOST_DIX_TYPE3_PROTECTION };
+
+	if (target_type > SHOST_DIX_TYPE3_PROTECTION)
+		return 0;
 
 	return shost->prot_capabilities & cap[target_type];
 #endif

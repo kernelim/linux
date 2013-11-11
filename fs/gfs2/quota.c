@@ -585,7 +585,7 @@ static void do_qc(struct gfs2_quota_data *qd, s64 change)
 	s64 x;
 
 	mutex_lock(&sdp->sd_quota_mutex);
-	gfs2_trans_add_bh(ip->i_gl, qd->qd_bh, 1);
+	gfs2_trans_add_meta(ip->i_gl, qd->qd_bh);
 
 	if (!test_bit(QDF_CHANGE, &qd->qd_flags)) {
 		qc->qc_change = 0;
@@ -641,7 +641,7 @@ static int gfs2_adjust_quota(struct gfs2_inode *ip, loff_t loc,
 	unsigned long index = loc >> PAGE_CACHE_SHIFT;
 	unsigned offset = loc & (PAGE_CACHE_SIZE - 1);
 	unsigned blocksize, iblock, pos;
-	struct buffer_head *bh, *dibh;
+	struct buffer_head *bh;
 	struct page *page;
 	void *kaddr, *ptr;
 	struct gfs2_quota q, *qp;
@@ -721,7 +721,7 @@ get_a_page:
 			goto unlock_out;
 	}
 
-	gfs2_trans_add_bh(ip->i_gl, bh, 0);
+	gfs2_trans_add_data(ip->i_gl, bh);
 
 	kaddr = kmap_atomic(page, KM_USER0);
 	if (offset + sizeof(struct gfs2_quota) > PAGE_CACHE_SIZE)
@@ -742,22 +742,13 @@ get_a_page:
 		goto get_a_page;
 	}
 
-	/* Update the disk inode timestamp and size (if extended) */
-	err = gfs2_meta_inode_buffer(ip, &dibh);
-	if (err)
-		goto out;
-
 	size = loc + sizeof(struct gfs2_quota);
 	if (size > inode->i_size)
 		i_size_write(inode, size);
 	inode->i_mtime = inode->i_atime = CURRENT_TIME;
-	gfs2_trans_add_bh(ip->i_gl, dibh, 1);
-	gfs2_dinode_out(ip, dibh->b_data);
-	brelse(dibh);
 	mark_inode_dirty(inode);
+	return 0;
 
-out:
-	return err;
 unlock_out:
 	unlock_page(page);
 	page_cache_release(page);
@@ -826,7 +817,7 @@ static int do_sync(unsigned int num_qd, struct gfs2_quota_data **qda)
 	blocks = num_qd * data_blocks + RES_DINODE + num_qd + 3;
 
 	reserved = 1 + (nalloc * (data_blocks + ind_blocks));
-	error = gfs2_inplace_reserve(ip, reserved);
+	error = gfs2_inplace_reserve(ip, reserved, 0);
 
 	if (error)
 		goto out_alloc;
@@ -1610,7 +1601,7 @@ static int gfs2_xquota_set(struct super_block *sb, int type, qid_t id,
 		gfs2_write_calc_reserv(ip, sizeof(struct gfs2_quota),
 				       &data_blocks, &ind_blocks);
 		blocks = 1 + data_blocks + ind_blocks;
-		error = gfs2_inplace_reserve(ip, blocks);
+		error = gfs2_inplace_reserve(ip, blocks, 0);
 		if (error)
 			goto out_i;
 		blocks += gfs2_rg_blocks(ip, blocks);

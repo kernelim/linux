@@ -150,8 +150,8 @@ static inline int pci_no_d1d2(struct pci_dev *dev)
 
 }
 extern struct device_attribute pci_dev_attrs[];
-extern struct device_attribute dev_attr_cpuaffinity;
-extern struct device_attribute dev_attr_cpulistaffinity;
+extern struct device_attribute pcibus_dev_attrs[];
+extern struct device_type pci_dev_type;
 #ifdef CONFIG_HOTPLUG
 extern struct bus_attribute pci_bus_attrs[];
 #else
@@ -242,6 +242,17 @@ struct pci_sriov {
 	struct mutex lock;	/* lock for VF bus */
 	struct work_struct mtask; /* VF Migration task */
 	u8 __iomem *mstate;	/* VF Migration State Array */
+/*
+ * kabi check will complain this struct has changed,
+ * even though it's reference is a ptr in pci-dev struct,
+ * and it's only used by kernel PCI core code.
+ * So, put this new entry at the end of the structure,
+ * just in case some 3rd party driver poking in this structure,
+ *  and wrap with GENKSYM so kabi check doesn't complain/fail.
+ */
+#ifndef __GENKSYMS__
+	u16 drvttl;		/* max num VFs driver supports */
+#endif
 };
 
 /* Address Translation Service */

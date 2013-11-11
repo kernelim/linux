@@ -191,7 +191,7 @@ long compat_sys_execve(unsigned long a0, unsigned long a1, unsigned long a2,
 		  struct pt_regs *regs)
 {
 	int error;
-	char * filename;
+	struct filename *filename;
 	
 	filename = getname((char __user *) a0);
 	error = PTR_ERR(filename);
@@ -200,7 +200,7 @@ long compat_sys_execve(unsigned long a0, unsigned long a1, unsigned long a2,
 	flush_fp_to_thread(current);
 	flush_altivec_to_thread(current);
 
-	error = compat_do_execve(filename, compat_ptr(a1), compat_ptr(a2), regs);
+	error = compat_do_execve(filename->name, compat_ptr(a1), compat_ptr(a2), regs);
 
 	putname(filename);
 

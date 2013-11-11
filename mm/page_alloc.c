@@ -1261,6 +1261,7 @@ void split_page(struct page *page, unsigned int order)
 	for (i = 1; i < (1 << order); i++)
 		set_page_refcounted(page + i);
 }
+EXPORT_SYMBOL_GPL(split_page);
 
 /*
  * Similar to split_page except the page is already free. As this is only
@@ -1511,12 +1512,30 @@ static bool __zone_watermark_ok(struct zone *z, int order, unsigned long mark,
 
 	if (free_pages <= min + z->lowmem_reserve[classzone_idx])
 		return false;
+	if (!order)
+		return true;
+
+	/*
+	 * Don't require any high order page under the min
+	 * wmark. Invoking compaction to create lots of high order
+	 * pages below the min wmark is wasteful because those
+	 * hugepages cannot be allocated without PF_MEMALLOC and the
+	 * PF_MEMALLOC paths must not depend on high order allocations
+	 * to succeed.
+	 */
+	min = mark - z->watermark[WMARK_MIN];
+	WARN_ON(min < 0);
+	if (alloc_flags & ALLOC_HIGH)
+		min -= min / 2;
+	if (alloc_flags & ALLOC_HARDER)
+		min -= min / 4;
 	for (o = 0; o < order; o++) {
 		/* At the next order, this order's pages become unavailable */
 		free_pages -= z->free_area[o].nr_free << o;
 
 		/* Require fewer higher order pages to be free */
-		min >>= 1;
+		if (o < (pageblock_order >> 2))
+			min >>= 1;
 
 		if (free_pages <= min)
 			return false;
@@ -1708,19 +1727,55 @@ zonelist_scan:
 			if (zone_reclaim_mode == 0)
 				goto this_zone_full;
 
-			ret = zone_reclaim(zone, gfp_mask, order);
+			ret = zone_reclaim(preferred_zone, zone, gfp_mask,
+					   order,
+					   mark, classzone_idx, alloc_flags);
 			switch (ret) {
 			case ZONE_RECLAIM_NOSCAN:
 				/* did not scan */
 				goto try_next_zone;
 			case ZONE_RECLAIM_FULL:
 				/* scanned but unreclaimable */
-				goto this_zone_full;
+				continue;
+			case ZONE_RECLAIM_SUCCESS:
+				/*
+				 * If we successfully reclaimed
+				 * enough, allow allocations up to the
+				 * min watermark (instead of stopping
+				 * at "mark"). This provides some more
+				 * margin against parallel
+				 * allocations. Using the min
+				 * watermark doesn't alter when we
+				 * wakeup kswapd. It also doesn't
+				 * alter the synchronous direct
+				 * reclaim behavior of zone_reclaim()
+				 * that will still be invoked at the
+				 * next pass if we're still below the
+				 * low watermark (even if kswapd isn't
+				 * woken).
+				 */
+				mark = min_wmark_pages(zone);
+				/* Fall through */
 			default:
 				/* did we reclaim enough */
-				if (!zone_watermark_ok(zone, order, mark,
+				if (zone_watermark_ok(zone, order, mark,
 						classzone_idx, alloc_flags))
+					goto try_this_zone;
+
+				/*
+				 * Failed to reclaim enough to meet watermark.
+				 * Only mark the zone full if checking the min
+				 * watermark or if we failed to reclaim just
+				 * 1<<order pages or else the page allocator
+				 * fastpath will prematurely mark zones full
+				 * when the watermark is between the low and
+				 * min watermarks.
+				 */
+				if (((alloc_flags & ALLOC_WMARK_MASK) == ALLOC_WMARK_MIN) ||
+				    ret == ZONE_RECLAIM_SOME)
 					goto this_zone_full;
+
+				continue;
 			}
 		}
 
@@ -1887,7 +1942,6 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 				alloc_flags, preferred_zone,
 				migratetype);
 		if (page) {
-			preferred_zone->compact_blockskip_flush = false;
 			preferred_zone->compact_considered = 0;
 			preferred_zone->compact_defer_shift = 0;
 			count_vm_event(COMPACTSUCCESS);

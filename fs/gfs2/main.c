@@ -27,6 +27,7 @@
 #include "util.h"
 #include "glock.h"
 #include "quota.h"
+#include "dir.h"
 
 static struct shrinker qd_shrinker = {
 	.shrink = gfs2_shrink_qd_memory,
@@ -92,6 +93,9 @@ static void gfs2_bh_free(void *ptr, void *data)
 static int __init init_gfs2_fs(void)
 {
 	int error;
+
+	gfs2_str2qstr(&gfs2_qdot, ".");
+	gfs2_str2qstr(&gfs2_qdotdot, "..");
 
 	error = gfs2_sys_init();
 	if (error)

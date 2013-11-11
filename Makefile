@@ -4,8 +4,8 @@ SUBLEVEL = 32
 EXTRAVERSION =
 NAME = Man-Eating Seals of Antiquity
 RHEL_MAJOR = 6
-RHEL_MINOR = 4
-RHEL_RELEASE = 357
+RHEL_MINOR = 5
+RHEL_RELEASE = 430
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
@@ -345,8 +345,9 @@ CFLAGS_GCOV	= -fprofile-arcs -ftest-coverage
 # Needed to be compatible with the O= option
 LINUXINCLUDE    := -Iinclude \
                    $(if $(KBUILD_SRC),-Iinclude2 -I$(srctree)/include) \
+                   -I$(srctree)/include/uapi \
                    -I$(srctree)/arch/$(hdr-arch)/include               \
-                   -include include/linux/autoconf.h
+                   -include $(srctree)/include/linux/kconfig.h
 
 KBUILD_CPPFLAGS := -D__KERNEL__
 

@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- * Copyright(c) 2007 - 2012 Intel Corporation. All rights reserved.
+ * Copyright(c) 2007 - 2013 Intel Corporation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of version 2 of the GNU General Public License as
@@ -27,7 +27,6 @@
 #include <linux/module.h>
 #include <linux/stringify.h>
 #include "iwl-config.h"
-#include "iwl-cfg.h"
 #include "iwl-agn-hw.h"
 #include "iwl-csr.h"
 
@@ -62,13 +61,26 @@ static const struct iwl_base_params iwl5000_base_params = {
 	.led_compensation = 51,
 	.plcp_delta_threshold = IWL_MAX_PLCP_ERR_LONG_THRESHOLD_DEF,
 	.chain_noise_scale = 1000,
-	.wd_timeout = IWL_WATCHHDOG_DISABLED,
+	.wd_timeout = IWL_WATCHDOG_DISABLED,
 	.max_event_log_size = 512,
 	.no_idle_support = true,
 };
 
 static const struct iwl_ht_params iwl5000_ht_params = {
 	.ht_greenfield_support = true,
+	.ht40_bands = BIT(IEEE80211_BAND_2GHZ) | BIT(IEEE80211_BAND_5GHZ),
+};
+
+static const struct iwl_eeprom_params iwl5000_eeprom_params = {
+	.regulatory_bands = {
+		EEPROM_REG_BAND_1_CHANNELS,
+		EEPROM_REG_BAND_2_CHANNELS,
+		EEPROM_REG_BAND_3_CHANNELS,
+		EEPROM_REG_BAND_4_CHANNELS,
+		EEPROM_REG_BAND_5_CHANNELS,
+		EEPROM_REG_BAND_24_HT40_CHANNELS,
+		EEPROM_REG_BAND_52_HT40_CHANNELS
+	},
 };
 
 #define IWL_DEVICE_5000						\
@@ -79,9 +91,10 @@ static const struct iwl_ht_params iwl5000_ht_params = {
 	.device_family = IWL_DEVICE_FAMILY_5000,		\
 	.max_inst_size = IWLAGN_RTC_INST_SIZE,			\
 	.max_data_size = IWLAGN_RTC_DATA_SIZE,			\
-	.eeprom_ver = EEPROM_5000_EEPROM_VERSION,		\
-	.eeprom_calib_ver = EEPROM_5000_TX_POWER_VERSION,	\
+	.nvm_ver = EEPROM_5000_EEPROM_VERSION,		\
+	.nvm_calib_ver = EEPROM_5000_TX_POWER_VERSION,	\
 	.base_params = &iwl5000_base_params,			\
+	.eeprom_params = &iwl5000_eeprom_params,		\
 	.led_mode = IWL_LED_BLINK
 
 const struct iwl_cfg iwl5300_agn_cfg = {
@@ -125,9 +138,10 @@ const struct iwl_cfg iwl5350_agn_cfg = {
 	.device_family = IWL_DEVICE_FAMILY_5000,
 	.max_inst_size = IWLAGN_RTC_INST_SIZE,
 	.max_data_size = IWLAGN_RTC_DATA_SIZE,
-	.eeprom_ver = EEPROM_5050_EEPROM_VERSION,
-	.eeprom_calib_ver = EEPROM_5050_TX_POWER_VERSION,
+	.nvm_ver = EEPROM_5050_EEPROM_VERSION,
+	.nvm_calib_ver = EEPROM_5050_TX_POWER_VERSION,
 	.base_params = &iwl5000_base_params,
+	.eeprom_params = &iwl5000_eeprom_params,
 	.ht_params = &iwl5000_ht_params,
 	.led_mode = IWL_LED_BLINK,
 	.internal_wimax_coex = true,
@@ -141,9 +155,10 @@ const struct iwl_cfg iwl5350_agn_cfg = {
 	.device_family = IWL_DEVICE_FAMILY_5150,		\
 	.max_inst_size = IWLAGN_RTC_INST_SIZE,			\
 	.max_data_size = IWLAGN_RTC_DATA_SIZE,			\
-	.eeprom_ver = EEPROM_5050_EEPROM_VERSION,		\
-	.eeprom_calib_ver = EEPROM_5050_TX_POWER_VERSION,	\
+	.nvm_ver = EEPROM_5050_EEPROM_VERSION,		\
+	.nvm_calib_ver = EEPROM_5050_TX_POWER_VERSION,	\
 	.base_params = &iwl5000_base_params,			\
+	.eeprom_params = &iwl5000_eeprom_params,		\
 	.no_xtal_calib = true,					\
 	.led_mode = IWL_LED_BLINK,				\
 	.internal_wimax_coex = true

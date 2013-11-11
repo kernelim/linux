@@ -93,6 +93,8 @@ struct sys_device {
 	struct kobject		kobj;
 };
 
+extern int sysdev_initialize(struct sys_device *);
+extern int sysdev_add(struct sys_device *);
 extern int sysdev_register(struct sys_device *);
 extern void sysdev_unregister(struct sys_device *);
 

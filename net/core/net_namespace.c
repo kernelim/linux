@@ -8,6 +8,8 @@
 #include <linux/idr.h>
 #include <linux/rculist.h>
 #include <linux/nsproxy.h>
+#include <linux/proc_fs.h>
+#include <linux/file.h>
 #include <net/net_namespace.h>
 #include <net/netns/generic.h>
 
@@ -28,6 +30,20 @@ struct net init_net = {
 EXPORT_SYMBOL(init_net);
 
 #define INITIAL_NET_GEN_PTRS	13 /* +1 for len +2 for rcu_head */
+
+static unsigned int max_gen_ptrs = INITIAL_NET_GEN_PTRS;
+
+static struct net_generic *net_alloc_generic(void)
+{
+	struct net_generic *ng;
+	size_t generic_size = offsetof(struct net_generic, ptr[max_gen_ptrs]);
+
+	ng = kzalloc(generic_size, GFP_KERNEL);
+	if (ng)
+		ng->len = max_gen_ptrs;
+
+	return ng;
+}
 
 /*
  * setup_net runs the initializers for the network namespace object.
@@ -67,18 +83,6 @@ out_undo:
 	goto out;
 }
 
-static struct net_generic *net_alloc_generic(void)
-{
-	struct net_generic *ng;
-	size_t generic_size = sizeof(struct net_generic) +
-		INITIAL_NET_GEN_PTRS * sizeof(void *);
-
-	ng = kzalloc(generic_size, GFP_KERNEL);
-	if (ng)
-		ng->len = INITIAL_NET_GEN_PTRS;
-
-	return ng;
-}
 
 #ifdef CONFIG_NET_NS
 static struct kmem_cache *net_cachep;
@@ -195,12 +199,37 @@ void __put_net(struct net *net)
 }
 EXPORT_SYMBOL_GPL(__put_net);
 
+struct net *get_net_ns_by_fd(int fd)
+{
+	struct proc_inode *ei;
+	struct file *file;
+	struct net *net;
+
+	file = proc_ns_fget(fd);
+	if (IS_ERR(file))
+		return ERR_CAST(file);
+
+	ei = PROC_I(file->f_dentry->d_inode);
+	if (ei->ns_ops == &netns_operations)
+		net = get_net(ei->ns);
+	else
+		net = ERR_PTR(-EINVAL);
+
+	fput(file);
+	return net;
+}
+
 #else
 struct net *copy_net_ns(unsigned long flags, struct net *old_net)
 {
 	if (flags & CLONE_NEWNET)
 		return ERR_PTR(-EINVAL);
 	return old_net;
+}
+
+struct net *get_net_ns_by_fd(int fd)
+{
+	return ERR_PTR(-EINVAL);
 }
 #endif
 
@@ -223,6 +252,21 @@ struct net *get_net_ns_by_pid(pid_t pid)
 	return net;
 }
 EXPORT_SYMBOL_GPL(get_net_ns_by_pid);
+
+static __net_init int net_ns_net_init(struct net *net)
+{
+	return proc_alloc_inum(&net->proc_inum);
+}
+
+static __net_exit void net_ns_net_exit(struct net *net)
+{
+	proc_free_inum(net->proc_inum);
+}
+
+static struct pernet_operations __net_initdata net_ns_ops = {
+	.init = net_ns_net_init,
+	.exit = net_ns_net_exit,
+};
 
 static int __init net_ns_init(void)
 {
@@ -254,6 +298,8 @@ static int __init net_ns_init(void)
 	rtnl_unlock();
 
 	mutex_unlock(&net_mutex);
+
+	register_pernet_subsys(&net_ns_ops);
 
 	return 0;
 }
@@ -442,6 +488,7 @@ again:
 		}
 		goto out;
 	}
+	max_gen_ptrs = max_t(unsigned int, max_gen_ptrs, *id);
 	error = register_pernet_operations(&pernet_list, ops);
 	if (error)
 		ida_remove(&net_generic_ids, *id);
@@ -502,8 +549,7 @@ int net_assign_generic(struct net *net, int id, void *data)
 	if (old_ng->len >= id)
 		goto assign;
 
-	ng = kzalloc(sizeof(struct net_generic) +
-			id * sizeof(void *), GFP_KERNEL);
+	ng = net_alloc_generic();
 	if (ng == NULL)
 		return -ENOMEM;
 
@@ -518,7 +564,6 @@ int net_assign_generic(struct net *net, int id, void *data)
 	 * the old copy for kfree after a grace period.
 	 */
 
-	ng->len = id;
 	memcpy(&ng->ptr, &old_ng->ptr, old_ng->len * sizeof(void*));
 
 	rcu_assign_pointer(net->gen, ng);
@@ -528,3 +573,46 @@ assign:
 	return 0;
 }
 EXPORT_SYMBOL_GPL(net_assign_generic);
+
+#ifdef CONFIG_NET_NS
+static void *netns_get(struct task_struct *task)
+{
+	struct net *net = NULL;
+	struct nsproxy *nsproxy;
+
+	rcu_read_lock();
+	nsproxy = task_nsproxy(task);
+	if (nsproxy)
+		net = get_net(nsproxy->net_ns);
+	rcu_read_unlock();
+
+	return net;
+}
+
+static void netns_put(void *ns)
+{
+	put_net(ns);
+}
+
+static int netns_install(struct nsproxy *nsproxy, void *ns)
+{
+	put_net(nsproxy->net_ns);
+	nsproxy->net_ns = get_net(ns);
+	return 0;
+}
+
+static unsigned int netns_inum(void *ns)
+{
+	struct net *net = ns;
+	return net->proc_inum;
+}
+
+const struct proc_ns_operations netns_operations = {
+	.name		= "net",
+	.type		= CLONE_NEWNET,
+	.get		= netns_get,
+	.put		= netns_put,
+	.install	= netns_install,
+	.inum		= netns_inum,
+};
+#endif

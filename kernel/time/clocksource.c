@@ -34,6 +34,7 @@
 /* RHEL6: fail clocksource if it is found to be unstable.
  * set 'clocksource_failover' as boot parameter to enable.*/
 static int clocksource_failover;
+static int has_kvm_clock;
 
 void timecounter_init(struct timecounter *tc,
 		      const struct cyclecounter *cc,
@@ -288,7 +289,8 @@ static void clocksource_watchdog(unsigned long data)
 
 		/* Check the deviation from the watchdog clocksource. */
 		if (abs(cs_nsec - wd_nsec) > WATCHDOG_THRESHOLD) {
-			if (clocksource_failover)
+			if (clocksource_failover ||
+			   (has_kvm_clock && !strcmp(cs->name, "tsc")))
 				clocksource_unstable(cs, cs_nsec - wd_nsec);
 			else
 				printk(KERN_WARNING "Clocksource %s unstable (delta = %Ld ns).  Enable clocksource failover by adding clocksource_failover kernel parameter.\n",
@@ -722,6 +724,8 @@ int clocksource_register(struct clocksource *cs)
 	clocksource_select();
 	clocksource_enqueue_watchdog(cs);
 	mutex_unlock(&clocksource_mutex);
+	if (!strcmp(cs->name, "kvm-clock"))
+		has_kvm_clock = 1;
 	return 0;
 }
 EXPORT_SYMBOL(clocksource_register);

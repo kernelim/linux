@@ -203,8 +203,8 @@ out:
 
 #ifdef CONFIG_FTRACE_SYSCALLS
 
-extern unsigned long __start_syscalls_metadata[];
-extern unsigned long __stop_syscalls_metadata[];
+extern struct syscall_metadata *__start_syscalls_metadata[];
+extern struct syscall_metadata *__stop_syscalls_metadata[];
 extern unsigned int sys_call_table[];
 
 static struct syscall_metadata **syscalls_metadata;
@@ -217,7 +217,7 @@ struct syscall_metadata *syscall_nr_to_meta(int nr)
 	return syscalls_metadata[nr];
 }
 
-int syscall_name_to_nr(char *name)
+int syscall_name_to_nr(const char *name)
 {
 	int i;
 
@@ -242,16 +242,16 @@ void set_syscall_exit_id(int num, int id)
 
 static struct syscall_metadata *find_syscall_meta(unsigned long syscall)
 {
-	struct syscall_metadata *start;
-	struct syscall_metadata *stop;
+	struct syscall_metadata **start;
+	struct syscall_metadata **stop;
 	char str[KSYM_SYMBOL_LEN];
 
-	start = (struct syscall_metadata *)__start_syscalls_metadata;
-	stop = (struct syscall_metadata *)__stop_syscalls_metadata;
+	start = __start_syscalls_metadata;
+	stop = __stop_syscalls_metadata;
 	kallsyms_lookup(syscall, NULL, NULL, NULL, str);
 
 	for ( ; start < stop; start++) {
-		if (start->name && !strcmp(start->name + 3, str + 3))
+		if ((*start)->name && !strcmp((*start)->name + 3, str + 3))
 			return start;
 	}
 	return NULL;

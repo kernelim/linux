@@ -241,13 +241,11 @@ void netvsc_linkstatus_callback(struct hv_device *device_obj,
 
 	if (status == 1) {
 		netif_carrier_on(net);
-		netif_wake_queue(net);
 		ndev_ctx = netdev_priv(net);
 		schedule_delayed_work(&ndev_ctx->dwork, 0);
 		schedule_delayed_work(&ndev_ctx->dwork, msecs_to_jiffies(20));
 	} else {
 		netif_carrier_off(net);
-		netif_tx_disable(net);
 	}
 }
 
@@ -265,6 +263,7 @@ int netvsc_recv_callback(struct hv_device *device_obj,
 	if (!net) {
 		netdev_err(net, "got receive callback but net device"
 			" not initialized yet\n");
+		packet->status = NVSP_STAT_FAIL;
 		return 0;
 	}
 
@@ -272,6 +271,7 @@ int netvsc_recv_callback(struct hv_device *device_obj,
 	skb = netdev_alloc_skb_ip_align(net, packet->total_data_buflen);
 	if (unlikely(!skb)) {
 		++net->stats.rx_dropped;
+		packet->status = NVSP_STAT_FAIL;
 		return 0;
 	}
 
@@ -347,7 +347,7 @@ static int netvsc_set_mac_addr(struct net_device *ndev, void *p)
 	struct net_device_context *ndevctx = netdev_priv(ndev);
 	struct hv_device *hdev =  ndevctx->device_ctx;
 	struct sockaddr *addr = p;
-	char save_adr[14];
+	char save_adr[ETH_ALEN];
 	unsigned char save_aatype;
 	int err;
 
@@ -496,8 +496,7 @@ static int netvsc_remove(struct hv_device *dev)
 
 static const struct hv_vmbus_device_id id_table[] = {
 	/* Network guid */
-	{ VMBUS_DEVICE(0x63, 0x51, 0x61, 0xF8, 0x3E, 0xDF, 0xc5, 0x46,
-		       0x91, 0x3F, 0xF2, 0xD2, 0xF9, 0x65, 0xED, 0x0E) },
+	{ HV_NIC_GUID, },
 	{ },
 };
 

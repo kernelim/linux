@@ -332,23 +332,8 @@ EXPORT_SYMBOL(snd_pcm_sgbuf_ops_page);
 unsigned int snd_pcm_sgbuf_get_chunk_size(struct snd_pcm_substream *substream,
 					  unsigned int ofs, unsigned int size)
 {
-	struct snd_sg_buf *sg = snd_pcm_substream_sgbuf(substream);
-	unsigned int start, end, pg;
-
-	start = ofs >> PAGE_SHIFT;
-	end = (ofs + size - 1) >> PAGE_SHIFT;
-	/* check page continuity */
-	pg = sg->table[start].addr >> PAGE_SHIFT;
-	for (;;) {
-		start++;
-		if (start > end)
-			break;
-		pg++;
-		if ((sg->table[start].addr >> PAGE_SHIFT) != pg)
-			return (start << PAGE_SHIFT) - ofs;
-	}
-	/* ok, all on continuous pages */
-	return size;
+	return snd_sgbuf_get_chunk_size(snd_pcm_get_dma_buf(substream),
+					ofs, size);
 }
 EXPORT_SYMBOL(snd_pcm_sgbuf_get_chunk_size);
 #endif /* CONFIG_SND_DMA_SGBUF */

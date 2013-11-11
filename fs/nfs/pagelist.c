@@ -152,6 +152,8 @@ nfs_create_request(struct nfs_open_context *ctx, struct inode *inode,
 	struct nfs_page		*req;
 	struct nfs_lock_context *l_ctx;
 
+	if (test_bit(NFS_CONTEXT_BAD, &ctx->flags))
+		return ERR_PTR(-EBADF);
 	/* try to allocate the request struct */
 	req = nfs_page_alloc();
 	if (req == NULL)
@@ -340,7 +342,9 @@ static bool nfs_can_coalesce_requests(struct nfs_page *prev,
 {
 	if (req->wb_context->cred != prev->wb_context->cred)
 		return false;
-	if (req->wb_lock_context->lockowner != prev->wb_lock_context->lockowner)
+	if (req->wb_lock_context->lockowner.l_owner != prev->wb_lock_context->lockowner.l_owner)
+		return false;
+	if (req->wb_lock_context->lockowner.l_pid != prev->wb_lock_context->lockowner.l_pid)
 		return false;
 	if (req->wb_context->state != prev->wb_context->state)
 		return false;

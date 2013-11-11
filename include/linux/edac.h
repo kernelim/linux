@@ -42,4 +42,39 @@ static inline void opstate_init(void)
 	return;
 }
 
+/**
+ * enum hw_event_mc_err_type - type of the detected error
+ *
+ * @HW_EVENT_ERR_CORRECTED:	Corrected Error - Indicates that an ECC
+ *				corrected error was detected
+ * @HW_EVENT_ERR_UNCORRECTED:	Uncorrected Error - Indicates an error that
+ *				can't be corrected by ECC, but it is not
+ *				fatal (maybe it is on an unused memory area,
+ *				or the memory controller could recover from
+ *				it for example, by re-trying the operation).
+ * @HW_EVENT_ERR_FATAL:		Fatal Error - Uncorrected error that could not
+ *				be recovered.
+ */
+enum hw_event_mc_err_type {
+	HW_EVENT_ERR_CORRECTED,
+	HW_EVENT_ERR_UNCORRECTED,
+	HW_EVENT_ERR_FATAL,
+	HW_EVENT_ERR_INFO,
+};
+
+static inline char *mc_event_error_type(const unsigned int err_type)
+{
+	switch (err_type) {
+	case HW_EVENT_ERR_CORRECTED:
+		return "Corrected";
+	case HW_EVENT_ERR_UNCORRECTED:
+		return "Uncorrected";
+	case HW_EVENT_ERR_FATAL:
+		return "Fatal";
+	default:
+	case HW_EVENT_ERR_INFO:
+		return "Info";
+	}
+}
+
 #endif

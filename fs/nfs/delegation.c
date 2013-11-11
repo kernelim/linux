@@ -23,8 +23,6 @@
 
 static void nfs_do_free_delegation(struct nfs_delegation *delegation)
 {
-	if (delegation->cred)
-		put_rpccred(delegation->cred);
 	kfree(delegation);
 }
 
@@ -37,6 +35,10 @@ static void nfs_free_delegation_callback(struct rcu_head *head)
 
 static void nfs_free_delegation(struct nfs_delegation *delegation)
 {
+	if (delegation->cred) {
+		put_rpccred(delegation->cred);
+		delegation->cred = NULL;
+	}
 	call_rcu(&delegation->rcu, nfs_free_delegation_callback);
 }
 
@@ -74,7 +76,7 @@ int nfs_have_delegation(struct inode *inode, fmode_t flags)
 	return ret;
 }
 
-static int nfs_delegation_claim_locks(struct nfs_open_context *ctx, struct nfs4_state *state)
+static int nfs_delegation_claim_locks(struct nfs_open_context *ctx, struct nfs4_state *state, const nfs4_stateid *stateid)
 {
 	struct inode *inode = state->inode;
 	struct file_lock *fl;
@@ -93,7 +95,7 @@ static int nfs_delegation_claim_locks(struct nfs_open_context *ctx, struct nfs4_
 		if (nfs_file_open_context(fl->fl_file) != ctx)
 			continue;
 		unlock_kernel();
-		status = nfs4_lock_delegation_recall(state, fl);
+		status = nfs4_lock_delegation_recall(fl, state, stateid);
 		if (status < 0)
 			goto out;
 		lock_kernel();
@@ -118,7 +120,7 @@ again:
 		state = ctx->state;
 		if (state == NULL)
 			continue;
-		if (memcmp(state->stateid.data, stateid->data, sizeof(state->stateid.data)) != 0)
+		if (!nfs4_stateid_match(&state->stateid, stateid))
 			continue;
 		if (!test_and_clear_bit(NFS_DELEGATED_STATE, &state->flags))
 			continue;
@@ -130,7 +132,7 @@ again:
 		seq = raw_seqcount_begin(&sp->so_reclaim_seqcount);
 		err = nfs4_open_delegation_recall(ctx, state, stateid);
 		if (!err)
-			err = nfs_delegation_claim_locks(ctx, state);
+			err = nfs_delegation_claim_locks(ctx, state, stateid);
 		if (!err && read_seqcount_retry(&sp->so_reclaim_seqcount, seq))
 			err = -EAGAIN;
 		mutex_unlock(&sp->so_delegreturn_mutex);
@@ -161,8 +163,7 @@ void nfs_inode_reclaim_delegation(struct inode *inode, struct rpc_cred *cred,
 	if (delegation != NULL) {
 		spin_lock(&delegation->lock);
 		if (delegation->inode != NULL) {
-			memcpy(delegation->stateid.data, res->delegation.data,
-			       sizeof(delegation->stateid.data));
+			nfs4_stateid_copy(&delegation->stateid, &res->delegation);
 			delegation->type = res->delegation_type;
 			delegation->maxsize = res->maxsize;
 			oldcred = delegation->cred;
@@ -310,8 +311,7 @@ int nfs_inode_set_delegation(struct inode *inode, struct rpc_cred *cred, struct 
 	delegation = kmalloc(sizeof(*delegation), GFP_NOFS);
 	if (delegation == NULL)
 		return -ENOMEM;
-	memcpy(delegation->stateid.data, res->delegation.data,
-			sizeof(delegation->stateid.data));
+	nfs4_stateid_copy(&delegation->stateid, &res->delegation);
 	delegation->type = res->delegation_type;
 	delegation->maxsize = res->maxsize;
 	delegation->change_attr = nfsi->change_attr;
@@ -324,8 +324,8 @@ int nfs_inode_set_delegation(struct inode *inode, struct rpc_cred *cred, struct 
 	old_delegation = rcu_dereference_protected(nfsi->delegation,
 					lockdep_is_held(&clp->cl_lock));
 	if (old_delegation != NULL) {
-		if (memcmp(&delegation->stateid, &old_delegation->stateid,
-					sizeof(old_delegation->stateid)) == 0 &&
+		if (nfs4_stateid_match(&delegation->stateid,
+					&old_delegation->stateid) &&
 				delegation->type == old_delegation->type) {
 			goto out;
 		}
@@ -626,7 +626,7 @@ void nfs_expire_unreferenced_delegations(struct nfs_client *clp)
 /**
  * nfs_async_inode_return_delegation - asynchronously return a delegation
  * @inode: inode to process
- * @stateid: state ID information from CB_RECALL arguments
+ * @stateid: state ID information
  *
  * Returns zero on success, or a negative errno value.
  */
@@ -641,7 +641,7 @@ int nfs_async_inode_return_delegation(struct inode *inode,
 	rcu_read_lock();
 	delegation = rcu_dereference(NFS_I(inode)->delegation);
 
-	if (!clp->cl_mvops->validate_stateid(delegation, stateid)) {
+	if (!clp->cl_mvops->match_stateid(&delegation->stateid, stateid)) {
 		rcu_read_unlock();
 		return -ENOENT;
 	}
@@ -780,21 +780,25 @@ int nfs_delegations_present(struct nfs_client *clp)
  * nfs4_copy_delegation_stateid - Copy inode's state ID information
  * @dst: stateid data structure to fill in
  * @inode: inode to check
+ * @flags: delegation type requirement
  *
- * Returns one and fills in "dst->data" * if inode had a delegation,
- * otherwise zero is returned.
+ * Returns "true" and fills in "dst->data" * if inode had a delegation,
+ * otherwise "false" is returned.
  */
-int nfs4_copy_delegation_stateid(nfs4_stateid *dst, struct inode *inode)
+bool nfs4_copy_delegation_stateid(nfs4_stateid *dst, struct inode *inode,
+		fmode_t flags)
 {
 	struct nfs_inode *nfsi = NFS_I(inode);
 	struct nfs_delegation *delegation;
-	int ret = 0;
+	bool ret;
 
+	flags &= FMODE_READ|FMODE_WRITE;
 	rcu_read_lock();
 	delegation = rcu_dereference(nfsi->delegation);
-	if (delegation != NULL) {
-		memcpy(dst->data, delegation->stateid.data, sizeof(dst->data));
-		ret = 1;
+	ret = (delegation != NULL && (delegation->type & flags) == flags);
+	if (ret) {
+		nfs4_stateid_copy(dst, &delegation->stateid);
+		nfs_mark_delegation_referenced(delegation);
 	}
 	rcu_read_unlock();
 	return ret;

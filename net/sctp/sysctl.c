@@ -58,6 +58,11 @@ extern int sysctl_sctp_mem[3];
 extern int sysctl_sctp_rmem[3];
 extern int sysctl_sctp_wmem[3];
 
+static int proc_sctp_do_hmac_alg(ctl_table *ctl,
+				int write,
+				void __user *buffer, size_t *lenp,
+
+				loff_t *ppos);
 static ctl_table sctp_table[] = {
 	{
 		.ctl_name	= NET_SCTP_RTO_INITIAL,
@@ -124,6 +129,12 @@ static ctl_table sctp_table[] = {
 		.strategy	= sysctl_intvec,
 		.extra1		= &one,
 		.extra2		= &int_max
+	},
+	{
+		.procname	= "cookie_hmac_alg",
+		.maxlen		= 8,
+		.mode		= 0644,
+		.proc_handler	= proc_sctp_do_hmac_alg,
 	},
 	{
 		.ctl_name	= NET_SCTP_SNDBUF_POLICY,
@@ -315,6 +326,53 @@ static struct ctl_path sctp_path[] = {
 	{ .procname = "sctp", .ctl_name = NET_SCTP, },
 	{ }
 };
+
+static int proc_sctp_do_hmac_alg(ctl_table *ctl,
+				int write,
+				void __user *buffer, size_t *lenp,
+				loff_t *ppos)
+{
+	char tmp[8];
+	ctl_table tbl;
+	int ret;
+	int changed = 0;
+	char *none = "none";
+
+	memset(&tbl, 0, sizeof(struct ctl_table));
+
+	if (write) {
+		tbl.data = tmp;
+		tbl.maxlen = 8;
+	} else {
+		tbl.data = sctp_hmac_algorithm ? : none;
+		tbl.maxlen = strlen(tbl.data);
+	}
+		ret = proc_dostring(&tbl, write, buffer, lenp, ppos);
+
+	if (write) {
+#ifdef CONFIG_CRYPTO_MD5
+		if (!strncmp(tmp, "md5", 3)) {
+			sctp_hmac_algorithm = "md5";
+			changed = 1;
+		}
+#endif
+#ifdef CONFIG_CRYPTO_SHA1
+		if (!strncmp(tmp, "sha1", 4)) {
+			sctp_hmac_algorithm = "sha1";
+			changed = 1;
+		}
+#endif
+		if (!strncmp(tmp, "none", 4)) {
+			sctp_hmac_algorithm = NULL;
+			changed = 1;
+		}
+
+		if (!changed)
+			ret = -EINVAL;
+	}
+
+	return ret;
+}
 
 static struct ctl_table_header * sctp_sysctl_header;
 

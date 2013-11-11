@@ -290,19 +290,20 @@ EXPORT_SYMBOL(deactivate_locked_super);
  *	and want to turn it into a full-blown active reference.  grab_super()
  *	is called with sb_lock held and drops it.  Returns 1 in case of
  *	success, 0 if we had failed (superblock contents was already dead or
- *	dying when grab_super() had been called).
+ *	dying when grab_super() had been called). Note that this is only
+ *	called for superblocks not in rundown mode (== ones still on ->fs_supers
+ *	of their type), so increment of ->s_count is OK here.
  */
 static int grab_super(struct super_block *s) __releases(sb_lock)
 {
-	if (atomic_inc_not_zero(&s->s_active)) {
-		spin_unlock(&sb_lock);
+	s->s_count++;
+	spin_unlock(&sb_lock);
+	down_write(&s->s_umount);
+	if ((s->s_flags & MS_BORN) && atomic_inc_not_zero(&s->s_active)) {
+		put_super(s);
 		return 1;
 	}
 	/* it's going away */
-	s->s_count++;
-	spin_unlock(&sb_lock);
-	/* usually that'll be enough for it to die... */
-	down_write(&s->s_umount);
 	up_write(&s->s_umount);
 	put_super(s);
 	/* ... but in case it wasn't, let's at least yield() */
@@ -406,11 +407,6 @@ retry:
 				s->s_type = type;
 				destroy_super(s);
 				s = NULL;
-			}
-			down_write(&old->s_umount);
-			if (unlikely(!(old->s_flags & MS_BORN))) {
-				deactivate_locked_super(old);
-				goto retry;
 			}
 			return old;
 		}
@@ -574,15 +570,15 @@ struct super_block *get_active_super(struct block_device *bdev)
 	if (!bdev)
 		return NULL;
 
+restart:
 	spin_lock(&sb_lock);
 	list_for_each_entry(sb, &super_blocks, s_list) {
-		if (sb->s_bdev != bdev)
-			continue;
-
-		if (grab_super(sb)) /* drops sb_lock */
+		if (sb->s_bdev == bdev) {
+			if (!grab_super(sb))
+				goto restart;
+			up_write(&sb->s_umount);
 			return sb;
-
-		spin_lock(&sb_lock);
+		}
 	}
 	spin_unlock(&sb_lock);
 	return NULL;

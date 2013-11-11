@@ -64,21 +64,11 @@ static struct net_device_stats *internal_dev_get_stats(struct net_device *netdev
 	return stats;
 }
 
-static int internal_dev_mac_addr(struct net_device *dev, void *p)
-{
-	struct sockaddr *addr = p;
-
-	if (!is_valid_ether_addr(addr->sa_data))
-		return -EADDRNOTAVAIL;
-	memcpy(dev->dev_addr, addr->sa_data, dev->addr_len);
-	return 0;
-}
-
 /* Called with rcu_read_lock_bh. */
 static int internal_dev_xmit(struct sk_buff *skb, struct net_device *netdev)
 {
 	rcu_read_lock();
-	ovs_vport_receive(internal_dev_priv(netdev)->vport, skb);
+	ovs_vport_receive(internal_dev_priv(netdev)->vport, skb, NULL);
 	rcu_read_unlock();
 	return 0;
 }
@@ -129,7 +119,7 @@ static const struct net_device_ops internal_dev_netdev_ops = {
 	.ndo_open = internal_dev_open,
 	.ndo_stop = internal_dev_stop,
 	.ndo_start_xmit = internal_dev_xmit,
-	.ndo_set_mac_address = internal_dev_mac_addr,
+	.ndo_set_mac_address = eth_mac_addr,
 	.ndo_change_mtu = internal_dev_change_mtu,
 	.ndo_get_stats = internal_dev_get_stats,
 };
@@ -140,13 +130,14 @@ static void do_setup(struct net_device *netdev)
 
 	netdev->netdev_ops = &internal_dev_netdev_ops;
 
-	netdev->priv_flags &= ~IFF_TX_SKB_SHARING;
+	netdev_extended(netdev)->ext_priv_flags &= ~IFF_TX_SKB_SHARING;
+	netdev_extended(netdev)->ext_priv_flags |= IFF_LIVE_ADDR_CHANGE;
 	netdev->destructor = internal_dev_destructor;
 	SET_ETHTOOL_OPS(netdev, &internal_dev_ethtool_ops);
 	netdev->tx_queue_len = 0;
 
 	netdev->features = NETIF_F_LLTX | NETIF_F_SG | NETIF_F_FRAGLIST |
-				NETIF_F_HIGHDMA | NETIF_F_HW_CSUM | NETIF_F_TSO;
+			   NETIF_F_HIGHDMA | NETIF_F_HW_CSUM | NETIF_F_TSO;
 
 	netdev->vlan_features = netdev->features;
 	netdev->features |= NETIF_F_HW_VLAN_TX;
@@ -177,19 +168,27 @@ static struct vport *internal_dev_create(const struct vport_parms *parms)
 		goto error_free_vport;
 	}
 
+	dev_net_set(netdev_vport->dev, ovs_dp_get_net(vport->dp));
 	internal_dev = internal_dev_priv(netdev_vport->dev);
 	internal_dev->vport = vport;
 
+	/* Restrict bridge port to current netns. */
+	if (vport->port_no == OVSP_LOCAL)
+		netdev_vport->dev->features |= NETIF_F_NETNS_LOCAL;
+
+	rtnl_lock();
 	err = register_netdevice(netdev_vport->dev);
 	if (err)
 		goto error_free_netdev;
 
 	dev_set_promiscuity(netdev_vport->dev, 1);
+	rtnl_unlock();
 	netif_start_queue(netdev_vport->dev);
 
 	return vport;
 
 error_free_netdev:
+	rtnl_unlock();
 	free_netdev(netdev_vport->dev);
 error_free_vport:
 	ovs_vport_free(vport);
@@ -202,10 +201,13 @@ static void internal_dev_destroy(struct vport *vport)
 	struct netdev_vport *netdev_vport = netdev_vport_priv(vport);
 
 	netif_stop_queue(netdev_vport->dev);
+	rtnl_lock();
 	dev_set_promiscuity(netdev_vport->dev, -1);
 
 	/* unregister_netdevice() waits for an RCU grace period. */
 	unregister_netdevice(netdev_vport->dev);
+
+	rtnl_unlock();
 }
 
 static int internal_dev_recv(struct vport *vport, struct sk_buff *skb)
@@ -222,6 +224,7 @@ static int internal_dev_recv(struct vport *vport, struct sk_buff *skb)
 	skb->dev = netdev;
 	skb->pkt_type = PACKET_HOST;
 	skb->protocol = eth_type_trans(skb, netdev);
+	skb_postpull_rcsum(skb, eth_hdr(skb), ETH_HLEN);
 
 	netif_rx(skb);
 
@@ -233,7 +236,6 @@ const struct vport_ops ovs_internal_vport_ops = {
 	.create		= internal_dev_create,
 	.destroy	= internal_dev_destroy,
 	.get_name	= ovs_netdev_get_name,
-	.get_ifindex	= ovs_netdev_get_ifindex,
 	.send		= internal_dev_recv,
 };
 

@@ -242,7 +242,9 @@ int __cpuinit register_cpu(struct cpu *cpu, int num)
 	cpu->sysdev.id = num;
 	cpu->sysdev.cls = &cpu_sysdev_class;
 
-	error = sysdev_register(&cpu->sysdev);
+	sysdev_initialize(&cpu->sysdev);
+	cpu->sysdev.kobj.uevent_suppress = 1;
+	error = sysdev_add(&cpu->sysdev);
 
 	if (!error && cpu->hotpluggable)
 		register_cpu_control(cpu);
@@ -255,6 +257,11 @@ int __cpuinit register_cpu(struct cpu *cpu, int num)
 	if (!error)
 		error = sysdev_create_file(&cpu->sysdev, &attr_crash_notes);
 #endif
+
+	cpu->sysdev.kobj.uevent_suppress = 0;
+	if (!error)
+		kobject_uevent(&cpu->sysdev.kobj, KOBJ_ADD);
+
 	return error;
 }
 

@@ -97,11 +97,21 @@ int mlx4_en_QUERY_PORT(struct mlx4_en_dev *mdev, u8 port)
 	/* This command is always accessed from Ethtool context
 	 * already synchronized, no need in locking */
 	state->link_state = !!(qport_context->link_up & MLX4_EN_LINK_UP_MASK);
-	if ((qport_context->link_speed & MLX4_EN_SPEED_MASK) ==
-	    MLX4_EN_1G_SPEED)
+	switch (qport_context->link_speed & MLX4_EN_SPEED_MASK) {
+	case MLX4_EN_1G_SPEED:
 		state->link_speed = 1000;
-	else
+		break;
+	case MLX4_EN_10G_SPEED_XAUI:
+	case MLX4_EN_10G_SPEED_XFI:
 		state->link_speed = 10000;
+		break;
+	case MLX4_EN_40G_SPEED:
+		state->link_speed = 40000;
+		break;
+	default:
+		state->link_speed = -1;
+		break;
+	}
 	state->transciver = qport_context->transceiver;
 
 out:
@@ -135,15 +145,21 @@ int mlx4_en_DUMP_ETH_STATS(struct mlx4_en_dev *mdev, u8 port, u8 reset)
 
 	stats->rx_packets = 0;
 	stats->rx_bytes = 0;
+	priv->port_stats.rx_chksum_good = 0;
+	priv->port_stats.rx_chksum_none = 0;
 	for (i = 0; i < priv->rx_ring_num; i++) {
 		stats->rx_packets += priv->rx_ring[i].packets;
 		stats->rx_bytes += priv->rx_ring[i].bytes;
+		priv->port_stats.rx_chksum_good += priv->rx_ring[i].csum_ok;
+		priv->port_stats.rx_chksum_none += priv->rx_ring[i].csum_none;
 	}
 	stats->tx_packets = 0;
 	stats->tx_bytes = 0;
+	priv->port_stats.tx_chksum_offload = 0;
 	for (i = 0; i < priv->tx_ring_num; i++) {
 		stats->tx_packets += priv->tx_ring[i].packets;
 		stats->tx_bytes += priv->tx_ring[i].bytes;
+		priv->port_stats.tx_chksum_offload += priv->tx_ring[i].tx_csum;
 	}
 
 	stats->rx_errors = be64_to_cpu(mlx4_en_stats->PCS) +

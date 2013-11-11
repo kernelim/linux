@@ -258,7 +258,7 @@ int vfs_fsync_range(struct file *file, struct dentry *dentry, loff_t start,
 	 */
 	mutex_lock(&mapping->host->i_mutex);
 	err = fop->fsync(file, dentry, datasync);
-	if (!ret)
+	if (!ret || (err && ret == -EIO))
 		ret = err;
 	mutex_unlock(&mapping->host->i_mutex);
 

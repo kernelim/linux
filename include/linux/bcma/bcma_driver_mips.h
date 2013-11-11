@@ -35,13 +35,15 @@ struct bcma_device;
 struct bcma_drv_mips {
 	struct bcma_device *core;
 	u8 setup_done:1;
-	unsigned int assigned_irqs;
+	u8 early_setup_done:1;
 };
 
 #ifdef CONFIG_BCMA_DRIVER_MIPS
 extern void bcma_core_mips_init(struct bcma_drv_mips *mcore);
+extern void bcma_core_mips_early_init(struct bcma_drv_mips *mcore);
 #else
 static inline void bcma_core_mips_init(struct bcma_drv_mips *mcore) { }
+static inline void bcma_core_mips_early_init(struct bcma_drv_mips *mcore) { }
 #endif
 
 extern u32 bcma_cpu_clock(struct bcma_drv_mips *mcore);

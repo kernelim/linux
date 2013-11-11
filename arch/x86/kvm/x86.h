@@ -51,7 +51,7 @@ static inline bool guest_cpuid_has_pcid(struct kvm_vcpu *vcpu)
 struct kvm_cpuid_entry2 *kvm_find_cpuid_entry(struct kvm_vcpu *vcpu,
                                              u32 function, u32 index);
 
-void kvm_write_tsc(struct kvm_vcpu *vcpu, u64 data);
+void kvm_write_tsc(struct kvm_vcpu *vcpu, struct msr_data *msr);
 
 void kvm_before_handle_nmi(struct kvm_vcpu *vcpu);
 void kvm_after_handle_nmi(struct kvm_vcpu *vcpu);

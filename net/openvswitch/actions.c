@@ -28,6 +28,7 @@
 #include <linux/if_arp.h>
 #include <linux/if_vlan.h>
 #include <net/ip.h>
+#include <net/ipv6.h>
 #include <net/checksum.h>
 #include <net/dsfield.h>
 
@@ -57,7 +58,7 @@ static int __pop_vlan_tci(struct sk_buff *skb, __be16 *current_tci)
 
 	if (skb->ip_summed == CHECKSUM_COMPLETE)
 		skb->csum = csum_sub(skb->csum, csum_partial(skb->data
-					+ ETH_HLEN, VLAN_HLEN, 0));
+					+ (2 * ETH_ALEN), VLAN_HLEN, 0));
 
 	vhdr = (struct vlan_hdr *)(skb->data + ETH_HLEN);
 	*current_tci = vhdr->h_vlan_TCI;
@@ -88,16 +89,21 @@ static int pop_vlan(struct sk_buff *skb)
 		if (err)
 			return err;
 	}
+	/* move next vlan tag to hw accel tag */
+	if (likely(skb->protocol != htons(ETH_P_8021Q) ||
+		   skb->len < VLAN_ETH_HLEN))
+		return 0;
 
+	err = __pop_vlan_tci(skb, &tci);
+	if (unlikely(err))
+		return err;
+
+	__vlan_hwaccel_put_tag(skb, ntohs(tci));
 	return 0;
 }
 
 static int push_vlan(struct sk_buff *skb, const struct ovs_action_push_vlan *vlan)
 {
-	/*
-	 * Push an eventual existing hardware accel VLAN tag to the skb first
-	 * to maintain correct order.
-	 */
 	if (unlikely(vlan_tx_tag_present(skb))) {
 		u16 current_tag;
 
@@ -109,11 +115,10 @@ static int push_vlan(struct sk_buff *skb, const struct ovs_action_push_vlan *vla
 
 		if (skb->ip_summed == CHECKSUM_COMPLETE)
 			skb->csum = csum_add(skb->csum, csum_partial(skb->data
-					+ ETH_HLEN, VLAN_HLEN, 0));
+					+ (2 * ETH_ALEN), VLAN_HLEN, 0));
 
 	}
-
-	__vlan_put_tag(skb, ntohs(vlan->vlan_tci) & ~VLAN_TAG_PRESENT);
+	__vlan_hwaccel_put_tag(skb, ntohs(vlan->vlan_tci) & ~VLAN_TAG_PRESENT);
 	return 0;
 }
 
@@ -125,8 +130,12 @@ static int set_eth_addr(struct sk_buff *skb,
 	if (unlikely(err))
 		return err;
 
+	skb_postpull_rcsum(skb, eth_hdr(skb), ETH_ALEN * 2);
+
 	memcpy(eth_hdr(skb)->h_source, eth_key->eth_src, ETH_ALEN);
 	memcpy(eth_hdr(skb)->h_dest, eth_key->eth_dst, ETH_ALEN);
+
+	ovs_skb_postpush_rcsum(skb, eth_hdr(skb), ETH_ALEN * 2);
 
 	return 0;
 }
@@ -158,6 +167,53 @@ static void set_ip_addr(struct sk_buff *skb, struct iphdr *nh,
 	*addr = new_addr;
 }
 
+static void update_ipv6_checksum(struct sk_buff *skb, u8 l4_proto,
+				 __be32 addr[4], const __be32 new_addr[4])
+{
+	int transport_len = skb->len - skb_transport_offset(skb);
+
+	if (l4_proto == IPPROTO_TCP) {
+		if (likely(transport_len >= sizeof(struct tcphdr)))
+			inet_proto_csum_replace16(&tcp_hdr(skb)->check, skb,
+						  addr, new_addr, 1);
+	} else if (l4_proto == IPPROTO_UDP) {
+		if (likely(transport_len >= sizeof(struct udphdr))) {
+			struct udphdr *uh = udp_hdr(skb);
+
+			if (uh->check || skb->ip_summed == CHECKSUM_PARTIAL) {
+				inet_proto_csum_replace16(&uh->check, skb,
+							  addr, new_addr, 1);
+				if (!uh->check)
+					uh->check = CSUM_MANGLED_0;
+			}
+		}
+	}
+}
+
+static void set_ipv6_addr(struct sk_buff *skb, u8 l4_proto,
+			  __be32 addr[4], const __be32 new_addr[4],
+			  bool recalculate_csum)
+{
+	if (recalculate_csum)
+		update_ipv6_checksum(skb, l4_proto, addr, new_addr);
+
+	skb->rxhash = 0;
+	memcpy(addr, new_addr, sizeof(__be32[4]));
+}
+
+static void set_ipv6_tc(struct ipv6hdr *nh, u8 tc)
+{
+	nh->priority = tc >> 4;
+	nh->flow_lbl[0] = (nh->flow_lbl[0] & 0x0F) | ((tc & 0x0F) << 4);
+}
+
+static void set_ipv6_fl(struct ipv6hdr *nh, u32 fl)
+{
+	nh->flow_lbl[0] = (nh->flow_lbl[0] & 0xF0) | (fl & 0x000F0000) >> 16;
+	nh->flow_lbl[1] = (fl & 0x0000FF00) >> 8;
+	nh->flow_lbl[2] = fl & 0x000000FF;
+}
+
 static void set_ip_ttl(struct sk_buff *skb, struct iphdr *nh, u8 new_ttl)
 {
 	csum_replace2(&nh->check, htons(nh->ttl << 8), htons(new_ttl << 8));
@@ -187,6 +243,47 @@ static int set_ipv4(struct sk_buff *skb, const struct ovs_key_ipv4 *ipv4_key)
 
 	if (ipv4_key->ipv4_ttl != nh->ttl)
 		set_ip_ttl(skb, nh, ipv4_key->ipv4_ttl);
+
+	return 0;
+}
+
+static int set_ipv6(struct sk_buff *skb, const struct ovs_key_ipv6 *ipv6_key)
+{
+	struct ipv6hdr *nh;
+	int err;
+	__be32 *saddr;
+	__be32 *daddr;
+
+	err = make_writable(skb, skb_network_offset(skb) +
+			    sizeof(struct ipv6hdr));
+	if (unlikely(err))
+		return err;
+
+	nh = ipv6_hdr(skb);
+	saddr = (__be32 *)&nh->saddr;
+	daddr = (__be32 *)&nh->daddr;
+
+	if (memcmp(ipv6_key->ipv6_src, saddr, sizeof(ipv6_key->ipv6_src)))
+		set_ipv6_addr(skb, ipv6_key->ipv6_proto, saddr,
+			      ipv6_key->ipv6_src, true);
+
+	if (memcmp(ipv6_key->ipv6_dst, daddr, sizeof(ipv6_key->ipv6_dst))) {
+		unsigned int offset = 0;
+		int flags = IP6_FH_F_SKIP_RH;
+		bool recalc_csum = true;
+
+		if (ipv6_ext_hdr(nh->nexthdr))
+			recalc_csum = ipv6_find_hdr(skb, &offset,
+						    NEXTHDR_ROUTING, NULL,
+						    &flags) != NEXTHDR_ROUTING;
+
+		set_ipv6_addr(skb, ipv6_key->ipv6_proto, daddr,
+			      ipv6_key->ipv6_dst, recalc_csum);
+	}
+
+	set_ipv6_tc(nh, ipv6_key->ipv6_tclass);
+	set_ipv6_fl(nh, ntohl(ipv6_key->ipv6_label));
+	nh->hop_limit = ipv6_key->ipv6_hlimit;
 
 	return 0;
 }
@@ -262,7 +359,7 @@ static int do_output(struct datapath *dp, struct sk_buff *skb, int out_port)
 	if (unlikely(!skb))
 		return -ENOMEM;
 
-	vport = rcu_dereference(dp->ports[out_port]);
+	vport = ovs_vport_rcu(dp, out_port);
 	if (unlikely(!vport)) {
 		kfree_skb(skb);
 		return -ENODEV;
@@ -335,12 +432,24 @@ static int execute_set_action(struct sk_buff *skb,
 		skb->priority = nla_get_u32(nested_attr);
 		break;
 
+	case OVS_KEY_ATTR_SKB_MARK:
+		skb->mark = nla_get_u32(nested_attr);
+		break;
+
+	case OVS_KEY_ATTR_IPV4_TUNNEL:
+		OVS_CB(skb)->tun_key = nla_data(nested_attr);
+		break;
+
 	case OVS_KEY_ATTR_ETHERNET:
 		err = set_eth_addr(skb, nla_data(nested_attr));
 		break;
 
 	case OVS_KEY_ATTR_IPV4:
 		err = set_ipv4(skb, nla_data(nested_attr));
+		break;
+
+	case OVS_KEY_ATTR_IPV6:
+		err = set_ipv6(skb, nla_data(nested_attr));
 		break;
 
 	case OVS_KEY_ATTR_TCP:
@@ -426,6 +535,7 @@ int ovs_execute_actions(struct datapath *dp, struct sk_buff *skb)
 {
 	struct sw_flow_actions *acts = rcu_dereference(OVS_CB(skb)->flow->sf_acts);
 
+	OVS_CB(skb)->tun_key = NULL;
 	return do_execute_actions(dp, skb, acts->actions,
 					 acts->actions_len, false);
 }

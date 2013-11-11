@@ -31,6 +31,8 @@
 #include <net/ip.h>
 #include <asm/checksum.h>
 #include <linux/in6.h>
+#include <linux/tcp.h>
+#include <linux/ipv6.h>
 
 #ifndef _HAVE_ARCH_IPV6_CSUM
 
@@ -91,4 +93,13 @@ static __inline__ __sum16 csum_ipv6_magic(const struct in6_addr *saddr,
 }
 
 #endif
+
+static __inline__ __sum16 tcp_v6_check(int len,
+				   const struct in6_addr *saddr,
+				   const struct in6_addr *daddr,
+				   __wsum base)
+{
+	return csum_ipv6_magic(saddr, daddr, len, IPPROTO_TCP, base);
+}
+
 #endif

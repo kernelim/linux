@@ -10,57 +10,9 @@
 #include <linux/pci.h>
 #include <linux/list.h>
 #include <linux/ioport.h>
+#include <asm-generic/pci-bridge.h>
 
 struct device_node;
-
-enum {
-	/* Force re-assigning all resources (ignore firmware
-	 * setup completely)
-	 */
-	PPC_PCI_REASSIGN_ALL_RSRC	= 0x00000001,
-
-	/* Re-assign all bus numbers */
-	PPC_PCI_REASSIGN_ALL_BUS	= 0x00000002,
-
-	/* Do not try to assign, just use existing setup */
-	PPC_PCI_PROBE_ONLY		= 0x00000004,
-
-	/* Don't bother with ISA alignment unless the bridge has
-	 * ISA forwarding enabled
-	 */
-	PPC_PCI_CAN_SKIP_ISA_ALIGN	= 0x00000008,
-
-	/* Enable domain numbers in /proc */
-	PPC_PCI_ENABLE_PROC_DOMAINS	= 0x00000010,
-	/* ... except for domain 0 */
-	PPC_PCI_COMPAT_DOMAIN_0		= 0x00000020,
-};
-#ifdef CONFIG_PCI
-extern unsigned int ppc_pci_flags;
-
-static inline void ppc_pci_set_flags(int flags)
-{
-	ppc_pci_flags = flags;
-}
-
-static inline void ppc_pci_add_flags(int flags)
-{
-	ppc_pci_flags |= flags;
-}
-
-static inline int ppc_pci_has_flag(int flag)
-{
-	return (ppc_pci_flags & flag);
-}
-#else
-static inline void ppc_pci_set_flags(int flags) { }
-static inline void ppc_pci_add_flags(int flags) { }
-static inline int ppc_pci_has_flag(int flag)
-{
-	return 0;
-}
-#endif
-
 
 /*
  * Structure of a PCI controller (host bridge)
@@ -300,7 +252,6 @@ extern void pci_process_bridge_OF_ranges(struct pci_controller *hose,
 /* Allocate & free a PCI host bridge structure */
 extern struct pci_controller *pcibios_alloc_controller(struct device_node *dev);
 extern void pcibios_free_controller(struct pci_controller *phb);
-extern void pcibios_setup_phb_resources(struct pci_controller *hose);
 
 #ifdef CONFIG_PCI
 extern unsigned long pci_address_to_pio(phys_addr_t address);

@@ -60,6 +60,35 @@ extern int i8259A_irq_pending(unsigned int irq);
 extern void make_8259A_irq(unsigned int irq);
 extern void init_8259A(int aeoi);
 
+#ifdef CONFIG_TRACING
+/* Interrupt handlers registered during init_IRQ */
+extern void trace_apic_timer_interrupt(void);
+extern void trace_x86_platform_ipi(void);
+extern void trace_error_interrupt(void);
+extern void trace_irq_work_interrupt(void);
+
+extern void trace_spurious_interrupt(void);
+extern void trace_thermal_interrupt(void);
+extern void trace_reschedule_interrupt(void);
+#define trace_mce_self_interrupt mce_self_interrupt
+
+#define trace_invalidate_interrupt0 invalidate_interrupt0
+#define trace_invalidate_interrupt1 invalidate_interrupt1
+#define trace_invalidate_interrupt2 invalidate_interrupt2
+#define trace_invalidate_interrupt3 invalidate_interrupt3
+#define trace_invalidate_interrupt4 invalidate_interrupt4
+#define trace_invalidate_interrupt5 invalidate_interrupt5
+#define trace_invalidate_interrupt6 invalidate_interrupt6
+#define trace_invalidate_interrupt7 invalidate_interrupt7
+
+#define trace_irq_move_cleanup_interrupt  irq_move_cleanup_interrupt
+#define trace_reboot_interrupt  reboot_interrupt
+extern void trace_threshold_interrupt(void);
+
+extern void trace_call_function_interrupt(void);
+extern void trace_call_function_single_interrupt(void);
+#endif /* CONFIG_TRACING */
+
 /* IOAPIC */
 #define IO_APIC_IRQ(x) (((x) >= NR_IRQS_LEGACY) || ((1<<(x)) & io_apic_irqs))
 extern unsigned long io_apic_irqs;

@@ -448,14 +448,18 @@ int blk_alloc_devt(struct hd_struct *part, dev_t *devt)
 	do {
 		if (!idr_pre_get(&ext_devt_idr, GFP_KERNEL))
 			return -ENOMEM;
+		mutex_lock(&ext_devt_mutex);
 		rc = idr_get_new(&ext_devt_idr, part, &idx);
+		mutex_unlock(&ext_devt_mutex);
 	} while (rc == -EAGAIN);
 
 	if (rc)
 		return rc;
 
 	if (idx > MAX_EXT_DEVT) {
+		mutex_lock(&ext_devt_mutex);
 		idr_remove(&ext_devt_idr, idx);
+		mutex_unlock(&ext_devt_mutex);
 		return -EBUSY;
 	}
 

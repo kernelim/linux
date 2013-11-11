@@ -38,8 +38,6 @@
 #define RX_DESC_PACKETID_SHIFT 11
 #define RX_MAX_PACKET_ID 3
 
-#define NUM_RX_PKT_DESC_MOD_MASK   7
-
 #define RX_DESC_VALID_FCS         0x0001
 #define RX_DESC_MATCH_RXADDR1     0x0002
 #define RX_DESC_MCAST             0x0004
@@ -86,12 +84,11 @@
  * Bits 3-5 - process_id tag (AP mode FW)
  * Bits 6-7 - reserved
  */
-#define WL1271_RX_DESC_STATUS_MASK      0x03
+#define WL1271_RX_DESC_STATUS_MASK      0x07
 
 #define WL1271_RX_DESC_SUCCESS          0x00
 #define WL1271_RX_DESC_DECRYPT_FAIL     0x01
 #define WL1271_RX_DESC_MIC_FAIL         0x02
-#define WL1271_RX_DESC_DRIVER_RX_Q_FAIL 0x03
 
 #define RX_MEM_BLOCK_MASK            0xFF
 #define RX_BUF_SIZE_MASK             0xFFF00
@@ -101,6 +98,15 @@
 
 /* If set, the start of IP payload is not 4 bytes aligned */
 #define RX_BUF_UNALIGNED_PAYLOAD     BIT(20)
+
+/* If set, the buffer was padded by the FW to be 4 bytes aligned */
+#define RX_BUF_PADDED_PAYLOAD        BIT(30)
+
+/*
+ * Account for the padding inserted by the FW in case of RX_ALIGNMENT
+ * or for fixing alignment in case the packet wasn't aligned.
+ */
+#define RX_BUF_ALIGN                 2
 
 /* Describes the alignment state of a Rx buffer */
 enum wl_rx_buf_align {
@@ -136,11 +142,11 @@ struct wl1271_rx_descriptor {
 	u8  reserved;
 } __packed;
 
-void wl12xx_rx(struct wl1271 *wl, struct wl_fw_status *status);
+int wlcore_rx(struct wl1271 *wl, struct wl_fw_status_1 *status);
 u8 wl1271_rate_to_idx(int rate, enum ieee80211_band band);
 int wl1271_rx_filter_enable(struct wl1271 *wl,
 			    int index, bool enable,
 			    struct wl12xx_rx_filter *filter);
-void wl1271_rx_filter_clear_all(struct wl1271 *wl);
+int wl1271_rx_filter_clear_all(struct wl1271 *wl);
 
 #endif

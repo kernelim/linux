@@ -134,6 +134,7 @@ nfs4_ds_connect(struct nfs_server *mds_srv, struct nfs4_pnfs_ds *ds)
 	if (status)
 		goto out_put;
 
+	smp_wmb();
 	ds->ds_clp = clp;
 	dprintk("%s [new] ip=%x, port=%hu\n", __func__, ntohl(ds->ds_ip_addr),
 		ntohs(ds->ds_port));
@@ -326,7 +327,7 @@ decode_device(struct inode *ino, struct pnfs_device *pdev, gfp_t gfp_flags)
 	cnt = be32_to_cpup(p);
 	dprintk("%s stripe count  %d\n", __func__, cnt);
 	if (cnt > NFS4_PNFS_MAX_STRIPE_CNT) {
-		printk(KERN_WARNING "%s: stripe count %d greater than "
+		printk(KERN_WARNING "NFS: %s: stripe count %d greater than "
 		       "supported maximum %d\n", __func__,
 			cnt, NFS4_PNFS_MAX_STRIPE_CNT);
 		goto out_err_free_scratch;
@@ -357,7 +358,7 @@ decode_device(struct inode *ino, struct pnfs_device *pdev, gfp_t gfp_flags)
 	num = be32_to_cpup(p);
 	dprintk("%s ds_num %u\n", __func__, num);
 	if (num > NFS4_PNFS_MAX_MULTI_CNT) {
-		printk(KERN_WARNING "%s: multipath count %d greater than "
+		printk(KERN_WARNING "NFS: %s: multipath count %d greater than "
 			"supported maximum %d\n", __func__,
 			num, NFS4_PNFS_MAX_MULTI_CNT);
 		goto out_err_free_stripe_indices;
@@ -365,7 +366,7 @@ decode_device(struct inode *ino, struct pnfs_device *pdev, gfp_t gfp_flags)
 
 	/* validate stripe indices are all < num */
 	if (max_stripe_index >= num) {
-		printk(KERN_WARNING "%s: stripe index %u >= num ds %u\n",
+		printk(KERN_WARNING "NFS: %s: stripe index %u >= num ds %u\n",
 			__func__, max_stripe_index, num);
 		goto out_err_free_stripe_indices;
 	}
@@ -466,7 +467,7 @@ decode_and_add_device(struct inode *inode, struct pnfs_device *dev, gfp_t gfp_fl
 
 	new = decode_device(inode, dev, gfp_flags);
 	if (!new) {
-		printk(KERN_WARNING "%s: Could not decode or add device\n",
+		printk(KERN_WARNING "NFS: %s: Could not decode or add device\n",
 			__func__);
 		return NULL;
 	}
@@ -524,7 +525,7 @@ get_device_info(struct inode *inode, struct nfs4_deviceid *dev_id, gfp_t gfp_fla
 	pdev->layout_type = LAYOUT_NFSV4_1_FILES;
 	pdev->pages = pages;
 	pdev->pgbase = 0;
-	pdev->pglen = PAGE_SIZE * max_pages;
+	pdev->pglen = max_resp_sz;
 	pdev->mincount = 0;
 
 	rc = nfs4_proc_getdeviceinfo(server, pdev);
@@ -608,33 +609,62 @@ filelayout_mark_devid_negative(struct nfs4_file_layout_dsaddr *dsaddr,
 	spin_unlock(&nfs4_ds_cache_lock);
 }
 
+static void nfs4_wait_ds_connect(struct nfs4_pnfs_ds *ds)
+{
+	might_sleep();
+	wait_on_bit(&ds->ds_state, NFS4DS_CONNECTING,
+			nfs_wait_bit_killable, TASK_KILLABLE);
+}
+
+static void nfs4_clear_ds_conn_bit(struct nfs4_pnfs_ds *ds)
+{
+	smp_mb__before_clear_bit();
+	clear_bit(NFS4DS_CONNECTING, &ds->ds_state);
+	smp_mb__after_clear_bit();
+	wake_up_bit(&ds->ds_state, NFS4DS_CONNECTING);
+}
+
+
 struct nfs4_pnfs_ds *
 nfs4_fl_prepare_ds(struct pnfs_layout_segment *lseg, u32 ds_idx)
 {
 	struct nfs4_file_layout_dsaddr *dsaddr = FILELAYOUT_LSEG(lseg)->dsaddr;
 	struct nfs4_pnfs_ds *ds = dsaddr->ds_list[ds_idx];
+	struct nfs4_pnfs_ds *ret = ds;
 
-	if (ds == NULL) {
-		printk(KERN_ERR "%s: No data server for offset index %d\n",
-			__func__, ds_idx);
+	if (dsaddr->flags & NFS4_DEVICE_ID_NEG_ENTRY) {
+		/* Already tried to connect, don't try again */
+		dprintk("%s Deviceid marked out of use\n", __func__);
 		return NULL;
 	}
 
-	if (!ds->ds_clp) {
+	if (ds == NULL) {
+		printk(KERN_ERR "NFS: %s: No data server for offset index %d\n",
+			__func__, ds_idx);
+		return NULL;
+	}
+	smp_rmb();
+	if (ds->ds_clp)
+		goto out;
+
+	if (test_and_set_bit(NFS4DS_CONNECTING, &ds->ds_state) == 0) {
 		struct nfs_server *s = NFS_SERVER(lseg->pls_layout->plh_inode);
 		int err;
 
-		if (dsaddr->flags & NFS4_DEVICE_ID_NEG_ENTRY) {
-			/* Already tried to connect, don't try again */
-			dprintk("%s Deviceid marked out of use\n", __func__);
-			return NULL;
-		}
 		err = nfs4_ds_connect(s, ds);
-		if (err) {
+		if (err)
 			filelayout_mark_devid_negative(dsaddr, err,
 						       ntohl(ds->ds_ip_addr));
-			return NULL;
-		}
+		nfs4_clear_ds_conn_bit(ds);
+	} else {
+		/* Either ds is connected, or ds is NULL */
+		nfs4_wait_ds_connect(ds);
 	}
-	return ds;
+
+	if (dsaddr->flags & NFS4_DEVICE_ID_NEG_ENTRY) {
+		dprintk("%s Deviceid marked out of use\n", __func__);
+		return NULL;
+	}
+out:
+	return ret;
 }

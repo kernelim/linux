@@ -102,6 +102,9 @@ config I2C_I801
 	    Patsburg (PCH)
 	    Panther Point (PCH)
 	    Lynx Point (PCH)
+	    Lynx Point-LP (PCH)
+	    Avoton (SOC)
+	    Wellsburg (PCH)
 
 	  This driver can also be built as a module.  If so, the module
 	  will be called i2c-i801.
@@ -118,7 +121,7 @@ config I2C_ISCH
 
 config I2C_ISMT
 	tristate "Intel iSMT SMBus Controller"
-	depends on PCI
+	depends on PCI && X86
 	help
 	  If you say yes to this option, support will be included for the Intel
 	  iSMT SMBus host controller interface.

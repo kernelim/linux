@@ -25,6 +25,15 @@
 #include <asm/nops.h>
 #include <asm/nmi.h>
 
+#if defined(CONFIG_FTRACE_SYSCALLS) && defined(CONFIG_IA32_EMULATION)
+#include <asm/compat.h>
+bool arch_trace_is_compat_syscall(struct pt_regs *regs)
+{
+	if (is_compat_task())
+		return true;
+	return false;
+}
+#endif /* CONFIG_FTRACE_SYSCALLS && CONFIG_IA32_EMULATION */
 
 #ifdef CONFIG_DYNAMIC_FTRACE
 
@@ -485,26 +494,26 @@ void prepare_ftrace_return(unsigned long *parent, unsigned long self_addr,
 
 #ifdef CONFIG_FTRACE_SYSCALLS
 
-extern unsigned long __start_syscalls_metadata[];
-extern unsigned long __stop_syscalls_metadata[];
+extern struct syscall_metadata *__start_syscalls_metadata[];
+extern struct syscall_metadata *__stop_syscalls_metadata[];
 extern unsigned long *sys_call_table;
 
 static struct syscall_metadata **syscalls_metadata;
 
 static struct syscall_metadata *find_syscall_meta(unsigned long *syscall)
 {
-	struct syscall_metadata *start;
-	struct syscall_metadata *stop;
+	struct syscall_metadata **start;
+	struct syscall_metadata **stop;
 	char str[KSYM_SYMBOL_LEN];
 
 
-	start = (struct syscall_metadata *)__start_syscalls_metadata;
-	stop = (struct syscall_metadata *)__stop_syscalls_metadata;
+	start = __start_syscalls_metadata;
+	stop = __stop_syscalls_metadata;
 	kallsyms_lookup((unsigned long) syscall, NULL, NULL, NULL, str);
 
 	for ( ; start < stop; start++) {
-		if (start->name && !strcmp(start->name, str))
-			return start;
+		if ((*start)->name && !strcmp((*start)->name, str))
+			return *start;
 	}
 	return NULL;
 }
@@ -517,7 +526,7 @@ struct syscall_metadata *syscall_nr_to_meta(int nr)
 	return syscalls_metadata[nr];
 }
 
-int syscall_name_to_nr(char *name)
+int syscall_name_to_nr(const char *name)
 {
 	int i;
 

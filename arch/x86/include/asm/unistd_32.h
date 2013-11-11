@@ -351,7 +351,7 @@
 #define __NR_clock_adjtime	343
 #define __NR_syncfs             344
 #define __NR_sendmmsg		345
-/* #define __NR_set_ns		346 */
+#define __NR_setns		346
 #define __NR_process_vm_readv  347
 #define __NR_process_vm_writev 348
 

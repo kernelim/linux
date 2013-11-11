@@ -357,17 +357,21 @@ static int async_thread(void *unused)
 
 	while (!kthread_should_stop()) {
 		int ret = HZ;
-		set_current_state(TASK_INTERRUPTIBLE);
 		/*
 		 * check the list head without lock.. false positives
 		 * are dealt with inside run_one_entry() while holding
 		 * the lock.
 		 */
 		rmb();
+		if (need_resched())
+			schedule();
+
 		if (!list_empty(&async_pending))
 			run_one_entry();
-		else
+		else {
+			set_current_state(TASK_INTERRUPTIBLE);
 			ret = schedule_timeout(HZ);
+		}
 
 		if (ret == 0) {
 			/*
@@ -383,7 +387,12 @@ static int async_thread(void *unused)
 			 * woops work came in between us timing out and us
 			 * signing off; we need to stay alive and keep working.
 			 */
-			atomic_inc(&thread_count);
+			if (!atomic_add_unless(&thread_count, 1, MAX_THREADS))
+				/*
+				 * The thread manager raced in and created a new thread
+				 * While we were checking list empty
+				 */
+				break;
 		}
 	}
 	remove_wait_queue(&async_new, &wq);
@@ -411,7 +420,11 @@ static int async_manager_thread(void *unused)
 				msleep(100);
 				continue;
 			}
-			atomic_inc(&thread_count);
+			if (!atomic_add_unless(&thread_count, 1, MAX_THREADS))
+				/*
+				 * One of the exiting workers decided to stick around
+				 */
+				break;
 			tc++;
 		}
 

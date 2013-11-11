@@ -36,7 +36,7 @@ void fscache_enqueue_operation(struct fscache_operation *op)
 
 	ASSERT(list_empty(&op->pend_link));
 	ASSERT(op->processor != NULL);
-	ASSERTCMP(op->object->state, >=, FSCACHE_OBJECT_AVAILABLE);
+	ASSERT(fscache_object_is_available(op->object));
 	ASSERTCMP(atomic_read(&op->usage), >, 0);
 	ASSERTCMP(op->state, ==, FSCACHE_OP_ST_IN_PROGRESS);
 
@@ -91,6 +91,8 @@ static void fscache_run_op(struct fscache_object *object,
 int fscache_submit_exclusive_op(struct fscache_object *object,
 				struct fscache_operation *op)
 {
+	int ret;
+
 	_enter("{OBJ%x OP%x},", object->debug_id, op->debug_id);
 
 	ASSERTCMP(op->state, ==, FSCACHE_OP_ST_INITIALISED);
@@ -125,20 +127,25 @@ int fscache_submit_exclusive_op(struct fscache_object *object,
 
 		/* need to issue a new write op after this */
 		clear_bit(FSCACHE_OBJECT_PENDING_WRITE, &object->flags);
-	} else if (object->state == FSCACHE_OBJECT_CREATING) {
+		ret = 0;
+	} else if (test_bit(FSCACHE_OBJECT_IS_LOOKED_UP, &object->flags)) {
 		op->object = object;
 		object->n_ops++;
 		object->n_exclusive++;	/* reads and writes must wait */
 		atomic_inc(&op->usage);
 		list_add_tail(&op->pend_link, &object->pending_ops);
 		fscache_stat(&fscache_n_op_pend);
+		ret = 0;
 	} else {
-		/* not allowed to submit ops in any other state */
-		BUG();
+		/* If we're in any other state, there must have been an I/O
+		 * error of some nature.
+		 */
+		ASSERT(test_bit(FSCACHE_IOERROR, &object->cache->flags));
+		ret = -EIO;
 	}
 
 	spin_unlock(&object->lock);
-	return 0;
+	return ret;
 }
 
 /*
@@ -146,7 +153,7 @@ int fscache_submit_exclusive_op(struct fscache_object *object,
  */
 static void fscache_report_unexpected_submission(struct fscache_object *object,
 						 struct fscache_operation *op,
-						 unsigned long ostate)
+						 const struct fscache_state *ostate)
 {
 	static bool once_only;
 	struct fscache_operation *p;
@@ -157,11 +164,8 @@ static void fscache_report_unexpected_submission(struct fscache_object *object,
 	once_only = true;
 
 	kdebug("unexpected submission OP%x [OBJ%x %s]",
-	       op->debug_id, object->debug_id,
-	       fscache_object_states[object->state]);
-	kdebug("objstate=%s [%s]",
-	       fscache_object_states[object->state],
-	       fscache_object_states[ostate]);
+	       op->debug_id, object->debug_id, object->state->name);
+	kdebug("objstate=%s [%s]", object->state->name, ostate->name);
 	kdebug("objflags=%lx", object->flags);
 	kdebug("objevent=%lx [%lx]", object->events, object->event_mask);
 	kdebug("ops=%u inp=%u exc=%u",
@@ -192,7 +196,7 @@ static void fscache_report_unexpected_submission(struct fscache_object *object,
 int fscache_submit_op(struct fscache_object *object,
 		      struct fscache_operation *op)
 {
-	unsigned long ostate;
+	const struct fscache_state *ostate;
 	int ret;
 
 	_enter("{OBJ%x OP%x},{%u}",
@@ -230,16 +234,14 @@ int fscache_submit_op(struct fscache_object *object,
 			fscache_run_op(object, op);
 		}
 		ret = 0;
-	} else if (object->state == FSCACHE_OBJECT_CREATING) {
+	} else if (test_bit(FSCACHE_OBJECT_IS_LOOKED_UP, &object->flags)) {
 		op->object = object;
 		object->n_ops++;
 		atomic_inc(&op->usage);
 		list_add_tail(&op->pend_link, &object->pending_ops);
 		fscache_stat(&fscache_n_op_pend);
 		ret = 0;
-	} else if (object->state == FSCACHE_OBJECT_DYING ||
-		   object->state == FSCACHE_OBJECT_LC_DYING ||
-		   object->state == FSCACHE_OBJECT_WITHDRAWING) {
+	} else if (fscache_object_is_dying(object)) {
 		fscache_stat(&fscache_n_op_rejected);
 		op->state = FSCACHE_OP_ST_CANCELLED;
 		ret = -ENOBUFS;
@@ -270,12 +272,13 @@ void fscache_abort_object(struct fscache_object *object)
 
 /*
  * jump start the operation processing on an object
- * - caller must hold object->lock
  */
 void fscache_start_operations(struct fscache_object *object)
 {
 	struct fscache_operation *op;
 	bool stop = false;
+
+	ASSERT(spin_is_locked(&object->lock));
 
 	while (!list_empty(&object->pending_ops) && !stop) {
 		op = list_entry(object->pending_ops.next,
@@ -302,7 +305,8 @@ void fscache_start_operations(struct fscache_object *object)
 /*
  * cancel an operation that's pending on an object
  */
-int fscache_cancel_op(struct fscache_operation *op)
+int fscache_cancel_op(struct fscache_operation *op,
+		      void (*do_cancel)(struct fscache_operation *))
 {
 	struct fscache_object *object = op->object;
 	int ret;
@@ -320,6 +324,8 @@ int fscache_cancel_op(struct fscache_operation *op)
 		ASSERT(!list_empty(&op->pend_link));
 		fscache_stat(&fscache_n_op_cancelled);
 		list_del_init(&op->pend_link);
+		if (do_cancel)
+			do_cancel(op);
 		op->state = FSCACHE_OP_ST_CANCELLED;
 		if (test_bit(FSCACHE_OP_EXCLUSIVE, &op->flags))
 			object->n_exclusive--;
@@ -367,9 +373,9 @@ void fscache_cancel_all_ops(struct fscache_object *object)
 }
 
 /*
- * Record the completion of an in-progress operation.
+ * Record the completion or cancellation of an in-progress operation.
  */
-void fscache_op_complete(struct fscache_operation *op)
+void fscache_op_complete(struct fscache_operation *op, bool cancelled)
 {
 	struct fscache_object *object = op->object;
 
@@ -384,7 +390,8 @@ void fscache_op_complete(struct fscache_operation *op)
 
 	spin_lock(&object->lock);
 
-	op->state = FSCACHE_OP_ST_COMPLETE;
+	op->state = cancelled ?
+		FSCACHE_OP_ST_CANCELLED : FSCACHE_OP_ST_COMPLETE;
 
 	if (test_bit(FSCACHE_OP_EXCLUSIVE, &op->flags))
 		object->n_exclusive--;
@@ -430,14 +437,10 @@ void fscache_put_operation(struct fscache_operation *op)
 
 	object = op->object;
 
-	if (test_bit(FSCACHE_OP_DEC_READ_CNT, &op->flags)) {
-		if (atomic_dec_and_test(&object->n_reads)) {
-			clear_bit(FSCACHE_COOKIE_WAITING_ON_READS,
-				  &object->cookie->flags);
-			wake_up_bit(&object->cookie->flags,
-				    FSCACHE_COOKIE_WAITING_ON_READS);
-		}
-	}
+	if (test_bit(FSCACHE_OP_DEC_READ_CNT, &op->flags))
+		atomic_dec(&object->n_reads);
+	if (test_bit(FSCACHE_OP_UNUSE_COOKIE, &op->flags))
+		fscache_unuse_cookie(object);
 
 	/* now... we may get called with the object spinlock held, so we
 	 * complete the cleanup here only if we can immediately acquire the

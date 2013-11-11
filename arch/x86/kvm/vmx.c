@@ -1163,6 +1163,8 @@ static void vmx_set_tsc_khz(struct kvm_vcpu *vcpu, u32 user_tsc_khz)
  */
 static void vmx_write_tsc_offset(struct kvm_vcpu *vcpu, u64 offset)
 {
+	trace_kvm_write_tsc_offset(vcpu->vcpu_id, vmcs_read64(TSC_OFFSET),
+				   offset);
 	vmcs_write64(TSC_OFFSET, offset);
 }
 
@@ -1170,6 +1172,9 @@ static void vmx_adjust_tsc_offset(struct kvm_vcpu *vcpu, s64 adjustment, bool ho
 {
 	u64 offset = vmcs_read64(TSC_OFFSET);
 	vmcs_write64(TSC_OFFSET, offset + adjustment);
+
+	trace_kvm_write_tsc_offset(vcpu->vcpu_id, offset,
+				   offset + adjustment);
 }
 
 static u64 vmx_compute_tsc_offset(struct kvm_vcpu *vcpu, u64 target_tsc)
@@ -1239,16 +1244,18 @@ static int vmx_get_msr(struct kvm_vcpu *vcpu, u32 msr_index, u64 *pdata)
  * Returns 0 on success, non-0 otherwise.
  * Assumes vcpu_load() was already called.
  */
-static int vmx_set_msr(struct kvm_vcpu *vcpu, u32 msr_index, u64 data)
+static int vmx_set_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 {
 	struct vcpu_vmx *vmx = to_vmx(vcpu);
 	struct shared_msr_entry *msr;
 	int ret = 0;
+	u32 msr_index = msr_info->index;
+	u64 data = msr_info->data;
 
 	switch (msr_index) {
 	case MSR_EFER:
 		vmx_load_host_state(vmx);
-		ret = kvm_set_msr_common(vcpu, msr_index, data);
+		ret = kvm_set_msr_common(vcpu, msr_info);
 		break;
 #ifdef CONFIG_X86_64
 	case MSR_FS_BASE:
@@ -1272,7 +1279,7 @@ static int vmx_set_msr(struct kvm_vcpu *vcpu, u32 msr_index, u64 data)
 		vmcs_writel(GUEST_SYSENTER_ESP, data);
 		break;
 	case MSR_IA32_TSC:
-		kvm_write_tsc(vcpu, data);
+		kvm_write_tsc(vcpu, msr_info);
 		break;
 	case MSR_IA32_CR_PAT:
 		if (vmcs_config.vmentry_ctrl & VM_ENTRY_LOAD_IA32_PAT) {
@@ -1288,7 +1295,7 @@ static int vmx_set_msr(struct kvm_vcpu *vcpu, u32 msr_index, u64 data)
 			msr->data = data;
 			break;
 		}
-		ret = kvm_set_msr_common(vcpu, msr_index, data);
+		ret = kvm_set_msr_common(vcpu, msr_info);
 	}
 
 	return ret;
@@ -2810,8 +2817,6 @@ static int vmx_vcpu_setup(struct vcpu_vmx *vmx)
 	vmcs_writel(CR4_GUEST_HOST_MASK, KVM_GUEST_CR4_MASK);
 	vmx->vcpu.arch.cr4_guest_owned_bits = ~KVM_GUEST_CR4_MASK;
 
-	kvm_write_tsc(&vmx->vcpu, 0);
-
 	return 0;
 }
 
@@ -3508,13 +3513,17 @@ static int handle_rdmsr(struct kvm_vcpu *vcpu)
 
 static int handle_wrmsr(struct kvm_vcpu *vcpu)
 {
+	struct msr_data msr;
 	u32 ecx = vcpu->arch.regs[VCPU_REGS_RCX];
 	u64 data = (vcpu->arch.regs[VCPU_REGS_RAX] & -1u)
 		| ((u64)(vcpu->arch.regs[VCPU_REGS_RDX] & -1u) << 32);
 
 	trace_kvm_msr_write(ecx, data);
 
-	if (vmx_set_msr(vcpu, ecx, data) != 0) {
+	msr.data = data;
+	msr.index = ecx;
+	msr.host_initiated = false;
+	if (vmx_set_msr(vcpu, &msr) != 0) {
 		kvm_inject_gp(vcpu, 0);
 		return 1;
 	}
@@ -3717,6 +3726,17 @@ static int handle_ept_violation(struct kvm_vcpu *vcpu)
 		return 0;
 	}
 
+	/*
+	 * EPT violation happened while executing iret from NMI,
+	 * "blocked by NMI" bit has to be set before next VM entry.
+	 * There are errata that may cause this bit to not be set:
+	 * AAK134, BY25.
+	 */
+	if (!(to_vmx(vcpu)->idt_vectoring_info & VECTORING_INFO_VALID_MASK) &&
+			cpu_has_virtual_nmis() &&
+			(exit_qualification & INTR_INFO_UNBLOCK_NMI))
+		vmcs_set_bits(GUEST_INTERRUPTIBILITY_INFO, GUEST_INTR_STATE_NMI);
+
 	gpa = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
 	trace_kvm_page_fault(gpa, exit_qualification);
 	return kvm_mmu_page_fault(vcpu, gpa & PAGE_MASK, 0, NULL, 0);
@@ -3915,7 +3935,7 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
 	u32 exit_reason = vmx->exit_reason;
 	u32 vectoring_info = vmx->idt_vectoring_info;
 
-	trace_kvm_exit(exit_reason, kvm_rip_read(vcpu));
+	trace_kvm_exit(exit_reason, kvm_rip_read(vcpu), KVM_ISA_VMX);
 
 	/* If we need to emulate an MMIO from handle_invalid_guest_state
 	 * we just return 0 */
@@ -4435,46 +4455,26 @@ static void vmx_cpuid_update(struct kvm_vcpu *vcpu)
 	struct kvm_cpuid_entry2 *best;
 	u32 exec_control;
 
-	exec_control = vmcs_read32(SECONDARY_VM_EXEC_CONTROL);
 	/* Exposing INVPCID only when PCID is exposed */
 	best = kvm_find_cpuid_entry(vcpu, 0x7, 0);
 	if (vmx_invpcid_supported() &&
 	    best && (best->ebx & bit(X86_FEATURE_INVPCID)) &&
 	    guest_cpuid_has_pcid(vcpu)) {
+		exec_control = vmcs_read32(SECONDARY_VM_EXEC_CONTROL);
 		exec_control |= SECONDARY_EXEC_ENABLE_INVPCID;
 		vmcs_write32(SECONDARY_VM_EXEC_CONTROL,
 			     exec_control);
 	} else {
-		exec_control &= ~SECONDARY_EXEC_ENABLE_INVPCID;
-		vmcs_write32(SECONDARY_VM_EXEC_CONTROL,
-			     exec_control);
+		if (cpu_has_secondary_exec_ctrls()) {
+			exec_control = vmcs_read32(SECONDARY_VM_EXEC_CONTROL);
+			exec_control &= ~SECONDARY_EXEC_ENABLE_INVPCID;
+			vmcs_write32(SECONDARY_VM_EXEC_CONTROL,
+				     exec_control);
+		}
 		if (best)
 			best->ebx &= ~bit(X86_FEATURE_INVPCID);
 	}
 }
-
-static const struct trace_print_flags vmx_exit_reasons_str[] = {
-	{ EXIT_REASON_EXCEPTION_NMI,           "exception" },
-	{ EXIT_REASON_EXTERNAL_INTERRUPT,      "ext_irq" },
-	{ EXIT_REASON_TRIPLE_FAULT,            "triple_fault" },
-	{ EXIT_REASON_NMI_WINDOW,              "nmi_window" },
-	{ EXIT_REASON_IO_INSTRUCTION,          "io_instruction" },
-	{ EXIT_REASON_CR_ACCESS,               "cr_access" },
-	{ EXIT_REASON_DR_ACCESS,               "dr_access" },
-	{ EXIT_REASON_CPUID,                   "cpuid" },
-	{ EXIT_REASON_MSR_READ,                "rdmsr" },
-	{ EXIT_REASON_MSR_WRITE,               "wrmsr" },
-	{ EXIT_REASON_PENDING_INTERRUPT,       "interrupt_window" },
-	{ EXIT_REASON_HLT,                     "halt" },
-	{ EXIT_REASON_INVLPG,                  "invlpg" },
-	{ EXIT_REASON_VMCALL,                  "hypercall" },
-	{ EXIT_REASON_TPR_BELOW_THRESHOLD,     "tpr_below_thres" },
-	{ EXIT_REASON_APIC_ACCESS,             "apic_access" },
-	{ EXIT_REASON_WBINVD,                  "wbinvd" },
-	{ EXIT_REASON_TASK_SWITCH,             "task_switch" },
-	{ EXIT_REASON_EPT_VIOLATION,           "ept_violation" },
-	{ -1, NULL }
-};
 
 static bool vmx_gb_page_enable(void)
 {
@@ -4545,7 +4545,6 @@ static struct kvm_x86_ops vmx_x86_ops = {
 	.get_tdp_level = get_ept_level,
 	.get_mt_mask = vmx_get_mt_mask,
 
-	.exit_reasons_str = vmx_exit_reasons_str,
 	.gb_page_enable = vmx_gb_page_enable,
 
 	.cpuid_update = vmx_cpuid_update,

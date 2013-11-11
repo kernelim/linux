@@ -1431,11 +1431,13 @@ map_error:
 }
 
 /* Categorizing receive firmware frame errors */
-static void ql_categorize_rx_err(struct ql_adapter *qdev, u8 rx_err)
+static void ql_categorize_rx_err(struct ql_adapter *qdev, u8 rx_err,
+				 struct rx_ring *rx_ring)
 {
 	struct nic_stats *stats = &qdev->nic_stats;
 
 	stats->rx_err_count++;
+	rx_ring->rx_errors++;
 
 	switch (rx_err & IB_MAC_IOCB_RSP_ERR_MASK) {
 	case IB_MAC_IOCB_RSP_ERR_CODE_ERR:
@@ -1473,6 +1475,12 @@ static void ql_process_mac_rx_gro_page(struct ql_adapter *qdev,
 	int nr_frags;
 	struct napi_struct *napi = &rx_ring->napi;
 
+	/* Frame error, so drop the packet. */
+	if (ib_mac_rsp->flags2 & IB_MAC_IOCB_RSP_ERR_MASK) {
+		ql_categorize_rx_err(qdev, ib_mac_rsp->flags2, rx_ring);
+		put_page(lbq_desc->p.pg_chunk.page);
+		return;
+	}
 	napi->dev = qdev->ndev;
 
 	skb = napi_get_frags(napi);
@@ -1500,7 +1508,7 @@ static void ql_process_mac_rx_gro_page(struct ql_adapter *qdev,
 	rx_ring->rx_bytes += length;
 	skb->ip_summed = CHECKSUM_UNNECESSARY;
 	skb_record_rx_queue(skb, rx_ring->cq_id);
-	if (qdev->vlgrp && (vlan_id != 0xffff))
+	if (vlan_id != 0xffff)
 		vlan_gro_frags(&rx_ring->napi, qdev->vlgrp, vlan_id);
 	else
 		napi_gro_frags(napi);
@@ -1530,6 +1538,12 @@ static void ql_process_mac_rx_page(struct ql_adapter *qdev,
 
 	addr = lbq_desc->p.pg_chunk.va;
 	prefetch(addr);
+
+	/* Frame error, so drop the packet. */
+	if (ib_mac_rsp->flags2 & IB_MAC_IOCB_RSP_ERR_MASK) {
+		ql_categorize_rx_err(qdev, ib_mac_rsp->flags2, rx_ring);
+		goto err_out;
+	}
 
 	/* The max framesize filter on this chip is set higher than
 	 * MTU since FCoE uses 2k frames.
@@ -1579,12 +1593,12 @@ static void ql_process_mac_rx_page(struct ql_adapter *qdev,
 
 	skb_record_rx_queue(skb, rx_ring->cq_id);
 	if (skb->ip_summed == CHECKSUM_UNNECESSARY) {
-		if (qdev->vlgrp && (vlan_id != 0xffff))
+		if (vlan_id != 0xffff)
 			vlan_gro_receive(napi, qdev->vlgrp, vlan_id, skb);
 		else
 			napi_gro_receive(napi, skb);
 	} else {
-		if (qdev->vlgrp && (vlan_id != 0xffff))
+		if (vlan_id != 0xffff)
 			vlan_hwaccel_receive_skb(skb, qdev->vlgrp, vlan_id);
 		else
 			netif_receive_skb(skb);
@@ -1619,6 +1633,13 @@ static void ql_process_mac_rx_skb(struct ql_adapter *qdev,
 	skb_reserve(new_skb, NET_IP_ALIGN);
 	memcpy(skb_put(new_skb, length), skb->data, length);
 	skb = new_skb;
+
+	/* Frame error, so drop the packet. */
+	if (ib_mac_rsp->flags2 & IB_MAC_IOCB_RSP_ERR_MASK) {
+		ql_categorize_rx_err(qdev, ib_mac_rsp->flags2, rx_ring);
+		dev_kfree_skb_any(skb);
+		return;
+	}
 
 	/* loopback self test for ethtool */
 	if (test_bit(QL_SELFTEST, &qdev->flags)) {
@@ -1682,13 +1703,13 @@ static void ql_process_mac_rx_skb(struct ql_adapter *qdev,
 
 	skb_record_rx_queue(skb, rx_ring->cq_id);
 	if (skb->ip_summed == CHECKSUM_UNNECESSARY) {
-		if (qdev->vlgrp && (vlan_id != 0xffff))
+		if (vlan_id != 0xffff)
 			vlan_gro_receive(&rx_ring->napi, qdev->vlgrp,
 						vlan_id, skb);
 		else
 			napi_gro_receive(&rx_ring->napi, skb);
 	} else {
-		if (qdev->vlgrp && (vlan_id != 0xffff))
+		if (vlan_id != 0xffff)
 			vlan_hwaccel_receive_skb(skb, qdev->vlgrp, vlan_id);
 		else
 			netif_receive_skb(skb);
@@ -1931,6 +1952,13 @@ static void ql_process_mac_split_rx_intr(struct ql_adapter *qdev,
 		return;
 	}
 
+	/* Frame error, so drop the packet. */
+	if (ib_mac_rsp->flags2 & IB_MAC_IOCB_RSP_ERR_MASK) {
+		ql_categorize_rx_err(qdev, ib_mac_rsp->flags2, rx_ring);
+		dev_kfree_skb_any(skb);
+		return;
+	}
+
 	/* The max framesize filter on this chip is set higher than
 	 * MTU since FCoE uses 2k frames.
 	 */
@@ -2021,12 +2049,6 @@ static unsigned long ql_process_mac_rx_intr(struct ql_adapter *qdev,
 			IB_MAC_IOCB_RSP_VLAN_MASK)) : 0xffff;
 
 	QL_DUMP_IB_MAC_RSP(ib_mac_rsp);
-
-	/* Frame error, so drop the packet. */
-	if (ib_mac_rsp->flags2 & IB_MAC_IOCB_RSP_ERR_MASK) {
-		ql_categorize_rx_err(qdev, ib_mac_rsp->flags2);
-		return (unsigned long)length;
-	}
 
 	if (ib_mac_rsp->flags4 & IB_MAC_IOCB_RSP_HV) {
 		/* The data and headers are split into
@@ -2554,7 +2576,7 @@ static netdev_tx_t qlge_send(struct sk_buff *skb, struct net_device *ndev)
 
 	mac_iocb_ptr->frame_len = cpu_to_le16((u16) skb->len);
 
-	if (qdev->vlgrp && vlan_tx_tag_present(skb)) {
+	if (vlan_tx_tag_present(skb)) {
 		netif_printk(qdev, tx_queued, KERN_DEBUG, qdev->ndev,
 			     "Adding a vlan tag %d.\n", vlan_tx_tag_get(skb));
 		mac_iocb_ptr->flags3 |= OB_MAC_IOCB_V;

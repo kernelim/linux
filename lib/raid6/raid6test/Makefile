@@ -26,7 +26,7 @@ raid6.a: raid6int1.o raid6int2.o raid6int4.o raid6int8.o raid6int16.o \
 	 raid6int32.o \
 	 raid6mmx.o raid6sse1.o raid6sse2.o \
 	 raid6altivec1.o raid6altivec2.o raid6altivec4.o raid6altivec8.o \
-	 raid6recov.o raid6algos.o \
+	 raid6recov.o raid6recov_ssse3.o raid6algos.o \
 	 raid6tables.o
 	 rm -f $@
 	 $(AR) cq $@ $^

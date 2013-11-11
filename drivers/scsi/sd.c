@@ -137,6 +137,7 @@ sd_store_cache_type(struct device *dev, struct device_attribute *attr,
 	char *buffer_data;
 	struct scsi_mode_data data;
 	struct scsi_sense_hdr sshdr;
+	static const char temp[] = "temporary ";
 	int len;
 
 	if (sdp->type != TYPE_DISK)
@@ -144,6 +145,13 @@ sd_store_cache_type(struct device *dev, struct device_attribute *attr,
 		 * can do it, but there's probably so many exceptions
 		 * it's not worth the risk */
 		return -EINVAL;
+
+	if (strncmp(buf, temp, sizeof(temp) - 1) == 0) {
+		buf += sizeof(temp) - 1;
+		sdkp->cache_override = 1;
+	} else {
+		sdkp->cache_override = 0;
+	}
 
 	for (i = 0; i < ARRAY_SIZE(sd_cache_types); i++) {
 		const int len = strlen(sd_cache_types[i]);
@@ -157,6 +165,13 @@ sd_store_cache_type(struct device *dev, struct device_attribute *attr,
 		return -EINVAL;
 	rcd = ct & 0x01 ? 1 : 0;
 	wce = ct & 0x02 ? 1 : 0;
+
+	if (sdkp->cache_override) {
+		sdkp->WCE = wce;
+		sdkp->RCD = rcd;
+		return count;
+	}
+
 	if (scsi_mode_sense(sdp, 0x08, 8, buffer, sizeof(buffer), SD_TIMEOUT,
 			    SD_MAX_RETRIES, &data, NULL))
 		return -EINVAL;
@@ -258,6 +273,24 @@ sd_show_protection_type(struct device *dev, struct device_attribute *attr,
 }
 
 static ssize_t
+sd_store_protection_type(struct device *dev, struct device_attribute *attr,
+			 const char *buf, size_t count)
+{
+	struct scsi_disk *sdkp = to_scsi_disk(dev);
+	unsigned int val;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EACCES;
+
+	val = simple_strtoul(buf, NULL, 10);
+
+	if (val >= 0 && val <= SD_DIF_TYPE3_PROTECTION)
+		sdkp->protection_type = val;
+
+	return count;
+}
+
+static ssize_t
 sd_show_protection_mode(struct device *dev, struct device_attribute *attr,
 			char *buf)
 {
@@ -352,7 +385,8 @@ static struct device_attribute sd_disk_attrs[] = {
 	       sd_store_allow_restart),
 	__ATTR(manage_start_stop, S_IRUGO|S_IWUSR, sd_show_manage_start_stop,
 	       sd_store_manage_start_stop),
-	__ATTR(protection_type, S_IRUGO, sd_show_protection_type, NULL),
+	__ATTR(protection_type, S_IRUGO|S_IWUSR, sd_show_protection_type,
+	       sd_store_protection_type),
 	__ATTR(protection_mode, S_IRUGO, sd_show_protection_mode, NULL),
 	__ATTR(app_tag_own, S_IRUGO, sd_show_app_tag_own, NULL),
 	__ATTR(thin_provisioning, S_IRUGO, sd_show_thin_provisioning, NULL),
@@ -527,29 +561,26 @@ static void sd_config_discard(struct scsi_disk *sdkp, unsigned int mode)
 }
 
 /**
- * scsi_setup_discard_cmnd - unmap blocks on thinly provisioned device
+ * sd_setup_discard_cmnd - unmap blocks on thinly provisioned device
  * @sdp: scsi device to operate one
  * @rq: Request to prepare
  *
  * Will issue either UNMAP or WRITE SAME(16) depending on preference
  * indicated by target device.
  **/
-static int scsi_setup_discard_cmnd(struct scsi_device *sdp, struct request *rq)
+static int sd_setup_discard_cmnd(struct scsi_device *sdp, struct request *rq)
 {
 	struct scsi_disk *sdkp = scsi_disk(rq->rq_disk);
-	struct bio *bio = rq->bio;
-	sector_t sector = bio->bi_sector;
-	unsigned int nr_sectors = bio_sectors(bio);
+	sector_t sector = blk_rq_pos(rq);
+	unsigned int nr_sectors = blk_rq_sectors(rq);
+	unsigned int nr_bytes = blk_rq_bytes(rq);
 	unsigned int len;
 	int ret;
 	char *buf;
 	struct page *page;
 
-	if (sdkp->device->sector_size == 4096) {
-		sector >>= 3;
-		nr_sectors >>= 3;
-	}
-
+	sector >>= ilog2(sdp->sector_size) - 9;
+	nr_sectors >>= ilog2(sdp->sector_size) - 9;
 	rq->timeout = SD_TIMEOUT;
 
 	memset(rq->cmd, 0, rq->cmd_len);
@@ -604,6 +635,7 @@ static int scsi_setup_discard_cmnd(struct scsi_device *sdp, struct request *rq)
 	blk_add_request_payload(rq, page, len);
 	ret = scsi_setup_blk_pc_cmnd(sdp, rq);
 	rq->buffer = page_address(page);
+	rq->__data_len = nr_bytes;
 
 out:
 	if (ret != BLKPREP_OK) {
@@ -663,7 +695,7 @@ static int sd_prep_fn(struct request_queue *q, struct request *rq)
 	 * block PC requests to make life easier.
 	 */
 	if (rq->cmd_flags & REQ_DISCARD) {
-		ret = scsi_setup_discard_cmnd(sdp, rq);
+		ret = sd_setup_discard_cmnd(sdp, rq);
 		goto out;
 	} else if (rq->cmd_flags & REQ_FLUSH) {
 		ret = scsi_setup_flush_cmnd(sdp, rq);
@@ -778,9 +810,8 @@ static int sd_prep_fn(struct request_queue *q, struct request *rq)
 		SCpnt->cmnd[0] = WRITE_6;
 		SCpnt->sc_data_direction = DMA_TO_DEVICE;
 
-		if (blk_integrity_rq(rq) &&
-		    sd_dif_prepare(rq, block, sdp->sector_size) == -EIO)
-			goto out;
+		if (blk_integrity_rq(rq))
+			sd_dif_prepare(rq, block, sdp->sector_size);
 
 	} else if (rq_data_dir(rq) == READ) {
 		SCpnt->cmnd[0] = READ_6;
@@ -1344,12 +1375,20 @@ static int sd_done(struct scsi_cmnd *SCpnt)
 	unsigned int good_bytes = result ? 0 : scsi_bufflen(SCpnt);
 	struct scsi_sense_hdr sshdr;
 	struct scsi_disk *sdkp = scsi_disk(SCpnt->request->rq_disk);
+	struct request *req = SCpnt->request;
 	int sense_valid = 0;
 	int sense_deferred = 0;
 	unsigned char op = SCpnt->cmnd[0];
 
-	if ((SCpnt->request->cmd_flags & REQ_DISCARD) && !result)
-		scsi_set_resid(SCpnt, 0);
+	if (req->cmd_flags & REQ_DISCARD) {
+		if (!result) {
+			good_bytes = blk_rq_bytes(req);
+			scsi_set_resid(SCpnt, 0);
+		} else {
+			good_bytes = 0;
+			scsi_set_resid(SCpnt, blk_rq_bytes(req));
+		}
+	}
 
 	if (result) {
 		sense_valid = scsi_command_normalize_sense(SCpnt, &sshdr);
@@ -1555,34 +1594,42 @@ sd_spinup_disk(struct scsi_disk *sdkp)
 /*
  * Determine whether disk supports Data Integrity Field.
  */
-void sd_read_protection_type(struct scsi_disk *sdkp, unsigned char *buffer)
+static int sd_read_protection_type(struct scsi_disk *sdkp, unsigned char *buffer)
 {
 	struct scsi_device *sdp = sdkp->device;
 	u8 type;
+	int ret = 0;
 
 	if (scsi_device_protection(sdp) == 0 || (buffer[12] & 1) == 0)
-		return;
+		return ret;
 
 	type = ((buffer[12] >> 1) & 7) + 1; /* P_TYPE 0 = Type 1 */
 
-	if (type == sdkp->protection_type || !sdkp->first_scan)
-		return;
+	if (type > SD_DIF_TYPE3_PROTECTION)
+		ret = -ENODEV;
+	else if (scsi_host_dif_capable(sdp->host, type))
+		ret = 1;
+
+	if (sdkp->first_scan || type != sdkp->protection_type)
+		switch (ret) {
+		case -ENODEV:
+			sd_printk(KERN_ERR, sdkp, "formatted with unsupported" \
+				  " protection type %u. Disabling disk!\n",
+				  type);
+			break;
+		case 1:
+			sd_printk(KERN_NOTICE, sdkp,
+				  "Enabling DIF Type %u protection\n", type);
+			break;
+		case 0:
+			sd_printk(KERN_NOTICE, sdkp,
+				  "Disabling DIF Type %u protection\n", type);
+			break;
+		}
 
 	sdkp->protection_type = type;
 
-	if (type > SD_DIF_TYPE3_PROTECTION) {
-		sd_printk(KERN_ERR, sdkp, "formatted with unsupported "	\
-			  "protection type %u. Disabling disk!\n", type);
-		sdkp->capacity = 0;
-		return;
-	}
-
-	if (scsi_host_dif_capable(sdp->host, type))
-		sd_printk(KERN_NOTICE, sdkp,
-			  "Enabling DIF Type %u protection\n", type);
-	else
-		sd_printk(KERN_NOTICE, sdkp,
-			  "Disabling DIF Type %u protection\n", type);
+	return ret;
 }
 
 static void read_capacity_error(struct scsi_disk *sdkp, struct scsi_device *sdp,
@@ -1675,7 +1722,10 @@ static int read_capacity_16(struct scsi_disk *sdkp, struct scsi_device *sdp,
 	sector_size = get_unaligned_be32(&buffer[8]);
 	lba = get_unaligned_be64(&buffer[0]);
 
-	sd_read_protection_type(sdkp, buffer);
+	if (sd_read_protection_type(sdkp, buffer) < 0) {
+		sdkp->capacity = 0;
+		return -ENODEV;
+	}
 
 	if ((sizeof(sdkp->capacity) == 4) && (lba >= 0xffffffffULL)) {
 		sd_printk(KERN_ERR, sdkp, "Too big for this kernel. Use a "
@@ -1995,6 +2045,10 @@ sd_read_cache_type(struct scsi_disk *sdkp, unsigned char *buffer)
 	int old_wce = sdkp->WCE;
 	int old_rcd = sdkp->RCD;
 	int old_dpofua = sdkp->DPOFUA;
+
+
+	if (sdkp->cache_override)
+		return;
 
 	if (sdp->skip_ms_page_8)
 		goto defaults;
@@ -2416,6 +2470,7 @@ static void sd_probe_async(void *data, async_cookie_t cookie)
 	sdkp->capacity = 0;
 	sdkp->media_present = 1;
 	sdkp->write_prot = 0;
+	sdkp->cache_override = 0;
 	sdkp->WCE = 0;
 	sdkp->RCD = 0;
 	sdkp->ATO = 0;
@@ -2433,7 +2488,8 @@ static void sd_probe_async(void *data, async_cookie_t cookie)
 
 	dev_set_drvdata(dev, sdkp);
 	add_disk(gd);
-	sd_dif_config_host(sdkp);
+	if (sdkp->capacity)
+		sd_dif_config_host(sdkp);
 
 	sd_revalidate_disk(gd);
 

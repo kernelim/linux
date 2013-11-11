@@ -7,12 +7,15 @@
  */
 
 #include <linux/pfn.h>
+#include <linux/suspend.h>
 #include <asm/system.h>
 
 /*
  * References to section boundaries
  */
 extern const void __nosave_begin, __nosave_end;
+
+unsigned long suspend_zero_pages;
 
 int pfn_is_nosave(unsigned long pfn)
 {
@@ -29,6 +32,36 @@ int pfn_is_nosave(unsigned long pfn)
 		return 1;
 	return 0;
 }
+
+/*
+ * PM notifier callback for suspend
+ */
+static int suspend_pm_cb(struct notifier_block *nb, unsigned long action,
+			 void *ptr)
+{
+	switch (action) {
+	case PM_SUSPEND_PREPARE:
+	case PM_HIBERNATION_PREPARE:
+		suspend_zero_pages = __get_free_pages(GFP_KERNEL, LC_ORDER);
+		if (!suspend_zero_pages)
+			return NOTIFY_BAD;
+		break;
+	case PM_POST_SUSPEND:
+	case PM_POST_HIBERNATION:
+		free_pages(suspend_zero_pages, LC_ORDER);
+		break;
+	default:
+		return NOTIFY_DONE;
+	}
+	return NOTIFY_OK;
+}
+
+static int __init suspend_pm_init(void)
+{
+	pm_notifier(suspend_pm_cb, 0);
+	return 0;
+}
+arch_initcall(suspend_pm_init);
 
 void save_processor_state(void)
 {

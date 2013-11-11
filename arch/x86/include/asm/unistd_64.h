@@ -679,8 +679,8 @@ __SYSCALL(__NR_clock_adjtime, sys_clock_adjtime)
 __SYSCALL(__NR_syncfs, sys_syncfs)
 #define __NR_sendmmsg				307
 __SYSCALL(__NR_sendmmsg, sys_sendmmsg)
-#define __NR_set_ns				308
-__SYSCALL(__NR_set_ns, sys_ni_syscall)
+#define __NR_setns				308
+__SYSCALL(__NR_setns, sys_setns)
 #define __NR_get_cpu				309
 __SYSCALL(__NR_get_cpu, sys_ni_syscall)
 #define __NR_process_vm_readv			310

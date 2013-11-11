@@ -46,7 +46,7 @@
 #include <net/ip.h>
 #include <net/udp.h>
 #include <net/icmp.h>
-#include <net/ipip.h>
+#include <net/ip_tunnels.h>
 #include <net/inet_ecn.h>
 #include <net/xfrm.h>
 #include <net/dsfield.h>
@@ -545,6 +545,23 @@ static inline __be32 try_6to4(struct in6_addr *v6dst)
 	}
 	return dst;
 }
+
+#define IPTUNNEL_XMIT() do {						\
+	int err;							\
+	int pkt_len = skb->len - skb_transport_offset(skb);		\
+									\
+	skb->ip_summed = CHECKSUM_NONE;					\
+	ip_select_ident(iph, &rt->u.dst, NULL);				\
+									\
+	err = ip_local_out(skb);					\
+	if (net_xmit_eval(err) == 0) {					\
+		stats->tx_bytes += pkt_len;				\
+		stats->tx_packets++;					\
+	} else {							\
+		stats->tx_errors++;					\
+		stats->tx_aborted_errors++;				\
+	}								\
+} while (0)
 
 /*
  *	This function assumes it is being called from dev_queue_xmit()

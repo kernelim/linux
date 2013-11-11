@@ -134,9 +134,6 @@ typedef struct xfs_bmalloca {
 	char			conv;	/* overwriting unwritten extents */
 	char			stack_switch;
 	int			flags;
-	struct completion	*done;
-	struct work_struct	work;
-	int			result;
 } xfs_bmalloca_t;
 
 /*

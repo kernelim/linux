@@ -1027,7 +1027,7 @@ static int dasd_eckd_read_conf(struct dasd_device *device)
 {
 	void *conf_data;
 	int conf_len, conf_data_saved;
-	int rc;
+	int rc, path_err;
 	__u8 lpm, opm;
 	struct dasd_eckd_private *private, path_private;
 	struct dasd_path *path_data;
@@ -1038,6 +1038,7 @@ static int dasd_eckd_read_conf(struct dasd_device *device)
 	path_data = &device->path_data;
 	opm = ccw_device_get_path_mask(device->cdev);
 	conf_data_saved = 0;
+	path_err = 0;
 	/* get configuration data per operational path */
 	for (lpm = 0x80; lpm; lpm>>= 1) {
 		if (!(lpm & opm))
@@ -1123,7 +1124,8 @@ static int dasd_eckd_read_conf(struct dasd_device *device)
 					"the same device, path %02X leads to "
 					"device %s instead of %s\n", lpm,
 					print_path_uid, print_device_uid);
-				return -EINVAL;
+				path_err = -EINVAL;
+				continue;
 			}
 
 			path_private.conf_data = NULL;
@@ -1143,7 +1145,7 @@ static int dasd_eckd_read_conf(struct dasd_device *device)
 			kfree(conf_data);
 	}
 
-	return 0;
+	return path_err;
 }
 
 static int verify_fcx_max_data(struct dasd_device *device, __u8 lpm)
@@ -1234,6 +1236,12 @@ static void do_path_verification_work(struct work_struct *work)
 
 	data = container_of(work, struct path_verification_work_data, worker);
 	device = data->device;
+
+	/* delay path verification until device was resumed */
+	if (test_bit(DASD_FLAG_SUSPENDED, &device->flags)) {
+		schedule_work(work);
+		return;
+	}
 
 	opm = 0;
 	npm = 0;
@@ -1566,7 +1574,10 @@ static void dasd_eckd_do_validate_server(struct work_struct *work)
 {
 	struct dasd_device *device = container_of(work, struct dasd_device,
 						  kick_validate);
-	if (dasd_eckd_validate_server(device, DASD_CQR_FLAGS_FAILFAST)
+	unsigned long flags = 0;
+
+	set_bit(DASD_CQR_FLAGS_FAILFAST, &flags);
+	if (dasd_eckd_validate_server(device, flags)
 	    == -EAGAIN) {
 		/* schedule worker again if failed */
 		schedule_work(&device->kick_validate);
@@ -2288,10 +2299,14 @@ static void dasd_eckd_check_for_device_change(struct dasd_device *device,
 	/* first of all check for state change pending interrupt */
 	mask = DEV_STAT_ATTENTION | DEV_STAT_DEV_END | DEV_STAT_UNIT_EXCEP;
 	if ((scsw_dstat(&irb->scsw) & mask) == mask) {
-		/* for alias only and not in offline processing*/
+		/*
+		 * for alias only, not in offline processing
+		 * and only if not suspended
+		 */
 		if (!device->block && private->lcu &&
 		    device->state == DASD_STATE_ONLINE &&
-		    !test_bit(DASD_FLAG_OFFLINE, &device->flags)) {
+		    !test_bit(DASD_FLAG_OFFLINE, &device->flags) &&
+ 		    !test_bit(DASD_FLAG_SUSPENDED, &device->flags)) {
 			/*
 			 * the state change could be caused by an alias
 			 * reassignment remove device from alias handling
@@ -4145,13 +4160,12 @@ static int dasd_eckd_restore_device(struct dasd_device *device)
 	int rc;
 	struct dasd_uid temp_uid;
 	unsigned long flags;
+	unsigned long cqr_flags = 0;
 
 	private = (struct dasd_eckd_private *) device->private;
 
 	/* Read Configuration Data */
-	rc = dasd_eckd_read_conf(device);
-	if (rc)
-		goto out_err;
+	dasd_eckd_read_conf(device);
 
 	dasd_eckd_get_uid(device, &temp_uid);
 	/* Generate device unique id */
@@ -4168,12 +4182,12 @@ static int dasd_eckd_restore_device(struct dasd_device *device)
 	rc = dasd_alias_make_device_known_to_lcu(device);
 	if (rc)
 		return rc;
-	dasd_eckd_validate_server(device, DASD_CQR_FLAGS_FAILFAST);
+
+	set_bit(DASD_CQR_FLAGS_FAILFAST, &cqr_flags);
+	dasd_eckd_validate_server(device, cqr_flags);
 
 	/* RE-Read Configuration Data */
-	rc = dasd_eckd_read_conf(device);
-	if (rc)
-		goto out_err;
+	dasd_eckd_read_conf(device);
 
 	/* Read Feature Codes */
 	dasd_eckd_read_features(device);
@@ -4254,6 +4268,7 @@ static struct ccw_driver dasd_eckd_driver = {
 	.set_online  = dasd_eckd_set_online,
 	.notify      = dasd_generic_notify,
 	.path_event  = dasd_generic_path_event,
+	.shutdown    = dasd_generic_shutdown,
 	.freeze      = dasd_generic_pm_freeze,
 	.thaw	     = dasd_generic_restore_device,
 	.restore     = dasd_generic_restore_device,

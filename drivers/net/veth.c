@@ -166,10 +166,12 @@ static netdev_tx_t veth_xmit(struct sk_buff *skb, struct net_device *dev)
 	if (!(rcv->flags & IFF_UP))
 		goto tx_drop;
 
-	if (dev->features & NETIF_F_NO_CSUM)
+	/* don't change ip_summed == CHECKSUM_PARTIAL, as that
+	   will cause bad checksum on forwarded packets */
+	if (skb->ip_summed == CHECKSUM_NONE)
 		skb->ip_summed = rcv_priv->ip_summed;
 
-	length = skb->len + ETH_HLEN;
+	length = skb->len;
 	if (dev_forward_skb(rcv, skb) != NET_RX_SUCCESS)
 		goto rx_drop;
 
@@ -294,6 +296,10 @@ static const struct net_device_ops veth_netdev_ops = {
 	.ndo_set_mac_address = eth_mac_addr,
 };
 
+#define VETH_FEATURES (NETIF_F_SG | NETIF_F_FRAGLIST | NETIF_F_ALL_TSO |    \
+		       NETIF_F_HW_CSUM | NETIF_F_RXCSUM | NETIF_F_HIGHDMA | \
+		       NETIF_F_HW_VLAN_TX)
+
 static void veth_setup(struct net_device *dev)
 {
 	ether_setup(dev);
@@ -303,6 +309,8 @@ static void veth_setup(struct net_device *dev)
 	dev->netdev_ops = &veth_netdev_ops;
 	dev->ethtool_ops = &veth_ethtool_ops;
 	dev->features |= NETIF_F_LLTX;
+	dev->features |= VETH_FEATURES;
+	dev->vlan_features = dev->features;
 	dev->destructor = veth_dev_free;
 }
 
@@ -330,6 +338,7 @@ static struct rtnl_link_ops veth_link_ops;
 static int veth_newlink(struct net_device *dev,
 			 struct nlattr *tb[], struct nlattr *data[])
 {
+	struct net *net, *src_net = netdev_extended(dev)->src_net;
 	int err;
 	struct net_device *peer;
 	struct veth_priv *priv;
@@ -367,14 +376,22 @@ static int veth_newlink(struct net_device *dev,
 	else
 		snprintf(ifname, IFNAMSIZ, DRV_NAME "%%d");
 
-	peer = rtnl_create_link(dev_net(dev), ifname, &veth_link_ops, tbp);
-	if (IS_ERR(peer))
+	net = rtnl_link_get_net(src_net, tbp);
+	if (IS_ERR(net))
+		return PTR_ERR(net);
+
+	peer = rtnl_create_link(src_net, net, ifname, &veth_link_ops, tbp);
+	if (IS_ERR(peer)) {
+		put_net(net);
 		return PTR_ERR(peer);
+	}
 
 	if (tbp[IFLA_ADDRESS] == NULL)
 		random_ether_addr(peer->dev_addr);
 
 	err = register_netdevice(peer);
+	put_net(net);
+	net = NULL;
 	if (err < 0)
 		goto err_register_peer;
 
@@ -441,7 +458,9 @@ static void veth_dellink(struct net_device *dev)
 	unregister_netdevice(peer);
 }
 
-static const struct nla_policy veth_policy[VETH_INFO_MAX + 1];
+static const struct nla_policy veth_policy[VETH_INFO_MAX + 1] = {
+	[VETH_INFO_PEER]	= { .len = sizeof(struct ifinfomsg) },
+};
 
 static struct rtnl_link_ops veth_link_ops = {
 	.kind		= DRV_NAME,

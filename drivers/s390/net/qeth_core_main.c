@@ -118,6 +118,27 @@ static inline void __qeth_fill_buffer_frag(struct sk_buff *skb,
 	*next_element_to_fill = element;
 }
 
+static struct workqueue_struct *qeth_wq;
+
+static void qeth_close_dev_handler(struct work_struct *work)
+{
+	struct qeth_card *card;
+
+	card = container_of(work, struct qeth_card, close_dev_work);
+	QETH_DBF_TEXT(TRACE, 2, "cldevhdl");
+	rtnl_lock();
+	dev_close(card->dev);
+	rtnl_unlock();
+	ccwgroup_set_offline(card->gdev);
+}
+
+void qeth_close_dev(struct qeth_card *card)
+{
+	QETH_DBF_TEXT(TRACE, 2, "cldevsubm");
+	queue_work(qeth_wq, &card->close_dev_work);
+}
+EXPORT_SYMBOL_GPL(qeth_close_dev);
+
 static inline const char *qeth_get_cardname(struct qeth_card *card)
 {
 	if (card->info.guestlan) {
@@ -206,6 +227,23 @@ const char *qeth_get_cardname_short(struct qeth_card *card)
 	return "n/a";
 }
 
+void qeth_set_recovery_task(struct qeth_card *card)
+{
+	card->recovery_task = current;
+}
+EXPORT_SYMBOL_GPL(qeth_set_recovery_task);
+
+void qeth_clear_recovery_task(struct qeth_card *card)
+{
+	card->recovery_task = NULL;
+}
+EXPORT_SYMBOL_GPL(qeth_clear_recovery_task);
+
+static bool qeth_is_recovery_task(const struct qeth_card *card)
+{
+	return card->recovery_task == current;
+}
+
 void qeth_set_allowed_threads(struct qeth_card *card, unsigned long threads,
 			 int clear_start_mask)
 {
@@ -234,6 +272,8 @@ EXPORT_SYMBOL_GPL(qeth_threads_running);
 
 int qeth_wait_for_threads(struct qeth_card *card, unsigned long threads)
 {
+	if (qeth_is_recovery_task(card))
+		return 0;
 	return wait_event_interruptible(card->wait_q,
 			qeth_threads_running(card, threads) == 0);
 }
@@ -587,11 +627,23 @@ static struct qeth_ipa_cmd *qeth_check_ipa_data(struct qeth_card *card,
 		} else {
 			switch (cmd->hdr.command) {
 			case IPA_CMD_STOPLAN:
-				dev_warn(&card->gdev->dev,
+				if (cmd->hdr.return_code ==
+						IPA_RC_VEPA_TO_VEB_TRANSITION) {
+					dev_err(&card->gdev->dev,
+					   "Interface %s is down because the "
+					   "adjacent port is no longer in "
+					   "reflective relay mode\n",
+					   QETH_CARD_IFNAME(card));
+					qeth_close_dev(card);
+				} else {
+					dev_warn(&card->gdev->dev,
 					   "The link for interface %s on CHPID"
 					   " 0x%X failed\n",
 					   QETH_CARD_IFNAME(card),
 					   card->info.chpid);
+					qeth_issue_ipa_msg(cmd,
+						cmd->hdr.return_code, card);
+				}
 				card->lan_online = 0;
 				if (card->dev && netif_carrier_ok(card->dev))
 					netif_carrier_off(card->dev);
@@ -1454,6 +1506,7 @@ static int qeth_setup_card(struct qeth_card *card)
 	/* init QDIO stuff */
 	qeth_init_qdio_info(card);
 	INIT_DELAYED_WORK(&card->buffer_reclaim_work, qeth_buffer_reclaim_work);
+	INIT_WORK(&card->close_dev_work, qeth_close_dev_handler);
 	return 0;
 }
 
@@ -1713,14 +1766,14 @@ static void qeth_configure_blkt_default(struct qeth_card *card, char *prcd) {
 	QETH_DBF_TEXT(SETUP, 2, "cfgblkt");
 
 	if (prcd[74] == 0xF0 && prcd[75] == 0xF0 &&
-	    (prcd[76] == 0xF5 || prcd[76] == 0xF6)) {
-		card->info.blkt.time_total = 250;
-		card->info.blkt.inter_packet = 5;
-		card->info.blkt.inter_packet_jumbo = 15;
-	} else {
+	    prcd[76] >= 0xF1 && prcd[76] <= 0xF4) {
 		card->info.blkt.time_total = 0;
 		card->info.blkt.inter_packet = 0;
 		card->info.blkt.inter_packet_jumbo = 0;
+	} else {
+		card->info.blkt.time_total = 250;
+		card->info.blkt.inter_packet = 5;
+		card->info.blkt.inter_packet_jumbo = 15;
 	}
 }
 
@@ -4090,6 +4143,7 @@ static int qeth_setadpparms_set_access_ctrl_cb(struct qeth_card *card,
 {
 	struct qeth_ipa_cmd *cmd;
 	struct qeth_set_access_ctrl *access_ctrl_req;
+	int fallback = *(int *)reply->param;
 
 	QETH_DBF_TEXT(TRACE, 4, "setaccb");
 
@@ -4099,12 +4153,14 @@ static int qeth_setadpparms_set_access_ctrl_cb(struct qeth_card *card,
 	QETH_DBF_TEXT_(SETUP, 2, "%s", card->gdev->dev.kobj.name);
 	QETH_DBF_TEXT_(SETUP, 2, "rc=%d",
 		cmd->data.setadapterparms.hdr.return_code);
+	if (cmd->data.setadapterparms.hdr.return_code !=
+						SET_ACCESS_CTRL_RC_SUCCESS)
+		QETH_DBF_MESSAGE(3, "ERR:SET_ACCESS_CTRL(%s,%d)==%d\n",
+				card->gdev->dev.kobj.name,
+				access_ctrl_req->subcmd_code,
+				cmd->data.setadapterparms.hdr.return_code);
 	switch (cmd->data.setadapterparms.hdr.return_code) {
 	case SET_ACCESS_CTRL_RC_SUCCESS:
-	case SET_ACCESS_CTRL_RC_ALREADY_NOT_ISOLATED:
-	case SET_ACCESS_CTRL_RC_ALREADY_ISOLATED:
-	{
-		card->options.isolation = access_ctrl_req->subcmd_code;
 		if (card->options.isolation == ISOLATION_MODE_NONE) {
 			dev_info(&card->gdev->dev,
 			    "QDIO data connection isolation is deactivated\n");
@@ -4112,72 +4168,64 @@ static int qeth_setadpparms_set_access_ctrl_cb(struct qeth_card *card,
 			dev_info(&card->gdev->dev,
 			    "QDIO data connection isolation is activated\n");
 		}
-		QETH_DBF_MESSAGE(3, "OK:SET_ACCESS_CTRL(%s, %d)==%d\n",
-			card->gdev->dev.kobj.name,
-			access_ctrl_req->subcmd_code,
-			cmd->data.setadapterparms.hdr.return_code);
 		break;
-	}
+	case SET_ACCESS_CTRL_RC_ALREADY_NOT_ISOLATED:
+		QETH_DBF_MESSAGE(2, "%s QDIO data connection isolation already "
+				"deactivated\n", dev_name(&card->gdev->dev));
+		if (fallback)
+			card->options.isolation = card->options.prev_isolation;
+		break;
+	case SET_ACCESS_CTRL_RC_ALREADY_ISOLATED:
+		QETH_DBF_MESSAGE(2, "%s QDIO data connection isolation already"
+				" activated\n", dev_name(&card->gdev->dev));
+		if (fallback)
+			card->options.isolation = card->options.prev_isolation;
+		break;
 	case SET_ACCESS_CTRL_RC_NOT_SUPPORTED:
-	{
-		QETH_DBF_MESSAGE(3, "ERR:SET_ACCESS_CTRL(%s,%d)==%d\n",
-			card->gdev->dev.kobj.name,
-			access_ctrl_req->subcmd_code,
-			cmd->data.setadapterparms.hdr.return_code);
 		dev_err(&card->gdev->dev, "Adapter does not "
 			"support QDIO data connection isolation\n");
-
-		/* ensure isolation mode is "none" */
-		card->options.isolation = ISOLATION_MODE_NONE;
 		break;
-	}
 	case SET_ACCESS_CTRL_RC_NONE_SHARED_ADAPTER:
-	{
-		QETH_DBF_MESSAGE(3, "ERR:SET_ACCESS_MODE(%s,%d)==%d\n",
-			card->gdev->dev.kobj.name,
-			access_ctrl_req->subcmd_code,
-			cmd->data.setadapterparms.hdr.return_code);
 		dev_err(&card->gdev->dev,
 			"Adapter is dedicated. "
 			"QDIO data connection isolation not supported\n");
-
-		/* ensure isolation mode is "none" */
-		card->options.isolation = ISOLATION_MODE_NONE;
+		if (fallback)
+			card->options.isolation = card->options.prev_isolation;
 		break;
-	}
 	case SET_ACCESS_CTRL_RC_ACTIVE_CHECKSUM_OFF:
-	{
-		QETH_DBF_MESSAGE(3, "ERR:SET_ACCESS_MODE(%s,%d)==%d\n",
-			card->gdev->dev.kobj.name,
-			access_ctrl_req->subcmd_code,
-			cmd->data.setadapterparms.hdr.return_code);
 		dev_err(&card->gdev->dev,
 			"TSO does not permit QDIO data connection isolation\n");
-
-		/* ensure isolation mode is "none" */
-		card->options.isolation = ISOLATION_MODE_NONE;
+		if (fallback)
+			card->options.isolation = card->options.prev_isolation;
 		break;
-	}
+	case SET_ACCESS_CTRL_RC_REFLREL_UNSUPPORTED:
+		dev_err(&card->gdev->dev, "The adjacent switch port does not "
+			"support reflective relay mode\n");
+		if (fallback)
+			card->options.isolation = card->options.prev_isolation;
+		break;
+	case SET_ACCESS_CTRL_RC_REFLREL_FAILED:
+		dev_err(&card->gdev->dev, "The reflective relay mode cannot be "
+					"enabled at the adjacent switch port");
+		if (fallback)
+			card->options.isolation = card->options.prev_isolation;
+		break;
+	case SET_ACCESS_CTRL_RC_REFLREL_DEACT_FAILED:
+		dev_warn(&card->gdev->dev, "Turning off reflective relay mode "
+					"at the adjacent switch failed\n");
+		break;
 	default:
-	{
 		/* this should never happen */
-		QETH_DBF_MESSAGE(3, "ERR:SET_ACCESS_MODE(%s,%d)==%d"
-			"==UNKNOWN\n",
-			card->gdev->dev.kobj.name,
-			access_ctrl_req->subcmd_code,
-			cmd->data.setadapterparms.hdr.return_code);
-
-		/* ensure isolation mode is "none" */
-		card->options.isolation = ISOLATION_MODE_NONE;
+		if (fallback)
+			card->options.isolation = card->options.prev_isolation;
 		break;
-	}
 	}
 	qeth_default_setadapterparms_cb(card, reply, (unsigned long) cmd);
 	return 0;
 }
 
 static int qeth_setadpparms_set_access_ctrl(struct qeth_card *card,
-		enum qeth_ipa_isolation_modes isolation)
+		enum qeth_ipa_isolation_modes isolation, int fallback)
 {
 	int rc;
 	struct qeth_cmd_buffer *iob;
@@ -4197,12 +4245,12 @@ static int qeth_setadpparms_set_access_ctrl(struct qeth_card *card,
 	access_ctrl_req->subcmd_code = isolation;
 
 	rc = qeth_send_ipa_cmd(card, iob, qeth_setadpparms_set_access_ctrl_cb,
-			       NULL);
+			       &fallback);
 	QETH_DBF_TEXT_(SETUP, 2, "rc=%d", rc);
 	return rc;
 }
 
-int qeth_set_access_ctrl_online(struct qeth_card *card)
+int qeth_set_access_ctrl_online(struct qeth_card *card, int fallback)
 {
 	int rc = 0;
 
@@ -4212,12 +4260,13 @@ int qeth_set_access_ctrl_online(struct qeth_card *card)
 	     card->info.type == QETH_CARD_TYPE_OSX) &&
 	     qeth_adp_supported(card, IPA_SETADP_SET_ACCESS_CONTROL)) {
 		rc = qeth_setadpparms_set_access_ctrl(card,
-			card->options.isolation);
+			card->options.isolation, fallback);
 		if (rc) {
 			QETH_DBF_MESSAGE(3,
 				"IPA(SET_ACCESS_CTRL,%s,%d) sent failed\n",
 				card->gdev->dev.kobj.name,
 				rc);
+			rc = -EOPNOTSUPP;
 		}
 	} else if (card->options.isolation != ISOLATION_MODE_NONE) {
 		card->options.isolation = ISOLATION_MODE_NONE;
@@ -5465,6 +5514,8 @@ static int __init qeth_core_init(void)
 	rwlock_init(&qeth_core_card_list.rwlock);
 	mutex_init(&qeth_mod_mutex);
 
+	qeth_wq = create_singlethread_workqueue("qeth_wq");
+
 	rc = qeth_register_dbf_views();
 	if (rc)
 		goto out_err;
@@ -5519,6 +5570,7 @@ out_err:
 
 static void __exit qeth_core_exit(void)
 {
+	destroy_workqueue(qeth_wq);
 	root_device_unregister(qeth_core_root_dev);
 	driver_remove_file(&qeth_core_ccwgroup_driver.driver,
 			   &driver_attr_group);

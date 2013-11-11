@@ -599,6 +599,8 @@ struct input_absinfo {
 
 #define KEY_RFKILL		0x20c /* Key that controls all radios */
 
+#define KEY_WPS_BUTTON		0x211	/* WiFi Protected Setup key */
+
 /* We avoid low common keys in module aliases so they don't get huge. */
 #define KEY_MIN_INTERESTING	KEY_MUTE
 #define KEY_MAX			0x2ff
@@ -691,6 +693,7 @@ struct input_absinfo {
 #define SW_LINEOUT_INSERT	0x06  /* set = inserted */
 #define SW_JACK_PHYSICAL_INSERT 0x07  /* set = mechanical switch set */
 #define SW_VIDEOOUT_INSERT	0x08  /* set = inserted */
+#define SW_LINEIN_INSERT	0x0d  /* set = inserted */
 #define SW_MAX			0x0f
 #define SW_CNT			(SW_MAX+1)
 

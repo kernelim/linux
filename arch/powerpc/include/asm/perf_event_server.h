@@ -49,6 +49,9 @@ struct power_pmu {
 #define PPMU_ALT_SIPR		2	/* uses alternate posn for SIPR/HV */
 #define PPMU_NO_SIPR		4	/* no SIPR/HV in MMCRA at all */
 #define PPMU_NO_CONT_SAMPLING	8	/* no continuous sampling */
+#define PPMU_SIAR_VALID		16	/* Processor has SIAR Valid bit */
+#define PPMU_HAS_SSLOT		0x00000020 /* Has sampled slot in MMCRA */
+#define PPMU_HAS_SIER		0x00000040 /* Has SIER */
 
 /*
  * Values for flags to get_alternatives()
@@ -62,8 +65,6 @@ extern int register_power_pmu(struct power_pmu *);
 struct pt_regs;
 extern unsigned long perf_misc_flags(struct pt_regs *regs);
 extern unsigned long perf_instruction_pointer(struct pt_regs *regs);
-
-#define PERF_EVENT_INDEX_OFFSET	1
 
 /*
  * Only override the default definitions in include/linux/perf_event.h

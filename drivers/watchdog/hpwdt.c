@@ -36,7 +36,7 @@
 #include <asm/cacheflush.h>
 #endif /* CONFIG_HPWDT_NMI_DECODING */
 
-#define HPWDT_VERSION			"1.3.0"
+#define HPWDT_VERSION			"1.3.2-rh"
 #define SECS_TO_TICKS(secs)		((secs) * 1000 / 128)
 #define TICKS_TO_SECS(ticks)		((ticks) * 128 / 1000)
 #define HPWDT_MAX_TIMER			TICKS_TO_SECS(65535)
@@ -146,6 +146,7 @@ static unsigned int hpwdt_nmi_decoding;
 static unsigned int allow_kdump = 1;
 static unsigned int priority;		/* hpwdt at end of die_notify list */
 static unsigned int is_icru;
+static unsigned int is_uefi;
 static DEFINE_SPINLOCK(rom_lock);
 static void *cru_rom_addr;
 static struct cmn_registers cmn_regs;
@@ -491,11 +492,11 @@ static int hpwdt_pretimeout(struct notifier_block *nb, unsigned long ulReason,
 		goto out;
 
 	spin_lock_irqsave(&rom_lock, rom_pl);
-	if (!die_nmi_called && !is_icru)
+	if (!die_nmi_called && !is_icru && !is_uefi)
 		asminline_call(&cmn_regs, cru_rom_addr);
 	die_nmi_called = 1;
 	spin_unlock_irqrestore(&rom_lock, rom_pl);
-	if (!is_icru) {
+	if (!is_icru && !is_uefi) {
 		if (cmn_regs.u1.ral == 0) {
 			printk(KERN_WARNING "hpwdt: An NMI occurred, "
 				"but unable to determine source.\n");
@@ -698,6 +699,8 @@ static void __devinit dmi_find_icru(const struct dmi_header *dm, void *dummy)
 		smbios_proliant_ptr = (struct smbios_proliant_info *) dm;
 		if (smbios_proliant_ptr->misc_features & 0x01)
 			is_icru = 1;
+		if (smbios_proliant_ptr->misc_features & 0x408)
+			is_uefi = 1;
 	}
 }
 
@@ -716,7 +719,7 @@ static int __devinit hpwdt_init_nmi_decoding(struct pci_dev *dev)
 	 * the old cru detect code.
 	 */
 	dmi_walk(dmi_find_icru, NULL);
-	if (!is_icru) {
+	if (!is_icru && !is_uefi) {
 
 		/*
 		* We need to map the ROM to get the CRU service.
@@ -791,6 +794,13 @@ static int __devinit hpwdt_init_one(struct pci_dev *dev,
 					const struct pci_device_id *ent)
 {
 	int retval;
+
+
+	/*
+	 * Ignore all auxilary iLO devices with the following PCI ID
+	 */
+	if (dev->subsystem_device == 0x1979)
+		return -ENODEV;
 
 	/*
 	 * Check if we can do NMI decoding or not

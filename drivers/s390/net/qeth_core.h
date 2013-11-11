@@ -686,6 +686,7 @@ struct qeth_card_options {
 	int performance_stats;
 	int rx_sg_cb;
 	enum qeth_ipa_isolation_modes isolation;
+	enum qeth_ipa_isolation_modes prev_isolation;
 	int sniffer;
 	enum qeth_cq cq;
 	char hsuid[9];
@@ -767,6 +768,7 @@ struct qeth_card {
 	unsigned long thread_start_mask;
 	unsigned long thread_allowed_mask;
 	unsigned long thread_running_mask;
+	struct task_struct *recovery_task;
 	spinlock_t ip_lock;
 	struct list_head ip_list;
 	struct list_head *ip_tbd_list;
@@ -787,6 +789,7 @@ struct qeth_card {
 	struct qeth_rx rx;
 	struct delayed_work buffer_reclaim_work;
 	int reclaim_index;
+	struct work_struct close_dev_work;
 };
 
 struct qeth_card_list_struct {
@@ -860,6 +863,8 @@ extern struct qeth_card_list_struct qeth_core_card_list;
 extern struct kmem_cache *qeth_core_header_cache;
 extern struct qeth_dbf_info qeth_dbf[QETH_DBF_INFOS];
 
+void qeth_set_recovery_task(struct qeth_card *);
+void qeth_clear_recovery_task(struct qeth_card *);
 void qeth_set_allowed_threads(struct qeth_card *, unsigned long , int);
 int qeth_threads_running(struct qeth_card *, unsigned long);
 int qeth_wait_for_threads(struct qeth_card *, unsigned long);
@@ -927,10 +932,11 @@ void qeth_core_get_strings(struct net_device *, u32, u8 *);
 void qeth_core_get_drvinfo(struct net_device *, struct ethtool_drvinfo *);
 void qeth_dbf_longtext(enum qeth_dbf_names dbf_nix, int level, char *text, ...);
 int qeth_core_ethtool_get_settings(struct net_device *, struct ethtool_cmd *);
-int qeth_set_access_ctrl_online(struct qeth_card *card);
+int qeth_set_access_ctrl_online(struct qeth_card *card, int fallback);
 int qeth_configure_cq(struct qeth_card *, enum qeth_cq);
 int qeth_hw_trap(struct qeth_card *, enum qeth_diags_trap_action);
 int qeth_query_ipassists(struct qeth_card *, enum qeth_prot_versions prot);
+void qeth_close_dev(struct qeth_card *);
 
 /* exports for OSN */
 int qeth_osn_assist(struct net_device *, void *, int);

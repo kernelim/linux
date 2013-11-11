@@ -121,9 +121,8 @@ static int pcie_port_enable_msix(struct pci_dev *dev, int *vectors, int mask)
 		 * the value in this field indicates which MSI-X Table entry is
 		 * used to generate the interrupt message."
 		 */
-		pos = pci_find_capability(dev, PCI_CAP_ID_EXP);
-		pci_read_config_word(dev, pos + PCIE_CAPABILITIES_REG, &reg16);
-		entry = (reg16 >> 9) & PCIE_PORT_MSI_VECTOR_MASK;
+		pcie_capability_read_word(dev, PCI_EXP_FLAGS, &reg16);
+		entry = (reg16 & PCI_EXP_FLAGS_IRQ) >> 9;
 		if (entry >= nr_entries)
 			goto Error;
 
@@ -250,8 +249,7 @@ static void cleanup_service_irqs(struct pci_dev *dev)
  */
 int pcie_get_port_device_capability(struct pci_dev *dev)
 {
-	int services = 0, pos;
-	u16 reg16;
+	int services = 0;
 	u32 reg32;
 	int cap_mask = 0;
 	int err;
@@ -273,13 +271,11 @@ int pcie_get_port_device_capability(struct pci_dev *dev)
 			cap_mask |= PCIE_PORT_SERVICE_AER;
 	}
 
-	pos = pci_find_capability(dev, PCI_CAP_ID_EXP);
-	pci_read_config_word(dev, pos + PCIE_CAPABILITIES_REG, &reg16);
 	/* Hot-Plug Capable */
-	if ((cap_mask & PCIE_PORT_SERVICE_HP) && (reg16 & PORT_TO_SLOT_MASK)) {
-		pci_read_config_dword(dev, 
-			pos + PCIE_SLOT_CAPABILITIES_REG, &reg32);
-		if (reg32 & SLOT_HP_CAPABLE_MASK)
+	if ((cap_mask & PCIE_PORT_SERVICE_HP) &&
+	    pcie_caps_reg(dev) & PCI_EXP_FLAGS_SLOT) {
+		pcie_capability_read_dword(dev, PCI_EXP_SLTCAP, &reg32);
+		if (reg32 & PCI_EXP_SLTCAP_HPC)
 			services |= PCIE_PORT_SERVICE_HP;
 	}
 	/* AER capable */
@@ -290,7 +286,7 @@ int pcie_get_port_device_capability(struct pci_dev *dev)
 	if (pci_find_ext_capability(dev, PCI_EXT_CAP_ID_VC))
 		services |= PCIE_PORT_SERVICE_VC;
 	if ((cap_mask & PCIE_PORT_SERVICE_PME)
-	    && dev->pcie_type == PCI_EXP_TYPE_ROOT_PORT)
+	    && pci_pcie_type(dev) == PCI_EXP_TYPE_ROOT_PORT)
 		services |= PCIE_PORT_SERVICE_PME;
 
 	rh1_pci->pcie_osc_capabilities = services;
@@ -324,7 +320,7 @@ static int pcie_device_init(struct pci_dev *pdev, int service, int irq)
 	device->release = release_pcie_device;	/* callback to free pcie dev */
 	dev_set_name(device, "%s:pcie%02x",
 		     pci_name(pdev),
-		     get_descriptor_id(pdev->pcie_type, service));
+		     get_descriptor_id(pci_pcie_type(pdev), service));
 	device->parent = &pdev->dev;
 
 	retval = device_register(device);

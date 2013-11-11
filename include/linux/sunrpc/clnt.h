@@ -231,6 +231,7 @@ static inline bool __rpc_copy_addr6(struct sockaddr *dst,
 
 	dsin6->sin6_family = ssin6->sin6_family;
 	ipv6_addr_copy(&dsin6->sin6_addr, &ssin6->sin6_addr);
+	dsin6->sin6_scope_id = ssin6->sin6_scope_id;
 	return true;
 }
 #else	/* !(CONFIG_IPV6 || CONFIG_IPV6_MODULE) */
@@ -252,7 +253,9 @@ static inline bool __rpc_copy_addr6(struct sockaddr *dst,
  * @sap1: first sockaddr
  * @sap2: second sockaddr
  *
- * Just compares the family and address portion. Ignores port, scope, etc.
+ * Just compares the family and address portion. Ignores port, but
+ * compares the scope if it's a link-local address.
+ *
  * Returns true if the addrs are equal, false if they aren't.
  */
 static inline bool rpc_cmp_addr(const struct sockaddr *sap1,

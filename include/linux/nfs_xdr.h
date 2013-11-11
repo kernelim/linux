@@ -106,14 +106,14 @@ struct nfs_fattr {
 		| NFS_ATTR_FATTR_FILEID \
 		| NFS_ATTR_FATTR_ATIME \
 		| NFS_ATTR_FATTR_MTIME \
-		| NFS_ATTR_FATTR_CTIME)
+		| NFS_ATTR_FATTR_CTIME \
+		| NFS_ATTR_FATTR_CHANGE)
 #define NFS_ATTR_FATTR_V2 (NFS_ATTR_FATTR \
 		| NFS_ATTR_FATTR_BLOCKS_USED)
 #define NFS_ATTR_FATTR_V3 (NFS_ATTR_FATTR \
 		| NFS_ATTR_FATTR_SPACE_USED)
 #define NFS_ATTR_FATTR_V4 (NFS_ATTR_FATTR \
-		| NFS_ATTR_FATTR_SPACE_USED \
-		| NFS_ATTR_FATTR_CHANGE)
+		| NFS_ATTR_FATTR_SPACE_USED)
 
 /*
  * Info on the file system
@@ -182,7 +182,8 @@ struct nfs4_slot {
 struct nfs4_sequence_args {
 	struct nfs4_session	*sa_session;
 	u8			sa_slotid;
-	u8			sa_cache_this;
+	u8			sa_cache_this : 1,
+				sa_privileged : 1;
 };
 
 struct nfs4_sequence_res {
@@ -308,6 +309,7 @@ struct nfs_openargs {
 	struct nfs_seqid *	seqid;
 	int			open_flags;
 	fmode_t			fmode;
+	u32			access;
 	__u64                   clientid;
 	__u64                   id;
 	union {
@@ -321,9 +323,9 @@ struct nfs_openargs {
 	const struct qstr *	name;
 	const struct nfs_server *server;	 /* Needed for ID mapping */
 	const u32 *		bitmask;
-	const u32 *		dir_bitmask;
 	__u32			claim;
 	struct nfs4_sequence_args	seq_args;
+	enum createmode4	createmode;
 };
 
 struct nfs_openres {
@@ -332,7 +334,6 @@ struct nfs_openres {
 	struct nfs4_change_info	cinfo;
 	__u32                   rflags;
 	struct nfs_fattr *      f_attr;
-	struct nfs_fattr *      dir_attr;
 	struct nfs_seqid *	seqid;
 	const struct nfs_server *server;
 	fmode_t			delegation_type;
@@ -343,6 +344,9 @@ struct nfs_openres {
 	struct nfs4_string	*owner;
 	struct nfs4_string	*group_owner;
 	struct nfs4_sequence_res	seq_res;
+	__u32			access_request;
+	__u32			access_supported;
+	__u32			access_result;
 };
 
 /*
@@ -458,6 +462,7 @@ struct nfs_readargs {
 	struct nfs_fh *		fh;
 	struct nfs_open_context *context;
 	struct nfs_lock_context *lock_context;
+	nfs4_stateid		stateid;
 	__u64			offset;
 	__u32			count;
 	unsigned int		pgbase;
@@ -479,6 +484,7 @@ struct nfs_writeargs {
 	struct nfs_fh *		fh;
 	struct nfs_open_context *context;
 	struct nfs_lock_context *lock_context;
+	nfs4_stateid		stateid;
 	__u64			offset;
 	__u32			count;
 	enum nfs3_stable_how	stable;
@@ -525,7 +531,6 @@ struct nfs_commitres {
 struct nfs_removeargs {
 	const struct nfs_fh	*fh;
 	struct qstr		name;
-	const u32 *		bitmask;
 	struct nfs4_sequence_args	seq_args;
 };
 
@@ -544,7 +549,6 @@ struct nfs_renameargs {
 	const struct nfs_fh		*new_dir;
 	const struct qstr		*old_name;
 	const struct qstr		*new_name;
-	const u32			*bitmask;
 	struct nfs4_sequence_args	seq_args;
 };
 
@@ -839,7 +843,6 @@ struct nfs4_create_res {
 	struct nfs_fh *			fh;
 	struct nfs_fattr *		fattr;
 	struct nfs4_change_info		dir_cinfo;
-	struct nfs_fattr *		dir_fattr;
 	struct nfs4_sequence_res	seq_res;
 };
 
@@ -1121,6 +1124,17 @@ struct nfs41_reclaim_complete_args {
 struct nfs41_reclaim_complete_res {
 	struct nfs4_sequence_res	seq_res;
 };
+
+struct nfs41_free_stateid_args {
+	nfs4_stateid			stateid;
+	struct nfs4_sequence_args	seq_args;
+};
+
+struct nfs41_free_stateid_res {
+	unsigned int			status;
+	struct nfs4_sequence_res	seq_res;
+};
+
 #endif /* CONFIG_NFS_V4_1 */
 
 struct nfs_page;

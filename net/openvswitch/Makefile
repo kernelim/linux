@@ -10,5 +10,10 @@ openvswitch-y := \
 	dp_notify.o \
 	flow.o \
 	vport.o \
+	vport-gre.o \
 	vport-internal_dev.o \
-	vport-netdev.o \
+	vport-netdev.o
+
+ifneq ($(CONFIG_OPENVSWITCH_VXLAN),)
+openvswitch-y += vport-vxlan.o
+endif

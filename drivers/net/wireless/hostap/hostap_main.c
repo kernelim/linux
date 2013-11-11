@@ -79,13 +79,8 @@ struct net_device * hostap_add_interface(struct local_info *local,
 	if (!rtnl_locked)
 		rtnl_lock();
 
-	ret = 0;
-	if (strchr(dev->name, '%'))
-		ret = dev_alloc_name(dev, dev->name);
-
 	SET_NETDEV_DEV(dev, mdev->dev.parent);
-	if (ret >= 0)
-		ret = register_netdevice(dev);
+	ret = register_netdevice(dev);
 
 	if (!rtnl_locked)
 		rtnl_unlock();
@@ -186,7 +181,7 @@ int prism2_wds_add(local_info_t *local, u8 *remote_addr,
 		return -ENOBUFS;
 
 	/* verify that there is room for wds# postfix in the interface name */
-	if (strlen(local->dev->name) > IFNAMSIZ - 5) {
+	if (strlen(local->dev->name) >= IFNAMSIZ - 5) {
 		printk(KERN_DEBUG "'%s' too long base device name\n",
 		       local->dev->name);
 		return -EINVAL;
@@ -249,8 +244,7 @@ u16 hostap_tx_callback_register(local_info_t *local,
 	unsigned long flags;
 	struct hostap_tx_callback_info *entry;
 
-	entry = kmalloc(sizeof(*entry),
-							   GFP_ATOMIC);
+	entry = kmalloc(sizeof(*entry), GFP_KERNEL);
 	if (entry == NULL)
 		return 0;
 
@@ -741,9 +735,7 @@ void hostap_set_multicast_list_queue(struct work_struct *work)
 	local_info_t *local =
 		container_of(work, local_info_t, set_multicast_list_queue);
 	struct net_device *dev = local->dev;
-	struct hostap_interface *iface;
 
-	iface = netdev_priv(dev);
 	if (hostap_set_word(dev, HFA384X_RID_PROMISCUOUSMODE,
 			    local->is_promisc)) {
 		printk(KERN_INFO "%s: %sabling promiscuous mode failed\n",
@@ -823,7 +815,7 @@ static const struct net_device_ops hostap_netdev_ops = {
 	.ndo_stop		= prism2_close,
 	.ndo_do_ioctl		= hostap_ioctl,
 	.ndo_set_mac_address	= prism2_set_mac_address,
-	.ndo_set_multicast_list = hostap_set_multicast_list,
+	.ndo_set_rx_mode	= hostap_set_multicast_list,
 	.ndo_change_mtu 	= prism2_change_mtu,
 	.ndo_tx_timeout 	= prism2_tx_timeout,
 	.ndo_validate_addr	= eth_validate_addr,
@@ -836,7 +828,7 @@ static const struct net_device_ops hostap_mgmt_netdev_ops = {
 	.ndo_stop		= prism2_close,
 	.ndo_do_ioctl		= hostap_ioctl,
 	.ndo_set_mac_address	= prism2_set_mac_address,
-	.ndo_set_multicast_list = hostap_set_multicast_list,
+	.ndo_set_rx_mode	= hostap_set_multicast_list,
 	.ndo_change_mtu 	= prism2_change_mtu,
 	.ndo_tx_timeout 	= prism2_tx_timeout,
 	.ndo_validate_addr	= eth_validate_addr,
@@ -849,7 +841,7 @@ static const struct net_device_ops hostap_master_ops = {
 	.ndo_stop		= prism2_close,
 	.ndo_do_ioctl		= hostap_ioctl,
 	.ndo_set_mac_address	= prism2_set_mac_address,
-	.ndo_set_multicast_list = hostap_set_multicast_list,
+	.ndo_set_rx_mode	= hostap_set_multicast_list,
 	.ndo_change_mtu 	= prism2_change_mtu,
 	.ndo_tx_timeout 	= prism2_tx_timeout,
 	.ndo_validate_addr	= eth_validate_addr,
@@ -894,7 +886,6 @@ void hostap_setup_dev(struct net_device *dev, local_info_t *local,
 
 	SET_ETHTOOL_OPS(dev, &prism2_ethtool_ops);
 
-	netif_stop_queue(dev);
 }
 
 static int hostap_enable_hostapd(local_info_t *local, int rtnl_locked)
@@ -1093,7 +1084,7 @@ int prism2_sta_deauth(local_info_t *local, u16 reason)
 	__le16 val = cpu_to_le16(reason);
 
 	if (local->iw_mode != IW_MODE_INFRA ||
-	    memcmp(local->bssid, "\x00\x00\x00\x00\x00\x00", ETH_ALEN) == 0 ||
+	    is_zero_ether_addr(local->bssid) ||
 	    memcmp(local->bssid, "\x44\x44\x44\x44\x44\x44", ETH_ALEN) == 0)
 		return 0;
 

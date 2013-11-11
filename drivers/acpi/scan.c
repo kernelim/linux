@@ -76,19 +76,31 @@ acpi_device_modalias_show(struct device *dev, struct device_attribute *attr, cha
 }
 static DEVICE_ATTR(modalias, 0444, acpi_device_modalias_show, NULL);
 
-static void acpi_bus_hot_remove_device(void *context)
+/**
+ * acpi_bus_hot_remove_device: hot-remove a device and its children
+ * @context: struct acpi_eject_event pointer (freed in this func)
+ *
+ * Hot-remove a device and its children. This function frees up the
+ * memory space passed by arg context, so that the caller may call
+ * this function asynchronously through acpi_os_hotplug_execute().
+ */
+void acpi_bus_hot_remove_device(void *context)
 {
+	struct acpi_eject_event *ej_event = (struct acpi_eject_event *) context;
 	struct acpi_device *device;
-	acpi_handle handle = context;
+	acpi_handle handle = ej_event->handle;
+	acpi_handle temp;
 	struct acpi_object_list arg_list;
 	union acpi_object arg;
 	acpi_status status = AE_OK;
+	unsigned long long sta;
+	u32 ost_code = ACPI_OST_SC_NON_SPECIFIC_FAILURE; /* default */
 
 	if (acpi_bus_get_device(handle, &device))
-		return;
+		goto err_out;
 
 	if (!device)
-		return;
+		goto err_out;
 
 	ACPI_DEBUG_PRINT((ACPI_DB_INFO,
 		"Hot-removing device %s...\n", dev_name(&device->dev)));
@@ -96,8 +108,11 @@ static void acpi_bus_hot_remove_device(void *context)
 	if (acpi_bus_trim(device, 1)) {
 		printk(KERN_ERR PREFIX
 				"Removing device failed\n");
-		return;
+		goto err_out;
 	}
+
+	/* device has been freed */
+	device = NULL;
 
 	/* power off device */
 	status = acpi_evaluate_object(handle, "_PS3", NULL, NULL);
@@ -105,7 +120,7 @@ static void acpi_bus_hot_remove_device(void *context)
 		printk(KERN_WARNING PREFIX
 				"Power-off device failed\n");
 
-	if (device->flags.lockable) {
+	if (ACPI_SUCCESS(acpi_get_handle(handle, "_LCK", &temp))) {
 		arg_list.count = 1;
 		arg_list.pointer = &arg;
 		arg.type = ACPI_TYPE_INTEGER;
@@ -122,12 +137,37 @@ static void acpi_bus_hot_remove_device(void *context)
 	 * TBD: _EJD support.
 	 */
 	status = acpi_evaluate_object(handle, "_EJ0", &arg_list, NULL);
-	if (ACPI_FAILURE(status))
-		printk(KERN_WARNING PREFIX
-				"Eject device failed\n");
+	if (ACPI_FAILURE(status)) {
+		if (status != AE_NOT_FOUND)
+			acpi_handle_warn(handle, "Eject failed (0x%x)\n",
+								status);
+		goto err_out;
+	}
 
+	/*
+	 * Verify if eject was indeed successful.  If not, log an error
+	 * message.  No need to call _OST since _EJ0 call was made OK.
+	 */
+	status = acpi_evaluate_integer(handle, "_STA", NULL, &sta);
+	if (ACPI_FAILURE(status)) {
+		acpi_handle_warn(handle,
+			"Status check after eject failed (0x%x)\n", status);
+	} else if (sta & ACPI_STA_DEVICE_ENABLED) {
+		acpi_handle_warn(handle,
+			"Eject incomplete - status 0x%llx\n", sta);
+	}
+
+	kfree(context);
+	return;
+
+err_out:
+	/* Inform firmware the hot-remove operation has completed w/ error */
+	(void) acpi_evaluate_hotplug_ost(handle,
+				ej_event->event, ost_code, NULL);
+	kfree(context);
 	return;
 }
+EXPORT_SYMBOL(acpi_bus_hot_remove_device);
 
 static ssize_t
 acpi_eject_store(struct device *d, struct device_attribute *attr,
@@ -137,6 +177,7 @@ acpi_eject_store(struct device *d, struct device_attribute *attr,
 	acpi_status status;
 	acpi_object_type type = 0;
 	struct acpi_device *acpi_device = to_acpi_device(d);
+	struct acpi_eject_event *ej_event;
 
 	if ((!count) || (buf[0] != '1')) {
 		return -EINVAL;
@@ -153,7 +194,25 @@ acpi_eject_store(struct device *d, struct device_attribute *attr,
 		goto err;
 	}
 
-	acpi_os_hotplug_execute(acpi_bus_hot_remove_device, acpi_device->handle);
+	ej_event = kmalloc(sizeof(*ej_event), GFP_KERNEL);
+	if (!ej_event) {
+		ret = -ENOMEM;
+		goto err;
+	}
+
+	ej_event->handle = acpi_device->handle;
+	if (acpi_device->flags.eject_pending) {
+		/* event originated from ACPI eject notification */
+		ej_event->event = ACPI_NOTIFY_EJECT_REQUEST;
+		acpi_device->flags.eject_pending = 0;
+	} else {
+		/* event originated from user */
+		ej_event->event = ACPI_OST_EC_OSPM_EJECT;
+		(void) acpi_evaluate_hotplug_ost(ej_event->handle,
+			ej_event->event, ACPI_OST_SC_EJECT_IN_PROGRESS, NULL);
+	}
+
+	acpi_os_hotplug_execute(acpi_bus_hot_remove_device, (void *)ej_event);
 err:
 	return ret;
 }
@@ -185,10 +244,28 @@ end:
 }
 static DEVICE_ATTR(path, 0444, acpi_device_path_show, NULL);
 
+static ssize_t
+acpi_device_sun_show(struct device *dev, struct device_attribute *attr,
+		     char *buf) {
+	struct acpi_device *acpi_dev = to_acpi_device(dev);
+	unsigned long long sun;
+	int result;
+
+	result = acpi_evaluate_integer(acpi_dev->handle, "_SUN", NULL, &sun);
+	if (result)
+		goto end;
+
+	result = sprintf(buf, "%llu\n", sun);
+end:
+	return result;
+}
+static DEVICE_ATTR(sun, 0444, acpi_device_sun_show, NULL);
+
 static int acpi_device_setup_files(struct acpi_device *dev)
 {
 	acpi_status status;
 	acpi_handle temp;
+	unsigned long long sun;
 	int result = 0;
 
 	/*
@@ -207,6 +284,13 @@ static int acpi_device_setup_files(struct acpi_device *dev)
 	result = device_create_file(&dev->dev, &dev_attr_modalias);
 	if (result)
 		goto end;
+
+	status = acpi_evaluate_integer(dev->handle, "_SUN", NULL, &sun);
+	if (ACPI_SUCCESS(status)) {
+		result = device_create_file(&dev->dev, &dev_attr_sun);
+		if (result)
+			goto end;
+	}
 
         /*
          * If device has _EJ0, 'eject' file is created that is used to trigger
@@ -231,6 +315,10 @@ static void acpi_device_remove_files(struct acpi_device *dev)
 	status = acpi_get_handle(dev->handle, "_EJ0", &temp);
 	if (ACPI_SUCCESS(status))
 		device_remove_file(&dev->dev, &dev_attr_eject);
+
+	status = acpi_get_handle(dev->handle, "_SUN", &temp);
+	if (ACPI_SUCCESS(status))
+		device_remove_file(&dev->dev, &dev_attr_sun);
 
 	device_remove_file(&dev->dev, &dev_attr_modalias);
 	device_remove_file(&dev->dev, &dev_attr_hid);
@@ -1336,8 +1424,24 @@ static int acpi_bus_scan(acpi_handle handle, struct acpi_bus_ops *ops,
 
 	if (child)
 		*child = device;
-	return 0;
+
+	if (device)
+		return 0;
+	else
+		return -ENODEV;
 }
+
+/*
+ * acpi_bus_add and acpi_bus_start
+ *
+ * scan a given ACPI tree and (probably recently hot-plugged)
+ * create and add or starts found devices.
+ *
+ * If no devices were found -ENODEV is returned which does not
+ * mean that this is a real error, there just have been no suitable
+ * ACPI objects in the table trunk from which the kernel could create
+ * a device and add/start an appropriate driver.
+ */
 
 int
 acpi_bus_add(struct acpi_device **child,
@@ -1348,8 +1452,7 @@ acpi_bus_add(struct acpi_device **child,
 	memset(&ops, 0, sizeof(ops));
 	ops.acpi_op_add = 1;
 
-	acpi_bus_scan(handle, &ops, child);
-	return 0;
+	return acpi_bus_scan(handle, &ops, child);
 }
 EXPORT_SYMBOL(acpi_bus_add);
 
@@ -1363,8 +1466,7 @@ int acpi_bus_start(struct acpi_device *device)
 	memset(&ops, 0, sizeof(ops));
 	ops.acpi_op_start = 1;
 
-	acpi_bus_scan(device->handle, &ops, NULL);
-	return 0;
+	return acpi_bus_scan(device->handle, &ops, NULL);
 }
 EXPORT_SYMBOL(acpi_bus_start);
 

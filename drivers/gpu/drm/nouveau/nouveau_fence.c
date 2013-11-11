@@ -24,17 +24,16 @@
  *
  */
 
-#include "drmP.h"
-#include "drm.h"
+#include <drm/drmP.h>
 
 #include <linux/ktime.h>
 #include <linux/hrtimer.h>
 
-#include "nouveau_drv.h"
-#include "nouveau_ramht.h"
-#include "nouveau_fence.h"
-#include "nouveau_software.h"
+#include "nouveau_drm.h"
 #include "nouveau_dma.h"
+#include "nouveau_fence.h"
+
+#include <engine/fifo.h>
 
 void
 nouveau_fence_context_del(struct nouveau_fence_chan *fctx)
@@ -42,8 +41,6 @@ nouveau_fence_context_del(struct nouveau_fence_chan *fctx)
 	struct nouveau_fence *fence, *fnext;
 	spin_lock(&fctx->lock);
 	list_for_each_entry_safe(fence, fnext, &fctx->pending, head) {
-		if (fence->work)
-			fence->work(fence->priv, false);
 		fence->channel = NULL;
 		list_del(&fence->head);
 		nouveau_fence_unref(&fence);
@@ -54,25 +51,22 @@ nouveau_fence_context_del(struct nouveau_fence_chan *fctx)
 void
 nouveau_fence_context_new(struct nouveau_fence_chan *fctx)
 {
+	INIT_LIST_HEAD(&fctx->flip);
 	INIT_LIST_HEAD(&fctx->pending);
 	spin_lock_init(&fctx->lock);
 }
 
-void
+static void
 nouveau_fence_update(struct nouveau_channel *chan)
 {
-	struct drm_device *dev = chan->dev;
-	struct nouveau_fence_priv *priv = nv_engine(dev, NVOBJ_ENGINE_FENCE);
-	struct nouveau_fence_chan *fctx = chan->engctx[NVOBJ_ENGINE_FENCE];
+	struct nouveau_fence_chan *fctx = chan->fence;
 	struct nouveau_fence *fence, *fnext;
 
 	spin_lock(&fctx->lock);
 	list_for_each_entry_safe(fence, fnext, &fctx->pending, head) {
-		if (priv->read(chan) < fence->sequence)
+		if (fctx->read(chan) < fence->sequence)
 			break;
 
-		if (fence->work)
-			fence->work(fence->priv, true);
 		fence->channel = NULL;
 		list_del(&fence->head);
 		nouveau_fence_unref(&fence);
@@ -83,16 +77,14 @@ nouveau_fence_update(struct nouveau_channel *chan)
 int
 nouveau_fence_emit(struct nouveau_fence *fence, struct nouveau_channel *chan)
 {
-	struct drm_device *dev = chan->dev;
-	struct nouveau_fence_priv *priv = nv_engine(dev, NVOBJ_ENGINE_FENCE);
-	struct nouveau_fence_chan *fctx = chan->engctx[NVOBJ_ENGINE_FENCE];
+	struct nouveau_fence_chan *fctx = chan->fence;
 	int ret;
 
 	fence->channel  = chan;
 	fence->timeout  = jiffies + (3 * DRM_HZ);
 	fence->sequence = ++fctx->sequence;
 
-	ret = priv->emit(fence);
+	ret = fctx->emit(fence);
 	if (!ret) {
 		kref_get(&fence->kref);
 		spin_lock(&fctx->lock);
@@ -111,12 +103,86 @@ nouveau_fence_done(struct nouveau_fence *fence)
 	return !fence->channel;
 }
 
+struct nouveau_fence_uevent {
+	struct nouveau_eventh handler;
+	struct nouveau_fence_priv *priv;
+};
+
+static int
+nouveau_fence_wait_uevent_handler(struct nouveau_eventh *event, int index)
+{
+	struct nouveau_fence_uevent *uevent =
+		container_of(event, struct nouveau_fence_uevent, handler);
+	wake_up_all(&uevent->priv->waiting);
+	return NVKM_EVENT_KEEP;
+}
+
+static int
+nouveau_fence_wait_uevent(struct nouveau_fence *fence, bool intr)
+
+{
+	struct nouveau_channel *chan = fence->channel;
+	struct nouveau_fifo *pfifo = nouveau_fifo(chan->drm->device);
+	struct nouveau_fence_priv *priv = chan->drm->fence;
+	struct nouveau_fence_uevent uevent = {
+		.handler.func = nouveau_fence_wait_uevent_handler,
+		.priv = priv,
+	};
+	int ret = 0;
+
+	nouveau_event_get(pfifo->uevent, 0, &uevent.handler);
+
+	if (fence->timeout) {
+		unsigned long timeout = fence->timeout - jiffies;
+
+		if (time_before(jiffies, fence->timeout)) {
+			if (intr) {
+				ret = wait_event_interruptible_timeout(
+						priv->waiting,
+						nouveau_fence_done(fence),
+						timeout);
+			} else {
+				ret = wait_event_timeout(priv->waiting,
+						nouveau_fence_done(fence),
+						timeout);
+			}
+		}
+
+		if (ret >= 0) {
+			fence->timeout = jiffies + ret;
+			if (time_after_eq(jiffies, fence->timeout))
+				ret = -EBUSY;
+		}
+	} else {
+		if (intr) {
+			ret = wait_event_interruptible(priv->waiting,
+					nouveau_fence_done(fence));
+		} else {
+			wait_event(priv->waiting, nouveau_fence_done(fence));
+		}
+	}
+
+	nouveau_event_put(pfifo->uevent, 0, &uevent.handler);
+	if (unlikely(ret < 0))
+		return ret;
+
+	return 0;
+}
+
 int
 nouveau_fence_wait(struct nouveau_fence *fence, bool lazy, bool intr)
 {
+	struct nouveau_channel *chan = fence->channel;
+	struct nouveau_fence_priv *priv = chan ? chan->drm->fence : NULL;
 	unsigned long sleep_time = NSEC_PER_MSEC / 1000;
 	ktime_t t;
 	int ret = 0;
+
+	while (priv && priv->uevent && lazy && !nouveau_fence_done(fence)) {
+		ret = nouveau_fence_wait_uevent(fence, intr);
+		if (ret < 0)
+			return ret;
+	}
 
 	while (!nouveau_fence_done(fence)) {
 		if (fence->timeout && time_after_eq(jiffies, fence->timeout)) {
@@ -147,19 +213,17 @@ nouveau_fence_wait(struct nouveau_fence *fence, bool lazy, bool intr)
 int
 nouveau_fence_sync(struct nouveau_fence *fence, struct nouveau_channel *chan)
 {
-	struct drm_device *dev = chan->dev;
-	struct nouveau_fence_priv *priv = nv_engine(dev, NVOBJ_ENGINE_FENCE);
+	struct nouveau_fence_chan *fctx = chan->fence;
 	struct nouveau_channel *prev;
 	int ret = 0;
 
-	prev = fence ? nouveau_channel_get_unlocked(fence->channel) : NULL;
+	prev = fence ? fence->channel : NULL;
 	if (prev) {
 		if (unlikely(prev != chan && !nouveau_fence_done(fence))) {
-			ret = priv->sync(fence, prev, chan);
+			ret = fctx->sync(fence, prev, chan);
 			if (unlikely(ret))
 				ret = nouveau_fence_wait(fence, true, false);
 		}
-		nouveau_channel_put_unlocked(&prev);
 	}
 
 	return ret;
@@ -188,24 +252,25 @@ nouveau_fence_ref(struct nouveau_fence *fence)
 }
 
 int
-nouveau_fence_new(struct nouveau_channel *chan, struct nouveau_fence **pfence)
+nouveau_fence_new(struct nouveau_channel *chan, bool sysmem,
+		  struct nouveau_fence **pfence)
 {
 	struct nouveau_fence *fence;
 	int ret = 0;
 
-	if (unlikely(!chan->engctx[NVOBJ_ENGINE_FENCE]))
+	if (unlikely(!chan->fence))
 		return -ENODEV;
 
 	fence = kzalloc(sizeof(*fence), GFP_KERNEL);
 	if (!fence)
 		return -ENOMEM;
+
+	fence->sysmem = sysmem;
 	kref_init(&fence->kref);
 
-	if (chan) {
-		ret = nouveau_fence_emit(fence, chan);
-		if (ret)
-			nouveau_fence_unref(&fence);
-	}
+	ret = nouveau_fence_emit(fence, chan);
+	if (ret)
+		nouveau_fence_unref(&fence);
 
 	*pfence = fence;
 	return ret;

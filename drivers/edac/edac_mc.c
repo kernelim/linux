@@ -347,6 +347,9 @@ static void edac_mc_workq_teardown(struct mem_ctl_info *mci)
 {
 	int status;
 
+	if (mci->op_state != OP_RUNNING_POLL)
+		return;
+
 	status = cancel_delayed_work(&mci->work);
 	if (status == 0) {
 		debugf0("%s() not canceled, flush the queue\n",
@@ -583,14 +586,16 @@ struct mem_ctl_info *edac_mc_del_mc(struct device *dev)
 		return NULL;
 	}
 
-	/* marking MCI offline */
-	mci->op_state = OP_OFFLINE;
-
 	del_mc_from_global_list(mci);
 	mutex_unlock(&mem_ctls_mutex);
 
-	/* flush workq processes and remove sysfs */
+	/* flush workq processes */
 	edac_mc_workq_teardown(mci);
+
+	/* marking MCI offline */
+	mci->op_state = OP_OFFLINE;
+
+	/* remove from sysfs */
 	edac_remove_sysfs_mci_device(mci);
 
 	edac_printk(KERN_INFO, EDAC_MC,

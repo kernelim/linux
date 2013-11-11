@@ -51,7 +51,7 @@ static void gfs2_page_add_databufs(struct gfs2_inode *ip, struct page *page,
 			continue;
 		if (gfs2_is_jdata(ip))
 			set_buffer_uptodate(bh);
-		gfs2_trans_add_bh(ip->i_gl, bh, 0);
+		gfs2_trans_add_data(ip->i_gl, bh);
 	}
 }
 
@@ -233,16 +233,14 @@ out_ignore:
 }
 
 /**
- * gfs2_writeback_writepages - Write a bunch of dirty pages back to disk
+ * gfs2_writepages - Write a bunch of dirty pages back to disk
  * @mapping: The mapping to write
  * @wbc: Write-back control
  *
- * For the data=writeback case we can already ignore buffer heads
- * and write whole extents at once. This is a big reduction in the
- * number of I/O requests we send and the bmap calls we make in this case.
+ * Used for both ordered and writeback modes.
  */
-static int gfs2_writeback_writepages(struct address_space *mapping,
-				     struct writeback_control *wbc)
+static int gfs2_writepages(struct address_space *mapping,
+			   struct writeback_control *wbc)
 {
 	return mpage_writepages(mapping, wbc, gfs2_get_block_noalloc);
 }
@@ -662,7 +660,7 @@ static int gfs2_write_begin(struct file *file, struct address_space *mapping,
 			goto out_unlock;
 
 		requested = data_blocks + ind_blocks;
-		error = gfs2_inplace_reserve(ip, requested);
+		error = gfs2_inplace_reserve(ip, requested, 0);
 		if (error)
 			goto out_qunlock;
 	}
@@ -796,7 +794,6 @@ static int gfs2_stuffed_write_end(struct inode *inode, struct buffer_head *dibh,
 	u64 to = pos + copied;
 	void *kaddr;
 	unsigned char *buf = dibh->b_data + sizeof(struct gfs2_dinode);
-	struct gfs2_dinode *di = (struct gfs2_dinode *)dibh->b_data;
 
 	BUG_ON((pos + len) > (dibh->b_size - sizeof(struct gfs2_dinode)));
 	kaddr = kmap_atomic(page, KM_USER0);
@@ -813,7 +810,6 @@ static int gfs2_stuffed_write_end(struct inode *inode, struct buffer_head *dibh,
 	if (copied) {
 		if (inode->i_size < to)
 			i_size_write(inode, to);
-		gfs2_dinode_out(ip, di);
 		mark_inode_dirty(inode);
 	}
 
@@ -862,7 +858,8 @@ static int gfs2_write_end(struct file *file, struct address_space *mapping,
 	unsigned int from = pos & (PAGE_CACHE_SIZE - 1);
 	unsigned int to = from + len;
 	int ret;
-	int i_size_changed = 0;
+	struct gfs2_trans *tr = current->journal_info;
+	BUG_ON(!tr);
 
 	BUG_ON(gfs2_glock_is_locked_by_me(ip->i_gl) == NULL);
 
@@ -873,29 +870,18 @@ static int gfs2_write_end(struct file *file, struct address_space *mapping,
 		goto failed;
 	}
 
-	gfs2_trans_add_bh(ip->i_gl, dibh, 1);
-
 	if (gfs2_is_stuffed(ip))
 		return gfs2_stuffed_write_end(inode, dibh, pos, len, copied, page);
 
 	if (!gfs2_is_writeback(ip))
 		gfs2_page_add_databufs(ip, page, from, to);
 
-	/* inlined bits of generic_write_end to avoid marking the inode dirty
-	   a second time: */
-	ret = block_write_end(file, mapping, pos, len, copied, page, fsdata);
-	if (pos + ret > inode->i_size) {
-		i_size_write(inode, pos + ret);
-		i_size_changed = 1;
-	}
+	ret = generic_write_end(file, mapping, pos, len, copied, page, fsdata);
+	if (tr->tr_num_buf_new)
+		__mark_inode_dirty(inode, I_DIRTY_DATASYNC);
+	else
+		gfs2_trans_add_meta(ip->i_gl, dibh);
 
-	unlock_page(page);
-	page_cache_release(page);
-
-	if (i_size_changed) {
-		gfs2_dinode_out(ip, dibh->b_data);
-		mark_inode_dirty(inode);
-	}
 
 	if (inode == sdp->sd_rindex) {
 		adjust_fs_space(inode);
@@ -1107,7 +1093,6 @@ int gfs2_releasepage(struct page *page, gfp_t gfp_mask)
 		bd = bh->b_private;
 		if (bd) {
 			gfs2_assert_warn(sdp, bd->bd_bh == bh);
-			gfs2_assert_warn(sdp, list_empty(&bd->bd_list_tr));
 			if (!list_empty(&bd->bd_list)) {
 				if (!buffer_pinned(bh))
 					list_del_init(&bd->bd_list);
@@ -1138,7 +1123,7 @@ cannot_release:
 
 static const struct address_space_operations gfs2_writeback_aops = {
 	.writepage = gfs2_writeback_writepage,
-	.writepages = gfs2_writeback_writepages,
+	.writepages = gfs2_writepages,
 	.readpage = gfs2_readpage,
 	.readpages = gfs2_readpages,
 	.sync_page = block_sync_page,
@@ -1155,6 +1140,7 @@ static const struct address_space_operations gfs2_writeback_aops = {
 
 static const struct address_space_operations gfs2_ordered_aops = {
 	.writepage = gfs2_ordered_writepage,
+	.writepages = gfs2_writepages,
 	.readpage = gfs2_readpage,
 	.readpages = gfs2_readpages,
 	.sync_page = block_sync_page,

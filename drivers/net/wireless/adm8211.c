@@ -1293,7 +1293,8 @@ static int adm8211_config(struct ieee80211_hw *dev, u32 changed)
 {
 	struct adm8211_priv *priv = dev->priv;
 	struct ieee80211_conf *conf = &dev->conf;
-	int channel = ieee80211_frequency_to_channel(conf->channel->center_freq);
+	int channel =
+		ieee80211_frequency_to_channel(conf->chandef.chan->center_freq);
 
 	if (channel != priv->channel) {
 		priv->channel = channel;
@@ -1663,7 +1664,9 @@ static void adm8211_tx_raw(struct ieee80211_hw *dev, struct sk_buff *skb,
 }
 
 /* Put adm8211_tx_hdr on skb and transmit */
-static void adm8211_tx(struct ieee80211_hw *dev, struct sk_buff *skb)
+static void adm8211_tx(struct ieee80211_hw *dev,
+		       struct ieee80211_tx_control *control,
+		       struct sk_buff *skb)
 {
 	struct adm8211_tx_hdr *txhdr;
 	size_t payload_len, hdrlen;

@@ -22,6 +22,8 @@
 #include <linux/err.h>
 #include <linux/freezer.h>
 #include <linux/fs.h>
+#include <linux/splice.h>
+#include <linux/pagemap.h>
 #include <linux/init.h>
 #include <linux/list.h>
 #include <linux/poll.h>
@@ -104,6 +106,12 @@ struct port_buffer {
 	size_t len;
 	/* offset in the buf from which to consume data */
 	size_t offset;
+
+	/* If sgpages == 0 then buf is used */
+	unsigned int sgpages;
+
+	/* sg is used if spages > 0. sg must be the last in is struct */
+	struct scatterlist sg[0];
 };
 
 /*
@@ -126,7 +134,8 @@ struct ports_device {
 	spinlock_t ports_lock;
 
 	/* To protect the vq operations for the control channel */
-	spinlock_t cvq_lock;
+	spinlock_t c_ivq_lock;
+	spinlock_t c_ovq_lock;
 
 	/* The current config space is stored here */
 	struct virtio_console_config config;
@@ -251,9 +260,12 @@ static struct port *find_port_by_devt_in_portdev(struct ports_device *portdev,
 	unsigned long flags;
 
 	spin_lock_irqsave(&portdev->ports_lock, flags);
-	list_for_each_entry(port, &portdev->ports, list)
-		if (port->cdev->dev == dev)
+	list_for_each_entry(port, &portdev->ports, list) {
+		if (port->cdev->dev == dev) {
+			kref_get(&port->kref);
 			goto out;
+		}
+	}
 	port = NULL;
 out:
 	spin_unlock_irqrestore(&portdev->ports_lock, flags);
@@ -331,18 +343,40 @@ static inline bool use_multiport(struct ports_device *portdev)
 
 static void free_buf(struct port_buffer *buf)
 {
+	unsigned int i;
+
 	kfree(buf->buf);
+	for (i = 0; i < buf->sgpages; i++) {
+		struct page *page = sg_page(&buf->sg[i]);
+		if (!page)
+			break;
+		put_page(page);
+	}
+
 	kfree(buf);
 }
 
-static struct port_buffer *alloc_buf(size_t buf_size)
+static struct port_buffer *alloc_buf(struct virtqueue *vq, size_t buf_size,
+				     int pages)
 {
 	struct port_buffer *buf;
 
-	buf = kmalloc(sizeof(*buf), GFP_KERNEL);
+	/*
+	 * Allocate buffer and the sg list. The sg list array is allocated
+	 * directly after the port_buffer struct.
+	 */
+	buf = kmalloc(sizeof(*buf) + sizeof(struct scatterlist) * pages,
+		      GFP_KERNEL);
 	if (!buf)
 		goto fail;
-	buf->buf = kzalloc(buf_size, GFP_KERNEL);
+
+	buf->sgpages = pages;
+	if (pages > 0) {
+		buf->buf = NULL;
+		return buf;
+	}
+
+	buf->buf = kmalloc(buf_size, GFP_KERNEL);
 	if (!buf->buf)
 		goto free_buf;
 	buf->len = 0;
@@ -452,11 +486,14 @@ static ssize_t __send_control_msg(struct ports_device *portdev, u32 port_id,
 	vq = portdev->c_ovq;
 
 	sg_init_one(sg, &cpkt, sizeof(cpkt));
+
+	spin_lock(&portdev->c_ovq_lock);
 	if (virtqueue_add_buf(vq, sg, 1, 0, &cpkt) >= 0) {
 		virtqueue_kick(vq);
 		while (!virtqueue_get_buf(vq, &len))
 			cpu_relax();
 	}
+	spin_unlock(&portdev->c_ovq_lock);
 	return 0;
 }
 
@@ -469,10 +506,11 @@ static ssize_t send_control_msg(struct port *port, unsigned int event,
 	return 0;
 }
 
+
 /* Callers must take the port->outvq_lock */
 static void reclaim_consumed_buffers(struct port *port)
 {
-	void *buf;
+	struct port_buffer *buf;
 	unsigned int len;
 
 	if (!port->portdev) {
@@ -480,15 +518,15 @@ static void reclaim_consumed_buffers(struct port *port)
 		return;
 	}
 	while ((buf = virtqueue_get_buf(port->out_vq, &len))) {
-		kfree(buf);
+		free_buf(buf);
 		port->outvq_full = false;
 	}
 }
 
-static ssize_t send_buf(struct port *port, void *in_buf, size_t in_count,
-			bool nonblock)
+static ssize_t __send_to_port(struct port *port, struct scatterlist *sg,
+			      int nents, size_t in_count,
+			      void *data, bool nonblock)
 {
-	struct scatterlist sg[1];
 	struct virtqueue *out_vq;
 	ssize_t ret;
 	unsigned long flags;
@@ -500,8 +538,7 @@ static ssize_t send_buf(struct port *port, void *in_buf, size_t in_count,
 
 	reclaim_consumed_buffers(port);
 
-	sg_init_one(sg, in_buf, in_count);
-	ret = virtqueue_add_buf(out_vq, sg, 1, 0, in_buf);
+	ret = virtqueue_add_buf(out_vq, sg, nents, 0, data);
 
 	/* Tell Host to go! */
 	virtqueue_kick(out_vq);
@@ -625,6 +662,10 @@ static ssize_t port_fops_read(struct file *filp, char __user *ubuf,
 
 	port = filp->private_data;
 
+	/* Port is hot-unplugged. */
+	if (!port->guest_connected)
+		return -ENODEV;
+
 	if (!port_has_data(port)) {
 		/*
 		 * If nothing's connected on the host just return 0 in
@@ -641,7 +682,7 @@ static ssize_t port_fops_read(struct file *filp, char __user *ubuf,
 		if (ret < 0)
 			return ret;
 	}
-	/* Port got hot-unplugged. */
+	/* Port got hot-unplugged while we were waiting above. */
 	if (!port->guest_connected)
 		return -ENODEV;
 	/*
@@ -660,21 +701,9 @@ static ssize_t port_fops_read(struct file *filp, char __user *ubuf,
 	return fill_readbuf(port, ubuf, count, true);
 }
 
-static ssize_t port_fops_write(struct file *filp, const char __user *ubuf,
-			       size_t count, loff_t *offp)
+static int wait_port_writable(struct port *port, bool nonblock)
 {
-	struct port *port;
-	char *buf;
-	ssize_t ret;
-	bool nonblock;
-
-	/* Userspace could be out to fool us */
-	if (!count)
-		return 0;
-
-	port = filp->private_data;
-
-	nonblock = filp->f_flags & O_NONBLOCK;
+	int ret;
 
 	if (will_write_block(port)) {
 		if (nonblock)
@@ -689,13 +718,37 @@ static ssize_t port_fops_write(struct file *filp, const char __user *ubuf,
 	if (!port->guest_connected)
 		return -ENODEV;
 
+	return 0;
+}
+
+static ssize_t port_fops_write(struct file *filp, const char __user *ubuf,
+			       size_t count, loff_t *offp)
+{
+	struct port *port;
+	struct port_buffer *buf;
+	ssize_t ret;
+	bool nonblock;
+	struct scatterlist sg[1];
+
+	/* Userspace could be out to fool us */
+	if (!count)
+		return 0;
+
+	port = filp->private_data;
+
+	nonblock = filp->f_flags & O_NONBLOCK;
+
+	ret = wait_port_writable(port, nonblock);
+	if (ret < 0)
+		return ret;
+
 	count = min((size_t)(32 * 1024), count);
 
-	buf = kmalloc(count, GFP_KERNEL);
+	buf = alloc_buf(port->out_vq, count, 0);
 	if (!buf)
 		return -ENOMEM;
 
-	ret = copy_from_user(buf, ubuf, count);
+	ret = copy_from_user(buf->buf, ubuf, count);
 	if (ret) {
 		ret = -EFAULT;
 		goto free_buf;
@@ -709,14 +762,123 @@ static ssize_t port_fops_write(struct file *filp, const char __user *ubuf,
 	 * through to the host.
 	 */
 	nonblock = true;
-	ret = send_buf(port, buf, count, nonblock);
+	sg_init_one(sg, buf->buf, count);
+	ret = __send_to_port(port, sg, 1, count, buf, nonblock);
 
 	if (nonblock && ret > 0)
 		goto out;
 
 free_buf:
-	kfree(buf);
+	free_buf(buf);
 out:
+	return ret;
+}
+
+struct sg_list {
+	unsigned int n;
+	unsigned int size;
+	size_t len;
+	struct scatterlist *sg;
+};
+
+static int pipe_to_sg(struct pipe_inode_info *pipe, struct pipe_buffer *buf,
+			struct splice_desc *sd)
+{
+	struct sg_list *sgl = sd->u.data;
+	unsigned int offset, len;
+
+	if (sgl->n == sgl->size)
+		return 0;
+
+	/* Try lock this page */
+	if (buf->ops->steal(pipe, buf) == 0) {
+		/* Get reference and unlock page for moving */
+		get_page(buf->page);
+		unlock_page(buf->page);
+
+		len = min(buf->len, sd->len);
+		sg_set_page(&(sgl->sg[sgl->n]), buf->page, len, buf->offset);
+	} else {
+		/* Failback to copying a page */
+		struct page *page = alloc_page(GFP_KERNEL);
+		char *src = buf->ops->map(pipe, buf, 1);
+		char *dst;
+
+		if (!page)
+			return -ENOMEM;
+		dst = kmap(page);
+
+		offset = sd->pos & ~PAGE_MASK;
+
+		len = sd->len;
+		if (len + offset > PAGE_SIZE)
+			len = PAGE_SIZE - offset;
+
+		memcpy(dst + offset, src + buf->offset, len);
+
+		kunmap(page);
+		buf->ops->unmap(pipe, buf, src);
+
+		sg_set_page(&(sgl->sg[sgl->n]), page, len, offset);
+	}
+	sgl->n++;
+	sgl->len += len;
+
+	return len;
+}
+
+/* Faster zero-copy write by splicing */
+static ssize_t port_fops_splice_write(struct pipe_inode_info *pipe,
+				      struct file *filp, loff_t *ppos,
+				      size_t len, unsigned int flags)
+{
+	struct port *port = filp->private_data;
+	struct sg_list sgl;
+	ssize_t ret;
+	struct port_buffer *buf;
+	struct splice_desc sd = {
+		.total_len = len,
+		.flags = flags,
+		.pos = *ppos,
+		.u.data = &sgl,
+	};
+
+	/*
+	 * pipe->nrbufs == 0 means there are no data to transfer,
+	 * so this returns just 0 for no data.
+	 */
+	pipe_lock(pipe);
+	if (!pipe->nrbufs) {
+		ret = 0;
+		goto error_out;
+	}
+
+	ret = wait_port_writable(port, filp->f_flags & O_NONBLOCK);
+	if (ret < 0)
+		goto error_out;
+
+	buf = alloc_buf(port->out_vq, 0, pipe->nrbufs);
+	if (!buf) {
+		ret = -ENOMEM;
+		goto error_out;
+	}
+
+	sgl.n = 0;
+	sgl.len = 0;
+	sgl.size = pipe->nrbufs;
+	sgl.sg = buf->sg;
+	sg_init_table(sgl.sg, sgl.size);
+	ret = __splice_from_pipe(pipe, &sd, pipe_to_sg);
+	pipe_unlock(pipe);
+	if (likely(ret > 0))
+		ret = __send_to_port(port, buf->sg, sgl.n, sgl.len, buf, true);
+
+	if (unlikely(ret <= 0))
+		kfree(sgl.sg);
+	return ret;
+
+error_out:
+	pipe_unlock(pipe);
 	return ret;
 }
 
@@ -784,13 +946,13 @@ static int port_fops_open(struct inode *inode, struct file *filp)
 	struct port *port;
 	int ret;
 
+	/* We get the port with a kref here */
 	port = find_port_by_devt(cdev->dev);
+	if (!port) {
+		/* Port was unplugged before we could proceed */
+		return -ENXIO;
+	}
 	filp->private_data = port;
-
-	/* Prevent against a port getting hot-unplugged at the same time */
-	spin_lock_irq(&port->portdev->ports_lock);
-	kref_get(&port->kref);
-	spin_unlock_irq(&port->portdev->ports_lock);
 
 	/*
 	 * Don't allow opening of console port devices -- that's done
@@ -805,7 +967,7 @@ static int port_fops_open(struct inode *inode, struct file *filp)
 	spin_lock_irq(&port->inbuf_lock);
 	if (port->guest_connected) {
 		spin_unlock_irq(&port->inbuf_lock);
-		ret = -EMFILE;
+		ret = -EBUSY;
 		goto out;
 	}
 
@@ -851,6 +1013,7 @@ static const struct file_operations port_fops = {
 	.open  = port_fops_open,
 	.read  = port_fops_read,
 	.write = port_fops_write,
+	.splice_write = port_fops_splice_write,
 	.poll  = port_fops_poll,
 	.release = port_fops_release,
 	.fasync = port_fops_fasync,
@@ -868,6 +1031,7 @@ static const struct file_operations port_fops = {
 static int put_chars(u32 vtermno, const char *buf, int count)
 {
 	struct port *port;
+	struct scatterlist sg[1];
 
 	if (unlikely(early_put_chars))
 		return early_put_chars(vtermno, buf, count);
@@ -876,7 +1040,8 @@ static int put_chars(u32 vtermno, const char *buf, int count)
 	if (!port)
 		return -EPIPE;
 
-	return send_buf(port, (void *)buf, count, false);
+	sg_init_one(sg, buf, count);
+	return __send_to_port(port, sg, 1, count, (void *)buf, false);
 }
 
 /*
@@ -1103,7 +1268,7 @@ static unsigned int fill_queue(struct virtqueue *vq, spinlock_t *lock)
 
 	nr_added_bufs = 0;
 	do {
-		buf = alloc_buf(PAGE_SIZE);
+		buf = alloc_buf(vq, PAGE_SIZE, 0);
 		if (!buf)
 			break;
 
@@ -1255,14 +1420,6 @@ static void remove_port(struct kref *kref)
 
 	port = container_of(kref, struct port, kref);
 
-	sysfs_remove_group(&port->dev->kobj, &port_attribute_group);
-	device_destroy(pdrvdata.class, port->dev->devt);
-	cdev_del(port->cdev);
-
-	kfree(port->name);
-
-	debugfs_remove(port->debugfs_file);
-
 	kfree(port);
 }
 
@@ -1270,14 +1427,22 @@ static void remove_port_data(struct port *port)
 {
 	struct port_buffer *buf;
 
+	spin_lock_irq(&port->inbuf_lock);
 	/* Remove unused data this port might have received. */
 	discard_port_data(port);
-
-	reclaim_consumed_buffers(port);
 
 	/* Remove buffers we queued up for the Host to send us data in. */
 	while ((buf = virtqueue_detach_unused_buf(port->in_vq)))
 		free_buf(buf);
+	spin_unlock_irq(&port->inbuf_lock);
+
+	spin_lock_irq(&port->outvq_lock);
+	reclaim_consumed_buffers(port);
+
+	/* Free pending buffers from the out-queue. */
+	while ((buf = virtqueue_detach_unused_buf(port->out_vq)))
+		free_buf(buf);
+	spin_unlock_irq(&port->outvq_lock);
 }
 
 /*
@@ -1291,14 +1456,18 @@ static void unplug_port(struct port *port)
 	list_del(&port->list);
 	spin_unlock_irq(&port->portdev->ports_lock);
 
+	spin_lock_irq(&port->inbuf_lock);
 	if (port->guest_connected) {
-		port->guest_connected = false;
-		port->host_connected = false;
-		wake_up_interruptible(&port->waitqueue);
-
 		/* Let the app know the port is going down. */
 		send_sigio_to_port(port);
+
+		/* Do this after sigio is actually sent */
+		port->guest_connected = false;
+		port->host_connected = false;
+
+		wake_up_interruptible(&port->waitqueue);
 	}
+	spin_unlock_irq(&port->inbuf_lock);
 
 	if (is_console_port(port)) {
 		spin_lock_irq(&pdrvdata_lock);
@@ -1315,6 +1484,13 @@ static void unplug_port(struct port *port)
 	 * control message.
 	 */
 	port->portdev = NULL;
+
+	sysfs_remove_group(&port->dev->kobj, &port_attribute_group);
+	device_destroy(pdrvdata.class, port->dev->devt);
+	cdev_del(port->cdev);
+
+	debugfs_remove(port->debugfs_file);
+	kfree(port->name);
 
 	/*
 	 * Locks around here are not necessary - a port can't be
@@ -1407,7 +1583,9 @@ static void handle_control_message(struct ports_device *portdev,
 		 * If the guest is connected, it'll be interested in
 		 * knowing the host connection state changed.
 		 */
+		spin_lock_irq(&port->inbuf_lock);
 		send_sigio_to_port(port);
+		spin_unlock_irq(&port->inbuf_lock);
 		break;
 	case VIRTIO_CONSOLE_PORT_NAME:
 		/*
@@ -1465,23 +1643,23 @@ static void control_work_handler(struct work_struct *work)
 	portdev = container_of(work, struct ports_device, control_work);
 	vq = portdev->c_ivq;
 
-	spin_lock(&portdev->cvq_lock);
+	spin_lock(&portdev->c_ivq_lock);
 	while ((buf = virtqueue_get_buf(vq, &len))) {
-		spin_unlock(&portdev->cvq_lock);
+		spin_unlock(&portdev->c_ivq_lock);
 
 		buf->len = len;
 		buf->offset = 0;
 
 		handle_control_message(portdev, buf);
 
-		spin_lock(&portdev->cvq_lock);
+		spin_lock(&portdev->c_ivq_lock);
 		if (add_inbuf(portdev->c_ivq, buf) < 0) {
 			dev_warn(&portdev->vdev->dev,
 				 "Error adding buffer to queue\n");
 			free_buf(buf);
 		}
 	}
-	spin_unlock(&portdev->cvq_lock);
+	spin_unlock(&portdev->c_ivq_lock);
 }
 
 static void out_intr(struct virtqueue *vq)
@@ -1517,12 +1695,12 @@ static void in_intr(struct virtqueue *vq)
 	if (!port->guest_connected)
 		discard_port_data(port);
 
+	/* Send a SIGIO indicating new data in case the process asked for it */
+	send_sigio_to_port(port);
+
 	spin_unlock_irqrestore(&port->inbuf_lock, flags);
 
 	wake_up_interruptible(&port->waitqueue);
-
-	/* Send a SIGIO indicating new data in case the process asked for it */
-	send_sigio_to_port(port);
 
 	if (is_console_port(port) && hvc_poll(port->cons.hvc))
 		hvc_kick();
@@ -1745,10 +1923,12 @@ static int __devinit virtcons_probe(struct virtio_device *vdev)
 	if (multiport) {
 		unsigned int nr_added_bufs;
 
-		spin_lock_init(&portdev->cvq_lock);
+		spin_lock_init(&portdev->c_ivq_lock);
+		spin_lock_init(&portdev->c_ovq_lock);
 		INIT_WORK(&portdev->control_work, &control_work_handler);
 
-		nr_added_bufs = fill_queue(portdev->c_ivq, &portdev->cvq_lock);
+		nr_added_bufs = fill_queue(portdev->c_ivq,
+					   &portdev->c_ivq_lock);
 		if (!nr_added_bufs) {
 			dev_err(&vdev->dev,
 				"Error allocating buffers for control queue\n");
@@ -1875,7 +2055,7 @@ static int virtcons_restore(struct virtio_device *vdev)
 		return ret;
 
 	if (use_multiport(portdev))
-		fill_queue(portdev->c_ivq, &portdev->cvq_lock);
+		fill_queue(portdev->c_ivq, &portdev->c_ivq_lock);
 
 	list_for_each_entry(port, &portdev->ports, list) {
 		port->in_vq = portdev->in_vqs[port->id];
@@ -1931,7 +2111,17 @@ static int __init init(void)
 	INIT_LIST_HEAD(&pdrvdata.consoles);
 	INIT_LIST_HEAD(&pdrvdata.portdevs);
 
-	return register_virtio_driver(&virtio_console);
+	err = register_virtio_driver(&virtio_console);
+	if (err < 0) {
+		pr_err("Error %d registering virtio driver\n", err);
+		goto free;
+	}
+	return 0;
+free:
+	if (pdrvdata.debugfs_dir)
+		debugfs_remove_recursive(pdrvdata.debugfs_dir);
+	class_destroy(pdrvdata.class);
+	return err;
 }
 
 static void __exit fini(void)

@@ -49,6 +49,7 @@
 #ifdef CONFIG_PPC64
 #include <asm/paca.h>
 #endif
+#include <asm/vdso.h>
 
 #ifdef DEBUG
 #include <asm/udbg.h>
@@ -504,7 +505,7 @@ int __devinit start_secondary(void *unused)
 		smp_ops->take_timebase();
 
 	secondary_cpu_time_init();
-
+	vdso_getcpu_init();
 	ipi_call_lock();
 	notify_cpu_starting(cpu);
 	set_cpu_online(cpu, true);

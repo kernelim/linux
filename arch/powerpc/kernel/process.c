@@ -909,7 +909,7 @@ int sys_execve(unsigned long a0, unsigned long a1, unsigned long a2,
 	       struct pt_regs *regs)
 {
 	int error;
-	char *filename;
+	struct filename *filename;
 
 	filename = getname((char __user *) a0);
 	error = PTR_ERR(filename);
@@ -918,7 +918,7 @@ int sys_execve(unsigned long a0, unsigned long a1, unsigned long a2,
 	flush_fp_to_thread(current);
 	flush_altivec_to_thread(current);
 	flush_spe_to_thread(current);
-	error = do_execve(filename, (char __user * __user *) a1,
+	error = do_execve(filename->name, (char __user * __user *) a1,
 			  (char __user * __user *) a2, regs);
 	putname(filename);
 out:

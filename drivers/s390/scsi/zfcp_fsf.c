@@ -678,11 +678,9 @@ static int zfcp_fsf_sbal_check(struct zfcp_qdio *qdio)
 {
 	struct zfcp_qdio_queue *req_q = &qdio->req_q;
 
-	spin_lock_bh(&qdio->req_q_lock);
 	if (atomic_read(&req_q->count) ||
 	    !(atomic_read(&qdio->adapter->status) & ZFCP_STATUS_ADAPTER_QDIOUP))
 		return 1;
-	spin_unlock_bh(&qdio->req_q_lock);
 	return 0;
 }
 
@@ -691,9 +689,8 @@ static int zfcp_fsf_req_sbal_get(struct zfcp_qdio *qdio)
 	struct zfcp_adapter *adapter = qdio->adapter;
 	long ret;
 
-	spin_unlock_bh(&qdio->req_q_lock);
-	ret = wait_event_interruptible_timeout(qdio->req_q_wq,
-			       zfcp_fsf_sbal_check(qdio), 5 * HZ);
+	ret = wait_event_interruptible_lock_bh_timeout(qdio->req_q_wq,
+		       zfcp_fsf_sbal_check(qdio), qdio->req_q_lock, 5 * HZ);
 
 	if (!(atomic_read(&qdio->adapter->status) & ZFCP_STATUS_ADAPTER_QDIOUP))
 		return -EIO;
@@ -707,7 +704,6 @@ static int zfcp_fsf_req_sbal_get(struct zfcp_qdio *qdio)
 		zfcp_erp_adapter_reopen(adapter, 0, "fsrsg_1", NULL);
 	}
 
-	spin_lock_bh(&qdio->req_q_lock);
 	return -EIO;
 }
 

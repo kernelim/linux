@@ -18,7 +18,7 @@ _dst := $(if $(destination-y),$(destination-y),$(_dst))
 
 include scripts/Kbuild.include
 
-install       := $(INSTALL_HDR_PATH)/$(_dst)
+install       := $(INSTALL_HDR_PATH)/$(subst uapi/,,$(_dst))
 
 header-y      := $(sort $(header-y) $(unifdef-y))
 subdirs       := $(patsubst %/,%,$(filter %/, $(header-y)))

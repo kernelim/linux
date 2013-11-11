@@ -369,15 +369,16 @@ ext4_read_block_bitmap(struct super_block *sb, ext4_group_t block_group)
 static int ext4_has_free_blocks(struct ext4_sb_info *sbi,
 				s64 nblocks, unsigned int flags)
 {
-	s64 free_blocks, dirty_blocks, root_blocks;
+	s64 free_blocks, dirty_blocks, rsv, resv_blocks;
 	struct percpu_counter *fbc = &sbi->s_freeblocks_counter;
 	struct percpu_counter *dbc = &sbi->s_dirtyblocks_counter;
 
 	free_blocks  = percpu_counter_read_positive(fbc);
 	dirty_blocks = percpu_counter_read_positive(dbc);
-	root_blocks = ext4_r_blocks_count(sbi->s_es);
+	resv_blocks = atomic64_read(&sbi->s_resv_blocks);
+	rsv = ext4_r_blocks_count(sbi->s_es) + resv_blocks;
 
-	if (free_blocks - (nblocks + root_blocks + dirty_blocks) <
+	if (free_blocks - (nblocks + rsv + dirty_blocks) <
 						EXT4_FREEBLOCKS_WATERMARK) {
 		free_blocks  = percpu_counter_sum_positive(fbc);
 		dirty_blocks = percpu_counter_sum_positive(dbc);
@@ -390,15 +391,20 @@ static int ext4_has_free_blocks(struct ext4_sb_info *sbi,
 	/* Check whether we have space after
 	 * accounting for current dirty blocks & root reserved blocks.
 	 */
-	if (free_blocks >= ((root_blocks + nblocks) + dirty_blocks))
+	if (free_blocks >= ((rsv + nblocks) + dirty_blocks))
 		return 1;
 
 	/* Hm, nope.  Are (enough) root reserved blocks available? */
 	if (sbi->s_resuid == current_fsuid() ||
 	    ((sbi->s_resgid != 0) && in_group_p(sbi->s_resgid)) ||
 	    capable(CAP_SYS_RESOURCE) ||
-		(flags & EXT4_MB_USE_ROOT_BLOCKS)) {
+	    (flags & EXT4_MB_USE_ROOT_BLOCKS)) {
 
+		if (free_blocks >= (nblocks + dirty_blocks + resv_blocks))
+			return 1;
+	}
+	/* No free blocks. Let's see if we can dip into reserved pool */
+	if (flags & EXT4_MB_USE_RESERVED) {
 		if (free_blocks >= (nblocks + dirty_blocks))
 			return 1;
 	}

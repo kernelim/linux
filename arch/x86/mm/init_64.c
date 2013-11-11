@@ -996,53 +996,33 @@ static long __meminitdata addr_start, addr_end;
 static void __meminitdata *p_start, *p_end;
 static int __meminitdata node_start;
 
-int __meminit
-vmemmap_populate(struct page *start_page, unsigned long size, int node)
+static int __meminit vmemmap_populate_hugepages(unsigned long start,
+						unsigned long end, int node)
 {
-	unsigned long start = (unsigned long)start_page;
-	unsigned long end = (unsigned long)(start_page + size);
-	unsigned long addr, next;
+	unsigned long addr;
+	unsigned long next;
 	pgd_t *pgd;
 	pud_t *pud;
 	pmd_t *pmd;
-	int err = -ENOMEM;
 
 	for (addr = start; addr < end; addr = next) {
-		void *p = NULL;
+		next = pmd_addr_end(addr, end);
 
-		err = -ENOMEM;
 		pgd = vmemmap_pgd_populate(addr, node);
 		if (!pgd)
-			break;
+			return -ENOMEM;
 
 		pud = vmemmap_pud_populate(pgd, addr, node);
 		if (!pud)
-			break;
+			return -ENOMEM;
 
-		if (!cpu_has_pse) {
-			next = (addr + PAGE_SIZE) & PAGE_MASK;
-			pmd = vmemmap_pmd_populate(pud, addr, node);
+		pmd = pmd_offset(pud, addr);
+		if (pmd_none(*pmd)) {
+			void *p;
 
-			if (!pmd)
-				break;
-
-			p = vmemmap_pte_populate(pmd, addr, node);
-
-			if (!p)
-				break;
-
-			addr_end = addr + PAGE_SIZE;
-			p_end = p + PAGE_SIZE;
-		} else {
-			next = pmd_addr_end(addr, end);
-
-			pmd = pmd_offset(pud, addr);
-			if (pmd_none(*pmd)) {
+			p = vmemmap_alloc_block(PMD_SIZE, node);
+			if (p) {
 				pte_t entry;
-
-				p = vmemmap_alloc_block(PMD_SIZE, node);
-				if (!p)
-					break;
 
 				entry = pfn_pte(__pa(p) >> PAGE_SHIFT,
 						PAGE_KERNEL_LARGE);
@@ -1060,11 +1040,28 @@ vmemmap_populate(struct page *start_page, unsigned long size, int node)
 
 				addr_end = addr + PMD_SIZE;
 				p_end = p + PMD_SIZE;
-			} else
-				vmemmap_verify((pte_t *)pmd, node, addr, next);
+				continue;
+			}
+		} else if (pmd_large(*pmd)) {
+			vmemmap_verify((pte_t *)pmd, node, addr, next);
+			continue;
 		}
-		err = 0;
+		pr_warn_once("vmemmap: falling back to regular page backing\n");
+		if (vmemmap_populate_basepages(addr, next, node))
+			return -ENOMEM;
 	}
+
+	return 0;
+}
+
+int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node)
+{
+	int err;
+
+	if (cpu_has_pse)
+		err = vmemmap_populate_hugepages(start, end, node);
+	else
+		err = vmemmap_populate_basepages(start, end, node);
 
 	if (!err) {
 		sync_global_pgds(start, end);

@@ -48,6 +48,7 @@ struct pstore_private {
 	struct pstore_info *psi;
 	enum pstore_type_id type;
 	u64	id;
+	int	count;
 	ssize_t	size;
 	char	data[];
 };
@@ -81,7 +82,8 @@ static int pstore_unlink(struct inode *dir, struct dentry *dentry)
 	struct pstore_private *p = dentry->d_inode->i_private;
 
 	if (p->psi->erase)
-		p->psi->erase(p->type, p->id, p->psi);
+		p->psi->erase(p->type, p->id, p->count,
+			      dentry->d_inode->i_ctime, p->psi);
 
 	return simple_unlink(dir, dentry);
 }
@@ -187,7 +189,7 @@ int pstore_is_mounted(void)
  * Load it up with "size" bytes of data from "buf".
  * Set the mtime & ctime to the date that this record was originally stored.
  */
-int pstore_mkfile(enum pstore_type_id type, char *psname, u64 id,
+int pstore_mkfile(enum pstore_type_id type, char *psname, u64 id, int count,
 		  char *data, size_t size, struct timespec time,
 		  struct pstore_info *psi)
 {
@@ -221,6 +223,7 @@ int pstore_mkfile(enum pstore_type_id type, char *psname, u64 id,
 		goto fail_alloc;
 	private->type = type;
 	private->id = id;
+	private->count = count;
 	private->psi = psi;
 
 	switch (type) {

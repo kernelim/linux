@@ -1217,6 +1217,45 @@ out_error:
 }
 
 /*
+ * A weaker form of d_revalidate for revalidating just the dentry->d_inode
+ * when we don't really care about the dentry name. This is called when a
+ * pathwalk ends on a dentry that was not found via a normal lookup in the
+ * parent dir (e.g.: ".", "..", procfs symlinks or mountpoint traversals).
+ *
+ * In this situation, we just want to verify that the inode itself is OK
+ * since the dentry might have changed on the server.
+ */
+static int nfs_weak_revalidate(struct dentry *dentry, struct nameidata *nd)
+{
+	int error;
+	struct inode *inode = dentry->d_inode;
+
+	/*
+	 * I believe we can only get a negative dentry here in the case of a
+	 * procfs-style symlink. Just assume it's correct for now, but we may
+	 * eventually need to do something more here.
+	 */
+	if (!inode) {
+		dfprintk(LOOKUPCACHE, "%s: %s/%s has negative inode\n",
+				__func__, dentry->d_parent->d_name.name,
+				dentry->d_name.name);
+		return 1;
+	}
+
+	if (is_bad_inode(inode)) {
+		dfprintk(LOOKUPCACHE, "%s: %s/%s has dud inode\n",
+				__func__, dentry->d_parent->d_name.name,
+				dentry->d_name.name);
+		return 0;
+	}
+
+	error = nfs_revalidate_inode(NFS_SERVER(inode), inode);
+	dfprintk(LOOKUPCACHE, "NFS: %s: inode %lu is %s\n",
+			__func__, inode->i_ino, error ? "invalid" : "valid");
+	return !error;
+}
+
+/*
  * This is called from dput() when d_count is going to 0.
  */
 static int nfs_dentry_delete(struct dentry *dentry)
@@ -1268,10 +1307,11 @@ static void nfs_dentry_iput(struct dentry *dentry, struct inode *inode)
 }
 
 const struct dentry_operations nfs_dentry_operations = {
-	.d_revalidate	= nfs_lookup_revalidate,
-	.d_delete	= nfs_dentry_delete,
-	.d_iput		= nfs_dentry_iput,
-	.d_automount	= nfs_d_automount,
+	.d_revalidate		= nfs_lookup_revalidate,
+	.d_delete		= nfs_dentry_delete,
+	.d_iput			= nfs_dentry_iput,
+	.d_automount		= nfs_d_automount,
+	.d_weak_revalidate	= nfs_weak_revalidate,
 };
 
 static struct dentry *nfs_lookup(struct inode *dir, struct dentry * dentry, struct nameidata *nd)
@@ -1347,10 +1387,11 @@ out:
 static int nfs_open_revalidate(struct dentry *, struct nameidata *);
 
 const struct dentry_operations nfs4_dentry_operations = {
-	.d_revalidate	= nfs_open_revalidate,
-	.d_delete	= nfs_dentry_delete,
-	.d_iput		= nfs_dentry_iput,
-	.d_automount	= nfs_d_automount,
+	.d_revalidate		= nfs_open_revalidate,
+	.d_delete		= nfs_dentry_delete,
+	.d_iput			= nfs_dentry_iput,
+	.d_automount		= nfs_d_automount,
+	.d_weak_revalidate	= nfs_weak_revalidate,
 };
 
 /*
@@ -2234,7 +2275,7 @@ found:
 	nfs_access_free_entry(entry);
 }
 
-static void nfs_access_add_cache(struct inode *inode, struct nfs_access_entry *set)
+void nfs_access_add_cache(struct inode *inode, struct nfs_access_entry *set)
 {
 	struct nfs_access_entry *cache = kmalloc(sizeof(*cache), GFP_KERNEL);
 	if (cache == NULL)
@@ -2260,6 +2301,20 @@ static void nfs_access_add_cache(struct inode *inode, struct nfs_access_entry *s
 		spin_unlock(&nfs_access_lru_lock);
 	}
 }
+EXPORT_SYMBOL_GPL(nfs_access_add_cache);
+
+void nfs_access_set_mask(struct nfs_access_entry *entry, u32 access_result)
+{
+	entry->mask = 0;
+	if (access_result & NFS4_ACCESS_READ)
+		entry->mask |= MAY_READ;
+	if (access_result &
+	    (NFS4_ACCESS_MODIFY | NFS4_ACCESS_EXTEND | NFS4_ACCESS_DELETE))
+		entry->mask |= MAY_WRITE;
+	if (access_result & (NFS4_ACCESS_LOOKUP|NFS4_ACCESS_EXECUTE))
+		entry->mask |= MAY_EXEC;
+}
+EXPORT_SYMBOL_GPL(nfs_access_set_mask);
 
 static int nfs_do_access(struct inode *inode, struct rpc_cred *cred, int mask)
 {
@@ -2294,12 +2349,16 @@ static int nfs_open_permission_mask(int openflags)
 {
 	int mask = 0;
 
-	if (openflags & FMODE_READ)
-		mask |= MAY_READ;
-	if (openflags & FMODE_WRITE)
-		mask |= MAY_WRITE;
-	if (openflags & FMODE_EXEC)
-		mask |= MAY_EXEC;
+	if (openflags & __FMODE_EXEC) {
+		/* ONLY check exec rights */
+		mask = MAY_EXEC;
+	} else {
+		if ((openflags & O_ACCMODE) != O_WRONLY)
+			mask |= MAY_READ;
+		if ((openflags & O_ACCMODE) != O_RDONLY)
+			mask |= MAY_WRITE;
+	}
+
 	return mask;
 }
 

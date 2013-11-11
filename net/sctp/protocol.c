@@ -1122,6 +1122,15 @@ SCTP_STATIC __init int sctp_init(void)
 	/* Whether Cookie Preservative is enabled(1) or not(0) */
 	sctp_cookie_preserve_enable 	= 1;
 
+	/* Default sctp sockets to use md5 as their hmac alg */
+#if defined (CONFIG_SCTP_DEFAULT_COOKIE_HMAC_MD5)
+	sctp_hmac_algorithm		= "md5";
+#elif defined (CONFIG_SCTP_DEFAULT_COOKIE_HMAC_SHA1)
+	sctp_hmac_algorithm		= "sha1";
+#else
+	sctp_hmac_algorithm		= NULL;
+#endif
+
 	/* Max.Burst		    - 4 */
 	sctp_max_burst 			= SCTP_DEFAULT_MAX_BURST;
 
@@ -1181,7 +1190,7 @@ SCTP_STATIC __init int sctp_init(void)
 	max_share = min(4UL*1024*1024, limit);
 
 	sysctl_sctp_rmem[0] = SK_MEM_QUANTUM; /* give each asoc 1 page min */
-	sysctl_sctp_rmem[1] = 1500 * SKB_TRUESIZE(1);
+	sysctl_sctp_rmem[1] = (1500 *(sizeof(struct sk_buff) + 1));
 	sysctl_sctp_rmem[2] = max(sysctl_sctp_rmem[1], max_share);
 
 	sysctl_sctp_wmem[0] = SK_MEM_QUANTUM;

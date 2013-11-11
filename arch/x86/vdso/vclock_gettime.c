@@ -34,10 +34,10 @@ notrace static long vdso_fallback_gettime(long clock, struct timespec *ts)
 	return ret;
 }
 
-notrace static inline long vgetns(void)
+notrace static inline unsigned long vgetns(void)
 {
-	long v;
-	cycles_t (*vread)(void);
+	cycle_t v;
+	cycle_t (*vread)(void);
 	vread = gtod->clock.vread;
 	v = (vread() - gtod->clock.cycle_last) & gtod->clock.mask;
 	return (v * gtod->clock.mult) >> gtod->clock.shift;

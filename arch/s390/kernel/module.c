@@ -203,6 +203,8 @@ apply_rela(Elf_Rela *rela, Elf_Addr base, Elf_Sym *symtab,
 	val = symtab[r_sym].st_value;
 
 	switch (r_type) {
+	case R_390_NONE:	/* No relocation.  */
+		break;
 	case R_390_8:		/* Direct 8 bit.   */
 	case R_390_12:		/* Direct 12 bit.  */
 	case R_390_16:		/* Direct 16 bit.  */

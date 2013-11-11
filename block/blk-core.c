@@ -1694,8 +1694,8 @@ static inline void __generic_make_request(struct bio *bio)
 			goto end_io;
 		}
 
-		if (unlikely(!bio_rw_flagged(bio, BIO_RW_DISCARD) &&
-			     nr_sectors > queue_max_hw_sectors(q))) {
+		if (likely(bio_is_rw(bio) &&
+			   nr_sectors > queue_max_hw_sectors(q))) {
 			printk(KERN_ERR "bio too big device %s (%u > %u)\n",
 			       bdevname(bio->bi_bdev, b),
 			       bio_sectors(bio),
@@ -1734,7 +1734,7 @@ static inline void __generic_make_request(struct bio *bio)
 			}
 		}
 
-		if (bio_rw_flagged(bio, BIO_RW_DISCARD) &&
+		if ((bio->bi_rw & BIO_DISCARD) &&
 		    !blk_queue_discard(q)) {
 			err = -EOPNOTSUPP;
 			goto end_io;
@@ -1742,13 +1742,6 @@ static inline void __generic_make_request(struct bio *bio)
 
 		if (blk_throtl_bio(q, bio))
 			break;  /* throttled, will be resubmitted later */
-
-		/*
-		 * If bio = NULL, bio has been throttled and will be submitted
-		 * later.
-		 */
-		if (!bio)
-			break;
 
 		trace_block_bio_queue(q, bio);
 
@@ -1833,7 +1826,7 @@ void submit_bio(int rw, struct bio *bio)
 	 * If it's a regular read/write or a barrier with data attached,
 	 * go through the normal accounting stuff before submission.
 	 */
-	if (bio_has_data(bio) && !(rw & (1 << BIO_RW_DISCARD))) {
+	if (bio_has_data(bio)) {
 		if (rw & WRITE) {
 			count_vm_events(PGPGOUT, count);
 		} else {
@@ -1878,11 +1871,10 @@ EXPORT_SYMBOL(submit_bio);
  */
 int blk_rq_check_limits(struct request_queue *q, struct request *rq)
 {
-	if (rq->cmd_flags & REQ_DISCARD)
+	if (!rq_mergeable(rq))
 		return 0;
 
-	if (blk_rq_sectors(rq) > queue_max_sectors(q) ||
-	    blk_rq_bytes(rq) > queue_max_hw_sectors(q) << 9) {
+	if (blk_rq_sectors(rq) > blk_queue_get_max_sectors(q, rq->cmd_flags)) {
 		printk(KERN_ERR "%s: over max size limit.\n", __func__);
 		return -EIO;
 	}
@@ -2356,7 +2348,7 @@ bool blk_update_request(struct request *req, int error, unsigned int nr_bytes)
 	req->buffer = bio_data(req->bio);
 
 	/* update sector only for requests with clear definition of sector */
-	if (req->cmd_type == REQ_TYPE_FS || (req->cmd_flags & REQ_DISCARD))
+	if (req->cmd_type == REQ_TYPE_FS)
 		req->__sector += total_bytes >> 9;
 
 	/* mixed attributes always follow the first bio */
@@ -2370,7 +2362,7 @@ bool blk_update_request(struct request *req, int error, unsigned int nr_bytes)
 	 * size, something has gone terribly wrong.
 	 */
 	if (blk_rq_bytes(req) < blk_rq_cur_bytes(req)) {
-		printk(KERN_ERR "blk: request botched\n");
+		blk_dump_rq_flags(req, "request botched");
 		req->__data_len = blk_rq_cur_bytes(req);
 	}
 

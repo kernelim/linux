@@ -277,7 +277,7 @@ acpi_status acpi_run_osc(acpi_handle handle, struct acpi_osc_context *context);
 #define OSC_SB_PAD_SUPPORT		1
 #define OSC_SB_PPC_OST_SUPPORT		2
 #define OSC_SB_PR3_SUPPORT		4
-#define OSC_SB_CPUHP_OST_SUPPORT	8
+#define OSC_SB_HOTPLUG_OST_SUPPORT	8
 #define OSC_SB_APEI_SUPPORT		16
 
 extern bool osc_sb_apei_support_acked;
@@ -305,6 +305,44 @@ extern bool osc_sb_apei_support_acked;
 				OSC_PCI_EXPRESS_CAP_STRUCTURE_CONTROL)
 extern acpi_status acpi_pci_osc_control_set(acpi_handle handle,
 					     u32 *mask, u32 req);
+
+/* Enable _OST when all relevant hotplug operations are enabled */
+#if defined(CONFIG_ACPI_HOTPLUG_CPU) &&			\
+	(defined(CONFIG_ACPI_HOTPLUG_MEMORY) ||		\
+	 defined(CONFIG_ACPI_HOTPLUG_MEMORY_MODULE)) &&	\
+	(defined(CONFIG_ACPI_CONTAINER) ||		\
+	 defined(CONFIG_ACPI_CONTAINER_MODULE))
+#define ACPI_HOTPLUG_OST
+#endif
+
+/* _OST Source Event Code (OSPM Action) */
+#define ACPI_OST_EC_OSPM_SHUTDOWN		0x100
+#define ACPI_OST_EC_OSPM_EJECT			0x103
+#define ACPI_OST_EC_OSPM_INSERTION		0x200
+
+/* _OST General Processing Status Code */
+#define ACPI_OST_SC_SUCCESS			0x0
+#define ACPI_OST_SC_NON_SPECIFIC_FAILURE	0x1
+#define ACPI_OST_SC_UNRECOGNIZED_NOTIFY		0x2
+
+/* _OST OS Shutdown Processing (0x100) Status Code */
+#define ACPI_OST_SC_OS_SHUTDOWN_DENIED		0x80
+#define ACPI_OST_SC_OS_SHUTDOWN_IN_PROGRESS	0x81
+#define ACPI_OST_SC_OS_SHUTDOWN_COMPLETED	0x82
+#define ACPI_OST_SC_OS_SHUTDOWN_NOT_SUPPORTED	0x83
+
+/* _OST Ejection Request (0x3, 0x103) Status Code */
+#define ACPI_OST_SC_EJECT_NOT_SUPPORTED		0x80
+#define ACPI_OST_SC_DEVICE_IN_USE		0x81
+#define ACPI_OST_SC_DEVICE_BUSY			0x82
+#define ACPI_OST_SC_EJECT_DEPENDENCY_BUSY	0x83
+#define ACPI_OST_SC_EJECT_IN_PROGRESS		0x84
+
+/* _OST Insertion Request (0x200) Status Code */
+#define ACPI_OST_SC_INSERT_IN_PROGRESS		0x80
+#define ACPI_OST_SC_DRIVER_LOAD_FAILURE		0x81
+#define ACPI_OST_SC_INSERT_NOT_SUPPORTED	0x82
+
 extern void acpi_early_init(void);
 
 #else	/* !CONFIG_ACPI */
@@ -356,4 +394,48 @@ static inline int acpi_table_parse(char *id,
 	return -1;
 }
 #endif	/* !CONFIG_ACPI */
+
+#ifdef CONFIG_ACPI
+__printf(3, 4)
+void acpi_handle_printk(const char *level, acpi_handle handle,
+			const char *fmt, ...);
+#else	/* !CONFIG_ACPI */
+static inline __printf(3, 4) void
+acpi_handle_printk(const char *level, void *handle, const char *fmt, ...) {}
+#endif	/* !CONFIG_ACPI */
+
+/*
+ * acpi_handle_<level>: Print message with ACPI prefix and object path
+ *
+ * These interfaces acquire the global namespace mutex to obtain an object
+ * path.  In interrupt context, it shows the object path as <n/a>.
+ */
+#define acpi_handle_emerg(handle, fmt, ...)				\
+	acpi_handle_printk(KERN_EMERG, handle, fmt, ##__VA_ARGS__)
+#define acpi_handle_alert(handle, fmt, ...)				\
+	acpi_handle_printk(KERN_ALERT, handle, fmt, ##__VA_ARGS__)
+#define acpi_handle_crit(handle, fmt, ...)				\
+	acpi_handle_printk(KERN_CRIT, handle, fmt, ##__VA_ARGS__)
+#define acpi_handle_err(handle, fmt, ...)				\
+	acpi_handle_printk(KERN_ERR, handle, fmt, ##__VA_ARGS__)
+#define acpi_handle_warn(handle, fmt, ...)				\
+	acpi_handle_printk(KERN_WARNING, handle, fmt, ##__VA_ARGS__)
+#define acpi_handle_notice(handle, fmt, ...)				\
+	acpi_handle_printk(KERN_NOTICE, handle, fmt, ##__VA_ARGS__)
+#define acpi_handle_info(handle, fmt, ...)				\
+	acpi_handle_printk(KERN_INFO, handle, fmt, ##__VA_ARGS__)
+
+/* REVISIT: Support CONFIG_DYNAMIC_DEBUG when necessary */
+#if defined(DEBUG) || defined(CONFIG_DYNAMIC_DEBUG)
+#define acpi_handle_debug(handle, fmt, ...)				\
+	acpi_handle_printk(KERN_DEBUG, handle, fmt, ##__VA_ARGS__)
+#else
+#define acpi_handle_debug(handle, fmt, ...)				\
+({									\
+	if (0)								\
+		acpi_handle_printk(KERN_DEBUG, handle, fmt, ##__VA_ARGS__); \
+	0;								\
+})
+#endif
+
 #endif	/*_LINUX_ACPI_H*/

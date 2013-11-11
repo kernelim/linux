@@ -2334,42 +2334,52 @@ static int create_files(struct bmc_device *bmc)
 	bmc->device_id_attr.attr.name = "device_id";
 	bmc->device_id_attr.attr.mode = S_IRUGO;
 	bmc->device_id_attr.show = device_id_show;
+	sysfs_attr_init(&bmc->device_id_attr.attr);
 
 	bmc->provides_dev_sdrs_attr.attr.name = "provides_device_sdrs";
 	bmc->provides_dev_sdrs_attr.attr.mode = S_IRUGO;
 	bmc->provides_dev_sdrs_attr.show = provides_dev_sdrs_show;
+	sysfs_attr_init(&bmc->provides_dev_sdrs_attr.attr);
 
 	bmc->revision_attr.attr.name = "revision";
 	bmc->revision_attr.attr.mode = S_IRUGO;
 	bmc->revision_attr.show = revision_show;
+	sysfs_attr_init(&bmc->revision_attr.attr);
 
 	bmc->firmware_rev_attr.attr.name = "firmware_revision";
 	bmc->firmware_rev_attr.attr.mode = S_IRUGO;
 	bmc->firmware_rev_attr.show = firmware_rev_show;
+	sysfs_attr_init(&bmc->firmware_rev_attr.attr);
 
 	bmc->version_attr.attr.name = "ipmi_version";
 	bmc->version_attr.attr.mode = S_IRUGO;
 	bmc->version_attr.show = ipmi_version_show;
+	sysfs_attr_init(&bmc->version_attr.attr);
 
 	bmc->add_dev_support_attr.attr.name = "additional_device_support";
 	bmc->add_dev_support_attr.attr.mode = S_IRUGO;
 	bmc->add_dev_support_attr.show = add_dev_support_show;
+	sysfs_attr_init(&bmc->add_dev_support_attr.attr);
 
 	bmc->manufacturer_id_attr.attr.name = "manufacturer_id";
 	bmc->manufacturer_id_attr.attr.mode = S_IRUGO;
 	bmc->manufacturer_id_attr.show = manufacturer_id_show;
+	sysfs_attr_init(&bmc->manufacturer_id_attr.attr);
 
 	bmc->product_id_attr.attr.name = "product_id";
 	bmc->product_id_attr.attr.mode = S_IRUGO;
 	bmc->product_id_attr.show = product_id_show;
+	sysfs_attr_init(&bmc->product_id_attr.attr);
 
 	bmc->guid_attr.attr.name = "guid";
 	bmc->guid_attr.attr.mode = S_IRUGO;
 	bmc->guid_attr.show = guid_show;
+	sysfs_attr_init(&bmc->guid_attr.attr);
 
 	bmc->aux_firmware_rev_attr.attr.name = "aux_firmware_revision";
 	bmc->aux_firmware_rev_attr.attr.mode = S_IRUGO;
 	bmc->aux_firmware_rev_attr.show = aux_firmware_rev_show;
+	sysfs_attr_init(&bmc->aux_firmware_rev_attr.attr);
 
 	err = device_create_file(&bmc->dev->dev,
 			   &bmc->device_id_attr);
@@ -2557,12 +2567,11 @@ static int ipmi_bmc_register(ipmi_smi_t intf, int ifnum,
 			return rv;
 		}
 
-		printk(KERN_INFO
-		       "ipmi: Found new BMC (man_id: 0x%6.6x, "
-		       " prod_id: 0x%4.4x, dev_id: 0x%2.2x)\n",
-		       bmc->id.manufacturer_id,
-		       bmc->id.product_id,
-		       bmc->id.device_id);
+		dev_info(intf->si_dev, "Found new BMC (man_id: 0x%6.6x, "
+			 "prod_id: 0x%4.4x, dev_id: 0x%2.2x)\n",
+			 bmc->id.manufacturer_id,
+			 bmc->id.product_id,
+			 bmc->id.device_id);
 	}
 
 	/*
@@ -2788,15 +2797,17 @@ channel_handler(ipmi_smi_t intf, struct ipmi_recv_msg *msg)
 	return;
 }
 
-void ipmi_poll_interface(ipmi_user_t user)
+static void ipmi_poll(ipmi_smi_t intf)
 {
-	ipmi_smi_t intf = user->intf;
-
 	if (intf->handlers->poll)
 		intf->handlers->poll(intf->send_info);
-
 	/* In case something came in */
 	handle_new_recv_msgs(intf);
+}
+
+void ipmi_poll_interface(ipmi_user_t user)
+{
+	ipmi_poll(user->intf);
 }
 EXPORT_SYMBOL(ipmi_poll_interface);
 
@@ -4211,12 +4222,48 @@ EXPORT_SYMBOL(ipmi_free_recv_msg);
 
 #ifdef CONFIG_IPMI_PANIC_EVENT
 
+static atomic_t panic_done_count = ATOMIC_INIT(0);
+
 static void dummy_smi_done_handler(struct ipmi_smi_msg *msg)
 {
+	atomic_dec(&panic_done_count);
 }
 
 static void dummy_recv_done_handler(struct ipmi_recv_msg *msg)
 {
+	atomic_dec(&panic_done_count);
+}
+
+/*
+ * Inside a panic, send a message and wait for a response.
+ */
+static void ipmi_panic_request_and_wait(ipmi_smi_t           intf,
+					struct ipmi_addr     *addr,
+					struct kernel_ipmi_msg *msg)
+{
+	struct ipmi_smi_msg  smi_msg;
+	struct ipmi_recv_msg recv_msg;
+	int rv;
+
+	smi_msg.done = dummy_smi_done_handler;
+	recv_msg.done = dummy_recv_done_handler;
+	atomic_add(2, &panic_done_count);
+	rv = i_ipmi_request(NULL,
+			    intf,
+			    addr,
+			    0,
+			    msg,
+			    intf,
+			    &smi_msg,
+			    &recv_msg,
+			    0,
+			    intf->channels[0].address,
+			    intf->channels[0].lun,
+			    0, 1); /* Don't retry, and don't wait. */
+	if (rv)
+		atomic_sub(2, &panic_done_count);
+	while (atomic_read(&panic_done_count) != 0)
+		ipmi_poll(intf);
 }
 
 #ifdef CONFIG_IPMI_PANIC_STRING
@@ -4255,8 +4302,6 @@ static void send_panic_events(char *str)
 	unsigned char                     data[16];
 	struct ipmi_system_interface_addr *si;
 	struct ipmi_addr                  addr;
-	struct ipmi_smi_msg               smi_msg;
-	struct ipmi_recv_msg              recv_msg;
 
 	si = (struct ipmi_system_interface_addr *) &addr;
 	si->addr_type = IPMI_SYSTEM_INTERFACE_ADDR_TYPE;
@@ -4284,9 +4329,6 @@ static void send_panic_events(char *str)
 		data[7] = str[2];
 	}
 
-	smi_msg.done = dummy_smi_done_handler;
-	recv_msg.done = dummy_recv_done_handler;
-
 	/* For every registered interface, send the event. */
 	list_for_each_entry_rcu(intf, &ipmi_interfaces, link) {
 		if (!intf->handlers)
@@ -4296,18 +4338,7 @@ static void send_panic_events(char *str)
 		intf->run_to_completion = 1;
 		/* Send the event announcing the panic. */
 		intf->handlers->set_run_to_completion(intf->send_info, 1);
-		i_ipmi_request(NULL,
-			       intf,
-			       &addr,
-			       0,
-			       &msg,
-			       intf,
-			       &smi_msg,
-			       &recv_msg,
-			       0,
-			       intf->channels[0].address,
-			       intf->channels[0].lun,
-			       0, 1); /* Don't retry, and don't wait. */
+		ipmi_panic_request_and_wait(intf, &addr, &msg);
 	}
 
 #ifdef CONFIG_IPMI_PANIC_STRING
@@ -4355,18 +4386,7 @@ static void send_panic_events(char *str)
 		msg.data = NULL;
 		msg.data_len = 0;
 		intf->null_user_handler = device_id_fetcher;
-		i_ipmi_request(NULL,
-			       intf,
-			       &addr,
-			       0,
-			       &msg,
-			       intf,
-			       &smi_msg,
-			       &recv_msg,
-			       0,
-			       intf->channels[0].address,
-			       intf->channels[0].lun,
-			       0, 1); /* Don't retry, and don't wait. */
+		ipmi_panic_request_and_wait(intf, &addr, &msg);
 
 		if (intf->local_event_generator) {
 			/* Request the event receiver from the local MC. */
@@ -4375,18 +4395,7 @@ static void send_panic_events(char *str)
 			msg.data = NULL;
 			msg.data_len = 0;
 			intf->null_user_handler = event_receiver_fetcher;
-			i_ipmi_request(NULL,
-				       intf,
-				       &addr,
-				       0,
-				       &msg,
-				       intf,
-				       &smi_msg,
-				       &recv_msg,
-				       0,
-				       intf->channels[0].address,
-				       intf->channels[0].lun,
-				       0, 1); /* no retry, and no wait. */
+			ipmi_panic_request_and_wait(intf, &addr, &msg);
 		}
 		intf->null_user_handler = NULL;
 
@@ -4443,18 +4452,7 @@ static void send_panic_events(char *str)
 			strncpy(data+5, p, 11);
 			p += size;
 
-			i_ipmi_request(NULL,
-				       intf,
-				       &addr,
-				       0,
-				       &msg,
-				       intf,
-				       &smi_msg,
-				       &recv_msg,
-				       0,
-				       intf->channels[0].address,
-				       intf->channels[0].lun,
-				       0, 1); /* no retry, and no wait. */
+			ipmi_panic_request_and_wait(intf, &addr, &msg);
 		}
 	}
 #endif /* CONFIG_IPMI_PANIC_STRING */
@@ -4531,13 +4529,13 @@ static int ipmi_init_msghandler(void)
 	return 0;
 }
 
-static __init int ipmi_init_msghandler_mod(void)
+static int __init ipmi_init_msghandler_mod(void)
 {
 	ipmi_init_msghandler();
 	return 0;
 }
 
-static __exit void cleanup_ipmi(void)
+static void __exit cleanup_ipmi(void)
 {
 	int count;
 

@@ -95,6 +95,10 @@ enum bio_rw_flags {
 #define BIO_FUA			(1 << BIO_RW_FUA)
 #define BIO_DISCARD		(1 << BIO_RW_DISCARD)
 
+/* This mask is used for bio merge checking (RHEL6 doesn't share bio and request flags) */
+#define BIO_NOMERGE_FLAGS \
+	((1 << BIO_RW_BARRIER) | BIO_FLUSH | BIO_FUA)
+
 /*
  * request type modified bits. first four bits match BIO_RW* bits, important
  */
@@ -154,6 +158,10 @@ enum rq_flag_bits {
 	(REQ_WRITE | REQ_FAILFAST_MASK | REQ_HARDBARRIER | REQ_SYNC | \
 	 REQ_META | REQ_DISCARD | REQ_NOIDLE | REQ_FLUSH | REQ_FUA)
 #define REQ_CLONE_MASK		REQ_COMMON_MASK
+
+/* This mask is used for request merge checking */
+#define REQ_NOMERGE_FLAGS \
+	(REQ_NOMERGE | REQ_STARTED | REQ_HARDBARRIER | REQ_SOFTBARRIER | REQ_FLUSH | REQ_FUA)
 
 #define REQ_SORTED		(1 << __REQ_SORTED)
 #define REQ_SOFTBARRIER		(1 << __REQ_SOFTBARRIER)

@@ -51,7 +51,6 @@ struct gfs2_log_header_host {
  */
 
 struct gfs2_log_operations {
-	void (*lo_add) (struct gfs2_sbd *sdp, struct gfs2_bufdata *bd);
 	void (*lo_before_commit) (struct gfs2_sbd *sdp);
 	void (*lo_after_commit) (struct gfs2_sbd *sdp, struct gfs2_ail *ai);
 	void (*lo_before_scan) (struct gfs2_jdesc *jd,
@@ -133,13 +132,7 @@ TAS_BUFFER_FNS(Zeronew, zeronew)
 struct gfs2_bufdata {
 	struct buffer_head *bd_bh;
 	struct gfs2_glock *bd_gl;
-
-	union {
-		struct list_head list_tr;
-		u64 blkno;
-	} u;
-#define bd_list_tr u.list_tr
-#define bd_blkno u.blkno
+	u64 bd_blkno;
 
 	struct list_head bd_list;
 	const struct gfs2_log_operations *bd_ops;
@@ -179,7 +172,7 @@ struct gfs2_glock_operations {
 	int (*go_lock) (struct gfs2_holder *gh);
 	void (*go_unlock) (struct gfs2_holder *gh);
 	int (*go_dump)(struct seq_file *seq, const struct gfs2_glock *gl);
-	void (*go_callback) (struct gfs2_glock *gl);
+	void (*go_callback) (struct gfs2_glock *gl, bool remote);
 	const int go_type;
 	const unsigned long go_flags;
 #define GLOF_ASPACE 1
@@ -308,6 +301,7 @@ enum {
 	GIF_QD_LOCKED		= 1,
 	GIF_ALLOC_FAILED        = 2,
 	GIF_SW_PAGED		= 3,
+	GIF_ORDERED		= 4,
 };
 
 struct gfs2_inode {
@@ -324,6 +318,7 @@ struct gfs2_inode {
 	struct gfs2_rgrpd *i_rgd;
 	u64 i_goal;	/* goal block for allocations */
 	struct rw_semaphore i_rw_mutex;
+	struct list_head i_ordered;
 	struct list_head i_trunc_list;
 	__be64 *i_hash_cache;
 	u32 i_entries;
@@ -401,13 +396,10 @@ struct gfs2_trans {
 
 	int tr_touched;
 
-	unsigned int tr_num_buf;
 	unsigned int tr_num_buf_new;
 	unsigned int tr_num_databuf_new;
 	unsigned int tr_num_buf_rm;
 	unsigned int tr_num_databuf_rm;
-	struct list_head tr_list_buf;
-
 	unsigned int tr_num_revoke;
 	unsigned int tr_num_revoke_rm;
 };
@@ -583,6 +575,7 @@ struct gfs2_sbd {
 	u32 sd_hash_bsize_shift;
 	u32 sd_hash_ptrs;	/* Number of pointers in a hash block */
 	u32 sd_qc_per_block;
+	u32 sd_blocks_per_bitmap;
 	u32 sd_max_dirres;	/* Max blocks needed to add a directory entry */
 	u32 sd_max_height;	/* Max height of a file's metadata tree */
 	u64 sd_heightsize[GFS2_MAX_META_HEIGHT + 1];
@@ -681,6 +674,7 @@ struct gfs2_sbd {
 	struct list_head sd_log_le_revoke;
 	struct list_head sd_log_le_databuf;
 	struct list_head sd_log_le_ordered;
+	spinlock_t sd_ordered_lock;
 
 	atomic_t sd_log_blks_free;
 	struct mutex sd_log_reserve_mutex;

@@ -48,8 +48,7 @@
 
 /* return minimum truesize of one skb containing X bytes of data */
 #define SKB_TRUESIZE(X) ((X) +						\
-			 SKB_DATA_ALIGN(sizeof(struct sk_buff)) +	\
-			 SKB_DATA_ALIGN(sizeof(struct skb_shared_info)))
+			 SKB_DATA_ALIGN(sizeof(struct sk_buff)))
 
 /* A. Checksumming of received packets by device.
  *
@@ -215,7 +214,13 @@ union skb_shared_tx {
 			software:1,
 			in_progress:1,
 			reserved:1,
-			dev_zerocopy:1;
+			dev_zerocopy:1,
+			/* This indicates at least one fragment might be overwritten
+			 * (as in vmsplice(), sendfile() ...)
+			 * If we need to compute a TX checksum, we'll need to copy
+			 * all frags to avoid possible bad checksum
+			 */
+			shared_frag:1;
 	};
 	__u8 flags;
 };
@@ -285,6 +290,10 @@ enum {
 	SKB_GSO_TCPV6 = 1 << 4,
 
 	SKB_GSO_FCOE = 1 << 5,
+
+	SKB_GSO_GRE = 1 << 6,
+
+	SKB_GSO_UDP_TUNNEL = 1 << 7,
 };
 
 #if BITS_PER_LONG > 32
@@ -426,6 +435,12 @@ struct sk_buff {
 #endif
 #ifndef __GENKSYMS__
 	__u8			ooo_okay:1;
+	/* Encapsulation protocol and NIC drivers should use
+	 * this flag to indicate to each other if the skb contains
+	 * encapsulated packet or not and maybe use the inner packet
+	 * headers if needed
+	 */
+	__u8			encapsulation:1;
 #endif
 	kmemcheck_bitfield_end(flags2);
 
@@ -685,6 +700,16 @@ static inline int skb_cloned(const struct sk_buff *skb)
 {
 	return skb->cloned &&
 	       (atomic_read(&skb_shinfo(skb)->dataref) & SKB_DATAREF_MASK) != 1;
+}
+
+static inline int skb_unclone(struct sk_buff *skb, gfp_t pri)
+{
+	might_sleep_if(pri & __GFP_WAIT);
+
+	if (skb_cloned(skb))
+		return pskb_expand_head(skb, 0, 0, pri);
+
+	return 0;
 }
 
 /**
@@ -1155,7 +1180,7 @@ extern void skb_add_rx_frag(struct sk_buff *skb, int i, struct page *page,
 			    int off, int size, unsigned int truesize);
 
 #define SKB_PAGE_ASSERT(skb) 	BUG_ON(skb_shinfo(skb)->nr_frags)
-#define SKB_FRAG_ASSERT(skb) 	BUG_ON(skb_has_frags(skb))
+#define SKB_FRAG_ASSERT(skb) 	BUG_ON(skb_has_frag_list(skb))
 #define SKB_LINEAR_ASSERT(skb)  BUG_ON(skb_is_nonlinear(skb))
 
 #ifdef NET_SKBUFF_DATA_USES_OFFSET
@@ -1882,6 +1907,18 @@ static inline int skb_linearize(struct sk_buff *skb)
 }
 
 /**
+ * skb_has_shared_frag - can any frag be overwritten
+ * @skb: buffer to test
+ *
+ * Return true if the skb has at least one frag that might be modified
+ * by an external entity (as in vmsplice()/sendfile())
+ */
+static inline bool skb_has_shared_frag(struct sk_buff *skb)
+{
+	return skb_is_nonlinear(skb) && skb_tx(skb)->shared_frag;
+}
+
+/**
  *	skb_linearize_cow - make sure skb is linear and writable
  *	@skb: buffer to process
  *
@@ -1957,7 +1994,7 @@ static inline int pskb_trim_rcsum(struct sk_buff *skb, unsigned int len)
 		     skb = skb->prev)
 
 
-static inline bool skb_has_frags(const struct sk_buff *skb)
+static inline bool skb_has_frag_list(const struct sk_buff *skb)
 {
 	return skb_shinfo(skb)->frag_list != NULL;
 }
@@ -2136,8 +2173,7 @@ static inline void sw_tx_timestamp(struct sk_buff *skb)
  * skb_tx_timestamp() - Driver hook for transmit timestamping
  *
  * Ethernet MAC Drivers should call this function in their hard_xmit()
- * function as soon as possible after giving the sk_buff to the MAC
- * hardware, but before freeing the sk_buff.
+ * function immediately before giving the sk_buff to the MAC hardware.
  *
  * @skb: A socket buffer.
  */
@@ -2323,6 +2359,21 @@ static inline struct sec_path *skb_sec_path(struct sk_buff *skb)
 	return NULL;
 }
 #endif
+
+/* Keeps track of mac header offset relative to skb->head.
+ * It is useful for TSO of Tunneling protocol. e.g. GRE.
+ * For non-tunnel skb it points to skb_mac_header() and for
+ * tunnel skb it points to outer mac header. */
+struct skb_gso_cb {
+	int mac_offset;
+};
+#define SKB_GSO_CB(skb) ((struct skb_gso_cb *)(skb)->cb)
+
+static inline int skb_tnl_header_len(const struct sk_buff *inner_skb)
+{
+	return (skb_mac_header(inner_skb) - inner_skb->head) -
+		SKB_GSO_CB(inner_skb)->mac_offset;
+}
 
 static inline int skb_is_gso(const struct sk_buff *skb)
 {

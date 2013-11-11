@@ -16,6 +16,7 @@
 #include <linux/kthread.h>
 #include <linux/khugepaged.h>
 #include <linux/freezer.h>
+#include <linux/mman.h>
 #include <asm/tlb.h>
 #include <asm/pgalloc.h>
 #include "internal.h"
@@ -169,9 +170,11 @@ static ssize_t double_flag_show(struct kobject *kobj,
 {
 	if (test_bit(enabled, &transparent_hugepage_flags)) {
 		VM_BUG_ON(test_bit(req_madv, &transparent_hugepage_flags));
-		return sprintf(buf, "[always] never\n");
-	} else
-		return sprintf(buf, "always [never]\n");
+		return sprintf(buf, "[always] madvise never\n");
+	} else if (test_bit(req_madv, &transparent_hugepage_flags))
+		return sprintf(buf, "always [madvise] never\n");
+	else
+		return sprintf(buf, "always madvise [never]\n");
 }
 static ssize_t double_flag_store(struct kobject *kobj,
 				 struct kobj_attribute *attr,
@@ -183,6 +186,10 @@ static ssize_t double_flag_store(struct kobject *kobj,
 		    min(sizeof("always")-1, count))) {
 		set_bit(enabled, &transparent_hugepage_flags);
 		clear_bit(req_madv, &transparent_hugepage_flags);
+	} else if (!memcmp("madvise", buf,
+			min(sizeof("madvise")-1, count))) {
+		clear_bit(enabled, &transparent_hugepage_flags);
+		set_bit(req_madv, &transparent_hugepage_flags);
 	} else if (!memcmp("never", buf,
 			   min(sizeof("never")-1, count))) {
 		clear_bit(enabled, &transparent_hugepage_flags);
@@ -550,6 +557,12 @@ static int __init setup_transparent_hugepage(char *str)
 			&transparent_hugepage_flags);
 		clear_bit(TRANSPARENT_HUGEPAGE_REQ_MADV_FLAG,
 			  &transparent_hugepage_flags);
+		ret = 1;
+	} else if (!strcmp(str, "madvise")) {
+		clear_bit(TRANSPARENT_HUGEPAGE_FLAG,
+			&transparent_hugepage_flags);
+		set_bit(TRANSPARENT_HUGEPAGE_REQ_MADV_FLAG,
+			&transparent_hugepage_flags);
 		ret = 1;
 	} else if (!strcmp(str, "never")) {
 		clear_bit(TRANSPARENT_HUGEPAGE_FLAG,
@@ -1425,6 +1438,40 @@ out_unlock:
 	page_unlock_anon_vma(anon_vma);
 out:
 	return ret;
+}
+
+int hugepage_madvise(unsigned long *vm_flags, int advice)
+{
+	switch (advice) {
+	case MADV_HUGEPAGE:
+		/*
+		 * Be somewhat over-protective like KSM for now!
+		 */
+		if (*vm_flags & (VM_HUGEPAGE |
+				 VM_SHARED   | VM_MAYSHARE   |
+				 VM_PFNMAP   | VM_IO      | VM_DONTEXPAND |
+				 VM_RESERVED | VM_HUGETLB | VM_INSERTPAGE |
+				 VM_MIXEDMAP | VM_SAO))
+			return -EINVAL;
+		*vm_flags &= ~VM_NOHUGEPAGE;
+		*vm_flags |= VM_HUGEPAGE;
+		break;
+	case MADV_NOHUGEPAGE:
+		/*
+		 * Be somewhat over-protective like KSM for now!
+		 */
+		if (*vm_flags & (VM_NOHUGEPAGE |
+				 VM_SHARED   | VM_MAYSHARE   |
+				 VM_PFNMAP   | VM_IO      | VM_DONTEXPAND |
+				 VM_RESERVED | VM_HUGETLB | VM_INSERTPAGE |
+				 VM_MIXEDMAP | VM_SAO))
+			return -EINVAL;
+		*vm_flags &= ~VM_HUGEPAGE;
+		*vm_flags |= VM_NOHUGEPAGE;
+		break;
+	}
+
+	return 0;
 }
 
 void __split_huge_page_pmd(struct mm_struct *mm, pmd_t *pmd)

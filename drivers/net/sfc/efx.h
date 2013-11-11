@@ -41,17 +41,22 @@ extern unsigned int efx_tx_max_skb_descs(struct efx_nic *efx);
 extern int efx_setup_tc(struct net_device *net_dev, u8 num_tc);
 
 /* RX */
+extern void efx_rx_config_page_split(struct efx_nic *efx);
 extern int efx_probe_rx_queue(struct efx_rx_queue *rx_queue);
 extern void efx_remove_rx_queue(struct efx_rx_queue *rx_queue);
 extern void efx_init_rx_queue(struct efx_rx_queue *rx_queue);
 extern void efx_fini_rx_queue(struct efx_rx_queue *rx_queue);
-extern void efx_rx_strategy(struct efx_channel *channel);
 extern void efx_fast_push_rx_descriptors(struct efx_rx_queue *rx_queue);
 extern void efx_rx_slow_fill(unsigned long context);
-extern void __efx_rx_packet(struct efx_channel *channel,
-			    struct efx_rx_buffer *rx_buf);
-extern void efx_rx_packet(struct efx_rx_queue *rx_queue, unsigned int index,
+extern void __efx_rx_packet(struct efx_channel *channel);
+extern void efx_rx_packet(struct efx_rx_queue *rx_queue,
+			  unsigned int index, unsigned int n_frags,
 			  unsigned int len, u16 flags);
+static inline void efx_rx_flush_packet(struct efx_channel *channel)
+{
+	if (channel->rx_pkt_n_frags)
+		__efx_rx_packet(channel);
+}
 extern void efx_schedule_slow_fill(struct efx_rx_queue *rx_queue);
 
 #define EFX_MAX_DMAQ_SIZE 4096UL
@@ -75,6 +80,7 @@ extern void efx_schedule_slow_fill(struct efx_rx_queue *rx_queue);
 extern int efx_probe_filters(struct efx_nic *efx);
 extern void efx_restore_filters(struct efx_nic *efx);
 extern void efx_remove_filters(struct efx_nic *efx);
+extern void efx_filter_update_rx_scatter(struct efx_nic *efx);
 extern s32 efx_filter_insert_filter(struct efx_nic *efx,
 				    struct efx_filter_spec *spec,
 				    bool replace);
@@ -110,6 +116,7 @@ static inline void efx_filter_rfs_expire(struct efx_channel *channel) {}
 
 /* Channels */
 extern int efx_channel_dummy_op_int(struct efx_channel *channel);
+extern void efx_channel_dummy_op_void(struct efx_channel *channel);
 extern void efx_process_channel_now(struct efx_channel *channel);
 extern int
 efx_realloc_channels(struct efx_nic *efx, u32 rxq_entries, u32 txq_entries);
@@ -127,6 +134,7 @@ extern const struct ethtool_ops_ext efx_ethtool_ops_ext;
 extern int efx_reset(struct efx_nic *efx, enum reset_type method);
 extern void efx_reset_down(struct efx_nic *efx, enum reset_type method);
 extern int efx_reset_up(struct efx_nic *efx, enum reset_type method, bool ok);
+extern int efx_try_recovery(struct efx_nic *efx);
 
 /* Global */
 extern void efx_schedule_reset(struct efx_nic *efx, enum reset_type type);
@@ -171,5 +179,18 @@ static inline void efx_schedule_channel_irq(struct efx_channel *channel)
 extern void efx_link_status_changed(struct efx_nic *efx);
 extern void efx_link_set_advertising(struct efx_nic *efx, u32);
 extern void efx_link_set_wanted_fc(struct efx_nic *efx, u8);
+
+static inline void efx_device_detach_sync(struct efx_nic *efx)
+{
+	struct net_device *dev = efx->net_dev;
+
+	/* Lock/freeze all TX queues so that we can be sure the
+	 * TX scheduler is stopped when we're done and before
+	 * netif_device_present() becomes false.
+	 */
+	netif_tx_lock_bh(dev);
+	netif_device_detach(dev);
+	netif_tx_unlock_bh(dev);
+}
 
 #endif /* EFX_EFX_H */

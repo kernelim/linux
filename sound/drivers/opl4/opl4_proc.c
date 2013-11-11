@@ -54,25 +54,18 @@ static long snd_opl4_mem_proc_read(struct snd_info_entry *entry, void *file_priv
 				   unsigned long count, unsigned long pos)
 {
 	struct snd_opl4 *opl4 = entry->private_data;
-	long size;
 	char* buf;
 
-	size = count;
-	if (pos + size > entry->size)
-		size = entry->size - pos;
-	if (size > 0) {
-		buf = vmalloc(size);
-		if (!buf)
-			return -ENOMEM;
-		snd_opl4_read_memory(opl4, buf, pos, size);
-		if (copy_to_user(_buf, buf, size)) {
-			vfree(buf);
-			return -EFAULT;
-		}
+	buf = vmalloc(count);
+	if (!buf)
+		return -ENOMEM;
+	snd_opl4_read_memory(opl4, buf, pos, count);
+	if (copy_to_user(_buf, buf, count)) {
 		vfree(buf);
-		return size;
+		return -EFAULT;
 	}
-	return 0;
+	vfree(buf);
+	return count;
 }
 
 static long snd_opl4_mem_proc_write(struct snd_info_entry *entry, void *file_private_data,
@@ -80,46 +73,18 @@ static long snd_opl4_mem_proc_write(struct snd_info_entry *entry, void *file_pri
 				    unsigned long count, unsigned long pos)
 {
 	struct snd_opl4 *opl4 = entry->private_data;
-	long size;
 	char *buf;
 
-	size = count;
-	if (pos + size > entry->size)
-		size = entry->size - pos;
-	if (size > 0) {
-		buf = vmalloc(size);
-		if (!buf)
-			return -ENOMEM;
-		if (copy_from_user(buf, _buf, size)) {
-			vfree(buf);
-			return -EFAULT;
-		}
-		snd_opl4_write_memory(opl4, buf, pos, size);
+	buf = vmalloc(count);
+	if (!buf)
+		return -ENOMEM;
+	if (copy_from_user(buf, _buf, count)) {
 		vfree(buf);
-		return size;
+		return -EFAULT;
 	}
-	return 0;
-}
-
-static long long snd_opl4_mem_proc_llseek(struct snd_info_entry *entry, void *file_private_data,
-					  struct file *file, long long offset, int orig)
-{
-	switch (orig) {
-	case SEEK_SET:
-		file->f_pos = offset;
-		break;
-	case SEEK_CUR:
-		file->f_pos += offset;
-		break;
-	case SEEK_END: /* offset is negative */
-		file->f_pos = entry->size + offset;
-		break;
-	default:
-		return -EINVAL;
-	}
-	if (file->f_pos > entry->size)
-		file->f_pos = entry->size;
-	return file->f_pos;
+	snd_opl4_write_memory(opl4, buf, pos, count);
+	vfree(buf);
+	return count;
 }
 
 static struct snd_info_entry_ops snd_opl4_mem_proc_ops = {
@@ -127,7 +92,6 @@ static struct snd_info_entry_ops snd_opl4_mem_proc_ops = {
 	.release = snd_opl4_mem_proc_release,
 	.read = snd_opl4_mem_proc_read,
 	.write = snd_opl4_mem_proc_write,
-	.llseek = snd_opl4_mem_proc_llseek,
 };
 
 int snd_opl4_create_proc(struct snd_opl4 *opl4)

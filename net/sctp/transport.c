@@ -167,10 +167,6 @@ static void sctp_transport_destroy_rcu(struct rcu_head *head)
 	struct sctp_transport *transport;
 
 	transport = container_of(head, struct sctp_transport, rcu);
-	if (transport->asoc)
-		sctp_association_put(transport->asoc);
-
-	sctp_packet_free(&transport->packet);
 
 	dst_release(transport->dst);
 	kfree(transport);
@@ -185,6 +181,11 @@ static void sctp_transport_destroy(struct sctp_transport *transport)
 	SCTP_ASSERT(transport->dead, "Transport is not dead", return);
 
 	call_rcu(&transport->rcu, sctp_transport_destroy_rcu);
+
+	sctp_packet_free(&transport->packet);
+
+	if (transport->asoc)
+		sctp_association_put(transport->asoc);
 }
 
 /* Start T3_rtx timer if it is not already running and update the heartbeat
@@ -385,6 +386,7 @@ void sctp_transport_update_rto(struct sctp_transport *tp, __u32 rtt)
 	if (tp->rto > tp->asoc->rto_max)
 		tp->rto = tp->asoc->rto_max;
 
+	sctp_max_rto(tp->asoc, tp);
 	tp->rtt = rtt;
 
 	/* Reset rto_pending so that a new RTT measurement is started when a
@@ -642,6 +644,7 @@ void sctp_transport_reset(struct sctp_transport *t)
 	t->burst_limited = 0;
 	t->ssthresh = asoc->peer.i.a_rwnd;
 	t->rto = asoc->rto_initial;
+	sctp_max_rto(asoc, t);
 	t->rtt = 0;
 	t->srtt = 0;
 	t->rttvar = 0;

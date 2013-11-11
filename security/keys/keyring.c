@@ -354,9 +354,11 @@ key_ref_t keyring_search_aux(key_ref_t keyring_ref,
 			goto error_2;
 		if (key->expiry && now.tv_sec >= key->expiry)
 			goto error_2;
-		key_ref = ERR_PTR((long)key->type_data.x[0]);
-		if (kflags & (1 << KEY_FLAG_NEGATIVE))
+		if (kflags & (1 << KEY_FLAG_NEGATIVE)) {
+			smp_rmb();
+			key_ref = ERR_PTR((long)key->type_data.x[0]);
 			goto error_2;
+		}
 		goto found;
 	}
 
@@ -410,6 +412,7 @@ descend:
 
 		/* we set a different error code if we pass a negative key */
 		if (kflags & (1 << KEY_FLAG_NEGATIVE)) {
+			smp_rmb();
 			err = (long)key->type_data.x[0];
 			continue;
 		}

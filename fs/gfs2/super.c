@@ -492,7 +492,7 @@ void gfs2_statfs_change(struct gfs2_sbd *sdp, s64 total, s64 free,
 	if (error)
 		return;
 
-	gfs2_trans_add_bh(l_ip->i_gl, l_bh, 1);
+	gfs2_trans_add_meta(l_ip->i_gl, l_bh);
 
 	spin_lock(&sdp->sd_statfs_spin);
 	l_sc->sc_total += total;
@@ -520,7 +520,7 @@ void update_statfs(struct gfs2_sbd *sdp, struct buffer_head *m_bh,
 	struct gfs2_statfs_change_host *m_sc = &sdp->sd_statfs_master;
 	struct gfs2_statfs_change_host *l_sc = &sdp->sd_statfs_local;
 
-	gfs2_trans_add_bh(l_ip->i_gl, l_bh, 1);
+	gfs2_trans_add_meta(l_ip->i_gl, l_bh);
 
 	spin_lock(&sdp->sd_statfs_spin);
 	m_sc->sc_total += l_sc->sc_total;
@@ -531,7 +531,7 @@ void update_statfs(struct gfs2_sbd *sdp, struct buffer_head *m_bh,
 	       0, sizeof(struct gfs2_statfs_change));
 	spin_unlock(&sdp->sd_statfs_spin);
 
-	gfs2_trans_add_bh(m_ip->i_gl, m_bh, 1);
+	gfs2_trans_add_meta(m_ip->i_gl, m_bh);
 	gfs2_statfs_change_out(m_sc, m_bh->b_data + sizeof(struct gfs2_dinode));
 }
 
@@ -718,40 +718,8 @@ static int gfs2_write_inode(struct inode *inode, struct writeback_control *wbc)
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
 	struct address_space *metamapping = gfs2_glock2aspace(ip->i_gl);
 	struct backing_dev_info *bdi = metamapping->backing_dev_info;
-	struct gfs2_holder gh;
-	struct buffer_head *bh;
-	struct timespec atime;
-	struct gfs2_dinode *di;
 	int ret = 0;
-	int unlock_required = 0;
 
-	/* Skip timestamp update, if this is from a memalloc */
-	if (current->flags & PF_MEMALLOC)
-		goto do_flush;
-	if (!gfs2_glock_is_locked_by_me(ip->i_gl)) {
-		ret = gfs2_glock_nq_init(ip->i_gl, LM_ST_EXCLUSIVE, 0, &gh);
-		if (ret)
-			goto do_flush;
-		unlock_required = 1;
-	}
-	ret = gfs2_meta_inode_buffer(ip, &bh);
-	if (ret == 0) {
-		di = (struct gfs2_dinode *)bh->b_data;
-		atime.tv_sec = be64_to_cpu(di->di_atime);
-		atime.tv_nsec = be32_to_cpu(di->di_atime_nsec);
-		if (timespec_compare(&inode->i_atime, &atime) > 0) {
-			ret = gfs2_trans_begin(sdp, RES_DINODE, 0);
-			if (ret == 0) {
-				gfs2_trans_add_bh(ip->i_gl, bh, 1);
-				gfs2_dinode_out(ip, bh->b_data);
-				gfs2_trans_end(sdp);
-			}
-		}
-		brelse(bh);
-	}
-	if (unlock_required)
-		gfs2_glock_dq_uninit(&gh);
-do_flush:
 	if (wbc->sync_mode == WB_SYNC_ALL)
 		gfs2_log_flush(GFS2_SB(inode), ip->i_gl);
 	if (bdi->dirty_exceeded)
@@ -760,12 +728,65 @@ do_flush:
 		filemap_fdatawrite(metamapping);
 	if (wbc->sync_mode == WB_SYNC_ALL)
 		ret = filemap_fdatawait(metamapping);
-	if ((ret || (current->flags & PF_MEMALLOC)) &&
-	    !(inode->i_state & (I_WILL_FREE|I_FREEING))) {
+	if (ret)
 		mark_inode_dirty_sync(inode);
-		return ret ? ret : -EAGAIN;
-	}
 	return ret;
+}
+
+/**
+ * gfs2_dirty_inode - check for atime updates
+ * @inode: The inode in question
+ * @flags: The type of dirty
+ *
+ * Unfortunately it can be called under any combination of inode
+ * glock and transaction lock, so we have to check carefully.
+ *
+ * At the moment this deals only with atime - it should be possible
+ * to expand that role in future, once a review of the locking has
+ * been carried out.
+ */
+
+static void gfs2_dirty_inode(struct inode *inode)
+{
+	struct gfs2_inode *ip = GFS2_I(inode);
+	struct gfs2_sbd *sdp = GFS2_SB(inode);
+	struct buffer_head *bh;
+	struct gfs2_holder gh;
+	int need_unlock = 0;
+	int need_endtrans = 0;
+	int ret;
+
+	if (!gfs2_glock_is_locked_by_me(ip->i_gl)) {
+		ret = gfs2_glock_nq_init(ip->i_gl, LM_ST_EXCLUSIVE, 0, &gh);
+		if (ret) {
+			fs_err(sdp, "dirty_inode: glock %d\n", ret);
+			return;
+		}
+		need_unlock = 1;
+	} else if (WARN_ON_ONCE(ip->i_gl->gl_state != LM_ST_EXCLUSIVE))
+		return;
+
+	if (current->journal_info == NULL) {
+		ret = gfs2_trans_begin(sdp, RES_DINODE, 0);
+		if (ret) {
+			fs_err(sdp, "dirty_inode: gfs2_trans_begin %d\n", ret);
+			goto out;
+		}
+		need_endtrans = 1;
+	}
+
+	ret = gfs2_meta_inode_buffer(ip, &bh);
+	if (ret == 0) {
+		gfs2_trans_add_meta(ip->i_gl, bh);
+		gfs2_dinode_out(ip, bh->b_data);
+		brelse(bh);
+	}
+
+	if (need_endtrans)
+		gfs2_trans_end(sdp);
+out:
+	if (need_unlock)
+		gfs2_glock_dq_uninit(&gh);
 }
 
 /**
@@ -1229,6 +1250,7 @@ static void gfs2_clear_inode(struct inode *inode)
 
 	gfs2_dir_hash_inval(ip);
 	gfs2_rs_delete(ip);
+	gfs2_ordered_del_inode(ip);
 	ip->i_gl->gl_object = NULL;
 	flush_delayed_work(&ip->i_gl->gl_work);
 	gfs2_glock_add_to_lru(ip->i_gl);
@@ -1236,6 +1258,7 @@ static void gfs2_clear_inode(struct inode *inode)
 	ip->i_gl = NULL;
 	if (ip->i_iopen_gh.gh_gl) {
 		ip->i_iopen_gh.gh_gl->gl_object = NULL;
+		ip->i_iopen_gh.gh_flags |= GL_NOCACHE;
 		gfs2_glock_dq_uninit(&ip->i_iopen_gh);
 	}
 }
@@ -1456,6 +1479,7 @@ static void gfs2_delete_inode(struct inode *inode)
 	/* Must not read inode block until block type has been verified */
 	error = gfs2_glock_nq_init(ip->i_gl, LM_ST_EXCLUSIVE, GL_SKIP, &gh);
 	if (unlikely(error)) {
+		ip->i_iopen_gh.gh_flags |= GL_NOCACHE;
 		gfs2_glock_dq_uninit(&ip->i_iopen_gh);
 		goto out;
 	}
@@ -1517,7 +1541,7 @@ out_truncate:
 			if (timespec_compare(&inode->i_atime, &atime) > 0) {
 				error = gfs2_trans_begin(sdp, RES_DINODE, 0);
 				if (error == 0) {
-					gfs2_trans_add_bh(ip->i_gl, bh, 1);
+					gfs2_trans_add_meta(ip->i_gl, bh);
 					gfs2_dinode_out(ip, bh->b_data);
 					gfs2_trans_end(sdp);
 				}
@@ -1545,10 +1569,12 @@ out_truncate:
 out_unlock:
 	/* Error path for case 1 */
 	if (gfs2_rs_active(ip->i_res))
-		gfs2_rs_deltree(ip, ip->i_res);
+		gfs2_rs_deltree(ip->i_res);
 
-	if (test_bit(HIF_HOLDER, &ip->i_iopen_gh.gh_iflags))
+	if (test_bit(HIF_HOLDER, &ip->i_iopen_gh.gh_iflags)) {
+		ip->i_iopen_gh.gh_flags |= GL_NOCACHE;
 		gfs2_glock_dq(&ip->i_iopen_gh);
+	}
 	gfs2_holder_uninit(&ip->i_iopen_gh);
 	gfs2_glock_dq_uninit(&gh);
 	if (error && error != GLR_TRYFAILED && error != -EROFS)
@@ -1557,6 +1583,7 @@ out:
 	/* Case 3 starts here */
 	truncate_inode_pages(&inode->i_data, 0);
 	gfs2_rs_delete(ip);
+	gfs2_ordered_del_inode(ip);
 	clear_inode(inode);
 }
 
@@ -1583,6 +1610,7 @@ const struct super_operations gfs2_super_ops = {
 	.alloc_inode		= gfs2_alloc_inode,
 	.destroy_inode		= gfs2_destroy_inode,
 	.write_inode		= gfs2_write_inode,
+	.dirty_inode		= gfs2_dirty_inode,
 	.delete_inode		= gfs2_delete_inode,
 	.put_super		= gfs2_put_super,
 	.sync_fs		= gfs2_sync_fs,

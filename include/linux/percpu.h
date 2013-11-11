@@ -164,10 +164,6 @@ struct percpu_data {
 
 #endif /* CONFIG_HAVE_LEGACY_PER_CPU_AREA */
 
-extern void *__alloc_percpu(size_t size, size_t align);
-extern void free_percpu(void *__pdata);
-extern phys_addr_t per_cpu_ptr_to_phys(void *addr);
-
 #ifndef CONFIG_HAVE_SETUP_PER_CPU_AREA
 extern void __init setup_per_cpu_areas(void);
 #endif
@@ -177,22 +173,6 @@ extern void __init setup_per_cpu_areas(void);
 #define per_cpu_ptr(ptr, cpu) ({ (void)(cpu); (ptr); })
 #define this_cpu_ptr(ptr) ({ (ptr); })
 
-static inline void *__alloc_percpu(size_t size, size_t align)
-{
-	/*
-	 * Can't easily make larger alignment work with kmalloc.  WARN
-	 * on it.  Larger alignment should only be used for module
-	 * percpu sections on SMP for which this path isn't used.
-	 */
-	WARN_ON_ONCE(align > SMP_CACHE_BYTES);
-	return kzalloc(size, GFP_KERNEL);
-}
-
-static inline void free_percpu(void *p)
-{
-	kfree(p);
-}
-
 static inline void __init setup_per_cpu_areas(void) { }
 
 static inline void *pcpu_lpage_remapped(void *kaddr)
@@ -201,6 +181,10 @@ static inline void *pcpu_lpage_remapped(void *kaddr)
 }
 
 #endif /* CONFIG_SMP */
+
+extern void __percpu *__alloc_percpu(size_t size, size_t align);
+extern void free_percpu(void __percpu *__pdata);
+extern phys_addr_t per_cpu_ptr_to_phys(void *addr);
 
 #define alloc_percpu(type)	(type *)__alloc_percpu(sizeof(type), \
 						       __alignof__(type))

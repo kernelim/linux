@@ -669,6 +669,9 @@ rehash:
 		break;
 
 	default:
+		/* If we have an existing entry, update it's expire timer */
+		mod_timer(&mp->timer,
+			  jiffies + br->multicast_membership_interval);
 		goto out;
 	}
 
@@ -716,8 +719,12 @@ static int br_multicast_add_group(struct net_bridge *br,
 	}
 
 	for (pp = &mp->ports; (p = *pp); pp = &p->next) {
-		if (p->port == port)
+		if (p->port == port) {
+			/* We already have a portgroup, update the timer.  */
+			mod_timer(&p->timer,
+				  jiffies + br->multicast_membership_interval);
 			goto out;
+		}
 		if ((unsigned long)p->port < (unsigned long)port)
 			break;
 	}
@@ -1638,6 +1645,7 @@ void br_multicast_init(struct net_bridge *br)
 		    br_multicast_querier_expired, (unsigned long)br);
 	setup_timer(&br->multicast_query_timer, br_multicast_query_expired,
 		    (unsigned long)br);
+	br_mdb_init();
 }
 
 void br_multicast_open(struct net_bridge *br)
@@ -1662,6 +1670,7 @@ void br_multicast_stop(struct net_bridge *br)
 	del_timer_sync(&br->multicast_querier_timer);
 	del_timer_sync(&br->multicast_query_timer);
 
+	br_mdb_uninit();
 	spin_lock_bh(&br->multicast_lock);
 	mdb = br->mdb;
 	if (!mdb)

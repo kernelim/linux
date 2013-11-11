@@ -1,9 +1,12 @@
 /* ioctl() (mostly Linux Wireless Extensions) routines for Host AP driver */
 
+#include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/sched.h>
 #include <linux/ethtool.h>
 #include <linux/if_arp.h>
+#include <linux/module.h>
+#include <linux/etherdevice.h>
 #include <net/lib80211.h>
 
 #include "hostap_wlan.h"
@@ -520,9 +523,9 @@ static int prism2_ioctl_giwaplist(struct net_device *dev,
 
 	data->length = prism2_ap_get_sta_qual(local, addr, qual, IW_MAX_AP, 1);
 
-	memcpy(extra, &addr, sizeof(struct sockaddr) * data->length);
+	memcpy(extra, addr, sizeof(struct sockaddr) * data->length);
 	data->flags = 1; /* has quality information */
-	memcpy(extra + sizeof(struct sockaddr) * data->length, &qual,
+	memcpy(extra + sizeof(struct sockaddr) * data->length, qual,
 	       sizeof(struct iw_quality) * data->length);
 
 	kfree(addr);
@@ -1695,7 +1698,7 @@ static int prism2_request_scan(struct net_device *dev)
 		hostap_set_word(dev, HFA384X_RID_CNFROAMINGMODE,
 				HFA384X_ROAMING_FIRMWARE);
 
-	return 0;
+	return ret;
 }
 
 #else /* !PRISM2_NO_STATION_MODES */
@@ -1944,7 +1947,7 @@ static char * __prism2_translate_scan(local_info_t *local,
 }
 
 
-/* Translate scan data returned from the card to a card independant
+/* Translate scan data returned from the card to a card independent
  * format that the Wireless Tools will understand - Jean II */
 static inline int prism2_translate_scan(local_info_t *local,
 					struct iw_request_info *info,
@@ -2042,7 +2045,7 @@ static inline int prism2_ioctl_giwscan_sta(struct net_device *dev,
 		 * until results are ready for various reasons.
 		 * First, managing wait queues is complex and racy
 		 * (there may be multiple simultaneous callers).
-		 * Second, we grab some rtnetlink lock before comming
+		 * Second, we grab some rtnetlink lock before coming
 		 * here (in dev_ioctl()).
 		 * Third, the caller can wait on the Wireless Event
 		 * - Jean II */
@@ -3038,8 +3041,7 @@ static int prism2_ioctl_priv_download(local_info_t *local, struct iw_point *p)
 	    p->length > 1024 || !p->pointer)
 		return -EINVAL;
 
-	param = (struct prism2_download_param *)
-		kmalloc(p->length, GFP_KERNEL);
+	param = kmalloc(p->length, GFP_KERNEL);
 	if (param == NULL)
 		return -ENOMEM;
 
@@ -3220,8 +3222,7 @@ static int prism2_ioctl_siwencodeext(struct net_device *dev,
 		return -EINVAL;
 
 	addr = ext->addr.sa_data;
-	if (addr[0] == 0xff && addr[1] == 0xff && addr[2] == 0xff &&
-	    addr[3] == 0xff && addr[4] == 0xff && addr[5] == 0xff) {
+	if (is_broadcast_ether_addr(addr)) {
 		sta_ptr = NULL;
 		crypt = &local->crypt_info.crypt[i];
 	} else {
@@ -3393,8 +3394,7 @@ static int prism2_ioctl_giwencodeext(struct net_device *dev,
 		i--;
 
 	addr = ext->addr.sa_data;
-	if (addr[0] == 0xff && addr[1] == 0xff && addr[2] == 0xff &&
-	    addr[3] == 0xff && addr[4] == 0xff && addr[5] == 0xff) {
+	if (is_broadcast_ether_addr(addr)) {
 		sta_ptr = NULL;
 		crypt = &local->crypt_info.crypt[i];
 	} else {
@@ -3457,9 +3457,7 @@ static int prism2_ioctl_set_encryption(local_info_t *local,
 	    param->u.crypt.key_len)
 		return -EINVAL;
 
-	if (param->sta_addr[0] == 0xff && param->sta_addr[1] == 0xff &&
-	    param->sta_addr[2] == 0xff && param->sta_addr[3] == 0xff &&
-	    param->sta_addr[4] == 0xff && param->sta_addr[5] == 0xff) {
+	if (is_broadcast_ether_addr(param->sta_addr)) {
 		if (param->u.crypt.idx >= WEP_KEYS)
 			return -EINVAL;
 		sta_ptr = NULL;
@@ -3592,9 +3590,7 @@ static int prism2_ioctl_get_encryption(local_info_t *local,
 	if (max_key_len < 0)
 		return -EINVAL;
 
-	if (param->sta_addr[0] == 0xff && param->sta_addr[1] == 0xff &&
-	    param->sta_addr[2] == 0xff && param->sta_addr[3] == 0xff &&
-	    param->sta_addr[4] == 0xff && param->sta_addr[5] == 0xff) {
+	if (is_broadcast_ether_addr(param->sta_addr)) {
 		sta_ptr = NULL;
 		if (param->u.crypt.idx >= WEP_KEYS)
 			param->u.crypt.idx = local->crypt_info.tx_keyidx;
@@ -3871,8 +3867,8 @@ static void prism2_get_drvinfo(struct net_device *dev,
 	iface = netdev_priv(dev);
 	local = iface->local;
 
-	strncpy(info->driver, "hostap", sizeof(info->driver) - 1);
-	snprintf(info->fw_version, sizeof(info->fw_version) - 1,
+	strlcpy(info->driver, "hostap", sizeof(info->driver));
+	snprintf(info->fw_version, sizeof(info->fw_version),
 		 "%d.%d.%d", (local->sta_fw_ver >> 16) & 0xff,
 		 (local->sta_fw_ver >> 8) & 0xff,
 		 local->sta_fw_ver & 0xff);

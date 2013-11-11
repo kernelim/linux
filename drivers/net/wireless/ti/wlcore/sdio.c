@@ -25,6 +25,7 @@
 #include <linux/module.h>
 #include <linux/vmalloc.h>
 #include <linux/platform_device.h>
+#include <linux/mmc/sdio.h>
 #include <linux/mmc/sdio_func.h>
 #include <linux/mmc/sdio_ids.h>
 #include <linux/mmc/card.h>
@@ -32,6 +33,7 @@
 #include <linux/gpio.h>
 #include <linux/wl12xx.h>
 #include <linux/pm_runtime.h>
+#include <linux/printk.h>
 
 #include "wlcore.h"
 #include "wl12xx_80211.h"
@@ -45,12 +47,14 @@
 #define SDIO_DEVICE_ID_TI_WL1271	0x4076
 #endif
 
+static bool dump = false;
+
 struct wl12xx_sdio_glue {
 	struct device *dev;
 	struct platform_device *core;
 };
 
-static const struct sdio_device_id wl1271_devices[] __devinitconst = {
+static const struct sdio_device_id wl1271_devices[] = {
 	{ SDIO_DEVICE(SDIO_VENDOR_ID_TI, SDIO_DEVICE_ID_TI_WL1271) },
 	{}
 };
@@ -67,14 +71,21 @@ static void wl1271_sdio_set_block_size(struct device *child,
 	sdio_release_host(func);
 }
 
-static void wl12xx_sdio_raw_read(struct device *child, int addr, void *buf,
-				 size_t len, bool fixed)
+static int __must_check wl12xx_sdio_raw_read(struct device *child, int addr,
+					     void *buf, size_t len, bool fixed)
 {
 	int ret;
 	struct wl12xx_sdio_glue *glue = dev_get_drvdata(child->parent);
 	struct sdio_func *func = dev_to_sdio_func(glue->dev);
 
 	sdio_claim_host(func);
+
+	if (unlikely(dump)) {
+		printk(KERN_DEBUG "wlcore_sdio: READ from 0x%04x\n", addr);
+		print_hex_dump(KERN_DEBUG, "wlcore_sdio: READ ",
+				DUMP_PREFIX_OFFSET, 16, 1,
+				buf, len, false);
+	}
 
 	if (unlikely(addr == HW_ACCESS_ELP_CTRL_REG)) {
 		((u8 *)buf)[0] = sdio_f0_readb(func, addr, &ret);
@@ -92,18 +103,27 @@ static void wl12xx_sdio_raw_read(struct device *child, int addr, void *buf,
 
 	sdio_release_host(func);
 
-	if (ret)
+	if (WARN_ON(ret))
 		dev_err(child->parent, "sdio read failed (%d)\n", ret);
+
+	return ret;
 }
 
-static void wl12xx_sdio_raw_write(struct device *child, int addr, void *buf,
-				  size_t len, bool fixed)
+static int __must_check wl12xx_sdio_raw_write(struct device *child, int addr,
+					      void *buf, size_t len, bool fixed)
 {
 	int ret;
 	struct wl12xx_sdio_glue *glue = dev_get_drvdata(child->parent);
 	struct sdio_func *func = dev_to_sdio_func(glue->dev);
 
 	sdio_claim_host(func);
+
+	if (unlikely(dump)) {
+		printk(KERN_DEBUG "wlcore_sdio: WRITE to 0x%04x\n", addr);
+		print_hex_dump(KERN_DEBUG, "wlcore_sdio: WRITE ",
+				DUMP_PREFIX_OFFSET, 16, 1,
+				buf, len, false);
+	}
 
 	if (unlikely(addr == HW_ACCESS_ELP_CTRL_REG)) {
 		sdio_f0_writeb(func, ((u8 *)buf)[0], addr, &ret);
@@ -121,30 +141,30 @@ static void wl12xx_sdio_raw_write(struct device *child, int addr, void *buf,
 
 	sdio_release_host(func);
 
-	if (ret)
+	if (WARN_ON(ret))
 		dev_err(child->parent, "sdio write failed (%d)\n", ret);
+
+	return ret;
 }
 
 static int wl12xx_sdio_power_on(struct wl12xx_sdio_glue *glue)
 {
 	int ret;
 	struct sdio_func *func = dev_to_sdio_func(glue->dev);
+	struct mmc_card *card = func->card;
 
-	/* If enabled, tell runtime PM not to power off the card */
-	if (pm_runtime_enabled(&func->dev)) {
-		ret = pm_runtime_get_sync(&func->dev);
-		if (ret < 0)
+	ret = pm_runtime_get_sync(&card->dev);
+	if (ret) {
+		/*
+		 * Runtime PM might be temporarily disabled, or the device
+		 * might have a positive reference counter. Make sure it is
+		 * really powered on.
+		 */
+		ret = mmc_power_restore_host(card->host);
+		if (ret < 0) {
+			pm_runtime_put_sync(&card->dev);
 			goto out;
-	} else {
-		/* Runtime PM is disabled: power up the card manually */
-#if 0 /* Not in RHEL */
-		ret = mmc_power_restore_host(func->card->host);
-		if (ret < 0)
-			goto out;
-#else
-		mmc_power_restore_host(func->card->host);
-		ret = 0;
-#endif
+		}
 	}
 
 	sdio_claim_host(func);
@@ -159,25 +179,21 @@ static int wl12xx_sdio_power_off(struct wl12xx_sdio_glue *glue)
 {
 	int ret;
 	struct sdio_func *func = dev_to_sdio_func(glue->dev);
+	struct mmc_card *card = func->card;
 
 	sdio_claim_host(func);
 	sdio_disable_func(func);
 	sdio_release_host(func);
 
-	/* Power off the card manually, even if runtime PM is enabled. */
-#if 0 /* Not in RHEL */
-	ret = mmc_power_save_host(func->card->host);
+	/* Power off the card manually in case it wasn't powered off above */
+	ret = mmc_power_save_host(card->host);
 	if (ret < 0)
-		return ret;
-#else
-	ret = 0;
-	mmc_power_save_host(func->card->host);
-#endif
+		goto out;
 
-	/* If enabled, let runtime PM know the card is powered off */
-	if (pm_runtime_enabled(&func->dev))
-		ret = pm_runtime_put_sync(&func->dev);
+	/* Let runtime PM know the card is powered off */
+	pm_runtime_put_sync(&card->dev);
 
+out:
 	return ret;
 }
 
@@ -198,25 +214,30 @@ static struct wl1271_if_operations sdio_ops = {
 	.set_block_size = wl1271_sdio_set_block_size,
 };
 
-static int __devinit wl1271_probe(struct sdio_func *func,
+static int wl1271_probe(struct sdio_func *func,
 				  const struct sdio_device_id *id)
 {
-	struct wl12xx_platform_data *wlan_data;
+	struct wlcore_platdev_data *pdev_data;
 	struct wl12xx_sdio_glue *glue;
 	struct resource res[1];
-#if 0 /* Not in RHEL */
 	mmc_pm_flag_t mmcflags;
-#endif
 	int ret = -ENOMEM;
+	const char *chip_family;
 
 	/* We are only able to handle the wlan function */
 	if (func->num != 0x02)
 		return -ENODEV;
 
+	pdev_data = kzalloc(sizeof(*pdev_data), GFP_KERNEL);
+	if (!pdev_data)
+		goto out;
+
+	pdev_data->if_ops = &sdio_ops;
+
 	glue = kzalloc(sizeof(*glue), GFP_KERNEL);
 	if (!glue) {
 		dev_err(&func->dev, "can't allocate glue\n");
-		goto out;
+		goto out_free_pdev_data;
 	}
 
 	glue->dev = &func->dev;
@@ -227,30 +248,37 @@ static int __devinit wl1271_probe(struct sdio_func *func,
 	/* Use block mode for transferring over one block size of data */
 	func->card->quirks |= MMC_QUIRK_BLKSZ_FOR_BYTE_MODE;
 
-	wlan_data = wl12xx_get_platform_data();
-	if (IS_ERR(wlan_data)) {
-		ret = PTR_ERR(wlan_data);
+	pdev_data->pdata = wl12xx_get_platform_data();
+	if (IS_ERR(pdev_data->pdata)) {
+		ret = PTR_ERR(pdev_data->pdata);
 		dev_err(glue->dev, "missing wlan platform data: %d\n", ret);
 		goto out_free_glue;
 	}
 
-#if 0 /* Not in RHEL */
 	/* if sdio can keep power while host is suspended, enable wow */
 	mmcflags = sdio_get_host_pm_caps(func);
 	dev_dbg(glue->dev, "sdio PM caps = 0x%x\n", mmcflags);
 
 	if (mmcflags & MMC_PM_KEEP_POWER)
-		wlan_data->pwr_in_suspend = true;
-#endif
-
-	wlan_data->ops = &sdio_ops;
+		pdev_data->pdata->pwr_in_suspend = true;
 
 	sdio_set_drvdata(func, glue);
 
 	/* Tell PM core that we don't need the card to be powered now */
 	pm_runtime_put_noidle(&func->dev);
 
-	glue->core = platform_device_alloc("wl12xx", -1);
+	/*
+	 * Due to a hardware bug, we can't differentiate wl18xx from
+	 * wl12xx, because both report the same device ID.  The only
+	 * way to differentiate is by checking the SDIO revision,
+	 * which is 3.00 on the wl18xx chips.
+	 */
+	if (func->card->cccr.sdio_vsn == SDIO_SDIO_REV_3_00)
+		chip_family = "wl18xx";
+	else
+		chip_family = "wl12xx";
+
+	glue->core = platform_device_alloc(chip_family, PLATFORM_DEVID_AUTO);
 	if (!glue->core) {
 		dev_err(glue->dev, "can't allocate platform_device");
 		ret = -ENOMEM;
@@ -261,7 +289,7 @@ static int __devinit wl1271_probe(struct sdio_func *func,
 
 	memset(res, 0x00, sizeof(res));
 
-	res[0].start = wlan_data->irq;
+	res[0].start = pdev_data->pdata->irq;
 	res[0].flags = IORESOURCE_IRQ;
 	res[0].name = "irq";
 
@@ -271,8 +299,8 @@ static int __devinit wl1271_probe(struct sdio_func *func,
 		goto out_dev_put;
 	}
 
-	ret = platform_device_add_data(glue->core, wlan_data,
-				       sizeof(*wlan_data));
+	ret = platform_device_add_data(glue->core, pdev_data,
+				       sizeof(*pdev_data));
 	if (ret) {
 		dev_err(glue->dev, "can't add platform data\n");
 		goto out_dev_put;
@@ -291,19 +319,21 @@ out_dev_put:
 out_free_glue:
 	kfree(glue);
 
+out_free_pdev_data:
+	kfree(pdev_data);
+
 out:
 	return ret;
 }
 
-static void __devexit wl1271_remove(struct sdio_func *func)
+static void wl1271_remove(struct sdio_func *func)
 {
 	struct wl12xx_sdio_glue *glue = sdio_get_drvdata(func);
 
 	/* Undo decrement done above in wl1271_probe */
 	pm_runtime_get_noresume(&func->dev);
 
-	platform_device_del(glue->core);
-	platform_device_put(glue->core);
+	platform_device_unregister(glue->core);
 	kfree(glue);
 }
 
@@ -315,15 +345,12 @@ static int wl1271_suspend(struct device *dev)
 	struct sdio_func *func = dev_to_sdio_func(dev);
 	struct wl12xx_sdio_glue *glue = sdio_get_drvdata(func);
 	struct wl1271 *wl = platform_get_drvdata(glue->core);
-#if 0 /* Not in RHEL */
 	mmc_pm_flag_t sdio_flags;
-#endif
 	int ret = 0;
 
 	dev_dbg(dev, "wl1271 suspend. wow_enabled: %d\n",
 		wl->wow_enabled);
 
-#if 0 /* Not in RHEL */
 	/* check whether sdio should keep power */
 	if (wl->wow_enabled) {
 		sdio_flags = sdio_get_host_pm_caps(func);
@@ -343,7 +370,6 @@ static int wl1271_suspend(struct device *dev)
 		}
 	}
 out:
-#endif
 	return ret;
 }
 
@@ -364,7 +390,7 @@ static struct sdio_driver wl1271_sdio_driver = {
 	.name		= "wl1271_sdio",
 	.id_table	= wl1271_devices,
 	.probe		= wl1271_probe,
-	.remove		= __devexit_p(wl1271_remove),
+	.remove		= wl1271_remove,
 #ifdef CONFIG_PM
 	.drv = {
 		.pm = &wl1271_sdio_pm_ops,
@@ -385,12 +411,9 @@ static void __exit wl1271_exit(void)
 module_init(wl1271_init);
 module_exit(wl1271_exit);
 
+module_param(dump, bool, S_IRUSR | S_IWUSR);
+MODULE_PARM_DESC(dump, "Enable sdio read/write dumps.");
+
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Luciano Coelho <coelho@ti.com>");
 MODULE_AUTHOR("Juuso Oikarinen <juuso.oikarinen@nokia.com>");
-MODULE_FIRMWARE(WL127X_FW_NAME_SINGLE);
-MODULE_FIRMWARE(WL127X_FW_NAME_MULTI);
-MODULE_FIRMWARE(WL127X_PLT_FW_NAME);
-MODULE_FIRMWARE(WL128X_FW_NAME_SINGLE);
-MODULE_FIRMWARE(WL128X_FW_NAME_MULTI);
-MODULE_FIRMWARE(WL128X_PLT_FW_NAME);

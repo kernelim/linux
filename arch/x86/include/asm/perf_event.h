@@ -110,23 +110,24 @@ struct x86_pmu_capability {
 /*
  * All 3 fixed-mode PMCs are configured via this single MSR:
  */
-#define MSR_ARCH_PERFMON_FIXED_CTR_CTRL			0x38d
+#define MSR_ARCH_PERFMON_FIXED_CTR_CTRL	0x38d
 
 /*
  * The counts are available in three separate MSRs:
  */
 
 /* Instr_Retired.Any: */
-#define MSR_ARCH_PERFMON_FIXED_CTR0			0x309
-#define X86_PMC_IDX_FIXED_INSTRUCTIONS			(X86_PMC_IDX_FIXED + 0)
+#define MSR_ARCH_PERFMON_FIXED_CTR0	0x309
+#define X86_PMC_IDX_FIXED_INSTRUCTIONS	(X86_PMC_IDX_FIXED + 0)
 
 /* CPU_CLK_Unhalted.Core: */
-#define MSR_ARCH_PERFMON_FIXED_CTR1			0x30a
-#define X86_PMC_IDX_FIXED_CPU_CYCLES			(X86_PMC_IDX_FIXED + 1)
+#define MSR_ARCH_PERFMON_FIXED_CTR1	0x30a
+#define X86_PMC_IDX_FIXED_CPU_CYCLES	(X86_PMC_IDX_FIXED + 1)
 
 /* CPU_CLK_Unhalted.Ref: */
-#define MSR_ARCH_PERFMON_FIXED_CTR2			0x30b
-#define X86_PMC_IDX_FIXED_BUS_CYCLES			(X86_PMC_IDX_FIXED + 2)
+#define MSR_ARCH_PERFMON_FIXED_CTR2	0x30b
+#define X86_PMC_IDX_FIXED_REF_CYCLES	(X86_PMC_IDX_FIXED + 2)
+#define X86_PMC_MSK_FIXED_REF_CYCLES	(1ULL << X86_PMC_IDX_FIXED_REF_CYCLES)
 
 /*
  * We model BTS tracing as another fixed-mode PMC.
@@ -154,8 +155,6 @@ struct x86_pmu_capability {
 #ifdef CONFIG_PERF_EVENTS
 extern void perf_events_lapic_init(void);
 
-#define PERF_EVENT_INDEX_OFFSET			0
-
 /*
  * Abuse bit 3 of the cpu eflags register to indicate proper PEBS IP fixups.
  * This flag is otherwise unused and ABI specified to be 0, so nobody should
@@ -179,19 +178,11 @@ extern unsigned long perf_misc_flags(struct pt_regs *regs);
 	(regs)->bp = caller_frame_pointer();			\
 	(regs)->cs = __KERNEL_CS;				\
 	regs->flags = 0;					\
-}
-
-#include <asm/stacktrace.h>
-
-/*
- * We abuse bit 3 from flags to pass exact information, see perf_misc_flags
- * and the comment with PERF_EFLAGS_EXACT.
- */
-#define perf_arch_fetch_caller_regs(regs, __ip)		{	\
-	(regs)->ip = (__ip);					\
-	(regs)->bp = caller_frame_pointer();			\
-	(regs)->cs = __KERNEL_CS;				\
-	regs->flags = 0;					\
+	asm volatile(						\
+		_ASM_MOV "%%"_ASM_SP ", %0\n"			\
+		: "=m" ((regs)->sp)				\
+		:: "memory"					\
+	);							\
 }
 
 struct perf_guest_switch_msr {

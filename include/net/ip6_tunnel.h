@@ -3,6 +3,7 @@
 
 #include <linux/ipv6.h>
 #include <linux/netdevice.h>
+#include <linux/if_tunnel.h>
 #include <linux/ip6_tunnel.h>
 
 /* capable of sending packets */

@@ -50,11 +50,6 @@ MODULE_AUTHOR("IBM Corporation");
 MODULE_DESCRIPTION("Cryptographic Accelerator (message type 50), " \
 		   "Copyright IBM Corp. 2001, 2012");
 MODULE_LICENSE("GPL");
-#else
-/* Dummy module for monolithic device driver */
-static struct module dummy_module = {
-	.name = MSGTYPE50_NAME,
-};
 #endif
 
 static void zcrypt_cex2a_receive(struct ap_device *, struct ap_message *,
@@ -505,11 +500,8 @@ out_free:
 static struct zcrypt_ops zcrypt_msgtype50_ops = {
 	.rsa_modexpo = zcrypt_cex2a_modexpo,
 	.rsa_modexpo_crt = zcrypt_cex2a_modexpo_crt,
-#ifndef CONFIG_ZCRYPT_MONOLITHIC
 	.owner = THIS_MODULE,
-#else
-	.owner = &dummy_module,
-#endif
+	.name = MSGTYPE50_NAME,
 	.variant = MSGTYPE50_VARIANT_DEFAULT,
 };
 

@@ -242,12 +242,12 @@ static int do_quotactl(struct super_block *sb, int type, int cmd, qid_t id,
 
 	switch (cmd) {
 		case Q_QUOTAON: {
-			char *pathname;
+			struct filename *pathname;
 
 			pathname = getname(addr);
 			if (IS_ERR(pathname))
 				return PTR_ERR(pathname);
-			ret = sb->s_qcop->quota_on(sb, type, id, pathname, 0);
+			ret = sb->s_qcop->quota_on(sb, type, id, (char *)pathname->name, 0);
 			putname(pathname);
 			return ret;
 		}
@@ -377,11 +377,11 @@ static struct super_block *quotactl_block(const char __user *special, int cmd)
 #ifdef CONFIG_BLOCK
 	struct block_device *bdev;
 	struct super_block *sb;
-	char *tmp = getname(special);
+	struct filename *tmp = getname(special);
 
 	if (IS_ERR(tmp))
 		return ERR_CAST(tmp);
-	bdev = lookup_bdev(tmp);
+	bdev = lookup_bdev(tmp->name);
 	putname(tmp);
 	if (IS_ERR(bdev))
 		return ERR_CAST(bdev);

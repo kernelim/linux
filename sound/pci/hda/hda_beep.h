@@ -39,6 +39,7 @@ struct hda_beep {
 	unsigned int enabled:1;
 	unsigned int request_enable:1;
 	unsigned int linear_tone:1;	/* linear tone for IDT/STAC codec */
+	unsigned int playing:1;
 	struct work_struct register_work; /* registration work */
 	struct delayed_work unregister_work; /* unregistration work */
 	struct work_struct beep_work; /* scheduled task for beep event */

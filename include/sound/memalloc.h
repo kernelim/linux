@@ -112,6 +112,13 @@ static inline void *snd_sgbuf_get_ptr(struct snd_sg_buf *sgbuf, size_t offset)
 {
 	return sgbuf->table[offset >> PAGE_SHIFT].buf + offset % PAGE_SIZE;
 }
+
+unsigned int snd_sgbuf_get_chunk_size(struct snd_dma_buffer *dmab,
+				      unsigned int ofs, unsigned int size);
+#else
+
+#define snd_sgbuf_get_chunk_size(dmab, ofs, size)	(size)
+
 #endif /* CONFIG_SND_DMA_SGBUF */
 
 /* allocate/release a buffer */

@@ -35,10 +35,14 @@ obj-$(CONFIG_FAILSLAB) += failslab.o
 obj-$(CONFIG_MEMORY_HOTPLUG) += memory_hotplug.o
 obj-$(CONFIG_FS_XIP) += filemap_xip.o
 obj-$(CONFIG_MIGRATION) += migrate.o
+ifdef CONFIG_SMP
 ifndef CONFIG_HAVE_LEGACY_PER_CPU_AREA
-obj-$(CONFIG_SMP) += percpu.o
+obj-y += percpu.o
 else
-obj-$(CONFIG_SMP) += allocpercpu.o
+obj-y += allocpercpu.o
+endif
+else
+obj-y += percpu_up.o
 endif
 obj-$(CONFIG_QUICKLIST) += quicklist.o
 obj-$(CONFIG_CGROUP_MEM_RES_CTLR) += memcontrol.o page_cgroup.o

@@ -79,15 +79,12 @@ static struct list_head __initdata dummy_slots = LIST_HEAD_INIT(dummy_slots);
 /* Dummy driver for dumplicate name detection */
 static int __init dummy_probe(struct pcie_device *dev)
 {
-	int pos;
 	u32 slot_cap;
 	acpi_handle handle;
 	struct dummy_slot *slot, *tmp;
 	struct pci_dev *pdev = dev->port;
 
-	if (!(pos = pci_find_capability(pdev, PCI_CAP_ID_EXP)))
-		return -ENODEV;
-	pci_read_config_dword(pdev, pos + PCI_EXP_SLTCAP, &slot_cap);
+	pcie_capability_read_dword(pdev, PCI_EXP_SLTCAP, &slot_cap);
 	slot = kzalloc(sizeof(*slot), GFP_KERNEL);
 	if (!slot)
 		return -ENOMEM;

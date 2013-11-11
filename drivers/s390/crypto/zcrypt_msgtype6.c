@@ -56,10 +56,6 @@ MODULE_AUTHOR("IBM Corporation");
 MODULE_DESCRIPTION("Cryptographic Coprocessor (message type 6), " \
 		   "Copyright IBM Corp. 2001, 2012");
 MODULE_LICENSE("GPL");
-#else
-static struct module dummy_module = {
-	.name = MSGTYPE06_NAME,
-};
 #endif
 
 static void zcrypt_msgtype6_receive(struct ap_device *, struct ap_message *,
@@ -828,11 +824,8 @@ static long zcrypt_msgtype6_rng(struct zcrypt_device *zdev,
  * The crypto operations for a PCIXCC/CEX2C card.
  */
 static struct zcrypt_ops zcrypt_msgtype6_norng_ops = {
-#ifndef CONFIG_ZCRYPT_MONOLITHIC
 	.owner = THIS_MODULE,
-#else
-	.owner = &dummy_module,
-#endif
+	.name = MSGTYPE06_NAME,
 	.variant = MSGTYPE06_VARIANT_NORNG,
 	.rsa_modexpo = zcrypt_msgtype6_modexpo,
 	.rsa_modexpo_crt = zcrypt_msgtype6_modexpo_crt,
@@ -840,11 +833,8 @@ static struct zcrypt_ops zcrypt_msgtype6_norng_ops = {
 };
 
 static struct zcrypt_ops zcrypt_msgtype6_ops = {
-#ifndef CONFIG_ZCRYPT_MONOLITHIC
 	.owner = THIS_MODULE,
-#else
-	.owner = &dummy_module,
-#endif
+	.name = MSGTYPE06_NAME,
 	.variant = MSGTYPE06_VARIANT_DEFAULT,
 	.rsa_modexpo = zcrypt_msgtype6_modexpo,
 	.rsa_modexpo_crt = zcrypt_msgtype6_modexpo_crt,

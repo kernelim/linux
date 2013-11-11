@@ -86,7 +86,7 @@ sys32_execve (char __user *name, compat_uptr_t __user *argv, compat_uptr_t __use
 	      struct pt_regs *regs)
 {
 	long error;
-	char *filename;
+	struct filename *filename;
 	unsigned long old_map_base, old_task_size, tssd;
 
 	filename = getname(name);
@@ -104,7 +104,7 @@ sys32_execve (char __user *name, compat_uptr_t __user *argv, compat_uptr_t __use
 	ia64_set_kr(IA64_KR_IO_BASE, current->thread.old_iob);
 	ia64_set_kr(IA64_KR_TSSD, current->thread.old_k1);
 
-	error = compat_do_execve(filename, argv, envp, regs);
+	error = compat_do_execve(filename->name, argv, envp, regs);
 	putname(filename);
 
 	if (error < 0) {

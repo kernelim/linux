@@ -1675,9 +1675,20 @@ static int set_coalesce(struct net_device *dev, struct ethtool_coalesce *c)
 {
 	const struct port_info *pi = netdev_priv(dev);
 	struct adapter *adap = pi->adapter;
+	struct sge_rspq *q;
+	int i;
+	int r = 0;
 
-	return set_rxq_intr_params(adap, &adap->sge.ethrxq[pi->first_qset].rspq,
-			c->rx_coalesce_usecs, c->rx_max_coalesced_frames);
+	for (i = pi->first_qset; i < pi->first_qset + pi->nqsets; i++) {
+		q = &adap->sge.ethrxq[i].rspq;
+		r = set_rxq_intr_params(adap, q, c->rx_coalesce_usecs,
+			c->rx_max_coalesced_frames);
+		if (r) {
+			dev_err(&dev->dev, "failed to set coalesce %d\n", r);
+			break;
+		}
+	}
+	return r;
 }
 
 static int get_coalesce(struct net_device *dev, struct ethtool_coalesce *c)
@@ -3624,15 +3635,7 @@ static void __devinit print_port_info(const struct net_device *dev)
 
 static void __devinit enable_pcie_relaxed_ordering(struct pci_dev *dev)
 {
-	u16 v;
-	int pos;
-
-	pos = pci_pcie_cap(dev);
-	if (pos > 0) {
-		pci_read_config_word(dev, pos + PCI_EXP_DEVCTL, &v);
-		v |= PCI_EXP_DEVCTL_RELAX_EN;
-		pci_write_config_word(dev, pos + PCI_EXP_DEVCTL, v);
-	}
+	pcie_capability_set_word(dev, PCI_EXP_DEVCTL, PCI_EXP_DEVCTL_RELAX_EN);
 }
 
 /*

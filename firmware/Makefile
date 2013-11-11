@@ -53,7 +53,13 @@ fw-shipped-$(CONFIG_BNX2X) += bnx2x-e1-5.2.13.0.fw bnx2x-e1h-5.2.13.0.fw \
 			      bnx2x/bnx2x-e2-7.2.16.0.fw \
 			      bnx2x/bnx2x-e1-7.2.51.0.fw \
 			      bnx2x/bnx2x-e1h-7.2.51.0.fw \
-			      bnx2x/bnx2x-e2-7.2.51.0.fw
+			      bnx2x/bnx2x-e2-7.2.51.0.fw \
+			      bnx2x/bnx2x-e1-7.8.2.0.fw \
+			      bnx2x/bnx2x-e1h-7.8.2.0.fw \
+			      bnx2x/bnx2x-e2-7.8.2.0.fw \
+			      bnx2x/bnx2x-e1-7.8.17.0.fw \
+			      bnx2x/bnx2x-e1h-7.8.17.0.fw \
+			      bnx2x/bnx2x-e2-7.8.17.0.fw
 fw-shipped-$(CONFIG_BNX2) += bnx2/bnx2-mips-09-6.0.17.fw \
 			     bnx2/bnx2-rv2p-09-6.0.17.fw \
 			     bnx2/bnx2-rv2p-09ax-6.0.17.fw \
@@ -152,7 +158,7 @@ fw-shipped-$(CONFIG_SND_YMFPCI) += yamaha/ds1_ctrl.fw yamaha/ds1_dsp.fw \
 fw-shipped-$(CONFIG_SND_WAVEFRONT) += yamaha/yss225_registers.bin
 fw-shipped-$(CONFIG_TEHUTI) += tehuti/bdx.bin
 fw-shipped-$(CONFIG_TIGON3) += tigon/tg3.bin tigon/tg3_tso.bin \
-			       tigon/tg3_tso5.bin
+			       tigon/tg3_tso5.bin tigon/tg357766.bin
 fw-shipped-$(CONFIG_TYPHOON) += 3com/typhoon.bin
 fw-shipped-$(CONFIG_USB_DABUSB) += dabusb/firmware.fw dabusb/bitstream.bin
 fw-shipped-$(CONFIG_USB_EMI26) += emi26/loader.fw emi26/firmware.fw \
@@ -195,14 +201,21 @@ fw-shipped-$(CONFIG_USB_VICAM) += vicam/firmware.fw
 fw-shipped-$(CONFIG_VIDEO_CPIA2) += cpia2/stv0672_vp4.bin
 fw-shipped-$(CONFIG_YAM) += yam/1200.bin yam/9600.bin
 
+fw-shipped-$(CONFIG_BRCMSMAC) += brcm/bcm43xx-0.fw brcm/bcm43xx_hdr-0.fw
+
 fw-shipped-$(CONFIG_RT2800PCI) += rt2860.bin
 fw-shipped-$(CONFIG_RT2800USB) += rt2870.bin
+
+fw-shipped-$(CONFIG_CARL9170) += carl9170-1.fw
+
+fw-shipped-$(CONFIG_ATH9K_HTC) += htc_7010.fw htc_9271.fw
 
 # This section is firmware required by the integrated compat-wireless
 # build.  All of those drivers are modules, and their config is turned-off
 # in the base kernel.  So, force them to fw-shipped-m below.
 fw-shipped-m += iwlwifi-105-6.ucode iwlwifi-135-6.ucode iwlwifi-2000-6.ucode \
-		iwlwifi-2030-6.ucode iwlwifi-6000g2a-6.ucode iwlwifi-6000g2b-6.ucode
+		iwlwifi-2030-6.ucode iwlwifi-6000g2a-6.ucode iwlwifi-6000g2b-6.ucode \
+		iwlwifi-7260-7.ucode iwlwifi-3160-7.ucode
 
 fw-shipped-all := $(fw-shipped-y) $(fw-shipped-m) $(fw-shipped-)
 

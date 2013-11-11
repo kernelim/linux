@@ -10,6 +10,8 @@
 #include <linux/timer.h>
 #include <linux/sysctl.h>
 
+#define IPV4_DEVCONF_MAX (__NET_IPV4_CONF_MAX - 1)
+
 struct ipv4_devconf
 {
 	void	*sysctl;

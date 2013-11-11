@@ -71,6 +71,9 @@ int ccwgroup_create_from_string(struct device *root, unsigned int creator_id,
 				struct ccw_driver *cdrv, int num_devices,
 				const char *buf);
 
+extern int ccwgroup_set_online(struct ccwgroup_device *gdev);
+extern int ccwgroup_set_offline(struct ccwgroup_device *gdev);
+
 extern int ccwgroup_probe_ccwdev(struct ccw_device *cdev);
 extern void ccwgroup_remove_ccwdev(struct ccw_device *cdev);
 

@@ -6,6 +6,9 @@
 #include <linux/security.h>
 #include <linux/pid.h>
 #include <linux/nsproxy.h>
+#ifndef __GENKSYMS__
+#include <linux/user_namespace.h>
+#endif
 
 /* Well, we should have at least one descriptor open
  * to accept passed FDs 8)
@@ -22,8 +25,10 @@ struct scm_fp_list
 
 struct scm_cookie
 {
-	struct ucred		creds;		/* Skb credentials	*/
+	struct pid		*pid;		/* Skb credentials */
+	const struct cred	*cred;
 	struct scm_fp_list	*fp;		/* Passed files		*/
+	struct ucred		creds;		/* Skb credentials	*/
 #ifdef CONFIG_SECURITY_NETWORK
 	u32			secid;		/* Passed security ID 	*/
 #endif
@@ -45,20 +50,41 @@ static __inline__ void unix_get_peersec_dgram(struct socket *sock, struct scm_co
 { }
 #endif /* CONFIG_SECURITY_NETWORK */
 
+static __inline__ void scm_set_cred(struct scm_cookie *scm,
+				    struct pid *pid, const struct cred *cred)
+{
+	struct user_namespace *current_ns = current_user_ns();
+
+	scm->pid  = get_pid(pid);
+	scm->cred = cred ? get_cred(cred) : NULL;
+	scm->creds.pid = pid_vnr(pid);
+	scm->creds.uid = cred ? user_ns_map_uid(current_ns, cred, cred->uid) : -1;
+	scm->creds.gid = cred ? user_ns_map_gid(current_ns, cred, cred->gid) : -1;
+}
+
+static __inline__ void scm_destroy_cred(struct scm_cookie *scm)
+{
+	put_pid(scm->pid);
+	scm->pid  = NULL;
+
+	if (scm->cred)
+		put_cred(scm->cred);
+	scm->cred = NULL;
+}
+
 static __inline__ void scm_destroy(struct scm_cookie *scm)
 {
+	scm_destroy_cred(scm);
 	if (scm && scm->fp)
 		__scm_destroy(scm);
 }
 
 static __inline__ int scm_send(struct socket *sock, struct msghdr *msg,
-			       struct scm_cookie *scm)
+			       struct scm_cookie *scm, bool forcecreds)
 {
-	struct task_struct *p = current;
-	scm->creds.uid = current_uid();
-	scm->creds.gid = current_gid();
-	scm->creds.pid = task_tgid_vnr(p);
-	scm->fp = NULL;
+	memset(scm, 0, sizeof(*scm));
+	if (forcecreds)
+		scm_set_cred(scm, task_tgid(current), current_cred());
 	unix_get_peersec_dgram(sock, scm);
 	if (msg->msg_controllen <= 0)
 		return 0;
@@ -99,6 +125,8 @@ static __inline__ void scm_recv(struct socket *sock, struct msghdr *msg,
 
 	if (test_bit(SOCK_PASSCRED, &sock->flags))
 		put_cmsg(msg, SOL_SOCKET, SCM_CREDENTIALS, sizeof(scm->creds), &scm->creds);
+
+	scm_destroy_cred(scm);
 
 	scm_passec(sock, msg, scm);
 

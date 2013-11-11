@@ -898,6 +898,32 @@ DEFINE_EVENT(ext4__trim, ext4_trim_all_free,
 	TP_ARGS(sb, group, start, len)
 );
 
+TRACE_EVENT(ext4_update_reserve_space,
+	TP_PROTO(struct inode *inode, unsigned int allocated,
+		 unsigned int reserved),
+
+	TP_ARGS(inode, allocated, reserved),
+
+	TP_STRUCT__entry(
+		__field(	dev_t,		dev		)
+		__field(	ino_t ,		ino		)
+		__field(	unsigned int,	allocated	)
+		__field(	unsigned int,	reserved	)
+	),
+
+	TP_fast_assign(
+		__entry->dev		= inode->i_sb->s_dev;
+		__entry->ino		= inode->i_ino;
+		__entry->allocated	= allocated;
+		__entry->reserved	= reserved;
+	),
+
+	TP_printk("dev %s ino %lu, allocated %d with only %d reserved "
+		 "metadata blocks\n",
+		 jbd2_dev_to_name(__entry->dev), __entry->ino,
+		 __entry->allocated, __entry->reserved)
+);
+
 #endif /* _TRACE_EXT4_H */
 
 /* This part must be outside protection */

@@ -24,8 +24,59 @@
 
 #include "conf.h"
 
+/* WiLink 6/7 chip IDs */
+#define CHIP_ID_127X_PG10              (0x04030101)
+#define CHIP_ID_127X_PG20              (0x04030111)
+#define CHIP_ID_128X_PG10              (0x05030101)
+#define CHIP_ID_128X_PG20              (0x05030111)
+
+/* FW chip version for wl127x */
+#define WL127X_CHIP_VER		6
+/* minimum single-role FW version for wl127x */
+#define WL127X_IFTYPE_SR_VER	3
+#define WL127X_MAJOR_SR_VER	10
+#define WL127X_SUBTYPE_SR_VER	WLCORE_FW_VER_IGNORE
+#define WL127X_MINOR_SR_VER	133
+/* minimum multi-role FW version for wl127x */
+#define WL127X_IFTYPE_MR_VER	5
+#define WL127X_MAJOR_MR_VER	7
+#define WL127X_SUBTYPE_MR_VER	WLCORE_FW_VER_IGNORE
+#define WL127X_MINOR_MR_VER	42
+
+/* FW chip version for wl128x */
+#define WL128X_CHIP_VER		7
+/* minimum single-role FW version for wl128x */
+#define WL128X_IFTYPE_SR_VER	3
+#define WL128X_MAJOR_SR_VER	10
+#define WL128X_SUBTYPE_SR_VER	WLCORE_FW_VER_IGNORE
+#define WL128X_MINOR_SR_VER	133
+/* minimum multi-role FW version for wl128x */
+#define WL128X_IFTYPE_MR_VER	5
+#define WL128X_MAJOR_MR_VER	7
+#define WL128X_SUBTYPE_MR_VER	WLCORE_FW_VER_IGNORE
+#define WL128X_MINOR_MR_VER	42
+
+#define WL12XX_AGGR_BUFFER_SIZE	(4 * PAGE_SIZE)
+
+#define WL12XX_NUM_TX_DESCRIPTORS 16
+#define WL12XX_NUM_RX_DESCRIPTORS 8
+
+#define WL12XX_NUM_MAC_ADDRESSES 2
+
+#define WL12XX_RX_BA_MAX_SESSIONS 3
+
+struct wl127x_rx_mem_pool_addr {
+	u32 addr;
+	u32 addr_extra;
+};
+
 struct wl12xx_priv {
 	struct wl12xx_priv_conf conf;
+
+	int ref_clock;
+	int tcxo_clock;
+
+	struct wl127x_rx_mem_pool_addr *rx_mem_addr;
 };
 
 #endif /* __WL12XX_PRIV_H__ */

@@ -85,8 +85,7 @@ __be32 nfs4_callback_recall(struct cb_recallargs *args, void *dummy,
 		res = 0;
 		break;
 	case -ENOENT:
-		if (res != 0)
-			res = htonl(NFS4ERR_BAD_STATEID);
+		res = htonl(NFS4ERR_BAD_STATEID);
 		break;
 	default:
 		res = htonl(NFS4ERR_RESOURCE);
@@ -95,14 +94,6 @@ __be32 nfs4_callback_recall(struct cb_recallargs *args, void *dummy,
 out:
 	dprintk("%s: exit with status = %d\n", __func__, ntohl(res));
 	return res;
-}
-
-int nfs4_validate_delegation_stateid(struct nfs_delegation *delegation, const nfs4_stateid *stateid)
-{
-	if (delegation == NULL || memcmp(delegation->stateid.data, stateid->data,
-					 sizeof(delegation->stateid.data)) != 0)
-		return 0;
-	return 1;
 }
 
 #if defined(CONFIG_NFS_V4_1)
@@ -302,21 +293,6 @@ out:
 	return res;
 }
 
-int nfs41_validate_delegation_stateid(struct nfs_delegation *delegation, const nfs4_stateid *stateid)
-{
-	if (delegation == NULL)
-		return 0;
-
-	if (stateid->stateid.seqid != 0)
-		return 0;
-	if (memcmp(&delegation->stateid.stateid.other,
-		   &stateid->stateid.other,
-		   NFS4_STATEID_OTHER_SIZE))
-		return 0;
-
-	return 1;
-}
-
 /*
  * Validate the sequenceID sent by the server.
  * Return success if the sequenceID is one more than what we last saw on
@@ -347,7 +323,7 @@ validate_seqid(struct nfs4_slot_table *tbl, struct cb_sequenceargs * args)
 	/* Normal */
 	if (likely(args->csa_sequenceid == slot->seq_nr + 1)) {
 		slot->seq_nr++;
-		return htonl(NFS4_OK);
+		goto out_ok;
 	}
 
 	/* Replay */
@@ -366,11 +342,14 @@ validate_seqid(struct nfs4_slot_table *tbl, struct cb_sequenceargs * args)
 	/* Wraparound */
 	if (args->csa_sequenceid == 1 && (slot->seq_nr + 1) == 0) {
 		slot->seq_nr = 1;
-		return htonl(NFS4_OK);
+		goto out_ok;
 	}
 
 	/* Misordered request */
 	return htonl(NFS4ERR_SEQ_MISORDERED);
+out_ok:
+	tbl->highest_used_slotid = args->csa_slotid;
+	return htonl(NFS4_OK);
 }
 
 /*
@@ -432,25 +411,31 @@ __be32 nfs4_callback_sequence(struct cb_sequenceargs *args,
 			      struct cb_sequenceres *res,
 			      struct cb_process_state *cps)
 {
+	struct nfs4_slot_table *tbl;
 	struct nfs_client *clp;
 	int i;
 	__be32 status = htonl(NFS4ERR_BADSESSION);
-
-	cps->clp = NULL;
 
 	clp = nfs4_find_client_sessionid(args->csa_addr, &args->csa_sessionid);
 	if (clp == NULL)
 		goto out;
 
+	tbl = &clp->cl_session->bc_slot_table;
+
+	spin_lock(&tbl->slot_tbl_lock);
 	/* state manager is resetting the session */
-	if (test_bit(NFS4_SESSION_DRAINING, &clp->cl_session->session_state)) {
-		status = NFS4ERR_DELAY;
+	if (test_bit(NFS4_SLOT_TBL_DRAINING, &tbl->slot_tbl_state)) {
+		spin_unlock(&tbl->slot_tbl_lock);
+		status = htonl(NFS4ERR_DELAY);
 		goto out;
 	}
 
 	status = validate_seqid(&clp->cl_session->bc_slot_table, args);
+	spin_unlock(&tbl->slot_tbl_lock);
 	if (status)
 		goto out;
+
+	cps->slotid = args->csa_slotid;
 
 	/*
 	 * Check for pending referring calls.  If a match is found, a
@@ -468,7 +453,6 @@ __be32 nfs4_callback_sequence(struct cb_sequenceargs *args,
 	res->csr_slotid = args->csa_slotid;
 	res->csr_highestslotid = NFS41_BC_MAX_CALLBACKS - 1;
 	res->csr_target_highestslotid = NFS41_BC_MAX_CALLBACKS - 1;
-	nfs4_cb_take_slot(clp);
 
 out:
 	cps->clp = clp; /* put in nfs4_callback_compound */

@@ -761,7 +761,9 @@ static void rh_check_supported(void)
 	if ((boot_cpu_data.x86_vendor == X86_VENDOR_INTEL) &&
 	    ((boot_cpu_data.x86 == 6))) {
 		switch (boot_cpu_data.x86_model) {
+		case 77: /* Atom Avoton */
 		case 70: /* Crystal Well */
+		case 63: /* Grantley/Haswell EP */
 		case 62: /* Ivy Town */
 			break;
 		default:

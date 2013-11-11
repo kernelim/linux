@@ -36,12 +36,11 @@
 #include <linux/init.h>
 #include <linux/vga_switcheroo.h>
 
-#include "drmP.h"
-#include "drm.h"
-#include "drm_crtc.h"
-#include "drm_fb_helper.h"
+#include <drm/drmP.h>
+#include <drm/drm_crtc.h>
+#include <drm/drm_fb_helper.h>
 #include "intel_drv.h"
-#include "i915_drm.h"
+#include <drm/i915_drm.h>
 #include "i915_drv.h"
 
 static struct fb_ops intelfb_ops = {
@@ -56,9 +55,10 @@ static struct fb_ops intelfb_ops = {
 	.fb_setcmap = drm_fb_helper_setcmap,
 };
 
-static int intelfb_create(struct intel_fbdev *ifbdev,
+static int intelfb_create(struct drm_fb_helper *helper,
 			  struct drm_fb_helper_surface_size *sizes)
 {
+	struct intel_fbdev *ifbdev = (struct intel_fbdev *)helper;
 	struct drm_device *dev = ifbdev->helper.dev;
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	struct fb_info *info;
@@ -82,7 +82,9 @@ static int intelfb_create(struct intel_fbdev *ifbdev,
 
 	size = mode_cmd.pitches[0] * mode_cmd.height;
 	size = ALIGN(size, PAGE_SIZE);
-	obj = i915_gem_alloc_object(dev, size);
+	obj = i915_gem_object_create_stolen(dev, size);
+	if (obj == NULL)
+		obj = i915_gem_alloc_object(dev, size);
 	if (!obj) {
 		DRM_ERROR("failed to allocate framebuffer\n");
 		ret = -ENOMEM;
@@ -125,18 +127,12 @@ static int intelfb_create(struct intel_fbdev *ifbdev,
 		ret = -ENOMEM;
 		goto out_unpin;
 	}
-	/* setup aperture base/size for vesafb takeover */
-	info->aperture_base = dev->mode_config.fb_base;
-	if (!IS_GEN2(dev))
-		info->aperture_size = pci_resource_len(dev->pdev, 2);
-	else
-		info->aperture_size = pci_resource_len(dev->pdev, 0);
 
 	info->fix.smem_start = dev->mode_config.fb_base + obj->gtt_offset;
 	info->fix.smem_len = size;
 
 	info->screen_base =
-		ioremap_wc(dev_priv->mm.gtt_base_addr + obj->gtt_offset,
+		ioremap_wc(dev_priv->gtt.mappable_base + obj->gtt_offset,
 			   size);
 	if (!info->screen_base) {
 		ret = -ENOSPC;
@@ -148,6 +144,13 @@ static int intelfb_create(struct intel_fbdev *ifbdev,
 
 	drm_fb_helper_fill_fix(info, fb->pitches[0], fb->depth);
 	drm_fb_helper_fill_var(info, &ifbdev->helper, sizes->fb_width, sizes->fb_height);
+
+	/* If the object is shmemfs backed, it will have given us zeroed pages.
+	 * If the object is stolen however, it will be full of whatever
+	 * garbage was left in there.
+	 */
+	if (ifbdev->ifb.obj->stolen)
+		memset_io(info->screen_base, 0, info->screen_size);
 
 	/* Use default scratch pixmap (info->pixmap.flags = FB_PIXMAP_SYSTEM) */
 
@@ -169,26 +172,10 @@ out:
 	return ret;
 }
 
-static int intel_fb_find_or_create_single(struct drm_fb_helper *helper,
-					  struct drm_fb_helper_surface_size *sizes)
-{
-	struct intel_fbdev *ifbdev = (struct intel_fbdev *)helper;
-	int new_fb = 0;
-	int ret;
-
-	if (!helper->fb) {
-		ret = intelfb_create(ifbdev, sizes);
-		if (ret)
-			return ret;
-		new_fb = 1;
-	}
-	return new_fb;
-}
-
 static struct drm_fb_helper_funcs intel_fb_helper_funcs = {
 	.gamma_set = intel_crtc_fb_gamma_set,
 	.gamma_get = intel_crtc_fb_gamma_get,
-	.fb_probe = intel_fb_find_or_create_single,
+	.fb_probe = intelfb_create,
 };
 
 static void intel_fbdev_destroy(struct drm_device *dev,
@@ -208,6 +195,7 @@ static void intel_fbdev_destroy(struct drm_device *dev,
 
 	drm_fb_helper_fini(&ifbdev->helper);
 
+	drm_framebuffer_unregister_private(&ifb->base);
 	drm_framebuffer_cleanup(&ifb->base);
 	if (ifb->obj) {
 		drm_gem_object_unreference_unlocked(&ifb->obj->base);
@@ -237,8 +225,16 @@ int intel_fbdev_init(struct drm_device *dev)
 	}
 
 	drm_fb_helper_single_add_all_connectors(&ifbdev->helper);
-	drm_fb_helper_initial_config(&ifbdev->helper, 32);
+
 	return 0;
+}
+
+void intel_fbdev_initial_config(struct drm_device *dev)
+{
+	drm_i915_private_t *dev_priv = dev->dev_private;
+
+	/* Due to peculiar init order wrt to hpd handling this is separate. */
+	drm_fb_helper_initial_config(&dev_priv->fbdev->helper, 32);
 }
 
 void intel_fbdev_fini(struct drm_device *dev)
@@ -255,10 +251,22 @@ void intel_fbdev_fini(struct drm_device *dev)
 void intel_fbdev_set_suspend(struct drm_device *dev, int state)
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
-	if (!dev_priv->fbdev)
+	struct intel_fbdev *ifbdev = dev_priv->fbdev;
+	struct fb_info *info;
+
+	if (!ifbdev)
 		return;
 
-	fb_set_suspend(dev_priv->fbdev->helper.fbdev, state);
+	info = ifbdev->helper.fbdev;
+
+	/* On resume from hibernation: If the object is shmemfs backed, it has
+	 * been restored from swap. If the object is stolen however, it will be
+	 * full of whatever garbage was left in there.
+	 */
+	if (!state && ifbdev->ifb.obj->stolen)
+		memset_io(info->screen_base, 0, info->screen_size);
+
+	fb_set_suspend(info, state);
 }
 
 MODULE_LICENSE("GPL and additional rights");
@@ -276,7 +284,7 @@ void intel_fb_restore_mode(struct drm_device *dev)
 	struct drm_mode_config *config = &dev->mode_config;
 	struct drm_plane *plane;
 
-	mutex_lock(&dev->mode_config.mutex);
+	drm_modeset_lock_all(dev);
 
 	ret = drm_fb_helper_restore_fbdev_mode(&dev_priv->fbdev->helper);
 	if (ret)
@@ -284,7 +292,8 @@ void intel_fb_restore_mode(struct drm_device *dev)
 
 	/* Be sure to shut off any planes that may be active */
 	list_for_each_entry(plane, &config->plane_list, head)
-		plane->funcs->disable_plane(plane);
+		if (plane->enabled)
+			plane->funcs->disable_plane(plane);
 
-	mutex_unlock(&dev->mode_config.mutex);
+	drm_modeset_unlock_all(dev);
 }

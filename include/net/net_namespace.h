@@ -20,6 +20,7 @@
 #include <net/netns/conntrack.h>
 #endif
 #include <net/netns/xfrm.h>
+#include <net/dst_ops.h>
 
 struct proc_dir_entry;
 struct net_device;
@@ -27,6 +28,10 @@ struct sock;
 struct ctl_table_header;
 struct net_generic;
 struct sock;
+
+
+#define NETDEV_HASHBITS    8
+#define NETDEV_HASHENTRIES (1 << NETDEV_HASHBITS)
 
 struct net {
 	atomic_t		count;		/* To decided when the network
@@ -87,6 +92,13 @@ struct net {
 #ifndef __GENKSYMS__
 	unsigned int ipv4_sysctl_ping_group_range[2];
 	struct netns_nf_frag	nf_frag;
+#ifdef CONFIG_XFRM
+	struct dst_ops		xfrm4_dst_ops;
+#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+	struct dst_ops		xfrm6_dst_ops;
+#endif
+#endif
+	unsigned int		proc_inum;
 #endif
 };
 
@@ -116,6 +128,7 @@ static inline struct net *copy_net_ns(unsigned long flags, struct net *net_ns)
 extern struct list_head net_namespace_list;
 
 extern struct net *get_net_ns_by_pid(pid_t pid);
+extern struct net *get_net_ns_by_fd(int pid);
 
 #ifdef CONFIG_NET_NS
 extern void __put_net(struct net *net);

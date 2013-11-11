@@ -51,10 +51,6 @@ struct nfs_client {
 	nfs4_verifier		cl_confirm;	/* Clientid verifier */
 	unsigned long		cl_state;
 
-	struct rb_root		cl_openowner_id;
-	struct rb_root		cl_lockowner_id;
-
-	struct rb_root		cl_state_owners;
 	spinlock_t		cl_lock;
 
 	unsigned long		cl_lease_time;
@@ -82,6 +78,10 @@ struct nfs_client {
 	/* The flags used for obtaining the clientid during EXCHANGE_ID */
 	u32			cl_exchange_flags;
 	struct nfs4_session	*cl_session; 	/* sharred session */
+	/* the following fields are protected by nfs_client->cl_lock */
+	struct rb_root		cl_openowner_id;
+	struct rb_root		cl_lockowner_id;
+	struct rb_root		cl_state_owners;
 #endif /* CONFIG_NFS_V4 */
 
 #ifdef CONFIG_NFS_FSCACHE
@@ -147,7 +147,13 @@ struct nfs_server {
 						   filesystem */
 	struct pnfs_layoutdriver_type  *pnfs_curr_ld; /* Active layout driver */
 	struct rpc_wait_queue	roc_rpcwaitq;
+
+	/* the following fields are protected by nfs_client->cl_lock */
+	struct rb_root		state_owners;
+	struct rb_root		openowner_id;
+	struct rb_root		lockowner_id;
 #endif
+	struct list_head	state_owners_lru;
 	struct list_head	layouts;
 	struct list_head        delegations;
 	void (*destroy)(struct nfs_server *);
@@ -179,6 +185,8 @@ struct nfs_server {
 #define NFS_CAP_MTIME		(1U << 13)
 #define NFS_CAP_POSIX_LOCK	(1U << 14)
 #define NFS_CAP_UIDGID_NOMAP	(1U << 15)
+#define NFS_CAP_STATEID_NFSV41	(1U << 16)
+#define NFS_CAP_ATOMIC_OPEN_V1	(1U << 17)
 
 
 /* maximum number of slots to use */
@@ -199,6 +207,7 @@ struct nfs4_slot_table {
 	int		target_max_slots;	/* Set by CB_RECALL_SLOT as
 						 * the new max_slots */
 	struct completion complete;
+	unsigned long	slot_tbl_state;
 };
 
 static inline int slot_idx(struct nfs4_slot_table *tbl, struct nfs4_slot *sp)

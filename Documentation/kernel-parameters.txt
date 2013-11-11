@@ -686,11 +686,6 @@ and is between 256 and 4096 characters. It is defined in the file
 
 	dtc3181e=	[HW,SCSI]
 
-	dynamic_printk	Enables pr_debug()/dev_dbg() calls if
-			CONFIG_DYNAMIC_PRINTK_DEBUG has been enabled.
-			These can also be switched on/off via
-			<debugfs>/dynamic_printk/modules
-
 	earlycon=	[KNL] Output early console device and options.
 		uart[8250],io,<addr>[,options]
 		uart[8250],mmio,<addr>[,options]
@@ -1646,6 +1641,13 @@ and is between 256 and 4096 characters. It is defined in the file
 			back to using the idmapper.
 			To turn off this behaviour, set the value to '0'.
 
+	nfsd.nfs4_disable_idmapping=
+			[NFSv4] Defaults to 0.  When set to '1', the NFSv4
+			server will return only numeric uids and gids to
+			clients using auth_sys, and will accept numeric uids
+			and gids from such clients.  This is intended to ease
+			migration from NFSv2/v3.
+
 	nmi_debug=	[KNL,AVR32,SH] Specify one or more actions to take
 			when a NMI is triggered.
 			Format: [state][,regs][,debounce][,die]
@@ -2042,6 +2044,21 @@ and is between 256 and 4096 characters. It is defined in the file
 				This sorting is done to get a device
 				order compatible with older (<= 2.4) kernels.
 		nobfsort	Don't sort PCI devices into breadth-first order.
+		pcie_bus_tune_off	Disable PCIe MPS (Max Payload Size)
+				tuning and use the BIOS-configured MPS defaults.
+		pcie_bus_safe	Set every device's MPS to the largest value
+				supported by all devices below the root complex.
+		pcie_bus_perf	Set device MPS to the largest allowable MPS
+				based on its parent bus. Also set MRRS (Max
+				Read Request Size) to the largest supported
+				value (no larger than the MPS that the device
+				or bus can support) for best performance.
+		pcie_bus_peer2peer	Set every device's MPS to 128B, which
+				every device is guaranteed to support. This
+				configuration allows peer-to-peer DMA between
+				any pair of devices, possibly at the cost of
+				reduced performance.  This also guarantees
+				that hot-added devices will work.
 		cbiosize=nn[KMG]	The fixed amount of bus space which is
 				reserved for the CardBus bridge's IO window.
 				The default value is 256 bytes.
@@ -2421,6 +2438,8 @@ and is between 256 and 4096 characters. It is defined in the file
 	smart2=		[HW]
 			Format: <io1>[,<io2>[,...,<io8>]]
 
+	smbios_26_uuid  [X86] Display UUID in SMBIOS 2.6 format
+
 	smp-alt-once	[X86-32,SMP] On a hotplug CPU system, only
 			attempt to substitute SMP alternatives once at boot.
 
@@ -2716,6 +2735,9 @@ and is between 256 and 4096 characters. It is defined in the file
 			high-resolution timer mode on older hardware, and in
 			virtualized environment.
 
+	tsc_init_debug  [RHEL] Output additional information about the TSC
+			during system boot.
+
 	turbografx.map[2|3]=	[HW,JOY]
 			TurboGraFX parallel port interface
 			Format:
@@ -2759,6 +2781,10 @@ and is between 256 and 4096 characters. It is defined in the file
 	usbcore.old_scheme_first=
 			[USB] Start with the old device initialization
 			scheme (default 0 = off).
+
+	usbcore.usbfs_memory_mb=
+			[USB] Memory limit (in MB) for buffers allocated by
+			usbfs (default = 16, 0 = max = 2047).
 
 	usbcore.use_both_schemes=
 			[USB] Try the other device initialization scheme

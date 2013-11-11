@@ -238,6 +238,9 @@ static DEFINE_PER_CPU(enum paravirt_lazy_mode, paravirt_lazy_mode) = PARAVIRT_LA
 
 static inline void enter_lazy(enum paravirt_lazy_mode mode)
 {
+	if (in_interrupt())
+		return;
+
 	BUG_ON(percpu_read(paravirt_lazy_mode) != PARAVIRT_LAZY_NONE);
 
 	percpu_write(paravirt_lazy_mode, mode);
@@ -245,6 +248,9 @@ static inline void enter_lazy(enum paravirt_lazy_mode mode)
 
 static void leave_lazy(enum paravirt_lazy_mode mode)
 {
+	if (in_interrupt())
+		return;
+
 	BUG_ON(percpu_read(paravirt_lazy_mode) != mode);
 
 	percpu_write(paravirt_lazy_mode, PARAVIRT_LAZY_NONE);

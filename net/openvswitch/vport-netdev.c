@@ -38,21 +38,27 @@ static atomic_t nr_bridges = ATOMIC_INIT(0);
 /* Must be called with rcu_read_lock. */
 static void netdev_port_receive(struct vport *vport, struct sk_buff *skb)
 {
-	if (unlikely(!vport)) {
-		kfree_skb(skb);
-		return;
-	}
+	if (unlikely(!vport))
+		goto error;
+
+	if (unlikely(skb_warn_if_lro(skb)))
+		goto error;
 
 	/* Make our own copy of the packet.  Otherwise we will mangle the
 	 * packet for anyone who came before us (e.g. tcpdump via AF_PACKET).
-	 * (No one comes after us, since we tell handle_bridge() that we took
-	 * the packet.) */
+	 */
 	skb = skb_share_check(skb, GFP_ATOMIC);
 	if (unlikely(!skb))
 		return;
 
 	skb_push(skb, ETH_HLEN);
-	ovs_vport_receive(vport, skb);
+	ovs_skb_postpush_rcsum(skb, skb->data, ETH_HLEN);
+
+	ovs_vport_receive(vport, skb, NULL);
+	return;
+
+error:
+	kfree_skb(skb);
 }
 
 /* Called with rcu_read_lock and bottom-halves disabled. */
@@ -85,7 +91,7 @@ static struct vport *netdev_create(const struct vport_parms *parms)
 
 	netdev_vport = netdev_vport_priv(vport);
 
-	netdev_vport->dev = dev_get_by_name(&init_net, parms->name);
+	netdev_vport->dev = dev_get_by_name(ovs_dp_get_net(vport->dp), parms->name);
 	if (!netdev_vport->dev) {
 		err = -ENODEV;
 		goto error_free_vport;
@@ -99,8 +105,9 @@ static struct vport *netdev_create(const struct vport_parms *parms)
 	}
 
 	err = -EBUSY;
+	rtnl_lock();
 	if (netdev_vport->dev->ax25_ptr)
-		goto error_put;
+		goto error_unlock;
 
 	netdev_vport->dev->ax25_ptr = vport;
 
@@ -109,9 +116,12 @@ static struct vport *netdev_create(const struct vport_parms *parms)
 
 	dev_set_promiscuity(netdev_vport->dev, 1);
 	netdev_vport->dev->priv_flags |= IFF_OVS_DATAPATH;
+	rtnl_unlock();
 
 	return vport;
 
+error_unlock:
+	rtnl_unlock();
 error_put:
 	dev_put(netdev_vport->dev);
 error_free_vport:
@@ -120,10 +130,20 @@ error:
 	return ERR_PTR(err);
 }
 
+static void free_port_rcu(struct rcu_head *rcu)
+{
+	struct netdev_vport *netdev_vport = container_of(rcu,
+					struct netdev_vport, rcu);
+
+	dev_put(netdev_vport->dev);
+	ovs_vport_free(vport_from_priv(netdev_vport));
+}
+
 static void netdev_destroy(struct vport *vport)
 {
 	struct netdev_vport *netdev_vport = netdev_vport_priv(vport);
 
+	rtnl_lock();
 	netdev_vport->dev->priv_flags &= ~IFF_OVS_DATAPATH;
 	netdev_vport->dev->ax25_ptr = NULL;
 
@@ -131,23 +151,15 @@ static void netdev_destroy(struct vport *vport)
 		openvswitch_handle_frame_hook = NULL;
 
 	dev_set_promiscuity(netdev_vport->dev, -1);
+	rtnl_unlock();
 
-	synchronize_rcu();
-
-	dev_put(netdev_vport->dev);
-	ovs_vport_free(vport);
+	call_rcu(&netdev_vport->rcu, free_port_rcu);
 }
 
 const char *ovs_netdev_get_name(const struct vport *vport)
 {
 	const struct netdev_vport *netdev_vport = netdev_vport_priv(vport);
 	return netdev_vport->dev->name;
-}
-
-int ovs_netdev_get_ifindex(const struct vport *vport)
-{
-	const struct netdev_vport *netdev_vport = netdev_vport_priv(vport);
-	return netdev_vport->dev->ifindex;
 }
 
 static unsigned packet_length(const struct sk_buff *skb)
@@ -169,12 +181,10 @@ static int netdev_send(struct vport *vport, struct sk_buff *skb)
 	if (unlikely(packet_length(skb) > mtu && !skb_is_gso(skb))) {
 		if (net_ratelimit())
 			pr_warn("%s: dropped over-mtu packet: %d > %d\n",
-				ovs_dp_name(vport->dp), packet_length(skb), mtu);
-		goto error;
+				     netdev_vport->dev->name,
+				     packet_length(skb), mtu);
+		goto drop;
 	}
-
-	if (unlikely(skb_warn_if_lro(skb)))
-		goto error;
 
 	skb->dev = netdev_vport->dev;
 	len = skb->len;
@@ -182,9 +192,8 @@ static int netdev_send(struct vport *vport, struct sk_buff *skb)
 
 	return len;
 
-error:
+drop:
 	kfree_skb(skb);
-	ovs_vport_record_error(vport, VPORT_E_TX_DROPPED);
 	return 0;
 }
 
@@ -203,6 +212,5 @@ const struct vport_ops ovs_netdev_vport_ops = {
 	.create		= netdev_create,
 	.destroy	= netdev_destroy,
 	.get_name	= ovs_netdev_get_name,
-	.get_ifindex	= ovs_netdev_get_ifindex,
 	.send		= netdev_send,
 };

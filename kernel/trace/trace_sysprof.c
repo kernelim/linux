@@ -301,9 +301,11 @@ sysprof_sample_write(struct file *filp, const char __user *ubuf,
 		val = 100;
 
 	mutex_lock(&sample_timer_lock);
-	stop_stack_timers();
+	if (tracer_enabled)
+		stop_stack_timers();
 	sample_period = val * 1000;
-	start_stack_timers();
+	if (tracer_enabled)
+		start_stack_timers();
 	mutex_unlock(&sample_timer_lock);
 
 	return cnt;

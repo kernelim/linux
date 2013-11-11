@@ -61,7 +61,7 @@ out:
 static long do_spu_create(const char __user *pathname, unsigned int flags,
 		mode_t mode, struct file *neighbor)
 {
-	char *tmp;
+	struct filename *tmp;
 	int ret;
 
 	tmp = getname(pathname);
@@ -69,7 +69,7 @@ static long do_spu_create(const char __user *pathname, unsigned int flags,
 	if (!IS_ERR(tmp)) {
 		struct nameidata nd;
 
-		ret = path_lookup(tmp, LOOKUP_PARENT, &nd);
+		ret = path_lookup(tmp->name, LOOKUP_PARENT, &nd);
 		if (!ret) {
 			nd.flags |= LOOKUP_OPEN | LOOKUP_CREATE;
 			ret = spufs_create(&nd, flags, mode, neighbor);

@@ -14,7 +14,7 @@ fi
 # This is a duplicate of RCS_FIND_IGNORE without escaped '()'
 ignore="( -name SCCS -o -name BitKeeper -o -name .svn -o \
           -name CVS  -o -name .pc       -o -name .hg  -o \
-          -name .git )                                   \
+          -name .git -o -name redhat )                   \
           -prune -o"
 
 # Do not use full path is we do not use O=.. builds

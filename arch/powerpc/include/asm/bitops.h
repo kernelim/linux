@@ -345,6 +345,10 @@ unsigned long generic_find_next_le_bit(const unsigned long *addr,
 
 #define test_bit_le(nr, addr) \
 	test_le_bit((nr), (addr))
+#define set_bit_le(nr, addr) \
+	set_bit((nr) ^ BITOP_LE_SWIZZLE, (addr))
+#define clear_bit_le(nr, addr) \
+	clear_bit((nr) ^ BITOP_LE_SWIZZLE, (addr))
 
 #define test_and_set_bit_le(nr, addr) \
 	test_and_set_bit((nr) ^ BITOP_LE_SWIZZLE, (addr))

@@ -1386,9 +1386,6 @@ int __init amd_iommu_init(void)
 	if (amd_iommu_pd_alloc_bitmap == NULL)
 		goto free;
 
-	/* init the device table */
-	init_device_table();
-
 	/*
 	 * let all alias entries point to itself
 	 */
@@ -1432,6 +1429,10 @@ int __init amd_iommu_init(void)
 
 	if (ret)
 		goto disable;
+
+	init_device_table();
+	amd_iommu_flush_all_devices();
+	amd_iommu_flush_all_domains();
 
 	amd_iommu_init_api();
 

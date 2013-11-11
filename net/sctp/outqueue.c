@@ -222,7 +222,7 @@ void sctp_outq_init(struct sctp_association *asoc, struct sctp_outq *q)
 
 /* Free the outqueue structure and any related pending chunks.
  */
-void sctp_outq_teardown(struct sctp_outq *q)
+static void __sctp_outq_teardown(struct sctp_outq *q)
 {
 	struct sctp_transport *transport;
 	struct list_head *lchunk, *temp;
@@ -275,8 +275,6 @@ void sctp_outq_teardown(struct sctp_outq *q)
 		sctp_chunk_free(chunk);
 	}
 
-	q->error = 0;
-
 	/* Throw away any leftover control chunks. */
 	list_for_each_entry_safe(chunk, tmp, &q->control_chunk_list, list) {
 		list_del_init(&chunk->list);
@@ -284,11 +282,17 @@ void sctp_outq_teardown(struct sctp_outq *q)
 	}
 }
 
+void sctp_outq_teardown(struct sctp_outq *q)
+{
+	__sctp_outq_teardown(q);
+	sctp_outq_init(q->asoc, q);
+}
+
 /* Free the outqueue structure and any related pending chunks.  */
 void sctp_outq_free(struct sctp_outq *q)
 {
 	/* Throw away leftover chunks. */
-	sctp_outq_teardown(q);
+	__sctp_outq_teardown(q);
 
 	/* If we were kmalloc()'d, free the memory.  */
 	if (q->malloced)
@@ -668,6 +672,7 @@ redo:
 				chunk->fast_retransmit = SCTP_DONT_FRTX;
 
 			q->empty = 0;
+			q->asoc->stats.rtxchunks++;
 			break;
 		}
 
@@ -867,12 +872,14 @@ static int sctp_outq_flush(struct sctp_outq *q, int rtx_timeout)
 			if (status  != SCTP_XMIT_OK) {
 				/* put the chunk back */
 				list_add(&chunk->list, &q->control_chunk_list);
-			} else if (chunk->chunk_hdr->type == SCTP_CID_FWD_TSN) {
+			} else {
+				asoc->stats.octrlchunks++;
 				/* PR-SCTP C5) If a FORWARD TSN is sent, the
 				 * sender MUST assure that at least one T3-rtx
 				 * timer is running.
 				 */
-				sctp_transport_reset_timers(transport);
+				if (chunk->chunk_hdr->type == SCTP_CID_FWD_TSN)
+					sctp_transport_reset_timers(transport);
 			}
 			break;
 
@@ -1033,6 +1040,11 @@ static int sctp_outq_flush(struct sctp_outq *q, int rtx_timeout)
 				break;
 
 			case SCTP_XMIT_OK:
+				if (chunk->chunk_hdr->flags & SCTP_DATA_UNORDERED)
+					asoc->stats.ouodchunks++;
+				else
+					asoc->stats.oodchunks++;
+
 				break;
 
 			default:
@@ -1138,6 +1150,7 @@ int sctp_outq_sack(struct sctp_outq *q, struct sctp_sackhdr *sack)
 
 	sack_ctsn = ntohl(sack->cum_tsn_ack);
 	gap_ack_blocks = ntohs(sack->num_gap_ack_blocks);
+	asoc->stats.gapcnt += gap_ack_blocks;
 	/*
 	 * SFR-CACC algorithm:
 	 * On receipt of a SACK the sender SHOULD execute the
@@ -1316,6 +1329,7 @@ static void sctp_check_transmitted(struct sctp_outq *q,
 	__u8 restart_timer = 0;
 	int bytes_acked = 0;
 	int migrate_bytes = 0;
+	bool forward_progress = false;
 
 	/* These state variables are for coherent debug output. --xguo */
 
@@ -1397,6 +1411,7 @@ static void sctp_check_transmitted(struct sctp_outq *q,
 				bytes_acked += sctp_data_size(tchunk);
 				if (!tchunk->transport)
 					migrate_bytes += sctp_data_size(tchunk);
+				forward_progress = true;
 			}
 
 			if (TSN_lte(tsn, sack_ctsn)) {
@@ -1410,6 +1425,7 @@ static void sctp_check_transmitted(struct sctp_outq *q,
 				 * current RTO.
 				 */
 				restart_timer = 1;
+				forward_progress = true;
 
 				if (!tchunk->tsn_gap_acked) {
 					/*
@@ -1596,6 +1612,7 @@ static void sctp_check_transmitted(struct sctp_outq *q,
 			 */
 			transport->error_count = 0;
 			transport->asoc->overall_error_count = 0;
+			forward_progress = true;
 
 			/*
 			 * While in SHUTDOWN PENDING, we may have started
@@ -1669,6 +1686,11 @@ static void sctp_check_transmitted(struct sctp_outq *q,
 			if (!mod_timer(&transport->T3_rtx_timer,
 				       jiffies + transport->rto))
 				sctp_transport_hold(transport);
+		}
+
+		if (forward_progress) {
+			if (transport->dst)
+				dst_confirm(transport->dst);
 		}
 	}
 

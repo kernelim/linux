@@ -89,65 +89,92 @@ int usb_amd_find_chipset_info(void)
 {
 	u8 rev = 0;
 	unsigned long flags;
+	struct amd_chipset_info info;
+	int ret;
 
 	spin_lock_irqsave(&amd_lock, flags);
 
-	amd_chipset.probe_count++;
 	/* probe only once */
-	if (amd_chipset.probe_count > 1) {
+	if (amd_chipset.probe_count > 0) {
+		amd_chipset.probe_count++;
 		spin_unlock_irqrestore(&amd_lock, flags);
 		return amd_chipset.probe_result;
 	}
+	memset(&info, 0, sizeof(info));
+	spin_unlock_irqrestore(&amd_lock, flags);
 
-	amd_chipset.smbus_dev = pci_get_device(PCI_VENDOR_ID_ATI, 0x4385, NULL);
-	if (amd_chipset.smbus_dev) {
-		rev = amd_chipset.smbus_dev->revision;
+	info.smbus_dev = pci_get_device(PCI_VENDOR_ID_ATI, 0x4385, NULL);
+	if (info.smbus_dev) {
+		rev = info.smbus_dev->revision;
 		if (rev >= 0x40)
-			amd_chipset.sb_type = 1;
+			info.sb_type = 1;
 		else if (rev >= 0x30 && rev <= 0x3b)
-			amd_chipset.sb_type = 3;
+			info.sb_type = 3;
 	} else {
-		amd_chipset.smbus_dev = pci_get_device(PCI_VENDOR_ID_AMD,
-							0x780b, NULL);
-		if (!amd_chipset.smbus_dev) {
-			spin_unlock_irqrestore(&amd_lock, flags);
-			return 0;
+		info.smbus_dev = pci_get_device(PCI_VENDOR_ID_AMD,
+						0x780b, NULL);
+		if (!info.smbus_dev) {
+			ret = 0;
+			goto commit;
 		}
-		rev = amd_chipset.smbus_dev->revision;
+
+		rev = info.smbus_dev->revision;
 		if (rev >= 0x11 && rev <= 0x18)
-			amd_chipset.sb_type = 2;
+			info.sb_type = 2;
 	}
 
-	if (amd_chipset.sb_type == 0) {
-		if (amd_chipset.smbus_dev) {
-			pci_dev_put(amd_chipset.smbus_dev);
-			amd_chipset.smbus_dev = NULL;
+	if (info.sb_type == 0) {
+		if (info.smbus_dev) {
+			pci_dev_put(info.smbus_dev);
+			info.smbus_dev = NULL;
 		}
-		spin_unlock_irqrestore(&amd_lock, flags);
-		return 0;
+		ret = 0;
+		goto commit;
 	}
 
-	amd_chipset.nb_dev = pci_get_device(PCI_VENDOR_ID_AMD, 0x9601, NULL);
-	if (amd_chipset.nb_dev) {
-		amd_chipset.nb_type = 1;
+	info.nb_dev = pci_get_device(PCI_VENDOR_ID_AMD, 0x9601, NULL);
+	if (info.nb_dev) {
+		info.nb_type = 1;
 	} else {
-		amd_chipset.nb_dev = pci_get_device(PCI_VENDOR_ID_AMD,
-							0x1510, NULL);
-		if (amd_chipset.nb_dev) {
-			amd_chipset.nb_type = 2;
-		} else  {
-			amd_chipset.nb_dev = pci_get_device(PCI_VENDOR_ID_AMD,
-								0x9600, NULL);
-			if (amd_chipset.nb_dev)
-				amd_chipset.nb_type = 3;
+		info.nb_dev = pci_get_device(PCI_VENDOR_ID_AMD, 0x1510, NULL);
+		if (info.nb_dev) {
+			info.nb_type = 2;
+		} else {
+			info.nb_dev = pci_get_device(PCI_VENDOR_ID_AMD,
+						     0x9600, NULL);
+			if (info.nb_dev)
+				info.nb_type = 3;
 		}
 	}
 
-	amd_chipset.probe_result = 1;
+	ret = info.probe_result = 1;
 	printk(KERN_DEBUG "QUIRK: Enable AMD PLL fix\n");
 
-	spin_unlock_irqrestore(&amd_lock, flags);
-	return amd_chipset.probe_result;
+commit:
+
+	spin_lock_irqsave(&amd_lock, flags);
+	if (amd_chipset.probe_count > 0) {
+		/* race - someone else was faster - drop devices */
+
+		/* Mark that we where here */
+		amd_chipset.probe_count++;
+		ret = amd_chipset.probe_result;
+
+		spin_unlock_irqrestore(&amd_lock, flags);
+
+		if (info.nb_dev)
+			pci_dev_put(info.nb_dev);
+		if (info.smbus_dev)
+			pci_dev_put(info.smbus_dev);
+
+	} else {
+		/* no race - commit the result */
+		info.probe_count++;
+		amd_chipset = info;
+		spin_unlock_irqrestore(&amd_lock, flags);
+	}
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(usb_amd_find_chipset_info);
 
@@ -289,6 +316,7 @@ EXPORT_SYMBOL_GPL(usb_amd_quirk_pll_enable);
 
 void usb_amd_dev_put(void)
 {
+	struct pci_dev *nb, *smbus;
 	unsigned long flags;
 
 	spin_lock_irqsave(&amd_lock, flags);
@@ -299,20 +327,23 @@ void usb_amd_dev_put(void)
 		return;
 	}
 
-	if (amd_chipset.nb_dev) {
-		pci_dev_put(amd_chipset.nb_dev);
-		amd_chipset.nb_dev = NULL;
-	}
-	if (amd_chipset.smbus_dev) {
-		pci_dev_put(amd_chipset.smbus_dev);
-		amd_chipset.smbus_dev = NULL;
-	}
+	/* save them to pci_dev_put outside of spinlock */
+	nb    = amd_chipset.nb_dev;
+	smbus = amd_chipset.smbus_dev;
+
+	amd_chipset.nb_dev = NULL;
+	amd_chipset.smbus_dev = NULL;
 	amd_chipset.nb_type = 0;
 	amd_chipset.sb_type = 0;
 	amd_chipset.isoc_reqs = 0;
 	amd_chipset.probe_result = 0;
 
 	spin_unlock_irqrestore(&amd_lock, flags);
+
+	if (nb)
+		pci_dev_put(nb);
+	if (smbus)
+		pci_dev_put(smbus);
 }
 EXPORT_SYMBOL_GPL(usb_amd_dev_put);
 
@@ -634,30 +665,6 @@ static int handshake(void __iomem *ptr, u32 mask, u32 done,
 	return -ETIMEDOUT;
 }
 
-#define PCI_DEVICE_ID_INTEL_LYNX_POINT_XHCI	0x8C31
-
-bool usb_is_intel_ppt_switchable_xhci(struct pci_dev *pdev)
-{
-	return pdev->class == PCI_CLASS_SERIAL_USB_XHCI &&
-		pdev->vendor == PCI_VENDOR_ID_INTEL &&
-		pdev->device == PCI_DEVICE_ID_INTEL_PANTHERPOINT_XHCI;
-}
-
-/* The Intel Lynx Point chipset also has switchable ports. */
-bool usb_is_intel_lpt_switchable_xhci(struct pci_dev *pdev)
-{
-	return pdev->class == PCI_CLASS_SERIAL_USB_XHCI &&
-		pdev->vendor == PCI_VENDOR_ID_INTEL &&
-		pdev->device == PCI_DEVICE_ID_INTEL_LYNX_POINT_XHCI;
-}
-
-bool usb_is_intel_switchable_xhci(struct pci_dev *pdev)
-{
-	return usb_is_intel_ppt_switchable_xhci(pdev) ||
-		usb_is_intel_lpt_switchable_xhci(pdev);
-}
-EXPORT_SYMBOL_GPL(usb_is_intel_switchable_xhci);
-
 /*
  * Intel's Panther Point chipset has two host controllers (EHCI and xHCI) that
  * share some number of ports.  These ports can be switched between either
@@ -676,9 +683,23 @@ EXPORT_SYMBOL_GPL(usb_is_intel_switchable_xhci);
  * terminations before switching the USB 2.0 wires over, so that USB 3.0
  * devices connect at SuperSpeed, rather than at USB 2.0 speeds.
  */
-void usb_enable_xhci_ports(struct pci_dev *xhci_pdev)
+void usb_enable_intel_xhci_ports(struct pci_dev *xhci_pdev)
 {
 	u32		ports_available;
+	bool		ehci_found = false;
+	struct pci_dev	*companion = NULL;
+
+	/* make sure an intel EHCI controller exists */
+	for_each_pci_dev(companion) {
+		if (companion->class == PCI_CLASS_SERIAL_USB_EHCI &&
+		    companion->vendor == PCI_VENDOR_ID_INTEL) {
+			ehci_found = true;
+			break;
+		}
+	}
+
+	if (!ehci_found)
+		return;
 
 	/* Read USB3PRM, the USB 3.0 Port Routing Mask Register
 	 * Indicate the ports that can be changed from OS.
@@ -723,7 +744,7 @@ void usb_enable_xhci_ports(struct pci_dev *xhci_pdev)
 	dev_dbg(&xhci_pdev->dev, "USB 2.0 ports that are now switched over "
 			"to xHCI: 0x%x\n", ports_available);
 }
-EXPORT_SYMBOL_GPL(usb_enable_xhci_ports);
+EXPORT_SYMBOL_GPL(usb_enable_intel_xhci_ports);
 
 void usb_disable_xhci_ports(struct pci_dev *xhci_pdev)
 {
@@ -804,8 +825,8 @@ static void __devinit quirk_usb_handoff_xhci(struct pci_dev *pdev)
 	writel(val, base + ext_cap_offset + XHCI_LEGACY_CONTROL_OFFSET);
 
 hc_init:
-	if (usb_is_intel_switchable_xhci(pdev))
-		usb_enable_xhci_ports(pdev);
+	if (pdev->vendor == PCI_VENDOR_ID_INTEL)
+		usb_enable_intel_xhci_ports(pdev);
 
 	op_reg_base = base + XHCI_HC_LENGTH(readl(base));
 

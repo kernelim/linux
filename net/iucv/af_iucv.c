@@ -1822,7 +1822,7 @@ static void iucv_callback_rx(struct iucv_path *path, struct iucv_message *msg)
 		goto save_message;
 
 	len = atomic_read(&sk->sk_rmem_alloc);
-	len += SKB_TRUESIZE(iucv_msg_length(msg));
+	len += iucv_msg_length(msg) + sizeof(struct sk_buff);
 	if (len > sk->sk_rcvbuf)
 		goto save_message;
 

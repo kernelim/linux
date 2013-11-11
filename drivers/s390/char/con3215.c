@@ -340,7 +340,8 @@ static inline void raw3215_try_io(struct raw3215_info *raw)
 static void raw3215_wakeup(unsigned long data)
 {
 	struct raw3215_info *raw = (struct raw3215_info *) data;
-	tty_wakeup(raw->tty);
+	if (raw->tty)
+		tty_wakeup(raw->tty);
 }
 
 /*
@@ -971,9 +972,9 @@ static void tty3215_close(struct tty_struct *tty, struct file * filp)
 	tty->closing = 1;
 	/* Shutdown the terminal */
 	raw3215_shutdown(raw);
+	raw->tty = NULL;
 	tasklet_kill(&raw->tlet);
 	tty->closing = 0;
-	raw->tty = NULL;
 }
 
 /*

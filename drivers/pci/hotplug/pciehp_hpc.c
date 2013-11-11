@@ -45,25 +45,25 @@ static atomic_t pciehp_num_controllers = ATOMIC_INIT(0);
 static inline int pciehp_readw(struct controller *ctrl, int reg, u16 *value)
 {
 	struct pci_dev *dev = ctrl->pcie->port;
-	return pci_read_config_word(dev, ctrl->cap_base + reg, value);
+	return pcie_capability_read_word(dev, reg, value);
 }
 
 static inline int pciehp_readl(struct controller *ctrl, int reg, u32 *value)
 {
 	struct pci_dev *dev = ctrl->pcie->port;
-	return pci_read_config_dword(dev, ctrl->cap_base + reg, value);
+	return pcie_capability_read_dword(dev, reg, value);
 }
 
 static inline int pciehp_writew(struct controller *ctrl, int reg, u16 value)
 {
 	struct pci_dev *dev = ctrl->pcie->port;
-	return pci_write_config_word(dev, ctrl->cap_base + reg, value);
+	return pcie_capability_write_word(dev, reg, value);
 }
 
 static inline int pciehp_writel(struct controller *ctrl, int reg, u32 value)
 {
 	struct pci_dev *dev = ctrl->pcie->port;
-	return pci_write_config_dword(dev, ctrl->cap_base + reg, value);
+	return pcie_capability_write_dword(dev, reg, value);
 }
 
 /* Power Control Command */
@@ -311,8 +311,8 @@ int pciehp_get_attention_status(struct slot *slot, u8 *status)
 		return retval;
 	}
 
-	ctrl_dbg(ctrl, "%s: SLOTCTRL %x, value read %x\n",
-		 __func__, ctrl->cap_base + PCI_EXP_SLTCTL, slot_ctrl);
+	ctrl_dbg(ctrl, "%s: SLOTCTRL %x, value read %x\n", __func__,
+		 pci_pcie_cap(ctrl->pcie->port) + PCI_EXP_SLTCTL, slot_ctrl);
 
 	atten_led_state = (slot_ctrl & PCI_EXP_SLTCTL_AIC) >> 6;
 
@@ -349,8 +349,8 @@ int pciehp_get_power_status(struct slot *slot, u8 *status)
 		ctrl_err(ctrl, "%s: Cannot read SLOTCTRL register\n", __func__);
 		return retval;
 	}
-	ctrl_dbg(ctrl, "%s: SLOTCTRL %x value read %x\n",
-		 __func__, ctrl->cap_base + PCI_EXP_SLTCTL, slot_ctrl);
+	ctrl_dbg(ctrl, "%s: SLOTCTRL %x value read %x\n", __func__,
+		 pci_pcie_cap(ctrl->pcie->port) + PCI_EXP_SLTCTL, slot_ctrl);
 
 	pwr_state = (slot_ctrl & PCI_EXP_SLTCTL_PCC) >> 10;
 
@@ -437,8 +437,8 @@ int pciehp_set_attention_status(struct slot *slot, u8 value)
 			return -1;
 	}
 	rc = pcie_write_cmd(ctrl, slot_cmd, cmd_mask);
-	ctrl_dbg(ctrl, "%s: SLOTCTRL %x write cmd %x\n",
-		 __func__, ctrl->cap_base + PCI_EXP_SLTCTL, slot_cmd);
+	ctrl_dbg(ctrl, "%s: SLOTCTRL %x write cmd %x\n", __func__,
+		 pci_pcie_cap(ctrl->pcie->port) + PCI_EXP_SLTCTL, slot_cmd);
 
 	return rc;
 }
@@ -452,8 +452,8 @@ void pciehp_green_led_on(struct slot *slot)
 	slot_cmd = 0x0100;
 	cmd_mask = PCI_EXP_SLTCTL_PIC;
 	pcie_write_cmd(ctrl, slot_cmd, cmd_mask);
-	ctrl_dbg(ctrl, "%s: SLOTCTRL %x write cmd %x\n",
-		 __func__, ctrl->cap_base + PCI_EXP_SLTCTL, slot_cmd);
+	ctrl_dbg(ctrl, "%s: SLOTCTRL %x write cmd %x\n", __func__,
+		 pci_pcie_cap(ctrl->pcie->port) + PCI_EXP_SLTCTL, slot_cmd);
 }
 
 void pciehp_green_led_off(struct slot *slot)
@@ -465,8 +465,8 @@ void pciehp_green_led_off(struct slot *slot)
 	slot_cmd = 0x0300;
 	cmd_mask = PCI_EXP_SLTCTL_PIC;
 	pcie_write_cmd(ctrl, slot_cmd, cmd_mask);
-	ctrl_dbg(ctrl, "%s: SLOTCTRL %x write cmd %x\n",
-		 __func__, ctrl->cap_base + PCI_EXP_SLTCTL, slot_cmd);
+	ctrl_dbg(ctrl, "%s: SLOTCTRL %x write cmd %x\n", __func__,
+		 pci_pcie_cap(ctrl->pcie->port) + PCI_EXP_SLTCTL, slot_cmd);
 }
 
 void pciehp_green_led_blink(struct slot *slot)
@@ -478,8 +478,8 @@ void pciehp_green_led_blink(struct slot *slot)
 	slot_cmd = 0x0200;
 	cmd_mask = PCI_EXP_SLTCTL_PIC;
 	pcie_write_cmd(ctrl, slot_cmd, cmd_mask);
-	ctrl_dbg(ctrl, "%s: SLOTCTRL %x write cmd %x\n",
-		 __func__, ctrl->cap_base + PCI_EXP_SLTCTL, slot_cmd);
+	ctrl_dbg(ctrl, "%s: SLOTCTRL %x write cmd %x\n", __func__,
+		 pci_pcie_cap(ctrl->pcie->port) + PCI_EXP_SLTCTL, slot_cmd);
 }
 
 int pciehp_power_on_slot(struct slot * slot)
@@ -521,8 +521,8 @@ int pciehp_power_on_slot(struct slot * slot)
 		ctrl_err(ctrl, "Write %x command failed!\n", slot_cmd);
 		return retval;
 	}
-	ctrl_dbg(ctrl, "%s: SLOTCTRL %x write cmd %x\n",
-		 __func__, ctrl->cap_base + PCI_EXP_SLTCTL, slot_cmd);
+	ctrl_dbg(ctrl, "%s: SLOTCTRL %x write cmd %x\n", __func__,
+		 pci_pcie_cap(ctrl->pcie->port) + PCI_EXP_SLTCTL, slot_cmd);
 
 	ctrl->power_fault_detected = 0;
 	return retval;
@@ -591,8 +591,8 @@ int pciehp_power_off_slot(struct slot * slot)
 		retval = -1;
 		goto out;
 	}
-	ctrl_dbg(ctrl, "%s: SLOTCTRL %x write cmd %x\n",
-		 __func__, ctrl->cap_base + PCI_EXP_SLTCTL, slot_cmd);
+	ctrl_dbg(ctrl, "%s: SLOTCTRL %x write cmd %x\n", __func__,
+		 pci_pcie_cap(ctrl->pcie->port) + PCI_EXP_SLTCTL, slot_cmd);
  out:
 	if (changed)
 		pcie_unmask_bad_dllp(ctrl);
@@ -927,7 +927,8 @@ static inline void dbg_ctrl(struct controller *ctrl)
 		  pdev->subsystem_device);
 	ctrl_info(ctrl, "  Subsystem Vendor ID  : 0x%04x\n",
 		  pdev->subsystem_vendor);
-	ctrl_info(ctrl, "  PCIe Cap offset      : 0x%02x\n", ctrl->cap_base);
+	ctrl_info(ctrl, "  PCIe Cap offset      : 0x%02x\n",
+		  pci_pcie_cap(pdev));
 	for (i = 0; i < DEVICE_COUNT_RESOURCE; i++) {
 		if (!pci_resource_len(pdev, i))
 			continue;
@@ -970,11 +971,6 @@ struct controller *pcie_init(struct pcie_device *dev)
 		goto abort;
 	}
 	ctrl->pcie = dev;
-	ctrl->cap_base = pci_find_capability(pdev, PCI_CAP_ID_EXP);
-	if (!ctrl->cap_base) {
-		ctrl_err(ctrl, "Cannot find PCI Express capability\n");
-		goto abort_ctrl;
-	}
 	if (pciehp_readl(ctrl, PCI_EXP_SLTCAP, &slot_cap)) {
 		ctrl_err(ctrl, "Cannot read SLOTCAP register\n");
 		goto abort_ctrl;

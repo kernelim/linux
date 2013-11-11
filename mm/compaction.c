@@ -86,7 +86,6 @@ static void __reset_isolation_suitable(struct zone *zone)
 
 	zone->compact_cached_migrate_pfn = start_pfn;
 	zone->compact_cached_free_pfn = end_pfn;
-	zone->compact_blockskip_flush = false;
 
 	/* Walk the zone and mark every pageblock as suitable for isolation */
 	for (pfn = start_pfn; pfn < end_pfn; pfn += pageblock_nr_pages) {
@@ -112,8 +111,7 @@ void reset_isolation_suitable(pg_data_t *pgdat)
 			continue;
 
 		/* Only flush if a full compaction finished recently */
-		if (zone->compact_blockskip_flush)
-			__reset_isolation_suitable(zone);
+		__reset_isolation_suitable(zone);
 	}
 }
 
@@ -629,25 +627,28 @@ static int compact_finished(struct zone *zone,
 	/* Compaction run completes if the migrate and free scanner meet */
 	if (cc->free_pfn <= cc->migrate_pfn) {
 		/*
-		 * Mark that the PG_migrate_skip information should be cleared
-		 * by kswapd when it goes to sleep. kswapd does not set the
-		 * flag itself as the decision to be clear should be directly
-		 * based on an allocation request.
+		 * Clear the PG_migrate_skip information. kswapd does
+		 * not clear it as the decision to be clear should be
+		 * directly based on an allocation request.
 		 */
 		if (!current_is_kswapd())
-			zone->compact_blockskip_flush = true;
+			__reset_isolation_suitable(zone);
 
 		return COMPACT_COMPLETE;
 	}
+
+	/*
+	 * order == -1 is expected when compacting via
+	 * /proc/sys/vm/compact_memory
+	 */
+	if (cc->order == -1)
+		return COMPACT_CONTINUE;
 
 	/* Compaction run is not finished if the watermark is not met */
 	watermark = low_wmark_pages(zone);
 	watermark += (1 << cc->order);
 
 	if (!zone_watermark_ok(zone, cc->order, watermark, 0, 0))
-		return COMPACT_CONTINUE;
-
-	if (cc->order == -1)
 		return COMPACT_CONTINUE;
 
 	/* Direct compactor: Is a suitable page free? */
@@ -675,6 +676,13 @@ unsigned long compaction_suitable(struct zone *zone, int order)
 {
 	int fragindex;
 	unsigned long watermark;
+
+	/*
+	 * order == -1 is expected when compacting via
+	 * /proc/sys/vm/compact_memory
+	 */
+	if (order == -1)
+		return COMPACT_CONTINUE;
 
 	/*
 	 * Watermarks for order-0 must be met for compaction. Note the 2UL.
@@ -723,6 +731,17 @@ static int compact_zone(struct zone *zone, struct compact_control *cc)
 	}
 
 	/*
+	 * Clear pageblock skip if there were failures recently and
+	 * compaction is about to be retried after being
+	 * deferred. kswapd does not do this reset and it will wait
+	 * direct compaction to do so either when the cursor meets
+	 * after one compaction pass is complete or if compaction is
+	 * restarted after being deferred for a while.
+	 */
+	if ((compaction_restarting(zone, cc->order)) && !current_is_kswapd())
+		__reset_isolation_suitable(zone);
+
+	/*
 	 * Setup to move all movable pages to the end of the zone. Used cached
 	 * information on where the scanners should start but check that it
 	 * is initialised by ensuring the values are within zone boundaries.
@@ -737,14 +756,6 @@ static int compact_zone(struct zone *zone, struct compact_control *cc)
 		cc->migrate_pfn = start_pfn;
 		zone->compact_cached_migrate_pfn = cc->migrate_pfn;
 	}
-
-	/*
-	 * Clear pageblock skip if there were failures recently and compaction
-	 * is about to be retried after being deferred. kswapd does not do
-	 * this reset as it'll reset the cached information when going to sleep.
-	 */
-	if (compaction_restarting(zone, cc->order) && !current_is_kswapd())
-		__reset_isolation_suitable(zone);
 
 	migrate_prep_local();
 
@@ -893,6 +904,7 @@ static int compact_node(int nid)
 		INIT_LIST_HEAD(&cc.freepages);
 		INIT_LIST_HEAD(&cc.migratepages);
 
+		__reset_isolation_suitable(zone);
 		compact_zone(zone, &cc);
 
 		VM_BUG_ON(!list_empty(&cc.freepages));

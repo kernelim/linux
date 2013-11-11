@@ -173,29 +173,25 @@ void smp_send_stop(void)
  * cpus are handled.
  */
 
-static void do_ext_call_interrupt(__u16 code)
+static void smp_handle_ext_call(void)
 {
 	unsigned long bits;
 
-	/*
-	 * handle bit signal external calls
-	 *
-	 * For the ec_schedule signal we have to do nothing. All the work
-	 * is done automatically when we return from the interrupt.
-	 */
+	/* handle bit signal external calls */
 	bits = xchg(&S390_lowcore.ext_call_fast, 0);
-
 	if (test_bit(ec_schedule, &bits))
 		scheduler_ipi();
-
 	if (test_bit(ec_stop_cpu, &bits))
 		smp_stop_cpu();
-
 	if (test_bit(ec_call_function, &bits))
 		generic_smp_call_function_interrupt();
-
 	if (test_bit(ec_call_function_single, &bits))
 		generic_smp_call_function_single_interrupt();
+}
+
+static void do_ext_call_interrupt(__u16 code)
+{
+	smp_handle_ext_call();
 }
 
 /*
@@ -698,6 +694,8 @@ int __cpu_disable(void)
 	struct ec_creg_mask_parms cr_parms;
 	int cpu = smp_processor_id();
 
+	/* Handle possible pending IPIs */
+	smp_handle_ext_call();
 	cpu_clear(cpu, cpu_online_map);
 
 	/* Disable pfault pseudo page faults on this cpu. */

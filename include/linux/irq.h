@@ -146,6 +146,7 @@ struct irq_chip {
 	const char	*typename;
 };
 
+struct irq_affinity_notify;
 struct timer_rand_state;
 struct irq_2_iommu;
 /**
@@ -168,6 +169,7 @@ struct irq_2_iommu;
  * @last_unhandled:	aging timer for unhandled count
  * @irqs_unhandled:	stats field for spurious unhandled interrupts
  * @lock:		locking for SMP
+ * @affinity_notify:	context for notification of affinity changes
  * @affinity:		IRQ affinity on SMP
  * @node:		node index useful for balancing
  * @pending_mask:	pending rebalanced interrupts
@@ -200,6 +202,7 @@ struct irq_desc {
 #ifdef CONFIG_SMP
 	cpumask_var_t		affinity;
 	const struct cpumask	*affinity_hint;
+	struct irq_affinity_notify *affinity_notify;
 	unsigned int		node;
 #ifdef CONFIG_GENERIC_PENDING_IRQ
 	cpumask_var_t		pending_mask;

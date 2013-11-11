@@ -891,6 +891,10 @@ static inline int ext2_find_next_bit(void *vaddr, unsigned long size,
 
 #define test_bit_le(nr, addr) \
 	test_bit((nr) ^ (__BITOPS_WORDSIZE - 8), (addr))
+#define set_bit_le(nr, addr) \
+	set_bit((nr) ^ (__BITOPS_WORDSIZE - 8), (addr))
+#define clear_bit_le(nr, addr) \
+	clear_bit((nr) ^ (__BITOPS_WORDSIZE - 8), (addr))
 
 #define test_and_set_bit_le(nr, addr) \
 	test_and_set_bit((nr) ^ (__BITOPS_WORDSIZE - 8), (addr))

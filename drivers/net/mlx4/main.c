@@ -567,6 +567,8 @@ static int mlx4_slave_cap(struct mlx4_dev *dev)
 
 	mlx4_log_num_mgm_entry_size = hca_param.log_mc_entry_sz;
 
+	dev->caps.hca_core_clock = hca_param.hca_core_clock;
+
 	memset(&dev_cap, 0, sizeof(dev_cap));
 	dev->caps.max_qp_dest_rdma = 1 << hca_param.log_rd_per_qp;
 	err = mlx4_dev_cap(dev, &dev_cap);
@@ -683,6 +685,9 @@ static int mlx4_slave_cap(struct mlx4_dev *dev)
 	} else {
 		dev->caps.cqe_size   = 32;
 	}
+
+	dev->caps.flags2 &= ~MLX4_DEV_CAP_FLAG2_TS;
+	mlx4_warn(dev, "Timestamping is not supported in slave mode.\n");
 
 	slave_adjust_steering_mode(dev, &dev_cap, &hca_param);
 
@@ -891,11 +896,11 @@ static ssize_t set_port_ib_mtu(struct device *dev,
 		return -EINVAL;
 	}
 
-	err = sscanf(buf, "%d", &mtu);
-	if (err > 0)
+	err = kstrtoint(buf, 0, &mtu);
+	if (!err)
 		ibta_mtu = int_to_ibta_mtu(mtu);
 
-	if (err <= 0 || ibta_mtu < 0) {
+	if (err || ibta_mtu < 0) {
 		mlx4_err(mdev, "%s is invalid IBTA mtu\n", buf);
 		return -EINVAL;
 	}
@@ -1280,8 +1285,53 @@ static void unmap_bf_area(struct mlx4_dev *dev)
 		io_mapping_free(mlx4_priv(dev)->bf_mapping);
 }
 
+cycle_t mlx4_read_clock(struct mlx4_dev *dev)
+{
+	u32 clockhi, clocklo, clockhi1;
+	cycle_t cycles;
+	int i;
+	struct mlx4_priv *priv = mlx4_priv(dev);
+
+	for (i = 0; i < 10; i++) {
+		clockhi = swab32(readl(priv->clock_mapping));
+		clocklo = swab32(readl(priv->clock_mapping + 4));
+		clockhi1 = swab32(readl(priv->clock_mapping));
+		if (clockhi == clockhi1)
+			break;
+	}
+
+	cycles = (u64) clockhi << 32 | (u64) clocklo;
+
+	return cycles;
+}
+EXPORT_SYMBOL_GPL(mlx4_read_clock);
+
+
+static int map_internal_clock(struct mlx4_dev *dev)
+{
+	struct mlx4_priv *priv = mlx4_priv(dev);
+
+	priv->clock_mapping =
+		ioremap(pci_resource_start(dev->pdev, priv->fw.clock_bar) +
+			priv->fw.clock_offset, MLX4_CLOCK_SIZE);
+
+	if (!priv->clock_mapping)
+		return -ENOMEM;
+
+	return 0;
+}
+
+static void unmap_internal_clock(struct mlx4_dev *dev)
+{
+	struct mlx4_priv *priv = mlx4_priv(dev);
+
+	if (priv->clock_mapping)
+		iounmap(priv->clock_mapping);
+}
+
 static void mlx4_close_hca(struct mlx4_dev *dev)
 {
+	unmap_internal_clock(dev);
 	unmap_bf_area(dev);
 	if (mlx4_is_slave(dev))
 		mlx4_slave_exit(dev);
@@ -1469,22 +1519,6 @@ static int mlx4_init_hca(struct mlx4_dev *dev)
 		if (mlx4_is_master(dev))
 			mlx4_parav_master_pf_caps(dev);
 
-		priv->fs_hash_mode = MLX4_FS_L2_HASH;
-
-		switch (priv->fs_hash_mode) {
-		case MLX4_FS_L2_HASH:
-			init_hca.fs_hash_enable_bits = 0;
-			break;
-
-		case MLX4_FS_L2_L3_L4_HASH:
-			/* Enable flow steering with
-			 * udp unicast and tcp unicast
-			 */
-			init_hca.fs_hash_enable_bits =
-				MLX4_FS_UDP_UC_EN | MLX4_FS_TCP_UC_EN;
-			break;
-		}
-
 		profile = default_profile;
 		if (dev->caps.steering_mode ==
 		    MLX4_STEERING_MODE_DEVICE_MANAGED)
@@ -1501,6 +1535,10 @@ static int mlx4_init_hca(struct mlx4_dev *dev)
 
 		init_hca.log_uar_sz = ilog2(dev->caps.num_uars);
 		init_hca.uar_page_sz = PAGE_SHIFT - 12;
+		init_hca.mw_enabled = 0;
+		if (dev->caps.flags & MLX4_DEV_CAP_FLAG_MEM_WINDOW ||
+		    dev->caps.bmme_flags & MLX4_BMME_FLAG_TYPE_2_WIN)
+			init_hca.mw_enabled = INIT_HCA_TPT_MW_ENABLE;
 
 		err = mlx4_init_icm(dev, &dev_cap, &init_hca, icm_size);
 		if (err)
@@ -1510,6 +1548,37 @@ static int mlx4_init_hca(struct mlx4_dev *dev)
 		if (err) {
 			mlx4_err(dev, "INIT_HCA command failed, aborting.\n");
 			goto err_free_icm;
+		}
+		/*
+		 * If TS is supported by FW
+		 * read HCA frequency by QUERY_HCA command
+		 */
+		if (dev->caps.flags2 & MLX4_DEV_CAP_FLAG2_TS) {
+			memset(&init_hca, 0, sizeof(init_hca));
+			err = mlx4_QUERY_HCA(dev, &init_hca);
+			if (err) {
+				mlx4_err(dev, "QUERY_HCA command failed, disable timestamp.\n");
+				dev->caps.flags2 &= ~MLX4_DEV_CAP_FLAG2_TS;
+			} else {
+				dev->caps.hca_core_clock =
+					init_hca.hca_core_clock;
+			}
+
+			/* In case we got HCA frequency 0 - disable timestamping
+			 * to avoid dividing by zero
+			 */
+			if (!dev->caps.hca_core_clock) {
+				dev->caps.flags2 &= ~MLX4_DEV_CAP_FLAG2_TS;
+				mlx4_err(dev,
+					 "HCA frequency is 0. Timestamping is not supported.");
+			} else if (map_internal_clock(dev)) {
+				/*
+				 * Map internal clock,
+				 * in case of failure disable timestamping
+				 */
+				dev->caps.flags2 &= ~MLX4_DEV_CAP_FLAG2_TS;
+				mlx4_err(dev, "Failed to map internal clock. Timestamping is not supported.\n");
+			}
 		}
 	} else {
 		err = mlx4_init_slave(dev);
@@ -1544,10 +1613,14 @@ static int mlx4_init_hca(struct mlx4_dev *dev)
 	return 0;
 
 unmap_bf:
+	unmap_internal_clock(dev);
 	unmap_bf_area(dev);
 
 err_close:
-	mlx4_close_hca(dev);
+	if (mlx4_is_slave(dev))
+		mlx4_slave_exit(dev);
+	else
+		mlx4_CLOSE_HCA(dev, 0);
 
 err_free_icm:
 	if (!mlx4_is_slave(dev))
@@ -1618,7 +1691,7 @@ void __mlx4_counter_free(struct mlx4_dev *dev, u32 idx)
 
 void mlx4_counter_free(struct mlx4_dev *dev, u32 idx)
 {
-	u64 in_param;
+	u64 in_param = 0;
 
 	if (mlx4_is_mfunc(dev)) {
 		set_param_l(&in_param, idx);
@@ -1900,12 +1973,9 @@ static int mlx4_init_port_info(struct mlx4_dev *dev, int port)
 	info->dev = dev;
 	info->port = port;
 	if (!mlx4_is_slave(dev)) {
-		INIT_RADIX_TREE(&info->mac_tree, GFP_KERNEL);
 		mlx4_init_mac_table(dev, &info->mac_table);
 		mlx4_init_vlan_table(dev, &info->vlan_table);
-		info->base_qpn =
-			dev->caps.reserved_qps_base[MLX4_QP_REGION_ETH_ADDR] +
-			(port - 1) * (1 << log_num_mac);
+		info->base_qpn = mlx4_get_base_qpn(dev, port);
 	}
 
 	sprintf(info->dev_name, "mlx4_port%d", port);
@@ -2072,6 +2142,11 @@ static int __mlx4_init_one(struct pci_dev *pdev, int pci_dev_data)
 		       num_vfs, MLX4_MAX_NUM_VF);
 		return -EINVAL;
 	}
+
+	if (num_vfs < 0) {
+		pr_err("num_vfs module parameter cannot be negative\n");
+		return -EINVAL;
+	}
 	/*
 	 * Check for BARs.
 	 */
@@ -2213,7 +2288,8 @@ slave_start:
 			dev->num_slaves = MLX4_MAX_NUM_SLAVES;
 		else {
 			dev->num_slaves = 0;
-			if (mlx4_multi_func_init(dev)) {
+			err = mlx4_multi_func_init(dev);
+			if (err) {
 				mlx4_err(dev, "Failed to init slave mfunc"
 					 " interface, aborting.\n");
 				goto err_cmd;
@@ -2237,7 +2313,8 @@ slave_start:
 	/* In master functions, the communication channel must be initialized
 	 * after obtaining its address from fw */
 	if (mlx4_is_master(dev)) {
-		if (mlx4_multi_func_init(dev)) {
+		err = mlx4_multi_func_init(dev);
+		if (err) {
 			mlx4_err(dev, "Failed to init master mfunc"
 				 "interface, aborting.\n");
 			goto err_close;
@@ -2254,6 +2331,7 @@ slave_start:
 	mlx4_enable_msi_x(dev);
 	if ((mlx4_is_mfunc(dev)) &&
 	    !(dev->flags & MLX4_FLAG_MSI_X)) {
+		err = -ENOSYS;
 		mlx4_err(dev, "INTx is not supported in multi-function mode."
 			 " aborting.\n");
 		goto err_free_eq;

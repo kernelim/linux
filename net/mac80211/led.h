@@ -11,8 +11,6 @@
 #include <linux/leds.h>
 #include "ieee80211_i.h"
 
-#include "leds-compat.h"
-
 #ifdef CONFIG_MAC80211_LEDS
 void ieee80211_led_rx(struct ieee80211_local *local);
 void ieee80211_led_tx(struct ieee80211_local *local, int q);

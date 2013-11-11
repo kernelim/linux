@@ -30,8 +30,6 @@
 #define TKIP_ICV_LEN		4
 #define CMAC_PN_LEN		6
 
-#define NUM_RX_DATA_QUEUES	16
-
 struct ieee80211_local;
 struct ieee80211_sub_if_data;
 struct sta_info;
@@ -82,17 +80,20 @@ struct ieee80211_key {
 			struct tkip_ctx tx;
 
 			/* last received RSC */
-			struct tkip_ctx rx[NUM_RX_DATA_QUEUES];
+			struct tkip_ctx rx[IEEE80211_NUM_TIDS];
+
+			/* number of mic failures */
+			u32 mic_failures;
 		} tkip;
 		struct {
 			atomic64_t tx_pn;
 			/*
 			 * Last received packet number. The first
-			 * NUM_RX_DATA_QUEUES counters are used with Data
+			 * IEEE80211_NUM_TIDS counters are used with Data
 			 * frames and the last counter is used with Robust
 			 * Management frames.
 			 */
-			u8 rx_pn[NUM_RX_DATA_QUEUES + 1][CCMP_PN_LEN];
+			u8 rx_pn[IEEE80211_NUM_TIDS + 1][CCMP_PN_LEN];
 			struct crypto_cipher *tfm;
 			u32 replays; /* dot11RSNAStatsCCMPReplays */
 		} ccmp;
@@ -128,23 +129,25 @@ struct ieee80211_key *ieee80211_key_alloc(u32 cipher, int idx, size_t key_len,
 					  size_t seq_len, const u8 *seq);
 /*
  * Insert a key into data structures (sdata, sta if necessary)
- * to make it used, free old key.
+ * to make it used, free old key. On failure, also free the new key.
  */
-int __must_check ieee80211_key_link(struct ieee80211_key *key,
-				    struct ieee80211_sub_if_data *sdata,
-				    struct sta_info *sta);
-void __ieee80211_key_free(struct ieee80211_key *key);
-void ieee80211_key_free(struct ieee80211_local *local,
-			struct ieee80211_key *key);
+int ieee80211_key_link(struct ieee80211_key *key,
+		       struct ieee80211_sub_if_data *sdata,
+		       struct sta_info *sta);
+void ieee80211_key_free(struct ieee80211_key *key, bool delay_tailroom);
+void ieee80211_key_free_unused(struct ieee80211_key *key);
 void ieee80211_set_default_key(struct ieee80211_sub_if_data *sdata, int idx,
 			       bool uni, bool multi);
 void ieee80211_set_default_mgmt_key(struct ieee80211_sub_if_data *sdata,
 				    int idx);
 void ieee80211_free_keys(struct ieee80211_sub_if_data *sdata);
+void ieee80211_free_sta_keys(struct ieee80211_local *local,
+			     struct sta_info *sta);
 void ieee80211_enable_keys(struct ieee80211_sub_if_data *sdata);
-void ieee80211_disable_keys(struct ieee80211_sub_if_data *sdata);
 
 #define key_mtx_dereference(local, ref) \
 	rcu_dereference_protected(ref, lockdep_is_held(&((local)->key_mtx)))
+
+void ieee80211_delayed_tailroom_dec(struct work_struct *wk);
 
 #endif /* IEEE80211_KEY_H */

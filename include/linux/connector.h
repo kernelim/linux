@@ -43,9 +43,11 @@
 
 #define CN_KVP_IDX			0x9     /* HyperV KVP */
 #define CN_KVP_VAL			0x1     /* queries from the kernel */
+#define CN_VSS_IDX			0xA     /* HyperV VSS */
+#define CN_VSS_VAL			0x1     /* queries from the kernel */
 
 
-#define CN_NETLINK_USERS		10
+#define CN_NETLINK_USERS		11
 
 /*
  * Maximum connector's message size.

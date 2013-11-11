@@ -276,7 +276,7 @@ static void raid_end_bio_io(struct r1bio *r1_bio)
 			 (bio_data_dir(bio) == WRITE) ? "write" : "read",
 			 (unsigned long long) bio->bi_sector,
 			 (unsigned long long) bio->bi_sector +
-			 (bio->bi_size >> 9) - 1);
+			 bio_sectors(bio) - 1);
 
 		call_bio_endio(r1_bio);
 	}
@@ -436,7 +436,17 @@ static void raid1_end_write_request(struct bio *bio, int error)
 
 		r1_bio->bios[mirror] = NULL;
 		to_put = bio;
-		set_bit(R1BIO_Uptodate, &r1_bio->state);
+		/*
+		 * Do not set R1BIO_Uptodate if the current device is
+		 * rebuilding or Faulty. This is because we cannot use
+		 * such device for properly reading the data back (we could
+		 * potentially use it, if the current write would have felt
+		 * before rdev->recovery_offset, but for simplicity we don't
+		 * check this here.
+		 */
+		if (test_bit(In_sync, &conf->mirrors[mirror].rdev->flags) &&
+		    !test_bit(Faulty, &conf->mirrors[mirror].rdev->flags))
+			set_bit(R1BIO_Uptodate, &r1_bio->state);
 
 		/* Maybe we can clear some bad blocks. */
 		if (is_badblock(conf->mirrors[mirror].rdev,
@@ -467,7 +477,7 @@ static void raid1_end_write_request(struct bio *bio, int error)
 					 " %llu-%llu\n",
 					 (unsigned long long) mbio->bi_sector,
 					 (unsigned long long) mbio->bi_sector +
-					 (mbio->bi_size >> 9) - 1);
+					 bio_sectors(mbio) - 1);
 				call_bio_endio(r1_bio);
 			}
 		}
@@ -506,12 +516,14 @@ static int read_balance(struct r1conf *conf, struct r1bio *r1_bio, int *max_sect
 	const sector_t this_sector = r1_bio->sector;
 	int sectors;
 	int best_good_sectors;
-	int start_disk;
-	int best_disk;
-	int i;
+	int best_disk, best_dist_disk, best_pending_disk;
+	int has_nonrot_disk;
+	int disk;
 	sector_t best_dist;
+	unsigned int min_pending;
 	struct md_rdev *rdev;
 	int choose_first;
+	int choose_next_idle;
 
 	rcu_read_lock();
 	/*
@@ -522,26 +534,26 @@ static int read_balance(struct r1conf *conf, struct r1bio *r1_bio, int *max_sect
  retry:
 	sectors = r1_bio->sectors;
 	best_disk = -1;
+	best_dist_disk = -1;
 	best_dist = MaxSector;
+	best_pending_disk = -1;
+	min_pending = UINT_MAX;
 	best_good_sectors = 0;
+	has_nonrot_disk = 0;
+	choose_next_idle = 0;
 
 	if (conf->mddev->recovery_cp < MaxSector &&
-	    (this_sector + sectors >= conf->next_resync)) {
+	    (this_sector + sectors >= conf->next_resync))
 		choose_first = 1;
-		start_disk = 0;
-	} else {
+	else
 		choose_first = 0;
-		start_disk = conf->last_used;
-	}
 
-	for (i = 0 ; i < conf->raid_disks * 2 ; i++) {
+	for (disk = 0 ; disk < conf->raid_disks * 2 ; disk++) {
 		sector_t dist;
 		sector_t first_bad;
 		int bad_sectors;
-
-		int disk = start_disk + i;
-		if (disk >= conf->raid_disks * 2)
-			disk -= conf->raid_disks * 2;
+		unsigned int pending;
+		bool nonrot;
 
 		rdev = rcu_dereference(conf->mirrors[disk].rdev);
 		if (r1_bio->bios[disk] == IO_BLOCKED
@@ -600,20 +612,75 @@ static int read_balance(struct r1conf *conf, struct r1bio *r1_bio, int *max_sect
 		} else
 			best_good_sectors = sectors;
 
+		nonrot = blk_queue_nonrot(bdev_get_queue(rdev->bdev));
+		has_nonrot_disk |= nonrot;
+		pending = atomic_read(&rdev->nr_pending);
 		dist = abs(this_sector - conf->mirrors[disk].head_position);
-		if (choose_first
-		    /* Don't change to another disk for sequential reads */
-		    || conf->next_seq_sect == this_sector
-		    || dist == 0
-		    /* If device is idle, use it */
-		    || atomic_read(&rdev->nr_pending) == 0) {
+		if (choose_first) {
 			best_disk = disk;
 			break;
 		}
+		/* Don't change to another disk for sequential reads */
+		if (conf->mirrors[disk].next_seq_sect == this_sector
+		    || dist == 0) {
+			int opt_iosize = bdev_io_opt(rdev->bdev) >> 9;
+			struct raid1_info *mirror = &conf->mirrors[disk];
+
+			best_disk = disk;
+			/*
+			 * If buffered sequential IO size exceeds optimal
+			 * iosize, check if there is idle disk. If yes, choose
+			 * the idle disk. read_balance could already choose an
+			 * idle disk before noticing it's a sequential IO in
+			 * this disk. This doesn't matter because this disk
+			 * will idle, next time it will be utilized after the
+			 * first disk has IO size exceeds optimal iosize. In
+			 * this way, iosize of the first disk will be optimal
+			 * iosize at least. iosize of the second disk might be
+			 * small, but not a big deal since when the second disk
+			 * starts IO, the first disk is likely still busy.
+			 */
+			if (nonrot && opt_iosize > 0 &&
+			    mirror->seq_start != MaxSector &&
+			    mirror->next_seq_sect > opt_iosize &&
+			    mirror->next_seq_sect - opt_iosize >=
+			    mirror->seq_start) {
+				choose_next_idle = 1;
+				continue;
+			}
+			break;
+		}
+		/* If device is idle, use it */
+		if (pending == 0) {
+			best_disk = disk;
+			break;
+		}
+
+		if (choose_next_idle)
+			continue;
+
+		if (min_pending > pending) {
+			min_pending = pending;
+			best_pending_disk = disk;
+		}
+
 		if (dist < best_dist) {
 			best_dist = dist;
-			best_disk = disk;
+			best_dist_disk = disk;
 		}
+	}
+
+	/*
+	 * If all disks are rotational, choose the closest disk. If any disk is
+	 * non-rotational, choose the disk with less pending request even the
+	 * disk is rotational, which might/might not be optimal for raids with
+	 * mixed ratation/non-rotational disks depending on workload.
+	 */
+	if (best_disk == -1) {
+		if (has_nonrot_disk)
+			best_disk = best_pending_disk;
+		else
+			best_disk = best_dist_disk;
 	}
 
 	if (best_disk >= 0) {
@@ -629,8 +696,11 @@ static int read_balance(struct r1conf *conf, struct r1bio *r1_bio, int *max_sect
 			goto retry;
 		}
 		sectors = best_good_sectors;
-		conf->next_seq_sect = this_sector + sectors;
-		conf->last_used = best_disk;
+
+		if (conf->mirrors[best_disk].next_seq_sect != this_sector)
+			conf->mirrors[best_disk].seq_start = this_sector;
+
+		conf->mirrors[best_disk].next_seq_sect = this_sector + sectors;
 	}
 	rcu_read_unlock();
 	*max_sectors = sectors;
@@ -782,7 +852,12 @@ static int flush_pending_writes(struct r1conf *conf)
 		while (bio) { /* submit pending writes */
 			struct bio *next = bio->bi_next;
 			bio->bi_next = NULL;
-			generic_make_request(bio);
+			if (unlikely((bio->bi_rw & BIO_DISCARD) &&
+			    !blk_queue_discard(bdev_get_queue(bio->bi_bdev))))
+				/* Just ignore it */
+				bio_endio(bio, 0);
+			else
+				generic_make_request(bio);
 			bio = next;
 		}
 		rv = 1;
@@ -961,8 +1036,9 @@ static int make_request(struct mddev *mddev, struct bio * bio)
 	struct bitmap *bitmap;
 	unsigned long flags;
 	const int rw = bio_data_dir(bio);
-	const bool do_sync = bio_rw_flagged(bio, BIO_RW_SYNCIO);
+	const unsigned long do_sync = (bio->bi_rw & (1 << BIO_RW_SYNCIO));
 	const unsigned long do_flush_fua = (bio->bi_rw & (BIO_FLUSH | BIO_FUA));
+	const unsigned long do_discard = (bio->bi_rw & BIO_DISCARD);
 	struct md_rdev *blocked_rdev;
 	int first_clone;
 	int sectors_handled;
@@ -1008,7 +1084,7 @@ static int make_request(struct mddev *mddev, struct bio * bio)
 	r1_bio = mempool_alloc(conf->r1bio_pool, GFP_NOIO);
 
 	r1_bio->master_bio = bio;
-	r1_bio->sectors = bio->bi_size >> 9;
+	r1_bio->sectors = bio_sectors(bio);
 	r1_bio->state = 0;
 	r1_bio->mddev = mddev;
 	r1_bio->sector = bio->bi_sector;
@@ -1059,7 +1135,7 @@ read_again:
 		read_bio->bi_sector = r1_bio->sector + mirror->rdev->data_offset;
 		read_bio->bi_bdev = mirror->rdev->bdev;
 		read_bio->bi_end_io = raid1_end_read_request;
-		read_bio->bi_rw = READ | (do_sync << BIO_RW_SYNCIO);
+		read_bio->bi_rw = READ | do_sync;
 		read_bio->bi_private = r1_bio;
 
 		if (max_sectors < r1_bio->sectors) {
@@ -1086,7 +1162,7 @@ read_again:
 			r1_bio = mempool_alloc(conf->r1bio_pool, GFP_NOIO);
 
 			r1_bio->master_bio = bio;
-			r1_bio->sectors = (bio->bi_size >> 9) - sectors_handled;
+			r1_bio->sectors = bio_sectors(bio) - sectors_handled;
 			r1_bio->state = 0;
 			r1_bio->mddev = mddev;
 			r1_bio->sector = bio->bi_sector + sectors_handled;
@@ -1261,7 +1337,7 @@ read_again:
 				   conf->mirrors[i].rdev->data_offset);
 		mbio->bi_bdev = conf->mirrors[i].rdev->bdev;
 		mbio->bi_end_io	= raid1_end_write_request;
-		mbio->bi_rw = WRITE | do_flush_fua | (do_sync << BIO_RW_SYNCIO);
+		mbio->bi_rw = WRITE | do_flush_fua | do_sync | do_discard;
 		mbio->bi_private = r1_bio;
 
 		atomic_inc(&r1_bio->remaining);
@@ -1274,14 +1350,14 @@ read_again:
 	/* Mustn't call r1_bio_write_done before this next test,
 	 * as it could result in the bio being freed.
 	 */
-	if (sectors_handled < (bio->bi_size >> 9)) {
+	if (sectors_handled < bio_sectors(bio)) {
 		r1_bio_write_done(r1_bio);
 		/* We need another r1_bio.  It has already been counted
 		 * in bio->bi_phys_segments
 		 */
 		r1_bio = mempool_alloc(conf->r1bio_pool, GFP_NOIO);
 		r1_bio->master_bio = bio;
-		r1_bio->sectors = (bio->bi_size >> 9) - sectors_handled;
+		r1_bio->sectors = bio_sectors(bio) - sectors_handled;
 		r1_bio->state = 0;
 		r1_bio->mddev = mddev;
 		r1_bio->sector = bio->bi_sector + sectors_handled;
@@ -1428,6 +1504,7 @@ static int raid1_spare_active(struct mddev *mddev)
 			}
 		}
 		if (rdev
+		    && rdev->recovery_offset == MaxSector
 		    && !test_bit(Faulty, &rdev->flags)
 		    && !test_and_set_bit(In_sync, &rdev->flags)) {
 			count++;
@@ -1468,8 +1545,9 @@ static int raid1_add_disk(struct mddev *mddev, struct md_rdev *rdev)
 		p = conf->mirrors+mirror;
 		if (!p->rdev) {
 
-			disk_stack_limits(mddev->gendisk, rdev->bdev,
-					  rdev->data_offset << 9);
+			if (mddev->gendisk)
+				disk_stack_limits(mddev->gendisk, rdev->bdev,
+						  rdev->data_offset << 9);
 
 			p->head_position = 0;
 			rdev->raid_disk = mirror;
@@ -1508,6 +1586,8 @@ static int raid1_add_disk(struct mddev *mddev, struct md_rdev *rdev)
 		clear_bit(Unmerged, &rdev->flags);
 	}
 	md_integrity_add_rdev(rdev, mddev);
+	if (mddev->queue && blk_queue_discard(bdev_get_queue(rdev->bdev)))
+		queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, mddev->queue);
 	print_conf(conf);
 	return err;
 }
@@ -1826,7 +1906,7 @@ static int process_checks(struct r1bio *r1_bio)
 		} else
 			j = 0;
 		if (j >= 0)
-			mddev->resync_mismatches += r1_bio->sectors;
+			atomic64_add(r1_bio->sectors, &mddev->resync_mismatches);
 		if (j < 0 || (test_bit(MD_RECOVERY_CHECK, &mddev->recovery)
 			      && test_bit(BIO_UPTODATE, &sbio->bi_flags))) {
 			/* No need to write to this device. */
@@ -1895,7 +1975,7 @@ static void sync_request_write(struct mddev *mddev, struct r1bio *r1_bio)
 		wbio->bi_rw = WRITE;
 		wbio->bi_end_io = end_sync_write;
 		atomic_inc(&r1_bio->remaining);
-		md_sync_acct(conf->mirrors[i].rdev->bdev, wbio->bi_size >> 9);
+		md_sync_acct(conf->mirrors[i].rdev->bdev, bio_sectors(wbio));
 
 		generic_make_request(wbio);
 	}
@@ -2005,25 +2085,6 @@ static void fix_read_error(struct r1conf *conf, int read_disk,
 		sectors -= s;
 		sect += s;
 	}
-}
-
-static void bi_complete(struct bio *bio, int error)
-{
-	complete((struct completion *)bio->bi_private);
-}
-
-static int submit_bio_wait(int rw, struct bio *bio)
-{
-	struct completion event;
-	rw |= REQ_SYNC;
-
-	init_completion(&event);
-	bio->bi_private = &event;
-	bio->bi_end_io = bi_complete;
-	submit_bio(rw, bio);
-	wait_for_completion(&event);
-
-	return test_bit(BIO_UPTODATE, &bio->bi_flags);
 }
 
 static int narrow_write_error(struct r1bio *r1_bio, int i)
@@ -2192,7 +2253,7 @@ read_more:
 		raid_end_bio_io(r1_bio);
 	} else {
 		const unsigned long do_sync
-			= r1_bio->master_bio->bi_rw & REQ_SYNC;
+			= r1_bio->master_bio->bi_rw & (1 << BIO_RW_SYNCIO);
 		if (bio) {
 			r1_bio->bios[r1_bio->read_disk] =
 				mddev->ro ? IO_BLOCKED : NULL;
@@ -2232,8 +2293,7 @@ read_more:
 			r1_bio = mempool_alloc(conf->r1bio_pool, GFP_NOIO);
 
 			r1_bio->master_bio = mbio;
-			r1_bio->sectors = (mbio->bi_size >> 9)
-					  - sectors_handled;
+			r1_bio->sectors = bio_sectors(mbio) - sectors_handled;
 			r1_bio->state = 0;
 			set_bit(R1BIO_ReadError, &r1_bio->state);
 			r1_bio->mddev = mddev;
@@ -2245,8 +2305,9 @@ read_more:
 	}
 }
 
-static void raid1d(struct mddev *mddev)
+static void raid1d(struct md_thread *thread)
 {
+	struct mddev *mddev = thread->mddev;
 	struct r1bio *r1_bio;
 	unsigned long flags;
 	struct r1conf *conf = mddev->private;
@@ -2459,6 +2520,18 @@ static sector_t sync_request(struct mddev *mddev, sector_t sector_nr, int *skipp
 				bio->bi_rw = READ;
 				bio->bi_end_io = end_sync_read;
 				read_targets++;
+			} else if (!test_bit(WriteErrorSeen, &rdev->flags) &&
+				test_bit(MD_RECOVERY_SYNC, &mddev->recovery) &&
+				!test_bit(MD_RECOVERY_CHECK, &mddev->recovery)) {
+				/*
+				 * The device is suitable for reading (InSync),
+				 * but has bad block(s) here. Let's try to correct them,
+				 * if we are doing resync or repair. Otherwise, leave
+				 * this device alone for this sync request.
+				 */
+				bio->bi_rw = WRITE;
+				bio->bi_end_io = end_sync_write;
+				write_targets++;
 			}
 		}
 		if (bio->bi_end_io) {
@@ -2651,7 +2724,7 @@ static struct r1conf *setup_conf(struct mddev *mddev)
 		    || disk_idx < 0)
 			continue;
 		if (test_bit(Replacement, &rdev->flags))
-			disk = conf->mirrors + conf->raid_disks + disk_idx;
+			disk = conf->mirrors + mddev->raid_disks + disk_idx;
 		else
 			disk = conf->mirrors + disk_idx;
 
@@ -2663,6 +2736,7 @@ static struct r1conf *setup_conf(struct mddev *mddev)
 			mddev->merge_check_needed = 1;
 
 		disk->head_position = 0;
+		disk->seq_start = MaxSector;
 	}
 	conf->raid_disks = mddev->raid_disks;
 	conf->mddev = mddev;
@@ -2676,7 +2750,6 @@ static struct r1conf *setup_conf(struct mddev *mddev)
 	conf->recovery_disabled = mddev->recovery_disabled - 1;
 
 	err = -EIO;
-	conf->last_used = -1;
 	for (i = 0; i < conf->raid_disks * 2; i++) {
 
 		disk = conf->mirrors + i;
@@ -2702,19 +2775,9 @@ static struct r1conf *setup_conf(struct mddev *mddev)
 			if (disk->rdev &&
 			    (disk->rdev->saved_raid_disk < 0))
 				conf->fullsync = 1;
-		} else if (conf->last_used < 0)
-			/*
-			 * The first working device is used as a
-			 * starting point to read balancing.
-			 */
-			conf->last_used = i;
+		}
 	}
 
-	if (conf->last_used < 0) {
-		printk(KERN_ERR "md/raid1:%s: no operational mirrors\n",
-		       mdname(mddev));
-		goto abort;
-	}
 	err = -ENOMEM;
 	conf->thread = md_register_thread(raid1d, mddev, "raid1");
 	if (!conf->thread) {
@@ -2745,6 +2808,7 @@ static int run(struct mddev *mddev)
 	int i;
 	struct md_rdev *rdev;
 	int ret;
+	bool discard_supported = false;
 
 	if (mddev->level != 1) {
 		printk(KERN_ERR "md/raid1:%s: raid level not set to "
@@ -2774,6 +2838,8 @@ static int run(struct mddev *mddev)
 			continue;
 		disk_stack_limits(mddev->gendisk, rdev->bdev,
 				  rdev->data_offset << 9);
+		if (blk_queue_discard(bdev_get_queue(rdev->bdev)))
+			discard_supported = true;
 	}
 
 	mddev->degraded = 0;
@@ -2811,6 +2877,13 @@ static int run(struct mddev *mddev)
 		mddev->queue->backing_dev_info.congested_fn = raid1_congested;
 		mddev->queue->backing_dev_info.congested_data = mddev;
 		blk_queue_merge_bvec(mddev->queue, raid1_mergeable_bvec);
+
+		if (discard_supported)
+			queue_flag_set_unlocked(QUEUE_FLAG_DISCARD,
+						mddev->queue);
+		else
+			queue_flag_clear_unlocked(QUEUE_FLAG_DISCARD,
+						  mddev->queue);
 	}
 
 	ret =  md_integrity_register(mddev);
@@ -2841,6 +2914,7 @@ static int stop(struct mddev *mddev)
 	if (conf->r1bio_pool)
 		mempool_destroy(conf->r1bio_pool);
 	kfree(conf->mirrors);
+	safe_put_page(conf->tmppage);
 	kfree(conf->poolinfo);
 	kfree(conf);
 	mddev->private = NULL;
@@ -2975,7 +3049,6 @@ static int raid1_reshape(struct mddev *mddev)
 	conf->raid_disks = mddev->raid_disks = raid_disks;
 	mddev->delta_disks = 0;
 
-	conf->last_used = 0; /* just make sure it is in-range */
 	unfreeze_array(conf);
 
 	set_bit(MD_RECOVERY_NEEDED, &mddev->recovery);

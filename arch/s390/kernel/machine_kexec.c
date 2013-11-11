@@ -13,6 +13,7 @@
 #include <linux/kexec.h>
 #include <linux/delay.h>
 #include <linux/reboot.h>
+#include <linux/suspend.h>
 #include <asm/cio.h>
 #include <asm/setup.h>
 #include <asm/pgtable.h>
@@ -98,6 +99,35 @@ void setup_regs(void)
 	       sizeof(struct save_area_s390x));
 }
 
+/*
+ * PM notifier callback for kdump
+ */
+static int machine_kdump_pm_cb(struct notifier_block *nb, unsigned long action,
+			       void *ptr)
+{
+	switch (action) {
+	case PM_SUSPEND_PREPARE:
+	case PM_HIBERNATION_PREPARE:
+		if (crashk_res.start)
+			crash_map_reserved_pages();
+		break;
+	case PM_POST_SUSPEND:
+	case PM_POST_HIBERNATION:
+		if (crashk_res.start)
+			crash_unmap_reserved_pages();
+		break;
+	default:
+		return NOTIFY_DONE;
+	}
+	return NOTIFY_OK;
+}
+
+static int __init machine_kdump_pm_init(void)
+{
+	pm_notifier(machine_kdump_pm_cb, 0);
+	return 0;
+}
+arch_initcall(machine_kdump_pm_init);
 #endif
 
 /*

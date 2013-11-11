@@ -53,6 +53,7 @@ extern void _zfcp_dbf_hba_fsf_unsol(const char *, int level, struct zfcp_dbf *,
 extern void zfcp_dbf_hba_qdio(struct zfcp_dbf *, unsigned int, int, int,
 			      u32, u8, void *[]);
 extern void zfcp_dbf_hba_berr(struct zfcp_dbf *, struct zfcp_fsf_req *);
+extern void zfcp_dbf_hba_base(struct zfcp_dbf *, char *);
 extern void zfcp_dbf_san_ct_request(struct zfcp_fsf_req *);
 extern void zfcp_dbf_san_ct_response(struct zfcp_fsf_req *);
 extern void zfcp_dbf_san_els_request(struct zfcp_fsf_req *);

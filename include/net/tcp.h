@@ -254,6 +254,9 @@ extern int sysctl_tcp_slow_start_after_idle;
 extern int sysctl_tcp_max_ssthresh;
 extern int sysctl_tcp_thin_linear_timeouts;
 extern int sysctl_tcp_thin_dupack;
+extern int sysctl_tcp_limit_output_bytes;
+extern int sysctl_tcp_challenge_ack_limit;
+extern int sysctl_tcp_min_tso_segs;
 
 extern atomic_t tcp_memory_allocated;
 extern struct percpu_counter tcp_sockets_allocated;
@@ -303,6 +306,8 @@ extern struct proto tcp_prot;
 #define TCP_DEC_STATS(net, field)	SNMP_DEC_STATS((net)->mib.tcp_statistics, field)
 #define TCP_ADD_STATS_USER(net, field, val) SNMP_ADD_STATS_USER((net)->mib.tcp_statistics, field, val)
 
+extern void			tcp_tasklet_init(void);
+
 extern void			tcp_v4_err(struct sk_buff *skb, u32);
 
 extern void			tcp_shutdown (struct sock *sk, int how);
@@ -316,6 +321,8 @@ extern int		    	tcp_v4_tw_remember_stamp(struct inet_timewait_sock *tw);
 extern int			tcp_sendmsg(struct kiocb *iocb, struct socket *sock,
 					    struct msghdr *msg, size_t size);
 extern ssize_t			tcp_sendpage(struct socket *sock, struct page *page, int offset, size_t size, int flags);
+
+extern void			tcp_release_cb(struct sock *sk);
 
 extern int			tcp_ioctl(struct sock *sk, 
 					  int cmd, 

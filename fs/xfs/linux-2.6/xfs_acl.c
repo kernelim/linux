@@ -375,7 +375,7 @@ xfs_decode_acl(const char *name)
 		return ACL_TYPE_ACCESS;
 	else if (strcmp(name, "posix_acl_default") == 0)
 		return ACL_TYPE_DEFAULT;
-	return -EINVAL;
+	return -EOPNOTSUPP;
 }
 
 static int

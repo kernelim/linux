@@ -118,16 +118,22 @@ EXPORT_SYMBOL_GPL(vfs_truncate);
 
 static long do_sys_truncate(const char __user *pathname, loff_t length)
 {
+	unsigned int lookup_flags = LOOKUP_FOLLOW;
 	struct path path;
 	int error;
 
 	if (length < 0)	/* sorry, but loff_t says... */
 		return -EINVAL;
 
-	error = user_path(pathname, &path);
+retry:
+	error = user_path_at(AT_FDCWD, pathname, lookup_flags, &path);
 	if (!error) {
 		error = vfs_truncate(&path, length);
 		path_put(&path);
+	}
+	if (retry_estale(error, lookup_flags)) {
+		lookup_flags |= LOOKUP_REVAL;
+		goto retry;
 	}
 	return error;
 }
@@ -316,6 +322,7 @@ SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)
 	struct path path;
 	struct inode *inode;
 	int res;
+	unsigned int lookup_flags = LOOKUP_FOLLOW;
 
 	if (mode & ~S_IRWXO)	/* where's F_OK, X_OK, W_OK, R_OK? */
 		return -EINVAL;
@@ -337,8 +344,8 @@ SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)
 	}
 
 	old_cred = override_creds(override_cred);
-
-	res = user_path_at(dfd, filename, LOOKUP_FOLLOW, &path);
+retry:
+	res = user_path_at(dfd, filename, lookup_flags, &path);
 	if (res)
 		goto out;
 
@@ -373,6 +380,10 @@ SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)
 
 out_path_release:
 	path_put(&path);
+	if (retry_estale(res, lookup_flags)) {
+		lookup_flags |= LOOKUP_REVAL;
+		goto retry;
+	}
 out:
 	revert_creds(old_cred);
 	put_cred(override_cred);
@@ -388,8 +399,9 @@ SYSCALL_DEFINE1(chdir, const char __user *, filename)
 {
 	struct path path;
 	int error;
-
-	error = user_path_dir(filename, &path);
+	unsigned int lookup_flags = LOOKUP_FOLLOW | LOOKUP_DIRECTORY;
+retry:
+	error = user_path_at(AT_FDCWD, filename, lookup_flags, &path);
 	if (error)
 		goto out;
 
@@ -401,6 +413,10 @@ SYSCALL_DEFINE1(chdir, const char __user *, filename)
 
 dput_and_out:
 	path_put(&path);
+	if (retry_estale(error, lookup_flags)) {
+		lookup_flags |= LOOKUP_REVAL;
+		goto retry;
+	}
 out:
 	return error;
 }
@@ -435,8 +451,9 @@ SYSCALL_DEFINE1(chroot, const char __user *, filename)
 {
 	struct path path;
 	int error;
-
-	error = user_path_dir(filename, &path);
+	unsigned int lookup_flags = LOOKUP_FOLLOW | LOOKUP_DIRECTORY;
+retry:
+	error = user_path_at(AT_FDCWD, filename, lookup_flags, &path);
 	if (error)
 		goto out;
 
@@ -452,6 +469,10 @@ SYSCALL_DEFINE1(chroot, const char __user *, filename)
 	error = 0;
 dput_and_out:
 	path_put(&path);
+	if (retry_estale(error, lookup_flags)) {
+		lookup_flags |= LOOKUP_REVAL;
+		goto retry;
+	}
 out:
 	return error;
 }
@@ -471,7 +492,7 @@ SYSCALL_DEFINE2(fchmod, unsigned int, fd, mode_t, mode)
 	dentry = file->f_path.dentry;
 	inode = dentry->d_inode;
 
-	audit_inode(NULL, dentry);
+	audit_inode(NULL, dentry, 0);
 
 	err = mnt_want_write_file(file);
 	if (err)
@@ -496,8 +517,9 @@ SYSCALL_DEFINE3(fchmodat, int, dfd, const char __user *, filename, mode_t, mode)
 	struct inode *inode;
 	int error;
 	struct iattr newattrs;
-
-	error = user_path_at(dfd, filename, LOOKUP_FOLLOW, &path);
+	unsigned int lookup_flags = LOOKUP_FOLLOW;
+retry:
+	error = user_path_at(dfd, filename, lookup_flags, &path);
 	if (error)
 		goto out;
 	inode = path.dentry->d_inode;
@@ -515,6 +537,10 @@ SYSCALL_DEFINE3(fchmodat, int, dfd, const char __user *, filename, mode_t, mode)
 	mnt_drop_write(path.mnt);
 dput_and_out:
 	path_put(&path);
+	if (retry_estale(error, lookup_flags)) {
+		lookup_flags |= LOOKUP_REVAL;
+		goto retry;
+	}
 out:
 	return error;
 }
@@ -549,37 +575,19 @@ static int chown_common(struct dentry * dentry, uid_t user, gid_t group)
 	return error;
 }
 
-SYSCALL_DEFINE3(chown, const char __user *, filename, uid_t, user, gid_t, group)
-{
-	struct path path;
-	int error;
-
-	error = user_path(filename, &path);
-	if (error)
-		goto out;
-	error = mnt_want_write(path.mnt);
-	if (error)
-		goto out_release;
-	error = chown_common(path.dentry, user, group);
-	mnt_drop_write(path.mnt);
-out_release:
-	path_put(&path);
-out:
-	return error;
-}
-
 SYSCALL_DEFINE5(fchownat, int, dfd, const char __user *, filename, uid_t, user,
 		gid_t, group, int, flag)
 {
 	struct path path;
 	int error = -EINVAL;
-	int follow;
+	unsigned int lookup_flags;
 
 	if ((flag & ~AT_SYMLINK_NOFOLLOW) != 0)
 		goto out;
 
-	follow = (flag & AT_SYMLINK_NOFOLLOW) ? 0 : LOOKUP_FOLLOW;
-	error = user_path_at(dfd, filename, follow, &path);
+	lookup_flags = (flag & AT_SYMLINK_NOFOLLOW) ? 0 : LOOKUP_FOLLOW;
+retry:
+	error = user_path_at(dfd, filename, lookup_flags, &path);
 	if (error)
 		goto out;
 	error = mnt_want_write(path.mnt);
@@ -589,27 +597,23 @@ SYSCALL_DEFINE5(fchownat, int, dfd, const char __user *, filename, uid_t, user,
 	mnt_drop_write(path.mnt);
 out_release:
 	path_put(&path);
+	if (retry_estale(error, lookup_flags)) {
+		lookup_flags |= LOOKUP_REVAL;
+		goto retry;
+	}
 out:
 	return error;
 }
 
+SYSCALL_DEFINE3(chown, const char __user *, filename, uid_t, user, gid_t, group)
+{
+	return sys_fchownat(AT_FDCWD, filename, user, group, 0);
+}
+
 SYSCALL_DEFINE3(lchown, const char __user *, filename, uid_t, user, gid_t, group)
 {
-	struct path path;
-	int error;
-
-	error = user_lpath(filename, &path);
-	if (error)
-		goto out;
-	error = mnt_want_write(path.mnt);
-	if (error)
-		goto out_release;
-	error = chown_common(path.dentry, user, group);
-	mnt_drop_write(path.mnt);
-out_release:
-	path_put(&path);
-out:
-	return error;
+	return sys_fchownat(AT_FDCWD, filename, user, group,
+			    AT_SYMLINK_NOFOLLOW);
 }
 
 SYSCALL_DEFINE3(fchown, unsigned int, fd, uid_t, user, gid_t, group)
@@ -626,7 +630,7 @@ SYSCALL_DEFINE3(fchown, unsigned int, fd, uid_t, user, gid_t, group)
 	if (error)
 		goto out_fput;
 	dentry = file->f_path.dentry;
-	audit_inode(NULL, dentry);
+	audit_inode(NULL, dentry, 0);
 	error = chown_common(dentry, user, group);
 	mnt_drop_write(file->f_path.mnt);
 out_fput:
@@ -890,7 +894,7 @@ EXPORT_SYMBOL(fd_install);
 
 long do_sys_open(int dfd, const char __user *filename, int flags, int mode)
 {
-	char *tmp = getname(filename);
+	struct filename *tmp = getname(filename);
 	int fd = PTR_ERR(tmp);
 
 	if (!IS_ERR(tmp)) {

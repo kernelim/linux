@@ -142,6 +142,7 @@ struct dentry_operations {
 #ifndef __GENKSYMS__
 	struct vfsmount *(*d_automount)(struct path *);
 	int (*d_manage)(struct dentry *, bool);
+	int (*d_weak_revalidate)(struct dentry *, struct nameidata *);
 #endif
 };
 
@@ -250,6 +251,7 @@ extern void d_delete(struct dentry *);
 
 /* allocate/de-allocate */
 extern struct dentry * d_alloc(struct dentry *, const struct qstr *);
+extern struct dentry * d_alloc_pseudo(struct super_block *, const struct qstr *);
 extern struct dentry * d_splice_alias(struct inode *, struct dentry *);
 extern struct dentry * d_add_ci(struct dentry *, struct inode *, struct qstr *);
 extern struct dentry * d_obtain_alias(struct inode *);
@@ -390,7 +392,7 @@ static inline bool d_managed(struct dentry *dentry)
 
 static inline int d_mountpoint(struct dentry *dentry)
 {
-	return dentry->d_mounted ? DCACHE_MOUNTED : 0;
+	return dentry->d_mounted;
 }
 
 extern struct vfsmount *lookup_mnt(struct path *);

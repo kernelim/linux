@@ -358,7 +358,7 @@ static void chsc_process_sei_chp_avail(struct chsc_sei_area *sei_area)
 			continue;
 		}
 		mutex_lock(&chp->lock);
-		chsc_determine_base_channel_path_desc(chpid, &chp->desc);
+		chp_update_desc(chp);
 		mutex_unlock(&chp->lock);
 	}
 }
@@ -415,6 +415,20 @@ static void chsc_process_sei_scm_change(struct chsc_sei_area *sei_area)
 			      " failed (rc=%d).\n", ret);
 }
 
+static void chsc_process_sei_scm_avail(struct chsc_sei_area *sei_area)
+{
+	int ret;
+
+	CIO_CRW_EVENT(4, "chsc: scm available information\n");
+	if (sei_area->rs != 7)
+		return;
+
+	ret = scm_process_availability_information();
+	if (ret)
+		CIO_CRW_EVENT(0, "chsc: process availability information"
+			      " failed (rc=%d).\n", ret);
+}
+
 static void chsc_process_sei(struct chsc_sei_area *sei_area)
 {
 	/* Check if we might have lost some information. */
@@ -438,6 +452,9 @@ static void chsc_process_sei(struct chsc_sei_area *sei_area)
 		break;
 	case 12: /* scm change notification */
 		chsc_process_sei_scm_change(sei_area);
+		break;
+	case 14: /* scm available notification */
+		chsc_process_sei_scm_avail(sei_area);
 		break;
 	default: /* other stuff */
 		CIO_CRW_EVENT(4, "chsc: unhandled sei content code %d\n",
@@ -563,8 +580,8 @@ int chsc_chp_vary(struct chp_id chpid, int on)
 	 * Redo PathVerification on the devices the chpid connects to
 	 */
 	if (on) {
-		/* Try to update the channel path descritor. */
-		chsc_determine_base_channel_path_desc(chpid, &chp->desc);
+		/* Try to update the channel path description. */
+		chp_update_desc(chp);
 		for_each_subchannel_staged(s390_subchannel_vary_chpid_on,
 					   __s390_vary_chpid_on, &link);
 	} else

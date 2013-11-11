@@ -12,10 +12,11 @@
 #ifndef _ALPS_H
 #define _ALPS_H
 
-#define ALPS_PROTO_V1	0
-#define ALPS_PROTO_V2	1
-#define ALPS_PROTO_V3	2
-#define ALPS_PROTO_V4	3
+#define ALPS_PROTO_V1	1
+#define ALPS_PROTO_V2	2
+#define ALPS_PROTO_V3	3
+#define ALPS_PROTO_V4	4
+#define ALPS_PROTO_V5	5
 
 struct alps_model_info {
         unsigned char signature[3];
@@ -30,12 +31,52 @@ struct alps_nibble_commands {
 	unsigned char data;
 };
 
+/**
+ * struct alps_fields - decoded version of the report packet
+ * @x: X position for ST.
+ * @y: Y position for ST.
+ * @z: Z position for ST.
+ * @first_mp: Packet is the first of a multi-packet report.
+ * @is_mp: Packet is part of a multi-packet report.
+ * @left: Left touchpad button is active.
+ * @right: Right touchpad button is active.
+ * @middle: Middle touchpad button is active.
+ * @ts_left: Left trackstick button is active.
+ * @ts_right: Right trackstick button is active.
+ * @ts_middle: Middle trackstick button is active.
+ */
+struct alps_fields {
+	unsigned int x;
+	unsigned int y;
+	unsigned int z;
+	unsigned int first_mp:1;
+	unsigned int is_mp:1;
+
+	unsigned int left:1;
+	unsigned int right:1;
+	unsigned int middle:1;
+
+	unsigned int ts_left:1;
+	unsigned int ts_right:1;
+	unsigned int ts_middle:1;
+};
+
 struct alps_data {
 	struct input_dev *dev2;		/* Relative device */
 	char phys[32];			/* Phys */
-	const struct alps_model_info *i;/* Info */
 	const struct alps_nibble_commands *nibble_commands;
 	int addr_command;		/* Command to set register address */
+	unsigned char proto_version;
+	unsigned char byte0, mask0;
+	unsigned char flags;
+	int x_max;
+	int y_max;
+
+	int (*hw_init)(struct psmouse *psmouse);
+	void (*process_packet)(struct psmouse *psmouse);
+	void (*decode_fields)(struct alps_fields *f, unsigned char *p);
+	void (*set_abs_params)(struct alps_data *priv, struct input_dev *dev1);
+
 	int prev_fin;			/* Finger bit from previous packet */
 	int multi_packet;		/* Multi-packet data in progress */
 	u8 quirks;

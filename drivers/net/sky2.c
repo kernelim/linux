@@ -1242,7 +1242,6 @@ static void sky2_vlan_rx_register(struct net_device *dev, struct vlan_group *grp
 	struct sky2_hw *hw = sky2->hw;
 	u16 port = sky2->port;
 
-	netif_tx_lock_bh(dev);
 	napi_disable(&hw->napi);
 
 	sky2->vlgrp = grp;
@@ -1250,7 +1249,6 @@ static void sky2_vlan_rx_register(struct net_device *dev, struct vlan_group *grp
 
 	sky2_read32(hw, B0_Y2_SP_LISR);
 	napi_enable(&hw->napi);
-	netif_tx_unlock_bh(dev);
 }
 #endif
 

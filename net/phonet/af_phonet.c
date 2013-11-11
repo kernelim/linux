@@ -35,20 +35,19 @@
 
 /* Transport protocol registration */
 static struct phonet_protocol *proto_tab[PHONET_NPROTO] __read_mostly;
-static DEFINE_SPINLOCK(proto_tab_lock);
 
-static struct phonet_protocol *phonet_proto_get(int protocol)
+static struct phonet_protocol *phonet_proto_get(unsigned int protocol)
 {
 	struct phonet_protocol *pp;
 
 	if (protocol >= PHONET_NPROTO)
 		return NULL;
 
-	spin_lock(&proto_tab_lock);
+	rcu_read_lock();
 	pp = proto_tab[protocol];
 	if (pp && !try_module_get(pp->prot->owner))
 		pp = NULL;
-	spin_unlock(&proto_tab_lock);
+	rcu_read_unlock();
 
 	return pp;
 }
@@ -394,7 +393,9 @@ static struct packet_type phonet_packet_type __read_mostly = {
 	.func = phonet_rcv,
 };
 
-int __init_or_module phonet_proto_register(int protocol,
+static DEFINE_MUTEX(proto_tab_lock);
+
+int __init_or_module phonet_proto_register(unsigned int protocol,
 						struct phonet_protocol *pp)
 {
 	int err = 0;
@@ -406,23 +407,24 @@ int __init_or_module phonet_proto_register(int protocol,
 	if (err)
 		return err;
 
-	spin_lock(&proto_tab_lock);
+	mutex_lock(&proto_tab_lock);
 	if (proto_tab[protocol])
 		err = -EBUSY;
 	else
-		proto_tab[protocol] = pp;
-	spin_unlock(&proto_tab_lock);
+		rcu_assign_pointer(proto_tab[protocol], pp);
+	mutex_unlock(&proto_tab_lock);
 
 	return err;
 }
 EXPORT_SYMBOL(phonet_proto_register);
 
-void phonet_proto_unregister(int protocol, struct phonet_protocol *pp)
+void phonet_proto_unregister(unsigned int protocol, struct phonet_protocol *pp)
 {
-	spin_lock(&proto_tab_lock);
+	mutex_lock(&proto_tab_lock);
 	BUG_ON(proto_tab[protocol] != pp);
-	proto_tab[protocol] = NULL;
-	spin_unlock(&proto_tab_lock);
+	rcu_assign_pointer(proto_tab[protocol], NULL);
+	mutex_unlock(&proto_tab_lock);
+	synchronize_rcu();
 	proto_unregister(pp->prot);
 }
 EXPORT_SYMBOL(phonet_proto_unregister);

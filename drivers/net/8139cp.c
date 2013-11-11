@@ -613,15 +613,20 @@ static irqreturn_t cp_interrupt (int irq, void *dev_instance)
 {
 	struct net_device *dev = dev_instance;
 	struct cp_private *cp;
+	int handled = 0;
 	u16 status;
 
 	if (unlikely(dev == NULL))
 		return IRQ_NONE;
 	cp = netdev_priv(dev);
 
+	spin_lock(&cp->lock);
+
 	status = cpr16(IntrStatus);
 	if (!status || (status == 0xFFFF))
-		return IRQ_NONE;
+		goto out_unlock;
+
+	handled = 1;
 
 	if (netif_msg_intr(cp))
 		pr_debug("%s: intr, status %04x cmd %02x cpcmd %04x\n",
@@ -629,13 +634,10 @@ static irqreturn_t cp_interrupt (int irq, void *dev_instance)
 
 	cpw16(IntrStatus, status & ~cp_rx_intr_mask);
 
-	spin_lock(&cp->lock);
-
 	/* close possible race's with dev_close */
 	if (unlikely(!netif_running(dev))) {
 		cpw16(IntrMask, 0);
-		spin_unlock(&cp->lock);
-		return IRQ_HANDLED;
+		goto out_unlock;
 	}
 
 	if (status & (RxOK | RxErr | RxEmpty | RxFIFOOvr))
@@ -649,7 +651,6 @@ static irqreturn_t cp_interrupt (int irq, void *dev_instance)
 	if (status & LinkChg)
 		mii_check_media(&cp->mii_if, netif_msg_link(cp), false);
 
-	spin_unlock(&cp->lock);
 
 	if (status & PciErr) {
 		u16 pci_status;
@@ -662,7 +663,10 @@ static irqreturn_t cp_interrupt (int irq, void *dev_instance)
 		/* TODO: reset hardware */
 	}
 
-	return IRQ_HANDLED;
+out_unlock:
+	spin_unlock(&cp->lock);
+
+	return IRQ_RETVAL(handled);
 }
 
 #ifdef CONFIG_NET_POLL_CONTROLLER
@@ -1243,12 +1247,9 @@ static void cp_tx_timeout(struct net_device *dev)
 	return;
 }
 
-#ifdef BROKEN
 static int cp_change_mtu(struct net_device *dev, int new_mtu)
 {
 	struct cp_private *cp = netdev_priv(dev);
-	int rc;
-	unsigned long flags;
 
 	/* check for invalid MTU, according to hardware limits */
 	if (new_mtu < CP_MIN_MTU || new_mtu > CP_MAX_MTU)
@@ -1261,22 +1262,12 @@ static int cp_change_mtu(struct net_device *dev, int new_mtu)
 		return 0;
 	}
 
-	spin_lock_irqsave(&cp->lock, flags);
-
-	cp_stop_hw(cp);			/* stop h/w and free rings */
-	cp_clean_rings(cp);
-
+	/* network IS up, close it, reset MTU, and come up again. */
+	cp_close(dev);
 	dev->mtu = new_mtu;
-	cp_set_rxbufsize(cp);		/* set new rx buf size */
-
-	rc = cp_init_rings(cp);		/* realloc and restart h/w */
-	cp_start_hw(cp);
-
-	spin_unlock_irqrestore(&cp->lock, flags);
-
-	return rc;
+	cp_set_rxbufsize(cp);
+	return cp_open(dev);
 }
-#endif /* BROKEN */
 
 static const char mii_2_8139_map[8] = {
 	BasicModeCtrl,
@@ -1853,9 +1844,7 @@ static const struct net_device_ops cp_netdev_ops = {
 #if CP_VLAN_TAG_USED
 	.ndo_vlan_rx_register	= cp_vlan_rx_register,
 #endif
-#ifdef BROKEN
 	.ndo_change_mtu		= cp_change_mtu,
-#endif
 
 #ifdef CONFIG_NET_POLL_CONTROLLER
 	.ndo_poll_controller	= cp_poll_controller,

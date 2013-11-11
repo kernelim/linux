@@ -278,7 +278,8 @@
 #define __NR_syncfs		338
 /* whole due to s390_runtime_instr */
 #define	__NR_s390_runtime_instr	342
-#define NR_syscalls 343
+#define __NR_setns		343
+#define NR_syscalls 344
 
 /* 
  * There are some system calls that are not present on 64 bit, some

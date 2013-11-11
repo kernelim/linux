@@ -144,6 +144,7 @@ struct kvm_vcpu_stat {
 	u32 instruction_sigp_prefix;
 	u32 instruction_sigp_restart;
 	u32 diagnose_44;
+	u32 diagnose_9c;
 };
 
 struct kvm_s390_io_info {

@@ -93,6 +93,7 @@ static const char radeon_family_name[][16] = {
 	"TAHITI",
 	"PITCAIRN",
 	"VERDE",
+	"OLAND",
 	"LAST",
 };
 
@@ -355,6 +356,8 @@ int radeon_wb_init(struct radeon_device *rdev)
  */
 void radeon_vram_location(struct radeon_device *rdev, struct radeon_mc *mc, u64 base)
 {
+	uint64_t limit = (uint64_t)radeon_vram_limit << 20;
+
 	mc->vram_start = base;
 	if (mc->mc_vram_size > (0xFFFFFFFF - base + 1)) {
 		dev_warn(rdev->dev, "limiting VRAM to PCI aperture size\n");
@@ -368,8 +371,8 @@ void radeon_vram_location(struct radeon_device *rdev, struct radeon_mc *mc, u64 
 		mc->mc_vram_size = mc->aper_size;
 	}
 	mc->vram_end = mc->vram_start + mc->mc_vram_size - 1;
-	if (radeon_vram_limit && radeon_vram_limit < mc->real_vram_size)
-		mc->real_vram_size = radeon_vram_limit;
+	if (limit && limit < mc->real_vram_size)
+		mc->real_vram_size = limit;
 	dev_info(rdev->dev, "VRAM: %lluM 0x%016llX - 0x%016llX (%lluM used)\n",
 			mc->mc_vram_size >> 20, mc->vram_start,
 			mc->vram_end, mc->real_vram_size >> 20);
@@ -431,18 +434,17 @@ bool radeon_card_posted(struct radeon_device *rdev)
 		return false;
 
 	/* first check CRTCs */
-	if (ASIC_IS_DCE41(rdev)) {
+	if (ASIC_IS_DCE4(rdev)) {
 		reg = RREG32(EVERGREEN_CRTC_CONTROL + EVERGREEN_CRTC0_REGISTER_OFFSET) |
 			RREG32(EVERGREEN_CRTC_CONTROL + EVERGREEN_CRTC1_REGISTER_OFFSET);
-		if (reg & EVERGREEN_CRTC_MASTER_EN)
-			return true;
-	} else if (ASIC_IS_DCE4(rdev)) {
-		reg = RREG32(EVERGREEN_CRTC_CONTROL + EVERGREEN_CRTC0_REGISTER_OFFSET) |
-			RREG32(EVERGREEN_CRTC_CONTROL + EVERGREEN_CRTC1_REGISTER_OFFSET) |
-			RREG32(EVERGREEN_CRTC_CONTROL + EVERGREEN_CRTC2_REGISTER_OFFSET) |
-			RREG32(EVERGREEN_CRTC_CONTROL + EVERGREEN_CRTC3_REGISTER_OFFSET) |
-			RREG32(EVERGREEN_CRTC_CONTROL + EVERGREEN_CRTC4_REGISTER_OFFSET) |
-			RREG32(EVERGREEN_CRTC_CONTROL + EVERGREEN_CRTC5_REGISTER_OFFSET);
+			if (rdev->num_crtc >= 4) {
+				reg |= RREG32(EVERGREEN_CRTC_CONTROL + EVERGREEN_CRTC2_REGISTER_OFFSET) |
+					RREG32(EVERGREEN_CRTC_CONTROL + EVERGREEN_CRTC3_REGISTER_OFFSET);
+			}
+			if (rdev->num_crtc >= 6) {
+				reg |= RREG32(EVERGREEN_CRTC_CONTROL + EVERGREEN_CRTC4_REGISTER_OFFSET) |
+					RREG32(EVERGREEN_CRTC_CONTROL + EVERGREEN_CRTC5_REGISTER_OFFSET);
+			}
 		if (reg & EVERGREEN_CRTC_MASTER_EN)
 			return true;
 	} else if (ASIC_IS_AVIVO(rdev)) {
@@ -755,6 +757,11 @@ int radeon_atombios_init(struct radeon_device *rdev)
 	atom_card_info->pll_write = cail_pll_write;
 
 	rdev->mode_info.atom_context = atom_parse(atom_card_info, rdev->bios);
+	if (!rdev->mode_info.atom_context) {
+		radeon_atombios_fini(rdev);
+		return -ENOMEM;
+	}
+
 	mutex_init(&rdev->mode_info.atom_context->mutex);
 	radeon_atom_initialize_bios_scratch_regs(rdev->ddev);
 	atom_allocate_fb_scratch(rdev->mode_info.atom_context);
@@ -774,9 +781,11 @@ void radeon_atombios_fini(struct radeon_device *rdev)
 {
 	if (rdev->mode_info.atom_context) {
 		kfree(rdev->mode_info.atom_context->scratch);
-		kfree(rdev->mode_info.atom_context);
 	}
+	kfree(rdev->mode_info.atom_context);
+	rdev->mode_info.atom_context = NULL;
 	kfree(rdev->mode_info.atom_card_info);
+	rdev->mode_info.atom_card_info = NULL;
 }
 
 /* COMBIOS */
@@ -835,6 +844,19 @@ static unsigned int radeon_vga_set_decode(void *cookie, bool state)
 }
 
 /**
+ * radeon_check_pot_argument - check that argument is a power of two
+ *
+ * @arg: value to check
+ *
+ * Validates that a certain argument is a power of two (all asics).
+ * Returns true if argument is valid.
+ */
+static bool radeon_check_pot_argument(int arg)
+{
+	return (arg & (arg - 1)) == 0;
+}
+
+/**
  * radeon_check_arguments - validate module params
  *
  * @rdev: radeon_device pointer
@@ -842,55 +864,28 @@ static unsigned int radeon_vga_set_decode(void *cookie, bool state)
  * Validates certain module parameters and updates
  * the associated values used by the driver (all asics).
  */
-void radeon_check_arguments(struct radeon_device *rdev)
+static void radeon_check_arguments(struct radeon_device *rdev)
 {
 	/* vramlimit must be a power of two */
-	switch (radeon_vram_limit) {
-	case 0:
-	case 4:
-	case 8:
-	case 16:
-	case 32:
-	case 64:
-	case 128:
-	case 256:
-	case 512:
-	case 1024:
-	case 2048:
-	case 4096:
-		break;
-	default:
+	if (!radeon_check_pot_argument(radeon_vram_limit)) {
 		dev_warn(rdev->dev, "vram limit (%d) must be a power of 2\n",
 				radeon_vram_limit);
 		radeon_vram_limit = 0;
-		break;
 	}
-	radeon_vram_limit = radeon_vram_limit << 20;
+
 	/* gtt size must be power of two and greater or equal to 32M */
-	switch (radeon_gart_size) {
-	case 4:
-	case 8:
-	case 16:
+	if (radeon_gart_size < 32) {
 		dev_warn(rdev->dev, "gart size (%d) too small forcing to 512M\n",
 				radeon_gart_size);
 		radeon_gart_size = 512;
-		break;
-	case 32:
-	case 64:
-	case 128:
-	case 256:
-	case 512:
-	case 1024:
-	case 2048:
-	case 4096:
-		break;
-	default:
+
+	} else if (!radeon_check_pot_argument(radeon_gart_size)) {
 		dev_warn(rdev->dev, "gart size (%d) must be a power of 2\n",
 				radeon_gart_size);
 		radeon_gart_size = 512;
-		break;
 	}
-	rdev->mc.gtt_size = radeon_gart_size * 1024 * 1024;
+	rdev->mc.gtt_size = (uint64_t)radeon_gart_size << 20;
+
 	/* AGP mode can only be -1, 1, 2, 4, 8 */
 	switch (radeon_agpmode) {
 	case -1:
@@ -909,6 +904,25 @@ void radeon_check_arguments(struct radeon_device *rdev)
 }
 
 /**
+ * radeon_switcheroo_quirk_long_wakeup - return true if longer d3 delay is
+ * needed for waking up.
+ *
+ * @pdev: pci dev pointer
+ */
+static bool radeon_switcheroo_quirk_long_wakeup(struct pci_dev *pdev)
+{
+
+	/* 6600m in a macbook pro */
+	if (pdev->subsystem_vendor == PCI_VENDOR_ID_APPLE &&
+	    pdev->subsystem_device == 0x00e2) {
+		printk(KERN_INFO "radeon: quirking longer d3 wakeup delay\n");
+		return true;
+	}
+
+	return false;
+}
+
+/**
  * radeon_switcheroo_set_state - set switcheroo state
  *
  * @pdev: pci dev pointer
@@ -922,10 +936,19 @@ static void radeon_switcheroo_set_state(struct pci_dev *pdev, enum vga_switchero
 	struct drm_device *dev = pci_get_drvdata(pdev);
 	pm_message_t pmm = { .event = PM_EVENT_SUSPEND };
 	if (state == VGA_SWITCHEROO_ON) {
+		unsigned d3_delay = dev->pdev->d3_delay;
+
 		printk(KERN_INFO "radeon: switched on\n");
 		/* don't suspend or resume card normally */
 		dev->switch_power_state = DRM_SWITCH_POWER_CHANGING;
+
+		if (d3_delay < 20 && radeon_switcheroo_quirk_long_wakeup(pdev))
+			dev->pdev->d3_delay = 20;
+
 		radeon_resume_kms(dev);
+
+		dev->pdev->d3_delay = d3_delay;
+
 		dev->switch_power_state = DRM_SWITCH_POWER_ON;
 		drm_kms_helper_poll_enable(dev);
 	} else {
@@ -1013,13 +1036,15 @@ int radeon_device_init(struct radeon_device *rdev,
 	init_rwsem(&rdev->pm.mclk_lock);
 	init_rwsem(&rdev->exclusive_lock);
 	init_waitqueue_head(&rdev->irq.vblank_queue);
-	init_waitqueue_head(&rdev->irq.idle_queue);
 	r = radeon_gem_init(rdev);
 	if (r)
 		return r;
 	/* initialize vm here */
 	mutex_init(&rdev->vm_manager.lock);
-	rdev->vm_manager.use_bitmap = 1;
+	/* Adjust VM size here.
+	 * Currently set to 4GB ((1 << 20) 4k pages).
+	 * Max GPUVM size for cayman and SI is 40 bits.
+	 */
 	rdev->vm_manager.max_pfn = 1 << 20;
 	INIT_LIST_HEAD(&rdev->vm_manager.lru_vm);
 
@@ -1069,6 +1094,7 @@ int radeon_device_init(struct radeon_device *rdev,
 
 	/* Registers mapping */
 	/* TODO: block userspace mapping of io register */
+	spin_lock_init(&rdev->mmio_idx_lock);
 	rdev->rmmio_base = pci_resource_start(rdev->pdev, 2);
 	rdev->rmmio_size = pci_resource_len(rdev->pdev, 2);
 	rdev->rmmio = ioremap(rdev->rmmio_base, rdev->rmmio_size);
@@ -1173,6 +1199,7 @@ int radeon_suspend_kms(struct drm_device *dev, pm_message_t state)
 	struct drm_crtc *crtc;
 	struct drm_connector *connector;
 	int i, r;
+	bool force_completion = false;
 
 	if (dev == NULL || dev->dev_private == NULL) {
 		return -ENODEV;
@@ -1215,8 +1242,16 @@ int radeon_suspend_kms(struct drm_device *dev, pm_message_t state)
 
 	mutex_lock(&rdev->ring_lock);
 	/* wait for gpu to finish processing current batch */
-	for (i = 0; i < RADEON_NUM_RINGS; i++)
-		radeon_fence_wait_empty_locked(rdev, i);
+	for (i = 0; i < RADEON_NUM_RINGS; i++) {
+		r = radeon_fence_wait_empty_locked(rdev, i);
+		if (r) {
+			/* delay GPU reset to resume */
+			force_completion = true;
+		}
+	}
+	if (force_completion) {
+		radeon_fence_driver_force_completion(rdev);
+	}
 	mutex_unlock(&rdev->ring_lock);
 
 	radeon_save_bios_scratch_regs(rdev);
@@ -1235,9 +1270,9 @@ int radeon_suspend_kms(struct drm_device *dev, pm_message_t state)
 		pci_disable_device(dev->pdev);
 		pci_set_power_state(dev->pdev, PCI_D3hot);
 	}
-	acquire_console_sem();
+	console_lock();
 	radeon_fbdev_set_suspend(rdev, 1);
-	release_console_sem();
+	console_unlock();
 	return 0;
 }
 
@@ -1259,11 +1294,11 @@ int radeon_resume_kms(struct drm_device *dev)
 	if (dev->switch_power_state == DRM_SWITCH_POWER_OFF)
 		return 0;
 
-	acquire_console_sem();
+	console_lock();
 	pci_set_power_state(dev->pdev, PCI_D0);
 	pci_restore_state(dev->pdev);
 	if (pci_enable_device(dev->pdev)) {
-		release_console_sem();
+		console_unlock();
 		return -1;
 	}
 	/* resume AGP if in use */
@@ -1278,12 +1313,19 @@ int radeon_resume_kms(struct drm_device *dev)
 	radeon_restore_bios_scratch_regs(rdev);
 
 	radeon_fbdev_set_suspend(rdev, 0);
-	release_console_sem();
+	console_unlock();
 
 	/* init dig PHYs, disp eng pll */
 	if (rdev->is_atom_bios) {
 		radeon_atom_encoder_init(rdev);
 		radeon_atom_disp_eng_pll_init(rdev);
+		/* turn on the BL */
+		if (rdev->mode_info.bl_encoder) {
+			u8 bl_level = radeon_get_backlight_level(rdev,
+								 rdev->mode_info.bl_encoder);
+			radeon_set_backlight_level(rdev, rdev->mode_info.bl_encoder,
+						   bl_level);
+		}
 	}
 	/* reset hpd state */
 	radeon_hpd_init(rdev);
@@ -1340,7 +1382,6 @@ retry:
 	}
 
 	radeon_restore_bios_scratch_regs(rdev);
-	drm_helper_resume_force_mode(rdev->ddev);
 
 	if (!r) {
 		for (i = 0; i < RADEON_NUM_RINGS; ++i) {
@@ -1360,10 +1401,13 @@ retry:
 			}
 		}
 	} else {
+		radeon_fence_driver_force_completion(rdev);
 		for (i = 0; i < RADEON_NUM_RINGS; ++i) {
 			kfree(ring_data[i]);
 		}
 	}
+
+	drm_helper_resume_force_mode(rdev->ddev);
 
 	ttm_bo_unlock_delayed_workqueue(&rdev->mman.bdev, resched);
 	if (r) {

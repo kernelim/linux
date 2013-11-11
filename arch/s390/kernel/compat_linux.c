@@ -440,14 +440,14 @@ asmlinkage long sys32_execve(char __user *name, compat_uptr_t __user *argv,
 			     compat_uptr_t __user *envp)
 {
 	struct pt_regs *regs = task_pt_regs(current);
-	char *filename;
+	struct filename *filename;
 	long rc;
 
 	filename = getname(name);
 	rc = PTR_ERR(filename);
 	if (IS_ERR(filename))
 		return rc;
-	rc = compat_do_execve(filename, argv, envp, regs);
+	rc = compat_do_execve(filename->name, argv, envp, regs);
 	if (rc)
 		goto out;
 	current->thread.fp_regs.fpc=0;

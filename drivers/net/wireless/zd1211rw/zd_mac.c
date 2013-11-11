@@ -919,7 +919,9 @@ static int fill_ctrlset(struct zd_mac *mac,
  * control block of the skbuff will be initialized. If necessary the incoming
  * mac80211 queues will be stopped.
  */
-static void zd_op_tx(struct ieee80211_hw *hw, struct sk_buff *skb)
+static void zd_op_tx(struct ieee80211_hw *hw,
+		     struct ieee80211_tx_control *control,
+		     struct sk_buff *skb)
 {
 	struct zd_mac *mac = zd_hw_mac(hw);
 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
@@ -1136,10 +1138,10 @@ static int zd_op_config(struct ieee80211_hw *hw, u32 changed)
 	struct ieee80211_conf *conf = &hw->conf;
 
 	spin_lock_irq(&mac->lock);
-	mac->channel = conf->channel->hw_value;
+	mac->channel = conf->chandef.chan->hw_value;
 	spin_unlock_irq(&mac->lock);
 
-	return zd_chip_set_channel(&mac->chip, conf->channel->hw_value);
+	return zd_chip_set_channel(&mac->chip, conf->chandef.chan->hw_value);
 }
 
 static void zd_beacon_done(struct zd_mac *mac)
@@ -1158,7 +1160,7 @@ static void zd_beacon_done(struct zd_mac *mac)
 		skb = ieee80211_get_buffered_bc(mac->hw, mac->vif);
 		if (!skb)
 			break;
-		zd_op_tx(mac->hw, skb);
+		zd_op_tx(mac->hw, NULL, skb);
 	}
 
 	/*

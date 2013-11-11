@@ -17,9 +17,6 @@
 #include <linux/netfilter_bridge.h>
 #include "br_private.h"
 
-/* Bridge group multicast address 802.1d (pg 51). */
-const u8 br_group_address[ETH_ALEN] = { 0x01, 0x80, 0xc2, 0x00, 0x00, 0x00 };
-
 static int br_pass_frame_up(struct sk_buff *skb)
 {
 	struct net_device *indev, *brdev = BR_INPUT_SKB_CB(skb)->brdev;
@@ -117,18 +114,6 @@ static int br_handle_local_finish(struct sk_buff *skb)
 	return 0;	 /* process further */
 }
 
-/* Does address match the link local multicast address.
- * 01:80:c2:00:00:0X
- */
-static inline int is_link_local(const unsigned char *dest)
-{
-	__be16 *a = (__be16 *)dest;
-	static const __be16 *b = (const __be16 *)br_group_address;
-	static const __be16 m = cpu_to_be16(0xfff0);
-
-	return ((a[0] ^ b[0]) | (a[1] ^ b[1]) | ((a[2] ^ b[2]) & m)) == 0;
-}
-
 /*
  * Called via br_handle_frame_hook.
  * Return NULL if skb is handled
@@ -146,7 +131,7 @@ struct sk_buff *br_handle_frame(struct net_bridge_port *p, struct sk_buff *skb)
 	if (!skb)
 		return NULL;
 
-	if (unlikely(is_link_local(dest))) {
+	if (unlikely(is_link_local_ether_addr(dest))) {
 		/* Pause frames shouldn't be passed up by driver anyway */
 		if (skb->protocol == htons(ETH_P_PAUSE))
 			goto drop;
