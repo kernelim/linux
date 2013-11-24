@@ -900,25 +900,32 @@ xfs_log_space_wake(
 }
 
 /*
- * Determine if we have a transaction that has gone to disk
- * that needs to be covered. To begin the transition to the idle state
- * firstly the log needs to be idle (no AIL and nothing in the iclogs).
- * If we are then in a state where covering is needed, the caller is informed
- * that dummy transactions are required to move the log into the idle state.
+ * Determine if we have a transaction that has gone to disk that needs to be
+ * covered. To begin the transition to the idle state firstly the log needs to
+ * be idle. That means the CIL, the AIL and the iclogs needs to be empty before
+ * we start attempting to cover the log.
  *
- * Because this is called as part of the sync process, we should also indicate
- * that dummy transactions should be issued in anything but the covered or
- * idle states. This ensures that the log tail is accurately reflected in
- * the log at the end of the sync, hence if a crash occurrs avoids replay
- * of transactions where the metadata is already on disk.
+ * Only if we are then in a state where covering is needed, the caller is
+ * informed that dummy transactions are required to move the log into the idle
+ * state.
+ *
+ * If there are any items in the AIl or CIL, then we do not want to attempt to
+ * cover the log as we may be in a situation where there isn't log space
+ * available to run a dummy transaction and this can lead to deadlocks when the
+ * tail of the log is pinned by an item that is modified in the CIL.  Hence
+ * there's no point in running a dummy transaction at this point because we
+ * can't start trying to idle the log until both the CIL and AIL are empty.
  */
 int
 xfs_log_need_covered(xfs_mount_t *mp)
 {
+	struct log	*log = mp->m_log;
 	int		needed = 0;
-	xlog_t		*log = mp->m_log;
 
 	if (!xfs_fs_writable(mp))
+		return 0;
+
+	if (!xlog_cil_empty(log))
 		return 0;
 
 	spin_lock(&log->l_icloglock);
@@ -929,14 +936,17 @@ xfs_log_need_covered(xfs_mount_t *mp)
 		break;
 	case XLOG_STATE_COVER_NEED:
 	case XLOG_STATE_COVER_NEED2:
-		if (!xfs_ail_min_lsn(log->l_ailp) &&
-		    xlog_iclogs_empty(log)) {
-			if (log->l_covered_state == XLOG_STATE_COVER_NEED)
-				log->l_covered_state = XLOG_STATE_COVER_DONE;
-			else
-				log->l_covered_state = XLOG_STATE_COVER_DONE2;
-		}
-		/* FALLTHRU */
+		if (xfs_ail_min_lsn(log->l_ailp))
+			break;
+		if (!xlog_iclogs_empty(log))
+			break;
+
+		needed = 1;
+		if (log->l_covered_state == XLOG_STATE_COVER_NEED)
+			log->l_covered_state = XLOG_STATE_COVER_DONE;
+		else
+			log->l_covered_state = XLOG_STATE_COVER_DONE2;
+		break;
 	default:
 		needed = 1;
 		break;
@@ -2372,14 +2382,27 @@ xlog_state_do_callback(
 
 
 				/*
-				 * update the last_sync_lsn before we drop the
+				 * Completion of a iclog IO does not imply that
+				 * a transaction has completed, as transactions
+				 * can be large enough to span many iclogs. We
+				 * cannot change the tail of the log half way
+				 * through a transaction as this may be the only
+				 * transaction in the log and moving th etail to
+				 * point to the middle of it will prevent
+				 * recovery from finding the start of the
+				 * transaction. Hence we should only update the
+				 * last_sync_lsn if this iclog contains
+				 * transaction completion callbacks on it.
+				 *
+				 * We have to do this before we drop the
 				 * icloglock to ensure we are the only one that
 				 * can update it.
 				 */
 				ASSERT(XFS_LSN_CMP(atomic64_read(&log->l_last_sync_lsn),
 					be64_to_cpu(iclog->ic_header.h_lsn)) <= 0);
-				atomic64_set(&log->l_last_sync_lsn,
-					be64_to_cpu(iclog->ic_header.h_lsn));
+				if (iclog->ic_callback)
+					atomic64_set(&log->l_last_sync_lsn,
+						be64_to_cpu(iclog->ic_header.h_lsn));
 
 			} else
 				ioerrors++;

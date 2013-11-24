@@ -1840,10 +1840,8 @@ static int _nfs4_open_and_get_state(struct nfs4_opendata *opendata,
 	if (ret != 0)
 		goto out;
 
-	if (read_seqcount_retry(&sp->so_reclaim_seqcount, seq)) {
+	if (read_seqcount_retry(&sp->so_reclaim_seqcount, seq))
 		nfs4_schedule_stateid_recovery(server, state);
-		nfs4_wait_clnt_recover(server->nfs_client);
-	}
 	*res = state;
 out:
 	return ret;

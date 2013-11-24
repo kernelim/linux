@@ -618,6 +618,20 @@ out_abort:
 	return XFS_ERROR(EIO);
 }
 
+bool
+xlog_cil_empty(
+	struct log	*log)
+{
+	struct xfs_cil	*cil = log->l_cilp;
+	bool		empty = false;
+
+	spin_lock(&cil->xc_cil_lock);
+	if (list_empty(&cil->xc_cil))
+		empty = true;
+	spin_unlock(&cil->xc_cil_lock);
+	return empty;
+}
+
 /*
  * Commit a transaction with the given vector to the Committed Item List.
  *

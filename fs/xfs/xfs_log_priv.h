@@ -630,6 +630,7 @@ xlog_assign_grant_head(atomic64_t *head, int cycle, int space)
 int	xlog_cil_init(struct log *log);
 void	xlog_cil_init_post_recovery(struct log *log);
 void	xlog_cil_destroy(struct log *log);
+bool	xlog_cil_empty(struct log *log);
 
 /*
  * CIL force routines

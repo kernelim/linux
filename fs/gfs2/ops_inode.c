@@ -177,11 +177,12 @@ static int gfs2_link(struct dentry *old_dentry, struct inode *dir,
 	error = 0;
 
 	if (alloc_required) {
+		struct gfs2_alloc_parms ap = { .target = sdp->sd_max_dirres, };
 		error = gfs2_quota_lock_check(dip);
 		if (error)
 			goto out_gunlock;
 
-		error = gfs2_inplace_reserve(dip, sdp->sd_max_dirres, 0);
+		error = gfs2_inplace_reserve(dip, &ap);
 		if (error)
 			goto out_gunlock_q;
 
@@ -734,11 +735,12 @@ static int gfs2_rename(struct inode *odir, struct dentry *odentry,
 		goto out_gunlock;
 
 	if (alloc_required) {
+		struct gfs2_alloc_parms ap = { .target = sdp->sd_max_dirres, };
 		error = gfs2_quota_lock_check(ndip);
 		if (error)
 			goto out_gunlock;
 
-		error = gfs2_inplace_reserve(ndip, sdp->sd_max_dirres, 0);
+		error = gfs2_inplace_reserve(ndip, &ap);
 		if (error)
 			goto out_gunlock_q;
 
@@ -1258,6 +1260,7 @@ static long gfs2_fallocate(struct inode *inode, int mode, loff_t offset,
 {
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
 	struct gfs2_inode *ip = GFS2_I(inode);
+	struct gfs2_alloc_parms ap = { .aflags = 0, };
 	int alloc_required;
 	unsigned int data_blocks = 0, ind_blocks = 0, rblocks;
 	loff_t bytes, max_bytes;
@@ -1311,7 +1314,8 @@ static long gfs2_fallocate(struct inode *inode, int mode, loff_t offset,
 retry:
 		gfs2_write_calc_reserv(ip, bytes, &data_blocks, &ind_blocks);
 
-		error = gfs2_inplace_reserve(ip, data_blocks + ind_blocks, 0);
+		ap.target = data_blocks + ind_blocks;
+		error = gfs2_inplace_reserve(ip, &ap);
 		if (error) {
 			if (error == -ENOSPC && bytes > sdp->sd_sb.sb_bsize) {
 				bytes >>= 1;

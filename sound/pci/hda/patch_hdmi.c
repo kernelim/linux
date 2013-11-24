@@ -1080,14 +1080,6 @@ static int hdmi_pcm_open(struct hda_pcm_stream *hinfo,
 	hinfo->formats = per_cvt->formats;
 	hinfo->maxbps = per_cvt->maxbps;
 
-	/* workaround for Haswell */
-	/*  44.1kHz (and maybe 88.2kHz) rates causes hw lockup  */
-	if (codec->vendor_id == 0x80862807) {
-		printk(KERN_WARNING "Haswell HDMI/DP audio: 44.1kHz & 88.2kHz rates are disabled\n");
-		hinfo->rates &= ~(SNDRV_PCM_RATE_44100 |
-				  SNDRV_PCM_RATE_88200);
-	}
-
 	/* Restrict capabilities by ELD if this isn't disabled */
 	if (!static_hdmi_pcm && eld->eld_valid) {
 		snd_hdmi_eld_update_pcm_info(&eld->info, hinfo);

@@ -625,13 +625,3 @@ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_AMD, PCI_DEVICE_ID_AMD_15H_NB_F5,
 			quirk_amd_nb_node);
 
 #endif
-
-/* RHEL6.4 does not support Intel Haswell HD Audio */
-static void __devinit quirk_intel_haswell_HD_audio(struct pci_dev *dev)
-{
-	mark_hardware_unsupported("Haswell HDMI Audio");
-}
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL, 0x0c0c,
-			quirk_intel_haswell_HD_audio);
-DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL, 0x0d0c,
-			quirk_intel_haswell_HD_audio);

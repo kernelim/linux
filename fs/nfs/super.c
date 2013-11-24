@@ -3073,6 +3073,9 @@ static int nfs4_xdev_get_sb(struct file_system_type *fs_type, int flags,
 	if (server->flags & NFS_MOUNT_NOAC)
 		sb_mntdata.mntflags |= MS_SYNCHRONOUS;
 
+	if (data->sb != NULL && data->sb->s_flags & MS_SYNCHRONOUS)
+		sb_mntdata.mntflags |= MS_SYNCHRONOUS;
+
 	/* Get a superblock - note that we may end up sharing one that already exists */
 	s = sget(&nfs4_fs_type, compare_super, nfs_set_super, &sb_mntdata);
 	if (IS_ERR(s)) {
@@ -3167,6 +3170,9 @@ static int nfs4_remote_referral_get_sb(struct file_system_type *fs_type,
 
 	/* -o noac implies -o sync */
 	if (server->flags & NFS_MOUNT_NOAC)
+		sb_mntdata.mntflags |= MS_SYNCHRONOUS;
+
+	if (data->sb != NULL && data->sb->s_flags & MS_SYNCHRONOUS)
 		sb_mntdata.mntflags |= MS_SYNCHRONOUS;
 
 	/* Get a superblock - note that we may end up sharing one that already exists */
