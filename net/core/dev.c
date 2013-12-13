@@ -5954,6 +5954,7 @@ unsigned long netdev_fix_features(unsigned long features, const char *name)
 	}
 
 	if ((features & NETIF_F_TSO) && !(features & NETIF_F_HW_CSUM) &&
+					!(features & NETIF_F_NO_CSUM) &&
 					!(features & NETIF_F_IP_CSUM)) {
 		printk(KERN_NOTICE "%s: Dropping TSO features since no CSUM "
 		       "feature.\n", name);
@@ -5962,6 +5963,7 @@ unsigned long netdev_fix_features(unsigned long features, const char *name)
 	}
 
 	if ((features & NETIF_F_TSO6) && !(features & NETIF_F_HW_CSUM) &&
+					 !(features & NETIF_F_NO_CSUM) &&
 					 !(features & NETIF_F_IPV6_CSUM)) {
 		printk("%s: Dropping TSO6 features since no CSUM feature.\n", name);
 		features &= ~NETIF_F_TSO6;
