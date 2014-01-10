@@ -389,7 +389,7 @@ int ata_sff_busy_sleep(struct ata_port *ap,
 	timeout = ata_deadline(timer_start, tmout_pat);
 	while (status != 0xff && (status & ATA_BUSY) &&
 	       time_before(jiffies, timeout)) {
-		msleep(50);
+		ata_msleep(ap, 50);
 		status = ata_sff_busy_wait(ap, ATA_BUSY, 3);
 	}
 
@@ -401,7 +401,7 @@ int ata_sff_busy_sleep(struct ata_port *ap,
 	timeout = ata_deadline(timer_start, tmout);
 	while (status != 0xff && (status & ATA_BUSY) &&
 	       time_before(jiffies, timeout)) {
-		msleep(50);
+		ata_msleep(ap, 50);
 		status = ap->ops->sff_check_status(ap);
 	}
 
@@ -506,7 +506,7 @@ void ata_dev_select(struct ata_port *ap, unsigned int device,
 
 	if (wait) {
 		if (can_sleep && ap->link.device[device].class == ATA_DEV_ATAPI)
-			msleep(150);
+			ata_msleep(ap, 150);
 		ata_wait_idle(ap);
 	}
 }
@@ -1503,7 +1503,7 @@ fsm_start:
 	 */
 	status = ata_sff_busy_wait(ap, ATA_BUSY, 5);
 	if (status & ATA_BUSY) {
-		msleep(2);
+		ata_msleep(ap, 2);
 		status = ata_sff_busy_wait(ap, ATA_BUSY, 10);
 		if (status & ATA_BUSY) {
 			ata_sff_queue_pio_task(ap, ATA_SHORT_PAUSE);
@@ -2079,7 +2079,7 @@ int ata_sff_wait_after_reset(struct ata_link *link, unsigned int devmask,
 	unsigned int dev1 = devmask & (1 << 1);
 	int rc, ret = 0;
 
-	msleep(ATA_WAIT_AFTER_RESET);
+	ata_msleep(ap, ATA_WAIT_AFTER_RESET);
 
 	/* always check readiness of the master device */
 	rc = ata_sff_wait_ready(link, deadline);
@@ -2108,7 +2108,7 @@ int ata_sff_wait_after_reset(struct ata_link *link, unsigned int devmask,
 			lbal = ioread8(ioaddr->lbal_addr);
 			if ((nsect == 1) && (lbal == 1))
 				break;
-			msleep(50);	/* give drive a breather */
+			ata_msleep(ap, 50);	/* give drive a breather */
 		}
 
 		rc = ata_sff_wait_ready(link, deadline);

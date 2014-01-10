@@ -75,6 +75,13 @@
 
 #define CLONE_OFFLINK_ROUTE 0
 
+enum rt6_nud_state {
+	RT6_NUD_FAIL_HARD = -3,
+	RT6_NUD_FAIL_PROBE = -2,
+	RT6_NUD_FAIL_DO_RR = -1,
+	RT6_NUD_SUCCEED = 1
+};
+
 static struct rt6_info * ip6_rt_copy(struct rt6_info *ort);
 static struct dst_entry	*ip6_dst_check(struct dst_entry *dst, u32 cookie);
 static struct dst_entry *ip6_negative_advice(struct dst_entry *);
@@ -286,6 +293,24 @@ out:
 }
 
 #ifdef CONFIG_IPV6_ROUTER_PREF
+struct __rt6_probe_work {
+	struct work_struct work;
+	struct in6_addr target;
+	struct net_device *dev;
+};
+
+static void rt6_probe_deferred(struct work_struct *w)
+{
+	struct in6_addr mcaddr;
+	struct __rt6_probe_work *work =
+		container_of(w, struct __rt6_probe_work, work);
+
+	addrconf_addr_solict_mult(&work->target, &mcaddr);
+	ndisc_send_ns(work->dev, NULL, &work->target, &mcaddr, NULL);
+	dev_put(work->dev);
+	kfree(w);
+}
+
 static void rt6_probe(struct rt6_info *rt)
 {
 	struct neighbour *neigh = rt ? rt->rt6i_nexthop : NULL;
@@ -297,22 +322,33 @@ static void rt6_probe(struct rt6_info *rt)
 	 * Router Reachability Probe MUST be rate-limited
 	 * to no more than one per minute.
 	 */
-	if (!neigh || (neigh->nud_state & NUD_VALID))
+	if (!neigh)
 		return;
-	read_lock_bh(&neigh->lock);
+	write_lock_bh(&neigh->lock);
+	if (neigh->nud_state & NUD_VALID) {
+		write_unlock_bh(&neigh->lock);
+		return;
+	}
 	if (!(neigh->nud_state & NUD_VALID) &&
 	    time_after(jiffies, neigh->updated + rt->rt6i_idev->cnf.rtr_probe_interval)) {
-		struct in6_addr mcaddr;
-		struct in6_addr *target;
+		struct __rt6_probe_work *work;
 
-		neigh->updated = jiffies;
-		read_unlock_bh(&neigh->lock);
+		work = kmalloc(sizeof(*work), GFP_ATOMIC);
 
-		target = (struct in6_addr *)&neigh->primary_key;
-		addrconf_addr_solict_mult(target, &mcaddr);
-		ndisc_send_ns(rt->rt6i_dev, NULL, target, &mcaddr, NULL);
+		if (work)
+			__neigh_set_probe_once(neigh);
+
+		write_unlock_bh(&neigh->lock);
+
+		if (work) {
+			INIT_WORK(&work->work, rt6_probe_deferred);
+			work->target = *(struct in6_addr *)&neigh->primary_key;
+			dev_hold(rt->rt6i_dev);
+			work->dev = rt->rt6i_dev;
+			schedule_work(&work->work);
+		}
 	} else
-		read_unlock_bh(&neigh->lock);
+		write_unlock_bh(&neigh->lock);
 }
 #else
 static inline void rt6_probe(struct rt6_info *rt)
@@ -335,74 +371,83 @@ static inline int rt6_check_dev(struct rt6_info *rt, int oif)
 	return 0;
 }
 
-static inline int rt6_check_neigh(struct rt6_info *rt)
+static inline enum rt6_nud_state rt6_check_neigh(struct rt6_info *rt)
 {
 	struct neighbour *neigh = rt->rt6i_nexthop;
-	int m;
+	enum rt6_nud_state ret = RT6_NUD_FAIL_HARD;
+
 	if (rt->rt6i_flags & RTF_NONEXTHOP ||
 	    !(rt->rt6i_flags & RTF_GATEWAY))
-		m = 1;
+		ret = RT6_NUD_SUCCEED;
 	else if (neigh) {
 		read_lock_bh(&neigh->lock);
 		if (neigh->nud_state & NUD_VALID)
-			m = 2;
+			ret = RT6_NUD_SUCCEED;
 #ifdef CONFIG_IPV6_ROUTER_PREF
-		else if (neigh->nud_state & NUD_FAILED)
-			m = 0;
-#endif
+		else if (!(neigh->nud_state & NUD_FAILED))
+			ret = RT6_NUD_SUCCEED;
 		else
-			m = 1;
+			ret = RT6_NUD_FAIL_PROBE;
+#endif
 		read_unlock_bh(&neigh->lock);
-	} else
-		m = 0;
-	return m;
+	}
+	return ret;
 }
 
 static int rt6_score_route(struct rt6_info *rt, int oif,
 			   int strict)
 {
-	int m, n;
+	int m;
 
 	m = rt6_check_dev(rt, oif);
 	if (!m && (strict & RT6_LOOKUP_F_IFACE))
-		return -1;
+		return RT6_NUD_FAIL_HARD;
 #ifdef CONFIG_IPV6_ROUTER_PREF
 	m |= IPV6_DECODE_PREF(IPV6_EXTRACT_PREF(rt->rt6i_flags)) << 2;
 #endif
-	n = rt6_check_neigh(rt);
-	if (!n && (strict & RT6_LOOKUP_F_REACHABLE))
-		return -1;
+	if (strict & RT6_LOOKUP_F_REACHABLE) {
+		int n = rt6_check_neigh(rt);
+		if (n < 0)
+			return n;
+	}
 	return m;
 }
 
 static struct rt6_info *find_match(struct rt6_info *rt, int oif, int strict,
-				   int *mpri, struct rt6_info *match)
+				   int *mpri, struct rt6_info *match,
+				   bool *do_rr)
 {
 	int m;
+	bool match_do_rr = false;
 
 	if (rt6_check_expired(rt))
 		goto out;
 
 	m = rt6_score_route(rt, oif, strict);
-	if (m < 0)
+	if (m == RT6_NUD_FAIL_DO_RR) {
+		match_do_rr = true;
+		m = 0; /* lowest valid score */
+	} else if (m == RT6_NUD_FAIL_HARD) {
 		goto out;
-
-	if (m > *mpri) {
-		if (strict & RT6_LOOKUP_F_REACHABLE)
-			rt6_probe(match);
-		*mpri = m;
-		match = rt;
-	} else if (strict & RT6_LOOKUP_F_REACHABLE) {
-		rt6_probe(rt);
 	}
 
+	if (strict & RT6_LOOKUP_F_REACHABLE)
+		rt6_probe(rt);
+
+	/* note that m can be RT6_NUD_FAIL_PROBE at this point */
+	if (m > *mpri) {
+		*do_rr = match_do_rr;
+		*mpri = m;
+		match = rt;
+	}
 out:
 	return match;
 }
 
 static struct rt6_info *find_rr_leaf(struct fib6_node *fn,
 				     struct rt6_info *rr_head,
-				     u32 metric, int oif, int strict)
+				     u32 metric, int oif, int strict,
+				     bool *do_rr)
 {
 	struct rt6_info *rt, *match;
 	int mpri = -1;
@@ -410,10 +455,10 @@ static struct rt6_info *find_rr_leaf(struct fib6_node *fn,
 	match = NULL;
 	for (rt = rr_head; rt && rt->rt6i_metric == metric;
 	     rt = rt->u.dst.rt6_next)
-		match = find_match(rt, oif, strict, &mpri, match);
+		match = find_match(rt, oif, strict, &mpri, match, do_rr);
 	for (rt = fn->leaf; rt && rt != rr_head && rt->rt6i_metric == metric;
 	     rt = rt->u.dst.rt6_next)
-		match = find_match(rt, oif, strict, &mpri, match);
+		match = find_match(rt, oif, strict, &mpri, match, do_rr);
 
 	return match;
 }
@@ -422,6 +467,7 @@ static struct rt6_info *rt6_select(struct fib6_node *fn, int oif, int strict)
 {
 	struct rt6_info *match, *rt0;
 	struct net *net;
+	bool do_rr = false;
 
 	RT6_TRACE("%s(fn->leaf=%p, oif=%d)\n",
 		  __func__, fn->leaf, oif);
@@ -430,10 +476,10 @@ static struct rt6_info *rt6_select(struct fib6_node *fn, int oif, int strict)
 	if (!rt0)
 		fn->rr_ptr = rt0 = fn->leaf;
 
-	match = find_rr_leaf(fn, rt0, rt0->rt6i_metric, oif, strict);
+	match = find_rr_leaf(fn, rt0, rt0->rt6i_metric, oif, strict,
+			     &do_rr);
 
-	if (!match &&
-	    (strict & RT6_LOOKUP_F_REACHABLE)) {
+	if (do_rr) {
 		struct rt6_info *next = rt0->u.dst.rt6_next;
 
 		/* no entries matched; do round-robin */
@@ -1078,7 +1124,8 @@ static int ip6_dst_gc(struct dst_ops *ops)
 		goto out;
 
 	net->ipv6.ip6_rt_gc_expire++;
-	fib6_run_gc(net->ipv6.ip6_rt_gc_expire, net);
+	fib6_run_gc(net->ipv6.ip6_rt_gc_expire, net,
+		    atomic_read(&ops->entries) > rt_max_size);
 	net->ipv6.ip6_rt_last_gc = now;
 	if (atomic_read(&ops->entries) < ops->gc_thresh)
 		net->ipv6.ip6_rt_gc_expire = rt_gc_timeout>>1;
@@ -2617,7 +2664,7 @@ int ipv6_sysctl_rtcache_flush(ctl_table *ctl, int write,
 	int delay = net->ipv6.sysctl.flush_delay;
 	if (write) {
 		proc_dointvec(ctl, write, buffer, lenp, ppos);
-		fib6_run_gc(delay <= 0 ? ~0UL : (unsigned long)delay, net);
+		fib6_run_gc(delay <= 0 ? 0 : (unsigned long)delay, net, delay > 0);
 		return 0;
 	} else
 		return -EINVAL;

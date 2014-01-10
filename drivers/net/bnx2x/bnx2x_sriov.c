@@ -2983,6 +2983,12 @@ static inline void bnx2x_vf_get_bars(struct bnx2x *bp, struct bnx2x_virtf *vf,
 void bnx2x_lock_vf_pf_channel(struct bnx2x *bp, struct bnx2x_virtf *vf,
 			      enum channel_tlvs tlv)
 {
+	/* we don't lock the channel for unsupported tlvs */
+	if (!bnx2x_tlv_supported(tlv)) {
+		BNX2X_ERR("attempting to lock with unsupported tlv. Aborting\n");
+		return;
+	}
+
 	/* lock the channel */
 	mutex_lock(&vf->op_mutex);
 
@@ -2997,6 +3003,10 @@ void bnx2x_lock_vf_pf_channel(struct bnx2x *bp, struct bnx2x_virtf *vf,
 void bnx2x_unlock_vf_pf_channel(struct bnx2x *bp, struct bnx2x_virtf *vf,
 				enum channel_tlvs expected_tlv)
 {
+	/* we don't unlock the channel for unsupported tlvs */
+	if (!bnx2x_tlv_supported(expected_tlv))
+		return;
+
 	WARN(expected_tlv != vf->op_current,
 	     "lock mismatch: expected %d found %d", expected_tlv,
 	     vf->op_current);

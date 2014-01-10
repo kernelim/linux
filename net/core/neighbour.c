@@ -1122,6 +1122,21 @@ out:
 }
 EXPORT_SYMBOL(neigh_update);
 
+/* Update the neigh to listen temporarily for probe responses, even if it is
+ * in a NUD_FAILED state. The caller has to hold neigh->lock for writing.
+ */
+void __neigh_set_probe_once(struct neighbour *neigh)
+{
+	neigh->updated = jiffies;
+	if (!(neigh->nud_state & NUD_FAILED))
+		return;
+	neigh->nud_state = NUD_PROBE;
+	atomic_set(&neigh->probes, neigh->parms->ucast_probes);
+	neigh_add_timer(neigh,
+			jiffies + neigh->parms->retrans_time);
+}
+EXPORT_SYMBOL(__neigh_set_probe_once);
+
 struct neighbour *neigh_event_ns(struct neigh_table *tbl,
 				 u8 *lladdr, void *saddr,
 				 struct net_device *dev)

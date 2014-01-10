@@ -751,7 +751,7 @@ static int __init mce_amd_init(void)
 	if (c->x86_vendor != X86_VENDOR_AMD)
 		return 0;
 
-	if (c->x86 < 0xf || c->x86 > 0x15)
+	if (c->x86 < 0xf || c->x86 > 0x16)
 		return 0;
 
 	fam_ops = kzalloc(sizeof(struct amd_decoder_ops), GFP_KERNEL);
@@ -789,6 +789,12 @@ static int __init mce_amd_init(void)
 		xec_mask = 0x1f;
 		fam_ops->dc_mce = f15h_dc_mce;
 		fam_ops->ic_mce = f15h_ic_mce;
+		break;
+
+	case 0x16:
+		xec_mask  = 0x1f;
+		fam_ops->dc_mce = f14h_dc_mce;
+		fam_ops->ic_mce = f14h_ic_mce;
 		break;
 
 	default:

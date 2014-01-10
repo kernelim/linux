@@ -468,6 +468,10 @@ static int ip_frag_queue(struct ipq *qp, struct sk_buff *skb)
 	if (offset == 0)
 		qp->q.last_in |= INET_FRAG_FIRST_IN;
 
+	if (ip_hdr(skb)->frag_off & htons(IP_DF) &&
+	    skb->len + ihl > qp->q.max_size)
+		qp->q.max_size = skb->len + ihl;
+
 	if (qp->q.last_in == (INET_FRAG_FIRST_IN | INET_FRAG_LAST_IN) &&
 	    qp->q.meat == qp->q.len)
 		return ip_frag_reasm(qp, prev, dev);
@@ -570,9 +574,11 @@ static int ip_frag_reasm(struct ipq *qp, struct sk_buff *prev,
 	head->next = NULL;
 	head->dev = dev;
 	head->tstamp = qp->q.stamp;
+	IPCB(head)->frag_max_size = qp->q.max_size;
 
 	iph = ip_hdr(head);
-	iph->frag_off = 0;
+	/* max_size != 0 implies at least one fragment had IP_DF set */
+	iph->frag_off = qp->q.max_size ? htons(IP_DF) : 0;
 	iph->tot_len = htons(len);
 	IP_INC_STATS_BH(net, IPSTATS_MIB_REASMOKS);
 	qp->q.fragments = NULL;

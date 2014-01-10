@@ -348,7 +348,7 @@ typedef unsigned char *sk_buff_data_t;
  *		done for it, don't do them again
  *	@nf_trace: netfilter packet trace flag
  *	@nfctinfo: Relationship of this skb to the connection
- *	@nfct_reasm: netfilter conntrack re-assembly pointer
+ *	@nfct_reasm: (UNUSED) netfilter conntrack re-assembly pointer
  *	@nf_bridge: Saved data about a bridged frame - see br_netfilter.c
  *	@iif: ifindex of device we arrived on
  *	@queue_mapping: Queue mapping for multiqueue devices
@@ -411,7 +411,7 @@ struct sk_buff {
 	void			(*destructor)(struct sk_buff *skb);
 #if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
 	struct nf_conntrack	*nfct;
-	struct sk_buff		*nfct_reasm;
+	struct sk_buff		*nfct_reasm; /* UNUSED */
 #endif
 #ifdef CONFIG_BRIDGE_NETFILTER
 	struct nf_bridge_info	*nf_bridge;
