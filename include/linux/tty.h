@@ -288,6 +288,9 @@ struct tty_struct {
 	unsigned char lnext:1, erasing:1, raw:1, real_raw:1, icanon:1;
 	unsigned char closing:1;
 	unsigned char echo_overrun:1;
+#ifndef __GENKSYMS__
+	char flow_change;
+#endif
 	unsigned short minimum_to_wake;
 	unsigned long overrun_time;
 	int num_overrun;
@@ -347,6 +350,21 @@ struct tty_struct {
 
 #define TTY_WRITE_FLUSH(tty) tty_write_flush((tty))
 
+/* Values for tty->flow_change */
+#define TTY_THROTTLE_SAFE 1
+#define TTY_UNTHROTTLE_SAFE 2
+
+static inline void __tty_set_flow_change(struct tty_struct *tty, int val)
+{
+	tty->flow_change = val;
+}
+
+static inline void tty_set_flow_change(struct tty_struct *tty, int val)
+{
+	tty->flow_change = val;
+	smp_mb();
+}
+
 extern void tty_write_flush(struct tty_struct *);
 
 extern struct ktermios tty_std_termios;
@@ -396,6 +414,8 @@ extern int tty_write_room(struct tty_struct *tty);
 extern void tty_driver_flush_buffer(struct tty_struct *tty);
 extern void tty_throttle(struct tty_struct *tty);
 extern void tty_unthrottle(struct tty_struct *tty);
+extern int tty_throttle_safe(struct tty_struct *tty);
+extern int tty_unthrottle_safe(struct tty_struct *tty);
 extern int tty_do_resize(struct tty_struct *tty, struct winsize *ws);
 extern void tty_shutdown(struct tty_struct *tty);
 extern void tty_free_termios(struct tty_struct *tty);

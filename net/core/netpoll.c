@@ -49,7 +49,7 @@ static atomic_t trapped;
 				sizeof(struct iphdr) + sizeof(struct ethhdr))
 
 static void zap_completion_queue(void);
-static void arp_reply(struct sk_buff *skb);
+static void netpoll_arp_reply(struct sk_buff *skb, struct netpoll_info *npinfo);
 
 static unsigned int carrier_timeout = 4;
 module_param(carrier_timeout, uint, 0644);
@@ -159,7 +159,8 @@ static void poll_napi(struct net_device *dev)
 	list_for_each_entry(napi, &dev->napi_list, dev_list) {
 		if (napi->poll_owner != smp_processor_id() &&
 		    spin_trylock(&napi->poll_lock)) {
-			budget = poll_one_napi(dev->npinfo, napi, budget);
+			budget = poll_one_napi(rcu_dereference_bh(dev->npinfo),
+					       napi, budget);
 			spin_unlock(&napi->poll_lock);
 
 			if (!budget)
@@ -174,13 +175,14 @@ static void service_arp_queue(struct netpoll_info *npi)
 		struct sk_buff *skb;
 
 		while ((skb = skb_dequeue(&npi->arp_tx)))
-			arp_reply(skb);
+			netpoll_arp_reply(skb, npi);
 	}
 }
 
 void netpoll_poll_dev(struct net_device *dev)
 {
 	const struct net_device_ops *ops;
+	struct netpoll_info *ni = rcu_dereference_bh(dev->npinfo);
 
 	if (!dev || !netif_running(dev))
 		return;
@@ -195,17 +197,18 @@ void netpoll_poll_dev(struct net_device *dev)
 	poll_napi(dev);
 
 	if (dev->priv_flags & IFF_SLAVE) {
-		if (dev->npinfo) {
+		if (ni) {
 			struct net_device *bond_dev = dev->master;
 			struct sk_buff *skb;
-			while ((skb = skb_dequeue(&dev->npinfo->arp_tx))) {
+			struct netpoll_info *bond_ni = rcu_dereference_bh(bond_dev->npinfo);
+			while ((skb = skb_dequeue(&ni->arp_tx))) {
 				skb->dev = bond_dev;
-				skb_queue_tail(&bond_dev->npinfo->arp_tx, skb);
+				skb_queue_tail(&bond_ni->arp_tx, skb);
 			}
 		}
 	}
 
-	service_arp_queue(dev->npinfo);
+	service_arp_queue(ni);
 
 	zap_completion_queue();
 }
@@ -296,14 +299,19 @@ static int netpoll_owner_active(struct net_device *dev)
 	return 0;
 }
 
+/* call with IRQ disabled */
 void netpoll_send_skb_on_dev(struct netpoll *np, struct sk_buff *skb,
 			     struct net_device *dev)
 {
 	int status = NETDEV_TX_BUSY;
 	unsigned long tries;
 	const struct net_device_ops *ops = dev->netdev_ops;
-	struct netpoll_info *npinfo = np->dev->npinfo;
+	/* It is up to the caller to keep npinfo alive. */
+	struct netpoll_info *npinfo;
 
+	WARN_ON_ONCE(!irqs_disabled());
+
+	npinfo = rcu_dereference_bh(np->dev->npinfo);
 	if (!npinfo || !netif_running(dev) || !netif_device_present(dev)) {
 		__kfree_skb(skb);
 		return;
@@ -312,11 +320,9 @@ void netpoll_send_skb_on_dev(struct netpoll *np, struct sk_buff *skb,
 	/* don't get messages out of order, and no recursion */
 	if (skb_queue_len(&npinfo->txq) == 0 && !netpoll_owner_active(dev)) {
 		struct netdev_queue *txq;
-		unsigned long flags;
 
 		txq = netdev_pick_tx(dev, skb);
 
-		local_irq_save(flags);
 		/* try until next clock tick */
 		for (tries = jiffies_to_usecs(1)/USEC_PER_POLL;
 		     tries > 0; --tries) {
@@ -342,10 +348,9 @@ void netpoll_send_skb_on_dev(struct netpoll *np, struct sk_buff *skb,
 		}
 
 		WARN_ONCE(!irqs_disabled(),
-			"netpoll_send_skb(): %s enabled interrupts in poll (%pF)\n",
+			"netpoll_send_skb_on_dev(): %s enabled interrupts in poll (%pF)\n",
 			dev->name, ops->ndo_start_xmit);
 
-		local_irq_restore(flags);
 	}
 
 	if (status != NETDEV_TX_OK) {
@@ -415,9 +420,8 @@ void netpoll_send_udp(struct netpoll *np, const char *msg, int len)
 	netpoll_send_skb(np, skb);
 }
 
-static void arp_reply(struct sk_buff *skb)
+static void netpoll_arp_reply(struct sk_buff *skb, struct netpoll_info *npinfo)
 {
-	struct netpoll_info *npinfo = skb->dev->npinfo;
 	struct arphdr *arp;
 	unsigned char *arp_ptr;
 	int size, type = ARPOP_REPLY, ptype = ETH_P_ARP;

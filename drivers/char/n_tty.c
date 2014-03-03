@@ -81,20 +81,23 @@ static inline int tty_put_user(struct tty_struct *tty, unsigned char x,
 }
 
 /**
- *	n_tty_set__room	-	receive space
+ *	n_tty_set_room	-	receive space
  *	@tty: terminal
  *
- *	Called by the driver to find out how much data it is
- *	permitted to feed to the line discipline without any being lost
- *	and thus to manage flow control. Not serialized. Answers for the
- *	"instant".
+ *	Sets tty->receive_room to reflect the currently available space
+ *	in the input buffer.
+ *
+ *	Locks: Concurrent update is protected with read_lock
  */
 
 static void n_tty_set_room(struct tty_struct *tty)
 {
-	/* tty->read_cnt is not read locked ? */
-	int	left = N_TTY_BUF_SIZE - tty->read_cnt - 1;
+	int left;
+	unsigned long flags;
 
+	spin_lock_irqsave(&tty->read_lock, flags);
+
+	left = N_TTY_BUF_SIZE - tty->read_cnt - 1;
 	/*
 	 * If we are doing input canonicalization, and there are no
 	 * pending newlines, let characters through without limit, so
@@ -104,6 +107,8 @@ static void n_tty_set_room(struct tty_struct *tty)
 	if (left <= 0)
 		left = tty->icanon && !tty->canon_data;
 	tty->receive_room = left;
+
+	spin_unlock_irqrestore(&tty->read_lock, flags);
 }
 
 static void put_tty_queue_nolock(unsigned char c, struct tty_struct *tty)
@@ -1419,8 +1424,14 @@ static void n_tty_receive_buf(struct tty_struct *tty, const unsigned char *cp,
 	 * mode.  We don't want to throttle the driver if we're in
 	 * canonical mode and don't have a newline yet!
 	 */
-	if (tty->receive_room < TTY_THRESHOLD_THROTTLE)
-		tty_throttle(tty);
+	while (1) {
+		tty_set_flow_change(tty, TTY_THROTTLE_SAFE);
+		if (tty->receive_room >= TTY_THRESHOLD_THROTTLE)
+			break;
+		if (!tty_throttle_safe(tty))
+			break;
+	}
+	__tty_set_flow_change(tty, 0);
 }
 
 int is_ignored(int sig)
@@ -1795,7 +1806,6 @@ do_it_again:
 				retval = -ERESTARTSYS;
 				break;
 			}
-			/* FIXME: does n_tty_set_room need locking ? */
 			n_tty_set_room(tty);
 			timeout = schedule_timeout(timeout);
 			continue;
@@ -1872,10 +1882,17 @@ do_it_again:
 		 * longer than TTY_THRESHOLD_UNTHROTTLE in canonical mode,
 		 * we won't get any more characters.
 		 */
-		if (n_tty_chars_in_buffer(tty) <= TTY_THRESHOLD_UNTHROTTLE) {
+		while (1) {
+			tty_set_flow_change(tty, TTY_UNTHROTTLE_SAFE);
+			if (n_tty_chars_in_buffer(tty) > TTY_THRESHOLD_UNTHROTTLE)
+				break;
+			if (!tty->count)
+				break;
 			n_tty_set_room(tty);
-			check_unthrottle(tty);
+			if (!tty_unthrottle_safe(tty))
+				break;
 		}
+		__tty_set_flow_change(tty, 0);
 
 		if (b - buf >= minimum)
 			break;

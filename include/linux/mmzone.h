@@ -468,7 +468,12 @@ struct zone {
 	unsigned long		compact_cached_free_pfn;
 	unsigned long		compact_cached_migrate_pfn;
 #endif
-	unsigned long padding[13];
+	/*
+	 * Number of MIGRATE_RESEVE page block. To maintain for just
+	 * optimization. Protected by zone->lock.
+	 */
+	unsigned long		nr_migrate_reserve_block;
+	unsigned long padding[12];
 #else
 	unsigned long padding[16];
 #endif

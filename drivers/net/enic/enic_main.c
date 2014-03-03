@@ -1366,7 +1366,7 @@ static void enic_rq_indicate_buf(struct vnic_rq *rq,
 			skb->ip_summed = CHECKSUM_COMPLETE;
 		}
 
-		if (enic->vlan_group && vlan_stripped &&
+		if (vlan_stripped &&
 			(vlan_tci & CQ_ENET_RQ_DESC_VLAN_TCI_VLAN_MASK)) {
 
 			if (netdev->features & NETIF_F_GRO)

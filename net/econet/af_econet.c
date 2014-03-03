@@ -122,7 +122,7 @@ static int econet_recvmsg(struct kiocb *iocb, struct socket *sock,
 	size_t copied;
 	int err;
 
-	msg->msg_namelen = sizeof(struct sockaddr_ec);
+	msg->msg_namelen = 0;
 
 	mutex_lock(&econet_mutex);
 
@@ -164,9 +164,10 @@ static int econet_recvmsg(struct kiocb *iocb, struct socket *sock,
 		goto out_free;
 	sk->sk_stamp = skb->tstamp;
 
-	if (msg->msg_name)
+	if (msg->msg_name) {
+		m->msg_namelen = sizeof(struct sockaddr_ec);
 		memcpy(msg->msg_name, skb->cb, msg->msg_namelen);
-
+	}
 	/*
 	 *	Free or return the buffer as appropriate. Again this
 	 *	hides all the races and re-entrancy issues from us.

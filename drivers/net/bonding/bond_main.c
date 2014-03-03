@@ -1665,6 +1665,7 @@ static int bond_compute_features(struct bonding *bond)
 
 		gso_max_size = min(gso_max_size, slave->dev->gso_max_size);
 	}
+	vlan_features |= NETIF_F_NO_CSUM;
 
 done:
 	features |= (bond_dev->features & BOND_VLAN_FEATURES);

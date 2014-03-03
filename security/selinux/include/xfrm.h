@@ -45,6 +45,7 @@ int selinux_xfrm_sock_rcv_skb(u32 sid, struct sk_buff *skb,
 int selinux_xfrm_postroute_last(u32 isec_sid, struct sk_buff *skb,
 			struct common_audit_data *ad, u8 proto);
 int selinux_xfrm_decode_session(struct sk_buff *skb, u32 *sid, int ckall);
+int selinux_xfrm_skb_sid(struct sk_buff *skb, u32 *sid);
 
 static inline void selinux_xfrm_notify_policyload(void)
 {
@@ -74,15 +75,15 @@ static inline int selinux_xfrm_decode_session(struct sk_buff *skb, u32 *sid, int
 	return 0;
 }
 
+static inline int selinux_xfrm_skb_sid(struct sk_buff *skb, u32 *sid)
+{
+	*sid = SECSID_NULL;
+	return 0;
+}
+
 static inline void selinux_xfrm_notify_policyload(void)
 {
 }
 #endif
-
-static inline void selinux_skb_xfrm_sid(struct sk_buff *skb, u32 *sid)
-{
-	int err = selinux_xfrm_decode_session(skb, sid, 0);
-	BUG_ON(err);
-}
 
 #endif /* _SELINUX_XFRM_H_ */

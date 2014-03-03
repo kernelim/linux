@@ -1194,6 +1194,7 @@ static int x25_recvmsg(struct kiocb *iocb, struct socket *sock,
 	if (sk->sk_state != TCP_ESTABLISHED)
 		goto out;
 
+	msg->msg_namelen = 0;
 	if (flags & MSG_OOB) {
 		rc = -EINVAL;
 		if (sock_flag(sk, SOCK_URGINLINE) ||
@@ -1249,9 +1250,8 @@ static int x25_recvmsg(struct kiocb *iocb, struct socket *sock,
 	if (sx25) {
 		sx25->sx25_family = AF_X25;
 		sx25->sx25_addr   = x25->dest_addr;
+		msg->msg_namelen = sizeof(*sx25);
 	}
-
-	msg->msg_namelen = sizeof(struct sockaddr_x25);
 
 	lock_sock(sk);
 	x25_check_rbuf(sk);

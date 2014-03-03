@@ -1165,6 +1165,8 @@ static int nr_recvmsg(struct kiocb *iocb, struct socket *sock,
 		return -ENOTCONN;
 	}
 
+	msg->msg_namelen = 0;
+
 	/* Now we can treat all alike */
 	if ((skb = skb_recv_datagram(sk, flags & ~MSG_DONTWAIT, flags & MSG_DONTWAIT, &er)) == NULL) {
 		release_sock(sk);
@@ -1185,9 +1187,8 @@ static int nr_recvmsg(struct kiocb *iocb, struct socket *sock,
 		sax->sax25_family = AF_NETROM;
 		skb_copy_from_linear_data_offset(skb, 7, sax->sax25_call.ax25_call,
 			      AX25_ADDR_LEN);
+		msg->msg_namelen = sizeof(*sax);
 	}
-
-	msg->msg_namelen = sizeof(*sax);
 
 	skb_free_datagram(sk, skb);
 

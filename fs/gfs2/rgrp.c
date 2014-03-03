@@ -2151,7 +2151,6 @@ void gfs2_free_meta(struct gfs2_inode *ip, u64 bstart, u32 blen)
 	__gfs2_free_blocks(ip, bstart, blen, 1);
 	gfs2_statfs_change(sdp, 0, +blen, 0);
 	gfs2_quota_change(ip, -(s64)blen, ip->i_inode.i_uid, ip->i_inode.i_gid);
-	gfs2_meta_wipe(ip, bstart, blen);
 }
 
 void gfs2_unlink_di(struct inode *inode)

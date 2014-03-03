@@ -910,6 +910,7 @@ static int recv_msg(struct kiocb *iocb, struct socket *sock,
 	if (unlikely(!buf_len))
 		return -EINVAL;
 
+	m->msg_namelen = 0;
 	lock_sock(sk);
 
 	if (unlikely(sock->state == SS_UNCONNECTED)) {
@@ -1042,6 +1043,7 @@ static int recv_stream(struct kiocb *iocb, struct socket *sock,
 	if (unlikely(!buf_len))
 		return -EINVAL;
 
+	m->msg_namelen = 0;
 	lock_sock(sk);
 
 	if (unlikely((sock->state == SS_UNCONNECTED) ||

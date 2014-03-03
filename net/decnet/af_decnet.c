@@ -1690,6 +1690,8 @@ static int dn_recvmsg(struct kiocb *iocb, struct socket *sock,
 		goto out;
 	}
 
+	msg->msg_namelen = 0;
+
 	if (sk->sk_shutdown & RCV_SHUTDOWN) {
 		rv = 0;
 		goto out;

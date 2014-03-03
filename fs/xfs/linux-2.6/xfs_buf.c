@@ -1225,6 +1225,12 @@ _xfs_buf_ioapply(
 	int			size = bp->b_count_desired;
 	sector_t		sector = bp->b_bn;
 
+	/*
+	 * Make sure we capture only current IO errors rather than stale errors
+	 * left over from previous use of the buffer (e.g. failed readahead).
+	 */
+	bp->b_error = 0;
+
 	total_nr_pages = bp->b_page_count;
 	map_i = 0;
 

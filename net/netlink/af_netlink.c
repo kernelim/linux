@@ -1391,6 +1391,7 @@ static int netlink_recvmsg(struct kiocb *kiocb, struct socket *sock,
 		return -EOPNOTSUPP;
 
 	copied = 0;
+	msg->msg_namelen = 0;
 
 	skb = skb_recv_datagram(sk, flags, noblock, &err);
 	if (skb == NULL)
@@ -1424,8 +1425,6 @@ static int netlink_recvmsg(struct kiocb *kiocb, struct socket *sock,
 		}
 	}
 #endif
-
-	msg->msg_namelen = 0;
 
 	copied = skb->len;
 	if (len < copied) {
