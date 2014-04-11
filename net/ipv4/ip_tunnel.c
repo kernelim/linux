@@ -370,19 +370,15 @@ static struct ip_tunnel *ip_tunnel_create(struct net *net,
 	return nt;
 }
 
-static inline int IP_ECN_decapsulate(const struct iphdr *oiph,
-                                     struct sk_buff *skb)
+static inline void ipgre_ecn_decapsulate(const struct iphdr *iph, struct sk_buff *skb)
 {
-	__u8 inner;
-
-	if (skb->protocol == htons(ETH_P_IP))
-		inner = ip_hdr(skb)->tos;
-	else if (skb->protocol == htons(ETH_P_IPV6))
-		inner = ipv6_get_dsfield(ipv6_hdr(skb));
-	else
-		return 0;
-
-	return INET_ECN_encapsulate(oiph->tos, inner);
+	if (INET_ECN_is_ce(iph->tos)) {
+		if (skb->protocol == htons(ETH_P_IP)) {
+			IP_ECN_set_ce(ip_hdr(skb));
+		} else if (skb->protocol == htons(ETH_P_IPV6)) {
+			IP6_ECN_set_ce(ipv6_hdr(skb));
+		}
+	}
 }
 
 int ip_tunnel_rcv(struct ip_tunnel *tunnel, struct sk_buff *skb,
@@ -390,7 +386,6 @@ int ip_tunnel_rcv(struct ip_tunnel *tunnel, struct sk_buff *skb,
 {
 	struct net_device_stats *stats = &tunnel->dev->stats;
 	const struct iphdr *iph = ip_hdr(skb);
-	int err;
 
 #ifdef CONFIG_NET_IPGRE_BROADCAST
 	if (ipv4_is_multicast(iph->daddr)) {
@@ -419,17 +414,7 @@ int ip_tunnel_rcv(struct ip_tunnel *tunnel, struct sk_buff *skb,
 		tunnel->i_seqno = ntohl(tpi->seq) + 1;
 	}
 
-	err = IP_ECN_decapsulate(iph, skb);
-	if (unlikely(err)) {
-		if (log_ecn_error)
-			net_info_ratelimited("non-ECT from %pI4 with TOS=%#x\n",
-					&iph->saddr, iph->tos);
-		if (err > 1) {
-			++tunnel->dev->stats.rx_frame_errors;
-			++tunnel->dev->stats.rx_errors;
-			goto drop;
-		}
-	}
+	ipgre_ecn_decapsulate(iph, skb);
 
 	stats->rx_packets++;
 	stats->rx_bytes += skb->len;

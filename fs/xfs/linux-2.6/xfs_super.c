@@ -354,9 +354,11 @@ xfs_parseargs(
 			mp->m_qflags |= (XFS_GQUOTA_ACCT | XFS_GQUOTA_ACTIVE);
 			mp->m_qflags &= ~XFS_OQUOTA_ENFD;
 		} else if (!strcmp(this_char, MNTOPT_DELAYLOG)) {
-			mp->m_flags |= XFS_MOUNT_DELAYLOG;
+			xfs_warn(mp,
+	"delaylog is the default now, option is deprecated.");
 		} else if (!strcmp(this_char, MNTOPT_NODELAYLOG)) {
-			mp->m_flags &= ~XFS_MOUNT_DELAYLOG;
+			xfs_warn(mp,
+	"nodelaylog support has been removed, option is deprecated.");
 		} else if (!strcmp(this_char, MNTOPT_DISCARD)) {
 			mp->m_flags |= XFS_MOUNT_DISCARD;
 		} else if (!strcmp(this_char, MNTOPT_NODISCARD)) {

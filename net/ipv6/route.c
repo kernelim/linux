@@ -609,6 +609,13 @@ out:
 
 }
 
+struct dst_entry * ip6_route_lookup(struct net *net, struct flowi *fl,
+				    int flags)
+{
+	return fib6_rule_lookup(net, fl, flags, ip6_pol_route_lookup);
+}
+EXPORT_SYMBOL_GPL(ip6_route_lookup);
+
 struct rt6_info *rt6_lookup(struct net *net, const struct in6_addr *daddr,
 			    const struct in6_addr *saddr, int oif, int strict)
 {

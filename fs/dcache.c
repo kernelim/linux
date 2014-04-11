@@ -1220,6 +1220,19 @@ struct dentry *d_obtain_alias(struct inode *inode)
 }
 EXPORT_SYMBOL(d_obtain_alias);
 
+static struct dentry *__find_moveable_alias(struct inode *inode,
+						struct dentry *parent)
+{
+	struct dentry *alias;
+
+	if (list_empty(&inode->i_dentry))
+		return NULL;
+	alias = list_first_entry(&inode->i_dentry, struct dentry, d_alias);
+	if (alias->d_parent == parent || IS_ROOT(alias))
+		return __dget_locked(alias);
+	return NULL;
+}
+
 /**
  * d_splice_alias - splice a disconnected dentry into the tree if one exists
  * @inode:  the inode which may have a disconnected dentry
@@ -1242,20 +1255,14 @@ struct dentry *d_splice_alias(struct inode *inode, struct dentry *dentry)
 
 	if (inode && S_ISDIR(inode->i_mode)) {
 		spin_lock(&dcache_lock);
-		new = __d_find_any_alias(inode);
+		new = __find_moveable_alias(inode, dentry->d_parent);
 		if (new) {
-			if (new->d_parent != dentry->d_parent &&
-					!IS_ROOT(new->d_parent)) {
-				WARN_ON_ONCE(1);
-				goto add_duplicate_alias;
-			}
 			spin_unlock(&dcache_lock);
 			security_d_instantiate(new, inode);
 			d_rehash(dentry);
 			d_move(new, dentry);
 			iput(inode);
 		} else {
-add_duplicate_alias:
 			/* already taking dcache_lock, so d_add() by hand */
 			__d_instantiate(dentry, inode);
 			spin_unlock(&dcache_lock);

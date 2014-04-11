@@ -69,4 +69,6 @@
 
 #define SO_RXQ_OVFL		40
 
+#define SO_BPF_EXTENSIONS	48
+
 #endif	/* _ASM_POWERPC_SOCKET_H */

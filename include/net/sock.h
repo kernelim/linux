@@ -724,6 +724,19 @@ struct timewait_sock_ops;
 struct inet_hashinfo;
 struct raw_hashinfo;
 
+/*
+ * RHEL HACK: Abuse slab_flags to indicate size extension of struct proto.
+ * If RHEL_EXTENDED_PROTO is set in .slab_flags, struct proto contains
+ * rhel_flags which specifies what additional members are provided by the
+ * protocol module. SLAB_DEBUG_FREE is reused due to being unused in this
+ * context. It is masked out and never passed into kmem_cache_create().
+ */
+#define RHEL_EXTENDED_PROTO	SLAB_DEBUG_FREE
+
+/* RHEL specific flags to signal presence of extended members */
+#define RHEL_PROTO_HAS_RELEASE_CB	1
+
+
 /* Networking protocol blocks we attach to sockets.
  * socket layer -> transport layer interface
  * transport -> network interface is defined by struct inet_proto
@@ -823,7 +836,14 @@ struct proto {
 	atomic_t		socks;
 #endif
 #ifndef __GENKSYMS__
+	/*
+	 * RHEL specific extended area, only valid if RHEL_EXTENDED_PROTO is
+	 * present in .slab_flags.
+	 */
 	void		(*release_cb)(struct sock *sk);
+	u32			rhel_flags;
+
+	/* Add additional members here and add a new RHEL_PROTO_ flag */
 #endif
 };
 

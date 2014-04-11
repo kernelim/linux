@@ -2897,6 +2897,7 @@ out_release:
 	path_put(&nd.path);
 	putname(to);
 	if (retry_estale(error, how)) {
+		path_put(&old_path);
 		how |= LOOKUP_REVAL;
 		goto retry;
 	}

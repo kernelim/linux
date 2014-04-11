@@ -14,7 +14,7 @@
 
 #define GFS2_POSIX_ACL_ACCESS		"posix_acl_access"
 #define GFS2_POSIX_ACL_DEFAULT		"posix_acl_default"
-#define GFS2_ACL_MAX_ENTRIES		25
+#define GFS2_ACL_MAX_ENTRIES(sdp) ((300 << (sdp)->sd_sb.sb_bsize_shift) >> 12)
 
 extern int gfs2_check_acl(struct inode *inode, int mask);
 extern int gfs2_acl_create(struct gfs2_inode *dip, struct inode *inode);

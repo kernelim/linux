@@ -303,7 +303,7 @@ static int gfs2_xattr_system_set(struct inode *inode, const char *name,
 		goto out_release;
 
 	error = -EINVAL;
-	if (acl->a_count > GFS2_ACL_MAX_ENTRIES)
+	if (acl->a_count > GFS2_ACL_MAX_ENTRIES(sdp))
 		goto out_release;
 
 	if (type == ACL_TYPE_ACCESS) {
