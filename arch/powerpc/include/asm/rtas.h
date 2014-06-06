@@ -155,8 +155,84 @@ struct rtas_error_log {
 	unsigned long target:4;			/* Target of failed operation */
 	unsigned long type:8;			/* General event or error*/
 	unsigned long extended_log_length:32;	/* length in bytes */
-	unsigned char buffer[1];
+	unsigned char buffer[1];		/* Start of extended log */
+						/* Variable length.      */
 };
+
+#define RTAS_V6EXT_LOG_FORMAT_EVENT_LOG	14
+
+#define RTAS_V6EXT_COMPANY_ID_IBM	(('I' << 24) | ('B' << 16) | ('M' << 8))
+
+/* RTAS general extended event log, Version 6. The extended log starts
+ * from "buffer" field of struct rtas_error_log defined above.
+ */
+struct rtas_ext_event_log_v6 {
+	/* Byte 0 */
+	uint32_t log_valid:1;		/* 1:Log valid */
+	uint32_t unrecoverable_error:1;	/* 1:Unrecoverable error */
+	uint32_t recoverable_error:1;	/* 1:recoverable (correctable	*/
+					/*   or successfully retried)	*/
+	uint32_t degraded_operation:1;	/* 1:Unrecoverable err, bypassed*/
+					/*   - degraded operation (e.g.	*/
+					/*   CPU or mem taken off-line)	*/
+	uint32_t predictive_error:1;
+	uint32_t new_log:1;		/* 1:"New" log (Always 1 for	*/
+					/*   data returned from RTAS	*/
+	uint32_t big_endian:1;		/* 1: Big endian */
+	uint32_t :1;			/* reserved */
+	/* Byte 1 */
+	uint32_t :8;			/* reserved */
+	/* Byte 2 */
+	uint32_t powerpc_format:1;	/* Set to 1 (indicating log is	*/
+					/* in PowerPC format		*/
+	uint32_t :3;			/* reserved */
+	uint32_t log_format:4;		/* Log format indicator. Define	*/
+					/* format used for byte 12-2047	*/
+	/* Byte 3 */
+	uint32_t :8;			/* reserved */
+	/* Byte 4-11 */
+	uint8_t reserved[8];		/* reserved */
+	/* Byte 12-15 */
+	uint32_t company_id;		/* Company ID of the company	*/
+					/* that defines the format for	*/
+					/* the vendor specific log type	*/
+	/* Byte 16-end of log */
+	uint8_t vendor_log[1];		/* Start of vendor specific log	*/
+					/* Variable length.		*/
+};
+
+/* pSeries event log format */
+
+/* Two bytes ASCII section IDs */
+#define PSERIES_ELOG_SECT_ID_PRIV_HDR		(('P' << 8) | 'H')
+#define PSERIES_ELOG_SECT_ID_USER_HDR		(('U' << 8) | 'H')
+#define PSERIES_ELOG_SECT_ID_PRIMARY_SRC	(('P' << 8) | 'S')
+#define PSERIES_ELOG_SECT_ID_EXTENDED_UH	(('E' << 8) | 'H')
+#define PSERIES_ELOG_SECT_ID_FAILING_MTMS	(('M' << 8) | 'T')
+#define PSERIES_ELOG_SECT_ID_SECONDARY_SRC	(('S' << 8) | 'S')
+#define PSERIES_ELOG_SECT_ID_DUMP_LOCATOR	(('D' << 8) | 'H')
+#define PSERIES_ELOG_SECT_ID_FW_ERROR		(('S' << 8) | 'W')
+#define PSERIES_ELOG_SECT_ID_IMPACT_PART_ID	(('L' << 8) | 'P')
+#define PSERIES_ELOG_SECT_ID_LOGIC_RESOURCE_ID	(('L' << 8) | 'R')
+#define PSERIES_ELOG_SECT_ID_HMC_ID		(('H' << 8) | 'M')
+#define PSERIES_ELOG_SECT_ID_EPOW		(('E' << 8) | 'P')
+#define PSERIES_ELOG_SECT_ID_IO_EVENT		(('I' << 8) | 'E')
+#define PSERIES_ELOG_SECT_ID_MANUFACT_INFO	(('M' << 8) | 'I')
+#define PSERIES_ELOG_SECT_ID_CALL_HOME		(('C' << 8) | 'H')
+#define PSERIES_ELOG_SECT_ID_USER_DEF		(('U' << 8) | 'D')
+
+/* Vendor specific Platform Event Log Format, Version 6, section header */
+struct pseries_errorlog {
+	uint16_t id;			/* 0x00 2-byte ASCII section ID	*/
+	uint16_t length;		/* 0x02 Section length in bytes	*/
+	uint8_t version;		/* 0x04 Section version		*/
+	uint8_t subtype;		/* 0x05 Section subtype		*/
+	uint16_t creator_component;	/* 0x06 Creator component ID	*/
+	uint8_t data[];			/* 0x08 Start of section data	*/
+};
+
+struct pseries_errorlog *get_pseries_errorlog(struct rtas_error_log *log,
+					      uint16_t section_id);
 
 /*
  * This can be set by the rtas_flash module so that it can get called

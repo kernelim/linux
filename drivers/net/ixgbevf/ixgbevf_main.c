@@ -285,18 +285,29 @@ static void ixgbevf_receive_skb(struct ixgbevf_q_vector *q_vector,
 				union ixgbe_adv_rx_desc *rx_desc)
 {
 	struct ixgbevf_adapter *adapter = q_vector->adapter;
-	bool is_vlan = (status & IXGBE_RXD_STAT_VP);
+	bool is_vlan = (status & IXGBE_RXD_STAT_VP), used_vlan = false;
 	u16 tag = le16_to_cpu(rx_desc->wb.upper.vlan);
 
+	if (is_vlan) {
+		rcu_read_lock();
+		if (vlan_group_get_device(adapter->vlgrp, tag & VLAN_VID_MASK))
+			used_vlan = true;
+		rcu_read_unlock();
+	}
+
 	if (!(adapter->flags & IXGBE_FLAG_IN_NETPOLL)) {
-		if (adapter->vlgrp && is_vlan)
+		if (used_vlan)
 			vlan_gro_receive(&q_vector->napi,
 					 adapter->vlgrp,
 					 tag, skb);
 		else
 			napi_gro_receive(&q_vector->napi, skb);
-	} else
-		netif_rx(skb);
+	} else {
+		if (used_vlan)
+			vlan_hwaccel_rx(skb, adapter->vlgrp, tag);
+		else
+			netif_rx(skb);
+	}
 }
 
 /**

@@ -76,6 +76,8 @@ extern int vfs_path_lookup(struct dentry *, struct vfsmount *,
 extern struct file *lookup_instantiate_filp(struct nameidata *nd, struct dentry *dentry,
 		int (*open)(struct inode *, struct file *));
 
+extern int kern_path_mountpoint(int, const char *, struct path *, unsigned int);
+
 extern struct dentry *lookup_one_len(const char *, struct dentry *, int);
 extern struct dentry *lookup_one_noperm(const char *, struct dentry *);
 

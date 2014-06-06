@@ -54,6 +54,11 @@ extern void __init chrdev_init(void);
 extern int check_unsafe_exec(struct linux_binprm *);
 
 /*
+ * namei.c
+ */
+extern int user_path_mountpoint_at(int, const char __user *, unsigned int, struct path *);
+
+/*
  * namespace.c
  */
 extern int copy_mount_options(const void __user *, unsigned long *);

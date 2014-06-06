@@ -415,6 +415,19 @@ static inline void vlan_set_encap_proto(struct sk_buff *skb,
 		 */
 		skb->protocol = htons(ETH_P_802_2);
 }
+
+static inline struct net_device *vlan_hwaccel_dev(struct sk_buff *skb,
+						  struct vlan_group *grp)
+{
+	struct net_device *vlan_dev;
+	u16 vlan_id;
+
+	vlan_id = vlan_tx_tag_get(skb) & VLAN_VID_MASK;
+	vlan_dev = vlan_group_get_device(grp, vlan_id);
+
+	return vlan_dev;
+}
+
 #endif /* __KERNEL__ */
 
 /* VLAN IOCTLs are found in sockios.h */

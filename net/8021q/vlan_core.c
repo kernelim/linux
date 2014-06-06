@@ -23,7 +23,10 @@ int __vlan_hwaccel_rx(struct sk_buff *skb, struct vlan_group *grp,
 		__vlan_hwaccel_put_tag(skb, vlan_tci);
 	vlan_dev = vlan_group_get_device(grp, vlan_id);
 
-	if (vlan_dev)
+	/* Give packet to VLAN device if it is not configured on top
+	 * of a bridge.
+	 */
+	if (vlan_dev && !is_bridge_device(vlan_dev_real_dev(vlan_dev)))
 		skb->dev = vlan_dev;
 	else if (vlan_id) {
 		if (!(skb->dev->flags & IFF_PROMISC))
@@ -117,7 +120,7 @@ vlan_gro_common(struct napi_struct *napi, struct vlan_group *grp,
 	vlan_id = vlan_tci & VLAN_VID_MASK;
 	vlan_dev = vlan_group_get_device(grp, vlan_id);
 
-	if (vlan_dev)
+	if (vlan_dev && !is_bridge_device(vlan_dev_real_dev(vlan_dev)))
 		skb->dev = vlan_dev;
 	else if (vlan_id) {
 		if (!(skb->dev->flags & IFF_PROMISC))

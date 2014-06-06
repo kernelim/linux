@@ -2528,6 +2528,11 @@ static inline int skb_bond_should_drop(struct sk_buff *skb,
 	return 0;
 }
 
+static inline bool is_bridge_device(struct net_device *dev)
+{
+	return dev->priv_flags & IFF_EBRIDGE;
+}
+
 extern struct net_device *br_get_br_dev_for_port_rcu(struct net_device *port_dev);
 
 extern struct pernet_operations __net_initdata loopback_net_ops;

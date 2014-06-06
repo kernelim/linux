@@ -317,6 +317,7 @@ enum {
 	GIF_ALLOC_FAILED        = 2,
 	GIF_SW_PAGED		= 3,
 	GIF_ORDERED		= 4,
+	GIF_FREE_VFS_INODE      = 5,
 };
 
 struct gfs2_inode {

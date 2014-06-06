@@ -132,8 +132,6 @@ void final_putname(struct filename *name)
 static int do_getname(const char __user *filename, char *page,
 			unsigned long len)
 {
-	int retval;
-
 	if (!segment_eq(get_fs(), KERNEL_DS)) {
 		if ((unsigned long) filename >= TASK_SIZE)
 			return -EFAULT;
@@ -141,14 +139,7 @@ static int do_getname(const char __user *filename, char *page,
 			len = TASK_SIZE - (unsigned long) filename;
 	}
 
-	retval = strncpy_from_user(page, filename, len);
-	if (retval > 0) {
-		if (retval < len)
-			return 0;
-		return -ENAMETOOLONG;
-	} else if (!retval)
-		retval = -ENOENT;
-	return retval;
+	return strncpy_from_user(page, filename, len);
 }
 
 #define EMBEDDED_NAME_MAX      (PATH_MAX - sizeof(struct filename))
@@ -201,6 +192,14 @@ recopy:
 		max = PATH_MAX;
 		goto recopy;
 	}
+
+	err = ERR_PTR(-ENOENT);
+	if (unlikely(!len))
+		goto error;
+
+	err = ERR_PTR(-ENAMETOOLONG);
+	if (unlikely(len >= PATH_MAX))
+		goto error;
 
 	result->uptr = filename;
 	audit_getname(result);
@@ -644,6 +643,7 @@ static __always_inline int __do_follow_link(struct path *path, struct nameidata 
 
 	if (path->mnt == nd->path.mnt)
 		mntget(path->mnt);
+	nd->last_type = LAST_BIND;
 	cookie = dentry->d_inode->i_op->follow_link(dentry, nd);
 	error = PTR_ERR(cookie);
 	if (!IS_ERR(cookie)) {
@@ -1622,6 +1622,196 @@ user_path_parent(int dfd, const char __user *path, struct nameidata *nd,
 
 	return s;
 }
+
+/**
+ * mountpoint_last - look up last component for umount
+ * @nd:   pathwalk nameidata - currently pointing at parent directory of "last"
+ * @path: pointer to container for result
+ *
+ * This is a special lookup_last function just for umount. In this case, we
+ * need to resolve the path without doing any revalidation.
+ *
+ * The nameidata should be the result of doing a LOOKUP_PARENT pathwalk. Since
+ * mountpoints are always pinned in the dcache, their ancestors are too. Thus,
+ * in almost all cases, this lookup will be served out of the dcache. The only
+ * cases where it won't are if nd->last refers to a symlink or the path is
+ * bogus and it doesn't exist.
+ *
+ * Returns:
+ * -error: if there was an error during lookup. This includes -ENOENT if the
+ *         lookup found a negative dentry. The nd->path reference will also be
+ *         put in this case.
+ *
+ * 0:      if we successfully resolved nd->path and found it to not to be a
+ *         symlink that needs to be followed. "path" will also be populated.
+ *         The nd->path reference will also be put.
+ *
+ * 1:      if we successfully resolved nd->last and found it to be a symlink
+ *         that needs to be followed. "path" will be populated with the path
+ *         to the link, and nd->path will *not* be put.
+ */
+static int
+mountpoint_last(struct nameidata *nd, struct path *path)
+{
+	int error = 0;
+	struct dentry *dentry;
+	struct dentry *parent = nd->path.dentry;
+	struct inode *dir = parent->d_inode;
+
+	nd->flags &= ~LOOKUP_PARENT;
+
+	if (unlikely(nd->last_type != LAST_NORM)) {
+		follow_dotdot(nd);
+		dentry = dget(nd->path.dentry);
+		goto done;
+	}
+
+	mutex_lock(&dir->i_mutex);
+	dentry = d_lookup(parent, &nd->last);
+	if (!dentry) {
+		struct dentry *new;
+		/*
+		 * No cached dentry. Mounted dentries are pinned in the cache,
+		 * so that means that this dentry is probably a symlink or the
+		 * path doesn't actually point to a mounted dentry.
+		 */
+		if (IS_DEADDIR(dir)) {
+			error = -ENOENT;
+			goto out_unlock;
+		}
+
+		new = d_alloc(parent, &nd->last);
+		if (!new) {
+			error = -ENOMEM;
+			goto out_unlock;
+		}
+		dentry = dir->i_op->lookup(dir, new, nd);
+		if (IS_ERR(dentry)) {
+			error = PTR_ERR(dentry);
+			goto out_unlock;
+		}
+		if (dentry)
+			dput(new);
+		else
+			dentry = new;
+	}
+	mutex_unlock(&dir->i_mutex);
+
+done:
+	if (!dentry->d_inode) {
+		error = -ENOENT;
+		dput(dentry);
+		goto out;
+	}
+	path->dentry = dentry;
+	path->mnt = mntget(nd->path.mnt);
+	if (nd->flags & LOOKUP_FOLLOW) {
+		if (unlikely(dentry->d_inode->i_op->follow_link))
+			return 1;
+	}
+	follow_mount(path);
+	error = 0;
+	goto out;
+
+out_unlock:
+	mutex_unlock(&dir->i_mutex);
+out:
+	path_put(&nd->path);
+	return error;
+}
+
+/**
+ * path_mountpoint - look up a path to a mount point
+ * @dfd:	directory file descriptor to start walk from
+ * @name:	full pathname to walk
+ * @flags:	lookup flags
+ * @nd:		pathwalk nameidata
+ *
+ * Look up the given name, but don't attempt to revalidate the last component.
+ * Returns 0 and "path" will be valid on success; Retuns error otherwise.
+ */
+static int
+path_mountpoint(int dfd, struct filename *s, struct path *path, unsigned int flags)
+{
+	struct nameidata nd;
+	int err;
+
+	err = path_init(dfd, s->name, flags | LOOKUP_PARENT, &nd);
+	if (unlikely(err))
+		return err;
+
+	current->total_link_count = 0;
+	err = __link_path_walk(s, &nd);
+	if (err)
+		goto out;
+
+	err = mountpoint_last(&nd, path);
+	while (err > 0) {
+		struct path link = *path;
+		err = -ELOOP;
+		current->total_link_count++;
+		if (current->total_link_count >= 40)
+			break;
+		nd.flags |= LOOKUP_PARENT;
+		err = __do_follow_link(&link, &nd);
+		if (err)
+			break;
+		err = mountpoint_last(&nd, path);
+	}
+out:
+	if (nd.root.mnt)
+		path_put(&nd.root);
+
+	return err;
+}
+
+static int
+filename_mountpoint(int dfd, struct filename *s, struct path *path,
+			unsigned int flags)
+{
+	int error = path_mountpoint(dfd, s, path, flags);
+	if (unlikely(error == -ESTALE))
+		error = path_mountpoint(dfd, s, path, flags | LOOKUP_REVAL);
+	if (likely(!error))
+		audit_inode(s, path->dentry, 0);
+	return error;
+}
+
+/**
+ * user_path_mountpoint_at - lookup a path from userland in order to umount it
+ * @dfd:	directory file descriptor
+ * @name:	pathname from userland
+ * @flags:	lookup flags
+ * @path:	pointer to container to hold result
+ *
+ * A umount is a special case for path walking. We're not actually interested
+ * in the inode in this situation, and ESTALE errors can be a problem. We
+ * simply want track down the dentry and vfsmount attached at the mountpoint
+ * and avoid revalidating the last component.
+ *
+ * Returns 0 and populates "path" on success.
+ */
+int
+user_path_mountpoint_at(int dfd, const char __user *name, unsigned int flags,
+			struct path *path)
+{
+	struct filename *s = getname(name);
+	int error;
+	if (IS_ERR(s))
+		return PTR_ERR(s);
+	error = filename_mountpoint(dfd, s, path, flags);
+	putname(s);
+	return error;
+}
+
+int
+kern_path_mountpoint(int dfd, const char *name, struct path *path,
+			unsigned int flags)
+{
+	struct filename s = {.name = name};
+	return filename_mountpoint(dfd, &s, path, flags);
+}
+EXPORT_SYMBOL(kern_path_mountpoint);
 
 /*
  * It's inline, so penalty for filesystems that don't use sticky bit is

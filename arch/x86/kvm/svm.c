@@ -2363,7 +2363,10 @@ static int task_switch_interception(struct vcpu_svm *svm)
 	     (int_vec == OF_VECTOR || int_vec == BP_VECTOR)))
 		skip_emulated_instruction(&svm->vcpu);
 
-	return kvm_task_switch(&svm->vcpu, tss_selector, reason,
+	if (int_type != SVM_EXITINTINFO_TYPE_SOFT)
+		int_vec = -1;
+
+	return kvm_task_switch(&svm->vcpu, tss_selector, int_vec, reason,
 			       has_error_code, error_code);
 }
 
