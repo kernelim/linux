@@ -199,7 +199,7 @@ walk:
 
 			/* check if the kernel is fetching from user page */
 			if ((pte_access & PT_USER_MASK) &&
-			    (read_cr4() & X86_CR4_SMEP))
+			    kvm_read_cr4_bits(vcpu, X86_CR4_SMEP))
 				if (fetch_fault && !user_fault)
 					goto access_error;
 
@@ -250,7 +250,8 @@ err:
 		walker->error_code |= PFERR_WRITE_MASK;
 	if (user_fault)
 		walker->error_code |= PFERR_USER_MASK;
-	if (fetch_fault && (is_nx(vcpu) || (read_cr4() & X86_CR4_SMEP)))
+	if (fetch_fault && (is_nx(vcpu) ||
+			    kvm_read_cr4_bits(vcpu, X86_CR4_SMEP)))
 		walker->error_code |= PFERR_FETCH_MASK;
 	if (rsvd_fault)
 		walker->error_code |= PFERR_RSVD_MASK;

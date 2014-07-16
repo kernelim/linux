@@ -2822,47 +2822,30 @@ static int
 qla82xx_device_bootstrap(scsi_qla_host_t *vha)
 {
 	int rval = QLA_SUCCESS;
-	int i, timeout;
+	int i;
 	uint32_t old_count, count;
 	struct qla_hw_data *ha = vha->hw;
-	int need_reset = 0, peg_stuck = 1;
+	int need_reset = 0;
 
 	need_reset = qla82xx_need_reset(ha);
 
-	old_count = qla82xx_rd_32(ha, QLA82XX_PEG_ALIVE_COUNTER);
-
-	for (i = 0; i < 10; i++) {
-		timeout = msleep_interruptible(200);
-		if (timeout) {
-			qla82xx_wr_32(ha, QLA82XX_CRB_DEV_STATE,
-				QLA8XXX_DEV_FAILED);
-			return QLA_FUNCTION_FAILED;
-		}
-
-		count = qla82xx_rd_32(ha, QLA82XX_PEG_ALIVE_COUNTER);
-		if (count != old_count)
-			peg_stuck = 0;
-	}
-
 	if (need_reset) {
 		/* We are trying to perform a recovery here. */
-		if (peg_stuck)
+		if (ha->flags.isp82xx_fw_hung)
 			qla82xx_rom_lock_recovery(ha);
-		goto dev_initialize;
 	} else  {
-		/* Start of day for this ha context. */
-		if (peg_stuck) {
-			/* Either we are the first or recovery in progress. */
-			qla82xx_rom_lock_recovery(ha);
-			goto dev_initialize;
-		} else
-			/* Firmware already running. */
-			goto dev_ready;
+		old_count = qla82xx_rd_32(ha, QLA82XX_PEG_ALIVE_COUNTER);
+		for (i = 0; i < 10; i++) {
+			msleep(200);
+			count = qla82xx_rd_32(ha, QLA82XX_PEG_ALIVE_COUNTER);
+			if (count != old_count) {
+				rval = QLA_SUCCESS;
+				goto dev_ready;
+			}
+		}
+		qla82xx_rom_lock_recovery(ha);
 	}
 
-	return rval;
-
-dev_initialize:
 	/* set to DEV_INITIALIZING */
 	ql_log(ql_log_info, vha, 0x009e,
 	    "HW State: INITIALIZING.\n");
@@ -3621,8 +3604,10 @@ qla82xx_chip_reset_cleanup(scsi_qla_host_t *vha)
 			for (cnt = 1; cnt < req->num_outstanding_cmds; cnt++) {
 				sp = req->outstanding_cmds[cnt];
 				if (sp) {
-					if (!sp->u.scmd.ctx ||
-					    (sp->flags & SRB_FCP_CMND_DMA_VALID)) {
+					if ((!sp->u.scmd.ctx ||
+					    (sp->flags &
+						SRB_FCP_CMND_DMA_VALID)) &&
+						!ha->flags.isp82xx_fw_hung) {
 						spin_unlock_irqrestore(
 						    &ha->hardware_lock, flags);
 						if (ha->isp_ops->abort_command(sp)) {

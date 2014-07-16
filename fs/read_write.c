@@ -32,22 +32,26 @@ const struct file_operations generic_ro_fops = {
 EXPORT_SYMBOL(generic_ro_fops);
 
 /**
- * generic_file_llseek_unlocked - lockless generic llseek implementation
+ * generic_file_llseek_unlocked_size - lockless generic llseek implementation
  * @file:	file structure to seek on
  * @offset:	file offset to seek to
  * @origin:	type of seek
+ * @size:       max size of this file in file system
+ * @eof:        offset used for SEEK_END position
+ *      
+ * This is a variant of generic_file_llseek that allows passing in a custom
+ * maximum file size and a custom EOF position, for e.g. hashed directories
  *
  * Updates the file offset to the value specified by @offset and @origin.
  * Locking must be provided by the caller.
  */
-loff_t
-generic_file_llseek_unlocked(struct file *file, loff_t offset, int origin)
+static loff_t
+generic_file_llseek_unlocked_size(struct file *file, loff_t offset, int origin,
+		loff_t maxsize, loff_t eof)
 {
-	struct inode *inode = file->f_mapping->host;
-
 	switch (origin) {
 	case SEEK_END:
-		offset += inode->i_size;
+		offset += eof;
 		break;
 	case SEEK_CUR:
 		/*
@@ -62,7 +66,7 @@ generic_file_llseek_unlocked(struct file *file, loff_t offset, int origin)
 		break;
 	}
 
-	if (offset < 0 || offset > inode->i_sb->s_maxbytes)
+	if (offset < 0 || offset > maxsize)
 		return -EINVAL;
 
 	/* Special lock needed here? */
@@ -73,7 +77,50 @@ generic_file_llseek_unlocked(struct file *file, loff_t offset, int origin)
 
 	return offset;
 }
+
+/**
+ * generic_file_llseek_unlocked - lockless generic llseek implementation
+ * @file:	file structure to seek on
+ * @offset:	file offset to seek to
+ * @origin:	type of seek
+ *      
+ * Updates the file offset to the value specified by @offset and @origin.
+ * Locking must be provided by the caller.
+ */
+loff_t
+generic_file_llseek_unlocked(struct file *file, loff_t offset, int origin)
+{
+	struct inode *inode = file->f_mapping->host;
+
+	return generic_file_llseek_unlocked_size(file, offset, origin,
+						 inode->i_sb->s_maxbytes,
+						 i_size_read(inode));
+}
 EXPORT_SYMBOL(generic_file_llseek_unlocked);
+
+/**
+ * generic_file_llseek - generic llseek implementation for regular files
+ * @file:	file structure to seek on
+ * @offset:	file offset to seek to
+ * @origin:	type of seek
+ *
+ * This is a generic implemenation of ->llseek useable for all normal local
+ * filesystems.  It just updates the file offset to the value specified by
+ * @offset and @origin under i_mutex.
+ */
+loff_t generic_file_llseek_size(struct file *file, loff_t offset, int origin,
+		loff_t maxsize, loff_t eof)
+{
+	loff_t rval;
+
+	mutex_lock(&file->f_dentry->d_inode->i_mutex);
+	rval = generic_file_llseek_unlocked_size(file, offset, origin,
+						 maxsize, eof);
+	mutex_unlock(&file->f_dentry->d_inode->i_mutex);
+
+	return rval;
+}
+EXPORT_SYMBOL(generic_file_llseek_size);
 
 /**
  * generic_file_llseek - generic llseek implementation for regular files

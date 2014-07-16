@@ -193,9 +193,11 @@ int __init br_netlink_init(void)
 	__rtnl_register(PF_BRIDGE, RTM_SETLINK,
 			      br_rtm_setlink, NULL, NULL);
 
+	br_mdb_init();
 	return 0;
 }
 
 void __exit br_netlink_fini(void)
 {
+	br_mdb_uninit();
 }

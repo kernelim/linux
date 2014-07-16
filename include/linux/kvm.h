@@ -449,6 +449,7 @@ struct kvm_ioeventfd {
 #define KVM_CAP_VCPU_EVENTS 41
 #endif
 #define KVM_CAP_HYPERV 44
+#define KVM_CAP_PCI_SEGMENT 47
 #ifdef __KVM_HAVE_XSAVE
 #define KVM_CAP_XSAVE 55
 #endif
@@ -697,8 +698,9 @@ struct kvm_assigned_pci_dev {
 	__u32 busnr;
 	__u32 devfn;
 	__u32 flags;
+	__u32 segnr;
 	union {
-		__u32 reserved[12];
+		__u32 reserved[11];
 	};
 };
 

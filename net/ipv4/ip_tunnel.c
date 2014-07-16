@@ -225,9 +225,9 @@ static struct ip_tunnel *ip_tunnel_find(struct ip_tunnel_net *itn,
 		    key == t->parms.i_key &&
 		    link == t->parms.link &&
 		    type == t->dev->type)
-			break;
+			return t;
 	}
-	return t;
+	return NULL;
 }
 
 static struct net_device *__ip_tunnel_create(struct net *net,

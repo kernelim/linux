@@ -377,6 +377,8 @@ static void icmp_reply(struct icmp_bxm *icmp_param, struct sk_buff *skb)
 	daddr = ipc.addr = rt->rt_src;
 	ipc.opt = NULL;
 	ipc.shtx.flags = 0;
+	ipc.ttl = 0;
+	ipc.tos = -1;
 	if (icmp_param->replyopts.optlen) {
 		ipc.opt = &icmp_param->replyopts;
 		if (ipc.opt->srr)
@@ -535,6 +537,8 @@ void icmp_send(struct sk_buff *skb_in, int type, int code, __be32 info)
 	ipc.addr = iph->saddr;
 	ipc.opt = &icmp_param.replyopts;
 	ipc.shtx.flags = 0;
+	ipc.ttl = 0;
+	ipc.tos = -1;
 
 	{
 		struct flowi fl = {

@@ -51,7 +51,8 @@ netdev_tx_t br_dev_xmit(struct sk_buff *skb, struct net_device *dev)
 		}
 
 		mdst = br_mdb_get(br, skb);
-		if (mdst || BR_INPUT_SKB_CB(skb)->mrouters_only)
+		if ((mdst || BR_INPUT_SKB_CB(skb)->mrouters_only) &&
+		    br_multicast_querier_exists(br))
 			br_multicast_deliver(mdst, skb);
 		else
 			br_flood_deliver(br, skb);

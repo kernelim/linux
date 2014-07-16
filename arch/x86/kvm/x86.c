@@ -1968,6 +1968,7 @@ int kvm_dev_ioctl_check_extension(long ext)
 	case KVM_CAP_ADJUST_CLOCK:
 	case KVM_CAP_VCPU_EVENTS:
 	case KVM_CAP_HYPERV:
+	case KVM_CAP_PCI_SEGMENT:
 	case KVM_CAP_XSAVE:
 	case KVM_CAP_GET_TSC_KHZ:
 	case KVM_CAP_KVMCLOCK_CTRL:

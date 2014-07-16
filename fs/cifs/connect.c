@@ -1227,12 +1227,12 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 				goto cifs_parse_mount_err;
 			}
 			if ((temp_len = strnlen(value, 1024)) < 1024) {
-				if (value[0] != '/')
+				if (!(value[0] == '/' || value[0] == '\\'))
 					temp_len++;  /* missing leading slash */
 				vol->prepath = kmalloc(temp_len+1, GFP_KERNEL);
 				if (vol->prepath == NULL)
 					goto cifs_parse_mount_err;
-				if (value[0] != '/') {
+				if (!(value[0] == '/' || value[0] == '\\')) {
 					vol->prepath[0] = '/';
 					strcpy(vol->prepath+1, value);
 				} else

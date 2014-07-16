@@ -1875,7 +1875,7 @@ static int set_spte(struct kvm_vcpu *vcpu, u64 *sptep,
 			 * then we should prevent the kernel from executing it
 			 * if SMEP is enabled.
 			 */
-			if ((read_cr4() & X86_CR4_SMEP))
+			if (kvm_read_cr4_bits(vcpu, X86_CR4_SMEP))
 				spte |= PT64_NX_MASK;
 		}
 		/*
@@ -2510,7 +2510,7 @@ static int init_kvm_tdp_mmu(struct kvm_vcpu *vcpu)
 static int init_kvm_softmmu(struct kvm_vcpu *vcpu)
 {
 	int r;
-	bool smep = (read_cr4() & X86_CR4_SMEP);
+	bool smep = kvm_read_cr4_bits(vcpu, X86_CR4_SMEP);
 
 	ASSERT(vcpu);
 	ASSERT(!VALID_PAGE(vcpu->arch.mmu.root_hpa));

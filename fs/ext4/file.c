@@ -181,9 +181,9 @@ static int ext4_file_open(struct inode * inode, struct file * filp)
 }
 
 /*
- * ext4_llseek() copied from generic_file_llseek() to handle both
- * block-mapped and extent-mapped maxbytes values. This should
- * otherwise be identical with generic_file_llseek().
+ * ext4_llseek() handles both block-mapped and extent-mapped maxbytes values
+ * by calling generic_file_llseek_size() with the appropriate maxbytes
+ * value for each.
  */
 loff_t ext4_llseek(struct file *file, loff_t offset, int origin)
 {
@@ -194,32 +194,9 @@ loff_t ext4_llseek(struct file *file, loff_t offset, int origin)
 		maxbytes = EXT4_SB(inode->i_sb)->s_bitmap_maxbytes;
 	else
 		maxbytes = inode->i_sb->s_maxbytes;
-	mutex_lock(&inode->i_mutex);
-	switch (origin) {
-	case SEEK_END:
-		offset += inode->i_size;
-		break;
-	case SEEK_CUR:
-		if (offset == 0) {
-			mutex_unlock(&inode->i_mutex);
-			return file->f_pos;
-		}
-		offset += file->f_pos;
-		break;
-	}
 
-	if (offset < 0 || offset > maxbytes) {
-		mutex_unlock(&inode->i_mutex);
-		return -EINVAL;
-	}
-
-	if (offset != file->f_pos) {
-		file->f_pos = offset;
-		file->f_version = 0;
-	}
-	mutex_unlock(&inode->i_mutex);
-
-	return offset;
+	return generic_file_llseek_size(file, offset, origin,
+					maxbytes, i_size_read(inode));
 }
 
 const struct file_operations ext4_file_operations = {

@@ -1041,6 +1041,7 @@ error:
 }
 
 static int ip_setup_cork(struct sock *sk, struct inet_cork *cork,
+			 struct inet_cork_extended* cork_ext,
 			 struct ipcm_cookie *ipc, struct rtable **rtp)
 {
 	struct inet_sock *inet = inet_sk(sk);
@@ -1073,6 +1074,9 @@ static int ip_setup_cork(struct sock *sk, struct inet_cork *cork,
 			 rt->u.dst.dev->mtu : dst_mtu(rt->u.dst.path);
 	cork->dst = &rt->u.dst;
 	cork->length = 0;
+	cork_ext->ttl = ipc->ttl;
+	cork_ext->tos = ipc->tos;
+	cork_ext->priority = ipc->priority;
 
 	return 0;
 }
@@ -1102,7 +1106,8 @@ int ip_append_data(struct sock *sk,
 		return 0;
 
 	if (skb_queue_empty(&sk->sk_write_queue)) {
-		err = ip_setup_cork(sk, (struct inet_cork *)&inet->cork, ipc,
+		err = ip_setup_cork(sk, (struct inet_cork *)&inet->cork,
+				    &sk_extended(sk)->inet_cork_ext, ipc,
 				    rtp);
 		if (err)
 			return err;
@@ -1273,7 +1278,8 @@ static void ip_cork_release(struct inet_cork *cork)
  */
 struct sk_buff *__ip_make_skb(struct sock *sk,
 			      struct sk_buff_head *queue,
-			      struct inet_cork *cork)
+			      struct inet_cork *cork,
+			      struct inet_cork_extended *cork_ext)
 {
 	struct sk_buff *skb, *tmp_skb;
 	struct sk_buff **tail_skb;
@@ -1321,7 +1327,9 @@ struct sk_buff *__ip_make_skb(struct sock *sk,
 	if (cork->flags & IPCORK_OPT)
 		opt = cork->opt;
 
-	if (rt->rt_type == RTN_MULTICAST)
+	if (cork_ext->ttl != 0)
+		ttl = cork_ext->ttl;
+	else if (rt->rt_type == RTN_MULTICAST)
 		ttl = inet->mc_ttl;
 	else
 		ttl = ip_select_ttl(inet, &rt->u.dst);
@@ -1333,7 +1341,7 @@ struct sk_buff *__ip_make_skb(struct sock *sk,
 		iph->ihl += opt->optlen>>2;
 		ip_options_build(skb, opt, cork->addr, rt, 0);
 	}
-	iph->tos = inet->tos;
+	iph->tos = (cork_ext->tos != -1) ? cork_ext->tos : inet->tos;
 	iph->frag_off = df;
 	ip_select_ident(iph, &rt->u.dst, sk);
 	iph->ttl = ttl;
@@ -1341,7 +1349,7 @@ struct sk_buff *__ip_make_skb(struct sock *sk,
 	iph->saddr = rt->rt_src;
 	iph->daddr = rt->rt_dst;
 
-	skb->priority = sk->sk_priority;
+	skb->priority = (cork_ext->tos != -1) ? cork_ext->priority: sk->sk_priority;
 	skb->mark = sk->sk_mark;
 	/*
 	 * Steal rt from cork.dst to avoid a pair of atomic_inc/atomic_dec
@@ -1417,6 +1425,7 @@ struct sk_buff *ip_make_skb(struct sock *sk,
 			    unsigned int flags)
 {
 	struct inet_cork cork = {};
+	struct inet_cork_extended cork_ext = {};
 	struct sk_buff_head queue;
 	int err;
 
@@ -1425,7 +1434,7 @@ struct sk_buff *ip_make_skb(struct sock *sk,
 
 	__skb_queue_head_init(&queue);
 
-	err = ip_setup_cork(sk, &cork, ipc, rtp);
+	err = ip_setup_cork(sk, &cork, &cork_ext, ipc, rtp);
 	if (err)
 		return ERR_PTR(err);
 
@@ -1436,7 +1445,7 @@ struct sk_buff *ip_make_skb(struct sock *sk,
 		return ERR_PTR(err);
 	}
 
-	return __ip_make_skb(sk, &queue, &cork);
+	return __ip_make_skb(sk, &queue, &cork, &cork_ext);
 }
 
 /*
@@ -1477,6 +1486,8 @@ void ip_send_reply(struct sock *sk, struct sk_buff *skb, struct ip_reply_arg *ar
 	daddr = ipc.addr = rt->rt_src;
 	ipc.opt = NULL;
 	ipc.shtx.flags = 0;
+	ipc.ttl = 0;
+	ipc.tos = -1;
 
 	if (replyopts.opt.optlen) {
 		ipc.opt = &replyopts.opt;

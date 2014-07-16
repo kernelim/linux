@@ -310,6 +310,13 @@ struct sock {
 	void                    (*sk_destruct)(struct sock *sk);
 };
 
+struct inet_cork_extended {
+	__s16		tos;
+	__u8		ttl;
+	char		priority;
+	unsigned __rh_inet_cork_reserved[2];
+};
+
 /*
  * To prevent KABI-breakage, struct sock_extended is added here to extend
  * the original struct sock. Also two helpers are added:
@@ -363,6 +370,7 @@ struct sock_extended {
 	const struct cred	*sk_peer_cred;
 	u16			sk_gso_max_segs;
 	u32			sk_pacing_rate; /* bytes per second */
+	struct inet_cork_extended	inet_cork_ext;
 };
 
 #define __sk_tx_queue_mapping(sk) \
