@@ -1751,7 +1751,15 @@ void utrace_finish_vfork(struct task_struct *task)
 		spin_lock(&utrace->lock);
 		utrace->vfork_stop = 0;
 		spin_unlock(&utrace->lock);
-		utrace_stop(task, utrace, UTRACE_RESUME); /* XXX */
+		/*
+		 * See the upstream commit b9cd18de4db3.
+		 *
+		 * Unlike upstream rhel6 is almost safe, this is the only case
+		 * when the tracee can stop in syscall. We use UTRACE_REPORT to
+		 * trigger utrace_resume() before we return to user-mode, this
+		 * also forces IRET.
+		 */
+		utrace_stop(task, utrace, UTRACE_REPORT);
 	}
 }
 
