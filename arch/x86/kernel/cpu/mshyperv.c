@@ -24,6 +24,7 @@
 #include <asm/idle.h>
 #include <asm/irq_regs.h>
 #include <asm/kvm_para.h>
+#include <asm/timer.h>
 
 #include <xen/xen.h>
 
@@ -85,6 +86,10 @@ static void __init ms_hyperv_init_platform(void)
 
 	if (ms_hyperv.features & HV_X64_MSR_TIME_REF_COUNT_AVAILABLE)
 		clocksource_register_hz(&hyperv_cs, NSEC_PER_SEC/100);
+
+#ifdef CONFIG_X86_IO_APIC
+	no_timer_check = 1;
+#endif
 }
 
 const __refconst struct hypervisor_x86 x86_hyper_ms_hyperv = {

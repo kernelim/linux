@@ -200,6 +200,77 @@ static size_t strncpy_from_user_mvcos(size_t count, const char __user *src,
 	return done;
 }
 
+#define __futex_atomic_op(insn, ret, oldval, newval, uaddr, oparg)	\
+	asm volatile(							\
+		"   sacf  256\n"					\
+		"0: l     %1,0(%6)\n"					\
+		"1:"insn						\
+		"2: cs    %1,%2,0(%6)\n"				\
+		"3: jl    1b\n"						\
+		"   lhi   %0,0\n"					\
+		"4: sacf  768\n"					\
+		EX_TABLE(0b,4b) EX_TABLE(2b,4b) EX_TABLE(3b,4b)		\
+		: "=d" (ret), "=&d" (oldval), "=&d" (newval),		\
+		  "=m" (*uaddr)						\
+		: "0" (-EFAULT), "d" (oparg), "a" (uaddr),		\
+		  "m" (*uaddr) : "cc");
+
+static int futex_atomic_op_mvcos(int op, int __user *uaddr, int oparg, int *old)
+{
+	int oldval = 0, newval, ret;
+	unsigned long asce;
+
+	__ctl_store(asce, 1, 1);
+	__ctl_load(S390_lowcore.kernel_asce, 1, 1);
+	switch (op) {
+	case FUTEX_OP_SET:
+		__futex_atomic_op("lr %2,%5\n",
+				  ret, oldval, newval, uaddr, oparg);
+		break;
+	case FUTEX_OP_ADD:
+		__futex_atomic_op("lr %2,%1\nar %2,%5\n",
+				  ret, oldval, newval, uaddr, oparg);
+		break;
+	case FUTEX_OP_OR:
+		__futex_atomic_op("lr %2,%1\nor %2,%5\n",
+				  ret, oldval, newval, uaddr, oparg);
+		break;
+	case FUTEX_OP_ANDN:
+		__futex_atomic_op("lr %2,%1\nnr %2,%5\n",
+				  ret, oldval, newval, uaddr, oparg);
+		break;
+	case FUTEX_OP_XOR:
+		__futex_atomic_op("lr %2,%1\nxr %2,%5\n",
+				  ret, oldval, newval, uaddr, oparg);
+		break;
+	default:
+		ret = -ENOSYS;
+	}
+	*old = oldval;
+	__ctl_load(asce, 1, 1);
+	return ret;
+}
+
+static int futex_atomic_cmpxchg_mvcos(int __user *uaddr, int oldval, int newval)
+{
+	unsigned long asce;
+	int ret;
+
+	__ctl_store(asce, 1, 1);
+	__ctl_load(S390_lowcore.kernel_asce, 1, 1);
+	asm volatile(
+		"   sacf 256\n"
+		"0: cs   %1,%4,0(%5)\n"
+		"1: lr   %0,%1\n"
+		"2: sacf 768\n"
+		EX_TABLE(0b,2b) EX_TABLE(1b,2b)
+		: "=d" (ret), "+d" (oldval), "=m" (*uaddr)
+		: "0" (-EFAULT), "d" (newval), "a" (uaddr), "m" (*uaddr)
+		: "cc", "memory" );
+	__ctl_load(asce, 1, 1);
+	return ret;
+}
+
 struct uaccess_ops uaccess_mvcos = {
 	.copy_from_user = copy_from_user_mvcos_check,
 	.copy_from_user_small = copy_from_user_std,
@@ -222,6 +293,6 @@ struct uaccess_ops uaccess_mvcos_switch = {
 	.clear_user = clear_user_mvcos,
 	.strnlen_user = strnlen_user_mvcos,
 	.strncpy_from_user = strncpy_from_user_mvcos,
-	.futex_atomic_op = futex_atomic_op_pt,
-	.futex_atomic_cmpxchg = futex_atomic_cmpxchg_pt,
+	.futex_atomic_op = futex_atomic_op_mvcos,
+	.futex_atomic_cmpxchg = futex_atomic_cmpxchg_mvcos,
 };

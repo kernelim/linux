@@ -441,7 +441,7 @@ static void scsi_run_queue(struct request_queue *q)
 		 * blk_cleanup_queue() marks the queue with QUEUE_FLAG_DYING.
 		 */
 		slq = sdev->request_queue;
-		if (!blk_get_queue(slq))
+		if (blk_get_queue(slq))
 			continue;
 		spin_unlock_irqrestore(shost->host_lock, flags);
 

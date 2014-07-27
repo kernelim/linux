@@ -1650,6 +1650,18 @@ and is between 256 and 4096 characters. It is defined in the file
 			back to using the idmapper.
 			To turn off this behaviour, set the value to '0'.
 
+	nfs.recover_lost_locks =
+			[NFSv4] Attempt to recover locks that were lost due
+			to a lease timeout on the server. Please note that
+			doing this risks data corruption, since there are
+			no guarantees that the file will remain unchanged
+			after the locks are lost.
+			If you want to enable the kernel legacy behaviour of
+			attempting to recover these locks, then set this
+			parameter to '1'.
+			The default parameter value of '0' causes the kernel
+			not to attempt recovery of lost locks.
+
 	nfsd.nfs4_disable_idmapping=
 			[NFSv4] Defaults to 0.  When set to '1', the NFSv4
 			server will return only numeric uids and gids to

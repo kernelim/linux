@@ -2323,9 +2323,9 @@ static void __net_exit ovs_exit_net(struct net *net)
 	list_for_each_entry_safe(dp, dp_next, &ovs_net->dps, list_node)
 		__dp_destroy(dp);
 	ovs_unlock();
-	kfree(ovs_net);
 
 	cancel_work_sync(&ovs_net->dp_notify_work);
+	kfree(ovs_net);
 }
 
 static struct pernet_operations ovs_net_ops = {

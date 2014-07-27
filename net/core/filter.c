@@ -36,6 +36,7 @@
 #include <asm/uaccess.h>
 #include <asm/unaligned.h>
 #include <linux/filter.h>
+#include <linux/if_vlan.h>
 
 /* No hurry in this branch */
 static void *__load_pointer(struct sk_buff *skb, int k)
@@ -307,7 +308,35 @@ load_b:
 			A = skb->pkt_type;
 			continue;
 		case SKF_AD_IFINDEX:
+			if (!skb->dev)
+				return 0;
 			A = skb->dev->ifindex;
+			continue;
+		case SKF_AD_MARK:
+			A = skb->mark;
+			continue;
+		case SKF_AD_QUEUE:
+			A = skb->queue_mapping;
+			continue;
+		case SKF_AD_HATYPE:
+			if (!skb->dev)
+				return 0;
+			A = skb->dev->type;
+			continue;
+		case SKF_AD_RXHASH:
+			A = skb->rxhash;
+			continue;
+		case SKF_AD_CPU:
+			A = raw_smp_processor_id();
+			continue;
+		case SKF_AD_ALU_XOR_X:
+			A ^= X;
+			continue;
+		case SKF_AD_VLAN_TAG:
+			A = vlan_tx_tag_get(skb);
+			continue;
+		case SKF_AD_VLAN_TAG_PRESENT:
+			A = !!vlan_tx_tag_present(skb);
 			continue;
 		case SKF_AD_NLATTR: {
 			struct nlattr *nla;

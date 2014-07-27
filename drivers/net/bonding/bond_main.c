@@ -2943,7 +2943,9 @@ static void bond_arp_send_all(struct bonding *bond, struct slave *slave)
 		/*
 		 * This target is not on a VLAN
 		 */
-		if (rt->u.dst.dev == bond->dev) {
+		if (rt->u.dst.dev == bond->dev ||
+		    (br_get_br_dev_for_port_hook &&
+		     rt->u.dst.dev == br_get_br_dev_for_port_hook(bond->dev))) {
 			ip_rt_put(rt);
 			pr_debug("basa: rtdev == bond->dev: arp_send\n");
 			addr = bond_confirm_addr(bond->dev, targets[i], 0);

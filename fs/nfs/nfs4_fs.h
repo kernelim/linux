@@ -176,8 +176,9 @@ struct nfs4_lock_owner {
 struct nfs4_lock_state {
 	struct list_head	ls_locks;	/* Other lock stateids */
 	struct nfs4_state *	ls_state;	/* Pointer to open state */
-#define NFS_LOCK_INITIALIZED 1
-	int			ls_flags;
+#define NFS_LOCK_INITIALIZED 0
+#define NFS_LOCK_LOST        1
+	unsigned long		ls_flags;
 	struct nfs_seqid_counter	ls_seqid;
 	struct rpc_sequence	ls_sequence;
 	struct nfs_unique_id	ls_id;
@@ -190,6 +191,7 @@ struct nfs4_lock_state {
 enum {
 	LK_STATE_IN_USE,
 	NFS_DELEGATED_STATE,		/* Current stateid is delegation */
+	NFS_OPEN_STATE,			/* OPEN stateid is set */
 	NFS_O_RDONLY_STATE,		/* OPEN stateid has read-only state */
 	NFS_O_WRONLY_STATE,		/* OPEN stateid has write-only state */
 	NFS_O_RDWR_STATE,		/* OPEN stateid has read/write state */
@@ -400,6 +402,9 @@ extern void nfs_free_seqid(struct nfs_seqid *seqid);
 extern void nfs4_free_lock_state(struct nfs_server *server, struct nfs4_lock_state *lsp);
 
 extern const nfs4_stateid zero_stateid;
+
+/* nfs4super.c */
+extern bool recover_lost_locks;
 
 /* nfs4xdr.c */
 extern __be32 *nfs4_decode_dirent(struct xdr_stream *, struct nfs_entry *, struct nfs_server *, int);

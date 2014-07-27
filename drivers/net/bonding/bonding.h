@@ -24,6 +24,7 @@
 #include <linux/inetdevice.h>
 #include <linux/rtnetlink.h>
 #include <linux/netpoll.h>
+#include <linux/if_bridge.h>
 #include "bond_3ad.h"
 #include "bond_alb.h"
 
@@ -368,10 +369,14 @@ static inline __be32 bond_confirm_addr(struct net_device *dev, __be32 dst, __be3
 	__be32 addr = 0;
 
 	rcu_read_lock();
+redo:
 	in_dev = __in_dev_get_rcu(dev);
 
-	if (in_dev)
+	if (in_dev) {
 		addr = inet_confirm_addr(in_dev, dst, local, RT_SCOPE_HOST);
+		if (!addr && (dev = br_get_br_dev_for_port_rcu(dev)))
+			goto redo;
+	}
 
 	rcu_read_unlock();
 	return addr;

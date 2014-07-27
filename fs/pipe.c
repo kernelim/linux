@@ -459,7 +459,6 @@ pipe_write(struct kiocb *iocb, const struct iovec *_iov,
 
 	do_wakeup = 0;
 	ret = 0;
-	sb_start_write(inode->i_sb);
 	mutex_lock(&inode->i_mutex);
 	pipe = inode->i_pipe;
 
@@ -608,9 +607,10 @@ out:
 		wake_up_interruptible_sync(&pipe->wait);
 		kill_fasync(&pipe->fasync_readers, SIGIO, POLL_IN);
 	}
-	if (ret > 0)
+	if (ret > 0 && sb_start_write_trylock(inode->i_sb)) {
 		file_update_time(filp);
-	sb_end_write(inode->i_sb);
+		sb_end_write(inode->i_sb);
+	}
 	return ret;
 }
 

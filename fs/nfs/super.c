@@ -3271,4 +3271,11 @@ out:
 	return error;
 }
 
+bool recover_lost_locks = false;
+module_param(recover_lost_locks, bool, 0644);
+MODULE_PARM_DESC(recover_lost_locks,
+		 "If the server reports that a lock might be lost, "
+		 "try to recover it risking data corruption.");
+
+
 #endif /* CONFIG_NFS_V4 */

@@ -71,14 +71,6 @@ size_t copy_from_user_std(size_t size, const void __user *ptr, void *x)
 	return size;
 }
 
-static size_t copy_from_user_std_check(size_t size, const void __user *ptr,
-				       void *x)
-{
-	if (size <= 1024)
-		return copy_from_user_std(size, ptr, x);
-	return copy_from_user_pt(size, ptr, x);
-}
-
 size_t copy_to_user_std(size_t size, void __user *ptr, const void *x)
 {
 	unsigned long tmp1, tmp2;
@@ -109,14 +101,6 @@ size_t copy_to_user_std(size_t size, void __user *ptr, const void *x)
 		: "+a" (size), "+a" (ptr), "+a" (x), "+a" (tmp1), "=a" (tmp2)
 		: : "cc", "memory");
 	return size;
-}
-
-static size_t copy_to_user_std_check(size_t size, void __user *ptr,
-				     const void *x)
-{
-	if (size <= 1024)
-		return copy_to_user_std(size, ptr, x);
-	return copy_to_user_pt(size, ptr, x);
 }
 
 static size_t copy_in_user_std(size_t size, void __user *to,
@@ -304,9 +288,9 @@ int futex_atomic_cmpxchg_std(int __user *uaddr, int oldval, int newval)
 }
 
 struct uaccess_ops uaccess_std = {
-	.copy_from_user = copy_from_user_std_check,
+	.copy_from_user = copy_from_user_std,
 	.copy_from_user_small = copy_from_user_std,
-	.copy_to_user = copy_to_user_std_check,
+	.copy_to_user = copy_to_user_std,
 	.copy_to_user_small = copy_to_user_std,
 	.copy_in_user = copy_in_user_std,
 	.clear_user = clear_user_std,
