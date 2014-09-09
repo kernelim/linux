@@ -306,13 +306,16 @@ static int lockd_start_svc(struct svc_serv *serv)
 	svc_sock_update_bufs(serv);
 	serv->sv_maxconn = nlm_max_connections;
 
-	nlmsvc_task = kthread_run(lockd, nlmsvc_rqst, "%s", serv->sv_name);
+	nlmsvc_task = kthread_create(lockd, nlmsvc_rqst, "%s", serv->sv_name);
 	if (IS_ERR(nlmsvc_task)) {
 		error = PTR_ERR(nlmsvc_task);
 		printk(KERN_WARNING
 			"lockd_up: kthread_run failed, error=%d\n", error);
 		goto out_task;
 	}
+	nlmsvc_rqst->rq_task = nlmsvc_task;
+	wake_up_process(nlmsvc_task);
+
 	dprintk("lockd_up: service started\n");
 	return 0;
 
@@ -583,7 +586,6 @@ static int lockd_init_net(struct net *net)
 	struct lockd_net *ln = net_generic(net, lockd_net_id);
 
 	INIT_DELAYED_WORK(&ln->grace_period_end, grace_ender);
-	INIT_LIST_HEAD(&ln->grace_list);
 	spin_lock_init(&ln->nsm_clnt_lock);
 	return 0;
 }

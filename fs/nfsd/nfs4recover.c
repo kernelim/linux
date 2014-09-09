@@ -58,7 +58,7 @@ struct nfsd4_client_tracking_ops {
 	void (*create)(struct nfs4_client *);
 	void (*remove)(struct nfs4_client *);
 	int (*check)(struct nfs4_client *);
-	void (*grace_done)(struct nfsd_net *, time_t);
+	void (*grace_done)(struct nfsd_net *);
 };
 
 /* Globals */
@@ -188,7 +188,7 @@ nfsd4_create_clid_dir(struct nfs4_client *clp)
 
 	status = mnt_want_write_file(nn->rec_file);
 	if (status)
-		return;
+		goto out_creds;
 
 	dir = nn->rec_file->f_path.dentry;
 	/* lock the parent */
@@ -228,6 +228,7 @@ out_unlock:
 				user_recovery_dirname);
 	}
 	mnt_drop_write_file(nn->rec_file);
+out_creds:
 	nfs4_reset_creds(original_cred);
 }
 
@@ -392,7 +393,7 @@ purge_old(struct dentry *parent, struct dentry *child, struct nfsd_net *nn)
 }
 
 static void
-nfsd4_recdir_purge_old(struct nfsd_net *nn, time_t boot_time)
+nfsd4_recdir_purge_old(struct nfsd_net *nn)
 {
 	int status;
 
@@ -479,6 +480,16 @@ nfsd4_init_recdir(struct net *net)
 	return status;
 }
 
+static void
+nfsd4_shutdown_recdir(struct net *net)
+{
+	struct nfsd_net *nn = net_generic(net, nfsd_net_id);
+
+	if (!nn->rec_file)
+		return;
+	fput(nn->rec_file);
+	nn->rec_file = NULL;
+}
 
 static int
 nfs4_legacy_state_init(struct net *net)
@@ -512,10 +523,13 @@ nfsd4_load_reboot_recovery_data(struct net *net)
 	int status;
 
 	status = nfsd4_init_recdir(net);
-	if (!status)
-		status = nfsd4_recdir_load(net);
 	if (status)
-		printk(KERN_ERR "NFSD: Failure reading reboot recovery data\n");
+		return status;
+
+	status = nfsd4_recdir_load(net);
+	if (status)
+		nfsd4_shutdown_recdir(net);
+
 	return status;
 }
 
@@ -546,21 +560,12 @@ err:
 }
 
 static void
-nfsd4_shutdown_recdir(struct nfsd_net *nn)
-{
-	if (!nn->rec_file)
-		return;
-	fput(nn->rec_file);
-	nn->rec_file = NULL;
-}
-
-static void
 nfsd4_legacy_tracking_exit(struct net *net)
 {
 	struct nfsd_net *nn = net_generic(net, nfsd_net_id);
 
 	nfs4_release_reclaim(nn);
-	nfsd4_shutdown_recdir(nn);
+	nfsd4_shutdown_recdir(net);
 	nfs4_legacy_state_shutdown(net);
 }
 
@@ -1016,7 +1021,7 @@ nfsd4_cld_check(struct nfs4_client *clp)
 }
 
 static void
-nfsd4_cld_grace_done(struct nfsd_net *nn, time_t boot_time)
+nfsd4_cld_grace_done(struct nfsd_net *nn)
 {
 	int ret;
 	struct cld_upcall *cup;
@@ -1029,7 +1034,7 @@ nfsd4_cld_grace_done(struct nfsd_net *nn, time_t boot_time)
 	}
 
 	cup->cu_msg.cm_cmd = Cld_GraceDone;
-	cup->cu_msg.cm_u.cm_gracetime = (int64_t)boot_time;
+	cup->cu_msg.cm_u.cm_gracetime = (int64_t)nn->boot_time;
 	ret = cld_pipe_upcall(cn->cn_pipe, &cup->cu_msg);
 	if (!ret)
 		ret = cup->cu_msg.cm_status;
@@ -1245,13 +1250,12 @@ nfsd4_umh_cltrack_check(struct nfs4_client *clp)
 }
 
 static void
-nfsd4_umh_cltrack_grace_done(struct nfsd_net __attribute__((unused)) *nn,
-				time_t boot_time)
+nfsd4_umh_cltrack_grace_done(struct nfsd_net *nn)
 {
 	char *legacy;
 	char timestr[22]; /* FIXME: better way to determine max size? */
 
-	sprintf(timestr, "%ld", boot_time);
+	sprintf(timestr, "%ld", nn->boot_time);
 	legacy = nfsd4_cltrack_legacy_topdir();
 	nfsd4_umh_cltrack_upcall("gracedone", timestr, legacy);
 	kfree(legacy);
@@ -1356,10 +1360,10 @@ nfsd4_client_record_check(struct nfs4_client *clp)
 }
 
 void
-nfsd4_record_grace_done(struct nfsd_net *nn, time_t boot_time)
+nfsd4_record_grace_done(struct nfsd_net *nn)
 {
 	if (nn->client_tracking_ops)
-		nn->client_tracking_ops->grace_done(nn, boot_time);
+		nn->client_tracking_ops->grace_done(nn);
 }
 
 static int
