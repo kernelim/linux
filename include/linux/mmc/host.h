@@ -139,6 +139,13 @@ struct mmc_host_ops {
 	int	(*select_drive_strength)(unsigned int max_dtr, int host_drv, int card_drv);
 	void	(*hw_reset)(struct mmc_host *host);
 	void	(*card_event)(struct mmc_host *host);
+
+	/*
+	 * Optional callback to support controllers with HW issues for multiple
+	 * I/O. Returns the number of supported blocks for the request.
+	 */
+	int	(*multi_io_quirk)(struct mmc_card *card,
+				  unsigned int direction, int blk_size);
 };
 
 struct mmc_card;
@@ -364,6 +371,9 @@ struct mmc_host {
 	unsigned int		actual_clock;	/* Actual HC clock rate */
 
 	unsigned int		slotno;	/* used for sdio acpi binding */
+
+	int			dsr_req;	/* DSR value is valid */
+	u32			dsr;	/* optional driver stage (DSR) value */
 
 	unsigned long		private[0] ____cacheline_aligned;
 };
