@@ -419,6 +419,7 @@ static void xonar_st_init_common(struct oxygen *chip)
 
 	data->generic.output_enable_bit = GPIO_ST_OUTPUT_ENABLE;
 	data->dacs = chip->model.dac_channels_mixer / 2;
+	data->h6 = chip->model.dac_channels_mixer > 2;
 	data->hp_gain_offset = 2*-18;
 
 	pcm1796_init(chip);
@@ -795,11 +796,11 @@ static int st_output_switch_put(struct snd_kcontrol *ctl,
 static int st_hp_volume_offset_info(struct snd_kcontrol *ctl,
 				    struct snd_ctl_elem_info *info)
 {
-	static const char *const names[3] = {
-		"< 64 ohms", "64-300 ohms", "300-600 ohms"
+	static const char *const names[4] = {
+		"< 32 ohms", "32-64 ohms", "64-300 ohms", "300-600 ohms"
 	};
 
-	return snd_ctl_enum_info(info, 1, 3, names);
+	return snd_ctl_enum_info(info, 1, 4, names);
 }
 
 static int st_hp_volume_offset_get(struct snd_kcontrol *ctl,
@@ -809,12 +810,14 @@ static int st_hp_volume_offset_get(struct snd_kcontrol *ctl,
 	struct xonar_pcm179x *data = chip->model_data;
 
 	mutex_lock(&chip->mutex);
-	if (data->hp_gain_offset < 2*-6)
+	if (data->hp_gain_offset < 2*-12)
 		value->value.enumerated.item[0] = 0;
-	else if (data->hp_gain_offset < 0)
+	else if (data->hp_gain_offset < 2*-6)
 		value->value.enumerated.item[0] = 1;
-	else
+	else if (data->hp_gain_offset < 0)
 		value->value.enumerated.item[0] = 2;
+	else
+		value->value.enumerated.item[0] = 3;
 	mutex_unlock(&chip->mutex);
 	return 0;
 }
@@ -823,13 +826,13 @@ static int st_hp_volume_offset_get(struct snd_kcontrol *ctl,
 static int st_hp_volume_offset_put(struct snd_kcontrol *ctl,
 				   struct snd_ctl_elem_value *value)
 {
-	static const s8 offsets[] = { 2*-18, 2*-6, 0 };
+	static const s8 offsets[] = { 2*-18, 2*-12, 2*-6, 0 };
 	struct oxygen *chip = ctl->private_data;
 	struct xonar_pcm179x *data = chip->model_data;
 	s8 offset;
 	int changed;
 
-	if (value->value.enumerated.item[0] > 2)
+	if (value->value.enumerated.item[0] > 3)
 		return -EINVAL;
 	offset = offsets[value->value.enumerated.item[0]];
 	mutex_lock(&chip->mutex);
@@ -1140,8 +1143,18 @@ int get_xonar_pcm179x_model(struct oxygen *chip,
 		break;
 	case 0x85f4:
 		chip->model = model_xonar_st;
-		/* TODO: daughterboard support */
-		chip->model.shortname = "Xonar STX II";
+		oxygen_clear_bits16(chip, OXYGEN_GPIO_CONTROL, GPIO_DB_MASK);
+		switch (oxygen_read16(chip, OXYGEN_GPIO_DATA) & GPIO_DB_MASK) {
+		default:
+			chip->model.shortname = "Xonar STX II";
+			break;
+		case GPIO_DB_H6:
+			chip->model.shortname = "Xonar STX II+H6";
+			chip->model.dac_channels_pcm = 8;
+			chip->model.dac_channels_mixer = 8;
+			chip->model.dac_mclks = OXYGEN_MCLKS(256, 128, 128);
+			break;
+		}
 		chip->model.init = xonar_stx_init;
 		chip->model.resume = xonar_stx_resume;
 		chip->model.set_dac_params = set_pcm1796_params;
