@@ -662,7 +662,7 @@ static void _rtl_pci_tx_isr(struct ieee80211_hw *hw, int prio)
 			RT_TRACE(COMP_ERR, DBG_LOUD,
 					("more desc left, wake"
 					 "skb_queue@%d,ring->idx = %d,"
-					 "skb_queue_len = 0x%d\n",
+					 "skb_queue_len = 0x%x\n",
 					 prio, ring->idx,
 					 skb_queue_len(&ring->queue)));
 
@@ -897,10 +897,10 @@ static void _rtl_pci_rx_interrupt(struct ieee80211_hw *hw)
 
 			/* static bcn for roaming */
 			rtl_beacon_statistic(hw, skb);
-			rtl_p2p_info(hw, (void*)skb->data, skb->len);
+			rtl_p2p_info(hw, (void *)skb->data, skb->len);
 			/* for sw lps */
-			rtl_swlps_beacon(hw, (void*)skb->data, skb->len);
-			rtl_recognize_peer(hw, (void*)skb->data, skb->len);
+			rtl_swlps_beacon(hw, (void *)skb->data, skb->len);
+			rtl_recognize_peer(hw, (void *)skb->data, skb->len);
 			if ((rtlpriv->mac80211.opmode == NL80211_IFTYPE_AP) &&
 			    (rtlpriv->rtlhal.current_bandtype == BAND_ON_2_4G)&&
 			    (ieee80211_is_beacon(fc) ||
@@ -1650,7 +1650,7 @@ static int rtl_pci_tx(struct ieee80211_hw *hw,
 		if ((own == 1) && (hw_queue != BEACON_QUEUE)) {
 			RT_TRACE(COMP_ERR, DBG_WARNING,
 				 ("No more TX desc@%d, ring->idx = %d,"
-				  "idx = %d, skb_queue_len = 0x%d\n",
+				  "idx = %d, skb_queue_len = 0x%x\n",
 				  hw_queue, ring->idx, idx,
 				  skb_queue_len(&ring->queue)));
 
@@ -1695,7 +1695,7 @@ static int rtl_pci_tx(struct ieee80211_hw *hw,
 		RT_TRACE(COMP_ERR, DBG_LOUD,
 			 ("less desc left, stop skb_queue@%d, "
 			  "ring->idx = %d,"
-			  "idx = %d, skb_queue_len = 0x%d\n",
+			  "idx = %d, skb_queue_len = 0x%x\n",
 			  hw_queue, ring->idx, idx,
 			  skb_queue_len(&ring->queue)));
 

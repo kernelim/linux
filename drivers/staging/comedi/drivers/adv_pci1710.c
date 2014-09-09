@@ -907,7 +907,7 @@ static irqreturn_t interrupt_service_pci1710(int irq, void *d)
 		return IRQ_HANDLED;
 	}
 
-	if (cmd->flags & TRIG_WAKE_EOS)
+	if (cmd->flags & CMDF_WAKE_EOS)
 		pci1710_handle_every_sample(dev, s);
 	else
 		pci1710_handle_fifo(dev, s);
@@ -932,7 +932,7 @@ static int pci171x_ai_cmd(struct comedi_device *dev, struct comedi_subdevice *s)
 	s->async->cur_chan = 0;
 
 	devpriv->CntrlReg &= Control_CNT0;
-	if ((cmd->flags & TRIG_WAKE_EOS) == 0)
+	if ((cmd->flags & CMDF_WAKE_EOS) == 0)
 		devpriv->CntrlReg |= Control_ONEFH;
 
 	devpriv->divisor1 = devpriv->next_divisor1;
@@ -1250,9 +1250,7 @@ static void pci1710_detach(struct comedi_device *dev)
 {
 	if (dev->iobase)
 		pci1710_reset(dev);
-	if (dev->irq)
-		free_irq(dev->irq, dev);
-	comedi_pci_disable(dev);
+	comedi_pci_detach(dev);
 }
 
 static struct comedi_driver adv_pci1710_driver = {

@@ -2108,7 +2108,7 @@ static int ni_ai_insn_read(struct comedi_device *dev,
 	unsigned int mask = (s->maxdata + 1) >> 1;
 	int i, n;
 	unsigned signbits;
-	unsigned short d;
+	unsigned int d;
 	unsigned long dl;
 
 	ni_load_channelgain_list(dev, s, 1, &insn->chanspec);
@@ -2206,15 +2206,15 @@ static int ni_ns_to_timer(const struct comedi_device *dev, unsigned nanosec,
 	struct ni_private *devpriv = dev->private;
 	int divider;
 
-	switch (flags & TRIG_ROUND_MASK) {
-	case TRIG_ROUND_NEAREST:
+	switch (flags & CMDF_ROUND_MASK) {
+	case CMDF_ROUND_NEAREST:
 	default:
 		divider = (nanosec + devpriv->clock_ns / 2) / devpriv->clock_ns;
 		break;
-	case TRIG_ROUND_DOWN:
+	case CMDF_ROUND_DOWN:
 		divider = (nanosec) / devpriv->clock_ns;
 		break;
-	case TRIG_ROUND_UP:
+	case CMDF_ROUND_UP:
 		divider = (nanosec + devpriv->clock_ns - 1) / devpriv->clock_ns;
 		break;
 	}
@@ -2541,7 +2541,7 @@ static int ni_ai_cmd(struct comedi_device *dev, struct comedi_subdevice *s)
 
 		/* load SI */
 		timer = ni_ns_to_timer(dev, cmd->scan_begin_arg,
-				       TRIG_ROUND_NEAREST);
+				       CMDF_ROUND_NEAREST);
 		ni_stc_writel(dev, timer, AI_SI_Load_A_Registers);
 		ni_stc_writew(dev, AI_SI_Load, AI_Command_1_Register);
 		break;
@@ -2569,7 +2569,7 @@ static int ni_ai_cmd(struct comedi_device *dev, struct comedi_subdevice *s)
 			timer = 1;
 		else
 			timer = ni_ns_to_timer(dev, cmd->convert_arg,
-					       TRIG_ROUND_NEAREST);
+					       CMDF_ROUND_NEAREST);
 		/* 0,0 does not work */
 		ni_stc_writew(dev, 1, AI_SI2_Load_A_Register);
 		ni_stc_writew(dev, timer, AI_SI2_Load_B_Register);
@@ -2610,7 +2610,7 @@ static int ni_ai_cmd(struct comedi_device *dev, struct comedi_subdevice *s)
 		interrupt_a_enable |= AI_FIFO_Interrupt_Enable;
 #endif
 
-		if (cmd->flags & TRIG_WAKE_EOS
+		if (cmd->flags & CMDF_WAKE_EOS
 		    || (devpriv->ai_cmd2 & AI_End_On_End_Of_Scan)) {
 			/* wake on end-of-scan */
 			devpriv->aimode = AIMODE_SCAN;
@@ -2731,9 +2731,6 @@ static int ni_ai_insn_config(struct comedi_device *dev,
 			unsigned int calib_source;
 
 			calib_source = data[1] & 0xf;
-
-			if (calib_source > 0xF)
-				return -EINVAL;
 
 			devpriv->ai_calib_source = calib_source;
 			ni_writew(dev, calib_source, Calibration_Channel_6143);
@@ -2921,21 +2918,6 @@ static int ni_ao_config_chanlist(struct comedi_device *dev,
 		return ni_old_ao_config_chanlist(dev, s, chanspec, n_chans);
 }
 
-static int ni_ao_insn_read(struct comedi_device *dev,
-			   struct comedi_subdevice *s,
-			   struct comedi_insn *insn,
-			   unsigned int *data)
-{
-	struct ni_private *devpriv = dev->private;
-	unsigned int chan = CR_CHAN(insn->chanspec);
-	int i;
-
-	for (i = 0; i < insn->n; i++)
-		data[i] = devpriv->ao[chan];
-
-	return insn->n;
-}
-
 static int ni_ao_insn_write(struct comedi_device *dev,
 			    struct comedi_subdevice *s,
 			    struct comedi_insn *insn,
@@ -2962,7 +2944,7 @@ static int ni_ao_insn_write(struct comedi_device *dev,
 	for (i = 0; i < insn->n; i++) {
 		unsigned int val = data[i];
 
-		devpriv->ao[chan] = val;
+		s->readback[chan] = val;
 
 		if (devpriv->is_6xxx) {
 			/*
@@ -3208,7 +3190,7 @@ static int ni_ao_cmd(struct comedi_device *dev, struct comedi_subdevice *s)
 		devpriv->ao_cmd2 &= ~AO_BC_Gate_Enable;
 		trigvar =
 		    ni_ns_to_timer(dev, cmd->scan_begin_arg,
-				   TRIG_ROUND_NEAREST);
+				   CMDF_ROUND_NEAREST);
 		ni_stc_writel(dev, 1, AO_UI_Load_A_Register);
 		ni_stc_writew(dev, AO_UI_Load, AO_Command_1_Register);
 		ni_stc_writel(dev, trigvar, AO_UI_Load_A_Register);
@@ -3552,12 +3534,10 @@ static int ni_cdio_cmdtest(struct comedi_device *dev,
 	if (err)
 		return 3;
 
-	/* step 4: fix up any arguments */
-
-	if (err)
-		return 4;
+	/* Step 4: fix up any arguments */
 
 	/* Step 5: check channel list if it exists */
+
 	if (cmd->chanlist && cmd->chanlist_len > 0)
 		err |= ni_cdio_check_chanlist(dev, s, cmd);
 
@@ -4176,16 +4156,15 @@ static int ni_freq_out_insn_config(struct comedi_device *dev,
 	return insn->n;
 }
 
-static int ni_8255_callback(int dir, int port, int data, unsigned long arg)
+static int ni_8255_callback(struct comedi_device *dev,
+			    int dir, int port, int data, unsigned long iobase)
 {
-	struct comedi_device *dev = (struct comedi_device *)arg;
-
 	if (dir) {
-		ni_writeb(dev, data, Port_A + 2 * port);
+		ni_writeb(dev, data, iobase + 2 * port);
 		return 0;
 	}
 
-	return ni_readb(dev, Port_A + 2 * port);
+	return ni_readb(dev, iobase + 2 * port);
 }
 
 static int ni_get_pwm_config(struct comedi_device *dev, unsigned int *data)
@@ -4208,15 +4187,15 @@ static int ni_m_series_pwm_config(struct comedi_device *dev,
 	switch (data[0]) {
 	case INSN_CONFIG_PWM_OUTPUT:
 		switch (data[1]) {
-		case TRIG_ROUND_NEAREST:
+		case CMDF_ROUND_NEAREST:
 			up_count =
 			    (data[2] +
 			     devpriv->clock_ns / 2) / devpriv->clock_ns;
 			break;
-		case TRIG_ROUND_DOWN:
+		case CMDF_ROUND_DOWN:
 			up_count = data[2] / devpriv->clock_ns;
 			break;
-		case TRIG_ROUND_UP:
+		case CMDF_ROUND_UP:
 			up_count =
 			    (data[2] + devpriv->clock_ns -
 			     1) / devpriv->clock_ns;
@@ -4225,15 +4204,15 @@ static int ni_m_series_pwm_config(struct comedi_device *dev,
 			return -EINVAL;
 		}
 		switch (data[3]) {
-		case TRIG_ROUND_NEAREST:
+		case CMDF_ROUND_NEAREST:
 			down_count =
 			    (data[4] +
 			     devpriv->clock_ns / 2) / devpriv->clock_ns;
 			break;
-		case TRIG_ROUND_DOWN:
+		case CMDF_ROUND_DOWN:
 			down_count = data[4] / devpriv->clock_ns;
 			break;
-		case TRIG_ROUND_UP:
+		case CMDF_ROUND_UP:
 			down_count =
 			    (data[4] + devpriv->clock_ns -
 			     1) / devpriv->clock_ns;
@@ -4272,15 +4251,15 @@ static int ni_6143_pwm_config(struct comedi_device *dev,
 	switch (data[0]) {
 	case INSN_CONFIG_PWM_OUTPUT:
 		switch (data[1]) {
-		case TRIG_ROUND_NEAREST:
+		case CMDF_ROUND_NEAREST:
 			up_count =
 			    (data[2] +
 			     devpriv->clock_ns / 2) / devpriv->clock_ns;
 			break;
-		case TRIG_ROUND_DOWN:
+		case CMDF_ROUND_DOWN:
 			up_count = data[2] / devpriv->clock_ns;
 			break;
-		case TRIG_ROUND_UP:
+		case CMDF_ROUND_UP:
 			up_count =
 			    (data[2] + devpriv->clock_ns -
 			     1) / devpriv->clock_ns;
@@ -4289,15 +4268,15 @@ static int ni_6143_pwm_config(struct comedi_device *dev,
 			return -EINVAL;
 		}
 		switch (data[3]) {
-		case TRIG_ROUND_NEAREST:
+		case CMDF_ROUND_NEAREST:
 			down_count =
 			    (data[4] +
 			     devpriv->clock_ns / 2) / devpriv->clock_ns;
 			break;
-		case TRIG_ROUND_DOWN:
+		case CMDF_ROUND_DOWN:
 			down_count = data[4] / devpriv->clock_ns;
 			break;
-		case TRIG_ROUND_UP:
+		case CMDF_ROUND_UP:
 			down_count =
 			    (data[4] + devpriv->clock_ns -
 			     1) / devpriv->clock_ns;
@@ -5491,9 +5470,13 @@ static int ni_E_init(struct comedi_device *dev,
 		s->n_chan	= board->n_aochan;
 		s->maxdata	= board->ao_maxdata;
 		s->range_table	= board->ao_range_table;
-		s->insn_read	= ni_ao_insn_read;
-		s->insn_write	= ni_ao_insn_write;
 		s->insn_config	= ni_ao_insn_config;
+		s->insn_write	= ni_ao_insn_write;
+		s->insn_read	= comedi_readback_insn_read;
+
+		ret = comedi_alloc_subdev_readback(s);
+		if (ret)
+			return ret;
 
 		/*
 		 * Along with the IRQ we need either a FIFO or DMA for
@@ -5560,8 +5543,7 @@ static int ni_E_init(struct comedi_device *dev,
 	/* 8255 device */
 	s = &dev->subdevices[NI_8255_DIO_SUBDEV];
 	if (board->has_8255) {
-		ret = subdev_8255_init(dev, s, ni_8255_callback,
-				       (unsigned long)dev);
+		ret = subdev_8255_init(dev, s, ni_8255_callback, Port_A);
 		if (ret)
 			return ret;
 	} else {

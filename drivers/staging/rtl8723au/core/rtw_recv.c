@@ -282,7 +282,7 @@ int recvframe_chkmic(struct rtw_adapter *adapter,
 	u32	datalen;
 	u8	miccode[8];
 	u8	bmic_err = false, brpt_micerror = true;
-	u8	*pframe, *payload,*pframemic;
+	u8	*pframe, *payload, *pframemic;
 	u8	*mickey;
 	/* u8	*iv, rxdata_key_idx = 0; */
 	struct	sta_info *stainfo;
@@ -1230,7 +1230,7 @@ static int validate_recv_ctrl_frame(struct rtw_adapter *padapter,
 	return _FAIL;
 }
 
-struct recv_frame* recvframe_chk_defrag23a(struct rtw_adapter *padapter,
+struct recv_frame *recvframe_chk_defrag23a(struct rtw_adapter *padapter,
 					struct recv_frame *precv_frame);
 static int validate_recv_mgnt_frame(struct rtw_adapter *padapter,
 				    struct recv_frame *precv_frame)
@@ -1705,7 +1705,7 @@ struct recv_frame *recvframe_defrag(struct rtw_adapter *adapter,
 }
 
 /* check if need to defrag, if needed queue the frame to defrag_q */
-struct recv_frame* recvframe_chk_defrag23a(struct rtw_adapter *padapter,
+struct recv_frame *recvframe_chk_defrag23a(struct rtw_adapter *padapter,
 					struct recv_frame *precv_frame)
 {
 	u8	ismfrag;

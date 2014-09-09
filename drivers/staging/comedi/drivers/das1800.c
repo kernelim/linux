@@ -731,15 +731,15 @@ static unsigned int burst_convert_arg(unsigned int convert_arg, int flags)
 		convert_arg = 64000;
 
 	/*  the conversion time must be an integral number of microseconds */
-	switch (flags & TRIG_ROUND_MASK) {
-	case TRIG_ROUND_NEAREST:
+	switch (flags & CMDF_ROUND_MASK) {
+	case CMDF_ROUND_NEAREST:
 	default:
 		micro_sec = (convert_arg + 500) / 1000;
 		break;
-	case TRIG_ROUND_DOWN:
+	case CMDF_ROUND_DOWN:
 		micro_sec = convert_arg / 1000;
 		break;
-	case TRIG_ROUND_UP:
+	case CMDF_ROUND_UP:
 		micro_sec = (convert_arg - 1) / 1000 + 1;
 		break;
 	}
@@ -1088,14 +1088,14 @@ static int das1800_ai_do_cmd(struct comedi_device *dev,
 	struct comedi_async *async = s->async;
 	const struct comedi_cmd *cmd = &async->cmd;
 
-	/* disable dma on TRIG_WAKE_EOS, or TRIG_RT
+	/* disable dma on CMDF_WAKE_EOS, or CMDF_PRIORITY
 	 * (because dma in handler is unsafe at hard real-time priority) */
-	if (cmd->flags & (TRIG_WAKE_EOS | TRIG_RT))
+	if (cmd->flags & (CMDF_WAKE_EOS | CMDF_PRIORITY))
 		devpriv->irq_dma_bits &= ~DMA_ENABLED;
 	else
 		devpriv->irq_dma_bits |= devpriv->dma_bits;
-	/*  interrupt on end of conversion for TRIG_WAKE_EOS */
-	if (cmd->flags & TRIG_WAKE_EOS) {
+	/*  interrupt on end of conversion for CMDF_WAKE_EOS */
+	if (cmd->flags & CMDF_WAKE_EOS) {
 		/*  interrupt fifo not empty */
 		devpriv->irq_dma_bits &= ~FIMD;
 	} else {
