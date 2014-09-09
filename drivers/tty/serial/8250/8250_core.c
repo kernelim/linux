@@ -1463,6 +1463,7 @@ void serial8250_tx_chars(struct uart_8250_port *up)
 }
 EXPORT_SYMBOL_GPL(serial8250_tx_chars);
 
+/* Caller holds uart port lock */
 unsigned int serial8250_modem_status(struct uart_8250_port *up)
 {
 	struct uart_port *port = &up->port;
@@ -1929,7 +1930,7 @@ static void serial8250_put_poll_char(struct uart_port *port,
 
 #endif /* CONFIG_CONSOLE_POLL */
 
-static int serial8250_startup(struct uart_port *port)
+int serial8250_do_startup(struct uart_port *port)
 {
 	struct uart_8250_port *up = up_to_u8250p(port);
 	unsigned long flags;
@@ -2180,8 +2181,16 @@ dont_test_tx_en:
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(serial8250_do_startup);
 
-static void serial8250_shutdown(struct uart_port *port)
+static int serial8250_startup(struct uart_port *port)
+{
+	if (port->startup)
+		return port->startup(port);
+	return serial8250_do_startup(port);
+}
+
+void serial8250_do_shutdown(struct uart_port *port)
 {
 	struct uart_8250_port *up = up_to_u8250p(port);
 	unsigned long flags;
@@ -2230,6 +2239,15 @@ static void serial8250_shutdown(struct uart_port *port)
 	up->timer.function = serial8250_timeout;
 	if (port->irq)
 		serial_unlink_irq_chain(up);
+}
+EXPORT_SYMBOL_GPL(serial8250_do_shutdown);
+
+static void serial8250_shutdown(struct uart_port *port)
+{
+	if (port->shutdown)
+		port->shutdown(port);
+	else
+		serial8250_do_shutdown(port);
 }
 
 static unsigned int serial8250_get_divisor(struct uart_port *port, unsigned int baud)
@@ -2319,11 +2337,9 @@ serial8250_do_set_termios(struct uart_port *port, struct ktermios *termios,
 	 * the trigger, or the MCR RTS bit is cleared.  In the case where
 	 * the remote UART is not using CTS auto flow control, we must
 	 * have sufficient FIFO entries for the latency of the remote
-	 * UART to respond.  IOW, at least 32 bytes of FIFO. Also enable
-	 * AFE if hw flow control is supported
+	 * UART to respond.  IOW, at least 32 bytes of FIFO.
 	 */
-	if ((up->capabilities & UART_CAP_AFE && (port->fifosize >= 32)) ||
-	    (port->flags & UPF_HARD_FLOW)) {
+	if (up->capabilities & UART_CAP_AFE && port->fifosize >= 32) {
 		up->mcr &= ~UART_MCR_AFE;
 		if (termios->c_cflag & CRTSCTS)
 			up->mcr |= UART_MCR_AFE;
@@ -2843,6 +2859,42 @@ serial8250_verify_port(struct uart_port *port, struct serial_struct *ser)
 	return 0;
 }
 
+static int serial8250_ioctl(struct uart_port *port, unsigned int cmd,
+			   unsigned long arg)
+{
+	struct uart_8250_port *up =
+		container_of(port, struct uart_8250_port, port);
+	int ret;
+	struct serial_rs485 rs485_config;
+
+	if (!up->rs485_config)
+		return -ENOIOCTLCMD;
+
+	switch (cmd) {
+	case TIOCSRS485:
+		if (copy_from_user(&rs485_config, (void __user *)arg,
+				   sizeof(rs485_config)))
+			return -EFAULT;
+
+		ret = up->rs485_config(up, &rs485_config);
+		if (ret)
+			return ret;
+
+		memcpy(&up->rs485, &rs485_config, sizeof(rs485_config));
+
+		return 0;
+	case TIOCGRS485:
+		if (copy_to_user((void __user *)arg, &up->rs485,
+				 sizeof(up->rs485)))
+			return -EFAULT;
+		return 0;
+	default:
+		break;
+	}
+
+	return -ENOIOCTLCMD;
+}
+
 static const char *
 serial8250_type(struct uart_port *port)
 {
@@ -2872,6 +2924,7 @@ static struct uart_ops serial8250_pops = {
 	.request_port	= serial8250_request_port,
 	.config_port	= serial8250_config_port,
 	.verify_port	= serial8250_verify_port,
+	.ioctl		= serial8250_ioctl,
 #ifdef CONFIG_CONSOLE_POLL
 	.poll_get_char = serial8250_get_poll_char,
 	.poll_put_char = serial8250_put_poll_char,
@@ -2879,6 +2932,24 @@ static struct uart_ops serial8250_pops = {
 };
 
 static struct uart_8250_port serial8250_ports[UART_NR];
+
+/**
+ * serial8250_get_port - retrieve struct uart_8250_port
+ * @line: serial line number
+ *
+ * This function retrieves struct uart_8250_port for the specific line.
+ * This struct *must* *not* be used to perform a 8250 or serial core operation
+ * which is not accessible otherwise. Its only purpose is to make the struct
+ * accessible to the runtime-pm callbacks for context suspend/restore.
+ * The lock assumption made here is none because runtime-pm suspend/resume
+ * callbacks should not be invoked if there is any operation performed on the
+ * port.
+ */
+struct uart_8250_port *serial8250_get_port(int line)
+{
+	return &serial8250_ports[line];
+}
+EXPORT_SYMBOL_GPL(serial8250_get_port);
 
 static void (*serial8250_isa_config)(int port, struct uart_port *up,
 	unsigned short *capabilities);
@@ -3388,6 +3459,8 @@ int serial8250_register_8250_port(struct uart_8250_port *up)
 		uart->port.fifosize	= up->port.fifosize;
 		uart->tx_loadsz		= up->tx_loadsz;
 		uart->capabilities	= up->capabilities;
+		uart->rs485_config	= up->rs485_config;
+		uart->rs485		= up->rs485;
 
 		/* Take tx_loadsz from fifosize if it wasn't set separately */
 		if (uart->port.fifosize && !uart->tx_loadsz)
@@ -3410,6 +3483,10 @@ int serial8250_register_8250_port(struct uart_8250_port *up)
 		/*  Possibly override set_termios call */
 		if (up->port.set_termios)
 			uart->port.set_termios = up->port.set_termios;
+		if (up->port.startup)
+			uart->port.startup = up->port.startup;
+		if (up->port.shutdown)
+			uart->port.shutdown = up->port.shutdown;
 		if (up->port.pm)
 			uart->port.pm = up->port.pm;
 		if (up->port.handle_break)
