@@ -442,8 +442,13 @@ xfs_quiesce_data(
 	/* make sure all delwri buffers are written out */
 	xfs_flush_buftarg(mp->m_ddev_targp, 1);
 
-	/* Ensure the log tail is up to date by loggin a dummy record. */
-	error2 = xfs_fs_log_dummy(mp);
+	/*
+	 * Ensure the log tail is up to date by logging a dummy record.
+	 * We should never get here with actual work to do on a frozen
+	 * fs, and doing so throws a warning, so skip it in that case.
+	 */
+	if (xfs_fs_writable(mp))
+		error2 = xfs_fs_log_dummy(mp);
 
 	/* flush data-only devices */
 	if (mp->m_rtdev_targp)

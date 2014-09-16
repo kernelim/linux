@@ -2345,7 +2345,7 @@ int usb_add_hcd(struct usb_hcd *hcd,
 	 * but drivers can override it in reset() if needed, along with
 	 * recording the overall controller's system wakeup capability.
 	 */
-	device_init_wakeup(&rhdev->dev, 1);
+	device_set_wakeup_capable(&rhdev->dev, 1);
 
 	/* HCD_FLAG_RH_RUNNING doesn't matter until the root hub is
 	 * registered.  But since the controller can die at any time,
@@ -2395,6 +2395,13 @@ int usb_add_hcd(struct usb_hcd *hcd,
 	}
 	if (hcd->uses_new_polling && HCD_POLL_RH(hcd))
 		usb_hcd_poll_rh_status(hcd);
+
+	/*
+	 * Host controllers don't generate their own wakeup requests;
+	 * they only forward requests from the root hub.  Therefore
+	 * controllers should always be enabled for remote wakeup.
+	 */
+	device_set_wakeup_enable(hcd->self.controller, true);
 	return retval;
 
 error_create_attr_group:

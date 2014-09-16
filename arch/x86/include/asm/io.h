@@ -202,4 +202,11 @@ extern void early_iounmap(void __iomem *addr, unsigned long size);
 
 #define IO_SPACE_LIMIT 0xffff
 
+#ifdef CONFIG_MTRR
+extern int __must_check arch_phys_wc_add(unsigned long base,
+					 unsigned long size);
+extern void arch_phys_wc_del(int handle);
+#define arch_phys_wc_add arch_phys_wc_add
+#endif
+
 #endif /* _ASM_X86_IO_H */

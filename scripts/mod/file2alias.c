@@ -211,10 +211,13 @@ static int do_hid_entry(const char *filename,
 			     struct hid_device_id *id, char *alias)
 {
 	id->bus = TO_NATIVE(id->bus);
+	id->group = TO_NATIVE(id->group);
 	id->vendor = TO_NATIVE(id->vendor);
 	id->product = TO_NATIVE(id->product);
 
-	sprintf(alias, "hid:b%04X", id->bus);
+	sprintf(alias, "hid:");
+	ADD(alias, "b", id->bus != HID_BUS_ANY, id->bus);
+	ADD(alias, "g", id->group != HID_GROUP_ANY, id->group);
 	ADD(alias, "v", id->vendor != HID_ANY_ID, id->vendor);
 	ADD(alias, "p", id->product != HID_ANY_ID, id->product);
 
@@ -744,8 +747,8 @@ static int do_dmi_entry(const char *filename, struct dmi_system_id *id,
 
 	for (i = 0; i < ARRAY_SIZE(dmi_fields); i++) {
 		for (j = 0; j < 4; j++) {
-			if (id->matches[j].slot &&
-			    id->matches[j].slot == dmi_fields[i].field) {
+			int s = dmi_strmatch_slot(&id->matches[j]);
+			if (s && s == dmi_fields[i].field) {
 				sprintf(alias + strlen(alias), ":%s*",
 					dmi_fields[i].prefix);
 				dmi_ascii_filter(alias + strlen(alias),

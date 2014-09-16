@@ -769,6 +769,26 @@ xfs_setup_devices(
 	return 0;
 }
 
+STATIC int
+xfs_init_mount_workqueues(
+	struct xfs_mount	*mp)
+{
+	snprintf(mp->m_cil_wq_name, sizeof(mp->m_cil_wq_name),
+		"xfs-cil/%s", mp->m_fsname);
+	mp->m_cil_workqueue = create_singlethread_workqueue(mp->m_cil_wq_name);
+	if (!mp->m_cil_workqueue)
+                return -ENOMEM;
+
+	return 0;
+}
+
+STATIC void
+xfs_destroy_mount_workqueues(
+	struct xfs_mount	*mp)
+{
+        destroy_workqueue(mp->m_cil_workqueue);
+}
+
 /*
  * XFS AIL push thread support
  */
@@ -1056,6 +1076,7 @@ xfs_fs_put_super(
 	xfs_unmountfs(mp);
 	xfs_freesb(mp);
 	xfs_icsb_destroy_counters(mp);
+	xfs_destroy_mount_workqueues(mp);
 	xfs_close_devices(mp);
 	xfs_free_fsname(mp);
 	kfree(mp);
@@ -1403,9 +1424,13 @@ xfs_fs_fill_super(
 	if (error)
 		goto out_free_fsname;
 
-	error = xfs_icsb_init_counters(mp);
+	error = xfs_init_mount_workqueues(mp);
 	if (error)
 		goto out_close_devices;
+
+	error = xfs_icsb_init_counters(mp);
+	if (error)
+		goto out_destroy_workqueues;
 
 	error = xfs_readsb(mp, flags);
 	if (error)
@@ -1474,6 +1499,8 @@ xfs_fs_fill_super(
 	xfs_freesb(mp);
  out_destroy_counters:
 	xfs_icsb_destroy_counters(mp);
+ out_destroy_workqueues:
+	xfs_destroy_mount_workqueues(mp);
  out_close_devices:
 	xfs_close_devices(mp);
  out_free_fsname:

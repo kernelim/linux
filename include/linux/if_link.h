@@ -4,9 +4,8 @@
 #include <linux/types.h>
 #include <linux/netlink.h>
 
-/* The struct should be in sync with struct net_device_stats */
-struct rtnl_link_stats
-{
+/* This struct should be in sync with struct rtnl_link_stats64 */
+struct rtnl_link_stats {
 	__u32	rx_packets;		/* total packets received	*/
 	__u32	tx_packets;		/* total packets transmitted	*/
 	__u32	rx_bytes;		/* total bytes received 	*/
@@ -38,6 +37,7 @@ struct rtnl_link_stats
 	__u32	tx_compressed;
 };
 
+/* The main device statistics structure */
 struct rtnl_link_stats64 {
 	__u64	rx_packets;		/* total packets received	*/
 	__u64	tx_packets;		/* total packets transmitted	*/
@@ -143,6 +143,8 @@ enum {
 #define IFLA_PROMISCUITY IFLA_PROMISCUITY
 	IFLA_NUM_TX_QUEUES,
 	IFLA_NUM_RX_QUEUES,
+	IFLA_CARRIER,
+	IFLA_PHYS_PORT_ID,
 	__IFLA_MAX
 };
 
@@ -319,6 +321,8 @@ enum {
 	IFLA_VF_MAC,		/* Hardware queue specific attributes */
 	IFLA_VF_VLAN,
 	IFLA_VF_TX_RATE,	/* TX Bandwidth Allocation */
+	IFLA_VF_SPOOFCHK,	/* Spoof Checking on/off switch */
+	IFLA_VF_LINK_STATE,	/* link state enable/disable/auto switch */
 	__IFLA_VF_MAX,
 };
 
@@ -340,13 +344,48 @@ struct ifla_vf_tx_rate {
 	__u32 rate; /* Max TX bandwidth in Mbps, 0 disables throttling */
 };
 
+struct ifla_vf_spoofchk {
+	__u32 vf;
+	__u32 setting;
+};
+
+enum {
+	IFLA_VF_LINK_STATE_AUTO,	/* link state of the uplink */
+	IFLA_VF_LINK_STATE_ENABLE,	/* link always up */
+	IFLA_VF_LINK_STATE_DISABLE,	/* link always down */
+	__IFLA_VF_LINK_STATE_MAX,
+};
+
+struct ifla_vf_link_state {
+	__u32 vf;
+	__u32 link_state;
+};
+
+#ifdef __KERNEL__
+
+/* We don't want this structure exposed to user space */
 struct ifla_vf_info {
 	__u32 vf;
 	__u8 mac[32];
 	__u32 vlan;
 	__u32 qos;
 	__u32 tx_rate;
+	/*
+	 * I checked usage of this structure.  It's allocated in
+	 * net/core/rtnetlink.c and then used to pass to the driver's
+	 * ndo_get_vf_config routine.  If this had been allocated as
+	 * an array, we wouldn't be able to get away with this, but
+	 * it's allocated as a single struct and the code in rtnetlink
+	 * calls the driver's ndo_get_vf_config routine once per vf
+	 * port.  Because of that, we can safely extend this structure
+	 * without actually break kABI.
+	 */
+#ifndef __GENKSYMS__
+	__u32 spoofchk;
+	__u32 linkstate;
+#endif
 };
+#endif
 
 /* VF ports management section
  *

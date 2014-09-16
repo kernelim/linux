@@ -38,6 +38,7 @@
 #include <linux/swap.h>
 #include <linux/sunrpc/svcauth_gss.h>
 #include <linux/sunrpc/clnt.h>
+#include <linux/jhash.h>
 #include "xdr4.h"
 #include "vfs.h"
 
@@ -125,7 +126,7 @@ get_nfs4_file(struct nfs4_file *fi)
 }
 
 static int num_delegations;
-unsigned int max_delegations;
+unsigned long max_delegations;
 
 /*
  * Open owner state (share locks)
@@ -202,6 +203,79 @@ static void nfs4_file_put_access(struct nfs4_file *fp, int oflag)
 		__nfs4_file_put_access(fp, oflag);
 }
 
+/*
+ * When we recall a delegation, we should be careful not to hand it
+ * out again straight away.
+ * To ensure this we keep a pair of bloom filters ('new' and 'old')
+ * in which the filehandles of recalled delegations are "stored".
+ * If a filehandle appear in either filter, a delegation is blocked.
+ * When a delegation is recalled, the filehandle is stored in the "new"
+ * filter.
+ * Every 30 seconds we swap the filters and clear the "new" one,
+ * unless both are empty of course.
+ *
+ * Each filter is 256 bits.  We hash the filehandle to 32bit and use the
+ * low 3 bytes as hash-table indices.
+ *
+ * 'recall_lock', which is always held when block_delegations() is called,
+ * is used to manage concurrent access.  Testing does not need the lock
+ * except when swapping the two filters.
+ */
+static struct bloom_pair {
+	int	entries, old_entries;
+	time_t	swap_time;
+	int	new; /* index into 'set' */
+	DECLARE_BITMAP(set[2], 256);
+} blocked_delegations;
+
+static int delegation_blocked(struct knfsd_fh *fh)
+{
+	u32 hash;
+	struct bloom_pair *bd = &blocked_delegations;
+
+	if (bd->entries == 0)
+		return 0;
+	if (seconds_since_boot() - bd->swap_time > 30) {
+		spin_lock(&recall_lock);
+		if (seconds_since_boot() - bd->swap_time > 30) {
+			bd->entries -= bd->old_entries;
+			bd->old_entries = bd->entries;
+			memset(bd->set[bd->new], 0,
+			       sizeof(bd->set[0]));
+			bd->new = 1-bd->new;
+			bd->swap_time = seconds_since_boot();
+		}
+		spin_unlock(&recall_lock);
+	}
+	hash = jhash(&fh->fh_base, fh->fh_size, 0);
+	if (test_bit(hash&255, bd->set[0]) &&
+	    test_bit((hash>>8)&255, bd->set[0]) &&
+	    test_bit((hash>>16)&255, bd->set[0]))
+		return 1;
+
+	if (test_bit(hash&255, bd->set[1]) &&
+	    test_bit((hash>>8)&255, bd->set[1]) &&
+	    test_bit((hash>>16)&255, bd->set[1]))
+		return 1;
+
+	return 0;
+}
+
+static void block_delegations(struct knfsd_fh *fh)
+{
+	u32 hash;
+	struct bloom_pair *bd = &blocked_delegations;
+
+	hash = jhash(&fh->fh_base, fh->fh_size, 0);
+
+	__set_bit(hash&255, bd->set[bd->new]);
+	__set_bit((hash>>8)&255, bd->set[bd->new]);
+	__set_bit((hash>>16)&255, bd->set[bd->new]);
+	if (bd->entries == 0)
+		bd->swap_time = seconds_since_boot();
+	bd->entries += 1;
+}
+
 static struct nfs4_delegation *
 alloc_init_deleg(struct nfs4_client *clp, struct nfs4_stateid *stp, struct svc_fh *current_fh, u32 type)
 {
@@ -219,6 +293,8 @@ alloc_init_deleg(struct nfs4_client *clp, struct nfs4_stateid *stp, struct svc_f
 	if (fp->fi_had_conflict)
 		return NULL;
 	if (num_delegations > max_delegations)
+		return NULL;
+	if (delegation_blocked(&current_fh->fh_handle))
 		return NULL;
 	dp = kmem_cache_alloc(deleg_slab, GFP_KERNEL);
 	if (dp == NULL)
@@ -277,12 +353,12 @@ nfs4_close_delegation(struct nfs4_delegation *dp)
 static void
 unhash_delegation(struct nfs4_delegation *dp)
 {
+	nfs4_close_delegation(dp);
 	list_del_init(&dp->dl_perfile);
 	list_del_init(&dp->dl_perclnt);
 	spin_lock(&recall_lock);
 	list_del_init(&dp->dl_recall_lru);
 	spin_unlock(&recall_lock);
-	nfs4_close_delegation(dp);
 	nfs4_put_delegation(dp);
 }
 
@@ -569,8 +645,8 @@ static int nfsd4_get_drc_mem(int slotsize, u32 num)
 	num = min_t(u32, num, NFSD_MAX_SLOTS_PER_SESSION);
 
 	spin_lock(&nfsd_drc_lock);
-	avail = min_t(int, NFSD_MAX_MEM_PER_SESSION,
-			nfsd_drc_max_mem - nfsd_drc_mem_used);
+	avail = min((unsigned long)NFSD_MAX_MEM_PER_SESSION,
+		    nfsd_drc_max_mem - nfsd_drc_mem_used);
 	num = min_t(int, num, avail / slotsize);
 	nfsd_drc_mem_used += num * slotsize;
 	spin_unlock(&nfsd_drc_lock);
@@ -2289,6 +2365,7 @@ void nfsd_break_deleg_cb(struct file_lock *fl)
 
 	spin_lock(&recall_lock);
 	list_add_tail(&dp->dl_recall_lru, &del_recall_lru);
+	block_delegations(&dp->dl_fh);
 	spin_unlock(&recall_lock);
 
 	/* only place dl_time is set. protected by lock_kernel*/
@@ -2302,6 +2379,7 @@ void nfsd_break_deleg_cb(struct file_lock *fl)
 	fl->fl_break_time = 0;
 
 	dp->dl_file->fi_had_conflict = true;
+
 	nfsd4_cb_recall(dp);
 }
 

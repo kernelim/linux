@@ -975,12 +975,6 @@ int security_netlink_send(struct sock *sk, struct sk_buff *skb)
 	return security_ops->netlink_send(sk, skb);
 }
 
-int security_netlink_recv(struct sk_buff *skb, int cap)
-{
-	return security_ops->netlink_recv(skb, cap);
-}
-EXPORT_SYMBOL(security_netlink_recv);
-
 int security_secid_to_secctx(u32 secid, char **secdata, u32 *seclen)
 {
 	return security_ops->secid_to_secctx(secid, secdata, seclen);
@@ -1170,23 +1164,35 @@ void security_inet_conn_established(struct sock *sk,
 	security_ops->inet_conn_established(sk, skb);
 }
 
+int security_tun_dev_alloc_security(void **security)
+{
+	return security_ops->tun_dev_alloc_security(security);
+}
+EXPORT_SYMBOL(security_tun_dev_alloc_security);
+
+void security_tun_dev_free_security(void *security)
+{
+	security_ops->tun_dev_free_security(security);
+}
+EXPORT_SYMBOL(security_tun_dev_free_security);
+
 int security_tun_dev_create(void)
 {
 	return security_ops->tun_dev_create();
 }
 EXPORT_SYMBOL(security_tun_dev_create);
 
-void security_tun_dev_post_create(struct sock *sk)
+int security_tun_dev_attach(struct sock *sk, void *security)
 {
-	return security_ops->tun_dev_post_create(sk);
-}
-EXPORT_SYMBOL(security_tun_dev_post_create);
-
-int security_tun_dev_attach(struct sock *sk)
-{
-	return security_ops->tun_dev_attach(sk);
+	return security_ops->tun_dev_attach(sk, security);
 }
 EXPORT_SYMBOL(security_tun_dev_attach);
+
+int security_tun_dev_open(void *security)
+{
+	return security_ops->tun_dev_open(security);
+}
+EXPORT_SYMBOL(security_tun_dev_open);
 
 #endif	/* CONFIG_SECURITY_NETWORK */
 

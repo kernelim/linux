@@ -443,7 +443,7 @@ int invalidate_inodes(struct super_block *sb, bool kill_dirty)
 	down_write(&iprune_sem);
 	spin_lock(&inode_lock);
 	inotify_unmount_inodes(&sb->s_inodes);
-	fsnotify_unmount_inodes(&sb->s_inodes);
+	fsnotify_unmount_inodes(sb);
 	busy = invalidate_list(&sb->s_inodes, &throw_away, kill_dirty);
 	spin_unlock(&inode_lock);
 

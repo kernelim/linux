@@ -370,6 +370,8 @@ struct cpu_vfs_cap_data {
 
 #ifdef __KERNEL__
 
+struct file;
+
 /*
  * Internal kernel functions only
  */
@@ -563,6 +565,7 @@ extern const kernel_cap_t __cap_init_eff_set;
 	(security_real_capable_noaudit((t), (cap)) == 0)
 
 extern int capable(int cap);
+extern bool file_init_ns_capable(const struct file *file, int cap);
 
 /* audit system wants to get cap info from files as well */
 struct dentry;

@@ -99,7 +99,7 @@ void fsnotify_put_event(struct fsnotify_event *event)
 
 struct fsnotify_event_holder *fsnotify_alloc_event_holder(void)
 {
-	return kmem_cache_alloc(fsnotify_event_holder_cachep, GFP_KERNEL);
+	return kmem_cache_alloc(fsnotify_event_holder_cachep, GFP_NOFS);
 }
 
 void fsnotify_destroy_event_holder(struct fsnotify_event_holder *holder)
@@ -307,7 +307,9 @@ void fsnotify_flush_notify(struct fsnotify_group *group)
 			if (priv)
 				group->ops->free_event_priv(priv);
 		}
+		mutex_unlock(&group->notification_mutex);
 		fsnotify_put_event(event); /* matches fsnotify_add_notify_event */
+		mutex_lock(&group->notification_mutex);
 	}
 	mutex_unlock(&group->notification_mutex);
 }

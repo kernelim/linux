@@ -171,6 +171,15 @@ static inline void msg_rmid(struct ipc_namespace *ns, struct msg_queue *s)
 	ipc_rmid(&msg_ids(ns), &s->q_perm);
 }
 
+static void msg_rcu_free(struct rcu_head *head)
+{
+	struct ipc_rcu *p = container_of(head, struct ipc_rcu, rcu);
+	struct msg_queue *msq = ipc_rcu_to_struct(p);
+
+	security_msg_queue_free(msq);
+	ipc_rcu_free(head);
+}
+
 /**
  * newque - Create a new msg queue
  * @ns: namespace
@@ -195,7 +204,7 @@ static int newque(struct ipc_namespace *ns, struct ipc_params *params)
 	msq->q_perm.security = NULL;
 	retval = security_msg_queue_alloc(msq);
 	if (retval) {
-		ipc_rcu_putref(msq);
+		ipc_rcu_putref(msq, ipc_rcu_free);
 		return retval;
 	}
 
@@ -204,8 +213,7 @@ static int newque(struct ipc_namespace *ns, struct ipc_params *params)
 	 */
 	id = ipc_addid(&msg_ids(ns), &msq->q_perm, ns->msg_ctlmni);
 	if (id < 0) {
-		security_msg_queue_free(msq);
-		ipc_rcu_putref(msq);
+		ipc_rcu_putref(msq, ipc_rcu_free);
 		return id;
 	}
 
@@ -296,8 +304,7 @@ static void freeque(struct ipc_namespace *ns, struct kern_ipc_perm *ipcp)
 		free_msg(msg);
 	}
 	atomic_sub(msq->q_cbytes, &ns->msg_bytes);
-	security_msg_queue_free(msq);
-	ipc_rcu_putref(msq);
+	ipc_rcu_putref(msq, msg_rcu_free);
 }
 
 /*
@@ -683,12 +690,17 @@ long do_msgsnd(int msqid, long mtype, void __user *mtext,
 			goto out_unlock_free;
 		}
 		ss_add(msq, &s);
-		ipc_rcu_getref(msq);
+
+		if (!ipc_rcu_getref(msq)) {
+			err = -EIDRM;
+			goto out_unlock_free;
+		}
+
 		msg_unlock(msq);
 		schedule();
 
 		ipc_lock_by_ptr(&msq->q_perm);
-		ipc_rcu_putref(msq);
+		ipc_rcu_putref(msq, ipc_rcu_free);
 		if (msq->q_perm.deleted) {
 			err = -EIDRM;
 			goto out_unlock_free;

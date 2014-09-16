@@ -207,6 +207,7 @@ static int ipgre_rcv(struct sk_buff *skb, const struct tnl_ptk_info *tpi)
 				  iph->saddr, iph->daddr, tpi->key);
 
 	if (tunnel) {
+		skb_pop_mac_header(skb);
 		ip_tunnel_rcv(tunnel, skb, tpi, false);
 		return PACKET_RCVD;
 	}
@@ -370,13 +371,10 @@ static int ipgre_header(struct sk_buff *skb, struct net_device *dev,
 	/* Set the source hardware address. */
 	if (saddr)
 		memcpy(&iph->saddr, saddr, 4);
-
-	if (daddr) {
+	if (daddr)
 		memcpy(&iph->daddr, daddr, 4);
-		return t->hlen;
-	}
-	if (iph->daddr && !ipv4_is_multicast(iph->daddr))
-		return t->hlen;
+	if (iph->daddr)
+		return t->hlen + sizeof(*iph);
 
 	return -(t->hlen + sizeof(*iph));
 }

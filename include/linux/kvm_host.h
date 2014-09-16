@@ -202,7 +202,7 @@ struct kvm {
 	u32 bsp_vcpu_id;
 	struct kvm_vcpu *bsp_vcpu;
 #endif
-	struct kvm_vcpu *vcpus[KVM_MAX_VCPUS];
+	struct kvm_vcpu *vcpus[KVM_MAX_VCPU_COUNT];
 	atomic_t online_vcpus;
 	int last_boosted_vcpu;
 	struct list_head vm_list;
@@ -353,6 +353,7 @@ int kvm_clear_guest_page(struct kvm *kvm, gfn_t gfn, int offset, int len);
 int kvm_clear_guest(struct kvm *kvm, gpa_t gpa, unsigned long len);
 struct kvm_memory_slot *gfn_to_memslot(struct kvm *kvm, gfn_t gfn);
 int kvm_is_visible_gfn(struct kvm *kvm, gfn_t gfn);
+unsigned long kvm_host_page_size(struct kvm *kvm, gfn_t gfn);
 void mark_page_dirty(struct kvm *kvm, gfn_t gfn);
 void mark_page_dirty_in_slot(struct kvm *kvm, struct kvm_memory_slot *memslot,
 			     gfn_t gfn);
@@ -410,6 +411,8 @@ void kvm_arch_exit(void);
 
 int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu);
 void kvm_arch_vcpu_uninit(struct kvm_vcpu *vcpu);
+
+void kvm_arch_sched_in(struct kvm_vcpu *vcpu, int cpu);
 
 void kvm_arch_vcpu_free(struct kvm_vcpu *vcpu);
 void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu);
@@ -580,6 +583,12 @@ static inline gpa_t gfn_to_gpa(gfn_t gfn)
 static inline hpa_t pfn_to_hpa(pfn_t pfn)
 {
 	return (hpa_t)pfn << PAGE_SHIFT;
+}
+
+static inline unsigned long
+__gfn_to_hva_memslot(struct kvm_memory_slot *slot, gfn_t gfn)
+{
+	return slot->userspace_addr + (gfn - slot->base_gfn) * PAGE_SIZE;
 }
 
 static inline void kvm_migrate_timers(struct kvm_vcpu *vcpu)

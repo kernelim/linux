@@ -85,6 +85,9 @@
 #define Src2ImmByte (2<<29)
 #define Src2One     (3<<29)
 #define Src2Imm16   (4<<29)
+#define Src2Mem16   (5<<29) /* Used for Ep encoding. First argument has to be
+			       in memory and second argument is located
+			       immediately after the first one in memory. */
 #define Src2Mask    (7<<29)
 
 enum {
@@ -341,7 +344,8 @@ static u32 group_table[] = {
 	[Group5*8] =
 	DstMem | SrcNone | ModRM | Lock, DstMem | SrcNone | ModRM | Lock,
 	SrcMem | ModRM | Stack, 0,
-	SrcMem | ModRM | Stack, 0, SrcMem | ModRM | Stack, 0,
+	SrcMem | ModRM | Stack, SrcMem | ModRM | Src2Mem16 | ImplicitOps,
+	SrcMem | ModRM | Stack, 0,
 	[Group7*8] =
 	0, 0, ModRM | SrcMem | Priv, ModRM | SrcMem | Priv,
 	SrcNone | ModRM | DstMem | Mov, 0,
@@ -1168,6 +1172,10 @@ done_prefixes:
 		c->src2.bytes = 1;
 		c->src2.val = 1;
 		break;
+	case Src2Mem16:
+		c->src2.bytes = 2;
+		c->src2.type = OP_MEM;
+		break;
 	}
 
 	/* Decode and fetch the destination operand: register or memory. */
@@ -1920,6 +1928,17 @@ x86_emulate_insn(struct x86_emulate_ctxt *ctxt, struct x86_emulate_ops *ops)
 		c->src.orig_val = c->src.val;
 	}
 
+	if (c->src2.type == OP_MEM) {
+		c->src2.ptr = (unsigned long *)(memop + c->src.bytes);
+		c->src2.val = 0;
+		rc = ops->read_emulated((unsigned long)c->src2.ptr,
+					&c->src2.val,
+					c->src2.bytes,
+					ctxt->vcpu);
+		if (rc != X86EMUL_CONTINUE)
+			goto done;
+	}
+
 	if ((c->d & DstMask) == ImplicitOps)
 		goto special_insn;
 
@@ -2330,6 +2349,7 @@ special_insn:
 	case 0xe9: /* jmp rel */
 		goto jmp;
 	case 0xea: /* jmp far */
+	jump_far:
 		if (kvm_load_segment_descriptor(ctxt->vcpu, c->src2.val,
 						VCPU_SREG_CS))
 			goto done;
@@ -2405,11 +2425,16 @@ special_insn:
 		ctxt->eflags |= EFLG_DF;
 		c->dst.type = OP_NONE;	/* Disable writeback. */
 		break;
-	case 0xfe ... 0xff:	/* Grp4/Grp5 */
+	case 0xfe: /* Grp4 */
+	grp45:
 		rc = emulate_grp45(ctxt, ops);
 		if (rc != X86EMUL_CONTINUE)
 			goto done;
 		break;
+	case 0xff: /* Grp5 */
+		if (c->modrm_reg == 5)
+			goto jump_far;
+		goto grp45;
 	}
 
 writeback:

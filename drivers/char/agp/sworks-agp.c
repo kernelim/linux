@@ -229,7 +229,7 @@ static int serverworks_fetch_size(void)
  * This routine could be implemented by taking the addresses
  * written to the GATT, and flushing them individually.  However
  * currently it just flushes the whole table.  Which is probably
- * more efficent, since agp_memory blocks can be a large number of
+ * more efficient, since agp_memory blocks can be a large number of
  * entries.
  */
 static void serverworks_tlbflush(struct agp_memory *temp)
@@ -445,8 +445,8 @@ static const struct agp_bridge_driver sworks_driver = {
 	.agp_type_to_mask_type  = agp_generic_type_to_mask_type,
 };
 
-static int __devinit agp_serverworks_probe(struct pci_dev *pdev,
-					   const struct pci_device_id *ent)
+static int agp_serverworks_probe(struct pci_dev *pdev,
+				 const struct pci_device_id *ent)
 {
 	struct agp_bridge_data *bridge;
 	struct pci_dev *bridge_dev;
@@ -518,7 +518,7 @@ static int __devinit agp_serverworks_probe(struct pci_dev *pdev,
 	return agp_add_bridge(bridge);
 }
 
-static void __devexit agp_serverworks_remove(struct pci_dev *pdev)
+static void agp_serverworks_remove(struct pci_dev *pdev)
 {
 	struct agp_bridge_data *bridge = pci_get_drvdata(pdev);
 

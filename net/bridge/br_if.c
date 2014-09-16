@@ -20,7 +20,6 @@
 #include <linux/init.h>
 #include <linux/rtnetlink.h>
 #include <linux/if_ether.h>
-#include <linux/if_vlan.h>
 #include <linux/etherdevice.h>
 #include <net/sock.h>
 
@@ -88,60 +87,6 @@ void br_port_carrier_check(struct net_bridge_port *p)
 	}
 }
 
-void br_add_vlans_to_port(struct net_bridge *br, struct net_bridge_port *p)
-{
-	int vid;
-	struct net_device *vlan_dev;
-	const struct net_device_ops *ops = p->dev->netdev_ops;
-
-	if (!br->vlgrp)
-		return;
-
-	if ((p->dev->features & NETIF_F_HW_VLAN_RX) &&
-	    ops->ndo_vlan_rx_register)
-		ops->ndo_vlan_rx_register(p->dev, br->vlgrp);
-
-	if (!(p->dev->features & NETIF_F_HW_VLAN_FILTER) ||
-	    !ops->ndo_vlan_rx_add_vid)
-		return;
-
-	/* Don't mess with vid 0.  Could keep a separate vlan list
-	 * to make this less expensive, but that adds complexity.
-	 */
-	for (vid = 1; vid < 4096; vid++) {
-		vlan_dev = vlan_group_get_device(br->vlgrp, vid);
-		if (vlan_dev)
-			ops->ndo_vlan_rx_add_vid(p->dev, vid);
-	}
-}
-
-void br_del_vlans_from_port(struct net_bridge *br, struct net_bridge_port *p)
-{
-	int vid;
-	struct net_device *vlan_dev;
-	const struct net_device_ops *ops = p->dev->netdev_ops;
-
-	if (!br->vlgrp)
-		return;
-
-	if (!(p->dev->features & NETIF_F_HW_VLAN_FILTER) ||
-	    !ops->ndo_vlan_rx_kill_vid)
-		goto unreg;
-
-	for (vid = 1; vid < 4096; vid++) {
-		vlan_dev = vlan_group_get_device(br->vlgrp, vid);
-		if (vlan_dev) {
-			ops->ndo_vlan_rx_kill_vid(p->dev, vid);
-			vlan_group_set_device(br->vlgrp, vid, vlan_dev);
-		}
-	}
-
-unreg:
-	if ((p->dev->features & NETIF_F_HW_VLAN_RX) &&
-	    ops->ndo_vlan_rx_register)
-		ops->ndo_vlan_rx_register(p->dev, NULL);
-}
-
 static void release_nbp(struct kobject *kobj)
 {
 	struct net_bridge_port *p
@@ -191,8 +136,6 @@ static void del_nbp(struct net_bridge_port *p)
 	sysfs_remove_link(br->ifobj, dev->name);
 
 	dev_set_promiscuity(dev, -1);
-
-	br_del_vlans_from_port(br, p);
 
 	spin_lock_bh(&br->lock);
 	br_stp_disable_port(p);
@@ -247,6 +190,12 @@ static struct net_device *new_bridge_dev(struct net *net, const char *name)
 
 	br = netdev_priv(dev);
 	br->dev = dev;
+
+	br->stats = alloc_percpu(struct br_cpu_netstats);
+	if (!br->stats) {
+		free_netdev(dev);
+		return NULL;
+	}
 
 	spin_lock_init(&br->lock);
 	INIT_LIST_HEAD(&br->port_list);
@@ -435,7 +384,7 @@ void br_features_recompute(struct net_bridge *br)
 	}
 
 done:
-	br->dev->features = netdev_fix_features(features, NULL);
+	br->dev->features = netdev_fix_features_dev(br->dev, features);
 	netdev_features_change(br->dev);
 }
 
@@ -495,8 +444,6 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 	dev->priv_flags |= IFF_BRIDGE_PORT;
 
 	list_add_rcu(&p->list, &br->port_list);
-
-	br_add_vlans_to_port(br, p);
 
 	br_features_recompute(br);
 

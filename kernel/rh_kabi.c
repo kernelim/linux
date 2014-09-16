@@ -11,6 +11,7 @@
  */
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/proc_fs.h>
 
 #ifdef CONFIG_X86
 #include <asm/alternative.h>
@@ -30,6 +31,10 @@ struct rh_kabi_structs_6_3 {
 #endif
 };
 
+struct rh_kabi_structs_6_6 {
+	struct proc_inode *proc_inode;
+};
+
 void rh_kabi_6_2(struct rh_kabi_structs_6_2 *rh_kabi_structs_6_2)
 {
 	/* No one should ever call this function */
@@ -43,3 +48,10 @@ void rh_kabi_6_3(struct rh_kabi_structs_6_3 *rh_kabi_structs_6_3)
 	rh_kabi_6_2(NULL);
 }
 EXPORT_SYMBOL_GPL(rh_kabi_6_3);
+
+void rh_kabi_6_6(struct rh_kabi_structs_6_6 *rh_kabi_structs_6_6)
+{
+	/* No need to duplicate the string above :) */
+	rh_kabi_6_2(NULL);
+}
+EXPORT_SYMBOL_GPL(rh_kabi_6_6);

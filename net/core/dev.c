@@ -135,6 +135,7 @@
 #endif
 #include <linux/cpu_rmap.h>
 #include <linux/net_tstamp.h>
+#include <linux/hashtable.h>
 
 #include "net-sysfs.h"
 
@@ -202,6 +203,12 @@ static struct list_head offload_base __read_mostly;
  */
 DEFINE_RWLOCK(dev_base_lock);
 EXPORT_SYMBOL(dev_base_lock);
+
+/* protects napi_hash addition/deletion and napi_gen_id */
+static DEFINE_SPINLOCK(napi_hash_lock);
+
+static unsigned int napi_gen_id;
+static DEFINE_HASHTABLE(napi_hash, 8);
 
 static inline struct hlist_head *dev_name_hash(struct net *net, const char *name)
 {
@@ -1365,6 +1372,8 @@ EXPORT_SYMBOL(dev_close);
  */
 void dev_disable_lro(struct net_device *dev)
 {
+	u32 flags;
+
 	/*
 	 * If we're trying to disable lro on a vlan device
 	 * use the underlying physical device instead
@@ -1372,15 +1381,17 @@ void dev_disable_lro(struct net_device *dev)
 	if (is_vlan_dev(dev))
 		dev = vlan_dev_real_dev(dev);
 
-	if (dev->ethtool_ops && dev->ethtool_ops->get_flags &&
-	    dev->ethtool_ops->set_flags) {
-		u32 flags = dev->ethtool_ops->get_flags(dev);
-		if (flags & ETH_FLAG_LRO) {
-			flags &= ~ETH_FLAG_LRO;
-			dev->ethtool_ops->set_flags(dev, flags);
-		}
-	}
-	WARN_ON(dev->features & NETIF_F_LRO);
+	if (dev->ethtool_ops && dev->ethtool_ops->get_flags)
+		flags = dev->ethtool_ops->get_flags(dev);
+	else
+		flags = ethtool_op_get_flags(dev);
+
+	if (!(flags & ETH_FLAG_LRO))
+		return;
+
+	__ethtool_set_flags(dev, flags & ~ETH_FLAG_LRO);
+	if (unlikely(dev->features & NETIF_F_LRO))
+		netdev_WARN(dev, "failed to disable LRO!\n");
 }
 EXPORT_SYMBOL(dev_disable_lro);
 
@@ -1895,14 +1906,17 @@ EXPORT_SYMBOL(netif_device_attach);
 static void skb_warn_bad_offload(const struct sk_buff *skb)
 {
 	struct net_device *dev = skb->dev;
-	struct ethtool_drvinfo info = {};
+	const char *driver = "";
 
-	if (dev && dev->ethtool_ops && dev->ethtool_ops->get_drvinfo)
-		dev->ethtool_ops->get_drvinfo(dev, &info);
+	if (!net_ratelimit())
+		return;
+
+	if (dev && dev->dev.parent)
+		driver = dev_driver_string(dev->dev.parent);
 
 	WARN(1, "%s: caps=(0x%lx, 0x%lx) len=%d data_len=%d "
 		"ip_summed=%d",
-	     info.driver, dev ? dev->features : 0L,
+	     driver, dev ? dev->features : 0L,
 	     skb->sk ? skb->sk->sk_route_caps : 0L,
 	     skb->len, skb->data_len, skb->ip_summed);
 }
@@ -1955,21 +1969,37 @@ out:
 }
 EXPORT_SYMBOL(skb_checksum_help);
 
-__be16 skb_network_protocol(struct sk_buff *skb)
+__be16 skb_network_protocol(struct sk_buff *skb, int *depth)
 {
+	unsigned int vlan_depth = skb->mac_len;
 	__be16 type = skb->protocol;
-	int vlan_depth = ETH_HLEN;
 
-	while (type == htons(ETH_P_8021Q)) {
-		struct vlan_hdr *vh;
+	/* if skb->protocol is 802.1Q/AD then the header should already be
+	 * present at mac_len - VLAN_HLEN (if mac_len > 0), or at
+	 * ETH_HLEN otherwise
+	 */
+	if (type == htons(ETH_P_8021Q)) {
+		if (vlan_depth) {
+			if (unlikely(WARN_ON(vlan_depth < VLAN_HLEN)))
+				return 0;
+			vlan_depth -= VLAN_HLEN;
+		} else {
+			vlan_depth = ETH_HLEN;
+		}
+		do {
+			struct vlan_hdr *vh;
 
-		if (unlikely(!pskb_may_pull(skb, vlan_depth + VLAN_HLEN)))
-			return 0;
+			if (unlikely(!pskb_may_pull(skb,
+						    vlan_depth + VLAN_HLEN)))
+				return 0;
 
-		vh = (struct vlan_hdr *)(skb->data + vlan_depth);
-		type = vh->h_vlan_encapsulated_proto;
-		vlan_depth += VLAN_HLEN;
+			vh = (struct vlan_hdr *)(skb->data + vlan_depth);
+			type = vh->h_vlan_encapsulated_proto;
+			vlan_depth += VLAN_HLEN;
+		} while (type == htons(ETH_P_8021Q));
 	}
+
+	*depth = vlan_depth;
 
 	return type;
 }
@@ -1983,14 +2013,15 @@ struct sk_buff *skb_mac_gso_segment(struct sk_buff *skb, int features)
 {
 	struct sk_buff *segs = ERR_PTR(-EPROTONOSUPPORT);
 	struct packet_offload *ptype;
-	__be16 type = skb_network_protocol(skb);
+	int vlan_depth = skb->mac_len;
+	__be16 type = skb_network_protocol(skb, &vlan_depth);
 	bool found = false;
 	int err;
 
 	if (unlikely(!type))
 		return ERR_PTR(-EINVAL);
 
-	__skb_pull(skb, skb->mac_len);
+	__skb_pull(skb, vlan_depth);
 
 	rcu_read_lock();
 	list_for_each_entry_rcu(ptype, &offload_base, list) {
@@ -2178,8 +2209,10 @@ static int dev_gso_segment(struct sk_buff *skb, int features)
 
 static int harmonize_features(struct sk_buff *skb, __be16 protocol, int features)
 {
+	int tmp;
+
 	if (skb->ip_summed != CHECKSUM_NONE &&
-	    !can_checksum_protocol(features, protocol)) {
+	    !can_checksum_protocol(features, skb_network_protocol(skb, &tmp))) {
 		features &= ~NETIF_F_ALL_CSUM;
 	} else if (illegal_highdma(skb->dev, skb)) {
 		features &= ~NETIF_F_SG;
@@ -3940,6 +3973,59 @@ void napi_complete(struct napi_struct *n)
 }
 EXPORT_SYMBOL(napi_complete);
 
+/* must be called under rcu_read_lock(), as we dont take a reference */
+struct napi_struct *napi_by_id(unsigned int napi_id)
+{
+	unsigned int hash = napi_id % HASH_SIZE(napi_hash);
+	struct napi_struct *napi;
+	struct hlist_node *node;
+
+	hlist_for_each_entry_rcu(napi, node, &napi_hash[hash], napi_hash_node)
+		if (napi->napi_id == napi_id)
+			return napi;
+
+	return NULL;
+}
+EXPORT_SYMBOL_GPL(napi_by_id);
+
+void napi_hash_add(struct napi_struct *napi)
+{
+	if (!test_and_set_bit(NAPI_STATE_HASHED, &napi->state)) {
+
+		spin_lock(&napi_hash_lock);
+
+		/* 0 is not a valid id, we also skip an id that is taken
+		 * we expect both events to be extremely rare
+		 */
+		napi->napi_id = 0;
+		while (!napi->napi_id) {
+			napi->napi_id = ++napi_gen_id;
+			if (napi_by_id(napi->napi_id))
+				napi->napi_id = 0;
+		}
+
+		hlist_add_head_rcu(&napi->napi_hash_node,
+			&napi_hash[napi->napi_id % HASH_SIZE(napi_hash)]);
+
+		spin_unlock(&napi_hash_lock);
+	}
+}
+EXPORT_SYMBOL_GPL(napi_hash_add);
+
+/* Warning : caller is responsible to make sure rcu grace period
+ * is respected before freeing memory containing @napi
+ */
+void napi_hash_del(struct napi_struct *napi)
+{
+	spin_lock(&napi_hash_lock);
+
+	if (test_and_clear_bit(NAPI_STATE_HASHED, &napi->state))
+		hlist_del_rcu(&napi->napi_hash_node);
+
+	spin_unlock(&napi_hash_lock);
+}
+EXPORT_SYMBOL_GPL(napi_hash_del);
+
 void netif_napi_add(struct net_device *dev, struct napi_struct *napi,
 		    int (*poll)(struct napi_struct *, int), int weight)
 {
@@ -3948,11 +4034,9 @@ void netif_napi_add(struct net_device *dev, struct napi_struct *napi,
 	napi->gro_list = NULL;
 	napi->skb = NULL;
 	napi->poll = poll;
-#if 0 /* Do not complain until all drivers shipped in RHEL are fixed. */
 	if (weight > NAPI_POLL_WEIGHT)
 		pr_err_once("netif_napi_add() called with weight %d on device %s\n",
 			    weight, dev->name);
-#endif
 	napi->weight = weight;
 	list_add(&napi->dev_list, &dev->napi_list);
 	napi->dev = dev;
@@ -4251,10 +4335,11 @@ void dev_seq_stop(struct seq_file *seq, void *v)
 
 static void dev_seq_printf_stats(struct seq_file *seq, struct net_device *dev)
 {
-	const struct net_device_stats *stats = dev_get_stats(dev);
+	struct rtnl_link_stats64 temp;
+	const struct rtnl_link_stats64 *stats = dev_get_stats64(dev, &temp);
 
-	seq_printf(seq, "%6s:%8lu %7lu %4lu %4lu %4lu %5lu %10lu %9lu "
-		   "%8lu %7lu %4lu %4lu %4lu %5lu %7lu %10lu\n",
+	seq_printf(seq, "%6s: %7llu %7llu %4llu %4llu %4llu %5llu %10llu %9llu "
+		   "%8llu %7llu %4llu %4llu %4llu %5llu %7llu %10llu\n",
 		   dev->name, stats->rx_bytes, stats->rx_packets,
 		   stats->rx_errors,
 		   stats->rx_dropped + stats->rx_missed_errors,
@@ -5618,6 +5703,7 @@ static int dev_ifsioc(struct net *net, struct ifreq *ifr, unsigned int cmd)
 		    cmd == SIOCBRADDIF ||
 		    cmd == SIOCBRDELIF ||
 		    cmd == SIOCSHWTSTAMP ||
+		    cmd == SIOCGHWTSTAMP ||
 		    cmd == SIOCWANDEV) {
 			err = -EOPNOTSUPP;
 			if (ops->ndo_do_ioctl) {
@@ -5798,6 +5884,7 @@ int dev_ioctl(struct net *net, unsigned int cmd, void __user *arg)
 	 */
 	default:
 		if (cmd == SIOCWANDEV ||
+		    cmd == SIOCGHWTSTAMP ||
 		    (cmd >= SIOCDEVPRIVATE &&
 		     cmd <= SIOCDEVPRIVATE + 15)) {
 			dev_load(net, ifr.ifr_name);
@@ -5816,6 +5903,22 @@ int dev_ioctl(struct net *net, unsigned int cmd, void __user *arg)
 	}
 }
 
+
+/**
+ *	dev_get_phys_port_id - Get device physical port ID
+ *	@dev: device
+ *	@ppid: port ID
+ *
+ *	Get device physical port ID
+ */
+int dev_get_phys_port_id(struct net_device *dev,
+			 struct netdev_phys_port_id *ppid)
+{
+	if (!GET_NETDEV_OP_EXT(dev, ndo_get_phys_port_id))
+		return -EOPNOTSUPP;
+	return GET_NETDEV_OP_EXT(dev, ndo_get_phys_port_id)(dev, ppid);
+}
+EXPORT_SYMBOL(dev_get_phys_port_id);
 
 /**
  *	dev_new_index	-	allocate an ifindex
@@ -5944,21 +6047,54 @@ static void netdev_init_queue_locks(struct net_device *dev)
 	__netdev_init_queue_locks_one(dev, &dev->rx_queue, NULL);
 }
 
-unsigned long netdev_fix_features(unsigned long features, const char *name)
+static void netdev_feat_warn(struct net_device *dev, const char *name,
+			     const char *msg)
 {
+	if (dev)
+		netdev_warn(dev, "%s", msg);
+	else if (name)
+		printk(KERN_WARNING "%s: %s", name, msg);
+}
+
+static void netdev_feat_dbg(struct net_device *dev, const char *name,
+			    const char *msg)
+{
+	if (dev)
+		netdev_dbg(dev, "%s", msg);
+	else if (name)
+		printk(KERN_DEBUG "%s: %s", name, msg);
+}
+
+static u32 __netdev_fix_features(struct net_device *dev, const char *name,
+				 u32 features)
+{
+	/* Fix illegal checksum combinations */
+	if ((features & NETIF_F_HW_CSUM) &&
+	    (features & (NETIF_F_IP_CSUM|NETIF_F_IPV6_CSUM))) {
+		netdev_feat_warn(dev, name,
+				 "mixed HW and IP checksum settings.\n");
+		features &= ~(NETIF_F_IP_CSUM|NETIF_F_IPV6_CSUM);
+	}
+
+	if ((features & NETIF_F_NO_CSUM) &&
+	    (features & (NETIF_F_HW_CSUM|NETIF_F_IP_CSUM|NETIF_F_IPV6_CSUM))) {
+		netdev_feat_warn(dev, name,
+				 "mixed no checksumming and other settings.\n");
+		features &= ~(NETIF_F_IP_CSUM|NETIF_F_IPV6_CSUM|NETIF_F_HW_CSUM);
+	}
+
 	/* TSO requires that SG is present as well. */
 	if ((features & NETIF_F_ALL_TSO) && !(features & NETIF_F_SG)) {
-		if (name)
-			printk(KERN_NOTICE "%s: Dropping TSO features since no "
-			       "SG feature.\n", name);
+		netdev_feat_dbg(dev, name,
+				"Dropping TSO features since no SG feature.\n");
 		features &= ~NETIF_F_ALL_TSO;
 	}
 
 	if ((features & NETIF_F_TSO) && !(features & NETIF_F_HW_CSUM) &&
 					!(features & NETIF_F_NO_CSUM) &&
 					!(features & NETIF_F_IP_CSUM)) {
-		printk(KERN_NOTICE "%s: Dropping TSO features since no CSUM "
-		       "feature.\n", name);
+		netdev_feat_dbg(dev, name,
+				"Dropping TSO features since no CSUM feature.\n");
 		features &= ~NETIF_F_TSO;
 		features &= ~NETIF_F_TSO_ECN;
 	}
@@ -5966,30 +6102,51 @@ unsigned long netdev_fix_features(unsigned long features, const char *name)
 	if ((features & NETIF_F_TSO6) && !(features & NETIF_F_HW_CSUM) &&
 					 !(features & NETIF_F_NO_CSUM) &&
 					 !(features & NETIF_F_IPV6_CSUM)) {
-		printk("%s: Dropping TSO6 features since no CSUM feature.\n", name);
+		netdev_feat_dbg(dev, name,
+				"Dropping TSO6 features since no CSUM feature.\n");
 		features &= ~NETIF_F_TSO6;
 	}
 
+	/* Software GSO depends on SG. */
+	if ((features & NETIF_F_GSO) && !(features & NETIF_F_SG)) {
+		netdev_feat_dbg(dev, name,
+				"Dropping NETIF_F_GSO since no SG feature.\n");
+		features &= ~NETIF_F_GSO;
+	}
+
+	/* UFO needs SG and checksumming */
 	if (features & NETIF_F_UFO) {
-		if (!(features & NETIF_F_GEN_CSUM)) {
-			if (name)
-				printk(KERN_ERR "%s: Dropping NETIF_F_UFO "
-				       "since no NETIF_F_HW_CSUM feature.\n",
-				       name);
+		/* maybe split UFO into V4 and V6? */
+		if (!((features & NETIF_F_GEN_CSUM) ||
+		    (features & (NETIF_F_IP_CSUM|NETIF_F_IPV6_CSUM))
+			    == (NETIF_F_IP_CSUM|NETIF_F_IPV6_CSUM))) {
+			netdev_feat_dbg(dev, name,
+					"Dropping NETIF_F_UFO since no checksum offload features.\n");
 			features &= ~NETIF_F_UFO;
 		}
 
 		if (!(features & NETIF_F_SG)) {
-			if (name)
-				printk(KERN_ERR "%s: Dropping NETIF_F_UFO "
-				       "since no NETIF_F_SG feature.\n", name);
+			netdev_feat_dbg(dev, name,
+					"Dropping NETIF_F_UFO since no NETIF_F_SG feature.\n");
 			features &= ~NETIF_F_UFO;
 		}
 	}
 
 	return features;
 }
+
+unsigned long netdev_fix_features(unsigned long features, const char *name)
+{
+	return __netdev_fix_features(NULL, name, (u32)features);
+}
+
+u32 netdev_fix_features_dev(struct net_device *dev, u32 features)
+{
+	return __netdev_fix_features(dev, NULL, features);
+}
+
 EXPORT_SYMBOL(netdev_fix_features);
+EXPORT_SYMBOL(netdev_fix_features_dev);
 
 static int netif_alloc_rx_queues(struct net_device *dev)
 {
@@ -6009,6 +6166,50 @@ static int netif_alloc_rx_queues(struct net_device *dev)
 		rx[i].dev = dev;
 	return 0;
 }
+
+int __netdev_update_features(struct net_device *dev)
+{
+	u32 features;
+	int err = 0;
+
+	ASSERT_RTNL();
+
+	features = netdev_get_wanted_features(dev);
+
+	if (GET_NETDEV_OP_EXT(dev, ndo_fix_features))
+		features = GET_NETDEV_OP_EXT(dev, ndo_fix_features)(dev, features);
+
+	/* driver might be less strict about feature dependencies */
+	features = netdev_fix_features_dev(dev, features);
+
+	if (dev->features == features)
+		return 0;
+
+	netdev_dbg(dev, "Features changed: 0x%08x -> 0x%08x\n",
+		(u32)dev->features, features);
+
+	if (GET_NETDEV_OP_EXT(dev, ndo_set_features))
+		err = GET_NETDEV_OP_EXT(dev, ndo_set_features)(dev, features);
+
+	if (unlikely(err < 0)) {
+		netdev_err(dev,
+			"set_features() failed (%d); wanted 0x%08x, left 0x%08x\n",
+			err, features, (u32)dev->features);
+		return -1;
+	}
+
+	if (!err)
+		dev->features = features;
+
+	return 1;
+}
+
+void netdev_update_features(struct net_device *dev)
+{
+	if (__netdev_update_features(dev))
+		netdev_features_change(dev);
+}
+EXPORT_SYMBOL(netdev_update_features);
 
 /**
  *	netif_stacked_transfer_operstate -	transfer operstate
@@ -6103,26 +6304,33 @@ int register_netdevice(struct net_device *dev)
 	if (dev->iflink == -1)
 		dev->iflink = dev->ifindex;
 
-	/* Fix illegal checksum combinations */
-	if ((dev->features & NETIF_F_HW_CSUM) &&
-	    (dev->features & (NETIF_F_IP_CSUM|NETIF_F_IPV6_CSUM))) {
-		printk(KERN_NOTICE "%s: mixed HW and IP checksum settings.\n",
-		       dev->name);
-		dev->features &= ~(NETIF_F_IP_CSUM|NETIF_F_IPV6_CSUM);
-	}
+	/* Drivers using modern ndo features should not mix them
+	 * with legacy ethtool ops.
+	 */
+	WARN_ON((netdev_extended(dev)->hw_features ||
+	         GET_NETDEV_OP_EXT(dev, ndo_fix_features) ||
+	         GET_NETDEV_OP_EXT(dev, ndo_set_features)) &&
+	        dev->ethtool_ops &&
+	        (dev->ethtool_ops->get_rx_csum ||
+	         dev->ethtool_ops->set_rx_csum ||
+	         dev->ethtool_ops->get_tx_csum ||
+	         dev->ethtool_ops->set_tx_csum ||
+	         dev->ethtool_ops->get_sg      ||
+	         dev->ethtool_ops->set_sg      ||
+	         dev->ethtool_ops->get_tso     ||
+	         dev->ethtool_ops->set_tso     ||
+	         dev->ethtool_ops->get_ufo     ||
+	         dev->ethtool_ops->set_ufo     ||
+	         dev->ethtool_ops->get_flags   ||
+	         dev->ethtool_ops->set_flags));
 
-	if ((dev->features & NETIF_F_NO_CSUM) &&
-	    (dev->features & (NETIF_F_HW_CSUM|NETIF_F_IP_CSUM|NETIF_F_IPV6_CSUM))) {
-		printk(KERN_NOTICE "%s: mixed no checksumming and other settings.\n",
-		       dev->name);
-		dev->features &= ~(NETIF_F_IP_CSUM|NETIF_F_IPV6_CSUM|NETIF_F_HW_CSUM);
-	}
-
-	dev->features = netdev_fix_features(dev->features, dev->name);
-
-	/* Enable software GSO if SG is supported. */
-	if (dev->features & NETIF_F_SG)
-		dev->features |= NETIF_F_GSO;
+	/* Transfer changeable features to wanted_features and enable
+	 * software offloads (GSO and GRO).
+	 */
+	netdev_extended(dev)->hw_features |= NETIF_F_SOFT_FEATURES;
+	dev->features |= NETIF_F_SOFT_FEATURES;
+	netdev_extended(dev)->wanted_features =
+		dev->features & netdev_extended(dev)->hw_features;
 
 	/* Enable GRO for vlans by default if dev->features has GRO also.
 	 * vlan_dev_init() will do the dev->features check.
@@ -6140,6 +6348,8 @@ int register_netdevice(struct net_device *dev)
 	if (ret)
 		goto err_uninit;
 	dev->reg_state = NETREG_REGISTERED;
+
+	__netdev_update_features(dev);
 
 	/*
 	 *	Default initial state at registry is that the
@@ -6249,6 +6459,55 @@ out:
 	return err;
 }
 EXPORT_SYMBOL(register_netdev);
+
+/**
+ * set_netdev_hw_features() - Set netdev's hw_features
+ * @netdev:       Network device
+ * @hw_features:  Bitmap of device's changeable features
+ *
+ * hw_features must not be changed after netdev initialization.
+ * Drivers that set hw_features must not have legacy ethtool ops.
+ */
+void set_netdev_hw_features(struct net_device *netdev, u32 hw_features)
+{
+	netdev_extended(netdev)->hw_features = hw_features;
+}
+EXPORT_SYMBOL(set_netdev_hw_features);
+
+/**
+ * get_netdev_hw_features() - Get netdev's hw_features
+ * @netdev:       Network device
+ *
+ * Returns net device's hw_features.
+ */
+u32 get_netdev_hw_features(struct net_device *netdev)
+{
+	return netdev_extended(netdev)->hw_features;
+}
+EXPORT_SYMBOL(get_netdev_hw_features);
+
+/**
+ * set_netdev_ops_ext() - Assign netdev extended ops to netdev's netdev_ops_ext
+ * @netdev:	Network device
+ * @ops:	Extended ops structure
+ */
+void set_netdev_ops_ext(struct net_device *netdev, const struct net_device_ops_ext *ops)
+{
+	netdev_extended(netdev)->netdev_ops_ext = ops;
+}
+EXPORT_SYMBOL(set_netdev_ops_ext);
+
+/**
+ * get_netdev_ops_ext() - Return netdev extended ops from netdev
+ * @netdev:	Network device
+ *
+ * This function should be used through GET_NETDEV_OP_EXT() macro.
+ */
+const struct net_device_ops_ext *get_netdev_ops_ext(const struct net_device *netdev)
+{
+	return netdev_extended(netdev)->netdev_ops_ext;
+}
+EXPORT_SYMBOL(get_netdev_ops_ext);
 
 /*
  * netdev_wait_allrefs - wait until all references are gone.
@@ -6401,24 +6660,129 @@ void dev_txq_stats_fold(const struct net_device *dev,
 EXPORT_SYMBOL(dev_txq_stats_fold);
 
 /**
+ *	dev_txq_stats_fold - fold tx_queues stats
+ *	@dev: device to get statistics from
+ *	@stats: struct rtnl_link_stats64 to hold results
+ */
+void dev_txq_stats_fold64(const struct net_device *dev,
+			  struct rtnl_link_stats64 *stats)
+{
+	u64 tx_bytes = 0, tx_packets = 0, tx_dropped = 0;
+	unsigned int i;
+	struct netdev_queue *txq;
+
+	for (i = 0; i < dev->num_tx_queues; i++) {
+		txq = netdev_get_tx_queue(dev, i);
+		tx_bytes   += txq->tx_bytes;
+		tx_packets += txq->tx_packets;
+		tx_dropped += txq->tx_dropped;
+	}
+	if (tx_bytes || tx_packets || tx_dropped) {
+		stats->tx_bytes   = tx_bytes;
+		stats->tx_packets = tx_packets;
+		stats->tx_dropped = tx_dropped;
+	}
+}
+EXPORT_SYMBOL(dev_txq_stats_fold64);
+
+/* Convert rtnl_link_stats64 to net_device_stats.  They have the same
+ * fields in the same order, with only the type differing.
+ */
+static void netdev_stats64_to_stats(struct net_device_stats *netdev_stats,
+				    const struct rtnl_link_stats64 *stats64)
+{
+#if BITS_PER_LONG == 64
+	BUILD_BUG_ON(sizeof(*stats64) != sizeof(*netdev_stats));
+	memcpy(netdev_stats, stats64, sizeof(*stats64));
+#else
+	size_t i, n = sizeof(*stats64) / sizeof(u64);
+	const u64 *src = (const u64 *)stats64;
+	unsigned long *dst = (unsigned long *)netdev_stats;
+
+	BUILD_BUG_ON(sizeof(*netdev_stats) / sizeof(unsigned long) !=
+		     sizeof(*stats64) / sizeof(u64));
+	for (i = 0; i < n; i++)
+		dst[i] = src[i];
+#endif
+}
+
+/**
  *	dev_get_stats	- get network device statistics
  *	@dev: device to get statistics from
  *
  *	Get network statistics from device. The device driver may provide
- *	its own method by setting dev->netdev_ops->get_stats; otherwise
- *	the internal statistics structure is used.
+ *	its own method by setting dev->netdev_ops->get_stats64 or
+ *	dev->netdev_ops->get_stats; otherwise the internal statistics
+ *	structure is used.
  */
 const struct net_device_stats *dev_get_stats(struct net_device *dev)
 {
 	const struct net_device_ops *ops = dev->netdev_ops;
 
+	if (GET_NETDEV_OP_EXT(dev, ndo_get_stats64)) {
+		struct rtnl_link_stats64 temp;
+		memset(&temp, 0, sizeof(temp));
+		GET_NETDEV_OP_EXT(dev, ndo_get_stats64)(dev, &temp);
+		netdev_stats64_to_stats(&dev->stats, &temp);
+		return &dev->stats;
+	}
 	if (ops->ndo_get_stats)
 		return ops->ndo_get_stats(dev);
-
 	dev_txq_stats_fold(dev, &dev->stats);
 	return &dev->stats;
 }
 EXPORT_SYMBOL(dev_get_stats);
+
+/* Convert net_device_stats to rtnl_link_stats64.  They have the same
+ * fields in the same order, with only the type differing.
+ */
+void netdev_stats_to_stats64(struct rtnl_link_stats64 *stats64,
+			     const struct net_device_stats *netdev_stats)
+{
+#if BITS_PER_LONG == 64
+	BUILD_BUG_ON(sizeof(*stats64) != sizeof(*netdev_stats));
+	memcpy(stats64, netdev_stats, sizeof(*stats64));
+#else
+	size_t i, n = sizeof(*stats64) / sizeof(u64);
+	const unsigned long *src = (const unsigned long *)netdev_stats;
+	u64 *dst = (u64 *)stats64;
+
+	BUILD_BUG_ON(sizeof(*netdev_stats) / sizeof(unsigned long) !=
+		     sizeof(*stats64) / sizeof(u64));
+	for (i = 0; i < n; i++)
+		dst[i] = src[i];
+#endif
+}
+EXPORT_SYMBOL(netdev_stats_to_stats64);
+
+/**
+ *	dev_get_stats64	- get network device statistics
+ *	@dev: device to get statistics from
+ *	@storage: place to store stats
+ *
+ *	Get network statistics from device. The device driver may provide
+ *	its own method by setting dev->netdev_ops->get_stats64 or
+ *	dev->netdev_ops->get_stats; otherwise the internal statistics
+ *	structure is used.
+ */
+const struct rtnl_link_stats64 *dev_get_stats64(struct net_device *dev,
+						struct rtnl_link_stats64 *storage)
+{
+	const struct net_device_ops *ops = dev->netdev_ops;
+
+	if (GET_NETDEV_OP_EXT(dev, ndo_get_stats64)) {
+		memset(storage, 0, sizeof(*storage));
+		return GET_NETDEV_OP_EXT(dev, ndo_get_stats64)(dev, storage);
+	}
+	if (ops->ndo_get_stats) {
+		netdev_stats_to_stats64(storage, ops->ndo_get_stats(dev));
+		return storage;
+	}
+	netdev_stats_to_stats64(storage, &dev->stats);
+	dev_txq_stats_fold64(dev, storage);
+	return storage;
+}
+EXPORT_SYMBOL(dev_get_stats64);
 
 static void netdev_init_one_queue(struct net_device *dev,
 				  struct netdev_queue *queue,
@@ -7003,6 +7367,68 @@ char *netdev_drivername(const struct net_device *dev, char *buffer, int len)
 		strlcpy(buffer, driver->name, len);
 	return buffer;
 }
+
+static int __netdev_printk(const char *level, const struct net_device *dev,
+			   struct va_format *vaf)
+{
+	int r;
+
+	if (dev && dev->dev.parent)
+		r = dev_printk(level, dev->dev.parent, "%s: %pV",
+			       netdev_name(dev), vaf);
+	else if (dev)
+		r = printk("%s%s: %pV", level, netdev_name(dev), vaf);
+	else
+		r = printk("%s(NULL net_device): %pV", level, vaf);
+
+	return r;
+}
+
+int netdev_printk(const char *level, const struct net_device *dev,
+		  const char *format, ...)
+{
+	struct va_format vaf;
+	va_list args;
+	int r;
+
+	va_start(args, format);
+
+	vaf.fmt = format;
+	vaf.va = &args;
+
+	r = __netdev_printk(level, dev, &vaf);
+	va_end(args);
+
+	return r;
+}
+EXPORT_SYMBOL(netdev_printk);
+
+#define define_netdev_printk_level(func, level)			\
+int func(const struct net_device *dev, const char *fmt, ...)	\
+{								\
+	int r;							\
+	struct va_format vaf;					\
+	va_list args;						\
+								\
+	va_start(args, fmt);					\
+								\
+	vaf.fmt = fmt;						\
+	vaf.va = &args;						\
+								\
+	r = __netdev_printk(level, dev, &vaf);			\
+	va_end(args);						\
+								\
+	return r;						\
+}								\
+EXPORT_SYMBOL(func);
+
+define_netdev_printk_level(netdev_emerg, KERN_EMERG);
+define_netdev_printk_level(netdev_alert, KERN_ALERT);
+define_netdev_printk_level(netdev_crit, KERN_CRIT);
+define_netdev_printk_level(netdev_err, KERN_ERR);
+define_netdev_printk_level(netdev_warn, KERN_WARNING);
+define_netdev_printk_level(netdev_notice, KERN_NOTICE);
+define_netdev_printk_level(netdev_info, KERN_INFO);
 
 static void __net_exit netdev_exit(struct net *net)
 {

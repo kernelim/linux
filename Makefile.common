@@ -6,17 +6,15 @@ KVERSION:=2.6.32
 MARKER:=v2.6.32
 SPECFILE:=kernel.spec
 REDHAT:=$(shell pwd)
-LASTCOMMIT:=$(shell cat $(REDHAT)/lastcommit)
+LASTCOMMIT:=$(shell git log -1 --format=format:%H `cat $(REDHAT)/lastcommit`)
 CMARKER:=$(MARKER)
 RPM:=$(REDHAT)/rpm
 SRPMS:=$(RPM)/SRPMS
 SOURCES:=$(RPM)/SOURCES
-BUILD:=431
-#TARFILE:=$(subst _,.,$(MARKER)).tar.bz2
-TARFILE:=linux-$(KVERSION).tar.bz2
-TARBALL:=$(REDHAT)/$(TARFILE)
+BUILD:=504
 TESTPATCH:=$(REDHAT)/linux-kernel-test.patch
-FILTERDIFF:=/usr/bin/filterdiff -x '*redhat/*' -x '*/.gitignore' -x '*/makefile'
+FILTERDIFF:=/usr/bin/filterdiff -x '*redhat/*' -x '*/.gitignore' \
+	-x '*/makefile' -x '*/Makefile'
 
 SUBLEVEL := $(shell echo $(MARKER) | cut -f 3 -d '.' | cut -f 1 -d '-')
 RCREV := $(shell echo $(MARKER) | cut -f 2 -d '-' -s | sed -e "s/rc//")

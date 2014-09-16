@@ -105,6 +105,7 @@ static char *xmit_hash_policy;
 static int arp_interval = BOND_LINK_ARP_INTERV;
 static char *arp_ip_target[BOND_MAX_ARP_TARGETS];
 static char *arp_validate;
+static char *arp_all_targets;
 static char *fail_over_mac;
 static int all_slaves_active = 0;
 static struct bond_params bonding_defaults;
@@ -164,6 +165,8 @@ module_param(arp_validate, charp, 0);
 MODULE_PARM_DESC(arp_validate, "validate src/dst of ARP probes; "
 			       "0 for none (default), 1 for active, "
 			       "2 for backup, 3 for all");
+module_param(arp_all_targets, charp, 0);
+MODULE_PARM_DESC(arp_all_targets, "fail on any/all arp targets timeout; 0 for any (default), 1 for all");
 module_param(fail_over_mac, charp, 0);
 MODULE_PARM_DESC(fail_over_mac, "For active-backup, do not set all slaves to "
 				"the same MAC; 0 for none (default), "
@@ -219,6 +222,12 @@ const struct bond_parm_tbl xmit_hashtype_tbl[] = {
 {	"layer2",		BOND_XMIT_POLICY_LAYER2},
 {	"layer3+4",		BOND_XMIT_POLICY_LAYER34},
 {	"layer2+3",		BOND_XMIT_POLICY_LAYER23},
+{	NULL,			-1},
+};
+
+const struct bond_parm_tbl arp_all_targets_tbl[] = {
+{	"any",			BOND_ARP_TARGETS_ANY},
+{	"all",			BOND_ARP_TARGETS_ALL},
 {	NULL,			-1},
 };
 
@@ -1669,8 +1678,8 @@ static int bond_compute_features(struct bonding *bond)
 
 done:
 	features |= (bond_dev->features & BOND_VLAN_FEATURES);
-	bond_dev->features = netdev_fix_features(features, NULL);
-	bond_dev->vlan_features = netdev_fix_features(vlan_features, NULL);
+	bond_dev->features = netdev_fix_features_dev(bond_dev, features);
+	bond_dev->vlan_features = netdev_fix_features_dev(bond_dev, vlan_features);
 	bond_dev->hard_header_len = max_hard_header_len;
 	netif_set_gso_max_size(bond_dev, gso_max_size);
 
@@ -1703,7 +1712,7 @@ int bond_enslave(struct net_device *bond_dev, struct net_device *slave_dev)
 	struct sockaddr addr;
 	int link_reporting;
 	int old_features = bond_dev->features;
-	int res = 0;
+	int res = 0, i;
 	u32 flags, orig_flags;
 
 	if (!bond->params.use_carrier && slave_dev->ethtool_ops == NULL &&
@@ -1949,13 +1958,15 @@ int bond_enslave(struct net_device *bond_dev, struct net_device *slave_dev)
 	new_slave->delay = 0;
 	new_slave->link_failure_count = 0;
 
-	bond_compute_features(bond);
-
 	write_unlock_bh(&bond->lock);
+
+	bond_compute_features(bond);
 
 	read_lock(&bond->lock);
 
 	new_slave->last_arp_rx = jiffies;
+	for (i = 0; i < BOND_MAX_ARP_TARGETS; i++)
+		new_slave->target_last_arp_rx[i] = new_slave->last_arp_rx;
 
 	if (bond->params.miimon && !bond->params.use_carrier) {
 		link_reporting = bond_check_dev_link(bond, slave_dev, 1);
@@ -3038,17 +3049,19 @@ static void bond_send_gratuitous_arp(struct bonding *bond)
 static void bond_validate_arp(struct bonding *bond, struct slave *slave, __be32 sip, __be32 tip)
 {
 	int i;
-	__be32 *targets = bond->params.arp_targets;
 
-	for (i = 0; (i < BOND_MAX_ARP_TARGETS) && targets[i]; i++) {
-		pr_debug("bva: sip %pI4 tip %pI4 t[%d] %pI4 bhti(tip) %d\n",
-			&sip, &tip, i, &targets[i], bond_has_this_ip(bond, tip));
-		if (sip == targets[i]) {
-			if (bond_has_this_ip(bond, tip))
-				slave->last_arp_rx = jiffies;
-			return;
-		}
+	if (!sip || !bond_has_this_ip(bond, tip)) {
+		pr_debug("bva: sip %pI4 tip %pI4 not found\n", &sip, &tip);
+		return;
 	}
+
+	i = bond_get_targets_ip(bond->params.arp_targets, sip);
+	if (i == -1) {
+		pr_debug("bva: sip %pI4 not found in targets\n", &sip);
+		return;
+	}
+	slave->last_arp_rx = jiffies;
+	slave->target_last_arp_rx[i] = jiffies;
 }
 
 static int bond_arp_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev)
@@ -3123,10 +3136,17 @@ static int bond_arp_rcv(struct sk_buff *skb, struct net_device *dev, struct pack
 	 * configuration, the ARP probe will (hopefully) travel from
 	 * the active, through one switch, the router, then the other
 	 * switch before reaching the backup.
+	 *
+	 * We 'trust' the arp requests if there is an active slave and
+	 * it received valid arp reply(s) after it became active. This
+	 * is done to avoid endless looping when we can't reach the
+	 * arp_ip_target and fool ourselves with our own arp requests.
 	 */
 	if (slave->state == BOND_STATE_ACTIVE)
 		bond_validate_arp(bond, slave, sip, tip);
-	else
+	else if (bond->curr_active_slave &&
+		 time_after(slave_last_rx(bond, bond->curr_active_slave),
+			    bond->curr_active_slave->jiffies))
 		bond_validate_arp(bond, slave, tip, sip);
 
 out_unlock:
@@ -4214,49 +4234,48 @@ static int bond_close(struct net_device *bond_dev)
 	return 0;
 }
 
-static struct net_device_stats *bond_get_stats(struct net_device *bond_dev)
+static struct rtnl_link_stats64 *bond_get_stats(struct net_device *bond_dev,
+						struct rtnl_link_stats64 *stats)
 {
 	struct bonding *bond = netdev_priv(bond_dev);
-	struct net_device_stats *stats = &bond->stats;
-	struct net_device_stats local_stats;
+	struct rtnl_link_stats64 temp;
 	struct slave *slave;
 	int i;
 
-	memset(&local_stats, 0, sizeof(struct net_device_stats));
+	memset(stats, 0, sizeof(*stats));
 
 	read_lock_bh(&bond->lock);
 
 	bond_for_each_slave(bond, slave, i) {
-		const struct net_device_stats *sstats = dev_get_stats(slave->dev);
+		const struct rtnl_link_stats64 *sstats =
+			dev_get_stats64(slave->dev, &temp);
 
-		local_stats.rx_packets += sstats->rx_packets;
-		local_stats.rx_bytes += sstats->rx_bytes;
-		local_stats.rx_errors += sstats->rx_errors;
-		local_stats.rx_dropped += sstats->rx_dropped;
+		stats->rx_packets += sstats->rx_packets;
+		stats->rx_bytes += sstats->rx_bytes;
+		stats->rx_errors += sstats->rx_errors;
+		stats->rx_dropped += sstats->rx_dropped;
 
-		local_stats.tx_packets += sstats->tx_packets;
-		local_stats.tx_bytes += sstats->tx_bytes;
-		local_stats.tx_errors += sstats->tx_errors;
-		local_stats.tx_dropped += sstats->tx_dropped;
+		stats->tx_packets += sstats->tx_packets;
+		stats->tx_bytes += sstats->tx_bytes;
+		stats->tx_errors += sstats->tx_errors;
+		stats->tx_dropped += sstats->tx_dropped;
 
-		local_stats.multicast += sstats->multicast;
-		local_stats.collisions += sstats->collisions;
+		stats->multicast += sstats->multicast;
+		stats->collisions += sstats->collisions;
 
-		local_stats.rx_length_errors += sstats->rx_length_errors;
-		local_stats.rx_over_errors += sstats->rx_over_errors;
-		local_stats.rx_crc_errors += sstats->rx_crc_errors;
-		local_stats.rx_frame_errors += sstats->rx_frame_errors;
-		local_stats.rx_fifo_errors += sstats->rx_fifo_errors;
-		local_stats.rx_missed_errors += sstats->rx_missed_errors;
+		stats->rx_length_errors += sstats->rx_length_errors;
+		stats->rx_over_errors += sstats->rx_over_errors;
+		stats->rx_crc_errors += sstats->rx_crc_errors;
+		stats->rx_frame_errors += sstats->rx_frame_errors;
+		stats->rx_fifo_errors += sstats->rx_fifo_errors;
+		stats->rx_missed_errors += sstats->rx_missed_errors;
 
-		local_stats.tx_aborted_errors += sstats->tx_aborted_errors;
-		local_stats.tx_carrier_errors += sstats->tx_carrier_errors;
-		local_stats.tx_fifo_errors += sstats->tx_fifo_errors;
-		local_stats.tx_heartbeat_errors += sstats->tx_heartbeat_errors;
-		local_stats.tx_window_errors += sstats->tx_window_errors;
+		stats->tx_aborted_errors += sstats->tx_aborted_errors;
+		stats->tx_carrier_errors += sstats->tx_carrier_errors;
+		stats->tx_fifo_errors += sstats->tx_fifo_errors;
+		stats->tx_heartbeat_errors += sstats->tx_heartbeat_errors;
+		stats->tx_window_errors += sstats->tx_window_errors;
 	}
-
-	memcpy(stats, &local_stats, sizeof(struct net_device_stats));
 
 	read_unlock_bh(&bond->lock);
 
@@ -5041,7 +5060,6 @@ static const struct net_device_ops bond_netdev_ops = {
 	.ndo_stop		= bond_close,
 	.ndo_start_xmit		= bond_start_xmit,
 	.ndo_select_queue	= bond_select_queue,
-	.ndo_get_stats		= bond_get_stats,
 	.ndo_do_ioctl		= bond_do_ioctl,
 	.ndo_set_multicast_list	= bond_set_multicast_list,
 	.ndo_change_mtu		= bond_change_mtu,
@@ -5054,6 +5072,11 @@ static const struct net_device_ops bond_netdev_ops = {
 	.ndo_netpoll_cleanup	= bond_netpoll_cleanup,
 	.ndo_poll_controller	= bond_poll_controller,
 #endif
+};
+
+static const struct net_device_ops_ext bond_netdev_ops_ext = {
+	.size			= sizeof(struct net_device_ops_ext),
+	.ndo_get_stats64	= bond_get_stats,
 };
 
 static void bond_destructor(struct net_device *bond_dev)
@@ -5081,6 +5104,7 @@ static void bond_setup(struct net_device *bond_dev)
 	/* Initialize the device entry points */
 	ether_setup(bond_dev);
 	bond_dev->netdev_ops = &bond_netdev_ops;
+	set_netdev_ops_ext(bond_dev, &bond_netdev_ops_ext);
 	bond_dev->ethtool_ops = &bond_ethtool_ops;
 	bond_set_mode_ops(bond, bond->params.mode);
 
@@ -5222,7 +5246,8 @@ int bond_parse_parm(const char *buf, const struct bond_parm_tbl *tbl)
 
 static int bond_check_params(struct bond_params *params)
 {
-	int arp_validate_value, fail_over_mac_value, primary_reselect_value;
+	int arp_validate_value, fail_over_mac_value, primary_reselect_value, i;
+	int arp_all_targets_value;
 
 	/*
 	 * Convert string parameters.
@@ -5452,20 +5477,25 @@ static int bond_check_params(struct bond_params *params)
 		arp_interval = BOND_LINK_ARP_INTERV;
 	}
 
-	for (arp_ip_count = 0;
-	     (arp_ip_count < BOND_MAX_ARP_TARGETS) && arp_ip_target[arp_ip_count];
-	     arp_ip_count++) {
+	for (arp_ip_count = 0, i = 0;
+	     (arp_ip_count < BOND_MAX_ARP_TARGETS) && arp_ip_target[i];
+	     i++) {
 		/* not complete check, but should be good enough to
 		   catch mistakes */
-		if (!isdigit(arp_ip_target[arp_ip_count][0])) {
+		__be32 ip = in_aton(arp_ip_target[i]);
+		if (!isdigit(arp_ip_target[i][0]) || ip == 0 ||
+		    ip == htonl(INADDR_BROADCAST)) {
 			pr_warning(DRV_NAME
 			       ": Warning: bad arp_ip_target module parameter "
 			       "(%s), ARP monitoring will not be performed\n",
-			       arp_ip_target[arp_ip_count]);
+			       arp_ip_target[i]);
 			arp_interval = 0;
 		} else {
-			__be32 ip = in_aton(arp_ip_target[arp_ip_count]);
-			arp_target[arp_ip_count] = ip;
+			if (bond_get_targets_ip(arp_target, ip) == -1)
+				arp_target[arp_ip_count++] = ip;
+			else
+				pr_warning("Warning: duplicate address %pI4 in arp_ip_target, skipping\n",
+					   &ip);
 		}
 	}
 
@@ -5502,13 +5532,23 @@ static int bond_check_params(struct bond_params *params)
 	} else
 		arp_validate_value = 0;
 
+	arp_all_targets_value = 0;
+	if (arp_all_targets) {
+		arp_all_targets_value = bond_parse_parm(arp_all_targets,
+							arp_all_targets_tbl);
+
+		if (arp_all_targets_value == -1) {
+			pr_err("Error: invalid arp_all_targets_value \"%s\"\n",
+			       arp_all_targets);
+			arp_all_targets_value = 0;
+		}
+	}
+
 	if (miimon) {
 		pr_info(DRV_NAME
 		       ": MII link monitoring set to %d ms\n",
 		       miimon);
 	} else if (arp_interval) {
-		int i;
-
 		pr_info(DRV_NAME ": ARP monitoring set to %d ms,"
 		       " validate %s, with %d target(s):",
 		       arp_interval,
@@ -5582,6 +5622,7 @@ static int bond_check_params(struct bond_params *params)
 	params->num_unsol_na = num_unsol_na;
 	params->arp_interval = arp_interval;
 	params->arp_validate = arp_validate_value;
+	params->arp_all_targets = arp_all_targets_value;
 	params->updelay = updelay;
 	params->downdelay = downdelay;
 	params->use_carrier = use_carrier;

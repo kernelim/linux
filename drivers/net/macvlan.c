@@ -253,7 +253,7 @@ netdev_tx_t macvlan_start_xmit(struct sk_buff *skb,
 	int ret;
 
 	ret = macvlan_queue_xmit(skb, dev);
-	if (likely(ret == NET_XMIT_SUCCESS)) {
+	if (likely(ret == NET_XMIT_SUCCESS || ret == NET_XMIT_CN)) {
 		txq->tx_packets++;
 		txq->tx_bytes += len;
 	} else
@@ -444,31 +444,6 @@ static int macvlan_init(struct net_device *dev)
 	return 0;
 }
 
-/**
- *	dev_txq_stats_fold - fold tx_queues stats
- *	@dev: device to get statistics from
- *	@stats: struct net_device_stats to hold results
- */
-static void macvlan_dev_txq_stats_fold(const struct net_device *dev,
-			struct net_device_stats *stats)
-{
-	unsigned long tx_bytes = 0, tx_packets = 0, tx_dropped = 0;
-	unsigned int i;
-	struct netdev_queue *txq;
-
-	for (i = 0; i < dev->num_tx_queues; i++) {
-		txq = netdev_get_tx_queue(dev, i);
-		tx_bytes   += txq->tx_bytes;
-		tx_packets += txq->tx_packets;
-		tx_dropped += txq->tx_dropped;
-	}
-	if (tx_bytes || tx_packets || tx_dropped) {
-		stats->tx_bytes   = tx_bytes;
-		stats->tx_packets = tx_packets;
-		stats->tx_dropped = tx_dropped;
-	}
-}
-
 static void macvlan_uninit(struct net_device *dev)
 {
 	struct macvlan_dev *vlan = netdev_priv(dev);
@@ -476,29 +451,38 @@ static void macvlan_uninit(struct net_device *dev)
 	free_percpu(vlan->rx_stats);
 }
 
-static struct net_device_stats *macvlan_dev_get_stats(struct net_device *dev)
+static struct rtnl_link_stats64 *macvlan_dev_get_stats64(struct net_device *dev,
+							 struct rtnl_link_stats64 *stats)
 {
-	struct net_device_stats *stats = &dev->stats;
 	struct macvlan_dev *vlan = netdev_priv(dev);
 
-	macvlan_dev_txq_stats_fold(dev, stats);
+	dev_txq_stats_fold64(dev, stats);
 
 	if (vlan->rx_stats) {
-		struct macvlan_rx_stats *p, rx = {0};
+		struct macvlan_rx_stats *p, accum = {0};
+		u64 rx_packets, rx_bytes, rx_multicast;
+		unsigned int start;
 		int i;
 
 		for_each_possible_cpu(i) {
 			p = per_cpu_ptr(vlan->rx_stats, i);
-			rx.rx_packets += p->rx_packets;
-			rx.rx_bytes   += p->rx_bytes;
-			rx.rx_errors  += p->rx_errors;
-			rx.multicast  += p->multicast;
+			do {
+				start = u64_stats_fetch_begin_irq(&p->syncp);
+				rx_packets	= p->rx_packets;
+				rx_bytes	= p->rx_bytes;
+				rx_multicast	= p->rx_multicast;
+			} while (u64_stats_fetch_retry_irq(&p->syncp, start));
+			accum.rx_packets	+= rx_packets;
+			accum.rx_bytes		+= rx_bytes;
+			accum.rx_multicast	+= rx_multicast;
+			/* rx_errors is an ulong, updated without syncp protection */
+			accum.rx_errors		+= p->rx_errors;
 		}
-		stats->rx_packets = rx.rx_packets;
-		stats->rx_bytes   = rx.rx_bytes;
-		stats->rx_errors  = rx.rx_errors;
-		stats->rx_dropped = rx.rx_errors;
-		stats->multicast  = rx.multicast;
+		stats->rx_packets = accum.rx_packets;
+		stats->rx_bytes   = accum.rx_bytes;
+		stats->rx_errors  = accum.rx_errors;
+		stats->rx_dropped = accum.rx_errors;
+		stats->multicast  = accum.rx_multicast;
 	}
 	return stats;
 }
@@ -547,8 +531,12 @@ static const struct net_device_ops macvlan_netdev_ops = {
 	.ndo_change_rx_flags	= macvlan_change_rx_flags,
 	.ndo_set_mac_address	= macvlan_set_mac_address,
 	.ndo_set_multicast_list	= macvlan_set_multicast_list,
-	.ndo_get_stats		= macvlan_dev_get_stats,
 	.ndo_validate_addr	= eth_validate_addr,
+};
+
+static const struct net_device_ops_ext macvlan_netdev_ops_ext = {
+	.size			= sizeof(struct net_device_ops_ext),
+	.ndo_get_stats64	= macvlan_dev_get_stats64,
 };
 
 void macvlan_common_setup(struct net_device *dev)
@@ -558,6 +546,7 @@ void macvlan_common_setup(struct net_device *dev)
 	dev->priv_flags &= ~IFF_XMIT_DST_RELEASE;
 	netdev_extended(dev)->ext_priv_flags &= ~IFF_TX_SKB_SHARING;
 	dev->netdev_ops		= &macvlan_netdev_ops;
+	set_netdev_ops_ext(dev, &macvlan_netdev_ops_ext);
 	dev->destructor		= free_netdev;
 	dev->header_ops		= &macvlan_hard_header_ops,
 	dev->ethtool_ops	= &macvlan_ethtool_ops;

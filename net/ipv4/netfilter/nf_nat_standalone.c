@@ -132,7 +132,7 @@ nf_nat_fn(unsigned int hooknum,
 
 			if (hooknum == NF_INET_LOCAL_IN)
 				/* LOCAL_IN hook doesn't have a chain!  */
-				ret = alloc_null_binding(ct, hooknum);
+				ret = nf_nat_alloc_null_binding(ct, hooknum);
 			else
 				ret = nf_nat_rule_find(skb, hooknum, in, out,
 						       ct);

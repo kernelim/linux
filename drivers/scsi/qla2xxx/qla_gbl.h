@@ -1,6 +1,6 @@
 /*
  * QLogic Fibre Channel HBA Driver
- * Copyright (c)  2003-2013 QLogic Corporation
+ * Copyright (c)  2003-2014 QLogic Corporation
  *
  * See LICENSE.qla2xxx for copyright and licensing details.
  */
@@ -114,6 +114,7 @@ extern int ql2xmdcapmask;
 extern int ql2xmdenable;
 extern int ql2xenabledif;
 extern int ql2xenablehba_err_chk;
+extern int ql2xtargetreset;
 extern int ql2xasynclogin;
 
 extern int qla2x00_loop_reset(scsi_qla_host_t *);
@@ -319,6 +320,7 @@ qla24xx_get_isp_stats(scsi_qla_host_t *, struct link_statistics *,
     dma_addr_t);
 
 extern int qla24xx_abort_command(srb_t *);
+extern int qla24xx_async_abort_command(srb_t *);
 extern int
 qla24xx_abort_target(struct fc_port *, unsigned int, int);
 extern int
@@ -328,6 +330,11 @@ qla2x00_eh_wait_for_pending_commands(scsi_qla_host_t *, unsigned int,
 	unsigned int, enum nexus_wait_type);
 extern int
 qla2x00_system_error(scsi_qla_host_t *);
+
+extern int
+qla2x00_write_serdes_word(scsi_qla_host_t *, uint16_t, uint16_t);
+extern int
+qla2x00_read_serdes_word(scsi_qla_host_t *, uint16_t, uint16_t *);
 
 extern int
 qla2x00_set_serdes_params(scsi_qla_host_t *, uint16_t, uint16_t, uint16_t);
@@ -346,6 +353,12 @@ qla2x00_enable_fce_trace(scsi_qla_host_t *, dma_addr_t, uint16_t , uint16_t *,
 
 extern int
 qla2x00_disable_fce_trace(scsi_qla_host_t *, uint64_t *, uint64_t *);
+
+extern int
+qla82xx_set_driver_version(scsi_qla_host_t *, char *);
+
+extern int
+qla25xx_set_driver_version(scsi_qla_host_t *, char *);
 
 extern int
 qla2x00_read_sfp(scsi_qla_host_t *, dma_addr_t, uint8_t *,
@@ -484,6 +497,7 @@ extern void qla2300_fw_dump(scsi_qla_host_t *, int);
 extern void qla24xx_fw_dump(scsi_qla_host_t *, int);
 extern void qla25xx_fw_dump(scsi_qla_host_t *, int);
 extern void qla81xx_fw_dump(scsi_qla_host_t *, int);
+extern void qla82xx_fw_dump(scsi_qla_host_t *, int);
 extern void qla2x00_dump_regs(scsi_qla_host_t *);
 extern void qla2x00_dump_buffer(uint8_t *, uint32_t);
 extern void qla2x00_dump_buffer_zipped(uint8_t *, uint32_t);
@@ -568,17 +582,17 @@ extern char *qlafx00_fw_version_str(struct scsi_qla_host *, char *);
 extern irqreturn_t qlafx00_intr_handler(int, void *);
 extern void qlafx00_enable_intrs(struct qla_hw_data *);
 extern void qlafx00_disable_intrs(struct qla_hw_data *);
-extern int qlafx00_abort_command(srb_t *);
 extern int qlafx00_abort_target(fc_port_t *, unsigned int, int);
 extern int qlafx00_lun_reset(fc_port_t *, unsigned int, int);
 extern int qlafx00_start_scsi(srb_t *);
 extern int qlafx00_abort_isp(scsi_qla_host_t *);
 extern int qlafx00_iospace_config(struct qla_hw_data *);
 extern int qlafx00_init_firmware(scsi_qla_host_t *, uint16_t);
+extern int qlafx00_driver_shutdown(scsi_qla_host_t *, int);
 extern int qlafx00_fw_ready(scsi_qla_host_t *);
 extern int qlafx00_configure_devices(scsi_qla_host_t *);
 extern int qlafx00_reset_initialize(scsi_qla_host_t *);
-extern int qlafx00_fx_disc(scsi_qla_host_t *, fc_port_t *, uint8_t);
+extern int qlafx00_fx_disc(scsi_qla_host_t *, fc_port_t *, uint16_t);
 extern int qlafx00_process_aen(struct scsi_qla_host *, struct qla_work_evt *);
 extern int qlafx00_post_aenfx_work(struct scsi_qla_host *,  uint32_t,
 				   uint32_t *, int);
@@ -592,6 +606,7 @@ extern void qlafx00_abort_iocb(srb_t *, struct abort_iocb_entry_fx00 *);
 extern void qlafx00_fxdisc_iocb(srb_t *, struct fxdisc_entry_fx00 *);
 extern void qlafx00_timer_routine(scsi_qla_host_t *);
 extern int qlafx00_rescan_isp(scsi_qla_host_t *);
+extern int qlafx00_loop_reset(scsi_qla_host_t *vha);
 
 /* qla82xx related functions */
 
@@ -660,6 +675,8 @@ extern int qla81xx_get_led_config(scsi_qla_host_t *, uint16_t *);
 extern char *qdev_state(uint32_t);
 extern int qla82xx_mbx_beacon_ctl(scsi_qla_host_t *, int);
 extern void qla82xx_clear_pending_mbx(scsi_qla_host_t *);
+extern int qla82xx_read_temperature(scsi_qla_host_t *);
+extern int qla8044_read_temperature(scsi_qla_host_t *);
 
 /* BSG related functions */
 extern int qla24xx_bsg_request(struct fc_bsg_job *);

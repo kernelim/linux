@@ -37,6 +37,7 @@
 #include <linux/completion.h>
 #include <linux/radix-tree.h>
 #include <linux/cpu_rmap.h>
+#include <linux/if_ether.h>
 
 #include <asm/atomic.h>
 
@@ -47,12 +48,16 @@
 #define MSIX_LEGACY_SZ		4
 #define MIN_MSIX_P_PORT		5
 
+#define MLX4_ROCE_MAX_GIDS	128
+#define MLX4_ROCE_PF_GIDS	16
+
 enum {
 	MLX4_FLAG_MSI_X		= 1 << 0,
 	MLX4_FLAG_OLD_PORT_CMDS	= 1 << 1,
 	MLX4_FLAG_MASTER	= 1 << 2,
 	MLX4_FLAG_SLAVE		= 1 << 3,
 	MLX4_FLAG_SRIOV		= 1 << 4,
+	MLX4_FLAG_OLD_REG_MAC	= 1 << 6,
 };
 
 enum {
@@ -79,6 +84,7 @@ enum {
 enum {
 	MLX4_MAX_NUM_PF		= 16,
 	MLX4_MAX_NUM_VF		= 64,
+	MLX4_MAX_NUM_VF_P_PORT  = 64,
 	MLX4_MFUNC_MAX		= 80,
 	MLX4_MAX_EQ_NUM		= 1024,
 	MLX4_MFUNC_EQ_NUM	= 4,
@@ -154,11 +160,13 @@ enum {
 	MLX4_DEV_CAP_FLAG2_RSS_TOP		= 1LL <<  1,
 	MLX4_DEV_CAP_FLAG2_RSS_XOR		= 1LL <<  2,
 	MLX4_DEV_CAP_FLAG2_FS_EN		= 1LL <<  3,
-	MLX4_DEV_CAP_FLAGS2_REASSIGN_MAC_EN	= 1LL <<  4,
+	MLX4_DEV_CAP_FLAG2_REASSIGN_MAC_EN	= 1LL <<  4,
 	MLX4_DEV_CAP_FLAG2_TS			= 1LL <<  5,
 	MLX4_DEV_CAP_FLAG2_VLAN_CONTROL		= 1LL <<  6,
 	MLX4_DEV_CAP_FLAG2_FSM			= 1LL <<  7,
-	MLX4_DEV_CAP_FLAG2_UPDATE_QP		= 1LL <<  8
+	MLX4_DEV_CAP_FLAG2_UPDATE_QP		= 1LL <<  8,
+	MLX4_DEV_CAP_FLAG2_DMFS_IPOIB		= 1LL <<  9,
+	MLX4_DEV_CAP_FLAG2_VXLAN_OFFLOADS	= 1LL << 10
 };
 
 enum {
@@ -207,6 +215,7 @@ enum mlx4_event {
 	MLX4_EVENT_TYPE_CMD		   = 0x0a,
 	MLX4_EVENT_TYPE_VEP_UPDATE	   = 0x19,
 	MLX4_EVENT_TYPE_COMM_CHANNEL	   = 0x18,
+	MLX4_EVENT_TYPE_OP_REQUIRED	   = 0x1a,
 	MLX4_EVENT_TYPE_FATAL_WARNING	   = 0x1b,
 	MLX4_EVENT_TYPE_FLR_EVENT	   = 0x1c,
 	MLX4_EVENT_TYPE_PORT_MNG_CHG_EVENT = 0x1d,
@@ -447,6 +456,7 @@ struct mlx4_caps {
 	u32			userspace_caps; /* userspace must be aware of these */
 	u32			function_caps;  /* VFs must be aware of these */
 	u16			hca_core_clock;
+	u64			phys_port_id[MLX4_MAX_PORTS + 1];
 };
 
 struct mlx4_buf_list {
@@ -613,7 +623,8 @@ struct mlx4_eth_av {
 	u8		hop_limit;
 	__be32		sl_tclass_flowlabel;
 	u8		dgid[16];
-	u32		reserved4[2];
+	u8		s_mac[6];
+	u8		reserved4[2];
 	__be16		vlan;
 	u8		mac[6];
 };
@@ -634,19 +645,37 @@ struct mlx4_counter {
 	__be64	tx_bytes;
 };
 
+struct mlx4_quotas {
+	int qp;
+	int cq;
+	int srq;
+	int mpt;
+	int mtt;
+	int counter;
+	int xrcd;
+};
+
+struct mlx4_vf_dev {
+	u8			min_port;
+	u8			n_ports;
+};
+
 struct mlx4_dev {
 	struct pci_dev	       *pdev;
 	unsigned long		flags;
 	unsigned long		num_slaves;
 	struct mlx4_caps	caps;
 	struct mlx4_phys_caps	phys_caps;
+	struct mlx4_quotas	quotas;
 	struct radix_tree_root	qp_table_tree;
 	u8			rev_id;
 	char			board_id[MLX4_BOARD_ID_LEN];
 	int			num_vfs;
+	int			numa_node;
 	int			oper_log_mgm_entry_size;
 	u64			regid_promisc_array[MLX4_MAX_PORTS + 1];
 	u64			regid_allmulti_array[MLX4_MAX_PORTS + 1];
+	struct mlx4_vf_dev     *dev_vfs;
 };
 
 struct mlx4_eqe {
@@ -765,6 +794,12 @@ static inline int mlx4_is_master(struct mlx4_dev *dev)
 	return dev->flags & MLX4_FLAG_MASTER;
 }
 
+static inline int mlx4_num_reserved_sqps(struct mlx4_dev *dev)
+{
+	return dev->phys_caps.base_sqpn + 8 +
+		16 * MLX4_MFUNC_MAX * !!mlx4_is_master(dev);
+}
+
 static inline int mlx4_is_qp_reserved(struct mlx4_dev *dev, u32 qpn)
 {
 	return (qpn < dev->phys_caps.base_sqpn + 8 +
@@ -810,7 +845,7 @@ void mlx4_xrcd_free(struct mlx4_dev *dev, u32 xrcdn);
 
 int mlx4_uar_alloc(struct mlx4_dev *dev, struct mlx4_uar *uar);
 void mlx4_uar_free(struct mlx4_dev *dev, struct mlx4_uar *uar);
-int mlx4_bf_alloc(struct mlx4_dev *dev, struct mlx4_bf *bf);
+int mlx4_bf_alloc(struct mlx4_dev *dev, struct mlx4_bf *bf, int node);
 void mlx4_bf_free(struct mlx4_dev *dev, struct mlx4_bf *bf);
 
 int mlx4_mtt_init(struct mlx4_dev *dev, int npages, int page_shift,
@@ -1048,11 +1083,6 @@ struct _rule_hw {
 	};
 };
 
-/* translating DMFS verbs sniffer rule to the FW API would need two reg IDs */
-struct mlx4_flow_handle {
-	u64 reg_id[2];
-};
-
 int mlx4_flow_steer_promisc_add(struct mlx4_dev *dev, u8 port, u32 qpn,
 				enum mlx4_net_trans_promisc_mode mode);
 int mlx4_flow_steer_promisc_remove(struct mlx4_dev *dev, u8 port,
@@ -1075,9 +1105,10 @@ int mlx4_SET_PORT_qpn_calc(struct mlx4_dev *dev, u8 port, u32 base_qpn,
 int mlx4_SET_PORT_PRIO2TC(struct mlx4_dev *dev, u8 port, u8 *prio2tc);
 int mlx4_SET_PORT_SCHEDULER(struct mlx4_dev *dev, u8 port, u8 *tc_tx_bw,
 		u8 *pg, u16 *ratelimit);
+int mlx4_find_cached_mac(struct mlx4_dev *dev, u8 port, u64 mac, int *idx);
 int mlx4_find_cached_vlan(struct mlx4_dev *dev, u8 port, u16 vid, int *idx);
 int mlx4_register_vlan(struct mlx4_dev *dev, u8 port, u16 vlan, int *index);
-void mlx4_unregister_vlan(struct mlx4_dev *dev, u8 port, int index);
+void mlx4_unregister_vlan(struct mlx4_dev *dev, u8 port, u16 vlan);
 
 int mlx4_map_phys_fmr(struct mlx4_dev *dev, struct mlx4_fmr *fmr, u64 *page_list,
 		      int npages, u64 iova, u32 *lkey, u32 *rkey);
@@ -1093,6 +1124,7 @@ int mlx4_assign_eq(struct mlx4_dev *dev, char *name, struct cpu_rmap *rmap,
 		   int *vector);
 void mlx4_release_eq(struct mlx4_dev *dev, int vec);
 
+int mlx4_get_phys_port_id(struct mlx4_dev *dev);
 int mlx4_wol_read(struct mlx4_dev *dev, u64 *config, int port);
 int mlx4_wol_write(struct mlx4_dev *dev, u64 config, int port);
 
@@ -1124,6 +1156,44 @@ int set_and_calc_slave_port_state(struct mlx4_dev *dev, int slave, u8 port, int 
 void mlx4_put_slave_node_guid(struct mlx4_dev *dev, int slave, __be64 guid);
 __be64 mlx4_get_slave_node_guid(struct mlx4_dev *dev, int slave);
 
+int mlx4_get_slave_from_roce_gid(struct mlx4_dev *dev, int port, u8 *gid,
+				 int *slave_id);
+int mlx4_get_roce_gid_from_slave(struct mlx4_dev *dev, int port, int slave_id,
+				 u8 *gid);
+
+int mlx4_FLOW_STEERING_IB_UC_QP_RANGE(struct mlx4_dev *dev, u32 min_range_qpn,
+				      u32 max_range_qpn);
+
 cycle_t mlx4_read_clock(struct mlx4_dev *dev);
 
+struct mlx4_active_ports {
+	DECLARE_BITMAP(ports, MLX4_MAX_PORTS);
+};
+/* Returns a bitmap of the physical ports which are assigned to slave */
+struct mlx4_active_ports mlx4_get_active_ports(struct mlx4_dev *dev, int slave);
+
+/* Returns the physical port that represents the virtual port of the slave, */
+/* or a value < 0 in case of an error. If a slave has 2 ports, the identity */
+/* mapping is returned.							    */
+int mlx4_slave_convert_port(struct mlx4_dev *dev, int slave, int port);
+
+struct mlx4_slaves_pport {
+	DECLARE_BITMAP(slaves, MLX4_MFUNC_MAX);
+};
+/* Returns a bitmap of all slaves that are assigned to port. */
+struct mlx4_slaves_pport mlx4_phys_to_slaves_pport(struct mlx4_dev *dev,
+						   int port);
+
+/* Returns a bitmap of all slaves that are assigned exactly to all the */
+/* the ports that are set in crit_ports.			       */
+struct mlx4_slaves_pport mlx4_phys_to_slaves_pport_actv(
+		struct mlx4_dev *dev,
+		const struct mlx4_active_ports *crit_ports);
+
+/* Returns the slave's virtual port that represents the physical port. */
+int mlx4_phys_to_slave_port(struct mlx4_dev *dev, int slave, int port);
+
+int mlx4_get_base_gid_ix(struct mlx4_dev *dev, int slave, int port);
+
+int mlx4_config_vxlan_port(struct mlx4_dev *dev, __be16 udp_port);
 #endif /* MLX4_DEVICE_H */

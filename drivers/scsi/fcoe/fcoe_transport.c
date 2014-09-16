@@ -135,6 +135,7 @@ void __fcoe_get_lesb(struct fc_lport *lport,
 	u32 lfc, vlfc, mdac;
 	struct fc_stats *stats;
 	struct fcoe_fc_els_lesb *lesb;
+	struct rtnl_link_stats64 temp;
 
 	lfc = 0;
 	vlfc = 0;
@@ -151,7 +152,7 @@ void __fcoe_get_lesb(struct fc_lport *lport,
 	lesb->lesb_vlink_fail = htonl(vlfc);
 	lesb->lesb_miss_fka = htonl(mdac);
 	lesb->lesb_fcs_error =
-			htonl(dev_get_stats(netdev)->rx_crc_errors);
+			htonl(dev_get_stats64(netdev, &temp)->rx_crc_errors);
 }
 EXPORT_SYMBOL_GPL(__fcoe_get_lesb);
 

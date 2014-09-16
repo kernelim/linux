@@ -2313,7 +2313,7 @@ static void btrfsic_bio_end_io(struct bio *bp, int bio_error_status)
 			       block->mirror_num);
 		next_block = block->next_in_same_bio;
 		block->iodone_w_error = iodone_w_error;
-		if (block->submit_bio_bh_rw & REQ_FLUSH) {
+		if (block->submit_bio_bh_rw & BIO_FLUSH) {
 			dev_state->last_flush_gen++;
 			if ((dev_state->state->print_mask &
 			     BTRFSIC_PRINT_MASK_END_IO_BIO_BH))
@@ -2323,7 +2323,7 @@ static void btrfsic_bio_end_io(struct bio *bp, int bio_error_status)
 				       (unsigned long long)
 				       dev_state->last_flush_gen);
 		}
-		if (block->submit_bio_bh_rw & REQ_FUA)
+		if (block->submit_bio_bh_rw & BIO_FUA)
 			block->flush_gen = 0; /* FUA completed means block is
 					       * on disk */
 		block->is_iodone = 1; /* for FLUSH, this releases the block */
@@ -2352,7 +2352,7 @@ static void btrfsic_bh_end_io(struct buffer_head *bh, int uptodate)
 		       block->mirror_num);
 
 	block->iodone_w_error = iodone_w_error;
-	if (block->submit_bio_bh_rw & REQ_FLUSH) {
+	if (block->submit_bio_bh_rw & BIO_FLUSH) {
 		dev_state->last_flush_gen++;
 		if ((dev_state->state->print_mask &
 		     BTRFSIC_PRINT_MASK_END_IO_BIO_BH))
@@ -2361,7 +2361,7 @@ static void btrfsic_bh_end_io(struct buffer_head *bh, int uptodate)
 			       dev_state->name,
 			       (unsigned long long)dev_state->last_flush_gen);
 	}
-	if (block->submit_bio_bh_rw & REQ_FUA)
+	if (block->submit_bio_bh_rw & BIO_FUA)
 		block->flush_gen = 0; /* FUA completed means block is on disk */
 
 	bh->b_private = block->orig_bio_bh_private;
@@ -3034,7 +3034,7 @@ int btrfsic_submit_bh(int rw, struct buffer_head *bh)
 		btrfsic_process_written_block(dev_state, dev_bytenr,
 					      &bh->b_data, 1, NULL,
 					      NULL, bh, rw);
-	} else if (NULL != dev_state && (rw & REQ_FLUSH)) {
+	} else if (NULL != dev_state && (rw & BIO_FLUSH)) {
 		if (dev_state->state->print_mask &
 		    BTRFSIC_PRINT_MASK_SUBMIT_BIO_BH)
 			printk(KERN_INFO
@@ -3135,7 +3135,7 @@ void btrfsic_submit_bio(int rw, struct bio *bio)
 			kunmap(bio->bi_io_vec[i].bv_page);
 		}
 		kfree(mapped_datav);
-	} else if (NULL != dev_state && (rw & REQ_FLUSH)) {
+	} else if (NULL != dev_state && (rw & BIO_FLUSH)) {
 		if (dev_state->state->print_mask &
 		    BTRFSIC_PRINT_MASK_SUBMIT_BIO_BH)
 			printk(KERN_INFO

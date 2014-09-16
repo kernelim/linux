@@ -5,6 +5,8 @@
 ifeq ($(CONFIG_USB_DEBUG),y)
 	EXTRA_CFLAGS		+= -DDEBUG
 endif
+# tell define_trace.h where to find the xhci trace header
+CFLAGS_xhci-trace.o := -I$(src)
 
 isp1760-objs := isp1760-hcd.o isp1760-if.o
 fhci-objs := fhci-hcd.o fhci-hub.o fhci-q.o fhci-mem.o \
@@ -13,6 +15,7 @@ ifeq ($(CONFIG_FHCI_DEBUG),y)
 fhci-objs += fhci-dbg.o
 endif
 xhci-hcd-objs := xhci.o xhci-mem.o xhci-ring.o xhci-hub.o xhci-dbg.o
+xhci-hcd-objs += xhci-trace.o
 xhci-hcd-$(CONFIG_PCI)	+= xhci-pci.o
 
 ifneq ($(CONFIG_USB_XHCI_PLATFORM), )

@@ -738,6 +738,10 @@ static int blkio_policy_parse_and_set(char *buf,
 
 	memset(s, 0, sizeof(s));
 
+	/* Allow tab separated inputs too. Convert all tabs into spaces */
+	while((p = strstr(buf, "	")) != NULL)
+		p[0] = ' ';
+
 	while ((p = strsep(&buf, " ")) != NULL) {
 		if (!*p)
 			continue;

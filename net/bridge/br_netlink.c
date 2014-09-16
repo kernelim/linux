@@ -185,6 +185,9 @@ static int br_rtm_setlink(struct sk_buff *skb,  struct nlmsghdr *nlh, void *arg)
 
 int __init br_netlink_init(void)
 {
+	/* be sure to remove RHEL-specific rtnl_unregister's in
+	 * br_netlink_fini if you're backporting upstream commit
+	 * e5a55a898720 */
 	if (__rtnl_register(PF_BRIDGE, RTM_GETLINK, NULL,
 			      br_dump_ifinfo, NULL))
 		return -ENOBUFS;
@@ -199,5 +202,7 @@ int __init br_netlink_init(void)
 
 void __exit br_netlink_fini(void)
 {
+	rtnl_unregister(PF_BRIDGE, RTM_SETLINK);
+	rtnl_unregister(PF_BRIDGE, RTM_GETLINK);
 	br_mdb_uninit();
 }

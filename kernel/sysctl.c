@@ -74,8 +74,6 @@ static int deprecated_sysctl_warning(struct __sysctl_args *args);
 /* External variables not in a header file. */
 extern int C_A_D;
 extern int print_fatal_signals;
-extern int sysctl_overcommit_memory;
-extern int sysctl_overcommit_ratio;
 extern int sysctl_panic_on_oom;
 extern int sysctl_oom_kill_allocating_task;
 extern int sysctl_oom_dump_tasks;
@@ -98,6 +96,11 @@ extern int sysctl_nr_trim_pages;
 extern int kexec_load_disabled;
 /* bz790921 */
 int unmap_area_factor_sysctl_handler(ctl_table *table, int write,
+			void __user *buffer, size_t *length, loff_t *ppos);
+
+/* bz1032702 */
+extern unsigned int sysctl_meminfo_legacy_layout;
+int meminfo_legacy_layout_sysctl_handler(ctl_table *table, int write,
 			void __user *buffer, size_t *length, loff_t *ppos);
 
 int exec_shield = (1<<0);
@@ -1238,7 +1241,16 @@ static struct ctl_table vm_table[] = {
 		.data		= &sysctl_overcommit_ratio,
 		.maxlen		= sizeof(sysctl_overcommit_ratio),
 		.mode		= 0644,
-		.proc_handler	= &proc_dointvec,
+		.proc_handler	= overcommit_ratio_handler,
+		.strategy	= &sysctl_data,
+	},
+	{
+		.ctl_name	= CTL_UNNUMBERED,
+		.procname	= "overcommit_kbytes",
+		.data		= &sysctl_overcommit_kbytes,
+		.maxlen		= sizeof(sysctl_overcommit_kbytes),
+		.mode		= 0644,
+		.proc_handler	= overcommit_kbytes_handler,
 	},
 	{
 		.ctl_name	= VM_PAGE_CLUSTER,
@@ -1414,6 +1426,14 @@ static struct ctl_table vm_table[] = {
 		.maxlen         = sizeof(unsigned int),
 		.mode           = 0644,
 		.proc_handler   = unmap_area_factor_sysctl_handler,
+		.strategy       = &sysctl_intvec,
+	},
+	{
+		.procname       = "meminfo_legacy_layout",
+		.data           = &sysctl_meminfo_legacy_layout,
+		.maxlen         = sizeof(unsigned int),
+		.mode           = 0644,
+		.proc_handler   = meminfo_legacy_layout_sysctl_handler,
 		.strategy       = &sysctl_intvec,
 	},
 	{

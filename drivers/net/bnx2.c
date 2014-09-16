@@ -1,6 +1,6 @@
 /* bnx2.c: Broadcom NX2 network driver.
  *
- * Copyright (c) 2004-2011 Broadcom Corporation
+ * Copyright (c) 2004-2013 Broadcom Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -60,8 +60,8 @@
 #include "bnx2_fw.h"
 
 #define DRV_MODULE_NAME		"bnx2"
-#define DRV_MODULE_VERSION	"2.2.3"
-#define DRV_MODULE_RELDATE	"June 27, 2012"
+#define DRV_MODULE_VERSION	"2.2.4"
+#define DRV_MODULE_RELDATE	"Aug 05, 2013"
 #define FW_MIPS_FILE_06		"bnx2/bnx2-mips-06-6.2.3.fw"
 #define FW_RV2P_FILE_06		"bnx2/bnx2-rv2p-06-6.0.15.fw"
 #define FW_MIPS_FILE_09		"bnx2/bnx2-mips-09-6.2.1b.fw"
@@ -418,7 +418,7 @@ static int bnx2_unregister_cnic(struct net_device *dev)
 	return 0;
 }
 
-struct cnic_eth_dev *bnx2_cnic_probe(struct net_device *dev)
+static struct cnic_eth_dev *bnx2_cnic_probe(struct net_device *dev)
 {
 	struct bnx2 *bp = netdev_priv(dev);
 	struct cnic_eth_dev *cp = &bp->cnic_eth_dev;
@@ -858,9 +858,8 @@ bnx2_alloc_mem(struct bnx2 *bp)
 	bp->status_stats_size = status_blk_size +
 				sizeof(struct statistics_block);
 
-	status_blk = dma_alloc_coherent(&bp->pdev->dev, bp->status_stats_size,
-					&bp->status_blk_mapping,
-					GFP_KERNEL | __GFP_ZERO);
+	status_blk = dma_zalloc_coherent(&bp->pdev->dev, bp->status_stats_size,
+					 &bp->status_blk_mapping, GFP_KERNEL);
 	if (status_blk == NULL)
 		goto alloc_mem_err;
 
@@ -3913,24 +3912,95 @@ init_cpu_err:
 	return rc;
 }
 
+static void
+bnx2_setup_wol(struct bnx2 *bp)
+{
+	int i;
+	u32 val, wol_msg;
+
+	if (bp->wol) {
+		u32 advertising;
+		u8 autoneg;
+
+		autoneg = bp->autoneg;
+		advertising = bp->advertising;
+
+		if (bp->phy_port == PORT_TP) {
+			bp->autoneg = AUTONEG_SPEED;
+			bp->advertising = ADVERTISED_10baseT_Half |
+				ADVERTISED_10baseT_Full |
+				ADVERTISED_100baseT_Half |
+				ADVERTISED_100baseT_Full |
+				ADVERTISED_Autoneg;
+		}
+
+		spin_lock_bh(&bp->phy_lock);
+		bnx2_setup_phy(bp, bp->phy_port);
+		spin_unlock_bh(&bp->phy_lock);
+
+		bp->autoneg = autoneg;
+		bp->advertising = advertising;
+
+		bnx2_set_mac_addr(bp, bp->dev->dev_addr, 0);
+
+		val = BNX2_RD(bp, BNX2_EMAC_MODE);
+
+		/* Enable port mode. */
+		val &= ~BNX2_EMAC_MODE_PORT;
+		val |= BNX2_EMAC_MODE_MPKT_RCVD |
+		       BNX2_EMAC_MODE_ACPI_RCVD |
+		       BNX2_EMAC_MODE_MPKT;
+		if (bp->phy_port == PORT_TP) {
+			val |= BNX2_EMAC_MODE_PORT_MII;
+		} else {
+			val |= BNX2_EMAC_MODE_PORT_GMII;
+			if (bp->line_speed == SPEED_2500)
+				val |= BNX2_EMAC_MODE_25G_MODE;
+		}
+
+		BNX2_WR(bp, BNX2_EMAC_MODE, val);
+
+		/* receive all multicast */
+		for (i = 0; i < NUM_MC_HASH_REGISTERS; i++) {
+			BNX2_WR(bp, BNX2_EMAC_MULTICAST_HASH0 + (i * 4),
+				0xffffffff);
+		}
+		BNX2_WR(bp, BNX2_EMAC_RX_MODE, BNX2_EMAC_RX_MODE_SORT_MODE);
+
+		val = 1 | BNX2_RPM_SORT_USER0_BC_EN | BNX2_RPM_SORT_USER0_MC_EN;
+		BNX2_WR(bp, BNX2_RPM_SORT_USER0, 0x0);
+		BNX2_WR(bp, BNX2_RPM_SORT_USER0, val);
+		BNX2_WR(bp, BNX2_RPM_SORT_USER0, val | BNX2_RPM_SORT_USER0_ENA);
+
+		/* Need to enable EMAC and RPM for WOL. */
+		BNX2_WR(bp, BNX2_MISC_ENABLE_SET_BITS,
+			BNX2_MISC_ENABLE_SET_BITS_RX_PARSER_MAC_ENABLE |
+			BNX2_MISC_ENABLE_SET_BITS_TX_HEADER_Q_ENABLE |
+			BNX2_MISC_ENABLE_SET_BITS_EMAC_ENABLE);
+
+		val = BNX2_RD(bp, BNX2_RPM_CONFIG);
+		val &= ~BNX2_RPM_CONFIG_ACPI_ENA;
+		BNX2_WR(bp, BNX2_RPM_CONFIG, val);
+
+		wol_msg = BNX2_DRV_MSG_CODE_SUSPEND_WOL;
+	} else {
+			wol_msg = BNX2_DRV_MSG_CODE_SUSPEND_NO_WOL;
+	}
+
+	if (!(bp->flags & BNX2_FLAG_NO_WOL))
+		bnx2_fw_sync(bp, BNX2_DRV_MSG_DATA_WAIT3 | wol_msg, 1, 0);
+
+}
+
 static int
 bnx2_set_power_state(struct bnx2 *bp, pci_power_t state)
 {
-	u16 pmcsr;
-
-	pci_read_config_word(bp->pdev, bp->pm_cap + PCI_PM_CTRL, &pmcsr);
-
 	switch (state) {
 	case PCI_D0: {
 		u32 val;
 
-		pci_write_config_word(bp->pdev, bp->pm_cap + PCI_PM_CTRL,
-			(pmcsr & ~PCI_PM_CTRL_STATE_MASK) |
-			PCI_PM_CTRL_PME_STATUS);
-
-		if (pmcsr & PCI_PM_CTRL_STATE_MASK)
-			/* delay required during transition out of D3hot */
-			msleep(20);
+		pci_enable_wake(bp->pdev, PCI_D0, false);
+		pci_set_power_state(bp->pdev, PCI_D0);
 
 		val = BNX2_RD(bp, BNX2_EMAC_MODE);
 		val |= BNX2_EMAC_MODE_MPKT_RCVD | BNX2_EMAC_MODE_ACPI_RCVD;
@@ -3943,106 +4013,20 @@ bnx2_set_power_state(struct bnx2 *bp, pci_power_t state)
 		break;
 	}
 	case PCI_D3hot: {
-		int i;
-		u32 val, wol_msg;
-
-		if (bp->wol) {
-			u32 advertising;
-			u8 autoneg;
-
-			autoneg = bp->autoneg;
-			advertising = bp->advertising;
-
-			if (bp->phy_port == PORT_TP) {
-				bp->autoneg = AUTONEG_SPEED;
-				bp->advertising = ADVERTISED_10baseT_Half |
-					ADVERTISED_10baseT_Full |
-					ADVERTISED_100baseT_Half |
-					ADVERTISED_100baseT_Full |
-					ADVERTISED_Autoneg;
-			}
-
-			spin_lock_bh(&bp->phy_lock);
-			bnx2_setup_phy(bp, bp->phy_port);
-			spin_unlock_bh(&bp->phy_lock);
-
-			bp->autoneg = autoneg;
-			bp->advertising = advertising;
-
-			bnx2_set_mac_addr(bp, bp->dev->dev_addr, 0);
-
-			val = BNX2_RD(bp, BNX2_EMAC_MODE);
-
-			/* Enable port mode. */
-			val &= ~BNX2_EMAC_MODE_PORT;
-			val |= BNX2_EMAC_MODE_MPKT_RCVD |
-			       BNX2_EMAC_MODE_ACPI_RCVD |
-			       BNX2_EMAC_MODE_MPKT;
-			if (bp->phy_port == PORT_TP)
-				val |= BNX2_EMAC_MODE_PORT_MII;
-			else {
-				val |= BNX2_EMAC_MODE_PORT_GMII;
-				if (bp->line_speed == SPEED_2500)
-					val |= BNX2_EMAC_MODE_25G_MODE;
-			}
-
-			BNX2_WR(bp, BNX2_EMAC_MODE, val);
-
-			/* receive all multicast */
-			for (i = 0; i < NUM_MC_HASH_REGISTERS; i++) {
-				BNX2_WR(bp, BNX2_EMAC_MULTICAST_HASH0 + (i * 4),
-					0xffffffff);
-			}
-			BNX2_WR(bp, BNX2_EMAC_RX_MODE,
-				BNX2_EMAC_RX_MODE_SORT_MODE);
-
-			val = 1 | BNX2_RPM_SORT_USER0_BC_EN |
-			      BNX2_RPM_SORT_USER0_MC_EN;
-			BNX2_WR(bp, BNX2_RPM_SORT_USER0, 0x0);
-			BNX2_WR(bp, BNX2_RPM_SORT_USER0, val);
-			BNX2_WR(bp, BNX2_RPM_SORT_USER0, val |
-				BNX2_RPM_SORT_USER0_ENA);
-
-			/* Need to enable EMAC and RPM for WOL. */
-			BNX2_WR(bp, BNX2_MISC_ENABLE_SET_BITS,
-				BNX2_MISC_ENABLE_SET_BITS_RX_PARSER_MAC_ENABLE |
-				BNX2_MISC_ENABLE_SET_BITS_TX_HEADER_Q_ENABLE |
-				BNX2_MISC_ENABLE_SET_BITS_EMAC_ENABLE);
-
-			val = BNX2_RD(bp, BNX2_RPM_CONFIG);
-			val &= ~BNX2_RPM_CONFIG_ACPI_ENA;
-			BNX2_WR(bp, BNX2_RPM_CONFIG, val);
-
-			wol_msg = BNX2_DRV_MSG_CODE_SUSPEND_WOL;
-		}
-		else {
-			wol_msg = BNX2_DRV_MSG_CODE_SUSPEND_NO_WOL;
-		}
-
-		if (!(bp->flags & BNX2_FLAG_NO_WOL))
-			bnx2_fw_sync(bp, BNX2_DRV_MSG_DATA_WAIT3 | wol_msg,
-				     1, 0);
-
-		pmcsr &= ~PCI_PM_CTRL_STATE_MASK;
+		bnx2_setup_wol(bp);
+		pci_wake_from_d3(bp->pdev, bp->wol);
 		if ((BNX2_CHIP_ID(bp) == BNX2_CHIP_ID_5706_A0) ||
 		    (BNX2_CHIP_ID(bp) == BNX2_CHIP_ID_5706_A1)) {
 
 			if (bp->wol)
-				pmcsr |= 3;
+				pci_set_power_state(bp->pdev, PCI_D3hot);
+		} else {
+			pci_set_power_state(bp->pdev, PCI_D3hot);
 		}
-		else {
-			pmcsr |= 3;
-		}
-		if (bp->wol) {
-			pmcsr |= PCI_PM_CTRL_PME_ENABLE;
-		}
-		pci_write_config_word(bp->pdev, bp->pm_cap + PCI_PM_CTRL,
-				      pmcsr);
 
 		/* No more memory access after this point until
 		 * device is brought back to D0.
 		 */
-		udelay(50);
 		break;
 	}
 	default:
@@ -5779,8 +5763,8 @@ bnx2_run_loopback(struct bnx2 *bp, int loopback_mode)
 	if (!skb)
 		return -ENOMEM;
 	packet = skb_put(skb, pkt_size);
-	memcpy(packet, bp->dev->dev_addr, 6);
-	memset(packet + 6, 0x0, 8);
+	memcpy(packet, bp->dev->dev_addr, ETH_ALEN);
+	memset(packet + ETH_ALEN, 0x0, 8);
 	for (i = 14; i < pkt_size; i++)
 		packet[i] = (unsigned char) (i & 0xff);
 
@@ -6751,36 +6735,25 @@ bnx2_save_stats(struct bnx2 *bp)
 		temp_stats[i] += hw_stats[i];
 }
 
-#define GET_64BIT_NET_STATS64(ctr)				\
-	(unsigned long) ((unsigned long) (ctr##_hi) << 32) +	\
-	(unsigned long) (ctr##_lo)
+#define GET_64BIT_NET_STATS64(ctr)		\
+	(((u64) (ctr##_hi) << 32) + (u64) (ctr##_lo))
 
-#define GET_64BIT_NET_STATS32(ctr)				\
-	(ctr##_lo)
-
-#if (BITS_PER_LONG == 64)
 #define GET_64BIT_NET_STATS(ctr)				\
 	GET_64BIT_NET_STATS64(bp->stats_blk->ctr) +		\
 	GET_64BIT_NET_STATS64(bp->temp_stats_blk->ctr)
-#else
-#define GET_64BIT_NET_STATS(ctr)				\
-	GET_64BIT_NET_STATS32(bp->stats_blk->ctr) +		\
-	GET_64BIT_NET_STATS32(bp->temp_stats_blk->ctr)
-#endif
 
 #define GET_32BIT_NET_STATS(ctr)				\
 	(unsigned long) (bp->stats_blk->ctr +			\
 			 bp->temp_stats_blk->ctr)
 
-static struct net_device_stats *
-bnx2_get_stats(struct net_device *dev)
+static struct rtnl_link_stats64 *
+bnx2_get_stats64(struct net_device *dev, struct rtnl_link_stats64 *net_stats)
 {
 	struct bnx2 *bp = netdev_priv(dev);
-	struct net_device_stats *net_stats = &dev->stats;
 
-	if (bp->stats_blk == NULL) {
+	if (bp->stats_blk == NULL)
 		return net_stats;
-	}
+
 	net_stats->rx_packets =
 		GET_64BIT_NET_STATS(stat_IfHCInUcastPkts) +
 		GET_64BIT_NET_STATS(stat_IfHCInMulticastPkts) +
@@ -7091,6 +7064,9 @@ bnx2_set_wol(struct net_device *dev, struct ethtool_wolinfo *wol)
 	else {
 		bp->wol = 0;
 	}
+
+	device_set_wakeup_enable(&bp->pdev->dev, bp->wol);
+
 	return 0;
 }
 
@@ -7681,41 +7657,39 @@ bnx2_get_ethtool_stats(struct net_device *dev,
 }
 
 static int
-bnx2_phys_id(struct net_device *dev, u32 data)
+bnx2_set_phys_id(struct net_device *dev, enum ethtool_phys_id_state state)
 {
 	struct bnx2 *bp = netdev_priv(dev);
-	int i;
-	u32 save;
 
-	bnx2_set_power_state(bp, PCI_D0);
+	switch (state) {
+	case ETHTOOL_ID_ACTIVE:
+		bnx2_set_power_state(bp, PCI_D0);
 
-	if (data == 0)
-		data = 2;
+		bp->leds_save = BNX2_RD(bp, BNX2_MISC_CFG);
+		BNX2_WR(bp, BNX2_MISC_CFG, BNX2_MISC_CFG_LEDMODE_MAC);
+		return 1;	/* cycle on/off once per second */
 
-	save = BNX2_RD(bp, BNX2_MISC_CFG);
-	BNX2_WR(bp, BNX2_MISC_CFG, BNX2_MISC_CFG_LEDMODE_MAC);
+	case ETHTOOL_ID_ON:
+		BNX2_WR(bp, BNX2_EMAC_LED, BNX2_EMAC_LED_OVERRIDE |
+		       BNX2_EMAC_LED_1000MB_OVERRIDE |
+		       BNX2_EMAC_LED_100MB_OVERRIDE |
+		       BNX2_EMAC_LED_10MB_OVERRIDE |
+		       BNX2_EMAC_LED_TRAFFIC_OVERRIDE |
+		       BNX2_EMAC_LED_TRAFFIC);
+		break;
 
-	for (i = 0; i < (data * 2); i++) {
-		if ((i % 2) == 0) {
-			BNX2_WR(bp, BNX2_EMAC_LED, BNX2_EMAC_LED_OVERRIDE);
-		}
-		else {
-			BNX2_WR(bp, BNX2_EMAC_LED, BNX2_EMAC_LED_OVERRIDE |
-				BNX2_EMAC_LED_1000MB_OVERRIDE |
-				BNX2_EMAC_LED_100MB_OVERRIDE |
-				BNX2_EMAC_LED_10MB_OVERRIDE |
-				BNX2_EMAC_LED_TRAFFIC_OVERRIDE |
-				BNX2_EMAC_LED_TRAFFIC);
-		}
-		msleep_interruptible(500);
-		if (signal_pending(current))
-			break;
+	case ETHTOOL_ID_OFF:
+		BNX2_WR(bp, BNX2_EMAC_LED, BNX2_EMAC_LED_OVERRIDE);
+		break;
+
+	case ETHTOOL_ID_INACTIVE:
+		BNX2_WR(bp, BNX2_EMAC_LED, 0);
+		BNX2_WR(bp, BNX2_MISC_CFG, bp->leds_save);
+
+		if (!netif_running(dev))
+			bnx2_set_power_state(bp, PCI_D3hot);
+		break;
 	}
-	BNX2_WR(bp, BNX2_EMAC_LED, 0);
-	BNX2_WR(bp, BNX2_MISC_CFG, save);
-
-	if (!netif_running(dev))
-		bnx2_set_power_state(bp, PCI_D3hot);
 
 	return 0;
 }
@@ -7757,9 +7731,13 @@ static const struct ethtool_ops bnx2_ethtool_ops = {
 	.set_tso		= bnx2_set_tso,
 	.self_test		= bnx2_self_test,
 	.get_strings		= bnx2_get_strings,
-	.phys_id		= bnx2_phys_id,
 	.get_ethtool_stats	= bnx2_get_ethtool_stats,
 	.get_sset_count		= bnx2_get_sset_count,
+};
+
+static const struct ethtool_ops_ext bnx2_ethtool_ops_ext = {
+	.size			= sizeof(struct ethtool_ops_ext),
+	.set_phys_id		= bnx2_set_phys_id,
 };
 
 /* Called with rtnl_lock */
@@ -8064,7 +8042,7 @@ bnx2_init_board(struct pci_dev *pdev, struct net_device *dev)
 
 	pci_set_master(pdev);
 
-	bp->pm_cap = pci_find_capability(pdev, PCI_CAP_ID_PM);
+	bp->pm_cap = pdev->pm_cap;
 	if (bp->pm_cap == 0) {
 		dev_err(&pdev->dev,
 			"Cannot find power management capability, aborting\n");
@@ -8331,6 +8309,11 @@ bnx2_init_board(struct pci_dev *pdev, struct net_device *dev)
 		bp->wol = 0;
 	}
 
+	if (bp->flags & BNX2_FLAG_NO_WOL)
+		device_set_wakeup_capable(&bp->pdev->dev, false);
+	else
+		device_set_wakeup_enable(&bp->pdev->dev, bp->wol);
+
 	if (BNX2_CHIP_ID(bp) == BNX2_CHIP_ID_5706_A0) {
 		bp->tx_quick_cons_trip_int =
 			bp->tx_quick_cons_trip;
@@ -8402,7 +8385,6 @@ err_out_release:
 
 err_out_disable:
 	pci_disable_device(pdev);
-	pci_set_drvdata(pdev, NULL);
 
 err_out:
 	return rc;
@@ -8460,7 +8442,6 @@ static const struct net_device_ops bnx2_netdev_ops = {
 	.ndo_open		= bnx2_open,
 	.ndo_start_xmit		= bnx2_start_xmit,
 	.ndo_stop		= bnx2_close,
-	.ndo_get_stats		= bnx2_get_stats,
 	.ndo_set_rx_mode	= bnx2_set_rx_mode,
 	.ndo_do_ioctl		= bnx2_ioctl,
 	.ndo_validate_addr	= eth_validate_addr,
@@ -8473,6 +8454,11 @@ static const struct net_device_ops bnx2_netdev_ops = {
 #if defined(HAVE_POLL_CONTROLLER) || defined(CONFIG_NET_POLL_CONTROLLER)
 	.ndo_poll_controller	= poll_bnx2,
 #endif
+};
+
+static const struct net_device_ops_ext bnx2_netdev_ops_ext = {
+	.size			= sizeof(struct net_device_ops_ext),
+	.ndo_get_stats64	= bnx2_get_stats64,
 };
 
 static inline void vlan_features_add(struct net_device *dev, u32 flags)
@@ -8504,8 +8490,10 @@ bnx2_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto err_free;
 
 	dev->netdev_ops = &bnx2_netdev_ops;
+	set_netdev_ops_ext(dev, &bnx2_netdev_ops_ext);
 	dev->watchdog_timeo = TX_TIMEOUT;
 	dev->ethtool_ops = &bnx2_ethtool_ops;
+	set_ethtool_ops_ext(dev, &bnx2_ethtool_ops_ext);
 
 	bp = netdev_priv(dev);
 
@@ -8515,8 +8503,8 @@ bnx2_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (rc)
 		goto error;
 
-	memcpy(dev->dev_addr, bp->mac_addr, 6);
-	memcpy(dev->perm_addr, bp->mac_addr, 6);
+	memcpy(dev->dev_addr, bp->mac_addr, ETH_ALEN);
+	memcpy(dev->perm_addr, bp->mac_addr, ETH_ALEN);
 
 	dev->features |= NETIF_F_IP_CSUM | NETIF_F_SG | NETIF_F_GRO;
 	vlan_features_add(dev, NETIF_F_IP_CSUM | NETIF_F_SG);
@@ -8556,7 +8544,6 @@ error:
 	pci_iounmap(pdev, bp->regview);
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
-	pci_set_drvdata(pdev, NULL);
 err_free:
 	free_netdev(dev);
 	return rc;
@@ -8591,50 +8578,55 @@ bnx2_remove_one(struct pci_dev *pdev)
 
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
-	pci_set_drvdata(pdev, NULL);
 }
 
 static int
-bnx2_suspend(struct pci_dev *pdev, pm_message_t state)
+bnx2_suspend(struct device *device)
 {
+	struct pci_dev *pdev = to_pci_dev(device);
 	struct net_device *dev = pci_get_drvdata(pdev);
 	struct bnx2 *bp = netdev_priv(dev);
 
-	/* PCI register 4 needs to be saved whether netif_running() or not.
-	 * MSI address and data need to be saved if using MSI and
-	 * netif_running().
-	 */
-	pci_save_state(pdev);
-	if (!netif_running(dev))
-		return 0;
-
-	cancel_work_sync(&bp->reset_task);
-	bnx2_netif_stop(bp, true);
-	netif_device_detach(dev);
-	del_timer_sync(&bp->timer);
-	bnx2_shutdown_chip(bp);
-	bnx2_free_skbs(bp);
-	bnx2_set_power_state(bp, pci_choose_state(pdev, state));
+	if (netif_running(dev)) {
+		cancel_work_sync(&bp->reset_task);
+		bnx2_netif_stop(bp, true);
+		netif_device_detach(dev);
+		del_timer_sync(&bp->timer);
+		bnx2_shutdown_chip(bp);
+		__bnx2_free_irq(bp);
+		bnx2_free_skbs(bp);
+	}
+	bnx2_setup_wol(bp);
 	return 0;
 }
 
 static int
-bnx2_resume(struct pci_dev *pdev)
+bnx2_resume(struct device *device)
 {
+	struct pci_dev *pdev = to_pci_dev(device);
 	struct net_device *dev = pci_get_drvdata(pdev);
 	struct bnx2 *bp = netdev_priv(dev);
 
-	pci_restore_state(pdev);
 	if (!netif_running(dev))
 		return 0;
 
 	bnx2_set_power_state(bp, PCI_D0);
 	netif_device_attach(dev);
+	bnx2_request_irq(bp);
 	bnx2_init_nic(bp, 1);
 	bnx2_netif_start(bp, true);
 	return 0;
 }
 
+#ifdef CONFIG_PM_SLEEP
+static SIMPLE_DEV_PM_OPS(bnx2_pm_ops, bnx2_suspend, bnx2_resume);
+#define BNX2_PM_OPS (&bnx2_pm_ops)
+
+#else
+
+#define BNX2_PM_OPS NULL
+
+#endif /* CONFIG_PM_SLEEP */
 /**
  * bnx2_io_error_detected - called when PCI error is detected
  * @pdev: Pointer to PCI device
@@ -8680,14 +8672,13 @@ static pci_ers_result_t bnx2_io_slot_reset(struct pci_dev *pdev)
 {
 	struct net_device *dev = pci_get_drvdata(pdev);
 	struct bnx2 *bp = netdev_priv(dev);
-	pci_ers_result_t result;
-	int err;
+	pci_ers_result_t result = PCI_ERS_RESULT_DISCONNECT;
+	int err = 0;
 
 	rtnl_lock();
 	if (pci_enable_device(pdev)) {
 		dev_err(&pdev->dev,
 			"Cannot re-enable PCI device after reset\n");
-		result = PCI_ERS_RESULT_DISCONNECT;
 	} else {
 		pci_set_master(pdev);
 		pci_restore_state(pdev);
@@ -8695,9 +8686,15 @@ static pci_ers_result_t bnx2_io_slot_reset(struct pci_dev *pdev)
 
 		if (netif_running(dev)) {
 			bnx2_set_power_state(bp, PCI_D0);
-			bnx2_init_nic(bp, 1);
+			err = bnx2_init_nic(bp, 1);
 		}
-		result = PCI_ERS_RESULT_RECOVERED;
+		if (!err)
+			result = PCI_ERS_RESULT_RECOVERED;
+	}
+
+	if (result != PCI_ERS_RESULT_RECOVERED && netif_running(dev)) {
+		bnx2_napi_enable(bp);
+		dev_close(dev);
 	}
 	rtnl_unlock();
 
@@ -8734,7 +8731,7 @@ static void bnx2_io_resume(struct pci_dev *pdev)
 	rtnl_unlock();
 }
 
-static struct pci_error_handlers bnx2_err_handler = {
+static const struct pci_error_handlers bnx2_err_handler = {
 	.error_detected	= bnx2_io_error_detected,
 	.slot_reset	= bnx2_io_slot_reset,
 	.resume		= bnx2_io_resume,
@@ -8745,23 +8742,8 @@ static struct pci_driver bnx2_pci_driver = {
 	.id_table	= bnx2_pci_tbl,
 	.probe		= bnx2_init_one,
 	.remove		= __devexit_p(bnx2_remove_one),
-	.suspend	= bnx2_suspend,
-	.resume		= bnx2_resume,
+	.driver.pm	= BNX2_PM_OPS,
 	.err_handler	= &bnx2_err_handler,
 };
 
-static int __init bnx2_init(void)
-{
-	return pci_register_driver(&bnx2_pci_driver);
-}
-
-static void __exit bnx2_cleanup(void)
-{
-	pci_unregister_driver(&bnx2_pci_driver);
-}
-
-module_init(bnx2_init);
-module_exit(bnx2_cleanup);
-
-
-
+module_pci_driver(bnx2_pci_driver);

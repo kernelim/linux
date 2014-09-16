@@ -746,16 +746,16 @@ blk_init_allocated_queue_node(struct request_queue *q, request_fn_proc *rfn,
 }
 EXPORT_SYMBOL(blk_init_allocated_queue_node);
 
-int blk_get_queue(struct request_queue *q)
+bool blk_get_request_queue(struct request_queue *q)
 {
 	if (likely(!blk_queue_dead(q))) {
-		kobject_get(&q->kobj);
-		return 0;
+		__blk_get_queue(q);
+		return true;
 	}
 
-	return 1;
+	return false;
 }
-EXPORT_SYMBOL(blk_get_queue);
+EXPORT_SYMBOL(blk_get_request_queue);
 
 static inline void blk_free_request(struct request_queue *q, struct request *rq)
 {
@@ -1352,7 +1352,7 @@ void init_request_from_bio(struct request *req, struct bio *bio)
  */
 static inline bool queue_should_plug(struct request_queue *q)
 {
-	return !(blk_queue_nonrot(q) && blk_queue_queuing(q));
+	return !(blk_queue_nonrot(q) && blk_queue_tagged(q));
 }
 
 static void blk_account_io_front_merge(struct request *req, sector_t newsector)
@@ -2134,12 +2134,6 @@ void blk_dequeue_request(struct request *rq)
 	if (blk_account_rq(rq)) {
 		q->in_flight[rq_is_sync(rq)]++;
 		set_io_start_time_ns(rq);
-		/*
-		 * Mark this device as supporting hardware queuing, if
-		 * we have more IOs in flight than 4.
-		 */
-		if (!blk_queue_queuing(q) && queue_in_flight(q) > 4)
-			set_bit(QUEUE_FLAG_CQ, &q->queue_flags);
 	}
 }
 
@@ -2256,6 +2250,12 @@ bool blk_update_request(struct request *req, int error, unsigned int nr_bytes)
 			break;
 		case -EBADE:
 			error_type = "critical nexus";
+			break;
+		case -ENOSPC:
+			error_type = "critical space allocation";
+			break;
+		case -ENODATA:
+			error_type = "critical medium";
 			break;
 		case -EIO:
 		default:

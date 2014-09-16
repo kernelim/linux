@@ -6,6 +6,8 @@
 
 #if BITS_PER_LONG == 64
 
+#define div64_ul(x, y)   div64_u64((x), (y))
+
 /**
  * div_u64_rem - unsigned 64bit divide with 32bit divisor with remainder
  *
@@ -22,6 +24,15 @@ static inline u64 div_u64_rem(u64 dividend, u32 divisor, u32 *remainder)
  * div_s64_rem - signed 64bit divide with 32bit divisor with remainder
  */
 static inline s64 div_s64_rem(s64 dividend, s32 divisor, s32 *remainder)
+{
+	*remainder = dividend % divisor;
+	return dividend / divisor;
+}
+
+/**
+ * div64_u64_rem - unsigned 64bit divide with 64bit divisor and remainder
+ */
+static inline u64 div64_u64_rem(u64 dividend, u64 divisor, u64 *remainder)
 {
 	*remainder = dividend % divisor;
 	return dividend / divisor;
@@ -45,6 +56,8 @@ static inline s64 div64_s64(s64 dividend, s64 divisor)
 
 #elif BITS_PER_LONG == 32
 
+#define div64_ul(x, y)   div_u64((x), (y))
+
 #ifndef div_u64_rem
 static inline u64 div_u64_rem(u64 dividend, u32 divisor, u32 *remainder)
 {
@@ -55,6 +68,10 @@ static inline u64 div_u64_rem(u64 dividend, u32 divisor, u32 *remainder)
 
 #ifndef div_s64_rem
 extern s64 div_s64_rem(s64 dividend, s32 divisor, s32 *remainder);
+#endif
+
+#ifndef div64_u64_rem
+extern u64 div64_u64_rem(u64 dividend, u64 divisor, u64 *remainder);
 #endif
 
 #ifndef div64_u64

@@ -42,8 +42,20 @@ static inline int crypto_set_driver_name(struct crypto_alg *alg)
 	return 0;
 }
 
+static inline void crypto_check_module_sig(struct module *mod)
+{
+#ifdef CONFIG_CRYPTO_FIPS
+	if (fips_enabled && mod && !mod->gpgsig_ok)
+		panic("Module %s signature verification failed in FIPS mode\n",
+		      mod->name);
+#endif
+	return;
+}
+
 static int crypto_check_alg(struct crypto_alg *alg)
 {
+	crypto_check_module_sig(alg->cra_module);
+
 	if (alg->cra_alignmask & (alg->cra_alignmask + 1))
 		return -EINVAL;
 
@@ -430,6 +442,8 @@ int crypto_register_template(struct crypto_template *tmpl)
 
 	down_write(&crypto_alg_sem);
 
+	crypto_check_module_sig(tmpl->module);
+
 	list_for_each_entry(q, &crypto_template_list, list) {
 		if (q == tmpl)
 			goto out;
@@ -437,6 +451,7 @@ int crypto_register_template(struct crypto_template *tmpl)
 
 	list_add(&tmpl->list, &crypto_template_list);
 	crypto_notify(CRYPTO_MSG_TMPL_REGISTER, tmpl);
+
 	err = 0;
 out:
 	up_write(&crypto_alg_sem);

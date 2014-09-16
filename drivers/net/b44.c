@@ -25,6 +25,7 @@
 #include <linux/init.h>
 #include <linux/dma-mapping.h>
 #include <linux/ssb/ssb.h>
+#include <linux/u64_stats_sync.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
@@ -486,9 +487,11 @@ out:
 static void b44_stats_update(struct b44 *bp)
 {
 	unsigned long reg;
-	u32 *val;
+	u64 *val;
 
 	val = &bp->hw_stats.tx_good_octets;
+	u64_stats_update_begin(&bp->hw_stats.syncp);
+
 	for (reg = B44_TX_GOOD_O; reg <= B44_TX_PAUSE; reg += 4UL) {
 		*val++ += br32(bp, reg);
 	}
@@ -499,6 +502,8 @@ static void b44_stats_update(struct b44 *bp)
 	for (reg = B44_RX_GOOD_O; reg <= B44_RX_NPAUSE; reg += 4UL) {
 		*val++ += br32(bp, reg);
 	}
+
+	u64_stats_update_end(&bp->hw_stats.syncp);
 }
 
 static void b44_link_report(struct b44 *bp)
@@ -1638,44 +1643,49 @@ static int b44_close(struct net_device *dev)
 	return 0;
 }
 
-static struct net_device_stats *b44_get_stats(struct net_device *dev)
+static struct rtnl_link_stats64 *b44_get_stats64(struct net_device *dev,
+					struct rtnl_link_stats64 *nstat)
 {
 	struct b44 *bp = netdev_priv(dev);
-	struct net_device_stats *nstat = &dev->stats;
 	struct b44_hw_stats *hwstat = &bp->hw_stats;
+	unsigned int start;
 
-	/* Convert HW stats into netdevice stats. */
-	nstat->rx_packets = hwstat->rx_pkts;
-	nstat->tx_packets = hwstat->tx_pkts;
-	nstat->rx_bytes   = hwstat->rx_octets;
-	nstat->tx_bytes   = hwstat->tx_octets;
-	nstat->tx_errors  = (hwstat->tx_jabber_pkts +
-			     hwstat->tx_oversize_pkts +
-			     hwstat->tx_underruns +
-			     hwstat->tx_excessive_cols +
-			     hwstat->tx_late_cols);
-	nstat->multicast  = hwstat->tx_multicast_pkts;
-	nstat->collisions = hwstat->tx_total_cols;
+	do {
+		start = u64_stats_fetch_begin_irq(&hwstat->syncp);
 
-	nstat->rx_length_errors = (hwstat->rx_oversize_pkts +
-				   hwstat->rx_undersize);
-	nstat->rx_over_errors   = hwstat->rx_missed_pkts;
-	nstat->rx_frame_errors  = hwstat->rx_align_errs;
-	nstat->rx_crc_errors    = hwstat->rx_crc_errs;
-	nstat->rx_errors        = (hwstat->rx_jabber_pkts +
-				   hwstat->rx_oversize_pkts +
-				   hwstat->rx_missed_pkts +
-				   hwstat->rx_crc_align_errs +
-				   hwstat->rx_undersize +
-				   hwstat->rx_crc_errs +
-				   hwstat->rx_align_errs +
-				   hwstat->rx_symbol_errs);
+		/* Convert HW stats into rtnl_link_stats64 stats. */
+		nstat->rx_packets = hwstat->rx_pkts;
+		nstat->tx_packets = hwstat->tx_pkts;
+		nstat->rx_bytes   = hwstat->rx_octets;
+		nstat->tx_bytes   = hwstat->tx_octets;
+		nstat->tx_errors  = (hwstat->tx_jabber_pkts +
+				     hwstat->tx_oversize_pkts +
+				     hwstat->tx_underruns +
+				     hwstat->tx_excessive_cols +
+				     hwstat->tx_late_cols);
+		nstat->multicast  = hwstat->tx_multicast_pkts;
+		nstat->collisions = hwstat->tx_total_cols;
 
-	nstat->tx_aborted_errors = hwstat->tx_underruns;
+		nstat->rx_length_errors = (hwstat->rx_oversize_pkts +
+					   hwstat->rx_undersize);
+		nstat->rx_over_errors   = hwstat->rx_missed_pkts;
+		nstat->rx_frame_errors  = hwstat->rx_align_errs;
+		nstat->rx_crc_errors    = hwstat->rx_crc_errs;
+		nstat->rx_errors        = (hwstat->rx_jabber_pkts +
+					   hwstat->rx_oversize_pkts +
+					   hwstat->rx_missed_pkts +
+					   hwstat->rx_crc_align_errs +
+					   hwstat->rx_undersize +
+					   hwstat->rx_crc_errs +
+					   hwstat->rx_align_errs +
+					   hwstat->rx_symbol_errs);
+
+		nstat->tx_aborted_errors = hwstat->tx_underruns;
 #if 0
-	/* Carrier lost counter seems to be broken for some devices */
-	nstat->tx_carrier_errors = hwstat->tx_carrier_lost;
+		/* Carrier lost counter seems to be broken for some devices */
+		nstat->tx_carrier_errors = hwstat->tx_carrier_lost;
 #endif
+	} while (u64_stats_fetch_retry_irq(&hwstat->syncp, start));
 
 	return nstat;
 }
@@ -1993,17 +2003,24 @@ static void b44_get_ethtool_stats(struct net_device *dev,
 				  struct ethtool_stats *stats, u64 *data)
 {
 	struct b44 *bp = netdev_priv(dev);
-	u32 *val = &bp->hw_stats.tx_good_octets;
+	struct b44_hw_stats *hwstat = &bp->hw_stats;
+	u64 *data_src, *data_dst;
+	unsigned int start;
 	u32 i;
 
 	spin_lock_irq(&bp->lock);
-
 	b44_stats_update(bp);
-
-	for (i = 0; i < ARRAY_SIZE(b44_gstrings); i++)
-		*data++ = *val++;
-
 	spin_unlock_irq(&bp->lock);
+
+	do {
+		data_src = &hwstat->tx_good_octets;
+		data_dst = data;
+		start = u64_stats_fetch_begin_irq(&hwstat->syncp);
+
+		for (i = 0; i < ARRAY_SIZE(b44_gstrings); i++)
+			*data_dst++ = *data_src++;
+
+	} while (u64_stats_fetch_retry_irq(&hwstat->syncp, start));
 }
 
 static void b44_get_wol(struct net_device *dev, struct ethtool_wolinfo *wol)
@@ -2113,7 +2130,7 @@ static const struct net_device_ops b44_netdev_ops = {
 	.ndo_open		= b44_open,
 	.ndo_stop		= b44_close,
 	.ndo_start_xmit		= b44_start_xmit,
-	.ndo_get_stats		= b44_get_stats,
+	.ndo_set_rx_mode	= b44_set_rx_mode,
 	.ndo_set_multicast_list = b44_set_rx_mode,
 	.ndo_set_mac_address	= b44_set_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
@@ -2123,6 +2140,11 @@ static const struct net_device_ops b44_netdev_ops = {
 #ifdef CONFIG_NET_POLL_CONTROLLER
 	.ndo_poll_controller	= b44_poll_controller,
 #endif
+};
+
+static const struct net_device_ops_ext b44_netdev_ops_ext = {
+	.size			= sizeof(struct net_device_ops_ext),
+	.ndo_get_stats64	= b44_get_stats64,
 };
 
 static int __devinit b44_init_one(struct ssb_device *sdev,
@@ -2164,6 +2186,7 @@ static int __devinit b44_init_one(struct ssb_device *sdev,
 	bp->tx_pending = B44_DEF_TX_RING_PENDING;
 
 	dev->netdev_ops = &b44_netdev_ops;
+	set_netdev_ops_ext(dev, &b44_netdev_ops_ext);
 	netif_napi_add(dev, &bp->napi, b44_poll, 64);
 	dev->watchdog_timeo = B44_TX_TIMEOUT;
 	dev->irq = sdev->irq;

@@ -487,7 +487,8 @@ static void purge_requests(struct ibmvscsi_host_data *hostdata, int error_code)
 				       tmp_evt->hostdata->dev);
 			if (tmp_evt->cmnd_done)
 				tmp_evt->cmnd_done(tmp_evt->cmnd);
-		} else if (tmp_evt->done)
+		} else if (tmp_evt->done && tmp_evt->crq.format != VIOSRP_MAD_FORMAT &&
+			   tmp_evt->iu.srp.login_req.opcode != SRP_LOGIN_REQ)
 			tmp_evt->done(tmp_evt);
 		free_event_struct(&tmp_evt->hostdata->pool, tmp_evt);
 	}

@@ -22,3 +22,13 @@ config THERMAL_HWMON
 	  requires a 2.10.7/3.0.2 or later lm-sensors userspace.
 
 	  Say Y if your user-space is new enough.
+config INTEL_POWERCLAMP
+	tristate "Intel PowerClamp idle injection driver"
+	depends on THERMAL
+	depends on X86
+	depends on CPU_SUP_INTEL
+	help
+	  Enable this to enable Intel PowerClamp idle injection driver. This
+	  enforce idle time which results in more package C-state residency. The
+	  user interface is exposed via generic thermal framework.
+

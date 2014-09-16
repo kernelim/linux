@@ -124,6 +124,8 @@ static struct gfs2_sbd *init_sbd(struct super_block *sb)
 	INIT_LIST_HEAD(&sdp->sd_revoke_list);
 
 	mutex_init(&sdp->sd_freeze_lock);
+	atomic_set(&sdp->sd_frozen_root, 0);
+	init_waitqueue_head(&sdp->sd_frozen_root_wait);
 
 	return sdp;
 }

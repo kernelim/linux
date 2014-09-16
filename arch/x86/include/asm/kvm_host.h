@@ -27,7 +27,19 @@
 #include <asm/mtrr.h>
 #include <asm/msr-index.h>
 
-#define KVM_MAX_VCPUS 160
+/* KVM_MAX_VCPU_COUNT is RHEL6-only. Upstream uses KVM_MAX_VCPUS.
+ * The macro was renamed because upstream code has the implicit assumption that
+ * vcpu_id < KVM_MAX_VCPUS for all VCPUs, while on RHEL-6 we allow
+ * vcpu_id >= KVM_MAX_VCPUS on x86. This way we avoid inadvertently introducing
+ * security bugs while backporting upstream code.
+ */
+#define KVM_MAX_VCPU_COUNT 160
+
+/* Limit for vcpu_id for all VCPUs. RHEL-specific, too (see above).
+ * KVM_CREATE_VCPU code ensures that all VCPUs have vcpu_id < KVM_MAX_VCPU_ID.
+ */
+#define KVM_MAX_VCPU_ID    255
+
 #define KVM_MEMORY_SLOTS 32
 /* memory slots that does not exposed to userspace */
 #define KVM_PRIVATE_MEM_SLOTS 4
@@ -297,8 +309,8 @@ struct kvm_pmu {
 	u64 counter_bitmask[2];
 	u64 global_ctrl_mask;
 	u8 version;
-	struct kvm_pmc gp_counters[X86_PMC_MAX_GENERIC];
-	struct kvm_pmc fixed_counters[X86_PMC_MAX_FIXED];
+	struct kvm_pmc gp_counters[INTEL_PMC_MAX_GENERIC];
+	struct kvm_pmc fixed_counters[INTEL_PMC_MAX_FIXED];
 	struct irq_work irq_work;
 	u64 reprogram_pmi;
 };
@@ -485,6 +497,7 @@ struct kvm_arch {
 	u64 last_tsc_offset;
 	u64 last_tsc_write;
 	struct delayed_work kvmclock_update_work;
+	struct delayed_work kvmclock_sync_work;
 
         /* fields used by HYPER-V emulation */
         u64 hv_guest_os_id;
@@ -613,13 +626,15 @@ struct kvm_x86_ops {
 	int (*set_tss_addr)(struct kvm *kvm, unsigned int addr);
 	int (*get_tdp_level)(void);
 	u64 (*get_mt_mask)(struct kvm_vcpu *vcpu, gfn_t gfn, bool is_mmio);
-	bool (*gb_page_enable)(void);
+	int (*get_lpage_level)(void);
 	bool (*invpcid_supported)(void);
 
 	void (*set_tsc_khz)(struct kvm_vcpu *vcpu, u32 user_tsc_khz);
 	void (*write_tsc_offset)(struct kvm_vcpu *vcpu, u64 offset);
 	void (*adjust_tsc_offset)(struct kvm_vcpu *vcpu, s64 adjustment, bool host);
 	u64 (*compute_tsc_offset)(struct kvm_vcpu *vcpu, u64 target_tsc);
+
+	void (*sched_in)(struct kvm_vcpu *kvm, int cpu);
 };
 
 extern struct kvm_x86_ops *kvm_x86_ops;

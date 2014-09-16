@@ -204,6 +204,7 @@ static const struct agp_bridge_driver ali_generic_bridge = {
 	.aperture_sizes		= ali_generic_sizes,
 	.size_type		= U32_APER_SIZE,
 	.num_aperture_sizes	= 7,
+	.needs_scratch_page	= true,
 	.configure		= ali_configure,
 	.fetch_size		= ali_fetch_size,
 	.cleanup		= ali_cleanup,
@@ -248,7 +249,7 @@ static const struct agp_bridge_driver ali_m1541_bridge = {
 };
 
 
-static struct agp_device_ids ali_agp_device_ids[] __devinitdata =
+static struct agp_device_ids ali_agp_device_ids[] =
 {
 	{
 		.device_id	= PCI_DEVICE_ID_AL_M1541,
@@ -298,8 +299,7 @@ static struct agp_device_ids ali_agp_device_ids[] __devinitdata =
 	{ }, /* dummy final entry, always present */
 };
 
-static int __devinit agp_ali_probe(struct pci_dev *pdev,
-				const struct pci_device_id *ent)
+static int agp_ali_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	struct agp_device_ids *devs = ali_agp_device_ids;
 	struct agp_bridge_data *bridge;
@@ -373,7 +373,7 @@ found:
 	return agp_add_bridge(bridge);
 }
 
-static void __devexit agp_ali_remove(struct pci_dev *pdev)
+static void agp_ali_remove(struct pci_dev *pdev)
 {
 	struct agp_bridge_data *bridge = pci_get_drvdata(pdev);
 

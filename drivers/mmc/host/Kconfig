@@ -353,3 +353,9 @@ config MMC_VIA_SDMMC
 	  If you have a controller with this interface, say Y or M here.
 
 	  If unsure, say N.
+config MMC_REALTEK_PCI
+	tristate "Realtek PCI-E SD/MMC Card Interface Driver"
+	depends on MFD_RTSX_PCI
+	help
+	  Say Y here to include driver code to support SD/MMC card interface
+	  of Realtek PCI-E card reader

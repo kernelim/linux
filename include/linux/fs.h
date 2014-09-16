@@ -1483,6 +1483,8 @@ struct super_block {
 	char *s_options;
 #ifndef __GENKSYMS__
 	struct sb_writers	s_writers;
+	atomic_t		s_fsnotify_marks;
+	wait_queue_head_t	s_fsnotify_marks_wq;
 #endif
 };
 
@@ -1493,8 +1495,10 @@ extern struct timespec current_fs_time(struct super_block *sb);
  */
 /* Old freezing mechanism */
 #define vfs_check_frozen(sb, level) \
+do { \
 	if (!sb_has_new_freeze(sb)) \
-		wait_event((sb)->s_wait_unfrozen, ((sb)->s_frozen < (level)))
+		wait_event((sb)->s_wait_unfrozen, ((sb)->s_frozen < (level))); \
+} while (0)
 
 void __sb_end_write(struct super_block *sb, int level);
 int __sb_start_write(struct super_block *sb, int level, bool wait);
@@ -2009,6 +2013,17 @@ void put_super(struct super_block *sb);
 	(((fops) && try_module_get((fops)->owner) ? (fops) : NULL))
 #define fops_put(fops) \
 	do { if (fops) module_put((fops)->owner); } while(0)
+/*
+ * This one is to be used *ONLY* from ->open() instances.
+ * fops must be non-NULL, pinned down *and* module dependencies
+ * should be sufficient to pin the caller down as well.
+ */
+#define replace_fops(f, fops) \
+	do {	\
+		struct file *__file = (f); \
+		fops_put(__file->f_op); \
+		BUG_ON(!(__file->f_op = (fops))); \
+	} while(0)
 
 extern int register_filesystem(struct file_system_type *);
 extern int unregister_filesystem(struct file_system_type *);

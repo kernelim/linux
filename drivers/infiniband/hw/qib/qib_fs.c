@@ -104,6 +104,7 @@ static int create_file(const char *name, mode_t mode,
 static ssize_t driver_stats_read(struct file *file, char __user *buf,
 				 size_t count, loff_t *ppos)
 {
+	qib_stats.sps_ints = qib_sps_ints();
 	return simple_read_from_buffer(buf, count, ppos, &qib_stats,
 				       sizeof qib_stats);
 }
@@ -455,7 +456,6 @@ static int remove_file(struct dentry *parent, char *name)
 	spin_lock(&dcache_lock);
 	spin_lock(&tmp->d_lock);
 	if (!(d_unhashed(tmp) && tmp->d_inode)) {
-		dget_locked(tmp);
 		__d_drop(tmp);
 		spin_unlock(&tmp->d_lock);
 		spin_unlock(&dcache_lock);
@@ -464,6 +464,7 @@ static int remove_file(struct dentry *parent, char *name)
 		spin_unlock(&tmp->d_lock);
 		spin_unlock(&dcache_lock);
 	}
+	dput(tmp);
 
 	ret = 0;
 bail:
@@ -492,6 +493,7 @@ static int remove_device_files(struct super_block *sb,
 		goto bail;
 	}
 
+	mutex_lock(&dir->d_inode->i_mutex);
 	remove_file(dir, "counters");
 	remove_file(dir, "counter_names");
 	remove_file(dir, "portcounter_names");
@@ -506,8 +508,10 @@ static int remove_device_files(struct super_block *sb,
 		}
 	}
 	remove_file(dir, "flash");
-	d_delete(dir);
+	mutex_unlock(&dir->d_inode->i_mutex);
 	ret = simple_rmdir(root->d_inode, dir);
+	d_delete(dir);
+	dput(dir);
 
 bail:
 	mutex_unlock(&root->d_inode->i_mutex);

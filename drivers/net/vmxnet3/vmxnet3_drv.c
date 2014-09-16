@@ -2607,8 +2607,8 @@ vmxnet3_open(struct net_device *netdev)
 	for (i = 0; i < adapter->num_tx_queues; i++)
 		spin_lock_init(&adapter->tx_queue[i].tx_lock);
 
-	err = vmxnet3_create_queues(adapter, VMXNET3_DEF_TX_RING_SIZE,
-				    VMXNET3_DEF_RX_RING_SIZE,
+	err = vmxnet3_create_queues(adapter, adapter->tx_ring_size,
+				    adapter->rx_ring_size,
 				    VMXNET3_DEF_RX_RING_SIZE);
 	if (err)
 		goto queue_err;
@@ -2965,7 +2965,6 @@ vmxnet3_probe_device(struct pci_dev *pdev,
 		.ndo_start_xmit = vmxnet3_xmit_frame,
 		.ndo_set_mac_address = vmxnet3_set_mac_addr,
 		.ndo_change_mtu = vmxnet3_change_mtu,
-		.ndo_get_stats = vmxnet3_get_stats,
 		.ndo_tx_timeout = vmxnet3_tx_timeout,
 		.ndo_vlan_rx_register = vmxnet3_vlan_rx_register,
 		.ndo_set_rx_mode = vmxnet3_set_mc,
@@ -2974,6 +2973,10 @@ vmxnet3_probe_device(struct pci_dev *pdev,
 #ifdef CONFIG_NET_POLL_CONTROLLER
 		.ndo_poll_controller = vmxnet3_netpoll,
 #endif
+	};
+	static const struct net_device_ops_ext vmxnet3_netdev_ops_ext = {
+		.size			= sizeof(struct net_device_ops_ext),
+		.ndo_get_stats64	= vmxnet3_get_stats64,
 	};
 	int err;
 	bool dma64 = false; /* stupid gcc */
@@ -3017,6 +3020,9 @@ vmxnet3_probe_device(struct pci_dev *pdev,
 	adapter = netdev_priv(netdev);
 	adapter->netdev = netdev;
 	adapter->pdev = pdev;
+
+	adapter->tx_ring_size = VMXNET3_DEF_TX_RING_SIZE;
+	adapter->rx_ring_size = VMXNET3_DEF_RX_RING_SIZE;
 
 	spin_lock_init(&adapter->cmd_lock);
 	adapter->shared = pci_alloc_consistent(adapter->pdev,
@@ -3109,6 +3115,7 @@ vmxnet3_probe_device(struct pci_dev *pdev,
 	memcpy(netdev->dev_addr,  mac, netdev->addr_len);
 
 	netdev->netdev_ops = &vmxnet3_netdev_ops;
+	set_netdev_ops_ext(netdev, &vmxnet3_netdev_ops_ext);
 	vmxnet3_set_ethtool_ops(netdev);
 	netdev->watchdog_timeo = 5 * HZ;
 

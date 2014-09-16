@@ -127,7 +127,7 @@ static bool ipt_dnat_checkentry(const struct xt_tgchk_param *par)
 	return true;
 }
 
-unsigned int
+static unsigned int
 alloc_null_binding(struct nf_conn *ct, unsigned int hooknum)
 {
 	/* Force range to this IP; let proto decide mapping for

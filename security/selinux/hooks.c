@@ -3176,12 +3176,11 @@ static int selinux_file_mmap(struct file *file, unsigned long reqprot,
 	int rc = 0;
 	u32 sid = current_sid();
 
-	/*
-	 * notice that we are intentionally putting the SELinux check before
-	 * the secondary cap_file_mmap check.  This is such a likely attempt
-	 * at bad behaviour/exploit that we always want to get the AVC, even
-	 * if DAC would have also denied the operation.
-	 */
+	/* do DAC check on address space usage */
+	rc = cap_file_mmap(file, reqprot, prot, flags, addr, addr_only);
+	if (rc)
+		return rc;
+
 	if (addr < CONFIG_LSM_MMAP_MIN_ADDR) {
 		rc = avc_has_perm(sid, sid, SECCLASS_MEMPROTECT,
 				  MEMPROTECT__MMAP_ZERO, NULL);
@@ -3189,9 +3188,7 @@ static int selinux_file_mmap(struct file *file, unsigned long reqprot,
 			return rc;
 	}
 
-	/* do DAC check on address space usage */
-	rc = cap_file_mmap(file, reqprot, prot, flags, addr, addr_only);
-	if (rc || addr_only)
+	if (addr_only)
 		return rc;
 
 	if (selinux_checkreqprot)
@@ -3405,7 +3402,11 @@ static void selinux_cred_free(struct cred *cred)
 {
 	struct task_security_struct *tsec = cred->security;
 
-	BUG_ON((unsigned long) cred->security < PAGE_SIZE);
+	/*
+	 * cred->security == NULL if security_cred_alloc_blank() or
+	 * security_prepare_creds() returned an error.
+	 */
+	BUG_ON(cred->security && (unsigned long) cred->security < PAGE_SIZE);
 	cred->security = (void *) 0x7UL;
 	kfree(tsec);
 }
@@ -4537,6 +4538,24 @@ static void selinux_req_classify_flow(const struct request_sock *req,
 	fl->secid = req->secid;
 }
 
+static int selinux_tun_dev_alloc_security(void **security)
+{
+	struct tun_security_struct *tunsec;
+
+	tunsec = kzalloc(sizeof(*tunsec), GFP_KERNEL);
+	if (!tunsec)
+		return -ENOMEM;
+	tunsec->sid = current_sid();
+
+	*security = tunsec;
+	return 0;
+}
+
+static void selinux_tun_dev_free_security(void *security)
+{
+	kfree(security);
+}
+
 static int selinux_tun_dev_create(void)
 {
 	u32 sid = current_sid();
@@ -4552,8 +4571,9 @@ static int selinux_tun_dev_create(void)
 			    NULL);
 }
 
-static void selinux_tun_dev_post_create(struct sock *sk)
+static int selinux_tun_dev_attach(struct sock *sk, void *security)
 {
+	struct tun_security_struct *tunsec = security;
 	struct sk_security_struct *sksec = sk->sk_security;
 
 	/* we don't currently perform any NetLabel based labeling here and it
@@ -4563,20 +4583,19 @@ static void selinux_tun_dev_post_create(struct sock *sk)
 	 * cause confusion to the TUN user that had no idea network labeling
 	 * protocols were being used */
 
-	/* see the comments in selinux_tun_dev_create() about why we don't use
-	 * the sockcreate SID here */
-
-	sksec->sid = current_sid();
+	sksec->sid = tunsec->sid;
 	sksec->sclass = SECCLASS_TUN_SOCKET;
+
+	return 0;
 }
 
-static int selinux_tun_dev_attach(struct sock *sk)
+static int selinux_tun_dev_open(void *security)
 {
-	struct sk_security_struct *sksec = sk->sk_security;
+	struct tun_security_struct *tunsec = security;
 	u32 sid = current_sid();
 	int err;
 
-	err = avc_has_perm(sid, sksec->sid, SECCLASS_TUN_SOCKET,
+	err = avc_has_perm(sid, tunsec->sid, SECCLASS_TUN_SOCKET,
 			   TUN_SOCKET__RELABELFROM, NULL);
 	if (err)
 		return err;
@@ -4584,8 +4603,7 @@ static int selinux_tun_dev_attach(struct sock *sk)
 			   TUN_SOCKET__RELABELTO, NULL);
 	if (err)
 		return err;
-
-	sksec->sid = sid;
+	tunsec->sid = sid;
 
 	return 0;
 }
@@ -4882,6 +4900,7 @@ static unsigned int selinux_ip_postroute(struct sk_buff *skb, int ifindex,
 			case PF_INET6:
 				if (IP6CB(skb)->flags & IP6SKB_XFRM_TRANSFORMED)
 					return NF_ACCEPT;
+				break;
 			default:
 				return NF_DROP_ERR(-ECONNREFUSED);
 			}
@@ -4959,22 +4978,6 @@ static int selinux_netlink_send(struct sock *sk, struct sk_buff *skb)
 		return err;
 
 	return selinux_nlmsg_perm(sk, skb);
-}
-
-static int selinux_netlink_recv(struct sk_buff *skb, int capability)
-{
-	int err;
-	struct common_audit_data ad;
-
-	err = cap_netlink_recv(skb, capability);
-	if (err)
-		return err;
-
-	COMMON_AUDIT_DATA_INIT(&ad, CAP);
-	ad.u.cap = capability;
-
-	return avc_has_perm(NETLINK_CB(skb).sid, NETLINK_CB(skb).sid,
-			    SECCLASS_CAPABILITY, CAP_TO_MASK(capability), &ad);
 }
 
 static int ipc_alloc_security(struct task_struct *task,
@@ -5706,7 +5709,6 @@ static struct security_operations selinux_ops = {
 	.vm_enough_memory =		selinux_vm_enough_memory,
 
 	.netlink_send =			selinux_netlink_send,
-	.netlink_recv =			selinux_netlink_recv,
 
 	.bprm_set_creds =		selinux_bprm_set_creds,
 	.bprm_committing_creds =	selinux_bprm_committing_creds,
@@ -5857,9 +5859,11 @@ static struct security_operations selinux_ops = {
 	.inet_csk_clone =		selinux_inet_csk_clone,
 	.inet_conn_established =	selinux_inet_conn_established,
 	.req_classify_flow =		selinux_req_classify_flow,
+	.tun_dev_alloc_security =	selinux_tun_dev_alloc_security,
+	.tun_dev_free_security =	selinux_tun_dev_free_security,
 	.tun_dev_create =		selinux_tun_dev_create,
-	.tun_dev_post_create = 		selinux_tun_dev_post_create,
 	.tun_dev_attach =		selinux_tun_dev_attach,
+	.tun_dev_open =			selinux_tun_dev_open,
 
 #ifdef CONFIG_SECURITY_NETWORK_XFRM
 	.xfrm_policy_alloc_security =	selinux_xfrm_policy_alloc,

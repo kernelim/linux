@@ -86,7 +86,9 @@ struct nd_opt_hdr {
 
 
 extern int			ndisc_init(void);
+extern int			ndisc_late_init(void);
 
+extern void			ndisc_late_cleanup(void);
 extern void			ndisc_cleanup(void);
 
 extern int			ndisc_rcv(struct sk_buff *skb);

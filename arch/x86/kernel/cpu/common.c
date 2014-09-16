@@ -290,38 +290,48 @@ struct cpuid_dependent_feature {
 };
 
 #ifdef CONFIG_XEN
-static const u32
+struct xen_dangerous_feature {
+	u32 feature;
+	u32 allowed_major;
+};
+
+static const struct xen_dangerous_feature __cpuinitconst
 xen_dangerous_cpuid_features[] = {
 	/* Mask out GBPAGES & RDTSCP for Xen BZ#703055 */
-	X86_FEATURE_GBPAGES,
-	X86_FEATURE_RDTSCP,
+	{ X86_FEATURE_GBPAGES,		4 },
+	{ X86_FEATURE_RDTSCP,		4 },
 	/* Mask out features masked by BZ#712131 */
-	X86_FEATURE_MWAIT,
+	{ X86_FEATURE_MWAIT,		4 },
 	/* Mask out features masked by BZ#711317 */
-	X86_FEATURE_CONSTANT_TSC,
-	X86_FEATURE_NONSTOP_TSC,
+	{ X86_FEATURE_CONSTANT_TSC,	4 },
+	{ X86_FEATURE_NONSTOP_TSC,	4 },
 	/* Mask out features masked by BZ#752382 */
-	X86_FEATURE_SMEP,
-	/* Mask out features masked by BZ#1006549 */
-	X86_FEATURE_AVX,
-	0
+	{ X86_FEATURE_SMEP,		4 },
+	{ 0, 0 }
 };
 
 static void __cpuinit fltr_xen_cpuid_features(struct cpuinfo_x86 *c, bool warn)
 {
-	const u32 *df;
+	const struct xen_dangerous_feature *df;
+	static u32 major = 0;
 
-	for (df = xen_dangerous_cpuid_features; *df; df++) {
-		if (!cpu_has(c, *df))
+	if (!major)
+		major = xen_version() >> 16;
+
+	for (df = xen_dangerous_cpuid_features; df->feature; df++) {
+
+		if (!cpu_has(c, df->feature))
 			continue;
 
-		clear_cpu_cap(c, *df);
+		if (df->allowed_major && major >= df->allowed_major)
+			continue;
 
+		clear_cpu_cap(c, df->feature);
 		if (!warn)
 			continue;
 
 		pr_warning("CPU: CPU feature %s disabled on xen guest\n",
-				x86_cap_flags[*df]);
+				x86_cap_flags[df->feature]);
 	}
 }
 #endif /* CONFIG_XEN */

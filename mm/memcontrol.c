@@ -3147,14 +3147,12 @@ static int mem_cgroup_force_empty_list(struct mem_cgroup *mem,
  * make mem_cgroup's charge to be 0 if there is no task.
  * This enables deleting this mem_cgroup.
  */
-static int mem_cgroup_force_empty(struct mem_cgroup *mem, bool free_all)
+static int __mem_cgroup_force_empty(struct mem_cgroup *mem, bool free_all)
 {
 	int ret;
 	int node, zid, shrink;
 	int nr_retries = MEM_CGROUP_RECLAIM_RETRIES;
 	struct cgroup *cgrp = mem->css.cgroup;
-
-	css_get(&mem->css);
 
 	shrink = 0;
 	/* should free all ? */
@@ -3193,7 +3191,6 @@ move_account:
 	/* "ret" should also be checked to ensure all lists are empty. */
 	} while (mem->res.usage > 0 || ret);
 out:
-	css_put(&mem->css);
 	return ret;
 
 try_to_free:
@@ -3225,6 +3222,33 @@ try_to_free:
 	lru_add_drain();
 	/* try move_account...there may be some *locked* pages. */
 	goto move_account;
+}
+
+static int mem_cgroup_force_empty(struct mem_cgroup *memcg, bool free_all)
+{
+	int ret;
+
+	css_get(&memcg->css);
+	ret = __mem_cgroup_force_empty(memcg, free_all);
+	css_put(&memcg->css);
+	return ret;
+}
+
+int mem_cgroup_force_empty_hack(struct cgroup *cgrp)
+{
+	struct cgroup_subsys_state *css;
+	struct mem_cgroup *memcg;
+
+	css = cgroup_subsys_state(cgrp, mem_cgroup_subsys_id);
+	/*
+	 * Because we are called for every cgroup unconditionally, and
+	 * not filtered by for_each_subsys(), we might get called on a
+	 * cgroup that doesn't even have the memory subsystem enabled.
+	 */
+	if (!css)
+		return 0;
+	memcg = container_of(css, struct mem_cgroup, css);
+	return __mem_cgroup_force_empty(memcg, false);
 }
 
 int mem_cgroup_force_empty_write(struct cgroup *cont, unsigned int event)

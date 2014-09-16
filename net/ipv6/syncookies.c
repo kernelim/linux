@@ -27,36 +27,20 @@ extern __u32 syncookie_secret[2][16-4+SHA_DIGEST_WORDS];
 #define COOKIEBITS 24	/* Upper bits store count */
 #define COOKIEMASK (((__u32)1 << COOKIEBITS) - 1)
 
-/*
- * This table has to be sorted and terminated with (__u16)-1.
- * XXX generate a better table.
- * Unresolved Issues: HIPPI with a 64k MSS is not well supported.
+/* RFC 2460, Section 8.3:
+ * [ipv6 tcp] MSS must be computed as the maximum packet size minus 60 [..]
  *
- * Taken directly from ipv4 implementation.
- * Should this list be modified for ipv6 use or is it close enough?
- * rfc 2460 8.3 suggests mss values 20 bytes less than ipv4 counterpart
+ * Due to IPV6_MIN_MTU=1280 the lowest possible MSS is 1220, which allows
+ * using higher values than ipv4 tcp syncookies.
+ * The other values are chosen based on ethernet (1500 and 9k MTU), plus
+ * one that accounts for common encap (PPPoe) overhead. Table must be sorted.
  */
 static __u16 const msstab[] = {
-	64 - 1,
-	256 - 1,
-	512 - 1,
-	536 - 1,
-	1024 - 1,
-	1440 - 1,
-	1460 - 1,
-	4312 - 1,
-	(__u16)-1
+	1280 - 60, /* IPV6_MIN_MTU - 60 */
+	1480 - 60,
+	1500 - 60,
+	9000 - 60,
 };
-/* The number doesn't include the -1 terminator */
-#define NUM_MSS (ARRAY_SIZE(msstab) - 1)
-
-/*
- * This (misnamed) value is the age of syncookie which is permitted.
- * Its ideal value should be dependent on TCP_TIMEOUT_INIT and
- * sysctl_tcp_retries1. It's a rather complicated formula (exponential
- * backoff) to compute at runtime so it's currently hardcoded here.
- */
-#define COUNTER_TRIES 4
 
 static inline struct sock *get_cookie_sock(struct sock *sk, struct sk_buff *skb,
 					   struct request_sock *req,
@@ -77,7 +61,7 @@ static inline struct sock *get_cookie_sock(struct sock *sk, struct sk_buff *skb,
 static DEFINE_PER_CPU(__u32 [16 + 5 + SHA_WORKSPACE_WORDS],
 		      ipv6_cookie_scratch);
 
-static u32 cookie_hash(struct in6_addr *saddr, struct in6_addr *daddr,
+static u32 cookie_hash(const struct in6_addr *saddr, const struct in6_addr *daddr,
 		       __be16 sport, __be16 dport, u32 count, int c)
 {
 	__u32 *tmp = __get_cpu_var(ipv6_cookie_scratch);
@@ -99,25 +83,25 @@ static u32 cookie_hash(struct in6_addr *saddr, struct in6_addr *daddr,
 
 static __u32 secure_tcp_syn_cookie(struct in6_addr *saddr, struct in6_addr *daddr,
 				   __be16 sport, __be16 dport, __u32 sseq,
-				   __u32 count, __u32 data)
+				   __u32 data)
 {
+	u32 count = tcp_cookie_time();
 	return (cookie_hash(saddr, daddr, sport, dport, 0, 0) +
 		sseq + (count << COOKIEBITS) +
 		((cookie_hash(saddr, daddr, sport, dport, count, 1) + data)
 		& COOKIEMASK));
 }
 
-static __u32 check_tcp_syn_cookie(__u32 cookie, struct in6_addr *saddr,
-				  struct in6_addr *daddr, __be16 sport,
-				  __be16 dport, __u32 sseq, __u32 count,
-				  __u32 maxdiff)
+static __u32 check_tcp_syn_cookie(__u32 cookie, const struct in6_addr *saddr,
+				  const struct in6_addr *daddr, __be16 sport,
+				  __be16 dport, __u32 sseq)
 {
-	__u32 diff;
+	__u32 diff, count = tcp_cookie_time();
 
 	cookie -= cookie_hash(saddr, daddr, sport, dport, 0, 0) + sseq;
 
 	diff = (count - (cookie >> COOKIEBITS)) & ((__u32) -1 >> COOKIEBITS);
-	if (diff >= maxdiff)
+	if (diff >= MAX_SYNCOOKIE_AGE)
 		return (__u32)-1;
 
 	return (cookie -
@@ -134,15 +118,16 @@ __u32 cookie_v6_init_sequence(struct sock *sk, struct sk_buff *skb, __u16 *mssp)
 
 	tcp_synq_overflow(sk);
 
-	for (mssind = 0; mss > msstab[mssind + 1]; mssind++)
-		;
-	*mssp = msstab[mssind] + 1;
+	for (mssind = ARRAY_SIZE(msstab) - 1; mssind ; mssind--)
+		if (mss >= msstab[mssind])
+			break;
+
+	*mssp = msstab[mssind];
 
 	NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_SYNCOOKIESSENT);
 
 	return secure_tcp_syn_cookie(&iph->saddr, &iph->daddr, th->source,
-				     th->dest, ntohl(th->seq),
-				     jiffies / (HZ * 60), mssind);
+				     th->dest, ntohl(th->seq), mssind);
 }
 
 static inline int cookie_check(struct sk_buff *skb, __u32 cookie)
@@ -151,10 +136,9 @@ static inline int cookie_check(struct sk_buff *skb, __u32 cookie)
 	const struct tcphdr *th = tcp_hdr(skb);
 	__u32 seq = ntohl(th->seq) - 1;
 	__u32 mssind = check_tcp_syn_cookie(cookie, &iph->saddr, &iph->daddr,
-					    th->source, th->dest, seq,
-					    jiffies / (HZ * 60), COUNTER_TRIES);
+					    th->source, th->dest, seq);
 
-	return mssind < NUM_MSS ? msstab[mssind] + 1 : 0;
+	return mssind < ARRAY_SIZE(msstab) ? msstab[mssind] : 0;
 }
 
 struct sock *cookie_v6_check(struct sock *sk, struct sk_buff *skb)

@@ -361,7 +361,7 @@ static struct ip_tunnel *ip_tunnel_create(struct net *net,
 	fbt = netdev_priv(itn->fb_tunnel_dev);
 	dev = __ip_tunnel_create(net, itn->fb_tunnel_dev->rtnl_link_ops, parms);
 	if (IS_ERR(dev))
-		return NULL;
+		return ERR_CAST(dev);
 
 	dev->mtu = ip_tunnel_bind_dev(dev);
 
@@ -413,6 +413,8 @@ int ip_tunnel_rcv(struct ip_tunnel *tunnel, struct sk_buff *skb,
 		}
 		tunnel->i_seqno = ntohl(tpi->seq) + 1;
 	}
+
+	skb_reset_network_header(skb);
 
 	ipgre_ecn_decapsulate(iph, skb);
 
@@ -606,13 +608,13 @@ void ip_tunnel_xmit(struct sk_buff *skb, struct net_device *dev,
 
 	max_headroom = LL_RESERVED_SPACE(rt->u.dst.dev) + sizeof(struct iphdr)
 			+ rt->u.dst.header_len;
-	if (max_headroom > dev->needed_headroom) {
+	if (max_headroom > dev->needed_headroom)
 		dev->needed_headroom = max_headroom;
-		if (skb_cow_head(skb, dev->needed_headroom)) {
-			dev->stats.tx_dropped++;
-			dev_kfree_skb(skb);
-			return;
-		}
+
+	if (skb_cow_head(skb, dev->needed_headroom)) {
+		dev->stats.tx_dropped++;
+		dev_kfree_skb(skb);
+		return;
 	}
 
 	err = iptunnel_xmit(dev_net(dev), rt, skb,
@@ -697,9 +699,13 @@ int ip_tunnel_ioctl(struct net_device *dev, struct ip_tunnel_parm *p, int cmd)
 
 		t = ip_tunnel_find(itn, p, itn->fb_tunnel_dev->type);
 
-		if (!t && (cmd == SIOCADDTUNNEL))
+		if (!t && (cmd == SIOCADDTUNNEL)) {
 			t = ip_tunnel_create(net, itn, p);
-
+			if (IS_ERR(t)) {
+				err = PTR_ERR(t);
+				break;
+			}
+		}
 		if (dev != itn->fb_tunnel_dev && cmd == SIOCCHGTUNNEL) {
 			if (t != NULL) {
 				if (t->dev != dev) {
@@ -726,8 +732,9 @@ int ip_tunnel_ioctl(struct net_device *dev, struct ip_tunnel_parm *p, int cmd)
 		if (t) {
 			err = 0;
 			ip_tunnel_update(itn, t, dev, p, true);
-		} else
-			err = (cmd == SIOCADDTUNNEL ? -ENOBUFS : -ENOENT);
+		} else {
+			err = -ENOENT;
+		}
 		break;
 
 	case SIOCDELTUNNEL:
@@ -814,6 +821,10 @@ int ip_tunnel_init_net(struct net *net, int ip_tnl_net_id,
 
 	rtnl_lock();
 	itn->fb_tunnel_dev = __ip_tunnel_create(net, ops, &parms);
+
+	if (!IS_ERR(itn->fb_tunnel_dev))
+		ip_tunnel_add(itn, netdev_priv(itn->fb_tunnel_dev));
+
 	rtnl_unlock();
 	if (IS_ERR(itn->fb_tunnel_dev)) {
 		kfree(itn->tunnels);
@@ -836,8 +847,6 @@ static void ip_tunnel_destroy(struct ip_tunnel_net *itn, struct list_head *head)
 		hlist_for_each_entry_safe(t, pos, n, thead, hash_node)
 			unregister_netdevice_queue(t->dev, head);
 	}
-	if (itn->fb_tunnel_dev)
-		unregister_netdevice_queue(itn->fb_tunnel_dev, head);
 }
 
 void ip_tunnel_delete_net(struct ip_tunnel_net *itn)

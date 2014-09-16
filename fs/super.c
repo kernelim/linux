@@ -153,6 +153,10 @@ static struct super_block *alloc_super(struct file_system_type *type)
 		s->s_qcop = sb_quotactl_ops;
 		s->s_op = &default_op;
 		s->s_time_gran = 1000000000;
+#ifdef CONFIG_FSNOTIFY
+		atomic_set(&s->s_fsnotify_marks, 0);
+		init_waitqueue_head(&s->s_fsnotify_marks_wq);
+#endif
 	}
 out:
 	return s;

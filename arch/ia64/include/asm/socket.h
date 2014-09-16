@@ -70,4 +70,7 @@
 #define SO_DOMAIN		39
 
 #define SO_RXQ_OVFL		40
+
+#define SO_BUSY_POLL		46
+
 #endif /* _ASM_IA64_SOCKET_H */

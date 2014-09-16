@@ -30,7 +30,15 @@ int __ratelimit(struct ratelimit_state *rs)
 	if (!rs->interval)
 		return 1;
 
-	spin_lock_irqsave(&ratelimit_lock, flags);
+	/*
+	 * If we contend on this state's lock then almost
+	 * by definition we are too busy to print a message,
+	 * in addition to the one that will be printed by
+	 * the entity that is holding the lock already:
+	 */
+	if (!spin_trylock_irqsave(&ratelimit_lock, flags))
+		return 0;
+
 	if (!rs->begin)
 		rs->begin = jiffies;
 

@@ -252,13 +252,13 @@ struct cred *cred_alloc_blank(void)
 #endif
 
 	atomic_set(&new->usage, 1);
+#ifdef CONFIG_DEBUG_CREDENTIALS
+	new->magic = CRED_MAGIC;
+#endif
 
 	if (security_cred_alloc_blank(new, GFP_KERNEL) < 0)
 		goto error;
 
-#ifdef CONFIG_DEBUG_CREDENTIALS
-	new->magic = CRED_MAGIC;
-#endif
 	return new;
 
 error:
@@ -385,7 +385,7 @@ struct cred *prepare_usermodehelper_creds(void)
 
 	new = kmem_cache_alloc(cred_jar, GFP_ATOMIC);
 	if (!new)
-		return NULL;
+		goto free_tgcred;
 
 	kdebug("prepare_usermodehelper_creds() alloc %p", new);
 
@@ -418,6 +418,12 @@ struct cred *prepare_usermodehelper_creds(void)
 
 error:
 	put_cred(new);
+	return NULL;
+
+free_tgcred:
+#ifdef CONFIG_KEYS
+	kfree(tgcred);
+#endif
 	return NULL;
 }
 
@@ -809,7 +815,11 @@ bool creds_are_invalid(const struct cred *cred)
 	if (cred->magic != CRED_MAGIC)
 		return true;
 #ifdef CONFIG_SECURITY_SELINUX
-	if (selinux_is_enabled()) {
+	/*
+	 * cred->security == NULL if security_cred_alloc_blank() or
+	 * security_prepare_creds() returned an error.
+	 */
+	if (selinux_is_enabled() && cred->security) {
 		if ((unsigned long) cred->security < PAGE_SIZE)
 			return true;
 		if ((*(u32 *)cred->security & 0xffffff00) ==

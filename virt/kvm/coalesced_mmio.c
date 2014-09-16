@@ -35,7 +35,7 @@ static int coalesced_mmio_in_range(struct kvm_coalesced_mmio_dev *dev,
 	 */
 	ring = dev->kvm->coalesced_mmio_ring;
 	avail = (ring->first - ring->last - 1) % KVM_COALESCED_MMIO_MAX;
-	if (avail < KVM_MAX_VCPUS) {
+	if (avail < KVM_MAX_VCPU_COUNT) {
 		/* full */
 		return 0;
 	}

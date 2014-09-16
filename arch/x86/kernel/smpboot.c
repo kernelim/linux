@@ -68,6 +68,7 @@
 #include <linux/mc146818rtc.h>
 
 #include <asm/smpboot_hooks.h>
+#include <asm/i8259.h>
 
 #ifdef CONFIG_X86_32
 u8 apicid_2_node[MAX_APICID];
@@ -340,9 +341,9 @@ notrace static void __cpuinit start_secondary(void *unused)
 	check_tsc_sync_target();
 
 	if (nmi_watchdog == NMI_IO_APIC) {
-		disable_8259A_irq(0);
+		legacy_pic->chip->mask(0);
 		enable_NMI_through_LVT0();
-		enable_8259A_irq(0);
+		legacy_pic->chip->unmask(0);
 	}
 
 	/* This must be done before setting cpu_online_mask */
@@ -444,7 +445,7 @@ void __cpuinit set_cpu_sibling_map(int cpu)
 		for_each_cpu(i, cpu_sibling_setup_mask) {
 			struct cpuinfo_x86 *o = &cpu_data(i);
 
-			if (cpu_has(c, X86_FEATURE_TOPOEXT)) {
+			if (cpu_has_topoext) {
 				if (c->phys_proc_id == o->phys_proc_id &&
 				    per_cpu(cpu_llc_id, cpu) == per_cpu(cpu_llc_id, i) &&
 				    c->compute_unit_id == o->compute_unit_id)
@@ -860,10 +861,12 @@ do_rest:
 	 * Kick the secondary CPU. Use the method in the APIC driver
 	 * if it's defined - or use an INIT boot APIC message otherwise:
 	 */
+	preempt_disable();
 	if (apic->wakeup_secondary_cpu)
 		boot_error = apic->wakeup_secondary_cpu(apicid, start_ip);
 	else
 		boot_error = wakeup_secondary_cpu_via_init(apicid, start_ip);
+	preempt_enable();
 
 	if (!boot_error) {
 		/*
@@ -1353,6 +1356,11 @@ void cpu_disable_common(void)
 int native_cpu_disable(void)
 {
 	int cpu = smp_processor_id();
+	int ret;
+
+	ret = check_irq_vectors_for_cpu_disable();
+	if (ret)
+		return ret;
 
 	/*
 	 * Perhaps use cpufreq to drop frequency, but that could go

@@ -85,6 +85,7 @@ void unregister_memory_isolate_notifier(struct notifier_block *nb)
 }
 EXPORT_SYMBOL(unregister_memory_isolate_notifier);
 
+extern int sysdev_register_hack(struct sys_device *sysdev);
 /*
  * register_memory - Setup a sysfs device for a memory block
  */
@@ -96,7 +97,7 @@ int register_memory(struct memory_block *memory)
 	memory->sysdev.cls = &memory_sysdev_class;
 	memory->sysdev.id = memory->start_phys_index;
 
-	error = sysdev_register(&memory->sysdev);
+	error = sysdev_register_hack(&memory->sysdev);
 	return error;
 }
 
@@ -528,6 +529,9 @@ static int init_memory_block(struct memory_block **memory,
 		ret = mem_create_simple_file(mem, phys_device);
 	if (!ret)
 		ret = mem_create_simple_file(mem, removable);
+
+	if (!ret)
+		kobject_uevent(&mem->sysdev.kobj, KOBJ_ADD);
 
 	*memory = mem;
 	return ret;

@@ -1,6 +1,6 @@
 /*
  * QLogic Fibre Channel HBA Driver
- * Copyright (c)  2003-2013 QLogic Corporation
+ * Copyright (c)  2003-2014 QLogic Corporation
  *
  * See LICENSE.qla2xxx for copyright and licensing details.
  */
@@ -321,7 +321,7 @@ struct srb_iocb {
 			uint32_t lun;
 			uint32_t data;
 			struct completion comp;
-			uint32_t comp_status;
+			__le16 comp_status;
 		} tmf;
 		struct {
 #define SRB_FXDISC_REQ_DMA_VALID	BIT_0
@@ -336,21 +336,21 @@ struct srb_iocb {
 			void *rsp_addr;
 			dma_addr_t req_dma_handle;
 			dma_addr_t rsp_dma_handle;
-			uint32_t adapter_id;
-			uint32_t adapter_id_hi;
-			uint32_t req_func_type;
-			uint32_t req_data;
-			uint32_t req_data_extra;
-			uint32_t result;
-			uint32_t seq_number;
-			uint32_t fw_flags;
+			__le32 adapter_id;
+			__le32 adapter_id_hi;
+			__le16 req_func_type;
+			__le32 req_data;
+			__le32 req_data_extra;
+			__le32 result;
+			__le32 seq_number;
+			__le16 fw_flags;
 			struct completion fxiocb_comp;
-			uint32_t reserved_0;
+			__le32 reserved_0;
 			uint8_t reserved_1;
 		} fxiocb;
 		struct {
 			uint32_t cmd_hndl;
-			uint32_t comp_status;
+			__le16 comp_status;
 			struct completion comp;
 		} abt;
 	} u;
@@ -638,6 +638,7 @@ struct device_reg_fx00 {
 	uint32_t initval6;		/* C8 */
 	uint32_t initval7;		/* CC */
 	uint32_t fwheartbeat;		/* D0 */
+	uint32_t pseudoaen;		/* D4 */
 };
 
 
@@ -798,7 +799,8 @@ struct mbx_cmd_32 {
 #define MBA_MIRROR_LUN_CHANGE	0x8402	/* Mirror LUN State Change
 					   Notification */
 #define MBA_FW_POLL_STATE	0x8600  /* Firmware in poll diagnostic state */
-
+#define MBA_FW_RESET_FCT	0x8502	/* Firmware reset factory defaults */
+#define MBA_FW_INIT_INPROGRESS	0x8500	/* Firmware boot in progress */
 /* 83XX FCoE specific */
 #define MBA_IDC_AEN		0x8200  /* FCoE: NIC Core state change AEN */
 
@@ -850,7 +852,6 @@ struct mbx_cmd_32 {
  */
 #define MBC_LOAD_RAM			1	/* Load RAM. */
 #define MBC_EXECUTE_FIRMWARE		2	/* Execute firmware. */
-#define MBC_WRITE_RAM_WORD		4	/* Write RAM word. */
 #define MBC_READ_RAM_WORD		5	/* Read RAM word. */
 #define MBC_MAILBOX_REGISTER_TEST	6	/* Wrap incoming mailboxes */
 #define MBC_VERIFY_CHECKSUM		7	/* Verify checksum. */
@@ -925,6 +926,8 @@ struct mbx_cmd_32 {
 /*
  * ISP24xx mailbox commands
  */
+#define MBC_WRITE_SERDES		0x3	/* Write serdes word. */
+#define MBC_READ_SERDES			0x4	/* Read serdes word. */
 #define MBC_SERDES_PARAMS		0x10	/* Serdes Tx Parameters. */
 #define MBC_GET_IOCB_STATUS		0x12	/* Get IOCB status command. */
 #define MBC_PORT_PARAMS			0x1A	/* Port iDMA Parameters. */
@@ -988,6 +991,7 @@ struct mbx_cmd_32 {
 #define	MBX_1		BIT_1
 #define	MBX_0		BIT_0
 
+#define RNID_TYPE_SET_VERSION	0x9
 #define RNID_TYPE_ASIC_TEMP	0xC
 
 /*
@@ -1183,30 +1187,6 @@ typedef struct {
 	uint8_t  reserved_3[26];
 } init_cb_t;
 
-
-struct init_cb_fx {
-	uint16_t	version;
-	uint16_t	reserved_1[13];
-	uint16_t	request_q_outpointer;
-	uint16_t	response_q_inpointer;
-	uint16_t	reserved_2[2];
-	uint16_t	response_q_length;
-	uint16_t	request_q_length;
-	uint16_t	reserved_3[2];
-	uint32_t	request_q_address[2];
-	uint32_t	response_q_address[2];
-	uint16_t	reserved_4[4];
-	uint8_t		response_q_msivec;
-	uint8_t		reserved_5[19];
-	uint16_t	interrupt_delay_timer;
-	uint16_t	reserved_6;
-	uint32_t	fwoptions1;
-	uint32_t	fwoptions2;
-	uint32_t	fwoptions3;
-	uint8_t		reserved_7[24];
-};
-
-
 /*
  * Get Link Status mailbox command return buffer.
  */
@@ -1224,8 +1204,9 @@ struct link_statistics {
 	uint32_t unused1[0x1a];
 	uint32_t tx_frames;
 	uint32_t rx_frames;
-	uint32_t dumped_frames;
-	uint32_t unused2[2];
+	uint32_t discarded_frames;
+	uint32_t dropped_frames;
+	uint32_t unused2[1];
 	uint32_t nos_rcvd;
 };
 
@@ -2632,6 +2613,11 @@ struct qla_statistics {
 	uint32_t total_isp_aborts;
 	uint64_t input_bytes;
 	uint64_t output_bytes;
+	uint64_t input_requests;
+	uint64_t output_requests;
+	uint32_t control_requests;
+
+	uint64_t jiffies_at_last_reset;
 };
 
 struct bidi_statistics {
@@ -2646,9 +2632,8 @@ struct bidi_statistics {
 #define QLA_MAX_QUEUES 256
 #define ISP_QUE_REG(ha, id) \
 	((ha->mqenable || IS_QLA83XX(ha)) ? \
-	((device_reg_t __iomem *)(ha->mqiobase) +\
-	(QLA_QUE_PAGE * id)) :\
-	((device_reg_t __iomem *)(ha->iobase)))
+	 ((void __iomem *)ha->mqiobase + (QLA_QUE_PAGE * id)) :\
+	 ((void __iomem *)ha->iobase))
 #define QLA_REQ_QUE_ID(tag) \
 	((tag < QLA_MAX_QUEUES && tag > 0) ? tag : 0)
 #define QLA_DEFAULT_QUE_QOS 5
@@ -2914,12 +2899,12 @@ struct qla_hw_data {
 				IS_QLA84XX(ha))
 #define IS_CNA_CAPABLE(ha)	(IS_QLA81XX(ha) || IS_QLA82XX(ha) || \
 				IS_QLA8031(ha))
+#define IS_P3P_TYPE(ha)		IS_QLA82XX(ha)
 #define IS_QLA2XXX_MIDTYPE(ha)	(IS_QLA24XX(ha) || IS_QLA84XX(ha) || \
 				IS_QLA25XX(ha) || IS_QLA81XX(ha) || \
 				IS_QLA82XX(ha) || IS_QLA83XX(ha))
 #define IS_MSIX_NACK_CAPABLE(ha) (IS_QLA81XX(ha) || IS_QLA83XX(ha))
-#define IS_NOPOLLING_TYPE(ha)	((IS_QLA25XX(ha) || IS_QLA81XX(ha) || \
-			IS_QLA83XX(ha)) && (ha)->flags.msix_enabled)
+#define IS_NOPOLLING_TYPE(ha)	(IS_QLA81XX(ha) && (ha)->flags.msix_enabled)
 #define IS_FAC_REQUIRED(ha)	(IS_QLA81XX(ha) || IS_QLA83XX(ha))
 #define IS_NOCACHE_VPD_TYPE(ha)	(IS_QLA81XX(ha) || IS_QLA83XX(ha))
 #define IS_ALOGIO_CAPABLE(ha)	(IS_QLA23XX(ha) || IS_FWI2_CAPABLE(ha))
@@ -3066,6 +3051,13 @@ struct qla_hw_data {
 	struct qla2xxx_fw_dump *fw_dump;
 	uint32_t	fw_dump_len;
 	int		fw_dumped;
+	unsigned long	fw_dump_cap_flags;
+#define RISC_PAUSE_CMPL		0
+#define DMA_SHUTDOWN_CMPL	1
+#define ISP_RESET_CMPL		2
+#define RISC_RDY_AFT_RESET	3
+#define RISC_SRAM_DUMP_CMPL	4
+#define RISC_EXT_MEM_DUMP_CMPL	5
 	int		fw_dump_reading;
 	dma_addr_t	eft_dma;
 	void		*eft;
@@ -3104,6 +3096,7 @@ struct qla_hw_data {
 #define QLA_SWRITING	2
 	uint32_t	optrom_region_start;
 	uint32_t	optrom_region_size;
+	struct mutex	optrom_mutex;
 
 /* PCI expansion ROM image information. */
 #define ROM_CODE_TYPE_BIOS	0
@@ -3213,6 +3206,7 @@ struct qla_hw_data {
 
 	/* QLA83XX IDC specific fields */
 	uint32_t	idc_audit_ts;
+	uint32_t	idc_extend_tmo;
 
 	/* DPC low-priority workqueue */
 	struct workqueue_struct *dpc_lp_wq;
@@ -3228,6 +3222,7 @@ struct qla_hw_data {
 	uint16_t	thermal_support;
 #define THERMAL_SUPPORT_I2C BIT_0
 #define THERMAL_SUPPORT_ISP BIT_1
+	int	allow_cna_fw_dump;
 };
 
 /*
@@ -3291,6 +3286,8 @@ typedef struct scsi_qla_host {
 #define PORT_UPDATE_NEEDED	22
 #define FX00_RESET_RECOVERY	23
 #define FX00_TARGET_SCAN	24
+#define FX00_CRITEMP_RECOVERY	25
+#define FX00_HOST_INFO_RESEND	26
 
 	uint32_t	device_flags;
 #define SWITCH_FOUND		BIT_0

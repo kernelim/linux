@@ -80,20 +80,13 @@ static const struct sysfs_ops dm_sysfs_ops = {
 };
 
 /*
- * The sysfs structure is embedded in md struct, nothing to do here
- */
-static void dm_sysfs_release(struct kobject *kobj)
-{
-}
-
-/*
  * dm kobject is embedded in mapped_device structure
  * no need to define release function here
  */
 static struct kobj_type dm_ktype = {
 	.sysfs_ops	= &dm_sysfs_ops,
 	.default_attrs	= dm_attrs,
-	.release	= dm_sysfs_release
+	.release	= dm_kobject_release,
 };
 
 /*
@@ -112,5 +105,7 @@ int dm_sysfs_init(struct mapped_device *md)
  */
 void dm_sysfs_exit(struct mapped_device *md)
 {
-	kobject_put(dm_kobject(md));
+	struct kobject *kobj = dm_kobject(md);
+	kobject_put(kobj);
+	wait_for_completion(dm_get_completion_from_kobject(kobj));
 }

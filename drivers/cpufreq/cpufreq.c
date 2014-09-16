@@ -135,7 +135,7 @@ pure_initcall(init_cpufreq_transition_notifier_list);
 static LIST_HEAD(cpufreq_governor_list);
 static DEFINE_MUTEX(cpufreq_governor_mutex);
 
-struct cpufreq_policy *cpufreq_cpu_get(unsigned int cpu)
+static struct cpufreq_policy *__cpufreq_cpu_get(unsigned int cpu, bool sysfs)
 {
 	struct cpufreq_policy *data;
 	unsigned long flags;
@@ -159,7 +159,7 @@ struct cpufreq_policy *cpufreq_cpu_get(unsigned int cpu)
 	if (!data)
 		goto err_out_put_module;
 
-	if (!kobject_get(&data->kobj))
+	if (!sysfs && !kobject_get(&data->kobj))
 		goto err_out_put_module;
 
 	read_unlock_irqrestore(&cpufreq_driver_lock, flags);
@@ -172,16 +172,35 @@ err_out_unlock:
 err_out:
 	return NULL;
 }
+
+struct cpufreq_policy *cpufreq_cpu_get(unsigned int cpu)
+{
+	return __cpufreq_cpu_get(cpu, false);
+}
 EXPORT_SYMBOL_GPL(cpufreq_cpu_get);
 
+static struct cpufreq_policy *cpufreq_cpu_get_sysfs(unsigned int cpu)
+{
+	return __cpufreq_cpu_get(cpu, true);
+}
+
+static void __cpufreq_cpu_put(struct cpufreq_policy *data, bool sysfs)
+{
+	if (!sysfs)
+		kobject_put(&data->kobj);
+	module_put(cpufreq_driver->owner);
+}
 
 void cpufreq_cpu_put(struct cpufreq_policy *data)
 {
-	kobject_put(&data->kobj);
-	module_put(cpufreq_driver->owner);
+	__cpufreq_cpu_put(data, false);
 }
 EXPORT_SYMBOL_GPL(cpufreq_cpu_put);
 
+static void cpufreq_cpu_put_sysfs(struct cpufreq_policy *data)
+{
+	__cpufreq_cpu_put(data, true);
+}
 
 /*********************************************************************
  *                     UNIFIED DEBUG HELPERS                         *
@@ -690,7 +709,7 @@ static ssize_t show(struct kobject *kobj, struct attribute *attr, char *buf)
 	struct cpufreq_policy *policy = to_policy(kobj);
 	struct freq_attr *fattr = to_attr(attr);
 	ssize_t ret = -EINVAL;
-	policy = cpufreq_cpu_get(policy->cpu);
+	policy = cpufreq_cpu_get_sysfs(policy->cpu);
 	if (!policy)
 		goto no_policy;
 
@@ -704,7 +723,7 @@ static ssize_t show(struct kobject *kobj, struct attribute *attr, char *buf)
 
 	unlock_policy_rwsem_read(policy->cpu);
 fail:
-	cpufreq_cpu_put(policy);
+	cpufreq_cpu_put_sysfs(policy);
 no_policy:
 	return ret;
 }
@@ -715,7 +734,7 @@ static ssize_t store(struct kobject *kobj, struct attribute *attr,
 	struct cpufreq_policy *policy = to_policy(kobj);
 	struct freq_attr *fattr = to_attr(attr);
 	ssize_t ret = -EINVAL;
-	policy = cpufreq_cpu_get(policy->cpu);
+	policy = cpufreq_cpu_get_sysfs(policy->cpu);
 	if (!policy)
 		goto no_policy;
 
@@ -729,7 +748,7 @@ static ssize_t store(struct kobject *kobj, struct attribute *attr,
 
 	unlock_policy_rwsem_write(policy->cpu);
 fail:
-	cpufreq_cpu_put(policy);
+	cpufreq_cpu_put_sysfs(policy);
 no_policy:
 	return ret;
 }
@@ -1067,15 +1086,15 @@ module_out:
 	return ret;
 }
 
-
 /**
- * __cpufreq_remove_dev - remove a CPU device
+ * __cpufreq_remove_dev_prepare - prepare device remove
  *
  * Removes the cpufreq interface for a CPU device.
- * Caller should already have policy_rwsem in write mode for this CPU.
- * This routine frees the rwsem before returning.
+ * This routine holding and frees the rwsem direct.
+ * because lock routine contain check if cpu is online
+ * and this is cleanup code ( cpu can be offline )
  */
-static int __cpufreq_remove_dev(struct sys_device *sys_dev)
+static int __cpufreq_remove_dev_prepare(struct sys_device *sys_dev)
 {
 	unsigned int cpu = sys_dev->id;
 	unsigned long flags;
@@ -1084,7 +1103,9 @@ static int __cpufreq_remove_dev(struct sys_device *sys_dev)
 	struct sys_device *cpu_sys_dev;
 	unsigned int j;
 #endif
+	int policy_cpu = per_cpu(policy_cpu, cpu);
 
+	down_write(&per_cpu(cpu_policy_rwsem, policy_cpu));
 	cpufreq_debug_disable_ratelimit();
 	dprintk("unregistering CPU %u\n", cpu);
 
@@ -1094,11 +1115,9 @@ static int __cpufreq_remove_dev(struct sys_device *sys_dev)
 	if (!data) {
 		write_unlock_irqrestore(&cpufreq_driver_lock, flags);
 		cpufreq_debug_enable_ratelimit();
-		unlock_policy_rwsem_write(cpu);
+		up_write(&per_cpu(cpu_policy_rwsem, policy_cpu));
 		return -EINVAL;
 	}
-	per_cpu(cpufreq_cpu_data, cpu) = NULL;
-
 
 #ifdef CONFIG_SMP
 	/* if this isn't the CPU which is the parent of the kobj, we
@@ -1108,10 +1127,11 @@ static int __cpufreq_remove_dev(struct sys_device *sys_dev)
 		dprintk("removing link\n");
 		cpumask_clear_cpu(cpu, data->cpus);
 		write_unlock_irqrestore(&cpufreq_driver_lock, flags);
+		per_cpu(cpufreq_cpu_data, cpu) = NULL;
 		sysfs_remove_link(&sys_dev->kobj, "cpufreq");
 		cpufreq_cpu_put(data);
 		cpufreq_debug_enable_ratelimit();
-		unlock_policy_rwsem_write(cpu);
+		up_write(&per_cpu(cpu_policy_rwsem, policy_cpu));
 		return 0;
 	}
 #endif
@@ -1160,8 +1180,45 @@ static int __cpufreq_remove_dev(struct sys_device *sys_dev)
 	if (cpufreq_driver->target)
 		__cpufreq_governor(data, CPUFREQ_GOV_STOP);
 
-	kobject_put(&data->kobj);
+	cpufreq_debug_enable_ratelimit();
+	up_write(&per_cpu(cpu_policy_rwsem, policy_cpu));
+	return 0;
+}
 
+/**
+ * __cpufreq_remove_dev_finish - finish device remove
+ *
+ * Finishing remove the cpufreq interface for a CPU device.
+ * cleaning mask and deleting sysfs kobject
+ * This routine holding and frees the rwsem direct.
+ * because lock routine contain check if cpu is online
+ * and this is cleanup code ( cpu is offline here )
+*/
+
+static int __cpufreq_remove_dev_finish(struct sys_device *sys_dev)
+{
+	unsigned int cpu = sys_dev->id;
+	unsigned long flags;
+	struct cpufreq_policy *data;
+	int policy_cpu = per_cpu(policy_cpu, cpu);
+
+	cpufreq_debug_disable_ratelimit();
+
+	read_lock_irqsave(&cpufreq_driver_lock, flags);
+	data = per_cpu(cpufreq_cpu_data, cpu);
+	read_unlock_irqrestore(&cpufreq_driver_lock, flags);
+
+	/* holding lock only for neccesary part of code */
+	down_write(&per_cpu(cpu_policy_rwsem, policy_cpu));
+	cpumask_clear_cpu(cpu, data->cpus);
+	up_write(&per_cpu(cpu_policy_rwsem, policy_cpu));
+
+	if (!data) {
+		cpufreq_debug_enable_ratelimit();
+		return -EINVAL;
+	}
+
+	kobject_put(&data->kobj);
 	/* we need to make sure that the underlying kobj is actually
 	 * not referenced anymore by anybody before we proceed with
 	 * unloading.
@@ -1173,17 +1230,12 @@ static int __cpufreq_remove_dev(struct sys_device *sys_dev)
 	if (cpufreq_driver->exit)
 		cpufreq_driver->exit(data);
 
-	unlock_policy_rwsem_write(cpu);
-
 	free_cpumask_var(data->related_cpus);
 	free_cpumask_var(data->cpus);
-	kfree(data);
 	per_cpu(cpufreq_cpu_data, cpu) = NULL;
-
-	cpufreq_debug_enable_ratelimit();
+	kfree(data);
 	return 0;
 }
-
 
 static int cpufreq_remove_dev(struct sys_device *sys_dev)
 {
@@ -1193,10 +1245,10 @@ static int cpufreq_remove_dev(struct sys_device *sys_dev)
 	if (cpu_is_offline(cpu))
 		return 0;
 
-	if (unlikely(lock_policy_rwsem_write(cpu)))
-		BUG();
+	retval = __cpufreq_remove_dev_prepare(sys_dev);
 
-	retval = __cpufreq_remove_dev(sys_dev);
+	if (!retval)
+		__cpufreq_remove_dev_finish(sys_dev);
 	return retval;
 }
 
@@ -1851,10 +1903,10 @@ static int __cpuinit cpufreq_cpu_callback(struct notifier_block *nfb,
 			break;
 		case CPU_DOWN_PREPARE:
 		case CPU_DOWN_PREPARE_FROZEN:
-			if (unlikely(lock_policy_rwsem_write(cpu)))
-				BUG();
-
-			__cpufreq_remove_dev(sys_dev);
+			__cpufreq_remove_dev_prepare(sys_dev);
+			break;
+		case CPU_POST_DEAD:
+			__cpufreq_remove_dev_finish(sys_dev);
 			break;
 		case CPU_DOWN_FAILED:
 		case CPU_DOWN_FAILED_FROZEN:

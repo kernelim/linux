@@ -33,6 +33,7 @@
  *   when freed).
  */
 
+#if defined(CONFIG_SWIOTLB) || defined(CONFIG_INTEL_IOMMU)
 #define pr_fmt(fmt) "[TTM] " fmt
 
 #include <linux/dma-mapping.h>
@@ -918,19 +919,6 @@ int ttm_dma_populate(struct ttm_dma_tt *ttm_dma, struct device *dev)
 }
 EXPORT_SYMBOL_GPL(ttm_dma_populate);
 
-/* Get good estimation how many pages are free in pools */
-static int ttm_dma_pool_get_num_unused_pages(void)
-{
-	struct device_pools *p;
-	unsigned total = 0;
-
-	mutex_lock(&_manager->lock);
-	list_for_each_entry(p, &_manager->pools, pools)
-		total += p->pool->npages_free;
-	mutex_unlock(&_manager->lock);
-	return total;
-}
-
 /* Put all pages in pages list to correct pool to wait for reuse */
 void ttm_dma_unpopulate(struct ttm_dma_tt *ttm_dma, struct device *dev)
 {
@@ -999,6 +987,19 @@ void ttm_dma_unpopulate(struct ttm_dma_tt *ttm_dma, struct device *dev)
 	ttm->state = tt_unpopulated;
 }
 EXPORT_SYMBOL_GPL(ttm_dma_unpopulate);
+
+/* Get good estimation how many pages are free in pools */
+static int ttm_dma_pool_get_num_unused_pages(void)
+{
+	struct device_pools *p;
+	unsigned total = 0;
+
+	mutex_lock(&_manager->lock);
+	list_for_each_entry(p, &_manager->pools, pools)
+	total += p->pool->npages_free;
+	mutex_unlock(&_manager->lock);
+	return total;
+}
 
 /**
  * Callback for mm to request pool to reduce number of page held.
@@ -1129,3 +1130,5 @@ int ttm_dma_page_alloc_debugfs(struct seq_file *m, void *data)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(ttm_dma_page_alloc_debugfs);
+
+#endif

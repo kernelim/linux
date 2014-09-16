@@ -1066,7 +1066,7 @@ static void raise_barrier(struct r10conf *conf, int force)
 	spin_lock_irq(&conf->resync_lock);
 
 	/* Wait until no block IO is waiting (unless 'force') */
-	wait_event_lock_irq(conf->wait_barrier, force || !conf->nr_waiting,
+	wait_event_lock_irq_cmd(conf->wait_barrier, force || !conf->nr_waiting,
 			    conf->resync_lock,
 			    md_raid10_unplug_device(conf));
 
@@ -1074,7 +1074,7 @@ static void raise_barrier(struct r10conf *conf, int force)
 	conf->barrier++;
 
 	/* No wait for all pending IO to complete */
-	wait_event_lock_irq(conf->wait_barrier,
+	wait_event_lock_irq_cmd(conf->wait_barrier,
 			    !conf->nr_pending && conf->barrier < RESYNC_DEPTH,
 			    conf->resync_lock,
 			    md_raid10_unplug_device(conf));
@@ -1105,14 +1105,13 @@ static void wait_barrier(struct r10conf *conf)
 		 * that queue to get the nr_pending
 		 * count down.
 		 */
-		wait_event_lock_irq(conf->wait_barrier,
+		wait_event_lock_irq_cmd(conf->wait_barrier,
 				    !conf->barrier ||
 				    (conf->nr_pending &&
 				     current->bio_list &&
 				     current->bio_tail),
 				    conf->resync_lock,
-				    md_raid10_unplug_device(conf)
-			);
+				    md_raid10_unplug_device(conf));
 		conf->nr_waiting--;
 	}
 	conf->nr_pending++;
@@ -1145,11 +1144,12 @@ static void freeze_array(struct r10conf *conf, int extra)
 	spin_lock_irq(&conf->resync_lock);
 	conf->barrier++;
 	conf->nr_waiting++;
-	wait_event_lock_irq(conf->wait_barrier,
+	wait_event_lock_irq_cmd(conf->wait_barrier,
 				conf->nr_pending == conf->nr_queued+extra,
 				conf->resync_lock,
-			    ({ flush_pending_writes(conf);
-			       md_raid10_unplug_device(conf); }));
+			     ({ flush_pending_writes(conf);
+				md_raid10_unplug_device(conf); }));
+
 	spin_unlock_irq(&conf->resync_lock);
 }
 
@@ -1339,7 +1339,7 @@ read_again:
 			/* Could not read all from this device, so we will
 			 * need another r10_bio.
 			 */
-			sectors_handled = (r10_bio->sectors + max_sectors
+			sectors_handled = (r10_bio->sector + max_sectors
 					   - bio->bi_sector);
 			r10_bio->sectors = max_sectors;
 			spin_lock_irq(&conf->device_lock);
@@ -1347,7 +1347,7 @@ read_again:
 				bio->bi_phys_segments = 2;
 			else
 				bio->bi_phys_segments++;
-			spin_unlock(&conf->device_lock);
+			spin_unlock_irq(&conf->device_lock);
 			/* Cannot call generic_make_request directly
 			 * as that will be queued in __generic_make_request
 			 * and subsequent mempool_alloc might block
@@ -1710,13 +1710,12 @@ static void error(struct mddev *mddev, struct md_rdev *rdev)
 		spin_unlock_irqrestore(&conf->device_lock, flags);
 		return;
 	}
-	if (test_and_clear_bit(In_sync, &rdev->flags)) {
+	if (test_and_clear_bit(In_sync, &rdev->flags))
 		mddev->degraded++;
-			/*
-		 * if recovery is running, make sure it aborts.
-		 */
-		set_bit(MD_RECOVERY_INTR, &mddev->recovery);
-	}
+	/*
+	 * If recovery is running, make sure it aborts.
+	 */
+	set_bit(MD_RECOVERY_INTR, &mddev->recovery);
 	set_bit(Blocked, &rdev->flags);
 	set_bit(Faulty, &rdev->flags);
 	set_bit(MD_CHANGE_DEVS, &mddev->flags);
@@ -3237,10 +3236,6 @@ static sector_t sync_request(struct mddev *mddev, sector_t sector_nr,
 			if (j == conf->copies) {
 				/* Cannot recover, so abort the recovery or
 				 * record a bad block */
-				put_buf(r10_bio);
-				if (rb2)
-					atomic_dec(&rb2->remaining);
-				r10_bio = rb2;
 				if (any_working) {
 					/* problem is that there are bad blocks
 					 * on other device(s)
@@ -3272,6 +3267,10 @@ static sector_t sync_request(struct mddev *mddev, sector_t sector_nr,
 					mirror->recovery_disabled
 						= mddev->recovery_disabled;
 				}
+				put_buf(r10_bio);
+				if (rb2)
+					atomic_dec(&rb2->remaining);
+				r10_bio = rb2;
 				break;
 			}
 		}
@@ -3775,7 +3774,8 @@ static int run(struct mddev *mddev)
 		    !test_bit(In_sync, &disk->rdev->flags)) {
 			disk->head_position = 0;
 			mddev->degraded++;
-			if (disk->rdev)
+			if (disk->rdev &&
+			    disk->rdev->saved_raid_disk < 0)
 				conf->fullsync = 1;
 		}
 		disk->recovery_disabled = mddev->recovery_disabled - 1;
@@ -4413,7 +4413,11 @@ static sector_t reshape_request(struct mddev *mddev, sector_t sector_nr,
 		set_bit(MD_CHANGE_DEVS, &mddev->flags);
 		md_wakeup_thread(mddev->thread);
 		wait_event(mddev->sb_wait, mddev->flags == 0 ||
-			   kthread_should_stop());
+			   test_bit(MD_RECOVERY_INTR, &mddev->recovery));
+		if (test_bit(MD_RECOVERY_INTR, &mddev->recovery)) {
+			allow_barrier(conf);
+			return sectors_done;
+		}
 		conf->reshape_safe = mddev->reshape_position;
 		allow_barrier(conf);
 	}

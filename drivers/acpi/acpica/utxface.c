@@ -47,6 +47,7 @@
 #include "acnamesp.h"
 #include "acdebug.h"
 #include "actables.h"
+#include "acinterp.h"
 
 #define _COMPONENT          ACPI_UTILITIES
 ACPI_MODULE_NAME("utxface")
@@ -533,4 +534,42 @@ acpi_status acpi_purge_cached_objects(void)
 }
 
 ACPI_EXPORT_SYMBOL(acpi_purge_cached_objects)
+
+/*****************************************************************************
+ *
+ * FUNCTION:    acpi_check_address_range
+ *
+ * PARAMETERS:  space_id            - Address space ID
+ *              Address             - Start address
+ *              Length              - Length
+ *              Warn                - TRUE if warning on overlap desired
+ *
+ * RETURN:      Count of the number of conflicts detected.
+ *
+ * DESCRIPTION: Check if the input address range overlaps any of the
+ *              ASL operation region address ranges.
+ *
+ ****************************************************************************/
+u32
+acpi_check_address_range(acpi_adr_space_type space_id,
+			 acpi_physical_address address,
+			 acpi_size length, u8 warn)
+{
+	u32 overlaps;
+	acpi_status status;
+
+	status = acpi_ut_acquire_mutex(ACPI_MTX_NAMESPACE);
+	if (ACPI_FAILURE(status)) {
+		return (0);
+	}
+
+	overlaps = acpi_ut_check_address_range(space_id, address,
+					       (u32)length, warn);
+
+	(void)acpi_ut_release_mutex(ACPI_MTX_NAMESPACE);
+	return (overlaps);
+}
+
+ACPI_EXPORT_SYMBOL(acpi_check_address_range)
+
 #endif

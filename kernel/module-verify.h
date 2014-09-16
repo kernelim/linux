@@ -15,7 +15,7 @@
 
 #ifdef CONFIG_MODULE_VERIFY
 struct module_verify_data {
-	struct shash_desc	*hash;		/* module signature digest (SHA1) */
+	struct shash_desc	*hash;		/* module signature digest */
 	const void		*buffer;	/* module buffer */
 	const Elf_Ehdr		*hdr;		/* ELF header */
 	const Elf_Shdr		*sections;	/* ELF section table */

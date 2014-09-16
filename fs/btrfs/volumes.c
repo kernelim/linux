@@ -3746,7 +3746,7 @@ static int __btrfs_map_block(struct btrfs_mapping_tree *map_tree, int rw,
 	/* stripe_offset is the offset of this block in its stripe*/
 	stripe_offset = offset - stripe_offset;
 
-	if (rw & REQ_DISCARD)
+	if (rw & BIO_DISCARD)
 		*length = min_t(u64, em->len - offset, *length);
 	else if (map->type & BTRFS_BLOCK_GROUP_PROFILE_MASK) {
 		/* we limit the length of each bio to what fits in a stripe */
@@ -3768,12 +3768,12 @@ static int __btrfs_map_block(struct btrfs_mapping_tree *map_tree, int rw,
 	stripe_end_offset = stripe_nr_end * map->stripe_len -
 			    (offset + *length);
 	if (map->type & BTRFS_BLOCK_GROUP_RAID0) {
-		if (rw & REQ_DISCARD)
+		if (rw & BIO_DISCARD)
 			num_stripes = min_t(u64, map->num_stripes,
 					    stripe_nr_end - stripe_nr_orig);
 		stripe_index = do_div(stripe_nr, map->num_stripes);
 	} else if (map->type & BTRFS_BLOCK_GROUP_RAID1) {
-		if (rw & (REQ_WRITE | REQ_DISCARD))
+		if (rw & (REQ_WRITE | BIO_DISCARD))
 			num_stripes = map->num_stripes;
 		else if (mirror_num)
 			stripe_index = mirror_num - 1;
@@ -3785,7 +3785,7 @@ static int __btrfs_map_block(struct btrfs_mapping_tree *map_tree, int rw,
 		}
 
 	} else if (map->type & BTRFS_BLOCK_GROUP_DUP) {
-		if (rw & (REQ_WRITE | REQ_DISCARD)) {
+		if (rw & (REQ_WRITE | BIO_DISCARD)) {
 			num_stripes = map->num_stripes;
 		} else if (mirror_num) {
 			stripe_index = mirror_num - 1;
@@ -3801,7 +3801,7 @@ static int __btrfs_map_block(struct btrfs_mapping_tree *map_tree, int rw,
 
 		if (rw & REQ_WRITE)
 			num_stripes = map->sub_stripes;
-		else if (rw & REQ_DISCARD)
+		else if (rw & BIO_DISCARD)
 			num_stripes = min_t(u64, map->sub_stripes *
 					    (stripe_nr_end - stripe_nr_orig),
 					    map->num_stripes);
@@ -3832,7 +3832,7 @@ static int __btrfs_map_block(struct btrfs_mapping_tree *map_tree, int rw,
 	}
 	atomic_set(&bbio->error, 0);
 
-	if (rw & REQ_DISCARD) {
+	if (rw & BIO_DISCARD) {
 		int factor = 0;
 		int sub_stripes = 0;
 		u64 stripes_per_dev = 0;
@@ -4131,7 +4131,7 @@ static noinline void schedule_bio(struct btrfs_root *root,
 	bio->bi_rw |= rw;
 
 	spin_lock(&device->io_lock);
-	if (bio->bi_rw & REQ_SYNC)
+	if (bio_rw_flagged(bio, BIO_RW_SYNCIO))
 		pending_bios = &device->pending_sync_bios;
 	else
 		pending_bios = &device->pending_bios;

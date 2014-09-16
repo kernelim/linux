@@ -724,8 +724,11 @@ struct gfs2_sbd {
 	/* For quiescing the filesystem */
 
 	struct gfs2_holder sd_freeze_gh;
+	struct gfs2_holder sd_freeze_root_gh;
 	struct mutex sd_freeze_lock;
 	unsigned int sd_freeze_count;
+	atomic_t sd_frozen_root;
+	wait_queue_head_t sd_frozen_root_wait;
 
 	char sd_fsname[GFS2_FSNAME_LEN];
 	char sd_table_name[GFS2_FSNAME_LEN];

@@ -39,6 +39,7 @@
 #include <linux/ipmi.h>
 #include <linux/device.h>
 #include <linux/pnp.h>
+#include <linux/spinlock.h>
 
 MODULE_AUTHOR("Zhao Yakui");
 MODULE_DESCRIPTION("ACPI IPMI Opregion driver");
@@ -57,7 +58,7 @@ struct acpi_ipmi_device {
 	struct list_head head;
 	/* the IPMI request message list */
 	struct list_head tx_msg_list;
-	struct mutex	tx_msg_lock;
+	spinlock_t	tx_msg_lock;
 	acpi_handle handle;
 	struct pnp_dev *pnp_dev;
 	ipmi_user_t	user_interface;
@@ -104,6 +105,9 @@ struct acpi_ipmi_buffer {
 	u8 length;
 	u8 data[64];
 };
+
+int acpi_ipmi_loaded;
+EXPORT_SYMBOL(acpi_ipmi_loaded);
 
 static void ipmi_register_bmc(int iface, struct device *dev);
 static void ipmi_bmc_gone(int iface);
@@ -157,6 +161,7 @@ static void acpi_format_ipmi_msg(struct acpi_ipmi_msg *tx_msg,
 	struct kernel_ipmi_msg *msg;
 	struct acpi_ipmi_buffer *buffer;
 	struct acpi_ipmi_device *device;
+	unsigned long flags;
 
 	msg = &tx_msg->tx_message;
 	/*
@@ -187,10 +192,10 @@ static void acpi_format_ipmi_msg(struct acpi_ipmi_msg *tx_msg,
 
 	/* Get the msgid */
 	device = tx_msg->device;
-	mutex_lock(&device->tx_msg_lock);
+	spin_lock_irqsave(&device->tx_msg_lock, flags);
 	device->curr_msgid++;
 	tx_msg->tx_msgid = device->curr_msgid;
-	mutex_unlock(&device->tx_msg_lock);
+	spin_unlock_irqrestore(&device->tx_msg_lock, flags);
 }
 
 static void acpi_format_ipmi_response(struct acpi_ipmi_msg *msg,
@@ -252,6 +257,7 @@ static void ipmi_msg_handler(struct ipmi_recv_msg *msg, void *user_msg_data)
 	int msg_found = 0;
 	struct acpi_ipmi_msg *tx_msg;
 	struct pnp_dev *pnp_dev = ipmi_device->pnp_dev;
+	unsigned long flags;
 
 	if (msg->user != ipmi_device->user_interface) {
 		dev_warn(&pnp_dev->dev, "Unexpected response is returned. "
@@ -260,7 +266,7 @@ static void ipmi_msg_handler(struct ipmi_recv_msg *msg, void *user_msg_data)
 		ipmi_free_recv_msg(msg);
 		return;
 	}
-	mutex_lock(&ipmi_device->tx_msg_lock);
+	spin_lock_irqsave(&ipmi_device->tx_msg_lock, flags);
 	list_for_each_entry(tx_msg, &ipmi_device->tx_msg_list, head) {
 		if (msg->msgid == tx_msg->tx_msgid) {
 			msg_found = 1;
@@ -268,7 +274,7 @@ static void ipmi_msg_handler(struct ipmi_recv_msg *msg, void *user_msg_data)
 		}
 	}
 
-	mutex_unlock(&ipmi_device->tx_msg_lock);
+	spin_unlock_irqrestore(&ipmi_device->tx_msg_lock, flags);
 	if (!msg_found) {
 		dev_warn(&pnp_dev->dev, "Unexpected response (msg id %ld) is "
 			"returned.\n", msg->msgid);
@@ -431,6 +437,7 @@ acpi_ipmi_space_handler(u32 function, acpi_physical_address address,
 	struct acpi_ipmi_device *ipmi_device = handler_context;
 	int err, rem_time;
 	acpi_status status;
+	unsigned long flags;
 	/*
 	 * IPMI opregion message.
 	 * IPMI message is firstly written to the BMC and system software
@@ -448,9 +455,9 @@ acpi_ipmi_space_handler(u32 function, acpi_physical_address address,
 		return AE_NO_MEMORY;
 
 	acpi_format_ipmi_msg(tx_msg, address, value);
-	mutex_lock(&ipmi_device->tx_msg_lock);
+	spin_lock_irqsave(&ipmi_device->tx_msg_lock, flags);
 	list_add_tail(&tx_msg->head, &ipmi_device->tx_msg_list);
-	mutex_unlock(&ipmi_device->tx_msg_lock);
+	spin_unlock_irqrestore(&ipmi_device->tx_msg_lock, flags);
 	err = ipmi_request_settime(ipmi_device->user_interface,
 					&tx_msg->addr,
 					tx_msg->tx_msgid,
@@ -466,9 +473,9 @@ acpi_ipmi_space_handler(u32 function, acpi_physical_address address,
 	status = AE_OK;
 
 end_label:
-	mutex_lock(&ipmi_device->tx_msg_lock);
+	spin_lock_irqsave(&ipmi_device->tx_msg_lock, flags);
 	list_del(&tx_msg->head);
-	mutex_unlock(&ipmi_device->tx_msg_lock);
+	spin_unlock_irqrestore(&ipmi_device->tx_msg_lock, flags);
 	kfree(tx_msg);
 	return status;
 }
@@ -510,7 +517,7 @@ static void acpi_add_ipmi_device(struct acpi_ipmi_device *ipmi_device)
 
 	INIT_LIST_HEAD(&ipmi_device->head);
 
-	mutex_init(&ipmi_device->tx_msg_lock);
+	spin_lock_init(&ipmi_device->tx_msg_lock);
 	INIT_LIST_HEAD(&ipmi_device->tx_msg_list);
 	ipmi_install_space_handler(ipmi_device);
 
@@ -539,7 +546,7 @@ static int __init acpi_ipmi_init(void)
 {
 	int result = 0;
 
-	if (acpi_disabled)
+	if (acpi_disabled || !ipmi_si_loaded)
 		return result;
 
 	mutex_init(&driver_data.ipmi_lock);
@@ -549,6 +556,11 @@ static int __init acpi_ipmi_init(void)
 	if (!result)
 		result = ipmi_smi_probe_complete_register(&probe_complete);
 
+	if (!result)
+		acpi_ipmi_loaded = 1;
+	else
+		acpi_ipmi_loaded = 0;
+
 	return result;
 }
 
@@ -556,7 +568,7 @@ static void __exit acpi_ipmi_exit(void)
 {
 	struct acpi_ipmi_device *ipmi_device, *temp;
 
-	if (acpi_disabled)
+	if (acpi_disabled || !ipmi_si_loaded)
 		return;
 
 	ipmi_smi_probe_complete_unregister(&probe_complete);

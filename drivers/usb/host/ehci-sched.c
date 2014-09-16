@@ -1395,7 +1395,7 @@ sitd_slot_ok (
  * given EHCI_TUNE_FLS and the slop).  Or, write a smarter scheduler!
  */
 
-#define SCHEDULE_SLOP	10	/* frames */
+#define SCHEDULE_SLOP	80	/* microframes */
 
 static int
 iso_stream_schedule (
@@ -1404,32 +1404,26 @@ iso_stream_schedule (
 	struct ehci_iso_stream	*stream
 )
 {
-	u32			now, start, max, period;
+	u32			now, next, start, period, span;
 	int			status;
 	unsigned		mod = ehci->periodic_size << 3;
 	struct ehci_iso_sched	*sched = urb->hcpriv;
+	struct pci_dev		*pdev;
 
-	if (sched->span > (mod - 8 * SCHEDULE_SLOP)) {
+	period = urb->interval;
+	span = sched->span;
+	if (!stream->highspeed) {
+		period <<= 3;
+		span <<= 3;
+	}
+
+	if (span > mod - SCHEDULE_SLOP) {
 		ehci_dbg (ehci, "iso request %p too long\n", urb);
 		status = -EFBIG;
 		goto fail;
 	}
 
-	if ((stream->depth + sched->span) > mod) {
-		ehci_dbg (ehci, "request %p would overflow (%d+%d>%d)\n",
-			urb, stream->depth, sched->span, mod);
-		status = -EFBIG;
-		goto fail;
-	}
-
-	period = urb->interval;
-	if (!stream->highspeed)
-		period <<= 3;
-
-	now = ehci_readl(ehci, &ehci->regs->frame_index) % mod;
-
-	/* when's the last uframe this urb could start? */
-	max = now + mod;
+	now = ehci_readl(ehci, &ehci->regs->frame_index) & (mod - 1);
 
 	/* Typical case: reuse current schedule, stream is still active.
 	 * Hopefully there are no gaps from the host falling behind
@@ -1437,22 +1431,36 @@ iso_stream_schedule (
 	 * slot in the schedule, implicitly assuming URB_ISO_ASAP.
 	 */
 	if (likely (!list_empty (&stream->td_list))) {
-		start = stream->next_uframe;
-		if (start < now)
-			start += mod;
+		u32	excess;
+		pdev = to_pci_dev(ehci_to_hcd(ehci)->self.controller);
 
-		/* Fell behind (by up to twice the slop amount)? */
-		if (start >= max - 2 * 8 * SCHEDULE_SLOP)
-			start += period * DIV_ROUND_UP(
-					max - start, period) - mod;
+		/* For high speed devices, allow scheduling within the
+		 * isochronous scheduling threshold.  For full speed devices,
+		 * don't. (Work around for Intel ICH9 bug.)
+		 */
+		if (!stream->highspeed &&
+				pdev->vendor == PCI_VENDOR_ID_INTEL)
+			next = now + ehci->i_thresh;
+		else
+			next = now;
 
-		/* Tried to schedule too far into the future? */
-		if (unlikely((start + sched->span) >= max)) {
+		/* Fell behind (by up to twice the slop amount)?
+		 * We decide based on the time of the last currently-scheduled
+		 * slot, not the time of the next available slot.
+		 */
+		excess = (stream->next_uframe - period - next) & (mod - 1);
+		if (excess >= mod - 2 * SCHEDULE_SLOP)
+			start = next + excess - mod + period *
+					DIV_ROUND_UP(mod - excess, period);
+		else
+			start = next + excess + period;
+		if (start - now >= mod) {
+			ehci_dbg(ehci, "request %p would overflow (%d+%d >= %d)\n",
+					urb, start - now - period, period,
+					mod);
 			status = -EFBIG;
 			goto fail;
 		}
-		stream->next_uframe = start;
-		goto ready;
 	}
 
 	/* need to schedule; when's the next (u)frame we could start?
@@ -1461,51 +1469,65 @@ iso_stream_schedule (
 	 * can also help high bandwidth if the dma and irq loads don't
 	 * jump until after the queue is primed.
 	 */
-	start = SCHEDULE_SLOP * 8 + (now & ~0x07);
-	start %= mod;
-	stream->next_uframe = start;
+	else {
+		start = SCHEDULE_SLOP + (now & ~0x07);
 
-	/* NOTE:  assumes URB_ISO_ASAP, to limit complexity/bugs */
+		/* NOTE:  assumes URB_ISO_ASAP, to limit complexity/bugs */
 
-	/* find a uframe slot with enough bandwidth */
-	for (; start < (stream->next_uframe + period); start++) {
-		int		enough_space;
+		/* find a uframe slot with enough bandwidth.
+		 * Early uframes are more precious because full-speed
+		 * iso IN transfers can't use late uframes,
+		 * and therefore they should be allocated last.
+		 */
+		next = start;
+		start += period;
+		do {
+			start--;
+			/* check schedule: enough space? */
+			if (stream->highspeed) {
+				if (itd_slot_ok(ehci, mod, start,
+						stream->usecs, period))
+					break;
+			} else {
+				if ((start % 8) >= 6)
+					continue;
+				if (sitd_slot_ok(ehci, mod, stream,
+						start, sched, period))
+					break;
+			}
+		} while (start > next);
 
-		/* check schedule: enough space? */
-		if (stream->highspeed)
-			enough_space = itd_slot_ok (ehci, mod, start,
-					stream->usecs, period);
-		else {
-			if ((start % 8) >= 6)
-				continue;
-			enough_space = sitd_slot_ok (ehci, mod, stream,
-					start, sched, period);
-		}
-
-		/* schedule it here if there's enough bandwidth */
-		if (enough_space) {
-			stream->next_uframe = start % mod;
-			goto ready;
+		/* no room in the schedule */
+		if (start == next) {
+			ehci_dbg(ehci, "iso resched full %p (now %d max %d)\n",
+				urb, now, now + mod);
+			status = -ENOSPC;
+			goto fail;
 		}
 	}
 
-	/* no room in the schedule */
-	ehci_dbg (ehci, "iso %ssched full %p (now %d max %d)\n",
-		list_empty (&stream->td_list) ? "" : "re",
-		urb, now, max);
-	status = -ENOSPC;
+	/* Tried to schedule too far into the future? */
+	if (unlikely(start - now + span - period
+				>= mod - 2 * SCHEDULE_SLOP)) {
+		ehci_dbg(ehci, "request %p would overflow (%d+%d >= %d)\n",
+				urb, start - now, span - period,
+				mod - 2 * SCHEDULE_SLOP);
+		status = -EFBIG;
+		goto fail;
+	}
 
-fail:
-	iso_sched_free (stream, sched);
-	urb->hcpriv = NULL;
-	return status;
+	stream->next_uframe = start & (mod - 1);
 
-ready:
 	/* report high speed start in uframes; full speed, in frames */
 	urb->start_frame = stream->next_uframe;
 	if (!stream->highspeed)
 		urb->start_frame >>= 3;
 	return 0;
+
+ fail:
+	iso_sched_free(stream, sched);
+	urb->hcpriv = NULL;
+	return status;
 }
 
 /*-------------------------------------------------------------------------*/
@@ -1600,7 +1622,7 @@ itd_link_urb (
 	struct ehci_iso_sched	*iso_sched = urb->hcpriv;
 	struct ehci_itd		*itd;
 
-	next_uframe = stream->next_uframe % mod;
+	next_uframe = stream->next_uframe & (mod - 1);
 
 	if (unlikely (list_empty(&stream->td_list))) {
 		ehci_to_hcd(ehci)->self.bandwidth_allocated
@@ -1644,13 +1666,13 @@ itd_link_urb (
 
 		next_uframe += stream->interval;
 		stream->depth += stream->interval;
-		next_uframe %= mod;
+		next_uframe &= mod - 1;
 		packet++;
 
 		/* link completed itds into the schedule */
 		if (((next_uframe >> 3) != frame)
 				|| packet == urb->number_of_packets) {
-			itd_link (ehci, frame % ehci->periodic_size, itd);
+			itd_link(ehci, frame & (ehci->periodic_size - 1), itd);
 			itd = NULL;
 		}
 	}
@@ -2032,7 +2054,7 @@ sitd_link_urb (
 			"sched devp %s ep%d%s-iso [%d] %dms/%04x\n",
 			urb->dev->devpath, stream->bEndpointAddress & 0x0f,
 			(stream->bEndpointAddress & USB_DIR_IN) ? "in" : "out",
-			(next_uframe >> 3) % ehci->periodic_size,
+			(next_uframe >> 3) & (ehci->periodic_size - 1),
 			stream->interval, hc32_to_cpu(ehci, stream->splits));
 		stream->start = jiffies;
 	}
@@ -2061,13 +2083,13 @@ sitd_link_urb (
 		sitd->urb = urb;
 
 		sitd_patch(ehci, stream, sitd, sched, packet);
-		sitd_link (ehci, (next_uframe >> 3) % ehci->periodic_size,
+		sitd_link(ehci, (next_uframe >> 3) & (ehci->periodic_size - 1),
 				sitd);
 
 		next_uframe += stream->interval << 3;
 		stream->depth += stream->interval << 3;
 	}
-	stream->next_uframe = next_uframe % mod;
+	stream->next_uframe = next_uframe & (mod - 1);
 
 	/* don't need that schedule data any more */
 	iso_sched_free (stream, sched);
@@ -2281,7 +2303,7 @@ scan_periodic (struct ehci_hcd *ehci)
 	now_uframe = ehci->next_uframe;
 	if (HC_IS_RUNNING(ehci_to_hcd(ehci)->state)) {
 		clock = ehci_readl(ehci, &ehci->regs->frame_index);
-		clock_frame = (clock >> 3) % ehci->periodic_size;
+		clock_frame = (clock >> 3) & (ehci->periodic_size - 1);
 	} else  {
 		clock = now_uframe + mod - 1;
 		clock_frame = -1;
@@ -2290,7 +2312,7 @@ scan_periodic (struct ehci_hcd *ehci)
 		free_cached_lists(ehci);
 		ehci->clock_frame = clock_frame;
 	}
-	clock %= mod;
+	clock &= mod - 1;
 	clock_frame = clock >> 3;
 
 	for (;;) {
@@ -2382,9 +2404,13 @@ restart:
 				 * No need to check for activity unless the
 				 * frame is current.
 				 */
-				if (frame == clock_frame && live &&
-						(q.sitd->hw_results &
-							SITD_ACTIVE(ehci))) {
+				if (((frame == clock_frame) ||
+				     (((frame + 1) & (ehci->periodic_size - 1))
+				      == clock_frame))
+				    && live
+				    && (q.sitd->hw_results &
+					SITD_ACTIVE(ehci))) {
+
 					incomplete = true;
 					q_p = &q.sitd->sitd_next;
 					hw_p = &q.sitd->hw_next;
@@ -2450,7 +2476,8 @@ restart:
 					|| ehci->periodic_sched == 0)
 				break;
 			ehci->next_uframe = now_uframe;
-			now = ehci_readl(ehci, &ehci->regs->frame_index) % mod;
+			now = ehci_readl(ehci, &ehci->regs->frame_index) &
+					(mod - 1);
 			if (now_uframe == now)
 				break;
 
@@ -2463,7 +2490,7 @@ restart:
 			}
 		} else {
 			now_uframe++;
-			now_uframe %= mod;
+			now_uframe &= mod - 1;
 		}
 	}
 }

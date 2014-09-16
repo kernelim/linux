@@ -28,6 +28,7 @@
 #include <linux/version.h>
 
 #include "flow.h"
+#include "flow_table.h"
 #include "vport.h"
 
 #define DP_MAX_PORTS           USHRT_MAX
@@ -46,11 +47,15 @@
  * @n_lost: Number of received packets that had no matching flow in the flow
  * table that could not be sent to userspace (normally due to an overflow in
  * one of the datapath's queues).
+ * @n_mask_hit: Number of masks looked up for flow match.
+ *   @n_mask_hit / (@n_hit + @n_missed)  will be the average masks looked
+ *   up per packet.
  */
 struct dp_stats_percpu {
 	u64 n_hit;
 	u64 n_missed;
 	u64 n_lost;
+	u64 n_mask_hit;
 	struct u64_stats_sync sync;
 };
 
@@ -58,7 +63,7 @@ struct dp_stats_percpu {
  * struct datapath - datapath for flow-based packet switching
  * @rcu: RCU callback head for deferred destruction.
  * @list_node: Element in global 'dps' list.
- * @table: Current flow table.  Protected by ovs_mutex and RCU.
+ * @table: flow table.
  * @ports: Hash table for ports.  %OVSP_LOCAL port always exists.  Protected by
  * ovs_mutex and RCU.
  * @stats_percpu: Per-CPU datapath statistics.
@@ -72,7 +77,7 @@ struct datapath {
 	struct list_head list_node;
 
 	/* Flow table. */
-	struct flow_table __rcu *table;
+	struct flow_table table;
 
 	/* Switch ports. */
 	struct hlist_head *ports;
@@ -89,11 +94,13 @@ struct datapath {
 /**
  * struct ovs_skb_cb - OVS data in skb CB
  * @flow: The flow associated with this packet.  May be %NULL if no flow.
+ * @pkt_key: The flow information extracted from the packet.  Must be nonnull.
  * @tun_key: Key for the tunnel that encapsulated this packet. NULL if the
  * packet is not being tunneled.
  */
 struct ovs_skb_cb {
 	struct sw_flow		*flow;
+	struct sw_flow_key	*pkt_key;
 	struct ovs_key_ipv4_tunnel  *tun_key;
 };
 #define OVS_CB(skb) ((struct ovs_skb_cb *)(skb)->cb)
@@ -182,4 +189,8 @@ struct sk_buff *ovs_vport_cmd_build_info(struct vport *, u32 pid, u32 seq,
 
 int ovs_execute_actions(struct datapath *dp, struct sk_buff *skb);
 void ovs_dp_notify_wq(struct work_struct *work);
+
+#define OVS_NLERR(fmt, ...) \
+	pr_info_once("netlink: " fmt, ##__VA_ARGS__)
+
 #endif /* datapath.h */

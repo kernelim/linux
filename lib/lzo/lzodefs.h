@@ -1,19 +1,26 @@
 /*
  *  lzodefs.h -- architecture, OS and compiler specific defines
  *
- *  Copyright (C) 1996-2005 Markus F.X.J. Oberhumer <markus@oberhumer.com>
+ *  Copyright (C) 1996-2012 Markus F.X.J. Oberhumer <markus@oberhumer.com>
  *
  *  The full LZO package can be found at:
  *  http://www.oberhumer.com/opensource/lzo/
  *
- *  Changed for kernel use by:
+ *  Changed for Linux kernel use by:
  *  Nitin Gupta <nitingupta910@gmail.com>
  *  Richard Purdie <rpurdie@openedhand.com>
  */
 
-#define LZO_VERSION		0x2020
-#define LZO_VERSION_STRING	"2.02"
-#define LZO_VERSION_DATE	"Oct 17 2005"
+
+#define COPY4(dst, src)	\
+		put_unaligned(get_unaligned((const u32 *)(src)), (u32 *)(dst))
+#if defined(__x86_64__)
+#define COPY8(dst, src)	\
+		put_unaligned(get_unaligned((const u64 *)(src)), (u64 *)(dst))
+#else
+#define COPY8(dst, src)	\
+		COPY4(dst, src); COPY4((dst) + 4, (src) + 4)
+#endif
 
 #define M1_MAX_OFFSET	0x0400
 #define M2_MAX_OFFSET	0x0800

@@ -24,6 +24,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/dmi.h>
 #include <linux/input.h>
 #include <linux/input/mt.h>
 #include <linux/serio.h>
@@ -42,6 +43,16 @@
 #define XMAX_NOMINAL 5472
 #define YMIN_NOMINAL 1408
 #define YMAX_NOMINAL 4448
+
+/*
+ * Synaptics touchpads report the y coordinate from bottom to top, which is
+ * opposite from what userspace expects.
+ * This function is used to invert y before reporting.
+ */
+static int synaptics_invert_y(int y)
+{
+	return YMAX_NOMINAL + YMIN_NOMINAL - y;
+}
 
 
 /*****************************************************************************
@@ -94,6 +105,44 @@ void synaptics_reset(struct psmouse *psmouse)
 }
 
 #ifdef CONFIG_MOUSE_PS2_SYNAPTICS
+/* This list has been kindly provided by Synaptics. */
+static const char * const topbuttonpad_pnp_ids[] = {
+	"LEN0017",
+	"LEN0018",
+	"LEN0019",
+	"LEN0023",
+	"LEN002A",
+	"LEN002B",
+	"LEN002C",
+	"LEN002D",
+	"LEN002E",
+	"LEN0033", /* Helix */
+	"LEN0034", /* T431s, T540, X1 Carbon 2nd */
+	"LEN0035", /* X240 */
+	"LEN0036", /* T440 */
+	"LEN0037",
+	"LEN0038",
+	"LEN0041",
+	"LEN0042", /* Yoga */
+	"LEN0045",
+	"LEN0046",
+	"LEN0047",
+	"LEN0048",
+	"LEN0049",
+	"LEN2000",
+	"LEN2001",
+	"LEN2002",
+	"LEN2003",
+	"LEN2004", /* L440 */
+	"LEN2005",
+	"LEN2006",
+	"LEN2007",
+	"LEN2008",
+	"LEN2009",
+	"LEN200A",
+	"LEN200B",
+	NULL
+};
 
 /*****************************************************************************
  *	Synaptics communications functions
@@ -203,30 +252,51 @@ static int synaptics_identify(struct psmouse *psmouse)
  * Read touchpad resolution and maximum reported coordinates
  * Resolution is left zero if touchpad does not support the query
  */
+
+static const int *quirk_min_max;
+
 static int synaptics_resolution(struct psmouse *psmouse)
 {
 	struct synaptics_data *priv = psmouse->private;
-	unsigned char res[3];
-	unsigned char max[3];
+	unsigned char resp[3];
+
+	if (quirk_min_max) {
+		priv->x_min = quirk_min_max[0];
+		priv->x_max = quirk_min_max[1];
+		priv->y_min = quirk_min_max[2];
+		priv->y_max = quirk_min_max[3];
+		return 0;
+	}
 
 	if (SYN_ID_MAJOR(priv->identity) < 4)
 		return 0;
 
-	if (synaptics_send_cmd(psmouse, SYN_QUE_RESOLUTION, res) == 0) {
-		if (res[0] != 0 && (res[1] & 0x80) && res[2] != 0) {
-			priv->x_res = res[0]; /* x resolution in units/mm */
-			priv->y_res = res[2]; /* y resolution in units/mm */
+	if (synaptics_send_cmd(psmouse, SYN_QUE_RESOLUTION, resp) == 0) {
+		if (resp[0] != 0 && (resp[1] & 0x80) && resp[2] != 0) {
+			priv->x_res = resp[0]; /* x resolution in units/mm */
+			priv->y_res = resp[2]; /* y resolution in units/mm */
 		}
 	}
 
 	if (SYN_EXT_CAP_REQUESTS(priv->capabilities) >= 5 &&
 	    SYN_CAP_MAX_DIMENSIONS(priv->ext_cap_0c)) {
-		if (synaptics_send_cmd(psmouse, SYN_QUE_EXT_DIMENSIONS, max)) {
-			printk(KERN_ERR "Synaptics claims to have dimensions query,"
-			       " but I'm not able to read it.\n");
+		if (synaptics_send_cmd(psmouse, SYN_QUE_EXT_MAX_COORDS, resp)) {
+			printk(KERN_ERR "Synaptics claims to have max coordinates"
+			       " query, but I'm not able to read it.\n");
 		} else {
-			priv->x_max = (max[0] << 5) | ((max[1] & 0x0f) << 1);
-			priv->y_max = (max[2] << 5) | ((max[1] & 0xf0) >> 3);
+			priv->x_max = (resp[0] << 5) | ((resp[1] & 0x0f) << 1);
+			priv->y_max = (resp[2] << 5) | ((resp[1] & 0xf0) >> 3);
+		}
+	}
+
+	if (SYN_EXT_CAP_REQUESTS(priv->capabilities) >= 7 &&
+	    SYN_CAP_MIN_DIMENSIONS(priv->ext_cap_0c)) {
+		if (synaptics_send_cmd(psmouse, SYN_QUE_EXT_MIN_COORDS, resp)) {
+			printk(KERN_ERR "Synaptics claims to have min coordinates"
+			       " query, but I'm not able to read it.\n");
+		} else {
+			priv->x_min = (resp[0] << 5) | ((resp[1] & 0x0f) << 1);
+			priv->y_min = (resp[2] << 5) | ((resp[1] & 0xf0) >> 3);
 		}
 	}
 
@@ -283,7 +353,8 @@ static int synaptics_set_advanced_gesture_mode(struct psmouse *psmouse)
 	static unsigned char param = 0xc8;
 	struct synaptics_data *priv = psmouse->private;
 
-	if (!SYN_CAP_ADV_GESTURE(priv->ext_cap_0c))
+	if (!(SYN_CAP_ADV_GESTURE(priv->ext_cap_0c) ||
+			SYN_CAP_IMAGE_SENSOR(priv->ext_cap_0c)))
 		return 0;
 
 	if (psmouse_sliced_command(psmouse, SYN_QUE_MODEL))
@@ -398,6 +469,17 @@ static void synaptics_pt_create(struct psmouse *psmouse)
  *	Functions to interpret the absolute mode packets
  ****************************************************************************/
 
+static void synaptics_parse_agm(const unsigned char buf[],
+				struct synaptics_data *priv)
+{
+	struct synaptics_hw_state *agm = &priv->agm;
+
+	/* Gesture packet: (x, y, z) at half resolution */
+	agm->x = (((buf[4] & 0x0f) << 8) | buf[1]) << 1;
+	agm->y = (((buf[4] & 0xf0) << 4) | buf[2]) << 1;
+	agm->z = ((buf[3] & 0x30) | (buf[5] & 0x0f)) << 1;
+}
+
 static int synaptics_parse_hw_state(const unsigned char buf[],
 				    struct synaptics_data *priv,
 				    struct synaptics_hw_state *hw)
@@ -405,25 +487,9 @@ static int synaptics_parse_hw_state(const unsigned char buf[],
 	memset(hw, 0, sizeof(struct synaptics_hw_state));
 
 	if (SYN_MODEL_NEWABS(priv->model_id)) {
-		hw->x = (((buf[3] & 0x10) << 8) |
-			 ((buf[1] & 0x0f) << 8) |
-			 buf[4]);
-		hw->y = (((buf[3] & 0x20) << 7) |
-			 ((buf[1] & 0xf0) << 4) |
-			 buf[5]);
-
-		hw->z = buf[2];
 		hw->w = (((buf[0] & 0x30) >> 2) |
 			 ((buf[0] & 0x04) >> 1) |
 			 ((buf[3] & 0x04) >> 2));
-
-		if (SYN_CAP_ADV_GESTURE(priv->ext_cap_0c) && hw->w == 2) {
-			/* Gesture packet: (x, y, z) at half resolution */
-			priv->mt.x = (((buf[4] & 0x0f) << 8) | buf[1]) << 1;
-			priv->mt.y = (((buf[4] & 0xf0) << 4) | buf[2]) << 1;
-			priv->mt.z = ((buf[3] & 0x30) | (buf[5] & 0x0f)) << 1;
-			return 1;
-		}
 
 		hw->left  = (buf[0] & 0x01) ? 1 : 0;
 		hw->right = (buf[0] & 0x02) ? 1 : 0;
@@ -446,6 +512,21 @@ static int synaptics_parse_hw_state(const unsigned char buf[],
 			hw->up   = ((buf[0] ^ buf[3]) & 0x01) ? 1 : 0;
 			hw->down = ((buf[0] ^ buf[3]) & 0x02) ? 1 : 0;
 		}
+
+		if ((SYN_CAP_ADV_GESTURE(priv->ext_cap_0c) ||
+			SYN_CAP_IMAGE_SENSOR(priv->ext_cap_0c)) &&
+		    hw->w == 2) {
+			synaptics_parse_agm(buf, priv);
+			return 1;
+		}
+
+		hw->x = (((buf[3] & 0x10) << 8) |
+			 ((buf[1] & 0x0f) << 8) |
+			 buf[4]);
+		hw->y = (((buf[3] & 0x20) << 7) |
+			 ((buf[1] & 0xf0) << 4) |
+			 buf[5]);
+		hw->z = buf[2];
 
 		if (SYN_CAP_MULTI_BUTTON_NO(priv->ext_cap) &&
 		    ((buf[0] ^ buf[3]) & 0x02)) {
@@ -484,14 +565,14 @@ static int synaptics_parse_hw_state(const unsigned char buf[],
 	return 0;
 }
 
-static void set_slot(struct input_dev *dev, int slot, bool active, int x, int y)
+static void synaptics_report_semi_mt_slot(struct input_dev *dev, int slot,
+					  bool active, int x, int y)
 {
 	input_mt_slot(dev, slot);
 	input_mt_report_slot_state(dev, MT_TOOL_FINGER, active);
 	if (active) {
 		input_report_abs(dev, ABS_MT_POSITION_X, x);
-		input_report_abs(dev, ABS_MT_POSITION_Y,
-				 YMAX_NOMINAL + YMIN_NOMINAL - y);
+		input_report_abs(dev, ABS_MT_POSITION_Y, synaptics_invert_y(y));
 	}
 }
 
@@ -501,15 +582,105 @@ static void synaptics_report_semi_mt_data(struct input_dev *dev,
 					  int num_fingers)
 {
 	if (num_fingers >= 2) {
-		set_slot(dev, 0, true, min(a->x, b->x), min(a->y, b->y));
-		set_slot(dev, 1, true, max(a->x, b->x), max(a->y, b->y));
+		synaptics_report_semi_mt_slot(dev, 0, true, min(a->x, b->x),
+					      min(a->y, b->y));
+		synaptics_report_semi_mt_slot(dev, 1, true, max(a->x, b->x),
+					      max(a->y, b->y));
 	} else if (num_fingers == 1) {
-		set_slot(dev, 0, true, a->x, a->y);
-		set_slot(dev, 1, false, 0, 0);
+		synaptics_report_semi_mt_slot(dev, 0, true, a->x, a->y);
+		synaptics_report_semi_mt_slot(dev, 1, false, 0, 0);
 	} else {
-		set_slot(dev, 0, false, 0, 0);
-		set_slot(dev, 1, false, 0, 0);
+		synaptics_report_semi_mt_slot(dev, 0, false, 0, 0);
+		synaptics_report_semi_mt_slot(dev, 1, false, 0, 0);
 	}
+}
+
+static void synaptics_report_buttons(struct psmouse *psmouse,
+				     const struct synaptics_hw_state *hw)
+{
+	struct input_dev *dev = psmouse->dev;
+	struct synaptics_data *priv = psmouse->private;
+	int i;
+
+	input_report_key(dev, BTN_LEFT, hw->left);
+	input_report_key(dev, BTN_RIGHT, hw->right);
+
+	if (SYN_CAP_MIDDLE_BUTTON(priv->capabilities))
+		input_report_key(dev, BTN_MIDDLE, hw->middle);
+
+	if (SYN_CAP_FOUR_BUTTON(priv->capabilities)) {
+		input_report_key(dev, BTN_FORWARD, hw->up);
+		input_report_key(dev, BTN_BACK, hw->down);
+	}
+
+	for (i = 0; i < SYN_CAP_MULTI_BUTTON_NO(priv->ext_cap); i++)
+		input_report_key(dev, BTN_0 + i, hw->ext_buttons & (1 << i));
+}
+
+static void synaptics_report_slot(struct input_dev *dev, int slot,
+				  const struct synaptics_hw_state *hw)
+{
+	input_mt_slot(dev, slot);
+	input_mt_report_slot_state(dev, MT_TOOL_FINGER, (hw != NULL));
+	if (!hw)
+		return;
+
+	input_report_abs(dev, ABS_MT_POSITION_X, hw->x);
+	input_report_abs(dev, ABS_MT_POSITION_Y, synaptics_invert_y(hw->y));
+	input_report_abs(dev, ABS_MT_PRESSURE, hw->z);
+}
+
+static void synaptics_report_mt_data(struct psmouse *psmouse,
+				     int count,
+				     const struct synaptics_hw_state *sgm)
+{
+	struct input_dev *dev = psmouse->dev;
+	struct synaptics_data *priv = psmouse->private;
+	struct synaptics_hw_state *agm = &priv->agm;
+
+	switch (count) {
+	case 0:
+		synaptics_report_slot(dev, 0, NULL);
+		synaptics_report_slot(dev, 1, NULL);
+		break;
+	case 1:
+		synaptics_report_slot(dev, 0, sgm);
+		synaptics_report_slot(dev, 1, NULL);
+		break;
+	case 2:
+	case 3: /* Fall-through case */
+		synaptics_report_slot(dev, 0, sgm);
+		synaptics_report_slot(dev, 1, agm);
+		break;
+	}
+
+	/* Don't use active slot count to generate BTN_TOOL events. */
+	input_mt_report_pointer_emulation(dev, false);
+
+	/* Send the number of fingers reported by touchpad itself. */
+	input_mt_report_finger_count(dev, count);
+
+	synaptics_report_buttons(psmouse, sgm);
+
+	input_sync(dev);
+}
+
+static void synaptics_image_sensor_process(struct psmouse *psmouse,
+					   struct synaptics_hw_state *sgm)
+{
+	int count;
+
+	if (sgm->z == 0)
+		count = 0;
+	else if (sgm->w >= 4)
+		count = 1;
+	else if (sgm->w == 0)
+		count = 2;
+	else
+		count = 3;
+
+	/* Send resulting input events to user space */
+	synaptics_report_mt_data(psmouse, count, sgm);
 }
 
 /*
@@ -522,10 +693,14 @@ static void synaptics_process_packet(struct psmouse *psmouse)
 	struct synaptics_hw_state hw;
 	int num_fingers;
 	int finger_width;
-	int i;
 
 	if (synaptics_parse_hw_state(psmouse->packet, priv, &hw))
 		return;
+
+	if (SYN_CAP_IMAGE_SENSOR(priv->ext_cap_0c)) {
+		synaptics_image_sensor_process(psmouse, &hw);
+		return;
+	}
 
 	if (hw.scroll) {
 		priv->scroll += hw.scroll;
@@ -572,7 +747,8 @@ static void synaptics_process_packet(struct psmouse *psmouse)
 	}
 
 	if (SYN_CAP_ADV_GESTURE(priv->ext_cap_0c))
-		synaptics_report_semi_mt_data(dev, &hw, &priv->mt, num_fingers);
+		synaptics_report_semi_mt_data(dev, &hw, &priv->agm,
+					      num_fingers);
 
 	/* Post events
 	 * BTN_TOUCH has to be first as mousedev relies on it when doing
@@ -583,7 +759,7 @@ static void synaptics_process_packet(struct psmouse *psmouse)
 
 	if (num_fingers > 0) {
 		input_report_abs(dev, ABS_X, hw.x);
-		input_report_abs(dev, ABS_Y, YMAX_NOMINAL + YMIN_NOMINAL - hw.y);
+		input_report_abs(dev, ABS_Y, synaptics_invert_y(hw.y));
 	}
 	input_report_abs(dev, ABS_PRESSURE, hw.z);
 
@@ -591,24 +767,12 @@ static void synaptics_process_packet(struct psmouse *psmouse)
 		input_report_abs(dev, ABS_TOOL_WIDTH, finger_width);
 
 	input_report_key(dev, BTN_TOOL_FINGER, num_fingers == 1);
-	input_report_key(dev, BTN_LEFT, hw.left);
-	input_report_key(dev, BTN_RIGHT, hw.right);
-
 	if (SYN_CAP_MULTIFINGER(priv->capabilities)) {
 		input_report_key(dev, BTN_TOOL_DOUBLETAP, num_fingers == 2);
 		input_report_key(dev, BTN_TOOL_TRIPLETAP, num_fingers == 3);
 	}
 
-	if (SYN_CAP_MIDDLE_BUTTON(priv->capabilities))
-		input_report_key(dev, BTN_MIDDLE, hw.middle);
-
-	if (SYN_CAP_FOUR_BUTTON(priv->capabilities)) {
-		input_report_key(dev, BTN_FORWARD, hw.up);
-		input_report_key(dev, BTN_BACK, hw.down);
-	}
-
-	for (i = 0; i < SYN_CAP_MULTI_BUTTON_NO(priv->ext_cap); i++)
-		input_report_key(dev, BTN_0 + i, hw.ext_buttons & (1 << i));
+	synaptics_report_buttons(psmouse, &hw);
 
 	input_sync(dev);
 }
@@ -679,23 +843,46 @@ static psmouse_ret_t synaptics_process_byte(struct psmouse *psmouse)
 /*****************************************************************************
  *	Driver initialization/cleanup functions
  ****************************************************************************/
-static void set_input_params(struct input_dev *dev, struct synaptics_data *priv)
+static void set_abs_position_params(struct input_dev *dev,
+				    struct synaptics_data *priv, int x_code,
+				    int y_code)
 {
+	int x_min = priv->x_min ?: XMIN_NOMINAL;
+	int x_max = priv->x_max ?: XMAX_NOMINAL;
+	int y_min = priv->y_min ?: YMIN_NOMINAL;
+	int y_max = priv->y_max ?: YMAX_NOMINAL;
+	int fuzz = SYN_CAP_REDUCED_FILTERING(priv->ext_cap_0c) ?
+			SYN_REDUCED_FILTER_FUZZ : 0;
+
+	input_set_abs_params(dev, x_code, x_min, x_max, fuzz, 0);
+	input_set_abs_params(dev, y_code, y_min, y_max, fuzz, 0);
+	input_abs_set_res(dev, x_code, priv->x_res);
+	input_abs_set_res(dev, y_code, priv->y_res);
+}
+
+static void set_input_params(struct psmouse *psmouse,
+			     struct synaptics_data *priv)
+{
+	struct input_dev *dev = psmouse->dev;
 	int i;
 
+	__set_bit(INPUT_PROP_POINTER, dev->propbit);
+
 	__set_bit(EV_ABS, dev->evbit);
-	input_set_abs_params(dev, ABS_X,
-			     XMIN_NOMINAL, priv->x_max ?: XMAX_NOMINAL, 0, 0);
-	input_set_abs_params(dev, ABS_Y,
-			     YMIN_NOMINAL, priv->y_max ?: YMAX_NOMINAL, 0, 0);
+	set_abs_position_params(dev, priv, ABS_X, ABS_Y);
 	input_set_abs_params(dev, ABS_PRESSURE, 0, 255, 0, 0);
 
-	if (SYN_CAP_ADV_GESTURE(priv->ext_cap_0c)) {
-		input_mt_init_slots(dev, 2);
-		input_set_abs_params(dev, ABS_MT_POSITION_X, XMIN_NOMINAL,
-				     priv->x_max ?: XMAX_NOMINAL, 0, 0);
-		input_set_abs_params(dev, ABS_MT_POSITION_Y, YMIN_NOMINAL,
-				     priv->y_max ?: YMAX_NOMINAL, 0, 0);
+	if (SYN_CAP_IMAGE_SENSOR(priv->ext_cap_0c)) {
+		set_abs_position_params(dev, priv, ABS_MT_POSITION_X,
+					ABS_MT_POSITION_Y);
+		/* Image sensors can report per-contact pressure */
+		input_set_abs_params(dev, ABS_MT_PRESSURE, 0, 255, 0, 0);
+		input_mt_init_slots(dev, 2, INPUT_MT_POINTER);
+	} else if (SYN_CAP_ADV_GESTURE(priv->ext_cap_0c)) {
+		/* Non-image sensors with AGM use semi-mt */
+		input_mt_init_slots(dev, 2, 0);
+		set_abs_position_params(dev, priv, ABS_MT_POSITION_X,
+					ABS_MT_POSITION_Y);
 	}
 
 	if (SYN_CAP_PALMDETECT(priv->capabilities))
@@ -728,10 +915,19 @@ static void set_input_params(struct input_dev *dev, struct synaptics_data *priv)
 	__clear_bit(REL_X, dev->relbit);
 	__clear_bit(REL_Y, dev->relbit);
 
-	dev->absres[ABS_X] = priv->x_res;
-	dev->absres[ABS_Y] = priv->y_res;
-
 	if (SYN_CAP_CLICKPAD(priv->ext_cap_0c)) {
+		__set_bit(INPUT_PROP_BUTTONPAD, dev->propbit);
+		/* See if this buttonpad has a top button area */
+		if (!strncmp(psmouse->ps2dev.serio->firmware_id, "PNP:", 4)) {
+			for (i = 0; topbuttonpad_pnp_ids[i]; i++) {
+				if (strstr(psmouse->ps2dev.serio->firmware_id,
+					   topbuttonpad_pnp_ids[i])) {
+					__set_bit(INPUT_PROP_TOPBUTTONPAD,
+						  dev->propbit);
+					break;
+				}
+			}
+		}
 		/* Clickpads report only left button */
 		__clear_bit(BTN_RIGHT, dev->keybit);
 		__clear_bit(BTN_MIDDLE, dev->keybit);
@@ -795,9 +991,10 @@ static int synaptics_reconnect(struct psmouse *psmouse)
 	return 0;
 }
 
-#if defined(__i386__)
-#include <linux/dmi.h>
-static const struct dmi_system_id toshiba_dmi_table[] = {
+static bool impaired_toshiba_kbc;
+
+static const struct dmi_system_id toshiba_dmi_table[] __initconst = {
+#if defined(CONFIG_DMI) && defined(CONFIG_X86)
 	{
 		.ident = "Toshiba Satellite",
 		.matches = {
@@ -830,8 +1027,115 @@ static const struct dmi_system_id toshiba_dmi_table[] = {
 
 	},
 	{ }
-};
 #endif
+};
+
+static const struct dmi_system_id min_max_dmi_table[] __initconst = {
+#if defined(CONFIG_DMI)
+	{
+		/* Lenovo ThinkPad Helix */
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+			DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad Helix"),
+		},
+		.driver_data = (int []){1024, 5052, 2258, 4832},
+	},
+	{
+		/* Lenovo ThinkPad X240 */
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+			DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad X240"),
+		},
+		.driver_data = (int []){1232, 5710, 1156, 4696},
+	},
+	{
+		/* Lenovo ThinkPad Edge E431 */
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+			DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad Edge E431"),
+		},
+		.driver_data = (int []){1024, 5022, 2508, 4832},
+	},
+	{
+		/* Lenovo ThinkPad T431s */
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+			DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad T431"),
+		},
+		.driver_data = (int []){1024, 5112, 2024, 4832},
+	},
+	{
+		/* Lenovo ThinkPad T440s */
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+			DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad T440"),
+		},
+		.driver_data = (int []){1024, 5112, 2024, 4832},
+	},
+	{
+		/* Lenovo ThinkPad L440 */
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+			DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad L440"),
+		},
+		.driver_data = (int []){1024, 5112, 2024, 4832},
+	},
+	{
+		/* Lenovo ThinkPad T540p */
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+			DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad T540"),
+		},
+		.driver_data = (int []){1024, 5056, 2058, 4832},
+	},
+	{
+		/* Lenovo ThinkPad L540 */
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+			DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad L540"),
+		},
+		.driver_data = (int []){1024, 5112, 2024, 4832},
+	},
+	{
+		/* Lenovo ThinkPad W540 */
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+			DMI_MATCH(DMI_PRODUCT_VERSION, "ThinkPad W540"),
+		},
+		.driver_data = (int []){1024, 5112, 2024, 4832},
+	},
+	{
+		/* Lenovo Yoga S1 */
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+			DMI_EXACT_MATCH(DMI_PRODUCT_VERSION,
+					"ThinkPad S1 Yoga"),
+		},
+		.driver_data = (int []){1232, 5710, 1156, 4696},
+	},
+	{
+		/* Lenovo ThinkPad X1 Carbon Haswell (3rd generation) */
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+			DMI_MATCH(DMI_PRODUCT_VERSION,
+					"ThinkPad X1 Carbon 2nd"),
+		},
+		.driver_data = (int []){1024, 5112, 2024, 4832},
+	},
+#endif
+	{ }
+};
+
+void __init synaptics_module_init(void)
+{
+	const struct dmi_system_id *min_max_dmi;
+
+	impaired_toshiba_kbc = dmi_check_system(toshiba_dmi_table);
+
+	min_max_dmi = dmi_first_match(min_max_dmi_table);
+	if (min_max_dmi)
+		quirk_min_max = (int *)min_max_dmi->driver_data;
+}
 
 int synaptics_init(struct psmouse *psmouse)
 {
@@ -865,7 +1169,7 @@ int synaptics_init(struct psmouse *psmouse)
 		SYN_ID_MAJOR(priv->identity), SYN_ID_MINOR(priv->identity),
 		priv->model_id, priv->capabilities, priv->ext_cap, priv->ext_cap_0c);
 
-	set_input_params(psmouse->dev, priv);
+	set_input_params(psmouse, priv);
 
 	/*
 	 * Encode touchpad model so that it can be used to set
@@ -889,18 +1193,16 @@ int synaptics_init(struct psmouse *psmouse)
 	if (SYN_CAP_PASS_THROUGH(priv->capabilities))
 		synaptics_pt_create(psmouse);
 
-#if defined(__i386__)
 	/*
 	 * Toshiba's KBC seems to have trouble handling data from
 	 * Synaptics as full rate, switch to lower rate which is roughly
 	 * thye same as rate of standard PS/2 mouse.
 	 */
-	if (psmouse->rate >= 80 && dmi_check_system(toshiba_dmi_table)) {
+	if (psmouse->rate >= 80 && impaired_toshiba_kbc) {
 		printk(KERN_INFO "synaptics: Toshiba %s detected, limiting rate to 40pps.\n",
 			dmi_get_system_info(DMI_PRODUCT_NAME));
 		psmouse->rate = 40;
 	}
-#endif
 
 	return 0;
 
@@ -916,6 +1218,10 @@ bool synaptics_supported(void)
 
 #else /* CONFIG_MOUSE_PS2_SYNAPTICS */
 
+void __init synaptics_module_init(void)
+{
+}
+
 int synaptics_init(struct psmouse *psmouse)
 {
 	return -ENOSYS;
@@ -927,4 +1233,3 @@ bool synaptics_supported(void)
 }
 
 #endif /* CONFIG_MOUSE_PS2_SYNAPTICS */
-

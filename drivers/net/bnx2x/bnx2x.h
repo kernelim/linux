@@ -6,7 +6,7 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation.
  *
- * Maintained by: Eilon Greenstein <eilong@broadcom.com>
+ * Maintained by: Ariel Elior <ariel.elior@qlogic.com>
  * Written by: Eliezer Tamir
  * Based on code from Michael Chan's bnx2 driver
  */
@@ -26,13 +26,9 @@
  * (you will need to reboot afterwards) */
 /* #define BNX2X_STOP_ON_ERROR */
 
-#define DRV_MODULE_VERSION      "1.78.17-0"
-#define DRV_MODULE_RELDATE      "2013/04/11"
+#define DRV_MODULE_VERSION      "1.78.19-0"
+#define DRV_MODULE_RELDATE      "2014/02/10"
 #define BNX2X_BC_VER            0x040200
-
-#if defined(CONFIG_VLAN_8021Q) || defined(CONFIG_VLAN_8021Q_MODULE)
-#define BCM_VLAN                       1
-#endif
 
 #if defined(CONFIG_DCB)
 #define BCM_DCBNL
@@ -79,13 +75,22 @@ enum bnx2x_int_mode {
 #define BNX2X_MSG_DCB			0x8000000
 
 /* regular debug print */
+#define DP_INNER(fmt, ...)					\
+	pr_notice("[%s:%d(%s)]" fmt,				\
+		  __func__, __LINE__,				\
+		  bp->dev ? (bp->dev->name) : "?",		\
+		  ##__VA_ARGS__);
+
 #define DP(__mask, fmt, ...)					\
 do {								\
 	if (unlikely(bp->msg_enable & (__mask)))		\
-		pr_notice("[%s:%d(%s)]" fmt,			\
-			  __func__, __LINE__,			\
-			  bp->dev ? (bp->dev->name) : "?",	\
-			  ##__VA_ARGS__);			\
+		DP_INNER(fmt, ##__VA_ARGS__);			\
+} while (0)
+
+#define DP_AND(__mask, fmt, ...)				\
+do {								\
+	if (unlikely((bp->msg_enable & (__mask)) == __mask))	\
+		DP_INNER(fmt, ##__VA_ARGS__);			\
 } while (0)
 
 #define DP_CONT(__mask, fmt, ...)				\
@@ -250,8 +255,37 @@ enum {
 	BNX2X_MAX_CNIC_ETH_CL_ID_IDX,
 };
 
-#define BNX2X_CNIC_START_ETH_CID(bp)	(BNX2X_NUM_NON_CNIC_QUEUES(bp) *\
+/* use a value high enough to be above all the PFs, which has least significant
+ * nibble as 8, so when cnic needs to come up with a CID for UIO to use to
+ * calculate doorbell address according to old doorbell configuration scheme
+ * (db_msg_sz 1 << 7 * cid + 0x40 DPM offset) it can come up with a valid number
+ * We must avoid coming up with cid 8 for iscsi since according to this method
+ * the designated UIO cid will come out 0 and it has a special handling for that
+ * case which doesn't suit us. Therefore will will cieling to closes cid which
+ * has least signigifcant nibble 8 and if it is 8 we will move forward to 0x18.
+ */
+
+#define BNX2X_1st_NON_L2_ETH_CID(bp)	(BNX2X_NUM_NON_CNIC_QUEUES(bp) * \
 					 (bp)->max_cos)
+/* amount of cids traversed by UIO's DPM addition to doorbell */
+#define UIO_DPM				8
+/* roundup to DPM offset */
+#define UIO_ROUNDUP(bp)			(roundup(BNX2X_1st_NON_L2_ETH_CID(bp), \
+					 UIO_DPM))
+/* offset to nearest value which has lsb nibble matching DPM */
+#define UIO_CID_OFFSET(bp)		((UIO_ROUNDUP(bp) + UIO_DPM) % \
+					 (UIO_DPM * 2))
+/* add offset to rounded-up cid to get a value which could be used with UIO */
+#define UIO_DPM_ALIGN(bp)		(UIO_ROUNDUP(bp) + UIO_CID_OFFSET(bp))
+/* but wait - avoid UIO special case for cid 0 */
+#define UIO_DPM_CID0_OFFSET(bp)		((UIO_DPM * 2) * \
+					 (UIO_DPM_ALIGN(bp) == UIO_DPM))
+/* Properly DPM aligned CID dajusted to cid 0 secal case */
+#define BNX2X_CNIC_START_ETH_CID(bp)	(UIO_DPM_ALIGN(bp) + \
+					 (UIO_DPM_CID0_OFFSET(bp)))
+/* how many cids were wasted  - need this value for cid allocation */
+#define UIO_CID_PAD(bp)			(BNX2X_CNIC_START_ETH_CID(bp) - \
+					 BNX2X_1st_NON_L2_ETH_CID(bp))
 	/* iSCSI L2 */
 #define	BNX2X_ISCSI_ETH_CID(bp)		(BNX2X_CNIC_START_ETH_CID(bp))
 	/* FCoE L2 */
@@ -447,6 +481,7 @@ struct bnx2x_agg_info {
 	u16			vlan_tag;
 	u16			len_on_bd;
 	u32			rxhash;
+	enum pkt_hash_types	rxhash_type;
 	u16			gro_size;
 	u16			full_page;
 };
@@ -488,6 +523,23 @@ struct bnx2x_fastpath {
 	struct bnx2x		*bp; /* parent */
 
 	struct napi_struct	napi;
+
+#ifdef CONFIG_NET_RX_BUSY_POLL
+	unsigned int state;
+#define BNX2X_FP_STATE_IDLE		      0
+#define BNX2X_FP_STATE_NAPI		(1 << 0)    /* NAPI owns this FP */
+#define BNX2X_FP_STATE_POLL		(1 << 1)    /* poll owns this FP */
+#define BNX2X_FP_STATE_DISABLED		(1 << 2)
+#define BNX2X_FP_STATE_NAPI_YIELD	(1 << 3)    /* NAPI yielded this FP */
+#define BNX2X_FP_STATE_POLL_YIELD	(1 << 4)    /* poll yielded this FP */
+#define BNX2X_FP_OWNED	(BNX2X_FP_STATE_NAPI | BNX2X_FP_STATE_POLL)
+#define BNX2X_FP_YIELD	(BNX2X_FP_STATE_NAPI_YIELD | BNX2X_FP_STATE_POLL_YIELD)
+#define BNX2X_FP_LOCKED	(BNX2X_FP_OWNED | BNX2X_FP_STATE_DISABLED)
+#define BNX2X_FP_USER_PEND (BNX2X_FP_STATE_POLL | BNX2X_FP_STATE_POLL_YIELD)
+	/* protect state */
+	spinlock_t lock;
+#endif /* CONFIG_NET_RX_BUSY_POLL */
+
 	union host_hc_status_block	status_blk;
 	/* chip independent shortcuts into sb structure */
 	__le16			*sb_index_values;
@@ -559,6 +611,138 @@ struct bnx2x_fastpath {
 #define bnx2x_sp_obj(bp, fp)	((bp)->sp_objs[(fp)->index])
 #define bnx2x_fp_stats(bp, fp)	(&((bp)->fp_stats[(fp)->index]))
 #define bnx2x_fp_qstats(bp, fp)	(&((bp)->fp_stats[(fp)->index].eth_q_stats))
+
+#ifdef CONFIG_NET_RX_BUSY_POLL
+static inline void bnx2x_fp_init_lock(struct bnx2x_fastpath *fp)
+{
+	spin_lock_init(&fp->lock);
+	fp->state = BNX2X_FP_STATE_IDLE;
+}
+
+/* called from the device poll routine to get ownership of a FP */
+static inline bool bnx2x_fp_lock_napi(struct bnx2x_fastpath *fp)
+{
+	bool rc = true;
+
+	spin_lock_bh(&fp->lock);
+	if (fp->state & BNX2X_FP_LOCKED) {
+		WARN_ON(fp->state & BNX2X_FP_STATE_NAPI);
+		fp->state |= BNX2X_FP_STATE_NAPI_YIELD;
+		rc = false;
+	} else {
+		/* we don't care if someone yielded */
+		fp->state = BNX2X_FP_STATE_NAPI;
+	}
+	spin_unlock_bh(&fp->lock);
+	return rc;
+}
+
+/* returns true is someone tried to get the FP while napi had it */
+static inline bool bnx2x_fp_unlock_napi(struct bnx2x_fastpath *fp)
+{
+	bool rc = false;
+
+	spin_lock_bh(&fp->lock);
+	WARN_ON(fp->state &
+		(BNX2X_FP_STATE_POLL | BNX2X_FP_STATE_NAPI_YIELD));
+
+	if (fp->state & BNX2X_FP_STATE_POLL_YIELD)
+		rc = true;
+
+	/* state ==> idle, unless currently disabled */
+	fp->state &= BNX2X_FP_STATE_DISABLED;
+	spin_unlock_bh(&fp->lock);
+	return rc;
+}
+
+/* called from bnx2x_low_latency_poll() */
+static inline bool bnx2x_fp_lock_poll(struct bnx2x_fastpath *fp)
+{
+	bool rc = true;
+
+	spin_lock_bh(&fp->lock);
+	if ((fp->state & BNX2X_FP_LOCKED)) {
+		fp->state |= BNX2X_FP_STATE_POLL_YIELD;
+		rc = false;
+	} else {
+		/* preserve yield marks */
+		fp->state |= BNX2X_FP_STATE_POLL;
+	}
+	spin_unlock_bh(&fp->lock);
+	return rc;
+}
+
+/* returns true if someone tried to get the FP while it was locked */
+static inline bool bnx2x_fp_unlock_poll(struct bnx2x_fastpath *fp)
+{
+	bool rc = false;
+
+	spin_lock_bh(&fp->lock);
+	WARN_ON(fp->state & BNX2X_FP_STATE_NAPI);
+
+	if (fp->state & BNX2X_FP_STATE_POLL_YIELD)
+		rc = true;
+
+	/* state ==> idle, unless currently disabled */
+	fp->state &= BNX2X_FP_STATE_DISABLED;
+	spin_unlock_bh(&fp->lock);
+	return rc;
+}
+
+/* true if a socket is polling, even if it did not get the lock */
+static inline bool bnx2x_fp_ll_polling(struct bnx2x_fastpath *fp)
+{
+	WARN_ON(!(fp->state & BNX2X_FP_OWNED));
+	return fp->state & BNX2X_FP_USER_PEND;
+}
+
+/* false if fp is currently owned */
+static inline bool bnx2x_fp_ll_disable(struct bnx2x_fastpath *fp)
+{
+	int rc = true;
+
+	spin_lock_bh(&fp->lock);
+	if (fp->state & BNX2X_FP_OWNED)
+		rc = false;
+	fp->state |= BNX2X_FP_STATE_DISABLED;
+	spin_unlock_bh(&fp->lock);
+
+	return rc;
+}
+#else
+static inline void bnx2x_fp_init_lock(struct bnx2x_fastpath *fp)
+{
+}
+
+static inline bool bnx2x_fp_lock_napi(struct bnx2x_fastpath *fp)
+{
+	return true;
+}
+
+static inline bool bnx2x_fp_unlock_napi(struct bnx2x_fastpath *fp)
+{
+	return false;
+}
+
+static inline bool bnx2x_fp_lock_poll(struct bnx2x_fastpath *fp)
+{
+	return false;
+}
+
+static inline bool bnx2x_fp_unlock_poll(struct bnx2x_fastpath *fp)
+{
+	return false;
+}
+
+static inline bool bnx2x_fp_ll_polling(struct bnx2x_fastpath *fp)
+{
+	return false;
+}
+static inline bool bnx2x_fp_ll_disable(struct bnx2x_fastpath *fp)
+{
+	return true;
+}
+#endif /* CONFIG_NET_RX_BUSY_POLL */
 
 /* Use 2500 as a mini-jumbo MTU for FCoE */
 #define BNX2X_FCOE_MINI_JUMBO_MTU	2500
@@ -702,15 +886,13 @@ struct bnx2x_fastpath {
 #define BD_UNMAP_LEN(bd)		(le16_to_cpu((bd)->nbytes))
 
 #define BNX2X_DB_MIN_SHIFT		3	/* 8 bytes */
-#define BNX2X_DB_SHIFT			7	/* 128 bytes*/
+#define BNX2X_DB_SHIFT			3	/* 8 bytes*/
 #if (BNX2X_DB_SHIFT < BNX2X_DB_MIN_SHIFT)
 #error "Min DB doorbell stride is 8"
 #endif
-#define DPM_TRIGER_TYPE			0x40
 #define DOORBELL(bp, cid, val) \
 	do { \
-		writel((u32)(val), bp->doorbells + (bp->db_size * (cid)) + \
-		       DPM_TRIGER_TYPE); \
+		writel((u32)(val), bp->doorbells + (bp->db_size * (cid))); \
 	} while (0)
 
 /* TX CSUM helpers */
@@ -966,17 +1148,27 @@ struct bnx2x_port {
 			(offsetof(struct bnx2x_eth_stats, stat_name) / 4)
 
 /* slow path */
-
-/* slow path work-queue */
-extern struct workqueue_struct *bnx2x_wq;
-
 #define BNX2X_MAX_NUM_OF_VFS	64
-#define BNX2X_VF_CID_WND	0
+#define BNX2X_VF_CID_WND	4 /* log num of queues per VF. HW config. */
 #define BNX2X_CIDS_PER_VF	(1 << BNX2X_VF_CID_WND)
-#define BNX2X_CLIENTS_PER_VF	1
-#define BNX2X_FIRST_VF_CID	256
+
+/* We need to reserve doorbell addresses for all VF and queue combinations */
 #define BNX2X_VF_CIDS		(BNX2X_MAX_NUM_OF_VFS * BNX2X_CIDS_PER_VF)
+
+/* The doorbell is configured to have the same number of CIDs for PFs and for
+ * VFs. For this reason the PF CID zone is as large as the VF zone.
+ */
+#define BNX2X_FIRST_VF_CID	BNX2X_VF_CIDS
+#define BNX2X_MAX_NUM_VF_QUEUES	64
 #define BNX2X_VF_ID_INVALID	0xFF
+
+/* the number of VF CIDS multiplied by the amount of bytes reserved for each
+ * cid must not exceed the size of the VF doorbell
+ */
+#define BNX2X_VF_BAR_SIZE	512
+#if (BNX2X_VF_BAR_SIZE < BNX2X_CIDS_PER_VF * (1 << BNX2X_DB_SHIFT))
+#error "VF doorbell bar size is 512"
+#endif
 
 /*
  * The total number of L2 queues, MSIX vectors and HW contexts (CIDs) is
@@ -1027,8 +1219,9 @@ union cdu_context {
 /* TM (timers) host DB constants */
 #define TM_ILT_PAGE_SZ_HW	0
 #define TM_ILT_PAGE_SZ		(4096 << TM_ILT_PAGE_SZ_HW) /* 4K */
-/* #define TM_CONN_NUM		(CNIC_STARTING_CID+CNIC_ISCSI_CXT_MAX) */
-#define TM_CONN_NUM		1024
+#define TM_CONN_NUM		(BNX2X_FIRST_VF_CID + \
+				 BNX2X_VF_CIDS + \
+				 CNIC_ISCSI_CID_MAX)
 #define TM_ILT_SZ		(8 * TM_CONN_NUM)
 #define TM_ILT_LINES		DIV_ROUND_UP(TM_ILT_SZ, TM_ILT_PAGE_SZ)
 
@@ -1066,6 +1259,7 @@ struct bnx2x_slowpath {
 	union {
 		struct client_init_ramrod_data  init_data;
 		struct client_update_ramrod_data update_data;
+		struct tpa_update_ramrod_data tpa_data;
 	} q_rdata;
 
 	union {
@@ -1079,7 +1273,10 @@ struct bnx2x_slowpath {
 	 * Therefore, if they would have been defined in the same union,
 	 * data can get corrupted.
 	 */
-	struct afex_vif_list_ramrod_data func_afex_rdata;
+	union {
+		struct afex_vif_list_ramrod_data	viflist_data;
+		struct function_update_data		func_update;
+	} func_afex_rdata;
 
 	/* used by dmae command executer */
 	struct dmae_command		dmae[MAX_DMAE_C];
@@ -1194,7 +1391,7 @@ struct bnx2x_fw_stats_data {
 };
 
 /* Public slow path states */
-enum {
+enum sp_rtnl_flag {
 	BNX2X_SP_RTNL_SETUP_TC,
 	BNX2X_SP_RTNL_TX_TIMEOUT,
 	BNX2X_SP_RTNL_FAN_FAILURE,
@@ -1202,10 +1399,15 @@ enum {
 	BNX2X_SP_RTNL_ENABLE_SRIOV,
 	BNX2X_SP_RTNL_VFPF_MCAST,
 	BNX2X_SP_RTNL_VFPF_CHANNEL_DOWN,
-	BNX2X_SP_RTNL_VFPF_STORM_RX_MODE,
+	BNX2X_SP_RTNL_RX_MODE,
 	BNX2X_SP_RTNL_HYPERVISOR_VLAN,
 	BNX2X_SP_RTNL_TX_STOP,
-	BNX2X_SP_RTNL_TX_RESUME,
+	BNX2X_SP_RTNL_GET_DRV_VERSION,
+};
+
+enum bnx2x_iov_flag {
+	BNX2X_IOV_HANDLE_VF_MSG,
+	BNX2X_IOV_HANDLE_FLR,
 };
 
 struct bnx2x_prev_path_list {
@@ -1292,7 +1494,6 @@ struct bnx2x {
 
 	struct vlan_group	*vlgrp;
 
-	u32			rx_csum;
 /* L2 header size + 2*VLANs (8 bytes) + LLC SNAP (8 bytes) */
 #define ETH_OVREHEAD		(ETH_HLEN + 8 + 8)
 #define ETH_MIN_PACKET_SIZE		60
@@ -1360,7 +1561,6 @@ struct bnx2x {
 #define PCI_32BIT_FLAG			(1 << 1)
 #define ONE_PORT_FLAG			(1 << 2)
 #define NO_WOL_FLAG			(1 << 3)
-#define USING_DAC_FLAG			(1 << 4)
 #define USING_MSIX_FLAG			(1 << 5)
 #define USING_MSI_FLAG			(1 << 6)
 #define DISABLE_MSI_FLAG		(1 << 7)
@@ -1373,12 +1573,15 @@ struct bnx2x {
 #define NO_ISCSI_FLAG			(1 << 14)
 #define NO_FCOE_FLAG			(1 << 15)
 #define BC_SUPPORTS_PFC_STATS		(1 << 17)
+#define TX_SWITCHING			(1 << 18)
 #define BC_SUPPORTS_FCOE_FEATURES	(1 << 19)
 #define USING_SINGLE_MSIX_FLAG		(1 << 20)
 #define BC_SUPPORTS_DCBX_MSG_NON_PMF	(1 << 21)
 #define IS_VF_FLAG			(1 << 22)
 #define INTERRUPTS_ENABLED_FLAG		(1 << 23)
 #define BC_SUPPORTS_RMMOD_CMD		(1 << 24)
+#define HAS_PHYS_PORT_ID		(1 << 25)
+#define AER_ENABLED			(1 << 26)
 
 #define BP_NOMCP(bp)			((bp)->flags & NO_MCP_FLAG)
 
@@ -1404,10 +1607,11 @@ struct bnx2x {
 	 */
 	bool			fcoe_init;
 
-	int			pm_cap;
 	int			mrrs;
 
 	struct delayed_work	sp_task;
+	struct delayed_work	iov_task;
+
 	atomic_t		interrupt_occurred;
 	struct delayed_work	sp_rtnl_task;
 
@@ -1455,7 +1659,7 @@ struct bnx2x {
 	u16			rx_ticks_int;
 	u16			rx_ticks;
 /* Maximal coalescing timeout in us */
-#define BNX2X_MAX_COALESCE_TOUT		(0xf0*12)
+#define BNX2X_MAX_COALESCE_TOUT		(0xff*BNX2X_BTR)
 
 	u32			lin_cnt;
 
@@ -1498,6 +1702,10 @@ struct bnx2x {
 	struct bnx2x_slowpath	*slowpath;
 	dma_addr_t		slowpath_mapping;
 
+	/* Mechanism protecting the drv_info_to_mcp */
+	struct mutex		drv_info_mutex;
+	bool			drv_info_mng_owner;
+
 	/* Total number of FW statistics requests */
 	u8			fw_stats_num;
 
@@ -1524,10 +1732,10 @@ struct bnx2x {
 	dma_addr_t			fw_stats_data_mapping;
 	int				fw_stats_data_sz;
 
-	/* For max 196 cids (64*3 + non-eth), 32KB ILT page size and 1KB
+	/* For max 1024 cids (VF RSS), 32KB ILT page size and 1KB
 	 * context size we need 8 ILT entries.
 	 */
-#define ILT_MAX_L2_LINES	8
+#define ILT_MAX_L2_LINES	32
 	struct hw_context	context[ILT_MAX_L2_LINES];
 
 	struct bnx2x_ilt	*ilt;
@@ -1543,10 +1751,11 @@ struct bnx2x {
  * Maximum CID count that might be required by the bnx2x:
  * Max RSS * Max_Tx_Multi_Cos + FCoE + iSCSI
  */
+
 #define BNX2X_L2_CID_COUNT(bp)	(BNX2X_NUM_ETH_QUEUES(bp) * BNX2X_MULTI_TX_COS \
-				+ 2 * CNIC_SUPPORT(bp))
+				+ CNIC_SUPPORT(bp) * (2 + UIO_CID_PAD(bp)))
 #define BNX2X_L2_MAX_CID(bp)	(BNX2X_MAX_RSS_COUNT(bp) * BNX2X_MULTI_TX_COS \
-				+ 2 * CNIC_SUPPORT(bp))
+				+ CNIC_SUPPORT(bp) * (2 + UIO_CID_PAD(bp)))
 #define L2_ILT_LINES(bp)	(DIV_ROUND_UP(BNX2X_L2_CID_COUNT(bp),\
 					ILT_PAGE_CIDS))
 
@@ -1686,6 +1895,9 @@ struct bnx2x {
 	/* operation indication for the sp_rtnl task */
 	unsigned long				sp_rtnl_state;
 
+	/* Indication of the IOV tasks */
+	unsigned long				iov_task_state;
+
 	/* DCBX Negotiation results */
 	struct dcbx_features			dcbx_local_feat;
 	u32					dcbx_error;
@@ -1709,6 +1921,8 @@ struct bnx2x {
 	u32 dump_preset_idx;
 	bool					stats_started;
 	struct semaphore			stats_sema;
+
+	u8					phys_port_id[ETH_ALEN];
 };
 
 /* Tx queues may be less or equal to Rx queues */
@@ -1743,7 +1957,7 @@ extern int num_queues;
 #define FUNC_FLG_TPA		0x0008
 #define FUNC_FLG_SPQ		0x0010
 #define FUNC_FLG_LEADING	0x0020	/* PF only */
-
+#define FUNC_FLG_LEADING_STATS	0x0040
 struct bnx2x_func_init_params {
 	/* dma */
 	dma_addr_t	fw_stat_map;	/* valid iff FUNC_FLG_STATS */
@@ -1884,7 +2098,6 @@ int bnx2x_del_all_macs(struct bnx2x *bp,
 void bnx2x_func_init(struct bnx2x *bp, struct bnx2x_func_init_params *p);
 void bnx2x_init_sb(struct bnx2x *bp, dma_addr_t mapping, int vfid,
 		    u8 vf_valid, int fw_sb_id, int igu_sb_id);
-u32 bnx2x_get_pretend_reg(struct bnx2x *bp);
 int bnx2x_get_gpio(struct bnx2x *bp, int gpio_num, u8 port);
 int bnx2x_set_gpio(struct bnx2x *bp, int gpio_num, u32 mode, u8 port);
 int bnx2x_set_mult_gpio(struct bnx2x *bp, u8 pins, u32 mode);
@@ -1944,9 +2157,8 @@ static inline u32 reg_poll(struct bnx2x *bp, u32 reg, u32 expected, int ms,
 void bnx2x_igu_clear_sb_gen(struct bnx2x *bp, u8 func, u8 idu_sb_id,
 			    bool is_pf);
 
-#define BNX2X_ILT_ZALLOC(x, y, size)				\
-	x = dma_alloc_coherent(&bp->pdev->dev, size, y,		\
-			       GFP_KERNEL | __GFP_ZERO)
+#define BNX2X_ILT_ZALLOC(x, y, size)					\
+	x = dma_zalloc_coherent(&bp->pdev->dev, size, y, GFP_KERNEL)
 
 #define BNX2X_ILT_FREE(x, y, size) \
 	do { \
@@ -2066,7 +2278,7 @@ void bnx2x_igu_clear_sb_gen(struct bnx2x *bp, u8 func, u8 idu_sb_id,
 #define BNX2X_NUM_TESTS_SF		7
 #define BNX2X_NUM_TESTS_MF		3
 #define BNX2X_NUM_TESTS(bp)		(IS_MF(bp) ? BNX2X_NUM_TESTS_MF : \
-						     BNX2X_NUM_TESTS_SF)
+					     IS_VF(bp) ? 0 : BNX2X_NUM_TESTS_SF)
 
 #define BNX2X_PHY_LOOPBACK		0
 #define BNX2X_MAC_LOOPBACK		1
@@ -2333,4 +2545,12 @@ enum bnx2x_pci_bus_speed {
 };
 
 void bnx2x_set_local_cmng(struct bnx2x *bp);
+
+void bnx2x_update_mng_version(struct bnx2x *bp);
+
+#define MCPR_SCRATCH_BASE(bp) \
+	(CHIP_IS_E1x(bp) ? MCP_REG_MCPR_SCRATCH : MCP_A_REG_MCPR_SCRATCH)
+
+#define E1H_MAX_MF_SB_COUNT (HC_SB_MAX_SB_E1X/(E1HVN_MAX * PORT_MAX))
+
 #endif /* bnx2x.h */

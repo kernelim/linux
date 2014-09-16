@@ -156,6 +156,8 @@ enum mem_type {
 	MEM_XDR,		/* Rambus XDR */
 	MEM_DDR3,		/* DDR3 RAM */
 	MEM_RDDR3,		/* Registered DDR3 RAM */
+	MEM_DDR4,		/* DDR4 RAM */
+	MEM_RDDR4,		/* Registered DDR4 RAM */
 };
 
 #define MEM_FLAG_EMPTY		BIT(MEM_EMPTY)

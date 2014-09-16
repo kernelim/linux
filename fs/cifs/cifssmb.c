@@ -460,7 +460,6 @@ CIFSSMBNegotiate(unsigned int xid, struct cifs_ses *ses)
 				       cifs_max_pending);
 		cifs_set_credits(server, server->maxReq);
 		server->maxBuf = le16_to_cpu(rsp->MaxBufSize);
-		server->max_vcs = le16_to_cpu(rsp->MaxNumberVcs);
 		/* even though we do not use raw we might as well set this
 		accurately, in case we ever find a need for it */
 		if ((le16_to_cpu(rsp->RawMode) & RAW_ENABLE) == RAW_ENABLE) {

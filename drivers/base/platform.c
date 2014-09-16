@@ -572,7 +572,7 @@ static int platform_uevent(struct device *dev, struct kobj_uevent_env *env)
 	struct platform_device	*pdev = to_platform_device(dev);
 
 	add_uevent_var(env, "MODALIAS=%s%s", PLATFORM_MODULE_PREFIX,
-		(pdev->id_entry) ? pdev->id_entry->name : pdev->name);
+			pdev->name);
 	return 0;
 }
 

@@ -2,7 +2,6 @@
 #include "../cache.h"
 #include "../../perf.h"
 #include "libslang.h"
-#include <newt.h>
 #include "ui.h"
 #include "util.h"
 #include <linux/compiler.h>
@@ -234,7 +233,7 @@ void ui_browser__reset_index(struct ui_browser *browser)
 void __ui_browser__show_title(struct ui_browser *browser, const char *title)
 {
 	SLsmg_gotorc(0, 0);
-	ui_browser__set_color(browser, NEWT_COLORSET_ROOT);
+	ui_browser__set_color(browser, HE_COLORSET_ROOT);
 	slsmg_write_nstring(title, browser->width + 1);
 }
 
@@ -273,6 +272,8 @@ void ui_browser__hide(struct ui_browser *browser __maybe_unused)
 {
 	pthread_mutex_lock(&ui__lock);
 	ui_helpline__pop();
+	free(browser->helpline);
+	browser->helpline = NULL;
 	pthread_mutex_unlock(&ui__lock);
 }
 
@@ -471,7 +472,7 @@ unsigned int ui_browser__list_head_refresh(struct ui_browser *browser)
 	return row;
 }
 
-static struct ui_browser__colorset {
+static struct ui_browser_colorset {
 	const char *name, *fg, *bg;
 	int colorset;
 } ui_browser__colorsets[] = {
@@ -510,6 +511,12 @@ static struct ui_browser__colorset {
 		.name	  = "addr",
 		.fg	  = "magenta",
 		.bg	  = "default",
+	},
+	{
+		.colorset = HE_COLORSET_ROOT,
+		.name	  = "root",
+		.fg	  = "white",
+		.bg	  = "blue",
 	},
 	{
 		.name = NULL,
@@ -706,7 +713,7 @@ void ui_browser__init(void)
 	perf_config(ui_browser__color_config, NULL);
 
 	while (ui_browser__colorsets[i].name) {
-		struct ui_browser__colorset *c = &ui_browser__colorsets[i++];
+		struct ui_browser_colorset *c = &ui_browser__colorsets[i++];
 		sltt_set_color(c->colorset, c->name, c->fg, c->bg);
 	}
 

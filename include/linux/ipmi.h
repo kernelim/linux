@@ -500,6 +500,12 @@ struct ipmi_smi_info {
 /* This is to get the private info of ipmi_smi_t */
 extern int ipmi_get_smi_info(int if_num, struct ipmi_smi_info *data);
 
+/*
+ * This clues dependent modules that ipmi_si and the modules it depends on have
+ * been loaded.
+ */
+extern int ipmi_si_loaded;
+
 #endif /* __KERNEL__ */
 
 

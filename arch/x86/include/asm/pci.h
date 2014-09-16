@@ -22,11 +22,6 @@ extern int pci_routeirq;
 extern int noioapicquirk;
 extern int noioapicreroute;
 
-/* scan a bus after allocating a pci_sysdata for it */
-extern struct pci_bus *pci_scan_bus_on_node(int busno, struct pci_ops *ops,
-					    int node);
-extern struct pci_bus *pci_scan_bus_with_sysdata(int busno);
-
 static inline int pci_domain_nr(struct pci_bus *bus)
 {
 	struct pci_sysdata *sd = bus->sysdata;
@@ -56,7 +51,7 @@ extern unsigned long pci_mem_start;
 #define PCIBIOS_MIN_CARDBUS_IO	0x4000
 
 void pcibios_config_init(void);
-struct pci_bus *pcibios_scan_root(int bus);
+void pcibios_scan_root(int bus);
 
 void pcibios_set_master(struct pci_dev *dev);
 void pcibios_penalize_isa_irq(int irq, int active);

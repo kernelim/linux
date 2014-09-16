@@ -131,6 +131,10 @@ struct iscsi_task {
 	unsigned long		last_xfer;
 	unsigned long		last_timeout;
 	bool			have_checked_conn;
+
+	/* T10 protection information */
+	bool			protected;
+
 	/* state set/tested under session->lock */
 	int			state;
 	atomic_t		refcount;
@@ -229,6 +233,7 @@ struct iscsi_conn {
 	uint8_t			ipv6_traffic_class;
 	uint8_t			ipv6_flow_label;
 	uint8_t			is_fw_assigned_ipv6;
+	char			*local_ipaddr;
 
 	/* MIB-statistics */
 	uint64_t		txdata_octets;

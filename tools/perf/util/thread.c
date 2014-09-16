@@ -7,16 +7,18 @@
 #include "util.h"
 #include "debug.h"
 
-struct thread *thread__new(pid_t pid)
+struct thread *thread__new(pid_t pid, pid_t tid)
 {
 	struct thread *self = zalloc(sizeof(*self));
 
 	if (self != NULL) {
 		map_groups__init(&self->mg);
-		self->pid = pid;
+		self->pid_ = pid;
+		self->tid = tid;
+		self->ppid = -1;
 		self->comm = malloc(32);
 		if (self->comm)
-			snprintf(self->comm, 32, ":%d", self->pid);
+			snprintf(self->comm, 32, ":%d", self->tid);
 	}
 
 	return self;
@@ -54,10 +56,10 @@ int thread__comm_len(struct thread *self)
 	return self->comm_len;
 }
 
-static size_t thread__fprintf(struct thread *self, FILE *fp)
+size_t thread__fprintf(struct thread *thread, FILE *fp)
 {
-	return fprintf(fp, "Thread %d %s\n", self->pid, self->comm) +
-	       map_groups__fprintf(&self->mg, verbose, fp);
+	return fprintf(fp, "Thread %d %s\n", thread->tid, thread->comm) +
+	       map_groups__fprintf(&thread->mg, verbose, fp);
 }
 
 void thread__insert_map(struct thread *self, struct map *map)
@@ -82,19 +84,8 @@ int thread__fork(struct thread *self, struct thread *parent)
 	for (i = 0; i < MAP__NR_TYPES; ++i)
 		if (map_groups__clone(&self->mg, &parent->mg, i) < 0)
 			return -ENOMEM;
+
+	self->ppid = parent->tid;
+
 	return 0;
-}
-
-size_t machine__fprintf(struct machine *machine, FILE *fp)
-{
-	size_t ret = 0;
-	struct rb_node *nd;
-
-	for (nd = rb_first(&machine->threads); nd; nd = rb_next(nd)) {
-		struct thread *pos = rb_entry(nd, struct thread, rb_node);
-
-		ret += thread__fprintf(pos, fp);
-	}
-
-	return ret;
 }

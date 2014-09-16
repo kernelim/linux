@@ -295,10 +295,6 @@ static void __devinit pci_read_bridge_io(struct pci_bus *child)
 		if (!res->end)
 			res->end = res2.end;
 		dev_printk(KERN_DEBUG, &dev->dev, "  bridge window %pR\n", res);
-	} else {
-		dev_printk(KERN_DEBUG, &dev->dev,
-			 "  bridge window [io  %#06lx-%#06lx] (disabled)\n",
-				 base, limit);
 	}
 }
 
@@ -321,10 +317,6 @@ static void __devinit pci_read_bridge_mmio(struct pci_bus *child)
 		region.end = limit + 0xfffff;
 		pcibios_bus_to_resource(dev, res, &region);
 		dev_printk(KERN_DEBUG, &dev->dev, "  bridge window %pR\n", res);
-	} else {
-		dev_printk(KERN_DEBUG, &dev->dev,
-			"  bridge window [mem %#010lx-%#010lx] (disabled)\n",
-					 base, limit + 0xfffff);
 	}
 }
 
@@ -374,10 +366,6 @@ static void __devinit pci_read_bridge_mmio_pref(struct pci_bus *child)
 		region.end = limit + 0xfffff;
 		pcibios_bus_to_resource(dev, res, &region);
 		dev_printk(KERN_DEBUG, &dev->dev, "  bridge window %pR\n", res);
-	} else {
-		dev_printk(KERN_DEBUG, &dev->dev,
-		     "  bridge window [mem %#010lx-%#010lx pref] (disabled)\n",
-					 base, limit + 0xfffff);
 	}
 }
 
@@ -1034,6 +1022,42 @@ void kfree_pci_dev(struct pci_dev *dev)
 }
 EXPORT_SYMBOL(kfree_pci_dev);
 
+bool pci_bus_read_dev_vendor_id(struct pci_bus *bus, int devfn, u32 *l,
+				 int crs_timeout)
+{
+	int delay = 1;
+
+	if (pci_bus_read_config_dword(bus, devfn, PCI_VENDOR_ID, l))
+		return false;
+
+	/* some broken boards return 0 or ~0 if a slot is empty: */
+	if (*l == 0xffffffff || *l == 0x00000000 ||
+	    *l == 0x0000ffff || *l == 0xffff0000)
+		return false;
+
+	/* Configuration request Retry Status */
+	while (*l == 0xffff0001) {
+		if (!crs_timeout)
+			return false;
+
+		msleep(delay);
+		delay *= 2;
+		if (pci_bus_read_config_dword(bus, devfn, PCI_VENDOR_ID, l))
+			return false;
+		/* Card hasn't responded in 60 seconds?  Must be stuck. */
+		if (delay > crs_timeout) {
+			printk(KERN_WARNING "pci %04x:%02x:%02x.%d: not "
+					"responding\n", pci_domain_nr(bus),
+					bus->number, PCI_SLOT(devfn),
+					PCI_FUNC(devfn));
+			return false;
+		}
+	}
+
+	return true;
+}
+EXPORT_SYMBOL(pci_bus_read_dev_vendor_id);
+
 /*
  * Read the config data for a PCI device, sanity-check it
  * and fill in the dev structure...
@@ -1042,31 +1066,9 @@ static struct pci_dev *pci_scan_device(struct pci_bus *bus, int devfn)
 {
 	struct pci_dev *dev;
 	u32 l;
-	int delay = 1;
 
-	if (pci_bus_read_config_dword(bus, devfn, PCI_VENDOR_ID, &l))
+	if (!pci_bus_read_dev_vendor_id(bus, devfn, &l, 60*1000))
 		return NULL;
-
-	/* some broken boards return 0 or ~0 if a slot is empty: */
-	if (l == 0xffffffff || l == 0x00000000 ||
-	    l == 0x0000ffff || l == 0xffff0000)
-		return NULL;
-
-	/* Configuration request Retry Status */
-	while (l == 0xffff0001) {
-		msleep(delay);
-		delay *= 2;
-		if (pci_bus_read_config_dword(bus, devfn, PCI_VENDOR_ID, &l))
-			return NULL;
-		/* Card hasn't responded in 60 seconds?  Must be stuck. */
-		if (delay > 60 * 1000) {
-			printk(KERN_WARNING "pci %04x:%02x:%02x.%d: not "
-					"responding\n", pci_domain_nr(bus),
-					bus->number, PCI_SLOT(devfn),
-					PCI_FUNC(devfn));
-			return NULL;
-		}
-	}
 
 	dev = alloc_pci_dev();
 	if (!dev)
@@ -1543,36 +1545,29 @@ EXPORT_SYMBOL(pci_scan_bus);
 
 #ifdef CONFIG_HOTPLUG
 /**
- * pci_rescan_bus - scan a PCI bus for devices.
- * @bus: PCI bus to scan
+ * pci_rescan_bus_bridge_resize - scan a PCI bus for devices.
+ * @bridge: PCI bridge for the bus to scan
  *
- * Scan a PCI bus and child buses for new devices, adds them,
- * and enables them.
+ * Scan a PCI bus and child buses for new devices, add them,
+ * and enable them, resizing bridge mmio/io resource if necessary
+ * and possible.  The caller must ensure the child devices are already
+ * removed for resizing to occur.
  *
  * Returns the max number of subordinate bus discovered.
  */
-unsigned int __ref pci_rescan_bus(struct pci_bus *bus)
+unsigned int __ref pci_rescan_bus_bridge_resize(struct pci_dev *bridge)
 {
 	unsigned int max;
-	struct pci_dev *dev;
+	struct pci_bus *bus = bridge->subordinate;
 
 	max = pci_scan_child_bus(bus);
 
-	down_read(&pci_bus_sem);
-	list_for_each_entry(dev, &bus->devices, bus_list)
-		if (dev->hdr_type == PCI_HEADER_TYPE_BRIDGE ||
-		    dev->hdr_type == PCI_HEADER_TYPE_CARDBUS)
-			if (dev->subordinate)
-				pci_bus_size_bridges(dev->subordinate);
-	up_read(&pci_bus_sem);
+	pci_assign_unassigned_bridge_resources(bridge);
 
-	pci_bus_assign_resources(bus);
-	pci_enable_bridges(bus);
 	pci_bus_add_devices(bus);
 
 	return max;
 }
-EXPORT_SYMBOL_GPL(pci_rescan_bus);
 
 EXPORT_SYMBOL(pci_add_new_bus);
 EXPORT_SYMBOL(pci_scan_slot);

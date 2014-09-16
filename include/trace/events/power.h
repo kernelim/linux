@@ -70,6 +70,54 @@ TRACE_EVENT(power_end,
 
 );
 
+TRACE_EVENT(pstate_sample,
+
+	TP_PROTO(u32 core_busy,
+		u32 scaled_busy,
+		u32 state,
+		u64 mperf,
+		u64 aperf,
+		u32 freq
+		),
+
+	TP_ARGS(core_busy,
+		scaled_busy,
+		state,
+		mperf,
+		aperf,
+		freq
+		),
+
+	TP_STRUCT__entry(
+		__field(u32, core_busy)
+		__field(u32, scaled_busy)
+		__field(u32, state)
+		__field(u64, mperf)
+		__field(u64, aperf)
+		__field(u32, freq)
+
+	),
+
+	TP_fast_assign(
+		__entry->core_busy = core_busy;
+		__entry->scaled_busy = scaled_busy;
+		__entry->state = state;
+		__entry->mperf = mperf;
+		__entry->aperf = aperf;
+		__entry->freq = freq;
+		),
+
+	TP_printk("core_busy=%lu scaled=%lu state=%lu mperf=%llu aperf=%llu freq=%lu ",
+		(unsigned long)__entry->core_busy,
+		(unsigned long)__entry->scaled_busy,
+		(unsigned long)__entry->state,
+		(unsigned long long)__entry->mperf,
+		(unsigned long long)__entry->aperf,
+		(unsigned long)__entry->freq
+		)
+
+);
+
 #endif /* _TRACE_POWER_H */
 
 /* This part must be outside protection */

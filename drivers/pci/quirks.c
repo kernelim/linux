@@ -2786,6 +2786,7 @@ extern struct pci_fixup __end_pci_fixups_resume_early[];
 extern struct pci_fixup __start_pci_fixups_suspend[];
 extern struct pci_fixup __end_pci_fixups_suspend[];
 
+static bool pci_apply_fixup_final_quirks;
 
 void pci_fixup_device(enum pci_fixup_pass pass, struct pci_dev *dev)
 {
@@ -2803,6 +2804,8 @@ void pci_fixup_device(enum pci_fixup_pass pass, struct pci_dev *dev)
 		break;
 
 	case pci_fixup_final:
+		if (!pci_apply_fixup_final_quirks)
+			return;
 		start = __start_pci_fixups_final;
 		end = __end_pci_fixups_final;
 		break;
@@ -2834,10 +2837,12 @@ void pci_fixup_device(enum pci_fixup_pass pass, struct pci_dev *dev)
 	pci_do_fixups(dev, start, end);
 }
 
+
 static int __init pci_apply_final_quirks(void)
 {
 	struct pci_dev *dev = NULL;
 
+	pci_apply_fixup_final_quirks = true;
 	while ((dev = pci_get_device(PCI_ANY_ID, PCI_ANY_ID, dev)) != NULL) {
 		pci_fixup_device(pci_fixup_final, dev);
 	}

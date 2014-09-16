@@ -250,7 +250,7 @@ static int shmem_add_to_page_cache(struct page *page,
 	VM_BUG_ON(!PageSwapBacked(page));
 
 	if (!expected)
-		error = radix_tree_preload(gfp & GFP_RECLAIM_MASK);
+		error = radix_tree_maybe_preload(gfp & GFP_RECLAIM_MASK);
 	if (!error) {
 		page_cache_get(page);
 		page->mapping = mapping;

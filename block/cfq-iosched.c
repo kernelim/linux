@@ -3127,7 +3127,7 @@ static int cfq_cic_link(struct cfq_data *cfqd, struct io_context *ioc,
 	unsigned long flags;
 	int ret;
 
-	ret = radix_tree_preload(gfp_mask);
+	ret = radix_tree_maybe_preload(gfp_mask);
 	if (!ret) {
 		cic->ioc = ioc;
 		cic->key = cfqd;

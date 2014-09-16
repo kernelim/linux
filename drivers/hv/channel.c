@@ -47,8 +47,8 @@ static void vmbus_setevent(struct vmbus_channel *channel)
 			(unsigned long *) vmbus_connection.send_int_page +
 			(channel->offermsg.child_relid >> 5));
 
-		monitorpage = vmbus_connection.monitor_pages;
-		monitorpage++; /* Get the child to parent monitor page */
+		/* Get the child to parent monitor page */
+		monitorpage = vmbus_connection.monitor_pages[1];
 
 		sync_set_bit(channel->monitor_bit,
 			(unsigned long *)&monitorpage->trigger_group
@@ -77,7 +77,7 @@ void vmbus_get_debug_info(struct vmbus_channel *channel,
 	       &channel->offermsg.offer.if_instance,
 	       sizeof(uuid_le));
 
-	monitorpage = (struct hv_monitor_page *)vmbus_connection.monitor_pages;
+	monitorpage = vmbus_connection.monitor_pages[0];
 
 	debuginfo->monitorid = channel->offermsg.monitorid;
 
@@ -89,8 +89,7 @@ void vmbus_get_debug_info(struct vmbus_channel *channel,
 			monitorpage->parameter[monitor_group]
 					[monitor_offset].connectionid.u.id;
 
-	monitorpage++;
-
+	monitorpage = vmbus_connection.monitor_pages[1];
 	debuginfo->clientmonitor_pending =
 			monitorpage->trigger_group[monitor_group].pending;
 	debuginfo->clientmonitor_latency =
@@ -512,18 +511,26 @@ int vmbus_teardown_gpadl(struct vmbus_channel *channel, u32 gpadl_handle)
 }
 EXPORT_SYMBOL_GPL(vmbus_teardown_gpadl);
 
+static void reset_channel_cb(void *arg)
+{
+	struct vmbus_channel *channel = arg;
+
+	channel->onchannel_callback = NULL;
+}
+
 static void vmbus_close_internal(struct vmbus_channel *channel)
 {
 	struct vmbus_channel_close_channel *msg;
 	int ret;
-	unsigned long flags;
 
 	channel->state = CHANNEL_OPEN_STATE;
 	channel->sc_creation_callback = NULL;
 	/* Stop callback and cancel the timer asap */
-	spin_lock_irqsave(&channel->inbound_lock, flags);
-	channel->onchannel_callback = NULL;
-	spin_unlock_irqrestore(&channel->inbound_lock, flags);
+	if (channel->target_cpu != smp_processor_id())
+		smp_call_function_single(channel->target_cpu, reset_channel_cb,
+					 channel, true);
+	else
+		reset_channel_cb(channel);
 
 	/* Send a closing message */
 
@@ -835,12 +842,8 @@ int vmbus_recvpacket_raw(struct vmbus_channel *channel, void *buffer,
 
 	*buffer_actual_len = packetlen;
 
-	if (packetlen > bufferlen) {
-		pr_err("Buffer too small - needed %d bytes but "
-			"got space for only %d bytes\n",
-			packetlen, bufferlen);
+	if (packetlen > bufferlen)
 		return -ENOBUFS;
-	}
 
 	*requestid = desc.trans_id;
 
@@ -851,6 +854,6 @@ int vmbus_recvpacket_raw(struct vmbus_channel *channel, void *buffer,
 	if (signal)
 		vmbus_setevent(channel);
 
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL_GPL(vmbus_recvpacket_raw);

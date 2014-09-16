@@ -125,7 +125,8 @@ static int probe_common(struct virtio_device *vdev)
 		return err;
 	}
 
-	register_buffer();
+	if (data_left < sizeof(u32))
+		register_buffer();
 	return 0;
 }
 

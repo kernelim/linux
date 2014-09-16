@@ -1244,6 +1244,7 @@ ktime_t ktime_get_monotonic_offset(void)
 
 	return timespec_to_ktime(wtom);
 }
+EXPORT_SYMBOL_GPL(ktime_get_monotonic_offset);
 
 /*
  * The 64-bit jiffies value is not atomic - you MUST NOT read it

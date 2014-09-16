@@ -370,7 +370,8 @@ cifs_show_options(struct seq_file *s, struct vfsmount *m)
 	cifs_show_security(s, tcon->ses->server);
 	cifs_show_cache_flavor(s, cifs_sb);
 
-	seq_printf(s, ",unc=%s", tcon->treeName);
+	seq_printf(s, ",unc=");
+	seq_escape(s, tcon->treeName, " \t\n\\");
 
 	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_MULTIUSER)
 		seq_printf(s, ",multiuser");
@@ -424,8 +425,10 @@ cifs_show_options(struct seq_file *s, struct vfsmount *m)
 		seq_printf(s, ",unix");
 	else
 		seq_printf(s, ",nounix");
-	if (cifs_sb->prepath)
-		seq_printf(s, ",prepath=%s", cifs_sb->prepath);
+	if (cifs_sb->prepath) {
+		seq_printf(s, ",prepath=");
+		seq_escape(s, cifs_sb->prepath, " \t\n\\");
+	}
 	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_POSIX_PATHS)
 		seq_printf(s, ",posixpaths");
 	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_SET_UID)

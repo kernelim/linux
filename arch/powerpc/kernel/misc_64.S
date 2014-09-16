@@ -476,7 +476,7 @@ _GLOBAL(kexec_wait)
 	/* r3 already contains cpuid here */
 	LOAD_REG_ADDR(r4, kexec_state)
 	li	r9,KEXEC_STATE_REAL_MODE
-	stbx	r9, r4, r3
+	stbx	r9, r4, r6
 	SYNC
 
 99:	HMT_LOW
@@ -507,6 +507,7 @@ kexec_flag:
  */
 _GLOBAL(kexec_smp_wait)
 	lhz	r3,PACAHWCPUID(r13)
+	lhz	r6,PACAPACAINDEX(r13)
 	bl	real_mode
 	b	.kexec_wait
 

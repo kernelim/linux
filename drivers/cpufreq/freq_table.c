@@ -67,8 +67,7 @@ int cpufreq_frequency_table_verify(struct cpufreq_policy *policy,
 	if (!cpu_online(policy->cpu))
 		return -EINVAL;
 
-	cpufreq_verify_within_limits(policy, policy->cpuinfo.min_freq,
-				     policy->cpuinfo.max_freq);
+	cpufreq_verify_within_cpu_limits(policy);
 
 	for (i = 0; (table[i].frequency != CPUFREQ_TABLE_END); i++) {
 		unsigned int freq = table[i].frequency;

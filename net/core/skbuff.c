@@ -43,6 +43,8 @@
 #include <linux/mm.h>
 #include <linux/interrupt.h>
 #include <linux/in.h>
+#include <linux/tcp.h>
+#include <linux/udp.h>
 #include <linux/inet.h>
 #include <linux/slab.h>
 #include <linux/netdevice.h>
@@ -630,6 +632,10 @@ static void __copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
 	new->vlan_tci		= old->vlan_tci;
 
 	skb_copy_secmark(new, old);
+
+#ifdef CONFIG_NET_RX_BUSY_POLL
+	new->napi_id	= old->napi_id;
+#endif
 }
 
 /*
@@ -2654,8 +2660,9 @@ struct sk_buff *skb_segment(struct sk_buff *skb, int features)
 	int err = -ENOMEM;
 	int i = 0;
 	int pos;
+	int dummy;
 
-	proto = skb_network_protocol(skb);
+	proto = skb_network_protocol(skb, &dummy);
 	if (unlikely(!proto))
 		return ERR_PTR(-EINVAL);
 
@@ -3208,3 +3215,28 @@ void __skb_warn_lro_forwarding(const struct sk_buff *skb)
 			   " while LRO is enabled\n", skb->dev->name);
 }
 EXPORT_SYMBOL(__skb_warn_lro_forwarding);
+
+/**
+ * skb_gso_transport_seglen - Return length of individual segments of a gso packet
+ *
+ * @skb: GSO skb
+ *
+ * skb_gso_transport_seglen is used to determine the real size of the
+ * individual segments, including Layer4 headers (TCP/UDP).
+ *
+ * The MAC/L2 or network (IP, IPv6) headers are not accounted for.
+ */
+unsigned int skb_gso_transport_seglen(const struct sk_buff *skb)
+{
+	const struct skb_shared_info *shinfo = skb_shinfo(skb);
+
+	if (likely(shinfo->gso_type & (SKB_GSO_TCPV4 | SKB_GSO_TCPV6)))
+		return tcp_hdrlen(skb) + shinfo->gso_size;
+
+	/* UFO sets gso_size to the size of the fragmentation
+	 * payload, i.e. the size of the L4 (UDP) header is already
+	 * accounted for.
+	 */
+	return shinfo->gso_size;
+}
+EXPORT_SYMBOL_GPL(skb_gso_transport_seglen);

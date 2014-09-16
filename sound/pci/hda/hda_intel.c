@@ -163,6 +163,7 @@ MODULE_SUPPORTED_DEVICE("{{Intel, ICH6},"
 			 "{Intel, PPT},"
 			 "{Intel, LPT},"
 			 "{Intel, LPT_LP},"
+			 "{Intel, WPT_LP},"
 			 "{Intel, HPT},"
 			 "{Intel, PBG},"
 			 "{Intel, SCH},"
@@ -586,6 +587,7 @@ enum {
 #define AZX_DCAPS_4K_BDLE_BOUNDARY (1 << 23)	/* BDLE in 4k boundary */
 #define AZX_DCAPS_COUNT_LPIB_DELAY  (1 << 25)	/* Take LPIB as delay */
 #define AZX_DCAPS_PM_RUNTIME	(1 << 26)	/* runtime PM support */
+#define AZX_DCAPS_RETRY2	(1 << 27)	/* Do init twice */
 
 /* quirks for Intel PCH */
 #define AZX_DCAPS_INTEL_PCH_NOPM \
@@ -614,7 +616,8 @@ enum {
 	 AZX_DCAPS_ALIGN_BUFSIZE | AZX_DCAPS_NO_64BIT)
 
 #define AZX_DCAPS_PRESET_CTHDA \
-	(AZX_DCAPS_NO_MSI | AZX_DCAPS_POSFIX_LPIB | AZX_DCAPS_4K_BDLE_BOUNDARY)
+	(AZX_DCAPS_NO_MSI | AZX_DCAPS_POSFIX_LPIB | AZX_DCAPS_4K_BDLE_BOUNDARY |\
+	 AZX_DCAPS_RETRY2)
 
 /*
  * VGA-switcher support
@@ -3603,6 +3606,7 @@ static int azx_probe(struct pci_dev *pci,
 	struct azx *chip;
 	bool probe_now;
 	int err;
+	unsigned int caps_mask = 0;
 
 	if (dev >= SNDRV_CARDS)
 		return -ENODEV;
@@ -3611,6 +3615,7 @@ static int azx_probe(struct pci_dev *pci,
 		return -ENOENT;
 	}
 
+retry:
 	err = snd_card_create(index[dev], id[dev], THIS_MODULE, 0, &card);
 	if (err < 0) {
 		snd_printk(KERN_ERR "hda-intel: Error creating card!\n");
@@ -3619,10 +3624,16 @@ static int azx_probe(struct pci_dev *pci,
 
 	snd_card_set_dev(card, &pci->dev);
 
-	err = azx_create(card, pci, dev, pci_id->driver_data, &chip);
+	err = azx_create(card, pci, dev,
+				pci_id->driver_data & ~caps_mask, &chip);
 	if (err < 0)
 		goto out_free;
 	card->private_data = chip;
+	if (chip->driver_caps & AZX_DCAPS_RETRY2) {
+		caps_mask = AZX_DCAPS_RETRY2;
+		snd_card_free(card);
+		goto retry;
+	}
 
 	pci_set_drvdata(pci, card);
 
@@ -3771,6 +3782,9 @@ static DEFINE_PCI_DEVICE_TABLE(azx_ids) = {
 	  .driver_data = AZX_DRIVER_PCH | AZX_DCAPS_INTEL_PCH },
 	/* Lynx Point-LP */
 	{ PCI_DEVICE(0x8086, 0x9c21),
+	  .driver_data = AZX_DRIVER_PCH | AZX_DCAPS_INTEL_PCH },
+	/* Wildcat Point-LP */
+	{ PCI_DEVICE(0x8086, 0x9ca0),
 	  .driver_data = AZX_DRIVER_PCH | AZX_DCAPS_INTEL_PCH },
 	/* Haswell */
 	{ PCI_DEVICE(0x8086, 0x0a0c),

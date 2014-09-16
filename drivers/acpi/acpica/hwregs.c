@@ -303,7 +303,7 @@ struct acpi_bit_register_info *acpi_hw_get_bit_register_info(u32 register_id)
 	ACPI_FUNCTION_ENTRY();
 
 	if (register_id > ACPI_BITREG_MAX) {
-		ACPI_ERROR((AE_INFO, "Invalid BitRegister ID: %X",
+		ACPI_ERROR((AE_INFO, "Invalid BitRegister ID: 0x%X",
 			    register_id));
 		return (NULL);
 	}
@@ -417,7 +417,7 @@ acpi_hw_register_read(u32 register_id, u32 * return_value)
 		break;
 
 	default:
-		ACPI_ERROR((AE_INFO, "Unknown Register ID: %X", register_id));
+		ACPI_ERROR((AE_INFO, "Unknown Register ID: 0x%X", register_id));
 		status = AE_BAD_PARAMETER;
 		break;
 	}
@@ -553,7 +553,7 @@ acpi_status acpi_hw_register_write(u32 register_id, u32 value)
 		break;
 
 	default:
-		ACPI_ERROR((AE_INFO, "Unknown Register ID: %X", register_id));
+		ACPI_ERROR((AE_INFO, "Unknown Register ID: 0x%X", register_id));
 		status = AE_BAD_PARAMETER;
 		break;
 	}

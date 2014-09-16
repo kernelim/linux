@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel 10 Gigabit PCI Express Linux driver
-  Copyright(c) 1999 - 2013 Intel Corporation.
+  Copyright(c) 1999 - 2014 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -20,6 +20,7 @@
   the file called "COPYING".
 
   Contact Information:
+  Linux NICS <linux.nics@intel.com>
   e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
   Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
 
@@ -29,7 +30,7 @@
 #include <linux/delay.h>
 #include <linux/sched.h>
 
-#include "ixgbe_common.h"
+#include "ixgbe.h"
 #include "ixgbe_phy.h"
 
 static void ixgbe_i2c_start(struct ixgbe_hw *hw);
@@ -46,6 +47,7 @@ static bool ixgbe_get_i2c_data(u32 *i2cctl);
 static void ixgbe_i2c_bus_clear(struct ixgbe_hw *hw);
 static enum ixgbe_phy_type ixgbe_get_phy_type_from_id(u32 phy_id);
 static s32 ixgbe_get_phy_id(struct ixgbe_hw *hw);
+static s32 ixgbe_identify_qsfp_module_generic(struct ixgbe_hw *hw);
 
 /**
  *  ixgbe_identify_phy_generic - Get physical layer module
@@ -94,6 +96,32 @@ s32 ixgbe_identify_phy_generic(struct ixgbe_hw *hw)
 	}
 
 	return status;
+}
+
+/**
+ * ixgbe_check_reset_blocked - check status of MNG FW veto bit
+ * @hw: pointer to the hardware structure
+ *
+ * This function checks the MMNGC.MNG_VETO bit to see if there are
+ * any constraints on link from manageability.  For MAC's that don't
+ * have this bit just return false since the link can not be blocked
+ * via this method.
+ **/
+bool ixgbe_check_reset_blocked(struct ixgbe_hw *hw)
+{
+	u32 mmngc;
+
+	/* If we don't have this bit, it can't be blocking */
+	if (hw->mac.type == ixgbe_mac_82598EB)
+		return false;
+
+	mmngc = IXGBE_READ_REG(hw, IXGBE_MMNGC);
+	if (mmngc & IXGBE_MMNGC_MNG_VETO) {
+		hw_dbg(hw, "MNG_VETO bit detected.\n");
+		return true;
+	}
+
+	return false;
 }
 
 /**
@@ -169,6 +197,10 @@ s32 ixgbe_reset_phy_generic(struct ixgbe_hw *hw)
 	/* Don't reset PHY if it's shut down due to overtemp. */
 	if (!hw->phy.reset_if_overtemp &&
 	    (IXGBE_ERR_OVERTEMP == hw->phy.ops.check_overtemp(hw)))
+		goto out;
+
+	/* Blocked by MNG FW so bail */
+	if (ixgbe_check_reset_blocked(hw))
 		goto out;
 
 	/*
@@ -475,6 +507,10 @@ s32 ixgbe_setup_phy_link_generic(struct ixgbe_hw *hw)
 				      autoneg_reg);
 	}
 
+	/* Blocked by MNG FW so don't reset PHY */
+	if (ixgbe_check_reset_blocked(hw))
+		return status;
+
 	/* Restart PHY autonegotiation and wait for completion */
 	hw->phy.ops.read_reg(hw, MDIO_CTRL1,
 			     MDIO_MMD_AN, &autoneg_reg);
@@ -500,7 +536,7 @@ s32 ixgbe_setup_phy_link_generic(struct ixgbe_hw *hw)
 
 	if (time_out == max_time_out) {
 		status = IXGBE_ERR_LINK_SETUP;
-		hw_dbg(hw, "ixgbe_setup_phy_link_generic: time out");
+		hw_dbg(hw, "ixgbe_setup_phy_link_generic: time out\n");
 	}
 
 	return status;
@@ -681,6 +717,10 @@ s32 ixgbe_setup_phy_link_tnx(struct ixgbe_hw *hw)
 				      autoneg_reg);
 	}
 
+	/* Blocked by MNG FW so don't reset PHY */
+	if (ixgbe_check_reset_blocked(hw))
+		return status;
+
 	/* Restart PHY autonegotiation and wait for completion */
 	hw->phy.ops.read_reg(hw, MDIO_CTRL1,
 			     MDIO_MMD_AN, &autoneg_reg);
@@ -705,7 +745,7 @@ s32 ixgbe_setup_phy_link_tnx(struct ixgbe_hw *hw)
 
 	if (time_out == max_time_out) {
 		status = IXGBE_ERR_LINK_SETUP;
-		hw_dbg(hw, "ixgbe_setup_phy_link_tnx: time out");
+		hw_dbg(hw, "ixgbe_setup_phy_link_tnx: time out\n");
 	}
 
 	return status;
@@ -758,6 +798,10 @@ s32 ixgbe_reset_phy_nl(struct ixgbe_hw *hw)
 	s32 ret_val = 0;
 	u32 i;
 
+	/* Blocked by MNG FW so bail */
+	if (ixgbe_check_reset_blocked(hw))
+		goto out;
+
 	hw->phy.ops.read_reg(hw, MDIO_CTRL1, MDIO_MMD_PHYXS, &phy_data);
 
 	/* reset the PHY and poll for completion */
@@ -791,6 +835,8 @@ s32 ixgbe_reset_phy_nl(struct ixgbe_hw *hw)
 		 * Read control word from PHY init contents offset
 		 */
 		ret_val = hw->eeprom.ops.read(hw, data_offset, &eword);
+		if (ret_val)
+			goto err_eeprom;
 		control = (eword & IXGBE_CONTROL_MASK_NL) >>
 		           IXGBE_CONTROL_SHIFT_NL;
 		edata = eword & IXGBE_DATA_MASK_NL;
@@ -803,10 +849,15 @@ s32 ixgbe_reset_phy_nl(struct ixgbe_hw *hw)
 		case IXGBE_DATA_NL:
 			hw_dbg(hw, "DATA:\n");
 			data_offset++;
-			hw->eeprom.ops.read(hw, data_offset++,
-			                    &phy_offset);
+			ret_val = hw->eeprom.ops.read(hw, data_offset++,
+						      &phy_offset);
+			if (ret_val)
+				goto err_eeprom;
 			for (i = 0; i < edata; i++) {
-				hw->eeprom.ops.read(hw, data_offset, &eword);
+				ret_val = hw->eeprom.ops.read(hw, data_offset,
+							      &eword);
+				if (ret_val)
+					goto err_eeprom;
 				hw->phy.ops.write_reg(hw, phy_offset,
 				                      MDIO_MMD_PMAPMD, eword);
 				hw_dbg(hw, "Wrote %4.4x to %4.4x\n", eword,
@@ -838,6 +889,10 @@ s32 ixgbe_reset_phy_nl(struct ixgbe_hw *hw)
 
 out:
 	return ret_val;
+
+err_eeprom:
+	hw_err(hw, "eeprom read at offset %d failed\n", data_offset);
+	return IXGBE_ERR_PHY;
 }
 
 /**
@@ -1120,7 +1175,7 @@ s32 ixgbe_identify_sfp_module_generic(struct ixgbe_hw *hw)
 				status = 0;
 			} else {
 				if (hw->allow_unsupported_sfp) {
-					e_warn(drv, "WARNING: Intel (R) Network Connections are quality tested using Intel (R) Ethernet Optics.  Using untested modules is not supported and may cause unstable operation or damage to the module or the adapter.  Intel Corporation is not responsible for any harm caused by using untested modules.");
+					e_warn(drv, "WARNING: Intel (R) Network Connections are quality tested using Intel (R) Ethernet Optics.  Using untested modules is not supported and may cause unstable operation or damage to the module or the adapter.  Intel Corporation is not responsible for any harm caused by using untested modules.\n");
 					status = 0;
 				} else {
 					hw_dbg(hw,
@@ -1153,7 +1208,7 @@ err_read_i2c_eeprom:
  *
  * Searches for and identifies the QSFP module and assigns appropriate PHY type
  **/
-s32 ixgbe_identify_qsfp_module_generic(struct ixgbe_hw *hw)
+static s32 ixgbe_identify_qsfp_module_generic(struct ixgbe_hw *hw)
 {
 	struct ixgbe_adapter *adapter = hw->back;
 	s32 status = IXGBE_ERR_PHY_ADDR_INVALID;
@@ -1164,6 +1219,10 @@ s32 ixgbe_identify_qsfp_module_generic(struct ixgbe_hw *hw)
 	u8 comp_codes_10g = 0;
 	u8 oui_bytes[3] = {0, 0, 0};
 	u16 enforce_sfp = 0;
+	u8 connector = 0;
+	u8 cable_length = 0;
+	u8 device_tech = 0;
+	bool active_cable = false;
 
 	if (hw->mac.ops.get_media_type(hw) != ixgbe_media_type_fiber_qsfp) {
 		hw->phy.sfp_type = ixgbe_sfp_type_not_present;
@@ -1194,18 +1253,18 @@ s32 ixgbe_identify_qsfp_module_generic(struct ixgbe_hw *hw)
 	if (status != 0)
 		goto err_read_i2c_eeprom;
 
+	status = hw->phy.ops.read_i2c_eeprom(hw, IXGBE_SFF_QSFP_1GBE_COMP,
+					     &comp_codes_1g);
+
+	if (status != 0)
+		goto err_read_i2c_eeprom;
+
 	if (comp_codes_10g & IXGBE_SFF_QSFP_DA_PASSIVE_CABLE) {
 		hw->phy.type = ixgbe_phy_qsfp_passive_unknown;
 		if (hw->bus.lan_id == 0)
 			hw->phy.sfp_type = ixgbe_sfp_type_da_cu_core0;
 		else
 			hw->phy.sfp_type = ixgbe_sfp_type_da_cu_core1;
-	} else if (comp_codes_10g & IXGBE_SFF_QSFP_DA_ACTIVE_CABLE) {
-		hw->phy.type = ixgbe_phy_qsfp_active_unknown;
-		if (hw->bus.lan_id == 0)
-			hw->phy.sfp_type = ixgbe_sfp_type_da_act_lmt_core0;
-		else
-			hw->phy.sfp_type = ixgbe_sfp_type_da_act_lmt_core1;
 	} else if (comp_codes_10g & (IXGBE_SFF_10GBASESR_CAPABLE |
 				     IXGBE_SFF_10GBASELR_CAPABLE)) {
 		if (hw->bus.lan_id == 0)
@@ -1213,10 +1272,47 @@ s32 ixgbe_identify_qsfp_module_generic(struct ixgbe_hw *hw)
 		else
 			hw->phy.sfp_type = ixgbe_sfp_type_srlr_core1;
 	} else {
-		/* unsupported module type */
-		hw->phy.type = ixgbe_phy_sfp_unsupported;
-		status = IXGBE_ERR_SFP_NOT_SUPPORTED;
-		goto out;
+		if (comp_codes_10g & IXGBE_SFF_QSFP_DA_ACTIVE_CABLE)
+			active_cable = true;
+
+		if (!active_cable) {
+			/* check for active DA cables that pre-date
+			 * SFF-8436 v3.6
+			 */
+			hw->phy.ops.read_i2c_eeprom(hw,
+					IXGBE_SFF_QSFP_CONNECTOR,
+					&connector);
+
+			hw->phy.ops.read_i2c_eeprom(hw,
+					IXGBE_SFF_QSFP_CABLE_LENGTH,
+					&cable_length);
+
+			hw->phy.ops.read_i2c_eeprom(hw,
+					IXGBE_SFF_QSFP_DEVICE_TECH,
+					&device_tech);
+
+			if ((connector ==
+				     IXGBE_SFF_QSFP_CONNECTOR_NOT_SEPARABLE) &&
+			    (cable_length > 0) &&
+			    ((device_tech >> 4) ==
+				     IXGBE_SFF_QSFP_TRANSMITER_850NM_VCSEL))
+				active_cable = true;
+		}
+
+		if (active_cable) {
+			hw->phy.type = ixgbe_phy_qsfp_active_unknown;
+			if (hw->bus.lan_id == 0)
+				hw->phy.sfp_type =
+						ixgbe_sfp_type_da_act_lmt_core0;
+			else
+				hw->phy.sfp_type =
+						ixgbe_sfp_type_da_act_lmt_core1;
+		} else {
+			/* unsupported module type */
+			hw->phy.type = ixgbe_phy_sfp_unsupported;
+			status = IXGBE_ERR_SFP_NOT_SUPPORTED;
+			goto out;
+		}
 	}
 
 	if (hw->phy.sfp_type != stored_sfp_type)
@@ -1271,7 +1367,7 @@ s32 ixgbe_identify_qsfp_module_generic(struct ixgbe_hw *hw)
 				status = 0;
 			} else {
 				if (hw->allow_unsupported_sfp == true) {
-					e_warn(hw, "WARNING: Intel (R) Network Connections are quality tested using Intel (R) Ethernet Optics. Using untested modules is not supported and may cause unstable operation or damage to the module or the adapter. Intel Corporation is not responsible for any harm caused by using untested modules.\n");
+					e_warn(drv, "WARNING: Intel (R) Network Connections are quality tested using Intel (R) Ethernet Optics. Using untested modules is not supported and may cause unstable operation or damage to the module or the adapter. Intel Corporation is not responsible for any harm caused by using untested modules.\n");
 					status = 0;
 				} else {
 					hw_dbg(hw,
@@ -1339,7 +1435,11 @@ s32 ixgbe_get_sfp_init_sequence_offsets(struct ixgbe_hw *hw,
 		sfp_type = ixgbe_sfp_type_srlr_core1;
 
 	/* Read offset to PHY init contents */
-	hw->eeprom.ops.read(hw, IXGBE_PHY_INIT_OFFSET_NL, list_offset);
+	if (hw->eeprom.ops.read(hw, IXGBE_PHY_INIT_OFFSET_NL, list_offset)) {
+		hw_err(hw, "eeprom read at %d failed\n",
+		       IXGBE_PHY_INIT_OFFSET_NL);
+		return IXGBE_ERR_SFP_NO_INIT_SEQ_PRESENT;
+	}
 
 	if ((!*list_offset) || (*list_offset == 0xFFFF))
 		return IXGBE_ERR_SFP_NO_INIT_SEQ_PRESENT;
@@ -1351,12 +1451,14 @@ s32 ixgbe_get_sfp_init_sequence_offsets(struct ixgbe_hw *hw,
 	 * Find the matching SFP ID in the EEPROM
 	 * and program the init sequence
 	 */
-	hw->eeprom.ops.read(hw, *list_offset, &sfp_id);
+	if (hw->eeprom.ops.read(hw, *list_offset, &sfp_id))
+		goto err_phy;
 
 	while (sfp_id != IXGBE_PHY_INIT_END_NL) {
 		if (sfp_id == sfp_type) {
 			(*list_offset)++;
-			hw->eeprom.ops.read(hw, *list_offset, data_offset);
+			if (hw->eeprom.ops.read(hw, *list_offset, data_offset))
+				goto err_phy;
 			if ((!*data_offset) || (*data_offset == 0xFFFF)) {
 				hw_dbg(hw, "SFP+ module not supported\n");
 				return IXGBE_ERR_SFP_NOT_SUPPORTED;
@@ -1366,7 +1468,7 @@ s32 ixgbe_get_sfp_init_sequence_offsets(struct ixgbe_hw *hw,
 		} else {
 			(*list_offset) += 2;
 			if (hw->eeprom.ops.read(hw, *list_offset, &sfp_id))
-				return IXGBE_ERR_PHY;
+				goto err_phy;
 		}
 	}
 
@@ -1376,6 +1478,10 @@ s32 ixgbe_get_sfp_init_sequence_offsets(struct ixgbe_hw *hw,
 	}
 
 	return 0;
+
+err_phy:
+	hw_err(hw, "eeprom read at offset %d failed\n", *list_offset);
+	return IXGBE_ERR_PHY;
 }
 
 /**

@@ -472,6 +472,7 @@ extern void nfsd4_recdir_purge_old(void);
 extern int nfsd4_create_clid_dir(struct nfs4_client *clp);
 extern void nfsd4_remove_clid_dir(struct nfs4_client *clp);
 extern void release_session_client(struct nfsd4_session *);
+extern int nfsd_md5_digest(u8 *out, u8 *data, unsigned int len);
 
 static inline void
 nfs4_put_stateowner(struct nfs4_stateowner *so)

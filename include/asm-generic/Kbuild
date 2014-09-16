@@ -28,7 +28,6 @@ header-y += termios.h
 header-y += types.h
 header-y += ucontext.h
 header-y += unistd.h
-header-y += trace_clock.h
 
 unifdef-y += int-l64.h
 unifdef-y += int-ll64.h

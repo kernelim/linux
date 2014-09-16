@@ -38,6 +38,7 @@
 #include <linux/fs.h>
 #include <linux/miscdevice.h>
 #include <linux/uinput.h>
+#include <linux/input/mt.h>
 #include "../input-compat.h"
 
 static int uinput_dev_event(struct input_dev *dev, unsigned int type, unsigned int code, int value)
@@ -401,6 +402,10 @@ static int uinput_setup_device(struct uinput_device *udev, const char __user *bu
 		retval = uinput_validate_absbits(dev);
 		if (retval < 0)
 			goto exit;
+		if (test_bit(ABS_MT_SLOT, dev->absbit)) {
+			int nslot = input_abs_get_max(dev, ABS_MT_SLOT) + 1;
+			input_mt_init_slots(dev, nslot, 0);
+		}
 	}
 
 	udev->state = UIST_SETUP_COMPLETE;
@@ -668,6 +673,10 @@ static long uinput_ioctl_handler(struct file *file, unsigned int cmd,
 
 		case UI_SET_SWBIT:
 			retval = uinput_set_bit(arg, swbit, SW_MAX);
+			break;
+
+		case UI_SET_PROPBIT:
+			retval = uinput_set_bit(arg, propbit, INPUT_PROP_MAX);
 			break;
 
 		case UI_SET_PHYS:

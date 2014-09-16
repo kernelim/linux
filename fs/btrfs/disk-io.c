@@ -813,7 +813,7 @@ int btrfs_wq_submit_bio(struct btrfs_fs_info *fs_info, struct inode *inode,
 
 	atomic_inc(&fs_info->nr_async_submits);
 
-	if (rw & REQ_SYNC)
+	if (rw & (1 << BIO_RW_SYNCIO))
 		btrfs_set_work_high_prio(&async->work);
 
 	btrfs_queue_worker(&fs_info->workers, &async->work);

@@ -53,7 +53,7 @@ static int inotify_handle_event(struct fsnotify_group *group, struct fsnotify_ev
 			      fsn_entry);
 	wd = ientry->wd;
 
-	event_priv = kmem_cache_alloc(event_priv_cachep, GFP_KERNEL);
+	event_priv = kmem_cache_alloc(event_priv_cachep, GFP_NOFS);
 	if (unlikely(!event_priv))
 		return -ENOMEM;
 

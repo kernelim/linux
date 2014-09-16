@@ -324,6 +324,9 @@ struct inet_cork_extended {
  *     - is used to adjust prot->obj_size
  * sk_extended
  *     - should be used to access items in struct sock_extended
+ *
+ *	@sk_napi_id: id of the last napi context to receive data for sk
+ *	@sk_ll_usec: usecs to busypoll when there is no data
  */
 
 struct sock_extended {
@@ -371,6 +374,10 @@ struct sock_extended {
 	u16			sk_gso_max_segs;
 	u32			sk_pacing_rate; /* bytes per second */
 	struct inet_cork_extended	inet_cork_ext;
+#ifdef CONFIG_NET_RX_BUSY_POLL
+	unsigned int		sk_napi_id;
+	unsigned int		sk_ll_usec;
+#endif
 };
 
 #define __sk_tx_queue_mapping(sk) \

@@ -2,72 +2,7 @@
 #define __BEN_VLAN_802_1Q_INC__
 
 #include <linux/if_vlan.h>
-
-
-/**
- *	struct vlan_priority_tci_mapping - vlan egress priority mappings
- *	@priority: skb priority
- *	@vlan_qos: vlan priority: (skb->priority << 13) & 0xE000
- *	@next: pointer to next struct
- */
-struct vlan_priority_tci_mapping {
-	u32					priority;
-	u16					vlan_qos;
-	struct vlan_priority_tci_mapping	*next;
-};
-
-
-/**
- *	struct vlan_rx_stats - VLAN percpu rx stats
- *	@rx_packets: number of received packets
- *	@rx_bytes: number of received bytes
- *	@multicast: number of received multicast packets
- *	@rx_errors: number of errors
- */
-struct vlan_rx_stats {
-	unsigned long rx_packets;
-	unsigned long rx_bytes;
-	unsigned long multicast;
-	unsigned long rx_errors;
-};
-
-/**
- *	struct vlan_dev_info - VLAN private device data
- *	@nr_ingress_mappings: number of ingress priority mappings
- *	@ingress_priority_map: ingress priority mappings
- *	@nr_egress_mappings: number of egress priority mappings
- *	@egress_priority_map: hash of egress priority mappings
- *	@vlan_id: VLAN identifier
- *	@flags: device flags
- *	@real_dev: underlying netdevice
- *	@real_dev_addr: address of underlying netdevice
- *	@dent: proc dir entry
- *	@cnt_inc_headroom_on_tx: statistic - number of skb expansions on TX
- *	@cnt_encap_on_xmit: statistic - number of skb encapsulations on TX
- *	@vlan_rx_stats: ptr to percpu rx stats
- */
-struct vlan_dev_info {
-	unsigned int				nr_ingress_mappings;
-	u32					ingress_priority_map[8];
-	unsigned int				nr_egress_mappings;
-	struct vlan_priority_tci_mapping	*egress_priority_map[16];
-
-	u16					vlan_id;
-	u16					flags;
-
-	struct net_device			*real_dev;
-	unsigned char				real_dev_addr[ETH_ALEN];
-
-	struct proc_dir_entry			*dent;
-	unsigned long				cnt_inc_headroom_on_tx;
-	unsigned long				cnt_encap_on_xmit;
-	struct vlan_rx_stats			*vlan_rx_stats;
-};
-
-static inline struct vlan_dev_info *vlan_dev_info(const struct net_device *dev)
-{
-	return netdev_priv(dev);
-}
+#include <linux/u64_stats_sync.h>
 
 #define VLAN_GRP_HASH_SHIFT	5
 #define VLAN_GRP_HASH_SIZE	(1 << VLAN_GRP_HASH_SHIFT)

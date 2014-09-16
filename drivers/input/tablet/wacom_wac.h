@@ -10,16 +10,18 @@
 #define WACOM_WAC_H
 
 /* maximum packet length for USB devices */
-#define WACOM_PKGLEN_MAX	32
+#define WACOM_PKGLEN_MAX	64
 
 /* packet length for individual models */
 #define WACOM_PKGLEN_PENPRTN	 7
 #define WACOM_PKGLEN_GRAPHIRE	 8
-#define WACOM_PKGLEN_BBFUN 	 9
-#define WACOM_PKGLEN_INTUOS 	10
+#define WACOM_PKGLEN_BBFUN	 9
+#define WACOM_PKGLEN_INTUOS	10
 #define WACOM_PKGLEN_PENABLED	 8
 #define WACOM_PKGLEN_TPC1FG	 5
-#define WACOM_PKGLEN_TPC2FG 	14
+#define WACOM_PKGLEN_TPC2FG	14
+#define WACOM_PKGLEN_BBTOUCH3	64
+#define WACOM_PKGLEN_WIRELESS	32
 
 /* device IDs */
 #define STYLUS_DEVICE_ID	0x02
@@ -30,6 +32,8 @@
 
 /* device quirks */
 #define WACOM_QUIRK_MULTI_INPUT		0x0001
+#define WACOM_QUIRK_NO_INPUT		0x0004
+#define WACOM_QUIRK_MONITOR		0x0008
 
 enum {
 	PENPARTNER = 0,
@@ -38,7 +42,6 @@ enum {
 	PTU,
 	PL,
 	DTU,
-	BAMBOO_PT,
 	INTUOS,
 	INTUOS3S,
 	INTUOS3,
@@ -49,19 +52,24 @@ enum {
 	INTUOS5S,
 	INTUOS5,
 	INTUOS5L,
+	INTUOSPS,
+	INTUOSPM,
+	INTUOSPL,
 	WACOM_21UX2,
 	WACOM_22HD,
 	WACOM_24HD,
 	CINTIQ,
 	WACOM_BEE,
 	WACOM_MO,
+	WIRELESS,
+	BAMBOO_PT,
 	TABLETPC,
 	TABLETPC2FG,
 	MAX_TYPE
 };
 
 struct wacom_features {
-	char *name;
+	const char *name;
 	int pktlen;
 	int x_max;
 	int y_max;
@@ -87,8 +95,9 @@ struct wacom_wac {
 	int tool[2];
 	int id[2];
 	__u32 serial[2];
-	struct wacom_features *features;
+	struct wacom_features features;
 	struct wacom_shared *shared;
+	int pid;
 };
 
 #endif

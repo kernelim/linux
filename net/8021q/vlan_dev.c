@@ -106,7 +106,7 @@ int vlan_skb_recv(struct sk_buff *skb, struct net_device *dev,
 		  struct packet_type *ptype, struct net_device *orig_dev)
 {
 	struct vlan_hdr *vhdr;
-	struct vlan_rx_stats *rx_stats;
+	struct vlan_pcpu_stats *rx_stats;
 	struct net_device *vlan_dev;
 	u16 vlan_id;
 	u16 vlan_tci;
@@ -141,9 +141,10 @@ int vlan_skb_recv(struct sk_buff *skb, struct net_device *dev,
 		rx_stats = NULL;
 	} else {
 		skb->dev = vlan_dev;
- 
-		rx_stats = per_cpu_ptr(vlan_dev_info(skb->dev)->vlan_rx_stats,
-					smp_processor_id());
+
+		rx_stats = this_cpu_ptr(vlan_dev_info(skb->dev)->vlan_pcpu_stats);
+
+		u64_stats_update_begin(&rx_stats->syncp);
 		rx_stats->rx_packets++;
 		rx_stats->rx_bytes += skb->len;
  
@@ -159,7 +160,7 @@ int vlan_skb_recv(struct sk_buff *skb, struct net_device *dev,
 			break;
  
 		case PACKET_MULTICAST:
-			rx_stats->multicast++;
+			rx_stats->rx_multicast++;
 			break;
  
 		case PACKET_OTHERHOST:
@@ -175,6 +176,7 @@ int vlan_skb_recv(struct sk_buff *skb, struct net_device *dev,
 		default:
 			break;
 		}
+		u64_stats_update_end(&rx_stats->syncp);
 	}
 
 	skb_pull_rcsum(skb, VLAN_HLEN);
@@ -197,23 +199,6 @@ err_unlock:
 err_free:
 	kfree_skb(skb);
 	return NET_RX_DROP;
-}
-
-static inline u16
-vlan_dev_get_egress_qos_mask(struct net_device *dev, struct sk_buff *skb)
-{
-	struct vlan_priority_tci_mapping *mp;
-
-	mp = vlan_dev_info(dev)->egress_priority_map[(skb->priority & 0xF)];
-	while (mp) {
-		if (mp->priority == skb->priority) {
-			return mp->vlan_qos; /* This should already be shifted
-					      * to mask correctly with the
-					      * VLAN's TCI */
-		}
-		mp = mp->next;
-	}
-	return 0;
 }
 
 /*
@@ -242,7 +227,7 @@ static int vlan_dev_hard_header(struct sk_buff *skb, struct net_device *dev,
 		vhdr = (struct vlan_hdr *) skb_push(skb, VLAN_HLEN);
 
 		vlan_tci = vlan_dev_info(dev)->vlan_id;
-		vlan_tci |= vlan_dev_get_egress_qos_mask(dev, skb);
+		vlan_tci |= vlan_dev_get_egress_qos_mask(dev, skb->priority);
 		vhdr->h_vlan_TCI = htons(vlan_tci);
 
 		/*
@@ -275,8 +260,6 @@ static int vlan_dev_hard_header(struct sk_buff *skb, struct net_device *dev,
 static netdev_tx_t vlan_dev_hard_start_xmit(struct sk_buff *skb,
 					    struct net_device *dev)
 {
-	int i = skb_get_queue_mapping(skb);
-	struct netdev_queue *txq = netdev_get_tx_queue(dev, i);
 	struct vlan_ethhdr *veth = (struct vlan_ethhdr *)(skb->data);
 	unsigned int len;
 	int ret;
@@ -294,10 +277,13 @@ static netdev_tx_t vlan_dev_hard_start_xmit(struct sk_buff *skb,
 		vlan_dev_info(dev)->cnt_encap_on_xmit++;
 
 		vlan_tci = vlan_dev_info(dev)->vlan_id;
-		vlan_tci |= vlan_dev_get_egress_qos_mask(dev, skb);
+		vlan_tci |= vlan_dev_get_egress_qos_mask(dev, skb->priority);
 		skb = __vlan_put_tag(skb, vlan_tci);
 		if (!skb) {
-			txq->tx_dropped++;
+			struct vlan_pcpu_stats *st;
+			st = this_cpu_ptr(vlan_dev_info(dev)->vlan_pcpu_stats);
+			st->tx_dropped++;
+
 			return NETDEV_TX_OK;
 		}
 
@@ -310,11 +296,19 @@ static netdev_tx_t vlan_dev_hard_start_xmit(struct sk_buff *skb,
 	len = skb->len;
 	ret = dev_queue_xmit(skb);
 
-	if (likely(ret == NET_XMIT_SUCCESS)) {
-		txq->tx_packets++;
-		txq->tx_bytes += len;
-	} else
-		txq->tx_dropped++;
+	if (likely(ret == NET_XMIT_SUCCESS || ret == NET_XMIT_CN)) {
+		struct vlan_pcpu_stats *stats;
+
+		stats = this_cpu_ptr(vlan_dev_info(dev)->vlan_pcpu_stats);
+		u64_stats_update_begin(&stats->syncp);
+		stats->tx_packets++;
+		stats->tx_bytes += len;
+		u64_stats_update_end(&stats->syncp);
+	} else {
+		struct vlan_pcpu_stats *st;
+		st = this_cpu_ptr(vlan_dev_info(dev)->vlan_pcpu_stats);
+		st->tx_dropped++;
+	}
 
 	return NETDEV_TX_OK;
 }
@@ -322,25 +316,31 @@ static netdev_tx_t vlan_dev_hard_start_xmit(struct sk_buff *skb,
 static netdev_tx_t vlan_dev_hwaccel_hard_start_xmit(struct sk_buff *skb,
 						    struct net_device *dev)
 {
-	int i = skb_get_queue_mapping(skb);
-	struct netdev_queue *txq = netdev_get_tx_queue(dev, i);
 	u16 vlan_tci;
 	unsigned int len;
 	int ret;
 
 	vlan_tci = vlan_dev_info(dev)->vlan_id;
-	vlan_tci |= vlan_dev_get_egress_qos_mask(dev, skb);
+	vlan_tci |= vlan_dev_get_egress_qos_mask(dev, skb->priority);
 	skb = __vlan_hwaccel_put_tag(skb, vlan_tci);
 
 	skb->dev = vlan_dev_info(dev)->real_dev;
 	len = skb->len;
 	ret = dev_queue_xmit(skb);
 
-	if (likely(ret == NET_XMIT_SUCCESS)) {
-		txq->tx_packets++;
-		txq->tx_bytes += len;
-	} else
-		txq->tx_dropped++;
+	if (likely(ret == NET_XMIT_SUCCESS || ret == NET_XMIT_CN)) {
+		struct vlan_pcpu_stats *stats;
+
+		stats = this_cpu_ptr(vlan_dev_info(dev)->vlan_pcpu_stats);
+		u64_stats_update_begin(&stats->syncp);
+		stats->tx_packets++;
+		stats->tx_bytes += len;
+		u64_stats_update_end(&stats->syncp);
+	} else {
+		struct vlan_pcpu_stats *st;
+		st = this_cpu_ptr(vlan_dev_info(dev)->vlan_pcpu_stats);
+		st->tx_dropped++;
+	}
 
 	return NETDEV_TX_OK;
 }
@@ -402,6 +402,11 @@ int vlan_dev_set_egress_priority(const struct net_device *dev,
 	np->next = mp;
 	np->priority = skb_prio;
 	np->vlan_qos = vlan_qos;
+	/* Before inserting this element in hash table, make sure all its fields
+	 * are committed to memory.
+	 * coupled with smp_rmb() in vlan_dev_get_egress_qos_mask()
+	 */
+	smp_wmb();
 	vlan->egress_priority_map[skb_prio & 0xF] = np;
 	if (vlan_qos)
 		vlan->nr_egress_mappings++;
@@ -685,6 +690,7 @@ static const struct header_ops vlan_header_ops = {
 };
 
 static const struct net_device_ops vlan_netdev_ops, vlan_netdev_accel_ops;
+static const struct net_device_ops_ext vlan_netdev_ops_ext;
 
 static int vlan_dev_init(struct net_device *dev)
 {
@@ -701,6 +707,7 @@ static int vlan_dev_init(struct net_device *dev)
 		      (1<<__LINK_STATE_PRESENT);
 
 	dev->features |= real_dev->features & real_dev->vlan_features;
+	dev->features |= NETIF_F_LLTX;
 	dev->gso_max_size = real_dev->gso_max_size;
 
 	/* ipv6 shared card related stuff */
@@ -720,10 +727,12 @@ static int vlan_dev_init(struct net_device *dev)
 		dev->header_ops      = real_dev->header_ops;
 		dev->hard_header_len = real_dev->hard_header_len;
 		dev->netdev_ops = &vlan_netdev_accel_ops;
+		set_netdev_ops_ext(dev, &vlan_netdev_ops_ext);
 	} else {
 		dev->header_ops      = &vlan_header_ops;
 		dev->hard_header_len = real_dev->hard_header_len + VLAN_HLEN;
 		dev->netdev_ops = &vlan_netdev_ops;
+		set_netdev_ops_ext(dev, &vlan_netdev_ops_ext);
 		/* TX checksum offload cannot work if both TX VLAN tag offload
 		 * and reorder_hdr are off.
 		 */
@@ -738,8 +747,8 @@ static int vlan_dev_init(struct net_device *dev)
 
 	vlan_dev_set_lockdep_class(dev, subclass);
 
-	vlan_dev_info(dev)->vlan_rx_stats = alloc_percpu(struct vlan_rx_stats);
-	if (!vlan_dev_info(dev)->vlan_rx_stats)
+	vlan_dev_info(dev)->vlan_pcpu_stats = alloc_percpu(struct vlan_pcpu_stats);
+	if (!vlan_dev_info(dev)->vlan_pcpu_stats)
 		return -ENOMEM;
 
 	return 0;
@@ -751,8 +760,8 @@ static void vlan_dev_uninit(struct net_device *dev)
 	struct vlan_dev_info *vlan = vlan_dev_info(dev);
 	int i;
 
-	free_percpu(vlan->vlan_rx_stats);
-	vlan->vlan_rx_stats = NULL;
+	free_percpu(vlan->vlan_pcpu_stats);
+	vlan->vlan_pcpu_stats = NULL;
 	for (i = 0; i < ARRAY_SIZE(vlan->egress_priority_map); i++) {
 		while ((pm = vlan->egress_priority_map[i]) != NULL) {
 			vlan->egress_priority_map[i] = pm->next;
@@ -788,27 +797,38 @@ static u32 vlan_ethtool_get_flags(struct net_device *dev)
 	return dev_ethtool_get_flags(vlan->real_dev);
 }
 
-static struct net_device_stats *vlan_dev_get_stats(struct net_device *dev)
+static struct rtnl_link_stats64 *vlan_dev_get_stats64(struct net_device *dev, struct rtnl_link_stats64 *stats)
 {
-	struct net_device_stats *stats = &dev->stats;
-
-	dev_txq_stats_fold(dev, stats);
-
-	if (vlan_dev_info(dev)->vlan_rx_stats) {
-		struct vlan_rx_stats *p, rx = {0};
+	if (vlan_dev_info(dev)->vlan_pcpu_stats) {
+		struct vlan_pcpu_stats *p;
+		u32 rx_errors = 0, tx_dropped = 0;
 		int i;
 
 		for_each_possible_cpu(i) {
-			p = per_cpu_ptr(vlan_dev_info(dev)->vlan_rx_stats, i);
-			rx.rx_packets += p->rx_packets;
-			rx.rx_bytes   += p->rx_bytes;
-			rx.rx_errors  += p->rx_errors;
-			rx.multicast  += p->multicast;
+			u64 rxpackets, rxbytes, rxmulticast, txpackets, txbytes;
+			unsigned int start;
+
+			p = per_cpu_ptr(vlan_dev_info(dev)->vlan_pcpu_stats, i);
+			do {
+				start = u64_stats_fetch_begin_irq(&p->syncp);
+				rxpackets	= p->rx_packets;
+				rxbytes		= p->rx_bytes;
+				rxmulticast	= p->rx_multicast;
+				txpackets	= p->tx_packets;
+				txbytes		= p->tx_bytes;
+			} while (u64_stats_fetch_retry_irq(&p->syncp, start));
+
+			stats->rx_packets	+= rxpackets;
+			stats->rx_bytes		+= rxbytes;
+			stats->multicast	+= rxmulticast;
+			stats->tx_packets	+= txpackets;
+			stats->tx_bytes		+= txbytes;
+			/* rx_errors & tx_dropped are u32 */
+			rx_errors	+= p->rx_errors;
+			tx_dropped	+= p->tx_dropped;
 		}
-		stats->rx_packets = rx.rx_packets;
-		stats->rx_bytes   = rx.rx_bytes;
-		stats->rx_errors  = rx.rx_errors;
-		stats->multicast  = rx.multicast;
+		stats->rx_errors  = rx_errors;
+		stats->tx_dropped = tx_dropped;
 	}
 	return stats;
 }
@@ -855,7 +875,6 @@ static const struct net_device_ops vlan_netdev_ops = {
 	.ndo_change_rx_flags	= vlan_dev_change_rx_flags,
 	.ndo_do_ioctl		= vlan_dev_ioctl,
 	.ndo_neigh_setup	= vlan_dev_neigh_setup,
-	.ndo_get_stats		= vlan_dev_get_stats,
 #if defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE)
 	.ndo_fcoe_ddp_setup	= vlan_dev_fcoe_ddp_setup,
 	.ndo_fcoe_ddp_done	= vlan_dev_fcoe_ddp_done,
@@ -879,7 +898,6 @@ static const struct net_device_ops vlan_netdev_accel_ops = {
 	.ndo_change_rx_flags	= vlan_dev_change_rx_flags,
 	.ndo_do_ioctl		= vlan_dev_ioctl,
 	.ndo_neigh_setup	= vlan_dev_neigh_setup,
-	.ndo_get_stats		= vlan_dev_get_stats,
 #if defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE)
 	.ndo_fcoe_ddp_setup	= vlan_dev_fcoe_ddp_setup,
 	.ndo_fcoe_ddp_done	= vlan_dev_fcoe_ddp_done,
@@ -887,6 +905,11 @@ static const struct net_device_ops vlan_netdev_accel_ops = {
 	.ndo_fcoe_disable	= vlan_dev_fcoe_disable,
 	.ndo_fcoe_get_wwn	= vlan_dev_fcoe_get_wwn,
 #endif
+};
+
+static const struct net_device_ops_ext vlan_netdev_ops_ext = {
+	.size			= sizeof(struct net_device_ops_ext),
+	.ndo_get_stats64	= vlan_dev_get_stats64,
 };
 
 void vlan_setup(struct net_device *dev)

@@ -79,9 +79,7 @@ startup_continue:
 #else
 	lhi	%r1,1			# mode 1 = esame (normal ipl)
 #endif /* CONFIG_ZFCPDUMP */
-	mvi	__LC_AR_MODE_ID,1	# set esame flag
-	slr	%r0,%r0 		# set cpuid to zero
-	sigp	%r1,%r0,0x12		# switch to esame mode
+	/* Continue with 64bit startup code in head64.S */
 	sam64				# switch to 64 bit mode
 	llgfr	%r13,%r13		# clear high-order half of base reg
 	lmh	%r0,%r15,.Lzero64-.LPG1(%r13)	# clear high-order half

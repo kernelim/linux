@@ -114,6 +114,8 @@ struct efivar_entry {
 	struct efi_variable var;
 	struct list_head list;
 	struct kobject kobj;
+	bool scanning;
+	bool deleting;
 };
 
 struct efivar_attribute {
@@ -450,82 +452,278 @@ efivar_unregister(struct efivar_entry *var)
 
 #ifdef CONFIG_PSTORE
 
+/**
+ * efivar_entry_iter_begin - begin iterating the variable list
+ *
+ * Lock the variable list to prevent entry insertion and removal until
+ * efivar_entry_iter_end() is called. This function is usually used in
+ * conjunction with __efivar_entry_iter() or efivar_entry_iter().
+ */
+static void efivar_entry_iter_begin(void)
+{
+	spin_lock_irq(&__efivars.lock);
+}
+
+/**
+ * efivar_entry_iter_end - finish iterating the variable list
+ *
+ * Unlock the variable list and allow modifications to the list again.
+ */
+static void efivar_entry_iter_end(void)
+{
+	spin_unlock_irq(&__efivars.lock);
+}
+
+static int efi_status_to_err(efi_status_t status)
+{
+	int err;
+
+	switch (status) {
+	case EFI_SUCCESS:
+		err = 0;
+		break;
+	case EFI_INVALID_PARAMETER:
+		err = -EINVAL;
+		break;
+	case EFI_NOT_FOUND:
+		err = -ENOENT;
+		break;
+	default:
+		err = -EINVAL;
+	}
+
+	return err;
+}
+
+/**
+ * __efivar_entry_get - call get_variable()
+ * @entry: read data for this variable
+ * @attributes: variable attributes
+ * @size: size of @data buffer
+ * @data: buffer to store variable data
+ *
+ * The caller MUST call efivar_entry_iter_begin() and
+ * efivar_entry_iter_end() before and after the invocation of this
+ * function, respectively.
+ */
+static int __efivar_entry_get(struct efivar_entry *entry, u32 *attributes,
+			      unsigned long *size, void *data)
+{
+	const struct efivar_operations *ops = __efivars.ops;
+	efi_status_t status;
+
+	WARN_ON(!spin_is_locked(&__efivars.lock));
+
+	status = ops->get_variable(entry->var.VariableName,
+				   &entry->var.VendorGuid,
+				   attributes, size, data);
+
+	return efi_status_to_err(status);
+}
+
 static int efi_pstore_open(struct pstore_info *psi)
 {
-	struct efivars *efivars = psi->data;
-
-	spin_lock_irq(&efivars->lock);
-	efivars->walk_entry = list_first_entry(&efivars->list,
-					       struct efivar_entry, list);
+	psi->data = NULL;
 	return 0;
 }
 
 static int efi_pstore_close(struct pstore_info *psi)
 {
-	struct efivars *efivars = psi->data;
-
-	spin_unlock_irq(&efivars->lock);
+	psi->data = NULL;
 	return 0;
 }
 
+struct pstore_read_data {
+	u64 *id;
+	enum pstore_type_id *type;
+	int *count;
+	struct timespec *timespec;
+	char **buf;
+};
+
+static inline u64 generic_id(unsigned long timestamp,
+			     unsigned int part, int count)
+{
+	return (timestamp * 100 + part) * 1000 + count;
+}
+
+static int efi_pstore_read_func(struct efivar_entry *entry, void *data)
+{
+	efi_guid_t vendor = LINUX_EFI_CRASH_GUID;
+	struct pstore_read_data *cb_data = data;
+	char name[DUMP_NAME_LEN];
+	int i;
+	int cnt;
+	unsigned int part;
+	unsigned long time, size;
+
+	if (efi_guidcmp(entry->var.VendorGuid, vendor))
+		return 0;
+
+	for (i = 0; i < DUMP_NAME_LEN; i++)
+		name[i] = entry->var.VariableName[i];
+
+	if (sscanf(name, "dump-type%u-%u-%d-%lu",
+		   cb_data->type, &part, &cnt, &time) == 4) {
+		*cb_data->id = generic_id(time, part, cnt);
+		*cb_data->count = cnt;
+		cb_data->timespec->tv_sec = time;
+		cb_data->timespec->tv_nsec = 0;
+	} else if (sscanf(name, "dump-type%u-%u-%lu",
+		cb_data->type, &part, &time) == 3) {
+		/*
+		 * Check if an old format,
+		 * which doesn't support holding
+		 * multiple logs, remains.
+		 */
+		*cb_data->id = generic_id(time, part, 0);
+		*cb_data->count = 0;
+		cb_data->timespec->tv_sec = time;
+		cb_data->timespec->tv_nsec = 0;
+	} else
+		return 0;
+
+	entry->var.DataSize = 1024;
+	__efivar_entry_get(entry, &entry->var.Attributes,
+			   &entry->var.DataSize, entry->var.Data);
+	size = entry->var.DataSize;
+
+	memcpy(*cb_data->buf, entry->var.Data,
+	       (size_t)min_t(unsigned long, EFIVARS_DATA_SIZE_MAX, size));
+
+	return size;
+}
+
+/**
+ * efi_pstore_scan_sysfs_enter
+ * @entry: scanning entry
+ * @next: next entry
+ * @head: list head
+ */
+static void efi_pstore_scan_sysfs_enter(struct efivar_entry *pos,
+					struct efivar_entry *next,
+					struct list_head *head)
+{
+	pos->scanning = true;
+	if (&next->list != head)
+		next->scanning = true;
+}
+
+/**
+ * __efi_pstore_scan_sysfs_exit
+ * @entry: deleting entry
+ * @turn_off_scanning: Check if a scanning flag should be turned off
+ */
+static inline void __efi_pstore_scan_sysfs_exit(struct efivar_entry *entry,
+						bool turn_off_scanning)
+{
+	if (entry->deleting) {
+		list_del(&entry->list);
+		efivar_entry_iter_end();
+		efivar_unregister(entry);
+		efivar_entry_iter_begin();
+	} else if (turn_off_scanning)
+		entry->scanning = false;
+}
+
+/**
+ * efi_pstore_scan_sysfs_exit
+ * @pos: scanning entry
+ * @next: next entry
+ * @head: list head
+ * @stop: a flag checking if scanning will stop
+ */
+static void efi_pstore_scan_sysfs_exit(struct efivar_entry *pos,
+				       struct efivar_entry *next,
+				       struct list_head *head, bool stop)
+{
+	__efi_pstore_scan_sysfs_exit(pos, true);
+	if (stop)
+		__efi_pstore_scan_sysfs_exit(next, &next->list != head);
+}
+
+/**
+ * efi_pstore_sysfs_entry_iter
+ *
+ * @data: function-specific data to pass to callback
+ * @pos: entry to begin iterating from
+ *
+ * You MUST call efivar_enter_iter_begin() before this function, and
+ * efivar_entry_iter_end() afterwards.
+ *
+ * It is possible to begin iteration from an arbitrary entry within
+ * the list by passing @pos. @pos is updated on return to point to
+ * the next entry of the last one passed to efi_pstore_read_func().
+ * To begin iterating from the beginning of the list @pos must be %NULL.
+ */
+static int efi_pstore_sysfs_entry_iter(void *data, struct efivar_entry **pos)
+{
+	struct efivar_entry *entry, *n;
+	struct list_head *head = &__efivars.list;
+	int size = 0;
+
+	if (!*pos) {
+		list_for_each_entry_safe(entry, n, head, list) {
+			efi_pstore_scan_sysfs_enter(entry, n, head);
+
+			size = efi_pstore_read_func(entry, data);
+			efi_pstore_scan_sysfs_exit(entry, n, head, size < 0);
+			if (size)
+				break;
+		}
+		*pos = n;
+		return size;
+	}
+
+	list_for_each_entry_safe_from((*pos), n, head, list) {
+		efi_pstore_scan_sysfs_enter((*pos), n, head);
+
+		size = efi_pstore_read_func((*pos), data);
+		efi_pstore_scan_sysfs_exit((*pos), n, head, size < 0);
+		if (size)
+			break;
+	}
+	*pos = n;
+	return size;
+}
+
+/**
+ * efi_pstore_read
+ *
+ * This function returns a size of NVRAM entry logged via efi_pstore_write().
+ * The meaning and behavior of efi_pstore/pstore are as below.
+ *
+ * size > 0: Got data of an entry logged via efi_pstore_write() successfully,
+ *           and pstore filesystem will continue reading subsequent entries.
+ * size == 0: Entry was not logged via efi_pstore_write(),
+ *            and efi_pstore driver will continue reading subsequent entries.
+ * size < 0: Failed to get data of entry logging via efi_pstore_write(),
+ *           and pstore will stop reading entry.
+ */
 static ssize_t efi_pstore_read(u64 *id, enum pstore_type_id *type,
 			       int *count, struct timespec *timespec,
 			       char **buf, struct pstore_info *psi)
 {
-	efi_guid_t vendor = LINUX_EFI_CRASH_GUID;
-	struct efivars *efivars = psi->data;
-	char name[DUMP_NAME_LEN];
-	int i;
-	int cnt;
-	unsigned int part, size;
-	unsigned long time;
+	struct pstore_read_data data;
+	ssize_t size;
 
-	while (&efivars->walk_entry->list != &efivars->list) {
-		if (!efi_guidcmp(efivars->walk_entry->var.VendorGuid,
-				 vendor)) {
-			for (i = 0; i < DUMP_NAME_LEN; i++) {
-				name[i] = efivars->walk_entry->var.VariableName[i];
-			}
-			if (sscanf(name, "dump-type%u-%u-%d-%lu",
-				   type, &part, &cnt, &time) == 4) {
-				*id = part;
-				*count = cnt;
-				timespec->tv_sec = time;
-				timespec->tv_nsec = 0;
-			} else if (sscanf(name, "dump-type%u-%u-%lu",
-				   type, &part, &time) == 3) {
-				/*
-				 * Check if an old format,
-				 * which doesn't support holding
-				 * multiple logs, remains.
-				 */
-				*id = part;
-				*count = 0;
-				timespec->tv_sec = time;
-				timespec->tv_nsec = 0;
-			} else {
-				efivars->walk_entry = list_entry(
-						efivars->walk_entry->list.next,
-						struct efivar_entry, list);
-				continue;
-			}
+	data.id = id;
+	data.type = type;
+	data.count = count;
+	data.timespec = timespec;
+	data.buf = buf;
 
-			get_var_data_locked(efivars, &efivars->walk_entry->var);
-			size = efivars->walk_entry->var.DataSize;
-			*buf = kmalloc(size, GFP_KERNEL);
-			if (*buf == NULL)
-				return -ENOMEM;
-			memcpy(*buf, efivars->walk_entry->var.Data,
-			       size);
-			efivars->walk_entry = list_entry(
-					efivars->walk_entry->list.next,
-					struct efivar_entry, list);
-			return size;
-		}
-		efivars->walk_entry = list_entry(efivars->walk_entry->list.next,
-						 struct efivar_entry, list);
-	}
-	return 0;
+	*data.buf = kzalloc(EFIVARS_DATA_SIZE_MAX, GFP_KERNEL);
+	if (!*data.buf)
+		return -ENOMEM;
+
+	efivar_entry_iter_begin();
+	size = efi_pstore_sysfs_entry_iter(&data,
+					   (struct efivar_entry **)&psi->data);
+	efivar_entry_iter_end();
+	if (size <= 0)
+		kfree(*data.buf);
+	return size;
 }
 
 static int efi_pstore_write(enum pstore_type_id type,
@@ -536,7 +734,7 @@ static int efi_pstore_write(enum pstore_type_id type,
 	char name[DUMP_NAME_LEN];
 	efi_char16_t efi_name[DUMP_NAME_LEN];
 	efi_guid_t vendor = LINUX_EFI_CRASH_GUID;
-	struct efivars *efivars = psi->data;
+	struct efivars *efivars = &__efivars;
 	int i, ret = 0;
 	u64 storage_space, remaining_space, max_variable_size;
 	efi_status_t status = EFI_NOT_FOUND;
@@ -585,12 +783,14 @@ static int efi_pstore_erase(enum pstore_type_id type, u64 id, int count,
 	char name_old[DUMP_NAME_LEN];
 	efi_char16_t efi_name_old[DUMP_NAME_LEN];
 	efi_guid_t vendor = LINUX_EFI_CRASH_GUID;
-	struct efivars *efivars = psi->data;
+	struct efivars *efivars = &__efivars;
 	struct efivar_entry *entry, *found = NULL;
 	int i;
+	unsigned int part;
 
-	sprintf(name, "dump-type%u-%u-%d-%lu", type, (unsigned int)id, count,
-		time.tv_sec);
+	do_div(id, 1000);
+	part = do_div(id, 100);
+	sprintf(name, "dump-type%u-%u-%d-%lu", type, part, count, time.tv_sec);
 
 	spin_lock_irq(&efivars->lock);
 
@@ -614,7 +814,7 @@ static int efi_pstore_erase(enum pstore_type_id type, u64 id, int count,
 			 * multiple logs, remains.
 			 */
 			sprintf(name_old, "dump-type%u-%u-%lu", type,
-				(unsigned int)id, time.tv_sec);
+				part, time.tv_sec);
 
 			for (i = 0; i < DUMP_NAME_LEN; i++)
 				efi_name_old[i] = name_old[i];
@@ -626,6 +826,15 @@ static int efi_pstore_erase(enum pstore_type_id type, u64 id, int count,
 
 		/* found */
 		found = entry;
+		if (entry->scanning) {
+			/*
+			 * Skip deletion because this entry will be deleted
+			 * after scanning is completed.
+			 */
+			entry->deleting = true;
+		} else
+			list_del(&entry->list);
+
 		efivars->ops->set_variable(entry->var.VariableName,
 					   &entry->var.VendorGuid,
 					   PSTORE_EFI_ATTRIBUTES,
@@ -633,13 +842,11 @@ static int efi_pstore_erase(enum pstore_type_id type, u64 id, int count,
 		break;
 	}
 
-	if (found)
-		list_del(&found->list);
-
-	spin_unlock_irq(&efivars->lock);
-
-	if (found)
+	if (found && !found->scanning) {
+		spin_unlock_irq(&efivars->lock);
 		efivar_unregister(found);
+	} else
+		spin_unlock_irq(&efivars->lock);
 
 	return 0;
 }
@@ -800,11 +1007,20 @@ static ssize_t efivar_delete(struct file *filp, struct kobject *kobj,
 		spin_unlock_irq(&efivars->lock);
 		return -EIO;
 	}
-	list_del(&search_efivar->list);
-	/* We need to release this lock before unregistering. */
-	spin_unlock_irq(&efivars->lock);
-	efivar_unregister(search_efivar);
 
+	if (!search_efivar->scanning) {
+		list_del(&search_efivar->list);
+		/* We need to release this lock before unregistering. */
+		spin_unlock_irq(&efivars->lock);
+		efivar_unregister(search_efivar);
+	} else {
+		/*
+		 * The entry will be deleted
+		 * after scanning is completed.
+		 */
+		search_efivar->deleting = true;
+		spin_unlock_irq(&efivars->lock);
+	}
 	/* It's dead Jim.... */
 	return count;
 }

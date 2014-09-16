@@ -1,6 +1,6 @@
 /*
  * QLogic Fibre Channel HBA Driver
- * Copyright (c)  2003-2013 QLogic Corporation
+ * Copyright (c)  2003-2014 QLogic Corporation
  *
  * See LICENSE.qla2xxx for copyright and licensing details.
  */
@@ -344,3 +344,8 @@ ql_log_pci(uint32_t, struct pci_dev *pdev, int32_t, const char *fmt, ...);
 				    * more verbosity is required. It might not
 				    * be applicable to all the levels.
 				    */
+extern int qla24xx_dump_ram(struct qla_hw_data *, uint32_t, uint32_t *,
+	uint32_t, void **);
+extern void qla24xx_pause_risc(struct device_reg_24xx __iomem *,
+	struct qla_hw_data *);
+extern int qla24xx_soft_reset(struct qla_hw_data *);

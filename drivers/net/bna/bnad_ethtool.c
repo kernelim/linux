@@ -34,7 +34,7 @@
 #define BNAD_NUM_TXQ_COUNTERS 5
 
 #define BNAD_ETHTOOL_STATS_NUM						\
-	(sizeof(struct net_device_stats) / sizeof(unsigned long) +	\
+	(sizeof(struct rtnl_link_stats64) / sizeof(u64) +	\
 	sizeof(struct bnad_drv_stats) / sizeof(u64) +		\
 	offsetof(struct bfi_enet_stats, rxf_stats[0]) / sizeof(u64))
 
@@ -543,61 +543,6 @@ bnad_set_pauseparam(struct net_device *netdev,
 	return 0;
 }
 
-static u32
-bnad_get_rx_csum(struct net_device *netdev)
-{
-	u32 rx_csum;
-	struct bnad *bnad = netdev_priv(netdev);
-
-	rx_csum = bnad->rx_csum;
-	return rx_csum;
-}
-
-static int
-bnad_set_rx_csum(struct net_device *netdev, u32 rx_csum)
-{
-	struct bnad *bnad = netdev_priv(netdev);
-
-	mutex_lock(&bnad->conf_mutex);
-	bnad->rx_csum = rx_csum;
-	mutex_unlock(&bnad->conf_mutex);
-	return 0;
-}
-
-static int
-bnad_set_tx_csum(struct net_device *netdev, u32 tx_csum)
-{
-	struct bnad *bnad = netdev_priv(netdev);
-
-	mutex_lock(&bnad->conf_mutex);
-	if (tx_csum) {
-		netdev->features |= NETIF_F_IP_CSUM;
-		netdev->features |= NETIF_F_IPV6_CSUM;
-	} else {
-		netdev->features &= ~NETIF_F_IP_CSUM;
-		netdev->features &= ~NETIF_F_IPV6_CSUM;
-	}
-	mutex_unlock(&bnad->conf_mutex);
-	return 0;
-}
-
-static int
-bnad_set_tso(struct net_device *netdev, u32 tso)
-{
-	struct bnad *bnad = netdev_priv(netdev);
-
-	mutex_lock(&bnad->conf_mutex);
-	if (tso) {
-		netdev->features |= NETIF_F_TSO;
-		netdev->features |= NETIF_F_TSO6;
-	} else {
-		netdev->features &= ~NETIF_F_TSO;
-		netdev->features &= ~NETIF_F_TSO6;
-	}
-	mutex_unlock(&bnad->conf_mutex);
-	return 0;
-}
-
 static void
 bnad_get_strings(struct net_device *netdev, u32 stringset, u8 *string)
 {
@@ -910,7 +855,7 @@ bnad_get_ethtool_stats(struct net_device *netdev, struct ethtool_stats *stats,
 	struct bnad *bnad = netdev_priv(netdev);
 	int i, j, bi;
 	unsigned long flags;
-	struct net_device_stats *net_stats;
+	struct rtnl_link_stats64 *net_stats64;
 	u64 *stats64;
 	u32 bmap;
 
@@ -928,11 +873,11 @@ bnad_get_ethtool_stats(struct net_device *netdev, struct ethtool_stats *stats,
 	bi = 0;
 	memset(buf, 0, stats->n_stats * sizeof(u64));
 
-	net_stats = (struct net_device_stats *)buf;
-	bnad_netdev_qstats_fill(bnad, net_stats);
-	bnad_netdev_hwstats_fill(bnad, net_stats);
+	net_stats64 = (struct rtnl_link_stats64 *)buf;
+	bnad_netdev_qstats_fill(bnad, net_stats64);
+	bnad_netdev_hwstats_fill(bnad, net_stats64);
 
-	bi = sizeof(*net_stats) / sizeof(unsigned long);
+	bi = sizeof(*net_stats64) / sizeof(u64);
 
 	/* Get netif_queue_stopped from stack */
 	bnad->stats.drv_stats.netif_queue_stopped = netif_queue_stopped(netdev);
@@ -1056,10 +1001,8 @@ bnad_get_eeprom(struct net_device *netdev, struct ethtool_eeprom *eeprom,
 	unsigned long flags = 0;
 	int ret = 0;
 
-	/* Check if the flash read request is valid */
-	if (eeprom->magic != (bnad->pcidev->vendor |
-			     (bnad->pcidev->device << 16)))
-		return -EFAULT;
+	/* Fill the magic value */
+	eeprom->magic = bnad->pcidev->vendor | (bnad->pcidev->device << 16);
 
 	/* Query the flash partition based on the offset */
 	flash_part = bnad_get_flash_partition_by_offset(bnad,
@@ -1183,14 +1126,6 @@ static const struct ethtool_ops bnad_ethtool_ops = {
 	.set_ringparam = bnad_set_ringparam,
 	.get_pauseparam = bnad_get_pauseparam,
 	.set_pauseparam = bnad_set_pauseparam,
-	.get_rx_csum = bnad_get_rx_csum,
-	.set_rx_csum = bnad_set_rx_csum,
-	.get_tx_csum = ethtool_op_get_tx_csum,
-	.set_tx_csum = bnad_set_tx_csum,
-	.get_sg = ethtool_op_get_sg,
-	.set_sg = ethtool_op_set_sg,
-	.get_tso = ethtool_op_get_tso,
-	.set_tso = bnad_set_tso,
 	.get_strings = bnad_get_strings,
 	.get_ethtool_stats = bnad_get_ethtool_stats,
 	.get_sset_count = bnad_get_sset_count,
@@ -1200,8 +1135,14 @@ static const struct ethtool_ops bnad_ethtool_ops = {
 	.flash_device = bnad_flash_device,
 };
 
+static const struct ethtool_ops_ext bnad_ethtool_ops_ext = {
+	.size = sizeof(struct ethtool_ops_ext),
+	.get_ts_info = ethtool_op_get_ts_info,
+};
+
 void
 bnad_set_ethtool_ops(struct net_device *netdev)
 {
 	SET_ETHTOOL_OPS(netdev, &bnad_ethtool_ops);
+	set_ethtool_ops_ext(netdev, &bnad_ethtool_ops_ext);
 }

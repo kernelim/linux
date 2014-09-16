@@ -83,6 +83,7 @@
 
 #include <asm/microcode.h>
 #include <asm/processor.h>
+#include <asm/perf_event.h>
 
 MODULE_DESCRIPTION("Microcode Update Driver");
 MODULE_AUTHOR("Tigran Aivazian <tigran@aivazian.fsnet.co.uk>");
@@ -272,7 +273,6 @@ static int reload_for_cpu(int cpu)
 	struct ucode_cpu_info *uci = ucode_cpu_info + cpu;
 	int err = 0;
 
-	mutex_lock(&microcode_mutex);
 	if (uci->valid) {
 		enum ucode_state ustate;
 
@@ -283,7 +283,6 @@ static int reload_for_cpu(int cpu)
 			if (ustate == UCODE_ERROR)
 				err = -EINVAL;
 	}
-	mutex_unlock(&microcode_mutex);
 
 	return err;
 }
@@ -303,8 +302,12 @@ static ssize_t reload_store(struct sys_device *dev,
 
 	if (val == 1) {
 		get_online_cpus();
+		mutex_lock(&microcode_mutex);
 		if (cpu_online(cpu))
 			ret = reload_for_cpu(cpu);
+		if (!ret)
+			perf_check_microcode();
+		mutex_unlock(&microcode_mutex);
 		put_online_cpus();
 	}
 
@@ -518,7 +521,8 @@ static int __init microcode_init(void)
 	mutex_lock(&microcode_mutex);
 
 	error = sysdev_driver_register(&cpu_sysdev_class, &mc_sysdev_driver);
-
+	if (!error)
+		perf_check_microcode();
 	mutex_unlock(&microcode_mutex);
 	put_online_cpus();
 

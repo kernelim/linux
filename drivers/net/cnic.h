@@ -1,6 +1,6 @@
 /* cnic.h: Broadcom CNIC core network driver.
  *
- * Copyright (c) 2006-2011 Broadcom Corporation
+ * Copyright (c) 2006-2014 Broadcom Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -186,6 +186,8 @@ struct kcq_info {
 	u16		(*hw_idx)(u16);
 };
 
+#define UIO_USE_TX_DOORBELL 0x017855DB
+
 struct cnic_uio_dev {
 	struct uio_info		cnic_uinfo;
 	u32			uio_dev;
@@ -303,8 +305,6 @@ struct cnic_local {
 
 	u32			chip_id;
 	int			func;
-	u32			pfid;
-	u8			port_mode;
 
 	u32			shmem_base;
 
@@ -399,12 +399,10 @@ struct bnx2x_bd_chain_next {
 #define ETH_MAX_RX_CLIENTS_E2 		ETH_MAX_RX_CLIENTS_E1H
 #endif
 
-#define CNIC_PORT(cp)			((cp)->pfid & 1)
 #define CNIC_FUNC(cp)			((cp)->func)
-#define CNIC_E1HVN(cp)			((cp)->pfid >> 1)
 
-#define BNX2X_HW_CID(cp, x)		((CNIC_PORT(cp) << 23) | \
-					 (CNIC_E1HVN(cp) << 17) | (x))
+#define BNX2X_HW_CID(bp, x)		((BP_PORT(bp) << 23) | \
+					 (BP_VN(bp) << 17) | (x))
 
 #define BNX2X_SW_CID(x)			(x & 0x1ffff)
 

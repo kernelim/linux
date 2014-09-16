@@ -51,6 +51,9 @@ typedef struct
 typedef struct
 {
 	unsigned int fpc;
+#ifndef __GENKSYMS__
+	unsigned int pad;
+#endif
 	double   fprs[__NUM_FPRS];
 } _s390_fp_regs;
 

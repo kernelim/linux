@@ -943,7 +943,7 @@ int __fscache_write_page(struct fscache_cookie *cookie,
 		(1 << FSCACHE_OP_UNUSE_COOKIE);
 	fscache_set_op_name(&op->op, "Write1");
 
-	ret = radix_tree_preload(gfp & ~__GFP_HIGHMEM);
+	ret = radix_tree_maybe_preload(gfp & ~__GFP_HIGHMEM);
 	if (ret < 0)
 		goto nomem_free;
 

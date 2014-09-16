@@ -18,6 +18,9 @@
 
 extern int ksign_verify_signature(const char *sig, unsigned sig_size,
 				  struct shash_desc *digest);
+extern int ksign_get_signature_digest_algo(const char *sigdata, unsigned sig_size,
+					   const char **digest_name);
+
 #endif
 
 #endif /* _LINUX_CRYPTO_KSIGN_H */

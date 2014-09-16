@@ -1001,10 +1001,10 @@ File: iwlwifi-2000-6.ucode
 Info: v18.168.6.1
 
 File: iwlwifi-7260-7.ucode
-Version: 22.0.7.0
+Version: 22.1.7.0
 
 File: iwlwifi-3160-7.ucode
-Version: 22.0.7.0
+Version: 22.1.7.0
 
 License: Redistributable. See LICENCE.iwlwifi_firmware for details
 

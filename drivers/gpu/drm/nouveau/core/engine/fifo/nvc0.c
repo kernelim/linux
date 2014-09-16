@@ -29,11 +29,11 @@
 #include <core/engctx.h>
 #include <core/event.h>
 #include <core/class.h>
-#include <core/math.h>
 #include <core/enum.h>
 
 #include <subdev/timer.h>
 #include <subdev/bar.h>
+#include <subdev/fb.h>
 #include <subdev/vm.h>
 
 #include <engine/dmaobj.h>
@@ -71,6 +71,7 @@ nvc0_fifo_playlist_update(struct nvc0_fifo_priv *priv)
 	struct nouveau_gpuobj *cur;
 	int i, p;
 
+	mutex_lock(&nv_subdev(priv)->mutex);
 	cur = priv->playlist[priv->cur_playlist];
 	priv->cur_playlist = !priv->cur_playlist;
 
@@ -87,6 +88,7 @@ nvc0_fifo_playlist_update(struct nvc0_fifo_priv *priv)
 	nv_wr32(priv, 0x002274, 0x01f00000 | (p >> 3));
 	if (!nv_wait(priv, 0x00227c, 0x00100000, 0x00000000))
 		nv_error(priv, "playlist update failed\n");
+	mutex_unlock(&nv_subdev(priv)->mutex);
 }
 
 static int
@@ -198,7 +200,7 @@ nvc0_fifo_chan_ctor(struct nouveau_object *parent,
 
 	usermem = chan->base.chid * 0x1000;
 	ioffset = args->ioffset;
-	ilength = log2i(args->ilength / 8);
+	ilength = order_base_2(args->ilength / 8);
 
 	for (i = 0; i < 0x1000; i += 4)
 		nv_wo32(priv->user.mem, usermem + i, 0x00000000);
@@ -248,9 +250,17 @@ nvc0_fifo_chan_fini(struct nouveau_object *object, bool suspend)
 	struct nvc0_fifo_priv *priv = (void *)object->engine;
 	struct nvc0_fifo_chan *chan = (void *)object;
 	u32 chid = chan->base.chid;
+	u32 mask, engine;
 
 	nv_mask(priv, 0x003004 + (chid * 8), 0x00000001, 0x00000000);
 	nvc0_fifo_playlist_update(priv);
+	mask = nv_rd32(priv, 0x0025a4);
+	for (engine = 0; mask && engine < 16; engine++) {
+		if (!(mask & (1 << engine)))
+			continue;
+		nv_mask(priv, 0x0025a8 + (engine * 4), 0x00000000, 0x00000000);
+		mask &= ~(1 << engine);
+	}
 	nv_wr32(priv, 0x003000 + (chid * 8), 0x00000000);
 
 	return nouveau_fifo_channel_fini(&chan->base, suspend);
@@ -292,7 +302,8 @@ nvc0_fifo_context_ctor(struct nouveau_object *parent,
 	if (ret)
 		return ret;
 
-	ret = nouveau_gpuobj_new(parent, NULL, 0x10000, 0x1000, 0, &base->pgd);
+	ret = nouveau_gpuobj_new(nv_object(base), NULL, 0x10000, 0x1000, 0,
+				&base->pgd);
 	if (ret)
 		return ret;
 
@@ -484,13 +495,6 @@ nvc0_fifo_isr_subfifo_intr(struct nvc0_fifo_priv *priv, int unit)
 	u32 mthd = (addr & 0x00003ffc);
 	u32 show = stat;
 
-	if (stat & 0x00200000) {
-		if (mthd == 0x0054) {
-			if (!nvc0_fifo_swmthd(priv, chid, 0x0500, 0x00000000))
-				show &= ~0x00200000;
-		}
-	}
-
 	if (stat & 0x00800000) {
 		if (!nvc0_fifo_swmthd(priv, chid, mthd, data))
 			show &= ~0x00800000;
@@ -623,17 +627,17 @@ nvc0_fifo_ctor(struct nouveau_object *parent, struct nouveau_object *engine,
 	if (ret)
 		return ret;
 
-	ret = nouveau_gpuobj_new(parent, NULL, 0x1000, 0x1000, 0,
+	ret = nouveau_gpuobj_new(nv_object(priv), NULL, 0x1000, 0x1000, 0,
 				&priv->playlist[0]);
 	if (ret)
 		return ret;
 
-	ret = nouveau_gpuobj_new(parent, NULL, 0x1000, 0x1000, 0,
+	ret = nouveau_gpuobj_new(nv_object(priv), NULL, 0x1000, 0x1000, 0,
 				&priv->playlist[1]);
 	if (ret)
 		return ret;
 
-	ret = nouveau_gpuobj_new(parent, NULL, 128 * 0x1000, 0x1000, 0,
+	ret = nouveau_gpuobj_new(nv_object(priv), NULL, 128 * 0x1000, 0x1000, 0,
 				&priv->user.mem);
 	if (ret)
 		return ret;
@@ -710,8 +714,8 @@ nvc0_fifo_init(struct nouveau_object *object)
 	return 0;
 }
 
-struct nouveau_oclass
-nvc0_fifo_oclass = {
+struct nouveau_oclass *
+nvc0_fifo_oclass = &(struct nouveau_oclass) {
 	.handle = NV_ENGINE(FIFO, 0xc0),
 	.ofuncs = &(struct nouveau_ofuncs) {
 		.ctor = nvc0_fifo_ctor,

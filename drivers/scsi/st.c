@@ -4055,7 +4055,7 @@ static int st_probe(struct device *dev)
 	disk->queue = SDp->request_queue;
 	/* SCSI tape doesn't register this gendisk via add_disk().  Manually
 	 * take queue reference that release_disk() expects. */
-	if (blk_get_queue(disk->queue)) {
+	if (!blk_get_request_queue(disk->queue)) {
 		write_unlock(&st_dev_arr_lock);
 		goto out_put_disk;
 	}

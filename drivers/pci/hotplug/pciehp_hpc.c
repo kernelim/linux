@@ -266,10 +266,37 @@ static void pcie_wait_link_active(struct controller *ctrl)
 	ctrl_dbg(ctrl, "Data Link Layer Link Active not set in 1000 msec\n");
 }
 
+static bool pci_bus_check_dev(struct pci_bus *bus, int devfn)
+{
+	u32 l;
+	int count = 0;
+	int delay = 1000, step = 20;
+	bool found = false;
+
+	do {
+		found = pci_bus_read_dev_vendor_id(bus, devfn, &l, 0);
+		count++;
+
+		if (found)
+			break;
+
+		msleep(step);
+		delay -= step;
+	} while (delay > 0);
+
+	if (count > 1 && pciehp_debug)
+		printk(KERN_DEBUG "pci %04x:%02x:%02x.%d id reading try %d times with interval %d ms to get %08x\n",
+			pci_domain_nr(bus), bus->number, PCI_SLOT(devfn),
+			PCI_FUNC(devfn), count, step, l);
+
+	return found;
+}
+
 int pciehp_check_link_status(struct controller *ctrl)
 {
 	u16 lnk_status;
 	int retval = 0;
+	bool found = false;
 
         /*
          * Data Link Layer Link Active Reporting must be capable for
@@ -280,6 +307,11 @@ int pciehp_check_link_status(struct controller *ctrl)
                 pcie_wait_link_active(ctrl);
         else
                 msleep(1000);
+
+	/* wait 100ms before read pci conf, and try in 1s */
+	msleep(100);
+	found = pci_bus_check_dev(ctrl->pcie->port->subordinate,
+					PCI_DEVFN(0, 0));
 
 	retval = pciehp_readw(ctrl, PCI_EXP_LNKSTA, &lnk_status);
 	if (retval) {
@@ -294,6 +326,9 @@ int pciehp_check_link_status(struct controller *ctrl)
 		retval = -1;
 		return retval;
 	}
+
+	if (!found && !retval)
+		retval = -1;
 
 	return retval;
 }
@@ -507,15 +542,10 @@ int pciehp_power_on_slot(struct slot * slot)
 			return retval;
 		}
 	}
+	ctrl->power_fault_detected = 0;
 
 	slot_cmd = POWER_ON;
 	cmd_mask = PCI_EXP_SLTCTL_PCC;
-	if (!pciehp_poll_mode) {
-		/* Enable power fault detection turned off at power off time */
-		slot_cmd |= PCI_EXP_SLTCTL_PFDE;
-		cmd_mask |= PCI_EXP_SLTCTL_PFDE;
-	}
-
 	retval = pcie_write_cmd(ctrl, slot_cmd, cmd_mask);
 	if (retval) {
 		ctrl_err(ctrl, "Write %x command failed!\n", slot_cmd);
@@ -524,7 +554,6 @@ int pciehp_power_on_slot(struct slot * slot)
 	ctrl_dbg(ctrl, "%s: SLOTCTRL %x write cmd %x\n", __func__,
 		 pci_pcie_cap(ctrl->pcie->port) + PCI_EXP_SLTCTL, slot_cmd);
 
-	ctrl->power_fault_detected = 0;
 	return retval;
 }
 
@@ -579,12 +608,6 @@ int pciehp_power_off_slot(struct slot * slot)
 
 	slot_cmd = POWER_OFF;
 	cmd_mask = PCI_EXP_SLTCTL_PCC;
-	if (!pciehp_poll_mode) {
-		/* Disable power fault detection */
-		slot_cmd &= ~PCI_EXP_SLTCTL_PFDE;
-		cmd_mask |= PCI_EXP_SLTCTL_PFDE;
-	}
-
 	retval = pcie_write_cmd(ctrl, slot_cmd, cmd_mask);
 	if (retval) {
 		ctrl_err(ctrl, "Write command failed!\n");
@@ -833,11 +856,19 @@ int pcie_enable_notification(struct controller *ctrl)
 {
 	u16 cmd, mask;
 
+	/*
+	 * TBD: Power fault detected software notification support.
+	 *
+	 * Power fault detected software notification is not enabled
+	 * now, because it caused power fault detected interrupt storm
+	 * on some machines. On those machines, power fault detected
+	 * bit in the slot status register was set again immediately
+	 * when it is cleared in the interrupt service routine, and
+	 * next power fault detected interrupt was notified again.
+	 */
 	cmd = PCI_EXP_SLTCTL_PDCE;
 	if (ATTN_BUTTN(ctrl))
 		cmd |= PCI_EXP_SLTCTL_ABPE;
-	if (POWER_CTRL(ctrl))
-		cmd |= PCI_EXP_SLTCTL_PFDE;
 	if (MRL_SENS(ctrl))
 		cmd |= PCI_EXP_SLTCTL_MRLSCE;
 	if (!pciehp_poll_mode)

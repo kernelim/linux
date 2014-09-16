@@ -411,7 +411,7 @@ static int cuse_send_init(struct cuse_conn *cc)
 
 	BUILD_BUG_ON(CUSE_INIT_INFO_MAX > PAGE_SIZE);
 
-	req = fuse_get_req(fc, 1);
+	req = fuse_get_req_for_background(fc, 1);
 	if (IS_ERR(req)) {
 		rc = PTR_ERR(req);
 		goto err;
@@ -487,7 +487,7 @@ static int cuse_channel_open(struct inode *inode, struct file *file)
 	cc->fc.release = cuse_fc_release;
 
 	cc->fc.connected = 1;
-	cc->fc.blocked = 0;
+	cc->fc.initialized = 1;
 	rc = cuse_send_init(cc);
 	if (rc) {
 		fuse_conn_put(&cc->fc);

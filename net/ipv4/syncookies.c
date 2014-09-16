@@ -89,8 +89,7 @@ __u32 cookie_init_timestamp(struct request_sock *req)
 
 
 static __u32 secure_tcp_syn_cookie(__be32 saddr, __be32 daddr, __be16 sport,
-				   __be16 dport, __u32 sseq, __u32 count,
-				   __u32 data)
+				   __be16 dport, __u32 sseq, __u32 data)
 {
 	/*
 	 * Compute the secure sequence number.
@@ -102,7 +101,7 @@ static __u32 secure_tcp_syn_cookie(__be32 saddr, __be32 daddr, __be16 sport,
 	 * As an extra hack, we add a small "data" value that encodes the
 	 * MSS into the second hash value.
 	 */
-
+	u32 count = tcp_cookie_time();
 	return (cookie_hash(saddr, daddr, sport, dport, 0, 0) +
 		sseq + (count << COOKIEBITS) +
 		((cookie_hash(saddr, daddr, sport, dport, count, 1) + data)
@@ -114,22 +113,21 @@ static __u32 secure_tcp_syn_cookie(__be32 saddr, __be32 daddr, __be16 sport,
  * If the syncookie is bad, the data returned will be out of
  * range.  This must be checked by the caller.
  *
- * The count value used to generate the cookie must be within
- * "maxdiff" if the current (passed-in) "count".  The return value
- * is (__u32)-1 if this test fails.
+ * The count value used to generate the cookie must be less than
+ * MAX_SYNCOOKIE_AGE minutes in the past.
+ * The return value (__u32)-1 if this test fails.
  */
 static __u32 check_tcp_syn_cookie(__u32 cookie, __be32 saddr, __be32 daddr,
-				  __be16 sport, __be16 dport, __u32 sseq,
-				  __u32 count, __u32 maxdiff)
+				  __be16 sport, __be16 dport, __u32 sseq)
 {
-	__u32 diff;
+	u32 diff, count = tcp_cookie_time();
 
 	/* Strip away the layers from the cookie */
 	cookie -= cookie_hash(saddr, daddr, sport, dport, 0, 0) + sseq;
 
 	/* Cookie is now reduced to (count * 2^24) ^ (hash % 2^24) */
 	diff = (count - (cookie >> COOKIEBITS)) & ((__u32) - 1 >> COOKIEBITS);
-	if (diff >= maxdiff)
+	if (diff >= MAX_SYNCOOKIE_AGE)
 		return (__u32)-1;
 
 	return (cookie -
@@ -138,23 +136,23 @@ static __u32 check_tcp_syn_cookie(__u32 cookie, __be32 saddr, __be32 daddr,
 }
 
 /*
- * This table has to be sorted and terminated with (__u16)-1.
- * XXX generate a better table.
- * Unresolved Issues: HIPPI with a 64k MSS is not well supported.
+ * MSS Values are chosen based on the 2011 paper
+ * 'An Analysis of TCP Maximum Segement Sizes' by S. Alcock and R. Nelson.
+ * Values ..
+ *  .. lower than 536 are rare (< 0.2%)
+ *  .. between 537 and 1299 account for less than < 1.5% of observed values
+ *  .. in the 1300-1349 range account for about 15 to 20% of observed mss values
+ *  .. exceeding 1460 are very rare (< 0.04%)
+ *
+ *  1460 is the single most frequently announced mss value (30 to 46% depending
+ *  on monitor location).  Table must be sorted.
  */
 static __u16 const msstab[] = {
-	64 - 1,
-	256 - 1,
-	512 - 1,
-	536 - 1,
-	1024 - 1,
-	1440 - 1,
-	1460 - 1,
-	4312 - 1,
-	(__u16)-1
+	536,
+	1300,
+	1440,	/* 1440, 1452: PPPoE */
+	1460,
 };
-/* The number doesn't include the -1 terminator */
-#define NUM_MSS (ARRAY_SIZE(msstab) - 1)
 
 /*
  * Generate a syncookie.  mssp points to the mss, which is returned
@@ -169,25 +167,18 @@ __u32 cookie_v4_init_sequence(struct sock *sk, struct sk_buff *skb, __u16 *mssp)
 
 	tcp_synq_overflow(sk);
 
-	/* XXX sort msstab[] by probability?  Binary search? */
-	for (mssind = 0; mss > msstab[mssind + 1]; mssind++)
-		;
-	*mssp = msstab[mssind] + 1;
+	for (mssind = ARRAY_SIZE(msstab) - 1; mssind ; mssind--)
+		if (mss >= msstab[mssind])
+			break;
+	*mssp = msstab[mssind];
 
 	NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_SYNCOOKIESSENT);
 
 	return secure_tcp_syn_cookie(iph->saddr, iph->daddr,
 				     th->source, th->dest, ntohl(th->seq),
-				     jiffies / (HZ * 60), mssind);
+				     mssind);
 }
 
-/*
- * This (misnamed) value is the age of syncookie which is permitted.
- * Its ideal value should be dependent on TCP_TIMEOUT_INIT and
- * sysctl_tcp_retries1. It's a rather complicated formula (exponential
- * backoff) to compute at runtime so it's currently hardcoded here.
- */
-#define COUNTER_TRIES 4
 /*
  * Check if a ack sequence number is a valid syncookie.
  * Return the decoded mss if it is, or 0 if not.
@@ -198,11 +189,9 @@ static inline int cookie_check(struct sk_buff *skb, __u32 cookie)
 	const struct tcphdr *th = tcp_hdr(skb);
 	__u32 seq = ntohl(th->seq) - 1;
 	__u32 mssind = check_tcp_syn_cookie(cookie, iph->saddr, iph->daddr,
-					    th->source, th->dest, seq,
-					    jiffies / (HZ * 60),
-					    COUNTER_TRIES);
+					    th->source, th->dest, seq);
 
-	return mssind < NUM_MSS ? msstab[mssind] + 1 : 0;
+	return mssind < ARRAY_SIZE(msstab) ? msstab[mssind] : 0;
 }
 
 static inline struct sock *get_cookie_sock(struct sock *sk, struct sk_buff *skb,

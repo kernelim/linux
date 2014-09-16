@@ -138,7 +138,8 @@ static int ipoib_cm_post_receive_nonsrq(struct net_device *dev,
 static struct sk_buff *ipoib_cm_alloc_rx_skb(struct net_device *dev,
 					     struct ipoib_cm_rx_buf *rx_ring,
 					     int id, int frags,
-					     u64 mapping[IPOIB_CM_RX_SG])
+					     u64 mapping[IPOIB_CM_RX_SG],
+					     gfp_t gfp)
 {
 	struct ipoib_dev_priv *priv = netdev_priv(dev);
 	struct sk_buff *skb;
@@ -162,7 +163,7 @@ static struct sk_buff *ipoib_cm_alloc_rx_skb(struct net_device *dev,
 	}
 
 	for (i = 0; i < frags; i++) {
-		struct page *page = alloc_page(GFP_ATOMIC);
+		struct page *page = alloc_page(gfp);
 
 		if (!page)
 			goto partial_error;
@@ -380,7 +381,8 @@ static int ipoib_cm_nonsrq_init_rx(struct net_device *dev, struct ib_cm_id *cm_i
 
 	for (i = 0; i < ipoib_recvq_size; ++i) {
 		if (!ipoib_cm_alloc_rx_skb(dev, rx->rx_ring, i, IPOIB_CM_RX_SG - 1,
-					   rx->rx_ring[i].mapping)) {
+					   rx->rx_ring[i].mapping,
+					   GFP_KERNEL)) {
 			ipoib_warn(priv, "failed to allocate receive buffer %d\n", i);
 				ret = -ENOMEM;
 				goto err_count;
@@ -470,7 +472,7 @@ static int ipoib_cm_req_handler(struct ib_cm_id *cm_id, struct ib_cm_event *even
 	}
 
 	spin_lock_irq(&priv->lock);
-	queue_delayed_work(ipoib_workqueue,
+	queue_delayed_work(priv->wq,
 			   &priv->cm.stale_task, IPOIB_CM_RX_DELAY);
 	/* Add this entry to passive ids list head, but do not re-add it
 	 * if IB_EVENT_QP_LAST_WQE_REACHED has moved it to flush list. */
@@ -572,7 +574,7 @@ void ipoib_cm_handle_rx_wc(struct net_device *dev, struct ib_wc *wc)
 			spin_lock_irqsave(&priv->lock, flags);
 			list_splice_init(&priv->cm.rx_drain_list, &priv->cm.rx_reap_list);
 			ipoib_cm_start_rx_drain(priv);
-			queue_work(ipoib_workqueue, &priv->cm.rx_reap_task);
+			queue_work(priv->wq, &priv->cm.rx_reap_task);
 			spin_unlock_irqrestore(&priv->lock, flags);
 		} else
 			ipoib_warn(priv, "cm recv completion event with wrid %d (> %d)\n",
@@ -599,7 +601,7 @@ void ipoib_cm_handle_rx_wc(struct net_device *dev, struct ib_wc *wc)
 				spin_lock_irqsave(&priv->lock, flags);
 				list_move(&p->list, &priv->cm.rx_reap_list);
 				spin_unlock_irqrestore(&priv->lock, flags);
-				queue_work(ipoib_workqueue, &priv->cm.rx_reap_task);
+				queue_work(priv->wq, &priv->cm.rx_reap_task);
 			}
 			return;
 		}
@@ -637,7 +639,8 @@ void ipoib_cm_handle_rx_wc(struct net_device *dev, struct ib_wc *wc)
 	frags = PAGE_ALIGN(wc->byte_len - min(wc->byte_len,
 					      (unsigned)IPOIB_CM_HEAD_SIZE)) / PAGE_SIZE;
 
-	newskb = ipoib_cm_alloc_rx_skb(dev, rx_ring, wr_id, frags, mapping);
+	newskb = ipoib_cm_alloc_rx_skb(dev, rx_ring, wr_id, frags,
+				       mapping, GFP_ATOMIC);
 	if (unlikely(!newskb)) {
 		/*
 		 * If we can't allocate a new RX buffer, dump
@@ -822,7 +825,7 @@ void ipoib_cm_handle_tx_wc(struct net_device *dev, struct ib_wc *wc)
 
 		if (test_and_clear_bit(IPOIB_FLAG_INITIALIZED, &tx->flags)) {
 			list_move(&tx->list, &priv->cm.reap_list);
-			queue_work(ipoib_workqueue, &priv->cm.reap_task);
+			queue_work(priv->wq, &priv->cm.reap_task);
 		}
 
 		clear_bit(IPOIB_FLAG_OPER_UP, &tx->flags);
@@ -1238,7 +1241,7 @@ static int ipoib_cm_tx_handler(struct ib_cm_id *cm_id,
 
 		if (test_and_clear_bit(IPOIB_FLAG_INITIALIZED, &tx->flags)) {
 			list_move(&tx->list, &priv->cm.reap_list);
-			queue_work(ipoib_workqueue, &priv->cm.reap_task);
+			queue_work(priv->wq, &priv->cm.reap_task);
 		}
 
 		spin_unlock_irqrestore(&priv->lock, flags);
@@ -1267,7 +1270,7 @@ struct ipoib_cm_tx *ipoib_cm_create_tx(struct net_device *dev, struct ipoib_path
 	tx->dev = dev;
 	list_add(&tx->list, &priv->cm.start_list);
 	set_bit(IPOIB_FLAG_INITIALIZED, &tx->flags);
-	queue_work(ipoib_workqueue, &priv->cm.start_task);
+	queue_work(priv->wq, &priv->cm.start_task);
 	return tx;
 }
 
@@ -1278,7 +1281,7 @@ void ipoib_cm_destroy_tx(struct ipoib_cm_tx *tx)
 	if (test_and_clear_bit(IPOIB_FLAG_INITIALIZED, &tx->flags)) {
 		spin_lock_irqsave(&priv->lock, flags);
 		list_move(&tx->list, &priv->cm.reap_list);
-		queue_work(ipoib_workqueue, &priv->cm.reap_task);
+		queue_work(priv->wq, &priv->cm.reap_task);
 		ipoib_dbg(priv, "Reap connection for gid %pI6\n",
 			  tx->neigh->daddr + 4);
 		tx->neigh = NULL;
@@ -1400,7 +1403,7 @@ void ipoib_cm_skb_too_long(struct net_device *dev, struct sk_buff *skb,
 
 	skb_queue_tail(&priv->cm.skb_queue, skb);
 	if (e)
-		queue_work(ipoib_workqueue, &priv->cm.skb_task);
+		queue_work(priv->wq, &priv->cm.skb_task);
 }
 
 static void ipoib_cm_rx_reap(struct work_struct *work)
@@ -1433,7 +1436,7 @@ static void ipoib_cm_stale_task(struct work_struct *work)
 	}
 
 	if (!list_empty(&priv->cm.passive_ids))
-		queue_delayed_work(ipoib_workqueue,
+		queue_delayed_work(priv->wq,
 				   &priv->cm.stale_task, IPOIB_CM_RX_DELAY);
 	spin_unlock_irq(&priv->lock);
 }
@@ -1592,7 +1595,8 @@ int ipoib_cm_dev_init(struct net_device *dev)
 		for (i = 0; i < ipoib_recvq_size; ++i) {
 			if (!ipoib_cm_alloc_rx_skb(dev, priv->cm.srq_ring, i,
 						   priv->cm.num_frags - 1,
-						   priv->cm.srq_ring[i].mapping)) {
+						   priv->cm.srq_ring[i].mapping,
+						   GFP_KERNEL)) {
 				ipoib_warn(priv, "failed to allocate "
 					   "receive buffer %d\n", i);
 				ipoib_cm_dev_cleanup(dev);

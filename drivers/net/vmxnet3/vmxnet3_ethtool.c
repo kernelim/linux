@@ -147,15 +147,15 @@ vmxnet3_global_stats[] = {
 };
 
 
-struct net_device_stats *
-vmxnet3_get_stats(struct net_device *netdev)
+struct rtnl_link_stats64 *
+vmxnet3_get_stats64(struct net_device *netdev,
+		   struct rtnl_link_stats64 *stats)
 {
 	struct vmxnet3_adapter *adapter;
 	struct vmxnet3_tq_driver_stats *drvTxStats;
 	struct vmxnet3_rq_driver_stats *drvRxStats;
 	struct UPT1_TxStats *devTxStats;
 	struct UPT1_RxStats *devRxStats;
-	struct net_device_stats *net_stats = &netdev->stats;
 	unsigned long flags;
 	int i;
 
@@ -166,36 +166,36 @@ vmxnet3_get_stats(struct net_device *netdev)
 	VMXNET3_WRITE_BAR1_REG(adapter, VMXNET3_REG_CMD, VMXNET3_CMD_GET_STATS);
 	spin_unlock_irqrestore(&adapter->cmd_lock, flags);
 
-	memset(net_stats, 0, sizeof(*net_stats));
 	for (i = 0; i < adapter->num_tx_queues; i++) {
 		devTxStats = &adapter->tqd_start[i].stats;
 		drvTxStats = &adapter->tx_queue[i].stats;
-		net_stats->tx_packets += devTxStats->ucastPktsTxOK +
-					devTxStats->mcastPktsTxOK +
-					devTxStats->bcastPktsTxOK;
-		net_stats->tx_bytes += devTxStats->ucastBytesTxOK +
-				      devTxStats->mcastBytesTxOK +
-				      devTxStats->bcastBytesTxOK;
-		net_stats->tx_errors += devTxStats->pktsTxError;
-		net_stats->tx_dropped += drvTxStats->drop_total;
+		stats->tx_packets += devTxStats->ucastPktsTxOK +
+				     devTxStats->mcastPktsTxOK +
+				     devTxStats->bcastPktsTxOK;
+		stats->tx_bytes += devTxStats->ucastBytesTxOK +
+				   devTxStats->mcastBytesTxOK +
+				   devTxStats->bcastBytesTxOK;
+		stats->tx_errors += devTxStats->pktsTxError;
+		stats->tx_dropped += drvTxStats->drop_total;
 	}
 
 	for (i = 0; i < adapter->num_rx_queues; i++) {
 		devRxStats = &adapter->rqd_start[i].stats;
 		drvRxStats = &adapter->rx_queue[i].stats;
-		net_stats->rx_packets += devRxStats->ucastPktsRxOK +
-					devRxStats->mcastPktsRxOK +
-					devRxStats->bcastPktsRxOK;
+		stats->rx_packets += devRxStats->ucastPktsRxOK +
+				     devRxStats->mcastPktsRxOK +
+				     devRxStats->bcastPktsRxOK;
 
-		net_stats->rx_bytes += devRxStats->ucastBytesRxOK +
-				      devRxStats->mcastBytesRxOK +
-				      devRxStats->bcastBytesRxOK;
+		stats->rx_bytes += devRxStats->ucastBytesRxOK +
+				   devRxStats->mcastBytesRxOK +
+				   devRxStats->bcastBytesRxOK;
 
-		net_stats->rx_errors += devRxStats->pktsRxError;
-		net_stats->rx_dropped += drvRxStats->drop_total;
-		net_stats->multicast +=  devRxStats->mcastPktsRxOK;
+		stats->rx_errors += devRxStats->pktsRxError;
+		stats->rx_dropped += drvRxStats->drop_total;
+		stats->multicast +=  devRxStats->mcastPktsRxOK;
 	}
-	return net_stats;
+
+	return stats;
 }
 
 static int
@@ -471,8 +471,8 @@ vmxnet3_get_ringparam(struct net_device *netdev,
 	param->rx_mini_max_pending = 0;
 	param->rx_jumbo_max_pending = 0;
 
-	param->rx_pending = adapter->rx_queue[0].rx_ring[0].size;
-	param->tx_pending = adapter->tx_queue[0].tx_ring.size;
+	param->rx_pending = adapter->rx_ring_size;
+	param->tx_pending = adapter->tx_ring_size;
 	param->rx_mini_pending = 0;
 	param->rx_jumbo_pending = 0;
 }
@@ -551,9 +551,11 @@ vmxnet3_set_ringparam(struct net_device *netdev,
 			 * size */
 			netdev_err(netdev, "failed to apply new sizes, "
 				   "try the default ones\n");
+			new_rx_ring_size = VMXNET3_DEF_RX_RING_SIZE;
+			new_tx_ring_size = VMXNET3_DEF_TX_RING_SIZE;
 			err = vmxnet3_create_queues(adapter,
-						    VMXNET3_DEF_TX_RING_SIZE,
-						    VMXNET3_DEF_RX_RING_SIZE,
+						    new_tx_ring_size,
+						    new_rx_ring_size,
 						    VMXNET3_DEF_RX_RING_SIZE);
 			if (err) {
 				netdev_err(netdev, "failed to create queues "
@@ -567,6 +569,8 @@ vmxnet3_set_ringparam(struct net_device *netdev,
 			netdev_err(netdev, "failed to re-activate, error %d."
 				   " Closing it\n", err);
 	}
+	adapter->tx_ring_size = new_tx_ring_size;
+	adapter->rx_ring_size = new_rx_ring_size;
 
 out:
 	clear_bit(VMXNET3_STATE_BIT_RESETTING, &adapter->state);

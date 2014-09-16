@@ -32,6 +32,30 @@ Table : Subdirectories in /proc/sys/net
 1. /proc/sys/net/core - Network core options
 -------------------------------------------------------
 
+busy_read
+----------------
+Low latency busy poll timeout for socket reads. (needs CONFIG_NET_RX_BUSY_POLL)
+Approximate time in us to busy loop waiting for packets on the device queue.
+This sets the default value of the SO_BUSY_POLL socket option.
+Can be set or overridden per socket by setting socket option SO_BUSY_POLL,
+which is the preferred method of enabling. If you need to enable the feature
+globally via sysctl, a value of 50 is recommended.
+Will increase power usage.
+Default: 0 (off)
+
+busy_poll
+----------------
+Low latency busy poll timeout for poll and select. (needs CONFIG_NET_RX_BUSY_POLL)
+Approximate time in us to busy loop waiting for events.
+Recommended value depends on the number of sockets you poll on.
+For several sockets 50, for several hundreds 100.
+For more than that you probably want to use epoll.
+Note that only sockets with SO_BUSY_POLL set will be busy polled,
+so you want to either selectively set SO_BUSY_POLL on those sockets or set
+sysctl.net.busy_read globally.
+Will increase power usage.
+Default: 0 (off)
+
 rmem_default
 ------------
 

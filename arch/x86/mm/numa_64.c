@@ -199,8 +199,6 @@ setup_node_bootmem(int nodeid, unsigned long start, unsigned long end)
 	if (end && (end - start) < NODE_MIN_SIZE)
 		return;
 
-	start = roundup(start, ZONE_ALIGN);
-
 	printk(KERN_INFO "Bootmem setup node %d %016lx-%016lx\n", nodeid,
 	       start, end);
 
@@ -224,8 +222,6 @@ setup_node_bootmem(int nodeid, unsigned long start, unsigned long end)
 
 	memset(NODE_DATA(nodeid), 0, sizeof(pg_data_t));
 	NODE_DATA(nodeid)->bdata = &bootmem_node_data[nodeid];
-	NODE_DATA(nodeid)->node_start_pfn = start_pfn;
-	NODE_DATA(nodeid)->node_spanned_pages = last_pfn - start_pfn;
 
 	/*
 	 * Find a place for the bootmem map

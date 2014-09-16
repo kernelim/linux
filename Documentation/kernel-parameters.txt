@@ -704,6 +704,7 @@ and is between 256 and 4096 characters. It is defined in the file
 
 	earlyprintk=	[X86,SH,BLACKFIN]
 			earlyprintk=vga
+			earlyprintk=efi
 			earlyprintk=serial[,ttySn[,baudrate]]
 			earlyprintk=ttySn[,baudrate]
 			earlyprintk=dbgp[debugController#]
@@ -711,17 +712,26 @@ and is between 256 and 4096 characters. It is defined in the file
 			Append ",keep" to not disable it when the real console
 			takes over.
 
-			Only vga or serial or usb debug port at a time.
+			Only one of vga, efi, serial or usb debug port can
+			be used at a time.
 
 			Currently only ttyS0 and ttyS1 are supported.
 
 			Interaction with the standard serial driver is not
 			very good.
 
-			The VGA output is eventually overwritten by the real
-			console.
+			The VGA and EFI output is eventually overwritten by
+			the real console.
 
 	eata=		[HW,SCSI]
+
+	edac_report=	[HW,EDAC] Control how to report EDAC event
+			Format: {"on" | "off" | "force"}
+			on: enable EDAC to report H/W event. May be overridden
+			by other higher priority error reporting module.
+			off: disable H/W event reporting through EDAC.
+			force: enforce the use of EDAC to report H/W event.
+			default: on.
 
 	edd=		[EDD]
 			Format: {"off" | "on" | "skip[mbr]"}
@@ -1037,6 +1047,10 @@ and is between 256 and 4096 characters. It is defined in the file
 			With this option on every unmap_single operation will
 			result in a hardware IOTLB flush operation as opposed
 			to batching them for performance.
+		sp_off [Default Off]
+			By default, super page will be supported if Intel IOMMU
+			has the capability. With this option, super page will
+			not be supported.
 
 	intel_idle.max_cstate=	[KNL,HW,ACPI,X86]
 			0	disables intel_idle and fall back on acpi_idle.
@@ -1142,7 +1156,7 @@ and is between 256 and 4096 characters. It is defined in the file
 			pages. In the event, a node is too small to have both
 			kernelcore and Movable pages, kernelcore pages will
 			take priority and other nodes will have a larger number
-			of kernelcore pages.  The Movable zone is used for the
+			of Movable pages.  The Movable zone is used for the
 			allocation of pages that may be reclaimed or moved
 			by the page migration subsystem.  This means that
 			HugeTLB pages may not be allocated from this zone.
@@ -2101,8 +2115,13 @@ and is between 256 and 4096 characters. It is defined in the file
 				the default.
 				off: Turn ECRC off
 				on: Turn ECRC on.
-		realloc		reallocate PCI resources if allocations done by BIOS
-				are erroneous.
+		realloc=	Enable/disable reallocating PCI bridge resources
+				if allocations done by BIOS are too small to
+				accommodate resources required by all child
+				devices.
+				off: Turn realloc off
+				on: Turn realloc on.
+		realloc		same as realloc=on
 		nosriov		[HW]
 				Disable SRIOV support in kernel.
 				Please report a bug if you use this parameter.
@@ -2461,7 +2480,7 @@ and is between 256 and 4096 characters. It is defined in the file
 
 	smbios_26_uuid  [X86] Display UUID in SMBIOS 2.6 format
 
-	smp-alt-once	[X86-32,SMP] On a hotplug CPU system, only
+	smp-alt-boot	[X86-32,SMP] On a hotplug CPU system, only
 			attempt to substitute SMP alternatives once at boot.
 
 	smsc-ircc2.nopnp	[HW] Don't use PNP to discover SMC devices

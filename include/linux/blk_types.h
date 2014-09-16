@@ -89,15 +89,18 @@ enum bio_rw_flags {
 	 * do it again.
 	 */
 	BIO_RW_THROTTLED,
+	BIO_RW_NOMERGE,
 };
 
+#define BIO_WRITE		(1 << BIO_RW)
 #define BIO_FLUSH		(1 << BIO_RW_FLUSH)
 #define BIO_FUA			(1 << BIO_RW_FUA)
 #define BIO_DISCARD		(1 << BIO_RW_DISCARD)
+#define BIO_NOMERGE		(1 << BIO_RW_NOMERGE)
 
 /* This mask is used for bio merge checking (RHEL6 doesn't share bio and request flags) */
 #define BIO_NOMERGE_FLAGS \
-	((1 << BIO_RW_BARRIER) | BIO_FLUSH | BIO_FUA)
+	((1 << BIO_RW_BARRIER) | BIO_FLUSH | BIO_FUA | BIO_NOMERGE)
 
 /*
  * request type modified bits. first four bits match BIO_RW* bits, important

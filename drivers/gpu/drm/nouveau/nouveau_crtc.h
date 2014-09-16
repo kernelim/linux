@@ -29,7 +29,6 @@
 
 struct nouveau_crtc {
 	struct drm_crtc base;
-	struct nouveau_eventh vblank;
 
 	int index;
 

@@ -526,6 +526,7 @@ static int dev_ifsioc(unsigned int fd, unsigned int cmd, unsigned long arg)
 			return -EFAULT;
 		break;
 	case SIOCSHWTSTAMP:
+	case SIOCGHWTSTAMP:
 		if (copy_from_user(&ifr, uifr32, sizeof(*uifr32)))
 			return -EFAULT;
 		ifr.ifr_data = compat_ptr(uifr32->ifr_ifru.ifru_data);
@@ -1506,7 +1507,6 @@ struct serial_struct32 {
 
 static int serial_struct_ioctl(unsigned fd, unsigned cmd, unsigned long arg)
 {
-        typedef struct serial_struct SS;
         typedef struct serial_struct32 SS32;
         struct serial_struct32 __user *ss32 = compat_ptr(arg);
         int err;
@@ -2541,6 +2541,7 @@ HANDLE_IOCTL(SIOCGIFADDR, dev_ifsioc)
 HANDLE_IOCTL(SIOCSIFADDR, dev_ifsioc)
 HANDLE_IOCTL(SIOCSIFHWBROADCAST, dev_ifsioc)
 HANDLE_IOCTL(SIOCSHWTSTAMP, dev_ifsioc)
+HANDLE_IOCTL(SIOCGHWTSTAMP, dev_ifsioc)
 
 /* ioctls used by appletalk ddp.c */
 HANDLE_IOCTL(SIOCATALKDIFADDR, dev_ifsioc)

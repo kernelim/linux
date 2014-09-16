@@ -311,14 +311,26 @@ acpi_ev_address_space_dispatch(union acpi_operand_object *region_obj,
 
 	handler_desc = region_obj->region.handler;
 	if (!handler_desc) {
-		ACPI_ERROR((AE_INFO,
-			    "No handler for Region [%4.4s] (%p) [%s]",
-			    acpi_ut_get_node_name(region_obj->region.node),
-			    region_obj,
-			    acpi_ut_get_region_name(region_obj->region.
-						    space_id)));
+		char *fmtstr = "No handler for Region [%4.4s] (%p) [%s]";
+		char *nodname =
+			acpi_ut_get_node_name(region_obj->region.node);
+		char *regname =
+			acpi_ut_get_region_name(region_obj->region.space_id);
 
-		return_ACPI_STATUS(AE_NOT_EXIST);
+		/*
+		 * RHEL6 - only
+		 * Special case the IPMI handlers, because IPMI drivers will
+		 * be loaded later in the boot.
+		 */
+		if (!strcmp(regname, "IPMI")) {
+			ACPI_INFO((AE_INFO, fmtstr,
+				   nodname, region_obj, regname));
+			return_ACPI_STATUS(AE_OK);
+		} else {
+			ACPI_ERROR((AE_INFO, fmtstr,
+				    nodname, region_obj, regname));
+			return_ACPI_STATUS(AE_NOT_EXIST);
+		}
 	}
 
 	/*

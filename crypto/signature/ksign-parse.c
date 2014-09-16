@@ -21,6 +21,7 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <asm/errno.h>
+#include <linux/err.h>
 #include "local.h"
 
 static inline uint32_t buffer_to_u32(const uint8_t *buffer)
@@ -101,20 +102,20 @@ static void ksign_calc_pk_keyid(struct shash_desc *digest,
 		n += 2 + nn[i];
 	}
 
-	SHA1_putc(digest, 0x99);     /* ctb */
-	SHA1_putc(digest, n >> 8);   /* 2 uint8_t length header */
-	SHA1_putc(digest, n);
+	digest_putc(digest, 0x99);     /* ctb */
+	digest_putc(digest, n >> 8);   /* 2 uint8_t length header */
+	digest_putc(digest, n);
 
 	if (pk->version < 4)
-		SHA1_putc(digest, 3);
+		digest_putc(digest, 3);
 	else
-		SHA1_putc(digest, 4);
+		digest_putc(digest, 4);
 
 	a32 = pk->timestamp;
-	SHA1_putc(digest, a32 >> 24 );
-	SHA1_putc(digest, a32 >> 16 );
-	SHA1_putc(digest, a32 >>  8 );
-	SHA1_putc(digest, a32 >>  0 );
+	digest_putc(digest, a32 >> 24 );
+	digest_putc(digest, a32 >> 16 );
+	digest_putc(digest, a32 >>  8 );
+	digest_putc(digest, a32 >>  0 );
 
 	if (pk->version < 4) {
 		uint16_t a16;
@@ -124,16 +125,16 @@ static void ksign_calc_pk_keyid(struct shash_desc *digest,
 				((pk->expiredate - pk->timestamp) / 86400L);
 		else
 			a16 = 0;
-		SHA1_putc(digest, a16 >> 8);
-		SHA1_putc(digest, a16 >> 0);
+		digest_putc(digest, a16 >> 8);
+		digest_putc(digest, a16 >> 0);
 	}
 
-	SHA1_putc(digest, PUBKEY_ALGO_DSA);
+	digest_putc(digest, PUBKEY_ALGO_DSA);
 
 	for (i = 0; i < npkey; i++) {
-		SHA1_putc(digest, nb[i] >> 8);
-		SHA1_putc(digest, nb[i]);
-		SHA1_write(digest, pp[i], nn[i]);
+		digest_putc(digest, nb[i] >> 8);
+		digest_putc(digest, nb[i]);
+		digest_write(digest, pp[i], nn[i]);
 		kfree(pp[i]);
 	}
 }
@@ -181,7 +182,7 @@ static int ksign_parse_key(const uint8_t *datap, const uint8_t *endp,
 	struct crypto_shash *tfm;
 	struct shash_desc *digest;
 	unsigned long timestamp, expiredate;
-	uint8_t sha1[SHA1_DIGEST_SIZE];
+	uint8_t digest_buf[SHA1_DIGEST_SIZE];
 	int i, version;
 	int is_v4 = 0;
 	int rc = 0;
@@ -239,12 +240,13 @@ static int ksign_parse_key(const uint8_t *datap, const uint8_t *endp,
 		datap += remaining;
 	}
 
-	rc = -ENOMEM;
-
 	tfm = crypto_alloc_shash("sha1", 0, 0);
-	if (!tfm)
+	if (IS_ERR(tfm)) {
+		rc = PTR_ERR(tfm);
 		goto cleanup_pubkey;
+	}
 
+	rc = -ENOMEM;
 	digest = kmalloc(sizeof(*digest) + crypto_shash_descsize(tfm),
 			 GFP_KERNEL);
 	if (!digest)
@@ -254,22 +256,24 @@ static int ksign_parse_key(const uint8_t *datap, const uint8_t *endp,
 	digest->flags = CRYPTO_TFM_REQ_MAY_SLEEP;
 	rc = crypto_shash_init(digest);
 	if (rc < 0)
-		goto cleanup_sha1;
+		goto cleanup_digest;
 
 	ksign_calc_pk_keyid(digest, pk);
 
-	rc = crypto_shash_final(digest, sha1);
+	rc = crypto_shash_final(digest, digest_buf);
 	if (rc < 0)
-		goto cleanup_sha1;
+		goto cleanup_digest;
 
-	pk->keyid[0] = sha1[12] << 24 | sha1[13] << 16 | sha1[14] << 8 | sha1[15];
-	pk->keyid[1] = sha1[16] << 24 | sha1[17] << 16 | sha1[18] << 8 | sha1[19];
+	pk->keyid[0] = (digest_buf[12] << 24 | digest_buf[13] << 16 |
+			digest_buf[14] << 8 | digest_buf[15]);
+	pk->keyid[1] = (digest_buf[16] << 24 | digest_buf[17] << 16 |
+			digest_buf[18] << 8 | digest_buf[19]);
 
 	rc = 0;
 	if (pkfnx)
 		rc = pkfnx(pk, fnxdata);
 
-cleanup_sha1:
+cleanup_digest:
 	kfree(digest);
 cleanup_tfm:
 	crypto_free_shash(tfm);
@@ -401,8 +405,12 @@ static int ksign_parse_signature(const uint8_t *datap, const uint8_t *endp,
 		printk("ksign: ignoring non-DSA signature\n");
 		goto leave;
 	}
-	if (*datap++ != DIGEST_ALGO_SHA1) {
-		printk("ksign: ignoring non-SHA1 signature\n");
+
+	sig->digest_algo = *datap++;
+	if (sig->digest_algo <= 0 || sig->digest_algo >= DIGEST_ALGO__LAST ||
+	    !ksign_hash_algo_names[sig->digest_algo]) {
+		printk("ksign: ignoring unsupported signature hash (%u)\n",
+		       sig->digest_algo);
 		goto leave;
 	}
 

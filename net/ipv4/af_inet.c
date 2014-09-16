@@ -1263,6 +1263,7 @@ static struct sk_buff *inet_gso_segment(struct sk_buff *skb, int features)
 		       0)))
 		goto out;
 
+	skb_reset_network_header(skb);
 	if (unlikely(!pskb_may_pull(skb, sizeof(*iph))))
 		goto out;
 

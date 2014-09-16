@@ -61,6 +61,7 @@
 #include <asm/reboot.h>
 #include <asm/stackprotector.h>
 #include <asm/hypervisor.h>
+#include <asm/mwait.h>
 
 #include "xen-ops.h"
 #include "mmu.h"
@@ -184,6 +185,9 @@ static void __init xen_banner(void)
 	       xen_feature(XENFEAT_mmu_pt_update_preserve_ad) ? " (preserve-AD)" : "");
 }
 
+#define CPUID_THERM_POWER_LEAF 6
+#define APERFMPERF_PRESENT 0
+
 static __read_mostly unsigned int cpuid_leaf1_edx_mask = ~0;
 static __read_mostly unsigned int cpuid_leaf1_ecx_mask = ~0;
 static __read_mostly unsigned int cpuid_leaf81_edx_mask = ~0;
@@ -206,8 +210,14 @@ static void xen_cpuid(unsigned int *ax, unsigned int *bx,
 		maskedx = cpuid_leaf1_edx_mask;
 		break;
 
-	case 5: /* CPUID_MWAIT_LEAF */
-		maskecx = maskedx = 0;
+	case CPUID_MWAIT_LEAF:
+		*ax = *bx = *cx = *dx = 0;
+		return;
+
+	case CPUID_THERM_POWER_LEAF:
+		/* Disabling APERFMPERF for kernel usage */
+		maskecx = ~(1 << APERFMPERF_PRESENT);
+		break;
 
 	case 0xb:
 		/* Suppress extended topology stuff */
@@ -238,15 +248,14 @@ static void xen_cpuid(unsigned int *ax, unsigned int *bx,
 static __init void xen_init_cpuid_mask(void)
 {
 	unsigned int ax, bx, cx, dx;
+	unsigned int xsave_mask;
 
-	cpuid_leaf1_ecx_mask =
-		~((1 << (X86_FEATURE_MWAIT % 32)) |
-		  (1 << (X86_FEATURE_AVX % 32)));
+	cpuid_leaf1_ecx_mask = ~(1 << (X86_FEATURE_MWAIT % 32));
+	cpuid_leaf81_edx_mask = ~(1 << (X86_FEATURE_GBPAGES % 32));
 
 	cpuid_leaf1_edx_mask =
-		~(1 << X86_FEATURE_ACC);   /* thermal monitoring */
-
-	cpuid_leaf81_edx_mask = ~(1 << (X86_FEATURE_GBPAGES % 32));
+		~((1 << X86_FEATURE_MTRR) |  /* disable MTRR */
+		  (1 << X86_FEATURE_ACC));   /* thermal monitoring */
 
 	if (!xen_initial_domain())
 		cpuid_leaf1_edx_mask &=
@@ -255,23 +264,19 @@ static __init void xen_init_cpuid_mask(void)
 			  (1 << X86_FEATURE_APIC) |  /* disable local APIC */
 			  (1 << X86_FEATURE_ACPI));  /* disable ACPI */
 
+	cpuid_leaf1_ecx_mask &= ~(1 << (X86_FEATURE_X2APIC % 32));
+
 	ax = 1;
 	cx = 0;
 	xen_cpuid(&ax, &bx, &cx, &dx);
 
-	/* cpuid claims we support xsave; try enabling it to see what happens */
-	if (cx & (1 << (X86_FEATURE_XSAVE % 32))) {
-		unsigned long cr4;
+	xsave_mask =
+		(1 << (X86_FEATURE_XSAVE % 32)) |
+		(1 << (X86_FEATURE_OSXSAVE % 32));
 
-		set_in_cr4(X86_CR4_OSXSAVE);
-		
-		cr4 = read_cr4();
-
-		if ((cr4 & X86_CR4_OSXSAVE) == 0)
-			cpuid_leaf1_ecx_mask &= ~(1 << (X86_FEATURE_XSAVE % 32));
-
-		clear_in_cr4(X86_CR4_OSXSAVE);
-	}
+	/* Xen will set CR4.OSXSAVE if supported and not disabled by force */
+	if ((cx & xsave_mask) != xsave_mask)
+		cpuid_leaf1_ecx_mask &= ~xsave_mask; /* disable XSAVE & OSXSAVE */
 }
 
 static void xen_set_debugreg(int reg, unsigned long val)
@@ -821,7 +826,6 @@ static void xen_write_cr4(unsigned long cr4)
 {
 	cr4 &= ~X86_CR4_PGE;
 	cr4 &= ~X86_CR4_PSE;
-	cr4 &= ~X86_CR4_OSXSAVE;
 
 	native_write_cr4(cr4);
 }
@@ -1298,6 +1302,14 @@ uint32_t xen_cpuid_base(void)
 	return 0;
 }
 
+uint32_t xen_version(void)
+{
+	uint32_t eax, ebx, ecx, edx, base;
+	base = xen_cpuid_base();
+	cpuid(base + 1, &eax, &ebx, &ecx, &edx);
+	return eax;
+}
+
 static int init_hvm_pv_info(int *major, int *minor)
 {
 	uint32_t eax, ebx, ecx, edx, pages, msr, base;
@@ -1362,6 +1374,8 @@ static int __cpuinit xen_hvm_cpu_notify(struct notifier_block *self,
 	switch (action) {
 	case CPU_UP_PREPARE:
 		per_cpu(xen_vcpu, cpu) = &HYPERVISOR_shared_info->vcpu_info[cpu];
+		if (xen_have_vector_callback)
+			xen_init_lock_cpu(cpu);
 		break;
 	default:
 		break;
@@ -1397,6 +1411,7 @@ void __init xen_hvm_guest_init(void)
 
 	if (xen_feature(XENFEAT_hvm_callback_vector))
 		xen_have_vector_callback = 1;
+	xen_hvm_smp_init();
 	register_cpu_notifier(&xen_hvm_cpu_notifier);
 	xen_unplug_emulated_devices();
 	have_vcpu_info_placement = 0;

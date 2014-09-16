@@ -36,7 +36,7 @@
 #include <asm/cacheflush.h>
 #endif /* CONFIG_HPWDT_NMI_DECODING */
 
-#define HPWDT_VERSION			"1.3.2-rh"
+#define HPWDT_VERSION			"1.3.3-rh"
 #define SECS_TO_TICKS(secs)		((secs) * 1000 / 128)
 #define TICKS_TO_SECS(ticks)		((ticks) * 128 / 1000)
 #define HPWDT_MAX_TIMER			TICKS_TO_SECS(65535)
@@ -505,8 +505,13 @@ static int hpwdt_pretimeout(struct notifier_block *nb, unsigned long ulReason,
 
 	if (allow_kdump)
 		hpwdt_stop();
-	panic("An NMI occurred, please see the Integrated "
-		"Management Log for details.\n");
+	panic("An NMI occurred. Depending on your system the reason "
+		"for the NMI is logged in any one of the following "
+		"resources:\n"
+		"1. Integrated Management Log (IML)\n"
+		"2. OA Syslog\n"
+		"3. OA Forward Progress Log\n"
+		"4. iLO Event Log");
 
 out:
 	return NOTIFY_OK;

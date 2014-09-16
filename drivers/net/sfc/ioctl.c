@@ -48,8 +48,8 @@ static int efx_ioctl_do_mcdi(struct efx_nic *efx, union efx_ioctl_data *data)
 		return -ENOTSUPP;
 	}
 
-	rc = efx_mcdi_rpc(efx, req->cmd, (const u8 *)req->payload,
-			  req->len, (u8 *)req->payload,
+	rc = efx_mcdi_rpc(efx, req->cmd, (const efx_dword_t *)req->payload,
+			  req->len, (efx_dword_t *)req->payload,
 			  sizeof(req->payload), &outlen);
 
 	/* efx_mcdi_rpc() will not schedule a reset if MC_CMD_PAYLOAD causes

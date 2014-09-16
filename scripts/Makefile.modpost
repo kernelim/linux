@@ -143,7 +143,7 @@ targets += $(modules:.ko=.ko.unsigned)
 # Step 7), sign the modules
 MODSECKEY = ./kernel.sec
 MODPUBKEY = ./kernel.pub
-KEYFLAGS = --no-default-keyring --secret-keyring $(MODSECKEY) --keyring $(MODPUBKEY) --no-default-keyring --homedir . --no-options --no-auto-check-trustdb --no-permission-warning
+KEYFLAGS = --no-default-keyring --secret-keyring $(MODSECKEY) --keyring $(MODPUBKEY) --no-default-keyring --homedir . --no-options --no-auto-check-trustdb --no-permission-warning --digest-algo sha256
 ifdef MODKEYNAME
 KEYFLAGS += --default-key $(MODKEYNAME)
 endif

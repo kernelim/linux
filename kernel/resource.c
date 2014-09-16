@@ -40,6 +40,14 @@ struct resource iomem_resource = {
 };
 EXPORT_SYMBOL(iomem_resource);
 
+/* constraints to be met while allocating resources */
+struct resource_constraint {
+	resource_size_t min, max, align;
+	void (*alignf)(void *, struct resource *,
+	     resource_size_t, resource_size_t);
+	void *alignf_data;
+};
+
 static DEFINE_RWLOCK(resource_lock);
 
 static void *r_next(struct seq_file *m, void *v, loff_t *pos)
@@ -386,14 +394,13 @@ static bool resource_contains(struct resource *res1, struct resource *res2)
 }
 
 /*
- * Find empty slot in the resource tree given range and alignment.
+ * Find empty slot in the resource tree with the given range and
+ * alignment constraints
  */
-static int find_resource(struct resource *root, struct resource *new,
-			 resource_size_t size, resource_size_t min,
-			 resource_size_t max, resource_size_t align,
-			 void (*alignf)(void *, struct resource *,
-					resource_size_t, resource_size_t),
-			 void *alignf_data)
+static int __find_resource(struct resource *root, struct resource *old,
+			 struct resource *new,
+			 resource_size_t  size,
+			 struct resource_constraint *constraint)
 {
 	struct resource *this = root->child;
 	struct resource tmp = *new, avail, alloc;
@@ -404,26 +411,30 @@ static int find_resource(struct resource *root, struct resource *new,
 	 * Skip past an allocated resource that starts at 0, since the assignment
 	 * of this->start - 1 to tmp->end below would cause an underflow.
 	 */
-	if (this && this->start == 0) {
-		tmp.start = this->end + 1;
+	if (this && this->start == root->start) {
+		tmp.start = (this == old) ? old->start : this->end + 1;
 		this = this->sibling;
 	}
 	for(;;) {
 		if (this)
-			tmp.end = this->start - 1;
+			tmp.end = (this == old) ?  this->end : this->start - 1;
 		else
 			tmp.end = root->end;
 
-		resource_clip(&tmp, min, max);
+		if (tmp.end < tmp.start)
+			goto next;
+
+		resource_clip(&tmp, constraint->min, constraint->max);
 		arch_remove_reservations(&tmp);
 
 		/* Check for overflow after ALIGN() */
 		avail = *new;
-		avail.start = ALIGN(tmp.start, align);
+		avail.start = ALIGN(tmp.start, constraint->align);
 		avail.end = tmp.end;
 		if (avail.start >= tmp.start) {
 			alloc = avail;
-			alignf(alignf_data, &alloc, size, align);
+			constraint->alignf(constraint->alignf_data, &alloc,
+					size, constraint->align);
 			alloc.end = alloc.start + size - 1;
 			if (resource_contains(&avail, &alloc)) {
 				new->start = alloc.start;
@@ -431,21 +442,84 @@ static int find_resource(struct resource *root, struct resource *new,
 				return 0;
 			}
 		}
-		if (!this)
+
+next:		if (!this || this->end == root->end)
 			break;
-		tmp.start = this->end + 1;
+
+		if (this != old)
+			tmp.start = this->end + 1;
 		this = this->sibling;
 	}
 	return -EBUSY;
 }
 
+/*
+ * Find empty slot in the resource tree given range and alignment.
+ */
+static int find_resource(struct resource *root, struct resource *new,
+			resource_size_t size,
+			struct resource_constraint  *constraint)
+{
+	return  __find_resource(root, NULL, new, size, constraint);
+}
+
 /**
- * allocate_resource - allocate empty slot in the resource tree given range & alignment
+ * reallocate_resource - allocate a slot in the resource tree given range & alignment.
+ *	The resource will be relocated if the new size cannot be reallocated in the
+ *	current location.
+ *
+ * @root: root resource descriptor
+ * @old:  resource descriptor desired by caller
+ * @newsize: new size of the resource descriptor
+ * @constraint: the size and alignment constraints to be met.
+ */
+int reallocate_resource(struct resource *root, struct resource *old,
+			resource_size_t newsize,
+			struct resource_constraint  *constraint)
+{
+	int err=0;
+	struct resource new = *old;
+	struct resource *conflict;
+
+	write_lock(&resource_lock);
+
+	if ((err = __find_resource(root, old, &new, newsize, constraint)))
+		goto out;
+
+	if (resource_contains(&new, old)) {
+		old->start = new.start;
+		old->end = new.end;
+		goto out;
+	}
+
+	if (old->child) {
+		err = -EBUSY;
+		goto out;
+	}
+
+	if (resource_contains(old, &new)) {
+		old->start = new.start;
+		old->end = new.end;
+	} else {
+		__release_resource(old);
+		*old = new;
+		conflict = __request_resource(root, old);
+		BUG_ON(conflict);
+	}
+out:
+	write_unlock(&resource_lock);
+	return err;
+}
+
+
+/**
+ * allocate_resource - allocate empty slot in the resource tree given range & alignment.
+ * 	The resource will be reallocated with a new size if it was already allocated
  * @root: root resource descriptor
  * @new: resource descriptor desired by caller
  * @size: requested resource region size
- * @min: minimum size to allocate
- * @max: maximum size to allocate
+ * @min: minimum boundary to allocate
+ * @max: maximum boundary to allocate
  * @align: alignment requested, in bytes
  * @alignf: alignment function, optional, called if not NULL
  * @alignf_data: arbitrary data to pass to the @alignf function
@@ -458,12 +532,25 @@ int allocate_resource(struct resource *root, struct resource *new,
 		      void *alignf_data)
 {
 	int err;
+	struct resource_constraint constraint;
 
 	if (!alignf)
 		alignf = simple_align_resource;
 
+	constraint.min = min;
+	constraint.max = max;
+	constraint.align = align;
+	constraint.alignf = alignf;
+	constraint.alignf_data = alignf_data;
+
+	if ( new->parent ) {
+		/* resource is already allocated, try reallocating with
+		   the new constraints */
+		return reallocate_resource(root, new, size, &constraint);
+	}
+
 	write_lock(&resource_lock);
-	err = find_resource(root, new, size, min, max, align, alignf, alignf_data);
+	err = find_resource(root, new, size, &constraint);
 	if (err >= 0 && __request_resource(root, new))
 		err = -EBUSY;
 	write_unlock(&resource_lock);
@@ -471,6 +558,27 @@ int allocate_resource(struct resource *root, struct resource *new,
 }
 
 EXPORT_SYMBOL(allocate_resource);
+
+/**
+ * lookup_resource - find an existing resource by a resource start address
+ * @root: root resource descriptor
+ * @start: resource start address
+ *
+ * Returns a pointer to the resource if found, NULL otherwise
+ */
+struct resource *lookup_resource(struct resource *root, resource_size_t start)
+{
+	struct resource *res;
+
+	read_lock(&resource_lock);
+	for (res = root->child; res; res = res->sibling) {
+		if (res->start == start)
+			break;
+	}
+	read_unlock(&resource_lock);
+
+	return res;
+}
 
 /*
  * Insert a resource into the resource tree. If successful, return NULL,
@@ -486,6 +594,8 @@ static struct resource * __insert_resource(struct resource *parent, struct resou
 			return first;
 
 		if (first == parent)
+			return first;
+		if (WARN_ON(first == new))	/* duplicated insertion */
 			return first;
 
 		if ((first->start > new->start) || (first->end < new->end))
@@ -640,6 +750,7 @@ int adjust_resource(struct resource *res, resource_size_t start, resource_size_t
 	write_unlock(&resource_lock);
 	return result;
 }
+EXPORT_SYMBOL(adjust_resource);
 
 static void __init __reserve_region_with_split(struct resource *root,
 		resource_size_t start, resource_size_t end,
@@ -728,8 +839,6 @@ void __init reserve_region_with_split(struct resource *root,
 		__reserve_region_with_split(root, start, end, name);
 	write_unlock(&resource_lock);
 }
-
-EXPORT_SYMBOL(adjust_resource);
 
 /**
  * resource_alignment - calculate resource's alignment

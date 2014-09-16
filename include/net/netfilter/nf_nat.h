@@ -83,6 +83,9 @@ extern unsigned int nf_nat_setup_info(struct nf_conn *ct,
 				      const struct nf_nat_range *range,
 				      enum nf_nat_manip_type maniptype);
 
+extern unsigned int nf_nat_alloc_null_binding(struct nf_conn *ct,
+					      unsigned int hooknum);
+
 /* Is this tuple already taken? (not by us)*/
 extern int nf_nat_used_tuple(const struct nf_conntrack_tuple *tuple,
 			     const struct nf_conn *ignored_conntrack);

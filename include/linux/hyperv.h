@@ -26,6 +26,7 @@
 #define _HYPERV_H
 
 #include <linux/types.h>
+#include <linux/uuid.h>
 
 /*
  * Framework version for util services.
@@ -94,6 +95,50 @@ struct hv_vss_msg {
 		struct hv_vss_check_dm_info dm_info;
 	};
 } __attribute__((packed));
+
+/*
+ * Implementation of a host to guest copy facility.
+ */
+
+#define FCOPY_VERSION_0 0
+#define FCOPY_CURRENT_VERSION FCOPY_VERSION_0
+#define W_MAX_PATH 260
+
+enum hv_fcopy_op {
+	START_FILE_COPY = 0,
+	WRITE_TO_FILE,
+	COMPLETE_FCOPY,
+	CANCEL_FCOPY,
+};
+
+struct hv_fcopy_hdr {
+	__u32 operation;
+	uuid_le service_id0; /* currently unused */
+	uuid_le service_id1; /* currently unused */
+} __attribute__((packed));
+
+#define OVER_WRITE     0x1
+#define CREATE_PATH    0x2
+
+struct hv_start_fcopy {
+	struct hv_fcopy_hdr hdr;
+	__u16 file_name[W_MAX_PATH];
+	__u16 path_name[W_MAX_PATH];
+	__u32 copy_flags;
+	__u64 file_size;
+} __attribute__((packed));
+
+/*
+ * The file is chunked into fragments.
+ */
+#define DATA_FRAGMENT  (6 * 1024)
+
+struct hv_do_fcopy {
+	struct hv_fcopy_hdr hdr;
+	__u64   offset;
+	__u32   size;
+	__u8    data[DATA_FRAGMENT];
+};
 
 /*
  * An implementation of HyperV key value pair (KVP) functionality for Linux.
@@ -261,6 +306,7 @@ enum hv_kvp_exchg_pool {
 #define HV_ERROR_DEVICE_NOT_CONNECTED	0x8007048F
 #define HV_INVALIDARG			0x80070057
 #define HV_GUID_NOTFOUND		0x80041002
+#define HV_ERROR_ALREADY_EXISTS	0x80070050
 
 #define ADDR_FAMILY_NONE	0x00
 #define ADDR_FAMILY_IPV4	0x01
@@ -346,7 +392,6 @@ struct hv_kvp_ip_msg {
 #ifdef __KERNEL__
 #include <linux/scatterlist.h>
 #include <linux/list.h>
-#include <linux/uuid.h>
 #include <linux/timer.h>
 #include <linux/workqueue.h>
 #include <linux/completion.h>
@@ -354,7 +399,7 @@ struct hv_kvp_ip_msg {
 #include <linux/mod_devicetable.h>
 
 
-#define MAX_PAGE_BUFFER_COUNT				19
+#define MAX_PAGE_BUFFER_COUNT				32
 #define MAX_MULTIPAGE_BUFFER_COUNT			32 /* 128K */
 
 #pragma pack(push, 1)
@@ -494,15 +539,17 @@ hv_get_ringbuffer_availbytes(struct hv_ring_buffer_info *rbi,
  * 0 . 13 (Windows Server 2008)
  * 1 . 1  (Windows 7)
  * 2 . 4  (Windows 8)
+ * 3 . 0  (Windows 8 R2)
  */
 
 #define VERSION_WS2008  ((0 << 16) | (13))
 #define VERSION_WIN7    ((1 << 16) | (1))
 #define VERSION_WIN8    ((2 << 16) | (4))
+#define VERSION_WIN8_1    ((3 << 16) | (0))
 
 #define VERSION_INVAL -1
 
-#define VERSION_CURRENT VERSION_WIN8
+#define VERSION_CURRENT VERSION_WIN8_1
 
 /* Make maximum size of pipe payload of 16K */
 #define MAX_PIPE_DATA_PAYLOAD		(sizeof(u8) * 16384)
@@ -905,7 +952,7 @@ struct vmbus_channel_relid_released {
 struct vmbus_channel_initiate_contact {
 	struct vmbus_channel_message_header header;
 	u32 vmbus_version_requested;
-	u32 padding2;
+	u32 target_vcpu; /* The VCPU the host should respond to */
 	u64 interrupt_page;
 	u64 monitor_page1;
 	u64 monitor_page2;
@@ -1058,6 +1105,8 @@ struct vmbus_channel {
 	 * preserve the earlier behavior.
 	 */
 	u32 target_vp;
+	/* The corresponding CPUID in the guest */
+	u32 target_cpu;
 	/*
 	 * Support for sub-channels. For high performance devices,
 	 * it will be useful to have multiple sub-channels to support
@@ -1090,11 +1139,30 @@ struct vmbus_channel {
 	 * This will be NULL for the primary channel.
 	 */
 	struct vmbus_channel *primary_channel;
+	/*
+	 * Support per-channel state for use by vmbus drivers.
+	 */
+	void *per_channel_state;
+	/*
+	 * To support per-cpu lookup mapping of relid to channel,
+	 * link up channels based on their CPU affinity.
+	 */
+	struct list_head percpu_list;
 };
 
 static inline void set_channel_read_state(struct vmbus_channel *c, bool state)
 {
 	c->batched_reading = state;
+}
+
+static inline void set_per_channel_state(struct vmbus_channel *c, void *s)
+{
+	c->per_channel_state = s;
+}
+
+static inline void *get_per_channel_state(struct vmbus_channel *c)
+{
+	return c->per_channel_state;
 }
 
 void vmbus_onmessage(void *context);
@@ -1410,6 +1478,17 @@ void vmbus_driver_unregister(struct hv_driver *hv_driver);
 		}
 
 /*
+ * Guest File Copy Service
+ * {34D14BE3-DEE4-41c8-9AE7-6B174977C192}
+ */
+
+#define HV_FCOPY_GUID \
+	.guid = { \
+			0xE3, 0x4B, 0xD1, 0x34, 0xE4, 0xDE, 0xC8, 0x41, \
+			0x9A, 0xE7, 0x6B, 0x17, 0x49, 0x77, 0xC1, 0x92 \
+		}
+
+/*
  * Common header for Hyper-V ICs
  */
 
@@ -1516,6 +1595,8 @@ void hv_kvp_onchannelcallback(void *);
 int hv_vss_init(struct hv_util_service *);
 void hv_vss_deinit(void);
 void hv_vss_onchannelcallback(void *);
+
+extern struct resource hyperv_mmio;
 
 /*
  * Negotiated version with the Host.

@@ -27,6 +27,7 @@
 #include <linux/pci-aspm.h>
 #include <linux/firmware.h>
 #include <linux/pci-aspm.h>
+#include <linux/u64_stats_sync.h>
 
 #include <asm/system.h>
 #include <asm/io.h>
@@ -713,6 +714,12 @@ enum rtl_flag {
 	RTL_FLAG_MAX
 };
 
+struct rtl8169_stats {
+	u64			packets;
+	u64			bytes;
+	struct u64_stats_sync	syncp;
+};
+
 struct rtl8169_private {
 	void __iomem *mmio_addr;	/* memory map physical address */
 	struct pci_dev *pci_dev;
@@ -725,6 +732,8 @@ struct rtl8169_private {
 	u32 cur_tx; /* Index into the Tx descriptor buffer of next Rx pkt. */
 	u32 dirty_rx;
 	u32 dirty_tx;
+	struct rtl8169_stats rx_stats;
+	struct rtl8169_stats tx_stats;
 	struct TxDesc *TxDescArray;	/* 256-aligned Tx descriptor ring */
 	struct RxDesc *RxDescArray;	/* 256-aligned Rx descriptor ring */
 	dma_addr_t TxPhyAddr;
@@ -5922,8 +5931,10 @@ static void rtl_tx(struct net_device *dev, struct rtl8169_private *tp)
 		rtl8169_unmap_tx_skb(&tp->pci_dev->dev, tx_skb,
 				     tp->TxDescArray + entry);
 		if (status & LastFrag) {
-			dev->stats.tx_packets++;
-			dev->stats.tx_bytes += tx_skb->skb->len;
+			u64_stats_update_begin(&tp->tx_stats.syncp);
+			tp->tx_stats.packets++;
+			tp->tx_stats.bytes += tx_skb->skb->len;
+			u64_stats_update_end(&tp->tx_stats.syncp);
 			dev_kfree_skb(tx_skb->skb);
 			tx_skb->skb = NULL;
 		}
@@ -6058,8 +6069,10 @@ static int rtl_rx(struct net_device *dev, struct rtl8169_private *tp, u32 budget
 			if (rtl8169_rx_vlan_skb(tp, desc, skb) < 0)
 				napi_gro_receive(&tp->napi, skb);
 
-			dev->stats.rx_bytes += pkt_size;
-			dev->stats.rx_packets++;
+			u64_stats_update_begin(&tp->rx_stats.syncp);
+			tp->rx_stats.packets++;
+			tp->rx_stats.bytes += pkt_size;
+			u64_stats_update_end(&tp->rx_stats.syncp);
 		}
 
 		/* Work around for AMD plateform. */
@@ -6360,21 +6373,38 @@ err_pm_runtime_put:
 	goto out;
 }
 
-/**
- *  rtl8169_get_stats - Get rtl8169 read/write statistics
- *  @dev: The Ethernet Device to get statistics for
- *
- *  Get TX/RX statistics for rtl8169
- */
-static struct net_device_stats *rtl8169_get_stats(struct net_device *dev)
+static struct rtnl_link_stats64 *
+rtl8169_get_stats64(struct net_device *dev, struct rtnl_link_stats64 *stats)
 {
 	struct rtl8169_private *tp = netdev_priv(dev);
 	void __iomem *ioaddr = tp->mmio_addr;
+	unsigned int start;
 
 	if (netif_running(dev))
 		rtl8169_rx_missed(dev, ioaddr);
 
-	return &dev->stats;
+	do {
+		start = u64_stats_fetch_begin_irq(&tp->rx_stats.syncp);
+		stats->rx_packets = tp->rx_stats.packets;
+		stats->rx_bytes	= tp->rx_stats.bytes;
+	} while (u64_stats_fetch_retry_irq(&tp->rx_stats.syncp, start));
+
+
+	do {
+		start = u64_stats_fetch_begin_irq(&tp->tx_stats.syncp);
+		stats->tx_packets = tp->tx_stats.packets;
+		stats->tx_bytes	= tp->tx_stats.bytes;
+	} while (u64_stats_fetch_retry_irq(&tp->tx_stats.syncp, start));
+
+	stats->rx_dropped	= dev->stats.rx_dropped;
+	stats->tx_dropped	= dev->stats.tx_dropped;
+	stats->rx_length_errors	= dev->stats.rx_length_errors;
+	stats->rx_errors	= dev->stats.rx_errors;
+	stats->rx_crc_errors	= dev->stats.rx_crc_errors;
+	stats->rx_fifo_errors	= dev->stats.rx_fifo_errors;
+	stats->rx_missed_errors	= dev->stats.rx_missed_errors;
+
+	return stats;
 }
 
 static void rtl8169_net_suspend(struct net_device *dev)
@@ -6592,7 +6622,6 @@ static void __devexit rtl_remove_one(struct pci_dev *pdev)
 static const struct net_device_ops rtl_netdev_ops = {
 	.ndo_open		= rtl_open,
 	.ndo_stop		= rtl8169_close,
-	.ndo_get_stats		= rtl8169_get_stats,
 	.ndo_start_xmit		= rtl8169_start_xmit,
 	.ndo_tx_timeout		= rtl8169_tx_timeout,
 	.ndo_validate_addr	= eth_validate_addr,
@@ -6607,6 +6636,11 @@ static const struct net_device_ops rtl_netdev_ops = {
 	.ndo_poll_controller	= rtl8169_netpoll,
 #endif
 
+};
+
+static const struct net_device_ops_ext rtl_netdev_ops_ext = {
+	.size			= sizeof(struct net_device_ops_ext),
+	.ndo_get_stats64	= rtl8169_get_stats64,
 };
 
 static const struct rtl_cfg_info {
@@ -6752,6 +6786,7 @@ rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	SET_NETDEV_DEV(dev, &pdev->dev);
 	dev->netdev_ops = &rtl_netdev_ops;
+	set_netdev_ops_ext(dev, &rtl_netdev_ops_ext);
 	tp = netdev_priv(dev);
 	tp->dev = dev;
 	tp->pci_dev = pdev;

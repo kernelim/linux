@@ -285,6 +285,45 @@ int sysdev_add(struct sys_device *sysdev)
 }
 EXPORT_SYMBOL_GPL(sysdev_add);
 
+int sysdev_add_hack(struct sys_device *sysdev)
+{
+	int error;
+	struct sysdev_class *cls = sysdev->cls;
+
+	if (!cls)
+		return -EINVAL;
+
+	error = kobject_add(&sysdev->kobj, NULL, "%s%d",
+			    kobject_name(&cls->kset.kobj), sysdev->id);
+
+	if (!error) {
+		struct sysdev_driver *drv;
+
+		pr_debug("Registering sys device '%s'\n",
+			 kobject_name(&sysdev->kobj));
+
+		mutex_lock(&sysdev_drivers_lock);
+		/* Generic notification is implicit, because it's that
+		 * code that should have called us.
+		 */
+
+		/* Notify class auxillary drivers */
+		list_for_each_entry(drv, &cls->drivers, entry) {
+			if (drv->add)
+				drv->add(sysdev);
+		}
+		mutex_unlock(&sysdev_drivers_lock);
+		/*
+		 * FIXME: init_memory_block() issues the event
+		 * once its sysfs files are visible as well.
+		 * This is a hack only!!!
+		 */
+		/* XXX: kobject_uevent(&sysdev->kobj, KOBJ_ADD); */
+	}
+
+	return error;
+}
+EXPORT_SYMBOL_GPL(sysdev_add_hack);
 /**
  *	sysdev_register - add a system device to the tree
  *	@sysdev:	device in question
@@ -303,6 +342,18 @@ int sysdev_register(struct sys_device *sysdev)
 	return sysdev_add(sysdev);
 }
 
+int sysdev_register_hack(struct sys_device *sysdev)
+{
+	struct sysdev_class *cls = sysdev->cls;
+
+	if (sysdev_initialize(sysdev))
+		return -EINVAL;
+
+	pr_debug("Registering sys device of class '%s'\n",
+		 kobject_name(&cls->kset.kobj));
+
+	return sysdev_add_hack(sysdev);
+}
 void sysdev_unregister(struct sys_device *sysdev)
 {
 	struct sysdev_driver *drv;
@@ -523,6 +574,7 @@ int __init system_bus_init(void)
 }
 
 EXPORT_SYMBOL_GPL(sysdev_register);
+EXPORT_SYMBOL_GPL(sysdev_register_hack);
 EXPORT_SYMBOL_GPL(sysdev_unregister);
 
 #define to_ext_attr(x) container_of(x, struct sysdev_ext_attribute, attr)

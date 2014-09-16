@@ -98,7 +98,9 @@ extern void efi_call_phys_prelog_in_physmode(void);
 extern void efi_call_phys_epilog_in_physmode(void);
 extern void efi_pagetable_init(void);
 
-#ifndef CONFIG_EFI
+#ifdef CONFIG_EFI
+extern struct console early_efi_console;
+#else
 /*
  * IF EFI is not configured, have the EFI calls return -ENOSYS.
  */

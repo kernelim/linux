@@ -103,6 +103,9 @@ enum si_intf_state {
 #define IPMI_BT_INTMASK_CLEAR_IRQ_BIT	2
 #define IPMI_BT_INTMASK_ENABLE_IRQ_BIT	1
 
+int ipmi_si_loaded;
+EXPORT_SYMBOL(ipmi_si_loaded);
+
 enum si_type {
     SI_KCS, SI_SMIC, SI_BT
 };
@@ -254,11 +257,17 @@ struct smi_info {
 	/* The timer for this si. */
 	struct timer_list   si_timer;
 
+	/* This flag is set, if the timer is running (timer_pending() isn't enough) */
+	bool		    timer_running;
+
 	/* The time (in jiffies) the last timeout occurred at. */
 	unsigned long       last_timeout_jiffies;
 
 	/* Used to gracefully stop the timer without race conditions. */
 	atomic_t            stop_operation;
+
+	/* Are we waiting for the events, pretimeouts, received msgs? */
+	atomic_t            need_watch;
 
 	/*
 	 * The driver will disable interrupts when it gets into a
@@ -441,6 +450,13 @@ static void start_clear_flags(struct smi_info *smi_info)
 	smi_info->si_state = SI_CLEARING_FLAGS;
 }
 
+static void smi_mod_timer(struct smi_info *smi_info, unsigned long new_val)
+{
+	smi_info->last_timeout_jiffies = jiffies;
+	mod_timer(&smi_info->si_timer, new_val);
+	smi_info->timer_running = true;
+}
+
 /*
  * When we have a situtaion where we run out of memory and cannot
  * allocate messages, we just leave them in the BMC and run the system
@@ -453,7 +469,7 @@ static inline void disable_si_irq(struct smi_info *smi_info)
 		start_disable_irq(smi_info);
 		smi_info->interrupt_disabled = 1;
 		if (!atomic_read(&smi_info->stop_operation))
-			mod_timer(&smi_info->si_timer, jiffies + SI_TIMEOUT_JIFFIES);
+			smi_mod_timer(smi_info, jiffies + SI_TIMEOUT_JIFFIES);
 	}
 }
 
@@ -676,8 +692,10 @@ static void handle_transaction_done(struct smi_info *smi_info)
 		/* We got the flags from the SMI, now handle them. */
 		smi_info->handlers->get_result(smi_info->si_sm, msg, 4);
 		if (msg[2] != 0) {
-			dev_warn(smi_info->dev, "Could not enable interrupts"
-				 ", failed get, using polled mode.\n");
+			dev_warn(smi_info->dev,
+				 "Couldn't get irq info: %x.\n", msg[2]);
+			dev_warn(smi_info->dev,
+				 "Maybe ok, but ipmi might run very slowly.\n");
 			smi_info->si_state = SI_NORMAL;
 		} else {
 			msg[0] = (IPMI_NETFN_APP_REQUEST << 2);
@@ -698,10 +716,12 @@ static void handle_transaction_done(struct smi_info *smi_info)
 
 		/* We got the flags from the SMI, now handle them. */
 		smi_info->handlers->get_result(smi_info->si_sm, msg, 4);
-		if (msg[2] != 0)
-			dev_warn(smi_info->dev, "Could not enable interrupts"
-				 ", failed set, using polled mode.\n");
-		else
+		if (msg[2] != 0) {
+			dev_warn(smi_info->dev,
+				 "Couldn't set irq info: %x.\n", msg[2]);
+			dev_warn(smi_info->dev,
+				 "Maybe ok, but ipmi might run very slowly.\n");
+		} else
 			smi_info->interrupt_disabled = 0;
 		smi_info->si_state = SI_NORMAL;
 		break;
@@ -855,6 +875,19 @@ static enum si_sm_result smi_event_handler(struct smi_info *smi_info,
 	return si_sm_result;
 }
 
+static void check_start_timer_thread(struct smi_info *smi_info)
+{
+	if (smi_info->si_state == SI_NORMAL && smi_info->curr_msg == NULL) {
+		smi_mod_timer(smi_info, jiffies + SI_TIMEOUT_JIFFIES);
+
+		if (smi_info->thread)
+			wake_up_process(smi_info->thread);
+
+		start_next_msg(smi_info);
+		smi_event_handler(smi_info, 0);
+	}
+}
+
 static void sender(void                *send_info,
 		   struct ipmi_smi_msg *msg,
 		   int                 priority)
@@ -908,23 +941,7 @@ static void sender(void                *send_info,
 	else
 		list_add_tail(&msg->link, &smi_info->xmit_msgs);
 
-	if (smi_info->si_state == SI_NORMAL && smi_info->curr_msg == NULL) {
-		/*
-		 * last_timeout_jiffies is updated here to avoid
-		 * smi_timeout() handler passing very large time_diff
-		 * value to smi_event_handler() that causes
-		 * the send command to abort.
-		 */
-		smi_info->last_timeout_jiffies = jiffies;
-
-		mod_timer(&smi_info->si_timer, jiffies + SI_TIMEOUT_JIFFIES);
-
-		if (smi_info->thread)
-			wake_up_process(smi_info->thread);
-
-		start_next_msg(smi_info);
-		smi_event_handler(smi_info, 0);
-	}
+	check_start_timer_thread(smi_info);
 	spin_unlock_irqrestore(&smi_info->si_lock, flags);
 }
 
@@ -1008,6 +1025,17 @@ static int ipmi_thread(void *data)
 
 		spin_lock_irqsave(&(smi_info->si_lock), flags);
 		smi_result = smi_event_handler(smi_info, 0);
+
+		/*
+		 * If the driver is doing something, there is a possible
+		 * race with the timer.  If the timer handler see idle,
+		 * and the thread here sees something else, the timer
+		 * handler won't restart the timer even though it is
+		 * required.  So start it here if necessary.
+		 */
+		if (smi_result != SI_SM_IDLE && !smi_info->timer_running)
+			smi_mod_timer(smi_info, jiffies + SI_TIMEOUT_JIFFIES);
+
 		spin_unlock_irqrestore(&(smi_info->si_lock), flags);
 		busy_wait = ipmi_thread_busy_wait(smi_result, smi_info,
 						  &busy_until);
@@ -1016,9 +1044,15 @@ static int ipmi_thread(void *data)
 			; /* do nothing */
 		else if (smi_result == SI_SM_CALL_WITH_DELAY && busy_wait)
 			schedule();
-		else if (smi_result == SI_SM_IDLE)
-			schedule_timeout_interruptible(100);
-		else
+		else if (smi_result == SI_SM_IDLE) {
+			if (atomic_read(&smi_info->need_watch)) {
+				schedule_timeout_interruptible(100);
+			} else {
+				/* Wait to be woken up when we are needed. */
+				__set_current_state(TASK_INTERRUPTIBLE);
+				schedule();
+			}
+		} else
 			schedule_timeout_interruptible(1);
 	}
 	return 0;
@@ -1054,6 +1088,17 @@ static void request_events(void *send_info)
 	atomic_set(&smi_info->req_events, 1);
 }
 
+static void set_need_watch(void *send_info, int enable)
+{
+	struct smi_info *smi_info = send_info;
+	unsigned long flags;
+
+	atomic_set(&smi_info->need_watch, enable);
+	spin_lock_irqsave(&smi_info->si_lock, flags);
+	check_start_timer_thread(smi_info);
+	spin_unlock_irqrestore(&smi_info->si_lock, flags);
+}
+
 static int initialized;
 
 static void smi_timeout(unsigned long data)
@@ -1078,10 +1123,6 @@ static void smi_timeout(unsigned long data)
 		     * SI_USEC_PER_JIFFY);
 	smi_result = smi_event_handler(smi_info, time_diff);
 
-	spin_unlock_irqrestore(&(smi_info->si_lock), flags);
-
-	smi_info->last_timeout_jiffies = jiffies_now;
-
 	if ((smi_info->irq) && (!smi_info->interrupt_disabled)) {
 		/* Running with interrupts, only do long timeouts. */
 		timeout = jiffies + SI_TIMEOUT_JIFFIES;
@@ -1103,7 +1144,10 @@ static void smi_timeout(unsigned long data)
 
  do_mod_timer:
 	if (smi_result != SI_SM_IDLE)
-		mod_timer(&(smi_info->si_timer), timeout);
+		smi_mod_timer(smi_info, timeout);
+	else
+		smi_info->timer_running = false;
+	spin_unlock_irqrestore(&(smi_info->si_lock), flags);
 }
 
 static irqreturn_t si_irq_handler(int irq, void *data)
@@ -1151,8 +1195,7 @@ static int smi_start_processing(void       *send_info,
 
 	/* Set up the timer that drives the interface. */
 	setup_timer(&new_smi->si_timer, smi_timeout, (long)new_smi);
-	new_smi->last_timeout_jiffies = jiffies;
-	mod_timer(&new_smi->si_timer, jiffies + SI_TIMEOUT_JIFFIES);
+	smi_mod_timer(new_smi, jiffies + SI_TIMEOUT_JIFFIES);
 
 	/*
 	 * Check if the user forcefully enabled the daemon.
@@ -2290,6 +2333,8 @@ static struct pnp_driver ipmi_pnp_driver = {
 	.remove		= __devexit_p(ipmi_pnp_remove),
 	.id_table	= pnp_dev_table,
 };
+
+MODULE_DEVICE_TABLE(pnp, pnp_dev_table);
 #endif
 
 #ifdef CONFIG_DMI
@@ -3142,6 +3187,7 @@ static int try_smi_init(struct smi_info *new_smi)
 {
 	int rv = 0;
 	int i;
+	struct ipmi_shadow_smi_handlers *shadow_handlers;
 
 	printk(KERN_INFO PFX "Trying %s-specified %s state"
 	       " machine at %s address 0x%lx, slave address 0x%x,"
@@ -3222,6 +3268,7 @@ static int try_smi_init(struct smi_info *new_smi)
 
 	new_smi->interrupt_disabled = 1;
 	atomic_set(&new_smi->stop_operation, 0);
+	atomic_set(&new_smi->need_watch, 0);
 	new_smi->intf_num = smi_num;
 	smi_num++;
 
@@ -3277,6 +3324,12 @@ static int try_smi_init(struct smi_info *new_smi)
 			rv);
 		goto out_err_stop_timer;
 	}
+
+	/* RHEL6-only - Init ipmi_shadow_smi_handlers
+	 */
+	shadow_handlers = ipmi_get_shadow_smi_handlers();
+	shadow_handlers->get_smi_info = ipmi_si_get_smi_info;
+	shadow_handlers->set_need_watch = set_need_watch;
 
 	rv = ipmi_smi_add_proc_entry(new_smi->intf, "type",
 				     type_file_read_proc,
@@ -3354,10 +3407,6 @@ static int try_smi_init(struct smi_info *new_smi)
 	return rv;
 }
 
-#ifdef CONFIG_X86_UV
-extern int is_uv_system(void);
-#endif
-
 static int __devinit init_ipmi_si(void)
 {
 	int  i;
@@ -3366,10 +3415,8 @@ static int __devinit init_ipmi_si(void)
 	struct smi_info *e;
 	enum ipmi_addr_src type = SI_INVALID;
 
-#ifdef CONFIG_X86_UV
-	if (is_uv_system())	/* Not supported on SGI UV systems */
-		return -ENODEV;
-#endif
+	ipmi_si_loaded = 0;
+
 	if (initialized)
 		return 0;
 	initialized = 1;
@@ -3406,6 +3453,7 @@ static int __devinit init_ipmi_si(void)
 	mutex_lock(&smi_infos_lock);
 	if (!list_empty(&smi_infos)) {
 		mutex_unlock(&smi_infos_lock);
+		ipmi_si_loaded = 1;
 		return 0;
 	}
 	mutex_unlock(&smi_infos_lock);
@@ -3472,6 +3520,7 @@ static int __devinit init_ipmi_si(void)
 	if (type) {
 		mutex_unlock(&smi_infos_lock);
 		ipmi_smi_probe_complete();
+		ipmi_si_loaded = 1;
 		return 0;
 	}
 
@@ -3488,6 +3537,7 @@ static int __devinit init_ipmi_si(void)
 
 	if (type) {
 		ipmi_smi_probe_complete();
+		ipmi_si_loaded = 1;
 		return 0;
 	}
 
@@ -3512,6 +3562,7 @@ static int __devinit init_ipmi_si(void)
 	} else {
 		mutex_unlock(&smi_infos_lock);
 		ipmi_smi_probe_complete();
+		ipmi_si_loaded = 1;
 		return 0;
 	}
 }

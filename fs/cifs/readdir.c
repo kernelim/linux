@@ -91,6 +91,14 @@ cifs_readdir_lookup(struct dentry *parent, struct qstr *name,
 		dput(dentry);
 	}
 
+	/*
+	 * If we know that the inode will need to be revalidated immediately,
+	 * then don't create a new dentry for it. We'll end up doing an on
+	 * the wire call either way and this spares us an invalidation.
+	 */
+	if (fattr->cf_flags & CIFS_FATTR_NEED_REVAL)
+		return NULL;
+
 	dentry = d_alloc(parent, name);
 	if (dentry == NULL)
 		return NULL;
@@ -117,6 +125,22 @@ cifs_readdir_lookup(struct dentry *parent, struct qstr *name,
 	return dentry;
 }
 
+/*
+ * Is it possible that this directory might turn out to be a DFS referral
+ * once we go to try and use it?
+ */
+static bool
+cifs_dfs_is_possible(struct cifs_sb_info *cifs_sb)
+{
+#ifdef CONFIG_CIFS_DFS_UPCALL
+	struct cifs_tcon *tcon = cifs_sb_master_tcon(cifs_sb);
+
+	if (tcon->Flags & SMB_SHARE_IS_IN_DFS)
+		return true;
+#endif
+	return false;
+}
+
 static void
 cifs_fill_common_info(struct cifs_fattr *fattr, struct cifs_sb_info *cifs_sb)
 {
@@ -126,6 +150,19 @@ cifs_fill_common_info(struct cifs_fattr *fattr, struct cifs_sb_info *cifs_sb)
 	if (fattr->cf_cifsattrs & ATTR_DIRECTORY) {
 		fattr->cf_mode = S_IFDIR | cifs_sb->mnt_dir_mode;
 		fattr->cf_dtype = DT_DIR;
+		/*
+		 * Windows CIFS servers generally make DFS referrals look
+		 * like directories in FIND_* responses with the reparse
+		 * attribute flag also set (since DFS junctions are
+		 * reparse points). We must revalidate at least these
+		 * directory inodes before trying to use them (if
+		 * they are DFS we will get PATH_NOT_COVERED back
+		 * when queried directly and can then try to connect
+		 * to the DFS target)
+		 */
+		if (cifs_dfs_is_possible(cifs_sb) &&
+		    (fattr->cf_cifsattrs & ATTR_REPARSE))
+			fattr->cf_flags |= CIFS_FATTR_NEED_REVAL;
 	} else {
 		fattr->cf_mode = S_IFREG | cifs_sb->mnt_file_mode;
 		fattr->cf_dtype = DT_REG;

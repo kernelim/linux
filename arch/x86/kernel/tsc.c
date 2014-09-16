@@ -1008,7 +1008,9 @@ void __init tsc_init(void)
 		return;
 
 	if (tsc_init_debug ||
-	    ((boot_cpu_data.x86 == 6) && (boot_cpu_data.x86_model == 45))) {
+	    ((boot_cpu_data.x86 == 6) &&
+	     ((boot_cpu_data.x86_model == 45) ||
+	      (boot_cpu_data.x86_model == 62)))) {
 		printk(KERN_INFO
 		       "TSC: cpu family %d model %d, tsc initial value = %llx\n",
 		       boot_cpu_data.x86, boot_cpu_data.x86_model,

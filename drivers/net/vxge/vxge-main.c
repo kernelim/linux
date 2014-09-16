@@ -366,11 +366,13 @@ vxge_rx_complete(struct vxge_ring *ring, struct sk_buff *skb, u16 vlan,
 	skb_record_rx_queue(skb, ring->driver_id);
 	skb->protocol = eth_type_trans(skb, ring->ndev);
 
+	u64_stats_update_begin(&ring->stats.syncp);
 	ring->stats.rx_frms++;
 	ring->stats.rx_bytes += pkt_length;
 
 	if (skb->pkt_type == PACKET_MULTICAST)
 		ring->stats.rx_mcast++;
+	u64_stats_update_end(&ring->stats.syncp);
 
 	vxge_debug_rx(VXGE_TRACE,
 		"%s: %s:%d  skb protocol = %d",
@@ -659,8 +661,10 @@ vxge_xmit_compl(struct __vxge_hw_fifo *fifo_hw, void *dtr,
 		vxge_hw_fifo_txdl_free(fifo_hw, dtr);
 
 		/* Updating the statistics block */
+		u64_stats_update_begin(&fifo->stats.syncp);
 		fifo->stats.tx_frms++;
 		fifo->stats.tx_bytes += skb->len;
+		u64_stats_update_end(&fifo->stats.syncp);
 
 		*done_skb++ = skb;
 
@@ -2576,11 +2580,16 @@ static void vxge_poll_vp_lockup(unsigned long data)
 	int i;
 	struct vxge_ring *ring;
 	enum vxge_hw_status status = VXGE_HW_OK;
+	unsigned long rx_frms;
 
 	for (i = 0; i < vdev->no_of_vpath; i++) {
 		ring = &vdev->vpaths[i].ring;
+
+		/* Truncated to machine word size number of frames */
+		rx_frms = ACCESS_ONCE(ring->stats.rx_frms);
+
 		/* Did this vpath received any packets */
-		if (ring->stats.prev_rx_frms == ring->stats.rx_frms) {
+		if (ring->stats.prev_rx_frms == rx_frms) {
 			status = vxge_hw_vpath_check_leak(ring->handle);
 
 			/* Did it received any packets last time */
@@ -2600,7 +2609,7 @@ static void vxge_poll_vp_lockup(unsigned long data)
 				}
 			}
 		}
-		ring->stats.prev_rx_frms = ring->stats.rx_frms;
+		ring->stats.prev_rx_frms = rx_frms;
 		ring->last_status = status;
 	}
 
@@ -3000,37 +3009,49 @@ static int vxge_change_mtu(struct net_device *dev, int new_mtu)
 }
 
 /**
- * vxge_get_stats
+ * vxge_get_stats64
  * @dev: pointer to the device structure
+ * @stats: pointer to struct rtnl_link_stats64
  *
- * Updates the device statistics structure. This function updates the device
- * statistics structure in the net_device structure and returns a pointer
- * to the same.
  */
-static struct net_device_stats *
-vxge_get_stats(struct net_device *dev)
+static struct rtnl_link_stats64 *
+vxge_get_stats64(struct net_device *dev, struct rtnl_link_stats64 *net_stats)
 {
-	struct vxgedev *vdev;
-	struct net_device_stats *net_stats;
+	struct vxgedev *vdev = netdev_priv(dev);
 	int k;
 
-	vdev = netdev_priv(dev);
-
-	net_stats = &vdev->stats.net_stats;
-
-	memset(net_stats, 0, sizeof(struct net_device_stats));
-
+	/* net_stats already zeroed by caller */
 	for (k = 0; k < vdev->no_of_vpath; k++) {
-		net_stats->rx_packets += vdev->vpaths[k].ring.stats.rx_frms;
-		net_stats->rx_bytes += vdev->vpaths[k].ring.stats.rx_bytes;
-		net_stats->rx_errors += vdev->vpaths[k].ring.stats.rx_errors;
-		net_stats->multicast += vdev->vpaths[k].ring.stats.rx_mcast;
-		net_stats->rx_dropped +=
-			vdev->vpaths[k].ring.stats.rx_dropped;
+		struct vxge_ring_stats *rxstats = &vdev->vpaths[k].ring.stats;
+		struct vxge_fifo_stats *txstats = &vdev->vpaths[k].fifo.stats;
+		unsigned int start;
+		u64 packets, bytes, multicast;
 
-		net_stats->tx_packets += vdev->vpaths[k].fifo.stats.tx_frms;
-		net_stats->tx_bytes += vdev->vpaths[k].fifo.stats.tx_bytes;
-		net_stats->tx_errors += vdev->vpaths[k].fifo.stats.tx_errors;
+		do {
+			start = u64_stats_fetch_begin_irq(&rxstats->syncp);
+
+			packets   = rxstats->rx_frms;
+			multicast = rxstats->rx_mcast;
+			bytes     = rxstats->rx_bytes;
+		} while (u64_stats_fetch_retry_irq(&rxstats->syncp, start));
+
+		net_stats->rx_packets += packets;
+		net_stats->rx_bytes += bytes;
+		net_stats->multicast += multicast;
+
+		net_stats->rx_errors += rxstats->rx_errors;
+		net_stats->rx_dropped += rxstats->rx_dropped;
+
+		do {
+			start = u64_stats_fetch_begin_irq(&txstats->syncp);
+
+			packets = txstats->tx_frms;
+			bytes   = txstats->tx_bytes;
+		} while (u64_stats_fetch_retry_irq(&txstats->syncp, start));
+
+		net_stats->tx_packets += packets;
+		net_stats->tx_bytes += bytes;
+		net_stats->tx_errors += txstats->tx_errors;
 	}
 
 	return net_stats;
@@ -3188,7 +3209,6 @@ vxge_vlan_rx_kill_vid(struct net_device *dev, unsigned short vid)
 static const struct net_device_ops vxge_netdev_ops = {
 	.ndo_open               = vxge_open,
 	.ndo_stop               = vxge_close,
-	.ndo_get_stats          = vxge_get_stats,
 	.ndo_start_xmit         = vxge_xmit,
 	.ndo_validate_addr      = eth_validate_addr,
 	.ndo_set_multicast_list = vxge_set_multicast,
@@ -3205,6 +3225,11 @@ static const struct net_device_ops vxge_netdev_ops = {
 #ifdef CONFIG_NET_POLL_CONTROLLER
 	.ndo_poll_controller    = vxge_netpoll,
 #endif
+};
+
+static const struct net_device_ops_ext vxge_netdev_ops_ext = {
+	.size			= sizeof(struct net_device_ops_ext),
+	.ndo_get_stats64        = vxge_get_stats64,
 };
 
 int __devinit vxge_device_register(struct __vxge_hw_device *hldev,
@@ -3255,6 +3280,7 @@ int __devinit vxge_device_register(struct __vxge_hw_device *hldev,
 	ndev->base_addr = (unsigned long) hldev->bar0;
 
 	ndev->netdev_ops = &vxge_netdev_ops;
+	set_netdev_ops_ext(ndev, &vxge_netdev_ops_ext);
 
 	ndev->watchdog_timeo = VXGE_LL_WATCH_DOG_TIMEOUT;
 
@@ -3273,7 +3299,7 @@ int __devinit vxge_device_register(struct __vxge_hw_device *hldev,
 
 	ndev->features |= NETIF_F_SG;
 
-	ndev->features |= NETIF_F_HW_CSUM;
+	ndev->features |= NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM;
 	vxge_debug_init(vxge_hw_device_trace_level_get(hldev),
 		"%s : checksuming enabled", __func__);
 

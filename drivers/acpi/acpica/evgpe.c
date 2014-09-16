@@ -629,7 +629,7 @@ acpi_ev_gpe_dispatch(struct acpi_gpe_event_info *gpe_event_info, u32 gpe_number)
 		status = acpi_hw_clear_gpe(gpe_event_info);
 		if (ACPI_FAILURE(status)) {
 			ACPI_EXCEPTION((AE_INFO, status,
-					"Unable to clear GPE[%2X]",
+					"Unable to clear GPE[0x%2X]",
 					gpe_number));
 			return_UINT32(ACPI_INTERRUPT_NOT_HANDLED);
 		}
@@ -662,7 +662,7 @@ acpi_ev_gpe_dispatch(struct acpi_gpe_event_info *gpe_event_info, u32 gpe_number)
 			status = acpi_hw_clear_gpe(gpe_event_info);
 			if (ACPI_FAILURE(status)) {
 				ACPI_EXCEPTION((AE_INFO, status,
-						"Unable to clear GPE[%2X]",
+					"Unable to clear GPE[0x%2X]",
 						gpe_number));
 				return_UINT32(ACPI_INTERRUPT_NOT_HANDLED);
 			}
@@ -678,7 +678,7 @@ acpi_ev_gpe_dispatch(struct acpi_gpe_event_info *gpe_event_info, u32 gpe_number)
 		status = acpi_ev_disable_gpe(gpe_event_info);
 		if (ACPI_FAILURE(status)) {
 			ACPI_EXCEPTION((AE_INFO, status,
-					"Unable to disable GPE[%2X]",
+					"Unable to disable GPE[0x%2X]",
 					gpe_number));
 			return_UINT32(ACPI_INTERRUPT_NOT_HANDLED);
 		}
@@ -692,7 +692,7 @@ acpi_ev_gpe_dispatch(struct acpi_gpe_event_info *gpe_event_info, u32 gpe_number)
 					 gpe_event_info);
 		if (ACPI_FAILURE(status)) {
 			ACPI_EXCEPTION((AE_INFO, status,
-					"Unable to queue handler for GPE[%2X] - event disabled",
+					"Unable to queue handler for GPE[0x%2X] - event disabled",
 					gpe_number));
 		}
 		break;
@@ -702,7 +702,7 @@ acpi_ev_gpe_dispatch(struct acpi_gpe_event_info *gpe_event_info, u32 gpe_number)
 		/* No handler or method to run! */
 
 		ACPI_ERROR((AE_INFO,
-			    "No handler or method for GPE[%2X], disabling event",
+			    "No handler or method for GPE[0x%2X], disabling event",
 			    gpe_number));
 
 		/*
@@ -712,7 +712,7 @@ acpi_ev_gpe_dispatch(struct acpi_gpe_event_info *gpe_event_info, u32 gpe_number)
 		status = acpi_ev_disable_gpe(gpe_event_info);
 		if (ACPI_FAILURE(status)) {
 			ACPI_EXCEPTION((AE_INFO, status,
-					"Unable to disable GPE[%2X]",
+					"Unable to disable GPE[0x%2X]",
 					gpe_number));
 			return_UINT32(ACPI_INTERRUPT_NOT_HANDLED);
 		}

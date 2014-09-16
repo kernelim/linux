@@ -1241,8 +1241,8 @@ static void uart_set_termios(struct tty_struct *tty,
 		if (!(cflag & CRTSCTS) ||
 		    !test_bit(TTY_THROTTLED, &tty->flags))
 			mask |= TIOCM_RTS;
-		if (!(cflag & CDTRDSR) ||
-		    !test_bit(TTY_THROTTLED, &tty->flags))
+		if ((cflag & CDTRDSR) &&
+		    test_bit(TTY_THROTTLED, &tty->flags))
 			mask &= ~TIOCM_DTR;
 		uart_set_mctrl(state->uart_port, mask);
 	}

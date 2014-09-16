@@ -13,6 +13,7 @@
 #include <linux/sysctl.h>
 #include <linux/init.h>
 #include <linux/fs.h>
+#include <linux/magic.h>
 #include "trace.h"
 
 #define STACK_TRACE_ENTRIES 500
@@ -102,6 +103,8 @@ static inline void check_stack(void)
 			i++;
 	}
 
+	BUG_ON(current != &init_task &&
+		*(end_of_stack(current)) != STACK_END_MAGIC);
  out:
 	__raw_spin_unlock(&max_stack_lock);
 	local_irq_restore(flags);

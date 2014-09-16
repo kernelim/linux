@@ -61,3 +61,8 @@ int acpi_sleep_proc_init(void);
 #else
 static inline int acpi_sleep_proc_init(void) { return 0; }
 #endif
+
+/*--------------------------------------------------------------------------
+                                  Internal Dependencies
+  -------------------------------------------------------------------------- */
+extern int acpi_ipmi_loaded;

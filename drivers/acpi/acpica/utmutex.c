@@ -81,11 +81,27 @@ acpi_status acpi_ut_mutex_initialize(void)
 		}
 	}
 
-	/* Create the spinlocks for use at interrupt level */
+	/* Create the spinlocks for use at interrupt level or for speed */
 
-	spin_lock_init(acpi_gbl_gpe_lock);
-	spin_lock_init(acpi_gbl_hardware_lock);
-	spin_lock_init(acpi_ev_global_lock_pending_lock);
+	status = acpi_os_create_lock (&acpi_gbl_gpe_lock);
+	if (ACPI_FAILURE (status)) {
+		return_ACPI_STATUS (status);
+	}
+
+	status = acpi_os_create_lock (&acpi_gbl_hardware_lock);
+	if (ACPI_FAILURE (status)) {
+		return_ACPI_STATUS (status);
+	}
+
+	status = acpi_os_create_lock (&acpi_ev_global_lock_pending_lock);
+	if (ACPI_FAILURE (status)) {
+		return_ACPI_STATUS (status);
+	}
+
+	status = acpi_os_create_lock(&acpi_gbl_reference_count_lock);
+	if (ACPI_FAILURE(status)) {
+		return_ACPI_STATUS(status);
+	}
 
 	/* Create the reader/writer lock for namespace access */
 
@@ -122,6 +138,7 @@ void acpi_ut_mutex_terminate(void)
 
 	acpi_os_delete_lock(acpi_gbl_gpe_lock);
 	acpi_os_delete_lock(acpi_gbl_hardware_lock);
+	acpi_os_delete_lock(acpi_gbl_reference_count_lock);
 
 	/* Delete the reader/writer lock */
 
@@ -269,7 +286,7 @@ acpi_status acpi_ut_acquire_mutex(acpi_mutex_handle mutex_id)
 		acpi_gbl_mutex_info[mutex_id].thread_id = this_thread_id;
 	} else {
 		ACPI_EXCEPTION((AE_INFO, status,
-				"Thread %p could not acquire Mutex [%X]",
+				"Thread %p could not acquire Mutex [0x%X]",
 				ACPI_CAST_PTR(void, this_thread_id), mutex_id));
 	}
 
@@ -308,7 +325,7 @@ acpi_status acpi_ut_release_mutex(acpi_mutex_handle mutex_id)
 	 */
 	if (acpi_gbl_mutex_info[mutex_id].thread_id == ACPI_MUTEX_NOT_ACQUIRED) {
 		ACPI_ERROR((AE_INFO,
-			    "Mutex [%X] is not acquired, cannot release",
+			    "Mutex [0x%X] is not acquired, cannot release",
 			    mutex_id));
 
 		return (AE_NOT_ACQUIRED);

@@ -8,6 +8,7 @@
 #include <linux/bootmem.h>
 #include <linux/slab.h>
 #include <asm/dmi.h>
+#include <asm/unaligned.h>
 
 /*
  * DMI stands for "Desktop Management Interface".  It is part
@@ -21,6 +22,13 @@ static u16 __initdata dmi_ver;
  * Catch too early calls to dmi_check_system():
  */
 static int dmi_initialized;
+
+static struct dmi_memdev_info {
+	const char *device;
+	const char *bank;
+	u16 handle;
+} *dmi_memdev;
+static int dmi_memdev_nr;
 
 static const char * __init dmi_string_nosave(const struct dmi_header *dm, u8 s)
 {
@@ -165,7 +173,7 @@ static int __init setup_smbios_26_uuid(char *str)
 	smbios_26_uuid = 1;
 	return 1;
 }
-__setup("smbios_26_uuid", setup_smbios_26_uuid);
+early_param("smbios_26_uuid", setup_smbios_26_uuid);
 
 static void __init dmi_save_uuid(const struct dmi_header *dm, int slot, int index)
 {
@@ -403,6 +411,42 @@ static void __init dmi_save_extended_devices(const struct dmi_header *dm)
 	dmi_save_one_device(*d & 0x7f, dmi_string_nosave(dm, *(d - 1)));
 }
 
+static void __init count_mem_devices(const struct dmi_header *dm, void *v)
+{
+	if (dm->type != DMI_ENTRY_MEM_DEVICE)
+		return;
+	dmi_memdev_nr++;
+}
+
+static void __init save_mem_devices(const struct dmi_header *dm, void *v)
+{
+	const char *d = (const char *)dm;
+	static int nr;
+
+	if (dm->type != DMI_ENTRY_MEM_DEVICE)
+		return;
+	if (nr >= dmi_memdev_nr) {
+		pr_warn(FW_BUG "Too many DIMM entries in SMBIOS table\n");
+		return;
+	}
+	dmi_memdev[nr].handle = get_unaligned(&dm->handle);
+	dmi_memdev[nr].device = dmi_string(dm, d[0x10]);
+	dmi_memdev[nr].bank = dmi_string(dm, d[0x11]);
+	nr++;
+}
+
+void __init dmi_memdev_walk(void)
+{
+	if (!dmi_available)
+		return;
+
+	if (dmi_walk_early(count_mem_devices) == 0 && dmi_memdev_nr) {
+		dmi_memdev = dmi_alloc(sizeof(*dmi_memdev) * dmi_memdev_nr);
+		if (dmi_memdev)
+			dmi_walk_early(save_mem_devices);
+	}
+}
+
 /*
  *	Process a DMI table entry. Right now all we care about are the BIOS
  *	and machine entries. For 2.5 we should pull the smbus controller info
@@ -580,12 +624,19 @@ static bool dmi_matches(const struct dmi_system_id *dmi)
 	WARN(!dmi_initialized, KERN_ERR "dmi check: not initialized yet.\n");
 
 	for (i = 0; i < ARRAY_SIZE(dmi->matches); i++) {
-		int s = dmi->matches[i].slot;
+		int s = dmi_strmatch_slot(&dmi->matches[i]);
+		bool exact_match = !!(dmi->matches[i].slot & __DMI_MATCH_EXACT);
 		if (s == DMI_NONE)
 			break;
-		if (dmi_ident[s]
-		    && strstr(dmi_ident[s], dmi->matches[i].substr))
-			continue;
+		if (dmi_ident[s]) {
+			if (!exact_match &&
+			    strstr(dmi_ident[s], dmi->matches[i].substr))
+				continue;
+			else if (exact_match &&
+				 !strcmp(dmi_ident[s], dmi->matches[i].substr))
+				continue;
+		}
+
 		/* No match */
 		return false;
 	}
@@ -598,7 +649,7 @@ static bool dmi_matches(const struct dmi_system_id *dmi)
  */
 static bool dmi_is_end_of_table(const struct dmi_system_id *dmi)
 {
-	return dmi->matches[0].slot == DMI_NONE;
+	return dmi_strmatch_slot(&dmi->matches[0]) == DMI_NONE;
 }
 
 /**
@@ -844,3 +895,20 @@ bool dmi_match(enum dmi_field f, const char *str)
 	return !strcmp(info, str);
 }
 EXPORT_SYMBOL_GPL(dmi_match);
+
+void dmi_memdev_name(u16 handle, const char **bank, const char **device)
+{
+	int n;
+
+	if (dmi_memdev == NULL)
+		return;
+
+	for (n = 0; n < dmi_memdev_nr; n++) {
+		if (handle == dmi_memdev[n].handle) {
+			*bank = dmi_memdev[n].bank;
+			*device = dmi_memdev[n].device;
+			break;
+		}
+	}
+}
+EXPORT_SYMBOL_GPL(dmi_memdev_name);

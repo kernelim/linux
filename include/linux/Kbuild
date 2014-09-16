@@ -165,6 +165,7 @@ header-y += udf_fs_i.h
 header-y += ultrasound.h
 header-y += un.h
 header-y += utime.h
+header-y += uuid.h
 header-y += veth.h
 header-y += videotext.h
 header-y += x25.h

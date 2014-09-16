@@ -127,6 +127,38 @@ struct ipmi_smi_handlers {
 	void (*dec_usecount)(void *send_info);
 };
 
+/*
+ * shadow struct of ipmi_smi_handlers to manage new fields backported
+ * from upstream.
+ *
+ * *** NOTE: This struct is not kabi protected. ***
+ */
+struct ipmi_shadow_smi_handlers {
+
+	/* Copy of pointer to caller's handlers for sanity checking.
+	 */
+	struct ipmi_smi_handlers *handlers;
+
+	/* Add new fields below this line
+	 * ----------------------------------------------------------
+	 */
+
+	/* Get the detailed private info of the low level interface and store
+	 * it into the structure of ipmi_smi_data. For example: the
+	 * ACPI device handle will be returned for the pnp_acpi IPMI device.
+	 */
+	int (*get_smi_info)(void *send_info, struct ipmi_smi_info *data);
+
+	/* Called by the upper layer when some user requires that the
+	   interface watch for events, received messages, watchdog
+	   pretimeouts, or not.  Used by the SMI to know if it should
+	   watch for these.  This may be NULL if the SMI does not
+	   implement it. */
+	void (*set_need_watch)(void *send_info, int enable);
+};
+
+struct ipmi_shadow_smi_handlers *ipmi_get_shadow_smi_handlers(void);
+
 struct ipmi_device_id {
 	unsigned char device_id;
 	unsigned char device_revision;

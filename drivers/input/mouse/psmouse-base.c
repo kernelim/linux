@@ -1689,6 +1689,8 @@ static int __init psmouse_init(void)
 {
 	int err;
 
+	synaptics_module_init();
+
 	kpsmoused_wq = create_singlethread_workqueue("kpsmoused");
 	if (!kpsmoused_wq) {
 		printk(KERN_ERR "psmouse: failed to create kpsmoused workqueue\n");

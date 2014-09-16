@@ -27,6 +27,7 @@
 #include <linux/ethtool.h>
 #include <linux/etherdevice.h>
 #include <linux/if_bonding.h>
+#include <linux/if_vlan.h>
 #include <linux/pkt_sched.h>
 #include <net/net_namespace.h>
 #include "bonding.h"
@@ -2449,12 +2450,24 @@ out:
 
 int bond_3ad_lacpdu_recv(struct sk_buff *skb, struct net_device *dev, struct packet_type* ptype, struct net_device *orig_dev)
 {
-	struct bonding *bond = netdev_priv(dev);
+	struct bonding *bond;
 	struct slave *slave = NULL;
 	int ret = NET_RX_DROP;
+	bool dev_held = false;
 
 	if (dev_net(dev) != &init_net)
 		goto out;
+
+	if (dev->priv_flags & IFF_802_1Q_VLAN) {
+		/*
+		 * When using VLANS and bonding, dev and orig_dev may be
+		 * incorrect if the physical interface supports VLAN
+		 * acceleration.
+		 */
+		dev = vlan_dev_real_dev(dev);
+		orig_dev = dev_get_by_index(dev_net(skb->dev), skb->iif);
+		dev_held = !!orig_dev;
+	}
 
 	if (!(dev->flags & IFF_MASTER))
 		goto out;
@@ -2466,6 +2479,7 @@ int bond_3ad_lacpdu_recv(struct sk_buff *skb, struct net_device *dev, struct pac
 	if (!pskb_may_pull(skb, sizeof(struct lacpdu)))
 		goto out;
 
+	bond = netdev_priv(dev);
 	read_lock(&bond->lock);
 	slave = bond_get_slave_by_dev((struct bonding *)netdev_priv(dev),
 					orig_dev);
@@ -2479,6 +2493,8 @@ int bond_3ad_lacpdu_recv(struct sk_buff *skb, struct net_device *dev, struct pac
 out_unlock:
 	read_unlock(&bond->lock);
 out:
+	if (dev_held)
+		dev_put(orig_dev);
 	dev_kfree_skb(skb);
 
 	return ret;

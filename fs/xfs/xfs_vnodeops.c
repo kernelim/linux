@@ -59,6 +59,7 @@ xfs_setattr(
 	xfs_mount_t		*mp = ip->i_mount;
 	struct inode		*inode = VFS_I(ip);
 	int			mask = iattr->ia_valid;
+	xfs_off_t		oldsize, newsize;
 	xfs_trans_t		*tp;
 	int			code;
 	uint			lock_flags = 0;
@@ -184,11 +185,12 @@ restart:
 	 * Truncate file.  Must have write permission and not be a directory.
 	 */
 	if (mask & ATTR_SIZE) {
-		loff_t	old_size = XFS_ISIZE(ip);
+
+		oldsize = XFS_ISIZE(ip);
+		newsize = iattr->ia_size;
 
 		/* Short circuit the truncate case for zero length files */
-		if (iattr->ia_size == 0 &&
-		    old_size == 0 && ip->i_d.di_nextents == 0) {
+		if (newsize == 0 && oldsize == 0 && ip->i_d.di_nextents == 0) {
 			if (mask & ATTR_CTIME) {
 				/* need to log timestamp changes */
 				iattr->ia_ctime = iattr->ia_mtime =
@@ -226,14 +228,14 @@ restart:
 		 * to the transaction, because the inode cannot be unlocked
 		 * once it is a part of the transaction.
 		 */
-		if (iattr->ia_size > old_size) {
+		if (newsize > oldsize) {
 			/*
 			 * Do the first part of growing a file: zero any data
 			 * in the last block that is beyond the old EOF.  We
 			 * need to do this before the inode is joined to the
 			 * transaction to modify the i_size.
 			 */
-			code = xfs_zero_eof(ip, iattr->ia_size, old_size);
+			code = xfs_zero_eof(ip, newsize, oldsize);
 			if (code)
 				goto error_return;
 		}
@@ -250,11 +252,9 @@ restart:
 		 * really care about here and prevents waiting for other data
 		 * not within the range we care about here.
 		 */
-		if (old_size != ip->i_d.di_size &&
-		    iattr->ia_size > ip->i_d.di_size) {
-			code = xfs_flush_pages(ip,
-					ip->i_d.di_size, iattr->ia_size,
-					0, FI_NONE);
+		if (oldsize != ip->i_d.di_size && newsize > ip->i_d.di_size) {
+			code = xfs_flush_pages(ip, ip->i_d.di_size, newsize, 0,
+					       FI_NONE);
 			if (code)
 				goto error_return;
 		}
@@ -262,7 +262,7 @@ restart:
 		/* wait for all I/O to complete */
 		xfs_ioend_wait(ip);
 
-		code = -block_truncate_page(inode->i_mapping, iattr->ia_size,
+		code = -block_truncate_page(inode->i_mapping, newsize,
 					    xfs_get_blocks);
 		if (code)
 			goto error_return;
@@ -274,7 +274,7 @@ restart:
 		if (code)
 			goto error_return;
 
-		truncate_setsize(inode, iattr->ia_size);
+		truncate_setsize(inode, newsize);
 
 		commit_flags = XFS_TRANS_RELEASE_LOG_RES;
 		lock_flags |= XFS_ILOCK_EXCL;
@@ -295,20 +295,32 @@ restart:
 		 * VFS set these flags explicitly if it wants a timestamp
 		 * update.
 		 */
-		if (iattr->ia_size != old_size &&
+		if (newsize != oldsize &&
 		    (!(mask & (ATTR_CTIME | ATTR_MTIME)))) {
 			iattr->ia_ctime = iattr->ia_mtime =
 				current_fs_time(inode->i_sb);
 			mask |= ATTR_CTIME | ATTR_MTIME;
 		}
 
-		if (iattr->ia_size > old_size) {
-			ip->i_d.di_size = iattr->ia_size;
-			xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
-		} else if (iattr->ia_size <= old_size ||
-			   (iattr->ia_size == 0 && ip->i_d.di_nextents)) {
-			code = xfs_itruncate_finish(&tp, ip, iattr->ia_size,
-						    XFS_DATA_FORK);
+		/*
+		 * The first thing we do is set the size to new_size permanently
+		 * on disk.  This way we don't have to worry about anyone ever
+		 * being able to look at the data being freed even in the face
+		 * of a crash.  What we're getting around here is the case where
+		 * we free a block, it is allocated to another file, it is
+		 * written to, and then we crash.  If the new data gets written
+		 * to the file but the log buffers containing the free and
+		 * reallocation don't, then we'd end up with garbage in the
+		 * blocks being freed.  As long as we make the new size
+		 * permanent before actually freeing any blocks it doesn't
+		 * matter if they get written to.
+		 */
+		ip->i_d.di_size = newsize;
+		xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
+
+		if (newsize <= oldsize) {
+			code = xfs_itruncate_extents(&tp, ip, XFS_DATA_FORK,
+						     newsize);
 			if (code)
 				goto abort_return;
 			/*
@@ -617,13 +629,6 @@ xfs_free_eofblocks(
 		 */
 		tp = xfs_trans_alloc(mp, XFS_TRANS_INACTIVE);
 
-		/*
-		 * Do the xfs_itruncate_start() call before
-		 * reserving any log space because
-		 * itruncate_start will call into the buffer
-		 * cache and we can't
-		 * do that within a transaction.
-		 */
 		if (flags & XFS_FREE_EOF_TRYLOCK) {
 			if (!xfs_ilock_nowait(ip, XFS_IOLOCK_EXCL)) {
 				xfs_trans_cancel(tp, 0);
@@ -631,13 +636,6 @@ xfs_free_eofblocks(
 			}
 		} else {
 			xfs_ilock(ip, XFS_IOLOCK_EXCL);
-		}
-		error = xfs_itruncate_start(ip, XFS_ITRUNC_DEFINITE,
-				    XFS_ISIZE(ip));
-		if (error) {
-			xfs_trans_cancel(tp, 0);
-			xfs_iunlock(ip, XFS_IOLOCK_EXCL);
-			return error;
 		}
 
 		error = xfs_trans_reserve(tp, 0,
@@ -654,13 +652,19 @@ xfs_free_eofblocks(
 		xfs_ilock(ip, XFS_ILOCK_EXCL);
 		xfs_trans_ijoin(tp, ip);
 
-		error = xfs_itruncate_finish(&tp, ip, XFS_ISIZE(ip),
-					     XFS_DATA_FORK);
 		/*
-		 * If we get an error at this point we
-		 * simply don't bother truncating the file.
+		 * Do not update the on-disk file size.  If we update the
+		 * on-disk file size and then the system crashes before the
+		 * contents of the file are flushed to disk then the files
+		 * may be full of holes (ie NULL files bug).
 		 */
+		error = xfs_itruncate_extents(&tp, ip, XFS_DATA_FORK,
+					      XFS_ISIZE(ip));
 		if (error) {
+			/*
+			 * If we get an error at this point we simply don't
+			 * bother truncating the file.
+			 */
 			xfs_trans_cancel(tp,
 					 (XFS_TRANS_RELEASE_LOG_RES |
 					  XFS_TRANS_ABORT));
@@ -1079,20 +1083,9 @@ xfs_inactive(
 
 	tp = xfs_trans_alloc(mp, XFS_TRANS_INACTIVE);
 	if (truncate) {
-		/*
-		 * Do the xfs_itruncate_start() call before
-		 * reserving any log space because itruncate_start
-		 * will call into the buffer cache and we can't
-		 * do that within a transaction.
-		 */
 		xfs_ilock(ip, XFS_IOLOCK_EXCL);
 
-		error = xfs_itruncate_start(ip, XFS_ITRUNC_DEFINITE, 0);
-		if (error) {
-			xfs_trans_cancel(tp, 0);
-			xfs_iunlock(ip, XFS_IOLOCK_EXCL);
-			return VN_INACTIVE_CACHE;
-		}
+		xfs_ioend_wait(ip);
 
 		error = xfs_trans_reserve(tp, 0,
 					  XFS_ITRUNCATE_LOG_RES(mp),
@@ -1109,13 +1102,18 @@ xfs_inactive(
 		xfs_ilock(ip, XFS_ILOCK_EXCL);
 		xfs_trans_ijoin(tp, ip);
 
-		error = xfs_itruncate_finish(&tp, ip, 0, XFS_DATA_FORK);
+		ip->i_d.di_size = 0;
+		xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
+
+		error = xfs_itruncate_extents(&tp, ip, XFS_DATA_FORK, 0);
 		if (error) {
 			xfs_trans_cancel(tp,
 				XFS_TRANS_RELEASE_LOG_RES | XFS_TRANS_ABORT);
 			xfs_iunlock(ip, XFS_IOLOCK_EXCL | XFS_ILOCK_EXCL);
 			return VN_INACTIVE_CACHE;
 		}
+
+		ASSERT(ip->i_d.di_nextents == 0);
 	} else if ((ip->i_d.di_mode & S_IFMT) == S_IFLNK) {
 
 		/*

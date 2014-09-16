@@ -244,6 +244,9 @@ struct fsnotify_mark_entry {
 	spinlock_t lock;		/* protect group, inode, and killme */
 	struct list_head free_i_list;	/* tmp list used when freeing this mark */
 	struct list_head free_g_list;	/* tmp list used when freeing this mark */
+#define FSNOTIFY_MARK_FLAG_OBJECT_PINNED        0x04
+	unsigned int flags;             /* protected by mark->lock */
+
 	void (*free_mark)(struct fsnotify_mark_entry *entry); /* called on final put+free */
 };
 
@@ -347,7 +350,7 @@ extern void fsnotify_destroy_mark_by_entry(struct fsnotify_mark_entry *entry);
 extern void fsnotify_clear_marks_by_group(struct fsnotify_group *group);
 extern void fsnotify_get_mark(struct fsnotify_mark_entry *entry);
 extern void fsnotify_put_mark(struct fsnotify_mark_entry *entry);
-extern void fsnotify_unmount_inodes(struct list_head *list);
+extern void fsnotify_unmount_inodes(struct super_block *sb);
 
 /* put here because inotify does some weird stuff when destroying watches */
 extern struct fsnotify_event *fsnotify_create_event(struct inode *to_tell, __u32 mask,
@@ -377,7 +380,7 @@ static inline u32 fsnotify_get_cookie(void)
 	return 0;
 }
 
-static inline void fsnotify_unmount_inodes(struct list_head *list)
+static inline void fsnotify_unmount_inodes(struct super_block *sb)
 {}
 
 #endif	/* CONFIG_FSNOTIFY */

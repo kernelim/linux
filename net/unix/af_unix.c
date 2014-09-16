@@ -149,8 +149,8 @@ static inline void unix_set_secdata(struct scm_cookie *scm, struct sk_buff *skb)
 
 static inline unsigned unix_hash_fold(__wsum n)
 {
-	unsigned hash = (__force unsigned)n;
-	hash ^= hash>>16;
+	unsigned int hash = (__force unsigned int)csum_fold(n);
+
 	hash ^= hash>>8;
 	return hash&(UNIX_HASH_SIZE-1);
 }
@@ -1955,7 +1955,7 @@ static int unix_stream_recvmsg(struct kiocb *iocb, struct socket *sock,
 				skb_queue_head(&sk->sk_receive_queue, skb);
 				break;
 			}
-		} else {
+		} else if (test_bit(SOCK_PASSCRED, &sock->flags)) {
 			/* Copy credentials */
 			scm_set_cred(siocb->scm, UNIXCB(skb).pid, UNIXCB(skb).cred);
 			check_creds = 1;

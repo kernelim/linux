@@ -132,10 +132,12 @@ struct usb_device_id {
 #define USB_DEVICE_ID_MATCH_INT_PROTOCOL	0x0200
 
 #define HID_ANY_ID				(~0)
+#define HID_BUS_ANY				0xffff
+#define HID_GROUP_ANY				0x0000
 
 struct hid_device_id {
 	__u16 bus;
-	__u16 pad1;
+	__u16 group;
 	__u32 vendor;
 	__u32 product;
 	kernel_ulong_t driver_data
@@ -464,9 +466,15 @@ enum dmi_field {
 };
 
 struct dmi_strmatch {
+#define __DMI_MATCH_EXACT 0x80
 	unsigned char slot;
 	char substr[79];
 };
+
+static inline unsigned char dmi_strmatch_slot(const struct dmi_strmatch *m)
+{
+	return m->slot & ~__DMI_MATCH_EXACT;
+}
 
 #ifndef __KERNEL__
 struct dmi_system_id {
@@ -492,7 +500,8 @@ struct dmi_system_id {
 #define dmi_device_id dmi_system_id
 #endif
 
-#define DMI_MATCH(a, b)	{ a, b }
+#define DMI_MATCH(a, b)	{ .slot = a, .substr = b, }
+#define DMI_EXACT_MATCH(a, b)	{ .slot = ((a) | __DMI_MATCH_EXACT), .substr = b, }
 
 #define PLATFORM_NAME_SIZE	20
 #define PLATFORM_MODULE_PREFIX	"platform:"

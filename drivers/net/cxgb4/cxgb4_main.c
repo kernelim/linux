@@ -1338,15 +1338,20 @@ static int restart_autoneg(struct net_device *dev)
 	return 0;
 }
 
-static int identify_port(struct net_device *dev, u32 data)
+static int identify_port(struct net_device *dev,
+			 enum ethtool_phys_id_state state)
 {
+	unsigned int val;
 	struct adapter *adap = netdev2adap(dev);
 
-	if (data == 0)
-		data = 2;     /* default to 2 seconds */
+	if (state == ETHTOOL_ID_ACTIVE)
+		val = 0xffff;
+	else if (state == ETHTOOL_ID_INACTIVE)
+		val = 0;
+	else
+		return -EINVAL;
 
-	return t4_identify_port(adap, adap->fn, netdev2pinfo(dev)->viid,
-				data * 5);
+	return t4_identify_port(adap, adap->fn, netdev2pinfo(dev)->viid, val);
 }
 
 static unsigned int from_fw_linkcaps(unsigned int type, unsigned int caps)
@@ -1912,7 +1917,6 @@ static const struct ethtool_ops cxgb_ethtool_ops = {
 	.set_sg            = ethtool_op_set_sg,
 	.get_link          = ethtool_op_get_link,
 	.get_strings       = get_strings,
-	.phys_id           = identify_port,
 	.nway_reset        = restart_autoneg,
 	.get_sset_count    = get_sset_count,
 	.get_ethtool_stats = get_stats,
@@ -1922,6 +1926,11 @@ static const struct ethtool_ops cxgb_ethtool_ops = {
 	.set_wol           = set_wol,
 	.set_tso           = set_tso,
 	.flash_device      = set_flash,
+};
+
+static const struct ethtool_ops_ext cxgb_ethtool_ops_ext = {
+	.size              = sizeof(struct ethtool_ops_ext),
+	.set_phys_id       = identify_port,
 };
 
 /*
@@ -2831,12 +2840,12 @@ static int cxgb_close(struct net_device *dev)
 	return t4_enable_vi(adapter, adapter->fn, pi->viid, false, false);
 }
 
-static struct net_device_stats *cxgb_get_stats(struct net_device *dev)
+static struct rtnl_link_stats64 *cxgb_get_stats(struct net_device *dev,
+						struct rtnl_link_stats64 *ns)
 {
 	struct port_stats stats;
 	struct port_info *p = netdev_priv(dev);
 	struct adapter *adapter = p->adapter;
-	struct net_device_stats *ns = &dev->stats;
 
 	spin_lock(&adapter->stats_lock);
 	t4_get_port_stats(adapter, p->tx_chan, &stats);
@@ -2981,7 +2990,6 @@ static const struct net_device_ops cxgb4_netdev_ops = {
 	.ndo_open             = cxgb_open,
 	.ndo_stop             = cxgb_close,
 	.ndo_start_xmit       = t4_eth_xmit,
-	.ndo_get_stats        = cxgb_get_stats,
 	.ndo_set_rx_mode      = cxgb_set_rxmode,
 	.ndo_set_mac_address  = cxgb_set_mac_addr,
 	.ndo_validate_addr    = eth_validate_addr,
@@ -2991,6 +2999,11 @@ static const struct net_device_ops cxgb4_netdev_ops = {
 #ifdef CONFIG_NET_POLL_CONTROLLER
 	.ndo_poll_controller  = cxgb_netpoll,
 #endif
+};
+
+static const struct net_device_ops_ext cxgb4_netdev_ops_ext = {
+	.size                 = sizeof(struct net_device_ops_ext),
+	.ndo_get_stats64      = cxgb_get_stats,
 };
 
 void t4_fatal_err(struct adapter *adap)
@@ -3778,7 +3791,9 @@ static int __devinit init_one(struct pci_dev *pdev,
 		netdev->vlan_features = netdev->features & VLAN_FEAT;
 
 		netdev->netdev_ops = &cxgb4_netdev_ops;
+		set_netdev_ops_ext(netdev, &cxgb4_netdev_ops_ext);
 		SET_ETHTOOL_OPS(netdev, &cxgb_ethtool_ops);
+		set_ethtool_ops_ext(netdev, &cxgb_ethtool_ops_ext);
 	}
 
 	pci_set_drvdata(pdev, adapter);

@@ -22,6 +22,22 @@ core_param(ksign_debug, ksign_debug, bool, 0644);
 			printk(KERN_DEBUG FMT, ##__VA_ARGS__);	\
 	} while(0)
 
+const char ksign_hash_algo_names[DIGEST_ALGO__LAST][7] = {
+	[DIGEST_ALGO_SHA1]	= "sha1",
+	[DIGEST_ALGO_SHA256]	= "sha256",
+	[DIGEST_ALGO_SHA384]	= "sha384",
+	[DIGEST_ALGO_SHA512]	= "sha512",
+	[DIGEST_ALGO_SHA224]	= "sha224",
+};
+
+const u16 ksign_hash_algo_sizes[DIGEST_ALGO__LAST] = {
+	[DIGEST_ALGO_SHA1]	= 160 / 8,
+	[DIGEST_ALGO_SHA256]	= 256 / 8,
+	[DIGEST_ALGO_SHA384]	= 384 / 8,
+	[DIGEST_ALGO_SHA512]	= 512 / 8,
+	[DIGEST_ALGO_SHA224]	= 224 / 8,
+};
+
 /*
  * check the signature which is contained in SIG.
  */
@@ -29,7 +45,7 @@ static int ksign_signature_check(const struct ksign_signature *sig,
 				 struct shash_desc *digest)
 {
 	struct ksign_public_key *pk;
-	uint8_t sha1[SHA1_DIGEST_SIZE];
+	uint8_t digest_buf[SHA_MAX_DIGEST_SIZE];
 	MPI result = NULL;
 	int rc = 0;
 
@@ -50,24 +66,24 @@ static int ksign_signature_check(const struct ksign_signature *sig,
 
 	/* complete the digest */
 	if (sig->version >= 4)
-		SHA1_putc(digest, sig->version);
-	SHA1_putc(digest, sig->sig_class);
+		digest_putc(digest, sig->version);
+	digest_putc(digest, sig->sig_class);
 
 	if (sig->version < 4) {
 		u32 a = sig->timestamp;
-		SHA1_putc(digest, (a >> 24) & 0xff);
-		SHA1_putc(digest, (a >> 16) & 0xff);
-		SHA1_putc(digest, (a >>  8) & 0xff);
-		SHA1_putc(digest, (a >>  0) & 0xff);
+		digest_putc(digest, (a >> 24) & 0xff);
+		digest_putc(digest, (a >> 16) & 0xff);
+		digest_putc(digest, (a >>  8) & 0xff);
+		digest_putc(digest, (a >>  0) & 0xff);
 	}
 	else {
 		uint8_t buf[6];
 		size_t n;
-		SHA1_putc(digest, PUBKEY_ALGO_DSA);
-		SHA1_putc(digest, DIGEST_ALGO_SHA1);
+		digest_putc(digest, PUBKEY_ALGO_DSA);
+		digest_putc(digest, sig->digest_algo);
 		if (sig->hashed_data) {
 			n = (sig->hashed_data[0] << 8) | sig->hashed_data[1];
-			SHA1_write(digest, sig->hashed_data, n + 2);
+			digest_write(digest, sig->hashed_data, n + 2);
 			n += 6;
 		}
 		else {
@@ -81,18 +97,19 @@ static int ksign_signature_check(const struct ksign_signature *sig,
 		buf[3] = n >> 16;
 		buf[4] = n >>  8;
 		buf[5] = n;
-		SHA1_write(digest, buf, 6);
+		digest_write(digest, buf, 6);
 	}
 
-	crypto_shash_final(digest, sha1);
+	crypto_shash_final(digest, digest_buf);
 
 	rc = -ENOMEM;
-	result = mpi_alloc((SHA1_DIGEST_SIZE + BYTES_PER_MPI_LIMB - 1) /
+	result = mpi_alloc((ksign_hash_algo_sizes[sig->digest_algo] +
+			    BYTES_PER_MPI_LIMB - 1) /
 			   BYTES_PER_MPI_LIMB);
 	if (!result)
 		goto cleanup;
 
-	rc = mpi_set_buffer(result, sha1, SHA1_DIGEST_SIZE, 0);
+	rc = mpi_set_buffer(result, digest_buf, ksign_hash_algo_sizes[sig->digest_algo], 0);
 	if (rc < 0)
 		goto cleanup;
 
@@ -130,7 +147,7 @@ static int ksign_grab_signature(struct ksign_signature *sig, void *fnxdata)
 
 /*
  * verify the signature of some data with one of the kernel's known public keys
- * - the SHA1 digest supplied should have the data to be checked already loaded
+ * - the digest supplied should have the data to be checked already loaded
  *   in to it
  */
 int ksign_verify_signature(const char *sigdata, unsigned sig_size,
@@ -138,7 +155,7 @@ int ksign_verify_signature(const char *sigdata, unsigned sig_size,
 {
 	struct ksign_signature *sig = NULL;
 	struct shash_desc *digest = NULL;
-	uint8_t sha1[SHA1_DIGEST_SIZE];
+	uint8_t digest_buf[SHA_MAX_DIGEST_SIZE];
 	void *export_buf = NULL;
 	int retval, loop;
 
@@ -170,10 +187,10 @@ int ksign_verify_signature(const char *sigdata, unsigned sig_size,
 		if (retval < 0)
 			goto cleanup;
 
-		crypto_shash_final(digest, sha1);
+		crypto_shash_final(digest, digest_buf);
 		printk(KERN_WARNING "Modsign digest: ");
-		for (loop = 0; loop < sizeof(sha1); loop++)
-			printk("%02x", sha1[loop]);
+		for (loop = 0; loop < sizeof(digest_buf); loop++)
+			printk("%02x", digest_buf[loop]);
 		printk("\n");
 	}
 
@@ -201,7 +218,7 @@ int ksign_verify_signature(const char *sigdata, unsigned sig_size,
 	_debug("signature keyid: %08x%08x ver=%u\n",
 	       sig->keyid[0], sig->keyid[1], sig->version);
 
-	/* check the data SHA1 transformation against the public key */
+	/* check the data SHA256 transformation against the public key */
 	retval = ksign_signature_check(sig, digest);
 	switch (retval) {
 	case 0:
@@ -223,4 +240,31 @@ cleanup:
 	kfree(export_buf);
 	kfree(digest);
 	return retval;
+}
+
+/*
+ * preparse the signature and extract the digest algorithm.
+ */
+int ksign_get_signature_digest_algo(const char *sigdata, unsigned sig_size,
+				    const char **digest_name)
+{
+	struct ksign_signature *sig = NULL;
+	int ret;
+
+	ret = ksign_parse_packets(sigdata, sig_size,
+				  &ksign_grab_signature, NULL, NULL,
+				  &sig);
+	if (ret < 0)
+		return ret;
+
+	if (!sig) {
+		printk(KERN_NOTICE
+		       "Couldn't find valid DSA signature in module\n");
+		return -ENOENT;
+	}
+
+	*digest_name = ksign_hash_algo_names[sig->digest_algo];
+
+	ksign_free_signature(sig);
+	return ret;
 }

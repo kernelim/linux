@@ -137,23 +137,30 @@ static void vxge_ethtool_gregs(struct net_device *dev,
 /**
  * vxge_ethtool_idnic - To physically identify the nic on the system.
  * @dev : device pointer.
- * @id : pointer to the structure with identification parameters given by
- * ethtool.
+ * @state : requested LED state
  *
  * Used to physically identify the NIC on the system.
- * The Link LED will blink for a time specified by the user.
- * Return value:
  * 0 on success
  */
-static int vxge_ethtool_idnic(struct net_device *dev, u32 data)
+static int vxge_ethtool_idnic(struct net_device *dev,
+			      enum ethtool_phys_id_state state)
 {
 	struct vxgedev *vdev = (struct vxgedev *)netdev_priv(dev);
 	struct __vxge_hw_device  *hldev = (struct __vxge_hw_device  *)
 			pci_get_drvdata(vdev->pdev);
 
-	vxge_hw_device_flick_link_led(hldev, VXGE_FLICKER_ON);
-	msleep_interruptible(data ? (data * HZ) : VXGE_MAX_FLICKER_TIME);
-	vxge_hw_device_flick_link_led(hldev, VXGE_FLICKER_OFF);
+	switch (state) {
+	case ETHTOOL_ID_ACTIVE:
+		vxge_hw_device_flick_link_led(hldev, VXGE_FLICKER_ON);
+		break;
+
+	case ETHTOOL_ID_INACTIVE:
+		vxge_hw_device_flick_link_led(hldev, VXGE_FLICKER_OFF);
+		break;
+
+	default:
+		return -EINVAL;
+	}
 
 	return 0;
 }
@@ -1131,18 +1138,23 @@ static const struct ethtool_ops vxge_ethtool_ops = {
 	.get_rx_csum		= vxge_get_rx_csum,
 	.set_rx_csum		= vxge_set_rx_csum,
 	.get_tx_csum		= ethtool_op_get_tx_csum,
-	.set_tx_csum		= ethtool_op_set_tx_hw_csum,
+	.set_tx_csum		= ethtool_op_set_tx_ipv6_csum,
 	.get_sg			= ethtool_op_get_sg,
 	.set_sg			= ethtool_op_set_sg,
 	.get_tso		= ethtool_op_get_tso,
 	.set_tso		= vxge_ethtool_op_set_tso,
 	.get_strings		= vxge_ethtool_get_strings,
-	.phys_id		= vxge_ethtool_idnic,
 	.get_sset_count		= vxge_ethtool_get_sset_count,
 	.get_ethtool_stats	= vxge_get_ethtool_stats,
+};
+
+static const struct ethtool_ops_ext vxge_ethtool_ops_ext = {
+	.size			= sizeof(struct ethtool_ops_ext),
+	.set_phys_id		= vxge_ethtool_idnic,
 };
 
 void initialize_ethtool_ops(struct net_device *ndev)
 {
 	SET_ETHTOOL_OPS(ndev, &vxge_ethtool_ops);
+	set_ethtool_ops_ext(ndev, &vxge_ethtool_ops_ext);
 }

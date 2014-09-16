@@ -595,7 +595,6 @@ struct nic {
 	enum phy phy;
 	struct params params;
 	struct timer_list watchdog;
-	struct timer_list blink_timer;
 	struct mii_if_info mii;
 	struct work_struct tx_timeout_task;
 	enum loopback loopback;
@@ -620,7 +619,6 @@ struct nic {
 	u32 rx_tco_frames;
 	u32 rx_over_length_errors;
 
-	u16 leds;
 	u16 eeprom_wc;
 	__le16 eeprom[256];
 	spinlock_t mdio_lock;
@@ -2355,30 +2353,6 @@ err_clean_rx:
 #define E100_82552_LED_OVERRIDE 0x19
 #define E100_82552_LED_ON       0x000F /* LEDTX and LED_RX both on */
 #define E100_82552_LED_OFF      0x000A /* LEDTX and LED_RX both off */
-static void e100_blink_led(unsigned long data)
-{
-	struct nic *nic = (struct nic *)data;
-	enum led_state {
-		led_on     = 0x01,
-		led_off    = 0x04,
-		led_on_559 = 0x05,
-		led_on_557 = 0x07,
-	};
-	u16 led_reg = MII_LED_CONTROL;
-
-	if (nic->phy == phy_82552_v) {
-		led_reg = E100_82552_LED_OVERRIDE;
-
-		nic->leds = (nic->leds == E100_82552_LED_ON) ?
-		            E100_82552_LED_OFF : E100_82552_LED_ON;
-	} else {
-		nic->leds = (nic->leds & led_on) ? led_off :
-		            (nic->mac < mac_82559_D101M) ? led_on_557 :
-		            led_on_559;
-	}
-	mdio_write(nic->netdev, nic->mii.phy_id, led_reg, nic->leds);
-	mod_timer(&nic->blink_timer, jiffies + HZ / 4);
-}
 
 static int e100_get_settings(struct net_device *netdev, struct ethtool_cmd *cmd)
 {
@@ -2598,19 +2572,38 @@ static void e100_diag_test(struct net_device *netdev,
 	msleep_interruptible(4 * 1000);
 }
 
-static int e100_phys_id(struct net_device *netdev, u32 data)
+static int e100_set_phys_id(struct net_device *netdev,
+			    enum ethtool_phys_id_state state)
 {
 	struct nic *nic = netdev_priv(netdev);
+	enum led_state {
+		led_on     = 0x01,
+		led_off    = 0x04,
+		led_on_559 = 0x05,
+		led_on_557 = 0x07,
+	};
 	u16 led_reg = (nic->phy == phy_82552_v) ? E100_82552_LED_OVERRIDE :
-	              MII_LED_CONTROL;
+		MII_LED_CONTROL;
+	u16 leds = 0;
 
-	if (!data || data > (u32)(MAX_SCHEDULE_TIMEOUT / HZ))
-		data = (u32)(MAX_SCHEDULE_TIMEOUT / HZ);
-	mod_timer(&nic->blink_timer, jiffies);
-	msleep_interruptible(data * 1000);
-	del_timer_sync(&nic->blink_timer);
-	mdio_write(netdev, nic->mii.phy_id, led_reg, 0);
+	switch (state) {
+	case ETHTOOL_ID_ACTIVE:
+		return 2;
 
+	case ETHTOOL_ID_ON:
+		leds = (nic->phy == phy_82552_v) ? E100_82552_LED_ON :
+		       (nic->mac < mac_82559_D101M) ? led_on_557 : led_on_559;
+		break;
+
+	case ETHTOOL_ID_OFF:
+		leds = (nic->phy == phy_82552_v) ? E100_82552_LED_OFF : led_off;
+		break;
+
+	case ETHTOOL_ID_INACTIVE:
+		break;
+	}
+
+	mdio_write(netdev, nic->mii.phy_id, led_reg, leds);
 	return 0;
 }
 
@@ -2691,9 +2684,13 @@ static const struct ethtool_ops e100_ethtool_ops = {
 	.set_ringparam		= e100_set_ringparam,
 	.self_test		= e100_diag_test,
 	.get_strings		= e100_get_strings,
-	.phys_id		= e100_phys_id,
 	.get_ethtool_stats	= e100_get_ethtool_stats,
 	.get_sset_count		= e100_get_sset_count,
+};
+
+static const struct ethtool_ops_ext e100_ethtool_ops_ext = {
+	.size			= sizeof(struct ethtool_ops_ext),
+	.set_phys_id		= e100_set_phys_id,
 };
 
 static int e100_do_ioctl(struct net_device *netdev, struct ifreq *ifr, int cmd)
@@ -2763,6 +2760,7 @@ static int __devinit e100_probe(struct pci_dev *pdev,
 
 	netdev->netdev_ops = &e100_netdev_ops;
 	SET_ETHTOOL_OPS(netdev, &e100_ethtool_ops);
+	set_ethtool_ops_ext(netdev, &e100_ethtool_ops_ext);
 	netdev->watchdog_timeo = E100_WATCHDOG_PERIOD;
 	strncpy(netdev->name, pci_name(pdev), sizeof(netdev->name) - 1);
 
@@ -2833,9 +2831,6 @@ static int __devinit e100_probe(struct pci_dev *pdev,
 	init_timer(&nic->watchdog);
 	nic->watchdog.function = e100_watchdog;
 	nic->watchdog.data = (unsigned long)nic;
-	init_timer(&nic->blink_timer);
-	nic->blink_timer.function = e100_blink_led;
-	nic->blink_timer.data = (unsigned long)nic;
 
 	INIT_WORK(&nic->tx_timeout_task, e100_tx_timeout_task);
 

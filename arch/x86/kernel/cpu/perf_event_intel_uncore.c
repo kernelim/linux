@@ -2482,7 +2482,7 @@ static int __init uncore_type_init(struct intel_uncore_type *type)
 
 	type->unconstrainted = (struct event_constraint)
 		__EVENT_CONSTRAINT(0, (1ULL << type->num_counters) - 1,
-				0, type->num_counters, 0);
+				0, type->num_counters, 0, 0);
 
 	for (i = 0; i < type->num_boxes; i++) {
 		pmus[i].func_id = -1;
@@ -2976,6 +2976,9 @@ static int __init intel_uncore_init(void)
 	int ret;
 
 	if (boot_cpu_data.x86_vendor != X86_VENDOR_INTEL)
+		return -ENODEV;
+
+	if (cpu_has_hypervisor)
 		return -ENODEV;
 
 	ret = uncore_pci_init();

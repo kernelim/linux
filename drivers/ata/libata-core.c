@@ -3727,7 +3727,7 @@ int sata_link_resume(struct ata_link *link, const unsigned long *params,
 	} while ((scontrol & 0xf0f) != 0x300 && --tries);
 
 	if ((scontrol & 0xf0f) != 0x300) {
-		ata_link_printk(link, KERN_ERR,
+		ata_link_printk(link, KERN_WARNING,
 				"failed to resume link (SControl %X)\n",
 				scontrol);
 		return 0;

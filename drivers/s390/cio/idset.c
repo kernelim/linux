@@ -59,6 +59,14 @@ static inline void idset_del(struct idset *set, int ssid, int id)
 	clear_bit(ssid * set->num_id + id, set->bitmap);
 }
 
+/* Clear ids starting from @schid up to end of subchannel set. */
+void idset_sch_del_subseq(struct idset *set, struct subchannel_id schid)
+{
+	int pos = schid.ssid * set->num_id + schid.sch_no;
+
+	bitmap_clear(set->bitmap, pos, set->num_id - schid.sch_no);
+}
+
 static inline int idset_contains(struct idset *set, int ssid, int id)
 {
 	return test_bit(ssid * set->num_id + id, set->bitmap);

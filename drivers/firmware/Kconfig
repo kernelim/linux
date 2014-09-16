@@ -36,6 +36,9 @@ config FIRMWARE_MEMMAP
 
       See also Documentation/ABI/testing/sysfs-firmware-memmap.
 
+config UEFI_CPER
+	bool
+
 config EFI_VARS
 	tristate "EFI Variable Support via sysfs"
 	depends on EFI

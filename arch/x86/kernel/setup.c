@@ -757,6 +757,15 @@ static void rh_check_supported(void)
 	/* The RHEL kernel does not support this hardware.  The kernel will
 	 * attempt to boot, but no support is given for this hardware */
 
+
+	/*
+	* Check if we are running on VMware's hypervisor and bail out
+	* if we are.  They run their own hypervisor and have different
+	* support requirements than we do.
+	*/
+	if (x86_hyper == &x86_hyper_vmware)
+		return;
+
 	/* RHEL only supports Intel and AMD processors */
 	if ((boot_cpu_data.x86_vendor != X86_VENDOR_INTEL) &&
 	    (boot_cpu_data.x86_vendor != X86_VENDOR_AMD)) {
@@ -774,6 +783,7 @@ static void rh_check_supported(void)
 		case 70: /* Crystal Well */
 		case 63: /* Grantley/Haswell EP */
 		case 62: /* Ivy Town */
+		case 61: /* Broadwell */
 			break;
 		default:
 			if (boot_cpu_data.x86_model > 60) {
@@ -936,6 +946,7 @@ void __init setup_arch(char **cmdline_p)
 		efi_init();
 
 	dmi_scan_machine();
+	dmi_memdev_walk();
 
 	dmi_check_system(bad_bios_dmi_table);
 

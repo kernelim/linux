@@ -145,11 +145,13 @@ void fsnotify_destroy_mark_by_entry(struct fsnotify_mark_entry *entry)
 {
 	struct fsnotify_group *group;
 	struct inode *inode;
+	int pinned;
 
 	spin_lock(&entry->lock);
 
 	group = entry->group;
 	inode = entry->inode;
+	pinned = entry->flags & FSNOTIFY_MARK_FLAG_OBJECT_PINNED;
 
 	BUG_ON(group && !inode);
 	BUG_ON(!group && inode);
@@ -193,6 +195,14 @@ void fsnotify_destroy_mark_by_entry(struct fsnotify_mark_entry *entry)
 	if (group->ops->freeing_mark)
 		group->ops->freeing_mark(entry, group);
 
+	if (pinned) {
+		struct super_block *sb;
+		sb = inode->i_sb;
+		iput(inode);
+		if (atomic_dec_and_test(&sb->s_fsnotify_marks))
+			wake_up(&sb->s_fsnotify_marks_wq);
+	}
+
 	/*
 	 * __fsnotify_update_child_dentry_flags(inode);
 	 *
@@ -205,8 +215,6 @@ void fsnotify_destroy_mark_by_entry(struct fsnotify_mark_entry *entry)
 	 * is just a lazy update (and could be a perf win...)
 	 */
 
-
-	iput(inode);
 
 	/*
 	 * it's possible that this group tried to destroy itself, but this
@@ -290,12 +298,10 @@ void fsnotify_init_mark(struct fsnotify_mark_entry *entry,
 			void (*free_mark)(struct fsnotify_mark_entry *entry))
 
 {
+	memset(entry, 0, sizeof(*entry));
 	spin_lock_init(&entry->lock);
 	atomic_set(&entry->refcnt, 1);
 	INIT_HLIST_NODE(&entry->i_list);
-	entry->group = NULL;
-	entry->mask = 0;
-	entry->inode = NULL;
 	entry->free_mark = free_mark;
 }
 
@@ -328,6 +334,8 @@ int fsnotify_add_mark(struct fsnotify_mark_entry *entry,
 	if (!lentry) {
 		entry->group = group;
 		entry->inode = inode;
+		entry->flags |= FSNOTIFY_MARK_FLAG_OBJECT_PINNED;
+		atomic_inc(&inode->i_sb->s_fsnotify_marks);
 
 		hlist_add_head(&entry->i_list, &inode->i_fsnotify_mark_entries);
 		list_add(&entry->g_list, &group->mark_entries);
@@ -356,14 +364,15 @@ int fsnotify_add_mark(struct fsnotify_mark_entry *entry,
 
 /**
  * fsnotify_unmount_inodes - an sb is unmounting.  handle any watched inodes.
- * @list: list of inodes being unmounted (sb->s_inodes)
+ * @sb: superblock being unmounted
  *
  * Called with inode_lock held, protecting the unmounting super block's list
  * of inodes, and with iprune_mutex held, keeping shrink_icache_memory() at bay.
  * We temporarily drop inode_lock, however, and CAN block.
  */
-void fsnotify_unmount_inodes(struct list_head *list)
+void fsnotify_unmount_inodes(struct super_block *sb)
 {
+	struct list_head *list = &sb->s_inodes;
 	struct inode *inode, *next_i, *need_iput = NULL;
 
 	list_for_each_entry_safe(inode, next_i, list, i_sb_list) {
@@ -423,4 +432,8 @@ void fsnotify_unmount_inodes(struct list_head *list)
 
 		spin_lock(&inode_lock);
 	}
+	spin_unlock(&inode_lock);
+	/* we need to pause until we are sure all iputs are finished */
+	wait_event(sb->s_fsnotify_marks_wq, !atomic_read(&sb->s_fsnotify_marks));
+	spin_lock(&inode_lock);
 }

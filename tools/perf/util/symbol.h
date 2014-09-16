@@ -16,8 +16,8 @@
 #ifdef LIBELF_SUPPORT
 #include <libelf.h>
 #include <gelf.h>
-#include <elf.h>
 #endif
+#include <elf.h>
 
 #include "dso.h"
 
@@ -96,7 +96,9 @@ struct symbol_conf {
 			initialized,
 			kptr_restrict,
 			annotate_asm_raw,
-			annotate_src;
+			annotate_src,
+			event_group,
+			demangle;
 	const char	*vmlinux_name,
 			*kallsyms_name,
 			*source_prefix,
@@ -120,6 +122,8 @@ struct symbol_conf {
 };
 
 extern struct symbol_conf symbol_conf;
+extern int vmlinux_path__nr_entries;
+extern char **vmlinux_path;
 
 static inline void *symbol__priv(struct symbol *sym)
 {
@@ -150,6 +154,12 @@ struct branch_info {
 	struct addr_map_symbol from;
 	struct addr_map_symbol to;
 	struct branch_flags flags;
+};
+
+struct mem_info {
+	struct addr_map_symbol iaddr;
+	struct addr_map_symbol daddr;
+	union perf_mem_data_src data_src;
 };
 
 struct addr_location {
@@ -205,6 +215,7 @@ struct symbol *dso__find_symbol(struct dso *dso, enum map_type type,
 				u64 addr);
 struct symbol *dso__find_symbol_by_name(struct dso *dso, enum map_type type,
 					const char *name);
+struct symbol *dso__first_symbol(struct dso *dso, enum map_type type);
 
 int filename__read_build_id(const char *filename, void *bf, size_t size);
 int sysfs__read_build_id(const char *filename, void *bf, size_t size);
@@ -223,6 +234,8 @@ size_t symbol__fprintf_symname_offs(const struct symbol *sym,
 size_t symbol__fprintf_symname(const struct symbol *sym, FILE *fp);
 size_t symbol__fprintf(struct symbol *sym, FILE *fp);
 bool symbol_type__is_a(char symbol_type, enum map_type map_type);
+bool symbol__restricted_filename(const char *filename,
+				 const char *restricted_filename);
 
 int dso__load_sym(struct dso *dso, struct map *map, struct symsrc *syms_ss,
 		  struct symsrc *runtime_ss, symbol_filter_t filter,
@@ -234,5 +247,9 @@ void symbols__insert(struct rb_root *symbols, struct symbol *sym);
 void symbols__fixup_duplicate(struct rb_root *symbols);
 void symbols__fixup_end(struct rb_root *symbols);
 void __map_groups__fixup_end(struct map_groups *mg, enum map_type type);
+
+typedef int (*mapfn_t)(u64 start, u64 len, u64 pgoff, void *data);
+int file__read_maps(int fd, bool exe, mapfn_t mapfn, void *data,
+		    bool *is_64_bit);
 
 #endif /* __PERF_SYMBOL */

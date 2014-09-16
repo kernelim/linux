@@ -102,6 +102,9 @@ typedef union
 typedef struct
 {
 	unsigned int	fpc;
+#ifndef __GENKSYMS__
+	unsigned int	pad;
+#endif
 	freg_t32	fprs[__NUM_FPRS];              
 } _s390_fp_regs32;
 

@@ -533,7 +533,7 @@ static int inotify_new_watch(struct fsnotify_group *group,
 {
 	struct inotify_inode_mark_entry *tmp_ientry;
 	__u32 mask;
-	int ret;
+	int ret, wd;
 
 	/* don't allow invalid bits: we don't want flags set */
 	mask = inotify_arg_to_mask(arg);
@@ -563,10 +563,20 @@ retry:
 	ret = idr_get_new_above(&group->inotify_data.idr, &tmp_ientry->fsn_entry,
 				group->inotify_data.last_wd +  1,
 				&tmp_ientry->wd);
+	if (!ret) {
+		wd = tmp_ientry->wd;
+		/* update the idr hint, who cares about races, it's just a hint */
+		group->inotify_data.last_wd = tmp_ientry->wd;
+
+		/* increment the number of watches the user has */
+		atomic_inc(&group->inotify_data.user->inotify_watches);
+	}
 	spin_unlock(&group->inotify_data.idr_lock);
 	if (ret) {
 		/* we didn't get on the idr, drop the idr reference */
 		fsnotify_put_mark(&tmp_ientry->fsn_entry);
+
+		atomic_dec(&group->inotify_data.user->inotify_watches);
 
 		/* idr was out of memory allocate and try again */
 		if (ret == -EAGAIN)
@@ -582,14 +592,8 @@ retry:
 		goto out_err;
 	}
 
-	/* update the idr hint, who cares about races, it's just a hint */
-	group->inotify_data.last_wd = tmp_ientry->wd;
-
-	/* increment the number of watches the user has */
-	atomic_inc(&group->inotify_data.user->inotify_watches);
-
 	/* return the watch descriptor for this new entry */
-	ret = tmp_ientry->wd;
+	ret = wd;
 
 	/* match the ref from fsnotify_init_markentry() */
 	fsnotify_put_mark(&tmp_ientry->fsn_entry);

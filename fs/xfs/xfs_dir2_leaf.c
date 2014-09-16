@@ -982,7 +982,7 @@ xfs_dir2_leaf_getdents(
 				/*
 				 * Advance offset through the mapping table.
 				 */
-				for (j = 0; j < mp->m_dirblkfsbs; j++) {
+				for (j = 0; j < mp->m_dirblkfsbs; j += length) {
 					/*
 					 * The rest of this extent but not
 					 * more than a dir block.
@@ -990,7 +990,6 @@ xfs_dir2_leaf_getdents(
 					length = MIN(mp->m_dirblkfsbs,
 						(int)(map[ra_index].br_blockcount -
 						ra_offset));
-					j += length;
 					ra_offset += length;
 					/*
 					 * Advance to the next mapping if

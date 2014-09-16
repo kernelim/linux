@@ -68,7 +68,7 @@ static int addr_doit(struct sk_buff *skb, struct nlmsghdr *nlh, void *attr)
 	int err;
 	u8 pnaddr;
 
-	if (!capable(CAP_SYS_ADMIN))
+	if (!netlink_capable(skb, CAP_SYS_ADMIN))
 		return -EPERM;
 
 	ASSERT_RTNL();

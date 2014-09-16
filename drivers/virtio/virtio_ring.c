@@ -98,6 +98,9 @@ struct vring_virtqueue
 	/* How to notify other side. FIXME: commonalize hcalls! */
 	void (*notify)(struct virtqueue *vq);
 
+	/* Index of the queue */
+	int queue_index;
+
 #ifdef DEBUG
 	/* They're supposed to lock for us. */
 	unsigned int in_use;
@@ -157,6 +160,13 @@ static int vring_add_indirect(struct vring_virtqueue *vq,
 
 	return head;
 }
+
+int virtqueue_get_queue_index(struct virtqueue *_vq)
+{
+	struct vring_virtqueue *vq = to_vvq(_vq);
+	return vq->queue_index;
+}
+EXPORT_SYMBOL_GPL(virtqueue_get_queue_index);
 
 int virtqueue_add_buf(struct virtqueue *_vq,
 		  struct scatterlist sg[],
@@ -527,7 +537,8 @@ irqreturn_t vring_interrupt(int irq, void *_vq)
 }
 EXPORT_SYMBOL_GPL(vring_interrupt);
 
-struct virtqueue *vring_new_virtqueue(unsigned int num,
+struct virtqueue *vring_new_virtqueue(unsigned int index,
+				      unsigned int num,
 				      unsigned int vring_align,
 				      struct virtio_device *vdev,
 				      void *pages,
@@ -556,6 +567,7 @@ struct virtqueue *vring_new_virtqueue(unsigned int num,
 	vq->broken = false;
 	vq->last_used_idx = 0;
 	vq->num_added = 0;
+	vq->queue_index = index;
 	list_add_tail(&vq->vq.list, &vdev->vqs);
 #ifdef DEBUG
 	vq->in_use = false;

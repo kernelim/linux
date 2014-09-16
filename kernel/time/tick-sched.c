@@ -477,6 +477,7 @@ out:
 end:
 	local_irq_restore(flags);
 }
+EXPORT_SYMBOL(tick_nohz_stop_sched_tick);
 
 /**
  * tick_nohz_get_sleep_length - return the length of the current sleep
@@ -577,6 +578,7 @@ void tick_nohz_restart_sched_tick(void)
 
 	local_irq_enable();
 }
+EXPORT_SYMBOL(tick_nohz_restart_sched_tick);
 
 static int tick_nohz_reprogram(struct tick_sched *ts, ktime_t now)
 {

@@ -30,6 +30,7 @@
 #include <linux/time.h>
 #include <acpi/acpi_drivers.h>
 #include <acpi/acpi_bus.h>
+#include "internal.h"
 
 #define ACPI_POWER_METER_NAME		"power_meter"
 ACPI_MODULE_NAME(ACPI_POWER_METER_NAME);
@@ -964,7 +965,7 @@ static int __init acpi_power_meter_init(void)
 {
 	int result;
 
-	if (acpi_disabled)
+	if (acpi_disabled || !acpi_ipmi_loaded)
 		return -ENODEV;
 
 	result = acpi_bus_register_driver(&acpi_power_meter_driver);

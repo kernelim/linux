@@ -54,11 +54,11 @@ static int ext4_release_file(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-void ext4_aiodio_wait(struct inode *inode)
+void ext4_unwritten_wait(struct inode *inode)
 {
 	wait_queue_head_t *wq = to_aio_wq(inode);
 
-	wait_event(*wq, (atomic_read(&EXT4_I(inode)->i_aiodio_unwritten) == 0));
+	wait_event(*wq, (atomic_read(&EXT4_I(inode)->i_unwritten) == 0));
 }
 
 /*
@@ -120,7 +120,7 @@ ext4_file_write(struct kiocb *iocb, const struct iovec *iov,
 	/* Unaligned direct AIO must be serialized; see comment above */
 	if (unaligned_aio) {
 		mutex_lock(&EXT4_I(inode)->i_aio_mutex);
-		ext4_aiodio_wait(inode);
+		ext4_unwritten_wait(inode);
  	}
 
 	ret = generic_file_aio_write(iocb, iov, nr_segs, pos);

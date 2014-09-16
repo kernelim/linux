@@ -1086,7 +1086,7 @@ static int scrub_recheck_block(struct btrfs_fs_info *fs_info,
 			bio_put(bio);
 			return -EIO;
 		}
-		btrfsic_submit_bio(READ | REQ_SYNC, bio);
+		btrfsic_submit_bio(READ_SYNC, bio);
 
 		wait_for_completion(&complete);
 
@@ -1217,7 +1217,7 @@ static int scrub_repair_page_from_good_copy(struct scrub_block *sblock_bad,
 			bio_put(bio);
 			return -EIO;
 		}
-		btrfsic_submit_bio(WRITE | REQ_SYNC, bio);
+		btrfsic_submit_bio(WRITE_SYNC, bio);
 
 		wait_for_completion(&complete);
 		if (!bio_flagged(bio, BIO_UPTODATE)) {

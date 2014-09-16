@@ -352,6 +352,29 @@ nf_nat_setup_info(struct nf_conn *ct,
 }
 EXPORT_SYMBOL(nf_nat_setup_info);
 
+static unsigned int
+__nf_nat_alloc_null_binding(struct nf_conn *ct, enum nf_nat_manip_type manip)
+{
+	/* Force range to this IP; let proto decide mapping for
+	 * per-proto parts (hence not IP_NAT_RANGE_PROTO_SPECIFIED).
+	 * Use reply in case it's already been mangled (eg local packet).
+	 */
+	__be32 ip =
+		(manip == IP_NAT_MANIP_SRC ?
+		ct->tuplehash[IP_CT_DIR_REPLY].tuple.dst.u3.ip :
+		ct->tuplehash[IP_CT_DIR_REPLY].tuple.src.u3.ip);
+	struct nf_nat_range range
+		= { IP_NAT_RANGE_MAP_IPS, ip, ip, { 0 }, { 0 } };
+	return nf_nat_setup_info(ct, &range, manip);
+}
+
+unsigned int
+nf_nat_alloc_null_binding(struct nf_conn *ct, unsigned int hooknum)
+{
+	return __nf_nat_alloc_null_binding(ct, HOOK2MANIP(hooknum));
+}
+EXPORT_SYMBOL_GPL(nf_nat_alloc_null_binding);
+
 /* Returns true if succeeded. */
 static bool
 manip_pkt(u_int16_t proto,
@@ -647,11 +670,7 @@ nfnetlink_parse_nat(const struct nlattr *nat,
 	if (!tb[CTA_NAT_PROTO])
 		return 0;
 
-	err = nfnetlink_parse_nat_proto(tb[CTA_NAT_PROTO], ct, range);
-	if (err < 0)
-		return err;
-
-	return 0;
+	return nfnetlink_parse_nat_proto(tb[CTA_NAT_PROTO], ct, range);
 }
 
 static int
@@ -660,11 +679,18 @@ nfnetlink_parse_nat_setup(struct nf_conn *ct,
 			  const struct nlattr *attr)
 {
 	struct nf_nat_range range;
+	int err;
 
-	if (nfnetlink_parse_nat(attr, ct, &range) < 0)
-		return -EINVAL;
-	if (nf_nat_initialized(ct, manip))
+	if (WARN_ON_ONCE(nf_nat_initialized(ct, manip)))
 		return -EEXIST;
+
+	/* No NAT information has been passed, allocate the null-binding */
+	if (attr == NULL)
+		return __nf_nat_alloc_null_binding(ct, manip);
+
+	err = nfnetlink_parse_nat(attr, ct, &range);
+	if (err < 0)
+		return err;
 
 	return nf_nat_setup_info(ct, &range, manip);
 }

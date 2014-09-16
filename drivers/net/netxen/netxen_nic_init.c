@@ -26,6 +26,7 @@
 #include <linux/netdevice.h>
 #include <linux/delay.h>
 #include <linux/if_vlan.h>
+#include <net/checksum.h>
 #include "netxen_nic.h"
 #include "netxen_nic_hw.h"
 
@@ -143,7 +144,7 @@ void netxen_release_tx_buffers(struct netxen_adapter *adapter)
 					 buffrag->length, PCI_DMA_TODEVICE);
 			buffrag->dma = 0ULL;
 		}
-		for (j = 0; j < cmd_buf->frag_count; j++) {
+		for (j = 1; j < cmd_buf->frag_count; j++) {
 			buffrag++;
 			if (buffrag->dma) {
 				pci_unmap_page(adapter->pdev, buffrag->dma,
@@ -1633,13 +1634,13 @@ netxen_process_lro(struct netxen_adapter *adapter,
 	u16 vid = 0xffff;
 	u8 vhdr_len = 0;
 
-	if (unlikely(ring > adapter->max_rds_rings))
+	if (unlikely(ring >= adapter->max_rds_rings))
 		return NULL;
 
 	rds_ring = &recv_ctx->rds_rings[ring];
 
 	index = netxen_get_lro_sts_refhandle(sts_data0);
-	if (unlikely(index > rds_ring->num_desc))
+	if (unlikely(index >= rds_ring->num_desc))
 		return NULL;
 
 	buffer = &rds_ring->rx_buf_arr[index];
@@ -1681,9 +1682,8 @@ netxen_process_lro(struct netxen_adapter *adapter,
 	th = (struct tcphdr *)((skb->data + vhdr_len) + (iph->ihl << 2));
 
 	length = (iph->ihl << 2) + (th->doff << 2) + lro_length;
+	csum_replace2(&iph->check, iph->tot_len, htons(length));
 	iph->tot_len = htons(length);
-	iph->check = 0;
-	iph->check = ip_fast_csum((unsigned char *)iph, iph->ihl);
 	th->psh = push;
 	th->seq = htonl(seq_number);
 

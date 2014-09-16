@@ -113,6 +113,11 @@ void *acpi_callocate(u32 size);
 
 void acpi_free(void *address);
 
+u32
+acpi_check_address_range(acpi_adr_space_type space_id,
+			 acpi_physical_address address,
+			 acpi_size length, u8 warn);
+
 /*
  * ACPI table manipulation interfaces
  */

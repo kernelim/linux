@@ -149,6 +149,104 @@ static int hidinput_setkeycode(struct input_dev *dev, int scancode,
 }
 
 
+/**
+ * hidinput_calc_abs_res - calculate an absolute axis resolution
+ * @field: the HID report field to calculate resolution for
+ * @code: axis code
+ *
+ * The formula is:
+ *                         (logical_maximum - logical_minimum)
+ * resolution = ----------------------------------------------------------
+ *              (physical_maximum - physical_minimum) * 10 ^ unit_exponent
+ *
+ * as seen in the HID specification v1.11 6.2.2.7 Global Items.
+ *
+ * Only exponent 1 length units are processed. Centimeters and inches are
+ * converted to millimeters. Degrees are converted to radians.
+ */
+__s32 hidinput_calc_abs_res(const struct hid_field *field, __u16 code)
+{
+	__s32 unit_exponent = field->unit_exponent;
+	__s32 logical_extents = field->logical_maximum -
+					field->logical_minimum;
+	__s32 physical_extents = field->physical_maximum -
+					field->physical_minimum;
+	__s32 prev;
+
+	/* Check if the extents are sane */
+	if (logical_extents <= 0 || physical_extents <= 0)
+		return 0;
+
+	/*
+	 * Verify and convert units.
+	 * See HID specification v1.11 6.2.2.7 Global Items for unit decoding
+	 */
+	switch (code) {
+	case ABS_X:
+	case ABS_Y:
+	case ABS_Z:
+	case ABS_MT_POSITION_X:
+	case ABS_MT_POSITION_Y:
+	case ABS_MT_TOOL_X:
+	case ABS_MT_TOOL_Y:
+	case ABS_MT_TOUCH_MAJOR:
+	case ABS_MT_TOUCH_MINOR:
+		if (field->unit == 0x11) {		/* If centimeters */
+			/* Convert to millimeters */
+			unit_exponent += 1;
+		} else if (field->unit == 0x13) {	/* If inches */
+			/* Convert to millimeters */
+			prev = physical_extents;
+			physical_extents *= 254;
+			if (physical_extents < prev)
+				return 0;
+			unit_exponent -= 1;
+		} else {
+			return 0;
+		}
+		break;
+
+	case ABS_RX:
+	case ABS_RY:
+	case ABS_RZ:
+	case ABS_TILT_X:
+	case ABS_TILT_Y:
+		if (field->unit == 0x14) {		/* If degrees */
+			/* Convert to radians */
+			prev = logical_extents;
+			logical_extents *= 573;
+			if (logical_extents < prev)
+				return 0;
+			unit_exponent += 1;
+		} else if (field->unit != 0x12) {	/* If not radians */
+			return 0;
+		}
+		break;
+
+	default:
+		return 0;
+	}
+
+	/* Apply negative unit exponent */
+	for (; unit_exponent < 0; unit_exponent++) {
+		prev = logical_extents;
+		logical_extents *= 10;
+		if (logical_extents < prev)
+			return 0;
+	}
+	/* Apply positive unit exponent */
+	for (; unit_exponent > 0; unit_exponent--) {
+		prev = physical_extents;
+		physical_extents *= 10;
+		if (physical_extents < prev)
+			return 0;
+	}
+
+	/* Calculate resolution */
+	return DIV_ROUND_CLOSEST(logical_extents, physical_extents);
+}
+EXPORT_SYMBOL_GPL(hidinput_calc_abs_res);
+
 static void hidinput_configure_usage(struct hid_input *hidinput, struct hid_field *field,
 				     struct hid_usage *usage)
 {
@@ -315,6 +413,14 @@ static void hidinput_configure_usage(struct hid_input *hidinput, struct hid_fiel
 
 		case 0x3c: /* Invert */
 			map_key_clear(BTN_TOOL_RUBBER);
+			break;
+
+		case 0x3d: /* X Tilt */
+			map_abs_clear(ABS_TILT_X);
+			break;
+
+		case 0x3e: /* Y Tilt */
+			map_abs_clear(ABS_TILT_Y);
 			break;
 
 		case 0x33: /* Touch */
@@ -528,6 +634,8 @@ mapped:
 			input_set_abs_params(input, usage->code, a, b, (b - a) >> 8, (b - a) >> 4);
 		else	input_set_abs_params(input, usage->code, a, b, 0, 0);
 
+		input_abs_set_res(input, usage->code,
+				  hidinput_calc_abs_res(field, usage->code));
 	}
 
 	if (usage->type == EV_ABS &&
@@ -647,6 +755,9 @@ void hidinput_report_event(struct hid_device *hid, struct hid_report *report)
 {
 	struct hid_input *hidinput;
 
+	if (hid->quirks & HID_QUIRK_NO_INPUT_SYNC)
+		return;
+
 	list_for_each_entry(hidinput, &hid->inputs, list)
 		input_sync(hidinput->input);
 }
@@ -673,14 +784,125 @@ static int hidinput_open(struct input_dev *dev)
 {
 	struct hid_device *hid = input_get_drvdata(dev);
 
-	return hid->ll_driver->open(hid);
+	return hid_hw_open(hid);
 }
 
 static void hidinput_close(struct input_dev *dev)
 {
 	struct hid_device *hid = input_get_drvdata(dev);
 
-	hid->ll_driver->close(hid);
+	hid_hw_close(hid);
+}
+
+static void report_features(struct hid_device *hid)
+{
+	struct hid_driver *drv = hid->driver;
+	struct hid_report_enum *rep_enum;
+	struct hid_report *rep;
+	int i, j;
+
+	if (!drv->feature_mapping)
+		return;
+
+	rep_enum = &hid->report_enum[HID_FEATURE_REPORT];
+	list_for_each_entry(rep, &rep_enum->report_list, list)
+		for (i = 0; i < rep->maxfield; i++)
+			for (j = 0; j < rep->field[i]->maxusage; j++)
+				drv->feature_mapping(hid, rep->field[i],
+						     rep->field[i]->usage + j);
+}
+
+static struct hid_input *hidinput_allocate(struct hid_device *hid)
+{
+	struct hid_input *hidinput = kzalloc(sizeof(*hidinput), GFP_KERNEL);
+	struct input_dev *input_dev = input_allocate_device();
+	if (!hidinput || !input_dev) {
+		kfree(hidinput);
+		input_free_device(input_dev);
+		hid_err(hid, "Out of memory during hid input probe\n");
+		return NULL;
+	}
+
+	input_set_drvdata(input_dev, hid);
+	input_dev->event = hid->ll_driver->hidinput_input_event;
+	input_dev->open = hidinput_open;
+	input_dev->close = hidinput_close;
+	input_dev->setkeycode = hidinput_setkeycode;
+	input_dev->getkeycode = hidinput_getkeycode;
+
+	input_dev->name = hid->name;
+	input_dev->phys = hid->phys;
+	input_dev->uniq = hid->uniq;
+	input_dev->id.bustype = hid->bus;
+	input_dev->id.vendor  = hid->vendor;
+	input_dev->id.product = hid->product;
+	input_dev->id.version = hid->version;
+	input_dev->dev.parent = hid->dev.parent;
+	hidinput->input = input_dev;
+	list_add_tail(&hidinput->list, &hid->inputs);
+
+	return hidinput;
+}
+
+static bool hidinput_has_been_populated(struct hid_input *hidinput)
+{
+	int i;
+	unsigned long r = 0;
+
+	for (i = 0; i < BITS_TO_LONGS(EV_CNT); i++)
+		r |= hidinput->input->evbit[i];
+
+	for (i = 0; i < BITS_TO_LONGS(KEY_CNT); i++)
+		r |= hidinput->input->keybit[i];
+
+	for (i = 0; i < BITS_TO_LONGS(REL_CNT); i++)
+		r |= hidinput->input->relbit[i];
+
+	for (i = 0; i < BITS_TO_LONGS(ABS_CNT); i++)
+		r |= hidinput->input->absbit[i];
+
+	for (i = 0; i < BITS_TO_LONGS(MSC_CNT); i++)
+		r |= hidinput->input->mscbit[i];
+
+	for (i = 0; i < BITS_TO_LONGS(LED_CNT); i++)
+		r |= hidinput->input->ledbit[i];
+
+	for (i = 0; i < BITS_TO_LONGS(SND_CNT); i++)
+		r |= hidinput->input->sndbit[i];
+
+	for (i = 0; i < BITS_TO_LONGS(FF_CNT); i++)
+		r |= hidinput->input->ffbit[i];
+
+	for (i = 0; i < BITS_TO_LONGS(SW_CNT); i++)
+		r |= hidinput->input->swbit[i];
+
+	return !!r;
+}
+
+static void hidinput_cleanup_hidinput(struct hid_device *hid,
+		struct hid_input *hidinput)
+{
+	struct hid_report *report;
+	int i, k;
+
+	list_del(&hidinput->list);
+	input_free_device(hidinput->input);
+
+	for (k = HID_INPUT_REPORT; k <= HID_OUTPUT_REPORT; k++) {
+		if (k == HID_OUTPUT_REPORT &&
+			hid->quirks & HID_QUIRK_SKIP_OUTPUT_REPORTS)
+			continue;
+
+		list_for_each_entry(report, &hid->report_enum[k].report_list,
+				    list) {
+
+			for (i = 0; i < report->maxfield; i++)
+				if (report->field[i]->hidinput == hidinput)
+					report->field[i]->hidinput = NULL;
+		}
+	}
+
+	kfree(hidinput);
 }
 
 /*
@@ -691,11 +913,10 @@ static void hidinput_close(struct input_dev *dev)
 
 int hidinput_connect(struct hid_device *hid, unsigned int force)
 {
+	struct hid_driver *drv = hid->driver;
 	struct hid_report *report;
 	struct hid_input *hidinput = NULL;
-	struct input_dev *input_dev;
 	int i, j, k;
-	int max_report_type = HID_OUTPUT_REPORT;
 
 	INIT_LIST_HEAD(&hid->inputs);
 
@@ -712,49 +933,32 @@ int hidinput_connect(struct hid_device *hid, unsigned int force)
 			return -1;
 	}
 
-	if (hid->quirks & HID_QUIRK_SKIP_OUTPUT_REPORTS)
-		max_report_type = HID_INPUT_REPORT;
+	report_features(hid);
 
-	for (k = HID_INPUT_REPORT; k <= max_report_type; k++)
+	for (k = HID_INPUT_REPORT; k <= HID_OUTPUT_REPORT; k++) {
+		if (k == HID_OUTPUT_REPORT &&
+			hid->quirks & HID_QUIRK_SKIP_OUTPUT_REPORTS)
+			continue;
+
 		list_for_each_entry(report, &hid->report_enum[k].report_list, list) {
 
 			if (!report->maxfield)
 				continue;
 
 			if (!hidinput) {
-				hidinput = kzalloc(sizeof(*hidinput), GFP_KERNEL);
-				input_dev = input_allocate_device();
-				if (!hidinput || !input_dev) {
-					kfree(hidinput);
-					input_free_device(input_dev);
-					err_hid("Out of memory during hid input probe");
+				hidinput = hidinput_allocate(hid);
+				if (!hidinput)
 					goto out_unwind;
-				}
-
-				input_set_drvdata(input_dev, hid);
-				input_dev->event =
-					hid->ll_driver->hidinput_input_event;
-				input_dev->open = hidinput_open;
-				input_dev->close = hidinput_close;
-				input_dev->setkeycode = hidinput_setkeycode;
-				input_dev->getkeycode = hidinput_getkeycode;
-
-				input_dev->name = hid->name;
-				input_dev->phys = hid->phys;
-				input_dev->uniq = hid->uniq;
-				input_dev->id.bustype = hid->bus;
-				input_dev->id.vendor  = hid->vendor;
-				input_dev->id.product = hid->product;
-				input_dev->id.version = hid->version;
-				input_dev->dev.parent = hid->dev.parent;
-				hidinput->input = input_dev;
-				list_add_tail(&hidinput->list, &hid->inputs);
 			}
 
 			for (i = 0; i < report->maxfield; i++)
 				for (j = 0; j < report->field[i]->maxusage; j++)
 					hidinput_configure_usage(hidinput, report->field[i],
 								 report->field[i]->usage + j);
+
+			if ((hid->quirks & HID_QUIRK_NO_EMPTY_INPUT) &&
+			    !hidinput_has_been_populated(hidinput))
+				continue;
 
 			if (hid->quirks & HID_QUIRK_MULTI_INPUT) {
 				/* This will leave hidinput NULL, so that it
@@ -763,14 +967,33 @@ int hidinput_connect(struct hid_device *hid, unsigned int force)
 				 * UGCI) cram a lot of unrelated inputs into the
 				 * same interface. */
 				hidinput->report = report;
+				if (drv->input_configured)
+					drv->input_configured(hid, hidinput);
 				if (input_register_device(hidinput->input))
 					goto out_cleanup;
 				hidinput = NULL;
 			}
 		}
+	}
 
-	if (hidinput && input_register_device(hidinput->input))
-		goto out_cleanup;
+	if (hidinput && (hid->quirks & HID_QUIRK_NO_EMPTY_INPUT) &&
+	    !hidinput_has_been_populated(hidinput)) {
+		/* no need to register an input device not populated */
+		hidinput_cleanup_hidinput(hid, hidinput);
+		hidinput = NULL;
+	}
+
+	if (list_empty(&hid->inputs)) {
+		hid_err(hid, "No inputs registered, leaving\n");
+		goto out_unwind;
+	}
+
+	if (hidinput) {
+		if (drv->input_configured)
+			drv->input_configured(hid, hidinput);
+		if (input_register_device(hidinput->input))
+			goto out_cleanup;
+	}
 
 	return 0;
 

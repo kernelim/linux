@@ -97,8 +97,6 @@ struct mpc_intsrc mp_irqs[MAX_IRQ_SOURCES];
 /* # of MP IRQ source entries */
 int mp_irq_entries;
 
-/* Number of legacy interrupts */
-static int nr_legacy_irqs __read_mostly = NR_IRQS_LEGACY;
 /* GSI interrupts */
 static int nr_irqs_gsi = NR_IRQS_LEGACY;
 
@@ -167,7 +165,6 @@ static struct irq_cfg irq_cfgx[NR_IRQS] = {
 
 void __init io_apic_disable_legacy(void)
 {
-	nr_legacy_irqs = 0;
 	nr_irqs_gsi = 0;
 }
 
@@ -188,7 +185,7 @@ int __init arch_early_irq_init(void)
 		desc->chip_data = &cfg[i];
 		zalloc_cpumask_var_node(&cfg[i].domain, GFP_NOWAIT, node);
 		zalloc_cpumask_var_node(&cfg[i].old_domain, GFP_NOWAIT, node);
-		if (i < nr_legacy_irqs)
+		if (i < legacy_pic->nr_legacy_irqs)
 			cpumask_setall(cfg[i].domain);
 	}
 
@@ -432,13 +429,21 @@ union entry_union {
 	struct IO_APIC_route_entry entry;
 };
 
-static struct IO_APIC_route_entry ioapic_read_entry(int apic, int pin)
+static struct IO_APIC_route_entry __ioapic_read_entry(int apic, int pin)
 {
 	union entry_union eu;
-	unsigned long flags;
-	spin_lock_irqsave(&ioapic_lock, flags);
+
 	eu.w1 = io_apic_read(apic, 0x10 + 2 * pin);
 	eu.w2 = io_apic_read(apic, 0x11 + 2 * pin);
+	return eu.entry;
+}
+
+static struct IO_APIC_route_entry ioapic_read_entry(int apic, int pin)
+{
+	union entry_union eu = { .entry = {0} };
+	unsigned long flags;
+	spin_lock_irqsave(&ioapic_lock, flags);
+	eu.entry = __ioapic_read_entry(apic, pin);
 	spin_unlock_irqrestore(&ioapic_lock, flags);
 	return eu.entry;
 }
@@ -565,18 +570,6 @@ static void io_apic_modify_irq(struct irq_cfg *cfg,
 
 	for_each_irq_pin(entry, cfg->irq_2_pin)
 		__io_apic_modify_irq(entry, mask_and, mask_or, final);
-}
-
-static void __mask_and_edge_IO_APIC_irq(struct irq_pin_list *entry)
-{
-	__io_apic_modify_irq(entry, ~IO_APIC_REDIR_LEVEL_TRIGGER,
-			     IO_APIC_REDIR_MASKED, NULL);
-}
-
-static void __unmask_and_level_IO_APIC_irq(struct irq_pin_list *entry)
-{
-	__io_apic_modify_irq(entry, ~IO_APIC_REDIR_MASKED,
-			     IO_APIC_REDIR_LEVEL_TRIGGER, NULL);
 }
 
 static void __unmask_IO_APIC_irq(struct irq_cfg *cfg)
@@ -914,7 +907,7 @@ static int __init find_isa_irq_apic(int irq, int type)
  */
 static int EISA_ELCR(unsigned int irq)
 {
-	if (irq < nr_legacy_irqs) {
+	if (irq < legacy_pic->nr_legacy_irqs) {
 		unsigned int port = 0x4d0 + (irq >> 3);
 		return (inb(port) >> (irq & 7)) & 1;
 	}
@@ -1508,8 +1501,8 @@ static void setup_IO_APIC_irq(int apic_id, int pin, unsigned int irq, struct irq
 	}
 
 	ioapic_register_intr(irq, desc, trigger);
-	if (irq < nr_legacy_irqs)
-		disable_8259A_irq(irq);
+	if (irq < legacy_pic->nr_legacy_irqs)
+		legacy_pic->chip->mask(irq);
 
 	ioapic_write_entry(apic_id, pin, entry);
 }
@@ -1927,7 +1920,7 @@ __apicdebuginit(void) print_PIC(void)
 	unsigned int v;
 	unsigned long flags;
 
-	if (apic_verbosity == APIC_QUIET || !nr_legacy_irqs)
+	if (apic_verbosity == APIC_QUIET || !legacy_pic->nr_legacy_irqs)
 		return;
 
 	printk(KERN_DEBUG "\nprinting PIC contents\n");
@@ -1979,7 +1972,7 @@ void __init enable_IO_APIC(void)
 	int i8259_apic, i8259_pin;
 	int apic;
 
-	if (!nr_legacy_irqs)
+	if (!legacy_pic->nr_legacy_irqs)
 		return;
 
 	for(apic = 0; apic < nr_ioapics; apic++) {
@@ -2052,7 +2045,7 @@ void disable_IO_APIC(int force)
 	 */
 	clear_IO_APIC();
 
-	if (!nr_legacy_irqs)
+	if (!legacy_pic->nr_legacy_irqs)
 		return;
 
 	/*
@@ -2285,9 +2278,9 @@ static unsigned int startup_ioapic_irq(unsigned int irq)
 	struct irq_cfg *cfg;
 
 	spin_lock_irqsave(&ioapic_lock, flags);
-	if (irq < nr_legacy_irqs) {
-		disable_8259A_irq(irq);
-		if (i8259A_irq_pending(irq))
+	if (irq < legacy_pic->nr_legacy_irqs) {
+		legacy_pic->chip->mask(irq);
+		if (legacy_pic->irq_pending(irq))
 			was_pending = 1;
 	}
 	cfg = irq_cfg(irq);
@@ -2632,8 +2625,23 @@ static void __eoi_ioapic_irq(unsigned int irq, struct irq_cfg *cfg)
 			else
 				io_apic_eoi(entry->apic, cfg->vector);
 		} else {
-			__mask_and_edge_IO_APIC_irq(entry);
-			__unmask_and_level_IO_APIC_irq(entry);
+			struct IO_APIC_route_entry rte, rte1;
+
+			rte = rte1 =
+				__ioapic_read_entry(entry->apic, entry->pin);
+
+			/*
+			 * Mask the entry and change the trigger mode to edge.
+			 */
+			rte1.mask = 1;
+			rte1.trigger = IOAPIC_EDGE;
+
+			__ioapic_write_entry(entry->apic, entry->pin, rte1);
+
+			/*
+			 * Restore the previous level triggered entry.
+			 */
+			__ioapic_write_entry(entry->apic, entry->pin, rte);
 		}
 	}
 }
@@ -2827,8 +2835,8 @@ static inline void init_IO_APIC_traps(void)
 			 * so default to an old-fashioned 8259
 			 * interrupt if we can..
 			 */
-			if (irq < nr_legacy_irqs)
-				make_8259A_irq(irq);
+			if (irq < legacy_pic->nr_legacy_irqs)
+				legacy_pic->make_irq(irq);
 			else
 				/* Strange. Oh, well.. */
 				desc->chip = &no_irq_chip;
@@ -2985,7 +2993,7 @@ static inline void __init check_timer(void)
 	/*
 	 * get/set the timer IRQ vector:
 	 */
-	disable_8259A_irq(0);
+	legacy_pic->chip->mask(0);
 	assign_irq_vector(0, cfg, apic->target_cpus());
 
 	/*
@@ -2998,7 +3006,7 @@ static inline void __init check_timer(void)
 	 * automatically.
 	 */
 	apic_write(APIC_LVT0, APIC_LVT_MASKED | APIC_DM_EXTINT);
-	init_8259A(1);
+	legacy_pic->init(1);
 #ifdef CONFIG_X86_32
 	{
 		unsigned int ver;
@@ -3058,7 +3066,7 @@ static inline void __init check_timer(void)
 			nmi_watchdog_default();
 			if (nmi_watchdog == NMI_IO_APIC) {
 				setup_nmi();
-				enable_8259A_irq(0);
+				legacy_pic->chip->unmask(0);
 			}
 			if (disable_timer_pin_1 > 0)
 				clear_IO_APIC_pin(0, pin1);
@@ -3081,15 +3089,15 @@ static inline void __init check_timer(void)
 		 */
 		replace_pin_at_irq_node(cfg, node, apic1, pin1, apic2, pin2);
 		setup_timer_IRQ0_pin(apic2, pin2, cfg->vector);
-		enable_8259A_irq(0);
+		legacy_pic->chip->unmask(0);
 		if (timer_irq_works()) {
 			apic_printk(APIC_QUIET, KERN_INFO "....... works.\n");
 			timer_through_8259 = 1;
 			nmi_watchdog_default();
 			if (nmi_watchdog == NMI_IO_APIC) {
-				disable_8259A_irq(0);
+				legacy_pic->chip->mask(0);
 				setup_nmi();
-				enable_8259A_irq(0);
+				legacy_pic->chip->unmask(0);
 			}
 			goto out;
 		}
@@ -3097,7 +3105,7 @@ static inline void __init check_timer(void)
 		 * Cleanup, just in case ...
 		 */
 		local_irq_disable();
-		disable_8259A_irq(0);
+		legacy_pic->chip->mask(0);
 		clear_IO_APIC_pin(apic2, pin2);
 		apic_printk(APIC_QUIET, KERN_INFO "....... failed.\n");
 	}
@@ -3116,22 +3124,22 @@ static inline void __init check_timer(void)
 
 	lapic_register_intr(0, desc);
 	apic_write(APIC_LVT0, APIC_DM_FIXED | cfg->vector);	/* Fixed mode */
-	enable_8259A_irq(0);
+	legacy_pic->chip->unmask(0);
 
 	if (timer_irq_works()) {
 		apic_printk(APIC_QUIET, KERN_INFO "..... works.\n");
 		goto out;
 	}
 	local_irq_disable();
-	disable_8259A_irq(0);
+	legacy_pic->chip->mask(0);
 	apic_write(APIC_LVT0, APIC_LVT_MASKED | APIC_DM_FIXED | cfg->vector);
 	apic_printk(APIC_QUIET, KERN_INFO "..... failed.\n");
 
 	apic_printk(APIC_QUIET, KERN_INFO
 		    "...trying to set up timer as ExtINT IRQ...\n");
 
-	init_8259A(0);
-	make_8259A_irq(0);
+	legacy_pic->init(0);
+	legacy_pic->make_irq(0);
 	apic_write(APIC_LVT0, APIC_DM_EXTINT);
 
 	unlock_ExtINT_logic();
@@ -3173,7 +3181,7 @@ void __init setup_IO_APIC(void)
 	/*
 	 * calling enable_IO_APIC() is moved to setup_local_APIC for BP
 	 */
-	io_apic_irqs = nr_legacy_irqs ? ~PIC_IRQS : ~0UL;
+	io_apic_irqs = legacy_pic->nr_legacy_irqs ? ~PIC_IRQS : ~0UL;
 
 	apic_printk(APIC_VERBOSE, "ENABLING IO-APIC IRQs\n");
 	/*
@@ -3184,7 +3192,7 @@ void __init setup_IO_APIC(void)
 	sync_Arb_IDs();
 	setup_IO_APIC_irqs();
 	init_IO_APIC_traps();
-	if (nr_legacy_irqs)
+	if (legacy_pic->nr_legacy_irqs)
 		check_timer();
 }
 
@@ -3983,7 +3991,7 @@ static int __io_apic_set_pci_routing(struct device *dev, int irq,
 	/*
 	 * IRQs < 16 are already in the irq_2_pin[] map
 	 */
-	if (irq >= nr_legacy_irqs) {
+	if (irq >= legacy_pic->nr_legacy_irqs) {
 		cfg = desc->chip_data;
 		if (add_pin_to_irq_node_nopanic(cfg, node, ioapic, pin)) {
 			printk(KERN_INFO "can not add pin %d for irq %d\n",

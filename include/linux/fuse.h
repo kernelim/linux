@@ -34,6 +34,9 @@
  * 7.13
  *  - make max number of background requests and congestion threshold
  *    tunables
+ *
+ * 7.14
+ *  - add splice support to fuse device
  */
 
 #ifndef _LINUX_FUSE_H
@@ -65,7 +68,7 @@
 #define FUSE_KERNEL_VERSION 7
 
 /** Minor version number of this interface */
-#define FUSE_KERNEL_MINOR_VERSION 13
+#define FUSE_KERNEL_MINOR_VERSION 14
 
 /** The node ID of the root inode */
 #define FUSE_ROOT_ID 1
@@ -143,6 +146,8 @@ struct fuse_file_lock {
  * FUSE_EXPORT_SUPPORT: filesystem handles lookups of "." and ".."
  * FUSE_DONT_MASK: don't apply umask to file mode on create operations
  * FUSE_AUTO_INVAL_DATA: automatically invalidate cached pages
+ * FUSE_DO_READDIRPLUS: do READDIRPLUS (READDIR+LOOKUP in one)
+ * FUSE_READDIRPLUS_AUTO: adaptive readdirplus
  * FUSE_ASYNC_DIO: asynchronous direct I/O submission
  */
 #define FUSE_ASYNC_READ		(1 << 0)
@@ -154,6 +159,7 @@ struct fuse_file_lock {
 #define FUSE_DONT_MASK		(1 << 6)
 #define FUSE_AUTO_INVAL_DATA   (1 << 12)
 #define FUSE_DO_READDIRPLUS    (1 << 13)
+#define FUSE_READDIRPLUS_AUTO  (1 << 14)
 #define FUSE_ASYNC_DIO         (1 << 15)
 
 /**

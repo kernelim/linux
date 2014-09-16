@@ -409,6 +409,10 @@ static int iscsi_prep_scsi_cmd_pdu(struct iscsi_task *task)
 		if (rc)
 			return rc;
 	}
+
+	if (scsi_get_prot_op(sc) != SCSI_PROT_NORMAL)
+		task->protected = true;
+
 	if (sc->sc_data_direction == DMA_TO_DEVICE) {
 		unsigned out_len = scsi_out(sc)->length;
 		struct iscsi_r2t_info *r2t = &task->unsol_r2t;
@@ -835,6 +839,33 @@ static void iscsi_scsi_cmd_rsp(struct iscsi_conn *conn, struct iscsi_hdr *hdr,
 	conn->exp_statsn = be32_to_cpu(rhdr->statsn) + 1;
 
 	sc->result = (DID_OK << 16) | rhdr->cmd_status;
+
+	if (task->protected) {
+		sector_t sector;
+		u8 ascq;
+
+		/**
+		 * Transports that didn't implement check_protection
+		 * callback but still published T10-PI support to scsi-mid
+		 * deserve this BUG_ON.
+		 **/
+		BUG_ON(!session->tt->check_protection);
+
+		ascq = session->tt->check_protection(task, &sector);
+		if (ascq) {
+			sc->result = DRIVER_SENSE << 24 |
+				     SAM_STAT_CHECK_CONDITION;
+			scsi_build_sense_buffer(1, sc->sense_buffer,
+						ILLEGAL_REQUEST, 0x10, ascq);
+			sc->sense_buffer[7] = 0xc; /* Additional sense length */
+			sc->sense_buffer[8] = 0;   /* Information desc type */
+			sc->sense_buffer[9] = 0xa; /* Additional desc length */
+			sc->sense_buffer[10] = 0x80; /* Validity bit */
+
+			put_unaligned_be64(sector, &sc->sense_buffer[12]);
+			goto out;
+		}
+	}
 
 	if (rhdr->response != ISCSI_STATUS_CMD_COMPLETED) {
 		sc->result = DID_ERROR << 16;
@@ -1580,6 +1611,7 @@ static inline struct iscsi_task *iscsi_alloc_task(struct iscsi_conn *conn,
 	task->have_checked_conn = false;
 	task->last_timeout = jiffies;
 	task->last_xfer = jiffies;
+	task->protected = false;
 	INIT_LIST_HEAD(&task->running);
 	return task;
 }
@@ -2973,6 +3005,7 @@ void iscsi_conn_teardown(struct iscsi_cls_conn *cls_conn)
 	free_pages((unsigned long) conn->data,
 		   get_order(ISCSI_DEF_MAX_RECV_SEG_LEN));
 	kfree(conn->persistent_address);
+	kfree(conn->local_ipaddr);
 	__kfifo_put(session->cmdpool.queue, (void*)&conn->login_task,
 		    sizeof(void*));
 	if (session->leadconn == conn)
@@ -3198,6 +3231,7 @@ int iscsi_set_param(struct iscsi_cls_conn *cls_conn,
 {
 	struct iscsi_conn *conn = cls_conn->dd_data;
 	struct iscsi_session *session = conn->session;
+	int val;
 
 	switch(param) {
 	case ISCSI_PARAM_FAST_ABORT:
@@ -3292,6 +3326,12 @@ int iscsi_set_param(struct iscsi_cls_conn *cls_conn,
 	case ISCSI_PARAM_DISCOVERY_PARENT_TYPE:
 		return iscsi_switch_str_param(&session->discovery_parent_type,
 					      buf);
+	case ISCSI_PARAM_DISCOVERY_SESS:
+		sscanf(buf, "%d", &val);
+		session->discovery_sess = !!val;
+		break;
+	case ISCSI_PARAM_LOCAL_IPADDR:
+		return iscsi_switch_str_param(&conn->local_ipaddr, buf);
 	default:
 		return -ENOSYS;
 	}
@@ -3564,6 +3604,9 @@ int iscsi_conn_get_param(struct iscsi_cls_conn *cls_conn,
 		break;
 	case ISCSI_PARAM_TCP_RECV_WSF:
 		len = sprintf(buf, "%u\n", conn->tcp_recv_wsf);
+		break;
+	case ISCSI_PARAM_LOCAL_IPADDR:
+		len = sprintf(buf, "%s\n", conn->local_ipaddr);
 		break;
 	default:
 		return -ENOSYS;

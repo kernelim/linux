@@ -197,6 +197,48 @@ config HID_MONTEREY
 	---help---
 	Support for Monterey Genius KB29E.
 
+config HID_MULTITOUCH
+	tristate "HID Multitouch panels"
+	depends on HID
+	---help---
+	  Generic support for HID multitouch panels.
+
+	  Say Y here if you have one of the following devices:
+	  - 3M PCT touch screens
+	  - ActionStar dual touch panels
+	  - Atmel panels
+	  - Cando dual touch panels
+	  - Chunghwa panels
+	  - CVTouch panels
+	  - Cypress TrueTouch panels
+	  - Elo TouchSystems IntelliTouch Plus panels
+	  - GeneralTouch 'Sensing Win7-TwoFinger' panels
+	  - GoodTouch panels
+	  - Hanvon dual touch panels
+	  - Ilitek dual touch panels
+	  - IrTouch Infrared USB panels
+	  - LG Display panels (Dell ST2220Tc)
+	  - Lumio CrystalTouch panels
+	  - MosArt dual-touch panels
+	  - Panasonic multitouch panels
+	  - PenMount dual touch panels
+	  - Perixx Peripad 701 touchpad
+	  - PixArt optical touch screen
+	  - Pixcir dual touch panels
+	  - Quanta panels
+	  - eGalax dual-touch panels, including the Joojoo and Wetab tablets
+	  - Stantum multitouch panels
+	  - Touch International Panels
+	  - Unitec Panels
+	  - XAT optical touch panels
+	  - Xiroku optical touch panels
+	  - Zytronic touch panels
+
+	  If unsure, say N.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called hid-multitouch.
+
 config HID_NTRIG
 	tristate "NTrig" if EMBEDDED
 	depends on USB_HID

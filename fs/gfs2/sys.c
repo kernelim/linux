@@ -114,7 +114,7 @@ static ssize_t freeze_store(struct gfs2_sbd *sdp, const char *buf, size_t len)
 
 	switch (n) {
 	case 0:
-		gfs2_unfreeze_fs(sdp);
+		gfs2_unfreeze_fs(sdp, 0);
 		break;
 	case 1:
 		error = gfs2_freeze_fs(sdp);

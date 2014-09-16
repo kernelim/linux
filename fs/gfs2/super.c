@@ -609,8 +609,14 @@ static int gfs2_lock_fs_check_clean(struct gfs2_sbd *sdp,
 	struct lfcc *lfcc;
 	LIST_HEAD(list);
 	struct gfs2_log_header_host lh;
+	struct gfs2_inode *dip = GFS2_I(sdp->sd_root_dir->d_inode);
 	int error;
 
+	error = gfs2_glock_nq_init(dip->i_gl, LM_ST_SHARED, 0,
+				   &sdp->sd_freeze_root_gh);
+	if (error)
+		return error;
+	atomic_set(&sdp->sd_frozen_root, 1);
 	list_for_each_entry(jd, &sdp->sd_jindex_list, jd_list) {
 		lfcc = kmalloc(sizeof(struct lfcc), GFP_KERNEL);
 		if (!lfcc) {
@@ -651,6 +657,11 @@ out:
 		list_del(&lfcc->list);
 		gfs2_glock_dq_uninit(&lfcc->gh);
 		kfree(lfcc);
+	}
+	if (error) {
+		atomic_dec(&sdp->sd_frozen_root);
+		wait_event(sdp->sd_frozen_root_wait, atomic_read(&sdp->sd_frozen_root) == 0);
+		gfs2_glock_dq_uninit(&sdp->sd_freeze_root_gh);
 	}
 	return error;
 }
@@ -693,12 +704,17 @@ int gfs2_freeze_fs(struct gfs2_sbd *sdp)
  *
  */
 
-void gfs2_unfreeze_fs(struct gfs2_sbd *sdp)
+void gfs2_unfreeze_fs(struct gfs2_sbd *sdp, int force)
 {
 	mutex_lock(&sdp->sd_freeze_lock);
 
-	if (sdp->sd_freeze_count && !--sdp->sd_freeze_count)
+	if (sdp->sd_freeze_count && (!--sdp->sd_freeze_count || force)) {
 		gfs2_glock_dq_uninit(&sdp->sd_freeze_gh);
+		atomic_dec(&sdp->sd_frozen_root);
+		wait_event(sdp->sd_frozen_root_wait,
+			   atomic_read(&sdp->sd_frozen_root) == 0);
+		gfs2_glock_dq_uninit(&sdp->sd_freeze_root_gh);
+	}
 
 	mutex_unlock(&sdp->sd_freeze_lock);
 }
@@ -842,11 +858,7 @@ static void gfs2_put_super(struct super_block *sb)
 	struct gfs2_jdesc *jd;
 
 	/*  Unfreeze the filesystem, if we need to  */
-
-	mutex_lock(&sdp->sd_freeze_lock);
-	if (sdp->sd_freeze_count)
-		gfs2_glock_dq_uninit(&sdp->sd_freeze_gh);
-	mutex_unlock(&sdp->sd_freeze_lock);
+	gfs2_unfreeze_fs(sdp, 1);
 
 	/* No more recovery requests */
 	set_bit(SDF_NORECOVERY, &sdp->sd_flags);
@@ -965,7 +977,7 @@ static int gfs2_freeze(struct super_block *sb)
 
 static int gfs2_unfreeze(struct super_block *sb)
 {
-	gfs2_unfreeze_fs(sb->s_fs_info);
+	gfs2_unfreeze_fs(sb->s_fs_info, 0);
 	return 0;
 }
 

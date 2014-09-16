@@ -71,7 +71,10 @@ static struct acpi_interface_info acpi_interfaces_supported[] = {
 	{"Windows 2006", ACPI_OSI_WIN_VISTA},	/* Windows Vista - Added 03/2006 */
 	{"Windows 2006.1", ACPI_OSI_WINSRV_2008},	/* Windows Server 2008 - Added 09/2009 */
 	{"Windows 2006 SP1", ACPI_OSI_WIN_VISTA_SP1},	/* Windows Vista SP1 - Added 09/2009 */
+	{"Windows 2006 SP2", ACPI_OSI_WIN_VISTA_SP2},	/* Windows Vista SP2 - Added 09/2010 */
 	{"Windows 2009", ACPI_OSI_WIN_7},	/* Windows 7 and Server 2008 R2 - Added 09/2009 */
+	{"Windows 2012", ACPI_OSI_WIN_8},	/* Windows 8 and Server 2012 - Added 08/2012 */
+	{"Windows 2013", ACPI_OSI_WIN_8},	/* Windows 8.1 and Server 2012 R2 - Added 01/2014 */
 
 	/* Feature Group Strings */
 
@@ -307,7 +310,7 @@ acpi_ut_evaluate_object(struct acpi_namespace_node *prefix_node,
 				  prefix_node, path, AE_TYPE);
 
 		ACPI_ERROR((AE_INFO,
-			    "Type returned from %s was incorrect: %s, expected Btypes: %X",
+			    "Type returned from %s was incorrect: %s, expected Btypes: 0x%X",
 			    path,
 			    acpi_ut_get_object_type_name(info->return_object),
 			    expected_return_btypes));

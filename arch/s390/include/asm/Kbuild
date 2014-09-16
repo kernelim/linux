@@ -9,6 +9,8 @@ header-y += vtoc.h
 header-y += zcrypt.h
 header-y += chsc.h
 
+generic-y += trace_clock.h
+
 unifdef-y += cmb.h
 unifdef-y += debug.h
 unifdef-y += chpid.h

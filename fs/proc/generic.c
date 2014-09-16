@@ -291,7 +291,7 @@ static const struct inode_operations proc_file_inode_operations = {
  * returns the struct proc_dir_entry for "/proc/tty/driver", and
  * returns "serial" in residual.
  */
-static int xlate_proc_name(const char *name,
+static int __xlate_proc_name(const char *name,
 			   struct proc_dir_entry **ret, const char **residual)
 {
 	const char     		*cp = name, *next;
@@ -303,7 +303,6 @@ static int xlate_proc_name(const char *name,
 	if (!de)
 		de = &proc_root;
 
-	spin_lock(&proc_subdir_lock);
 	while (1) {
 		next = strchr(cp, '/');
 		if (!next)
@@ -315,16 +314,25 @@ static int xlate_proc_name(const char *name,
 				break;
 		}
 		if (!de) {
-			rtn = -ENOENT;
-			goto out;
+			WARN(1, "name '%s'\n", name);
+			return -ENOENT;
 		}
 		cp += len + 1;
 	}
 	*residual = cp;
 	*ret = de;
-out:
-	spin_unlock(&proc_subdir_lock);
 	return rtn;
+}
+
+static int xlate_proc_name(const char *name, struct proc_dir_entry **ret,
+			   const char **residual)
+{
+	int rv;
+
+	spin_lock(&proc_subdir_lock);
+	rv = __xlate_proc_name(name, ret, residual);
+	spin_unlock(&proc_subdir_lock);
+	return rv;
 }
 
 static DEFINE_IDA(proc_inum_ida);
@@ -778,33 +786,14 @@ void free_proc_entry(struct proc_dir_entry *de)
 	kfree(de);
 }
 
-/*
- * Remove a /proc entry and free it if it's not currently in use.
- */
-void remove_proc_entry(const char *name, struct proc_dir_entry *parent)
+void pde_put(struct proc_dir_entry *pde)
 {
-	struct proc_dir_entry **p;
-	struct proc_dir_entry *de = NULL;
-	const char *fn = name;
-	int len;
+	if (atomic_dec_and_test(&pde->count))
+		free_proc_entry(pde);
+}
 
-	if (xlate_proc_name(name, &parent, &fn) != 0)
-		return;
-	len = strlen(fn);
-
-	spin_lock(&proc_subdir_lock);
-	for (p = &parent->subdir; *p; p=&(*p)->next ) {
-		if (proc_match(len, fn, *p)) {
-			de = *p;
-			*p = de->next;
-			de->next = NULL;
-			break;
-		}
-	}
-	spin_unlock(&proc_subdir_lock);
-	if (!de)
-		return;
-
+static void entry_rundown(struct proc_dir_entry *de)
+{
 	spin_lock(&de->pde_unload_lock);
 	/*
 	 * Stop accepting new callers into module. If you're
@@ -839,6 +828,40 @@ continue_removing:
 		spin_lock(&de->pde_unload_lock);
 	}
 	spin_unlock(&de->pde_unload_lock);
+}
+
+/*
+ * Remove a /proc entry and free it if it's not currently in use.
+ */
+void remove_proc_entry(const char *name, struct proc_dir_entry *parent)
+{
+	struct proc_dir_entry **p;
+	struct proc_dir_entry *de = NULL;
+	const char *fn = name;
+	unsigned int len;
+
+	spin_lock(&proc_subdir_lock);
+	if (__xlate_proc_name(name, &parent, &fn) != 0) {
+		spin_unlock(&proc_subdir_lock);
+		return;
+	}
+	len = strlen(fn);
+
+	for (p = &parent->subdir; *p; p=&(*p)->next ) {
+		if (proc_match(len, fn, *p)) {
+			de = *p;
+			*p = de->next;
+			de->next = NULL;
+			break;
+		}
+	}
+	spin_unlock(&proc_subdir_lock);
+	if (!de) {
+		WARN(1, "name '%s'\n", name);
+		return;
+	}
+
+	entry_rundown(de);
 
 	if (S_ISDIR(de->mode))
 		parent->nlink--;
@@ -849,3 +872,57 @@ continue_removing:
 	if (atomic_dec_and_test(&de->count))
 		free_proc_entry(de);
 }
+
+int remove_proc_subtree(const char *name, struct proc_dir_entry *parent)
+{
+	struct proc_dir_entry **p;
+	struct proc_dir_entry *root = NULL, *de, *next;
+	const char *fn = name;
+	unsigned int len;
+
+	spin_lock(&proc_subdir_lock);
+	if (__xlate_proc_name(name, &parent, &fn) != 0) {
+		spin_unlock(&proc_subdir_lock);
+		return -ENOENT;
+	}
+	len = strlen(fn);
+
+	for (p = &parent->subdir; *p; p=&(*p)->next ) {
+		if (proc_match(len, fn, *p)) {
+			root = *p;
+			*p = root->next;
+			root->next = NULL;
+			break;
+		}
+	}
+	if (!root) {
+		spin_unlock(&proc_subdir_lock);
+		return -ENOENT;
+	}
+	de = root;
+	while (1) {
+		next = de->subdir;
+		if (next) {
+			de->subdir = next->next;
+			next->next = NULL;
+			de = next;
+			continue;
+		}
+		spin_unlock(&proc_subdir_lock);
+
+		entry_rundown(de);
+		next = de->parent;
+		if (S_ISDIR(de->mode))
+			next->nlink--;
+		de->nlink = 0;
+		if (de == root)
+			break;
+		pde_put(de);
+
+		spin_lock(&proc_subdir_lock);
+		de = next;
+	}
+	pde_put(root);
+	return 0;
+}
+EXPORT_SYMBOL(remove_proc_subtree);

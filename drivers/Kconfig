@@ -64,6 +64,8 @@ source "drivers/w1/Kconfig"
 
 source "drivers/power/Kconfig"
 
+source "drivers/powercap/Kconfig"
+
 source "drivers/hwmon/Kconfig"
 
 source "drivers/thermal/Kconfig"

@@ -216,6 +216,10 @@ config NETPRIO_CGROUP
 	  Cgroup subsystem for use in assigning processes to network priorities on
 	  a per-interface basis
 
+config NET_RX_BUSY_POLL
+	boolean
+	default y
+
 config RFS_ACCEL
 	boolean
 	depends on RPS && GENERIC_HARDIRQS

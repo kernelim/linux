@@ -42,6 +42,7 @@ acpi-$(ACPI_FUTURE_USAGE) += rsdump.o
 
 acpi-y += tbxface.o tbinstal.o tbutils.o tbfind.o tbfadt.o tbxfroot.o
 
-acpi-y += utalloc.o utdebug.o uteval.o utinit.o utmisc.o utxface.o \
+acpi-y += utaddress.o \
+		utalloc.o utdebug.o uteval.o utinit.o utmisc.o utxface.o \
 		utcopy.o utdelete.o utglobal.o utmath.o utobject.o \
 		utstate.o utmutex.o utobject.o utresrc.o utlock.o utids.o

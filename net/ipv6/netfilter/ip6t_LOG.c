@@ -370,7 +370,7 @@ static void dump_packet(const struct nf_loginfo *info,
 	}
 
 	/* Max length: 16 "MARK=0xFFFFFFFF " */
-	if (!recurse && skb->mark)
+	if (recurse && skb->mark)
 		printk("MARK=0x%x ", skb->mark);
 }
 

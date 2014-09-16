@@ -27,7 +27,8 @@
 #include <linux/crypto/mpi.h>
 #include <asm/atomic.h>
 
-#define SHA1_DIGEST_SIZE	20
+#define SHA1_DIGEST_SIZE	(160 / 8)
+#define SHA_MAX_DIGEST_SIZE	(512 / 8)
 
 #define PUBKEY_USAGE_SIG	1	    /* key is good for signatures */
 #define PUBKEY_USAGE_ENC	2	    /* key is good for encryption */
@@ -36,7 +37,17 @@
 #define DSA_NPKEY		4	/* number of MPI's in DSA public key */
 #define DSA_NSIG		2	/* number of MPI's in DSA signature */
 
-#define DIGEST_ALGO_SHA1	2
+enum digest_algo {
+	DIGEST_ALGO_SHA1	= 2,
+	DIGEST_ALGO_SHA256	= 8,
+	DIGEST_ALGO_SHA384	= 9,
+	DIGEST_ALGO_SHA512	= 10,
+	DIGEST_ALGO_SHA224	= 11,
+	DIGEST_ALGO__LAST
+};
+
+extern const char ksign_hash_algo_names[DIGEST_ALGO__LAST][7];
+extern const u16 ksign_hash_algo_sizes[DIGEST_ALGO__LAST];
 
 typedef enum {
 	PKT_NONE			= 0,
@@ -85,6 +96,7 @@ struct ksign_signature {
 	time_t		timestamp;		/* signature made */
 	uint8_t		version;
 	uint8_t		sig_class;		/* sig classification, append for MD calculation*/
+	enum digest_algo digest_algo : 8;	/* digest algorithm */
 	uint8_t		*hashed_data;		/* all subpackets with hashed  data (v4 only) */
 	uint8_t		*unhashed_data;		/* ditto for unhashed data */
 	uint8_t		digest_start[2];	/* first 2 uint8_ts of the digest */
@@ -153,12 +165,12 @@ extern int DSA_verify(const MPI datahash, const MPI sig[], const MPI pkey[]);
  * - we _know_ the data is locked into kernel memory, so we don't want to have
  *   to kmap() it
  */
-static inline void SHA1_putc(struct shash_desc *digest, uint8_t ch)
+static inline void digest_putc(struct shash_desc *digest, uint8_t ch)
 {
 	crypto_shash_update(digest, &ch, 1);
 }
 
-static inline void SHA1_write(struct shash_desc *digest, const void *s, size_t n)
+static inline void digest_write(struct shash_desc *digest, const void *s, size_t n)
 {
 	crypto_shash_update(digest, s, n);
 }

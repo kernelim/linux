@@ -122,42 +122,46 @@ static int save_sigregs(struct pt_regs *regs, _sigregs __user *sregs)
 	user_sregs.regs.psw.addr = regs->psw.addr;
 	memcpy(&user_sregs.regs.gprs, &regs->gprs, sizeof(sregs->regs.gprs));
 	memcpy(&user_sregs.regs.acrs, current->thread.acrs,
-	       sizeof(sregs->regs.acrs));
+	       sizeof(user_sregs.regs.acrs));
 	/* 
 	 * We have to store the fp registers to current->thread.fp_regs
 	 * to merge them with the emulated registers.
 	 */
-	save_fp_regs(&current->thread.fp_regs);
+	save_fp_ctl(&current->thread.fp_regs.fpc);
+	save_fp_regs(current->thread.fp_regs.fprs);
 	memcpy(&user_sregs.fpregs, &current->thread.fp_regs,
-	       sizeof(s390_fp_regs));
-	return __copy_to_user(sregs, &user_sregs, sizeof(_sigregs));
+	       sizeof(user_sregs.fpregs));
+	if (__copy_to_user(sregs, &user_sregs, sizeof(_sigregs)))
+		return -EFAULT;
+	return 0;
 }
 
-/* Returns positive number on error */
 static int restore_sigregs(struct pt_regs *regs, _sigregs __user *sregs)
 {
-	int err;
 	_sigregs user_sregs;
 
 	/* Alwys make any pending restarted system call return -EINTR */
 	current_thread_info()->restart_block.fn = do_no_restart_syscall;
 
-	err = __copy_from_user(&user_sregs, sregs, sizeof(_sigregs));
-	if (err)
-		return err;
+	if (__copy_from_user(&user_sregs, sregs, sizeof(user_sregs)))
+		return -EFAULT;
+
+	/* Loading the floating-point-control word can fail. Do that first. */
+	if (restore_fp_ctl(&user_sregs.fpregs.fpc))
+		return -EINVAL;
+
 	regs->psw.mask = PSW_MASK_MERGE(regs->psw.mask,
 					user_sregs.regs.psw.mask);
 	regs->psw.addr = PSW_ADDR_AMODE | user_sregs.regs.psw.addr;
 	memcpy(&regs->gprs, &user_sregs.regs.gprs, sizeof(sregs->regs.gprs));
 	memcpy(&current->thread.acrs, &user_sregs.regs.acrs,
-	       sizeof(sregs->regs.acrs));
+	       sizeof(current->thread.acrs));
 	restore_access_regs(current->thread.acrs);
 
 	memcpy(&current->thread.fp_regs, &user_sregs.fpregs,
-	       sizeof(s390_fp_regs));
-	current->thread.fp_regs.fpc &= FPC_VALID_MASK;
+	       sizeof(current->thread.fp_regs));
 
-	restore_fp_regs(&current->thread.fp_regs);
+	restore_fp_regs(current->thread.fp_regs.fprs);
 	regs->svcnr = 0;	/* disable syscall checks */
 	return 0;
 }

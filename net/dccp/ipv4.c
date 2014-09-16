@@ -411,7 +411,7 @@ struct sock *dccp_v4_request_recv_sock(struct sock *sk, struct sk_buff *skb,
 		sock_put(newsk);
 		goto exit;
 	}
-	__inet_hash_nolisten(newsk);
+	__inet_hash_nolisten(newsk, NULL);
 
 	return newsk;
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005 - 2013 Emulex
+ * Copyright (C) 2005 - 2014 Emulex
  * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
@@ -35,6 +35,12 @@ static void _be_roce_dev_add(struct be_adapter *adapter)
 
 	if (!ocrdma_drv)
 		return;
+
+	if (ocrdma_drv->be_abi_version != BE_ROCE_ABI_VERSION) {
+		dev_warn(&pdev->dev, "Cannot initialize RoCE due to ocrdma ABI mismatch\n");
+		return;
+	}
+
 	if (pdev->device == OC_DEVICE_ID5) {
 		/* only msix is supported on these devices */
 		if (!msix_enabled(adapter))
@@ -93,7 +99,7 @@ void be_roce_dev_add(struct be_adapter *adapter)
 	}
 }
 
-void _be_roce_dev_remove(struct be_adapter *adapter)
+static void _be_roce_dev_remove(struct be_adapter *adapter)
 {
 	if (ocrdma_drv && ocrdma_drv->remove && adapter->ocrdma_dev)
 		ocrdma_drv->remove(adapter->ocrdma_dev);
@@ -110,7 +116,7 @@ void be_roce_dev_remove(struct be_adapter *adapter)
 	}
 }
 
-void _be_roce_dev_open(struct be_adapter *adapter)
+static void _be_roce_dev_open(struct be_adapter *adapter)
 {
 	if (ocrdma_drv && adapter->ocrdma_dev &&
 	    ocrdma_drv->state_change_handler)
@@ -126,7 +132,7 @@ void be_roce_dev_open(struct be_adapter *adapter)
 	}
 }
 
-void _be_roce_dev_close(struct be_adapter *adapter)
+static void _be_roce_dev_close(struct be_adapter *adapter)
 {
 	if (ocrdma_drv && adapter->ocrdma_dev &&
 	    ocrdma_drv->state_change_handler)

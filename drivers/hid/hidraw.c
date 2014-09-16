@@ -194,15 +194,13 @@ static int hidraw_open(struct inode *inode, struct file *file)
 
 	dev = hidraw_table[minor];
 	if (!dev->open++) {
-		if (dev->hid->ll_driver->power) {
-			err = dev->hid->ll_driver->power(dev->hid, PM_HINT_FULLON);
-			if (err < 0)
-				goto out_unlock;
-		}
-		err = dev->hid->ll_driver->open(dev->hid);
+		err = hid_hw_power(dev->hid, PM_HINT_FULLON);
+		if (err < 0)
+			goto out_unlock;
+
+		err = hid_hw_open(dev->hid);
 		if (err < 0) {
-			if (dev->hid->ll_driver->power)
-				dev->hid->ll_driver->power(dev->hid, PM_HINT_NORMAL);
+			hid_hw_power(dev->hid, PM_HINT_NORMAL);
 			dev->open--;
 		}
 	}
@@ -231,9 +229,8 @@ static int hidraw_release(struct inode * inode, struct file * file)
 	dev = hidraw_table[minor];
 	if (!--dev->open) {
 		if (list->hidraw->exist) {
-			if (dev->hid->ll_driver->power)
-				dev->hid->ll_driver->power(dev->hid, PM_HINT_NORMAL);
-			dev->hid->ll_driver->close(dev->hid);
+			hid_hw_power(dev->hid, PM_HINT_NORMAL);
+			hid_hw_close(dev->hid);
 		} else {
 			kfree(list->hidraw);
 		}
@@ -433,7 +430,7 @@ void hidraw_disconnect(struct hid_device *hid)
 	hidraw_table[hidraw->minor] = NULL;
 
 	if (hidraw->open) {
-		hid->ll_driver->close(hid);
+		hid_hw_close(hid);
 		wake_up_interruptible(&hidraw->wait);
 	} else {
 		kfree(hidraw);

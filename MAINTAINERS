@@ -1260,7 +1260,7 @@ F:	drivers/net/bnx2.*
 F:	drivers/net/bnx2_*
 
 BROADCOM BNX2X 10 GIGABIT ETHERNET DRIVER
-M:	Eilon Greenstein <eilong@broadcom.com>
+M:	Ariel Elior <ariel.elior@qlogic.com>
 L:	netdev@vger.kernel.org
 S:	Supported
 F:	drivers/net/bnx2x*
@@ -1403,9 +1403,15 @@ F:	scripts/checkpatch.pl
 CISCO VIC ETHERNET NIC DRIVER
 M:	Scott Feldman <scofeldm@cisco.com>
 M:	Vasanthy Kolluri <vkolluri@cisco.com>
-M:	Roopa Prabhu <roprabhu@cisco.com>
+M:	Sujith Sankar <ssujith@cisco.com>
+M:	Govindarajulu Varadarajan <govindarajulu90@gmail.com>
 S:	Supported
 F:	drivers/net/enic/
+
+CISCO VIC LOW LATENCY NIC DRIVER
+M:      Upinder Malhi <umalhi@cisco.com>
+S:      Supported
+F:      drivers/infiniband/hw/usnic
 
 CIRRUS LOGIC EP93XX ETHERNET DRIVER
 M:	Lennert Buytenhek <kernel@wantstofly.org>
@@ -3573,6 +3579,28 @@ F:	Documentation/ia64/mca.txt
 F:	Documentation/mca.txt
 F:	drivers/mca/
 F:	include/linux/mca*
+
+Mellanox MLX5 core VPI driver
+M:	Eli Cohen <eli@mellanox.com>
+L:	netdev@vger.kernel.org
+L:	linux-rdma@vger.kernel.org
+W:	http://www.mellanox.com
+Q:	http://patchwork.ozlabs.org/project/netdev/list/
+Q:	http://patchwork.kernel.org/project/linux-rdma/list/
+T:	git://openfabrics.org/~eli/connect-ib.git
+S:	Supported
+F:	drivers/net/ethernet/mellanox/mlx5/core/
+F:	include/linux/mlx5/
+
+Mellanox MLX5 IB driver
+M:      Eli Cohen <eli@mellanox.com>
+L:      linux-rdma@vger.kernel.org
+W:      http://www.mellanox.com
+Q:      http://patchwork.kernel.org/project/linux-rdma/list/
+T:      git://openfabrics.org/~eli/connect-ib.git
+S:      Supported
+F:      include/linux/mlx5/
+F:      drivers/infiniband/hw/mlx5/
 
 MODULE SUPPORT
 M:	Rusty Russell <rusty@rustcorp.com.au>

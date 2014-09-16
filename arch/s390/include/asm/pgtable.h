@@ -1102,6 +1102,10 @@ static inline pte_t mk_swap_pte(unsigned long type, unsigned long offset)
 	((pte_t) { ((((__off) & 0x7f) << 1) + (((__off) >> 7) << 12)) \
 		   | _PAGE_TYPE_FILE })
 
+/* TODO: s390 cannot support io_remap_pfn_range... */
+#define io_remap_pfn_range(vma, vaddr, pfn, size, prot) 	       \
+	remap_pfn_range(vma, vaddr, pfn, size, prot)
+
 #endif /* !__ASSEMBLY__ */
 
 #define kern_addr_valid(addr)   (1)

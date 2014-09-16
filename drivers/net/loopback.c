@@ -58,11 +58,13 @@
 #include <linux/tcp.h>
 #include <linux/percpu.h>
 #include <net/net_namespace.h>
+#include <linux/u64_stats_sync.h>
 
 struct pcpu_lstats {
-	unsigned long packets;
-	unsigned long bytes;
-	unsigned long drops;
+	u64			packets;
+	u64			bytes;
+	struct u64_stats_sync	syncp;
+	unsigned long		drops;
 };
 
 /*
@@ -72,7 +74,7 @@ struct pcpu_lstats {
 static netdev_tx_t loopback_xmit(struct sk_buff *skb,
 				 struct net_device *dev)
 {
-	struct pcpu_lstats *pcpu_lstats, *lb_stats;
+	struct pcpu_lstats *lb_stats;
 	int len;
 
 	skb_orphan(skb);
@@ -80,36 +82,42 @@ static netdev_tx_t loopback_xmit(struct sk_buff *skb,
 	skb->protocol = eth_type_trans(skb, dev);
 
 	/* it's OK to use per_cpu_ptr() because BHs are off */
-	pcpu_lstats = dev->ml_priv;
-	lb_stats = per_cpu_ptr(pcpu_lstats, smp_processor_id());
+	lb_stats = this_cpu_ptr((void __percpu __force *)dev->ml_priv);
 
 	len = skb->len;
 	if (likely(netif_rx(skb) == NET_RX_SUCCESS)) {
+		u64_stats_update_begin(&lb_stats->syncp);
 		lb_stats->bytes += len;
 		lb_stats->packets++;
+		u64_stats_update_end(&lb_stats->syncp);
 	} else
 		lb_stats->drops++;
 
 	return NETDEV_TX_OK;
 }
 
-static struct net_device_stats *loopback_get_stats(struct net_device *dev)
+static struct rtnl_link_stats64 *loopback_get_stats64(struct net_device *dev,
+						      struct rtnl_link_stats64 *stats)
 {
-	const struct pcpu_lstats *pcpu_lstats;
-	struct net_device_stats *stats = &dev->stats;
-	unsigned long bytes = 0;
-	unsigned long packets = 0;
-	unsigned long drops = 0;
+	u64 bytes = 0;
+	u64 packets = 0;
+	u64 drops = 0;
 	int i;
 
-	pcpu_lstats = dev->ml_priv;
 	for_each_possible_cpu(i) {
 		const struct pcpu_lstats *lb_stats;
+		u64 tbytes, tpackets;
+		unsigned int start;
 
-		lb_stats = per_cpu_ptr(pcpu_lstats, i);
-		bytes   += lb_stats->bytes;
-		packets += lb_stats->packets;
+		lb_stats = per_cpu_ptr((void __percpu __force *)dev->ml_priv, i);
+		do {
+			start = u64_stats_fetch_begin_irq(&lb_stats->syncp);
+			tbytes = lb_stats->bytes;
+			tpackets = lb_stats->packets;
+		} while (u64_stats_fetch_retry_irq(&lb_stats->syncp, start));
 		drops   += lb_stats->drops;
+		bytes   += tbytes;
+		packets += tpackets;
 	}
 	stats->rx_packets = packets;
 	stats->tx_packets = packets;
@@ -127,36 +135,31 @@ static u32 always_on(struct net_device *dev)
 
 static const struct ethtool_ops loopback_ethtool_ops = {
 	.get_link		= always_on,
-	.set_tso		= ethtool_op_set_tso,
-	.get_tx_csum		= always_on,
-	.get_sg			= always_on,
-	.get_rx_csum		= always_on,
 };
 
 static int loopback_dev_init(struct net_device *dev)
 {
-	struct pcpu_lstats *lstats;
-
-	lstats = alloc_percpu(struct pcpu_lstats);
-	if (!lstats)
+	dev->ml_priv = (void __force *)alloc_percpu(struct pcpu_lstats);
+	if (!dev->ml_priv)
 		return -ENOMEM;
 
-	dev->ml_priv = lstats;
 	return 0;
 }
 
 static void loopback_dev_free(struct net_device *dev)
 {
-	struct pcpu_lstats *lstats = dev->ml_priv;
-
-	free_percpu(lstats);
+	free_percpu((void __percpu __force *)dev->ml_priv);
 	free_netdev(dev);
 }
 
 static const struct net_device_ops loopback_ops = {
 	.ndo_init      = loopback_dev_init,
 	.ndo_start_xmit= loopback_xmit,
-	.ndo_get_stats = loopback_get_stats,
+};
+
+static const struct net_device_ops_ext loopback_ops_ext = {
+	.size = sizeof(struct net_device_ops_ext),
+	.ndo_get_stats64 = loopback_get_stats64,
 };
 
 /*
@@ -165,23 +168,28 @@ static const struct net_device_ops loopback_ops = {
  */
 static void loopback_setup(struct net_device *dev)
 {
-	dev->mtu		= (16 * 1024) + 20 + 20 + 12;
+	dev->mtu		= 64 * 1024;
 	dev->hard_header_len	= ETH_HLEN;	/* 14	*/
 	dev->addr_len		= ETH_ALEN;	/* 6	*/
 	dev->tx_queue_len	= 0;
 	dev->type		= ARPHRD_LOOPBACK;	/* 0x0001*/
 	dev->flags		= IFF_LOOPBACK;
 	dev->priv_flags	       &= ~IFF_XMIT_DST_RELEASE;
+	set_netdev_hw_features(dev, NETIF_F_ALL_TSO | NETIF_F_UFO);
 	dev->features 		= NETIF_F_SG | NETIF_F_FRAGLIST
-		| NETIF_F_TSO
+		| NETIF_F_ALL_TSO
+		| NETIF_F_UFO
 		| NETIF_F_NO_CSUM
+		| NETIF_F_RXCSUM
 		| NETIF_F_HIGHDMA
 		| NETIF_F_LLTX
 		| NETIF_F_NETNS_LOCAL
-		| NETIF_F_VLAN_CHALLENGED;
+		| NETIF_F_VLAN_CHALLENGED
+		| NETIF_F_LOOPBACK;
 	dev->ethtool_ops	= &loopback_ethtool_ops;
 	dev->header_ops		= &eth_header_ops;
 	dev->netdev_ops		= &loopback_ops;
+	set_netdev_ops_ext(dev, &loopback_ops_ext);
 	dev->destructor		= loopback_dev_free;
 }
 

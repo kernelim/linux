@@ -45,6 +45,9 @@ struct genl_family
 	unsigned int		version;
 	unsigned int		maxattr;
 	bool			netnsok;
+#ifndef __GENKSYMS__
+	bool    		parallel_ops;
+#endif
 	struct nlattr **	attrbuf;	/* private */
 	struct list_head	ops_list;	/* private */
 	struct list_head	family_list;	/* private */

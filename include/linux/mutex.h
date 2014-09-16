@@ -10,6 +10,7 @@
 #ifndef __LINUX_MUTEX_H
 #define __LINUX_MUTEX_H
 
+#include <asm/current.h>
 #include <linux/list.h>
 #include <linux/spinlock_types.h>
 #include <linux/linkage.h>
@@ -49,7 +50,13 @@ struct mutex {
 	/* 1: unlocked, 0: locked, negative: locked, possible waiters */
 	atomic_t		count;
 	spinlock_t		wait_lock;
+#if defined(CONFIG_SMP) && !defined(CONFIG_DEBUG_MUTEXES) && \
+    !defined(CONFIG_HAVE_DEFAULT_NO_SPIN_MUTEXES) && !defined(__GENKSYMS__)
+	struct list_head	*wait_list;
+	void			*spin_mlock;
+#else
 	struct list_head	wait_list;
+#endif
 #if defined(CONFIG_DEBUG_MUTEXES) || defined(CONFIG_SMP)
 	struct thread_info	*owner;
 #endif
@@ -94,10 +101,27 @@ do {							\
 # define __DEP_MAP_MUTEX_INITIALIZER(lockname)
 #endif
 
+#if defined(CONFIG_SMP) && !defined(CONFIG_DEBUG_MUTEXES) && \
+    !defined(CONFIG_HAVE_DEFAULT_NO_SPIN_MUTEXES)
+# define MUTEX_WAIT_LIST_INIT(x)	(struct list_head *)&(x)
+# define MUTEX_INIT_WAIT_LIST(x)	*(x) = (struct list_head *)(x)
+# define MUTEX_LIST_EMPTY(x)		(*(x) == (struct list_head *)(x))
+#define mutex_list_for_each_entry(pos, head, member)				\
+	for (pos = MUTEX_LIST_EMPTY(head) ? NULL : list_entry(*(head), typeof(*pos), member);	\
+	     pos; 	\
+	     pos = (pos->member.next != *(head)) ? list_entry(pos->member.next, typeof(*pos), member) : NULL)
+#else
+# define MUTEX_WAIT_LIST_INIT(x)	LIST_HEAD_INIT(x)
+# define MUTEX_INIT_WAIT_LIST(x)	INIT_LIST_HEAD(x)
+# define MUTEX_LIST_EMPTY(x)		list_empty(x)
+# define mutex_list_for_each_entry(pos, head, member) \
+	list_for_each_entry(pos, head, member)
+#endif
+
 #define __MUTEX_INITIALIZER(lockname) \
 		{ .count = ATOMIC_INIT(1) \
 		, .wait_lock = __SPIN_LOCK_UNLOCKED(lockname.wait_lock) \
-		, .wait_list = LIST_HEAD_INIT(lockname.wait_list) \
+		, .wait_list = MUTEX_WAIT_LIST_INIT(lockname.wait_list) \
 		__DEBUG_MUTEX_INITIALIZER(lockname) \
 		__DEP_MAP_MUTEX_INITIALIZER(lockname) }
 
@@ -125,6 +149,7 @@ static inline int mutex_is_locked(struct mutex *lock)
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 extern void mutex_lock_nested(struct mutex *lock, unsigned int subclass);
 extern void _mutex_lock_nest_lock(struct mutex *lock, struct lockdep_map *nest_lock);
+
 extern int __must_check mutex_lock_interruptible_nested(struct mutex *lock,
 					unsigned int subclass);
 extern int __must_check mutex_lock_killable_nested(struct mutex *lock,
@@ -136,7 +161,7 @@ extern int __must_check mutex_lock_killable_nested(struct mutex *lock,
 
 #define mutex_lock_nest_lock(lock, nest_lock)				\
 do {									\
-	typecheck(struct lockdep_map *, &(nest_lock)->dep_map);		\
+	typecheck(struct lockdep_map *, &(nest_lock)->dep_map);	\
 	_mutex_lock_nest_lock(lock, &(nest_lock)->dep_map);		\
 } while (0)
 
@@ -159,6 +184,7 @@ extern int __must_check mutex_lock_killable(struct mutex *lock);
  */
 extern int mutex_trylock(struct mutex *lock);
 extern void mutex_unlock(struct mutex *lock);
+
 extern int atomic_dec_and_mutex_lock(atomic_t *cnt, struct mutex *lock);
 
 #ifndef CONFIG_HAVE_ARCH_MUTEX_CPU_RELAX
