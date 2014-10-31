@@ -1666,6 +1666,12 @@ mountpoint_last(struct nameidata *nd, struct path *path)
 		goto done;
 	}
 
+	if (parent->d_op && parent->d_op->d_hash) {
+		error = parent->d_op->d_hash(parent, &nd->last);
+		if (error < 0)
+			goto out;
+	}
+
 	mutex_lock(&dir->i_mutex);
 	dentry = d_lookup(parent, &nd->last);
 	if (!dentry) {

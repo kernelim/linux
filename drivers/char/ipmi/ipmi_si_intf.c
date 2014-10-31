@@ -3187,7 +3187,6 @@ static int try_smi_init(struct smi_info *new_smi)
 {
 	int rv = 0;
 	int i;
-	struct ipmi_shadow_smi_handlers *shadow_handlers;
 
 	printk(KERN_INFO PFX "Trying %s-specified %s state"
 	       " machine at %s address 0x%lx, slave address 0x%x,"
@@ -3325,12 +3324,6 @@ static int try_smi_init(struct smi_info *new_smi)
 		goto out_err_stop_timer;
 	}
 
-	/* RHEL6-only - Init ipmi_shadow_smi_handlers
-	 */
-	shadow_handlers = ipmi_get_shadow_smi_handlers();
-	shadow_handlers->get_smi_info = ipmi_si_get_smi_info;
-	shadow_handlers->set_need_watch = set_need_watch;
-
 	rv = ipmi_smi_add_proc_entry(new_smi->intf, "type",
 				     type_file_read_proc,
 				     new_smi);
@@ -3414,12 +3407,24 @@ static int __devinit init_ipmi_si(void)
 	int  rv;
 	struct smi_info *e;
 	enum ipmi_addr_src type = SI_INVALID;
+	struct ipmi_shadow_smi_handlers *shadow_handlers;
 
 	ipmi_si_loaded = 0;
 
 	if (initialized)
 		return 0;
 	initialized = 1;
+
+	/* RHEL6-only - Init ipmi_shadow_smi_handlers
+	 * The instance of struct ipmi_shadow_smi_handlers is located in
+	 * ipmi_msghandler.c. Locating it in this file would cause a
+	 * module dependency loop, because ipmi_msghandler would then
+	 * depend on ipmi_si, which already depends on ipmi_msghandler.
+	 */
+	shadow_handlers = ipmi_get_shadow_smi_handlers();
+	shadow_handlers->handlers = &handlers;
+	shadow_handlers->get_smi_info = ipmi_si_get_smi_info;
+	shadow_handlers->set_need_watch = set_need_watch;
 
 	if (si_tryplatform) {
 		rv = driver_register(&ipmi_driver.driver);
@@ -3575,6 +3580,9 @@ static void cleanup_one_si(struct smi_info *to_clean)
 
 	if (!to_clean)
 		return;
+
+	if (to_clean->dev)
+		dev_set_drvdata(to_clean->dev, NULL);
 
 	list_del(&to_clean->link);
 

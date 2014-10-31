@@ -267,9 +267,11 @@ void __kvm_migrate_pit_timer(struct kvm_vcpu *vcpu)
 	if (!kvm_vcpu_is_bsp(vcpu) || !pit)
 		return;
 
+	mutex_lock(&pit->pit_state.lock);
 	timer = &pit->pit_state.pit_timer.timer;
 	if (hrtimer_cancel(timer))
 		hrtimer_start_expires(timer, HRTIMER_MODE_ABS);
+	mutex_unlock(&pit->pit_state.lock);
 }
 
 static void destroy_pit_timer(struct kvm_pit *pit)

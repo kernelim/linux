@@ -1056,12 +1056,12 @@ int ipmi_get_smi_info(int if_num, struct ipmi_smi_info *data)
 
 found:
 	handlers = intf->handlers;
-	if(shadow_smi_handlers.get_smi_info) {
-		BUG_ON(shadow_smi_handlers.handlers != handlers);
+	rv = -ENOSYS;
+	if(shadow_smi_handlers.get_smi_info &&
+			shadow_smi_handlers.handlers == handlers)
 		rv = shadow_smi_handlers.get_smi_info(intf->send_info, data);
-	}
-	mutex_unlock(&ipmi_interfaces_mutex);
 
+	mutex_unlock(&ipmi_interfaces_mutex);
 	return rv;
 }
 EXPORT_SYMBOL(ipmi_get_smi_info);
@@ -2931,13 +2931,6 @@ int ipmi_register_smi(struct ipmi_smi_handlers *handlers,
 	if (slave_addr != 0)
 		intf->channels[0].address = slave_addr;
 	INIT_LIST_HEAD(&intf->users);
-
-	/* RHEL6-only - Init shadow_smi_handlers structure
-	 */
-	shadow_smi_handlers.handlers = handlers;
-	shadow_smi_handlers.get_smi_info = NULL;
-	shadow_smi_handlers.set_need_watch = NULL;
-
 	intf->handlers = handlers;
 	intf->send_info = send_info;
 	spin_lock_init(&intf->seq_lock);
@@ -4222,11 +4215,11 @@ static void ipmi_timeout(unsigned long data)
 		lnt = !!lnt;
 
 		if (lnt != intf->last_needs_timer &&
-					shadow_smi_handlers.set_need_watch) {
-			BUG_ON(shadow_smi_handlers.handlers != intf->handlers);
+				shadow_smi_handlers.set_need_watch &&
+				shadow_smi_handlers.handlers == intf->handlers)
 			shadow_smi_handlers.set_need_watch
 				(intf->send_info, lnt);
-		}
+
 		intf->last_needs_timer = lnt;
 
 		nt += lnt;
