@@ -1651,9 +1651,15 @@ void rt6_pmtu_discovery(struct in6_addr *daddr, struct in6_addr *saddr,
 	struct net *net = dev_net(dev);
 	int allfrag = 0;
 
+again:
 	rt = rt6_lookup(net, daddr, saddr, dev->ifindex, 0);
 	if (rt == NULL)
 		return;
+
+	if (rt6_check_expired(rt)) {
+		ip6_del_rt(rt);
+		goto again;
+	}
 
 	if (pmtu >= dst_mtu(&rt->u.dst))
 		goto out;
