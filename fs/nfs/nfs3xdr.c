@@ -262,6 +262,7 @@ xdr_decode_wcc_attr(__be32 *p, struct nfs_fattr *fattr)
 		| NFS_ATTR_FATTR_PRECHANGE
 		| NFS_ATTR_FATTR_PREMTIME
 		| NFS_ATTR_FATTR_PRECTIME;
+	fattr->pre_change_attr = nfs_timespec_to_change_attr(&fattr->pre_ctime);
 	return p;
 }
 

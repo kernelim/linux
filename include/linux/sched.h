@@ -1666,9 +1666,13 @@ struct task_struct {
 	/* bitmask of trace recursion */
 	unsigned long trace_recursion;
 #endif /* CONFIG_TRACING */
+#ifdef __GENKSYMS__
 	/* padding reserved by Red Hat for non-kABI breaking extensions */
 	unsigned long rh_reserved[2];
-#ifndef __GENKSYMS__
+#else
+	unsigned long atomic_flags;
+	unsigned long rh_reserved[1];
+
 	struct perf_event_context *perf_event_ctxp[perf_nr_task_contexts];
 #ifdef CONFIG_CGROUP_MEM_RES_CTLR /* memcg uses this to do batch job */
 	struct memcg_batch_info {
@@ -1677,7 +1681,7 @@ struct task_struct {
 		unsigned long bytes; 		/* uncharged usage */
 		unsigned long memsw_bytes; /* uncharged mem+swap usage */
 	} memcg_batch;
-#endif
+#endif /* __GENKYSMS__ */
 #ifdef CONFIG_NUMA
 	short pref_node_fork;
 #endif
@@ -1892,8 +1896,6 @@ extern void thread_group_times(struct task_struct *p, cputime_t *ut, cputime_t *
 #define PF_KTHREAD	0x00200000	/* I am a kernel thread */
 #define PF_RANDOMIZE	0x00400000	/* randomize virtual address space */
 #define PF_SWAPWRITE	0x00800000	/* Allowed to write to swap */
-#define PF_SPREAD_PAGE	0x01000000	/* Spread page cache over cpuset */
-#define PF_SPREAD_SLAB	0x02000000	/* Spread some slab caches over cpuset */
 #define PF_THREAD_BOUND	0x04000000	/* Thread bound to specific cpu */
 #define PF_MCE_EARLY    0x08000000      /* Early kill for mce process policy */
 #define PF_MEMPOLICY	0x10000000	/* Non-default NUMA mempolicy */
@@ -1925,6 +1927,28 @@ extern void thread_group_times(struct task_struct *p, cputime_t *ut, cputime_t *
 /* NOTE: this will return 0 or PF_USED_MATH, it will never return 1 */
 #define tsk_used_math(p) ((p)->flags & PF_USED_MATH)
 #define used_math() tsk_used_math(current)
+
+/* Per-process atomic flags. */
+#define PFA_SPREAD_PAGE  1      /* Spread page cache over cpuset */
+#define PFA_SPREAD_SLAB  2      /* Spread some slab caches over cpuset */
+
+#define TASK_PFA_TEST(name, func)                                      \
+       static inline bool task_##func(struct task_struct *p)           \
+       { return test_bit(PFA_##name, &p->atomic_flags); }
+#define TASK_PFA_SET(name, func)                                       \
+       static inline void task_set_##func(struct task_struct *p)       \
+       { set_bit(PFA_##name, &p->atomic_flags); }
+#define TASK_PFA_CLEAR(name, func)                                     \
+       static inline void task_clear_##func(struct task_struct *p)     \
+       { clear_bit(PFA_##name, &p->atomic_flags); }
+
+TASK_PFA_TEST(SPREAD_PAGE, spread_page)
+TASK_PFA_SET(SPREAD_PAGE, spread_page)
+TASK_PFA_CLEAR(SPREAD_PAGE, spread_page)
+
+TASK_PFA_TEST(SPREAD_SLAB, spread_slab)
+TASK_PFA_SET(SPREAD_SLAB, spread_slab)
+TASK_PFA_CLEAR(SPREAD_SLAB, spread_slab)
 
 #ifdef CONFIG_TREE_PREEMPT_RCU
 

@@ -4326,8 +4326,8 @@ static int ext4_statfs(struct dentry *dentry, struct kstatfs *buf)
 		 */
 		overhead += ngroups * (2 + sbi->s_itb_per_group);
 
-		/* Add the journal blocks as well */
-		if (sbi->s_journal)
+		/* Add the internal journal blocks as well */
+		if (sbi->s_journal && !sbi->journal_bdev)
 			overhead += sbi->s_journal->j_maxlen;
 
 		sbi->s_overhead_last = overhead;

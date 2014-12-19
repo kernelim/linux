@@ -29,8 +29,6 @@
 #include <asm/synch.h>
 #include <asm/ppc-opcode.h>
 
-#define __raw_spin_is_locked(x)		((x)->slock != 0)
-
 #ifdef CONFIG_PPC64
 /* use 0x800000yy when locked, where yy == CPU number */
 #define LOCK_TOKEN	(*(u32 *)(&get_paca()->lock_token))
@@ -50,6 +48,12 @@
 #define CLEAR_IO_SYNC
 #define SYNC_IO
 #endif
+
+static inline int __raw_spin_is_locked(raw_spinlock_t *lock)
+{
+	smp_mb();
+	return lock->slock != 0;
+}
 
 /*
  * This returns the old value in the lock, so we succeeded

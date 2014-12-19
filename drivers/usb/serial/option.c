@@ -46,6 +46,7 @@
 /* Function prototypes */
 static int  option_probe(struct usb_serial *serial,
 			const struct usb_device_id *id);
+static void option_release(struct usb_serial *serial);
 static int option_send_setup(struct usb_serial_port *port);
 static void option_instat_callback(struct urb *urb);
 
@@ -669,8 +670,8 @@ static struct usb_serial_driver option_1port_device = {
 	.tiocmget          = usb_wwan_tiocmget,
 	.tiocmset          = usb_wwan_tiocmset,
 	.attach            = usb_wwan_startup,
-	.disconnect        = usb_wwan_disconnect,
-	.release           = usb_wwan_release,
+	.release           = option_release,
+	.port_remove	   = usb_wwan_port_remove,
 	.read_int_callback = option_instat_callback,
 #ifdef CONFIG_PM
 	.suspend           = usb_wwan_suspend,
@@ -756,6 +757,11 @@ static int option_probe(struct usb_serial *serial,
 	data->send_setup = option_send_setup;
 	spin_lock_init(&data->susp_lock);
 	return 0;
+}
+
+static void option_release(struct usb_serial *serial)
+{
+	/* Nothing to do on RHEL6 */
 }
 
 static void option_instat_callback(struct urb *urb)
