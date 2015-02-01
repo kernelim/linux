@@ -162,7 +162,7 @@ int dst_discard(struct sk_buff *skb)
 }
 EXPORT_SYMBOL(dst_discard);
 
-void * dst_alloc(struct dst_ops * ops)
+void *__dst_alloc(struct dst_ops * ops, int flags)
 {
 	struct dst_entry * dst;
 
@@ -181,7 +181,9 @@ void * dst_alloc(struct dst_ops * ops)
 #if RT_CACHE_DEBUG >= 2
 	atomic_inc(&dst_total);
 #endif
-	atomic_inc(&ops->entries);
+	dst->flags = flags;
+	if (!(flags & DST_NOCOUNT))
+		atomic_inc(&ops->entries);
 	return dst;
 }
 
@@ -211,6 +213,11 @@ void __dst_free(struct dst_entry * dst)
 	spin_unlock_bh(&dst_garbage.lock);
 }
 
+void *dst_alloc(struct dst_ops *ops)
+{
+	return __dst_alloc(ops, 0);
+}
+
 struct dst_entry *dst_destroy(struct dst_entry * dst)
 {
 	struct dst_entry *child;
@@ -233,7 +240,8 @@ again:
 		neigh_release(neigh);
 	}
 
-	atomic_dec(&dst->ops->entries);
+	if (!(dst->flags & DST_NOCOUNT))
+		atomic_dec(&dst->ops->entries);
 
 	if (dst->ops->destroy)
 		dst->ops->destroy(dst);
@@ -347,5 +355,6 @@ void __init dst_init(void)
 }
 
 EXPORT_SYMBOL(__dst_free);
+EXPORT_SYMBOL(__dst_alloc);
 EXPORT_SYMBOL(dst_alloc);
 EXPORT_SYMBOL(dst_destroy);
