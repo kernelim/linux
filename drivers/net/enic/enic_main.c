@@ -1092,10 +1092,14 @@ static void enic_rq_indicate_buf(struct vnic_rq *rq,
 				     PKT_HASH_TYPE_L4 : PKT_HASH_TYPE_L3);
 		}
 
-		if (enic->csum_rx_enabled && !csum_not_calc) {
-			skb->csum = htons(checksum);
-			skb->ip_summed = CHECKSUM_COMPLETE;
-		}
+		/* Hardware does not provide whole packet checksum. It only
+		 * provides pseudo checksum. Since hw validates the packet
+		 * checksum but not provide us the checksum value. use
+		 * CHECSUM_UNNECESSARY.
+		 */
+		if (enic->csum_rx_enabled && tcp_udp_csum_ok &&
+		    ipv4_csum_ok)
+			skb->ip_summed = CHECKSUM_UNNECESSARY;
 
 		if (vlan_stripped &&
 			(vlan_tci & CQ_ENET_RQ_DESC_VLAN_TCI_VLAN_MASK)) {

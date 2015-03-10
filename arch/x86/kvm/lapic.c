@@ -1474,7 +1474,15 @@ static void apic_sync_pv_eoi_to_guest(struct kvm_vcpu *vcpu,
 	pv_eoi_set_pending(apic->vcpu);
 }
 
-void kvm_lapic_sync_to_vapic(struct kvm_vcpu *vcpu)
+void kvm_lapic_prefault_vapic(struct kvm_vcpu *vcpu)
+{
+	if (!test_bit(KVM_APIC_CHECK_VAPIC, &vcpu->arch.apic_attention))
+		return;
+
+	kvm_fault_in_guest_cached_writable(vcpu->kvm, &vcpu->arch.apic->vapic_cache);
+}
+
+int kvm_lapic_sync_to_vapic(struct kvm_vcpu *vcpu)
 {
 	u32 data, tpr;
 	int max_irr, max_isr;
@@ -1483,7 +1491,7 @@ void kvm_lapic_sync_to_vapic(struct kvm_vcpu *vcpu)
 	apic_sync_pv_eoi_to_guest(vcpu, apic);
 
 	if (!test_bit(KVM_APIC_CHECK_VAPIC, &vcpu->arch.apic_attention))
-		return;
+		return 0;
 
 	tpr = apic_get_reg(apic, APIC_TASKPRI) & 0xff;
 	max_irr = apic_find_highest_irr(apic);
@@ -1494,7 +1502,7 @@ void kvm_lapic_sync_to_vapic(struct kvm_vcpu *vcpu)
 		max_isr = 0;
 	data = (tpr & 0xff) | ((max_isr & 0xf0) << 8) | (max_irr << 24);
 
-	kvm_write_guest_cached(vcpu->kvm, &vcpu->arch.apic->vapic_cache, &data,
+	return kvm_write_guest_cached_atomic(vcpu->kvm, &vcpu->arch.apic->vapic_cache, &data,
 			       sizeof(u32));
 }
 

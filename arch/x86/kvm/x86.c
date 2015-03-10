@@ -5226,6 +5226,8 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	kvm_x86_ops->prepare_guest_switch(vcpu);
 	kvm_load_guest_fpu(vcpu);
 	kvm_load_guest_xcr0(vcpu);
+	if (kvm_lapic_enabled(vcpu))
+		kvm_lapic_prefault_vapic(vcpu);
 
 	local_irq_disable();
 
@@ -5259,7 +5261,10 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 
 	if (kvm_lapic_enabled(vcpu)) {
 		update_cr8_intercept(vcpu);
-		kvm_lapic_sync_to_vapic(vcpu);
+		r = kvm_lapic_sync_to_vapic(vcpu);
+		if (unlikely(r) &&
+		    !test_and_set_bit(KVM_REQ_KICK, &vcpu->requests))
+			smp_send_reschedule(vcpu->cpu);
 	}
 
 	srcu_read_unlock(&vcpu->kvm->srcu, vcpu->srcu_idx);

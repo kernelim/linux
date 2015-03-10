@@ -659,6 +659,23 @@ static ssize_t gfs2_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 	return generic_file_aio_write(iocb, iov, nr_segs, pos);
 }
 
+static ssize_t gfs2_file_splice_write(struct pipe_inode_info *pipe,
+				      struct file *out, loff_t *ppos,
+				      size_t len, unsigned int flags)
+{
+	int error;
+	struct inode *inode = out->f_mapping->host;
+	struct gfs2_inode *ip = GFS2_I(inode);
+
+	error = gfs2_rs_alloc(ip);
+	if (error)
+		return (ssize_t)error;
+
+	gfs2_size_hint(inode, *ppos, len);
+
+	return generic_file_splice_write(pipe, out, ppos, len, flags);
+}
+
 #ifdef CONFIG_GFS2_FS_LOCKING_DLM
 
 /**
@@ -823,7 +840,7 @@ const struct file_operations gfs2_file_fops = {
 	.lock		= gfs2_lock,
 	.flock		= gfs2_flock,
 	.splice_read	= generic_file_splice_read,
-	.splice_write	= generic_file_splice_write,
+	.splice_write	= gfs2_file_splice_write,
 	.setlease	= gfs2_setlease,
 };
 
@@ -851,7 +868,7 @@ const struct file_operations gfs2_file_fops_nolock = {
 	.release	= gfs2_release,
 	.fsync		= gfs2_fsync,
 	.splice_read	= generic_file_splice_read,
-	.splice_write	= generic_file_splice_write,
+	.splice_write	= gfs2_file_splice_write,
 	.setlease	= generic_setlease,
 };
 

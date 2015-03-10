@@ -248,7 +248,7 @@ void ftrace_syscall_enter(struct pt_regs *regs, long id)
 	int size;
 
 	syscall_nr = trace_get_syscall_nr(current, regs);
-	if (syscall_nr < 0)
+	if (syscall_nr < 0 || syscall_nr >= NR_syscalls)
 		return;
 	if (!test_bit(syscall_nr, enabled_enter_syscalls))
 		return;
@@ -282,7 +282,7 @@ void ftrace_syscall_exit(struct pt_regs *regs, long ret)
 	int syscall_nr;
 
 	syscall_nr = trace_get_syscall_nr(current, regs);
-	if (syscall_nr < 0)
+	if (syscall_nr < 0 || syscall_nr >= NR_syscalls)
 		return;
 	if (!test_bit(syscall_nr, enabled_exit_syscalls))
 		return;
@@ -400,7 +400,7 @@ static void prof_syscall_enter(struct pt_regs *regs, long id)
 	int rctx;
 
 	syscall_nr = trace_get_syscall_nr(current, regs);
-	if (syscall_nr < 0)
+	if (syscall_nr < 0 || syscall_nr >= NR_syscalls)
 		return;
 	if (!test_bit(syscall_nr, enabled_prof_enter_syscalls))
 		return;
@@ -504,7 +504,7 @@ static void prof_syscall_exit(struct pt_regs *regs, long ret)
 	int rctx;
 
 	syscall_nr = trace_get_syscall_nr(current, regs);
-	if (syscall_nr < 0)
+	if (syscall_nr < 0 || syscall_nr >= NR_syscalls)
 		return;
 	if (!test_bit(syscall_nr, enabled_prof_exit_syscalls))
 		return;

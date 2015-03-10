@@ -282,11 +282,7 @@ struct scsi_target {
 	struct list_head	siblings;
 	struct list_head	devices;
 	struct device		dev;
-#ifndef __GENKSYMS__
-	struct kref		reap_ref; /* last put renders target invisible */
-#else
 	unsigned int		reap_ref; /* protected by the host lock */
-#endif
 	unsigned int		channel;
 	unsigned int		id; /* target id ... replace
 				     * scsi_device.id eventually */

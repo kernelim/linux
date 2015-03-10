@@ -1985,6 +1985,27 @@ int kvm_gfn_to_hva_cache_init(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
 }
 EXPORT_SYMBOL_GPL(kvm_gfn_to_hva_cache_init);
 
+int kvm_fault_in_guest_cached_writable(struct kvm *kvm,
+				       struct gfn_to_hva_cache *ghc)
+{
+	struct kvm_memslots *slots = kvm_memslots(kvm);
+	u8 c;
+	int r;
+
+	if (slots->generation != ghc->generation)
+		kvm_gfn_to_hva_cache_init(kvm, ghc, ghc->gpa);
+
+	if (kvm_is_error_hva(ghc->hva))
+		return -EFAULT;
+
+        r = __get_user(c, (u8 __user *)ghc->hva);
+        if (r == 0)
+		r = __put_user(c, (u8 __user *)ghc->hva);
+
+        return r;
+}
+EXPORT_SYMBOL_GPL(kvm_fault_in_guest_cached_writable);
+
 int kvm_write_guest_cached(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
 			   void *data, unsigned long len)
 {

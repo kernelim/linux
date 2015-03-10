@@ -1392,9 +1392,13 @@ struct task_struct {
 				 * execve */
 	unsigned in_iowait:1;
 
-
 	/* Revert to default priority/policy when forking */
 	unsigned sched_reset_on_fork:1;
+
+#ifndef __GENKSYMS__
+	/* task may not gain privileges */
+	unsigned no_new_privs:1;
+#endif
 
 	pid_t pid;
 	pid_t tgid;
@@ -1681,11 +1685,18 @@ struct task_struct {
 		unsigned long bytes; 		/* uncharged usage */
 		unsigned long memsw_bytes; /* uncharged mem+swap usage */
 	} memcg_batch;
-#endif /* __GENKYSMS__ */
+#endif
 #ifdef CONFIG_NUMA
 	short pref_node_fork;
 #endif
+#ifdef CONFIG_CGROUP_MEM_RES_CTLR
+	struct memcg_oom_info {
+		struct mem_cgroup *memcg;
+		gfp_t gfp_mask;
+		unsigned int may_oom:1;
+	} memcg_oom;
 #endif
+#endif /* __GENKYSMS__ */
 };
 
 /* Future-safe accessor for struct task_struct's cpus_allowed. */

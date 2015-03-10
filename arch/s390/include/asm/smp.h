@@ -52,7 +52,6 @@ extern void smp_restart_with_online_cpu(void);
 #define PROC_CHANGE_PENALTY	20		/* Schedule penalty */
 
 #define raw_smp_processor_id()	(S390_lowcore.cpu_nr)
-#define cpu_logical_map(cpu)	(cpu)
 
 extern int __cpu_disable (void);
 extern void __cpu_die (unsigned int cpu);
