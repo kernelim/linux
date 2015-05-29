@@ -191,6 +191,7 @@ struct slave {
 	struct net_device *dev; /* first - useful for panic debug */
 	struct slave *next;
 	struct slave *prev;
+	struct bonding *bond; /* our master */
 	int    delay;
 	unsigned long jiffies;
 	unsigned long last_arp_rx;
@@ -231,6 +232,8 @@ struct bonding {
 	struct   slave *primary_slave;
 	bool     force_primary;
 	s32      slave_cnt; /* never change this value outside the attach/detach wrappers */
+	int     (*recv_probe)(const struct sk_buff *, struct bonding *,
+			      struct slave *);
 	rwlock_t lock;
 	rwlock_t curr_slave_lock;
 	s8       kill_timers;
@@ -263,6 +266,9 @@ struct bonding {
 	struct   in6_addr master_ipv6;
 #endif
 };
+
+#define bond_slave_get_rcu(dev) \
+	((struct slave *) rcu_dereference(netdev_extended(dev)->rx_handler_data))
 
 /**
  * Returns NULL if the net_device does not belong to any of the bond's slaves
@@ -406,6 +412,7 @@ redo:
 	return addr;
 }
 
+int bond_arp_rcv(const struct sk_buff *skb, struct bonding *bond, struct slave *slave);
 struct vlan_entry *bond_next_vlan(struct bonding *bond, struct vlan_entry *curr);
 int bond_dev_queue_xmit(struct bonding *bond, struct sk_buff *skb, struct net_device *slave_dev);
 int bond_create(const char *name);
@@ -425,8 +432,6 @@ void bond_set_mode_ops(struct bonding *bond, int mode);
 int bond_parse_parm(const char *mode_arg, const struct bond_parm_tbl *tbl);
 void bond_select_active_slave(struct bonding *bond);
 void bond_change_active_slave(struct bonding *bond, struct slave *new_active);
-void bond_register_arp(struct bonding *);
-void bond_unregister_arp(struct bonding *);
 
 /* Check if the ip is present in arp ip list, or first free slot if ip == 0
  * Returns -1 if not found, index if found

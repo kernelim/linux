@@ -1937,6 +1937,17 @@ static void mem_cgroup_cancel_charge(struct mem_cgroup *mem,
 				(page_size >> PAGE_SHIFT) * charge_count);
 }
 
+static void mem_cgroup_cancel_local_charge(struct mem_cgroup *memcg,
+					   unsigned long bytes)
+{
+	if (mem_cgroup_is_root(memcg))
+		return;
+
+	res_counter_uncharge_local(&memcg->res, bytes);
+	if (do_swap_account)
+		res_counter_uncharge_local(&memcg->memsw, bytes);
+}
+
 /*
  * A helper function to get mem_cgroup from ID. must be called under
  * rcu_read_lock(). The caller must check css_is_removed() or some if
@@ -2039,7 +2050,6 @@ static void __mem_cgroup_commit_charge(struct mem_cgroup *mem,
  * @pc:	page_cgroup of the page.
  * @from: mem_cgroup which the page is moved from.
  * @to:	mem_cgroup which the page is moved to. @from != @to.
- * @uncharge: whether we should call uncharge and css_put against @from
  *
  * The caller must confirm following.
  * - page is not on LRU (isolate_page() is useful.)
@@ -2049,13 +2059,10 @@ static void __mem_cgroup_commit_charge(struct mem_cgroup *mem,
  *
  * This function doesn't do "charge" nor css_get to @to, this should
  * be done by the caller (__mem_cgroup_try_charge would be useful).
- *
- * If @uncharge is true, this function does "uncharge" from @from,
- * otherwise this is up to the caller as well.
  */
 static int mem_cgroup_move_account(struct page *page, struct page_cgroup *pc,
 				   struct mem_cgroup *from, struct mem_cgroup *to,
-				   int page_size, bool uncharge)
+				   int page_size)
 {
 	int ret;
 
@@ -2090,9 +2097,6 @@ static int mem_cgroup_move_account(struct page *page, struct page_cgroup *pc,
 	}
 
 	mem_cgroup_charge_statistics(from, pc, -page_size);
-	if (uncharge)
-		/* This is not "cancel", but cancel_charge does all we need. */
-		mem_cgroup_cancel_charge(from, page_size, 1);
 
 	/* caller should have done css_get */
 	pc->mem_cgroup = to;
@@ -2116,19 +2120,12 @@ out:
 
 static int mem_cgroup_move_parent(struct page *page,
 				  struct page_cgroup *pc,
-				  struct mem_cgroup *child,
-				  gfp_t gfp_mask)
+				  struct mem_cgroup *child)
 {
-	struct cgroup *cg = child->css.cgroup;
-	struct cgroup *pcg = cg->parent;
 	struct mem_cgroup *parent;
 	int page_size = PAGE_SIZE;
 	int ret;
 	unsigned long flags;
-
-	/* Is ROOT ? */
-	if (!pcg)
-		return -EINVAL;
 
 	ret = -EBUSY;
 	if (!get_page_unless_zero(page))
@@ -2144,26 +2141,21 @@ static int mem_cgroup_move_parent(struct page *page,
 		page_size = HPAGE_SIZE;
 	}
 
-	parent = mem_cgroup_from_cont(pcg);
-	ret = __mem_cgroup_try_charge(NULL, gfp_mask, &parent, false, page,
-				      page_size);
-	if (ret || !parent)
-		goto put_back;
+	parent = parent_mem_cgroup(child);
+	if (!parent)
+		parent = root_mem_cgroup;
 
 	flags = compound_lock_irqsave(page);
 	/* re-check under compound_lock because the page might be split */
-	if (unlikely(page_size != PAGE_SIZE && !PageTransHuge(page))) {
-		unsigned long extra = (page_size - PAGE_SIZE) >> PAGE_SHIFT;
-		/* uncharge extra charges from parent */
-		__mem_cgroup_cancel_charge(parent, extra);
+	if (unlikely(page_size != PAGE_SIZE && !PageTransHuge(page)))
 		page_size = PAGE_SIZE;
-	}
-	ret = mem_cgroup_move_account(page, pc, child, parent, page_size, true);
+
+	ret = mem_cgroup_move_account(page, pc, child, parent, page_size);
+	if (!ret)
+		mem_cgroup_cancel_local_charge(child, page_size);
+
 	compound_unlock_irqrestore(page, flags);
 
-	if (ret)
-		mem_cgroup_cancel_charge(parent, page_size, 1);
-put_back:
 	putback_lru_page(page);
 put:
 	put_page(page);
@@ -3134,29 +3126,24 @@ unsigned long mem_cgroup_soft_limit_reclaim(struct zone *zone, int order,
  * This routine traverse page_cgroup in given list and drop them all.
  * *And* this routine doesn't reclaim page itself, just removes page_cgroup.
  */
-static int mem_cgroup_force_empty_list(struct mem_cgroup *mem,
+static void mem_cgroup_force_empty_list(struct mem_cgroup *mem,
 				int node, int zid, enum lru_list lru)
 {
 	struct mem_cgroup_per_zone *mz;
-	unsigned long flags, loop;
+	unsigned long flags;
 	struct list_head *list;
 	struct page *busy;
 	struct zone *zone;
-	int ret = 0;
 
 	zone = &NODE_DATA(node)->node_zones[zid];
 	mz = mem_cgroup_zoneinfo(mem, node, zid);
 	list = &mz->lruvec.lists[lru];
 
-	loop = MEM_CGROUP_ZSTAT(mz, lru);
-	/* give some margin against EBUSY etc...*/
-	loop += 256;
 	busy = NULL;
-	while (loop--) {
+	do {
 		struct page_cgroup *pc;
 		struct page *page;
 
-		ret = 0;
 		spin_lock_irqsave(&zone->lru_lock, flags);
 		if (list_empty(list)) {
 			spin_unlock_irqrestore(&zone->lru_lock, flags);
@@ -3173,21 +3160,13 @@ static int mem_cgroup_force_empty_list(struct mem_cgroup *mem,
 
 		pc = lookup_page_cgroup(page);
 
-		ret = mem_cgroup_move_parent(page, pc, mem, GFP_KERNEL);
-		if (ret == -ENOMEM)
-			break;
-
-		if (ret == -EBUSY || ret == -EINVAL) {
+		if (mem_cgroup_move_parent(page, pc, mem)) {
 			/* found lock contention or "pc" is obsolete. */
 			busy = page;
-			cond_resched();
 		} else
 			busy = NULL;
-	}
-
-	if (!ret && !list_empty(list))
-		return -EBUSY;
-	return ret;
+		cond_resched();
+	} while (!list_empty(list));
 }
 
 /*
@@ -3196,66 +3175,45 @@ static int mem_cgroup_force_empty_list(struct mem_cgroup *mem,
  */
 static int __mem_cgroup_force_empty(struct mem_cgroup *mem, bool free_all)
 {
-	int ret;
-	int node, zid, shrink;
+	int node, zid;
 	int nr_retries = MEM_CGROUP_RECLAIM_RETRIES;
 	struct cgroup *cgrp = mem->css.cgroup;
 
-	shrink = 0;
 	/* should free all ? */
 	if (free_all)
 		goto try_to_free;
-move_account:
+
 	do {
-		ret = -EBUSY;
-		if (cgroup_task_count(cgrp) || !list_empty(&cgrp->children))
-			goto out;
-		ret = -EINTR;
-		if (signal_pending(current))
-			goto out;
 		/* This is for making all *used* pages to be on LRU. */
 		lru_add_drain_all();
 		drain_all_stock_sync();
-		ret = 0;
 		for_each_node_state(node, N_HIGH_MEMORY) {
-			for (zid = 0; !ret && zid < MAX_NR_ZONES; zid++) {
+			for (zid = 0; zid < MAX_NR_ZONES; zid++) {
 				enum lru_list l;
 				for_each_lru(l) {
-					ret = mem_cgroup_force_empty_list(mem,
+					mem_cgroup_force_empty_list(mem,
 							node, zid, l);
-					if (ret)
-						break;
 				}
 			}
-			if (ret)
-				break;
 		}
 		memcg_oom_recover(mem);
-		/* it seems parent cgroup doesn't have enough mem */
-		if (ret == -ENOMEM)
-			goto try_to_free;
 		cond_resched();
 	/* "ret" should also be checked to ensure all lists are empty. */
-	} while (mem->res.usage > 0 || ret);
-out:
-	return ret;
+	} while (mem->res.usage > 0);
+	return 0;
 
 try_to_free:
-	/* returns EBUSY if there is a task or if we come here twice. */
-	if (cgroup_task_count(cgrp) || !list_empty(&cgrp->children) || shrink) {
-		ret = -EBUSY;
-		goto out;
-	}
+	/* returns EBUSY if there is a task */
+	if (cgroup_task_count(cgrp) || !list_empty(&cgrp->children))
+		return -EBUSY;
 	/* we call try-to-free pages for make this cgroup empty */
 	lru_add_drain_all();
 	/* try to free all pages in this cgroup */
-	shrink = 1;
 	while (nr_retries && mem->res.usage > 0) {
 		int progress;
 
 		if (signal_pending(current)) {
-			ret = -EINTR;
-			goto out;
+			return -EINTR;
 		}
 		progress = try_to_free_mem_cgroup_pages(mem, GFP_KERNEL,
 						false, get_swappiness(mem));
@@ -3266,9 +3224,7 @@ try_to_free:
 		}
 
 	}
-	lru_add_drain();
-	/* try move_account...there may be some *locked* pages. */
-	goto move_account;
+	return 0;
 }
 
 static int mem_cgroup_force_empty(struct mem_cgroup *memcg, bool free_all)
@@ -3281,26 +3237,13 @@ static int mem_cgroup_force_empty(struct mem_cgroup *memcg, bool free_all)
 	return ret;
 }
 
-int mem_cgroup_force_empty_hack(struct cgroup *cgrp)
-{
-	struct cgroup_subsys_state *css;
-	struct mem_cgroup *memcg;
-
-	css = cgroup_subsys_state(cgrp, mem_cgroup_subsys_id);
-	/*
-	 * Because we are called for every cgroup unconditionally, and
-	 * not filtered by for_each_subsys(), we might get called on a
-	 * cgroup that doesn't even have the memory subsystem enabled.
-	 */
-	if (!css)
-		return 0;
-	memcg = container_of(css, struct mem_cgroup, css);
-	return __mem_cgroup_force_empty(memcg, false);
-}
-
 int mem_cgroup_force_empty_write(struct cgroup *cont, unsigned int event)
 {
-	return mem_cgroup_force_empty(mem_cgroup_from_cont(cont), true);
+	struct mem_cgroup *memcg = mem_cgroup_from_cont(cont);
+
+	if (mem_cgroup_is_root(memcg))
+		return -EINVAL;
+	return mem_cgroup_force_empty(memcg, true);
 }
 
 
@@ -4169,6 +4112,7 @@ static void mem_cgroup_destroy(struct cgroup_subsys *ss,
 {
 	struct mem_cgroup *mem = mem_cgroup_from_cont(cont);
 
+	__mem_cgroup_force_empty(mem, false);
 	mem_cgroup_put(mem);
 }
 
@@ -4577,7 +4521,7 @@ retry:
 				goto put;
 			pc = lookup_page_cgroup(page);
 			if (!mem_cgroup_move_account(page, pc, mc.from, mc.to,
-						     PAGE_SIZE, false)) {
+						     PAGE_SIZE)) {
 				mc.precharge--;
 				/* we uncharge from mc.from later. */
 				mc.moved_charge++;

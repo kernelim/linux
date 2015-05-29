@@ -386,6 +386,56 @@ typedef enum gro_result __bitwise__ gro_result_t;
 #define GRO_NORMAL	((__force gro_result_t) GRO_NORMAL)
 #define GRO_DROP	((__force gro_result_t) GRO_DROP)
 
+/*
+ * enum rx_handler_result - Possible return values for rx_handlers.
+ * @RX_HANDLER_CONSUMED: skb was consumed by rx_handler, do not process it
+ * further.
+ * @RX_HANDLER_ANOTHER: Do another round in receive path. This is indicated in
+ * case skb->dev was changed by rx_handler.
+ * @RX_HANDLER_EXACT: Force exact delivery, no wildcard.
+ * @RX_HANDLER_PASS: Do nothing, passe the skb as if no rx_handler was called.
+ *
+ * rx_handlers are functions called from inside __netif_receive_skb(), to do
+ * special processing of the skb, prior to delivery to protocol handlers.
+ *
+ * Currently, a net_device can only have a single rx_handler registered. Trying
+ * to register a second rx_handler will return -EBUSY.
+ *
+ * To register a rx_handler on a net_device, use netdev_rx_handler_register().
+ * To unregister a rx_handler on a net_device, use
+ * netdev_rx_handler_unregister().
+ *
+ * Upon return, rx_handler is expected to tell __netif_receive_skb() what to
+ * do with the skb.
+ *
+ * If the rx_handler consumed to skb in some way, it should return
+ * RX_HANDLER_CONSUMED. This is appropriate when the rx_handler arranged for
+ * the skb to be delivered in some other ways.
+ *
+ * If the rx_handler changed skb->dev, to divert the skb to another
+ * net_device, it should return RX_HANDLER_ANOTHER. The rx_handler for the
+ * new device will be called if it exists.
+ *
+ * If the rx_handler consider the skb should be ignored, it should return
+ * RX_HANDLER_EXACT. The skb will only be delivered to protocol handlers that
+ * are registred on exact device (ptype->dev == skb->dev).
+ *
+ * If the rx_handler didn't changed skb->dev, but want the skb to be normally
+ * delivered, it should return RX_HANDLER_PASS.
+ *
+ * A device without a registered rx_handler will behave as if rx_handler
+ * returned RX_HANDLER_PASS.
+ */
+
+enum rx_handler_result {
+	RX_HANDLER_CONSUMED,
+	RX_HANDLER_ANOTHER,
+	RX_HANDLER_EXACT,
+	RX_HANDLER_PASS,
+};
+typedef enum rx_handler_result rx_handler_result_t;
+typedef rx_handler_result_t rx_handler_func_t(struct sk_buff **pskb);
+
 extern void __napi_schedule(struct napi_struct *n);
 
 static inline int napi_disable_pending(struct napi_struct *n)
@@ -1124,7 +1174,7 @@ struct net_device
 
 
 	/* Protocol specific pointers */
-	
+
 #ifdef CONFIG_NET_DSA
 	void			*dsa_ptr;	/* dsa specific data */
 #endif
@@ -1369,6 +1419,11 @@ struct net_device_extended {
 	u32			hw_features;
 	/* user-requested features */
 	u32			wanted_features;
+#if defined(CONFIG_VLAN_8021Q) || defined(CONFIG_VLAN_8021Q_MODULE)
+	struct vlan_group	*vlgrp;		/* VLAN group */
+#endif
+	rx_handler_func_t	*rx_handler;
+	void			*rx_handler_data;
 };
 
 #define NET_DEVICE_EXTENDED_SIZE \
@@ -2146,7 +2201,11 @@ static inline void napi_free_frags(struct napi_struct *napi)
 	napi->skb = NULL;
 }
 
-extern void		netif_nit_deliver(struct sk_buff *skb);
+extern int netdev_rx_handler_register(struct net_device *dev,
+				      rx_handler_func_t *rx_handler,
+				      void *rx_handler_data);
+extern void netdev_rx_handler_unregister(struct net_device *dev);
+
 extern int		dev_valid_name(const char *name);
 extern int		dev_ioctl(struct net *net, unsigned int cmd, void __user *);
 extern int		dev_ethtool(struct net *net, struct ifreq *);
@@ -2641,57 +2700,6 @@ static inline void netif_set_gso_max_size(struct net_device *dev,
 					  unsigned int size)
 {
 	dev->gso_max_size = size;
-}
-
-static inline void skb_bond_set_mac_by_master(struct sk_buff *skb,
-					      struct net_device *master)
-{
-	if (skb->pkt_type == PACKET_HOST) {
-		u16 *dest = (u16 *) eth_hdr(skb)->h_dest;
-
-		memcpy(dest, master->dev_addr, ETH_ALEN);
-	}
-}
-
-/* On bonding slaves other than the currently active slave, suppress
- * duplicates except for 802.3ad ETH_P_SLOW, alb non-mcast/bcast, and
- * ARP on active-backup slaves with arp_validate enabled.
- */
-static inline int skb_bond_should_drop(struct sk_buff *skb,
-				       struct net_device *master)
-{
-	if (master) {
-		struct net_device *dev = skb->dev;
-
-		if (master->priv_flags & IFF_MASTER_ARPMON)
-			dev->last_rx = jiffies;
-
-		if ((master->priv_flags & IFF_MASTER_ALB) && master->br_port) {
-			/* Do address unmangle. The local destination address
-			 * will be always the one master has. Provides the right
-			 * functionality in a bridge.
-			 */
-			skb_bond_set_mac_by_master(skb, master);
-		}
-
-		if (dev->priv_flags & IFF_SLAVE_INACTIVE) {
-			if ((dev->priv_flags & IFF_SLAVE_NEEDARP) &&
-			    skb->protocol == __cpu_to_be16(ETH_P_ARP))
-				return 0;
-
-			if (master->priv_flags & IFF_MASTER_ALB) {
-				if (skb->pkt_type != PACKET_BROADCAST &&
-				    skb->pkt_type != PACKET_MULTICAST)
-					return 0;
-			}
-			if (master->priv_flags & IFF_MASTER_8023AD &&
-			    skb->protocol == __cpu_to_be16(ETH_P_SLOW))
-				return 0;
-
-			return 1;
-		}
-	}
-	return 0;
 }
 
 extern struct net_device *br_get_br_dev_for_port_rcu(struct net_device *port_dev);

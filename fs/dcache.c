@@ -1784,7 +1784,7 @@ static struct dentry *__d_unalias(struct dentry *dentry, struct dentry *alias)
 		goto out_err;
 
 	/* See lock_rename() */
-	ret = ERR_PTR(-EBUSY);
+	ret = ERR_PTR(-ESTALE);
 	if (!mutex_trylock(&dentry->d_sb->s_vfs_rename_mutex))
 		goto out_err;
 	m1 = &dentry->d_sb->s_vfs_rename_mutex;

@@ -115,9 +115,7 @@ static int ipath_map_sg(struct ib_device *dev, struct scatterlist *sgl,
 			break;
 		}
 		sg->dma_address = addr + sg->offset;
-#ifdef CONFIG_NEED_SG_DMA_LENGTH
 		sg->dma_length = sg->length;
-#endif
 	}
 	return ret;
 }

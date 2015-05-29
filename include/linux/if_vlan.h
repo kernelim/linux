@@ -16,6 +16,7 @@
 #ifdef __KERNEL__
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
+#include <linux/rtnetlink.h>
 #include <linux/u64_stats_sync.h>
 
 #define VLAN_HLEN	4		/* The additional bytes (on top of the Ethernet header)
@@ -69,6 +70,7 @@ static inline struct vlan_ethhdr *vlan_eth_hdr(const struct sk_buff *skb)
 #define VLAN_CFI_MASK		0x1000 /* Canonical Format Indicator */
 #define VLAN_TAG_PRESENT	VLAN_CFI_MASK
 #define VLAN_VID_MASK		0x0fff /* VLAN Identifier */
+#define VLAN_N_VID		4096
 
 /* found in socket.c */
 extern void vlan_ioctl_set(int (*hook)(struct net *, void __user *));
@@ -77,9 +79,8 @@ extern void vlan_ioctl_set(int (*hook)(struct net *, void __user *));
  * depends on completely exhausting the VLAN identifier space.  Thus
  * it gives constant time look-up, but in many cases it wastes memory.
  */
-#define VLAN_GROUP_ARRAY_LEN          4096
 #define VLAN_GROUP_ARRAY_SPLIT_PARTS  8
-#define VLAN_GROUP_ARRAY_PART_LEN     (VLAN_GROUP_ARRAY_LEN/VLAN_GROUP_ARRAY_SPLIT_PARTS)
+#define VLAN_GROUP_ARRAY_PART_LEN     (VLAN_N_VID/VLAN_GROUP_ARRAY_SPLIT_PARTS)
 
 struct vlan_group {
 	struct net_device	*real_dev; /* The ethernet(like) device
@@ -90,19 +91,6 @@ struct vlan_group {
 	struct net_device **vlan_devices_arrays[VLAN_GROUP_ARRAY_SPLIT_PARTS];
 	struct rcu_head		rcu;
 };
-
-struct vlan_group* vlan_find_group(struct net_device *dev);
-struct vlan_group *vlan_group_alloc(struct net_device *real_dev);
-void vlan_group_free(struct vlan_group *grp);
-int vlan_group_prealloc_vid(struct vlan_group *vg, u16 vlan_id);
-
-#ifdef CONFIG_VLAN_8021Q_GVRP
-extern int vlan_gvrp_init_applicant(struct net_device *dev);
-extern void vlan_gvrp_uninit_applicant(struct net_device *dev);
-#else
-static inline int vlan_gvrp_init_applicant(struct net_device *dev) { return 0; }
-static inline void vlan_gvrp_uninit_applicant(struct net_device *dev) {}
-#endif
 
 static inline struct net_device *vlan_group_get_device(struct vlan_group *vg,
 						       u16 vlan_id)
@@ -134,8 +122,10 @@ static inline int is_vlan_dev(struct net_device *dev)
 
 #define vlan_tx_tag_present(__skb)	((__skb)->vlan_tci & VLAN_TAG_PRESENT)
 #define vlan_tx_tag_get(__skb)		((__skb)->vlan_tci & ~VLAN_TAG_PRESENT)
+#define vlan_tx_tag_get_id(__skb)	((__skb)->vlan_tci & VLAN_VID_MASK)
 
 #if defined(CONFIG_VLAN_8021Q) || defined(CONFIG_VLAN_8021Q_MODULE)
+
 extern struct net_device *vlan_dev_real_dev(const struct net_device *dev);
 extern u16 vlan_dev_vlan_id(const struct net_device *dev);
 
@@ -185,8 +175,6 @@ struct vlan_pcpu_stats {
  *	@real_dev: underlying netdevice
  *	@real_dev_addr: address of underlying netdevice
  *	@dent: proc dir entry
- *	@cnt_inc_headroom_on_tx: statistic - number of skb expansions on TX
- *	@cnt_encap_on_xmit: statistic - number of skb encapsulations on TX
  *	@vlan_pcpu_stats: ptr to percpu rx stats
  */
 struct vlan_dev_info {
@@ -202,8 +190,6 @@ struct vlan_dev_info {
 	unsigned char				real_dev_addr[ETH_ALEN];
 
 	struct proc_dir_entry			*dent;
-	unsigned long				cnt_inc_headroom_on_tx;
-	unsigned long				cnt_encap_on_xmit;
 	struct vlan_pcpu_stats __percpu		*vlan_pcpu_stats;
 };
 
@@ -233,7 +219,7 @@ vlan_dev_get_egress_qos_mask(struct net_device *dev, u32 skprio)
 
 extern int __vlan_hwaccel_rx(struct sk_buff *skb, struct vlan_group *grp,
 			     u16 vlan_tci, int polling);
-extern int vlan_hwaccel_do_receive(struct sk_buff *skb);
+extern bool vlan_do_receive(struct sk_buff **skb);
 extern int vlan_gro_receive(struct napi_struct *napi, struct vlan_group *grp,
 			    unsigned int vlan_tci, struct sk_buff *skb);
 extern gro_result_t
@@ -271,9 +257,9 @@ static inline u16 vlan_dev_get_egress_qos_mask(struct net_device *dev,
 	return 0;
 }
 
-static inline int vlan_hwaccel_do_receive(struct sk_buff *skb)
+static inline bool vlan_do_receive(struct sk_buff **skb)
 {
-	return 0;
+	return false;
 }
 
 static inline int vlan_gro_receive(struct napi_struct *napi,
@@ -331,7 +317,7 @@ static inline int vlan_hwaccel_receive_skb(struct sk_buff *skb,
 }
 
 /**
- * __vlan_put_tag - regular VLAN tag inserting
+ * vlan_insert_tag - regular VLAN tag inserting
  * @skb: skbuff to tag
  * @vlan_tci: VLAN TCI to insert
  *
@@ -340,8 +326,10 @@ static inline int vlan_hwaccel_receive_skb(struct sk_buff *skb,
  *
  * Following the skb_unshare() example, in case of error, the calling function
  * doesn't have to worry about freeing the original skb.
+ *
+ * Does not change skb->protocol so this function can be used during receive.
  */
-static inline struct sk_buff *__vlan_put_tag(struct sk_buff *skb, u16 vlan_tci)
+static inline struct sk_buff *vlan_insert_tag(struct sk_buff *skb, u16 vlan_tci)
 {
 	struct vlan_ethhdr *veth;
 
@@ -361,8 +349,25 @@ static inline struct sk_buff *__vlan_put_tag(struct sk_buff *skb, u16 vlan_tci)
 	/* now, the TCI */
 	veth->h_vlan_TCI = htons(vlan_tci);
 
-	skb->protocol = htons(ETH_P_8021Q);
+	return skb;
+}
 
+/**
+ * __vlan_put_tag - regular VLAN tag inserting
+ * @skb: skbuff to tag
+ * @vlan_tci: VLAN TCI to insert
+ *
+ * Inserts the VLAN tag into @skb as part of the payload
+ * Returns a VLAN tagged skb. If a new skb is created, @skb is freed.
+ *
+ * Following the skb_unshare() example, in case of error, the calling function
+ * doesn't have to worry about freeing the original skb.
+ */
+static inline struct sk_buff *__vlan_put_tag(struct sk_buff *skb, u16 vlan_tci)
+{
+	skb = vlan_insert_tag(skb, vlan_tci);
+	if (skb)
+		skb->protocol = htons(ETH_P_8021Q);
 	return skb;
 }
 
@@ -535,6 +540,7 @@ enum vlan_ioctl_cmds {
 enum vlan_flags {
 	VLAN_FLAG_REORDER_HDR	= 0x1,
 	VLAN_FLAG_GVRP		= 0x2,
+	VLAN_FLAG_LOOSE_BINDING	= 0x4,
 };
 
 enum vlan_name_types {

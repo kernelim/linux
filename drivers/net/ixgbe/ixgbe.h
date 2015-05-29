@@ -368,6 +368,7 @@ struct ixgbe_q_vector {
 	struct napi_struct napi;
 	cpumask_t affinity_mask;
 	int numa_node;
+	struct rcu_head rcu;	/* to avoid race with update stats on free */
 	char name[IFNAMSIZ + 9];
 
 #ifdef CONFIG_NET_RX_BUSY_POLL

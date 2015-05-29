@@ -17,48 +17,6 @@
 #include <linux/netfilter_bridge.h>
 #include "br_private.h"
 
-static struct sk_buff *br_vlan_workaround(struct sk_buff *skb)
-{
-	if (!vlan_tx_tag_present(skb))
-		return skb;
-
-	/* Since bridge is no longer a vlan accelerated device  any vlans
-	 * configured on top of the bridge will not  be propagated to hw.
-	 * Some drivers will pass vlan_tci  even if there we no vlan groups
-	 * configured.  This is  a workaround for those drivers.  We insert
-	 * the vlan header into the packet thus letting any vlans defined
-	 * on top of the bridge handle this packet.  This code can be
-	 * removed when we have a new vlan infrastructure.
-	 */
-	skb_push(skb, ETH_HLEN);
-	skb = __vlan_put_tag(skb, vlan_tx_tag_get(skb));
-	if (unlikely(!skb))
-		goto out;
-	skb->vlan_tci = 0;
-	skb_reset_mac_header(skb);
-	skb_pull(skb, ETH_HLEN);
-
-	if (skb->pkt_type == PACKET_OTHERHOST) {
-		/* Since this packet had vlan_tci set, it has passed
-		 * through the vlan layer and vlan layer has changed
-		 * the packet type.  If this is a multicast or
-		 * broadcast packet, we need to change the packet type
-		 * back since this packet will be going through the
-		 * vlan layer again and we want it delivered if we
-		 * find a matching vlan device.
-		 */
-		const unsigned char *dest = eth_hdr(skb)->h_dest;
-		if (is_multicast_ether_addr(dest)) {
-			if (is_broadcast_ether_addr(dest))
-				skb->pkt_type = PACKET_BROADCAST;
-			else
-				skb->pkt_type = PACKET_MULTICAST;
-		}
-	}
-out:
-	return skb;
-}
-
 static int br_pass_frame_up(struct sk_buff *skb)
 {
 	struct net_device *indev, *brdev = BR_INPUT_SKB_CB(skb)->brdev;
@@ -72,10 +30,6 @@ static int br_pass_frame_up(struct sk_buff *skb)
 
 	indev = skb->dev;
 	skb->dev = brdev;
-
-	skb = br_vlan_workaround(skb);
-	if (!skb)
-		return NET_RX_DROP;
 
 	return NF_HOOK(PF_BRIDGE, NF_BR_LOCAL_IN, skb, indev, NULL,
 		       netif_receive_skb);
@@ -166,21 +120,28 @@ static int br_handle_local_finish(struct sk_buff *skb)
 }
 
 /*
- * Called via br_handle_frame_hook.
  * Return NULL if skb is handled
- * note: already called with rcu_read_lock (preempt_disabled)
+ * note: already called with rcu_read_lock (preempt_disabled) from
+ * netif_receive_skb
  */
-struct sk_buff *br_handle_frame(struct net_bridge_port *p, struct sk_buff *skb)
+rx_handler_result_t br_handle_frame(struct sk_buff **pskb)
 {
+	struct net_bridge_port *p;
+	struct sk_buff *skb = *pskb;
 	const unsigned char *dest = eth_hdr(skb)->h_dest;
 	int (*rhook)(struct sk_buff *skb);
+
+	if (skb->pkt_type == PACKET_LOOPBACK)
+		return RX_HANDLER_PASS;
 
 	if (!is_valid_ether_addr(eth_hdr(skb)->h_source))
 		goto drop;
 
 	skb = skb_share_check(skb, GFP_ATOMIC);
 	if (!skb)
-		return NULL;
+		return RX_HANDLER_CONSUMED;
+
+	p = rcu_dereference(skb->dev->br_port);
 
 	if (unlikely(is_link_local_ether_addr(dest))) {
 		/* Pause frames shouldn't be passed up by driver anyway */
@@ -192,10 +153,12 @@ struct sk_buff *br_handle_frame(struct net_bridge_port *p, struct sk_buff *skb)
 			goto forward;
 
 		if (NF_HOOK(PF_BRIDGE, NF_BR_LOCAL_IN, skb, skb->dev,
-			    NULL, br_handle_local_finish))
-			return NULL;	/* frame consumed by filter */
-		else
-			return skb;	/* continue processing */
+			    NULL, br_handle_local_finish)) {
+			return RX_HANDLER_CONSUMED; /* consumed by filter */
+		} else {
+			*pskb = skb;
+			return RX_HANDLER_PASS;	/* continue processing */
+		}
 	}
 
 forward:
@@ -203,8 +166,10 @@ forward:
 	case BR_STATE_FORWARDING:
 		rhook = rcu_dereference(br_should_route_hook);
 		if (rhook != NULL) {
-			if (rhook(skb))
-				return skb;
+			if (rhook(skb)) {
+				*pskb = skb;
+				return RX_HANDLER_PASS;
+			}
 			dest = eth_hdr(skb)->h_dest;
 		}
 		/* fall through */
@@ -219,5 +184,5 @@ forward:
 drop:
 		kfree_skb(skb);
 	}
-	return NULL;
+	return RX_HANDLER_CONSUMED;
 }

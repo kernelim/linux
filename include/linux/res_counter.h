@@ -128,6 +128,7 @@ int __must_check res_counter_charge(struct res_counter *counter,
 
 void res_counter_uncharge_locked(struct res_counter *counter, unsigned long val);
 void res_counter_uncharge(struct res_counter *counter, unsigned long val);
+void res_counter_uncharge_local(struct res_counter *counter, unsigned long val);
 
 static inline bool res_counter_limit_check_locked(struct res_counter *cnt)
 {

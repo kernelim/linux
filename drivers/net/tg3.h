@@ -3198,7 +3198,6 @@ struct tg3 {
 	u32				rxq_cnt;
 	u32				rxq_max;
 	bool				rx_refill;
-	struct vlan_group		*vlgrp;
 
 
 	/* begin "everything else" cacheline(s) section */

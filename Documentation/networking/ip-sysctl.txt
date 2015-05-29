@@ -20,6 +20,11 @@ ip_no_pmtu_disc - BOOLEAN
 min_pmtu - INTEGER
 	default 562 - minimum discovered Path MTU
 
+neigh/default/gc_thresh1 - INTEGER
+	Minimum number of entries to keep.  Garbage collector will not
+	purge entries if there are fewer than this number.
+	Default: 256
+
 mtu_expires - INTEGER
 	Time, in seconds, that cached PMTU information is kept.
 

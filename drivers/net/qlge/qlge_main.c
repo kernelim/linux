@@ -2418,7 +2418,7 @@ static void qlge_restore_vlan(struct ql_adapter *qdev)
 
 	if (qdev->vlgrp) {
 		u16 vid;
-			for (vid = 0; vid < VLAN_GROUP_ARRAY_LEN; vid++) {
+			for (vid = 0; vid < VLAN_N_VID; vid++) {
 				if (!vlan_group_get_device(qdev->vlgrp, vid))
 					continue;
 				qlge_vlan_rx_add_vid(qdev->ndev, vid);

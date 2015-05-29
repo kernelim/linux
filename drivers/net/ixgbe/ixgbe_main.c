@@ -3771,7 +3771,7 @@ static void ixgbe_restore_vlan(struct ixgbe_adapter *adapter)
 
 	if (adapter->vlgrp) {
 		u16 vid;
-		for (vid = 0; vid < VLAN_GROUP_ARRAY_LEN; vid++) {
+		for (vid = 0; vid < VLAN_N_VID; vid++) {
 			if (!vlan_group_get_device(adapter->vlgrp, vid))
 				continue;
 			ixgbe_vlan_rx_add_vid(adapter->netdev, vid);
@@ -4215,6 +4215,8 @@ static inline bool ixgbe_is_sfp(struct ixgbe_hw *hw)
 	case ixgbe_phy_qsfp_active_unknown:
 	case ixgbe_phy_qsfp_intel:
 	case ixgbe_phy_qsfp_unknown:
+	/* ixgbe_phy_none is set when no SFP module is present */
+	case ixgbe_phy_none:
 		return true;
 	case ixgbe_phy_nl:
 		if (hw->mac.type == ixgbe_mac_82598EB)
@@ -7129,22 +7131,39 @@ static struct rtnl_link_stats64 *ixgbe_get_stats64(struct net_device *netdev,
 	struct ixgbe_adapter *adapter = netdev_priv(netdev);
 	int i;
 
-	/* accurate rx/tx bytes/packets stats */
-	dev_txq_stats_fold64(netdev, stats);
+	rcu_read_lock();
 	for (i = 0; i < adapter->num_rx_queues; i++) {
-		struct ixgbe_ring *ring = adapter->rx_ring[i];
+		struct ixgbe_ring *ring = ACCESS_ONCE(adapter->rx_ring[i]);
 		u64 bytes, packets;
 		unsigned int start;
 
-		do {
-			start = u64_stats_fetch_begin_irq(&ring->syncp);
-			packets = ring->stats.packets;
-			bytes   = ring->stats.bytes;
-		} while (u64_stats_fetch_retry_irq(&ring->syncp, start));
-		stats->rx_packets += packets;
-		stats->rx_bytes   += bytes;
+		if (ring) {
+			do {
+				start = u64_stats_fetch_begin_irq(&ring->syncp);
+				packets = ring->stats.packets;
+				bytes   = ring->stats.bytes;
+			} while (u64_stats_fetch_retry_irq(&ring->syncp, start));
+			stats->rx_packets += packets;
+			stats->rx_bytes   += bytes;
+		}
 	}
 
+	for (i = 0; i < adapter->num_tx_queues; i++) {
+		struct ixgbe_ring *ring = ACCESS_ONCE(adapter->tx_ring[i]);
+		u64 bytes, packets;
+		unsigned int start;
+
+		if (ring) {
+			do {
+				start = u64_stats_fetch_begin_irq(&ring->syncp);
+				packets = ring->stats.packets;
+				bytes   = ring->stats.bytes;
+			} while (u64_stats_fetch_retry_irq(&ring->syncp, start));
+			stats->tx_packets += packets;
+			stats->tx_bytes   += bytes;
+		}
+	}
+	rcu_read_unlock();
 	/* following stats updated by ixgbe_watchdog_task() */
 	stats->multicast	= netdev->stats.multicast;
 	stats->rx_errors	= netdev->stats.rx_errors;
@@ -8008,6 +8027,9 @@ static void __exit ixgbe_exit_module(void)
 	pci_unregister_driver(&ixgbe_driver);
 
 	ixgbe_dbg_exit();
+
+	rcu_barrier(); /* Wait for completion of call_rcu()'s */
+
 }
 
 #ifdef CONFIG_IXGBE_DCA

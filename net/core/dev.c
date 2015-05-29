@@ -3125,38 +3125,6 @@ int (*br_fdb_test_addr_hook)(struct net_device *dev,
 EXPORT_SYMBOL_GPL(br_fdb_test_addr_hook);
 #endif
 
-/*
- * If bridge module is loaded call bridging hook.
- *  returns NULL if packet was consumed.
- */
-struct sk_buff *(*br_handle_frame_hook)(struct net_bridge_port *p,
-					struct sk_buff *skb) __read_mostly;
-EXPORT_SYMBOL_GPL(br_handle_frame_hook);
-
-
-static inline struct sk_buff *handle_bridge(struct sk_buff *skb,
-					    struct packet_type **pt_prev, int *ret,
-					    struct net_device *orig_dev)
-{
-	struct net_bridge_port *port;
-
-	if (skb->pkt_type == PACKET_LOOPBACK ||
-	    (port = rcu_dereference(skb->dev->br_port)) == NULL)
-		return skb;
-
-	/* RHEL only: skbs received on inactive slaves
-	 * due the vlan hwaccel path should not pass along */
-	if (skb->deliver_no_wcard)
-		return skb;
-
-	if (*pt_prev) {
-		*ret = deliver_skb(skb, *pt_prev, orig_dev);
-		*pt_prev = NULL;
-	}
-
-	return br_handle_frame_hook(port, skb);
-}
-
 struct net_device *(*br_get_br_dev_for_port_hook)(struct net_device *);
 EXPORT_SYMBOL_GPL(br_get_br_dev_for_port_hook);
 
@@ -3169,54 +3137,12 @@ struct net_device *br_get_br_dev_for_port_rcu(struct net_device *port_dev)
 }
 
 #else
-#define handle_bridge(skb, pt_prev, ret, orig_dev)	(skb)
 struct net_device *br_get_br_dev_for_port_rcu(struct net_device *port_dev)
 {
 	return NULL;
 }
 #endif
 EXPORT_SYMBOL_GPL(br_get_br_dev_for_port_rcu);
-
-#if defined(CONFIG_MACVLAN) || defined(CONFIG_MACVLAN_MODULE)
-struct sk_buff *(*macvlan_handle_frame_hook)(struct sk_buff *skb) __read_mostly;
-EXPORT_SYMBOL_GPL(macvlan_handle_frame_hook);
-
-static inline struct sk_buff *handle_macvlan(struct sk_buff *skb,
-					     struct packet_type **pt_prev,
-					     int *ret,
-					     struct net_device *orig_dev)
-{
-	if (skb->dev->macvlan_port == NULL)
-		return skb;
-
-	if (*pt_prev) {
-		*ret = deliver_skb(skb, *pt_prev, orig_dev);
-		*pt_prev = NULL;
-	}
-	return macvlan_handle_frame_hook(skb);
-}
-#else
-#define handle_macvlan(skb, pt_prev, ret, orig_dev)	(skb)
-#endif
-
-struct sk_buff *(*openvswitch_handle_frame_hook)(struct sk_buff *skb)
-	__read_mostly;
-EXPORT_SYMBOL_GPL(openvswitch_handle_frame_hook);
-
-static inline struct sk_buff *handle_openvswitch(struct sk_buff *skb,
-						 struct packet_type **pt_prev,
-						 int *ret,
-						 struct net_device *orig_dev)
-{
-	if (!(skb->dev->priv_flags & IFF_OVS_DATAPATH) || !skb->dev->ax25_ptr)
-		return skb;
-
-	if (*pt_prev) {
-		*ret = deliver_skb(skb, *pt_prev, orig_dev);
-		*pt_prev = NULL;
-	}
-	return openvswitch_handle_frame_hook(skb);
-}
 
 #ifdef CONFIG_NET_CLS_ACT
 /* TODO: Maybe we should just force sch_ingress to be compiled in
@@ -3286,41 +3212,66 @@ out:
 }
 #endif
 
-/*
- * 	netif_nit_deliver - deliver received packets to network taps
- * 	@skb: buffer
+/**
+ *	netdev_rx_handler_register - register receive handler
+ *	@dev: device to register a handler for
+ *	@rx_handler: receive handler to register
+ *	@rx_handler_data: data pointer that is used by rx handler
  *
- * 	This function is used to deliver incoming packets to network
- * 	taps. It should be used when the normal netif_receive_skb path
- * 	is bypassed, for example because of VLAN acceleration.
+ *	Register a receive hander for a device. This handler will then be
+ *	called from __netif_receive_skb. A negative errno code is returned
+ *	on a failure.
+ *
+ *	The caller must hold the rtnl_mutex.
+ *
+ *	For a general description of rx_handler, see enum rx_handler_result.
  */
-void netif_nit_deliver(struct sk_buff *skb)
+int netdev_rx_handler_register(struct net_device *dev,
+			       rx_handler_func_t *rx_handler,
+			       void *rx_handler_data)
 {
-	struct packet_type *ptype;
+	ASSERT_RTNL();
 
-	if (list_empty(&ptype_all))
-		return;
+	if (netdev_extended(dev)->rx_handler)
+		return -EBUSY;
 
-	skb_reset_network_header(skb);
-	skb_reset_transport_header(skb);
-	skb->mac_len = skb->network_header - skb->mac_header;
+	/* Note: rx_handler_data must be set before rx_handler */
+	rcu_assign_pointer(netdev_extended(dev)->rx_handler_data, rx_handler_data);
+	rcu_assign_pointer(netdev_extended(dev)->rx_handler, rx_handler);
 
-	rcu_read_lock();
-	list_for_each_entry_rcu(ptype, &ptype_all, list) {
-		if (!ptype->dev || ptype->dev == skb->dev)
-			deliver_skb(skb, ptype, skb->dev);
-	}
-	rcu_read_unlock();
+	return 0;
 }
+EXPORT_SYMBOL_GPL(netdev_rx_handler_register);
+
+/**
+ *	netdev_rx_handler_unregister - unregister receive handler
+ *	@dev: device to unregister a handler from
+ *
+ *	Unregister a receive hander from a device.
+ *
+ *	The caller must hold the rtnl_mutex.
+ */
+void netdev_rx_handler_unregister(struct net_device *dev)
+{
+
+	ASSERT_RTNL();
+	rcu_assign_pointer(netdev_extended(dev)->rx_handler, NULL);
+	/* a reader seeing a non NULL rx_handler in a rcu_read_lock()
+	 * section has a guarantee to see a non NULL rx_handler_data
+	 * as well.
+	 */
+	synchronize_net();
+	rcu_assign_pointer(netdev_extended(dev)->rx_handler_data, NULL);
+}
+EXPORT_SYMBOL_GPL(netdev_rx_handler_unregister);
 
 int __netif_receive_skb(struct sk_buff *skb)
 {
 	struct packet_type *ptype, *pt_prev;
+	rx_handler_func_t *rx_handler;
 	struct net_device *orig_dev;
-	struct net_device *master;
-	struct net_device *null_or_orig;
-	struct net_device *null_or_bond;
-	struct net_device *exact_dev;
+	struct net_device *null_or_dev;
+	bool deliver_exact = false;
 	int ret = NET_RX_DROP;
 	__be16 type;
 
@@ -3328,47 +3279,31 @@ int __netif_receive_skb(struct sk_buff *skb)
 		net_timestamp(skb);
 
 	trace_netif_receive_skb(skb);
-	if (vlan_tx_tag_present(skb) && vlan_hwaccel_do_receive(skb))
-		return NET_RX_SUCCESS;
 
 	/* if we've gotten here through NAPI, check netpoll */
 	if (netpoll_receive_skb(skb))
 		return NET_RX_DROP;
 
-	if (!skb->iif)
-		skb->iif = skb->dev->ifindex;
-
-	/*
-	 * bonding note: skbs received on inactive slaves should only
-	 * be delivered to pkt handlers that are exact matches.  Also
-	 * the deliver_no_wcard flag will be set.  If packet handlers
-	 * are sensitive to duplicate packets these skbs will need to
-	 * be dropped at the handler.  The vlan accel path may have
-	 * already set the deliver_no_wcard flag.
-	 */
-
-	null_or_orig = NULL;
 	orig_dev = skb->dev;
-	master = ACCESS_ONCE(orig_dev->master);
-	if (skb->deliver_no_wcard)
-		null_or_orig = orig_dev;
-	else if (master) {
-		if (skb_bond_should_drop(skb, master)) {
-			skb->deliver_no_wcard = 1;
-			null_or_orig = orig_dev; /* deliver only exact match */
-		} else
-			skb->dev = master;
-	}
-
-	__get_cpu_var(netdev_rx_stat).total++;
 
 	skb_reset_network_header(skb);
 	skb_reset_transport_header(skb);
-	skb->mac_len = skb->network_header - skb->mac_header;
+	skb_reset_mac_len(skb);
 
 	pt_prev = NULL;
 
 	rcu_read_lock();
+
+another_round:
+	skb->iif = skb->dev->ifindex;
+
+	__get_cpu_var(netdev_rx_stat).total++;
+
+	if (skb->protocol == cpu_to_be16(ETH_P_8021Q)) {
+		skb = skb_vlan_untag(skb);
+		if (unlikely(!skb))
+			goto out;
+	}
 
 #ifdef CONFIG_NET_CLS_ACT
 	if (skb->tc_verd & TC_NCLS) {
@@ -3378,8 +3313,7 @@ int __netif_receive_skb(struct sk_buff *skb)
 #endif
 
 	list_for_each_entry_rcu(ptype, &ptype_all, list) {
-		if (ptype->dev == null_or_orig || ptype->dev == skb->dev ||
-		    ptype->dev == orig_dev) {
+		if (!ptype->dev || ptype->dev == skb->dev) {
 			if (pt_prev)
 				ret = deliver_skb(skb, pt_prev, orig_dev);
 			pt_prev = ptype;
@@ -3393,36 +3327,56 @@ int __netif_receive_skb(struct sk_buff *skb)
 ncls:
 #endif
 
-	skb = handle_bridge(skb, &pt_prev, &ret, orig_dev);
-	if (!skb)
-		goto out;
-	skb = handle_macvlan(skb, &pt_prev, &ret, orig_dev);
-	if (!skb)
-		goto out;
-	skb = handle_openvswitch(skb, &pt_prev, &ret, orig_dev);
-	if (!skb)
-		goto out;
-
-	/*
-	 * Make sure frames received on VLAN interfaces stacked on
-	 * bonding interfaces still make their way to any base bonding
-	 * device that may have registered for a specific ptype.  The
-	 * handler may have to adjust skb->dev and orig_dev.
-	 */
-	null_or_bond = NULL;
-	if ((skb->dev->priv_flags & IFF_802_1Q_VLAN) &&
-	    (vlan_dev_real_dev(skb->dev)->priv_flags & IFF_BONDING)) {
-		null_or_bond = vlan_dev_real_dev(skb->dev);
+	if (vlan_tx_tag_present(skb)) {
+		if (pt_prev) {
+			ret = deliver_skb(skb, pt_prev, orig_dev);
+			pt_prev = NULL;
+		}
+		if (vlan_do_receive(&skb))
+			goto another_round;
+		else if (unlikely(!skb))
+			goto out;
 	}
 
-	/* either one will determine the exact match */
-	exact_dev = skb->deliver_no_wcard ? null_or_orig : null_or_bond;
+	rx_handler = rcu_dereference(netdev_extended(skb->dev)->rx_handler);
+	if (rx_handler) {
+		if (pt_prev) {
+			ret = deliver_skb(skb, pt_prev, orig_dev);
+			pt_prev = NULL;
+		}
+		switch (rx_handler(&skb)) {
+		case RX_HANDLER_CONSUMED:
+			goto out;
+		case RX_HANDLER_ANOTHER:
+			goto another_round;
+		case RX_HANDLER_EXACT:
+			deliver_exact = true;
+		case RX_HANDLER_PASS:
+			break;
+		default:
+			BUG();
+		}
+	}
+
+	if (unlikely(vlan_tx_tag_present(skb))) {
+		if (vlan_tx_tag_get_id(skb))
+			skb->pkt_type = PACKET_OTHERHOST;
+		/* Note: we might in the future use prio bits
+		 * and set skb->priority like in vlan_do_receive()
+		 * For the time being, just ignore Priority Code Point
+		 */
+		skb->vlan_tci = 0;
+	}
+
+	/* deliver only exact match when indicated */
+	null_or_dev = deliver_exact ? skb->dev : NULL;
+
 	type = skb->protocol;
 	list_for_each_entry_rcu(ptype,
 			&ptype_base[ntohs(type) & PTYPE_HASH_MASK], list) {
-		if (ptype->type == type && (ptype->dev == skb->dev ||
-		    ptype->dev == orig_dev || ptype->dev == exact_dev ||
-		    (!skb->deliver_no_wcard && ptype->dev == NULL))) {
+		if (ptype->type == type &&
+		    (ptype->dev == null_or_dev || ptype->dev == skb->dev ||
+		     ptype->dev == orig_dev)) {
 			if (pt_prev)
 				ret = deliver_skb(skb, pt_prev, orig_dev);
 			pt_prev = ptype;
@@ -3658,7 +3612,7 @@ pull:
 			put_page(skb_shinfo(skb)->frags[0].page);
 			memmove(skb_shinfo(skb)->frags,
 				skb_shinfo(skb)->frags + 1,
-				--skb_shinfo(skb)->nr_frags);
+				--skb_shinfo(skb)->nr_frags * sizeof(skb_frag_t));
 		}
 	}
 
@@ -3681,6 +3635,7 @@ __napi_gro_receive(struct napi_struct *napi, struct sk_buff *skb)
 		unsigned long diffs;
 
 		diffs = (unsigned long)p->dev ^ (unsigned long)skb->dev;
+		diffs |= p->vlan_tci ^ skb->vlan_tci;
 		if (maclen == ETH_HLEN)
 			diffs |= compare_ether_header(skb_mac_header(p),
 						      skb_gro_mac_header(skb));
@@ -3787,29 +3742,13 @@ out:
 }
 EXPORT_SYMBOL(napi_get_frags);
 
-static __be16 __eth_type_trans_no_dev_change(struct sk_buff *skb,
-					     struct net_device *dev)
-{
-	struct net_device *tmp_dev = skb->dev;
-	__be16 ret;
-
-	ret = eth_type_trans(skb, dev);
-	skb->dev = tmp_dev;
-	return ret;
-}
-
 gro_result_t napi_frags_finish(struct napi_struct *napi, struct sk_buff *skb,
 			       gro_result_t ret)
 {
 	switch (ret) {
 	case GRO_NORMAL:
 	case GRO_HELD:
-		/*
-		 * If this is vlan skb, vlan code previously changed skb->dev to
-		 * vlan dev. We need eth_type_trans() to be called with original
-		 * device though because otherwise it would change pkt_type.
-		 */
-		skb->protocol = __eth_type_trans_no_dev_change(skb, napi->dev);
+		skb->protocol = eth_type_trans(skb, skb->dev);
 
 		if (ret == GRO_HELD)
 			skb_gro_pull(skb, -ETH_HLEN);
@@ -6332,10 +6271,11 @@ int register_netdevice(struct net_device *dev)
 	netdev_extended(dev)->wanted_features =
 		dev->features & netdev_extended(dev)->hw_features;
 
-	/* Enable GRO for vlans by default if dev->features has GRO also.
-	 * vlan_dev_init() will do the dev->features check.
+	/* Enable GRO and NETIF_F_HIGHDMA for vlans by default,
+	 * vlan_dev_init() will do the dev->features check, so these features
+	 * are enabled only if supported by underlying device.
 	 */
-	dev->vlan_features |= NETIF_F_GRO;
+	dev->vlan_features |= (NETIF_F_GRO | NETIF_F_HIGHDMA);
 
 	netdev_initialize_kobject(dev);
 

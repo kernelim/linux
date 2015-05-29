@@ -475,11 +475,11 @@ static ssize_t bonding_store_arp_validate(struct device *d,
 	       bond->dev->name, arp_validate_tbl[new_value].modename,
 	       new_value);
 
-	if ((bond->dev->flags & IFF_UP) && bond->params.arp_interval) {
-		if (!bond->params.arp_validate && new_value)
-			bond_register_arp(bond);
-		else if (bond->params.arp_validate && !new_value)
-			bond_unregister_arp(bond);
+	if (bond->dev->flags & IFF_UP) {
+		if (!new_value)
+			bond->recv_probe = NULL;
+		else if (bond->params.arp_interval)
+			bond->recv_probe = bond_arp_rcv;
 	}
 	bond->params.arp_validate = new_value;
 out:
@@ -596,8 +596,8 @@ static ssize_t bonding_store_arp_interval(struct device *d,
 					  struct device_attribute *attr,
 					  const char *buf, size_t count)
 {
-	int new_value, old_value, ret = count;
 	struct bonding *bond = to_bond(d);
+	int new_value, ret = count;
 
 	if (!rtnl_trylock())
 		return restart_syscall();
@@ -626,7 +626,6 @@ static ssize_t bonding_store_arp_interval(struct device *d,
 	pr_info(DRV_NAME
 	       ": %s: Setting ARP monitoring interval to %d.\n",
 	       bond->dev->name, new_value);
-	old_value = bond->params.arp_interval;
 	bond->params.arp_interval = new_value;
 	if (bond->params.arp_interval)
 		bond->dev->priv_flags |= IFF_MASTER_ARPMON;
@@ -653,10 +652,14 @@ static ssize_t bonding_store_arp_interval(struct device *d,
 		 * timer will get fired off when the open function
 		 * is called.
 		 */
-		if (!old_value && new_value && bond->params.arp_validate)
-			bond_register_arp(bond);
-		else if (old_value && !new_value && bond->params.arp_validate)
-			bond_unregister_arp(bond);
+		if (!new_value) {
+			if (bond->params.arp_validate)
+				bond->recv_probe = NULL;
+		} else {
+			/* arp_validate can be set only in active-backup mode */
+			if (bond->params.arp_validate)
+				bond->recv_probe = bond_arp_rcv;
+		}
 		if (!delayed_work_pending(&bond->arp_work)) {
 			if (bond->params.mode == BOND_MODE_ACTIVEBACKUP)
 				INIT_DELAYED_WORK(&bond->arp_work,
@@ -1164,7 +1167,6 @@ static ssize_t bonding_store_miimon(struct device *d,
 			bond->params.arp_interval = 0;
 			bond->dev->priv_flags &= ~IFF_MASTER_ARPMON;
 			if (bond->params.arp_validate) {
-				bond_unregister_arp(bond);
 				bond->params.arp_validate =
 					BOND_ARP_VALIDATE_NONE;
 			}

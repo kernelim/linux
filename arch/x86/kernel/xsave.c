@@ -160,31 +160,10 @@ int save_i387_xstate(void __user *buf)
 	if (!used_math())
 		return 0;
 
-	if (task_thread_info(tsk)->status & TS_USEDFPU) {
-		/*
-	 	 * Start with clearing the user buffer. This will present a
-	 	 * clean context for the bytes not touched by the fxsave/xsave.
-		 */
-		err = __clear_user(buf, sig_xstate_size);
-		if (err)
-			return err;
+	unlazy_fpu(current);
 
-		if (use_xsave())
-			err = xsave_user(buf);
-		else
-			err = fxsave_user(buf);
-
-		if (err)
-			return err;
-		task_thread_info(tsk)->status &= ~TS_USEDFPU;
-		stts();
-	} else {
-		if (__copy_to_user(buf, &tsk->thread.xstate->fxsave,
-				   xstate_size))
-			return -1;
-	}
-
-	clear_used_math(); /* trigger finit */
+	if (__copy_to_user(buf, &tsk->thread.xstate->fxsave, xstate_size))
+		return -1;
 
 	if (use_xsave()) {
 		struct _fpstate __user *fx = buf;

@@ -582,11 +582,6 @@ int save_i387_xstate_ia32(void __user *buf)
 
 	if (!access_ok(VERIFY_WRITE, buf, sig_xstate_ia32_size))
 		return -EACCES;
-	/*
-	 * This will cause a "finit" to be triggered by the next
-	 * attempted FPU operation by the 'current' process.
-	 */
-	clear_used_math();
 
 	if (!HAVE_HWFP) {
 		return fpregs_soft_get(current, NULL,

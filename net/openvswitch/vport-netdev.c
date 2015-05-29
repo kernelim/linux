@@ -32,9 +32,6 @@
 #include "vport-internal_dev.h"
 #include "vport-netdev.h"
 
-
-static atomic_t nr_bridges = ATOMIC_INIT(0);
-
 /* Must be called with rcu_read_lock. */
 static void netdev_port_receive(struct vport *vport, struct sk_buff *skb)
 {
@@ -62,18 +59,19 @@ error:
 }
 
 /* Called with rcu_read_lock and bottom-halves disabled. */
-struct sk_buff *ovs_netdev_frame_hook(struct sk_buff *skb)
+static rx_handler_result_t netdev_frame_hook(struct sk_buff **pskb)
 {
+	struct sk_buff *skb = *pskb;
 	struct vport *vport;
 
 	if (unlikely(skb->pkt_type == PACKET_LOOPBACK))
-		return skb;
+		return RX_HANDLER_PASS;
 
 	vport = ovs_netdev_get_vport(skb->dev);
 
 	netdev_port_receive(vport, skb);
 
-	return NULL;
+	return RX_HANDLER_CONSUMED;
 }
 
 static struct vport *netdev_create(const struct vport_parms *parms)
@@ -104,15 +102,11 @@ static struct vport *netdev_create(const struct vport_parms *parms)
 		goto error_put;
 	}
 
-	err = -EBUSY;
 	rtnl_lock();
-	if (netdev_vport->dev->ax25_ptr)
+	err = netdev_rx_handler_register(netdev_vport->dev, netdev_frame_hook,
+					 vport);
+	if (err)
 		goto error_unlock;
-
-	netdev_vport->dev->ax25_ptr = vport;
-
-	atomic_inc(&nr_bridges);
-	openvswitch_handle_frame_hook = ovs_netdev_frame_hook;
 
 	dev_set_promiscuity(netdev_vport->dev, 1);
 	netdev_vport->dev->priv_flags |= IFF_OVS_DATAPATH;
@@ -145,10 +139,8 @@ static void netdev_destroy(struct vport *vport)
 
 	rtnl_lock();
 	netdev_vport->dev->priv_flags &= ~IFF_OVS_DATAPATH;
+	netdev_rx_handler_unregister(netdev_vport->dev);
 	netdev_vport->dev->ax25_ptr = NULL;
-
-	if (atomic_dec_and_test(&nr_bridges))
-		openvswitch_handle_frame_hook = NULL;
 
 	dev_set_promiscuity(netdev_vport->dev, -1);
 	rtnl_unlock();
@@ -202,7 +194,7 @@ struct vport *ovs_netdev_get_vport(struct net_device *dev)
 {
 	if (likely(dev->priv_flags & IFF_OVS_DATAPATH))
 		return (struct vport *)
-			rcu_dereference_rtnl(dev->ax25_ptr);
+			rcu_dereference_rtnl(netdev_extended(dev)->rx_handler_data);
 	else
 		return NULL;
 }

@@ -27,7 +27,6 @@
 #include <linux/ethtool.h>
 #include <linux/etherdevice.h>
 #include <linux/if_bonding.h>
-#include <linux/if_vlan.h>
 #include <linux/pkt_sched.h>
 #include <net/net_namespace.h>
 #include "bonding.h"
@@ -2167,9 +2166,10 @@ out:
  * received frames (loopback). Since only the payload is given to this
  * function, it check for loopback.
  */
-static void bond_3ad_rx_indication(struct lacpdu *lacpdu, struct slave *slave, u16 length)
+static int bond_3ad_rx_indication(struct lacpdu *lacpdu, struct slave *slave, u16 length)
 {
 	struct port *port;
+	int ret = RX_HANDLER_ANOTHER;
 
 	if (length >= sizeof(struct lacpdu)) {
 
@@ -2179,11 +2179,12 @@ static void bond_3ad_rx_indication(struct lacpdu *lacpdu, struct slave *slave, u
 			pr_warning(DRV_NAME ": %s: Warning: port of slave %s "
 				   "is uninitialized\n",
 				   slave->dev->name, slave->dev->master->name);
-			return;
+			return ret;
 		}
 
 		switch (lacpdu->subtype) {
 		case AD_TYPE_LACPDU:
+			ret = RX_HANDLER_CONSUMED;
 			pr_debug("Received LACPDU on port %d\n", port->actor_port_number);
 			/* Protect against concurrent state machines */
 			__get_state_machine_lock(port);
@@ -2192,6 +2193,7 @@ static void bond_3ad_rx_indication(struct lacpdu *lacpdu, struct slave *slave, u
 			break;
 
 		case AD_TYPE_MARKER:
+			ret = RX_HANDLER_CONSUMED;
 			// No need to convert fields to Little Endian since we don't use the marker's fields.
 
 			switch (((struct bond_marker *)lacpdu)->tlv_type) {
@@ -2210,6 +2212,7 @@ static void bond_3ad_rx_indication(struct lacpdu *lacpdu, struct slave *slave, u
 			}
 		}
 	}
+	return ret;
 }
 
 /**
@@ -2448,55 +2451,25 @@ out:
 	return NETDEV_TX_OK;
 }
 
-int bond_3ad_lacpdu_recv(struct sk_buff *skb, struct net_device *dev, struct packet_type* ptype, struct net_device *orig_dev)
+int bond_3ad_lacpdu_recv(const struct sk_buff *skb, struct bonding *bond,
+			 struct slave *slave)
 {
-	struct bonding *bond;
-	struct slave *slave = NULL;
-	int ret = NET_RX_DROP;
-	bool dev_held = false;
+	int ret = RX_HANDLER_ANOTHER;
+	struct lacpdu *lacpdu, _lacpdu;
 
-	if (dev_net(dev) != &init_net)
-		goto out;
+	if (dev_net(bond->dev) != &init_net)
+		return ret;
 
-	if (dev->priv_flags & IFF_802_1Q_VLAN) {
-		/*
-		 * When using VLANS and bonding, dev and orig_dev may be
-		 * incorrect if the physical interface supports VLAN
-		 * acceleration.
-		 */
-		dev = vlan_dev_real_dev(dev);
-		orig_dev = dev_get_by_index(dev_net(skb->dev), skb->iif);
-		dev_held = !!orig_dev;
-	}
+	if (skb->protocol != PKT_TYPE_LACPDU)
+		return ret;
 
-	if (!(dev->flags & IFF_MASTER))
-		goto out;
+	lacpdu = skb_header_pointer(skb, 0, sizeof(_lacpdu), &_lacpdu);
+	if (!lacpdu)
+		return ret;
 
-	skb = skb_share_check(skb, GFP_ATOMIC);
-	if (!skb)
-		goto out;
-
-	if (!pskb_may_pull(skb, sizeof(struct lacpdu)))
-		goto out;
-
-	bond = netdev_priv(dev);
 	read_lock(&bond->lock);
-	slave = bond_get_slave_by_dev((struct bonding *)netdev_priv(dev),
-					orig_dev);
-	if (!slave)
-		goto out_unlock;
-
-	bond_3ad_rx_indication((struct lacpdu *) skb->data, slave, skb->len);
-
-	ret = NET_RX_SUCCESS;
-
-out_unlock:
+	ret = bond_3ad_rx_indication(lacpdu, slave, skb->len);
 	read_unlock(&bond->lock);
-out:
-	if (dev_held)
-		dev_put(orig_dev);
-	dev_kfree_skb(skb);
-
 	return ret;
 }
 

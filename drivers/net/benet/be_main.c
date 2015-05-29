@@ -1087,7 +1087,7 @@ static int be_vid_config(struct be_adapter *adapter)
 		goto set_vlan_promisc;
 
 	/* Construct VLAN Table to give to HW */
-	for_each_set_bit(i, adapter->vids, VLAN_GROUP_ARRAY_LEN)
+	for_each_set_bit(i, adapter->vids, VLAN_N_VID)
 		vids[num++] = cpu_to_le16(i);
 
 	status = be_cmd_vlan_config(adapter, adapter->if_handle, vids, num);
@@ -1125,13 +1125,6 @@ set_vlan_promisc:
 		dev_err(&adapter->pdev->dev,
 			"Failed to enable VLAN Promiscuous mode.\n");
 	return status;
-}
-
-static void be_vlan_register(struct net_device *netdev, struct vlan_group *grp)
-{
-	struct be_adapter *adapter = netdev_priv(netdev);
-
-	adapter->vlan_grp = grp;
 }
 
 static void be_vlan_add_vid(struct net_device *netdev, u16 vid)
@@ -1601,10 +1594,9 @@ static void be_rx_compl_process(struct be_rx_obj *rxo, struct napi_struct *napi,
 	skb_mark_napi_id(skb, napi);
 
 	if (rxcp->vlanf)
-		vlan_hwaccel_receive_skb(skb, adapter->vlan_grp,
-					rxcp->vlan_tag);
-	else
-		netif_receive_skb(skb);
+		__vlan_hwaccel_put_tag(skb, rxcp->vlan_tag);
+
+	netif_receive_skb(skb);
 }
 
 /* Process the RX completion indicated by rxcp when GRO is enabled */
@@ -1658,9 +1650,9 @@ static void be_rx_compl_process_gro(struct be_rx_obj *rxo,
 	skb_mark_napi_id(skb, napi);
 
 	if (rxcp->vlanf)
-		vlan_gro_frags(napi, adapter->vlan_grp, rxcp->vlan_tag);
-	else
-		napi_gro_frags(napi);
+		__vlan_hwaccel_put_tag(skb, rxcp->vlan_tag);
+
+	napi_gro_frags(napi);
 }
 
 static void be_parse_rx_compl_v1(struct be_eth_rx_compl *compl,
@@ -4230,7 +4222,6 @@ static struct net_device_ops be_netdev_ops = {
 	.ndo_set_mac_address	= be_mac_addr_set,
 	.ndo_change_mtu		= be_change_mtu,
 	.ndo_validate_addr	= eth_validate_addr,
-	.ndo_vlan_rx_register	= be_vlan_register,
 	.ndo_vlan_rx_add_vid	= be_vlan_add_vid,
 	.ndo_vlan_rx_kill_vid	= be_vlan_rem_vid,
 	.ndo_set_vf_mac		= be_set_vf_mac,

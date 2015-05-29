@@ -1991,7 +1991,7 @@ static void i40e_vlan_rx_add_vid(struct net_device *netdev, u16 vid)
 	if (vid)
 		ret = i40e_vsi_add_vlan(vsi, vid);
 
-	if (!ret && (vid < VLAN_GROUP_ARRAY_LEN))
+	if (!ret && (vid < VLAN_N_VID))
 		set_bit(vid, vsi->active_vlans);
 
 	return;
@@ -2035,7 +2035,7 @@ static void i40e_restore_vlan(struct i40e_vsi *vsi)
 
 	i40e_vlan_rx_register(vsi->netdev, vsi->vlgrp);
 
-	for_each_set_bit(vid, vsi->active_vlans, VLAN_GROUP_ARRAY_LEN)
+	for_each_set_bit(vid, vsi->active_vlans, VLAN_N_VID)
                i40e_vlan_rx_add_vid(vsi->netdev,
 				    vid);
 }

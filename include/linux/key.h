@@ -157,6 +157,7 @@ struct key {
 #define KEY_FLAG_USER_CONSTRUCT	4	/* set if key is being constructed in userspace */
 #define KEY_FLAG_NEGATIVE	5	/* set if key is negative */
 #define KEY_FLAG_ROOT_CAN_CLEAR	6	/* set if key can be cleared by root without permission */
+#define KEY_FLAG_INVALIDATED	7	/* set if key has been invalidated */
 
 	/* the description string
 	 * - this is used to match a key against search criteria
@@ -198,19 +199,7 @@ extern struct key *key_alloc(struct key_type *type,
 #define KEY_ALLOC_NOT_IN_QUOTA	0x0002	/* not in quota */
 
 extern void key_revoke(struct key *key);
-
-/* Use in place of key_invalidate which hasn't been backported to RHEL 6 yet */
-static inline void rh_key_invalidate(struct key *key)
-{
-	key_revoke(key);
-	/*
-	 * At this time gc has been set by key_revoke() above.
-	 * Simply set expiry time to 'now'.
-	 */
-	down_write(&key->sem);
-	key->expiry = current_kernel_time().tv_sec;
-	up_write(&key->sem);
-}
+extern void key_invalidate(struct key *key);
 
 extern void key_put(struct key *key);
 
@@ -329,6 +318,7 @@ extern void key_init(void);
 #define key_serial(k)			0
 #define key_get(k) 			({ NULL; })
 #define key_revoke(k)			do { } while(0)
+#define key_invalidate(k)		do { } while(0)
 #define key_put(k)			do { } while(0)
 #define key_ref_put(k)			do { } while(0)
 #define make_key_ref(k, p)		NULL

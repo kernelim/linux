@@ -49,13 +49,11 @@ int vlan_gvrp_init_applicant(struct net_device *dev)
 {
 	return garp_init_applicant(dev, &vlan_gvrp_app);
 }
-EXPORT_SYMBOL(vlan_gvrp_init_applicant);
 
 void vlan_gvrp_uninit_applicant(struct net_device *dev)
 {
 	garp_uninit_applicant(dev, &vlan_gvrp_app);
 }
-EXPORT_SYMBOL(vlan_gvrp_uninit_applicant);
 
 int __init vlan_gvrp_init(void)
 {

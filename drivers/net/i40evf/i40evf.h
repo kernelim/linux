@@ -57,7 +57,7 @@
 struct i40e_vsi {
 	struct i40evf_adapter *back;
 	struct net_device *netdev;
-	unsigned long active_vlans[BITS_TO_LONGS(VLAN_GROUP_ARRAY_LEN)];
+	unsigned long active_vlans[BITS_TO_LONGS(VLAN_N_VID)];
 	u16 seid;
 	u16 id;
 	unsigned long state;

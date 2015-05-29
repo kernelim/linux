@@ -2398,7 +2398,7 @@ bnad_restore_vlans(struct bnad *bnad, u32 rx_id)
 	if (!bnad->vlan_grp)
 		return;
 
-	for (vlan_id = 0; vlan_id < VLAN_GROUP_ARRAY_LEN; vlan_id++) {
+	for (vlan_id = 0; vlan_id < VLAN_N_VID; vlan_id++) {
 		if (!vlan_group_get_device(bnad->vlan_grp, vlan_id))
 			continue;
 		spin_lock_irqsave(&bnad->bna_lock, flags);

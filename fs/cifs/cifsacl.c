@@ -240,8 +240,7 @@ out_revert_creds:
 	return rc;
 
 invalidate_key:
-	/* Use key_invalidate() here once it has been backported to RHEL 6 */
-	rh_key_invalidate(sidkey);
+	key_invalidate(sidkey);
 	goto out_key_put;
 }
 
@@ -288,8 +287,7 @@ sid_to_id(struct cifs_sb_info *cifs_sb, struct cifs_sid *psid,
 		rc = -EIO;
 		cFYI(1, "%s: Downcall contained malformed key "
 			"(datalen=%hu)", __func__, sidkey->datalen);
-		/* Use key_invalidate() here once it has been backported to RHEL 6 */
-		rh_key_invalidate(sidkey);
+		key_invalidate(sidkey);
 		goto out_key_put;
 	}
 

@@ -58,8 +58,7 @@ static int br_device_event(struct notifier_block *unused, unsigned long event, v
 		break;
 
 	case NETDEV_FEAT_CHANGE:
-		if (netif_running(br->dev))
-			br_features_recompute(br);
+		netdev_update_features(br->dev);
 		break;
 
 	case NETDEV_DOWN:

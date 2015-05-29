@@ -923,6 +923,12 @@ static void ixgbe_free_q_vector(struct ixgbe_adapter *adapter, int v_idx)
 	adapter->q_vector[v_idx] = NULL;
 	napi_hash_del(&q_vector->napi);
 	netif_napi_del(&q_vector->napi);
+
+	/*
+	 * ixgbe_get_stats64() might access the rings on this vector,
+	 * we must wait a grace period before freeing it.
+	*/
+	kfree_rcu(q_vector, rcu);
 }
 
 /**

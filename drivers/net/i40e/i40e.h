@@ -370,7 +370,7 @@ struct i40e_veb {
 /* struct that defines a VSI, associated with a dev */
 struct i40e_vsi {
 	struct net_device *netdev;
-	unsigned long active_vlans[BITS_TO_LONGS(VLAN_GROUP_ARRAY_LEN)];
+	unsigned long active_vlans[BITS_TO_LONGS(VLAN_N_VID)];
 	struct vlan_group *vlgrp;
 	bool netdev_registered;
 	bool stat_offsets_loaded;
