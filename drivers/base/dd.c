@@ -45,24 +45,21 @@
  * retry them.
  *
  * The deferred_probe_mutex must be held any time the deferred_probe_*_list
- * of the (struct device*)->deferred_probe pointers are manipulated
+ * of the (struct device*)->p->deferred_probe pointers are manipulated
  */
 static DEFINE_MUTEX(deferred_probe_mutex);
 static LIST_HEAD(deferred_probe_pending_list);
 static LIST_HEAD(deferred_probe_active_list);
 static struct workqueue_struct *deferred_wq;
-struct deferred_dev {
-	struct device		*dev;
-	struct list_head	deferred_probe;
-};
+static atomic_t deferred_trigger_count = ATOMIC_INIT(0);
 
 /**
  * deferred_probe_work_func() - Retry probing devices in the active list.
  */
 static void deferred_probe_work_func(struct work_struct *work)
 {
-	struct deferred_dev *dd;
 	struct device *dev;
+	struct device_private *private;
 	/*
 	 * This block processes every device in the deferred 'active' list.
 	 * Each device is removed from the active list and passed to
@@ -77,19 +74,30 @@ static void deferred_probe_work_func(struct work_struct *work)
 	 */
 	mutex_lock(&deferred_probe_mutex);
 	while (!list_empty(&deferred_probe_active_list)) {
-		dd = list_first_entry(&deferred_probe_active_list,
-					typeof(*dd), deferred_probe);
-		list_del_init(&dd->deferred_probe);
-		dev = dd->dev;
-		kfree(dd);
+		private = list_first_entry(&deferred_probe_active_list,
+					typeof(*dev->p), deferred_probe);
+		dev = private->device;
+		list_del_init(&private->deferred_probe);
 
 		get_device(dev);
 
 		/* Drop the mutex while probing each device; the probe path
 		 * may manipulate the deferred list */
 		mutex_unlock(&deferred_probe_mutex);
+
+		/*
+		 * Force the device to the end of the dpm_list since
+		 * the PM code assumes that the order we add things to
+		 * the list is a good order for suspend but deferred
+		 * probe makes that very unsafe.
+		 */
+		device_pm_lock();
+		device_pm_move_last(dev);
+		device_pm_unlock();
+
 		dev_dbg(dev, "Retrying from deferred list\n");
 		bus_probe_device(dev);
+
 		mutex_lock(&deferred_probe_mutex);
 
 		put_device(dev);
@@ -98,56 +106,22 @@ static void deferred_probe_work_func(struct work_struct *work)
 }
 static DECLARE_WORK(deferred_probe_work, deferred_probe_work_func);
 
-static struct deferred_dev *driver_deferred_probe_find(struct device *dev)
-{
-	struct list_head *lh;
-	struct deferred_dev *dd;
-
-	list_for_each(lh, &deferred_probe_active_list) {
-		dd = list_entry(lh, struct deferred_dev, deferred_probe);
-		if (dd->dev == dev)
-			return dd;
-	}
-	list_for_each(lh, &deferred_probe_pending_list) {
-		dd = list_entry(lh, struct deferred_dev, deferred_probe);
-		if (dd->dev == dev)
-			return dd;
-	}
-	return NULL;
-}
-
 static void driver_deferred_probe_add(struct device *dev)
 {
-	struct deferred_dev *dd;
-
-	/*
-	 * I chose to use GFP_ATOMIC because we are likely doing this during
-	 * early system init when memory should be readily available, and we
-	 * should have very few of these allocations anyway, so this is just
-	 * an easy way to guarantee we get our memory.
-	 */
-	dd = kzalloc(sizeof(*dd), GFP_ATOMIC);
-	dd->dev = dev;
-	INIT_LIST_HEAD(&dd->deferred_probe);
 	mutex_lock(&deferred_probe_mutex);
-	if (driver_deferred_probe_find(dev))
-		kfree(dd);
-	else {
+	if (list_empty(&dev->p->deferred_probe)) {
 		dev_dbg(dev, "Added to deferred list\n");
-		list_add(&dd->deferred_probe, &deferred_probe_pending_list);
+		list_add_tail(&dev->p->deferred_probe, &deferred_probe_pending_list);
 	}
 	mutex_unlock(&deferred_probe_mutex);
 }
 
 void driver_deferred_probe_del(struct device *dev)
 {
-	struct deferred_dev *dd;
-
 	mutex_lock(&deferred_probe_mutex);
-	if ((dd = driver_deferred_probe_find(dev)) != NULL) {
+	if (!list_empty(&dev->p->deferred_probe)) {
 		dev_dbg(dev, "Removed from deferred list\n");
-		list_del_init(&dd->deferred_probe);
-		kfree(dd);
+		list_del_init(&dev->p->deferred_probe);
 	}
 	mutex_unlock(&deferred_probe_mutex);
 }
@@ -159,6 +133,17 @@ static bool driver_deferred_probe_enable = false;
  * This functions moves all devices from the pending list to the active
  * list and schedules the deferred probe workqueue to process them.  It
  * should be called anytime a driver is successfully bound to a device.
+ *
+ * Note, there is a race condition in multi-threaded probe. In the case where
+ * more than one device is probing at the same time, it is possible for one
+ * probe to complete successfully while another is about to defer. If the second
+ * depends on the first, then it will get put on the pending list after the
+ * trigger event has already occured and will be stuck there.
+ *
+ * The atomic 'deferred_trigger_count' is used to determine if a successful
+ * trigger has occurred in the midst of probing a driver. If the trigger count
+ * changes in the midst of a probe, then deferred processing should be triggered
+ * again.
  */
 static void driver_deferred_probe_trigger(void)
 {
@@ -169,6 +154,7 @@ static void driver_deferred_probe_trigger(void)
 	 * should be triggered to be reprobed.  Move all the deferred devices
 	 * into the active list so they can be retried by the workqueue */
 	mutex_lock(&deferred_probe_mutex);
+	atomic_inc(&deferred_trigger_count);
 	list_splice_tail_init(&deferred_probe_pending_list,
 			      &deferred_probe_active_list);
 	mutex_unlock(&deferred_probe_mutex);
@@ -193,6 +179,8 @@ static int deferred_probe_initcall(void)
 
 	driver_deferred_probe_enable = true;
 	driver_deferred_probe_trigger();
+	/* Sort as many dependencies as possible before exiting initcalls */
+	flush_workqueue(deferred_wq);
 	return 0;
 }
 late_initcall(deferred_probe_initcall);
@@ -277,6 +265,7 @@ static DECLARE_WAIT_QUEUE_HEAD(probe_waitqueue);
 static int really_probe(struct device *dev, struct device_driver *drv)
 {
 	int ret = 0;
+	int local_trigger_count = atomic_read(&deferred_trigger_count);
 
 	atomic_inc(&probe_count);
 	pr_debug("bus: '%s': %s: probing driver %s with device %s\n",
@@ -316,6 +305,9 @@ probe_failed:
 		/* Driver requested deferred probing */
 		dev_info(dev, "Driver %s requests probe deferral\n", drv->name);
 		driver_deferred_probe_add(dev);
+		/* Did a trigger occur while probing? Need to re-trigger if yes */
+		if (local_trigger_count != atomic_read(&deferred_trigger_count))
+			driver_deferred_probe_trigger();
 	} else if (ret != -ENODEV && ret != -ENXIO) {
 		/* driver matched but the probe failed */
 		printk(KERN_WARNING

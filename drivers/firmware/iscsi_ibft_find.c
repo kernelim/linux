@@ -46,13 +46,6 @@ EXPORT_SYMBOL_GPL(ibft_addr);
 static const struct {
 	char *sign;
 } ibft_signs[] = {
-#ifdef CONFIG_ACPI
-	/*
-	 * One spec says "IBFT", the other says "iBFT". We have to check
-	 * for both.
-	 */
-	{ ACPI_SIG_IBFT },
-#endif
 	{ "iBFT" },
 	{ "BIFT" },	/* Broadcom iSCSI Offload */
 };
@@ -87,6 +80,7 @@ static int __init find_ibft_in_mem(void)
 				 * the table cannot be valid. */
 				if (pos + len <= (IBFT_END-1)) {
 					ibft_addr = (struct acpi_table_ibft *)virt;
+					pr_info("iBFT found at 0x%lx.\n", pos);
 					goto done;
 				}
 			}
@@ -103,7 +97,11 @@ unsigned long __init find_ibft_region(unsigned long *sizep)
 {
 	ibft_addr = NULL;
 
-	find_ibft_in_mem();
+	/* iBFT 1.03 section 1.4.3.1 mandates that UEFI machines will
+	 * only use ACPI for this */
+
+	if (!efi_enabled)
+		find_ibft_in_mem();
 
 	if (ibft_addr) {
 		*sizep = PAGE_ALIGN(ibft_addr->header.length);

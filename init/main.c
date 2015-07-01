@@ -70,6 +70,7 @@
 #include <linux/sfi.h>
 #include <linux/shmem_fs.h>
 #include <linux/perf_event.h>
+#include <linux/list.h>
 #include <trace/boot.h>
 
 #include <asm/io.h>
@@ -285,7 +286,8 @@ early_param("loglevel", loglevel);
  * Unknown boot options get handed to init, unless they look like
  * unused parameters (modprobe will find them in /proc/cmdline).
  */
-static int __init unknown_bootoption(char *param, char *val)
+static int __init unknown_bootoption(char *param, char *val,
+				const char *unused)
 {
 	/* Change NUL term back to "=", to make "param" the whole string. */
 	if (val) {
@@ -486,7 +488,7 @@ static noinline void __init_refok rest_init(void)
 }
 
 /* Check for early params. */
-static int __init do_early_param(char *param, char *val)
+static int __init do_early_param(char *param, char *val, const char *unused)
 {
 	struct obs_kernel_param *p;
 
@@ -756,6 +758,70 @@ static void __init do_ctors(void)
 int initcall_debug;
 core_param(initcall_debug, initcall_debug, bool, 0644);
 
+#ifdef CONFIG_KALLSYMS
+struct blacklist_entry {
+	struct list_head next;
+	char *buf;
+};
+
+static __initdata_or_module LIST_HEAD(blacklisted_initcalls);
+
+static int __init initcall_blacklist(char *str)
+{
+	char *str_entry;
+	struct blacklist_entry *entry;
+
+	/* str argument is a comma-separated list of functions */
+	do {
+		str_entry = strsep(&str, ",");
+		if (str_entry) {
+			pr_debug("blacklisting initcall %s\n", str_entry);
+			entry = alloc_bootmem(sizeof(*entry));
+			entry->buf = alloc_bootmem(strlen(str_entry) + 1);
+			strcpy(entry->buf, str_entry);
+			list_add(&entry->next, &blacklisted_initcalls);
+		}
+	} while (str_entry);
+
+	return 0;
+}
+
+static bool __init_or_module initcall_blacklisted(initcall_t fn)
+{
+	struct list_head *tmp;
+	struct blacklist_entry *entry;
+	char *fn_name;
+
+	fn_name = kasprintf(GFP_KERNEL, "%pf", fn);
+	if (!fn_name)
+		return false;
+
+	list_for_each(tmp, &blacklisted_initcalls) {
+		entry = list_entry(tmp, struct blacklist_entry, next);
+		if (!strcmp(fn_name, entry->buf)) {
+			pr_debug("initcall %s blacklisted\n", fn_name);
+			kfree(fn_name);
+			return true;
+		}
+	}
+
+	kfree(fn_name);
+	return false;
+}
+#else
+static int __init initcall_blacklist(char *str)
+{
+	pr_warn("initcall_blacklist requires CONFIG_KALLSYMS\n");
+	return 0;
+}
+
+static bool __init_or_module initcall_blacklisted(initcall_t fn)
+{
+	return false;
+}
+#endif
+__setup("initcall_blacklist=", initcall_blacklist);
+
 static char msgbuf[64];
 static struct boot_trace_call call;
 static struct boot_trace_ret ret;
@@ -764,6 +830,9 @@ int do_one_initcall(initcall_t fn)
 {
 	int count = preempt_count();
 	ktime_t calltime, delta, rettime;
+
+	if (initcall_blacklisted(fn))
+		return -EPERM;
 
 	if (initcall_debug) {
 		call.caller = task_pid_nr(current);
@@ -804,7 +873,6 @@ int do_one_initcall(initcall_t fn)
 
 	return ret.result;
 }
-
 
 extern initcall_t __initcall_start[], __initcall_end[], __early_initcall_end[];
 

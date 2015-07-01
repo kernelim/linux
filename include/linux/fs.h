@@ -103,6 +103,10 @@ struct inodes_stat_t {
 /* Expect random access pattern */
 #define FMODE_RANDOM		((__force fmode_t)4096)
 
+/* File needs atomic accesses to f_pos */
+#define FMODE_ATOMIC_POS	((__force fmode_t)0x8000)
+
+
 /*
  * The below are the various read and write types that we support. Some of
  * them include behavioral modifiers that send information down to the
@@ -1012,6 +1016,9 @@ struct file {
 	struct address_space	*f_mapping;
 #ifdef CONFIG_DEBUG_WRITECOUNT
 	unsigned long f_mnt_write_state;
+#endif
+#ifndef __GENKSYMS__
+	struct mutex		f_pos_lock;
 #endif
 };
 extern spinlock_t files_lock;

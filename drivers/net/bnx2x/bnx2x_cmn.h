@@ -615,15 +615,6 @@ int bnx2x_fcoe_get_wwn(struct net_device *dev, u64 *wwn, int type);
  */
 void bnx2x_tx_timeout(struct net_device *dev);
 
-/**
- * vlan rx register netdev callback
- *
- * @dev:	net device
- * @vlgrp:	VLAN group
- */
-void bnx2x_vlan_rx_register(struct net_device *dev,
-				   struct vlan_group *vlgrp);
-
 
 /*********************** Inlines **********************************/
 /*********************** Fast path ********************************/
@@ -936,6 +927,12 @@ static inline int bnx2x_func_start(struct bnx2x *bp)
 	start_params->tunnel_mode	= TUNN_MODE_GRE;
 	start_params->gre_tunnel_type	= IPGRE_TUNNEL;
 	start_params->inner_gre_rss_en	= 1;
+
+	if (IS_MF_UFP(bp) && BNX2X_IS_MF_SD_PROTOCOL_FCOE(bp)) {
+		start_params->class_fail_ethtype = ETH_P_FIP;
+		start_params->class_fail = 1;
+		start_params->no_added_tags = 1;
+	}
 
 	return bnx2x_func_state_change(bp, &func_params);
 }
@@ -1299,15 +1296,7 @@ static inline void bnx2x_update_drv_flags(struct bnx2x *bp, u32 flags, u32 set)
 	}
 }
 
-static inline bool bnx2x_is_valid_ether_addr(struct bnx2x *bp, u8 *addr)
-{
-	if (is_valid_ether_addr(addr) ||
-	    (is_zero_ether_addr(addr) &&
-	     (IS_MF_STORAGE_SD(bp) || IS_MF_FCOE_AFEX(bp))))
-		return true;
 
-	return false;
-}
 
 /**
  * bnx2x_fill_fw_str - Fill buffer with FW version string

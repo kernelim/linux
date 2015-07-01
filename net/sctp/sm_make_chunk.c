@@ -195,6 +195,7 @@ struct sctp_chunk *sctp_make_init(const struct sctp_association *asoc,
 			     const struct sctp_bind_addr *bp,
 			     gfp_t gfp, int vparam_len)
 {
+	struct sctp_endpoint *ep = asoc->ep;
 	sctp_inithdr_t init;
 	union sctp_params addrs;
 	size_t chunksize;
@@ -254,7 +255,7 @@ struct sctp_chunk *sctp_make_init(const struct sctp_association *asoc,
 	chunksize += vparam_len;
 
 	/* Account for AUTH related parameters */
-	if (sctp_auth_enable) {
+	if (ep->auth_enable) {
 		/* Add random parameter length*/
 		chunksize += sizeof(asoc->c.auth_random);
 
@@ -339,7 +340,7 @@ struct sctp_chunk *sctp_make_init(const struct sctp_association *asoc,
 	}
 
 	/* Add SCTP-AUTH chunks to the parameter list */
-	if (sctp_auth_enable) {
+	if (ep->auth_enable) {
 		sctp_addto_chunk(retval, sizeof(asoc->c.auth_random),
 				 asoc->c.auth_random);
 		if (auth_hmacs)
@@ -1627,8 +1628,8 @@ static sctp_cookie_param_t *sctp_pack_cookie(const struct sctp_endpoint *ep,
 	cookie->c.adaptation_ind = asoc->peer.adaptation_ind;
 
 	/* Set an expiration time for the cookie.  */
-	do_gettimeofday(&cookie->c.expiration);
-	TIMEVAL_ADD(asoc->cookie_life, cookie->c.expiration);
+	cookie->c.expiration = ktime_add(asoc->cookie_life,
+					 ktime_get());
 
 	/* Copy the peer's init packet.  */
 	memcpy(&cookie->c.peer_init[0], init_chunk->chunk_hdr,
@@ -1679,7 +1680,7 @@ struct sctp_association *sctp_unpack_cookie(
 	char *key;
 	sctp_scope_t scope;
 	struct sk_buff *skb = chunk->skb;
-	struct timeval tv;
+	ktime_t kt;
 	struct hash_desc desc;
 
 	/* Header size is static data prior to the actual cookie, including
@@ -1769,11 +1770,11 @@ no_hmac:
 	 * down the new association establishment instead of every packet.
 	 */
 	if (sock_flag(ep->base.sk, SOCK_TIMESTAMP))
-		skb_get_timestamp(skb, &tv);
+		kt = skb_get_ktime(skb);
 	else
-		do_gettimeofday(&tv);
+		kt = ktime_get();
 
-	if (!asoc && tv_lt(bear_cookie->expiration, tv)) {
+	if (!asoc && ktime_before(bear_cookie->expiration, kt)) {
 		/*
 		 * Section 3.3.10.3 Stale Cookie Error (3)
 		 *
@@ -1785,9 +1786,7 @@ no_hmac:
 		len = ntohs(chunk->chunk_hdr->length);
 		*errp = sctp_make_op_error_space(asoc, chunk, len);
 		if (*errp) {
-			suseconds_t usecs = (tv.tv_sec -
-				bear_cookie->expiration.tv_sec) * 1000000L +
-				tv.tv_usec - bear_cookie->expiration.tv_usec;
+			suseconds_t usecs = ktime_to_us(ktime_sub(kt, bear_cookie->expiration));
 			__be32 n = htonl(usecs);
 
 			sctp_init_cause(*errp, SCTP_ERROR_STALE_COOKIE,
@@ -2004,7 +2003,7 @@ static void sctp_process_ext_param(struct sctp_association *asoc,
 			    /* if the peer reports AUTH, assume that he
 			     * supports AUTH.
 			     */
-			    if (sctp_auth_enable)
+			if (asoc->ep->auth_enable)
 				    asoc->peer.auth_capable = 1;
 			    break;
 		    case SCTP_CID_ASCONF:
@@ -2095,7 +2094,8 @@ static sctp_ierror_t sctp_process_unk_param(const struct sctp_association *asoc,
  *	SCTP_IERROR_ERROR - stop processing, trigger an ERROR
  * 	SCTP_IERROR_NO_ERROR - continue with the chunk
  */
-static sctp_ierror_t sctp_verify_param(const struct sctp_association *asoc,
+static sctp_ierror_t sctp_verify_param(const struct sctp_endpoint *ep,
+					const struct sctp_association *asoc,
 					union sctp_params param,
 					sctp_cid_t cid,
 					struct sctp_chunk *chunk,
@@ -2145,7 +2145,7 @@ static sctp_ierror_t sctp_verify_param(const struct sctp_association *asoc,
 		goto fallthrough;
 
 	case SCTP_PARAM_RANDOM:
-		if (!sctp_auth_enable)
+		if (!ep->auth_enable)
 			goto fallthrough;
 
 		/* SCTP-AUTH: Secion 6.1
@@ -2162,7 +2162,7 @@ static sctp_ierror_t sctp_verify_param(const struct sctp_association *asoc,
 		break;
 
 	case SCTP_PARAM_CHUNKS:
-		if (!sctp_auth_enable)
+		if (!ep->auth_enable)
 			goto fallthrough;
 
 		/* SCTP-AUTH: Section 3.2
@@ -2178,7 +2178,7 @@ static sctp_ierror_t sctp_verify_param(const struct sctp_association *asoc,
 		break;
 
 	case SCTP_PARAM_HMAC_ALGO:
-		if (!sctp_auth_enable)
+		if (!ep->auth_enable)
 			goto fallthrough;
 
 		hmacs = (struct sctp_hmac_algo_param *)param.p;
@@ -2212,10 +2212,9 @@ fallthrough:
 }
 
 /* Verify the INIT packet before we process it.  */
-int sctp_verify_init(const struct sctp_association *asoc,
-		     sctp_cid_t cid,
-		     sctp_init_chunk_t *peer_init,
-		     struct sctp_chunk *chunk,
+int sctp_verify_init(const struct sctp_endpoint *ep,
+		     const struct sctp_association *asoc, sctp_cid_t cid,
+		     sctp_init_chunk_t *peer_init, struct sctp_chunk *chunk,
 		     struct sctp_chunk **errp)
 {
 	union sctp_params param;
@@ -2258,8 +2257,8 @@ int sctp_verify_init(const struct sctp_association *asoc,
 
 	/* Verify all the variable length parameters */
 	sctp_walk_params(param, peer_init, init_hdr.params) {
-
-		result = sctp_verify_param(asoc, param, cid, chunk, errp);
+		result = sctp_verify_param(ep, asoc, param, cid,
+					   chunk, errp);
 		switch (result) {
 		    case SCTP_IERROR_ABORT:
 		    case SCTP_IERROR_NOMEM:
@@ -2489,6 +2488,7 @@ static int sctp_process_param(struct sctp_association *asoc,
 	struct sctp_af *af;
 	union sctp_addr_param *addr_param;
 	struct sctp_transport *t;
+	struct sctp_endpoint *ep = asoc->ep;
 
 	/* We maintain all INIT parameters in network byte order all the
 	 * time.  This allows us to not worry about whether the parameters
@@ -2522,8 +2522,7 @@ do_addr_param:
 		/* Suggested Cookie Life span increment's unit is msec,
 		 * (1/1000sec).
 		 */
-		asoc->cookie_life.tv_sec += stale / 1000;
-		asoc->cookie_life.tv_usec += (stale % 1000) * 1000;
+		asoc->cookie_life = ktime_add_ms(asoc->cookie_life, stale);
 		break;
 
 	case SCTP_PARAM_HOST_NAME_ADDRESS:
@@ -2632,7 +2631,7 @@ do_addr_param:
 		goto fall_through;
 
 	case SCTP_PARAM_RANDOM:
-		if (!sctp_auth_enable)
+		if (!ep->auth_enable)
 			goto fall_through;
 
 		/* Save peer's random parameter */
@@ -2645,7 +2644,7 @@ do_addr_param:
 		break;
 
 	case SCTP_PARAM_HMAC_ALGO:
-		if (!sctp_auth_enable)
+		if (!ep->auth_enable)
 			goto fall_through;
 
 		/* Save peer's HMAC list */
@@ -2661,7 +2660,7 @@ do_addr_param:
 		break;
 
 	case SCTP_PARAM_CHUNKS:
-		if (!sctp_auth_enable)
+		if (!ep->auth_enable)
 			goto fall_through;
 
 		asoc->peer.peer_chunks = kmemdup(param.p,

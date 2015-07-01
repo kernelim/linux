@@ -8,6 +8,7 @@ menuconfig DRM
 	tristate "Direct Rendering Manager (XFree86 4.1.0 and higher DRI support)"
 	depends on (AGP || AGP=n) && !EMULATED_CMPXCHG && MMU && HAS_DMA
 	select HDMI
+	select FB_CMDLINE
 	select I2C
 	select I2C_ALGOBIT
 	select DMA_SHARED_BUFFER
@@ -23,12 +24,6 @@ menuconfig DRM
 config DRM_MIPI_DSI
 	bool
 	depends on DRM
-
-config DRM_USB
-	tristate
-	depends on DRM
-	depends on USB_SUPPORT && USB_ARCH_HAS_HCD
-	select USB
 
 config DRM_KMS_HELPER
 	tristate
@@ -65,6 +60,22 @@ config DRM_TTM
 	  GPU memory types. Will be enabled automatically if a device driver
 	  uses it.
 
+config DRM_GEM_CMA_HELPER
+	bool
+	depends on DRM
+	help
+	  Choose this if you need the GEM CMA helper functions
+
+config DRM_KMS_CMA_HELPER
+	bool
+	select DRM_GEM_CMA_HELPER
+	select DRM_KMS_FB_HELPER
+	select FB_SYS_FILLRECT
+	select FB_SYS_COPYAREA
+	select FB_SYS_IMAGEBLIT
+	help
+	  Choose this if you need the KMS CMA helper functions
+
 source "drivers/gpu/drm/i2c/Kconfig"
 
 config DRM_TDFX
@@ -96,6 +107,7 @@ config DRM_RADEON
 	select POWER_SUPPLY
 	select HWMON
 	select BACKLIGHT_CLASS_DEVICE
+	select INTERVAL_TREE
 	help
 	  Choose this option if you have an ATI Radeon graphics card.  There
 	  are both PCI and AGP versions.  You don't need to choose this to
@@ -149,5 +161,7 @@ config DRM_SAVAGE
 	help
 	  Choose this option if you have a Savage3D/4/SuperSavage/Pro/Twister
 	  chipset. If M is selected the module will be called savage.
+
+source "drivers/gpu/drm/gma500/Kconfig"
 
 source "drivers/gpu/drm/panel/Kconfig"

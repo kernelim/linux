@@ -517,6 +517,10 @@ int con_set_unimap(struct vc_data *vc, ushort ct, struct unipair __user *list)
 	struct uni_pagedir *p, *q;
 
 	p = (struct uni_pagedir *)*vc->vc_uni_pagedir_loc;
+
+	if (!p)
+		return -EIO;
+
 	if (p->readonly) return -EIO;
 	
 	if (!ct) return 0;

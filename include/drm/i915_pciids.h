@@ -191,8 +191,8 @@
 	INTEL_VGA_DEVICE(0x0A06, info), /* ULT GT1 mobile */ \
 	INTEL_VGA_DEVICE(0x0A16, info), /* ULT GT2 mobile */ \
 	INTEL_VGA_DEVICE(0x0A26, info), /* ULT GT3 mobile */ \
-	INTEL_VGA_DEVICE(0x0A0E, info), /* ULT GT1 reserved */ \
-	INTEL_VGA_DEVICE(0x0A1E, info), /* ULT GT2 reserved */ \
+	INTEL_VGA_DEVICE(0x0A0E, info), /* ULX GT1 mobile */ \
+	INTEL_VGA_DEVICE(0x0A1E, info), /* ULX GT2 mobile */ \
 	INTEL_VGA_DEVICE(0x0A2E, info), /* ULT GT3 reserved */ \
 	INTEL_VGA_DEVICE(0x0D06, info), /* CRW GT1 mobile */ \
 	INTEL_VGA_DEVICE(0x0D16, info), /* CRW GT2 mobile */ \
@@ -214,23 +214,49 @@
 	INTEL_VGA_DEVICE((((gt) - 1) << 4) | (id), info)
 
 #define _INTEL_BDW_M_IDS(gt, info) \
-	_INTEL_BDW_M(gt, 0x1602, info), /* ULT */ \
+	_INTEL_BDW_M(gt, 0x1602, info), /* Halo */ \
 	_INTEL_BDW_M(gt, 0x1606, info), /* ULT */ \
-	_INTEL_BDW_M(gt, 0x160B, info), /* Iris */ \
+	_INTEL_BDW_M(gt, 0x160B, info), /* ULT */ \
 	_INTEL_BDW_M(gt, 0x160E, info) /* ULX */
 
 #define _INTEL_BDW_D_IDS(gt, info) \
 	_INTEL_BDW_D(gt, 0x160A, info), /* Server */ \
 	_INTEL_BDW_D(gt, 0x160D, info) /* Workstation */
 
-#define INTEL_BDW_M_IDS(info) \
+#define INTEL_BDW_GT12M_IDS(info) \
 	_INTEL_BDW_M_IDS(1, info), \
-	_INTEL_BDW_M_IDS(2, info), \
+	_INTEL_BDW_M_IDS(2, info)
+
+#define INTEL_BDW_GT12D_IDS(info) \
+	_INTEL_BDW_D_IDS(1, info), \
+	_INTEL_BDW_D_IDS(2, info)
+
+#define INTEL_BDW_GT3M_IDS(info) \
 	_INTEL_BDW_M_IDS(3, info)
 
-#define INTEL_BDW_D_IDS(info) \
-	_INTEL_BDW_D_IDS(1, info), \
-	_INTEL_BDW_D_IDS(2, info), \
+#define INTEL_BDW_GT3D_IDS(info) \
 	_INTEL_BDW_D_IDS(3, info)
+
+#define INTEL_BDW_RSVDM_IDS(info) \
+	_INTEL_BDW_M_IDS(4, info)
+
+#define INTEL_BDW_RSVDD_IDS(info) \
+	_INTEL_BDW_D_IDS(4, info)
+
+#define INTEL_BDW_M_IDS(info) \
+	INTEL_BDW_GT12M_IDS(info), \
+	INTEL_BDW_GT3M_IDS(info), \
+	INTEL_BDW_RSVDM_IDS(info)
+
+#define INTEL_BDW_D_IDS(info) \
+	INTEL_BDW_GT12D_IDS(info), \
+	INTEL_BDW_GT3D_IDS(info), \
+	INTEL_BDW_RSVDD_IDS(info)
+
+#define INTEL_CHV_IDS(info) \
+	INTEL_VGA_DEVICE(0x22b0, info), \
+	INTEL_VGA_DEVICE(0x22b1, info), \
+	INTEL_VGA_DEVICE(0x22b2, info), \
+	INTEL_VGA_DEVICE(0x22b3, info)
 
 #endif /* _I915_PCIIDS_H */

@@ -172,7 +172,7 @@ static inline void eth_random_addr(u8 *addr)
  */
 static inline void dev_hw_addr_random(struct net_device *dev, u8 *hwaddr)
 {
-	dev->addr_assign_type |= NET_ADDR_RANDOM;
+	dev->addr_assign_type = NET_ADDR_RANDOM;
 	random_ether_addr(hwaddr);
 }
 
@@ -209,8 +209,30 @@ static inline void eth_broadcast_addr(u8 *addr)
  */
 static inline void eth_hw_addr_random(struct net_device *dev)
 {
-	dev->addr_assign_type |= NET_ADDR_RANDOM;
+	dev->addr_assign_type = NET_ADDR_RANDOM;
 	eth_random_addr(dev->dev_addr);
+}
+
+/**
+ * ether_addr_copy - Copy an Ethernet address
+ * @dst: Pointer to a six-byte array Ethernet address destination
+ * @src: Pointer to a six-byte array Ethernet address source
+ *
+ * Please note: dst & src must both be aligned to u16.
+ */
+static inline void ether_addr_copy(u8 *dst, const u8 *src)
+{
+#if defined(CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS)
+	*(u32 *)dst = *(const u32 *)src;
+	*(u16 *)(dst + 4) = *(const u16 *)(src + 4);
+#else
+	u16 *a = (u16 *)dst;
+	const u16 *b = (const u16 *)src;
+
+	a[0] = b[0];
+	a[1] = b[1];
+	a[2] = b[2];
+#endif
 }
 
 /**
@@ -303,6 +325,24 @@ static inline bool ether_addr_equal_64bits(const u8 addr1[6+2],
 }
 
 /**
+ * ether_addr_equal_unaligned - Compare two not u16 aligned Ethernet addresses
+ * @addr1: Pointer to a six-byte array containing the Ethernet address
+ * @addr2: Pointer other six-byte array containing the Ethernet address
+ *
+ * Compare two Ethernet addresses, returns true if equal
+ *
+ * Please note: Use only when any Ethernet address may not be u16 aligned.
+ */
+static inline bool ether_addr_equal_unaligned(const u8 *addr1, const u8 *addr2)
+{
+#if defined(CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS)
+	return ether_addr_equal(addr1, addr2);
+#else
+	return memcmp(addr1, addr2, ETH_ALEN) == 0;
+#endif
+}
+
+/**
  * is_etherdev_addr - Tell if given Ethernet address belongs to the device.
  * @dev: Pointer to a device structure
  * @addr: Pointer to a six-byte array containing the Ethernet address
@@ -365,6 +405,18 @@ static inline unsigned long compare_ether_header(const void *a, const void *b)
 	return (*(u16 *)a ^ *(u16 *)b) | (a32[0] ^ b32[0]) |
 	       (a32[1] ^ b32[1]) | (a32[2] ^ b32[2]);
 #endif
+}
+
+/**
+ * eth_skb_pad - Pad buffer to mininum number of octets for Ethernet frame
+ * @skb: Buffer to pad
+ *
+ * An Ethernet frame should have a minimum size of 60 bytes.  This function
+ * takes short frames and pads them with zeros up to the 60 byte limit.
+ */
+static inline int eth_skb_pad(struct sk_buff *skb)
+{
+	return skb_put_padto(skb, ETH_ZLEN);
 }
 
 #endif	/* _LINUX_ETHERDEVICE_H */

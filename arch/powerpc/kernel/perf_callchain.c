@@ -251,7 +251,7 @@ static void perf_callchain_user_64(struct perf_callchain_entry *entry,
 	lr = regs->link;
 	sp = regs->gpr[1];
 
-	for (;;) {
+	while (entry->nr < PERF_MAX_STACK_DEPTH) {
 		fp = (unsigned long __user *) sp;
 		if (!valid_user_sp(sp, 1) || read_user_stack_64(fp, &next_sp))
 			return;

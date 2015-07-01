@@ -2162,6 +2162,15 @@ restart:
 	 */
 	alloc_flags = gfp_to_alloc_flags(gfp_mask);
 
+	/*
+	 * Find the true preferred zone if the allocation is unconstrained by
+	 * cpusets.
+	 */
+	if (!(alloc_flags & ALLOC_CPUSET) && !nodemask)
+		first_zones_zonelist(zonelist, high_zoneidx, NULL,
+					&preferred_zone);
+
+rebalance:
 	/* This is the last chance, in general, before the goto nopage. */
 	page = get_page_from_freelist(gfp_mask, nodemask, order, zonelist,
 			high_zoneidx, alloc_flags & ~ALLOC_NO_WATERMARKS,
@@ -2169,7 +2178,6 @@ restart:
 	if (page)
 		goto got_pg;
 
-rebalance:
 	/* Allocate without watermarks if the context allows */
 	if (alloc_flags & ALLOC_NO_WATERMARKS) {
 		page = __alloc_pages_high_priority(gfp_mask, order,
@@ -2340,7 +2348,9 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order,
 
 	get_mems_allowed();
 	/* The preferred zone is used for statistics later */
-	first_zones_zonelist(zonelist, high_zoneidx, nodemask, &preferred_zone);
+	first_zones_zonelist(zonelist, high_zoneidx,
+				nodemask ? : &cpuset_current_mems_allowed,
+				&preferred_zone);
 	if (!preferred_zone) {
 		put_mems_allowed();
 		return NULL;

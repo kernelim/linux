@@ -785,7 +785,7 @@ xfs_iomap_write_allocate(
 			 * pointer that the caller gave to us.
 			 */
 			error = xfs_bmapi(tp, ip, map_start_fsb, count_fsb,
-					XFS_BMAPI_WRITE|XFS_BMAPI_STACK_SWITCH,
+					XFS_BMAPI_WRITE,
 					&first_block, 1,
 					imap, &nimaps, &free_list);
 			if (error)

@@ -39,6 +39,7 @@
 #include <asm/swiotlb.h>
 #include <asm/dma.h>
 #include <asm/amd_nb.h>
+#include <asm/x86_init.h>
 
 static unsigned long iommu_bus_base;	/* GART remapping area (physical) */
 static unsigned long iommu_size;	/* size of remapping area bytes */
@@ -703,12 +704,13 @@ static struct dma_map_ops gart_dma_ops = {
 	.free_coherent			= gart_free_coherent,
 };
 
-void gart_iommu_shutdown(void)
+static void gart_iommu_shutdown(void)
 {
 	struct pci_dev *dev;
 	int i;
 
-	if (no_agp && (dma_ops != &gart_dma_ops))
+	/* don't shutdown it if there is AGP installed */
+	if (!no_agp)
 		return;
 
 	if (!amd_nb_has_feature(AMD_NB_GART))
@@ -726,7 +728,7 @@ void gart_iommu_shutdown(void)
 	}
 }
 
-void __init gart_iommu_init(void)
+int __init gart_iommu_init(void)
 {
 	struct agp_kern_info info;
 	unsigned long iommu_start;
@@ -736,7 +738,7 @@ void __init gart_iommu_init(void)
 	long i;
 
 	if (!amd_nb_has_feature(AMD_NB_GART))
-		return;
+		return 0;
 
 #ifndef CONFIG_AGP_AMD64
 	no_agp = 1;
@@ -748,13 +750,6 @@ void __init gart_iommu_init(void)
 		(agp_copy_info(agp_bridge, &info) < 0);
 #endif
 
-	if (swiotlb)
-		return;
-
-	/* Did we detect a different HW IOMMU? */
-	if (iommu_detected && !gart_iommu_aperture)
-		return;
-
 	if (no_iommu ||
 	    (!force_iommu && max_pfn <= MAX_DMA32_PFN) ||
 	    !gart_iommu_aperture ||
@@ -764,7 +759,7 @@ void __init gart_iommu_init(void)
 			       "but GART IOMMU not available.\n");
 			printk(KERN_WARNING "falling back to iommu=soft.\n");
 		}
-		return;
+		return 0;
 	}
 
 	/* need to map that range */
@@ -856,6 +851,10 @@ void __init gart_iommu_init(void)
 
 	flush_gart();
 	dma_ops = &gart_dma_ops;
+	x86_platform.iommu_shutdown = gart_iommu_shutdown;
+	swiotlb = 0;
+
+	return 0;
 }
 
 void __init gart_parse_options(char *p)

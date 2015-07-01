@@ -151,9 +151,11 @@ void bio_integrity_free(struct bio *bio, struct bio_set *bs)
 	    && bip->bip_buf != NULL)
 		kfree(bip->bip_buf);
 
-	if (use_bip_pool(bip->bip_slab))
+	if (use_bip_pool(bip->bip_slab)) {
+		if (!bs)
+			bs = fs_bio_set;
 		mempool_free(bip, bs->bio_integrity_pool);
-	else
+	} else
 		kmem_cache_free(bip_slab[bip->bip_slab].slab, bip);
 
 	bio->bi_integrity = NULL;

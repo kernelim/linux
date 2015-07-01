@@ -51,7 +51,7 @@ static struct mfd_cell rtsx_pcr_cells[] = {
 	},
 };
 
-static DEFINE_PCI_DEVICE_TABLE(rtsx_pci_ids) = {
+static const struct pci_device_id rtsx_pci_ids[] = {
 	{ PCI_DEVICE(0x10EC, 0x5209), PCI_CLASS_OTHERS << 16, 0xFF0000 },
 	{ PCI_DEVICE(0x10EC, 0x5229), PCI_CLASS_OTHERS << 16, 0xFF0000 },
 	{ PCI_DEVICE(0x10EC, 0x5289), PCI_CLASS_OTHERS << 16, 0xFF0000 },
@@ -1046,11 +1046,13 @@ static int rtsx_pci_init_chip(struct rtsx_pcr *pcr)
 	case 0x5209:
 		rts5209_init_params(pcr);
 		break;
+#endif
 
 	case 0x5229:
 		rts5229_init_params(pcr);
 		break;
 
+#if 0
 	case 0x5289:
 		rtl8411_init_params(pcr);
 		break;

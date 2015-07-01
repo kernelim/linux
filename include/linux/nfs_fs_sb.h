@@ -190,12 +190,14 @@ struct nfs_server {
 
 
 /* maximum number of slots to use */
+#define NFS4_DEF_SLOT_TABLE_SIZE (16U)
 #define NFS4_MAX_SLOT_TABLE (250U)
 
 #if defined(CONFIG_NFS_V4)
 
 /* Sessions */
-#define SLOT_TABLE_SZ ((NFS4_MAX_SLOT_TABLE + (8 * sizeof(long) - 1))/(8*sizeof(long)))
+#define SLOT_TABLE_SZ DIV_ROUND_UP(NFS4_MAX_SLOT_TABLE, 8*sizeof(long))
+
 struct nfs4_slot_table {
 	struct nfs4_slot *slots;		/* seqid per slot */
 	unsigned long   used_slots[SLOT_TABLE_SZ]; /* used/unused bitmap */

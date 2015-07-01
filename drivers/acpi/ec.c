@@ -1053,22 +1053,6 @@ error:
 	return -ENODEV;
 }
 
-static int acpi_ec_suspend(struct acpi_device *device, pm_message_t state)
-{
-	struct acpi_ec *ec = acpi_driver_data(device);
-	/* Stop using GPE */
-	acpi_disable_gpe(NULL, ec->gpe);
-	return 0;
-}
-
-static int acpi_ec_resume(struct acpi_device *device)
-{
-	struct acpi_ec *ec = acpi_driver_data(device);
-	/* Enable use of GPE back */
-	acpi_enable_gpe(NULL, ec->gpe);
-	return 0;
-}
-
 static struct acpi_driver acpi_ec_driver = {
 	.name = "ec",
 	.class = ACPI_EC_CLASS,
@@ -1076,8 +1060,6 @@ static struct acpi_driver acpi_ec_driver = {
 	.ops = {
 		.add = acpi_ec_add,
 		.remove = acpi_ec_remove,
-		.suspend = acpi_ec_suspend,
-		.resume = acpi_ec_resume,
 		},
 };
 

@@ -85,7 +85,6 @@ static int eeh_event_handler(void * dummy)
 	pdn = handle_eeh_events(event);
 
 	eeh_clear_slot(event->dn, EEH_MODE_RECOVERING);
-	pci_dev_put(event->dev);
 	kfree(event);
 	mutex_unlock(&eeh_event_mutex);
 
@@ -136,9 +135,6 @@ int eeh_send_failure_event (struct device_node *dn,
 		printk (KERN_ERR "EEH: out of memory, event not handled\n");
 		return 1;
  	}
-
-	if (dev)
-		pci_dev_get(dev);
 
 	event->dn = dn;
 	event->dev = dev;

@@ -1223,6 +1223,13 @@ void register_console(struct console *newcon)
 	unsigned long flags;
 	struct console *bcon = NULL;
 
+	if (console_drivers)
+		for_each_console(bcon)
+			if (WARN(bcon == newcon,
+					"console '%s%d' already registered\n",
+					bcon->name, bcon->index))
+				return;
+
 	/*
 	 * before we register a new CON_BOOT console, make sure we don't
 	 * already have a valid console

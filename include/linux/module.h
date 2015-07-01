@@ -49,7 +49,7 @@ struct rheldata
 	/* These two u8's make up the X.Y release tag */
 	u8 rhel_major;
 	u8 rhel_minor;
-	u16 pad; /* we may one day need to add additional release info */
+	u16 rhel_release;
 };
 
 struct module;

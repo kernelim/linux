@@ -28,6 +28,7 @@
 #define BCMA_MIPS_MIPS74K_GPIOEN	0x0048
 #define BCMA_MIPS_MIPS74K_CLKCTLST	0x01E0
 
+#define BCMA_MIPS_OOBSELINA74		0x004
 #define BCMA_MIPS_OOBSELOUTA30		0x100
 
 struct bcma_device;
@@ -41,13 +42,18 @@ struct bcma_drv_mips {
 #ifdef CONFIG_BCMA_DRIVER_MIPS
 extern void bcma_core_mips_init(struct bcma_drv_mips *mcore);
 extern void bcma_core_mips_early_init(struct bcma_drv_mips *mcore);
+
+extern unsigned int bcma_core_mips_irq(struct bcma_device *dev);
 #else
 static inline void bcma_core_mips_init(struct bcma_drv_mips *mcore) { }
 static inline void bcma_core_mips_early_init(struct bcma_drv_mips *mcore) { }
+
+static inline unsigned int bcma_core_mips_irq(struct bcma_device *dev)
+{
+	return 0;
+}
 #endif
 
 extern u32 bcma_cpu_clock(struct bcma_drv_mips *mcore);
-
-extern unsigned int bcma_core_mips_irq(struct bcma_device *dev);
 
 #endif /* LINUX_BCMA_DRIVER_MIPS_H_ */

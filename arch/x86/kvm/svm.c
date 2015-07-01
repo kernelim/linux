@@ -2710,7 +2710,7 @@ static int wrmsr_interception(struct vcpu_svm *svm)
 	msr.host_initiated = false;
 
 	svm->next_rip = kvm_rip_read(&svm->vcpu) + 2;
-	if (svm_set_msr(&svm->vcpu, &msr))
+	if (kvm_set_msr(&svm->vcpu, &msr))
 		kvm_inject_gp(&svm->vcpu, 0);
 	else
 		skip_emulated_instruction(&svm->vcpu);

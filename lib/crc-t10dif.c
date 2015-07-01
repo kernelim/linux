@@ -38,10 +38,8 @@ EXPORT_SYMBOL(crc_t10dif);
 
 static int __init crc_t10dif_mod_init(void)
 {
-	printk(KERN_CRIT "STARTING CRC_T10DIF\n");
 	crct10dif_tfm = crypto_alloc_shash("crct10dif", 0, 0);
 	if (IS_ERR(crct10dif_tfm)) {
-		printk(KERN_CRIT "CRC_T10DIF: ALLOCATING CRYPTO HASH FAILED\n");
 		return PTR_ERR(crct10dif_tfm);
 	}
 	return 0;

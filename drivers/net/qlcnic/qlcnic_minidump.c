@@ -47,15 +47,26 @@ struct qlcnic_common_entry_hdr {
 	u32     type;
 	u32     offset;
 	u32     cap_size;
+#if defined(__LITTLE_ENDIAN)
 	u8      mask;
 	u8      rsvd[2];
 	u8      flags;
+#else
+	u8      flags;
+	u8      rsvd[2];
+	u8      mask;
+#endif
 } __packed;
 
 struct __crb {
 	u32	addr;
+#if defined(__LITTLE_ENDIAN)
 	u8	stride;
 	u8	rsvd1[3];
+#else
+	u8	rsvd1[3];
+	u8	stride;
+#endif
 	u32	data_size;
 	u32	no_ops;
 	u32	rsvd2[4];
@@ -63,15 +74,28 @@ struct __crb {
 
 struct __ctrl {
 	u32	addr;
+#if defined(__LITTLE_ENDIAN)
 	u8	stride;
 	u8	index_a;
 	u16	timeout;
+#else
+	u16	timeout;
+	u8	index_a;
+	u8	stride;
+#endif
 	u32	data_size;
 	u32	no_ops;
+#if defined(__LITTLE_ENDIAN)
 	u8	opcode;
 	u8	index_v;
 	u8	shl_val;
 	u8	shr_val;
+#else
+	u8	shr_val;
+	u8	shl_val;
+	u8	index_v;
+	u8	opcode;
+#endif
 	u32	val1;
 	u32	val2;
 	u32	val3;
@@ -79,16 +103,27 @@ struct __ctrl {
 
 struct __cache {
 	u32	addr;
+#if defined(__LITTLE_ENDIAN)
 	u16	stride;
 	u16	init_tag_val;
+#else
+	u16	init_tag_val;
+	u16	stride;
+#endif
 	u32	size;
 	u32	no_ops;
 	u32	ctrl_addr;
 	u32	ctrl_val;
 	u32	read_addr;
+#if defined(__LITTLE_ENDIAN)
 	u8	read_addr_stride;
 	u8	read_addr_num;
 	u8	rsvd1[2];
+#else
+	u8	rsvd1[2];
+	u8	read_addr_num;
+	u8	read_addr_stride;
+#endif
 } __packed;
 
 struct __ocm {
@@ -122,23 +157,39 @@ struct __mux {
 
 struct __queue {
 	u32	sel_addr;
+#if defined(__LITTLE_ENDIAN)
 	u16	stride;
 	u8	rsvd[2];
+#else
+	u8	rsvd[2];
+	u16	stride;
+#endif
 	u32	size;
 	u32	no_ops;
 	u8	rsvd2[8];
 	u32	read_addr;
+#if defined(__LITTLE_ENDIAN)
 	u8	read_addr_stride;
 	u8	read_addr_cnt;
 	u8	rsvd3[2];
+#else
+	u8	rsvd3[2];
+	u8	read_addr_cnt;
+	u8	read_addr_stride;
+#endif
 } __packed;
 
 struct __pollrd {
 	u32	sel_addr;
 	u32	read_addr;
 	u32	sel_val;
+#if defined(__LITTLE_ENDIAN)
 	u16	sel_val_stride;
 	u16	no_ops;
+#else
+	u16	no_ops;
+	u16	sel_val_stride;
+#endif
 	u32	poll_wait;
 	u32	poll_mask;
 	u32	data_size;
@@ -153,9 +204,15 @@ struct __mux2 {
 	u32	no_ops;
 	u32	sel_val_mask;
 	u32	read_addr;
+#if defined(__LITTLE_ENDIAN)
 	u8	sel_val_stride;
 	u8	data_size;
 	u8	rsvd[2];
+#else
+	u8	rsvd[2];
+	u8	data_size;
+	u8	sel_val_stride;
+#endif
 } __packed;
 
 struct __pollrdmwr {
@@ -660,8 +717,6 @@ out:
 #define QLC_DMA_CMD_BUFF_ADDR_HI	4
 #define QLC_DMA_CMD_STATUS_CTRL		8
 
-#define QLC_PEX_DMA_READ_SIZE		(PAGE_SIZE * 16)
-
 static int qlcnic_start_pex_dma(struct qlcnic_adapter *adapter,
 				struct __mem *mem)
 {
@@ -1158,6 +1213,7 @@ int qlcnic_fw_cmd_get_minidump_temp(struct qlcnic_adapter *adapter)
 	u32 version, csum, *tmp_buf;
 	u8 use_flash_temp = 0;
 	u32 temp_size = 0;
+	void *temp_buffer;
 	int err;
 
 	ahw = adapter->ahw;
@@ -1207,6 +1263,19 @@ flash_temp:
 
 	qlcnic_cache_tmpl_hdr_values(adapter, fw_dump);
 
+	if (fw_dump->use_pex_dma) {
+		fw_dump->dma_buffer = NULL;
+		temp_buffer = dma_alloc_coherent(&adapter->pdev->dev,
+						 QLC_PEX_DMA_READ_SIZE,
+						 &fw_dump->phys_addr,
+						 GFP_KERNEL);
+		if (!temp_buffer)
+			fw_dump->use_pex_dma = false;
+		else
+			fw_dump->dma_buffer = temp_buffer;
+	}
+
+
 	dev_info(&adapter->pdev->dev,
 		 "Default minidump capture mask 0x%x\n",
 		 fw_dump->cap_mask);
@@ -1226,7 +1295,7 @@ int qlcnic_dump_fw(struct qlcnic_adapter *adapter)
 	struct device *dev = &adapter->pdev->dev;
 	struct qlcnic_hardware_context *ahw;
 	struct qlcnic_dump_entry *entry;
-	void *temp_buffer, *tmpl_hdr;
+	void *tmpl_hdr;
 	u32 ocm_window;
 	__le32 *buffer;
 	char mesg[64];
@@ -1272,16 +1341,6 @@ int qlcnic_dump_fw(struct qlcnic_adapter *adapter)
 	entry_offset = fw_dump->offset;
 	qlcnic_set_sys_info(adapter, tmpl_hdr, 0, QLCNIC_DRIVER_VERSION);
 	qlcnic_set_sys_info(adapter, tmpl_hdr, 1, adapter->fw_version);
-
-	if (fw_dump->use_pex_dma) {
-		temp_buffer = dma_alloc_coherent(dev, QLC_PEX_DMA_READ_SIZE,
-						 &fw_dump->phys_addr,
-						 GFP_KERNEL);
-		if (!temp_buffer)
-			fw_dump->use_pex_dma = false;
-		else
-			fw_dump->dma_buffer = temp_buffer;
-	}
 
 	if (qlcnic_82xx_check(adapter)) {
 		ops_cnt = ARRAY_SIZE(qlcnic_fw_dump_ops);
@@ -1339,10 +1398,6 @@ int qlcnic_dump_fw(struct qlcnic_adapter *adapter)
 		    fw_dump->size, fw_dump->tmpl_hdr_size);
 	/* Send a udev event to notify availability of FW dump */
 	kobject_uevent_env(&dev->kobj, KOBJ_CHANGE, msg);
-
-	if (fw_dump->use_pex_dma)
-		dma_free_coherent(dev, QLC_PEX_DMA_READ_SIZE,
-				  fw_dump->dma_buffer, fw_dump->phys_addr);
 
 	return 0;
 }

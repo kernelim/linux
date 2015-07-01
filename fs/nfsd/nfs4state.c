@@ -1015,6 +1015,8 @@ expire_client(struct nfs4_client *clp)
 		dprintk("NFSD: expire client. dp %p, fp %p\n", dp,
 				dp->dl_flock);
 		list_del_init(&dp->dl_perclnt);
+		/* Ensure that deleg break won't try to requeue it */
+		++dp->dl_time;
 		list_move(&dp->dl_recall_lru, &reaplist);
 	}
 	spin_unlock(&recall_lock);
@@ -2364,12 +2366,16 @@ void nfsd_break_deleg_cb(struct file_lock *fl)
 	atomic_inc(&dp->dl_count);
 
 	spin_lock(&recall_lock);
-	list_add_tail(&dp->dl_recall_lru, &del_recall_lru);
+	/*
+	 * If the dl_time != 0, then we know that it has already been
+	 * queued for a lease break. Don't queue it again.
+	 */
+	if (dp->dl_time == 0) {
+		list_add_tail(&dp->dl_recall_lru, &del_recall_lru);
+		dp->dl_time = get_seconds();
+	}
 	block_delegations(&dp->dl_fh);
 	spin_unlock(&recall_lock);
-
-	/* only place dl_time is set. protected by lock_kernel*/
-	dp->dl_time = get_seconds();
 
 	/*
 	 * We don't want the locks code to timeout the lease for us;

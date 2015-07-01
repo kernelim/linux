@@ -2993,6 +2993,17 @@ S:	Maintained
 F:	drivers/scsi/*iscsi*
 F:	include/scsi/*iscsi*
 
+ISCSI EXTENSIONS FOR RDMA (ISER) INITIATOR
+M:	Or Gerlitz <ogerlitz@mellanox.com>
+M:	Sagi Grimberg <sagig@mellanox.com>
+M:	Roi Dayan <roid@mellanox.com>
+L:	linux-rdma@vger.kernel.org
+S:	Supported
+W:	http://www.openfabrics.org
+W:	www.open-iscsi.org
+Q:	http://patchwork.kernel.org/project/linux-rdma/list/
+F:	drivers/infiniband/ulp/iser/
+
 ISDN SUBSYSTEM
 M:	Karsten Keil <isdn@linux-pingi.de>
 L:	isdn4linux@listserv.isdn4linux.de (subscribers-only)
@@ -3516,10 +3527,13 @@ F:	include/media/
 F:	include/linux/dvb/
 F:	include/linux/videodev*.h
 
-MEGARAID SCSI DRIVERS
-M:	Neela Syam Kolli <megaraidlinux@lsi.com>
+MEGARAID SCSI/SAS DRIVERS
+M:	Kashyap Desai <kashyap.desai@avagotech.com>
+M:	Sumit Saxena <sumit.saxena@avagotech.com>
+M:	Uday Lingala <uday.lingala@avagotech.com>
+L:	megaraidlinux.pdl@avagotech.com
 L:	linux-scsi@vger.kernel.org
-W:	http://megaraid.lsilogic.com
+W:	http://www.lsi.com
 S:	Maintained
 F:	Documentation/scsi/megaraid.txt
 F:	drivers/scsi/megaraid.*

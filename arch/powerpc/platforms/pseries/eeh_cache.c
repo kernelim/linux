@@ -69,16 +69,12 @@ static inline struct pci_dev *__pci_get_device_by_addr(unsigned long addr)
 		struct pci_io_addr_range *piar;
 		piar = rb_entry(n, struct pci_io_addr_range, rb_node);
 
-		if (addr < piar->addr_lo) {
+		if (addr < piar->addr_lo)
 			n = n->rb_left;
-		} else {
-			if (addr > piar->addr_hi) {
-				n = n->rb_right;
-			} else {
-				pci_dev_get(piar->pcidev);
-				return piar->pcidev;
-			}
-		}
+		else if (addr > piar->addr_hi)
+			n = n->rb_right;
+		else
+			return piar->pcidev;
 	}
 
 	return NULL;
@@ -157,7 +153,6 @@ pci_addr_cache_insert(struct pci_dev *dev, unsigned long alo,
 	if (!piar)
 		return NULL;
 
-	pci_dev_get(dev);
 	piar->addr_lo = alo;
 	piar->addr_hi = ahi;
 	piar->pcidev = dev;
@@ -245,7 +240,6 @@ restart:
 
 		if (piar->pcidev == dev) {
 			rb_erase(n, &pci_io_addr_cache_root.rb_root);
-			pci_dev_put(piar->pcidev);
 			kfree(piar);
 			goto restart;
 		}
@@ -294,7 +288,6 @@ void __init pci_addr_cache_build(void)
 		dn = pci_device_to_OF_node(dev);
 		if (!dn)
 			continue;
-		pci_dev_get(dev);  /* matching put is in eeh_remove_device() */
 		PCI_DN(dn)->pcidev = dev;
 
 		eeh_sysfs_add_device(dev);

@@ -611,6 +611,19 @@ struct usb_device {
 
 extern struct usb_device *usb_get_dev(struct usb_device *dev);
 extern void usb_put_dev(struct usb_device *dev);
+extern struct usb_device *usb_hub_find_child(struct usb_device *hdev,
+	int port1);
+
+/**
+ * usb_hub_for_each_child - iterate over all child devices on the hub
+ * @hdev:  USB device belonging to the usb hub
+ * @port1: portnum associated with child device
+ * @child: child device pointer
+ */
+#define usb_hub_for_each_child(hdev, port1, child) \
+	for (port1 = 1,	child =	usb_hub_find_child(hdev, port1); \
+		port1 <= hdev->maxchild; \
+		child = usb_hub_find_child(hdev, ++port1))
 
 /* USB device locking */
 #define usb_lock_device(udev)		down(&(udev)->dev.sem)

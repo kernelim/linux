@@ -30,6 +30,12 @@
 
 int watchdog_enabled = 1;
 int __read_mostly softlockup_thresh = 60;
+#ifdef CONFIG_SMP
+int __read_mostly sysctl_softlockup_all_cpu_backtrace;
+#else
+#define sysctl_softlockup_all_cpu_backtrace 0
+#endif
+
 
 static DEFINE_PER_CPU(unsigned long, watchdog_touch_ts);
 static DEFINE_PER_CPU(struct task_struct *, softlockup_watchdog);
@@ -43,6 +49,7 @@ static DEFINE_PER_CPU(unsigned long, hrtimer_interrupts);
 static DEFINE_PER_CPU(unsigned long, hrtimer_interrupts_saved);
 static DEFINE_PER_CPU(struct perf_event *, watchdog_ev);
 #endif
+static unsigned long soft_lockup_nmi_warn;
 
 /* boot commands */
 /*
@@ -54,6 +61,25 @@ static int hardlockup_panic =
 static int hardlockup_enable = 
 			CONFIG_BOOTPARAM_HARDLOCKUP_ENABLED_VALUE;
 
+static bool hardlockup_detector_enabled = true;
+/*
+ * We may not want to enable hard lockup detection by default in all cases,
+ * for example when running the kernel as a guest on a hypervisor. In these
+ * cases this function can be called to disable hard lockup detection. This
+ * function should only be executed once by the boot processor before the
+ * kernel command line parameters are parsed, because otherwise it is not
+ * possible to override this in hardlockup_panic_setup().
+ */
+void watchdog_enable_hardlockup_detector(bool val)
+{
+	hardlockup_detector_enabled = val;
+}
+
+bool watchdog_hardlockup_detector_is_enabled(void)
+{
+	return hardlockup_detector_enabled;
+}
+
 static int __init hardlockup_panic_setup(char *str)
 {
 	if (!strncmp(str, "panic", 5))
@@ -64,10 +90,16 @@ static int __init hardlockup_panic_setup(char *str)
 		watchdog_enabled = 0;
 	else if (!strncmp(str, "1", 1) ||
 		 !strncmp(str, "2", 1))
+	{
 		hardlockup_enable = 1;
+		watchdog_enable_hardlockup_detector(true);
+	}
 	else if (!strncmp(str, "lapic", 5) ||
 		 !strncmp(str, "ioapic", 6))
+	{
 		hardlockup_enable = 1;
+		watchdog_enable_hardlockup_detector(true);
+	}
 	return 1;
 }
 __setup("nmi_watchdog=", hardlockup_panic_setup);
@@ -99,6 +131,15 @@ static int __init nosoftlockup_setup(char *str)
 }
 __setup("nosoftlockup", nosoftlockup_setup);
 /*  */
+#ifdef CONFIG_SMP
+static int __init softlockup_all_cpu_backtrace_setup(char *str)
+{
+	sysctl_softlockup_all_cpu_backtrace =
+		!!simple_strtol(str, NULL, 0);
+	return 1;
+}
+__setup("softlockup_all_cpu_backtrace=", softlockup_all_cpu_backtrace_setup);
+#endif
 
 
 /*
@@ -259,6 +300,7 @@ static enum hrtimer_restart watchdog_timer_fn(struct hrtimer *hrtimer)
 	unsigned long touch_ts = __get_cpu_var(watchdog_touch_ts);
 	struct pt_regs *regs = get_irq_regs();
 	int duration;
+	int softlockup_all_cpu_backtrace = sysctl_softlockup_all_cpu_backtrace;
 
 	/* kick the hardlockup detector */
 	watchdog_interrupt_count();
@@ -305,6 +347,17 @@ static enum hrtimer_restart watchdog_timer_fn(struct hrtimer *hrtimer)
 		if (__get_cpu_var(soft_watchdog_warn) == true)
 			return HRTIMER_RESTART;
 
+		if (softlockup_all_cpu_backtrace) {
+			/* Prevent multiple soft-lockup reports if one cpu is already
+			 * engaged in dumping cpu back traces
+			 */
+			if (test_and_set_bit(0, &soft_lockup_nmi_warn)) {
+				/* Someone else will report us. Let's give up */
+				__get_cpu_var(soft_watchdog_warn) = true;
+				return HRTIMER_RESTART;
+			}
+		}
+
 		printk(KERN_EMERG "BUG: soft lockup - CPU#%d stuck for %us! [%s:%d]\n",
 			smp_processor_id(), duration,
 			current->comm, task_pid_nr(current));
@@ -315,6 +368,18 @@ static enum hrtimer_restart watchdog_timer_fn(struct hrtimer *hrtimer)
 		else
 			dump_stack();
 
+		if (softlockup_all_cpu_backtrace) {
+			/* Avoid generating two back traces for current
+			 * given that one is already made above
+			 */
+			trigger_allbutself_cpu_backtrace();
+
+			clear_bit(0, &soft_lockup_nmi_warn);
+			/* Barrier to sync with other cpus */
+			smp_mb__after_clear_bit();
+		}
+
+		add_taint(TAINT_SOFTLOCKUP);
 		if (softlockup_panic)
 			panic("softlockup: hung tasks");
 		__get_cpu_var(soft_watchdog_warn) = true;
@@ -365,21 +430,29 @@ static int watchdog(void *unused)
 
 
 #ifdef CONFIG_HARDLOCKUP_DETECTOR
+/*
+ * People like the simple clean cpu node info on boot.
+ * Reduce the watchdog noise by only printing messages
+ * that are different from what cpu0 displayed.
+ */
+static unsigned long cpu0_err;
+
 static int watchdog_nmi_enable(int cpu)
 {
 	struct perf_event_attr *wd_attr;
 	struct perf_event *event = per_cpu(watchdog_ev, cpu);
 
-	/*
- 	 * People like the simple clean cpu node info
- 	 * on boot.  Simplify the noise from the watchdog
- 	 * by only printing messages that are different than
- 	 * what cpu0 displayed
- 	 */
-	static unsigned long err0 = 0;
-
 	if (!hardlockup_enable)
 		return 0;
+
+	/*
+	 * Some kernels need to default hard lockup detection to
+	 * 'disabled', for example a guest on a hypervisor.
+	 */
+	if (!watchdog_hardlockup_detector_is_enabled()) {
+		event = ERR_PTR(-ENOENT);
+		goto handle_err;
+	}
 
 	/* is it already setup and enabled? */
 	if (event && event->state > PERF_EVENT_STATE_OFF)
@@ -395,19 +468,20 @@ static int watchdog_nmi_enable(int cpu)
 	/* Try to register using hardware perf events */
 	event = perf_event_create_kernel_counter(wd_attr, cpu, NULL, watchdog_overflow_callback, NULL);
 
-	/* save cpu0 error for future comparison */
-	if (!cpu)
-		err0 = (IS_ERR(event) ? PTR_ERR(event) : 0);
+handle_err:
+	/* save cpu0 error for future comparision */
+	if (cpu == 0 && IS_ERR(event))
+		cpu0_err = PTR_ERR(event);
 
 	if (!IS_ERR(event)) {
 		/* only print for cpu0 or different than cpu0 */
-		if (!cpu || err0)
+		if (cpu == 0 || cpu0_err)
 			printk(KERN_INFO "NMI watchdog enabled, takes one hw-pmu counter.\n");
 		goto out_save;
 	}
 
 	/* skip displaying the same error again */
-	if ((PTR_ERR(event) == err0) && cpu)
+	if (cpu > 0 && (PTR_ERR(event) == cpu0_err))
 		return PTR_ERR(event);
 
 	/* vary the KERN level based on the returned errno */
@@ -439,7 +513,10 @@ static void watchdog_nmi_disable(int cpu)
 		/* should be in cleanup, but blocks oprofile */
 		perf_event_release_kernel(event);
 	}
-	return;
+	if (cpu == 0) {
+		/* watchdog_nmi_enable() expects this to be zero initially. */
+		cpu0_err = 0;
+	}
 }
 #else
 static int watchdog_nmi_enable(int cpu) { return 0; }
@@ -518,6 +595,7 @@ static void watchdog_enable_all_cpus(void)
 #ifdef CONFIG_HARDLOCKUP_DETECTOR
 	/* user is explicitly enabling this */
 	hardlockup_enable = 1;
+	watchdog_enable_hardlockup_detector(true);
 #endif
 	for_each_online_cpu(cpu)
 		if (!watchdog_enable(cpu))

@@ -20,6 +20,8 @@
 # define ISA_DMA_BIT_MASK DMA_BIT_MASK(32)
 #endif
 
+#define DMA_ERROR_CODE	0
+
 extern dma_addr_t bad_dma_address;
 extern int iommu_merge;
 extern struct device x86_dma_fallback_dev;

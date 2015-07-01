@@ -1132,12 +1132,6 @@ void netdev_state_change(struct net_device *dev)
 }
 EXPORT_SYMBOL(netdev_state_change);
 
-void netdev_bonding_change(struct net_device *dev, unsigned long event)
-{
-	call_netdevice_notifiers(event, dev);
-}
-EXPORT_SYMBOL(netdev_bonding_change);
-
 /**
  *	dev_load 	- load a network module
  *	@net: the applicable net namespace
@@ -5278,12 +5272,13 @@ void dev_unicast_unsync(struct net_device *to, struct net_device *from)
 }
 EXPORT_SYMBOL(dev_unicast_unsync);
 
-static void dev_unicast_flush(struct net_device *dev)
+void dev_unicast_flush(struct net_device *dev)
 {
 	netif_addr_lock_bh(dev);
 	__hw_addr_flush(&dev->uc);
 	netif_addr_unlock_bh(dev);
 }
+EXPORT_SYMBOL(dev_unicast_flush);
 
 static void dev_unicast_init(struct net_device *dev)
 {
@@ -5305,7 +5300,7 @@ static void __dev_addr_discard(struct dev_addr_list **list)
 	}
 }
 
-static void dev_addr_discard(struct net_device *dev)
+void dev_addr_discard(struct net_device *dev)
 {
 	netif_addr_lock_bh(dev);
 
@@ -5314,6 +5309,7 @@ static void dev_addr_discard(struct net_device *dev)
 
 	netif_addr_unlock_bh(dev);
 }
+EXPORT_SYMBOL(dev_addr_discard);
 
 /**
  *	dev_get_flags - get flags reported to userspace
@@ -5886,10 +5882,12 @@ static int dev_new_index(struct net *net)
 
 /* Delayed registration/unregisteration */
 static LIST_HEAD(net_todo_list);
+DECLARE_WAIT_QUEUE_HEAD(netdev_unregistering_wq);
 
 static void net_set_todo(struct net_device *dev)
 {
 	list_add_tail(&dev->todo_list, &net_todo_list);
+	dev_net(dev)->dev_unreg_count++;
 }
 
 static void rollback_registered_many(struct list_head *head)
@@ -6573,6 +6571,12 @@ void netdev_run_todo(void)
 
 		if (dev->destructor)
 			dev->destructor(dev);
+
+		/* Report a network device has been unregistered */
+		rtnl_lock();
+		dev_net(dev)->dev_unreg_count--;
+		__rtnl_unlock();
+		wake_up(&netdev_unregistering_wq);
 
 		/* Free network device */
 		kobject_put(&dev->dev.kobj);
@@ -7314,7 +7318,7 @@ char *netdev_drivername(const struct net_device *dev, char *buffer, int len)
 	return buffer;
 }
 
-static int __netdev_printk(const char *level, const struct net_device *dev,
+int __netdev_printk(const char *level, const struct net_device *dev,
 			   struct va_format *vaf)
 {
 	int r;
@@ -7329,6 +7333,7 @@ static int __netdev_printk(const char *level, const struct net_device *dev,
 
 	return r;
 }
+EXPORT_SYMBOL(__netdev_printk);
 
 int netdev_printk(const char *level, const struct net_device *dev,
 		  const char *format, ...)

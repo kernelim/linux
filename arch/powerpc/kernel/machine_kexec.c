@@ -83,7 +83,8 @@ unsigned long long __init arch_default_crash_base(void)
 #endif
 }
 
-unsigned long long __init arch_default_crash_size(unsigned long long total_size)
+unsigned long long __init
+arch_crash_auto_scale(unsigned long long total_size, unsigned long long size)
 {
 	if (total_size < KEXEC_AUTO_THRESHOLD)
 		return 0;

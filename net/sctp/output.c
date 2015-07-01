@@ -375,7 +375,6 @@ int sctp_packet_transmit(struct sctp_packet *packet)
 	__u8 has_data = 0;
 	struct dst_entry *dst = tp->dst;
 	unsigned char *auth = NULL;	/* pointer to auth in skb data */
-	__u32 cksum_buf_len = sizeof(struct sctphdr);
 
 	SCTP_DEBUG_PRINTK("%s: packet:%p\n", __func__, packet);
 
@@ -478,7 +477,6 @@ int sctp_packet_transmit(struct sctp_packet *packet)
 		if (chunk == packet->auth)
 			auth = skb_tail_pointer(nskb);
 
-		cksum_buf_len += chunk->skb->len;
 		memcpy(skb_put(nskb, chunk->skb->len),
 			       chunk->skb->data, chunk->skb->len);
 
@@ -525,12 +523,7 @@ int sctp_packet_transmit(struct sctp_packet *packet)
 	 */
 	if (!sctp_checksum_disable) {
 		if (!(dst->dev->features & NETIF_F_SCTP_CSUM)) {
-			__u32 crc32 = sctp_start_cksum((__u8 *)sh, cksum_buf_len);
-
-			/* 3) Put the resultant value into the checksum field in the
-			 *    common header, and leave the rest of the bits unchanged.
-			 */
-			sh->checksum = sctp_end_cksum(crc32);
+			sh->checksum = sctp_compute_cksum(nskb, 0);
 		} else {
 			/* no need to seed pseudo checksum for SCTP */
 			nskb->ip_summed = CHECKSUM_PARTIAL;

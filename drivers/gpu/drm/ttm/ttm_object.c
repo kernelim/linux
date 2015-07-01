@@ -87,7 +87,7 @@ struct ttm_object_file {
  */
 
 struct ttm_object_device {
-	rwlock_t object_lock;
+	spinlock_t object_lock;
 	struct drm_open_hash object_hash;
 	atomic_t object_count;
 	struct ttm_mem_global *mem_glob;
@@ -170,12 +170,12 @@ int ttm_base_object_init(struct ttm_object_file *tfile,
 	base->refcount_release = refcount_release;
 	base->ref_obj_release = ref_obj_release;
 	base->object_type = object_type;
-	write_lock(&tdev->object_lock);
 	kref_init(&base->refcount);
-	ret = drm_ht_just_insert_please(&tdev->object_hash,
-					&base->hash,
-					(unsigned long)base, 31, 0, 0);
-	write_unlock(&tdev->object_lock);
+	spin_lock(&tdev->object_lock);
+	ret = drm_ht_just_insert_please_rcu(&tdev->object_hash,
+					    &base->hash,
+					    (unsigned long)base, 31, 0, 0);
+	spin_unlock(&tdev->object_lock);
 	if (unlikely(ret != 0))
 		goto out_err0;
 
@@ -187,7 +187,9 @@ int ttm_base_object_init(struct ttm_object_file *tfile,
 
 	return 0;
 out_err1:
-	(void)drm_ht_remove_item(&tdev->object_hash, &base->hash);
+	spin_lock(&tdev->object_lock);
+	(void)drm_ht_remove_item_rcu(&tdev->object_hash, &base->hash);
+	spin_unlock(&tdev->object_lock);
 out_err0:
 	return ret;
 }
@@ -199,63 +201,120 @@ static void ttm_release_base(struct kref *kref)
 	    container_of(kref, struct ttm_base_object, refcount);
 	struct ttm_object_device *tdev = base->tfile->tdev;
 
-	(void)drm_ht_remove_item(&tdev->object_hash, &base->hash);
-	write_unlock(&tdev->object_lock);
-	if (base->refcount_release) {
-		ttm_object_file_unref(&base->tfile);
+	spin_lock(&tdev->object_lock);
+	(void)drm_ht_remove_item_rcu(&tdev->object_hash, &base->hash);
+	spin_unlock(&tdev->object_lock);
+
+	/*
+	 * Note: We don't use synchronize_rcu() here because it's far
+	 * too slow. It's up to the user to free the object using
+	 * call_rcu() or ttm_base_object_kfree().
+	 */
+
+	ttm_object_file_unref(&base->tfile);
+	if (base->refcount_release)
 		base->refcount_release(&base);
-	}
-	write_lock(&tdev->object_lock);
 }
 
 void ttm_base_object_unref(struct ttm_base_object **p_base)
 {
 	struct ttm_base_object *base = *p_base;
-	struct ttm_object_device *tdev = base->tfile->tdev;
 
 	*p_base = NULL;
 
-	/*
-	 * Need to take the lock here to avoid racing with
-	 * users trying to look up the object.
-	 */
-
-	write_lock(&tdev->object_lock);
 	kref_put(&base->refcount, ttm_release_base);
-	write_unlock(&tdev->object_lock);
 }
 EXPORT_SYMBOL(ttm_base_object_unref);
 
 struct ttm_base_object *ttm_base_object_lookup(struct ttm_object_file *tfile,
 					       uint32_t key)
 {
-	struct ttm_object_device *tdev = tfile->tdev;
-	struct ttm_base_object *uninitialized_var(base);
+	struct ttm_base_object *base = NULL;
 	struct drm_hash_item *hash;
 	struct drm_open_hash *ht = &tfile->ref_hash[TTM_REF_USAGE];
 	int ret;
 
-	read_lock(&tdev->object_lock);
-	ret = drm_ht_find_item(ht, key, &hash);
+	rcu_read_lock();
+	ret = drm_ht_find_item_rcu(ht, key, &hash);
 
 	if (likely(ret == 0)) {
-		base = drm_hash_entry(hash, struct ttm_base_object, hash);
-		ret = kref_get_unless_zero(&base->refcount) ? 0 : -EINVAL;
+		base = drm_hash_entry(hash, struct ttm_ref_object, hash)->obj;
+		if (!kref_get_unless_zero(&base->refcount))
+			base = NULL;
 	}
-	read_unlock(&tdev->object_lock);
-
-	if (unlikely(ret != 0))
-		return NULL;
-
-	if (tfile != base->tfile && !base->shareable) {
-		pr_err("Attempted access of non-shareable object\n");
-		ttm_base_object_unref(&base);
-		return NULL;
-	}
+	rcu_read_unlock();
 
 	return base;
 }
 EXPORT_SYMBOL(ttm_base_object_lookup);
+
+struct ttm_base_object *
+ttm_base_object_lookup_for_ref(struct ttm_object_device *tdev, uint32_t key)
+{
+	struct ttm_base_object *base = NULL;
+	struct drm_hash_item *hash;
+	struct drm_open_hash *ht = &tdev->object_hash;
+	int ret;
+
+	rcu_read_lock();
+	ret = drm_ht_find_item_rcu(ht, key, &hash);
+
+	if (likely(ret == 0)) {
+		base = drm_hash_entry(hash, struct ttm_base_object, hash);
+		if (!kref_get_unless_zero(&base->refcount))
+			base = NULL;
+	}
+	rcu_read_unlock();
+
+	return base;
+}
+EXPORT_SYMBOL(ttm_base_object_lookup_for_ref);
+
+/**
+ * ttm_ref_object_exists - Check whether a caller has a valid ref object
+ * (has opened) a base object.
+ *
+ * @tfile: Pointer to a struct ttm_object_file identifying the caller.
+ * @base: Pointer to a struct base object.
+ *
+ * Checks wether the caller identified by @tfile has put a valid USAGE
+ * reference object on the base object identified by @base.
+ */
+bool ttm_ref_object_exists(struct ttm_object_file *tfile,
+			   struct ttm_base_object *base)
+{
+	struct drm_open_hash *ht = &tfile->ref_hash[TTM_REF_USAGE];
+	struct drm_hash_item *hash;
+	struct ttm_ref_object *ref;
+
+	rcu_read_lock();
+	if (unlikely(drm_ht_find_item_rcu(ht, base->hash.key, &hash) != 0))
+		goto out_false;
+
+	/*
+	 * Verify that the ref object is really pointing to our base object.
+	 * Our base object could actually be dead, and the ref object pointing
+	 * to another base object with the same handle.
+	 */
+	ref = drm_hash_entry(hash, struct ttm_ref_object, hash);
+	if (unlikely(base != ref->obj))
+		goto out_false;
+
+	/*
+	 * Verify that the ref->obj pointer was actually valid!
+	 */
+	rmb();
+	if (unlikely(atomic_read(&ref->kref.refcount) == 0))
+		goto out_false;
+
+	rcu_read_unlock();
+	return true;
+
+ out_false:
+	rcu_read_unlock();
+	return false;
+}
+EXPORT_SYMBOL(ttm_ref_object_exists);
 
 int ttm_ref_object_add(struct ttm_object_file *tfile,
 		       struct ttm_base_object *base,
@@ -445,7 +504,7 @@ ttm_object_device_init(struct ttm_mem_global *mem_glob,
 		return NULL;
 
 	tdev->mem_glob = mem_glob;
-	rwlock_init(&tdev->object_lock);
+	spin_lock_init(&tdev->object_lock);
 	atomic_set(&tdev->object_count, 0);
 	ret = drm_ht_create(&tdev->object_hash, hash_order);
 	if (ret != 0)
@@ -470,9 +529,9 @@ void ttm_object_device_release(struct ttm_object_device **p_tdev)
 
 	*p_tdev = NULL;
 
-	write_lock(&tdev->object_lock);
+	spin_lock(&tdev->object_lock);
 	drm_ht_remove(&tdev->object_hash);
-	write_unlock(&tdev->object_lock);
+	spin_unlock(&tdev->object_lock);
 
 	kfree(tdev);
 }
@@ -636,7 +695,7 @@ int ttm_prime_handle_to_fd(struct ttm_object_file *tfile,
 		}
 
 		dma_buf = dma_buf_export(prime, &tdev->ops,
-					 prime->size, flags);
+					 prime->size, flags, NULL);
 		if (IS_ERR(dma_buf)) {
 			ret = PTR_ERR(dma_buf);
 			ttm_mem_global_free(tdev->mem_glob,

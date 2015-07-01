@@ -76,6 +76,12 @@ struct snd_hwdep {
 	unsigned int exclusive:1;	/* exclusive access mode */
 };
 
+struct snd_hwdep2 {
+	struct snd_hwdep hwdep;
+	struct device *dev;
+	const struct attribute_group **groups;
+};
+
 extern int snd_hwdep_new(struct snd_card *card, char *id, int device,
 			 struct snd_hwdep **rhwdep);
 

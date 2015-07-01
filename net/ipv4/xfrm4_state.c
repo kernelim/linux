@@ -15,7 +15,7 @@
 
 static int xfrm4_init_flags(struct xfrm_state *x)
 {
-	if (ipv4_config.no_pmtu_disc)
+	if (xs_net(x)->sysctl_ip_no_pmtu_disc)
 		x->props.flags |= XFRM_STATE_NOPMTUDISC;
 	return 0;
 }

@@ -157,6 +157,7 @@ MODULE_PARM_DESC(txselect, \
 
 #define BOARD_QME7342 5
 #define BOARD_QMH7342 6
+#define BOARD_QMH7360 9
 #define IS_QMH(dd) (SYM_FIELD((dd)->revision, Revision, BoardID) == \
 		    BOARD_QMH7342)
 #define IS_QME(dd) (SYM_FIELD((dd)->revision, Revision, BoardID) == \
@@ -3616,6 +3617,10 @@ static unsigned qib_7322_boardname(struct qib_devdata *dd)
 		n = "InfiniPath_QME7362";
 		dd->flags |= QIB_HAS_QSFP;
 		break;
+	case BOARD_QMH7360:
+		n = "Intel IB QDR 1P FLR-QSFP Adptr";
+		dd->flags |= QIB_HAS_QSFP;
+		break;
 	case 15:
 		n = "InfiniPath_QLE7342_TEST";
 		dd->flags |= QIB_HAS_QSFP;
@@ -5177,8 +5182,6 @@ static void qib_get_7322_faststats(unsigned long opaque)
 		spin_lock_irqsave(&ppd->dd->eep_st_lock, flags);
 		traffic_wds -= ppd->dd->traffic_wds;
 		ppd->dd->traffic_wds += traffic_wds;
-		if (traffic_wds >= QIB_TRAFFIC_ACTIVE_THRESHOLD)
-			atomic_add(ACTIVITY_TIMER, &ppd->dd->active_time);
 		spin_unlock_irqrestore(&ppd->dd->eep_st_lock, flags);
 		if (ppd->cpspec->qdr_dfe_on && (ppd->link_speed_active &
 						QIB_IB_QDR) &&

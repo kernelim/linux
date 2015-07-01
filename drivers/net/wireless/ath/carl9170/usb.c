@@ -621,9 +621,16 @@ int __carl9170_exec_cmd(struct ar9170 *ar, struct carl9170_cmd *cmd,
 		goto err_free;
 	}
 
-	usb_fill_int_urb(urb, ar->udev, usb_sndintpipe(ar->udev,
-		AR9170_USB_EP_CMD), cmd, cmd->hdr.len + 4,
-		carl9170_usb_cmd_complete, ar, 1);
+	if (ar->usb_ep_cmd_is_bulk)
+		usb_fill_bulk_urb(urb, ar->udev,
+				  usb_sndbulkpipe(ar->udev, AR9170_USB_EP_CMD),
+				  cmd, cmd->hdr.len + 4,
+				  carl9170_usb_cmd_complete, ar);
+	else
+		usb_fill_int_urb(urb, ar->udev,
+				 usb_sndintpipe(ar->udev, AR9170_USB_EP_CMD),
+				 cmd, cmd->hdr.len + 4,
+				 carl9170_usb_cmd_complete, ar, 1);
 
 	if (free_buf)
 		urb->transfer_flags |= URB_FREE_BUFFER;
@@ -773,7 +780,11 @@ void carl9170_usb_stop(struct ar9170 *ar)
 	complete_all(&ar->cmd_wait);
 
 	/* This is required to prevent an early completion on _start */
+#if 0 /* Not in RHEL */
+	reinit_completion(&ar->cmd_wait);
+#else
 	INIT_COMPLETION(ar->cmd_wait);
+#endif
 
 	/*
 	 * Note:
@@ -1032,9 +1043,10 @@ static void carl9170_usb_firmware_step2(const struct firmware *fw,
 static int carl9170_usb_probe(struct usb_interface *intf,
 			      const struct usb_device_id *id)
 {
+	struct usb_endpoint_descriptor *ep;
 	struct ar9170 *ar;
 	struct usb_device *udev;
-	int err;
+	int i, err;
 
 	err = usb_reset_device(interface_to_usbdev(intf));
 	if (err)
@@ -1049,6 +1061,21 @@ static int carl9170_usb_probe(struct usb_interface *intf,
 	ar->udev = udev;
 	ar->intf = intf;
 	ar->features = id->driver_info;
+
+	/* We need to remember the type of endpoint 4 because it differs
+	 * between high- and full-speed configuration. The high-speed
+	 * configuration specifies it as interrupt and the full-speed
+	 * configuration as bulk endpoint. This information is required
+	 * later when sending urbs to that endpoint.
+	 */
+	for (i = 0; i < intf->cur_altsetting->desc.bNumEndpoints; ++i) {
+		ep = &intf->cur_altsetting->endpoint[i].desc;
+
+		if (usb_endpoint_num(ep) == AR9170_USB_EP_CMD &&
+		    usb_endpoint_dir_out(ep) &&
+		    usb_endpoint_type(ep) == USB_ENDPOINT_XFER_BULK)
+			ar->usb_ep_cmd_is_bulk = true;
+	}
 
 	usb_set_intfdata(intf, ar);
 	SET_IEEE80211_DEV(ar->hw, &intf->dev);
@@ -1076,8 +1103,14 @@ static int carl9170_usb_probe(struct usb_interface *intf,
 
 	carl9170_set_state(ar, CARL9170_STOPPED);
 
-	return request_firmware_nowait(THIS_MODULE, 1, CARL9170FW_NAME,
+	err = request_firmware_nowait(THIS_MODULE, 1, CARL9170FW_NAME,
 		&ar->udev->dev, GFP_KERNEL, ar, carl9170_usb_firmware_step2);
+	if (err) {
+		usb_put_dev(udev);
+		usb_put_dev(udev);
+		carl9170_free(ar);
+	}
+	return err;
 }
 
 static void carl9170_usb_disconnect(struct usb_interface *intf)
@@ -1166,9 +1199,7 @@ static struct usb_driver carl9170_driver = {
 	.resume = carl9170_usb_resume,
 	.reset_resume = carl9170_usb_resume,
 #endif /* CONFIG_PM */
-#if 0 /* Not in RHEL */
 	.disable_hub_initiated_lpm = 1,
-#endif
 };
 
 module_usb_driver(carl9170_driver);

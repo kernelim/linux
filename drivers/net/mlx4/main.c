@@ -125,6 +125,16 @@ static struct mlx4_profile default_profile = {
 	.num_mtt	= 1 << 20, /* It is really num mtt segements */
 };
 
+static struct mlx4_profile low_mem_profile = {
+	.num_qp		= 1 << 17,
+	.num_srq	= 1 << 6,
+	.rdmarc_per_qp	= 1 << 4,
+	.num_cq		= 1 << 8,
+	.num_mcg	= 1 << 8,
+	.num_mpt	= 1 << 9,
+	.num_mtt	= 1 << 7,
+};
+
 static int log_num_mac = 7;
 module_param_named(log_num_mac, log_num_mac, int, 0444);
 MODULE_PARM_DESC(log_num_mac, "Log2 max number of MACs per ETH port (1-7)");
@@ -134,11 +144,12 @@ module_param_named(log_num_vlan, log_num_vlan, int, 0444);
 MODULE_PARM_DESC(log_num_vlan, "Log2 max number of VLANs per ETH port (0-7)");
 /* Log2 max number of VLANs per ETH port (0-7) */
 #define MLX4_LOG_NUM_VLANS 7
+#define MLX4_MIN_LOG_NUM_VLANS 0
+#define MLX4_MIN_LOG_NUM_MAC 1
 
 static int use_prio;
 module_param_named(use_prio, use_prio, bool, 0444);
-MODULE_PARM_DESC(use_prio, "Enable steering by VLAN priority on ETH ports "
-		  "(0/1, default 0)");
+MODULE_PARM_DESC(use_prio, "Enable steering by VLAN priority on ETH ports (deprecated)");
 
 int log_mtts_per_seg = ilog2(MLX4_MTT_ENTRY_PER_SEG);
 module_param_named(log_mtts_per_seg, log_mtts_per_seg, int, 0444);
@@ -343,9 +354,13 @@ static int mlx4_dev_cap(struct mlx4_dev *dev, struct mlx4_dev_cap *dev_cap)
 	if (mlx4_is_mfunc(dev))
 		dev->caps.flags &= ~MLX4_DEV_CAP_FLAG_SENSE_SUPPORT;
 
-	dev->caps.log_num_macs  = log_num_mac;
-	dev->caps.log_num_vlans = MLX4_LOG_NUM_VLANS;
-	dev->caps.log_num_prios = use_prio ? 3 : 0;
+	if (mlx4_low_memory_profile()) {
+		dev->caps.log_num_macs  = MLX4_MIN_LOG_NUM_MAC;
+		dev->caps.log_num_vlans = MLX4_MIN_LOG_NUM_VLANS;
+	} else {
+		dev->caps.log_num_macs  = log_num_mac;
+		dev->caps.log_num_vlans = MLX4_LOG_NUM_VLANS;
+	}
 
 	for (i = 1; i <= dev->caps.num_ports; ++i) {
 		dev->caps.port_type[i] = MLX4_PORT_TYPE_NONE;
@@ -415,7 +430,6 @@ static int mlx4_dev_cap(struct mlx4_dev *dev, struct mlx4_dev_cap *dev_cap)
 		dev->caps.reserved_qps_cnt[MLX4_QP_REGION_FC_ADDR] =
 		(1 << dev->caps.log_num_macs) *
 		(1 << dev->caps.log_num_vlans) *
-		(1 << dev->caps.log_num_prios) *
 		dev->caps.num_ports;
 	dev->caps.reserved_qps_cnt[MLX4_QP_REGION_FC_EXCH] = MLX4_NUM_FEXCH;
 
@@ -1538,7 +1552,12 @@ static int mlx4_init_hca(struct mlx4_dev *dev)
 		if (mlx4_is_master(dev))
 			mlx4_parav_master_pf_caps(dev);
 
-		profile = default_profile;
+		if (mlx4_low_memory_profile()) {
+			mlx4_info(dev, "Running from within kdump kernel. Using low memory profile\n");
+			profile = low_mem_profile;
+		} else {
+			profile = default_profile;
+		}
 		if (dev->caps.steering_mode ==
 		    MLX4_STEERING_MODE_DEVICE_MANAGED)
 			profile.num_mcg = MLX4_FS_NUM_MCG;
@@ -2568,7 +2587,7 @@ static void __mlx4_remove_one(struct pci_dev *pdev)
 	/* in SRIOV it is not allowed to unload the pf's
 	 * driver while there are alive vf's */
 	if (mlx4_is_master(dev) && mlx4_how_many_lives_vf(dev))
-		printk(KERN_ERR "Removing PF when there are assigned VF's !!!\n");
+		pr_warn("Removing PF when there are assigned VF's !!!\n");
 	mlx4_stop_sense(dev);
 	mlx4_unregister_device(dev);
 
@@ -2739,22 +2758,26 @@ static struct pci_driver mlx4_driver = {
 static int __init mlx4_verify_params(void)
 {
 	if ((log_num_mac < 0) || (log_num_mac > 7)) {
-		printk(KERN_WARNING "mlx4_core: bad num_mac: %d\n", log_num_mac);
+		pr_warn("mlx4_core: bad num_mac: %d\n", log_num_mac);
 		return -1;
 	}
 
 	if (log_num_vlan != 0)
-		printk(KERN_WARNING "mlx4_core: log_num_vlan - obsolete module param, using %d\n",
-			   MLX4_LOG_NUM_VLANS);
+		pr_warn("mlx4_core: log_num_vlan - obsolete module param, using %d\n",
+			MLX4_LOG_NUM_VLANS);
+
+	if (use_prio != 0)
+		pr_warn("mlx4_core: use_prio - obsolete module param, ignored\n");
 
 	if ((log_mtts_per_seg < 1) || (log_mtts_per_seg > 7)) {
-		printk(KERN_WARNING "mlx4_core: bad log_mtts_per_seg: %d\n", log_mtts_per_seg);
+		pr_warn("mlx4_core: bad log_mtts_per_seg: %d\n",
+			log_mtts_per_seg);
 		return -1;
 	}
 
 	/* Check if module param for ports type has legal combination */
 	if (port_type_array[0] == false && port_type_array[1] == true) {
-		printk(KERN_WARNING "Module parameter configuration ETH/IB is not supported. Switching to default configuration IB/IB\n");
+		pr_warn("Module parameter configuration ETH/IB is not supported. Switching to default configuration IB/IB\n");
 		port_type_array[0] = true;
 	}
 

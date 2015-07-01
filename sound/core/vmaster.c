@@ -18,7 +18,7 @@
  * a subset of information returned via ctl info callback
  */
 struct link_ctl_info {
-	int type;		/* value type */
+	snd_ctl_elem_type_t type; /* value type */
 	int count;		/* item count */
 	int min_val, max_val;	/* min, max values */
 };
@@ -100,7 +100,7 @@ static int slave_init(struct link_slave *slave)
 	if (slave->info.count > 2  ||
 	    (slave->info.type != SNDRV_CTL_ELEM_TYPE_INTEGER &&
 	     slave->info.type != SNDRV_CTL_ELEM_TYPE_BOOLEAN)) {
-		snd_printk(KERN_ERR "invalid slave element\n");
+		pr_err("ALSA: vmaster: invalid slave element\n");
 		kfree(uinfo);
 		return -EINVAL;
 	}

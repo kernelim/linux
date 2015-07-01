@@ -39,6 +39,9 @@
 #warning This file is not supposed to be used outside of kernel.
 #endif
 
+/* IPv4 datagram length is stored into 16bit field (tot_len) */
+#define IP_MAX_MTU	0xFFF0U
+
 #define RTO_ONLINK	0x01
 
 #define RTO_CONN	0

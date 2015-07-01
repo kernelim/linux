@@ -528,6 +528,33 @@ static int search_for_mapped_con(void)
 	return retval;
 }
 
+static int do_fbcon_takeover(int show_logo)
+{
+	int err, i;
+
+	if (!num_registered_fb)
+		return -ENODEV;
+
+	if (!show_logo)
+		logo_shown = FBCON_LOGO_DONTSHOW;
+
+	for (i = first_fb_vc; i <= last_fb_vc; i++)
+		con2fb_map[i] = info_idx;
+
+	err = do_take_over_console(&fb_con, first_fb_vc, last_fb_vc,
+				fbcon_is_default);
+
+	if (err) {
+		for (i = first_fb_vc; i <= last_fb_vc; i++)
+			con2fb_map[i] = -1;
+		info_idx = -1;
+	} else {
+		fbcon_has_console_bind = 1;
+	}
+
+	return err;
+}
+
 static int fbcon_takeover(int show_logo)
 {
 	int err, i;
@@ -816,6 +843,8 @@ static void con2fb_init_display(struct vc_data *vc, struct fb_info *info,
  *
  *	Maps a virtual console @unit to a frame buffer device
  *	@newidx.
+ *
+ *	This should be called with the console lock held.
  */
 static int set_con2fb_map(int unit, int newidx, int user)
 {
@@ -833,7 +862,7 @@ static int set_con2fb_map(int unit, int newidx, int user)
 
 	if (!search_for_mapped_con() || !con_is_bound(&fb_con)) {
 		info_idx = newidx;
-		return fbcon_takeover(0);
+		return do_fbcon_takeover(0);
 	}
 
 	if (oldidx != -1)
@@ -841,7 +870,6 @@ static int set_con2fb_map(int unit, int newidx, int user)
 
 	found = search_fb_in_map(newidx);
 
-	acquire_console_sem();
 	con2fb_map[unit] = newidx;
 	if (!err && !found)
  		err = con2fb_acquire_newinfo(vc, info, unit, oldidx);
@@ -868,7 +896,6 @@ static int set_con2fb_map(int unit, int newidx, int user)
 	if (!search_fb_in_map(info_idx))
 		info_idx = newidx;
 
-	release_console_sem();
  	return err;
 }
 
@@ -2954,7 +2981,7 @@ static int fbcon_unbind(void)
 {
 	int ret;
 
-	ret = unbind_con_driver(&fb_con, first_fb_vc, last_fb_vc,
+	ret = do_unbind_con_driver(&fb_con, first_fb_vc, last_fb_vc,
 				fbcon_is_default);
 
 	if (!ret)
@@ -2969,6 +2996,7 @@ static inline int fbcon_unbind(void)
 }
 #endif /* CONFIG_VT_HW_CONSOLE_BINDING */
 
+/* called with console_lock held */
 static int fbcon_fb_unbind(int idx)
 {
 	int i, new_idx = -1, ret = 0;
@@ -2995,6 +3023,7 @@ static int fbcon_fb_unbind(int idx)
 	return ret;
 }
 
+/* called with console_lock held */
 static int fbcon_fb_unregistered(struct fb_info *info)
 {
 	int i, idx;
@@ -3027,11 +3056,12 @@ static int fbcon_fb_unregistered(struct fb_info *info)
 		primary_device = -1;
 
 	if (!num_registered_fb)
-		unregister_con_driver(&fb_con);
+		do_unregister_con_driver(&fb_con);
 
 	return 0;
 }
 
+/* called with console_lock held */
 static void fbcon_remap_all(int idx)
 {
 	int i;
@@ -3076,6 +3106,7 @@ static inline void fbcon_select_primary(struct fb_info *info)
 }
 #endif /* CONFIG_FRAMEBUFFER_DETECT_PRIMARY */
 
+/* called with console_lock held */
 static int fbcon_fb_registered(struct fb_info *info)
 {
 	int ret = 0, i, idx;
@@ -3092,7 +3123,7 @@ static int fbcon_fb_registered(struct fb_info *info)
 		}
 
 		if (info_idx != -1)
-			ret = fbcon_takeover(1);
+			ret = do_fbcon_takeover(1);
 	} else {
 		for (i = first_fb_vc; i <= last_fb_vc; i++) {
 			if (con2fb_map_boot[i] == idx)
@@ -3228,6 +3259,7 @@ static int fbcon_event_notify(struct notifier_block *self,
 		ret = fbcon_fb_unregistered(info);
 		break;
 	case FB_EVENT_SET_CONSOLE_MAP:
+		/* called with console lock held */
 		con2fb = event->data;
 		ret = set_con2fb_map(con2fb->console - 1,
 				     con2fb->framebuffer, 1);

@@ -12,13 +12,15 @@
  * for more details.
  *
  * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ * with this program; if not, see <http://www.gnu.org/licenses/>.
  *
  * The full GNU General Public License is included in this distribution in the
  * file called LICENSE.
  *
  */
+
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/device.h>
@@ -36,24 +38,28 @@
 #include <linux/rtnetlink.h>
 #include <linux/etherdevice.h>
 #include <net/net_namespace.h>
+#include <net/netns/generic.h>
+#include <linux/nsproxy.h>
+#include <linux/reciprocal_div.h>
 
 #include "bonding.h"
 
 #define to_dev(obj)	container_of(obj, struct device, kobj)
 #define to_bond(cd)	((struct bonding *)(netdev_priv(to_net_dev(cd))))
 
-/*
- * "show" function for the bond_masters attribute.
+/* "show" function for the bond_masters attribute.
  * The class parameter is ignored.
  */
 static ssize_t bonding_show_bonds(struct class *cls, char *buf)
 {
+	struct net *net = current->nsproxy->net_ns;
+	struct bond_net *bn = net_generic(net, bond_net_id);
 	int res = 0;
 	struct bonding *bond;
 
 	rtnl_lock();
 
-	list_for_each_entry(bond, &bond_dev_list, bond_list) {
+	list_for_each_entry(bond, &bn->dev_list, bond_list) {
 		if (res > (PAGE_SIZE - IFNAMSIZ)) {
 			/* not enough space for another interface name */
 			if ((PAGE_SIZE - res) > 10)
@@ -70,28 +76,27 @@ static ssize_t bonding_show_bonds(struct class *cls, char *buf)
 	return res;
 }
 
-static struct net_device *bond_get_by_name(const char *ifname)
+static struct net_device *bond_get_by_name(struct net *net, const char *ifname)
 {
+	struct bond_net *bn = net_generic(net, bond_net_id);
 	struct bonding *bond;
 
-	list_for_each_entry(bond, &bond_dev_list, bond_list) {
+	list_for_each_entry(bond, &bn->dev_list, bond_list) {
 		if (strncmp(bond->dev->name, ifname, IFNAMSIZ) == 0)
 			return bond->dev;
 	}
 	return NULL;
 }
 
-/*
- * "store" function for the bond_masters attribute.  This is what
+/* "store" function for the bond_masters attribute.  This is what
  * creates and deletes entire bonds.
  *
  * The class parameter is ignored.
- *
  */
-
 static ssize_t bonding_store_bonds(struct class *cls,
 				   const char *buffer, size_t count)
 {
+	struct net *net = current->nsproxy->net_ns;
 	char command[IFNAMSIZ + 1] = {0, };
 	char *ifname;
 	int rv, res = count;
@@ -103,25 +108,25 @@ static ssize_t bonding_store_bonds(struct class *cls,
 		goto err_no_cmd;
 
 	if (command[0] == '+') {
-		pr_info(DRV_NAME
-			": %s is being created...\n", ifname);
-		rv = bond_create(ifname);
+		pr_info("%s is being created...\n", ifname);
+		rv = bond_create(net, ifname);
 		if (rv) {
-			pr_info(DRV_NAME ": Bond creation failed.\n");
+			if (rv == -EEXIST)
+				pr_info("%s already exists\n", ifname);
+			else
+				pr_info("%s creation failed\n", ifname);
 			res = rv;
 		}
 	} else if (command[0] == '-') {
 		struct net_device *bond_dev;
 
 		rtnl_lock();
-		bond_dev = bond_get_by_name(ifname);
+		bond_dev = bond_get_by_name(net, ifname);
 		if (bond_dev) {
-			pr_info(DRV_NAME ": %s is being deleted...\n",
-				ifname);
+			pr_info("%s is being deleted...\n", ifname);
 			unregister_netdevice(bond_dev);
 		} else {
-			pr_err(DRV_NAME ": unable to delete non-existent %s\n",
-			       ifname);
+			pr_err("unable to delete non-existent %s\n", ifname);
 			res = -ENODEV;
 		}
 		rtnl_unlock();
@@ -134,8 +139,7 @@ static ssize_t bonding_store_bonds(struct class *cls,
 	return res;
 
 err_no_cmd:
-	pr_err(DRV_NAME ": no command found in bonding_masters."
-	       " Use +ifname or -ifname.\n");
+	pr_err("no command found in bonding_masters - use +ifname or -ifname\n");
 	return -EPERM;
 }
 
@@ -158,6 +162,11 @@ int bond_create_slave_symlinks(struct net_device *master,
 	sprintf(linkname, "slave_%s", slave->name);
 	ret = sysfs_create_link(&(master->dev.kobj), &(slave->dev.kobj),
 				linkname);
+
+	/* free the master link created earlier in case of error */
+	if (ret)
+		sysfs_remove_link(&(slave->dev.kobj), "master");
+
 	return ret;
 
 }
@@ -173,18 +182,38 @@ void bond_destroy_slave_symlinks(struct net_device *master,
 }
 
 
-/*
- * Show the slaves in the current bond.
- */
+/* Generic "store" method for bonding sysfs option setting */
+static ssize_t bonding_sysfs_store_option(struct device *d,
+					  struct device_attribute *attr,
+					  const char *buffer, size_t count)
+{
+	struct bonding *bond = to_bond(d);
+	const struct bond_option *opt;
+	int ret;
+
+	opt = bond_opt_get_by_name(attr->attr.name);
+	if (WARN_ON(!opt))
+		return -ENOENT;
+	ret = bond_opt_tryset_rtnl(bond, opt->id, (char *)buffer);
+	if (!ret)
+		ret = count;
+
+	return ret;
+}
+
+/* Show the slaves in the current bond. */
 static ssize_t bonding_show_slaves(struct device *d,
 				   struct device_attribute *attr, char *buf)
 {
-	struct slave *slave;
-	int i, res = 0;
 	struct bonding *bond = to_bond(d);
+	struct list_head *iter;
+	struct slave *slave;
+	int res = 0;
 
-	read_lock(&bond->lock);
-	bond_for_each_slave(bond, slave, i) {
+	if (!rtnl_trylock())
+		return restart_syscall();
+
+	bond_for_each_slave(bond, slave, iter) {
 		if (res > (PAGE_SIZE - IFNAMSIZ)) {
 			/* not enough space for another interface name */
 			if ((PAGE_SIZE - res) > 10)
@@ -194,395 +223,95 @@ static ssize_t bonding_show_slaves(struct device *d,
 		}
 		res += sprintf(buf + res, "%s ", slave->dev->name);
 	}
-	read_unlock(&bond->lock);
+
+	rtnl_unlock();
+
 	if (res)
 		buf[res-1] = '\n'; /* eat the leftover space */
+
 	return res;
 }
-
-/*
- * Set the slaves in the current bond.  The bond interface must be
- * up for this to succeed.
- * This function is largely the same flow as bonding_update_bonds().
- */
-static ssize_t bonding_store_slaves(struct device *d,
-				    struct device_attribute *attr,
-				    const char *buffer, size_t count)
-{
-	char command[IFNAMSIZ + 1] = { 0, };
-	char *ifname;
-	int i, res, found, ret = count;
-	struct slave *slave;
-	struct net_device *dev = NULL;
-	struct bonding *bond = to_bond(d);
-
-	/* Note:  We can't hold bond->lock here, as bond_create grabs it. */
-
-	if (!rtnl_trylock())
-		return restart_syscall();
-
-	sscanf(buffer, "%16s", command); /* IFNAMSIZ*/
-	ifname = command + 1;
-	if ((strlen(command) <= 1) ||
-	    !dev_valid_name(ifname))
-		goto err_no_cmd;
-
-	if (command[0] == '+') {
-
-		/* Got a slave name in ifname.  Is it already in the list? */
-		found = 0;
-
-		/* FIXME: get netns from sysfs object */
-		dev = __dev_get_by_name(&init_net, ifname);
-		if (!dev) {
-			pr_info(DRV_NAME
-			       ": %s: Interface %s does not exist!\n",
-			       bond->dev->name, ifname);
-			ret = -ENODEV;
-			goto out;
-		}
-
-		if (dev->flags & IFF_UP) {
-			pr_err(DRV_NAME
-			       ": %s: Error: Unable to enslave %s "
-			       "because it is already up.\n",
-			       bond->dev->name, dev->name);
-			ret = -EPERM;
-			goto out;
-		}
-
-		read_lock(&bond->lock);
-		bond_for_each_slave(bond, slave, i)
-			if (slave->dev == dev) {
-				pr_err(DRV_NAME
-				       ": %s: Interface %s is already enslaved!\n",
-				       bond->dev->name, ifname);
-				ret = -EPERM;
-				read_unlock(&bond->lock);
-				goto out;
-			}
-		read_unlock(&bond->lock);
-
-		pr_info(DRV_NAME ": %s: Adding slave %s.\n",
-			bond->dev->name, ifname);
-
-		res = bond_enslave(bond->dev, dev);
-		if (res)
-			ret = res;
-
-		goto out;
-	}
-
-	if (command[0] == '-') {
-		dev = NULL;
-		bond_for_each_slave(bond, slave, i)
-			if (strnicmp(slave->dev->name, ifname, IFNAMSIZ) == 0) {
-				dev = slave->dev;
-				break;
-			}
-		if (dev) {
-			pr_info(DRV_NAME ": %s: Removing slave %s\n",
-				bond->dev->name, dev->name);
-			res = bond_release(bond->dev, dev);
-			if (res)
-				ret = res;
-		} else {
-			pr_err(DRV_NAME ": unable to remove non-existent"
-			       " slave %s for bond %s.\n",
-				ifname, bond->dev->name);
-			ret = -ENODEV;
-		}
-		goto out;
-	}
-
-err_no_cmd:
-	pr_err(DRV_NAME ": no command found in slaves file for bond %s. Use +ifname or -ifname.\n", bond->dev->name);
-	ret = -EPERM;
-
-out:
-	rtnl_unlock();
-	return ret;
-}
-
 static DEVICE_ATTR(slaves, S_IRUGO | S_IWUSR, bonding_show_slaves,
-		   bonding_store_slaves);
+		   bonding_sysfs_store_option);
 
-/*
- * Show and set the bonding mode.  The bond interface must be down to
- * change the mode.
- */
+/* Show the bonding mode. */
 static ssize_t bonding_show_mode(struct device *d,
 				 struct device_attribute *attr, char *buf)
 {
 	struct bonding *bond = to_bond(d);
+	const struct bond_opt_value *val;
 
-	return sprintf(buf, "%s %d\n",
-			bond_mode_tbl[bond->params.mode].modename,
-			bond->params.mode);
-}
+	val = bond_opt_get_val(BOND_OPT_MODE, BOND_MODE(bond));
 
-static ssize_t bonding_store_mode(struct device *d,
-				  struct device_attribute *attr,
-				  const char *buf, size_t count)
-{
-	int new_value, ret = count;
-	struct bonding *bond = to_bond(d);
-
-	if (!rtnl_trylock())
-		return restart_syscall();
-
-	if (bond->dev->flags & IFF_UP) {
-		pr_err(DRV_NAME ": unable to update mode of %s"
-		       " because interface is up.\n", bond->dev->name);
-		ret = -EPERM;
-		goto out;
-	}
-
-	if (bond->slave_cnt > 0) {
-		pr_err("unable to update mode of %s because it has slaves.\n",
-			bond->dev->name);
-		ret = -EPERM;
-		goto out;
-	}
-
-	new_value = bond_parse_parm(buf, bond_mode_tbl);
-	if (new_value < 0)  {
-		pr_err(DRV_NAME
-		       ": %s: Ignoring invalid mode value %.*s.\n",
-		       bond->dev->name,
-		       (int)strlen(buf) - 1, buf);
-		ret = -EINVAL;
-		goto out;
-	}
-	if ((new_value == BOND_MODE_ALB ||
-	     new_value == BOND_MODE_TLB) &&
-	    bond->params.arp_interval) {
-		pr_err("%s: %s mode is incompatible with arp monitoring.\n",
-		       bond->dev->name, bond_mode_tbl[new_value].modename);
-		ret = -EINVAL;
-		goto out;
-	}
-	if (bond->params.mode == BOND_MODE_8023AD)
-		bond_unset_master_3ad_flags(bond);
-
-	if (bond->params.mode == BOND_MODE_ALB)
-		bond_unset_master_alb_flags(bond);
-
-	/* don't cache arp_validate between modes */
-	bond->params.arp_validate = BOND_ARP_VALIDATE_NONE;
-	bond->params.mode = new_value;
-	bond_set_mode_ops(bond, bond->params.mode);
-	pr_info(DRV_NAME ": %s: setting mode to %s (%d).\n",
-		bond->dev->name, bond_mode_tbl[new_value].modename,
-		new_value);
-out:
-	rtnl_unlock();
-	return ret;
+	return sprintf(buf, "%s %d\n", val->string, BOND_MODE(bond));
 }
 static DEVICE_ATTR(mode, S_IRUGO | S_IWUSR,
-		   bonding_show_mode, bonding_store_mode);
+		   bonding_show_mode, bonding_sysfs_store_option);
 
-/*
- * Show and set the bonding transmit hash method.
- * The bond interface must be down to change the xmit hash policy.
- */
+/* Show the bonding transmit hash method. */
 static ssize_t bonding_show_xmit_hash(struct device *d,
 				      struct device_attribute *attr,
 				      char *buf)
 {
 	struct bonding *bond = to_bond(d);
+	const struct bond_opt_value *val;
 
-	return sprintf(buf, "%s %d\n",
-		       xmit_hashtype_tbl[bond->params.xmit_policy].modename,
-		       bond->params.xmit_policy);
-}
+	val = bond_opt_get_val(BOND_OPT_XMIT_HASH, bond->params.xmit_policy);
 
-static ssize_t bonding_store_xmit_hash(struct device *d,
-				       struct device_attribute *attr,
-				       const char *buf, size_t count)
-{
-	int new_value, ret = count;
-	struct bonding *bond = to_bond(d);
-
-	if (bond->dev->flags & IFF_UP) {
-		pr_err(DRV_NAME
-		       "%s: Interface is up. Unable to update xmit policy.\n",
-		       bond->dev->name);
-		ret = -EPERM;
-		goto out;
-	}
-
-	new_value = bond_parse_parm(buf, xmit_hashtype_tbl);
-	if (new_value < 0)  {
-		pr_err(DRV_NAME
-		       ": %s: Ignoring invalid xmit hash policy value %.*s.\n",
-		       bond->dev->name,
-		       (int)strlen(buf) - 1, buf);
-		ret = -EINVAL;
-		goto out;
-	} else {
-		bond->params.xmit_policy = new_value;
-		bond_set_mode_ops(bond, bond->params.mode);
-		pr_info(DRV_NAME ": %s: setting xmit hash policy to %s (%d).\n",
-			bond->dev->name,
-			xmit_hashtype_tbl[new_value].modename, new_value);
-	}
-out:
-	return ret;
+	return sprintf(buf, "%s %d\n", val->string, bond->params.xmit_policy);
 }
 static DEVICE_ATTR(xmit_hash_policy, S_IRUGO | S_IWUSR,
-		   bonding_show_xmit_hash, bonding_store_xmit_hash);
+		   bonding_show_xmit_hash, bonding_sysfs_store_option);
 
-/*
- * Show and set arp_validate.
- */
+/* Show arp_validate. */
 static ssize_t bonding_show_arp_validate(struct device *d,
 					 struct device_attribute *attr,
 					 char *buf)
 {
 	struct bonding *bond = to_bond(d);
+	const struct bond_opt_value *val;
 
-	return sprintf(buf, "%s %d\n",
-		       arp_validate_tbl[bond->params.arp_validate].modename,
-		       bond->params.arp_validate);
+	val = bond_opt_get_val(BOND_OPT_ARP_VALIDATE,
+			       bond->params.arp_validate);
+
+	return sprintf(buf, "%s %d\n", val->string, bond->params.arp_validate);
 }
-
-static ssize_t bonding_store_arp_validate(struct device *d,
-					  struct device_attribute *attr,
-					  const char *buf, size_t count)
-{
-	struct bonding *bond = to_bond(d);
-	int new_value, ret = count;
-
-	if (!rtnl_trylock())
-		return restart_syscall();
-	new_value = bond_parse_parm(buf, arp_validate_tbl);
-	if (new_value < 0) {
-		pr_err(DRV_NAME
-		       ": %s: Ignoring invalid arp_validate value %s\n",
-		       bond->dev->name, buf);
-		ret = -EINVAL;
-		goto out;
-	}
-	if (bond->params.mode != BOND_MODE_ACTIVEBACKUP) {
-		pr_err(DRV_NAME
-		       ": %s: arp_validate only supported in active-backup mode.\n",
-		       bond->dev->name);
-		ret = -EINVAL;
-		goto out;
-	}
-	pr_info(DRV_NAME ": %s: setting arp_validate to %s (%d).\n",
-	       bond->dev->name, arp_validate_tbl[new_value].modename,
-	       new_value);
-
-	if (bond->dev->flags & IFF_UP) {
-		if (!new_value)
-			bond->recv_probe = NULL;
-		else if (bond->params.arp_interval)
-			bond->recv_probe = bond_arp_rcv;
-	}
-	bond->params.arp_validate = new_value;
-out:
-	rtnl_unlock();
-
-	return ret;
-}
-
 static DEVICE_ATTR(arp_validate, S_IRUGO | S_IWUSR, bonding_show_arp_validate,
-		   bonding_store_arp_validate);
-/*
- * Show and set arp_all_targets.
- */
+		   bonding_sysfs_store_option);
+
+/* Show arp_all_targets. */
 static ssize_t bonding_show_arp_all_targets(struct device *d,
 					 struct device_attribute *attr,
 					 char *buf)
 {
 	struct bonding *bond = to_bond(d);
-	int value = bond->params.arp_all_targets;
+	const struct bond_opt_value *val;
 
-	return sprintf(buf, "%s %d\n", arp_all_targets_tbl[value].modename,
-		       value);
+	val = bond_opt_get_val(BOND_OPT_ARP_ALL_TARGETS,
+			       bond->params.arp_all_targets);
+	return sprintf(buf, "%s %d\n",
+		       val->string, bond->params.arp_all_targets);
 }
-
-static ssize_t bonding_store_arp_all_targets(struct device *d,
-					  struct device_attribute *attr,
-					  const char *buf, size_t count)
-{
-	struct bonding *bond = to_bond(d);
-	int new_value;
-
-	new_value = bond_parse_parm(buf, arp_all_targets_tbl);
-	if (new_value < 0) {
-		pr_err("%s: Ignoring invalid arp_all_targets value %s\n",
-		       bond->dev->name, buf);
-		return -EINVAL;
-	}
-	pr_info("%s: setting arp_all_targets to %s (%d).\n",
-		bond->dev->name, arp_all_targets_tbl[new_value].modename,
-		new_value);
-
-	bond->params.arp_all_targets = new_value;
-
-	return count;
-}
-
 static DEVICE_ATTR(arp_all_targets, S_IRUGO | S_IWUSR,
-		   bonding_show_arp_all_targets, bonding_store_arp_all_targets);
+		   bonding_show_arp_all_targets, bonding_sysfs_store_option);
 
-/*
- * Show and store fail_over_mac.  User only allowed to change the
- * value when there are no slaves.
- */
+/* Show fail_over_mac. */
 static ssize_t bonding_show_fail_over_mac(struct device *d,
 					  struct device_attribute *attr,
 					  char *buf)
 {
 	struct bonding *bond = to_bond(d);
+	const struct bond_opt_value *val;
 
-	return sprintf(buf, "%s %d\n",
-		       fail_over_mac_tbl[bond->params.fail_over_mac].modename,
-		       bond->params.fail_over_mac);
+	val = bond_opt_get_val(BOND_OPT_FAIL_OVER_MAC,
+			       bond->params.fail_over_mac);
+
+	return sprintf(buf, "%s %d\n", val->string, bond->params.fail_over_mac);
 }
-
-static ssize_t bonding_store_fail_over_mac(struct device *d,
-					   struct device_attribute *attr,
-					   const char *buf, size_t count)
-{
-	int new_value;
-	struct bonding *bond = to_bond(d);
-
-	if (bond->slave_cnt != 0) {
-		pr_err(DRV_NAME
-		       ": %s: Can't alter fail_over_mac with slaves in bond.\n",
-		       bond->dev->name);
-		return -EPERM;
-	}
-
-	new_value = bond_parse_parm(buf, fail_over_mac_tbl);
-	if (new_value < 0) {
-		pr_err(DRV_NAME
-		       ": %s: Ignoring invalid fail_over_mac value %s.\n",
-		       bond->dev->name, buf);
-		return -EINVAL;
-	}
-
-	bond->params.fail_over_mac = new_value;
-	pr_info(DRV_NAME ": %s: Setting fail_over_mac to %s (%d).\n",
-	       bond->dev->name, fail_over_mac_tbl[new_value].modename,
-	       new_value);
-
-	return count;
-}
-
 static DEVICE_ATTR(fail_over_mac, S_IRUGO | S_IWUSR,
-		   bonding_show_fail_over_mac, bonding_store_fail_over_mac);
+		   bonding_show_fail_over_mac, bonding_sysfs_store_option);
 
-/*
- * Show and set the arp timer interval.  There are two tricky bits
- * here.  First, if ARP monitoring is activated, then we must disable
- * MII monitoring.  Second, if the ARP timer isn't running, we must
- * start it.
- */
+/* Show the arp timer interval. */
 static ssize_t bonding_show_arp_interval(struct device *d,
 					 struct device_attribute *attr,
 					 char *buf)
@@ -591,103 +320,16 @@ static ssize_t bonding_show_arp_interval(struct device *d,
 
 	return sprintf(buf, "%d\n", bond->params.arp_interval);
 }
-
-static ssize_t bonding_store_arp_interval(struct device *d,
-					  struct device_attribute *attr,
-					  const char *buf, size_t count)
-{
-	struct bonding *bond = to_bond(d);
-	int new_value, ret = count;
-
-	if (!rtnl_trylock())
-		return restart_syscall();
-	if (sscanf(buf, "%d", &new_value) != 1) {
-		pr_err(DRV_NAME
-		       ": %s: no arp_interval value specified.\n",
-		       bond->dev->name);
-		ret = -EINVAL;
-		goto out;
-	}
-	if (new_value < 0) {
-		pr_err(DRV_NAME
-		       ": %s: Invalid arp_interval value %d not in range 1-%d; rejected.\n",
-		       bond->dev->name, new_value, INT_MAX);
-		ret = -EINVAL;
-		goto out;
-	}
-	if (bond->params.mode == BOND_MODE_ALB ||
-	    bond->params.mode == BOND_MODE_TLB ||
-	    bond->params.mode == BOND_MODE_8023AD) {
-		pr_info("%s: ARP monitoring cannot be used with ALB/TLB/802.3ad. Only MII monitoring is supported on %s.\n",
-			bond->dev->name, bond->dev->name);
-		ret = -EINVAL;
-		goto out;
-	}
-	pr_info(DRV_NAME
-	       ": %s: Setting ARP monitoring interval to %d.\n",
-	       bond->dev->name, new_value);
-	bond->params.arp_interval = new_value;
-	if (bond->params.arp_interval)
-		bond->dev->priv_flags |= IFF_MASTER_ARPMON;
-	if (bond->params.miimon) {
-		pr_info(DRV_NAME
-		       ": %s: ARP monitoring cannot be used with MII monitoring. "
-		       "%s Disabling MII monitoring.\n",
-		       bond->dev->name, bond->dev->name);
-		bond->params.miimon = 0;
-		if (delayed_work_pending(&bond->mii_work)) {
-			cancel_delayed_work(&bond->mii_work);
-			flush_workqueue(bond->wq);
-		}
-	}
-	if (!bond->params.arp_targets[0]) {
-		pr_info(DRV_NAME
-		       ": %s: ARP monitoring has been set up, "
-		       "but no ARP targets have been specified.\n",
-		       bond->dev->name);
-	}
-	if (bond->dev->flags & IFF_UP) {
-		/* If the interface is up, we may need to fire off
-		 * the ARP timer.  If the interface is down, the
-		 * timer will get fired off when the open function
-		 * is called.
-		 */
-		if (!new_value) {
-			if (bond->params.arp_validate)
-				bond->recv_probe = NULL;
-		} else {
-			/* arp_validate can be set only in active-backup mode */
-			if (bond->params.arp_validate)
-				bond->recv_probe = bond_arp_rcv;
-		}
-		if (!delayed_work_pending(&bond->arp_work)) {
-			if (bond->params.mode == BOND_MODE_ACTIVEBACKUP)
-				INIT_DELAYED_WORK(&bond->arp_work,
-						  bond_activebackup_arp_mon);
-			else
-				INIT_DELAYED_WORK(&bond->arp_work,
-						  bond_loadbalance_arp_mon);
-
-			queue_delayed_work(bond->wq, &bond->arp_work, 0);
-		}
-	}
-
-out:
-	rtnl_unlock();
-	return ret;
-}
 static DEVICE_ATTR(arp_interval, S_IRUGO | S_IWUSR,
-		   bonding_show_arp_interval, bonding_store_arp_interval);
+		   bonding_show_arp_interval, bonding_sysfs_store_option);
 
-/*
- * Show and set the arp targets.
- */
+/* Show the arp targets. */
 static ssize_t bonding_show_arp_targets(struct device *d,
 					struct device_attribute *attr,
 					char *buf)
 {
-	int i, res = 0;
 	struct bonding *bond = to_bond(d);
+	int i, res = 0;
 
 	for (i = 0; i < BOND_MAX_ARP_TARGETS; i++) {
 		if (bond->params.arp_targets[i])
@@ -696,108 +338,13 @@ static ssize_t bonding_show_arp_targets(struct device *d,
 	}
 	if (res)
 		buf[res-1] = '\n'; /* eat the leftover space */
+
 	return res;
 }
+static DEVICE_ATTR(arp_ip_target, S_IRUGO | S_IWUSR,
+		   bonding_show_arp_targets, bonding_sysfs_store_option);
 
-static ssize_t bonding_store_arp_targets(struct device *d,
-					 struct device_attribute *attr,
-					 const char *buf, size_t count)
-{
-	struct bonding *bond = to_bond(d);
-	struct slave *slave;
-	__be32 newtarget, *targets;
-	unsigned long *targets_rx;
-	int ind, i, j, ret = -EINVAL;
-
-	targets = bond->params.arp_targets;
-	newtarget = in_aton(buf + 1);
-	/* look for adds */
-	if (buf[0] == '+') {
-		if ((newtarget == 0) || (newtarget == htonl(INADDR_BROADCAST))) {
-			pr_err(DRV_NAME
-			       ": %s: invalid ARP target %pI4 specified for addition\n",
-			       bond->dev->name, &newtarget);
-			goto out;
-		}
-
-		if (bond_get_targets_ip(targets, newtarget) != -1) { /* dup */
-			pr_err(DRV_NAME
-			       ": %s: ARP target %pI4 is already present\n",
-			       bond->dev->name, &newtarget);
-			goto out;
-		}
-
-		ind = bond_get_targets_ip(targets, 0); /* first free slot */
-		if (ind == -1) {
-			pr_err(DRV_NAME
-			       ": %s: ARP target table is full!\n",
-			       bond->dev->name);
-			goto out;
-		}
-
-		pr_info(DRV_NAME ": %s: adding ARP target %pI4.\n", bond->dev->name,
-			&newtarget);
-		/* not to race with bond_arp_rcv */
-		write_lock_bh(&bond->lock);
-		bond_for_each_slave(bond, slave, i)
-			slave->target_last_arp_rx[ind] = jiffies;
-		targets[ind] = newtarget;
-		write_unlock_bh(&bond->lock);
-	} else if (buf[0] == '-')	{
-		if ((newtarget == 0) || (newtarget == htonl(INADDR_BROADCAST))) {
-			pr_err(DRV_NAME
-			       ": %s: invalid ARP target %pI4 specified for removal\n",
-			       bond->dev->name, &newtarget);
-			goto out;
-		}
-
-		ind = bond_get_targets_ip(targets, newtarget);
-		if (ind == -1) {
-			pr_err(DRV_NAME
-			       ": %s: unable to remove nonexistent ARP target %pI4.\n",
-			       bond->dev->name, &newtarget);
-			goto out;
-		}
-
-		if (ind == 0 && !targets[1] && bond->params.arp_interval)
-			pr_warn(DRV_NAME
-				": %s: removing last arp target with arp_interval on\n",
-				bond->dev->name);
-
-		pr_info(DRV_NAME "%s: removing ARP target %pI4.\n", bond->dev->name,
-			&newtarget);
-
-		write_lock_bh(&bond->lock);
-		bond_for_each_slave(bond, slave, i) {
-			targets_rx = slave->target_last_arp_rx;
-			j = ind;
-			for (; (j < BOND_MAX_ARP_TARGETS-1) && targets[j+1]; j++)
-				targets_rx[j] = targets_rx[j+1];
-			targets_rx[j] = 0;
-		}
-		for (i = ind; (i < BOND_MAX_ARP_TARGETS-1) && targets[i+1]; i++)
-			targets[i] = targets[i+1];
-		targets[i] = 0;
-		write_unlock_bh(&bond->lock);
-	} else {
-		pr_err(DRV_NAME ": no command found in arp_ip_targets file"
-		       " for bond %s. Use +<addr> or -<addr>.\n",
-			bond->dev->name);
-		ret = -EPERM;
-		goto out;
-	}
-
-	ret = count;
-out:
-	return ret;
-}
-static DEVICE_ATTR(arp_ip_target, S_IRUGO | S_IWUSR , bonding_show_arp_targets, bonding_store_arp_targets);
-
-/*
- * Show and set the up and down delays.  These must be multiples of the
- * MII monitoring value, and are stored internally as the multiplier.
- * Thus, we must translate to MS for the real world.
- */
+/* Show the up and down delays. */
 static ssize_t bonding_show_downdelay(struct device *d,
 				      struct device_attribute *attr,
 				      char *buf)
@@ -806,58 +353,8 @@ static ssize_t bonding_show_downdelay(struct device *d,
 
 	return sprintf(buf, "%d\n", bond->params.downdelay * bond->params.miimon);
 }
-
-static ssize_t bonding_store_downdelay(struct device *d,
-				       struct device_attribute *attr,
-				       const char *buf, size_t count)
-{
-	int new_value, ret = count;
-	struct bonding *bond = to_bond(d);
-
-	if (!(bond->params.miimon)) {
-		pr_err(DRV_NAME
-		       ": %s: Unable to set down delay as MII monitoring is disabled\n",
-		       bond->dev->name);
-		ret = -EPERM;
-		goto out;
-	}
-
-	if (sscanf(buf, "%d", &new_value) != 1) {
-		pr_err(DRV_NAME
-		       ": %s: no down delay value specified.\n",
-		       bond->dev->name);
-		ret = -EINVAL;
-		goto out;
-	}
-	if (new_value < 0) {
-		pr_err(DRV_NAME
-		       ": %s: Invalid down delay value %d not in range %d-%d; rejected.\n",
-		       bond->dev->name, new_value, 1, INT_MAX);
-		ret = -EINVAL;
-		goto out;
-	} else {
-		if ((new_value % bond->params.miimon) != 0) {
-			pr_warning(DRV_NAME
-				   ": %s: Warning: down delay (%d) is not a "
-				   "multiple of miimon (%d), delay rounded "
-				   "to %d ms\n",
-				   bond->dev->name, new_value,
-				   bond->params.miimon,
-				   (new_value / bond->params.miimon) *
-				   bond->params.miimon);
-		}
-		bond->params.downdelay = new_value / bond->params.miimon;
-		pr_info(DRV_NAME ": %s: Setting down delay to %d.\n",
-		       bond->dev->name,
-		       bond->params.downdelay * bond->params.miimon);
-
-	}
-
-out:
-	return ret;
-}
 static DEVICE_ATTR(downdelay, S_IRUGO | S_IWUSR,
-		   bonding_show_downdelay, bonding_store_downdelay);
+		   bonding_show_downdelay, bonding_sysfs_store_option);
 
 static ssize_t bonding_show_updelay(struct device *d,
 				    struct device_attribute *attr,
@@ -868,251 +365,77 @@ static ssize_t bonding_show_updelay(struct device *d,
 	return sprintf(buf, "%d\n", bond->params.updelay * bond->params.miimon);
 
 }
-
-static ssize_t bonding_store_updelay(struct device *d,
-				     struct device_attribute *attr,
-				     const char *buf, size_t count)
-{
-	int new_value, ret = count;
-	struct bonding *bond = to_bond(d);
-
-	if (!(bond->params.miimon)) {
-		pr_err(DRV_NAME
-		       ": %s: Unable to set up delay as MII monitoring is disabled\n",
-		       bond->dev->name);
-		ret = -EPERM;
-		goto out;
-	}
-
-	if (sscanf(buf, "%d", &new_value) != 1) {
-		pr_err(DRV_NAME
-		       ": %s: no up delay value specified.\n",
-		       bond->dev->name);
-		ret = -EINVAL;
-		goto out;
-	}
-	if (new_value < 0) {
-		pr_err(DRV_NAME
-		       ": %s: Invalid down delay value %d not in range %d-%d; rejected.\n",
-		       bond->dev->name, new_value, 1, INT_MAX);
-		ret = -EINVAL;
-		goto out;
-	} else {
-		if ((new_value % bond->params.miimon) != 0) {
-			pr_warning(DRV_NAME
-				   ": %s: Warning: up delay (%d) is not a "
-				   "multiple of miimon (%d), updelay rounded "
-				   "to %d ms\n",
-				   bond->dev->name, new_value,
-				   bond->params.miimon,
-				   (new_value / bond->params.miimon) *
-				   bond->params.miimon);
-		}
-		bond->params.updelay = new_value / bond->params.miimon;
-		pr_info(DRV_NAME ": %s: Setting up delay to %d.\n",
-		       bond->dev->name, bond->params.updelay * bond->params.miimon);
-
-	}
-
-out:
-	return ret;
-}
 static DEVICE_ATTR(updelay, S_IRUGO | S_IWUSR,
-		   bonding_show_updelay, bonding_store_updelay);
+		   bonding_show_updelay, bonding_sysfs_store_option);
 
-/*
- * Show and set the LACP interval.  Interface must be down, and the mode
- * must be set to 802.3ad mode.
- */
+/* Show the LACP interval. */
 static ssize_t bonding_show_lacp(struct device *d,
 				 struct device_attribute *attr,
 				 char *buf)
 {
 	struct bonding *bond = to_bond(d);
+	const struct bond_opt_value *val;
 
-	return sprintf(buf, "%s %d\n",
-		bond_lacp_tbl[bond->params.lacp_fast].modename,
-		bond->params.lacp_fast);
-}
+	val = bond_opt_get_val(BOND_OPT_LACP_RATE, bond->params.lacp_fast);
 
-static ssize_t bonding_store_lacp(struct device *d,
-				  struct device_attribute *attr,
-				  const char *buf, size_t count)
-{
-	int new_value, ret = count;
-	struct bonding *bond = to_bond(d);
-
-	if (bond->dev->flags & IFF_UP) {
-		pr_err(DRV_NAME
-		       ": %s: Unable to update LACP rate because interface is up.\n",
-		       bond->dev->name);
-		ret = -EPERM;
-		goto out;
-	}
-
-	if (bond->params.mode != BOND_MODE_8023AD) {
-		pr_err(DRV_NAME
-		       ": %s: Unable to update LACP rate because bond is not in 802.3ad mode.\n",
-		       bond->dev->name);
-		ret = -EPERM;
-		goto out;
-	}
-
-	new_value = bond_parse_parm(buf, bond_lacp_tbl);
-
-	if ((new_value == 1) || (new_value == 0)) {
-		bond->params.lacp_fast = new_value;
-		bond_3ad_update_lacp_rate(bond);
-		pr_info(DRV_NAME ": %s: Setting LACP rate to %s (%d).\n",
-			bond->dev->name, bond_lacp_tbl[new_value].modename,
-			new_value);
-	} else {
-		pr_err(DRV_NAME
-		       ": %s: Ignoring invalid LACP rate value %.*s.\n",
-		       bond->dev->name, (int)strlen(buf) - 1, buf);
-		ret = -EINVAL;
-	}
-out:
-	return ret;
+	return sprintf(buf, "%s %d\n", val->string, bond->params.lacp_fast);
 }
 static DEVICE_ATTR(lacp_rate, S_IRUGO | S_IWUSR,
-		   bonding_show_lacp, bonding_store_lacp);
+		   bonding_show_lacp, bonding_sysfs_store_option);
+
+static ssize_t bonding_show_min_links(struct device *d,
+				      struct device_attribute *attr,
+				      char *buf)
+{
+	struct bonding *bond = to_bond(d);
+
+	return sprintf(buf, "%u\n", bond->params.min_links);
+}
+static DEVICE_ATTR(min_links, S_IRUGO | S_IWUSR,
+		   bonding_show_min_links, bonding_sysfs_store_option);
 
 static ssize_t bonding_show_ad_select(struct device *d,
 				      struct device_attribute *attr,
 				      char *buf)
 {
 	struct bonding *bond = to_bond(d);
+	const struct bond_opt_value *val;
 
-	return sprintf(buf, "%s %d\n",
-		ad_select_tbl[bond->params.ad_select].modename,
-		bond->params.ad_select);
-}
+	val = bond_opt_get_val(BOND_OPT_AD_SELECT, bond->params.ad_select);
 
-
-static ssize_t bonding_store_ad_select(struct device *d,
-				       struct device_attribute *attr,
-				       const char *buf, size_t count)
-{
-	int new_value, ret = count;
-	struct bonding *bond = to_bond(d);
-
-	if (bond->dev->flags & IFF_UP) {
-		pr_err(DRV_NAME
-		       ": %s: Unable to update ad_select because interface "
-		       "is up.\n", bond->dev->name);
-		ret = -EPERM;
-		goto out;
-	}
-
-	new_value = bond_parse_parm(buf, ad_select_tbl);
-
-	if (new_value != -1) {
-		bond->params.ad_select = new_value;
-		pr_info(DRV_NAME
-		       ": %s: Setting ad_select to %s (%d).\n",
-		       bond->dev->name, ad_select_tbl[new_value].modename,
-		       new_value);
-	} else {
-		pr_err(DRV_NAME
-		       ": %s: Ignoring invalid ad_select value %.*s.\n",
-		       bond->dev->name, (int)strlen(buf) - 1, buf);
-		ret = -EINVAL;
-	}
-out:
-	return ret;
+	return sprintf(buf, "%s %d\n", val->string, bond->params.ad_select);
 }
 static DEVICE_ATTR(ad_select, S_IRUGO | S_IWUSR,
-		   bonding_show_ad_select, bonding_store_ad_select);
+		   bonding_show_ad_select, bonding_sysfs_store_option);
 
-/*
- * Show and set the number of grat ARP to send after a failover event.
- */
-static ssize_t bonding_show_n_grat_arp(struct device *d,
-				   struct device_attribute *attr,
-				   char *buf)
+/* Show and set the number of peer notifications to send after a failover event. */
+static ssize_t bonding_show_num_peer_notif(struct device *d,
+					   struct device_attribute *attr,
+					   char *buf)
 {
 	struct bonding *bond = to_bond(d);
-
-	return sprintf(buf, "%d\n", bond->params.num_grat_arp);
+	return sprintf(buf, "%d\n", bond->params.num_peer_notif);
 }
 
-static ssize_t bonding_store_n_grat_arp(struct device *d,
-				    struct device_attribute *attr,
-				    const char *buf, size_t count)
+static ssize_t bonding_store_num_peer_notif(struct device *d,
+					    struct device_attribute *attr,
+					    const char *buf, size_t count)
 {
-	int new_value, ret = count;
 	struct bonding *bond = to_bond(d);
+	int ret;
 
-	if (sscanf(buf, "%d", &new_value) != 1) {
-		pr_err(DRV_NAME
-		       ": %s: no num_grat_arp value specified.\n",
-		       bond->dev->name);
-		ret = -EINVAL;
-		goto out;
-	}
-	if (new_value < 0 || new_value > 255) {
-		pr_err(DRV_NAME
-		       ": %s: Invalid num_grat_arp value %d not in range 0-255; rejected.\n",
-		       bond->dev->name, new_value);
-		ret = -EINVAL;
-		goto out;
-	} else {
-		bond->params.num_grat_arp = new_value;
-	}
-out:
+	ret = bond_opt_tryset_rtnl(bond, BOND_OPT_NUM_PEER_NOTIF, (char *)buf);
+	if (!ret)
+		ret = count;
+
 	return ret;
 }
 static DEVICE_ATTR(num_grat_arp, S_IRUGO | S_IWUSR,
-		   bonding_show_n_grat_arp, bonding_store_n_grat_arp);
-
-/*
- * Show and set the number of unsolicited NA's to send after a failover event.
- */
-static ssize_t bonding_show_n_unsol_na(struct device *d,
-				       struct device_attribute *attr,
-				       char *buf)
-{
-	struct bonding *bond = to_bond(d);
-
-	return sprintf(buf, "%d\n", bond->params.num_unsol_na);
-}
-
-static ssize_t bonding_store_n_unsol_na(struct device *d,
-					struct device_attribute *attr,
-					const char *buf, size_t count)
-{
-	int new_value, ret = count;
-	struct bonding *bond = to_bond(d);
-
-	if (sscanf(buf, "%d", &new_value) != 1) {
-		pr_err(DRV_NAME
-		       ": %s: no num_unsol_na value specified.\n",
-		       bond->dev->name);
-		ret = -EINVAL;
-		goto out;
-	}
-
-	if (new_value < 0 || new_value > 255) {
-		pr_err(DRV_NAME
-		       ": %s: Invalid num_unsol_na value %d not in range 0-255; rejected.\n",
-		       bond->dev->name, new_value);
-		ret = -EINVAL;
-		goto out;
-	} else
-		bond->params.num_unsol_na = new_value;
-out:
-	return ret;
-}
+		   bonding_show_num_peer_notif, bonding_store_num_peer_notif);
 static DEVICE_ATTR(num_unsol_na, S_IRUGO | S_IWUSR,
-		   bonding_show_n_unsol_na, bonding_store_n_unsol_na);
+		   bonding_show_num_peer_notif, bonding_store_num_peer_notif);
 
-/*
- * Show and set the MII monitor interval.  There are two tricky bits
- * here.  First, if MII monitoring is activated, then we must disable
- * ARP monitoring.  Second, if the timer isn't running, we must
- * start it.
- */
+/* Show the MII monitor interval. */
 static ssize_t bonding_show_miimon(struct device *d,
 				   struct device_attribute *attr,
 				   char *buf)
@@ -1121,219 +444,47 @@ static ssize_t bonding_show_miimon(struct device *d,
 
 	return sprintf(buf, "%d\n", bond->params.miimon);
 }
-
-static ssize_t bonding_store_miimon(struct device *d,
-				    struct device_attribute *attr,
-				    const char *buf, size_t count)
-{
-	int new_value, ret = count;
-	struct bonding *bond = to_bond(d);
-
-	if (sscanf(buf, "%d", &new_value) != 1) {
-		pr_err(DRV_NAME
-		       ": %s: no miimon value specified.\n",
-		       bond->dev->name);
-		ret = -EINVAL;
-		goto out;
-	}
-	if (new_value < 0) {
-		pr_err(DRV_NAME
-		       ": %s: Invalid miimon value %d not in range %d-%d; rejected.\n",
-		       bond->dev->name, new_value, 1, INT_MAX);
-		ret = -EINVAL;
-		goto out;
-	} else {
-		pr_info(DRV_NAME
-		       ": %s: Setting MII monitoring interval to %d.\n",
-		       bond->dev->name, new_value);
-		bond->params.miimon = new_value;
-		if (bond->params.updelay)
-			pr_info(DRV_NAME
-			      ": %s: Note: Updating updelay (to %d) "
-			      "since it is a multiple of the miimon value.\n",
-			      bond->dev->name,
-			      bond->params.updelay * bond->params.miimon);
-		if (bond->params.downdelay)
-			pr_info(DRV_NAME
-			      ": %s: Note: Updating downdelay (to %d) "
-			      "since it is a multiple of the miimon value.\n",
-			      bond->dev->name,
-			      bond->params.downdelay * bond->params.miimon);
-		if (bond->params.arp_interval) {
-			pr_info(DRV_NAME
-			       ": %s: MII monitoring cannot be used with "
-			       "ARP monitoring. Disabling ARP monitoring...\n",
-			       bond->dev->name);
-			bond->params.arp_interval = 0;
-			bond->dev->priv_flags &= ~IFF_MASTER_ARPMON;
-			if (bond->params.arp_validate) {
-				bond->params.arp_validate =
-					BOND_ARP_VALIDATE_NONE;
-			}
-			if (delayed_work_pending(&bond->arp_work)) {
-				cancel_delayed_work(&bond->arp_work);
-				flush_workqueue(bond->wq);
-			}
-		}
-
-		if (bond->dev->flags & IFF_UP) {
-			/* If the interface is up, we may need to fire off
-			 * the MII timer. If the interface is down, the
-			 * timer will get fired off when the open function
-			 * is called.
-			 */
-			if (!delayed_work_pending(&bond->mii_work)) {
-				INIT_DELAYED_WORK(&bond->mii_work,
-						  bond_mii_monitor);
-				queue_delayed_work(bond->wq,
-						   &bond->mii_work, 0);
-			}
-		}
-	}
-out:
-	return ret;
-}
 static DEVICE_ATTR(miimon, S_IRUGO | S_IWUSR,
-		   bonding_show_miimon, bonding_store_miimon);
+		   bonding_show_miimon, bonding_sysfs_store_option);
 
-/*
- * Show and set the primary slave.  The store function is much
- * simpler than bonding_store_slaves function because it only needs to
- * handle one interface name.
- * The bond must be a mode that supports a primary for this be
- * set.
- */
+/* Show the primary slave. */
 static ssize_t bonding_show_primary(struct device *d,
 				    struct device_attribute *attr,
 				    char *buf)
 {
+	struct bonding *bond = to_bond(d);
+	struct slave *primary;
 	int count = 0;
-	struct bonding *bond = to_bond(d);
 
-	if (bond->primary_slave)
-		count = sprintf(buf, "%s\n", bond->primary_slave->dev->name);
-
-	return count;
-}
-
-static ssize_t bonding_store_primary(struct device *d,
-				     struct device_attribute *attr,
-				     const char *buf, size_t count)
-{
-	int i;
-	struct slave *slave;
-	struct bonding *bond = to_bond(d);
-	char ifname[IFNAMSIZ];
-
-	if (!rtnl_trylock())
-		return restart_syscall();
-	block_netpoll_tx();
-	read_lock(&bond->lock);
-	write_lock_bh(&bond->curr_slave_lock);
-
-	if (!USES_PRIMARY(bond->params.mode)) {
-		pr_info(DRV_NAME
-			": %s: Unable to set primary slave; %s is in mode %d\n",
-			bond->dev->name, bond->dev->name, bond->params.mode);
-		goto out;
-	}
-
-	sscanf(buf, "%16s", ifname); /* IFNAMSIZ */
-
-	/* check to see if we are clearing primary */
-	if (!strlen(ifname) || buf[0] == '\n') {
-		pr_info(DRV_NAME
-		       ": %s: Setting primary slave to None.\n",
-		       bond->dev->name);
-		bond->primary_slave = NULL;
-		memset(bond->params.primary, 0, sizeof(bond->params.primary));
-		bond_select_active_slave(bond);
-		goto out;
-	}
-
-	bond_for_each_slave(bond, slave, i) {
-		if (strncmp(slave->dev->name, ifname, IFNAMSIZ) == 0) {
-			pr_info(DRV_NAME
-			       ": %s: Setting %s as primary slave.\n",
-			       bond->dev->name, slave->dev->name);
-			bond->primary_slave = slave;
-			strcpy(bond->params.primary, slave->dev->name);
-			bond_select_active_slave(bond);
-			goto out;
-		}
-	}
-
-	pr_info(DRV_NAME
-		": %s: Unable to set %.*s as primary slave.\n",
-		bond->dev->name, (int)strlen(buf) - 1, buf);
-out:
-	write_unlock_bh(&bond->curr_slave_lock);
-	read_unlock(&bond->lock);
-	unblock_netpoll_tx();
-	rtnl_unlock();
+	rcu_read_lock();
+	primary = rcu_dereference(bond->primary_slave);
+	if (primary)
+		count = sprintf(buf, "%s\n", primary->dev->name);
+	rcu_read_unlock();
 
 	return count;
 }
 static DEVICE_ATTR(primary, S_IRUGO | S_IWUSR,
-		   bonding_show_primary, bonding_store_primary);
+		   bonding_show_primary, bonding_sysfs_store_option);
 
-/*
- * Show and set the primary_reselect flag.
- */
+/* Show the primary_reselect flag. */
 static ssize_t bonding_show_primary_reselect(struct device *d,
 					     struct device_attribute *attr,
 					     char *buf)
 {
 	struct bonding *bond = to_bond(d);
+	const struct bond_opt_value *val;
+
+	val = bond_opt_get_val(BOND_OPT_PRIMARY_RESELECT,
+			       bond->params.primary_reselect);
 
 	return sprintf(buf, "%s %d\n",
-		       pri_reselect_tbl[bond->params.primary_reselect].modename,
-		       bond->params.primary_reselect);
-}
-
-static ssize_t bonding_store_primary_reselect(struct device *d,
-					      struct device_attribute *attr,
-					      const char *buf, size_t count)
-{
-	int new_value, ret = count;
-	struct bonding *bond = to_bond(d);
-
-	if (!rtnl_trylock())
-		return restart_syscall();
-
-	new_value = bond_parse_parm(buf, pri_reselect_tbl);
-	if (new_value < 0)  {
-		pr_err(DRV_NAME
-		       ": %s: Ignoring invalid primary_reselect value %.*s.\n",
-		       bond->dev->name,
-		       (int) strlen(buf) - 1, buf);
-		ret = -EINVAL;
-		goto out;
-	}
-
-	bond->params.primary_reselect = new_value;
-	pr_info(DRV_NAME ": %s: setting primary_reselect to %s (%d).\n",
-		bond->dev->name, pri_reselect_tbl[new_value].modename,
-		new_value);
-
-	block_netpoll_tx();
-	read_lock(&bond->lock);
-	write_lock_bh(&bond->curr_slave_lock);
-	bond_select_active_slave(bond);
-	write_unlock_bh(&bond->curr_slave_lock);
-	read_unlock(&bond->lock);
-	unblock_netpoll_tx();
-out:
-	rtnl_unlock();
-	return ret;
+		       val->string, bond->params.primary_reselect);
 }
 static DEVICE_ATTR(primary_reselect, S_IRUGO | S_IWUSR,
-		   bonding_show_primary_reselect,
-		   bonding_store_primary_reselect);
+		   bonding_show_primary_reselect, bonding_sysfs_store_option);
 
-/*
- * Show and set the use_carrier flag.
- */
+/* Show the use_carrier flag. */
 static ssize_t bonding_show_carrier(struct device *d,
 				    struct device_attribute *attr,
 				    char *buf)
@@ -1342,174 +493,43 @@ static ssize_t bonding_show_carrier(struct device *d,
 
 	return sprintf(buf, "%d\n", bond->params.use_carrier);
 }
-
-static ssize_t bonding_store_carrier(struct device *d,
-				     struct device_attribute *attr,
-				     const char *buf, size_t count)
-{
-	int new_value, ret = count;
-	struct bonding *bond = to_bond(d);
-
-
-	if (sscanf(buf, "%d", &new_value) != 1) {
-		pr_err(DRV_NAME
-		       ": %s: no use_carrier value specified.\n",
-		       bond->dev->name);
-		ret = -EINVAL;
-		goto out;
-	}
-	if ((new_value == 0) || (new_value == 1)) {
-		bond->params.use_carrier = new_value;
-		pr_info(DRV_NAME ": %s: Setting use_carrier to %d.\n",
-		       bond->dev->name, new_value);
-	} else {
-		pr_info(DRV_NAME
-		       ": %s: Ignoring invalid use_carrier value %d.\n",
-		       bond->dev->name, new_value);
-	}
-out:
-	return count;
-}
 static DEVICE_ATTR(use_carrier, S_IRUGO | S_IWUSR,
-		   bonding_show_carrier, bonding_store_carrier);
+		   bonding_show_carrier, bonding_sysfs_store_option);
 
 
-/*
- * Show and set currently active_slave.
- */
+/* Show currently active_slave. */
 static ssize_t bonding_show_active_slave(struct device *d,
 					 struct device_attribute *attr,
 					 char *buf)
 {
-	struct slave *curr;
 	struct bonding *bond = to_bond(d);
+	struct net_device *slave_dev;
 	int count = 0;
 
-	read_lock(&bond->curr_slave_lock);
-	curr = bond->curr_active_slave;
-	read_unlock(&bond->curr_slave_lock);
-
-	if (USES_PRIMARY(bond->params.mode) && curr)
-		count = sprintf(buf, "%s\n", curr->dev->name);
-	return count;
-}
-
-static ssize_t bonding_store_active_slave(struct device *d,
-					  struct device_attribute *attr,
-					  const char *buf, size_t count)
-{
-	int i;
-	struct slave *slave;
-	struct slave *old_active = NULL;
-	struct slave *new_active = NULL;
-	struct bonding *bond = to_bond(d);
-	char ifname[IFNAMSIZ];
-
-	if (!rtnl_trylock())
-		return restart_syscall();
-
-	block_netpoll_tx();
-	read_lock(&bond->lock);
-	write_lock_bh(&bond->curr_slave_lock);
-
-	if (!USES_PRIMARY(bond->params.mode)) {
-		pr_info(DRV_NAME
-			": %s: Unable to change active slave;"
-			" %s is in mode %d\n",
-			bond->dev->name, bond->dev->name, bond->params.mode);
-		goto out;
-	}
-
-	sscanf(buf, "%16s", ifname); /* IFNAMSIZ */
-
-	/* check to see if we are clearing primary */
-	if (!strlen(ifname) || buf[0] == '\n') {
-		pr_info(DRV_NAME
-			": %s: Clearing current active slave.\n",
-			bond->dev->name);
-		bond->curr_active_slave = NULL;
-		bond_select_active_slave(bond);
-		goto out;
-	}
-
-	bond_for_each_slave(bond, slave, i) {
-		if (strncmp(slave->dev->name, ifname, IFNAMSIZ) == 0) {
-			old_active = bond->curr_active_slave;
-			new_active = slave;
-			if (new_active == old_active) {
-				/* do nothing */
-				pr_info(DRV_NAME
-					": %s: %s is already the current"
-					" active slave.\n",
-					bond->dev->name,
-					slave->dev->name);
-				goto out;
-			}
-			else {
-				if ((new_active) &&
-				    (old_active) &&
-				    (new_active->link == BOND_LINK_UP) &&
-				    IS_UP(new_active->dev)) {
-					pr_info(DRV_NAME
-						": %s: Setting %s as active"
-						" slave.\n",
-						bond->dev->name,
-						slave->dev->name);
-					bond_change_active_slave(bond,
-								 new_active);
-				}
-				else {
-					pr_info(DRV_NAME
-						": %s: Could not set %s as"
-						" active slave; either %s is"
-						" down or the link is down.\n",
-						bond->dev->name,
-						slave->dev->name,
-						slave->dev->name);
-				}
-				goto out;
-			}
-		}
-	}
-
-	pr_info("%s: Unable to set %.*s as active slave.\n",
-		bond->dev->name, (int)strlen(buf) - 1, buf);
- out:
-	write_unlock_bh(&bond->curr_slave_lock);
-	read_unlock(&bond->lock);
-	unblock_netpoll_tx();
-
-	rtnl_unlock();
+	rcu_read_lock();
+	slave_dev = bond_option_active_slave_get_rcu(bond);
+	if (slave_dev)
+		count = sprintf(buf, "%s\n", slave_dev->name);
+	rcu_read_unlock();
 
 	return count;
-
 }
 static DEVICE_ATTR(active_slave, S_IRUGO | S_IWUSR,
-		   bonding_show_active_slave, bonding_store_active_slave);
+		   bonding_show_active_slave, bonding_sysfs_store_option);
 
-
-/*
- * Show link status of the bond interface.
- */
+/* Show link status of the bond interface. */
 static ssize_t bonding_show_mii_status(struct device *d,
 				       struct device_attribute *attr,
 				       char *buf)
 {
-	struct slave *curr;
 	struct bonding *bond = to_bond(d);
+	bool active = !!rcu_access_pointer(bond->curr_active_slave);
 
-	read_lock(&bond->curr_slave_lock);
-	curr = bond->curr_active_slave;
-	read_unlock(&bond->curr_slave_lock);
-
-	return sprintf(buf, "%s\n", curr ? "up" : "down");
+	return sprintf(buf, "%s\n", active ? "up" : "down");
 }
 static DEVICE_ATTR(mii_status, S_IRUGO, bonding_show_mii_status, NULL);
 
-
-/*
- * Show current 802.3ad aggregator ID.
- */
+/* Show current 802.3ad aggregator ID. */
 static ssize_t bonding_show_ad_aggregator(struct device *d,
 					  struct device_attribute *attr,
 					  char *buf)
@@ -1517,10 +537,10 @@ static ssize_t bonding_show_ad_aggregator(struct device *d,
 	int count = 0;
 	struct bonding *bond = to_bond(d);
 
-	if (bond->params.mode == BOND_MODE_8023AD) {
+	if (BOND_MODE(bond) == BOND_MODE_8023AD) {
 		struct ad_info ad_info;
 		count = sprintf(buf, "%d\n",
-				(bond_3ad_get_active_agg_info(bond, &ad_info))
+				bond_3ad_get_active_agg_info(bond, &ad_info)
 				?  0 : ad_info.aggregator_id);
 	}
 
@@ -1529,9 +549,7 @@ static ssize_t bonding_show_ad_aggregator(struct device *d,
 static DEVICE_ATTR(ad_aggregator, S_IRUGO, bonding_show_ad_aggregator, NULL);
 
 
-/*
- * Show number of active 802.3ad ports.
- */
+/* Show number of active 802.3ad ports. */
 static ssize_t bonding_show_ad_num_ports(struct device *d,
 					 struct device_attribute *attr,
 					 char *buf)
@@ -1539,10 +557,10 @@ static ssize_t bonding_show_ad_num_ports(struct device *d,
 	int count = 0;
 	struct bonding *bond = to_bond(d);
 
-	if (bond->params.mode == BOND_MODE_8023AD) {
+	if (BOND_MODE(bond) == BOND_MODE_8023AD) {
 		struct ad_info ad_info;
 		count = sprintf(buf, "%d\n",
-				(bond_3ad_get_active_agg_info(bond, &ad_info))
+				bond_3ad_get_active_agg_info(bond, &ad_info)
 				?  0 : ad_info.ports);
 	}
 
@@ -1551,9 +569,7 @@ static ssize_t bonding_show_ad_num_ports(struct device *d,
 static DEVICE_ATTR(ad_num_ports, S_IRUGO, bonding_show_ad_num_ports, NULL);
 
 
-/*
- * Show current 802.3ad actor key.
- */
+/* Show current 802.3ad actor key. */
 static ssize_t bonding_show_ad_actor_key(struct device *d,
 					 struct device_attribute *attr,
 					 char *buf)
@@ -1561,10 +577,10 @@ static ssize_t bonding_show_ad_actor_key(struct device *d,
 	int count = 0;
 	struct bonding *bond = to_bond(d);
 
-	if (bond->params.mode == BOND_MODE_8023AD) {
+	if (BOND_MODE(bond) == BOND_MODE_8023AD) {
 		struct ad_info ad_info;
 		count = sprintf(buf, "%d\n",
-				(bond_3ad_get_active_agg_info(bond, &ad_info))
+				bond_3ad_get_active_agg_info(bond, &ad_info)
 				?  0 : ad_info.actor_key);
 	}
 
@@ -1573,9 +589,7 @@ static ssize_t bonding_show_ad_actor_key(struct device *d,
 static DEVICE_ATTR(ad_actor_key, S_IRUGO, bonding_show_ad_actor_key, NULL);
 
 
-/*
- * Show current 802.3ad partner key.
- */
+/* Show current 802.3ad partner key. */
 static ssize_t bonding_show_ad_partner_key(struct device *d,
 					   struct device_attribute *attr,
 					   char *buf)
@@ -1583,10 +597,10 @@ static ssize_t bonding_show_ad_partner_key(struct device *d,
 	int count = 0;
 	struct bonding *bond = to_bond(d);
 
-	if (bond->params.mode == BOND_MODE_8023AD) {
+	if (BOND_MODE(bond) == BOND_MODE_8023AD) {
 		struct ad_info ad_info;
 		count = sprintf(buf, "%d\n",
-				(bond_3ad_get_active_agg_info(bond, &ad_info))
+				bond_3ad_get_active_agg_info(bond, &ad_info)
 				?  0 : ad_info.partner_key);
 	}
 
@@ -1595,9 +609,7 @@ static ssize_t bonding_show_ad_partner_key(struct device *d,
 static DEVICE_ATTR(ad_partner_key, S_IRUGO, bonding_show_ad_partner_key, NULL);
 
 
-/*
- * Show current 802.3ad partner mac.
- */
+/* Show current 802.3ad partner mac. */
 static ssize_t bonding_show_ad_partner_mac(struct device *d,
 					   struct device_attribute *attr,
 					   char *buf)
@@ -1605,7 +617,7 @@ static ssize_t bonding_show_ad_partner_mac(struct device *d,
 	int count = 0;
 	struct bonding *bond = to_bond(d);
 
-	if (bond->params.mode == BOND_MODE_8023AD) {
+	if (BOND_MODE(bond) == BOND_MODE_8023AD) {
 		struct ad_info ad_info;
 		if (!bond_3ad_get_active_agg_info(bond, &ad_info))
 			count = sprintf(buf, "%pM\n", ad_info.partner_system);
@@ -1615,24 +627,22 @@ static ssize_t bonding_show_ad_partner_mac(struct device *d,
 }
 static DEVICE_ATTR(ad_partner_mac, S_IRUGO, bonding_show_ad_partner_mac, NULL);
 
-/*
- * Show the queue_ids of the slaves in the current bond.
- */
+/* Show the queue_ids of the slaves in the current bond. */
 static ssize_t bonding_show_queue_id(struct device *d,
 				     struct device_attribute *attr,
 				     char *buf)
 {
-	struct slave *slave;
-	int i, res = 0;
 	struct bonding *bond = to_bond(d);
+	struct list_head *iter;
+	struct slave *slave;
+	int res = 0;
 
 	if (!rtnl_trylock())
 		return restart_syscall();
 
-	read_lock(&bond->lock);
-	bond_for_each_slave(bond, slave, i) {
-		if (res > (PAGE_SIZE - 6)) {
-			/* not enough space for another interface name */
+	bond_for_each_slave(bond, slave, iter) {
+		if (res > (PAGE_SIZE - IFNAMSIZ - 6)) {
+			/* not enough space for another interface_name:queue_id pair */
 			if ((PAGE_SIZE - res) > 10)
 				res = PAGE_SIZE - 10;
 			res += sprintf(buf + res, "++more++ ");
@@ -1641,98 +651,18 @@ static ssize_t bonding_show_queue_id(struct device *d,
 		res += sprintf(buf + res, "%s:%d ",
 			       slave->dev->name, slave->queue_id);
 	}
-	read_unlock(&bond->lock);
 	if (res)
 		buf[res-1] = '\n'; /* eat the leftover space */
+
 	rtnl_unlock();
+
 	return res;
 }
-
-/*
- * Set the queue_ids of the  slaves in the current bond.  The bond
- * interface must be enslaved for this to work.
- */
-static ssize_t bonding_store_queue_id(struct device *d,
-				      struct device_attribute *attr,
-				      const char *buffer, size_t count)
-{
-	struct slave *slave, *update_slave;
-	struct bonding *bond = to_bond(d);
-	u16 qid;
-	int i, ret = count;
-	char *delim;
-	struct net_device *sdev = NULL;
-
-	if (!rtnl_trylock())
-		return restart_syscall();
-
-	/* delim will point to queue id if successful */
-	delim = strchr(buffer, ':');
-	if (!delim)
-		goto err_no_cmd;
-
-	/*
-	 * Terminate string that points to device name and bump it
-	 * up one, so we can read the queue id there.
-	 */
-	*delim = '\0';
-	if (sscanf(++delim, "%hd\n", &qid) != 1)
-		goto err_no_cmd;
-
-	/* Check buffer length, valid ifname and queue id */
-	if (strlen(buffer) > IFNAMSIZ ||
-	    !dev_valid_name(buffer) ||
-	    qid > bond->params.tx_queues)
-		goto err_no_cmd;
-
-	/* Get the pointer to that interface if it exists */
-	sdev = __dev_get_by_name(dev_net(bond->dev), buffer);
-	if (!sdev)
-		goto err_no_cmd;
-
-	read_lock(&bond->lock);
-
-	/* Search for thes slave and check for duplicate qids */
-	update_slave = NULL;
-	bond_for_each_slave(bond, slave, i) {
-		if (sdev == slave->dev)
-			/*
-			 * We don't need to check the matching
-			 * slave for dups, since we're overwriting it
-			 */
-			update_slave = slave;
-		else if (qid && qid == slave->queue_id) {
-			goto err_no_cmd_unlock;
-		}
-	}
-
-	if (!update_slave)
-		goto err_no_cmd_unlock;
-
-	/* Actually set the qids for the slave */
-	update_slave->queue_id = qid;
-
-	read_unlock(&bond->lock);
-out:
-	rtnl_unlock();
-	return ret;
-
-err_no_cmd_unlock:
-	read_unlock(&bond->lock);
-err_no_cmd:
-	pr_info("invalid input for queue_id set for %s.\n",
-		bond->dev->name);
-	ret = -EPERM;
-	goto out;
-}
-
 static DEVICE_ATTR(queue_id, S_IRUGO | S_IWUSR, bonding_show_queue_id,
-		   bonding_store_queue_id);
+		   bonding_sysfs_store_option);
 
 
-/*
- * Show and set the all_slaves_active flag.
- */
+/* Show the all_slaves_active flag. */
 static ssize_t bonding_show_slaves_active(struct device *d,
 					  struct device_attribute *attr,
 					  char *buf)
@@ -1741,51 +671,10 @@ static ssize_t bonding_show_slaves_active(struct device *d,
 
 	return sprintf(buf, "%d\n", bond->params.all_slaves_active);
 }
-
-static ssize_t bonding_store_slaves_active(struct device *d,
-					   struct device_attribute *attr,
-					   const char *buf, size_t count)
-{
-	int i, new_value, ret = count;
-	struct bonding *bond = to_bond(d);
-	struct slave *slave;
-
-	if (sscanf(buf, "%d", &new_value) != 1) {
-		pr_err("%s: no all_slaves_active value specified.\n",
-		       bond->dev->name);
-		ret = -EINVAL;
-		goto out;
-	}
-
-	if (new_value == bond->params.all_slaves_active)
-		goto out;
-
-	if ((new_value == 0) || (new_value == 1)) {
-		bond->params.all_slaves_active = new_value;
-	} else {
-		pr_info("%s: Ignoring invalid all_slaves_active value %d.\n",
-			bond->dev->name, new_value);
-		ret = -EINVAL;
-		goto out;
-	}
-
-	bond_for_each_slave(bond, slave, i) {
-		if (slave->state == BOND_STATE_BACKUP) {
-			if (new_value)
-				slave->dev->priv_flags &= ~IFF_SLAVE_INACTIVE;
-			else
-				slave->dev->priv_flags |= IFF_SLAVE_INACTIVE;
-		}
-	}
-out:
-	return count;
-}
 static DEVICE_ATTR(all_slaves_active, S_IRUGO | S_IWUSR,
-		   bonding_show_slaves_active, bonding_store_slaves_active);
+		   bonding_show_slaves_active, bonding_sysfs_store_option);
 
-/*
- * Show and set the number of IGMP membership reports to send on link failure
- */
+/* Show the number of IGMP membership reports to send on link failure */
 static ssize_t bonding_show_resend_igmp(struct device *d,
 					struct device_attribute *attr,
 					char *buf)
@@ -1794,37 +683,45 @@ static ssize_t bonding_show_resend_igmp(struct device *d,
 
 	return sprintf(buf, "%d\n", bond->params.resend_igmp);
 }
+static DEVICE_ATTR(resend_igmp, S_IRUGO | S_IWUSR,
+		   bonding_show_resend_igmp, bonding_sysfs_store_option);
 
-static ssize_t bonding_store_resend_igmp(struct device *d,
-					 struct device_attribute *attr,
-					 const char *buf, size_t count)
+
+static ssize_t bonding_show_lp_interval(struct device *d,
+					struct device_attribute *attr,
+					char *buf)
 {
-	int new_value, ret = count;
 	struct bonding *bond = to_bond(d);
 
-	if (sscanf(buf, "%d", &new_value) != 1) {
-		pr_err("%s: no resend_igmp value specified.\n",
-		       bond->dev->name);
-		ret = -EINVAL;
-		goto out;
-	}
-
-	if (new_value < 0 || new_value > 255) {
-		pr_err("%s: Invalid resend_igmp value %d not in range 0-255; rejected.\n",
-		       bond->dev->name, new_value);
-		ret = -EINVAL;
-		goto out;
-	}
-
-	pr_info("%s: Setting resend_igmp to %d.\n",
-		bond->dev->name, new_value);
-	bond->params.resend_igmp = new_value;
-out:
-	return ret;
+	return sprintf(buf, "%d\n", bond->params.lp_interval);
 }
+static DEVICE_ATTR(lp_interval, S_IRUGO | S_IWUSR,
+		   bonding_show_lp_interval, bonding_sysfs_store_option);
 
-static DEVICE_ATTR(resend_igmp, S_IRUGO | S_IWUSR,
-		   bonding_show_resend_igmp, bonding_store_resend_igmp);
+static ssize_t bonding_show_tlb_dynamic_lb(struct device *d,
+					   struct device_attribute *attr,
+					   char *buf)
+{
+	struct bonding *bond = to_bond(d);
+	return sprintf(buf, "%d\n", bond->params.tlb_dynamic_lb);
+}
+static DEVICE_ATTR(tlb_dynamic_lb, S_IRUGO | S_IWUSR,
+		   bonding_show_tlb_dynamic_lb, bonding_sysfs_store_option);
+
+static ssize_t bonding_show_packets_per_slave(struct device *d,
+					      struct device_attribute *attr,
+					      char *buf)
+{
+	struct bonding *bond = to_bond(d);
+	unsigned int packets_per_slave = bond->params.packets_per_slave;
+
+	if (packets_per_slave > 1)
+		packets_per_slave = reciprocal_value(packets_per_slave);
+
+	return sprintf(buf, "%u\n", packets_per_slave);
+}
+static DEVICE_ATTR(packets_per_slave, S_IRUGO | S_IWUSR,
+		   bonding_show_packets_per_slave, bonding_sysfs_store_option);
 
 static struct attribute *per_bond_attrs[] = {
 	&dev_attr_slaves.attr,
@@ -1855,6 +752,10 @@ static struct attribute *per_bond_attrs[] = {
 	&dev_attr_queue_id.attr,
 	&dev_attr_all_slaves_active.attr,
 	&dev_attr_resend_igmp.attr,
+	&dev_attr_min_links.attr,
+	&dev_attr_lp_interval.attr,
+	&dev_attr_packets_per_slave.attr,
+	&dev_attr_tlb_dynamic_lb.attr,
 	NULL,
 };
 
@@ -1863,8 +764,7 @@ static struct attribute_group bonding_group = {
 	.attrs = per_bond_attrs,
 };
 
-/*
- * Initialize sysfs.  This sets up the bonding_masters file in
+/* Initialize sysfs.  This sets up the bonding_masters file in
  * /sys/class/net.
  */
 int bond_create_sysfs(void)
@@ -1872,8 +772,7 @@ int bond_create_sysfs(void)
 	int ret;
 
 	ret = netdev_class_create_file(&class_attr_bonding_masters);
-	/*
-	 * Permit multiple loads of the module by ignoring failures to
+	/* Permit multiple loads of the module by ignoring failures to
 	 * create the bonding_masters sysfs file.  Bonding devices
 	 * created by second or subsequent loads of the module will
 	 * not be listed in, or controllable by, bonding_masters, but
@@ -1887,8 +786,7 @@ int bond_create_sysfs(void)
 		/* Is someone being kinky and naming a device bonding_master? */
 		if (__dev_get_by_name(&init_net,
 				      class_attr_bonding_masters.attr.name))
-			pr_err("network device named %s already "
-			       "exists in sysfs",
+			pr_err("network device named %s already exists in sysfs\n",
 			       class_attr_bonding_masters.attr.name);
 		ret = 0;
 	}
@@ -1897,36 +795,17 @@ int bond_create_sysfs(void)
 
 }
 
-/*
- * Remove /sys/class/net/bonding_masters.
- */
+/* Remove /sys/class/net/bonding_masters. */
 void bond_destroy_sysfs(void)
 {
 	netdev_class_remove_file(&class_attr_bonding_masters);
 }
 
-/*
- * Initialize sysfs for each bond.  This sets up and registers
+/* Initialize sysfs for each bond.  This sets up and registers
  * the 'bondctl' directory for each individual bond under /sys/class/net.
  */
-int bond_create_sysfs_entry(struct bonding *bond)
+void bond_prepare_sysfs_group(struct bonding *bond)
 {
-	struct net_device *dev = bond->dev;
-	int err;
-
-	err = sysfs_create_group(&(dev->dev.kobj), &bonding_group);
-	if (err)
-		pr_emerg("eek! didn't create group!\n");
-
-	return err;
-}
-/*
- * Remove sysfs entries for each bond.
- */
-void bond_destroy_sysfs_entry(struct bonding *bond)
-{
-	struct net_device *dev = bond->dev;
-
-	sysfs_remove_group(&(dev->dev.kobj), &bonding_group);
+	bond->dev->sysfs_groups[0] = &bonding_group;
 }
 

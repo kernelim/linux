@@ -130,17 +130,10 @@ static int sis_drm_alloc(struct drm_device *dev, struct drm_file *file,
 	if (retval)
 		goto fail_alloc;
 
-again:
-	if (idr_pre_get(&dev_priv->object_idr, GFP_KERNEL) == 0) {
-		retval = -ENOMEM;
+	retval = idr_alloc(&dev_priv->object_idr, item, 1, 0, GFP_KERNEL);
+	if (retval < 0)
 		goto fail_idr;
-	}
-
-	retval = idr_get_new_above(&dev_priv->object_idr, item, 1, &user_key);
-	if (retval == -EAGAIN)
-		goto again;
-	if (retval)
-		goto fail_idr;
+	user_key = retval;
 
 	list_add(&item->owner_list, &file_priv->obj_list);
 	mutex_unlock(&dev->struct_mutex);
@@ -326,12 +319,12 @@ void sis_reclaim_buffers_locked(struct drm_device *dev,
 	if (!(file->minor->master && file->master->lock.hw_lock))
 		return;
 
-	drm_idlelock_take(&file->master->lock);
+	drm_legacy_idlelock_take(&file->master->lock);
 
 	mutex_lock(&dev->struct_mutex);
 	if (list_empty(&file_priv->obj_list)) {
 		mutex_unlock(&dev->struct_mutex);
-		drm_idlelock_release(&file->master->lock);
+		drm_legacy_idlelock_release(&file->master->lock);
 
 		return;
 	}
@@ -352,7 +345,7 @@ void sis_reclaim_buffers_locked(struct drm_device *dev,
 	}
 	mutex_unlock(&dev->struct_mutex);
 
-	drm_idlelock_release(&file->master->lock);
+	drm_legacy_idlelock_release(&file->master->lock);
 
 	return;
 }
@@ -366,4 +359,4 @@ const struct drm_ioctl_desc sis_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(SIS_FB_INIT, sis_fb_init, DRM_AUTH | DRM_MASTER | DRM_ROOT_ONLY),
 };
 
-int sis_max_ioctl = DRM_ARRAY_SIZE(sis_ioctls);
+int sis_max_ioctl = ARRAY_SIZE(sis_ioctls);

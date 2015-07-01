@@ -54,7 +54,7 @@
 #ifndef __sctp_structs_h__
 #define __sctp_structs_h__
 
-#include <linux/time.h>		/* We get struct timespec.    */
+#include <linux/ktime.h>
 #include <linux/socket.h>	/* linux/in.h needs this!!    */
 #include <linux/in.h>		/* We get struct sockaddr_in. */
 #include <linux/in6.h>		/* We get struct in6_addr     */
@@ -409,7 +409,7 @@ struct sctp_cookie {
 	__u32 peer_ttag;
 
 	/* When does this cookie expire? */
-	struct timeval expiration;
+	ktime_t expiration;
 
 	/* Number of inbound/outbound streams which are set
 	 * and negotiated during the INIT process.
@@ -977,10 +977,10 @@ struct sctp_transport {
 	unsigned long sackdelay;
 	__u32 sackfreq;
 
-	/* When was the last time (in jiffies) that we heard from this
-	 * transport?  We use this to pick new active and retran paths.
+	/* When was the last time that we heard from this transport? We use
+	 * this to pick new active and retran paths.
 	 */
-	unsigned long last_time_heard;
+	ktime_t last_time_heard;
 
 	/* Last time(in jiffies) when cwnd is reduced due to the congestion
 	 * indication based on ECNE chunk.
@@ -1393,6 +1393,7 @@ struct sctp_endpoint {
 	/* SCTP-AUTH: endpoint shared keys */
 	struct list_head endpoint_shared_keys;
 	__u16 active_key_id;
+	__u8  auth_enable;
 };
 
 /* Recover the outter endpoint structure. */
@@ -1421,9 +1422,10 @@ struct sctp_endpoint *sctp_endpoint_is_match(struct sctp_endpoint *,
 int sctp_has_association(const union sctp_addr *laddr,
 			 const union sctp_addr *paddr);
 
-int sctp_verify_init(const struct sctp_association *asoc, sctp_cid_t,
-		     sctp_init_chunk_t *peer_init, struct sctp_chunk *chunk,
-		     struct sctp_chunk **err_chunk);
+int sctp_verify_init(const struct sctp_endpoint *ep,
+		     const struct sctp_association *asoc,
+		     sctp_cid_t, sctp_init_chunk_t *peer_init,
+		     struct sctp_chunk *chunk, struct sctp_chunk **err_chunk);
 int sctp_process_init(struct sctp_association *, struct sctp_chunk *chunk,
 		      const union sctp_addr *peer,
 		      sctp_init_chunk_t *init, gfp_t gfp);
@@ -1678,7 +1680,7 @@ struct sctp_association {
 	sctp_state_t state;
 
 	/* The cookie life I award for any cookie.  */
-	struct timeval cookie_life;
+	ktime_t cookie_life;
 
 	/* Overall     : The overall association error count.
 	 * Error Count : [Clear this any time I get something.]

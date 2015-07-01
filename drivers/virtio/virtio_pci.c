@@ -192,12 +192,8 @@ static void vp_notify(struct virtqueue *vq)
 static irqreturn_t vp_config_changed(int irq, void *opaque)
 {
 	struct virtio_pci_device *vp_dev = opaque;
-	struct virtio_driver *drv;
-	drv = container_of(vp_dev->vdev.dev.driver,
-			   struct virtio_driver, driver);
 
-	if (drv && drv->config_changed)
-		drv->config_changed(&vp_dev->vdev);
+	virtio_config_changed(&vp_dev->vdev);
 	return IRQ_HANDLED;
 }
 
@@ -621,6 +617,13 @@ static int vp_set_vq_affinity(struct virtqueue *vq, int cpu)
 	return 0;
 }
 
+static const char *vp_bus_name(struct virtio_device *vdev)
+{
+	struct virtio_pci_device *vp_dev = to_vp_device(vdev);
+
+	return pci_name(vp_dev->pci_dev);
+}
+
 static struct virtio_config_ops virtio_pci_config_ops = {
 	.get		= vp_get,
 	.set		= vp_set,
@@ -632,15 +635,18 @@ static struct virtio_config_ops virtio_pci_config_ops = {
 	.get_features	= vp_get_features,
 	.finalize_features = vp_finalize_features,
 	.set_vq_affinity = vp_set_vq_affinity,
+	.bus_name	= vp_bus_name,
 };
 
 static void virtio_pci_release_dev(struct device *_d)
 {
-	/*
-	 * No need for a release method as we allocate/free
-	 * all devices together with the pci devices.
-	 * Provide an empty one to avoid getting a warning from core.
-	 */
+	struct pci_dev *pci_dev = to_pci_dev(_d);
+	struct virtio_pci_device *vp_dev = pci_get_drvdata(pci_dev);
+
+	/* As struct device is a kobject, it's not safe to
+	 * free the memory (including the reference counter itself)
+	 * until it's release callback. */
+	kfree(vp_dev);
 }
 
 /* the PCI probing function */
@@ -689,6 +695,7 @@ static int __devinit virtio_pci_probe(struct pci_dev *pci_dev,
 		goto out_req_regions;
 
 	pci_set_drvdata(pci_dev, vp_dev);
+	pci_set_master(pci_dev);
 
 	/* we use the subsystem vendor/device id as the virtio vendor/device
 	 * id.  this allows us to use the same PCI vendor/device id for all
@@ -727,7 +734,6 @@ static void __devexit virtio_pci_remove(struct pci_dev *pci_dev)
 	pci_iounmap(pci_dev, vp_dev->ioaddr);
 	pci_release_regions(pci_dev);
 	pci_disable_device(pci_dev);
-	kfree(vp_dev);
 }
 
 #ifdef CONFIG_PM

@@ -214,24 +214,31 @@ int vmbus_connect(void)
 
 cleanup:
 	pr_err("Unable to connect to host\n");
-	vmbus_connection.conn_state = DISCONNECTED;
 
-	if (vmbus_connection.work_queue)
+	vmbus_connection.conn_state = DISCONNECTED;
+	vmbus_disconnect();
+
+	kfree(msginfo);
+
+	return ret;
+}
+
+void vmbus_disconnect(void)
+{
+	if (vmbus_connection.work_queue) {
+		flush_workqueue(vmbus_connection.work_queue);
 		destroy_workqueue(vmbus_connection.work_queue);
+	}
 
 	if (vmbus_connection.int_page) {
 		free_pages((unsigned long)vmbus_connection.int_page, 0);
 		vmbus_connection.int_page = NULL;
 	}
 
-	free_pages((unsigned long)vmbus_connection.monitor_pages[0], 1);
-	free_pages((unsigned long)vmbus_connection.monitor_pages[1], 1);
+	free_pages((unsigned long)vmbus_connection.monitor_pages[0], 0);
+	free_pages((unsigned long)vmbus_connection.monitor_pages[1], 0);
 	vmbus_connection.monitor_pages[0] = NULL;
 	vmbus_connection.monitor_pages[1] = NULL;
-
-	kfree(msginfo);
-
-	return ret;
 }
 
 /*
@@ -427,10 +434,21 @@ int vmbus_post_msg(void *buffer, size_t buflen)
 	 * insufficient resources. Retry the operation a couple of
 	 * times before giving up.
 	 */
-	while (retries < 3) {
-		ret =  hv_post_message(conn_id, 1, buffer, buflen);
-		if (ret != HV_STATUS_INSUFFICIENT_BUFFERS)
+	while (retries < 10) {
+		ret = hv_post_message(conn_id, 1, buffer, buflen);
+
+		switch (ret) {
+		case HV_STATUS_INSUFFICIENT_BUFFERS:
+			ret = -ENOMEM;
+		case -ENOMEM:
+			break;
+		case HV_STATUS_SUCCESS:
 			return ret;
+		default:
+			pr_err("hv_post_msg() failed; error code:%d\n", ret);
+			return -EINVAL;
+		}
+
 		retries++;
 		msleep(100);
 	}

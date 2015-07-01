@@ -112,8 +112,6 @@
 #define RT_FL_TOS(oldflp) \
     ((u32)(oldflp->fl4_tos & (IPTOS_RT_MASK | RTO_ONLINK)))
 
-#define IP_MAX_MTU	0xFFF0
-
 #define RT_GC_TIMEOUT (300*HZ)
 
 static int ip_rt_max_size;
@@ -980,7 +978,7 @@ static void __do_rt_garbage_collect(int elasticity, int min_interval)
 	 * do not make it too frequently.
 	 */
 
-	spin_lock(&rt_gc_lock);
+	spin_lock_bh(&rt_gc_lock);
 
 	RT_CACHE_STAT_INC(gc_total);
 
@@ -1087,7 +1085,7 @@ work_done:
 			atomic_read(&ipv4_dst_ops.entries), goal, rover);
 #endif
 out:
-	spin_unlock(&rt_gc_lock);
+	spin_unlock_bh(&rt_gc_lock);
 }
 
 static void __rt_garbage_collect(struct work_struct *w)
@@ -1685,7 +1683,7 @@ unsigned short ip_rt_frag_needed(struct net *net, struct iphdr *iph,
 	__be32  daddr = iph->daddr;
 	unsigned short est_mtu = 0;
 
-	if (ipv4_config.no_pmtu_disc)
+	if (net->sysctl_ip_no_pmtu_disc)
 		return 0;
 
 	for (k = 0; k < 2; k++) {

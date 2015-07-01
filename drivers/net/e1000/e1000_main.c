@@ -44,7 +44,7 @@ static const char e1000_copyright[] = "Copyright (c) 1999-2006 Intel Corporation
  * Macro expands to...
  *   {PCI_DEVICE(PCI_VENDOR_ID_INTEL, device_id)}
  */
-static DEFINE_PCI_DEVICE_TABLE(e1000_pci_tbl) = {
+static const struct pci_device_id e1000_pci_tbl[] = {
 	INTEL_E1000_ETHERNET_DEVICE(0x1000),
 	INTEL_E1000_ETHERNET_DEVICE(0x1001),
 	INTEL_E1000_ETHERNET_DEVICE(0x1004),
@@ -109,7 +109,7 @@ void e1000_update_stats(struct e1000_adapter *adapter);
 static int e1000_init_module(void);
 static void e1000_exit_module(void);
 static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent);
-static void __devexit e1000_remove(struct pci_dev *pdev);
+static void e1000_remove(struct pci_dev *pdev);
 static int e1000_alloc_queues(struct e1000_adapter *adapter);
 static int e1000_sw_init(struct e1000_adapter *adapter);
 static int e1000_open(struct net_device *netdev);
@@ -196,7 +196,7 @@ static struct pci_driver e1000_driver = {
 	.name     = e1000_driver_name,
 	.id_table = e1000_pci_tbl,
 	.probe    = e1000_probe,
-	.remove   = __devexit_p(e1000_remove),
+	.remove   = e1000_remove,
 #ifdef CONFIG_PM
 	/* Power Management Hooks */
 	.suspend  = e1000_suspend,
@@ -484,13 +484,20 @@ static void e1000_down_and_stop(struct e1000_adapter *adapter)
 {
 	set_bit(__E1000_DOWN, &adapter->flags);
 
+	cancel_delayed_work_sync(&adapter->watchdog_task);
+
+	/*
+	 * Since the watchdog task can reschedule other tasks, we should cancel
+	 * it first, otherwise we can run into the situation when a work is
+	 * still running after the adapter has been turned down.
+	 */
+
+	cancel_delayed_work_sync(&adapter->phy_info_task);
+	cancel_delayed_work_sync(&adapter->fifo_stall_task);
+
 	/* Only kill reset task if adapter is not resetting */
 	if (!test_bit(__E1000_RESETTING, &adapter->flags))
 		cancel_work_sync(&adapter->reset_task);
-
-	cancel_delayed_work_sync(&adapter->watchdog_task);
-	cancel_delayed_work_sync(&adapter->phy_info_task);
-	cancel_delayed_work_sync(&adapter->fifo_stall_task);
 }
 
 void e1000_down(struct e1000_adapter *adapter)
@@ -535,21 +542,8 @@ void e1000_down(struct e1000_adapter *adapter)
 	e1000_clean_all_rx_rings(adapter);
 }
 
-static void e1000_reinit_safe(struct e1000_adapter *adapter)
-{
-	while (test_and_set_bit(__E1000_RESETTING, &adapter->flags))
-		msleep(1);
-	mutex_lock(&adapter->mutex);
-	e1000_down(adapter);
-	e1000_up(adapter);
-	mutex_unlock(&adapter->mutex);
-	clear_bit(__E1000_RESETTING, &adapter->flags);
-}
-
 void e1000_reinit_locked(struct e1000_adapter *adapter)
 {
-	/* if rtnl_lock is not held the call path is bogus */
-	ASSERT_RTNL();
 	WARN_ON(in_interrupt());
 	while (test_and_set_bit(__E1000_RESETTING, &adapter->flags))
 		msleep(1);
@@ -892,8 +886,7 @@ static int e1000_init_hw_struct(struct e1000_adapter *adapter,
  * The OS initialization, configuring of the adapter private structure,
  * and a hardware reset occur.
  **/
-static int __devinit e1000_probe(struct pci_dev *pdev,
-				 const struct pci_device_id *ent)
+static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	struct net_device *netdev;
 	struct e1000_adapter *adapter;
@@ -974,20 +967,14 @@ static int __devinit e1000_probe(struct pci_dev *pdev,
 	 */
 	pci_using_dac = 0;
 	if ((hw->bus_type == e1000_bus_type_pcix) &&
-	    !dma_set_mask(&pdev->dev, DMA_BIT_MASK(64))) {
-		/*
-		 * according to DMA-API-HOWTO, coherent calls will always
-		 * succeed if the set call did
-		 */
-		dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(64));
+	    !dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64))) {
 		pci_using_dac = 1;
 	} else {
-		err = dma_set_mask(&pdev->dev, DMA_BIT_MASK(32));
+		err = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
 		if (err) {
 			pr_err("No usable DMA config, aborting\n");
 			goto err_dma;
 		}
-		dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32));
 	}
 
 	netdev->netdev_ops = &e1000_netdev_ops;
@@ -1216,7 +1203,7 @@ err_pci_reg:
  * memory.
  **/
 
-static void __devexit e1000_remove(struct pci_dev *pdev)
+static void e1000_remove(struct pci_dev *pdev)
 {
 	struct net_device *netdev = pci_get_drvdata(pdev);
 	struct e1000_adapter *adapter = netdev_priv(netdev);
@@ -1252,7 +1239,7 @@ static void __devexit e1000_remove(struct pci_dev *pdev)
  * e1000_init_hw_struct MUST be called before this function
  **/
 
-static int __devinit e1000_sw_init(struct e1000_adapter *adapter)
+static int e1000_sw_init(struct e1000_adapter *adapter)
 {
 	adapter->rx_buffer_len = MAXIMUM_ETHERNET_VLAN_SIZE;
 
@@ -1268,7 +1255,6 @@ static int __devinit e1000_sw_init(struct e1000_adapter *adapter)
 	e1000_irq_disable(adapter);
 
 	spin_lock_init(&adapter->stats_lock);
-	mutex_init(&adapter->mutex);
 
 	set_bit(__E1000_DOWN, &adapter->flags);
 
@@ -1283,7 +1269,7 @@ static int __devinit e1000_sw_init(struct e1000_adapter *adapter)
  * number of queues at compile-time.
  **/
 
-static int __devinit e1000_alloc_queues(struct e1000_adapter *adapter)
+static int e1000_alloc_queues(struct e1000_adapter *adapter)
 {
 	adapter->tx_ring = kcalloc(adapter->num_tx_queues,
 	                           sizeof(struct e1000_tx_ring), GFP_KERNEL);
@@ -1394,6 +1380,10 @@ static int e1000_close(struct net_device *netdev)
 {
 	struct e1000_adapter *adapter = netdev_priv(netdev);
 	struct e1000_hw *hw = &adapter->hw;
+	int count = E1000_CHECK_RESET_COUNT;
+
+	while (test_bit(__E1000_RESETTING, &adapter->flags) && count--)
+		usleep_range(10000, 20000);
 
 	WARN_ON(test_bit(__E1000_RESETTING, &adapter->flags));
 	e1000_down(adapter);
@@ -1455,11 +1445,8 @@ static int e1000_setup_tx_resources(struct e1000_adapter *adapter,
 
 	size = sizeof(struct e1000_buffer) * txdr->count;
 	txdr->buffer_info = vzalloc(size);
-	if (!txdr->buffer_info) {
-		e_err(probe, "Unable to allocate memory for the Tx descriptor "
-		      "ring\n");
+	if (!txdr->buffer_info)
 		return -ENOMEM;
-	}
 
 	/* round up to nearest 4K */
 
@@ -1471,8 +1458,6 @@ static int e1000_setup_tx_resources(struct e1000_adapter *adapter,
 	if (!txdr->desc) {
 setup_tx_desc_die:
 		vfree(txdr->buffer_info);
-		e_err(probe, "Unable to allocate memory for the Tx descriptor "
-		      "ring\n");
 		return -ENOMEM;
 	}
 
@@ -1650,11 +1635,8 @@ static int e1000_setup_rx_resources(struct e1000_adapter *adapter,
 
 	size = sizeof(struct e1000_buffer) * rxdr->count;
 	rxdr->buffer_info = vzalloc(size);
-	if (!rxdr->buffer_info) {
-		e_err(probe, "Unable to allocate memory for the Rx descriptor "
-		      "ring\n");
+	if (!rxdr->buffer_info)
 		return -ENOMEM;
-	}
 
 	desc_len = sizeof(struct e1000_rx_desc);
 
@@ -1665,10 +1647,7 @@ static int e1000_setup_rx_resources(struct e1000_adapter *adapter,
 
 	rxdr->desc = dma_alloc_coherent(&pdev->dev, rxdr->size, &rxdr->dma,
 					GFP_KERNEL);
-
 	if (!rxdr->desc) {
-		e_err(probe, "Unable to allocate memory for the Rx descriptor "
-		      "ring\n");
 setup_rx_desc_die:
 		vfree(rxdr->buffer_info);
 		return -ENOMEM;
@@ -1687,8 +1666,6 @@ setup_rx_desc_die:
 		if (!rxdr->desc) {
 			dma_free_coherent(&pdev->dev, rxdr->size, olddesc,
 					  olddma);
-			e_err(probe, "Unable to allocate memory for the Rx "
-			      "descriptor ring\n");
 			goto setup_rx_desc_die;
 		}
 
@@ -2182,10 +2159,8 @@ static void e1000_set_rx_mode(struct net_device *netdev)
 	int mta_reg_count = E1000_NUM_MTA_REGISTERS;
 	u32 *mcarray = kcalloc(mta_reg_count, sizeof(u32), GFP_ATOMIC);
 
-	if (!mcarray) {
-		e_err(probe, "memory allocation failed\n");
+	if (!mcarray)
 		return;
-	}
 
 	/* Check for Promiscuous and All Multicast modes */
 
@@ -2285,11 +2260,8 @@ static void e1000_update_phy_info_task(struct work_struct *work)
 	struct e1000_adapter *adapter = container_of(work,
 						     struct e1000_adapter,
 						     phy_info_task.work);
-	if (test_bit(__E1000_DOWN, &adapter->flags))
-		return;
-	mutex_lock(&adapter->mutex);
+
 	e1000_phy_get_info(&adapter->hw, &adapter->phy_info);
-	mutex_unlock(&adapter->mutex);
 }
 
 /**
@@ -2305,9 +2277,6 @@ static void e1000_82547_tx_fifo_stall_task(struct work_struct *work)
 	struct net_device *netdev = adapter->netdev;
 	u32 tctl;
 
-	if (test_bit(__E1000_DOWN, &adapter->flags))
-		return;
-	mutex_lock(&adapter->mutex);
 	if (atomic_read(&adapter->tx_fifo_stall)) {
 		if ((er32(TDT) == er32(TDH)) &&
 		   (er32(TDFT) == er32(TDFH)) &&
@@ -2328,7 +2297,6 @@ static void e1000_82547_tx_fifo_stall_task(struct work_struct *work)
 			schedule_delayed_work(&adapter->fifo_stall_task, 1);
 		}
 	}
-	mutex_unlock(&adapter->mutex);
 }
 
 bool e1000_has_link(struct e1000_adapter *adapter)
@@ -2382,10 +2350,6 @@ static void e1000_watchdog(struct work_struct *work)
 	struct e1000_tx_ring *txdr = adapter->tx_ring;
 	u32 link, tctl;
 
-	if (test_bit(__E1000_DOWN, &adapter->flags))
-		return;
-
-	mutex_lock(&adapter->mutex);
 	link = e1000_has_link(adapter);
 	if ((netif_carrier_ok(netdev)) && link)
 		goto link_up;
@@ -2475,7 +2439,7 @@ link_up:
 			adapter->tx_timeout_count++;
 			schedule_work(&adapter->reset_task);
 			/* exit immediately since reset is imminent */
-			goto unlock;
+			return;
 		}
 	}
 
@@ -2504,9 +2468,6 @@ link_up:
 	/* Reschedule the task */
 	if (!test_bit(__E1000_DOWN, &adapter->flags))
 		schedule_delayed_work(&adapter->watchdog_task, 2 * HZ);
-
-unlock:
-	mutex_unlock(&adapter->mutex);
 }
 
 enum latency_range {
@@ -2660,14 +2621,13 @@ static int e1000_tso(struct e1000_adapter *adapter,
 	u32 cmd_length = 0;
 	u16 ipcse = 0, tucse, mss;
 	u8 ipcss, ipcso, tucss, tucso, hdr_len;
-	int err;
 
 	if (skb_is_gso(skb)) {
-		if (skb_header_cloned(skb)) {
-			err = pskb_expand_head(skb, 0, 0, GFP_ATOMIC);
-			if (err)
-				return err;
-		}
+		int err;
+
+		err = skb_cow_head(skb, 0);
+		if (err < 0)
+			return err;
 
 		hdr_len = skb_transport_offset(skb) + tcp_hdrlen(skb);
 		mss = skb_shinfo(skb)->gso_size;
@@ -3069,9 +3029,15 @@ static netdev_tx_t e1000_xmit_frame(struct sk_buff *skb,
 	 * single qdisc implementation, we can look at this again. */
 	tx_ring = adapter->tx_ring;
 
-	if (unlikely(skb->len <= 0)) {
-		dev_kfree_skb_any(skb);
-		return NETDEV_TX_OK;
+	/* On PCI/PCI-X HW, if packet size is less than ETH_ZLEN,
+	 * packets may get corrupted during padding by HW.
+	 * To WA this issue, pad all small packets manually.
+	 */
+	if (skb->len < ETH_ZLEN) {
+		if (skb_pad(skb, ETH_ZLEN - skb->len))
+			return NETDEV_TX_OK;
+		skb->len = ETH_ZLEN;
+		skb_set_tail_pointer(skb, ETH_ZLEN);
 	}
 
 	mss = skb_shinfo(skb)->gso_size;
@@ -3438,10 +3404,8 @@ static void e1000_reset_task(struct work_struct *work)
 	struct e1000_adapter *adapter =
 		container_of(work, struct e1000_adapter, reset_task);
 
-	if (test_bit(__E1000_DOWN, &adapter->flags))
-		return;
 	e_err(drv, "Reset adapter\n");
-	e1000_reinit_safe(adapter);
+	e1000_reinit_locked(adapter);
 }
 
 /**
@@ -3848,8 +3812,7 @@ static bool e1000_clean_tx_irq(struct e1000_adapter *adapter,
 			      "  next_to_watch        <%x>\n"
 			      "  jiffies              <%lx>\n"
 			      "  next_to_watch.status <%x>\n",
-				(unsigned long)((tx_ring - adapter->tx_ring) /
-					sizeof(struct e1000_tx_ring)),
+				(unsigned long)(tx_ring - adapter->tx_ring),
 				readl(hw->hw_addr + tx_ring->tdh),
 				readl(hw->hw_addr + tx_ring->tdt),
 				tx_ring->next_to_use,
@@ -3938,6 +3901,83 @@ static void e1000_receive_skb(struct e1000_adapter *adapter, u8 status,
 				 skb);
 	else
 		napi_gro_receive(&adapter->napi, skb);
+}
+
+/**
+ * e1000_tbi_adjust_stats
+ * @hw: Struct containing variables accessed by shared code
+ * @frame_len: The length of the frame in question
+ * @mac_addr: The Ethernet destination address of the frame in question
+ *
+ * Adjusts the statistic counters when a frame is accepted by TBI_ACCEPT
+ */
+static void e1000_tbi_adjust_stats(struct e1000_hw *hw,
+				   struct e1000_hw_stats *stats,
+				   u32 frame_len, const u8 *mac_addr)
+{
+	u64 carry_bit;
+
+	/* First adjust the frame length. */
+	frame_len--;
+	/* We need to adjust the statistics counters, since the hardware
+	 * counters overcount this packet as a CRC error and undercount
+	 * the packet as a good packet
+	 */
+	/* This packet should not be counted as a CRC error. */
+	stats->crcerrs--;
+	/* This packet does count as a Good Packet Received. */
+	stats->gprc++;
+
+	/* Adjust the Good Octets received counters */
+	carry_bit = 0x80000000 & stats->gorcl;
+	stats->gorcl += frame_len;
+	/* If the high bit of Gorcl (the low 32 bits of the Good Octets
+	 * Received Count) was one before the addition,
+	 * AND it is zero after, then we lost the carry out,
+	 * need to add one to Gorch (Good Octets Received Count High).
+	 * This could be simplified if all environments supported
+	 * 64-bit integers.
+	 */
+	if (carry_bit && ((stats->gorcl & 0x80000000) == 0))
+		stats->gorch++;
+	/* Is this a broadcast or multicast?  Check broadcast first,
+	 * since the test for a multicast frame will test positive on
+	 * a broadcast frame.
+	 */
+	if (is_broadcast_ether_addr(mac_addr))
+		stats->bprc++;
+	else if (is_multicast_ether_addr(mac_addr))
+		stats->mprc++;
+
+	if (frame_len == hw->max_frame_size) {
+		/* In this case, the hardware has overcounted the number of
+		 * oversize frames.
+		 */
+		if (stats->roc > 0)
+			stats->roc--;
+	}
+
+	/* Adjust the bin counters when the extra byte put the frame in the
+	 * wrong bin. Remember that the frame_len was adjusted above.
+	 */
+	if (frame_len == 64) {
+		stats->prc64++;
+		stats->prc127--;
+	} else if (frame_len == 127) {
+		stats->prc127++;
+		stats->prc255--;
+	} else if (frame_len == 255) {
+		stats->prc255++;
+		stats->prc511--;
+	} else if (frame_len == 511) {
+		stats->prc511++;
+		stats->prc1023--;
+	} else if (frame_len == 1023) {
+		stats->prc1023++;
+		stats->prc1522--;
+	} else if (frame_len == 1522) {
+		stats->prc1522++;
+	}
 }
 
 /**
@@ -4878,6 +4918,11 @@ static int __e1000_shutdown(struct pci_dev *pdev, bool *enable_wake)
 	netif_device_detach(netdev);
 
 	if (netif_running(netdev)) {
+		int count = E1000_CHECK_RESET_COUNT;
+
+		while (test_bit(__E1000_RESETTING, &adapter->flags) && count--)
+			usleep_range(10000, 20000);
+
 		WARN_ON(test_bit(__E1000_RESETTING, &adapter->flags));
 		e1000_down(adapter);
 	}

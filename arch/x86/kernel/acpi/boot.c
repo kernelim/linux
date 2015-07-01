@@ -41,6 +41,7 @@
 #include <asm/io.h>
 #include <asm/mpspec.h>
 #include <asm/smp.h>
+#include <asm/processor.h>
 
 static int __initdata acpi_force = 0;
 u32 acpi_rsdt_forced;
@@ -516,43 +517,11 @@ static void acpi_map_cpu2node(acpi_handle handle, int cpu, int physid)
 #endif
 }
 
-static int __cpuinit _acpi_map_lsapic(acpi_handle handle, int *pcpu)
+static int _acpi_map_lsapic(acpi_handle handle, int physid, int *pcpu)
 {
-	struct acpi_buffer buffer = { ACPI_ALLOCATE_BUFFER, NULL };
-	union acpi_object *obj;
-	struct acpi_madt_local_apic *lapic;
 	cpumask_var_t tmp_map, new_map;
-	u8 physid;
 	int cpu;
 	int retval = -ENOMEM;
-
-	if (ACPI_FAILURE(acpi_evaluate_object(handle, "_MAT", NULL, &buffer)))
-		return -EINVAL;
-
-	if (!buffer.length || !buffer.pointer)
-		return -EINVAL;
-
-	obj = buffer.pointer;
-	if (obj->type != ACPI_TYPE_BUFFER ||
-	    obj->buffer.length < sizeof(*lapic)) {
-		kfree(buffer.pointer);
-		return -EINVAL;
-	}
-
-	lapic = (struct acpi_madt_local_apic *)obj->buffer.pointer;
-
-	if (lapic->header.type != ACPI_MADT_TYPE_LOCAL_APIC ||
-	    !(lapic->lapic_flags & ACPI_MADT_ENABLED)) {
-		kfree(buffer.pointer);
-		return -EINVAL;
-	}
-
-	physid = lapic->id;
-
-	kfree(buffer.pointer);
-	buffer.length = ACPI_ALLOCATE_BUFFER;
-	buffer.pointer = NULL;
-	lapic = NULL;
 
 	if (!alloc_cpumask_var(&tmp_map, GFP_KERNEL))
 		goto out;
@@ -589,9 +558,9 @@ out:
 }
 
 /* wrapper to silence section mismatch warning */
-int __ref acpi_map_lsapic(acpi_handle handle, int *pcpu)
+int __ref acpi_map_lsapic(acpi_handle handle, int physid, int *pcpu)
 {
-	return _acpi_map_lsapic(handle, pcpu);
+	return _acpi_map_lsapic(handle, physid, pcpu);
 }
 EXPORT_SYMBOL(acpi_map_lsapic);
 
@@ -1570,6 +1539,18 @@ static struct dmi_system_id __initdata acpi_dmi_table_late[] = {
 int __init acpi_boot_table_init(void)
 {
 	int error;
+
+	/*
+	 * Disable ACPI OSI Win8 for everyone except Intel Broadwell.
+	 * Note, if necessary, dmi_check_system or acpi_blacklisted
+	 * can disable OSI Win8 for specific Broadwell-based systems.
+	 */
+	if (!((boot_cpu_data.x86_vendor == X86_VENDOR_INTEL) &&
+	      (boot_cpu_data.x86 == 6) &&
+	      (boot_cpu_data.x86_model == 61))) {
+		acpi_osi_setup("!Windows 2012");
+		acpi_osi_setup("!Windows 2013");
+	}
 
 	dmi_check_system(acpi_dmi_table);
 

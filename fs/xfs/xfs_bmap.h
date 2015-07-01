@@ -79,7 +79,6 @@ typedef	struct xfs_bmap_free
  * from written to unwritten, otherwise convert from unwritten to written.
  */
 #define XFS_BMAPI_CONVERT	0x200
-#define XFS_BMAPI_STACK_SWITCH	0x400
 
 #define XFS_BMAPI_FLAGS \
 	{ XFS_BMAPI_WRITE,	"WRITE" }, \
@@ -90,8 +89,7 @@ typedef	struct xfs_bmap_free
 	{ XFS_BMAPI_PREALLOC,	"PREALLOC" }, \
 	{ XFS_BMAPI_IGSTATE,	"IGSTATE" }, \
 	{ XFS_BMAPI_CONTIG,	"CONTIG" }, \
-	{ XFS_BMAPI_CONVERT,	"CONVERT" }, \
-	{ XFS_BMAPI_STACK_SWITCH, "STACK_SWITCH" }
+	{ XFS_BMAPI_CONVERT,	"CONVERT" }
 
 
 static inline int xfs_bmapi_aflag(int w)
@@ -126,13 +124,12 @@ typedef struct xfs_bmalloca {
 	xfs_extlen_t		total;	/* total blocks needed for xaction */
 	xfs_extlen_t		minlen;	/* minimum allocation size (blocks) */
 	xfs_extlen_t		minleft; /* amount must be left after alloc */
-	char			eof;	/* set if allocating past last extent */
-	char			wasdel;	/* replacing a delayed allocation */
-	char			userdata;/* set if is user data */
-	char			low;	/* low on space, using seq'l ags */
-	char			aeof;	/* allocated space at eof */
-	char			conv;	/* overwriting unwritten extents */
-	char			stack_switch;
+	bool			eof;	/* set if allocating past last extent */
+	bool			wasdel;	/* replacing a delayed allocation */
+	bool			userdata;/* set if is user data */
+	bool			low;	/* low on space, using seq'l ags */
+	bool			aeof;	/* allocated space at eof */
+	bool			conv;	/* overwriting unwritten extents */
 	int			flags;
 } xfs_bmalloca_t;
 

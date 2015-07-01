@@ -29,7 +29,7 @@
 #include <asm/amd_iommu.h>
 #include <asm/iommu.h>
 #include <asm/gart.h>
-#include <asm/dma.h>
+#include <asm/x86_init.h>
 
 /*
  * definitions for the ACPI scanning code
@@ -119,10 +119,6 @@ struct ivmd_header {
 bool amd_iommu_dump;
 
 static int __initdata amd_iommu_detected;
-
-/* original values for gart fallback on initialization failure */
-static int __initdata __gart_iommu_aperture_disabled;
-static int __initdata __gart_iommu_aperture;
 
 u16 amd_iommu_last_bdf;			/* largest PCI device id we have
 					   to handle */
@@ -1322,18 +1318,9 @@ static struct sys_device device_amd_iommu = {
  * functions. Finally it prints some information about AMD IOMMUs and
  * the driver state and enables the hardware.
  */
-int __init amd_iommu_init(void)
+static int __init amd_iommu_init(void)
 {
 	int i, ret = 0;
-
-
-	if (no_iommu) {
-		printk(KERN_INFO "AMD-Vi disabled by kernel command line\n");
-		return 0;
-	}
-
-	if (!amd_iommu_detected)
-		return -ENODEV;
 
 	/*
 	 * First parse ACPI tables to find the largest Bus/Dev/Func
@@ -1438,6 +1425,8 @@ int __init amd_iommu_init(void)
 
 	amd_iommu_init_notifier();
 
+	x86_platform.iommu_shutdown = disable_iommus;
+
 	if (iommu_pass_through)
 		goto out;
 
@@ -1482,16 +1471,11 @@ free:
 	 * We failed to initialize the AMD IOMMU - try fallback to GART
 	 * if possible.
 	 */
-	gart_iommu_aperture_disabled = __gart_iommu_aperture_disabled;
-	gart_iommu_aperture = __gart_iommu_aperture;
+	gart_iommu_init();
+
 #endif
 
 	goto out;
-}
-
-void amd_iommu_shutdown(void)
-{
-	disable_iommus();
 }
 
 /****************************************************************************
@@ -1508,7 +1492,7 @@ static int __init early_amd_iommu_detect(struct acpi_table_header *table)
 
 void __init amd_iommu_detect(void)
 {
-	if (swiotlb || no_iommu || (iommu_detected && !gart_iommu_aperture))
+	if (no_iommu || (iommu_detected && !gart_iommu_aperture))
 		return;
 
 	if (!amd_iommu_enable) {
@@ -1520,12 +1504,6 @@ void __init amd_iommu_detect(void)
 	if (acpi_table_parse("IVRS", early_amd_iommu_detect) == 0) {
 		iommu_detected = 1;
 		amd_iommu_detected = 1;
-#ifdef CONFIG_GART_IOMMU
-		__gart_iommu_aperture_disabled = gart_iommu_aperture_disabled;
-		__gart_iommu_aperture = gart_iommu_aperture;
-		gart_iommu_aperture_disabled = 1;
-		gart_iommu_aperture = 0;
-#endif
 		/* Make sure ACS will be enabled */
 		pci_request_acs();
 	
@@ -1537,8 +1515,7 @@ void __init amd_iommu_detect(void)
 		 */
 		iommu_pass_through = amd_iommu_force_nopt ? 0 : 1;
 	
-		if (iommu_pass_through && max_pfn > MAX_DMA32_PFN)
-			swiotlb = 1;
+		x86_init.iommu.iommu_init = amd_iommu_init;
 	}
 }
 

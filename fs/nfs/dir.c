@@ -134,21 +134,28 @@ const struct inode_operations nfs4_dir_inode_operations = {
 
 static struct nfs_open_dir_context *alloc_nfs_open_dir_context(struct inode *dir, struct rpc_cred *cred)
 {
+	struct nfs_inode *nfsi = NFS_I(dir);
 	struct nfs_open_dir_context *ctx;
 	ctx = kmalloc(sizeof(*ctx), GFP_KERNEL);
 	if (ctx != NULL) {
 		ctx->duped = 0;
-		ctx->attr_gencount = NFS_I(dir)->attr_gencount;
+		ctx->attr_gencount = nfsi->attr_gencount;
 		ctx->dir_cookie = 0;
 		ctx->dup_cookie = 0;
 		ctx->cred = get_rpccred(cred);
+		spin_lock(&dir->i_lock);
+		list_add(&ctx->list, &nfsi->open_files);
+		spin_unlock(&dir->i_lock);
 		return ctx;
 	}
 	return  ERR_PTR(-ENOMEM);
 }
 
-static void put_nfs_open_dir_context(struct nfs_open_dir_context *ctx)
+static void put_nfs_open_dir_context(struct inode *dir, struct nfs_open_dir_context *ctx)
 {
+	spin_lock(&dir->i_lock);
+	list_del(&ctx->list);
+	spin_unlock(&dir->i_lock);
 	put_rpccred(ctx->cred);
 	kfree(ctx);
 }
@@ -193,7 +200,7 @@ out:
 static int
 nfs_closedir(struct inode *inode, struct file *filp)
 {
-	put_nfs_open_dir_context(filp->private_data);
+	put_nfs_open_dir_context(filp->f_path.dentry->d_inode, filp->private_data);
 	return 0;
 }
 
@@ -505,6 +512,22 @@ void nfs_advise_use_readdirplus(struct inode *dir)
 	set_bit(NFS_INO_ADVISE_RDPLUS, &NFS_I(dir)->flags);
 }
 
+/*
+ * This function is mainly for use by nfs_getattr().
+ *
+ * If this is an 'ls -l', we want to force use of readdirplus.
+ * Do this by checking if there is an active file descriptor
+ * and calling nfs_advise_use_readdirplus, then forcing a
+ * cache flush.
+ */
+void nfs_force_use_readdirplus(struct inode *dir)
+{
+	if (!list_empty(&NFS_I(dir)->open_files)) {
+		nfs_advise_use_readdirplus(dir);
+		nfs_zap_mapping(dir, dir->i_mapping);
+	}
+}
+
 static
 void nfs_prime_dcache(struct dentry *parent, struct nfs_entry *entry)
 {
@@ -532,7 +555,8 @@ void nfs_prime_dcache(struct dentry *parent, struct nfs_entry *entry)
 			nfs_refresh_inode(dentry->d_inode, entry->fattr);
 			goto out;
 		} else {
-			d_drop(dentry);
+			if (d_invalidate(dentry) != 0)
+				goto out;
 			dput(dentry);
 		}
 	}
@@ -580,6 +604,9 @@ int nfs_readdir_page_filler(nfs_readdir_descriptor_t *desc, struct nfs_entry *en
 	if (scratch == NULL)
 		return -ENOMEM;
 
+	if (buflen == 0)
+		goto out_nopages;
+
 	xdr_init_decode(&stream, &buf, NULL);
 	xdr_set_scratch_buffer(&stream, page_address(scratch), PAGE_SIZE);
 
@@ -601,6 +628,7 @@ int nfs_readdir_page_filler(nfs_readdir_descriptor_t *desc, struct nfs_entry *en
 			break;
 	} while (!entry->eof);
 
+out_nopages:
 	if (count == 0 || (status == -EBADCOOKIE && entry->eof != 0)) {
 		array = nfs_readdir_get_array(page);
 		if (!IS_ERR(array)) {
@@ -882,6 +910,17 @@ int uncached_readdir(nfs_readdir_descriptor_t *desc, void *dirent,
 	goto out;
 }
 
+static bool nfs_dir_mapping_need_revalidate(struct inode *dir)
+{
+	struct nfs_inode *nfsi = NFS_I(dir);
+
+	if (nfs_attribute_cache_expired(dir))
+		return true;
+	if (nfsi->cache_validity & NFS_INO_INVALID_DATA)
+		return true;
+	return false;
+}
+
 /* The file offset position represents the dirent entry number.  A
    last cookie cache takes care of the common case of reading the
    whole directory.
@@ -914,7 +953,7 @@ static int nfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 	desc->plus = nfs_use_readdirplus(inode, filp) ? 1 : 0;
 
 	nfs_block_sillyrename(dentry);
-	if (filp->f_pos == 0 || nfs_attribute_cache_expired(inode))
+	if (filp->f_pos == 0 || nfs_dir_mapping_need_revalidate(inode))
 		res = nfs_revalidate_mapping(inode, filp->f_mapping);
 	if (res < 0)
 		goto out;
@@ -1681,6 +1720,11 @@ static int nfs_open_create(struct inode *dir, struct dentry *dentry, int mode,
 	error = PTR_ERR(ctx);
 	if (IS_ERR(ctx))
 		goto out_err_drop;
+
+	if (open_flags & O_TRUNC) {
+		attr.ia_valid |= ATTR_SIZE;
+		attr.ia_size = 0;
+	}
 
 	error = NFS_PROTO(dir)->create(dir, dentry, &attr, open_flags, ctx);
 	if (error != 0)

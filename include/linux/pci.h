@@ -331,6 +331,7 @@ struct pci_dev_rh1 {
 	u8		pcie_mpss:3;	/* PCI-E Max Payload Size Supported */
 	unsigned int	mmio_always_on:1;	/* disallow turning off io/mem
 						   decoding during bar sizing */
+	unsigned int	ignore_hotplug:1;	/* Ignore hotplug events */
 	u16		pcie_flags_reg;	/* cached PCI-E Capabilities Register */
 };
 
@@ -588,8 +589,7 @@ struct pci_driver_rh {
  * DEFINE_PCI_DEVICE_TABLE - macro used to describe a pci device table
  * @_table: device table name
  *
- * This macro is used to create a struct pci_device_id array (a device table)
- * in a generic manner.
+ * This macro is deprecated and should not be used in new code.
  */
 #define DEFINE_PCI_DEVICE_TABLE(_table) \
 	const struct pci_device_id _table[] __devinitconst
@@ -723,8 +723,14 @@ u8 pci_common_swizzle(struct pci_dev *dev, u8 *pinp);
 extern struct pci_dev *pci_dev_get(struct pci_dev *dev);
 extern void pci_dev_put(struct pci_dev *dev);
 extern void pci_remove_bus(struct pci_bus *b);
+/**
+ * The following (pci_remove_bus_device) is for RHEL6 KABI, old external
+ * module compatibility, only.  Do not use within the kernel - use
+ * pci_stop_and_remove_bus_device instead
+ */
 extern void pci_remove_bus_device(struct pci_dev *dev);
-extern void pci_stop_bus_device(struct pci_dev *dev);
+extern void pci_stop_and_remove_bus_device(struct pci_dev *dev);
+extern void pci_stop_and_remove_bus_device_locked(struct pci_dev *dev);
 void pci_setup_cardbus(struct pci_bus *bus);
 extern void pci_sort_breadthfirst(void);
 #define dev_is_pci(d) ((d)->bus == &pci_bus_type)
@@ -923,6 +929,12 @@ enum pci_obff_signal_type {
 int pci_enable_obff(struct pci_dev *dev, enum pci_obff_signal_type);
 void pci_disable_obff(struct pci_dev *dev);
 
+static inline void pci_ignore_hotplug(struct pci_dev *dev)
+{
+	struct pci_dev_rh1 *rdev = dev->rh_reserved1;
+	rdev->ignore_hotplug = 1;
+}
+
 bool pci_ltr_supported(struct pci_dev *dev);
 int pci_enable_ltr(struct pci_dev *dev);
 void pci_disable_ltr(struct pci_dev *dev);
@@ -938,6 +950,8 @@ int pci_bus_find_capability(struct pci_bus *bus, unsigned int devfn, int cap);
 unsigned int pci_rescan_bus_bridge_resize(struct pci_dev *bridge);
 unsigned int pci_rescan_bus(struct pci_bus *bus);
 #endif
+void pci_lock_rescan_remove(void);
+void pci_unlock_rescan_remove(void);
 
 /* Vital product data routines */
 ssize_t pci_read_vpd(struct pci_dev *dev, loff_t pos, size_t count, void *buf);
@@ -1012,7 +1026,6 @@ void pci_unregister_driver(struct pci_driver *dev);
 	module_driver(__pci_driver, pci_register_driver, \
 		       pci_unregister_driver)
 
-void pci_remove_behind_bridge(struct pci_dev *dev);
 struct pci_driver *pci_dev_driver(const struct pci_dev *dev);
 int pci_add_dynid(struct pci_driver *drv,
 		  unsigned int vendor, unsigned int device,
@@ -1073,9 +1086,9 @@ static inline void pci_msi_shutdown(struct pci_dev *dev)
 static inline void pci_disable_msi(struct pci_dev *dev)
 { }
 
-static inline int pci_msix_table_size(struct pci_dev *dev)
+static inline int pci_msix_vec_count(struct pci_dev *dev)
 {
-	return 0;
+	return -ENOSYS;
 }
 static inline int pci_enable_msix(struct pci_dev *dev,
 				  struct msix_entry *entries, int nvec)
@@ -1112,7 +1125,7 @@ static inline int pci_enable_msix_range(struct pci_dev *dev,
 extern int pci_enable_msi_block(struct pci_dev *dev, unsigned int nvec);
 extern void pci_msi_shutdown(struct pci_dev *dev);
 extern void pci_disable_msi(struct pci_dev *dev);
-extern int pci_msix_table_size(struct pci_dev *dev);
+extern int pci_msix_vec_count(struct pci_dev *dev);
 extern int pci_enable_msix(struct pci_dev *dev,
 	struct msix_entry *entries, int nvec);
 extern void pci_msix_shutdown(struct pci_dev *dev);
@@ -1573,6 +1586,7 @@ void pcibios_disable_device(struct pci_dev *dev);
 int pcibios_set_pcie_reset_state(struct pci_dev *dev,
 				 enum pcie_reset_state state);
 int pcibios_add_device(struct pci_dev *dev);
+void pcibios_release_device(struct pci_dev *dev);
 
 #ifdef CONFIG_PCI_MMCONFIG
 extern void __init pci_mmcfg_early_init(void);

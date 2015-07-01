@@ -41,7 +41,7 @@ void netpoll_poll(struct netpoll *np);
 void netpoll_send_udp(struct netpoll *np, const char *msg, int len);
 void netpoll_print_options(struct netpoll *np);
 int netpoll_parse_options(struct netpoll *np, char *opt);
-int __netpoll_setup(struct netpoll *np);
+int __netpoll_setup(struct netpoll *np, struct net_device *ndev, gfp_t gfp);
 int netpoll_setup(struct netpoll *np);
 int netpoll_trap(void);
 void netpoll_set_trap(int trap);

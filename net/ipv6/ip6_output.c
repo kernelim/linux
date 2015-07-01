@@ -1129,7 +1129,7 @@ int ip6_append_data(struct sock *sk, int getfrag(void *from, char *to,
 		inet->cork.fl = *fl;
 		np->cork.hop_limit = hlimit;
 		np->cork.tclass = tclass;
-		mtu = np->pmtudisc == IPV6_PMTUDISC_PROBE ?
+		mtu = np->pmtudisc >= IPV6_PMTUDISC_PROBE ?
 		      rt->u.dst.dev->mtu : dst_mtu(rt->u.dst.path);
 		if (np->frag_size < mtu) {
 			if (np->frag_size)
@@ -1170,8 +1170,10 @@ int ip6_append_data(struct sock *sk, int getfrag(void *from, char *to,
 			      sizeof(struct frag_hdr) : 0) +
 			     rt->rt6i_nfheader_len;
 
-		maxnonfragsize = (np->pmtudisc >= IPV6_PMTUDISC_DO) ?
-				 mtu : sizeof(struct ipv6hdr) + IPV6_MAXPLEN;
+		if (ip6_sk_local_df(sk))
+			maxnonfragsize = sizeof(struct ipv6hdr) + IPV6_MAXPLEN;
+		else
+			maxnonfragsize = mtu;
 
 		if (inet->cork.length + length > maxnonfragsize - headersize) {
 			ipv6_local_error(sk, EMSGSIZE, fl,
@@ -1470,8 +1472,7 @@ int ip6_push_pending_frames(struct sock *sk)
 	}
 
 	/* Allow local fragmentation. */
-	if (np->pmtudisc < IPV6_PMTUDISC_DO)
-		skb->local_df = 1;
+	skb->local_df = ip6_sk_local_df(sk);
 
 	ipv6_addr_copy(final_dst, &fl->fl6_dst);
 	__skb_pull(skb, skb_network_header_len(skb));

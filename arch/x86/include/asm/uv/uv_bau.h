@@ -33,8 +33,8 @@
  * Each of the descriptors is 64 bytes in size (8*64 = 512 bytes in a set).
  */
 
-#define MAX_CPUS_PER_UVHUB		64
-#define MAX_CPUS_PER_SOCKET		32
+#define MAX_CPUS_PER_UVHUB		128
+#define MAX_CPUS_PER_SOCKET		64
 #define ADP_SZ				64 /* hardware-provided max. */
 #define UV_CPUS_PER_AS			32 /* hardware-provided max. */
 #define ITEMS_PER_DESC			8
@@ -73,6 +73,7 @@
 #define UV_INTD_SOFT_ACK_TIMEOUT_PERIOD	(is_uv1_hub() ?			\
 		UV1_INTD_SOFT_ACK_TIMEOUT_PERIOD :			\
 		UV2_INTD_SOFT_ACK_TIMEOUT_PERIOD)
+/* assuming UV3 is the same */
 
 #define BAU_MISC_CONTROL_MULT_MASK	3
 
@@ -93,6 +94,8 @@
 #define SOFTACK_MSHIFT UVH_LB_BAU_MISC_CONTROL_ENABLE_INTD_SOFT_ACK_MODE_SHFT
 #define SOFTACK_PSHIFT UVH_LB_BAU_MISC_CONTROL_INTD_SOFT_ACK_TIMEOUT_PERIOD_SHFT
 #define SOFTACK_TIMEOUT_PERIOD UV_INTD_SOFT_ACK_TIMEOUT_PERIOD
+#define PREFETCH_HINT_SHFT UV3H_LB_BAU_MISC_CONTROL_ENABLE_INTD_PREFETCH_HINT_SHFT
+#define SB_STATUS_SHFT UV3H_LB_BAU_MISC_CONTROL_ENABLE_EXTENDED_SB_STATUS_SHFT
 #define write_gmmr	uv_write_global_mmr64
 #define write_lmmr	uv_write_local_mmr
 #define read_lmmr	uv_read_local_mmr
@@ -149,7 +152,6 @@
 /* 4 bits of software ack period */
 #define UV2_ACK_MASK			0x7UL
 #define UV2_ACK_UNITS_SHFT		3
-#define UV2_LEG_SHFT UV2H_LB_BAU_MISC_CONTROL_USE_LEGACY_DESCRIPTOR_FORMATS_SHFT
 #define UV2_EXT_SHFT UV2H_LB_BAU_MISC_CONTROL_ENABLE_EXTENDED_SB_STATUS_SHFT
 
 /*
@@ -321,8 +323,9 @@ struct uv1_bau_msg_header {
 /*
  * UV2 Message header:  16 bytes (128 bits) (bytes 0x30-0x3f of descriptor)
  * see figure 9-2 of harp_sys.pdf
+ * assuming UV3 is the same
  */
-struct uv2_bau_msg_header {
+struct uv2_3_bau_msg_header {
 	unsigned int	base_dest_nasid:15;	/* nasid of the first bit */
 	/* bits 14:0 */				/* in uvhub map */
 	unsigned int	dest_subnodeid:5;	/* must be 0x10, for the LB */
@@ -394,7 +397,7 @@ struct bau_desc {
 	 */
 	union bau_msg_header {
 		struct uv1_bau_msg_header	uv1_hdr;
-		struct uv2_bau_msg_header	uv2_hdr;
+		struct uv2_3_bau_msg_header	uv2_3_hdr;
 	} header;
 
 	struct bau_msg_payload			payload;

@@ -4,8 +4,11 @@ SUBLEVEL = 32
 EXTRAVERSION =
 NAME = Man-Eating Seals of Antiquity
 RHEL_MAJOR = 6
-RHEL_MINOR = 6
-RHEL_RELEASE = 503
+RHEL_MINOR = 7
+RHEL_RELEASE = 572
+RHEL_DRM_VERSION = 3
+RHEL_DRM_PATCHLEVEL = 18
+RHEL_DRM_SUBLEVEL = 13
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
@@ -1090,7 +1093,8 @@ define filechk_version.h
 	echo '#define RHEL_RELEASE_VERSION(a,b) (((a) << 8) + (b))'; \
 	echo '#define RHEL_RELEASE_CODE \
 		$(shell expr $(RHEL_MAJOR) \* 256 + $(RHEL_MINOR))'; \
-	echo '#define RHEL_RELEASE "$(RHEL_RELEASE)"';)
+	echo '#define RHEL_RELEASE $(RHEL_RELEASE)'; \
+	echo '#define RHEL_16KSTACK_BUILD 520';)
 endef
 
 include/linux/version.h: $(srctree)/Makefile FORCE

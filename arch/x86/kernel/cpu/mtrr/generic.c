@@ -65,6 +65,19 @@ static inline void k8_check_syscfg_dram_mod_en(void)
 	}
 }
 
+/* Get the size of contiguous MTRR range */
+static u64 get_mtrr_size(u64 mask)
+{
+	u64 size;
+
+	mask >>= PAGE_SHIFT;
+	mask |= size_or_mask;
+	size = -mask;
+	size <<= PAGE_SHIFT;
+	return size;
+}
+
+
 /*
  * Returns the effective MTRR type for the region
  * Error returns:
@@ -74,7 +87,6 @@ static inline void k8_check_syscfg_dram_mod_en(void)
 u8 mtrr_type_lookup(u64 start, u64 end)
 {
 	int i;
-	u64 base, mask;
 	u8 prev_match, curr_match;
 
 	if (!mtrr_state_set)
@@ -115,22 +127,24 @@ u8 mtrr_type_lookup(u64 start, u64 end)
 
 	prev_match = 0xFF;
 	for (i = 0; i < num_var_ranges; ++i) {
-		unsigned short start_state, end_state;
+		u64 mtrr_start, mtrr_end, mask;
 
 		if (!(mtrr_state.var_ranges[i].mask_lo & (1 << 11)))
 			continue;
 
-		base = (((u64)mtrr_state.var_ranges[i].base_hi) << 32) +
-		       (mtrr_state.var_ranges[i].base_lo & PAGE_MASK);
 		mask = (((u64)mtrr_state.var_ranges[i].mask_hi) << 32) +
 		       (mtrr_state.var_ranges[i].mask_lo & PAGE_MASK);
+		mtrr_start = (((u64)mtrr_state.var_ranges[i].base_hi) << 32) +
+			     (mtrr_state.var_ranges[i].base_lo & PAGE_MASK);
+		mtrr_end = mtrr_start + get_mtrr_size(mask);
 
-		start_state = ((start & mask) == (base & mask));
-		end_state = ((end & mask) == (base & mask));
-		if (start_state != end_state)
-			return 0xFE;
-
-		if ((start & mask) != (base & mask))
+		/*
+		 * Handle the case where the range overlap several mtrr, for
+		 * which we will consider all mtrr two by two and use the
+		 * lowest common denominator (uncache being lower, then write
+		 * through then write back).
+		 */
+		if (end < mtrr_start || start > mtrr_end)
 			continue;
 
 		curr_match = mtrr_state.var_ranges[i].base_lo & 0xff;

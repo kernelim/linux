@@ -14,9 +14,7 @@
 #include <linux/wireless.h>
 #include <linux/uaccess.h>
 #include <linux/export.h>
-#ifndef __GENKSYMS__
 #include <net/cfg80211.h>
-#endif
 #include <net/iw_handler.h>
 #include <net/netlink.h>
 #include <net/wext.h>

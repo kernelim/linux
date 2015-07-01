@@ -214,7 +214,7 @@ lookup_protocol:
 	inet->mc_list	= NULL;
 	sk_extended(sk)->rcv_tos = 0;
 
-	if (ipv4_config.no_pmtu_disc)
+	if (net->sysctl_ip_no_pmtu_disc)
 		inet->pmtudisc = IP_PMTUDISC_DONT;
 	else
 		inet->pmtudisc = IP_PMTUDISC_WANT;

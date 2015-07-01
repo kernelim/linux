@@ -151,6 +151,8 @@ struct vf_data_storage {
 	u16 pf_vlan; /* When set, guest VLAN config not allowed. */
 	u16 pf_qos;
 	u16 tx_rate;
+	u16 vlan_count;
+	u8 spoofchk_enabled;
 	unsigned int vf_api;
 };
 
@@ -292,12 +294,18 @@ enum ixgbe_ring_f_enum {
 	RING_F_ARRAY_SIZE      /* must be last in enum set */
 };
 
-#define IXGBE_MAX_RSS_INDICES  16
-#define IXGBE_MAX_VMDQ_INDICES 64
-#define IXGBE_MAX_FDIR_INDICES 63	/* based on q_vector limit */
-#define IXGBE_MAX_FCOE_INDICES  8
-#define MAX_RX_QUEUES (IXGBE_MAX_FDIR_INDICES + 1)
-#define MAX_TX_QUEUES (IXGBE_MAX_FDIR_INDICES + 1)
+#define IXGBE_MAX_RSS_INDICES		16
+#define IXGBE_MAX_RSS_INDICES_X550	64
+#define IXGBE_MAX_VMDQ_INDICES		64
+#define IXGBE_MAX_FDIR_INDICES		63	/* based on q_vector limit */
+#define IXGBE_MAX_FCOE_INDICES		8
+#define MAX_RX_QUEUES			(IXGBE_MAX_FDIR_INDICES + 1)
+#define MAX_TX_QUEUES			(IXGBE_MAX_FDIR_INDICES + 1)
+#define IXGBE_MAX_L2A_QUEUES		4
+#define IXGBE_BAD_L2A_QUEUE		3
+#define IXGBE_MAX_MACVLANS		31
+#define IXGBE_MAX_DCBMACVLANS		8
+
 struct ixgbe_ring_feature {
 	u16 limit;	/* upper limit on feature indices */
 	u16 indices;	/* current value of indices */
@@ -348,7 +356,7 @@ struct ixgbe_ring_container {
 	for (pos = (head).ring; pos != NULL; pos = pos->next)
 
 #define MAX_RX_PACKET_BUFFERS ((adapter->flags & IXGBE_FLAG_DCB_ENABLED) \
-                              ? 8 : 1)
+			      ? 8 : 1)
 #define MAX_TX_PACKET_BUFFERS MAX_RX_PACKET_BUFFERS
 
 /* MAX_Q_VECTORS of these are allocated,
@@ -766,7 +774,6 @@ struct ixgbe_adapter {
 	int vf_rate_link_speed;
 	struct vf_macvlans vf_mvs;
 	struct vf_macvlans *mv_list;
-	bool antispoofing_enabled;
 
 	u32 timer_event_accumulator;
 	u32 vferr_refcount;
@@ -780,6 +787,21 @@ struct ixgbe_adapter {
 
 	u8 default_up;
 };
+
+static inline u8 ixgbe_max_rss_indices(struct ixgbe_adapter *adapter)
+{
+	switch (adapter->hw.mac.type) {
+	case ixgbe_mac_82598EB:
+	case ixgbe_mac_82599EB:
+	case ixgbe_mac_X540:
+		return IXGBE_MAX_RSS_INDICES;
+	case ixgbe_mac_X550:
+	case ixgbe_mac_X550EM_x:
+		return IXGBE_MAX_RSS_INDICES_X550;
+	default:
+		return 0;
+	}
+}
 
 struct ixgbe_fdir_filter {
 	struct hlist_node fdir_node;
@@ -816,11 +838,15 @@ enum ixgbe_boards {
 	board_82598,
 	board_82599,
 	board_X540,
+	board_X550,
+	board_X550EM_x,
 };
 
 extern struct ixgbe_info ixgbe_82598_info;
 extern struct ixgbe_info ixgbe_82599_info;
 extern struct ixgbe_info ixgbe_X540_info;
+extern struct ixgbe_info ixgbe_X550_info;
+extern struct ixgbe_info ixgbe_X550EM_x_info;
 #ifdef CONFIG_IXGBE_DCB
 extern const struct dcbnl_rtnl_ops dcbnl_ops;
 #endif
@@ -930,6 +956,7 @@ static inline void ixgbe_dbg_exit(void) {}
 
 #ifdef CONFIG_IXGBE_PTP
 void ixgbe_ptp_init(struct ixgbe_adapter *adapter);
+void ixgbe_ptp_suspend(struct ixgbe_adapter *adapter);
 void ixgbe_ptp_stop(struct ixgbe_adapter *adapter);
 void ixgbe_ptp_overflow_check(struct ixgbe_adapter *adapter);
 void ixgbe_ptp_rx_hang(struct ixgbe_adapter *adapter);

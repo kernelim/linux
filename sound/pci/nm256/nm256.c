@@ -1619,8 +1619,6 @@ snd_nm256_create(struct snd_card *card, struct pci_dev *pci,
 	if ((err = snd_device_new(card, SNDRV_DEV_LOWLEVEL, chip, &ops)) < 0)
 		goto __error;
 
-	snd_card_set_dev(card, &pci->dev);
-
 	*chip_ret = chip;
 	return 0;
 
@@ -1653,7 +1651,8 @@ static int __devinit snd_nm256_probe(struct pci_dev *pci,
 
 	q = snd_pci_quirk_lookup(pci, nm256_quirks);
 	if (q) {
-		snd_printdd(KERN_INFO "nm256: Enabled quirk for %s.\n", q->name);
+		snd_printdd(KERN_INFO "nm256: Enabled quirk for %s.\n",
+			    snd_pci_quirk_name(q));
 		switch (q->value) {
 		case NM_BLACKLISTED:
 			printk(KERN_INFO "nm256: The device is blacklisted. "
@@ -1668,7 +1667,7 @@ static int __devinit snd_nm256_probe(struct pci_dev *pci,
 		}
 	}
 
-	err = snd_card_create(index, id, THIS_MODULE, 0, &card);
+	err = snd_card_new(&pci->dev, index, id, THIS_MODULE, 0, &card);
 	if (err < 0)
 		return err;
 

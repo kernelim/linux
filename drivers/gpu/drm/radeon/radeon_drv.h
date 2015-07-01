@@ -33,7 +33,9 @@
 
 #include <linux/firmware.h>
 #include <linux/platform_device.h>
+#include <drm/drm_legacy.h>
 
+#include <drm/ati_pcigart.h>
 #include "radeon_family.h"
 
 /* General customization:
@@ -113,6 +115,9 @@
 #define DRIVER_MAJOR		1
 #define DRIVER_MINOR		34
 #define DRIVER_PATCHLEVEL	0
+
+long radeon_drm_ioctl(struct file *filp,
+		      unsigned int cmd, unsigned long arg);
 
 /* The rest of the file is DEPRECATED! */
 #ifdef CONFIG_DRM_RADEON_UMS

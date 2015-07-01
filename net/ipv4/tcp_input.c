@@ -2665,6 +2665,35 @@ static inline int tcp_packet_delayed(struct tcp_sock *tp)
 
 /* Undo procedures. */
 
+/* We can clear retrans_stamp when there are no retransmissions in the
+ * window. It would seem that it is trivially available for us in
+ * tp->retrans_out, however, that kind of assumptions doesn't consider
+ * what will happen if errors occur when sending retransmission for the
+ * second time. ...It could the that such segment has only
+ * TCPCB_EVER_RETRANS set at the present time. It seems that checking
+ * the head skb is enough except for some reneging corner cases that
+ * are not worth the effort.
+ *
+ * Main reason for all this complexity is the fact that connection dying
+ * time now depends on the validity of the retrans_stamp, in particular,
+ * that successive retransmissions of a segment must not advance
+ * retrans_stamp under any conditions.
+ */
+static bool tcp_any_retrans_done(const struct sock *sk)
+{
+	const struct tcp_sock *tp = tcp_sk(sk);
+	struct sk_buff *skb;
+
+	if (tp->retrans_out)
+		return true;
+
+	skb = tcp_write_queue_head((struct sock *)sk);
+	if (unlikely(skb && TCP_SKB_CB(skb)->sacked & TCPCB_EVER_RETRANS))
+		return true;
+
+	return false;
+}
+
 #if FASTRETRANS_DEBUG > 1
 static void DBGUNDO(struct sock *sk, const char *msg)
 {
@@ -2748,6 +2777,8 @@ static int tcp_try_undo_recovery(struct sock *sk)
 		 * is ACKed. For Reno it is MUST to prevent false
 		 * fast retransmits (RFC2582). SACK TCP is safe. */
 		tcp_moderate_cwnd(tp);
+		if (!tcp_any_retrans_done(sk))
+			tp->retrans_stamp = 0;
 		return 1;
 	}
 	tcp_set_ca_state(sk, TCP_CA_Open);
@@ -2779,7 +2810,7 @@ static int tcp_try_undo_partial(struct sock *sk, int acked)
 		/* Plain luck! Hole if filled with delayed
 		 * packet, rather than with a retransmit.
 		 */
-		if (tp->retrans_out == 0)
+		if (!tcp_any_retrans_done(sk))
 			tp->retrans_stamp = 0;
 
 		tcp_update_reordering(sk, tcp_fackets_out(tp) + acked, 1);
@@ -2845,7 +2876,7 @@ static void tcp_try_keep_open(struct sock *sk)
 	struct tcp_sock *tp = tcp_sk(sk);
 	int state = TCP_CA_Open;
 
-	if (tcp_left_out(tp) || tp->retrans_out)
+	if (tcp_left_out(tp) || tcp_any_retrans_done(sk))
 		state = TCP_CA_Disorder;
 
 	if (inet_csk(sk)->icsk_ca_state != state) {
@@ -2860,7 +2891,7 @@ static void tcp_try_to_open(struct sock *sk, int flag)
 
 	tcp_verify_left_out(tp);
 
-	if (!tp->frto_counter && tp->retrans_out == 0)
+	if (!tp->frto_counter && !tcp_any_retrans_done(sk))
 		tp->retrans_stamp = 0;
 
 	if (flag & FLAG_ECE)

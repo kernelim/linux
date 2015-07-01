@@ -569,8 +569,19 @@ static int mlx4_cmd_wait(struct mlx4_dev *dev, u64 in_param, u64 *out_param,
 
 	err = context->result;
 	if (err) {
-		mlx4_err(dev, "command 0x%x failed: fw status = 0x%x\n",
-			 op, context->fw_status);
+		/* Since we do not want to have this error message always
+		 * displayed at driver start when there are ConnectX2 HCAs
+		 * on the host, we deprecate the error message for this
+		 * specific command/input_mod/opcode_mod/fw-status to be debug.
+		 */
+		if (op == MLX4_CMD_SET_PORT &&
+		    (in_modifier == 1 || in_modifier == 2) &&
+		    op_modifier == 0 && context->fw_status == CMD_STAT_BAD_SIZE)
+			mlx4_dbg(dev, "command 0x%x failed: fw status = 0x%x\n",
+				 op, context->fw_status);
+		else
+			mlx4_err(dev, "command 0x%x failed: fw status = 0x%x\n",
+				 op, context->fw_status);
 		goto out;
 	}
 
@@ -1880,10 +1891,9 @@ void mlx4_master_comm_channel(struct work_struct *work)
 			if (toggle != slt) {
 				if (master->slave_state[slave].comm_toggle
 				    != slt) {
-					printk(KERN_INFO "slave %d out of sync."
-					       " read toggle %d, state toggle %d. "
-					       "Resynching.\n", slave, slt,
-					       master->slave_state[slave].comm_toggle);
+					pr_info("slave %d out of sync. read toggle %d, state toggle %d. Resynching.\n",
+						slave, slt,
+						master->slave_state[slave].comm_toggle);
 					master->slave_state[slave].comm_toggle =
 						slt;
 				}

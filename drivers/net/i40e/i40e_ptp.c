@@ -25,7 +25,6 @@
  ******************************************************************************/
 
 #include "i40e.h"
-#include <linux/export.h>
 #include <linux/ptp_classify.h>
 
 /* The XL710 timesync is very much like Intel's 82599 design when it comes to
@@ -216,7 +215,7 @@ static int i40e_ptp_settime(struct ptp_clock_info *ptp,
 }
 
 /**
- * i40e_ptp_enable - Enable/disable ancillary features of the PHC subsystem
+ * i40e_ptp_feature_enable - Enable/disable ancillary features of the PHC subsystem
  * @ptp: The PTP clock structure
  * @rq: The requested feature to change
  * @on: Enable/disable flag
@@ -224,8 +223,8 @@ static int i40e_ptp_settime(struct ptp_clock_info *ptp,
  * The XL710 does not support any of the ancillary features of the PHC
  * subsystem, so this function may just return.
  **/
-static int i40e_ptp_enable(struct ptp_clock_info *ptp,
-			   struct ptp_clock_request *rq, int on)
+static int i40e_ptp_feature_enable(struct ptp_clock_info *ptp,
+				   struct ptp_clock_request *rq, int on)
 {
 	return -EOPNOTSUPP;
 }
@@ -248,7 +247,12 @@ void i40e_ptp_rx_hang(struct i40e_vsi *vsi)
 	u32 prttsyn_stat;
 	int n;
 
-	if (pf->flags & I40E_FLAG_PTP)
+	/* Since we cannot turn off the Rx timestamp logic if the device is
+	 * configured for Tx timestamping, we check if Rx timestamping is
+	 * configured. We don't want to spuriously warn about Rx timestamp
+	 * hangs if we don't care about the timestamps.
+	 */
+	if (!(pf->flags & I40E_FLAG_PTP) || !pf->ptp_rx)
 		return;
 
 	prttsyn_stat = rd32(hw, I40E_PRTTSYN_STAT_1);
@@ -306,6 +310,13 @@ void i40e_ptp_tx_hwtstamp(struct i40e_pf *pf)
 	u32 hi, lo;
 	u64 ns;
 
+	if (!(pf->flags & I40E_FLAG_PTP) || !pf->ptp_tx)
+		return;
+
+	/* don't attempt to timestamp if we don't have an skb */
+	if (!pf->ptp_tx_skb)
+		return;
+
 	lo = rd32(hw, I40E_PRTTSYN_TXTIME_L);
 	hi = rd32(hw, I40E_PRTTSYN_TXTIME_H);
 
@@ -338,7 +349,7 @@ void i40e_ptp_rx_hwtstamp(struct i40e_pf *pf, struct sk_buff *skb, u8 index)
 	/* Since we cannot turn off the Rx timestamp logic if the device is
 	 * doing Tx timestamping, check if Rx timestamping is configured.
 	 */
-	if (!pf->ptp_rx)
+	if (!(pf->flags & I40E_FLAG_PTP) || !pf->ptp_rx)
 		return;
 
 	hw = &pf->hw;
@@ -382,11 +393,17 @@ void i40e_ptp_set_increment(struct i40e_pf *pf)
 		incval = I40E_PTP_1GB_INCVAL;
 		break;
 	case I40E_LINK_SPEED_100MB:
-		dev_warn(&pf->pdev->dev,
-			 "%s: 1588 functionality is not supported at 100 Mbps. Stopping the PHC.\n",
-			 __func__);
+	{
+		static int warn_once;
+
+		if (!warn_once) {
+			dev_warn(&pf->pdev->dev,
+				 "1588 functionality is not supported at 100 Mbps. Stopping the PHC.\n");
+			warn_once++;
+		}
 		incval = 0;
 		break;
+	}
 	case I40E_LINK_SPEED_40GB:
 	default:
 		incval = I40E_PTP_40GB_INCVAL;
@@ -418,41 +435,33 @@ int i40e_ptp_get_ts_config(struct i40e_pf *pf, struct ifreq *ifr)
 {
 	struct hwtstamp_config *config = &pf->tstamp_config;
 
+	if (!(pf->flags & I40E_FLAG_PTP))
+		return -EOPNOTSUPP;
+
 	return copy_to_user(ifr->ifr_data, config, sizeof(*config)) ?
 		-EFAULT : 0;
 }
 
 /**
- * i40e_ptp_set_ts_config - ioctl interface to control the HW timestamping
+ * i40e_ptp_set_timestamp_mode - setup hardware for requested timestamp mode
  * @pf: Board private structure
- * @ifreq: ioctl data
+ * @config: hwtstamp settings requested or saved
  *
- * Respond to the user filter requests and make the appropriate hardware
- * changes here. The XL710 cannot support splitting of the Tx/Rx timestamping
- * logic, so keep track in software of whether to indicate these timestamps
- * or not.
+ * Control hardware registers to enter the specific mode requested by the
+ * user. Also used during reset path to ensure that timestamp settings are
+ * maintained.
  *
- * It is permissible to "upgrade" the user request to a broader filter, as long
- * as the user receives the timestamps they care about and the user is notified
- * the filter has been broadened.
+ * Note: modifies config in place, and may update the requested mode to be
+ * more broad if the specific filter is not directly supported.
  **/
-int i40e_ptp_set_ts_config(struct i40e_pf *pf, struct ifreq *ifr)
+static int i40e_ptp_set_timestamp_mode(struct i40e_pf *pf,
+				       struct hwtstamp_config *config)
 {
 	struct i40e_hw *hw = &pf->hw;
-	struct hwtstamp_config *config = &pf->tstamp_config;
-	u32 pf_id, tsyntype, regval;
-
-	if (copy_from_user(config, ifr->ifr_data, sizeof(*config)))
-		return -EFAULT;
+	u32 tsyntype, regval;
 
 	/* Reserved for future extensions. */
 	if (config->flags)
-		return -EINVAL;
-
-	/* Confirm that 1588 is supported on this PF. */
-	pf_id = (rd32(hw, I40E_PRTTSYN_CTL0) & I40E_PRTTSYN_CTL0_PF_ID_MASK) >>
-		I40E_PRTTSYN_CTL0_PF_ID_SHIFT;
-	if (hw->pf_id != pf_id)
 		return -EINVAL;
 
 	switch (config->tx_type) {
@@ -469,7 +478,12 @@ int i40e_ptp_set_ts_config(struct i40e_pf *pf, struct ifreq *ifr)
 	switch (config->rx_filter) {
 	case HWTSTAMP_FILTER_NONE:
 		pf->ptp_rx = false;
-		tsyntype = 0;
+		/* We set the type to V1, but do not enable UDP packet
+		 * recognition. In this way, we should be as close to
+		 * disabling PTP Rx timestamps as possible since V1 packets
+		 * are always UDP, since L2 packets are a V2 feature.
+		 */
+		tsyntype = I40E_PRTTSYN_CTL1_TSYNTYPE_V1;
 		break;
 	case HWTSTAMP_FILTER_PTP_V1_L4_SYNC:
 	case HWTSTAMP_FILTER_PTP_V1_L4_DELAY_REQ:
@@ -523,35 +537,75 @@ int i40e_ptp_set_ts_config(struct i40e_pf *pf, struct ifreq *ifr)
 		regval &= ~I40E_PFINT_ICR0_ENA_TIMESYNC_MASK;
 	wr32(hw, I40E_PFINT_ICR0_ENA, regval);
 
-	/* There is no simple on/off switch for Rx. To "disable" Rx support,
-	 * ignore any received timestamps, rather than turn off the clock.
+	/* Although there is no simple on/off switch for Rx, we "disable" Rx
+	 * timestamps by setting to V1 only mode and clear the UDP
+	 * recognition. This ought to disable all PTP Rx timestamps as V1
+	 * packets are always over UDP. Note that software is configured to
+	 * ignore Rx timestamps via the pf->ptp_rx flag.
 	 */
-	if (pf->ptp_rx) {
-		regval = rd32(hw, I40E_PRTTSYN_CTL1);
-		/* clear everything but the enable bit */
-		regval &= I40E_PRTTSYN_CTL1_TSYNENA_MASK;
-		/* now enable bits for desired Rx timestamps */
-		regval |= tsyntype;
-		wr32(hw, I40E_PRTTSYN_CTL1, regval);
-	}
+	regval = rd32(hw, I40E_PRTTSYN_CTL1);
+	/* clear everything but the enable bit */
+	regval &= I40E_PRTTSYN_CTL1_TSYNENA_MASK;
+	/* now enable bits for desired Rx timestamps */
+	regval |= tsyntype;
+	wr32(hw, I40E_PRTTSYN_CTL1, regval);
 
-	return copy_to_user(ifr->ifr_data, config, sizeof(*config)) ?
+	return 0;
+}
+
+/**
+ * i40e_ptp_set_ts_config - ioctl interface to control the HW timestamping
+ * @pf: Board private structure
+ * @ifreq: ioctl data
+ *
+ * Respond to the user filter requests and make the appropriate hardware
+ * changes here. The XL710 cannot support splitting of the Tx/Rx timestamping
+ * logic, so keep track in software of whether to indicate these timestamps
+ * or not.
+ *
+ * It is permissible to "upgrade" the user request to a broader filter, as long
+ * as the user receives the timestamps they care about and the user is notified
+ * the filter has been broadened.
+ **/
+int i40e_ptp_set_ts_config(struct i40e_pf *pf, struct ifreq *ifr)
+{
+	struct hwtstamp_config config;
+	int err;
+
+	if (!(pf->flags & I40E_FLAG_PTP))
+		return -EOPNOTSUPP;
+
+	if (copy_from_user(&config, ifr->ifr_data, sizeof(config)))
+		return -EFAULT;
+
+	err = i40e_ptp_set_timestamp_mode(pf, &config);
+	if (err)
+		return err;
+
+	/* save these settings for future reference */
+	pf->tstamp_config = config;
+
+	return copy_to_user(ifr->ifr_data, &config, sizeof(config)) ?
 		-EFAULT : 0;
 }
 
 /**
- * i40e_ptp_init - Initialize the 1588 support and register the PHC
+ * i40e_ptp_create_clock - Create PTP clock device for userspace
  * @pf: Board private structure
  *
- * This function registers the device clock as a PHC. If it is successful, it
- * starts the clock in the hardware.
+ * This function creates a new PTP clock device. It only creates one if we
+ * don't already have one, so it is safe to call. Will return error if it
+ * can't create one, but success if we already have a device. Should be used
+ * by i40e_ptp_init to create clock initially, and prevent global resets from
+ * creating new clock devices.
  **/
-void i40e_ptp_init(struct i40e_pf *pf)
+static long i40e_ptp_create_clock(struct i40e_pf *pf)
 {
-	struct i40e_hw *hw = &pf->hw;
-	struct net_device *netdev = pf->vsi[pf->lan_vsi]->netdev;
+	/* no need to create a clock device if we already have one */
+	if (!IS_ERR_OR_NULL(pf->ptp_clock))
+		return 0;
 
-	strncpy(pf->ptp_caps.name, "i40e", sizeof(pf->ptp_caps.name));
+	strncpy(pf->ptp_caps.name, i40e_driver_name, sizeof(pf->ptp_caps.name));
 	pf->ptp_caps.owner = THIS_MODULE;
 	pf->ptp_caps.max_adj = 999999999;
 	pf->ptp_caps.n_ext_ts = 0;
@@ -560,19 +614,66 @@ void i40e_ptp_init(struct i40e_pf *pf)
 	pf->ptp_caps.adjtime = i40e_ptp_adjtime;
 	pf->ptp_caps.gettime = i40e_ptp_gettime;
 	pf->ptp_caps.settime = i40e_ptp_settime;
-	pf->ptp_caps.enable = i40e_ptp_enable;
+	pf->ptp_caps.enable = i40e_ptp_feature_enable;
 
 	/* Attempt to register the clock before enabling the hardware. */
 	pf->ptp_clock = ptp_clock_register(&pf->ptp_caps, &pf->pdev->dev);
 	if (IS_ERR(pf->ptp_clock)) {
+		return PTR_ERR(pf->ptp_clock);
+	}
+
+	/* clear the hwtstamp settings here during clock create, instead of
+	 * during regular init, so that we can maintain settings across a
+	 * reset or suspend.
+	 */
+	pf->tstamp_config.rx_filter = HWTSTAMP_FILTER_NONE;
+	pf->tstamp_config.tx_type = HWTSTAMP_TX_OFF;
+
+	return 0;
+}
+
+/**
+ * i40e_ptp_init - Initialize the 1588 support after device probe or reset
+ * @pf: Board private structure
+ *
+ * This function sets device up for 1588 support. The first time it is run, it
+ * will create a PHC clock device. It does not create a clock device if one
+ * already exists. It also reconfigures the device after a reset.
+ **/
+void i40e_ptp_init(struct i40e_pf *pf)
+{
+	struct net_device *netdev = pf->vsi[pf->lan_vsi]->netdev;
+	struct i40e_hw *hw = &pf->hw;
+	u32 pf_id;
+	long err;
+
+	/* Only one PF is assigned to control 1588 logic per port. Do not
+	 * enable any support for PFs not assigned via PRTTSYN_CTL0.PF_ID
+	 */
+	pf_id = (rd32(hw, I40E_PRTTSYN_CTL0) & I40E_PRTTSYN_CTL0_PF_ID_MASK) >>
+		I40E_PRTTSYN_CTL0_PF_ID_SHIFT;
+	if (hw->pf_id != pf_id) {
+		pf->flags &= ~I40E_FLAG_PTP;
+		dev_info(&pf->pdev->dev, "%s: PTP not supported on %s\n",
+			 __func__,
+			 netdev->name);
+		return;
+	}
+
+	/* we have to initialize the lock first, since we can't control
+	 * when the user will enter the PHC device entry points
+	 */
+	spin_lock_init(&pf->tmreg_lock);
+
+	/* ensure we have a clock device */
+	err = i40e_ptp_create_clock(pf);
+	if (err) {
 		pf->ptp_clock = NULL;
 		dev_err(&pf->pdev->dev, "%s: ptp_clock_register failed\n",
 			__func__);
 	} else {
 		struct timespec ts;
 		u32 regval;
-
-		spin_lock_init(&pf->tmreg_lock);
 
 		dev_info(&pf->pdev->dev, "%s: added PHC on %s\n", __func__,
 			 netdev->name);
@@ -589,8 +690,8 @@ void i40e_ptp_init(struct i40e_pf *pf)
 		/* Set the increment value per clock tick. */
 		i40e_ptp_set_increment(pf);
 
-		/* reset the tstamp_config */
-		memset(&pf->tstamp_config, 0, sizeof(pf->tstamp_config));
+		/* reset timestamping mode */
+		i40e_ptp_set_timestamp_mode(pf, &pf->tstamp_config);
 
 		/* Set the clock value. */
 		ts = ktime_to_timespec(ktime_get_real());

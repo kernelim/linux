@@ -2209,8 +2209,8 @@ int __init amd_iommu_init_dma_ops(void)
 		prealloc_protection_domains();
 
 	iommu_detected = 1;
-	force_iommu = 1;
 	bad_dma_address = 0;
+	swiotlb = 0;
 
 	/* Make the driver finally visible to the drivers */
 	unhandled = device_dma_ops_init();

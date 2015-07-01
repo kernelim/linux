@@ -38,6 +38,7 @@
 #include <linux/radix-tree.h>
 #include <linux/cpu_rmap.h>
 #include <linux/if_ether.h>
+#include <linux/crash_dump.h>
 
 #include <asm/atomic.h>
 
@@ -440,7 +441,6 @@ struct mlx4_caps {
 	int                     reserved_qps_base[MLX4_NUM_QP_REGION];
 	int                     log_num_macs;
 	int                     log_num_vlans;
-	int                     log_num_prios;
 	enum mlx4_port_type	port_type[MLX4_MAX_PORTS + 1];
 	u8			supported_type[MLX4_MAX_PORTS + 1];
 	u8                      suggested_type[MLX4_MAX_PORTS + 1];
@@ -1196,4 +1196,11 @@ int mlx4_phys_to_slave_port(struct mlx4_dev *dev, int slave, int port);
 int mlx4_get_base_gid_ix(struct mlx4_dev *dev, int slave, int port);
 
 int mlx4_config_vxlan_port(struct mlx4_dev *dev, __be16 udp_port);
+
+/* Returns true if running in low memory profile (kdump kernel) */
+static inline bool mlx4_low_memory_profile(void)
+{
+	return is_kdump_kernel();
+}
+
 #endif /* MLX4_DEVICE_H */

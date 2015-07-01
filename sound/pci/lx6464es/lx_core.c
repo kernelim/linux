@@ -1183,7 +1183,7 @@ static int lx_interrupt_request_new_buffer(struct lx6464es *chip,
 	err = lx_buffer_give(chip, 0, is_capture, period_bytes, buf_lo, buf_hi,
 			     &buffer_index);
 	snd_printdd(LXP "interrupt: gave buffer index %x on %p (%d bytes)\n",
-		    buffer_index, (void *)buf, period_bytes);
+		    buffer_index, (void *)(uintptr_t)buf, period_bytes);
 
 	lx_stream->frame_pos = next_pos;
 	spin_unlock_irqrestore(&chip->lock, flags);

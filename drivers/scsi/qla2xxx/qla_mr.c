@@ -40,7 +40,7 @@ qlafx00_mailbox_command(scsi_qla_host_t *vha, struct mbx_cmd_32 *mcp)
 {
 	int		rval;
 	unsigned long    flags = 0;
-	device_reg_t __iomem *reg;
+	device_reg_t *reg;
 	uint8_t		abort_active;
 	uint8_t		io_lock_on;
 	uint16_t	command = 0;
@@ -695,11 +695,11 @@ qlafx00_pci_info_str(struct scsi_qla_host *vha, char *str)
 }
 
 char *
-qlafx00_fw_version_str(struct scsi_qla_host *vha, char *str)
+qlafx00_fw_version_str(struct scsi_qla_host *vha, char *str, size_t size)
 {
 	struct qla_hw_data *ha = vha->hw;
 
-	sprintf(str, "%s", ha->mr.fw_version);
+	snprintf(str, size, "%s", ha->mr.fw_version);
 	return str;
 }
 
@@ -1551,7 +1551,10 @@ qlafx00_timer_routine(scsi_qla_host_t *vha)
 			ha->mr.fw_reset_timer_tick =
 			    QLAFX00_MAX_RESET_INTERVAL;
 		}
-		ha->mr.old_aenmbx0_state = aenmbx0;
+		if (ha->mr.old_aenmbx0_state != aenmbx0) {
+			ha->mr.old_aenmbx0_state = aenmbx0;
+			ha->mr.fw_reset_timer_tick = QLAFX00_RESET_INTERVAL;
+		}
 		ha->mr.fw_reset_timer_tick--;
 	}
 	if (test_bit(FX00_CRITEMP_RECOVERY, &vha->dpc_flags)) {
@@ -1675,17 +1678,16 @@ qlafx00_get_fcport(struct scsi_qla_host *vha, int tgt_id)
 	fc_port_t	*fcport;
 
 	/* Check for matching device in remote port list. */
-	fcport = NULL;
 	list_for_each_entry(fcport, &vha->vp_fcports, list) {
 		if (fcport->tgt_id == tgt_id) {
 			ql_dbg(ql_dbg_async, vha, 0x5072,
 			    "Matching fcport(%p) found with TGT-ID: 0x%x "
 			    "and Remote TGT_ID: 0x%x\n",
 			    fcport, fcport->tgt_id, tgt_id);
-			break;
+			return fcport;
 		}
 	}
-	return fcport;
+	return NULL;
 }
 
 static void

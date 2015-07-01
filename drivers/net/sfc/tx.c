@@ -194,7 +194,7 @@ static void efx_memcpy_toio_aligned(struct efx_nic *efx, u8 __iomem **piobuf,
 {
 	int block_len = len & ~(sizeof(copy_buf->buf) - 1);
 
-	memcpy_toio(*piobuf, data, block_len);
+	__iowrite64_copy(*piobuf, data, block_len >> 3);
 	*piobuf += block_len;
 	len -= block_len;
 
@@ -226,7 +226,8 @@ static void efx_memcpy_toio_aligned_cb(struct efx_nic *efx, u8 __iomem **piobuf,
 		if (copy_buf->used < sizeof(copy_buf->buf))
 			return;
 
-		memcpy_toio(*piobuf, copy_buf->buf, sizeof(copy_buf->buf));
+		__iowrite64_copy(*piobuf, copy_buf->buf,
+				 sizeof(copy_buf->buf) >> 3);
 		*piobuf += sizeof(copy_buf->buf);
 		data += copy_to_buf;
 		len -= copy_to_buf;
@@ -241,7 +242,8 @@ static void efx_flush_copy_buffer(struct efx_nic *efx, u8 __iomem *piobuf,
 {
 	/* if there's anything in it, write the whole buffer, including junk */
 	if (copy_buf->used)
-		memcpy_toio(piobuf, copy_buf->buf, sizeof(copy_buf->buf));
+		__iowrite64_copy(piobuf, copy_buf->buf,
+				 sizeof(copy_buf->buf) >> 3);
 }
 
 /* Traverse skb structure and copy fragments in to PIO buffer.
@@ -300,8 +302,8 @@ efx_enqueue_skb_pio(struct efx_tx_queue *tx_queue, struct sk_buff *skb)
 		 */
 		BUILD_BUG_ON(L1_CACHE_BYTES >
 			     SKB_DATA_ALIGN(sizeof(struct skb_shared_info)));
-		memcpy_toio(tx_queue->piobuf, skb->data,
-			    ALIGN(skb->len, L1_CACHE_BYTES));
+		__iowrite64_copy(tx_queue->piobuf, skb->data,
+				 ALIGN(skb->len, L1_CACHE_BYTES) >> 3);
 	}
 
 	EFX_POPULATE_QWORD_5(buffer->option,
@@ -344,8 +346,6 @@ netdev_tx_t efx_enqueue_skb(struct efx_tx_queue *tx_queue, struct sk_buff *skb)
 	unsigned int dma_len;
 	unsigned short dma_flags;
 	int i = 0;
-
-	EFX_BUG_ON_PARANOID(tx_queue->write_count != tx_queue->insert_count);
 
 	if (skb_shinfo(skb)->gso_size)
 		return efx_enqueue_skb_tso(tx_queue, skb);
@@ -433,6 +433,8 @@ finish_packet:
 
 	/* Pass off to hardware */
 	efx_nic_push_buffers(tx_queue);
+
+	tx_queue->tx_packets++;
 
 	efx_tx_maybe_stop_queue(tx_queue);
 
@@ -1169,6 +1171,8 @@ static int tso_start_new_packet(struct efx_tx_queue *tx_queue,
 
 	++tx_queue->tso_packets;
 
+	++tx_queue->tx_packets;
+
 	return 0;
 }
 
@@ -1193,8 +1197,6 @@ static int efx_enqueue_skb_tso(struct efx_tx_queue *tx_queue,
 
 	/* Find the packet protocol and sanity-check it */
 	state.protocol = efx_tso_check_protocol(skb);
-
-	EFX_BUG_ON_PARANOID(tx_queue->write_count != tx_queue->insert_count);
 
 	rc = tso_start(&state, efx, skb);
 	if (rc)

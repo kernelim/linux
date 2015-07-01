@@ -112,6 +112,13 @@ struct plist_node {
 }
 
 /**
+ * PLIST_HEAD - declare and init plist_head
+ * @head:	name for struct plist_head variable
+ */
+#define PLIST_HEAD(head, _lock)				\
+	struct plist_head head = PLIST_HEAD_INIT(head, _lock)
+
+/**
  * PLIST_NODE_INIT - static struct plist_node initializer
  * @node:	struct plist_node variable name
  * @__prio:	initial node priority
@@ -151,6 +158,8 @@ static inline void plist_node_init(struct plist_node *node, int prio)
 extern void plist_add(struct plist_node *node, struct plist_head *head);
 extern void plist_del(struct plist_node *node, struct plist_head *head);
 
+extern void plist_requeue(struct plist_node *node, struct plist_head *head);
+
 /**
  * plist_for_each - iterate over the plist
  * @pos:	the type * to use as a loop counter
@@ -158,6 +167,16 @@ extern void plist_del(struct plist_node *node, struct plist_head *head);
  */
 #define plist_for_each(pos, head)	\
 	 list_for_each_entry(pos, &(head)->node_list, plist.node_list)
+
+/**
+ * plist_for_each_continue - continue iteration over the plist
+ * @pos:	the type * to use as a loop cursor
+ * @head:	the head for your list
+ *
+ * Continue to iterate over plist, continuing after the current position.
+ */
+#define plist_for_each_continue(pos, head)	\
+	 list_for_each_entry_continue(pos, &(head)->node_list, plist.node_list)
 
 /**
  * plist_for_each_safe - iterate safely over a plist of given type
@@ -178,6 +197,18 @@ extern void plist_del(struct plist_node *node, struct plist_head *head);
  */
 #define plist_for_each_entry(pos, head, mem)	\
 	 list_for_each_entry(pos, &(head)->node_list, mem.plist.node_list)
+
+/**
+ * plist_for_each_entry_continue - continue iteration over list of given type
+ * @pos:	the type * to use as a loop cursor
+ * @head:	the head for your list
+ * @m:		the name of the list_struct within the struct
+ *
+ * Continue to iterate over list of given type, continuing after
+ * the current position.
+ */
+#define plist_for_each_entry_continue(pos, head, m)	\
+	list_for_each_entry_continue(pos, &(head)->node_list, m.plist.node_list)
 
 /**
  * plist_for_each_entry_safe - iterate safely over list of given type
@@ -229,6 +260,20 @@ static inline int plist_node_empty(const struct plist_node *node)
 #endif
 
 /**
+ * plist_next - get the next entry in list
+ * @pos:	the type * to cursor
+ */
+#define plist_next(pos) \
+	list_next_entry(pos, plist.node_list)
+
+/**
+ * plist_prev - get the prev entry in list
+ * @pos:	the type * to cursor
+ */
+#define plist_prev(pos) \
+	list_prev_entry(pos, plist.node_list)
+
+/**
  * plist_first - return the first node (and thus, highest priority)
  * @head:	the &struct plist_head pointer
  *
@@ -237,6 +282,18 @@ static inline int plist_node_empty(const struct plist_node *node)
 static inline struct plist_node* plist_first(const struct plist_head *head)
 {
 	return list_entry(head->node_list.next,
+			  struct plist_node, plist.node_list);
+}
+
+/**
+ * plist_last - return the last node (and thus, lowest priority)
+ * @head:	the &struct plist_head pointer
+ *
+ * Assumes the plist is _not_ empty.
+ */
+static inline struct plist_node *plist_last(const struct plist_head *head)
+{
+	return list_entry(head->node_list.prev,
 			  struct plist_node, plist.node_list);
 }
 

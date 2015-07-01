@@ -222,14 +222,6 @@ static inline int ip_finish_output2(struct sk_buff *skb)
 	return -EINVAL;
 }
 
-static inline int ip_skb_dst_mtu(struct sk_buff *skb)
-{
-	struct inet_sock *inet = skb->sk ? inet_sk(skb->sk) : NULL;
-
-	return (inet && inet->pmtudisc == IP_PMTUDISC_PROBE) ?
-	       skb_dst(skb)->dev->mtu : dst_mtu(skb_dst(skb));
-}
-
 static int ip_finish_output(struct sk_buff *skb)
 {
 #if defined(CONFIG_NETFILTER) && defined(CONFIG_XFRM)
@@ -468,12 +460,13 @@ int ip_fragment(struct sk_buff *skb, int (*output)(struct sk_buff *))
 
 	iph = ip_hdr(skb);
 
+	mtu = ip_skb_dst_mtu(skb);
 	if (unlikely(((iph->frag_off & htons(IP_DF)) && !skb->local_df) ||
 		     (IPCB(skb)->frag_max_size &&
-		      IPCB(skb)->frag_max_size > dst_mtu(&rt->u.dst)))) {
+		      IPCB(skb)->frag_max_size > mtu))) {
 		IP_INC_STATS(dev_net(dev), IPSTATS_MIB_FRAGFAILS);
 		icmp_send(skb, ICMP_DEST_UNREACH, ICMP_FRAG_NEEDED,
-			  htonl(ip_skb_dst_mtu(skb)));
+			  htonl(mtu));
 		kfree_skb(skb);
 		return -EMSGSIZE;
 	}
@@ -483,7 +476,7 @@ int ip_fragment(struct sk_buff *skb, int (*output)(struct sk_buff *))
 	 */
 
 	hlen = iph->ihl * 4;
-	mtu = dst_mtu(&rt->u.dst) - hlen;	/* Size of data space */
+	mtu = mtu - hlen;	/* Size of data space */
 	IPCB(skb)->flags |= IPSKB_FRAG_COMPLETE;
 
 	/* When frag_list is given, use it. First, check its validity:
@@ -822,8 +815,7 @@ static int __ip_append_data(struct sock *sk, struct sk_buff_head *queue,
 
 	fragheaderlen = sizeof(struct iphdr) + (opt ? opt->optlen : 0);
 	maxfraglen = ((mtu - fragheaderlen) & ~7) + fragheaderlen;
-	maxnonfragsize = (inet->pmtudisc >= IP_PMTUDISC_DO) ?
-			 mtu : 0xFFFF;
+	maxnonfragsize = ip_sk_local_df(sk) ? 0xFFFF : mtu;
 
 	if (cork->length + length > maxnonfragsize - fragheaderlen) {
 		ip_local_error(sk, EMSGSIZE, rt->rt_dst, inet->dport, mtu-exthdrlen);
@@ -1046,7 +1038,6 @@ static int ip_setup_cork(struct sock *sk, struct inet_cork *cork,
 			 struct inet_cork_extended* cork_ext,
 			 struct ipcm_cookie *ipc, struct rtable **rtp)
 {
-	struct inet_sock *inet = inet_sk(sk);
 	struct ip_options *opt;
 	struct rtable *rt;
 
@@ -1072,8 +1063,8 @@ static int ip_setup_cork(struct sock *sk, struct inet_cork *cork,
 	 * We steal reference to this route, caller should not release it
 	 */
 	*rtp = NULL;
-	cork->fragsize = inet->pmtudisc == IP_PMTUDISC_PROBE ?
-			 rt->u.dst.dev->mtu : dst_mtu(rt->u.dst.path);
+	cork->fragsize = ip_sk_use_pmtu(sk) ?
+			 dst_mtu(&rt->u.dst) : rt->u.dst.dev->mtu;
 	cork->dst = &rt->u.dst;
 	cork->length = 0;
 	cork_ext->ttl = ipc->ttl;
@@ -1156,8 +1147,7 @@ ssize_t	ip_append_page(struct sock *sk, struct page *page,
 
 	fragheaderlen = sizeof(struct iphdr) + (opt ? opt->optlen : 0);
 	maxfraglen = ((mtu - fragheaderlen) & ~7) + fragheaderlen;
-	maxnonfragsize = (inet->pmtudisc >= IP_PMTUDISC_DO) ?
-			 mtu : 0xFFFF;
+	maxnonfragsize = ip_sk_local_df(sk) ? 0xFFFF : mtu;
 
 	if (inet->cork.length + size > maxnonfragsize - fragheaderlen) {
 		ip_local_error(sk, EMSGSIZE, rt->rt_dst, inet->dport, mtu);
@@ -1317,13 +1307,13 @@ struct sk_buff *__ip_make_skb(struct sock *sk,
 	 * to fragment the frame generated here. No matter, what transforms
 	 * how transforms change size of the packet, it will come out.
 	 */
-	if (inet->pmtudisc < IP_PMTUDISC_DO)
-		skb->local_df = 1;
+	skb->local_df = ip_sk_local_df(sk);
 
 	/* DF bit is set when we want to see DF on outgoing frames.
 	 * If local_df is set too, we still allow to fragment this frame
 	 * locally. */
-	if (inet->pmtudisc >= IP_PMTUDISC_DO ||
+	if (inet->pmtudisc == IP_PMTUDISC_DO ||
+	    inet->pmtudisc == IP_PMTUDISC_PROBE ||
 	    (skb->len <= dst_mtu(&rt->u.dst) &&
 	     ip_dont_fragment(sk, &rt->u.dst)))
 		df = htons(IP_DF);

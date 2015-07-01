@@ -21,6 +21,8 @@
 #include <linux/tick.h>
 #include <linux/stop_machine.h>
 
+#include "timekeeping_internal.h"
+
 /* Structure holding internal timekeeping values. */
 struct timekeeper {
 	/* Current clocksource used for timekeeping. */
@@ -147,7 +149,7 @@ static void timekeeper_setup_internals(struct clocksource *clock)
 /* Timekeeper helper functions. */
 static inline s64 timekeeping_get_ns(void)
 {
-	cycle_t cycle_now, cycle_delta;
+	cycle_t cycle_now, delta;
 	struct clocksource *clock;
 
 	/* read clocksource: */
@@ -155,16 +157,15 @@ static inline s64 timekeeping_get_ns(void)
 	cycle_now = clock->read(clock);
 
 	/* calculate the delta since the last update_wall_time: */
-	cycle_delta = (cycle_now - clock->cycle_last) & clock->mask;
+	delta = clocksource_delta(cycle_now, clock->cycle_last, clock->mask);
 
 	/* return delta convert to nanoseconds using ntp adjusted mult. */
-	return clocksource_cyc2ns(cycle_delta, timekeeper.mult,
-				  timekeeper.shift);
+	return clocksource_cyc2ns(delta, timekeeper.mult, timekeeper.shift);
 }
 
 static inline s64 timekeeping_get_ns_raw(void)
 {
-	cycle_t cycle_now, cycle_delta;
+	cycle_t cycle_now, delta;
 	struct clocksource *clock;
 
 	/* read clocksource: */
@@ -172,10 +173,10 @@ static inline s64 timekeeping_get_ns_raw(void)
 	cycle_now = clock->read(clock);
 
 	/* calculate the delta since the last update_wall_time: */
-	cycle_delta = (cycle_now - clock->cycle_last) & clock->mask;
+	delta = clocksource_delta(cycle_now, clock->cycle_last, clock->mask);
 
 	/* return delta convert to nanoseconds. */
-	return clocksource_cyc2ns(cycle_delta, clock->mult, clock->shift);
+	return clocksource_cyc2ns(delta, clock->mult, clock->shift);
 }
 
 static void update_rt_offset(void)
@@ -208,24 +209,23 @@ static void timekeeping_update(bool clearntp)
  */
 static void timekeeping_forward_now(void)
 {
-	cycle_t cycle_now, cycle_delta;
+	cycle_t cycle_now, delta;
 	struct clocksource *clock;
 	s64 nsec;
 
 	clock = timekeeper.clock;
 	cycle_now = clock->read(clock);
-	cycle_delta = (cycle_now - clock->cycle_last) & clock->mask;
+	delta = clocksource_delta(cycle_now, clock->cycle_last, clock->mask);
 	clock->cycle_last = cycle_now;
 
-	nsec = clocksource_cyc2ns(cycle_delta, timekeeper.mult,
-				  timekeeper.shift);
+	nsec = clocksource_cyc2ns(delta, timekeeper.mult, timekeeper.shift);
 
 	/* If arch requires, add in gettimeoffset() */
 	nsec += arch_gettimeoffset();
 
 	timespec_add_ns(&timekeeper.xtime, nsec);
 
-	nsec = clocksource_cyc2ns(cycle_delta, clock->mult, clock->shift);
+	nsec = clocksource_cyc2ns(delta, clock->mult, clock->shift);
 	timespec_add_ns(&timekeeper.raw_time, nsec);
 }
 
@@ -1020,7 +1020,8 @@ static void update_wall_time(void)
 #ifdef CONFIG_ARCH_USES_GETTIMEOFFSET
 	offset = timekeeper.cycle_interval;
 #else
-	offset = (clock->read(clock) - clock->cycle_last) & clock->mask;
+	offset = clocksource_delta(clock->read(clock), clock->cycle_last,
+				   clock->mask);
 #endif
 	timekeeper.xtime_nsec = (s64)timekeeper.xtime.tv_nsec <<
 						timekeeper.shift;

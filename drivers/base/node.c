@@ -392,7 +392,7 @@ static int link_mem_sections(int nid)
 	unsigned long start_pfn = NODE_DATA(nid)->node_start_pfn;
 	unsigned long end_pfn = start_pfn + NODE_DATA(nid)->node_spanned_pages;
 	unsigned long pfn;
-	struct memory_block *mem_blk = NULL;
+	struct memory_block *mem_blk, *prev_mem_blk = NULL;
 	int err = 0;
 
 	for (pfn = start_pfn; pfn < end_pfn; pfn += PAGES_PER_SECTION) {
@@ -403,7 +403,10 @@ static int link_mem_sections(int nid)
 		if (!present_section_nr(section_nr))
 			continue;
 		mem_sect = __nr_to_section(section_nr);
-		mem_blk = find_memory_block_hinted(mem_sect, mem_blk);
+		mem_blk = find_memory_block_hinted(mem_sect, prev_mem_blk);
+		if (prev_mem_blk == mem_blk)
+			continue;
+		prev_mem_blk = mem_blk;
 		ret = register_mem_sect_under_node(mem_blk, nid);
 		if (!err)
 			err = ret;

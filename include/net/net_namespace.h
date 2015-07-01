@@ -99,6 +99,9 @@ struct net {
 #endif
 #endif
 	unsigned int		proc_inum;
+	unsigned int		dev_unreg_count;
+	int sysctl_ip_no_pmtu_disc;
+	int sysctl_ip_fwd_use_pmtu;
 #endif
 };
 

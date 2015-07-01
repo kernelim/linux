@@ -246,13 +246,13 @@ enum ndis_80211_power_mode {
 
 struct ndis_80211_auth_request {
 	__le32 length;
-	u8 bssid[6];
+	u8 bssid[ETH_ALEN];
 	u8 padding[2];
 	__le32 flags;
 } __packed;
 
 struct ndis_80211_pmkid_candidate {
-	u8 bssid[6];
+	u8 bssid[ETH_ALEN];
 	u8 padding[2];
 	__le32 flags;
 } __packed;
@@ -295,7 +295,7 @@ struct ndis_80211_conf {
 
 struct ndis_80211_bssid_ex {
 	__le32 length;
-	u8 mac[6];
+	u8 mac[ETH_ALEN];
 	u8 padding[2];
 	struct ndis_80211_ssid ssid;
 	__le32 privacy;
@@ -330,7 +330,7 @@ struct ndis_80211_key {
 	__le32 size;
 	__le32 index;
 	__le32 length;
-	u8 bssid[6];
+	u8 bssid[ETH_ALEN];
 	u8 padding[6];
 	u8 rsc[8];
 	u8 material[32];
@@ -339,7 +339,7 @@ struct ndis_80211_key {
 struct ndis_80211_remove_key {
 	__le32 size;
 	__le32 index;
-	u8 bssid[6];
+	u8 bssid[ETH_ALEN];
 	u8 padding[2];
 } __packed;
 
@@ -357,7 +357,7 @@ struct ndis_80211_assoc_info {
 	struct req_ie {
 		__le16 capa;
 		__le16 listen_interval;
-		u8 cur_ap_address[6];
+		u8 cur_ap_address[ETH_ALEN];
 	} req_ie;
 	__le32 req_ie_length;
 	__le32 offset_req_ies;
@@ -385,7 +385,7 @@ struct ndis_80211_capability {
 } __packed;
 
 struct ndis_80211_bssid_info {
-	u8 bssid[6];
+	u8 bssid[ETH_ALEN];
 	u8 pmkid[16];
 };
 
@@ -565,7 +565,7 @@ static int rndis_set_default_key(struct wiphy *wiphy, struct net_device *netdev,
 				 u8 key_index, bool unicast, bool multicast);
 
 static int rndis_get_station(struct wiphy *wiphy, struct net_device *dev,
-					u8 *mac, struct station_info *sinfo);
+			     const u8 *mac, struct station_info *sinfo);
 
 static int rndis_dump_station(struct wiphy *wiphy, struct net_device *dev,
 			       int idx, u8 *mac, struct station_info *sinfo);
@@ -1082,7 +1082,7 @@ static int get_bssid(struct usbnet *usbdev, u8 bssid[ETH_ALEN])
 	ret = rndis_query_oid(usbdev, OID_802_11_BSSID, bssid, &len);
 
 	if (ret != 0)
-		memset(bssid, 0, ETH_ALEN);
+		eth_zero_addr(bssid);
 
 	return ret;
 }
@@ -1326,7 +1326,8 @@ static int set_channel(struct usbnet *usbdev, int channel)
 	if (is_associated(usbdev))
 		return 0;
 
-	dsconfig = ieee80211_dsss_chan_to_freq(channel) * 1000;
+	dsconfig = 1000 *
+		ieee80211_channel_to_frequency(channel, IEEE80211_BAND_2GHZ);
 
 	len = sizeof(config);
 	ret = rndis_query_oid(usbdev, OID_802_11_CONFIGURATION, &config, &len);
@@ -1344,6 +1345,35 @@ static int set_channel(struct usbnet *usbdev, int channel)
 
 	return ret;
 }
+
+static struct ieee80211_channel *get_current_channel(struct usbnet *usbdev,
+						     u32 *beacon_period)
+{
+	struct rndis_wlan_private *priv = get_rndis_wlan_priv(usbdev);
+	struct ieee80211_channel *channel;
+	struct ndis_80211_conf config;
+	int len, ret;
+
+	/* Get channel and beacon interval */
+	len = sizeof(config);
+	ret = rndis_query_oid(usbdev,
+			OID_802_11_CONFIGURATION,
+			&config, &len);
+	netdev_dbg(usbdev->net, "%s(): RNDIS_OID_802_11_CONFIGURATION -> %d\n",
+				__func__, ret);
+	if (ret < 0)
+		return NULL;
+
+	channel = ieee80211_get_channel(priv->wdev.wiphy,
+				KHZ_TO_MHZ(le32_to_cpu(config.ds_config)));
+	if (!channel)
+		return NULL;
+
+	if (beacon_period)
+		*beacon_period = le32_to_cpu(config.beacon_period);
+	return channel;
+}
+
 
 /* index must be 0 - N, as per NDIS  */
 static int add_wep_key(struct usbnet *usbdev, const u8 *key, int key_len,
@@ -1392,7 +1422,7 @@ static int add_wep_key(struct usbnet *usbdev, const u8 *key, int key_len,
 	priv->encr_keys[index].len = key_len;
 	priv->encr_keys[index].cipher = cipher;
 	memcpy(&priv->encr_keys[index].material, key, key_len);
-	memset(&priv->encr_keys[index].bssid, 0xff, ETH_ALEN);
+	eth_broadcast_addr(priv->encr_keys[index].bssid);
 
 	return 0;
 }
@@ -1467,7 +1497,7 @@ static int add_wpa_key(struct usbnet *usbdev, const u8 *key, int key_len,
 	} else {
 		/* group key */
 		if (priv->infra_mode == NDIS_80211_INFRA_ADHOC)
-			memset(ndis_key.bssid, 0xff, ETH_ALEN);
+			eth_broadcast_addr(ndis_key.bssid);
 		else
 			get_bssid(usbdev, ndis_key.bssid);
 	}
@@ -1486,7 +1516,7 @@ static int add_wpa_key(struct usbnet *usbdev, const u8 *key, int key_len,
 	if (flags & NDIS_80211_ADDKEY_PAIRWISE_KEY)
 		memcpy(&priv->encr_keys[index].bssid, ndis_key.bssid, ETH_ALEN);
 	else
-		memset(&priv->encr_keys[index].bssid, 0xff, ETH_ALEN);
+		eth_broadcast_addr(priv->encr_keys[index].bssid);
 
 	if (flags & NDIS_80211_ADDKEY_TRANSMIT_KEY)
 		priv->encr_tx_key_index = index;
@@ -2019,9 +2049,10 @@ static bool rndis_bss_info_update(struct usbnet *usbdev,
 	capability = le16_to_cpu(fixed->capabilities);
 	beacon_interval = le16_to_cpu(fixed->beacon_interval);
 
-	bss = cfg80211_inform_bss(priv->wdev.wiphy, channel, bssid->mac,
-		timestamp, capability, beacon_interval, ie, ie_len, signal,
-		GFP_KERNEL);
+	bss = cfg80211_inform_bss(priv->wdev.wiphy, channel,
+				  CFG80211_BSS_FTYPE_UNKNOWN, bssid->mac,
+				  timestamp, capability, beacon_interval,
+				  ie, ie_len, signal, GFP_KERNEL);
 	cfg80211_put_bss(priv->wdev.wiphy, bss);
 
 	return (bss != NULL);
@@ -2275,7 +2306,7 @@ static int rndis_disconnect(struct wiphy *wiphy, struct net_device *dev,
 	netdev_dbg(usbdev->net, "cfg80211.disconnect(%d)\n", reason_code);
 
 	priv->connected = false;
-	memset(priv->bssid, 0, ETH_ALEN);
+	eth_zero_addr(priv->bssid);
 
 	return deauthenticate(usbdev);
 }
@@ -2387,7 +2418,7 @@ static int rndis_leave_ibss(struct wiphy *wiphy, struct net_device *dev)
 	netdev_dbg(usbdev->net, "cfg80211.leave_ibss()\n");
 
 	priv->connected = false;
-	memset(priv->bssid, 0, ETH_ALEN);
+	eth_zero_addr(priv->bssid);
 
 	return deauthenticate(usbdev);
 }
@@ -2482,7 +2513,7 @@ static void rndis_fill_station_info(struct usbnet *usbdev,
 }
 
 static int rndis_get_station(struct wiphy *wiphy, struct net_device *dev,
-					u8 *mac, struct station_info *sinfo)
+			     const u8 *mac, struct station_info *sinfo)
 {
 	struct rndis_wlan_private *priv = wiphy_priv(wiphy);
 	struct usbnet *usbdev = priv->usbdev;
@@ -2712,9 +2743,10 @@ static void rndis_wlan_craft_connected_bss(struct usbnet *usbdev, u8 *bssid,
 		bssid, (u32)timestamp, capability, beacon_interval, ie_len,
 		ssid.essid, signal);
 
-	bss = cfg80211_inform_bss(priv->wdev.wiphy, channel, bssid,
-		timestamp, capability, beacon_interval, ie_buf, ie_len,
-		signal, GFP_KERNEL);
+	bss = cfg80211_inform_bss(priv->wdev.wiphy, channel,
+				  CFG80211_BSS_FTYPE_UNKNOWN, bssid,
+				  timestamp, capability, beacon_interval,
+				  ie_buf, ie_len, signal, GFP_KERNEL);
 	cfg80211_put_bss(priv->wdev.wiphy, bss);
 }
 
@@ -2831,7 +2863,9 @@ static void rndis_wlan_do_link_up_work(struct usbnet *usbdev)
 					req_ie, req_ie_len,
 					resp_ie, resp_ie_len, GFP_KERNEL);
 	} else if (priv->infra_mode == NDIS_80211_INFRA_ADHOC)
-		cfg80211_ibss_joined(usbdev->net, bssid, GFP_KERNEL);
+		cfg80211_ibss_joined(usbdev->net, bssid,
+				     get_current_channel(usbdev, NULL),
+				     GFP_KERNEL);
 
 	if (info != NULL)
 		kfree(info);
@@ -2849,7 +2883,7 @@ static void rndis_wlan_do_link_down_work(struct usbnet *usbdev)
 
 	if (priv->connected) {
 		priv->connected = false;
-		memset(priv->bssid, 0, ETH_ALEN);
+		eth_zero_addr(priv->bssid);
 
 		deauthenticate(usbdev);
 

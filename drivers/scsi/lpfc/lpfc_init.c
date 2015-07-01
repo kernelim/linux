@@ -1,7 +1,7 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
  * Fibre Channel Host Bus Adapters.                                *
- * Copyright (C) 2004-2014 Emulex.  All rights reserved.           *
+ * Copyright (C) 2004-2015 Emulex.  All rights reserved.           *
  * EMULEX and SLI are trademarks of Emulex.                        *
  * www.emulex.com                                                  *
  * Portions Copyright (C) 2004-2005 Christoph Hellwig              *
@@ -979,9 +979,12 @@ lpfc_hba_down_post_s4(struct lpfc_hba *phba)
 	LIST_HEAD(aborts);
 	unsigned long iflag = 0;
 	struct lpfc_sglq *sglq_entry = NULL;
+	struct lpfc_sli *psli = &phba->sli;
+	struct lpfc_sli_ring *pring;
 
 	lpfc_hba_free_post_buf(phba);
 	lpfc_hba_clean_txcmplq(phba);
+	pring = &psli->ring[LPFC_ELS_RING];
 
 	/* At this point in time the HBA is either reset or DOA. Either
 	 * way, nothing should be on lpfc_abts_els_sgl_list, it needs to be
@@ -999,8 +1002,10 @@ lpfc_hba_down_post_s4(struct lpfc_hba *phba)
 		&phba->sli4_hba.lpfc_abts_els_sgl_list, list)
 		sglq_entry->state = SGL_FREED;
 
+	spin_lock(&pring->ring_lock);
 	list_splice_init(&phba->sli4_hba.lpfc_abts_els_sgl_list,
 			&phba->sli4_hba.lpfc_sgl_list);
+	spin_unlock(&pring->ring_lock);
 	spin_unlock(&phba->sli4_hba.abts_sgl_list_lock);
 	/* abts_scsi_buf_list_lock required because worker thread uses this
 	 * list.
@@ -2729,9 +2734,19 @@ lpfc_sli4_node_prep(struct lpfc_hba *phba)
 			list_for_each_entry_safe(ndlp, next_ndlp,
 						 &vports[i]->fc_nodes,
 						 nlp_listp) {
-				if (NLP_CHK_NODE_ACT(ndlp))
+				if (NLP_CHK_NODE_ACT(ndlp)) {
 					ndlp->nlp_rpi =
 						lpfc_sli4_alloc_rpi(phba);
+					lpfc_printf_vlog(ndlp->vport, KERN_INFO,
+							 LOG_NODE,
+							 "0009 rpi:%x DID:%x "
+							 "flg:%x map:%x %p\n",
+							 ndlp->nlp_rpi,
+							 ndlp->nlp_DID,
+							 ndlp->nlp_flag,
+							 ndlp->nlp_usg_map,
+							 ndlp);
+				}
 			}
 		}
 	}
@@ -2895,8 +2910,18 @@ lpfc_offline_prep(struct lpfc_hba *phba, int mbx_action)
 				 * RPI. Get a new RPI when the adapter port
 				 * comes back online.
 				 */
-				if (phba->sli_rev == LPFC_SLI_REV4)
+				if (phba->sli_rev == LPFC_SLI_REV4) {
+					lpfc_printf_vlog(ndlp->vport,
+							 KERN_INFO, LOG_NODE,
+							 "0011 lpfc_offline: "
+							 "ndlp:x%p did %x "
+							 "usgmap:x%x rpi:%x\n",
+							 ndlp, ndlp->nlp_DID,
+							 ndlp->nlp_usg_map,
+							 ndlp->nlp_rpi);
+
 					lpfc_sli4_free_rpi(phba, ndlp->nlp_rpi);
+				}
 				lpfc_unreg_rpi(vports[i], ndlp);
 			}
 		}
@@ -3022,6 +3047,7 @@ lpfc_sli4_xri_sgl_update(struct lpfc_hba *phba)
 	LIST_HEAD(els_sgl_list);
 	LIST_HEAD(scsi_sgl_list);
 	int rc;
+	struct lpfc_sli_ring *pring = &phba->sli.ring[LPFC_ELS_RING];
 
 	/*
 	 * update on pci function's els xri-sgl list
@@ -3062,7 +3088,9 @@ lpfc_sli4_xri_sgl_update(struct lpfc_hba *phba)
 			list_add_tail(&sglq_entry->list, &els_sgl_list);
 		}
 		spin_lock_irq(&phba->hbalock);
+		spin_lock(&pring->ring_lock);
 		list_splice_init(&els_sgl_list, &phba->sli4_hba.lpfc_sgl_list);
+		spin_unlock(&pring->ring_lock);
 		spin_unlock_irq(&phba->hbalock);
 	} else if (els_xri_cnt < phba->sli4_hba.els_xri_cnt) {
 		/* els xri-sgl shrinked */
@@ -3072,7 +3100,9 @@ lpfc_sli4_xri_sgl_update(struct lpfc_hba *phba)
 				"%d to %d\n", phba->sli4_hba.els_xri_cnt,
 				els_xri_cnt);
 		spin_lock_irq(&phba->hbalock);
+		spin_lock(&pring->ring_lock);
 		list_splice_init(&phba->sli4_hba.lpfc_sgl_list, &els_sgl_list);
+		spin_unlock(&pring->ring_lock);
 		spin_unlock_irq(&phba->hbalock);
 		/* release extra els sgls from list */
 		for (i = 0; i < xri_cnt; i++) {
@@ -3085,7 +3115,9 @@ lpfc_sli4_xri_sgl_update(struct lpfc_hba *phba)
 			}
 		}
 		spin_lock_irq(&phba->hbalock);
+		spin_lock(&pring->ring_lock);
 		list_splice_init(&els_sgl_list, &phba->sli4_hba.lpfc_sgl_list);
+		spin_unlock(&pring->ring_lock);
 		spin_unlock_irq(&phba->hbalock);
 	} else
 		lpfc_printf_log(phba, KERN_INFO, LOG_SLI,
@@ -3202,12 +3234,17 @@ lpfc_create_port(struct lpfc_hba *phba, int instance, struct device *dev)
 	struct Scsi_Host  *shost;
 	int error = 0;
 
-	if (dev != &phba->pcidev->dev)
+	if (dev != &phba->pcidev->dev) {
 		shost = scsi_host_alloc(&lpfc_vport_template,
 					sizeof(struct lpfc_vport));
-	else
-		shost = scsi_host_alloc(&lpfc_template,
+	} else {
+		if (phba->sli_rev == LPFC_SLI_REV4)
+			shost = scsi_host_alloc(&lpfc_template,
 					sizeof(struct lpfc_vport));
+		else
+			shost = scsi_host_alloc(&lpfc_template_s3,
+					sizeof(struct lpfc_vport));
+	}
 	if (!shost)
 		goto out;
 
@@ -3650,6 +3687,12 @@ lpfc_sli4_parse_latt_link_speed(struct lpfc_hba *phba,
 	case LPFC_ASYNC_LINK_SPEED_10GBPS:
 		link_speed = LPFC_LINK_SPEED_10GHZ;
 		break;
+	case LPFC_ASYNC_LINK_SPEED_20GBPS:
+	case LPFC_ASYNC_LINK_SPEED_25GBPS:
+	case LPFC_ASYNC_LINK_SPEED_40GBPS:
+		/* Waiting for defines in the upstream kernel */
+		link_speed = LPFC_LINK_SPEED_UNKNOWN;
+		break;
 	default:
 		lpfc_printf_log(phba, KERN_ERR, LOG_INIT,
 				"0483 Invalid link-attention link speed: x%x\n",
@@ -3721,20 +3764,29 @@ lpfc_sli4_port_speed_parse(struct lpfc_hba *phba, uint32_t evt_code,
 	switch (evt_code) {
 	case LPFC_TRAILER_CODE_LINK:
 		switch (speed_code) {
-		case LPFC_EVT_CODE_LINK_NO_LINK:
+		case LPFC_ASYNC_LINK_SPEED_ZERO:
 			port_speed = 0;
 			break;
-		case LPFC_EVT_CODE_LINK_10_MBIT:
+		case LPFC_ASYNC_LINK_SPEED_10MBPS:
 			port_speed = 10;
 			break;
-		case LPFC_EVT_CODE_LINK_100_MBIT:
+		case LPFC_ASYNC_LINK_SPEED_100MBPS:
 			port_speed = 100;
 			break;
-		case LPFC_EVT_CODE_LINK_1_GBIT:
+		case LPFC_ASYNC_LINK_SPEED_1GBPS:
 			port_speed = 1000;
 			break;
-		case LPFC_EVT_CODE_LINK_10_GBIT:
+		case LPFC_ASYNC_LINK_SPEED_10GBPS:
 			port_speed = 10000;
+			break;
+		case LPFC_ASYNC_LINK_SPEED_20GBPS:
+			port_speed = 20000;
+			break;
+		case LPFC_ASYNC_LINK_SPEED_25GBPS:
+			port_speed = 25000;
+			break;
+		case LPFC_ASYNC_LINK_SPEED_40GBPS:
+			port_speed = 40000;
 			break;
 		default:
 			port_speed = 0;
@@ -3742,25 +3794,25 @@ lpfc_sli4_port_speed_parse(struct lpfc_hba *phba, uint32_t evt_code,
 		break;
 	case LPFC_TRAILER_CODE_FC:
 		switch (speed_code) {
-		case LPFC_EVT_CODE_FC_NO_LINK:
+		case LPFC_FC_LA_SPEED_UNKNOWN:
 			port_speed = 0;
 			break;
-		case LPFC_EVT_CODE_FC_1_GBAUD:
+		case LPFC_FC_LA_SPEED_1G:
 			port_speed = 1000;
 			break;
-		case LPFC_EVT_CODE_FC_2_GBAUD:
+		case LPFC_FC_LA_SPEED_2G:
 			port_speed = 2000;
 			break;
-		case LPFC_EVT_CODE_FC_4_GBAUD:
+		case LPFC_FC_LA_SPEED_4G:
 			port_speed = 4000;
 			break;
-		case LPFC_EVT_CODE_FC_8_GBAUD:
+		case LPFC_FC_LA_SPEED_8G:
 			port_speed = 8000;
 			break;
-		case LPFC_EVT_CODE_FC_10_GBAUD:
+		case LPFC_FC_LA_SPEED_10G:
 			port_speed = 10000;
 			break;
-		case LPFC_EVT_CODE_FC_16_GBAUD:
+		case LPFC_FC_LA_SPEED_16G:
 			port_speed = 16000;
 			break;
 		default:
@@ -5661,10 +5713,13 @@ static void
 lpfc_free_els_sgl_list(struct lpfc_hba *phba)
 {
 	LIST_HEAD(sglq_list);
+	struct lpfc_sli_ring *pring = &phba->sli.ring[LPFC_ELS_RING];
 
 	/* Retrieve all els sgls from driver list */
 	spin_lock_irq(&phba->hbalock);
+	spin_lock(&pring->ring_lock);
 	list_splice_init(&phba->sli4_hba.lpfc_sgl_list, &sglq_list);
+	spin_unlock(&pring->ring_lock);
 	spin_unlock_irq(&phba->hbalock);
 
 	/* Now free the sgl list */
@@ -7614,6 +7669,13 @@ lpfc_sli4_queue_setup(struct lpfc_hba *phba)
 			goto out_destroy_els_rq;
 		}
 	}
+	/*
+	 * Configure EQ delay multipier for interrupt coalescing using
+	 * MODIFY_EQ_DELAY for all EQs created, LPFC_MAX_EQ_DELAY at a time.
+	 */
+	for (fcp_eqidx = 0; fcp_eqidx < phba->cfg_fcp_io_channel;
+			fcp_eqidx += LPFC_MAX_EQ_DELAY)
+		lpfc_modify_fcp_eq_delay(phba, fcp_eqidx);
 	return 0;
 
 out_destroy_els_rq:
@@ -7873,7 +7935,8 @@ lpfc_pci_function_reset(struct lpfc_hba *phba)
 	LPFC_MBOXQ_t *mboxq;
 	uint32_t rc = 0, if_type;
 	uint32_t shdr_status, shdr_add_status;
-	uint32_t rdy_chk, num_resets = 0, reset_again = 0;
+	uint32_t rdy_chk;
+	uint32_t port_reset = 0;
 	union lpfc_sli4_cfg_shdr *shdr;
 	struct lpfc_register reg_data;
 	uint16_t devid;
@@ -7913,9 +7976,42 @@ lpfc_pci_function_reset(struct lpfc_hba *phba)
 		}
 		break;
 	case LPFC_SLI_INTF_IF_TYPE_2:
-		for (num_resets = 0;
-		     num_resets < MAX_IF_TYPE_2_RESETS;
-		     num_resets++) {
+wait:
+		/*
+		 * Poll the Port Status Register and wait for RDY for
+		 * up to 30 seconds. If the port doesn't respond, treat
+		 * it as an error.
+		 */
+		for (rdy_chk = 0; rdy_chk < 1500; rdy_chk++) {
+			if (lpfc_readl(phba->sli4_hba.u.if_type2.
+				STATUSregaddr, &reg_data.word0)) {
+				rc = -ENODEV;
+				goto out;
+			}
+			if (bf_get(lpfc_sliport_status_rdy, &reg_data))
+				break;
+			msleep(20);
+		}
+
+		if (!bf_get(lpfc_sliport_status_rdy, &reg_data)) {
+			phba->work_status[0] = readl(
+				phba->sli4_hba.u.if_type2.ERR1regaddr);
+			phba->work_status[1] = readl(
+				phba->sli4_hba.u.if_type2.ERR2regaddr);
+			lpfc_printf_log(phba, KERN_ERR, LOG_INIT,
+					"2890 Port not ready, port status reg "
+					"0x%x error 1=0x%x, error 2=0x%x\n",
+					reg_data.word0,
+					phba->work_status[0],
+					phba->work_status[1]);
+			rc = -ENODEV;
+			goto out;
+		}
+
+		if (!port_reset) {
+			/*
+			 * Reset the port now
+			 */
 			reg_data.word0 = 0;
 			bf_set(lpfc_sliport_ctrl_end, &reg_data,
 			       LPFC_SLIPORT_LITTLE_ENDIAN);
@@ -7926,64 +8022,16 @@ lpfc_pci_function_reset(struct lpfc_hba *phba)
 			/* flush */
 			pci_read_config_word(phba->pcidev,
 					     PCI_DEVICE_ID, &devid);
-			/*
-			 * Poll the Port Status Register and wait for RDY for
-			 * up to 10 seconds.  If the port doesn't respond, treat
-			 * it as an error.  If the port responds with RN, start
-			 * the loop again.
-			 */
-			for (rdy_chk = 0; rdy_chk < 1000; rdy_chk++) {
-				msleep(10);
-				if (lpfc_readl(phba->sli4_hba.u.if_type2.
-					      STATUSregaddr, &reg_data.word0)) {
-					rc = -ENODEV;
-					goto out;
-				}
-				if (bf_get(lpfc_sliport_status_rn, &reg_data))
-					reset_again++;
-				if (bf_get(lpfc_sliport_status_rdy, &reg_data))
-					break;
-			}
 
-			/*
-			 * If the port responds to the init request with
-			 * reset needed, delay for a bit and restart the loop.
-			 */
-			if (reset_again && (rdy_chk < 1000)) {
-				msleep(10);
-				reset_again = 0;
-				continue;
-			}
-
-			/* Detect any port errors. */
-			if ((bf_get(lpfc_sliport_status_err, &reg_data)) ||
-			    (rdy_chk >= 1000)) {
-				phba->work_status[0] = readl(
-					phba->sli4_hba.u.if_type2.ERR1regaddr);
-				phba->work_status[1] = readl(
-					phba->sli4_hba.u.if_type2.ERR2regaddr);
-				lpfc_printf_log(phba, KERN_ERR, LOG_INIT,
-					"2890 Port error detected during port "
-					"reset(%d): wait_tmo:%d ms, "
-					"port status reg 0x%x, "
-					"error 1=0x%x, error 2=0x%x\n",
-					num_resets, rdy_chk*10,
-					reg_data.word0,
-					phba->work_status[0],
-					phba->work_status[1]);
-				rc = -ENODEV;
-			}
-
-			/*
-			 * Terminate the outer loop provided the Port indicated
-			 * ready within 10 seconds.
-			 */
-			if (rdy_chk < 1000)
-				break;
+			port_reset = 1;
+			msleep(20);
+			goto wait;
+		} else if (bf_get(lpfc_sliport_status_rn, &reg_data)) {
+			rc = -ENODEV;
+			goto out;
 		}
-		/* delay driver action following IF_TYPE_2 function reset */
-		msleep(100);
 		break;
+
 	case LPFC_SLI_INTF_IF_TYPE_1:
 	default:
 		break;
@@ -7991,11 +8039,10 @@ lpfc_pci_function_reset(struct lpfc_hba *phba)
 
 out:
 	/* Catch the not-ready port failure after a port reset. */
-	if (num_resets >= MAX_IF_TYPE_2_RESETS) {
+	if (rc) {
 		lpfc_printf_log(phba, KERN_ERR, LOG_INIT,
 				"3317 HBA not functional: IP Reset Failed "
-				"after (%d) retries, try: "
-				"echo fw_reset > board_mode\n", num_resets);
+				"try: echo fw_reset > board_mode\n");
 		rc = -ENODEV;
 	}
 

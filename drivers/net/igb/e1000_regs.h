@@ -66,6 +66,7 @@
 #define E1000_PBA      0x01000  /* Packet Buffer Allocation - RW */
 #define E1000_PBS      0x01008  /* Packet Buffer Size */
 #define E1000_EEMNGCTL 0x01010  /* MNG EEprom Control */
+#define E1000_EEARBC_I210 0x12024  /* EEPROM Auto Read Bus Control */
 #define E1000_EEWR     0x0102C  /* EEPROM Write Register - RW */
 #define E1000_I2CCMD   0x01028  /* SFPI2C Command Register - RW */
 #define E1000_FRTIMER  0x01048  /* Free Running Timer - RW */
@@ -192,6 +193,10 @@
 				    : (0x0E038 + ((_n) * 0x40)))
 #define E1000_TDWBAH(_n)  ((_n) < 4 ? (0x0383C + ((_n) * 0x100)) \
 				    : (0x0E03C + ((_n) * 0x40)))
+
+#define E1000_RXPBS	0x02404  /* Rx Packet Buffer Size - RW */
+#define E1000_TXPBS	0x03404  /* Tx Packet Buffer Size - RW */
+
 #define E1000_TDFH     0x03410  /* TX Data FIFO Head - RW */
 #define E1000_TDFT     0x03418  /* TX Data FIFO Tail - RW */
 #define E1000_TDFHS    0x03420  /* TX Data FIFO Head Saved - RW */
@@ -350,6 +355,7 @@
 #define E1000_UTA       0x0A000 /* Unicast Table Array - RW */
 #define E1000_IOVTCL    0x05BBC /* IOV Control Register */
 #define E1000_TXSWC     0x05ACC /* Tx Switch Control */
+#define E1000_LVMMC	0x03548 /* Last VM Misbehavior cause */
 /* These act per VF so an array friendly macro is used */
 #define E1000_P2VMAILBOX(_n)   (0x00C00 + (4 * (_n)))
 #define E1000_VMBMEM(_n)       (0x00800 + (64 * (_n)))

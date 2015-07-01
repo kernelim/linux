@@ -38,8 +38,8 @@
 
 #define _QLCNIC_LINUX_MAJOR 5
 #define _QLCNIC_LINUX_MINOR 3
-#define _QLCNIC_LINUX_SUBVERSION 59
-#define QLCNIC_LINUX_VERSIONID  "5.3.59"
+#define _QLCNIC_LINUX_SUBVERSION 62
+#define QLCNIC_LINUX_VERSIONID  "5.3.62.1"
 #define QLCNIC_DRV_IDC_VER  0x01
 #define QLCNIC_DRIVER_VERSION  ((_QLCNIC_LINUX_MAJOR << 16) |\
 		 (_QLCNIC_LINUX_MINOR << 8) | (_QLCNIC_LINUX_SUBVERSION))
@@ -257,7 +257,7 @@ struct qlcnic_fdt {
 	u16	cksum;
 	u16	unused;
 	u8	model[16];
-	u16	mfg_id;
+	u8	mfg_id;
 	u16	id;
 	u8	flag;
 	u8	erase_cmd;
@@ -430,6 +430,8 @@ struct qlcnic_82xx_dump_template_hdr {
 	u32	rsvd1[0];
 };
 
+#define QLC_PEX_DMA_READ_SIZE	(PAGE_SIZE * 16)
+
 struct qlcnic_fw_dump {
 	u8	clr;	/* flag to indicate if dump is cleared */
 	bool	enable; /* enable/disable dump */
@@ -525,6 +527,8 @@ struct qlcnic_hardware_context {
 	u8 extend_lb_time;
 	u8 lb_mode;
 	struct device *hwmon_dev;
+	u32 post_mode;
+	bool run_post;
 };
 
 struct qlcnic_adapter_stats {
@@ -828,10 +832,17 @@ struct qlcnic_cardrsp_tx_ctx {
 #define QLCNIC_MAC_VLAN_ADD	3
 #define QLCNIC_MAC_VLAN_DEL	4
 
+enum qlcnic_mac_type {
+	QLCNIC_UNICAST_MAC,
+	QLCNIC_MULTICAST_MAC,
+	QLCNIC_BROADCAST_MAC,
+};
+
 struct qlcnic_mac_vlan_list {
 	struct list_head list;
 	uint8_t mac_addr[ETH_ALEN+2];
 	u16 vlan_id;
+	enum qlcnic_mac_type mac_type;
 };
 
 #define QLCNIC_HOST_REQUEST	0x13
@@ -1589,7 +1600,9 @@ void qlcnic_watchdog_task(struct work_struct *work);
 void qlcnic_post_rx_buffers(struct qlcnic_adapter *adapter,
 		struct qlcnic_host_rds_ring *rds_ring, u8 ring_id);
 void qlcnic_set_multi(struct net_device *);
-int qlcnic_nic_add_mac(struct qlcnic_adapter *, const u8 *, u16);
+void qlcnic_flush_mcast_mac(struct qlcnic_adapter *);
+int qlcnic_nic_add_mac(struct qlcnic_adapter *, const u8 *, u16,
+		       enum qlcnic_mac_type);
 void qlcnic_82xx_free_mac_list(struct qlcnic_adapter *adapter);
 
 int qlcnic_fw_cmd_set_mtu(struct qlcnic_adapter *adapter, int mtu);
@@ -2237,6 +2250,7 @@ extern const struct ethtool_ops qlcnic_ethtool_failed_ops;
 
 #define PCI_DEVICE_ID_QLOGIC_QLE824X		0x8020
 #define PCI_DEVICE_ID_QLOGIC_QLE834X		0x8030
+#define PCI_DEVICE_ID_QLOGIC_QLE8830		0x8830
 #define PCI_DEVICE_ID_QLOGIC_VF_QLE834X	0x8430
 #define PCI_DEVICE_ID_QLOGIC_QLE844X		0x8040
 #define PCI_DEVICE_ID_QLOGIC_VF_QLE844X	0x8440
@@ -2261,6 +2275,7 @@ static inline bool qlcnic_83xx_check(struct qlcnic_adapter *adapter)
 	bool status;
 
 	status = ((device == PCI_DEVICE_ID_QLOGIC_QLE834X) ||
+		  (device == PCI_DEVICE_ID_QLOGIC_QLE8830) ||
 		  (device == PCI_DEVICE_ID_QLOGIC_QLE844X) ||
 		  (device == PCI_DEVICE_ID_QLOGIC_VF_QLE844X) ||
 		  (device == PCI_DEVICE_ID_QLOGIC_VF_QLE834X)) ? true : false;
@@ -2314,6 +2329,19 @@ static inline u32 qlcnic_get_vnic_func_count(struct qlcnic_adapter *adapter)
 		return QLC_84XX_VNIC_COUNT;
 	else
 		return QLC_DEFAULT_VNIC_COUNT;
+}
+
+static inline void qlcnic_swap32_buffer(u32 *buffer, int count)
+{
+#if defined(__BIG_ENDIAN)
+	u32 *tmp = buffer;
+	int i;
+
+	for (i = 0; i < count; i++) {
+		*tmp = swab32(*tmp);
+		tmp++;
+	}
+#endif
 }
 
 #ifdef CONFIG_QLCNIC_HWMON

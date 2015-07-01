@@ -22,6 +22,7 @@
 #include <linux/string.h>
 #include <linux/if_arp.h>
 #include <linux/firmware.h>
+#include <net/cfg80211.h>
 #include "zd1201.h"
 
 static struct usb_device_id zd1201_table[] = {
@@ -915,7 +916,7 @@ static int zd1201_set_freq(struct net_device *dev,
 	if (freq->e == 0)
 		channel = freq->m;
 	else {
-		channel = ieee80211_freq_to_dsss_chan(freq->m);
+		channel = ieee80211_frequency_to_channel(freq->m);
 		if (channel < 0)
 			channel = 0;
 	}

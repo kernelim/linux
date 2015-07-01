@@ -51,8 +51,21 @@ static int zfcp_ccw_activate(struct ccw_device *cdev, int clear, char *tag)
 				       ZFCP_STATUS_COMMON_RUNNING, ZFCP_SET);
 	zfcp_erp_adapter_reopen(adapter, ZFCP_STATUS_COMMON_ERP_FAILED,
 				tag, NULL);
+	/*
+	 * We want to scan ports here, with some random backoff and without
+	 * rate limit. Recovery has already scheduled a port scan for us,
+	 * but with both random delay and rate limit. Nevertheless we get
+	 * what we want here by flushing the scheduled work after sleeping
+	 * an equivalent random time.
+	 * Let the port scan random delay elapse first. If recovery finishes
+	 * up to that point in time, that would be perfect for both recovery
+	 * and port scan. If not, i.e. recovery takes ages, there was no
+	 * point in waiting a random delay on top of the time consumed by
+	 * recovery.
+	 */
+	msleep(zfcp_fc_port_scan_backoff());
 	zfcp_erp_wait(adapter);
-	flush_work(&adapter->scan_work); /* ok to call even if nothing queued */
+	flush_delayed_work(&adapter->scan_work);
 
 	return 0;
 }
@@ -116,7 +129,7 @@ static void zfcp_ccw_remove(struct ccw_device *ccw_device)
 
 	zfcp_adapter_scsi_unregister(adapter);
 
-	cancel_work_sync(&adapter->scan_work);
+	cancel_delayed_work_sync(&adapter->scan_work);
 	cancel_work_sync(&adapter->stat_work);
 	zfcp_fc_wka_ports_force_offline(adapter->gs);
 	zfcp_fc_gs_destroy(adapter);
@@ -188,15 +201,28 @@ static int zfcp_ccw_set_online(struct ccw_device *ccw_device)
 				       ZFCP_STATUS_COMMON_RUNNING, ZFCP_SET);
 	zfcp_erp_adapter_reopen(adapter, ZFCP_STATUS_COMMON_ERP_FAILED,
 				"ccsonl2", NULL);
+	/*
+	 * We want to scan ports here, always, with some random delay and
+	 * without rate limit - basically what zfcp_erp_adapter_reopen()
+	 * has achieved for us. Not quite! That port scan depended on
+	 * !no_auto_port_rescan. So let's cover the no_auto_port_rescan
+	 * case here to make sure a port scan is done unconditionally.
+	 * Scheduled port scans use a rate limit. Nevertheless we get
+	 * what we want here by flushing the scheduled work after sleeping
+	 * a random time equivalent to the desired backoff.
+	 * Let the port scan random delay elapse first. If recovery finishes
+	 * up to that point in time, that would be perfect for both recovery
+	 * and port scan. If not, i.e. recovery takes ages, there was no
+	 * point in waiting a random delay on top of the time consumed by
+	 * recovery.
+	 */
+	msleep(zfcp_fc_port_scan_backoff());
 	zfcp_erp_wait(adapter);
-	/* scan for remote ports
-	   either at the end of any successful adapter recovery
-	   or only after the adapter recovery for setting a device online */
 	zfcp_fc_inverse_conditional_port_scan(adapter);
 out:
 	mutex_unlock(&zfcp_data.config_mutex);
 	if (!ret)
-		flush_work(&adapter->scan_work); /* ok even if nothing queued */
+		flush_delayed_work(&adapter->scan_work);
 	return ret;
 }
 

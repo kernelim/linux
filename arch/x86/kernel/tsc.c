@@ -755,7 +755,7 @@ core_initcall(cpufreq_tsc);
 static struct clocksource clocksource_tsc;
 
 /*
- * We compare the TSC to the cycle_last value in the clocksource
+ * We used to compare the TSC to the cycle_last value in the clocksource
  * structure to avoid a nasty time-warp. This can be observed in a
  * very small window right after one CPU updated cycle_last under
  * xtime/vsyscall_gtod lock and the other CPU reads a TSC value which
@@ -765,13 +765,14 @@ static struct clocksource clocksource_tsc;
  * due to the unsigned delta calculation of the time keeping core
  * code, which is necessary to support wrapping clocksources like pm
  * timer.
+ *
+ * This sanity check is now done in the core timekeeping code.
+ * checking the result of read_tsc() - cycle_last for being negative.
+ * That works because CLOCKSOURCE_MASK(64) does not mask out any bit.
  */
 static cycle_t read_tsc(struct clocksource *cs)
 {
-	cycle_t ret = (cycle_t)get_cycles();
-
-	return ret >= clocksource_tsc.cycle_last ?
-		ret : clocksource_tsc.cycle_last;
+	return (cycle_t)get_cycles();
 }
 
 #ifdef CONFIG_X86_64
@@ -788,21 +789,17 @@ static cycle_t __vsyscall_fn vread_tsc(void)
 	ret = (cycle_t)vget_cycles();
 	rdtsc_barrier();
 
-	return ret >= __vsyscall_gtod_data.clock.cycle_last ?
-		ret : __vsyscall_gtod_data.clock.cycle_last;
+	return ret;
 }
 #endif
 
-static void resume_tsc(void)
-{
-	clocksource_tsc.cycle_last = 0;
-}
-
+/*
+ * .mask MUST be CLOCKSOURCE_MASK(64). See comment above read_tsc()
+ */
 static struct clocksource clocksource_tsc = {
 	.name                   = "tsc",
 	.rating                 = 300,
 	.read                   = read_tsc,
-	.resume			= resume_tsc,
 	.mask                   = CLOCKSOURCE_MASK(64),
 	.shift                  = 22,
 	.flags                  = CLOCK_SOURCE_IS_CONTINUOUS |

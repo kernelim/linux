@@ -67,8 +67,9 @@ unsigned long task_vsize(struct mm_struct *mm)
 	return PAGE_SIZE * mm->total_vm;
 }
 
-int task_statm(struct mm_struct *mm, int *shared, int *text,
-	       int *data, int *resident)
+unsigned long task_statm(struct mm_struct *mm,
+			 unsigned long *shared, unsigned long *text,
+			 unsigned long *data, unsigned long *resident)
 {
 	*shared = get_mm_counter(mm, file_rss);
 	*text = (PAGE_ALIGN(mm->end_code) - (mm->start_code & PAGE_MASK))
@@ -418,6 +419,67 @@ static int smaps_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 	return 0;
 }
 
+static void show_smap_vma_flags(struct seq_file *m, struct vm_area_struct *vma)
+{
+	/*
+	 * Don't forget to update Documentation/ on changes.
+	 */
+	static const char mnemonics[BITS_PER_LONG][2] = {
+		/*
+		 * In case if we meet a flag we don't know about.
+		 */
+		[0 ... (BITS_PER_LONG-1)] = "??",
+		[ilog2(VM_READ)]        = "rd",
+		[ilog2(VM_WRITE)]       = "wr",
+		[ilog2(VM_EXEC)]        = "ex",
+		[ilog2(VM_SHARED)]      = "sh",
+		[ilog2(VM_MAYREAD)]     = "mr",
+		[ilog2(VM_MAYWRITE)]    = "mw",
+		[ilog2(VM_MAYEXEC)]     = "me",
+		[ilog2(VM_MAYSHARE)]    = "ms",
+		[ilog2(VM_GROWSDOWN)]   = "gd",
+		[ilog2(VM_PFNMAP)]      = "pf",
+		[ilog2(VM_DENYWRITE)]   = "dw",
+		[ilog2(VM_LOCKED)]      = "lo",
+		[ilog2(VM_IO)]          = "io",
+		[ilog2(VM_SEQ_READ)]    = "sr",
+		[ilog2(VM_RAND_READ)]   = "rr",
+		[ilog2(VM_DONTCOPY)]    = "dc",
+		[ilog2(VM_DONTEXPAND)]  = "de",
+		[ilog2(VM_ACCOUNT)]     = "ac",
+		[ilog2(VM_NORESERVE)]   = "nr",
+		[ilog2(VM_HUGETLB)]     = "ht",
+		[ilog2(VM_NONLINEAR)]   = "nl",
+		/*
+		 * RHEL6 backport notes:
+		 * 1. We're not using VM_ARCH_1 flag so keeping it
+		 *    hidden as a commentary here.
+		 * 2. VM_NODUMP == VM_DONTDUMP -- check upstream commit
+		 *    # 0103bd16fb90bc741c7a03fd1ea4e8a505abad23
+		 * 3. VM_HUGEPAGE is only defined for x86_64 / THP builds
+		 *    on RHEL6 -- check include/linux/mm.h
+		 */
+		/* [ilog2(VM_ARCH_1)]      = "ar", */
+		[ilog2(VM_NODUMP)]      = "dd",
+		[ilog2(VM_MIXEDMAP)]    = "mm",
+#if BITS_PER_LONG > 32
+		[ilog2(VM_HUGEPAGE)]    = "hg",
+#endif
+		[ilog2(VM_NOHUGEPAGE)]  = "nh",
+		[ilog2(VM_MERGEABLE)]   = "mg",
+	};
+	size_t i;
+
+	seq_puts(m, "VmFlags: ");
+	for (i = 0; i < BITS_PER_LONG; i++) {
+		if (vma->vm_flags & (1UL << i)) {
+			seq_printf(m, "%c%c ",
+				   mnemonics[i][0], mnemonics[i][1]);
+		}
+	}
+	seq_putc(m, '\n');
+}
+
 static int show_smap(struct seq_file *m, void *v)
 {
 	struct proc_maps_private *priv = m->private;
@@ -465,6 +527,8 @@ static int show_smap(struct seq_file *m, void *v)
 		   mss.swap >> 10,
 		   vma_kernel_pagesize(vma) >> 10,
 		   vma_mmu_pagesize(vma) >> 10);
+
+	show_smap_vma_flags(m, vma);
 
 	if (m->count < m->size)  /* vma is copied successfully */
 		m->version = (vma != get_gate_vma(task->mm))
@@ -970,7 +1034,7 @@ static int gather_hugetbl_stats(pte_t *pte, unsigned long hmask,
 	struct numa_maps *md;
 	struct page *page;
 
-	if (pte_none(*pte))
+	if (!pte_present(*pte))
 		return 0;
 
 	page = pte_page(*pte);
@@ -1067,6 +1131,8 @@ static int show_numa_map(struct seq_file *m, void *v)
 	for_each_node_state(n, N_HIGH_MEMORY)
 		if (md->node[n])
 			seq_printf(m, " N%d=%lu", n, md->node[n]);
+
+	seq_printf(m, " kernelpagesize_kB=%lu", vma_kernel_pagesize(vma) >> 10);
 out:
 	seq_putc(m, '\n');
 

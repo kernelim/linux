@@ -15,6 +15,7 @@ static void *kdump_buf_page;
 
 /* Stores the physical address of elf header of crash image. */
 unsigned long long elfcorehdr_addr = ELFCORE_ADDR_MAX;
+EXPORT_SYMBOL(elfcorehdr_addr);
 
 static inline bool is_crashed_pfn_valid(unsigned long pfn)
 {

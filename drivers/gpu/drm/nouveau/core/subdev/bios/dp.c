@@ -162,18 +162,20 @@ nvbios_dpcfg_parse(struct nouveau_bios *bios, u16 outp, u8 idx,
 		   struct nvbios_dpcfg *info)
 {
 	u16 data = nvbios_dpcfg_entry(bios, outp, idx, ver, hdr, cnt, len);
+	memset(info, 0x00, sizeof(*info));
 	if (data) {
 		switch (*ver) {
 		case 0x21:
-			info->drv = nv_ro08(bios, data + 0x02);
-			info->pre = nv_ro08(bios, data + 0x03);
-			info->unk = nv_ro08(bios, data + 0x04);
+			info->dc    = nv_ro08(bios, data + 0x02);
+			info->pe    = nv_ro08(bios, data + 0x03);
+			info->tx_pu = nv_ro08(bios, data + 0x04);
 			break;
 		case 0x30:
 		case 0x40:
-			info->drv = nv_ro08(bios, data + 0x01);
-			info->pre = nv_ro08(bios, data + 0x02);
-			info->unk = nv_ro08(bios, data + 0x03);
+			info->pc    = nv_ro08(bios, data + 0x00);
+			info->dc    = nv_ro08(bios, data + 0x01);
+			info->pe    = nv_ro08(bios, data + 0x02);
+			info->tx_pu = nv_ro08(bios, data + 0x03);
 			break;
 		default:
 			data = 0x0000;

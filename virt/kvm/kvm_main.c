@@ -69,6 +69,9 @@
 MODULE_AUTHOR("Qumranet");
 MODULE_LICENSE("GPL");
 
+unsigned int halt_poll_ns = 0;
+module_param(halt_poll_ns, uint, S_IRUGO | S_IWUSR);
+
 /*
  * Ordering of locks:
  *
@@ -1350,12 +1353,10 @@ int __kvm_set_memory_region(struct kvm *kvm,
 	/* Allocate if a slot is being created */
 #ifndef CONFIG_S390
 	if (npages && !new.rmap) {
-		new.rmap = vmalloc(npages * sizeof(struct page *));
+		new.rmap = vzalloc(npages * sizeof(struct page *));
 
 		if (!new.rmap)
 			goto out_free;
-
-		memset(new.rmap, 0, npages * sizeof(*new.rmap));
 
 		new.user_alloc = user_alloc;
 		new.userspace_addr = mem->userspace_addr;
@@ -1379,13 +1380,10 @@ int __kvm_set_memory_region(struct kvm *kvm,
 			     KVM_PAGES_PER_HPAGE(level);
 		lpages -= base_gfn / KVM_PAGES_PER_HPAGE(level);
 
-		new.lpage_info[i] = vmalloc(lpages * sizeof(*new.lpage_info[i]));
+		new.lpage_info[i] = vzalloc(lpages * sizeof(*new.lpage_info[i]));
 
 		if (!new.lpage_info[i])
 			goto out_free;
-
-		memset(new.lpage_info[i], 0,
-		       lpages * sizeof(*new.lpage_info[i]));
 
 		if (base_gfn % KVM_PAGES_PER_HPAGE(level))
 			new.lpage_info[i][0].write_count = 1;
@@ -1409,10 +1407,9 @@ skip_lpage:
 	if ((new.flags & KVM_MEM_LOG_DIRTY_PAGES) && !new.dirty_bitmap) {
 		unsigned long dirty_bytes = kvm_dirty_bitmap_bytes(&new);
 
-		new.dirty_bitmap = vmalloc(dirty_bytes);
+		new.dirty_bitmap = vzalloc(dirty_bytes);
 		if (!new.dirty_bitmap)
 			goto out_free;
-		memset(new.dirty_bitmap, 0, dirty_bytes);
 	}
 #else  /* not defined CONFIG_S390 */
 	new.user_alloc = user_alloc;
@@ -2135,31 +2132,62 @@ void mark_page_dirty(struct kvm *kvm, gfn_t gfn)
 	mark_page_dirty_in_slot(kvm, memslot, gfn);
 }
 
+static int kvm_vcpu_check_block(struct kvm_vcpu *vcpu)
+{
+	if (kvm_arch_vcpu_runnable(vcpu)) {
+		set_bit(KVM_REQ_UNHALT, &vcpu->requests);
+		return -EINTR;
+	}
+	if (kvm_cpu_has_pending_timer(vcpu))
+		return -EINTR;
+	if (signal_pending(current))
+		return -EINTR;
+
+	return 0;
+}
+
 /*
  * The vCPU has executed a HLT instruction with in-kernel mode enabled.
  */
 void kvm_vcpu_block(struct kvm_vcpu *vcpu)
 {
+	ktime_t start, cur;
 	DEFINE_WAIT(wait);
+	bool waited = false;
+
+	start = cur = ktime_get();
+	if (halt_poll_ns) {
+		ktime_t stop = ktime_add_ns(ktime_get(), halt_poll_ns);
+		do {
+			/*
+			 * This sets KVM_REQ_UNHALT if an interrupt
+			 * arrives.
+			 */
+			if (kvm_vcpu_check_block(vcpu) < 0) {
+				++vcpu->stat.halt_successful_poll;
+				goto out;
+			}
+			cur = ktime_get();
+		} while (single_task_running() && ktime_before(cur, stop));
+	}
 
 	for (;;) {
 		prepare_to_wait(&vcpu->wq, &wait, TASK_INTERRUPTIBLE);
 
-		if (kvm_arch_vcpu_runnable(vcpu)) {
-			set_bit(KVM_REQ_UNHALT, &vcpu->requests);
-			break;
-		}
-		if (kvm_cpu_has_pending_timer(vcpu))
-			break;
-		if (signal_pending(current))
+		if (kvm_vcpu_check_block(vcpu) < 0)
 			break;
 
+		waited = true;
 		vcpu_put(vcpu);
 		schedule();
 		vcpu_load(vcpu);
 	}
 
 	finish_wait(&vcpu->wq, &wait);
+	cur = ktime_get();
+
+out:
+	trace_kvm_vcpu_wakeup(ktime_to_ns(cur) - ktime_to_ns(start), waited);
 }
 
 void kvm_resched(struct kvm_vcpu *vcpu)

@@ -23,6 +23,7 @@
 #include <linux/kernel.h>
 #include <linux/bug.h>
 #include <linux/mm.h>
+#include <linux/version.h>
 
 #include <asm/system.h>
 #include <asm/page.h>
@@ -140,7 +141,8 @@ int apply_relocate_add(Elf32_Shdr *sechdrs,
 		       const char *strtab,
 		       unsigned int symindex,
 		       unsigned int relsec,
-		       struct module *me)
+		       struct module *me,
+		       struct rheldata *rheldata)
 {
 	printk(KERN_ERR "module %s: ADD RELOCATION unsupported\n",
 	       me->name);
@@ -151,7 +153,8 @@ int apply_relocate_add(Elf64_Shdr *sechdrs,
 		   const char *strtab,
 		   unsigned int symindex,
 		   unsigned int relsec,
-		   struct module *me)
+		   struct module *me,
+		   struct rheldata *rheldata)
 {
 	unsigned int i;
 	Elf64_Rela *rel = (void *)sechdrs[relsec].sh_addr;
@@ -175,7 +178,28 @@ int apply_relocate_add(Elf64_Shdr *sechdrs,
 			(int)ELF64_R_TYPE(rel[i].r_info),
 			sym->st_value, rel[i].r_addend, (u64)loc);
 
-		val = sym->st_value + rel[i].r_addend;
+		/*
+		 * kernel_stack is referenced to access current_thread_info in
+		 * a variety of places... if we're loading a module which
+		 * expects an 8K stack, fix up the symbol reference to look
+		 * at a second copy. Nobody should be using this symbol for
+		 * any other purpose.
+		 */
+		if ((!rheldata || rheldata->rhel_release < RHEL_16KSTACK_BUILD) &&
+		    !strcmp(strtab + sym->st_name, "per_cpu__kernel_stack")) {
+			const struct kernel_symbol *compat_sym;
+
+			printk(KERN_INFO
+			       "%s: applying 16k kernel stack fix up\n",
+			       me->name);
+
+			compat_sym = find_symbol("per_cpu__kernel_stack8k",
+						 NULL, NULL, true, true);
+			val = compat_sym->value;
+		} else
+			val = sym->st_value;
+
+		val += rel[i].r_addend;
 
 		switch (ELF64_R_TYPE(rel[i].r_info)) {
 		case R_X86_64_NONE:

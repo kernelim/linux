@@ -1688,28 +1688,15 @@ emulate_sysenter(struct x86_emulate_ctxt *ctxt)
 	setup_syscalls_segments(ctxt, &cs, &ss);
 
 	kvm_x86_ops->get_msr(ctxt->vcpu, MSR_IA32_SYSENTER_CS, &msr_data);
-	switch (ctxt->mode) {
-	case X86EMUL_MODE_PROT32:
-		if ((msr_data & 0xfffc) == 0x0) {
-			kvm_inject_gp(ctxt->vcpu, 0);
-			return X86EMUL_PROPAGATE_FAULT;
-		}
-		break;
-	case X86EMUL_MODE_PROT64:
-		if (msr_data == 0x0) {
-			kvm_inject_gp(ctxt->vcpu, 0);
-			return X86EMUL_PROPAGATE_FAULT;
-		}
-		break;
+	if ((msr_data & 0xfffc) == 0x0) {
+		kvm_inject_gp(ctxt->vcpu, 0);
+		return X86EMUL_PROPAGATE_FAULT;
 	}
 
 	ctxt->eflags &= ~(EFLG_VM | EFLG_IF | EFLG_RF);
-	cs.selector = (u16)msr_data;
-	cs.selector &= ~SELECTOR_RPL_MASK;
+	cs.selector = (u16)msr_data & ~SELECTOR_RPL_MASK;
 	ss.selector = cs.selector + 8;
-	ss.selector &= ~SELECTOR_RPL_MASK;
-	if (ctxt->mode == X86EMUL_MODE_PROT64
-		|| is_long_mode(ctxt->vcpu)) {
+	if (is_long_mode(ctxt->vcpu)) {
 		cs.db = 0;
 		cs.l = 1;
 	}
@@ -1718,10 +1705,11 @@ emulate_sysenter(struct x86_emulate_ctxt *ctxt)
 	kvm_x86_ops->set_segment(ctxt->vcpu, &ss, VCPU_SREG_SS);
 
 	kvm_x86_ops->get_msr(ctxt->vcpu, MSR_IA32_SYSENTER_EIP, &msr_data);
-	c->eip = msr_data;
+	c->eip = is_long_mode(ctxt->vcpu) ? msr_data : (u32)msr_data;
 
 	kvm_x86_ops->get_msr(ctxt->vcpu, MSR_IA32_SYSENTER_ESP, &msr_data);
-	c->regs[VCPU_REGS_RSP] = msr_data;
+	c->regs[VCPU_REGS_RSP] = is_long_mode(ctxt->vcpu) ? msr_data :
+								(u32)msr_data;
 
 	return X86EMUL_CONTINUE;
 }

@@ -20,6 +20,7 @@
   Boston, MA 02110-1301, USA.
 
 */
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/module.h>
 #include <linux/delay.h>
@@ -340,7 +341,7 @@ static int if_cs_send_cmd(struct lbs_private *priv, u8 *buf, u16 nb)
 		if (status & IF_CS_BIT_COMMAND)
 			break;
 		if (++loops > 100) {
-			lbs_pr_err("card not ready for commands\n");
+			pr_err("card not ready for commands\n");
 			goto done;
 		}
 		mdelay(1);
@@ -410,14 +411,14 @@ static int if_cs_receive_cmdres(struct lbs_private *priv, u8 *data, u32 *len)
 	/* is hardware ready? */
 	status = if_cs_read16(priv->card, IF_CS_CARD_STATUS);
 	if ((status & IF_CS_BIT_RESP) == 0) {
-		lbs_pr_err("no cmd response in card\n");
+		pr_err("no cmd response in card\n");
 		*len = 0;
 		goto out;
 	}
 
 	*len = if_cs_read16(priv->card, IF_CS_RESP_LEN);
 	if ((*len == 0) || (*len > LBS_CMD_BUFFER_SIZE)) {
-		lbs_pr_err("card cmd buffer has invalid # of bytes (%d)\n", *len);
+		pr_err("card cmd buffer has invalid # of bytes (%d)\n", *len);
 		goto out;
 	}
 
@@ -451,7 +452,7 @@ static struct sk_buff *if_cs_receive_data(struct lbs_private *priv)
 
 	len = if_cs_read16(priv->card, IF_CS_READ_LEN);
 	if (len == 0 || len > MRVDRV_ETH_RX_PACKET_BUFFER_SIZE) {
-		lbs_pr_err("card data buffer has invalid # of bytes (%d)\n", len);
+		pr_err("card data buffer has invalid # of bytes (%d)\n", len);
 		priv->dev->stats.rx_dropped++;
 		goto dat_err;
 	}
@@ -592,7 +593,7 @@ static int if_cs_prog_helper(struct if_cs_card *card)
 	ret = request_firmware(&fw, "libertas_cs_helper.fw",
 		&handle_to_dev(card->p_dev));
 	if (ret) {
-		lbs_pr_err("can't load helper firmware\n");
+		pr_err("can't load helper firmware\n");
 		ret = -ENODEV;
 		goto done;
 	}
@@ -632,7 +633,7 @@ static int if_cs_prog_helper(struct if_cs_card *card)
 		ret = if_cs_poll_while_fw_download(card, IF_CS_CARD_STATUS,
 			IF_CS_BIT_COMMAND);
 		if (ret < 0) {
-			lbs_pr_err("can't download helper at 0x%x, ret %d\n",
+			pr_err("can't download helper at 0x%x, ret %d\n",
 				sent, ret);
 			goto err_release;
 		}
@@ -665,7 +666,7 @@ static int if_cs_prog_real(struct if_cs_card *card)
 	ret = request_firmware(&fw, "libertas_cs.fw",
 		&handle_to_dev(card->p_dev));
 	if (ret) {
-		lbs_pr_err("can't load firmware\n");
+		pr_err("can't load firmware\n");
 		ret = -ENODEV;
 		goto done;
 	}
@@ -674,7 +675,7 @@ static int if_cs_prog_real(struct if_cs_card *card)
 	ret = if_cs_poll_while_fw_download(card, IF_CS_SQ_READ_LOW,
 		IF_CS_SQ_HELPER_OK);
 	if (ret < 0) {
-		lbs_pr_err("helper firmware doesn't answer\n");
+		pr_err("helper firmware doesn't answer\n");
 		goto err_release;
 	}
 
@@ -682,13 +683,13 @@ static int if_cs_prog_real(struct if_cs_card *card)
 		len = if_cs_read16(card, IF_CS_SQ_READ_LOW);
 		if (len & 1) {
 			retry++;
-			lbs_pr_info("odd, need to retry this firmware block\n");
+			pr_info("odd, need to retry this firmware block\n");
 		} else {
 			retry = 0;
 		}
 
 		if (retry > 20) {
-			lbs_pr_err("could not download firmware\n");
+			pr_err("could not download firmware\n");
 			ret = -ENODEV;
 			goto err_release;
 		}
@@ -708,14 +709,14 @@ static int if_cs_prog_real(struct if_cs_card *card)
 		ret = if_cs_poll_while_fw_download(card, IF_CS_CARD_STATUS,
 			IF_CS_BIT_COMMAND);
 		if (ret < 0) {
-			lbs_pr_err("can't download firmware at 0x%x\n", sent);
+			pr_err("can't download firmware at 0x%x\n", sent);
 			goto err_release;
 		}
 	}
 
 	ret = if_cs_poll_while_fw_download(card, IF_CS_SCRATCH, 0x5a);
 	if (ret < 0)
-		lbs_pr_err("firmware download failed\n");
+		pr_err("firmware download failed\n");
 
 err_release:
 	release_firmware(fw);
@@ -752,7 +753,7 @@ static int if_cs_host_to_card(struct lbs_private *priv,
 		ret = if_cs_send_cmd(priv, buf, nb);
 		break;
 	default:
-		lbs_pr_err("%s: unsupported type %d\n", __func__, type);
+		pr_err("%s: unsupported type %d\n", __func__, type);
 	}
 
 	lbs_deb_leave_args(LBS_DEB_CS, "ret %d", ret);
@@ -810,7 +811,7 @@ static int if_cs_probe(struct pcmcia_device *p_dev)
 
 	card = kzalloc(sizeof(struct if_cs_card), GFP_KERNEL);
 	if (!card) {
-		lbs_pr_err("error in kzalloc\n");
+		pr_err("error in kzalloc\n");
 		goto out;
 	}
 	card->p_dev = p_dev;
@@ -833,7 +834,7 @@ static int if_cs_probe(struct pcmcia_device *p_dev)
 	    (ret = pcmcia_get_tuple_data(p_dev, &tuple)) != 0 ||
 	    (ret = pcmcia_parse_tuple(&tuple, &parse)) != 0)
 	{
-		lbs_pr_err("error in pcmcia_get_first_tuple etc\n");
+		pr_err("error in pcmcia_get_first_tuple etc\n");
 		goto out1;
 	}
 
@@ -846,7 +847,7 @@ static int if_cs_probe(struct pcmcia_device *p_dev)
 
 	/* IO window settings */
 	if (cfg->io.nwin != 1) {
-		lbs_pr_err("wrong CIS (check number of IO windows)\n");
+		pr_err("wrong CIS (check number of IO windows)\n");
 		ret = -ENODEV;
 		goto out1;
 	}
@@ -857,7 +858,7 @@ static int if_cs_probe(struct pcmcia_device *p_dev)
 	/* This reserves IO space but doesn't actually enable it */
 	ret = pcmcia_request_io(p_dev, &p_dev->io);
 	if (ret) {
-		lbs_pr_err("error in pcmcia_request_io\n");
+		pr_err("error in pcmcia_request_io\n");
 		goto out1;
 	}
 
@@ -869,7 +870,7 @@ static int if_cs_probe(struct pcmcia_device *p_dev)
 	if (p_dev->conf.Attributes & CONF_ENABLE_IRQ) {
 		ret = pcmcia_request_irq(p_dev, &p_dev->irq);
 		if (ret) {
-			lbs_pr_err("error in pcmcia_request_irq\n");
+			pr_err("error in pcmcia_request_irq\n");
 			goto out1;
 		}
 	}
@@ -877,7 +878,7 @@ static int if_cs_probe(struct pcmcia_device *p_dev)
 	/* Initialize io access */
 	card->iobase = ioport_map(p_dev->io.BasePort1, p_dev->io.NumPorts1);
 	if (!card->iobase) {
-		lbs_pr_err("error in ioport_map\n");
+		pr_err("error in ioport_map\n");
 		ret = -EIO;
 		goto out1;
 	}
@@ -889,7 +890,7 @@ static int if_cs_probe(struct pcmcia_device *p_dev)
 	 */
 	ret = pcmcia_request_configuration(p_dev, &p_dev->conf);
 	if (ret) {
-		lbs_pr_err("error in pcmcia_request_configuration\n");
+		pr_err("error in pcmcia_request_configuration\n");
 		goto out2;
 	}
 
@@ -909,7 +910,7 @@ static int if_cs_probe(struct pcmcia_device *p_dev)
 	if (if_cs_hw_is_cf8305(p_dev)) {
 		card->align_regs = 1;
 		if (prod_id < IF_CS_CF8305_B1_REV) {
-			lbs_pr_err("old chips like 8305 rev B3 "
+			pr_err("old chips like 8305 rev B3 "
 				"aren't supported\n");
 			ret = -ENODEV;
 			goto out2;
@@ -917,13 +918,13 @@ static int if_cs_probe(struct pcmcia_device *p_dev)
 	}
 
 	if (if_cs_hw_is_cf8381(p_dev) && prod_id < IF_CS_CF8381_B3_REV) {
-		lbs_pr_err("old chips like 8381 rev B3 aren't supported\n");
+		pr_err("old chips like 8381 rev B3 aren't supported\n");
 		ret = -ENODEV;
 		goto out2;
 	}
 
 	if (if_cs_hw_is_cf8385(p_dev) && prod_id < IF_CS_CF8385_B1_REV) {
-		lbs_pr_err("old chips like 8385 rev B1 aren't supported\n");
+		pr_err("old chips like 8385 rev B1 aren't supported\n");
 		ret = -ENODEV;
 		goto out2;
 	}
@@ -952,7 +953,7 @@ static int if_cs_probe(struct pcmcia_device *p_dev)
 	ret = request_irq(p_dev->irq.AssignedIRQ, if_cs_interrupt,
 		IRQF_SHARED, DRV_NAME, card);
 	if (ret) {
-		lbs_pr_err("error in request_irq\n");
+		pr_err("error in request_irq\n");
 		goto out3;
 	}
 
@@ -963,7 +964,7 @@ static int if_cs_probe(struct pcmcia_device *p_dev)
 
 	/* And finally bring the card up */
 	if (lbs_start_card(priv) != 0) {
-		lbs_pr_err("could not activate card\n");
+		pr_err("could not activate card\n");
 		goto out3;
 	}
 

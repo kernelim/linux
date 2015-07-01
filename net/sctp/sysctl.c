@@ -69,6 +69,9 @@ static int proc_sctp_do_hmac_alg(ctl_table *ctl,
 				void __user *buffer, size_t *lenp,
 
 				loff_t *ppos);
+static int proc_sctp_do_auth(struct ctl_table *ctl, int write,
+			     void __user *buffer, size_t *lenp,
+			     loff_t *ppos);
 static int proc_sctp_do_alpha_beta(struct ctl_table *ctl, int write,
 				   void __user *buffer, size_t *lenp,
 				   loff_t *ppos);
@@ -296,8 +299,7 @@ static ctl_table sctp_table[] = {
 		.data		= &sctp_auth_enable,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-		.strategy	= sysctl_intvec
+		.proc_handler	= proc_sctp_do_auth,
 	},
 	{
 		.ctl_name	= CTL_UNNUMBERED,
@@ -398,6 +400,36 @@ static int proc_sctp_do_alpha_beta(struct ctl_table *ctl, int write,
 			     "suboptimal rtt/srtt estimations!\n");
 
 	return proc_dointvec_minmax(ctl, write, buffer, lenp, ppos);
+}
+
+static int proc_sctp_do_auth(struct ctl_table *ctl, int write,
+			     void __user *buffer, size_t *lenp,
+			     loff_t *ppos)
+{
+	struct ctl_table tbl;
+	int new_value, ret;
+
+	memset(&tbl, 0, sizeof(struct ctl_table));
+	tbl.maxlen = sizeof(unsigned int);
+
+	if (write)
+		tbl.data = &new_value;
+	else
+		tbl.data = &sctp_auth_enable;
+
+	ret = proc_dointvec(&tbl, write, buffer, lenp, ppos);
+
+	if (write) {
+		struct sock *sk = sctp_get_ctl_sock();
+
+		sctp_auth_enable = new_value;
+		/* Update the value in the control socket */
+		lock_sock(sk);
+		sctp_sk(sk)->ep->auth_enable = new_value;
+		release_sock(sk);
+	}
+
+	return ret;
 }
 
 /* Sysctl registration.  */

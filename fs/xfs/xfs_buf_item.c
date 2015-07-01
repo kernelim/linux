@@ -420,7 +420,7 @@ xfs_buf_item_unpin(
 
 	if (freed && stale) {
 		ASSERT(bip->bli_flags & XFS_BLI_STALE);
-		ASSERT(XFS_BUF_VALUSEMA(bp) <= 0);
+		ASSERT(xfs_buf_islocked(bp));
 		ASSERT(!(XFS_BUF_ISDELAYWRITE(bp)));
 		ASSERT(XFS_BUF_ISSTALE(bp));
 		ASSERT(bip->bli_format.blf_flags & XFS_BLF_CANCEL);
@@ -455,7 +455,7 @@ xfs_buf_item_unpin(
 		if (bip->bli_flags & XFS_BLI_STALE_INODE) {
 			xfs_buf_do_callbacks(bp);
 			XFS_BUF_SET_FSPRIVATE(bp, NULL);
-			XFS_BUF_CLR_IODONE_FUNC(bp);
+			bp->b_iodone = NULL;
 		} else {
 			spin_lock(&ailp->xa_lock);
 			xfs_trans_ail_delete(ailp, lip, SHUTDOWN_LOG_IO_ERROR);
@@ -483,7 +483,7 @@ xfs_buf_item_trylock(
 
 	if (XFS_BUF_ISPINNED(bp))
 		return XFS_ITEM_PINNED;
-	if (!XFS_BUF_CPSEMA(bp)) {
+	if (!xfs_buf_trylock(bp)) {
 		/*
 		 * If we have just raced with a buffer being pinned and it has
 		 * been marked stale, we could end up stalling until someone else
@@ -889,10 +889,9 @@ xfs_buf_item_relse(
 
 	bip = XFS_BUF_FSPRIVATE(bp, xfs_buf_log_item_t*);
 	XFS_BUF_SET_FSPRIVATE(bp, bip->bli_item.li_bio_list);
-	if ((XFS_BUF_FSPRIVATE(bp, void *) == NULL) &&
-	    (XFS_BUF_IODONE_FUNC(bp) != NULL)) {
-		XFS_BUF_CLR_IODONE_FUNC(bp);
-	}
+	if (bp->b_fspriv == NULL)
+		bp->b_iodone = NULL;
+
 	xfs_buf_rele(bp);
 	xfs_buf_item_free(bip);
 }
@@ -916,7 +915,7 @@ xfs_buf_attach_iodone(
 	xfs_log_item_t	*head_lip;
 
 	ASSERT(XFS_BUF_ISBUSY(bp));
-	ASSERT(XFS_BUF_VALUSEMA(bp) <= 0);
+	ASSERT(xfs_buf_islocked(bp));
 
 	lip->li_cb = cb;
 	if (XFS_BUF_FSPRIVATE(bp, void *) != NULL) {
@@ -927,9 +926,9 @@ xfs_buf_attach_iodone(
 		XFS_BUF_SET_FSPRIVATE(bp, lip);
 	}
 
-	ASSERT((XFS_BUF_IODONE_FUNC(bp) == xfs_buf_iodone_callbacks) ||
-	       (XFS_BUF_IODONE_FUNC(bp) == NULL));
-	XFS_BUF_SET_IODONE_FUNC(bp, xfs_buf_iodone_callbacks);
+	ASSERT(bp->b_iodone == NULL ||
+	       bp->b_iodone == xfs_buf_iodone_callbacks);
+	bp->b_iodone = xfs_buf_iodone_callbacks;
 }
 
 /*
@@ -1016,7 +1015,7 @@ xfs_buf_iodone_callbacks(
 			XFS_BUF_DONE(bp);
 			XFS_BUF_SET_START(bp);
 		}
-		ASSERT(XFS_BUF_IODONE_FUNC(bp));
+		ASSERT(bp->b_iodone != NULL);
 		trace_xfs_buf_item_iodone_async(bp, _RET_IP_);
 		xfs_buf_relse(bp);
 		return;
@@ -1035,7 +1034,7 @@ xfs_buf_iodone_callbacks(
 do_callbacks:
 	xfs_buf_do_callbacks(bp);
 	XFS_BUF_SET_FSPRIVATE(bp, NULL);
-	XFS_BUF_CLR_IODONE_FUNC(bp);
+	bp->b_iodone = NULL;
 	xfs_buf_ioend(bp, 0);
 }
 

@@ -25,11 +25,14 @@
 
 static int pseries_rng_data_read(struct hwrng *rng, u32 *data)
 {
-	if (plpar_hcall(H_RANDOM, (unsigned long *)data) != H_SUCCESS) {
+	u64 buffer[PLPAR_HCALL_BUFSIZE];
+
+	if (plpar_hcall(H_RANDOM, (unsigned long *)buffer) != H_SUCCESS) {
 		printk(KERN_ERR "pseries rng hcall error\n");
 		return 0;
 	}
-	return 8;
+	memcpy(data, buffer, sizeof(*data));
+	return sizeof(*data);
 }
 
 /**

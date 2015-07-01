@@ -1596,6 +1596,26 @@ static void vxlan_set_multicast_list(struct net_device *dev)
 {
 }
 
+static int vxlan_change_mtu(struct net_device *dev, int new_mtu)
+{
+	struct vxlan_dev *vxlan = netdev_priv(dev);
+	struct vxlan_rdst *dst = &vxlan->default_dst;
+	struct net_device *lowerdev;
+	int max_mtu;
+
+	lowerdev = __dev_get_by_index(dev_net(dev), dst->remote_ifindex);
+	if (lowerdev == NULL)
+		return eth_change_mtu(dev, new_mtu);
+
+	max_mtu = lowerdev->mtu - VXLAN_HEADROOM;
+
+	if (new_mtu < 68 || new_mtu > max_mtu)
+		return -EINVAL;
+
+	dev->mtu = new_mtu;
+	return 0;
+}
+
 static const struct net_device_ops vxlan_netdev_ops = {
 	.ndo_init		= vxlan_init,
 	.ndo_uninit		= vxlan_uninit,
@@ -1603,7 +1623,7 @@ static const struct net_device_ops vxlan_netdev_ops = {
 	.ndo_stop		= vxlan_stop,
 	.ndo_start_xmit		= vxlan_xmit,
 	.ndo_set_rx_mode	= vxlan_set_multicast_list,
-	.ndo_change_mtu		= eth_change_mtu,
+	.ndo_change_mtu		= vxlan_change_mtu,
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_set_mac_address	= eth_mac_addr,
 };

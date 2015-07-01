@@ -254,6 +254,7 @@ extern int nfs_init_client(struct nfs_client *clp,
 			   int noresvport);
 
 /* dir.c */
+extern void nfs_force_use_readdirplus(struct inode *dir);
 extern int nfs_access_cache_shrinker(struct shrinker *shrink,
 					int nr_to_scan, gfp_t gfp_mask);
 

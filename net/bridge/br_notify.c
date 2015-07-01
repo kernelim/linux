@@ -79,6 +79,11 @@ static int br_device_event(struct notifier_block *unused, unsigned long event, v
 	case NETDEV_UNREGISTER:
 		br_del_if(br, dev);
 		break;
+
+	case NETDEV_RESEND_IGMP:
+		/* Propagate to master device */
+		call_netdevice_notifiers(event, br->dev);
+		break;
 	}
 
 	/* Events that may cause spanning tree to refresh */

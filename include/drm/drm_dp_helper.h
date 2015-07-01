@@ -190,16 +190,16 @@
 # define DP_TRAIN_VOLTAGE_SWING_MASK	    0x3
 # define DP_TRAIN_VOLTAGE_SWING_SHIFT	    0
 # define DP_TRAIN_MAX_SWING_REACHED	    (1 << 2)
-# define DP_TRAIN_VOLTAGE_SWING_400	    (0 << 0)
-# define DP_TRAIN_VOLTAGE_SWING_600	    (1 << 0)
-# define DP_TRAIN_VOLTAGE_SWING_800	    (2 << 0)
-# define DP_TRAIN_VOLTAGE_SWING_1200	    (3 << 0)
+# define DP_TRAIN_VOLTAGE_SWING_LEVEL_0 (0 << 0)
+# define DP_TRAIN_VOLTAGE_SWING_LEVEL_1 (1 << 0)
+# define DP_TRAIN_VOLTAGE_SWING_LEVEL_2 (2 << 0)
+# define DP_TRAIN_VOLTAGE_SWING_LEVEL_3 (3 << 0)
 
 # define DP_TRAIN_PRE_EMPHASIS_MASK	    (3 << 3)
-# define DP_TRAIN_PRE_EMPHASIS_0	    (0 << 3)
-# define DP_TRAIN_PRE_EMPHASIS_3_5	    (1 << 3)
-# define DP_TRAIN_PRE_EMPHASIS_6	    (2 << 3)
-# define DP_TRAIN_PRE_EMPHASIS_9_5	    (3 << 3)
+# define DP_TRAIN_PRE_EMPH_LEVEL_0		(0 << 3)
+# define DP_TRAIN_PRE_EMPH_LEVEL_1		(1 << 3)
+# define DP_TRAIN_PRE_EMPH_LEVEL_2		(2 << 3)
+# define DP_TRAIN_PRE_EMPH_LEVEL_3		(3 << 3)
 
 # define DP_TRAIN_PRE_EMPHASIS_SHIFT	    3
 # define DP_TRAIN_MAX_PRE_EMPHASIS_REACHED  (1 << 5)
@@ -309,6 +309,8 @@
 # define DP_TEST_ACK			    (1 << 0)
 # define DP_TEST_NAK			    (1 << 1)
 # define DP_TEST_EDID_CHECKSUM_WRITE	    (1 << 2)
+
+#define DP_TEST_EDID_CHECKSUM		    0x261
 
 #define DP_TEST_SINK			    0x270
 #define DP_TEST_SINK_START	    (1 << 0)
@@ -509,8 +511,10 @@ struct drm_dp_aux_msg {
 
 /**
  * struct drm_dp_aux - DisplayPort AUX channel
+ * @name: user-visible name of this AUX channel and the I2C-over-AUX adapter
  * @ddc: I2C adapter that can be used for I2C-over-AUX communication
  * @dev: pointer to struct device that is the parent for this AUX channel
+ * @hw_mutex: internal mutex used for locking transfers
  * @transfer: transfers a message representing a single AUX transaction
  *
  * The .dev field should be set to a pointer to the device that implements
@@ -543,7 +547,7 @@ struct drm_dp_aux {
 	const char *name;
 	struct i2c_adapter ddc;
 	struct device *dev;
-
+	struct mutex hw_mutex;
 	ssize_t (*transfer)(struct drm_dp_aux *aux,
 			    struct drm_dp_aux_msg *msg);
 };
@@ -602,7 +606,7 @@ int drm_dp_link_probe(struct drm_dp_aux *aux, struct drm_dp_link *link);
 int drm_dp_link_power_up(struct drm_dp_aux *aux, struct drm_dp_link *link);
 int drm_dp_link_configure(struct drm_dp_aux *aux, struct drm_dp_link *link);
 
-int drm_dp_aux_register_i2c_bus(struct drm_dp_aux *aux);
-void drm_dp_aux_unregister_i2c_bus(struct drm_dp_aux *aux);
+int drm_dp_aux_register(struct drm_dp_aux *aux);
+void drm_dp_aux_unregister(struct drm_dp_aux *aux);
 
 #endif /* _DRM_DP_HELPER_H_ */

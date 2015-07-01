@@ -425,10 +425,7 @@ static inline int acpi_processor_remove_fs(struct acpi_device *device)
 
 /* Use the acpiid in MADT to map cpus in case of SMP */
 
-#ifndef CONFIG_SMP
-static int get_cpu_id(acpi_handle handle, int type, u32 acpi_id) { return -1; }
-#else
-
+#ifdef CONFIG_SMP
 static struct acpi_table_madt *madt;
 
 static int map_lapic_id(struct acpi_subtable_header *entry,
@@ -499,10 +496,10 @@ found:
 static int map_madt_entry(int type, u32 acpi_id)
 {
 	unsigned long madt_end, entry;
-	int apic_id = -1;
+	int phys_id = -1;	/* CPU hardware ID */
 
 	if (!madt)
-		return apic_id;
+		return phys_id;
 
 	entry = (unsigned long)madt;
 	madt_end = entry + madt->header.length;
@@ -514,18 +511,18 @@ static int map_madt_entry(int type, u32 acpi_id)
 		struct acpi_subtable_header *header =
 			(struct acpi_subtable_header *)entry;
 		if (header->type == ACPI_MADT_TYPE_LOCAL_APIC) {
-			if (map_lapic_id(header, acpi_id, &apic_id))
+			if (map_lapic_id(header, acpi_id, &phys_id))
 				break;
 		} else if (header->type == ACPI_MADT_TYPE_LOCAL_X2APIC) {
-			if (map_x2apic_id(header, type, acpi_id, &apic_id))
+			if (map_x2apic_id(header, type, acpi_id, &phys_id))
 				break;
 		} else if (header->type == ACPI_MADT_TYPE_LOCAL_SAPIC) {
-			if (map_lsapic_id(header, type, acpi_id, &apic_id))
+			if (map_lsapic_id(header, type, acpi_id, &phys_id))
 				break;
 		}
 		entry += header->length;
 	}
-	return apic_id;
+	return phys_id;
 }
 
 static int map_mat_entry(acpi_handle handle, int type, u32 acpi_id)
@@ -533,7 +530,7 @@ static int map_mat_entry(acpi_handle handle, int type, u32 acpi_id)
 	struct acpi_buffer buffer = { ACPI_ALLOCATE_BUFFER, NULL };
 	union acpi_object *obj;
 	struct acpi_subtable_header *header;
-	int apic_id = -1;
+	int phys_id = -1;
 
 	if (ACPI_FAILURE(acpi_evaluate_object(handle, "_MAT", NULL, &buffer)))
 		goto exit;
@@ -549,34 +546,53 @@ static int map_mat_entry(acpi_handle handle, int type, u32 acpi_id)
 
 	header = (struct acpi_subtable_header *)obj->buffer.pointer;
 	if (header->type == ACPI_MADT_TYPE_LOCAL_APIC) {
-		map_lapic_id(header, acpi_id, &apic_id);
+		map_lapic_id(header, acpi_id, &phys_id);
 	} else if (header->type == ACPI_MADT_TYPE_LOCAL_SAPIC) {
-		map_lsapic_id(header, type, acpi_id, &apic_id);
+		map_lsapic_id(header, type, acpi_id, &phys_id);
+	} else if (header->type == ACPI_MADT_TYPE_LOCAL_X2APIC) {
+		map_x2apic_id(header, type, acpi_id, &phys_id);
 	}
 
 exit:
 	if (buffer.pointer)
 		kfree(buffer.pointer);
-	return apic_id;
+	return phys_id;
 }
 
-static int get_cpu_id(acpi_handle handle, int type, u32 acpi_id)
+int acpi_get_phys_id(acpi_handle handle, int type, u32 acpi_id)
+{
+	int phys_id;
+
+	phys_id = map_mat_entry(handle, type, acpi_id);
+	if (phys_id == -1)
+		phys_id = map_madt_entry(type, acpi_id);
+
+	return phys_id;
+}
+
+int acpi_map_cpuid(int phys_id, u32 acpi_id)
 {
 	int i;
-	int apic_id = -1;
 
-	apic_id = map_mat_entry(handle, type, acpi_id);
-	if (apic_id == -1)
-		apic_id = map_madt_entry(type, acpi_id);
-	if (apic_id == -1)
-		return apic_id;
+	if (phys_id == -1)
+		return phys_id;
 
 	for_each_possible_cpu(i) {
-		if (cpu_physical_id(i) == apic_id)
+		if (cpu_physical_id(i) == phys_id)
 			return i;
 	}
 	return -1;
 }
+
+int acpi_get_cpuid(acpi_handle handle, int type, u32 acpi_id)
+{
+	int phys_id;
+
+	phys_id = acpi_get_phys_id(handle, type, acpi_id);
+
+	return acpi_map_cpuid(phys_id, acpi_id);
+}
+EXPORT_SYMBOL_GPL(acpi_get_cpuid);
 #endif
 
 /* --------------------------------------------------------------------------
@@ -589,8 +605,8 @@ static int acpi_processor_get_info(struct acpi_device *device)
 	union acpi_object object = { 0 };
 	struct acpi_buffer buffer = { sizeof(union acpi_object), &object };
 	struct acpi_processor *pr;
-	int cpu_index, device_declaration = 0;
 	static int cpu0_initialized;
+	int phys_id, cpu_index, device_declaration = 0;
 
 	pr = acpi_driver_data(device);
 	if (!pr)
@@ -646,16 +662,24 @@ static int acpi_processor_get_info(struct acpi_device *device)
 		device_declaration = 1;
 		pr->acpi_id = value;
 	}
-	cpu_index = get_cpu_id(pr->handle, device_declaration, pr->acpi_id);
 
-	/* Handle UP system running SMP kernel, with no LAPIC in MADT */
-	if (!cpu0_initialized && (cpu_index == -1) &&
-	    (num_online_cpus() == 1)) {
-		cpu_index = 0;
+	phys_id = acpi_get_phys_id(pr->handle, device_declaration, pr->acpi_id);
+	if (phys_id < 0) {
+		acpi_handle_debug(pr->handle, "failed to get CPU APIC ID.\n");
+		return -ENODEV;
 	}
+	pr->phys_id = phys_id;
 
-	cpu0_initialized = 1;
-
+	cpu_index = acpi_map_cpuid(pr->phys_id, pr->acpi_id);
+	if (!cpu0_initialized) {
+		cpu0_initialized = 1;
+		/*
+		 * Handle UP system running SMP kernel, with no CPU
+		 * entry in MADT
+		 */
+		if ((cpu_index == -1) && (num_online_cpus() == 1))
+			cpu_index = 0;
+	}
 	pr->id = cpu_index;
 
 	/*
@@ -667,6 +691,7 @@ static int acpi_processor_get_info(struct acpi_device *device)
 		if (ACPI_FAILURE(acpi_processor_hotadd_init(pr)))
 			return -ENODEV;
 	}
+
 	/*
 	 * On some boxes several processors use the same processor bus id.
 	 * But they are located in different scope. For example:
@@ -1059,7 +1084,7 @@ static void __ref acpi_processor_hotplug_notify(acpi_handle handle,
 	 * re-enabled for 32-bit
 	 */
 
-	mark_hardware_unsupported("CPU Hot Add is not supported for x86 32-bit.\n");
+	pr_crit("CPU Hot Add is not supported for x86 32-bit.\n");
 #endif
 
 	switch (event) {
@@ -1196,7 +1221,7 @@ static acpi_status acpi_processor_hotadd_init(struct acpi_processor *pr)
 		return AE_ERROR;
 	}
 
-	if (acpi_map_lsapic(handle, &pr->id))
+	if (acpi_map_lsapic(handle, pr->phys_id, &pr->id))
 		return AE_ERROR;
 
 	if (arch_register_cpu(pr->id)) {

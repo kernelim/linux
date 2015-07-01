@@ -83,6 +83,9 @@ struct trace_iterator {
 	long			idx;
 
 	cpumask_var_t		started;
+#ifndef __GENKSYMS__
+	int			leftover;
+#endif
 };
 
 enum trace_iter_flags {

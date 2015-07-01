@@ -1204,11 +1204,11 @@ compat_sys_readv(unsigned long fd, const struct compat_iovec __user *vec,
 	int fput_needed;
 	ssize_t ret;
 
-	file = fget_light(fd, &fput_needed);
+	file = fget_light_pos(fd, &fput_needed);
 	if (!file)
 		return -EBADF;
 	ret = compat_readv(file, vec, vlen, &file->f_pos);
-	fput_light(file, fput_needed);
+	fput_light_pos(file, fput_needed);
 	return ret;
 }
 
@@ -1261,11 +1261,11 @@ compat_sys_writev(unsigned long fd, const struct compat_iovec __user *vec,
 	int fput_needed;
 	ssize_t ret;
 
-	file = fget_light(fd, &fput_needed);
+	file = fget_light_pos(fd, &fput_needed);
 	if (!file)
 		return -EBADF;
 	ret = compat_writev(file, vec, vlen, &file->f_pos);
-	fput_light(file, fput_needed);
+	fput_light_pos(file, fput_needed);
 	return ret;
 }
 

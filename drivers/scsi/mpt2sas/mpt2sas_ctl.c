@@ -3,8 +3,9 @@
  * controllers
  *
  * This code is based on drivers/scsi/mpt2sas/mpt2_ctl.c
- * Copyright (C) 2007-2013  LSI Corporation
- *  (mailto:DL-MPTFusionLinux@lsi.com)
+ * Copyright (C) 2007-2014  LSI Corporation
+ * Copyright (C) 20013-2014 Avago Technologies
+ *  (mailto: MPT-FusionLinux.pdl@avagotech.com)
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -80,6 +81,7 @@ enum block_state {
 	BLOCKING,
 };
 
+#ifdef CONFIG_SCSI_MPT2SAS_LOGGING
 /**
  * _ctl_sas_device_find_by_handle - sas device search
  * @ioc: per adapter object
@@ -106,7 +108,6 @@ _ctl_sas_device_find_by_handle(struct MPT2SAS_ADAPTER *ioc, u16 handle)
 	return r;
 }
 
-#ifdef CONFIG_SCSI_MPT2SAS_LOGGING
 /**
  * _ctl_display_some_debug - debug routine
  * @ioc: per adapter object
@@ -115,7 +116,7 @@ _ctl_sas_device_find_by_handle(struct MPT2SAS_ADAPTER *ioc, u16 handle)
  * @mpi_reply: reply message frame
  * Context: none.
  *
- * Function for displaying debug info helpfull when debugging issues
+ * Function for displaying debug info helpful when debugging issues
  * in this module.
  */
 static void
@@ -509,19 +510,6 @@ _ctl_fasync(int fd, struct file *filep, int mode)
 }
 
 /**
- * _ctl_release -
- * @inode -
- * @filep -
- *
- * Called when application releases the fasyn callback handler.
- */
-static int
-_ctl_release(struct inode *inode, struct file *filep)
-{
-	return fasync_helper(-1, filep, 0, &async_queue);
-}
-
-/**
  * _ctl_poll -
  * @file -
  * @wait -
@@ -627,7 +615,7 @@ _ctl_set_task_mid(struct MPT2SAS_ADAPTER *ioc, struct mpt2_ioctl_command *karg,
  */
 static long
 _ctl_do_mpt_command(struct MPT2SAS_ADAPTER *ioc, struct mpt2_ioctl_command karg,
-    void __user *mf)
+	void __user *mf)
 {
 	MPI2RequestHeader_t *mpi_request = NULL, *request;
 	MPI2DefaultReply_t *mpi_reply;
@@ -1000,7 +988,7 @@ _ctl_do_mpt_command(struct MPT2SAS_ADAPTER *ioc, struct mpt2_ioctl_command karg,
 			mpt2sas_scsih_issue_tm(ioc,
 			    le16_to_cpu(mpi_request->FunctionDependent1), 0, 0,
 			    0, MPI2_SCSITASKMGMT_TASKTYPE_TARGET_RESET, 0, 10,
-			    0, TM_MUTEX_ON);
+			    TM_MUTEX_ON);
 			ioc->tm_cmds.status = MPT2_CMD_NOT_USED;
 		} else
 			mpt2sas_base_hard_reset_handler(ioc, CAN_SLEEP,
@@ -3031,7 +3019,6 @@ struct device_attribute *mpt2sas_dev_attrs[] = {
 static const struct file_operations ctl_fops = {
 	.owner = THIS_MODULE,
 	.unlocked_ioctl = _ctl_ioctl,
-	.release = _ctl_release,
 	.poll = _ctl_poll,
 	.fasync = _ctl_fasync,
 #ifdef CONFIG_COMPAT

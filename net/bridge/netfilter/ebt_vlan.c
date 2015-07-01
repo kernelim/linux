@@ -44,8 +44,6 @@ static bool
 ebt_vlan_mt(const struct sk_buff *skb, const struct xt_match_param *par)
 {
 	const struct ebt_vlan_info *info = par->matchinfo;
-	const struct vlan_hdr *fp;
-	struct vlan_hdr _frame;
 
 	unsigned short TCI;	/* Whole TCI, given from parsed frame */
 	unsigned short id;	/* VLAN ID, given from frame TCI */
@@ -53,9 +51,20 @@ ebt_vlan_mt(const struct sk_buff *skb, const struct xt_match_param *par)
 	/* VLAN encapsulated Type/Length field, given from orig frame */
 	__be16 encap;
 
-	fp = skb_header_pointer(skb, 0, sizeof(_frame), &_frame);
-	if (fp == NULL)
-		return false;
+	if (vlan_tx_tag_present(skb)) {
+		TCI = vlan_tx_tag_get(skb);
+		encap = skb->protocol;
+	} else {
+		const struct vlan_hdr *fp;
+		struct vlan_hdr _frame;
+
+		fp = skb_header_pointer(skb, 0, sizeof(_frame), &_frame);
+		if (fp == NULL)
+			return false;
+
+		TCI = ntohs(fp->h_vlan_TCI);
+		encap = fp->h_vlan_encapsulated_proto;
+	}
 
 	/* Tag Control Information (TCI) consists of the following elements:
 	 * - User_priority. The user_priority field is three bits in length,
@@ -64,10 +73,8 @@ ebt_vlan_mt(const struct sk_buff *skb, const struct xt_match_param *par)
 	 * (CFI) is a single bit flag value. Currently ignored.
 	 * - VLAN Identifier (VID). The VID is encoded as
 	 * an unsigned binary number. */
-	TCI = ntohs(fp->h_vlan_TCI);
 	id = TCI & VLAN_VID_MASK;
 	prio = (TCI >> 13) & 0x7;
-	encap = fp->h_vlan_encapsulated_proto;
 
 	/* Checking VLAN Identifier (VID) */
 	if (GET_BITMASK(EBT_VLAN_ID))

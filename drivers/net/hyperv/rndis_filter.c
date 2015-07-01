@@ -748,7 +748,8 @@ int rndis_filter_set_rss_param(struct rndis_device *rdev, int num_queue)
 	rssp->hdr.size = sizeof(struct ndis_recv_scale_param);
 	rssp->flag = 0;
 	rssp->hashinfo = NDIS_HASH_FUNC_TOEPLITZ | NDIS_HASH_IPV4 |
-			 NDIS_HASH_TCP_IPV4;
+			 NDIS_HASH_TCP_IPV4 | NDIS_HASH_IPV6 |
+			 NDIS_HASH_TCP_IPV6;
 	rssp->indirect_tabsize = 4*ITAB_NUM;
 	rssp->indirect_taboffset = sizeof(struct ndis_recv_scale_param);
 	rssp->hashkey_size = HASH_KEYLEN;
@@ -977,6 +978,9 @@ static int rndis_filter_close_device(struct rndis_device *dev)
 		return 0;
 
 	ret = rndis_filter_set_packet_filter(dev, 0);
+	if (ret == -ENODEV)
+		ret = 0;
+
 	if (ret == 0)
 		dev->state = RNDIS_DEV_INITIALIZED;
 

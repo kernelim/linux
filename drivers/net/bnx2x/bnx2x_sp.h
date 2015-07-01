@@ -770,7 +770,9 @@ enum {
 	BNX2X_Q_UPDATE_SILENT_VLAN_REM_CHNG,
 	BNX2X_Q_UPDATE_SILENT_VLAN_REM,
 	BNX2X_Q_UPDATE_TX_SWITCHING_CHNG,
-	BNX2X_Q_UPDATE_TX_SWITCHING
+	BNX2X_Q_UPDATE_TX_SWITCHING,
+	BNX2X_Q_UPDATE_PTP_PKTS_CHNG,
+	BNX2X_Q_UPDATE_PTP_PKTS,
 };
 
 /* Allowed Queue states */
@@ -852,6 +854,10 @@ enum bnx2x_q_type {
 #define BNX2X_MULTI_TX_COS			BNX2X_MULTI_TX_COS_E3B0
 
 #define MAC_PAD (ALIGN(ETH_ALEN, sizeof(u32)) - ETH_ALEN)
+/* DMAE channel to be used by FW for timesync workaroun. A driver that sends
+ * timesync-related ramrods must not use this DMAE command ID.
+ */
+#define FW_DMAE_CMD_ID 6
 
 struct bnx2x_queue_init_params {
 	struct {
@@ -930,6 +936,8 @@ struct bnx2x_general_setup_params {
 	u8		spcl_id;
 	u16		mtu;
 	u8		cos;
+
+	u8		fp_hsi;
 };
 
 struct bnx2x_rxq_setup_params {
@@ -1091,6 +1099,10 @@ struct bnx2x_queue_sp_obj {
 enum {
 	BNX2X_F_UPDATE_TX_SWITCH_SUSPEND_CHNG,
 	BNX2X_F_UPDATE_TX_SWITCH_SUSPEND,
+	BNX2X_F_UPDATE_SD_VLAN_TAG_CHNG,
+	BNX2X_F_UPDATE_SD_VLAN_ETH_TYPE_CHNG,
+	BNX2X_F_UPDATE_VLAN_FORCE_PRIO_CHNG,
+	BNX2X_F_UPDATE_VLAN_FORCE_PRIO_FLAG,
 	BNX2X_F_UPDATE_TUNNEL_CFG_CHNG,
 	BNX2X_F_UPDATE_TUNNEL_CLSS_EN,
 	BNX2X_F_UPDATE_TUNNEL_INNER_GRE_RSS_EN,
@@ -1116,6 +1128,7 @@ enum bnx2x_func_cmd {
 	BNX2X_F_CMD_TX_STOP,
 	BNX2X_F_CMD_TX_START,
 	BNX2X_F_CMD_SWITCH_UPDATE,
+	BNX2X_F_CMD_SET_TIMESYNC,
 	BNX2X_F_CMD_MAX,
 };
 
@@ -1170,10 +1183,29 @@ struct bnx2x_func_start_params {
 	 * capailities
 	 */
 	u8 inner_gre_rss_en;
+
+	/* Allows accepting of packets failing MF classification, possibly
+	 * only matching a given ethertype
+	 */
+	u8 class_fail;
+	u16 class_fail_ethtype;
+
+	/* Override priority of output packets */
+	u8 sd_vlan_force_pri;
+	u8 sd_vlan_force_pri_val;
+
+	/* Replace vlan's ethertype */
+	u16 sd_vlan_eth_type;
+
+	/* Prevent inner vlans from being added by FW */
+	u8 no_added_tags;
 };
 
 struct bnx2x_func_switch_update_params {
 	unsigned long changes; /* BNX2X_F_UPDATE_XX bits */
+	u16 vlan;
+	u16 vlan_eth_type;
+	u8 vlan_force_prio;
 	u8 tunnel_mode;
 	u8 gre_tunnel_type;
 };
@@ -1190,11 +1222,30 @@ struct bnx2x_func_afex_viflists_params {
 	u8 afex_vif_list_command;
 	u8 func_to_clear;
 };
+
 struct bnx2x_func_tx_start_params {
 	struct priority_cos traffic_type_to_priority_cos[MAX_TRAFFIC_TYPES];
 	u8 dcb_enabled;
 	u8 dcb_version;
 	u8 dont_add_pri_0_en;
+};
+
+struct bnx2x_func_set_timesync_params {
+	/* Reset, set or keep the current drift value */
+	u8 drift_adjust_cmd;
+
+	/* Dec, inc or keep the current offset */
+	u8 offset_cmd;
+
+	/* Drift value direction */
+	u8 add_sub_drift_adjust_value;
+
+	/* Drift, period and offset values to be used according to the commands
+	 * above.
+	 */
+	u8 drift_adjust_value;
+	u32 drift_adjust_period;
+	u64 offset_delta;
 };
 
 struct bnx2x_func_state_params {
@@ -1215,6 +1266,7 @@ struct bnx2x_func_state_params {
 		struct bnx2x_func_afex_update_params afex_update;
 		struct bnx2x_func_afex_viflists_params afex_viflists;
 		struct bnx2x_func_tx_start_params tx_start;
+		struct bnx2x_func_set_timesync_params set_timesync;
 	} params;
 };
 

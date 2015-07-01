@@ -1180,6 +1180,48 @@ void install_exec_creds(struct linux_binprm *bprm)
 }
 EXPORT_SYMBOL(install_exec_creds);
 
+static void bprm_fill_uid(struct linux_binprm *bprm)
+{
+	struct inode *inode;
+	unsigned int mode;
+	uid_t uid;
+	gid_t gid;
+
+	/* clear any previous set[ug]id data from a previous binary */
+	bprm->cred->euid = current_euid();
+	bprm->cred->egid = current_egid();
+
+	if (bprm->file->f_path.mnt->mnt_flags & MNT_NOSUID)
+		return;
+
+	if (current->no_new_privs)
+		return;
+
+	inode = bprm->file->f_path.dentry->d_inode;
+	mode = ACCESS_ONCE(inode->i_mode);
+	if (!(mode & (S_ISUID|S_ISGID)))
+		return;
+
+	/* Be careful if suid/sgid is set */
+	mutex_lock(&inode->i_mutex);
+
+	/* reload atomically mode/uid/gid now that lock held */
+	mode = inode->i_mode;
+	uid = inode->i_uid;
+	gid = inode->i_gid;
+	mutex_unlock(&inode->i_mutex);
+
+	if (mode & S_ISUID) {
+		bprm->per_clear |= PER_CLEAR_ON_SETID;
+		bprm->cred->euid = uid;
+	}
+
+	if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP)) {
+		bprm->per_clear |= PER_CLEAR_ON_SETID;
+		bprm->cred->egid = gid;
+	}
+}
+
 /*
  * determine how safe it is to execute the proposed program
  * - the caller must hold current->cred_guard_mutex to protect against
@@ -1231,37 +1273,12 @@ int check_unsafe_exec(struct linux_binprm *bprm)
  */
 int prepare_binprm(struct linux_binprm *bprm)
 {
-	umode_t mode;
-	struct inode * inode = bprm->file->f_path.dentry->d_inode;
 	int retval;
 
-	mode = inode->i_mode;
 	if (bprm->file->f_op == NULL)
 		return -EACCES;
 
-	/* clear any previous set[ug]id data from a previous binary */
-	bprm->cred->euid = current_euid();
-	bprm->cred->egid = current_egid();
-
-	if (!(bprm->file->f_path.mnt->mnt_flags & MNT_NOSUID) &&
-	    !current->no_new_privs) {
-		/* Set-uid? */
-		if (mode & S_ISUID) {
-			bprm->per_clear |= PER_CLEAR_ON_SETID;
-			bprm->cred->euid = inode->i_uid;
-		}
-
-		/* Set-gid? */
-		/*
-		 * If setgid is set but no group execute bit then this
-		 * is a candidate for mandatory locking, not a setgid
-		 * executable.
-		 */
-		if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP)) {
-			bprm->per_clear |= PER_CLEAR_ON_SETID;
-			bprm->cred->egid = inode->i_gid;
-		}
-	}
+	bprm_fill_uid(bprm);
 
 	/* fill in binprm security blob */
 	retval = security_bprm_set_creds(bprm);
@@ -1810,7 +1827,6 @@ static int coredump_wait(int exit_code, struct core_state *core_state)
 {
 	struct task_struct *tsk = current;
 	struct mm_struct *mm = tsk->mm;
-	struct completion *vfork_done;
 	int core_waiters;
 
 	init_completion(&core_state->startup);
@@ -1819,20 +1835,7 @@ static int coredump_wait(int exit_code, struct core_state *core_state)
 	core_waiters = zap_threads(tsk, mm, core_state, exit_code);
 	up_write(&mm->mmap_sem);
 
-	if (unlikely(core_waiters < 0))
-		goto fail;
-
-	/*
-	 * Make sure nobody is waiting for us to release the VM,
-	 * otherwise we can deadlock when we wait on each other
-	 */
-	vfork_done = tsk->vfork_done;
-	if (vfork_done) {
-		tsk->vfork_done = NULL;
-		complete(vfork_done);
-	}
-
-	if (core_waiters) {
+	if (core_waiters > 0) {
 		struct core_thread *ptr;
 
 		wait_for_completion(&core_state->startup);
@@ -1847,7 +1850,7 @@ static int coredump_wait(int exit_code, struct core_state *core_state)
 			ptr = ptr->next;
 		}
 	}
-fail:
+
 	return core_waiters;
 }
 

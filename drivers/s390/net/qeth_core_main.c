@@ -23,6 +23,7 @@
 #include <net/iucv/af_iucv.h>
 
 #include <asm/ebcdic.h>
+#include <asm/chpid.h>
 #include <asm/io.h>
 #include <asm/sysinfo.h>
 
@@ -1353,16 +1354,7 @@ static void qeth_clean_channel(struct qeth_channel *channel)
 static void qeth_get_channel_path_desc(struct qeth_card *card)
 {
 	struct ccw_device *ccwdev;
-	struct channelPath_dsc {
-		u8 flags;
-		u8 lsn;
-		u8 desc;
-		u8 chpid;
-		u8 swla;
-		u8 zeroes;
-		u8 chla;
-		u8 chpp;
-	} *chp_dsc;
+	struct channel_path_desc *chp_dsc;
 
 	QETH_DBF_TEXT(SETUP, 2, "chp_desc");
 
@@ -3093,6 +3085,45 @@ int qeth_query_ipassists(struct qeth_card *card, enum qeth_prot_versions prot)
 	return rc;
 }
 EXPORT_SYMBOL_GPL(qeth_query_ipassists);
+
+static int qeth_query_switch_attributes_cb(struct qeth_card *card,
+				struct qeth_reply *reply, unsigned long data)
+{
+	struct qeth_ipa_cmd *cmd;
+	struct qeth_switch_info *sw_info;
+	struct qeth_query_switch_attributes *attrs;
+
+	QETH_DBF_TEXT(SETUP, 2, "qswiatcb");
+	cmd = (struct qeth_ipa_cmd *) data;
+	sw_info = (struct qeth_switch_info *)reply->param;
+	if (cmd->data.setadapterparms.hdr.return_code == 0) {
+		attrs = &cmd->data.setadapterparms.data.query_switch_attributes;
+		sw_info->capabilities = attrs->capabilities;
+		sw_info->settings = attrs->settings;
+		QETH_DBF_TEXT_(SETUP, 2, "%04x%04x", sw_info->capabilities,
+							sw_info->settings);
+	}
+	qeth_default_setadapterparms_cb(card, reply, (unsigned long) cmd);
+
+	return 0;
+}
+
+int qeth_query_switch_attributes(struct qeth_card *card,
+				 struct qeth_switch_info *sw_info)
+{
+	struct qeth_cmd_buffer *iob;
+
+	QETH_DBF_TEXT(SETUP, 2, "qswiattr");
+	if (!qeth_adp_supported(card, IPA_SETADP_QUERY_SWITCH_ATTRIBUTES))
+		return -EOPNOTSUPP;
+	if (!netif_carrier_ok(card->dev))
+		return -ENOMEDIUM;
+	iob = qeth_get_adapter_cmd(card, IPA_SETADP_QUERY_SWITCH_ATTRIBUTES,
+				sizeof(struct qeth_ipacmd_setadpparms_hdr));
+	return qeth_send_ipa_cmd(card, iob,
+				qeth_query_switch_attributes_cb, sw_info);
+}
+EXPORT_SYMBOL_GPL(qeth_query_switch_attributes);
 
 static int qeth_query_setdiagass_cb(struct qeth_card *card,
 		struct qeth_reply *reply, unsigned long data)

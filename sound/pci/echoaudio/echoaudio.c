@@ -2002,11 +2002,10 @@ static int __devinit snd_echo_probe(struct pci_dev *pci,
 
 	DE_INIT(("Echoaudio driver starting...\n"));
 	i = 0;
-	err = snd_card_create(index[dev], id[dev], THIS_MODULE, 0, &card);
+	err = snd_card_new(&pci->dev, index[dev], id[dev], THIS_MODULE,
+			   0, &card);
 	if (err < 0)
 		return err;
-
-	snd_card_set_dev(card, &pci->dev);
 
 	if ((err = snd_echo_create(card, pci, &chip)) < 0) {
 		snd_card_free(card);

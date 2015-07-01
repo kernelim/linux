@@ -245,7 +245,7 @@ struct ep_send_events_data {
  * Configuration options available inside /proc/sys/fs/epoll/
  */
 /* Maximum number of epoll watched descriptors, per user */
-static int max_user_watches __read_mostly;
+static long max_user_watches __read_mostly;
 
 /*
  * This mutex is used to serialize ep_free() and eventpoll_release_file().
@@ -340,16 +340,18 @@ static void clear_tfile_check_list(void)
 
 #include <linux/sysctl.h>
 
-static int zero;
+static long zero;
+static long long_max = LONG_MAX;
 
 ctl_table epoll_table[] = {
 	{
 		.procname	= "max_user_watches",
 		.data		= &max_user_watches,
-		.maxlen		= sizeof(int),
+		.maxlen		= sizeof(max_user_watches),
 		.mode		= 0644,
-		.proc_handler	= &proc_dointvec_minmax,
+		.proc_handler	= proc_doulongvec_minmax,
 		.extra1		= &zero,
+		.extra2		= &long_max,
 	},
 	{ .ctl_name = 0 }
 };
@@ -692,7 +694,9 @@ static int ep_remove(struct eventpoll *ep, struct epitem *epi)
 	 */
 	call_rcu(&epi->rcu, epi_rcu_free);
 
-	atomic_dec(&ep->user->epoll_watches);
+	atomic_long_dec(&ep->user->epoll_watches_long);
+	atomic_set(&ep->user->epoll_watches,
+		(int)atomic_long_read(&ep->user->epoll_watches_long));
 
 	return 0;
 }
@@ -1144,11 +1148,12 @@ static int ep_insert(struct eventpoll *ep, struct epoll_event *event,
 {
 	int error, revents, pwake = 0;
 	unsigned long flags;
+	long user_watches;
 	struct epitem *epi;
 	struct ep_pqueue epq;
 
-	if (unlikely(atomic_read(&ep->user->epoll_watches) >=
-		     max_user_watches))
+	user_watches = atomic_long_read(&ep->user->epoll_watches_long);
+	if (unlikely(user_watches >= max_user_watches))
 		return -ENOSPC;
 	if (!(epi = kmem_cache_alloc(epi_cache, GFP_KERNEL)))
 		return -ENOMEM;
@@ -1223,7 +1228,9 @@ static int ep_insert(struct eventpoll *ep, struct epoll_event *event,
 
 	spin_unlock_irqrestore(&ep->lock, flags);
 
-	atomic_inc(&ep->user->epoll_watches);
+	atomic_long_inc(&ep->user->epoll_watches_long);
+	atomic_set(&ep->user->epoll_watches,
+		(int)atomic_long_read(&ep->user->epoll_watches_long));
 
 	/* We have to call this outside the lock */
 	if (pwake)
@@ -1868,8 +1875,9 @@ static int __init eventpoll_init(void)
 	/*
 	 * Allows top 4% of lomem to be allocated for epoll watches (per user).
 	 */
-	max_user_watches = min((unsigned long)INT_MAX, (((si.totalram - si.totalhigh) / 25) << PAGE_SHIFT) /
-		EP_ITEM_COST);
+	max_user_watches = (((si.totalram - si.totalhigh) / 25) << PAGE_SHIFT) /
+		EP_ITEM_COST;
+	BUG_ON(max_user_watches < 0);
 
 	/*
 	 * Initialize the structure used to perform epoll file descriptor

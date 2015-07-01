@@ -80,7 +80,7 @@ struct i40e_vsi {
 #define I40EVF_MIN_TXD       64
 #define I40EVF_MAX_RXD       4096
 #define I40EVF_MIN_RXD       64
-#define I40EVF_REQ_DESCRIPTOR_MULTIPLE  8
+#define I40EVF_REQ_DESCRIPTOR_MULTIPLE  32
 
 /* Supported Rx Buffer Sizes */
 #define I40EVF_RXBUFFER_64    64     /* Used for packet split */
@@ -191,15 +191,18 @@ struct i40evf_adapter {
 	struct i40e_q_vector *q_vector[MAX_MSIX_Q_VECTORS];
 	struct list_head vlan_filter_list;
 	char misc_vector_name[IFNAMSIZ + 9];
+	int num_active_queues;
 
 	/* TX */
 	struct i40e_ring *tx_rings[I40E_MAX_VSI_QP];
 	u32 tx_timeout_count;
 	struct list_head mac_filter_list;
+	u32 tx_desc_count;
 
 	/* RX */
 	struct i40e_ring *rx_rings[I40E_MAX_VSI_QP];
 	u64 hw_csum_rx_error;
+	u32 rx_desc_count;
 	int num_msix_vectors;
 	struct msix_entry *msix_entries;
 
@@ -241,7 +244,7 @@ struct i40evf_adapter {
 	struct i40e_hw hw; /* defined in i40e_type.h */
 
 	enum i40evf_state_t state;
-	volatile unsigned long crit_section;
+	unsigned long crit_section;
 
 	struct work_struct watchdog_task;
 	bool netdev_registered;

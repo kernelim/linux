@@ -36,7 +36,7 @@
 #include <scsi/scsi_transport_iscsi.h>
 
 #define DRV_NAME		"be2iscsi"
-#define BUILD_STR		"10.2.273.0r"
+#define BUILD_STR		"10.4.272.0r"
 #define BE_NAME			"Emulex OneConnect" \
 				"Open-iSCSI Driver version" BUILD_STR
 #define DRV_DESC		BE_NAME " " "Driver"
@@ -104,10 +104,14 @@
 #define BE_ADAPTER_LINK_DOWN	0x002
 #define BE_ADAPTER_PCI_ERR	0x004
 #define BE_ADAPTER_STATE_SHUTDOWN	0x008
+#define BE_ADAPTER_CHECK_BOOT	0x010
 
 
 #define BEISCSI_CLEAN_UNLOAD	0x01
 #define BEISCSI_EEH_UNLOAD	0x02
+
+#define BE_GET_BOOT_RETRIES	45
+#define BE_GET_BOOT_TO		20
 /**
  * hardware needs the async PDU buffers to be posted in multiples of 8
  * So have atleast 8 of them by default
@@ -412,6 +416,7 @@ struct beiscsi_hba {
 	} fw_config;
 
 	unsigned int state;
+	int get_boot;
 	bool fw_timeout;
 	bool ue_detected;
 	struct delayed_work beiscsi_hw_check_task;
@@ -839,6 +844,9 @@ void beiscsi_free_mgmt_task_handles(struct beiscsi_conn *beiscsi_conn,
 void hwi_ring_cq_db(struct beiscsi_hba *phba,
 		     unsigned int id, unsigned int num_processed,
 		     unsigned char rearm, unsigned char event);
+
+unsigned int beiscsi_process_cq(struct be_eq_obj *pbe_eq);
+
 static inline bool beiscsi_error(struct beiscsi_hba *phba)
 {
 	return phba->ue_detected || phba->fw_timeout;

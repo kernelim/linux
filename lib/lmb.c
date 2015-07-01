@@ -480,17 +480,43 @@ void __init lmb_enforce_memory_limit(u64 memory_limit)
 	}
 }
 
+static int lmb_search(struct lmb_region *region, u64 addr)
+{
+	unsigned int left = 0, right = region->cnt;
+
+	do {
+		unsigned int mid = (right + left) / 2;
+
+		if (addr < region->region[mid].base)
+			right = mid;
+		else if (addr >= (region->region[mid].base +
+				  region->region[mid].size))
+			left = mid + 1;
+		else
+			return mid;
+	} while (left < right);
+	return -1;
+}
+
 int __init lmb_is_reserved(u64 addr)
 {
-	int i;
+	return lmb_search(&lmb.reserved, addr) != -1;
+}
 
-	for (i = 0; i < lmb.reserved.cnt; i++) {
-		u64 upper = lmb.reserved.region[i].base +
-			lmb.reserved.region[i].size - 1;
-		if ((addr >= lmb.reserved.region[i].base) && (addr <= upper))
-			return 1;
-	}
-	return 0;
+int lmb_is_memory(u64 addr)
+{
+	return lmb_search(&lmb.memory, addr) != -1;
+}
+
+int lmb_is_region_memory(u64 base, u64 size)
+{
+	int idx = lmb_search(&lmb.memory, base);
+
+	if (idx == -1)
+		return 0;
+	return lmb.memory.region[idx].base <= base &&
+		(lmb.memory.region[idx].base +
+		 lmb.memory.region[idx].size) >= (base + size);
 }
 
 /*

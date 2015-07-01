@@ -12,6 +12,7 @@
 #include "bcma_private.h"
 #include <linux/bcm47xx_wdt.h>
 #include <linux/export.h>
+#include <linux/platform_device.h>
 #include <linux/bcma/bcma.h>
 
 static inline u32 bcma_cc_write32_masked(struct bcma_drv_cc *cc, u16 offset,
@@ -24,15 +25,14 @@ static inline u32 bcma_cc_write32_masked(struct bcma_drv_cc *cc, u16 offset,
 	return value;
 }
 
-/* Fix unused error on RHEL: we don't compile MIPS arch, but keep it available */
-static u32 bcma_chipco_get_alp_clock(struct bcma_drv_cc *cc) __attribute__((unused));
-static u32 bcma_chipco_get_alp_clock(struct bcma_drv_cc *cc)
+u32 bcma_chipco_get_alp_clock(struct bcma_drv_cc *cc)
 {
 	if (cc->capabilities & BCMA_CC_CAP_PMU)
 		return bcma_pmu_get_alp_clock(cc);
 
 	return 20000000;
 }
+EXPORT_SYMBOL_GPL(bcma_chipco_get_alp_clock);
 
 static u32 bcma_chipco_watchdog_get_max_timer(struct bcma_drv_cc *cc)
 {
@@ -55,9 +55,6 @@ static u32 bcma_chipco_watchdog_get_max_timer(struct bcma_drv_cc *cc)
 		return (1 << nb) - 1;
 }
 
-/* Fix unused error on RHEL: next commit uses these, fix warn as err */
-static u32 bcma_chipco_watchdog_timer_set_wdt(struct bcm47xx_wdt *wdt,
-                                              u32 ticks) __attribute__((unused));
 static u32 bcma_chipco_watchdog_timer_set_wdt(struct bcm47xx_wdt *wdt,
 					      u32 ticks)
 {
@@ -66,9 +63,6 @@ static u32 bcma_chipco_watchdog_timer_set_wdt(struct bcm47xx_wdt *wdt,
 	return bcma_chipco_watchdog_timer_set(cc, ticks);
 }
 
-/* Fix unused error on RHEL: next commit uses these, fix warn as err */
-static u32 bcma_chipco_watchdog_timer_set_ms_wdt(struct bcm47xx_wdt *wdt,
-                                              u32 ms) __attribute__((unused));
 static u32 bcma_chipco_watchdog_timer_set_ms_wdt(struct bcm47xx_wdt *wdt,
 						 u32 ms)
 {
@@ -93,6 +87,27 @@ static int bcma_chipco_watchdog_ticks_per_ms(struct bcma_drv_cc *cc)
 	} else {
 		return bcma_chipco_get_alp_clock(cc) / 1000;
 	}
+}
+
+int bcma_chipco_watchdog_register(struct bcma_drv_cc *cc)
+{
+	struct bcm47xx_wdt wdt = {};
+	struct platform_device *pdev;
+
+	wdt.driver_data = cc;
+	wdt.timer_set = bcma_chipco_watchdog_timer_set_wdt;
+	wdt.timer_set_ms = bcma_chipco_watchdog_timer_set_ms_wdt;
+	wdt.max_timer_ms = bcma_chipco_watchdog_get_max_timer(cc) / cc->ticks_per_ms;
+
+	pdev = platform_device_register_data(NULL, "bcm47xx-wdt",
+					     cc->core->bus->num, &wdt,
+					     sizeof(wdt));
+	if (IS_ERR(pdev))
+		return PTR_ERR(pdev);
+
+	cc->watchdog = pdev;
+
+	return 0;
 }
 
 void bcma_core_chipcommon_early_init(struct bcma_drv_cc *cc)
@@ -125,8 +140,15 @@ void bcma_core_chipcommon_init(struct bcma_drv_cc *cc)
 	bcma_core_chipcommon_early_init(cc);
 
 	if (cc->core->id.rev >= 20) {
-		bcma_cc_write32(cc, BCMA_CC_GPIOPULLUP, 0);
-		bcma_cc_write32(cc, BCMA_CC_GPIOPULLDOWN, 0);
+		u32 pullup = 0, pulldown = 0;
+
+		if (cc->core->bus->chipinfo.id == BCMA_CHIP_ID_BCM43142) {
+			pullup = 0x402e0;
+			pulldown = 0x20500;
+		}
+
+		bcma_cc_write32(cc, BCMA_CC_GPIOPULLUP, pullup);
+		bcma_cc_write32(cc, BCMA_CC_GPIOPULLDOWN, pulldown);
 	}
 
 	if (cc->capabilities & BCMA_CC_CAP_PMU)
@@ -199,6 +221,7 @@ u32 bcma_chipco_gpio_out(struct bcma_drv_cc *cc, u32 mask, u32 value)
 
 	return res;
 }
+EXPORT_SYMBOL_GPL(bcma_chipco_gpio_out);
 
 u32 bcma_chipco_gpio_outen(struct bcma_drv_cc *cc, u32 mask, u32 value)
 {
@@ -211,6 +234,7 @@ u32 bcma_chipco_gpio_outen(struct bcma_drv_cc *cc, u32 mask, u32 value)
 
 	return res;
 }
+EXPORT_SYMBOL_GPL(bcma_chipco_gpio_outen);
 
 /*
  * If the bit is set to 0, chipcommon controlls this GPIO,
@@ -315,7 +339,7 @@ void bcma_chipco_serial_init(struct bcma_drv_cc *cc)
 		return;
 	}
 
-	irq = bcma_core_mips_irq(cc->core);
+	irq = bcma_core_irq(cc->core, 0);
 
 	/* Determine the registers of the UARTs */
 	cc->nr_serial_ports = (cc->capabilities & BCMA_CC_CAP_NRUART);

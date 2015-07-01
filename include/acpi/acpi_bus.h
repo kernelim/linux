@@ -419,6 +419,8 @@ static inline int acpi_pm_device_sleep_wake(struct device *dev, bool enable)
 }
 #endif /* !CONFIG_PM_SLEEP */
 
+u32 acpi_target_system_state(void);
+
 #endif				/* CONFIG_ACPI */
 
 #endif /*__ACPI_BUS_H__*/

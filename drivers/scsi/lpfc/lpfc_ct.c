@@ -1,7 +1,7 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
  * Fibre Channel Host Bus Adapters.                                *
- * Copyright (C) 2004-2013 Emulex.  All rights reserved.           *
+ * Copyright (C) 2004-2015 Emulex.  All rights reserved.           *
  * EMULEX and SLI are trademarks of Emulex.                        *
  * www.emulex.com                                                  *
  *                                                                 *
@@ -1070,12 +1070,29 @@ lpfc_vport_symbolic_node_name(struct lpfc_vport *vport, char *symbol,
 	size_t size)
 {
 	char fwrev[FW_REV_STR_SIZE];
-	int n;
+	int n = 0;
 
 	lpfc_decode_firmware_rev(vport->phba, fwrev, 0);
 
-	n = snprintf(symbol, size, "Emulex %s FV%s DV%s",
-		vport->phba->ModelName, fwrev, lpfc_release_version);
+	n = snprintf(symbol, size, "Emulex %s", vport->phba->ModelName);
+
+	if (size < n)
+		return n;
+	n += snprintf(symbol + n, size - n, " FV%s", fwrev);
+
+	if (size < n)
+		return n;
+	n += snprintf(symbol + n, size - n, " DV%s", lpfc_release_version);
+
+	if (size < n)
+		return n;
+	n += snprintf(symbol + n, size - n, " HN:%s", init_utsname()->nodename);
+
+	/* Note :- OS name is "Linux" as per requirement BZ168199. */
+	if (size < n)
+		return n;
+	n += snprintf(symbol + n, size - n, " OS:%s", init_utsname()->sysname);
+
 	return n;
 }
 

@@ -1178,7 +1178,7 @@ static int at76_start_monitor(struct at76_priv *priv)
 	int ret;
 
 	memset(&scan, 0, sizeof(struct at76_req_scan));
-	memset(scan.bssid, 0xff, ETH_ALEN);
+	eth_broadcast_addr(scan.bssid);
 
 	scan.channel = priv->channel;
 	scan.scan_type = SCAN_TYPE_PASSIVE;
@@ -1439,7 +1439,7 @@ static int at76_startup_device(struct at76_priv *priv)
 	at76_wait_completion(priv, CMD_STARTUP);
 
 	/* remove BSSID from previous run */
-	memset(priv->bssid, 0, ETH_ALEN);
+	eth_zero_addr(priv->bssid);
 
 	if (at76_set_radio(priv, 1) == 1)
 		at76_wait_completion(priv, CMD_RADIO_ON);
@@ -1916,8 +1916,9 @@ static void at76_dwork_hw_scan(struct work_struct *work)
 
 static int at76_hw_scan(struct ieee80211_hw *hw,
 			struct ieee80211_vif *vif,
-			struct cfg80211_scan_request *req)
+			struct ieee80211_scan_request *hw_req)
 {
+	struct cfg80211_scan_request *req = &hw_req->req;
 	struct at76_priv *priv = hw->priv;
 	struct at76_req_scan scan;
 	u8 *ssid = NULL;
@@ -1933,7 +1934,7 @@ static int at76_hw_scan(struct ieee80211_hw *hw,
 	ieee80211_stop_queues(hw);
 
 	memset(&scan, 0, sizeof(struct at76_req_scan));
-	memset(scan.bssid, 0xFF, ETH_ALEN);
+	eth_broadcast_addr(scan.bssid);
 
 	if (req->n_ssids) {
 		scan.scan_type = SCAN_TYPE_ACTIVE;
@@ -2144,7 +2145,6 @@ static struct at76_priv *at76_alloc_new_device(struct usb_device *udev)
 	priv->pm_period = 0;
 
 	/* unit us */
-	priv->hw->channel_change_time = 100000;
 
 	return priv;
 }

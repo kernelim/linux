@@ -68,6 +68,7 @@ int sysctl_overcommit_ratio = 50; /* default is 50% */
 unsigned long sysctl_overcommit_kbytes __read_mostly;
 int sysctl_max_map_count = DEFAULT_MAX_MAP_COUNT;
 int sysctl_nr_trim_pages = CONFIG_NOMMU_INITIAL_TRIM_EXCESS;
+unsigned long sysctl_admin_reserve_kbytes __read_mostly = 1UL << 13; /* 8MB */
 int heap_stack_gap = 0;
 
 atomic_long_t mmap_pages_allocated;
@@ -1860,10 +1861,10 @@ int __vm_enough_memory(struct mm_struct *mm, long pages, int cap_sys_admin)
 		free += global_page_state(NR_SLAB_RECLAIMABLE);
 
 		/*
-		 * Leave the last 3% for root
+		 * Reserve some for root
 		 */
 		if (!cap_sys_admin)
-			free -= free / 32;
+			free -= sysctl_admin_reserve_kbytes >> (PAGE_SHIFT - 10);
 
 		if (free > pages)
 			return 0;
@@ -1897,10 +1898,10 @@ int __vm_enough_memory(struct mm_struct *mm, long pages, int cap_sys_admin)
 
 	allowed = vm_commit_limit();
 	/*
-	 * Leave the last 3% for root
+	 * Reserve some 3% for root
 	 */
 	if (!cap_sys_admin)
-		allowed -= allowed / 32;
+		allowed -= sysctl_admin_reserve_kbytes >> (PAGE_SHIFT - 10);
 
 	/* Don't let a single process grow too big:
 	   leave 3% of the size of this process for other processes */
@@ -1968,3 +1969,24 @@ int access_process_vm(struct task_struct *tsk, unsigned long addr, void *buf, in
 	mmput(mm);
 	return len;
 }
+
+/*
+ * Initialise sysctl_admin_reserve_kbytes.
+ *
+ * The purpose of sysctl_admin_reserve_kbytes is to allow the sys admin
+ * to log in and kill a memory hogging process.
+ *
+ * Systems with more than 256MB will reserve 8MB, enough to recover
+ * with sshd, bash, and top in OVERCOMMIT_GUESS. Smaller systems will
+ * only reserve 3% of free pages by default.
+ */
+static int __meminit init_admin_reserve(void)
+{
+	unsigned long free_kbytes;
+
+	free_kbytes = global_page_state(NR_FREE_PAGES) << (PAGE_SHIFT - 10);
+
+	sysctl_admin_reserve_kbytes = min(free_kbytes / 32, 1UL << 13);
+	return 0;
+}
+module_init(init_admin_reserve)

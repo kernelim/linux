@@ -380,7 +380,7 @@ apply_rela(Elf_Rela *rela, Elf_Addr base, Elf_Sym *symtab,
 int
 apply_relocate_add(Elf_Shdr *sechdrs, const char *strtab,
 		   unsigned int symindex, unsigned int relsec,
-		   struct module *me)
+		   struct module *me, struct rheldata *rheldata)
 {
 	Elf_Addr base;
 	Elf_Sym *symtab;

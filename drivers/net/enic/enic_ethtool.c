@@ -22,6 +22,8 @@
 #include "enic_res.h"
 #include "enic.h"
 #include "enic_dev.h"
+#include "enic_clsf.h"
+#include "vnic_stats.h"
 
 struct enic_stat {
 	char name[ETH_GSTRING_LEN];
@@ -36,6 +38,11 @@ struct enic_stat {
 #define ENIC_RX_STAT(stat) { \
 	.name = #stat, \
 	.index = offsetof(struct vnic_rx_stats, stat) / sizeof(u64) \
+}
+
+#define ENIC_GEN_STAT(stat) { \
+	.name = #stat, \
+	.index = offsetof(struct vnic_gen_stats, stat) / sizeof(u64)\
 }
 
 static const struct enic_stat enic_tx_stats[] = {
@@ -76,8 +83,13 @@ static const struct enic_stat enic_rx_stats[] = {
 	ENIC_RX_STAT(rx_frames_to_max),
 };
 
+static const struct enic_stat enic_gen_stats[] = {
+	ENIC_GEN_STAT(dma_map_error),
+};
+
 static const unsigned int enic_n_tx_stats = ARRAY_SIZE(enic_tx_stats);
 static const unsigned int enic_n_rx_stats = ARRAY_SIZE(enic_rx_stats);
+static const unsigned int enic_n_gen_stats = ARRAY_SIZE(enic_gen_stats);
 
 void enic_intr_coal_set_rx(struct enic *enic, u32 timer)
 {
@@ -104,8 +116,8 @@ static int enic_get_settings(struct net_device *netdev,
 		ethtool_cmd_speed_set(ecmd, vnic_dev_port_speed(enic->vdev));
 		ecmd->duplex = DUPLEX_FULL;
 	} else {
-		ethtool_cmd_speed_set(ecmd, -1);
-		ecmd->duplex = -1;
+		ethtool_cmd_speed_set(ecmd, SPEED_UNKNOWN);
+		ecmd->duplex = DUPLEX_UNKNOWN;
 	}
 
 	ecmd->autoneg = AUTONEG_DISABLE;
@@ -144,6 +156,10 @@ static void enic_get_strings(struct net_device *netdev, u32 stringset,
 			memcpy(data, enic_rx_stats[i].name, ETH_GSTRING_LEN);
 			data += ETH_GSTRING_LEN;
 		}
+		for (i = 0; i < enic_n_gen_stats; i++) {
+			memcpy(data, enic_gen_stats[i].name, ETH_GSTRING_LEN);
+			data += ETH_GSTRING_LEN;
+		}
 		break;
 	}
 }
@@ -152,7 +168,7 @@ static int enic_get_sset_count(struct net_device *netdev, int sset)
 {
 	switch (sset) {
 	case ETH_SS_STATS:
-		return enic_n_tx_stats + enic_n_rx_stats;
+		return enic_n_tx_stats + enic_n_rx_stats + enic_n_gen_stats;
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -171,56 +187,8 @@ static void enic_get_ethtool_stats(struct net_device *netdev,
 		*(data++) = ((u64 *)&vstats->tx)[enic_tx_stats[i].index];
 	for (i = 0; i < enic_n_rx_stats; i++)
 		*(data++) = ((u64 *)&vstats->rx)[enic_rx_stats[i].index];
-}
-
-static u32 enic_get_rx_csum(struct net_device *netdev)
-{
-	struct enic *enic = netdev_priv(netdev);
-	return enic->csum_rx_enabled;
-}
-
-static int enic_set_rx_csum(struct net_device *netdev, u32 data)
-{
-	struct enic *enic = netdev_priv(netdev);
-
-	if (data && !ENIC_SETTING(enic, RXCSUM))
-		return -EINVAL;
-
-	enic->csum_rx_enabled = !!data;
-
-	return 0;
-}
-
-static int enic_set_tx_csum(struct net_device *netdev, u32 data)
-{
-	struct enic *enic = netdev_priv(netdev);
-
-	if (data && !ENIC_SETTING(enic, TXCSUM))
-		return -EINVAL;
-
-	if (data)
-		netdev->features |= NETIF_F_HW_CSUM;
-	else
-		netdev->features &= ~NETIF_F_HW_CSUM;
-
-	return 0;
-}
-
-static int enic_set_tso(struct net_device *netdev, u32 data)
-{
-	struct enic *enic = netdev_priv(netdev);
-
-	if (data && !ENIC_SETTING(enic, TSO))
-		return -EINVAL;
-
-	if (data)
-		netdev->features |=
-			NETIF_F_TSO | NETIF_F_TSO6 | NETIF_F_TSO_ECN;
-	else
-		netdev->features &=
-			~(NETIF_F_TSO | NETIF_F_TSO6 | NETIF_F_TSO_ECN);
-
-	return 0;
+	for (i = 0; i < enic_n_gen_stats; i++)
+		*(data++) = ((u64 *)&enic->gen_stats)[enic_gen_stats[i].index];
 }
 
 static u32 enic_get_msglevel(struct net_device *netdev)
@@ -281,7 +249,7 @@ static int enic_set_coalesce(struct net_device *netdev,
 		if (ecmd->use_adaptive_rx_coalesce	||
 		    ecmd->rx_coalesce_usecs_low		||
 		    ecmd->rx_coalesce_usecs_high)
-			return -EOPNOTSUPP;
+			return -EINVAL;
 
 		intr = enic_legacy_io_intr();
 		vnic_intr_coalescing_timer_set(&enic->intr[intr],
@@ -293,34 +261,29 @@ static int enic_set_coalesce(struct net_device *netdev,
 		if (ecmd->use_adaptive_rx_coalesce	||
 		    ecmd->rx_coalesce_usecs_low		||
 		    ecmd->rx_coalesce_usecs_high)
-			return -EOPNOTSUPP;
+			return -EINVAL;
 
 		vnic_intr_coalescing_timer_set(&enic->intr[0],
 			tx_coalesce_usecs);
 		break;
 	case VNIC_DEV_INTR_MODE_MSIX:
+		if (ecmd->rx_coalesce_usecs_high &&
+		    (rx_coalesce_usecs_high <
+		     rx_coalesce_usecs_low + ENIC_AIC_LARGE_PKT_DIFF))
+				return -EINVAL;
+
 		for (i = 0; i < enic->wq_count; i++) {
 			intr = enic_msix_wq_intr(enic, i);
 			vnic_intr_coalescing_timer_set(&enic->intr[intr],
 				tx_coalesce_usecs);
 		}
 
-		if (rxcoal->use_adaptive_rx_coalesce) {
-			if (!ecmd->use_adaptive_rx_coalesce) {
-				rxcoal->use_adaptive_rx_coalesce = 0;
-				enic_intr_coal_set_rx(enic, rx_coalesce_usecs);
-			}
-		} else {
-			if (ecmd->use_adaptive_rx_coalesce)
-				rxcoal->use_adaptive_rx_coalesce = 1;
-			else
-				enic_intr_coal_set_rx(enic, rx_coalesce_usecs);
-		}
+		rxcoal->use_adaptive_rx_coalesce =
+					!!ecmd->use_adaptive_rx_coalesce;
+		if (!rxcoal->use_adaptive_rx_coalesce)
+			enic_intr_coal_set_rx(enic, rx_coalesce_usecs);
 
 		if (ecmd->rx_coalesce_usecs_high) {
-			if (rx_coalesce_usecs_high <
-			    (rx_coalesce_usecs_low + ENIC_AIC_LARGE_PKT_DIFF))
-				return -EINVAL;
 			rxcoal->range_end = rx_coalesce_usecs_high;
 			rxcoal->small_pkt_range_start = rx_coalesce_usecs_low;
 			rxcoal->large_pkt_range_start = rx_coalesce_usecs_low +
@@ -337,6 +300,24 @@ static int enic_set_coalesce(struct net_device *netdev,
 	return 0;
 }
 
+int enic_get_rxnfc(struct net_device *dev, struct ethtool_rxnfc *cmd,
+			  void *rule_locs)
+{
+	struct enic *enic = netdev_priv(dev);
+	int ret = 0;
+
+	switch (cmd->cmd) {
+	case ETHTOOL_GRXRINGS:
+		cmd->data = enic->rq_count;
+		break;
+	default:
+		ret = -EOPNOTSUPP;
+		break;
+	}
+
+	return ret;
+}
+
 static const struct ethtool_ops enic_ethtool_ops = {
 	.get_settings = enic_get_settings,
 	.get_drvinfo = enic_get_drvinfo,
@@ -346,17 +327,9 @@ static const struct ethtool_ops enic_ethtool_ops = {
 	.get_strings = enic_get_strings,
 	.get_sset_count = enic_get_sset_count,
 	.get_ethtool_stats = enic_get_ethtool_stats,
-	.get_rx_csum = enic_get_rx_csum,
-	.set_rx_csum = enic_set_rx_csum,
-	.get_tx_csum = ethtool_op_get_tx_csum,
-	.set_tx_csum = enic_set_tx_csum,
-	.get_sg = ethtool_op_get_sg,
-	.set_sg = ethtool_op_set_sg,
-	.get_tso = ethtool_op_get_tso,
-	.set_tso = enic_set_tso,
 	.get_coalesce = enic_get_coalesce,
 	.set_coalesce = enic_set_coalesce,
-	.get_flags = ethtool_op_get_flags,
+	.get_rxnfc = enic_get_rxnfc,
 };
 
 void enic_set_ethtool_ops(struct net_device *netdev)

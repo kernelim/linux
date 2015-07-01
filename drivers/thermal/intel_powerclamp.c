@@ -671,12 +671,17 @@ static const struct x86_cpu_id intel_powerclamp_ids[] = {
 	{ X86_VENDOR_INTEL, 6, 0x2d},
 	{ X86_VENDOR_INTEL, 6, 0x2e},
 	{ X86_VENDOR_INTEL, 6, 0x2f},
+	{ X86_VENDOR_INTEL, 6, 0x37},
 	{ X86_VENDOR_INTEL, 6, 0x3a},
 	{ X86_VENDOR_INTEL, 6, 0x3c},
+	{ X86_VENDOR_INTEL, 6, 0x3d},
 	{ X86_VENDOR_INTEL, 6, 0x3e},
 	{ X86_VENDOR_INTEL, 6, 0x3f},
 	{ X86_VENDOR_INTEL, 6, 0x45},
 	{ X86_VENDOR_INTEL, 6, 0x46},
+	{ X86_VENDOR_INTEL, 6, 0x4d},
+	{ X86_VENDOR_INTEL, 6, 0x4f},
+	{ X86_VENDOR_INTEL, 6, 0x56},
 	{}
 };
 MODULE_DEVICE_TABLE(x86cpu, intel_powerclamp_ids);

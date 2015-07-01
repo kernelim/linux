@@ -963,14 +963,38 @@ Version: 0.0.4
 File: rtl_nic/rtl8411-1.fw
 Version: 0.0.3
 
+File: rtl_nic/rtl8411-2.fw
+Version: 0.0.1
+
 File: rtl_nic/rtl8402-1.fw
 Version: 0.0.1
 
 File: rtl_nic/rtl8106e-1.fw
 Version: 0.0.1
 
+File: rtl_nic/rtl8106e-2.fw
+Version: 0.0.1
+
 File: rtl_nic/rtl8168g-1.fw
-Version: 0.0.2
+Version: 0.0.3
+
+File: rtl_nic/rtl8168g-2.fw
+Version: 0.0.1
+
+File: rtl_nic/rtl8168g-3.fw
+Version: 0.0.1
+
+File: rtl_nic/rtl8168h-1.fw
+Version: 0.0.1
+
+File: rtl_nic/rtl8168h-2.fw
+Version: 0.0.1
+
+File: rtl_nic/rtl8107e-1.fw
+Version: 0.0.1
+
+File: rtl_nic/rtl8107e-2.fw
+Version: 0.0.1
 
 Licence:
  * Copyright (c) 2010, Realtek Semiconductor Corporation
@@ -1003,8 +1027,41 @@ Info: v18.168.6.1
 File: iwlwifi-7260-7.ucode
 Version: 22.1.7.0
 
+File: iwlwifi-7260-9.ucode
+Version: 25.228.9.0
+
+File: iwlwifi-7260-10.ucode
+Version: 23.15.10.0
+
+File: iwlwifi-7260-12.ucode
+Version: 25.17.12.0
+
 File: iwlwifi-3160-7.ucode
 Version: 22.1.7.0
+
+File: iwlwifi-3160-9.ucode
+Version: 25.228.9.0
+
+File: iwlwifi-3160-10.ucode
+Version: 23.15.10.0
+
+File: iwlwifi-3160-12.ucode
+Version: 25.17.12.0
+
+File: iwlwifi-7265-9.ucode
+Version: 25.228.9.0
+
+File: iwlwifi-7265-10.ucode
+Version: 23.15.10.0
+
+File: iwlwifi-7265-12.ucode
+Version: 25.17.12.0
+
+File: iwlwifi-7265D-10.ucode
+Version: 23.15.10.0
+
+File: iwlwifi-7265D-12.ucode
+Version: 25.17.12.0
 
 License: Redistributable. See LICENCE.iwlwifi_firmware for details
 
@@ -1024,13 +1081,15 @@ License: Redistributable.  See LICENCE.myri10ge_firmware for details.
 
 --------------------------------------------------------------------------
 
-Driver: rt2800pci - Ralink RT2860, RT2890, RT3090, RT5390 wireless MACs
+Driver: rt2800pci - Ralink RT2860, RT2890, RT3090, RT3290, RT5390 wireless MACs
 
 File: rt2860.bin
+File: rt3290.bin
 
 Licence: Redistributable. See LICENCE.ralink-firmware.txt for details
 
 Binary file supplied by Shiang Tu <shiang_tu@ralinktech.com>. Firmware Version 34
+rt3290.bin is a specific firmware support the RT3290 chip. Firmware Version 37
 
 --------------------------------------------------------------------------
 

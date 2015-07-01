@@ -69,6 +69,7 @@ typedef int (*dm_request_endio_fn) (struct dm_target *ti,
 
 typedef void (*dm_flush_fn) (struct dm_target *ti);
 typedef void (*dm_presuspend_fn) (struct dm_target *ti);
+typedef void (*dm_presuspend_undo_fn) (struct dm_target *ti);
 typedef void (*dm_postsuspend_fn) (struct dm_target *ti);
 typedef int (*dm_preresume_fn) (struct dm_target *ti);
 typedef void (*dm_resume_fn) (struct dm_target *ti);
@@ -189,6 +190,7 @@ struct target_type {
 
 #ifndef __GENKSYMS__
 	dm_status_with_flags_fn status_with_flags;
+	dm_presuspend_undo_fn presuspend_undo;
 #endif
 };
 
@@ -219,6 +221,13 @@ struct target_type {
 #define DM_TARGET_STATUS_WITH_FLAGS	0x00000008
 #define dm_target_provides_status_with_flags(type) \
 		((type)->features & DM_TARGET_STATUS_WITH_FLAGS)
+
+/*
+ * Target provides the .presuspend_undo method
+ */
+#define DM_TARGET_PRESUSPEND_UNDO	0x00000016
+#define dm_target_provides_presuspend_undo(type) \
+		((type)->features & DM_TARGET_PRESUSPEND_UNDO)
 
 struct dm_target {
 	uint64_t features;	/* 3rd party driver must initialize to zero */
@@ -459,6 +468,11 @@ struct mapped_device *dm_table_get_md(struct dm_table *t);
 void dm_table_event(struct dm_table *t);
 
 /*
+ * Run the queue for request-based targets.
+ */
+void dm_table_run_md_queue_async(struct dm_table *t);
+
+/*
  * The device must be suspended before calling this method.
  * Returns the previous table, which the caller must destroy.
  */
@@ -596,6 +610,5 @@ static inline unsigned long to_bytes(sector_t n)
 void dm_dispatch_request(struct request *rq);
 void dm_requeue_unmapped_request(struct request *rq);
 void dm_kill_unmapped_request(struct request *rq, int error);
-int dm_underlying_device_busy(struct request_queue *q);
 
 #endif	/* _LINUX_DEVICE_MAPPER_H */

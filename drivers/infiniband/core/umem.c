@@ -109,7 +109,7 @@ struct ib_umem *ib_umem_get(struct ib_ucontext *context, unsigned long addr,
 
 	umem->context   = context;
 	umem->length    = size;
-	umem->offset    = addr & ~PAGE_MASK;
+	umem->address   = addr;
 	umem->page_size = PAGE_SIZE;
 	/*
 	 * We ask for writable memory if any access flags other than
@@ -137,7 +137,7 @@ struct ib_umem *ib_umem_get(struct ib_ucontext *context, unsigned long addr,
 	if (!vma_list)
 		umem->hugetlb = 0;
 
-	npages = PAGE_ALIGN(size + umem->offset) >> PAGE_SHIFT;
+	npages = ib_umem_num_pages(umem);
 
 	down_write(&current->mm->mmap_sem);
 
@@ -246,7 +246,7 @@ void ib_umem_release(struct ib_umem *umem)
 		return;
 	}
 
-	diff = PAGE_ALIGN(umem->length + umem->offset) >> PAGE_SHIFT;
+	diff = ib_umem_num_pages(umem);
 
 	/*
 	 * We may be called with the mm's mmap_sem already held.  This

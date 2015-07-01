@@ -46,14 +46,15 @@
 #define E1000_CTRL_EXT_SDP3_DIR  0x00000800 /* SDP3 Data direction */
 
 /* Physical Func Reset Done Indication */
-#define E1000_CTRL_EXT_PFRSTD    0x00004000
-#define E1000_CTRL_EXT_LINK_MODE_MASK 0x00C00000
-#define E1000_CTRL_EXT_LINK_MODE_PCIE_SERDES  0x00C00000
-#define E1000_CTRL_EXT_LINK_MODE_1000BASE_KX  0x00400000
-#define E1000_CTRL_EXT_LINK_MODE_SGMII   0x00800000
-#define E1000_CTRL_EXT_LINK_MODE_GMII   0x00000000
-#define E1000_CTRL_EXT_EIAME          0x01000000
-#define E1000_CTRL_EXT_IRCA           0x00000001
+#define E1000_CTRL_EXT_PFRSTD	0x00004000
+#define E1000_CTRL_EXT_SDLPE	0X00040000  /* SerDes Low Power Enable */
+#define E1000_CTRL_EXT_LINK_MODE_MASK	0x00C00000
+#define E1000_CTRL_EXT_LINK_MODE_PCIE_SERDES	0x00C00000
+#define E1000_CTRL_EXT_LINK_MODE_1000BASE_KX	0x00400000
+#define E1000_CTRL_EXT_LINK_MODE_SGMII	0x00800000
+#define E1000_CTRL_EXT_LINK_MODE_GMII	0x00000000
+#define E1000_CTRL_EXT_EIAME	0x01000000
+#define E1000_CTRL_EXT_IRCA		0x00000001
 /* Interrupt delay cancellation */
 /* Driver loaded bit for FW */
 #define E1000_CTRL_EXT_DRV_LOAD       0x10000000
@@ -62,6 +63,7 @@
 /* packet buffer parity error detection enabled */
 /* descriptor FIFO parity error detection enable */
 #define E1000_CTRL_EXT_PBA_CLR		0x80000000 /* PBA Clear */
+#define E1000_CTRL_EXT_PHYPDEN		0x00100000
 #define E1000_I2CCMD_REG_ADDR_SHIFT	16
 #define E1000_I2CCMD_PHY_ADDR_SHIFT	24
 #define E1000_I2CCMD_OPCODE_READ	0x08000000
@@ -136,6 +138,8 @@
 #define E1000_RCTL_SZ_256         0x00030000    /* rx buffer size 256 */
 #define E1000_RCTL_VFE            0x00040000    /* vlan filter enable */
 #define E1000_RCTL_CFIEN          0x00080000    /* canonical form enable */
+#define E1000_RCTL_DPF            0x00400000    /* Discard Pause Frames */
+#define E1000_RCTL_PMCF           0x00800000    /* pass MAC control frames */
 #define E1000_RCTL_SECRC          0x04000000    /* Strip Ethernet CRC */
 
 /* Use byte values for the following shift parameters
@@ -327,6 +331,9 @@
 /* Timestamp in Rx buffer */
 #define E1000_RXPBS_CFG_TS_EN           0x80000000
 
+#define I210_RXPBSIZE_DEFAULT		0x000000A2 /* RXPBSIZE default */
+#define I210_TXPBSIZE_DEFAULT		0x04000014 /* TXPBSIZE default */
+
 /* SerDes Control */
 #define E1000_SCTL_DISABLE_SERDES_LOOPBACK 0x0400
 
@@ -454,7 +461,6 @@
 #define E1000_RAH_POOL_1 0x00040000
 
 /* Error Codes */
-#define E1000_SUCCESS      0
 #define E1000_ERR_NVM      1
 #define E1000_ERR_PHY      2
 #define E1000_ERR_CONFIG   3

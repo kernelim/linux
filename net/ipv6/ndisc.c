@@ -604,6 +604,27 @@ static void ndisc_send_na(struct net_device *dev, struct neighbour *neigh,
 		     inc_opt ? ND_OPT_TARGET_LL_ADDR : 0);
 }
 
+static void ndisc_send_unsol_na(struct net_device *dev)
+{
+	struct inet6_dev *idev;
+	struct inet6_ifaddr *ifa;
+
+	idev = in6_dev_get(dev);
+	if (!idev)
+		return;
+
+	read_lock_bh(&idev->lock);
+	for (ifa = idev->addr_list; ifa; ifa = ifa->if_next) {
+		ndisc_send_na(dev, NULL, &in6addr_linklocal_allnodes, &ifa->addr,
+			      /*router=*/ !!idev->cnf.forwarding,
+			      /*solicited=*/ false, /*override=*/ true,
+			      /*inc_opt=*/ true);
+	}
+	read_unlock_bh(&idev->lock);
+
+	in6_dev_put(idev);
+}
+
 void ndisc_send_ns(struct net_device *dev, struct neighbour *neigh,
 		   const struct in6_addr *solicit,
 		   const struct in6_addr *daddr, const struct in6_addr *saddr)
@@ -992,10 +1013,7 @@ static void ndisc_recv_na(struct sk_buff *skb)
 			/*
 			 * Change: router to host
 			 */
-			struct rt6_info *rt;
-			rt = rt6_get_dflt_router(saddr, dev);
-			if (rt)
-				ip6_del_rt(rt);
+			rt6_clean_tohost(dev_net(dev),  saddr);
 		}
 
 out:
@@ -1710,6 +1728,9 @@ static int ndisc_netdev_event(struct notifier_block *this, unsigned long event, 
 	case NETDEV_DOWN:
 		neigh_ifdown(&nd_tbl, dev);
 		fib6_run_gc(0, net, false);
+		break;
+	case NETDEV_NOTIFY_PEERS:
+		ndisc_send_unsol_na(dev);
 		break;
 	default:
 		break;

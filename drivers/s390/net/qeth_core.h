@@ -737,6 +737,11 @@ struct qeth_rx {
 	int qdio_err;
 };
 
+struct qeth_switch_info {
+	__u32 capabilities;
+	__u32 settings;
+};
+
 #define QETH_NAPI_WEIGHT NAPI_POLL_WEIGHT
 
 struct qeth_card {
@@ -913,6 +918,8 @@ void qeth_prepare_ipa_cmd(struct qeth_card *, struct qeth_cmd_buffer *, char);
 struct qeth_cmd_buffer *qeth_wait_for_buffer(struct qeth_channel *);
 int qeth_mdio_read(struct net_device *, int, int);
 int qeth_snmp_command(struct qeth_card *, char __user *);
+int qeth_query_switch_attributes(struct qeth_card *card,
+				 struct qeth_switch_info *sw_info);
 struct qeth_cmd_buffer *qeth_get_adapter_cmd(struct qeth_card *, __u32, __u32);
 int qeth_default_setadapterparms_cb(struct qeth_card *, struct qeth_reply *,
 					unsigned long);

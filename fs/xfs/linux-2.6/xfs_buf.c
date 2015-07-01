@@ -444,8 +444,8 @@ _xfs_buf_find(
 	range_length = (isize << BBSHIFT);
 
 	/* Check for IOs smaller than the sector size / not sector aligned */
-	ASSERT(!(range_length < (1 << btp->bt_sshift)));
-	ASSERT(!(range_base & (xfs_off_t)btp->bt_smask));
+	ASSERT(!(range_length < (btp->bt_meta_sectorsize)));
+	ASSERT(!(range_base & (xfs_off_t)btp->bt_meta_sectormask));
 
 	/* get tree root */
 	pag = xfs_perag_get(btp->bt_mount,
@@ -501,16 +501,14 @@ found:
 	spin_unlock(&pag->pag_buf_lock);
 	xfs_perag_put(pag);
 
-	if (xfs_buf_cond_lock(bp)) {
-		/* failed, so wait for the lock if requested. */
-		if (!(flags & XBF_TRYLOCK)) {
-			xfs_buf_lock(bp);
-			XFS_STATS_INC(xb_get_locked_waited);
-		} else {
+	if (!xfs_buf_trylock(bp)) {
+		if (flags & XBF_TRYLOCK) {
 			xfs_buf_rele(bp);
 			XFS_STATS_INC(xb_busy_locked);
 			return NULL;
 		}
+		xfs_buf_lock(bp);
+		XFS_STATS_INC(xb_get_locked_waited);
 	}
 
 	/*
@@ -691,7 +689,6 @@ xfs_buf_read_uncached(
 		return NULL;
 
 	/* set up the buffer for a read IO */
-	xfs_buf_lock(bp);
 	XFS_BUF_SET_ADDR(bp, daddr);
 	XFS_BUF_READ(bp);
 	XFS_BUF_BUSY(bp);
@@ -812,8 +809,6 @@ xfs_buf_get_uncached(
 		goto fail_free_mem;
 	}
 
-	xfs_buf_unlock(bp);
-
 	trace_xfs_buf_get_uncached(bp, _RET_IP_);
 	return bp;
 
@@ -892,8 +887,8 @@ xfs_buf_rele(
  *	to push on stale inode buffers.
  */
 int
-xfs_buf_cond_lock(
-	xfs_buf_t		*bp)
+xfs_buf_trylock(
+	struct xfs_buf		*bp)
 {
 	int			locked;
 
@@ -901,15 +896,8 @@ xfs_buf_cond_lock(
 	if (locked)
 		XB_SET_OWNER(bp);
 
-	trace_xfs_buf_cond_lock(bp, _RET_IP_);
-	return locked ? 0 : -EBUSY;
-}
-
-int
-xfs_buf_lock_value(
-	xfs_buf_t		*bp)
-{
-	return bp->b_sema.count;
+	trace_xfs_buf_trylock(bp, _RET_IP_);
+	return locked;
 }
 
 /*
@@ -923,7 +911,7 @@ xfs_buf_lock_value(
  */
 void
 xfs_buf_lock(
-	xfs_buf_t		*bp)
+	struct xfs_buf		*bp)
 {
 	trace_xfs_buf_lock(bp, _RET_IP_);
 
@@ -946,7 +934,7 @@ xfs_buf_lock(
  */
 void
 xfs_buf_unlock(
-	xfs_buf_t		*bp)
+	struct xfs_buf		*bp)
 {
 	if ((bp->b_flags & (XBF_DELWRI|_XBF_DELWRI_Q)) == XBF_DELWRI) {
 		atomic_inc(&bp->b_hold);
@@ -1130,7 +1118,7 @@ xfs_bioerror_relse(
 	XFS_BUF_UNDELAYWRITE(bp);
 	XFS_BUF_DONE(bp);
 	XFS_BUF_STALE(bp);
-	XFS_BUF_CLR_IODONE_FUNC(bp);
+	bp->b_iodone = NULL;
 	if (!(fl & XBF_ASYNC)) {
 		/*
 		 * Mark b_error and B_ERROR _both_.
@@ -1493,16 +1481,15 @@ xfs_free_buftarg(
 	kmem_free(btp);
 }
 
-STATIC int
-xfs_setsize_buftarg_flags(
+int
+xfs_setsize_buftarg(
 	xfs_buftarg_t		*btp,
 	unsigned int		blocksize,
-	unsigned int		sectorsize,
-	int			verbose)
+	unsigned int		sectorsize)
 {
-	btp->bt_bsize = blocksize;
-	btp->bt_sshift = ffs(sectorsize) - 1;
-	btp->bt_smask = sectorsize - 1;
+	/* Set up metadata sector size info */
+	btp->bt_meta_sectorsize = sectorsize;
+	btp->bt_meta_sectormask = sectorsize - 1;
 
 	if (set_blocksize(btp->bt_bdev, sectorsize)) {
 		xfs_warn(btp->bt_mount,
@@ -1511,30 +1498,25 @@ xfs_setsize_buftarg_flags(
 		return EINVAL;
 	}
 
+	/* Set up device logical sector size mask */
+	btp->bt_logical_sectorsize = bdev_logical_block_size(btp->bt_bdev);
+	btp->bt_logical_sectormask = bdev_logical_block_size(btp->bt_bdev) - 1;
+
 	return 0;
 }
 
 /*
- *	When allocating the initial buffer target we have not yet
- *	read in the superblock, so don't know what sized sectors
- *	are being used is at this early stage.  Play safe.
+ * When allocating the initial buffer target we have not yet
+ * read in the superblock, so don't know what sized sectors
+ * are being used is at this early stage.  Play safe.
  */
 STATIC int
 xfs_setsize_buftarg_early(
 	xfs_buftarg_t		*btp,
 	struct block_device	*bdev)
 {
-	return xfs_setsize_buftarg_flags(btp,
-			PAGE_SIZE, bdev_logical_block_size(bdev), 0);
-}
-
-int
-xfs_setsize_buftarg(
-	xfs_buftarg_t		*btp,
-	unsigned int		blocksize,
-	unsigned int		sectorsize)
-{
-	return xfs_setsize_buftarg_flags(btp, blocksize, sectorsize, 1);
+	return xfs_setsize_buftarg(btp, PAGE_SIZE,
+				   bdev_logical_block_size(bdev));
 }
 
 STATIC int
@@ -1697,7 +1679,7 @@ xfs_buf_delwri_split(
 	list_for_each_entry_safe(bp, n, dwq, b_list) {
 		ASSERT(bp->b_flags & XBF_DELWRI);
 
-		if (!XFS_BUF_ISPINNED(bp) && !xfs_buf_cond_lock(bp)) {
+		if (!XFS_BUF_ISPINNED(bp) && xfs_buf_trylock(bp)) {
 			if (!force &&
 			    time_before(jiffies, bp->b_queuetime + age)) {
 				xfs_buf_unlock(bp);

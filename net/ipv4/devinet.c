@@ -978,6 +978,7 @@ __be32 inet_confirm_addr(struct in_device *in_dev,
 
 	return addr;
 }
+EXPORT_SYMBOL(inet_confirm_addr);
 
 /*
  *	Device notifier
@@ -1107,10 +1108,10 @@ static int inetdev_event(struct notifier_block *this, unsigned long event,
 	case NETDEV_DOWN:
 		ip_mc_down(in_dev);
 		break;
-	case NETDEV_BONDING_OLDTYPE:
+	case NETDEV_PRE_TYPE_CHANGE:
 		ip_mc_unmap(in_dev);
 		break;
-	case NETDEV_BONDING_NEWTYPE:
+	case NETDEV_POST_TYPE_CHANGE:
 		ip_mc_remap(in_dev);
 		break;
 	case NETDEV_CHANGEMTU:
@@ -1802,4 +1803,3 @@ EXPORT_SYMBOL(inet_select_addr);
 EXPORT_SYMBOL(inetdev_by_index);
 EXPORT_SYMBOL(register_inetaddr_notifier);
 EXPORT_SYMBOL(unregister_inetaddr_notifier);
-EXPORT_SYMBOL(inet_confirm_addr);

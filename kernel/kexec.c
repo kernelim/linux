@@ -33,6 +33,7 @@
 #include <linux/vmalloc.h>
 #include <linux/swap.h>
 #include <linux/kmsg_dump.h>
+#include <linux/hugetlb.h>
 
 #include <asm/page.h>
 #include <asm/uaccess.h>
@@ -1368,9 +1369,26 @@ static int __init parse_crashkernel_simple(char 		*cmdline,
 }
 
 #ifdef CONFIG_KEXEC_AUTO_RESERVE
-#ifndef arch_default_crash_size
-unsigned long long __init arch_default_crash_size(unsigned long long total_size)
+/*
+ * This function proposes a crash size which can be adjusted/overridden
+ * by architecture code by implementing arch_crash_auto_scale().
+ */
+unsigned long long __init __weak
+arch_crash_auto_scale(unsigned long long total_size, unsigned long long size)
 {
+	return size;
+}
+
+unsigned long long __init __weak arch_default_crash_base(void)
+{
+	/* 0 means find the base address automatically. */
+	return 0;
+}
+
+static unsigned long long __init
+default_crash_size(unsigned long long total_size)
+{
+	unsigned long long size;
 	/*
 	 * BIOS usually will reserve some memory regions for it's own use.
 	 * so we will get less than actual memory in e820 usable areas.
@@ -1378,30 +1396,20 @@ unsigned long long __init arch_default_crash_size(unsigned long long total_size)
 	 * enough for our current 2G kdump auto reserve threshold.
 	 */
 	if (roundup(total_size, 0x8000000) < KEXEC_AUTO_THRESHOLD)
-		return 0;
+		size = 0;
 	else {
 		/*
 		 * Filtering logic in kdump initrd requires 2bits per 4K page.
 		 * Hence reserve 2bits per 4K of RAM (or 1byte per 16K of RAM)
 		 * on top of base of 128M (KEXEC_AUTO_RESERVED_SIZE).
 		 */
-		return KEXEC_AUTO_RESERVED_SIZE +
+		size = KEXEC_AUTO_RESERVED_SIZE +
 			roundup((total_size - KEXEC_AUTO_RESERVED_SIZE)
 				/ (1ULL<<14), 1ULL<<20);
 	}
-}
-#define arch_default_crash_size arch_default_crash_size
-#endif
 
-#ifndef arch_default_crash_base
-unsigned long long __init arch_default_crash_base(void)
-{
-	/* 0 means find the base address automatically. */
-	return 0;
+	return arch_crash_auto_scale(total_size, size);
 }
-#define arch_default_crash_base arch_default_crash_base
-#endif
-
 #endif /*CONFIG_KEXEC_AUTO_RESERVE*/
 
 /*
@@ -1438,7 +1446,7 @@ int __init parse_crashkernel(char 		 *cmdline,
 		int len;
 		char tmp[32];
 
-		size = arch_default_crash_size(system_ram);
+		size = default_crash_size(system_ram);
 		if (size != 0) {
 			*crash_size = size;
 			*crash_base = arch_default_crash_base();
@@ -1587,6 +1595,10 @@ static int __init crash_save_vmcoreinfo_init(void)
 	VMCOREINFO_NUMBER(PG_buddy);
 #ifdef CONFIG_MEMORY_FAILURE
 	VMCOREINFO_NUMBER(PG_hwpoison);
+#endif
+	VMCOREINFO_NUMBER(PG_head_mask);
+#ifdef CONFIG_HUGETLBFS
+	VMCOREINFO_SYMBOL(free_huge_page);
 #endif
 
 	arch_crash_save_vmcoreinfo();

@@ -198,13 +198,6 @@ static inline __u8 ip_reply_arg_flowi_flags(const struct ip_reply_arg *arg)
 void ip_send_reply(struct sock *sk, struct sk_buff *skb, struct ip_reply_arg *arg,
 		   unsigned int len); 
 
-struct ipv4_config
-{
-	int	log_martians;
-	int	no_pmtu_disc;
-};
-
-extern struct ipv4_config ipv4_config;
 #define IP_INC_STATS(net, field)	SNMP_INC_STATS((net)->mib.ip_statistics, field)
 #define IP_INC_STATS_BH(net, field)	SNMP_INC_STATS_BH((net)->mib.ip_statistics, field)
 #define IP_ADD_STATS(net, field, val)	SNMP_ADD_STATS((net)->mib.ip_statistics, field, val)
@@ -253,6 +246,11 @@ extern void ipfrag_init(void);
 
 extern void ip_static_sysctl_init(void);
 
+static inline bool ip_is_fragment(const struct iphdr *iph)
+{
+	return (iph->frag_off & htons(IP_MF | IP_OFFSET)) != 0;
+}
+
 #ifdef CONFIG_INET
 #include <net/dst.h>
 
@@ -273,6 +271,40 @@ int ip_dont_fragment(struct sock *sk, struct dst_entry *dst)
 	return (inet_sk(sk)->pmtudisc == IP_PMTUDISC_DO ||
 		(inet_sk(sk)->pmtudisc == IP_PMTUDISC_WANT &&
 		 !(dst_metric_locked(dst, RTAX_MTU))));
+}
+
+static inline bool ip_sk_use_pmtu(const struct sock *sk)
+{
+	return inet_sk(sk)->pmtudisc < IP_PMTUDISC_PROBE;
+}
+
+static inline unsigned int ip_dst_mtu_maybe_forward(struct dst_entry *dst,
+						    bool forwarding)
+{
+	struct net *net = dev_net(dst->dev);
+
+	if (net->sysctl_ip_fwd_use_pmtu ||
+	    dst_metric_locked(dst, RTAX_MTU) ||
+	    !forwarding)
+		return dst_mtu(dst);
+
+	return min(dst->dev->mtu, IP_MAX_MTU);
+}
+
+static inline unsigned int ip_skb_dst_mtu(const struct sk_buff *skb)
+{
+	if (!skb->sk || ip_sk_use_pmtu(skb->sk)) {
+		bool forwarding = IPCB(skb)->flags & IPSKB_FORWARDED;
+		return ip_dst_mtu_maybe_forward(skb_dst(skb), forwarding);
+	} else {
+		return min(skb_dst(skb)->dev->mtu, IP_MAX_MTU);
+	}
+}
+
+static inline bool ip_sk_local_df(const struct sock *sk)
+{
+	return inet_sk(sk)->pmtudisc < IP_PMTUDISC_DO ||
+	       inet_sk(sk)->pmtudisc == IP_PMTUDISC_OMIT;
 }
 
 extern void __ip_select_ident(struct iphdr *iph, struct dst_entry *dst, int more);

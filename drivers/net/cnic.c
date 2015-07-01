@@ -1,13 +1,15 @@
-/* cnic.c: Broadcom CNIC core network driver.
+/* cnic.c: QLogic CNIC core network driver.
  *
  * Copyright (c) 2006-2014 Broadcom Corporation
+ * Copyright (c) 2014 QLogic Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation.
  *
  * Original skeleton written by: John(Zongxi) Chen (zongxi@broadcom.com)
- * Modified and maintained by: Michael Chan <mchan@broadcom.com>
+ * Previously modified and maintained by: Michael Chan <mchan@broadcom.com>
+ * Maintained By: Dept-HSGLinuxNICDev@qlogic.com
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -56,11 +58,11 @@
 #define CNIC_MODULE_NAME	"cnic"
 
 static char version[] =
-	"Broadcom NetXtreme II CNIC Driver " CNIC_MODULE_NAME " v" CNIC_MODULE_VERSION " (" CNIC_MODULE_RELDATE ")\n";
+	"QLogic NetXtreme II CNIC Driver " CNIC_MODULE_NAME " v" CNIC_MODULE_VERSION " (" CNIC_MODULE_RELDATE ")\n";
 
 MODULE_AUTHOR("Michael Chan <mchan@broadcom.com> and John(Zongxi) "
 	      "Chen (zongxi@broadcom.com");
-MODULE_DESCRIPTION("Broadcom NetXtreme II CNIC Driver");
+MODULE_DESCRIPTION("QLogic NetXtreme II CNIC Driver");
 MODULE_LICENSE("GPL");
 MODULE_VERSION(CNIC_MODULE_VERSION);
 
@@ -373,10 +375,8 @@ static int cnic_iscsi_nl_msg_recv(struct cnic_dev *dev, u32 msg_type,
 		if (l5_cid >= MAX_CM_SK_TBL_SZ)
 			break;
 
-		rcu_read_lock();
-		if (!rcu_dereference(cp->ulp_ops[CNIC_ULP_L4])) {
+		if (!rcu_access_pointer(cp->ulp_ops[CNIC_ULP_L4])) {
 			rc = -ENODEV;
-			rcu_read_unlock();
 			break;
 		}
 		csk = &cp->csk_tbl[l5_cid];
@@ -405,7 +405,6 @@ static int cnic_iscsi_nl_msg_recv(struct cnic_dev *dev, u32 msg_type,
 			}
 		}
 		csk_put(csk);
-		rcu_read_unlock();
 		rc = 0;
 	}
 	}
@@ -518,7 +517,7 @@ int cnic_unregister_driver(int ulp_type)
 	list_for_each_entry(dev, &cnic_dev_list, list) {
 		struct cnic_local *cp = dev->cnic_priv;
 
-		if (rcu_dereference(cp->ulp_ops[ulp_type])) {
+		if (rcu_access_pointer(cp->ulp_ops[ulp_type])) {
 			pr_err("%s: Type %d still has devices registered\n",
 			       __func__, ulp_type);
 			read_unlock(&cnic_dev_lock);
@@ -566,7 +565,7 @@ static int cnic_register_device(struct cnic_dev *dev, int ulp_type,
 		mutex_unlock(&cnic_lock);
 		return -EAGAIN;
 	}
-	if (rcu_dereference(cp->ulp_ops[ulp_type])) {
+	if (rcu_access_pointer(cp->ulp_ops[ulp_type])) {
 		pr_err("%s: Type %d has already been registered to this device\n",
 		       __func__, ulp_type);
 		mutex_unlock(&cnic_lock);
@@ -601,8 +600,12 @@ static int cnic_unregister_device(struct cnic_dev *dev, int ulp_type)
 		pr_err("%s: Bad type %d\n", __func__, ulp_type);
 		return -EINVAL;
 	}
+
+	if (ulp_type == CNIC_ULP_ISCSI)
+		cnic_send_nlmsg(cp, ISCSI_KEVENT_IF_DOWN, NULL);
+
 	mutex_lock(&cnic_lock);
-	if (rcu_dereference(cp->ulp_ops[ulp_type])) {
+	if (rcu_access_pointer(cp->ulp_ops[ulp_type])) {
 		rcu_assign_pointer(cp->ulp_ops[ulp_type], NULL);
 		cnic_put(dev);
 	} else {
@@ -613,9 +616,7 @@ static int cnic_unregister_device(struct cnic_dev *dev, int ulp_type)
 	}
 	mutex_unlock(&cnic_lock);
 
-	if (ulp_type == CNIC_ULP_ISCSI)
-		cnic_send_nlmsg(cp, ISCSI_KEVENT_IF_DOWN, NULL);
-	else if (ulp_type == CNIC_ULP_FCOE)
+	if (ulp_type == CNIC_ULP_FCOE)
 		dev->fcoe_cap = NULL;
 
 	synchronize_rcu();
@@ -1032,21 +1033,17 @@ static int cnic_alloc_uio_rings(struct cnic_dev *dev, int pages)
 	struct cnic_local *cp = dev->cnic_priv;
 	struct cnic_uio_dev *udev;
 
-	read_lock(&cnic_dev_lock);
 	list_for_each_entry(udev, &cnic_udev_list, list) {
 		if (udev->pdev == dev->pcidev) {
 			udev->dev = dev;
 			if (__cnic_alloc_uio_rings(udev, pages)) {
 				udev->dev = NULL;
-				read_unlock(&cnic_dev_lock);
 				return -ENOMEM;
 			}
 			cp->udev = udev;
-			read_unlock(&cnic_dev_lock);
 			return 0;
 		}
 	}
-	read_unlock(&cnic_dev_lock);
 
 	udev = kzalloc(sizeof(struct cnic_uio_dev), GFP_ATOMIC);
 	if (!udev)
@@ -1060,9 +1057,7 @@ static int cnic_alloc_uio_rings(struct cnic_dev *dev, int pages)
 	if (__cnic_alloc_uio_rings(udev, pages))
 		goto err_udev;
 
-	write_lock(&cnic_dev_lock);
 	list_add(&udev->list, &cnic_udev_list);
-	write_unlock(&cnic_dev_lock);
 
 	pci_dev_get(udev->pdev);
 
@@ -5618,20 +5613,27 @@ static void cnic_rcv_netevent(struct cnic_local *cp, unsigned long event,
 {
 	int if_type;
 
-	rcu_read_lock();
 	for (if_type = 0; if_type < MAX_CNIC_ULP_TYPE; if_type++) {
 		struct cnic_ulp_ops *ulp_ops;
 		void *ctx;
 
-		ulp_ops = rcu_dereference(cp->ulp_ops[if_type]);
-		if (!ulp_ops || !ulp_ops->indicate_netevent)
+		mutex_lock(&cnic_lock);
+		ulp_ops = rcu_dereference_protected(cp->ulp_ops[if_type],
+						lockdep_is_held(&cnic_lock));
+		if (!ulp_ops || !ulp_ops->indicate_netevent) {
+			mutex_unlock(&cnic_lock);
 			continue;
+		}
 
 		ctx = cp->ulp_handle[if_type];
 
+		set_bit(ULP_F_CALL_PENDING, &cp->ulp_flags[if_type]);
+		mutex_unlock(&cnic_lock);
+
 		ulp_ops->indicate_netevent(ctx, event, vlan_id);
+
+		clear_bit(ULP_F_CALL_PENDING, &cp->ulp_flags[if_type]);
 	}
-	rcu_read_unlock();
 }
 
 /* netdev event handler */

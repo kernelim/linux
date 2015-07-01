@@ -115,7 +115,8 @@ static void build_data_key(struct dm_thin_device *td,
 {
 	key->virtual = 0;
 	key->dev = dm_thin_dev_id(td);
-	key->block = b;
+	key->block_begin = b;
+	key->block_end = b + 1ULL;
 }
 
 static void build_virtual_key(struct dm_thin_device *td, dm_block_t b,
@@ -123,7 +124,8 @@ static void build_virtual_key(struct dm_thin_device *td, dm_block_t b,
 {
 	key->virtual = 1;
 	key->dev = dm_thin_dev_id(td);
-	key->block = b;
+	key->block_begin = b;
+	key->block_end = b + 1ULL;
 }
 
 /*----------------------------------------------------------------*/
@@ -222,6 +224,7 @@ struct pool {
 
 	struct pool_features pf;
 	bool low_water_triggered:1;	/* A dm event has been sent */
+	bool suspended:1;
 
 	struct dm_bio_prison *prison;
 	struct dm_kcopyd_client *copier;
@@ -290,6 +293,8 @@ struct thin_c {
 
 	struct pool *pool;
 	struct dm_thin_device *td;
+	struct mapped_device *thin_md;
+
 	bool requeue_mode:1;
 	spinlock_t lock;
 	struct list_head deferred_cells;
@@ -1118,6 +1123,24 @@ static void schedule_external_copy(struct thin_c *tc, dm_block_t virt_block,
 		schedule_zero(tc, virt_block, data_dest, cell, bio);
 }
 
+static void set_pool_mode(struct pool *pool, enum pool_mode new_mode);
+
+static void check_for_space(struct pool *pool)
+{
+	int r;
+	dm_block_t nr_free;
+
+	if (get_pool_mode(pool) != PM_OUT_OF_DATA_SPACE)
+		return;
+
+	r = dm_pool_get_free_block_count(pool->pmd, &nr_free);
+	if (r)
+		return;
+
+	if (nr_free)
+		set_pool_mode(pool, PM_WRITE);
+}
+
 /*
  * A non-zero return indicates read_only or fail_io mode.
  * Many callers don't care about the return value.
@@ -1132,6 +1155,8 @@ static int commit(struct pool *pool)
 	r = dm_pool_commit_metadata(pool->pmd);
 	if (r)
 		metadata_operation_failed(pool, "dm_pool_commit_metadata", r);
+	else
+		check_for_space(pool);
 
 	return r;
 }
@@ -1149,8 +1174,6 @@ static void check_low_water_mark(struct pool *pool, dm_block_t free_blocks)
 		dm_table_event(pool->ti->table);
 	}
 }
-
-static void set_pool_mode(struct pool *pool, enum pool_mode new_mode);
 
 static int alloc_data_block(struct thin_c *tc, dm_block_t *result)
 {
@@ -2143,7 +2166,7 @@ static void set_pool_mode(struct pool *pool, enum pool_mode new_mode)
 		pool->process_cell = process_cell_read_only;
 		pool->process_discard_cell = process_discard_cell;
 		pool->process_prepared_mapping = process_prepared_mapping;
-		pool->process_prepared_discard = process_prepared_discard_passdown;
+		pool->process_prepared_discard = process_prepared_discard;
 
 		if (!pool->pf.error_if_no_space && no_space_timeout)
 			queue_delayed_work(pool->wq, &pool->no_space_timeout, no_space_timeout);
@@ -2573,6 +2596,7 @@ static struct pool *pool_create(struct mapped_device *pool_md,
 	INIT_LIST_HEAD(&pool->prepared_discards);
 	INIT_LIST_HEAD(&pool->active_thins);
 	pool->low_water_triggered = false;
+	pool->suspended = true;
 
 	pool->shared_read_ds = dm_deferred_set_create();
 	if (!pool->shared_read_ds) {
@@ -3119,18 +3143,75 @@ static int pool_preresume(struct dm_target *ti)
 	return 0;
 }
 
+static void pool_suspend_active_thins(struct pool *pool)
+{
+	struct thin_c *tc;
+
+	/* Suspend all active thin devices */
+	tc = get_first_thin(pool);
+	while (tc) {
+		dm_internal_suspend_noflush(tc->thin_md);
+		tc = get_next_thin(pool, tc);
+	}
+}
+
+static void pool_resume_active_thins(struct pool *pool)
+{
+	struct thin_c *tc;
+
+	/* Resume all active thin devices */
+	tc = get_first_thin(pool);
+	while (tc) {
+		dm_internal_resume(tc->thin_md);
+		tc = get_next_thin(pool, tc);
+	}
+}
+
 static void pool_resume(struct dm_target *ti)
 {
 	struct pool_c *pt = ti->private;
 	struct pool *pool = pt->pool;
 	unsigned long flags;
 
+	/*
+	 * Must requeue active_thins' bios and then resume
+	 * active_thins _before_ clearing 'suspend' flag.
+	 */
+	requeue_bios(pool);
+	pool_resume_active_thins(pool);
+
 	spin_lock_irqsave(&pool->lock, flags);
 	pool->low_water_triggered = false;
+	pool->suspended = false;
 	spin_unlock_irqrestore(&pool->lock, flags);
-	requeue_bios(pool);
 
 	do_waker(&pool->waker.work);
+}
+
+static void pool_presuspend(struct dm_target *ti)
+{
+	struct pool_c *pt = ti->private;
+	struct pool *pool = pt->pool;
+	unsigned long flags;
+
+	spin_lock_irqsave(&pool->lock, flags);
+	pool->suspended = true;
+	spin_unlock_irqrestore(&pool->lock, flags);
+
+	pool_suspend_active_thins(pool);
+}
+
+static void pool_presuspend_undo(struct dm_target *ti)
+{
+	struct pool_c *pt = ti->private;
+	struct pool *pool = pt->pool;
+	unsigned long flags;
+
+	pool_resume_active_thins(pool);
+
+	spin_lock_irqsave(&pool->lock, flags);
+	pool->suspended = false;
+	spin_unlock_irqrestore(&pool->lock, flags);
 }
 
 static void pool_postsuspend(struct dm_target *ti)
@@ -3304,7 +3385,6 @@ static int process_release_metadata_snap_mesg(unsigned argc, char **argv, struct
  *   create_thin	<dev_id>
  *   create_snap	<dev_id> <origin_id>
  *   delete		<dev_id>
- *   trim		<dev_id> <new_size_in_sectors>
  *   set_transaction_id <current_trans_id> <new_trans_id>
  *   reserve_metadata_snap
  *   release_metadata_snap
@@ -3314,6 +3394,12 @@ static int pool_message(struct dm_target *ti, unsigned argc, char **argv)
 	int r = -EINVAL;
 	struct pool_c *pt = ti->private;
 	struct pool *pool = pt->pool;
+
+	if (get_pool_mode(pool) >= PM_READ_ONLY) {
+		DMERR("%s: unable to service pool target messages in READ_ONLY or FAIL mode",
+		      dm_device_name(pool->pool_md));
+		return -EINVAL;
+	}
 
 	if (!strcasecmp(argv[0], "create_thin"))
 		r = process_create_thin_mesg(argc, argv, pool);
@@ -3590,12 +3676,15 @@ static void pool_io_hints(struct dm_target *ti, struct queue_limits *limits)
 static struct target_type pool_target = {
 	.name = "thin-pool",
 	.features = DM_TARGET_SINGLETON | DM_TARGET_ALWAYS_WRITEABLE |
-		    DM_TARGET_IMMUTABLE | DM_TARGET_STATUS_WITH_FLAGS,
-	.version = {1, 14, 0},
+		    DM_TARGET_IMMUTABLE | DM_TARGET_STATUS_WITH_FLAGS |
+		    DM_TARGET_PRESUSPEND_UNDO,
+	.version = {1, 14, 1},
 	.module = THIS_MODULE,
 	.ctr = pool_ctr,
 	.dtr = pool_dtr,
 	.map = pool_map,
+	.presuspend = pool_presuspend,
+	.presuspend_undo = pool_presuspend_undo,
 	.postsuspend = pool_postsuspend,
 	.preresume = pool_preresume,
 	.resume = pool_resume,
@@ -3625,13 +3714,13 @@ static void thin_dtr(struct dm_target *ti)
 	struct thin_c *tc = ti->private;
 	unsigned long flags;
 
-	thin_put(tc);
-	wait_for_completion(&tc->can_destroy);
-
 	spin_lock_irqsave(&tc->pool->lock, flags);
 	list_del_rcu(&tc->list);
 	spin_unlock_irqrestore(&tc->pool->lock, flags);
 	synchronize_rcu();
+
+	thin_put(tc);
+	wait_for_completion(&tc->can_destroy);
 
 	mutex_lock(&dm_thin_pool_table.mutex);
 
@@ -3679,6 +3768,7 @@ static int thin_ctr(struct dm_target *ti, unsigned argc, char **argv)
 		r = -ENOMEM;
 		goto out_unlock;
 	}
+	tc->thin_md = dm_table_get_md(ti->table);
 	spin_lock_init(&tc->lock);
 	INIT_LIST_HEAD(&tc->deferred_cells);
 	bio_list_init(&tc->deferred_bio_list);
@@ -3725,18 +3815,18 @@ static int thin_ctr(struct dm_target *ti, unsigned argc, char **argv)
 	if (get_pool_mode(tc->pool) == PM_FAIL) {
 		ti->error = "Couldn't open thin device, Pool is in fail mode";
 		r = -EINVAL;
-		goto bad_thin_open;
+		goto bad_pool;
 	}
 
 	r = dm_pool_open_thin_device(tc->pool->pmd, tc->dev_id, &tc->td);
 	if (r) {
 		ti->error = "Couldn't open thin internal device";
-		goto bad_thin_open;
+		goto bad_pool;
 	}
 
 	r = dm_set_target_max_io_len(ti, tc->pool->sectors_per_block);
 	if (r)
-		goto bad_target_max_io_len;
+		goto bad;
 
 	ti->num_flush_requests = 1;
 	ti->flush_supported = 1;
@@ -3750,14 +3840,18 @@ static int thin_ctr(struct dm_target *ti, unsigned argc, char **argv)
 		ti->split_discard_requests = 1;
 	}
 
-	dm_put(pool_md);
-
 	mutex_unlock(&dm_thin_pool_table.mutex);
 
+	spin_lock_irqsave(&tc->pool->lock, flags);
+	if (tc->pool->suspended) {
+		spin_unlock_irqrestore(&tc->pool->lock, flags);
+		mutex_lock(&dm_thin_pool_table.mutex); /* reacquire for __pool_dec */
+		ti->error = "Unable to activate thin device while pool is suspended";
+		r = -EINVAL;
+		goto bad;
+	}
 	atomic_set(&tc->refcount, 1);
 	init_completion(&tc->can_destroy);
-
-	spin_lock_irqsave(&tc->pool->lock, flags);
 	list_add_tail_rcu(&tc->list, &tc->pool->active_thins);
 	spin_unlock_irqrestore(&tc->pool->lock, flags);
 	/*
@@ -3768,11 +3862,13 @@ static int thin_ctr(struct dm_target *ti, unsigned argc, char **argv)
 	 */
 	synchronize_rcu();
 
+	dm_put(pool_md);
+
 	return 0;
 
-bad_target_max_io_len:
+bad:
 	dm_pool_close_thin_device(tc->td);
-bad_thin_open:
+bad_pool:
 	__pool_dec(tc->pool);
 bad_pool_lookup:
 	dm_put(pool_md);
@@ -3963,7 +4059,7 @@ static int thin_iterate_devices(struct dm_target *ti,
 
 static struct target_type thin_target = {
 	.name = "thin",
-	.version = {1, 14, 0},
+	.version = {1, 14, 1},
 	.module	= THIS_MODULE,
 	.ctr = thin_ctr,
 	.dtr = thin_dtr,

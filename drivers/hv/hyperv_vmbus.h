@@ -29,6 +29,7 @@
 #include <asm/sync_bitops.h>
 #include <linux/atomic.h>
 #include <linux/hyperv.h>
+#include <linux/uio.h>
 
 /*
  * The below CPUID leaves are present if VersionAndFeatures.HypervisorPresent
@@ -515,6 +516,10 @@ struct hv_context {
 	 * per-cpu list of the channels based on their CPU affinity.
 	 */
 	struct list_head percpu_list[NR_CPUS];
+	/*
+	 * buffer to post messages to the host.
+	 */
+	void *post_msg_page[NR_CPUS];
 };
 
 extern struct hv_context hv_context;
@@ -556,8 +561,8 @@ int hv_ringbuffer_init(struct hv_ring_buffer_info *ring_info, void *buffer,
 
 
 int hv_ringbuffer_write(struct hv_ring_buffer_info *ring_info,
-		    struct scatterlist *sglist,
-		    u32 sgcount, bool *signal);
+		    struct kvec *kv_list,
+		    u32 kv_count, bool *signal);
 
 int hv_ringbuffer_peek(struct hv_ring_buffer_info *ring_info, void *buffer,
 		   u32 buflen);
@@ -641,9 +646,9 @@ extern struct vmbus_connection vmbus_connection;
 
 /* General vmbus interface */
 
-struct hv_device *vmbus_device_create(uuid_le *type,
-					 uuid_le *instance,
-					 struct vmbus_channel *channel);
+struct hv_device *vmbus_device_create(const uuid_le *type,
+				      const uuid_le *instance,
+				      struct vmbus_channel *channel);
 
 int vmbus_device_register(struct hv_device *child_device_obj);
 void vmbus_device_unregister(struct hv_device *device_obj);
@@ -659,6 +664,7 @@ void vmbus_free_channels(void);
 /* Connection interface */
 
 int vmbus_connect(void);
+void vmbus_disconnect(void);
 
 int vmbus_post_msg(void *buffer, size_t buflen);
 

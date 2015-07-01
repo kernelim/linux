@@ -203,11 +203,22 @@ static char *snd_pcm_format_names[] = {
 	FORMAT(S18_3BE),
 	FORMAT(U18_3LE),
 	FORMAT(U18_3BE),
+	FORMAT(G723_24),
+	FORMAT(G723_24_1B),
+	FORMAT(G723_40),
+	FORMAT(G723_40_1B),
+	FORMAT(DSD_U8),
+	FORMAT(DSD_U16_LE),
+	FORMAT(DSD_U32_LE),
+	FORMAT(DSD_U16_BE),
+	FORMAT(DSD_U32_BE),
 };
 
 const char *snd_pcm_format_name(snd_pcm_format_t format)
 {
-	return snd_pcm_format_names[format];
+	if ((__force unsigned int)format >= ARRAY_SIZE(snd_pcm_format_names))
+		return "Unknown";
+	return snd_pcm_format_names[(__force unsigned int)format];
 }
 EXPORT_SYMBOL_GPL(snd_pcm_format_name);
 
@@ -263,12 +274,12 @@ static const char *snd_pcm_stream_name(int stream)
 
 static const char *snd_pcm_access_name(snd_pcm_access_t access)
 {
-	return snd_pcm_access_names[access];
+	return snd_pcm_access_names[(__force int)access];
 }
 
 static const char *snd_pcm_subformat_name(snd_pcm_subformat_t subformat)
 {
-	return snd_pcm_subformat_names[subformat];
+	return snd_pcm_subformat_names[(__force int)subformat];
 }
 
 static const char *snd_pcm_tstamp_mode_name(int mode)
@@ -278,7 +289,7 @@ static const char *snd_pcm_tstamp_mode_name(int mode)
 
 static const char *snd_pcm_state_name(snd_pcm_state_t state)
 {
-	return snd_pcm_state_names[state];
+	return snd_pcm_state_names[(__force int)state];
 }
 
 #if defined(CONFIG_SND_PCM_OSS) || defined(CONFIG_SND_PCM_OSS_MODULE)
@@ -324,7 +335,8 @@ static void snd_pcm_proc_info_read(struct snd_pcm_substream *substream,
 
 	info = kmalloc(sizeof(*info), GFP_KERNEL);
 	if (! info) {
-		printk(KERN_DEBUG "snd_pcm_proc_info_read: cannot malloc\n");
+		pcm_dbg(substream->pcm,
+			"snd_pcm_proc_info_read: cannot malloc\n");
 		return;
 	}
 
@@ -647,7 +659,7 @@ int snd_pcm_new_stream(struct snd_pcm *pcm, int stream, int substream_count)
 	if (substream_count > 0) {
 		err = snd_pcm_stream_proc_init(pstr);
 		if (err < 0) {
-			snd_printk(KERN_ERR "Error in snd_pcm_stream_proc_init\n");
+			pcm_err(pcm, "Error in snd_pcm_stream_proc_init\n");
 			return err;
 		}
 	}
@@ -655,7 +667,7 @@ int snd_pcm_new_stream(struct snd_pcm *pcm, int stream, int substream_count)
 	for (idx = 0, prev = NULL; idx < substream_count; idx++) {
 		substream = kzalloc(sizeof(struct snd_pcm_substream2), GFP_KERNEL);
 		if (substream == NULL) {
-			snd_printk(KERN_ERR "Cannot allocate PCM substream\n");
+			pcm_err(pcm, "Cannot allocate PCM substream\n");
 			return -ENOMEM;
 		}
 		substream->pcm = pcm;
@@ -673,7 +685,8 @@ int snd_pcm_new_stream(struct snd_pcm *pcm, int stream, int substream_count)
 			prev->next = substream;
 		err = snd_pcm_substream_proc_init(substream);
 		if (err < 0) {
-			snd_printk(KERN_ERR "Error in snd_pcm_stream_proc_init\n");
+			pcm_err(pcm,
+				"Error in snd_pcm_stream_proc_init\n");
 			if (prev == NULL)
 				pstr->substream = NULL;
 			else
@@ -727,7 +740,7 @@ int snd_pcm_new(struct snd_card *card, const char *id, int device,
 		*rpcm = NULL;
 	pcm = kzalloc(sizeof(struct snd_pcm2), GFP_KERNEL);
 	if (pcm == NULL) {
-		snd_printk(KERN_ERR "Cannot allocate PCM\n");
+		dev_err(card->dev, "Cannot allocate PCM\n");
 		return -ENOMEM;
 	}
 	pcm->card = card;
@@ -969,8 +982,20 @@ static ssize_t show_pcm_class(struct device *dev,
         return snprintf(buf, PAGE_SIZE, "%s\n", str);
 }
 
-static struct device_attribute pcm_attrs =
-	__ATTR(pcm_class, S_IRUGO, show_pcm_class, NULL);
+static DEVICE_ATTR(pcm_class, S_IRUGO, show_pcm_class, NULL);
+static struct attribute *pcm_dev_attrs[] = {
+	&dev_attr_pcm_class.attr,
+	NULL
+};
+
+static struct attribute_group pcm_dev_attr_group = {
+	.attrs	= pcm_dev_attrs,
+};
+
+static const struct attribute_group *pcm_dev_attr_groups[] = {
+	&pcm_dev_attr_group,
+	NULL
+};
 
 static int snd_pcm_dev_register(struct snd_device *device)
 {
@@ -1020,8 +1045,18 @@ static int snd_pcm_dev_register(struct snd_device *device)
 			mutex_unlock(&register_mutex);
 			return err;
 		}
-		snd_add_device_sysfs_file(devtype, pcm->card, pcm->device,
-					  &pcm_attrs);
+
+		dev = snd_get_device(devtype, pcm->card, pcm->device);
+		if (dev) {
+			err = sysfs_create_groups(&dev->kobj,
+						  pcm_dev_attr_groups);
+			if (err < 0)
+				dev_warn(dev,
+					 "pcm %d:%d: cannot create sysfs groups\n",
+					 pcm->card->number, pcm->device);
+			put_device(dev);
+		}
+
 		for (substream = pcm->streams[cidx].substream; substream; substream = substream->next)
 			snd_pcm_timer_init(substream);
 	}
@@ -1071,6 +1106,10 @@ static int snd_pcm_dev_disconnect(struct snd_device *device)
 			break;
 		}
 		snd_unregister_device(devtype, pcm->card, pcm->device);
+		if (((struct snd_pcm2 *)pcm)->chmap_kctl[cidx]) {
+			snd_ctl_remove(pcm->card, ((struct snd_pcm2 *)pcm)->chmap_kctl[cidx]);
+			((struct snd_pcm2 *)pcm)->chmap_kctl[cidx] = NULL;
+		}
 	}
 	mutex_unlock(&pcm->open_mutex);
  unlock:

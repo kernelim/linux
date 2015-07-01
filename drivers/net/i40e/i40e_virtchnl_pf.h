@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel Ethernet Controller XL710 Family Linux Driver
- * Copyright(c) 2013 - 2014 Intel Corporation.
+ * Copyright(c) 2013 - 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -101,6 +101,7 @@ struct i40e_vf {
 	unsigned int tx_rate;	/* Tx bandwidth limit in Mbps */
 	bool link_forced;
 	bool link_up;		/* only valid if vf link is forced */
+	bool spoofchk;
 };
 
 void i40e_free_vfs(struct i40e_pf *pf);
@@ -120,8 +121,11 @@ int i40e_ndo_set_vf_bw(struct net_device *netdev, int vf_id, int tx_rate);
 int i40e_ndo_get_vf_config(struct net_device *netdev,
 			   int vf_id, struct ifla_vf_info *ivi);
 int i40e_ndo_set_vf_link_state(struct net_device *netdev, int vf_id, int link);
+int i40e_ndo_set_vf_spoofchk(struct net_device *netdev, int vf_id, bool enable);
 
 void i40e_vc_notify_link_state(struct i40e_pf *pf);
 void i40e_vc_notify_reset(struct i40e_pf *pf);
+void i40e_enable_pf_switch_lb(struct i40e_pf *pf);
+void i40e_disable_pf_switch_lb(struct i40e_pf *pf);
 
 #endif /* _I40E_VIRTCHNL_PF_H_ */

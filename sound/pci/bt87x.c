@@ -779,7 +779,6 @@ static int __devinit snd_bt87x_create(struct snd_card *card,
 	if (err < 0)
 		goto fail;
 
-	snd_card_set_dev(card, &pci->dev);
 	*rchip = chip;
 	return 0;
 
@@ -795,7 +794,7 @@ fail:
 	  .driver_data = SND_BT87X_BOARD_ ## id }
 /* driver_data is the card id for that device */
 
-static DEFINE_PCI_DEVICE_TABLE(snd_bt87x_ids) = {
+static const struct pci_device_id snd_bt87x_ids[] = {
 	/* Hauppauge WinTV series */
 	BT_DEVICE(PCI_DEVICE_ID_BROOKTREE_878, 0x0070, 0x13eb, GENERIC),
 	/* Hauppauge WinTV series */
@@ -894,7 +893,8 @@ static int __devinit snd_bt87x_probe(struct pci_dev *pci,
 		return -ENOENT;
 	}
 
-	err = snd_card_create(index[dev], id[dev], THIS_MODULE, 0, &card);
+	err = snd_card_new(&pci->dev, index[dev], id[dev], THIS_MODULE,
+			   0, &card);
 	if (err < 0)
 		return err;
 
@@ -964,7 +964,7 @@ static void __devexit snd_bt87x_remove(struct pci_dev *pci)
 
 /* default entries for all Bt87x cards - it's not exported */
 /* driver_data is set to 0 to call detection */
-static DEFINE_PCI_DEVICE_TABLE(snd_bt87x_default_ids) = {
+static const struct pci_device_id snd_bt87x_default_ids[] = {
 	BT_DEVICE(PCI_DEVICE_ID_BROOKTREE_878, PCI_ANY_ID, PCI_ANY_ID, UNKNOWN),
 	BT_DEVICE(PCI_DEVICE_ID_BROOKTREE_879, PCI_ANY_ID, PCI_ANY_ID, UNKNOWN),
 	{ }

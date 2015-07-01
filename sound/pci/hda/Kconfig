@@ -40,8 +40,8 @@ config SND_HDA_HWDEP
 	  with codecs for debugging purposes.
 
 config SND_HDA_RECONFIG
-	bool "Allow dynamic codec reconfiguration (EXPERIMENTAL)"
-	depends on SND_HDA_HWDEP && EXPERIMENTAL
+	bool "Allow dynamic codec reconfiguration"
+	depends on SND_HDA_HWDEP
 	help
 	  Say Y here to enable the HD-audio codec re-configuration feature.
 	  This adds the sysfs interfaces to allow user to clear the whole
@@ -78,7 +78,6 @@ config SND_HDA_PATCH_LOADER
 	bool "Support initialization patch loading for HD-audio"
 	depends on EXPERIMENTAL
 	select FW_LOADER
-	select SND_HDA_HWDEP
 	select SND_HDA_RECONFIG
 	help
 	  Say Y here to allow the HD-audio driver to load a pseudo
@@ -86,12 +85,11 @@ config SND_HDA_PATCH_LOADER
 	  start up.  The "patch" file can be specified via patch module
 	  option, such as patch=hda-init.
 
-	  This option turns on hwdep and reconfig features automatically.
-
 config SND_HDA_CODEC_REALTEK
 	bool "Build Realtek HD-audio codec support"
 	default y
 	select SND_HDA_GENERIC
+	select INPUT
 	help
 	  Say Y here to include Realtek HD-audio codec support in
 	  snd-hda-intel driver, such as ALC880.
@@ -166,6 +164,16 @@ config SND_HDA_CODEC_HDMI
 	  snd-hda-codec-hdmi.
 	  This module is automatically loaded at probing.
 
+config SND_HDA_I915
+	bool "Build Display HD-audio controller/codec power well support for i915 cards"
+	depends on DRM_I915
+	help
+	  Say Y here to include full HDMI and DisplayPort HD-audio controller/codec
+	  power-well support for Intel Haswell graphics cards based on the i915 driver.
+
+	  Note that this option must be enabled for Intel Haswell C+ stepping machines, otherwise
+	  the GPU audio controller/codecs will not be initialized or damaged when exit from S3 mode.
+
 config SND_HDA_CODEC_CIRRUS
 	bool "Build Cirrus Logic codec support"
 	depends on SND_HDA_INTEL
@@ -222,8 +230,9 @@ config SND_HDA_CODEC_CA0132
 
 config SND_HDA_CODEC_CA0132_DSP
 	bool "Support new DSP code for CA0132 codec"
-	depends on SND_HDA_CODEC_CA0132 && FW_LOADER
+	depends on SND_HDA_CODEC_CA0132
 	select SND_HDA_DSP_LOADER
+	select FW_LOADER
 	help
 	  Say Y here to enable the DSP for Creative CA0132 for extended
 	  features like equalizer or echo cancellation.

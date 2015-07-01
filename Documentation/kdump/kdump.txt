@@ -296,7 +296,14 @@ and x86_64, base memory reserved is 128M and this memory is scaled based on
 physical memory present in the system. Currently dump filtering utility
 (makedumpfile) requires 2bits per 4K page of memory in its user space. So
 memory reserved is scaled accordingly. That means on top of 128MB, we reserve
-additional 2bit per 4K page of physical memory in the system.
+additional 2bit per 4K page of physical memory in the system. But when system
+has large memory crashkernel=auto could try to reserve very large contiguous
+memory, possibly exceed 896M. While kernel only supports reserving memory
+below 896M for kexec/kdump kernel. So the reservation size need be scaled
+down in step size of 64M until a final size is found or failed if the reserved
+size is smaller than 256M since kdump probably won't work with <256M with very
+large memory. This is fine since makedumpfile use cyclic buffer mode by default
+which need far less memory than bitmap mode.
 
 It will be 128M or 256M on ppc, 128M on s390x, 1/32 of your physical memory
 size on ppc64 (but it will not grow if you have more than 128G memory). IA64
@@ -470,6 +477,13 @@ To see the entire memory, use the following command:
 
    dd if=/dev/oldmem of=oldmem.001
 
+Trigger Kdump on WARN()
+=======================
+
+The kernel parameter, panic_on_warn, calls panic() in all WARN() paths.  This
+will cause a kdump to occur at the panic() call.  In cases where a user wants
+to specify this during runtime, /proc/sys/kernel/panic_on_warn can be set to 1
+to achieve the same behaviour.
 
 Analysis
 ========

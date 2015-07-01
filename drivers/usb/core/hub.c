@@ -5124,3 +5124,26 @@ void usb_queue_reset_device(struct usb_interface *iface)
 	schedule_work(&iface->reset_ws);
 }
 EXPORT_SYMBOL_GPL(usb_queue_reset_device);
+
+/**
+ * usb_hub_find_child - Get the pointer of child device
+ * attached to the port which is specified by @port1.
+ * @hdev: USB device belonging to the usb hub
+ * @port1: port num to indicate which port the child device
+ *	is attached to.
+ *
+ * RHEL specific note: ff823c79a5c33194c2e5594f7c4686ea3547910c wasn't
+ * completely backported due changes on usb_device structure. This function
+ * was modified to work with existing structure.
+ *
+ * Return NULL if input param is invalid and
+ * child's usb_device pointer if non-NULL.
+ */
+struct usb_device *usb_hub_find_child(struct usb_device *hdev,
+		int port1)
+{
+	if (port1 < 1 || port1 > hdev->maxchild)
+		return NULL;
+	return hdev->children[port1 - 1];
+}
+EXPORT_SYMBOL_GPL(usb_hub_find_child);

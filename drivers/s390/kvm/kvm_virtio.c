@@ -259,6 +259,11 @@ error:
 	return PTR_ERR(vqs[i]);
 }
 
+static const char *kvm_bus_name(struct virtio_device *vdev)
+{
+	return "";
+}
+
 /*
  * The config ops structure as defined by virtio config
  */
@@ -272,6 +277,7 @@ static struct virtio_config_ops kvm_vq_configspace_ops = {
 	.reset = kvm_reset,
 	.find_vqs = kvm_find_vqs,
 	.del_vqs = kvm_del_vqs,
+	.bus_name = kvm_bus_name,
 };
 
 /*
@@ -347,11 +353,7 @@ static void kvm_extint_handler(u16 code)
 	config_changed =  (*(int *)  __LC_EXT_PARAMS & 1);
 
 	if (config_changed) {
-		struct virtio_driver *drv;
-		drv = container_of(vq->vdev->dev.driver,
-				   struct virtio_driver, driver);
-		if (drv->config_changed)
-			drv->config_changed(vq->vdev);
+		virtio_config_changed(vq->vdev);
 	} else
 		vring_interrupt(0, vq);
 }

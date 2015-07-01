@@ -927,6 +927,7 @@ static void pci_release_dev(struct device *dev)
 
 	pci_dev = to_pci_dev(dev);
 	pci_release_capabilities(pci_dev);
+	pcibios_release_device(pci_dev);
 	kfree_pci_dev(pci_dev);
 }
 
@@ -1116,7 +1117,6 @@ void pci_device_add(struct pci_dev *dev, struct pci_bus *bus)
 {
 	device_initialize(&dev->dev);
 	dev->dev.release = pci_release_dev;
-	pci_dev_get(dev);
 
 	dev->dev.dma_mask = &dev->dma_mask;
 	dev->dev.dma_parms = &dev->dma_parms;
@@ -1574,6 +1574,24 @@ EXPORT_SYMBOL(pci_scan_slot);
 EXPORT_SYMBOL(pci_scan_bridge);
 EXPORT_SYMBOL_GPL(pci_scan_child_bus);
 #endif
+
+/*
+ * pci_rescan_bus(), pci_rescan_bus_bridge_resize() and PCI device removal
+ * routines should always be executed under this mutex.
+ */
+static DEFINE_MUTEX(pci_rescan_remove_lock);
+
+void pci_lock_rescan_remove(void)
+{
+	mutex_lock(&pci_rescan_remove_lock);
+}
+EXPORT_SYMBOL_GPL(pci_lock_rescan_remove);
+
+void pci_unlock_rescan_remove(void)
+{
+	mutex_unlock(&pci_rescan_remove_lock);
+}
+EXPORT_SYMBOL_GPL(pci_unlock_rescan_remove);
 
 static int __init pci_sort_bf_cmp(const struct device *d_a, const struct device *d_b)
 {

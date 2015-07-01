@@ -187,7 +187,11 @@ static int fuse_dentry_revalidate(struct dentry *entry, struct nameidata *nd)
 	if (inode && is_bad_inode(inode))
 		goto invalid;
 	else if (time_before64(fuse_dentry_time(entry), get_jiffies_64()) ||
-		 (nd && (nd->flags & LOOKUP_REVAL))) {
+		 (nd && (nd->flags & LOOKUP_REVAL)) ||
+		 (nd && !(nd->flags & (LOOKUP_CONTINUE | LOOKUP_PARENT)) &&
+		 (nd && (nd->flags & LOOKUP_OPEN)) && inode &&
+		 S_ISREG(inode->i_mode))) {
+
 		int err;
 		struct fuse_entry_out outarg;
 		struct fuse_req *req;

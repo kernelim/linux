@@ -175,6 +175,10 @@ __create_workqueue_key(const char *name, int singlethread,
 		       int freezeable, int rt, struct lock_class_key *key,
 		       const char *lock_name);
 
+extern struct workqueue_struct *system_wq;
+extern struct workqueue_struct *system_long_wq;
+extern struct workqueue_struct *system_power_efficient_wq;
+
 #ifdef CONFIG_LOCKDEP
 #define __create_workqueue(name, singlethread, freezeable, rt)	\
 ({								\
@@ -235,6 +239,8 @@ extern int flush_work(struct work_struct *work);
 extern int cancel_work_sync(struct work_struct *work);
 
 extern unsigned int work_busy(struct work_struct *work);
+extern bool mod_delayed_work(struct workqueue_struct *wq,
+			     struct delayed_work *dwork, unsigned long delay);
 
 /*
  * Kill off a pending schedule_delayed_work().  Note that the work callback

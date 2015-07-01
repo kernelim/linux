@@ -133,6 +133,7 @@ struct kvm_stats_debugfs_item debugfs_entries[] = {
 	{ "irq_window", VCPU_STAT(irq_window_exits) },
 	{ "nmi_window", VCPU_STAT(nmi_window_exits) },
 	{ "halt_exits", VCPU_STAT(halt_exits) },
+	{ "halt_successful_poll", VCPU_STAT(halt_successful_poll) },
 	{ "halt_wakeup", VCPU_STAT(halt_wakeup) },
 	{ "hypercalls", VCPU_STAT(hypercalls) },
 	{ "request_irq", VCPU_STAT(request_irq_exits) },
@@ -770,7 +771,6 @@ void kvm_enable_efer_bits(u64 mask)
 }
 EXPORT_SYMBOL_GPL(kvm_enable_efer_bits);
 
-
 /*
  * Writes msr value into into the appropriate "register".
  * Returns 0 on success, non-0 otherwise.
@@ -778,8 +778,34 @@ EXPORT_SYMBOL_GPL(kvm_enable_efer_bits);
  */
 int kvm_set_msr(struct kvm_vcpu *vcpu, struct msr_data *msr)
 {
+	switch (msr->index) {
+	case MSR_FS_BASE:
+	case MSR_GS_BASE:
+	case MSR_KERNEL_GS_BASE:
+	case MSR_CSTAR:
+	case MSR_LSTAR:
+		if (is_noncanonical_address(msr->data))
+			return 1;
+		break;
+	case MSR_IA32_SYSENTER_EIP:
+	case MSR_IA32_SYSENTER_ESP:
+		/*
+		 * IA32_SYSENTER_ESP and IA32_SYSENTER_EIP cause #GP if
+		 * non-canonical address is written on Intel but not on
+		 * AMD (which ignores the top 32-bits, because it does
+		 * not implement 64-bit SYSENTER).
+		 *
+		 * 64-bit code should hence be able to write a non-canonical
+		 * value on AMD.  Making the address canonical ensures that
+		 * vmentry does not fail on Intel after writing a non-canonical
+		 * value, and that something deterministic happens if the guest
+		 * invokes 64-bit SYSENTER.
+		 */
+		msr->data = get_canonical(msr->data);
+	}
 	return kvm_x86_ops->set_msr(vcpu, msr);
 }
+EXPORT_SYMBOL_GPL(kvm_set_msr);
 
 bool kvm_rdpmc(struct kvm_vcpu *vcpu)
 {
@@ -1271,9 +1297,13 @@ static int set_msr_mce(struct kvm_vcpu *vcpu, u32 msr, u64 data)
 		if (msr >= MSR_IA32_MC0_CTL &&
 		    msr < MSR_IA32_MC0_CTL + 4 * bank_num) {
 			u32 offset = msr - MSR_IA32_MC0_CTL;
-			/* only 0 or all 1s can be written to IA32_MCi_CTL */
+			/* only 0 or all 1s can be written to IA32_MCi_CTL
+			 * some Linux kernels though clear bit 10 in bank 4 to
+			 * workaround a BIOS/GART TBL issue on AMD K8s, ignore
+			 * this to avoid an uncatched #GP in the guest
+			 */
 			if ((offset & 0x3) == 0 &&
-			    data != 0 && data != ~(u64)0)
+			    data != 0 && (data | (1 << 10)) != ~(u64)0)
 				return -1;
 			vcpu->arch.mce_banks[offset] = data;
 			break;
@@ -3414,10 +3444,9 @@ int kvm_vm_ioctl_get_dirty_log(struct kvm *kvm,
 	n = kvm_dirty_bitmap_bytes(memslot);
 
 	r = -ENOMEM;
-	dirty_bitmap = vmalloc(n);
+	dirty_bitmap = vzalloc(n);
 	if (!dirty_bitmap)
 		goto out;
-	memset(dirty_bitmap, 0, n);
 
 	for (i = 0; !is_dirty && i < n/sizeof(long); i++)
 		is_dirty = memslot->dirty_bitmap[i];

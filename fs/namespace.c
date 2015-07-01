@@ -1556,7 +1556,7 @@ static int do_loopback(struct path *path, char *old_name,
 
 	err = -EINVAL;
 	if (mnt_ns_loop(&old_path))
-		goto out;
+		goto out_path;
 
 	down_write(&namespace_sem);
 	err = -EINVAL;
@@ -1586,6 +1586,7 @@ static int do_loopback(struct path *path, char *old_name,
 
 out:
 	up_write(&namespace_sem);
+out_path:
 	path_put(&old_path);
 	return err;
 }

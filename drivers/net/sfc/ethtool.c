@@ -75,7 +75,6 @@ static const struct efx_sw_stat_desc efx_sw_stat_desc[] = {
 	EFX_ETHTOOL_UINT_CHANNEL_STAT(rx_tcp_udp_chksum_err),
 	EFX_ETHTOOL_UINT_CHANNEL_STAT(rx_mcast_mismatch),
 	EFX_ETHTOOL_UINT_CHANNEL_STAT(rx_frm_trunc),
-	EFX_ETHTOOL_UINT_CHANNEL_STAT(rx_nodesc_trunc),
 	EFX_ETHTOOL_UINT_CHANNEL_STAT(rx_merge_events),
 	EFX_ETHTOOL_UINT_CHANNEL_STAT(rx_merge_packets),
 };
@@ -358,6 +357,37 @@ static int efx_ethtool_fill_self_tests(struct efx_nic *efx,
 	return n;
 }
 
+static size_t efx_describe_per_queue_stats(struct efx_nic *efx, u8 *strings)
+{
+	size_t n_stats = 0;
+	struct efx_channel *channel;
+
+	efx_for_each_channel(channel, efx) {
+		if (efx_channel_has_tx_queues(channel)) {
+			n_stats++;
+			if (strings != NULL) {
+				snprintf(strings, ETH_GSTRING_LEN,
+					 "tx-%u.tx_packets",
+					 channel->tx_queue[0].queue /
+					 EFX_TXQ_TYPES);
+
+				strings += ETH_GSTRING_LEN;
+			}
+		}
+	}
+	efx_for_each_channel(channel, efx) {
+		if (efx_channel_has_rx_queue(channel)) {
+			n_stats++;
+			if (strings != NULL) {
+				snprintf(strings, ETH_GSTRING_LEN,
+					 "rx-%d.rx_packets", channel->channel);
+				strings += ETH_GSTRING_LEN;
+			}
+		}
+	}
+	return n_stats;
+}
+
 static int efx_ethtool_get_sset_count(struct net_device *net_dev,
 				      int string_set)
 {
@@ -366,8 +396,9 @@ static int efx_ethtool_get_sset_count(struct net_device *net_dev,
 	switch (string_set) {
 	case ETH_SS_STATS:
 		return efx->type->describe_stats(efx, NULL) +
-			EFX_ETHTOOL_SW_STAT_COUNT +
-			efx_ptp_describe_stats(efx, NULL);
+		       EFX_ETHTOOL_SW_STAT_COUNT +
+		       efx_describe_per_queue_stats(efx, NULL) +
+		       efx_ptp_describe_stats(efx, NULL);
 	case ETH_SS_TEST:
 		return efx_ethtool_fill_self_tests(efx, NULL, NULL, NULL);
 	default:
@@ -389,6 +420,8 @@ static void efx_ethtool_get_strings(struct net_device *net_dev,
 			strlcpy(strings + i * ETH_GSTRING_LEN,
 				efx_sw_stat_desc[i].name, ETH_GSTRING_LEN);
 		strings += EFX_ETHTOOL_SW_STAT_COUNT * ETH_GSTRING_LEN;
+		strings += (efx_describe_per_queue_stats(efx, strings) *
+			    ETH_GSTRING_LEN);
 		efx_ptp_describe_stats(efx, strings);
 		break;
 	case ETH_SS_TEST:
@@ -408,6 +441,7 @@ static void efx_ethtool_get_stats(struct net_device *net_dev,
 	const struct efx_sw_stat_desc *stat;
 	struct efx_channel *channel;
 	struct efx_tx_queue *tx_queue;
+	struct efx_rx_queue *rx_queue;
 	int i;
 
 	spin_lock_bh(&efx->stats_lock);
@@ -443,76 +477,26 @@ static void efx_ethtool_get_stats(struct net_device *net_dev,
 
 	spin_unlock_bh(&efx->stats_lock);
 
+	efx_for_each_channel(channel, efx) {
+		if (efx_channel_has_tx_queues(channel)) {
+			*data = 0;
+			efx_for_each_channel_tx_queue(tx_queue, channel) {
+				*data += tx_queue->tx_packets;
+			}
+			data++;
+		}
+	}
+	efx_for_each_channel(channel, efx) {
+		if (efx_channel_has_rx_queue(channel)) {
+			*data = 0;
+			efx_for_each_channel_rx_queue(rx_queue, channel) {
+				*data += rx_queue->rx_packets;
+			}
+			data++;
+		}
+	}
+
 	efx_ptp_update_stats(efx, data);
-}
-
-static int efx_ethtool_set_tso(struct net_device *net_dev, u32 enable)
-{
-	struct efx_nic *efx __attribute__ ((unused)) = netdev_priv(net_dev);
-	unsigned long features;
-
-	features = NETIF_F_TSO;
-	if (efx->type->offload_features & NETIF_F_V6_CSUM)
-		features |= NETIF_F_TSO6;
-
-	if (enable)
-		net_dev->features |= features;
-	else
-		net_dev->features &= ~features;
-
-	return 0;
-}
-
-static int efx_ethtool_set_tx_csum(struct net_device *net_dev, u32 enable)
-{
-	struct efx_nic *efx = netdev_priv(net_dev);
-	unsigned long features = efx->type->offload_features & NETIF_F_ALL_CSUM;
-
-	if (enable)
-		net_dev->features |= features;
-	else
-		net_dev->features &= ~features;
-
-	return 0;
-}
-
-static int efx_ethtool_set_rx_csum(struct net_device *net_dev, u32 enable)
-{
-	struct efx_nic *efx = netdev_priv(net_dev);
-
-	/* No way to stop the hardware doing the checks; we just
-	 * ignore the result.
-	 */
-	efx->rx_checksum_enabled = !!enable;
-
-	return 0;
-}
-
-static u32 efx_ethtool_get_rx_csum(struct net_device *net_dev)
-{
-	struct efx_nic *efx = netdev_priv(net_dev);
-
-	return efx->rx_checksum_enabled;
-}
-
-static int efx_ethtool_set_flags(struct net_device *net_dev, u32 data)
-{
-	struct efx_nic *efx = netdev_priv(net_dev);
-	u32 supported = (efx->type->offload_features &
-			 (ETH_FLAG_RXHASH | ETH_FLAG_NTUPLE));
-	int rc;
-
-	if (data & ~supported)
-		rc = -EINVAL;
-	else
-		rc = ethtool_op_set_flags(net_dev, data);
-	if (rc)
-		return rc;
-
-	if (!(data & ETH_FLAG_NTUPLE))
-		rc = efx->type->filter_clear_rx(efx, EFX_FILTER_PRI_MANUAL);
-
-	return rc;
 }
 
 static void efx_ethtool_self_test(struct net_device *net_dev,
@@ -1182,18 +1166,6 @@ const struct ethtool_ops efx_ethtool_ops = {
 	.set_ringparam		= efx_ethtool_set_ringparam,
 	.get_pauseparam         = efx_ethtool_get_pauseparam,
 	.set_pauseparam         = efx_ethtool_set_pauseparam,
-	.get_rx_csum		= efx_ethtool_get_rx_csum,
-	.set_rx_csum		= efx_ethtool_set_rx_csum,
-	.get_tx_csum		= ethtool_op_get_tx_csum,
-	/* Need to enable/disable IPv6 too */
-	.set_tx_csum		= efx_ethtool_set_tx_csum,
-	.get_sg			= ethtool_op_get_sg,
-	.set_sg			= ethtool_op_set_sg,
-	.get_tso		= ethtool_op_get_tso,
-	/* Need to enable/disable TSO-IPv6 too */
-	.set_tso		= efx_ethtool_set_tso,
-	.get_flags		= ethtool_op_get_flags,
-	.set_flags		= efx_ethtool_set_flags,
 	.get_sset_count		= efx_ethtool_get_sset_count,
 	.self_test		= efx_ethtool_self_test,
 	.get_strings		= efx_ethtool_get_strings,

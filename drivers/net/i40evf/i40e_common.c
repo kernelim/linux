@@ -43,15 +43,15 @@ i40e_status i40e_set_mac_type(struct i40e_hw *hw)
 	if (hw->vendor_id == PCI_VENDOR_ID_INTEL) {
 		switch (hw->device_id) {
 		case I40E_DEV_ID_SFP_XL710:
-		case I40E_DEV_ID_SFP_X710:
 		case I40E_DEV_ID_QEMU:
 		case I40E_DEV_ID_KX_A:
 		case I40E_DEV_ID_KX_B:
 		case I40E_DEV_ID_KX_C:
-		case I40E_DEV_ID_KX_D:
 		case I40E_DEV_ID_QSFP_A:
 		case I40E_DEV_ID_QSFP_B:
 		case I40E_DEV_ID_QSFP_C:
+		case I40E_DEV_ID_10G_BASE_T:
+		case I40E_DEV_ID_20G_KR2:
 			hw->mac.type = I40E_MAC_XL710;
 			break;
 		case I40E_DEV_ID_VF:
@@ -77,13 +77,15 @@ i40e_status i40e_set_mac_type(struct i40e_hw *hw)
  * @mask: debug mask
  * @desc: pointer to admin queue descriptor
  * @buffer: pointer to command buffer
+ * @buf_len: max length of buffer
  *
  * Dumps debug log about adminq command with descriptor contents.
  **/
 void i40evf_debug_aq(struct i40e_hw *hw, enum i40e_debug_mask mask, void *desc,
-		   void *buffer)
+		   void *buffer, u16 buf_len)
 {
 	struct i40e_aq_desc *aq_desc = (struct i40e_aq_desc *)desc;
+	u16 len = le16_to_cpu(aq_desc->datalen);
 	u8 *aq_buffer = (u8 *)buffer;
 	u32 data[4];
 	u32 i = 0;
@@ -93,35 +95,44 @@ void i40evf_debug_aq(struct i40e_hw *hw, enum i40e_debug_mask mask, void *desc,
 
 	i40e_debug(hw, mask,
 		   "AQ CMD: opcode 0x%04X, flags 0x%04X, datalen 0x%04X, retval 0x%04X\n",
-		   aq_desc->opcode, aq_desc->flags, aq_desc->datalen,
-		   aq_desc->retval);
+		   le16_to_cpu(aq_desc->opcode),
+		   le16_to_cpu(aq_desc->flags),
+		   le16_to_cpu(aq_desc->datalen),
+		   le16_to_cpu(aq_desc->retval));
 	i40e_debug(hw, mask, "\tcookie (h,l) 0x%08X 0x%08X\n",
-		   aq_desc->cookie_high, aq_desc->cookie_low);
+		   le32_to_cpu(aq_desc->cookie_high),
+		   le32_to_cpu(aq_desc->cookie_low));
 	i40e_debug(hw, mask, "\tparam (0,1)  0x%08X 0x%08X\n",
-		   aq_desc->params.internal.param0,
-		   aq_desc->params.internal.param1);
+		   le32_to_cpu(aq_desc->params.internal.param0),
+		   le32_to_cpu(aq_desc->params.internal.param1));
 	i40e_debug(hw, mask, "\taddr (h,l)   0x%08X 0x%08X\n",
-		   aq_desc->params.external.addr_high,
-		   aq_desc->params.external.addr_low);
+		   le32_to_cpu(aq_desc->params.external.addr_high),
+		   le32_to_cpu(aq_desc->params.external.addr_low));
 
 	if ((buffer != NULL) && (aq_desc->datalen != 0)) {
 		memset(data, 0, sizeof(data));
 		i40e_debug(hw, mask, "AQ CMD Buffer:\n");
-		for (i = 0; i < le16_to_cpu(aq_desc->datalen); i++) {
+		if (buf_len < len)
+			len = buf_len;
+		for (i = 0; i < len; i++) {
 			data[((i % 16) / 4)] |=
 				((u32)aq_buffer[i]) << (8 * (i % 4));
 			if ((i % 16) == 15) {
 				i40e_debug(hw, mask,
 					   "\t0x%04X  %08X %08X %08X %08X\n",
-					   i - 15, data[0], data[1], data[2],
-					   data[3]);
+					   i - 15, le32_to_cpu(data[0]),
+					   le32_to_cpu(data[1]),
+					   le32_to_cpu(data[2]),
+					   le32_to_cpu(data[3]));
 				memset(data, 0, sizeof(data));
 			}
 		}
 		if ((i % 16) != 0)
 			i40e_debug(hw, mask, "\t0x%04X  %08X %08X %08X %08X\n",
-				   i - (i % 16), data[0], data[1], data[2],
-				   data[3]);
+				   i - (i % 16), le32_to_cpu(data[0]),
+				   le32_to_cpu(data[1]),
+				   le32_to_cpu(data[2]),
+				   le32_to_cpu(data[3]));
 	}
 }
 
@@ -553,6 +564,7 @@ i40e_status i40e_aq_send_msg_to_pf(struct i40e_hw *hw,
 				struct i40e_asq_cmd_details *cmd_details)
 {
 	struct i40e_aq_desc desc;
+	struct i40e_asq_cmd_details details;
 	i40e_status status;
 
 	i40evf_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_send_msg_to_pf);
@@ -567,7 +579,6 @@ i40e_status i40e_aq_send_msg_to_pf(struct i40e_hw *hw,
 		desc.datalen = cpu_to_le16(msglen);
 	}
 	if (!cmd_details) {
-		struct i40e_asq_cmd_details details;
 		memset(&details, 0, sizeof(details));
 		details.async = true;
 		cmd_details = &details;

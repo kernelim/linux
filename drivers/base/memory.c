@@ -538,16 +538,23 @@ static int init_memory_block(struct memory_block **memory,
 }
 
 static int add_memory_section(int nid, struct mem_section *section,
-			unsigned long state, enum mem_add_context context)
+			struct memory_block **mem_p, unsigned long state,
+			enum mem_add_context context)
 {
-	struct memory_block *mem;
+	struct memory_block *mem = NULL;
 	int ret = 0;
 
-	mem = find_memory_block(section);
-	if (mem) {
-		atomic_inc(&mem->section_count);
-		kobject_put(&mem->sysdev.kobj);
+	if (context == BOOT) {
+		if (mem_p) {
+			mem = find_memory_block_hinted(section, *mem_p);
+			*mem_p = mem;
+		}
 	} else
+		mem = find_memory_block(section);
+
+	if (mem)
+		atomic_inc(&mem->section_count);
+	else
 		ret = init_memory_block(&mem, section, state);
 
 	if (!ret) {
@@ -621,7 +628,7 @@ EXPORT_SYMBOL(set_memory_state);
  */
 int register_new_memory(int nid, struct mem_section *section)
 {
-	return add_memory_section(nid, section, MEM_OFFLINE, HOTPLUG);
+	return add_memory_section(nid, section, NULL, MEM_OFFLINE, HOTPLUG);
 }
 
 int unregister_memory_section(struct mem_section *section)
@@ -659,6 +666,7 @@ int __init memory_dev_init(void)
 	int ret;
 	int err;
 	u32 block_sz;
+	struct memory_block *mem = NULL;
 
 	memory_sysdev_class.kset.uevent_ops = &memory_uevent_ops;
 	ret = sysdev_class_register(&memory_sysdev_class);
@@ -675,10 +683,18 @@ int __init memory_dev_init(void)
 	for (i = 0; i < NR_MEM_SECTIONS; i++) {
 		if (!present_section_nr(i))
 			continue;
-		err = add_memory_section(0, __nr_to_section(i), MEM_ONLINE,
+		/* don't need to reuse memory_block if only one per block */
+		err = add_memory_section(0, __nr_to_section(i),
+				 (sections_per_block == 1) ? NULL : &mem,
+					 MEM_ONLINE,
 					 BOOT);
 		if (!ret)
 			ret = err;
+	}
+
+	if (mem) {
+		/* drop ref on add_memory_section() hint */
+		kobject_put(&mem->sysdev.kobj);
 	}
 
 	err = memory_probe_init();

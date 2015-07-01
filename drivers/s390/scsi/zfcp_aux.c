@@ -567,7 +567,9 @@ int zfcp_adapter_enqueue(struct ccw_device *ccw_device)
 		goto erp_thread_failed;
 
 	INIT_WORK(&adapter->stat_work, _zfcp_status_read_scheduler);
-	INIT_WORK(&adapter->scan_work, zfcp_fc_scan_ports);
+	INIT_DELAYED_WORK(&adapter->scan_work, zfcp_fc_scan_ports);
+
+	adapter->next_port_scan = jiffies;
 
 	adapter->service_level.seq_print = zfcp_print_sl;
 

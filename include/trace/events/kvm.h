@@ -7,6 +7,25 @@
 #define TRACE_SYSTEM kvm
 #define TRACE_INCLUDE_FILE kvm
 
+TRACE_EVENT(kvm_vcpu_wakeup,
+	    TP_PROTO(__u64 ns, bool waited),
+	    TP_ARGS(ns, waited),
+
+	TP_STRUCT__entry(
+		__field(	__u64,		ns		)
+		__field(	bool,		waited		)
+	),
+
+	TP_fast_assign(
+		__entry->ns		= ns;
+		__entry->waited		= waited;
+	),
+
+	TP_printk("%s time %lld ns",
+		  __entry->waited ? "wait" : "poll",
+		  __entry->ns)
+);
+
 #if defined(__KVM_HAVE_IOAPIC)
 TRACE_EVENT(kvm_set_irq,
 	TP_PROTO(unsigned int gsi, int level, int irq_source_id),

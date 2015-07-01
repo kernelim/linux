@@ -1765,7 +1765,7 @@ static int igbvf_set_mac(struct net_device *netdev, void *p)
 		return -EADDRNOTAVAIL;
 
 	memcpy(netdev->dev_addr, addr->sa_data, netdev->addr_len);
-	netdev->addr_assign_type &= ~NET_ADDR_RANDOM;
+	netdev->addr_assign_type = NET_ADDR_PERM;
 
 	return 0;
 }
@@ -1924,7 +1924,8 @@ static void igbvf_watchdog_task(struct work_struct *work)
 
 static int igbvf_tso(struct igbvf_adapter *adapter,
                      struct igbvf_ring *tx_ring,
-                     struct sk_buff *skb, u32 tx_flags, u8 *hdr_len)
+		     struct sk_buff *skb, u32 tx_flags, u8 *hdr_len,
+		     __be16 protocol)
 {
 	struct e1000_adv_tx_context_desc *context_desc;
 	struct igbvf_buffer *buffer_info;
@@ -1944,7 +1945,7 @@ static int igbvf_tso(struct igbvf_adapter *adapter,
 	l4len = tcp_hdrlen(skb);
 	*hdr_len += l4len;
 
-	if (skb->protocol == htons(ETH_P_IP)) {
+	if (protocol == htons(ETH_P_IP)) {
 		struct iphdr *iph = ip_hdr(skb);
 		iph->tot_len = 0;
 		iph->check = 0;
@@ -1975,7 +1976,7 @@ static int igbvf_tso(struct igbvf_adapter *adapter,
 	/* ADV DTYP TUCMD MKRLOC/ISCSIHEDLEN */
 	tu_cmd |= (E1000_TXD_CMD_DEXT | E1000_ADVTXD_DTYP_CTXT);
 
-	if (skb->protocol == htons(ETH_P_IP))
+	if (protocol == htons(ETH_P_IP))
 		tu_cmd |= E1000_ADVTXD_TUCMD_IPV4;
 	tu_cmd |= E1000_ADVTXD_TUCMD_L4T_TCP;
 
@@ -2001,7 +2002,8 @@ static int igbvf_tso(struct igbvf_adapter *adapter,
 
 static inline bool igbvf_tx_csum(struct igbvf_adapter *adapter,
                                  struct igbvf_ring *tx_ring,
-                                 struct sk_buff *skb, u32 tx_flags)
+				 struct sk_buff *skb, u32 tx_flags,
+				 __be16 protocol)
 {
 	struct e1000_adv_tx_context_desc *context_desc;
 	unsigned int i;
@@ -2028,7 +2030,7 @@ static inline bool igbvf_tx_csum(struct igbvf_adapter *adapter,
 		tu_cmd |= (E1000_TXD_CMD_DEXT | E1000_ADVTXD_DTYP_CTXT);
 
 		if (skb->ip_summed == CHECKSUM_PARTIAL) {
-			switch (skb->protocol) {
+			switch (protocol) {
 			case htons(ETH_P_IP):
 				tu_cmd |= E1000_ADVTXD_TUCMD_IPV4;
 				if (ip_hdr(skb)->protocol == IPPROTO_TCP)
@@ -2231,6 +2233,7 @@ static netdev_tx_t igbvf_xmit_frame_ring_adv(struct sk_buff *skb,
 	u8 hdr_len = 0;
 	int count = 0;
 	int tso = 0;
+	__be16 protocol = vlan_get_protocol(skb);
 
 	if (test_bit(__IGBVF_DOWN, &adapter->state)) {
 		dev_kfree_skb_any(skb);
@@ -2259,13 +2262,13 @@ static netdev_tx_t igbvf_xmit_frame_ring_adv(struct sk_buff *skb,
 		tx_flags |= (vlan_tx_tag_get(skb) << IGBVF_TX_FLAGS_VLAN_SHIFT);
 	}
 
-	if (skb->protocol == htons(ETH_P_IP))
+	if (protocol == htons(ETH_P_IP))
 		tx_flags |= IGBVF_TX_FLAGS_IPV4;
 
 	first = tx_ring->next_to_use;
 
 	tso = skb_is_gso(skb) ?
-		igbvf_tso(adapter, tx_ring, skb, tx_flags, &hdr_len) : 0;
+		igbvf_tso(adapter, tx_ring, skb, tx_flags, &hdr_len, protocol) : 0;
 	if (unlikely(tso < 0)) {
 		dev_kfree_skb_any(skb);
 		return NETDEV_TX_OK;
@@ -2273,7 +2276,7 @@ static netdev_tx_t igbvf_xmit_frame_ring_adv(struct sk_buff *skb,
 
 	if (tso)
 		tx_flags |= IGBVF_TX_FLAGS_TSO;
-	else if (igbvf_tx_csum(adapter, tx_ring, skb, tx_flags) &&
+	else if (igbvf_tx_csum(adapter, tx_ring, skb, tx_flags, protocol) &&
 	         (skb->ip_summed == CHECKSUM_PARTIAL))
 		tx_flags |= IGBVF_TX_FLAGS_CSUM;
 
@@ -2759,7 +2762,7 @@ static int __devinit igbvf_probe(struct pci_dev *pdev,
 
 	/* workaround for RHEL6 */
 	if (is_local_ether_addr(netdev->dev_addr))
-		netdev->addr_assign_type |= NET_ADDR_RANDOM;
+		netdev->addr_assign_type = NET_ADDR_RANDOM;
 
 	memcpy(netdev->perm_addr, netdev->dev_addr, netdev->addr_len);
 
@@ -2866,7 +2869,7 @@ static struct pci_error_handlers igbvf_err_handler = {
 	.resume = igbvf_io_resume,
 };
 
-static DEFINE_PCI_DEVICE_TABLE(igbvf_pci_tbl) = {
+static const struct pci_device_id igbvf_pci_tbl[] = {
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_82576_VF), board_vf },
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_I350_VF), board_i350_vf },
 	{ } /* terminate list */

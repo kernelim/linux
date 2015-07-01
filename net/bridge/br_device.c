@@ -57,7 +57,7 @@ netdev_tx_t br_dev_xmit(struct sk_buff *skb, struct net_device *dev)
 
 		mdst = br_mdb_get(br, skb);
 		if ((mdst || BR_INPUT_SKB_CB(skb)->mrouters_only) &&
-		    br_multicast_querier_exists(br))
+		    br_multicast_querier_exists(br, eth_hdr(skb)))
 			br_multicast_deliver(mdst, skb);
 		else
 			br_flood_deliver(br, skb);
@@ -191,7 +191,8 @@ static void br_netpoll_cleanup(struct net_device *dev)
 	}
 }
 
-static int br_netpoll_setup(struct net_device *dev, struct netpoll_info *ni)
+static int br_netpoll_setup(struct net_device *dev, struct netpoll_info *ni,
+			    gfp_t gfp)
 {
 	struct net_bridge *br = netdev_priv(dev);
 	struct net_bridge_port *p, *n;
@@ -201,8 +202,7 @@ static int br_netpoll_setup(struct net_device *dev, struct netpoll_info *ni)
 	list_for_each_entry_safe(p, n, &br->port_list, list) {
 		if (!p->dev)
 			continue;
-
-		err = br_netpoll_enable(p);
+		err = br_netpoll_enable(p, gfp);
 		if (err)
 			goto fail;
 	}
@@ -215,19 +215,19 @@ fail:
 	goto out;
 }
 
-int br_netpoll_enable(struct net_bridge_port *p)
+int br_netpoll_enable(struct net_bridge_port *p, gfp_t gfp)
 {
 	struct netpoll *np;
 	int err = 0;
 
-	np = kzalloc(sizeof(*p->np), GFP_KERNEL);
+	np = kzalloc(sizeof(*p->np), gfp);
 	err = -ENOMEM;
 	if (!np)
 		goto out;
 
 	np->dev = p->dev;
 
-	err = __netpoll_setup(np);
+	err = __netpoll_setup(np, p->dev, gfp);
 	if (err) {
 		kfree(np);
 		goto out;

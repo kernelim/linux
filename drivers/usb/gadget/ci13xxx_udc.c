@@ -2790,7 +2790,7 @@ static void __devexit ci13xxx_pci_remove(struct pci_dev *pdev)
  *
  * Check "pci.h" for details
  */
-static DEFINE_PCI_DEVICE_TABLE(ci13xxx_pci_id_table) = {
+static const struct pci_device_id ci13xxx_pci_id_table[] = {
 	{ PCI_DEVICE(0x153F, 0x1004) },
 	{ PCI_DEVICE(0x153F, 0x1006) },
 	{ 0, 0, 0, 0, 0, 0, 0 /* end: all zeroes */ }

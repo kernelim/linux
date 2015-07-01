@@ -3,6 +3,7 @@
 # Direct Rendering Infrastructure (DRI) in XFree86 4.1.0 and higher.
 
 ccflags-y = -Iinclude/drm
+ccflags-y += -include drm/drm_backport.h
 savage-y := savage_drv.o savage_bci.o savage_state.o
 
 obj-$(CONFIG_DRM_SAVAGE)+= savage.o

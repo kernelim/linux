@@ -89,6 +89,7 @@ struct acpi_power_reference {
 
 struct acpi_power_resource {
 	struct acpi_device * device;
+	struct list_head list_node;
 	acpi_bus_id name;
 	u32 system_level;
 	u32 order;
@@ -96,7 +97,8 @@ struct acpi_power_resource {
 	struct list_head reference;
 };
 
-static struct list_head acpi_power_resource_list;
+static LIST_HEAD(acpi_power_resource_list);
+static DEFINE_MUTEX(power_resource_list_lock);
 
 static const struct file_operations acpi_power_fops = {
 	.owner = THIS_MODULE,
@@ -600,15 +602,55 @@ static int acpi_power_open_fs(struct inode *inode, struct file *file)
 	return single_open(file, acpi_power_seq_show, PDE(inode)->data);
 }
 
+static int acpi_power_name_exists(struct acpi_device *device)
+{
+	struct acpi_power_resource *resource;
+
+
+	mutex_lock(&power_resource_list_lock);
+	list_for_each_entry(resource, &acpi_power_resource_list, list_node) {
+		if (resource == acpi_driver_data(device))
+			continue;
+		if (!strcmp(acpi_device_bid(device), resource->name)) {
+			mutex_unlock(&power_resource_list_lock);
+			return -EEXIST;
+		}
+	}
+	mutex_unlock(&power_resource_list_lock);
+
+	return 0;
+}
+
 static int acpi_power_add_fs(struct acpi_device *device)
 {
 	struct proc_dir_entry *entry = NULL;
+	struct acpi_buffer name_buffer = { ACPI_ALLOCATE_BUFFER, NULL };
 
 
 	if (!device)
 		return -EINVAL;
 
 	if (!acpi_device_dir(device)) {
+
+		/*
+		 * Avoid attempt to create a duplicate proc fs entry under
+		 * /proc/acpi/power_resource if another power resource has
+		 * the same simple name.
+		 */
+		if (acpi_power_name_exists(device)) {
+			pr_info(PREFIX
+				"Skipped creation of duplicate /proc/acpi/%s/%s entry\n",
+				ACPI_POWER_CLASS, acpi_device_bid(device));
+			acpi_get_name(device->handle, ACPI_FULL_PATHNAME,
+				      &name_buffer);
+			ACPI_DEBUG_PRINT((ACPI_DB_INFO,
+					  "Duplicate power resource [%s] for %s\n",
+					  acpi_device_bid(device),
+					  (char *)name_buffer.pointer));
+			kfree(name_buffer.pointer);
+			return 0;
+		}
+
 		acpi_device_dir(device) = proc_mkdir(acpi_device_bid(device),
 						     acpi_power_dir);
 		if (!acpi_device_dir(device))
@@ -697,6 +739,10 @@ static int acpi_power_add(struct acpi_device *device)
 	printk(KERN_INFO PREFIX "%s [%s] (%s)\n", acpi_device_name(device),
 	       acpi_device_bid(device), state ? "on" : "off");
 
+	mutex_lock(&power_resource_list_lock);
+	list_add(&resource->list_node, &acpi_power_resource_list);
+	mutex_unlock(&power_resource_list_lock);
+
       end:
 	if (result)
 		kfree(resource);
@@ -724,6 +770,10 @@ static int acpi_power_remove(struct acpi_device *device, int type)
 		kfree(ref);
 	}
 	mutex_unlock(&resource->resource_lock);
+
+	mutex_lock(&power_resource_list_lock);
+	list_del(&resource->list_node);
+	mutex_unlock(&power_resource_list_lock);
 
 	kfree(resource);
 
@@ -761,8 +811,6 @@ static int acpi_power_resume(struct acpi_device *device)
 int __init acpi_power_init(void)
 {
 	int result = 0;
-
-	INIT_LIST_HEAD(&acpi_power_resource_list);
 
 	acpi_power_dir = proc_mkdir(ACPI_POWER_CLASS, acpi_root_dir);
 	if (!acpi_power_dir)

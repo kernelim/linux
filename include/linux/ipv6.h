@@ -342,6 +342,7 @@ struct ipv6_pinfo {
 	} rxopt;
 
 	/* sockopt flags */
+#ifdef __GENKSYMS__
 	__u8			recverr:1,
 	                        sndflow:1,
 				pmtudisc:2,
@@ -350,6 +351,16 @@ struct ipv6_pinfo {
 						 * 010: prefer public address
 						 * 100: prefer care-of address
 						 */
+#else /* __GENKSYMS__ */
+	__u16			recverr:1,
+	                        sndflow:1,
+				pmtudisc:3,
+				ipv6only:1,
+				srcprefs:3;	/* 001: prefer temporary address
+						 * 010: prefer public address
+						 * 100: prefer care-of address
+						 */
+#endif
 	__u8			tclass;
 
 	__u32			dst_cookie;

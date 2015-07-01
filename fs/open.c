@@ -687,6 +687,10 @@ static struct file *__dentry_open(struct dentry *dentry, struct vfsmount *mnt,
 			file_take_write(f);
 	}
 
+	/* POSIX.1-2008/SUSv4 Section XSI 2.9.7 */
+	if (S_ISREG(inode->i_mode))
+		f->f_mode |= FMODE_ATOMIC_POS;
+
 	f->f_mapping = inode->i_mapping;
 	f->f_path.dentry = dentry;
 	f->f_path.mnt = mnt;

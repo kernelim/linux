@@ -51,11 +51,12 @@ struct event_constraint {
 	int	flags;
 };
 /*
- * struct event_constraint flags
+ * struct hw_perf_event.flags flags
  */
 #define PERF_X86_EVENT_PEBS_LDLAT	0x1 /* ld+ldlat data address sampling */
 #define PERF_X86_EVENT_PEBS_ST		0x2 /* st data address sampling */
 #define PERF_X86_EVENT_PEBS_ST_HSW	0x4 /* haswell style st data sampling */
+#define PERF_X86_EVENT_COMMITTED	0x8 /* event passed commit_txn */
 
 struct amd_nb {
 	int nb_id;  /* NorthBridge id */
@@ -97,9 +98,11 @@ struct cpu_hw_events {
 	unsigned long		running[BITS_TO_LONGS(X86_PMC_IDX_MAX)];
 	int			enabled;
 
-	int			n_events;
-	int			n_added;
-	int			n_txn;
+	int			n_events; /* the # of events in the below arrays */
+	int			n_added;  /* the # last events in the below arrays;
+					     they've never been enabled yet */
+	int			n_txn;    /* the # last events in the below arrays;
+					     added in the current transaction */
 	int			assign[X86_PMC_IDX_MAX]; /* event to counter assignment */
 	u64			tags[X86_PMC_IDX_MAX];
 	struct perf_event	*event_list[X86_PMC_IDX_MAX]; /* in enabled order */
@@ -230,11 +233,20 @@ struct cpu_hw_events {
 	__EVENT_CONSTRAINT(c, n, INTEL_ARCH_EVENT_MASK, \
 			  HWEIGHT(n), 0, PERF_X86_EVENT_PEBS_ST_HSW)
 
-#define EVENT_CONSTRAINT_END		\
-	EVENT_CONSTRAINT(0, 0, 0)
+/*
+ * We define the end marker as having a weight of -1
+ * to enable blacklisting of events using a counter bitmask
+ * of zero and thus a weight of zero.
+ * The end marker has a weight that cannot possibly be
+ * obtained from counting the bits in the bitmask.
+ */
+#define EVENT_CONSTRAINT_END { .weight = -1 }
 
+/*
+ * Check for end marker with weight == -1
+ */
 #define for_each_event_constraint(e, c)	\
-	for ((e) = (c); (e)->weight; (e)++)
+	for ((e) = (c); (e)->weight != -1; (e)++)
 
 /*
  * Per register state.
@@ -363,6 +375,7 @@ struct x86_pmu {
 	struct x86_pmu_quirk *quirks;
 	int		perfctr_second_write;
 	bool		late_ack;
+	unsigned	(*limit_period)(struct perf_event *event, unsigned l);
 
 	/*
 	 * sysfs attrs

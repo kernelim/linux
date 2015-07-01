@@ -96,8 +96,6 @@ static int filelayout_async_handle_error(struct rpc_task *task,
 	/* MDS state errors */
 	case -NFS4ERR_DELEG_REVOKED:
 	case -NFS4ERR_ADMIN_REVOKED:
-	case -NFS4ERR_BAD_STATEID:
-		nfs_remove_bad_delegation(state->inode);
 	case -NFS4ERR_OPENMODE:
 		if (nfs4_schedule_stateid_recovery(mds_server, state) < 0)
 			goto out_bad_stateid;
@@ -400,7 +398,6 @@ filelayout_read_pagelist(struct nfs_read_data *data)
 	loff_t offset = data->args.offset;
 	u32 j, idx;
 	struct nfs_fh *fh;
-	int status;
 
 	dprintk("--> %s ino %lu pgbase %u req %Zu@%llu\n",
 		__func__, hdr->inode->i_ino,
@@ -432,9 +429,8 @@ filelayout_read_pagelist(struct nfs_read_data *data)
 	data->mds_offset = offset;
 
 	/* Perform an asynchronous read to ds */
-	status = nfs_initiate_read(ds->ds_clp->cl_rpcclient, data,
+	nfs_initiate_read(ds->ds_clp->cl_rpcclient, data,
 				   &filelayout_read_call_ops);
-	BUG_ON(status != 0);
 	return PNFS_ATTEMPTED;
 }
 
@@ -448,7 +444,6 @@ filelayout_write_pagelist(struct nfs_write_data *data, int sync)
 	loff_t offset = data->args.offset;
 	u32 j, idx;
 	struct nfs_fh *fh;
-	int status;
 
 	if (test_bit(NFS_DEVICEID_INVALID, &FILELAYOUT_DEVID_NODE(lseg)->flags))
 		return PNFS_NOT_ATTEMPTED;
@@ -480,9 +475,8 @@ filelayout_write_pagelist(struct nfs_write_data *data, int sync)
 	data->args.offset = filelayout_get_dserver_offset(lseg, offset);
 
 	/* Perform an asynchronous write */
-	status = nfs_initiate_write(ds->ds_clp->cl_rpcclient, data,
+	nfs_initiate_write(ds->ds_clp->cl_rpcclient, data,
 				    &filelayout_write_call_ops, sync);
-	BUG_ON(status != 0);
 	return PNFS_ATTEMPTED;
 }
 
@@ -522,8 +516,8 @@ filelayout_check_layout(struct pnfs_layout_hdr *lo,
 		goto out;
 	}
 
-	if (fl->stripe_unit % PAGE_SIZE) {
-		dprintk("%s Stripe unit (%u) not page aligned\n",
+	if (!fl->stripe_unit || fl->stripe_unit % PAGE_SIZE) {
+		dprintk("%s Invalid stripe unit (%u)\n",
 			__func__, fl->stripe_unit);
 		goto out;
 	}
@@ -815,7 +809,7 @@ void
 filelayout_pg_init_read(struct nfs_pageio_descriptor *pgio,
 			struct nfs_page *req)
 {
-	BUG_ON(pgio->pg_lseg != NULL);
+	WARN_ON_ONCE(pgio->pg_lseg != NULL);
 
 	if (req->wb_offset != req->wb_pgbase) {
 		/*
@@ -845,7 +839,7 @@ filelayout_pg_init_write(struct nfs_pageio_descriptor *pgio,
 	struct nfs_commit_info cinfo;
 	int status;
 
-	BUG_ON(pgio->pg_lseg != NULL);
+	WARN_ON_ONCE(pgio->pg_lseg != NULL);
 
 	if (req->wb_offset != req->wb_pgbase)
 		goto out_mds;
@@ -939,6 +933,7 @@ filelayout_choose_commit_list(struct nfs_page *req,
 	 */
 	j = nfs4_fl_calc_j_index(lseg, req_offset(req));
 	i = select_bucket_index(fl, j);
+	spin_lock(cinfo->lock);
 	buckets = cinfo->ds->buckets;
 	list = &buckets[i].written;
 	if (list_empty(list)) {
@@ -952,6 +947,7 @@ filelayout_choose_commit_list(struct nfs_page *req,
 	}
 	set_bit(PG_COMMIT_TO_DS, &req->wb_flags);
 	cinfo->ds->nwritten++;
+	spin_unlock(cinfo->lock);
 	return list;
 }
 
@@ -1042,6 +1038,7 @@ transfer_commit_list(struct list_head *src, struct list_head *dst,
 	return ret;
 }
 
+/* Note called with cinfo->lock held. */
 static int
 filelayout_scan_ds_commit_list(struct pnfs_commit_bucket *bucket,
 			       struct nfs_commit_info *cinfo,
@@ -1086,20 +1083,23 @@ static void filelayout_recover_commit_reqs(struct list_head *dst,
 					   struct nfs_commit_info *cinfo)
 {
 	struct pnfs_commit_bucket *b;
+	struct pnfs_layout_segment *freeme;
 	int i;
 
-	/* NOTE cinfo->lock is NOT held, relying on fact that this is
-	 * only called on single thread per dreq.
-	 * Can't take the lock because need to do put_lseg
-	 */
+restart:
+	spin_lock(cinfo->lock);
 	for (i = 0, b = cinfo->ds->buckets; i < cinfo->ds->nbuckets; i++, b++) {
 		if (transfer_commit_list(&b->written, dst, cinfo, 0)) {
-			BUG_ON(!list_empty(&b->written));
-			put_lseg(b->wlseg);
+			spin_unlock(cinfo->lock);
+			freeme = b->wlseg;
 			b->wlseg = NULL;
+			spin_unlock(cinfo->lock);
+			put_lseg(freeme);
+			goto restart;
 		}
 	}
 	cinfo->ds->nwritten = 0;
+	spin_unlock(cinfo->lock);
 }
 
 static unsigned int
@@ -1110,6 +1110,7 @@ alloc_ds_commits(struct nfs_commit_info *cinfo, struct list_head *list)
 	struct nfs_commit_data *data;
 	int i, j;
 	unsigned int nreq = 0;
+	struct pnfs_layout_segment *freeme;
 
 	fl_cinfo = cinfo->ds;
 	bucket = fl_cinfo->buckets;
@@ -1120,8 +1121,10 @@ alloc_ds_commits(struct nfs_commit_info *cinfo, struct list_head *list)
 		if (!data)
 			break;
 		data->ds_commit_index = i;
+		spin_lock(cinfo->lock);
 		data->lseg = bucket->clseg;
 		bucket->clseg = NULL;
+		spin_unlock(cinfo->lock);
 		list_add(&data->pages, list);
 		nreq++;
 	}
@@ -1131,8 +1134,11 @@ alloc_ds_commits(struct nfs_commit_info *cinfo, struct list_head *list)
 		if (list_empty(&bucket->committing))
 			continue;
 		nfs_retry_commit(&bucket->committing, bucket->clseg, cinfo);
-		put_lseg(bucket->clseg);
+		spin_lock(cinfo->lock);
+		freeme = bucket->clseg;
 		bucket->clseg = NULL;
+		spin_unlock(cinfo->lock);
+		put_lseg(freeme);
 	}
 	/* Caller will clean up entries put on list */
 	return nreq;

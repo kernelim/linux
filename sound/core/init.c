@@ -109,11 +109,11 @@ static inline int init_info_for_card(struct snd_card *card)
 	struct snd_info_entry *entry;
 
 	if ((err = snd_info_card_register(card)) < 0) {
-		snd_printd("unable to create card info\n");
+		dev_dbg(card->dev, "unable to create card info\n");
 		return err;
 	}
 	if ((entry = snd_info_create_card_entry(card, "id", card->proc_root)) == NULL) {
-		snd_printd("unable to create card entry\n");
+		dev_dbg(card->dev, "unable to create card entry\n");
 		return err;
 	}
 	entry->c.text.read = snd_card_id_read;
@@ -129,7 +129,8 @@ static inline int init_info_for_card(struct snd_card *card)
 #endif
 
 /**
- *  snd_card_create - create and initialize a soundcard structure
+ *  snd_card_new - create and initialize a soundcard structure
+ *  @parent: the parent device object
  *  @idx: card index (address) [0 ... (SNDRV_CARDS-1)]
  *  @xid: card identification (ASCII string)
  *  @module: top level module for locking
@@ -144,7 +145,7 @@ static inline int init_info_for_card(struct snd_card *card)
  *
  *  Returns zero if successful or a negative error code.
  */
-int snd_card_create(int idx, const char *xid,
+int snd_card_new(struct device *parent, int idx, const char *xid,
 		    struct module *module, int extra_size,
 		    struct snd_card **card_ret)
 {
@@ -193,7 +194,7 @@ int snd_card_create(int idx, const char *xid,
 		err = -ENODEV;
 	if (err < 0) {
 		mutex_unlock(&snd_card_mutex);
-		snd_printk(KERN_ERR "cannot find the slot for index %d (range 0-%i), error: %d\n",
+		dev_err(parent, "cannot find the slot for index %d (range 0-%i), error: %d\n",
 			 idx, snd_ecards_limit - 1, err);
 		goto __error;
 	}
@@ -201,6 +202,7 @@ int snd_card_create(int idx, const char *xid,
 	if (idx >= snd_ecards_limit)
 		snd_ecards_limit = idx + 1; /* increase the limit */
 	mutex_unlock(&snd_card_mutex);
+	card->dev = parent;
 	card->number = idx;
 	card->module = module;
 	INIT_LIST_HEAD(&card->devices);
@@ -219,12 +221,12 @@ int snd_card_create(int idx, const char *xid,
 	/* snd_cards_bitmask and snd_cards are set with snd_card_register */
 	err = snd_ctl_create(card);
 	if (err < 0) {
-		snd_printk(KERN_ERR "unable to register control minors\n");
+		dev_err(parent, "unable to register control minors\n");
 		goto __error;
 	}
 	err = snd_info_card_create(card);
 	if (err < 0) {
-		snd_printk(KERN_ERR "unable to create card info\n");
+		dev_err(parent, "unable to create card info\n");
 		goto __error_ctl;
 	}
 	if (extra_size > 0)
@@ -237,6 +239,14 @@ int snd_card_create(int idx, const char *xid,
       __error:
 	kfree(card);
   	return err;
+}
+EXPORT_SYMBOL(snd_card_new);
+
+int snd_card_create(int idx, const char *id,
+		    struct module *module, int extra_size,
+		    struct snd_card **card_ret)
+{
+	return snd_card_new(NULL, idx, id, module, extra_size, card_ret);
 }
 EXPORT_SYMBOL(snd_card_create);
 
@@ -389,7 +399,7 @@ int snd_card_disconnect(struct snd_card *card)
 	/* notify all devices that we are disconnected */
 	err = snd_device_disconnect_all(card);
 	if (err < 0)
-		snd_printk(KERN_ERR "not all devices for card %i can be disconnected\n", card->number);
+		dev_err(card->dev, "not all devices for card %i can be disconnected\n", card->number);
 
 	snd_info_card_disconnect(card);
 #ifndef CONFIG_SYSFS_DEPRECATED
@@ -424,22 +434,22 @@ static int snd_card_do_free(struct snd_card *card)
 		snd_mixer_oss_notify_callback(card, SND_MIXER_OSS_NOTIFY_FREE);
 #endif
 	if (snd_device_free_all(card, SNDRV_DEV_CMD_PRE) < 0) {
-		snd_printk(KERN_ERR "unable to free all devices (pre)\n");
+		dev_err(card->dev, "unable to free all devices (pre)\n");
 		/* Fatal, but this situation should never occur */
 	}
 	if (snd_device_free_all(card, SNDRV_DEV_CMD_NORMAL) < 0) {
-		snd_printk(KERN_ERR "unable to free all devices (normal)\n");
+		dev_err(card->dev, "unable to free all devices (normal)\n");
 		/* Fatal, but this situation should never occur */
 	}
 	if (snd_device_free_all(card, SNDRV_DEV_CMD_POST) < 0) {
-		snd_printk(KERN_ERR "unable to free all devices (post)\n");
+		dev_err(card->dev, "unable to free all devices (post)\n");
 		/* Fatal, but this situation should never occur */
 	}
 	if (card->private_free)
 		card->private_free(card);
 	snd_info_free_entry(card->proc_id);
 	if (snd_info_card_free(card) < 0) {
-		snd_printk(KERN_WARNING "unable to free card info\n");
+		dev_warn(card->dev, "unable to free card info\n");
 		/* Not fatal error */
 	}
 	kfree(card);
@@ -517,8 +527,8 @@ static void snd_card_set_id_no_lock(struct snd_card *card, const char *nid)
 
 	while (1) {
 	      	if (loops-- == 0) {
-			snd_printk(KERN_ERR "unable to set card id (%s)\n", id);
-      			strcpy(card->id, card->proc_root->name);
+			dev_err(card->dev, "unable to set card id (%s)\n", id);
+      			strlcpy(card->id, card->proc_root->name, sizeof(card->id));
       			return;
       		}
 	      	if (!snd_info_check_reserved_words(id))
@@ -904,7 +914,7 @@ int snd_card_file_remove(struct snd_card *card, struct file *file)
 			snd_card_do_free(card);
 	}
 	if (!found) {
-		snd_printk(KERN_ERR "ALSA card file remove problem (%p)\n", file);
+		dev_err(card->dev, "card file remove problem (%p)\n", file);
 		return -ENOENT;
 	}
 	kfree(found);

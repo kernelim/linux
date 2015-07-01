@@ -250,13 +250,11 @@ static inline int snd_register_device(int type, struct snd_card *card, int dev,
 
 int snd_unregister_device(int type, struct snd_card *card, int dev);
 void *snd_lookup_minor_data(unsigned int minor, int type);
-int snd_add_device_sysfs_file(int type, struct snd_card *card, int dev,
-			      struct device_attribute *attr);
+struct device *snd_get_device(int type, struct snd_card *card, int dev);
 
 #ifdef CONFIG_SND_OSSEMUL
 int snd_register_oss_device(int type, struct snd_card *card, int dev,
-			    const struct file_operations *f_ops, void *private_data,
-			    const char *name);
+			    const struct file_operations *f_ops, void *private_data);
 int snd_unregister_oss_device(int type, struct snd_card *card, int dev);
 void *snd_lookup_oss_minor_data(unsigned int minor, int type);
 #endif
@@ -289,6 +287,10 @@ int snd_card_locked(int card);
 #define SND_MIXER_OSS_NOTIFY_FREE	2
 extern int (*snd_mixer_oss_notify_callback)(struct snd_card *card, int cmd);
 #endif
+
+int snd_card_new(struct device *parent, int idx, const char *xid,
+		 struct module *module, int extra_size,
+		 struct snd_card **card_ret);
 
 int snd_card_create(int idx, const char *id,
 		    struct module *module, int extra_size,
@@ -400,8 +402,11 @@ void __snd_printk(unsigned int level, const char *file, int line,
 
 #else /* !CONFIG_SND_DEBUG */
 
-#define snd_printd(fmt, args...)	do { } while (0)
-#define _snd_printd(level, fmt, args...) do { } while (0)
+__printf(1, 2)
+static inline void snd_printd(const char *format, ...) {}
+__printf(2, 3)
+static inline void _snd_printd(int level, const char *format, ...) {}
+
 #define snd_BUG()			do { } while (0)
 static inline int __snd_bug_on(int cond)
 {
@@ -422,7 +427,8 @@ static inline int __snd_bug_on(int cond)
 #define snd_printdd(format, args...) \
 	__snd_printk(2, __FILE__, __LINE__, format, ##args)
 #else
-#define snd_printdd(format, args...)	do { } while (0)
+__printf(1, 2)
+static inline void snd_printdd(const char *format, ...) {}
 #endif
 
 
@@ -459,6 +465,7 @@ struct snd_pci_quirk {
 #define SND_PCI_QUIRK_MASK(vend, mask, dev, xname, val)			\
 	{_SND_PCI_QUIRK_ID_MASK(vend, mask, dev),			\
 			.value = (val), .name = (xname)}
+#define snd_pci_quirk_name(q)	((q)->name)
 #else
 #define SND_PCI_QUIRK(vend,dev,xname,val) \
 	{_SND_PCI_QUIRK_ID(vend, dev), .value = (val)}
@@ -466,6 +473,7 @@ struct snd_pci_quirk {
 	{_SND_PCI_QUIRK_ID_MASK(vend, mask, dev), .value = (val)}
 #define SND_PCI_QUIRK_VENDOR(vend, xname, val)			\
 	{_SND_PCI_QUIRK_ID_MASK(vend, 0, 0), .value = (val)}
+#define snd_pci_quirk_name(q)	""
 #endif
 
 const struct snd_pci_quirk *

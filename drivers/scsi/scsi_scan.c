@@ -1423,9 +1423,9 @@ static int scsi_report_lun_scan(struct scsi_target *starget, int bflags,
 
 	num_luns = (length / sizeof(struct scsi_lun));
 	if (num_luns > max_scsi_report_luns) {
-		printk(KERN_WARNING "scsi: On %s only %d (max_scsi_report_luns)"
+		printk(KERN_WARNING "scsi: On %s only %d (max_report_luns)"
 		       " of %d luns reported, try increasing"
-		       " max_scsi_report_luns.\n", devname,
+		       " max_report_luns.\n", devname,
 		       max_scsi_report_luns, num_luns);
 		num_luns = max_scsi_report_luns;
 	}
@@ -1697,6 +1697,9 @@ static void scsi_sysfs_add_devices(struct Scsi_Host *shost)
 	shost_for_each_device(sdev, shost) {
 		/* target removed before the device could be added */
 		if (sdev->sdev_state == SDEV_DEL)
+			continue;
+		/* If device is already visible, skip adding it to sysfs */
+		if (sdev->is_visible)
 			continue;
 		if (!scsi_host_scan_allowed(shost) ||
 		    scsi_sysfs_add_sdev(sdev) != 0)

@@ -521,7 +521,7 @@ struct lpc_ich_info lpc_chipset_info[] __devinitdata = {
  * pci_driver, because the I/O Controller Hub has also other
  * functions that probably will be registered by other drivers.
  */
-static DEFINE_PCI_DEVICE_TABLE(lpc_ich_ids) = {
+static const struct pci_device_id lpc_ich_ids[] = {
 	{ PCI_VDEVICE(INTEL, 0x2410), LPC_ICH},
 	{ PCI_VDEVICE(INTEL, 0x2420), LPC_ICH0},
 	{ PCI_VDEVICE(INTEL, 0x2440), LPC_ICH2},

@@ -1,6 +1,12 @@
 #
 # Timer subsystem related configuration options
 #
+
+# Clocksources require validation of the clocksource against the last
+# cycle update - x86/TSC misfeature
+config CLOCKSOURCE_VALIDATE_LAST_CYCLE
+	bool
+
 config TICK_ONESHOT
 	bool
 
@@ -27,3 +33,5 @@ config GENERIC_CLOCKEVENTS_BUILD
 	default y
 	depends on GENERIC_CLOCKEVENTS || GENERIC_CLOCKEVENTS_MIGR
 
+config GENERIC_CLOCKEVENTS_MIN_ADJUST
+	bool

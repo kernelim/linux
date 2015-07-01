@@ -285,14 +285,6 @@ static struct ctl_table ipv4_table[] = {
 		.extra2		= &init_net,
 	},
 	{
-		.ctl_name	= NET_IPV4_NO_PMTU_DISC,
-		.procname	= "ip_no_pmtu_disc",
-		.data		= &ipv4_config.no_pmtu_disc,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
 		.ctl_name	= NET_IPV4_NONLOCAL_BIND,
 		.procname	= "ip_nonlocal_bind",
 		.data		= &sysctl_ip_nonlocal_bind,
@@ -912,6 +904,21 @@ static struct ctl_table ipv4_net_table[] = {
 		.mode		= 0644,
 		.proc_handler	= ipv4_ping_group_range,
 	},
+	{
+		.ctl_name	= NET_IPV4_NO_PMTU_DISC,
+		.procname	= "ip_no_pmtu_disc",
+		.data		= &init_net.sysctl_ip_no_pmtu_disc,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "ip_forward_use_pmtu",
+		.data		= &init_net.sysctl_ip_fwd_use_pmtu,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
 	{ }
 };
 
@@ -948,7 +955,8 @@ static __net_init int ipv4_sysctl_init_net(struct net *net)
 			&net->ipv4.sysctl_rt_cache_rebuild_count;
 		table[7].data =
 			&net->ipv4_sysctl_ping_group_range;
-
+		table[8].data =
+			&net->sysctl_ip_no_pmtu_disc;
 	}
 
 	/*

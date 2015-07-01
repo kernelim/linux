@@ -100,6 +100,9 @@ int virtqueue_get_queue_index(struct virtqueue *vq);
 /**
  * virtio_device - representation of a device using virtio
  * @index: unique position on the virtio bus
+ * @config_enabled: configuration change reporting enabled
+ * @config_change_pending: configuration change reported while disabled
+ * @config_lock: protects configuration change reporting
  * @dev: underlying device.
  * @id: the device type identification (used to match it with a driver).
  * @config: the configuration ops for this device.
@@ -109,6 +112,9 @@ int virtqueue_get_queue_index(struct virtqueue *vq);
  */
 struct virtio_device {
 	int index;
+	bool config_enabled;
+	bool config_change_pending;
+	spinlock_t config_lock;
 	struct device dev;
 	struct virtio_device_id id;
 	struct virtio_config_ops *config;
@@ -120,6 +126,8 @@ struct virtio_device {
 
 int register_virtio_device(struct virtio_device *dev);
 void unregister_virtio_device(struct virtio_device *dev);
+
+void virtio_config_changed(struct virtio_device *dev);
 
 /**
  * virtio_driver - operations for a virtio I/O driver

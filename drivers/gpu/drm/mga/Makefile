@@ -3,6 +3,7 @@
 # Direct Rendering Infrastructure (DRI) in XFree86 4.1.0 and higher.
 
 ccflags-y := -Iinclude/drm
+ccflags-y += -include drm/drm_backport.h
 mga-y := mga_drv.o mga_dma.o mga_state.o mga_warp.o mga_irq.o
 
 mga-$(CONFIG_COMPAT) += mga_ioc32.o

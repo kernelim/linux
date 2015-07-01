@@ -1,7 +1,7 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
  * Fibre Channel Host Bus Adapters.                                *
- * Copyright (C) 2009-2014 Emulex.  All rights reserved.           *
+ * Copyright (C) 2009-2015 Emulex.  All rights reserved.           *
  * EMULEX and SLI are trademarks of Emulex.                        *
  * www.emulex.com                                                  *
  *                                                                 *
@@ -3197,6 +3197,7 @@ lpfc_bsg_diag_loopback_run(struct fc_bsg_job *job)
 		cmd->unsli3.rcvsli3.ox_id = 0xffff;
 	}
 	cmdiocbq->iocb_flag |= LPFC_IO_LIBDFC;
+	cmdiocbq->iocb_flag |= LPFC_IO_LOOPBACK;
 	cmdiocbq->vport = phba->pport;
 	cmdiocbq->iocb_cmpl = NULL;
 	iocb_stat = lpfc_sli_issue_iocb_wait(phba, LPFC_ELS_RING, cmdiocbq,

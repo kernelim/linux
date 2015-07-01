@@ -833,6 +833,11 @@ static int rapl_write_data_raw(struct rapl_domain *rd,
 	return 0;
 }
 
+static const struct x86_cpu_id energy_unit_quirk_ids[] = {
+	{ X86_VENDOR_INTEL, 6, 0x37},/* Valleyview */
+	{}
+};
+
 static int rapl_check_unit(struct rapl_package *rp, int cpu)
 {
 	u64 msr_val;
@@ -853,8 +858,11 @@ static int rapl_check_unit(struct rapl_package *rp, int cpu)
 	 * time unit: 1/time_unit_divisor Seconds
 	 */
 	value = (msr_val & ENERGY_UNIT_MASK) >> ENERGY_UNIT_OFFSET;
-	rp->energy_unit_divisor = 1 << value;
-
+	/* some CPUs have different way to calculate energy unit */
+	if (x86_match_cpu(energy_unit_quirk_ids))
+		rp->energy_unit_divisor = 1000000 / (1 << value);
+	else
+		rp->energy_unit_divisor = 1 << value;
 
 	value = (msr_val & POWER_UNIT_MASK) >> POWER_UNIT_OFFSET;
 	rp->power_unit_divisor = 1 << value;
@@ -939,10 +947,17 @@ static void package_power_limit_irq_restore(int package_id)
 }
 
 static const struct x86_cpu_id rapl_ids[] = {
-	{ X86_VENDOR_INTEL, 6, 0x2a},/* SNB */
-	{ X86_VENDOR_INTEL, 6, 0x2d},/* SNB EP */
-	{ X86_VENDOR_INTEL, 6, 0x3a},/* IVB */
-	{ X86_VENDOR_INTEL, 6, 0x45},/* HSW */
+	{ X86_VENDOR_INTEL, 6, 0x2a},/* Sandy Bridge */
+	{ X86_VENDOR_INTEL, 6, 0x2d},/* Sandy Bridge EP */
+	{ X86_VENDOR_INTEL, 6, 0x37},/* Valleyview */
+	{ X86_VENDOR_INTEL, 6, 0x3a},/* Ivy Bridge */
+	{ X86_VENDOR_INTEL, 6, 0x3c},/* Haswell */
+	{ X86_VENDOR_INTEL, 6, 0x3d},/* Broadwell */
+	{ X86_VENDOR_INTEL, 6, 0x3f},/* Haswell */
+	{ X86_VENDOR_INTEL, 6, 0x4f},/* Broadwell servers */
+	{ X86_VENDOR_INTEL, 6, 0x45},/* Haswell ULT */
+	{ X86_VENDOR_INTEL, 6, 0x4E},/* Skylake */
+	{ X86_VENDOR_INTEL, 6, 0x56},/* Future Xeon */
 	/* TODO: Add more CPU IDs after testing */
 	{}
 };

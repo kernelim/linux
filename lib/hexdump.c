@@ -201,6 +201,14 @@ void print_hex_dump(const char *level, const char *prefix_str, int prefix_type,
 }
 EXPORT_SYMBOL(print_hex_dump);
 
+/*
+ * RHEL: We need to preserve print_hex_dump_bytes() as an exported function
+ * even with CONFIG_DYNAMIC_DEBUG=y, because it is in KABI.
+ * It won't be called by newly built modules though, because they will instead
+ * see print_hex_dump_bytes() as a macro (defined in include/linux/kernel.h).
+ */
+#undef print_hex_dump_bytes
+//#if !defined(CONFIG_DYNAMIC_DEBUG)
 /**
  * print_hex_dump_bytes - shorthand form of print_hex_dump() with default params
  * @prefix_str: string to prefix each line with;
@@ -220,3 +228,4 @@ void print_hex_dump_bytes(const char *prefix_str, int prefix_type,
 			buf, len, 1);
 }
 EXPORT_SYMBOL(print_hex_dump_bytes);
+//#endif /* !defined(CONFIG_DYNAMIC_DEBUG) */

@@ -92,8 +92,10 @@ fw-shipped-$(CONFIG_CHELSIO_T3) += cxgb3/t3b_psram-1.1.0.bin \
 				   cxgb3/ael2005_twx_edc.bin \
 				   cxgb3/ael2020_twx_edc.bin
 fw-shipped-$(CONFIG_CHELSO_T4) += cxgb4/t4fw.bin \
-				  cxgb4/t4fw-1.3.10.0.bin\
-				  cxgb4/t4fw-1.4.16.0.bin
+				  cxgb4/t4fw-1.3.10.0.bin \
+				  cxgb4/t4fw-1.4.16.0.bin \
+				  cxgb4/t4fw-1.13.32.0.bin \
+				  cxgb4/t5fw-1.13.32.0.bin
 fw-shipped-$(CONFIG_DRM_MGA) += matrox/g200_warp.fw matrox/g400_warp.fw
 fw-shipped-$(CONFIG_DRM_R128) += r128/r128_cce.bin
 fw-shipped-$(CONFIG_DRM_RADEON) += radeon/R100_cp.bin radeon/R200_cp.bin \
@@ -133,8 +135,16 @@ fw-shipped-$(CONFIG_R8169) += rtl_nic/rtl8168d-1.fw \
 			      rtl_nic/rtl8168f-2.fw \
 			      rtl_nic/rtl8402-1.fw \
 			      rtl_nic/rtl8411-1.fw \
+			      rtl_nic/rtl8411-2.fw \
 			      rtl_nic/rtl8106e-1.fw \
-			      rtl_nic/rtl8168g-1.fw
+			      rtl_nic/rtl8106e-2.fw \
+			      rtl_nic/rtl8168g-1.fw \
+			      rtl_nic/rtl8168g-2.fw \
+			      rtl_nic/rtl8168g-3.fw \
+			      rtl_nic/rtl8168h-1.fw \
+			      rtl_nic/rtl8168h-2.fw \
+			      rtl_nic/rtl8107e-1.fw \
+			      rtl_nic/rtl8107e-2.fw
 fw-shipped-$(CONFIG_MYRI10GE) += myri10ge_eth_z8e.dat \
 				 myri10ge_ethp_z8e.dat \
 				 myri10ge_rss_eth_z8e.dat \
@@ -210,6 +220,7 @@ fw-shipped-$(CONFIG_YAM) += yam/1200.bin yam/9600.bin
 fw-shipped-$(CONFIG_BRCMSMAC) += brcm/bcm43xx-0.fw brcm/bcm43xx_hdr-0.fw
 
 fw-shipped-$(CONFIG_RT2800PCI) += rt2860.bin
+fw-shipped-$(CONFIG_RT2800PCI) += rt3290.bin
 fw-shipped-$(CONFIG_RT2800USB) += rt2870.bin
 
 fw-shipped-$(CONFIG_CARL9170) += carl9170-1.fw
@@ -221,7 +232,10 @@ fw-shipped-$(CONFIG_ATH9K_HTC) += htc_7010.fw htc_9271.fw
 # in the base kernel.  So, force them to fw-shipped-m below.
 fw-shipped-m += iwlwifi-105-6.ucode iwlwifi-135-6.ucode iwlwifi-2000-6.ucode \
 		iwlwifi-2030-6.ucode iwlwifi-6000g2a-6.ucode iwlwifi-6000g2b-6.ucode \
-		iwlwifi-7260-7.ucode iwlwifi-3160-7.ucode
+		iwlwifi-7260-7.ucode iwlwifi-3160-7.ucode \
+		iwlwifi-7260-9.ucode iwlwifi-3160-9.ucode iwlwifi-7265-9.ucode \
+		iwlwifi-7260-10.ucode iwlwifi-3160-10.ucode iwlwifi-7265-10.ucode iwlwifi-7265D-10.ucode \
+		iwlwifi-7260-12.ucode iwlwifi-3160-12.ucode iwlwifi-7265-12.ucode iwlwifi-7265D-12.ucode
 
 fw-shipped-all := $(fw-shipped-y) $(fw-shipped-m) $(fw-shipped-)
 

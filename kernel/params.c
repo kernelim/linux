@@ -50,27 +50,29 @@ static inline int parameq(const char *input, const char *paramname)
 
 static int parse_one(char *param,
 		     char *val,
-		     struct kernel_param *params, 
+		     const char *doing,
+		     struct kernel_param *params,
 		     unsigned num_params,
-		     int (*handle_unknown)(char *param, char *val))
+		     int (*handle_unknown)(char *param, char *val,
+				     const char *doing))
 {
 	unsigned int i;
 
 	/* Find parameter */
 	for (i = 0; i < num_params; i++) {
 		if (parameq(param, params[i].name)) {
-			DEBUGP("They are equal!  Calling %p\n",
+			DEBUGP("handling %s with %p\n", param,
 			       params[i].set);
 			return params[i].set(val, &params[i]);
 		}
 	}
 
 	if (handle_unknown) {
-		DEBUGP("Unknown argument: calling %p\n", handle_unknown);
-		return handle_unknown(param, val);
+		DEBUGP("doing %s: %s='%s'\n", doing, param, val);
+		return handle_unknown(param, val, doing);
 	}
 
-	DEBUGP("Unknown argument `%s'\n", param);
+	DEBUGP("Unknown argument '%s'\n", param);
 	return -ENOENT;
 }
 
@@ -127,18 +129,19 @@ static char *next_arg(char *args, char **param, char **val)
 }
 
 /* Args looks like "foo=bar,bar2 baz=fuz wiz". */
-int parse_args(const char *name,
+int parse_args(const char *doing,
 	       char *args,
 	       struct kernel_param *params,
 	       unsigned num,
-	       int (*unknown)(char *param, char *val))
+	       int (*unknown)(char *param, char *val, const char *doing))
 {
 	char *param, *val;
 
-	DEBUGP("Parsing ARGS: %s\n", args);
-
 	/* Chew leading spaces */
 	args = skip_spaces(args);
+
+	if (args && *args)
+		pr_debug("doing %s, parsing ARGS: '%s'\n", doing, args);
 
 	while (*args) {
 		int ret;
@@ -146,7 +149,8 @@ int parse_args(const char *name,
 
 		args = next_arg(args, &param, &val);
 		irq_was_disabled = irqs_disabled();
-		ret = parse_one(param, val, params, num, unknown);
+		ret = parse_one(param, val, doing, params, num,
+				unknown);
 		if (irq_was_disabled && !irqs_disabled()) {
 			printk(KERN_WARNING "parse_args(): option '%s' enabled "
 					"irq's!\n", param);
@@ -154,19 +158,19 @@ int parse_args(const char *name,
 		switch (ret) {
 		case -ENOENT:
 			printk(KERN_ERR "%s: Unknown parameter `%s'\n",
-			       name, param);
+			       doing, param);
 			return ret;
 		case -ENOSPC:
 			printk(KERN_ERR
 			       "%s: `%s' too large for parameter `%s'\n",
-			       name, val ?: "", param);
+			       doing, val ?: "", param);
 			return ret;
 		case 0:
 			break;
 		default:
 			printk(KERN_ERR
 			       "%s: `%s' invalid for parameter `%s'\n",
-			       name, val ?: "", param);
+			       doing, val ?: "", param);
 			return ret;
 		}
 	}

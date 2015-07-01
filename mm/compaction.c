@@ -320,7 +320,7 @@ static void isolate_freepages(struct zone *zone,
 	 * is the end of the pageblock the migration scanner is using.
 	 */
 	pfn = cc->free_pfn;
-	low_pfn = cc->migrate_pfn + pageblock_nr_pages;
+	low_pfn = ALIGN(cc->migrate_pfn + 1, pageblock_nr_pages);
 
 	/*
 	 * Take care that if the migration scanner is at the end of the zone
@@ -334,7 +334,7 @@ static void isolate_freepages(struct zone *zone,
 	 * pages on cc->migratepages. We stop searching if the migrate
 	 * and free page scanners meet or enough free pages are isolated.
 	 */
-	for (; pfn > low_pfn && cc->nr_migratepages > nr_freepages;
+	for (; pfn >= low_pfn && cc->nr_migratepages > nr_freepages;
 					pfn -= pageblock_nr_pages) {
 		unsigned long isolated;
 
@@ -379,7 +379,14 @@ static void isolate_freepages(struct zone *zone,
 		kernel_map_pages(page, 1, 1);
 	}
 
-	cc->free_pfn = high_pfn;
+	/*
+	 * If we crossed the migrate scanner, we want to keep it that way
+	 * so that compact_finished() may detect this
+	 */
+	if (pfn < low_pfn)
+		cc->free_pfn = max(pfn, zone->zone_start_pfn);
+	else
+		cc->free_pfn = high_pfn;
 	cc->nr_freepages = nr_freepages;
 }
 
@@ -572,8 +579,10 @@ static unsigned long isolate_migratepages(struct zone *zone,
 		cc->nr_migratepages++;
 
 		/* Avoid isolating too much */
-		if (cc->nr_migratepages == COMPACT_CLUSTER_MAX)
+		if (cc->nr_migratepages == COMPACT_CLUSTER_MAX) {
+			++low_pfn;
 			break;
+		}
 
 		continue;
 
@@ -592,7 +601,13 @@ next_pageblock:
 	if (low_pfn == end_pfn)
 		update_pageblock_skip(cc, valid_page, cc->nr_migratepages, true);
 
-	cc->migrate_pfn = low_pfn;
+	/*
+	 * Record where migration scanner will be restarted. If we end up in
+	 * the same pageblock as the free scanner, make the scanners fully
+	 * meet so that compact_finished() terminates compaction.
+	 */
+	cc->migrate_pfn = (end_pfn <= cc->free_pfn) ? low_pfn : cc->free_pfn;
+
 	return cc->nr_migratepages;
 }
 
@@ -724,7 +739,8 @@ unsigned long compaction_suitable(struct zone *zone, int order)
 	 * fragmentation index determines if allocation failures are due to
 	 * low memory or external fragmentation
 	 *
-	 * index of -1 implies allocations might succeed dependingon watermarks
+	 * index of -1000 implies allocations might succeed depending on
+	 * watermarks
 	 * index towards 0 implies failure is due to lack of memory
 	 * index towards 1000 implies failure is due to fragmentation
 	 *
@@ -734,7 +750,8 @@ unsigned long compaction_suitable(struct zone *zone, int order)
 	if (fragindex >= 0 && fragindex <= sysctl_extfrag_threshold)
 		return COMPACT_SKIPPED;
 
-	if (fragindex == -1 && zone_watermark_ok(zone, order, watermark, 0, 0))
+	if (fragindex == -1000 && zone_watermark_ok(zone, order, watermark,
+	    0, 0))
 		return COMPACT_PARTIAL;
 
 	return COMPACT_CONTINUE;
@@ -788,6 +805,7 @@ static int compact_zone(struct zone *zone, struct compact_control *cc)
 
 	while ((ret = compact_finished(zone, cc)) == COMPACT_CONTINUE) {
 		unsigned long nr_migrate, nr_remaining;
+		int err;
 
 		if (!isolate_migratepages(zone, cc)) {
 			if (cc->contended && cc->sync != MIGRATE_SYNC) {
@@ -800,7 +818,7 @@ static int compact_zone(struct zone *zone, struct compact_control *cc)
 		}
 
 		nr_migrate = cc->nr_migratepages;
-		migrate_pages(&cc->migratepages, compaction_alloc,
+		err = migrate_pages(&cc->migratepages, compaction_alloc,
 				(unsigned long)cc, false,
 				cc->sync ? MIGRATE_SYNC_LIGHT : MIGRATE_ASYNC);
 		update_nr_listpages(cc);
@@ -812,11 +830,18 @@ static int compact_zone(struct zone *zone, struct compact_control *cc)
 			count_vm_events(COMPACTPAGEFAILED, nr_remaining);
 
 		/* Release LRU pages not migrated */
-		if (!list_empty(&cc->migratepages)) {
+		if (err) {
 			putback_lru_pages(&cc->migratepages);
 			cc->nr_migratepages = 0;
+			/*
+			 * migrate_pages() may return -ENOMEM when scanners meet
+			 * and we want compact_finished() to detect it
+			 */
+			if (err == -ENOMEM && cc->free_pfn > cc->migrate_pfn) {
+				ret = COMPACT_PARTIAL;
+				break;
+			}
 		}
-
 	}
 
 	/* Release free pages and check accounting */

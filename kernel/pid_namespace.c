@@ -100,6 +100,7 @@ static struct pid_namespace *create_pid_namespace(struct pid_namespace *parent_p
 	kref_init(&ns->kref);
 	ns->level = level;
 	ns->parent = get_pid_ns(parent_pid_ns);
+	ns->nr_hashed = PIDNS_HASH_ADDING;
 	INIT_WORK(&ns->proc_work, proc_cleanup_work);
 
 	set_bit(0, ns->pidmap[0].page);
@@ -154,7 +155,16 @@ void zap_pid_ns_processes(struct pid_namespace *pid_ns)
 {
 	int nr;
 	int rc;
-	struct task_struct *task;
+	struct task_struct *task, *me = current;
+	int init_pids = thread_group_leader(me) ? 1 : 2;
+
+	/* Don't allow any more processes into the pid namespace */
+	disable_pid_allocation(pid_ns);
+
+	/* Ignore SIGCHLD causing any terminated children to autoreap */
+	spin_lock_irq(&me->sighand->siglock);
+	me->sighand->action[SIGCHLD - 1].sa.sa_handler = SIG_IGN;
+	spin_unlock_irq(&me->sighand->siglock);
 
 	/*
 	 * The last thread in the cgroup-init thread group is terminating.
@@ -189,10 +199,23 @@ void zap_pid_ns_processes(struct pid_namespace *pid_ns)
 	}
 	read_unlock(&tasklist_lock);
 
+	/* Firstly reap the EXIT_ZOMBIE children we may have. */
 	do {
 		clear_thread_flag(TIF_SIGPENDING);
 		rc = sys_wait4(-1, NULL, __WALL, NULL);
 	} while (rc != -ECHILD);
+
+	/*
+	 * sys_wait4() above can't reap the TASK_DEAD children.
+	 * Make sure they all go away, see free_pid().
+	 */
+	for (;;) {
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		if (pid_ns->nr_hashed == init_pids)
+			break;
+		schedule();
+	}
+	__set_current_state(TASK_RUNNING);
 
 	if (pid_ns->reboot)
 		current->signal->group_exit_code = pid_ns->reboot;
@@ -235,7 +258,9 @@ static void *pidns_get(struct task_struct *task)
 	struct pid_namespace *ns;
 
 	rcu_read_lock();
-	ns = get_pid_ns(task_active_pid_ns(task));
+	ns = task_active_pid_ns(task);
+	if (ns)
+		get_pid_ns(ns);
 	rcu_read_unlock();
 
 	return ns;

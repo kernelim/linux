@@ -656,8 +656,6 @@ unsigned long eeh_check_failure(const volatile void __iomem *token, unsigned lon
 
 	dn = pci_device_to_OF_node(dev);
 	eeh_dn_check_failure (dn, dev);
-
-	pci_dev_put(dev);
 	return val;
 }
 
@@ -1181,7 +1179,7 @@ void __init eeh_init(void)
  * on the CEC architecture, type of the device, on earlier boot
  * command-line arguments & etc.
  */
-static void eeh_add_device_early(struct device_node *dn)
+void eeh_add_device_early(struct device_node *dn)
 {
 	struct pci_controller *phb;
 	struct eeh_early_enable_info info;
@@ -1216,7 +1214,7 @@ EXPORT_SYMBOL_GPL(eeh_add_device_tree_early);
  * This routine must be used to complete EEH initialization for PCI
  * devices that were added after system boot (e.g. hotplug, dlpar).
  */
-static void eeh_add_device_late(struct pci_dev *dev)
+void eeh_add_device_late(struct pci_dev *dev)
 {
 	struct device_node *dn;
 	struct pci_dn *pdn;
@@ -1234,7 +1232,6 @@ static void eeh_add_device_late(struct pci_dev *dev)
 	}
 	WARN_ON(pdn->pcidev);
 
-	pci_dev_get (dev);
 	pdn->pcidev = dev;
 
 	pci_addr_cache_insert_device(dev);
@@ -1266,7 +1263,7 @@ EXPORT_SYMBOL_GPL(eeh_add_device_tree_late);
  * this device will no longer be detected after this call; thus,
  * i/o errors affecting this slot may leave this device unusable.
  */
-static void eeh_remove_device(struct pci_dev *dev)
+void eeh_remove_device(struct pci_dev *dev)
 {
 	struct device_node *dn;
 	if (!dev || !eeh_subsystem_enabled)
@@ -1281,7 +1278,6 @@ static void eeh_remove_device(struct pci_dev *dev)
 		return;
 	}
 	PCI_DN(dn)->pcidev = NULL;
-	pci_dev_put (dev);
 
 	pci_addr_cache_remove_device(dev);
 	eeh_sysfs_remove_device(dev);

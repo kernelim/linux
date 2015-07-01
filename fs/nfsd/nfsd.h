@@ -17,7 +17,7 @@
 /*
  * nfsd version
  */
-#define NFSD_SUPPORTED_MINOR_VERSION	1
+#define NFSD_SUPPORTED_MINOR_VERSION	0
 
 struct readdir_cd {
 	__be32			err;	/* 0, nfserr, or nfserr_eof */

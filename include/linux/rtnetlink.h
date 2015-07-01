@@ -636,6 +636,7 @@ struct tcamsg
 #ifdef __KERNEL__
 
 #include <linux/mutex.h>
+#include <linux/wait.h>
 
 static __inline__ int rtattr_strcmp(const struct rtattr *rta, const char *str)
 {
@@ -776,6 +777,10 @@ extern void rtnl_lock(void);
 extern void rtnl_unlock(void);
 extern int rtnl_trylock(void);
 extern int rtnl_is_locked(void);
+
+extern wait_queue_head_t netdev_unregistering_wq;
+extern struct mutex net_mutex;
+
 #ifdef CONFIG_PROVE_LOCKING
 extern int lockdep_rtnl_is_held(void);
 #endif /* #ifdef CONFIG_PROVE_LOCKING */

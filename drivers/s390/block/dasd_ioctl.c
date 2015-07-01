@@ -142,22 +142,24 @@ static int dasd_ioctl_resume(struct dasd_block *block)
 /*
  * performs formatting of _device_ according to _fdata_
  * Note: The discipline's format_function is assumed to deliver formatting
- * commands to format a single unit of the device. In terms of the ECKD
- * devices this means CCWs are generated to format a single track.
+ * commands to format multiple units of the device. In terms of the ECKD
+ * devices this means CCWs are generated to format multiple tracks.
  */
-static int dasd_format(struct dasd_block *block, struct format_data_t *fdata)
+static int
+dasd_format(struct dasd_block *block, struct format_data_t *fdata)
 {
-	struct dasd_ccw_req *cqr;
 	struct dasd_device *base;
-	int rc;
+	int enable_PAV = 1;
+	int rc, retries;
+	int start, stop;
 
 	base = block->base;
 	if (base->discipline->format_device == NULL)
 		return -EPERM;
 
 	if (base->state != DASD_STATE_BASIC) {
-		pr_warning("%s: The DASD cannot be formatted while it is "
-			   "enabled\n",  dev_name(&base->cdev->dev));
+		pr_warn("%s: The DASD cannot be formatted while it is enabled\n",
+			dev_name(&base->cdev->dev));
 		return -EBUSY;
 	}
 
@@ -177,22 +179,30 @@ static int dasd_format(struct dasd_block *block, struct format_data_t *fdata)
 		bdput(bdev);
 	}
 
-	while (fdata->start_unit <= fdata->stop_unit) {
-		cqr = base->discipline->format_device(base, fdata);
-		if (IS_ERR(cqr))
-			return PTR_ERR(cqr);
-		rc = dasd_sleep_on_interruptible(cqr);
-		dasd_sfree_request(cqr, cqr->memdev);
+	retries = 255;
+	/* backup start- and endtrack for retries */
+	start = fdata->start_unit;
+	stop = fdata->stop_unit;
+	do {
+		rc = base->discipline->format_device(base, fdata, enable_PAV);
 		if (rc) {
-			if (rc != -ERESTARTSYS)
-				pr_err("%s: Formatting unit %d failed with "
-				       "rc=%d\n", dev_name(&base->cdev->dev),
-				       fdata->start_unit, rc);
-			return rc;
-		}
-		fdata->start_unit++;
-	}
-	return 0;
+			if (rc == -EAGAIN) {
+				retries--;
+				/* disable PAV in case of errors */
+				enable_PAV = 0;
+				fdata->start_unit = start;
+				fdata->stop_unit = stop;
+			} else
+				return rc;
+		} else
+			/* success */
+			break;
+	} while (retries);
+
+	if (!retries)
+		return -EIO;
+	else
+		return 0;
 }
 
 /*

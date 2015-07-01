@@ -102,6 +102,7 @@ int psmouse_sliced_command(struct psmouse *psmouse, unsigned char command);
 int psmouse_reset(struct psmouse *psmouse);
 void psmouse_set_state(struct psmouse *psmouse, enum psmouse_state new_state);
 void psmouse_set_resolution(struct psmouse *psmouse, unsigned int resolution);
+bool psmouse_matches_pnp_id(struct psmouse *psmouse, const char * const ids[]);
 
 struct psmouse_attribute {
 	struct device_attribute dattr;

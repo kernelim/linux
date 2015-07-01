@@ -70,6 +70,8 @@
 #define NFS4_POLL_RETRY_MIN	(HZ/10)
 #define NFS4_POLL_RETRY_MAX	(15*HZ)
 
+static unsigned short max_session_slots = NFS4_DEF_SLOT_TABLE_SIZE;
+
 struct nfs4_opendata;
 static int _nfs4_proc_open(struct nfs4_opendata *data);
 static int _nfs4_recover_proc_open(struct nfs4_opendata *data);
@@ -267,11 +269,6 @@ static int nfs4_handle_exception(struct nfs_server *server, int errorcode, struc
 		case -NFS4ERR_DELEG_REVOKED:
 		case -NFS4ERR_ADMIN_REVOKED:
 		case -NFS4ERR_BAD_STATEID:
-			if (inode != NULL && nfs_have_delegation(inode, FMODE_READ)) {
-				nfs_remove_bad_delegation(inode);
-				exception->retry = 1;
-				break;
-			}
 			if (state == NULL)
 				break;
 			ret = nfs4_schedule_stateid_recovery(server, state);
@@ -445,19 +442,20 @@ static int nfs41_sequence_done(struct rpc_task *task, struct nfs4_sequence_res *
 {
 	unsigned long timestamp;
 	struct nfs_client *clp;
-
-	/*
-	 * sr_status remains 1 if an RPC level error occurred. The server
-	 * may or may not have processed the sequence operation..
-	 * Proceed as if the server received and processed the sequence
-	 * operation.
-	 */
-	if (res->sr_status == 1)
-		res->sr_status = NFS_OK;
+	struct nfs4_slot *slot;
+	bool interrupted = false;
+	int ret = 1;
 
 	/* don't increment the sequence number if the task wasn't sent */
 	if (!RPC_WAS_SENT(task))
 		goto out;
+
+	slot = res->sr_slot;
+
+	if (slot->interrupted) {
+		slot->interrupted = 0;
+		interrupted = true;
+	}
 
 	/* Check the SEQUENCE operation status */
 	switch (res->sr_status) {
@@ -471,6 +469,15 @@ static int nfs41_sequence_done(struct rpc_task *task, struct nfs4_sequence_res *
 		if (res->sr_status_flags != 0)
 			nfs4_schedule_lease_recovery(clp);
 		break;
+	case 1:
+		/*
+		 * sr_status remains 1 if an RPC level error occurred.
+		 * The server may or may not have processed the sequence
+		 * operation..
+		 * Mark the slot as having hosted an interrupted RPC call.
+		 */
+		slot->interrupted = 1;
+		goto out;
 	case -NFS4ERR_DELAY:
 		/* The server detected a resend of the RPC call and
 		 * returned NFS4ERR_DELAY as per Section 2.10.6.2
@@ -481,6 +488,32 @@ static int nfs41_sequence_done(struct rpc_task *task, struct nfs4_sequence_res *
 			res->sr_slot - res->sr_session->fc_slot_table.slots,
 			res->sr_slot->seq_nr);
 		goto out_retry;
+	case -NFS4ERR_BADSLOT:
+		/*
+		 * The slot id we used was probably retired. Try again
+		 * using a different slot id.
+		 */
+		goto retry_nowait;
+	case -NFS4ERR_SEQ_MISORDERED:
+		/*
+		 * Was the last operation on this sequence interrupted?
+		 * If so, retry after bumping the sequence number.
+		 */
+		if (interrupted) {
+			++slot->seq_nr;
+			goto retry_nowait;
+		}
+		/*
+		 * Could this slot have been previously retired?
+		 * If so, then the server may be expecting seq_nr = 1!
+		 */
+		if (slot->seq_nr == 1)
+			break;
+		slot->seq_nr = 1;
+		goto retry_nowait;
+	case -NFS4ERR_SEQ_FALSE_RETRY:
+		++slot->seq_nr;
+		goto retry_nowait;
 	default:
 		/* Just update the slot sequence no. */
 		++res->sr_slot->seq_nr;
@@ -489,7 +522,13 @@ out:
 	/* The session may be reset by one of the error handlers. */
 	dprintk("%s: Error %d free the slot \n", __func__, res->sr_status);
 	nfs41_sequence_free_slot(res);
-	return 1;
+	return ret;
+retry_nowait:
+	if (rpc_restart_call_prepare(task)) {
+		task->tk_status = 0;
+		ret = 0;
+	}
+	goto out;
 out_retry:
 	if (!rpc_restart_call(task))
 		goto out;
@@ -1371,7 +1410,7 @@ static int nfs4_handle_delegation_recall_error(struct nfs_server *server, struct
 			nfs_inode_find_state_and_recover(state->inode,
 					stateid);
 			nfs4_schedule_stateid_recovery(server, state);
-			return 0;
+			return -EAGAIN;
 		case -NFS4ERR_DELAY:
 		case -NFS4ERR_GRACE:
 			set_bit(NFS_DELEGATED_STATE, &state->flags);
@@ -1795,6 +1834,28 @@ static int nfs4_open_expired(struct nfs4_state_owner *sp, struct nfs4_state *sta
 	ret = nfs4_do_open_expired(ctx, state);
 	put_nfs_open_context(ctx);
 	return ret;
+}
+
+static void nfs_finish_clear_delegation_stateid(struct nfs4_state *state)
+{
+	nfs_remove_bad_delegation(state->inode);
+	write_seqlock(&state->seqlock);
+	nfs4_stateid_copy(&state->stateid, &state->open_stateid);
+	write_sequnlock(&state->seqlock);
+	clear_bit(NFS_DELEGATED_STATE, &state->flags);
+}
+
+static void nfs40_clear_delegation_stateid(struct nfs4_state *state)
+{
+	if (rcu_access_pointer(NFS_I(state->inode)->delegation) != NULL)
+		nfs_finish_clear_delegation_stateid(state);
+}
+
+static int nfs40_open_expired(struct nfs4_state_owner *sp, struct nfs4_state *state)
+{
+	/* NFSv4.0 doesn't allow for delegation recovery on open expire */
+	nfs40_clear_delegation_stateid(state);
+	return nfs4_open_expired(sp, state);
 }
 
 /*
@@ -4014,9 +4075,6 @@ nfs4_async_handle_error(struct rpc_task *task, const struct nfs_server *server, 
 		case -NFS4ERR_DELEG_REVOKED:
 		case -NFS4ERR_ADMIN_REVOKED:
 		case -NFS4ERR_BAD_STATEID:
-			if (state == NULL)
-				break;
-			nfs_remove_bad_delegation(state->inode);
 		case -NFS4ERR_OPENMODE:
 			if (state == NULL)
 				break;
@@ -5434,8 +5492,10 @@ static int nfs4_reset_slot_table(struct nfs4_slot_table *tbl, u32 max_reqs,
 		tbl->slots = new;
 		tbl->max_slots = max_reqs;
 	}
-	for (i = 0; i < tbl->max_slots; ++i)
+	for (i = 0; i < tbl->max_slots; ++i) {
 		tbl->slots[i].seq_nr = ivalue;
+		tbl->slots[i].interrupted = 0;
+	}
 	spin_unlock(&tbl->slot_tbl_lock);
 	dprintk("%s: tbl=%p slots=%p max_slots=%d\n", __func__,
 		tbl, tbl->slots, tbl->max_slots);
@@ -5597,7 +5657,7 @@ static void nfs4_init_channel_attrs(struct nfs41_create_session_args *args)
 	args->fc_attrs.max_rqst_sz = mxrqst_sz;
 	args->fc_attrs.max_resp_sz = mxresp_sz;
 	args->fc_attrs.max_ops = NFS4_MAX_OPS;
-	args->fc_attrs.max_reqs = NFS4_MAX_SLOT_TABLE;
+	args->fc_attrs.max_reqs = max_session_slots;
 
 	dprintk("%s: Fore Channel : max_rqst_sz=%u max_resp_sz=%u "
 		"max_ops=%u max_reqs=%u\n",
@@ -5760,8 +5820,7 @@ int nfs4_proc_destroy_session(struct nfs4_session *session)
 	status = rpc_call_sync(session->clp->cl_rpcclient, &msg, RPC_TASK_TIMEOUT);
 
 	if (status)
-		printk(KERN_WARNING
-			"NFS: Got error %d from the server on DESTROY_SESSION. "
+		dprintk("NFS: Got error %d from the server on DESTROY_SESSION. "
 			"Session has been destroyed regardless...\n", status);
 
 	dprintk("<-- nfs4_proc_destroy_session\n");
@@ -6544,7 +6603,7 @@ struct nfs4_state_recovery_ops nfs41_reboot_recovery_ops = {
 struct nfs4_state_recovery_ops nfs40_nograce_recovery_ops = {
 	.owner_flag_bit = NFS_OWNER_RECLAIM_NOGRACE,
 	.state_flag_bit	= NFS_STATE_RECLAIM_NOGRACE,
-	.recover_open	= nfs4_open_expired,
+	.recover_open	= nfs40_open_expired,
 	.recover_lock	= nfs4_lock_expired,
 	.establish_clid = nfs4_init_clientid,
 	.get_clid_cred	= nfs4_get_setclientid_cred,
@@ -6670,6 +6729,10 @@ const struct nfs_rpc_ops nfs_v4_clientops = {
 	.open_context	= nfs4_atomic_open,
 	.init_client	= nfs4_init_client,
 };
+
+module_param(max_session_slots, ushort, 0644);
+MODULE_PARM_DESC(max_session_slots, "Maximum number of outstanding NFSv4.1 "
+		"requests the client will negotiate");
 
 /*
  * Local variables:

@@ -2524,7 +2524,7 @@ bnad_tso_prepare(struct bnad *bnad, struct sk_buff *skb)
 	 * For TSO, the TCP checksum field is seeded with pseudo-header sum
 	 * excluding the length field.
 	 */
-	if (skb->protocol == htons(ETH_P_IP)) {
+	if (vlan_get_protocol(skb) == htons(ETH_P_IP)) {
 		struct iphdr *iph = ip_hdr(skb);
 
 		/* Do we really need these? */
@@ -2889,19 +2889,19 @@ bnad_txq_wi_prepare(struct bnad *bnad, struct bna_tcb *tcb,
 		txqent->hdr.wi.opcode =	__constant_htons(BNA_TXQ_WI_SEND);
 		txqent->hdr.wi.lso_mss = 0;
 
-		if (unlikely(skb->len > (bnad->netdev->mtu + ETH_HLEN))) {
+		if (unlikely(skb->len > (bnad->netdev->mtu + VLAN_ETH_HLEN))) {
 			BNAD_UPDATE_CTR(bnad, tx_skb_non_tso_too_long);
 			return -EINVAL;
 		}
 
 		if (skb->ip_summed == CHECKSUM_PARTIAL) {
+			__be16 net_proto = vlan_get_protocol(skb);
 			u8 proto = 0;
 
-			if (skb->protocol == __constant_htons(ETH_P_IP))
+			if (net_proto == __constant_htons(ETH_P_IP))
 				proto = ip_hdr(skb)->protocol;
 #ifdef NETIF_F_IPV6_CSUM
-			else if (skb->protocol ==
-				 __constant_htons(ETH_P_IPV6)) {
+			else if (net_proto == __constant_htons(ETH_P_IPV6)) {
 				/* nexthdr may not be TCP immediately. */
 				proto = ipv6_hdr(skb)->nexthdr;
 			}
@@ -3884,7 +3884,7 @@ bnad_pci_remove(struct pci_dev *pdev)
 	free_netdev(netdev);
 }
 
-static DEFINE_PCI_DEVICE_TABLE(bnad_pci_id_table) = {
+static const struct pci_device_id bnad_pci_id_table[] = {
 	{
 		PCI_DEVICE(PCI_VENDOR_ID_BROCADE,
 			PCI_DEVICE_ID_BROCADE_CT),

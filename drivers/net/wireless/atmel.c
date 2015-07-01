@@ -68,6 +68,7 @@
 #include <linux/firmware.h>
 #include <linux/jiffies.h>
 #include <linux/ieee80211.h>
+#include <net/cfg80211.h>
 #include "atmel.h"
 
 #define DRIVER_MAJOR 0
@@ -1365,7 +1366,7 @@ static int atmel_close(struct net_device *dev)
 		wrqu.data.length = 0;
 		wrqu.data.flags = 0;
 		wrqu.ap_addr.sa_family = ARPHRD_ETHER;
-		memset(wrqu.ap_addr.sa_data, 0, ETH_ALEN);
+		eth_zero_addr(wrqu.ap_addr.sa_data);
 		wireless_send_event(priv->dev, SIOCGIWAP, &wrqu, NULL);
 	}
 
@@ -2267,7 +2268,7 @@ static int atmel_set_freq(struct net_device *dev,
 
 		/* Hack to fall through... */
 		fwrq->e = 0;
-		fwrq->m = ieee80211_freq_to_dsss_chan(f);
+		fwrq->m = ieee80211_frequency_to_channel(f);
 	}
 	/* Setting by channel number */
 	if ((fwrq->m > 1000) || (fwrq->e > 0))
@@ -2428,8 +2429,8 @@ static int atmel_get_range(struct net_device *dev,
 			range->freq[k].i = i; /* List index */
 
 			/* Values in MHz -> * 10^5 * 10 */
-			range->freq[k].m = (ieee80211_dsss_chan_to_freq(i) *
-					    100000);
+			range->freq[k].m = 100000 *
+			 ieee80211_channel_to_frequency(i, IEEE80211_BAND_2GHZ);
 			range->freq[k++].e = 1;
 		}
 		range->num_frequency = k;
@@ -4052,7 +4053,7 @@ static int reset_atmel_card(struct net_device *dev)
 		wrqu.data.length = 0;
 		wrqu.data.flags = 0;
 		wrqu.ap_addr.sa_family = ARPHRD_ETHER;
-		memset(wrqu.ap_addr.sa_data, 0, ETH_ALEN);
+		eth_zero_addr(wrqu.ap_addr.sa_data);
 		wireless_send_event(priv->dev, SIOCGIWAP, &wrqu, NULL);
 	}
 

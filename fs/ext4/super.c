@@ -1432,8 +1432,6 @@ static int parse_options(char *options, struct super_block *sb,
 				return 0;
 			if (option < 0)
 				return 0;
-			if (option == 0)
-				option = EXT4_DEF_MAX_BATCH_TIME;
 			sbi->s_max_batch_time = option;
 			break;
 		case Opt_min_batch_time:
@@ -2045,7 +2043,9 @@ static void ext4_orphan_cleanup(struct super_block *sb,
 				__func__, inode->i_ino, inode->i_size);
 			jbd_debug(2, "truncating inode %lu to %lld bytes\n",
 				  inode->i_ino, inode->i_size);
+			mutex_lock(&inode->i_mutex);
 			ext4_truncate(inode);
+			mutex_unlock(&inode->i_mutex);
 			nr_truncates++;
 		} else {
 			ext4_msg(sb, KERN_DEBUG,

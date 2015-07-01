@@ -128,7 +128,7 @@ static bool __devinit fam15h_power_is_internal_node0(struct pci_dev *f4)
  * counter saturations resulting in bogus power readings.
  * We correct this value ourselves to cope with older BIOSes.
  */
-static DEFINE_PCI_DEVICE_TABLE(affected_device) = {
+static const struct pci_device_id affected_device[] = {
 	{ PCI_VDEVICE(AMD, PCI_DEVICE_ID_AMD_15H_NB_F4) },
 	{ 0 }
 };
@@ -244,7 +244,7 @@ static void __devexit fam15h_power_remove(struct pci_dev *pdev)
 	kfree(data);
 }
 
-static DEFINE_PCI_DEVICE_TABLE(fam15h_power_id_table) = {
+static const struct pci_device_id fam15h_power_id_table[] = {
 	{ PCI_VDEVICE(AMD, PCI_DEVICE_ID_AMD_15H_NB_F4) },
 	{}
 };

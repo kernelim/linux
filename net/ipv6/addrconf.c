@@ -137,8 +137,8 @@ static DEFINE_SPINLOCK(addrconf_verify_lock);
 static void addrconf_join_anycast(struct inet6_ifaddr *ifp);
 static void addrconf_leave_anycast(struct inet6_ifaddr *ifp);
 
-static void addrconf_bonding_change(struct net_device *dev,
-				    unsigned long event);
+static void addrconf_type_change(struct net_device *dev,
+				 unsigned long event);
 static int addrconf_ifdown(struct net_device *dev, int how);
 
 static void addrconf_dad_start(struct inet6_ifaddr *ifp, u32 flags);
@@ -1730,6 +1730,40 @@ addrconf_prefix_route(struct in6_addr *pfx, int plen, struct net_device *dev,
 	ip6_route_add(&cfg);
 }
 
+
+static struct rt6_info *addrconf_get_prefix_route(struct in6_addr *pfx,
+						  int plen,
+						  struct net_device *dev,
+						  u32 flags, u32 noflags)
+{
+	struct fib6_node *fn;
+	struct rt6_info *rt = NULL;
+	struct fib6_table *table;
+
+	table = fib6_get_table(dev_net(dev), RT6_TABLE_PREFIX);
+	if (table == NULL)
+		return NULL;
+
+	write_lock_bh(&table->tb6_lock);
+	fn = fib6_locate(&table->tb6_root, pfx, plen, NULL, 0);
+	if (!fn)
+		goto out;
+	for (rt = fn->leaf; rt; rt = rt->u.dst.rt6_next) {
+		if (rt->rt6i_dev->ifindex != dev->ifindex)
+			continue;
+		if ((rt->rt6i_flags & flags) != flags)
+			continue;
+		if ((rt->rt6i_flags & noflags) != 0)
+			continue;
+		dst_hold(&rt->u.dst);
+		break;
+	}
+out:
+	write_unlock_bh(&table->tb6_lock);
+	return rt;
+}
+
+
 /* Create "default" multicast route to the interface */
 
 static void addrconf_add_mroute(struct net_device *dev)
@@ -1855,10 +1889,13 @@ void addrconf_prefix_rcv(struct net_device *dev, u8 *opt, int len)
 		if (addrconf_finite_timeout(rt_expires))
 			rt_expires *= HZ;
 
-		rt = rt6_lookup(net, &pinfo->prefix, NULL,
-				dev->ifindex, 1);
+		rt = addrconf_get_prefix_route(&pinfo->prefix,
+					       pinfo->prefix_len,
+					       dev,
+					       RTF_ADDRCONF | RTF_PREFIX_RT,
+					       RTF_GATEWAY | RTF_DEFAULT);
 
-		if (rt && addrconf_is_prefix_route(rt)) {
+		if (rt) {
 			/* Autoconf prefix route */
 			if (valid_lft == 0) {
 				ip6_del_rt(rt);
@@ -2384,8 +2421,18 @@ static void init_loopback(struct net_device *dev)
 			if (sp_ifa->flags & (IFA_F_DADFAILED | IFA_F_TENTATIVE))
 				continue;
 
-			if (sp_ifa->rt)
-				continue;
+			if (sp_ifa->rt) {
+				/* This dst has been added to garbage list when
+				 * lo device down, release this obsolete dst and
+				 * reallocate a new router for ifa.
+				 */
+				if (sp_ifa->rt->u.dst.obsolete > 0) {
+					dst_release(&sp_ifa->rt->u.dst);
+					sp_ifa->rt = NULL;
+				} else {
+					continue;
+				}
+			}
 
 			sp_rt = addrconf_dst_alloc(idev, &sp_ifa->addr, 0);
 
@@ -2665,9 +2712,9 @@ static int addrconf_notify(struct notifier_block *this, unsigned long event,
 				return notifier_from_errno(err);
 		}
 		break;
-	case NETDEV_BONDING_OLDTYPE:
-	case NETDEV_BONDING_NEWTYPE:
-		addrconf_bonding_change(dev, event);
+	case NETDEV_PRE_TYPE_CHANGE:
+	case NETDEV_POST_TYPE_CHANGE:
+		addrconf_type_change(dev, event);
 		break;
 	}
 
@@ -2682,16 +2729,16 @@ static struct notifier_block ipv6_dev_notf = {
 	.priority = 0
 };
 
-static void addrconf_bonding_change(struct net_device *dev, unsigned long event)
+static void addrconf_type_change(struct net_device *dev, unsigned long event)
 {
 	struct inet6_dev *idev;
 	ASSERT_RTNL();
 
 	idev = __in6_dev_get(dev);
 
-	if (event == NETDEV_BONDING_NEWTYPE)
+	if (event == NETDEV_POST_TYPE_CHANGE)
 		ipv6_mc_remap(idev);
-	else if (event == NETDEV_BONDING_OLDTYPE)
+	else if (event == NETDEV_PRE_TYPE_CHANGE)
 		ipv6_mc_unmap(idev);
 }
 

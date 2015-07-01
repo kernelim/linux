@@ -779,14 +779,15 @@ static void rh_check_supported(void)
 	if ((boot_cpu_data.x86_vendor == X86_VENDOR_INTEL) &&
 	    ((boot_cpu_data.x86 == 6))) {
 		switch (boot_cpu_data.x86_model) {
+		case 94: /* Skylake-S */
+		case 79: /* Broadwell-EP */
+		case 78: /* Skylake-Y */
 		case 77: /* Atom Avoton */
+		case 71: /* Broadwell-H */
 		case 70: /* Crystal Well */
-		case 63: /* Grantley/Haswell EP */
-		case 62: /* Ivy Town */
-		case 61: /* Broadwell */
 			break;
 		default:
-			if (boot_cpu_data.x86_model > 60) {
+			if (boot_cpu_data.x86_model > 63) {
 				printk(KERN_CRIT
 				       "Detected CPU family %d model %d\n",
 				       boot_cpu_data.x86,

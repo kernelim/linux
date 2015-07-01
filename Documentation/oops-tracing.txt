@@ -261,6 +261,8 @@ characters, each representing a particular tainted value.
  12: 'I' if the kernel is working around a severe bug in the platform
      firmware (BIOS or similar).
 
+ 15: 'L' if a soft lockup has previously occurred on the system.
+
  29: 'H' if the hardware is unsupported by the distribution
 
 The primary reason for the 'Tainted: ' string is to tell kernel

@@ -36,6 +36,7 @@ struct hda_beep {
 	char phys[32];
 	int tone;
 	hda_nid_t nid;
+	unsigned int registered:1;
 	unsigned int enabled:1;
 	unsigned int request_enable:1;
 	unsigned int linear_tone:1;	/* linear tone for IDT/STAC codec */
@@ -50,6 +51,7 @@ struct hda_beep {
 int snd_hda_enable_beep_device(struct hda_codec *codec, int enable);
 int snd_hda_attach_beep_device(struct hda_codec *codec, int nid);
 void snd_hda_detach_beep_device(struct hda_codec *codec);
+int snd_hda_register_beep_device(struct hda_codec *codec);
 #else
 static inline int snd_hda_attach_beep_device(struct hda_codec *codec, int nid)
 {
@@ -57,6 +59,10 @@ static inline int snd_hda_attach_beep_device(struct hda_codec *codec, int nid)
 }
 static inline void snd_hda_detach_beep_device(struct hda_codec *codec)
 {
+}
+static inline int snd_hda_register_beep_device(struct hda_codec *codec)
+{
+	return 0;
 }
 #endif
 #endif

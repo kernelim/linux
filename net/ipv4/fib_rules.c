@@ -64,6 +64,9 @@ int fib_lookup(struct net *net, struct flowi *flp, struct fib_result *res)
 	err = fib_rules_lookup(net->ipv4.rules_ops, flp, 0, &arg);
 	res->r = arg.rule;
 
+	if (err == -ESRCH)
+		err = -ENETUNREACH;
+
 	return err;
 }
 

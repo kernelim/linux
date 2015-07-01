@@ -3026,12 +3026,17 @@ static struct cfq_queue *
 cfq_get_queue(struct cfq_data *cfqd, bool is_sync, struct io_context *ioc,
 	      gfp_t gfp_mask)
 {
-	const int ioprio = task_ioprio(ioc);
-	const int ioprio_class = task_ioprio_class(ioc);
+	int ioprio = task_ioprio(ioc);
+	int ioprio_class = task_ioprio_class(ioc);
 	struct cfq_queue **async_cfqq = NULL;
 	struct cfq_queue *cfqq = NULL;
 
 	if (!is_sync) {
+		if (!ioprio_valid(ioc->ioprio)) {
+			struct task_struct *tsk = current;
+			ioprio = task_nice_ioprio(tsk);
+			ioprio_class = task_nice_ioclass(tsk);
+		}
 		async_cfqq = cfq_async_queue_prio(cfqd, ioprio_class, ioprio);
 		cfqq = *async_cfqq;
 	}

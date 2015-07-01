@@ -1,5 +1,5 @@
 /* Intel PRO/1000 Linux driver
- * Copyright(c) 1999 - 2014 Intel Corporation.
+ * Copyright(c) 1999 - 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -87,6 +87,10 @@ struct e1000_hw;
 #define E1000_DEV_ID_PCH_I218_V2		0x15A1
 #define E1000_DEV_ID_PCH_I218_LM3		0x15A2	/* Wildcat Point PCH */
 #define E1000_DEV_ID_PCH_I218_V3		0x15A3	/* Wildcat Point PCH */
+#define E1000_DEV_ID_PCH_SPT_I219_LM		0x156F	/* SPT PCH */
+#define E1000_DEV_ID_PCH_SPT_I219_V		0x1570	/* SPT PCH */
+#define E1000_DEV_ID_PCH_SPT_I219_LM2		0x15B7	/* SPT-H PCH */
+#define E1000_DEV_ID_PCH_SPT_I219_V2		0x15B8	/* SPT-H PCH */
 
 #define E1000_REVISION_4	4
 
@@ -108,6 +112,7 @@ enum e1000_mac_type {
 	e1000_pchlan,
 	e1000_pch2lan,
 	e1000_pch_lpt,
+	e1000_pch_spt,
 };
 
 enum e1000_media_type {
@@ -153,6 +158,7 @@ enum e1000_bus_width {
 	e1000_bus_width_pcie_x1,
 	e1000_bus_width_pcie_x2,
 	e1000_bus_width_pcie_x4 = 4,
+	e1000_bus_width_pcie_x8 = 8,
 	e1000_bus_width_32,
 	e1000_bus_width_64,
 	e1000_bus_width_reserved
@@ -644,12 +650,20 @@ struct e1000_shadow_ram {
 
 #define E1000_ICH8_SHADOW_RAM_WORDS		2048
 
+/* I218 PHY Ultra Low Power (ULP) states */
+enum e1000_ulp_state {
+	e1000_ulp_state_unknown,
+	e1000_ulp_state_off,
+	e1000_ulp_state_on,
+};
+
 struct e1000_dev_spec_ich8lan {
 	bool kmrn_lock_loss_workaround_enabled;
 	struct e1000_shadow_ram shadow_ram[E1000_ICH8_SHADOW_RAM_WORDS];
 	bool nvm_k1_enabled;
 	bool eee_disable;
 	u16 eee_lp_ability;
+	enum e1000_ulp_state ulp_state;
 };
 
 struct e1000_hw {

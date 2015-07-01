@@ -2804,7 +2804,7 @@ static inline void snd_cmipci_proc_init(struct cmipci *cm) {}
 #endif
 
 
-static DEFINE_PCI_DEVICE_TABLE(snd_cmipci_ids) = {
+static const struct pci_device_id snd_cmipci_ids[] = {
 	{PCI_VDEVICE(CMEDIA, PCI_DEVICE_ID_CMEDIA_CM8338A), 0},
 	{PCI_VDEVICE(CMEDIA, PCI_DEVICE_ID_CMEDIA_CM8338B), 0},
 	{PCI_VDEVICE(CMEDIA, PCI_DEVICE_ID_CMEDIA_CM8738), 0},
@@ -3026,7 +3026,7 @@ static int __devinit snd_cmipci_create(struct snd_card *card, struct pci_dev *pc
 	int integrated_midi = 0;
 	char modelstr[16];
 	int pcm_index, pcm_spdif_index;
-	static DEFINE_PCI_DEVICE_TABLE(intel_82437vx) = {
+	static const struct pci_device_id intel_82437vx[] = {
 		{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82437VX) },
 		{ },
 	};
@@ -3254,8 +3254,6 @@ static int __devinit snd_cmipci_create(struct snd_card *card, struct pci_dev *pc
 	if (snd_cmipci_create_gameport(cm, dev) < 0)
 		snd_cmipci_clear_bit(cm, CM_REG_FUNCTRL1, CM_JYSTK_EN);
 
-	snd_card_set_dev(card, &pci->dev);
-
 	*rcmipci = cm;
 	return 0;
 }
@@ -3280,7 +3278,8 @@ static int __devinit snd_cmipci_probe(struct pci_dev *pci,
 		return -ENOENT;
 	}
 
-	err = snd_card_create(index[dev], id[dev], THIS_MODULE, 0, &card);
+	err = snd_card_new(&pci->dev, index[dev], id[dev], THIS_MODULE,
+			   0, &card);
 	if (err < 0)
 		return err;
 	

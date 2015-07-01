@@ -1435,8 +1435,6 @@ static int __devinit snd_fm801_create(struct snd_card *card,
 		return err;
 	}
 
-	snd_card_set_dev(card, &pci->dev);
-
 #ifdef TEA575X_RADIO
 	if (tea575x_tuner > 0 && (tea575x_tuner & 0x000f) < 4) {
 		chip->tea.dev_nr = tea575x_tuner >> 16;
@@ -1468,7 +1466,8 @@ static int __devinit snd_card_fm801_probe(struct pci_dev *pci,
 		return -ENOENT;
 	}
 
-	err = snd_card_create(index[dev], id[dev], THIS_MODULE, 0, &card);
+	err = snd_card_new(&pci->dev, index[dev], id[dev], THIS_MODULE,
+			   0, &card);
 	if (err < 0)
 		return err;
 	if ((err = snd_fm801_create(card, pci, tea575x_tuner[dev], &chip)) < 0) {

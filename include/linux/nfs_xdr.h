@@ -177,6 +177,7 @@ struct nfs4_channel_attrs {
 /* nfs41 sessions slot seqid */
 struct nfs4_slot {
 	u32		 	seq_nr;
+	unsigned int		interrupted : 1;
 };
 
 struct nfs4_sequence_args {

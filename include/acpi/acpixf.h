@@ -68,6 +68,7 @@ extern u8 acpi_gbl_use_default_register_widths;
 extern acpi_name acpi_gbl_trace_method_name;
 extern u32 acpi_gbl_trace_flags;
 extern u8 acpi_gbl_truncate_io_addresses;
+extern u8 acpi_gbl_osi_data;
 
 extern u32 acpi_current_gpe_count;
 extern struct acpi_table_fadt acpi_gbl_FADT;

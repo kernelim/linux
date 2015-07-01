@@ -64,6 +64,17 @@ static ssize_t show_##field(struct device *dev,				\
 	return netdev_show(dev, attr, buf, format_##field);		\
 }
 
+#define NETDEVICE_SHOW_EXT(field, format_string)			\
+static ssize_t format_##field(const struct net_device *net, char *buf)	\
+{									\
+	return sprintf(buf, format_string, netdev_extended(net)->field);\
+}									\
+static ssize_t show_##field(struct device *dev,				\
+			    struct device_attribute *attr, char *buf)	\
+{									\
+	return netdev_show(dev, attr, buf, format_##field);		\
+}
+
 
 /* use same locking and permission rules as SIF* ioctl's */
 static ssize_t netdev_store(struct device *dev, struct device_attribute *attr,
@@ -95,6 +106,7 @@ static ssize_t netdev_store(struct device *dev, struct device_attribute *attr,
 }
 
 NETDEVICE_SHOW(dev_id, fmt_hex);
+NETDEVICE_SHOW_EXT(dev_port, fmt_dec);
 NETDEVICE_SHOW(addr_assign_type, fmt_dec);
 NETDEVICE_SHOW(addr_len, fmt_dec);
 NETDEVICE_SHOW(iflink, fmt_dec);
@@ -351,6 +363,7 @@ static struct device_attribute net_class_attributes[] = {
 	__ATTR(tx_queue_len, S_IRUGO | S_IWUSR, show_tx_queue_len,
 	       store_tx_queue_len),
 	__ATTR(phys_port_id, S_IRUGO, show_phys_port_id, NULL),
+	__ATTR(dev_port, S_IRUGO, show_dev_port, NULL),
 	{}
 };
 
@@ -1250,8 +1263,15 @@ int netdev_register_kobject(struct net_device *net)
 	dev_set_name(dev, "%s", net->name);
 
 #ifdef CONFIG_SYSFS
-	*groups++ = &netstat_group;
+	/* Allow for a device specific group */
+	if (*groups && *groups != &netstat_group) {
+		netdev_extended(net)->sysfs_groups[0] = *groups;
+		groups = netdev_extended(net)->sysfs_groups;
+		dev->groups = groups;
+		groups++;
+	}
 
+	*groups++ = &netstat_group;
 #ifdef CONFIG_WIRELESS_EXT_SYSFS
 	if (net->wireless_handlers || net->ieee80211_ptr)
 		*groups++ = &wireless_group;

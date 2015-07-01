@@ -391,7 +391,9 @@ struct input_absinfo {
 
 #define KEY_WIMAX		246
 
-/* Range 248 - 255 is reserved for special needs of AT keyboard driver */
+#define KEY_MICMUTE		248	/* Mute / unmute the microphone */
+
+/* Code 255 is reserved for special needs of AT keyboard driver */
 
 #define BTN_MISC		0x100
 #define BTN_0			0x100
@@ -615,6 +617,9 @@ struct input_absinfo {
 #define KEY_RFKILL		0x20c /* Key that controls all radios */
 
 #define KEY_WPS_BUTTON		0x211	/* WiFi Protected Setup key */
+#define KEY_TOUCHPAD_TOGGLE	0x212	/* Request switch touchpad on or off */
+#define KEY_TOUCHPAD_ON		0x213
+#define KEY_TOUCHPAD_OFF	0x214
 
 /* We avoid low common keys in module aliases so they don't get huge. */
 #define KEY_MIN_INTERESTING	KEY_MUTE

@@ -111,6 +111,9 @@ u32 c4iw_get_cqid(struct c4iw_rdev *rdev, struct c4iw_dev_ucontext *uctx)
 		qid = c4iw_get_resource(&rdev->resource.qid_table);
 		if (!qid)
 			goto out;
+		mutex_lock(&rdev->stats.lock);
+		rdev->stats.qid.cur += rdev->qpmask + 1;
+		mutex_unlock(&rdev->stats.lock);
 		for (i = qid+1; i & rdev->qpmask; i++) {
 			entry = kmalloc(sizeof *entry, GFP_KERNEL);
 			if (!entry)
@@ -139,6 +142,10 @@ u32 c4iw_get_cqid(struct c4iw_rdev *rdev, struct c4iw_dev_ucontext *uctx)
 out:
 	mutex_unlock(&uctx->lock);
 	PDBG("%s qid 0x%x\n", __func__, qid);
+	mutex_lock(&rdev->stats.lock);
+	if (rdev->stats.qid.cur > rdev->stats.qid.max)
+		rdev->stats.qid.max = rdev->stats.qid.cur;
+	mutex_unlock(&rdev->stats.lock);
 	return qid;
 }
 
@@ -172,8 +179,15 @@ u32 c4iw_get_qpid(struct c4iw_rdev *rdev, struct c4iw_dev_ucontext *uctx)
 		kfree(entry);
 	} else {
 		qid = c4iw_get_resource(&rdev->resource.qid_table);
-		if (!qid)
+		if (!qid) {
+			mutex_lock(&rdev->stats.lock);
+			rdev->stats.qid.fail++;
+			mutex_unlock(&rdev->stats.lock);
 			goto out;
+		}
+		mutex_lock(&rdev->stats.lock);
+		rdev->stats.qid.cur += rdev->qpmask + 1;
+		mutex_unlock(&rdev->stats.lock);
 		for (i = qid+1; i & rdev->qpmask; i++) {
 			entry = kmalloc(sizeof *entry, GFP_KERNEL);
 			if (!entry)
@@ -202,6 +216,10 @@ u32 c4iw_get_qpid(struct c4iw_rdev *rdev, struct c4iw_dev_ucontext *uctx)
 out:
 	mutex_unlock(&uctx->lock);
 	PDBG("%s qid 0x%x\n", __func__, qid);
+	mutex_lock(&rdev->stats.lock);
+	if (rdev->stats.qid.cur > rdev->stats.qid.max)
+		rdev->stats.qid.max = rdev->stats.qid.cur;
+	mutex_unlock(&rdev->stats.lock);
 	return qid;
 }
 
@@ -240,12 +258,22 @@ u32 c4iw_pblpool_alloc(struct c4iw_rdev *rdev, int size)
 	if (!addr)
 		printk_ratelimited(KERN_WARNING MOD "%s: Out of PBL memory\n",
 		       pci_name(rdev->lldi.pdev));
+	if (addr) {
+		mutex_lock(&rdev->stats.lock);
+		rdev->stats.pbl.cur += roundup(size, 1 << MIN_PBL_SHIFT);
+		if (rdev->stats.pbl.cur > rdev->stats.pbl.max)
+			rdev->stats.pbl.max = rdev->stats.pbl.cur;
+		mutex_unlock(&rdev->stats.lock);
+	}
 	return (u32)addr;
 }
 
 void c4iw_pblpool_free(struct c4iw_rdev *rdev, u32 addr, int size)
 {
 	PDBG("%s addr 0x%x size %d\n", __func__, addr, size);
+	mutex_lock(&rdev->stats.lock);
+	rdev->stats.pbl.cur -= roundup(size, 1 << MIN_PBL_SHIFT);
+	mutex_unlock(&rdev->stats.lock);
 	gen_pool_free(rdev->pbl_pool, (unsigned long)addr, size);
 }
 
@@ -300,14 +328,24 @@ u32 c4iw_rqtpool_alloc(struct c4iw_rdev *rdev, int size)
 	unsigned long addr = gen_pool_alloc(rdev->rqt_pool, size << 6);
 	PDBG("%s addr 0x%x size %d\n", __func__, (u32)addr, size << 6);
 	if (!addr)
-		printk_ratelimited(KERN_WARNING MOD "%s: Out of RQT memory\n",
-		       pci_name(rdev->lldi.pdev));
+		pr_warn_ratelimited(MOD "%s: Out of RQT memory\n",
+				pci_name(rdev->lldi.pdev));
+	if (addr) {
+		mutex_lock(&rdev->stats.lock);
+		rdev->stats.rqt.cur += roundup(size << 6, 1 << MIN_RQT_SHIFT);
+		if (rdev->stats.rqt.cur > rdev->stats.rqt.max)
+			rdev->stats.rqt.max = rdev->stats.rqt.cur;
+		mutex_unlock(&rdev->stats.lock);
+	}
 	return (u32)addr;
 }
 
 void c4iw_rqtpool_free(struct c4iw_rdev *rdev, u32 addr, int size)
 {
 	PDBG("%s addr 0x%x size %d\n", __func__, addr, size << 6);
+	mutex_lock(&rdev->stats.lock);
+	rdev->stats.rqt.cur -= roundup(size << 6, 1 << MIN_RQT_SHIFT);
+	mutex_unlock(&rdev->stats.lock);
 	gen_pool_free(rdev->rqt_pool, (unsigned long)addr, size << 6);
 }
 
@@ -358,12 +396,22 @@ u32 c4iw_ocqp_pool_alloc(struct c4iw_rdev *rdev, int size)
 {
 	unsigned long addr = gen_pool_alloc(rdev->ocqp_pool, size);
 	PDBG("%s addr 0x%x size %d\n", __func__, (u32)addr, size);
+	if (addr) {
+		mutex_lock(&rdev->stats.lock);
+		rdev->stats.ocqp.cur += roundup(size, 1 << MIN_OCQP_SHIFT);
+		if (rdev->stats.ocqp.cur > rdev->stats.ocqp.max)
+			rdev->stats.ocqp.max = rdev->stats.ocqp.cur;
+		mutex_unlock(&rdev->stats.lock);
+	}
 	return (u32)addr;
 }
 
 void c4iw_ocqp_pool_free(struct c4iw_rdev *rdev, u32 addr, int size)
 {
 	PDBG("%s addr 0x%x size %d\n", __func__, addr, size);
+	mutex_lock(&rdev->stats.lock);
+	rdev->stats.ocqp.cur -= roundup(size, 1 << MIN_OCQP_SHIFT);
+	mutex_unlock(&rdev->stats.lock);
 	gen_pool_free(rdev->ocqp_pool, (unsigned long)addr, size);
 }
 

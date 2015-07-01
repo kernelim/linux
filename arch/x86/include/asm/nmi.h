@@ -48,7 +48,7 @@ extern int proc_nmi_enabled(struct ctl_table *, int ,
 extern int unknown_nmi_panic;
 extern void nmi_watchdog_default(void);
 
-void arch_trigger_all_cpu_backtrace(void);
+void arch_trigger_all_cpu_backtrace(bool);
 #define arch_trigger_all_cpu_backtrace arch_trigger_all_cpu_backtrace
 
 /*

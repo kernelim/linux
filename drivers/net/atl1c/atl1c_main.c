@@ -34,7 +34,7 @@ char atl1c_driver_version[] = ATL1C_DRV_VERSION;
  * { Vendor ID, Device ID, SubVendor ID, SubDevice ID,
  *   Class, Class Mask, private data (not used) }
  */
-static DEFINE_PCI_DEVICE_TABLE(atl1c_pci_tbl) = {
+static const struct pci_device_id atl1c_pci_tbl[] = {
 	{PCI_DEVICE(PCI_VENDOR_ID_ATTANSIC, PCI_DEVICE_ID_ATTANSIC_L1C)},
 	{PCI_DEVICE(PCI_VENDOR_ID_ATTANSIC, PCI_DEVICE_ID_ATTANSIC_L2C)},
 	{PCI_DEVICE(PCI_VENDOR_ID_ATTANSIC, PCI_DEVICE_ID_ATHEROS_L2C_B)},
@@ -471,7 +471,7 @@ static int atl1c_set_mac_addr(struct net_device *netdev, void *p)
 
 	memcpy(netdev->dev_addr, addr->sa_data, netdev->addr_len);
 	memcpy(adapter->hw.mac_addr, addr->sa_data, netdev->addr_len);
-	netdev->addr_assign_type &= ~NET_ADDR_RANDOM;
+	netdev->addr_assign_type = NET_ADDR_PERM;
 
 	atl1c_hw_set_mac_addr(&adapter->hw, adapter->hw.mac_addr);
 
@@ -2515,7 +2515,7 @@ static int __devinit atl1c_probe(struct pci_dev *pdev,
 	}
 	if (atl1c_read_mac_addr(&adapter->hw)) {
 		/* got a random MAC address, set NET_ADDR_RANDOM to netdev */
-		netdev->addr_assign_type |= NET_ADDR_RANDOM;
+		netdev->addr_assign_type = NET_ADDR_RANDOM;
 	}
 	memcpy(netdev->dev_addr, adapter->hw.mac_addr, netdev->addr_len);
 	memcpy(netdev->perm_addr, adapter->hw.mac_addr, netdev->addr_len);

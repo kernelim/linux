@@ -511,13 +511,17 @@ dmar_find_matched_drhd_unit(struct pci_dev *dev)
 
 int __init dmar_dev_scope_init(void)
 {
+	static int dmar_dev_scope_initialized;
 	struct dmar_drhd_unit *drhd, *drhd_n;
 	int ret = -ENODEV;
+
+	if (dmar_dev_scope_initialized)
+		return dmar_dev_scope_initialized;
 
 	list_for_each_entry_safe(drhd, drhd_n, &dmar_drhd_units, list) {
 		ret = dmar_parse_dev(drhd);
 		if (ret)
-			return ret;
+			goto fail;
 	}
 
 #ifdef CONFIG_DMAR
@@ -528,17 +532,22 @@ int __init dmar_dev_scope_init(void)
 		list_for_each_entry_safe(rmrr, rmrr_n, &dmar_rmrr_units, list) {
 			ret = rmrr_parse_dev(rmrr);
 			if (ret)
-				return ret;
+				goto fail;
 		}
 
 		list_for_each_entry_safe(atsr, atsr_n, &dmar_atsr_units, list) {
 			ret = atsr_parse_dev(atsr);
 			if (ret)
-				return ret;
+				goto fail;
 		}
 	}
 #endif
 
+	dmar_dev_scope_initialized = 1;
+	return 0;
+
+fail:
+	dmar_dev_scope_initialized = ret;
 	return ret;
 }
 
@@ -635,9 +644,6 @@ int __init check_zero_address(void)
 	return 1;
 
 failed:
-#ifdef CONFIG_DMAR
-	dmar_disabled = 1;
-#endif
 	return 0;
 }
 
@@ -662,12 +668,15 @@ void __init detect_intel_iommu(void)
 			pr_info("Queued invalidation will be enabled to support x2apic and Intr-remapping.\n");
 #endif
 #ifdef CONFIG_DMAR
-		if (ret && !no_iommu && !iommu_detected && !swiotlb &&
-		    !dmar_disabled) {
+		if (ret && !no_iommu && !iommu_detected && !dmar_disabled) {
 			iommu_detected = 1;
 			/* Make sure ACS will be enabled */
 			pci_request_acs();
 		}
+#endif
+#ifdef CONFIG_X86
+		if (ret)
+			x86_init.iommu.iommu_init = intel_iommu_init;
 #endif
 	}
 	early_acpi_os_unmap_memory(dmar_tbl, dmar_tbl_size);

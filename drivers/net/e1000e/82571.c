@@ -1,5 +1,5 @@
 /* Intel PRO/1000 Linux driver
- * Copyright(c) 1999 - 2014 Intel Corporation.
+ * Copyright(c) 1999 - 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -95,7 +95,6 @@ static s32 e1000_init_phy_params_82571(struct e1000_hw *hw)
 		break;
 	default:
 		return -E1000_ERR_PHY;
-		break;
 	}
 
 	/* This can only be done after all function pointers are setup. */
@@ -422,7 +421,6 @@ static s32 e1000_get_phy_id_82571(struct e1000_hw *hw)
 		break;
 	case e1000_82573:
 		return e1000e_get_phy_id(hw);
-		break;
 	case e1000_82574:
 	case e1000_82583:
 		ret_val = e1e_rphy(hw, MII_PHYSID1, &phy_id);
@@ -440,7 +438,6 @@ static s32 e1000_get_phy_id_82571(struct e1000_hw *hw)
 		break;
 	default:
 		return -E1000_ERR_PHY;
-		break;
 	}
 
 	return 0;
@@ -1458,7 +1455,6 @@ static s32 e1000_setup_copper_link_82571(struct e1000_hw *hw)
 		break;
 	default:
 		return -E1000_ERR_PHY;
-		break;
 	}
 
 	if (ret_val)
@@ -2017,7 +2013,7 @@ const struct e1000_info e1000_82573_info = {
 	.flags2			= FLAG2_DISABLE_ASPM_L1
 				  | FLAG2_DISABLE_ASPM_L0S,
 	.pba			= 20,
-	.max_hw_frame_size	= ETH_FRAME_LEN + ETH_FCS_LEN,
+	.max_hw_frame_size	= VLAN_ETH_FRAME_LEN + ETH_FCS_LEN,
 	.get_variants		= e1000_get_variants_82571,
 	.mac_ops		= &e82571_mac_ops,
 	.phy_ops		= &e82_phy_ops_m88,

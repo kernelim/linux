@@ -459,10 +459,11 @@ struct zfcp_adapter {
 	struct fc_host_statistics *fc_stats;
 	struct fsf_qtcb_bottom_port *stats_reset_data;
 	unsigned long		stats_reset;
-	struct work_struct	scan_work;
+	struct delayed_work	scan_work;
 	struct service_level	service_level;
 	struct workqueue_struct	*work_queue;
 	struct zfcp_fc_events events;
+	unsigned long		next_port_scan;
 };
 
 struct zfcp_port {

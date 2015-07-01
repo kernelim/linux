@@ -1001,26 +1001,40 @@ xfs_ioctl_setattr(
 		}
 	}
 
+	/*
+	 * extent size hint validation is somewhat cumbersome. Rules are:
+	 *
+	 * 1. extent size hint is only valid for directories and regular files
+	 * 2. XFS_XFLAG_EXTSIZE is only valid for regular files
+	 * 3. XFS_XFLAG_EXTSZINHERIT is only valid for directories.
+	 * 4. can only be changed on regular files if no extents are allocated
+	 * 5. can be changed on directories at any time
+	 * 6. extsize hint of 0 turns off hints, clears inode flags.
+	 * 7. Extent size must be a multiple of the appropriate block size.
+	 * 8. for non-realtime files, the extent size hint must be limited
+	 *    to half the AG size to avoid alignment extending the extent beyond the
+	 *    limits of the AG.
+	 */
 	if (mask & FSX_EXTSIZE) {
-		/*
-		 * Can't change extent size if any extents are allocated.
-		 */
-		if (ip->i_d.di_nextents &&
+		if ((fa->fsx_xflags & XFS_XFLAG_EXTSIZE) &&
+			!S_ISREG(ip->i_d.di_mode)) {
+			code = XFS_ERROR(EINVAL);
+			goto error_return;
+		}
+
+		if ((fa->fsx_xflags & XFS_XFLAG_EXTSZINHERIT) &&
+			!S_ISDIR(ip->i_d.di_mode)) {
+			code = XFS_ERROR(EINVAL);
+			goto error_return;
+		}
+
+		if (S_ISREG(ip->i_d.di_mode) && ip->i_d.di_nextents &&
 		    ((ip->i_d.di_extsize << mp->m_sb.sb_blocklog) !=
 		     fa->fsx_extsize)) {
 			code = XFS_ERROR(EINVAL);	/* EFBIG? */
 			goto error_return;
 		}
 
-		/*
-		 * Extent size must be a multiple of the appropriate block
-		 * size, if set at all. It must also be smaller than the
-		 * maximum extent size supported by the filesystem.
-		 *
-		 * Also, for non-realtime files, limit the extent size hint to
-		 * half the size of the AGs in the filesystem so alignment
-		 * doesn't result in extents larger than an AG.
-		 */
 		if (fa->fsx_extsize != 0) {
 			xfs_extlen_t    size;
 			xfs_fsblock_t   extsize_fsb;
@@ -1048,6 +1062,8 @@ xfs_ioctl_setattr(
 				code = XFS_ERROR(EINVAL);
 				goto error_return;
 			}
+		} else {
+			fa->fsx_xflags &= ~(XFS_XFLAG_EXTSIZE | XFS_XFLAG_EXTSZINHERIT);
 		}
 	}
 
@@ -1375,7 +1391,7 @@ xfs_file_ioctl(
 			XFS_IS_REALTIME_INODE(ip) ?
 			mp->m_rtdev_targp : mp->m_ddev_targp;
 
-		da.d_mem = da.d_miniosz = 1 << target->bt_sshift;
+		da.d_mem =  da.d_miniosz = target->bt_logical_sectorsize;
 		da.d_maxiosz = INT_MAX & ~(da.d_miniosz - 1);
 
 		if (copy_to_user(arg, &da, sizeof(da)))

@@ -464,6 +464,8 @@ struct ring_buffer_iter {
 	struct ring_buffer_per_cpu	*cpu_buffer;
 	unsigned long			head;
 	struct buffer_page		*head_page;
+	struct buffer_page		*cache_reader_page;
+	unsigned long			cache_read;
 	u64				read_stamp;
 };
 
@@ -2714,15 +2716,12 @@ static void rb_iter_reset(struct ring_buffer_iter *iter)
 	struct ring_buffer_per_cpu *cpu_buffer = iter->cpu_buffer;
 
 	/* Iterator usage is expected to have record disabled */
-	if (list_empty(&cpu_buffer->reader_page->list)) {
-		iter->head_page = rb_set_head_page(cpu_buffer);
-		if (unlikely(!iter->head_page))
-			return;
-		iter->head = iter->head_page->read;
-	} else {
-		iter->head_page = cpu_buffer->reader_page;
-		iter->head = cpu_buffer->reader_page->read;
-	}
+	iter->head_page = cpu_buffer->reader_page;
+	iter->head = cpu_buffer->reader_page->read;
+
+	iter->cache_reader_page = iter->head_page;
+	iter->cache_read = cpu_buffer->read;
+
 	if (iter->head)
 		iter->read_stamp = cpu_buffer->read_stamp;
 	else
@@ -3071,13 +3070,22 @@ rb_iter_peek(struct ring_buffer_iter *iter, u64 *ts)
 	struct ring_buffer_event *event;
 	int nr_loops = 0;
 
-	if (ring_buffer_iter_empty(iter))
-		return NULL;
-
 	cpu_buffer = iter->cpu_buffer;
 	buffer = cpu_buffer->buffer;
 
+	/*
+	 * Check if someone performed a consuming read to
+	 * the buffer. A consuming read invalidates the iterator
+	 * and we need to reset the iterator in this case.
+	 */
+	if (unlikely(iter->cache_read != cpu_buffer->read ||
+		     iter->cache_reader_page != cpu_buffer->reader_page))
+		rb_iter_reset(iter);
+
  again:
+	if (ring_buffer_iter_empty(iter))
+		return NULL;
+
 	/*
 	 * We repeat when a timestamp is encountered.
 	 * We can get multiple timestamps by nested interrupts or also
@@ -3091,6 +3099,11 @@ rb_iter_peek(struct ring_buffer_iter *iter, u64 *ts)
 
 	if (rb_per_cpu_empty(cpu_buffer))
 		return NULL;
+
+	if (iter->head >= local_read(&iter->head_page->page->commit)) {
+		rb_inc_iter(iter);
+		goto again;
+	}
 
 	event = rb_iter_head_event(iter);
 
@@ -3737,6 +3750,9 @@ int ring_buffer_read_page(struct ring_buffer *buffer,
 			rb_advance_reader(cpu_buffer);
 			rpos = reader->read;
 			pos += size;
+
+			if (rpos >= commit)
+				break;
 
 			event = rb_reader_event(cpu_buffer);
 			size = rb_event_length(event);

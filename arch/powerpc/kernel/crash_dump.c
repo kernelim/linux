@@ -30,6 +30,7 @@
 
 /* Stores the physical address of elf header of crash image. */
 unsigned long long elfcorehdr_addr = ELFCORE_ADDR_MAX;
+EXPORT_SYMBOL(elfcorehdr_addr);
 
 #ifndef CONFIG_RELOCATABLE
 void __init reserve_kdump_trampoline(void)
@@ -125,17 +126,19 @@ ssize_t copy_oldmem_page(unsigned long pfn, char *buf,
 			size_t csize, unsigned long offset, int userbuf)
 {
 	void  *vaddr;
+	phys_addr_t paddr;
 
 	if (!csize)
 		return 0;
 
 	csize = min(csize, PAGE_SIZE);
+	paddr = pfn << PAGE_SHIFT;
 
-	if (pfn < max_pfn) {
-		vaddr = __va(pfn << PAGE_SHIFT);
+	if (lmb_is_region_memory(paddr, csize)) {
+		vaddr = __va(paddr);
 		csize = copy_oldmem_vaddr(vaddr, buf, csize, offset, userbuf);
 	} else {
-		vaddr = __ioremap(pfn << PAGE_SHIFT, PAGE_SIZE, 0);
+		vaddr = __ioremap(paddr, PAGE_SIZE, 0);
 		csize = copy_oldmem_vaddr(vaddr, buf, csize, offset, userbuf);
 		iounmap(vaddr);
 	}

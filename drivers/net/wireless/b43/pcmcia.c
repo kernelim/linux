@@ -27,14 +27,20 @@
 #include <linux/slab.h>
 #include <linux/module.h>
 
+#if 1 /* in RHEL */
 #include <pcmcia/cs_types.h>
+#endif
 #include <pcmcia/cistpl.h>
 #include <pcmcia/ciscode.h>
 #include <pcmcia/ds.h>
 #include <pcmcia/cisreg.h>
 
 
+#if 0 /* Not in RHEL */
+static const struct pcmcia_device_id b43_pcmcia_tbl[] = {
+#else
 static struct pcmcia_device_id b43_pcmcia_tbl[] = {
+#endif
 	PCMCIA_DEVICE_MANF_CARD(0x2D0, 0x448),
 	PCMCIA_DEVICE_MANF_CARD(0x2D0, 0x476),
 	PCMCIA_DEVICE_NULL,
@@ -64,11 +70,11 @@ static int b43_pcmcia_resume(struct pcmcia_device *dev)
 static int b43_pcmcia_probe(struct pcmcia_device *dev)
 {
 	struct ssb_bus *ssb;
+	int err = -ENOMEM;
+	int res = 0;
 #if 1 /* in RHEL */
 	win_req_t win;
 #endif
-	int err = -ENOMEM;
-	int res = 0;
 
 	ssb = kzalloc(sizeof(*ssb), GFP_KERNEL);
 	if (!ssb)
@@ -95,7 +101,6 @@ static int b43_pcmcia_probe(struct pcmcia_device *dev)
 	win.AccessSpeed = 250;
 	res = pcmcia_request_window(&dev, &win, &dev->win);
 #endif
-
 	if (res != 0)
 		goto err_kfree_ssb;
 

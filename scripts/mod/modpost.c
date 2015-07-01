@@ -1858,6 +1858,7 @@ static void add_rheldata(struct buffer *b, struct module *mod)
 	buf_printf(b, "__attribute__((section(\".rheldata\"))) = {\n");
 	buf_printf(b, "	.rhel_major = %d,\n", RHEL_MAJOR);
 	buf_printf(b, "	.rhel_minor = %d,\n", RHEL_MINOR);
+	buf_printf(b, "	.rhel_release = %d,\n", RHEL_RELEASE);
 	buf_printf(b, "};\n");
 }
 

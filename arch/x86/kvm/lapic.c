@@ -230,8 +230,14 @@ static u8 count_vectors(void *bitmap)
 
 static inline int apic_test_and_set_irr(int vec, struct kvm_lapic *apic)
 {
+	bool ret;
+	ret = apic_test_and_set_vector(vec, apic->regs + APIC_IRR);
+	/*
+	 * irr_pending must be true if any interrupt is pending; set it after
+	 * APIC_IRR to avoid race with apic_clear_irr
+	 */
 	apic->irr_pending = true;
-	return apic_test_and_set_vector(vec, apic->regs + APIC_IRR);
+	return ret;
 }
 
 static inline int apic_search_irr(struct kvm_lapic *apic)

@@ -342,7 +342,8 @@ int apply_relocate_add(Elf64_Shdr *sechdrs,
 		       const char *strtab,
 		       unsigned int symindex,
 		       unsigned int relsec,
-		       struct module *me)
+		       struct module *me,
+		       struct rheldata *rheldata)
 {
 	unsigned int i;
 	Elf64_Rela *rela = (void *)sechdrs[relsec].sh_addr;

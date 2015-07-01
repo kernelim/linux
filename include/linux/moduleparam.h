@@ -149,7 +149,8 @@ extern int parse_args(const char *name,
 		      char *args,
 		      struct kernel_param *params,
 		      unsigned num,
-		      int (*unknown)(char *param, char *val));
+		      int (*unknown)(char *param, char *val,
+			      const char *doing));
 
 /* Called by module remove. */
 #ifdef CONFIG_SYSFS

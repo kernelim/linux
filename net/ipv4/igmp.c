@@ -1259,7 +1259,7 @@ out:
 }
 
 /*
- *	Resend IGMP JOIN report; used for bonding.
+ *	Resend IGMP JOIN report; used by netdev notifier.
  */
 void ip_mc_rejoin_group(struct ip_mc_list *im)
 {
@@ -1269,14 +1269,14 @@ void ip_mc_rejoin_group(struct ip_mc_list *im)
 	if (im->multiaddr == IGMP_ALL_HOSTS)
 		return;
 
-	/* a failover is happening and switches
-	 * must be notified immediately */
-	if (IGMP_V1_SEEN(in_dev))
-		igmp_send_report(in_dev, im, IGMP_HOST_MEMBERSHIP_REPORT);
-	else if (IGMP_V2_SEEN(in_dev))
-		igmp_send_report(in_dev, im, IGMPV2_HOST_MEMBERSHIP_REPORT);
-	else
-		igmp_send_report(in_dev, im, IGMPV3_HOST_MEMBERSHIP_REPORT);
+	if (IGMP_V1_SEEN(in_dev) || IGMP_V2_SEEN(in_dev)) {
+		igmp_mod_timer(im, IGMP_Initial_Report_Delay);
+		return;
+	}
+	/* else, v3 */
+	im->crcount = in_dev->mr_qrv ? in_dev->mr_qrv :
+		IGMP_Unsolicited_Report_Count;
+	igmp_ifc_event(in_dev);
 #endif
 }
 
@@ -2691,9 +2691,48 @@ static struct pernet_operations igmp_net_ops = {
 	.exit = igmp_net_exit,
 };
 
+static int igmp_netdev_event(struct notifier_block *this,
+			     unsigned long event, void *ptr)
+{
+	struct net_device *dev = (struct net_device *)ptr;
+	struct in_device *in_dev;
+	struct ip_mc_list *im;
+
+	switch (event) {
+	case NETDEV_RESEND_IGMP:
+		in_dev = __in_dev_get_rtnl(dev);
+		if (in_dev) {
+			read_lock(&in_dev->mc_list_lock);
+			for (im = in_dev->mc_list; im; im = im->next)
+				ip_mc_rejoin_group(im);
+			read_unlock(&in_dev->mc_list_lock);
+		}
+		break;
+	default:
+		break;
+	}
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block igmp_notifier = {
+	.notifier_call = igmp_netdev_event,
+};
+
 int __init igmp_mc_proc_init(void)
 {
-	return register_pernet_subsys(&igmp_net_ops);
+	int err;
+
+	err = register_pernet_subsys(&igmp_net_ops);
+	if (err)
+		return err;
+	err = register_netdevice_notifier(&igmp_notifier);
+	if (err)
+		goto reg_notif_fail;
+	return 0;
+
+reg_notif_fail:
+	unregister_pernet_subsys(&igmp_net_ops);
+	return err;
 }
 #endif
 

@@ -57,7 +57,7 @@
 #include <linux/kthread.h>
 
 #define CCISS_DRIVER_VERSION(maj,min,submin) ((maj<<16)|(min<<8)|(submin))
-#define DRIVER_NAME "HP CISS Driver (v 3.6.28-RH2)"
+#define DRIVER_NAME "HP CISS Driver (v 3.6.28-RH3)"
 #define DRIVER_VERSION CCISS_DRIVER_VERSION(3, 6, 28)
 
 /* Embedded module documentation macros - see modules.h */
@@ -4681,8 +4681,10 @@ static __devinit int cciss_kdump_hard_reset_controller(struct pci_dev *pdev)
 	 * likely not be happy.  Just forbid resetting this conjoined mess.
 	 */
 	cciss_lookup_board_id(pdev, &board_id);
-	if (!ctlr_is_resettable(board_id))
-		return -ENOTSUPP;
+	if (!ctlr_is_resettable(board_id)) {
+		dev_warn(&pdev->dev, "Cannot reset adapter.");
+		return -ENODEV;
+	}
 
 	/* if controller is soft- but not hard resettable... */
 	if (!ctlr_is_hard_resettable(board_id))

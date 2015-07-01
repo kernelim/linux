@@ -33,7 +33,7 @@
 
 #define DRV_NAME		"enic"
 #define DRV_DESCRIPTION		"Cisco VIC Ethernet NIC Driver"
-#define DRV_VERSION		"2.1.1.50"
+#define DRV_VERSION		"2.1.1.67"
 #define DRV_COPYRIGHT		"Copyright 2008-2013 Cisco Systems, Inc"
 
 #define ENIC_BARS_MAX		6
@@ -120,7 +120,6 @@ struct enic {
 	unsigned int priv_flags;
 	unsigned int mc_count;
 	unsigned int uc_count;
-	int csum_rx_enabled;
 	u32 port_mtu;
 	struct enic_rx_coal rx_coalesce_setting;
 	u32 rx_coalesce_usecs;
@@ -144,7 +143,7 @@ struct enic {
 	unsigned int rq_count;
 	u64 rq_truncated_pkts;
 	u64 rq_bad_fcs;
-	struct napi_struct napi[ENIC_RQ_MAX];
+	struct napi_struct napi[ENIC_RQ_MAX + ENIC_WQ_MAX];
 
 	/* interrupt resource cache line section */
 	____cacheline_aligned struct vnic_intr intr[ENIC_INTR_MAX];
@@ -154,6 +153,8 @@ struct enic {
 	/* completion queue cache line section */
 	____cacheline_aligned struct vnic_cq cq[ENIC_CQ_MAX];
 	unsigned int cq_count;
+	u32 rx_copybreak;
+	struct vnic_gen_stats gen_stats;
 };
 
 static inline struct device *enic_get_dev(struct enic *enic)
@@ -206,6 +207,19 @@ static inline unsigned int enic_msix_err_intr(struct enic *enic)
 static inline unsigned int enic_msix_notify_intr(struct enic *enic)
 {
 	return enic->rq_count + enic->wq_count + 1;
+}
+
+static inline int enic_dma_map_check(struct enic *enic, dma_addr_t dma_addr)
+{
+	if (unlikely(pci_dma_mapping_error(enic->pdev, dma_addr))) {
+		net_warn_ratelimited("%s: PCI dma mapping failed!\n",
+				     enic->netdev->name);
+		enic->gen_stats.dma_map_error++;
+
+		return -ENOMEM;
+	}
+
+	return 0;
 }
 
 void enic_reset_addr_lists(struct enic *enic);

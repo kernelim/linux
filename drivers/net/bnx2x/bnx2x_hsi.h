@@ -280,17 +280,11 @@ struct shared_hw_cfg {			 /* NVRAM Offset */
 		#define SHARED_HW_CFG_MDC_MDIO_ACCESS2_BOTH          0x60000000
 		#define SHARED_HW_CFG_MDC_MDIO_ACCESS2_SWAPPED       0x80000000
 
-
-	u32 power_dissipated;			/* 0x11c */
-	#define SHARED_HW_CFG_POWER_MGNT_SCALE_MASK         0x00ff0000
-		#define SHARED_HW_CFG_POWER_MGNT_SCALE_SHIFT         16
-		#define SHARED_HW_CFG_POWER_MGNT_UNKNOWN_SCALE       0x00000000
-		#define SHARED_HW_CFG_POWER_MGNT_DOT_1_WATT          0x00010000
-		#define SHARED_HW_CFG_POWER_MGNT_DOT_01_WATT         0x00020000
-		#define SHARED_HW_CFG_POWER_MGNT_DOT_001_WATT        0x00030000
-
-	#define SHARED_HW_CFG_POWER_DIS_CMN_MASK            0xff000000
-	#define SHARED_HW_CFG_POWER_DIS_CMN_SHIFT                    24
+	u32 config_3;				/* 0x11C */
+	#define SHARED_HW_CFG_EXTENDED_MF_MODE_MASK         0x00000F00
+		#define SHARED_HW_CFG_EXTENDED_MF_MODE_SHIFT              8
+		#define SHARED_HW_CFG_EXTENDED_MF_MODE_NPAR1_DOT_5        0x00000000
+		#define SHARED_HW_CFG_EXTENDED_MF_MODE_NPAR2_DOT_0        0x00000100
 
 	u32 ump_nc_si_config;			/* 0x120 */
 	#define SHARED_HW_CFG_UMP_NC_SI_MII_MODE_MASK       0x00000003
@@ -859,6 +853,8 @@ struct shared_feat_cfg {		 /* NVRAM Offset */
 		#define SHARED_FEAT_CFG_FORCE_SF_MODE_SPIO4          0x00000200
 		#define SHARED_FEAT_CFG_FORCE_SF_MODE_SWITCH_INDEPT  0x00000300
 		#define SHARED_FEAT_CFG_FORCE_SF_MODE_AFEX_MODE      0x00000400
+		#define SHARED_FEAT_CFG_FORCE_SF_MODE_UFP_MODE       0x00000600
+		#define SHARED_FEAT_CFG_FORCE_SF_MODE_EXTENDED_MODE  0x00000700
 
 	/* The interval in seconds between sending LLDP packets. Set to zero
 	   to disable the feature */
@@ -1268,6 +1264,10 @@ struct drv_func_mb {
 	#define DRV_MSG_CODE_GET_UPGRADE_KEY            0x81000000
 	#define DRV_MSG_CODE_GET_MANUF_KEY              0x82000000
 	#define DRV_MSG_CODE_LOAD_L2B_PRAM              0x90000000
+	#define DRV_MSG_CODE_OEM_OK			0x00010000
+	#define DRV_MSG_CODE_OEM_FAILURE		0x00020000
+	#define DRV_MSG_CODE_OEM_UPDATE_SVID_OK		0x00030000
+	#define DRV_MSG_CODE_OEM_UPDATE_SVID_FAILURE	0x00040000
 	/*
 	 * The optic module verification command requires bootcode
 	 * v5.0.6 or later, te specific optic module verification command
@@ -1422,6 +1422,12 @@ struct drv_func_mb {
 	#define DRV_STATUS_VF_DISABLED                  0x00000002
 	#define DRV_STATUS_SET_MF_BW                    0x00000004
 	#define DRV_STATUS_LINK_EVENT                   0x00000008
+
+	#define DRV_STATUS_OEM_EVENT_MASK               0x00000070
+	#define DRV_STATUS_OEM_DISABLE_ENABLE_PF        0x00000010
+	#define DRV_STATUS_OEM_BANDWIDTH_ALLOCATION     0x00000020
+
+	#define DRV_STATUS_OEM_UPDATE_SVID              0x00000080
 
 	#define DRV_STATUS_DCC_EVENT_MASK               0x0000ff00
 	#define DRV_STATUS_DCC_DISABLE_ENABLE_PF        0x00000100
@@ -2233,7 +2239,12 @@ struct shmem2_region {
 	u32 reserved3;				/* Offset 0x14C */
 	u32 reserved4;				/* Offset 0x150 */
 	u32 link_attr_sync[PORT_MAX];		/* Offset 0x154 */
-	#define LINK_ATTR_SYNC_KR2_ENABLE	(1<<0)
+	#define LINK_ATTR_SYNC_KR2_ENABLE	0x00000001
+	#define LINK_SFP_EEPROM_COMP_CODE_MASK	0x0000ff00
+	#define LINK_SFP_EEPROM_COMP_CODE_SHIFT		 8
+	#define LINK_SFP_EEPROM_COMP_CODE_SR	0x00001000
+	#define LINK_SFP_EEPROM_COMP_CODE_LR	0x00002000
+	#define LINK_SFP_EEPROM_COMP_CODE_LRM	0x00004000
 
 	u32 reserved5[2];
 	u32 reserved6[PORT_MAX];
@@ -3547,7 +3558,9 @@ struct client_init_rx_data {
 	__le16 rx_cos_mask;
 	__le16 silent_vlan_value;
 	__le16 silent_vlan_mask;
-	__le32 reserved6[2];
+	u8 handle_ptp_pkts_flg;
+	u8 reserved6[3];
+	__le32 reserved7;
 };
 
 /*
@@ -3616,7 +3629,9 @@ struct client_update_ramrod_data {
 	u8 refuse_outband_vlan_change_flg;
 	u8 tx_switching_flg;
 	u8 tx_switching_change_flg;
-	__le32 reserved1;
+	u8 handle_ptp_pkts_flg;
+	u8 handle_ptp_pkts_change_flg;
+	__le16 reserved1;
 	__le32 echo;
 };
 
@@ -3850,8 +3865,10 @@ struct eth_fast_path_rx_cqe {
 #define ETH_FAST_PATH_RX_CQE_IP_BAD_XSUM_FLG_SHIFT 4
 #define ETH_FAST_PATH_RX_CQE_L4_BAD_XSUM_FLG (0x1<<5)
 #define ETH_FAST_PATH_RX_CQE_L4_BAD_XSUM_FLG_SHIFT 5
-#define ETH_FAST_PATH_RX_CQE_RESERVED0 (0x3<<6)
-#define ETH_FAST_PATH_RX_CQE_RESERVED0_SHIFT 6
+#define ETH_FAST_PATH_RX_CQE_PTP_PKT (0x1<<6)
+#define ETH_FAST_PATH_RX_CQE_PTP_PKT_SHIFT 6
+#define ETH_FAST_PATH_RX_CQE_RESERVED0 (0x1<<7)
+#define ETH_FAST_PATH_RX_CQE_RESERVED0_SHIFT 7
 	u8 status_flags;
 #define ETH_FAST_PATH_RX_CQE_RSS_HASH_TYPE (0x7<<0)
 #define ETH_FAST_PATH_RX_CQE_RSS_HASH_TYPE_SHIFT 0
@@ -3977,29 +3994,10 @@ struct eth_mac_addresses {
 
 /* tunneling related data */
 struct eth_tunnel_data {
-#if defined(__BIG_ENDIAN)
-	__le16 dst_mid;
-	__le16 dst_lo;
-#elif defined(__LITTLE_ENDIAN)
 	__le16 dst_lo;
 	__le16 dst_mid;
-#endif
-#if defined(__BIG_ENDIAN)
-	__le16 fw_ip_hdr_csum;
-	__le16 dst_hi;
-#elif defined(__LITTLE_ENDIAN)
 	__le16 dst_hi;
 	__le16 fw_ip_hdr_csum;
-#endif
-#if defined(__BIG_ENDIAN)
-	u8 flags;
-#define ETH_TUNNEL_DATA_IP_HDR_TYPE_OUTER (0x1<<0)
-#define ETH_TUNNEL_DATA_IP_HDR_TYPE_OUTER_SHIFT 0
-#define ETH_TUNNEL_DATA_RESERVED (0x7F<<1)
-#define ETH_TUNNEL_DATA_RESERVED_SHIFT 1
-	u8 ip_hdr_start_inner_w;
-	__le16 pseudo_csum;
-#elif defined(__LITTLE_ENDIAN)
 	__le16 pseudo_csum;
 	u8 ip_hdr_start_inner_w;
 	u8 flags;
@@ -4007,7 +4005,6 @@ struct eth_tunnel_data {
 #define ETH_TUNNEL_DATA_IP_HDR_TYPE_OUTER_SHIFT 0
 #define ETH_TUNNEL_DATA_RESERVED (0x7F<<1)
 #define ETH_TUNNEL_DATA_RESERVED_SHIFT 1
-#endif
 };
 
 /* union for mac addresses and for tunneling data.
@@ -5658,6 +5655,16 @@ struct protocol_common_spe {
 	union protocol_common_specific_data data;
 };
 
+/* The data for the Set Timesync Ramrod */
+struct set_timesync_ramrod_data {
+	u8 drift_adjust_cmd;
+	u8 offset_cmd;
+	u8 add_sub_drift_adjust_value;
+	u8 drift_adjust_value;
+	u32 drift_adjust_period;
+	struct regpair offset_delta;
+};
+
 /*
  * The send queue element
  */
@@ -5778,6 +5785,29 @@ struct tstorm_queue_zone_data {
  */
 struct tstorm_vf_zone_data {
 	struct regpair reserved;
+};
+
+/* Add or Subtract Value for Set Timesync Ramrod */
+enum ts_add_sub_value {
+	TS_SUB_VALUE,
+	TS_ADD_VALUE,
+	MAX_TS_ADD_SUB_VALUE
+};
+
+/* Drift-Adjust Commands for Set Timesync Ramrod */
+enum ts_drift_adjust_cmd {
+	TS_DRIFT_ADJUST_KEEP,
+	TS_DRIFT_ADJUST_SET,
+	TS_DRIFT_ADJUST_RESET,
+	MAX_TS_DRIFT_ADJUST_CMD
+};
+
+/* Offset Commands for Set Timesync Ramrod */
+enum ts_offset_cmd {
+	TS_OFFSET_KEEP,
+	TS_OFFSET_INC,
+	TS_OFFSET_DEC,
+	MAX_TS_OFFSET_CMD
 };
 
 /* Tunnel Mode */

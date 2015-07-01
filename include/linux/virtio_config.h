@@ -78,6 +78,10 @@
  *	This gives the final feature bits for the device: it can change
  *	the dev->feature bits if it wants.
  * @set_vq_affinity: set the affinity for a virtqueue.
+ * @bus_name: return the bus name associated with the device
+ *	vdev: the virtio_device
+ *      This returns a pointer to the bus name a la pci_name from which
+ *      the caller can then copy.
  */
 typedef void vq_callback_t(struct virtqueue *);
 struct virtio_config_ops {
@@ -96,6 +100,7 @@ struct virtio_config_ops {
 	u32 (*get_features)(struct virtio_device *vdev);
 	void (*finalize_features)(struct virtio_device *vdev);
 	int (*set_vq_affinity)(struct virtqueue *vq, int cpu);
+	const char *(*bus_name)(struct virtio_device *vdev);
 };
 
 /* If driver didn't advertise the feature, it will never appear. */
@@ -174,6 +179,14 @@ int virtqueue_set_affinity(struct virtqueue *vq, int cpu)
 	return 0;
 }
 
+
+static inline
+const char *virtio_bus_name(struct virtio_device *vdev)
+{
+	if (!vdev->config->bus_name)
+		return "virtio";
+	return vdev->config->bus_name(vdev);
+}
 
 #endif /* __KERNEL__ */
 #endif /* _LINUX_VIRTIO_CONFIG_H */

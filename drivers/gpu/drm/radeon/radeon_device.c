@@ -99,8 +99,67 @@ static const char radeon_family_name[][16] = {
 	"KAVERI",
 	"KABINI",
 	"HAWAII",
+	"MULLINS",
 	"LAST",
 };
+
+#define RADEON_PX_QUIRK_DISABLE_PX  (1 << 0)
+#define RADEON_PX_QUIRK_LONG_WAKEUP (1 << 1)
+
+struct radeon_px_quirk {
+	u32 chip_vendor;
+	u32 chip_device;
+	u32 subsys_vendor;
+	u32 subsys_device;
+	u32 px_quirk_flags;
+};
+
+static struct radeon_px_quirk radeon_px_quirk_list[] = {
+	/* Acer aspire 5560g (CPU: AMD A4-3305M; GPU: AMD Radeon HD 6480g + 7470m)
+	 * https://bugzilla.kernel.org/show_bug.cgi?id=74551
+	 */
+	{ PCI_VENDOR_ID_ATI, 0x6760, 0x1025, 0x0672, RADEON_PX_QUIRK_DISABLE_PX },
+	/* Asus K73TA laptop with AMD A6-3400M APU and Radeon 6550 GPU
+	 * https://bugzilla.kernel.org/show_bug.cgi?id=51381
+	 */
+	{ PCI_VENDOR_ID_ATI, 0x6741, 0x1043, 0x108c, RADEON_PX_QUIRK_DISABLE_PX },
+	/* Asus K53TK laptop with AMD A6-3420M APU and Radeon 7670m GPU
+	 * https://bugzilla.kernel.org/show_bug.cgi?id=51381
+	 */
+	{ PCI_VENDOR_ID_ATI, 0x6840, 0x1043, 0x2122, RADEON_PX_QUIRK_DISABLE_PX },
+	/* macbook pro 8.2 */
+	{ PCI_VENDOR_ID_ATI, 0x6741, PCI_VENDOR_ID_APPLE, 0x00e2, RADEON_PX_QUIRK_LONG_WAKEUP },
+	{ 0, 0, 0, 0, 0 },
+};
+
+bool radeon_is_px(struct drm_device *dev)
+{
+	struct radeon_device *rdev = dev->dev_private;
+
+	if (rdev->flags & RADEON_IS_PX)
+		return true;
+	return false;
+}
+
+static void radeon_device_handle_px_quirks(struct radeon_device *rdev)
+{
+	struct radeon_px_quirk *p = radeon_px_quirk_list;
+
+	/* Apply PX quirks */
+	while (p && p->chip_device != 0) {
+		if (rdev->pdev->vendor == p->chip_vendor &&
+		    rdev->pdev->device == p->chip_device &&
+		    rdev->pdev->subsystem_vendor == p->subsys_vendor &&
+		    rdev->pdev->subsystem_device == p->subsys_device) {
+			rdev->px_quirk_flags = p->px_quirk_flags;
+			break;
+		}
+		++p;
+	}
+
+	if (rdev->px_quirk_flags & RADEON_PX_QUIRK_DISABLE_PX)
+		rdev->flags &= ~RADEON_IS_PX;
+}
 
 /**
  * radeon_program_register_sequence - program an array of registers.
@@ -375,7 +434,8 @@ int radeon_wb_init(struct radeon_device *rdev)
 
 	if (rdev->wb.wb_obj == NULL) {
 		r = radeon_bo_create(rdev, RADEON_GPU_PAGE_SIZE, PAGE_SIZE, true,
-				     RADEON_GEM_DOMAIN_GTT, NULL, &rdev->wb.wb_obj);
+				     RADEON_GEM_DOMAIN_GTT, 0, NULL, NULL,
+				     &rdev->wb.wb_obj);
 		if (r) {
 			dev_warn(rdev->dev, "(%d) create WB bo failed\n", r);
 			return r;
@@ -552,7 +612,9 @@ bool radeon_card_posted(struct radeon_device *rdev)
 {
 	uint32_t reg;
 
-	if (efi_enabled && (rdev->pdev->subsystem_vendor == PCI_VENDOR_ID_APPLE) &&
+	/* required for EFI mode on macbook2,1 which uses an r5xx asic */
+	if (efi_enabled &&
+	    (rdev->pdev->subsystem_vendor == PCI_VENDOR_ID_APPLE) &&
 	    (rdev->family < CHIP_R600))
 		return false;
 
@@ -681,6 +743,8 @@ int radeon_dummy_page_init(struct radeon_device *rdev)
 		rdev->dummy_page.page = NULL;
 		return -ENOMEM;
 	}
+	rdev->dummy_page.entry = radeon_gart_get_page_entry(rdev->dummy_page.addr,
+							    RADEON_GART_PAGE_DUMMY);
 	return 0;
 }
 
@@ -890,6 +954,7 @@ int radeon_atombios_init(struct radeon_device *rdev)
 	}
 
 	mutex_init(&rdev->mode_info.atom_context->mutex);
+	mutex_init(&rdev->mode_info.atom_context->scratch_mutex);
 	radeon_atom_initialize_bios_scratch_regs(rdev->ddev);
 	atom_allocate_fb_scratch(rdev->mode_info.atom_context);
 	return 0;
@@ -1040,25 +1105,55 @@ static void radeon_check_arguments(struct radeon_device *rdev)
 		radeon_agpmode = 0;
 		break;
 	}
-}
 
-/**
- * radeon_switcheroo_quirk_long_wakeup - return true if longer d3 delay is
- * needed for waking up.
- *
- * @pdev: pci dev pointer
- */
-static bool radeon_switcheroo_quirk_long_wakeup(struct pci_dev *pdev)
-{
-
-	/* 6600m in a macbook pro */
-	if (pdev->subsystem_vendor == PCI_VENDOR_ID_APPLE &&
-	    pdev->subsystem_device == 0x00e2) {
-		printk(KERN_INFO "radeon: quirking longer d3 wakeup delay\n");
-		return true;
+	if (!radeon_check_pot_argument(radeon_vm_size)) {
+		dev_warn(rdev->dev, "VM size (%d) must be a power of 2\n",
+			 radeon_vm_size);
+		radeon_vm_size = 4;
 	}
 
-	return false;
+	if (radeon_vm_size < 1) {
+		dev_warn(rdev->dev, "VM size (%d) to small, min is 1GB\n",
+			 radeon_vm_size);
+		radeon_vm_size = 4;
+	}
+
+       /*
+        * Max GPUVM size for Cayman, SI and CI are 40 bits.
+        */
+	if (radeon_vm_size > 1024) {
+		dev_warn(rdev->dev, "VM size (%d) too large, max is 1TB\n",
+			 radeon_vm_size);
+		radeon_vm_size = 4;
+	}
+
+	/* defines number of bits in page table versus page directory,
+	 * a page is 4KB so we have 12 bits offset, minimum 9 bits in the
+	 * page table and the remaining bits are in the page directory */
+	if (radeon_vm_block_size == -1) {
+
+		/* Total bits covered by PD + PTs */
+		unsigned bits = ilog2(radeon_vm_size) + 18;
+
+		/* Make sure the PD is 4K in size up to 8GB address space.
+		   Above that split equal between PD and PTs */
+		if (radeon_vm_size <= 8)
+			radeon_vm_block_size = bits - 9;
+		else
+			radeon_vm_block_size = (bits + 3) / 2;
+
+	} else if (radeon_vm_block_size < 9) {
+		dev_warn(rdev->dev, "VM page table size (%d) too small\n",
+			 radeon_vm_block_size);
+		radeon_vm_block_size = 9;
+	}
+
+	if (radeon_vm_block_size > 24 ||
+	    (radeon_vm_size * 1024) < (1ull << radeon_vm_block_size)) {
+		dev_warn(rdev->dev, "VM page table size (%d) too large\n",
+			 radeon_vm_block_size);
+		radeon_vm_block_size = 9;
+	}
 }
 
 /**
@@ -1073,7 +1168,11 @@ static bool radeon_switcheroo_quirk_long_wakeup(struct pci_dev *pdev)
 static void radeon_switcheroo_set_state(struct pci_dev *pdev, enum vga_switcheroo_state state)
 {
 	struct drm_device *dev = pci_get_drvdata(pdev);
-	pm_message_t pmm = { .event = PM_EVENT_SUSPEND };
+	struct radeon_device *rdev = dev->dev_private;
+
+	if (radeon_is_px(dev) && state == VGA_SWITCHEROO_OFF)
+		return;
+
 	if (state == VGA_SWITCHEROO_ON) {
 		unsigned d3_delay = dev->pdev->d3_delay;
 
@@ -1081,10 +1180,10 @@ static void radeon_switcheroo_set_state(struct pci_dev *pdev, enum vga_switchero
 		/* don't suspend or resume card normally */
 		dev->switch_power_state = DRM_SWITCH_POWER_CHANGING;
 
-		if (d3_delay < 20 && radeon_switcheroo_quirk_long_wakeup(pdev))
+		if (d3_delay < 20 && (rdev->px_quirk_flags & RADEON_PX_QUIRK_LONG_WAKEUP))
 			dev->pdev->d3_delay = 20;
 
-		radeon_resume_kms(dev);
+		radeon_resume_kms(dev, true, true);
 
 		dev->pdev->d3_delay = d3_delay;
 
@@ -1094,7 +1193,7 @@ static void radeon_switcheroo_set_state(struct pci_dev *pdev, enum vga_switchero
 		printk(KERN_INFO "radeon: switched off\n");
 		drm_kms_helper_poll_disable(dev);
 		dev->switch_power_state = DRM_SWITCH_POWER_CHANGING;
-		radeon_suspend_kms(dev, pmm);
+		radeon_suspend_kms(dev, true, true);
 		dev->switch_power_state = DRM_SWITCH_POWER_OFF;
 	}
 }
@@ -1111,12 +1210,13 @@ static void radeon_switcheroo_set_state(struct pci_dev *pdev, enum vga_switchero
 static bool radeon_switcheroo_can_switch(struct pci_dev *pdev)
 {
 	struct drm_device *dev = pci_get_drvdata(pdev);
-	bool can_switch;
 
-	spin_lock(&dev->count_lock);
-	can_switch = (dev->open_count == 0);
-	spin_unlock(&dev->count_lock);
-	return can_switch;
+	/*
+	 * FIXME: open_count is protected by drm_global_mutex but that would lead to
+	 * locking inversion with the driver load path. And the access here is
+	 * completely racy anyway. So don't bother with locking for now.
+	 */
+	return dev->open_count == 0;
 }
 
 static const struct vga_switcheroo_client_ops radeon_switcheroo_ops = {
@@ -1144,6 +1244,7 @@ int radeon_device_init(struct radeon_device *rdev,
 {
 	int r, i;
 	int dma_bits;
+	bool runtime = false;
 
 	rdev->shutdown = false;
 	rdev->dev = &pdev->dev;
@@ -1159,6 +1260,7 @@ int radeon_device_init(struct radeon_device *rdev,
 	for (i = 0; i < RADEON_NUM_RINGS; i++) {
 		rdev->ring[i].idx = i;
 	}
+	rdev->fence_context = fence_context_alloc(RADEON_NUM_RINGS);
 
 	DRM_INFO("initializing kernel modesetting (%s 0x%04X:0x%04X 0x%04X:0x%04X).\n",
 		radeon_family_name[rdev->family], pdev->vendor, pdev->device,
@@ -1176,23 +1278,22 @@ int radeon_device_init(struct radeon_device *rdev,
 	init_rwsem(&rdev->pm.mclk_lock);
 	init_rwsem(&rdev->exclusive_lock);
 	init_waitqueue_head(&rdev->irq.vblank_queue);
+	mutex_init(&rdev->mn_lock);
+	hash_init(rdev->mn_hash);
 	r = radeon_gem_init(rdev);
 	if (r)
 		return r;
-	/* initialize vm here */
-	mutex_init(&rdev->vm_manager.lock);
+
+	radeon_check_arguments(rdev);
 	/* Adjust VM size here.
-	 * Currently set to 4GB ((1 << 20) 4k pages).
-	 * Max GPUVM size for cayman and SI is 40 bits.
+	 * Max GPUVM size for cayman+ is 40 bits.
 	 */
-	rdev->vm_manager.max_pfn = 1 << 20;
-	INIT_LIST_HEAD(&rdev->vm_manager.lru_vm);
+	rdev->vm_manager.max_pfn = radeon_vm_size << 18;
 
 	/* Set asic functions */
 	r = radeon_asic_init(rdev);
 	if (r)
 		return r;
-	radeon_check_arguments(rdev);
 
 	/* all of the newer IGP chips have an internal gart
 	 * However some rs4xx report as AGP, so remove that here.
@@ -1286,19 +1387,21 @@ int radeon_device_init(struct radeon_device *rdev,
 	if (rdev->rio_mem == NULL)
 		DRM_ERROR("Unable to find PCI I/O BAR\n");
 
+	if (rdev->flags & RADEON_IS_PX)
+		radeon_device_handle_px_quirks(rdev);
+
 	/* if we have > 1 VGA cards, then disable the radeon VGA resources */
 	/* this will fail for cards that aren't VGA class devices, just
 	 * ignore it */
 	vga_client_register(rdev->pdev, rdev, NULL, radeon_vga_set_decode);
+
+	if (rdev->flags & RADEON_IS_PX)
+		runtime = true;
 	vga_switcheroo_register_client(rdev->pdev, &radeon_switcheroo_ops);
 
 	r = radeon_init(rdev);
 	if (r)
-		return r;
-
-	r = radeon_ib_ring_tests(rdev);
-	if (r)
-		DRM_ERROR("ib ring test failed (%d).\n", r);
+		goto failed;
 
 	r = radeon_gem_debugfs_init(rdev);
 	if (r) {
@@ -1314,7 +1417,26 @@ int radeon_device_init(struct radeon_device *rdev,
 		radeon_agp_disable(rdev);
 		r = radeon_init(rdev);
 		if (r)
-			return r;
+			goto failed;
+	}
+
+	r = radeon_ib_ring_tests(rdev);
+	if (r)
+		DRM_ERROR("ib ring test failed (%d).\n", r);
+
+	/*
+	 * Turks/Thames GPU will freeze whole laptop if DPM is not restarted
+	 * after the CP ring have chew one packet at least. Hence here we stop
+	 * and restart DPM after the radeon_ib_ring_tests().
+	 */
+	if (rdev->pm.dpm_enabled &&
+	    (rdev->pm.pm_method == PM_METHOD_DPM) &&
+	    (rdev->family == CHIP_TURKS) &&
+	    (rdev->flags & RADEON_IS_MOBILITY)) {
+		mutex_lock(&rdev->pm.mutex);
+		radeon_dpm_disable(rdev);
+		radeon_dpm_enable(rdev);
+		mutex_unlock(&rdev->pm.mutex);
 	}
 
 	if ((radeon_testing & 1)) {
@@ -1336,6 +1458,11 @@ int radeon_device_init(struct radeon_device *rdev,
 			DRM_INFO("radeon: acceleration disabled, skipping benchmarks\n");
 	}
 	return 0;
+
+failed:
+	if (runtime)
+		vga_switcheroo_fini_domain_pm_ops(rdev->dev);
+	return r;
 }
 
 static void radeon_debugfs_remove_files(struct radeon_device *rdev);
@@ -1356,6 +1483,8 @@ void radeon_device_fini(struct radeon_device *rdev)
 	radeon_bo_evict_vram(rdev);
 	radeon_fini(rdev);
 	vga_switcheroo_unregister_client(rdev->pdev);
+	if (rdev->flags & RADEON_IS_PX)
+		vga_switcheroo_fini_domain_pm_ops(rdev->dev);
 	vga_client_register(rdev->pdev, NULL, NULL, NULL);
 	if (rdev->rio_mem)
 		pci_iounmap(rdev->pdev, rdev->rio_mem);
@@ -1381,20 +1510,17 @@ void radeon_device_fini(struct radeon_device *rdev)
  * Returns 0 for success or an error on failure.
  * Called at driver suspend.
  */
-int radeon_suspend_kms(struct drm_device *dev, pm_message_t state)
+int radeon_suspend_kms(struct drm_device *dev, bool suspend, bool fbcon)
 {
 	struct radeon_device *rdev;
 	struct drm_crtc *crtc;
 	struct drm_connector *connector;
 	int i, r;
-	bool force_completion = false;
 
 	if (dev == NULL || dev->dev_private == NULL) {
 		return -ENODEV;
 	}
-	if (state.event == PM_EVENT_PRETHAW) {
-		return 0;
-	}
+
 	rdev = dev->dev_private;
 
 	if (dev->switch_power_state == DRM_SWITCH_POWER_OFF)
@@ -1409,7 +1535,7 @@ int radeon_suspend_kms(struct drm_device *dev, pm_message_t state)
 
 	/* unpin the front buffers */
 	list_for_each_entry(crtc, &dev->mode_config.crtc_list, head) {
-		struct radeon_framebuffer *rfb = to_radeon_framebuffer(crtc->fb);
+		struct radeon_framebuffer *rfb = to_radeon_framebuffer(crtc->primary->fb);
 		struct radeon_bo *robj;
 
 		if (rfb == NULL || rfb->obj == NULL) {
@@ -1428,19 +1554,14 @@ int radeon_suspend_kms(struct drm_device *dev, pm_message_t state)
 	/* evict vram memory */
 	radeon_bo_evict_vram(rdev);
 
-	mutex_lock(&rdev->ring_lock);
 	/* wait for gpu to finish processing current batch */
 	for (i = 0; i < RADEON_NUM_RINGS; i++) {
-		r = radeon_fence_wait_empty_locked(rdev, i);
+		r = radeon_fence_wait_empty(rdev, i);
 		if (r) {
 			/* delay GPU reset to resume */
-			force_completion = true;
+			radeon_fence_driver_force_completion(rdev, i);
 		}
 	}
-	if (force_completion) {
-		radeon_fence_driver_force_completion(rdev);
-	}
-	mutex_unlock(&rdev->ring_lock);
 
 	radeon_save_bios_scratch_regs(rdev);
 
@@ -1452,14 +1573,17 @@ int radeon_suspend_kms(struct drm_device *dev, pm_message_t state)
 	radeon_agp_suspend(rdev);
 
 	pci_save_state(dev->pdev);
-	if (state.event == PM_EVENT_SUSPEND) {
+	if (suspend) {
 		/* Shut down the device */
 		pci_disable_device(dev->pdev);
 		pci_set_power_state(dev->pdev, PCI_D3hot);
 	}
-	console_lock();
-	radeon_fbdev_set_suspend(rdev, 1);
-	console_unlock();
+
+	if (fbcon) {
+		console_lock();
+		radeon_fbdev_set_suspend(rdev, 1);
+		console_unlock();
+	}
 	return 0;
 }
 
@@ -1472,7 +1596,7 @@ int radeon_suspend_kms(struct drm_device *dev, pm_message_t state)
  * Returns 0 for success or an error on failure.
  * Called at driver resume.
  */
-int radeon_resume_kms(struct drm_device *dev)
+int radeon_resume_kms(struct drm_device *dev, bool resume, bool fbcon)
 {
 	struct drm_connector *connector;
 	struct radeon_device *rdev = dev->dev_private;
@@ -1481,12 +1605,17 @@ int radeon_resume_kms(struct drm_device *dev)
 	if (dev->switch_power_state == DRM_SWITCH_POWER_OFF)
 		return 0;
 
-	console_lock();
-	pci_set_power_state(dev->pdev, PCI_D0);
-	pci_restore_state(dev->pdev);
-	if (pci_enable_device(dev->pdev)) {
-		console_unlock();
-		return -1;
+	if (fbcon) {
+		console_lock();
+	}
+	if (resume) {
+		pci_set_power_state(dev->pdev, PCI_D0);
+		pci_restore_state(dev->pdev);
+		if (pci_enable_device(dev->pdev)) {
+			if (fbcon)
+				console_unlock();
+			return -1;
+		}
 	}
 	/* resume AGP if in use */
 	radeon_agp_resume(rdev);
@@ -1510,10 +1639,6 @@ int radeon_resume_kms(struct drm_device *dev)
 
 	radeon_restore_bios_scratch_regs(rdev);
 
-	if (1) {
-		radeon_fbdev_set_suspend(rdev, 0);
-		console_unlock();
-	}
 	/* init dig PHYs, disp eng pll */
 	if (rdev->is_atom_bios) {
 		radeon_atom_encoder_init(rdev);
@@ -1529,13 +1654,25 @@ int radeon_resume_kms(struct drm_device *dev)
 	/* reset hpd state */
 	radeon_hpd_init(rdev);
 	/* blat the mode back in */
-	drm_helper_resume_force_mode(dev);
-	/* turn on display hw */
-	list_for_each_entry(connector, &dev->mode_config.connector_list, head) {
-		drm_helper_connector_dpms(connector, DRM_MODE_DPMS_ON);
+	if (fbcon) {
+		drm_helper_resume_force_mode(dev);
+		/* turn on display hw */
+		list_for_each_entry(connector, &dev->mode_config.connector_list, head) {
+			drm_helper_connector_dpms(connector, DRM_MODE_DPMS_ON);
+		}
 	}
 
 	drm_kms_helper_poll_enable(dev);
+
+	/* set the power state here in case we are a PX system or headless */
+	if ((rdev->pm.pm_method == PM_METHOD_DPM) && rdev->pm.dpm_enabled)
+		radeon_pm_compute_clocks(rdev);
+
+	if (fbcon) {
+		radeon_fbdev_set_suspend(rdev, 0);
+		console_unlock();
+	}
+
 	return 0;
 }
 
@@ -1564,13 +1701,11 @@ int radeon_gpu_reset(struct radeon_device *rdev)
 		return 0;
 	}
 
-	rdev->needs_reset = false;
-
 	radeon_save_bios_scratch_regs(rdev);
 	/* block TTM */
 	resched = ttm_bo_lock_delayed_workqueue(&rdev->mman.bdev);
-	radeon_pm_suspend(rdev);
 	radeon_suspend(rdev);
+	radeon_hpd_fini(rdev);
 
 	for (i = 0; i < RADEON_NUM_RINGS; ++i) {
 		ring_sizes[i] = radeon_ring_backup(rdev, &rdev->ring[i],
@@ -1582,7 +1717,6 @@ int radeon_gpu_reset(struct radeon_device *rdev)
 		}
 	}
 
-retry:
 	r = radeon_asic_reset(rdev);
 	if (!r) {
 		dev_info(rdev->dev, "GPU reset succeeded, trying to resume\n");
@@ -1591,40 +1725,69 @@ retry:
 
 	radeon_restore_bios_scratch_regs(rdev);
 
-	if (!r) {
-		for (i = 0; i < RADEON_NUM_RINGS; ++i) {
+	for (i = 0; i < RADEON_NUM_RINGS; ++i) {
+		if (!r && ring_data[i]) {
 			radeon_ring_restore(rdev, &rdev->ring[i],
 					    ring_sizes[i], ring_data[i]);
-			ring_sizes[i] = 0;
-			ring_data[i] = NULL;
-		}
-
-		r = radeon_ib_ring_tests(rdev);
-		if (r) {
-			dev_err(rdev->dev, "ib ring test failed (%d).\n", r);
-			if (saved) {
-				saved = false;
-				radeon_suspend(rdev);
-				goto retry;
-			}
-		}
-	} else {
-		radeon_fence_driver_force_completion(rdev);
-		for (i = 0; i < RADEON_NUM_RINGS; ++i) {
+		} else {
+			radeon_fence_driver_force_completion(rdev, i);
 			kfree(ring_data[i]);
 		}
 	}
 
-	radeon_pm_resume(rdev);
-	drm_helper_resume_force_mode(rdev->ddev);
+	if ((rdev->pm.pm_method == PM_METHOD_DPM) && rdev->pm.dpm_enabled) {
+		/* do dpm late init */
+		r = radeon_pm_late_init(rdev);
+		if (r) {
+			rdev->pm.dpm_enabled = false;
+			DRM_ERROR("radeon_pm_late_init failed, disabling dpm\n");
+		}
+	} else {
+		/* resume old pm late */
+		radeon_pm_resume(rdev);
+	}
+
+	/* init dig PHYs, disp eng pll */
+	if (rdev->is_atom_bios) {
+		radeon_atom_encoder_init(rdev);
+		radeon_atom_disp_eng_pll_init(rdev);
+		/* turn on the BL */
+		if (rdev->mode_info.bl_encoder) {
+			u8 bl_level = radeon_get_backlight_level(rdev,
+								 rdev->mode_info.bl_encoder);
+			radeon_set_backlight_level(rdev, rdev->mode_info.bl_encoder,
+						   bl_level);
+		}
+	}
+	/* reset hpd state */
+	radeon_hpd_init(rdev);
 
 	ttm_bo_unlock_delayed_workqueue(&rdev->mman.bdev, resched);
-	if (r) {
+
+	rdev->in_reset = true;
+	rdev->needs_reset = false;
+
+	downgrade_write(&rdev->exclusive_lock);
+
+	drm_helper_resume_force_mode(rdev->ddev);
+
+	/* set the power state here in case we are a PX system or headless */
+	if ((rdev->pm.pm_method == PM_METHOD_DPM) && rdev->pm.dpm_enabled)
+		radeon_pm_compute_clocks(rdev);
+
+	if (!r) {
+		r = radeon_ib_ring_tests(rdev);
+		if (r && saved)
+			r = -EAGAIN;
+	} else {
 		/* bad news, how to tell it to userspace ? */
 		dev_info(rdev->dev, "GPU reset failed\n");
 	}
 
-	up_write(&rdev->exclusive_lock);
+	rdev->needs_reset = r == -EAGAIN;
+	rdev->in_reset = false;
+
+	up_read(&rdev->exclusive_lock);
 	return r;
 }
 

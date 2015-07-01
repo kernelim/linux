@@ -38,6 +38,8 @@
 #include <linux/dmi.h>
 #include <linux/pci.h>
 
+#include "internal.h"
+
 #define PREFIX "ACPI: "
 
 ACPI_MODULE_NAME("video");
@@ -183,6 +185,12 @@ long acpi_video_get_capabilities(acpi_handle graphics_handle)
 	return caps;
 }
 EXPORT_SYMBOL(acpi_video_get_capabilities);
+
+bool acpi_osi_is_win8(void)
+{
+	return acpi_gbl_osi_data >= ACPI_OSI_WIN_8;
+}
+EXPORT_SYMBOL(acpi_osi_is_win8);
 
 /* Returns true if video.ko can do backlight switching */
 int acpi_video_backlight_support(void)

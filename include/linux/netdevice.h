@@ -78,6 +78,9 @@ struct wireless_dev;
 #define NET_ADDR_PERM		0	/* address is permanent (default) */
 #define NET_ADDR_RANDOM		1	/* address is generated randomly */
 #define NET_ADDR_STOLEN		2	/* address is stolen from other device */
+#define NET_ADDR_SET		3	/* address is set using
+					 * dev_set_mac_address()
+					 * !!!: not in RHEL6 */
 
 /* Backlog congestion levels */
 #define NET_RX_SUCCESS		0   /* keep 'em coming, baby */
@@ -1191,7 +1194,8 @@ struct net_device
 /*
  * Cache line mostly used on receive path (including eth_type_trans())
  */
-	unsigned long		last_rx;	/* Time of last Rx	*/
+	unsigned long		last_rx;	/* Time of last Rx */
+
 	/* Interface address info used in eth_type_trans() */
 	unsigned char		*dev_addr;	/* hw address, (before bcast
 						   because most packets are
@@ -1361,8 +1365,9 @@ struct netdev_qos_info {
 };
 
 struct netdev_netpoll_ext_info {
-	int (*ndo_netpoll_setup)(struct net_device *dev,
-	     struct netpoll_info *info);
+	int			(*ndo_netpoll_setup)(struct net_device *dev,
+						     struct netpoll_info *info,
+						     gfp_t gfp);
 };
 
 struct netdev_priomap_info {
@@ -1424,6 +1429,12 @@ struct net_device_extended {
 #endif
 	rx_handler_func_t	*rx_handler;
 	void			*rx_handler_data;
+	/* space for optional device, statistics, and wireless sysfs groups */
+	const struct attribute_group *sysfs_groups[6];
+	unsigned short          dev_port;	/* Used to differentiate
+						 * devices that share the same
+						 * function
+						 */
 };
 
 #define NET_DEVICE_EXTENDED_SIZE \
@@ -2591,10 +2602,12 @@ extern int		dev_unicast_delete(struct net_device *dev, void *addr);
 extern int		dev_unicast_add(struct net_device *dev, void *addr);
 extern int		dev_unicast_sync(struct net_device *to, struct net_device *from);
 extern void		dev_unicast_unsync(struct net_device *to, struct net_device *from);
+extern void		dev_unicast_flush(struct net_device *dev);
 extern int 		dev_mc_delete(struct net_device *dev, void *addr, int alen, int all);
 extern int		dev_mc_add(struct net_device *dev, void *addr, int alen, int newonly);
 extern int		dev_mc_sync(struct net_device *to, struct net_device *from);
 extern void		dev_mc_unsync(struct net_device *to, struct net_device *from);
+extern void		dev_addr_discard(struct net_device *dev);
 extern int 		__dev_addr_delete(struct dev_addr_list **list, int *count, void *addr, int alen, int all);
 extern int		__dev_addr_add(struct dev_addr_list **list, int *count, void *addr, int alen, int newonly);
 extern int		__dev_addr_sync(struct dev_addr_list **to, int *to_count, struct dev_addr_list **from, int *from_count);
@@ -2602,8 +2615,6 @@ extern void		__dev_addr_unsync(struct dev_addr_list **to, int *to_count, struct 
 extern int		dev_set_promiscuity(struct net_device *dev, int inc);
 extern int		dev_set_allmulti(struct net_device *dev, int inc);
 extern void		netdev_state_change(struct net_device *dev);
-extern void		netdev_bonding_change(struct net_device *dev,
-					      unsigned long event);
 extern void		netdev_features_change(struct net_device *dev);
 /* Load a device via the kmod */
 extern void		dev_load(struct net *net, const char *name);
@@ -2620,6 +2631,12 @@ extern void		dev_txq_stats_fold64(const struct net_device *dev,
 extern int		netdev_max_backlog;
 extern int		weight_p;
 extern int		netdev_set_master(struct net_device *dev, struct net_device *master);
+
+/* RSS keys are 40 or 52 bytes long */
+#define NETDEV_RSS_KEY_LEN 52
+extern u8 netdev_rss_key[NETDEV_RSS_KEY_LEN];
+void netdev_rss_key_fill(void *buffer, size_t len);
+
 extern int skb_checksum_help(struct sk_buff *skb);
 extern struct sk_buff *skb_gso_segment(struct sk_buff *skb, int features);
 extern struct sk_buff *__skb_gso_segment(struct sk_buff *skb, int features, bool tx_path);
@@ -2685,6 +2702,17 @@ unsigned long netdev_increment_features(unsigned long all, unsigned long one,
 					unsigned long mask);
 unsigned long netdev_fix_features(unsigned long features, const char *name);
 u32 netdev_fix_features_dev(struct net_device *dev, u32 features);
+
+/* Allow TSO being used on stacked device :
+ * Performing the GSO segmentation before last device
+ * is a performance improvement.
+ */
+static inline netdev_features_t netdev_add_tso_features(unsigned long features,
+							unsigned long mask)
+{
+	return netdev_increment_features(features, NETIF_F_ALL_TSO, mask);
+}
+
 int __netdev_update_features(struct net_device *dev);
 void netdev_update_features(struct net_device *dev);
 
@@ -2708,7 +2736,8 @@ static inline int skb_gso_ok(struct sk_buff *skb, int features)
 static inline int netif_needs_gso(struct sk_buff *skb, int features)
 {
 	return skb_is_gso(skb) && (!skb_gso_ok(skb, features) ||
-		unlikely(skb->ip_summed != CHECKSUM_PARTIAL));
+		unlikely((skb->ip_summed != CHECKSUM_PARTIAL) &&
+			 (skb->ip_summed != CHECKSUM_UNNECESSARY)));
 }
 
 static inline void netif_set_gso_max_size(struct net_device *dev,
@@ -2756,6 +2785,9 @@ static inline const char *netdev_name(const struct net_device *dev)
 	return dev->name;
 }
 
+extern int __netdev_printk(const char *level, const struct net_device *dev,
+			struct va_format *vaf);
+
 extern __printf(3, 4)
 int netdev_printk(const char *level, const struct net_device *dev,
 		  const char *format, ...);
@@ -2777,15 +2809,14 @@ int netdev_info(const struct net_device *dev, const char *format, ...);
 #define MODULE_ALIAS_NETDEV(device)				\
 	MODULE_ALIAS("netdev-" device)
 
-#if defined(DEBUG)
-#define netdev_dbg(__dev, format, args...)			\
-	netdev_printk(KERN_DEBUG, __dev, format, ##args)
-#elif defined(CONFIG_DYNAMIC_DEBUG)
+#if defined(CONFIG_DYNAMIC_DEBUG)
 #define netdev_dbg(__dev, format, args...)			\
 do {								\
-	dynamic_dev_dbg((__dev)->dev.parent, "%s: " format,	\
-			netdev_name(__dev), ##args);		\
+	dynamic_netdev_dbg(__dev, format, ##args);		\
 } while (0)
+#elif defined(DEBUG)
+#define netdev_dbg(__dev, format, args...)			\
+	netdev_printk(KERN_DEBUG, __dev, format, ##args)
 #else
 #define netdev_dbg(__dev, format, args...)			\
 ({								\

@@ -26,7 +26,7 @@
 #include "pcm_plugin.h"
 
 static void zero_areas(struct snd_pcm_plugin_channel *dvp, int ndsts,
-		       snd_pcm_uframes_t frames, int format)
+		       snd_pcm_uframes_t frames, snd_pcm_format_t format)
 {
 	int dst = 0;
 	for (; dst < ndsts; ++dst) {
@@ -39,7 +39,7 @@ static void zero_areas(struct snd_pcm_plugin_channel *dvp, int ndsts,
 
 static inline void copy_area(const struct snd_pcm_plugin_channel *src_channel,
 			     struct snd_pcm_plugin_channel *dst_channel,
-			     snd_pcm_uframes_t frames, int format)
+			     snd_pcm_uframes_t frames, snd_pcm_format_t format)
 {
 	dst_channel->enabled = 1;
 	snd_pcm_area_copy(&src_channel->area, 0, &dst_channel->area, 0, frames, format);
@@ -52,7 +52,7 @@ static snd_pcm_sframes_t route_transfer(struct snd_pcm_plugin *plugin,
 {
 	int nsrcs, ndsts, dst;
 	struct snd_pcm_plugin_channel *dvp;
-	int format;
+	snd_pcm_format_t format;
 
 	if (snd_BUG_ON(!plugin || !src_channels || !dst_channels))
 		return -ENXIO;

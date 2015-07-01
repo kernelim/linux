@@ -264,6 +264,22 @@ do {								\
 #define net_random()		random32()
 #define net_srandom(seed)	srandom32((__force u32)seed)
 
+bool __net_get_random_once(void *buf, int nbytes, bool *done,
+			   atomic_t *done_key);
+
+#define net_get_random_once(buf, nbytes)				\
+	({								\
+		bool ___ret = false;					\
+		static bool ___done = false;				\
+		static atomic_t ___once_key = ATOMIC_INIT(1);		\
+		if (likely(atomic_read(&___once_key)))			\
+			___ret = __net_get_random_once(buf,		\
+						       nbytes,		\
+						       &___done,	\
+						       &___once_key);	\
+		___ret;							\
+	})
+
 extern int   	     kernel_sendmsg(struct socket *sock, struct msghdr *msg,
 				    struct kvec *vec, size_t num, size_t len);
 extern int   	     kernel_recvmsg(struct socket *sock, struct msghdr *msg,

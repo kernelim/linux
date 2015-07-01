@@ -537,7 +537,7 @@ static mode_t beiscsi_eth_get_attr_visibility(void *data, int type)
 }
 
 /*------------------- PCI Driver operations and data ----------------- */
-static DEFINE_PCI_DEVICE_TABLE(beiscsi_pci_id_table) = {
+static const struct pci_device_id beiscsi_pci_id_table[] = {
 	{ PCI_DEVICE(BE_VENDOR_ID, BE_DEVICE_ID1) },
 	{ PCI_DEVICE(BE_VENDOR_ID, BE_DEVICE_ID2) },
 	{ PCI_DEVICE(BE_VENDOR_ID, OC_DEVICE_ID1) },
@@ -668,14 +668,20 @@ static int beiscsi_enable_pci(struct pci_dev *pcidev)
 		return ret;
 	}
 
+	ret = pci_request_regions(pcidev, DRV_NAME);
+	if (ret) {
+		dev_err(&pcidev->dev,
+				"beiscsi_enable_pci - request region failed\n");
+		goto pci_dev_disable;
+	}
+
 	pci_set_master(pcidev);
 	ret = pci_set_dma_mask(pcidev, DMA_BIT_MASK(64));
 	if (ret) {
 		ret = pci_set_dma_mask(pcidev, DMA_BIT_MASK(32));
 		if (ret) {
 			dev_err(&pcidev->dev, "Could not set PCI DMA Mask\n");
-			pci_disable_device(pcidev);
-			return ret;
+			goto pci_region_release;
 		} else {
 			ret = pci_set_consistent_dma_mask(pcidev,
 							  DMA_BIT_MASK(32));
@@ -684,11 +690,17 @@ static int beiscsi_enable_pci(struct pci_dev *pcidev)
 		ret = pci_set_consistent_dma_mask(pcidev, DMA_BIT_MASK(64));
 		if (ret) {
 			dev_err(&pcidev->dev, "Could not set PCI DMA Mask\n");
-			pci_disable_device(pcidev);
-			return ret;
+			goto pci_region_release;
 		}
 	}
 	return 0;
+
+pci_region_release:
+	pci_release_regions(pcidev);
+pci_dev_disable:
+	pci_disable_device(pcidev);
+
+	return ret;
 }
 
 static int be_ctrl_init(struct beiscsi_hba *phba, struct pci_dev *pdev)
@@ -2086,11 +2098,16 @@ static void  beiscsi_process_mcc_isr(struct beiscsi_hba *phba)
 				/* Interpret compl as a async link evt */
 				beiscsi_async_link_state_process(phba,
 				(struct be_async_event_link_state *) mcc_compl);
-			else
+			else {
 				beiscsi_log(phba, KERN_ERR, BEISCSI_LOG_MBOX,
 					    "BM_%d :  Unsupported Async Event, flags"
 					    " = 0x%08x\n",
 					    mcc_compl->flags);
+				if (phba->state & BE_ADAPTER_LINK_UP) {
+					phba->state |= BE_ADAPTER_CHECK_BOOT;
+					phba->get_boot = BE_GET_BOOT_RETRIES;
+				}
+			}
 		} else if (mcc_compl->flags & CQE_FLAGS_COMPLETED_MASK) {
 			be_mcc_compl_process_isr(&phba->ctrl, mcc_compl);
 			atomic_dec(&phba->ctrl.mcc_obj.q.used);
@@ -2115,7 +2132,7 @@ static void  beiscsi_process_mcc_isr(struct beiscsi_hba *phba)
  * return
  *     Number of Completion Entries processed.
  **/
-static unsigned int beiscsi_process_cq(struct be_eq_obj *pbe_eq)
+unsigned int beiscsi_process_cq(struct be_eq_obj *pbe_eq)
 {
 	struct be_queue_info *cq;
 	struct sol_cqe *sol;
@@ -2157,6 +2174,18 @@ static unsigned int beiscsi_process_cq(struct be_eq_obj *pbe_eq)
 
 		cri_index = BE_GET_CRI_FROM_CID(cid);
 		ep = phba->ep_array[cri_index];
+
+		if (ep == NULL) {
+			/* connection has already been freed
+			 * just move on to next one
+			 */
+			beiscsi_log(phba, KERN_WARNING,
+				    BEISCSI_LOG_INIT,
+				    "BM_%d : proc cqe of disconn ep: cid %d\n",
+				    cid);
+			goto proc_next_cqe;
+		}
+
 		beiscsi_ep = ep->dd_data;
 		beiscsi_conn = beiscsi_ep->conn;
 
@@ -2266,6 +2295,7 @@ static unsigned int beiscsi_process_cq(struct be_eq_obj *pbe_eq)
 			break;
 		}
 
+proc_next_cqe:
 		AMAP_SET_BITS(struct amap_sol_cqe, valid, sol, 0);
 		queue_tail_inc(cq);
 		sol = queue_tail_node(cq);
@@ -3766,8 +3796,10 @@ static void hwi_cleanup(struct beiscsi_hba *phba)
 
 	for (i = 0; i < (phba->num_cpus); i++) {
 		q = &phwi_context->be_cq[i];
-		if (q->created)
+		if (q->created) {
+			be_queue_free(phba, q);
 			beiscsi_cmd_q_destroy(ctrl, q, QTYPE_CQ);
+		}
 	}
 
 	be_mcc_queues_destroy(phba);
@@ -3777,8 +3809,10 @@ static void hwi_cleanup(struct beiscsi_hba *phba)
 		eq_for_mcc = 0;
 	for (i = 0; i < (phba->num_cpus + eq_for_mcc); i++) {
 		q = &phwi_context->be_eq[i].q;
-		if (q->created)
+		if (q->created) {
+			be_queue_free(phba, q);
 			beiscsi_cmd_q_destroy(ctrl, q, QTYPE_EQ);
+		}
 	}
 	be_cmd_fw_uninit(ctrl);
 }
@@ -4365,8 +4399,13 @@ static int beiscsi_get_boot_info(struct beiscsi_hba *phba)
 		beiscsi_log(phba, KERN_ERR,
 			    BEISCSI_LOG_INIT | BEISCSI_LOG_CONFIG,
 			    "BM_%d : No boot session\n");
+
+		if (ret == -ENXIO)
+			phba->get_boot = 0;
+
 		return ret;
 	}
+	phba->get_boot = 0;
 	nonemb_cmd.va = pci_alloc_consistent(phba->ctrl.pdev,
 				sizeof(*session_resp),
 				&nonemb_cmd.dma);
@@ -4425,6 +4464,10 @@ static void beiscsi_boot_release(void *data)
 static int beiscsi_setup_boot_info(struct beiscsi_hba *phba)
 {
 	struct iscsi_boot_kobj *boot_kobj;
+
+	/* it has been created previously */
+	if (phba->boot_kset)
+		return 0;
 
 	/* get boot info using mgmt cmd */
 	if (beiscsi_get_boot_info(phba))
@@ -5255,6 +5298,7 @@ static void beiscsi_quiesce(struct beiscsi_hba *phba,
 			free_irq(phba->pcidev->irq, phba);
 		}
 	pci_disable_msix(phba->pcidev);
+	cancel_delayed_work_sync(&phba->beiscsi_hw_check_task);
 
 	if (blk_iopoll_enabled)
 		for (i = 0; i < phba->num_cpus; i++) {
@@ -5277,7 +5321,6 @@ static void beiscsi_quiesce(struct beiscsi_hba *phba,
 		hwi_cleanup(phba);
 	}
 
-	cancel_delayed_work_sync(&phba->beiscsi_hw_check_task);
 }
 
 static void beiscsi_remove(struct pci_dev *pcidev)
@@ -5299,6 +5342,7 @@ static void beiscsi_remove(struct pci_dev *pcidev)
 	iscsi_host_free(phba->shost);
 	pci_disable_pcie_error_reporting(pcidev);
 	pci_set_drvdata(pcidev, NULL);
+	pci_release_regions(pcidev);
 	pci_disable_device(pcidev);
 }
 
@@ -5385,6 +5429,14 @@ static void be_eqd_update(struct beiscsi_hba *phba)
 	}
 }
 
+static void be_check_boot_session(struct beiscsi_hba *phba)
+{
+	if (beiscsi_setup_boot_info(phba))
+		beiscsi_log(phba, KERN_ERR, BEISCSI_LOG_INIT,
+			    "BM_%d : Could not set up "
+			    "iSCSI boot info on async event.\n");
+}
+
 /*
  * beiscsi_hw_health_check()- Check adapter health
  * @work: work item to check HW health
@@ -5399,6 +5451,17 @@ beiscsi_hw_health_check(struct work_struct *work)
 			     beiscsi_hw_check_task.work);
 
 	be_eqd_update(phba);
+
+	if (phba->state & BE_ADAPTER_CHECK_BOOT) {
+		if ((phba->get_boot > 0) && (!phba->boot_kset)) {
+			phba->get_boot--;
+			if (!(phba->get_boot % BE_GET_BOOT_TO))
+				be_check_boot_session(phba);
+		} else {
+			phba->state &= ~BE_ADAPTER_CHECK_BOOT;
+			phba->get_boot = 0;
+		}
+	}
 
 	beiscsi_ue_detect(phba);
 
@@ -5785,10 +5848,11 @@ free_port:
 hba_free:
 	if (phba->msix_enabled)
 		pci_disable_msix(phba->pcidev);
-	iscsi_host_remove(phba->shost);
 	pci_dev_put(phba->pcidev);
 	iscsi_host_free(phba->shost);
+	pci_set_drvdata(pcidev, NULL);
 disable_pci:
+	pci_release_regions(pcidev);
 	pci_disable_device(pcidev);
 	return ret;
 }

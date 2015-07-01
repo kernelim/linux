@@ -212,7 +212,7 @@ static void freezer_fork(struct cgroup_subsys *ss, struct task_struct *task)
 		return;
 
 	spin_lock_irq(&freezer->lock);
-	BUG_ON(freezer->state == CGROUP_FROZEN);
+	WARN_ON(freezer->state == CGROUP_FROZEN);
 
 	/* Locking avoids race with FREEZING -> THAWED transitions. */
 	if (freezer->state == CGROUP_FREEZING)
@@ -239,12 +239,12 @@ static void update_if_frozen(struct cgroup *cgroup,
 	}
 
 	if (old_state == CGROUP_THAWED) {
-		BUG_ON(nfrozen > 0);
+		WARN_ON(nfrozen > 0);
 	} else if (old_state == CGROUP_FREEZING) {
 		if (nfrozen == ntotal)
 			freezer->state = CGROUP_FROZEN;
 	} else { /* old_state == CGROUP_FROZEN */
-		BUG_ON(nfrozen != ntotal);
+		WARN_ON(nfrozen != ntotal);
 	}
 
 	cgroup_iter_end(cgroup, &it);

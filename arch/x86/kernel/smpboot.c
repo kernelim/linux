@@ -825,6 +825,9 @@ do_rest:
 	per_cpu(kernel_stack, cpu) =
 		(unsigned long)task_stack_page(c_idle.idle) -
 		KERNEL_STACK_OFFSET + THREAD_SIZE;
+	per_cpu(kernel_stack8k, cpu) =
+		(unsigned long)task_stack_page(c_idle.idle) -
+		KERNEL_STACK_OFFSET + THREAD_SIZE - 8192;
 #endif
 	early_gdt_descr.address = (unsigned long)get_cpu_gdt_table(cpu);
 	initial_code = (unsigned long)start_secondary;

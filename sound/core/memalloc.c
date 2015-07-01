@@ -192,7 +192,8 @@ int snd_dma_alloc_pages(int type, struct device *device, size_t size,
 	dmab->bytes = 0;
 	switch (type) {
 	case SNDRV_DMA_TYPE_CONTINUOUS:
-		dmab->area = snd_malloc_pages(size, (unsigned long)device);
+		dmab->area = snd_malloc_pages(size,
+					(__force gfp_t)(unsigned long)device);
 		dmab->addr = 0;
 		break;
 #ifdef CONFIG_HAS_DMA
@@ -206,7 +207,7 @@ int snd_dma_alloc_pages(int type, struct device *device, size_t size,
 		break;
 #endif
 	default:
-		printk(KERN_ERR "snd-malloc: invalid device type %d\n", type);
+		pr_err("snd-malloc: invalid device type %d\n", type);
 		dmab->area = NULL;
 		dmab->addr = 0;
 		return -ENXIO;
@@ -278,7 +279,7 @@ void snd_dma_free_pages(struct snd_dma_buffer *dmab)
 		break;
 #endif
 	default:
-		printk(KERN_ERR "snd-malloc: invalid device type %d\n", dmab->dev.type);
+		pr_err("snd-malloc: invalid device type %d\n", dmab->dev.type);
 	}
 }
 

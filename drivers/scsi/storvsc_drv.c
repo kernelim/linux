@@ -424,21 +424,42 @@ done:
 	kfree(wrk);
 }
 
-static void storvsc_bus_scan(struct work_struct *work)
+static void storvsc_host_scan(struct work_struct *work)
 {
 	struct storvsc_scan_work *wrk;
-	int id, order_id;
+	struct Scsi_Host *host;
+	struct scsi_device *sdev;
+	unsigned long flags;
 
 	wrk = container_of(work, struct storvsc_scan_work, work);
-	for (id = 0; id < wrk->host->max_id; ++id) {
-		if (wrk->host->reverse_ordering)
-			order_id = wrk->host->max_id - id - 1;
-		else
-			order_id = id;
+	host = wrk->host;
 
-		scsi_scan_target(&wrk->host->shost_gendev, 0,
-				order_id, SCAN_WILD_CARD, 1);
+	/*
+	 * Before scanning the host, first check to see if any of the
+	 * currrently known devices have been hot removed. We issue a
+	 * "unit ready" command against all currently known devices.
+	 * This I/O will result in an error for devices that have been
+	 * removed. As part of handling the I/O error, we remove the device.
+	 *
+	 * When a LUN is added or removed, the host sends us a signal to
+	 * scan the host. Thus we are forced to discover the LUNs that
+	 * may have been removed this way.
+	 */
+	mutex_lock(&host->scan_mutex);
+	spin_lock_irqsave(host->host_lock, flags);
+	list_for_each_entry(sdev, &host->__devices, siblings) {
+		spin_unlock_irqrestore(host->host_lock, flags);
+		scsi_test_unit_ready(sdev, 1, 1, NULL);
+		spin_lock_irqsave(host->host_lock, flags);
+		continue;
 	}
+	spin_unlock_irqrestore(host->host_lock, flags);
+	mutex_unlock(&host->scan_mutex);
+	/*
+	 * Now scan the host to discover LUNs that may have been added.
+	 */
+	scsi_scan_host(host);
+
 	kfree(wrk);
 }
 
@@ -1195,7 +1216,7 @@ static void storvsc_on_receive(struct hv_device *device,
 		if (!work)
 			return;
 
-		INIT_WORK(&work->work, storvsc_bus_scan);
+		INIT_WORK(&work->work, storvsc_host_scan);
 		work->host = stor_device->host;
 		schedule_work(&work->work);
 		break;
@@ -1614,8 +1635,7 @@ static int storvsc_queuecommand(struct scsi_cmnd *scmnd,
 		break;
 	default:
 		vm_srb->data_in = UNKNOWN_TYPE;
-		vm_srb->win8_extension.srb_flags |= (SRB_FLAGS_DATA_IN |
-						     SRB_FLAGS_DATA_OUT);
+		vm_srb->win8_extension.srb_flags |= SRB_FLAGS_NO_DATA_TRANSFER;
 		break;
 	}
 

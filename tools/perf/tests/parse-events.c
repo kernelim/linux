@@ -2,11 +2,11 @@
 #include "parse-events.h"
 #include "evsel.h"
 #include "evlist.h"
-#include "sysfs.h"
 /* XXX There's no support for HW_BREAKPOINT in RHEL6 yet.
 #include "../../../include/linux/hw_breakpoint.h"
 */
-#include <lk/debugfs.h>
+#include <api/fs/fs.h>
+#include <api/fs/debugfs.h>
 #include "tests.h"
 
 #define PERF_TP_SAMPLE_TYPE (PERF_SAMPLE_RAW | PERF_SAMPLE_TIME | \
@@ -32,7 +32,7 @@ static int test__checkevent_tracepoint_multi(struct perf_evlist *evlist)
 	TEST_ASSERT_VAL("wrong number of entries", evlist->nr_entries > 1);
 	TEST_ASSERT_VAL("wrong number of groups", 0 == evlist->nr_groups);
 
-	list_for_each_entry(evsel, &evlist->entries, node) {
+	evlist__for_each(evlist, evsel) {
 		TEST_ASSERT_VAL("wrong type",
 			PERF_TYPE_TRACEPOINT == evsel->attr.type);
 		TEST_ASSERT_VAL("wrong sample_type",
@@ -206,7 +206,7 @@ test__checkevent_tracepoint_multi_modifier(struct perf_evlist *evlist)
 
 	TEST_ASSERT_VAL("wrong number of entries", evlist->nr_entries > 1);
 
-	list_for_each_entry(evsel, &evlist->entries, node) {
+	evlist__for_each(evlist, evsel) {
 		TEST_ASSERT_VAL("wrong exclude_user",
 				!evsel->attr.exclude_user);
 		TEST_ASSERT_VAL("wrong exclude_kernel",
@@ -448,9 +448,8 @@ static int test__checkevent_pmu_name(struct perf_evlist *evlist)
 
 static int test__checkevent_pmu_events(struct perf_evlist *evlist)
 {
-	struct perf_evsel *evsel;
+	struct perf_evsel *evsel = perf_evlist__first(evlist);
 
-	evsel = list_entry(evlist->entries.next, struct perf_evsel, node);
 	TEST_ASSERT_VAL("wrong number of entries", 1 == evlist->nr_entries);
 	TEST_ASSERT_VAL("wrong type", PERF_TYPE_RAW == evsel->attr.type);
 	TEST_ASSERT_VAL("wrong exclude_user",
@@ -1182,195 +1181,246 @@ static int test__all_tracepoints(struct perf_evlist *evlist)
 struct evlist_test {
 	const char *name;
 	__u32 type;
+	const int id;
 	int (*check)(struct perf_evlist *evlist);
 };
 
 static struct evlist_test test__events[] = {
-	[0] = {
+	{
 		.name  = "syscalls:sys_enter_open",
 		.check = test__checkevent_tracepoint,
+		.id    = 0,
 	},
-	[1] = {
+	{
 		.name  = "syscalls:*",
 		.check = test__checkevent_tracepoint_multi,
+		.id    = 1,
 	},
-	[2] = {
+	{
 		.name  = "r1a",
 		.check = test__checkevent_raw,
+		.id    = 2,
 	},
-	[3] = {
+	{
 		.name  = "1:1",
 		.check = test__checkevent_numeric,
+		.id    = 3,
 	},
-	[4] = {
+	{
 		.name  = "instructions",
 		.check = test__checkevent_symbolic_name,
+		.id    = 4,
 	},
-	[5] = {
+	{
 		.name  = "cycles/period=100000,config2/",
 		.check = test__checkevent_symbolic_name_config,
+		.id    = 5,
 	},
-	[6] = {
+	{
 		.name  = "faults",
 		.check = test__checkevent_symbolic_alias,
+		.id    = 6,
 	},
-	[7] = {
+	{
 		.name  = "L1-dcache-load-miss",
 		.check = test__checkevent_genhw,
+		.id    = 7,
 	},
 /* XXX There's no support for HW_BREAKPOINT in RHEL6 yet.
-
-	[8] = {
+	{
 		.name  = "mem:0",
 		.check = test__checkevent_breakpoint,
+		.id    = 8,
 	},
-	[9] = {
+	{
 		.name  = "mem:0:x",
 		.check = test__checkevent_breakpoint_x,
+		.id    = 9,
 	},
-	[10] = {
+	{
 		.name  = "mem:0:r",
 		.check = test__checkevent_breakpoint_r,
+		.id    = 10,
 	},
-	[11] = {
+	{
 		.name  = "mem:0:w",
 		.check = test__checkevent_breakpoint_w,
+		.id    = 11,
 	},
 */
-	[8] = {
+	{
 		.name  = "syscalls:sys_enter_open:k",
 		.check = test__checkevent_tracepoint_modifier,
+		.id    = 12,
 	},
-	[9] = {
+	{
 		.name  = "syscalls:*:u",
 		.check = test__checkevent_tracepoint_multi_modifier,
+		.id    = 13,
 	},
-	[10] = {
+	{
 		.name  = "r1a:kp",
 		.check = test__checkevent_raw_modifier,
+		.id    = 14,
 	},
-	[11] = {
+	{
 		.name  = "1:1:hp",
 		.check = test__checkevent_numeric_modifier,
+		.id    = 15,
 	},
-	[12] = {
+	{
 		.name  = "instructions:h",
 		.check = test__checkevent_symbolic_name_modifier,
+		.id    = 16,
 	},
-	[13] = {
+	{
 		.name  = "faults:u",
 		.check = test__checkevent_symbolic_alias_modifier,
+		.id    = 17,
 	},
-	[14] = {
+	{
 		.name  = "L1-dcache-load-miss:kp",
 		.check = test__checkevent_genhw_modifier,
+		.id    = 18,
 	},
 /* XXX There's no support for HW_BREAKPOINT in RHEL6 yet.
-	[19] = {
+	{
 		.name  = "mem:0:u",
 		.check = test__checkevent_breakpoint_modifier,
+		.id    = 19,
 	},
-	[20] = {
+	{
 		.name  = "mem:0:x:k",
 		.check = test__checkevent_breakpoint_x_modifier,
+		.id    = 20,
 	},
-	[21] = {
+	{
 		.name  = "mem:0:r:hp",
 		.check = test__checkevent_breakpoint_r_modifier,
+		.id    = 21,
 	},
-	[22] = {
+	{
 		.name  = "mem:0:w:up",
 		.check = test__checkevent_breakpoint_w_modifier,
+		.id    = 22,
 	},
 */
-	[15] = {
+	{
 		.name  = "r1,syscalls:sys_enter_open:k,1:1:hp",
 		.check = test__checkevent_list,
+		.id    = 23,
 	},
-	[16] = {
+	{
 		.name  = "instructions:G",
 		.check = test__checkevent_exclude_host_modifier,
+		.id    = 24,
 	},
-	[17] = {
+	{
 		.name  = "instructions:H",
 		.check = test__checkevent_exclude_guest_modifier,
-	},
-	[18] = {
-		.name  = "{instructions:k,cycles:upp}",
-		.check = test__group1,
-	},
-	[19] = {
-		.name  = "{faults:k,cache-references}:u,cycles:k",
-		.check = test__group2,
-	},
-	[20] = {
-		.name  = "group1{syscalls:sys_enter_open:H,cycles:kppp},group2{cycles,1:3}:G,instructions:u",
-		.check = test__group3,
-	},
-	[21] = {
-		.name  = "{cycles:u,instructions:kp}:p",
-		.check = test__group4,
-	},
-	[22] = {
-		.name  = "{cycles,instructions}:G,{cycles:G,instructions:G},cycles",
-		.check = test__group5,
+		.id    = 25,
 	},
 /* XXX There's no support for HW_BREAKPOINT in RHEL6 yet.
-	[23] = {
+	{
 		.name  = "mem:0:rw",
 		.check = test__checkevent_breakpoint_rw,
+		.id    = 26,
 	},
-	[24] = {
+	{
 		.name  = "mem:0:rw:kp",
 		.check = test__checkevent_breakpoint_rw_modifier,
+		.id    = 27,
 	},
 */
-	[23] = {
+	{
+		.name  = "{instructions:k,cycles:upp}",
+		.check = test__group1,
+		.id    = 28,
+	},
+	{
+		.name  = "{faults:k,cache-references}:u,cycles:k",
+		.check = test__group2,
+		.id    = 29,
+	},
+	{
+		.name  = "group1{syscalls:sys_enter_open:H,cycles:kppp},group2{cycles,1:3}:G,instructions:u",
+		.check = test__group3,
+		.id    = 30,
+	},
+	{
+		.name  = "{cycles:u,instructions:kp}:p",
+		.check = test__group4,
+		.id    = 31,
+	},
+	{
+		.name  = "{cycles,instructions}:G,{cycles:G,instructions:G},cycles",
+		.check = test__group5,
+		.id    = 32,
+	},
+	{
 		.name  = "*:*",
 		.check = test__all_tracepoints,
+		.id    = 33,
 	},
-	[24] = {
+	{
 		.name  = "{cycles,cache-misses:G}:H",
 		.check = test__group_gh1,
+		.id    = 34,
 	},
-	[25] = {
+	{
 		.name  = "{cycles,cache-misses:H}:G",
 		.check = test__group_gh2,
+		.id    = 35,
 	},
-	[26] = {
+	{
 		.name  = "{cycles:G,cache-misses:H}:u",
 		.check = test__group_gh3,
+		.id    = 36,
 	},
-	[27] = {
+	{
 		.name  = "{cycles:G,cache-misses:H}:uG",
 		.check = test__group_gh4,
+		.id    = 37,
 	},
-	[28] = {
+	{
 		.name  = "{cycles,cache-misses,branch-misses}:S",
 		.check = test__leader_sample1,
+		.id    = 38,
 	},
-	[29] = {
+	{
 		.name  = "{instructions,branch-misses}:Su",
 		.check = test__leader_sample2,
+		.id    = 39,
 	},
-	[30] = {
+	{
 		.name  = "instructions:uDp",
 		.check = test__checkevent_pinned_modifier,
+		.id    = 40,
 	},
-	[31] = {
+	{
 		.name  = "{cycles,cache-misses,branch-misses}:D",
 		.check = test__pinned_group,
+		.id    = 41,
 	},
+#if defined(__s390x__)
+	{
+		.name  = "kvm-s390:kvm_s390_create_vm",
+		.check = test__checkevent_tracepoint,
+		.id    = 100,
+	},
+#endif
 };
 
 static struct evlist_test test__events_pmu[] = {
-	[0] = {
+	{
 		.name  = "cpu/config=10,config1,config2=3,period=1000/u",
 		.check = test__checkevent_pmu,
+		.id    = 0,
 	},
-	[1] = {
+	{
 		.name  = "cpu/config=1,name=krava/u,cpu/config=2/u",
 		.check = test__checkevent_pmu_name,
+		.id    = 1,
 	},
 };
 
@@ -1400,10 +1450,10 @@ static int test_event(struct evlist_test *e)
 	if (ret) {
 		pr_debug("failed to parse event '%s', err %d\n",
 			 e->name, ret);
-		return ret;
+	} else {
+		ret = e->check(evlist);
 	}
-
-	ret = e->check(evlist);
+	
 	perf_evlist__delete(evlist);
 
 	return ret;
@@ -1417,7 +1467,7 @@ static int test_events(struct evlist_test *events, unsigned cnt)
 	for (i = 0; i < cnt; i++) {
 		struct evlist_test *e = &events[i];
 
-		pr_debug("running test %d '%s'\n", i, e->name);
+		pr_debug("running test %d '%s'\n", e->id, e->name);
 		ret1 = test_event(e);
 		if (ret1)
 			ret2 = ret1;
@@ -1470,7 +1520,7 @@ static int test_pmu(void)
 	int ret;
 
 	snprintf(path, PATH_MAX, "%s/bus/event_source/devices/cpu/format/",
-		 sysfs_find_mountpoint());
+		 sysfs__mountpoint());
 
 	ret = stat(path, &st);
 	if (ret)
@@ -1487,7 +1537,7 @@ static int test_pmu_events(void)
 	int ret;
 
 	snprintf(path, PATH_MAX, "%s/bus/event_source/devices/cpu/events/",
-		 sysfs_find_mountpoint());
+		 sysfs__mountpoint());
 
 	ret = stat(path, &st);
 	if (ret) {

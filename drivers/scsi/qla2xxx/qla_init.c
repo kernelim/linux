@@ -1460,7 +1460,12 @@ qla2x00_alloc_fw_dump(scsi_qla_host_t *vha)
 
 	ha->fw_dumped = 0;
 	ha->fw_dump_cap_flags = 0;
-	fixed_size = mem_size = eft_size = fce_size = mq_size = 0;
+	dump_size = fixed_size = mem_size = eft_size = fce_size = mq_size = 0;
+	req_q_size = rsp_q_size = 0;
+
+	if (IS_QLA27XX(ha))
+		goto try_fce;
+
 	if (IS_QLA2100(ha) || IS_QLA2200(ha)) {
 		fixed_size = sizeof(struct qla2100_fw_dump);
 	} else if (IS_QLA23XX(ha)) {
@@ -1476,6 +1481,7 @@ qla2x00_alloc_fw_dump(scsi_qla_host_t *vha)
 			fixed_size = offsetof(struct qla25xx_fw_dump, ext_mem);
 		else
 			fixed_size = offsetof(struct qla24xx_fw_dump, ext_mem);
+
 		mem_size = (ha->fw_memory_size - 0x100000 + 1) *
 		    sizeof(uint32_t);
 		if (ha->mqenable) {
@@ -1491,11 +1497,18 @@ qla2x00_alloc_fw_dump(scsi_qla_host_t *vha)
 			    (rsp->length * sizeof(response_t));
 		}
 		/* Allocate memory for Fibre Channel Event Buffer. */
-		if (!IS_QLA25XX(ha) && !IS_QLA81XX(ha) && !IS_QLA83XX(ha))
+		if (!IS_QLA25XX(ha) && !IS_QLA81XX(ha) && !IS_QLA83XX(ha) &&
+		    !IS_QLA27XX(ha))
 			goto try_eft;
 
-		tc = dma_alloc_coherent(&ha->pdev->dev, FCE_SIZE, &tc_dma,
-		    GFP_KERNEL);
+try_fce:
+		if (ha->fce)
+			dma_free_coherent(&ha->pdev->dev,
+			    FCE_SIZE, ha->fce, ha->fce_dma);
+
+		/* Allocate memory for Fibre Channel Event Buffer. */
+		tc = dma_zalloc_coherent(&ha->pdev->dev, FCE_SIZE, &tc_dma,
+					 GFP_KERNEL);
 		if (!tc) {
 			ql_log(ql_log_warn, vha, 0x00be,
 			    "Unable to allocate (%d KB) for FCE.\n",
@@ -1503,7 +1516,6 @@ qla2x00_alloc_fw_dump(scsi_qla_host_t *vha)
 			goto try_eft;
 		}
 
-		memset(tc, 0, FCE_SIZE);
 		rval = qla2x00_enable_fce_trace(vha, tc_dma, FCE_NUM_BUFFERS,
 		    ha->fce_mb, &ha->fce_bufs);
 		if (rval) {
@@ -1521,10 +1533,15 @@ qla2x00_alloc_fw_dump(scsi_qla_host_t *vha)
 		ha->flags.fce_enabled = 1;
 		ha->fce_dma = tc_dma;
 		ha->fce = tc;
+
 try_eft:
+		if (ha->eft)
+			dma_free_coherent(&ha->pdev->dev,
+			    EFT_SIZE, ha->eft, ha->eft_dma);
+
 		/* Allocate memory for Extended Trace Buffer. */
-		tc = dma_alloc_coherent(&ha->pdev->dev, EFT_SIZE, &tc_dma,
-		    GFP_KERNEL);
+		tc = dma_zalloc_coherent(&ha->pdev->dev, EFT_SIZE, &tc_dma,
+					 GFP_KERNEL);
 		if (!tc) {
 			ql_log(ql_log_warn, vha, 0x00c1,
 			    "Unable to allocate (%d KB) for EFT.\n",
@@ -1532,7 +1549,6 @@ try_eft:
 			goto cont_alloc;
 		}
 
-		memset(tc, 0, EFT_SIZE);
 		rval = qla2x00_enable_eft_trace(vha, tc_dma, EFT_NUM_BUFFERS);
 		if (rval) {
 			ql_log(ql_log_warn, vha, 0x00c2,
@@ -1548,15 +1564,28 @@ try_eft:
 		ha->eft_dma = tc_dma;
 		ha->eft = tc;
 	}
+
 cont_alloc:
+	if (IS_QLA27XX(ha)) {
+		if (!ha->fw_dump_template) {
+			ql_log(ql_log_warn, vha, 0x00ba,
+			    "Failed missing fwdump template\n");
+			return;
+		}
+		dump_size = qla27xx_fwdt_calculate_dump_size(vha);
+		ql_dbg(ql_dbg_init, vha, 0x00fa,
+		    "-> allocating fwdump (%x bytes)...\n", dump_size);
+		goto allocate;
+	}
+
 	req_q_size = req->length * sizeof(request_t);
 	rsp_q_size = rsp->length * sizeof(response_t);
-
 	dump_size = offsetof(struct qla2xxx_fw_dump, isp);
 	dump_size += fixed_size + mem_size + req_q_size + rsp_q_size + eft_size;
 	ha->chain_offset = dump_size;
 	dump_size += mq_size + fce_size;
 
+allocate:
 	ha->fw_dump = vmalloc(dump_size);
 	if (!ha->fw_dump) {
 		ql_log(ql_log_warn, vha, 0x00c4,
@@ -1578,10 +1607,13 @@ cont_alloc:
 		}
 		return;
 	}
+	ha->fw_dump_len = dump_size;
 	ql_dbg(ql_dbg_init, vha, 0x00c5,
 	    "Allocated (%d KB) for firmware dump.\n", dump_size / 1024);
 
-	ha->fw_dump_len = dump_size;
+	if (IS_QLA27XX(ha))
+		return;
+
 	ha->fw_dump->signature[0] = 'Q';
 	ha->fw_dump->signature[1] = 'L';
 	ha->fw_dump->signature[2] = 'G';
@@ -1802,7 +1834,9 @@ enable_82xx_npiv:
 		spin_unlock_irqrestore(&ha->hardware_lock, flags);
 	}
 
-	if (rval == QLA_SUCCESS && IS_FAC_REQUIRED(ha)) {
+	if (IS_QLA27XX(ha))
+		ha->flags.fac_supported = 1;
+	else if (rval == QLA_SUCCESS && IS_FAC_REQUIRED(ha)) {
 		uint32_t size;
 
 		rval = qla81xx_fac_get_sector_size(vha, &size);
@@ -1815,7 +1849,7 @@ enable_82xx_npiv:
 			    ha->fw_major_version, ha->fw_minor_version,
 			    ha->fw_subminor_version);
 
-			if (IS_QLA83XX(ha)) {
+			if (IS_QLA83XX(ha) || IS_QLA27XX(ha)) {
 				ha->flags.fac_supported = 0;
 				rval = QLA_SUCCESS;
 			}
@@ -2008,7 +2042,11 @@ qla24xx_config_rings(struct scsi_qla_host *vha)
 	icb->response_q_address[0] = cpu_to_le32(LSD(rsp->dma));
 	icb->response_q_address[1] = cpu_to_le32(MSD(rsp->dma));
 
-	if (ha->mqenable || IS_QLA83XX(ha)) {
+	if (IS_SHADOW_REG_CAPABLE(ha))
+		icb->firmware_options_2 |=
+		    __constant_cpu_to_le32(BIT_30|BIT_29);
+
+	if (ha->mqenable || IS_QLA83XX(ha) || IS_QLA27XX(ha)) {
 		icb->qos = __constant_cpu_to_le16(QLA_DEFAULT_QUE_QOS);
 		icb->rid = __constant_cpu_to_le16(rid);
 		if (ha->flags.msix_enabled) {
@@ -2083,6 +2121,8 @@ qla2x00_init_rings(scsi_qla_host_t *vha)
 		req = ha->req_q_map[que];
 		if (!req)
 			continue;
+		req->out_ptr = (void *)(req->ring + req->length);
+		*req->out_ptr = 0;
 		for (cnt = 1; cnt < req->num_outstanding_cmds; cnt++)
 			req->outstanding_cmds[cnt] = NULL;
 
@@ -2098,6 +2138,8 @@ qla2x00_init_rings(scsi_qla_host_t *vha)
 		rsp = ha->rsp_q_map[que];
 		if (!rsp)
 			continue;
+		rsp->in_ptr = (void *)(rsp->ring + rsp->length);
+		*rsp->in_ptr = 0;
 		/* Initialize response queue entries */
 		if (IS_QLAFX00(ha))
 			qlafx00_init_response_q_entries(rsp);
@@ -2129,6 +2171,15 @@ qla2x00_init_rings(scsi_qla_host_t *vha)
 		mid_init_cb->options = __constant_cpu_to_le16(BIT_1);
 		mid_init_cb->init_cb.execution_throttle =
 		    cpu_to_le16(ha->fw_xcb_count);
+		/* D-Port Status */
+		if (IS_DPORT_CAPABLE(ha))
+			mid_init_cb->init_cb.firmware_options_1 |=
+			    cpu_to_le16(BIT_7);
+		/* Enable FA-WWPN */
+		ha->flags.fawwpn_enabled =
+		    (mid_init_cb->init_cb.firmware_options_1 & BIT_6) ? 1 : 0;
+		ql_dbg(ql_dbg_init, vha, 0x0141, "FA-WWPN Support: %s.\n",
+		    (ha->flags.fawwpn_enabled) ? "enabled" : "disabled");
 	}
 
 	rval = qla2x00_init_firmware(vha, ha->init_cb_size);
@@ -2157,7 +2208,7 @@ qla2x00_fw_ready(scsi_qla_host_t *vha)
 	unsigned long	wtime, mtime, cs84xx_time;
 	uint16_t	min_wait;	/* Minimum wait time if loop is down */
 	uint16_t	wait_time;	/* Wait time if loop is coming ready */
-	uint16_t	state[5];
+	uint16_t	state[6];
 	struct qla_hw_data *ha = vha->hw;
 
 	if (IS_QLAFX00(vha->hw))
@@ -2262,8 +2313,8 @@ qla2x00_fw_ready(scsi_qla_host_t *vha)
 	} while (1);
 
 	ql_dbg(ql_dbg_taskm, vha, 0x803a,
-	    "fw_state=%x (%x, %x, %x, %x) " "curr time=%lx.\n", state[0],
-	    state[1], state[2], state[3], state[4], jiffies);
+	    "fw_state=%x (%x, %x, %x, %x %x) curr time=%lx.\n", state[0],
+	    state[1], state[2], state[3], state[4], state[5], jiffies);
 
 	if (rval && !(vha->device_flags & DFLG_NO_CABLE)) {
 		ql_log(ql_log_warn, vha, 0x803b,
@@ -2524,18 +2575,18 @@ qla2x00_nvram_config(scsi_qla_host_t *vha)
 			nv->firmware_options[1] = BIT_7 | BIT_5;
 			nv->add_firmware_options[0] = BIT_5;
 			nv->add_firmware_options[1] = BIT_5 | BIT_4;
-			nv->frame_payload_size = __constant_cpu_to_le16(2048);
+			nv->frame_payload_size = 2048;
 			nv->special_options[1] = BIT_7;
 		} else if (IS_QLA2200(ha)) {
 			nv->firmware_options[0] = BIT_2 | BIT_1;
 			nv->firmware_options[1] = BIT_7 | BIT_5;
 			nv->add_firmware_options[0] = BIT_5;
 			nv->add_firmware_options[1] = BIT_5 | BIT_4;
-			nv->frame_payload_size = __constant_cpu_to_le16(1024);
+			nv->frame_payload_size = 1024;
 		} else if (IS_QLA2100(ha)) {
 			nv->firmware_options[0] = BIT_3 | BIT_1;
 			nv->firmware_options[1] = BIT_5;
-			nv->frame_payload_size = __constant_cpu_to_le16(1024);
+			nv->frame_payload_size = 1024;
 		}
 
 		nv->max_iocb_allocation = __constant_cpu_to_le16(256);
@@ -2571,7 +2622,7 @@ qla2x00_nvram_config(scsi_qla_host_t *vha)
 	 * are valid.
 	 */
 	if (ia64_platform_is("sn2")) {
-		nv->frame_payload_size = __constant_cpu_to_le16(2048);
+		nv->frame_payload_size = 2048;
 		if (IS_QLA23XX(ha))
 			nv->special_options[1] = BIT_7;
 	}
@@ -3113,7 +3164,7 @@ static void
 qla2x00_iidma_fcport(scsi_qla_host_t *vha, fc_port_t *fcport)
 {
 	int rval;
-	uint16_t mb[4];
+	uint16_t mb[MAILBOX_REGISTER_COUNT];
 	struct qla_hw_data *ha = vha->hw;
 
 	if (!IS_IIDMA_CAPABLE(ha))
@@ -4802,13 +4853,14 @@ qla24xx_nvram_config(scsi_qla_host_t *vha)
 	nv = ha->nvram;
 
 	/* Determine NVRAM starting address. */
-	if (ha->flags.port0) {
+	if (ha->port_no == 0) {
 		ha->nvram_base = FA_NVRAM_FUNC0_ADDR;
 		ha->vpd_base = FA_NVRAM_VPD0_ADDR;
 	} else {
 		ha->nvram_base = FA_NVRAM_FUNC1_ADDR;
 		ha->vpd_base = FA_NVRAM_VPD1_ADDR;
 	}
+
 	ha->nvram_size = sizeof(struct nvram_24xx);
 	ha->vpd_size = FA_NVRAM_VPD_SIZE;
 	if (IS_QLA82XX(ha))
@@ -4849,12 +4901,12 @@ qla24xx_nvram_config(scsi_qla_host_t *vha)
 		memset(nv, 0, ha->nvram_size);
 		nv->nvram_version = __constant_cpu_to_le16(ICB_VERSION);
 		nv->version = __constant_cpu_to_le16(ICB_VERSION);
-		nv->frame_payload_size = __constant_cpu_to_le16(2048);
+		nv->frame_payload_size = 2048;
 		nv->execution_throttle = __constant_cpu_to_le16(0xFFFF);
 		nv->exchange_count = __constant_cpu_to_le16(0);
 		nv->hard_address = __constant_cpu_to_le16(124);
 		nv->port_name[0] = 0x21;
-		nv->port_name[1] = 0x00 + ha->port_no;
+		nv->port_name[1] = 0x00 + ha->port_no + 1;
 		nv->port_name[2] = 0x00;
 		nv->port_name[3] = 0xe0;
 		nv->port_name[4] = 0x8b;
@@ -5105,7 +5157,7 @@ qla24xx_load_risc_flash(scsi_qla_host_t *vha, uint32_t *srisc_addr,
 				ql_log(ql_log_fatal, vha, 0x008f,
 				    "Failed to load segment %d of firmware.\n",
 				    fragment);
-				break;
+				return QLA_FUNCTION_FAILED;
 			}
 
 			faddr += dlen;
@@ -5118,6 +5170,99 @@ qla24xx_load_risc_flash(scsi_qla_host_t *vha, uint32_t *srisc_addr,
 		segments--;
 	}
 
+	if (!IS_QLA27XX(ha))
+		return rval;
+
+	if (ha->fw_dump_template)
+		vfree(ha->fw_dump_template);
+	ha->fw_dump_template = NULL;
+	ha->fw_dump_template_len = 0;
+
+	ql_dbg(ql_dbg_init, vha, 0x0161,
+	    "Loading fwdump template from %x\n", faddr);
+	qla24xx_read_flash_data(vha, dcode, faddr, 7);
+	risc_size = be32_to_cpu(dcode[2]);
+	ql_dbg(ql_dbg_init, vha, 0x0162,
+	    "-> array size %x dwords\n", risc_size);
+	if (risc_size == 0 || risc_size == ~0)
+		goto default_template;
+
+	dlen = (risc_size - 8) * sizeof(*dcode);
+	ql_dbg(ql_dbg_init, vha, 0x0163,
+	    "-> template allocating %x bytes...\n", dlen);
+	ha->fw_dump_template = vmalloc(dlen);
+	if (!ha->fw_dump_template) {
+		ql_log(ql_log_warn, vha, 0x0164,
+		    "Failed fwdump template allocate %x bytes.\n", risc_size);
+		goto default_template;
+	}
+
+	faddr += 7;
+	risc_size -= 8;
+	dcode = ha->fw_dump_template;
+	qla24xx_read_flash_data(vha, dcode, faddr, risc_size);
+	for (i = 0; i < risc_size; i++)
+		dcode[i] = le32_to_cpu(dcode[i]);
+
+	if (!qla27xx_fwdt_template_valid(dcode)) {
+		ql_log(ql_log_warn, vha, 0x0165,
+		    "Failed fwdump template validate\n");
+		goto default_template;
+	}
+
+	dlen = qla27xx_fwdt_template_size(dcode);
+	ql_dbg(ql_dbg_init, vha, 0x0166,
+	    "-> template size %x bytes\n", dlen);
+	if (dlen > risc_size * sizeof(*dcode)) {
+		ql_log(ql_log_warn, vha, 0x0167,
+		    "Failed fwdump template exceeds array by %x bytes\n",
+		    (uint32_t)(dlen - risc_size * sizeof(*dcode)));
+		goto default_template;
+	}
+	ha->fw_dump_template_len = dlen;
+	return rval;
+
+default_template:
+	ql_log(ql_log_warn, vha, 0x0168, "Using default fwdump template\n");
+	if (ha->fw_dump_template)
+		vfree(ha->fw_dump_template);
+	ha->fw_dump_template = NULL;
+	ha->fw_dump_template_len = 0;
+
+	dlen = qla27xx_fwdt_template_default_size();
+	ql_dbg(ql_dbg_init, vha, 0x0169,
+	    "-> template allocating %x bytes...\n", dlen);
+	ha->fw_dump_template = vmalloc(dlen);
+	if (!ha->fw_dump_template) {
+		ql_log(ql_log_warn, vha, 0x016a,
+		    "Failed fwdump template allocate %x bytes.\n", risc_size);
+		goto failed_template;
+	}
+
+	dcode = ha->fw_dump_template;
+	risc_size = dlen / sizeof(*dcode);
+	memcpy(dcode, qla27xx_fwdt_template_default(), dlen);
+	for (i = 0; i < risc_size; i++)
+		dcode[i] = be32_to_cpu(dcode[i]);
+
+	if (!qla27xx_fwdt_template_valid(ha->fw_dump_template)) {
+		ql_log(ql_log_warn, vha, 0x016b,
+		    "Failed fwdump template validate\n");
+		goto failed_template;
+	}
+
+	dlen = qla27xx_fwdt_template_size(ha->fw_dump_template);
+	ql_dbg(ql_dbg_init, vha, 0x016c,
+	    "-> template size %x bytes\n", dlen);
+	ha->fw_dump_template_len = dlen;
+	return rval;
+
+failed_template:
+	ql_log(ql_log_warn, vha, 0x016d, "Failed default fwdump template\n");
+	if (ha->fw_dump_template)
+		vfree(ha->fw_dump_template);
+	ha->fw_dump_template = NULL;
+	ha->fw_dump_template_len = 0;
 	return rval;
 }
 
@@ -5232,7 +5377,8 @@ qla24xx_load_risc_blob(scsi_qla_host_t *vha, uint32_t *srisc_addr)
 	uint32_t risc_size;
 	uint32_t i;
 	struct fw_blob *blob;
-	uint32_t *fwcode, fwclen;
+	const uint32_t *fwcode;
+	uint32_t fwclen;
 	struct qla_hw_data *ha = vha->hw;
 	struct req_que *req = ha->req_q_map[0];
 
@@ -5264,7 +5410,7 @@ qla24xx_load_risc_blob(scsi_qla_host_t *vha, uint32_t *srisc_addr)
 		ql_log(ql_log_fatal, vha, 0x0093,
 		    "Unable to verify integrity of firmware image (%Zd).\n",
 		    blob->fw->size);
-		goto fail_fw_integrity;
+		return QLA_FUNCTION_FAILED;
 	}
 	for (i = 0; i < 4; i++)
 		dcode[i] = be32_to_cpu(fwcode[i + 4]);
@@ -5278,7 +5424,7 @@ qla24xx_load_risc_blob(scsi_qla_host_t *vha, uint32_t *srisc_addr)
 		ql_log(ql_log_fatal, vha, 0x0095,
 		    "Firmware data: %08x %08x %08x %08x.\n",
 		    dcode[0], dcode[1], dcode[2], dcode[3]);
-		goto fail_fw_integrity;
+		return QLA_FUNCTION_FAILED;
 	}
 
 	while (segments && rval == QLA_SUCCESS) {
@@ -5292,8 +5438,7 @@ qla24xx_load_risc_blob(scsi_qla_host_t *vha, uint32_t *srisc_addr)
 			ql_log(ql_log_fatal, vha, 0x0096,
 			    "Unable to verify integrity of firmware image "
 			    "(%Zd).\n", blob->fw->size);
-
-			goto fail_fw_integrity;
+			return QLA_FUNCTION_FAILED;
 		}
 
 		fragment = 0;
@@ -5315,7 +5460,7 @@ qla24xx_load_risc_blob(scsi_qla_host_t *vha, uint32_t *srisc_addr)
 				ql_log(ql_log_fatal, vha, 0x0098,
 				    "Failed to load segment %d of firmware.\n",
 				    fragment);
-				break;
+				return QLA_FUNCTION_FAILED;
 			}
 
 			fwcode += dlen;
@@ -5327,10 +5472,100 @@ qla24xx_load_risc_blob(scsi_qla_host_t *vha, uint32_t *srisc_addr)
 		/* Next segment. */
 		segments--;
 	}
+
+	if (!IS_QLA27XX(ha))
+		return rval;
+
+	if (ha->fw_dump_template)
+		vfree(ha->fw_dump_template);
+	ha->fw_dump_template = NULL;
+	ha->fw_dump_template_len = 0;
+
+	ql_dbg(ql_dbg_init, vha, 0x171,
+	    "Loading fwdump template from %x\n",
+	    (uint32_t)((void *)fwcode - (void *)blob->fw->data));
+	risc_size = be32_to_cpu(fwcode[2]);
+	ql_dbg(ql_dbg_init, vha, 0x172,
+	    "-> array size %x dwords\n", risc_size);
+	if (risc_size == 0 || risc_size == ~0)
+		goto default_template;
+
+	dlen = (risc_size - 8) * sizeof(*fwcode);
+	ql_dbg(ql_dbg_init, vha, 0x0173,
+	    "-> template allocating %x bytes...\n", dlen);
+	ha->fw_dump_template = vmalloc(dlen);
+	if (!ha->fw_dump_template) {
+		ql_log(ql_log_warn, vha, 0x0174,
+		    "Failed fwdump template allocate %x bytes.\n", risc_size);
+		goto default_template;
+	}
+
+	fwcode += 7;
+	risc_size -= 8;
+	dcode = ha->fw_dump_template;
+	for (i = 0; i < risc_size; i++)
+		dcode[i] = le32_to_cpu(fwcode[i]);
+
+	if (!qla27xx_fwdt_template_valid(dcode)) {
+		ql_log(ql_log_warn, vha, 0x0175,
+		    "Failed fwdump template validate\n");
+		goto default_template;
+	}
+
+	dlen = qla27xx_fwdt_template_size(dcode);
+	ql_dbg(ql_dbg_init, vha, 0x0176,
+	    "-> template size %x bytes\n", dlen);
+	if (dlen > risc_size * sizeof(*fwcode)) {
+		ql_log(ql_log_warn, vha, 0x0177,
+		    "Failed fwdump template exceeds array by %x bytes\n",
+		    (uint32_t)(dlen - risc_size * sizeof(*fwcode)));
+		goto default_template;
+	}
+	ha->fw_dump_template_len = dlen;
 	return rval;
 
-fail_fw_integrity:
-	return QLA_FUNCTION_FAILED;
+default_template:
+	ql_log(ql_log_warn, vha, 0x0178, "Using default fwdump template\n");
+	if (ha->fw_dump_template)
+		vfree(ha->fw_dump_template);
+	ha->fw_dump_template = NULL;
+	ha->fw_dump_template_len = 0;
+
+	dlen = qla27xx_fwdt_template_default_size();
+	ql_dbg(ql_dbg_init, vha, 0x0179,
+	    "-> template allocating %x bytes...\n", dlen);
+	ha->fw_dump_template = vmalloc(dlen);
+	if (!ha->fw_dump_template) {
+		ql_log(ql_log_warn, vha, 0x017a,
+		    "Failed fwdump template allocate %x bytes.\n", risc_size);
+		goto failed_template;
+	}
+
+	dcode = ha->fw_dump_template;
+	risc_size = dlen / sizeof(*fwcode);
+	fwcode = qla27xx_fwdt_template_default();
+	for (i = 0; i < risc_size; i++)
+		dcode[i] = be32_to_cpu(fwcode[i]);
+
+	if (!qla27xx_fwdt_template_valid(ha->fw_dump_template)) {
+		ql_log(ql_log_warn, vha, 0x017b,
+		    "Failed fwdump template validate\n");
+		goto failed_template;
+	}
+
+	dlen = qla27xx_fwdt_template_size(ha->fw_dump_template);
+	ql_dbg(ql_dbg_init, vha, 0x017c,
+	    "-> template size %x bytes\n", dlen);
+	ha->fw_dump_template_len = dlen;
+	return rval;
+
+failed_template:
+	ql_log(ql_log_warn, vha, 0x017d, "Failed default fwdump template\n");
+	if (ha->fw_dump_template)
+		vfree(ha->fw_dump_template);
+	ha->fw_dump_template = NULL;
+	ha->fw_dump_template_len = 0;
+	return rval;
 }
 
 int
@@ -5600,11 +5835,11 @@ qla81xx_nvram_config(scsi_qla_host_t *vha)
 		memset(nv, 0, ha->nvram_size);
 		nv->nvram_version = __constant_cpu_to_le16(ICB_VERSION);
 		nv->version = __constant_cpu_to_le16(ICB_VERSION);
-		nv->frame_payload_size = __constant_cpu_to_le16(2048);
+		nv->frame_payload_size = 2048;
 		nv->execution_throttle = __constant_cpu_to_le16(0xFFFF);
 		nv->exchange_count = __constant_cpu_to_le16(0);
 		nv->port_name[0] = 0x21;
-		nv->port_name[1] = 0x00 + ha->port_no;
+		nv->port_name[1] = 0x00 + ha->port_no + 1;
 		nv->port_name[2] = 0x00;
 		nv->port_name[3] = 0xe0;
 		nv->port_name[4] = 0x8b;
@@ -5638,7 +5873,7 @@ qla81xx_nvram_config(scsi_qla_host_t *vha)
 		nv->enode_mac[2] = 0xDD;
 		nv->enode_mac[3] = 0x04;
 		nv->enode_mac[4] = 0x05;
-		nv->enode_mac[5] = 0x06 + ha->port_no;
+		nv->enode_mac[5] = 0x06 + ha->port_no + 1;
 
 		rval = 1;
 	}
@@ -5674,7 +5909,7 @@ qla81xx_nvram_config(scsi_qla_host_t *vha)
 		icb->enode_mac[2] = 0xDD;
 		icb->enode_mac[3] = 0x04;
 		icb->enode_mac[4] = 0x05;
-		icb->enode_mac[5] = 0x06 + ha->port_no;
+		icb->enode_mac[5] = 0x06 + ha->port_no + 1;
 	}
 
 	/* Use extended-initialization control block. */
@@ -5775,7 +6010,7 @@ qla81xx_nvram_config(scsi_qla_host_t *vha)
 		ha->login_retry_count = ql2xloginretrycount;
 
 	/* if not running MSI-X we need handshaking on interrupts */
-	if (!vha->hw->flags.msix_enabled && IS_QLA83XX(ha))
+	if (!vha->hw->flags.msix_enabled && (IS_QLA83XX(ha) || IS_QLA27XX(ha)))
 		icb->firmware_options_2 |= __constant_cpu_to_le32(BIT_22);
 
 	/* Enable ZIO. */

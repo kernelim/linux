@@ -45,25 +45,137 @@ typedef uint64_t blkif_sector_t;
 #define BLKIF_OP_WRITE_BARRIER     2
 
 /*
+ * Recognised if "feature-flush-cache" is present in backend xenbus
+ * info.  A flush will ask the underlying storage hardware to flush its
+ * non-volatile caches as appropriate.  The "feature-flush-cache" node
+ * contains a boolean indicating whether flush requests are likely to
+ * succeed or fail. Either way, a flush request may fail at any time
+ * with BLKIF_RSP_EOPNOTSUPP if it is unsupported by the underlying
+ * block-device hardware. The boolean simply indicates whether or not it
+ * is worthwhile for the frontend to attempt flushes.  If a backend does
+ * not recognise BLKIF_OP_WRITE_FLUSH_CACHE, it should *not* create the
+ * "feature-flush-cache" node!
+ */
+#define BLKIF_OP_FLUSH_DISKCACHE   3
+
+/*
+ * Recognised only if "feature-discard" is present in backend xenbus info.
+ * The "feature-discard" node contains a boolean indicating whether trim
+ * (ATA) or unmap (SCSI) - conviently called discard requests are likely
+ * to succeed or fail. Either way, a discard request
+ * may fail at any time with BLKIF_RSP_EOPNOTSUPP if it is unsupported by
+ * the underlying block-device hardware. The boolean simply indicates whether
+ * or not it is worthwhile for the frontend to attempt discard requests.
+ * If a backend does not recognise BLKIF_OP_DISCARD, it should *not*
+ * create the "feature-discard" node!
+ *
+ * Discard operation is a request for the underlying block device to mark
+ * extents to be erased. However, discard does not guarantee that the blocks
+ * will be erased from the device - it is just a hint to the device
+ * controller that these blocks are no longer in use. What the device
+ * controller does with that information is left to the controller.
+ * Discard operations are passed with sector_number as the
+ * sector index to begin discard operations at and nr_sectors as the number of
+ * sectors to be discarded. The specified sectors should be discarded if the
+ * underlying block device supports trim (ATA) or unmap (SCSI) operations,
+ * or a BLKIF_RSP_EOPNOTSUPP  should be returned.
+ * More information about trim/unmap operations at:
+ * http://t13.org/Documents/UploadedDocuments/docs2008/
+ *     e07154r6-Data_Set_Management_Proposal_for_ATA-ACS2.doc
+ * http://www.seagate.com/staticfiles/support/disc/manuals/
+ *     Interface%20manuals/100293068c.pdf
+ */
+#define BLKIF_OP_DISCARD           5
+
+/*
+ * Recognized if "feature-max-indirect-segments" in present in the backend
+ * xenbus info. The "feature-max-indirect-segments" node contains the maximum
+ * number of segments allowed by the backend per request. If the node is
+ * present, the frontend might use blkif_request_indirect structs in order to
+ * issue requests with more than BLKIF_MAX_SEGMENTS_PER_REQUEST (11). The
+ * maximum number of indirect segments is fixed by the backend, but the
+ * frontend can issue requests with any number of indirect segments as long as
+ * it's less than the number provided by the backend. The indirect_grefs field
+ * in blkif_request_indirect should be filled by the frontend with the
+ * grant references of the pages that are holding the indirect segments.
+ * These pages are filled with an array of blkif_request_segment that hold the
+ * information about the segments. The number of indirect pages to use is
+ * determined by the number of segments an indirect request contains. Every
+ * indirect page can contain a maximum of
+ * (PAGE_SIZE / sizeof(struct blkif_request_segment)) segments, so to
+ * calculate the number of indirect pages to use we have to do
+ * ceil(indirect_segments / (PAGE_SIZE / sizeof(struct blkif_request_segment))).
+ *
+ * If a backend does not recognize BLKIF_OP_INDIRECT, it should *not*
+ * create the "feature-max-indirect-segments" node!
+ */
+#define BLKIF_OP_INDIRECT          6
+
+/*
  * Maximum scatter/gather segments per request.
  * This is carefully chosen so that sizeof(struct blkif_ring) <= PAGE_SIZE.
  * NB. This could be 12 if the ring indexes weren't stored in the same page.
  */
 #define BLKIF_MAX_SEGMENTS_PER_REQUEST 11
 
-struct blkif_request {
-	uint8_t        operation;    /* BLKIF_OP_???                         */
-	uint8_t        nr_segments;  /* number of segments                   */
-	blkif_vdev_t   handle;       /* only for read/write requests         */
-	uint64_t       id;           /* private guest value, echoed in resp  */
-	blkif_sector_t sector_number;/* start sector idx on disk (r/w only)  */
-	struct blkif_request_segment {
+#define BLKIF_MAX_INDIRECT_PAGES_PER_REQUEST 8
+
+struct blkif_request_segment {
 		grant_ref_t gref;        /* reference to I/O buffer frame        */
 		/* @first_sect: first sector in frame to transfer (inclusive).   */
 		/* @last_sect: last sector in frame to transfer (inclusive).     */
 		uint8_t     first_sect, last_sect;
-	} seg[BLKIF_MAX_SEGMENTS_PER_REQUEST];
 };
+
+struct blkif_request_rw {
+	uint8_t        nr_segments;  /* number of segments                   */
+	blkif_vdev_t   handle;       /* only for read/write requests         */
+#ifdef CONFIG_X86_64
+	uint32_t       _pad1;	     /* offsetof(blkif_request,u.rw.id) == 8 */
+#endif
+	uint64_t       id;           /* private guest value, echoed in resp  */
+	blkif_sector_t sector_number;/* start sector idx on disk (r/w only)  */
+	struct blkif_request_segment seg[BLKIF_MAX_SEGMENTS_PER_REQUEST];
+} __attribute__((__packed__));
+
+struct blkif_request_discard {
+	uint8_t        nr_segments;  /* number of segments                   */
+	blkif_vdev_t   _pad1;        /* only for read/write requests         */
+#ifdef CONFIG_X86_64
+	uint32_t       _pad2;        /* offsetof(blkif_req..,u.discard.id)==8*/
+#endif
+	uint64_t       id;           /* private guest value, echoed in resp  */
+	blkif_sector_t sector_number;
+	uint64_t       nr_sectors;
+	uint8_t        _pad3;
+} __attribute__((__packed__));
+
+struct blkif_request_indirect {
+	uint8_t        indirect_op;
+	uint16_t       nr_segments;
+#ifdef CONFIG_X86_64
+	uint32_t       _pad1;        /* offsetof(blkif_...,u.indirect.id) == 8 */
+#endif
+	uint64_t       id;
+	blkif_sector_t sector_number;
+	blkif_vdev_t   handle;
+	uint16_t       _pad2;
+	grant_ref_t    indirect_grefs[BLKIF_MAX_INDIRECT_PAGES_PER_REQUEST];
+#ifdef CONFIG_X86_64
+	uint32_t      _pad3;         /* make it 64 byte aligned */
+#else
+	uint64_t      _pad3;         /* make it 64 byte aligned */
+#endif
+} __attribute__((__packed__));
+
+struct blkif_request {
+	uint8_t        operation;    /* BLKIF_OP_???                         */
+	union {
+		struct blkif_request_rw rw;
+		struct blkif_request_discard discard;
+		struct blkif_request_indirect indirect;
+	} u;
+} __attribute__((__packed__));
 
 struct blkif_response {
 	uint64_t        id;              /* copied from request */

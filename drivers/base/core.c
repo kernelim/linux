@@ -870,6 +870,7 @@ int device_private_init(struct device *dev)
 	dev->p->device = dev;
 	klist_init(&dev->p->klist_children, klist_children_get,
 		   klist_children_put);
+	INIT_LIST_HEAD(&dev->p->deferred_probe);
 	return 0;
 }
 
@@ -1761,8 +1762,8 @@ void device_shutdown(void)
 
 #ifdef CONFIG_PRINTK
 
-static int __dev_printk(const char *level, const struct device *dev,
-			struct va_format *vaf)
+int __dev_printk(const char *level, const struct device *dev,
+		 struct va_format *vaf)
 {
 	if (!dev)
 		return printk("%s(NULL device *): %pV", level, vaf);
@@ -1770,6 +1771,7 @@ static int __dev_printk(const char *level, const struct device *dev,
 	return printk("%s%s %s: %pV",
 		      level, dev_driver_string(dev), dev_name(dev), vaf);
 }
+EXPORT_SYMBOL(__dev_printk);
 
 int dev_printk(const char *level, const struct device *dev,
 	       const char *fmt, ...)

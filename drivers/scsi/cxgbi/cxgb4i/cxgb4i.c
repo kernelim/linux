@@ -19,7 +19,9 @@
 #include <net/tcp.h>
 #include <net/dst.h>
 #include <linux/netdevice.h>
+#include <net/addrconf.h>
 
+#include "t4_regs.h"
 #include "t4_msg.h"
 #include "cxgb4.h"
 #include "cxgb4_uld.h"
@@ -32,13 +34,12 @@ static unsigned int dbg_level;
 #include "../libcxgbi.h"
 
 #define	DRV_MODULE_NAME		"cxgb4i"
-#define DRV_MODULE_DESC		"Chelsio T4 iSCSI Driver"
-#define	DRV_MODULE_VERSION	"0.9.1"
-#define	DRV_MODULE_RELDATE	"Aug. 2010"
+#define DRV_MODULE_DESC		"Chelsio T4/T5 iSCSI Driver"
+#define	DRV_MODULE_VERSION	"0.9.4"
 
 static char version[] =
 	DRV_MODULE_DESC " " DRV_MODULE_NAME
-	" v" DRV_MODULE_VERSION " (" DRV_MODULE_RELDATE ")\n";
+	" v" DRV_MODULE_VERSION "\n";
 
 MODULE_AUTHOR("Chelsio Communications, Inc.");
 MODULE_DESCRIPTION(DRV_MODULE_DESC);
@@ -74,6 +75,7 @@ typedef void (*cxgb4i_cplhandler_func)(struct cxgbi_device *, struct sk_buff *);
 static void *t4_uld_add(const struct cxgb4_lld_info *);
 static int t4_uld_rx_handler(void *, const __be64 *, const struct pkt_gl *);
 static int t4_uld_state_change(void *, enum cxgb4_state state);
+static inline int send_tx_flowc_wr(struct cxgbi_sock *);
 
 static const struct cxgb4_uld_info cxgb4i_uld_info = {
 	.name = DRV_MODULE_NAME,
@@ -150,15 +152,10 @@ static struct scsi_transport_template *cxgb4i_stt;
  * The section below implments CPLs that related to iscsi tcp connection
  * open/close/abort and data send/receive.
  */
+
 #define DIV_ROUND_UP(n, d)	(((n) + (d) - 1) / (d))
 #define RCV_BUFSIZ_MASK		0x3FFU
 #define MAX_IMM_TX_PKT_LEN	128
-
-static inline void set_queue(struct sk_buff *skb, unsigned int queue,
-				const struct cxgbi_sock *csk)
-{
-	skb->queue_mapping = queue;
-}
 
 static int push_tx_frames(struct cxgbi_sock *, int);
 
@@ -169,16 +166,21 @@ static int push_tx_frames(struct cxgbi_sock *, int);
  * Returns true if a packet can be sent as an offload WR with immediate
  * data.  We currently use the same limit as for Ethernet packets.
  */
-static inline int is_ofld_imm(const struct sk_buff *skb)
+static inline bool is_ofld_imm(const struct sk_buff *skb)
 {
-	return skb->len <= (MAX_IMM_TX_PKT_LEN -
-			sizeof(struct fw_ofld_tx_data_wr));
+	int len = skb->len;
+
+	if (likely(cxgbi_skcb_test_flag(skb, SKCBF_TX_NEED_HDR)))
+		len += sizeof(struct fw_ofld_tx_data_wr);
+
+	return len <= MAX_IMM_TX_PKT_LEN;
 }
 
 static void send_act_open_req(struct cxgbi_sock *csk, struct sk_buff *skb,
 				struct l2t_entry *e)
 {
-	struct cpl_act_open_req *req;
+	struct cxgb4_lld_info *lldi = cxgbi_cdev_priv(csk->cdev);
+	int t4 = is_t4(lldi->adapter_type);
 	int wscale = cxgbi_sock_compute_wscale(csk->mss_idx);
 	unsigned long long opt0;
 	unsigned int opt2;
@@ -195,31 +197,154 @@ static void send_act_open_req(struct cxgbi_sock *csk, struct sk_buff *skb,
 		RCV_BUFSIZ(cxgb4i_rcv_win >> 10);
 	opt2 = RX_CHANNEL(0) |
 		RSS_QUEUE_VALID |
-		(1 << 20) | (1 << 22) |
+		(1 << 20) |
 		RSS_QUEUE(csk->rss_qid);
 
-	set_wr_txq(skb, CPL_PRIORITY_SETUP, csk->port_id);
-	req = (struct cpl_act_open_req *)skb->head;
+	if (is_t4(lldi->adapter_type)) {
+		struct cpl_act_open_req *req =
+				(struct cpl_act_open_req *)skb->head;
 
-	INIT_TP_WR(req, 0);
-	OPCODE_TID(req) = cpu_to_be32(MK_OPCODE_TID(CPL_ACT_OPEN_REQ,
+		INIT_TP_WR(req, 0);
+		OPCODE_TID(req) = cpu_to_be32(MK_OPCODE_TID(CPL_ACT_OPEN_REQ,
 					qid_atid));
-	req->local_port = csk->saddr.sin_port;
-	req->peer_port = csk->daddr.sin_port;
-	req->local_ip = csk->saddr.sin_addr.s_addr;
-	req->peer_ip = csk->daddr.sin_addr.s_addr;
-	req->opt0 = cpu_to_be64(opt0);
-	req->params = 0;
-	req->opt2 = cpu_to_be32(opt2);
+		req->local_port = csk->saddr.sin_port;
+		req->peer_port = csk->daddr.sin_port;
+		req->local_ip = csk->saddr.sin_addr.s_addr;
+		req->peer_ip = csk->daddr.sin_addr.s_addr;
+		req->opt0 = cpu_to_be64(opt0);
+		req->params = cpu_to_be32(cxgb4_select_ntuple(
+					csk->cdev->ports[csk->port_id],
+					csk->l2t));
+		opt2 |= 1 << 22;
+		req->opt2 = cpu_to_be32(opt2);
 
-	log_debug(1 << CXGBI_DBG_TOE | 1 << CXGBI_DBG_SOCK,
-		"csk 0x%p, %pI4:%u-%pI4:%u, atid %d, qid %u.\n",
-		csk, &req->local_ip, ntohs(req->local_port),
-		&req->peer_ip, ntohs(req->peer_port),
-		csk->atid, csk->rss_qid);
+		log_debug(1 << CXGBI_DBG_TOE | 1 << CXGBI_DBG_SOCK,
+			"csk t4 0x%p, %pI4:%u-%pI4:%u, atid %d, qid %u.\n",
+			csk, &req->local_ip, ntohs(req->local_port),
+			&req->peer_ip, ntohs(req->peer_port),
+			csk->atid, csk->rss_qid);
+	} else {
+		struct cpl_t5_act_open_req *req =
+				(struct cpl_t5_act_open_req *)skb->head;
+
+		INIT_TP_WR(req, 0);
+		OPCODE_TID(req) = cpu_to_be32(MK_OPCODE_TID(CPL_ACT_OPEN_REQ,
+					qid_atid));
+		req->local_port = csk->saddr.sin_port;
+		req->peer_port = csk->daddr.sin_port;
+		req->local_ip = csk->saddr.sin_addr.s_addr;
+		req->peer_ip = csk->daddr.sin_addr.s_addr;
+		req->opt0 = cpu_to_be64(opt0);
+		req->params = cpu_to_be64(V_FILTER_TUPLE(
+				cxgb4_select_ntuple(
+					csk->cdev->ports[csk->port_id],
+					csk->l2t)));
+		opt2 |= 1 << 31;
+		req->opt2 = cpu_to_be32(opt2);
+
+		log_debug(1 << CXGBI_DBG_TOE | 1 << CXGBI_DBG_SOCK,
+			"csk t5 0x%p, %pI4:%u-%pI4:%u, atid %d, qid %u.\n",
+			csk, &req->local_ip, ntohs(req->local_port),
+			&req->peer_ip, ntohs(req->peer_port),
+			csk->atid, csk->rss_qid);
+	}
+
+	set_wr_txq(skb, CPL_PRIORITY_SETUP, csk->port_id);
+
+	pr_info_ipaddr("t%d csk 0x%p,%u,0x%lx,%u, rss_qid %u.\n",
+		       (&csk->saddr), (&csk->daddr), t4 ? 4 : 5, csk,
+		       csk->state, csk->flags, csk->atid, csk->rss_qid);
 
 	cxgb4_l2t_send(csk->cdev->ports[csk->port_id], skb, csk->l2t);
 }
+
+#if IS_ENABLED(CONFIG_IPV6)
+static void send_act_open_req6(struct cxgbi_sock *csk, struct sk_buff *skb,
+			       struct l2t_entry *e)
+{
+	struct cxgb4_lld_info *lldi = cxgbi_cdev_priv(csk->cdev);
+	int t4 = is_t4(lldi->adapter_type);
+	int wscale = cxgbi_sock_compute_wscale(csk->mss_idx);
+	unsigned long long opt0;
+	unsigned int opt2;
+	unsigned int qid_atid = ((unsigned int)csk->atid) |
+				 (((unsigned int)csk->rss_qid) << 14);
+
+	opt0 = KEEP_ALIVE(1) |
+		WND_SCALE(wscale) |
+		MSS_IDX(csk->mss_idx) |
+		L2T_IDX(((struct l2t_entry *)csk->l2t)->idx) |
+		TX_CHAN(csk->tx_chan) |
+		SMAC_SEL(csk->smac_idx) |
+		ULP_MODE(ULP_MODE_ISCSI) |
+		RCV_BUFSIZ(cxgb4i_rcv_win >> 10);
+
+	opt2 = RX_CHANNEL(0) |
+		RSS_QUEUE_VALID |
+		RX_FC_DISABLE |
+		RSS_QUEUE(csk->rss_qid);
+
+	if (t4) {
+		struct cpl_act_open_req6 *req =
+			    (struct cpl_act_open_req6 *)skb->head;
+
+		INIT_TP_WR(req, 0);
+		OPCODE_TID(req) = cpu_to_be32(MK_OPCODE_TID(CPL_ACT_OPEN_REQ6,
+							    qid_atid));
+		req->local_port = csk->saddr6.sin6_port;
+		req->peer_port = csk->daddr6.sin6_port;
+
+		req->local_ip_hi = *(__be64 *)(csk->saddr6.sin6_addr.s6_addr);
+		req->local_ip_lo = *(__be64 *)(csk->saddr6.sin6_addr.s6_addr +
+								    8);
+		req->peer_ip_hi = *(__be64 *)(csk->daddr6.sin6_addr.s6_addr);
+		req->peer_ip_lo = *(__be64 *)(csk->daddr6.sin6_addr.s6_addr +
+								    8);
+
+		req->opt0 = cpu_to_be64(opt0);
+
+		opt2 |= RX_FC_VALID;
+		req->opt2 = cpu_to_be32(opt2);
+
+		req->params = cpu_to_be32(cxgb4_select_ntuple(
+					  csk->cdev->ports[csk->port_id],
+					  csk->l2t));
+	} else {
+		struct cpl_t5_act_open_req6 *req =
+				(struct cpl_t5_act_open_req6 *)skb->head;
+
+		INIT_TP_WR(req, 0);
+		OPCODE_TID(req) = cpu_to_be32(MK_OPCODE_TID(CPL_ACT_OPEN_REQ6,
+							    qid_atid));
+		req->local_port = csk->saddr6.sin6_port;
+		req->peer_port = csk->daddr6.sin6_port;
+		req->local_ip_hi = *(__be64 *)(csk->saddr6.sin6_addr.s6_addr);
+		req->local_ip_lo = *(__be64 *)(csk->saddr6.sin6_addr.s6_addr +
+									8);
+		req->peer_ip_hi = *(__be64 *)(csk->daddr6.sin6_addr.s6_addr);
+		req->peer_ip_lo = *(__be64 *)(csk->daddr6.sin6_addr.s6_addr +
+									8);
+		req->opt0 = cpu_to_be64(opt0);
+
+		opt2 |= T5_OPT_2_VALID;
+		req->opt2 = cpu_to_be32(opt2);
+
+		req->params = cpu_to_be64(V_FILTER_TUPLE(cxgb4_select_ntuple(
+					  csk->cdev->ports[csk->port_id],
+					  csk->l2t)));
+	}
+
+	set_wr_txq(skb, CPL_PRIORITY_SETUP, csk->port_id);
+
+	pr_info("t%d csk 0x%p,%u,0x%lx,%u, [%pI6]:%u-[%pI6]:%u, rss_qid %u.\n",
+		t4 ? 4 : 5, csk, csk->state, csk->flags, csk->atid,
+		&csk->saddr6.sin6_addr, ntohs(csk->saddr.sin_port),
+		&csk->daddr6.sin6_addr, ntohs(csk->daddr.sin_port),
+		csk->rss_qid);
+
+	cxgb4_l2t_send(csk->cdev->ports[csk->port_id], skb, csk->l2t);
+}
+#endif
 
 static void send_close_req(struct cxgbi_sock *csk)
 {
@@ -261,13 +386,19 @@ static void send_abort_req(struct cxgbi_sock *csk)
 
 	if (unlikely(csk->state == CTP_ABORTING) || !skb || !csk->cdev)
 		return;
+
+	if (!cxgbi_sock_flag(csk, CTPF_TX_DATA_SENT)) {
+		send_tx_flowc_wr(csk);
+		cxgbi_sock_set_flag(csk, CTPF_TX_DATA_SENT);
+	}
+
 	cxgbi_sock_set_state(csk, CTP_ABORTING);
 	cxgbi_sock_set_flag(csk, CTPF_ABORT_RPL_PENDING);
 	cxgbi_sock_purge_write_queue(csk);
 
 	csk->cpl_abort_req = NULL;
 	req = (struct cpl_abort_req *)skb->head;
-	set_queue(skb, CPL_PRIORITY_DATA, csk);
+	set_wr_txq(skb, CPL_PRIORITY_DATA, csk->port_id);
 	req->cmd = CPL_ABORT_SEND_RST;
 	t4_set_arp_err_handler(skb, csk, abort_arp_failure);
 	INIT_TP_WR(req, csk->tid);
@@ -293,7 +424,7 @@ static void send_abort_rpl(struct cxgbi_sock *csk, int rst_status)
 		csk, csk->state, csk->flags, csk->tid, rst_status);
 
 	csk->cpl_abort_rpl = NULL;
-	set_queue(skb, CPL_PRIORITY_DATA, csk);
+	set_wr_txq(skb, CPL_PRIORITY_DATA, csk->port_id);
 	INIT_TP_WR(rpl, csk->tid);
 	OPCODE_TID(rpl) = cpu_to_be32(MK_OPCODE_TID(CPL_ABORT_RPL, csk->tid));
 	rpl->cmd = rst_status;
@@ -358,25 +489,45 @@ static inline unsigned int calc_tx_flits_ofld(const struct sk_buff *skb)
 		return DIV_ROUND_UP(skb->len, 8);
 	flits = skb_transport_offset(skb) / 8;
 	cnt = skb_shinfo(skb)->nr_frags;
-	if (skb->tail != skb->transport_header)
+	if (skb_tail_pointer(skb) != skb_transport_header(skb))
 		cnt++;
 	return flits + sgl_len(cnt);
 }
 
-static inline void send_tx_flowc_wr(struct cxgbi_sock *csk)
+#define FLOWC_WR_NPARAMS_MIN 9
+static inline int tx_flowc_wr_credits(int *nparamsp, int *flowclenp)
+{
+	int nparams, flowclen16, flowclen;
+
+	nparams = FLOWC_WR_NPARAMS_MIN;
+	flowclen = offsetof(struct fw_flowc_wr, mnemval[nparams]);
+	flowclen16 = DIV_ROUND_UP(flowclen, 16);
+	flowclen = flowclen16 * 16;
+	/*
+	 * Return the number of 16-byte credits used by the FlowC request.
+	 * Pass back the nparams and actual FlowC length if requested.
+	 */
+	if (nparamsp)
+		*nparamsp = nparams;
+	if (flowclenp)
+		*flowclenp = flowclen;
+
+	return flowclen16;
+}
+
+static inline int send_tx_flowc_wr(struct cxgbi_sock *csk)
 {
 	struct sk_buff *skb;
 	struct fw_flowc_wr *flowc;
-	int flowclen, i;
+	int nparams, flowclen16, flowclen;
 
-	flowclen = 80;
+	flowclen16 = tx_flowc_wr_credits(&nparams, &flowclen);
 	skb = alloc_wr(flowclen, 0, GFP_ATOMIC);
 	flowc = (struct fw_flowc_wr *)skb->head;
 	flowc->op_to_nparams =
-		htonl(FW_WR_OP(FW_FLOWC_WR) | FW_FLOWC_WR_NPARAMS(8));
+		htonl(FW_WR_OP(FW_FLOWC_WR) | FW_FLOWC_WR_NPARAMS(nparams));
 	flowc->flowid_len16 =
-		htonl(FW_WR_LEN16(DIV_ROUND_UP(72, 16)) |
-				FW_WR_FLOWID(csk->tid));
+		htonl(FW_WR_LEN16(flowclen16) | FW_WR_FLOWID(csk->tid));
 	flowc->mnemval[0].mnemonic = FW_FLOWC_MNEM_PFNVFN;
 	flowc->mnemval[0].val = htonl(csk->cdev->pfvf);
 	flowc->mnemval[1].mnemonic = FW_FLOWC_MNEM_CH;
@@ -395,12 +546,10 @@ static inline void send_tx_flowc_wr(struct cxgbi_sock *csk)
 	flowc->mnemval[7].val = htonl(csk->advmss);
 	flowc->mnemval[8].mnemonic = 0;
 	flowc->mnemval[8].val = 0;
-	for (i = 0; i < 9; i++) {
-		flowc->mnemval[i].r4[0] = 0;
-		flowc->mnemval[i].r4[1] = 0;
-		flowc->mnemval[i].r4[2] = 0;
-	}
-	set_queue(skb, CPL_PRIORITY_DATA, csk);
+	flowc->mnemval[8].mnemonic = FW_FLOWC_MNEM_TXDATAPLEN_MAX;
+	flowc->mnemval[8].val = 16384;
+
+	set_wr_txq(skb, CPL_PRIORITY_DATA, csk->port_id);
 
 	log_debug(1 << CXGBI_DBG_TOE | 1 << CXGBI_DBG_SOCK,
 		"csk 0x%p, tid 0x%x, %u,%u,%u,%u,%u,%u,%u.\n",
@@ -409,6 +558,8 @@ static inline void send_tx_flowc_wr(struct cxgbi_sock *csk)
 		csk->advmss);
 
 	cxgb4_ofld_send(csk->cdev->ports[csk->port_id], skb);
+
+	return flowclen16;
 }
 
 static inline void make_tx_data_wr(struct cxgbi_sock *csk, struct sk_buff *skb,
@@ -417,10 +568,11 @@ static inline void make_tx_data_wr(struct cxgbi_sock *csk, struct sk_buff *skb,
 	struct fw_ofld_tx_data_wr *req;
 	unsigned int submode = cxgbi_skcb_ulp_mode(skb) & 3;
 	unsigned int wr_ulp_mode = 0;
+	bool imm = is_ofld_imm(skb);
 
 	req = (struct fw_ofld_tx_data_wr *)__skb_push(skb, sizeof(*req));
 
-	if (is_ofld_imm(skb)) {
+	if (imm) {
 		req->op_to_immdlen = htonl(FW_WR_OP(FW_OFLD_TX_DATA_WR) |
 					FW_WR_COMPL(1) |
 					FW_WR_IMMDLEN(dlen));
@@ -468,15 +620,31 @@ static int push_tx_frames(struct cxgbi_sock *csk, int req_completion)
 		int dlen = skb->len;
 		int len = skb->len;
 		unsigned int credits_needed;
+		int flowclen16 = 0;
 
 		skb_reset_transport_header(skb);
 		if (is_ofld_imm(skb))
-			credits_needed = DIV_ROUND_UP(dlen +
-					sizeof(struct fw_ofld_tx_data_wr), 16);
+			credits_needed = DIV_ROUND_UP(dlen, 16);
 		else
-			credits_needed = DIV_ROUND_UP(8*calc_tx_flits_ofld(skb)
-					+ sizeof(struct fw_ofld_tx_data_wr),
+			credits_needed = DIV_ROUND_UP(
+						8 * calc_tx_flits_ofld(skb),
+						16);
+
+		if (likely(cxgbi_skcb_test_flag(skb, SKCBF_TX_NEED_HDR)))
+			credits_needed += DIV_ROUND_UP(
+					sizeof(struct fw_ofld_tx_data_wr),
 					16);
+
+		/*
+		 * Assumes the initial credits is large enough to support
+		 * fw_flowc_wr plus largest possible first payload
+		 */
+		if (!cxgbi_sock_flag(csk, CTPF_TX_DATA_SENT)) {
+			flowclen16 = send_tx_flowc_wr(csk);
+			csk->wr_cred -= flowclen16;
+			csk->wr_una_cred += flowclen16;
+			cxgbi_sock_set_flag(csk, CTPF_TX_DATA_SENT);
+		}
 
 		if (csk->wr_cred < credits_needed) {
 			log_debug(1 << CXGBI_DBG_PDU_TX,
@@ -486,8 +654,8 @@ static int push_tx_frames(struct cxgbi_sock *csk, int req_completion)
 			break;
 		}
 		__skb_unlink(skb, &csk->write_queue);
-		set_queue(skb, CPL_PRIORITY_DATA, csk);
-		skb->csum = credits_needed;
+		set_wr_txq(skb, CPL_PRIORITY_DATA, csk->port_id);
+		skb->csum = credits_needed + flowclen16;
 		csk->wr_cred -= credits_needed;
 		csk->wr_una_cred += credits_needed;
 		cxgbi_sock_enqueue_wr(csk, skb);
@@ -498,12 +666,6 @@ static int push_tx_frames(struct cxgbi_sock *csk, int req_completion)
 			csk->wr_cred, csk->wr_una_cred);
 
 		if (likely(cxgbi_skcb_test_flag(skb, SKCBF_TX_NEED_HDR))) {
-			if (!cxgbi_sock_flag(csk, CTPF_TX_DATA_SENT)) {
-				send_tx_flowc_wr(csk);
-				skb->csum += 5;
-				csk->wr_cred -= 5;
-				csk->wr_una_cred += 5;
-			}
 			len += cxgbi_ulp_extra_len(cxgbi_skcb_ulp_mode(skb));
 			make_tx_data_wr(csk, skb, dlen, len, credits_needed,
 					req_completion);
@@ -556,9 +718,11 @@ static void do_act_establish(struct cxgbi_device *cdev, struct sk_buff *skb)
 		goto rel_skb;
 	}
 
-	log_debug(1 << CXGBI_DBG_TOE | 1 << CXGBI_DBG_SOCK,
-		"csk 0x%p,%u,0x%lx, tid %u, atid %u, rseq %u.\n",
-		csk, csk->state, csk->flags, tid, atid, rcv_isn);
+	pr_info_ipaddr("atid 0x%x, tid 0x%x, csk 0x%p,%u,0x%lx, isn %u.\n",
+		       (&csk->saddr), (&csk->daddr),
+		       atid, tid, csk, csk->state, csk->flags, rcv_isn);
+
+	module_put(THIS_MODULE);
 
 	cxgbi_sock_get(csk);
 	csk->tid = tid;
@@ -630,8 +794,12 @@ static int act_open_rpl_status_to_errno(int status)
 
 static void csk_act_open_retry_timer(unsigned long data)
 {
-	struct sk_buff *skb;
+	struct sk_buff *skb = NULL;
 	struct cxgbi_sock *csk = (struct cxgbi_sock *)data;
+	struct cxgb4_lld_info *lldi = cxgbi_cdev_priv(csk->cdev);
+	void (*send_act_open_func)(struct cxgbi_sock *, struct sk_buff *,
+				   struct l2t_entry *);
+	int t4 = is_t4(lldi->adapter_type), size, size6;
 
 	log_debug(1 << CXGBI_DBG_TOE | 1 << CXGBI_DBG_SOCK,
 		"csk 0x%p,%u,0x%lx,%u.\n",
@@ -639,17 +807,44 @@ static void csk_act_open_retry_timer(unsigned long data)
 
 	cxgbi_sock_get(csk);
 	spin_lock_bh(&csk->lock);
-	skb = alloc_wr(sizeof(struct cpl_act_open_req), 0, GFP_ATOMIC);
+
+	if (t4) {
+		size = sizeof(struct cpl_act_open_req);
+		size6 = sizeof(struct cpl_act_open_req6);
+	} else {
+		size = sizeof(struct cpl_t5_act_open_req);
+		size6 = sizeof(struct cpl_t5_act_open_req6);
+	}
+
+	if (csk->csk_family == AF_INET) {
+		send_act_open_func = send_act_open_req;
+		skb = alloc_wr(size, 0, GFP_ATOMIC);
+#if IS_ENABLED(CONFIG_IPV6)
+	} else {
+		send_act_open_func = send_act_open_req6;
+		skb = alloc_wr(size6, 0, GFP_ATOMIC);
+#endif
+	}
+
 	if (!skb)
 		cxgbi_sock_fail_act_open(csk, -ENOMEM);
 	else {
 		skb->sk = (struct sock *)csk;
 		t4_set_arp_err_handler(skb, csk,
-					cxgbi_sock_act_open_req_arp_failure);
-		send_act_open_req(csk, skb, csk->l2t);
+				       cxgbi_sock_act_open_req_arp_failure);
+		send_act_open_func(csk, skb, csk->l2t);
 	}
+
 	spin_unlock_bh(&csk->lock);
 	cxgbi_sock_put(csk);
+
+}
+
+static inline bool is_neg_adv(unsigned int status)
+{
+	return status == CPL_ERR_RTX_NEG_ADVICE ||
+		status == CPL_ERR_KEEPALV_NEG_ADVICE ||
+		status == CPL_ERR_PERSIST_NEG_ADVICE;
 }
 
 static void do_act_open_rpl(struct cxgbi_device *cdev, struct sk_buff *skb)
@@ -669,13 +864,14 @@ static void do_act_open_rpl(struct cxgbi_device *cdev, struct sk_buff *skb)
 		goto rel_skb;
 	}
 
-	pr_info("%pI4:%u-%pI4:%u, atid %u,%u, status %u, csk 0x%p,%u,0x%lx.\n",
-		&csk->saddr.sin_addr.s_addr, ntohs(csk->saddr.sin_port),
-		&csk->daddr.sin_addr.s_addr, ntohs(csk->daddr.sin_port),
-		atid, tid, status, csk, csk->state, csk->flags);
+	pr_info_ipaddr("tid %u/%u, status %u.\n"
+		       "csk 0x%p,%u,0x%lx. ", (&csk->saddr), (&csk->daddr),
+		       atid, tid, status, csk, csk->state, csk->flags);
 
-	if (status == CPL_ERR_RTX_NEG_ADVICE)
+	if (is_neg_adv(status))
 		goto rel_skb;
+
+	module_put(THIS_MODULE);
 
 	if (status && status != CPL_ERR_TCAM_FULL &&
 	    status != CPL_ERR_CONN_EXIST &&
@@ -712,9 +908,9 @@ static void do_peer_close(struct cxgbi_device *cdev, struct sk_buff *skb)
 		pr_err("can't find connection for tid %u.\n", tid);
 		goto rel_skb;
 	}
-	log_debug(1 << CXGBI_DBG_TOE | 1 << CXGBI_DBG_SOCK,
-		"csk 0x%p,%u,0x%lx,%u.\n",
-		csk, csk->state, csk->flags, csk->tid);
+	pr_info_ipaddr("csk 0x%p,%u,0x%lx,%u.\n",
+		       (&csk->saddr), (&csk->daddr),
+		       csk, csk->state, csk->flags, csk->tid);
 	cxgbi_sock_rcv_peer_close(csk);
 rel_skb:
 	__kfree_skb(skb);
@@ -733,9 +929,9 @@ static void do_close_con_rpl(struct cxgbi_device *cdev, struct sk_buff *skb)
 		pr_err("can't find connection for tid %u.\n", tid);
 		goto rel_skb;
 	}
-	log_debug(1 << CXGBI_DBG_TOE | 1 << CXGBI_DBG_SOCK,
-		"csk 0x%p,%u,0x%lx,%u.\n",
-		csk, csk->state, csk->flags, csk->tid);
+	pr_info_ipaddr("csk 0x%p,%u,0x%lx,%u.\n",
+		       (&csk->saddr), (&csk->daddr),
+		       csk, csk->state, csk->flags, csk->tid);
 	cxgbi_sock_rcv_close_conn_rpl(csk, ntohl(rpl->snd_nxt));
 rel_skb:
 	__kfree_skb(skb);
@@ -774,31 +970,33 @@ static void do_abort_req_rss(struct cxgbi_device *cdev, struct sk_buff *skb)
 		goto rel_skb;
 	}
 
-	log_debug(1 << CXGBI_DBG_TOE | 1 << CXGBI_DBG_SOCK,
-		"csk 0x%p,%u,0x%lx, tid %u, status 0x%x.\n",
-		csk, csk->state, csk->flags, csk->tid, req->status);
+	pr_info_ipaddr("csk 0x%p,%u,0x%lx,%u, status %u.\n",
+		       (&csk->saddr), (&csk->daddr),
+		       csk, csk->state, csk->flags, csk->tid, req->status);
 
-	if (req->status == CPL_ERR_RTX_NEG_ADVICE ||
-	    req->status == CPL_ERR_PERSIST_NEG_ADVICE)
+	if (is_neg_adv(req->status))
 		goto rel_skb;
 
 	cxgbi_sock_get(csk);
 	spin_lock_bh(&csk->lock);
 
-	if (!cxgbi_sock_flag(csk, CTPF_ABORT_REQ_RCVD)) {
-		cxgbi_sock_set_flag(csk, CTPF_ABORT_REQ_RCVD);
-		cxgbi_sock_set_state(csk, CTP_ABORTING);
-		goto done;
+	cxgbi_sock_clear_flag(csk, CTPF_ABORT_REQ_RCVD);
+
+	if (!cxgbi_sock_flag(csk, CTPF_TX_DATA_SENT)) {
+		send_tx_flowc_wr(csk);
+		cxgbi_sock_set_flag(csk, CTPF_TX_DATA_SENT);
 	}
 
-	cxgbi_sock_clear_flag(csk, CTPF_ABORT_REQ_RCVD);
+	cxgbi_sock_set_flag(csk, CTPF_ABORT_REQ_RCVD);
+	cxgbi_sock_set_state(csk, CTP_ABORTING);
+
 	send_abort_rpl(csk, rst_status);
 
 	if (!cxgbi_sock_flag(csk, CTPF_ABORT_RPL_PENDING)) {
 		csk->err = abort_status_to_errno(csk, req->status, &rst_status);
 		cxgbi_sock_closed(csk);
 	}
-done:
+
 	spin_unlock_bh(&csk->lock);
 	cxgbi_sock_put(csk);
 rel_skb:
@@ -817,16 +1015,37 @@ static void do_abort_rpl_rss(struct cxgbi_device *cdev, struct sk_buff *skb)
 	if (!csk)
 		goto rel_skb;
 
-	log_debug(1 << CXGBI_DBG_TOE | 1 << CXGBI_DBG_SOCK,
-		"status 0x%x, csk 0x%p, s %u, 0x%lx.\n",
-		rpl->status, csk, csk ? csk->state : 0,
-		csk ? csk->flags : 0UL);
+	if (csk)
+		pr_info_ipaddr("csk 0x%p,%u,0x%lx,%u, status %u.\n",
+			       (&csk->saddr), (&csk->daddr), csk,
+			       csk->state, csk->flags, csk->tid, rpl->status);
 
 	if (rpl->status == CPL_ERR_ABORT_FAILED)
 		goto rel_skb;
 
 	cxgbi_sock_rcv_abort_rpl(csk);
 rel_skb:
+	__kfree_skb(skb);
+}
+
+static void do_rx_data(struct cxgbi_device *cdev, struct sk_buff *skb)
+{
+	struct cxgbi_sock *csk;
+	struct cpl_rx_data *cpl = (struct cpl_rx_data *)skb->data;
+	unsigned int tid = GET_TID(cpl);
+	struct cxgb4_lld_info *lldi = cxgbi_cdev_priv(cdev);
+	struct tid_info *t = lldi->tids;
+
+	csk = lookup_tid(t, tid);
+	if (!csk) {
+		pr_err("can't find connection for tid %u.\n", tid);
+	} else {
+		/* not expecting this, reset the connection. */
+		pr_err("csk 0x%p, tid %u, rcv cpl_rx_data.\n", csk, tid);
+		spin_lock_bh(&csk->lock);
+		send_abort_req(csk);
+		spin_unlock_bh(&csk->lock);
+	}
 	__kfree_skb(skb);
 }
 
@@ -871,7 +1090,7 @@ static void do_rx_iscsi_hdr(struct cxgbi_device *cdev, struct sk_buff *skb)
 
 	if (!csk->skb_ulp_lhdr) {
 		unsigned char *bhs;
-		unsigned int hlen, dlen;
+		unsigned int hlen, dlen, plen;
 
 		log_debug(1 << CXGBI_DBG_TOE | 1 << CXGBI_DBG_PDU_RX,
 			"csk 0x%p,%u,0x%lx, tid %u, skb 0x%p header.\n",
@@ -890,11 +1109,15 @@ static void do_rx_iscsi_hdr(struct cxgbi_device *cdev, struct sk_buff *skb)
 		hlen = ntohs(cpl->len);
 		dlen = ntohl(*(unsigned int *)(bhs + 4)) & 0xFFFFFF;
 
-		if ((hlen + dlen) != ISCSI_PDU_LEN(pdu_len_ddp) - 40) {
+		plen = ISCSI_PDU_LEN(pdu_len_ddp);
+		if (is_t4(lldi->adapter_type))
+			plen -= 40;
+
+		if ((hlen + dlen) != plen) {
 			pr_info("tid 0x%x, CPL_ISCSI_HDR, pdu len "
 				"mismatch %u != %u + %u, seq 0x%x.\n",
-				csk->tid, ISCSI_PDU_LEN(pdu_len_ddp) - 40,
-				hlen, dlen, cxgbi_skcb_tcp_seq(skb));
+				csk->tid, plen, hlen, dlen,
+				cxgbi_skcb_tcp_seq(skb));
 			goto abort_conn;
 		}
 
@@ -1125,13 +1348,34 @@ static int init_act_open(struct cxgbi_sock *csk)
 	struct cxgbi_device *cdev = csk->cdev;
 	struct cxgb4_lld_info *lldi = cxgbi_cdev_priv(cdev);
 	struct net_device *ndev = cdev->ports[csk->port_id];
-	struct port_info *pi = netdev_priv(ndev);
 	struct sk_buff *skb = NULL;
+	struct neighbour *n = NULL;
+	void *daddr;
 	unsigned int step;
+	unsigned int size, size6;
+	int t4 = is_t4(lldi->adapter_type);
 
 	log_debug(1 << CXGBI_DBG_TOE | 1 << CXGBI_DBG_SOCK,
 		"csk 0x%p,%u,0x%lx,%u.\n",
 		csk, csk->state, csk->flags, csk->tid);
+
+	if (csk->csk_family == AF_INET)
+		daddr = &csk->daddr.sin_addr.s_addr;
+#if IS_ENABLED(CONFIG_IPV6)
+	else if (csk->csk_family == AF_INET6)
+		daddr = &csk->daddr6.sin6_addr;
+#endif
+	else {
+		pr_err("address family 0x%x not supported\n", csk->csk_family);
+		goto rel_resource;
+	}
+
+	n = csk->dst->neighbour;
+
+	if (!n) {
+		pr_err("%s, can't get neighbour of csk->dst.\n", ndev->name);
+		goto rel_resource;
+	}
 
 	csk->atid = cxgb4_alloc_atid(lldi->tids, csk);
 	if (csk->atid < 0) {
@@ -1148,7 +1392,21 @@ static int init_act_open(struct cxgbi_sock *csk)
 	}
 	cxgbi_sock_get(csk);
 
-	skb = alloc_wr(sizeof(struct cpl_act_open_req), 0, GFP_KERNEL);
+	if (t4) {
+		size = sizeof(struct cpl_act_open_req);
+		size6 = sizeof(struct cpl_act_open_req6);
+	} else {
+		size = sizeof(struct cpl_t5_act_open_req);
+		size6 = sizeof(struct cpl_t5_act_open_req6);
+	}
+
+	if (csk->csk_family == AF_INET)
+		skb = alloc_wr(size, 0, GFP_NOIO);
+#if IS_ENABLED(CONFIG_IPV6)
+	else
+		skb = alloc_wr(size6, 0, GFP_NOIO);
+#endif
+
 	if (!skb)
 		goto rel_resource;
 	skb->sk = (struct sock *)csk;
@@ -1164,18 +1422,29 @@ static int init_act_open(struct cxgbi_sock *csk)
 	csk->txq_idx = cxgb4_port_idx(ndev) * step;
 	step = lldi->nrxq / lldi->nchan;
 	csk->rss_qid = lldi->rxq_ids[cxgb4_port_idx(ndev) * step];
-	csk->wr_max_cred = csk->wr_cred = lldi->wr_cred;
+	csk->wr_cred = lldi->wr_cred -
+		       DIV_ROUND_UP(sizeof(struct cpl_abort_req), 16);
+	csk->wr_max_cred = csk->wr_cred;
 	csk->wr_una_cred = 0;
 	cxgbi_sock_reset_wr_list(csk);
 	csk->err = 0;
-	log_debug(1 << CXGBI_DBG_TOE | 1 << CXGBI_DBG_SOCK,
-		"csk 0x%p,p%d,%s, %u,%u,%u, mss %u,%u, smac %u.\n",
-		csk, pi->port_id, ndev->name, csk->tx_chan,
-		csk->txq_idx, csk->rss_qid, csk->mtu, csk->mss_idx,
-		csk->smac_idx);
 
+	pr_info_ipaddr("csk 0x%p,%u,0x%lx,%u,%u,%u, mtu %u,%u, smac %u.\n",
+		       (&csk->saddr), (&csk->daddr), csk, csk->state,
+		       csk->flags, csk->tx_chan, csk->txq_idx, csk->rss_qid,
+		       csk->mtu, csk->mss_idx, csk->smac_idx);
+
+	/* must wait for either a act_open_rpl or act_open_establish */
+	try_module_get(THIS_MODULE);
 	cxgbi_sock_set_state(csk, CTP_ACTIVE_OPEN);
-	send_act_open_req(csk, skb, csk->l2t);
+	if (csk->csk_family == AF_INET)
+		send_act_open_req(csk, skb, csk->l2t);
+#if IS_ENABLED(CONFIG_IPV6)
+	else
+		send_act_open_req6(csk, skb, csk->l2t);
+#endif
+	neigh_release(n);
+
 	return 0;
 
 rel_resource:
@@ -1184,6 +1453,8 @@ rel_resource:
 	return -EINVAL;
 }
 
+#define CPL_ISCSI_DATA		0xB2
+#define CPL_RX_ISCSI_DDP	0x49
 cxgb4i_cplhandler_func cxgb4i_cplhandlers[NUM_CPL_CMDS] = {
 	[CPL_ACT_ESTABLISH] = do_act_establish,
 	[CPL_ACT_OPEN_RPL] = do_act_open_rpl,
@@ -1193,8 +1464,11 @@ cxgb4i_cplhandler_func cxgb4i_cplhandlers[NUM_CPL_CMDS] = {
 	[CPL_CLOSE_CON_RPL] = do_close_con_rpl,
 	[CPL_FW4_ACK] = do_fw4_ack,
 	[CPL_ISCSI_HDR] = do_rx_iscsi_hdr,
+	[CPL_ISCSI_DATA] = do_rx_iscsi_hdr,
 	[CPL_SET_TCB_RPL] = do_set_tcb_rpl,
 	[CPL_RX_DATA_DDP] = do_rx_data_ddp,
+	[CPL_RX_ISCSI_DDP] = do_rx_data_ddp,
+	[CPL_RX_DATA] = do_rx_data,
 };
 
 int cxgb4i_ofld_init(struct cxgbi_device *cdev)
@@ -1225,14 +1499,20 @@ int cxgb4i_ofld_init(struct cxgbi_device *cdev)
  * functions to program the pagepod in h/w
  */
 #define ULPMEM_IDATA_MAX_NPPODS	4 /* 256/PPOD_SIZE */
-static inline void ulp_mem_io_set_hdr(struct ulp_mem_io *req,
+static inline void ulp_mem_io_set_hdr(struct cxgb4_lld_info *lldi,
+				struct ulp_mem_io *req,
 				unsigned int wr_len, unsigned int dlen,
 				unsigned int pm_addr)
 {
 	struct ulptx_idata *idata = (struct ulptx_idata *)(req + 1);
 
 	INIT_ULPTX_WR(req, wr_len, 0, 0);
-	req->cmd = htonl(ULPTX_CMD(ULP_TX_MEM_WRITE) | (1 << 23));
+	if (is_t4(lldi->adapter_type))
+		req->cmd = htonl(ULPTX_CMD(ULP_TX_MEM_WRITE) |
+					(ULP_MEMIO_ORDER(1)));
+	else
+		req->cmd = htonl(ULPTX_CMD(ULP_TX_MEM_WRITE) |
+					(V_T5_ULP_MEMIO_IMM(1)));
 	req->dlen = htonl(ULP_MEMIO_DATA_LEN(dlen >> 5));
 	req->lock_addr = htonl(ULP_MEMIO_ADDR(pm_addr >> 5));
 	req->len16 = htonl(DIV_ROUND_UP(wr_len - sizeof(req->wr), 16));
@@ -1248,6 +1528,7 @@ static int ddp_ppod_write_idata(struct cxgbi_device *cdev, unsigned int port_id,
 				unsigned int gl_pidx)
 {
 	struct cxgbi_ddp_info *ddp = cdev->ddp;
+	struct cxgb4_lld_info *lldi = cxgbi_cdev_priv(cdev);
 	struct sk_buff *skb;
 	struct ulp_mem_io *req;
 	struct ulptx_idata *idata;
@@ -1265,9 +1546,9 @@ static int ddp_ppod_write_idata(struct cxgbi_device *cdev, unsigned int port_id,
 		return -ENOMEM;
 	}
 	req = (struct ulp_mem_io *)skb->head;
-	set_queue(skb, CPL_PRIORITY_CONTROL, NULL);
+	set_wr_txq(skb, CPL_PRIORITY_CONTROL, 0);
 
-	ulp_mem_io_set_hdr(req, wr_len, dlen, pm_addr);
+	ulp_mem_io_set_hdr(lldi, req, wr_len, dlen, pm_addr);
 	idata = (struct ulptx_idata *)(req + 1);
 	ppod = (struct cxgbi_pagepod *)(idata + 1);
 
@@ -1544,7 +1825,6 @@ static int t4_uld_state_change(void *handle, enum cxgb4_state state)
 	switch (state) {
 	case CXGB4_STATE_UP:
 		pr_info("cdev 0x%p, UP.\n", cdev);
-		/* re-initialize */
 		break;
 	case CXGB4_STATE_START_RECOVERY:
 		pr_info("cdev 0x%p, RECOVERY.\n", cdev);
@@ -1574,6 +1854,7 @@ static int __init cxgb4i_init_module(void)
 	if (rc < 0)
 		return rc;
 	cxgb4_register_uld(CXGB4_ULD_ISCSI, &cxgb4i_uld_info);
+
 	return 0;
 }
 

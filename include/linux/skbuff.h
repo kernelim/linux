@@ -1507,6 +1507,11 @@ static inline int skb_network_offset(const struct sk_buff *skb)
 	return skb_network_header(skb) - skb->data;
 }
 
+static inline int pskb_network_may_pull(struct sk_buff *skb, unsigned int len)
+{
+	return pskb_may_pull(skb, skb_network_offset(skb) + len);
+}
+
 /*
  * CPUs often take a performance hit when accessing unaligned memory
  * locations. The actual performance hit varies, it can be small if the
@@ -1914,13 +1919,35 @@ static inline int skb_cow_head(struct sk_buff *skb, unsigned int headroom)
  *	is untouched. Otherwise it is extended. Returns zero on
  *	success. The skb is freed on error.
  */
- 
 static inline int skb_padto(struct sk_buff *skb, unsigned int len)
 {
 	unsigned int size = skb->len;
 	if (likely(size >= len))
 		return 0;
 	return skb_pad(skb, len - size);
+}
+
+/**
+ *	skb_put_padto - increase size and pad an skbuff up to a minimal size
+ *	@skb: buffer to pad
+ *	@len: minimal length
+ *
+ *	Pads up a buffer to ensure the trailing bytes exist and are
+ *	blanked. If the buffer already contains sufficient data it
+ *	is untouched. Otherwise it is extended. Returns zero on
+ *	success. The skb is freed on error.
+ */
+static inline int skb_put_padto(struct sk_buff *skb, unsigned int len)
+{
+	unsigned int size = skb->len;
+
+	if (unlikely(size < len)) {
+		len -= size;
+		if (skb_pad(skb, len))
+			return -ENOMEM;
+		__skb_put(skb, len);
+	}
+	return 0;
 }
 
 static inline int skb_add_data(struct sk_buff *skb,
@@ -2106,8 +2133,6 @@ extern void	       skb_free_datagram_locked(struct sock *sk,
 						struct sk_buff *skb);
 extern int	       skb_kill_datagram(struct sock *sk, struct sk_buff *skb,
 					 unsigned int flags);
-extern __wsum	       skb_checksum(const struct sk_buff *skb, int offset,
-				    int len, __wsum csum);
 extern int	       skb_copy_bits(const struct sk_buff *skb, int offset,
 				     void *to, int len);
 extern int	       skb_store_bits(struct sk_buff *skb, int offset,
@@ -2128,6 +2153,16 @@ extern int	       skb_shift(struct sk_buff *tgt, struct sk_buff *skb,
 
 extern struct sk_buff *skb_segment(struct sk_buff *skb, int features);
 struct sk_buff *skb_vlan_untag(struct sk_buff *skb);
+
+struct skb_checksum_ops {
+	__wsum (*update)(const void *mem, int len, __wsum wsum);
+	__wsum (*combine)(__wsum csum, __wsum csum2, int offset, int len);
+};
+
+__wsum __skb_checksum(const struct sk_buff *skb, int offset, int len,
+		      __wsum csum, const struct skb_checksum_ops *ops);
+__wsum skb_checksum(const struct sk_buff *skb, int offset, int len,
+		    __wsum csum);
 
 static inline void *skb_header_pointer(const struct sk_buff *skb, int offset,
 				       int len, void *buffer)

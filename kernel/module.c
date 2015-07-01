@@ -2111,6 +2111,7 @@ static noinline struct module *load_module(void __user *umod,
 	struct _ddebug *debug = NULL;
 	unsigned int num_debug = 0;
 	unsigned long symoffs, stroffs, *strmap;
+	struct rheldata *rheldata;
 	int gpgsig_ok;
 
 	mm_segment_t old_fs;
@@ -2439,6 +2440,8 @@ static noinline struct module *load_module(void __user *umod,
 	}
 #endif
 
+	rheldata = section_addr(hdr, sechdrs, secstrings, ".rheldata");
+
 	/* Now do relocations. */
 	for (i = 1; i < hdr->e_shnum; i++) {
 		const char *strtab = (char *)sechdrs[strindex].sh_addr;
@@ -2456,7 +2459,7 @@ static noinline struct module *load_module(void __user *umod,
 			err = apply_relocate(sechdrs, strtab, symindex, i,mod);
 		else if (sechdrs[i].sh_type == SHT_RELA)
 			err = apply_relocate_add(sechdrs, strtab, symindex, i,
-						 mod);
+						 mod, rheldata);
 		if (err < 0)
 			goto cleanup;
 	}
@@ -2523,7 +2526,9 @@ static noinline struct module *load_module(void __user *umod,
 	 */
 	list_add_rcu(&mod->list, &modules);
 
-	err = parse_args(mod->name, mod->args, mod->kp, mod->num_kp, NULL);
+	/* Module is ready to execute: parsing args may do that. */
+	err = parse_args(mod->name, mod->args, mod->kp, mod->num_kp,
+			 &ddebug_dyndbg_module_param_cb);
 	if (err < 0)
 		goto unlink;
 

@@ -60,6 +60,7 @@
 #include <linux/pid.h>
 #include <linux/nsproxy.h>
 #include <linux/bootmem.h>
+#include <linux/hugetlb.h>
 
 #include <asm/futex.h>
 
@@ -403,7 +404,7 @@ again:
 	} else {
 		key->both.offset |= FUT_OFF_INODE; /* inode-based key */
 		key->shared.inode = page_head->mapping->host;
-		key->shared.pgoff = page_head->index;
+		key->shared.pgoff = basepage_index(page);
 	}
 
 	get_futex_key_refs(key); /* implies MB (B) */
@@ -561,20 +562,11 @@ static void free_pi_state(struct futex_pi_state *pi_state)
 static struct task_struct * futex_find_get_task(pid_t pid)
 {
 	struct task_struct *p;
-	const struct cred *cred = current_cred(), *pcred;
 
 	rcu_read_lock();
 	p = find_task_by_vpid(pid);
-	if (!p) {
-		p = ERR_PTR(-ESRCH);
-	} else {
-		pcred = __task_cred(p);
-		if (cred->euid != pcred->euid &&
-		    cred->euid != pcred->uid)
-			p = ERR_PTR(-ESRCH);
-		else
-			get_task_struct(p);
-	}
+	if (p)
+		get_task_struct(p);
 
 	rcu_read_unlock();
 
@@ -782,8 +774,13 @@ lookup_pi_state(u32 uval, struct futex_hash_bucket *hb,
 	if (!pid)
 		return -ESRCH;
 	p = futex_find_get_task(pid);
-	if (IS_ERR(p))
-		return PTR_ERR(p);
+	if (!p)
+		return -ESRCH;
+
+	if (unlikely(p->flags & PF_KTHREAD)) {
+		put_task_struct(p);
+		return -EPERM;
+	}
 
 	/*
 	 * We need to look at the task state flags to figure out,

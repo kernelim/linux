@@ -36,7 +36,7 @@ MODULE_AUTHOR("Andrea Merello <andreamrl@tiscali.it>");
 MODULE_DESCRIPTION("RTL8180 / RTL8185 PCI wireless driver");
 MODULE_LICENSE("GPL");
 
-static DEFINE_PCI_DEVICE_TABLE(rtl8180_table) = {
+static const struct pci_device_id rtl8180_table[] = {
 	/* rtl8185 */
 	{ PCI_DEVICE(PCI_VENDOR_ID_REALTEK, 0x8185) },
 	{ PCI_DEVICE(PCI_VENDOR_ID_BELKIN, 0x700f) },

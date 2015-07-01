@@ -91,6 +91,8 @@ xlog_get_bp(
 	xlog_t		*log,
 	int		nbblks)
 {
+	struct xfs_buf	*bp;
+
 	if (!xlog_buf_bbcount_valid(log, nbblks)) {
 		xfs_warn(log->l_mp, "Invalid block length (0x%x) for buffer",
 			nbblks);
@@ -118,8 +120,10 @@ xlog_get_bp(
 		nbblks += log->l_sectBBsize;
 	nbblks = round_up(nbblks, log->l_sectBBsize);
 
-	return xfs_buf_get_uncached(log->l_mp->m_logdev_targp,
-					BBTOB(nbblks), 0);
+	bp = xfs_buf_get_uncached(log->l_mp->m_logdev_targp, BBTOB(nbblks), 0);
+	if (bp)
+		xfs_buf_unlock(bp);
+	return bp;
 }
 
 STATIC void
@@ -264,7 +268,7 @@ xlog_bwrite(
 	XFS_BUF_ZEROFLAGS(bp);
 	XFS_BUF_BUSY(bp);
 	XFS_BUF_HOLD(bp);
-	XFS_BUF_PSEMA(bp, PRIBIO);
+	xfs_buf_lock(bp);
 	XFS_BUF_SET_COUNT(bp, BBTOB(nbblks));
 	XFS_BUF_SET_TARGET(bp, log->l_mp->m_logdev_targp);
 	bp->b_error = 0;
@@ -372,7 +376,7 @@ xlog_recover_iodone(
 		xfs_force_shutdown(bp->b_target->bt_mount,
 					SHUTDOWN_META_IO_ERROR);
 	}
-	XFS_BUF_CLR_IODONE_FUNC(bp);
+	bp->b_iodone = NULL;
 	xfs_buf_ioend(bp, 0);
 }
 
@@ -2182,7 +2186,7 @@ xlog_recover_buffer_pass2(
 		error = xfs_bwrite(mp, bp);
 	} else {
 		ASSERT(bp->b_target->bt_mount == mp);
-		XFS_BUF_SET_IODONE_FUNC(bp, xlog_recover_iodone);
+		bp->b_iodone = xlog_recover_iodone;
 		xfs_bdwrite(mp, bp);
 	}
 
@@ -2441,7 +2445,7 @@ xlog_recover_inode_pass2(
 
 write_inode_buffer:
 	ASSERT(bp->b_target->bt_mount == mp);
-	XFS_BUF_SET_IODONE_FUNC(bp, xlog_recover_iodone);
+	bp->b_iodone = xlog_recover_iodone;
 	xfs_bdwrite(mp, bp);
 error:
 	if (need_free)
@@ -2562,7 +2566,7 @@ xlog_recover_dquot_pass2(
 
 	ASSERT(dq_f->qlf_size == 2);
 	ASSERT(bp->b_target->bt_mount == mp);
-	XFS_BUF_SET_IODONE_FUNC(bp, xlog_recover_iodone);
+	bp->b_iodone = xlog_recover_iodone;
 	xfs_bdwrite(mp, bp);
 
 	return (0);

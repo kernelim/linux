@@ -1970,7 +1970,6 @@ int __devinit snd_emu10k1_create(struct snd_card *card,
 	snd_emu10k1_proc_init(emu);
 #endif
 
-	snd_card_set_dev(card, &pci->dev);
 	*remu = emu;
 	return 0;
 

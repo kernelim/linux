@@ -227,6 +227,16 @@ static void __init dmi_save_type(const struct dmi_header *dm, int slot, int inde
 	dmi_ident[slot] = s;
 }
 
+static unsigned long efi_smbios_addr;
+static int __init setup_efi_smbios_addr(char *str)
+{
+	efi_smbios_addr = simple_strtoul(str, NULL, 16);
+	printk(KERN_INFO
+	       "user specified smbios address is 0x%0lx\n", efi_smbios_addr);
+	return 0;
+}
+early_param("efi_smbios_addr", setup_efi_smbios_addr);
+
 static void __init dmi_save_smbios_ver(int slot)
 {
 	u8 *buf = NULL;
@@ -246,6 +256,8 @@ static void __init dmi_save_smbios_ver(int slot)
 		if (efi.smbios == EFI_INVALID_TABLE_ADDR)
 			goto error;
 		smbios_addr = efi.smbios;
+	} else if (efi_smbios_addr) {
+		smbios_addr = efi_smbios_addr;
 	} else {
 		/* "Legacy" SMBIOS is mapped @ 0xF0000 */
 		smbios_addr = 0xF0000;
@@ -586,8 +598,22 @@ void __init dmi_scan_machine(void)
 			dmi_available = 1;
 			goto out;
 		}
-	}
-	else {
+	} else if (efi_smbios_addr) {
+		/* This is called as a core_initcall() because it isn't
+		 * needed during early boot.  This also means we can
+		 * iounmap the space when we're done with it.
+		 */
+		p = dmi_ioremap(efi_smbios_addr, 32);
+		if (p == NULL)
+			goto error;
+
+		rc = dmi_present(p + 0x10); /* offset of _DMI_ string */
+		dmi_iounmap(p, 32);
+		if (!rc) {
+			dmi_available = 1;
+			goto out;
+		}
+	} else {
 		/*
 		 * no iounmap() for that ioremap(); it would be a no-op, but
 		 * it's so early in setup that sucker gets confused into doing

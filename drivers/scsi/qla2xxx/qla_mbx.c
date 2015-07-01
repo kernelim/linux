@@ -33,7 +33,7 @@ qla2x00_mailbox_command(scsi_qla_host_t *vha, mbx_cmd_t *mcp)
 {
 	int		rval;
 	unsigned long    flags = 0;
-	device_reg_t __iomem *reg;
+	device_reg_t *reg;
 	uint8_t		abort_active;
 	uint8_t		io_lock_on;
 	uint16_t	command = 0;
@@ -114,7 +114,7 @@ qla2x00_mailbox_command(scsi_qla_host_t *vha, mbx_cmd_t *mcp)
 	command = mcp->mb[0];
 	mboxes = mcp->out_mb;
 
-	ql_dbg(ql_dbg_mbx + ql_dbg_buffer, vha, 0x1111,
+	ql_dbg(ql_dbg_mbx, vha, 0x1111,
 	    "Mailbox registers (OUT):\n");
 	for (cnt = 0; cnt < ha->mbx_count; cnt++) {
 		if (IS_QLA2200(ha) && cnt == 8)
@@ -465,7 +465,8 @@ qla2x00_execute_fw(scsi_qla_host_t *vha, uint32_t risc_addr)
 		mcp->mb[1] = MSW(risc_addr);
 		mcp->mb[2] = LSW(risc_addr);
 		mcp->mb[3] = 0;
-		if (IS_QLA25XX(ha) || IS_QLA81XX(ha) || IS_QLA83XX(ha)) {
+		if (IS_QLA25XX(ha) || IS_QLA81XX(ha) || IS_QLA83XX(ha) ||
+		    IS_QLA27XX(ha)) {
 			struct nvram_81xx *nv = ha->nvram;
 			mcp->mb[4] = (nv->enhanced_features &
 			    EXTENDED_BB_CREDITS);
@@ -536,6 +537,8 @@ qla2x00_get_fw_version(scsi_qla_host_t *vha)
 		mcp->in_mb |= MBX_13|MBX_12|MBX_11|MBX_10|MBX_9|MBX_8;
 	if (IS_FWI2_CAPABLE(ha))
 		mcp->in_mb |= MBX_17|MBX_16|MBX_15;
+	if (IS_QLA27XX(ha))
+		mcp->in_mb |= MBX_21|MBX_20|MBX_19|MBX_18;
 	mcp->flags = 0;
 	mcp->tov = MBX_TOV_SECONDS;
 	rval = qla2x00_mailbox_command(vha, mcp);
@@ -570,6 +573,10 @@ qla2x00_get_fw_version(scsi_qla_host_t *vha)
 		ql_dbg(ql_dbg_mbx + ql_dbg_verbose, vha, 0x112f,
 		    "%s: Ext_FwAttributes Upper: 0x%x, Lower: 0x%x.\n",
 		    __func__, mcp->mb[17], mcp->mb[16]);
+	}
+	if (IS_QLA27XX(ha)) {
+		ha->fw_shared_ram_start = (mcp->mb[19] << 16) | mcp->mb[18];
+		ha->fw_shared_ram_end = (mcp->mb[21] << 16) | mcp->mb[20];
 	}
 
 failed:
@@ -1075,6 +1082,8 @@ qla2x00_get_adapter_id(scsi_qla_host_t *vha, uint16_t *id, uint8_t *al_pa,
 	mcp->in_mb = MBX_9|MBX_7|MBX_6|MBX_3|MBX_2|MBX_1|MBX_0;
 	if (IS_CNA_CAPABLE(vha->hw))
 		mcp->in_mb |= MBX_13|MBX_12|MBX_11|MBX_10;
+	if (IS_FWI2_CAPABLE(vha->hw))
+		mcp->in_mb |= MBX_19|MBX_18|MBX_17|MBX_16;
 	mcp->tov = MBX_TOV_SECONDS;
 	mcp->flags = 0;
 	rval = qla2x00_mailbox_command(vha, mcp);
@@ -1107,6 +1116,22 @@ qla2x00_get_adapter_id(scsi_qla_host_t *vha, uint16_t *id, uint8_t *al_pa,
 			vha->fcoe_vn_port_mac[2] = mcp->mb[12] & 0xff;
 			vha->fcoe_vn_port_mac[1] = mcp->mb[13] >> 8;
 			vha->fcoe_vn_port_mac[0] = mcp->mb[13] & 0xff;
+		}
+		/* If FA-WWN supported */
+		if (mcp->mb[7] & BIT_14) {
+			vha->port_name[0] = MSB(mcp->mb[16]);
+			vha->port_name[1] = LSB(mcp->mb[16]);
+			vha->port_name[2] = MSB(mcp->mb[17]);
+			vha->port_name[3] = LSB(mcp->mb[17]);
+			vha->port_name[4] = MSB(mcp->mb[18]);
+			vha->port_name[5] = LSB(mcp->mb[18]);
+			vha->port_name[6] = MSB(mcp->mb[19]);
+			vha->port_name[7] = LSB(mcp->mb[19]);
+			fc_host_port_name(vha->host) =
+			    wwn_to_u64(vha->port_name);
+			ql_dbg(ql_dbg_mbx, vha, 0x10ca,
+			    "FA-WWN acquired %016llx\n",
+			    wwn_to_u64(vha->port_name));
 		}
 	}
 
@@ -1220,9 +1245,11 @@ qla2x00_init_firmware(scsi_qla_host_t *vha, uint16_t size)
 		mcp->mb[14] = sizeof(*ha->ex_init_cb);
 		mcp->out_mb |= MBX_14|MBX_13|MBX_12|MBX_11|MBX_10;
 	}
-	mcp->in_mb = MBX_2|MBX_1|MBX_0; // 1 and 2 should normally be captured.
-	if (IS_QLA83XX(ha))
-		mcp->in_mb  |= MBX_3; // mb3 is additional info about the installed SFP.
+	/* 1 and 2 should normally be captured. */
+	mcp->in_mb = MBX_2|MBX_1|MBX_0;
+	if (IS_QLA83XX(ha) || IS_QLA27XX(ha))
+		/* mb3 is additional info about the installed SFP. */
+		mcp->in_mb  |= MBX_3;
 	mcp->buf_size = size;
 	mcp->flags = MBX_DMA_OUT;
 	mcp->tov = MBX_TOV_SECONDS;
@@ -1438,7 +1465,7 @@ qla2x00_get_firmware_state(scsi_qla_host_t *vha, uint16_t *states)
 	mcp->mb[0] = MBC_GET_FIRMWARE_STATE;
 	mcp->out_mb = MBX_0;
 	if (IS_FWI2_CAPABLE(vha->hw))
-		mcp->in_mb = MBX_5|MBX_4|MBX_3|MBX_2|MBX_1|MBX_0;
+		mcp->in_mb = MBX_6|MBX_5|MBX_4|MBX_3|MBX_2|MBX_1|MBX_0;
 	else
 		mcp->in_mb = MBX_1|MBX_0;
 	mcp->tov = MBX_TOV_SECONDS;
@@ -1452,6 +1479,7 @@ qla2x00_get_firmware_state(scsi_qla_host_t *vha, uint16_t *states)
 		states[2] = mcp->mb[3];
 		states[3] = mcp->mb[4];
 		states[4] = mcp->mb[5];
+		states[5] = mcp->mb[6];  /* DPORT status */
 	}
 
 	if (rval != QLA_SUCCESS) {
@@ -2243,7 +2271,7 @@ qla2x00_get_resource_cnts(scsi_qla_host_t *vha, uint16_t *cur_xchg_cnt,
 	mcp->mb[0] = MBC_GET_RESOURCE_COUNTS;
 	mcp->out_mb = MBX_0;
 	mcp->in_mb = MBX_11|MBX_10|MBX_7|MBX_6|MBX_3|MBX_2|MBX_1|MBX_0;
-	if (IS_QLA81XX(vha->hw) || IS_QLA83XX(vha->hw))
+	if (IS_QLA81XX(vha->hw) || IS_QLA83XX(vha->hw) || IS_QLA27XX(vha->hw))
 		mcp->in_mb |= MBX_12;
 	mcp->tov = MBX_TOV_SECONDS;
 	mcp->flags = 0;
@@ -2932,7 +2960,7 @@ qla2x00_enable_fce_trace(scsi_qla_host_t *vha, dma_addr_t fce_dma,
 	    "Entered %s.\n", __func__);
 
 	if (!IS_QLA25XX(vha->hw) && !IS_QLA81XX(vha->hw) &&
-	    !IS_QLA83XX(vha->hw))
+	    !IS_QLA83XX(vha->hw) && !IS_QLA27XX(vha->hw))
 		return QLA_FUNCTION_FAILED;
 
 	if (unlikely(pci_channel_offline(vha->hw->pdev)))
@@ -3144,8 +3172,24 @@ qla24xx_report_id_acquisition(scsi_qla_host_t *vha,
 		    rptid_entry->port_id[2], rptid_entry->port_id[1],
 		    rptid_entry->port_id[0]);
 
+		/* FA-WWN is only for physical port */
+		if (!vp_idx) {
+			void *wwpn = ha->init_cb->port_name;
+
+			if (!MSB(stat)) {
+				if (rptid_entry->vp_idx_map[1] & BIT_6)
+					wwpn = rptid_entry->reserved_4 + 8;
+			}
+			memcpy(vha->port_name, wwpn, WWN_SIZE);
+			fc_host_port_name(vha->host) =
+			    wwn_to_u64(vha->port_name);
+			ql_dbg(ql_dbg_mbx, vha, 0x1018,
+			    "FA-WWN portname %016llx (%x)\n",
+			    fc_host_port_name(vha->host), MSB(stat));
+		}
+
 		vp = vha;
-		if (vp_idx == 0 && (MSB(stat) != 1))
+		if (vp_idx == 0)
 			goto reg_needed;
 
 		if (MSB(stat) != 0 && MSB(stat) != 2) {
@@ -3554,6 +3598,9 @@ qla25xx_init_req_que(struct scsi_qla_host *vha, struct req_que *req)
 	ql_dbg(ql_dbg_mbx + ql_dbg_verbose, vha, 0x10d3,
 	    "Entered %s.\n", __func__);
 
+	if (IS_SHADOW_REG_CAPABLE(ha))
+		req->options |= BIT_13;
+
 	mcp->mb[0] = MBC_INITIALIZE_MULTIQ;
 	mcp->mb[1] = req->options;
 	mcp->mb[2] = MSW(LSD(req->dma));
@@ -3566,23 +3613,23 @@ qla25xx_init_req_que(struct scsi_qla_host *vha, struct req_que *req)
 	mcp->mb[12] = req->qos;
 	mcp->mb[11] = req->vp_idx;
 	mcp->mb[13] = req->rid;
-	if (IS_QLA83XX(ha))
+	if (IS_QLA83XX(ha) || IS_QLA27XX(ha))
 		mcp->mb[15] = 0;
 
 	mcp->mb[4] = req->id;
 	/* que in ptr index */
 	mcp->mb[8] = 0;
 	/* que out ptr index */
-	mcp->mb[9] = 0;
+	mcp->mb[9] = *req->out_ptr = 0;
 	mcp->out_mb = MBX_14|MBX_13|MBX_12|MBX_11|MBX_10|MBX_9|MBX_8|MBX_7|
 			MBX_6|MBX_5|MBX_4|MBX_3|MBX_2|MBX_1|MBX_0;
 	mcp->in_mb = MBX_0;
 	mcp->flags = MBX_DMA_OUT;
 	mcp->tov = MBX_TOV_SECONDS * 2;
 
-	if (IS_QLA81XX(ha) || IS_QLA83XX(ha))
+	if (IS_QLA81XX(ha) || IS_QLA83XX(ha) || IS_QLA27XX(ha))
 		mcp->in_mb |= MBX_1;
-	if (IS_QLA83XX(ha)) {
+	if (IS_QLA83XX(ha) || IS_QLA27XX(ha)) {
 		mcp->out_mb |= MBX_15;
 		/* debug q create issue in SR-IOV */
 		mcp->in_mb |= MBX_9 | MBX_8 | MBX_7;
@@ -3591,7 +3638,7 @@ qla25xx_init_req_que(struct scsi_qla_host *vha, struct req_que *req)
 	spin_lock_irqsave(&ha->hardware_lock, flags);
 	if (!(req->options & BIT_0)) {
 		WRT_REG_DWORD(req->req_q_in, 0);
-		if (!IS_QLA83XX(ha))
+		if (!IS_QLA83XX(ha) && !IS_QLA27XX(ha))
 			WRT_REG_DWORD(req->req_q_out, 0);
 	}
 	spin_unlock_irqrestore(&ha->hardware_lock, flags);
@@ -3620,6 +3667,9 @@ qla25xx_init_rsp_que(struct scsi_qla_host *vha, struct rsp_que *rsp)
 	ql_dbg(ql_dbg_mbx + ql_dbg_verbose, vha, 0x10d6,
 	    "Entered %s.\n", __func__);
 
+	if (IS_SHADOW_REG_CAPABLE(ha))
+		rsp->options |= BIT_13;
+
 	mcp->mb[0] = MBC_INITIALIZE_MULTIQ;
 	mcp->mb[1] = rsp->options;
 	mcp->mb[2] = MSW(LSD(rsp->dma));
@@ -3629,12 +3679,12 @@ qla25xx_init_rsp_que(struct scsi_qla_host *vha, struct rsp_que *rsp)
 	mcp->mb[5] = rsp->length;
 	mcp->mb[14] = rsp->msix->entry;
 	mcp->mb[13] = rsp->rid;
-	if (IS_QLA83XX(ha))
+	if (IS_QLA83XX(ha) || IS_QLA27XX(ha))
 		mcp->mb[15] = 0;
 
 	mcp->mb[4] = rsp->id;
 	/* que in ptr index */
-	mcp->mb[8] = 0;
+	mcp->mb[8] = *rsp->in_ptr = 0;
 	/* que out ptr index */
 	mcp->mb[9] = 0;
 	mcp->out_mb = MBX_14|MBX_13|MBX_9|MBX_8|MBX_7
@@ -3646,7 +3696,7 @@ qla25xx_init_rsp_que(struct scsi_qla_host *vha, struct rsp_que *rsp)
 	if (IS_QLA81XX(ha)) {
 		mcp->out_mb |= MBX_12|MBX_11|MBX_10;
 		mcp->in_mb |= MBX_1;
-	} else if (IS_QLA83XX(ha)) {
+	} else if (IS_QLA83XX(ha) || IS_QLA27XX(ha)) {
 		mcp->out_mb |= MBX_15|MBX_12|MBX_11|MBX_10;
 		mcp->in_mb |= MBX_1;
 		/* debug q create issue in SR-IOV */
@@ -3713,7 +3763,8 @@ qla81xx_fac_get_sector_size(scsi_qla_host_t *vha, uint32_t *sector_size)
 	ql_dbg(ql_dbg_mbx + ql_dbg_verbose, vha, 0x10dc,
 	    "Entered %s.\n", __func__);
 
-	if (!IS_QLA81XX(vha->hw) && !IS_QLA83XX(vha->hw))
+	if (!IS_QLA81XX(vha->hw) && !IS_QLA83XX(vha->hw) &&
+	    !IS_QLA27XX(vha->hw))
 		return QLA_FUNCTION_FAILED;
 
 	mcp->mb[0] = MBC_FLASH_ACCESS_CTRL;
@@ -3744,7 +3795,8 @@ qla81xx_fac_do_write_enable(scsi_qla_host_t *vha, int enable)
 	mbx_cmd_t mc;
 	mbx_cmd_t *mcp = &mc;
 
-	if (!IS_QLA81XX(vha->hw) && !IS_QLA83XX(vha->hw))
+	if (!IS_QLA81XX(vha->hw) && !IS_QLA83XX(vha->hw) &&
+	    !IS_QLA27XX(vha->hw))
 		return QLA_FUNCTION_FAILED;
 
 	ql_dbg(ql_dbg_mbx + ql_dbg_verbose, vha, 0x10df,
@@ -3778,7 +3830,8 @@ qla81xx_fac_erase_sector(scsi_qla_host_t *vha, uint32_t start, uint32_t finish)
 	mbx_cmd_t mc;
 	mbx_cmd_t *mcp = &mc;
 
-	if (!IS_QLA81XX(vha->hw) && !IS_QLA83XX(vha->hw))
+	if (!IS_QLA81XX(vha->hw) && !IS_QLA83XX(vha->hw) &&
+	    !IS_QLA27XX(vha->hw))
 		return QLA_FUNCTION_FAILED;
 
 	ql_dbg(ql_dbg_mbx + ql_dbg_verbose, vha, 0x10e2,
@@ -4447,7 +4500,7 @@ qla2x00_get_data_rate(scsi_qla_host_t *vha)
 	mcp->mb[1] = 0;
 	mcp->out_mb = MBX_1|MBX_0;
 	mcp->in_mb = MBX_2|MBX_1|MBX_0;
-	if (IS_QLA83XX(ha))
+	if (IS_QLA83XX(ha) || IS_QLA27XX(ha))
 		mcp->in_mb |= MBX_3;
 	mcp->tov = MBX_TOV_SECONDS;
 	mcp->flags = 0;
@@ -4476,7 +4529,8 @@ qla81xx_get_port_config(scsi_qla_host_t *vha, uint16_t *mb)
 	ql_dbg(ql_dbg_mbx + ql_dbg_verbose, vha, 0x1109,
 	    "Entered %s.\n", __func__);
 
-	if (!IS_QLA81XX(ha) && !IS_QLA83XX(ha))
+	if (!IS_QLA81XX(ha) && !IS_QLA83XX(ha) &&
+	    !IS_QLA27XX(ha))
 		return QLA_FUNCTION_FAILED;
 	mcp->mb[0] = MBC_GET_PORT_CONFIG;
 	mcp->out_mb = MBX_0;
@@ -4953,7 +5007,7 @@ qla83xx_wr_reg(scsi_qla_host_t *vha, uint32_t reg, uint32_t data)
 	mbx_cmd_t mc;
 	mbx_cmd_t *mcp = &mc;
 
-	if (!IS_QLA83XX(ha))
+	if (!IS_QLA83XX(ha) && !IS_QLA27XX(ha))
 		return QLA_FUNCTION_FAILED;
 
 	ql_dbg(ql_dbg_mbx + ql_dbg_verbose, vha, 0x1130,
@@ -4991,7 +5045,7 @@ qla83xx_rd_reg(scsi_qla_host_t *vha, uint32_t reg, uint32_t *data)
 	struct qla_hw_data *ha = vha->hw;
 	unsigned long retry_max_time = jiffies + (2 * HZ);
 
-	if (!IS_QLA83XX(ha))
+	if (!IS_QLA83XX(ha) && !IS_QLA27XX(ha))
 		return QLA_FUNCTION_FAILED;
 
 	ql_dbg(ql_dbg_mbx, vha, 0x113f, "Entered %s.\n", __func__);

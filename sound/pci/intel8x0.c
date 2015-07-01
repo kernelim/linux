@@ -3100,8 +3100,6 @@ static int __devinit snd_intel8x0_create(struct snd_card *card,
 		return err;
 	}
 
-	snd_card_set_dev(card, &pci->dev);
-
 	*r_intel8x0 = chip;
 	return 0;
 }
@@ -3148,11 +3146,13 @@ static int __devinit check_default_spdif_aclink(struct pci_dev *pci)
 	w = snd_pci_quirk_lookup(pci, spdif_aclink_defaults);
 	if (w) {
 		if (w->value)
-			snd_printdd(KERN_INFO "intel8x0: Using SPDIF over "
-				    "AC-Link for %s\n", w->name);
+			snd_printdd(KERN_INFO
+				    "intel8x0: Using SPDIF over AC-Link for %s\n",
+				    snd_pci_quirk_name(w));
 		else
-			snd_printdd(KERN_INFO "intel8x0: Using integrated "
-				    "SPDIF DMA for %s\n", w->name);
+			snd_printdd(KERN_INFO
+				    "intel8x0: Using integrated SPDIF DMA for %s\n",
+				    snd_pci_quirk_name(w));
 		return w->value;
 	}
 	return 0;
@@ -3166,7 +3166,7 @@ static int __devinit snd_intel8x0_probe(struct pci_dev *pci,
 	int err;
 	struct shortname_table *name;
 
-	err = snd_card_create(index, id, THIS_MODULE, 0, &card);
+	err = snd_card_new(&pci->dev, index, id, THIS_MODULE, 0, &card);
 	if (err < 0)
 		return err;
 

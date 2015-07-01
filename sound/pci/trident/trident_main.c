@@ -3663,7 +3663,6 @@ int __devinit snd_trident_create(struct snd_card *card,
 	snd_trident_enable_eso(trident);
 
 	snd_trident_proc_init(trident);
-	snd_card_set_dev(card, &pci->dev);
 	*rtrident = trident;
 	return 0;
 }

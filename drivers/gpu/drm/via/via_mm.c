@@ -79,7 +79,7 @@ int via_final_context(struct drm_device *dev, int context)
 
 	/* Linux specific until context tracking code gets ported to BSD */
 	/* Last context, perform cleanup */
-	if (list_is_singular(&dev->ctxlist) && dev->dev_private) {
+	if (list_is_singular(&dev->ctxlist)) {
 		DRM_DEBUG("Last Context\n");
 		drm_irq_uninstall(dev);
 		via_cleanup_futex(dev_priv);
@@ -148,17 +148,10 @@ int via_mem_alloc(struct drm_device *dev, void *data,
 	if (retval)
 		goto fail_alloc;
 
-again:
-	if (idr_pre_get(&dev_priv->object_idr, GFP_KERNEL) == 0) {
-		retval = -ENOMEM;
+	retval = idr_alloc(&dev_priv->object_idr, item, 1, 0, GFP_KERNEL);
+	if (retval < 0)
 		goto fail_idr;
-	}
-
-	retval = idr_get_new_above(&dev_priv->object_idr, item, 1, &user_key);
-	if (retval == -EAGAIN)
-		goto again;
-	if (retval)
-		goto fail_idr;
+	user_key = retval;
 
 	list_add(&item->owner_list, &file_priv->obj_list);
 	mutex_unlock(&dev->struct_mutex);
@@ -218,12 +211,12 @@ void via_reclaim_buffers_locked(struct drm_device *dev,
 	if (!(file->minor->master && file->master->lock.hw_lock))
 		return;
 
-	drm_idlelock_take(&file->master->lock);
+	drm_legacy_idlelock_take(&file->master->lock);
 
 	mutex_lock(&dev->struct_mutex);
 	if (list_empty(&file_priv->obj_list)) {
 		mutex_unlock(&dev->struct_mutex);
-		drm_idlelock_release(&file->master->lock);
+		drm_legacy_idlelock_release(&file->master->lock);
 
 		return;
 	}
@@ -238,7 +231,7 @@ void via_reclaim_buffers_locked(struct drm_device *dev,
 	}
 	mutex_unlock(&dev->struct_mutex);
 
-	drm_idlelock_release(&file->master->lock);
+	drm_legacy_idlelock_release(&file->master->lock);
 
 	return;
 }

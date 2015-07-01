@@ -70,6 +70,11 @@ static inline int pciehp_writel(struct controller *ctrl, int reg, u32 value)
 #define POWER_ON	0
 #define POWER_OFF	PCI_EXP_SLTCTL_PCC
 
+static inline struct pci_dev *ctrl_dev(struct controller *ctrl)
+{
+	return ctrl->pcie->port;
+}
+
 static irqreturn_t pcie_isr(int irq, void *dev_id);
 static void start_int_poll_timer(struct controller *ctrl, int sec);
 
@@ -626,6 +631,9 @@ int pciehp_power_off_slot(struct slot * slot)
 static irqreturn_t pcie_isr(int irq, void *dev_id)
 {
 	struct controller *ctrl = (struct controller *)dev_id;
+	struct pci_dev *pdev = ctrl_dev(ctrl);
+	struct pci_bus *subordinate = pdev->subordinate;
+	struct pci_dev *dev;
 	struct slot *slot = ctrl->slot;
 	u16 detected, intr_loc;
 
@@ -663,6 +671,17 @@ static irqreturn_t pcie_isr(int irq, void *dev_id)
 		ctrl->cmd_busy = 0;
 		smp_mb();
 		wake_up(&ctrl->queue);
+	}
+
+	if (subordinate) {
+		list_for_each_entry(dev, &subordinate->devices, bus_list) {
+			struct pci_dev_rh1 *rdev = dev->rh_reserved1;
+			if (rdev->ignore_hotplug) {
+				ctrl_dbg(ctrl, "ignoring hotplug event %#06x (%s requested no hotplug)\n",
+					 intr_loc, pci_name(dev));
+				return IRQ_HANDLED;
+			}
+		}
 	}
 
 	if (!(intr_loc & ~PCI_EXP_SLTSTA_CC))

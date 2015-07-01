@@ -154,15 +154,22 @@ typedef int (*read_sfp_module_eeprom_func_p)(struct bnx2x_phy *phy,
 			 LINK_STATUS_LINK_PARTNER_ASYMMETRIC_PAUSE)
 
 #define SFP_EEPROM_CON_TYPE_ADDR		0x2
+	#define SFP_EEPROM_CON_TYPE_VAL_UNKNOWN	0x0
 	#define SFP_EEPROM_CON_TYPE_VAL_LC	0x7
 	#define SFP_EEPROM_CON_TYPE_VAL_COPPER	0x21
 	#define SFP_EEPROM_CON_TYPE_VAL_RJ45	0x22
 
 
-#define SFP_EEPROM_COMP_CODE_ADDR		0x3
-	#define SFP_EEPROM_COMP_CODE_SR_MASK	(1<<4)
-	#define SFP_EEPROM_COMP_CODE_LR_MASK	(1<<5)
-	#define SFP_EEPROM_COMP_CODE_LRM_MASK	(1<<6)
+#define SFP_EEPROM_10G_COMP_CODE_ADDR		0x3
+	#define SFP_EEPROM_10G_COMP_CODE_SR_MASK	(1<<4)
+	#define SFP_EEPROM_10G_COMP_CODE_LR_MASK	(1<<5)
+	#define SFP_EEPROM_10G_COMP_CODE_LRM_MASK	(1<<6)
+
+#define SFP_EEPROM_1G_COMP_CODE_ADDR		0x6
+	#define SFP_EEPROM_1G_COMP_CODE_SX	(1<<0)
+	#define SFP_EEPROM_1G_COMP_CODE_LX	(1<<1)
+	#define SFP_EEPROM_1G_COMP_CODE_CX	(1<<2)
+	#define SFP_EEPROM_1G_COMP_CODE_BASE_T	(1<<3)
 
 #define SFP_EEPROM_FC_TX_TECH_ADDR		0x8
 	#define SFP_EEPROM_FC_TX_TECH_BITMASK_COPPER_PASSIVE 0x4
@@ -2218,7 +2225,6 @@ int bnx2x_update_pfc(struct link_params *params,
 	 */
 	u32 val;
 	struct bnx2x *bp = params->bp;
-	int bnx2x_status = 0;
 	u8 bmac_loopback = (params->loopback_mode == LOOPBACK_BMAC);
 
 	if (params->feature_config_flags & FEATURE_CONFIG_PFC_ENABLED)
@@ -2232,7 +2238,7 @@ int bnx2x_update_pfc(struct link_params *params,
 	bnx2x_update_pfc_nig(params, vars, pfc_params);
 
 	if (!vars->link_up)
-		return bnx2x_status;
+		return 0;
 
 	DP(NETIF_MSG_LINK, "About to update PFC in BMAC\n");
 
@@ -2246,7 +2252,7 @@ int bnx2x_update_pfc(struct link_params *params,
 		    == 0) {
 			DP(NETIF_MSG_LINK, "About to update PFC in EMAC\n");
 			bnx2x_emac_enable(params, vars, 0);
-			return bnx2x_status;
+			return 0;
 		}
 		if (CHIP_IS_E2(bp))
 			bnx2x_update_pfc_bmac2(params, vars, bmac_loopback);
@@ -2260,7 +2266,7 @@ int bnx2x_update_pfc(struct link_params *params,
 			val = 1;
 		REG_WR(bp, NIG_REG_BMAC0_PAUSE_OUT_EN + params->port*4, val);
 	}
-	return bnx2x_status;
+	return 0;
 }
 
 static int bnx2x_bmac1_enable(struct link_params *params,
@@ -3634,8 +3640,8 @@ static void bnx2x_warpcore_enable_AN_KR2(struct bnx2x_phy *phy,
 				 reg_set[i].val);
 
 	/* Start KR2 work-around timer which handles BCM8073 link-parner */
-	vars->link_attr_sync |= LINK_ATTR_SYNC_KR2_ENABLE;
-	bnx2x_update_link_attr(params, vars->link_attr_sync);
+	params->link_attr_sync |= LINK_ATTR_SYNC_KR2_ENABLE;
+	bnx2x_update_link_attr(params, params->link_attr_sync);
 }
 
 static void bnx2x_disable_kr2(struct link_params *params,
@@ -3667,8 +3673,8 @@ static void bnx2x_disable_kr2(struct link_params *params,
 	for (i = 0; i < ARRAY_SIZE(reg_set); i++)
 		bnx2x_cl45_write(bp, phy, reg_set[i].devad, reg_set[i].reg,
 				 reg_set[i].val);
-	vars->link_attr_sync &= ~LINK_ATTR_SYNC_KR2_ENABLE;
-	bnx2x_update_link_attr(params, vars->link_attr_sync);
+	params->link_attr_sync &= ~LINK_ATTR_SYNC_KR2_ENABLE;
+	bnx2x_update_link_attr(params, params->link_attr_sync);
 
 	vars->check_kr2_recovery_cnt = CHECK_KR2_RECOVERY_CNT;
 }
@@ -4811,7 +4817,7 @@ void bnx2x_link_status_update(struct link_params *params,
 					~FEATURE_CONFIG_PFC_ENABLED;
 
 	if (SHMEM2_HAS(bp, link_attr_sync))
-		vars->link_attr_sync = SHMEM2_RD(bp,
+		params->link_attr_sync = SHMEM2_RD(bp,
 						 link_attr_sync[params->port]);
 
 	DP(NETIF_MSG_LINK, "link_status 0x%x  phy_link_up %x int_mask 0x%x\n",
@@ -6486,7 +6492,6 @@ int bnx2x_test_link(struct link_params *params, struct link_vars *vars,
 static int bnx2x_link_initialize(struct link_params *params,
 				 struct link_vars *vars)
 {
-	int rc = 0;
 	u8 phy_index, non_ext_phy;
 	struct bnx2x *bp = params->bp;
 	/* In case of external phy existence, the line speed would be the
@@ -6559,7 +6564,7 @@ static int bnx2x_link_initialize(struct link_params *params,
 			NIG_STATUS_XGXS0_LINK_STATUS |
 			NIG_STATUS_SERDES0_LINK_STATUS |
 			NIG_MASK_MI_INT));
-	return rc;
+	return 0;
 }
 
 static void bnx2x_int_link_reset(struct bnx2x_phy *phy,
@@ -8059,21 +8064,24 @@ static int bnx2x_get_edc_mode(struct bnx2x_phy *phy,
 {
 	struct bnx2x *bp = params->bp;
 	u32 sync_offset = 0, phy_idx, media_types;
-	u8 gport, val[2], check_limiting_mode = 0;
+	u8 val[SFP_EEPROM_FC_TX_TECH_ADDR + 1], check_limiting_mode = 0;
 	*edc_mode = EDC_MODE_LIMITING;
 	phy->media_type = ETH_PHY_UNSPECIFIED;
 	/* First check for copper cable */
 	if (bnx2x_read_sfp_module_eeprom(phy,
 					 params,
 					 I2C_DEV_ADDR_A0,
-					 SFP_EEPROM_CON_TYPE_ADDR,
-					 2,
+					 0,
+					 SFP_EEPROM_FC_TX_TECH_ADDR + 1,
 					 (u8 *)val) != 0) {
 		DP(NETIF_MSG_LINK, "Failed to read from SFP+ module EEPROM\n");
 		return -EINVAL;
 	}
-
-	switch (val[0]) {
+	params->link_attr_sync &= ~LINK_SFP_EEPROM_COMP_CODE_MASK;
+	params->link_attr_sync |= val[SFP_EEPROM_10G_COMP_CODE_ADDR] <<
+		LINK_SFP_EEPROM_COMP_CODE_SHIFT;
+	bnx2x_update_link_attr(params, params->link_attr_sync);
+	switch (val[SFP_EEPROM_CON_TYPE_ADDR]) {
 	case SFP_EEPROM_CON_TYPE_VAL_COPPER:
 	{
 		u8 copper_module_type;
@@ -8081,17 +8089,7 @@ static int bnx2x_get_edc_mode(struct bnx2x_phy *phy,
 		/* Check if its active cable (includes SFP+ module)
 		 * of passive cable
 		 */
-		if (bnx2x_read_sfp_module_eeprom(phy,
-					       params,
-					       I2C_DEV_ADDR_A0,
-					       SFP_EEPROM_FC_TX_TECH_ADDR,
-					       1,
-					       &copper_module_type) != 0) {
-			DP(NETIF_MSG_LINK,
-				"Failed to read copper-cable-type"
-				" from SFP+ EEPROM\n");
-			return -EINVAL;
-		}
+		copper_module_type = val[SFP_EEPROM_FC_TX_TECH_ADDR];
 
 		if (copper_module_type &
 		    SFP_EEPROM_FC_TX_TECH_BITMASK_COPPER_ACTIVE) {
@@ -8117,16 +8115,19 @@ static int bnx2x_get_edc_mode(struct bnx2x_phy *phy,
 		}
 		break;
 	}
+	case SFP_EEPROM_CON_TYPE_VAL_UNKNOWN:
 	case SFP_EEPROM_CON_TYPE_VAL_LC:
 	case SFP_EEPROM_CON_TYPE_VAL_RJ45:
 		check_limiting_mode = 1;
-		if ((val[1] & (SFP_EEPROM_COMP_CODE_SR_MASK |
-			       SFP_EEPROM_COMP_CODE_LR_MASK |
-			       SFP_EEPROM_COMP_CODE_LRM_MASK)) == 0) {
+		if (((val[SFP_EEPROM_10G_COMP_CODE_ADDR] &
+		     (SFP_EEPROM_10G_COMP_CODE_SR_MASK |
+		      SFP_EEPROM_10G_COMP_CODE_LR_MASK |
+		       SFP_EEPROM_10G_COMP_CODE_LRM_MASK)) == 0) &&
+		    (val[SFP_EEPROM_1G_COMP_CODE_ADDR] != 0)) {
 			DP(NETIF_MSG_LINK, "1G SFP module detected\n");
-			gport = params->port;
 			phy->media_type = ETH_PHY_SFP_1G_FIBER;
 			if (phy->req_line_speed != SPEED_1000) {
+				u8 gport = params->port;
 				phy->req_line_speed = SPEED_1000;
 				if (!CHIP_IS_E1x(bp)) {
 					gport = BP_PATH(bp) +
@@ -8135,6 +8136,12 @@ static int bnx2x_get_edc_mode(struct bnx2x_phy *phy,
 				netdev_err(bp->dev,
 					   "Warning: Link speed was forced to 1000Mbps. Current SFP module in port %d is not compliant with 10G Ethernet\n",
 					   gport);
+			}
+			if (val[SFP_EEPROM_1G_COMP_CODE_ADDR] &
+			    SFP_EEPROM_1G_COMP_CODE_BASE_T) {
+				bnx2x_sfp_set_transmitter(params, phy, 0);
+				msleep(40);
+				bnx2x_sfp_set_transmitter(params, phy, 1);
 			}
 		} else {
 			int idx, cfg_idx = 0;
@@ -8151,7 +8158,7 @@ static int bnx2x_get_edc_mode(struct bnx2x_phy *phy,
 		break;
 	default:
 		DP(NETIF_MSG_LINK, "Unable to determine module type 0x%x !!!\n",
-			 val[0]);
+			 val[SFP_EEPROM_CON_TYPE_ADDR]);
 		return -EINVAL;
 	}
 	sync_offset = params->shmem_base +
@@ -13509,7 +13516,7 @@ static void bnx2x_check_kr2_wa(struct link_params *params,
 
 	sigdet = bnx2x_warpcore_get_sigdet(phy, params);
 	if (!sigdet) {
-		if (!(vars->link_attr_sync & LINK_ATTR_SYNC_KR2_ENABLE)) {
+		if (!(params->link_attr_sync & LINK_ATTR_SYNC_KR2_ENABLE)) {
 			bnx2x_kr2_recovery(params, vars, phy);
 			DP(NETIF_MSG_LINK, "No sigdet\n");
 		}
@@ -13527,7 +13534,7 @@ static void bnx2x_check_kr2_wa(struct link_params *params,
 
 	/* CL73 has not begun yet */
 	if (base_page == 0) {
-		if (!(vars->link_attr_sync & LINK_ATTR_SYNC_KR2_ENABLE)) {
+		if (!(params->link_attr_sync & LINK_ATTR_SYNC_KR2_ENABLE)) {
 			bnx2x_kr2_recovery(params, vars, phy);
 			DP(NETIF_MSG_LINK, "No BP\n");
 		}
@@ -13543,7 +13550,7 @@ static void bnx2x_check_kr2_wa(struct link_params *params,
 			    ((next_page & 0xe0) == 0x20))));
 
 	/* In case KR2 is already disabled, check if we need to re-enable it */
-	if (!(vars->link_attr_sync & LINK_ATTR_SYNC_KR2_ENABLE)) {
+	if (!(params->link_attr_sync & LINK_ATTR_SYNC_KR2_ENABLE)) {
 		if (!not_kr2_device) {
 			DP(NETIF_MSG_LINK, "BP=0x%x, NP=0x%x\n", base_page,
 			   next_page);

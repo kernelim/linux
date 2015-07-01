@@ -35,7 +35,7 @@
 #include "be_hw.h"
 #include "be_roce.h"
 
-#define DRV_VER			"10.2r"
+#define DRV_VER			"10.4r"
 #define DRV_NAME		"be2net"
 #define BE_NAME			"Emulex BladeEngine2"
 #define BE3_NAME		"Emulex BladeEngine3"
@@ -60,26 +60,6 @@
 #define OC_SUBSYS_DEVICE_ID3	0xE612
 #define OC_SUBSYS_DEVICE_ID4	0xE652
 
-static inline char *nic_name(struct pci_dev *pdev)
-{
-	switch (pdev->device) {
-	case OC_DEVICE_ID1:
-		return OC_NAME;
-	case OC_DEVICE_ID2:
-		return OC_NAME_BE;
-	case OC_DEVICE_ID3:
-	case OC_DEVICE_ID4:
-		return OC_NAME_LANCER;
-	case BE_DEVICE_ID2:
-		return BE3_NAME;
-	case OC_DEVICE_ID5:
-	case OC_DEVICE_ID6:
-		return OC_NAME_SH;
-	default:
-		return BE_NAME;
-	}
-}
-
 /* Number of bytes of an RX frame that are copied to skb->data */
 #define BE_HDR_LEN		((u16) 64)
 /* allocate extra space to allow tunneling decapsulation without head reallocation */
@@ -87,6 +67,8 @@ static inline char *nic_name(struct pci_dev *pdev)
 
 #define BE_MAX_JUMBO_FRAME_SIZE	9018
 #define BE_MIN_MTU		256
+#define BE_MAX_MTU              (BE_MAX_JUMBO_FRAME_SIZE -	\
+				 (ETH_HLEN + ETH_FCS_LEN))
 
 #define BE_NUM_VLANS_SUPPORTED	64
 #define BE_MAX_EQD		128u
@@ -113,7 +95,6 @@ static inline char *nic_name(struct pci_dev *pdev)
 #define MAX_ROCE_EQS		5
 #define MAX_MSIX_VECTORS	32
 #define MIN_MSIX_VECTORS	1
-#define BE_TX_BUDGET		256
 #define BE_NAPI_WEIGHT		64
 #define MAX_RX_POST		BE_NAPI_WEIGHT /* Frags posted at a time */
 #define RX_FRAGS_REFILL_WM	(RX_Q_LEN - MAX_RX_POST)
@@ -199,7 +180,6 @@ struct be_eq_obj {
 
 	u8 idx;			/* array index */
 	u8 msix_idx;
-	u16 tx_budget;
 	u16 spurious_intr;
 	struct napi_struct napi;
 	struct be_adapter *adapter;
@@ -249,6 +229,13 @@ struct be_tx_stats {
 	ulong tx_jiffies;
 	u32 tx_stops;
 	u32 tx_drv_drops;	/* pkts dropped by driver */
+	/* the error counters are described in be_ethtool.c */
+	u32 tx_hdr_parse_err;
+	u32 tx_dma_err;
+	u32 tx_tso_err;
+	u32 tx_spoof_check_err;
+	u32 tx_qinq_err;
+	u32 tx_internal_parity_err;
 	struct u64_stats_sync sync;
 	struct u64_stats_sync sync_compl;
 };
@@ -316,6 +303,7 @@ struct be_rx_obj {
 struct be_drv_stats {
 	u32 be_on_die_temperature;
 	u32 eth_red_drops;
+	u32 dma_map_errors;
 	u32 rx_drops_no_pbuf;
 	u32 rx_drops_no_txpb;
 	u32 rx_drops_no_erx_descr;
@@ -363,6 +351,7 @@ struct be_vf_cfg {
 	int pmac_id;
 	u16 vlan_tag;
 	u32 tx_rate;
+	u32 plink_tracking;
 };
 
 enum vf_state {
@@ -370,21 +359,25 @@ enum vf_state {
 	ASSIGNED = 1
 };
 
-#define BE_FLAGS_LINK_STATUS_INIT		1
-#define BE_FLAGS_SRIOV_ENABLED			(1 << 2)
-#define BE_FLAGS_WORKER_SCHEDULED		(1 << 3)
-#define BE_FLAGS_VLAN_PROMISC			(1 << 4)
-#define BE_FLAGS_MCAST_PROMISC			(1 << 5)
-#define BE_FLAGS_NAPI_ENABLED			(1 << 9)
-#define BE_UC_PMAC_COUNT		30
-#define BE_VF_UC_PMAC_COUNT		2
-#define BE_FLAGS_QNQ_ASYNC_EVT_RCVD		(1 << 11)
-#define BE_FLAGS_SETUP_DONE			(1 << 13)
+#define BE_FLAGS_LINK_STATUS_INIT		BIT(1)
+#define BE_FLAGS_SRIOV_ENABLED			BIT(2)
+#define BE_FLAGS_WORKER_SCHEDULED		BIT(3)
+#define BE_FLAGS_NAPI_ENABLED			BIT(6)
+#define BE_FLAGS_QNQ_ASYNC_EVT_RCVD		BIT(7)
+#define BE_FLAGS_VXLAN_OFFLOADS			BIT(8)
+#define BE_FLAGS_SETUP_DONE			BIT(9)
+#define BE_FLAGS_EVT_INCOMPATIBLE_SFP		BIT(10)
+
+#define BE_UC_PMAC_COUNT			30
+#define BE_VF_UC_PMAC_COUNT			2
 
 /* Ethtool set_dump flags */
 #define LANCER_INITIATE_FW_DUMP			0x1
+#define LANCER_DELETE_FW_DUMP			0x2
 
 struct phy_info {
+/* From SFF-8472 spec */
+#define SFP_VENDOR_NAME_LEN			17
 	u8 transceiver;
 	u8 autoneg;
 	u8 fc_autoneg;
@@ -395,9 +388,11 @@ struct phy_info {
 	u16 auto_speeds_supported;
 	u16 fixed_speeds_supported;
 	int link_speed;
-	u32 dac_cable_len;
 	u32 advertising;
 	u32 supported;
+	u8 cable_type;
+	u8 vendor_name[SFP_VENDOR_NAME_LEN];
+	u8 vendor_pn[SFP_VENDOR_NAME_LEN];
 };
 
 struct be_resources {
@@ -426,6 +421,7 @@ struct be_adapter {
 
 	u8 __iomem *csr;	/* CSR BAR used only for BE2/3 */
 	u8 __iomem *db;		/* Door Bell */
+	u8 __iomem *pcicfg;	/* On SH,BEx only. Shadow of PCI config space */
 
 	struct mutex mbox_lock; /* For serializing mbox cmds to BE card */
 	struct be_dma_mem mbox_mem;
@@ -455,8 +451,6 @@ struct be_adapter {
 
 	struct be_drv_stats drv_stats;
 	struct be_aic_obj aic_obj[MAX_EVT_QS];
-	u16 vlans_added;
-	unsigned long vids[BITS_TO_LONGS(VLAN_N_VID)];
 	u8 vlan_prio_bmap;	/* Available Priority BitMap */
 	u16 recommended_prio;	/* Recommended Priority */
 	struct be_dma_mem rx_filter; /* Cmd DMA mem for rx-filter */
@@ -472,8 +466,15 @@ struct be_adapter {
 	/* Ethtool knobs and info */
 	char fw_ver[FW_VER_LEN];
 	char fw_on_flash[FW_VER_LEN];
+
+	/* IFACE filtering fields */
 	int if_handle;		/* Used to configure filtering */
+	u32 if_flags;		/* Interface filtering flags */
 	u32 *pmac_id;		/* MAC addr handle used by BE card */
+	u32 uc_macs;		/* Count of secondary UC MAC programmed */
+	unsigned long vids[BITS_TO_LONGS(VLAN_N_VID)];
+	u16 vlans_added;
+
 	u32 beacon_state;	/* for set_phys_id */
 
 	bool eeh_error;
@@ -481,7 +482,7 @@ struct be_adapter {
 	bool hw_error;
 
 	u32 port_num;
-	bool promiscuous;
+	char port_name;
 	u8 mc_type;
 	u32 function_mode;
 	u32 function_caps;
@@ -512,7 +513,6 @@ struct be_adapter {
 	struct phy_info phy;
 	u8 wol_cap;
 	bool wol_en;
-	u32 uc_macs;		/* Count of secondary UC MAC programmed */
 	u16 asic_rev;
 	u16 qnq_vid;
 	u32 msg_enable;
@@ -609,6 +609,10 @@ extern const struct ethtool_ops_ext be_ethtool_ops_ext;
 	for (i = eqo->idx, rxo = &adapter->rx_obj[i]; i < adapter->num_rx_qs;\
 		 i += adapter->num_evt_qs, rxo += adapter->num_evt_qs)
 
+#define for_all_tx_queues_on_eq(adapter, eqo, txo, i)			\
+	for (i = eqo->idx, txo = &adapter->tx_obj[i]; i < adapter->num_tx_qs;\
+		i += adapter->num_evt_qs, txo += adapter->num_evt_qs)
+
 #define is_mcc_eqo(eqo)			(eqo->idx == 0)
 #define mcc_eqo(adapter)		(&adapter->eq_obj[0])
 
@@ -657,6 +661,18 @@ static inline u32 amap_get(void *ptr, u32 dw_offset, u32 mask, u32 offset)
 			amap_mask(sizeof(((_struct *)0)->field)),	\
 			AMAP_BIT_OFFSET(_struct, field))
 
+#define GET_RX_COMPL_V0_BITS(field, ptr)				\
+		AMAP_GET_BITS(struct amap_eth_rx_compl_v0, field, ptr)
+
+#define GET_RX_COMPL_V1_BITS(field, ptr)				\
+		AMAP_GET_BITS(struct amap_eth_rx_compl_v1, field, ptr)
+
+#define GET_TX_COMPL_BITS(field, ptr)					\
+		AMAP_GET_BITS(struct amap_eth_tx_compl, field, ptr)
+
+#define SET_TX_WRB_HDR_BITS(field, ptr, val)				\
+		AMAP_SET_BITS(struct amap_eth_hdr_wrb, field, ptr, val)
+
 #define be_dws_cpu_to_le(wrb, len)	swap_dws(wrb, len)
 #define be_dws_le_to_cpu(wrb, len)	swap_dws(wrb, len)
 static inline void swap_dws(void *wrb, int len)
@@ -671,6 +687,8 @@ static inline void swap_dws(void *wrb, int len)
 	} while (len);
 #endif				/* __BIG_ENDIAN */
 }
+
+#define be_cmd_status(status)		(status > 0 ? -EIO : status)
 
 static inline u8 is_tcp_pkt(struct sk_buff *skb)
 {
@@ -701,19 +719,6 @@ static inline bool is_ipv4_pkt(struct sk_buff *skb)
 	return skb->protocol == htons(ETH_P_IP) && ip_hdr(skb)->version == 4;
 }
 
-static inline void be_vf_eth_addr_generate(struct be_adapter *adapter, u8 *mac)
-{
-	u32 addr;
-
-	addr = jhash(adapter->netdev->dev_addr, ETH_ALEN, 0);
-
-	mac[5] = (u8)(addr & 0xFF);
-	mac[4] = (u8)((addr >> 8) & 0xFF);
-	mac[3] = (u8)((addr >> 16) & 0xFF);
-	/* Use the OUI from the current MAC address */
-	memcpy(mac, adapter->netdev->dev_addr, 3);
-}
-
 static inline bool be_multi_rxq(const struct be_adapter *adapter)
 {
 	return adapter->num_rx_qs > 1;
@@ -736,129 +741,6 @@ static inline void  be_clear_all_error(struct be_adapter *adapter)
 	adapter->fw_timeout = false;
 }
 
-static inline bool be_is_wol_excluded(struct be_adapter *adapter)
-{
-	struct pci_dev *pdev = adapter->pdev;
-
-	if (!be_physfn(adapter))
-		return true;
-
-	switch (pdev->subsystem_device) {
-	case OC_SUBSYS_DEVICE_ID1:
-	case OC_SUBSYS_DEVICE_ID2:
-	case OC_SUBSYS_DEVICE_ID3:
-	case OC_SUBSYS_DEVICE_ID4:
-		return true;
-	default:
-		return false;
-	}
-}
-
-static inline int qnq_async_evt_rcvd(struct be_adapter *adapter)
-{
-	return adapter->flags & BE_FLAGS_QNQ_ASYNC_EVT_RCVD;
-}
-
-#ifdef CONFIG_NET_RX_BUSY_POLL
-static inline bool be_lock_napi(struct be_eq_obj *eqo)
-{
-	bool status = true;
-
-	spin_lock(&eqo->lock); /* BH is already disabled */
-	if (eqo->state & BE_EQ_LOCKED) {
-		WARN_ON(eqo->state & BE_EQ_NAPI);
-		eqo->state |= BE_EQ_NAPI_YIELD;
-		status = false;
-	} else {
-		eqo->state = BE_EQ_NAPI;
-	}
-	spin_unlock(&eqo->lock);
-	return status;
-}
-
-static inline void be_unlock_napi(struct be_eq_obj *eqo)
-{
-	spin_lock(&eqo->lock); /* BH is already disabled */
-
-	WARN_ON(eqo->state & (BE_EQ_POLL | BE_EQ_NAPI_YIELD));
-	eqo->state = BE_EQ_IDLE;
-
-	spin_unlock(&eqo->lock);
-}
-
-static inline bool be_lock_busy_poll(struct be_eq_obj *eqo)
-{
-	bool status = true;
-
-	spin_lock_bh(&eqo->lock);
-	if (eqo->state & BE_EQ_LOCKED) {
-		eqo->state |= BE_EQ_POLL_YIELD;
-		status = false;
-	} else {
-		eqo->state |= BE_EQ_POLL;
-	}
-	spin_unlock_bh(&eqo->lock);
-	return status;
-}
-
-static inline void be_unlock_busy_poll(struct be_eq_obj *eqo)
-{
-	spin_lock_bh(&eqo->lock);
-
-	WARN_ON(eqo->state & (BE_EQ_NAPI));
-	eqo->state = BE_EQ_IDLE;
-
-	spin_unlock_bh(&eqo->lock);
-}
-
-static inline void be_enable_busy_poll(struct be_eq_obj *eqo)
-{
-	spin_lock_init(&eqo->lock);
-	eqo->state = BE_EQ_IDLE;
-}
-
-static inline void be_disable_busy_poll(struct be_eq_obj *eqo)
-{
-	local_bh_disable();
-
-	/* It's enough to just acquire napi lock on the eqo to stop
-	 * be_busy_poll() from processing any queueus.
-	 */
-	while (!be_lock_napi(eqo))
-		mdelay(1);
-
-	local_bh_enable();
-}
-
-#else /* CONFIG_NET_RX_BUSY_POLL */
-
-static inline bool be_lock_napi(struct be_eq_obj *eqo)
-{
-	return true;
-}
-
-static inline void be_unlock_napi(struct be_eq_obj *eqo)
-{
-}
-
-static inline bool be_lock_busy_poll(struct be_eq_obj *eqo)
-{
-	return false;
-}
-
-static inline void be_unlock_busy_poll(struct be_eq_obj *eqo)
-{
-}
-
-static inline void be_enable_busy_poll(struct be_eq_obj *eqo)
-{
-}
-
-static inline void be_disable_busy_poll(struct be_eq_obj *eqo)
-{
-}
-#endif /* CONFIG_NET_RX_BUSY_POLL */
-
 void be_cq_notify(struct be_adapter *adapter, u16 qid, bool arm,
 		  u16 num_popped);
 void be_link_status_update(struct be_adapter *adapter, u8 link_status);
@@ -867,16 +749,6 @@ int be_load_fw(struct be_adapter *adapter, u8 *func);
 bool be_is_wol_supported(struct be_adapter *adapter);
 bool be_pause_supported(struct be_adapter *adapter);
 u32 be_get_fw_log_level(struct be_adapter *adapter);
-
-static inline int fw_major_num(const char *fw_ver)
-{
-	int fw_major = 0;
-
-	sscanf(fw_ver, "%d.", &fw_major);
-
-	return fw_major;
-}
-
 int be_update_queues(struct be_adapter *adapter);
 int be_poll(struct napi_struct *napi, int budget);
 
@@ -891,5 +763,6 @@ void be_roce_dev_remove(struct be_adapter *);
  */
 void be_roce_dev_open(struct be_adapter *);
 void be_roce_dev_close(struct be_adapter *);
+void be_roce_dev_shutdown(struct be_adapter *);
 
 #endif				/* BE_H */

@@ -51,7 +51,7 @@ static void cpuidle_idle_call(void)
 {
 	struct cpuidle_device *dev = __get_cpu_var(cpuidle_devices);
 	struct cpuidle_state *target_state;
-	int next_state;
+	int next_state, entered_state;
 
 	/* check if the device is ready */
 	if (!dev || !dev->enabled) {
@@ -83,19 +83,21 @@ static void cpuidle_idle_call(void)
 
 	target_state = &dev->states[next_state];
 
-	/* enter the state and update stats */
-	dev->last_state = target_state;
-	dev->last_residency = target_state->enter(dev, target_state);
-	if (dev->last_state)
-		target_state = dev->last_state;
+	entered_state = target_state->enter(dev, next_state);
 
-	target_state->time += (unsigned long long)dev->last_residency;
-	target_state->usage++;
+	if (entered_state >= 0) {
+		/* Update cpuidle counters */
+		/* This can be moved to within driver enter routine
+		 * but that results in multiple copies of same code.
+		 */
+		dev->states_usage[entered_state].time +=
+				(unsigned long long)dev->last_residency;
+		dev->states_usage[entered_state].usage++;
+	}
 
 	/* give the governor an opportunity to reflect on the outcome */
 	if (cpuidle_curr_governor->reflect)
-		cpuidle_curr_governor->reflect(dev);
-	trace_power_end(smp_processor_id());
+		cpuidle_curr_governor->reflect(dev, entered_state);
 }
 
 /**
@@ -144,11 +146,10 @@ void cpuidle_resume_and_unlock(void)
 EXPORT_SYMBOL_GPL(cpuidle_resume_and_unlock);
 
 #ifdef CONFIG_ARCH_HAS_CPU_RELAX
-static int poll_idle(struct cpuidle_device *dev, struct cpuidle_state *st)
+static int poll_idle(struct cpuidle_device *dev, int index)
 {
 	ktime_t	t1, t2;
 	s64 diff;
-	int ret;
 
 	t1 = ktime_get();
 	local_irq_enable();
@@ -160,15 +161,17 @@ static int poll_idle(struct cpuidle_device *dev, struct cpuidle_state *st)
 	if (diff > INT_MAX)
 		diff = INT_MAX;
 
-	ret = (int) diff;
-	return ret;
+	dev->last_residency = (int) diff;
+
+	return index;
 }
 
 static void poll_idle_init(struct cpuidle_device *dev)
 {
 	struct cpuidle_state *state = &dev->states[0];
+	struct cpuidle_state_usage *state_usage = &dev->states_usage[0];
 
-	cpuidle_set_statedata(state, NULL);
+	cpuidle_set_statedata(state_usage, NULL);
 
 	snprintf(state->name, CPUIDLE_NAME_LEN, "C0");
 	snprintf(state->desc, CPUIDLE_DESC_LEN, "CPUIDLE CORE POLL IDLE");
@@ -216,11 +219,10 @@ int cpuidle_enable_device(struct cpuidle_device *dev)
 		goto fail_sysfs;
 
 	for (i = 0; i < dev->state_count; i++) {
-		dev->states[i].usage = 0;
-		dev->states[i].time = 0;
+		dev->states_usage[i].usage = 0;
+		dev->states_usage[i].time = 0;
 	}
 	dev->last_residency = 0;
-	dev->last_state = NULL;
 
 	smp_wmb();
 

@@ -33,7 +33,7 @@ struct pid_namespace {
 #ifndef __GENKSYMS__
 	gid_t pid_gid;
 	int hide_pid;
-	int nr_hashed;
+	unsigned int nr_hashed;
 	struct work_struct proc_work;
 	int reboot;	/* group exit code if this pidns was rebooted */
 	unsigned int proc_inum;
@@ -41,6 +41,8 @@ struct pid_namespace {
 };
 
 extern struct pid_namespace init_pid_ns;
+
+#define PIDNS_HASH_ADDING (1U << 31)
 
 #ifdef CONFIG_PID_NS
 static inline struct pid_namespace *get_pid_ns(struct pid_namespace *ns)

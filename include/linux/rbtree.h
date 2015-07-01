@@ -97,44 +97,30 @@ static inline struct page * rb_insert_page_cache(struct inode * inode,
 #include <linux/kernel.h>
 #include <linux/stddef.h>
 
-struct rb_node
-{
+struct rb_node {
 	unsigned long  rb_parent_color;
-#define	RB_RED		0
-#define	RB_BLACK	1
 	struct rb_node *rb_right;
 	struct rb_node *rb_left;
 } __attribute__((aligned(sizeof(long))));
     /* The alignment might seem pointless, but allegedly CRIS needs it */
 
-struct rb_root
-{
+struct rb_root {
 	struct rb_node *rb_node;
 };
 
 
 #define rb_parent(r)   ((struct rb_node *)((r)->rb_parent_color & ~3))
-#define rb_color(r)   ((r)->rb_parent_color & 1)
-#define rb_is_red(r)   (!rb_color(r))
-#define rb_is_black(r) rb_color(r)
-#define rb_set_red(r)  do { (r)->rb_parent_color &= ~1; } while (0)
-#define rb_set_black(r)  do { (r)->rb_parent_color |= 1; } while (0)
-
-static inline void rb_set_parent(struct rb_node *rb, struct rb_node *p)
-{
-	rb->rb_parent_color = (rb->rb_parent_color & 3) | (unsigned long)p;
-}
-static inline void rb_set_color(struct rb_node *rb, int color)
-{
-	rb->rb_parent_color = (rb->rb_parent_color & ~1) | color;
-}
 
 #define RB_ROOT	(struct rb_root) { NULL, }
 #define	rb_entry(ptr, type, member) container_of(ptr, type, member)
 
-#define RB_EMPTY_ROOT(root)	((root)->rb_node == NULL)
-#define RB_EMPTY_NODE(node)	(rb_parent(node) == node)
-#define RB_CLEAR_NODE(node)	(rb_set_parent(node, node))
+#define RB_EMPTY_ROOT(root)  ((root)->rb_node == NULL)
+
+/* 'empty' nodes are nodes that are known not to be inserted in an rbree */
+#define RB_EMPTY_NODE(node)  \
+	((node)->rb_parent_color == (unsigned long)(node))
+#define RB_CLEAR_NODE(node)  \
+	((node)->rb_parent_color = (unsigned long)(node))
 
 static inline void rb_init_node(struct rb_node *rb)
 {
@@ -147,11 +133,64 @@ static inline void rb_init_node(struct rb_node *rb)
 extern void rb_insert_color(struct rb_node *, struct rb_root *);
 extern void rb_erase(struct rb_node *, struct rb_root *);
 
+
+struct rb_augment_callbacks {
+	void (*propagate)(struct rb_node *node, struct rb_node *stop);
+	void (*copy)(struct rb_node *old, struct rb_node *new);
+	void (*rotate)(struct rb_node *old, struct rb_node *new);
+};
+
+extern void __rb_insert_augmented(struct rb_node *node, struct rb_root *root,
+	void (*augment_rotate)(struct rb_node *old, struct rb_node *new));
+extern void rb_erase_augmented(struct rb_node *node, struct rb_root *root,
+			       const struct rb_augment_callbacks *augment);
+static inline void
+rb_insert_augmented(struct rb_node *node, struct rb_root *root,
+		    const struct rb_augment_callbacks *augment)
+{
+	__rb_insert_augmented(node, root, augment->rotate);
+}
+
+#define RB_DECLARE_CALLBACKS(rbstatic, rbname, rbstruct, rbfield,	      \
+			     rbtype, rbaugmented, rbcompute)		      \
+static void rbname ## _propagate(struct rb_node *rb, struct rb_node *stop)    \
+{									      \
+	while (rb != stop) {						      \
+		rbstruct *node = rb_entry(rb, rbstruct, rbfield);	      \
+		rbtype augmented = rbcompute(node);			      \
+		if (node->rbaugmented == augmented)			      \
+			break;						      \
+		node->rbaugmented = augmented;				      \
+		rb = rb_parent(&node->rbfield);				      \
+	}								      \
+}									      \
+static void rbname ## _copy(struct rb_node *rb_old, struct rb_node *rb_new)   \
+{									      \
+	rbstruct *old = rb_entry(rb_old, rbstruct, rbfield);		      \
+	rbstruct *new = rb_entry(rb_new, rbstruct, rbfield);		      \
+	new->rbaugmented = old->rbaugmented;				      \
+}									      \
+static void rbname ## _rotate(struct rb_node *rb_old, struct rb_node *rb_new) \
+{									      \
+	rbstruct *old = rb_entry(rb_old, rbstruct, rbfield);		      \
+	rbstruct *new = rb_entry(rb_new, rbstruct, rbfield);		      \
+	new->rbaugmented = old->rbaugmented;				      \
+	old->rbaugmented = rbcompute(old);				      \
+}									      \
+rbstatic const struct rb_augment_callbacks rbname = {			      \
+	rbname ## _propagate, rbname ## _copy, rbname ## _rotate	      \
+};
+
+
 /* Find logical next and previous nodes in a tree */
 extern struct rb_node *rb_next(const struct rb_node *);
 extern struct rb_node *rb_prev(const struct rb_node *);
 extern struct rb_node *rb_first(const struct rb_root *);
 extern struct rb_node *rb_last(const struct rb_root *);
+
+/* Postorder iteration - always visit the parent after its children */
+extern struct rb_node *rb_first_postorder(const struct rb_root *);
+extern struct rb_node *rb_next_postorder(const struct rb_node *);
 
 /* Fast replacement of a single node without remove/rebalance/add/rebalance */
 extern void rb_replace_node(struct rb_node *victim, struct rb_node *new, 
@@ -160,10 +199,30 @@ extern void rb_replace_node(struct rb_node *victim, struct rb_node *new,
 static inline void rb_link_node(struct rb_node * node, struct rb_node * parent,
 				struct rb_node ** rb_link)
 {
-	node->rb_parent_color = (unsigned long )parent;
+	node->rb_parent_color = (unsigned long)parent;
 	node->rb_left = node->rb_right = NULL;
 
 	*rb_link = node;
 }
+
+#define rb_entry_safe(ptr, type, member) \
+	({ typeof(ptr) ____ptr = (ptr); \
+	   ____ptr ? rb_entry(____ptr, type, member) : NULL; \
+	})
+
+/**
+ * rbtree_postorder_for_each_entry_safe - iterate over rb_root in post order of
+ * given type safe against removal of rb_node entry
+ *
+ * @pos:	the 'type *' to use as a loop cursor.
+ * @n:		another 'type *' to use as temporary storage
+ * @root:	'rb_root *' of the rbtree.
+ * @field:	the name of the rb_node field within 'type'.
+ */
+#define rbtree_postorder_for_each_entry_safe(pos, n, root, field) \
+	for (pos = rb_entry_safe(rb_first_postorder(root), typeof(*pos), field); \
+	     pos && ({ n = rb_entry_safe(rb_next_postorder(&pos->field), \
+			typeof(*pos), field); 1; }); \
+	     pos = n)
 
 #endif	/* _LINUX_RBTREE_H */

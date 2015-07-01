@@ -42,6 +42,7 @@ module_param(gso, bool, 0444);
 #define GOOD_COPY_LEN	128
 
 #define VIRTNET_SEND_COMMAND_SG_MAX    2
+#define VIRTNET_DRIVER_VERSION "1.0.0"
 
 struct virtnet_stats {
 	struct u64_stats_sync tx_syncp;
@@ -1210,7 +1211,21 @@ static void virtnet_get_channels(struct net_device *dev,
 	channels->other_count = 0;
 }
 
+
+static void virtnet_get_drvinfo(struct net_device *dev,
+				struct ethtool_drvinfo *info)
+{
+	struct virtnet_info *vi = netdev_priv(dev);
+	struct virtio_device *vdev = vi->vdev;
+
+	strlcpy(info->driver, KBUILD_MODNAME, sizeof(info->driver));
+	strlcpy(info->version, VIRTNET_DRIVER_VERSION, sizeof(info->version));
+	strlcpy(info->bus_info, virtio_bus_name(vdev), sizeof(info->bus_info));
+
+}
+
 static const struct ethtool_ops virtnet_ethtool_ops = {
+	.get_drvinfo = virtnet_get_drvinfo,
 	.get_link = ethtool_op_get_link,
 };
 
@@ -1573,6 +1588,8 @@ static int virtnet_probe(struct virtio_device *vdev)
 	}
 	if (virtio_has_feature(vdev, VIRTIO_NET_F_GUEST_CSUM))
 		dev->features |= NETIF_F_RXCSUM;
+
+	dev->vlan_features = dev->features;
 
 	/* Configuration may specify what MAC to use.  Otherwise random. */
 	if (virtio_has_feature(vdev, VIRTIO_NET_F_MAC)) {

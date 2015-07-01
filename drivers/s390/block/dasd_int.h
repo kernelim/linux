@@ -178,6 +178,7 @@ struct dasd_ccw_req {
 	struct dasd_block *block;	/* the originating block device */
 	struct dasd_device *memdev;	/* the device used to allocate this */
 	struct dasd_device *startdev;	/* device the request is started on */
+	struct dasd_device *basedev;	/* base device if no block->base */
 	void *cpaddr;			/* address of ccw or tcw */
 	unsigned char cpmode;		/* 0 = cmd mode, 1 = itcw */
 	char status;			/* status of this request */
@@ -303,10 +304,11 @@ struct dasd_discipline {
 	 * Last things to do when a device is set online, and first things
 	 * when it is set offline.
 	 */
-	int (*ready_to_online) (struct dasd_device *);
+	int (*basic_to_ready) (struct dasd_device *);
 	int (*online_to_ready) (struct dasd_device *);
+	int (*basic_to_known)(struct dasd_device *);
 
-	/*
+	/* (struct dasd_device *);
 	 * Device operation functions. build_cp creates a ccw chain for
 	 * a block device request, start_io starts the request and
 	 * term_IO cancels it (e.g. in case of a timeout). format_device
@@ -320,8 +322,8 @@ struct dasd_discipline {
 	int (*start_IO) (struct dasd_ccw_req *);
 	int (*term_IO) (struct dasd_ccw_req *);
 	void (*handle_terminated_request) (struct dasd_ccw_req *);
-	struct dasd_ccw_req *(*format_device) (struct dasd_device *,
-					       struct format_data_t *);
+	int (*format_device) (struct dasd_device *,
+			      struct format_data_t *, int enable_PAV);
 	int (*free_cp) (struct dasd_ccw_req *, struct request *);
 
 	/*
@@ -357,6 +359,7 @@ struct dasd_discipline {
 	int (*reload) (struct dasd_device *);
 
 	void (*kick_validate) (struct dasd_device *);
+	int (*check_attention)(struct dasd_device *, __u8);
 };
 
 extern struct dasd_discipline *dasd_diag_discipline_pointer;
@@ -382,6 +385,10 @@ struct dasd_path {
 	__u8 tbvpm;
 	__u8 ppm;
 	__u8 npm;
+	/* paths that are not used because of a special condition */
+	__u8 cablepm; /* miss-cabled */
+	__u8 hpfpm;   /* the HPF requirements of the other paths are not met */
+	__u8 cuirpm;  /* CUIR varied offline */
 };
 
 struct dasd_profile_info {
@@ -498,7 +505,10 @@ struct dasd_block {
 	struct dasd_profile profile;
 };
 
-
+struct dasd_attention_data {
+	struct dasd_device *device;
+	__u8 lpum;
+};
 
 /* reasons why device (ccw_device_start) was stopped */
 #define DASD_STOPPED_NOT_ACC 1         /* not accessible */
@@ -676,6 +686,7 @@ int  dasd_term_IO(struct dasd_ccw_req *);
 void dasd_schedule_device_bh(struct dasd_device *);
 void dasd_schedule_block_bh(struct dasd_block *);
 int  dasd_sleep_on(struct dasd_ccw_req *);
+int  dasd_sleep_on_queue(struct list_head *);
 int  dasd_sleep_on_immediatly(struct dasd_ccw_req *);
 int  dasd_sleep_on_interruptible(struct dasd_ccw_req *);
 void dasd_device_set_timer(struct dasd_device *, int);

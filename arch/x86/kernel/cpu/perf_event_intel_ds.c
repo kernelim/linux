@@ -12,6 +12,7 @@
 
 #define BTS_BUFFER_SIZE		(PAGE_SIZE << 4)
 #define PEBS_BUFFER_SIZE	PAGE_SIZE
+#define PEBS_FIXUP_SIZE		PAGE_SIZE
 
 /*
  * pebs_record_32 for p4 and core not supported
@@ -244,19 +245,34 @@ void fini_debug_store_on_cpu(int cpu)
 	wrmsr_on_cpu(cpu, MSR_IA32_DS_AREA, 0, 0);
 }
 
+static DEFINE_PER_CPU(void *, insn_buffer);
+
 static int alloc_pebs_buffer(int cpu)
 {
 	struct debug_store *ds = per_cpu(cpu_hw_events, cpu).ds;
 	int node = cpu_to_node(cpu);
 	int max, thresh = 1; /* always use a single PEBS record */
-	void *buffer;
+	void *buffer, *ibuffer;
 
 	if (!x86_pmu.pebs)
 		return 0;
 
-	buffer = kmalloc_node(PEBS_BUFFER_SIZE, GFP_KERNEL | __GFP_ZERO, node);
+	buffer = kzalloc_node(PEBS_BUFFER_SIZE, GFP_KERNEL, node);
 	if (unlikely(!buffer))
 		return -ENOMEM;
+
+	/*
+	 * HSW+ already provides us the eventing ip; no need to allocate this
+	 * buffer then.
+	 */
+	if (x86_pmu.intel_cap.pebs_format < 2) {
+		ibuffer = kzalloc_node(PEBS_FIXUP_SIZE, GFP_KERNEL, node);
+		if (!ibuffer) {
+			kfree(buffer);
+			return -ENOMEM;
+		}
+		per_cpu(insn_buffer, cpu) = ibuffer;
+	}
 
 	max = PEBS_BUFFER_SIZE / x86_pmu.pebs_record_size;
 
@@ -278,6 +294,9 @@ static void release_pebs_buffer(int cpu)
 	if (!ds || !x86_pmu.pebs)
 		return;
 
+	kfree(per_cpu(insn_buffer, cpu));
+	per_cpu(insn_buffer, cpu) = NULL;
+
 	kfree((void *)(unsigned long)ds->pebs_buffer_base);
 	ds->pebs_buffer_base = 0;
 }
@@ -292,7 +311,7 @@ static int alloc_bts_buffer(int cpu)
 	if (!x86_pmu.bts)
 		return 0;
 
-	buffer = kmalloc_node(BTS_BUFFER_SIZE, GFP_KERNEL | __GFP_ZERO, node);
+	buffer = kzalloc_node(BTS_BUFFER_SIZE, GFP_KERNEL, node);
 	if (unlikely(!buffer))
 		return -ENOMEM;
 
@@ -325,7 +344,7 @@ static int alloc_ds_buffer(int cpu)
 	int node = cpu_to_node(cpu);
 	struct debug_store *ds;
 
-	ds = kmalloc_node(sizeof(*ds), GFP_KERNEL | __GFP_ZERO, node);
+	ds = kzalloc_node(sizeof(*ds), GFP_KERNEL, node);
 	if (unlikely(!ds))
 		return -ENOMEM;
 
@@ -737,6 +756,7 @@ static int intel_pmu_pebs_fixup_ip(struct pt_regs *regs)
 	unsigned long from = cpuc->lbr_entries[0].from;
 	unsigned long old_to, to = cpuc->lbr_entries[0].to;
 	unsigned long ip = regs->ip;
+	void *kaddr;
 
 	/*
 	 * We don't need to fixup if the PEBS assist is fault like
@@ -760,7 +780,7 @@ static int intel_pmu_pebs_fixup_ip(struct pt_regs *regs)
 	 * unsigned math, either ip is before the start (impossible) or
 	 * the basic block is larger than 1 page (sanity)
 	 */
-	if ((ip - to) > PAGE_SIZE)
+	if ((ip - to) > PEBS_FIXUP_SIZE)
 		return 0;
 
 	/*
@@ -771,26 +791,30 @@ static int intel_pmu_pebs_fixup_ip(struct pt_regs *regs)
 		return 1;
 	}
 
+	if (!kernel_ip(ip)) {
+		int size, bytes;
+		u8 *buf = __get_cpu_var(insn_buffer);
+
+		size = ip - to; /* Must fit our buffer, see above */
+		bytes = copy_from_user_nmi(buf, (void __user *)to, size);
+		if (bytes != size)
+			return 0;
+
+		kaddr = buf;
+	} else {
+		kaddr = (void *)to;
+	}
+
 	do {
 		struct insn insn;
-		u8 buf[MAX_INSN_SIZE];
-		void *kaddr;
 
 		old_to = to;
-		if (!kernel_ip(ip)) {
-			int bytes, size = MAX_INSN_SIZE;
-
-			bytes = copy_from_user_nmi(buf, (void __user *)to, size);
-			if (bytes != size)
-				return 0;
-
-			kaddr = buf;
-		} else
-			kaddr = (void *)to;
 
 		kernel_insn_init(&insn, kaddr);
 		insn_get_length(&insn);
+
 		to += insn.length;
+		kaddr += insn.length;
 	} while (to < ip);
 
 	if (to == ip) {
@@ -965,7 +989,7 @@ static void intel_pmu_drain_pebs_nhm(struct pt_regs *iregs)
 	struct perf_event *event = NULL;
 	void *at, *top;
 	u64 status = 0;
-	int bit, n;
+	int bit;
 
 	if (!x86_pmu.pebs_active)
 		return;
@@ -975,16 +999,16 @@ static void intel_pmu_drain_pebs_nhm(struct pt_regs *iregs)
 
 	ds->pebs_index = ds->pebs_buffer_base;
 
-	n = (top - at) / x86_pmu.pebs_record_size;
-	if (n <= 0)
+	if (unlikely(at > top))
 		return;
 
 	/*
 	 * Should not happen, we program the threshold at 1 and do not
 	 * set a reset value.
 	 */
-	WARN_ONCE(n > x86_pmu.max_pebs_events,
-		  "Unexpected number of pebs records %d\n", n);
+	WARN_ONCE(top - at > x86_pmu.max_pebs_events * x86_pmu.pebs_record_size,
+		  "Unexpected number of pebs records %ld\n",
+		  (long)(top - at) / x86_pmu.pebs_record_size);
 
 	for (; at < top; at += x86_pmu.pebs_record_size) {
 		struct pebs_record_nhm *p = at;

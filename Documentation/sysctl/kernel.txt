@@ -21,6 +21,7 @@ show up in /proc/sys/kernel:
 - acct
 - callhome		     [ S390 only ]
 - auto_msgmni
+- cap_last_cap
 - core_pattern
 - core_pipe_limit
 - core_uses_pid
@@ -49,6 +50,7 @@ show up in /proc/sys/kernel:
 - pid_max
 - powersave-nap               [ PPC only ]
 - panic_on_unrecovered_nmi
+- panic_on_warn
 - printk
 - randomize_va_space
 - real-root-dev               ==> Documentation/initrd.txt
@@ -61,6 +63,7 @@ show up in /proc/sys/kernel:
 - shmall
 - shmmax                      [ sysv ipc ]
 - shmmni
+- softlockup_all_cpu_backtrace
 - stop-a                      [ SPARC only ]
 - sysrq                       ==> Documentation/sysrq.txt
 - tainted
@@ -108,6 +111,13 @@ nothing happens in case of a kernel panic. If this value is set to "1"
 the complete kernel oops message is send to the IBM customer service
 organization in case the mainframe the Linux operating system is running
 on has a service contract with IBM.
+
+==============================================================
+
+cap_last_cap
+
+Highest valid capability of the running kernel.  Exports
+CAP_LAST_CAP from the kernel.
 
 ==============================================================
 
@@ -311,6 +321,30 @@ Controls the kernel's behaviour when an oops or BUG is encountered.
 
 ==============================================================
 
+panic_on_unrecovered_nmi:
+
+The default Linux behaviour on an NMI of either memory or unknown is to continue
+operation. For many environments such as scientific computing it is preferable
+that the box is taken out and the error dealt with than an uncorrected
+parity/ECC error get propogated.
+
+A small number of systems do generate NMI's for bizarre random reasons such as
+power management so the default is off. That sysctl works like the existing
+panic controls already in that directory.
+
+==============================================================
+
+panic_on_warn:
+
+Calls panic() in the WARN() path when set to 1.  This is useful to avoid
+a kernel rebuild when attempting to kdump at the location of a WARN().
+
+0: only WARN(), default behaviour.
+
+1: call panic() after printing out WARN() location.
+
+==============================================================
+
 pid_max:
 
 PID allocation wrap value.  When the kernel's next PID value
@@ -475,6 +509,22 @@ tunable to zero will disable the softlockup detection altogether.
 
 ==============================================================
 
+softlockup_all_cpu_backtrace:
+
+This value controls the soft lockup detector thread's behavior
+when a soft lockup condition is detected as to whether or not
+to gather further debug information. If enabled, each cpu will
+be issued an NMI and instructed to capture stack trace.
+
+This feature is only applicable for architectures which support
+NMI.
+
+0: do nothing. This is the default behavior.
+
+1: on detection capture more debug information.
+
+==============================================================
+
 tainted: 
 
 Non-zero if the kernel has been tainted.  Numeric values, which
@@ -497,6 +547,7 @@ can be ORed together:
         instead of using the one provided by the hardware.
  512 - A kernel warning has occurred.
 1024 - A module from drivers/staging was loaded.
+16384 - A soft lockup has previously occurred on the system.
 
 ==============================================================
 
@@ -532,17 +583,3 @@ debugging information is displayed on console.
 
 NMI switch that most IA32 servers have fires unknown NMI up, for example.
 If a system hangs up, try pressing the NMI switch.
-
-==============================================================
-
-panic_on_unrecovered_nmi:
-
-The default Linux behaviour on an NMI of either memory or unknown is to continue
-operation. For many environments such as scientific computing it is preferable
-that the box is taken out and the error dealt with than an uncorrected
-parity/ECC error get propogated.
-
-A small number of systems do generate NMI's for bizarre random reasons such as
-power management so the default is off. That sysctl works like the existing
-panic controls already in that directory.
-

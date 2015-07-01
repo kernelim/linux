@@ -2469,7 +2469,9 @@ static int stop_queued_cmnd(struct scsi_cmnd *cmnd)
 	for (k = 0; k < scsi_debug_max_queue; ++k) {
 		sqcp = &queued_arr[k];
 		if (sqcp->in_use && (cmnd == sqcp->a_cmnd)) {
+			spin_unlock_irqrestore(&queued_arr_lock, iflags);
 			del_timer_sync(&sqcp->cmnd_timer);
+			spin_lock_irqsave(&queued_arr_lock, iflags);
 			sqcp->in_use = 0;
 			sqcp->a_cmnd = NULL;
 			break;
@@ -2490,7 +2492,9 @@ static void stop_all_queued(void)
 	for (k = 0; k < scsi_debug_max_queue; ++k) {
 		sqcp = &queued_arr[k];
 		if (sqcp->in_use && sqcp->a_cmnd) {
+			spin_unlock_irqrestore(&queued_arr_lock, iflags);
 			del_timer_sync(&sqcp->cmnd_timer);
+			spin_lock_irqsave(&queued_arr_lock, iflags);
 			sqcp->in_use = 0;
 			sqcp->a_cmnd = NULL;
 		}

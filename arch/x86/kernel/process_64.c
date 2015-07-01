@@ -505,6 +505,10 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	percpu_write(kernel_stack,
 		  (unsigned long)task_stack_page(next_p) +
 		  THREAD_SIZE - KERNEL_STACK_OFFSET);
+	percpu_write(kernel_stack8k,
+		  (unsigned long)task_stack_page(next_p) +
+		  THREAD_SIZE - 8192 - KERNEL_STACK_OFFSET);
+
 
 	/*
 	 * Now maybe reload the debug registers and handle I/O bitmaps

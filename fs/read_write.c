@@ -218,7 +218,7 @@ SYSCALL_DEFINE3(lseek, unsigned int, fd, off_t, offset, unsigned int, origin)
 	int fput_needed;
 
 	retval = -EBADF;
-	file = fget_light(fd, &fput_needed);
+	file = fget_light_pos(fd, &fput_needed);
 	if (!file)
 		goto bad;
 
@@ -229,7 +229,7 @@ SYSCALL_DEFINE3(lseek, unsigned int, fd, off_t, offset, unsigned int, origin)
 		if (res != (loff_t)retval)
 			retval = -EOVERFLOW;	/* LFS: should only happen on 32 bit platforms */
 	}
-	fput_light(file, fput_needed);
+	fput_light_pos(file, fput_needed);
 bad:
 	return retval;
 }
@@ -245,7 +245,7 @@ SYSCALL_DEFINE5(llseek, unsigned int, fd, unsigned long, offset_high,
 	int fput_needed;
 
 	retval = -EBADF;
-	file = fget_light(fd, &fput_needed);
+	file = fget_light_pos(fd, &fput_needed);
 	if (!file)
 		goto bad;
 
@@ -263,7 +263,7 @@ SYSCALL_DEFINE5(llseek, unsigned int, fd, unsigned long, offset_high,
 			retval = 0;
 	}
 out_putf:
-	fput_light(file, fput_needed);
+	fput_light_pos(file, fput_needed);
 bad:
 	return retval;
 }
@@ -437,12 +437,12 @@ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 	ssize_t ret = -EBADF;
 	int fput_needed;
 
-	file = fget_light(fd, &fput_needed);
+	file = fget_light_pos(fd, &fput_needed);
 	if (file) {
 		loff_t pos = file_pos_read(file);
 		ret = vfs_read(file, buf, count, &pos);
 		file_pos_write(file, pos);
-		fput_light(file, fput_needed);
+		fput_light_pos(file, fput_needed);
 	}
 
 	return ret;
@@ -455,12 +455,12 @@ SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 	ssize_t ret = -EBADF;
 	int fput_needed;
 
-	file = fget_light(fd, &fput_needed);
+	file = fget_light_pos(fd, &fput_needed);
 	if (file) {
 		loff_t pos = file_pos_read(file);
 		ret = vfs_write(file, buf, count, &pos);
 		file_pos_write(file, pos);
-		fput_light(file, fput_needed);
+		fput_light_pos(file, fput_needed);
 	}
 
 	return ret;
@@ -766,12 +766,12 @@ SYSCALL_DEFINE3(readv, unsigned long, fd, const struct iovec __user *, vec,
 	ssize_t ret = -EBADF;
 	int fput_needed;
 
-	file = fget_light(fd, &fput_needed);
+	file = fget_light_pos(fd, &fput_needed);
 	if (file) {
 		loff_t pos = file_pos_read(file);
 		ret = vfs_readv(file, vec, vlen, &pos);
 		file_pos_write(file, pos);
-		fput_light(file, fput_needed);
+		fput_light_pos(file, fput_needed);
 	}
 
 	if (ret > 0)
@@ -787,12 +787,12 @@ SYSCALL_DEFINE3(writev, unsigned long, fd, const struct iovec __user *, vec,
 	ssize_t ret = -EBADF;
 	int fput_needed;
 
-	file = fget_light(fd, &fput_needed);
+	file = fget_light_pos(fd, &fput_needed);
 	if (file) {
 		loff_t pos = file_pos_read(file);
 		ret = vfs_writev(file, vec, vlen, &pos);
 		file_pos_write(file, pos);
-		fput_light(file, fput_needed);
+		fput_light_pos(file, fput_needed);
 	}
 
 	if (ret > 0)

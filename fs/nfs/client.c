@@ -59,6 +59,12 @@ static DECLARE_WAIT_QUEUE_HEAD(nfs_client_active_wq);
 #ifdef CONFIG_NFS_V4
 static DEFINE_IDR(cb_ident_idr); /* Protected by nfs_client_lock */
 
+#define NFS4_DEF_DS_TIMEO 150
+#define NFS4_DEF_DS_RETRANS 1
+
+static unsigned int dataserver_timeo = NFS4_DEF_DS_TIMEO;
+static unsigned int dataserver_retrans = NFS4_DEF_DS_RETRANS;
+
 /*
  * Get a unique NFSv4.0 callback identifier which will be used
  * by the V4.0 callback service to lookup the nfs_client struct
@@ -1451,12 +1457,7 @@ struct nfs_client *nfs4_set_ds_client(struct nfs_client* mds_clp,
 		.proto = ds_proto,
 		.minorversion = mds_clp->cl_minorversion,
 	};
-	struct rpc_timeout ds_timeout = {
-		.to_initval = 15 * HZ,
-		.to_maxval = 15 * HZ,
-		.to_retries = 1,
-		.to_exponential = 1,
-	};
+	struct rpc_timeout ds_timeout;
 	struct nfs_client *clp;
 
 	/*
@@ -1464,6 +1465,7 @@ struct nfs_client *nfs4_set_ds_client(struct nfs_client* mds_clp,
 	 * cl_ipaddr so as to use the same EXCHANGE_ID co_ownerid as the MDS
 	 * (section 13.1 RFC 5661).
 	 */
+	nfs_init_timeout_values(&ds_timeout, ds_proto, dataserver_timeo, dataserver_retrans);
 	clp = nfs_get_client(&cl_init, &ds_timeout, mds_clp->cl_ipaddr,
 			     mds_clp->cl_rpcclient->cl_auth->au_flavor, 0);
 
@@ -2016,3 +2018,15 @@ void nfs_fs_proc_exit(void)
 module_param(nfs4_disable_idmapping, bool, 0644);
 MODULE_PARM_DESC(nfs4_disable_idmapping,
 		"Turn off NFSv4 idmapping when using 'sec=sys'");
+
+#ifdef CONFIG_NFS_V4
+module_param(dataserver_timeo, uint, 0644);
+MODULE_PARM_DESC(dataserver_timeo, "The time (in tenths of a second) the "
+	"NFSv4.1  client  waits for a response from a "
+	" data server before it retries an NFS request.");
+
+module_param(dataserver_retrans, uint, 0644);
+MODULE_PARM_DESC(dataserver_retrans, "The  number of times the NFSv4.1 client "
+	"retries a request before it attempts further "
+	" recovery  action.");
+#endif /* CONFIG_NFS_V4 */

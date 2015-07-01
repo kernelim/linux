@@ -689,6 +689,8 @@ do {									       \
 	if (EXT4_FITS_IN_INODE(raw_inode, EXT4_I(inode), xtime ## _extra))     \
 		ext4_decode_extra_time(&(inode)->xtime,			       \
 				       raw_inode->xtime ## _extra);	       \
+	else								       \
+		(inode)->xtime.tv_nsec = 0;				       \
 } while (0)
 
 #define EXT4_EINODE_GET_XTIME(xtime, einode, raw_inode)			       \
@@ -696,9 +698,13 @@ do {									       \
 	if (EXT4_FITS_IN_INODE(raw_inode, einode, xtime))		       \
 		(einode)->xtime.tv_sec = 				       \
 			(signed)le32_to_cpu((raw_inode)->xtime);	       \
+	else								       \
+		(einode)->xtime.tv_sec = 0;				       \
 	if (EXT4_FITS_IN_INODE(raw_inode, einode, xtime ## _extra))	       \
 		ext4_decode_extra_time(&(einode)->xtime,		       \
 				       raw_inode->xtime ## _extra);	       \
+	else								       \
+		(einode)->xtime.tv_nsec = 0;				       \
 } while (0)
 
 #define i_disk_version osd1.linux1.l_i_version

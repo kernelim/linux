@@ -700,14 +700,16 @@ int netpoll_parse_options(struct netpoll *np, char *opt)
 	return -1;
 }
 
-int __netpoll_setup(struct netpoll *np)
+int __netpoll_setup(struct netpoll *np, struct net_device *ndev, gfp_t gfp)
 {
-	struct net_device *ndev = np->dev;
 	struct netpoll_info *npinfo;
 	unsigned long flags;
 	struct netdev_netpoll_ext_info *data = &netdev_extended(ndev)->netpoll_data;
 
 	int err;
+
+	np->dev = ndev;
+	strlcpy(np->dev_name, ndev->name, IFNAMSIZ);
 
 	if ((ndev->priv_flags & IFF_DISABLE_NETPOLL) ||
 	    !ndev->netdev_ops->ndo_poll_controller) {
@@ -718,7 +720,7 @@ int __netpoll_setup(struct netpoll *np)
 	}
 
 	if (!ndev->npinfo) {
-		npinfo = kmalloc(sizeof(*npinfo), GFP_KERNEL);
+		npinfo = kmalloc(sizeof(*npinfo), gfp);
 		if (!npinfo) {
 			err = -ENOMEM;
 			goto out;
@@ -735,7 +737,7 @@ int __netpoll_setup(struct netpoll *np)
 		atomic_set(&npinfo->refcnt, 1);
 
 		if (data->ndo_netpoll_setup) {
-			err = data->ndo_netpoll_setup(ndev, npinfo);
+			err = data->ndo_netpoll_setup(ndev, npinfo, gfp);
 			if (err)
 				goto free_npinfo;
 		}
@@ -852,13 +854,11 @@ int netpoll_setup(struct netpoll *np)
 		printk(KERN_INFO "%s: local IP %pI4\n", np->name, &np->local_ip);
 	}
 
-	np->dev = ndev;
-
 	/* fill up the skb queue */
 	refill_skbs();
 
 	rtnl_lock();
-	err = __netpoll_setup(np);
+	err = __netpoll_setup(np, ndev, GFP_KERNEL);
 	rtnl_unlock();
 
 	if (err)

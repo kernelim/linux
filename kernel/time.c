@@ -702,6 +702,7 @@ unsigned long nsecs_to_jiffies(u64 n)
 {
 	return (unsigned long)nsecs_to_jiffies64(n);
 }
+EXPORT_SYMBOL(nsecs_to_jiffies);
 
 #if (BITS_PER_LONG < 64)
 u64 get_jiffies_64(void)

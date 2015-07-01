@@ -236,19 +236,9 @@ static void i915_save_display(struct drm_device *dev)
 		dev_priv->regfile.savePP_DIVISOR = I915_READ(PP_DIVISOR);
 	}
 
-	/* Only regfile.save FBC state on the platform that supports FBC */
-	if (HAS_FBC(dev)) {
-		if (HAS_PCH_SPLIT(dev)) {
-			dev_priv->regfile.saveDPFC_CB_BASE = I915_READ(ILK_DPFC_CB_BASE);
-		} else if (IS_GM45(dev)) {
-			dev_priv->regfile.saveDPFC_CB_BASE = I915_READ(DPFC_CB_BASE);
-		} else {
-			dev_priv->regfile.saveFBC_CFB_BASE = I915_READ(FBC_CFB_BASE);
-			dev_priv->regfile.saveFBC_LL_BASE = I915_READ(FBC_LL_BASE);
-			dev_priv->regfile.saveFBC_CONTROL2 = I915_READ(FBC_CONTROL2);
-			dev_priv->regfile.saveFBC_CONTROL = I915_READ(FBC_CONTROL);
-		}
-	}
+	/* save FBC interval */
+	if (HAS_FBC(dev) && INTEL_INFO(dev)->gen <= 4 && !IS_G4X(dev))
+		dev_priv->regfile.saveFBC_CONTROL = I915_READ(FBC_CONTROL);
 
 	if (!drm_core_check_feature(dev, DRIVER_MODESET))
 		i915_save_vga(dev);
@@ -300,18 +290,10 @@ static void i915_restore_display(struct drm_device *dev)
 
 	/* only restore FBC info on the platform that supports FBC*/
 	intel_disable_fbc(dev);
-	if (HAS_FBC(dev)) {
-		if (HAS_PCH_SPLIT(dev)) {
-			I915_WRITE(ILK_DPFC_CB_BASE, dev_priv->regfile.saveDPFC_CB_BASE);
-		} else if (IS_GM45(dev)) {
-			I915_WRITE(DPFC_CB_BASE, dev_priv->regfile.saveDPFC_CB_BASE);
-		} else {
-			I915_WRITE(FBC_CFB_BASE, dev_priv->regfile.saveFBC_CFB_BASE);
-			I915_WRITE(FBC_LL_BASE, dev_priv->regfile.saveFBC_LL_BASE);
-			I915_WRITE(FBC_CONTROL2, dev_priv->regfile.saveFBC_CONTROL2);
-			I915_WRITE(FBC_CONTROL, dev_priv->regfile.saveFBC_CONTROL);
-		}
-	}
+
+	/* restore FBC interval */
+	if (HAS_FBC(dev) && INTEL_INFO(dev)->gen <= 4 && !IS_G4X(dev))
+		I915_WRITE(FBC_CONTROL, dev_priv->regfile.saveFBC_CONTROL);
 
 	if (!drm_core_check_feature(dev, DRIVER_MODESET))
 		i915_restore_vga(dev);
@@ -323,10 +305,6 @@ int i915_save_state(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	int i;
-
-	if (INTEL_INFO(dev)->gen <= 4)
-		pci_read_config_byte(dev->pdev, LBB,
-				     &dev_priv->regfile.saveLBB);
 
 	mutex_lock(&dev->struct_mutex);
 
@@ -350,7 +328,9 @@ int i915_save_state(struct drm_device *dev)
 		}
 	}
 
-	intel_disable_gt_powersave(dev);
+	if (IS_GEN4(dev))
+		pci_read_config_word(dev->pdev, GCDGMBUS,
+				     &dev_priv->regfile.saveGCDGMBUS);
 
 	/* Cache mode state */
 	if (INTEL_INFO(dev)->gen < 7)
@@ -377,13 +357,13 @@ int i915_restore_state(struct drm_device *dev)
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	int i;
 
-	if (INTEL_INFO(dev)->gen <= 4)
-		pci_write_config_byte(dev->pdev, LBB,
-				      dev_priv->regfile.saveLBB);
-
 	mutex_lock(&dev->struct_mutex);
 
 	i915_gem_restore_fences(dev);
+
+	if (IS_GEN4(dev))
+		pci_write_config_word(dev->pdev, GCDGMBUS,
+				      dev_priv->regfile.saveGCDGMBUS);
 	i915_restore_display(dev);
 
 	if (!drm_core_check_feature(dev, DRIVER_MODESET)) {

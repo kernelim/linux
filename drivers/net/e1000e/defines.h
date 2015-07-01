@@ -1,5 +1,5 @@
 /* Intel PRO/1000 Linux driver
- * Copyright(c) 1999 - 2014 Intel Corporation.
+ * Copyright(c) 1999 - 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -28,9 +28,11 @@
 
 /* Definitions for power management and wakeup registers */
 /* Wake Up Control */
-#define E1000_WUC_APME       0x00000001 /* APM Enable */
-#define E1000_WUC_PME_EN     0x00000002 /* PME Enable */
-#define E1000_WUC_PHY_WAKE   0x00000100 /* if PHY supports wakeup */
+#define E1000_WUC_APME		0x00000001	/* APM Enable */
+#define E1000_WUC_PME_EN	0x00000002	/* PME Enable */
+#define E1000_WUC_PME_STATUS	0x00000004	/* PME Status */
+#define E1000_WUC_APMPME	0x00000008	/* Assert PME on APM Wakeup */
+#define E1000_WUC_PHY_WAKE	0x00000100	/* if PHY supports wakeup */
 
 /* Wake Up Filter Control */
 #define E1000_WUFC_LNKC 0x00000001 /* Link Status Change Wakeup Enable */
@@ -132,6 +134,7 @@
 #define E1000_RCTL_LBM_TCVR       0x000000C0    /* tcvr loopback mode */
 #define E1000_RCTL_DTYP_PS        0x00000400    /* Packet Split descriptor */
 #define E1000_RCTL_RDMTS_HALF     0x00000000    /* Rx desc min threshold size */
+#define E1000_RCTL_RDMTS_HEX      0x00010000
 #define E1000_RCTL_MO_SHIFT       12            /* multicast offset shift */
 #define E1000_RCTL_MO_3           0x00003000    /* multicast offset 15:4 */
 #define E1000_RCTL_BAM            0x00008000    /* broadcast enable */
@@ -331,6 +334,7 @@
 #define E1000_TIPG_IPGR2_SHIFT  20
 
 #define MAX_JUMBO_FRAME_SIZE    0x3F00
+#define E1000_TX_PTR_GAP		0x1F
 
 /* Extended Configuration Control and Size */
 #define E1000_EXTCNF_CTRL_MDIO_SW_OWNERSHIP      0x00000020

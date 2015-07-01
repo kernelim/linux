@@ -1027,8 +1027,6 @@ static int __devinit snd_mixart_create(struct mixart_mgr *mgr, struct snd_card *
 	}
 
 	mgr->chip[idx] = chip;
-	snd_card_set_dev(card, &mgr->pci->dev);
-
 	return 0;
 }
 
@@ -1305,7 +1303,8 @@ static int __devinit snd_mixart_probe(struct pci_dev *pci,
 		else
 			idx = index[dev] + i;
 		snprintf(tmpid, sizeof(tmpid), "%s-%d", id[dev] ? id[dev] : "MIXART", i);
-		err = snd_card_create(idx, tmpid, THIS_MODULE, 0, &card);
+		err = snd_card_new(&pci->dev, idx, tmpid, THIS_MODULE,
+				   0, &card);
 
 		if (err < 0) {
 			snd_printk(KERN_ERR "cannot allocate the card %d\n", i);

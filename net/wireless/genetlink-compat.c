@@ -68,8 +68,7 @@ found:
 	return err;
 }
 
-int compat_genl_register_family_with_ops(struct genl_family *family,
-					 struct genl_ops *ops, size_t n_ops)
+int compat_genl_register_family(struct genl_family *family)
 {
 	int i, ret;
 
@@ -79,9 +78,7 @@ int compat_genl_register_family_with_ops(struct genl_family *family,
 	__copy(version);
 	__copy(maxattr);
 	strncpy(family->family.name, family->name, sizeof(family->family.name));
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32))
 	__copy(netnsok);
-#endif
 #undef __copy
 
 	ret = genl_register_family(&family->family);
@@ -91,21 +88,22 @@ int compat_genl_register_family_with_ops(struct genl_family *family,
 	family->attrbuf = family->family.attrbuf;
 	family->id = family->family.id;
 
-	for (i = 0; i < n_ops; i++) {
-#define __copy(_field) ops[i].ops._field = ops[i]._field
+	list_add(&family->list, &compat_nl_fam);
+
+	for (i = 0; i < family->n_ops; i++) {
+#define __copy(_field) family->ops[i].ops._field = family->ops[i]._field
 		__copy(cmd);
 		__copy(flags);
 		__copy(policy);
 		__copy(dumpit);
 		__copy(done);
 #undef __copy
-		if (ops[i].doit)
-			ops[i].ops.doit = nl_doit_wrapper;
-		ret = genl_register_ops(&family->family, &ops[i].ops);
+		if (family->ops[i].doit)
+			family->ops[i].ops.doit = nl_doit_wrapper;
+		ret = genl_register_ops(&family->family, &family->ops[i].ops);
 		if (ret < 0)
 			goto error_ops;
 	}
-	list_add(&family->list, &compat_nl_fam);
 
 	return ret;
 
@@ -113,7 +111,7 @@ error_ops:
 	compat_genl_unregister_family(family);
 	return ret;
 }
-EXPORT_SYMBOL(compat_genl_register_family_with_ops);
+EXPORT_SYMBOL(compat_genl_register_family);
 
 int compat_genl_unregister_family(struct genl_family *family)
 {

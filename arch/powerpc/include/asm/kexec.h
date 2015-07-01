@@ -55,18 +55,6 @@ typedef void (*crash_shutdown_t)(void);
 #endif
 #endif /*PAGE_SHIFT == 12 */
 
-#ifndef arch_default_crash_base
-extern
-unsigned long long __init arch_default_crash_base(void);
-#define arch_default_crash_base arch_default_crash_base
-#endif
-
-#ifndef arch_default_crash_size
-extern
-unsigned long long __init arch_default_crash_size(unsigned long long);
-#define arch_default_crash_size arch_default_crash_size
-#endif
-
 #endif
 
 #include <asm-generic/kexec.h>

@@ -74,6 +74,7 @@ cifs_readdir_lookup(struct dentry *parent, struct qstr *name,
 	struct dentry *dentry, *alias;
 	struct inode *inode;
 	struct super_block *sb = parent->d_inode->i_sb;
+	struct cifs_sb_info *cifs_sb = CIFS_SB(sb);
 
 	cFYI(1, "For %s", name->name);
 
@@ -84,9 +85,25 @@ cifs_readdir_lookup(struct dentry *parent, struct qstr *name,
 
 	dentry = d_lookup(parent, name);
 	if (dentry) {
-		/* FIXME: check for inode number changes? */
-		if (dentry->d_inode != NULL)
-			return dentry;
+		inode = dentry->d_inode;
+		if (inode) {
+			if (d_mountpoint(dentry))
+				return dentry;
+
+			/*
+			 * If we're generating inode numbers, then we don't
+			 * want to clobber the existing one with the one that
+			 * the readdir code created.
+			 */
+			if (!(cifs_sb->mnt_cifs_flags & CIFS_MOUNT_SERVER_INUM))
+				fattr->cf_uniqueid = CIFS_I(inode)->uniqueid;
+
+			/* update inode in place if i_ino didn't change */
+			if (CIFS_I(inode)->uniqueid == fattr->cf_uniqueid) {
+				cifs_fattr_to_inode(inode, fattr);
+				return dentry;
+			}
+		}
 		d_drop(dentry);
 		dput(dentry);
 	}

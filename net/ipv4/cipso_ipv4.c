@@ -975,7 +975,7 @@ static int cipso_v4_map_cat_rbm_ntoh(const struct cipso_v4_doi *doi_def,
 				return -EPERM;
 			break;
 		}
-		ret_val = netlbl_secattr_catmap_setbit(secattr->attr.mls.cat,
+		ret_val = netlbl_secattr_catmap_setbit(&secattr->attr.mls.cat,
 						       host_spot,
 						       GFP_ATOMIC);
 		if (ret_val != 0)
@@ -1077,7 +1077,7 @@ static int cipso_v4_map_cat_enum_ntoh(const struct cipso_v4_doi *doi_def,
 	u32 iter;
 
 	for (iter = 0; iter < net_cat_len; iter += 2) {
-		ret_val = netlbl_secattr_catmap_setbit(secattr->attr.mls.cat,
+		ret_val = netlbl_secattr_catmap_setbit(&secattr->attr.mls.cat,
 				get_unaligned_be16(&net_cat[iter]),
 				GFP_ATOMIC);
 		if (ret_val != 0)
@@ -1219,7 +1219,7 @@ static int cipso_v4_map_cat_rng_ntoh(const struct cipso_v4_doi *doi_def,
 		else
 			cat_low = 0;
 
-		ret_val = netlbl_secattr_catmap_setrng(secattr->attr.mls.cat,
+		ret_val = netlbl_secattr_catmap_setrng(&secattr->attr.mls.cat,
 						       cat_low,
 						       cat_high,
 						       GFP_ATOMIC);
@@ -1337,11 +1337,6 @@ static int cipso_v4_parsetag_rbm(const struct cipso_v4_doi *doi_def,
 	secattr->flags |= NETLBL_SECATTR_MLS_LVL;
 
 	if (tag_len > 4) {
-		secattr->attr.mls.cat =
-		                       netlbl_secattr_catmap_alloc(GFP_ATOMIC);
-		if (secattr->attr.mls.cat == NULL)
-			return -ENOMEM;
-
 		ret_val = cipso_v4_map_cat_rbm_ntoh(doi_def,
 						    &tag[4],
 						    tag_len - 4,
@@ -1433,11 +1428,6 @@ static int cipso_v4_parsetag_enum(const struct cipso_v4_doi *doi_def,
 	secattr->flags |= NETLBL_SECATTR_MLS_LVL;
 
 	if (tag_len > 4) {
-		secattr->attr.mls.cat =
-			               netlbl_secattr_catmap_alloc(GFP_ATOMIC);
-		if (secattr->attr.mls.cat == NULL)
-			return -ENOMEM;
-
 		ret_val = cipso_v4_map_cat_enum_ntoh(doi_def,
 						     &tag[4],
 						     tag_len - 4,
@@ -1528,11 +1518,6 @@ static int cipso_v4_parsetag_rng(const struct cipso_v4_doi *doi_def,
 	secattr->flags |= NETLBL_SECATTR_MLS_LVL;
 
 	if (tag_len > 4) {
-		secattr->attr.mls.cat =
-			               netlbl_secattr_catmap_alloc(GFP_ATOMIC);
-		if (secattr->attr.mls.cat == NULL)
-			return -ENOMEM;
-
 		ret_val = cipso_v4_map_cat_rng_ntoh(doi_def,
 						    &tag[4],
 						    tag_len - 4,

@@ -133,7 +133,7 @@ static void t1_set_rxmode(struct net_device *dev)
 static void link_report(struct port_info *p)
 {
 	if (!netif_carrier_ok(p->dev))
-		printk(KERN_INFO "%s: link down\n", p->dev->name);
+		netdev_info(p->dev, "link down\n");
 	else {
 		const char *s = "10Mbps";
 
@@ -143,9 +143,9 @@ static void link_report(struct port_info *p)
 			case SPEED_100:   s = "100Mbps"; break;
 		}
 
-		printk(KERN_INFO "%s: link up, %s, %s-duplex\n",
-		       p->dev->name, s,
-		       p->link_config.duplex == DUPLEX_FULL ? "full" : "half");
+		netdev_info(p->dev, "link up, %s, %s-duplex\n",
+			    s, p->link_config.duplex == DUPLEX_FULL
+			    ? "full" : "half");
 	}
 }
 

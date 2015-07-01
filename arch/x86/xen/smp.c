@@ -303,6 +303,9 @@ static int __cpuinit xen_cpu_up(unsigned int cpu)
 	per_cpu(kernel_stack, cpu) =
 		(unsigned long)task_stack_page(idle) -
 		KERNEL_STACK_OFFSET + THREAD_SIZE;
+	per_cpu(kernel_stack8k, cpu) =
+		(unsigned long)task_stack_page(idle) -
+		KERNEL_STACK_OFFSET + THREAD_SIZE - 8192;
 #endif
 	xen_setup_runstate_info(cpu);
 	xen_setup_timer(cpu);
@@ -363,8 +366,7 @@ static void xen_cpu_die(unsigned int cpu)
 	unbind_from_irqhandler(per_cpu(xen_debug_irq, cpu), NULL);
 	unbind_from_irqhandler(per_cpu(xen_callfuncsingle_irq, cpu), NULL);
 	xen_uninit_lock_cpu(cpu);
-	if (xen_pv_domain())
-		xen_teardown_timer(cpu);
+	xen_teardown_timer(cpu);
 
 	if (num_online_cpus() == 1)
 		alternatives_smp_switch(0);

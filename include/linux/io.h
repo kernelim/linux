@@ -101,4 +101,13 @@ static inline void arch_phys_wc_del(int handle)
 #define arch_phys_wc_add arch_phys_wc_add
 #endif
 
+/*
+ * Some systems do not have legacy ISA devices.
+ * /dev/port is not a valid interface on these systems.
+ * So for those archs, <asm/io.h> should define the following symbol.
+ */
+#ifndef arch_has_dev_port
+#define arch_has_dev_port()     (1)
+#endif
+
 #endif /* _LINUX_IO_H */

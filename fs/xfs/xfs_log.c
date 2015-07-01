@@ -1073,12 +1073,14 @@ xlog_iodone(xfs_buf_t *bp)
 	/* log I/O is always issued ASYNC */
 	ASSERT(XFS_BUF_ISASYNC(bp));
 	xlog_state_done_syncing(iclog, aborted);
-	/*
-	 * do not reference the buffer (bp) here as we could race
-	 * with it being freed after writing the unmount record to the
-	 * log.
-	 */
 
+	/*
+	 * drop the buffer lock now that we are done. Nothing references
+	 * the buffer after this, so an unmount waiting on this lock can now
+	 * tear it down safely. As such, it is unsafe to reference the buffer
+	 * (bp) after the unlock as we could race with it being freed.
+	 */
+	xfs_buf_unlock(bp);
 }	/* xlog_iodone */
 
 /*
@@ -1224,10 +1226,18 @@ xlog_alloc_log(xfs_mount_t	*mp,
 	bp = xfs_buf_alloc(mp->m_logdev_targp, 0, log->l_iclog_size, 0);
 	if (!bp)
 		goto out_free_log;
-	XFS_BUF_SET_IODONE_FUNC(bp, xlog_iodone);
 	XFS_BUF_SET_FSPRIVATE2(bp, (unsigned long)1);
+
+	/*
+	 * The iclogbuf buffer locks are held over IO but we are not going to do
+	 * IO yet.  Hence unlock the buffer so that the log IO path can grab it
+	 * when appropriately.
+	 */
 	ASSERT(XFS_BUF_ISBUSY(bp));
-	ASSERT(XFS_BUF_VALUSEMA(bp) <= 0);
+	ASSERT(xfs_buf_islocked(bp));
+	xfs_buf_unlock(bp);
+
+	bp->b_iodone = xlog_iodone;
 	log->l_xbuf = bp;
 
 	spin_lock_init(&log->l_icloglock);
@@ -1258,9 +1268,11 @@ xlog_alloc_log(xfs_mount_t	*mp,
 						log->l_iclog_size, 0);
 		if (!bp)
 			goto out_free_iclog;
-		if (!XFS_BUF_CPSEMA(bp))
-			ASSERT(0);
-		XFS_BUF_SET_IODONE_FUNC(bp, xlog_iodone);
+
+		ASSERT(xfs_buf_islocked(bp));
+		xfs_buf_unlock(bp);
+
+		bp->b_iodone = xlog_iodone;
 		XFS_BUF_SET_FSPRIVATE2(bp, (unsigned long)1);
 		iclog->ic_bp = bp;
 		iclog->ic_data = bp->b_addr;
@@ -1286,7 +1298,6 @@ xlog_alloc_log(xfs_mount_t	*mp,
 		iclog->ic_datap = (char *)iclog->ic_data + log->l_iclog_hsize;
 
 		ASSERT(XFS_BUF_ISBUSY(iclog->ic_bp));
-		ASSERT(XFS_BUF_VALUSEMA(iclog->ic_bp) <= 0);
 		init_waitqueue_head(&iclog->ic_force_wait);
 		init_waitqueue_head(&iclog->ic_write_wait);
 
@@ -1417,6 +1428,12 @@ xlog_grant_push_ail(
  * we transition the iclogs to IOERROR state *after* flushing all existing
  * iclogs to disk. This is because we don't want anymore new transactions to be
  * started or completed afterwards.
+ *
+ * We lock the iclogbufs here so that we can serialise against IO completion
+ * during unmount. We might be processing a shutdown triggered during unmount,
+ * and that can occur asynchronously to the unmount thread, and hence we need to
+ * ensure that completes before tearing down the iclogbufs. Hence we need to
+ * hold the buffer lock across the log IO to acheive that.
  */
 STATIC int
 xlog_bdstrat(
@@ -1425,6 +1442,7 @@ xlog_bdstrat(
 	struct xlog_in_core	*iclog;
 
 	iclog = XFS_BUF_FSPRIVATE(bp, xlog_in_core_t *);
+	xfs_buf_lock(bp);
 	if (iclog->ic_state & XLOG_STATE_IOERROR) {
 		XFS_BUF_ERROR(bp, EIO);
 		XFS_BUF_STALE(bp);
@@ -1432,7 +1450,8 @@ xlog_bdstrat(
 		/*
 		 * It would seem logical to return EIO here, but we rely on
 		 * the log state machine to propagate I/O errors instead of
-		 * doing it here.
+		 * doing it here. Similarly, IO completion will unlock the
+		 * buffer, so we don't do it here.
 		 */
 		return 0;
 	}
@@ -1627,14 +1646,29 @@ xlog_dealloc_log(xlog_t *log)
 	xlog_cil_destroy(log);
 
 	/*
-	 * always need to ensure that the extra buffer does not point to memory
-	 * owned by another log buffer before we free it.
+	 * Cycle all the iclogbuf locks to make sure all log IO completion
+	 * is done before we tear down these buffers.
 	 */
+	iclog = log->l_iclog;
+	for (i = 0; i < log->l_iclog_bufs; i++) {
+		xfs_buf_lock(iclog->ic_bp);
+		xfs_buf_unlock(iclog->ic_bp);
+		iclog = iclog->ic_next;
+	}
+
+	/*
+	 * Always need to ensure that the extra buffer does not point to memory
+	 * owned by another log buffer before we free it. Also, cycle the lock
+	 * first to ensure we've completed IO on it.
+	 */
+	xfs_buf_lock(log->l_xbuf);
+	xfs_buf_unlock(log->l_xbuf);
+
 	xfs_buf_set_empty(log->l_xbuf, log->l_iclog_size);
 	xfs_buf_free(log->l_xbuf);
 
 	iclog = log->l_iclog;
-	for (i=0; i<log->l_iclog_bufs; i++) {
+	for (i = 0; i < log->l_iclog_bufs; i++) {
 		xfs_buf_free(iclog->ic_bp);
 		next_iclog = iclog->ic_next;
 		kmem_free(iclog);

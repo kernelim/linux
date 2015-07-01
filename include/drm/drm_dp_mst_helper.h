@@ -388,6 +388,7 @@ struct drm_dp_payload {
 	int payload_state;
 	int start_slot;
 	int num_slots;
+	int vcpi;
 };
 
 /**
@@ -401,7 +402,6 @@ struct drm_dp_payload {
  * @down_rep_recv: msg receiver state for down replies.
  * @up_req_recv: msg receiver state for up requests.
  * @lock: protects mst state, primary, guid, dpcd.
- * @aux_lock: protects aux channel.
  * @mst_state: if this manager is enabled for an MST capable port.
  * @mst_primary: pointer to the primary branch device.
  * @guid_valid: GUID valid for the primary branch device.
@@ -429,7 +429,6 @@ struct drm_dp_mst_topology_mgr {
 	/* pointer to info about the initial MST device */
 	struct mutex lock; /* protects mst_state + primary + guid + dpcd */
 
-	struct mutex aux_lock; /* protect access to the AUX */
 	bool mst_state;
 	struct drm_dp_mst_branch *mst_primary;
 	/* primary MST device GUID */
@@ -456,6 +455,7 @@ struct drm_dp_mst_topology_mgr {
 	struct drm_dp_vcpi **proposed_vcpis;
 	struct drm_dp_payload *payloads;
 	unsigned long payload_mask;
+	unsigned long vcpi_mask;
 
 	wait_queue_head_t tx_waitq;
 	struct work_struct work;

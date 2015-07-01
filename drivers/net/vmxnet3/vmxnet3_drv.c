@@ -36,7 +36,7 @@ char vmxnet3_driver_name[] = "vmxnet3";
  * PCI Device ID Table
  * Last entry must be all 0s
  */
-static DEFINE_PCI_DEVICE_TABLE(vmxnet3_pciid_table) = {
+static const struct pci_device_id vmxnet3_pciid_table[] = {
 	{PCI_VDEVICE(VMWARE, PCI_DEVICE_ID_VMWARE_VMXNET3)},
 	{0}
 };
@@ -1294,7 +1294,8 @@ vmxnet3_rq_rx_complete(struct vmxnet3_rx_queue *rq,
 					(union Vmxnet3_GenericDesc *)rcd);
 			skb->protocol = eth_type_trans(skb, adapter->netdev);
 
-			if (unlikely(adapter->vlan_grp && rcd->ts)) {
+
+			if (unlikely(rcd->ts)) {
 				vlan_hwaccel_receive_skb(skb,
 						adapter->vlan_grp, rcd->tci);
 			} else {

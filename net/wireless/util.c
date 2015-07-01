@@ -2,6 +2,7 @@
  * Wireless utility functions
  *
  * Copyright 2007-2009	Johannes Berg <johannes@sipsolutions.net>
+ * Copyright 2013-2014  Intel Mobile Communications GmbH
  */
 #include <linux/export.h>
 #include <linux/bitops.h>
@@ -10,6 +11,8 @@
 #include <net/cfg80211.h>
 #include <net/ip.h>
 #include <net/dsfield.h>
+#include <linux/if_vlan.h>
+#include <linux/mpls.h>
 #include "core.h"
 #include "rdev-ops.h"
 
@@ -32,6 +35,35 @@ ieee80211_get_response_rate(struct ieee80211_supported_band *sband,
 	return result;
 }
 EXPORT_SYMBOL(ieee80211_get_response_rate);
+
+u32 ieee80211_mandatory_rates(struct ieee80211_supported_band *sband,
+			      enum nl80211_bss_scan_width scan_width)
+{
+	struct ieee80211_rate *bitrates;
+	u32 mandatory_rates = 0;
+	enum ieee80211_rate_flags mandatory_flag;
+	int i;
+
+	if (WARN_ON(!sband))
+		return 1;
+
+	if (sband->band == IEEE80211_BAND_2GHZ) {
+		if (scan_width == NL80211_BSS_CHAN_WIDTH_5 ||
+		    scan_width == NL80211_BSS_CHAN_WIDTH_10)
+			mandatory_flag = IEEE80211_RATE_MANDATORY_G;
+		else
+			mandatory_flag = IEEE80211_RATE_MANDATORY_B;
+	} else {
+		mandatory_flag = IEEE80211_RATE_MANDATORY_A;
+	}
+
+	bitrates = sband->bitrates;
+	for (i = 0; i < sband->n_bitrates; i++)
+		if (bitrates[i].flags & mandatory_flag)
+			mandatory_rates |= BIT(i);
+	return mandatory_rates;
+}
+EXPORT_SYMBOL(ieee80211_mandatory_rates);
 
 int ieee80211_channel_to_frequency(int chan, enum ieee80211_band band)
 {
@@ -276,6 +308,12 @@ unsigned int __attribute_const__ ieee80211_hdrlen(__le16 fc)
 		goto out;
 	}
 
+	if (ieee80211_is_mgmt(fc)) {
+		if (ieee80211_has_order(fc))
+			hdrlen += IEEE80211_HT_CTL_LEN;
+		goto out;
+	}
+
 	if (ieee80211_is_ctl(fc)) {
 		/*
 		 * ACK and CTS are 10 bytes, all others 16. To see how
@@ -410,7 +448,8 @@ int ieee80211_data_to_8023(struct sk_buff *skb, const u8 *addr,
 		break;
 	case cpu_to_le16(0):
 		if (iftype != NL80211_IFTYPE_ADHOC &&
-		    iftype != NL80211_IFTYPE_STATION)
+		    iftype != NL80211_IFTYPE_STATION &&
+		    iftype != NL80211_IFTYPE_OCB)
 				return -1;
 		break;
 	}
@@ -445,7 +484,8 @@ int ieee80211_data_to_8023(struct sk_buff *skb, const u8 *addr,
 EXPORT_SYMBOL(ieee80211_data_to_8023);
 
 int ieee80211_data_from_8023(struct sk_buff *skb, const u8 *addr,
-			     enum nl80211_iftype iftype, u8 *bssid, bool qos)
+			     enum nl80211_iftype iftype,
+			     const u8 *bssid, bool qos)
 {
 	struct ieee80211_hdr hdr;
 	u16 hdrlen, ethertype;
@@ -486,6 +526,7 @@ int ieee80211_data_from_8023(struct sk_buff *skb, const u8 *addr,
 		memcpy(hdr.addr3, skb->data, ETH_ALEN);
 		hdrlen = 24;
 		break;
+	case NL80211_IFTYPE_OCB:
 	case NL80211_IFTYPE_ADHOC:
 		/* DA SA BSSID */
 		memcpy(hdr.addr1, skb->data, ETH_ALEN);
@@ -659,9 +700,11 @@ void ieee80211_amsdu_to_8023s(struct sk_buff *skb, struct sk_buff_head *list,
 EXPORT_SYMBOL(ieee80211_amsdu_to_8023s);
 
 /* Given a data frame determine the 802.1p/1d tag to use. */
-unsigned int cfg80211_classify8021d(struct sk_buff *skb)
+unsigned int cfg80211_classify8021d(struct sk_buff *skb,
+				    struct cfg80211_qos_map *qos_map)
 {
 	unsigned int dscp;
+	unsigned char vlan_priority;
 
 	/* skb->priority values from 256->263 are magic values to
 	 * directly indicate a specific 802.1d priority.  This is used
@@ -671,6 +714,13 @@ unsigned int cfg80211_classify8021d(struct sk_buff *skb)
 	if (skb->priority >= 256 && skb->priority <= 263)
 		return skb->priority - 256;
 
+	if (vlan_tx_tag_present(skb)) {
+		vlan_priority = (vlan_tx_tag_get(skb) & VLAN_PRIO_MASK)
+			>> VLAN_PRIO_SHIFT;
+		if (vlan_priority > 0)
+			return vlan_priority;
+	}
+
 	switch (skb->protocol) {
 	case htons(ETH_P_IP):
 		dscp = ipv4_get_dsfield(ip_hdr(skb)) & 0xfc;
@@ -678,8 +728,38 @@ unsigned int cfg80211_classify8021d(struct sk_buff *skb)
 	case htons(ETH_P_IPV6):
 		dscp = ipv6_get_dsfield(ipv6_hdr(skb)) & 0xfc;
 		break;
+	case htons(ETH_P_MPLS_UC):
+	case htons(ETH_P_MPLS_MC): {
+		struct mpls_label mpls_tmp, *mpls;
+
+		mpls = skb_header_pointer(skb, sizeof(struct ethhdr),
+					  sizeof(*mpls), &mpls_tmp);
+		if (!mpls)
+			return 0;
+
+		return (ntohl(mpls->entry) & MPLS_LS_TC_MASK)
+			>> MPLS_LS_TC_SHIFT;
+	}
+	case htons(ETH_P_80221):
+		/* 802.21 is always network control traffic */
+		return 7;
 	default:
 		return 0;
+	}
+
+	if (qos_map) {
+		unsigned int i, tmp_dscp = dscp >> 2;
+
+		for (i = 0; i < qos_map->num_des; i++) {
+			if (tmp_dscp == qos_map->dscp_exception[i].dscp)
+				return qos_map->dscp_exception[i].up;
+		}
+
+		for (i = 0; i < 8; i++) {
+			if (tmp_dscp >= qos_map->up[i].low &&
+			    tmp_dscp <= qos_map->up[i].high)
+				return i;
+		}
 	}
 
 	return dscp >> 5;
@@ -700,7 +780,7 @@ EXPORT_SYMBOL(ieee80211_bss_get_ie);
 
 void cfg80211_upload_connect_keys(struct wireless_dev *wdev)
 {
-	struct cfg80211_registered_device *rdev = wiphy_to_dev(wdev->wiphy);
+	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wdev->wiphy);
 	struct net_device *dev = wdev->netdev;
 	int i;
 
@@ -725,7 +805,7 @@ void cfg80211_upload_connect_keys(struct wireless_dev *wdev)
 				netdev_err(dev, "failed to set mgtdef %d\n", i);
 	}
 
-	kfree(wdev->connect_keys);
+	kzfree(wdev->connect_keys);
 	wdev->connect_keys = NULL;
 }
 
@@ -766,7 +846,11 @@ void cfg80211_process_wdev_events(struct wireless_dev *wdev)
 						ev->dc.reason, true);
 			break;
 		case EVENT_IBSS_JOINED:
-			__cfg80211_ibss_joined(wdev->netdev, ev->ij.bssid);
+			__cfg80211_ibss_joined(wdev->netdev, ev->ij.bssid,
+					       ev->ij.channel);
+			break;
+		case EVENT_STOPPED:
+			__cfg80211_leave(wiphy_to_rdev(wdev->wiphy), wdev);
 			break;
 		}
 		wdev_unlock(wdev);
@@ -783,14 +867,9 @@ void cfg80211_process_rdev_events(struct cfg80211_registered_device *rdev)
 	struct wireless_dev *wdev;
 
 	ASSERT_RTNL();
-	ASSERT_RDEV_LOCK(rdev);
-
-	mutex_lock(&rdev->devlist_mtx);
 
 	list_for_each_entry(wdev, &rdev->wdev_list, list)
 		cfg80211_process_wdev_events(wdev);
-
-	mutex_unlock(&rdev->devlist_mtx);
 }
 
 int cfg80211_change_iface(struct cfg80211_registered_device *rdev,
@@ -800,7 +879,7 @@ int cfg80211_change_iface(struct cfg80211_registered_device *rdev,
 	int err;
 	enum nl80211_iftype otype = dev->ieee80211_ptr->iftype;
 
-	ASSERT_RDEV_LOCK(rdev);
+	ASSERT_RTNL();
 
 	/* don't support changing VLANs, you just re-create them */
 	if (otype == NL80211_IFTYPE_AP_VLAN)
@@ -822,27 +901,25 @@ int cfg80211_change_iface(struct cfg80211_registered_device *rdev,
 		return -EBUSY;
 
 	if (ntype != otype && netif_running(dev)) {
-		mutex_lock(&rdev->devlist_mtx);
-		err = cfg80211_can_change_interface(rdev, dev->ieee80211_ptr,
-						    ntype);
-		mutex_unlock(&rdev->devlist_mtx);
-		if (err)
-			return err;
-
 		dev->ieee80211_ptr->use_4addr = false;
 		dev->ieee80211_ptr->mesh_id_up_len = 0;
+		wdev_lock(dev->ieee80211_ptr);
+		rdev_set_qos_map(rdev, dev, NULL);
+		wdev_unlock(dev->ieee80211_ptr);
 
 		switch (otype) {
 		case NL80211_IFTYPE_AP:
-			cfg80211_stop_ap(rdev, dev);
+			cfg80211_stop_ap(rdev, dev, true);
 			break;
 		case NL80211_IFTYPE_ADHOC:
 			cfg80211_leave_ibss(rdev, dev, false);
 			break;
 		case NL80211_IFTYPE_STATION:
 		case NL80211_IFTYPE_P2P_CLIENT:
+			wdev_lock(dev->ieee80211_ptr);
 			cfg80211_disconnect(rdev, dev,
 					    WLAN_REASON_DEAUTH_LEAVING, true);
+			wdev_unlock(dev->ieee80211_ptr);
 			break;
 		case NL80211_IFTYPE_MESH_POINT:
 			/* mesh should be handled? */
@@ -862,15 +939,16 @@ int cfg80211_change_iface(struct cfg80211_registered_device *rdev,
 		dev->ieee80211_ptr->use_4addr = params->use_4addr;
 
 	if (!err) {
-		netdev_extended(dev)->ext_priv_flags &= ~IFF_DONT_BRIDGE;
+		dev->priv_flags &= ~IFF_DONT_BRIDGE;
 		switch (ntype) {
 		case NL80211_IFTYPE_STATION:
 			if (dev->ieee80211_ptr->use_4addr)
 				break;
 			/* fall through */
+		case NL80211_IFTYPE_OCB:
 		case NL80211_IFTYPE_P2P_CLIENT:
 		case NL80211_IFTYPE_ADHOC:
-			netdev_extended(dev)->ext_priv_flags |= IFF_DONT_BRIDGE;
+			dev->priv_flags |= IFF_DONT_BRIDGE;
 			break;
 		case NL80211_IFTYPE_P2P_GO:
 		case NL80211_IFTYPE_AP:
@@ -1169,6 +1247,9 @@ bool ieee80211_operating_class_to_band(u8 operating_class,
 	case 84:
 		*band = IEEE80211_BAND_2GHZ;
 		return true;
+	case 180:
+		*band = IEEE80211_BAND_60GHZ;
+		return true;
 	}
 
 	return false;
@@ -1184,8 +1265,6 @@ int cfg80211_validate_beacon_int(struct cfg80211_registered_device *rdev,
 	if (!beacon_int)
 		return -EINVAL;
 
-	mutex_lock(&rdev->devlist_mtx);
-
 	list_for_each_entry(wdev, &rdev->wdev_list, list) {
 		if (!wdev->beacon_interval)
 			continue;
@@ -1195,10 +1274,122 @@ int cfg80211_validate_beacon_int(struct cfg80211_registered_device *rdev,
 		}
 	}
 
-	mutex_unlock(&rdev->devlist_mtx);
-
 	return res;
 }
+
+int cfg80211_iter_combinations(struct wiphy *wiphy,
+			       const int num_different_channels,
+			       const u8 radar_detect,
+			       const int iftype_num[NUM_NL80211_IFTYPES],
+			       void (*iter)(const struct ieee80211_iface_combination *c,
+					    void *data),
+			       void *data)
+{
+	const struct ieee80211_regdomain *regdom;
+	enum nl80211_dfs_regions region = 0;
+	int i, j, iftype;
+	int num_interfaces = 0;
+	u32 used_iftypes = 0;
+
+	if (radar_detect) {
+		rcu_read_lock();
+		regdom = rcu_dereference(cfg80211_regdomain);
+		if (regdom)
+			region = regdom->dfs_region;
+		rcu_read_unlock();
+	}
+
+	for (iftype = 0; iftype < NUM_NL80211_IFTYPES; iftype++) {
+		num_interfaces += iftype_num[iftype];
+		if (iftype_num[iftype] > 0 &&
+		    !(wiphy->software_iftypes & BIT(iftype)))
+			used_iftypes |= BIT(iftype);
+	}
+
+	for (i = 0; i < wiphy->n_iface_combinations; i++) {
+		const struct ieee80211_iface_combination *c;
+		struct ieee80211_iface_limit *limits;
+		u32 all_iftypes = 0;
+
+		c = &wiphy->iface_combinations[i];
+
+		if (num_interfaces > c->max_interfaces)
+			continue;
+		if (num_different_channels > c->num_different_channels)
+			continue;
+
+		limits = kmemdup(c->limits, sizeof(limits[0]) * c->n_limits,
+				 GFP_KERNEL);
+		if (!limits)
+			return -ENOMEM;
+
+		for (iftype = 0; iftype < NUM_NL80211_IFTYPES; iftype++) {
+			if (wiphy->software_iftypes & BIT(iftype))
+				continue;
+			for (j = 0; j < c->n_limits; j++) {
+				all_iftypes |= limits[j].types;
+				if (!(limits[j].types & BIT(iftype)))
+					continue;
+				if (limits[j].max < iftype_num[iftype])
+					goto cont;
+				limits[j].max -= iftype_num[iftype];
+			}
+		}
+
+		if (radar_detect != (c->radar_detect_widths & radar_detect))
+			goto cont;
+
+		if (radar_detect && c->radar_detect_regions &&
+		    !(c->radar_detect_regions & BIT(region)))
+			goto cont;
+
+		/* Finally check that all iftypes that we're currently
+		 * using are actually part of this combination. If they
+		 * aren't then we can't use this combination and have
+		 * to continue to the next.
+		 */
+		if ((all_iftypes & used_iftypes) != used_iftypes)
+			goto cont;
+
+		/* This combination covered all interface types and
+		 * supported the requested numbers, so we're good.
+		 */
+
+		(*iter)(c, data);
+ cont:
+		kfree(limits);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(cfg80211_iter_combinations);
+
+static void
+cfg80211_iter_sum_ifcombs(const struct ieee80211_iface_combination *c,
+			  void *data)
+{
+	int *num = data;
+	(*num)++;
+}
+
+int cfg80211_check_combinations(struct wiphy *wiphy,
+				const int num_different_channels,
+				const u8 radar_detect,
+				const int iftype_num[NUM_NL80211_IFTYPES])
+{
+	int err, num = 0;
+
+	err = cfg80211_iter_combinations(wiphy, num_different_channels,
+					 radar_detect, iftype_num,
+					 cfg80211_iter_sum_ifcombs, &num);
+	if (err)
+		return err;
+	if (num == 0)
+		return -EBUSY;
+
+	return 0;
+}
+EXPORT_SYMBOL(cfg80211_check_combinations);
 
 int cfg80211_can_use_iftype_chan(struct cfg80211_registered_device *rdev,
 				 struct wireless_dev *wdev,
@@ -1208,7 +1399,6 @@ int cfg80211_can_use_iftype_chan(struct cfg80211_registered_device *rdev,
 				 u8 radar_detect)
 {
 	struct wireless_dev *wdev_iter;
-	u32 used_iftypes = BIT(iftype);
 	int num[NUM_NL80211_IFTYPES];
 	struct ieee80211_channel
 			*used_channels[CFG80211_MAX_NUM_DIFFERENT_CHANNELS];
@@ -1216,38 +1406,14 @@ int cfg80211_can_use_iftype_chan(struct cfg80211_registered_device *rdev,
 	enum cfg80211_chan_mode chmode;
 	int num_different_channels = 0;
 	int total = 1;
-	bool radar_required;
-	int i, j;
+	int i;
 
 	ASSERT_RTNL();
-	lockdep_assert_held(&rdev->devlist_mtx);
 
 	if (WARN_ON(hweight32(radar_detect) > 1))
 		return -EINVAL;
 
-	switch (iftype) {
-	case NL80211_IFTYPE_ADHOC:
-	case NL80211_IFTYPE_AP:
-	case NL80211_IFTYPE_AP_VLAN:
-	case NL80211_IFTYPE_MESH_POINT:
-	case NL80211_IFTYPE_P2P_GO:
-	case NL80211_IFTYPE_WDS:
-		radar_required = !!(chan &&
-				    (chan->flags & IEEE80211_CHAN_RADAR));
-		break;
-	case NL80211_IFTYPE_P2P_CLIENT:
-	case NL80211_IFTYPE_STATION:
-	case NL80211_IFTYPE_P2P_DEVICE:
-	case NL80211_IFTYPE_MONITOR:
-		radar_required = false;
-		break;
-	case NUM_NL80211_IFTYPES:
-	case NL80211_IFTYPE_UNSPECIFIED:
-	default:
-		return -EINVAL;
-	}
-
-	if (radar_required && !radar_detect)
+	if (WARN_ON(iftype >= NUM_NL80211_IFTYPES))
 		return -EINVAL;
 
 	/* Always allow software iftypes */
@@ -1262,6 +1428,11 @@ int cfg80211_can_use_iftype_chan(struct cfg80211_registered_device *rdev,
 
 	num[iftype] = 1;
 
+	/* TODO: We'll probably not need this anymore, since this
+	 * should only be called with CHAN_MODE_UNDEFINED. There are
+	 * still a couple of pending calls where other chanmodes are
+	 * used, but we should get rid of them.
+	 */
 	switch (chanmode) {
 	case CHAN_MODE_UNDEFINED:
 		break;
@@ -1299,7 +1470,7 @@ int cfg80211_can_use_iftype_chan(struct cfg80211_registered_device *rdev,
 		 */
 		mutex_lock_nested(&wdev_iter->mtx, 1);
 		__acquire(wdev_iter->mtx);
-		cfg80211_get_chan_state(wdev_iter, &ch, &chmode);
+		cfg80211_get_chan_state(wdev_iter, &ch, &chmode, &radar_detect);
 		wdev_unlock(wdev_iter);
 
 		switch (chmode) {
@@ -1325,65 +1496,13 @@ int cfg80211_can_use_iftype_chan(struct cfg80211_registered_device *rdev,
 
 		num[wdev_iter->iftype]++;
 		total++;
-		used_iftypes |= BIT(wdev_iter->iftype);
 	}
 
 	if (total == 1 && !radar_detect)
 		return 0;
 
-	for (i = 0; i < rdev->wiphy.n_iface_combinations; i++) {
-		const struct ieee80211_iface_combination *c;
-		struct ieee80211_iface_limit *limits;
-		u32 all_iftypes = 0;
-
-		c = &rdev->wiphy.iface_combinations[i];
-
-		if (total > c->max_interfaces)
-			continue;
-		if (num_different_channels > c->num_different_channels)
-			continue;
-
-		limits = kmemdup(c->limits, sizeof(limits[0]) * c->n_limits,
-				 GFP_KERNEL);
-		if (!limits)
-			return -ENOMEM;
-
-		for (iftype = 0; iftype < NUM_NL80211_IFTYPES; iftype++) {
-			if (rdev->wiphy.software_iftypes & BIT(iftype))
-				continue;
-			for (j = 0; j < c->n_limits; j++) {
-				all_iftypes |= limits[j].types;
-				if (!(limits[j].types & BIT(iftype)))
-					continue;
-				if (limits[j].max < num[iftype])
-					goto cont;
-				limits[j].max -= num[iftype];
-			}
-		}
-
-		if (radar_detect && !(c->radar_detect_widths & radar_detect))
-			goto cont;
-
-		/*
-		 * Finally check that all iftypes that we're currently
-		 * using are actually part of this combination. If they
-		 * aren't then we can't use this combination and have
-		 * to continue to the next.
-		 */
-		if ((all_iftypes & used_iftypes) != used_iftypes)
-			goto cont;
-
-		/*
-		 * This combination covered all interface types and
-		 * supported the requested numbers, so we're good.
-		 */
-		kfree(limits);
-		return 0;
- cont:
-		kfree(limits);
-	}
-
-	return -EBUSY;
+	return cfg80211_check_combinations(&rdev->wiphy, num_different_channels,
+					   radar_detect, num);
 }
 
 int ieee80211_get_ratemask(struct ieee80211_supported_band *sband,
@@ -1423,6 +1542,37 @@ int ieee80211_get_ratemask(struct ieee80211_supported_band *sband,
 
 	return 0;
 }
+
+unsigned int ieee80211_get_num_supported_channels(struct wiphy *wiphy)
+{
+	enum ieee80211_band band;
+	unsigned int n_channels = 0;
+
+	for (band = 0; band < IEEE80211_NUM_BANDS; band++)
+		if (wiphy->bands[band])
+			n_channels += wiphy->bands[band]->n_channels;
+
+	return n_channels;
+}
+EXPORT_SYMBOL(ieee80211_get_num_supported_channels);
+
+int cfg80211_get_station(struct net_device *dev, const u8 *mac_addr,
+			 struct station_info *sinfo)
+{
+	struct cfg80211_registered_device *rdev;
+	struct wireless_dev *wdev;
+
+	wdev = dev->ieee80211_ptr;
+	if (!wdev)
+		return -EOPNOTSUPP;
+
+	rdev = wiphy_to_rdev(wdev->wiphy);
+	if (!rdev->ops->get_station)
+		return -EOPNOTSUPP;
+
+	return rdev_get_station(rdev, dev, mac_addr, sinfo);
+}
+EXPORT_SYMBOL(cfg80211_get_station);
 
 /* See IEEE 802.1H for LLC/SNAP encapsulation/decapsulation */
 /* Ethernet-II snap header (RFC1042 for most EtherTypes) */

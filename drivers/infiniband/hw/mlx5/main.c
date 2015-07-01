@@ -1515,7 +1515,7 @@ static void remove_one(struct pci_dev *pdev)
 	ib_dealloc_device(&dev->ib_dev);
 }
 
-static DEFINE_PCI_DEVICE_TABLE(mlx5_ib_pci_table) = {
+static const struct pci_device_id mlx5_ib_pci_table[] = {
 	{ PCI_VDEVICE(MELLANOX, 4113) }, /* MT4113 Connect-IB */
 	{ 0, }
 };

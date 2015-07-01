@@ -666,6 +666,8 @@ extern const char *dev_driver_string(const struct device *dev);
 
 #ifdef CONFIG_PRINTK
 
+extern int __dev_printk(const char *level, const struct device *dev,
+			struct va_format *vaf);
 extern __printf(3, 4)
 int dev_printk(const char *level, const struct device *dev,
 	       const char *fmt, ...)
@@ -687,6 +689,9 @@ int _dev_info(const struct device *dev, const char *fmt, ...);
 
 #else
 
+static inline int __dev_printk(const char *level, const struct device *dev,
+			       struct va_format *vaf)
+	 { return 0; }
 static inline __printf(3, 4)
 int dev_printk(const char *level, const struct device *dev,
 	       const char *fmt, ...)
@@ -725,14 +730,14 @@ int _dev_info(const struct device *dev, const char *fmt, ...)
 
 #define dev_info(dev, fmt, arg...) _dev_info(dev, fmt, ##arg)
 
-#if defined(DEBUG)
-#define dev_dbg(dev, format, arg...)		\
-	dev_printk(KERN_DEBUG, dev, format, ##arg)
-#elif defined(CONFIG_DYNAMIC_DEBUG)
+#if defined(CONFIG_DYNAMIC_DEBUG)
 #define dev_dbg(dev, format, ...)		     \
 do {						     \
 	dynamic_dev_dbg(dev, format, ##__VA_ARGS__); \
 } while (0)
+#elif defined(DEBUG)
+#define dev_dbg(dev, format, arg...)		\
+	dev_printk(KERN_DEBUG, dev, format, ##arg)
 #else
 #define dev_dbg(dev, format, arg...)				\
 ({								\

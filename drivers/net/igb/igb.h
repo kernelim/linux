@@ -32,6 +32,8 @@
 #include <linux/clocksource.h>
 #include <linux/net_tstamp.h>
 #include <linux/ptp_clock_kernel.h>
+#include <linux/bitops.h>
+#include <linux/if_vlan.h>
 #include <linux/i2c.h>
 #include <linux/i2c-algo-bit.h>
 #include <linux/pci.h>
@@ -100,6 +102,7 @@ struct vf_data_storage {
 	u16 pf_vlan; /* When set, guest VLAN config not allowed. */
 	u16 pf_qos;
 	u16 tx_rate;
+	bool spoofchk_enabled;
 };
 
 #define IGB_VF_FLAG_CTS            0x00000001 /* VF is clear to send data */
@@ -286,7 +289,6 @@ struct igb_q_vector {
 };
 
 enum e1000_ring_flags_t {
-	IGB_RING_FLAG_RX_CSUM,
 	IGB_RING_FLAG_RX_SCTP_CSUM,
 	IGB_RING_FLAG_RX_LB_VLAN_BSWAP,
 	IGB_RING_FLAG_TX_CTX_IDX,
@@ -372,8 +374,7 @@ struct igb_adapter {
 
 	struct timer_list watchdog_timer;
 	struct timer_list phy_info_timer;
-
-	struct vlan_group *vlgrp;
+	unsigned long active_vlans[BITS_TO_LONGS(VLAN_N_VID)];
 	u16 mng_vlan_id;
 	u32 bd_number;
 	u32 wol;
@@ -398,7 +399,6 @@ struct igb_adapter {
 	struct e1000_hw hw;
 	struct e1000_hw_stats stats;
 	struct e1000_phy_info phy_info;
-	struct e1000_phy_stats phy_stats;
 
 	u32 test_icr;
 	struct igb_ring test_tx_ring;

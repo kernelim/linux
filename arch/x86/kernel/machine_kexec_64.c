@@ -351,3 +351,41 @@ void arch_crash_save_vmcoreinfo(void)
 #endif
 }
 
+#ifdef CONFIG_KEXEC_AUTO_RESERVE
+
+#define KEXEC_AUTO_LOW_LIMIT	(896 * 1024 * 1024)
+#define KEXEC_AUTO_LOW_MIN	(256 * 1024 * 1024)
+#define KEXEC_AUTO_SCALE	( 64 * 1024 * 1024)
+
+/*
+ * Scale the crash kernel size 64M each time till we find a suitable
+ * area under 896M. But never smaller than 256M.
+ *
+ * Because we only support loading below 896M. If it's too large, it probally
+ * can't be found. And if it's too small, kdump kernel probably won't
+ * boot.
+ */
+unsigned long long __init
+arch_crash_auto_scale(unsigned long long total_size, unsigned long long size)
+{
+	const unsigned long long alignment = 16<<20;    /* 16M */
+	unsigned long long start = -1ULL;
+
+	if (size > KEXEC_AUTO_LOW_LIMIT)
+		size = KEXEC_AUTO_LOW_LIMIT;
+
+	do {
+		start = find_e820_area(0, KEXEC_AUTO_LOW_LIMIT, size, alignment);
+		if (start == -1ULL)
+			size -= KEXEC_AUTO_SCALE;
+		else
+			return size;
+	} while (size >= KEXEC_AUTO_LOW_MIN);
+
+	return 0;
+}
+
+#undef KEXEC_AUTO_LOW_LIMIT
+#undef KEXEC_AUTO_LOW_MIN
+#undef KEXEC_AUTO_SCALE
+#endif

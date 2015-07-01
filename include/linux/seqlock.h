@@ -125,6 +125,13 @@ typedef struct seqcount {
 #define SEQCNT_ZERO { 0 }
 #define seqcount_init(x)	do { *(x) = (seqcount_t) SEQCNT_ZERO; } while (0)
 
+
+static inline void __seqcount_init(seqcount_t *s, const char *name,
+					  struct lock_class_key *key)
+{
+	s->sequence = 0;
+}
+
 /**
  * __read_seqcount_begin - begin a seq-read critical section (without barrier)
  * @s: pointer to seqcount_t

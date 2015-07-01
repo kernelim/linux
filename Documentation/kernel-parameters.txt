@@ -43,10 +43,11 @@ parameter is applicable:
 	AVR32	AVR32 architecture is enabled.
 	AX25	Appropriate AX.25 support is enabled.
 	BLACKFIN Blackfin architecture is enabled.
-	DRM	Direct Rendering Management support is enabled.
 	EDD	BIOS Enhanced Disk Drive Services (EDD) is enabled
 	EFI	EFI Partitioning (GPT) is enabled
 	EIDE	EIDE/ATAPI support is enabled.
+	DRM	Direct Rendering Management support is enabled.
+	DYNAMIC_DEBUG Build in debug messages and enable them at runtime
 	FB	The frame buffer device is enabled.
 	GCOV	GCOV profiling is enabled.
 	HW	Appropriate hardware is enabled.
@@ -282,6 +283,9 @@ and is between 256 and 4096 characters. It is defined in the file
 
 	ad1848=		[HW,OSS]
 			Format: <io>,<irq>,<dma>,<dma2>,<type>
+
+	acpi_no_memhotplug [ACPI] Disable memory hotplug.  Useful for kdump
+			   kernels.
 
 	add_efi_memmap	[EFI; X86] Include EFI memory map in
 			kernel's map of available physical RAM.
@@ -604,6 +608,10 @@ and is between 256 and 4096 characters. It is defined in the file
 			Format: <port#>,<type>
 			See also Documentation/input/joystick-parport.txt
 
+	ddebug_query=   [KNL,DYNAMIC_DEBUG] Enable debug messages at early boot
+			time. See Documentation/dynamic-debug-howto.txt for
+			details.  Deprecated, see dyndbg.
+
 	debug		[KNL] Enable kernel debugging (events log level).
 
 	debug_locks_verbose=
@@ -695,6 +703,11 @@ and is between 256 and 4096 characters. It is defined in the file
 
 	dtc3181e=	[HW,SCSI]
 
+	dyndbg[="val"]		[KNL,DYNAMIC_DEBUG]
+	module.dyndbg[="val"]
+			Enable debug messages at boot time.  See
+			Documentation/dynamic-debug-howto.txt for details.
+
 	earlycon=	[KNL] Output early console device and options.
 		uart[8250],io,<addr>[,options]
 		uart[8250],mmio,<addr>[,options]
@@ -735,6 +748,10 @@ and is between 256 and 4096 characters. It is defined in the file
 
 	edd=		[EDD]
 			Format: {"off" | "on" | "skip[mbr]"}
+
+	efi_smbios_addr= [X86,EFI]
+			Parameter used to specify location of SMBIOS for
+			EFI systems.  Used by kexec-tools for kdump.
 
 	eisa_irq_edge=	[PARISC,HW]
 			See header of drivers/parisc/eisa.c.
@@ -1011,6 +1028,10 @@ and is between 256 and 4096 characters. It is defined in the file
 	initcall_debug	[KNL] Trace initcalls as they are executed.  Useful
 			for working out where the kernel is dying during
 			startup.
+
+	initcall_blacklist=  [KNL] Do not execute a comma-separated list of
+			initcall functions.  Useful for debugging built-in
+			modules and initcalls.
 
 	initrd=		[BOOT] Specify the location of the initial ramdisk
 
@@ -1651,6 +1672,14 @@ and is between 256 and 4096 characters. It is defined in the file
 			of returning the full 64-bit number.
 			The default is to return 64-bit inode numbers.
 
+	nfs.max_session_slots=
+			[NFSv4.1] Sets the maximum number of session slots
+			the client will attempt to negotiate with the server.
+			This limits the number of simultaneous RPC requests
+			that the client can send to the NFSv4.1 server.
+			Note that there is little point in setting this
+			value higher than the max_tcp_slot_table_limit.
+
 	nfs.nfs4_disable_idmapping=
 			[NFSv4] When set to the default of '1', this option
 			ensures that both the RPC level authentication
@@ -1924,6 +1953,9 @@ and is between 256 and 4096 characters. It is defined in the file
 
 	panic=		[KNL] Kernel behaviour on panic
 			Format: <timeout>
+
+	panic_on_warn	panic() instead of WARN().  Useful to cause kdump
+			on a WARN().
 
 	parkbd.port=	[HW] Parallel port number the keyboard adapter is
 			connected to, default is 0.
@@ -2618,6 +2650,11 @@ and is between 256 and 4096 characters. It is defined in the file
 
 	softlockup_panic=
 			[KNL] Should the soft-lockup detector generate panics.
+
+	softlockup_all_cpu_backtrace=
+			[KNL] Should the soft-lockup detector generate
+			backtraces on all cpus.
+			Format: <integer>
 
 	sonypi.*=	[HW] Sony Programmable I/O Control Device driver
 			See Documentation/sonypi.txt

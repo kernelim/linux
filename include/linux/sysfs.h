@@ -157,6 +157,26 @@ void sysfs_put(struct sysfs_dirent *sd);
 void sysfs_printk_last_file(void);
 int __must_check sysfs_init(void);
 
+static inline int sysfs_create_groups(struct kobject *kobj,
+				      const struct attribute_group **groups)
+{
+	int error = 0;
+	int i;
+
+	if (!groups)
+		return 0;
+
+	for (i = 0; groups[i]; i++) {
+		error = sysfs_create_group(kobj, groups[i]);
+		if (error) {
+			while (--i >= 0)
+				sysfs_remove_group(kobj, groups[i]);
+			break;
+		}
+	}
+	return error;
+}
+
 #else /* CONFIG_SYSFS */
 
 static inline int sysfs_schedule_callback(struct kobject *kobj,
@@ -308,6 +328,12 @@ static inline int __must_check sysfs_init(void)
 
 static inline void sysfs_printk_last_file(void)
 {
+}
+
+static inline int sysfs_create_groups(struct kobject *kobj,
+				      const struct attribute_group **groups)
+{
+	return 0;
 }
 
 #endif /* CONFIG_SYSFS */

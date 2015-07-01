@@ -15,45 +15,47 @@ ALC260
 
 ALC262
 ======
-  N/A
+  inv-dmic	Inverted internal mic workaround
 
 ALC267/268
 ==========
-  N/A
-
-ALC269/270/275/276/280/282
-======
-  laptop-amic	Laptops with analog-mic input
-  laptop-dmic	Laptops with digital-mic input
-  alc269-dmic	Enable ALC269(VA) digital mic workaround
-  alc271-dmic	Enable ALC271X digital mic workaround
   inv-dmic	Inverted internal mic workaround
-  lenovo-dock   Enables docking station I/O for some Lenovos
+
+ALC269/270/275/276/28x/29x
+======
+  laptop-amic		Laptops with analog-mic input
+  laptop-dmic		Laptops with digital-mic input
+  alc269-dmic		Enable ALC269(VA) digital mic workaround
+  alc271-dmic		Enable ALC271X digital mic workaround
+  inv-dmic		Inverted internal mic workaround
+  headset-mic		Indicates a combined headset (headphone+mic) jack
+  lenovo-dock   	Enables docking station I/O for some Lenovos
   dell-headset-multi	Headset jack, which can also be used as mic-in
 
-ALC662/663/272
+ALC66x/67x/892
 ==============
-  asus-mode1	ASUS
-  asus-mode2	ASUS
-  asus-mode3	ASUS
-  asus-mode4	ASUS
-  asus-mode5	ASUS
-  asus-mode6	ASUS
-  asus-mode7	ASUS
-  asus-mode8	ASUS
-  inv-dmic	Inverted internal mic workaround
+  mario			Chromebook mario model fixup
+  asus-mode1		ASUS
+  asus-mode2		ASUS
+  asus-mode3		ASUS
+  asus-mode4		ASUS
+  asus-mode5		ASUS
+  asus-mode6		ASUS
+  asus-mode7		ASUS
+  asus-mode8		ASUS
+  inv-dmic		Inverted internal mic workaround
   dell-headset-multi	Headset jack, which can also be used as mic-in
 
 ALC680
 ======
   N/A
 
-ALC882/883/885/888/889
+ALC88x/898/1150
 ======================
   acer-aspire-4930g	Acer Aspire 4930G/5930G/6530G/6930G/7730G
   acer-aspire-8930g	Acer Aspire 8330G/6935G
   acer-aspire		Acer Aspire others
-  inv-dmic	Inverted internal mic workaround
+  inv-dmic		Inverted internal mic workaround
   no-primary-hp		VAIO Z/VGC-LN51JGB workaround (for fixed speaker DAC)
 
 ALC861/660
@@ -110,14 +112,10 @@ AD1984
 
 AD1986A
 =======
-  6stack	6-jack, separate surrounds (default)
   3stack	3-stack, shared surrounds
   laptop	2-channel only (FSC V2060, Samsung M50)
-  laptop-eapd	2-channel with EAPD (ASUS A6J)
-  laptop-automute 2-channel with EAPD and HP-automute (Lenovo N100)
-  ultra		2-channel with EAPD (Samsung Ultra tablet PC)
-  samsung	2-channel with EAPD (Samsung R65)
-  samsung-p50	2-channel with HP-automute (Samsung P50)
+  laptop-imic	2-channel with built-in mic
+  eapd		Turn on EAPD constantly
 
 AD1988/AD1988B/AD1989A/AD1989B
 ==============================
@@ -242,6 +240,7 @@ STAC9227/9228/9229/927x
   5stack-no-fp	D965 5stack without front panel
   dell-3stack	Dell Dimension E520
   dell-bios	Fixes with Dell BIOS setup
+  dell-bios-amic Fixes with Dell BIOS setup including analog mic
   volknob	Fixes with volume-knob widget 0x24
   auto		BIOS setup (default)
 
@@ -277,6 +276,11 @@ STAC92HD83*
   dell-vostro-3500	Dell Vostro 3500 laptop
   hp-dv7-4000	HP dv-7 4000
   auto		BIOS setup (default)
+
+STAC92HD95
+==========
+  hp-led	LED support for HP laptops
+  hp-bass	Bass HPF setup for HP Spectre 13
 
 STAC9872
 ========

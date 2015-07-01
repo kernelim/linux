@@ -675,7 +675,7 @@ static int ipoib_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct ipoib_dev_priv *priv = netdev_priv(dev);
 	struct ipoib_neigh *neigh;
-	struct ipoib_cb *cb = (struct ipoib_cb *) skb->cb;
+	struct ipoib_cb *cb = ipoib_skb_cb(skb);
 	struct ipoib_header *header;
 	unsigned long flags;
 
@@ -772,7 +772,7 @@ static int ipoib_hard_header(struct sk_buff *skb,
 			     const void *daddr, const void *saddr, unsigned len)
 {
 	struct ipoib_header *header;
-	struct ipoib_cb *cb = (struct ipoib_cb *) skb->cb;
+	struct ipoib_cb *cb = ipoib_skb_cb(skb);
 
 	header = (struct ipoib_header *) skb_push(skb, sizeof *header);
 
@@ -1710,17 +1710,14 @@ static int __init ipoib_init_module(void)
 		return ret;
 
 	/*
-	 * We create our own workqueue mainly because we want to be
-	 * able to flush it when devices are being removed.  We can't
-	 * use schedule_work()/flush_scheduled_work() because both
-	 * unregister_netdev() and linkwatch_event take the rtnl lock,
-	 * so flush_scheduled_work() can deadlock during device
-	 * removal.
-	 *
-	 * In addition, bringing one device up and another down at the
-	 * same time can deadlock a single workqueue, so we have this
-	 * global fallback workqueue, but we also attempt to open a
-	 * per device workqueue each time we bring an interface up
+	 * We create a global workqueue here that is used for all flush
+	 * operations.  However, if you attempt to flush a workqueue
+	 * from a task on that same workqueue, it deadlocks the system.
+	 * We want to be able to flush the tasks associated with a
+	 * specific net device, so we also create a workqueue for each
+	 * netdevice.  We queue up the tasks for that device only on
+	 * its private workqueue, and we only queue up flush events
+	 * on our global flush workqueue.  This avoids the deadlocks.
 	 */
 	ipoib_workqueue = create_singlethread_workqueue("ipoib_flush");
 	if (!ipoib_workqueue) {

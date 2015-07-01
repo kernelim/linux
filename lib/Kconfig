@@ -60,14 +60,24 @@ config CRC_ITU_T
 	  functions require M here.
 
 config CRC32
-	tristate "CRC32 functions"
+	tristate "CRC32/CRC32c functions"
 	default y
 	select BITREVERSE
 	help
 	  This option is provided for the case where no in-kernel-tree
-	  modules require CRC32 functions, but a module built outside the
-	  kernel tree does. Such modules that use library CRC32 functions
-	  require M here.
+	  modules require CRC32/CRC32c functions, but a module built outside
+	  the kernel tree does. Such modules that use library CRC32/CRC32c
+	  functions require M here.
+
+config CRC32_SELFTEST
+	bool "CRC32 perform self test on init"
+	default n
+	depends on CRC32
+	help
+	  This option enables the CRC32 library functions to perform a
+	  self test on initialization. The self test computes crc32_le
+	  and crc32_be over byte strings with random alignment and length
+	  and computes the total elapsed time and number of bytes processed.
 
 config CRC7
 	tristate "CRC7 functions"
@@ -160,6 +170,20 @@ config TEXTSEARCH_BM
 
 config TEXTSEARCH_FSM
 	tristate
+
+config INTERVAL_TREE
+	boolean
+	help
+	  Simple, embeddable, interval-tree. Can find the start of an
+	  overlapping range in log(n) time and then iterate over all
+	  overlapping nodes. The algorithm is implemented as an
+	  augmented rbtree.
+
+	  See:
+
+		Documentation/rbtree.txt
+
+	  for more information.
 
 config HAS_IOMEM
 	boolean

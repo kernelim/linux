@@ -33,7 +33,7 @@
  * vcpu_id >= KVM_MAX_VCPUS on x86. This way we avoid inadvertently introducing
  * security bugs while backporting upstream code.
  */
-#define KVM_MAX_VCPU_COUNT 160
+#define KVM_MAX_VCPU_COUNT 240
 
 /* Limit for vcpu_id for all VCPUs. RHEL-specific, too (see above).
  * KVM_CREATE_VCPU code ensures that all VCPUs have vcpu_id < KVM_MAX_VCPU_ID.
@@ -530,6 +530,7 @@ struct kvm_vcpu_stat {
 	u32 irq_window_exits;
 	u32 nmi_window_exits;
 	u32 halt_exits;
+	u32 halt_successful_poll;
 	u32 halt_wakeup;
 	u32 request_irq_exits;
 	u32 irq_exits;
@@ -871,6 +872,20 @@ static inline u32 get_rdx_init_val(void)
 static inline void kvm_inject_gp(struct kvm_vcpu *vcpu, u32 error_code)
 {
 	kvm_queue_exception_e(vcpu, GP_VECTOR, error_code);
+}
+
+static inline u64 get_canonical(u64 la)
+{
+	return ((int64_t)la << 16) >> 16;
+}
+
+static inline bool is_noncanonical_address(u64 la)
+{
+#ifdef CONFIG_X86_64
+	return get_canonical(la) != la;
+#else
+	return false;
+#endif
 }
 
 #define TSS_IOPB_BASE_OFFSET 0x66

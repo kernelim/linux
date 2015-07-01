@@ -84,7 +84,7 @@ static unsigned int skip_txen_test; /* force skip of txen test at init time */
 #define DEBUG_INTR(fmt...)	do { } while (0)
 #endif
 
-#define PASS_LIMIT	256
+#define PASS_LIMIT	512
 
 #define BOTH_EMPTY 	(UART_LSR_TEMT | UART_LSR_THRE)
 
@@ -1268,6 +1268,18 @@ static void autoconfig(struct uart_8250_port *up, unsigned int probeflags)
 	DEBUG_AUTOCONF("type=%s\n", uart_config[up->port.type].name);
 }
 
+/*
+ * RHEL: Some HP boxes have an intermittent issue where the serial console
+ * does not seem to respond for a period of time after a reboot.  As a
+ * result the response in waiting for an IRQ does not happen and the serial
+ * IRQ defaults to IRQ 0 which causes a significant performance hit.  This
+ * module option allows them to set the IRQ through the module parameter
+ * '8250.force_irq=4'.
+ */
+static int force_irq = -1;
+module_param(force_irq, int, 0644);
+MODULE_PARM_DESC(force_irq, "Force serial IRQ to specified value.");
+
 static void autoconfig_irq(struct uart_8250_port *up)
 {
 	unsigned char save_mcr, save_ier;
@@ -1314,7 +1326,12 @@ static void autoconfig_irq(struct uart_8250_port *up)
 	if (up->port.flags & UPF_FOURPORT)
 		outb_p(save_ICP, ICP);
 
-	up->port.irq = (irq > 0) ? irq : 0;
+	if ((force_irq >= 0) && (force_irq < 256)) {
+		up->port.irq = force_irq;
+		printk("%s: IRQ FORCED to %d\n", __FUNCTION__, up->port.irq);
+	} else {
+		up->port.irq = (irq > 0) ? irq : 0;
+	}
 }
 
 static inline void __stop_tx(struct uart_8250_port *p)

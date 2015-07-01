@@ -25,6 +25,8 @@ Supported adapters:
   * Intel Wellsburg (PCH)
   * Intel Wildcat Point-LP (PCH)
   * Intel Coleto Creek (PCH)
+  * Intel Sunrise Point-H (PCH)
+  * Intel Sunrise Point-LP (PCH)
    Datasheets: Publicly available at the Intel website
 
 On Intel Patsburg and later chipsets, both the normal host SMBus controller

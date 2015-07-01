@@ -25,7 +25,6 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/device.h>
-#include <linux/irq.h>
 #include <linux/interrupt.h>
 #include <linux/sysctl.h>
 #include <linux/slab.h>
@@ -264,7 +263,7 @@ static int vmbus_uevent(struct device *device, struct kobj_uevent_env *env)
 	return ret;
 }
 
-static uuid_le null_guid;
+static const uuid_le null_guid;
 
 static inline bool is_null_guid(const __u8 *guid)
 {
@@ -279,7 +278,7 @@ static inline bool is_null_guid(const __u8 *guid)
  */
 static const struct hv_vmbus_device_id *hv_vmbus_get_id(
 					const struct hv_vmbus_device_id *id,
-					__u8 *guid)
+					const __u8 *guid)
 {
 	for (; !is_null_guid(id->guid); id++)
 		if (!memcmp(&id->guid, guid, sizeof(uuid_le)))
@@ -392,9 +391,6 @@ static struct bus_type  hv_bus = {
 	.dev_attrs =	vmbus_device_attrs,
 };
 
-static const char *driver_name = "hyperv";
-
-
 struct onmessage_work_context {
 	struct work_struct work;
 	struct hv_message msg;
@@ -403,6 +399,10 @@ struct onmessage_work_context {
 static void vmbus_onmessage_work(struct work_struct *work)
 {
 	struct onmessage_work_context *ctx;
+
+	/* Do not process messages if we're in DISCONNECTED state */
+	if (vmbus_connection.conn_state == DISCONNECTED)
+		return;
 
 	ctx = container_of(work, struct onmessage_work_context,
 			   work);
@@ -453,7 +453,7 @@ static void vmbus_on_msg_dpc(unsigned long data)
 	}
 }
 
-static irqreturn_t vmbus_isr(int irq, void *dev_id)
+static void vmbus_isr(void)
 {
 	int cpu = smp_processor_id();
 	void *page_addr;
@@ -463,7 +463,7 @@ static irqreturn_t vmbus_isr(int irq, void *dev_id)
 
 	page_addr = hv_context.synic_event_page[cpu];
 	if (page_addr == NULL)
-		return IRQ_NONE;
+		return;
 
 	event = (union hv_synic_event_flags *)page_addr +
 					 VMBUS_MESSAGE_SINT;
@@ -499,28 +499,8 @@ static irqreturn_t vmbus_isr(int irq, void *dev_id)
 	msg = (struct hv_message *)page_addr + VMBUS_MESSAGE_SINT;
 
 	/* Check if there are actual msgs to be processed */
-	if (msg->header.message_type != HVMSG_NONE) {
-		handled = true;
+	if (msg->header.message_type != HVMSG_NONE)
 		tasklet_schedule(&msg_dpc);
-	}
-
-	if (handled)
-		return IRQ_HANDLED;
-	else
-		return IRQ_NONE;
-}
-
-/*
- * vmbus interrupt flow handler:
- * vmbus interrupts can concurrently occur on multiple CPUs and
- * can be handled concurrently.
- */
-
-static void vmbus_flow_handler(unsigned int irq, struct irq_desc *desc)
-{
-	kstat_incr_irqs_this_cpu(irq, desc);
-
-	desc->action->handler(irq, desc->action->dev_id);
 }
 
 /*
@@ -549,25 +529,7 @@ static int vmbus_bus_init(int irq)
 	if (ret)
 		goto err_cleanup;
 
-	ret = request_irq(irq, vmbus_isr, 0, driver_name, hv_acpi_dev);
-
-	if (ret != 0) {
-		pr_err("Unable to request IRQ %d\n",
-			   irq);
-		goto err_unregister;
-	}
-
-	/*
-	 * Vmbus interrupts can be handled concurrently on
-	 * different CPUs. Establish an appropriate interrupt flow
-	 * handler that can support this model.
-	 */
-	set_irq_handler(irq, vmbus_flow_handler);
-
-	/*
-	 * Register our interrupt handler.
-	 */
-	hv_register_vmbus_handler(irq, vmbus_isr);
+	hv_setup_vmbus_irq(vmbus_isr);
 
 	ret = hv_synic_alloc();
 	if (ret)
@@ -587,9 +549,8 @@ static int vmbus_bus_init(int irq)
 
 err_alloc:
 	hv_synic_free();
-	free_irq(irq, hv_acpi_dev);
+	hv_remove_vmbus_irq();
 
-err_unregister:
 	bus_unregister(&hv_bus);
 
 err_cleanup:
@@ -650,9 +611,9 @@ EXPORT_SYMBOL_GPL(vmbus_driver_unregister);
  * vmbus_device_create - Creates and registers a new child device
  * on the vmbus.
  */
-struct hv_device *vmbus_device_create(uuid_le *type,
-					    uuid_le *instance,
-					    struct vmbus_channel *channel)
+struct hv_device *vmbus_device_create(const uuid_le *type,
+				      const uuid_le *instance,
+				      struct vmbus_channel *channel)
 {
 	struct hv_device *child_device_obj;
 
@@ -696,7 +657,7 @@ int vmbus_device_register(struct hv_device *child_device_obj)
 	if (ret)
 		pr_err("Unable to register child device\n");
 	else
-		pr_info("child device %s registered\n",
+		pr_debug("child device %s registered\n",
 			dev_name(&child_device_obj->device));
 
 	return ret;
@@ -708,14 +669,14 @@ int vmbus_device_register(struct hv_device *child_device_obj)
  */
 void vmbus_device_unregister(struct hv_device *device_obj)
 {
+	pr_debug("child device %s unregistered\n",
+		dev_name(&device_obj->device));
+
 	/*
 	 * Kick off the process of unregistering the device.
 	 * This will call vmbus_remove() and eventually vmbus_device_release()
 	 */
 	device_unregister(&device_obj->device);
-
-	pr_info("child device %s unregistered\n",
-		dev_name(&device_obj->device));
 }
 
 
@@ -773,6 +734,15 @@ acpi_walk_err:
 	return ret_val;
 }
 
+static int vmbus_acpi_remove(struct acpi_device *device, int type)
+{
+	int ret = 0;
+
+	if (hyperv_mmio.start && hyperv_mmio.end)
+		ret = release_resource(&hyperv_mmio);
+	return ret;
+}
+
 static const struct acpi_device_id vmbus_acpi_device_ids[] = {
 	{"VMBUS", 0},
 	{"VMBus", 0},
@@ -785,6 +755,7 @@ static struct acpi_driver vmbus_acpi_driver = {
 	.ids = vmbus_acpi_device_ids,
 	.ops = {
 		.add = vmbus_acpi_add,
+		.remove = vmbus_acpi_remove,
 	},
 };
 
@@ -800,7 +771,6 @@ static int __init hv_acpi_init(void)
 	/*
 	 * Get irq resources first.
 	 */
-
 	ret = acpi_bus_register_driver(&vmbus_acpi_driver);
 
 	if (ret)
@@ -831,12 +801,17 @@ cleanup:
 
 static void __exit vmbus_exit(void)
 {
+	int cpu;
 
-	free_irq(irq, hv_acpi_dev);
+	vmbus_connection.conn_state = DISCONNECTED;
+	hv_remove_vmbus_irq();
 	vmbus_free_channels();
 	bus_unregister(&hv_bus);
 	hv_cleanup();
+	for_each_online_cpu(cpu)
+		smp_call_function_single(cpu, hv_synic_cleanup, NULL, 1);
 	acpi_bus_unregister_driver(&vmbus_acpi_driver);
+	vmbus_disconnect();
 }
 
 

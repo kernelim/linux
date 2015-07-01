@@ -44,10 +44,10 @@ struct be_mcc_wrb {
 	} payload;
 };
 
-#define CQE_FLAGS_VALID_MASK 		(1 << 31)
-#define CQE_FLAGS_ASYNC_MASK 		(1 << 30)
-#define CQE_FLAGS_COMPLETED_MASK 	(1 << 28)
-#define CQE_FLAGS_CONSUMED_MASK 	(1 << 27)
+#define CQE_FLAGS_VALID_MASK		BIT(31)
+#define CQE_FLAGS_ASYNC_MASK		BIT(30)
+#define CQE_FLAGS_COMPLETED_MASK	BIT(28)
+#define CQE_FLAGS_CONSUMED_MASK		BIT(27)
 
 /* Completion Status */
 enum mcc_base_status {
@@ -57,7 +57,8 @@ enum mcc_base_status {
 	MCC_STATUS_ILLEGAL_FIELD = 3,
 	MCC_STATUS_INSUFFICIENT_BUFFER = 4,
 	MCC_STATUS_UNAUTHORIZED_REQUEST = 5,
-	MCC_STATUS_NOT_SUPPORTED = 66
+	MCC_STATUS_NOT_SUPPORTED = 66,
+	MCC_STATUS_FEATURE_NOT_SUPPORTED = 68
 };
 
 /* Additional status */
@@ -87,13 +88,13 @@ struct be_mcc_compl {
 	u32 flags;		/* dword 3 */
 };
 
-/* When the async bit of mcc_compl is set, the last 4 bytes of
- * mcc_compl is interpreted as follows:
+/* When the async bit of mcc_compl flags is set, flags
+ * is interpreted as follows:
  */
-#define ASYNC_TRAILER_EVENT_CODE_SHIFT	8	/* bits 8 - 15 */
-#define ASYNC_TRAILER_EVENT_CODE_MASK	0xFF
-#define ASYNC_TRAILER_EVENT_TYPE_SHIFT	16
-#define ASYNC_TRAILER_EVENT_TYPE_MASK	0xFF
+#define ASYNC_EVENT_CODE_SHIFT		8	/* bits 8 - 15 */
+#define ASYNC_EVENT_CODE_MASK		0xFF
+#define ASYNC_EVENT_TYPE_SHIFT		16
+#define ASYNC_EVENT_TYPE_MASK		0xFF
 #define ASYNC_EVENT_CODE_LINK_STATE	0x1
 #define ASYNC_EVENT_CODE_GRP_5		0x5
 #define ASYNC_EVENT_QOS_SPEED		0x1
@@ -101,10 +102,8 @@ struct be_mcc_compl {
 #define ASYNC_EVENT_PVID_STATE		0x3
 #define ASYNC_EVENT_CODE_QNQ		0x6
 #define ASYNC_DEBUG_EVENT_TYPE_QNQ	1
-
-struct be_async_event_trailer {
-	u32 code;
-};
+#define ASYNC_EVENT_CODE_SLIPORT	0x11
+#define ASYNC_EVENT_PORT_MISCONFIG	0x9
 
 enum {
 	LINK_DOWN	= 0x0,
@@ -113,7 +112,7 @@ enum {
 #define LINK_STATUS_MASK			0x1
 #define LOGICAL_LINK_STATUS_MASK		0x2
 
-/* When the event code of an async trailer is link-state, the mcc_compl
+/* When the event code of compl->flags is link-state, the mcc_compl
  * must be interpreted as follows
  */
 struct be_async_event_link_state {
@@ -123,10 +122,10 @@ struct be_async_event_link_state {
 	u8 port_speed;
 	u8 port_fault;
 	u8 rsvd0[7];
-	struct be_async_event_trailer trailer;
+	u32 flags;
 } __packed;
 
-/* When the event code of an async trailer is GRP-5 and event_type is QOS_SPEED
+/* When the event code of compl->flags is GRP-5 and event_type is QOS_SPEED
  * the mcc_compl must be interpreted as follows
  */
 struct be_async_event_grp5_qos_link_speed {
@@ -134,10 +133,10 @@ struct be_async_event_grp5_qos_link_speed {
 	u8 rsvd[5];
 	u16 qos_link_speed;
 	u32 event_tag;
-	struct be_async_event_trailer trailer;
+	u32 flags;
 } __packed;
 
-/* When the event code of an async trailer is GRP5 and event type is
+/* When the event code of compl->flags is GRP5 and event type is
  * CoS-Priority, the mcc_compl must be interpreted as follows
  */
 struct be_async_event_grp5_cos_priority {
@@ -147,10 +146,10 @@ struct be_async_event_grp5_cos_priority {
 	u8 valid;
 	u8 rsvd0;
 	u8 event_tag;
-	struct be_async_event_trailer trailer;
+	u32 flags;
 } __packed;
 
-/* When the event code of an async trailer is GRP5 and event type is
+/* When the event code of compl->flags is GRP5 and event type is
  * PVID state, the mcc_compl must be interpreted as follows
  */
 struct be_async_event_grp5_pvid_state {
@@ -159,7 +158,7 @@ struct be_async_event_grp5_pvid_state {
 	u16 tag;
 	u32 event_tag;
 	u32 rsvd1;
-	struct be_async_event_trailer trailer;
+	u32 flags;
 } __packed;
 
 /* async event indicating outer VLAN tag in QnQ */
@@ -169,7 +168,16 @@ struct be_async_event_qnq {
 	u16 vlan_tag;
 	u32 event_tag;
 	u8 rsvd1[4];
-	struct be_async_event_trailer trailer;
+	u32 flags;
+} __packed;
+
+#define INCOMPATIBLE_SFP		0x3
+/* async event indicating misconfigured port */
+struct be_async_event_misconfig_port {
+	u32 event_data_word1;
+	u32 event_data_word2;
+	u32 rsvd0;
+	u32 flags;
 } __packed;
 
 struct be_mcc_mailbox {
@@ -216,6 +224,7 @@ struct be_mcc_mailbox {
 #define OPCODE_COMMON_GET_BEACON_STATE			70
 #define OPCODE_COMMON_READ_TRANSRECV_DATA		73
 #define OPCODE_COMMON_GET_PORT_NAME			77
+#define OPCODE_COMMON_SET_LOGICAL_LINK_CONFIG		80
 #define OPCODE_COMMON_SET_INTERRUPT_ENABLE		89
 #define OPCODE_COMMON_SET_FN_PRIVILEGES			100
 #define OPCODE_COMMON_GET_PHY_DETAILS			102
@@ -234,6 +243,7 @@ struct be_mcc_mailbox {
 #define OPCODE_COMMON_GET_FN_PRIVILEGES			170
 #define OPCODE_COMMON_READ_OBJECT			171
 #define OPCODE_COMMON_WRITE_OBJECT			172
+#define OPCODE_COMMON_DELETE_OBJECT			174
 #define OPCODE_COMMON_MANAGE_IFACE_FILTERS		193
 #define OPCODE_COMMON_GET_IFACE_LIST			194
 #define OPCODE_COMMON_ENABLE_DISABLE_VF			196
@@ -586,6 +596,10 @@ enum be_if_flags {
 			 BE_IF_FLAGS_VLAN | BE_IF_FLAGS_MCAST_PROMISCUOUS |\
 			 BE_IF_FLAGS_PASS_L3L4_ERRORS | BE_IF_FLAGS_MULTICAST |\
 			 BE_IF_FLAGS_UNTAGGED)
+
+#define BE_IF_FLAGS_ALL_PROMISCUOUS	(BE_IF_FLAGS_PROMISCUOUS | \
+					 BE_IF_FLAGS_VLAN_PROMISCUOUS |\
+					 BE_IF_FLAGS_MCAST_PROMISCUOUS)
 
 /* An RX interface is an object with one or more MAC addresses and
  * filtering capabilities. */
@@ -1006,8 +1020,8 @@ struct be_cmd_resp_link_status {
 /*    Identifies the type of port attached to NIC     */
 struct be_cmd_req_port_type {
 	struct be_cmd_req_hdr hdr;
-	u32 page_num;
-	u32 port;
+	__le32 page_num;
+	__le32 port;
 };
 
 enum {
@@ -1015,28 +1029,25 @@ enum {
 	TR_PAGE_A2 = 0xa2
 };
 
+/* From SFF-8436 QSFP+ spec */
+#define	QSFP_PLUS_CABLE_TYPE_OFFSET	0x83
+#define	QSFP_PLUS_CR4_CABLE		0x8
+#define	QSFP_PLUS_SR4_CABLE		0x4
+#define	QSFP_PLUS_LR4_CABLE		0x2
+
+/* From SFF-8472 spec */
+#define	SFP_PLUS_SFF_8472_COMP		0x5E
+#define	SFP_PLUS_CABLE_TYPE_OFFSET	0x8
+#define	SFP_PLUS_COPPER_CABLE		0x4
+#define SFP_VENDOR_NAME_OFFSET		0x14
+#define SFP_VENDOR_PN_OFFSET		0x28
+
+#define PAGE_DATA_LEN   256
 struct be_cmd_resp_port_type {
 	struct be_cmd_resp_hdr hdr;
 	u32 page_num;
 	u32 port;
-	struct data {
-		u8 identifier;
-		u8 identifier_ext;
-		u8 connector;
-		u8 transceiver[8];
-		u8 rsvd0[3];
-		u8 length_km;
-		u8 length_hm;
-		u8 length_om1;
-		u8 length_om2;
-		u8 length_cu;
-		u8 length_cu_m;
-		u8 vendor_name[16];
-		u8 rsvd;
-		u8 vendor_oui[3];
-		u8 vendor_pn[16];
-		u8 vendor_rev[4];
-	} data;
+	u8  page_data[PAGE_DATA_LEN];
 };
 
 /******************** Get FW Version *******************/
@@ -1084,11 +1095,6 @@ struct be_cmd_req_modify_eq_delay {
 	struct be_set_eqd set_eqd[MAX_EVT_QS];
 } __packed;
 
-struct be_cmd_resp_modify_eq_delay {
-	struct be_cmd_resp_hdr hdr;
-	u32 rsvd0;
-} __packed;
-
 /******************** Get FW Config *******************/
 /* The HW can come up in either of the following multi-channel modes
  * based on the skew/IPL.
@@ -1101,6 +1107,10 @@ struct be_cmd_req_query_fw_cfg {
 	struct be_cmd_req_hdr hdr;
 	u32 rsvd[31];
 };
+
+/* ASIC revisions */
+#define ASIC_REV_B0		0x10
+#define ASIC_REV_P2		0x11
 
 struct be_cmd_resp_query_fw_cfg {
 	struct be_cmd_resp_hdr hdr;
@@ -1159,11 +1169,6 @@ struct be_cmd_req_enable_disable_beacon {
 	u8  status_duration;
 } __packed;
 
-struct be_cmd_resp_enable_disable_beacon {
-	struct be_cmd_resp_hdr resp_hdr;
-	u32 rsvd0;
-} __packed;
-
 struct be_cmd_req_get_beacon_state {
 	struct be_cmd_req_hdr hdr;
 	u8  port_num;
@@ -1177,7 +1182,173 @@ struct be_cmd_resp_get_beacon_state {
 	u8 rsvd0[3];
 } __packed;
 
+/* Flashrom related descriptors */
+#define MAX_FLASH_COMP			32
+
+#define OPTYPE_ISCSI_ACTIVE		0
+#define OPTYPE_REDBOOT			1
+#define OPTYPE_BIOS			2
+#define OPTYPE_PXE_BIOS			3
+#define OPTYPE_OFFSET_SPECIFIED		7
+#define OPTYPE_FCOE_BIOS		8
+#define OPTYPE_ISCSI_BACKUP		9
+#define OPTYPE_FCOE_FW_ACTIVE		10
+#define OPTYPE_FCOE_FW_BACKUP		11
+#define OPTYPE_NCSI_FW			13
+#define OPTYPE_REDBOOT_DIR		18
+#define OPTYPE_REDBOOT_CONFIG		19
+#define OPTYPE_SH_PHY_FW		21
+#define OPTYPE_FLASHISM_JUMPVECTOR	22
+#define OPTYPE_UFI_DIR			23
+#define OPTYPE_PHY_FW			99
+
+#define FLASH_BIOS_IMAGE_MAX_SIZE_g2	262144  /* Max OPTION ROM image sz */
+#define FLASH_REDBOOT_IMAGE_MAX_SIZE_g2	262144  /* Max Redboot image sz    */
+#define FLASH_IMAGE_MAX_SIZE_g2		1310720 /* Max firmware image size */
+
+#define FLASH_NCSI_IMAGE_MAX_SIZE_g3	262144
+#define FLASH_PHY_FW_IMAGE_MAX_SIZE_g3	262144
+#define FLASH_BIOS_IMAGE_MAX_SIZE_g3	524288  /* Max OPTION ROM image sz */
+#define FLASH_REDBOOT_IMAGE_MAX_SIZE_g3	1048576 /* Max Redboot image sz    */
+#define FLASH_IMAGE_MAX_SIZE_g3		2097152 /* Max firmware image size */
+
+/* Offsets for components on Flash. */
+#define FLASH_REDBOOT_START_g2			0
+#define FLASH_FCoE_BIOS_START_g2		524288
+#define FLASH_iSCSI_PRIMARY_IMAGE_START_g2	1048576
+#define FLASH_iSCSI_BACKUP_IMAGE_START_g2	2359296
+#define FLASH_FCoE_PRIMARY_IMAGE_START_g2	3670016
+#define FLASH_FCoE_BACKUP_IMAGE_START_g2	4980736
+#define FLASH_iSCSI_BIOS_START_g2		7340032
+#define FLASH_PXE_BIOS_START_g2			7864320
+
+#define FLASH_REDBOOT_START_g3			262144
+#define FLASH_PHY_FW_START_g3			1310720
+#define FLASH_iSCSI_PRIMARY_IMAGE_START_g3	2097152
+#define FLASH_iSCSI_BACKUP_IMAGE_START_g3	4194304
+#define FLASH_FCoE_PRIMARY_IMAGE_START_g3	6291456
+#define FLASH_FCoE_BACKUP_IMAGE_START_g3	8388608
+#define FLASH_iSCSI_BIOS_START_g3		12582912
+#define FLASH_PXE_BIOS_START_g3			13107200
+#define FLASH_FCoE_BIOS_START_g3		13631488
+#define FLASH_NCSI_START_g3			15990784
+
+#define IMAGE_NCSI			16
+#define IMAGE_OPTION_ROM_PXE		32
+#define IMAGE_OPTION_ROM_FCoE		33
+#define IMAGE_OPTION_ROM_ISCSI		34
+#define IMAGE_FLASHISM_JUMPVECTOR	48
+#define IMAGE_FIRMWARE_iSCSI		160
+#define IMAGE_FIRMWARE_FCoE		162
+#define IMAGE_FIRMWARE_BACKUP_iSCSI	176
+#define IMAGE_FIRMWARE_BACKUP_FCoE	178
+#define IMAGE_FIRMWARE_PHY		192
+#define IMAGE_REDBOOT_DIR		208
+#define IMAGE_REDBOOT_CONFIG		209
+#define IMAGE_UFI_DIR			210
+#define IMAGE_BOOT_CODE			224
+
+struct controller_id {
+	u32 vendor;
+	u32 device;
+	u32 subvendor;
+	u32 subdevice;
+};
+
+struct flash_comp {
+	unsigned long offset;
+	int optype;
+	int size;
+	int img_type;
+};
+
+struct image_hdr {
+	u32 imageid;
+	u32 imageoffset;
+	u32 imagelength;
+	u32 image_checksum;
+	u8 image_version[32];
+};
+
+struct flash_file_hdr_g2 {
+	u8 sign[32];
+	u32 cksum;
+	u32 antidote;
+	struct controller_id cont_id;
+	u32 file_len;
+	u32 chunk_num;
+	u32 total_chunks;
+	u32 num_imgs;
+	u8 build[24];
+};
+
+/* First letter of the build version of the image */
+#define BLD_STR_UFI_TYPE_BE2	'2'
+#define BLD_STR_UFI_TYPE_BE3	'3'
+#define BLD_STR_UFI_TYPE_SH	'4'
+
+struct flash_file_hdr_g3 {
+	u8 sign[52];
+	u8 ufi_version[4];
+	u32 file_len;
+	u32 cksum;
+	u32 antidote;
+	u32 num_imgs;
+	u8 build[24];
+	u8 asic_type_rev;
+	u8 rsvd[31];
+};
+
+struct flash_section_hdr {
+	u32 format_rev;
+	u32 cksum;
+	u32 antidote;
+	u32 num_images;
+	u8 id_string[128];
+	u32 rsvd[4];
+} __packed;
+
+struct flash_section_hdr_g2 {
+	u32 format_rev;
+	u32 cksum;
+	u32 antidote;
+	u32 build_num;
+	u8 id_string[128];
+	u32 rsvd[8];
+} __packed;
+
+struct flash_section_entry {
+	u32 type;
+	u32 offset;
+	u32 pad_size;
+	u32 image_size;
+	u32 cksum;
+	u32 entry_point;
+	u16 optype;
+	u16 rsvd0;
+	u32 rsvd1;
+	u8 ver_data[32];
+} __packed;
+
+struct flash_section_info {
+	u8 cookie[32];
+	struct flash_section_hdr fsec_hdr;
+	struct flash_section_entry fsec_entry[32];
+} __packed;
+
+struct flash_section_info_g2 {
+	u8 cookie[32];
+	struct flash_section_hdr_g2 fsec_hdr;
+	struct flash_section_entry fsec_entry[32];
+} __packed;
+
 /****************** Firmware Flash ******************/
+#define FLASHROM_OPER_FLASH		1
+#define FLASHROM_OPER_SAVE		2
+#define FLASHROM_OPER_REPORT		4
+#define FLASHROM_OPER_PHY_FLASH		9
+#define FLASHROM_OPER_PHY_SAVE		10
+
 struct flashrom_params {
 	u32 op_code;
 	u32 op_type;
@@ -1266,6 +1437,13 @@ struct lancer_cmd_resp_read_object {
 	u32 eof;
 };
 
+struct lancer_cmd_req_delete_object {
+	struct be_cmd_req_hdr hdr;
+	u32 rsvd1;
+	u32 rsvd2;
+	u8 object_name[104];
+};
+
 /************************ WOL *******************************/
 struct be_cmd_req_acpi_wol_magic_config{
 	struct be_cmd_req_hdr hdr;
@@ -1329,11 +1507,6 @@ struct be_cmd_req_set_lmode {
 	u8 loopback_state;
 };
 
-struct be_cmd_resp_set_lmode {
-	struct be_cmd_resp_hdr resp_hdr;
-	u8 rsvd0[4];
-};
-
 /********************** DDR DMA test *********************/
 struct be_cmd_req_ddrdma_test {
 	struct be_cmd_req_hdr hdr;
@@ -1377,6 +1550,10 @@ enum {
 	PHY_TYPE_BASET_1GB,
 	PHY_TYPE_BASEX_1GB,
 	PHY_TYPE_SGMII,
+	PHY_TYPE_QSFP,
+	PHY_TYPE_KR4_40GB,
+	PHY_TYPE_KR2_20GB,
+	PHY_TYPE_TN_8022,
 	PHY_TYPE_DISABLED = 255
 };
 
@@ -1385,6 +1562,8 @@ enum {
 #define BE_SUPPORTED_SPEED_100MBPS	2
 #define BE_SUPPORTED_SPEED_1GBPS	4
 #define BE_SUPPORTED_SPEED_10GBPS	8
+#define BE_SUPPORTED_SPEED_20GBPS	0x10
+#define BE_SUPPORTED_SPEED_40GBPS	0x20
 
 #define BE_AN_EN			0x2
 #define BE_PAUSE_SYM_EN			0x80
@@ -1437,12 +1616,21 @@ struct be_cmd_req_set_qos {
 	u32 rsvd[7];
 };
 
-struct be_cmd_resp_set_qos {
-	struct be_cmd_resp_hdr hdr;
-	u32 rsvd;
-};
-
 /*********************** Controller Attributes ***********************/
+struct mgmt_hba_attribs {
+	u32 rsvd0[24];
+	u8 controller_model_number[32];
+	u32 rsvd1[79];
+	u8 rsvd2[3];
+	u8 phy_port;
+	u32 rsvd3[13];
+} __packed;
+
+struct mgmt_controller_attrib {
+	struct mgmt_hba_attribs hba_attribs;
+	u32 rsvd0[10];
+} __packed;
+
 struct be_cmd_req_cntl_attribs {
 	struct be_cmd_req_hdr hdr;
 };
@@ -1574,11 +1762,6 @@ struct be_cmd_req_set_hsw_config {
 	struct be_cmd_req_hdr hdr;
 	u8 context[sizeof(struct amap_set_hsw_context) / 8];
 } __packed;
-
-struct be_cmd_resp_set_hsw_config {
-	struct be_cmd_resp_hdr hdr;
-	u32 rsvd;
-};
 
 struct amap_get_hsw_req_context {
 	u8 interface_id[16];
@@ -1916,7 +2099,9 @@ struct be_nic_res_desc {
 	u8 acpi_params;
 	u8 wol_param;
 	u16 rsvd7;
-	u32 rsvd8[7];
+	u16 tunnel_iface_count;
+	u16 direct_tenant_iface_count;
+	u32 rsvd8[6];
 } __packed;
 
 /************ Multi-Channel type ***********/
@@ -1967,10 +2152,6 @@ struct be_cmd_req_set_profile_config {
 	u8 desc[2 * RESOURCE_DESC_SIZE_V1];
 } __packed;
 
-struct be_cmd_resp_set_profile_config {
-	struct be_cmd_resp_hdr hdr;
-};
-
 struct be_cmd_req_get_active_profile {
 	struct be_cmd_req_hdr hdr;
 	u32 rsvd;
@@ -2014,6 +2195,13 @@ struct be_cmd_resp_get_iface_list {
 	struct be_cmd_req_hdr hdr;
 	u32 if_cnt;
 	struct be_if_desc if_desc;
+};
+
+/*************** Set logical link ********************/
+#define PLINK_TRACK_SHIFT	8
+struct be_cmd_req_set_ll_link {
+	struct be_cmd_req_hdr hdr;
+	u32 link_config; /* Bit 0: UP_DOWN, Bit 9: PLINK */
 };
 
 /************** Manage IFACE Filters *******************/
@@ -2065,16 +2253,14 @@ int be_cmd_reset(struct be_adapter *adapter);
 int be_cmd_get_stats(struct be_adapter *adapter, struct be_dma_mem *nonemb_cmd);
 int lancer_cmd_get_pport_stats(struct be_adapter *adapter,
 			       struct be_dma_mem *nonemb_cmd);
-int be_cmd_get_fw_ver(struct be_adapter *adapter, char *fw_ver,
-		      char *fw_on_flash);
+int be_cmd_get_fw_ver(struct be_adapter *adapter);
 int be_cmd_modify_eqd(struct be_adapter *adapter, struct be_set_eqd *, int num);
 int be_cmd_vlan_config(struct be_adapter *adapter, u32 if_id, u16 *vtag_array,
 		       u32 num);
 int be_cmd_rx_filter(struct be_adapter *adapter, u32 flags, u32 status);
 int be_cmd_set_flow_control(struct be_adapter *adapter, u32 tx_fc, u32 rx_fc);
 int be_cmd_get_flow_control(struct be_adapter *adapter, u32 *tx_fc, u32 *rx_fc);
-int be_cmd_query_fw_cfg(struct be_adapter *adapter, u32 *port_num,
-			u32 *function_mode, u32 *function_caps, u16 *asic_rev);
+int be_cmd_query_fw_cfg(struct be_adapter *adapter);
 int be_cmd_reset_function(struct be_adapter *adapter);
 int be_cmd_rss_config(struct be_adapter *adapter, u8 *rsstable,
 		      u32 rss_hash_opts, u16 table_size, u8 *rss_hkey);
@@ -2083,8 +2269,13 @@ int be_cmd_set_beacon_state(struct be_adapter *adapter, u8 port_num, u8 beacon,
 			    u8 status, u8 state);
 int be_cmd_get_beacon_state(struct be_adapter *adapter, u8 port_num,
 			    u32 *state);
+int be_cmd_read_port_transceiver_data(struct be_adapter *adapter,
+				      u8 page_num, u8 *data);
+int be_cmd_query_cable_type(struct be_adapter *adapter);
+int be_cmd_query_sfp_info(struct be_adapter *adapter);
 int be_cmd_write_flashrom(struct be_adapter *adapter, struct be_dma_mem *cmd,
-			  u32 flash_oper, u32 flash_opcode, u32 buf_size);
+			  u32 flash_oper, u32 flash_opcode, u32 img_offset,
+			  u32 buf_size);
 int lancer_cmd_write_object(struct be_adapter *adapter, struct be_dma_mem *cmd,
 			    u32 data_size, u32 data_offset,
 			    const char *obj_name, u32 *data_written,
@@ -2092,8 +2283,9 @@ int lancer_cmd_write_object(struct be_adapter *adapter, struct be_dma_mem *cmd,
 int lancer_cmd_read_object(struct be_adapter *adapter, struct be_dma_mem *cmd,
 			   u32 data_size, u32 data_offset, const char *obj_name,
 			   u32 *data_read, u32 *eof, u8 *addn_status);
+int lancer_cmd_delete_object(struct be_adapter *adapter, const char *obj_name);
 int be_cmd_get_flash_crc(struct be_adapter *adapter, u8 *flashed_crc,
-			  u16 optype, int offset);
+			 u16 img_optype, u32 img_offset, u32 crc_offset);
 int be_cmd_enable_magic_wol(struct be_adapter *adapter, u8 *mac,
 			    struct be_dma_mem *nonemb_cmd);
 int be_cmd_fw_init(struct be_adapter *adapter);
@@ -2110,13 +2302,14 @@ int be_cmd_get_seeprom_data(struct be_adapter *adapter,
 int be_cmd_set_loopback(struct be_adapter *adapter, u8 port_num,
 			u8 loopback_type, u8 enable);
 int be_cmd_get_phy_info(struct be_adapter *adapter);
-int be_cmd_config_qos(struct be_adapter *adapter, u32 bps, u8 domain);
+int be_cmd_config_qos(struct be_adapter *adapter, u32 max_rate,
+		      u16 link_speed, u8 domain);
 void be_detect_error(struct be_adapter *adapter);
 int be_cmd_get_die_temperature(struct be_adapter *adapter);
 int be_cmd_get_cntl_attributes(struct be_adapter *adapter);
 int be_cmd_req_native_mode(struct be_adapter *adapter);
 int be_cmd_get_reg_len(struct be_adapter *adapter, u32 *log_size);
-void be_cmd_get_regs(struct be_adapter *adapter, u32 buf_len, void *buf);
+int be_cmd_get_regs(struct be_adapter *adapter, u32 buf_len, void *buf);
 int be_cmd_get_fn_privileges(struct be_adapter *adapter, u32 *privilege,
 			     u32 domain);
 int be_cmd_set_fn_privileges(struct be_adapter *adapter, u32 privileges,
@@ -2144,9 +2337,10 @@ int be_cmd_set_ext_fat_capabilites(struct be_adapter *adapter,
 				   struct be_fat_conf_params *cfgs);
 int lancer_physdev_ctrl(struct be_adapter *adapter, u32 mask);
 int lancer_initiate_dump(struct be_adapter *adapter);
+int lancer_delete_dump(struct be_adapter *adapter);
 bool dump_present(struct be_adapter *adapter);
 int lancer_test_and_set_rdy_state(struct be_adapter *adapter);
-int be_cmd_query_port_name(struct be_adapter *adapter, u8 *port_name);
+int be_cmd_query_port_name(struct be_adapter *adapter);
 int be_cmd_get_func_config(struct be_adapter *adapter,
 			   struct be_resources *res);
 int be_cmd_get_profile_config(struct be_adapter *adapter,
@@ -2156,6 +2350,8 @@ int be_cmd_get_if_id(struct be_adapter *adapter, struct be_vf_cfg *vf_cfg,
 		     int vf_num);
 int be_cmd_enable_vf(struct be_adapter *adapter, u8 domain);
 int be_cmd_intr_set(struct be_adapter *adapter, bool intr_enable);
+int be_cmd_set_logical_link_config(struct be_adapter *adapter,
+					  int link_state, u8 domain);
 int be_cmd_set_vxlan_port(struct be_adapter *adapter, __be16 port);
 int be_cmd_manage_iface(struct be_adapter *adapter, u32 iface, u8 op);
 int be_cmd_set_sriov_config(struct be_adapter *adapter,

@@ -135,10 +135,11 @@ struct hv_start_fcopy {
 
 struct hv_do_fcopy {
 	struct hv_fcopy_hdr hdr;
+	__u32   pad;
 	__u64   offset;
 	__u32   size;
 	__u8    data[DATA_FRAGMENT];
-};
+} __attribute__((packed));
 
 /*
  * An implementation of HyperV key value pair (KVP) functionality for Linux.
@@ -1059,6 +1060,8 @@ struct vmbus_channel {
 	u8 monitor_grp;
 	u8 monitor_bit;
 
+	bool rescind; /* got rescind msg */
+
 	u32 ringbuffer_gpadlhandle;
 
 	/* Allocated memory for ring buffer */
@@ -1129,7 +1132,12 @@ struct vmbus_channel {
 	 */
 	void (*sc_creation_callback)(struct vmbus_channel *new_sc);
 
-	spinlock_t sc_lock;
+	/*
+	 * The spinlock to protect the structure. It is being used to protect
+	 * test-and-set access to various attributes of the structure as well
+	 * as all sc_list operations.
+	 */
+	spinlock_t lock;
 	/*
 	 * All Sub-channels of a primary channel are linked here.
 	 */
@@ -1233,7 +1241,7 @@ extern int vmbus_open(struct vmbus_channel *channel,
 extern void vmbus_close(struct vmbus_channel *channel);
 
 extern int vmbus_sendpacket(struct vmbus_channel *channel,
-				  const void *buffer,
+				  void *buffer,
 				  u32 bufferLen,
 				  u64 requestid,
 				  enum vmbus_packet_type type,

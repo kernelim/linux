@@ -14,9 +14,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston,
- * MA  02111-1307, USA.
+ * along with this program; if not, see <http://www.gnu.org/licenses/>.
  *
  * The full GNU General Public License is included in this distribution
  * in the file called "COPYING".
@@ -102,7 +100,7 @@ static int nx_dev_request_reset(struct netxen_adapter *adapter);
 	{PCI_DEVICE(PCI_VENDOR_ID_NETXEN, (device)), \
 	.class = PCI_CLASS_NETWORK_ETHERNET << 8, .class_mask = ~0}
 
-static DEFINE_PCI_DEVICE_TABLE(netxen_pci_tbl) = {
+static const struct pci_device_id netxen_pci_tbl[] = {
 	ENTRY(PCI_DEVICE_ID_NX2031_10GXSR),
 	ENTRY(PCI_DEVICE_ID_NX2031_10GCX4),
 	ENTRY(PCI_DEVICE_ID_NX2031_4GCU),
@@ -556,7 +554,7 @@ static const struct net_device_ops netxen_netdev_ops = {
 	.ndo_stop	   = netxen_nic_close,
 	.ndo_start_xmit    = netxen_nic_xmit_frame,
 	.ndo_validate_addr = eth_validate_addr,
-	.ndo_set_multicast_list = netxen_set_multicast_list,
+	.ndo_set_rx_mode   = netxen_set_multicast_list,
 	.ndo_set_mac_address    = netxen_nic_set_mac,
 	.ndo_change_mtu	   = netxen_nic_change_mtu,
 	.ndo_tx_timeout	   = netxen_tx_timeout,
@@ -626,8 +624,9 @@ static int netxen_setup_msi_interrupts(struct netxen_adapter *adapter,
 
 	if (adapter->msix_supported) {
 		netxen_init_msix_entries(adapter, num_msix);
-		err = pci_enable_msix(pdev, adapter->msix_entries, num_msix);
-		if (err == 0) {
+		err = pci_enable_msix_range(pdev, adapter->msix_entries,
+					    num_msix, num_msix);
+		if (err > 0) {
 			adapter->flags |= NETXEN_NIC_MSIX_ENABLED;
 			netxen_set_msix_bit(pdev, 1);
 
@@ -1176,7 +1175,6 @@ __netxen_nic_down(struct netxen_adapter *adapter, struct net_device *netdev)
 		return;
 
 	smp_mb();
-	spin_lock(&adapter->tx_clean_lock);
 	netif_carrier_off(netdev);
 	netif_tx_disable(netdev);
 
@@ -1194,7 +1192,6 @@ __netxen_nic_down(struct netxen_adapter *adapter, struct net_device *netdev)
 	netxen_napi_disable(adapter);
 
 	netxen_release_tx_buffers(adapter);
-	spin_unlock(&adapter->tx_clean_lock);
 }
 
 /* Usage: During suspend and firmware recovery module */
@@ -1365,7 +1362,7 @@ netxen_setup_netdev(struct netxen_adapter *adapter,
 
 	netxen_nic_change_mtu(netdev, netdev->mtu);
 
-	SET_ETHTOOL_OPS(netdev, &netxen_nic_ethtool_ops);
+	netdev->ethtool_ops = &netxen_nic_ethtool_ops;
 
 	netdev->features |= (NETIF_F_SG | NETIF_F_IP_CSUM | NETIF_F_TSO);
 	netdev->features |= (NETIF_F_GRO);
@@ -1470,9 +1467,8 @@ netxen_nic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	u32 val;
 
 	if (pdev->revision >= NX_P3_A0 && pdev->revision <= NX_P3_B1) {
-		pr_warning("%s: chip revisions between 0x%x-0x%x "
-				"will not be enabled.\n",
-				module_name(THIS_MODULE), NX_P3_A0, NX_P3_B1);
+		pr_warn("%s: chip revisions between 0x%x-0x%x will not be enabled\n",
+			module_name(THIS_MODULE), NX_P3_A0, NX_P3_B1);
 		return -ENODEV;
 	}
 
@@ -1622,7 +1618,6 @@ err_out_free_res:
 	pci_release_regions(pdev);
 
 err_out_disable_pdev:
-	pci_set_drvdata(pdev, NULL);
 	pci_disable_device(pdev);
 	return err;
 }
@@ -1681,7 +1676,6 @@ static void netxen_nic_remove(struct pci_dev *pdev)
 
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
-	pci_set_drvdata(pdev, NULL);
 
 	free_netdev(netdev);
 }
@@ -2018,8 +2012,8 @@ netxen_map_tx_skb(struct pci_dev *pdev,
 		frag = &skb_shinfo(skb)->frags[i];
 		nf = &pbuf->frag_array[i+1];
 
-		map = pci_map_page(pdev, frag->page, frag->page_offset,
-				frag->size, PCI_DMA_TODEVICE);
+		map = skb_frag_dma_map(&pdev->dev, frag, 0, frag->size,
+				       PCI_DMA_TODEVICE);
 		if (pci_dma_mapping_error(pdev, map))
 			goto unwind;
 
@@ -2760,7 +2754,8 @@ netxen_fw_poll_work(struct work_struct *work)
 	if (test_bit(__NX_RESETTING, &adapter->state))
 		goto reschedule;
 
-	if (test_bit(__NX_DEV_UP, &adapter->state)) {
+	if (test_bit(__NX_DEV_UP, &adapter->state) &&
+	    !(adapter->capabilities & NX_FW_CAPABILITY_LINK_NOTIFICATION)) {
 		if (!adapter->has_link_events) {
 
 			netxen_nic_handle_phy_intr(adapter);
@@ -3677,7 +3672,7 @@ netxen_free_ip_list(struct netxen_adapter *adapter, bool master)
 { }
 #endif
 
-static struct pci_error_handlers netxen_err_handler = {
+static const struct pci_error_handlers netxen_err_handler = {
 	.error_detected = netxen_io_error_detected,
 	.slot_reset = netxen_io_slot_reset,
 	.resume = netxen_io_resume,

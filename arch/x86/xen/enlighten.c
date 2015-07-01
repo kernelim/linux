@@ -1004,10 +1004,6 @@ static const struct pv_init_ops xen_init_ops __initdata = {
 	.patch = xen_patch,
 };
 
-static const struct pv_time_ops xen_time_ops __initdata = {
-	.sched_clock = xen_clocksource_read,
-};
-
 static const struct pv_cpu_ops xen_cpu_ops __initdata = {
 	.cpuid = xen_cpuid,
 
@@ -1164,7 +1160,6 @@ asmlinkage void __init xen_start_kernel(void)
 	/* Install Xen paravirt ops */
 	pv_info = xen_info;
 	pv_init_ops = xen_init_ops;
-	pv_time_ops = xen_time_ops;
 	pv_cpu_ops = xen_cpu_ops;
 	pv_apic_ops = xen_apic_ops;
 
@@ -1172,13 +1167,7 @@ asmlinkage void __init xen_start_kernel(void)
 	x86_init.oem.arch_setup = xen_arch_setup;
 	x86_init.oem.banner = xen_banner;
 
-	x86_init.timers.timer_init = xen_time_init;
-	x86_init.timers.setup_percpu_clockev = x86_init_noop;
-	x86_cpuinit.setup_percpu_clockev = x86_init_noop;
-
-	x86_platform.calibrate_tsc = xen_tsc_khz;
-	x86_platform.get_wallclock = xen_get_wallclock;
-	x86_platform.set_wallclock = xen_set_wallclock;
+	xen_init_time_ops();
 
 	/*
 	 * Set up some pagetable state before starting to set any ptes.
@@ -1405,8 +1394,11 @@ static int __cpuinit xen_hvm_cpu_notify(struct notifier_block *self,
 	switch (action) {
 	case CPU_UP_PREPARE:
 		xen_vcpu_setup(cpu);
-		if (xen_have_vector_callback)
+		if (xen_have_vector_callback) {
 			xen_init_lock_cpu(cpu);
+			if (xen_feature(XENFEAT_hvm_safe_pvclock))
+				xen_setup_timer(cpu);
+		}
 		break;
 	default:
 		break;
@@ -1446,4 +1438,5 @@ void __init xen_hvm_guest_init(void)
 	register_cpu_notifier(&xen_hvm_cpu_notifier);
 	xen_unplug_emulated_devices();
 	x86_init.irqs.intr_init = xen_init_IRQ;
+	xen_hvm_init_time_ops();
 }

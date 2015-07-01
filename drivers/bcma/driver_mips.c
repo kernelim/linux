@@ -20,8 +20,19 @@
 #include <linux/serial_core.h>
 #include <linux/serial_reg.h>
 #include <linux/time.h>
+#ifdef CONFIG_BCM47XX
+#include <bcm47xx_nvram.h>
+#endif
 
-static const char *part_probes[] = { "bcm47xxpart", NULL };
+enum bcma_boot_dev {
+	BCMA_BOOT_DEV_UNK = 0,
+	BCMA_BOOT_DEV_ROM,
+	BCMA_BOOT_DEV_PARALLEL,
+	BCMA_BOOT_DEV_SERIAL,
+	BCMA_BOOT_DEV_NAND,
+};
+
+static const char * const part_probes[] = { "bcm47xxpart", NULL };
 
 static struct physmap_flash_data bcma_pflash_data = {
 	.part_probe_types	= part_probes,
@@ -124,7 +135,6 @@ unsigned int bcma_core_mips_irq(struct bcma_device *dev)
 
 	return 5;
 }
-EXPORT_SYMBOL(bcma_core_mips_irq);
 
 static void bcma_core_mips_set_irq(struct bcma_device *dev, unsigned int irq)
 {
@@ -223,11 +233,51 @@ u32 bcma_cpu_clock(struct bcma_drv_mips *mcore)
 }
 EXPORT_SYMBOL(bcma_cpu_clock);
 
+static enum bcma_boot_dev bcma_boot_dev(struct bcma_bus *bus)
+{
+	struct bcma_drv_cc *cc = &bus->drv_cc;
+	u8 cc_rev = cc->core->id.rev;
+
+	if (cc_rev == 42) {
+		struct bcma_device *core;
+
+		core = bcma_find_core(bus, BCMA_CORE_NS_ROM);
+		if (core) {
+			switch (bcma_aread32(core, BCMA_IOST) &
+				BCMA_NS_ROM_IOST_BOOT_DEV_MASK) {
+			case BCMA_NS_ROM_IOST_BOOT_DEV_NOR:
+				return BCMA_BOOT_DEV_SERIAL;
+			case BCMA_NS_ROM_IOST_BOOT_DEV_NAND:
+				return BCMA_BOOT_DEV_NAND;
+			case BCMA_NS_ROM_IOST_BOOT_DEV_ROM:
+			default:
+				return BCMA_BOOT_DEV_ROM;
+			}
+		}
+	} else {
+		if (cc_rev == 38) {
+			if (cc->status & BCMA_CC_CHIPST_5357_NAND_BOOT)
+				return BCMA_BOOT_DEV_NAND;
+			else if (cc->status & BIT(5))
+				return BCMA_BOOT_DEV_ROM;
+		}
+
+		if ((cc->capabilities & BCMA_CC_CAP_FLASHT) ==
+		    BCMA_CC_FLASHT_PARA)
+			return BCMA_BOOT_DEV_PARALLEL;
+		else
+			return BCMA_BOOT_DEV_SERIAL;
+	}
+
+	return BCMA_BOOT_DEV_SERIAL;
+}
+
 static void bcma_core_mips_flash_detect(struct bcma_drv_mips *mcore)
 {
 	struct bcma_bus *bus = mcore->core->bus;
 	struct bcma_drv_cc *cc = &bus->drv_cc;
 	struct bcma_pflash *pflash = &cc->pflash;
+	enum bcma_boot_dev boot_dev;
 
 	switch (cc->capabilities & BCMA_CC_CAP_FLASHT) {
 	case BCMA_CC_FLASHT_STSER:
@@ -263,6 +313,26 @@ static void bcma_core_mips_flash_detect(struct bcma_drv_mips *mcore)
 			bcma_nflash_init(cc);
 		}
 	}
+
+	/* Determine flash type this SoC boots from */
+	boot_dev = bcma_boot_dev(bus);
+	switch (boot_dev) {
+	case BCMA_BOOT_DEV_PARALLEL:
+	case BCMA_BOOT_DEV_SERIAL:
+#ifdef CONFIG_BCM47XX
+		bcm47xx_nvram_init_from_mem(BCMA_SOC_FLASH2,
+					    BCMA_SOC_FLASH2_SZ);
+#endif
+		break;
+	case BCMA_BOOT_DEV_NAND:
+#ifdef CONFIG_BCM47XX
+		bcm47xx_nvram_init_from_mem(BCMA_SOC_FLASH1,
+					    BCMA_SOC_FLASH1_SZ);
+#endif
+		break;
+	default:
+		break;
+	}
 }
 
 void bcma_core_mips_early_init(struct bcma_drv_mips *mcore)
@@ -278,6 +348,32 @@ void bcma_core_mips_early_init(struct bcma_drv_mips *mcore)
 	mcore->early_setup_done = true;
 }
 
+static void bcma_fix_i2s_irqflag(struct bcma_bus *bus)
+{
+	struct bcma_device *cpu, *pcie, *i2s;
+
+	/* Fixup the interrupts in 4716/4748 for i2s core (2010 Broadcom SDK)
+	 * (IRQ flags > 7 are ignored when setting the interrupt masks)
+	 */
+	if (bus->chipinfo.id != BCMA_CHIP_ID_BCM4716 &&
+	    bus->chipinfo.id != BCMA_CHIP_ID_BCM4748)
+		return;
+
+	cpu = bcma_find_core(bus, BCMA_CORE_MIPS_74K);
+	pcie = bcma_find_core(bus, BCMA_CORE_PCIE);
+	i2s = bcma_find_core(bus, BCMA_CORE_I2S);
+	if (cpu && pcie && i2s &&
+	    bcma_aread32(cpu, BCMA_MIPS_OOBSELINA74) == 0x08060504 &&
+	    bcma_aread32(pcie, BCMA_MIPS_OOBSELINA74) == 0x08060504 &&
+	    bcma_aread32(i2s, BCMA_MIPS_OOBSELOUTA30) == 0x88) {
+		bcma_awrite32(cpu, BCMA_MIPS_OOBSELINA74, 0x07060504);
+		bcma_awrite32(pcie, BCMA_MIPS_OOBSELINA74, 0x07060504);
+		bcma_awrite32(i2s, BCMA_MIPS_OOBSELOUTA30, 0x87);
+		bcma_debug(bus,
+			   "Moved i2s interrupt to oob line 7 instead of 8\n");
+	}
+}
+
 void bcma_core_mips_init(struct bcma_drv_mips *mcore)
 {
 	struct bcma_bus *bus;
@@ -290,6 +386,8 @@ void bcma_core_mips_init(struct bcma_drv_mips *mcore)
 	bcma_debug(bus, "Initializing MIPS core...\n");
 
 	bcma_core_mips_early_init(mcore);
+
+	bcma_fix_i2s_irqflag(bus);
 
 	switch (bus->chipinfo.id) {
 	case BCMA_CHIP_ID_BCM4716:
@@ -327,7 +425,7 @@ void bcma_core_mips_init(struct bcma_drv_mips *mcore)
 		break;
 	default:
 		list_for_each_entry(core, &bus->cores, list) {
-			core->irq = bcma_core_irq(core);
+			core->irq = bcma_core_irq(core, 0);
 		}
 		bcma_err(bus,
 			 "Unknown device (0x%x) found, can not configure IRQs\n",

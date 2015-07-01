@@ -1,7 +1,7 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
  * Fibre Channel Host Bus Adapters.                                *
- * Copyright (C) 2004-2014 Emulex.  All rights reserved.           *
+ * Copyright (C) 2004-2015 Emulex.  All rights reserved.           *
  * EMULEX and SLI are trademarks of Emulex.                        *
  * www.emulex.com                                                  *
  * Portions Copyright (C) 2004-2005 Christoph Hellwig              *
@@ -3343,7 +3343,11 @@ lpfc_els_retry(struct lpfc_hba *phba, struct lpfc_iocbq *cmdiocb,
 		/* FLOGI retry policy */
 		retry = 1;
 		/* retry FLOGI forever */
-		maxretry = 0;
+		if (phba->link_flag != LS_LOOPBACK_MODE)
+			maxretry = 0;
+		else
+			maxretry = 2;
+
 		if (cmdiocb->retry >= 100)
 			delay = 5000;
 		else if (cmdiocb->retry >= 32)
@@ -3706,6 +3710,11 @@ lpfc_mbx_cmpl_dflt_rpi(struct lpfc_hba *phba, LPFC_MBOXQ_t *pmb)
 	kfree(mp);
 	mempool_free(pmb, phba->mbox_mem_pool);
 	if (ndlp) {
+		lpfc_printf_vlog(ndlp->vport, KERN_INFO, LOG_NODE,
+				 "0006 rpi%x DID:%x flg:%x %d map:%x %p\n",
+				 ndlp->nlp_rpi, ndlp->nlp_DID, ndlp->nlp_flag,
+				 atomic_read(&ndlp->kref.refcount),
+				 ndlp->nlp_usg_map, ndlp);
 		if (NLP_CHK_NODE_ACT(ndlp)) {
 			lpfc_nlp_put(ndlp);
 			/* This is the end of the default RPI cleanup logic for
@@ -5203,7 +5212,6 @@ lpfc_els_rcv_flogi(struct lpfc_vport *vport, struct lpfc_iocbq *cmdiocb,
 		port_state = vport->port_state;
 		vport->fc_flag |= FC_PT2PT;
 		vport->fc_flag &= ~(FC_FABRIC | FC_PUBLIC_LOOP);
-		vport->port_state = LPFC_FLOGI;
 		spin_unlock_irq(shost->host_lock);
 		lpfc_printf_vlog(vport, KERN_INFO, LOG_ELS,
 				 "3311 Rcv Flogi PS x%x new PS x%x "
@@ -6701,6 +6709,13 @@ lpfc_els_unsol_buffer(struct lpfc_hba *phba, struct lpfc_sli_ring *pring,
 
 	phba->fc_stat.elsRcvFrame++;
 
+	/*
+	 * Do not process any unsolicited ELS commands
+	 * if the ndlp is in DEV_LOSS
+	 */
+	if (ndlp->nlp_add_flag & NLP_IN_DEV_LOSS)
+		goto dropit;
+
 	elsiocb->context1 = lpfc_nlp_get(ndlp);
 	elsiocb->vport = vport;
 
@@ -8195,9 +8210,11 @@ lpfc_sli4_els_xri_aborted(struct lpfc_hba *phba,
 			list_del(&sglq_entry->list);
 			ndlp = sglq_entry->ndlp;
 			sglq_entry->ndlp = NULL;
+			spin_lock(&pring->ring_lock);
 			list_add_tail(&sglq_entry->list,
 				&phba->sli4_hba.lpfc_sgl_list);
 			sglq_entry->state = SGL_FREED;
+			spin_unlock(&pring->ring_lock);
 			spin_unlock(&phba->sli4_hba.abts_sgl_list_lock);
 			spin_unlock_irqrestore(&phba->hbalock, iflag);
 			lpfc_set_rrq_active(phba, ndlp,
@@ -8216,12 +8233,15 @@ lpfc_sli4_els_xri_aborted(struct lpfc_hba *phba,
 		spin_unlock_irqrestore(&phba->hbalock, iflag);
 		return;
 	}
+	spin_lock(&pring->ring_lock);
 	sglq_entry = __lpfc_get_active_sglq(phba, lxri);
 	if (!sglq_entry || (sglq_entry->sli4_xritag != xri)) {
+		spin_unlock(&pring->ring_lock);
 		spin_unlock_irqrestore(&phba->hbalock, iflag);
 		return;
 	}
 	sglq_entry->state = SGL_XRI_ABORTED;
+	spin_unlock(&pring->ring_lock);
 	spin_unlock_irqrestore(&phba->hbalock, iflag);
 	return;
 }

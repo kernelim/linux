@@ -49,7 +49,7 @@ static int iser_start_rdma_unaligned_sg(struct iscsi_iser_task *iser_task,
 					struct iser_data_buf *data_copy,
 					enum iser_data_dir cmd_dir)
 {
-	struct ib_device *dev = iser_task->ib_conn->device->ib_device;
+	struct ib_device *dev = iser_task->iser_conn->ib_conn.device->ib_device;
 	struct scatterlist *sgl = (struct scatterlist *)data->buf;
 	struct scatterlist *sg;
 	char *mem = NULL;
@@ -73,7 +73,6 @@ static int iser_start_rdma_unaligned_sg(struct iscsi_iser_task *iser_task,
 
 	if (cmd_dir == ISER_DIR_OUT) {
 		/* copy the unaligned sg the buffer which is used for RDMA */
-		int i;
 		char *p, *from;
 
 		sgl = (struct scatterlist *)data->buf;
@@ -116,7 +115,7 @@ void iser_finalize_rdma_unaligned_sg(struct iscsi_iser_task *iser_task,
 	struct ib_device *dev;
 	unsigned long  cmd_data_len;
 
-	dev = iser_task->ib_conn->device->ib_device;
+	dev = iser_task->iser_conn->ib_conn.device->ib_device;
 
 	ib_dma_unmap_sg(dev, &data_copy->sg_single, 1,
 			(cmd_dir == ISER_DIR_OUT) ?
@@ -322,7 +321,7 @@ int iser_dma_map_task_data(struct iscsi_iser_task *iser_task,
 	struct ib_device *dev;
 
 	iser_task->dir[iser_dir] = 1;
-	dev = iser_task->ib_conn->device->ib_device;
+	dev = iser_task->iser_conn->ib_conn.device->ib_device;
 
 	data->dma_nents = ib_dma_map_sg(dev, data->buf, data->size, dma_dir);
 	if (data->dma_nents == 0) {
@@ -333,12 +332,13 @@ int iser_dma_map_task_data(struct iscsi_iser_task *iser_task,
 }
 
 void iser_dma_unmap_task_data(struct iscsi_iser_task *iser_task,
-			      struct iser_data_buf *data)
+			      struct iser_data_buf *data,
+			      enum dma_data_direction dir)
 {
 	struct ib_device *dev;
 
-	dev = iser_task->ib_conn->device->ib_device;
-	ib_dma_unmap_sg(dev, data->buf, data->size, DMA_FROM_DEVICE);
+	dev = iser_task->iser_conn->ib_conn.device->ib_device;
+	ib_dma_unmap_sg(dev, data->buf, data->size, dir);
 }
 
 static int fall_to_bounce_buf(struct iscsi_iser_task *iser_task,
@@ -348,7 +348,7 @@ static int fall_to_bounce_buf(struct iscsi_iser_task *iser_task,
 			      enum iser_data_dir cmd_dir,
 			      int aligned_len)
 {
-	struct iscsi_conn    *iscsi_conn = iser_task->ib_conn->iscsi_conn;
+	struct iscsi_conn    *iscsi_conn = iser_task->iser_conn->iscsi_conn;
 
 	iscsi_conn->fmr_unalign_cnt++;
 	iser_warn("rdma alignment violation (%d/%d aligned) or FMR not supported\n",
@@ -358,7 +358,9 @@ static int fall_to_bounce_buf(struct iscsi_iser_task *iser_task,
 		iser_data_buf_dump(mem, ibdev);
 
 	/* unmap the command data before accessing it */
-	iser_dma_unmap_task_data(iser_task, mem);
+	iser_dma_unmap_task_data(iser_task, mem,
+				 (cmd_dir == ISER_DIR_OUT) ?
+				 DMA_TO_DEVICE : DMA_FROM_DEVICE);
 
 	/* allocate copy buf, if we are writing, copy the */
 	/* unaligned scatterlist, dma map the copy        */
@@ -377,7 +379,7 @@ static int fall_to_bounce_buf(struct iscsi_iser_task *iser_task,
 int iser_reg_rdma_mem_fmr(struct iscsi_iser_task *iser_task,
 			  enum iser_data_dir cmd_dir)
 {
-	struct iser_conn     *ib_conn = iser_task->ib_conn;
+	struct ib_conn *ib_conn = &iser_task->iser_conn->ib_conn;
 	struct iser_device   *device = ib_conn->device;
 	struct ib_device     *ibdev = device->ib_device;
 	struct iser_data_buf *mem = &iser_task->data[cmd_dir];
@@ -409,7 +411,6 @@ int iser_reg_rdma_mem_fmr(struct iscsi_iser_task *iser_task,
 		regd_buf->reg.rkey = device->mr->rkey;
 		regd_buf->reg.len  = ib_sg_dma_len(ibdev, &sg[0]);
 		regd_buf->reg.va   = ib_sg_dma_address(ibdev, &sg[0]);
-		regd_buf->reg.is_mr = 0;
 
 		iser_dbg("PHYSICAL Mem.register: lkey: 0x%08X rkey: 0x%08X  "
 			 "va: 0x%08lX sz: %ld]\n",
@@ -432,7 +433,7 @@ int iser_reg_rdma_mem_fmr(struct iscsi_iser_task *iser_task,
 				 ib_conn->fmr.page_vec->offset);
 			for (i = 0; i < ib_conn->fmr.page_vec->length; i++)
 				iser_err("page_vec[%d] = 0x%llx\n", i,
-					 (unsigned long long) ib_conn->fmr.page_vec->pages[i]);
+					 (unsigned long long)ib_conn->fmr.page_vec->pages[i]);
 		}
 		if (err)
 			return err;
@@ -440,77 +441,74 @@ int iser_reg_rdma_mem_fmr(struct iscsi_iser_task *iser_task,
 	return 0;
 }
 
-static inline enum ib_t10_dif_type
-scsi2ib_prot_type(unsigned char prot_type)
+static inline void
+iser_set_dif_domain(struct scsi_cmnd *sc, struct ib_sig_attrs *sig_attrs,
+		    struct ib_sig_domain *domain)
 {
-	switch (prot_type) {
-	case SCSI_PROT_DIF_TYPE0:
-		return IB_T10DIF_NONE;
-	case SCSI_PROT_DIF_TYPE1:
-		return IB_T10DIF_TYPE1;
-	case SCSI_PROT_DIF_TYPE2:
-		return IB_T10DIF_TYPE2;
-	case SCSI_PROT_DIF_TYPE3:
-		return IB_T10DIF_TYPE3;
-	default:
-		return IB_T10DIF_NONE;
-	}
-}
-
+	domain->sig_type = IB_SIG_TYPE_T10_DIF;
+	domain->sig.dif.pi_interval = sc->device->sector_size;
+	domain->sig.dif.ref_tag = scsi_get_lba(sc) & 0xffffffff;
+	/*
+	 * At the moment we hard code those, but in the future
+	 * we will take them from sc.
+	 */
+	domain->sig.dif.apptag_check_mask = 0xffff;
+	domain->sig.dif.app_escape = true;
+	domain->sig.dif.ref_escape = true;
+	if (scsi_get_prot_type(sc) == SCSI_PROT_DIF_TYPE1 ||
+	    scsi_get_prot_type(sc) == SCSI_PROT_DIF_TYPE2)
+		domain->sig.dif.ref_remap = true;
+};
 
 static int
 iser_set_sig_attrs(struct scsi_cmnd *sc, struct ib_sig_attrs *sig_attrs)
 {
-	unsigned char scsi_ptype = scsi_get_prot_type(sc);
-
-	sig_attrs->mem.sig_type = IB_SIG_TYPE_T10_DIF;
-	sig_attrs->wire.sig_type = IB_SIG_TYPE_T10_DIF;
-	sig_attrs->mem.sig.dif.pi_interval = sc->device->sector_size;
-	sig_attrs->wire.sig.dif.pi_interval = sc->device->sector_size;
-
 	switch (scsi_get_prot_op(sc)) {
 	case SCSI_PROT_WRITE_INSERT:
 	case SCSI_PROT_READ_STRIP:
-		sig_attrs->mem.sig.dif.type = IB_T10DIF_NONE;
-		sig_attrs->wire.sig.dif.type = scsi2ib_prot_type(scsi_ptype);
+		sig_attrs->mem.sig_type = IB_SIG_TYPE_NONE;
+		iser_set_dif_domain(sc, sig_attrs, &sig_attrs->wire);
 		sig_attrs->wire.sig.dif.bg_type = IB_T10DIF_CRC;
-		sig_attrs->wire.sig.dif.ref_tag = scsi_get_lba(sc) &
-						  0xffffffff;
 		break;
 	case SCSI_PROT_READ_INSERT:
 	case SCSI_PROT_WRITE_STRIP:
-		sig_attrs->mem.sig.dif.type = scsi2ib_prot_type(scsi_ptype);
-		sig_attrs->mem.sig.dif.bg_type = IB_T10DIF_CRC;
-		sig_attrs->mem.sig.dif.ref_tag = scsi_get_lba(sc) &
-						 0xffffffff;
-		sig_attrs->wire.sig.dif.type = IB_T10DIF_NONE;
+		sig_attrs->wire.sig_type = IB_SIG_TYPE_NONE;
+		iser_set_dif_domain(sc, sig_attrs, &sig_attrs->mem);
+		/*
+		 * At the moment we use this modparam to tell what is
+		 * the memory bg_type, in the future we will take it
+		 * from sc.
+		 */
+		sig_attrs->mem.sig.dif.bg_type = iser_pi_guard ? IB_T10DIF_CSUM :
+						 IB_T10DIF_CRC;
 		break;
 	case SCSI_PROT_READ_PASS:
 	case SCSI_PROT_WRITE_PASS:
-		sig_attrs->mem.sig.dif.type = scsi2ib_prot_type(scsi_ptype);
-		sig_attrs->mem.sig.dif.bg_type = IB_T10DIF_CRC;
-		sig_attrs->mem.sig.dif.ref_tag = scsi_get_lba(sc) &
-						 0xffffffff;
-		sig_attrs->wire.sig.dif.type = scsi2ib_prot_type(scsi_ptype);
+		iser_set_dif_domain(sc, sig_attrs, &sig_attrs->wire);
 		sig_attrs->wire.sig.dif.bg_type = IB_T10DIF_CRC;
-		sig_attrs->wire.sig.dif.ref_tag = scsi_get_lba(sc) &
-						  0xffffffff;
+		iser_set_dif_domain(sc, sig_attrs, &sig_attrs->mem);
+		/*
+		 * At the moment we use this modparam to tell what is
+		 * the memory bg_type, in the future we will take it
+		 * from sc.
+		 */
+		sig_attrs->mem.sig.dif.bg_type = iser_pi_guard ? IB_T10DIF_CSUM :
+						 IB_T10DIF_CRC;
 		break;
 	default:
 		iser_err("Unsupported PI operation %d\n",
 			 scsi_get_prot_op(sc));
 		return -EINVAL;
 	}
+
 	return 0;
 }
-
 
 static int
 iser_set_prot_checks(struct scsi_cmnd *sc, u8 *mask)
 {
 	switch (scsi_get_prot_type(sc)) {
 	case SCSI_PROT_DIF_TYPE0:
-		*mask = 0x0;
 		break;
 	case SCSI_PROT_DIF_TYPE1:
 	case SCSI_PROT_DIF_TYPE2:
@@ -528,18 +526,31 @@ iser_set_prot_checks(struct scsi_cmnd *sc, u8 *mask)
 	return 0;
 }
 
+static void
+iser_inv_rkey(struct ib_send_wr *inv_wr, struct ib_mr *mr)
+{
+	u32 rkey;
+
+	memset(inv_wr, 0, sizeof(*inv_wr));
+	inv_wr->opcode = IB_WR_LOCAL_INV;
+	inv_wr->wr_id = ISER_FASTREG_LI_WRID;
+	inv_wr->ex.invalidate_rkey = mr->rkey;
+
+	rkey = ib_inc_rkey(mr->rkey);
+	ib_update_fast_reg_key(mr, rkey);
+}
+
 static int
 iser_reg_sig_mr(struct iscsi_iser_task *iser_task,
 		struct fast_reg_descriptor *desc, struct ib_sge *data_sge,
 		struct ib_sge *prot_sge, struct ib_sge *sig_sge)
 {
-	struct iser_conn *ib_conn = iser_task->ib_conn;
+	struct ib_conn *ib_conn = &iser_task->iser_conn->ib_conn;
 	struct iser_pi_context *pi_ctx = desc->pi_ctx;
 	struct ib_send_wr sig_wr, inv_wr;
 	struct ib_send_wr *bad_wr, *wr = NULL;
 	struct ib_sig_attrs sig_attrs;
 	int ret;
-	u32 key;
 
 	memset(&sig_attrs, 0, sizeof(sig_attrs));
 	ret = iser_set_sig_attrs(iser_task->sc, &sig_attrs);
@@ -551,14 +562,8 @@ iser_reg_sig_mr(struct iscsi_iser_task *iser_task,
 		goto err;
 
 	if (!(desc->reg_indicators & ISER_SIG_KEY_VALID)) {
-		memset(&inv_wr, 0, sizeof(inv_wr));
-		inv_wr.opcode = IB_WR_LOCAL_INV;
-		inv_wr.wr_id = ISER_FASTREG_LI_WRID;
-		inv_wr.ex.invalidate_rkey = pi_ctx->sig_mr->rkey;
+		iser_inv_rkey(&inv_wr, pi_ctx->sig_mr);
 		wr = &inv_wr;
-		/* Bump the key */
-		key = (u8)(pi_ctx->sig_mr->rkey & 0x000000FF);
-		ib_update_fast_reg_key(pi_ctx->sig_mr, ++key);
 	}
 
 	memset(&sig_wr, 0, sizeof(sig_wr));
@@ -609,14 +614,13 @@ static int iser_fast_reg_mr(struct iscsi_iser_task *iser_task,
 			    struct ib_sge *sge)
 {
 	struct fast_reg_descriptor *desc = regd_buf->reg.mem_h;
-	struct iser_conn *ib_conn = iser_task->ib_conn;
+	struct ib_conn *ib_conn = &iser_task->iser_conn->ib_conn;
 	struct iser_device *device = ib_conn->device;
 	struct ib_device *ibdev = device->ib_device;
 	struct ib_mr *mr;
 	struct ib_fast_reg_page_list *frpl;
 	struct ib_send_wr fastreg_wr, inv_wr;
 	struct ib_send_wr *bad_wr, *wr = NULL;
-	u8 key;
 	int ret, offset, size, plen;
 
 	/* if there a single dma entry, dma mr suffices */
@@ -648,14 +652,8 @@ static int iser_fast_reg_mr(struct iscsi_iser_task *iser_task,
 	}
 
 	if (!(desc->reg_indicators & ind)) {
-		memset(&inv_wr, 0, sizeof(inv_wr));
-		inv_wr.wr_id = ISER_FASTREG_LI_WRID;
-		inv_wr.opcode = IB_WR_LOCAL_INV;
-		inv_wr.ex.invalidate_rkey = mr->rkey;
+		iser_inv_rkey(&inv_wr, mr);
 		wr = &inv_wr;
-		/* Bump the key */
-		key = (u8)(mr->rkey & 0x000000FF);
-		ib_update_fast_reg_key(mr, ++key);
 	}
 
 	/* Prepare FASTREG WR */
@@ -700,7 +698,7 @@ static int iser_fast_reg_mr(struct iscsi_iser_task *iser_task,
 int iser_reg_rdma_mem_fastreg(struct iscsi_iser_task *iser_task,
 			      enum iser_data_dir cmd_dir)
 {
-	struct iser_conn *ib_conn = iser_task->ib_conn;
+	struct ib_conn *ib_conn = &iser_task->iser_conn->ib_conn;
 	struct iser_device *device = ib_conn->device;
 	struct ib_device *ibdev = device->ib_device;
 	struct iser_data_buf *mem = &iser_task->data[cmd_dir];
@@ -773,15 +771,11 @@ int iser_reg_rdma_mem_fastreg(struct iscsi_iser_task *iser_task,
 		regd_buf->reg.rkey = desc->pi_ctx->sig_mr->rkey;
 		regd_buf->reg.va = sig_sge.addr;
 		regd_buf->reg.len = sig_sge.length;
-		regd_buf->reg.is_mr = 1;
 	} else {
-		if (desc) {
+		if (desc)
 			regd_buf->reg.rkey = desc->data_mr->rkey;
-			regd_buf->reg.is_mr = 1;
-		} else {
+		else
 			regd_buf->reg.rkey = device->mr->rkey;
-			regd_buf->reg.is_mr = 0;
-		}
 
 		regd_buf->reg.lkey = data_sge.lkey;
 		regd_buf->reg.va = data_sge.addr;

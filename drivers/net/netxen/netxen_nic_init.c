@@ -14,9 +14,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston,
- * MA  02111-1307, USA.
+ * along with this program; if not, see <http://www.gnu.org/licenses/>.
  *
  * The full GNU General Public License is included in this distribution
  * in the file called "COPYING".
@@ -136,6 +134,7 @@ void netxen_release_tx_buffers(struct netxen_adapter *adapter)
 	int i, j;
 	struct nx_host_tx_ring *tx_ring = adapter->tx_ring;
 
+	spin_lock(&adapter->tx_clean_lock);
 	cmd_buf = tx_ring->cmd_buf_arr;
 	for (i = 0; i < tx_ring->num_desc; i++) {
 		buffrag = cmd_buf->frag_array;
@@ -159,6 +158,7 @@ void netxen_release_tx_buffers(struct netxen_adapter *adapter)
 		}
 		cmd_buf++;
 	}
+	spin_unlock(&adapter->tx_clean_lock);
 }
 
 void netxen_free_sw_resources(struct netxen_adapter *adapter)
@@ -1837,9 +1837,9 @@ int netxen_process_cmd_ring(struct netxen_adapter *adapter)
 			break;
 	}
 
-	if (count && netif_running(netdev)) {
-		tx_ring->sw_consumer = sw_consumer;
+	tx_ring->sw_consumer = sw_consumer;
 
+	if (count && netif_running(netdev)) {
 		smp_mb();
 
 		if (netif_queue_stopped(netdev) && netif_carrier_ok(netdev))

@@ -261,6 +261,27 @@ int queue_delayed_work_on(int cpu, struct workqueue_struct *wq,
 }
 EXPORT_SYMBOL_GPL(queue_delayed_work_on);
 
+/**
+ * mod_delayed_work - modify delay of or queue a delayed work
+ * @wq: workqueue to use
+ * @dwork: work to queue
+ * @delay: number of jiffies to wait before queueing
+ *
+ * WARNING: unlike upstream mod_delayed_work() from newer kernel,
+ * this is not safe for atomic ctx!  Be sure to review call sites.
+ */
+bool mod_delayed_work(struct workqueue_struct *wq,
+		      struct delayed_work *dwork, unsigned long delay)
+{
+	bool ret;
+
+	WARN_ON_ONCE(in_irq());
+	ret = cancel_delayed_work(dwork);
+	queue_delayed_work(wq, dwork, delay);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(mod_delayed_work);
+
 static void run_workqueue(struct cpu_workqueue_struct *cwq)
 {
 	spin_lock_irq(&cwq->lock);
@@ -593,6 +614,13 @@ int cancel_delayed_work_sync(struct delayed_work *dwork)
 EXPORT_SYMBOL(cancel_delayed_work_sync);
 
 static struct workqueue_struct *keventd_wq __read_mostly;
+
+struct workqueue_struct *system_wq __read_mostly;
+EXPORT_SYMBOL(system_wq);
+struct workqueue_struct *system_long_wq __read_mostly;
+EXPORT_SYMBOL_GPL(system_long_wq);
+struct workqueue_struct *system_power_efficient_wq __read_mostly;
+EXPORT_SYMBOL_GPL(system_power_efficient_wq);
 
 /**
  * schedule_work - put work task in global workqueue
@@ -1081,5 +1109,9 @@ void __init init_workqueues(void)
 	cpu_singlethread_map = cpumask_of(singlethread_cpu);
 	hotcpu_notifier(workqueue_cpu_callback, 0);
 	keventd_wq = create_workqueue("events");
-	BUG_ON(!keventd_wq);
+	system_wq = create_workqueue("events");
+	system_long_wq = create_workqueue("events_long");
+	system_power_efficient_wq = create_workqueue("events_power_efficient");
+	BUG_ON(!keventd_wq || !system_wq || !system_long_wq ||
+	       !system_power_efficient_wq);
 }

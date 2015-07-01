@@ -98,14 +98,28 @@ typedef struct xfs_bufhash {
 	spinlock_t		bh_lock;
 } xfs_bufhash_t;
 
+/*
+ * The xfs_buftarg contains 2 notions of "sector size" -
+ *
+ * 1) The metadata sector size, which is the minimum unit and
+ *    alignment of IO which will be performed by metadata operations.
+ * 2) The device logical sector size
+ *
+ * The first is specified at mkfs time, and is stored on-disk in the
+ * superblock's sb_sectsize.
+ *
+ * The latter is derived from the underlying device, and controls direct IO
+ * alignment constraints.
+ */
 typedef struct xfs_buftarg {
 	dev_t			bt_dev;
 	struct block_device	*bt_bdev;
 	struct backing_dev_info	*bt_bdi;
 	struct xfs_mount	*bt_mount;
-	unsigned int		bt_bsize;
-	unsigned int		bt_sshift;
-	size_t			bt_smask;
+	unsigned int		bt_meta_sectorsize;
+	size_t			bt_meta_sectormask;
+	size_t			bt_logical_sectorsize;
+	size_t			bt_logical_sectormask;
 
 	/* per device delwri queue */
 	struct task_struct	*bt_task;
@@ -200,10 +214,11 @@ extern void xfs_buf_free(xfs_buf_t *);
 extern void xfs_buf_rele(xfs_buf_t *);
 
 /* Locking and Unlocking Buffers */
-extern int xfs_buf_cond_lock(xfs_buf_t *);
-extern int xfs_buf_lock_value(xfs_buf_t *);
+extern int xfs_buf_trylock(xfs_buf_t *);
 extern void xfs_buf_lock(xfs_buf_t *);
 extern void xfs_buf_unlock(xfs_buf_t *);
+#define xfs_buf_islocked(bp) \
+	((bp)->b_sema.count <= 0)
 
 /* Buffer Read and Write Routines */
 extern int xfs_bwrite(struct xfs_mount *mp, struct xfs_buf *bp);
@@ -289,10 +304,6 @@ void xfs_buf_stale(struct xfs_buf *bp);
 #define XFS_BUF_UNWRITE(bp)	((bp)->b_flags &= ~XBF_WRITE)
 #define XFS_BUF_ISWRITE(bp)	((bp)->b_flags & XBF_WRITE)
 
-#define XFS_BUF_IODONE_FUNC(bp)			((bp)->b_iodone)
-#define XFS_BUF_SET_IODONE_FUNC(bp, func)	((bp)->b_iodone = (func))
-#define XFS_BUF_CLR_IODONE_FUNC(bp)		((bp)->b_iodone = NULL)
-
 #define XFS_BUF_FSPRIVATE(bp, type)		((type)(bp)->b_fspriv)
 #define XFS_BUF_SET_FSPRIVATE(bp, val)		((bp)->b_fspriv = (void*)(val))
 #define XFS_BUF_FSPRIVATE2(bp, type)		((type)(bp)->b_fspriv2)
@@ -322,10 +333,6 @@ xfs_buf_set_ref(
 
 #define XFS_BUF_ISPINNED(bp)	atomic_read(&((bp)->b_pin_count))
 
-#define XFS_BUF_VALUSEMA(bp)	xfs_buf_lock_value(bp)
-#define XFS_BUF_CPSEMA(bp)	(xfs_buf_cond_lock(bp) == 0)
-#define XFS_BUF_VSEMA(bp)	xfs_buf_unlock(bp)
-#define XFS_BUF_PSEMA(bp,x)	xfs_buf_lock(bp)
 #define XFS_BUF_FINISH_IOWAIT(bp)	complete(&bp->b_iowait);
 
 #define XFS_BUF_SET_TARGET(bp, target)	((bp)->b_target = (target))

@@ -1208,15 +1208,15 @@ static int __cpufreq_remove_dev_finish(struct sys_device *sys_dev)
 	data = per_cpu(cpufreq_cpu_data, cpu);
 	read_unlock_irqrestore(&cpufreq_driver_lock, flags);
 
-	/* holding lock only for neccesary part of code */
-	down_write(&per_cpu(cpu_policy_rwsem, policy_cpu));
-	cpumask_clear_cpu(cpu, data->cpus);
-	up_write(&per_cpu(cpu_policy_rwsem, policy_cpu));
-
 	if (!data) {
 		cpufreq_debug_enable_ratelimit();
 		return -EINVAL;
 	}
+
+	/* holding lock only for neccesary part of code */
+	down_write(&per_cpu(cpu_policy_rwsem, policy_cpu));
+	cpumask_clear_cpu(cpu, data->cpus);
+	up_write(&per_cpu(cpu_policy_rwsem, policy_cpu));
 
 	kobject_put(&data->kobj);
 	/* we need to make sure that the underlying kobj is actually

@@ -31,6 +31,8 @@
 #include <linux/tick.h>
 #include <linux/kthread.h>
 
+#include "timekeeping_internal.h"
+
 /* RHEL6: fail clocksource if it is found to be unstable.
  * set 'clocksource_failover' as boot parameter to enable.*/
 static int clocksource_failover;
@@ -249,7 +251,7 @@ void clocksource_mark_unstable(struct clocksource *cs)
 static void clocksource_watchdog(unsigned long data)
 {
 	struct clocksource *cs;
-	cycle_t csnow, wdnow;
+	cycle_t csnow, wdnow, delta;
 	int64_t wd_nsec, cs_nsec;
 	int next_cpu;
 
@@ -279,11 +281,12 @@ static void clocksource_watchdog(unsigned long data)
 			continue;
 		}
 
-		wd_nsec = clocksource_cyc2ns((wdnow - cs->wd_last) & watchdog->mask,
-					     watchdog->mult, watchdog->shift);
+		delta = clocksource_delta(wdnow, cs->wd_last, watchdog->mask);
+		wd_nsec = clocksource_cyc2ns(delta, watchdog->mult,
+					     watchdog->shift);
 
-		cs_nsec = clocksource_cyc2ns((csnow - cs->cs_last) &
-					     cs->mask, cs->mult, cs->shift);
+		delta = clocksource_delta(csnow, cs->cs_last, cs->mask);
+		cs_nsec = clocksource_cyc2ns(delta, cs->mult, cs->shift);
 		cs->cs_last = csnow;
 		cs->wd_last = wdnow;
 

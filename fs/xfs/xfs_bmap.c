@@ -228,7 +228,7 @@ xfs_bmap_isaeof(
 	xfs_inode_t	*ip,		/* incore inode pointer */
 	xfs_fileoff_t   off,		/* file offset in fsblocks */
 	int             whichfork,	/* data or attribute fork */
-	char		*aeof);		/* return value */
+	bool		*aeof);		/* return value */
 
 /*
  * Compute the worst-case number of indirect blocks that will be used
@@ -4287,8 +4287,8 @@ xfs_bmap_validate_ret(
 }
 #endif /* DEBUG */
 
-STATIC int
-__xfs_bmapi_allocate(
+static int
+xfs_bmapi_allocate(
 	struct xfs_bmalloca	*bma,
 	xfs_extnum_t		*lastx,
 	struct xfs_btree_cur	**cur,
@@ -4423,78 +4423,6 @@ __xfs_bmapi_allocate(
 	ASSERT(bma->gotp->br_state == XFS_EXT_NORM ||
 	       bma->gotp->br_state == XFS_EXT_UNWRITTEN);
 	return 0;
-}
-
-struct xfs_bmalloc_work {
-	struct completion	*done;
-	struct work_struct	work;
-	int			result;
-
-	struct xfs_bmalloca	*bma;
-	xfs_extnum_t		*lastx;
-	struct xfs_btree_cur	**cur;
-	xfs_fsblock_t		*firstblock;
-	struct xfs_bmap_free	*flist;
-	int			flags;
-	int			*nallocs;
-	int			*logflags;
-};
-
-static void
-xfs_bmapi_allocate_worker(
-	struct work_struct	*work)
-{
-	struct xfs_bmalloc_work	*args = container_of(work,
-						struct xfs_bmalloc_work, work);
-	unsigned long		pflags;
-
-	/* we are in a transaction context here */
-	current_set_flags_nested(&pflags, PF_FSTRANS);
-
-	args->result = __xfs_bmapi_allocate(args->bma, args->lastx, args->cur,
-				args->firstblock, args->flist, args->flags,
-				args->nallocs, args->logflags);
-	complete(args->done);
-
-	current_restore_flags_nested(&pflags, PF_FSTRANS);
-}
-
-/*
- * Some allocation requests often come in with little stack to work on. Push
- * them off to a worker thread so there is lots of stack to use. Otherwise just
- * call directly to avoid the context switch overhead here.
- */
-int
-xfs_bmapi_allocate(
-	struct xfs_bmalloca	*bma,
-	xfs_extnum_t		*lastx,
-	struct xfs_btree_cur	**cur,
-	xfs_fsblock_t		*firstblock,
-	struct xfs_bmap_free	*flist,
-	int			flags,
-	int			*nallocs,
-	int			*logflags)
-{
-	DECLARE_COMPLETION_ONSTACK(done);
-	struct xfs_bmalloc_work	args;
-
-	if (!bma->stack_switch)
-		return __xfs_bmapi_allocate(bma, lastx, cur, firstblock, flist,
-					    flags, nallocs, logflags);
-
-	args.done = &done;
-	args.bma = bma;
-	args.lastx = lastx;
-	args.cur = cur;
-	args.firstblock = firstblock;
-	args.flist = flist;
-	args.flags = flags;
-	args.nallocs = nallocs;
-	args.logflags = logflags;
-	INIT_WORK(&args.work, xfs_bmapi_allocate_worker);
-	queue_work(xfs_alloc_wq, &args.work);
-	wait_for_completion(&done);
-	return args.result;
 }
 
 /*
@@ -4741,9 +4669,6 @@ xfs_bmapi(
 	bma.gotp = &got;
 	bma.total = total;
 	bma.userdata = 0;
-
-	if (flags & XFS_BMAPI_STACK_SWITCH)
-		bma.stack_switch = 1;
 
 	while (bno < end && n < *nmap) {
 		/*
@@ -5794,7 +5719,7 @@ xfs_bmap_isaeof(
 	xfs_inode_t	*ip,		/* incore inode pointer */
 	xfs_fileoff_t   off,		/* file offset in fsblocks */
 	int             whichfork,	/* data or attribute fork */
-	char		*aeof)		/* return value */
+	bool		*aeof)		/* return value */
 {
 	int		error;		/* error return value */
 	xfs_ifork_t	*ifp;		/* inode fork pointer */

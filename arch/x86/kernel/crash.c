@@ -29,8 +29,6 @@
 #include <asm/cpu.h>
 #include <asm/reboot.h>
 #include <asm/virtext.h>
-#include <asm/iommu.h>
-
 
 int in_crash_kexec;
 

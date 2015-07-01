@@ -32,6 +32,8 @@ void refrigerator(void)
 	task_lock(current);
 	if (freezing(current)) {
 		frozen_process();
+		/* prevent accounting of that task to load */
+		current->flags |= PF_FREEZING;
 		task_unlock(current);
 	} else {
 		task_unlock(current);
@@ -43,9 +45,6 @@ void refrigerator(void)
 	spin_lock_irq(&current->sighand->siglock);
 	recalc_sigpending(); /* We sent fake signal, clean it up */
 	spin_unlock_irq(&current->sighand->siglock);
-
-	/* prevent accounting of that task to load */
-	current->flags |= PF_FREEZING;
 
 	for (;;) {
 		set_current_state(TASK_UNINTERRUPTIBLE);

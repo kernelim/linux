@@ -131,6 +131,7 @@ struct file *get_empty_filp(void)
 	rwlock_init(&f->f_owner.lock);
 	f->f_cred = get_cred(cred);
 	spin_lock_init(&f->f_lock);
+	mutex_init(&f->f_pos_lock);
 	eventpoll_init_file(f);
 	/* f->f_version: 0 */
 	return f;
@@ -319,6 +320,29 @@ struct file *fget_light(unsigned int fd, int *fput_needed)
 	return file;
 }
 
+/*
+ * We only lock f_pos if we have threads or if the file might be
+ * shared with another process. In both cases we'll have an elevated
+ * file count (done either by fdget() or by fork()).
+ */
+struct file *fget_light_pos(unsigned int fd, int *fput_needed)
+{
+	struct file *file = fget_light(fd, fput_needed);
+
+	if (file && (file->f_mode & FMODE_ATOMIC_POS)) {
+		if (file_count(file) > 1) {
+			*fput_needed |= FDPUT_POS_UNLOCK;
+			mutex_lock(&file->f_pos_lock);
+		}
+	}
+	return file;
+}
+
+/* only to avoid giving file.h struct file */
+void fput_pos_unlock(struct file *file)
+{
+	mutex_unlock(&file->f_pos_lock);
+}
 
 void put_filp(struct file *file)
 {

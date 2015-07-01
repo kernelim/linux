@@ -7,10 +7,9 @@
 
 void mark_hardware_unsupported(const char *msg)
 {
-	printk(KERN_CRIT "UNSUPPORTED HARDWARE DEVICE: %s\n", msg);
-	WARN(1,
-	     "Your hardware is unsupported.  Please do not report "
-	     "bugs, panics, oopses, etc., on this hardware.\n");
+	/* Print one single message */
+	pr_crit("Warning: %s - this hardware has not undergone testing by Red Hat and might not be certified. Please consult https://hardware.redhat.com for certified hardware.\n", msg);
+
 }
 EXPORT_SYMBOL(mark_hardware_unsupported);
 

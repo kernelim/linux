@@ -1242,7 +1242,7 @@ scsi_show_extd_sense(unsigned char asc, unsigned char ascq)
 		if (asc >= 0x80)
 			printk("<<vendor>> ASC=0x%x ASCQ=0x%x", asc,
 			       ascq);
-		if (ascq >= 0x80)
+		else if (ascq >= 0x80)
 			printk("ASC=0x%x <<vendor>> ASCQ=0x%x", asc,
 			       ascq);
 		else

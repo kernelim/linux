@@ -211,6 +211,8 @@ static struct net_device *new_bridge_dev(struct net *net, const char *name)
 	memcpy(br->group_addr, br_reserved_address, ETH_ALEN);
 
 	br->stp_enabled = BR_NO_STP;
+	br->group_fwd_mask = BR_GROUPFWD_DEFAULT;
+
 	br->designated_root = br->bridge_id;
 	br->root_path_cost = 0;
 	br->root_port = 0;
@@ -435,7 +437,7 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 	if (err)
 		goto err2;
 
-	if (br_netpoll_info(br) && ((err = br_netpoll_enable(p))))
+	if (br_netpoll_info(br) && ((err = br_netpoll_enable(p, GFP_KERNEL))))
 		goto err3;
 
 	rcu_assign_pointer(dev->br_port, p);
