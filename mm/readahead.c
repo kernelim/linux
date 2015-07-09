@@ -195,6 +195,7 @@ out:
 	return ret;
 }
 
+#define MAX_READAHEAD   ((512*4096)/PAGE_CACHE_SIZE)
 /*
  * Chunk the readahead into 2 megabyte units, so that we don't pin too much
  * memory at once.
@@ -211,7 +212,7 @@ int force_page_cache_readahead(struct address_space *mapping, struct file *filp,
 	while (nr_to_read) {
 		int err;
 
-		unsigned long this_chunk = (2 * 1024 * 1024) / PAGE_CACHE_SIZE;
+		unsigned long this_chunk = MAX_READAHEAD;
 
 		if (this_chunk > nr_to_read)
 			this_chunk = nr_to_read;
@@ -228,14 +229,15 @@ int force_page_cache_readahead(struct address_space *mapping, struct file *filp,
 	return ret;
 }
 
-#define MAX_READAHEAD   ((512*4096)/PAGE_CACHE_SIZE)
 /*
  * Given a desired number of PAGE_CACHE_SIZE readahead pages, return a
  * sensible upper limit.
  */
 unsigned long max_sane_readahead(unsigned long nr)
 {
-	return min(nr, MAX_READAHEAD);
+	return min(nr, max(MAX_READAHEAD,
+			  (node_page_state(numa_node_id(), NR_INACTIVE_FILE) +
+			   node_page_state(numa_node_id(), NR_FREE_PAGES)) / 2));
 }
 
 /*

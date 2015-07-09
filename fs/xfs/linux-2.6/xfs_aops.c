@@ -1447,15 +1447,24 @@ xfs_end_io_direct_write(
 	bool			is_async)
 {
 	struct xfs_ioend	*ioend = iocb->private;
+	struct xfs_inode	*ip = XFS_I(ioend->io_inode);
+	unsigned long		flags;
 
 	/*
 	 * While the generic direct I/O code updates the inode size, it does
 	 * so only after the end_io handler is called, which means our
 	 * end_io handler thinks the on-disk size is outside the in-core
 	 * size.  To prevent this just update it a little bit earlier here.
+	 *
+	 * We need to lock the test/set EOF update as we can be racing with
+	 * other IO completions here to update the EOF. Failing to serialise
+	 * here can result in EOF moving backwards and Bad Things Happen when
+	 * that occurs.
 	 */
+	spin_lock_irqsave(&ip->i_size_lock, flags);
 	if (offset + size > i_size_read(ioend->io_inode))
 		i_size_write(ioend->io_inode, offset + size);
+	spin_unlock_irqrestore(&ip->i_size_lock, flags);
 
 	/*
 	 * blockdev_direct_IO can return an error even after the I/O

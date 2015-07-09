@@ -94,6 +94,7 @@ int sysctl_ip_vs_sync_qlen_max; /* init in ip_vs_control_init() */
 int sysctl_ip_vs_sync_sock_size = 0;
 int sysctl_ip_vs_sync_refresh_period = DEFAULT_SYNC_REFRESH_PERIOD;
 int sysctl_ip_vs_sync_retries;  /* init in ip_vs_control_init() */
+int sysctl_ip_vs_conn_reuse_mode = 1;
 
 
 #ifdef CONFIG_IP_VS_DEBUG
@@ -1615,6 +1616,13 @@ static struct ctl_table vs_vars[] = {
 	{
 		.procname	= "amemthresh",
 		.data		= &sysctl_ip_vs_amemthresh,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "conn_reuse_mode",
+		.data		= &sysctl_ip_vs_conn_reuse_mode,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,

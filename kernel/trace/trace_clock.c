@@ -42,6 +42,7 @@ u64 notrace trace_clock_local(void)
 
 	return clock;
 }
+EXPORT_SYMBOL_GPL(trace_clock_local);
 
 /*
  * trace_clock(): 'inbetween' trace clock. Not completely serialized,
@@ -55,7 +56,7 @@ u64 notrace trace_clock(void)
 {
 	return cpu_clock(raw_smp_processor_id());
 }
-
+EXPORT_SYMBOL_GPL(trace_clock);
 
 /*
  * trace_clock_global(): special globally coherent trace clock
@@ -111,3 +112,4 @@ u64 notrace trace_clock_global(void)
 
 	return now;
 }
+EXPORT_SYMBOL_GPL(trace_clock_global);

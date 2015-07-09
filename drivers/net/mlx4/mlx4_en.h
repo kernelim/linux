@@ -561,7 +561,7 @@ struct mlx4_en_priv {
 	int allocated;
 	int stride;
 	int rx_csum;
-	unsigned char prev_mac[ETH_ALEN + 2];
+	unsigned char current_mac[ETH_ALEN + 2];
 	int mac_index;
 	unsigned max_mtu;
 	int base_qpn;

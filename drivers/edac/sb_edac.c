@@ -835,6 +835,9 @@ static int sbridge_get_active_channels(const u8 bus, enum type type,
 	if (type == IVY_BRIDGE && get_pdev_same_bus(bus, PCI_DEVICE_ID_INTEL_IBRIDGE_IMC_HA1))
 		ha2 = true;
 
+	if (type == HASWELL && get_pdev_same_bus(bus, PCI_DEVICE_ID_INTEL_HASWELL_IMC_HA1))
+		ha2 = true;
+
 	for (i = 0; i < NUM_CHANNELS; i++) {
 		u32 mtr;
 

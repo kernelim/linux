@@ -928,6 +928,7 @@ xfs_fs_inode_init_once(
 	atomic_set(&ip->i_iocount, 0);
 	atomic_set(&ip->i_pincount, 0);
 	spin_lock_init(&ip->i_flags_lock);
+	spin_lock_init(&ip->i_size_lock);
 	init_waitqueue_head(&ip->i_ipin_wait);
 	/*
 	 * Because we want to use a counting completion, complete

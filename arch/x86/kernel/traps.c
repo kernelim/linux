@@ -30,6 +30,7 @@
 #include <linux/mm.h>
 #include <linux/smp.h>
 #include <linux/io.h>
+#include <linux/crash_dump.h>
 
 #ifdef CONFIG_EISA
 #include <linux/ioport.h>
@@ -426,6 +427,11 @@ static notrace __kprobes void
 io_check_error(unsigned char reason, struct pt_regs *regs)
 {
 	unsigned long i;
+
+	if (is_kdump_kernel()) {
+		printk("Ignoring NMI IOCK for now\n");
+		return;
+	}
 
 	if (notify_die(DIE_NMIIOCHECK, "nmi", regs, reason, 2, SIGINT) ==
 			NOTIFY_STOP)

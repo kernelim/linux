@@ -899,6 +899,7 @@ extern const struct ctl_path net_vs_ctl_path[];
 extern int sysctl_ip_vs_sync_ver;
 extern int sysctl_ip_vs_sync_qlen_max;
 extern int sysctl_ip_vs_sync_sock_size;
+extern int sysctl_ip_vs_conn_reuse_mode;
 
 #define IPVS_SYNC_WAKEUP_RATE	8
 #define IPVS_SYNC_QLEN_MAX	(IPVS_SYNC_WAKEUP_RATE * 4)
@@ -945,6 +946,11 @@ static inline int sysctl_sync_sock_size(void)
 	return sysctl_ip_vs_sync_sock_size;
 }
 
+static inline int sysctl_conn_reuse_mode(void)
+{
+	return sysctl_ip_vs_conn_reuse_mode;
+}
+
 #else
 
 static inline int sysctl_sync_threshold(void)
@@ -975,6 +981,11 @@ static inline int sysctl_sync_qlen_max(void)
 static inline int sysctl_sync_sock_size(void)
 {
 	return 0;
+}
+
+static inline int sysctl_conn_reuse_mode(void)
+{
+	return 1;
 }
 
 #endif /* CONFIG_SYSCTL */

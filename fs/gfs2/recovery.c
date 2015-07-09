@@ -469,14 +469,14 @@ static void gfs2_recover_work(struct slow_work *work)
 	unsigned long t;
 	int ro = 0;
 	unsigned int pass;
-	int error;
+	int error, retries = 3;
 
 	if (jd->jd_jid != sdp->sd_lockstruct.ls_jid) {
 		fs_info(sdp, "jid=%u: Trying to acquire journal lock...\n",
 			jd->jd_jid);
 
 		/* Acquire the journal lock so we can do recovery */
-
+retry:
 		error = gfs2_glock_nq_num(sdp, jd->jd_jid, &gfs2_journal_glops,
 					  LM_ST_EXCLUSIVE,
 					  LM_FLAG_NOEXP | LM_FLAG_TRY | GL_NOCACHE,
@@ -486,7 +486,14 @@ static void gfs2_recover_work(struct slow_work *work)
 			break;
 
 		case GLR_TRYFAILED:
-			fs_info(sdp, "jid=%u: Busy\n", jd->jd_jid);
+			if (retries > 0) {
+				retries--;
+				fs_info(sdp, "jid=%u: Busy, retrying...\n",
+					jd->jd_jid);
+				msleep(1000);
+				goto retry;
+			}
+			fs_info(sdp, "jid=%u: Busy, gave up.\n", jd->jd_jid);
 			error = 0;
 
 		default:

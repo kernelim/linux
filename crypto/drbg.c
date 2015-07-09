@@ -1923,7 +1923,7 @@ static inline void __init drbg_fill_array(struct crypto_alg *alg,
 					  const struct drbg_core *core, int pr)
 {
 	int pos = 0;
-	static int priority = 100;
+	static int priority = 200;
 
 	memset(alg, 0, sizeof(struct crypto_alg));
 	memcpy(alg->cra_name, "stdrng", 6);
@@ -2014,3 +2014,4 @@ MODULE_DESCRIPTION("NIST SP800-90A Deterministic Random Bit Generator (DRBG) "
 		   CRYPTO_DRBG_HASH_STRING
 		   CRYPTO_DRBG_HMAC_STRING
 		   CRYPTO_DRBG_CTR_STRING);
+MODULE_ALIAS("stdrng");
