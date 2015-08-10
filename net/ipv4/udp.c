@@ -1067,8 +1067,8 @@ csum_copy_err:
 		UDP_INC_STATS_USER(sock_net(sk), UDP_MIB_INERRORS, is_udplite);
 	release_sock(sk);
 
-	if (noblock)
-		return -EAGAIN;
+	/* starting over for a new packet, but check if we need to yield */
+	cond_resched();
 	goto try_again;
 }
 

@@ -323,8 +323,8 @@ csum_copy_err:
 	}
 	release_sock(sk);
 
-	if (flags & MSG_DONTWAIT)
-		return -EAGAIN;
+	/* starting over for a new packet, but check if we need to yield */
+	cond_resched();
 	goto try_again;
 }
 

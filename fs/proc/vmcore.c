@@ -217,7 +217,6 @@ static int __init merge_note_headers_elf64(char *elfptr, size_t *elfsz,
 	ehdr_ptr = (Elf64_Ehdr *)elfptr;
 	phdr_ptr = (Elf64_Phdr*)(elfptr + sizeof(Elf64_Ehdr));
 	for (i = 0; i < ehdr_ptr->e_phnum; i++, phdr_ptr++) {
-		int j;
 		void *notes_section;
 		struct vmcore *new;
 		u64 offset, max_sz, sz, real_sz = 0;
@@ -235,12 +234,15 @@ static int __init merge_note_headers_elf64(char *elfptr, size_t *elfsz,
 			return rc;
 		}
 		nhdr_ptr = notes_section;
-		for (j = 0; j < max_sz; j += sz) {
-			if (nhdr_ptr->n_namesz == 0)
-				break;
+		while (nhdr_ptr->n_namesz != 0) {
 			sz = sizeof(Elf64_Nhdr) +
 				((nhdr_ptr->n_namesz + 3) & ~3) +
 				((nhdr_ptr->n_descsz + 3) & ~3);
+			if ((real_sz + sz) > max_sz) {
+				pr_warn("Warning: Exceeded p_memsz, dropping PT_NOTE entry n_namesz=0x%x, n_descsz=0x%x\n",
+					nhdr_ptr->n_namesz, nhdr_ptr->n_descsz);
+				break;
+			}
 			real_sz += sz;
 			nhdr_ptr = (Elf64_Nhdr*)((char*)nhdr_ptr + sz);
 		}
@@ -256,6 +258,9 @@ static int __init merge_note_headers_elf64(char *elfptr, size_t *elfsz,
 		list_add_tail(&new->list, vc_list);
 		phdr_sz += real_sz;
 		kfree(notes_section);
+		if (real_sz == 0) {
+			pr_warn("Warning: Zero PT_NOTE entries found\n");
+		}
 	}
 
 	/* Prepare merged PT_NOTE program header. */
@@ -298,7 +303,6 @@ static int __init merge_note_headers_elf32(char *elfptr, size_t *elfsz,
 	ehdr_ptr = (Elf32_Ehdr *)elfptr;
 	phdr_ptr = (Elf32_Phdr*)(elfptr + sizeof(Elf32_Ehdr));
 	for (i = 0; i < ehdr_ptr->e_phnum; i++, phdr_ptr++) {
-		int j;
 		void *notes_section;
 		struct vmcore *new;
 		u64 offset, max_sz, sz, real_sz = 0;
@@ -316,12 +320,15 @@ static int __init merge_note_headers_elf32(char *elfptr, size_t *elfsz,
 			return rc;
 		}
 		nhdr_ptr = notes_section;
-		for (j = 0; j < max_sz; j += sz) {
-			if (nhdr_ptr->n_namesz == 0)
-				break;
+		while (nhdr_ptr->n_namesz != 0) {
 			sz = sizeof(Elf32_Nhdr) +
 				((nhdr_ptr->n_namesz + 3) & ~3) +
 				((nhdr_ptr->n_descsz + 3) & ~3);
+			if ((real_sz + sz) > max_sz) {
+				pr_warn("Warning: Exceeded p_memsz, dropping PT_NOTE entry n_namesz=0x%x, n_descsz=0x%x\n",
+					nhdr_ptr->n_namesz, nhdr_ptr->n_descsz);
+				break;
+			}
 			real_sz += sz;
 			nhdr_ptr = (Elf32_Nhdr*)((char*)nhdr_ptr + sz);
 		}
@@ -337,6 +344,10 @@ static int __init merge_note_headers_elf32(char *elfptr, size_t *elfsz,
 		list_add_tail(&new->list, vc_list);
 		phdr_sz += real_sz;
 		kfree(notes_section);
+		if (real_sz == 0) {
+			pr_warn("Warning: Zero PT_NOTE entries found\n");
+		}
+
 	}
 
 	/* Prepare merged PT_NOTE program header. */

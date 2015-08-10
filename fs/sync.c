@@ -109,8 +109,21 @@ restart:
 		spin_unlock(&sb_lock);
 
 		down_read(&sb->s_umount);
+		/*
+		 * If the file system is frozen we can't proceed because we
+		 * could potentially block on frozen file system. This would
+		 * lead to a deadlock, because we're holding s_umount which
+		 * has to be taken in order to  thaw the file system as well.
+		 * Frozen file system should be clean anyway so just skip it.
+		 */
+		if ((!sb_has_new_freeze(sb) && sb->s_frozen != SB_UNFROZEN) ||
+		    (sb->s_writers.frozen != SB_UNFROZEN))
+			goto skip;
+
 		if (!(sb->s_flags & MS_RDONLY) && sb->s_root && sb->s_bdi)
 			__sync_filesystem(sb, wait);
+
+skip:
 		up_read(&sb->s_umount);
 
 		/* restart only when sb is no longer on the list */
@@ -193,7 +206,7 @@ SYSCALL_DEFINE1(syncfs, int, fd)
 {
 	struct file *file;
 	struct super_block *sb;
-	int ret;
+	int ret = 0;
 	int fput_needed;
 
 	file = fget_light(fd, &fput_needed);
@@ -202,7 +215,17 @@ SYSCALL_DEFINE1(syncfs, int, fd)
 	sb = file->f_dentry->d_sb;
 
 	down_read(&sb->s_umount);
-	ret = sync_filesystem(sb);
+	/*
+	 * If the file system is frozen we can't proceed because we
+	 * could potentially block on frozen file system. This would
+	 * lead to a deadlock, because we're holding s_umount which
+	 * has to be taken in order to  thaw the file system as well
+	 * Frozen file system should be clean anyway so just skip it.
+	 */
+	if ((sb_has_new_freeze(sb) && sb->s_writers.frozen == SB_UNFROZEN) ||
+	    (!sb_has_new_freeze(sb) && sb->s_frozen == SB_UNFROZEN))
+		ret = sync_filesystem(sb);
+
 	up_read(&sb->s_umount);
 
 	fput_light(file, fput_needed);
