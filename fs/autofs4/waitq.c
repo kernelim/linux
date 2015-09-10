@@ -422,10 +422,10 @@ int autofs4_wait(struct autofs_sb_info *sbi, struct dentry *dentry,
 		memcpy(&wq->name, &qstr, sizeof(struct qstr));
 		wq->dev = autofs4_get_dev(sbi);
 		wq->ino = autofs4_get_ino(sbi);
+		wq->uid = current_uid();
+		wq->gid = current_gid();
 		wq->pid = pid;
 		wq->tgid = tgid;
-		wq->pid = current->pid;
-		wq->tgid = current->tgid;
 		wq->status = -EINTR; /* Status return if interrupted */
 		wq->wait_ctr = 2;
 		mutex_unlock(&sbi->wq_mutex);

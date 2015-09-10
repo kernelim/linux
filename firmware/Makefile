@@ -235,7 +235,8 @@ fw-shipped-m += iwlwifi-105-6.ucode iwlwifi-135-6.ucode iwlwifi-2000-6.ucode \
 		iwlwifi-7260-7.ucode iwlwifi-3160-7.ucode \
 		iwlwifi-7260-9.ucode iwlwifi-3160-9.ucode iwlwifi-7265-9.ucode \
 		iwlwifi-7260-10.ucode iwlwifi-3160-10.ucode iwlwifi-7265-10.ucode iwlwifi-7265D-10.ucode \
-		iwlwifi-7260-12.ucode iwlwifi-3160-12.ucode iwlwifi-7265-12.ucode iwlwifi-7265D-12.ucode
+		iwlwifi-7260-12.ucode iwlwifi-3160-12.ucode iwlwifi-7265-12.ucode iwlwifi-7265D-12.ucode \
+		iwlwifi-8000C-13.ucode
 
 fw-shipped-all := $(fw-shipped-y) $(fw-shipped-m) $(fw-shipped-)
 

@@ -83,6 +83,8 @@
 static DEFINE_MUTEX(cgroup_mutex);
 static DEFINE_MUTEX(cgroup_root_mutex);
 
+struct percpu_rw_semaphore cgroup_threadgroup_rwsem;
+
 /* Generate an array of cgroup subsystem pointers */
 #define SUBSYS(_x) &_x ## _subsys,
 
@@ -3948,6 +3950,8 @@ int __init cgroup_init(void)
 	int err;
 	int i;
 	struct hlist_head *hhead;
+
+	BUG_ON(percpu_init_rwsem(&cgroup_threadgroup_rwsem));
 
 	err = bdi_init(&cgroup_backing_dev_info);
 	if (err)

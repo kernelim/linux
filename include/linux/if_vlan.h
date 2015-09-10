@@ -72,6 +72,12 @@ static inline struct vlan_ethhdr *vlan_eth_hdr(const struct sk_buff *skb)
 #define VLAN_VID_MASK		0x0fff /* VLAN Identifier */
 #define VLAN_N_VID		4096
 
+/*
+ * RHEL: VLAN_GROUP_ARRAY_LEN was renamed to VLAN_N_VID in the big VLAN
+ * rework. Some 3rd party modules need the old macro to compile.
+ */
+#define VLAN_GROUP_ARRAY_LEN VLAN_N_VID
+
 /* found in socket.c */
 extern void vlan_ioctl_set(int (*hook)(struct net *, void __user *));
 

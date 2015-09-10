@@ -1063,6 +1063,9 @@ Version: 23.15.10.0
 File: iwlwifi-7265D-12.ucode
 Version: 25.17.12.0
 
+File: iwlwifi-8000C-13.ucode
+Version: 25.30.13.0
+
 License: Redistributable. See LICENCE.iwlwifi_firmware for details
 
 Also available from http://intellinuxwireless.org/?n=Downloads
