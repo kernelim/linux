@@ -202,7 +202,7 @@ int inet_frag_evictor(struct netns_frags *nf, struct inet_frags *f, bool force)
 			return 0;
 	}
 
-	work = frag_mem_limit(nf) - nf->low_thresh;
+	work = sum_frag_mem_limit(nf) - nf->low_thresh;
 	while (work > 0 || force) {
 		spin_lock(&nf_priv->lru_lock);
 

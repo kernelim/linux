@@ -79,8 +79,7 @@ struct wireless_dev;
 #define NET_ADDR_RANDOM		1	/* address is generated randomly */
 #define NET_ADDR_STOLEN		2	/* address is stolen from other device */
 #define NET_ADDR_SET		3	/* address is set using
-					 * dev_set_mac_address()
-					 * !!!: not in RHEL6 */
+					 * dev_set_mac_address() */
 
 /* Backlog congestion levels */
 #define NET_RX_SUCCESS		0   /* keep 'em coming, baby */

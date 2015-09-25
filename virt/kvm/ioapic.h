@@ -47,6 +47,8 @@ struct kvm_ioapic {
 	void (*ack_notifier)(void *opaque, int irq);
 	spinlock_t lock;
 	DECLARE_BITMAP(handled_vectors, 256);
+	struct delayed_work eoi_inject;
+	u32 irq_eoi[IOAPIC_NUM_PINS];
 };
 
 #ifdef DEBUG

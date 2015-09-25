@@ -5475,9 +5475,11 @@ int dev_set_mac_address(struct net_device *dev, struct sockaddr *sa)
 	if (!netif_device_present(dev))
 		return -ENODEV;
 	err = ops->ndo_set_mac_address(dev, sa);
-	if (!err)
-		call_netdevice_notifiers(NETDEV_CHANGEADDR, dev);
-	return err;
+	if (err)
+		return err;
+	dev->addr_assign_type = NET_ADDR_SET;
+	call_netdevice_notifiers(NETDEV_CHANGEADDR, dev);
+	return 0;
 }
 EXPORT_SYMBOL(dev_set_mac_address);
 
