@@ -1777,11 +1777,15 @@ int nfs_wb_page_cancel(struct inode *inode, struct page *page)
 	BUG_ON(!PageLocked(page));
 	for (;;) {
 		wait_on_page_writeback(page);
-		req = nfs_page_find_request(page);
-		if (req == NULL)
+		spin_lock(&inode->i_lock);
+		req = nfs_page_find_request_locked(page);
+		if (req == NULL) {
+			spin_unlock(&inode->i_lock);
 			break;
+		}
 		if (nfs_lock_request(req)) {
 			nfs_clear_request_commit(req);
+			spin_unlock(&inode->i_lock);
 			nfs_inode_remove_request(req);
 			/*
 			 * In case nfs_inode_remove_request has marked the
@@ -1791,6 +1795,7 @@ int nfs_wb_page_cancel(struct inode *inode, struct page *page)
 			nfs_unlock_and_release_request(req);
 			break;
 		}
+		spin_unlock(&inode->i_lock);
 		ret = nfs_wait_on_request(req);
 		nfs_release_request(req);
 		if (ret < 0)

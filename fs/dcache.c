@@ -33,6 +33,7 @@
 #include <linux/bootmem.h>
 #include <linux/fs_struct.h>
 #include <linux/hardirq.h>
+#include <linux/ratelimit.h>
 #include "internal.h"
 
 int sysctl_vfs_cache_pressure __read_mostly = 100;
@@ -1715,21 +1716,21 @@ static void switch_names(struct dentry *dentry, struct dentry *target)
  */
  
 /*
- * d_move_locked - move a dentry
+ * __d_move - move a dentry
  * @dentry: entry to move
  * @target: new dentry
  *
  * Update the dcache to reflect the move of a file name. Negative
- * dcache entries should not be moved in this way.
+ * dcache entries should not be moved in this way.  Caller hold
+ * rename_lock.
  */
-static void d_move_locked(struct dentry * dentry, struct dentry * target)
+static void __d_move(struct dentry * dentry, struct dentry * target)
 {
 	struct hlist_head *list;
 
 	if (!dentry->d_inode)
 		printk(KERN_WARNING "VFS: moving negative dcache entry\n");
 
-	write_seqlock(&rename_lock);
 	/*
 	 * XXXX: do we really need to take target->d_lock?
 	 */
@@ -1777,7 +1778,6 @@ already_unhashed:
 	spin_unlock(&target->d_lock);
 	fsnotify_d_move(dentry);
 	spin_unlock(&dentry->d_lock);
-	write_sequnlock(&rename_lock);
 }
 
 /**
@@ -1792,7 +1792,9 @@ already_unhashed:
 void d_move(struct dentry * dentry, struct dentry * target)
 {
 	spin_lock(&dcache_lock);
-	d_move_locked(dentry, target);
+	write_seqlock(&rename_lock);
+	__d_move(dentry, target);
+	write_sequnlock(&rename_lock);
 	spin_unlock(&dcache_lock);
 }
 
@@ -1819,7 +1821,7 @@ struct dentry *d_ancestor(struct dentry *p1, struct dentry *p2)
  * This helper attempts to cope with remotely renamed directories
  *
  * It assumes that the caller is already holding
- * dentry->d_parent->d_inode->i_mutex and the dcache_lock
+ * dentry->d_parent->d_inode->i_mutex, the dcache_lock and rename_lock
  *
  * Note: If ever the locking in lock_rename() changes, then please
  * remember to update this too...
@@ -1848,7 +1850,7 @@ static struct dentry *__d_unalias(struct dentry *dentry, struct dentry *alias)
 		goto out_err;
 	m2 = &alias->d_parent->d_inode->i_mutex;
 out_unalias:
-	d_move_locked(alias, dentry);
+	__d_move(alias, dentry);
 	ret = alias;
 out_err:
 	spin_unlock(&dcache_lock);
@@ -1919,19 +1921,37 @@ struct dentry *d_materialise_unique(struct dentry *dentry, struct inode *inode)
 		alias = __d_find_alias(inode);
 		if (alias) {
 			actual = alias;
-			/* Is this an anonymous mountpoint that we could splice
-			 * into our tree? */
-			if (IS_ROOT(alias)) {
+			write_seqlock(&rename_lock);
+
+			if (d_ancestor(alias, dentry)) {
+				/* Check for loops */
+				actual = ERR_PTR(-ELOOP);
+				write_sequnlock(&rename_lock);
+				pr_warn_ratelimited(
+					"VFS: Lookup of '%s' in %s %s"
+					" would have caused loop\n",
+					dentry->d_name.name,
+					inode->i_sb->s_type->name,
+					inode->i_sb->s_id);
+				dput(alias);
+				goto out_unlock_dcache;
+			} else if (IS_ROOT(alias)) {
+				/* Is this an anonymous mountpoint that we
+				 * could splice into our tree? */
 				spin_lock(&alias->d_lock);
 				__d_materialise_dentry(dentry, alias);
+				write_sequnlock(&rename_lock);
 				__d_drop(alias);
 				goto found;
+			} else {
+				/* Nope, but we must(!) avoid directory
+				 * aliasing */
+				actual = __d_unalias(dentry, alias);
+				write_sequnlock(&rename_lock);
+				if (IS_ERR(actual))
+					dput(alias);
+				goto out_nolock;
 			}
-			/* Nope, but we must(!) avoid directory aliasing */
-			actual = __d_unalias(dentry, alias);
-			if (IS_ERR(actual))
-				dput(alias);
-			goto out_nolock;
 		}
 	}
 
@@ -1947,6 +1967,7 @@ found_lock:
 found:
 	_d_rehash(actual);
 	spin_unlock(&actual->d_lock);
+out_unlock_dcache:
 	spin_unlock(&dcache_lock);
 out_nolock:
 	if (actual == dentry) {
@@ -2001,7 +2022,7 @@ char *__d_path(const struct path *path, struct path *root,
 	struct dentry *dentry = path->dentry;
 	struct vfsmount *vfsmnt = path->mnt;
 	char *end = buffer + buflen;
-	char *retval;
+	char *retval, *tail;
 
 	spin_lock(&vfsmount_lock);
 	prepend(&end, &buflen, "\0", 1);
@@ -2014,6 +2035,7 @@ char *__d_path(const struct path *path, struct path *root,
 	/* Get '/' right */
 	retval = end-1;
 	*retval = '/';
+	tail = retval;
 
 	for (;;) {
 		struct dentry * parent;
@@ -2021,6 +2043,12 @@ char *__d_path(const struct path *path, struct path *root,
 		if (dentry == root->dentry && vfsmnt == root->mnt)
 			break;
 		if (dentry == vfsmnt->mnt_root || IS_ROOT(dentry)) {
+			/* Escaped? */
+			if (dentry != vfsmnt->mnt_root) {
+				retval = tail;
+				*retval = '/';
+				goto out;
+			}
 			/* Global root? */
 			if (vfsmnt->mnt_parent == vfsmnt) {
 				goto global_root;

@@ -23,6 +23,7 @@
 #define GP_VECTOR 13
 #define PF_VECTOR 14
 #define MF_VECTOR 16
+#define AC_VECTOR 17
 #define MC_VECTOR 18
 
 /* Select x86 specific features in <linux/kvm.h> */

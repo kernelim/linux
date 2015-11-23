@@ -682,7 +682,7 @@ static void update_exception_bitmap(struct kvm_vcpu *vcpu)
 	u32 eb;
 
 	eb = (1u << PF_VECTOR) | (1u << UD_VECTOR) | (1u << MC_VECTOR)
-		| (1u << NM_VECTOR);
+		| (1u << NM_VECTOR) | (1u << AC_VECTOR);
 	/*
 	 * Unconditionally intercept #DB so we can maintain dr6 without
 	 * reading it every exit.
@@ -3265,6 +3265,9 @@ static int handle_exception(struct kvm_vcpu *vcpu)
 
 	ex_no = intr_info & INTR_INFO_VECTOR_MASK;
 	switch (ex_no) {
+	case AC_VECTOR:
+		kvm_queue_exception_e(vcpu, AC_VECTOR, error_code);
+		return 1;
 	case DB_VECTOR:
 		dr6 = vmcs_readl(EXIT_QUALIFICATION);
 		if (!(vcpu->guest_debug &
