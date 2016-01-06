@@ -1613,11 +1613,11 @@ void d_delete(struct dentry * dentry)
 
 	if (!d_unhashed(dentry))
 		__d_drop(dentry);
+	spin_unlock(&dentry->d_lock);
 
 	if (isdir)
 		unhash_offsprings(dentry);
 
-	spin_unlock(&dentry->d_lock);
 	spin_unlock(&dcache_lock);
 
 	fsnotify_nameremove(dentry, isdir);

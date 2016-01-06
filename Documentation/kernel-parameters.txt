@@ -817,6 +817,9 @@ and is between 256 and 4096 characters. It is defined in the file
 	floppy=		[HW]
 			See Documentation/blockdev/floppy.txt.
 
+	force_hrtimer_reprogram= [KNL] Force the reprogramming of expired
+			timers in hrtimer_reprogram().
+
 	force_pal_cache_flush
 			[IA-64] Avoid check_sal_cache_flush which may hang on
 			buggy SAL_CACHE_FLUSH implementations. Using this

@@ -60,7 +60,7 @@ enum nl80211_multicast_groups {
 	NL80211_MCGRP_TESTMODE /* keep last - ifdef! */
 };
 
-static const struct genl_multicast_group nl80211_mcgrps[] = {
+static struct genl_multicast_group nl80211_mcgrps[] = {
 	[NL80211_MCGRP_CONFIG] = { .name = "config", },
 	[NL80211_MCGRP_SCAN] = { .name = "scan", },
 	[NL80211_MCGRP_REGULATORY] = { .name = "regulatory", },

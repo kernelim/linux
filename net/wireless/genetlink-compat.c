@@ -105,6 +105,12 @@ int compat_genl_register_family(struct genl_family *family)
 			goto error_ops;
 	}
 
+	for (i = 0; i < family->n_mcgrps; i++) {
+		ret = genl_register_mc_group(family, &family->mcgrps[i]);
+		if (ret < 0)
+			goto error_ops;
+	}
+
 	return ret;
 
 error_ops:

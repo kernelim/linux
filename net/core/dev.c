@@ -132,6 +132,7 @@
 #include <trace/events/napi.h>
 #include <trace/events/net.h>
 #include <trace/events/skb.h>
+#include <net/bonding.h>
 #endif
 #include <linux/cpu_rmap.h>
 #include <linux/net_tstamp.h>
@@ -1386,6 +1387,15 @@ void dev_disable_lro(struct net_device *dev)
 	__ethtool_set_flags(dev, flags & ~ETH_FLAG_LRO);
 	if (unlikely(dev->features & NETIF_F_LRO))
 		netdev_WARN(dev, "failed to disable LRO!\n");
+
+	/* if dev is a bond master, disable LRO for all its slaves */
+	if (netif_is_bond_master(dev)) {
+		struct bonding *bond = netdev_priv(dev);
+		struct list_head *iter;
+		struct slave *slave;
+		bond_for_each_slave(bond, slave, iter)
+			dev_disable_lro(slave->dev);
+	}
 }
 EXPORT_SYMBOL(dev_disable_lro);
 
@@ -1965,37 +1975,9 @@ EXPORT_SYMBOL(skb_checksum_help);
 
 __be16 skb_network_protocol(struct sk_buff *skb, int *depth)
 {
-	unsigned int vlan_depth = skb->mac_len;
 	__be16 type = skb->protocol;
 
-	/* if skb->protocol is 802.1Q/AD then the header should already be
-	 * present at mac_len - VLAN_HLEN (if mac_len > 0), or at
-	 * ETH_HLEN otherwise
-	 */
-	if (type == htons(ETH_P_8021Q)) {
-		if (vlan_depth) {
-			if (unlikely(WARN_ON(vlan_depth < VLAN_HLEN)))
-				return 0;
-			vlan_depth -= VLAN_HLEN;
-		} else {
-			vlan_depth = ETH_HLEN;
-		}
-		do {
-			struct vlan_hdr *vh;
-
-			if (unlikely(!pskb_may_pull(skb,
-						    vlan_depth + VLAN_HLEN)))
-				return 0;
-
-			vh = (struct vlan_hdr *)(skb->data + vlan_depth);
-			type = vh->h_vlan_encapsulated_proto;
-			vlan_depth += VLAN_HLEN;
-		} while (type == htons(ETH_P_8021Q));
-	}
-
-	*depth = vlan_depth;
-
-	return type;
+	return __vlan_get_protocol(skb, type, depth);
 }
 
 /**

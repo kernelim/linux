@@ -12,8 +12,8 @@
  *
  */
 
-#ifndef _LINUX_BONDING_H
-#define _LINUX_BONDING_H
+#ifndef _NET_BONDING_H
+#define _NET_BONDING_H
 
 #include <linux/timer.h>
 #include <linux/proc_fs.h>
@@ -27,9 +27,9 @@
 #include <linux/if_bridge.h>
 #include <linux/if_link.h>
 
-#include "bond_3ad.h"
-#include "bond_alb.h"
-#include "bond_options.h"
+#include <net/bond_3ad.h>
+#include <net/bond_alb.h>
+#include <net/bond_options.h>
 
 #define DRV_VERSION	"3.7.1"
 #define DRV_RELDATE	"April 27, 2011"
@@ -641,4 +641,4 @@ static inline void bond_tx_drop(struct net_device *dev, struct sk_buff *skb)
 	kfree_skb(skb);
 }
 
-#endif /* _LINUX_BONDING_H */
+#endif /* _NET_BONDING_H */

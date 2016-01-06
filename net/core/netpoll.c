@@ -128,7 +128,7 @@ static __sum16 checksum_udp(struct sk_buff *skb, struct udphdr *uh,
 static int poll_one_napi(struct netpoll_info *npinfo,
 			 struct napi_struct *napi, int budget)
 {
-	int work;
+	int work = 0;
 
 	/* net_rx_action's ->poll() invocations and our's are
 	 * synchronized by this test which is only made while
@@ -137,17 +137,24 @@ static int poll_one_napi(struct netpoll_info *npinfo,
 	if (!test_bit(NAPI_STATE_SCHED, &napi->state))
 		return budget;
 
+	/* If we set this bit but see that it has already been set,
+	 * that indicates that napi has been disabled and we need
+	 * to abort this operation
+	 */
+	if (test_and_set_bit(NAPI_STATE_NPSVC, &napi->state))
+		goto out;
+
 	npinfo->rx_flags |= NETPOLL_RX_DROP;
 	atomic_inc(&trapped);
-	set_bit(NAPI_STATE_NPSVC, &napi->state);
 
 	work = napi->poll(napi, budget);
 	trace_napi_poll(napi);
 
-	clear_bit(NAPI_STATE_NPSVC, &napi->state);
 	atomic_dec(&trapped);
 	npinfo->rx_flags &= ~NETPOLL_RX_DROP;
+	clear_bit(NAPI_STATE_NPSVC, &napi->state);
 
+out:
 	return budget - work;
 }
 

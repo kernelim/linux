@@ -45,7 +45,7 @@ struct compat_genl_family {
 	void (*post_doit)(const struct genl_ops *ops, struct sk_buff *skb,
 			  struct genl_info *info);
 
-	const struct genl_multicast_group *mcgrps;
+	struct genl_multicast_group *mcgrps;
 	struct genl_ops *ops;
 	unsigned int n_mcgrps, n_ops;
 
@@ -58,7 +58,7 @@ extern int compat_genl_register_family(struct genl_family *family);
 static inline int
 _genl_register_family_with_ops_grps(struct genl_family *family,
 				    struct genl_ops *ops, size_t n_ops,
-				    const struct genl_multicast_group *mcgrps,
+				    struct genl_multicast_group *mcgrps,
 				    size_t n_mcgrps)
 {
 	family->module = THIS_MODULE;

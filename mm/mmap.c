@@ -589,9 +589,9 @@ again:			remove_next = 1 + (end > next->vm_end);
 		 * shrinking vma had, to cover any anon pages imported.
 		 */
 		if (exporter && exporter->anon_vma && !importer->anon_vma) {
+			importer->anon_vma = exporter->anon_vma;
 			if (anon_vma_clone(importer, exporter))
 				return -ENOMEM;
-			importer->anon_vma = exporter->anon_vma;
 		}
 	}
 
