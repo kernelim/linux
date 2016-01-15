@@ -35,6 +35,7 @@
 #include <linux/efi.h>
 #include <linux/swiotlb.h>
 #include <linux/kexec.h>
+#include <linux/crash_dump.h>
 
 #include <asm/boot.h>
 #include <asm/fixmap.h>
@@ -128,6 +129,36 @@ static void __init reserve_crashkernel(void)
 }
 #endif /* CONFIG_KEXEC_CORE */
 
+#ifdef CONFIG_CRASH_DUMP
+/*
+ * reserve_elfcorehdr() - reserves memory for elf core header
+ *
+ * This function reserves elf core header given in "elfcorehdr=" kernel
+ * command line parameter. This region contains all the information about
+ * primary kernel's core image and is used by a dump capture kernel to
+ * access the system memory on primary kernel.
+ */
+static void __init reserve_elfcorehdr(void)
+{
+	if (!elfcorehdr_size)
+		return;
+
+	if (memblock_is_region_reserved(elfcorehdr_addr, elfcorehdr_size)) {
+		pr_warn("elfcorehdr is overlapped\n");
+		return;
+	}
+
+	memblock_reserve(elfcorehdr_addr, elfcorehdr_size);
+
+	pr_info("Reserving %lldKB of memory at 0x%llx for elfcorehdr\n",
+		elfcorehdr_size >> 10, elfcorehdr_addr);
+}
+#else
+static void __init reserve_elfcorehdr(void)
+{
+	;
+}
+#endif /* CONFIG_CRASH_DUMP */
 /*
  * Return the maximum physical address for ZONE_DMA (DMA_BIT_MASK(32)). It
  * currently assumes that for memory starting above 4G, 32-bit devices will
@@ -297,6 +328,7 @@ void __init arm64_memblock_init(void)
 #ifdef CONFIG_KEXEC_CORE
 	reserve_crashkernel();
 #endif
+	reserve_elfcorehdr();
 
 	early_init_fdt_scan_reserved_mem();
 
