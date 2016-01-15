@@ -31,7 +31,6 @@
 #include <linux/screen_info.h>
 #include <linux/init.h>
 #include <linux/kexec.h>
-#include <linux/crash_dump.h>
 #include <linux/root_dev.h>
 #include <linux/cpu.h>
 #include <linux/interrupt.h>
@@ -222,6 +221,12 @@ static void __init request_standard_resources(void)
 		    kernel_data.end <= res->end)
 			request_resource(res, &kernel_data);
 	}
+
+#ifdef CONFIG_KEXEC_CORE
+	/* User space tools will find "Crash kernel" region in /proc/iomem. */
+	if (crashk_res.end)
+		insert_resource(&iomem_resource, &crashk_res);
+#endif
 }
 
 #ifdef CONFIG_BLK_DEV_INITRD
