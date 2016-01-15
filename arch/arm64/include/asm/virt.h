@@ -58,8 +58,17 @@
 
 #define HVC_CALL_FUNC 3
 
+/*
+ * HVC_RESET_CPU - Reset cpu in EL2 to initial state.
+ *
+ * @x0: entry address in trampoline code in va
+ * @x1: identical mapping page table in pa
+ */
+
 #define BOOT_CPU_MODE_EL1	(0xe11)
 #define BOOT_CPU_MODE_EL2	(0xe12)
+
+#define HVC_RESET_CPU 4
 
 #ifndef __ASSEMBLY__
 
