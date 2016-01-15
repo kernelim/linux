@@ -18,6 +18,33 @@
 #ifndef __ASM__VIRT_H
 #define __ASM__VIRT_H
 
+/*
+ * The arm64 hcall implementation uses the ISS field of the ESR_EL2 register to
+ * specify the hcall type.  The exception handlers are allowed to use registers
+ * x17 and x18 in their implementation.  Any routine issuing an hcall must not
+ * expect these registers to be preserved.
+ */
+
+/*
+ * HVC_CALL_HYP - Execute a hyp routine.
+ */
+
+#define HVC_CALL_HYP 0
+
+/*
+ * HVC_GET_VECTORS - Return the value of the vbar_el2 register.
+ */
+
+#define HVC_GET_VECTORS 1
+
+/*
+ * HVC_SET_VECTORS - Set the value of the vbar_el2 register.
+ *
+ * @x0: Physical address of the new vector table.
+ */
+
+#define HVC_SET_VECTORS 2
+
 #define BOOT_CPU_MODE_EL1	(0xe11)
 #define BOOT_CPU_MODE_EL2	(0xe12)
 
