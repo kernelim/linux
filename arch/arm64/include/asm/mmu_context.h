@@ -72,6 +72,28 @@ static inline bool __cpu_uses_extended_idmap(void)
 		unlikely(idmap_t0sz != TCR_T0SZ(VA_BITS)));
 }
 
+static inline void __cpu_set_tcr_t0sz(u64 t0sz)
+{
+	unsigned long tcr;
+
+	if (__cpu_uses_extended_idmap())
+		asm volatile (
+		"	mrs	%0, tcr_el1	;"
+		"	bfi	%0, %1, %2, %3	;"
+		"	msr	tcr_el1, %0	;"
+		"	isb"
+		: "=&r" (tcr)
+		: "r"(t0sz), "I"(TCR_T0SZ_OFFSET), "I"(TCR_TxSZ_WIDTH));
+}
+
+/*
+ * Set TCR.T0SZ to the value appropriate for activating the identity map.
+ */
+static inline void cpu_set_idmap_tcr_t0sz(void)
+{
+	__cpu_set_tcr_t0sz(idmap_t0sz);
+}
+
 /*
  * Set TCR.T0SZ to its default value (based on VA_BITS)
  */
@@ -82,13 +104,7 @@ static inline void __cpu_set_tcr_t0sz(unsigned long t0sz)
 	if (!__cpu_uses_extended_idmap())
 		return;
 
-	asm volatile (
-	"	mrs	%0, tcr_el1	;"
-	"	bfi	%0, %1, %2, %3	;"
-	"	msr	tcr_el1, %0	;"
-	"	isb"
-	: "=&r" (tcr)
-	: "r"(t0sz), "I"(TCR_T0SZ_OFFSET), "I"(TCR_TxSZ_WIDTH));
+	__cpu_set_tcr_t0sz(TCR_T0SZ(VA_BITS));
 }
 
 #define cpu_set_default_tcr_t0sz()	__cpu_set_tcr_t0sz(TCR_T0SZ(VA_BITS))
