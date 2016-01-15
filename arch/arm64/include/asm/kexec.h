@@ -30,6 +30,21 @@
 
 #ifndef __ASSEMBLY__
 
+extern bool in_crash_kexec;
+
+static inline bool is_in_crash_kexec(void)
+{
+#ifdef CONFIG_KEXEC_CORE
+	return in_crash_kexec;
+#else
+	return false;
+#endif
+}
+
+#ifndef CONFIG_KEXEC_CORE
+#define crash_save_cpu(regs, cpu)
+#endif
+
 /**
  * crash_setup_regs() - save registers for the panic kernel
  *
@@ -40,7 +55,37 @@
 static inline void crash_setup_regs(struct pt_regs *newregs,
 				    struct pt_regs *oldregs)
 {
-	/* Empty routine needed to avoid build errors. */
+	if (oldregs) {
+		memcpy(newregs, oldregs, sizeof(*newregs));
+	} else {
+		__asm__ __volatile__ (
+			"stp	 x0,   x1, [%3, #16 *  0]\n"
+			"stp	 x2,   x3, [%3, #16 *  1]\n"
+			"stp	 x4,   x5, [%3, #16 *  2]\n"
+			"stp	 x6,   x7, [%3, #16 *  3]\n"
+			"stp	 x8,   x9, [%3, #16 *  4]\n"
+			"stp	x10,  x11, [%3, #16 *  5]\n"
+			"stp	x12,  x13, [%3, #16 *  6]\n"
+			"stp	x14,  x15, [%3, #16 *  7]\n"
+			"stp	x16,  x17, [%3, #16 *  8]\n"
+			"stp	x18,  x19, [%3, #16 *  9]\n"
+			"stp	x20,  x21, [%3, #16 * 10]\n"
+			"stp	x22,  x23, [%3, #16 * 11]\n"
+			"stp	x24,  x25, [%3, #16 * 12]\n"
+			"stp	x26,  x27, [%3, #16 * 13]\n"
+			"stp	x28,  x29, [%3, #16 * 14]\n"
+			"str	x30,	   [%3, #16 * 15]\n"
+			"mov	%0, sp\n"
+			"adr	%1, 1f\n"
+			"mrs	%2, spsr_el1\n"
+		"1:"
+			: "=r" (newregs->sp),
+			  "=r" (newregs->pc),
+			  "=r" (newregs->pstate)
+			: "r"  (&newregs->regs)
+			: "memory"
+		);
+	}
 }
 
 #endif /* __ASSEMBLY__ */

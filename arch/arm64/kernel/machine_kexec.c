@@ -10,6 +10,9 @@
  */
 
 #include <linux/highmem.h>
+#include <linux/interrupt.h>
+#include <linux/irq.h>
+#include <linux/kernel.h>
 #include <linux/kexec.h>
 #include <linux/libfdt_env.h>
 #include <linux/of_fdt.h>
@@ -25,6 +28,7 @@
 extern const unsigned char arm64_relocate_new_kernel[];
 extern const unsigned long arm64_relocate_new_kernel_size;
 
+bool in_crash_kexec;
 static unsigned long kimage_start;
 
 /**
@@ -212,13 +216,70 @@ void machine_kexec(struct kimage *kimage)
 	 * relocation is complete.
 	 */
 
-	cpu_soft_restart(is_hyp_mode_available(),
+	cpu_soft_restart(in_crash_kexec ? 0 : is_hyp_mode_available(),
 		reboot_code_buffer_phys, kimage->head, kimage_start, 0);
 
 	BUG(); /* Should never get here. */
 }
 
+static void machine_kexec_mask_interrupts(void)
+{
+	unsigned int i;
+	struct irq_desc *desc;
+
+	for_each_irq_desc(i, desc) {
+		struct irq_chip *chip;
+		int ret;
+
+		chip = irq_desc_get_chip(desc);
+		if (!chip)
+			continue;
+
+		/*
+		 * First try to remove the active state. If this
+		 * fails, try to EOI the interrupt.
+		 */
+		ret = irq_set_irqchip_state(i, IRQCHIP_STATE_ACTIVE, false);
+
+		if (ret && irqd_irq_inprogress(&desc->irq_data) &&
+		    chip->irq_eoi)
+			chip->irq_eoi(&desc->irq_data);
+
+		if (chip->irq_mask)
+			chip->irq_mask(&desc->irq_data);
+
+		if (chip->irq_disable && !irqd_irq_disabled(&desc->irq_data))
+			chip->irq_disable(&desc->irq_data);
+	}
+}
+
+/**
+ * machine_crash_shutdown - shutdown non-crashing cpus and save registers
+ */
 void machine_crash_shutdown(struct pt_regs *regs)
 {
-	/* Empty routine needed to avoid build errors. */
+	struct pt_regs dummy_regs;
+	int cpu;
+
+	local_irq_disable();
+
+	in_crash_kexec = true;
+
+	/*
+	 * clear and initialize the per-cpu info. This is necessary
+	 * because, otherwise, slots for offline cpus would never be
+	 * filled up. See smp_send_stop().
+	 */
+	memset(&dummy_regs, 0, sizeof(dummy_regs));
+	for_each_possible_cpu(cpu)
+		crash_save_cpu(&dummy_regs, cpu);
+
+	/* shutdown non-crashing cpus */
+	smp_send_stop();
+
+	/* for crashing cpu */
+	crash_save_cpu(regs, smp_processor_id());
+	machine_kexec_mask_interrupts();
+
+	pr_info("Starting crashdump kernel...\n");
 }
