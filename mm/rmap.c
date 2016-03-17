@@ -356,11 +356,13 @@ void unlink_anon_vmas(struct vm_area_struct *vma)
 
 		/*
 		 * Leave empty anon_vmas on the list - we'll need
-		 * to free them outside the lock.
+		 * to free them outside the lock. However, if there
+		 * is an externel refcount, its holder will free it.
 		 */
-		if (list_empty(&anon_vma->head) && !anonvma_external_refcount(anon_vma)) {
+		if (list_empty(&anon_vma->head)) {
 			anon_vma->parent->degree--;
-			continue;
+			if (!anonvma_external_refcount(anon_vma))
+				continue;
 		}
 
 		list_del(&avc->same_vma);
@@ -1604,9 +1606,12 @@ void drop_anon_vma(struct anon_vma *anon_vma)
 		anon_vma_unlock(anon_vma);
 
 		if (empty) {
+			BUG_ON(anon_vma->degree);
 			anon_vma_free(anon_vma);
-			if (root_empty && last_root_user)
+			if (root_empty && last_root_user) {
+				BUG_ON(root->degree);
 				anon_vma_free(root);
+			}
 		}
 	}
 }

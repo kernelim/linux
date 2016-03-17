@@ -528,17 +528,44 @@ static struct dst_entry *sctp_v4_get_dst(struct sctp_association *asoc,
 	 */
 	rcu_read_lock();
 	list_for_each_entry_rcu(laddr, &bp->address_list, list) {
+		struct net_device *odev;
+
 		if (!laddr->valid)
 			continue;
-		if ((laddr->state == SCTP_ADDR_SRC) &&
-		    (AF_INET == laddr->a.sa.sa_family)) {
-			fl->fl4_src = laddr->a.v4.sin_addr.s_addr;
-			fl->fl_ip_sport = laddr->a.v4.sin_port;
-			if (!ip_route_output_key(&init_net, &rt, fl)) {
-				dst = &rt->u.dst;
-				goto out_unlock;
-			}
+
+		if (laddr->state != SCTP_ADDR_SRC ||
+		    AF_INET != laddr->a.sa.sa_family)
+			continue;
+
+		fl->fl4_src = laddr->a.v4.sin_addr.s_addr;
+		fl->fl_ip_sport = laddr->a.v4.sin_port;
+		if (ip_route_output_key(&init_net, &rt, fl))
+			continue;
+
+		if (!dst)
+			dst = &rt->u.dst;
+
+		/* Ensure the src address belongs to the output
+		 * interface.
+		 */
+		odev = ip_dev_find(sock_net(sk), laddr->a.v4.sin_addr.s_addr);
+		if (!odev) {
+			if (&rt->u.dst != dst)
+				dst_release(&rt->u.dst);
+			continue;
 		}
+		if (odev->ifindex != rt->rt_iif) {
+			dev_put(odev);
+			if (&rt->u.dst != dst)
+				dst_release(&rt->u.dst);
+			continue;
+		}
+		dev_put(odev);
+		if (dst != &rt->u.dst)
+			dst_release(dst);
+
+		dst = &rt->u.dst;
+		break;
 	}
 
 out_unlock:

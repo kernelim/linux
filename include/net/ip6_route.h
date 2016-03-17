@@ -28,6 +28,7 @@ struct route_info {
 #include <net/ip6_fib.h>
 #include <net/if_inet6.h>
 #include <net/sock.h>
+#include <net/ipv6.h>
 #include <linux/ip.h>
 #include <linux/ipv6.h>
 
@@ -46,6 +47,12 @@ extern struct dst_entry *	ip6_route_output(struct net *net,
 						 struct flowi *fl);
 extern struct dst_entry *	ip6_route_lookup(struct net *net,
 						 struct flowi *fl, int flags);
+
+static inline bool rt6_need_strict(const struct in6_addr *daddr)
+{
+	return ipv6_addr_type(daddr) &
+		(IPV6_ADDR_MULTICAST | IPV6_ADDR_LINKLOCAL | IPV6_ADDR_LOOPBACK);
+}
 
 extern int			ip6_route_init(void);
 extern void			ip6_route_cleanup(void);
