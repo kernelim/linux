@@ -654,11 +654,13 @@ static int nvme_split_and_submit(struct bio *bio, struct nvme_queue *nvmeq,
 	trace_block_split(bdev_get_queue(bio->bi_bdev), bio,
 					bio->bi_sector);
 
+	spin_lock_irq(&nvmeq->q_lock);
 	if (!waitqueue_active(&nvmeq->sq_full))
 		add_wait_queue(&nvmeq->sq_full, &nvmeq->sq_cong_wait);
 	bio_list_add(&nvmeq->sq_cong, &bp->b1);
 	bio_list_add(&nvmeq->sq_cong, &bp->b2);
 	wake_up(&nvmeq->sq_full);
+	spin_unlock_irq(&nvmeq->q_lock);
 
 	return 0;
 }
@@ -751,6 +753,7 @@ static int nvme_submit_flush(struct nvme_queue *nvmeq, struct nvme_ns *ns,
 	return 0;
 }
 
+/* Called with q_lock held */
 static int nvme_submit_iod(struct nvme_queue *nvmeq, struct nvme_iod *iod)
 {
 	struct bio *bio = iod->private;
@@ -759,6 +762,9 @@ static int nvme_submit_iod(struct nvme_queue *nvmeq, struct nvme_iod *iod)
 	int cmdid;
 	u16 control;
 	u32 dsmgmt;
+
+	if (nvmeq->q_suspended)
+		return -EBUSY;
 
 	cmdid = alloc_cmdid(nvmeq, iod, bio_completion, NVME_IO_TIMEOUT);
 	if (unlikely(cmdid < 0))
@@ -810,17 +816,19 @@ static int nvme_split_flush_data(struct nvme_queue *nvmeq, struct bio *bio)
 	bp->b1.bi_phys_segments = 0;
 	bp->b2.bi_rw &= ~BIO_FLUSH;
 
+	spin_lock_irq(&nvmeq->q_lock);
 	if (!waitqueue_active(&nvmeq->sq_full))
 		add_wait_queue(&nvmeq->sq_full, &nvmeq->sq_cong_wait);
 	bio_list_add(&nvmeq->sq_cong, &bp->b1);
 	bio_list_add(&nvmeq->sq_cong, &bp->b2);
 	wake_up(&nvmeq->sq_full);
+	spin_unlock_irq(&nvmeq->q_lock);
 
 	return 0;
 }
 
 /*
- * Called with local interrupts disabled and the q_lock held.  May not sleep.
+ * Called with local interrupts disabled. May not sleep.
  */
 static int nvme_submit_bio_queue(struct nvme_queue *nvmeq, struct nvme_ns *ns,
 								struct bio *bio)
@@ -866,11 +874,14 @@ static int nvme_submit_bio_queue(struct nvme_queue *nvmeq, struct nvme_ns *ns,
 		}
 		nvme_start_io_acct(bio);
 	}
+
+	spin_lock_irq(&nvmeq->q_lock);
 	if (unlikely(nvme_submit_iod(nvmeq, iod))) {
 		if (!waitqueue_active(&nvmeq->sq_full))
 			add_wait_queue(&nvmeq->sq_full, &nvmeq->sq_cong_wait);
 		list_add_tail(&iod->node, &nvmeq->iod_bio);
 	}
+	spin_unlock_irq(&nvmeq->q_lock);
 	return 0;
 
  free_iod:
@@ -922,24 +933,18 @@ static int nvme_make_request(struct request_queue *q, struct bio *bio)
 {
 	struct nvme_ns *ns = q->queuedata;
 	struct nvme_queue *nvmeq = get_nvmeq(ns->dev);
-	int result = -EBUSY;
 
 	if (!nvmeq) {
 		bio_endio(bio, -EIO);
 		return 0;
 	}
-
-	spin_lock_irq(&nvmeq->q_lock);
-	if (!nvmeq->q_suspended && bio_list_empty(&nvmeq->sq_cong))
-		result = nvme_submit_bio_queue(nvmeq, ns, bio);
-	if (unlikely(result)) {
+	if (nvme_submit_bio_queue(nvmeq, ns, bio)) {
+		spin_lock_irq(&nvmeq->q_lock);
 		if (!waitqueue_active(&nvmeq->sq_full))
 			add_wait_queue(&nvmeq->sq_full, &nvmeq->sq_cong_wait);
 		bio_list_add(&nvmeq->sq_cong, bio);
+		spin_unlock_irq(&nvmeq->q_lock);
 	}
-
-	nvme_process_cq(nvmeq);
-	spin_unlock_irq(&nvmeq->q_lock);
 	put_nvmeq(nvmeq);
 	return 0;
 }
@@ -1902,8 +1907,10 @@ static void nvme_resubmit_iods(struct nvme_queue *nvmeq)
 	}
 }
 
+/* Called with q_lock held */
 static void nvme_resubmit_bios(struct nvme_queue *nvmeq)
 {
+	int ret;
 	while (bio_list_peek(&nvmeq->sq_cong)) {
 		struct bio *bio = bio_list_pop(&nvmeq->sq_cong);
 		struct nvme_ns *ns = bio->bi_bdev->bd_disk->private_data;
@@ -1912,7 +1919,10 @@ static void nvme_resubmit_bios(struct nvme_queue *nvmeq)
 						list_empty(&nvmeq->iod_bio))
 			remove_wait_queue(&nvmeq->sq_full,
 							&nvmeq->sq_cong_wait);
-		if (nvme_submit_bio_queue(nvmeq, ns, bio)) {
+		spin_unlock_irq(&nvmeq->q_lock);
+		ret = nvme_submit_bio_queue(nvmeq, ns, bio);
+		spin_lock_irq(&nvmeq->q_lock);
+		if (ret) {
 			if (!waitqueue_active(&nvmeq->sq_full))
 				add_wait_queue(&nvmeq->sq_full,
 							&nvmeq->sq_cong_wait);

@@ -1610,24 +1610,21 @@ static void ixgbe_process_skb_fields(struct ixgbe_ring *rx_ring,
 }
 
 static void ixgbe_rx_skb(struct ixgbe_q_vector *q_vector,
-			 struct sk_buff *skb, union ixgbe_adv_rx_desc *rx_desc)
+			 struct sk_buff *skb,
+			 struct ixgbe_ring *ring,
+			 union ixgbe_adv_rx_desc *rx_desc)
 {
 	struct ixgbe_adapter *adapter = q_vector->adapter;
-	struct net_device *dev = skb->dev;
 
-	if (ixgbe_qv_busy_polling(q_vector))
-		netif_receive_skb(skb);
-	else if (!(adapter->flags & IXGBE_FLAG_IN_NETPOLL)) {
-		if ((dev->features & NETIF_F_HW_VLAN_RX) &&
-		    ixgbe_test_staterr(rx_desc, IXGBE_RXD_STAT_VP)) {
-			u16 vid = le16_to_cpu(rx_desc->wb.upper.vlan);
-			vlan_gro_receive(&q_vector->napi, adapter->vlgrp, vid, skb);
-		}
-		else
-			napi_gro_receive(&q_vector->napi, skb);
-	} else {
-		netif_rx(skb);
+	if (ixgbe_test_staterr(rx_desc, IXGBE_RXD_STAT_VP)) {
+		u16 vid = le16_to_cpu(rx_desc->wb.upper.vlan);
+		__vlan_hwaccel_put_tag(skb, vid);
 	}
+
+	if (!(adapter->flags & IXGBE_FLAG_IN_NETPOLL))
+		napi_gro_receive(&q_vector->napi, skb);
+	else
+		netif_rx(skb);
 }
 
 /**
@@ -2092,7 +2089,7 @@ static int ixgbe_clean_rx_irq(struct ixgbe_q_vector *q_vector,
 
 #endif /* IXGBE_FCOE */
 		skb_mark_napi_id(skb, &q_vector->napi);
-		ixgbe_rx_skb(q_vector, skb, rx_desc);
+		ixgbe_rx_skb(q_vector, skb, rx_ring, rx_desc);
 
 		/* update budget accounting */
 		total_rx_packets++;
@@ -3749,6 +3746,7 @@ static void ixgbe_vlan_rx_add_vid(struct net_device *netdev, u16 vid)
 
 	/* add VID to filter table */
 	hw->mac.ops.set_vfta(&adapter->hw, vid, VMDQ_P(0), true);
+	set_bit(vid, adapter->active_vlans);
 }
 
 static void ixgbe_vlan_rx_kill_vid(struct net_device *netdev, u16 vid)
@@ -3756,16 +3754,9 @@ static void ixgbe_vlan_rx_kill_vid(struct net_device *netdev, u16 vid)
 	struct ixgbe_adapter *adapter = netdev_priv(netdev);
 	struct ixgbe_hw *hw = &adapter->hw;
 
-	if (!test_bit(__IXGBE_DOWN, &adapter->state))
-		ixgbe_irq_disable(adapter);
-
-	vlan_group_set_device(adapter->vlgrp, vid, NULL);
-
-	if (!test_bit(__IXGBE_DOWN, &adapter->state))
-		ixgbe_irq_enable(adapter, true, true);
-
 	/* remove VID from filter table */
 	hw->mac.ops.set_vfta(&adapter->hw, vid, VMDQ_P(0), false);
+	clear_bit(vid, adapter->active_vlans);
 }
 
 /**
@@ -3832,40 +3823,14 @@ static void ixgbe_vlan_strip_enable(struct ixgbe_adapter *adapter)
 	}
 }
 
-static void ixgbe_vlan_rx_register(struct net_device *netdev,
-				   struct vlan_group *grp)
-{
-	struct ixgbe_adapter *adapter = netdev_priv(netdev);
-
-	if (!test_bit(__IXGBE_DOWN, &adapter->state))
-		ixgbe_irq_disable(adapter);
-	adapter->vlgrp = grp;
-
-	/*
-	 * For a DCB driver, always enable VLAN tag stripping so we can
-	 * still receive traffic from a DCB-enabled host even if we're
-	 * not in DCB mode.
-	 */
-	ixgbe_vlan_strip_enable(adapter);
-
-	ixgbe_vlan_rx_add_vid(netdev, 0);
-
-	if (!test_bit(__IXGBE_DOWN, &adapter->state))
-		ixgbe_irq_enable(adapter, true, true);
-}
-
 static void ixgbe_restore_vlan(struct ixgbe_adapter *adapter)
 {
-	ixgbe_vlan_rx_register(adapter->netdev, adapter->vlgrp);
+	u16 vid;
 
-	if (adapter->vlgrp) {
-		u16 vid;
-		for (vid = 0; vid < VLAN_N_VID; vid++) {
-			if (!vlan_group_get_device(adapter->vlgrp, vid))
-				continue;
-			ixgbe_vlan_rx_add_vid(adapter->netdev, vid);
-		}
-	}
+	ixgbe_vlan_rx_add_vid(adapter->netdev, 0);
+
+	for_each_set_bit(vid, adapter->active_vlans, VLAN_N_VID)
+		ixgbe_vlan_rx_add_vid(adapter->netdev, vid);
 }
 
 /**
@@ -7383,7 +7348,6 @@ static const struct net_device_ops ixgbe_netdev_ops = {
 	.ndo_set_mac_address	= ixgbe_set_mac,
 	.ndo_change_mtu		= ixgbe_change_mtu,
 	.ndo_tx_timeout		= ixgbe_tx_timeout,
-	.ndo_vlan_rx_register	= ixgbe_vlan_rx_register,
 	.ndo_vlan_rx_add_vid	= ixgbe_vlan_rx_add_vid,
 	.ndo_vlan_rx_kill_vid	= ixgbe_vlan_rx_kill_vid,
 	.ndo_do_ioctl		= ixgbe_ioctl,

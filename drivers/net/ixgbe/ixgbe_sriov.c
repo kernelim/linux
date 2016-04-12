@@ -848,7 +848,7 @@ static int ixgbe_set_vf_vlan_msg(struct ixgbe_adapter *adapter,
 		 * because the PF is in promiscuous mode.
 		 */
 		if ((vlvf & VLAN_VID_MASK) == vid &&
-		    !adapter->vlgrp && !bits)
+		    !test_bit(vid, adapter->active_vlans) && !bits)
 			ixgbe_set_vf_vlan(adapter, add, vid, VMDQ_P(0));
 	}
 

@@ -1921,22 +1921,6 @@ void __init udp_init(void)
 
 int udp4_ufo_send_check(struct sk_buff *skb)
 {
-	if (!pskb_may_pull(skb, sizeof(struct udphdr)))
-		return -EINVAL;
-
-	if (likely(!skb->encapsulation)) {
-		const struct iphdr *iph;
-		struct udphdr *uh;
-
-		iph = ip_hdr(skb);
-		uh = udp_hdr(skb);
-
-		uh->check = ~csum_tcpudp_magic(iph->saddr, iph->daddr, skb->len,
-				IPPROTO_UDP, 0);
-		skb->csum_start = skb_transport_header(skb) - skb->head;
-		skb->csum_offset = offsetof(struct udphdr, check);
-		skb->ip_summed = CHECKSUM_PARTIAL;
-	}
 	return 0;
 }
 
@@ -2025,6 +2009,10 @@ struct sk_buff *udp4_ufo_fragment(struct sk_buff *skb, int features)
 {
 	struct sk_buff *segs = ERR_PTR(-EINVAL);
 	unsigned int mss;
+
+	if (!pskb_may_pull(skb, sizeof(struct udphdr)))
+		goto out;
+
 	mss = skb_shinfo(skb)->gso_size;
 	if (unlikely(skb->len <= mss))
 		goto out;
@@ -2051,17 +2039,24 @@ struct sk_buff *udp4_ufo_fragment(struct sk_buff *skb, int features)
 	if (skb->encapsulation && skb_shinfo(skb)->gso_type & SKB_GSO_UDP_TUNNEL)
 		segs = skb_udp_tunnel_segment(skb, features);
 	else {
-		int offset;
 		__wsum csum;
+		struct udphdr *uh;
+		struct iphdr *iph;
 
 		/* Do software UFO. Complete and fill in the UDP checksum as
 		 * HW cannot do checksum of UDP packets sent as multiple
 		 * IP fragments.
 		 */
-		offset = skb_checksum_start_offset(skb);
-		csum = skb_checksum(skb, offset, skb->len - offset, 0);
-		offset += skb->csum_offset;
-		*(__sum16 *)(skb->data + offset) = csum_fold(csum);
+
+		uh = udp_hdr(skb);
+		iph = ip_hdr(skb);
+
+		uh->check = 0;
+		csum = skb_checksum(skb, 0, skb->len, 0);
+		uh->check = udp_v4_check(skb->len, iph->saddr, iph->daddr, csum);
+		if (uh->check == 0)
+			uh->check = CSUM_MANGLED_0;
+
 		skb->ip_summed = CHECKSUM_NONE;
 
 		segs = skb_segment(skb, features);

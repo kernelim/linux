@@ -1557,6 +1557,64 @@ END(error_exit)
 ENTRY(nmi)
 	INTR_FRAME
 	PARAVIRT_ADJUST_EXCEPTION_FRAME
+
+	testb	$3, CS-RIP(%rsp)
+	jz	.Lnmi_from_kernel
+
+	/*
+	 * NMI from user mode.  We need to run on the thread stack, but we
+	 * can't go through the normal entry paths: NMIs are masked, and
+	 * we don't want to enable interrupts, because then we'll end
+	 * up in an awkward situation in which IRQs are on but NMIs
+	 * are off.
+	 *
+	 * We also must not push anything to the stack before switching
+	 * stacks lest we corrupt the "NMI executing" variable.
+	 */
+	pushq	%rdx
+	SWAPGS_UNSAFE_STACK
+	cld
+	movq	%rsp, %rdx
+	movq	PER_CPU_VAR(kernel_stack), %rsp
+	addq	$KERNEL_STACK_OFFSET, %rsp
+	pushq	5*8(%rdx)	/* pt_regs->ss */
+	pushq	4*8(%rdx)	/* pt_regs->rsp */
+	pushq	3*8(%rdx)	/* pt_regs->flags */
+	pushq	2*8(%rdx)	/* pt_regs->cs */
+	pushq	1*8(%rdx)	/* pt_regs->rip */
+	pushq   $-1		/* pt_regs->orig_ax */
+	pushq   %rdi		/* pt_regs->di */
+	pushq   %rsi		/* pt_regs->si */
+	pushq   (%rdx)		/* pt_regs->dx */
+	pushq   %rcx		/* pt_regs->cx */
+	pushq   %rax		/* pt_regs->ax */
+	pushq   %r8		/* pt_regs->r8 */
+	pushq   %r9		/* pt_regs->r9 */
+	pushq   %r10		/* pt_regs->r10 */
+	pushq   %r11		/* pt_regs->r11 */
+	pushq	%rbx		/* pt_regs->rbx */
+	pushq	%rbp		/* pt_regs->rbp */
+	pushq	%r12		/* pt_regs->r12 */
+	pushq	%r13		/* pt_regs->r13 */
+	pushq	%r14		/* pt_regs->r14 */
+	pushq	%r15		/* pt_regs->r15 */
+
+	movq	%rsp, %rdi
+	movq	$-1, %rsi
+	call	do_nmi
+
+	/*
+	 * Return back to user mode.  We must *not* do the normal exit
+	 * work, because we don't want to enable interrupts.  Fortunately,
+	 * do_nmi doesn't modify pt_regs.
+	 */
+	SWAPGS
+
+	addq	$6*8, %rsp	/* skip bx, bp, and r12-r15 */
+	jmp	restore_args
+
+.Lnmi_from_kernel:
+
 	pushq_cfi $-1
 	subq $15*8, %rsp
 	CFI_ADJUST_CFA_OFFSET 15*8

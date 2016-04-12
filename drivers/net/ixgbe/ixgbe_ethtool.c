@@ -2431,6 +2431,15 @@ static int ixgbe_set_flags(struct net_device *netdev, u32 data)
 	bool need_reset = false;
 	int rc;
 
+#ifdef CONFIG_IXGBE_DCB
+	if ((adapter->flags & IXGBE_FLAG_DCB_ENABLED) &&
+	    !(data & ETH_FLAG_RXVLAN))
+		return -EINVAL;
+#endif
+
+	need_reset = (data & ETH_FLAG_RXVLAN) !=
+		     (netdev->features & NETIF_F_HW_VLAN_RX);
+
 	rc = ethtool_op_set_flags(netdev, data);
 	if (rc)
 		return rc;
