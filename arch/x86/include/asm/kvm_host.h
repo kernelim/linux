@@ -706,7 +706,6 @@ static inline int emulate_instruction(struct kvm_vcpu *vcpu,
 	return x86_emulate_instruction(vcpu, 0, emulation_type, NULL, 0);
 }
 
-void kvm_report_emulation_failure(struct kvm_vcpu *cvpu, const char *context);
 void realmode_lgdt(struct kvm_vcpu *vcpu, u16 size, unsigned long address);
 void realmode_lidt(struct kvm_vcpu *vcpu, u16 size, unsigned long address);
 void realmode_lmsw(struct kvm_vcpu *vcpu, unsigned long msw,

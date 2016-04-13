@@ -46,11 +46,19 @@ extern void vmem_map_init(void);
 #define update_mmu_cache(vma, address, pte)     do { } while (0)
 
 /*
- * ZERO_PAGE is a global shared page that is always zero: used
+ * ZERO_PAGE is a global shared page that is always zero; used
  * for zero-mapped memory areas etc..
  */
-extern char empty_zero_page[PAGE_SIZE];
-#define ZERO_PAGE(vaddr) (virt_to_page(empty_zero_page))
+
+extern unsigned long empty_zero_page;
+extern unsigned long zero_page_mask;
+
+#define ZERO_PAGE(vaddr) \
+	(virt_to_page((void *)(empty_zero_page + \
+	 (((unsigned long)(vaddr)) &zero_page_mask))))
+
+#define __HAVE_COLOR_ZERO_PAGE
+
 #endif /* !__ASSEMBLY__ */
 
 /*
@@ -1113,6 +1121,10 @@ static inline pte_t mk_swap_pte(unsigned long type, unsigned long offset)
 extern int vmem_add_mapping(unsigned long start, unsigned long size);
 extern int vmem_remove_mapping(unsigned long start, unsigned long size);
 extern int s390_enable_sie(void);
+
+/* s390 has a private copy of get unmapped area to deal with cache synonyms */
+#define HAVE_ARCH_UNMAPPED_AREA
+#define HAVE_ARCH_UNMAPPED_AREA_TOPDOWN
 
 /*
  * No page table caches to initialise

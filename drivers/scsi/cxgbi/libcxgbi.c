@@ -609,6 +609,7 @@ static struct cxgbi_sock *cxgbi_check_route(struct sockaddr *dst_addr)
 	struct net_device *ndev;
 	struct cxgbi_device *cdev;
 	struct rtable *rt = NULL;
+	struct neighbour *n;
 	struct cxgbi_sock *csk = NULL;
 	unsigned int mtu = 0;
 	int port = 0xFFFF;
@@ -623,14 +624,15 @@ static struct cxgbi_sock *cxgbi_check_route(struct sockaddr *dst_addr)
 		goto err_out;
 	}
 	dst = &rt->u.dst;
-	ndev = dst->neighbour->dev;
+	n = dst->neighbour;
+	ndev = n->dev;
 
 	if (rt->rt_flags & (RTCF_MULTICAST | RTCF_BROADCAST)) {
 		pr_info("multi-cast route %pI4, port %u, dev %s.\n",
 			&daddr->sin_addr.s_addr, ntohs(daddr->sin_port),
 			ndev->name);
 		err = -ENETUNREACH;
-		goto rel_rt;
+		goto rel_neigh;
 	}
 
 	if (ndev->flags & IFF_LOOPBACK) {
@@ -645,7 +647,7 @@ static struct cxgbi_sock *cxgbi_check_route(struct sockaddr *dst_addr)
 		pr_info("dst %pI4, %s, NOT cxgbi device.\n",
 			&daddr->sin_addr.s_addr, ndev->name);
 		err = -ENETUNREACH;
-		goto rel_rt;
+		goto rel_neigh;
 	}
 	log_debug(1 << CXGBI_DBG_SOCK,
 		"route to %pI4 :%u, ndev p#%d,%s, cdev 0x%p.\n",
@@ -655,7 +657,7 @@ static struct cxgbi_sock *cxgbi_check_route(struct sockaddr *dst_addr)
 	csk = cxgbi_sock_create(cdev);
 	if (!csk) {
 		err = -ENOMEM;
-		goto rel_rt;
+		goto rel_neigh;
 	}
 	csk->cdev = cdev;
 	csk->port_id = port;
@@ -671,10 +673,9 @@ static struct cxgbi_sock *cxgbi_check_route(struct sockaddr *dst_addr)
 
 	return csk;
 
-rel_rt:
-	ip_rt_put(rt);
-	if (csk)
-		cxgbi_sock_closed(csk);
+rel_neigh:
+	neigh_release(n);
+
 err_out:
 	return ERR_PTR(err);
 }
@@ -782,7 +783,6 @@ static struct cxgbi_sock *cxgbi_check_route6(struct sockaddr *dst_addr)
 	csk->saddr6.sin6_family = daddr6->sin6_family;
 	csk->saddr6.sin6_addr = pref_saddr;
 
-	neigh_release(n);
 	return csk;
 
 rel_rt:
@@ -1065,7 +1065,7 @@ unsigned int cxgbi_sock_select_mss(struct cxgbi_sock *csk, unsigned int pmtu)
 	unsigned int idx;
 	struct dst_entry *dst = csk->dst;
 
-	csk->advmss = dst_metric(dst, RTAX_ADVMSS);
+	csk->advmss = dst_metric_advmss(dst);
 
 	if (csk->advmss > pmtu - 40)
 		csk->advmss = pmtu - 40;

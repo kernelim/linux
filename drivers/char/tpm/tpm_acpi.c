@@ -33,13 +33,13 @@ struct acpi_tcpa {
 	u16 platform_class;
 	union {
 		struct client_hdr {
-			u32 log_max_len __attribute__ ((packed));
-			u64 log_start_addr __attribute__ ((packed));
+			u32 log_max_len __packed;
+			u64 log_start_addr __packed;
 		} client;
 		struct server_hdr {
 			u16 reserved;
-			u64 log_max_len __attribute__ ((packed));
-			u64 log_start_addr __attribute__ ((packed));
+			u64 log_max_len __packed;
+			u64 log_start_addr __packed;
 		} server;
 	};
 };
@@ -49,7 +49,7 @@ int read_log(struct tpm_bios_log *log)
 {
 	struct acpi_tcpa *buff;
 	acpi_status status;
-	struct acpi_table_header *virt;
+	void __iomem *virt;
 	u64 len, start;
 
 	if (log->bios_event_log != NULL) {
@@ -96,8 +96,13 @@ int read_log(struct tpm_bios_log *log)
 	log->bios_event_log_end = log->bios_event_log + len;
 
 	virt = acpi_os_map_memory(start, len);
+	if (!virt) {
+		kfree(log->bios_event_log);
+		printk("%s: ERROR - Unable to map memory\n", __func__);
+		return -EIO;
+	}
 
-	memcpy(log->bios_event_log, virt, len);
+	memcpy_fromio(log->bios_event_log, virt, len);
 
 	acpi_os_unmap_memory(virt, len);
 	return 0;

@@ -47,6 +47,7 @@ struct ib_umem {
 	int                     writable;
 	int                     hugetlb;
 	struct work_struct	work;
+	struct pid             *pid;
 	struct mm_struct       *mm;
 	unsigned long		diff;
 	struct sg_table sg_head;
@@ -83,6 +84,8 @@ struct ib_umem *ib_umem_get(struct ib_ucontext *context, unsigned long addr,
 			    size_t size, int access, int dmasync);
 void ib_umem_release(struct ib_umem *umem);
 int ib_umem_page_count(struct ib_umem *umem);
+int ib_umem_copy_from(void *dst, struct ib_umem *umem, size_t offset,
+		      size_t length);
 
 #else /* CONFIG_INFINIBAND_USER_MEM */
 
@@ -95,7 +98,10 @@ static inline struct ib_umem *ib_umem_get(struct ib_ucontext *context,
 }
 static inline void ib_umem_release(struct ib_umem *umem) { }
 static inline int ib_umem_page_count(struct ib_umem *umem) { return 0; }
-
+static inline int ib_umem_copy_from(void *dst, struct ib_umem *umem, size_t offset,
+		      		    size_t length) {
+	return -EINVAL;
+}
 #endif /* CONFIG_INFINIBAND_USER_MEM */
 
 #endif /* IB_UMEM_H */

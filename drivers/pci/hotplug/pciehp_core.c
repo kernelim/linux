@@ -290,17 +290,12 @@ static int pciehp_probe(struct pcie_device *dev)
 	struct controller *ctrl;
 	struct slot *slot;
 	u8 value;
-	struct pci_dev *pdev = dev->port;
 
 	if (pciehp_disable)
 		goto err_out_none;
 
-	if (pciehp_force)
-		dev_info(&dev->device,
-			 "Bypassing BIOS check for pciehp use on %s\n",
-			 pci_name(pdev));
-	else if (pciehp_acpi_slot_detection_check(dev->port))
-		goto err_out_none;
+	if (dev->service != PCIE_PORT_SERVICE_HP)
+		return -ENODEV;
 
 	ctrl = pcie_init(dev);
 	if (!ctrl) {
@@ -409,7 +404,6 @@ static int __init pcied_init(void)
 {
 	int retval = 0;
 
-	pciehp_firmware_init();
 	retval = pcie_port_service_register(&hpdriver_portdrv);
  	dbg("pcie_port_service_register = %d\n", retval);
   	info(DRIVER_DESC " version: " DRIVER_VERSION "\n");

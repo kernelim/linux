@@ -205,7 +205,9 @@ static int sctp_v6_xmit(struct sk_buff *skb, struct sctp_transport *transport)
 {
 	struct sock *sk = skb->sk;
 	struct ipv6_pinfo *np = inet6_sk(sk);
+	struct ipv6_txoptions *opt;
 	struct flowi fl;
+	int res;
 
 	memset(&fl, 0, sizeof(fl));
 
@@ -224,10 +226,13 @@ static int sctp_v6_xmit(struct sk_buff *skb, struct sctp_transport *transport)
 	else
 		fl.oif = sk->sk_bound_dev_if;
 
-	if (np->opt && np->opt->srcrt) {
-		struct rt0_hdr *rt0 = (struct rt0_hdr *) np->opt->srcrt;
+	rcu_read_lock();
+	opt = rcu_dereference(np->opt);
+	if (opt && opt->srcrt) {
+		struct rt0_hdr *rt0 = (struct rt0_hdr *) opt->srcrt;
 		ipv6_addr_copy(&fl.fl6_dst, rt0->addr);
 	}
+	rcu_read_unlock();
 
 	SCTP_DEBUG_PRINTK("%s: skb:%p, len:%d, src:%pI6 dst:%pI6\n",
 			  __func__, skb, skb->len,
@@ -238,7 +243,10 @@ static int sctp_v6_xmit(struct sk_buff *skb, struct sctp_transport *transport)
 	if (!(transport->param_flags & SPP_PMTUD_ENABLE))
 		skb->local_df = 1;
 
-	return ip6_xmit(sk, skb, &fl, np->opt, 0);
+	rcu_read_lock();
+	res = ip6_xmit(sk, skb, &fl, rcu_dereference(np->opt), 0);
+	rcu_read_unlock();
+	return res;
 }
 
 /* Returns the dst cache entry for the given source and destination ip

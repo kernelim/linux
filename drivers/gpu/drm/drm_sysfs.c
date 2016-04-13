@@ -30,6 +30,8 @@ static struct device_type drm_sysfs_device_minor = {
 	.name = "drm_minor"
 };
 
+struct class *drm_class;
+
 /**
  * __drm_class_suspend - internal DRM class suspend routine
  * @dev: Linux device to suspend
@@ -98,42 +100,35 @@ static char *drm_devnode(struct device *dev, mode_t *mode)
 static CLASS_ATTR(version, S_IRUGO, version_show, NULL);
 
 /**
- * drm_sysfs_create - create a struct drm_sysfs_class structure
- * @owner: pointer to the module that is to "own" this struct drm_sysfs_class
- * @name: pointer to a string for the name of this class.
+ * drm_sysfs_init - initialize sysfs helpers
  *
- * This is used to create DRM class pointer that can then be used
- * in calls to drm_sysfs_device_add().
+ * This is used to create the DRM class, which is the implicit parent of any
+ * other top-level DRM sysfs objects.
  *
- * Note, the pointer created here is to be destroyed when finished by making a
- * call to drm_sysfs_destroy().
+ * You must call drm_sysfs_destroy() to release the allocated resources.
+ *
+ * Return: 0 on success, negative error code on failure.
  */
-struct class *drm_sysfs_create(struct module *owner, char *name)
+int drm_sysfs_init(void)
 {
-	struct class *class;
 	int err;
 
-	class = class_create(owner, name);
-	if (IS_ERR(class)) {
-		err = PTR_ERR(class);
-		goto err_out;
+	drm_class = class_create(THIS_MODULE, "drm");
+	if (IS_ERR(drm_class))
+		return PTR_ERR(drm_class);
+
+	drm_class->suspend = drm_class_suspend;
+	drm_class->resume = drm_class_resume;
+
+	err = class_create_file(drm_class, &class_attr_version);
+	if (err) {
+		class_destroy(drm_class);
+		drm_class = NULL;
+		return err;
 	}
 
-	class->suspend = drm_class_suspend;
-	class->resume = drm_class_resume;
-
-	err = class_create_file(class, &class_attr_version);
-	if (err)
-		goto err_out_class;
-
-	class->devnode = drm_devnode;
-
-	return class;
-
-err_out_class:
-	class_destroy(class);
-err_out:
-	return ERR_PTR(err);
+	drm_class->devnode = drm_devnode;
+	return 0;
 }
 
 /**
@@ -143,7 +138,7 @@ err_out:
  */
 void drm_sysfs_destroy(void)
 {
-	if ((drm_class == NULL) || (IS_ERR(drm_class)))
+	if (IS_ERR_OR_NULL(drm_class))
 		return;
 	class_remove_file(drm_class, &class_attr_version);
 	class_destroy(drm_class);

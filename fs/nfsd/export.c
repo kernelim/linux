@@ -308,13 +308,19 @@ static struct cache_head *export_table[EXPORT_HASHMAX];
 
 static void nfsd4_fslocs_free(struct nfsd4_fs_locations *fsloc)
 {
+	struct nfsd4_fs_location *locations = fsloc->locations;
 	int i;
 
+	if (!locations)
+		return;
+
 	for (i = 0; i < fsloc->locations_count; i++) {
-		kfree(fsloc->locations[i].path);
-		kfree(fsloc->locations[i].hosts);
+		kfree(locations[i].path);
+		kfree(locations[i].hosts);
 	}
-	kfree(fsloc->locations);
+
+	kfree(locations);
+	fsloc->locations = NULL;
 }
 
 static void svc_export_put(struct kref *ref)

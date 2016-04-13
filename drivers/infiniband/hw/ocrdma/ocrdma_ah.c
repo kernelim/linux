@@ -56,7 +56,13 @@ static inline int set_av_attr(struct ocrdma_dev *dev, struct ocrdma_ah *ah,
 	vlan_tag = attr->vlan_id;
 	if (!vlan_tag || (vlan_tag > 0xFFF))
 		vlan_tag = dev->pvid;
-	if (vlan_tag && (vlan_tag < 0x1000)) {
+	if (vlan_tag || dev->pfc_state) {
+		if (!vlan_tag) {
+			pr_err("ocrdma%d:Using VLAN with PFC is recommended\n",
+				dev->id);
+			pr_err("ocrdma%d:Using VLAN 0 for this connection\n",
+				dev->id);
+		}
 		eth.eth_type = cpu_to_be16(0x8100);
 		eth.roce_eth_type = cpu_to_be16(OCRDMA_ROCE_ETH_TYPE);
 		vlan_tag |= (dev->sl & 0x07) << OCRDMA_VID_PCP_SHIFT;
@@ -117,16 +123,18 @@ struct ib_ah *ocrdma_create_ah(struct ib_pd *ibpd, struct ib_ah_attr *attr)
 	status = ocrdma_query_gid(&dev->ibdev, 1, attr->grh.sgid_index, &sgid);
 	if (status) {
 		pr_err("%s(): Failed to query sgid, status = %d\n",
-		       __func__, status);
+		      __func__, status);
 		goto av_conf_err;
 	}
 
-	if (pd->uctx) {
+	if ((pd->uctx) &&
+	    (!rdma_is_multicast_addr((struct in6_addr *)attr->grh.dgid.raw)) &&
+	    (!rdma_link_local_addr((struct in6_addr *)attr->grh.dgid.raw))) {
 		status = rdma_addr_find_dmac_by_grh(&sgid, &attr->grh.dgid,
-						    attr->dmac, &attr->vlan_id);
+                                        attr->dmac, &attr->vlan_id);
 		if (status) {
-			pr_err("%s(): Failed to resolve dmac from gid. status = %d\n",
-			       __func__, status);
+			pr_err("%s(): Failed to resolve dmac from gid."
+				"status = %d\n", __func__, status);
 			goto av_conf_err;
 		}
 	}

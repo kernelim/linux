@@ -1317,11 +1317,11 @@ static netdev_tx_t amd8111e_start_xmit(struct sk_buff *skb,
 	lp->tx_ring[tx_index].tx_flags = 0;
 
 #if AMD8111E_VLAN_TAG_USED
-	if((lp->vlgrp != NULL) && vlan_tx_tag_present(skb)){
+	if((lp->vlgrp != NULL) && skb_vlan_tag_present(skb)){
 		lp->tx_ring[tx_index].tag_ctrl_cmd |=
 				cpu_to_le16(TCC_VLAN_INSERT);
 		lp->tx_ring[tx_index].tag_ctrl_info =
-				cpu_to_le16(vlan_tx_tag_get(skb));
+				cpu_to_le16(skb_vlan_tag_get(skb));
 
 	}
 #endif

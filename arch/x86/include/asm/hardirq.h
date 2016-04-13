@@ -34,12 +34,20 @@ typedef struct {
 
 DECLARE_PER_CPU_SHARED_ALIGNED(irq_cpustat_t, irq_stat);
 
+typedef struct {
+	unsigned int irq_hv_callback_count;
+} ____cacheline_aligned rh_irq_cpustat_t;
+
+DECLARE_PER_CPU_SHARED_ALIGNED(rh_irq_cpustat_t, rh_irq_stat);
+
 /* We can have at most NR_VECTORS irqs routed to a cpu at a time */
 #define MAX_HARDIRQS_PER_CPU NR_VECTORS
 
 #define __ARCH_IRQ_STAT
 
 #define inc_irq_stat(member)	percpu_inc(irq_stat.member)
+
+#define rh_inc_irq_stat(member)        percpu_inc(rh_irq_stat.member)
 
 #define local_softirq_pending()	percpu_read(irq_stat.__softirq_pending)
 

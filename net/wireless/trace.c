@@ -1,5 +1,5 @@
 #include <linux/module.h>
-#if 1 /* in RHEL */
+#if 1 /* in RHEL6 */
 #include <linux/interrupt.h>
 #endif
 

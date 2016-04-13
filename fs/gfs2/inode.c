@@ -730,7 +730,7 @@ int gfs2_create_inode(struct inode *dir, struct dentry *dentry,
 	if (!name->len || name->len > GFS2_FNAMESIZE)
 		return -ENAMETOOLONG;
 
-	error = gfs2_rs_alloc(dip);
+	error = gfs2_rsqa_alloc(dip);
 	if (error)
 		return error;
 
@@ -764,7 +764,7 @@ int gfs2_create_inode(struct inode *dir, struct dentry *dentry,
 		return -ENOMEM;
 	}
 	ip = GFS2_I(inode);
-	error = gfs2_rs_alloc(ip);
+	error = gfs2_rsqa_alloc(ip);
 	if (error)
 		goto fail_free_inode;
 
@@ -858,7 +858,7 @@ fail_gunlock2:
 fail_free_inode:
 	if (ip->i_gl)
 		gfs2_glock_put(ip->i_gl);
-	gfs2_rs_delete(ip);
+	gfs2_rsqa_delete(ip, NULL);
 	free_vfs_inode = 1;
 fail_gunlock:
 	gfs2_glock_dq_uninit(ghs);

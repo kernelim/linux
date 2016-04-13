@@ -99,6 +99,7 @@ parameter is applicable:
 	SWSUSP	Software suspend (hibernation) is enabled.
 	SUSPEND	System suspend states are enabled.
 	FTRACE	Function tracing enabled.
+	TPM	TPM drivers are enabled.
 	TS	Appropriate touchscreen support is enabled.
 	UMS	USB Mass Storage support is enabled.
 	USB	USB support is enabled.
@@ -872,6 +873,11 @@ and is between 256 and 4096 characters. It is defined in the file
 			invalid Protective MBR to be treated as GPT.
 
 	gvp11=		[HW,SCSI]
+
+	hardlockup_all_cpu_backtrace=
+			[KNL] Should the hard-lockup detector generate
+			backtraces on all cpus.
+			Format: <integer>
 
 	hashdist=	[KNL,NUMA] Large hashes allocated during boot
 			are distributed across NUMA nodes.  Defaults on
@@ -2651,6 +2657,9 @@ and is between 256 and 4096 characters. It is defined in the file
 
 	snd-ymfpci=	[HW,ALSA]
 
+	softirq_2ms_loop [KNL] Set softirq handling to 2ms maximum.  Default
+			 is existing RHEL6 behaviour.
+
 	softlockup_panic=
 			[KNL] Should the soft-lockup detector generate panics.
 
@@ -2794,6 +2803,15 @@ and is between 256 and 4096 characters. It is defined in the file
 			Default is on.
 
 	tp720=		[HW,PS2]
+
+	tpm_suspend_pcr=[HW,TPM]
+			Format: integer pcr id
+			Specify that at suspend time, the tpm driver
+			should extend the specified pcr with zeros,
+			as a workaround for some chips which fail to
+			flush the last written pcr on TPM_SaveState.
+			This will guarantee that all the other pcrs
+			are saved.
 
 	trace_buf_size=nn[KMG]
 			[FTRACE] will set tracing buffer size.

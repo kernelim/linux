@@ -11,7 +11,7 @@ CMARKER:=$(MARKER)
 RPM:=$(REDHAT)/rpm
 SRPMS:=$(RPM)/SRPMS
 SOURCES:=$(RPM)/SOURCES
-BUILD:=573
+BUILD:=642
 TESTPATCH:=$(REDHAT)/linux-kernel-test.patch
 FILTERDIFF:=/usr/bin/filterdiff -x '*redhat/*' -x '*/.gitignore' \
 	-x '*/makefile' -x '*/Makefile'

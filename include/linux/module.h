@@ -386,7 +386,14 @@ struct module
 	unsigned int num_trace_bprintk_fmt;
 #endif
 #ifdef CONFIG_EVENT_TRACING
+#ifdef __GENKSYMS__
 	struct ftrace_event_call *trace_events;
+#else
+	union {
+		struct ftrace_event_call  *events;
+		struct ftrace_event_call **ptrs;
+	} trace_events;
+#endif
 	unsigned int num_trace_events;
 #endif
 #ifdef CONFIG_FTRACE_MCOUNT_RECORD

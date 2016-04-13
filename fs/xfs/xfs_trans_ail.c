@@ -390,7 +390,7 @@ xfsaild_push(
 	    !list_empty(&ailp->xa_ail)) {
 		ailp->xa_log_flush = 0;
 		spin_unlock(&ailp->xa_lock);
-		XFS_STATS_INC(xs_push_ail_flush);
+		XFS_STATS_INC(mp, xs_push_ail_flush);
 		xfs_log_force(mp, XFS_LOG_SYNC);
 		spin_lock(&ailp->xa_lock);
 	}
@@ -409,7 +409,7 @@ xfsaild_push(
 		return tout;
 	}
 
-	XFS_STATS_INC(xs_push_ail);
+	XFS_STATS_INC(mp, xs_push_ail);
 
 	/*
 	 * While the item we are looking at is below the given threshold
@@ -441,7 +441,7 @@ xfsaild_push(
 		spin_unlock(&ailp->xa_lock);
 		switch (lock_result) {
 		case XFS_ITEM_SUCCESS:
-			XFS_STATS_INC(xs_push_ail_success);
+			XFS_STATS_INC(mp, xs_push_ail_success);
 			trace_xfs_ail_push(lip);
 
 			IOP_PUSH(lip);
@@ -449,7 +449,7 @@ xfsaild_push(
 			break;
 
 		case XFS_ITEM_PUSHBUF:
-			XFS_STATS_INC(xs_push_ail_pushbuf);
+			XFS_STATS_INC(mp, xs_push_ail_pushbuf);
 			trace_xfs_ail_pushbuf(lip);
 
 			if (!IOP_PUSHBUF(lip)) {
@@ -463,7 +463,7 @@ xfsaild_push(
 			break;
 
 		case XFS_ITEM_PINNED:
-			XFS_STATS_INC(xs_push_ail_pinned);
+			XFS_STATS_INC(mp, xs_push_ail_pinned);
 			trace_xfs_ail_pinned(lip);
 
 			stuck++;
@@ -471,7 +471,7 @@ xfsaild_push(
 			break;
 
 		case XFS_ITEM_LOCKED:
-			XFS_STATS_INC(xs_push_ail_locked);
+			XFS_STATS_INC(mp, xs_push_ail_locked);
 			trace_xfs_ail_locked(lip);
 			stuck++;
 			break;

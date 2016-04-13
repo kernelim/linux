@@ -54,5 +54,7 @@ int sclp_chp_configure(struct chp_id chpid);
 int sclp_chp_deconfigure(struct chp_id chpid);
 int sclp_chp_read_info(struct sclp_chp_info *info);
 void sclp_get_ipl_info(struct sclp_ipl_info *info);
+void sclp_hsa_size_detect(void);
+unsigned long sclp_get_hsa_size(void);
 
 #endif /* _ASM_S390_SCLP_H */

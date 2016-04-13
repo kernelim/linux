@@ -687,7 +687,11 @@ struct inode *new_inode(struct super_block *sb)
 	if (inode) {
 		spin_lock(&inode_lock);
 		__inode_add_to_lists(sb, NULL, inode);
-		inode->i_ino = ++last_ino;
+		last_ino++;
+		/* new_inode should not provide a 0 inode number */
+		if (unlikely(!last_ino))
+			last_ino++;
+		inode->i_ino = last_ino;
 		inode->i_state = 0;
 		spin_unlock(&inode_lock);
 	}

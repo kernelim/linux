@@ -32,6 +32,16 @@
 #include <linux/uio.h>
 
 /*
+ * Timeout for services such as KVP and fcopy.
+ */
+#define HV_UTIL_TIMEOUT 30
+
+/*
+ * Timeout for guest-host handshake for services.
+ */
+#define HV_UTIL_NEGO_TIMEOUT 60
+
+/*
  * The below CPUID leaves are present if VersionAndFeatures.HypervisorPresent
  * is set by CPUID(HVCPUID_VERSION_FEATURES).
  */
@@ -49,6 +59,17 @@ enum hv_cpuid_function {
 	HVCPUID_ENLIGHTENMENT_INFO	= 0x40000004,
 	HVCPUID_IMPLEMENTATION_LIMITS		= 0x40000005,
 };
+
+#define  HV_FEATURE_GUEST_CRASH_MSR_AVAILABLE   0x400
+
+#define HV_X64_MSR_CRASH_P0   0x40000100
+#define HV_X64_MSR_CRASH_P1   0x40000101
+#define HV_X64_MSR_CRASH_P2   0x40000102
+#define HV_X64_MSR_CRASH_P3   0x40000103
+#define HV_X64_MSR_CRASH_P4   0x40000104
+#define HV_X64_MSR_CRASH_CTL  0x40000105
+
+#define HV_CRASH_CTL_CRASH_NOTIFY (1ULL << 63)
 
 /* Define version of the synthetic interrupt controller. */
 #define HV_SYNIC_VERSION		(1)
@@ -606,6 +627,7 @@ struct vmbus_connection {
 
 	atomic_t next_gpadl_handle;
 
+	struct completion  unload_event;
 	/*
 	 * Represents channel interrupts. Each bit position represents a
 	 * channel.  When a channel sends an interrupt via VMBUS, it finds its
@@ -644,6 +666,23 @@ struct vmbus_msginfo {
 
 extern struct vmbus_connection vmbus_connection;
 
+enum vmbus_message_handler_type {
+	/* The related handler can sleep. */
+	VMHT_BLOCKING = 0,
+
+	/* The related handler must NOT sleep. */
+	VMHT_NON_BLOCKING = 1,
+};
+
+struct vmbus_channel_message_table_entry {
+	enum vmbus_channel_message_type message_type;
+	enum vmbus_message_handler_type handler_type;
+	void (*message_handler)(struct vmbus_channel_message_header *msg);
+};
+
+extern struct vmbus_channel_message_table_entry
+	channel_message_table[CHANNELMSG_COUNT];
+
 /* General vmbus interface */
 
 struct hv_device *vmbus_device_create(const uuid_le *type,
@@ -672,9 +711,35 @@ int vmbus_set_event(struct vmbus_channel *channel);
 
 void vmbus_on_event(unsigned long data);
 
+int hv_kvp_init(struct hv_util_service *);
+void hv_kvp_deinit(void);
+void hv_kvp_onchannelcallback(void *);
+
+int hv_vss_init(struct hv_util_service *);
+void hv_vss_deinit(void);
+void hv_vss_onchannelcallback(void *);
+
 int hv_fcopy_init(struct hv_util_service *);
 void hv_fcopy_deinit(void);
 void hv_fcopy_onchannelcallback(void *);
+void vmbus_initiate_unload(void);
 
+static inline void hv_poll_channel(struct vmbus_channel *channel,
+				   void (*cb)(void *))
+{
+	if (!channel)
+		return;
+
+	smp_call_function_single(channel->target_cpu, cb, channel, true);
+}
+
+enum hvutil_device_state {
+	HVUTIL_DEVICE_INIT = 0,  /* driver is loaded, waiting for userspace */
+	HVUTIL_READY,            /* userspace is registered */
+	HVUTIL_HOSTMSG_RECEIVED, /* message from the host was received */
+	HVUTIL_USERSPACE_REQ,    /* request to userspace was sent */
+	HVUTIL_USERSPACE_RECV,   /* reply from userspace was received */
+	HVUTIL_DEVICE_DYING,     /* driver unload is in progress */
+};
 
 #endif /* _HYPERV_VMBUS_H */

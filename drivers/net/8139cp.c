@@ -764,8 +764,8 @@ static netdev_tx_t cp_start_xmit (struct sk_buff *skb,
 	}
 
 #if CP_VLAN_TAG_USED
-	if (cp->vlgrp && vlan_tx_tag_present(skb))
-		vlan_tag = TxVlanTag | swab16(vlan_tx_tag_get(skb));
+	if (cp->vlgrp && skb_vlan_tag_present(skb))
+		vlan_tag = TxVlanTag | swab16(skb_vlan_tag_get(skb));
 #endif
 
 	entry = cp->tx_head;
@@ -1961,7 +1961,6 @@ static int cp_init_one (struct pci_dev *pdev, const struct pci_device_id *ent)
 	for (i = 0; i < 3; i++)
 		((__le16 *) (dev->dev_addr))[i] =
 		    cpu_to_le16(read_eeprom (regs, i + 7, addr_len));
-	memcpy(dev->perm_addr, dev->dev_addr, dev->addr_len);
 
 	dev->netdev_ops = &cp_netdev_ops;
 	netif_napi_add(dev, &cp->napi, cp_rx_poll, 16);

@@ -15,6 +15,8 @@ struct gfs2_sbd;
 
 #define NO_QUOTA_CHANGE ((u32)-1)
 
+extern int gfs2_qa_alloc(struct gfs2_inode *ip);
+extern void gfs2_qa_delete(struct gfs2_inode *ip, atomic_t *wcount);
 extern int gfs2_quota_hold(struct gfs2_inode *ip, u32 uid, u32 gid);
 extern void gfs2_quota_unhold(struct gfs2_inode *ip);
 

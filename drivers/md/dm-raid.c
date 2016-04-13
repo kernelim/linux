@@ -296,8 +296,7 @@ static int validate_region_size(struct raid_set *rs, unsigned long region_size)
 		 */
 		if (min_region_size > (1 << 13)) {
 			/* If not a power of 2, make it the next power of 2 */
-			if (min_region_size & (min_region_size - 1))
-				region_size = 1 << fls(region_size);
+			region_size = roundup_pow_of_two(min_region_size);
 			DMINFO("Choosing default region size of %lu sectors",
 			       region_size);
 		} else {
@@ -1123,7 +1122,7 @@ static int raid_ctr(struct dm_target *ti, unsigned argc, char **argv)
 	argv++;
 
 	/* Skip over RAID params for now and find out # of devices */
-	if (num_raid_params + 1 > argc) {
+	if (num_raid_params >= argc) {
 		ti->error = "Arguments do not agree with counts given";
 		return -EINVAL;
 	}
@@ -1131,6 +1130,12 @@ static int raid_ctr(struct dm_target *ti, unsigned argc, char **argv)
 	if ((kstrtoul(argv[num_raid_params], 10, &num_raid_devs) < 0) ||
 	    (num_raid_devs >= INT_MAX)) {
 		ti->error = "Cannot understand number of raid devices";
+		return -EINVAL;
+	}
+
+	argc -= num_raid_params + 1; /* +1: we already have num_raid_devs */
+	if (argc != (num_raid_devs * 2)) {
+		ti->error = "Supplied RAID devices does not match the count given";
 		return -EINVAL;
 	}
 
@@ -1142,15 +1147,7 @@ static int raid_ctr(struct dm_target *ti, unsigned argc, char **argv)
 	if (ret)
 		goto bad;
 
-	ret = -EINVAL;
-
-	argc -= num_raid_params + 1; /* +1: we already have num_raid_devs */
 	argv += num_raid_params + 1;
-
-	if (argc != (num_raid_devs * 2)) {
-		ti->error = "Supplied RAID devices does not match the count given";
-		goto bad;
-	}
 
 	ret = dev_parms(rs, argv);
 	if (ret)

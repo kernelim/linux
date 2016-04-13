@@ -79,6 +79,10 @@ extern struct Qdisc *fifo_create_dflt(struct Qdisc *sch, struct Qdisc_ops *ops,
 
 extern int register_qdisc(struct Qdisc_ops *qops);
 extern int unregister_qdisc(struct Qdisc_ops *qops);
+void qdisc_get_default(char *id, size_t len);
+int qdisc_set_default(const char *id);
+
+void qdisc_list_add(struct Qdisc *q);
 extern void qdisc_list_del(struct Qdisc *q);
 extern struct Qdisc *qdisc_lookup(struct net_device *dev, u32 handle);
 extern struct Qdisc *qdisc_lookup_class(struct net_device *dev, u32 handle);

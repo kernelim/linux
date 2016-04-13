@@ -20,6 +20,7 @@
 #include <net/rtnetlink.h>
 #include <net/sock.h>
 #include <linux/virtio_net.h>
+#include <net/flow_keys.h>
 
 /*
  * A macvtap queue is the central object of this driver, it connects
@@ -625,7 +626,7 @@ static int macvtap_skb_to_vnet_hdr(const struct sk_buff *skb,
 		vnet_hdr->flags = VIRTIO_NET_HDR_F_NEEDS_CSUM;
 		vnet_hdr->csum_start = skb->csum_start -
 					skb_headroom(skb);
-		if (vlan_tx_tag_present(skb))
+		if (skb_vlan_tag_present(skb))
 			vnet_hdr->csum_start += VLAN_HLEN;
 		vnet_hdr->csum_offset = skb->csum_offset;
 	} else if (skb->ip_summed == CHECKSUM_UNNECESSARY) {
@@ -673,6 +674,7 @@ static ssize_t macvtap_get_user(struct macvtap_queue *q, struct msghdr *m,
 	int copylen = 0;
 	int depth;
 	bool zerocopy = false;
+	struct flow_keys keys;
 	size_t linear;
 
 	if (q->flags & IFF_VNET_HDR) {
@@ -751,6 +753,13 @@ static ssize_t macvtap_get_user(struct macvtap_queue *q, struct msghdr *m,
 			goto err_kfree;
 	}
 
+	if (skb->ip_summed == CHECKSUM_PARTIAL)
+		skb_set_transport_header(skb, skb_checksum_start_offset(skb));
+	else if (skb_flow_dissect(skb, &keys))
+		skb_set_transport_header(skb, keys.thoff);
+	else
+		skb_set_transport_header(skb, ETH_HLEN);
+
 	/* Move network header to the right position for VLAN tagged packets */
 	if ((skb->protocol == htons(ETH_P_8021Q) ||
 	     skb->protocol == htons(ETH_P_8021AD)) &&
@@ -825,7 +834,7 @@ static ssize_t macvtap_put_user(struct macvtap_queue *q,
 	total = copied = vnet_hdr_len;
 	total += skb->len;
 
-	if (!vlan_tx_tag_present(skb))
+	if (!skb_vlan_tag_present(skb))
 		len = min_t(int, skb->len, len);
 	else {
 		int copy;
@@ -834,7 +843,7 @@ static ssize_t macvtap_put_user(struct macvtap_queue *q,
 			__be16 h_vlan_TCI;
 		} veth;
 		veth.h_vlan_proto = htons(ETH_P_8021Q);
-		veth.h_vlan_TCI = htons(vlan_tx_tag_get(skb));
+		veth.h_vlan_TCI = htons(skb_vlan_tag_get(skb));
 
 		vlan_offset = offsetof(struct vlan_ethhdr, h_vlan_proto);
 		len = min_t(int, skb->len + VLAN_HLEN, len);

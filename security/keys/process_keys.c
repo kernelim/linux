@@ -47,9 +47,11 @@ int install_user_keyrings(void)
 	struct user_struct *user;
 	const struct cred *cred;
 	struct key *uid_keyring, *session_keyring;
+	key_perm_t user_keyring_perm;
 	char buf[20];
 	int ret;
 
+	user_keyring_perm = (KEY_POS_ALL & ~KEY_POS_SETATTR) | KEY_USR_ALL;
 	cred = current_cred();
 	user = cred->user;
 
@@ -73,8 +75,8 @@ int install_user_keyrings(void)
 		uid_keyring = find_keyring_by_name(buf, true);
 		if (IS_ERR(uid_keyring)) {
 			uid_keyring = keyring_alloc(buf, user->uid, (gid_t) -1,
-						    cred, KEY_ALLOC_IN_QUOTA,
-						    NULL);
+						    cred, user_keyring_perm,
+						    KEY_ALLOC_IN_QUOTA, NULL);
 			if (IS_ERR(uid_keyring)) {
 				ret = PTR_ERR(uid_keyring);
 				goto error;
@@ -89,7 +91,8 @@ int install_user_keyrings(void)
 		if (IS_ERR(session_keyring)) {
 			session_keyring =
 				keyring_alloc(buf, user->uid, (gid_t) -1,
-					      cred, KEY_ALLOC_IN_QUOTA, NULL);
+					      cred, user_keyring_perm,
+					      KEY_ALLOC_IN_QUOTA, NULL);
 			if (IS_ERR(session_keyring)) {
 				ret = PTR_ERR(session_keyring);
 				goto error_release;
@@ -130,6 +133,7 @@ int install_thread_keyring_to_cred(struct cred *new)
 	struct key *keyring;
 
 	keyring = keyring_alloc("_tid", new->uid, new->gid, new,
+				KEY_POS_ALL | KEY_USR_VIEW,
 				KEY_ALLOC_QUOTA_OVERRUN, NULL);
 	if (IS_ERR(keyring))
 		return PTR_ERR(keyring);
@@ -175,8 +179,9 @@ int install_process_keyring_to_cred(struct cred *new)
 	if (new->tgcred->process_keyring)
 		return -EEXIST;
 
-	keyring = keyring_alloc("_pid", new->uid, new->gid,
-				new, KEY_ALLOC_QUOTA_OVERRUN, NULL);
+	keyring = keyring_alloc("_pid", new->uid, new->gid, new,
+				KEY_POS_ALL | KEY_USR_VIEW,
+				KEY_ALLOC_QUOTA_OVERRUN, NULL);
 	if (IS_ERR(keyring))
 		return PTR_ERR(keyring);
 
@@ -235,8 +240,9 @@ static int install_session_keyring_to_cred(struct cred *cred,
 		if (cred->tgcred->session_keyring)
 			flags = KEY_ALLOC_IN_QUOTA;
 
-		keyring = keyring_alloc("_ses", cred->uid, cred->gid,
-					cred, flags, NULL);
+		keyring = keyring_alloc("_ses", cred->uid, cred->gid, cred,
+					KEY_POS_ALL | KEY_USR_VIEW | KEY_USR_READ,
+					flags, NULL);
 		if (IS_ERR(keyring))
 			return PTR_ERR(keyring);
 	} else {
@@ -455,6 +461,7 @@ found:
 key_ref_t search_process_keyrings(struct key_type *type,
 				  const void *description,
 				  key_match_func_t match,
+				  bool no_state_check,
 				  const struct cred *cred)
 {
 	struct request_key_auth *rka;
@@ -463,7 +470,7 @@ key_ref_t search_process_keyrings(struct key_type *type,
 	might_sleep();
 
 	key_ref = search_my_process_keyrings(type, description, match,
-					     false, cred);
+					     no_state_check, cred);
 	if (!IS_ERR(key_ref))
 		goto found;
 	err = key_ref;
@@ -483,7 +490,8 @@ key_ref_t search_process_keyrings(struct key_type *type,
 			rka = cred->request_key_auth->payload.data;
 
 			key_ref = search_process_keyrings(type, description,
-							  match, rka->cred);
+							  match, no_state_check,
+							  rka->cred);
 
 			up_read(&cred->request_key_auth->sem);
 
@@ -690,7 +698,7 @@ try_again:
 		/* check to see if we possess the key */
 		skey_ref = search_process_keyrings(key->type, key,
 						   lookup_user_key_possessed,
-						   cred);
+						   true, cred);
 
 		if (!IS_ERR(skey_ref)) {
 			key_put(key);
@@ -733,6 +741,8 @@ try_again:
 	ret = key_task_permission(key_ref, cred, perm);
 	if (ret < 0)
 		goto invalid_key;
+
+	key->last_used_at = current_kernel_time().tv_sec;
 
 error:
 	put_cred(cred);
@@ -799,8 +809,10 @@ long join_session_keyring(const char *name)
 	keyring = find_keyring_by_name(name, false);
 	if (PTR_ERR(keyring) == -ENOKEY) {
 		/* not found - try and create a new one */
-		keyring = keyring_alloc(name, old->uid, old->gid, old,
-					KEY_ALLOC_IN_QUOTA, NULL);
+		keyring = keyring_alloc(
+			name, old->uid, old->gid, old,
+			KEY_POS_ALL | KEY_USR_VIEW | KEY_USR_READ | KEY_USR_LINK,
+			KEY_ALLOC_IN_QUOTA, NULL);
 		if (IS_ERR(keyring)) {
 			ret = PTR_ERR(keyring);
 			goto error2;
@@ -877,3 +889,13 @@ void key_replace_session_keyring(void)
 
 	commit_creds(new);
 }
+
+/*
+ * Make sure that root's user and user-session keyrings exist.
+ */
+static int __init init_root_keyring(void)
+{
+	return install_user_keyrings();
+}
+
+late_initcall(init_root_keyring);

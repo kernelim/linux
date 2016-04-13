@@ -15,6 +15,7 @@
 #include <linux/bitops.h>
 #include <linux/log2.h>
 #include <linux/typecheck.h>
+#include <linux/printk.h>
 #include <linux/ratelimit.h>
 #include <linux/dynamic_debug.h>
 #include <linux/init.h>

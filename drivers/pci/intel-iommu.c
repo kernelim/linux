@@ -355,6 +355,9 @@ int dmar_disabled = 0;
 int dmar_disabled = 1;
 #endif /*CONFIG_DMAR_DEFAULT_ON*/
 
+int intel_iommu_enabled = 0;
+EXPORT_SYMBOL_GPL(intel_iommu_enabled);
+
 static int dmar_map_gfx = 1;
 static int dmar_forcedac;
 static int intel_iommu_strict;
@@ -3486,18 +3489,19 @@ static int device_notifier(struct notifier_block *nb,
 	if (iommu_no_mapping(dev))
 		return 0;
 
+	if (action != BUS_NOTIFY_REMOVED_DEVICE)
+		return 0;
+
 	domain = find_domain(pdev);
 	if (!domain)
 		return 0;
 
-	if (action == BUS_NOTIFY_UNBOUND_DRIVER && !iommu_pass_through) {
-		domain_remove_one_dev_info(domain, pdev);
+	domain_remove_one_dev_info(domain, pdev);
 
-		if (!(domain->flags & DOMAIN_FLAG_VIRTUAL_MACHINE) &&
-		    !(domain->flags & DOMAIN_FLAG_STATIC_IDENTITY) &&
-		    list_empty(&domain->devices))
-			domain_exit(domain);
-	}
+	if (!(domain->flags & DOMAIN_FLAG_VIRTUAL_MACHINE) &&
+	    !(domain->flags & DOMAIN_FLAG_STATIC_IDENTITY) &&
+	    list_empty(&domain->devices))
+		domain_exit(domain);
 
 	return 0;
 }
@@ -3557,6 +3561,8 @@ int __init intel_iommu_init(void)
 	register_iommu(&intel_iommu_ops);
 
 	bus_register_notifier(&pci_bus_type, &device_nb);
+
+	intel_iommu_enabled = 1;
 
 	return 0;
 }
@@ -3850,6 +3856,11 @@ static int intel_iommu_attach_device(struct iommu_domain *domain,
 				domain_remove_one_dev_info(old_domain, pdev);
 			else
 				domain_remove_dev_info(old_domain);
+
+			if (!(old_domain->flags & DOMAIN_FLAG_VIRTUAL_MACHINE) &&
+			    !(old_domain->flags & DOMAIN_FLAG_STATIC_IDENTITY) &&
+			    list_empty(&old_domain->devices))
+				domain_exit(old_domain);
 		}
 	}
 

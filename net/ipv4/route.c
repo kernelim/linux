@@ -138,6 +138,7 @@ static unsigned long expires_ljiffies;
  */
 
 static struct dst_entry *ipv4_dst_check(struct dst_entry *dst, u32 cookie);
+static unsigned int	 ipv4_default_advmss(const struct dst_entry *dst);
 static void		 ipv4_dst_destroy(struct dst_entry *dst);
 static void		 ipv4_dst_ifdown(struct dst_entry *dst,
 					 struct net_device *dev, int how);
@@ -384,8 +385,7 @@ static int rt_cache_seq_show(struct seq_file *seq, void *v)
 			(unsigned long)r->rt_dst, (unsigned long)r->rt_gateway,
 			r->rt_flags, atomic_read(&r->u.dst.__refcnt),
 			r->u.dst.__use, 0, (unsigned long)r->rt_src,
-			(dst_metric(&r->u.dst, RTAX_ADVMSS) ?
-			     (int)dst_metric(&r->u.dst, RTAX_ADVMSS) + 40 : 0),
+			dst_metric_advmss(&r->u.dst) + 40,
 			dst_metric(&r->u.dst, RTAX_WINDOW),
 			(int)((dst_metric(&r->u.dst, RTAX_RTT) >> 3) +
 			      dst_metric(&r->u.dst, RTAX_RTTVAR)),
@@ -1846,6 +1846,19 @@ static void set_class_tag(struct rtable *rt, u32 tag)
 }
 #endif
 
+static unsigned int ipv4_default_advmss(const struct dst_entry *dst)
+{
+	unsigned int advmss = dst_metric(dst, RTAX_ADVMSS);
+
+	if (advmss == 0) {
+		advmss = max_t(unsigned int, dst->dev->mtu - 40,
+			       ip_rt_min_advmss);
+		if (advmss > 65535 - 40)
+			advmss = 65535 - 40;
+	}
+	return advmss;
+}
+
 static void rt_set_nexthop(struct rtable *rt, struct fib_result *res, u32 itag)
 {
 	struct fib_info *fi = res->fi;
@@ -1873,9 +1886,6 @@ static void rt_set_nexthop(struct rtable *rt, struct fib_result *res, u32 itag)
 		rt->u.dst.metrics[RTAX_HOPLIMIT-1] = sysctl_ip_default_ttl;
 	if (dst_mtu(&rt->u.dst) > IP_MAX_MTU)
 		rt->u.dst.metrics[RTAX_MTU-1] = IP_MAX_MTU;
-	if (dst_metric(&rt->u.dst, RTAX_ADVMSS) == 0)
-		rt->u.dst.metrics[RTAX_ADVMSS-1] = max_t(unsigned int, rt->u.dst.dev->mtu - 40,
-				       ip_rt_min_advmss);
 	if (dst_metric(&rt->u.dst, RTAX_ADVMSS) > 65535 - 40)
 		rt->u.dst.metrics[RTAX_ADVMSS-1] = 65535 - 40;
 
@@ -2571,7 +2581,7 @@ static int ip_route_output_slow(struct net *net, struct rtable **rp,
 	unsigned flags = 0;
 	struct net_device *dev_out = NULL;
 	int free_res = 0;
-	int err;
+	int err = -ENETUNREACH;
 
 
 	res.fi		= NULL;
@@ -2675,7 +2685,8 @@ static int ip_route_output_slow(struct net *net, struct rtable **rp,
 		goto make_route;
 	}
 
-	if (fib_lookup(net, &fl, &res)) {
+	err = fib_lookup(net, &fl, &res);
+	if (err) {
 		res.fi = NULL;
 		if (oldflp->oif) {
 			/* Apparently, routing tables are wrong. Assume,
@@ -2704,7 +2715,6 @@ static int ip_route_output_slow(struct net *net, struct rtable **rp,
 		}
 		if (dev_out)
 			dev_put(dev_out);
-		err = -ENETUNREACH;
 		goto out;
 	}
 	free_res = 1;
@@ -3509,6 +3519,9 @@ int __init ip_rt_init(void)
 
 	ipv4_dst_ops.gc_thresh = (rt_hash_mask + 1);
 	ip_rt_max_size = (rt_hash_mask + 1) * 16;
+
+	dst_ops_extend_register(&ipv4_dst_ops, ipv4_default_advmss);
+	dst_ops_extend_register(&ipv4_dst_blackhole_ops, ipv4_default_advmss);
 
 	devinet_init();
 	ip_fib_init();

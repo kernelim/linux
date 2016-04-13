@@ -23,6 +23,7 @@
 #include <asm/e820.h>
 #include <asm/apic.h>
 #include <asm/uv/uv.h>
+#include <asm/hypervisor.h>
 
 int acpi_numa __initdata;
 
@@ -270,6 +271,10 @@ acpi_numa_memory_affinity_init(struct acpi_srat_mem_affinity *ma)
 		return;
 	start = ma->base_address;
 	end = start + ma->length;
+
+	if ((x86_hyper == &x86_hyper_ms_hyperv) && (PFN_DOWN(start) > max_pfn))
+		return;
+
 	pxm = ma->proximity_domain;
 	node = setup_node(pxm);
 	if (node < 0) {
@@ -310,7 +315,8 @@ acpi_numa_memory_affinity_init(struct acpi_srat_mem_affinity *ma)
 	dmi_product_name = dmi_get_system_info(DMI_PRODUCT_NAME);
 	if (ma->flags & ACPI_SRAT_MEM_HOT_PLUGGABLE &&
 	    (!dmi_match(DMI_SYS_VENDOR, "FUJITSU") ||
-	     !strstr(dmi_product_name, "PRIMEQUEST"))) {
+	     !strstr(dmi_product_name, "PRIMEQUEST")) &&
+	    (x86_hyper != &x86_hyper_ms_hyperv)) {
 		update_nodes_add(node, start, end);
 		/* restore nodes[node] */
 		*nd = oldnode;

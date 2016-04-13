@@ -369,13 +369,9 @@ static int gfs2_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf)
 	/* Update file times before taking page lock */
 	file_update_time(vma->vm_file);
 
-	ret = get_write_access(inode);
+	ret = gfs2_rsqa_alloc(ip);
 	if (ret)
 		goto out;
-
-	ret = gfs2_rs_alloc(ip);
-	if (ret)
-		goto out_write_access;
 
 	gfs2_holder_init(ip->i_gl, LM_ST_EXCLUSIVE, 0, &gh);
 	ret = gfs2_glock_nq(&gh);
@@ -462,8 +458,6 @@ out_uninit:
 		set_page_dirty(page);
 		wait_for_stable_page(page);
 	}
-out_write_access:
-	put_write_access(inode);
 out:
 	sb_end_pagefault(inode->i_sb);
 	return block_page_mkwrite_return(ret);
@@ -576,7 +570,7 @@ static int gfs2_release(struct inode *inode, struct file *file)
 	if (!(file->f_mode & FMODE_WRITE))
 		return 0;
 
-	gfs2_rs_delete(ip);
+	gfs2_rsqa_delete(ip, &inode->i_writecount);
 	return 0;
 }
 
@@ -642,7 +636,7 @@ static ssize_t gfs2_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 	int ret;
 
 	sdp = GFS2_SB(file->f_mapping->host);
-	ret = gfs2_rs_alloc(ip);
+	ret = gfs2_rsqa_alloc(ip);
 	if (ret)
 		return ret;
 
@@ -667,7 +661,7 @@ static ssize_t gfs2_file_splice_write(struct pipe_inode_info *pipe,
 	struct inode *inode = out->f_mapping->host;
 	struct gfs2_inode *ip = GFS2_I(inode);
 
-	error = gfs2_rs_alloc(ip);
+	error = gfs2_rsqa_alloc(ip);
 	if (error)
 		return (ssize_t)error;
 
@@ -741,7 +735,7 @@ static int do_flock(struct file *file, int cmd, struct file_lock *fl)
 	struct gfs2_inode *ip = GFS2_I(file->f_path.dentry->d_inode);
 	struct gfs2_glock *gl;
 	unsigned int state;
-	int flags;
+	u16 flags;
 	int error = 0;
 	int sleeptime;
 

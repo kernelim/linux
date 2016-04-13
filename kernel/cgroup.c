@@ -61,6 +61,7 @@
 #include <linux/eventfd.h>
 #include <linux/poll.h>
 #include <linux/flex_array.h> /* used in cgroup_attach_proc */
+#include <linux/kthread.h>
 
 #include <asm/atomic.h>
 
@@ -2101,6 +2102,16 @@ static int attach_task_by_pid(struct cgroup *cgrp, u64 pid, bool threadgroup)
 			cgroup_unlock();
 			return -EACCES;
 		}
+		/*
+		 * Workqueue threads may acquire PF_THREAD_BOUND and become
+		 * trapped in a cpuset, or RT worker may be born in a cgroup
+		 * with no rt_runtime allocated.  Just say no.
+		 */
+		if (tsk == kthreadd_task || (tsk->flags & PF_THREAD_BOUND)) {
+			rcu_read_unlock();
+			cgroup_unlock();
+			return -EINVAL;
+		}
 		get_task_struct(tsk);
 		rcu_read_unlock();
 	} else {
@@ -2108,6 +2119,16 @@ static int attach_task_by_pid(struct cgroup *cgrp, u64 pid, bool threadgroup)
 			tsk = current->group_leader;
 		else
 			tsk = current;
+
+		/*
+		 * Workqueue threads may acquire PF_THREAD_BOUND and become
+		 * trapped in a cpuset, or RT worker may be born in a cgroup
+		 * with no rt_runtime allocated.  Just say no.
+		 */
+		if (tsk == kthreadd_task || (tsk->flags & PF_THREAD_BOUND)) {
+			cgroup_unlock();
+			return -EINVAL;
+		}
 		get_task_struct(tsk);
 	}
 

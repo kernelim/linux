@@ -1,5 +1,6 @@
 #include "../perf.h"
 #include "util.h"
+#include "debug.h"
 #include <api/fs/fs.h>
 #include <sys/mman.h>
 #ifdef HAVE_BACKTRACE_SUPPORT
@@ -12,6 +13,15 @@
 #include <limits.h>
 #include <byteswap.h>
 #include <linux/kernel.h>
+#include <unistd.h>
+#include "callchain.h"
+
+struct callchain_param	callchain_param = {
+	.mode	= CHAIN_GRAPH_REL,
+	.min_percent = 0.5,
+	.order  = ORDER_CALLEE,
+	.key	= CCKEY_FUNCTION
+};
 
 /*
  * XXX We need to find a better place for these things...
@@ -338,6 +348,13 @@ void dump_stack(void)
 void dump_stack(void) {}
 #endif
 
+void sighandler_dump_stack(int sig)
+{
+	psignal(sig, "perf");
+	dump_stack();
+	exit(sig);
+}
+
 void get_term_dimensions(struct winsize *ws)
 {
 	char *s = getenv("LINES");
@@ -360,13 +377,38 @@ void get_term_dimensions(struct winsize *ws)
 	ws->ws_col = 80;
 }
 
-static void set_tracing_events_path(const char *mountpoint)
+void set_term_quiet_input(struct termios *old)
 {
-	snprintf(tracing_events_path, sizeof(tracing_events_path), "%s/%s",
-		 mountpoint, "tracing/events");
+	struct termios tc;
+
+	tcgetattr(0, old);
+	tc = *old;
+	tc.c_lflag &= ~(ICANON | ECHO);
+	tc.c_cc[VMIN] = 0;
+	tc.c_cc[VTIME] = 0;
+	tcsetattr(0, TCSANOW, &tc);
 }
 
-const char *perf_debugfs_mount(const char *mountpoint)
+static void set_tracing_events_path(const char *tracing, const char *mountpoint)
+{
+	snprintf(tracing_events_path, sizeof(tracing_events_path), "%s/%s%s",
+		 mountpoint, tracing, "events");
+}
+
+static const char *__perf_tracefs_mount(const char *mountpoint)
+{
+	const char *mnt;
+
+	mnt = tracefs_mount(mountpoint);
+	if (!mnt)
+		return NULL;
+
+	set_tracing_events_path("", mnt);
+
+	return mnt;
+}
+
+static const char *__perf_debugfs_mount(const char *mountpoint)
 {
 	const char *mnt;
 
@@ -374,7 +416,20 @@ const char *perf_debugfs_mount(const char *mountpoint)
 	if (!mnt)
 		return NULL;
 
-	set_tracing_events_path(mnt);
+	set_tracing_events_path("tracing/", mnt);
+
+	return mnt;
+}
+
+const char *perf_debugfs_mount(const char *mountpoint)
+{
+	const char *mnt;
+
+	mnt = __perf_tracefs_mount(mountpoint);
+	if (mnt)
+		return mnt;
+
+	mnt = __perf_debugfs_mount(mountpoint);
 
 	return mnt;
 }
@@ -382,12 +437,19 @@ const char *perf_debugfs_mount(const char *mountpoint)
 void perf_debugfs_set_path(const char *mntpt)
 {
 	snprintf(debugfs_mountpoint, strlen(debugfs_mountpoint), "%s", mntpt);
-	set_tracing_events_path(mntpt);
+	set_tracing_events_path("tracing/", mntpt);
+}
+
+static const char *find_tracefs(void)
+{
+	const char *path = __perf_tracefs_mount(NULL);
+
+	return path;
 }
 
 static const char *find_debugfs(void)
 {
-	const char *path = perf_debugfs_mount(NULL);
+	const char *path = __perf_debugfs_mount(NULL);
 
 	if (!path)
 		fprintf(stderr, "Your kernel does not support the debugfs filesystem");
@@ -401,6 +463,7 @@ static const char *find_debugfs(void)
  */
 const char *find_tracing_dir(void)
 {
+	const char *tracing_dir = "";
 	static char *tracing;
 	static int tracing_found;
 	const char *debugfs;
@@ -408,15 +471,16 @@ const char *find_tracing_dir(void)
 	if (tracing_found)
 		return tracing;
 
-	debugfs = find_debugfs();
-	if (!debugfs)
-		return NULL;
+	debugfs = find_tracefs();
+	if (!debugfs) {
+		tracing_dir = "/tracing";
+		debugfs = find_debugfs();
+		if (!debugfs)
+			return NULL;
+	}
 
-	tracing = malloc(strlen(debugfs) + 9);
-	if (!tracing)
+	if (asprintf(&tracing, "%s%s", debugfs, tracing_dir) < 0)
 		return NULL;
-
-	sprintf(tracing, "%s/tracing", debugfs);
 
 	tracing_found = 1;
 	return tracing;
@@ -431,11 +495,9 @@ char *get_tracing_file(const char *name)
 	if (!tracing)
 		return NULL;
 
-	file = malloc(strlen(tracing) + strlen(name) + 2);
-	if (!file)
+	if (asprintf(&file, "%s/%s", tracing, name) < 0)
 		return NULL;
 
-	sprintf(file, "%s/%s", tracing, name);
 	return file;
 }
 
@@ -482,6 +544,7 @@ int filename__read_str(const char *filename, char **buf, size_t *sizep)
 	size_t size = 0, alloc_size = 0;
 	void *bf = NULL, *nbf;
 	int fd, n, err = 0;
+	char sbuf[STRERR_BUFSIZE];
 
 	fd = open(filename, O_RDONLY);
 	if (fd < 0)
@@ -502,8 +565,8 @@ int filename__read_str(const char *filename, char **buf, size_t *sizep)
 		n = read(fd, bf + size, alloc_size - size);
 		if (n < 0) {
 			if (size) {
-				pr_warning("read failed %d: %s\n",
-					   errno, strerror(errno));
+				pr_warning("read failed %d: %s\n", errno,
+					 strerror_r(errno, sbuf, sizeof(sbuf)));
 				err = 0;
 			} else
 				err = -errno;
@@ -587,23 +650,6 @@ unsigned long parse_tag_value(const char *str, struct parse_tag *tags)
 	return (unsigned long) -1;
 }
 
-int filename__read_int(const char *filename, int *value)
-{
-	char line[64];
-	int fd = open(filename, O_RDONLY), err = -1;
-
-	if (fd < 0)
-		return -1;
-
-	if (read(fd, line, sizeof(line)) > 0) {
-		*value = atoi(line);
-		err = 0;
-	}
-
-	close(fd);
-	return err;
-}
-
 const char *get_filename_for_perf_kvm(void)
 {
 	const char *filename;
@@ -620,16 +666,9 @@ const char *get_filename_for_perf_kvm(void)
 
 int perf_event_paranoid(void)
 {
-	char path[PATH_MAX];
-	const char *procfs = procfs__mountpoint();
 	int value;
 
-	if (!procfs)
-		return INT_MAX;
-
-	scnprintf(path, PATH_MAX, "%s/sys/kernel/perf_event_paranoid", procfs);
-
-	if (filename__read_int(path, &value))
+	if (sysctl__read_int("kernel/perf_event_paranoid", &value))
 		return INT_MAX;
 
 	return value;

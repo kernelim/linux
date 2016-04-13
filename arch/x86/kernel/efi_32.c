@@ -32,12 +32,11 @@
 
 /*
  * To make EFI call EFI runtime service in physical addressing mode we need
- * prelog/epilog before/after the invocation to disable interrupt, to
- * claim EFI runtime service handler exclusively and to duplicate a memory in
- * low memory space say 0 - 3G.
+ * prolog/epilog before/after the invocation to claim the EFI runtime service
+ * handler exclusively and to duplicate a memory mapping in low memory space,
+ * say 0 - 3G.
  */
 
-static unsigned long efi_rt_eflags;
 static pgd_t efi_bak_pg_dir_pointer[2];
 
 void efi_call_phys_prelog(void)
@@ -45,8 +44,6 @@ void efi_call_phys_prelog(void)
 	unsigned long cr4;
 	unsigned long temp;
 	struct desc_ptr gdt_descr;
-
-	local_irq_save(efi_rt_eflags);
 
 	/*
 	 * If I don't have PAE, I should just duplicate two entries in page
@@ -107,8 +104,6 @@ void efi_call_phys_epilog(void)
 	 * After the lock is released, the original page table is restored.
 	 */
 	__flush_tlb_all();
-
-	local_irq_restore(efi_rt_eflags);
 }
 
 void efi_call_phys_prelog_in_physmode(void) { /* Not supported */ }

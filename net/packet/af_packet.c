@@ -82,6 +82,7 @@
 #include <linux/if_vlan.h>
 #include <linux/errqueue.h>
 #include <linux/net_tstamp.h>
+#include <net/flow_keys.h>
 
 #ifdef CONFIG_INET
 #include <net/inet_common.h>
@@ -424,6 +425,7 @@ static int packet_sendmsg_spkt(struct kiocb *iocb, struct socket *sock,
 	struct net_device *dev;
 	__be16 proto = 0;
 	int err;
+	struct flow_keys keys;
 
 	/*
 	 *	Get and verify the address.
@@ -505,6 +507,11 @@ static int packet_sendmsg_spkt(struct kiocb *iocb, struct socket *sock,
 	/*
 	 *	Now send it
 	 */
+
+	if (skb_flow_dissect(skb, &keys))
+		skb_set_transport_header(skb, keys.thoff);
+	else
+		skb_reset_transport_header(skb);
 
 	dev_queue_xmit(skb);
 	dev_put(dev);
@@ -785,7 +792,7 @@ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev,
 			getnstimeofday(&ts);
 		h.h2->tp_sec = ts.tv_sec;
 		h.h2->tp_nsec = ts.tv_nsec;
-		h.h2->tp_vlan_tci = vlan_tx_tag_get(skb);
+		h.h2->tp_vlan_tci = skb_vlan_tag_get(skb);
 		h.h2->tp_padding = 0;
 		hdrlen = sizeof(*h.h2);
 		break;
@@ -869,6 +876,7 @@ static int tpacket_fill_skb(struct packet_sock *po, struct sk_buff *skb,
 	struct page *page;
 	void *data;
 	int err;
+	struct flow_keys keys;
 
 	ph.raw = frame;
 
@@ -894,6 +902,12 @@ static int tpacket_fill_skb(struct packet_sock *po, struct sk_buff *skb,
 	skb_reset_network_header(skb);
 
 	data = ph.raw + po->tp_hdrlen - sizeof(struct sockaddr_ll);
+
+	if (skb_flow_dissect(skb, &keys))
+		skb_set_transport_header(skb, keys.thoff);
+	else
+		skb_reset_transport_header(skb);
+
 	to_write = tp_len;
 
 	if (sock->type == SOCK_DGRAM) {
@@ -1116,6 +1130,7 @@ static int packet_snd(struct socket *sock,
 	unsigned char *addr;
 	int ifindex, err, reserve = 0;
 	int offset = 0;
+	struct flow_keys keys;
 
 	/*
 	 *	Get and verify the address.
@@ -1179,6 +1194,13 @@ static int packet_snd(struct socket *sock,
 	skb->protocol = proto;
 	skb->dev = dev;
 	skb->priority = sk->sk_priority;
+
+	if (skb->ip_summed == CHECKSUM_PARTIAL)
+		skb_set_transport_header(skb, skb_checksum_start_offset(skb));
+	else if (skb_flow_dissect(skb, &keys))
+		skb_set_transport_header(skb, keys.thoff);
+	else
+		skb_set_transport_header(skb, reserve);
 
 	/*
 	 *	Now send it
@@ -1602,7 +1624,7 @@ static int packet_recvmsg(struct kiocb *iocb, struct socket *sock,
 		aux.tp_snaplen = skb->len;
 		aux.tp_mac = 0;
 		aux.tp_net = skb_network_offset(skb);
-		aux.tp_vlan_tci = vlan_tx_tag_get(skb);
+		aux.tp_vlan_tci = skb_vlan_tag_get(skb);
 		aux.tp_padding = 0;
 
 		put_cmsg(msg, SOL_PACKET, PACKET_AUXDATA, sizeof(aux), &aux);

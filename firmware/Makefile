@@ -65,7 +65,13 @@ fw-shipped-$(CONFIG_BNX2X) += bnx2x-e1-5.2.13.0.fw bnx2x-e1h-5.2.13.0.fw \
 			      bnx2x/bnx2x-e2-7.8.19.0.fw \
 			      bnx2x/bnx2x-e1-7.10.51.0.fw \
 			      bnx2x/bnx2x-e1h-7.10.51.0.fw \
-			      bnx2x/bnx2x-e2-7.10.51.0.fw
+			      bnx2x/bnx2x-e2-7.10.51.0.fw \
+			      bnx2x/bnx2x-e1-7.12.30.0.fw \
+			      bnx2x/bnx2x-e1h-7.12.30.0.fw \
+			      bnx2x/bnx2x-e2-7.12.30.0.fw \
+			      bnx2x/bnx2x-e1-7.13.1.0.fw \
+			      bnx2x/bnx2x-e1h-7.13.1.0.fw \
+			      bnx2x/bnx2x-e2-7.13.1.0.fw
 fw-shipped-$(CONFIG_BNX2) += bnx2/bnx2-mips-09-6.0.17.fw \
 			     bnx2/bnx2-rv2p-09-6.0.17.fw \
 			     bnx2/bnx2-rv2p-09ax-6.0.17.fw \
@@ -95,7 +101,9 @@ fw-shipped-$(CONFIG_CHELSO_T4) += cxgb4/t4fw.bin \
 				  cxgb4/t4fw-1.3.10.0.bin \
 				  cxgb4/t4fw-1.4.16.0.bin \
 				  cxgb4/t4fw-1.13.32.0.bin \
-				  cxgb4/t5fw-1.13.32.0.bin
+				  cxgb4/t5fw-1.13.32.0.bin \
+				  cxgb4/t4fw-1.14.4.0.bin \
+				  cxgb4/t5fw-1.14.4.0.bin
 fw-shipped-$(CONFIG_DRM_MGA) += matrox/g200_warp.fw matrox/g400_warp.fw
 fw-shipped-$(CONFIG_DRM_R128) += r128/r128_cce.bin
 fw-shipped-$(CONFIG_DRM_RADEON) += radeon/R100_cp.bin radeon/R200_cp.bin \
@@ -218,14 +226,52 @@ fw-shipped-$(CONFIG_VIDEO_CPIA2) += cpia2/stv0672_vp4.bin
 fw-shipped-$(CONFIG_YAM) += yam/1200.bin yam/9600.bin
 
 fw-shipped-$(CONFIG_BRCMSMAC) += brcm/bcm43xx-0.fw brcm/bcm43xx_hdr-0.fw
+fw-shipped-$(CONFIG_BRCMFMAC) += brcm/brcmfmac43143-sdio.bin \
+				brcm/brcmfmac43143.bin \
+				brcm/brcmfmac43236b.bin \
+				brcm/brcmfmac43241b0-sdio.bin \
+				brcm/brcmfmac43241b4-sdio.bin \
+				brcm/brcmfmac43241b5-sdio.bin \
+				brcm/brcmfmac43242a.bin \
+				brcm/brcmfmac4329-sdio.bin \
+				brcm/brcmfmac4330-sdio.bin \
+				brcm/brcmfmac4334-sdio.bin \
+				brcm/brcmfmac43340-sdio.bin \
+				brcm/brcmfmac4335-sdio.bin \
+				brcm/brcmfmac43362-sdio.bin \
+				brcm/brcmfmac4339-sdio.bin \
+				brcm/brcmfmac43455-sdio.bin \
+				brcm/brcmfmac4350-pcie.bin \
+				brcm/brcmfmac4354-sdio.bin \
+				brcm/brcmfmac4356-pcie.bin \
+				brcm/brcmfmac43569.bin \
+				brcm/brcmfmac43570-pcie.bin \
+				brcm/brcmfmac43602-pcie.ap.bin \
+				brcm/brcmfmac43602-pcie.bin \
+				brcm/brcmfmac4371-pcie.bin
 
 fw-shipped-$(CONFIG_RT2800PCI) += rt2860.bin
 fw-shipped-$(CONFIG_RT2800PCI) += rt3290.bin
 fw-shipped-$(CONFIG_RT2800USB) += rt2870.bin
 
+fw-shipped-$(CONFIG_RTL8192CE) += rtlwifi/rtl8192cfw.bin rtlwifi/rtl8192cfwU.bin rtlwifi/rtl8192cfwU_B.bin
+fw-shipped-$(CONFIG_RTL8192SE) += rtlwifi/rtl8192sefw.bin
+fw-shipped-$(CONFIG_RTL8192DE) += rtlwifi/rtl8192defw.bin
+fw-shipped-$(CONFIG_RTL8723BE) += rtlwifi/rtl8723befw.bin
+fw-shipped-$(CONFIG_RTL8188EE) += rtlwifi/rtl8188efw.bin
+fw-shipped-$(CONFIG_RTL8192EE) += rtlwifi/rtl8192eefw.bin
+fw-shipped-$(CONFIG_RTL8821AE) += rtlwifi/rtl8821aefw.bin
+fw-shipped-$(CONFIG_RTL8192CU) += rtlwifi/rtl8192cufw.bin rtlwifi/rtl8192cufw_A.bin rtlwifi/rtl8192cufw_B.bin rtlwifi/rtl8192cufw_TMSC.bin
+
 fw-shipped-$(CONFIG_CARL9170) += carl9170-1.fw
 
 fw-shipped-$(CONFIG_ATH9K_HTC) += htc_7010.fw htc_9271.fw
+
+fw-shipped-$(CONFIG_CRYPTO_DEV_QAT_DH895xCC) += qat_895xcc.bin
+
+fw-shipped-$(CONFIG_SND_HDA_CODEC_CA0132_DSP) += ctefx.bin
+
+fw-shipped-$(CONFIG_DRM_I915) += i915/skl_dmc_ver1.bin i915/skl_guc_ver4.bin
 
 # This section is firmware required by the integrated compat-wireless
 # build.  All of those drivers are modules, and their config is turned-off
@@ -236,7 +282,8 @@ fw-shipped-m += iwlwifi-105-6.ucode iwlwifi-135-6.ucode iwlwifi-2000-6.ucode \
 		iwlwifi-7260-9.ucode iwlwifi-3160-9.ucode iwlwifi-7265-9.ucode \
 		iwlwifi-7260-10.ucode iwlwifi-3160-10.ucode iwlwifi-7265-10.ucode iwlwifi-7265D-10.ucode \
 		iwlwifi-7260-12.ucode iwlwifi-3160-12.ucode iwlwifi-7265-12.ucode iwlwifi-7265D-12.ucode \
-		iwlwifi-8000C-13.ucode
+		iwlwifi-7260-13.ucode iwlwifi-3160-13.ucode iwlwifi-7265-13.ucode iwlwifi-7265D-13.ucode iwlwifi-8000C-13.ucode \
+		iwlwifi-7260-16.ucode iwlwifi-3160-16.ucode iwlwifi-7265-16.ucode iwlwifi-7265D-16.ucode iwlwifi-8000C-16.ucode
 
 fw-shipped-all := $(fw-shipped-y) $(fw-shipped-m) $(fw-shipped-)
 

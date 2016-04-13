@@ -32,6 +32,7 @@
 #include "hda_local.h"
 #include "hda_auto_parser.h"
 #include "hda_jack.h"
+#include "hda_generic.h"
 
 #include "ca0132_regs.h"
 
@@ -43,8 +44,6 @@
 #define FLOAT_TWO	0x40000000
 #define FLOAT_MINUS_5	0xc0a00000
 
-#define UNSOL_TAG_HP	0x10
-#define UNSOL_TAG_AMIC1	0x12
 #define UNSOL_TAG_DSP	0x16
 
 #define DSP_DMA_WRITE_BUFLEN_INIT (1UL<<18)
@@ -699,13 +698,14 @@ enum dsp_download_state {
  */
 
 struct ca0132_spec {
+	struct hda_gen_spec gen; /* must be at head */
+
 	struct snd_kcontrol_new *mixers[5];
 	unsigned int num_mixers;
 	const struct hda_verb *base_init_verbs;
 	const struct hda_verb *base_exit_verbs;
-	const struct hda_verb *init_verbs[5];
-	unsigned int num_init_verbs;  /* exclude base init verbs */
-	struct auto_pin_cfg autocfg;
+	const struct hda_verb *chip_init_verbs;
+	struct hda_verb *spec_init_verbs;
 
 	/* Nodes configurations */
 	struct hda_multi_out multiout;
@@ -720,6 +720,8 @@ struct ca0132_spec {
 	hda_nid_t shared_mic_nid;
 	hda_nid_t shared_out_nid;
 	struct hda_pcm pcm_rec[5]; /* PCM information */
+	hda_nid_t unsol_tag_hp;
+	hda_nid_t unsol_tag_amic1;
 
 	/* chip access */
 	struct mutex chipio_mutex; /* chip access mutex */
@@ -749,10 +751,31 @@ struct ca0132_spec {
 
 	struct hda_codec *codec;
 	struct delayed_work unsol_hp_work;
+	int quirk;
 
 #ifdef ENABLE_TUNING_CONTROLS
 	long cur_ctl_vals[TUNING_CTLS_COUNT];
 #endif
+};
+
+/*
+ * CA0132 quirks table
+ */
+enum {
+	QUIRK_NONE,
+	QUIRK_ALIENWARE,
+	QUIRK_GENERIC_PARSER,
+};
+
+static const struct snd_pci_quirk ca0132_quirks[] = {
+	SND_PCI_QUIRK(0x1028, 0x0685, "Alienware 15 2015", QUIRK_ALIENWARE),
+	SND_PCI_QUIRK(0x1028, 0x0688, "Alienware 17 2015", QUIRK_ALIENWARE),
+	SND_PCI_QUIRK(0x1102, 0x0010, "Sound Blaster Z", QUIRK_GENERIC_PARSER),
+	SND_PCI_QUIRK(0x1102, 0x0023, "Sound Blaster Z", QUIRK_GENERIC_PARSER),
+	SND_PCI_QUIRK(0x1102, 0x0024, "Sound Blaster Z", QUIRK_GENERIC_PARSER),
+	SND_PCI_QUIRK(0x1102, 0x0025, "Sound Blaster Zx", QUIRK_GENERIC_PARSER),
+	SND_PCI_QUIRK(0x1102, 0x0027, "Sound Blaster Z", QUIRK_GENERIC_PARSER),
+	{}
 };
 
 /*
@@ -3228,7 +3251,7 @@ static void ca0132_unsol_hp_delayed(struct work_struct *work)
 	struct hda_jack_tbl *jack;
 
 	ca0132_select_out(spec->codec);
-	jack = snd_hda_jack_tbl_get(spec->codec, UNSOL_TAG_HP);
+	jack = snd_hda_jack_tbl_get(spec->codec, spec->unsol_tag_hp);
 	if (jack) {
 		jack->block_report = 0;
 		snd_hda_jack_report_sync(spec->codec);
@@ -3967,7 +3990,7 @@ static int ca0132_build_controls(struct hda_codec *codec)
 	add_tuning_ctls(codec);
 #endif
 
-	err = snd_hda_jack_add_kctls(codec, &spec->autocfg);
+	err = snd_hda_jack_add_kctls(codec, &spec->gen.autocfg);
 	if (err < 0)
 		return err;
 
@@ -4425,8 +4448,9 @@ static void amic_callback(struct hda_codec *codec, struct hda_jack_callback *cb)
 
 static void ca0132_init_unsol(struct hda_codec *codec)
 {
-	snd_hda_jack_detect_enable_callback(codec, UNSOL_TAG_HP, hp_callback);
-	snd_hda_jack_detect_enable_callback(codec, UNSOL_TAG_AMIC1,
+	struct ca0132_spec *spec = codec->spec;
+	snd_hda_jack_detect_enable_callback(codec, spec->unsol_tag_hp, hp_callback);
+	snd_hda_jack_detect_enable_callback(codec, spec->unsol_tag_amic1,
 					    amic_callback);
 	snd_hda_jack_detect_enable_callback(codec, UNSOL_TAG_DSP,
 					    ca0132_process_dsp_response);
@@ -4487,17 +4511,6 @@ static struct hda_verb ca0132_init_verbs0[] = {
 	{}
 };
 
-static struct hda_verb ca0132_init_verbs1[] = {
-	{0x10, AC_VERB_SET_UNSOLICITED_ENABLE, AC_USRSP_EN | UNSOL_TAG_HP},
-	{0x12, AC_VERB_SET_UNSOLICITED_ENABLE, AC_USRSP_EN | UNSOL_TAG_AMIC1},
-	/* config EAPD */
-	{0x0b, 0x78D, 0x00},
-	/*{0x0b, AC_VERB_SET_EAPD_BTLENABLE, 0x02},*/
-	/*{0x10, 0x78D, 0x02},*/
-	/*{0x10, AC_VERB_SET_EAPD_BTLENABLE, 0x02},*/
-	{}
-};
-
 static void ca0132_init_chip(struct hda_codec *codec)
 {
 	struct ca0132_spec *spec = codec->spec;
@@ -4547,7 +4560,7 @@ static void ca0132_exit_chip(struct hda_codec *codec)
 static int ca0132_init(struct hda_codec *codec)
 {
 	struct ca0132_spec *spec = codec->spec;
-	struct auto_pin_cfg *cfg = &spec->autocfg;
+	struct auto_pin_cfg *cfg = &spec->gen.autocfg;
 	int i;
 
 	if (spec->dsp_state != DSP_DOWNLOAD_FAILED)
@@ -4577,8 +4590,8 @@ static int ca0132_init(struct hda_codec *codec)
 
 	init_input(codec, cfg->dig_in_pin, spec->dig_in);
 
-	for (i = 0; i < spec->num_init_verbs; i++)
-		snd_hda_sequence_write(codec, spec->init_verbs[i]);
+	snd_hda_sequence_write(codec, spec->chip_init_verbs);
+	snd_hda_sequence_write(codec, spec->spec_init_verbs);
 
 	ca0132_select_out(codec);
 	ca0132_select_mic(codec);
@@ -4599,6 +4612,7 @@ static void ca0132_free(struct hda_codec *codec)
 	snd_hda_sequence_write(codec, spec->base_exit_verbs);
 	ca0132_exit_chip(codec);
 	snd_hda_power_down(codec);
+	kfree(spec->spec_init_verbs);
 	kfree(codec->spec);
 }
 
@@ -4613,7 +4627,7 @@ static struct hda_codec_ops ca0132_patch_ops = {
 static void ca0132_config(struct hda_codec *codec)
 {
 	struct ca0132_spec *spec = codec->spec;
-	struct auto_pin_cfg *cfg = &spec->autocfg;
+	struct auto_pin_cfg *cfg = &spec->gen.autocfg;
 
 	spec->dacs[0] = 0x2;
 	spec->dacs[1] = 0x3;
@@ -4625,18 +4639,25 @@ static void ca0132_config(struct hda_codec *codec)
 
 	spec->num_outputs = 2;
 	spec->out_pins[0] = 0x0b; /* speaker out */
-	spec->out_pins[1] = 0x10; /* headphone out */
+	if (spec->quirk == QUIRK_ALIENWARE) {
+		codec_dbg(codec, "ca0132_config: QUIRK_ALIENWARE applied.\n");
+		spec->out_pins[1] = 0x0f;
+	} else{
+		spec->out_pins[1] = 0x10; /* headphone out */
+	}
 	spec->shared_out_nid = 0x2;
+	spec->unsol_tag_hp = spec->out_pins[1];
 
-	spec->num_inputs = 3;
 	spec->adcs[0] = 0x7; /* digital mic / analog mic1 */
 	spec->adcs[1] = 0x8; /* analog mic2 */
 	spec->adcs[2] = 0xa; /* what u hear */
-	spec->shared_mic_nid = 0x7;
 
+	spec->num_inputs = 3;
 	spec->input_pins[0] = 0x12;
 	spec->input_pins[1] = 0x11;
 	spec->input_pins[2] = 0x13;
+	spec->shared_mic_nid = 0x7;
+	spec->unsol_tag_amic1 = spec->input_pins[0];
 
 	/* SPDIF I/O */
 	spec->dig_out = 0x05;
@@ -4649,10 +4670,135 @@ static void ca0132_config(struct hda_codec *codec)
 	cfg->dig_in_type = HDA_PCM_TYPE_SPDIF;
 }
 
+static int ca0132_prepare_verbs(struct hda_codec *codec)
+{
+/* Verbs + terminator (an empty element) */
+#define NUM_SPEC_VERBS 4
+	struct ca0132_spec *spec = codec->spec;
+
+	spec->chip_init_verbs = ca0132_init_verbs0;
+	spec->spec_init_verbs = kzalloc(sizeof(struct hda_verb) * NUM_SPEC_VERBS, GFP_KERNEL);
+	if (!spec->spec_init_verbs)
+		return -ENOMEM;
+
+	/* HP jack autodetection */
+	spec->spec_init_verbs[0].nid = spec->unsol_tag_hp;
+	spec->spec_init_verbs[0].param = AC_VERB_SET_UNSOLICITED_ENABLE;
+	spec->spec_init_verbs[0].verb = AC_USRSP_EN | spec->unsol_tag_hp;
+
+	/* MIC1 jack autodetection */
+	spec->spec_init_verbs[1].nid = spec->unsol_tag_amic1;
+	spec->spec_init_verbs[1].param = AC_VERB_SET_UNSOLICITED_ENABLE;
+	spec->spec_init_verbs[1].verb = AC_USRSP_EN | spec->unsol_tag_amic1;
+
+	/* config EAPD */
+	spec->spec_init_verbs[2].nid = 0x0b;
+	spec->spec_init_verbs[2].param = 0x78D;
+	spec->spec_init_verbs[2].verb = 0x00;
+
+	/* Previously commented configuration */
+	/*
+	spec->spec_init_verbs[3].nid = 0x0b;
+	spec->spec_init_verbs[3].param = AC_VERB_SET_EAPD_BTLENABLE;
+	spec->spec_init_verbs[3].verb = 0x02;
+
+	spec->spec_init_verbs[4].nid = 0x10;
+	spec->spec_init_verbs[4].param = 0x78D;
+	spec->spec_init_verbs[4].verb = 0x02;
+
+	spec->spec_init_verbs[5].nid = 0x10;
+	spec->spec_init_verbs[5].param = AC_VERB_SET_EAPD_BTLENABLE;
+	spec->spec_init_verbs[5].verb = 0x02;
+	*/
+
+	/* Terminator: spec->spec_init_verbs[NUM_SPEC_VERBS-1] */
+	return 0;
+}
+
+/*
+ * CA0132 codec support using generic parser;
+ * This mode is a kind of fallback mode as the provided DSP has some
+ * hard-coding mapping and we can't fix it.  That is, the board works
+ * just like a normal HD-audio, and of course, without any effects.
+ */
+
+#define REG_CODEC_MUTE          0x18b014
+#define REG_CODEC_HP_VOL_L      0x18b070
+#define REG_CODEC_HP_VOL_R      0x18b074
+
+enum {
+	CA0132_GEN_FIXUP_SBZ,
+};
+
+static const struct hda_fixup ca0132_gen_fixups[] = {
+	[CA0132_GEN_FIXUP_SBZ] = {
+		.type = HDA_FIXUP_PINS,
+		.v.pins = (const struct hda_pintbl[]) {
+			{ 0x0b, 0x411111f0 },
+			{ 0x0c, 0x411111f0 },
+			{ 0x0d, 0x90170110 }, /* lineout */
+			{ 0x0e, 0x411111f0 },
+			{ 0x0f, 0x0321101f }, /* HP */
+			{ 0x10, 0x411111f0 },
+			{ 0x11, 0x03a11021 }, /* mic */
+			{ 0x12, 0xd5a30140 }, /* mic */
+			{ 0x13, 0x50d000f0 },
+			{ 0x18, 0x500000f0 },
+			{}
+		},
+	},
+};
+
+static const struct snd_pci_quirk ca0132_gen_fixup_tbl[] = {
+	SND_PCI_QUIRK(0x1102, 0x0010, "Sound Blaster Z", CA0132_GEN_FIXUP_SBZ),
+	SND_PCI_QUIRK(0x1102, 0x0023, "Sound Blaster Z", CA0132_GEN_FIXUP_SBZ),
+	SND_PCI_QUIRK(0x1102, 0x0024, "Sound Blaster Z", CA0132_GEN_FIXUP_SBZ),
+	SND_PCI_QUIRK(0x1102, 0x0025, "Sound Blaster Zx", CA0132_GEN_FIXUP_SBZ),
+	SND_PCI_QUIRK(0x1102, 0x0027, "Sound Blaster Z", CA0132_GEN_FIXUP_SBZ),
+};
+
+static const struct hda_codec_ops ca0132_gen_patch_ops = {
+	.build_controls = snd_hda_gen_build_controls,
+	.build_pcms = snd_hda_gen_build_pcms,
+	.init = snd_hda_gen_init,
+	.free = snd_hda_gen_free,
+	.unsol_event = snd_hda_jack_unsol_event,
+};
+
+static int parse_ca0132_generic(struct hda_codec *codec)
+{
+	struct ca0132_spec *spec = codec->spec;
+	struct auto_pin_cfg *cfg = &spec->gen.autocfg;
+	int err;
+
+	codec_dbg(codec, "Using generic parser for CA0132\n");
+	snd_hda_gen_spec_init(&spec->gen);
+	codec->patch_ops = ca0132_gen_patch_ops;
+	snd_hda_pick_fixup(codec, NULL, ca0132_gen_fixup_tbl,
+			   ca0132_gen_fixups);
+	snd_hda_apply_fixup(codec, HDA_FIXUP_ACT_PRE_PROBE);
+
+	err = snd_hda_parse_pin_def_config(codec, cfg, NULL);
+	if (err < 0)
+		goto error;
+	err = snd_hda_gen_parse_auto_config(codec, cfg);
+	if (err < 0)
+		goto error;
+
+	snd_hda_apply_fixup(codec, HDA_FIXUP_ACT_PROBE);
+	return 0;
+
+ error:
+	snd_hda_gen_free(codec);
+	return err;
+}
+
+/* common probe entry */
 static int patch_ca0132(struct hda_codec *codec)
 {
 	struct ca0132_spec *spec;
 	int err;
+	const struct snd_pci_quirk *quirk;
 
 	codec_dbg(codec, "patch_ca0132\n");
 
@@ -4662,15 +4808,24 @@ static int patch_ca0132(struct hda_codec *codec)
 	codec->spec = spec;
 	spec->codec = codec;
 
+	/* Detect codec quirk */
+	quirk = snd_pci_quirk_lookup(codec->bus->pci, ca0132_quirks);
+	if (quirk)
+		spec->quirk = quirk->value;
+	else
+		spec->quirk = QUIRK_NONE;
+
+	if (spec->quirk == QUIRK_GENERIC_PARSER)
+		return parse_ca0132_generic(codec);
+
+	codec->patch_ops = ca0132_patch_ops;
+
 	spec->dsp_state = DSP_DOWNLOAD_INIT;
 	spec->num_mixers = 1;
 	spec->mixers[0] = ca0132_mixer;
 
 	spec->base_init_verbs = ca0132_base_init_verbs;
 	spec->base_exit_verbs = ca0132_base_exit_verbs;
-	spec->init_verbs[0] = ca0132_init_verbs0;
-	spec->init_verbs[1] = ca0132_init_verbs1;
-	spec->num_init_verbs = 2;
 
 	INIT_DELAYED_WORK(&spec->unsol_hp_work, ca0132_unsol_hp_delayed);
 
@@ -4678,11 +4833,14 @@ static int patch_ca0132(struct hda_codec *codec)
 
 	ca0132_config(codec);
 
-	err = snd_hda_parse_pin_def_config(codec, &spec->autocfg, NULL);
+	err = ca0132_prepare_verbs(codec);
 	if (err < 0)
 		return err;
 
-	codec->patch_ops = ca0132_patch_ops;
+	err = snd_hda_parse_pin_def_config(codec, &spec->gen.autocfg, NULL);
+	if (err < 0)
+		return err;
+
 	codec->pcm_format_first = 1;
 	codec->no_sticky_stream = 1;
 

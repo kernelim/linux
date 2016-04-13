@@ -88,6 +88,16 @@ struct sccb_header {
 	u16	response_code;
 } __attribute__((packed));
 
+struct init_sccb {
+	struct sccb_header header;
+	u16 _reserved;
+	u16 mask_length;
+	sccb_mask_t receive_mask;
+	sccb_mask_t send_mask;
+	sccb_mask_t sclp_receive_mask;
+	sccb_mask_t sclp_send_mask;
+} __attribute__((packed));
+
 extern u64 sclp_facilities;
 #define SCLP_HAS_CHP_INFO	(sclp_facilities & 0x8000000000000000ULL)
 #define SCLP_HAS_CHP_RECONFIG	(sclp_facilities & 0x2000000000000000ULL)
@@ -160,6 +170,7 @@ int sclp_remove_processed(struct sccb_header *sccb);
 int sclp_deactivate(void);
 int sclp_reactivate(void);
 int sclp_service_call(sclp_cmdw_t command, void *sccb);
+int __init sclp_cmd_sync_early(sclp_cmdw_t cmd, void *sccb);
 
 int sclp_sdias_init(void);
 void sclp_sdias_exit(void);

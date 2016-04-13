@@ -146,7 +146,7 @@ static inline int drv_add_interface(struct ieee80211_local *local,
 
 	if (WARN_ON(sdata->vif.type == NL80211_IFTYPE_AP_VLAN ||
 		    (sdata->vif.type == NL80211_IFTYPE_MONITOR &&
-		     !(local->hw.flags & IEEE80211_HW_WANT_MONITOR_VIF) &&
+		     !ieee80211_hw_check(&local->hw, WANT_MONITOR_VIF) &&
 		     !(sdata->u.mntr_flags & MONITOR_FLAG_ACTIVE))))
 		return -EINVAL;
 
@@ -431,12 +431,13 @@ static inline int drv_get_stats(struct ieee80211_local *local,
 	return ret;
 }
 
-static inline void drv_get_tkip_seq(struct ieee80211_local *local,
-				    u8 hw_key_idx, u32 *iv32, u16 *iv16)
+static inline void drv_get_key_seq(struct ieee80211_local *local,
+				   struct ieee80211_key *key,
+				   struct ieee80211_key_seq *seq)
 {
-	if (local->ops->get_tkip_seq)
-		local->ops->get_tkip_seq(&local->hw, hw_key_idx, iv32, iv16);
-	trace_drv_get_tkip_seq(local, hw_key_idx, iv32, iv16);
+	if (local->ops->get_key_seq)
+		local->ops->get_key_seq(&local->hw, &key->conf, seq);
+	trace_drv_get_key_seq(local, &key->conf);
 }
 
 static inline int drv_set_frag_threshold(struct ieee80211_local *local,
@@ -586,37 +587,12 @@ static inline void drv_sta_pre_rcu_remove(struct ieee80211_local *local,
 	trace_drv_return_void(local);
 }
 
-static inline __must_check
+__must_check
 int drv_sta_state(struct ieee80211_local *local,
 		  struct ieee80211_sub_if_data *sdata,
 		  struct sta_info *sta,
 		  enum ieee80211_sta_state old_state,
-		  enum ieee80211_sta_state new_state)
-{
-	int ret = 0;
-
-	might_sleep();
-
-	sdata = get_bss_sdata(sdata);
-	if (!check_sdata_in_driver(sdata))
-		return -EIO;
-
-	trace_drv_sta_state(local, sdata, &sta->sta, old_state, new_state);
-	if (local->ops->sta_state) {
-		ret = local->ops->sta_state(&local->hw, &sdata->vif, &sta->sta,
-					    old_state, new_state);
-	} else if (old_state == IEEE80211_STA_AUTH &&
-		   new_state == IEEE80211_STA_ASSOC) {
-		ret = drv_sta_add(local, sdata, &sta->sta);
-		if (ret == 0)
-			sta->uploaded = true;
-	} else if (old_state == IEEE80211_STA_ASSOC &&
-		   new_state == IEEE80211_STA_AUTH) {
-		drv_sta_remove(local, sdata, &sta->sta);
-	}
-	trace_drv_return_int(local, ret);
-	return ret;
-}
+		  enum ieee80211_sta_state new_state);
 
 static inline void drv_sta_rc_update(struct ieee80211_local *local,
 				     struct ieee80211_sub_if_data *sdata,
@@ -650,6 +626,21 @@ static inline void drv_sta_rate_tbl_update(struct ieee80211_local *local,
 	if (local->ops->sta_rate_tbl_update)
 		local->ops->sta_rate_tbl_update(&local->hw, &sdata->vif, sta);
 
+	trace_drv_return_void(local);
+}
+
+static inline void drv_sta_statistics(struct ieee80211_local *local,
+				      struct ieee80211_sub_if_data *sdata,
+				      struct ieee80211_sta *sta,
+				      struct station_info *sinfo)
+{
+	sdata = get_bss_sdata(sdata);
+	if (!check_sdata_in_driver(sdata))
+		return;
+
+	trace_drv_sta_statistics(local, sdata, sta);
+	if (local->ops->sta_statistics)
+		local->ops->sta_statistics(&local->hw, &sdata->vif, sta, sinfo);
 	trace_drv_return_void(local);
 }
 
@@ -978,21 +969,6 @@ drv_allow_buffered_frames(struct ieee80211_local *local,
 						  tids, num_frames, reason,
 						  more_data);
 	trace_drv_return_void(local);
-}
-
-static inline int drv_get_rssi(struct ieee80211_local *local,
-				struct ieee80211_sub_if_data *sdata,
-				struct ieee80211_sta *sta,
-				s8 *rssi_dbm)
-{
-	int ret;
-
-	might_sleep();
-
-	ret = local->ops->get_rssi(&local->hw, &sdata->vif, sta, rssi_dbm);
-	trace_drv_get_rssi(local, sta, *rssi_dbm, ret);
-
-	return ret;
 }
 
 static inline void drv_mgd_prepare_tx(struct ieee80211_local *local,
@@ -1379,6 +1355,18 @@ drv_tdls_recv_channel_switch(struct ieee80211_local *local,
 		local->ops->tdls_recv_channel_switch(&local->hw, &sdata->vif,
 						     params);
 	trace_drv_return_void(local);
+}
+
+static inline void drv_wake_tx_queue(struct ieee80211_local *local,
+				     struct txq_info *txq)
+{
+	struct ieee80211_sub_if_data *sdata = vif_to_sdata(txq->txq.vif);
+
+	if (!check_sdata_in_driver(sdata))
+		return;
+
+	trace_drv_wake_tx_queue(local, sdata, txq);
+	local->ops->wake_tx_queue(&local->hw, &txq->txq);
 }
 
 #endif /* __MAC80211_DRIVER_OPS */

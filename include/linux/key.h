@@ -99,7 +99,7 @@ struct keyring_name;
 typedef struct __key_reference_with_attributes *key_ref_t;
 
 static inline key_ref_t make_key_ref(const struct key *key,
-				     unsigned long possession)
+				     bool possession)
 {
 	return (key_ref_t) ((unsigned long) key | possession);
 }
@@ -109,7 +109,7 @@ static inline struct key *key_ref_to_ptr(const key_ref_t key_ref)
 	return (struct key *) ((unsigned long) key_ref & ~1UL);
 }
 
-static inline unsigned long is_key_possessed(const key_ref_t key_ref)
+static inline bool is_key_possessed(const key_ref_t key_ref)
 {
 	return (unsigned long) key_ref & 1UL;
 }
@@ -125,7 +125,14 @@ static inline unsigned long is_key_possessed(const key_ref_t key_ref)
 struct key {
 	atomic_t		usage;		/* number of references */
 	key_serial_t		serial;		/* key serial number */
+#ifndef __GENKSYMS__
+	union {
+		struct list_head graveyard_link;
+		struct rb_node	serial_node;
+	};
+#else
 	struct rb_node		serial_node;
+#endif
 	struct key_type		*type;		/* type of key */
 	struct rw_semaphore	sem;		/* change vs change sem */
 	struct key_user		*user;		/* owner of this key */
@@ -158,6 +165,7 @@ struct key {
 #define KEY_FLAG_NEGATIVE	5	/* set if key is negative */
 #define KEY_FLAG_ROOT_CAN_CLEAR	6	/* set if key can be cleared by root without permission */
 #define KEY_FLAG_INVALIDATED	7	/* set if key has been invalidated */
+#define KEY_FLAG_ROOT_CAN_INVAL	11	/* set if key can be invalidated by root without permission */
 
 	/* the description string
 	 * - this is used to match a key against search criteria
@@ -184,6 +192,9 @@ struct key {
 		void			*data;
 		struct keyring_list	*subscriptions;
 	} payload;
+#ifndef __GENKSYMS__
+	time_t			last_used_at;	/* last time used for LRU keyring discard */
+#endif
 };
 
 extern struct key *key_alloc(struct key_type *type,
@@ -238,7 +249,7 @@ extern struct key *request_key_async_with_auxdata(struct key_type *type,
 
 extern int wait_for_key_construction(struct key *key, bool intr);
 
-extern int key_validate(struct key *key);
+extern int key_validate(const struct key *key);
 
 extern key_ref_t key_create_or_update(key_ref_t keyring,
 				      const char *type,
@@ -260,6 +271,7 @@ extern int key_unlink(struct key *keyring,
 
 extern struct key *keyring_alloc(const char *description, uid_t uid, gid_t gid,
 				 const struct cred *cred,
+				 key_perm_t perm,
 				 unsigned long flags,
 				 struct key *dest);
 
@@ -279,6 +291,8 @@ static inline key_serial_t key_serial(const struct key *key)
 	return key ? key->serial : 0;
 }
 
+extern void key_set_timeout(struct key *, unsigned);
+
 /**
  * key_is_instantiated - Determine if a key has been positively instantiated
  * @key: The key to check.
@@ -296,7 +310,9 @@ static inline bool key_is_instantiated(const struct key *key)
 	(rcu_dereference((KEY)->payload.data))
 
 #define rcu_assign_keypointer(KEY, PAYLOAD)				\
-	(rcu_assign_pointer((KEY)->payload.data, PAYLOAD))
+do {									\
+	rcu_assign_pointer((KEY)->payload.data, (PAYLOAD));		\
+} while (0)
 
 #ifdef CONFIG_SYSCTL
 extern ctl_table key_sysctls[];

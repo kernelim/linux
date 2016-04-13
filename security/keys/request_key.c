@@ -92,6 +92,7 @@ static int call_sbin_request_key(struct key_construction *cons,
 
 	cred = get_current_cred();
 	keyring = keyring_alloc(desc, cred->fsuid, cred->fsgid, cred,
+				KEY_POS_ALL | KEY_USR_VIEW | KEY_USR_READ,
 				KEY_ALLOC_QUOTA_OVERRUN, NULL);
 	put_cred(cred);
 	if (IS_ERR(keyring)) {
@@ -313,6 +314,7 @@ static int construct_alloc_key(struct key_type *type,
 	const struct cred *cred = current_cred();
 	unsigned long prealloc;
 	struct key *key;
+	key_perm_t perm;
 	key_ref_t key_ref;
 	int ret;
 
@@ -321,8 +323,15 @@ static int construct_alloc_key(struct key_type *type,
 	*_key = NULL;
 	mutex_lock(&user->cons_lock);
 
+	perm = KEY_POS_VIEW | KEY_POS_SEARCH | KEY_POS_LINK | KEY_POS_SETATTR;
+	perm |= KEY_USR_VIEW;
+	if (type->read)
+		perm |= KEY_POS_READ;
+	if (type == &key_type_keyring || type->update)
+		perm |= KEY_POS_WRITE;
+
 	key = key_alloc(type, description, cred->fsuid, cred->fsgid, cred,
-			KEY_POS_ALL, flags);
+			perm, flags);
 	if (IS_ERR(key))
 		goto alloc_failed;
 
@@ -340,7 +349,8 @@ static int construct_alloc_key(struct key_type *type,
 	 * waited for locks */
 	mutex_lock(&key_construction_mutex);
 
-	key_ref = search_process_keyrings(type, description, type->match, cred);
+	key_ref = search_process_keyrings(type, description, type->match,
+					  false, cred);
 	if (!IS_ERR(key_ref))
 		goto key_already_present;
 
@@ -490,7 +500,8 @@ struct key *request_key_and_link(struct key_type *type,
 	       dest_keyring, flags);
 
 	/* search all the process keyrings for a key */
-	key_ref = search_process_keyrings(type, description, type->match, cred);
+	key_ref = search_process_keyrings(type, description, type->match,
+					  false, cred);
 
 	if (!IS_ERR(key_ref)) {
 		key = key_ref_to_ptr(key_ref);

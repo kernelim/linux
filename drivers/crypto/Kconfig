@@ -243,4 +243,5 @@ config CRYPTO_DEV_PPC4XX
 	help
 	  This option allows you to have support for AMCC crypto acceleration.
 
+source "drivers/crypto/qat/Kconfig"
 endif # CRYPTO_HW

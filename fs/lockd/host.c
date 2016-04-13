@@ -477,8 +477,8 @@ again:	mutex_lock(&nlm_host_mutex);
 			}
 		}
 	}
-
 	mutex_unlock(&nlm_host_mutex);
+	nsm_release(nsm);
 }
 
 /*

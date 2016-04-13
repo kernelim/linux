@@ -47,8 +47,10 @@
 struct cache_head {
 	struct cache_head * next;
 	time_t		expiry_time;	/* After time time, don't use the data */
-	time_t		last_refresh;   /* If CACHE_PENDING, this is when upcall 
-					 * was sent, else this is when update was received
+	time_t		last_refresh;   /* If CACHE_PENDING, this is when upcall was
+					 * sent, else this is when update was
+					 * received, though it is alway set to
+					 * be *after* ->flush_time.
 					 */
 	struct kref	ref;
 	unsigned long	flags;
@@ -99,8 +101,12 @@ struct cache_detail {
 	/* fields below this comment are for internal use
 	 * and should not be touched by cache owners
 	 */
-	time_t			flush_time;		/* flush all cache items with last_refresh
-							 * earlier than this */
+	time_t			flush_time;		/* flush all cache items with
+							 * last_refresh at or earlier
+							 * than this.  last_refresh
+							 * is never set at or earlier
+							 * than this.
+							 */
 	struct list_head	others;
 	time_t			nextcheck;
 	int			entries;

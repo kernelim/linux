@@ -40,6 +40,11 @@ OPTIONS
 	Only consider symbols in these comms. CSV that understands
 	file://filename entries.  This option will affect the percentage of
 	the overhead column.  See --percentage for more info.
+--pid=::
+        Only show events for given process ID (comma separated list).
+
+--tid=::
+        Only show events for given thread ID (comma separated list).
 -d::
 --dsos=::
 	Only consider symbols in these dsos. CSV that understands
@@ -103,6 +108,7 @@ OPTIONS
 	- mispredict: "N" for predicted branch, "Y" for mispredicted branch
 	- in_tx: branch in TSX transaction
 	- abort: TSX transaction abort.
+	- cycles: Cycles in basic block
 
 	And default sort keys are changed to comm, dso_from, symbol_from, dso_to
 	and symbol_to, see '--branch-stack'.
@@ -147,7 +153,7 @@ OPTIONS
 -w::
 --column-widths=<width[,width...]>::
 	Force each column width to the provided list, for large terminal
-	readability.
+	readability.  0 means no limit (default behavior).
 
 -t::
 --field-separator=::
@@ -159,7 +165,7 @@ OPTIONS
 --dump-raw-trace::
         Dump raw trace in ASCII.
 
--g [type,min[,limit],order[,key]]::
+-g [type,min[,limit],order[,key][,branch]]::
 --call-graph::
         Display call chains using type, min percent threshold, optional print
 	limit and order.
@@ -176,6 +182,11 @@ OPTIONS
 	key can be:
 	- function: compare on functions
 	- address: compare on individual code addresses
+
+	branch can be:
+	- branch: include last branch information in callgraph
+	when available. Usually more convenient to use --branch-history
+	for this.
 
 	Default: fractal,0.5,callee,function.
 
@@ -266,6 +277,11 @@ OPTIONS
 	branch stacks and it will automatically switch to the branch view mode,
 	unless --no-branch-stack is used.
 
+--branch-history::
+	Add the addresses of sampled taken branches to the callstack.
+	This allows to examine the path the program took to each sample.
+	The data collection must have used -b (or -j) and -g.
+
 --objdump=<path>::
         Path to objdump binary.
 
@@ -275,6 +291,9 @@ OPTIONS
 --demangle::
 	Demangle symbol names to human readable form. It's enabled by default,
 	disable with --no-demangle.
+
+--demangle-kernel::
+	Demangle kernel symbol names to human readable form (for C++ kernels).
 
 --mem-mode::
 	Use the data addresses of samples in addition to instruction addresses
@@ -304,6 +323,9 @@ OPTIONS
 
 --header-only::
 	Show only perf.data header (forces --stdio).
+
+--full-source-path::
+	Show the full path for source files for srcline output.
 
 SEE ALSO
 --------

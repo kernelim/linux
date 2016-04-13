@@ -59,9 +59,10 @@ enum scsi_device_event {
 	SDEV_EVT_SOFT_THRESHOLD_REACHED_REPORTED,	/* 38 07  UA reported */
 	SDEV_EVT_MODE_PARAMETER_CHANGE_REPORTED,	/* 2A 01  UA reported */
 	SDEV_EVT_LUN_CHANGE_REPORTED,			/* 3F 0E  UA reported */
+	SDEV_EVT_ALUA_STATE_CHANGE_REPORTED,		/* 2A 06  UA reported */
 
 	SDEV_EVT_FIRST		= SDEV_EVT_MEDIA_CHANGE,
-	SDEV_EVT_LAST		= SDEV_EVT_LUN_CHANGE_REPORTED,
+	SDEV_EVT_LAST		= SDEV_EVT_ALUA_STATE_CHANGE_REPORTED,
 #else
 	SDEV_EVT_LAST		= SDEV_EVT_MEDIA_CHANGE,
 #endif
@@ -163,6 +164,9 @@ struct scsi_device {
 	unsigned is_visible:1;	/* is the device visible in sysfs */
 #ifndef __GENKSYMS__
 	unsigned no_dif:1;	/* T10 PI (DIF) should be disabled */
+	unsigned skip_vpd_pages:1;	/* do not read VPD pages */
+	unsigned try_rc_10_first:1;	/* Try READ_CAPACACITY_10 first */
+	unsigned lun_in_cdb:1;		/* Store LUN bits in CDB[1] */
 #endif
 
 	DECLARE_BITMAP(supported_events, SDEV_EVT_MAXBITS); /* supported events */
@@ -294,6 +298,8 @@ struct scsi_target {
 	unsigned int		expecting_lun_change:1;	/* A device has reported
 						 * a 3F/0E UA, other devices on
 						 * the same target will also. */
+	unsigned int		no_report_luns:1;	/* Don't use
+						 * REPORT LUNS for scanning. */
 #endif
 	unsigned int		pdt_1f_for_no_lun;	/* PDT = 0x1f */
 						/* means no lun present */

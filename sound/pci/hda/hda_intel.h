@@ -16,6 +16,7 @@
 #ifndef __SOUND_HDA_INTEL_H
 #define __SOUND_HDA_INTEL_H
 
+#include <drm/i915_component.h>
 #include "hda_priv.h"
 
 struct hda_intel {
@@ -38,24 +39,27 @@ struct hda_intel {
 	unsigned int use_vga_switcheroo:1;
 	unsigned int vga_switcheroo_registered:1;
 	unsigned int init_failed:1; /* delayed init failed */
+
+	/* i915 component interface */
+	struct i915_audio_component audio_component;
 };
 
 #ifdef CONFIG_SND_HDA_I915
-int hda_display_power(bool enable);
-void haswell_set_bclk(struct azx *chip);
-int hda_i915_init(void);
-int hda_i915_exit(void);
+int hda_display_power(struct hda_intel *hda, bool enable);
+void haswell_set_bclk(struct hda_intel *hda);
+int hda_i915_init(struct hda_intel *hda);
+int hda_i915_exit(struct hda_intel *hda);
 #else
-static inline int hda_display_power(bool enable)
+static inline int hda_display_power(struct hda_intel *hda, bool enable)
 {
 	return 0;
 }
-static inline void haswell_set_bclk(struct azx *chip) { return; }
-static inline int hda_i915_init(void)
+static inline void haswell_set_bclk(struct hda_intel *hda) { return; }
+static inline int hda_i915_init(struct hda_intel *hda)
 {
 	return -ENODEV;
 }
-static inline int hda_i915_exit(void)
+static inline int hda_i915_exit(struct hda_intel *hda)
 {
 	return 0;
 }

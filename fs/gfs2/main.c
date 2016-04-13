@@ -29,6 +29,10 @@
 #include "quota.h"
 #include "dir.h"
 
+static char *gl_hash_size = "32K";
+module_param(gl_hash_size, charp, 0644);
+MODULE_PARM_DESC(gl_hash_size, "Number of glock hash buckets (factor of 2)");
+
 static struct shrinker qd_shrinker = {
 	.shrink = gfs2_shrink_qd_memory,
 	.seeks = DEFAULT_SEEKS,
@@ -41,7 +45,9 @@ static void gfs2_init_inode_once(void *foo)
 	inode_init_once(&ip->i_inode);
 	init_rwsem(&ip->i_rw_mutex);
 	INIT_LIST_HEAD(&ip->i_trunc_list);
-	ip->i_res = NULL;
+	ip->i_qadata = NULL;
+	memset(&ip->i_res, 0, sizeof(ip->i_res));
+	RB_CLEAR_NODE(&ip->i_res.rs_node);
 	ip->i_hash_cache = NULL;
 }
 
@@ -93,6 +99,8 @@ static void gfs2_bh_free(void *ptr, void *data)
 static int __init init_gfs2_fs(void)
 {
 	int error;
+	size_t glock_hashtbl_size = 0, hts, factor = 0;
+	static char *last;
 
 	gfs2_str2qstr(&gfs2_qdot, ".");
 	gfs2_str2qstr(&gfs2_qdotdot, "..");
@@ -101,9 +109,45 @@ static int __init init_gfs2_fs(void)
 	if (error)
 		return error;
 
-	error = gfs2_glock_init();
+	if (strlen(gl_hash_size) == 0)
+		goto fail_invalid_hashsize;
+
+	glock_hashtbl_size = simple_strtoul(gl_hash_size, NULL, 0);
+	if (glock_hashtbl_size == 0)
+		goto fail_invalid_hashsize;
+
+	last = gl_hash_size + strlen(gl_hash_size) - 1;
+
+	/* Check for KB, MB, GB, and such */
+	if (last && (strlen(gl_hash_size) > 1) &&
+	    ((*last == 'b') || (*last == 'B')) &&
+	    strchr("gmkGMK", *(last - 1)))
+		last--;
+	switch(*last) {
+	case 'g':
+	case 'G':
+		glock_hashtbl_size *= 1024; /* fall through */
+	case 'm':
+	case 'M':
+		glock_hashtbl_size *= 1024; /* fall through */
+	case 'k':
+	case 'K':
+		glock_hashtbl_size *= 1024; /* fall through */
+	default:
+		break;
+	};
+	hts = glock_hashtbl_size;
+	while (hts > 1) {
+		factor++;
+		hts >>= 1;
+	}
+	hts <<= factor;
+	if (hts != glock_hashtbl_size)
+		goto fail_invalid_hashsize;
+
+	error = gfs2_glock_init(glock_hashtbl_size);
 	if (error)
-		goto fail;
+		goto fail_uninit;
 
 	error = -ENOMEM;
 	gfs2_glock_cachep = kmem_cache_create("gfs2_glock",
@@ -147,10 +191,10 @@ static int __init init_gfs2_fs(void)
 	if (!gfs2_quotad_cachep)
 		goto fail;
 
-	gfs2_rsrv_cachep = kmem_cache_create("gfs2_mblk",
-					     sizeof(struct gfs2_blkreserv),
+	gfs2_qadata_cachep = kmem_cache_create("gfs2_qadata",
+					       sizeof(struct gfs2_qadata),
 					       0, 0, NULL);
-	if (!gfs2_rsrv_cachep)
+	if (!gfs2_qadata_cachep)
 		goto fail;
 
 	register_shrinker(&qd_shrinker);
@@ -174,6 +218,9 @@ static int __init init_gfs2_fs(void)
 	gfs2_register_debugfs();
 
 	printk("GFS2 (built %s %s) installed\n", __DATE__, __TIME__);
+	if (glock_hashtbl_size != 32768)
+		printk(KERN_ERR "GFS2: Using glock hash table size: %lu\n",
+		       (unsigned long)glock_hashtbl_size);
 
 	return 0;
 
@@ -187,8 +234,8 @@ fail:
 	unregister_shrinker(&qd_shrinker);
 	gfs2_glock_exit();
 
-	if (gfs2_rsrv_cachep)
-		kmem_cache_destroy(gfs2_rsrv_cachep);
+	if (gfs2_qadata_cachep)
+		kmem_cache_destroy(gfs2_qadata_cachep);
 
 	if (gfs2_quotad_cachep)
 		kmem_cache_destroy(gfs2_quotad_cachep);
@@ -208,8 +255,21 @@ fail:
 	if (gfs2_glock_cachep)
 		kmem_cache_destroy(gfs2_glock_cachep);
 
+fail_uninit:
 	gfs2_sys_uninit();
 	return error;
+
+fail_invalid_hashsize:
+	printk(KERN_ERR "Glock hash table buckets %lu is invalid.\n",
+	       (unsigned long)glock_hashtbl_size);
+	printk(KERN_ERR "Value must be >= 1024 and should be a multiple "
+	       "of 2.\n");
+	printk(KERN_ERR "Value may be specified in K, M, or G. For example, "
+	       "gl_hash_size=128K. Default is 32K buckets.\n");
+	printk(KERN_ERR "(This is the number of hash table buckets, not the "
+	       "byte size of the hash table.)\n");
+	error = -EINVAL;
+	goto fail_uninit;
 }
 
 /**
@@ -229,7 +289,7 @@ static void __exit exit_gfs2_fs(void)
 	rcu_barrier();
 
 	mempool_destroy(gfs2_bh_pool);
-	kmem_cache_destroy(gfs2_rsrv_cachep);
+	kmem_cache_destroy(gfs2_qadata_cachep);
 	kmem_cache_destroy(gfs2_quotad_cachep);
 	kmem_cache_destroy(gfs2_rgrpd_cachep);
 	kmem_cache_destroy(gfs2_bufdata_cachep);

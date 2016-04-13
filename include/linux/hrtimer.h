@@ -165,7 +165,9 @@ struct hrtimer_clock_base {
  * @nr_retries:		Total number of hrtimer interrupt retries
  * @nr_hangs:		Total number of hrtimer interrupt hangs
  * @max_hang_time:	Maximum time spent in hrtimer_interrupt
- * @clock_was_set:	Indicates that clock was set from irq context.
+ * @clock_was_set:	Sequence counter of clock was set events
+ *                      Note that in RHEL6 clock_was_set is upstream's
+ *                      clock_was_set_seq (KABI).
  */
 struct hrtimer_cpu_base {
 	spinlock_t			lock;
@@ -180,7 +182,7 @@ struct hrtimer_cpu_base {
 	ktime_t				max_hang_time;
 #endif
 #ifndef __GENKSYMS__
-	unsigned int			clock_was_set;
+	unsigned int			clock_was_set; /* clock_was_set_seq */
 #endif
 };
 
@@ -319,7 +321,8 @@ extern ktime_t ktime_get(void);
 extern ktime_t ktime_get_real(void);
 extern ktime_t ktime_get_boottime(void);
 extern ktime_t ktime_get_monotonic_offset(void);
-extern ktime_t ktime_get_update_offsets(ktime_t *offs_real);
+extern ktime_t ktime_get_update_offsets(unsigned int *cwsseq,
+					ktime_t *offs_real);
 
 DECLARE_PER_CPU(struct tick_device, tick_cpu_device);
 

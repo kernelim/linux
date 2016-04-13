@@ -6,13 +6,21 @@
 #endif
 
 typedef struct {
+#ifndef __GENKSYMS__
+	unsigned int lock;
+#else
 	volatile unsigned int owner_cpu;
+#endif
 } __attribute__ ((aligned (4))) raw_spinlock_t;
 
-#define __RAW_SPIN_LOCK_UNLOCKED	{ 0 }
+#define __RAW_SPIN_LOCK_UNLOCKED { .lock = 0, }
 
 typedef struct {
+#ifndef __GENKSYMS__
+	unsigned int lock;
+#else
 	volatile unsigned int lock;
+#endif
 } raw_rwlock_t;
 
 #define __RAW_RW_LOCK_UNLOCKED		{ 0 }

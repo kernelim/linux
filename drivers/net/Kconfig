@@ -2298,12 +2298,12 @@ config TIGON3
 	  will be called tg3.  This is recommended.
 
 config BNX2
-	tristate "QLogic NetXtremeII support"
+	tristate "QLogic bnx2 support"
 	depends on PCI
 	select CRC32
 	select FW_LOADER
 	help
-	  This driver supports QLogic NetXtremeII gigabit Ethernet cards.
+	  This driver supports QLogic bnx2 gigabit Ethernet cards.
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called bnx2.  This is recommended.
@@ -2599,6 +2599,28 @@ config CHELSIO_T4
 	  To compile this driver as a module choose M here; the module
 	  will be called cxgb4.
 
+config CHELSIO_T4_FCOE
+	bool "Fibre Channel over Ethernet (FCoE) Support for Chelsio T5 cards"
+	default n
+	depends on CHELSIO_T4 && CHELSIO_T4_DCB && FCOE
+	help
+	  Enable FCoE offload features.
+	  Say Y here if you want to enable Fibre Channel over Ethernet (FCoE) support
+	  in the driver.
+
+	  If unsure, say N.
+
+config CHELSIO_T4_DCB
+	bool "Data Center Bridging (DCB) Support for Chelsio T4/T5 cards"
+	default n
+	depends on CHELSIO_T4 && DCB
+	---help---
+	  Enable DCB support through rtNetlink interface.
+	  Say Y here if you want to enable Data Center Bridging (DCB) support
+	  in the driver.
+
+	  If unsure, say N.
+
 config CHELSIO_T4VF
 	tristate "Chelsio Communications T4 Virtual Function Ethernet support"
 	depends on PCI
@@ -2651,6 +2673,17 @@ config IXGBE
 
 	  To compile this driver as a module, choose M here. The module
 	  will be called ixgbe.
+
+config IXGBE_VXLAN
+	bool "Virtual eXtensible Local Area Network Support"
+	default n
+	depends on IXGBE && VXLAN && !(IXGBE=y && VXLAN=m)
+	---help---
+	  This allows one to create VXLAN virtual interfaces that provide
+	  Layer 2 Networks over Layer 3 Networks. VXLAN is often used
+	  to tunnel virtual network infrastructure in virtualized environments.
+	  Say Y here if you want to use Virtual eXtensible Local Area Network
+	  (VXLAN) in the driver.
 
 config IXGBE_HWMON
 	bool "Intel(R) 10GbE PCI Express adapters HWMON support"
@@ -2803,6 +2836,25 @@ config I40EVF
 	  will be called i40evf.  MSI-X interrupt support is required
 	  for this driver to work correctly.
 
+config FM10K
+	tristate "Intel(R) FM10000 Ethernet Switch Host Interface Support"
+	default n
+	depends on PCI_MSI
+	---help---
+	  This driver supports Intel(R) FM10000 Ethernet Switch Host
+	  Interface.  For more information on how to identify your adapter,
+	  go to the Adapter & Driver ID Guide at:
+
+	  <http://support.intel.com/support/network/sb/CS-008441.htm>
+
+	  For general information and support, go to the Intel support
+	  website at:
+
+	  <http://support.intel.com>
+
+	  To compile this driver as a module, choose M here. The module
+	  will be called fm10k.  MSI-X interrupt support is required
+
 config S2IO
 	tristate "S2IO 10Gbe XFrame NIC"
 	depends on PCI
@@ -2914,9 +2966,21 @@ config MLX4_DEBUG
 	  the driver is loaded through sysfs).
 
 config MLX5_CORE
-	tristate
-	depends on PCI && X86
+	tristate "Mellanox Technologies ConnectX-4 and Connect-IB core driver"
+	depends on PCI
 	default n
+	---help---
+	  Core driver for low level functionality of the ConnectX-4 and
+	  Connect-IB cards by Mellanox Technologies.
+
+config MLX5_CORE_EN
+	bool "Mellanox Technologies ConnectX-4 Ethernet support"
+	depends on NETDEVICES && INET && PCI && MLX5_CORE
+	default n
+	---help---
+	  Ethernet support in Mellanox Technologies ConnectX-4 NIC.
+	  Ethernet and Infiniband support in ConnectX-4 are currently mutually
+	  exclusive.
 
 config MLX5_DEBUG
 	bool "Verbose debugging output" if (MLX5_CORE && EXPERT)
@@ -2954,6 +3018,35 @@ config BNX2X_SRIOV
 	  This configuration parameter enables Single Root Input Output
 	  Virtualization support in the 578xx and 57712 products. This
 	  allows for virtual function acceleration in virtual environments.
+
+config BNXT
+	tristate "Broadcom NetXtreme-C/E support"
+	depends on PCI
+	select FW_LOADER
+	select LIBCRC32C
+	---help---
+	  This driver supports Broadcom NetXtreme-C/E 10/25/40/50 gigabit
+	  Ethernet cards.  To compile this driver as a module, choose M here:
+	  the module will be called bnxt_en.  This is recommended.
+
+config BNXT_SRIOV
+	bool "Broadcom NetXtreme-C/E SR-IOV support"
+	depends on BNXT && PCI_IOV
+	default y
+	---help---
+	  This configuration parameter enables Single Root Input Output
+	  Virtualization support in the NetXtreme-C/E products. This
+	  allows for virtual function acceleration in virtual environments.
+
+config BNX2X_VXLAN
+	bool "Virtual eXtensible Local Area Network support"
+	default n
+	depends on BNX2X && VXLAN && !(BNX2X=y && VXLAN=m)
+	---help---
+	  This enables hardward offload support for VXLAN protocol over the
+	  NetXtremeII series adapters.
+	  Say Y here if you want to enable hardware offload support for
+	  Virtual eXtensible Local Area Network (VXLAN) in the driver.
 
 config QLCNIC
 	tristate "QLOGIC QLCNIC 1/10Gb Converged Ethernet NIC Support"
@@ -3004,18 +3097,18 @@ config QLGE
 	  will be called qlge.
 
 config BNA
-	tristate "Brocade 1010/1020 10Gb Ethernet Driver support"
+	tristate "QLogic BR-series 1010/1020/1860 10Gb Ethernet Driver support"
 	depends on PCI
 	---help---
-	  This driver supports Brocade 1010/1020 10Gb CEE capable Ethernet
-	  cards.
+	  This driver supports QLogic BR-series 1010/1020/1860 10Gb CEE capable
+	  Ethernet cards.
 	  To compile this driver as a module, choose M here: the module
 	  will be called bna.
 
-	  For general information and support, go to the Brocade support
+	  For general information and support, go to the QLogic support
 	  website at:
 
-	  <http://support.brocade.com>
+	  <http://support.qlogic.com>
 
 source "drivers/net/sfc/Kconfig"
 

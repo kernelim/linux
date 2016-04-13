@@ -125,32 +125,32 @@ struct ndis_tcp_ip_checksum_info;
 /*
  * Represent netvsc packet which contains 1 RNDIS and 1 ethernet frame
  * within the RNDIS
+ *
+ * The size of this structure is less than 48 bytes and we can now
+ * place this structure in the skb->cb field.
  */
 struct hv_netvsc_packet {
 	/* Bookkeeping stuff */
-	u32 status;
+	u8 status;
+	u8 is_data_pkt;
+	u8 xmit_more; /* from skb */
+	u8 cp_partial; /* partial copy into send buffer */
 
-	struct hv_device *device;
-	bool is_data_pkt;
+	u8 rmsg_size; /* RNDIS header and PPI size */
+	u8 rmsg_pgcnt; /* page count of RNDIS header and PPI */
+	u8 page_buf_cnt;
+	u8 completion_func;
+
 	u16 vlan_tci;
-
 	u16 q_idx;
-	struct vmbus_channel *channel;
-
-	u64 send_completion_tid;
-	void *send_completion_ctx;
-	void (*send_completion)(void *context);
-
 	u32 send_buf_index;
 
-	/* This points to the memory after page_buf */
-	struct rndis_message *rndis_msg;
-
 	u32 total_data_buflen;
-	/* Points to the send/receive buffer where the ethernet frame is */
-	void *data;
-	u32 page_buf_cnt;
-	struct hv_page_buffer page_buf[0];
+	u32 pad1;
+
+
+	u64 send_completion_tid;
+	struct hv_page_buffer *page_buf;
 };
 
 struct netvsc_device_info {
@@ -181,15 +181,20 @@ struct rndis_device {
 
 
 /* Interface */
+struct rndis_message;
 int netvsc_device_add(struct hv_device *device, void *additional_info);
 int netvsc_device_remove(struct hv_device *device);
 int netvsc_send(struct hv_device *device,
-		struct hv_netvsc_packet *packet);
+		struct hv_netvsc_packet *packet,
+		struct rndis_message *rndis_msg);
 void netvsc_linkstatus_callback(struct hv_device *device_obj,
 				unsigned int status);
+void netvsc_xmit_completion(void *context);
 int netvsc_recv_callback(struct hv_device *device_obj,
 			struct hv_netvsc_packet *packet,
-			struct ndis_tcp_ip_checksum_info *csum_info);
+			void **data,
+			struct ndis_tcp_ip_checksum_info *csum_info,
+			struct vmbus_channel *channel);
 void netvsc_channel_cb(void *context);
 int rndis_filter_open(struct hv_device *dev);
 int rndis_filter_close(struct hv_device *dev);
@@ -197,11 +202,12 @@ int rndis_filter_device_add(struct hv_device *dev,
 			void *additional_info);
 void rndis_filter_device_remove(struct hv_device *dev);
 int rndis_filter_receive(struct hv_device *dev,
-			struct hv_netvsc_packet *pkt);
+			struct hv_netvsc_packet *pkt,
+			void **data,
+			struct vmbus_channel *channel);
 
 int rndis_filter_set_packet_filter(struct rndis_device *dev, u32 new_filter);
 int rndis_filter_set_device_mac(struct hv_device *hdev, char *mac);
-
 
 #define NVSP_INVALID_PROTOCOL_VERSION	((u32)0xFFFFFFFF)
 
@@ -593,7 +599,24 @@ struct nvsp_message {
 
 #define VRSS_SEND_TAB_SIZE 16
 
-/* Per netvsc channel-specific */
+#define RNDIS_MAX_PKT_DEFAULT 8
+#define RNDIS_PKT_ALIGN_DEFAULT 8
+
+struct multi_send_data {
+	struct hv_netvsc_packet *pkt; /* netvsc pkt pending */
+	u32 count; /* counter of batched packets */
+};
+
+/* The context of the netvsc device  */
+struct net_device_context {
+	/* point back to our device context */
+	struct hv_device *device_ctx;
+	struct delayed_work dwork;
+	struct work_struct work;
+	u32 msg_enable; /* debug level */
+};
+
+/* Per netvsc device */
 struct netvsc_device {
 	struct hv_device *dev;
 
@@ -643,6 +666,13 @@ struct netvsc_device {
 	unsigned char cb_buffer[NETVSC_PACKET_SIZE];
 	/* The sub channel callback buffer */
 	unsigned char *sub_cb_buf;
+
+	struct multi_send_data msd[NR_CPUS];
+	u32 max_pkt; /* max number of pkt in one send, e.g. 8 */
+	u32 pkt_align; /* alignment bytes, e.g. 8 */
+
+	/* The net device context */
+	struct net_device_context *nd_ctx;
 };
 
 /* NdisInitialize message */
@@ -940,6 +970,10 @@ struct ndis_tcp_lso_info {
 #define NDIS_HASH_PPI_SIZE (sizeof(struct rndis_per_packet_info) + \
 		sizeof(u32))
 
+/* Total size of all PPI data */
+#define NDIS_ALL_PPI_SIZE (NDIS_VLAN_PPI_SIZE + NDIS_CSUM_PPI_SIZE + \
+			   NDIS_LSO_PPI_SIZE + NDIS_HASH_PPI_SIZE)
+
 /* Format of Information buffer passed in a SetRequest for the OID */
 /* OID_GEN_RNDIS_CONFIG_PARAMETER. */
 struct rndis_config_parameter_info {
@@ -1152,6 +1186,8 @@ struct rndis_message {
 #define RNDIS_HEADER_SIZE	(sizeof(struct rndis_message) - \
 				 sizeof(union rndis_message_container))
 
+#define RNDIS_AND_PPI_SIZE (sizeof(struct rndis_message) + NDIS_ALL_PPI_SIZE)
+
 #define NDIS_PACKET_TYPE_DIRECTED	0x00000001
 #define NDIS_PACKET_TYPE_MULTICAST	0x00000002
 #define NDIS_PACKET_TYPE_ALL_MULTICAST	0x00000004
@@ -1175,6 +1211,5 @@ struct rndis_message {
 #define TRANSPORT_INFO_IPV4_UDP ((INFO_IPV4 << 16) | INFO_UDP)
 #define TRANSPORT_INFO_IPV6_TCP ((INFO_IPV6 << 16) | INFO_TCP)
 #define TRANSPORT_INFO_IPV6_UDP ((INFO_IPV6 << 16) | INFO_UDP)
-
 
 #endif /* _HYPERV_NET_H */

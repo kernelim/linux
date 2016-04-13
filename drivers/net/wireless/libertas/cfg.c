@@ -835,14 +835,13 @@ static int lbs_cfg_scan(struct wiphy *wiphy,
  * Events
  */
 
-void lbs_send_disconnect_notification(struct lbs_private *priv)
+void lbs_send_disconnect_notification(struct lbs_private *priv,
+				      bool locally_generated)
 {
 	lbs_deb_enter(LBS_DEB_CFG80211);
 
-	cfg80211_disconnected(priv->dev,
-		0,
-		NULL, 0,
-		GFP_KERNEL);
+	cfg80211_disconnected(priv->dev, 0, NULL, 0, locally_generated,
+			      GFP_KERNEL);
 
 	lbs_deb_leave(LBS_DEB_CFG80211);
 }
@@ -1458,7 +1457,7 @@ int lbs_disconnect(struct lbs_private *priv, u16 reason)
 
 	cfg80211_disconnected(priv->dev,
 			reason,
-			NULL, 0,
+			NULL, 0, true,
 			GFP_KERNEL);
 	priv->connect_status = LBS_DISCONNECTED;
 
@@ -1616,10 +1615,10 @@ static int lbs_cfg_get_station(struct wiphy *wiphy, struct net_device *dev,
 
 	lbs_deb_enter(LBS_DEB_CFG80211);
 
-	sinfo->filled |= STATION_INFO_TX_BYTES |
-			 STATION_INFO_TX_PACKETS |
-			 STATION_INFO_RX_BYTES |
-			 STATION_INFO_RX_PACKETS;
+	sinfo->filled |= BIT(NL80211_STA_INFO_TX_BYTES) |
+			 BIT(NL80211_STA_INFO_TX_PACKETS) |
+			 BIT(NL80211_STA_INFO_RX_BYTES) |
+			 BIT(NL80211_STA_INFO_RX_PACKETS);
 	sinfo->tx_bytes = priv->dev->stats.tx_bytes;
 	sinfo->tx_packets = priv->dev->stats.tx_packets;
 	sinfo->rx_bytes = priv->dev->stats.rx_bytes;
@@ -1629,14 +1628,14 @@ static int lbs_cfg_get_station(struct wiphy *wiphy, struct net_device *dev,
 	ret = lbs_get_rssi(priv, &signal, &noise);
 	if (ret == 0) {
 		sinfo->signal = signal;
-		sinfo->filled |= STATION_INFO_SIGNAL;
+		sinfo->filled |= BIT(NL80211_STA_INFO_SIGNAL);
 	}
 
 	/* Convert priv->cur_rate from hw_value to NL80211 value */
 	for (i = 0; i < ARRAY_SIZE(lbs_rates); i++) {
 		if (priv->cur_rate == lbs_rates[i].hw_value) {
 			sinfo->txrate.legacy = lbs_rates[i].bitrate;
-			sinfo->filled |= STATION_INFO_TX_BITRATE;
+			sinfo->filled |= BIT(NL80211_STA_INFO_TX_BITRATE);
 			break;
 		}
 	}
@@ -2031,7 +2030,7 @@ static int lbs_leave_ibss(struct wiphy *wiphy, struct net_device *dev)
 	ret = lbs_cmd_with_response(priv, CMD_802_11_AD_HOC_STOP, &cmd);
 
 	/* TODO: consider doing this at MACREG_INT_CODE_ADHOC_BCN_LOST time */
-	lbs_mac_event_disconnected(priv);
+	lbs_mac_event_disconnected(priv, true);
 
 	lbs_deb_leave_args(LBS_DEB_CFG80211, "ret %d", ret);
 	return ret;

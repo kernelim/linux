@@ -137,6 +137,7 @@
 #include <linux/cpu_rmap.h>
 #include <linux/net_tstamp.h>
 #include <linux/hashtable.h>
+#include <linux/hrtimer.h>
 
 #include "net-sysfs.h"
 
@@ -1652,6 +1653,7 @@ int dev_forward_skb(struct net_device *dev, struct sk_buff *skb)
 		return NET_RX_DROP;
 	}
 	skb->iif = 0;
+	skb->local_df = 0;
 	skb_dst_drop(skb);
 	skb->tstamp.tv64 = 0;
 	skb->pkt_type = PACKET_HOST;
@@ -2208,7 +2210,7 @@ int netif_skb_features(struct sk_buff *skb)
 	if (protocol == htons(ETH_P_8021Q)) {
 		struct vlan_ethhdr *veh = (struct vlan_ethhdr *)skb->data;
 		protocol = veh->h_vlan_encapsulated_proto;
-	} else if (!vlan_tx_tag_present(skb)) {
+	} else if (!skb_vlan_tag_present(skb)) {
 		return harmonize_features(skb, protocol, features);
 	}
 
@@ -2259,9 +2261,9 @@ int dev_hard_start_xmit(struct sk_buff *skb, struct net_device *dev,
 
 		features = netif_skb_features(skb);
 
-		if (vlan_tx_tag_present(skb) &&
+		if (skb_vlan_tag_present(skb) &&
 		    !(features & NETIF_F_HW_VLAN_TX)) {
-			skb = __vlan_put_tag(skb, vlan_tx_tag_get(skb));
+			skb = __vlan_put_tag(skb, skb_vlan_tag_get(skb));
 			if (unlikely(!skb))
 				goto out;
 
@@ -3269,7 +3271,8 @@ int __netif_receive_skb(struct sk_buff *skb)
 	orig_dev = skb->dev;
 
 	skb_reset_network_header(skb);
-	skb_reset_transport_header(skb);
+	if (!skb_transport_header_was_set(skb))
+		skb_reset_transport_header(skb);
 	skb_reset_mac_len(skb);
 
 	pt_prev = NULL;
@@ -3309,7 +3312,7 @@ another_round:
 ncls:
 #endif
 
-	if (vlan_tx_tag_present(skb)) {
+	if (skb_vlan_tag_present(skb)) {
 		if (pt_prev) {
 			ret = deliver_skb(skb, pt_prev, orig_dev);
 			pt_prev = NULL;
@@ -3340,8 +3343,8 @@ ncls:
 		}
 	}
 
-	if (unlikely(vlan_tx_tag_present(skb))) {
-		if (vlan_tx_tag_get_id(skb))
+	if (unlikely(skb_vlan_tag_present(skb))) {
+		if (skb_vlan_tag_get_id(skb))
 			skb->pkt_type = PACKET_OTHERHOST;
 		/* Note: we might in the future use prio bits
 		 * and set skb->priority like in vlan_do_receive()
@@ -3434,6 +3437,8 @@ static int napi_gro_complete(struct sk_buff *skb)
 	bool found = false;
 	int err = -ENOENT;
 
+	BUILD_BUG_ON(sizeof(struct napi_gro_cb) > sizeof(skb->cb));
+
 	if (NAPI_GRO_CB(skb)->count == 1) {
 		skb_shinfo(skb)->gso_size = 0;
 		goto out;
@@ -3477,17 +3482,31 @@ out:
 	return netif_receive_skb(skb);
 }
 
-void napi_gro_flush(struct napi_struct *napi)
+/* napi->gro_list contains packets ordered by age.
+ * youngest packets at the head of it.
+ * Complete skbs in reverse order to reduce latencies.
+ */
+void napi_gro_flush(struct napi_struct *napi, bool flush_old)
 {
-	struct sk_buff *skb, *next;
+	struct sk_buff *skb, *prev = NULL;
 
-	for (skb = napi->gro_list; skb; skb = next) {
-		next = skb->next;
-		skb->next = NULL;
-		napi_gro_complete(skb);
+	/* scan list and build reverse chain */
+	for (skb = napi->gro_list; skb != NULL; skb = skb->next) {
+		skb->prev = prev;
+		prev = skb;
 	}
 
-	napi->gro_count = 0;
+	for (skb = prev; skb; skb = prev) {
+		skb->next = NULL;
+
+		if (flush_old && NAPI_GRO_CB(skb)->age == jiffies)
+			return;
+
+		prev = skb->prev;
+		napi_gro_complete(skb);
+		napi->gro_count--;
+	}
+
 	napi->gro_list = NULL;
 }
 EXPORT_SYMBOL(napi_gro_flush);
@@ -3571,6 +3590,7 @@ gro_result_t dev_gro_receive(struct napi_struct *napi, struct sk_buff *skb)
 
 	napi->gro_count++;
 	NAPI_GRO_CB(skb)->count = 1;
+	NAPI_GRO_CB(skb)->age = jiffies;
 	skb_shinfo(skb)->gso_size = skb_gro_len(skb);
 	skb->next = napi->gro_list;
 	napi->gro_list = skb;
@@ -3868,7 +3888,6 @@ EXPORT_SYMBOL(__napi_schedule);
 void __napi_complete(struct napi_struct *n)
 {
 	BUG_ON(!test_bit(NAPI_STATE_SCHED, &n->state));
-	BUG_ON(n->gro_list);
 
 	list_del(&n->poll_list);
 	smp_mb__before_clear_bit();
@@ -3876,7 +3895,7 @@ void __napi_complete(struct napi_struct *n)
 }
 EXPORT_SYMBOL(__napi_complete);
 
-void napi_complete(struct napi_struct *n)
+void napi_complete_done(struct napi_struct *n, int work_done)
 {
 	unsigned long flags;
 
@@ -3887,10 +3906,30 @@ void napi_complete(struct napi_struct *n)
 	if (unlikely(test_bit(NAPI_STATE_NPSVC, &n->state)))
 		return;
 
-	napi_gro_flush(n);
+	napi_gro_flush(n, false);
+	if (n->gro_list) {
+		unsigned long timeout = 0;
+
+		if (work_done)
+			timeout = netdev_extended(n->dev)->gro_flush_timeout;
+
+		if (timeout)
+			hrtimer_start(&n->timer, ns_to_ktime(timeout),
+				      HRTIMER_MODE_REL_PINNED);
+		else
+			napi_gro_flush(n, false);
+	}
 	local_irq_save(flags);
 	__napi_complete(n);
 	local_irq_restore(flags);
+}
+EXPORT_SYMBOL(napi_complete_done);
+
+/* This is a version for old binary modules compiled against older kernels. */
+#undef napi_complete
+void napi_complete(struct napi_struct *n)
+{
+	return napi_complete_done(n, 0);
 }
 EXPORT_SYMBOL(napi_complete);
 
@@ -3947,10 +3986,31 @@ void napi_hash_del(struct napi_struct *napi)
 }
 EXPORT_SYMBOL_GPL(napi_hash_del);
 
-void netif_napi_add(struct net_device *dev, struct napi_struct *napi,
-		    int (*poll)(struct napi_struct *, int), int weight)
+static enum hrtimer_restart napi_watchdog(struct hrtimer *timer)
 {
+	struct napi_struct *napi;
+
+	napi = container_of(timer, struct napi_struct, timer);
+	if (napi->gro_list)
+		napi_schedule(napi);
+
+	return HRTIMER_NORESTART;
+}
+
+void __netif_napi_add(struct net_device *dev, struct napi_struct *napi,
+		      int (*poll)(struct napi_struct *, int), int weight,
+		      size_t size)
+{
+	if (size > offsetof(struct napi_struct, size)) {
+		napi->size = size;
+		set_bit(NAPI_STATE_EXT, &napi->state); /* Mark as extended */
+	}
 	INIT_LIST_HEAD(&napi->poll_list);
+	if (NAPI_STRUCT_HAS(napi, timer)) {
+		hrtimer_init(&napi->timer, CLOCK_MONOTONIC,
+			     HRTIMER_MODE_REL_PINNED);
+		napi->timer.function = napi_watchdog;
+	}
 	napi->gro_count = 0;
 	napi->gro_list = NULL;
 	napi->skb = NULL;
@@ -3967,7 +4027,36 @@ void netif_napi_add(struct net_device *dev, struct napi_struct *napi,
 #endif
 	set_bit(NAPI_STATE_SCHED, &napi->state);
 }
+EXPORT_SYMBOL(__netif_napi_add);
+
+/* This is a version for old binary modules compiled against older kernels
+ * without extended napi_struct.
+ */
+#undef netif_napi_add
+void netif_napi_add(struct net_device *dev, struct napi_struct *napi,
+		    int (*poll)(struct napi_struct *, int), int weight)
+{
+	__netif_napi_add(dev, napi, poll, weight,
+			 offsetof(struct napi_struct, size));
+}
 EXPORT_SYMBOL(netif_napi_add);
+
+void napi_disable(struct napi_struct *n)
+{
+	might_sleep();
+	set_bit(NAPI_STATE_DISABLE, &n->state);
+
+	while (test_and_set_bit(NAPI_STATE_SCHED, &n->state))
+		msleep(1);
+	while (test_and_set_bit(NAPI_STATE_NPSVC, &n->state))
+		msleep(1);
+
+	if (NAPI_STRUCT_HAS(n, timer))
+		hrtimer_cancel(&n->timer);
+
+	clear_bit(NAPI_STATE_DISABLE, &n->state);
+}
+EXPORT_SYMBOL(napi_disable);
 
 void netif_napi_del(struct napi_struct *napi)
 {
@@ -4069,8 +4158,17 @@ static void net_rx_action(struct softirq_action *h)
 				local_irq_enable();
 				napi_complete(n);
 				local_irq_disable();
-			} else
+			} else {
+				if (n->gro_list) {
+					/* flush too old packets
+					 * If HZ < 1000, flush all packets.
+					 */
+					local_irq_enable();
+					napi_gro_flush(n, HZ >= 1000);
+					local_irq_disable();
+				}
 				list_move_tail(&n->poll_list, list);
+			}
 		}
 
 		netpoll_poll_unlock(have);
@@ -6289,6 +6387,13 @@ int register_netdevice(struct net_device *dev)
 	dev_init_scheduler(dev);
 	dev_hold(dev);
 	list_netdevice(dev);
+
+	/* If the device has permanent device address, driver should
+	 * set dev_addr and also addr_assign_type should be set to
+	 * NET_ADDR_PERM (default value).
+	 */
+	if (dev->addr_assign_type == NET_ADDR_PERM)
+		memcpy(dev->perm_addr, dev->dev_addr, dev->addr_len);
 
 	/* Notify protocols, that a new device appeared. */
 	ret = call_netdevice_notifiers(NETDEV_REGISTER, dev);

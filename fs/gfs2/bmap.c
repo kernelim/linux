@@ -789,8 +789,8 @@ static int do_strip(struct gfs2_inode *ip, struct buffer_head *dibh,
 	if (error)
 		goto out_rlist;
 
-	if (gfs2_rs_active(ip->i_res)) /* needs to be done with the rgrp glock held */
-		gfs2_rs_deltree(ip->i_res);
+	if (gfs2_rs_active(&ip->i_res)) /* needs to be done with the rgrp glock held */
+		gfs2_rs_deltree(&ip->i_res);
 
 	error = gfs2_trans_begin(sdp, rg_blocks + RES_DINODE +
 				 RES_INDIRECT + RES_STATFS + RES_QUOTA,
@@ -1283,6 +1283,7 @@ do_grow_qunlock:
 
 int gfs2_setattr_size(struct inode *inode, u64 newsize)
 {
+	struct gfs2_inode *ip = GFS2_I(inode);
 	int ret;
 	u64 oldsize;
 
@@ -1292,11 +1293,7 @@ int gfs2_setattr_size(struct inode *inode, u64 newsize)
 	if (ret)
 		return ret;
 
-	ret = get_write_access(inode);
-	if (ret)
-		return ret;
-
-	ret = gfs2_rs_alloc(GFS2_I(inode));
+	ret = gfs2_rsqa_alloc(ip);
 	if (ret)
 		goto out;
 
@@ -1308,7 +1305,7 @@ int gfs2_setattr_size(struct inode *inode, u64 newsize)
 
 	ret = do_shrink(inode, oldsize, newsize);
 out:
-	put_write_access(inode);
+	gfs2_rsqa_delete(ip, NULL);
 	return ret;
 }
 

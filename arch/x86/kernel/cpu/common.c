@@ -651,6 +651,31 @@ static void __cpuinit get_cpu_cap(struct cpuinfo_x86 *c)
 		rh->x86_capability[9 - NCAPINTS] = ebx;
 	}
 
+	/* Additional Intel-defined flags: level 0x0000000F */
+	if (c->cpuid_level >= 0x0000000F) {
+		u32 eax, ebx, ecx, edx;
+		struct cpuinfo_x86_rh *rh_c = get_cpuinfo_x86_rh(c);
+
+		/* QoS sub-leaf, EAX=0Fh, ECX=0 */
+		cpuid_count(0x0000000F, 0, &eax, &ebx, &ecx, &edx);
+		rh_c->x86_capability[11 - NCAPINTS] = edx;
+		if (cpu_has(c, X86_FEATURE_CQM_LLC)) {
+			/* will be overridden if occupancy monitoring exists */
+			rh_c->x86_cache_max_rmid = ebx;
+
+			/* QoS sub-leaf, EAX=0Fh, ECX=1 */
+			cpuid_count(0x0000000F, 1, &eax, &ebx, &ecx, &edx);
+			rh_c->x86_capability[12 - NCAPINTS] = edx;
+			if (cpu_has(c, X86_FEATURE_CQM_OCCUP_LLC)) {
+				rh_c->x86_cache_max_rmid = ecx;
+				rh_c->x86_cache_occ_scale = ebx;
+			}
+		} else {
+			rh_c->x86_cache_max_rmid = -1;
+			rh_c->x86_cache_occ_scale = -1;
+		}
+	}
+
 	/* AMD-defined flags: level 0x80000001 */
 	xlvl = cpuid_eax(0x80000000);
 	c->extended_cpuid_level = xlvl;
@@ -835,6 +860,22 @@ static void __cpuinit generic_identify(struct cpuinfo_x86 *c)
 	detect_nopl(c);
 }
 
+static void x86_init_cache_qos(struct cpuinfo_x86 *c)
+{
+	/*
+	 * The heavy lifting of max_rmid and cache_occ_scale are handled
+	 * in get_cpu_cap().  Here we just set the max_rmid for the boot_cpu
+	 * in case CQM bits really aren't there in this CPU.
+	 */
+	if (c != &boot_cpu_data) {
+		struct cpuinfo_x86_rh *rh_c = &cpu_data_rh(c->cpu_index);
+
+		boot_cpu_data_rh.x86_cache_max_rmid =
+			min(boot_cpu_data_rh.x86_cache_max_rmid,
+			    rh_c->x86_cache_max_rmid);
+	}
+}
+
 /*
  * This does the hard work of actually picking apart the CPU stuff...
  */
@@ -942,6 +983,7 @@ static void __cpuinit identify_cpu(struct cpuinfo_x86 *c)
 
 	init_hypervisor(c);
 	x86_init_rdrand(c);
+	x86_init_cache_qos(c);
 
 	/*
 	 * Clear/Set all flags overriden by options, need do it

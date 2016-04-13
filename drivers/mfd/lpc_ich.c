@@ -54,6 +54,7 @@
  *	document number TBD : Avoton SoC
  *	document number TBD : Wildcat Point-LP
  *	document number TBD : Coleto Creek
+ *	document number TBD : Lewisburg
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -66,15 +67,18 @@
 #include <linux/pci.h>
 #include <linux/mfd/core.h>
 #include <linux/mfd/lpc_ich.h>
+#include <linux/platform_data/itco_wdt.h>
 
 #define ACPIBASE		0x40
 #define ACPIBASE_GPE_OFF	0x28
 #define ACPIBASE_GPE_END	0x2f
 #define ACPIBASE_SMI_OFF	0x30
 #define ACPIBASE_SMI_END	0x33
+#define ACPIBASE_PMC_OFF	0x08
+#define ACPIBASE_PMC_END	0x0c
 #define ACPIBASE_TCO_OFF	0x60
 #define ACPIBASE_TCO_END	0x7f
-#define ACPICTRL		0x44
+#define ACPICTRL_PMCBASE	0x44
 
 #define ACPIBASE_GCS_OFF	0x3410
 #define ACPIBASE_GCS_END	0x3414
@@ -90,16 +94,17 @@
 #define wdt_mem_res(i) wdt_res(ICH_RES_MEM_OFF, i)
 #define wdt_res(b, i) (&wdt_ich_res[(b) + (i)])
 
-struct lpc_ich_cfg {
-	int base;
-	int ctrl;
-	int save;
-};
-
 struct lpc_ich_priv {
 	int chipset;
-	struct lpc_ich_cfg acpi;
-	struct lpc_ich_cfg gpio;
+
+	int abase;		/* ACPI base */
+	int actrl_pbase;	/* ACPI control or PMC base */
+	int gbase;		/* GPIO base */
+	int gctrl;		/* GPIO control */
+
+	int abase_save;		/* Cached ACPI base value */
+	int actrl_pbase_save;		/* Cached ACPI control or PMC base value */
+	int gctrl_save;		/* Cached GPIO control value */
 };
 
 static struct resource wdt_ich_res[] = {
@@ -111,7 +116,7 @@ static struct resource wdt_ich_res[] = {
 	{
 		.flags = IORESOURCE_IO,
 	},
-	/* GCS */
+	/* GCS or PMC */
 	{
 		.flags = IORESOURCE_MEM,
 	},
@@ -215,8 +220,10 @@ enum lpc_chipsets {
 	LPC_LPT_LP,	/* Lynx Point-LP */
 	LPC_WBG,	/* Wellsburg */
 	LPC_AVN,	/* Avoton SoC */
+	LPC_BAYTRAIL,   /* Bay Trail SoC */
 	LPC_WPT_LP,	/* Wildcat Point-LP */
 	LPC_COLETO,	/* Coleto Creek */
+	LPC_LEWISBURG,	/* Lewisburg */
 };
 
 struct lpc_ich_info lpc_chipset_info[] __devinitdata = {
@@ -307,6 +314,7 @@ struct lpc_ich_info lpc_chipset_info[] __devinitdata = {
 	[LPC_NM10] = {
 		.name = "NM10",
 		.iTCO_version = 2,
+		.gpio_version = ICH_V7_GPIO,
 	},
 	[LPC_ICH8] = {
 		.name = "ICH8 or ICH8R",
@@ -503,14 +511,23 @@ struct lpc_ich_info lpc_chipset_info[] __devinitdata = {
 	},
 	[LPC_AVN] = {
 		.name = "Avoton SoC",
-		.iTCO_version = 1,
+		.iTCO_version = 3,
+		.gpio_version = AVOTON_GPIO,
 	},
 	[LPC_WPT_LP] = {
 		.name = "Lynx Point_LP",
 		.iTCO_version = 2,
 	},
+	[LPC_BAYTRAIL] = {
+		.name = "Bay Trail SoC",
+		.iTCO_version = 3,
+	},
 	[LPC_COLETO] = {
 		.name = "Coleto Creek",
+		.iTCO_version = 2,
+	},
+	[LPC_LEWISBURG] = {
+		.name = "Lewisburg",
 		.iTCO_version = 2,
 	},
 };
@@ -730,6 +747,7 @@ static const struct pci_device_id lpc_ich_ids[] = {
 	{ PCI_VDEVICE(INTEL, 0x1f39), LPC_AVN},
 	{ PCI_VDEVICE(INTEL, 0x1f3a), LPC_AVN},
 	{ PCI_VDEVICE(INTEL, 0x1f3b), LPC_AVN},
+	{ PCI_VDEVICE(INTEL, 0x0f1c), LPC_BAYTRAIL},
 	{ PCI_VDEVICE(INTEL, 0x9cc1), LPC_WPT_LP},
 	{ PCI_VDEVICE(INTEL, 0x9cc2), LPC_WPT_LP},
 	{ PCI_VDEVICE(INTEL, 0x9cc3), LPC_WPT_LP},
@@ -738,6 +756,15 @@ static const struct pci_device_id lpc_ich_ids[] = {
 	{ PCI_VDEVICE(INTEL, 0x9cc7), LPC_WPT_LP},
 	{ PCI_VDEVICE(INTEL, 0x9cc9), LPC_WPT_LP},
 	{ PCI_VDEVICE(INTEL, 0x2390), LPC_COLETO},
+	{ PCI_VDEVICE(INTEL, 0xa1c1), LPC_LEWISBURG},
+	{ PCI_VDEVICE(INTEL, 0xa1c2), LPC_LEWISBURG},
+	{ PCI_VDEVICE(INTEL, 0xa1c3), LPC_LEWISBURG},
+	{ PCI_VDEVICE(INTEL, 0xa1c4), LPC_LEWISBURG},
+	{ PCI_VDEVICE(INTEL, 0xa1c5), LPC_LEWISBURG},
+	{ PCI_VDEVICE(INTEL, 0xa1c6), LPC_LEWISBURG},
+	{ PCI_VDEVICE(INTEL, 0xa1c7), LPC_LEWISBURG},
+	{ PCI_VDEVICE(INTEL, 0xa242), LPC_LEWISBURG},
+	{ PCI_VDEVICE(INTEL, 0xa243), LPC_LEWISBURG},
 	{ 0, },			/* End of list */
 };
 MODULE_DEVICE_TABLE(pci, lpc_ich_ids);
@@ -746,14 +773,20 @@ static void lpc_ich_restore_config_space(struct pci_dev *dev)
 {
 	struct lpc_ich_priv *priv = pci_get_drvdata(dev);
 
-	if (priv->acpi.save >= 0) {
-		pci_write_config_byte(dev, priv->acpi.ctrl, priv->acpi.save);
-		priv->acpi.save = -1;
+	if (priv->abase_save >= 0) {
+		pci_write_config_byte(dev, priv->abase, priv->abase_save);
+		priv->abase_save = -1;
 	}
 
-	if (priv->gpio.save >= 0) {
-		pci_write_config_byte(dev, priv->gpio.ctrl, priv->gpio.save);
-		priv->gpio.save = -1;
+	if (priv->actrl_pbase_save >= 0) {
+		pci_write_config_byte(dev, priv->actrl_pbase,
+			priv->actrl_pbase_save);
+		priv->actrl_pbase_save = -1;
+	}
+
+	if (priv->gctrl_save >= 0) {
+		pci_write_config_byte(dev, priv->gctrl, priv->gctrl_save);
+		priv->gctrl_save = -1;
 	}
 }
 
@@ -762,9 +795,26 @@ static void __devinit lpc_ich_enable_acpi_space(struct pci_dev *dev)
 	struct lpc_ich_priv *priv = pci_get_drvdata(dev);
 	u8 reg_save;
 
-	pci_read_config_byte(dev, priv->acpi.ctrl, &reg_save);
-	pci_write_config_byte(dev, priv->acpi.ctrl, reg_save | 0x10);
-	priv->acpi.save = reg_save;
+	switch (lpc_chipset_info[priv->chipset].iTCO_version) {
+	case 3:
+		/*
+		 * Some chipsets (eg Avoton) enable the ACPI space in the
+		 * ACPI BASE register.
+		 */
+		pci_read_config_byte(dev, priv->abase, &reg_save);
+		pci_write_config_byte(dev, priv->abase, reg_save | 0x2);
+		priv->abase_save = reg_save;
+		break;
+	default:
+		/*
+		 * Most chipsets enable the ACPI space in the ACPI control
+		 * register.
+		 */
+		pci_read_config_byte(dev, priv->actrl_pbase, &reg_save);
+		pci_write_config_byte(dev, priv->actrl_pbase, reg_save | 0x80);
+		priv->actrl_pbase_save = reg_save;
+		break;
+	}
 }
 
 static void __devinit lpc_ich_enable_gpio_space(struct pci_dev *dev)
@@ -772,14 +822,47 @@ static void __devinit lpc_ich_enable_gpio_space(struct pci_dev *dev)
 	struct lpc_ich_priv *priv = pci_get_drvdata(dev);
 	u8 reg_save;
 
-	pci_read_config_byte(dev, priv->gpio.ctrl, &reg_save);
-	pci_write_config_byte(dev, priv->gpio.ctrl, reg_save | 0x10);
-	priv->gpio.save = reg_save;
+	pci_read_config_byte(dev, priv->gctrl, &reg_save);
+	pci_write_config_byte(dev, priv->gctrl, reg_save | 0x10);
+	priv->gctrl_save = reg_save;
 }
 
-static void __devinit lpc_ich_finalize_cell(struct pci_dev *dev, struct mfd_cell *cell)
+static void lpc_ich_enable_pmc_space(struct pci_dev *dev)
 {
 	struct lpc_ich_priv *priv = pci_get_drvdata(dev);
+	u8 reg_save;
+
+	pci_read_config_byte(dev, priv->actrl_pbase, &reg_save);
+	pci_write_config_byte(dev, priv->actrl_pbase, reg_save | 0x2);
+
+	priv->actrl_pbase_save = reg_save;
+}
+
+static int __devinit lpc_ich_finalize_wdt_cell(struct pci_dev *dev)
+{
+	struct itco_wdt_platform_data *pdata;
+	struct lpc_ich_priv *priv = pci_get_drvdata(dev);
+	struct lpc_ich_info *info;
+	struct mfd_cell *cell = &lpc_ich_cells[LPC_WDT];
+
+	pdata = devm_kzalloc(&dev->dev, sizeof(*pdata), GFP_KERNEL);
+	if (!pdata)
+		return -ENOMEM;
+
+	info = &lpc_chipset_info[priv->chipset];
+
+	pdata->version = info->iTCO_version;
+	strlcpy(pdata->name, info->name, sizeof(pdata->name));
+
+	cell->platform_data = pdata;
+	cell->data_size = sizeof(*pdata);
+	return 0;
+}
+
+static void lpc_ich_finalize_gpio_cell(struct pci_dev *dev)
+{
+	struct lpc_ich_priv *priv = pci_get_drvdata(dev);
+	struct mfd_cell *cell = &lpc_ich_cells[LPC_GPIO];
 
 	cell->platform_data = &lpc_chipset_info[priv->chipset];
 	cell->data_size = sizeof(struct lpc_ich_info);
@@ -816,11 +899,10 @@ static int __devinit lpc_ich_init_gpio(struct pci_dev *dev)
 	u32 base_addr_cfg;
 	u32 base_addr;
 	int ret;
-	bool acpi_conflict = false;
 	struct resource *res;
 
 	/* Setup power management base register */
-	pci_read_config_dword(dev, priv->acpi.base, &base_addr_cfg);
+	pci_read_config_dword(dev, priv->abase, &base_addr_cfg);
 	base_addr = base_addr_cfg & 0x0000ff80;
 	if (!base_addr) {
 		dev_notice(&dev->dev, "I/O space for ACPI uninitialized\n");
@@ -831,22 +913,11 @@ static int __devinit lpc_ich_init_gpio(struct pci_dev *dev)
 	res = &gpio_ich_res[ICH_RES_GPE0];
 	res->start = base_addr + ACPIBASE_GPE_OFF;
 	res->end = base_addr + ACPIBASE_GPE_END;
-	ret = acpi_check_resource_conflict(res);
-	if (ret) {
-		/*
-		 * This isn't fatal for the GPIO, but we have to make sure that
-		 * the platform_device subsystem doesn't see this resource
-		 * or it will register an invalid region.
-		 */
-		lpc_ich_cells[LPC_GPIO].num_resources--;
-		acpi_conflict = true;
-	} else {
-		lpc_ich_enable_acpi_space(dev);
-	}
+	lpc_ich_enable_acpi_space(dev);
 
 gpe0_done:
 	/* Setup GPIO base register */
-	pci_read_config_dword(dev, priv->gpio.base, &base_addr_cfg);
+	pci_read_config_dword(dev, priv->gbase, &base_addr_cfg);
 	base_addr = base_addr_cfg & 0x0000ff80;
 	if (!base_addr) {
 		dev_notice(&dev->dev, "I/O space for GPIO uninitialized\n");
@@ -867,25 +938,16 @@ gpe0_done:
 		break;
 	}
 
-	ret = acpi_check_resource_conflict(res);
-	if (ret) {
-		/* this isn't necessarily fatal for the GPIO */
-		acpi_conflict = true;
-		goto gpio_done;
-	}
 #if 0
 	lpc_chipset_info[priv->chipset].use_gpio = ret;
 #endif
 	lpc_ich_enable_gpio_space(dev);
 
-	lpc_ich_finalize_cell(dev, &lpc_ich_cells[LPC_GPIO]);
-	ret = mfd_add_devices(&dev->dev, -1, &lpc_ich_cells[LPC_GPIO],
+	lpc_ich_finalize_gpio_cell(dev);
+	ret = mfd_add_devices(&dev->dev, -2, &lpc_ich_cells[LPC_GPIO],
 				1, NULL, 0);
 
 gpio_done:
-	if (acpi_conflict)
-		pr_warn("Resource conflict(s) found affecting %s\n",
-				lpc_ich_cells[LPC_GPIO].name);
 	return ret;
 }
 
@@ -898,7 +960,7 @@ static int __devinit lpc_ich_init_wdt(struct pci_dev *dev)
 	struct resource *res;
 
 	/* Setup power management base register */
-	pci_read_config_dword(dev, priv->acpi.base, &base_addr_cfg);
+	pci_read_config_dword(dev, priv->abase, &base_addr_cfg);
 	base_addr = base_addr_cfg & 0x0000ff80;
 	if (!base_addr) {
 		dev_notice(&dev->dev, "I/O space for ACPI uninitialized\n");
@@ -917,14 +979,20 @@ static int __devinit lpc_ich_init_wdt(struct pci_dev *dev)
 	lpc_ich_enable_acpi_space(dev);
 
 	/*
+	 * iTCO v2:
 	 * Get the Memory-Mapped GCS register. To get access to it
 	 * we have to read RCBA from PCI Config space 0xf0 and use
 	 * it as base. GCS = RCBA + ICH6_GCS(0x3410).
+	 *
+	 * iTCO v3:
+	 * Get the Power Management Configuration register.  To get access
+	 * to it we have to read the PMC BASE from config space and address
+	 * the register at offset 0x8.
 	 */
 	if (lpc_chipset_info[priv->chipset].iTCO_version == 1) {
 		/* Don't register iomem for TCO ver 1 */
 		lpc_ich_cells[LPC_WDT].num_resources--;
-	} else {
+	} else if (lpc_chipset_info[priv->chipset].iTCO_version == 2) {
 		pci_read_config_dword(dev, RCBABASE, &base_addr_cfg);
 		base_addr = base_addr_cfg & 0xffffc000;
 		if (!(base_addr_cfg & 1)) {
@@ -933,13 +1001,24 @@ static int __devinit lpc_ich_init_wdt(struct pci_dev *dev)
 			ret = -ENODEV;
 			goto wdt_done;
 		}
-		res = wdt_mem_res(ICH_RES_MEM_GCS);
+		res = wdt_mem_res(ICH_RES_MEM_GCS_PMC);
 		res->start = base_addr + ACPIBASE_GCS_OFF;
 		res->end = base_addr + ACPIBASE_GCS_END;
+	} else if (lpc_chipset_info[priv->chipset].iTCO_version == 3) {
+		lpc_ich_enable_pmc_space(dev);
+		pci_read_config_dword(dev, ACPICTRL_PMCBASE, &base_addr_cfg);
+		base_addr = base_addr_cfg & 0xfffffe00;
+
+		res = wdt_mem_res(ICH_RES_MEM_GCS_PMC);
+		res->start = base_addr + ACPIBASE_PMC_OFF;
+		res->end = base_addr + ACPIBASE_PMC_END;
 	}
 
-	lpc_ich_finalize_cell(dev, &lpc_ich_cells[LPC_WDT]);
-	ret = mfd_add_devices(&dev->dev, -1, &lpc_ich_cells[LPC_WDT],
+	ret = lpc_ich_finalize_wdt_cell(dev);
+	if (ret)
+		goto wdt_done;
+
+	ret = mfd_add_devices(&dev->dev, -2, &lpc_ich_cells[LPC_WDT],
 				1, NULL, 0);
 
 wdt_done:
@@ -959,28 +1038,35 @@ static int __devinit lpc_ich_probe(struct pci_dev *dev,
 		return -ENOMEM;
 
 	priv->chipset = id->driver_data;
-	priv->acpi.save = -1;
-	priv->acpi.base = ACPIBASE;
-	priv->acpi.ctrl = ACPICTRL;
 
-	priv->gpio.save = -1;
+	priv->actrl_pbase_save = -1;
+	priv->abase_save = -1;
+
+	priv->abase = ACPIBASE;
+	priv->actrl_pbase = ACPICTRL_PMCBASE;
+
+	priv->gctrl_save = -1;
 	if (priv->chipset <= LPC_ICH5) {
-		priv->gpio.base = GPIOBASE_ICH0;
-		priv->gpio.ctrl = GPIOCTRL_ICH0;
+		priv->gbase = GPIOBASE_ICH0;
+		priv->gctrl = GPIOCTRL_ICH0;
 	} else {
-		priv->gpio.base = GPIOBASE_ICH6;
-		priv->gpio.ctrl = GPIOCTRL_ICH6;
+		priv->gbase = GPIOBASE_ICH6;
+		priv->gctrl = GPIOCTRL_ICH6;
 	}
 
 	pci_set_drvdata(dev, priv);
 
-	ret = lpc_ich_init_wdt(dev);
-	if (!ret)
-		cell_added = true;
+	if (lpc_chipset_info[priv->chipset].iTCO_version) {
+		ret = lpc_ich_init_wdt(dev);
+		if (!ret)
+			cell_added = true;
+	}
 
-	ret = lpc_ich_init_gpio(dev);
-	if (!ret)
-		cell_added = true;
+	if (lpc_chipset_info[priv->chipset].gpio_version) {
+		ret = lpc_ich_init_gpio(dev);
+		if (!ret)
+			cell_added = true;
+	}
 
 	/*
 	 * We only care if at least one or none of the cells registered

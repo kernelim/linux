@@ -1,6 +1,8 @@
-/* bnx2x_stats.c: Broadcom Everest network driver.
+/* bnx2x_stats.c: QLogic Everest network driver.
  *
  * Copyright (c) 2007-2013 Broadcom Corporation
+ * Copyright (c) 2014 QLogic Corporation
+ * All rights reserved
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -1587,7 +1589,7 @@ void bnx2x_memset_stats(struct bnx2x *bp)
 	if (bp->port.pmf && bp->port.port_stx)
 		bnx2x_port_stats_base_init(bp);
 
-	/* mark the end of statistics initializiation */
+	/* mark the end of statistics initialization */
 	bp->stats_init = false;
 }
 

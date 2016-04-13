@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, Mellanox Technologies inc.  All rights reserved.
+ * Copyright (c) 2013-2015, Mellanox Technologies. All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -131,11 +131,19 @@ enum {
 
 enum {
 	MLX5_WQE_CTRL_CQ_UPDATE		= 2 << 2,
+	MLX5_WQE_CTRL_CQ_UPDATE_AND_EQE	= 3 << 2,
 	MLX5_WQE_CTRL_SOLICITED		= 1 << 1,
 };
 
 enum {
+	MLX5_SEND_WQE_DS	= 16,
 	MLX5_SEND_WQE_BB	= 64,
+};
+
+#define MLX5_SEND_WQEBB_NUM_DS	(MLX5_SEND_WQE_BB / MLX5_SEND_WQE_DS)
+
+enum {
+	MLX5_SEND_WQE_MAX_WQEBBS	= 16,
 };
 
 enum {
@@ -187,6 +195,26 @@ struct mlx5_wqe_ctrl_seg {
 	u8			rsvd[2];
 	u8			fm_ce_se;
 	__be32			imm;
+};
+
+#define MLX5_WQE_CTRL_DS_MASK 0x3f
+#define MLX5_WQE_DS_UNITS 16
+
+enum {
+	MLX5_ETH_WQE_L3_INNER_CSUM      = 1 << 4,
+	MLX5_ETH_WQE_L4_INNER_CSUM      = 1 << 5,
+	MLX5_ETH_WQE_L3_CSUM            = 1 << 6,
+	MLX5_ETH_WQE_L4_CSUM            = 1 << 7,
+};
+
+struct mlx5_wqe_eth_seg {
+	u8              rsvd0[4];
+	u8              cs_flags;
+	u8              rsvd1;
+	__be16          mss;
+	__be32          rsvd2;
+	__be16          inline_hdr_sz;
+	u8              inline_hdr_start[2];
 };
 
 struct mlx5_wqe_xrc_seg {
@@ -361,10 +389,9 @@ struct mlx5_stride_block_ctrl_seg {
 };
 
 struct mlx5_core_qp {
+	struct mlx5_core_rsc_common	common; /* must be first */
 	void (*event)		(struct mlx5_core_qp *, int);
 	int			qpn;
-	atomic_t		refcount;
-	struct completion	free;
 	struct mlx5_rsc_debug	*dbg;
 	int			pid;
 };

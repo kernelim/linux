@@ -32,6 +32,7 @@
 #include <linux/if_vlan.h>
 #include <linux/tcp.h>
 #include <linux/pci.h>
+#include <linux/highuid.h>
 
 /* get readq/writeq support for 32 bit kernels, use the low-first version */
 #include <asm-generic/io-64-nonatomic-lo-hi.h>

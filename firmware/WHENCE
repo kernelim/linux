@@ -943,6 +943,95 @@ SOLELY OR IN COMBINATION WITH THIS PROGRAM.
 Found in hex form in kernel source.
 --------------------------------------------------------------------------
 
+Driver: rtl8192ce - Realtek 802.11n WLAN driver for RTL8192CE
+
+File: rtlwifi/rtl8192cfw.bin
+File: rtlwifi/rtl8192cfwU.bin
+File: rtlwifi/rtl8192cfwU_B.bin
+Info: From Vendor's realtek/rtlwifi_linux_mac80211_0019.0320.2014V628 driver
+
+Licence: Redistributable. See LICENCE.rtlwifi_firmware.txt for details.
+
+--------------------------------------------------------------------------
+
+Driver: rtl8192cu - Realtek 802.11n WLAN driver for RTL8192CU
+
+File: rtlwifi/rtl8192cufw.bin
+File: rtlwifi/rtl8192cufw_A.bin
+File: rtlwifi/rtl8192cufw_B.bin
+File: rtlwifi/rtl8192cufw_TMSC.bin
+
+Licence: Redistributable. See LICENCE.rtlwifi_firmware.txt for details.
+
+--------------------------------------------------------------------------
+
+Driver: rtl8192se - Realtek 802.11n WLAN driver for RTL8192SE
+
+Info: updated from rtl_92ce_92se_92de_linux_mac80211_0004.0816.2011 driver version
+File: rtlwifi/rtl8192sefw.bin
+
+Licence: Redistributable. See LICENCE.rtlwifi_firmware.txt for details.
+
+--------------------------------------------------------------------------
+
+Driver: rtl8192de - Realtek 802.11n WLAN driver for RTL8192DE
+
+Info: Updated from Realtek version rtl_92ce_92se_92de_8723ae_linux_mac80211_0007.0809.2012
+File: rtlwifi/rtl8192defw.bin
+
+Licence: Redistributable. See LICENCE.rtlwifi_firmware.txt for details.
+
+--------------------------------------------------------------------------
+
+Driver: rtl8723be - Realtek 802.11n WLAN driver for RTL8723BE
+
+Info: From Vendor's realtek/rtlwifi_linux_mac80211_0019.0320.2014V628 driver
+File: rtlwifi/rtl8723befw.bin
+
+Licence: Redistributable. See LICENCE.rtlwifi_firmware.txt for details.
+
+--------------------------------------------------------------------------
+
+Driver: rtl8188ee - Realtek 802.11n WLAN driver for RTL8188EE
+
+Info: Taken from Realtek version rtl_92ce_92se_92de_8723ae_88ee_linux_mac80211_0010.0109.2013
+File: rtlwifi/rtl8188efw.bin
+
+Licence: Redistributable. See LICENCE.rtlwifi_firmware.txt for details.
+
+--------------------------------------------------------------------------
+
+Driver: rtl8188eu - Realtek 802.11n WLAN driver for RTL8188EU
+
+Info: Taken from Realtek version RTL8188EUS_linux_v4.1.4_6773.20130222
+File: rtlwifi/rtl8188eufw.bin
+
+Licence: Redistributable. See LICENCE.rtlwifi_firmware.txt for details.
+
+--------------------------------------------------------------------------
+
+Driver: rtl8821ae - Realtek 802.11n WLAN driver for RTL8821AE
+
+Info: From Vendor's realtek/rtlwifi_linux_mac80211_0019.0320.2014V628 driver
+File: rtlwifi/rtl8821aefw.bin
+File: rtlwifi/rtl8821aefw_wowlan.bin
+
+Licence: Redistributable. See LICENCE.rtlwifi_firmware.txt for details.
+
+--------------------------------------------------------------------------
+
+Driver: rtl8192ee - Realtek 802.11n WLAN driver for RTL8192EE
+
+Info: Initial version taken from Realtek version
+      rtl_92ce_92se_92de_8723ae_88ee_8723be_92ee_linux_mac80211_0017.1224.2013
+      Updated Jan. 14, 2015 with file added by Realtek to
+      http://github.com/lwfinger/rtlwifi_new.git.
+File: rtlwifi/rtl8192eefw.bin
+
+Licence: Redistributable. See LICENCE.rtlwifi_firmware.txt for details.
+
+--------------------------------------------------------------------------
+
 Driver: r8169 - RealTek 8169/8168/8101 ethernet driver.
 
 File: rtl_nic/rtl8168d-1.fw
@@ -1036,6 +1125,12 @@ Version: 23.15.10.0
 File: iwlwifi-7260-12.ucode
 Version: 25.17.12.0
 
+File: iwlwifi-7260-13.ucode
+Version: 25.30.13.0
+
+File: iwlwifi-7260-16.ucode
+Version 16.242414.0
+
 File: iwlwifi-3160-7.ucode
 Version: 22.1.7.0
 
@@ -1048,6 +1143,12 @@ Version: 23.15.10.0
 File: iwlwifi-3160-12.ucode
 Version: 25.17.12.0
 
+File: iwlwifi-3160-13.ucode
+Version: 25.30.13.0
+
+File: iwlwifi-3160-16.ucode
+Version 16.242414.0
+
 File: iwlwifi-7265-9.ucode
 Version: 25.228.9.0
 
@@ -1057,14 +1158,26 @@ Version: 23.15.10.0
 File: iwlwifi-7265-12.ucode
 Version: 25.17.12.0
 
+File: iwlwifi-7265-13.ucode
+Version: 25.30.13.0
+
+File: iwlwifi-7265-16.ucode
+Version 16.242414.0
+
 File: iwlwifi-7265D-10.ucode
 Version: 23.15.10.0
 
 File: iwlwifi-7265D-12.ucode
 Version: 25.17.12.0
 
+File: iwlwifi-7265D-13.ucode
+Version: 25.30.13.0
+
 File: iwlwifi-8000C-13.ucode
 Version: 25.30.13.0
+
+File: iwlwifi-8000C-16.ucode
+Version 16.242414.0
 
 License: Redistributable. See LICENCE.iwlwifi_firmware for details
 
@@ -1116,6 +1229,37 @@ Licence: Redistributable. See LICENCE.broadcom_bcm43xx for details.
 
 --------------------------------------------------------------------------
 
+Driver: brcmfmac - Broadcom 802.11n fullmac wireless LAN driver.
+
+File: brcm/bcm4329-fullmac-4.bin
+File: brcm/brcmfmac43236b.bin
+File: brcm/brcmfmac4329-sdio.bin
+File: brcm/brcmfmac4330-sdio.bin
+File: brcm/brcmfmac4334-sdio.bin
+File: brcm/brcmfmac43340-sdio.bin
+File: brcm/brcmfmac4335-sdio.bin
+File: brcm/brcmfmac43362-sdio.bin
+File: brcm/brcmfmac4339-sdio.bin
+File: brcm/brcmfmac43241b0-sdio.bin
+File: brcm/brcmfmac43241b4-sdio.bin
+File: brcm/brcmfmac43241b5-sdio.bin
+File: brcm/brcmfmac43242a.bin
+File: brcm/brcmfmac43143.bin
+File: brcm/brcmfmac43143-sdio.bin
+File: brcm/brcmfmac43455-sdio.bin
+File: brcm/brcmfmac4350-pcie.bin
+File: brcm/brcmfmac4354-sdio.bin
+File: brcm/brcmfmac4356-pcie.bin
+File: brcm/brcmfmac43569.bin
+File: brcm/brcmfmac43570-pcie.bin
+File: brcm/brcmfmac43602-pcie.bin
+File: brcm/brcmfmac43602-pcie.ap.bin
+File: brcm/brcmfmac4371-pcie.bin
+
+Licence: Redistributable. See LICENCE.broadcom_bcm43xx for details.
+
+--------------------------------------------------------------------------
+
 Driver: carl9170 -- Atheros AR9170 802.11 draft-n USB driver
 
 File: carl9170-1.fw
@@ -1136,5 +1280,74 @@ File: htc_7010.fw
 Version: 1.3
 
 Licence: Redistributable. See LICENCE.atheros_firmware for details
+
+--------------------------------------------------------------------------
+
+Driver: snd-hda-intel / snd_hda_codec_ca0132 - Creative CA0132 firmware
+
+File: ctefx.bin
+Version: alsa-firmware-1.1.0
+
+Licence:
+01 Copyright (c) 2012, Creative Technology Ltd
+02 All rights reserved.
+03
+04 Redistribution.  Redistribution and use in binary form, without
+05 modification, are permitted provided that the following conditions are
+06 met:
+07
+08 * Redistributions must reproduce the above copyright notice and the
+09   following disclaimer in the documentation and/or other materials
+10   provided with the distribution.
+11 * Neither the name of Creative Technology Ltd or its affiliates ("CTL")
+12   nor the names of its suppliers may be used to endorse or promote
+13   products derived from this software without specific prior written
+14   permission.
+15 * No reverse engineering, decompilation, or disassembly of this software
+16   (or any part thereof) is permitted.
+17
+18 Limited patent license. CTL grants a limited, world-wide,
+19 royalty-free, non-exclusive license under patents it now or hereafter
+20 owns or controls to make, have made, use, import, offer to sell and
+21 sell ("Utilize") this software, but strictly only to the extent that any
+22 such patent is necessary to Utilize the software alone, or in
+23 combination with an operating system licensed under an approved Open
+24 Source license as listed by the Open Source Initiative at
+25 http://opensource.org/licenses.  The patent license shall not be
+26 applicable, to any other combinations which include this software.
+27 No hardware per se is licensed hereunder.
+28
+29 DISCLAIMER.  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+30 CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING,
+31 BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
+32 FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+33 COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+34 INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+35 BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+36 OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+37 ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR
+38 TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+39 USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+40 DAMAGE.
+41
+42 NO OTHER RIGHTS GRANTED. USER HEREBY ACKNOWLEDGES AND AGREES THAT USE OF
+43 THIS SOFTWARE SHALL NOT CREATE OR GIVE GROUNDS FOR A LICENSE BY
+44 IMPLICATION, ESTOPPEL, OR OTHERWISE TO ANY INTELLECTUAL PROPERTY RIGHTS
+45 (PATENT, COPYRIGHT, TRADE SECRET, MASK WORK, OR OTHER PROPRIETARY RIGHT)
+46 EMBODIED IN ANY OTHER CTL HARDWARE OR SOFTWARE WHETHER SOLELY OR IN
+47 COMBINATION WITH THIS SOFTWARE.
+
+--------------------------------------------------------------------------
+
+Driver: i915 -- Intel Integrated Graphics driver
+
+File: i915/skl_dmc_ver1_23.bin
+File: i915/skl_dmc_ver1.bin
+Version: DMC API/ABI ver 1 - release 23 for Skylake
+
+File: i915/skl_guc_ver4.bin
+Version: Guc API/ABI ver 4 - release 3 for Skylake
+
+License: Redistributable. See LICENSE.i915 for details
 
 --------------------------------------------------------------------------

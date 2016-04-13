@@ -297,7 +297,7 @@ static struct psb_mmu_pt *psb_mmu_alloc_pt(struct psb_mmu_pd *pd)
 
 	spin_lock(lock);
 
-	v = kmap_atomic(pt->p, KM_USER0);
+	v = kmap_atomic(pt->p);
 	clf = (uint8_t *) v;
 	ptes = (uint32_t *) v;
 	for (i = 0; i < (PAGE_SIZE / sizeof(uint32_t)); ++i)
@@ -313,7 +313,7 @@ static struct psb_mmu_pt *psb_mmu_alloc_pt(struct psb_mmu_pd *pd)
 		mb();
 	}
 #endif
-	kunmap_atomic(v, KM_USER0);
+	kunmap_atomic(v);
 	spin_unlock(lock);
 
 	pt->count = 0;
@@ -348,18 +348,18 @@ struct psb_mmu_pt *psb_mmu_pt_alloc_map_lock(struct psb_mmu_pd *pd,
 			continue;
 		}
 
-		v = kmap_atomic(pd->p, KM_USER0);
+		v = kmap_atomic(pd->p);
 		pd->tables[index] = pt;
 		v[index] = (page_to_pfn(pt->p) << 12) | pd->pd_mask;
 		pt->index = index;
-		kunmap_atomic((void *) v, KM_USER0);
+		kunmap_atomic((void *) v);
 
 		if (pd->hw_context != -1) {
 			psb_mmu_clflush(pd->driver, (void *)&v[index]);
 			atomic_set(&pd->driver->needs_tlbflush, 1);
 		}
 	}
-	pt->v = kmap_atomic(pt->p, KM_USER0);
+	pt->v = kmap_atomic(pt->p);
 	return pt;
 }
 
@@ -376,7 +376,7 @@ static struct psb_mmu_pt *psb_mmu_pt_map_lock(struct psb_mmu_pd *pd,
 		spin_unlock(lock);
 		return NULL;
 	}
-	pt->v = kmap_atomic(pt->p, KM_USER0);
+	pt->v = kmap_atomic(pt->p);
 	return pt;
 }
 
@@ -385,9 +385,9 @@ static void psb_mmu_pt_unmap_unlock(struct psb_mmu_pt *pt)
 	struct psb_mmu_pd *pd = pt->pd;
 	uint32_t *v;
 
-	kunmap_atomic(pt->v, KM_USER0);
+	kunmap_atomic(pt->v);
 	if (pt->count == 0) {
-		v = kmap_atomic(pd->p, KM_USER0);
+		v = kmap_atomic(pd->p);
 		v[pt->index] = pd->invalid_pde;
 		pd->tables[pt->index] = NULL;
 
@@ -395,7 +395,7 @@ static void psb_mmu_pt_unmap_unlock(struct psb_mmu_pt *pt)
 			psb_mmu_clflush(pd->driver, (void *)&v[pt->index]);
 			atomic_set(&pd->driver->needs_tlbflush, 1);
 		}
-		kunmap_atomic(pt->v, KM_USER0);
+		kunmap_atomic(pt->v);
 		spin_unlock(&pd->driver->lock);
 		psb_mmu_free_pt(pt);
 		return;
@@ -479,7 +479,7 @@ struct psb_mmu_driver *psb_mmu_driver_init(struct drm_device *dev,
 	driver->has_clflush = 0;
 
 #if defined(CONFIG_X86)
-	if (boot_cpu_has(X86_FEATURE_CLFLSH)) {
+	if (boot_cpu_has(X86_FEATURE_CLFLUSH)) {
 		uint32_t tfms, misc, cap0, cap4, clflush_size;
 
 		/*
@@ -784,9 +784,9 @@ int psb_mmu_virtual_to_pfn(struct psb_mmu_pd *pd, uint32_t virtual,
 		uint32_t *v;
 
 		spin_lock(lock);
-		v = kmap_atomic(pd->p, KM_USER0);
+		v = kmap_atomic(pd->p);
 		tmp = v[psb_mmu_pd_index(virtual)];
-		kunmap_atomic(v, KM_USER0);
+		kunmap_atomic(v);
 		spin_unlock(lock);
 
 		if (tmp != pd->invalid_pde || !(tmp & PSB_PTE_VALID) ||

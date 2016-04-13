@@ -445,9 +445,15 @@ static void tty_set_termios_ldisc(struct tty_struct *tty, int num)
 
 static int tty_ldisc_open(struct tty_struct *tty, struct tty_ldisc *ld)
 {
+	int ret;
+
 	WARN_ON(test_and_set_bit(TTY_LDISC_OPEN, &tty->flags));
-	if (ld->ops->open)
-		return ld->ops->open(tty);
+	if (ld->ops->open) {
+		ret = ld->ops->open(tty);
+		if (ret)
+			clear_bit(TTY_LDISC_OPEN, &tty->flags);
+		return ret;
+	}
 	return 0;
 }
 
@@ -647,7 +653,8 @@ int tty_set_ldisc(struct tty_struct *tty, int ldisc)
 		goto enable;
 	}
 
-	if (test_bit(TTY_HUPPED, &tty->flags)) {
+	if (test_bit(TTY_HUPPING, &tty->flags) ||
+	    tty->ldisc != o_ldisc) {
 		/* We were raced by the hangup method. It will have stomped
 		   the ldisc data and closed the ldisc down */
 		clear_bit(TTY_LDISC_CHANGING, &tty->flags);

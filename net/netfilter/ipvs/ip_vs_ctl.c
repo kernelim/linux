@@ -108,9 +108,8 @@ int ip_vs_get_debug_level(void)
 
 #ifdef CONFIG_IP_VS_IPV6
 /* Taken from rt6_fill_node() in net/ipv6/route.c, is there a better way? */
-static int __ip_vs_addr_is_local_v6(const struct in6_addr *addr)
+static bool __ip_vs_addr_is_local_v6(const struct in6_addr *addr)
 {
-	struct rt6_info *rt;
 	struct flowi fl = {
 		.oif = 0,
 		.nl_u = {
@@ -118,12 +117,13 @@ static int __ip_vs_addr_is_local_v6(const struct in6_addr *addr)
 				.daddr = *addr,
 				.saddr = { .s6_addr32 = {0, 0, 0, 0} }, } },
 	};
+	struct rt6_info *rt = (struct rt6_info *)ip6_route_output(&init_net, NULL, &fl);
+	bool is_local;
 
-	rt = (struct rt6_info *)ip6_route_output(&init_net, NULL, &fl);
-	if (rt && rt->rt6i_dev && (rt->rt6i_dev->flags & IFF_LOOPBACK))
-			return 1;
+	is_local = !rt->u.dst.error && rt->rt6i_dev && (rt->rt6i_dev->flags & IFF_LOOPBACK);
 
-	return 0;
+	dst_release(&rt->u.dst);
+	return is_local;
 }
 #endif
 /*

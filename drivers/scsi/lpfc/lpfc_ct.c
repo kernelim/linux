@@ -55,6 +55,7 @@
 #define HBA_PORTSPEED_10GBIT		0x0004	/* 10 GBit/sec */
 #define HBA_PORTSPEED_8GBIT		0x0010	/* 8 GBit/sec */
 #define HBA_PORTSPEED_16GBIT		0x0020	/* 16 GBit/sec */
+#define HBA_PORTSPEED_32GBIT		0x0040  /* 32 GBit/sec */
 #define HBA_PORTSPEED_UNKNOWN		0x0800	/* Unknown */
 
 #define FOURBYTES	4
@@ -1605,6 +1606,8 @@ lpfc_fdmi_cmd(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp, int cmdcode)
 			ae->ad.bits.AttrLen = be16_to_cpu(FOURBYTES + 4);
 
 			ae->un.SupportSpeed = 0;
+			if (phba->lmt & LMT_32Gb)
+				ae->un.SupportSpeed |= HBA_PORTSPEED_32GBIT;
 			if (phba->lmt & LMT_16Gb)
 				ae->un.SupportSpeed |= HBA_PORTSPEED_16GBIT;
 			if (phba->lmt & LMT_10Gb)
@@ -1643,6 +1646,9 @@ lpfc_fdmi_cmd(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp, int cmdcode)
 				break;
 			case LPFC_LINK_SPEED_16GHZ:
 				ae->un.PortSpeed = HBA_PORTSPEED_16GBIT;
+				break;
+			case LPFC_LINK_SPEED_32GHZ:
+				ae->un.PortSpeed = HBA_PORTSPEED_32GBIT;
 				break;
 			default:
 				ae->un.PortSpeed = HBA_PORTSPEED_UNKNOWN;

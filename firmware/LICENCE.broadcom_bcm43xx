@@ -1,12 +1,12 @@
 SOFTWARE LICENSE AGREEMENT
 
-The accompanying software in binary code form (âSoftwareâ), is licensed to you,
+The accompanying software in binary code form (Software), is licensed to you,
 or, if you are accepting on behalf of an entity, the entity and its affiliates
-exercising rights hereunder (âLicenseeâ) subject to the terms of this software
-license agreement (âAgreementâ), unless Licensee and Broadcom Corporation
-(âBroadcomâ) execute a separate written software license agreement governing
+exercising rights hereunder (Licensee) subject to the terms of this software
+license agreement (Agreement), unless Licensee and Broadcom Corporation
+(Broadcom) execute a separate written software license agreement governing
 use of the Software. ANY USE, REPRODUCTION, OR DISTRIBUTION OF THE SOFTWARE
-CONSTITUTES LICENSEEâS ACCEPTANCE OF THIS AGREEMENT.
+CONSTITUTES LICENSEES ACCEPTANCE OF THIS AGREEMENT.
 
 1.	License. Subject to the terms and conditions of this Agreement,
 Broadcom hereby grants to Licensee a limited, non-exclusive, non-transferable,
@@ -26,7 +26,7 @@ except as provided in this Agreement; (ii) attempt to modify in any way,
 reverse engineer, decompile or disassemble any portion of the Software; or
 (iii) use the Software or other material in violation of any applicable law or
 regulation, including but not limited to any regulatory agency. This Agreement
-shall automatically terminate upon Licenseeâs failure to comply with any of the
+shall automatically terminate upon Licensees failure to comply with any of the
 terms of this Agreement. In such event, Licensee will destroy all copies of the
 Software and its component parts.
 
@@ -37,7 +37,7 @@ covenants that it will not assert any claim that the Software created by or for
 Broadcom infringe any intellectual property right owned or controlled by
 Licensee.
 
-4.     	Disclaimer. THE SOFTWARE IS OFFERED âAS IS,â AND BROADCOM PROVIDES AND
+4.     	Disclaimer. THE SOFTWARE IS OFFERED AS IS, AND BROADCOM PROVIDES AND
 GRANTS AND LICENSEE RECEIVES NO SUPPORT AND NO WARRANTIES OF ANY KIND, EXPRESS
 OR IMPLIED, BY STATUTE, COMMUNICATION OR CONDUCT WITH LICENSEE, OR OTHERWISE.
 BROADCOM SPECIFICALLY DISCLAIMS ANY IMPLIED WARRANTIES OF MERCHANTABILITY,

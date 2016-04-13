@@ -231,6 +231,7 @@ config SND_HDA_CODEC_CA0132
 config SND_HDA_CODEC_CA0132_DSP
 	bool "Support new DSP code for CA0132 codec"
 	depends on SND_HDA_CODEC_CA0132
+	select SND_HDA_GENERIC
 	select SND_HDA_DSP_LOADER
 	select FW_LOADER
 	help

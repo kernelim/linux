@@ -1326,6 +1326,8 @@ out:
 			xfrm_state_check_expire(x1);
 
 		err = 0;
+		x->km.state = XFRM_STATE_DEAD;
+		__xfrm_state_put(x);
 	}
 	spin_unlock_bh(&x1->lock);
 

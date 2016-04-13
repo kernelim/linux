@@ -39,6 +39,7 @@
 #include <linux/rculist.h>
 #include <linux/mm.h>
 #include <linux/random.h>
+#include <linux/vmalloc.h>
 
 #include "qib.h"
 #include "qib_common.h"
@@ -1341,6 +1342,7 @@ static int qib_verbs_send_pio(struct qib_qp *qp, struct qib_ib_header *ibhdr,
 done:
 	if (dd->flags & QIB_USE_SPCL_TRIG) {
 		u32 spcl_off = (pbufn >= dd->piobcnt2k) ? 2047 : 1023;
+
 		qib_flush_wc();
 		__raw_writel(0xaebecede, piobuf_orig + spcl_off);
 	}
@@ -1743,7 +1745,7 @@ static struct ib_pd *qib_alloc_pd(struct ib_device *ibdev,
 	 * we allow allocations of more than we report for this value.
 	 */
 
-	pd = kmalloc(sizeof *pd, GFP_KERNEL);
+	pd = kmalloc(sizeof(*pd), GFP_KERNEL);
 	if (!pd) {
 		ret = ERR_PTR(-ENOMEM);
 		goto bail;
@@ -1828,7 +1830,7 @@ static struct ib_ah *qib_create_ah(struct ib_pd *pd,
 		goto bail;
 	}
 
-	ah = kmalloc(sizeof *ah, GFP_ATOMIC);
+	ah = kmalloc(sizeof(*ah), GFP_ATOMIC);
 	if (!ah) {
 		ret = ERR_PTR(-ENOMEM);
 		goto bail;
@@ -1861,7 +1863,7 @@ struct ib_ah *qib_create_qp0_ah(struct qib_ibport *ibp, u16 dlid)
 	struct ib_ah *ah = ERR_PTR(-EINVAL);
 	struct qib_qp *qp0;
 
-	memset(&attr, 0, sizeof attr);
+	memset(&attr, 0, sizeof(attr));
 	attr.dlid = dlid;
 	attr.port_num = ppd_from_ibp(ibp)->port;
 	rcu_read_lock();
@@ -1976,7 +1978,7 @@ static struct ib_ucontext *qib_alloc_ucontext(struct ib_device *ibdev,
 	struct qib_ucontext *context;
 	struct ib_ucontext *ret;
 
-	context = kmalloc(sizeof *context, GFP_KERNEL);
+	context = kmalloc(sizeof(*context), GFP_KERNEL);
 	if (!context) {
 		ret = ERR_PTR(-ENOMEM);
 		goto bail;
@@ -2053,7 +2055,9 @@ int qib_register_ib_device(struct qib_devdata *dd)
 
 	dev->qp_table_size = ib_qib_qp_table_size;
 	get_random_bytes(&dev->qp_rnd, sizeof(dev->qp_rnd));
-	dev->qp_table = kmalloc(dev->qp_table_size * sizeof *dev->qp_table,
+	dev->qp_table = kmalloc_array(
+				dev->qp_table_size,
+				sizeof(*dev->qp_table),
 				GFP_KERNEL);
 	if (!dev->qp_table) {
 		ret = -ENOMEM;
@@ -2085,10 +2089,16 @@ int qib_register_ib_device(struct qib_devdata *dd)
 	 * the LKEY).  The remaining bits act as a generation number or tag.
 	 */
 	spin_lock_init(&dev->lk_table.lock);
+	/* insure generation is at least 4 bits see keys.c */
+	if (ib_qib_lkey_table_size > MAX_LKEY_TABLE_BITS) {
+		qib_dev_warn(dd, "lkey bits %u too large, reduced to %u\n",
+			ib_qib_lkey_table_size, MAX_LKEY_TABLE_BITS);
+		ib_qib_lkey_table_size = MAX_LKEY_TABLE_BITS;
+	}
 	dev->lk_table.max = 1 << ib_qib_lkey_table_size;
 	lk_tab_size = dev->lk_table.max * sizeof(*dev->lk_table.table);
 	dev->lk_table.table = (struct qib_mregion __rcu **)
-		__get_free_pages(GFP_KERNEL, get_order(lk_tab_size));
+		vmalloc(lk_tab_size);
 	if (dev->lk_table.table == NULL) {
 		ret = -ENOMEM;
 		goto err_lk;
@@ -2121,7 +2131,7 @@ int qib_register_ib_device(struct qib_devdata *dd)
 	for (i = 0; i < ppd->sdma_descq_cnt; i++) {
 		struct qib_verbs_txreq *tx;
 
-		tx = kzalloc(sizeof *tx, GFP_KERNEL);
+		tx = kzalloc(sizeof(*tx), GFP_KERNEL);
 		if (!tx) {
 			ret = -ENOMEM;
 			goto err_tx;
@@ -2261,7 +2271,7 @@ err_tx:
 					sizeof(struct qib_pio_header),
 				  dev->pio_hdrs, dev->pio_hdrs_phys);
 err_hdrs:
-	free_pages((unsigned long) dev->lk_table.table, get_order(lk_tab_size));
+	vfree(dev->lk_table.table);
 err_lk:
 	kfree(dev->qp_table);
 err_qpt:
@@ -2315,8 +2325,7 @@ void qib_unregister_ib_device(struct qib_devdata *dd)
 					sizeof(struct qib_pio_header),
 				  dev->pio_hdrs, dev->pio_hdrs_phys);
 	lk_tab_size = dev->lk_table.max * sizeof(*dev->lk_table.table);
-	free_pages((unsigned long) dev->lk_table.table,
-		   get_order(lk_tab_size));
+	vfree(dev->lk_table.table);
 	kfree(dev->qp_table);
 }
 

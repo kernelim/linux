@@ -683,30 +683,55 @@
 
 #define CDRESUMECTL			0xFE52
 #define WAKE_SEL_CTL			0xFE54
+#define PCLK_CTL			0xFE55
+#define   PCLK_MODE_SEL			0x20
 #define PME_FORCE_CTL			0xFE56
+
 #define ASPM_FORCE_CTL			0xFE57
+#define   FORCE_ASPM_CTL0		0x10
+#define   FORCE_ASPM_VAL_MASK		0x03
+#define   FORCE_ASPM_L1_EN		0x02
+#define   FORCE_ASPM_L0_EN		0x01
+#define   FORCE_ASPM_NO_ASPM		0x00
 #define PM_CLK_FORCE_CTL		0xFE58
 #define FUNC_FORCE_CTL			0xFE59
+#define   FUNC_FORCE_UPME_XMT_DBG	0x02
 #define PERST_GLITCH_WIDTH		0xFE5C
 #define CHANGE_LINK_STATE		0xFE5B
 #define RESET_LOAD_REG			0xFE5E
 #define EFUSE_CONTENT			0xFE5F
 #define HOST_SLEEP_STATE		0xFE60
 #define SDIO_CFG			0xFE70
-
+#define PM_EVENT_DEBUG			0xFE71
+#define   PME_DEBUG_0			0x08
 #define NFTS_TX_CTRL			0xFE72
 
 #define PWR_GATE_CTRL			0xFE75
 #define PWD_SUSPEND_EN			0xFE76
 #define LDO_PWR_SEL			0xFE78
 
+#define L1SUB_CONFIG1			0xFE8D
+#define L1SUB_CONFIG2			0xFE8E
+#define   L1SUB_AUTO_CFG		0x02
+#define L1SUB_CONFIG3			0xFE8F
+
 #define DUMMY_REG_RESET_0		0xFE90
 
 #define AUTOLOAD_CFG_BASE		0xFF00
 
 #define PM_CTRL1			0xFF44
+#define   CD_RESUME_EN_MASK		0xF0
+
 #define PM_CTRL2			0xFF45
 #define PM_CTRL3			0xFF46
+#define   SDIO_SEND_PME_EN		0x80
+#define   FORCE_RC_MODE_ON		0x40
+#define   FORCE_RX50_LINK_ON		0x20
+#define   D3_DELINK_MODE_EN		0x10
+#define   USE_PESRTB_CTL_DELINK		0x08
+#define   DELAY_PIN_WAKE		0x04
+#define   RESET_PIN_WAKE		0x02
+#define   PM_WAKE_EN			0x01
 #define PM_CTRL4			0xFF47
 
 /* Memory mapping */
@@ -717,18 +742,126 @@
 #define IMAGE_FLAG_ADDR0		0xCE80
 #define IMAGE_FLAG_ADDR1		0xCE81
 
+#define RREF_CFG			0xFF6C
+#define   RREF_VBGSEL_MASK		0x38
+#define   RREF_VBGSEL_1V25		0x28
+
+#define OOBS_CONFIG			0xFF6E
+#define   OOBS_AUTOK_DIS		0x80
+#define   OOBS_VAL_MASK			0x1F
+
+#define LDO_DV18_CFG			0xFF70
+#define   LDO_DV18_SR_MASK		0xC0
+#define   LDO_DV18_SR_DF		0x40
+
+#define LDO_CONFIG2			0xFF71
+#define   LDO_D3318_MASK		0x07
+#define   LDO_D3318_33V			0x07
+#define   LDO_D3318_18V			0x02
+
+#define LDO_VCC_CFG0			0xFF72
+#define   LDO_VCC_LMTVTH_MASK		0x30
+#define   LDO_VCC_LMTVTH_2A		0x10
+
+#define LDO_VCC_CFG1			0xFF73
+#define   LDO_VCC_REF_TUNE_MASK		0x30
+#define   LDO_VCC_REF_1V2		0x20
+#define   LDO_VCC_TUNE_MASK		0x07
+#define   LDO_VCC_1V8			0x04
+#define   LDO_VCC_3V3			0x07
+#define   LDO_VCC_LMT_EN		0x08
+
+#define LDO_VIO_CFG			0xFF75
+#define   LDO_VIO_SR_MASK		0xC0
+#define   LDO_VIO_SR_DF			0x40
+#define   LDO_VIO_REF_TUNE_MASK		0x30
+#define   LDO_VIO_REF_1V2		0x20
+#define   LDO_VIO_TUNE_MASK		0x07
+#define   LDO_VIO_1V7			0x03
+#define   LDO_VIO_1V8			0x04
+#define   LDO_VIO_3V3			0x07
+
+#define LDO_DV12S_CFG			0xFF76
+#define   LDO_REF12_TUNE_MASK		0x18
+#define   LDO_REF12_TUNE_DF		0x10
+#define   LDO_D12_TUNE_MASK		0x07
+#define   LDO_D12_TUNE_DF		0x04
+
+#define LDO_AV12S_CFG			0xFF77
+#define   LDO_AV12S_TUNE_MASK		0x07
+#define   LDO_AV12S_TUNE_DF		0x04
+
+#define SD40_LDO_CTL1			0xFE7D
+#define   SD40_VIO_TUNE_MASK		0x70
+#define   SD40_VIO_TUNE_1V7		0x30
+#define   SD_VIO_LDO_1V8		0x40
+#define   SD_VIO_LDO_3V3		0x70
+
 /* Phy register */
 #define PHY_PCR				0x00
+#define   PHY_PCR_FORCE_CODE		0xB000
+#define   PHY_PCR_OOBS_CALI_50		0x0800
+#define   PHY_PCR_OOBS_VCM_08		0x0200
+#define   PHY_PCR_OOBS_SEN_90		0x0040
+#define   PHY_PCR_RSSI_EN		0x0002
+#define   PHY_PCR_RX10K			0x0001
+
 #define PHY_RCR0			0x01
 #define PHY_RCR1			0x02
+#define   PHY_RCR1_ADP_TIME_4		0x0400
+#define   PHY_RCR1_VCO_COARSE		0x001F
+#define   PHY_RCR1_INIT_27S		0x0A1F
+#define PHY_SSCCR2			0x02
+#define   PHY_SSCCR2_PLL_NCODE		0x0A00
+#define   PHY_SSCCR2_TIME0		0x001C
+#define   PHY_SSCCR2_TIME2_WIDTH	0x0003
+
 #define PHY_RCR2			0x03
+#define   PHY_RCR2_EMPHASE_EN		0x8000
+#define   PHY_RCR2_NADJR		0x4000
+#define   PHY_RCR2_CDR_CP_10		0x0400
+#define   PHY_RCR2_CDR_SR_2		0x0100
+#define   PHY_RCR2_FREQSEL_12		0x0040
+#define   PHY_RCR2_CPADJEN		0x0020
+#define   PHY_RCR2_CDR_SC_12P		0x0010
+#define   PHY_RCR2_CDR_SC_8		0x0008
+#define   PHY_RCR2_CALIB_LATE		0x0002
+#define   PHY_RCR2_INIT_27S		0xC152
+#define PHY_SSCCR3			0x03
+#define   PHY_SSCCR3_STEP_IN		0x2740
+#define   PHY_SSCCR3_CHECK_DELAY	0x0008
+
 #define PHY_RTCR			0x04
 #define PHY_RDR				0x05
+#define   PHY_RDR_RXDSEL_1_9		0x4000
+#define   PHY_SSC_AUTO_PWD		0x0600
 #define PHY_TCR0			0x06
 #define PHY_TCR1			0x07
 #define PHY_TUNE			0x08
+#define   PHY_TUNE_TUNEREF_1_0		0x4000
+#define   PHY_TUNE_VBGSEL_1252		0x0C00
+#define   PHY_TUNE_SDBUS_33		0x0200
+#define   PHY_TUNE_TUNED18		0x01C0
+#define   PHY_TUNE_TUNED12		0X0020
+#define   PHY_TUNE_TUNEA12		0x0004
+#define   PHY_TUNE_VOLTAGE_MASK		0xFC3F
+#define   PHY_TUNE_VOLTAGE_3V3		0x03C0
+#define   PHY_TUNE_D18_1V8		0x0100
+#define   PHY_TUNE_D18_1V7		0x0080
+#define PHY_ANA08			0x08
+#define   PHY_ANA08_RX_EQ_DCGAIN	0x5000
+#define   PHY_ANA08_SEL_RX_EN		0x0400
+#define   PHY_ANA08_RX_EQ_VAL		0x03C0
+#define   PHY_ANA08_SCP			0x0020
+#define   PHY_ANA08_SEL_IPI		0x0004
+
 #define PHY_IMR				0x09
 #define PHY_BPCR			0x0A
+#define   PHY_BPCR_IBRXSEL		0x0400
+#define   PHY_BPCR_IBTXSEL		0x0100
+#define   PHY_BPCR_IB_FILTER		0x0080
+#define   PHY_BPCR_CMIRROR_EN		0x0040
+
 #define PHY_BIST			0x0B
 #define PHY_RAW_L			0x0C
 #define PHY_RAW_H			0x0D
@@ -736,6 +869,7 @@
 #define PHY_HOST_CLK_CTRL		0x0F
 #define PHY_DMR				0x10
 #define PHY_BACR			0x11
+#define   PHY_BACR_BASIC_MASK		0xFFF3
 #define PHY_IER				0x12
 #define PHY_BCSR			0x13
 #define PHY_BPR				0x14
@@ -743,71 +877,70 @@
 #define PHY_BPNR			0x16
 #define PHY_BRNR2			0x17
 #define PHY_BENR			0x18
-#define PHY_REG_REV			0x19
+#define PHY_REV				0x19
+#define   PHY_REV_RESV			0xE000
+#define   PHY_REV_RXIDLE_LATCHED	0x1000
+#define   PHY_REV_P1_EN			0x0800
+#define   PHY_REV_RXIDLE_EN		0x0400
+#define   PHY_REV_CLKREQ_TX_EN		0x0200
+#define   PHY_REV_CLKREQ_RX_EN		0x0100
+#define   PHY_REV_CLKREQ_DT_1_0		0x0040
+#define   PHY_REV_STOP_CLKRD		0x0020
+#define   PHY_REV_RX_PWST		0x0008
+#define   PHY_REV_STOP_CLKWR		0x0004
+
 #define PHY_FLD0			0x1A
+#define PHY_ANA1A			0x1A
+#define   PHY_ANA1A_TXR_LOOPBACK	0x2000
+#define   PHY_ANA1A_RXT_BIST		0x0500
+#define   PHY_ANA1A_TXR_BIST		0x0040
+#define   PHY_ANA1A_REV			0x0006
+#define   PHY_FLD0_INIT_27S		0x2546
 #define PHY_FLD1			0x1B
 #define PHY_FLD2			0x1C
 #define PHY_FLD3			0x1D
+#define   PHY_FLD3_TIMER_4		0x0800
+#define   PHY_FLD3_TIMER_6		0x0020
+#define   PHY_FLD3_RXDELINK		0x0004
+#define   PHY_FLD3_INIT_27S		0x0004
+#define PHY_ANA1D			0x1D
+#define   PHY_ANA1D_DEBUG_ADDR		0x0004
+
 #define PHY_FLD4			0x1E
+#define   PHY_FLD4_FLDEN_SEL		0x4000
+#define   PHY_FLD4_REQ_REF		0x2000
+#define   PHY_FLD4_RXAMP_OFF		0x1000
+#define   PHY_FLD4_REQ_ADDA		0x0800
+#define   PHY_FLD4_BER_COUNT		0x00E0
+#define   PHY_FLD4_BER_TIMER		0x000A
+#define   PHY_FLD4_BER_CHK_EN		0x0001
+#define   PHY_FLD4_INIT_27S		0x5C7F
+#define PHY_DIG1E			0x1E
+#define   PHY_DIG1E_REV			0x4000
+#define   PHY_DIG1E_D0_X_D1		0x1000
+#define   PHY_DIG1E_RX_ON_HOST		0x0800
+#define   PHY_DIG1E_RCLK_REF_HOST	0x0400
+#define   PHY_DIG1E_RCLK_TX_EN_KEEP	0x0040
+#define   PHY_DIG1E_RCLK_TX_TERM_KEEP	0x0020
+#define   PHY_DIG1E_RCLK_RX_EIDLE_ON	0x0010
+#define   PHY_DIG1E_TX_TERM_KEEP	0x0008
+#define   PHY_DIG1E_RX_TERM_KEEP	0x0004
+#define   PHY_DIG1E_TX_EN_KEEP		0x0002
+#define   PHY_DIG1E_RX_EN_KEEP		0x0001
 #define PHY_DUM_REG			0x1F
 
 #define LCTLR				0x80
+#define   LCTLR_EXT_SYNC		0x80
+#define   LCTLR_COMMON_CLOCK_CFG	0x40
+#define   LCTLR_RETRAIN_LINK		0x20
+#define   LCTLR_LINK_DISABLE		0x10
+#define   LCTLR_RCB			0x08
+#define   LCTLR_RESERVED		0x04
+#define   LCTLR_ASPM_CTL_MASK		0x03
+
 #define PCR_SETTING_REG1		0x724
 #define PCR_SETTING_REG2		0x814
 #define PCR_SETTING_REG3		0x747
-
-/* Phy bits */
-#define PHY_PCR_FORCE_CODE			0xB000
-#define PHY_PCR_OOBS_CALI_50			0x0800
-#define PHY_PCR_OOBS_VCM_08			0x0200
-#define PHY_PCR_OOBS_SEN_90			0x0040
-#define PHY_PCR_RSSI_EN				0x0002
-
-#define PHY_RCR1_ADP_TIME			0x0100
-#define PHY_RCR1_VCO_COARSE			0x001F
-
-#define PHY_RCR2_EMPHASE_EN			0x8000
-#define PHY_RCR2_NADJR				0x4000
-#define PHY_RCR2_CDR_CP_10			0x0400
-#define PHY_RCR2_CDR_SR_2			0x0100
-#define PHY_RCR2_FREQSEL_12			0x0040
-#define PHY_RCR2_CPADJEN			0x0020
-#define PHY_RCR2_CDR_SC_8			0x0008
-#define PHY_RCR2_CALIB_LATE			0x0002
-
-#define PHY_RDR_RXDSEL_1_9			0x4000
-
-#define PHY_TUNE_TUNEREF_1_0			0x4000
-#define PHY_TUNE_VBGSEL_1252			0x0C00
-#define PHY_TUNE_SDBUS_33			0x0200
-#define PHY_TUNE_TUNED18			0x01C0
-#define PHY_TUNE_TUNED12			0X0020
-
-#define PHY_BPCR_IBRXSEL			0x0400
-#define PHY_BPCR_IBTXSEL			0x0100
-#define PHY_BPCR_IB_FILTER			0x0080
-#define PHY_BPCR_CMIRROR_EN			0x0040
-
-#define PHY_REG_REV_RESV			0xE000
-#define PHY_REG_REV_RXIDLE_LATCHED		0x1000
-#define PHY_REG_REV_P1_EN			0x0800
-#define PHY_REG_REV_RXIDLE_EN			0x0400
-#define PHY_REG_REV_CLKREQ_DLY_TIMER_1_0	0x0040
-#define PHY_REG_REV_STOP_CLKRD			0x0020
-#define PHY_REG_REV_RX_PWST			0x0008
-#define PHY_REG_REV_STOP_CLKWR			0x0004
-
-#define PHY_FLD3_TIMER_4			0x7800
-#define PHY_FLD3_TIMER_6			0x00E0
-#define PHY_FLD3_RXDELINK			0x0004
-
-#define PHY_FLD4_FLDEN_SEL			0x4000
-#define PHY_FLD4_REQ_REF			0x2000
-#define PHY_FLD4_RXAMP_OFF			0x1000
-#define PHY_FLD4_REQ_ADDA			0x0800
-#define PHY_FLD4_BER_COUNT			0x00E0
-#define PHY_FLD4_BER_TIMER			0x000A
-#define PHY_FLD4_BER_CHK_EN			0x0001
 
 #define rtsx_pci_init_cmd(pcr)		((pcr)->ci = 0)
 
@@ -818,6 +951,8 @@ struct pcr_handle {
 };
 
 struct pcr_ops {
+	int (*write_phy)(struct rtsx_pcr *pcr, u8 addr, u16 val);
+	int (*read_phy)(struct rtsx_pcr *pcr, u8 addr, u16 *val);
 	int		(*extra_init_hw)(struct rtsx_pcr *pcr);
 	int		(*optimize_phy)(struct rtsx_pcr *pcr);
 	int		(*turn_on_led)(struct rtsx_pcr *pcr);
@@ -911,6 +1046,8 @@ struct rtsx_pcr {
 	const struct pcr_ops		*ops;
 	enum PDEV_STAT			state;
 
+	u16				reg_pm_ctrl3;
+
 	int				num_slots;
 	struct rtsx_slot		*slots;
 };
@@ -918,6 +1055,10 @@ struct rtsx_pcr {
 #define CHK_PCI_PID(pcr, pid)		((pcr)->pci->device == (pid))
 #define PCI_VID(pcr)			((pcr)->pci->vendor)
 #define PCI_PID(pcr)			((pcr)->pci->device)
+#define is_version(pcr, pid, ver)				\
+	(CHK_PCI_PID(pcr, pid) && (pcr)->ic_version == (ver))
+#define pcr_dbg(pcr, fmt, arg...)				\
+	dev_dbg(&(pcr)->pci->dev, fmt, ##arg)
 
 #define SDR104_PHASE(val)		((val) & 0xFF)
 #define SDR50_PHASE(val)		(((val) >> 8) & 0xFF)
@@ -959,6 +1100,31 @@ void rtsx_pci_complete_unfinished_transfer(struct rtsx_pcr *pcr);
 static inline u8 *rtsx_pci_get_cmd_data(struct rtsx_pcr *pcr)
 {
 	return (u8 *)(pcr->host_cmds_ptr);
+}
+
+static inline int rtsx_pci_update_cfg_byte(struct rtsx_pcr *pcr, int addr,
+		u8 mask, u8 append)
+{
+	int err;
+	u8 val;
+
+	err = pci_read_config_byte(pcr->pci, addr, &val);
+	if (err < 0)
+		return err;
+	return pci_write_config_byte(pcr->pci, addr, (val & mask) | append);
+}
+
+static inline int rtsx_pci_update_phy(struct rtsx_pcr *pcr, u8 addr,
+	u16 mask, u16 append)
+{
+	int err;
+	u16 val;
+
+	err = rtsx_pci_read_phy_register(pcr, addr, &val);
+	if (err < 0)
+		return err;
+
+	return rtsx_pci_write_phy_register(pcr, addr, (val & mask) | append);
 }
 
 #endif

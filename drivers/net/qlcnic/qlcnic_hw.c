@@ -5,11 +5,11 @@
  * See LICENSE.qlcnic for copyright and licensing details.
  */
 #include <linux/netdevice.h>
-#include "qlcnic.h"
-#include "qlcnic_hdr.h"
-
 #include <net/ip.h>
 #include <linux/bitops.h>
+
+#include "qlcnic.h"
+#include "qlcnic_hdr.h"
 
 #define MASK(n) ((1ULL<<(n))-1)
 #define OCM_WIN_P3P(addr) (addr & 0xffc0000)
@@ -781,7 +781,7 @@ int qlcnic_82xx_config_intr_coalesce(struct qlcnic_adapter *adapter,
 
 	if (rv)
 		netdev_err(adapter->netdev,
-			   "Failed to set Rx coalescing parametrs\n");
+			   "Failed to set Rx coalescing parameters\n");
 
 	return rv;
 }

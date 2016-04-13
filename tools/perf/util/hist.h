@@ -4,11 +4,10 @@
 #include <linux/types.h>
 #include <pthread.h>
 #include "callchain.h"
+#include "evsel.h"
 #include "header.h"
 #include "color.h"
 #include "ui/progress.h"
-
-extern struct callchain_param callchain_param;
 
 struct hist_entry;
 struct addr_location;
@@ -21,32 +20,6 @@ enum hist_filter {
 	HIST_FILTER__SYMBOL,
 	HIST_FILTER__GUEST,
 	HIST_FILTER__HOST,
-};
-
-/*
- * The kernel collects the number of events it couldn't send in a stretch and
- * when possible sends this number in a PERF_RECORD_LOST event. The number of
- * such "chunks" of lost events is stored in .nr_events[PERF_EVENT_LOST] while
- * total_lost tells exactly how many events the kernel in fact lost, i.e. it is
- * the sum of all struct lost_event.lost fields reported.
- *
- * The total_period is needed because by default auto-freq is used, so
- * multipling nr_events[PERF_EVENT_SAMPLE] by a frequency isn't possible to get
- * the total number of low level events, it is necessary to to sum all struct
- * sample_event.period and stash the result in total_period.
- */
-struct events_stats {
-	u64 total_period;
-	u64 total_non_filtered_period;
-	u64 total_lost;
-	u64 total_invalid_chains;
-	u32 nr_events[PERF_RECORD_HEADER_MAX];
-	u32 nr_non_filtered_samples;
-	u32 nr_lost_warned;
-	u32 nr_unknown_events;
-	u32 nr_invalid_chains;
-	u32 nr_unknown_id;
-	u32 nr_unprocessable_samples;
 };
 
 enum hist_column {
@@ -74,6 +47,7 @@ enum hist_column {
 	HISTC_MEM_SNOOP,
 	HISTC_MEM_DCACHELINE,
 	HISTC_TRANSACTION,
+	HISTC_CYCLES,
 	HISTC_NR_COLS, /* Last entry */
 };
 
@@ -87,7 +61,7 @@ struct hists {
 	struct rb_root		entries_collapsed;
 	u64			nr_entries;
 	u64			nr_non_filtered_entries;
-	const struct thread	*thread_filter;
+	struct thread		*thread_filter;
 	const struct dso	*dso_filter;
 	const char		*uid_filter_str;
 	const char		*symbol_filter_str;
@@ -146,12 +120,13 @@ int64_t hist_entry__collapse(struct hist_entry *left, struct hist_entry *right);
 int hist_entry__transaction_len(void);
 int hist_entry__sort_snprintf(struct hist_entry *he, char *bf, size_t size,
 			      struct hists *hists);
-void hist_entry__free(struct hist_entry *);
+void hist_entry__delete(struct hist_entry *he);
 
-void hists__output_resort(struct hists *hists);
+void hists__output_resort(struct hists *hists, struct ui_progress *prog);
 void hists__collapse_resort(struct hists *hists, struct ui_progress *prog);
 
 void hists__decay_entries(struct hists *hists, bool zap_user, bool zap_kernel);
+void hists__delete_entries(struct hists *hists);
 void hists__output_recalc_col_len(struct hists *hists, int max_rows);
 
 u64 hists__total_period(struct hists *hists);
@@ -164,6 +139,7 @@ size_t events_stats__fprintf(struct events_stats *stats, FILE *fp);
 
 size_t hists__fprintf(struct hists *hists, bool show_header, int max_rows,
 		      int max_cols, float min_pcnt, FILE *fp);
+size_t perf_evlist__fprintf_nr_events(struct perf_evlist *evlist, FILE *fp);
 
 void hists__filter_by_dso(struct hists *hists);
 void hists__filter_by_thread(struct hists *hists);
@@ -184,6 +160,25 @@ void hists__calc_col_len(struct hists *hists, struct hist_entry *he);
 void hists__match(struct hists *leader, struct hists *other);
 int hists__link(struct hists *leader, struct hists *other);
 
+struct hists_evsel {
+	struct perf_evsel evsel;
+	struct hists	  hists;
+};
+
+static inline struct perf_evsel *hists_to_evsel(struct hists *hists)
+{
+	struct hists_evsel *hevsel = container_of(hists, struct hists_evsel, hists);
+	return &hevsel->evsel;
+}
+
+static inline struct hists *evsel__hists(struct perf_evsel *evsel)
+{
+	struct hists_evsel *hevsel = (struct hists_evsel *)evsel;
+	return &hevsel->hists;
+}
+
+int hists__init(void);
+
 struct perf_hpp {
 	char *buf;
 	size_t size;
@@ -192,6 +187,7 @@ struct perf_hpp {
 };
 
 struct perf_hpp_fmt {
+	const char *name;
 	int (*header)(struct perf_hpp_fmt *fmt, struct perf_hpp *hpp,
 		      struct perf_evsel *evsel);
 	int (*width)(struct perf_hpp_fmt *fmt, struct perf_hpp *hpp,
@@ -200,13 +196,18 @@ struct perf_hpp_fmt {
 		     struct hist_entry *he);
 	int (*entry)(struct perf_hpp_fmt *fmt, struct perf_hpp *hpp,
 		     struct hist_entry *he);
-	int64_t (*cmp)(struct hist_entry *a, struct hist_entry *b);
-	int64_t (*collapse)(struct hist_entry *a, struct hist_entry *b);
-	int64_t (*sort)(struct hist_entry *a, struct hist_entry *b);
+	int64_t (*cmp)(struct perf_hpp_fmt *fmt,
+		       struct hist_entry *a, struct hist_entry *b);
+	int64_t (*collapse)(struct perf_hpp_fmt *fmt,
+			    struct hist_entry *a, struct hist_entry *b);
+	int64_t (*sort)(struct perf_hpp_fmt *fmt,
+			struct hist_entry *a, struct hist_entry *b);
 
 	struct list_head list;
 	struct list_head sort_list;
 	bool elide;
+	int len;
+	int user_len;
 };
 
 extern struct list_head perf_hpp__list;
@@ -261,17 +262,19 @@ static inline bool perf_hpp__should_skip(struct perf_hpp_fmt *format)
 }
 
 void perf_hpp__reset_width(struct perf_hpp_fmt *fmt, struct hists *hists);
+void perf_hpp__reset_sort_width(struct perf_hpp_fmt *fmt, struct hists *hists);
+void perf_hpp__set_user_width(const char *width_list_str);
 
 typedef u64 (*hpp_field_fn)(struct hist_entry *he);
 typedef int (*hpp_callback_fn)(struct perf_hpp *hpp, bool front);
 typedef int (*hpp_snprint_fn)(struct perf_hpp *hpp, const char *fmt, ...);
 
-int __hpp__fmt(struct perf_hpp *hpp, struct hist_entry *he,
-	       hpp_field_fn get_field, const char *fmt,
-	       hpp_snprint_fn print_fn, bool fmt_percent);
-int __hpp__fmt_acc(struct perf_hpp *hpp, struct hist_entry *he,
-		   hpp_field_fn get_field, const char *fmt,
-		   hpp_snprint_fn print_fn, bool fmt_percent);
+int hpp__fmt(struct perf_hpp_fmt *fmt, struct perf_hpp *hpp,
+	     struct hist_entry *he, hpp_field_fn get_field,
+	     const char *fmtstr, hpp_snprint_fn print_fn, bool fmt_percent);
+int hpp__fmt_acc(struct perf_hpp_fmt *fmt, struct perf_hpp *hpp,
+		 struct hist_entry *he, hpp_field_fn get_field,
+		 const char *fmtstr, hpp_snprint_fn print_fn, bool fmt_percent);
 
 static inline void advance_hpp(struct perf_hpp *hpp, int inc)
 {
@@ -301,6 +304,9 @@ struct hist_browser_timer {
 
 #ifdef HAVE_SLANG_SUPPORT
 #include "../ui/keysyms.h"
+int map_symbol__tui_annotate(struct map_symbol *ms, struct perf_evsel *evsel,
+			     struct hist_browser_timer *hbt);
+
 int hist_entry__tui_annotate(struct hist_entry *he, struct perf_evsel *evsel,
 			     struct hist_browser_timer *hbt);
 
@@ -316,6 +322,12 @@ int perf_evlist__tui_browse_hists(struct perf_evlist *evlist __maybe_unused,
 				  struct hist_browser_timer *hbt __maybe_unused,
 				  float min_pcnt __maybe_unused,
 				  struct perf_session_env *env __maybe_unused)
+{
+	return 0;
+}
+static inline int map_symbol__tui_annotate(struct map_symbol *ms __maybe_unused,
+					   struct perf_evsel *evsel __maybe_unused,
+					   struct hist_browser_timer *hbt __maybe_unused)
 {
 	return 0;
 }
@@ -338,6 +350,9 @@ static inline int script_browse(const char *script_opt __maybe_unused)
 #endif
 
 unsigned int hists__sort_list_width(struct hists *hists);
+
+void hist__account_cycles(struct branch_stack *bs, struct addr_location *al,
+			  struct perf_sample *sample, bool nonany_branch_mode);
 
 struct option;
 int parse_filter_percentage(const struct option *opt __maybe_unused,

@@ -86,7 +86,7 @@ static inline unsigned long raw_local_irq_disable(void)
 #define raw_local_save_flags(x)						\
 do {									\
 	typecheck(unsigned long, x);					\
-	(x) = __raw_local_irq_stosm(0x00);				\
+	(x) = __raw_local_irq_stnsm(0xff);				\
 } while (0)
 
 static inline void raw_local_irq_restore(unsigned long flags)

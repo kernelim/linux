@@ -179,6 +179,8 @@ enum pci_dev_flags {
 	PCI_DEV_FLAGS_NO_D3 = (__force pci_dev_flags_t) 2,
 	/* Provide indication device is assigned by a Virtual Machine Manager */
 	PCI_DEV_FLAGS_ASSIGNED = (__force pci_dev_flags_t) 4,
+	/* Get VPD from function 0 VPD */
+	PCI_DEV_FLAGS_VPD_REF_F0 = (__force pci_dev_flags_t) (1 << 8),
 };
 
 enum pci_irq_reroute_variant {
@@ -327,6 +329,8 @@ struct pci_dev_rh1 {
 	resource_size_t	fw_addr[DEVICE_COUNT_RESOURCE];	/* FW-assigned addr */
 #ifdef CONFIG_PCI_MSI
 	struct kset *msi_kset;
+	u8		msi_cap;	/* MSI capability offset */
+	u8		msix_cap;	/* MSI-X capability offset */
 #endif
 	u8		pcie_mpss:3;	/* PCI-E Max Payload Size Supported */
 	unsigned int	mmio_always_on:1;	/* disallow turning off io/mem
@@ -553,7 +557,11 @@ struct pci_error_handlers {
 struct module;
 struct pci_driver {
 	struct list_head node;
+#ifndef __GENKSYMS__
+	const char *name;
+#else
 	char *name;
+#endif
 	const struct pci_device_id *id_table;	/* must be non-NULL for probe to be called */
 	int  (*probe)  (struct pci_dev *dev, const struct pci_device_id *id);	/* New device inserted */
 	void (*remove) (struct pci_dev *dev);	/* Device removed (NULL if not a hot-plug capable driver) */
@@ -1090,6 +1098,7 @@ static inline int pci_msix_vec_count(struct pci_dev *dev)
 {
 	return -ENOSYS;
 }
+
 static inline int pci_enable_msix(struct pci_dev *dev,
 				  struct msix_entry *entries, int nvec)
 {
@@ -1116,11 +1125,17 @@ static inline int pci_enable_msi_range(struct pci_dev *dev, int minvec,
 {
 	return -ENOSYS;
 }
+static inline int pci_enable_msi_exact(struct pci_dev *dev, int nvec)
+{ return -ENOSYS; }
+
 static inline int pci_enable_msix_range(struct pci_dev *dev,
 		      struct msix_entry *entries, int minvec, int maxvec)
 {
 	return -ENOSYS;
 }
+static inline int pci_enable_msix_exact(struct pci_dev *dev,
+		     struct msix_entry *entries, int nvec)
+{ return -ENOSYS; }
 #else
 extern int pci_enable_msi_block(struct pci_dev *dev, unsigned int nvec);
 extern void pci_msi_shutdown(struct pci_dev *dev);
@@ -1134,8 +1149,24 @@ extern void msi_remove_pci_irq_vectors(struct pci_dev *dev);
 extern void pci_restore_msi_state(struct pci_dev *dev);
 extern int pci_msi_enabled(void);
 int pci_enable_msi_range(struct pci_dev *dev, int minvec, int maxvec);
+
+static inline int pci_enable_msi_exact(struct pci_dev *dev, int nvec)
+{
+	int rc = pci_enable_msi_range(dev, nvec, nvec);
+	if (rc < 0)
+		return rc;
+	return 0;
+}
 int pci_enable_msix_range(struct pci_dev *dev, struct msix_entry *entries,
 			  int minvec, int maxvec);
+static inline int pci_enable_msix_exact(struct pci_dev *dev,
+				       struct msix_entry *entries, int nvec)
+{
+	int rc = pci_enable_msix_range(dev, entries, nvec, nvec);
+	if (rc < 0)
+               return rc;
+	return 0;
+}
 #endif
 
 extern bool pcie_ports_disabled;
@@ -1763,5 +1794,15 @@ static inline bool pci_is_pcie(struct pci_dev *dev)
 	return !!pci_pcie_cap(dev);
 }
 
+/**
+ * pci_ari_enabled - query ARI forwarding status
+ * @bus: the PCI bus
+ *
+ * Returns true if ARI forwarding is enabled.
+ */
+static inline bool pci_ari_enabled(struct pci_bus *bus)
+{
+	return bus->self && bus->self->ari_enabled;
+}
 #endif /* __KERNEL__ */
 #endif /* LINUX_PCI_H */

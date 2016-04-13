@@ -40,6 +40,8 @@ struct call_single_queue {
 
 static DEFINE_PER_CPU(struct call_function_data, cfd_data);
 
+static void flush_smp_call_function_queue(bool warn_cpu_offline);
+
 static int
 hotplug_cfd(struct notifier_block *nfb, unsigned long action, void *hcpu)
 {
@@ -57,10 +59,25 @@ hotplug_cfd(struct notifier_block *nfb, unsigned long action, void *hcpu)
 #ifdef CONFIG_HOTPLUG_CPU
 	case CPU_UP_CANCELED:
 	case CPU_UP_CANCELED_FROZEN:
+		/* Fall-through to the CPU_DEAD[_FROZEN] case. */
 
 	case CPU_DEAD:
 	case CPU_DEAD_FROZEN:
 		free_cpumask_var(cfd->cpumask);
+		break;
+
+	case CPU_DYING:
+	case CPU_DYING_FROZEN:
+		/*
+		 * The IPIs for the smp-call-function callbacks queued by other
+		 * CPUs might arrive late, either due to hardware latencies or
+		 * because this CPU disabled interrupts (inside stop-machine)
+		 * before the IPIs were sent. So flush out any pending callbacks
+		 * explicitly (without waiting for the IPIs to arrive), to
+		 * ensure that the outgoing CPU doesn't go offline with work
+		 * still pending.
+		 */
+		flush_smp_call_function_queue(false);
 		break;
 #endif
 	};
@@ -241,29 +258,61 @@ void generic_smp_call_function_interrupt(void)
 	put_cpu();
 }
 
-/*
- * Invoked by arch to handle an IPI for call function single. Must be
- * called from the arch with interrupts disabled.
+/**
+ * generic_smp_call_function_single_interrupt - Execute SMP IPI callbacks
+ *
+ * Invoked by arch to handle an IPI for call function single.
+ * Must be called with interrupts disabled.
  */
 void generic_smp_call_function_single_interrupt(void)
+{
+	flush_smp_call_function_queue(true);
+}
+
+/**
+ * flush_smp_call_function_queue - Flush pending smp-call-function callbacks
+ *
+ * @warn_cpu_offline: If set to 'true', warn if callbacks were queued on an
+ * 		     offline CPU. Skip this check if set to 'false'.
+ * 
+ * Flush any pending smp-call-function callbacks queued on this CPU. This is
+ * invoked by the generic IPI handler, as well as by a CPU about to go offline,
+ * to ensure that all pending IPI callbacks are run before it goes completely
+ * offline.
+ *
+ * Loop through the call_single_queue and run all the queued callbacks.
+ * Must be called with interrupts disabled.
+ */
+static void flush_smp_call_function_queue(bool warn_cpu_offline)
 {
 	struct call_single_queue *q = &__get_cpu_var(call_single_queue);
 	unsigned int data_flags;
 	LIST_HEAD(list);
+	static bool warned;
 
-	/*
-	 * Shouldn't receive this interrupt on a cpu that is not yet online.
-	 */
-	WARN_ON_ONCE(!cpu_online(smp_processor_id()));
-
+	WARN_ON(!irqs_disabled());
 	spin_lock(&q->lock);
 	list_replace_init(&q->list, &list);
 	spin_unlock(&q->lock);
+
+	/*
+	 * There should not be any pending callbacks on an offline CPU
+	 */
+	if (unlikely(warn_cpu_offline && !cpu_online(smp_processor_id()) &&
+			!warned && !list_empty(&list))) {
+		warned = true;
+		WARN(1, "IPI on offline CPU %d\n", smp_processor_id());
+	}
 
 	while (!list_empty(&list)) {
 		struct call_single_data *data;
 
 		data = list_entry(list.next, struct call_single_data, list);
+
+		if (warned)
+			pr_warn("IPI callback %pS sent to offline CPU\n",
+				data->func);
+
 		list_del(&data->list);
 
 		/*

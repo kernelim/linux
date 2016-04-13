@@ -69,6 +69,7 @@ int writeback_in_progress(struct backing_dev_info *bdi)
 {
 	return test_bit(BDI_writeback_running, &bdi->state);
 }
+EXPORT_SYMBOL(writeback_in_progress);
 
 static void bdi_queue_work(struct backing_dev_info *bdi,
 		struct wb_writeback_work *work)

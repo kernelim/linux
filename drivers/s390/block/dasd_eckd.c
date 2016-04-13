@@ -1148,7 +1148,12 @@ static int dasd_eckd_read_conf(struct dasd_device *device)
 			path_data->ppm |= lpm;
 			break;
 		}
-		path_data->opm |= lpm;
+		if (!path_data->opm) {
+			path_data->opm = lpm;
+			dasd_generic_path_operational(device);
+		} else {
+			path_data->opm |= lpm;
+		}
 		/*
 		 * if the path is used
 		 * it should not be in one of the negative lists
@@ -4375,7 +4380,12 @@ static int dasd_eckd_restore_device(struct dasd_device *device)
 	private = (struct dasd_eckd_private *) device->private;
 
 	/* Read Configuration Data */
-	dasd_eckd_read_conf(device);
+	rc = dasd_eckd_read_conf(device);
+	if (rc) {
+		DBF_EVENT_DEVID(DBF_WARNING, device->cdev,
+				"Read configuration data failed, rc=%d", rc);
+		goto out_err;
+	}
 
 	dasd_eckd_get_uid(device, &temp_uid);
 	/* Generate device unique id */
@@ -4391,13 +4401,18 @@ static int dasd_eckd_restore_device(struct dasd_device *device)
 	/* register lcu with alias handling, enable PAV if this is a new lcu */
 	rc = dasd_alias_make_device_known_to_lcu(device);
 	if (rc)
-		return rc;
+		goto out_err;
 
 	set_bit(DASD_CQR_FLAGS_FAILFAST, &cqr_flags);
 	dasd_eckd_validate_server(device, cqr_flags);
 
 	/* RE-Read Configuration Data */
-	dasd_eckd_read_conf(device);
+	rc = dasd_eckd_read_conf(device);
+	if (rc) {
+		DBF_EVENT_DEVID(DBF_WARNING, device->cdev,
+			"Read configuration data failed, rc=%d", rc);
+		goto out_err2;
+	}
 
 	/* Read Feature Codes */
 	dasd_eckd_read_features(device);
@@ -4408,7 +4423,7 @@ static int dasd_eckd_restore_device(struct dasd_device *device)
 	if (rc) {
 		DBF_EVENT_DEVID(DBF_WARNING, device->cdev,
 				"Read device characteristic failed, rc=%d", rc);
-		goto out_err;
+		goto out_err2;
 	}
 	spin_lock_irqsave(get_ccwdev_lock(device->cdev), flags);
 	memcpy(&private->rdc_data, &temp_rdc_data, sizeof(temp_rdc_data));
@@ -4419,6 +4434,8 @@ static int dasd_eckd_restore_device(struct dasd_device *device)
 
 	return 0;
 
+out_err2:
+	dasd_alias_disconnect_device_from_lcu(device);
 out_err:
 	return -1;
 }

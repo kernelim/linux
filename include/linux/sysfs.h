@@ -72,6 +72,11 @@ struct attribute_group {
 	.show	= _name##_show,					\
 }
 
+#define __ATTR_WO(_name) {						\
+	.attr	= { .name = __stringify(_name), .mode = S_IWUSR },	\
+	.store	= _name##_store,					\
+}
+
 #define __ATTR_RW(_name) __ATTR(_name, 0644, _name##_show, _name##_store)
 
 #define __ATTR_NULL { .attr = { .name = NULL } }
@@ -135,10 +140,14 @@ void sysfs_remove_link(struct kobject *kobj, const char *name);
 
 int __must_check sysfs_create_group(struct kobject *kobj,
 				    const struct attribute_group *grp);
+int __must_check sysfs_create_groups(struct kobject *kobj,
+				     const struct attribute_group **groups);
 int sysfs_update_group(struct kobject *kobj,
 		       const struct attribute_group *grp);
 void sysfs_remove_group(struct kobject *kobj,
 			const struct attribute_group *grp);
+void sysfs_remove_groups(struct kobject *kobj,
+			 const struct attribute_group **groups);
 int sysfs_add_file_to_group(struct kobject *kobj,
 			const struct attribute *attr, const char *group);
 void sysfs_remove_file_from_group(struct kobject *kobj,
@@ -156,26 +165,6 @@ struct sysfs_dirent *sysfs_get(struct sysfs_dirent *sd);
 void sysfs_put(struct sysfs_dirent *sd);
 void sysfs_printk_last_file(void);
 int __must_check sysfs_init(void);
-
-static inline int sysfs_create_groups(struct kobject *kobj,
-				      const struct attribute_group **groups)
-{
-	int error = 0;
-	int i;
-
-	if (!groups)
-		return 0;
-
-	for (i = 0; groups[i]; i++) {
-		error = sysfs_create_group(kobj, groups[i]);
-		if (error) {
-			while (--i >= 0)
-				sysfs_remove_group(kobj, groups[i]);
-			break;
-		}
-	}
-	return error;
-}
 
 #else /* CONFIG_SYSFS */
 
@@ -267,6 +256,12 @@ static inline int sysfs_create_group(struct kobject *kobj,
 	return 0;
 }
 
+static inline int sysfs_create_groups(struct kobject *kobj,
+				      const struct attribute_group **groups)
+{
+	return 0;
+}
+
 static inline int sysfs_update_group(struct kobject *kobj,
 				const struct attribute_group *grp)
 {
@@ -275,6 +270,11 @@ static inline int sysfs_update_group(struct kobject *kobj,
 
 static inline void sysfs_remove_group(struct kobject *kobj,
 				      const struct attribute_group *grp)
+{
+}
+
+static inline void sysfs_remove_groups(struct kobject *kobj,
+				       const struct attribute_group **groups)
 {
 }
 
@@ -328,12 +328,6 @@ static inline int __must_check sysfs_init(void)
 
 static inline void sysfs_printk_last_file(void)
 {
-}
-
-static inline int sysfs_create_groups(struct kobject *kobj,
-				      const struct attribute_group **groups)
-{
-	return 0;
 }
 
 #endif /* CONFIG_SYSFS */

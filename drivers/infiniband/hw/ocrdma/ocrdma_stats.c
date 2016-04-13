@@ -738,16 +738,9 @@ exit:
 	return status;
 }
 
-static int ocrdma_debugfs_open(struct inode *inode, struct file *file)
-{
-	if (inode->i_private)
-		file->private_data = inode->i_private;
-	return 0;
-}
-
 static const struct file_operations ocrdma_dbg_ops = {
 	.owner = THIS_MODULE,
-	.open = ocrdma_debugfs_open,
+	.open = simple_open,
 	.read = ocrdma_dbgfs_ops_read,
 	.write = ocrdma_dbgfs_ops_write,
 };
@@ -847,9 +840,9 @@ void ocrdma_rem_port_stats(struct ocrdma_dev *dev)
 {
 	if (!dev->dir)
 		return;
+	debugfs_remove(dev->dir);
 	mutex_destroy(&dev->stats_lock);
 	ocrdma_release_stats_mem(dev);
-	debugfs_remove(dev->dir);
 }
 
 void ocrdma_init_debugfs(void)

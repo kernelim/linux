@@ -449,7 +449,7 @@ static int serial_ioctl(struct tty_struct *tty, struct file *file,
 	struct usb_serial_port *port = tty->driver_data;
 	int retval = -ENODEV;
 
-	dbg("%s - port %d, cmd 0x%.4x", __func__, port->number, cmd);
+	dbg("%s - port %d, cmd 0x%04x", __func__, port->number, cmd);
 
 	WARN_ON(!port->port.count);
 

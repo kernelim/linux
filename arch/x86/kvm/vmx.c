@@ -3322,11 +3322,8 @@ static int handle_io(struct kvm_vcpu *vcpu)
 	exit_qualification = vmcs_readl(EXIT_QUALIFICATION);
 	string = (exit_qualification & 16) != 0;
 
-	if (string) {
-		if (emulate_instruction(vcpu, 0) == EMULATE_DO_MMIO)
-			return 0;
-		return 1;
-	}
+	if (string)
+		return emulate_instruction(vcpu, 0) == EMULATE_DONE;
 
 	size = (exit_qualification & 7) + 1;
 	in = (exit_qualification & 8) != 0;
@@ -3654,22 +3651,7 @@ static int handle_xsetbv(struct kvm_vcpu *vcpu)
 
 static int handle_apic_access(struct kvm_vcpu *vcpu)
 {
-	unsigned long exit_qualification;
-	enum emulation_result er;
-	unsigned long offset;
-
-	exit_qualification = vmcs_readl(EXIT_QUALIFICATION);
-	offset = exit_qualification & 0xffful;
-
-	er = emulate_instruction(vcpu, 0);
-
-	if (er !=  EMULATE_DONE) {
-		printk(KERN_ERR
-		       "Fail to handle apic access vmexit! Offset is 0x%lx\n",
-		       offset);
-		return -ENOEXEC;
-	}
-	return 1;
+	return emulate_instruction(vcpu, 0) == EMULATE_DONE;
 }
 
 static int handle_task_switch(struct kvm_vcpu *vcpu)
@@ -3890,10 +3872,8 @@ static void handle_invalid_guest_state(struct kvm_vcpu *vcpu)
 		if (err == EMULATE_DO_MMIO)
 			break;
 
-		if (err != EMULATE_DONE) {
-			kvm_report_emulation_failure(vcpu, "emulation failure");
+		if (err != EMULATE_DONE)
 			break;
-		}
 
 		if (signal_pending(current))
 			break;

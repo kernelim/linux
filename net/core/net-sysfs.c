@@ -115,6 +115,24 @@ NETDEVICE_SHOW(features, fmt_long_hex);
 NETDEVICE_SHOW(type, fmt_dec);
 NETDEVICE_SHOW(link_mode, fmt_dec);
 
+static ssize_t format_name_assign_type(const struct net_device *net, char *buf)
+{
+	return sprintf(buf, fmt_dec, netdev_extended(net)->name_assign_type);
+}
+
+static ssize_t name_assign_type_show(struct device *dev,
+				     struct device_attribute *attr,
+				     char *buf)
+{
+	struct net_device *net = to_net_dev(dev);
+	ssize_t ret = -EINVAL;
+
+	if (netdev_extended(net)->name_assign_type != NET_NAME_UNKNOWN)
+		ret = netdev_show(dev, attr, buf, format_name_assign_type);
+
+	return ret;
+}
+
 /* use same locking rules as GIFHWADDR ioctl's */
 static ssize_t show_address(struct device *dev, struct device_attribute *attr,
 			    char *buf)
@@ -284,6 +302,23 @@ static ssize_t store_tx_queue_len(struct device *dev,
 	return netdev_store(dev, attr, buf, len, change_tx_queue_len);
 }
 
+static int change_gro_flush_timeout(struct net_device *dev, unsigned long val)
+{
+	netdev_extended(dev)->gro_flush_timeout = val;
+	return 0;
+}
+
+static ssize_t gro_flush_timeout_store(struct device *dev,
+				  struct device_attribute *attr,
+				  const char *buf, size_t len)
+{
+	if (!capable(CAP_NET_ADMIN))
+		return -EPERM;
+
+	return netdev_store(dev, attr, buf, len, change_gro_flush_timeout);
+}
+NETDEVICE_SHOW_EXT(gro_flush_timeout, fmt_ulong);
+
 static ssize_t store_ifalias(struct device *dev, struct device_attribute *attr,
 			     const char *buf, size_t len)
 {
@@ -348,6 +383,7 @@ static struct device_attribute net_class_attributes[] = {
 	__ATTR(ifalias, S_IRUGO | S_IWUSR, show_ifalias, store_ifalias),
 	__ATTR(iflink, S_IRUGO, show_iflink, NULL),
 	__ATTR(ifindex, S_IRUGO, show_ifindex, NULL),
+	__ATTR(name_assign_type, S_IRUGO, name_assign_type_show, NULL),
 	__ATTR(features, S_IRUGO, show_features, NULL),
 	__ATTR(type, S_IRUGO, show_type, NULL),
 	__ATTR(link_mode, S_IRUGO, show_link_mode, NULL),
@@ -362,6 +398,8 @@ static struct device_attribute net_class_attributes[] = {
 	__ATTR(flags, S_IRUGO | S_IWUSR, show_flags, store_flags),
 	__ATTR(tx_queue_len, S_IRUGO | S_IWUSR, show_tx_queue_len,
 	       store_tx_queue_len),
+	__ATTR(gro_flush_timeout, S_IRUGO | S_IWUSR, show_gro_flush_timeout,
+	       gro_flush_timeout_store),
 	__ATTR(phys_port_id, S_IRUGO, show_phys_port_id, NULL),
 	__ATTR(dev_port, S_IRUGO, show_dev_port, NULL),
 	{}

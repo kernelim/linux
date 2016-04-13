@@ -44,6 +44,7 @@ extern struct sort_entry sort_dso_to;
 extern struct sort_entry sort_sym_from;
 extern struct sort_entry sort_sym_to;
 extern enum sort_type sort__first_dimension;
+extern const char default_mem_sort_order[];
 
 struct he_stat {
 	u64			period;
@@ -102,7 +103,6 @@ struct hist_entry {
 
 	bool			init_have_children;
 	char			level;
-	bool			used;
 	u8			filtered;
 	char			*srcline;
 	struct symbol		*parent;
@@ -177,6 +177,7 @@ enum sort_type {
 	SORT_MISPREDICT,
 	SORT_ABORT,
 	SORT_IN_TX,
+	SORT_CYCLES,
 
 	/* memory mode specific sort keys */
 	__SORT_MEMORY_MODE,
@@ -218,4 +219,5 @@ void perf_hpp__set_elide(int idx, bool elide);
 
 int report_parse_ignore_callees_opt(const struct option *opt, const char *arg, int unset);
 
+bool is_strict_order(const char *order);
 #endif	/* __PERF_SORT_H */

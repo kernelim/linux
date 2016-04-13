@@ -1239,8 +1239,8 @@ static void ql_get_core_dump(struct ql_adapter *qdev)
 	queue_delayed_work(qdev->workqueue, &qdev->mpi_reset_work, 0);
 }
 
-void ql_gen_reg_dump(struct ql_adapter *qdev,
-			struct ql_reg_dump *mpi_coredump)
+static void ql_gen_reg_dump(struct ql_adapter *qdev,
+			   struct ql_reg_dump *mpi_coredump)
 {
 	int i, status;
 

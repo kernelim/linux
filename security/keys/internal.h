@@ -100,8 +100,7 @@ extern void __key_link_end(struct key *keyring,
 
 extern key_ref_t __keyring_search_one(key_ref_t keyring_ref,
 				      const struct key_type *type,
-				      const char *description,
-				      key_perm_t perm);
+				      const char *description);
 
 extern struct key *keyring_search_instkey(struct key *keyring,
 					  key_serial_t target_id);
@@ -123,6 +122,7 @@ extern key_ref_t search_my_process_keyrings(struct key_type *type,
 extern key_ref_t search_process_keyrings(struct key_type *type,
 					 const void *description,
 					 key_match_func_t match,
+					 bool no_state_check,
 					 const struct cred *cred);
 
 extern struct key *find_keyring_by_name(const char *name, bool skip_perm_check);
@@ -207,7 +207,7 @@ extern struct key *key_get_instantiation_authkey(key_serial_t target_id);
 /*
  * Determine whether a key is dead.
  */
-static inline bool key_is_dead(struct key *key, time_t limit)
+static inline bool key_is_dead(const struct key *key, time_t limit)
 {
 	return
 		key->flags & ((1 << KEY_FLAG_DEAD) |
@@ -247,7 +247,7 @@ extern long keyctl_instantiate_key_iov(key_serial_t,
 extern long keyctl_invalidate_key(key_serial_t);
 
 extern long keyctl_instantiate_key_common(key_serial_t,
-					  const struct iovec __user *,
+					  const struct iovec *,
 					  unsigned, size_t, key_serial_t);
 
 /*

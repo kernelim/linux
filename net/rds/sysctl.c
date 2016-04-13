@@ -106,8 +106,7 @@ static struct ctl_path rds_sysctl_path[] = {
 
 void rds_sysctl_exit(void)
 {
-	if (rds_sysctl_reg_table)
-		unregister_net_sysctl_table(rds_sysctl_reg_table);
+	unregister_net_sysctl_table(rds_sysctl_reg_table);
 }
 
 int rds_sysctl_init(void)

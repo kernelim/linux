@@ -133,6 +133,24 @@ dst_metric(const struct dst_entry *dst, int metric)
 	return dst->metrics[metric-1];
 }
 
+static inline u32
+dst_metric_advmss(const struct dst_entry *dst)
+{
+	u32 advmss = dst_metric(dst, RTAX_ADVMSS);
+
+	if (!advmss) {
+		struct dst_ops_extend *ext;
+
+		rcu_read_lock();
+		ext = dst_ops_extend_get_rcu(dst->ops);
+		if (ext)
+			advmss = ext->default_advmss(dst);
+		rcu_read_unlock();
+	}
+
+	return advmss;
+}
+
 static inline u32 dst_mtu(const struct dst_entry *dst)
 {
 	u32 mtu = dst_metric(dst, RTAX_MTU);

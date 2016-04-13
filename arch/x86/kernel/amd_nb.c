@@ -79,8 +79,7 @@ int amd_cache_northbridges(void)
 			next_northbridge(link, amd_nb_link_ids);
 	}
 
-	if (boot_cpu_data.x86 == 0xf || boot_cpu_data.x86 == 0x10 ||
-	    boot_cpu_data.x86 == 0x15)
+	if (amd_gart_present())
 		amd_northbridges.flags |= AMD_NB_GART;
 
 	/*

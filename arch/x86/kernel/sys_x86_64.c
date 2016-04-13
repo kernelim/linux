@@ -22,6 +22,10 @@
 
 /*
  * Align a virtual address to avoid aliasing in the I$ on AMD F15h.
+ * The bits defined by the va_align.bits, [12:upper_bit), are set to
+ * a random value instead of zeroing them. This random value is
+ * computed once per boot. This form of ASLR is known as "per-boot
+ * ASLR".
  *
  * @flags denotes the allocation direction - bottomup or topdown -
  * or vDSO; see call sites below.
@@ -49,8 +53,11 @@ unsigned long align_addr(unsigned long addr, struct file *filp,
 	 */
 	if (!(flags & ALIGN_TOPDOWN))
 		tmp_addr += va_align.mask;
+	else
+		tmp_addr -= va_align.mask;
 
 	tmp_addr &= ~va_align.mask;
+	tmp_addr |= va_align.bits;
 
 	return tmp_addr;
 }

@@ -62,6 +62,8 @@
 # define KEXEC_ARCH KEXEC_ARCH_X86_64
 #endif
 
+#define KEXEC_RESERVE_UPPER_LIMIT    (896 * 1024 * 1024)
+
 /*
  * CPU does not save ss and sp on stack if execution is already
  * running in kernel mode at the time of NMI occurrence. This code

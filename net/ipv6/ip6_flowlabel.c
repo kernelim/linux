@@ -158,7 +158,7 @@ static void ip6_fl_purge(struct net *net)
 {
 	int i;
 
-	write_lock(&ip6_fl_lock);
+	write_lock_bh(&ip6_fl_lock);
 	for (i = 0; i <= FL_HASH_MASK; i++) {
 		struct ip6_flowlabel *fl, **flp;
 		flp = &fl_ht[i];
@@ -172,7 +172,7 @@ static void ip6_fl_purge(struct net *net)
 			flp = &fl->next;
 		}
 	}
-	write_unlock(&ip6_fl_lock);
+	write_unlock_bh(&ip6_fl_lock);
 }
 
 static struct ip6_flowlabel *fl_intern(struct net *net,
@@ -309,6 +309,8 @@ static int fl6_renew(struct ip6_flowlabel *fl, unsigned long linger, unsigned lo
 	expires = check_linger(expires);
 	if (!expires)
 		return -EPERM;
+
+	write_lock_bh(&ip6_fl_lock);
 	fl->lastuse = jiffies;
 	if (time_before(fl->linger, linger))
 		fl->linger = linger;
@@ -316,6 +318,8 @@ static int fl6_renew(struct ip6_flowlabel *fl, unsigned long linger, unsigned lo
 		expires = fl->linger;
 	if (time_before(fl->expires, fl->lastuse + expires))
 		fl->expires = fl->lastuse + expires;
+	write_unlock_bh(&ip6_fl_lock);
+
 	return 0;
 }
 

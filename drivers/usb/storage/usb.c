@@ -935,6 +935,14 @@ int usb_stor_probe2(struct us_data *us)
 	if (us->fflags & US_FL_SINGLE_LUN)
 		us->max_lun = 0;
 
+	/*
+	 * Like Windows, we won't store the LUN bits in CDB[1] for SCSI-2
+	 * devices using the Bulk-Only transport (even though this violates
+	 * the SCSI spec).
+	 */
+	if (us->transport == usb_stor_Bulk_transport)
+		us_to_host(us)->no_scsi2_lun_in_cdb = 1;
+
 	/* Find the endpoints and calculate pipe values */
 	result = get_pipes(us);
 	if (result)

@@ -59,3 +59,4 @@ SCHED_FEAT(LB_BIAS, 1)
  * release the lock. Decreases scheduling overhead.
  */
 SCHED_FEAT(OWNER_SPIN, 1)
+SCHED_FEAT(RT_RUNTIME_SHARE, 1)

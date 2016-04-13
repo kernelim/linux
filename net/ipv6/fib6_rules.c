@@ -20,6 +20,7 @@
 #include <net/addrconf.h>
 #include <net/ip6_route.h>
 #include <net/netlink.h>
+#include <linux/route.h>
 
 struct fib6_rule
 {
@@ -32,6 +33,7 @@ struct fib6_rule
 struct dst_entry *fib6_rule_lookup(struct net *net, struct flowi *fl,
 				   int flags, pol_lookup_t lookup)
 {
+	struct rt6_info *rt;
 	struct fib_lookup_arg arg = {
 		.lookup_ptr = lookup,
 	};
@@ -40,11 +42,21 @@ struct dst_entry *fib6_rule_lookup(struct net *net, struct flowi *fl,
 	if (arg.rule)
 		fib_rule_put(arg.rule);
 
-	if (arg.result)
-		return arg.result;
+	rt = arg.result;
 
-	dst_hold(&net->ipv6.ip6_null_entry->u.dst);
-	return &net->ipv6.ip6_null_entry->u.dst;
+	if (!rt) {
+		dst_hold(&net->ipv6.ip6_null_entry->u.dst);
+		return &net->ipv6.ip6_null_entry->u.dst;
+	}
+
+	if (rt->rt6i_flags & RTF_REJECT &&
+	    rt->u.dst.error == -EAGAIN) {
+		dst_release(&rt->u.dst);
+		rt = net->ipv6.ip6_null_entry;
+		dst_hold(&rt->u.dst);
+	}
+
+	return &rt->u.dst;
 }
 
 static int fib6_rule_action(struct fib_rule *rule, struct flowi *flp,
@@ -233,11 +245,6 @@ nla_put_failure:
 	return -ENOBUFS;
 }
 
-static u32 fib6_rule_default_pref(struct fib_rules_ops *ops)
-{
-	return 0x3FFF;
-}
-
 static size_t fib6_rule_nlmsg_payload(struct fib_rule *rule)
 {
 	return nla_total_size(16) /* dst */
@@ -253,7 +260,6 @@ static struct fib_rules_ops fib6_rules_ops_template = {
 	.configure		= fib6_rule_configure,
 	.compare		= fib6_rule_compare,
 	.fill			= fib6_rule_fill,
-	.default_pref		= fib6_rule_default_pref,
 	.nlmsg_payload		= fib6_rule_nlmsg_payload,
 	.nlgroup		= RTNLGRP_IPV6_RULE,
 	.policy			= fib6_rule_policy,

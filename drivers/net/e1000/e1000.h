@@ -147,16 +147,21 @@ struct e1000_adapter;
 
 /* wrapper around a pointer to a socket buffer,
  * so a DMA handle can be stored along with the buffer */
-struct e1000_buffer {
+struct e1000_tx_buffer {
 	struct sk_buff *skb;
 	dma_addr_t dma;
-	struct page *page;
 	unsigned long time_stamp;
 	u16 length;
 	u16 next_to_watch;
-	unsigned int segs;
+	bool mapped_as_page;
+	unsigned short segs;
 	unsigned int bytecount;
-	u16 mapped_as_page;
+};
+
+struct e1000_rx_buffer {
+	struct sk_buff *skb;
+	dma_addr_t dma;
+	struct page *page;
 };
 
 struct e1000_tx_ring {
@@ -173,7 +178,7 @@ struct e1000_tx_ring {
 	/* next descriptor to check for DD status bit */
 	unsigned int next_to_clean;
 	/* array of buffer information structs */
-	struct e1000_buffer *buffer_info;
+	struct e1000_tx_buffer *buffer_info;
 
 	u16 tdh;
 	u16 tdt;
@@ -194,7 +199,7 @@ struct e1000_rx_ring {
 	/* next descriptor to check for DD status bit */
 	unsigned int next_to_clean;
 	/* array of buffer information structs */
-	struct e1000_buffer *buffer_info;
+	struct e1000_rx_buffer *buffer_info;
 	struct sk_buff *rx_skb_top;
 
 	/* cpu for rx queue */

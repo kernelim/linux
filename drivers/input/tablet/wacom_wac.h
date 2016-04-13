@@ -10,7 +10,9 @@
 #define WACOM_WAC_H
 
 /* maximum packet length for USB devices */
-#define WACOM_PKGLEN_MAX	64
+#define WACOM_PKGLEN_MAX	192
+#define WACOM_MAX_REMOTES	5
+#define WACOM_STATUS_UNKNOWN	255
 
 /* packet length for individual models */
 #define WACOM_PKGLEN_PENPRTN	 7
@@ -20,6 +22,7 @@
 #define WACOM_PKGLEN_PENABLED	 8
 #define WACOM_PKGLEN_TPC1FG	 5
 #define WACOM_PKGLEN_TPC2FG	14
+#define WACOM_PKGLEN_BBPEN	10
 #define WACOM_PKGLEN_BBTOUCH3	64
 #define WACOM_PKGLEN_WIRELESS	32
 #define WACOM_PKGLEN_MTOUCH	62
@@ -27,6 +30,7 @@
 /* wacom data size per MT contact */
 #define WACOM_BYTES_PER_MT_PACKET	11
 #define WACOM_BYTES_PER_24HDT_PACKET	14
+#define WACOM_BYTES_PER_QHDTHID_PACKET	 6
 
 /* device IDs */
 #define STYLUS_DEVICE_ID	0x02
@@ -35,8 +39,14 @@
 #define ERASER_DEVICE_ID	0x0A
 #define PAD_DEVICE_ID		0x0F
 
+#define WACOM_REPORT_PENABLED		2
 #define WACOM_REPORT_TPCMT		13
 #define WACOM_REPORT_24HDT		1
+#define WACOM_REPORT_WL			128
+#define WACOM_REPORT_CINTIQ		16
+#define WACOM_REPORT_CINTIQPAD		17
+#define WACOM_REPORT_DEVICE_LIST	16
+#define WACOM_REPORT_REMOTE		17
 
 /* device quirks */
 #define WACOM_QUIRK_MULTI_INPUT		0x0001
@@ -63,15 +73,19 @@ enum {
 	INTUOSPS,
 	INTUOSPM,
 	INTUOSPL,
+	INTUOSHT,
 	WACOM_21UX2,
 	WACOM_22HD,
 	WACOM_24HD,
+	WACOM_27QHD,
 	CINTIQ,
 	WACOM_BEE,
 	WACOM_MO,
 	WIRELESS,
 	BAMBOO_PT,
 	WACOM_24HDT,
+	WACOM_27QHDT,
+	REMOTE,
 	TABLETPC,
 	TABLETPC2FG,
 	MTSCREEN,
@@ -95,6 +109,8 @@ struct wacom_features {
 	unsigned touch_max;
 	int oVid;
 	int oPid;
+	int x_min;
+	int y_min;
 };
 
 struct wacom_shared {
@@ -107,7 +123,7 @@ struct wacom_wac {
 	unsigned char *data;
 	int tool[2];
 	int id[2];
-	__u32 serial[2];
+	__u32 serial[5];
 	struct wacom_features features;
 	struct wacom_shared *shared;
 	int pid;

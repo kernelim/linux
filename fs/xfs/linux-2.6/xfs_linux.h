@@ -152,6 +152,24 @@
 #define howmany(x, y)	(((x)+((y)-1))/(y))
 
 /*
+ * XFS wrapper structure for sysfs support. It depends on external data
+ * structures and is embedded in various internal data structures to implement
+ * the XFS sysfs object heirarchy. Define it here for broad access throughout
+ * the codebase.
+ */
+struct xfs_kobj {
+	struct kobject		kobject;
+	struct completion	complete;
+};
+
+struct xstats {
+	struct xfsstats __percpu	*xs_stats;
+	struct xfs_kobj			xs_kobj;
+};
+
+extern struct xstats xfsstats;
+
+/*
  * Various platform dependent calls that don't fit anywhere else
  */
 #define xfs_sort(a,n,s,fn)	sort(a,n,s,fn,NULL)

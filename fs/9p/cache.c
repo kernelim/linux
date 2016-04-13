@@ -145,7 +145,7 @@ void v9fs_cache_session_get_cookie(struct v9fs_session_info *v9ses)
 
 	v9ses->fscache = fscache_acquire_cookie(v9fs_cache_netfs.primary_index,
 						&v9fs_cache_session_index_def,
-						v9ses);
+						v9ses, true);
 	P9_DPRINTK(P9_DEBUG_FSC, "session %p get cookie %p", v9ses,
 		   v9ses->fscache);
 }
@@ -261,7 +261,7 @@ void v9fs_cache_inode_get_cookie(struct inode *inode)
 	v9ses = v9fs_inode2v9ses(inode);
 	vcookie->fscache = fscache_acquire_cookie(v9ses->fscache,
 						  &v9fs_cache_inode_index_def,
-						  vcookie);
+						  vcookie, true);
 
 	P9_DPRINTK(P9_DEBUG_FSC, "inode %p get cookie %p", inode,
 		   vcookie->fscache);
@@ -328,7 +328,7 @@ void v9fs_cache_inode_reset_cookie(struct inode *inode)
 	v9ses = v9fs_inode2v9ses(inode);
 	vcookie->fscache = fscache_acquire_cookie(v9ses->fscache,
 						  &v9fs_cache_inode_index_def,
-						  vcookie);
+						  vcookie, true);
 
 	P9_DPRINTK(P9_DEBUG_FSC, "inode %p revalidating cookie old %p new %p",
 		   inode, old, vcookie->fscache);

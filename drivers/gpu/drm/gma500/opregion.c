@@ -322,7 +322,7 @@ int psb_intel_opregion_setup(struct drm_device *dev)
 	INIT_WORK(&opregion->asle_work, psb_intel_opregion_asle_work);
 
 	DRM_DEBUG("OpRegion detected at 0x%8x\n", opregion_phy);
-	base = ioremap_cache(opregion_phy, 8*1024);
+	base = acpi_os_ioremap(opregion_phy, 8*1024);
 	if (!base)
 		return -ENOMEM;
 

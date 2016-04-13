@@ -262,10 +262,60 @@ restart:
 		/* wait for all I/O to complete */
 		xfs_ioend_wait(ip);
 
+		/*
+		 * Do all the page cache truncate work outside the transaction
+		 * context as the "lock" order is page lock->log space
+		 * reservation.  i.e.  locking pages inside the transaction can
+		 * ABBA deadlock with writeback. We have to do the VFS inode
+		 * size update before we truncate the pagecache, however, to
+		 * avoid racing with page faults beyond the new EOF they are not
+		 * serialised against truncate operations except by page locks
+		 * and size updates.
+		 *
+		 * Hence we are in a situation where a truncate can fail with
+		 * ENOMEM from xfs_trans_reserve(), but having already truncated
+		 * the in-memory version of the file (i.e. made user visible
+		 * changes). There's not much we can do about this, except to
+		 * hope that the caller sees ENOMEM and retries the truncate
+		 * operation.
+		 */
 		code = -block_truncate_page(inode->i_mapping, newsize,
 					    xfs_get_blocks);
 		if (code)
 			goto error_return;
+		truncate_setsize(inode, newsize);
+
+		/*
+		* The "we can't serialise against page faults" pain gets worse.
+		*
+		* If the file is mapped then we have to clean the page at the
+		* old EOF when extending the file. Extending the file can expose
+		* changes the underlying page mapping (e.g. from beyond EOF to a
+		* hole or unwritten), and so on the next attempt to write to
+		* that page we need to remap it for write. i.e. we need
+		* .page_mkwrite() to be called. Hence we need to clean the page
+		* to clean the pte and so a new write fault will be triggered
+		* appropriately.
+		*
+		* If we do it before we change the inode size, then we can race
+		* with a page fault that maps the page with exactly the same
+		* problem. If we do it after we change the file size, then a new
+		* page fault can come in and allocate space before we've run the
+		* rest of the truncate transaction. That's kinda grotesque, but
+		* it's better than have data over a hole, and so that's the
+		* lesser evil that has been chosen here.
+		*
+		* The real solution, however, is to have some mechanism for
+		* locking out page faults while a truncate is in progress.
+		*/
+		if (newsize > oldsize && mapping_mapped(VFS_I(ip)->i_mapping)) {
+			code = filemap_write_and_wait_range(
+					VFS_I(ip)->i_mapping,
+					round_down(oldsize, PAGE_CACHE_SIZE),
+					round_up(oldsize, PAGE_CACHE_SIZE) - 1);
+			if (code)
+				goto error_return;
+		}
 
 		tp = xfs_trans_alloc(mp, XFS_TRANS_SETATTR_SIZE);
 		code = xfs_trans_reserve(tp, 0, XFS_ITRUNCATE_LOG_RES(mp), 0,
@@ -274,13 +324,9 @@ restart:
 		if (code)
 			goto error_return;
 
-		truncate_setsize(inode, newsize);
-
 		commit_flags = XFS_TRANS_RELEASE_LOG_RES;
 		lock_flags |= XFS_ILOCK_EXCL;
-
 		xfs_ilock(ip, XFS_ILOCK_EXCL);
-
 		xfs_trans_ijoin(tp, ip);
 
 		/*
@@ -422,7 +468,7 @@ restart:
 		    ATTR_ATIME|ATTR_CTIME|ATTR_MTIME))
 		xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
 
-	XFS_STATS_INC(xs_ig_attrchg);
+	XFS_STATS_INC(mp, xs_ig_attrchg);
 
 	/*
 	 * If this is a synchronous mount, make sure that the

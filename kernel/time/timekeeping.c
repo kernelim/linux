@@ -43,6 +43,10 @@ struct timekeeper {
 
 	/* Clock shifted nano seconds remainder not stored in xtime.tv_nsec. */
 	u64	xtime_nsec;
+
+	/* Monotonic base time */
+	ktime_t base_mono;
+
 	/* Difference between accumulated time and NTP time in ntp
 	 * shifted nano seconds. */
 	s64	ntp_error;
@@ -78,8 +82,14 @@ struct timekeeper {
 	/* Offset clock monotonic -> clock boottime */
 	ktime_t offs_boot;
 
+	/* CLOCK_MONOTONIC time value of a pending leap-second */
+	ktime_t next_leap_ktime;
+
 	/* Seqlock for all timekeeper values */
 	seqlock_t lock;
+
+	/* The sequence number of clock was set events */
+	unsigned int clock_was_set_seq;
 };
 
 static struct timekeeper timekeeper;
@@ -187,16 +197,66 @@ static void update_rt_offset(void)
 	timekeeper.offs_real = timespec_to_ktime(tmp);
 }
 
+/*
+ * tk_update_leap_state - helper to update the next_leap_ktime
+ */
+static inline void __tk_update_leap_state(struct timekeeper *tk)
+{
+	tk->next_leap_ktime = ntp_get_next_leap();
+	if (tk->next_leap_ktime.tv64 != KTIME_MAX)
+		/* convert to monotonic time */
+		tk->next_leap_ktime = ktime_sub(tk->next_leap_ktime, tk->offs_real);
+}
+
+void tk_update_leap_state(void)
+{
+	unsigned long flags;
+
+	write_seqlock_irqsave(&timekeeper.lock, flags);
+	__tk_update_leap_state(&timekeeper);
+	write_sequnlock_irqrestore(&timekeeper.lock, flags);
+}
+
+/*
+ * Update the ktime_t based scalar nsec members of the timekeeper
+ */
+static inline void tk_update_ktime_data(struct timekeeper *tk)
+{
+	s64 nsec;
+
+	/*
+	 * The xtime based monotonic readout is:
+	 *      nsec = (xtime_sec + wtm_sec) * 1e9 + wtm_nsec + now();
+	 * The ktime based monotonic readout is:
+	 *      nsec = base_mono + now();
+	 * ==> base_mono = (xtime_sec + wtm_sec) * 1e9 + wtm_nsec
+	 *
+	 * RHEL6: timekeeper still uses xtime for tracking tv_sec
+	 * unlike upstream, so use xtime.tv_sec here.
+	 */
+	nsec = (s64)(tk->xtime.tv_sec + tk->wall_to_monotonic.tv_sec);
+	nsec *= NSEC_PER_SEC;
+	nsec += tk->wall_to_monotonic.tv_nsec;
+	tk->base_mono = ns_to_ktime(nsec);
+}
+
 /* must hold write on timekeeper.lock */
-static void timekeeping_update(bool clearntp)
+static void timekeeping_update(bool clearntp, bool clock_set)
 {
 	if (clearntp) {
 		timekeeper.ntp_error = 0;
 		ntp_clear();
 	}
+
+	__tk_update_leap_state(&timekeeper);
+	tk_update_ktime_data(&timekeeper);
+
 	update_rt_offset();
 	update_vsyscall(&timekeeper.xtime, &timekeeper.wall_to_monotonic,
 			 timekeeper.clock, timekeeper.mult);
+
+	if (clock_set)
+		timekeeper.clock_was_set_seq++;
 }
 
 
@@ -354,7 +414,7 @@ int do_settimeofday(const struct timespec *tv)
 			timespec_sub(timekeeper.wall_to_monotonic, ts_delta);
 
 	timekeeper.xtime = *tv;
-	timekeeping_update(true);
+	timekeeping_update(true, true);
 
 	write_sequnlock_irqrestore(&timekeeper.lock, flags);
 
@@ -397,7 +457,7 @@ int timekeeping_inject_offset(struct timespec *ts)
 				timespec_sub(timekeeper.wall_to_monotonic, *ts);
 
 error: /* even if we error out, we forwarded the time, so call update */
-	timekeeping_update(true);
+	timekeeping_update(true, true);
 
 	write_sequnlock_irqrestore(&timekeeper.lock, flags);
 
@@ -429,7 +489,7 @@ static int change_clocksource(void *data)
 		if (old->disable)
 			old->disable(old);
 	}
-	timekeeping_update(true);
+	timekeeping_update(true, true);
 
 	write_sequnlock_irqrestore(&timekeeper.lock, flags);
 
@@ -662,7 +722,7 @@ void timekeeping_inject_sleeptime(struct timespec *delta)
 
 	__timekeeping_inject_sleeptime(delta);
 
-	timekeeping_update(true);
+	timekeeping_update(true, true);
 
 	write_sequnlock_irqrestore(&timekeeper.lock, flags);
 
@@ -698,7 +758,7 @@ static int timekeeping_resume(struct sys_device *dev)
 	timekeeper.clock->cycle_last = timekeeper.clock->read(timekeeper.clock);
 	timekeeper.ntp_error = 0;
 	timekeeping_suspended = 0;
-	timekeeping_update(false);
+	timekeeping_update(false, true);
 	write_sequnlock_irqrestore(&timekeeper.lock, flags);
 
 	touch_softlockup_watchdog();
@@ -953,8 +1013,11 @@ static void timekeeping_adjust(s64 offset)
  * loop.
  *
  * Returns the unconsumed cycles.
+ *
+ * RHEL6: Added clock_set argument to track that clock_was_set_delayed should
+ *        be called once the timekeeper lock has been released. [BZ 1224408] 
  */
-static cycle_t logarithmic_accumulation(cycle_t offset, int shift)
+static cycle_t logarithmic_accumulation(cycle_t offset, int shift, bool *clock_set)
 {
 	u64 nsecps = (u64)NSEC_PER_SEC << timekeeper.shift;
 	u64 raw_nsecs;
@@ -976,7 +1039,7 @@ static cycle_t logarithmic_accumulation(cycle_t offset, int shift)
 		timekeeper.xtime.tv_sec += leap;
 		timekeeper.wall_to_monotonic.tv_sec -= leap;
 		if (leap)
-			clock_was_set_delayed();
+			*clock_set = true;
 	}
 
 	/* Accumulate raw time */
@@ -1007,6 +1070,7 @@ static void update_wall_time(void)
 	struct clocksource *clock;
 	cycle_t offset;
 	int shift = 0, maxshift;
+	bool clock_set = false;
 	unsigned long flags;
 
 	write_seqlock_irqsave(&timekeeper.lock, flags);
@@ -1040,7 +1104,7 @@ static void update_wall_time(void)
 	maxshift = (64 - (ilog2(ntp_tick_length())+1)) - 1;
 	shift = min(shift, maxshift);
 	while (offset >= timekeeper.cycle_interval) {
-		offset = logarithmic_accumulation(offset, shift);
+		offset = logarithmic_accumulation(offset, shift, &clock_set);
 		if(offset < timekeeper.cycle_interval<<shift)
 			shift--;
 	}
@@ -1094,14 +1158,15 @@ static void update_wall_time(void)
 		timekeeper.xtime.tv_sec += leap;
 		timekeeper.wall_to_monotonic.tv_sec -= leap;
 		if (leap)
-			clock_was_set_delayed();
+			clock_set = true;
 	}
 
-	timekeeping_update(false);
+	timekeeping_update(false, clock_set);
 
 out:
 	write_sequnlock_irqrestore(&timekeeper.lock, flags);
-
+	if (clock_set)
+		clock_was_set_delayed();
 }
 
 /**
@@ -1282,6 +1347,7 @@ void get_xtime_and_monotonic_and_sleep_offset(struct timespec *xtim,
 #ifdef CONFIG_HIGH_RES_TIMERS
 /**
  * ktime_get_update_offsets - hrtimer helper
+ * @cwsseq:     pointer to check and store the clock was set sequence number
  * @offs_real:	pointer to storage for monotonic -> realtime offset
  *
  * Returns current monotonic time and updates the offsets
@@ -1289,27 +1355,34 @@ void get_xtime_and_monotonic_and_sleep_offset(struct timespec *xtim,
  *
  * RHEL6: We do not have real vs boot clocks in RHEL.
  */
-ktime_t ktime_get_update_offsets(ktime_t *offs_real)
+ktime_t ktime_get_update_offsets(unsigned int *cwsseq, ktime_t *offs_real)
 {
-	ktime_t now;
 	unsigned int seq;
-	u64 secs, nsecs;
+	ktime_t base;
+	u64 nsecs;
 
 	do {
 		seq = read_seqbegin(&timekeeper.lock);
 
-		secs = timekeeper.xtime.tv_sec;
+		base = timekeeper.base_mono;
 		nsecs = timekeeper.xtime.tv_nsec;
 		nsecs += timekeeping_get_ns();
 		/* If arch requires, add in gettimeoffset() */
 		nsecs += arch_gettimeoffset();
+		base = ktime_add_ns(base, nsecs);
 
-		*offs_real = timekeeper.offs_real;
+		if (*cwsseq != timekeeper.clock_was_set_seq) {
+			*cwsseq = timekeeper.clock_was_set_seq;
+			*offs_real = timekeeper.offs_real;
+		}
+
+		/* Handle leapsecond insertion adjustments */
+		if (unlikely(base.tv64 >= timekeeper.next_leap_ktime.tv64))
+			*offs_real = ktime_sub(timekeeper.offs_real, ktime_set(1, 0));
+
 	} while (read_seqretry(&timekeeper.lock, seq));
 
-	now = ktime_add_ns(ktime_set(secs, 0), nsecs);
-	now = ktime_sub(now, *offs_real);
-	return now;
+	return base;
 }
 #endif
 

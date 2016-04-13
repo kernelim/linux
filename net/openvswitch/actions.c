@@ -85,7 +85,7 @@ static int pop_vlan(struct sk_buff *skb)
 	__be16 tci;
 	int err;
 
-	if (likely(vlan_tx_tag_present(skb))) {
+	if (likely(skb_vlan_tag_present(skb))) {
 		skb->vlan_tci = 0;
 	} else {
 		if (unlikely(skb->protocol != htons(ETH_P_8021Q) ||
@@ -111,11 +111,11 @@ static int pop_vlan(struct sk_buff *skb)
 
 static int push_vlan(struct sk_buff *skb, const struct ovs_action_push_vlan *vlan)
 {
-	if (unlikely(vlan_tx_tag_present(skb))) {
+	if (unlikely(skb_vlan_tag_present(skb))) {
 		u16 current_tag;
 
 		/* push down current VLAN tag */
-		current_tag = vlan_tx_tag_get(skb);
+		current_tag = skb_vlan_tag_get(skb);
 
 		if (!__vlan_put_tag(skb, current_tag))
 			return -ENOMEM;

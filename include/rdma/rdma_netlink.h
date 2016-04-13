@@ -4,7 +4,16 @@
 #include <linux/types.h>
 
 enum {
-	RDMA_NL_RDMA_CM = 1
+	RDMA_NL_RDMA_CM = 1,
+	RDMA_NL_NES,
+	RDMA_NL_C4IW,
+	RDMA_NL_NUM_CLIENTS
+};
+
+enum {
+	RDMA_NL_GROUP_CM = 1,
+	RDMA_NL_GROUP_IWPM,
+	RDMA_NL_NUM_GROUPS
 };
 
 #define RDMA_NL_GET_CLIENT(type) ((type & (((1 << 6) - 1) << 10)) >> 10)
@@ -22,6 +31,19 @@ enum {
 	RDMA_NL_RDMA_CM_NUM_ATTR,
 };
 
+/* iwarp port mapper op-codes */
+enum {
+	RDMA_NL_IWPM_REG_PID = 0,
+	RDMA_NL_IWPM_ADD_MAPPING,
+	RDMA_NL_IWPM_QUERY_MAPPING,
+	RDMA_NL_IWPM_REMOVE_MAPPING,
+	RDMA_NL_IWPM_REMOTE_INFO,
+	RDMA_NL_IWPM_HANDLE_ERR,
+	RDMA_NL_IWPM_MAPINFO,
+	RDMA_NL_IWPM_MAPINFO_NUM,
+	RDMA_NL_IWPM_NUM_OPS
+};
+
 struct rdma_cm_id_stats {
 	__u32	qp_num;
 	__u32	bound_dev_if;
@@ -31,6 +53,79 @@ struct rdma_cm_id_stats {
 	__u8	node_type;
 	__u8	port_num;
 	__u8	qp_type;
+};
+
+enum {
+	IWPM_NLA_REG_PID_UNSPEC = 0,
+	IWPM_NLA_REG_PID_SEQ,
+	IWPM_NLA_REG_IF_NAME,
+	IWPM_NLA_REG_IBDEV_NAME,
+	IWPM_NLA_REG_ULIB_NAME,
+	IWPM_NLA_REG_PID_MAX
+};
+
+enum {
+	IWPM_NLA_RREG_PID_UNSPEC = 0,
+	IWPM_NLA_RREG_PID_SEQ,
+	IWPM_NLA_RREG_IBDEV_NAME,
+	IWPM_NLA_RREG_ULIB_NAME,
+	IWPM_NLA_RREG_ULIB_VER,
+	IWPM_NLA_RREG_PID_ERR,
+	IWPM_NLA_RREG_PID_MAX
+
+};
+
+enum {
+	IWPM_NLA_MANAGE_MAPPING_UNSPEC = 0,
+	IWPM_NLA_MANAGE_MAPPING_SEQ,
+	IWPM_NLA_MANAGE_ADDR,
+	IWPM_NLA_MANAGE_MAPPED_LOC_ADDR,
+	IWPM_NLA_RMANAGE_MAPPING_ERR,
+	IWPM_NLA_RMANAGE_MAPPING_MAX
+};
+
+#define IWPM_NLA_MANAGE_MAPPING_MAX 3
+#define IWPM_NLA_QUERY_MAPPING_MAX  4
+#define IWPM_NLA_MAPINFO_SEND_MAX   3
+
+enum {
+	IWPM_NLA_QUERY_MAPPING_UNSPEC = 0,
+	IWPM_NLA_QUERY_MAPPING_SEQ,
+	IWPM_NLA_QUERY_LOCAL_ADDR,
+	IWPM_NLA_QUERY_REMOTE_ADDR,
+	IWPM_NLA_RQUERY_MAPPED_LOC_ADDR,
+	IWPM_NLA_RQUERY_MAPPED_REM_ADDR,
+	IWPM_NLA_RQUERY_MAPPING_ERR,
+	IWPM_NLA_RQUERY_MAPPING_MAX
+};
+
+enum {
+	IWPM_NLA_MAPINFO_REQ_UNSPEC = 0,
+	IWPM_NLA_MAPINFO_ULIB_NAME,
+	IWPM_NLA_MAPINFO_ULIB_VER,
+	IWPM_NLA_MAPINFO_REQ_MAX
+};
+
+enum {
+	IWPM_NLA_MAPINFO_UNSPEC = 0,
+	IWPM_NLA_MAPINFO_LOCAL_ADDR,
+	IWPM_NLA_MAPINFO_MAPPED_ADDR,
+	IWPM_NLA_MAPINFO_MAX
+};
+
+enum {
+	IWPM_NLA_MAPINFO_NUM_UNSPEC = 0,
+	IWPM_NLA_MAPINFO_SEQ,
+	IWPM_NLA_MAPINFO_SEND_NUM,
+	IWPM_NLA_MAPINFO_ACK_NUM,
+	IWPM_NLA_MAPINFO_NUM_MAX
+};
+
+enum {
+	IWPM_NLA_ERR_UNSPEC = 0,
+	IWPM_NLA_ERR_SEQ,
+	IWPM_NLA_ERR_CODE,
+	IWPM_NLA_ERR_MAX
 };
 
 #ifdef __KERNEL__
@@ -75,7 +170,7 @@ int ibnl_remove_client(int index);
  * Returns the allocated buffer on success and NULL on failure.
  */
 void *ibnl_put_msg(struct sk_buff *skb, struct nlmsghdr **nlh, int seq,
-		   int len, int client, int op);
+		   int len, int client, int op, int flags);
 /**
  * Put a new attribute in a supplied skb.
  * @skb: The netlink skb.
@@ -88,6 +183,26 @@ void *ibnl_put_msg(struct sk_buff *skb, struct nlmsghdr **nlh, int seq,
 int ibnl_put_attr(struct sk_buff *skb, struct nlmsghdr *nlh,
 		  int len, void *data, int type);
 
-#endif /* __KERNEL__ */
+/**
+ * Send the supplied skb to a specific userspace PID.
+ * @skb: The netlink skb
+ * @nlh: Header of the netlink message to send
+ * @pid: Userspace netlink process ID
+ * Returns 0 on success or a negative error code.
+ */
+int ibnl_unicast(struct sk_buff *skb, struct nlmsghdr *nlh,
+			__u32 pid);
 
+/**
+ * Send the supplied skb to a netlink group.
+ * @skb: The netlink skb
+ * @nlh: Header of the netlink message to send
+ * @group: Netlink group ID
+ * @flags: allocation flags
+ * Returns 0 on success or a negative error code.
+ */
+int ibnl_multicast(struct sk_buff *skb, struct nlmsghdr *nlh,
+			unsigned int group, gfp_t flags);
+
+#endif /* KERNEL */
 #endif /* _RDMA_NETLINK_H */

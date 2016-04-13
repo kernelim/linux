@@ -14,6 +14,7 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/syscalls.h>
+#include <linux/key.h>
 #include <linux/keyctl.h>
 #include <linux/fs.h>
 #include <linux/capability.h>
@@ -23,6 +24,8 @@
 #include <linux/security.h>
 #include <asm/uaccess.h>
 #include "internal.h"
+
+#define KEY_MAX_DESC_SIZE 4096
 
 static int key_get_type_from_user(char *type,
 				  const char __user *_type,
@@ -63,7 +66,7 @@ SYSCALL_DEFINE5(add_key, const char __user *, _type,
 	bool vm;
 
 	ret = -EINVAL;
-	if (plen > 1024 * 1024 - 1)
+	if (plen > 1024 * 1024 - 1 || !_description)
 		goto error;
 
 	/* draw all the data into kernel space */
@@ -71,10 +74,18 @@ SYSCALL_DEFINE5(add_key, const char __user *, _type,
 	if (ret < 0)
 		goto error;
 
-	description = strndup_user(_description, PAGE_SIZE);
+	description = strndup_user(_description, KEY_MAX_DESC_SIZE);
 	if (IS_ERR(description)) {
 		ret = PTR_ERR(description);
 		goto error;
+	}
+	if (!*description) {
+		ret = -EINVAL;
+		goto error2;
+	} else if ((description[0] == '.') &&
+		   (strncmp(type, "keyring", 7) == 0)) {
+		ret = -EPERM;
+		goto error2;
 	}
 
 	/* pull the payload in if one was supplied */
@@ -83,7 +94,7 @@ SYSCALL_DEFINE5(add_key, const char __user *, _type,
 	vm = false;
 	if (_payload) {
 		ret = -ENOMEM;
-		payload = kmalloc(plen, GFP_KERNEL);
+		payload = kmalloc(plen, GFP_KERNEL | __GFP_NOWARN);
 		if (!payload) {
 			if (plen <= PAGE_SIZE)
 				goto error2;
@@ -161,7 +172,7 @@ SYSCALL_DEFINE4(request_key, const char __user *, _type,
 		goto error;
 
 	/* pull the description into kernel space */
-	description = strndup_user(_description, PAGE_SIZE);
+	description = strndup_user(_description, KEY_MAX_DESC_SIZE);
 	if (IS_ERR(description)) {
 		ret = PTR_ERR(description);
 		goto error;
@@ -271,7 +282,7 @@ long keyctl_join_session_keyring(const char __user *_name)
 	/* fetch the name from userspace */
 	name = NULL;
 	if (_name) {
-		name = strndup_user(_name, PAGE_SIZE);
+		name = strndup_user(_name, KEY_MAX_DESC_SIZE);
 		if (IS_ERR(name)) {
 			ret = PTR_ERR(name);
 			goto error;
@@ -392,12 +403,25 @@ long keyctl_invalidate_key(key_serial_t id)
 	key_ref = lookup_user_key(id, 0, KEY_SEARCH);
 	if (IS_ERR(key_ref)) {
 		ret = PTR_ERR(key_ref);
+
+		/* Root is permitted to invalidate certain special keys */
+		if (capable(CAP_SYS_ADMIN)) {
+			key_ref = lookup_user_key(id, 0, 0);
+			if (IS_ERR(key_ref))
+				goto error;
+			if (test_bit(KEY_FLAG_ROOT_CAN_INVAL,
+				     &key_ref_to_ptr(key_ref)->flags))
+				goto invalidate;
+			goto error_put;
+		}
+
 		goto error;
 	}
 
+invalidate:
 	key_invalidate(key_ref_to_ptr(key_ref));
 	ret = 0;
-
+error_put:
 	key_ref_put(key_ref);
 error:
 	kleave(" = %ld", ret);
@@ -533,8 +557,9 @@ long keyctl_describe_key(key_serial_t keyid,
 {
 	struct key *key, *instkey;
 	key_ref_t key_ref;
-	char *tmpbuf;
+	char *infobuf;
 	long ret;
+	int desclen, infolen;
 
 	key_ref = lookup_user_key(keyid, KEY_LOOKUP_PARTIAL, KEY_VIEW);
 	if (IS_ERR(key_ref)) {
@@ -557,38 +582,31 @@ long keyctl_describe_key(key_serial_t keyid,
 	}
 
 okay:
-	/* calculate how much description we're going to return */
-	ret = -ENOMEM;
-	tmpbuf = kmalloc(PAGE_SIZE, GFP_KERNEL);
-	if (!tmpbuf)
-		goto error2;
-
 	key = key_ref_to_ptr(key_ref);
+	desclen = strlen(key->description);
 
-	ret = snprintf(tmpbuf, PAGE_SIZE - 1,
-		       "%s;%d;%d;%08x;%s",
-		       key->type->name,
-		       key->uid,
-		       key->gid,
-		       key->perm,
-		       key->description ?: "");
-
-	/* include a NUL char at the end of the data */
-	if (ret > PAGE_SIZE - 1)
-		ret = PAGE_SIZE - 1;
-	tmpbuf[ret] = 0;
-	ret++;
+	/* calculate how much information we're going to return */
+	ret = -ENOMEM;
+	infobuf = kasprintf(GFP_KERNEL,
+			    "%s;%d;%d;%08x;",
+			    key->type->name,
+			    key->uid,
+			    key->gid,
+			    key->perm);
+	if (!infobuf)
+		goto error2;
+	infolen = strlen(infobuf);
+	ret = infolen + desclen + 1;
 
 	/* consider returning the data */
-	if (buffer && buflen > 0) {
-		if (buflen > ret)
-			buflen = ret;
-
-		if (copy_to_user(buffer, tmpbuf, buflen) != 0)
+	if (buffer && buflen >= ret) {
+		if (copy_to_user(buffer, infobuf, infolen) != 0 ||
+		    copy_to_user(buffer + infolen, key->description,
+				 desclen + 1) != 0)
 			ret = -EFAULT;
 	}
 
-	kfree(tmpbuf);
+	kfree(infobuf);
 error2:
 	key_ref_put(key_ref);
 error:
@@ -620,7 +638,7 @@ long keyctl_keyring_search(key_serial_t ringid,
 	if (ret < 0)
 		goto error;
 
-	description = strndup_user(_description, PAGE_SIZE);
+	description = strndup_user(_description, KEY_MAX_DESC_SIZE);
 	if (IS_ERR(description)) {
 		ret = PTR_ERR(description);
 		goto error;
@@ -732,16 +750,16 @@ long keyctl_read_key(key_serial_t keyid, char __user *buffer, size_t buflen)
 
 	/* the key is probably readable - now try to read it */
 can_read_key:
-	ret = key_validate(key);
-	if (ret == 0) {
-		ret = -EOPNOTSUPP;
-		if (key->type->read) {
-			/* read the data with the semaphore held (since we
-			 * might sleep) */
-			down_read(&key->sem);
+	ret = -EOPNOTSUPP;
+	if (key->type->read) {
+		/* Read the data with the semaphore held (since we might sleep)
+		 * to protect against the key being updated or revoked.
+		 */
+		down_read(&key->sem);
+		ret = key_validate(key);
+		if (ret == 0)
 			ret = key->type->read(key, buffer, buflen);
-			up_read(&key->sem);
-		}
+		up_read(&key->sem);
 	}
 
 error2:
@@ -1105,18 +1123,18 @@ long keyctl_instantiate_key_iov(key_serial_t id,
 	struct iovec iovstack[UIO_FASTIOV], *iov = iovstack;
 	long ret;
 
-	if (_payload_iov == 0 || ioc == 0)
+	if (!_payload_iov || !ioc)
 		goto no_payload;
 
 	ret = rw_copy_check_uvector(WRITE, _payload_iov, ioc,
 				    ARRAY_SIZE(iovstack), iovstack, &iov, 1);
 	if (ret < 0)
-		return ret;
+		goto err;
 	if (ret == 0)
 		goto no_payload_free;
 
 	ret = keyctl_instantiate_key_common(id, iov, ioc, ret, ringid);
-
+err:
 	if (iov != iovstack)
 		kfree(iov);
 	return ret;
@@ -1288,10 +1306,8 @@ error:
  */
 long keyctl_set_timeout(key_serial_t id, unsigned timeout)
 {
-	struct timespec now;
 	struct key *key, *instkey;
 	key_ref_t key_ref;
-	time_t expiry;
 	long ret;
 
 	key_ref = lookup_user_key(id, KEY_LOOKUP_CREATE | KEY_LOOKUP_PARTIAL,
@@ -1317,20 +1333,7 @@ long keyctl_set_timeout(key_serial_t id, unsigned timeout)
 
 okay:
 	key = key_ref_to_ptr(key_ref);
-
-	/* make the changes with the locks held to prevent races */
-	down_write(&key->sem);
-
-	expiry = 0;
-	if (timeout > 0) {
-		now = current_kernel_time();
-		expiry = now.tv_sec + timeout;
-	}
-
-	key->expiry = expiry;
-	key_schedule_gc(key->expiry + key_gc_delay);
-
-	up_write(&key->sem);
+	key_set_timeout(key, timeout);
 	key_put(key);
 
 	ret = 0;

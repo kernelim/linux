@@ -439,7 +439,7 @@ static void can_setup(struct net_device *dev)
 
 	/* New-style flags. */
 	dev->flags = IFF_NOARP;
-	dev->features = NETIF_F_NO_CSUM;
+	dev->features = NETIF_F_HW_CSUM;
 }
 
 /*

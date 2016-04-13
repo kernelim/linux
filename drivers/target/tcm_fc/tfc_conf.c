@@ -183,9 +183,33 @@ static ssize_t ft_nacl_store_node_name(
 
 TF_NACL_BASE_ATTR(ft, node_name, S_IRUGO | S_IWUSR);
 
+static ssize_t ft_nacl_show_tag(
+	struct se_node_acl *se_nacl,
+	char *page)
+{
+	return snprintf(page, PAGE_SIZE, "%s", se_nacl->acl_tag);
+}
+
+static ssize_t ft_nacl_store_tag(
+	struct se_node_acl *se_nacl,
+	const char *page,
+	size_t count)
+{
+	int ret;
+
+	ret = core_tpg_set_initiator_node_tag(se_nacl->se_tpg, se_nacl, page);
+
+	if (ret < 0)
+		return ret;
+	return count;
+}
+
+TF_NACL_BASE_ATTR(ft, tag, S_IRUGO | S_IWUSR);
+
 static struct configfs_attribute *ft_nacl_base_attrs[] = {
 	&ft_nacl_port_name.attr,
 	&ft_nacl_node_name.attr,
+	&ft_nacl_tag.attr,
 	NULL,
 };
 

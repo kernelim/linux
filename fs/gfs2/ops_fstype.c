@@ -372,6 +372,9 @@ static int gfs2_read_sb(struct gfs2_sbd *sdp, int silent)
 	}
 	sdp->sd_max_height = x;
 	sdp->sd_heightsize[x] = ~0;
+	sdp->sd_max_dents_per_leaf = (sdp->sd_sb.sb_bsize -
+				      sizeof(struct gfs2_leaf)) /
+				     GFS2_MIN_DIRENT_SIZE;
 	gfs2_assert(sdp, sdp->sd_max_height <= GFS2_MAX_META_HEIGHT);
 
 	sdp->sd_jheightsize[0] = sdp->sd_sb.sb_bsize -

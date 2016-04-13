@@ -407,12 +407,12 @@ static int queue_userspace_packet(struct net *net, int dp_ifindex,
 	struct nlattr *nla;
 	int err;
 
-	if (vlan_tx_tag_present(skb)) {
+	if (skb_vlan_tag_present(skb)) {
 		nskb = skb_clone(skb, GFP_ATOMIC);
 		if (!nskb)
 			return -ENOMEM;
 
-		nskb = __vlan_put_tag(nskb, vlan_tx_tag_get(nskb));
+		nskb = __vlan_put_tag(nskb, skb_vlan_tag_get(nskb));
 		if (!nskb)
 			return -ENOMEM;
 

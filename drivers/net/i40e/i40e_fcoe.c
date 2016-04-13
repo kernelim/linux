@@ -24,7 +24,6 @@
  *
  ******************************************************************************/
 
-
 #include <linux/if_ether.h>
 #include <scsi/scsi_cmnd.h>
 #include <scsi/scsi_device.h>
@@ -119,7 +118,7 @@ static inline int i40e_fcoe_fc_eof(struct sk_buff *skb, u8 *eof)
  *
  * The FC EOF is converted to the value understood by HW for descriptor
  * programming. Never call this w/o calling i40e_fcoe_eof_is_supported()
- * first.
+ * first and that already checks for all supported valid eof values.
  **/
 static inline u32 i40e_fcoe_ctxt_eof(u8 eof)
 {
@@ -133,9 +132,12 @@ static inline u32 i40e_fcoe_ctxt_eof(u8 eof)
 	case FC_EOF_A:
 		return I40E_TX_DESC_CMD_L4T_EOFT_EOF_A;
 	default:
-		/* FIXME: still returns 0 */
-		pr_err("Unrecognized EOF %x\n", eof);
-		return 0;
+		/* Supported valid eof shall be already checked by
+		 * calling i40e_fcoe_eof_is_supported() first,
+		 * therefore this default case shall never hit.
+		 */
+		WARN_ON(1);
+		return -EINVAL;
 	}
 }
 
@@ -150,7 +152,7 @@ static inline bool i40e_fcoe_xid_is_valid(u16 xid)
 
 /**
  * i40e_fcoe_ddp_unmap - unmap the mapped sglist associated
- * @pf: pointer to pf
+ * @pf: pointer to PF
  * @ddp: sw DDP context
  *
  * Unmap the scatter-gather list associated with the given SW DDP context
@@ -269,11 +271,9 @@ out:
 
 /**
  * i40e_fcoe_sw_init - sets up the HW for FCoE
- * @pf: pointer to pf
- *
- * Returns 0 if FCoE is supported otherwise the error code
+ * @pf: pointer to PF
  **/
-int i40e_init_pf_fcoe(struct i40e_pf *pf)
+void i40e_init_pf_fcoe(struct i40e_pf *pf)
 {
 	struct i40e_hw *hw = &pf->hw;
 	u32 val;
@@ -288,20 +288,20 @@ int i40e_init_pf_fcoe(struct i40e_pf *pf)
 	pf->fcoe_hmc_filt_num = 0;
 
 	if (!pf->hw.func_caps.fcoe) {
-		dev_info(&pf->pdev->dev, "FCoE capability is disabled\n");
-		return 0;
+		dev_dbg(&pf->pdev->dev, "FCoE capability is disabled\n");
+		return;
 	}
 
 	if (!pf->hw.func_caps.dcb) {
 		dev_warn(&pf->pdev->dev,
 			 "Hardware is not DCB capable not enabling FCoE.\n");
-		return 0;
+		return;
 	}
 
 	/* enable FCoE hash filter */
 	val = rd32(hw, I40E_PFQF_HENA(1));
-	val |= 1 << (I40E_FILTER_PCTYPE_FCOE_OX - 32);
-	val |= 1 << (I40E_FILTER_PCTYPE_FCOE_RX - 32);
+	val |= BIT(I40E_FILTER_PCTYPE_FCOE_OX - 32);
+	val |= BIT(I40E_FILTER_PCTYPE_FCOE_RX - 32);
 	val &= I40E_PFQF_HENA_PTYPE_ENA_MASK;
 	wr32(hw, I40E_PFQF_HENA(1), val);
 
@@ -310,10 +310,10 @@ int i40e_init_pf_fcoe(struct i40e_pf *pf)
 	pf->num_fcoe_qps = I40E_DEFAULT_FCOE;
 
 	/* Reserve 4K DDP contexts and 20K filter size for FCoE */
-	pf->fcoe_hmc_cntx_num = (1 << I40E_DMA_CNTX_SIZE_4K) *
-				 I40E_DMA_CNTX_BASE_SIZE;
+	pf->fcoe_hmc_cntx_num = BIT(I40E_DMA_CNTX_SIZE_4K) *
+				I40E_DMA_CNTX_BASE_SIZE;
 	pf->fcoe_hmc_filt_num = pf->fcoe_hmc_cntx_num +
-				(1 << I40E_HASH_FILTER_SIZE_16K) *
+				BIT(I40E_HASH_FILTER_SIZE_16K) *
 				I40E_HASH_FILTER_BASE_SIZE;
 
 	/* FCoE object: max 16K filter buckets and 4K DMA contexts */
@@ -328,12 +328,11 @@ int i40e_init_pf_fcoe(struct i40e_pf *pf)
 	wr32(hw, I40E_GLFCOE_RCTL, val);
 
 	dev_info(&pf->pdev->dev, "FCoE is supported.\n");
-	return 0;
 }
 
 /**
  * i40e_get_fcoe_tc_map - Return TC map for FCoE APP
- * @pf: pointer to pf
+ * @pf: pointer to PF
  *
  **/
 u8 i40e_get_fcoe_tc_map(struct i40e_pf *pf)
@@ -350,7 +349,7 @@ u8 i40e_get_fcoe_tc_map(struct i40e_pf *pf)
 		if (app.selector == IEEE_8021QAZ_APP_SEL_ETHERTYPE &&
 		    app.protocolid == ETH_P_FCOE) {
 			tc = dcbcfg->etscfg.prioritytable[app.priority];
-			enabled_tc |= (1 << tc);
+			enabled_tc |= BIT(tc);
 			break;
 		}
 	}
@@ -1313,8 +1312,7 @@ static void i40e_fcoe_tx_map(struct i40e_ring *tx_ring,
 	/* MACLEN is ether header length in words not bytes */
 	td_offset |= (maclen >> 1) << I40E_TX_DESC_LENGTH_MACLEN_SHIFT;
 
-	return i40e_tx_map(tx_ring, skb, first, tx_flags, hdr_len,
-			   td_cmd, td_offset);
+	i40e_tx_map(tx_ring, skb, first, tx_flags, hdr_len, td_cmd, td_offset);
 }
 
 /**
@@ -1453,7 +1451,6 @@ static int i40e_fcoe_set_features(struct net_device *netdev,
 	return 0;
 }
 
-
 static const struct net_device_ops i40e_fcoe_netdev_ops = {
 	.ndo_open		= i40e_open,
 	.ndo_stop		= i40e_close,
@@ -1488,6 +1485,10 @@ static const struct net_device_ops_ext i40e_fcoe_netdev_ops_ext = {
 	.ndo_set_features	= i40e_fcoe_set_features,
 };
 
+/* fcoe network device type */
+static struct device_type fcoe_netdev_type = {
+	.name = "fcoe",
+};
 
 /**
  * i40e_fcoe_config_netdev - prepares the VSI context for creating a FCoE VSI
@@ -1526,10 +1527,19 @@ void i40e_fcoe_config_netdev(struct net_device *netdev, struct i40e_vsi *vsi)
 	strlcpy(netdev->name, "fcoe%d", IFNAMSIZ-1);
 	netdev->mtu = FCOE_MTU;
 	SET_NETDEV_DEV(netdev, &pf->pdev->dev);
+	SET_NETDEV_DEVTYPE(netdev, &fcoe_netdev_type);
+	/* set different dev_port value 1 for FCoE netdev than the default
+	 * zero dev_port value for PF netdev, this helps biosdevname user
+	 * tool to differentiate them correctly while both attached to the
+	 * same PCI function.
+	 */
+	netdev->dev_port = 1;
+	spin_lock_bh(&vsi->mac_filter_list_lock);
 	i40e_add_filter(vsi, hw->mac.san_addr, 0, false, false);
 	i40e_add_filter(vsi, (u8[6]) FC_FCOE_FLOGI_MAC, 0, false, false);
 	i40e_add_filter(vsi, FIP_ALL_FCOE_MACS, 0, false, false);
 	i40e_add_filter(vsi, FIP_ALL_ENODE_MACS, 0, false, false);
+	spin_unlock_bh(&vsi->mac_filter_list_lock);
 
 	/* use san mac */
 	ether_addr_copy(netdev->dev_addr, hw->mac.san_addr);
@@ -1540,7 +1550,7 @@ void i40e_fcoe_config_netdev(struct net_device *netdev, struct i40e_vsi *vsi)
 
 /**
  * i40e_fcoe_vsi_setup - allocate and set up FCoE VSI
- * @pf: the pf that VSI is associated with
+ * @pf: the PF that VSI is associated with
  *
  **/
 void i40e_fcoe_vsi_setup(struct i40e_pf *pf)
@@ -1551,8 +1561,6 @@ void i40e_fcoe_vsi_setup(struct i40e_pf *pf)
 
 	if (!(pf->flags & I40E_FLAG_FCOE_ENABLED))
 		return;
-
-	BUG_ON(!pf->vsi[pf->lan_vsi]);
 
 	for (i = 0; i < pf->num_alloc_vsi; i++) {
 		vsi = pf->vsi[i];
@@ -1567,7 +1575,7 @@ void i40e_fcoe_vsi_setup(struct i40e_pf *pf)
 	vsi = i40e_vsi_setup(pf, I40E_VSI_FCOE, seid, 0);
 	if (vsi) {
 		dev_dbg(&pf->pdev->dev,
-			"Successfully created FCoE VSI seid %d id %d uplink_seid %d pf seid %d\n",
+			"Successfully created FCoE VSI seid %d id %d uplink_seid %d PF seid %d\n",
 			vsi->seid, vsi->id, vsi->uplink_seid, seid);
 	} else {
 		dev_info(&pf->pdev->dev, "Failed to create FCoE VSI\n");

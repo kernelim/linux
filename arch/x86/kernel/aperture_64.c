@@ -275,6 +275,9 @@ void __init early_gart_iommu_check(void)
 	u64 aper_base = 0, last_aper_base = 0;
 	int aper_enabled = 0, last_aper_enabled = 0, last_valid = 0;
 
+	if (!amd_gart_present())
+		return;
+
 	if (!early_pci_allowed())
 		return;
 
@@ -366,6 +369,9 @@ void __init gart_iommu_hole_init(void)
 	u64 aper_base, last_aper_base = 0;
 	int fix, slot, valid_agp = 0;
 	int i, node;
+
+	if (!amd_gart_present())
+		return;
 
 	if (gart_iommu_aperture_disabled || !fix_aperture ||
 	    !early_pci_allowed())
@@ -467,7 +473,7 @@ out:
 		   valid_agp ||
 		   fallback_aper_force) {
 		printk(KERN_INFO
-			"Your BIOS doesn't leave a aperture memory hole\n");
+			"Your BIOS doesn't leave an aperture memory hole\n");
 		printk(KERN_INFO
 			"Please enable the IOMMU option in the BIOS setup\n");
 		printk(KERN_INFO

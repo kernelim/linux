@@ -1004,7 +1004,7 @@ char *get_task_comm(char *buf, struct task_struct *tsk)
 }
 EXPORT_SYMBOL_GPL(get_task_comm);
 
-void set_task_comm(struct task_struct *tsk, char *buf)
+void __set_task_comm(struct task_struct *tsk, char *buf, bool exec)
 {
 	task_lock(tsk);
 
@@ -1018,7 +1018,7 @@ void set_task_comm(struct task_struct *tsk, char *buf)
 	wmb();
 	strlcpy(tsk->comm, buf, sizeof(tsk->comm));
 	task_unlock(tsk);
-	perf_event_comm(tsk);
+	perf_event_comm(tsk, exec);
 }
 
 int flush_old_exec(struct linux_binprm * bprm)
@@ -1083,7 +1083,7 @@ void setup_new_exec(struct linux_binprm * bprm)
 				tcomm[i++] = ch;
 	}
 	tcomm[i] = '\0';
-	set_task_comm(current, tcomm);
+	__set_task_comm(current, tcomm, true);
 
 	/* Set the new mm task size. We have to do that late because it may
 	 * depend on TIF_32BIT which is only updated in flush_thread() on
@@ -2133,6 +2133,9 @@ void do_coredump(long signr, int exit_code, struct pt_regs *regs)
 			       __func__);
 			goto fail_dropcount;
 		}
+
+		if (!helper_argv[0])
+			goto fail_dropcount;
 
 		cprm.limit = RLIM_INFINITY;
 

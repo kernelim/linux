@@ -41,7 +41,7 @@ static int
 nv40_get_intensity(struct backlight_device *bd)
 {
 	struct nouveau_drm *drm = bl_get_data(bd);
-	struct nvif_device *device = &drm->device;
+	struct nvif_object *device = &drm->device.object;
 	int val = (nvif_rd32(device, NV40_PMC_BACKLIGHT) &
 				   NV40_PMC_BACKLIGHT_MASK) >> 16;
 
@@ -52,7 +52,7 @@ static int
 nv40_set_intensity(struct backlight_device *bd)
 {
 	struct nouveau_drm *drm = bl_get_data(bd);
-	struct nvif_device *device = &drm->device;
+	struct nvif_object *device = &drm->device.object;
 	int val = bd->props.brightness;
 	int reg = nvif_rd32(device, NV40_PMC_BACKLIGHT);
 
@@ -72,7 +72,7 @@ static int
 nv40_backlight_init(struct drm_connector *connector)
 {
 	struct nouveau_drm *drm = nouveau_drm(connector->dev);
-	struct nvif_device *device = &drm->device;
+	struct nvif_object *device = &drm->device.object;
 	struct backlight_device *bd;
 
 	if (!(nvif_rd32(device, NV40_PMC_BACKLIGHT) & NV40_PMC_BACKLIGHT_MASK))
@@ -95,7 +95,7 @@ nv50_get_intensity(struct backlight_device *bd)
 {
 	struct nouveau_encoder *nv_encoder = bl_get_data(bd);
 	struct nouveau_drm *drm = nouveau_drm(nv_encoder->base.base.dev);
-	struct nvif_device *device = &drm->device;
+	struct nvif_object *device = &drm->device.object;
 	int or = nv_encoder->or;
 	u32 div = 1025;
 	u32 val;
@@ -110,7 +110,7 @@ nv50_set_intensity(struct backlight_device *bd)
 {
 	struct nouveau_encoder *nv_encoder = bl_get_data(bd);
 	struct nouveau_drm *drm = nouveau_drm(nv_encoder->base.base.dev);
-	struct nvif_device *device = &drm->device;
+	struct nvif_object *device = &drm->device.object;
 	int or = nv_encoder->or;
 	u32 div = 1025;
 	u32 val = (bd->props.brightness * div) / 100;
@@ -131,7 +131,7 @@ nva3_get_intensity(struct backlight_device *bd)
 {
 	struct nouveau_encoder *nv_encoder = bl_get_data(bd);
 	struct nouveau_drm *drm = nouveau_drm(nv_encoder->base.base.dev);
-	struct nvif_device *device = &drm->device;
+	struct nvif_object *device = &drm->device.object;
 	int or = nv_encoder->or;
 	u32 div, val;
 
@@ -149,7 +149,7 @@ nva3_set_intensity(struct backlight_device *bd)
 {
 	struct nouveau_encoder *nv_encoder = bl_get_data(bd);
 	struct nouveau_drm *drm = nouveau_drm(nv_encoder->base.base.dev);
-	struct nvif_device *device = &drm->device;
+	struct nvif_object *device = &drm->device.object;
 	int or = nv_encoder->or;
 	u32 div, val;
 
@@ -175,7 +175,7 @@ static int
 nv50_backlight_init(struct drm_connector *connector)
 {
 	struct nouveau_drm *drm = nouveau_drm(connector->dev);
-	struct nvif_device *device = &drm->device;
+	struct nvif_object *device = &drm->device.object;
 	struct nouveau_encoder *nv_encoder;
 	struct backlight_device *bd;
 	struct backlight_ops *ops;
@@ -190,9 +190,9 @@ nv50_backlight_init(struct drm_connector *connector)
 	if (!nvif_rd32(device, NV50_PDISP_SOR_PWM_CTL(nv_encoder->or)))
 		return 0;
 
-	if (device->info.chipset <= 0xa0 ||
-	    device->info.chipset == 0xaa ||
-	    device->info.chipset == 0xac)
+	if (drm->device.info.chipset <= 0xa0 ||
+	    drm->device.info.chipset == 0xaa ||
+	    drm->device.info.chipset == 0xac)
 		ops = &nv50_bl_ops;
 	else
 		ops = &nva3_bl_ops;

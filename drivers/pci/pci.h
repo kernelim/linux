@@ -209,16 +209,6 @@ extern int pci_resource_bar(struct pci_dev *dev, int resno,
 			    enum pci_bar_type *type);
 extern int pci_bus_add_child(struct pci_bus *bus);
 extern void pci_enable_ari(struct pci_dev *dev);
-/**
- * pci_ari_enabled - query ARI forwarding status
- * @bus: the PCI bus
- *
- * Returns 1 if ARI forwarding is enabled, or 0 if not enabled;
- */
-static inline int pci_ari_enabled(struct pci_bus *bus)
-{
-	return bus->self && bus->self->ari_enabled;
-}
 
 void pci_reassigndev_resource_alignment(struct pci_dev *dev);
 extern void pci_disable_bridge_window(struct pci_dev *dev);
@@ -279,7 +269,8 @@ extern int pci_iov_init(struct pci_dev *dev);
 extern void pci_iov_release(struct pci_dev *dev);
 extern int pci_iov_resource_bar(struct pci_dev *dev, int resno,
 				enum pci_bar_type *type);
-extern int pci_sriov_resource_alignment(struct pci_dev *dev, int resno);
+extern resource_size_t pci_sriov_resource_alignment(struct pci_dev *dev,
+						    int resno);
 extern void pci_restore_iov_state(struct pci_dev *dev);
 extern int pci_iov_bus_range(struct pci_bus *bus);
 
@@ -337,7 +328,7 @@ static inline int pci_ats_enabled(struct pci_dev *dev)
 
 extern unsigned long pci_cardbus_resource_alignment(struct resource *);
 
-static inline int pci_resource_alignment(struct pci_dev *dev,
+static inline resource_size_t pci_resource_alignment(struct pci_dev *dev,
 					 struct resource *res)
 {
 #ifdef CONFIG_PCI_IOV

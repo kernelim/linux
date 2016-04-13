@@ -91,6 +91,9 @@ struct scan_control {
 	 * are scanned.
 	 */
 	nodemask_t	*nodemask;
+
+	/* Force scanning of anon pages if OOM kill is imminent */
+	bool oom_force_anon_scan;
 };
 
 struct mem_cgroup_zone {
@@ -241,6 +244,9 @@ unsigned long shrink_slab(unsigned long scanned, gfp_t gfp_mask,
 		unsigned long max_pass;
 
 		max_pass = (*shrinker->shrink)(shrinker, 0, gfp_mask);
+		/* -> shrink returns an int; many have overflow issues */
+		if (max_pass > INT_MAX)
+			max_pass = INT_MAX;
 		delta = (4 * scanned) / shrinker->seeks;
 		delta *= max_pass;
 		do_div(delta, lru_pages + 1);
@@ -1828,7 +1834,8 @@ static void shrink_mem_cgroup_zone(int priority, struct mem_cgroup_zone *mz,
 		unsigned long scan;
 
 		scan = zone_nr_lru_pages(mz, l);
-		if (priority || noswap || !sc->swappiness) {
+		if (priority || noswap ||
+		    (!sc->swappiness && !sc->oom_force_anon_scan)) {
 			scan >>= priority;
 			scan = (scan * percent[file]) / 100;
 		}
@@ -2159,6 +2166,7 @@ static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
 	}
 
 	for (priority = DEF_PRIORITY; priority >= 0; priority--) {
+retry:
 		sc->nr_scanned = 0;
 		if (!priority)
 			disable_swap_token();
@@ -2203,6 +2211,19 @@ static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
 						&cpuset_current_mems_allowed,
 						&preferred_zone);
 			wait_iff_congested(preferred_zone, BLK_RW_ASYNC, HZ/10);
+		}
+
+		/*
+		 * When swappiness == 0, and under heavy pagecache pressure,
+		 * direct reclaim may fail to reclaim cache pages.
+		 * Let's try once more and force scan of anonymous pages this
+		 * time to avoid OOM kill if possible.
+		 */
+		if (!priority && !sc->swappiness && !sc->nr_reclaimed &&
+		    !sc->oom_force_anon_scan &&
+		    sc->may_swap && (get_nr_swap_pages() > 0)) {
+			sc->oom_force_anon_scan = true;
+			goto retry;
 		}
 	}
 	/* top priority shrink_zones still had more to do? don't OOM, then */
@@ -2261,6 +2282,7 @@ unsigned long try_to_free_pages(struct zonelist *zonelist, int order,
 		.order = order,
 		.target_mem_cgroup = NULL,
 		.nodemask = nodemask,
+		.oom_force_anon_scan = false,
 	};
 
 	trace_mm_vmscan_direct_reclaim_begin(order,
@@ -2288,6 +2310,7 @@ unsigned long mem_cgroup_shrink_node_zone(struct mem_cgroup *mem,
 		.swappiness = swappiness,
 		.order = 0,
 		.target_mem_cgroup = mem,
+		.oom_force_anon_scan = false,
 	};
 	struct mem_cgroup_zone mz = {
 		.mem_cgroup = mem,
@@ -2326,6 +2349,7 @@ unsigned long try_to_free_mem_cgroup_pages(struct mem_cgroup *mem_cont,
 		.order = 0,
 		.target_mem_cgroup = mem_cont,
 		.nodemask = NULL, /* we don't care the placement */
+		.oom_force_anon_scan = false,
 	};
 
 	sc.gfp_mask = (gfp_mask & GFP_RECLAIM_MASK) |
@@ -2426,6 +2450,7 @@ static unsigned long balance_pgdat(pg_data_t *pgdat, int order)
 		.swappiness = vm_swappiness,
 		.order = order,
 		.target_mem_cgroup = NULL,
+		.oom_force_anon_scan = false,
 	};
 	/*
 	 * temp_priority is used to remember the scanning priority at which
@@ -2857,6 +2882,7 @@ unsigned long shrink_all_memory(unsigned long nr_to_reclaim)
 		.hibernation_mode = 1,
 		.swappiness = vm_swappiness,
 		.order = 0,
+		.oom_force_anon_scan = false,
 	};
 	struct zonelist * zonelist = node_zonelist(numa_node_id(), sc.gfp_mask);
 	struct task_struct *p = current;
@@ -3030,6 +3056,7 @@ static int __zone_reclaim(struct zone *zone, gfp_t gfp_mask, unsigned int order)
 		.gfp_mask = gfp_mask,
 		.swappiness = vm_swappiness,
 		.order = order,
+		.oom_force_anon_scan = false,
 	};
 	unsigned long slab_reclaimable;
 

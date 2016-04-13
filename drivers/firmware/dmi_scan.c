@@ -15,9 +15,11 @@
  * of and an antecedent to, SMBIOS, which stands for System
  * Management BIOS.  See further: http://www.dmtf.org/standards
  */
-static char dmi_empty_string[] = "        ";
+static const char dmi_empty_string[] = "        ";
 
-static u16 __initdata dmi_ver;
+static u32 dmi_ver __initdata;
+static u32 dmi_len;
+static u16 dmi_num;
 /*
  * Catch too early calls to dmi_check_system():
  */
@@ -29,6 +31,9 @@ static struct dmi_memdev_info {
 	u16 handle;
 } *dmi_memdev;
 static int dmi_memdev_nr;
+
+/* DMI system identification string used during boot */
+static char dmi_ids_string[128] __initdata;
 
 static const char * __init dmi_string_nosave(const struct dmi_header *dm, u8 s)
 {
@@ -54,7 +59,7 @@ static const char * __init dmi_string_nosave(const struct dmi_header *dm, u8 s)
 	return "";
 }
 
-static char * __init dmi_string(const struct dmi_header *dm, u8 s)
+static const char * __init dmi_string(const struct dmi_header *dm, u8 s)
 {
 	const char *bp = dmi_string_nosave(dm, s);
 	char *str;
@@ -67,8 +72,6 @@ static char * __init dmi_string(const struct dmi_header *dm, u8 s)
 	str = dmi_alloc(len);
 	if (str != NULL)
 		strcpy(str, bp);
-	else
-		printk(KERN_ERR "dmi_string: cannot allocate %Zu bytes.\n", len);
 
 	return str;
 }
@@ -77,18 +80,21 @@ static char * __init dmi_string(const struct dmi_header *dm, u8 s)
  *	We have to be cautious here. We have seen BIOSes with DMI pointers
  *	pointing to completely the wrong place for example
  */
-static void dmi_table(u8 *buf, int len, int num,
-		      void (*decode)(const struct dmi_header *, void *),
-		      void *private_data)
+static void dmi_decode_table(u8 *buf,
+			     void (*decode)(const struct dmi_header *, void *),
+			     void *private_data)
 {
 	u8 *data = buf;
 	int i = 0;
 
 	/*
-	 *	Stop when we see all the items the table claimed to have
-	 *	OR we run off the end of the table (also happens)
+	 * Stop when we have seen all the items the table claimed to have
+	 * (SMBIOS < 3.0 only) OR we reach an end-of-table marker (SMBIOS
+	 * >= 3.0 only) OR we run off the end of the table (should never
+	 * happen but sometimes does on bogus implementations.)
 	 */
-	while ((i < num) && (data - buf + sizeof(struct dmi_header)) <= len) {
+	while ((i < dmi_num) && (data - buf + sizeof(struct dmi_header))
+		<= dmi_len) {
 		const struct dmi_header *dm = (const struct dmi_header *)data;
 
 		/*
@@ -97,56 +103,72 @@ static void dmi_table(u8 *buf, int len, int num,
 		 *  table in dmi_decode or dmi_string
 		 */
 		data += dm->length;
-		while ((data - buf < len - 1) && (data[0] || data[1]))
+		while ((data - buf < dmi_len - 1) && (data[0] || data[1]))
 			data++;
-		if (data - buf < len - 1)
+		if (data - buf < dmi_len - 1)
 			decode(dm, private_data);
+
 		data += 2;
 		i++;
+
+		/*
+		 * 7.45 End-of-Table (Type 127) [SMBIOS reference spec v3.0.0]
+		 * For tables behind a 64-bit entry point, we have no item
+		 * count and no exact table length, so stop on end-of-table
+		 * marker. For tables behind a 32-bit entry point, we have
+		 * seen OEM structures behind the end-of-table marker on
+		 * some systems, so don't trust it.
+		 */
+		if (!dmi_num && dm->type == DMI_ENTRY_END_OF_TABLE)
+			break;
 	}
+
+	/* Trim DMI table length if needed */
+	if (dmi_len > data - buf)
+		dmi_len = data - buf;
 }
 
-static u32 dmi_base;
-static u16 dmi_len;
-static u16 dmi_num;
+static phys_addr_t dmi_base;
 
 static int __init dmi_walk_early(void (*decode)(const struct dmi_header *,
 		void *))
 {
 	u8 *buf;
+	u32 orig_dmi_len = dmi_len;
 
-	buf = dmi_ioremap(dmi_base, dmi_len);
+	buf = dmi_early_remap(dmi_base, orig_dmi_len);
 	if (buf == NULL)
 		return -1;
 
-	dmi_table(buf, dmi_len, dmi_num, decode, NULL);
+	dmi_decode_table(buf, decode, NULL);
 
-	dmi_iounmap(buf, dmi_len);
+	dmi_early_unmap(buf, orig_dmi_len);
 	return 0;
 }
 
-static int __init dmi_checksum(const u8 *buf)
+static int __init dmi_checksum(const u8 *buf, u8 len)
 {
 	u8 sum = 0;
 	int a;
 
-	for (a = 0; a < 15; a++)
+	for (a = 0; a < len; a++)
 		sum += buf[a];
 
 	return sum == 0;
 }
 
-static char *dmi_ident[DMI_STRING_MAX];
+static const char *dmi_ident[DMI_STRING_MAX];
 static LIST_HEAD(dmi_devices);
 int dmi_available;
 
 /*
  *	Save a DMI string
  */
-static void __init dmi_save_ident(const struct dmi_header *dm, int slot, int string)
+static void __init dmi_save_ident(const struct dmi_header *dm, int slot,
+		int string)
 {
-	const char *d = (const char*) dm;
-	char *p;
+	const char *d = (const char *) dm;
+	const char *p;
 
 	if (dmi_ident[slot])
 		return;
@@ -175,9 +197,10 @@ static int __init setup_smbios_26_uuid(char *str)
 }
 early_param("smbios_26_uuid", setup_smbios_26_uuid);
 
-static void __init dmi_save_uuid(const struct dmi_header *dm, int slot, int index)
+static void __init dmi_save_uuid(const struct dmi_header *dm, int slot,
+		int index)
 {
-	const u8 *d = (u8*) dm + index;
+	const u8 *d = (u8 *) dm + index;
 	char *s;
 	int is_ff = 1, is_00 = 1, i;
 
@@ -203,17 +226,18 @@ static void __init dmi_save_uuid(const struct dmi_header *dm, int slot, int inde
 	 * the UUID are supposed to be little-endian encoded.  The specification
 	 * says that this is the defacto standard.
 	 */
-	if (smbios_26_uuid && dmi_ver >= 0x0206)
+	if (smbios_26_uuid && dmi_ver >= 0x020600)
 		sprintf(s, "%pUL", d);
 	else
 		sprintf(s, "%pUB", d);
 
-        dmi_ident[slot] = s;
+	dmi_ident[slot] = s;
 }
 
-static void __init dmi_save_type(const struct dmi_header *dm, int slot, int index)
+static void __init dmi_save_type(const struct dmi_header *dm, int slot,
+		int index)
 {
-	const u8 *d = (u8*) dm + index;
+	const u8 *d = (u8 *) dm + index;
 	char *s;
 
 	if (dmi_ident[slot])
@@ -308,10 +332,8 @@ static void __init dmi_save_one_device(int type, const char *name)
 		return;
 
 	dev = dmi_alloc(sizeof(*dev) + strlen(name) + 1);
-	if (!dev) {
-		printk(KERN_ERR "dmi_save_one_device: out of memory.\n");
+	if (!dev)
 		return;
-	}
 
 	dev->type = type;
 	strcpy((char *)(dev + 1), name);
@@ -341,17 +363,14 @@ static void __init dmi_save_oem_strings_devices(const struct dmi_header *dm)
 	struct dmi_device *dev;
 
 	for (i = 1; i <= count; i++) {
-		char *devname = dmi_string(dm, i);
+		const char *devname = dmi_string(dm, i);
 
 		if (devname == dmi_empty_string)
 			continue;
 
 		dev = dmi_alloc(sizeof(*dev));
-		if (!dev) {
-			printk(KERN_ERR
-			   "dmi_save_oem_strings_devices: out of memory.\n");
+		if (!dev)
 			break;
-		}
 
 		dev->type = DMI_DEV_TYPE_OEM_STRING;
 		dev->name = devname;
@@ -364,21 +383,17 @@ static void __init dmi_save_oem_strings_devices(const struct dmi_header *dm)
 static void __init dmi_save_ipmi_device(const struct dmi_header *dm)
 {
 	struct dmi_device *dev;
-	void * data;
+	void *data;
 
 	data = dmi_alloc(dm->length);
-	if (data == NULL) {
-		printk(KERN_ERR "dmi_save_ipmi_device: out of memory.\n");
+	if (data == NULL)
 		return;
-	}
 
 	memcpy(data, dm, dm->length);
 
 	dev = dmi_alloc(sizeof(*dev));
-	if (!dev) {
-		printk(KERN_ERR "dmi_save_ipmi_device: out of memory.\n");
+	if (!dev)
 		return;
-	}
 
 	dev->type = DMI_DEV_TYPE_IPMI;
 	dev->name = "IPMI controller";
@@ -393,10 +408,9 @@ static void __init dmi_save_dev_onboard(int instance, int segment, int bus,
 	struct dmi_dev_onboard *onboard_dev;
 
 	onboard_dev = dmi_alloc(sizeof(*onboard_dev) + strlen(name) + 1);
-	if (!onboard_dev) {
-		printk(KERN_ERR "dmi_save_dev_onboard: out of memory.\n");
+	if (!onboard_dev)
 		return;
-	}
+
 	onboard_dev->instance = instance;
 	onboard_dev->segment = segment;
 	onboard_dev->bus = bus;
@@ -412,7 +426,7 @@ static void __init dmi_save_dev_onboard(int instance, int segment, int bus,
 
 static void __init dmi_save_extended_devices(const struct dmi_header *dm)
 {
-	const u8 *d = (u8*) dm + 5;
+	const u8 *d = (u8 *) dm + 5;
 
 	/* Skip disabled device */
 	if ((*d & 0x80) == 0)
@@ -466,7 +480,7 @@ void __init dmi_memdev_walk(void)
  */
 static void __init dmi_decode(const struct dmi_header *dm, void *dummy)
 {
-	switch(dm->type) {
+	switch (dm->type) {
 	case 0:		/* BIOS Information */
 		dmi_save_ident(dm, DMI_BIOS_VENDOR, 4);
 		dmi_save_ident(dm, DMI_BIOS_VERSION, 5);
@@ -512,63 +526,126 @@ static void __init dmi_decode(const struct dmi_header *dm, void *dummy)
 	}
 }
 
-static void __init print_filtered(const char *info)
+static int __init print_filtered(char *buf, size_t len, const char *info)
 {
+	int c = 0;
 	const char *p;
 
 	if (!info)
-		return;
+		return c;
 
 	for (p = info; *p; p++)
 		if (isprint(*p))
-			printk(KERN_CONT "%c", *p);
+			c += scnprintf(buf + c, len - c, "%c", *p);
 		else
-			printk(KERN_CONT "\\x%02x", *p & 0xff);
+			c += scnprintf(buf + c, len - c, "\\x%02x", *p & 0xff);
+	return c;
 }
 
-static void __init dmi_dump_ids(void)
+static void __init dmi_format_ids(char *buf, size_t len)
 {
+	int c = 0;
 	const char *board;	/* Board Name is optional */
 
-	printk(KERN_DEBUG "DMI: ");
-	print_filtered(dmi_get_system_info(DMI_SYS_VENDOR));
-	printk(KERN_CONT " ");
-	print_filtered(dmi_get_system_info(DMI_PRODUCT_NAME));
+	c += print_filtered(buf + c, len - c,
+			    dmi_get_system_info(DMI_SYS_VENDOR));
+	c += scnprintf(buf + c, len - c, " ");
+	c += print_filtered(buf + c, len - c,
+			    dmi_get_system_info(DMI_PRODUCT_NAME));
+
 	board = dmi_get_system_info(DMI_BOARD_NAME);
 	if (board) {
-		printk(KERN_CONT "/");
-		print_filtered(board);
+		c += scnprintf(buf + c, len - c, "/");
+		c += print_filtered(buf + c, len - c, board);
 	}
-	printk(KERN_CONT ", BIOS ");
-	print_filtered(dmi_get_system_info(DMI_BIOS_VERSION));
-	printk(KERN_CONT " ");
-	print_filtered(dmi_get_system_info(DMI_BIOS_DATE));
-	printk(KERN_CONT "\n");
+	c += scnprintf(buf + c, len - c, ", BIOS ");
+	c += print_filtered(buf + c, len - c,
+			    dmi_get_system_info(DMI_BIOS_VERSION));
+	c += scnprintf(buf + c, len - c, " ");
+	c += print_filtered(buf + c, len - c,
+			    dmi_get_system_info(DMI_BIOS_DATE));
 }
 
-static int __init dmi_present(const char __iomem *p)
+/*
+ * Check for DMI/SMBIOS headers in the system firmware image.  Any
+ * SMBIOS header must start 16 bytes before the DMI header, so take a
+ * 32 byte buffer and check for DMI at offset 16 and SMBIOS at offset
+ * 0.  If the DMI header is present, set dmi_ver accordingly (SMBIOS
+ * takes precedence) and return 0.  Otherwise return 1.
+ */
+static int __init dmi_present(const u8 *buf)
 {
-	u8 buf[15];
+	u32 smbios_ver;
 
-	memcpy_fromio(buf, p, 15);
-	if ((memcmp(buf, "_DMI_", 5) == 0) && dmi_checksum(buf)) {
-		dmi_num = (buf[13] << 8) | buf[12];
-		dmi_len = (buf[7] << 8) | buf[6];
-		dmi_base = (buf[11] << 24) | (buf[10] << 16) |
-			(buf[9] << 8) | buf[8];
+	if (memcmp(buf, "_SM_", 4) == 0 &&
+	    buf[5] < 32 && dmi_checksum(buf, buf[5])) {
+		smbios_ver = get_unaligned_be16(buf + 6);
 
-		/*
-		 * DMI version 0.0 means that the real version is taken from
-		 * the SMBIOS version, which we don't know at this point.
-		 */
-		dmi_ver = (buf[14] & 0xf0) << 4 | (buf[14] & 0x0f);
-		if (buf[14] != 0)
-			printk(KERN_INFO "DMI %d.%d present.\n",
-			       buf[14] >> 4, buf[14] & 0xF);
+		/* Some BIOS report weird SMBIOS version, fix that up */
+		switch (smbios_ver) {
+		case 0x021F:
+		case 0x0221:
+			pr_debug("SMBIOS version fixup (2.%d->2.%d)\n",
+				 smbios_ver & 0xFF, 3);
+			smbios_ver = 0x0203;
+			break;
+		case 0x0233:
+			pr_debug("SMBIOS version fixup (2.%d->2.%d)\n", 51, 6);
+			smbios_ver = 0x0206;
+			break;
+		}
+	} else {
+		smbios_ver = 0;
+	}
+
+	buf += 16;
+
+	if (memcmp(buf, "_DMI_", 5) == 0 && dmi_checksum(buf, 15)) {
+		if (smbios_ver)
+			dmi_ver = smbios_ver;
 		else
-			printk(KERN_INFO "DMI present.\n");
+			dmi_ver = (buf[14] & 0xF0) << 4 | (buf[14] & 0x0F);
+		dmi_ver <<= 8;
+		dmi_num = get_unaligned_le16(buf + 12);
+		dmi_len = get_unaligned_le16(buf + 6);
+		dmi_base = get_unaligned_le32(buf + 8);
+
 		if (dmi_walk_early(dmi_decode) == 0) {
-			dmi_dump_ids();
+			if (smbios_ver) {
+				pr_info("SMBIOS %d.%d present.\n",
+				       dmi_ver >> 16, (dmi_ver >> 8) & 0xFF);
+			} else {
+				pr_info("Legacy DMI %d.%d present.\n",
+				       dmi_ver >> 16, (dmi_ver >> 8) & 0xFF);
+			}
+			dmi_format_ids(dmi_ids_string, sizeof(dmi_ids_string));
+			printk(KERN_DEBUG "DMI: %s\n", dmi_ids_string);
+			return 0;
+		}
+	}
+
+	return 1;
+}
+
+/*
+ * Check for the SMBIOS 3.0 64-bit entry point signature. Unlike the legacy
+ * 32-bit entry point, there is no embedded DMI header (_DMI_) in here.
+ */
+static int __init dmi_smbios3_present(const u8 *buf)
+{
+	if (memcmp(buf, "_SM3_", 5) == 0 &&
+	    buf[6] < 32 && dmi_checksum(buf, buf[6])) {
+		dmi_ver = get_unaligned_be32(buf + 6) & 0xFFFFFF;
+		dmi_num = 0;			/* No longer specified */
+		dmi_len = get_unaligned_le32(buf + 12);
+		dmi_base = get_unaligned_le64(buf + 16);
+
+		if (dmi_walk_early(dmi_decode) == 0) {
+			pr_info("SMBIOS %d.%d.%d present.\n",
+				dmi_ver >> 16, (dmi_ver >> 8) & 0xFF,
+				dmi_ver & 0xFF);
+			dmi_format_ids(dmi_ids_string, sizeof(dmi_ids_string));
+			pr_debug("DMI: %s\n", dmi_ids_string);
 			return 0;
 		}
 	}
@@ -578,9 +655,34 @@ static int __init dmi_present(const char __iomem *p)
 void __init dmi_scan_machine(void)
 {
 	char __iomem *p, *q;
-	int rc;
+	char buf[32];
 
 	if (efi_enabled) {
+		/*
+		 * According to the DMTF SMBIOS reference spec v3.0.0, it is
+		 * allowed to define both the 64-bit entry point (smbios3) and
+		 * the 32-bit entry point (smbios), in which case they should
+		 * either both point to the same SMBIOS structure table, or the
+		 * table pointed to by the 64-bit entry point should contain a
+		 * superset of the table contents pointed to by the 32-bit entry
+		 * point (section 5.2)
+		 * This implies that the 64-bit entry point should have
+		 * precedence if it is defined and supported by the OS. If we
+		 * have the 64-bit entry point, but fail to decode it, fall
+		 * back to the legacy one (if available)
+		 */
+		if (efi.smbios3 != EFI_INVALID_TABLE_ADDR) {
+			p = dmi_early_remap(efi.smbios3, 32);
+			if (p == NULL)
+				goto error;
+			memcpy_fromio(buf, p, 32);
+			dmi_early_unmap(p, 32);
+
+			if (!dmi_smbios3_present(buf)) {
+				dmi_available = 1;
+				goto out;
+			}
+		}
 		if (efi.smbios == EFI_INVALID_TABLE_ADDR)
 			goto error;
 
@@ -588,13 +690,13 @@ void __init dmi_scan_machine(void)
 		 * needed during early boot.  This also means we can
 		 * iounmap the space when we're done with it.
 		 */
-		p = dmi_ioremap(efi.smbios, 32);
+		p = dmi_early_remap(efi.smbios, 32);
 		if (p == NULL)
 			goto error;
+		memcpy_fromio(buf, p, 32);
+		dmi_early_unmap(p, 32);
 
-		rc = dmi_present(p + 0x10); /* offset of _DMI_ string */
-		dmi_iounmap(p, 32);
-		if (!rc) {
+		if (!dmi_present(buf)) {
 			dmi_available = 1;
 			goto out;
 		}
@@ -603,38 +705,43 @@ void __init dmi_scan_machine(void)
 		 * needed during early boot.  This also means we can
 		 * iounmap the space when we're done with it.
 		 */
-		p = dmi_ioremap(efi_smbios_addr, 32);
+		p = dmi_early_remap(efi_smbios_addr, 32);
 		if (p == NULL)
 			goto error;
 
-		rc = dmi_present(p + 0x10); /* offset of _DMI_ string */
-		dmi_iounmap(p, 32);
-		if (!rc) {
+		memcpy_fromio(buf, p, 32);
+		dmi_early_unmap(p, 32);
+
+		if (!dmi_present(buf + 0x10)) { /* offset of _DMI_ string */
 			dmi_available = 1;
 			goto out;
 		}
 	} else {
-		/*
-		 * no iounmap() for that ioremap(); it would be a no-op, but
-		 * it's so early in setup that sucker gets confused into doing
-		 * what it shouldn't if we actually call it.
-		 */
-		p = dmi_ioremap(0xF0000, 0x10000);
+		p = dmi_early_remap(0xF0000, 0x10000);
 		if (p == NULL)
 			goto error;
 
+		/*
+		 * Iterate over all possible DMI header addresses q.
+		 * Maintain the 32 bytes around q in buf.  On the
+		 * first iteration, substitute zero for the
+		 * out-of-range bytes so there is no chance of falsely
+		 * detecting an SMBIOS header.
+		 */
+		memset(buf, 0, 16);
 		for (q = p; q < p + 0x10000; q += 16) {
-			rc = dmi_present(q);
-			if (!rc) {
+			memcpy_fromio(buf + 16, q, 16);
+			if (!dmi_smbios3_present(buf) || !dmi_present(buf)) {
 				dmi_available = 1;
-				dmi_iounmap(p, 0x10000);
+				dmi_early_unmap(p, 0x10000);
 				goto out;
 			}
+			memcpy(buf, buf + 16, 16);
 		}
-		dmi_iounmap(p, 0x10000);
+		dmi_early_unmap(p, 0x10000);
 	}
  error:
-	printk(KERN_INFO "DMI not present or invalid.\n");
+	pr_info("DMI not present or invalid.\n");
  out:
 	dmi_initialized = 1;
 }
@@ -758,7 +865,7 @@ int dmi_name_in_serial(const char *str)
 
 /**
  *	dmi_name_in_vendors - Check if string is anywhere in the DMI vendor information.
- *	@str: 	Case sensitive Name
+ *	@str: Case sensitive Name
  */
 int dmi_name_in_vendors(const char *str)
 {
@@ -787,13 +894,13 @@ EXPORT_SYMBOL(dmi_name_in_vendors);
  *	A new search is initiated by passing %NULL as the @from argument.
  *	If @from is not %NULL, searches continue from next device.
  */
-const struct dmi_device * dmi_find_device(int type, const char *name,
+const struct dmi_device *dmi_find_device(int type, const char *name,
 				    const struct dmi_device *from)
 {
 	const struct list_head *head = from ? &from->list : &dmi_devices;
 	struct list_head *d;
 
-	for(d = head->next; d != &dmi_devices; d = d->next) {
+	for (d = head->next; d != &dmi_devices; d = d->next) {
 		const struct dmi_device *dev =
 			list_entry(d, struct dmi_device, list);
 
@@ -893,13 +1000,13 @@ int dmi_walk(void (*decode)(const struct dmi_header *, void *),
 	if (!dmi_available)
 		return -1;
 
-	buf = ioremap(dmi_base, dmi_len);
+	buf = dmi_remap(dmi_base, dmi_len);
 	if (buf == NULL)
 		return -1;
 
-	dmi_table(buf, dmi_len, dmi_num, decode, private_data);
+	dmi_decode_table(buf, decode, private_data);
 
-	iounmap(buf);
+	dmi_unmap(buf);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(dmi_walk);

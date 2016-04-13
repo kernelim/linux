@@ -6,6 +6,9 @@
 #include <linux/time.h>
 #include <linux/clocksource.h>
 
+extern void tk_update_leap_state(void);
+extern ktime_t ntp_get_next_leap(void);
+
 #ifdef CONFIG_CLOCKSOURCE_VALIDATE_LAST_CYCLE
 static inline cycle_t clocksource_delta(cycle_t now, cycle_t last, cycle_t mask)
 {

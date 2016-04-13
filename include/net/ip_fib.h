@@ -180,14 +180,17 @@ static inline int fib_lookup(struct net *net, const struct flowi *flp,
 			     struct fib_result *res)
 {
 	struct fib_table *table;
+	int err;
 
 	table = fib_get_table(net, RT_TABLE_LOCAL);
 	if (!table->tb_lookup(table, flp, res))
 		return 0;
 
 	table = fib_get_table(net, RT_TABLE_MAIN);
-	if (!table->tb_lookup(table, flp, res))
-		return 0;
+	err = table->tb_lookup(table, flp, res);
+	if (err <= 0 && err != -EAGAIN)
+		return err;
+
 	return -ENETUNREACH;
 }
 

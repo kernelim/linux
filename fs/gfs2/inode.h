@@ -113,7 +113,7 @@ static inline void gfs2_size_hint(struct inode *inode, loff_t offset,
 	struct gfs2_inode *ip = GFS2_I(inode);
 	size_t blks = (size + sdp->sd_sb.sb_bsize - 1) >> sdp->sd_sb.sb_bsize_shift;
 	int hint = min_t(size_t, INT_MAX, blks);
-	atomic_set(&ip->i_res->rs_sizehint, hint);
+	atomic_set(&ip->i_res.rs_sizehint, hint);
 }
 
 extern struct inode *gfs2_inode_lookup(struct super_block *sb, unsigned type, 

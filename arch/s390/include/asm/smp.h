@@ -64,6 +64,32 @@ extern int smp_cpu_polarization[];
 extern void arch_send_call_function_single_ipi(int cpu);
 extern void arch_send_call_function_ipi_mask(const struct cpumask *mask);
 
+/*
+ * returns 1 if (virtual) cpu is scheduled
+ * returns 0 otherwise
+ */
+static inline int smp_vcpu_scheduled(int cpu)
+{
+	u32 status;
+
+	switch (signal_processor_ps(&status, 0, cpu, sigp_sense_running)) {
+	case sigp_status_stored:
+		/* Check for running status */
+		if (status & 0x400)
+			return 0;
+		break;
+	case sigp_not_operational:
+		return 0;
+	default:
+		break;
+	}
+	return 1;
+}
+
+#else
+
+#define smp_vcpu_scheduler (1)
+
 #endif
 
 #ifdef CONFIG_HOTPLUG_CPU

@@ -185,3 +185,8 @@ struct lpfc_scsi_buf {
 #define FIND_FIRST_OAS_LUN		 0
 #define NO_MORE_OAS_LUN			-1
 #define NOT_OAS_ENABLED_LUN		NO_MORE_OAS_LUN
+/* This macro is available from RHEL 7.1 onwards. */
+#ifndef FC_PORTSPEED_32GBIT
+#define FC_PORTSPEED_32GBIT     0x40
+#endif
+

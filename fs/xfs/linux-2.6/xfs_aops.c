@@ -445,7 +445,8 @@ xfs_end_bio(
 	xfs_ioend_t		*ioend = bio->bi_private;
 
 	ASSERT(atomic_read(&bio->bi_cnt) >= 1);
-	ioend->io_error = test_bit(BIO_UPTODATE, &bio->bi_flags) ? 0 : error;
+	if (!ioend->io_error && !test_bit(BIO_UPTODATE, &bio->bi_flags))
+		ioend->io_error = error;
 
 	/* Toss bio and pass work off to an xfsdatad thread */
 	bio->bi_private = NULL;
@@ -504,10 +505,22 @@ xfs_start_page_writeback(
 {
 	ASSERT(PageLocked(page));
 	ASSERT(!PageWriteback(page));
-	if (clear_dirty)
+
+	/*
+	 * if the page was not fully cleaned, we need to ensure that the higher
+	 * layers come back to it correctly. That means we need to keep the page
+	 * dirty, and for WB_SYNC_ALL writeback we need to ensure the
+	 * PAGECACHE_TAG_TOWRITE index mark is not removed so another attempt to
+	 * write this page in this writeback sweep will be made.
+	 */
+	if (clear_dirty) {
 		clear_page_dirty_for_io(page);
-	set_page_writeback(page);
+		set_page_writeback(page);
+	} else
+		set_page_writeback_keepwrite(page);
+
 	unlock_page(page);
+
 	/* If no buffers on the page are to be written, finish it here */
 	if (!buffers)
 		end_page_writeback(page);
@@ -1297,12 +1310,12 @@ __xfs_get_blocks(
 	      imap.br_startblock == DELAYSTARTBLOCK))) {
 		if (direct || xfs_get_extsz_hint(ip)) {
 			/*
-			 * Drop the ilock in preparation for starting the block
-			 * allocation transaction.  It will be retaken
-			 * exclusively inside xfs_iomap_write_direct for the
-			 * actual allocation.
+			 * xfs_iomap_write_direct() expects the shared lock. It
+			 * is unlocked on return.
 			 */
-			xfs_iunlock(ip, lockmode);
+			if (lockmode == XFS_ILOCK_EXCL)
+				xfs_ilock_demote(ip, lockmode);
+
 			error = xfs_iomap_write_direct(ip, offset, size,
 						       &imap, nimaps);
 			if (error)

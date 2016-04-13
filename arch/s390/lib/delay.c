@@ -118,3 +118,4 @@ void udelay_simple(unsigned long long usecs)
 	while (get_clock() < end)
 		cpu_relax();
 }
+EXPORT_SYMBOL(udelay_simple);

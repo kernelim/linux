@@ -2489,9 +2489,9 @@ restart:
 		if (skb->ip_summed == CHECKSUM_PARTIAL)
 			flagsize |= BD_FLG_TCP_UDP_SUM;
 #if ACENIC_DO_VLAN
-		if (vlan_tx_tag_present(skb)) {
+		if (skb_vlan_tag_present(skb)) {
 			flagsize |= BD_FLG_VLAN_TAG;
-			vlan_tag = vlan_tx_tag_get(skb);
+			vlan_tag = skb_vlan_tag_get(skb);
 		}
 #endif
 		desc = ap->tx_ring + idx;
@@ -2512,9 +2512,9 @@ restart:
 		if (skb->ip_summed == CHECKSUM_PARTIAL)
 			flagsize |= BD_FLG_TCP_UDP_SUM;
 #if ACENIC_DO_VLAN
-		if (vlan_tx_tag_present(skb)) {
+		if (skb_vlan_tag_present(skb)) {
 			flagsize |= BD_FLG_VLAN_TAG;
-			vlan_tag = vlan_tx_tag_get(skb);
+			vlan_tag = skb_vlan_tag_get(skb);
 		}
 #endif
 

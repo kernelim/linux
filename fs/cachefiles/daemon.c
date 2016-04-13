@@ -314,8 +314,7 @@ static unsigned int cachefiles_daemon_poll(struct file *file,
 static int cachefiles_daemon_range_error(struct cachefiles_cache *cache,
 					 char *args)
 {
-	kerror("Free space limits must be in range"
-	       " 0%%<=stop<cull<run<100%%");
+	pr_err("Free space limits must be in range 0%%<=stop<cull<run<100%%\n");
 
 	return -EINVAL;
 }
@@ -475,12 +474,12 @@ static int cachefiles_daemon_dir(struct cachefiles_cache *cache, char *args)
 	_enter(",%s", args);
 
 	if (!*args) {
-		kerror("Empty directory specified");
+		pr_err("Empty directory specified\n");
 		return -EINVAL;
 	}
 
 	if (cache->rootdirname) {
-		kerror("Second cache directory specified");
+		pr_err("Second cache directory specified\n");
 		return -EEXIST;
 	}
 
@@ -503,12 +502,12 @@ static int cachefiles_daemon_secctx(struct cachefiles_cache *cache, char *args)
 	_enter(",%s", args);
 
 	if (!*args) {
-		kerror("Empty security context specified");
+		pr_err("Empty security context specified\n");
 		return -EINVAL;
 	}
 
 	if (cache->secctx) {
-		kerror("Second security context specified");
+		pr_err("Second security context specified\n");
 		return -EINVAL;
 	}
 
@@ -531,7 +530,7 @@ static int cachefiles_daemon_tag(struct cachefiles_cache *cache, char *args)
 	_enter(",%s", args);
 
 	if (!*args) {
-		kerror("Empty tag specified");
+		pr_err("Empty tag specified\n");
 		return -EINVAL;
 	}
 
@@ -563,12 +562,12 @@ static int cachefiles_daemon_cull(struct cachefiles_cache *cache, char *args)
 		goto inval;
 
 	if (!test_bit(CACHEFILES_READY, &cache->flags)) {
-		kerror("cull applied to unready cache");
+		pr_err("cull applied to unready cache\n");
 		return -EIO;
 	}
 
 	if (test_bit(CACHEFILES_DEAD, &cache->flags)) {
-		kerror("cull applied to dead cache");
+		pr_err("cull applied to dead cache\n");
 		return -EIO;
 	}
 
@@ -591,11 +590,11 @@ static int cachefiles_daemon_cull(struct cachefiles_cache *cache, char *args)
 
 notdir:
 	dput(dir);
-	kerror("cull command requires dirfd to be a directory");
+	pr_err("cull command requires dirfd to be a directory\n");
 	return -ENOTDIR;
 
 inval:
-	kerror("cull command requires dirfd and filename");
+	pr_err("cull command requires dirfd and filename\n");
 	return -EINVAL;
 }
 
@@ -618,7 +617,7 @@ static int cachefiles_daemon_debug(struct cachefiles_cache *cache, char *args)
 	return 0;
 
 inval:
-	kerror("debug command requires mask");
+	pr_err("debug command requires mask\n");
 	return -EINVAL;
 }
 
@@ -639,12 +638,12 @@ static int cachefiles_daemon_inuse(struct cachefiles_cache *cache, char *args)
 		goto inval;
 
 	if (!test_bit(CACHEFILES_READY, &cache->flags)) {
-		kerror("inuse applied to unready cache");
+		pr_err("inuse applied to unready cache\n");
 		return -EIO;
 	}
 
 	if (test_bit(CACHEFILES_DEAD, &cache->flags)) {
-		kerror("inuse applied to dead cache");
+		pr_err("inuse applied to dead cache\n");
 		return -EIO;
 	}
 
@@ -667,11 +666,11 @@ static int cachefiles_daemon_inuse(struct cachefiles_cache *cache, char *args)
 
 notdir:
 	dput(dir);
-	kerror("inuse command requires dirfd to be a directory");
+	pr_err("inuse command requires dirfd to be a directory\n");
 	return -ENOTDIR;
 
 inval:
-	kerror("inuse command requires dirfd and filename");
+	pr_err("inuse command requires dirfd and filename\n");
 	return -EINVAL;
 }
 

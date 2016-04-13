@@ -61,7 +61,13 @@ static void do_account_vtime(struct task_struct *tsk, int hardirq_offset)
 	timer = S390_lowcore.last_update_timer;
 	clock = S390_lowcore.last_update_clock;
 	asm volatile ("  STPT %0\n"    /* Store current cpu timer value */
+#if defined(CONFIG_MARCH_Z9_109) || \
+    defined(CONFIG_MARCH_Z10) || \
+    defined(CONFIG_MARCH_Z196)
+		      "  STCKF %1"     /* Store current tod clock value */
+#else
 		      "  STCK %1"      /* Store current tod clock value */
+#endif
 		      : "=m" (S390_lowcore.last_update_timer),
 		        "=m" (S390_lowcore.last_update_clock) );
 	S390_lowcore.system_timer += timer - S390_lowcore.last_update_timer;

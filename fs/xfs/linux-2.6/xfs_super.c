@@ -53,6 +53,7 @@
 #include "xfs_inode_item.h"
 #include "xfs_sync.h"
 #include "xfs_trace.h"
+#include "xfs_sysfs.h"
 
 #include <linux/namei.h>
 #include <linux/init.h>
@@ -67,6 +68,11 @@
 static const struct super_operations xfs_super_operations;
 static kmem_zone_t *xfs_ioend_zone;
 mempool_t *xfs_ioend_pool;
+struct kset *xfs_kset;			/* top-level xfs sysfs dir */
+
+#ifdef DEBUG
+static struct xfs_kobj xfs_dbg_kobj;   /* global debug sysfs attrs */
+#endif
 
 #define MNTOPT_LOGBUFS	"logbufs"	/* number of XFS log buffers */
 #define MNTOPT_LOGBSIZE	"logbsize"	/* size of XFS log buffers */
@@ -878,7 +884,7 @@ xfs_fs_destroy_inode(
 
 	trace_xfs_destroy_inode(ip);
 
-	XFS_STATS_INC(vn_reclaim);
+	XFS_STATS_INC(ip->i_mount, vn_reclaim);
 
 	/* bad inode, get out here ASAP */
 	if (is_bad_inode(inode))
@@ -1018,9 +1024,9 @@ xfs_fs_clear_inode(
 
 	trace_xfs_clear_inode(ip);
 
-	XFS_STATS_INC(vn_rele);
-	XFS_STATS_INC(vn_remove);
-	XFS_STATS_DEC(vn_active);
+	XFS_STATS_INC(ip->i_mount, vn_rele);
+	XFS_STATS_INC(ip->i_mount, vn_remove);
+	XFS_STATS_DEC(ip->i_mount, vn_active);
 
 	/*
 	 * The iolock is used by the file system to coordinate reads,
@@ -1076,6 +1082,7 @@ xfs_fs_put_super(
 	xfs_syncd_stop(mp);
 	xfs_unmountfs(mp);
 	xfs_freesb(mp);
+	free_percpu(mp->m_stats.xs_stats);
 	xfs_icsb_destroy_counters(mp);
 	xfs_destroy_mount_workqueues(mp);
 	xfs_close_devices(mp);
@@ -1433,9 +1440,16 @@ xfs_fs_fill_super(
 	if (error)
 		goto out_destroy_workqueues;
 
+	/* Allocate stats memory before we do operations that might use it */
+	mp->m_stats.xs_stats = alloc_percpu(struct xfsstats);
+	if (!mp->m_stats.xs_stats) {
+		error = ENOMEM;
+		goto out_destroy_counters;
+	}
+
 	error = xfs_readsb(mp, flags);
 	if (error)
-		goto out_destroy_counters;
+		goto out_free_stats;
 
 	error = xfs_finish_flags(mp);
 	if (error)
@@ -1498,6 +1512,8 @@ xfs_fs_fill_super(
 	xfs_filestream_unmount(mp);
  out_free_sb:
 	xfs_freesb(mp);
+ out_free_stats:
+	free_percpu(mp->m_stats.xs_stats);
  out_destroy_counters:
 	xfs_icsb_destroy_counters(mp);
  out_destroy_workqueues:
@@ -1740,15 +1756,41 @@ init_xfs_fs(void)
 	if (error)
 		goto out_cleanup_procfs;
 
+	xfs_kset = kset_create_and_add("xfs", NULL, fs_kobj);
+	if (!xfs_kset) {
+		error = -ENOMEM;
+		goto out_sysctl_unregister;
+	}
+
+	xfsstats.xs_kobj.kobject.kset = xfs_kset;
+
+	xfsstats.xs_stats = alloc_percpu(struct xfsstats);
+	if (!xfsstats.xs_stats) {
+		error = -ENOMEM;
+		goto out_kset_unregister;
+	}
+
+	error = xfs_sysfs_init(&xfsstats.xs_kobj, &xfs_stats_ktype, NULL,
+			       "stats");
+	if (error)
+		goto out_free_stats;
+
+#ifdef DEBUG
+	xfs_dbg_kobj.kobject.kset = xfs_kset;
+	error = xfs_sysfs_init(&xfs_dbg_kobj, &xfs_dbg_ktype, NULL, "debug");
+	if (error)
+		goto out_remove_stats_kobj;
+#endif
+
 	xfs_alloc_wq = create_workqueue("xfsalloc");
 	if (!xfs_alloc_wq) {
-		error = ENOMEM;
-		goto out_sysctl_unregister;
+		error = -ENOMEM;
+		goto out_remove_dbg_kobj;
 	}
 
 	xfs_eofblocks_wq = create_workqueue("xfseofblocks");
 	if (!xfs_eofblocks_wq) {
-		error = ENOMEM;
+		error = -ENOMEM;
 		goto out_destroy_alloc_wq;
 	}
 
@@ -1763,6 +1805,16 @@ init_xfs_fs(void)
 	destroy_workqueue(xfs_eofblocks_wq);
  out_destroy_alloc_wq:
 	destroy_workqueue(xfs_alloc_wq);
+ out_remove_dbg_kobj:
+#ifdef DEBUG
+	xfs_sysfs_del(&xfs_dbg_kobj);
+ out_remove_stats_kobj:
+#endif
+	xfs_sysfs_del(&xfsstats.xs_kobj);
+ out_free_stats:
+	free_percpu(xfsstats.xs_stats);
+ out_kset_unregister:
+	kset_unregister(xfs_kset);
  out_sysctl_unregister:
 	xfs_sysctl_unregister();
  out_cleanup_procfs:
@@ -1786,6 +1838,12 @@ exit_xfs_fs(void)
 	unregister_filesystem(&xfs_fs_type);
 	destroy_workqueue(xfs_eofblocks_wq);
 	destroy_workqueue(xfs_alloc_wq);
+#ifdef DEBUG
+	xfs_sysfs_del(&xfs_dbg_kobj);
+#endif
+	xfs_sysfs_del(&xfsstats.xs_kobj);
+	free_percpu(xfsstats.xs_stats);
+	kset_unregister(xfs_kset);
 	xfs_sysctl_unregister();
 	xfs_cleanup_procfs();
 	xfs_buf_terminate();

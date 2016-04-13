@@ -21,6 +21,73 @@
 
 #include <net/dst.h>
 
+static LIST_HEAD(dst_ops_extend_list);
+static DEFINE_SPINLOCK(dst_ops_extend_lock);
+
+struct dst_ops_extend *dst_ops_extend_get_rcu(struct dst_ops *key)
+{
+	struct dst_ops_extend *ops;
+
+	list_for_each_entry_rcu(ops, &dst_ops_extend_list, list) {
+		if (ops->key == key)
+			return ops;
+	}
+
+	return NULL;
+}
+EXPORT_SYMBOL(dst_ops_extend_get_rcu);
+
+int dst_ops_extend_register(struct dst_ops *key, unsigned int (*default_advmss)(const struct dst_entry *))
+{
+	struct dst_ops_extend *old_ops, *ops;
+
+	rcu_read_lock();
+	spin_lock(&dst_ops_extend_lock);
+	old_ops = dst_ops_extend_get_rcu(key);
+	if (old_ops && old_ops->default_advmss != default_advmss) {
+		spin_unlock(&dst_ops_extend_lock);
+		rcu_read_unlock();
+		WARN_ON_ONCE(1);
+		return -EBUSY;
+	}
+
+	ops = kmalloc(sizeof(*ops), GFP_ATOMIC);
+	if (!ops) {
+		spin_unlock(&dst_ops_extend_lock);
+		rcu_read_unlock();
+		return -ENOMEM;
+	}
+
+	ops->key = key;
+	ops->default_advmss = default_advmss;
+	list_add_rcu(&ops->list, &dst_ops_extend_list);
+	spin_unlock(&dst_ops_extend_lock);
+	rcu_read_unlock();
+
+	return 0;
+}
+EXPORT_SYMBOL(dst_ops_extend_register);
+
+void dst_ops_extend_unregister(struct dst_ops *key)
+{
+	struct dst_ops_extend *ops;
+
+	rcu_read_lock();
+	spin_lock(&dst_ops_extend_lock);
+	ops = dst_ops_extend_get_rcu(key);
+	if (!ops) {
+		spin_unlock(&dst_ops_extend_lock);
+		rcu_read_unlock();
+		return;
+	}
+
+	list_del_rcu(&ops->list);
+	kfree_rcu(ops, rcu);
+	spin_unlock(&dst_ops_extend_lock);
+	rcu_read_unlock();
+}
+EXPORT_SYMBOL(dst_ops_extend_unregister);
+
 /*
  * Theory of operations:
  * 1) We use a list, protected by a spinlock, to add

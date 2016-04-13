@@ -1224,6 +1224,7 @@ again:
 static enum hrtimer_restart uncore_pmu_hrtimer(struct hrtimer *hrtimer)
 {
 	struct intel_uncore_box *box;
+	struct perf_event *event;
 	unsigned long flags;
 	int bit;
 
@@ -1235,6 +1236,14 @@ static enum hrtimer_restart uncore_pmu_hrtimer(struct hrtimer *hrtimer)
 	 * to interrupt the update process
 	 */
 	local_irq_save(flags);
+
+	/*
+	 * handle boxes with an active event list as opposed to active
+	 * counters
+	 */
+	list_for_each_entry(event, &box->active_list, active_entry) {
+		uncore_perf_event_update(box, event);
+	}
 
 	for_each_set_bit(bit, box->active_mask, UNCORE_PMC_IDX_MAX)
 		uncore_perf_event_update(box, box->events[bit]);
@@ -1285,7 +1294,20 @@ static struct intel_uncore_box *uncore_alloc_box(struct intel_uncore_type *type,
 	/* set default hrtimer timeout */
 	box->hrtimer_duration = UNCORE_PMU_HRTIMER_INTERVAL;
 
+	INIT_LIST_HEAD(&box->active_list);
+
 	return box;
+}
+
+/*
+ * Using uncore_pmu_event_init pmu event_init callback
+ * as a detection point for uncore events.
+ */
+static int uncore_pmu_event_init(struct perf_event *event);
+
+static bool is_uncore_event(struct perf_event *event)
+{
+	return event->pmu->event_init == uncore_pmu_event_init;
 }
 
 static int
@@ -1302,13 +1324,18 @@ uncore_collect_events(struct intel_uncore_box *box, struct perf_event *leader, b
 		return -EINVAL;
 
 	n = box->n_events;
-	box->event_list[n] = leader;
-	n++;
+
+	if (is_uncore_event(leader)) {
+		box->event_list[n] = leader;
+		n++;
+	}
+
 	if (!dogrp)
 		return n;
 
 	list_for_each_entry(event, &leader->sibling_list, group_entry) {
-		if (event->state <= PERF_EVENT_STATE_OFF)
+		if (!is_uncore_event(event) ||
+		    event->state <= PERF_EVENT_STATE_OFF)
 			continue;
 
 		if (n >= max_count)
@@ -1354,7 +1381,7 @@ static void uncore_put_event_constraint(struct intel_uncore_box *box, struct per
 static int uncore_assign_events(struct intel_uncore_box *box, int assign[], int n)
 {
 	unsigned long used_mask[BITS_TO_LONGS(UNCORE_PMC_IDX_MAX)];
-	struct event_constraint *c, *constraints[UNCORE_PMC_IDX_MAX];
+	struct event_constraint *c;
 	int i, wmin, wmax, ret = 0;
 	struct hw_perf_event *hwc;
 
@@ -1362,7 +1389,7 @@ static int uncore_assign_events(struct intel_uncore_box *box, int assign[], int 
 
 	for (i = 0, wmin = UNCORE_PMC_IDX_MAX, wmax = 0; i < n; i++) {
 		c = uncore_get_event_constraint(box, box->event_list[i]);
-		constraints[i] = c;
+		box->event_constraint[i] = c;
 		wmin = min(wmin, c->weight);
 		wmax = max(wmax, c->weight);
 	}
@@ -1370,7 +1397,7 @@ static int uncore_assign_events(struct intel_uncore_box *box, int assign[], int 
 	/* fastpath, try to reuse previous register */
 	for (i = 0; i < n; i++) {
 		hwc = &box->event_list[i]->hw;
-		c = constraints[i];
+		c = box->event_constraint[i];
 
 		/* never assigned */
 		if (hwc->idx == -1)
@@ -1390,7 +1417,8 @@ static int uncore_assign_events(struct intel_uncore_box *box, int assign[], int 
 	}
 	/* slow path */
 	if (i != n)
-		ret = perf_assign_events(constraints, n, wmin, wmax, assign);
+		ret = perf_assign_events(box->event_constraint, n,
+					 wmin, wmax, n, assign);
 
 	if (!assign || ret) {
 		for (i = 0; i < n; i++)
@@ -1915,6 +1943,23 @@ static int __init uncore_pci_init(void)
 	case 63: /* Haswell-EP */
 		ret = hswep_uncore_pci_init();
 		break;
+	case 79: /* BDX-EP */
+	case 86: /* BDX-DE */
+		ret = bdx_uncore_pci_init();
+		break;
+	case 42: /* Sandy Bridge */
+		ret = snb_uncore_pci_init();
+		break;
+	case 58: /* Ivy Bridge */
+		ret = ivb_uncore_pci_init();
+		break;
+	case 60: /* Haswell */
+	case 69: /* Haswell Celeron */
+		ret = hsw_uncore_pci_init();
+		break;
+	case 61: /* Broadwell */
+		ret = bdw_uncore_pci_init();
+		break;
 	default:
 		return 0;
 	}
@@ -2179,6 +2224,11 @@ static int __init uncore_cpu_init(void)
 		break;
 	case 42: /* Sandy Bridge */
 	case 58: /* Ivy Bridge */
+	case 60: /* Haswell */
+	case 69: /* Haswell */
+	case 70: /* Haswell */
+	case 61: /* Broadwell */
+	case 71: /* Broadwell */
 		snb_uncore_cpu_init();
 		break;
 	case 45: /* Sandy Birdge-EP */
@@ -2198,6 +2248,10 @@ static int __init uncore_cpu_init(void)
 		break;
 	case 63: /* Haswell-EP */
 		hswep_uncore_cpu_init();
+		break;
+	case 79: /* BDX-EP */
+	case 86: /* BDX-DE */
+		bdx_uncore_cpu_init();
 		break;
 	default:
 		return 0;

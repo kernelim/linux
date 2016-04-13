@@ -1602,11 +1602,8 @@ static int io_interception(struct vcpu_svm *svm)
 
 	string = (io_info & SVM_IOIO_STR_MASK) != 0;
 
-	if (string) {
-		if (emulate_instruction(&svm->vcpu, 0) == EMULATE_DO_MMIO)
-			return 0;
-		return 1;
-	}
+	if (string)
+		return emulate_instruction(&svm->vcpu, 0) == EMULATE_DONE;
 
 	in = (io_info & SVM_IOIO_TYPE_MASK) != 0;
 	port = io_info >> 16;
@@ -2392,18 +2389,14 @@ static int invlpg_interception(struct vcpu_svm *svm)
 	if (svm_has(SVM_FEATURE_DECODE_ASSIST)) {
 		kvm_mmu_invlpg(&svm->vcpu, svm->vmcb->control.exit_info_1);
 		skip_emulated_instruction(&svm->vcpu);
-	} else {
-		if (emulate_instruction(&svm->vcpu, 0) != EMULATE_DONE)
-			pr_unimpl(&svm->vcpu, "%s: failed\n", __func__);
-	}
-	return 1;
+		return 1;
+	} else
+		return emulate_instruction(&svm->vcpu, 0) == EMULATE_DONE;
 }
 
 static int emulate_on_interception(struct vcpu_svm *svm)
 {
-	if (emulate_instruction(&svm->vcpu, 0) != EMULATE_DONE)
-		pr_unimpl(&svm->vcpu, "%s: failed\n", __func__);
-	return 1;
+	return emulate_instruction(&svm->vcpu, 0) == EMULATE_DONE;
 }
 
 static int rdpmc_interception(struct vcpu_svm *svm)

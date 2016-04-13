@@ -216,7 +216,9 @@ typedef struct xfs_mount {
 	struct shrinker		m_inode_shrink;	/* inode reclaim shrinker */
 	int64_t			m_low_space[XFS_LOWSP_MAX];
 						/* low free space thresholds */
+	struct xfs_kobj		m_kobj;
 	char			m_cil_wq_name[32];
+	struct xstats		m_stats;	/* per-fs stats */
 	struct workqueue_struct	*m_cil_workqueue;
 } xfs_mount_t;
 

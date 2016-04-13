@@ -1038,8 +1038,6 @@ static struct vnet * __devinit vnet_new(const u64 *local_mac)
 	for (i = 0; i < ETH_ALEN; i++)
 		dev->dev_addr[i] = (*local_mac >> (5 - i) * 8) & 0xff;
 
-	memcpy(dev->perm_addr, dev->dev_addr, dev->addr_len);
-
 	vp = netdev_priv(dev);
 
 	spin_lock_init(&vp->lock);

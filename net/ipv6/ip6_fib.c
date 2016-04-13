@@ -262,7 +262,17 @@ struct fib6_table *fib6_get_table(struct net *net, u32 id)
 struct dst_entry *fib6_rule_lookup(struct net *net, struct flowi *fl,
 				   int flags, pol_lookup_t lookup)
 {
-	return (struct dst_entry *) lookup(net, net->ipv6.fib6_main_tbl, fl, flags);
+	struct rt6_info *rt;
+
+	rt = lookup(net, net->ipv6.fib6_main_tbl, fl, flags);
+	if (rt->rt6i_flags & RTF_REJECT &&
+	    rt->u.dst.error == -EAGAIN) {
+		dst_release(&rt->u.dst);
+		rt = net->ipv6.ip6_null_entry;
+		dst_hold(&rt->u.dst);
+	}
+
+	return &rt->u.dst;
 }
 
 static void fib6_tables_init(struct net *net)

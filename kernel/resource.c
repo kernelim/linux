@@ -18,6 +18,7 @@
 #include <linux/spinlock.h>
 #include <linux/fs.h>
 #include <linux/proc_fs.h>
+#include <linux/sched.h>
 #include <linux/seq_file.h>
 #include <linux/device.h>
 #include <linux/pfn.h>
@@ -388,11 +389,6 @@ static void resource_clip(struct resource *res, resource_size_t min,
 		res->end = max;
 }
 
-static bool resource_contains(struct resource *res1, struct resource *res2)
-{
-	return res1->start <= res2->start && res1->end >= res2->end;
-}
-
 /*
  * Find empty slot in the resource tree with the given range and
  * alignment constraints
@@ -428,11 +424,12 @@ static int __find_resource(struct resource *root, struct resource *old,
 		arch_remove_reservations(&tmp);
 
 		/* Check for overflow after ALIGN() */
-		avail = *new;
 		avail.start = ALIGN(tmp.start, constraint->align);
 		avail.end = tmp.end;
+		avail.flags = new->flags & ~IORESOURCE_UNSET;
 		if (avail.start >= tmp.start) {
-			alloc = avail;
+			alloc.flags = avail.flags;
+			alloc.start = avail.start;
 			constraint->alignf(constraint->alignf_data, &alloc,
 					size, constraint->align);
 			alloc.end = alloc.start + size - 1;
@@ -871,6 +868,8 @@ resource_size_t resource_alignment(struct resource *res)
  * release_region releases a matching busy region.
  */
 
+static DECLARE_WAIT_QUEUE_HEAD(muxed_resource_wait);
+
 /**
  * __request_region - create a new busy resource region
  * @parent: parent resource descriptor
@@ -883,6 +882,7 @@ struct resource * __request_region(struct resource *parent,
 				   resource_size_t start, resource_size_t n,
 				   const char *name, int flags)
 {
+	DECLARE_WAITQUEUE(wait, current);
 	struct resource *res = kzalloc(sizeof(*res), GFP_KERNEL);
 
 	if (!res)
@@ -907,7 +907,15 @@ struct resource * __request_region(struct resource *parent,
 			if (!(conflict->flags & IORESOURCE_BUSY))
 				continue;
 		}
-
+		if (conflict->flags & flags & IORESOURCE_MUXED) {
+			add_wait_queue(&muxed_resource_wait, &wait);
+			write_unlock(&resource_lock);
+			set_current_state(TASK_UNINTERRUPTIBLE);
+			schedule();
+			remove_wait_queue(&muxed_resource_wait, &wait);
+			write_lock(&resource_lock);
+			continue;
+		}
 		/* Uhhuh, that didn't work out.. */
 		kfree(res);
 		res = NULL;
@@ -981,6 +989,8 @@ void __release_region(struct resource *parent, resource_size_t start,
 				break;
 			*p = res->sibling;
 			write_unlock(&resource_lock);
+			if (res->flags & IORESOURCE_MUXED)
+				wake_up(&muxed_resource_wait);
 			kfree(res);
 			return;
 		}

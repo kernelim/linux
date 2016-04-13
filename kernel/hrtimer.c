@@ -693,7 +693,7 @@ static inline ktime_t hrtimer_update_base(struct hrtimer_cpu_base *base)
 {
 	ktime_t *offs_real = &base->clock_base[CLOCK_REALTIME].offset;
 
-	return ktime_get_update_offsets(offs_real);
+	return ktime_get_update_offsets(&base->clock_was_set, offs_real);
 }
 
 static void clock_was_set_work(struct work_struct *work)

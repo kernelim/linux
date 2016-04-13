@@ -109,6 +109,7 @@ static unsigned long dn_rt_deadline;
 
 static int dn_dst_gc(struct dst_ops *ops);
 static struct dst_entry *dn_dst_check(struct dst_entry *, __u32);
+static unsigned int dn_dst_default_advmss(const struct dst_entry *dst);
 static struct dst_entry *dn_dst_negative_advice(struct dst_entry *);
 static void dn_dst_link_failure(struct sk_buff *);
 static void dn_dst_update_pmtu(struct dst_entry *dst, u32 mtu);
@@ -241,7 +242,8 @@ static void dn_dst_update_pmtu(struct dst_entry *dst, u32 mtu)
 		}
 		if (!(dst_metric_locked(dst, RTAX_ADVMSS))) {
 			u32 mss = mtu - DN_MAX_NSP_DATA_HEADER;
-			if (dst_metric(dst, RTAX_ADVMSS) > mss)
+			u32 existing_mss = dst_metric(dst, RTAX_ADVMSS);
+			if (!existing_mss || existing_mss > mss)
 				dst->metrics[RTAX_ADVMSS-1] = mss;
 		}
 	}
@@ -777,12 +779,17 @@ static int dn_rt_bug(struct sk_buff *skb)
 	return NET_RX_DROP;
 }
 
+static unsigned int dn_dst_default_advmss(const struct dst_entry *dst)
+{
+	return dn_mss_from_pmtu(dst->dev, dst_mtu(dst));
+}
+
 static int dn_rt_set_next_hop(struct dn_route *rt, struct dn_fib_res *res)
 {
 	struct dn_fib_info *fi = res->fi;
 	struct net_device *dev = rt->u.dst.dev;
 	struct neighbour *n;
-	unsigned mss;
+	unsigned int metric;
 
 	if (fi) {
 		if (DN_FIB_RES_GW(*res) &&
@@ -803,10 +810,12 @@ static int dn_rt_set_next_hop(struct dn_route *rt, struct dn_fib_res *res)
 	if (dst_metric(&rt->u.dst, RTAX_MTU) == 0 ||
 	    dst_metric(&rt->u.dst, RTAX_MTU) > rt->u.dst.dev->mtu)
 		rt->u.dst.metrics[RTAX_MTU-1] = rt->u.dst.dev->mtu;
-	mss = dn_mss_from_pmtu(dev, dst_mtu(&rt->u.dst));
-	if (dst_metric(&rt->u.dst, RTAX_ADVMSS) == 0 ||
-	    dst_metric(&rt->u.dst, RTAX_ADVMSS) > mss)
-		rt->u.dst.metrics[RTAX_ADVMSS-1] = mss;
+	metric = dst_metric(&rt->u.dst, RTAX_ADVMSS);
+	if (metric) {
+		unsigned int mss = dn_mss_from_pmtu(dev, dst_mtu(&rt->u.dst));
+		if (metric > mss)
+			rt->u.dst.metrics[RTAX_ADVMSS-1] = mss;
+	}
 	return 0;
 }
 
@@ -1746,6 +1755,8 @@ void __init dn_route_init(void)
 	dn_dst_ops.kmem_cachep =
 		kmem_cache_create("dn_dst_cache", sizeof(struct dn_route), 0,
 				  SLAB_HWCACHE_ALIGN|SLAB_PANIC, NULL);
+	dst_ops_extend_register(&dn_dst_ops, dn_dst_default_advmss);
+
 	setup_timer(&dn_route_timer, dn_dst_check_expire, 0);
 	dn_route_timer.expires = jiffies + decnet_dst_gc_interval * HZ;
 	add_timer(&dn_route_timer);
@@ -1801,6 +1812,7 @@ void __init dn_route_init(void)
 
 void __exit dn_route_cleanup(void)
 {
+	dst_ops_extend_unregister(&dn_dst_ops);
 	del_timer(&dn_route_timer);
 	dn_run_flush(0);
 

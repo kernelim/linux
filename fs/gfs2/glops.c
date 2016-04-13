@@ -442,7 +442,7 @@ const struct gfs2_glock_operations gfs2_inode_glops = {
 	.go_lock = inode_go_lock,
 	.go_dump = inode_go_dump,
 	.go_type = LM_TYPE_INODE,
-	.go_flags = GLOF_ASPACE,
+	.go_flags = GLOF_ASPACE | GLOF_LRU,
 };
 
 const struct gfs2_glock_operations gfs2_rgrp_glops = {
@@ -465,10 +465,12 @@ const struct gfs2_glock_operations gfs2_trans_glops = {
 const struct gfs2_glock_operations gfs2_iopen_glops = {
 	.go_type = LM_TYPE_IOPEN,
 	.go_callback = iopen_go_callback,
+	.go_flags = GLOF_LRU,
 };
 
 const struct gfs2_glock_operations gfs2_flock_glops = {
 	.go_type = LM_TYPE_FLOCK,
+	.go_flags = GLOF_LRU,
 };
 
 const struct gfs2_glock_operations gfs2_nondisk_glops = {
@@ -477,6 +479,7 @@ const struct gfs2_glock_operations gfs2_nondisk_glops = {
 
 const struct gfs2_glock_operations gfs2_quota_glops = {
 	.go_type = LM_TYPE_QUOTA,
+	.go_flags = GLOF_LRU,
 };
 
 const struct gfs2_glock_operations gfs2_journal_glops = {

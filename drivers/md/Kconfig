@@ -229,9 +229,8 @@ config DM_CRYPT
 	  transparently encrypts the data on it. You'll need to activate
 	  the ciphers you're going to use in the cryptoapi configuration.
 
-	  Information on how to use dm-crypt can be found on
-
-	  <http://www.saout.de/misc/dm-crypt/>
+	  For further information on dm-crypt and userspace tools see:
+	  <https://gitlab.com/cryptsetup/cryptsetup/wikis/DMCrypt>
 
 	  To compile this code as a module, choose M here: the module will
 	  be called dm-crypt.
@@ -275,6 +274,18 @@ config DM_CACHE_MQ
          count to select which blocks should be promoted and demoted.
          This is meant to be a general purpose policy.  It prioritises
          reads over writes.
+
+config DM_CACHE_SMQ
+       tristate "Stochastic MQ Cache Policy (EXPERIMENTAL)"
+       depends on DM_CACHE
+       default y
+       ---help---
+         A cache policy that uses a multiqueue ordered by recent hits
+         to select which blocks should be promoted and demoted.
+         This is meant to be a general purpose policy.  It prioritises
+         reads over writes.  This SMQ policy (vs MQ) offers the promise
+         of less memory utilization, improved performance and increased
+         adaptability in the face of changing workloads.
 
 config DM_CACHE_CLEANER
        tristate "Cleaner Cache Policy (EXPERIMENTAL)"

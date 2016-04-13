@@ -1,0 +1,3 @@
+libperf-y += header.o
+
+libperf-$(CONFIG_DWARF) += dwarf-regs.o

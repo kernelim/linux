@@ -309,15 +309,10 @@ static struct csrowdev_attribute *dynamic_csrow_ce_count_attr[] = {
 	&attr_ch5_ce_count
 };
 
-#define EDAC_NR_CHANNELS	6
-
 /* Create dynamic CHANNEL files, indexed by 'chan',  under specifed CSROW */
 static int edac_create_channel_files(struct kobject *kobj, int chan)
 {
-	int err = -ENODEV;
-
-	if (chan >= EDAC_NR_CHANNELS)
-		return err;
+	int err;
 
 	/* create the DIMM label attribute file */
 	err = sysfs_create_file(kobj,

@@ -62,8 +62,7 @@ static int __init fscache_init(void)
 					       0,
 					       fscache_cookie_init_once);
 	if (!fscache_cookie_jar) {
-		printk(KERN_NOTICE
-		       "FS-Cache: Failed to allocate a cookie jar\n");
+		pr_notice("Failed to allocate a cookie jar\n");
 		ret = -ENOMEM;
 		goto error_cookie_jar;
 	}
@@ -72,7 +71,7 @@ static int __init fscache_init(void)
 	if (!fscache_root)
 		goto error_kobj;
 
-	printk(KERN_NOTICE "FS-Cache: Loaded\n");
+	pr_notice("Loaded\n");
 	return 0;
 
 error_kobj:
@@ -98,7 +97,7 @@ static void __exit fscache_exit(void)
 	kmem_cache_destroy(fscache_cookie_jar);
 	fscache_proc_cleanup();
 	slow_work_unregister_user(THIS_MODULE);
-	printk(KERN_NOTICE "FS-Cache: Unloaded\n");
+	pr_notice("Unloaded\n");
 }
 
 module_exit(fscache_exit);

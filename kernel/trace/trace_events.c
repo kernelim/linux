@@ -1293,51 +1293,83 @@ trace_create_file_ops(struct module *mod, bool print_fmt)
 	return file_ops;
 }
 
+static int
+__trace_module_add_events(struct module *mod,
+			  struct ftrace_event_call *call,
+			  struct ftrace_module_file_ops **file_ops,
+			  struct dentry *d_events)
+{
+	int ret;
+
+	/* The linker may leave blanks */
+	if (!call->name)
+		return 0;
+
+	if (call->raw_init) {
+		ret = call->raw_init(call);
+		if (ret < 0) {
+			if (ret != -ENOSYS)
+				pr_warning("Could not initialize trace "
+					   "point events/%s\n", call->name);
+			return 0;
+		}
+	}
+	/*
+	 * This module has events, create file ops for this module
+	 * if not already done.
+	 */
+	if (!*file_ops) {
+		bool print_fmt = is_print_fmt_event(call);
+		*file_ops = trace_create_file_ops(mod, print_fmt);
+		if (!*file_ops)
+			return -ENOMEM;
+	}
+	call->mod = mod;
+	list_add(&call->list, &ftrace_events);
+	event_create_dir(call, d_events,
+			 &(*file_ops)->id, &(*file_ops)->enable,
+			 &(*file_ops)->filter, &(*file_ops)->format);
+	return 0;
+}
+
 static void trace_module_add_events(struct module *mod)
 {
 	struct ftrace_module_file_ops *file_ops = NULL;
-	struct ftrace_event_call *call, *start, *end;
+	struct ftrace_event_call *call, *start = NULL, *end;
+	struct ftrace_event_call **pcall, **pstart = NULL, **pend;
 	struct dentry *d_events;
 	int ret;
 
-	start = mod->trace_events;
-	end = mod->trace_events + mod->num_trace_events;
+	if (module_has_ftrace_events_ptrs(mod)) {
+		pstart = module_ftrace_events_ptrs_unmask(mod->trace_events.ptrs);
+		pend   = pstart + mod->num_trace_events;
+	} else {
+		start = mod->trace_events.events;
+		end   = mod->trace_events.events + mod->num_trace_events;
+	}
 
-	if (start == end)
+	if (start == NULL && pstart == NULL)
 		return;
 
 	d_events = event_trace_events_dir();
 	if (!d_events)
 		return;
 
-	for_each_event(call, start, end) {
-		/* The linker may leave blanks */
-		if (!call->name)
-			continue;
-		if (call->raw_init) {
-			ret = call->raw_init(call);
-			if (ret < 0) {
-				if (ret != -ENOSYS)
-					pr_warning("Could not initialize trace "
-					"point events/%s\n", call->name);
-				continue;
-			}
-		}
-		/*
-		 * This module has events, create file ops for this module
-		 * if not already done.
-		 */
-		if (!file_ops) {
-			bool print_fmt = is_print_fmt_event(call);
-			file_ops = trace_create_file_ops(mod, print_fmt);
-			if (!file_ops)
+	if (pstart) {
+		for_each_event(pcall, pstart, pend) {
+			call = *pcall;
+			ret = __trace_module_add_events(mod, call,
+							&file_ops, d_events);
+			if (ret < 0)
 				return;
 		}
-		call->mod = mod;
-		list_add(&call->list, &ftrace_events);
-		event_create_dir(call, d_events,
-				 &file_ops->id, &file_ops->enable,
-				 &file_ops->filter, &file_ops->format);
+	} else {
+		for_each_event(call, start, end) {
+			ret = __trace_module_add_events(mod, call,
+							&file_ops, d_events);
+			if (ret < 0)
+				return;
+		}
 	}
 }
 

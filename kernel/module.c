@@ -2113,6 +2113,8 @@ static noinline struct module *load_module(void __user *umod,
 	unsigned long symoffs, stroffs, *strmap;
 	struct rheldata *rheldata;
 	int gpgsig_ok;
+	struct ftrace_event_call **trace_events_ptrs;
+	unsigned int num_trace_events_ptrs;
 
 	mm_segment_t old_fs;
 
@@ -2412,10 +2414,20 @@ static noinline struct module *load_module(void __user *umod,
 					&mod->num_tracepoints);
 #endif
 #ifdef CONFIG_EVENT_TRACING
-	mod->trace_events = section_objs(hdr, sechdrs, secstrings,
+	mod->trace_events.events = section_objs(hdr, sechdrs, secstrings,
 					 "_ftrace_events",
-					 sizeof(*mod->trace_events),
+					 sizeof(*mod->trace_events.events),
 					 &mod->num_trace_events);
+
+	trace_events_ptrs = section_objs(hdr, sechdrs, secstrings,
+					"_ftrace_events_ptrs",
+					sizeof(*trace_events_ptrs),
+					&num_trace_events_ptrs);
+	if (trace_events_ptrs &&
+	    use_ftrace_events_ptrs(trace_events_ptrs)) {
+		mod->trace_events.ptrs = ftrace_events_ptrs_mask(trace_events_ptrs);
+		mod->num_trace_events = num_trace_events_ptrs;
+	}
 #endif
 #ifdef CONFIG_FTRACE_MCOUNT_RECORD
 	/* sechdrs[0].sh_size is always zero */

@@ -62,6 +62,7 @@
 #include <asm/compat.h>
 #include <asm/kvm_virtio.h>
 #include <asm/diag.h>
+#include <asm/sclp.h>
 
 long psw_kernel_bits	= (PSW_BASE_BITS | PSW_MASK_DAT | PSW_ASC_PRIMARY |
 			   PSW_MASK_MCHECK | PSW_DEFAULT_KEY);
@@ -482,6 +483,11 @@ setup_lowcore(void)
 	lc->last_update_timer = S390_lowcore.last_update_timer;
 	lc->last_update_clock = S390_lowcore.last_update_clock;
 	lc->ftrace_func = S390_lowcore.ftrace_func;
+
+#ifdef CONFIG_SMP
+	lc->spinlock_lockval = __raw_spin_lockval(0);
+#endif
+
 	set_prefix((u32)(unsigned long) lc);
 	lowcore_ptr[0] = lc;
 }
@@ -558,6 +564,34 @@ setup_resources(void)
 unsigned long real_memory_size;
 EXPORT_SYMBOL_GPL(real_memory_size);
 
+static inline unsigned long sske_frame(unsigned long addr, unsigned char skey)
+{
+	asm volatile(".insn rrf,0xb22b0000,%[skey],%[addr],9,0"
+		     : [addr] "+a" (addr) : [skey] "d" (skey));
+	return addr;
+}
+
+void storage_key_init_range(unsigned long start, unsigned long end)
+{
+	unsigned long boundary, size;
+
+	while (start < end) {
+		if (MACHINE_HAS_EDAT1) {
+			/* set storage keys for a 1MB frame */
+			size = 1UL << 20;
+			boundary = (start + size) & ~(size - 1);
+			if (boundary <= end) {
+				do {
+					start = sske_frame(start, PAGE_DEFAULT_KEY);
+				} while (start < boundary);
+				continue;
+			}
+		}
+		page_set_storage_key(start, PAGE_DEFAULT_KEY);
+		start += PAGE_SIZE;
+	}
+}
+
 static void __init setup_memory_end(void)
 {
 	unsigned long vmax, vmalloc_size, tmp;
@@ -565,8 +599,9 @@ static void __init setup_memory_end(void)
 
 
 #ifdef CONFIG_ZFCPDUMP
-	if (ipl_info.type == IPL_TYPE_FCP_DUMP && !OLDMEM_BASE) {
-		memory_end = ZFCPDUMP_HSA_SIZE;
+	if (ipl_info.type == IPL_TYPE_FCP_DUMP &&
+	    !OLDMEM_BASE && sclp_get_hsa_size()) {
+		memory_end = sclp_get_hsa_size();
 		memory_end_set = 1;
 	}
 #endif
@@ -696,7 +731,7 @@ static unsigned long __init find_crash_base(unsigned long crash_size,
 		crash_base = (chunk->addr + chunk->size) - crash_size;
 		if (crash_base < crash_size)
 			continue;
-		if (crash_base < ZFCPDUMP_HSA_SIZE_MAX)
+		if (crash_base < sclp_get_hsa_size())
 			continue;
 		if (crash_base < (unsigned long) INITRD_START + INITRD_SIZE)
 			continue;
@@ -925,8 +960,7 @@ setup_memory(void)
 			continue;
 		add_active_range(0, start_chunk, end_chunk);
 		pfn = max(start_chunk, start_pfn);
-		for (; pfn < end_chunk; pfn++)
-			page_set_storage_key(PFN_PHYS(pfn), PAGE_DEFAULT_KEY);
+		storage_key_init_range(PFN_PHYS(pfn), PFN_PHYS(end_chunk));
 	}
 
 	psw_set_key(PAGE_DEFAULT_KEY);

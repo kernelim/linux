@@ -354,8 +354,11 @@ static int mtip_hba_reset(struct driver_data *dd)
 	/* Flush */
 	readl(dd->mmio + HOST_CTL);
 
-	/* Spin for up to 2 seconds, waiting for reset acknowledgement */
-	timeout = jiffies + msecs_to_jiffies(2000);
+	/*
+	 * Spin for up to 10 seconds waiting for reset acknowledgement. Spec
+	 * is 1 sec but in LUN failure conditions, up to 10 secs are required
+	 */
+	timeout = jiffies + msecs_to_jiffies(10000);
 	do {
 		mdelay(10);
 		if (test_bit(MTIP_DDF_REMOVE_PENDING_BIT, &dd->dd_flag))
@@ -1207,15 +1210,10 @@ static bool mtip_pause_ncq(struct mtip_port *port,
 	reply = port->rxfis + RX_FIS_D2H_REG;
 	task_file_data = readl(port->mmio+PORT_TFDATA);
 
-	if (fis->command == ATA_CMD_SEC_ERASE_UNIT)
-		clear_bit(MTIP_DDF_SEC_LOCK_BIT, &port->dd->dd_flag);
-
 	if ((task_file_data & 1))
 		return false;
 
 	if (fis->command == ATA_CMD_SEC_ERASE_PREP) {
-		set_bit(MTIP_PF_SE_ACTIVE_BIT, &port->flags);
-		set_bit(MTIP_DDF_SEC_LOCK_BIT, &port->dd->dd_flag);
 		port->ic_pause_timer = jiffies;
 		return true;
 	} else if ((fis->command == ATA_CMD_DOWNLOAD_MICRO) &&
@@ -1227,8 +1225,10 @@ static bool mtip_pause_ncq(struct mtip_port *port,
 		((fis->command == 0xFC) &&
 			(fis->features == 0x27 || fis->features == 0x72 ||
 			 fis->features == 0x62 || fis->features == 0x26))) {
+		clear_bit(MTIP_DDF_SEC_LOCK_BIT, &port->dd->dd_flag);
 		/* Com reset after secure erase or lowlevel format */
 		mtip_restart_port(port);
+		clear_bit(MTIP_PF_SE_ACTIVE_BIT, &port->flags);
 		return false;
 	}
 
@@ -1331,9 +1331,10 @@ static int mtip_exec_internal_command(struct mtip_port *port,
 		return -EBUSY;
 	}
 	set_bit(MTIP_PF_IC_ACTIVE_BIT, &port->flags);
-	port->ic_pause_timer = 0;
 
-	clear_bit(MTIP_PF_SE_ACTIVE_BIT, &port->flags);
+	if (fis->command == ATA_CMD_SEC_ERASE_PREP)
+		set_bit(MTIP_PF_SE_ACTIVE_BIT, &port->flags);
+
 	clear_bit(MTIP_PF_DM_ACTIVE_BIT, &port->flags);
 
 	if (atomic == GFP_KERNEL) {
@@ -1470,11 +1471,11 @@ exec_ic_exit:
 	/* Clear the allocated and active bits for the internal command. */
 	atomic_set(&int_cmd->active, 0);
 	release_slot(port, MTIP_TAG_INTERNAL);
+	clear_bit(MTIP_PF_IC_ACTIVE_BIT, &port->flags);
 	if (rv >= 0 && mtip_pause_ncq(port, fis)) {
 		/* NCQ paused */
 		return rv;
 	}
-	clear_bit(MTIP_PF_IC_ACTIVE_BIT, &port->flags);
 	wake_up_interruptible(&port->svc_wait);
 
 	return rv;
@@ -3064,6 +3065,7 @@ static int mtip_free_orphan(struct driver_data *dd)
 			return -2;
 
 		bdput(dd->bdev);
+		put_disk(dd->disk);
 		dd->bdev = NULL;
 	}
 
@@ -3218,7 +3220,6 @@ static int mtip_ftl_rebuild_poll(struct driver_data *dd)
 			mtip_block_initialize(dd);
 			return 0;
 		}
-		ssleep(10);
 	} while (time_before(jiffies, timeout));
 
 	/* Check for timeout */
@@ -3996,6 +3997,26 @@ static const struct block_device_operations mtip_block_ops = {
 	.owner		= THIS_MODULE
 };
 
+static inline bool is_se_active(struct driver_data *dd)
+{
+	if (unlikely(test_bit(MTIP_PF_SE_ACTIVE_BIT, &dd->port->flags))) {
+		if (dd->port->ic_pause_timer) {
+			unsigned long to = dd->port->ic_pause_timer +
+							msecs_to_jiffies(1000);
+			if (time_after(jiffies, to)) {
+				clear_bit(MTIP_PF_SE_ACTIVE_BIT,
+							&dd->port->flags);
+				clear_bit(MTIP_DDF_SEC_LOCK_BIT, &dd->dd_flag);
+				dd->port->ic_pause_timer = 0;
+				wake_up_interruptible(&dd->port->svc_wait);
+				return false;
+			}
+		}
+		return true;
+	}
+	return false;
+}
+
 /*
  * Block layer make request function.
  *
@@ -4016,6 +4037,9 @@ static int mtip_make_request(struct request_queue *queue, struct bio *bio)
 	struct bio_vec *bvec;
 	int i, nents = 0;
 	int tag = 0, unaligned = 0;
+
+	if (is_se_active(dd))
+		return -ENODATA;
 
  	if (unlikely(dd->dd_flag & MTIP_DDF_STOP_IO)) {
  		if (unlikely(test_bit(MTIP_DDF_REMOVE_PENDING_BIT,
@@ -4162,7 +4186,8 @@ static int mtip_block_initialize(struct driver_data *dd)
 
 	dd->disk->driverfs_dev	= &dd->pdev->dev;
 	dd->disk->major		= dd->major;
-	dd->disk->first_minor	= dd->instance * MTIP_MAX_MINORS;
+	dd->disk->first_minor	= index * MTIP_MAX_MINORS;
+	dd->disk->minors 	= MTIP_MAX_MINORS;
 	dd->disk->fops		= &mtip_block_ops;
 	dd->disk->private_data	= dd;
 	dd->index		= index;
@@ -4329,12 +4354,12 @@ static int mtip_block_remove(struct driver_data *dd)
 			dd->bdev = NULL;
 		}
 		if (dd->disk) {
+			del_gendisk(dd->disk);
 			if (dd->disk->queue) {
-				del_gendisk(dd->disk);
 				blk_cleanup_queue(dd->queue);
 				dd->queue = NULL;
-			} else
-				put_disk(dd->disk);
+			}
+			put_disk(dd->disk);
 		}
 		dd->disk  = NULL;
 
@@ -4371,11 +4396,11 @@ static int mtip_block_shutdown(struct driver_data *dd)
 		dev_info(&dd->pdev->dev,
 			"Shutting down %s ...\n", dd->disk->disk_name);
 
+		del_gendisk(dd->disk);
 		if (dd->disk->queue) {
-			del_gendisk(dd->disk);
 			blk_cleanup_queue(dd->queue);
-		} else
-			put_disk(dd->disk);
+		}
+		put_disk(dd->disk);
 		dd->disk  = NULL;
 		dd->queue = NULL;
 	}

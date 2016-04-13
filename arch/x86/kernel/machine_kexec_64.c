@@ -353,7 +353,6 @@ void arch_crash_save_vmcoreinfo(void)
 
 #ifdef CONFIG_KEXEC_AUTO_RESERVE
 
-#define KEXEC_AUTO_LOW_LIMIT	(896 * 1024 * 1024)
 #define KEXEC_AUTO_LOW_MIN	(256 * 1024 * 1024)
 #define KEXEC_AUTO_SCALE	( 64 * 1024 * 1024)
 
@@ -371,11 +370,11 @@ arch_crash_auto_scale(unsigned long long total_size, unsigned long long size)
 	const unsigned long long alignment = 16<<20;    /* 16M */
 	unsigned long long start = -1ULL;
 
-	if (size > KEXEC_AUTO_LOW_LIMIT)
-		size = KEXEC_AUTO_LOW_LIMIT;
+	if (size > KEXEC_RESERVE_UPPER_LIMIT)
+		size = KEXEC_RESERVE_UPPER_LIMIT;
 
 	do {
-		start = find_e820_area(0, KEXEC_AUTO_LOW_LIMIT, size, alignment);
+		start = find_e820_area(0, KEXEC_RESERVE_UPPER_LIMIT, size, alignment);
 		if (start == -1ULL)
 			size -= KEXEC_AUTO_SCALE;
 		else
@@ -385,7 +384,6 @@ arch_crash_auto_scale(unsigned long long total_size, unsigned long long size)
 	return 0;
 }
 
-#undef KEXEC_AUTO_LOW_LIMIT
 #undef KEXEC_AUTO_LOW_MIN
 #undef KEXEC_AUTO_SCALE
 #endif

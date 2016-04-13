@@ -50,8 +50,6 @@ static inline int nfs_attr_use_mounted_on_fileid(struct nfs_fattr *fattr)
 		(((fattr->valid & NFS_ATTR_FATTR_MOUNTPOINT) == 0) &&
 		((fattr->valid & NFS_ATTR_FATTR_V4_REFERRAL) == 0)))
 			return 0;
-
-	fattr->fileid = fattr->mounted_on_fileid;
 	return 1;
 }
 
@@ -257,6 +255,9 @@ extern int nfs_init_client(struct nfs_client *clp,
 extern void nfs_force_use_readdirplus(struct inode *dir);
 extern int nfs_access_cache_shrinker(struct shrinker *shrink,
 					int nr_to_scan, gfp_t gfp_mask);
+
+/* file.c */
+int nfs_check_flags(int);
 
 /* inode.c */
 extern struct workqueue_struct *nfsiod_workqueue;

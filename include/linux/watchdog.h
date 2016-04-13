@@ -178,4 +178,12 @@ extern void watchdog_unregister_device(struct watchdog_device *);
 
 #endif	/* __KERNEL__ */
 
+#ifdef CONFIG_HARDLOCKUP_DETECTOR
+void watchdog_nmi_disable_all(void);
+void watchdog_nmi_enable_all(void);
+#else
+static inline void watchdog_nmi_disable_all(void) {}
+static inline void watchdog_nmi_enable_all(void) {}
+#endif
+
 #endif  /* ifndef _LINUX_WATCHDOG_H */

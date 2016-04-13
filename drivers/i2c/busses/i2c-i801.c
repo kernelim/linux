@@ -2,7 +2,7 @@
     Copyright (c) 1998 - 2002  Frodo Looijaard <frodol@dds.nl>,
     Philip Edelbrock <phil@netroedge.com>, and Mark D. Studebaker
     <mdsxyz123@yahoo.com>
-    Copyright (C) 2007, 2008   Jean Delvare <khali@linux-fr.org>
+    Copyright (C) 2007 - 2012  Jean Delvare <khali@linux-fr.org>
     Copyright (C) 2010         Intel Corporation,
                                David Woodhouse <dwmw2@infradead.org>
 
@@ -59,8 +59,11 @@
   Wellsburg (PCH) MS    0x8d7f     32     hard     yes     yes     yes
   Wildcat Point-LP (PCH)   0x9ca2     32     hard     yes     yes     yes
   Coleto Creek (PCH)    0x23b0     32     hard     yes     yes     yes
+  Wildcat Point (PCH)   0x8ca2     32     hard     yes     yes     yes
   Sunrise Point-H (PCH) 0xa123     32     hard     yes     yes     yes
   Sunrise Point-LP (PCH)0x9d23     32     hard     yes     yes     yes
+  Lewisburg (PCH)       0xa1a3     32     hard     yes     yes     yes
+  Lewisburg Supersku (PCH) 0xa223     32     hard     yes     yes     yes
 
   Features supported by this driver:
   Software PEC                     no
@@ -69,13 +72,16 @@
   Block process call transaction   no
   I2C block read transaction       yes  (doesn't use the block buffer)
   Slave mode                       no
+  Interrupt processing             yes
 
   See the file Documentation/i2c/busses/i2c-i801 for details.
 */
 
+#include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/kernel.h>
+#include <linux/wait.h>
 #include <linux/stddef.h>
 #include <linux/delay.h>
 #include <linux/ioport.h>
@@ -84,6 +90,8 @@
 #include <linux/acpi.h>
 #include <linux/io.h>
 #include <linux/dmi.h>
+#include <linux/platform_device.h>
+#include <linux/platform_data/itco_wdt.h>
 
 /* I801 SMBus address offsets */
 #define SMBHSTSTS(p)	(0 + (p)->smba)
@@ -99,22 +107,40 @@
 
 /* PCI Address Constants */
 #define SMBBAR		4
+#define SMBPCICTL	0x004
+#define SMBPCISTS	0x006
 #define SMBHSTCFG	0x040
+#define TCOBASE		0x050
+#define TCOCTL		0x054
+
+#define ACPIBASE		0x040
+#define ACPIBASE_SMI_OFF	0x030
+#define ACPICTRL		0x044
+#define ACPICTRL_EN		0x080
+
+#define SBREG_BAR		0x10
+#define SBREG_SMBCTRL		0xc6000c
+
+/* Host status bits for SMBPCISTS */
+#define SMBPCISTS_INTS		0x08
+
+/* Control bits for SMBPCICTL */
+#define SMBPCICTL_INTDIS	0x0400
 
 /* Host configuration bits for SMBHSTCFG */
 #define SMBHSTCFG_HST_EN	1
 #define SMBHSTCFG_SMB_SMI_EN	2
 #define SMBHSTCFG_I2C_EN	4
 
-/* Auxillary control register bits, ICH4+ only */
+/* TCO configuration bits for TCOCTL */
+#define TCOCTL_EN		0x0100
+
+/* Auxiliary control register bits, ICH4+ only */
 #define SMBAUXCTL_CRC		1
 #define SMBAUXCTL_E32B		2
 
-/* kill bit for SMBHSTCNT */
-#define SMBHSTCNT_KILL		2
-
 /* Other settings */
-#define MAX_TIMEOUT		100
+#define MAX_RETRIES		400
 #define ENABLE_INT9		0	/* set to 0x01 to enable - untested */
 
 /* I801 command constants */
@@ -127,9 +153,13 @@
 #define I801_I2C_BLOCK_DATA	0x18	/* ICH5 and later */
 #define I801_BLOCK_LAST		0x34
 #define I801_I2C_BLOCK_LAST	0x38	/* ICH5 and later */
-#define I801_START		0x40
-#define I801_PEC_EN		0x80	/* ICH3 and later */
 
+/* I801 Host Control register bits */
+#define SMBHSTCNT_INTREN	0x01
+#define SMBHSTCNT_KILL		0x02
+#define SMBHSTCNT_LAST_BYTE	0x20
+#define SMBHSTCNT_START		0x40
+#define SMBHSTCNT_PEC_EN	0x80	/* ICH3 and later */
 /* I801 Hosts Status register bits */
 #define SMBHSTSTS_BYTE_DONE	0x80
 #define SMBHSTSTS_INUSE_STS	0x40
@@ -140,12 +170,15 @@
 #define SMBHSTSTS_INTR		0x02
 #define SMBHSTSTS_HOST_BUSY	0x01
 
-#define STATUS_FLAGS		(SMBHSTSTS_BYTE_DONE | SMBHSTSTS_FAILED | \
-				 SMBHSTSTS_BUS_ERR | SMBHSTSTS_DEV_ERR | \
-				 SMBHSTSTS_INTR)
+#define STATUS_ERROR_FLAGS	(SMBHSTSTS_FAILED | SMBHSTSTS_BUS_ERR | \
+				 SMBHSTSTS_DEV_ERR)
+
+#define STATUS_FLAGS		(SMBHSTSTS_BYTE_DONE | SMBHSTSTS_INTR | \
+				 STATUS_ERROR_FLAGS)
 
 /* Patsburg also has three 'Integrated Device Function' SMBus controllers */
 #define PCI_DEVICE_ID_INTEL_PATSBURG_SMBUS_IDF0	0x1d70
+#define PCI_DEVICE_ID_INTEL_WILDCATPOINT_SMBUS		0x8ca2
 #define PCI_DEVICE_ID_INTEL_PATSBURG_SMBUS_IDF1	0x1d71
 #define PCI_DEVICE_ID_INTEL_PATSBURG_SMBUS_IDF2	0x1d72
 #define PCI_DEVICE_ID_INTEL_PANTHERPOINT_SMBUS	0x1e22
@@ -162,6 +195,8 @@
 #define PCI_DEVICE_ID_INTEL_WILDCATPOINT_LP_SMBUS	0x9ca2
 #define PCI_DEVICE_ID_INTEL_SUNRISEPOINT_H_SMBUS	0xa123
 #define PCI_DEVICE_ID_INTEL_SUNRISEPOINT_LP_SMBUS	0x9d23
+#define PCI_DEVICE_ID_INTEL_LEWISBURG_SMBUS		0xa1a3
+#define PCI_DEVICE_ID_INTEL_LEWISBURG_SSKU_SMBUS	0xa223
 
 struct i801_priv {
 	struct i2c_adapter adapter;
@@ -169,6 +204,11 @@ struct i801_priv {
 	unsigned char original_hstcfg;
 	struct pci_dev *pci_dev;
 	unsigned int features;
+
+	/* isr processing */
+	wait_queue_head_t waitq;
+	u8 status;
+	struct platform_device *tco_pdev;
 };
 
 static struct pci_driver i801_driver;
@@ -177,12 +217,15 @@ static struct pci_driver i801_driver;
 #define FEATURE_BLOCK_BUFFER	(1 << 1)
 #define FEATURE_BLOCK_PROC	(1 << 2)
 #define FEATURE_I2C_BLOCK_READ	(1 << 3)
+#define FEATURE_IRQ		(1 << 4)
+#define FEATURE_TCO		(1 << 16)
 
 static const char *i801_feature_names[] = {
 	"SMBus PEC",
 	"Block buffer",
 	"Block process call",
 	"I2C block read",
+	"Interrupt",
 };
 
 static unsigned int disable_features;
@@ -223,14 +266,19 @@ static int i801_check_post(struct i801_priv *priv, int status, int timeout)
 {
 	int result = 0;
 
-	/* If the SMBus is still busy, we give up */
+	/*
+	 * If the SMBus is still busy, we give up
+	 * Note: This timeout condition only happens when using polling
+	 * transactions.  For interrupt operation, NAK/timeout is indicated by
+	 * DEV_ERR.
+	 */
 	if (timeout) {
 		dev_err(&priv->pci_dev->dev, "Transaction timeout\n");
 		/* try to stop the current command */
 		dev_dbg(&priv->pci_dev->dev, "Terminating the current operation\n");
 		outb_p(inb_p(SMBHSTCNT(priv)) | SMBHSTCNT_KILL,
 		       SMBHSTCNT(priv));
-		msleep(1);
+		usleep_range(1000, 2000);
 		outb_p(inb_p(SMBHSTCNT(priv)) & (~SMBHSTCNT_KILL),
 		       SMBHSTCNT(priv));
 
@@ -281,17 +329,25 @@ static int i801_transaction(struct i801_priv *priv, int xact)
 	if (result < 0)
 		return result;
 
+	if (priv->features & FEATURE_IRQ) {
+		outb_p(xact | SMBHSTCNT_INTREN | SMBHSTCNT_START,
+		       SMBHSTCNT(priv));
+		wait_event(priv->waitq, (status = priv->status));
+		priv->status = 0;
+		return i801_check_post(priv, status, timeout > MAX_RETRIES);
+	}
+
 	/* the current contents of SMBHSTCNT can be overwritten, since PEC,
 	 * INTREN, SMBSCMD are passed in xact */
-	outb_p(xact | I801_START, SMBHSTCNT(priv));
+	outb_p(xact | SMBHSTCNT_START, SMBHSTCNT(priv));
 
 	/* We will always wait for a fraction of a second! */
 	do {
-		msleep(1);
+		usleep_range(250, 500);
 		status = inb_p(SMBHSTSTS(priv));
-	} while ((status & SMBHSTSTS_HOST_BUSY) && (timeout++ < MAX_TIMEOUT));
+	} while ((status & SMBHSTSTS_HOST_BUSY) && (timeout++ < MAX_RETRIES));
 
-	result = i801_check_post(priv, status, timeout > MAX_TIMEOUT);
+	result = i801_check_post(priv, status, timeout > MAX_RETRIES);
 	if (result < 0)
 		return result;
 
@@ -306,12 +362,12 @@ static void i801_wait_hwpec(struct i801_priv *priv)
 	int status;
 
 	do {
-		msleep(1);
+		usleep_range(250, 500);
 		status = inb_p(SMBHSTSTS(priv));
 	} while ((!(status & SMBHSTSTS_INTR))
-		 && (timeout++ < MAX_TIMEOUT));
+		 && (timeout++ < MAX_RETRIES));
 
-	if (timeout > MAX_TIMEOUT)
+	if (timeout > MAX_RETRIES)
 		dev_dbg(&priv->pci_dev->dev, "PEC Timeout!\n");
 
 	outb_p(status, SMBHSTSTS(priv));
@@ -335,7 +391,7 @@ static int i801_block_transaction_by_block(struct i801_priv *priv,
 	}
 
 	status = i801_transaction(priv, I801_BLOCK_DATA | ENABLE_INT9 |
-				  I801_PEC_EN * hwpec);
+				  (hwpec ? SMBHSTCNT_PEC_EN : 0));
 	if (status)
 		return status;
 
@@ -349,6 +405,44 @@ static int i801_block_transaction_by_block(struct i801_priv *priv,
 			data->block[i + 1] = inb_p(SMBBLKDAT(priv));
 	}
 	return 0;
+}
+
+/*
+ * i801 signals transaction completion with one of these interrupts:
+ *   INTR - Success
+ *   DEV_ERR - Invalid command, NAK or communication timeout
+ *   BUS_ERR - SMI# transaction collision
+ *   FAILED - transaction was canceled due to a KILL request
+ * When any of these occur, update ->status and wake up the waitq.
+ * ->status must be cleared before kicking off the next transaction.
+ */
+static irqreturn_t i801_isr(int irq, void *dev_id)
+{
+	struct i801_priv *priv = dev_id;
+	u16 pcists;
+	u8 status;
+
+	/* Confirm this is our interrupt */
+	pci_read_config_word(priv->pci_dev, SMBPCISTS, &pcists);
+	if (!(pcists & SMBPCISTS_INTS))
+		return IRQ_NONE;
+
+	status = inb_p(SMBHSTSTS(priv));
+	if (status != 0x42)
+		dev_dbg(&priv->pci_dev->dev, "irq: status = %02x\n", status);
+
+	/*
+	 * Clear irq sources and report transaction result.
+	 * ->status must be cleared before the next transaction is started.
+	 */
+	status &= SMBHSTSTS_INTR | STATUS_ERROR_FLAGS;
+	if (status) {
+		outb_p(status, SMBHSTSTS(priv));
+		priv->status |= status;
+		wake_up(&priv->waitq);
+	}
+
+	return IRQ_HANDLED;
 }
 
 static int i801_block_transaction_byte_by_byte(struct i801_priv *priv,
@@ -389,18 +483,18 @@ static int i801_block_transaction_byte_by_byte(struct i801_priv *priv,
 		outb_p(smbcmd | ENABLE_INT9, SMBHSTCNT(priv));
 
 		if (i == 1)
-			outb_p(inb(SMBHSTCNT(priv)) | I801_START,
+			outb_p(inb(SMBHSTCNT(priv)) | SMBHSTCNT_START,
 			       SMBHSTCNT(priv));
 
 		/* We will always wait for a fraction of a second! */
 		timeout = 0;
 		do {
-			msleep(1);
+			usleep_range(250, 500);
 			status = inb_p(SMBHSTSTS(priv));
-		} while ((!(status & SMBHSTSTS_BYTE_DONE))
-			 && (timeout++ < MAX_TIMEOUT));
+		} while (!(status & (SMBHSTSTS_BYTE_DONE | STATUS_ERROR_FLAGS))
+			 && (timeout++ < MAX_RETRIES));
 
-		result = i801_check_post(priv, status, timeout > MAX_TIMEOUT);
+		result = i801_check_post(priv, status, timeout > MAX_RETRIES);
 		if (result < 0)
 			return result;
 
@@ -658,6 +752,9 @@ static const struct pci_device_id i801_ids[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_COLETOCREEK_SMBUS) },
 	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_SUNRISEPOINT_H_SMBUS) },
 	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_SUNRISEPOINT_LP_SMBUS) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_WILDCATPOINT_SMBUS) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_LEWISBURG_SMBUS) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_LEWISBURG_SSKU_SMBUS) },
 	{ 0, }
 };
 
@@ -765,6 +862,95 @@ static void __devinit dmi_check_onboard_devices(const struct dmi_header *dm,
 }
 #endif
 
+static const struct itco_wdt_platform_data tco_platform_data = {
+	.name = "Intel PCH",
+	.version = 4,
+};
+
+static DEFINE_SPINLOCK(p2sb_spinlock);
+
+static void i801_add_tco(struct i801_priv *priv)
+{
+	struct pci_dev *pci_dev = priv->pci_dev;
+	struct resource tco_res[3], *res;
+	struct platform_device *pdev;
+	unsigned int devfn;
+	u32 tco_base, tco_ctl;
+	u32 base_addr, ctrl_val;
+	u64 base64_addr;
+
+	if (!(priv->features & FEATURE_TCO))
+		return;
+
+	pci_read_config_dword(pci_dev, TCOBASE, &tco_base);
+	pci_read_config_dword(pci_dev, TCOCTL, &tco_ctl);
+	if (!(tco_ctl & TCOCTL_EN))
+		return;
+
+	memset(tco_res, 0, sizeof(tco_res));
+
+	res = &tco_res[ICH_RES_IO_TCO];
+	res->start = tco_base & ~1;
+	res->end = res->start + 32 - 1;
+	res->flags = IORESOURCE_IO;
+
+	/*
+	 * Power Management registers.
+	 */
+	devfn = PCI_DEVFN(PCI_SLOT(pci_dev->devfn), 2);
+	pci_bus_read_config_dword(pci_dev->bus, devfn, ACPIBASE, &base_addr);
+
+	res = &tco_res[ICH_RES_IO_SMI];
+	res->start = (base_addr & ~1) + ACPIBASE_SMI_OFF;
+	res->end = res->start + 3;
+	res->flags = IORESOURCE_IO;
+
+	/*
+	 * Enable the ACPI I/O space.
+	 */
+	pci_bus_read_config_dword(pci_dev->bus, devfn, ACPICTRL, &ctrl_val);
+	ctrl_val |= ACPICTRL_EN;
+	pci_bus_write_config_dword(pci_dev->bus, devfn, ACPICTRL, ctrl_val);
+
+	/*
+	 * We must access the NO_REBOOT bit over the Primary to Sideband
+	 * bridge (P2SB). The BIOS prevents the P2SB device from being
+	 * enumerated by the PCI subsystem, so we need to unhide/hide it
+	 * to lookup the P2SB BAR.
+	 */
+	spin_lock(&p2sb_spinlock);
+
+	devfn = PCI_DEVFN(PCI_SLOT(pci_dev->devfn), 1);
+
+	/* Unhide the P2SB device */
+	pci_bus_write_config_byte(pci_dev->bus, devfn, 0xe1, 0x0);
+
+	pci_bus_read_config_dword(pci_dev->bus, devfn, SBREG_BAR, &base_addr);
+	base64_addr = base_addr & 0xfffffff0;
+
+	pci_bus_read_config_dword(pci_dev->bus, devfn, SBREG_BAR + 0x4, &base_addr);
+	base64_addr |= (u64)base_addr << 32;
+
+	/* Hide the P2SB device */
+	pci_bus_write_config_byte(pci_dev->bus, devfn, 0xe1, 0x1);
+	spin_unlock(&p2sb_spinlock);
+
+	res = &tco_res[ICH_RES_MEM_OFF];
+	res->start = (resource_size_t)base64_addr + SBREG_SMBCTRL;
+	res->end = res->start + 3;
+	res->flags = IORESOURCE_MEM;
+
+	pdev = platform_device_register_resndata(&pci_dev->dev, "iTCO_wdt", -1,
+						 tco_res, 3, &tco_platform_data,
+						 sizeof(tco_platform_data));
+	if (IS_ERR(pdev)) {
+		dev_warn(&pci_dev->dev, "failed to create iTCO device\n");
+		return;
+	}
+
+	priv->tco_pdev = pdev;
+}
+
 static int __devinit i801_probe(struct pci_dev *dev,
 				const struct pci_device_id *id)
 {
@@ -795,7 +981,22 @@ static int __devinit i801_probe(struct pci_dev *dev,
 	case PCI_DEVICE_ID_INTEL_82801AB_3:
 	case PCI_DEVICE_ID_INTEL_82801AA_3:
 		break;
+	case PCI_DEVICE_ID_INTEL_SUNRISEPOINT_H_SMBUS:
+	case PCI_DEVICE_ID_INTEL_SUNRISEPOINT_LP_SMBUS:
+	case PCI_DEVICE_ID_INTEL_LEWISBURG_SMBUS:
+	case PCI_DEVICE_ID_INTEL_LEWISBURG_SSKU_SMBUS:
+		priv->features |= FEATURE_I2C_BLOCK_READ;
+		priv->features |= FEATURE_IRQ;
+		priv->features |= FEATURE_SMBUS_PEC;
+		priv->features |= FEATURE_BLOCK_BUFFER;
+		priv->features |= FEATURE_TCO;
+		break;
+
 	}
+
+	/* IRQ processing only tested on CougarPoint PCH */
+	if (dev->device == PCI_DEVICE_ID_INTEL_COUGARPOINT_SMBUS)
+		priv->features |= FEATURE_IRQ;
 
 	/* Disable features on user request */
 	for (i = 0; i < ARRAY_SIZE(i801_feature_names); i++) {
@@ -844,15 +1045,50 @@ static int __devinit i801_probe(struct pci_dev *dev,
 	}
 	pci_write_config_byte(priv->pci_dev, SMBHSTCFG, temp);
 
-	if (temp & SMBHSTCFG_SMB_SMI_EN)
+	if (temp & SMBHSTCFG_SMB_SMI_EN) {
 		dev_dbg(&dev->dev, "SMBus using interrupt SMI#\n");
-	else
+		/* Disable SMBus interrupt feature if SMBus using SMI# */
+		priv->features &= ~FEATURE_IRQ;
+	} else {
 		dev_dbg(&dev->dev, "SMBus using PCI Interrupt\n");
+	}
 
 	/* Clear special mode bits */
 	if (priv->features & (FEATURE_SMBUS_PEC | FEATURE_BLOCK_BUFFER))
 		outb_p(inb_p(SMBAUXCTL(priv)) &
 		       ~(SMBAUXCTL_CRC | SMBAUXCTL_E32B), SMBAUXCTL(priv));
+
+	if (priv->features & FEATURE_IRQ) {
+		u16 pcictl, pcists;
+
+		/* Complain if an interrupt is already pending */
+		pci_read_config_word(priv->pci_dev, SMBPCISTS, &pcists);
+		if (pcists & SMBPCISTS_INTS)
+			dev_warn(&dev->dev, "An interrupt is pending!\n");
+
+		/* Check if interrupts have been disabled */
+		pci_read_config_word(priv->pci_dev, SMBPCICTL, &pcictl);
+		if (pcictl & SMBPCICTL_INTDIS) {
+			dev_info(&dev->dev, "Interrupts are disabled\n");
+			priv->features &= ~FEATURE_IRQ;
+		}
+	}
+
+	if (priv->features & FEATURE_IRQ) {
+		init_waitqueue_head(&priv->waitq);
+
+		err = request_irq(dev->irq, i801_isr, IRQF_SHARED,
+				  i801_driver.name, priv);
+		if (err) {
+			dev_err(&dev->dev, "Failed to allocate irq %d: %d\n",
+				dev->irq, err);
+			priv->features &= ~FEATURE_IRQ;
+		}
+	}
+	dev_info(&dev->dev, "SMBus using %s\n",
+		 priv->features & FEATURE_IRQ ? "PCI interrupt" : "polling");
+
+	i801_add_tco(priv);
 
 	/* set up the sysfs linkage to our parent device */
 	priv->adapter.dev.parent = &dev->dev;
@@ -865,7 +1101,7 @@ static int __devinit i801_probe(struct pci_dev *dev,
 	err = i2c_add_adapter(&priv->adapter);
 	if (err) {
 		dev_err(&dev->dev, "Failed to add SMBus adapter\n");
-		goto exit_release;
+		goto exit_free_irq;
 	}
 
 	/* Register optional slaves */
@@ -885,9 +1121,12 @@ static int __devinit i801_probe(struct pci_dev *dev,
 #endif
 
 	pci_set_drvdata(dev, priv);
+
 	return 0;
 
-exit_release:
+exit_free_irq:
+	if (priv->features & FEATURE_IRQ)
+		free_irq(dev->irq, priv);
 	pci_release_region(dev, SMBBAR);
 exit:
 	kfree(priv);
@@ -900,7 +1139,13 @@ static void __devexit i801_remove(struct pci_dev *dev)
 
 	i2c_del_adapter(&priv->adapter);
 	pci_write_config_byte(dev, SMBHSTCFG, priv->original_hstcfg);
+
+	if (priv->features & FEATURE_IRQ)
+		free_irq(dev->irq, priv);
 	pci_release_region(dev, SMBBAR);
+
+	platform_device_unregister(priv->tco_pdev);
+
 	pci_set_drvdata(dev, NULL);
 	kfree(priv);
 	/*

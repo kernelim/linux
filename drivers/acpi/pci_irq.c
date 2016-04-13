@@ -71,7 +71,7 @@ static struct acpi_prt_entry *acpi_pci_irq_find_prt_entry(struct pci_dev *dev,
 	struct acpi_prt_entry *entry;
 	int segment = pci_domain_nr(dev->bus);
 	int bus = dev->bus->number;
-	int device = PCI_SLOT(dev->devfn);
+	int device = pci_ari_enabled(dev->bus) ? 0 : PCI_SLOT(dev->devfn);
 
 	spin_lock(&acpi_prt_lock);
 	list_for_each_entry(entry, &acpi_prt_list, list) {

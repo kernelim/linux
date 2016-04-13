@@ -52,6 +52,8 @@
  * in time to have their callbacks seen.
  */
 struct utrace {
+	bool freeze_stop;
+
 	spinlock_t lock;
 	struct list_head attached, attaching;
 
@@ -65,8 +67,6 @@ struct utrace {
 	unsigned int death:1;	/* in utrace_report_death() now */
 	unsigned int reap:1;	/* release_task() has run */
 	unsigned int pending_attach:1; /* need splice_attaching() */
-
-	bool freeze_stop;
 };
 
 static struct kmem_cache *utrace_cachep;

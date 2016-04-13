@@ -375,7 +375,6 @@ static int __devinit ne2k_pci_init_one (struct pci_dev *pdev,
 	NS8390_init(dev, 0);
 
 	memcpy(dev->dev_addr, SA_prom, dev->addr_len);
-	memcpy(dev->perm_addr, dev->dev_addr, dev->addr_len);
 
 	i = register_netdev(dev);
 	if (i)

@@ -216,11 +216,13 @@ static bool ath_prepare_reset(struct ath_softc *sc)
 	ath_stop_ani(sc);
 	ath9k_hw_disable_interrupts(ah);
 
-	if (!ath_drain_all_txq(sc))
-		ret = false;
-
-	if (!ath_stoprecv(sc))
-		ret = false;
+	if (AR_SREV_9300_20_OR_LATER(ah)) {
+		ret &= ath_stoprecv(sc);
+		ret &= ath_drain_all_txq(sc);
+	} else {
+		ret &= ath_drain_all_txq(sc);
+		ret &= ath_stoprecv(sc);
+	}
 
 	return ret;
 }
@@ -554,15 +556,6 @@ irqreturn_t ath_isr(int irq, void *dev)
 	if ((ah->config.hw_hang_checks & HW_BB_WATCHDOG) &&
 	    (status & ATH9K_INT_BB_WATCHDOG))
 		goto chip_reset;
-
-#ifdef CONFIG_ATH9K_WOW
-	if (status & ATH9K_INT_BMISS) {
-		if (atomic_read(&sc->wow_sleep_proc_intr) == 0) {
-			atomic_inc(&sc->wow_got_bmiss_intr);
-			atomic_dec(&sc->wow_sleep_proc_intr);
-		}
-	}
-#endif
 
 	if (status & ATH9K_INT_SWBA)
 		tasklet_schedule(&sc->bcon_tasklet);
@@ -1181,6 +1174,38 @@ void ath9k_calculate_summary_state(struct ath_softc *sc,
 	ath9k_ps_restore(sc);
 }
 
+static void ath9k_tpc_vif_iter(void *data, u8 *mac, struct ieee80211_vif *vif)
+{
+	int *power = (int *)data;
+
+	if (*power < vif->bss_conf.txpower)
+		*power = vif->bss_conf.txpower;
+}
+
+/* Called with sc->mutex held. */
+void ath9k_set_txpower(struct ath_softc *sc, struct ieee80211_vif *vif)
+{
+	int power;
+	struct ath_hw *ah = sc->sc_ah;
+	struct ath_regulatory *reg = ath9k_hw_regulatory(ah);
+
+	ath9k_ps_wakeup(sc);
+	if (ah->tpc_enabled) {
+		power = (vif) ? vif->bss_conf.txpower : -1;
+		ieee80211_iterate_active_interfaces_atomic(
+				sc->hw, IEEE80211_IFACE_ITER_RESUME_ALL,
+				ath9k_tpc_vif_iter, &power);
+		if (power == -1)
+			power = sc->hw->conf.power_level;
+	} else {
+		power = sc->hw->conf.power_level;
+	}
+	sc->cur_chan->txpower = 2 * power;
+	ath9k_hw_set_txpowerlimit(ah, sc->cur_chan->txpower, false);
+	sc->cur_chan->cur_txpower = reg->max_power_level;
+	ath9k_ps_restore(sc);
+}
+
 static void ath9k_assign_hw_queues(struct ieee80211_hw *hw,
 				   struct ieee80211_vif *vif)
 {
@@ -1234,6 +1259,8 @@ static int ath9k_add_interface(struct ieee80211_hw *hw,
 
 	ath9k_assign_hw_queues(hw, vif);
 
+	ath9k_set_txpower(sc, vif);
+
 	an->sc = sc;
 	an->sta = NULL;
 	an->vif = vif;
@@ -1274,6 +1301,8 @@ static int ath9k_change_interface(struct ieee80211_hw *hw,
 	ath9k_assign_hw_queues(hw, vif);
 	ath9k_calculate_summary_state(sc, avp->chanctx);
 
+	ath9k_set_txpower(sc, vif);
+
 	mutex_unlock(&sc->mutex);
 	return 0;
 }
@@ -1302,6 +1331,8 @@ static void ath9k_remove_interface(struct ieee80211_hw *hw,
 	ath_tx_node_cleanup(sc, &avp->mcast_node);
 
 	ath9k_calculate_summary_state(sc, avp->chanctx);
+
+	ath9k_set_txpower(sc, NULL);
 
 	mutex_unlock(&sc->mutex);
 }
@@ -1406,14 +1437,6 @@ static int ath9k_config(struct ieee80211_hw *hw, u32 changed)
 		ath_chanctx_set_channel(sc, ctx, &hw->conf.chandef);
 	}
 
-	if (changed & IEEE80211_CONF_CHANGE_POWER) {
-		ath_dbg(common, CONFIG, "Set power: %d\n", conf->power_level);
-		sc->cur_chan->txpower = 2 * conf->power_level;
-		ath9k_cmn_update_txpow(ah, sc->cur_chan->cur_txpower,
-				       sc->cur_chan->txpower,
-				       &sc->cur_chan->cur_txpower);
-	}
-
 	mutex_unlock(&sc->mutex);
 	ath9k_ps_restore(sc);
 
@@ -1421,8 +1444,7 @@ static int ath9k_config(struct ieee80211_hw *hw, u32 changed)
 }
 
 #define SUPPORTED_FILTERS			\
-	(FIF_PROMISC_IN_BSS |			\
-	FIF_ALLMULTI |				\
+	(FIF_ALLMULTI |				\
 	FIF_CONTROL |				\
 	FIF_PSPOLL |				\
 	FIF_OTHER_BSS |				\
@@ -1437,13 +1459,18 @@ static void ath9k_configure_filter(struct ieee80211_hw *hw,
 				   u64 multicast)
 {
 	struct ath_softc *sc = hw->priv;
+	struct ath_chanctx *ctx;
 	u32 rfilt;
 
 	changed_flags &= SUPPORTED_FILTERS;
 	*total_flags &= SUPPORTED_FILTERS;
 
 	spin_lock_bh(&sc->chan_lock);
-	sc->cur_chan->rxfilter = *total_flags;
+	ath_for_each_chanctx(sc, ctx)
+		ctx->rxfilter = *total_flags;
+#ifdef CONFIG_ATH9K_CHANNEL_CONTEXT
+	sc->offchannel.chan.rxfilter = *total_flags;
+#endif
 	spin_unlock_bh(&sc->chan_lock);
 
 	ath9k_ps_wakeup(sc);
@@ -1772,6 +1799,12 @@ static void ath9k_bss_info_changed(struct ieee80211_hw *hw,
 
 	if (changed & CHECK_ANI)
 		ath_check_ani(sc);
+
+	if (changed & BSS_CHANGED_TXPOWER) {
+		ath_dbg(common, CONFIG, "vif %pM power %d dbm power_type %d\n",
+			vif->addr, bss_conf->txpower, bss_conf->txpower_type);
+		ath9k_set_txpower(sc, vif);
+	}
 
 	mutex_unlock(&sc->mutex);
 	ath9k_ps_restore(sc);
@@ -2218,7 +2251,7 @@ static void ath9k_cancel_pending_offchannel(struct ath_softc *sc)
 
 		del_timer_sync(&sc->offchannel.timer);
 		if (sc->offchannel.state >= ATH_OFFCHANNEL_ROC_START)
-			ath_roc_complete(sc, true);
+			ath_roc_complete(sc, ATH_ROC_COMPLETE_ABORT);
 	}
 
 	if (test_bit(ATH_OP_SCANNING, &common->op_flags)) {
@@ -2327,7 +2360,7 @@ static int ath9k_cancel_remain_on_channel(struct ieee80211_hw *hw)
 
 	if (sc->offchannel.roc_vif) {
 		if (sc->offchannel.state >= ATH_OFFCHANNEL_ROC_START)
-			ath_roc_complete(sc, true);
+			ath_roc_complete(sc, ATH_ROC_COMPLETE_CANCEL);
 	}
 
 	mutex_unlock(&sc->mutex);

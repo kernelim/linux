@@ -37,6 +37,7 @@ struct nvme_bar {
 #define NVME_CAP_TIMEOUT(cap)	(((cap) >> 24) & 0xff)
 #define NVME_CAP_STRIDE(cap)	(((cap) >> 32) & 0xf)
 #define NVME_CAP_MPSMIN(cap)	(((cap) >> 48) & 0xf)
+#define NVME_CAP_MPSMAX(cap)	(((cap) >> 52) & 0xf)
 
 enum {
 	NVME_CC_ENABLE		= 1 << 0,
@@ -58,8 +59,6 @@ enum {
 	NVME_CSTS_SHST_CMPLT	= 2 << 2,
 	NVME_CSTS_SHST_MASK	= 3 << 2,
 };
-
-#define NVME_VS(major, minor)	(major << 16 | minor)
 
 extern unsigned char nvme_io_timeout;
 #define NVME_IO_TIMEOUT	(nvme_io_timeout * HZ)
@@ -96,8 +95,10 @@ struct nvme_dev {
 	char firmware_rev[8];
 	u32 max_hw_sectors;
 	u32 stripe_size;
+	u32 page_size;
 	u16 oncs;
 	u16 abort_limit;
+	u8 event_limit;
 	u8 vwc;
 	u8 initialized;
 };

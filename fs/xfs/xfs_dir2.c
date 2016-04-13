@@ -208,7 +208,7 @@ xfs_dir_createname(
 	ASSERT((dp->i_d.di_mode & S_IFMT) == S_IFDIR);
 	if ((rval = xfs_dir_ino_validate(tp->t_mountp, inum)))
 		return rval;
-	XFS_STATS_INC(xs_dir_create);
+	XFS_STATS_INC(dp->i_mount, xs_dir_create);
 
 	memset(&args, 0, sizeof(xfs_da_args_t));
 	args.name = name->name;
@@ -282,7 +282,7 @@ xfs_dir_lookup(
 	int		v;		/* type-checking value */
 
 	ASSERT((dp->i_d.di_mode & S_IFMT) == S_IFDIR);
-	XFS_STATS_INC(xs_dir_lookup);
+	XFS_STATS_INC(dp->i_mount, xs_dir_lookup);
 
 	memset(&args, 0, sizeof(xfs_da_args_t));
 	args.name = name->name;
@@ -337,7 +337,7 @@ xfs_dir_removename(
 	int		v;		/* type-checking value */
 
 	ASSERT((dp->i_d.di_mode & S_IFMT) == S_IFDIR);
-	XFS_STATS_INC(xs_dir_remove);
+	XFS_STATS_INC(dp->i_mount, xs_dir_remove);
 
 	memset(&args, 0, sizeof(xfs_da_args_t));
 	args.name = name->name;
@@ -386,7 +386,7 @@ xfs_readdir(
 		return XFS_ERROR(EIO);
 
 	ASSERT((dp->i_d.di_mode & S_IFMT) == S_IFDIR);
-	XFS_STATS_INC(xs_dir_getdents);
+	XFS_STATS_INC(dp->i_mount, xs_dir_getdents);
 
 	if (dp->i_d.di_format == XFS_DINODE_FMT_LOCAL)
 		rval = xfs_dir2_sf_getdents(dp, dirent, offset, filldir);

@@ -10,6 +10,7 @@
 #include "../util/util.h"
 #include "../util/parse-options.h"
 #include "../util/header.h"
+#include "../util/cloexec.h"
 #include "bench.h"
 
 #include <stdio.h>
@@ -63,7 +64,8 @@ static struct perf_event_attr clock_attr = {
 
 static void init_clock(void)
 {
-	clock_fd = sys_perf_event_open(&clock_attr, getpid(), -1, -1, 0);
+	clock_fd = sys_perf_event_open(&clock_attr, getpid(), -1, -1,
+				       perf_event_open_cloexec_flag());
 
 	if (clock_fd < 0 && errno == ENOSYS)
 		die("No CONFIG_PERF_EVENTS=y kernel support configured?\n");

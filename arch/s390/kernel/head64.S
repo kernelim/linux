@@ -39,7 +39,7 @@ startup_continue:
 
 	# store all prefix registers in case of load with dump:
 
-	la	%r7,0			# base register for 0 page
+	lhi	%r7,0x1000		# base register for 0x1000 page
 	la	%r8,0			# first cpu
 	l	%r11,.Lpref_arr_ptr-.LPG1(%r13)	# address of prefix array
 	ahi	%r11,4			# skip boot cpu
@@ -57,7 +57,7 @@ startup_continue:
 	brc	2,2b			# busy: 	 try again
 	brc	1,4f			# not op:	 next cpu
 3:
-	mvc	0(4,%r11),264(%r7)	# copy prefix register to prefix array
+	mvc	0(4,%r11),0x318(%r7)	# copy prefix register to prefix array
 	ahi	%r11,4			# next element in prefix array
 	clr	%r11,%r12
 	je	5f			# no more space in prefix array

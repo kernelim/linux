@@ -777,10 +777,9 @@ static void __br_multicast_send_query(struct net_bridge *br,
 		return;
 
 	if (port) {
-		__skb_push(skb, sizeof(struct ethhdr));
 		skb->dev = port->dev;
 		NF_HOOK(PF_BRIDGE, NF_BR_LOCAL_OUT, skb, NULL, skb->dev,
-			dev_queue_xmit);
+			br_dev_queue_push_xmit);
 	} else
 		netif_rx(skb);
 }
@@ -1030,7 +1029,7 @@ static int br_ip6_multicast_mld2_report(struct net_bridge *br,
 		}
 
 		err = br_ip6_multicast_add_group(br, port, &grec->grec_mca);
-		if (!err)
+		if (err)
 			break;
 	}
 

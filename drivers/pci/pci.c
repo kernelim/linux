@@ -368,29 +368,40 @@ EXPORT_SYMBOL_GPL(pci_find_ht_capability);
  * @res: child resource record for which parent is sought
  *
  *  For given resource region of given device, return the resource
- *  region of parent bus the given region is contained in or where
- *  it should be allocated from.
+ *  region of parent bus the given region is contained in.
  */
 struct resource *
 pci_find_parent_resource(const struct pci_dev *dev, struct resource *res)
 {
 	const struct pci_bus *bus = dev->bus;
+	struct resource *r;
 	int i;
-	struct resource *best = NULL, *r;
 
 	pci_bus_for_each_resource(bus, r, i) {
 		if (!r)
 			continue;
-		if (res->start && !(res->start >= r->start && res->end <= r->end))
-			continue;	/* Not contained */
-		if ((res->flags ^ r->flags) & (IORESOURCE_IO | IORESOURCE_MEM))
-			continue;	/* Wrong type */
-		if (!((res->flags ^ r->flags) & IORESOURCE_PREFETCH))
-			return r;	/* Exact match */
-		if ((res->flags & IORESOURCE_PREFETCH) && !(r->flags & IORESOURCE_PREFETCH))
-			best = r;	/* Approximating prefetchable by non-prefetchable */
+		if (res->start && resource_contains(r, res)) {
+
+			/*
+			 * If the window is prefetchable but the BAR is
+			 * not, the allocator made a mistake.
+			 */
+			if (r->flags & IORESOURCE_PREFETCH &&
+			    !(res->flags & IORESOURCE_PREFETCH))
+				return NULL;
+
+			/*
+			 * If we're below a transparent bridge, there may
+			 * be both a positively-decoded aperture and a
+			 * subtractively-decoded region that contain the BAR.
+			 * We want the positively-decoded one, so this depends
+			 * on pci_bus_for_each_resource() giving us those
+			 * first.
+			 */
+			return r;
+		}
 	}
-	return best;
+	return NULL;
 }
 
 /**
@@ -3187,6 +3198,7 @@ void pci_reassigndev_resource_alignment(struct pci_dev *dev)
 				"Rounding up size of resource #%d to %#llx.\n",
 				i, (unsigned long long)size);
 		}
+		r->flags |= IORESOURCE_UNSET;
 		r->end = size - 1;
 		r->start = 0;
 	}
@@ -3200,6 +3212,7 @@ void pci_reassigndev_resource_alignment(struct pci_dev *dev)
 			r = &dev->resource[i];
 			if (!(r->flags & IORESOURCE_MEM))
 				continue;
+			r->flags |= IORESOURCE_UNSET;
 			r->end = resource_size(r) - 1;
 			r->start = 0;
 		}

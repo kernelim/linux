@@ -307,4 +307,35 @@ ftrace_perf_buf_submit(void *raw_data, int size, int rctx, u64 addr,
 }
 #endif
 
+#define PTRS_MASK 1
+
+static inline bool use_ftrace_events_ptrs(void *ptr)
+{
+	return ((unsigned long) ptr & PTRS_MASK) == 0;
+}
+
+static inline bool module_has_ftrace_events_ptrs(struct module *mod)
+{
+	return (unsigned long) mod->trace_events.ptrs & PTRS_MASK;
+}
+
+static inline struct ftrace_event_call**
+ftrace_events_ptrs_mask(struct ftrace_event_call** ptrs)
+{
+	unsigned long p = (unsigned long) ptrs;
+
+	p |= PTRS_MASK;
+	return (struct ftrace_event_call**) p;
+}
+
+static inline struct ftrace_event_call**
+module_ftrace_events_ptrs_unmask(struct ftrace_event_call** ptrs)
+{
+	unsigned long p = (unsigned long) ptrs;
+
+	p &= ~PTRS_MASK;
+	return (struct ftrace_event_call**) p;
+}
+
+#undef PTRS_MASK
 #endif /* _LINUX_FTRACE_EVENT_H */

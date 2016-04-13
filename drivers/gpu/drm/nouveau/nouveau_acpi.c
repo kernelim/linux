@@ -372,17 +372,18 @@ static int nouveau_rom_call(acpi_handle rom_handle, uint8_t *bios,
 		return -ENODEV;
 	}
 	obj = (union acpi_object *)buffer.pointer;
+	len = min(len, (int)obj->buffer.length);
 	memcpy(bios+offset, obj->buffer.pointer, len);
 	kfree(buffer.pointer);
 	return len;
 }
 
-bool nouveau_acpi_rom_supported(struct pci_dev *pdev)
+bool nouveau_acpi_rom_supported(struct device *dev)
 {
 	acpi_status status;
 	acpi_handle dhandle, rom_handle;
 
-	dhandle = DEVICE_ACPI_HANDLE(&pdev->dev);
+	dhandle = DEVICE_ACPI_HANDLE(dev);
 	if (!dhandle)
 		return false;
 

@@ -956,8 +956,10 @@ static const struct x86_cpu_id rapl_ids[] = {
 	{ X86_VENDOR_INTEL, 6, 0x3f},/* Haswell */
 	{ X86_VENDOR_INTEL, 6, 0x4f},/* Broadwell servers */
 	{ X86_VENDOR_INTEL, 6, 0x45},/* Haswell ULT */
+	{ X86_VENDOR_INTEL, 6, 0x47},/* Broadwell-H */
 	{ X86_VENDOR_INTEL, 6, 0x4E},/* Skylake */
 	{ X86_VENDOR_INTEL, 6, 0x56},/* Future Xeon */
+	{ X86_VENDOR_INTEL, 6, 0x5E},/* Skylake-H/S */
 	/* TODO: Add more CPU IDs after testing */
 	{}
 };
@@ -1200,10 +1202,13 @@ static int rapl_detect_domains(struct rapl_package *rp, int cpu)
 
 	for (rd = rp->domains; rd < rp->domains + rp->nr_domains; rd++) {
 		/* check if the domain is locked by BIOS */
-		if (rapl_read_data_raw(rd, FW_LOCK, false, &locked)) {
+		ret = rapl_read_data_raw(rd, FW_LOCK, false, &locked);
+		if (ret)
+			return ret;
+		if (locked) {
 			pr_info("RAPL package %d domain %s locked by BIOS\n",
 				rp->id, rd->name);
-				rd->state |= DOMAIN_STATE_BIOS_LOCKED;
+			rd->state |= DOMAIN_STATE_BIOS_LOCKED;
 		}
 	}
 

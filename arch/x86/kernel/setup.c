@@ -178,7 +178,10 @@ struct cpuinfo_x86_rh new_cpu_data_rh __cpuinitdata;
 /* common cpu data for all cpus */
 struct cpuinfo_x86 boot_cpu_data __read_mostly = {0, 0, 0, 0, -1, 1, 0, 0, -1};
 /* This symbol should not be on kabi whitelists */
-struct cpuinfo_x86_rh boot_cpu_data_rh;
+struct cpuinfo_x86_rh boot_cpu_data_rh = {
+	.x86_cache_max_rmid = -1,
+	.x86_cache_occ_scale = -1,
+};
 EXPORT_SYMBOL(boot_cpu_data);
 EXPORT_SYMBOL(boot_cpu_data_rh);
 
@@ -212,7 +215,10 @@ struct cpuinfo_x86 boot_cpu_data __read_mostly = {
 	.x86_phys_bits = MAX_PHYSMEM_BITS,
 };
 /* This symbol should not be on kabi whitelists */
-struct cpuinfo_x86_rh boot_cpu_data_rh __read_mostly;
+struct cpuinfo_x86_rh boot_cpu_data_rh __read_mostly = {
+	.x86_cache_max_rmid = -1,
+	.x86_cache_occ_scale = -1,
+};
 EXPORT_SYMBOL(boot_cpu_data);
 EXPORT_SYMBOL(boot_cpu_data_rh);
 #endif
@@ -527,8 +533,21 @@ unsigned long long __init find_and_reserve_crashkernel(unsigned long long size)
 		int ret;
 
 		start = find_e820_area(start, ULONG_MAX, size, alignment);
-		if (start == -1ULL)
-			return start;
+
+		if (start == -1ULL) {
+			pr_info("crashkernel reservation failed. "
+				"No suitable area found.\n");
+			return -1ULL;
+		}
+
+
+		if (start + size >= KEXEC_RESERVE_UPPER_LIMIT) {
+			pr_info("crashkernel reservation failed. "
+				"found area can not be reserved: "
+				"start=0x%llx, size=0x%llx \n",
+				start, size);
+			return -1ULL;
+		}
 
 		/* try to reserve it */
 		ret = reserve_bootmem_generic(start, size, BOOTMEM_EXCLUSIVE);
@@ -563,16 +582,23 @@ static void __init reserve_crashkernel(void)
 			&crash_size, &crash_base);
 	if (ret != 0 || crash_size <= 0)
 		return;
+	if (crash_size >= KEXEC_RESERVE_UPPER_LIMIT) {
+		pr_info("crashkernel reservation failed. "
+			"specified size is too big.\n");
+		return;
+	}
 
 	/* 0 means: find the address automatically */
 	if (crash_base <= 0) {
 		crash_base = find_and_reserve_crashkernel(crash_size);
-		if (crash_base == -1ULL) {
+		if (crash_base == -1ULL)
+			return;
+	} else {
+		if (crash_base + crash_size >= KEXEC_RESERVE_UPPER_LIMIT) {
 			pr_info("crashkernel reservation failed. "
-				"No suitable area found.\n");
+				"specified region can not be reserved.\n");
 			return;
 		}
-	} else {
 		ret = reserve_bootmem_generic(crash_base, crash_size,
 					BOOTMEM_EXCLUSIVE);
 		if (ret < 0) {
@@ -780,7 +806,8 @@ static void rh_check_supported(void)
 	    ((boot_cpu_data.x86 == 6))) {
 		switch (boot_cpu_data.x86_model) {
 		case 94: /* Skylake-S */
-		case 79: /* Broadwell-EP */
+		case 86: /* Broadwell-DE SoC */
+		case 79: /* Broadwell-EP and EX */
 		case 78: /* Skylake-Y */
 		case 77: /* Atom Avoton */
 		case 71: /* Broadwell-H */

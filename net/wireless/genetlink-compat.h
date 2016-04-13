@@ -7,7 +7,10 @@ struct compat_genl_info {
 	struct genl_info *info;
 
 	u32 snd_seq;
-	u32 snd_pid;
+	union {
+		u32 snd_portid;
+		u32 snd_pid;
+	};
 	struct genlmsghdr *genlhdr;
 	struct nlattr **attrs;
 	void *user_ptr[2];

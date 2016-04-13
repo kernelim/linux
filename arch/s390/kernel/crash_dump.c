@@ -56,6 +56,47 @@ static int __init setup_elfcorehdr(char *arg)
 early_param("elfcorehdr", setup_elfcorehdr);
 
 /*
+ * Return physical address for virtual address
+ */
+static inline void *load_real_addr(void *addr)
+{
+	unsigned long real_addr;
+
+	asm volatile(
+		   "	lra     %0,0(%1)\n"
+		   "	jz	0f\n"
+		   "	la	%0,0\n"
+		   "0:"
+		   : "=a" (real_addr) : "a" (addr) : "cc");
+	return (void *)real_addr;
+}
+
+/*
+ * Copy up to one page to vmalloc or real memory
+ */
+static ssize_t copy_page_real(void *buf, void *src, size_t csize)
+{
+	size_t size;
+
+	if (is_vmalloc_addr(buf)) {
+		BUG_ON(csize > PAGE_SIZE);
+		/* If buf is not page aligned, copy first part */
+		size = min(roundup(__pa(buf), PAGE_SIZE) - __pa(buf), csize);
+		if (size) {
+			if (memcpy_real(load_real_addr(buf), src, size))
+				return -EFAULT;
+			buf += size;
+			src += size;
+		}
+		/* Copy second part */
+		size = csize - size;
+		return (size) ? memcpy_real(load_real_addr(buf), src, size) : 0;
+	} else {
+		return memcpy_real(buf, src, csize);
+	}
+}
+
+/*
  * Copy one page from "oldmem"
  *
  * For the kdump reserved memory this functions performs a swap operation:
@@ -66,6 +107,7 @@ ssize_t copy_oldmem_page(unsigned long pfn, char *buf,
 			 size_t csize, unsigned long offset, int userbuf)
 {
 	unsigned long src;
+	int rc;
 
 	if (!csize)
 		return 0;
@@ -77,10 +119,37 @@ ssize_t copy_oldmem_page(unsigned long pfn, char *buf,
 		 src < OLDMEM_BASE + OLDMEM_SIZE)
 		src -= OLDMEM_BASE;
 	if (userbuf)
-		copy_to_user_real((void __user *) buf, (void *) src, csize);
+		rc = copy_to_user_real((void __force __user *) buf,
+					(void *) src, csize);
 	else
-		memcpy_real(buf, (void *) src, csize);
-	return csize;
+		rc = copy_page_real(buf, (void *) src, csize);
+	return (rc == 0) ? csize : rc;
+}
+
+/*
+ * Remap "oldmem"
+ *
+ * For the kdump reserved memory this functions performs a swap operation:
+ * [0 - OLDMEM_SIZE] is mapped to [OLDMEM_BASE - OLDMEM_BASE + OLDMEM_SIZE]
+ */
+int remap_oldmem_pfn_range(struct vm_area_struct *vma, unsigned long from,
+			   unsigned long pfn, unsigned long size, pgprot_t prot)
+{
+	unsigned long size_old;
+	int rc;
+
+	if (pfn < OLDMEM_SIZE >> PAGE_SHIFT) {
+		size_old = min(size, OLDMEM_SIZE - (pfn << PAGE_SHIFT));
+		rc = remap_pfn_range(vma, from,
+				     pfn + (OLDMEM_BASE >> PAGE_SHIFT),
+				     size_old, prot);
+		if (rc || size == size_old)
+			return rc;
+		size -= size_old;
+		from += size_old;
+		pfn += size_old >> PAGE_SHIFT;
+	}
+	return remap_pfn_range(vma, from, pfn, size, prot);
 }
 
 /*

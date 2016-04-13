@@ -48,8 +48,6 @@ struct rndis_request {
 
 	/* Simplify allocation by having a netvsc packet inline */
 	struct hv_netvsc_packet	pkt;
-	/* Set 2 pages for rndis requests crossing page boundary */
-	struct hv_page_buffer buf[2];
 
 	struct rndis_message request_msg;
 	/*
@@ -211,6 +209,7 @@ static int rndis_filter_send_request(struct rndis_device *dev,
 {
 	int ret;
 	struct hv_netvsc_packet *packet;
+	struct hv_page_buffer page_buf[2];
 
 	/* Setup the packet to send it */
 	packet = &req->pkt;
@@ -218,6 +217,7 @@ static int rndis_filter_send_request(struct rndis_device *dev,
 	packet->is_data_pkt = false;
 	packet->total_data_buflen = req->request_msg.msg_len;
 	packet->page_buf_cnt = 1;
+	packet->page_buf = page_buf;
 
 	packet->page_buf[0].pfn = virt_to_phys(&req->request_msg) >>
 					PAGE_SHIFT;
@@ -237,9 +237,10 @@ static int rndis_filter_send_request(struct rndis_device *dev,
 			packet->page_buf[0].len;
 	}
 
-	packet->send_completion = NULL;
+	packet->completion_func = 0;
+	packet->xmit_more = false;
 
-	ret = netvsc_send(dev->net_dev->dev, packet);
+	ret = netvsc_send(dev->net_dev->dev, packet, NULL);
 	return ret;
 }
 
@@ -368,7 +369,9 @@ static inline void *rndis_get_ppi(struct rndis_packet *rpkt, u32 type)
 
 static void rndis_filter_receive_data(struct rndis_device *dev,
 				   struct rndis_message *msg,
-				   struct hv_netvsc_packet *pkt)
+				   struct hv_netvsc_packet *pkt,
+				   void **data,
+				   struct vmbus_channel *channel)
 {
 	struct rndis_packet *rndis_pkt;
 	u32 data_offset;
@@ -400,7 +403,7 @@ static void rndis_filter_receive_data(struct rndis_device *dev,
 	 * the data packet to the stack, without the rndis trailer padding
 	 */
 	pkt->total_data_buflen = rndis_pkt->data_len;
-	pkt->data = (void *)((unsigned long)pkt->data + data_offset);
+	*data = (void *)((unsigned long)(*data) + data_offset);
 
 	vlan = rndis_get_ppi(rndis_pkt, IEEE_8021Q_INFO);
 	if (vlan) {
@@ -411,11 +414,13 @@ static void rndis_filter_receive_data(struct rndis_device *dev,
 	}
 
 	csum_info = rndis_get_ppi(rndis_pkt, TCPIP_CHKSUM_PKTINFO);
-	netvsc_recv_callback(dev->net_dev->dev, pkt, csum_info);
+	netvsc_recv_callback(dev->net_dev->dev, pkt, data, csum_info, channel);
 }
 
 int rndis_filter_receive(struct hv_device *dev,
-				struct hv_netvsc_packet	*pkt)
+				struct hv_netvsc_packet	*pkt,
+				void **data,
+				struct vmbus_channel *channel)
 {
 	struct netvsc_device *net_dev = hv_get_drvdata(dev);
 	struct rndis_device *rndis_dev;
@@ -446,14 +451,16 @@ int rndis_filter_receive(struct hv_device *dev,
 		goto exit;
 	}
 
-	rndis_msg = pkt->data;
+	rndis_msg = *data;
 
-	dump_rndis_message(dev, rndis_msg);
+	if (netif_msg_rx_err(net_dev->nd_ctx))
+		dump_rndis_message(dev, rndis_msg);
 
 	switch (rndis_msg->ndis_msg_type) {
 	case RNDIS_MSG_PACKET:
 		/* data msg */
-		rndis_filter_receive_data(rndis_dev, rndis_msg, pkt);
+		rndis_filter_receive_data(rndis_dev, rndis_msg, pkt,
+					  data, channel);
 		break;
 
 	case RNDIS_MSG_INIT_C:
@@ -490,7 +497,7 @@ static int rndis_filter_query_device(struct rndis_device *dev, u32 oid,
 	struct rndis_query_request *query;
 	struct rndis_query_complete *query_complete;
 	int ret = 0;
-	int t;
+	unsigned long t;
 
 	if (!result)
 		return -EINVAL;
@@ -580,7 +587,8 @@ int rndis_filter_set_device_mac(struct hv_device *hdev, char *mac)
 	char macstr[2*ETH_ALEN+1];
 	u32 extlen = sizeof(struct rndis_config_parameter_info) +
 		2*NWADR_STRLEN + 4*ETH_ALEN;
-	int ret, t;
+	int ret;
+	unsigned long t;
 
 	request = get_rndis_request(rdev, RNDIS_MSG_SET,
 		RNDIS_MESSAGE_SIZE(struct rndis_set_request) + extlen);
@@ -643,7 +651,8 @@ cleanup:
 	return ret;
 }
 
-int rndis_filter_set_offload_params(struct hv_device *hdev,
+static int
+rndis_filter_set_offload_params(struct hv_device *hdev,
 				struct ndis_offload_params *req_offloads)
 {
 	struct netvsc_device *nvdev = hv_get_drvdata(hdev);
@@ -654,7 +663,8 @@ int rndis_filter_set_offload_params(struct hv_device *hdev,
 	struct ndis_offload_params *offload_params;
 	struct rndis_set_complete *set_complete;
 	u32 extlen = sizeof(struct ndis_offload_params);
-	int ret, t;
+	int ret;
+	unsigned long t;
 	u32 vsp_version = nvdev->nvsp_version;
 
 	if (vsp_version <= NVSP_PROTOCOL_VERSION_4) {
@@ -717,7 +727,7 @@ u8 netvsc_hash_key[HASH_KEYLEN] = {
 	0x6a, 0x42, 0xb7, 0x3b, 0xbe, 0xac, 0x01, 0xfa
 };
 
-int rndis_filter_set_rss_param(struct rndis_device *rdev, int num_queue)
+static int rndis_filter_set_rss_param(struct rndis_device *rdev, int num_queue)
 {
 	struct net_device *ndev = rdev->net_dev->ndev;
 	struct rndis_request *request;
@@ -728,7 +738,8 @@ int rndis_filter_set_rss_param(struct rndis_device *rdev, int num_queue)
 	struct ndis_recv_scale_param *rssp;
 	u32 *itab;
 	u8 *keyp;
-	int i, t, ret;
+	int i, ret;
+	unsigned long t;
 
 	request = get_rndis_request(
 			rdev, RNDIS_MSG_SET,
@@ -812,7 +823,8 @@ int rndis_filter_set_packet_filter(struct rndis_device *dev, u32 new_filter)
 	struct rndis_set_request *set;
 	struct rndis_set_complete *set_complete;
 	u32 status;
-	int ret, t;
+	int ret;
+	unsigned long t;
 	struct net_device *ndev;
 
 	ndev = dev->net_dev->ndev;
@@ -868,7 +880,9 @@ static int rndis_filter_init_device(struct rndis_device *dev)
 	struct rndis_initialize_request *init;
 	struct rndis_initialize_complete *init_complete;
 	u32 status;
-	int ret, t;
+	int ret;
+	unsigned long t;
+	struct netvsc_device *nvdev = dev->net_dev;
 
 	request = get_rndis_request(dev, RNDIS_MSG_INIT,
 			RNDIS_MESSAGE_SIZE(struct rndis_initialize_request));
@@ -903,6 +917,8 @@ static int rndis_filter_init_device(struct rndis_device *dev)
 	status = init_complete->status;
 	if (status == RNDIS_STATUS_SUCCESS) {
 		dev->state = RNDIS_DEV_INITIALIZED;
+		nvdev->max_pkt = init_complete->max_pkt_per_msg;
+		nvdev->pkt_align = 1 << init_complete->pkt_alignment_factor;
 		ret = 0;
 	} else {
 		dev->state = RNDIS_DEV_UNINITIALIZED;
@@ -1018,9 +1034,10 @@ int rndis_filter_device_add(struct hv_device *dev,
 	struct netvsc_device_info *device_info = additional_info;
 	struct ndis_offload_params offloads;
 	struct nvsp_message *init_packet;
-	int t;
+	unsigned long t;
 	struct ndis_recv_scale_cap rsscap;
 	u32 rsscap_size = sizeof(struct ndis_recv_scale_cap);
+	u32 mtu, size;
 
 	rndis_device = get_rndis_device();
 	if (!rndis_device)
@@ -1051,6 +1068,14 @@ int rndis_filter_device_add(struct hv_device *dev,
 		rndis_filter_device_remove(dev);
 		return ret;
 	}
+
+	/* Get the MTU from the host */
+	size = sizeof(u32);
+	ret = rndis_filter_query_device(rndis_device,
+					RNDIS_OID_GEN_MAXIMUM_FRAME_SIZE,
+					&mtu, &size);
+	if (ret == 0 && size == sizeof(u32))
+		net_device->ndev->mtu = mtu;
 
 	/* Get the mac address */
 	ret = rndis_filter_query_device_mac(rndis_device);
@@ -1139,8 +1164,6 @@ int rndis_filter_device_add(struct hv_device *dev,
 	}
 	net_device->num_chn = 1 +
 		init_packet->msg.v5_msg.subchn_comp.num_subchannels;
-
-	vmbus_are_subchannels_present(dev->channel);
 
 	ret = rndis_filter_set_rss_param(rndis_device, net_device->num_chn);
 

@@ -51,6 +51,9 @@ static struct pci_device_id xonar_ids[] __devinitdata = {
 	{ OXYGEN_PCI_SUBID(0x1043, 0x835d) },
 	{ OXYGEN_PCI_SUBID(0x1043, 0x835e) },
 	{ OXYGEN_PCI_SUBID(0x1043, 0x838e) },
+	{ OXYGEN_PCI_SUBID(0x1043, 0x8428) },
+	{ OXYGEN_PCI_SUBID(0x1043, 0x8522) },
+	{ OXYGEN_PCI_SUBID(0x1043, 0x85f4) },
 	{ OXYGEN_PCI_SUBID_BROKEN_EEPROM },
 	{ }
 };
@@ -93,8 +96,9 @@ static struct pci_driver xonar_driver = {
 	.probe = xonar_probe,
 	.remove = __devexit_p(oxygen_pci_remove),
 #ifdef CONFIG_PM
-	.suspend = oxygen_pci_suspend,
-	.resume = oxygen_pci_resume,
+	.driver = {
+		.pm = &oxygen_pci_pm,
+	},
 #endif
 	.shutdown = oxygen_pci_shutdown,
 };

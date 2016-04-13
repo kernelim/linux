@@ -37,6 +37,8 @@
 /* &a[0] degrades to a pointer: a different type from an array */
 #define __must_be_array(a) \
   BUILD_BUG_ON_ZERO(__builtin_types_compatible_p(typeof(a), typeof(&a[0])))
+/* Make the optimizer believe the variable can be manipulated arbitrarily. */
+#define OPTIMIZER_HIDE_VAR(var) __asm__ ("" : "=r" (var) : "0" (var))
 
 /*
  * Force always-inline if the user requests it so via the .config,

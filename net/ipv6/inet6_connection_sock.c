@@ -196,7 +196,8 @@ int inet6_csk_xmit(struct sk_buff *skb, int ipfragok)
 	struct ipv6_pinfo *np = inet6_sk(sk);
 	struct flowi fl;
 	struct dst_entry *dst;
-	struct in6_addr *final_p = NULL, final;
+	struct in6_addr *final_p, final;
+	int res;
 
 	memset(&fl, 0, sizeof(fl));
 	fl.proto = sk->sk_protocol;
@@ -209,12 +210,9 @@ int inet6_csk_xmit(struct sk_buff *skb, int ipfragok)
 	fl.fl_ip_dport = inet->dport;
 	security_sk_classify_flow(sk, &fl);
 
-	if (np->opt && np->opt->srcrt) {
-		struct rt0_hdr *rt0 = (struct rt0_hdr *)np->opt->srcrt;
-		ipv6_addr_copy(&final, &fl.fl6_dst);
-		ipv6_addr_copy(&fl.fl6_dst, rt0->addr);
-		final_p = &final;
-	}
+	rcu_read_lock();
+	final_p = fl6_update_dst(&fl, rcu_dereference(np->opt), &final);
+	rcu_read_unlock();
 
 	dst = __inet6_csk_dst_check(sk, np->dst_cookie);
 
@@ -244,7 +242,10 @@ int inet6_csk_xmit(struct sk_buff *skb, int ipfragok)
 	/* Restore final destination back after routing done */
 	ipv6_addr_copy(&fl.fl6_dst, &np->daddr);
 
-	return ip6_xmit(sk, skb, &fl, np->opt, 0);
+	rcu_read_lock();
+	res = ip6_xmit(sk, skb, &fl, rcu_dereference(np->opt), 0);
+	rcu_read_unlock();
+	return res;
 }
 
 EXPORT_SYMBOL_GPL(inet6_csk_xmit);

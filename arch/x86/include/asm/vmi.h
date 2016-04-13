@@ -32,7 +32,6 @@
  */
 #define VMI_SIGNATURE 0x696d5663   /* "cVmi" */
 
-#define PCI_VENDOR_ID_VMWARE            0x15AD
 #define PCI_DEVICE_ID_VMWARE_VMI        0x0801
 
 /*

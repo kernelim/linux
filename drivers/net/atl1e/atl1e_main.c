@@ -1837,8 +1837,8 @@ static netdev_tx_t atl1e_xmit_frame(struct sk_buff *skb,
 
 	tpd = atl1e_get_tpd(adapter);
 
-	if (unlikely(adapter->vlgrp && vlan_tx_tag_present(skb))) {
-		u16 vlan_tag = vlan_tx_tag_get(skb);
+	if (unlikely(adapter->vlgrp && skb_vlan_tag_present(skb))) {
+		u16 vlan_tag = skb_vlan_tag_get(skb);
 		u16 atl1e_vlan_tag;
 
 		tpd->word3 |= 1 << TPD_INS_VL_TAG_SHIFT;
@@ -2379,7 +2379,6 @@ static int __devinit atl1e_probe(struct pci_dev *pdev,
 	}
 
 	memcpy(netdev->dev_addr, adapter->hw.mac_addr, netdev->addr_len);
-	memcpy(netdev->perm_addr, adapter->hw.mac_addr, netdev->addr_len);
 	dev_dbg(&pdev->dev, "mac address : %02x-%02x-%02x-%02x-%02x-%02x\n",
 			adapter->hw.mac_addr[0], adapter->hw.mac_addr[1],
 			adapter->hw.mac_addr[2], adapter->hw.mac_addr[3],

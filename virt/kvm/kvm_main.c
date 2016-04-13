@@ -1084,10 +1084,10 @@ static const struct mmu_notifier_ops kvm_mmu_notifier_ops = {
 
 static struct kvm *kvm_create_vm(void)
 {
-	int r = 0, i;
+	int r, i;
 	struct kvm *kvm = kvm_arch_create_vm();
 #ifdef KVM_COALESCED_MMIO_PAGE_OFFSET
-	struct page *page;
+	struct page *page = NULL;
 #endif
 
 	if (IS_ERR(kvm))
@@ -1095,47 +1095,34 @@ static struct kvm *kvm_create_vm(void)
 
 	r = hardware_enable_all();
 	if (r)
-		goto out_err_nodisable;
+		goto out_err_no_disable;
 
 #ifdef CONFIG_HAVE_KVM_IRQCHIP
 	INIT_HLIST_HEAD(&kvm->mask_notifier_list);
 	INIT_HLIST_HEAD(&kvm->irq_ack_notifier_list);
 #endif
+	r = -ENOMEM;
 	kvm->memslots = kzalloc(sizeof(struct kvm_memslots), GFP_KERNEL);
-	if (!kvm->memslots) {
-		kfree(kvm);
-		return ERR_PTR(-ENOMEM);
-	}
+	if (!kvm->memslots)
+		goto out_err_no_srcu;
 
 	r = init_srcu_struct(&kvm->srcu);
-	if (r) {
-		kfree(kvm->memslots);
-		kfree(kvm);
-		return ERR_PTR(r);
-	}
+	if (r)
+		goto out_err_no_srcu;
 
+	r = -ENOMEM;
 	for (i = 0; i < KVM_NR_BUSES; i++) {
 		kvm->buses[i] = kzalloc(sizeof(struct kvm_io_bus),
 					GFP_KERNEL);
-		if (!kvm->buses[i]) {
-			cleanup_srcu_struct(&kvm->srcu);
-			kfree(kvm->memslots);
-			kfree(kvm);
-			return ERR_PTR(-ENOMEM);
-		}
+		if (!kvm->buses[i])
+			goto out_err;
 	}
 
 #ifdef KVM_COALESCED_MMIO_PAGE_OFFSET
 	page = alloc_page(GFP_KERNEL | __GFP_ZERO);
-	if (!page) {
-		for (i = 0; i < KVM_NR_BUSES; i++)
-			kfree(kvm->buses[i]);
-		cleanup_srcu_struct(&kvm->srcu);
-		kfree(kvm->memslots);
-		kfree(kvm);
-		r = -ENOMEM;
+	if (!page)
 		goto out_err;
-	}
+
 	kvm->coalesced_mmio_ring =
 			(struct kvm_coalesced_mmio_ring *)page_address(page);
 #endif
@@ -1144,17 +1131,8 @@ static struct kvm *kvm_create_vm(void)
 	{
 		kvm->mmu_notifier.ops = &kvm_mmu_notifier_ops;
 		r = mmu_notifier_register(&kvm->mmu_notifier, current->mm);
-		if (r) {
-#ifdef KVM_COALESCED_MMIO_PAGE_OFFSET
-			put_page(page);
-#endif
-			for (i = 0; i < KVM_NR_BUSES; i++)
-				kfree(kvm->buses[i]);
-			cleanup_srcu_struct(&kvm->srcu);
-			kfree(kvm->memslots);
-			kfree(kvm);
+		if (r)
 			goto out_err;
-		}
 	}
 #endif
 
@@ -1177,8 +1155,17 @@ out:
 	return kvm;
 
 out_err:
+	cleanup_srcu_struct(&kvm->srcu);
+out_err_no_srcu:
 	hardware_disable_all();
-out_err_nodisable:
+out_err_no_disable:
+#ifdef KVM_COALESCED_MMIO_PAGE_OFFSET
+	if (page)
+		put_page(page);
+#endif
+	for (i = 0; i < KVM_NR_BUSES; i++)
+		kfree(kvm->buses[i]);
+	kfree(kvm->memslots);
 	kfree(kvm);
 	return ERR_PTR(r);
 }

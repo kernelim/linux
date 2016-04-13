@@ -288,12 +288,12 @@ ieee80211_classify(struct sk_buff *skb, struct ieee80211_network *network)
     const struct iphdr *ih = (struct iphdr*)(skb->data + \
 		    sizeof(struct ether_header));
     wme_UP = (ih->tos >> 5)&0x07;
-  } else if (vlan_tx_tag_present(skb)) {//vtag packet
+  } else if (skb_vlan_tag_present(skb)) {//vtag packet
 #ifndef VLAN_PRI_SHIFT
 #define VLAN_PRI_SHIFT  13              /* Shift to find VLAN user priority */
 #define VLAN_PRI_MASK   7               /* Mask for user priority bits in VLAN */
 #endif
-	u32 tag = vlan_tx_tag_get(skb);
+	u32 tag = skb_vlan_tag_get(skb);
 	wme_UP = (tag >> VLAN_PRI_SHIFT) & VLAN_PRI_MASK;
   } else if(ETH_P_PAE ==  ntohs(((struct ethhdr *)skb->data)->h_proto)) {
     //printk(KERN_WARNING "type = normal packet\n");

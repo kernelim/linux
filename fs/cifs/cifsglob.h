@@ -72,6 +72,11 @@
 /*           (max path length + 1 for null) * 2 for unicode    */
 #define MAX_NAME 514
 
+/* echo interval in seconds */
+#define SMB_ECHO_INTERVAL_MIN 1
+#define SMB_ECHO_INTERVAL_MAX 600
+#define SMB_ECHO_INTERVAL_DEFAULT 60
+
 #include "cifspdu.h"
 
 #ifndef XATTR_DOS_ATTRIB
@@ -223,6 +228,7 @@ struct smb_vol {
 	char *prepath;
 	struct sockaddr_storage srcaddr; /* allow binding to a local IP */
 	struct nls_table *local_nls;
+	unsigned int echo_interval; /* echo interval in secs */
 };
 
 struct cifs_mnt_data {
@@ -304,6 +310,7 @@ struct TCP_Server_Info {
 	atomic_t in_send; /* requests trying to send */
 	atomic_t num_waiters;   /* blocked waiting to get in sendrecv */
 #endif
+	unsigned long echo_interval;
 };
 
 static inline unsigned int

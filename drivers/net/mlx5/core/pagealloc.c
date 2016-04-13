@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, Mellanox Technologies inc.  All rights reserved.
+ * Copyright (c) 2013-2015, Mellanox Technologies. All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -51,7 +51,7 @@ enum {
 
 struct mlx5_pages_req {
 	struct mlx5_core_dev *dev;
-	u32	func_id;
+	u16	func_id;
 	s32	npages;
 	struct work_struct work;
 };
@@ -245,8 +245,9 @@ static int alloc_system_page(struct mlx5_core_dev *dev, u16 func_id)
 	struct page *page;
 	u64 addr;
 	int err;
+	int nid = dev_to_node(&dev->pdev->dev);
 
-	page = alloc_page(GFP_HIGHUSER);
+	page = alloc_pages_node(nid, GFP_HIGHUSER, 0);
 	if (!page) {
 		mlx5_core_warn(dev, "failed to allocate page\n");
 		return -ENOMEM;
@@ -274,12 +275,36 @@ out_alloc:
 
 	return err;
 }
+
+static void page_notify_fail(struct mlx5_core_dev *dev, u16 func_id)
+{
+	struct mlx5_manage_pages_inbox *in;
+	struct mlx5_manage_pages_outbox out;
+	int err;
+
+	in = kzalloc(sizeof(*in), GFP_KERNEL);
+	if (!in)
+		return;
+
+	memset(&out, 0, sizeof(out));
+	in->hdr.opcode = cpu_to_be16(MLX5_CMD_OP_MANAGE_PAGES);
+	in->hdr.opmod = cpu_to_be16(MLX5_PAGES_CANT_GIVE);
+	in->func_id = cpu_to_be16(func_id);
+	err = mlx5_cmd_exec(dev, in, sizeof(*in), &out, sizeof(out));
+	if (!err)
+		err = mlx5_cmd_status_to_err(&out.hdr);
+
+	if (err)
+		mlx5_core_warn(dev, "page notify failed\n");
+
+	kfree(in);
+}
+
 static int give_pages(struct mlx5_core_dev *dev, u16 func_id, int npages,
 		      int notify_fail)
 {
 	struct mlx5_manage_pages_inbox *in;
 	struct mlx5_manage_pages_outbox out;
-	struct mlx5_manage_pages_inbox *nin;
 	int inlen;
 	u64 addr;
 	int err;
@@ -288,8 +313,9 @@ static int give_pages(struct mlx5_core_dev *dev, u16 func_id, int npages,
 	inlen = sizeof(*in) + npages * sizeof(in->pas[0]);
 	in = mlx5_vzalloc(inlen);
 	if (!in) {
+		err = -ENOMEM;
 		mlx5_core_warn(dev, "vzalloc failed %d\n", inlen);
-		return -ENOMEM;
+		goto out_free;
 	}
 	memset(&out, 0, sizeof(out));
 
@@ -313,43 +339,31 @@ retry:
 	in->num_entries = cpu_to_be32(npages);
 	err = mlx5_cmd_exec(dev, in, inlen, &out, sizeof(out));
 	if (err) {
-		mlx5_core_warn(dev, "func_id 0x%x, npages %d, err %d\n", func_id, npages, err);
-		goto out_alloc;
+		mlx5_core_warn(dev, "func_id 0x%x, npages %d, err %d\n",
+			       func_id, npages, err);
+		goto out_4k;
 	}
 	dev->priv.fw_pages += npages;
 
-	if (out.hdr.status) {
-		err = mlx5_cmd_status_to_err(&out.hdr);
-		if (err) {
-			mlx5_core_warn(dev, "func_id 0x%x, npages %d, status %d\n", func_id, npages, out.hdr.status);
-			goto out_alloc;
-		}
+	err = mlx5_cmd_status_to_err(&out.hdr);
+	if (err) {
+		mlx5_core_warn(dev, "func_id 0x%x, npages %d, status %d\n",
+			       func_id, npages, out.hdr.status);
+		goto out_4k;
 	}
 
 	mlx5_core_dbg(dev, "err %d\n", err);
 
-	goto out_free;
-
-out_alloc:
-	if (notify_fail) {
-		nin = kzalloc(sizeof(*nin), GFP_KERNEL);
-		if (!nin) {
-			mlx5_core_warn(dev, "allocation failed\n");
-			goto out_4k;
-		}
-		memset(&out, 0, sizeof(out));
-		nin->hdr.opcode = cpu_to_be16(MLX5_CMD_OP_MANAGE_PAGES);
-		nin->hdr.opmod = cpu_to_be16(MLX5_PAGES_CANT_GIVE);
-		if (mlx5_cmd_exec(dev, nin, sizeof(*nin), &out, sizeof(out)))
-			mlx5_core_warn(dev, "page notify failed\n");
-		kfree(nin);
-	}
+	kvfree(in);
+	return 0;
 
 out_4k:
 	for (i--; i >= 0; i--)
 		free_4k(dev, be64_to_cpu(in->pas[i]));
 out_free:
-	mlx5_vfree(in);
+	kvfree(in);
+	if (notify_fail)
+		page_notify_fail(dev, func_id);
 	return err;
 }
 
@@ -380,7 +394,7 @@ static int reclaim_pages(struct mlx5_core_dev *dev, u32 func_id, int npages,
 	mlx5_core_dbg(dev, "npages %d, outlen %d\n", npages, outlen);
 	err = mlx5_cmd_exec(dev, &in, sizeof(in), out, outlen);
 	if (err) {
-		mlx5_core_err(dev, "failed recliaming pages\n");
+		mlx5_core_err(dev, "failed reclaiming pages\n");
 		goto out_free;
 	}
 	dev->priv.fw_pages -= npages;
@@ -400,7 +414,7 @@ static int reclaim_pages(struct mlx5_core_dev *dev, u32 func_id, int npages,
 	}
 
 out_free:
-	mlx5_vfree(out);
+	kvfree(out);
 	return err;
 }
 
@@ -416,8 +430,8 @@ static void pages_work_handler(struct work_struct *work)
 		err = give_pages(dev, req->func_id, req->npages, 1);
 
 	if (err)
-		mlx5_core_warn(dev, "%s fail %d\n", req->npages < 0 ?
-			       "reclaim" : "give", err);
+		mlx5_core_warn(dev, "%s fail %d\n",
+			       req->npages < 0 ? "reclaim" : "give", err);
 
 	kfree(req);
 }
@@ -489,7 +503,8 @@ int mlx5_reclaim_startup_pages(struct mlx5_core_dev *dev)
 					    optimal_reclaimed_pages(),
 					    &nclaimed);
 			if (err) {
-				mlx5_core_warn(dev, "failed reclaiming pages (%d)\n", err);
+				mlx5_core_warn(dev, "failed reclaiming pages (%d)\n",
+					       err);
 				return err;
 			}
 			if (nclaimed)

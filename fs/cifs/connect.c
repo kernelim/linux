@@ -51,9 +51,6 @@
 #define CIFS_PORT 445
 #define RFC1001_PORT 139
 
-/* SMB echo "timeout" -- FIXME: tunable? */
-#define SMB_ECHO_INTERVAL (60 * HZ)
-
 extern mempool_t *cifs_req_poolp;
 
 /* FIXME: should these be tunable? */
@@ -318,6 +315,7 @@ cifs_echo_request(struct work_struct *work)
 	int rc;
 	struct TCP_Server_Info *server = container_of(work,
 					struct TCP_Server_Info, echo.work);
+	unsigned long echo_interval = server->echo_interval;
 
 	/*
 	 * We cannot send an echo until the NEGOTIATE_PROTOCOL request is
@@ -325,7 +323,7 @@ cifs_echo_request(struct work_struct *work)
 	 * we got a response recently
 	 */
 	if (server->maxBuf == 0 ||
-	    time_before(jiffies, server->lstrp + SMB_ECHO_INTERVAL - HZ))
+	    time_before(jiffies, server->lstrp + echo_interval - HZ))
 		goto requeue_echo;
 
 	rc = CIFSSMBEcho(server);
@@ -334,7 +332,7 @@ cifs_echo_request(struct work_struct *work)
 			server->hostname);
 
 requeue_echo:
-	queue_delayed_work(cifsiod_workqueue, &server->echo, SMB_ECHO_INTERVAL);
+	queue_delayed_work(cifsiod_workqueue, &server->echo, echo_interval);
 }
 
 static bool
@@ -385,10 +383,10 @@ server_unresponsive(struct TCP_Server_Info *server)
 	 *     a response in >60s.
 	 */
 	if (server->tcpStatus == CifsGood &&
-	    time_after(jiffies, server->lstrp + 2 * SMB_ECHO_INTERVAL)) {
-		cERROR(1, "Server %s has not responded in %d seconds. "
+	    time_after(jiffies, server->lstrp + 2 * server->echo_interval)) {
+		cERROR(1, "Server %s has not responded in %lu seconds. "
 			  "Reconnecting...", server->hostname,
-			  (2 * SMB_ECHO_INTERVAL) / HZ);
+			  (2 * server->echo_interval) / HZ);
 		cifs_reconnect(server);
 		wake_up(&server->response_q);
 		return true;
@@ -1134,18 +1132,21 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 				vol->secFlg |= CIFSSEC_MAY_NTLMSSP |
 					CIFSSEC_MUST_SIGN;
 			} else if (strnicmp(value, "ntlmssp", 7) == 0) {
-				vol->secFlg |= CIFSSEC_MAY_NTLMSSP;
+				vol->secFlg |= CIFSSEC_MAY_NTLMSSP |
+						CIFSSEC_MAY_SIGN;
 			} else if (strnicmp(value, "ntlmv2i", 7) == 0) {
 				vol->secFlg |= CIFSSEC_MAY_NTLMV2 |
 					CIFSSEC_MUST_SIGN;
 			} else if (strnicmp(value, "ntlmv2", 6) == 0) {
-				vol->secFlg |= CIFSSEC_MAY_NTLMV2;
+				vol->secFlg |= CIFSSEC_MAY_NTLMV2 |
+						CIFSSEC_MAY_SIGN;
 			} else if (strnicmp(value, "ntlmi", 5) == 0) {
 				vol->secFlg |= CIFSSEC_MAY_NTLM |
 					CIFSSEC_MUST_SIGN;
 			} else if (strnicmp(value, "ntlm", 4) == 0) {
 				/* ntlm is default so can be turned off too */
-				vol->secFlg |= CIFSSEC_MAY_NTLM;
+				vol->secFlg |= CIFSSEC_MAY_NTLM |
+						CIFSSEC_MAY_SIGN;
 			} else if (strnicmp(value, "nontlm", 6) == 0) {
 				/* BB is there a better way to do this? */
 				vol->secFlg |= CIFSSEC_MAY_NTLMV2;
@@ -1314,6 +1315,11 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 		} else if (strnicmp(data, "wsize", 5) == 0) {
 			if (value && *value) {
 				vol->wsize =
+					simple_strtoul(value, &value, 0);
+			}
+		} else if (strnicmp(data, "echo_interval", 13) == 0) {
+			if (value && *value) {
+				vol->echo_interval =
 					simple_strtoul(value, &value, 0);
 			}
 		} else if (strnicmp(data, "sockopt", 5) == 0) {
@@ -1781,6 +1787,9 @@ static int match_server(struct TCP_Server_Info *server, struct sockaddr *addr,
 	if (!match_security(server, vol))
 		return 0;
 
+	if (server->echo_interval != vol->echo_interval)
+		return 0;
+
 	return 1;
 }
 
@@ -1919,6 +1928,12 @@ cifs_get_tcp_session(struct smb_vol *volume_info)
 	       sizeof(tcp_ses->srcaddr));
 	++tcp_ses->srv_count;
 
+	if (volume_info->echo_interval >= SMB_ECHO_INTERVAL_MIN &&
+		volume_info->echo_interval <= SMB_ECHO_INTERVAL_MAX)
+		tcp_ses->echo_interval = volume_info->echo_interval * HZ;
+	else
+		tcp_ses->echo_interval = SMB_ECHO_INTERVAL_DEFAULT * HZ;
+
 	if (addr.ss_family == AF_INET6) {
 		cFYI(1, "attempting ipv6 connect");
 		/* BB should we allow ipv6 on port 139? */
@@ -1958,7 +1973,8 @@ cifs_get_tcp_session(struct smb_vol *volume_info)
 	cifs_fscache_get_client_cookie(tcp_ses);
 
 	/* queue echo request delayed work */
-	queue_delayed_work(cifsiod_workqueue, &tcp_ses->echo, SMB_ECHO_INTERVAL);
+	queue_delayed_work(cifsiod_workqueue, &tcp_ses->echo,
+				tcp_ses->echo_interval);
 
 	return tcp_ses;
 

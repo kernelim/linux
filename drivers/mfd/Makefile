@@ -5,7 +5,7 @@
 obj-$(CONFIG_MFD_SM501)		+= sm501.o
 obj-$(CONFIG_MFD_ASIC3)		+= asic3.o
 
-rtsx_pci-objs			:= rtsx_pcr.o rts5229.o rts5227.o rts5249.o
+rtsx_pci-objs			:= rtsx_pcr.o rtsx_gops.o rts5229.o rts5227.o rts5249.o
 obj-$(CONFIG_MFD_RTSX_PCI)	+= rtsx_pci.o
 obj-$(CONFIG_MFD_RTSX_USB)	+= rtsx_usb.o
 

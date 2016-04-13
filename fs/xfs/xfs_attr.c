@@ -173,7 +173,7 @@ xfs_attr_get(
 	int		error;
 	struct xfs_name	xname;
 
-	XFS_STATS_INC(xs_attr_get);
+	XFS_STATS_INC(ip->i_mount, xs_attr_get);
 
 	if (XFS_FORCED_SHUTDOWN(ip->i_mount))
 		return(EIO);
@@ -450,7 +450,7 @@ xfs_attr_set(
 	int             error;
 	struct xfs_name	xname;
 
-	XFS_STATS_INC(xs_attr_set);
+	XFS_STATS_INC(dp->i_mount, xs_attr_set);
 
 	if (XFS_FORCED_SHUTDOWN(dp->i_mount))
 		return (EIO);
@@ -598,7 +598,7 @@ xfs_attr_remove(
 	int		error;
 	struct xfs_name	xname;
 
-	XFS_STATS_INC(xs_attr_remove);
+	XFS_STATS_INC(dp->i_mount, xs_attr_remove);
 
 	if (XFS_FORCED_SHUTDOWN(dp->i_mount))
 		return (EIO);
@@ -623,7 +623,7 @@ xfs_attr_list_int(xfs_attr_list_context_t *context)
 	int error;
 	xfs_inode_t *dp = context->dp;
 
-	XFS_STATS_INC(xs_attr_list);
+	XFS_STATS_INC(dp->i_mount, xs_attr_list);
 
 	if (XFS_FORCED_SHUTDOWN(dp->i_mount))
 		return EIO;

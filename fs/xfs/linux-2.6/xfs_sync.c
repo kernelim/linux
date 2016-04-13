@@ -956,7 +956,7 @@ reclaim:
 	xfs_ifunlock(ip);
 	xfs_iunlock(ip, XFS_ILOCK_EXCL);
 
-	XFS_STATS_INC(xs_ig_reclaims);
+	XFS_STATS_INC(ip->i_mount, xs_ig_reclaims);
 	/*
 	 * Remove the inode from the per-AG radix tree.
 	 *

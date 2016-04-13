@@ -4164,24 +4164,6 @@ int emulator_set_dr(struct x86_emulate_ctxt *ctxt, int dr, unsigned long value)
 	return X86EMUL_CONTINUE;
 }
 
-void kvm_report_emulation_failure(struct kvm_vcpu *vcpu, const char *context)
-{
-	u8 opcodes[4];
-	unsigned long rip = kvm_rip_read(vcpu);
-	unsigned long rip_linear;
-
-	if (!printk_ratelimit())
-		return;
-
-	rip_linear = rip + get_segment_base(vcpu, VCPU_SREG_CS);
-
-	kvm_read_guest_virt(rip_linear, (void *)opcodes, 4, vcpu, NULL);
-
-	printk(KERN_ERR "emulation failed (%s) rip %lx %02x %02x %02x %02x\n",
-	       context, rip, opcodes[0], opcodes[1], opcodes[2], opcodes[3]);
-}
-EXPORT_SYMBOL_GPL(kvm_report_emulation_failure);
-
 static bool emulator_get_cpuid(struct kvm_vcpu *vcpu,
 			       u32 *eax, u32 *ebx, u32 *ecx, u32 *edx)
 {
@@ -4243,6 +4225,21 @@ static bool reexecute_instruction(struct kvm_vcpu *vcpu, gva_t gva)
 		return true;
 
 	return false;
+}
+
+static int handle_emulation_failure(struct kvm_vcpu *vcpu)
+{
+	int r = EMULATE_DONE;
+
+	++vcpu->stat.insn_emulation_fail;
+	if (kvm_x86_ops->get_cpl(vcpu) == 0) {
+		vcpu->run->exit_reason = KVM_EXIT_INTERNAL_ERROR;
+		vcpu->run->internal.suberror = KVM_INTERNAL_ERROR_EMULATION;
+		vcpu->run->internal.ndata = 0;
+		r = EMULATE_FAIL;
+	}
+	kvm_queue_exception(vcpu, UD_VECTOR);
+	return r;
 }
 
 int x86_emulate_instruction(struct kvm_vcpu *vcpu,
@@ -4314,10 +4311,11 @@ int x86_emulate_instruction(struct kvm_vcpu *vcpu,
 
 		++vcpu->stat.insn_emulation;
 		if (r)  {
-			++vcpu->stat.insn_emulation_fail;
 			if (reexecute_instruction(vcpu, cr2))
 				return EMULATE_DONE;
-			return EMULATE_FAIL;
+			if (emulation_type & EMULTYPE_SKIP)
+				return EMULATE_FAIL;
+			return handle_emulation_failure(vcpu);
 		}
 	}
 
@@ -4346,10 +4344,8 @@ int x86_emulate_instruction(struct kvm_vcpu *vcpu,
 	if (r) {
 		if (reexecute_instruction(vcpu, cr2))
 			return EMULATE_DONE;
-		if (!vcpu->mmio_needed) {
-			kvm_report_emulation_failure(vcpu, "mmio");
-			return EMULATE_FAIL;
-		}
+		if (!vcpu->mmio_needed)
+			return handle_emulation_failure(vcpu);
 		return EMULATE_DO_MMIO;
 	}
 
@@ -5469,7 +5465,7 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
 		r = x86_emulate_instruction(vcpu, vcpu->arch.mmio_fault_cr2,
 					EMULTYPE_NO_DECODE, NULL, 0);
 		srcu_read_unlock(&vcpu->kvm->srcu, vcpu->srcu_idx);
-		if (r == EMULATE_DO_MMIO) {
+		if (r != EMULATE_DONE) {
 			/*
 			 * Read-modify-write.  Back to userspace.
 			 */

@@ -8457,14 +8457,12 @@ static void __devinit niu_pci_vpd_validate(struct niu *np)
 		return;
 	}
 
-	memcpy(dev->perm_addr, vpd->local_mac, ETH_ALEN);
+	memcpy(dev->dev_addr, vpd->local_mac, ETH_ALEN);
 
-	val8 = dev->perm_addr[5];
-	dev->perm_addr[5] += np->port;
-	if (dev->perm_addr[5] < val8)
-		dev->perm_addr[4]++;
-
-	memcpy(dev->dev_addr, dev->perm_addr, dev->addr_len);
+	val8 = dev->dev_addr[5];
+	dev->dev_addr[5] += np->port;
+	if (dev->dev_addr[5] < val8)
+		dev->dev_addr[4]++;
 }
 
 static int __devinit niu_pci_probe_sprom(struct niu *np)
@@ -8559,32 +8557,30 @@ static int __devinit niu_pci_probe_sprom(struct niu *np)
 	val = nr64(ESPC_MAC_ADDR0);
 	niudbg(PROBE, "SPROM: MAC_ADDR0[%08llx]\n",
 	       (unsigned long long) val);
-	dev->perm_addr[0] = (val >>  0) & 0xff;
-	dev->perm_addr[1] = (val >>  8) & 0xff;
-	dev->perm_addr[2] = (val >> 16) & 0xff;
-	dev->perm_addr[3] = (val >> 24) & 0xff;
+	dev->dev_addr[0] = (val >>  0) & 0xff;
+	dev->dev_addr[1] = (val >>  8) & 0xff;
+	dev->dev_addr[2] = (val >> 16) & 0xff;
+	dev->dev_addr[3] = (val >> 24) & 0xff;
 
 	val = nr64(ESPC_MAC_ADDR1);
 	niudbg(PROBE, "SPROM: MAC_ADDR1[%08llx]\n",
 	       (unsigned long long) val);
-	dev->perm_addr[4] = (val >>  0) & 0xff;
-	dev->perm_addr[5] = (val >>  8) & 0xff;
+	dev->dev_addr[4] = (val >>  0) & 0xff;
+	dev->dev_addr[5] = (val >>  8) & 0xff;
 
-	if (!is_valid_ether_addr(&dev->perm_addr[0])) {
+	if (!is_valid_ether_addr(&dev->dev_addr[0])) {
 		dev_err(np->device, PFX "SPROM MAC address invalid\n");
 		dev_err(np->device, PFX "[ \n");
 		for (i = 0; i < 6; i++)
-			printk("%02x ", dev->perm_addr[i]);
+			printk("%02x ", dev->dev_addr[i]);
 		printk("]\n");
 		return -EINVAL;
 	}
 
-	val8 = dev->perm_addr[5];
-	dev->perm_addr[5] += np->port;
-	if (dev->perm_addr[5] < val8)
-		dev->perm_addr[4]++;
-
-	memcpy(dev->dev_addr, dev->perm_addr, dev->addr_len);
+	val8 = dev->dev_addr[5];
+	dev->dev_addr[5] += np->port;
+	if (dev->dev_addr[5] < val8)
+		dev->dev_addr[4]++;
 
 	val = nr64(ESPC_MOD_STR_LEN);
 	niudbg(PROBE, "SPROM: MOD_STR_LEN[%llu]\n",
@@ -9381,8 +9377,8 @@ static int __devinit niu_get_of_props(struct niu *np)
 			"is wrong.\n",
 			dp->full_name, prop_len);
 	}
-	memcpy(dev->perm_addr, mac_addr, dev->addr_len);
-	if (!is_valid_ether_addr(&dev->perm_addr[0])) {
+	memcpy(dev->dev_addr, mac_addr, dev->addr_len);
+	if (!is_valid_ether_addr(&dev->dev_addr[0])) {
 		int i;
 
 		dev_err(np->device, PFX "%s: OF MAC address is invalid\n",
@@ -9390,12 +9386,10 @@ static int __devinit niu_get_of_props(struct niu *np)
 		dev_err(np->device, PFX "%s: [ \n",
 			dp->full_name);
 		for (i = 0; i < 6; i++)
-			printk("%02x ", dev->perm_addr[i]);
+			printk("%02x ", dev->dev_addr[i]);
 		printk("]\n");
 		return -EINVAL;
 	}
-
-	memcpy(dev->dev_addr, dev->perm_addr, dev->addr_len);
 
 	model = of_get_property(dp, "model", &prop_len);
 

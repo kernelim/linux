@@ -29,11 +29,13 @@
 #include "vnic_stats.h"
 #include "vnic_nic.h"
 #include "vnic_rss.h"
+#include "enic_res.h"
 #include <linux/irq.h>
+#include <linux/netdevice.h>
 
 #define DRV_NAME		"enic"
 #define DRV_DESCRIPTION		"Cisco VIC Ethernet NIC Driver"
-#define DRV_VERSION		"2.1.1.67"
+#define DRV_VERSION		"2.3.0.12"
 #define DRV_COPYRIGHT		"Copyright 2008-2013 Cisco Systems, Inc"
 
 #define ENIC_BARS_MAX		6
@@ -108,6 +110,7 @@ struct enic {
 	struct vnic_dev *vdev;
 	struct timer_list notify_timer;
 	struct work_struct reset;
+	struct work_struct tx_hang_reset;
 	struct work_struct change_mtu_work;
 	struct msix_entry msix_entry[ENIC_INTR_MAX];
 	struct enic_msix_entry msix[ENIC_INTR_MAX];
@@ -154,8 +157,28 @@ struct enic {
 	____cacheline_aligned struct vnic_cq cq[ENIC_CQ_MAX];
 	unsigned int cq_count;
 	u32 rx_copybreak;
+	u8 rss_key[ENIC_RSS_LEN];
 	struct vnic_gen_stats gen_stats;
 };
+
+static inline struct net_device *vnic_get_netdev(struct vnic_dev *vdev)
+{
+	struct enic *enic = vdev->priv;
+
+	return enic->netdev;
+}
+
+/* wrappers function for kernel log
+ * Make sure variable vdev of struct vnic_dev is available in the block where
+ * these macros are used
+ */
+#define vdev_info(args...)	dev_info(&vdev->pdev->dev, args)
+#define vdev_warn(args...)	dev_warn(&vdev->pdev->dev, args)
+#define vdev_err(args...)	dev_err(&vdev->pdev->dev, args)
+
+#define vdev_netinfo(args...)	netdev_info(vnic_get_netdev(vdev), args)
+#define vdev_netwarn(args...)	netdev_warn(vnic_get_netdev(vdev), args)
+#define vdev_neterr(args...)	netdev_err(vnic_get_netdev(vdev), args)
 
 static inline struct device *enic_get_dev(struct enic *enic)
 {
@@ -227,5 +250,6 @@ int enic_sriov_enabled(struct enic *enic);
 int enic_is_valid_vf(struct enic *enic, int vf);
 int enic_is_dynamic(struct enic *enic);
 void enic_set_ethtool_ops(struct net_device *netdev);
+int __enic_set_rsskey(struct enic *enic);
 
 #endif /* _ENIC_H_ */

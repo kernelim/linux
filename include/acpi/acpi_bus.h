@@ -54,6 +54,34 @@ acpi_status
 acpi_evaluate_hotplug_ost(acpi_handle handle, u32 source_event,
 			u32 status_code, struct acpi_buffer *status_buf);
 
+bool acpi_has_method(acpi_handle handle, char *name);
+
+bool acpi_check_dsm(acpi_handle handle, const u8 *uuid, int rev, u64 funcs);
+union acpi_object *acpi_evaluate_dsm(acpi_handle handle, const u8 *uuid,
+			int rev, int func, union acpi_object *argv4);
+
+static inline union acpi_object *
+acpi_evaluate_dsm_typed(acpi_handle handle, const u8 *uuid, int rev, int func,
+			union acpi_object *argv4, acpi_object_type type)
+{
+	union acpi_object *obj;
+
+	obj = acpi_evaluate_dsm(handle, uuid, rev, func, argv4);
+	if (obj && obj->type != type) {
+		ACPI_FREE(obj);
+		obj = NULL;
+	}
+
+	return obj;
+}
+
+#define	ACPI_INIT_DSM_ARGV4(cnt, eles)			\
+	{						\
+	  .package.type = ACPI_TYPE_PACKAGE,		\
+	  .package.count = (cnt),			\
+	  .package.elements = (eles)			\
+	}
+
 #ifdef CONFIG_ACPI
 
 #include <linux/proc_fs.h>
@@ -365,6 +393,19 @@ int acpi_match_device_ids(struct acpi_device *device,
 			  const struct acpi_device_id *ids);
 int acpi_create_dir(struct acpi_device *);
 void acpi_remove_dir(struct acpi_device *);
+
+
+/**
+ * module_acpi_driver(acpi_driver) - Helper macro for registering an ACPI driver
+ * @__acpi_driver: acpi_driver struct
+ *
+ * Helper macro for ACPI drivers which do not do anything special in module
+ * init/exit. This eliminates a lot of boilerplate. Each module may only
+ * use this macro once, and calling it replaces module_init() and module_exit()
+ */
+#define module_acpi_driver(__acpi_driver) \
+	module_driver(__acpi_driver, acpi_bus_register_driver, \
+		      acpi_bus_unregister_driver)
 
 /*
  * Bind physical devices with ACPI devices

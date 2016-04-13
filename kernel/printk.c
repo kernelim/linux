@@ -602,6 +602,20 @@ static int have_callable_console(void)
 	return 0;
 }
 
+int vprintk_default(const char *fmt, va_list args)
+{
+	return vprintk(fmt, args);
+}
+EXPORT_SYMBOL_GPL(vprintk_default);
+
+/*
+ * This allows printk to be diverted to another function per cpu.
+ * This is useful for calling printk functions from within NMI
+ * without worrying about race conditions that can lock up the
+ * box.
+ */
+DEFINE_PER_CPU(printk_func_t, printk_func) = vprintk_default;
+
 /**
  * printk - print a kernel message
  * @fmt: format string
@@ -626,11 +640,15 @@ static int have_callable_console(void)
 
 asmlinkage int printk(const char *fmt, ...)
 {
+	printk_func_t vprintk_func;
 	va_list args;
 	int r;
 
 	va_start(args, fmt);
-	r = vprintk(fmt, args);
+	preempt_disable();
+	vprintk_func = __get_cpu_var(printk_func);
+	r = vprintk_func(fmt, args);
+	preempt_enable();
 	va_end(args);
 
 	return r;

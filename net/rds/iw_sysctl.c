@@ -124,8 +124,7 @@ static struct ctl_path rds_iw_sysctl_path[] = {
 
 void rds_iw_sysctl_exit(void)
 {
-	if (rds_iw_sysctl_hdr)
-		unregister_net_sysctl_table(rds_iw_sysctl_hdr);
+	unregister_net_sysctl_table(rds_iw_sysctl_hdr);
 }
 
 int rds_iw_sysctl_init(void)

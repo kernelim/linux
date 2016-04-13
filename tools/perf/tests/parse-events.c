@@ -6,8 +6,10 @@
 #include "../../../include/linux/hw_breakpoint.h"
 */
 #include <api/fs/fs.h>
+#include <api/fs/tracefs.h>
 #include <api/fs/debugfs.h>
 #include "tests.h"
+#include "debug.h"
 
 #define PERF_TP_SAMPLE_TYPE (PERF_SAMPLE_RAW | PERF_SAMPLE_TIME | \
 			     PERF_SAMPLE_CPU | PERF_SAMPLE_PERIOD)
@@ -298,6 +300,36 @@ static int test__checkevent_genhw_modifier(struct perf_evlist *evlist)
 	return test__checkevent_genhw(evlist);
 }
 
+static int test__checkevent_exclude_idle_modifier(struct perf_evlist *evlist)
+{
+	struct perf_evsel *evsel = perf_evlist__first(evlist);
+
+	TEST_ASSERT_VAL("wrong exclude idle", evsel->attr.exclude_idle);
+	TEST_ASSERT_VAL("wrong exclude guest", !evsel->attr.exclude_guest);
+	TEST_ASSERT_VAL("wrong exclude host", !evsel->attr.exclude_host);
+	TEST_ASSERT_VAL("wrong exclude_user", !evsel->attr.exclude_user);
+	TEST_ASSERT_VAL("wrong exclude_kernel", !evsel->attr.exclude_kernel);
+	TEST_ASSERT_VAL("wrong exclude_hv", !evsel->attr.exclude_hv);
+	TEST_ASSERT_VAL("wrong precise_ip", !evsel->attr.precise_ip);
+
+	return test__checkevent_symbolic_name(evlist);
+}
+
+static int test__checkevent_exclude_idle_modifier_1(struct perf_evlist *evlist)
+{
+	struct perf_evsel *evsel = perf_evlist__first(evlist);
+
+	TEST_ASSERT_VAL("wrong exclude idle", evsel->attr.exclude_idle);
+	TEST_ASSERT_VAL("wrong exclude guest", !evsel->attr.exclude_guest);
+	TEST_ASSERT_VAL("wrong exclude host", evsel->attr.exclude_host);
+	TEST_ASSERT_VAL("wrong exclude_user", evsel->attr.exclude_user);
+	TEST_ASSERT_VAL("wrong exclude_kernel", !evsel->attr.exclude_kernel);
+	TEST_ASSERT_VAL("wrong exclude_hv", evsel->attr.exclude_hv);
+	TEST_ASSERT_VAL("wrong precise_ip", !evsel->attr.precise_ip);
+
+	return test__checkevent_symbolic_name(evlist);
+}
+
 /* XXX There's no support for HW_BREAKPOINT in RHEL6 yet.
 static int test__checkevent_breakpoint_modifier(struct perf_evlist *evlist)
 {
@@ -451,6 +483,36 @@ static int test__checkevent_pmu_events(struct perf_evlist *evlist)
 	struct perf_evsel *evsel = perf_evlist__first(evlist);
 
 	TEST_ASSERT_VAL("wrong number of entries", 1 == evlist->nr_entries);
+	TEST_ASSERT_VAL("wrong type", PERF_TYPE_RAW == evsel->attr.type);
+	TEST_ASSERT_VAL("wrong exclude_user",
+			!evsel->attr.exclude_user);
+	TEST_ASSERT_VAL("wrong exclude_kernel",
+			evsel->attr.exclude_kernel);
+	TEST_ASSERT_VAL("wrong exclude_hv", evsel->attr.exclude_hv);
+	TEST_ASSERT_VAL("wrong precise_ip", !evsel->attr.precise_ip);
+	TEST_ASSERT_VAL("wrong pinned", !evsel->attr.pinned);
+
+	return 0;
+}
+
+
+static int test__checkevent_pmu_events_mix(struct perf_evlist *evlist)
+{
+	struct perf_evsel *evsel = perf_evlist__first(evlist);
+
+	/* pmu-event:u */
+	TEST_ASSERT_VAL("wrong number of entries", 2 == evlist->nr_entries);
+	TEST_ASSERT_VAL("wrong exclude_user",
+			!evsel->attr.exclude_user);
+	TEST_ASSERT_VAL("wrong exclude_kernel",
+			evsel->attr.exclude_kernel);
+	TEST_ASSERT_VAL("wrong exclude_hv", evsel->attr.exclude_hv);
+	TEST_ASSERT_VAL("wrong precise_ip", !evsel->attr.precise_ip);
+	TEST_ASSERT_VAL("wrong pinned", !evsel->attr.pinned);
+
+	/* cpu/pmu-event/u*/
+	evsel = perf_evsel__next(evsel);
+	TEST_ASSERT_VAL("wrong number of entries", 2 == evlist->nr_entries);
 	TEST_ASSERT_VAL("wrong type", PERF_TYPE_RAW == evsel->attr.type);
 	TEST_ASSERT_VAL("wrong exclude_user",
 			!evsel->attr.exclude_user);
@@ -1125,11 +1187,19 @@ static int count_tracepoints(void)
 {
 	char events_path[PATH_MAX];
 	struct dirent *events_ent;
+	const char *mountpoint;
 	DIR *events_dir;
 	int cnt = 0;
 
-	scnprintf(events_path, PATH_MAX, "%s/tracing/events",
-		  debugfs_find_mountpoint());
+	mountpoint = tracefs_find_mountpoint();
+	if (mountpoint) {
+		scnprintf(events_path, PATH_MAX, "%s/events",
+			  mountpoint);
+	} else {
+		mountpoint = debugfs_find_mountpoint();
+		scnprintf(events_path, PATH_MAX, "%s/tracing/events",
+			  mountpoint);
+	}
 
 	events_dir = opendir(events_path);
 
@@ -1409,6 +1479,16 @@ static struct evlist_test test__events[] = {
 		.id    = 100,
 	},
 #endif
+	{
+		.name  = "instructions:I",
+		.check = test__checkevent_exclude_idle_modifier,
+		.id    = 45,
+	},
+	{
+		.name  = "instructions:kIG",
+		.check = test__checkevent_exclude_idle_modifier_1,
+		.id    = 46,
+	},
 };
 
 static struct evlist_test test__events_pmu[] = {
@@ -1453,7 +1533,7 @@ static int test_event(struct evlist_test *e)
 	} else {
 		ret = e->check(evlist);
 	}
-	
+
 	perf_evlist__delete(evlist);
 
 	return ret;
@@ -1565,6 +1645,12 @@ static int test_pmu_events(void)
 		e.name  = name;
 		e.check = test__checkevent_pmu_events;
 
+		ret = test_event(&e);
+		if (ret)
+			break;
+		snprintf(name, MAX_NAME, "%s:u,cpu/event=%s/u", ent->d_name, ent->d_name);
+		e.name  = name;
+		e.check = test__checkevent_pmu_events_mix;
 		ret = test_event(&e);
 #undef MAX_NAME
 	}

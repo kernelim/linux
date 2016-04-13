@@ -624,9 +624,10 @@ static int nvram_pstore_init(void)
 	nvram_pstore_info.bufsize = oops_data_sz;
 
 	rc = pstore_register(&nvram_pstore_info);
-	if (rc != 0)
-		pr_err("nvram: pstore_register() failed, defaults to "
-				"kmsg_dump; returned %d\n", rc);
+	if (rc && (rc != -EPERM))
+		/* Print error only when pstore.backend == nvram */
+		pr_err("nvram: pstore_register() failed, returned %d. "
+				"Defaults to kmsg_dump\n", rc);
 
 	return rc;
 }

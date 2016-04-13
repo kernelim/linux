@@ -385,6 +385,7 @@ __generic_file_splice_read(struct file *in, loff_t *ppos,
 			 */
 			if (!page->mapping) {
 				unlock_page(page);
+retry_lookup:
 				page = find_or_create_page(mapping, index,
 						mapping_gfp_mask(mapping));
 
@@ -409,13 +410,10 @@ __generic_file_splice_read(struct file *in, loff_t *ppos,
 			error = mapping->a_ops->readpage(in, page);
 			if (unlikely(error)) {
 				/*
-				 * We really should re-lookup the page here,
-				 * but it complicates things a lot. Instead
-				 * lets just do what we already stored, and
-				 * we'll get it the next time we are called.
+				 * Re-lookup the page
 				 */
 				if (error == AOP_TRUNCATED_PAGE)
-					error = 0;
+					goto retry_lookup;
 
 				break;
 			}
@@ -932,24 +930,24 @@ ssize_t splice_from_pipe(struct pipe_inode_info *pipe, struct file *out,
 }
 
 /**
- * generic_file_splice_write - splice data from a pipe to a file
+ * splice_write_to_file - splice data from a pipe to a file
  * @pipe:	pipe info
  * @out:	file to write to
  * @ppos:	position in @out
  * @len:	number of bytes to splice
  * @flags:	splice modifier flags
+ * @actor:	worker that does the splicing from the pipe to the file
  *
  * Description:
  *    Will either move or copy pages (determined by @flags options) from
  *    the given pipe inode to the given file.
  *
  */
-ssize_t
-generic_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
-			  loff_t *ppos, size_t len, unsigned int flags)
+ssize_t splice_write_to_file(struct pipe_inode_info *pipe, struct file *out,
+			     loff_t *ppos, size_t len, unsigned int flags,
+			     splice_write_actor actor)
 {
 	struct address_space *mapping = out->f_mapping;
-	struct inode *inode = mapping->host;
 	struct splice_desc sd = {
 		.total_len = len,
 		.flags = flags,
@@ -957,6 +955,7 @@ generic_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
 		.u.file = out,
 	};
 	ssize_t ret;
+	struct inode *inode = out->f_mapping->host;
 
 	sb_start_write(inode->i_sb);
 
@@ -968,13 +967,8 @@ generic_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
 		if (ret <= 0)
 			break;
 
-		mutex_lock_nested(&inode->i_mutex, I_MUTEX_CHILD);
-		ret = file_remove_suid(out);
-		if (!ret) {
-			file_update_time(out);
-			ret = splice_from_pipe_feed(pipe, &sd, pipe_to_file);
-		}
-		mutex_unlock(&inode->i_mutex);
+		ret = actor(pipe, &sd);
+
 	} while (ret > 0);
 	splice_from_pipe_end(pipe, &sd);
 
@@ -1000,7 +994,46 @@ generic_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
 
 	return ret;
 }
+EXPORT_SYMBOL(splice_write_to_file);
 
+static ssize_t generic_file_splice_write_actor(struct pipe_inode_info *pipe,
+					       struct splice_desc *sd)
+{
+	struct file *out = sd->u.file;
+	struct inode *inode = out->f_mapping->host;
+	ssize_t ret;
+
+	mutex_lock_nested(&inode->i_mutex, I_MUTEX_CHILD);
+	ret = file_remove_suid(out);
+	if (!ret) {
+		file_update_time(out);
+		ret = splice_from_pipe_feed(pipe, sd, pipe_to_file);
+	}
+	mutex_unlock(&inode->i_mutex);
+
+	return ret;
+}
+
+/**
+ * generic_file_splice_write - splice data from a pipe to a file
+ * @pipe:	pipe info
+ * @out:	file to write to
+ * @ppos:	position in @out
+ * @len:	number of bytes to splice
+ * @flags:	splice modifier flags
+ *
+ * Description:
+ *    Will either move or copy pages (determined by @flags options) from
+ *    the given pipe inode to the given file.
+ *
+ */
+ssize_t
+generic_file_splice_write(struct pipe_inode_info *pipe, struct file *out,
+			  loff_t *ppos, size_t len, unsigned int flags)
+{
+	return splice_write_to_file(pipe, out, ppos, len, flags,
+				    generic_file_splice_write_actor);
+}
 EXPORT_SYMBOL(generic_file_splice_write);
 
 static int write_pipe_buf(struct pipe_inode_info *pipe, struct pipe_buffer *buf,

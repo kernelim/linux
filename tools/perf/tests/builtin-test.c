@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <string.h>
 #include "builtin.h"
+#include "hist.h"
 #include "intlist.h"
 #include "tests.h"
 #include "debug.h"
@@ -81,7 +82,7 @@ static struct test {
 		.func = test__hists_link,
 	},
 	{
-		.desc = "Try 'use perf' in python, checking link problems",
+		.desc = "Try 'import perf' in python, checking link problems",
 		.func = test__python_use,
 	},
 	{
@@ -137,6 +138,22 @@ static struct test {
 		.func = test__hists_cumulate,
 	},
 	{
+		.desc = "Test tracking with sched_switch",
+		.func = test__switch_tracking,
+	},
+	{
+		.desc = "Filter fds with revents mask in a fdarray",
+		.func = test__fdarray__filter,
+	},
+	{
+		.desc = "Add fd to a fdarray, making it autogrow",
+		.func = test__fdarray__add,
+	},
+	{
+		.desc = "Test kmod_path__parse function",
+		.func = test__kmod_path__parse,
+	},
+	{
 		.func = NULL,
 	},
 };
@@ -168,9 +185,11 @@ static bool perf_test__matches(int curr, int argc, const char *argv[])
 static int run_test(struct test *test)
 {
 	int status, err = -1, child = fork();
+	char sbuf[STRERR_BUFSIZE];
 
 	if (child < 0) {
-		pr_err("failed to fork test: %s\n", strerror(errno));
+		pr_err("failed to fork test: %s\n",
+			strerror_r(errno, sbuf, sizeof(sbuf)));
 		return -1;
 	}
 
@@ -259,7 +278,7 @@ static int perf_test__list(int argc, const char **argv)
 
 int cmd_test(int argc, const char **argv, const char *prefix __maybe_unused)
 {
-	const char * const test_usage[] = {
+	const char *test_usage[] = {
 	"perf test [<options>] [{list <test-name-fragment>|[<test-name-fragments>|<test-numbers>]}]",
 	NULL,
 	};
@@ -270,9 +289,14 @@ int cmd_test(int argc, const char **argv, const char *prefix __maybe_unused)
 		    "be more verbose (show symbol address, etc)"),
 	OPT_END()
 	};
+	const char * const test_subcommands[] = { "list", NULL };
 	struct intlist *skiplist = NULL;
+        int ret = hists__init();
 
-	argc = parse_options(argc, argv, test_options, test_usage, 0);
+        if (ret < 0)
+                return ret;
+
+	argc = parse_options_subcommand(argc, argv, test_options, test_subcommands, test_usage, 0);
 	if (argc >= 1 && !strcmp(argv[0], "list"))
 		return perf_test__list(argc, argv);
 
@@ -280,7 +304,7 @@ int cmd_test(int argc, const char **argv, const char *prefix __maybe_unused)
 	symbol_conf.sort_by_name = true;
 	symbol_conf.try_vmlinux_path = true;
 
-	if (symbol__init() < 0)
+	if (symbol__init(NULL) < 0)
 		return -1;
 
 	if (skip != NULL)

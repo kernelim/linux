@@ -11,22 +11,22 @@
  * ----------------------------------------------------------------------
  * |             Level            |   Last Value Used  |     Holes	|
  * ----------------------------------------------------------------------
- * | Module Init and Probe        |       0x017d       | 0x0144,0x0146	|
+ * | Module Init and Probe        |       0x017f       | 0x0146         |
  * |                              |                    | 0x015b-0x0160	|
- * |                              |                    | 0x016e-0x0170	|
+ * |                              |                    | 0x016e-0x0170  |
  * | Mailbox commands             |       0x118d       | 0x1115-0x1116	|
  * |                              |                    | 0x111a-0x111b  |
  * | Device Discovery             |       0x2016       | 0x2020-0x2022, |
  * |                              |                    | 0x2011-0x2012, |
  * |                              |                    | 0x2099-0x20a4  |
- * | Queue Command and IO tracing |       0x3059       | 0x3006-0x300b  |
+ * | Queue Command and IO tracing |       0x3075       | 0x300b         |
  * |                              |                    | 0x3027-0x3028  |
  * |                              |                    | 0x303d-0x3041  |
  * |                              |                    | 0x302d,0x3033  |
  * |                              |                    | 0x3036,0x3038  |
  * |                              |                    | 0x303a		|
  * | DPC Thread                   |       0x4023       | 0x4002,0x4013  |
- * | Async Events                 |       0x5087       | 0x502b-0x502f  |
+ * | Async Events                 |       0x508a       | 0x502b-0x502f  |
  * |                              |                    | 0x5047		|
  * |                              |                    | 0x5084,0x5075	|
  * |                              |                    | 0x503d,0x5044  |
@@ -47,7 +47,7 @@
  * | Virtual Port                 |       0xa007       |		|
  * | ISP82XX Specific             |       0xb157       | 0xb002,0xb024  |
  * | MultiQ                       |       0xc00c       |		|
- * | Misc                         |       0xd213       | 0xd011-0xd017	|
+ * | Misc                         |       0xd300       | 0xd016-0xd017	|
  * |                              |                    | 0xd021,0xd024	|
  * |                              |                    | 0xd025,0xd029	|
  * |                              |                    | 0xd02a,0xd02e	|
@@ -563,7 +563,7 @@ qla25xx_copy_mq(struct qla_hw_data *ha, void *ptr, uint32_t **last_chain)
 	uint32_t cnt, que_idx;
 	uint8_t que_cnt;
 	struct qla2xxx_mq_chain *mq = ptr;
-	device_reg_t __iomem *reg;
+	device_reg_t *reg;
 
 	if (!ha->mqenable || IS_QLA83XX(ha) || IS_QLA27XX(ha))
 		return ptr;

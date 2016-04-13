@@ -751,6 +751,8 @@ void xen_evtchn_do_upcall(struct pt_regs *regs)
 	exit_idle();
 	irq_enter();
 
+	rh_inc_irq_stat(irq_hv_callback_count);
+
 	__xen_evtchn_do_upcall();
 
 	irq_exit();

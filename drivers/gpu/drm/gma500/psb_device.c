@@ -115,7 +115,7 @@ static int psb_set_brightness(struct backlight_device *bd)
 	return 0;
 }
 
-static struct backlight_ops psb_ops = {
+static const struct backlight_ops psb_ops = {
 	.get_brightness = psb_get_brightness,
 	.update_status  = psb_set_brightness,
 };
@@ -124,9 +124,14 @@ static int psb_backlight_init(struct drm_device *dev)
 {
 	struct drm_psb_private *dev_priv = dev->dev_private;
 	int ret;
+	struct backlight_properties props;
+
+	memset(&props, 0, sizeof(struct backlight_properties));
+	props.max_brightness = 100;
+	props.type = BACKLIGHT_PLATFORM;
 
 	psb_backlight_device = backlight_device_register("psb-bl",
-					NULL, (void *)dev, &psb_ops);
+					NULL, (void *)dev, &psb_ops, &props);
 	if (IS_ERR(psb_backlight_device))
 		return PTR_ERR(psb_backlight_device);
 

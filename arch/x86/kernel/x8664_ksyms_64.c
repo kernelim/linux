@@ -28,7 +28,7 @@ EXPORT_SYMBOL(__put_user_2);
 EXPORT_SYMBOL(__put_user_4);
 EXPORT_SYMBOL(__put_user_8);
 
-__must_check unsigned long
+__must_check unsigned long notrace
 copy_user_generic(void *to, const void *from, unsigned len)
 {
 	unsigned ret;

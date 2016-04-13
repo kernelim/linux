@@ -37,6 +37,7 @@ obj-$(CONFIG_CPU_SUP_INTEL)		+= perf_event_p6.o perf_event_p4.o
 obj-$(CONFIG_CPU_SUP_INTEL)		+= perf_event_intel_lbr.o perf_event_intel_ds.o perf_event_intel.o
 obj-$(CONFIG_CPU_SUP_INTEL)		+= perf_event_intel_uncore.o perf_event_intel_uncore_snb.o
 obj-$(CONFIG_CPU_SUP_INTEL)		+= perf_event_intel_uncore_snbep.o
+obj-$(CONFIG_CPU_SUP_INTEL)		+= perf_event_intel_cqm.o
 endif
 
 obj-$(CONFIG_X86_MCE)			+= mcheck/

@@ -149,6 +149,8 @@ struct pci_dn {
 
 	int	pci_ext_config_space;	/* for pci devices */
 
+	int	force_32bit_msi:1;
+
 #ifdef CONFIG_EEH
 	struct	pci_dev *pcidev;	/* back-pointer to the pci device */
 	int	class_code;		/* pci device class */

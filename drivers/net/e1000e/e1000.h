@@ -24,6 +24,7 @@
 #ifndef _E1000_H_
 #define _E1000_H_
 
+#include <linux/bitops.h>
 #include <linux/types.h>
 #include <linux/timer.h>
 #include <linux/workqueue.h>
@@ -32,6 +33,7 @@
 #include <linux/pci.h>
 #include <linux/pci-aspm.h>
 #include <linux/crc32.h>
+#include <linux/if_vlan.h>
 #include <linux/etherdevice.h>
 #include <linux/clocksource.h>
 #include <linux/net_tstamp.h>
@@ -214,7 +216,7 @@ struct e1000_adapter {
 
 	const struct e1000_info *ei;
 
-	struct vlan_group *vlgrp;
+	unsigned long active_vlans[BITS_TO_LONGS(VLAN_N_VID)];
 	u32 bd_number;
 	u32 rx_buffer_len;
 	u16 mng_vlan_id;
@@ -428,12 +430,11 @@ s32 e1000e_get_base_timinca(struct e1000_adapter *adapter, u32 *timinca);
 #define FLAG_LSC_GIG_SPEED_DROP           (1 << 25)
 #define FLAG_SMART_POWER_DOWN             (1 << 26)
 #define FLAG_MSI_ENABLED                  (1 << 27)
-#define FLAG_RX_CSUM_ENABLED              (1 << 28)
+/* reserved (1 << 28) */
 #define FLAG_TSO_FORCE                    (1 << 29)
 #define FLAG_RESTART_NOW                  (1 << 30)
 #define FLAG_MSI_TEST_FAILED              (1 << 31)
 
-/* CRC Stripping defines */
 #define FLAG2_CRC_STRIPPING               (1 << 0)
 #define FLAG2_HAS_PHY_WAKEUP              (1 << 1)
 #define FLAG2_IS_DISCARDING               (1 << 2)

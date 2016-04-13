@@ -116,11 +116,13 @@ struct wacom {
 	unsigned int open:1;
 	char phys[32];
 	struct wacom_led {
-		u8 select[2]; /* status led selector (0..3) */
+		u8 select[5]; /* status led selector (0..3) */
 		u8 llv;       /* status led brightness no button (1..127) */
 		u8 hlv;       /* status led brightness button pressed (1..127) */
 		u8 img_lum;   /* OLED matrix display brightness */
 	} led;
+	struct kobject *remote_dir;
+	struct attribute_group remote_group[5];
 };
 
 struct wacom_combo {
@@ -167,9 +169,16 @@ extern void input_dev_cintiq(struct input_dev *input_dev, struct wacom_wac *waco
 extern void input_dev_bamboo_pt(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
 extern void input_dev_ipro(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
 extern void input_dev_ipros(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
+extern void input_dev_cintiq27qhd(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
+extern void input_dev_cintiq27qhdt(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
+extern void input_dev_remote(struct input_dev *input_dev, struct wacom_wac *wacom_wac);
+extern void wacom_set_led_status(void *wcombo, int idx, int status);
 extern __u16 wacom_le16_to_cpu(unsigned char *data);
 extern __u16 wacom_be16_to_cpu(unsigned char *data);
 extern struct wacom_features *get_wacom_feature(const struct usb_device_id *id);
 extern const struct usb_device_id *get_device_table(void);
+int wacom_remote_create_attr_group(void *wcombo, __u32 serial, int index);
+void wacom_remote_destroy_attr_group(void *wcombo, __u32 serial);
+int wacom_wac_finger_count_touches(void *wcombo);
 
 #endif

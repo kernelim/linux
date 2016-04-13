@@ -12,14 +12,14 @@ struct msi_msg {
 
 /* Helper functions */
 struct irq_desc;
-extern void mask_msi_irq(unsigned int irq);
-extern void unmask_msi_irq(unsigned int irq);
-extern void read_msi_msg_desc(struct irq_desc *desc, struct msi_msg *msg);
-extern void get_cached_msi_msg_desc(struct irq_desc *desc, struct msi_msg *msg);
-extern void write_msi_msg_desc(struct irq_desc *desc, struct msi_msg *msg);
-extern void read_msi_msg(unsigned int irq, struct msi_msg *msg);
-extern void get_cached_msi_msg(unsigned int irq, struct msi_msg *msg);
-extern void write_msi_msg(unsigned int irq, struct msi_msg *msg);
+void mask_msi_irq(unsigned int irq);
+void unmask_msi_irq(unsigned int irq);
+void read_msi_msg_desc(struct irq_desc *desc, struct msi_msg *msg);
+void get_cached_msi_msg_desc(struct irq_desc *desc, struct msi_msg *msg);
+void write_msi_msg_desc(struct irq_desc *desc, struct msi_msg *msg);
+void read_msi_msg(unsigned int irq, struct msi_msg *msg);
+void get_cached_msi_msg(unsigned int irq, struct msi_msg *msg);
+void write_msi_msg(unsigned int irq, struct msi_msg *msg);
 
 struct msi_desc {
 	struct {
@@ -53,9 +53,8 @@ struct msi_desc {
  */
 int arch_setup_msi_irq(struct pci_dev *dev, struct msi_desc *desc);
 void arch_teardown_msi_irq(unsigned int irq);
-extern int arch_setup_msi_irqs(struct pci_dev *dev, int nvec, int type);
-extern void arch_teardown_msi_irqs(struct pci_dev *dev);
-extern int arch_msi_check_device(struct pci_dev* dev, int nvec, int type);
-
+int arch_setup_msi_irqs(struct pci_dev *dev, int nvec, int type);
+void arch_teardown_msi_irqs(struct pci_dev *dev);
+int arch_msi_check_device(struct pci_dev* dev, int nvec, int type);
 
 #endif /* LINUX_MSI_H */

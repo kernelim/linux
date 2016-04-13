@@ -332,6 +332,7 @@ enum ethtool_stringset {
 	ETH_SS_PRIV_FLAGS,
 	ETH_SS_NTUPLE_FILTERS,
 	ETH_SS_FEATURES,
+	ETH_SS_RSS_HASH_FUNCS,
 };
 
 /* for passing string sets for data tagging */
@@ -554,30 +555,37 @@ struct ethtool_rxfh_indir {
  * struct ethtool_rxfh - command to get/set RX flow hash indir or/and hash key.
  * @cmd: Specific command number - %ETHTOOL_GRSSH or %ETHTOOL_SRSSH
  * @rss_context: RSS context identifier.
- * @indir_size: On entry, the array size of the user buffer, which may be zero.
- *		On return from %ETHTOOL_GRSSH, the array size of the hardware
- *		indirection table.
- * @key_size:	On entry, the array size of the user buffer in bytes,
- *		which may be zero.
- *		On return from %ETHTOOL_GRSSH, the size of the RSS hash key.
+ * @indir_size: On entry, the array size of the user buffer for the
+ * 	indirection table, which may be zero, or (for %ETHTOOL_SRSSH),
+ * 	%ETH_RXFH_INDIR_NO_CHANGE.  On return from %ETHTOOL_GRSSH,
+ * 	the array size of the hardware indirection table.
+ * @key_size: On entry, the array size of the user buffer for the hash key,
+ * 	which may be zero.  On return from %ETHTOOL_GRSSH, the size of the
+ * @hfunc: Defines the current RSS hash function used by HW (or to be set to).
+ * 	Valid values are one of the %ETH_RSS_HASH_*.
+ * 	hardware hash key.
  * @rsvd:	Reserved for future extensions.
  * @rss_config: RX ring/queue index for each hash value i.e., indirection table
- *		of size @indir_size followed by hash key of size @key_size.
+ *	of @indir_size __u32 elements, followed by hash key of @key_size
+ *	bytes.
  *
  * For %ETHTOOL_GRSSH, a @indir_size and key_size of zero means that only the
- * size should be returned.  For %ETHTOOL_SRSSH, a @indir_size of 0xDEADBEEF
- * means that indir table setting is not requested and a @indir_size of zero
- * means the indir table should be reset to default values.  This last feature
- * is not supported by the original implementations.
+ * size should be returned.  For %ETHTOOL_SRSSH, an @indir_size of
+ * %ETH_RXFH_INDIR_NO_CHANGE means that indir table setting is not requested
+ * and a @indir_size of zero means the indir table should be reset to default
+ * values.
  */
 struct ethtool_rxfh {
 	__u32   cmd;
 	__u32	rss_context;
 	__u32   indir_size;
 	__u32   key_size;
-	__u32	rsvd[2];
+	__u8	hfunc;
+	__u8	rsvd8[3];
+	__u32	rsvd32;
 	__u32   rss_config[0];
 };
+#define ETH_RXFH_INDIR_NO_CHANGE	0xffffffff
 
 /**
  * struct ethtool_ts_info - holds a device's timestamping and PHC association
@@ -705,6 +713,26 @@ enum ethtool_phys_id_state {
 	ETHTOOL_ID_ON,
 	ETHTOOL_ID_OFF
 };
+
+enum {
+	ETH_RSS_HASH_TOP_BIT, /* Configurable RSS hash function - Toeplitz */
+	ETH_RSS_HASH_XOR_BIT, /* Configurable RSS hash function - Xor */
+
+	/*
+	 * Add your fresh new hash function bits above and remember to update
+	 * rss_hash_func_strings[] in ethtool.c
+	 */
+	ETH_RSS_HASH_FUNCS_COUNT
+};
+
+#define __ETH_RSS_HASH_BIT(bit)	((u32)1 << (bit))
+#define __ETH_RSS_HASH(name)	__ETH_RSS_HASH_BIT(ETH_RSS_HASH_##name##_BIT)
+
+#define ETH_RSS_HASH_TOP	__ETH_RSS_HASH(TOP)
+#define ETH_RSS_HASH_XOR	__ETH_RSS_HASH(XOR)
+
+#define ETH_RSS_HASH_UNKNOWN	0
+#define ETH_RSS_HASH_NO_CHANGE	0
 
 /* needed by dev_disable_lro() */
 extern int __ethtool_set_flags(struct net_device *dev, u32 flags);
@@ -874,17 +902,64 @@ struct ethtool_dump {
  * ethtool_ops_ext - structure used to extend ethtool_ops methods
  * @size: This field should be initialized to the size of the structure 
  *	  by the drivers.
- *
+ * @get_rxfh_key_size: Get the size of the RX flow hash key.
+ *	Returns zero if not supported for this specific device.
+ * @get_rxfh_indir_size: Get the size of the RX flow hash indirection table.
+ *	Returns zero if not supported for this specific device.
+ * @get_rxfh: Get the contents of the RX flow hash indirection table, hash key
+ *	and/or hash function.
+ *	Returns a negative error code or zero.
+ * @set_rxfh: Set the contents of the RX flow hash indirection table, hash
+ *	key, and/or hash function.  Arguments which are set to %NULL or zero
+ *	will remain unchanged.
+ *	Returns a negative error code or zero. An error code must be returned
+ *	if at least one unsupported change was requested.
+ * @get_rxfh_indir: Get the contents of the RX flow hash indirection table.
+ *	Will not be called if @get_rxfh_indir_size returns zero.
+ * @set_rxfh_indir: Set the contents of the RX flow hash indirection table.
+ *	Will not be called if @get_rxfh_indir_size returns zero.
+ * @get_channels: Get number of channels.
+ * @set_channels: Set number of channels.  Returns a negative error code or
+ *	zero.
+ * @get_dump_flag: Get dump flag indicating current dump length, version,
+ *	and flag of the device.
+ * @get_dump_data: Get dump data.
+ * @set_dump: Set dump specific flags to the device.
+ * @get_module_info: Get the size and type of the eeprom contained within
+ *	a plug-in module.
+ * @get_module_eeprom: Get the eeprom information from the plug-in module
+ * @set_phys_id: Identify the physical devices, e.g. by flashing an LED
+ *	attached to it.  The implementation may update the indicator
+ *	asynchronously or synchronously, but in either case it must return
+ *	quickly.  It is initially called with the argument %ETHTOOL_ID_ACTIVE,
+ *	and must either activate asynchronous updates and return zero, return
+ *	a negative error or return a positive frequency for synchronous
+ *	indication (e.g. 1 for one on/off cycle per second).  If it returns
+ *	a frequency then it will be called again at intervals with the
+ *	argument %ETHTOOL_ID_ON or %ETHTOOL_ID_OFF and should set the state of
+ *	the indicator accordingly.  Finally, it is called with the argument
+ *	%ETHTOOL_ID_INACTIVE and must deactivate the indicator.  Returns a
+ *	negative error code or zero.
+ * @reset: Reset (part of) the device, as specified by a bitmask of
+ *	flags from &enum ethtool_reset_flags.  Returns a negative
+ *	error code or zero.
+ * @get_eee: Get Energy-Efficient (EEE) supported and status.
+ * @set_eee: Set EEE status (enable/disable) as well as LPI timers.
+ * @get_ts_info: Get the time stamping and PTP hardware clock capabilities.
+ *	Drivers supporting transmit time stamps in software should set this to
+ *	ethtool_op_get_ts_info().
  */
 struct  ethtool_ops_ext {
 	size_t    size;
 
 	u32	(*get_rxfh_key_size)(struct net_device *);
-	u32     (*get_rxfh_indir_size)(struct net_device *);
-	int	(*get_rxfh)(struct net_device *, u32 *, u8 *);
-	int	(*set_rxfh)(struct net_device *, u32 *, u8 *);
-	int     (*get_rxfh_indir)(struct net_device *, u32 *);
-	int     (*set_rxfh_indir)(struct net_device *, const u32 *);
+	u32	(*get_rxfh_indir_size)(struct net_device *);
+	int	(*get_rxfh)(struct net_device *, u32 *indir, u8 *key,
+			    u8 *hfunc);
+	int	(*set_rxfh)(struct net_device *, const u32 *indir,
+			    const u8 *key, const u8 hfunc);
+	int	(*get_rxfh_indir)(struct net_device *, u32 *);
+	int	(*set_rxfh_indir)(struct net_device *, const u32 *);
 	void	(*get_channels)(struct net_device *, struct ethtool_channels *);
 	int	(*set_channels)(struct net_device *, struct ethtool_channels *);
 	int	(*get_dump_flag)(struct net_device *, struct ethtool_dump *);
@@ -1058,15 +1133,19 @@ struct  ethtool_ops_ext {
  * it was foced up into this mode or autonegotiated.
  */
 
-/* The forced speed, 10Mb, 100Mb, gigabit, [2.5|10|20|40|56]GbE. */
+/* The forced speed, 10Mb, 100Mb, gigabit, [2.5|5|10|20|25|40|50|56|100]GbE. */
 #define SPEED_10		10
 #define SPEED_100		100
 #define SPEED_1000		1000
 #define SPEED_2500		2500
+#define SPEED_5000		5000
 #define SPEED_10000		10000
 #define SPEED_20000		20000
+#define SPEED_25000		25000
 #define SPEED_40000		40000
+#define SPEED_50000		50000
 #define SPEED_56000		56000
+#define SPEED_100000		100000
 
 #define SPEED_UNKNOWN		-1
 
@@ -1159,6 +1238,11 @@ struct  ethtool_ops_ext {
 #define ETH_MODULE_SFF_8079_LEN		256
 #define ETH_MODULE_SFF_8472		0x2
 #define ETH_MODULE_SFF_8472_LEN		512
+#define ETH_MODULE_SFF_8636		0x3
+#define ETH_MODULE_SFF_8636_LEN		256
+#define ETH_MODULE_SFF_8436		0x4
+#define ETH_MODULE_SFF_8436_LEN		256
+
 
 enum ethtool_reset_flags {
 	/* These flags represent components dedicated to the interface

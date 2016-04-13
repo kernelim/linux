@@ -41,8 +41,63 @@ DEFINE_PER_CPU(struct mmu_gather, mmu_gathers);
 
 pgd_t swapper_pg_dir[PTRS_PER_PGD] __attribute__((__aligned__(PAGE_SIZE)));
 
-char  empty_zero_page[PAGE_SIZE] __attribute__((__aligned__(PAGE_SIZE)));
+unsigned long empty_zero_page, zero_page_mask;
 EXPORT_SYMBOL(empty_zero_page);
+
+static unsigned long setup_zero_pages(void)
+{
+	struct cpuid cpu_id;
+	unsigned int order;
+	unsigned long size;
+	struct page *page;
+	int i;
+
+	get_cpu_id(&cpu_id);
+	switch (cpu_id.machine) {
+	case 0x9672:	/* g5 */
+	case 0x2064:	/* z900 */
+	case 0x2066:	/* z900 */
+	case 0x2084:	/* z990 */
+	case 0x2086:	/* z990 */
+	case 0x2094:	/* z9-109 */
+	case 0x2096:	/* z9-109 */
+		order = 0;
+		break;
+	case 0x2097:	/* z10 */
+	case 0x2098:	/* z10 */
+	case 0x2817:	/* z196 */
+	case 0x2818:	/* z196 */
+		order = 2;
+		break;
+	case 0x2827:	/* zEC12 */
+	case 0x2828:	/* zEC12 */
+		order = 5;
+		break;
+	case 0x2964:	/* z13 */
+	default:
+		order = 7;
+		break;
+	}
+	/* Limit number of empty zero pages for small memory sizes */
+	while (order > 2 && (totalram_pages >> 10) < (1UL << order))
+		order--;
+
+	empty_zero_page = __get_free_pages(GFP_KERNEL | __GFP_ZERO, order);
+	if (!empty_zero_page)
+		panic("Out of memory in setup_zero_pages");
+
+	page = virt_to_page((void *) empty_zero_page);
+	split_page(page, order);
+	for (i = 1 << order; i > 0; i--) {
+		SetPageReserved(page);
+		page++;
+	}
+
+	size = PAGE_SIZE << order;
+	zero_page_mask = (size - 1) & PAGE_MASK;
+
+	return 1UL << order;
+}
 
 /*
  * paging_init() sets up the page tables
@@ -96,14 +151,12 @@ void __init mem_init(void)
         max_mapnr = num_physpages = max_low_pfn;
         high_memory = (void *) __va(max_low_pfn * PAGE_SIZE);
 
-        /* clear the zero-page */
-        memset(empty_zero_page, 0, PAGE_SIZE);
-
 	/* Setup guest page hinting */
 	cmma_init();
 
 	/* this will put all low memory onto the freelists */
 	totalram_pages += free_all_bootmem();
+	totalram_pages -= setup_zero_pages();	/* Setup zeroed pages. */
 
 	reservedpages = 0;
 

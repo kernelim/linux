@@ -1745,11 +1745,10 @@ pcnet32_probe1(unsigned long ioaddr, int shared, struct pci_dev *pdev)
 			memcpy(dev->dev_addr, promaddr, 6);
 		}
 	}
-	memcpy(dev->perm_addr, dev->dev_addr, dev->addr_len);
 
 	/* if the ethernet address is not valid, force to 00:00:00:00:00:00 */
-	if (!is_valid_ether_addr(dev->perm_addr))
-		memset(dev->dev_addr, 0, ETH_ALEN);
+	if (!is_valid_ether_addr(dev->dev_addr))
+		eth_zero_addr(dev->dev_addr);
 
 	if (pcnet32_debug & NETIF_MSG_PROBE) {
 		printk(" %pM", dev->dev_addr);

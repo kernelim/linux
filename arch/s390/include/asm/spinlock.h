@@ -13,32 +13,36 @@
 
 #include <linux/smp.h>
 
+#define SPINLOCK_LOCKVAL (S390_lowcore.spinlock_lockval)
+
 #if __GNUC__ > 3 || (__GNUC__ == 3 && __GNUC_MINOR__ > 2)
 
 static inline int
-_raw_compare_and_swap(volatile unsigned int *lock,
-		      unsigned int old, unsigned int new)
+_raw_compare_and_swap(unsigned int *lock, unsigned int old, unsigned int new)
 {
+	unsigned int old_expected = old;
+
 	asm volatile(
 		"	cs	%0,%3,%1"
 		: "=d" (old), "=Q" (*lock)
 		: "0" (old), "d" (new), "Q" (*lock)
 		: "cc", "memory" );
-	return old;
+	return old == old_expected;
 }
 
 #else /* __GNUC__ */
 
 static inline int
-_raw_compare_and_swap(volatile unsigned int *lock,
-		      unsigned int old, unsigned int new)
+_raw_compare_and_swap(unsigned int *lock, unsigned int old, unsigned int new)
 {
+	unsigned int old_expected = old;
+
 	asm volatile(
 		"	cs	%0,%3,0(%4)"
 		: "=d" (old), "=m" (*lock)
 		: "0" (old), "d" (new), "a" (lock), "m" (*lock)
 		: "cc", "memory" );
-	return old;
+	return old == old_expected;
 }
 
 #endif /* __GNUC__ */
@@ -52,52 +56,70 @@ _raw_compare_and_swap(volatile unsigned int *lock,
  * (the type definitions are in asm/spinlock_types.h)
  */
 
-#define __raw_spin_is_locked(x) ((x)->owner_cpu != 0)
-#define __raw_spin_unlock_wait(lock) \
-	do { while (__raw_spin_is_locked(lock)) \
-		 _raw_spin_relax(lock); } while (0)
+void _raw_spin_lock_wait(raw_spinlock_t *);
+int _raw_spin_trylock_retry(raw_spinlock_t *);
+void _raw_spin_relax(raw_spinlock_t *);
+void _raw_spin_lock_wait_flags(raw_spinlock_t *, unsigned long flags);
 
-extern void _raw_spin_lock_wait(raw_spinlock_t *);
-extern void _raw_spin_lock_wait_flags(raw_spinlock_t *, unsigned long flags);
-extern int _raw_spin_trylock_retry(raw_spinlock_t *);
-extern void _raw_spin_relax(raw_spinlock_t *lock);
+static inline u32 __raw_spin_lockval(int cpu)
+{
+	return ~cpu;
+}
+
+static inline int __raw_spin_value_unlocked(raw_spinlock_t lock)
+{
+	return lock.lock == 0;
+}
+
+static inline int __raw_spin_is_locked(raw_spinlock_t *lp)
+{
+	return ACCESS_ONCE(lp->lock) != 0;
+}
+
+static inline int __raw_spin_trylock_once(raw_spinlock_t *lp)
+{
+	barrier();
+	return likely(__raw_spin_value_unlocked(*lp) &&
+		      _raw_compare_and_swap(&lp->lock, 0, SPINLOCK_LOCKVAL));
+}
 
 static inline void __raw_spin_lock(raw_spinlock_t *lp)
 {
-	int old;
-
-	old = _raw_compare_and_swap(&lp->owner_cpu, 0, ~smp_processor_id());
-	if (likely(old == 0))
-		return;
-	_raw_spin_lock_wait(lp);
+	if (!__raw_spin_trylock_once(lp))
+		_raw_spin_lock_wait(lp);
 }
 
 static inline void __raw_spin_lock_flags(raw_spinlock_t *lp,
 					 unsigned long flags)
 {
-	int old;
-
-	old = _raw_compare_and_swap(&lp->owner_cpu, 0, ~smp_processor_id());
-	if (likely(old == 0))
-		return;
-	_raw_spin_lock_wait_flags(lp, flags);
+	if (!__raw_spin_trylock_once(lp))
+		_raw_spin_lock_wait_flags(lp, flags);
 }
 
 static inline int __raw_spin_trylock(raw_spinlock_t *lp)
 {
-	int old;
-
-	old = _raw_compare_and_swap(&lp->owner_cpu, 0, ~smp_processor_id());
-	if (likely(old == 0))
-		return 1;
-	return _raw_spin_trylock_retry(lp);
+	if (!__raw_spin_trylock_once(lp))
+		return _raw_spin_trylock_retry(lp);
+	return 1;
 }
 
 static inline void __raw_spin_unlock(raw_spinlock_t *lp)
 {
-	_raw_compare_and_swap(&lp->owner_cpu, lp->owner_cpu, 0);
+	typecheck(unsigned int, lp->lock);
+	asm volatile(
+		"bcr	15,0\n"
+		"st	%1,%0\n"
+		: "+Q" (lp->lock)
+		: "d" (0)
+		: "cc", "memory");
 }
-		
+
+static inline void __raw_spin_unlock_wait(raw_spinlock_t *lock)
+{
+	while (__raw_spin_is_locked(lock))
+		_raw_spin_relax(lock);
+}
+
 /*
  * Read-write spinlocks, allowing multiple readers
  * but only one writer.
@@ -128,64 +150,76 @@ extern void _raw_write_lock_wait(raw_rwlock_t *lp);
 extern void _raw_write_lock_wait_flags(raw_rwlock_t *lp, unsigned long flags);
 extern int _raw_write_trylock_retry(raw_rwlock_t *lp);
 
+static inline int __raw_read_trylock_once(raw_rwlock_t *rw)
+{
+	unsigned int old = ACCESS_ONCE(rw->lock);
+	return likely((int) old >= 0 &&
+		      _raw_compare_and_swap(&rw->lock, old, old + 1));
+}
+
+static inline int __raw_write_trylock_once(raw_rwlock_t *rw)
+{
+	unsigned int old = ACCESS_ONCE(rw->lock);
+	return likely(old == 0 &&
+		      _raw_compare_and_swap(&rw->lock, 0, 0x80000000));
+}
+
 static inline void __raw_read_lock(raw_rwlock_t *rw)
 {
-	unsigned int old;
-	old = rw->lock & 0x7fffffffU;
-	if (_raw_compare_and_swap(&rw->lock, old, old + 1) != old)
+	if (!__raw_read_trylock_once(rw))
 		_raw_read_lock_wait(rw);
 }
 
 static inline void __raw_read_lock_flags(raw_rwlock_t *rw, unsigned long flags)
 {
-	unsigned int old;
-	old = rw->lock & 0x7fffffffU;
-	if (_raw_compare_and_swap(&rw->lock, old, old + 1) != old)
+	if (!__raw_read_trylock_once(rw))
 		_raw_read_lock_wait_flags(rw, flags);
 }
 
 static inline void __raw_read_unlock(raw_rwlock_t *rw)
 {
-	unsigned int old, cmp;
+	unsigned int old;
 
-	old = rw->lock;
 	do {
-		cmp = old;
-		old = _raw_compare_and_swap(&rw->lock, old, old - 1);
-	} while (cmp != old);
+		old = ACCESS_ONCE(rw->lock);
+	} while (!_raw_compare_and_swap(&rw->lock, old, old - 1));
 }
 
 static inline void __raw_write_lock(raw_rwlock_t *rw)
 {
-	if (unlikely(_raw_compare_and_swap(&rw->lock, 0, 0x80000000) != 0))
+	if (!__raw_write_trylock_once(rw))
 		_raw_write_lock_wait(rw);
 }
 
 static inline void __raw_write_lock_flags(raw_rwlock_t *rw, unsigned long flags)
 {
-	if (unlikely(_raw_compare_and_swap(&rw->lock, 0, 0x80000000) != 0))
+	if (!__raw_write_trylock_once(rw))
 		_raw_write_lock_wait_flags(rw, flags);
 }
 
 static inline void __raw_write_unlock(raw_rwlock_t *rw)
 {
-	_raw_compare_and_swap(&rw->lock, 0x80000000, 0);
+	typecheck(unsigned int, rw->lock);
+	asm volatile(
+		"bcr	15,0\n"
+		"st	%1,%0\n"
+		: "+Q" (rw->lock)
+		: "d" (0)
+		: "cc", "memory");
 }
 
 static inline int __raw_read_trylock(raw_rwlock_t *rw)
 {
-	unsigned int old;
-	old = rw->lock & 0x7fffffffU;
-	if (likely(_raw_compare_and_swap(&rw->lock, old, old + 1) == old))
-		return 1;
-	return _raw_read_trylock_retry(rw);
+	if (!__raw_read_trylock_once(rw))
+		return _raw_read_trylock_retry(rw);
+	return 1;
 }
 
 static inline int __raw_write_trylock(raw_rwlock_t *rw)
 {
-	if (likely(_raw_compare_and_swap(&rw->lock, 0, 0x80000000) == 0))
-		return 1;
-	return _raw_write_trylock_retry(rw);
+	if (!__raw_write_trylock_once(rw))
+		return _raw_write_trylock_retry(rw);
+	return 1;
 }
 
 #define _raw_read_relax(lock)	cpu_relax()

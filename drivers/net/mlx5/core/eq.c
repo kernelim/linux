@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, Mellanox Technologies inc.  All rights reserved.
+ * Copyright (c) 2013-2015, Mellanox Technologies. All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -198,7 +198,7 @@ static int mlx5_eq_int(struct mlx5_core_dev *dev, struct mlx5_eq *eq)
 	int eqes_found = 0;
 	int set_ci = 0;
 	u32 cqn;
-	u32 srqn;
+	u32 rsn;
 	u8 port;
 
 	while ((eqe = next_eqe_sw(eq))) {
@@ -208,7 +208,8 @@ static int mlx5_eq_int(struct mlx5_core_dev *dev, struct mlx5_eq *eq)
 		 */
 		rmb();
 
-		mlx5_core_dbg(eq->dev, "eqn %d, eqe type %s\n", eq->eqn, eqe_type_str(eqe->type));
+		mlx5_core_dbg(eq->dev, "eqn %d, eqe type %s\n",
+			      eq->eqn, eqe_type_str(eqe->type));
 		switch (eqe->type) {
 		case MLX5_EVENT_TYPE_COMP:
 			cqn = be32_to_cpu(eqe->data.comp.cqn) & 0xffffff;
@@ -223,18 +224,18 @@ static int mlx5_eq_int(struct mlx5_core_dev *dev, struct mlx5_eq *eq)
 		case MLX5_EVENT_TYPE_PATH_MIG_FAILED:
 		case MLX5_EVENT_TYPE_WQ_INVAL_REQ_ERROR:
 		case MLX5_EVENT_TYPE_WQ_ACCESS_ERROR:
-			mlx5_core_dbg(dev, "event %s(%d) arrived\n",
-				      eqe_type_str(eqe->type), eqe->type);
-			mlx5_qp_event(dev, be32_to_cpu(eqe->data.qp_srq.qp_srq_n) & 0xffffff,
-				      eqe->type);
+			rsn = be32_to_cpu(eqe->data.qp_srq.qp_srq_n) & 0xffffff;
+			mlx5_core_dbg(dev, "event %s(%d) arrived on resource 0x%x\n",
+				      eqe_type_str(eqe->type), eqe->type, rsn);
+			mlx5_rsc_event(dev, rsn, eqe->type);
 			break;
 
 		case MLX5_EVENT_TYPE_SRQ_RQ_LIMIT:
 		case MLX5_EVENT_TYPE_SRQ_CATAS_ERROR:
-			srqn = be32_to_cpu(eqe->data.qp_srq.qp_srq_n) & 0xffffff;
+			rsn = be32_to_cpu(eqe->data.qp_srq.qp_srq_n) & 0xffffff;
 			mlx5_core_dbg(dev, "SRQ event %s(%d): srqn 0x%x\n",
-				      eqe_type_str(eqe->type), eqe->type, srqn);
-			mlx5_srq_event(dev, srqn, eqe->type);
+				      eqe_type_str(eqe->type), eqe->type, rsn);
+			mlx5_srq_event(dev, rsn, eqe->type);
 			break;
 
 		case MLX5_EVENT_TYPE_CMD:
@@ -251,7 +252,9 @@ static int mlx5_eq_int(struct mlx5_core_dev *dev, struct mlx5_eq *eq)
 			case MLX5_PORT_CHANGE_SUBTYPE_GUID:
 			case MLX5_PORT_CHANGE_SUBTYPE_CLIENT_REREG:
 			case MLX5_PORT_CHANGE_SUBTYPE_INITIALIZED:
-				dev->event(dev, port_subtype_event(eqe->sub_type), &port);
+				if (dev->event)
+					dev->event(dev, port_subtype_event(eqe->sub_type),
+						   (unsigned long)port);
 				break;
 			default:
 				mlx5_core_warn(dev, "Port event with unrecognized subtype: port %d, sub_type %d\n",
@@ -270,14 +273,16 @@ static int mlx5_eq_int(struct mlx5_core_dev *dev, struct mlx5_eq *eq)
 				u16 func_id = be16_to_cpu(eqe->data.req_pages.func_id);
 				s32 npages = be32_to_cpu(eqe->data.req_pages.num_pages);
 
-				mlx5_core_dbg(dev, "page request for func 0x%x, napges %d\n", func_id, npages);
+				mlx5_core_dbg(dev, "page request for func 0x%x, npages %d\n",
+					      func_id, npages);
 				mlx5_core_req_pages_handler(dev, func_id, npages);
 			}
 			break;
 
 
 		default:
-			mlx5_core_warn(dev, "Unhandled event 0x%x on EQ 0x%x\n", eqe->type, eq->eqn);
+			mlx5_core_warn(dev, "Unhandled event 0x%x on EQ 0x%x\n",
+				       eqe->type, eq->eqn);
 			break;
 		}
 
@@ -327,15 +332,15 @@ static void init_eq_buf(struct mlx5_eq *eq)
 int mlx5_create_map_eq(struct mlx5_core_dev *dev, struct mlx5_eq *eq, u8 vecidx,
 		       int nent, u64 mask, const char *name, struct mlx5_uar *uar)
 {
-	struct mlx5_eq_table *table = &dev->priv.eq_table;
+	struct mlx5_priv *priv = &dev->priv;
 	struct mlx5_create_eq_mbox_in *in;
 	struct mlx5_create_eq_mbox_out out;
 	int err;
 	int inlen;
 
 	eq->nent = roundup_pow_of_two(nent + MLX5_NUM_SPARE_EQE);
-	err = mlx5_buf_alloc(dev, eq->nent * MLX5_EQE_SIZE, 2 * PAGE_SIZE,
-			     &eq->buf);
+	eq->cons_index = 0;
+	err = mlx5_buf_alloc(dev, eq->nent * MLX5_EQE_SIZE, &eq->buf);
 	if (err)
 		return err;
 
@@ -366,17 +371,17 @@ int mlx5_create_map_eq(struct mlx5_core_dev *dev, struct mlx5_eq *eq, u8 vecidx,
 		goto err_in;
 	}
 
-	snprintf(eq->name, MLX5_MAX_EQ_NAME, "%s@pci:%s",
+	snprintf(priv->irq_info[vecidx].name, MLX5_MAX_IRQ_NAME, "%s@pci:%s",
 		 name, pci_name(dev->pdev));
-	eq->eqn = out.eq_number;
-	err = request_irq(table->msix_arr[vecidx].vector, mlx5_msix_handler, 0,
-			  eq->name, eq);
-	if (err)
-		goto err_eq;
 
-	eq->irqn = vecidx;
+	eq->eqn = out.eq_number;
+	eq->irqn = priv->msix_arr[vecidx].vector;
 	eq->dev = dev;
 	eq->doorbell = uar->map + MLX5_EQ_DOORBEL_OFFSET;
+	err = request_irq(eq->irqn, mlx5_msix_handler, 0,
+			  priv->irq_info[vecidx].name, eq);
+	if (err)
+		goto err_eq;
 
 	err = mlx5_debug_eq_add(dev, eq);
 	if (err)
@@ -386,17 +391,17 @@ int mlx5_create_map_eq(struct mlx5_core_dev *dev, struct mlx5_eq *eq, u8 vecidx,
 	 */
 	eq_update_ci(eq, 1);
 
-	mlx5_vfree(in);
+	kvfree(in);
 	return 0;
 
 err_irq:
-	free_irq(table->msix_arr[vecidx].vector, eq);
+	free_irq(priv->msix_arr[vecidx].vector, eq);
 
 err_eq:
 	mlx5_cmd_destroy_eq(dev, eq->eqn);
 
 err_in:
-	mlx5_vfree(in);
+	kvfree(in);
 
 err_buf:
 	mlx5_buf_free(dev, &eq->buf);
@@ -406,15 +411,15 @@ EXPORT_SYMBOL_GPL(mlx5_create_map_eq);
 
 int mlx5_destroy_unmap_eq(struct mlx5_core_dev *dev, struct mlx5_eq *eq)
 {
-	struct mlx5_eq_table *table = &dev->priv.eq_table;
 	int err;
 
 	mlx5_debug_eq_remove(dev, eq);
-	free_irq(table->msix_arr[eq->irqn].vector, eq);
+	free_irq(eq->irqn, eq);
 	err = mlx5_cmd_destroy_eq(dev, eq->eqn);
 	if (err)
 		mlx5_core_warn(dev, "failed to destroy a previously created eq: eqn %d\n",
 			       eq->eqn);
+	synchronize_irq(eq->irqn);
 	mlx5_buf_free(dev, &eq->buf);
 
 	return err;
@@ -463,7 +468,7 @@ int mlx5_start_eqs(struct mlx5_core_dev *dev)
 
 	err = mlx5_create_map_eq(dev, &table->pages_eq,
 				 MLX5_EQ_VEC_PAGES,
-				 dev->caps.max_vf + 1,
+				 /* TODO: sriov max_vf + */ 1,
 				 1 << MLX5_EVENT_TYPE_PAGE_REQUEST, "mlx5_pages_eq",
 				 &dev->priv.uuari.uars[0]);
 	if (err) {

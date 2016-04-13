@@ -574,4 +574,20 @@ unsigned int kstat_irqs(unsigned int irq)
 	return sum;
 }
 EXPORT_SYMBOL(kstat_irqs);
+
 #endif /* CONFIG_GENERIC_HARDIRQS */
+
+#ifdef CONFIG_SPARSE_IRQ
+unsigned int kstat_irqs_usr(unsigned int irq)
+{
+	int sum;
+	unsigned long flags;
+
+	spin_lock_irqsave(&sparse_irq_lock, flags);
+	sum = kstat_irqs(irq);
+	spin_unlock_irqrestore(&sparse_irq_lock, flags);
+
+	return sum;
+}
+EXPORT_SYMBOL(kstat_irqs_usr);
+#endif

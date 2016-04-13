@@ -95,16 +95,13 @@ struct port_info {
 	s16 xact_addr_filt;		/* index of our MAC address filter */
 	u16 rss_size;			/* size of VI's RSS table slice */
 	u8 pidx;			/* index into adapter port[] */
+	s8 mdio_addr;
+	u8 port_type;			/* firmware port type */
+	u8 mod_type;			/* firmware module type */
 	u8 port_id;			/* physical port ID */
-	u8 rx_offload;			/* CSO, etc. */
 	u8 nqsets;			/* # of "Queue Sets" */
 	u8 first_qset;			/* index of first "Queue Set" */
 	struct link_config link_cfg;	/* physical port configuration */
-};
-
-/* port_info.rx_offload flags */
-enum {
-	RX_CSO = 1 << 0,
 };
 
 /*
@@ -143,6 +140,8 @@ struct sge_fl {
 	struct rx_sw_desc *sdesc;	/* address of SW RX descriptor ring */
 	__be64 *desc;			/* address of HW RX descriptor ring */
 	dma_addr_t addr;		/* PCI bus address of hardware ring */
+	void __iomem *bar2_addr;	/* address of BAR2 Queue registers */
+	unsigned int bar2_qid;		/* Queue ID for BAR2 Queue registers */
 };
 
 /*
@@ -183,6 +182,8 @@ struct sge_rspq {
 	u16 abs_id;			/* SGE abs QID for the response Q */
 	__be64 *desc;			/* address of hardware response ring */
 	dma_addr_t phys_addr;		/* PCI bus address of ring */
+	void __iomem *bar2_addr;	/* address of BAR2 Queue registers */
+	unsigned int bar2_qid;		/* Queue ID for BAR2 Queue registers */
 	unsigned int iqe_len;		/* entry size */
 	unsigned int size;		/* capcity of response Q */
 	struct adapter *adapter;	/* our adapter */
@@ -245,6 +246,8 @@ struct sge_txq {
 	struct tx_sw_desc *sdesc;	/* address of SW TX descriptor ring */
 	struct sge_qstat *stat;		/* queue status entry */
 	dma_addr_t phys_addr;		/* PCI bus address of hardware ring */
+	void __iomem *bar2_addr;	/* address of BAR2 Queue registers */
+	unsigned int bar2_qid;		/* Queue ID for BAR2 Queue registers */
 };
 
 /*
@@ -350,6 +353,7 @@ struct sge {
 struct adapter {
 	/* PCI resources */
 	void __iomem *regs;
+	void __iomem *bar2;
 	struct pci_dev *pdev;
 	struct device *pdev_dev;
 
@@ -479,7 +483,6 @@ static inline void t4_os_set_hw_addr(struct adapter *adapter, int pidx,
 				     u8 hw_addr[])
 {
 	memcpy(adapter->port[pidx]->dev_addr, hw_addr, ETH_ALEN);
-	memcpy(adapter->port[pidx]->perm_addr, hw_addr, ETH_ALEN);
 }
 
 /**
@@ -521,6 +524,7 @@ static inline struct adapter *netdev2adap(const struct net_device *dev)
  * is "contracted" to provide for the common code.
  */
 void t4vf_os_link_changed(struct adapter *, int, int);
+void t4vf_os_portmod_changed(struct adapter *, int);
 
 /*
  * SGE function prototype declarations.

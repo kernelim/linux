@@ -16,6 +16,7 @@
 #  define CONFIG_INTEL_IOMMU 1
 #endif
 
+#include <linux/vmalloc.h>
 #include <linux/console.h>
 
 #include <linux/pci.h>
@@ -206,18 +207,6 @@ do {									\
 						    lock, __ret, );	\
 	__ret;								\
 })
-
-/**
- * reinit_completion - reinitialize a completion structure
- * @x:  pointer to completion structure that is to be reinitialized
- *
- * This inline function should be used to reinitialize a completion structure so it can
- * be reused. This is especially important after complete_all() is used.
- */
-static inline void reinit_completion(struct completion *x)
-{
-	x->done = 0;
-}
 
 /**
  * list_last_entry - get the last element from a list
@@ -419,6 +408,23 @@ static inline unsigned long get_num_physpages(void)
 char *simple_dname(struct dentry *dentry, char *buffer, int buflen);
 struct inode *alloc_anon_inode(struct super_block *mnt_sb);
 
+/* TODO backport! */
+
+//#define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
+#define BUILD_BUG_ON_MSG(cond, msg)
+#define BUILD_BUG()
+
+static inline void __iomem *pci_platform_rom(struct pci_dev *pdev, size_t *size)
+{
+	return NULL;
+}
+
+#define module_param_unsafe(name, type, perm) module_param(name, type, perm)
+
+#define DIV_ROUND_CLOSEST_ULL(ll, d)    \
+ ({ unsigned long long _tmp = (ll)+(d)/2; do_div(_tmp, d); _tmp; })
+
+#define atomic_or(mask, v) atomic_set_mask(mask, v)
 
 int __init drm_backport_init(void);
 void __exit drm_backport_exit(void);

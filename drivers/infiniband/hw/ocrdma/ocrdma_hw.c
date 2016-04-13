@@ -656,18 +656,42 @@ static void ocrdma_dispatch_ibevent(struct ocrdma_dev *dev,
 {
 	struct ocrdma_qp *qp = NULL;
 	struct ocrdma_cq *cq = NULL;
-	struct ib_event ib_evt = { 0 };
+	struct ib_event ib_evt;
 	int cq_event = 0;
 	int qp_event = 1;
 	int srq_event = 0;
 	int dev_event = 0;
 	int type = (cqe->valid_ae_event & OCRDMA_AE_MCQE_EVENT_TYPE_MASK) >>
 	    OCRDMA_AE_MCQE_EVENT_TYPE_SHIFT;
+	u16 qpid = cqe->qpvalid_qpid & OCRDMA_AE_MCQE_QPID_MASK;
+	u16 cqid = cqe->cqvalid_cqid & OCRDMA_AE_MCQE_CQID_MASK;
 
-	if (cqe->qpvalid_qpid & OCRDMA_AE_MCQE_QPVALID)
-		qp = dev->qp_tbl[cqe->qpvalid_qpid & OCRDMA_AE_MCQE_QPID_MASK];
-	if (cqe->cqvalid_cqid & OCRDMA_AE_MCQE_CQVALID)
-		cq = dev->cq_tbl[cqe->cqvalid_cqid & OCRDMA_AE_MCQE_CQID_MASK];
+	/*
+	 * Some FW version returns wrong qp or cq ids in CQEs.
+	 * Checking whether the IDs are valid
+	 */
+
+	if (cqe->qpvalid_qpid & OCRDMA_AE_MCQE_QPVALID) {
+		if (qpid < dev->attr.max_qp)
+			qp = dev->qp_tbl[qpid];
+		if (qp == NULL) {
+			pr_err("ocrdma%d:Async event - qpid %u is not valid\n",
+			       dev->id, qpid);
+			return;
+		}
+	}
+
+	if (cqe->cqvalid_cqid & OCRDMA_AE_MCQE_CQVALID) {
+		if (cqid < dev->attr.max_cq)
+			cq = dev->cq_tbl[cqid];
+		if (cq == NULL) {
+			pr_err("ocrdma%d:Async event - cqid %u is not valid\n",
+			       dev->id, cqid);
+			return;
+		}
+	}
+
+	memset(&ib_evt, 0, sizeof(ib_evt));
 
 	ib_evt.device = &dev->ibdev;
 
@@ -931,12 +955,18 @@ static irqreturn_t ocrdma_irq_handler(int irq, void *handle)
 	struct ocrdma_eqe eqe;
 	struct ocrdma_eqe *ptr;
 	u16 cq_id;
+	u8 mcode;
 	int budget = eq->cq_cnt;
 
 	do {
 		ptr = ocrdma_get_eqe(eq);
 		eqe = *ptr;
 		ocrdma_le32_to_cpu(&eqe, sizeof(eqe));
+		mcode = (eqe.id_valid & OCRDMA_EQE_MAJOR_CODE_MASK)
+				>> OCRDMA_EQE_MAJOR_CODE_SHIFT;
+		if (mcode == OCRDMA_MAJOR_CODE_SENTINAL)
+			pr_err("EQ full on eqid = 0x%x, eqe = 0x%x\n",
+			       eq->q.id, eqe.id_valid);
 		if ((eqe.id_valid & OCRDMA_EQE_VALID_MASK) == 0)
 			break;
 
@@ -1432,27 +1462,30 @@ static int ocrdma_mbx_alloc_pd_range(struct ocrdma_dev *dev)
 	struct ocrdma_alloc_pd_range_rsp *rsp;
 
 	/* Pre allocate the DPP PDs */
-	cmd = ocrdma_init_emb_mqe(OCRDMA_CMD_ALLOC_PD_RANGE, sizeof(*cmd));
-	if (!cmd)
-		return -ENOMEM;
-	cmd->pd_count = dev->attr.max_dpp_pds;
-	cmd->enable_dpp_rsvd |= OCRDMA_ALLOC_PD_ENABLE_DPP;
-	status = ocrdma_mbx_cmd(dev, (struct ocrdma_mqe *)cmd);
-	if (status)
-		goto mbx_err;
-	rsp = (struct ocrdma_alloc_pd_range_rsp *)cmd;
+	if (dev->attr.max_dpp_pds) {
+		cmd = ocrdma_init_emb_mqe(OCRDMA_CMD_ALLOC_PD_RANGE,
+					  sizeof(*cmd));
+		if (!cmd)
+			return -ENOMEM;
+		cmd->pd_count = dev->attr.max_dpp_pds;
+		cmd->enable_dpp_rsvd |= OCRDMA_ALLOC_PD_ENABLE_DPP;
+		status = ocrdma_mbx_cmd(dev, (struct ocrdma_mqe *)cmd);
+		rsp = (struct ocrdma_alloc_pd_range_rsp *)cmd;
 
-	if ((rsp->dpp_page_pdid & OCRDMA_ALLOC_PD_RSP_DPP) && rsp->pd_count) {
-		dev->pd_mgr->dpp_page_index = rsp->dpp_page_pdid >>
-				OCRDMA_ALLOC_PD_RSP_DPP_PAGE_SHIFT;
-		dev->pd_mgr->pd_dpp_start = rsp->dpp_page_pdid &
-				OCRDMA_ALLOC_PD_RNG_RSP_START_PDID_MASK;
-		dev->pd_mgr->max_dpp_pd = rsp->pd_count;
-		pd_bitmap_size = BITS_TO_LONGS(rsp->pd_count) * sizeof(long);
-		dev->pd_mgr->pd_dpp_bitmap = kzalloc(pd_bitmap_size,
-						     GFP_KERNEL);
+		if (!status && (rsp->dpp_page_pdid & OCRDMA_ALLOC_PD_RSP_DPP) &&
+		    rsp->pd_count) {
+			dev->pd_mgr->dpp_page_index = rsp->dpp_page_pdid >>
+					OCRDMA_ALLOC_PD_RSP_DPP_PAGE_SHIFT;
+			dev->pd_mgr->pd_dpp_start = rsp->dpp_page_pdid &
+					OCRDMA_ALLOC_PD_RNG_RSP_START_PDID_MASK;
+			dev->pd_mgr->max_dpp_pd = rsp->pd_count;
+			pd_bitmap_size =
+				BITS_TO_LONGS(rsp->pd_count) * sizeof(long);
+			dev->pd_mgr->pd_dpp_bitmap = kzalloc(pd_bitmap_size,
+							     GFP_KERNEL);
+		}
+		kfree(cmd);
 	}
-	kfree(cmd);
 
 	cmd = ocrdma_init_emb_mqe(OCRDMA_CMD_ALLOC_PD_RANGE, sizeof(*cmd));
 	if (!cmd)
@@ -1460,10 +1493,8 @@ static int ocrdma_mbx_alloc_pd_range(struct ocrdma_dev *dev)
 
 	cmd->pd_count = dev->attr.max_pd - dev->attr.max_dpp_pds;
 	status = ocrdma_mbx_cmd(dev, (struct ocrdma_mqe *)cmd);
-	if (status)
-		goto mbx_err;
 	rsp = (struct ocrdma_alloc_pd_range_rsp *)cmd;
-	if (rsp->pd_count) {
+	if (!status && rsp->pd_count) {
 		dev->pd_mgr->pd_norm_start = rsp->dpp_page_pdid &
 					OCRDMA_ALLOC_PD_RNG_RSP_START_PDID_MASK;
 		dev->pd_mgr->max_normal_pd = rsp->pd_count;
@@ -1471,15 +1502,13 @@ static int ocrdma_mbx_alloc_pd_range(struct ocrdma_dev *dev)
 		dev->pd_mgr->pd_norm_bitmap = kzalloc(pd_bitmap_size,
 						      GFP_KERNEL);
 	}
+	kfree(cmd);
 
 	if (dev->pd_mgr->pd_norm_bitmap || dev->pd_mgr->pd_dpp_bitmap) {
 		/* Enable PD resource manager */
 		dev->pd_mgr->pd_prealloc_valid = true;
-	} else {
-		return -ENOMEM;
+		return 0;
 	}
-mbx_err:
-	kfree(cmd);
 	return status;
 }
 
@@ -1659,6 +1688,7 @@ static void ocrdma_mbx_delete_ah_tbl(struct ocrdma_dev *dev)
 	ocrdma_mbx_cmd(dev, (struct ocrdma_mqe *)cmd);
 	dma_free_coherent(&pdev->dev, dev->av_tbl.size, dev->av_tbl.va,
 			  dev->av_tbl.pa);
+	dev->av_tbl.va = NULL;
 	dma_free_coherent(&pdev->dev, PAGE_SIZE, dev->av_tbl.pbl.va,
 			  dev->av_tbl.pbl.pa);
 	kfree(cmd);
@@ -2403,7 +2433,7 @@ int ocrdma_mbx_query_qp(struct ocrdma_dev *dev, struct ocrdma_qp *qp,
 	struct ocrdma_query_qp *cmd;
 	struct ocrdma_query_qp_rsp *rsp;
 
-	cmd = ocrdma_init_emb_mqe(OCRDMA_CMD_QUERY_QP, sizeof(*cmd));
+	cmd = ocrdma_init_emb_mqe(OCRDMA_CMD_QUERY_QP, sizeof(*rsp));
 	if (!cmd)
 		return status;
 	cmd->qp_id = qp->id;
@@ -2425,7 +2455,7 @@ static int ocrdma_set_av_params(struct ocrdma_qp *qp,
 	int status;
 	struct ib_ah_attr *ah_attr = &attrs->ah_attr;
 	union ib_gid sgid, zgid;
-	u32 vlan_id;
+	u32 vlan_id = 0xFFFF;
 	u8 mac_addr[6];
 	struct ocrdma_dev *dev = get_ocrdma_dev(qp->ibqp.device);
 
@@ -2465,12 +2495,22 @@ static int ocrdma_set_av_params(struct ocrdma_qp *qp,
 	cmd->params.vlan_dmac_b4_to_b5 = mac_addr[4] | (mac_addr[5] << 8);
 	if (attr_mask & IB_QP_VID) {
 		vlan_id = attrs->vlan_id;
+	} else if (dev->pfc_state) {
+		vlan_id = 0;
+		pr_err("ocrdma%d:Using VLAN with PFC is recommended\n",
+			dev->id);
+		pr_err("ocrdma%d:Using VLAN 0 for this connection\n",
+			dev->id);
+	}
+
+	if (vlan_id < 0x1000) {
 		cmd->params.vlan_dmac_b4_to_b5 |=
 		    vlan_id << OCRDMA_QP_PARAMS_VLAN_SHIFT;
 		cmd->flags |= OCRDMA_QP_PARA_VLAN_EN_VALID;
 		cmd->params.rnt_rc_sl_fl |=
 			(dev->sl & 0x07) << OCRDMA_QP_PARAMS_SL_SHIFT;
 	}
+
 	return 0;
 }
 
@@ -2516,8 +2556,10 @@ static int ocrdma_set_qp_params(struct ocrdma_qp *qp,
 		cmd->flags |= OCRDMA_QP_PARA_DST_QPN_VALID;
 	}
 	if (attr_mask & IB_QP_PATH_MTU) {
-		if (attrs->path_mtu < IB_MTU_256 ||
+		if (attrs->path_mtu < IB_MTU_512 ||
 		    attrs->path_mtu > IB_MTU_4096) {
+			pr_err("ocrdma%d: IB MTU %d is not supported\n",
+			       dev->id, ib_mtu_enum_to_int(attrs->path_mtu));
 			status = -EINVAL;
 			goto pmtu_err;
 		}
@@ -3121,13 +3163,15 @@ int ocrdma_init_hw(struct ocrdma_dev *dev)
 		goto conf_err;
 	status = ocrdma_mbx_get_phy_info(dev);
 	if (status)
-		goto conf_err;
+		goto info_attrb_err;
 	status = ocrdma_mbx_get_ctrl_attribs(dev);
 	if (status)
-		goto conf_err;
+		goto info_attrb_err;
 
 	return 0;
 
+info_attrb_err:
+	ocrdma_mbx_delete_ah_tbl(dev);
 conf_err:
 	ocrdma_destroy_mq(dev);
 mq_err:
@@ -3142,9 +3186,9 @@ void ocrdma_cleanup_hw(struct ocrdma_dev *dev)
 	ocrdma_free_pd_pool(dev);
 	ocrdma_mbx_delete_ah_tbl(dev);
 
-	/* cleanup the eqs */
-	ocrdma_destroy_eqs(dev);
-
 	/* cleanup the control path */
 	ocrdma_destroy_mq(dev);
+
+	/* cleanup the eqs */
+	ocrdma_destroy_eqs(dev);
 }

@@ -87,11 +87,14 @@ static int query_hypervisor_info(void)
  */
 static u64 do_hypercall(u64 control, void *input, void *output)
 {
-#ifdef CONFIG_X86_64
-	u64 hv_status = 0;
 	u64 input_address = (input) ? virt_to_phys(input) : 0;
 	u64 output_address = (output) ? virt_to_phys(output) : 0;
 	void *hypercall_page = hv_context.hypercall_page;
+#ifdef CONFIG_X86_64
+	u64 hv_status = 0;
+
+	if (!hypercall_page)
+		return (u64)ULLONG_MAX;
 
 	__asm__ __volatile__("mov %0, %%r8" : : "r" (output_address) : "r8");
 	__asm__ __volatile__("call *%3" : "=a" (hv_status) :
@@ -106,13 +109,13 @@ static u64 do_hypercall(u64 control, void *input, void *output)
 	u32 control_lo = control & 0xFFFFFFFF;
 	u32 hv_status_hi = 1;
 	u32 hv_status_lo = 1;
-	u64 input_address = (input) ? virt_to_phys(input) : 0;
 	u32 input_address_hi = input_address >> 32;
 	u32 input_address_lo = input_address & 0xFFFFFFFF;
-	u64 output_address = (output) ? virt_to_phys(output) : 0;
 	u32 output_address_hi = output_address >> 32;
 	u32 output_address_lo = output_address & 0xFFFFFFFF;
-	void *hypercall_page = hv_context.hypercall_page;
+
+	if (!hypercall_page)
+		return (u64)ULLONG_MAX;
 
 	__asm__ __volatile__ ("call *%8" : "=d"(hv_status_hi),
 			      "=a"(hv_status_lo) : "d" (control_hi),
@@ -304,7 +307,7 @@ err:
 	return -ENOMEM;
 }
 
-void hv_synic_free_cpu(int cpu)
+static void hv_synic_free_cpu(int cpu)
 {
 	kfree(hv_context.event_dpc[cpu]);
 	if (hv_context.synic_event_page[cpu])
@@ -402,7 +405,6 @@ void hv_synic_cleanup(void *arg)
 	union hv_synic_simp simp;
 	union hv_synic_siefp siefp;
 	union hv_synic_scontrol sctrl;
-	int cpu = smp_processor_id();
 
 	if (!hv_context.synic_initialized)
 		return;
@@ -431,6 +433,4 @@ void hv_synic_cleanup(void *arg)
 	rdmsrl(HV_X64_MSR_SCONTROL, sctrl.as_uint64);
 	sctrl.enable = 0;
 	wrmsrl(HV_X64_MSR_SCONTROL, sctrl.as_uint64);
-
-	hv_synic_free_cpu(cpu);
 }

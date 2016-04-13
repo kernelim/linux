@@ -78,6 +78,8 @@ enum {
 	Opt_quota_quantum,
 	Opt_barrier,
 	Opt_nobarrier,
+	Opt_loccookie,
+	Opt_noloccookie,
 	Opt_error,
 };
 
@@ -114,6 +116,8 @@ static const match_table_t tokens = {
 	{Opt_quota_quantum, "quota_quantum=%d"},
 	{Opt_barrier, "barrier"},
 	{Opt_nobarrier, "nobarrier"},
+	{Opt_loccookie, "loccookie"},
+	{Opt_noloccookie, "noloccookie"},
 	{Opt_error, NULL}
 };
 
@@ -265,6 +269,12 @@ int gfs2_mount_args(struct gfs2_args *args, char *options)
 			break;
 		case Opt_nobarrier:
 			args->ar_nobarrier = 1;
+			break;
+		case Opt_loccookie:
+			args->ar_loccookie = 1;
+			break;
+		case Opt_noloccookie:
+			args->ar_loccookie = 0;
 			break;
 		case Opt_error:
 		default:
@@ -1264,7 +1274,7 @@ static void gfs2_clear_inode(struct inode *inode)
 		return;
 
 	gfs2_dir_hash_inval(ip);
-	gfs2_rs_delete(ip);
+	gfs2_rsqa_delete(ip, NULL);
 	gfs2_ordered_del_inode(ip);
 	ip->i_gl->gl_object = NULL;
 	flush_delayed_work(&ip->i_gl->gl_work);
@@ -1392,6 +1402,8 @@ static int gfs2_show_options(struct seq_file *s, struct vfsmount *mnt)
 		seq_printf(s, ",nobarrier");
 	if (test_bit(SDF_DEMOTE, &sdp->sd_flags))
 		seq_printf(s, ",demote_interface_used");
+	if (args->ar_loccookie)
+		seq_puts(s, ",loccookie");
 	return 0;
 }
 
@@ -1583,8 +1595,8 @@ out_truncate:
 
 out_unlock:
 	/* Error path for case 1 */
-	if (gfs2_rs_active(ip->i_res))
-		gfs2_rs_deltree(ip->i_res);
+	if (gfs2_rs_active(&ip->i_res))
+		gfs2_rs_deltree(&ip->i_res);
 
 	if (test_bit(HIF_HOLDER, &ip->i_iopen_gh.gh_iflags)) {
 		ip->i_iopen_gh.gh_flags |= GL_NOCACHE;
@@ -1597,7 +1609,7 @@ out_unlock:
 out:
 	/* Case 3 starts here */
 	truncate_inode_pages(&inode->i_data, 0);
-	gfs2_rs_delete(ip);
+	gfs2_rsqa_delete(ip, NULL);
 	gfs2_ordered_del_inode(ip);
 	clear_inode(inode);
 }
@@ -1611,7 +1623,8 @@ static struct inode *gfs2_alloc_inode(struct super_block *sb)
 		ip->i_flags = 0;
 		ip->i_gl = NULL;
 		ip->i_rgd = NULL;
-		ip->i_res = NULL;
+		memset(&ip->i_res, 0, sizeof(ip->i_res));
+		RB_CLEAR_NODE(&ip->i_res.rs_node);
 	}
 	return &ip->i_inode;
 }

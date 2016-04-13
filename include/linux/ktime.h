@@ -108,6 +108,12 @@ static inline ktime_t timespec_to_ktime(struct timespec ts)
 	return ktime_set(ts.tv_sec, ts.tv_nsec);
 }
 
+/* convert a timespec64 to ktime_t format: */
+static inline ktime_t timespec64_to_ktime(struct timespec64 ts)
+{
+	return ktime_set(ts.tv_sec, ts.tv_nsec);
+}
+
 /* convert a timeval to ktime_t format: */
 static inline ktime_t timeval_to_ktime(struct timeval tv)
 {
@@ -116,6 +122,9 @@ static inline ktime_t timeval_to_ktime(struct timeval tv)
 
 /* Map the ktime_t to timespec conversion to ns_to_timespec function */
 #define ktime_to_timespec(kt)		ns_to_timespec((kt).tv64)
+
+/* Map the ktime_t to timespec conversion to ns_to_timespec function */
+#define ktime_to_timespec64(kt)		ns_to_timespec64((kt).tv64)
 
 /* Map the ktime_t to timeval conversion to ns_to_timeval function */
 #define ktime_to_timeval(kt)		ns_to_timeval((kt).tv64)
@@ -220,6 +229,12 @@ static inline ktime_t timespec_to_ktime(const struct timespec ts)
 			   	   .nsec = (s32)ts.tv_nsec } };
 }
 
+/* convert a timespec64 to ktime_t format: */
+static inline ktime_t timespec64_to_ktime(struct timespec64 ts)
+{
+	return ktime_set(ts.tv_sec, ts.tv_nsec);
+}
+
 /**
  * timeval_to_ktime - convert a timeval to ktime_t format
  * @tv:		the timeval variable to convert
@@ -243,6 +258,9 @@ static inline struct timespec ktime_to_timespec(const ktime_t kt)
 	return (struct timespec) { .tv_sec = (time_t) kt.tv.sec,
 				   .tv_nsec = (long) kt.tv.nsec };
 }
+
+/* Map the ktime_t to timespec conversion to ns_to_timespec function */
+#define ktime_to_timespec64(kt)		ns_to_timespec64((kt).tv64)
 
 /**
  * ktime_to_timeval - convert a ktime_t variable to timeval format
@@ -342,6 +360,11 @@ static inline s64 ktime_us_delta(const ktime_t later, const ktime_t earlier)
        return ktime_to_us(ktime_sub(later, earlier));
 }
 
+static inline s64 ktime_ms_delta(const ktime_t later, const ktime_t earlier)
+{
+	return ktime_to_ms(ktime_sub(later, earlier));
+}
+
 static inline ktime_t ktime_add_us(const ktime_t kt, const u64 usec)
 {
 	return ktime_add_ns(kt, usec * 1000);
@@ -358,6 +381,25 @@ static inline ktime_t ktime_sub_us(const ktime_t kt, const u64 usec)
 }
 
 extern ktime_t ktime_add_safe(const ktime_t lhs, const ktime_t rhs);
+
+/**
+ * ktime_to_timespec64_cond - convert a ktime_t variable to timespec64
+ *			    format only if the variable contains data
+ * @kt:		the ktime_t variable to convert
+ * @ts:		the timespec variable to store the result in
+ *
+ * Return: %true if there was a successful conversion, %false if kt was 0.
+ */
+static inline __must_check bool ktime_to_timespec64_cond(const ktime_t kt,
+						       struct timespec64 *ts)
+{
+	if (kt.tv64) {
+		*ts = ktime_to_timespec64(kt);
+		return true;
+	} else {
+		return false;
+	}
+}
 
 /*
  * The resolution of the clocks. The resolution value is returned in

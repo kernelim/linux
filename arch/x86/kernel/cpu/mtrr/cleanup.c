@@ -516,10 +516,11 @@ struct mtrr_cleanup_result {
 
 /*
  * gran_size: 64K, 128K, 256K, 512K, 1M, 2M, ..., 2G
- * chunk size: gran_size, ..., 2G
- * so we need (1+16)*8
+ * chunk size: gran_size, ..., 2G, ..., 1<<address_bits
+ *   (for 32 address bits, we need 136)
+ *   (for 40 address bits, we need 264)
  */
-#define NUM_RESULT	136
+#define NUM_RESULT	264
 #define PSHIFT		(PAGE_SHIFT - 10)
 
 static struct mtrr_cleanup_result __initdata result[NUM_RESULT];
@@ -750,7 +751,7 @@ int __init mtrr_cleanup(unsigned address_bits)
 	memset(result, 0, sizeof(result));
 	for (gran_size = (1ULL<<16); gran_size < (1ULL<<32); gran_size <<= 1) {
 
-		for (chunk_size = gran_size; chunk_size < (1ULL<<32);
+		for (chunk_size = gran_size; chunk_size < (1ULL<<address_bits);
 		     chunk_size <<= 1) {
 
 			if (i >= NUM_RESULT)

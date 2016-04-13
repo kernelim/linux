@@ -732,7 +732,7 @@ static int efx_ethtool_set_pauseparam(struct net_device *net_dev,
 	/* Reconfigure the MAC. The PHY *may* generate a link state change event
 	 * if the user just changed the advertised capabilities, but there's no
 	 * harm doing this twice */
-	efx->type->reconfigure_mac(efx);
+	efx_mac_reconfigure(efx);
 
 out:
 	mutex_unlock(&efx->mac_lock);
@@ -778,7 +778,7 @@ int efx_ethtool_reset(struct net_device *net_dev, u32 *flags)
 }
 
 /* MAC address mask including only I/G bit */
-static const u8 mac_addr_ig_mask[ETH_ALEN] = { 0x01, 0, 0, 0, 0, 0 };
+static const u8 mac_addr_ig_mask[ETH_ALEN] __aligned(2) = {0x01, 0, 0, 0, 0, 0};
 
 #define IP4_ADDR_FULL_MASK	((__force __be32)~0)
 #define PORT_FULL_MASK		((__force __be16)~0)
@@ -838,16 +838,16 @@ static int efx_ethtool_get_class_rule(struct efx_nic *efx,
 		rule->flow_type = ETHER_FLOW;
 		if (spec.match_flags &
 		    (EFX_FILTER_MATCH_LOC_MAC | EFX_FILTER_MATCH_LOC_MAC_IG)) {
-			memcpy(mac_entry->h_dest, spec.loc_mac, ETH_ALEN);
+			ether_addr_copy(mac_entry->h_dest, spec.loc_mac);
 			if (spec.match_flags & EFX_FILTER_MATCH_LOC_MAC)
-				memset(mac_mask->h_dest, ~0, ETH_ALEN);
+				eth_broadcast_addr(mac_mask->h_dest);
 			else
-				memcpy(mac_mask->h_dest, mac_addr_ig_mask,
-				       ETH_ALEN);
+				ether_addr_copy(mac_mask->h_dest,
+						mac_addr_ig_mask);
 		}
 		if (spec.match_flags & EFX_FILTER_MATCH_REM_MAC) {
-			memcpy(mac_entry->h_source, spec.rem_mac, ETH_ALEN);
-			memset(mac_mask->h_source, ~0, ETH_ALEN);
+			ether_addr_copy(mac_entry->h_source, spec.rem_mac);
+			eth_broadcast_addr(mac_mask->h_source);
 		}
 		if (spec.match_flags & EFX_FILTER_MATCH_ETHER_TYPE) {
 			mac_entry->h_proto = spec.ether_type;
@@ -1020,13 +1020,13 @@ static int efx_ethtool_set_class_rule(struct efx_nic *efx,
 				spec.match_flags |= EFX_FILTER_MATCH_LOC_MAC;
 			else
 				return -EINVAL;
-			memcpy(spec.loc_mac, mac_entry->h_dest, ETH_ALEN);
+			ether_addr_copy(spec.loc_mac, mac_entry->h_dest);
 		}
 		if (!is_zero_ether_addr(mac_mask->h_source)) {
 			if (!is_broadcast_ether_addr(mac_mask->h_source))
 				return -EINVAL;
 			spec.match_flags |= EFX_FILTER_MATCH_REM_MAC;
-			memcpy(spec.rem_mac, mac_entry->h_source, ETH_ALEN);
+			ether_addr_copy(spec.rem_mac, mac_entry->h_source);
 		}
 		if (mac_mask->h_proto) {
 			if (mac_mask->h_proto != ETHER_TYPE_FULL_MASK)
@@ -1079,28 +1079,36 @@ static int efx_ethtool_set_rxnfc(struct net_device *net_dev,
 static u32 efx_ethtool_get_rxfh_indir_size(struct net_device *net_dev)
 {
 	struct efx_nic *efx = netdev_priv(net_dev);
-	
+
 	return ((efx_nic_rev(efx) < EFX_REV_FALCON_B0 ||
 		efx->n_rx_channels == 1) ?
 	               0 : ARRAY_SIZE(efx->rx_indir_table));
 }
 
-static int efx_ethtool_get_rxfh_indir(struct net_device *net_dev, u32 *indir)
+static int efx_ethtool_get_rxfh(struct net_device *net_dev, u32 *indir, u8 *key,
+				u8 *hfunc)
 {
 	struct efx_nic *efx = netdev_priv(net_dev);
-	
-	memcpy(indir, efx->rx_indir_table, sizeof(efx->rx_indir_table));
+	if (hfunc)
+		*hfunc = ETH_RSS_HASH_TOP;
+	if (indir)
+		memcpy(indir, efx->rx_indir_table, sizeof(efx->rx_indir_table));
 	return 0;
 }
 
-static int efx_ethtool_set_rxfh_indir(struct net_device *net_dev,
-				      const u32 *indir)
+static int efx_ethtool_set_rxfh(struct net_device *net_dev, const u32 *indir,
+				const u8 *key, const u8 hfunc)
 {
 	struct efx_nic *efx = netdev_priv(net_dev);
-	
-	memcpy(efx->rx_indir_table, indir, sizeof(efx->rx_indir_table));
-	efx->type->rx_push_rss_config(efx);
-	return 0;
+
+	/* We do not allow change in unsupported parameters */
+	if (key ||
+	    (hfunc != ETH_RSS_HASH_NO_CHANGE && hfunc != ETH_RSS_HASH_TOP))
+		return -EOPNOTSUPP;
+	if (!indir)
+		return 0;
+
+	return efx->type->rx_push_rss_config(efx, true, indir);
 }
 
 static int efx_ethtool_get_ts_info(struct net_device *net_dev,
@@ -1180,8 +1188,8 @@ const struct ethtool_ops_ext efx_ethtool_ops_ext = {
 	.size			= sizeof(struct ethtool_ops_ext),
 	
 	.get_rxfh_indir_size	= efx_ethtool_get_rxfh_indir_size,
-	.get_rxfh_indir		= efx_ethtool_get_rxfh_indir,
-	.set_rxfh_indir		= efx_ethtool_set_rxfh_indir,
+	.get_rxfh		= efx_ethtool_get_rxfh,
+	.set_rxfh		= efx_ethtool_set_rxfh,
 	.get_ts_info		= efx_ethtool_get_ts_info,
 	.get_module_info	= efx_ethtool_get_module_info,
 	.get_module_eeprom	= efx_ethtool_get_module_eeprom,

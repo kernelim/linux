@@ -911,10 +911,10 @@ struct sctp_transport {
 		pmtu_pending:1,
 
 		/* Is this structure kfree()able? */
-		malloced:1;
+		malloced:1,
 
-	/* Has this transport moved the ctsn since we last sacked */
-	__u32 sack_generation;
+		/* Has this transport moved the ctsn since we last sacked */
+		sack_generation:1;
 
 	/* This is the peer's IP address and port. */
 	union sctp_addr ipaddr;
@@ -1615,19 +1615,20 @@ struct sctp_association {
 		 */
 		struct sctp_tsnmap tsn_map;
 
-		/* Ack State   : This flag indicates if the next received
+		/* sack_needed : This flag indicates if the next received
 		 *             : packet is to be responded to with a
-		 *             : SACK. This is initializedto 0.  When a packet
-		 *             : is received it is incremented. If this value
+		 *             : SACK. This is initialized to 0.  When a packet
+		 *             : is received sack_cnt is incremented. If this value
 		 *             : reaches 2 or more, a SACK is sent and the
 		 *             : value is reset to 0. Note: This is used only
 		 *             : when no DATA chunks are received out of
 		 *             : order.  When DATA chunks are out of order,
 		 *             : SACK's are not delayed (see Section 6).
 		 */
-		__u8    sack_needed;     /* Do we need to sack the peer? */
+		__u8    sack_needed:1,     /* Do we need to sack the peer? */
+			sack_generation:1,
+			zero_window_announced:1;
 		__u32	sack_cnt;
-		__u32	sack_generation;
 
 		/* These are capabilities which our peer advertised.  */
 		__u8	ecn_capable:1,	    /* Can peer do ECN? */

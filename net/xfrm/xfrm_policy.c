@@ -1761,6 +1761,13 @@ int __xfrm_lookup(struct net *net, struct dst_entry **dst_p, struct flowi *fl,
 	u8 dir = policy_to_flow_dir(XFRM_POLICY_OUT);
 	int i, err, num_pols, num_xfrms, drop_pols = 0;
 
+	/* __xfrm{4,6}_selector_match() depend on this being
+	 * correctly set to allow for policy matching based
+	 * on outgoing interface, so populate it with what
+	 * the routing decision came up with. */
+	if (!fl->oif)
+		fl->oif = dst_orig->dev->ifindex;
+
 restart:
 	dst = NULL;
 	xdst = NULL;
@@ -2396,6 +2403,11 @@ int xfrm_bundle_ok(struct xfrm_policy *pol, struct xfrm_dst *first,
 
 EXPORT_SYMBOL(xfrm_bundle_ok);
 
+static unsigned int xfrm_default_advmss(const struct dst_entry *dst)
+{
+	return dst_metric_advmss(dst->path);
+}
+
 int xfrm_policy_register_afinfo(struct xfrm_policy_afinfo *afinfo)
 {
 	struct net *net;
@@ -2440,6 +2452,7 @@ int xfrm_policy_register_afinfo(struct xfrm_policy_afinfo *afinfo)
 			BUG();
 		}
 		*xfrm_dst_ops = *afinfo->dst_ops;
+		dst_ops_extend_register(xfrm_dst_ops, xfrm_default_advmss);
 	}
 	rtnl_unlock();
 
@@ -2468,6 +2481,7 @@ int xfrm_policy_unregister_afinfo(struct xfrm_policy_afinfo *afinfo)
 
 		synchronize_rcu();
 
+		dst_ops_extend_unregister(dst_ops);
 		dst_ops->kmem_cachep = NULL;
 		dst_ops->check = NULL;
 		dst_ops->negative_advice = NULL;
@@ -2484,12 +2498,16 @@ static void __net_init xfrm_dst_ops_init(struct net *net)
 
 	rcu_read_lock();
 	afinfo = rcu_dereference(xfrm_policy_afinfo[AF_INET]);
-	if (afinfo)
+	if (afinfo) {
 		net->xfrm4_dst_ops = *afinfo->dst_ops;
+		dst_ops_extend_register(&net->xfrm4_dst_ops, xfrm_default_advmss);
+	}
 #if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
 	afinfo = rcu_dereference(xfrm_policy_afinfo[AF_INET6]);
-	if (afinfo)
+	if (afinfo) {
 		net->xfrm6_dst_ops = *afinfo->dst_ops;
+		dst_ops_extend_register(&net->xfrm6_dst_ops, xfrm_default_advmss);
+	}
 #endif
 	rcu_read_unlock();
 }

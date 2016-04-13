@@ -1,5 +1,4 @@
 #include <linux/kernel.h>
-#include <linux/init.h>
 #include <linux/types.h>
 #include <linux/module.h>
 #include <linux/list.h>
@@ -417,13 +416,6 @@ static void ql_get_drvinfo(struct net_device *ndev,
 		 (qdev->fw_rev_id & 0x0000ff00) >> 8,
 		 (qdev->fw_rev_id & 0x000000ff));
 	strncpy(drvinfo->bus_info, pci_name(qdev->pdev), 32);
-	drvinfo->n_stats = 0;
-	drvinfo->testinfo_len = 0;
-	if (!test_bit(QL_FRC_COREDUMP, &qdev->flags))
-		drvinfo->regdump_len = sizeof(struct ql_mpi_coredump);
-	else
-		drvinfo->regdump_len = sizeof(struct ql_reg_dump);
-	drvinfo->eedump_len = 0;
 }
 
 static void ql_get_wol(struct net_device *ndev, struct ethtool_wolinfo *wol)

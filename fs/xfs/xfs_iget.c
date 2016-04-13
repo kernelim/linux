@@ -193,7 +193,7 @@ xfs_iget_cache_hit(
 	spin_lock(&ip->i_flags_lock);
 	if (ip->i_ino != ino) {
 		trace_xfs_iget_skip(ip);
-		XFS_STATS_INC(xs_ig_frecycle);
+		XFS_STATS_INC(mp, xs_ig_frecycle);
 		error = EAGAIN;
 		goto out_error;
 	}
@@ -211,7 +211,7 @@ xfs_iget_cache_hit(
 	 */
 	if (ip->i_flags & (XFS_INEW|XFS_IRECLAIM)) {
 		trace_xfs_iget_skip(ip);
-		XFS_STATS_INC(xs_ig_frecycle);
+		XFS_STATS_INC(mp, xs_ig_frecycle);
 		error = EAGAIN;
 		goto out_error;
 	}
@@ -295,7 +295,7 @@ xfs_iget_cache_hit(
 		xfs_ilock(ip, lock_flags);
 
 	xfs_iflags_clear(ip, XFS_ISTALE);
-	XFS_STATS_INC(xs_ig_found);
+	XFS_STATS_INC(mp, xs_ig_found);
 
 	return 0;
 
@@ -372,7 +372,7 @@ xfs_iget_cache_miss(
 	error = radix_tree_insert(&pag->pag_ici_root, agino, ip);
 	if (unlikely(error)) {
 		WARN_ON(error != -EEXIST);
-		XFS_STATS_INC(xs_ig_dup);
+		XFS_STATS_INC(mp, xs_ig_dup);
 		error = EAGAIN;
 		goto out_preload_end;
 	}
@@ -457,7 +457,7 @@ again:
 			goto out_error_or_again;
 	} else {
 		rcu_read_unlock();
-		XFS_STATS_INC(xs_ig_missed);
+		XFS_STATS_INC(mp, xs_ig_missed);
 
 		error = xfs_iget_cache_miss(mp, pag, tp, ino, &ip,
 							flags, lock_flags);

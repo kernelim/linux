@@ -23,9 +23,15 @@ static int mfd_add_device(struct device *parent, int id,
 	struct resource *res;
 	struct platform_device *pdev;
 	int ret = -ENOMEM;
+	int platform_id;
 	int r;
 
-	pdev = platform_device_alloc(cell->name, id + cell->id);
+	if (id == PLATFORM_DEVID_AUTO)
+		platform_id = id;
+	else
+		platform_id = id + cell->id;
+
+	pdev = platform_device_alloc(cell->name, platform_id);
 	if (!pdev)
 		goto fail_alloc;
 
@@ -34,6 +40,13 @@ static int mfd_add_device(struct device *parent, int id,
 		goto fail_device;
 
 	pdev->dev.parent = parent;
+	if (cell->data_size) {
+		ret = platform_device_add_data(pdev,
+					cell->platform_data, cell->data_size);
+		if (ret)
+			goto fail_res;
+	}
+
 	platform_set_drvdata(pdev, cell->driver_data);
 
 	ret = platform_device_add_data(pdev,

@@ -100,6 +100,15 @@ static inline unsigned int kstat_irqs(unsigned int irq)
 extern unsigned int kstat_irqs(unsigned int irq);
 #endif
 
+#ifdef CONFIG_SPARSE_IRQ
+extern unsigned int kstat_irqs_usr(unsigned int irq);
+#else
+static inline unsigned int kstat_irqs_usr(unsigned int irq)
+{
+	return kstat_irqs(irq);
+}
+#endif
+
 /*
  * Number of interrupts per cpu, since bootup
  */

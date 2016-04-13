@@ -163,6 +163,12 @@ struct net_device_stats {
 
 #endif  /*  __KERNEL__  */
 
+/* interface name assignment types (sysfs name_assign_type attribute) */
+#define NET_NAME_UNKNOWN	0	/* unknown origin (not exposed to userspace) */
+#define NET_NAME_ENUM		1	/* enumerated by kernel */
+#define NET_NAME_PREDICTABLE	2	/* predictably named by the kernel */
+#define NET_NAME_USER		3	/* provided by user-space */
+#define NET_NAME_RENAMED	4	/* renamed by user-space */
 
 /* Media selection options. */
 enum {
@@ -358,8 +364,15 @@ struct napi_struct {
 #ifndef __GENKSYMS__
 	struct hlist_node	napi_hash_node;
 	unsigned int		napi_id;
+	size_t			size;
+	struct hrtimer		timer;
 #endif
 };
+
+#define NAPI_STRUCT_HAS(napi, member)					\
+	({ const struct napi_struct *__n = napi;			\
+	 (test_bit(NAPI_STATE_EXT, &__n->state) &&			\
+	  (offsetof(struct napi_struct, member) < __n->size)); })
 
 enum
 {
@@ -367,6 +380,7 @@ enum
 	NAPI_STATE_DISABLE,	/* Disable pending */
 	NAPI_STATE_NPSVC,	/* Netpoll - don't dequeue from poll_list */
 	NAPI_STATE_HASHED,	/* In NAPI hash */
+	NAPI_STATE_EXT,		/* Extended napi_struct */
 };
 
 enum gro_result {
@@ -483,14 +497,24 @@ static inline int napi_reschedule(struct napi_struct *napi)
 	return 0;
 }
 
+void __napi_complete(struct napi_struct *n);
+void napi_complete_done(struct napi_struct *n, int work_done);
 /**
  *	napi_complete - NAPI processing complete
  *	@n: napi context
  *
  * Mark NAPI processing as complete.
+ * Consider using napi_complete_done() instead.
  */
-extern void __napi_complete(struct napi_struct *n);
-extern void napi_complete(struct napi_struct *n);
+static inline void _napi_complete(struct napi_struct *n)
+{
+	return napi_complete_done(n, 0);
+}
+
+/* RHEL has napi_complete in KABI so we need to keep it for binary
+ * modules. Newly compiled modules will use inlined function. */
+void napi_complete(struct napi_struct *n);
+#define napi_complete _napi_complete
 
 /**
  *	napi_by_id - lookup a NAPI by napi_id
@@ -525,15 +549,7 @@ extern void napi_hash_del(struct napi_struct *napi);
  * Stop NAPI from being scheduled on this context.
  * Waits till any outstanding processing completes.
  */
-static inline void napi_disable(struct napi_struct *n)
-{
-	set_bit(NAPI_STATE_DISABLE, &n->state);
-	while (test_and_set_bit(NAPI_STATE_SCHED, &n->state))
-		msleep(1);
-	while (test_and_set_bit(NAPI_STATE_NPSVC, &n->state))
-		msleep(1);
-	clear_bit(NAPI_STATE_DISABLE, &n->state);
-}
+void napi_disable(struct napi_struct *n);
 
 /**
  *	napi_enable - enable NAPI scheduling
@@ -1437,6 +1453,8 @@ struct net_device_extended {
 						 * devices that share the same
 						 * function
 						 */
+	unsigned long		gro_flush_timeout;
+	unsigned char		name_assign_type;
 };
 
 #define NET_DEVICE_EXTENDED_SIZE \
@@ -1636,6 +1654,10 @@ static inline void *netdev_priv(const struct net_device *dev)
  */
 #define NAPI_POLL_WEIGHT 64
 
+void __netif_napi_add(struct net_device *dev, struct napi_struct *napi,
+		      int (*poll)(struct napi_struct *, int), int weight,
+		      size_t size);
+
 /**
  *	netif_napi_add - initialize a napi context
  *	@dev:  network device
@@ -1646,8 +1668,21 @@ static inline void *netdev_priv(const struct net_device *dev)
  * netif_napi_add() must be used to initialize a napi context prior to calling
  * *any* of the other napi related functions.
  */
+static inline void _netif_napi_add(struct net_device *dev,
+				   struct napi_struct *napi,
+				   int (*poll)(struct napi_struct *, int),
+				   int weight)
+{
+	__netif_napi_add(dev, napi, poll, weight, sizeof(struct napi_struct));
+}
+
+/* RHEL has netif_napi_add in KABI so we need to keep it for binary
+ * modules. Another reason is that older binary modules uses non-extended
+ * napi_struct. Newly compiled modules will use inlined function that uses
+ * current (extended) napi_struct. */
 void netif_napi_add(struct net_device *dev, struct napi_struct *napi,
 		    int (*poll)(struct napi_struct *, int), int weight);
+#define netif_napi_add _netif_napi_add
 
 /**
  *  netif_napi_del - remove a napi context
@@ -1667,17 +1702,23 @@ struct napi_gro_cb {
 	/* This indicates where we are processing relative to skb->data. */
 	int data_offset;
 
-	/* This is non-zero if the packet may be of the same flow. */
-	int same_flow;
-
 	/* This is non-zero if the packet cannot be merged with the new skb. */
 	int flush;
 
 	/* Number of segments aggregated. */
-	int count;
+	u16	count;
+
+	/* This is non-zero if the packet may be of the same flow. */
+	u8	same_flow;
 
 	/* Free the skb? */
-	int free;
+	u8	free;
+
+	/* jiffies when first packet was created/queued */
+	unsigned long age;
+
+	/* used in skb_gro_receive() slow path */
+	struct sk_buff *last;
 };
 
 #define NAPI_GRO_CB(skb) ((struct napi_gro_cb *)(skb)->cb)
@@ -2190,7 +2231,7 @@ extern int		netif_rx(struct sk_buff *skb);
 extern int		netif_rx_ni(struct sk_buff *skb);
 #define HAVE_NETIF_RECEIVE_SKB 1
 extern int		netif_receive_skb(struct sk_buff *skb);
-extern void		napi_gro_flush(struct napi_struct *napi);
+extern void		napi_gro_flush(struct napi_struct *napi, bool flush_old);
 extern gro_result_t	dev_gro_receive(struct napi_struct *napi,
 					struct sk_buff *skb);
 extern gro_result_t	napi_skb_finish(gro_result_t ret, struct sk_buff *skb);
