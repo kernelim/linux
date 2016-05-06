@@ -39,6 +39,10 @@ static int loading_timeout = 60;	/* In seconds */
  * guarding for corner cases a global lock should be OK */
 static DEFINE_MUTEX(fw_lock);
 
+/* Devices might try loading multiple pieces of firmware asynchronously, which
+ * can result in a race for who registers the firmware device first */
+static DEFINE_MUTEX(fw_dev_lock);
+
 struct firmware_priv {
 	char *fw_id;
 	struct completion completion;
@@ -542,6 +546,7 @@ _request_firmware(const struct firmware **firmware_p, const char *name,
 	if (uevent)
 		dev_info(device, "firmware: requesting %s\n", name);
 
+	mutex_lock(&fw_dev_lock);
 	retval = fw_setup_device(firmware, &f_dev, name, device, uevent);
 	if (retval)
 		goto error_kfree_fw;
@@ -576,6 +581,8 @@ error_kfree_fw:
 	kfree(firmware);
 	*firmware_p = NULL;
 out:
+	mutex_unlock(&fw_dev_lock);
+
 	return retval;
 }
 

@@ -36,7 +36,15 @@ static int ip_ping_group_range_max[] = { GID_T_MAX, GID_T_MAX };
 /* Update system visible IP port range */
 static void set_local_port_range(int range[2])
 {
+	bool same_parity = !((range[0] ^ range[1]) & 1);
+	static bool warned;
+
 	write_seqlock(&sysctl_local_ports.lock);
+
+	if (same_parity && !warned) {
+		warned = true;
+		pr_err_ratelimited("ip_local_port_range: prefer different parity for start/end values.\n");
+	}
 	sysctl_local_ports.range[0] = range[0];
 	sysctl_local_ports.range[1] = range[1];
 	write_sequnlock(&sysctl_local_ports.lock);

@@ -34,7 +34,7 @@ EXPORT_SYMBOL(inet_csk_timer_bug_msg);
  */
 struct local_ports sysctl_local_ports __read_mostly = {
 	.lock = SEQLOCK_UNLOCKED,
-	.range = { 32768, 61000 },
+	.range = { 32768, 60999 },
 };
 
 unsigned long *sysctl_local_reserved_ports;
@@ -125,6 +125,7 @@ int inet_csk_get_port(struct sock *sk, unsigned short snum)
 	struct net *net = sock_net(sk);
 	int smallest_size = -1, smallest_rover;
 	uid_t uid = sock_i_uid(sk);
+	int attempt_half = sk->sk_reuse ? 1 : 0;
 
 	local_bh_disable();
 	if (!snum) {
@@ -132,6 +133,14 @@ int inet_csk_get_port(struct sock *sk, unsigned short snum)
 
 again:
 		inet_get_local_port_range(&low, &high);
+		if (attempt_half) {
+			int half = low + ((high - low) >> 1);
+
+			if (attempt_half == 1)
+				high = half;
+			else
+				low = half;
+		}
 		remaining = (high - low) + 1;
 		smallest_rover = rover = net_random() % remaining + low;
 
@@ -184,6 +193,11 @@ again:
 			if (smallest_size != -1) {
 				snum = smallest_rover;
 				goto have_snum;
+			}
+			if (attempt_half == 1) {
+				/* OK we now try the upper half of the range */
+				attempt_half = 2;
+				goto again;
 			}
 			goto fail;
 		}
