@@ -300,10 +300,16 @@ static struct notifier_block nfsd_inet6addr_notifier = {
 
 static void nfsd_last_thread(struct svc_serv *serv)
 {
-	unregister_inetaddr_notifier(&nfsd_inetaddr_notifier);
 #if IS_ENABLED(CONFIG_IPV6)
-	unregister_inet6addr_notifier(&nfsd_inet6addr_notifier);
+	int (*fn)(struct notifier_block *);
+
+	fn = symbol_get(unregister_inet6addr_notifier);
+	if (fn) {
+		fn(&nfsd_inet6addr_notifier);
+		symbol_put_addr(fn);
+	}
 #endif
+	unregister_inetaddr_notifier(&nfsd_inetaddr_notifier);
 
 	/* When last nfsd thread exits we need to do some clean-up */
 	nfsd_serv = NULL;
@@ -362,6 +368,9 @@ static void set_max_drc(void)
 int nfsd_create_serv(void)
 {
 	int err = 0;
+#if IS_ENABLED(CONFIG_IPV6)
+	int (*fn)(struct notifier_block *);
+#endif
 
 	WARN_ON(!mutex_is_locked(&nfsd_mutex));
 	if (nfsd_serv) {
@@ -394,7 +403,11 @@ int nfsd_create_serv(void)
 	set_max_drc();
 	register_inetaddr_notifier(&nfsd_inetaddr_notifier);
 #if IS_ENABLED(CONFIG_IPV6)
-	register_inet6addr_notifier(&nfsd_inet6addr_notifier);
+	fn = symbol_get(register_inet6addr_notifier);
+	if (fn) {
+		fn(&nfsd_inet6addr_notifier);
+		symbol_put_addr(fn);
+	}
 #endif
 	do_gettimeofday(&nfssvc_boot);		/* record boot time */
 	return err;

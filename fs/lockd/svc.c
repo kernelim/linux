@@ -314,10 +314,16 @@ static struct notifier_block lockd_inet6addr_notifier = {
 
 static void lockd_svc_exit_thread(void)
 {
-	unregister_inetaddr_notifier(&lockd_inetaddr_notifier);
 #if IS_ENABLED(CONFIG_IPV6)
-	unregister_inet6addr_notifier(&lockd_inet6addr_notifier);
+	int (*fn)(struct notifier_block *);
+
+	fn = symbol_get(unregister_inet6addr_notifier);
+	if (fn) {
+		fn(&lockd_inet6addr_notifier);
+		symbol_put_addr(fn);
+	}
 #endif
+	unregister_inetaddr_notifier(&lockd_inetaddr_notifier);
 	svc_exit_thread(nlmsvc_rqst);
 }
 
@@ -328,6 +334,9 @@ int lockd_up(void)
 {
 	struct svc_serv *serv;
 	int		error = 0;
+#if IS_ENABLED(CONFIG_IPV6)
+	int (*fn)(struct notifier_block *);
+#endif
 
 	mutex_lock(&nlmsvc_mutex);
 	/*
@@ -353,7 +362,11 @@ int lockd_up(void)
 
 	register_inetaddr_notifier(&lockd_inetaddr_notifier);
 #if IS_ENABLED(CONFIG_IPV6)
-	register_inet6addr_notifier(&lockd_inet6addr_notifier);
+	fn = symbol_get(register_inet6addr_notifier);
+	if (fn) {
+		fn(&lockd_inet6addr_notifier);
+		symbol_put_addr(fn);
+	}
 #endif
 
 	error = make_socks(serv);
