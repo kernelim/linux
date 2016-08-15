@@ -4115,7 +4115,8 @@ static inline void update_sg_lb_stats(struct sched_domain *sd,
 	}
 
 	/* Adjust by relative CPU power of the group */
-	sgs->avg_load = (sgs->group_load * SCHED_LOAD_SCALE) / group->cpu_power;
+	if (group->cpu_power)
+		sgs->avg_load = (sgs->group_load * SCHED_LOAD_SCALE) / group->cpu_power;
 
 	/*
 	 * Consider the group unbalanced when the imbalance is larger
@@ -4209,6 +4210,9 @@ static inline void update_sd_lb_stats(struct sched_domain *sd, int this_cpu,
 
 	do {
 		int local_group;
+
+		if (sg == NULL)
+			return;
 
 		local_group = cpumask_test_cpu(this_cpu, sched_group_cpus(sg));
 		memset(&sgs, 0, sizeof(sgs));
@@ -4505,7 +4509,8 @@ find_busiest_group(struct sched_domain *sd, int this_cpu,
 	if (sds.this_load >= sds.max_load)
 		goto out_balanced;
 
-	sds.avg_load = (SCHED_LOAD_SCALE * sds.total_load) / sds.total_pwr;
+	if (sds.total_pwr)
+		sds.avg_load = (SCHED_LOAD_SCALE * sds.total_load) / sds.total_pwr;
 
 	if (sds.this_load >= sds.avg_load)
 		goto out_balanced;

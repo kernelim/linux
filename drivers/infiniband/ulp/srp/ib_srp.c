@@ -1870,6 +1870,8 @@ static int srp_queuecommand(struct scsi_cmnd *scmnd,
 	if (in_scsi_eh)
 		mutex_lock(&rport->mutex);
 
+	scmnd->scsi_done = done;
+
 	scmnd->result = srp_chkready(target->rport);
 	if (unlikely(scmnd->result))
 		goto err;

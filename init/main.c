@@ -63,6 +63,7 @@
 #include <linux/sched.h>
 #include <linux/signal.h>
 #include <linux/idr.h>
+#include <linux/idr2.h>
 #include <linux/ftrace.h>
 #include <linux/async.h>
 #include <linux/kmemcheck.h>
@@ -640,6 +641,7 @@ asmlinkage void __init start_kernel(void)
 		local_irq_disable();
 	}
 	idr_init_cache();
+	idr2_init_cache();
 	rcu_init();
 	/* init some links before init_ISA_irqs() */
 	early_irq_init();

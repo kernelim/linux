@@ -124,7 +124,6 @@ EXPORT_SYMBOL(unregister_shrinker2);
 
 int __init drm_backport_init(void)
 {
-	idr2_init_cache();
 	return 0;
 }
 

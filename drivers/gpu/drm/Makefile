@@ -17,7 +17,7 @@ drm-y       :=	drm_auth.o drm_bufs.o drm_cache.o \
 		drm_rect.o drm_vma_manager.o drm_flip_work.o \
 		drm_modeset_lock.o drm_atomic.o drm_bridge.o
 
-drm-y += idr2.o drm_backport.o
+drm-y += drm_backport.o
 
 drm-$(CONFIG_COMPAT) += drm_ioc32.o
 drm-$(CONFIG_DRM_GEM_CMA_HELPER) += drm_gem_cma_helper.o

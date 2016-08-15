@@ -27,7 +27,7 @@
 #endif
 #include <linux/err.h>
 #include <linux/string.h>
-#include <drm/idr2.h>
+#include <linux/idr2.h>
 #include <linux/spinlock.h>
 #include <linux/percpu.h>
 #include <linux/hardirq.h>

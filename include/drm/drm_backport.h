@@ -374,7 +374,7 @@ static inline void vga_switcheroo_fini_domain_pm_ops(struct device *dev) {}
 
 /* redirect things to our own idr/ida: */
 #define __IDR_H__
-#include <drm/idr2.h>
+#include <linux/idr2.h>
 #define idr                idr2
 #define idr_find_slowpath  idr2_find_slowpath
 #define idr_preload        idr2_preload
