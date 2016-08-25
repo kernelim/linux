@@ -115,7 +115,7 @@ static int gfs2_dentry_delete(struct dentry *dentry)
 		return 0;
 
 	ginode = GFS2_I(dentry->d_inode);
-	if (!ginode->i_iopen_gh.gh_gl)
+	if (!gfs2_holder_initialized(&ginode->i_iopen_gh))
 		return 0;
 
 	if (test_bit(GLF_DEMOTE, &ginode->i_iopen_gh.gh_gl->gl_flags))

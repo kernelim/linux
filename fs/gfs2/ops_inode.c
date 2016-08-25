@@ -524,7 +524,7 @@ static int gfs2_rename(struct inode *odir, struct dentry *odentry,
 	struct gfs2_inode *ip = GFS2_I(odentry->d_inode);
 	struct gfs2_inode *nip = NULL;
 	struct gfs2_sbd *sdp = GFS2_SB(odir);
-	struct gfs2_holder ghs[5], r_gh = { .gh_gl = NULL, };
+	struct gfs2_holder ghs[5], r_gh;
 	struct gfs2_rgrpd *nrgd;
 	unsigned int num_gh;
 	int dir_rename = 0;
@@ -532,6 +532,7 @@ static int gfs2_rename(struct inode *odir, struct dentry *odentry,
 	unsigned int x;
 	int error;
 
+	gfs2_holder_mark_uninitialized(&r_gh);
 	if (ndentry->d_inode) {
 		nip = GFS2_I(ndentry->d_inode);
 		if (ip == nip)
@@ -740,7 +741,7 @@ out_gunlock:
 		gfs2_holder_uninit(ghs + x);
 	}
 out_gunlock_r:
-	if (r_gh.gh_gl)
+	if (gfs2_holder_initialized(&r_gh))
 		gfs2_glock_dq_uninit(&r_gh);
 out:
 	return error;
@@ -885,9 +886,9 @@ int gfs2_permission(struct inode *inode, int mask)
 	struct gfs2_holder i_gh;
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
 	int error;
-	int unlock = 0;
 	int frozen_root = 0;
 
+	gfs2_holder_mark_uninitialized(&i_gh);
 	if (gfs2_glock_is_locked_by_me(ip->i_gl) == NULL) {
 		if (unlikely(gfs2_glock_is_held_dfrd(sdp->sd_trans_gl) &&
 			     inode == sdp->sd_root_dir->d_inode &&
@@ -898,7 +899,6 @@ int gfs2_permission(struct inode *inode, int mask)
 						   LM_FLAG_ANY, &i_gh);
 			if (error)
 				return error;
-			unlock = 1;
 		}
 	}
 
@@ -906,7 +906,7 @@ int gfs2_permission(struct inode *inode, int mask)
 		error = -EACCES;
 	else
 		error = generic_permission(inode, mask, gfs2_check_acl);
-	if (unlock)
+	if (gfs2_holder_initialized(&i_gh))
 		gfs2_glock_dq_uninit(&i_gh);
 	else if (frozen_root && atomic_dec_and_test(&sdp->sd_frozen_root))
 		wake_up(&sdp->sd_frozen_root_wait);
@@ -1050,9 +1050,9 @@ static int gfs2_getattr(struct vfsmount *mnt, struct dentry *dentry,
 	struct gfs2_holder gh;
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
 	int error;
-	int unlock = 0;
 	int frozen_root = 0;
 
+	gfs2_holder_mark_uninitialized(&gh);
 	if (gfs2_glock_is_locked_by_me(ip->i_gl) == NULL) {
 		if (unlikely(gfs2_glock_is_held_dfrd(sdp->sd_trans_gl) &&
 			     inode == sdp->sd_root_dir->d_inode &&
@@ -1062,12 +1062,11 @@ static int gfs2_getattr(struct vfsmount *mnt, struct dentry *dentry,
 			error = gfs2_glock_nq_init(ip->i_gl, LM_ST_SHARED, LM_FLAG_ANY, &gh);
 			if (error)
 				return error;
-			unlock = 1;
 		}
 	}
 
 	generic_fillattr(inode, stat);
-	if (unlock)
+	if (gfs2_holder_initialized(&gh))
 		gfs2_glock_dq_uninit(&gh);
 	else if (frozen_root && atomic_dec_and_test(&sdp->sd_frozen_root))
 		wake_up(&sdp->sd_frozen_root_wait);

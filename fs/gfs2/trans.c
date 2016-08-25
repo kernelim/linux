@@ -96,7 +96,7 @@ void gfs2_trans_end(struct gfs2_sbd *sdp)
 
 	if (!tr->tr_touched) {
 		gfs2_log_release(sdp, tr->tr_reserved);
-		if (tr->tr_t_gh.gh_gl) {
+		if (gfs2_holder_initialized(&tr->tr_t_gh)) {
 			gfs2_glock_dq(&tr->tr_t_gh);
 			gfs2_holder_uninit(&tr->tr_t_gh);
 			kfree(tr);
@@ -114,7 +114,7 @@ void gfs2_trans_end(struct gfs2_sbd *sdp)
 		gfs2_print_trans(tr);
 
 	gfs2_log_commit(sdp, tr);
-	if (tr->tr_t_gh.gh_gl) {
+	if (gfs2_holder_initialized(&tr->tr_t_gh)) {
 		gfs2_glock_dq(&tr->tr_t_gh);
 		gfs2_holder_uninit(&tr->tr_t_gh);
 		kfree(tr);

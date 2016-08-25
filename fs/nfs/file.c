@@ -455,7 +455,7 @@ static int nfs_write_end(struct file *file, struct address_space *mapping,
 	if (status < 0)
 		return status;
 
-	if (nfs_ctx_key_to_expire(ctx)) {
+	if (nfs_ctx_key_to_expire(ctx, mapping->host)) {
 		status = nfs_wb_all(mapping->host);
 		if (status < 0)
 			return status;
@@ -605,7 +605,7 @@ static int nfs_need_sync_write(struct file *filp, struct inode *inode)
 		return 1;
 	ctx = nfs_file_open_context(filp);
 	if (test_bit(NFS_CONTEXT_ERROR_WRITE, &ctx->flags) ||
-	    nfs_ctx_key_to_expire(ctx))
+	    nfs_ctx_key_to_expire(ctx, inode))
 		return 1;
 	return 0;
 }
