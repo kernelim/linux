@@ -1119,6 +1119,9 @@ struct net_device
 
 #define NETIF_F_ALL_TSO 	(NETIF_F_TSO | NETIF_F_TSO6 | NETIF_F_TSO_ECN)
 
+#define NETIF_F_ALL_FCOE	(NETIF_F_FCOE_CRC | NETIF_F_FCOE_MTU | \
+				 NETIF_F_FSO)
+
 	/*
 	 * If one device supports one of these features, then enable them
 	 * for all in netdev_increment_features.

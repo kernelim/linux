@@ -761,14 +761,20 @@ int pcibios_set_pcie_reset_state(struct pci_dev *dev, enum pcie_reset_state stat
 	struct device_node *dn = pci_device_to_OF_node(dev);
 	struct pci_dn *pdn = PCI_DN(dn);
 
+	/* We should set the EEH flag below to avoid PCI cfg space access
+	 * during EEH, otherwise we could get many unexpected errors. */
+
 	switch (state) {
 	case pcie_deassert_reset:
 		rtas_pci_slot_reset(pdn, 0);
+		eeh_toggle_dev_flag(pdn, EEH_MODE_PCI_CFG_BLOCKED, false);
 		break;
 	case pcie_hot_reset:
+		eeh_toggle_dev_flag(pdn, EEH_MODE_PCI_CFG_BLOCKED, true);
 		rtas_pci_slot_reset(pdn, 1);
 		break;
 	case pcie_warm_reset:
+		eeh_toggle_dev_flag(pdn, EEH_MODE_PCI_CFG_BLOCKED, true);
 		rtas_pci_slot_reset(pdn, 3);
 		break;
 	default:
@@ -1296,6 +1302,27 @@ void eeh_remove_bus_device(struct pci_dev *dev)
 	}
 }
 EXPORT_SYMBOL_GPL(eeh_remove_bus_device);
+
+void eeh_toggle_dev_flag(struct pci_dn *pdn, int flag, bool set)
+{
+	struct device_node *dn;
+	struct pci_dn *current_pdn;
+	int dev_slot;
+
+	dev_slot = PCI_SLOT(pdn->devfn);
+	dn = (pdn->node)->parent;
+
+	for (dn = dn->child; dn; dn = dn->sibling) {
+		current_pdn = PCI_DN(dn);
+		if (current_pdn && PCI_SLOT(current_pdn->devfn) == dev_slot) {
+
+			if (set)
+				current_pdn->eeh_mode |= flag;
+			else
+				current_pdn->eeh_mode &= (~flag);
+		}
+	}
+}
 
 static int proc_eeh_show(struct seq_file *m, void *v)
 {

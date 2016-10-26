@@ -81,10 +81,8 @@ static inline void __tlb_flush_mm(struct mm_struct * mm)
 	if (MACHINE_HAS_IDTE) {
 		if (mm->context.noexec)
 			__tlb_flush_idte((unsigned long)
-					 get_shadow_table(mm->pgd) |
-					 mm->context.asce_bits);
-		__tlb_flush_idte((unsigned long) mm->pgd |
-				 mm->context.asce_bits);
+				get_shadow_table((void *) mm->context.asce));
+		__tlb_flush_idte(mm->context.asce);
 		return;
 	}
 	__tlb_flush_full(mm);

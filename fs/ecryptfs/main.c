@@ -630,6 +630,10 @@ static int ecryptfs_get_sb(struct file_system_type *fs_type, int flags,
 			"known incompatibilities\n");
 		goto out_pathput;
 	}
+	if (strcmp(lower_sb->s_type->name, "proc") == 0) {
+		rc = -EINVAL;
+		goto out_pathput;
+	}
 
 	rc = get_sb_nodev(fs_type, flags, raw_data, ecryptfs_fill_super, mnt);
 	if (rc < 0) {

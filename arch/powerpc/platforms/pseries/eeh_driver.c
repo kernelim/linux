@@ -295,12 +295,20 @@ static int eeh_reset_device (struct pci_dn *pe_dn, struct pci_bus *bus)
 	if (bus)
 		pcibios_remove_pci_devices(bus);
 
+	/* Set this flag in all pci_dn's of the device in which EEH error
+	 * is happening. This is necessary to avoid access in PCI cfg space
+	 * during EEH, otherwise unexpected erros can occur.
+	 * We need to unset the flag below on appropriate places. */
+	eeh_toggle_dev_flag(pe_dn, EEH_MODE_PCI_CFG_BLOCKED, true);
+
 	/* Reset the pci controller. (Asserts RST#; resets config space).
 	 * Reconfigure bridges and devices. Don't try to bring the system
 	 * up if the reset failed for some reason. */
 	rc = rtas_set_slot_reset(pe_dn);
-	if (rc)
+	if (rc) {
+		eeh_toggle_dev_flag(pe_dn, EEH_MODE_PCI_CFG_BLOCKED, false);
 		return rc;
+	}
 
 	/* Walk over all functions on this device.  */
 	dn = pe_dn->node;
@@ -316,6 +324,8 @@ static int eeh_reset_device (struct pci_dn *pe_dn, struct pci_bus *bus)
  		}
 		dn = dn->sibling;
 	}
+
+	eeh_toggle_dev_flag(pe_dn, EEH_MODE_PCI_CFG_BLOCKED, false);
 
 	/* Give the system 5 seconds to finish running the user-space
 	 * hotplug shutdown scripts, e.g. ifdown for ethernet.  Yes, 

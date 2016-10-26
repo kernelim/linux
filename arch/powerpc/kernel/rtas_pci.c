@@ -80,10 +80,6 @@ int rtas_read_config(struct pci_dn *pdn, int where, int size, u32 *val)
 	if (ret)
 		return PCIBIOS_DEVICE_NOT_FOUND;
 
-	if (returnval == EEH_IO_ERROR_VALUE(size) &&
-	    eeh_dn_check_failure (pdn->node, NULL))
-		return PCIBIOS_DEVICE_NOT_FOUND;
-
 	return PCIBIOS_SUCCESSFUL;
 }
 
@@ -92,18 +88,42 @@ static int rtas_pci_read_config(struct pci_bus *bus,
 				int where, int size, u32 *val)
 {
 	struct device_node *busdn, *dn;
+	struct pci_dn *pdn;
+	bool found = false;
+	int ret;
 
 	busdn = pci_bus_to_OF_node(bus);
 
 	/* Search only direct children of the bus */
 	for (dn = busdn->child; dn; dn = dn->sibling) {
-		struct pci_dn *pdn = PCI_DN(dn);
+		pdn = PCI_DN(dn);
 		if (pdn && pdn->devfn == devfn
-		    && of_device_is_available(dn))
-			return rtas_read_config(pdn, where, size, val);
+		    && of_device_is_available(dn)) {
+			found = true;
+			break;
+		}
 	}
 
-	return PCIBIOS_DEVICE_NOT_FOUND;
+	if (!found)
+		return PCIBIOS_DEVICE_NOT_FOUND;
+
+#ifdef CONFIG_EEH
+	/* If device is in the middle of an EEH error, we must drop the read to
+	 * avoid issues in devices that don't allow PCI cfg access during error
+	 * recovery. One way to achieve this is to return 0xFs in this case */
+	if (pdn->eeh_mode & EEH_MODE_PCI_CFG_BLOCKED) {
+                *val = EEH_IO_ERROR_VALUE(size);
+                return PCIBIOS_DEVICE_NOT_FOUND;
+        }
+#endif
+
+	ret = rtas_read_config(pdn, where, size, val);
+
+	if (*val == EEH_IO_ERROR_VALUE(size) &&
+	    eeh_dn_check_failure (pdn->node, NULL))
+		return PCIBIOS_DEVICE_NOT_FOUND;
+
+	return ret;
 }
 
 int rtas_write_config(struct pci_dn *pdn, int where, int size, u32 val)
@@ -136,17 +156,34 @@ static int rtas_pci_write_config(struct pci_bus *bus,
 				 int where, int size, u32 val)
 {
 	struct device_node *busdn, *dn;
+	struct pci_dn *pdn;
+	bool found = false;
 
 	busdn = pci_bus_to_OF_node(bus);
 
 	/* Search only direct children of the bus */
 	for (dn = busdn->child; dn; dn = dn->sibling) {
-		struct pci_dn *pdn = PCI_DN(dn);
+		pdn = PCI_DN(dn);
 		if (pdn && pdn->devfn == devfn
-		    && of_device_is_available(dn))
-			return rtas_write_config(pdn, where, size, val);
+		    && of_device_is_available(dn)) {
+			found = true;
+			break;
+		}
 	}
-	return PCIBIOS_DEVICE_NOT_FOUND;
+
+	if (!found)
+		return PCIBIOS_DEVICE_NOT_FOUND;
+
+#ifdef CONFIG_EEH
+	/* If device is in middle of an EEH error, we must drop the write to
+	 * avoid issues in devices that don't allow PCI cfg access during error
+	 * recovery. */
+
+	if (pdn->eeh_mode & EEH_MODE_PCI_CFG_BLOCKED)
+		return PCIBIOS_DEVICE_NOT_FOUND;
+#endif
+
+	return rtas_write_config(pdn, where, size, val);
 }
 
 static struct pci_ops rtas_pci_ops = {

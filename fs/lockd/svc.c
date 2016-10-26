@@ -312,7 +312,7 @@ static struct notifier_block lockd_inet6addr_notifier = {
 };
 #endif
 
-static void lockd_svc_exit_thread(void)
+static void lockd_unregister_notifiers(void)
 {
 #if IS_ENABLED(CONFIG_IPV6)
 	int (*fn)(struct notifier_block *);
@@ -324,6 +324,11 @@ static void lockd_svc_exit_thread(void)
 	}
 #endif
 	unregister_inetaddr_notifier(&lockd_inetaddr_notifier);
+}
+
+static void lockd_svc_exit_thread(void)
+{
+	lockd_unregister_notifiers();
 	svc_exit_thread(nlmsvc_rqst);
 }
 
@@ -371,7 +376,7 @@ int lockd_up(void)
 
 	error = make_socks(serv);
 	if (error < 0)
-		goto destroy_and_out;
+		goto err_start;
 
 	/*
 	 * Create the kernel thread and wait for it to start.
@@ -383,7 +388,7 @@ int lockd_up(void)
 		printk(KERN_WARNING
 			"lockd_up: svc_rqst allocation failed, error=%d\n",
 			error);
-		goto destroy_and_out;
+		goto err_start;
 	}
 
 	svc_sock_update_bufs(serv);
@@ -411,6 +416,9 @@ out:
 		nlmsvc_users++;
 	mutex_unlock(&nlmsvc_mutex);
 	return error;
+err_start:
+	lockd_unregister_notifiers();
+	goto destroy_and_out;
 }
 EXPORT_SYMBOL_GPL(lockd_up);
 

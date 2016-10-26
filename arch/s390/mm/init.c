@@ -121,7 +121,8 @@ void __init paging_init(void)
 	asce_bits = _ASCE_TABLE_LENGTH;
 	pgd_type = _SEGMENT_ENTRY_EMPTY;
 #endif
-	S390_lowcore.kernel_asce = (__pa(init_mm.pgd) & PAGE_MASK) | asce_bits;
+	init_mm.context.asce = (__pa(init_mm.pgd) & PAGE_MASK) | asce_bits;
+	S390_lowcore.kernel_asce = init_mm.context.asce;
 	clear_table((unsigned long *) init_mm.pgd, pgd_type,
 		    sizeof(unsigned long)*2048);
 	vmem_map_init();
