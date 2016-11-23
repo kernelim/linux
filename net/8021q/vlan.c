@@ -302,6 +302,10 @@ static void vlan_sync_address(struct net_device *dev,
 	if (!compare_ether_addr(vlan->real_dev_addr, dev->dev_addr))
 		return;
 
+	/* vlan continues to inherit address of lower device */
+	if (vlan_dev_inherit_address(vlandev, dev))
+		goto out;
+
 	/* vlan address was different from the old address and is equal to
 	 * the new address */
 	if (compare_ether_addr(vlandev->dev_addr, vlan->real_dev_addr) &&
@@ -314,6 +318,7 @@ static void vlan_sync_address(struct net_device *dev,
 	    compare_ether_addr(vlandev->dev_addr, dev->dev_addr))
 		dev_unicast_add(dev, vlandev->dev_addr);
 
+out:
 	memcpy(vlan->real_dev_addr, dev->dev_addr, ETH_ALEN);
 }
 

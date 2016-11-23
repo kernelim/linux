@@ -93,8 +93,8 @@ static void dmi_decode_table(u8 *buf,
 	 * >= 3.0 only) OR we run off the end of the table (should never
 	 * happen but sometimes does on bogus implementations.)
 	 */
-	while ((i < dmi_num) && (data - buf + sizeof(struct dmi_header))
-		<= dmi_len) {
+	while ((!dmi_num || i < dmi_num) && 
+		(data - buf + sizeof(struct dmi_header)) <= dmi_len) {
 		const struct dmi_header *dm = (const struct dmi_header *)data;
 
 		/*

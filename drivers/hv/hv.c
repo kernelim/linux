@@ -149,6 +149,8 @@ int hv_init(void)
 	       sizeof(int) * NR_CPUS);
 	memset(hv_context.event_dpc, 0,
 	       sizeof(void *) * NR_CPUS);
+	memset(hv_context.msg_dpc, 0,
+	       sizeof(void *) * NR_CPUS);
 
 	max_leaf = query_hypervisor_info();
 
@@ -200,7 +202,7 @@ cleanup:
  *
  * This routine is called normally during driver unloading or exiting.
  */
-void hv_cleanup(void)
+void hv_cleanup(bool crash)
 {
 	union hv_x64_msr_hypercall_contents hypercall_msr;
 
@@ -210,7 +212,8 @@ void hv_cleanup(void)
 	if (hv_context.hypercall_page) {
 		hypercall_msr.as_uint64 = 0;
 		wrmsrl(HV_X64_MSR_HYPERCALL, hypercall_msr.as_uint64);
-		vfree(hv_context.hypercall_page);
+		if (!crash)
+			vfree(hv_context.hypercall_page);
 		hv_context.hypercall_page = NULL;
 	}
 }
@@ -277,6 +280,13 @@ int hv_synic_alloc(void)
 		}
 		tasklet_init(hv_context.event_dpc[cpu], vmbus_on_event, cpu);
 
+		hv_context.msg_dpc[cpu] = kmalloc(size, GFP_ATOMIC);
+		if (hv_context.msg_dpc[cpu] == NULL) {
+			pr_err("Unable to allocate event dpc\n");
+			goto err;
+		}
+		tasklet_init(hv_context.msg_dpc[cpu], vmbus_on_msg_dpc, cpu);
+
 		hv_context.synic_message_page[cpu] =
 			(void *)get_zeroed_page(GFP_ATOMIC);
 
@@ -310,6 +320,7 @@ err:
 static void hv_synic_free_cpu(int cpu)
 {
 	kfree(hv_context.event_dpc[cpu]);
+	kfree(hv_context.msg_dpc[cpu]);
 	if (hv_context.synic_event_page[cpu])
 		free_page((unsigned long)hv_context.synic_event_page[cpu]);
 	if (hv_context.synic_message_page[cpu])

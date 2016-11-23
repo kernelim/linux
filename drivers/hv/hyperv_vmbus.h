@@ -27,6 +27,7 @@
 
 #include <linux/list.h>
 #include <asm/sync_bitops.h>
+#include <asm/hyperv.h>
 #include <linux/atomic.h>
 #include <linux/hyperv.h>
 #include <linux/uio.h>
@@ -528,10 +529,11 @@ struct hv_context {
 	u32 vp_index[NR_CPUS];
 	/*
 	 * Starting with win8, we can take channel interrupts on any CPU;
-	 * we will manage the tasklet that handles events on a per CPU
+	 * we will manage the tasklet that handles events messages on a per CPU
 	 * basis.
 	 */
 	struct tasklet_struct *event_dpc[NR_CPUS];
+	struct tasklet_struct *msg_dpc[NR_CPUS];
 	/*
 	 * To optimize the mapping of relid to channel, maintain
 	 * per-cpu list of the channels based on their CPU affinity.
@@ -550,7 +552,7 @@ extern struct hv_context hv_context;
 
 extern int hv_init(void);
 
-extern void hv_cleanup(void);
+extern void hv_cleanup(bool crash);
 
 extern int hv_post_message(union hv_connection_id connection_id,
 			 enum hv_message_type message_type,
@@ -683,6 +685,42 @@ struct vmbus_channel_message_table_entry {
 extern struct vmbus_channel_message_table_entry
 	channel_message_table[CHANNELMSG_COUNT];
 
+/* Free the message slot and signal end-of-message if required */
+static inline void vmbus_signal_eom(struct hv_message *msg, u32 old_msg_type)
+{
+	/*
+	 * On crash we're reading some other CPU's message page and we need
+	 * to be careful: this other CPU may already had cleared the header
+	 * and the host may already had delivered some other message there.
+	 * In case we blindly write msg->header.message_type we're going
+	 * to lose it. We can still lose a message of the same type but
+	 * we count on the fact that there can only be one
+	 * CHANNELMSG_UNLOAD_RESPONSE and we don't care about other messages
+	 * on crash.
+	 */
+	if (cmpxchg(&msg->header.message_type, old_msg_type,
+		    HVMSG_NONE) != old_msg_type)
+		return;
+
+	/*
+	 * Make sure the write to MessageType (ie set to
+	 * HVMSG_NONE) happens before we read the
+	 * MessagePending and EOMing. Otherwise, the EOMing
+	 * will not deliver any more messages since there is
+	 * no empty slot
+	 */
+	mb();
+
+	if (msg->header.message_flags.msg_pending) {
+		/*
+		 * This will cause message queue rescan to
+		 * possibly deliver another msg from the
+		 * hypervisor
+		 */
+		wrmsrl(HV_X64_MSR_EOM, 0);
+	}
+}
+
 /* General vmbus interface */
 
 struct hv_device *vmbus_device_create(const uuid_le *type,
@@ -710,6 +748,7 @@ int vmbus_post_msg(void *buffer, size_t buflen);
 int vmbus_set_event(struct vmbus_channel *channel);
 
 void vmbus_on_event(unsigned long data);
+void vmbus_on_msg_dpc(unsigned long data);
 
 int hv_kvp_init(struct hv_util_service *);
 void hv_kvp_deinit(void);
@@ -722,7 +761,7 @@ void hv_vss_onchannelcallback(void *);
 int hv_fcopy_init(struct hv_util_service *);
 void hv_fcopy_deinit(void);
 void hv_fcopy_onchannelcallback(void *);
-void vmbus_initiate_unload(void);
+void vmbus_initiate_unload(bool crash);
 
 static inline void hv_poll_channel(struct vmbus_channel *channel,
 				   void (*cb)(void *))
