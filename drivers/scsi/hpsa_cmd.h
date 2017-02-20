@@ -142,6 +142,7 @@
 #define DOORBELL_CTLR_RESET	0x00000004l
 #define DOORBELL_CTLR_RESET2	0x00000020l
 #define DOORBELL_CLEAR_EVENTS	0x00000040l
+#define DOORBELL_GENERATE_NMI	0x00000080l
 
 #define CFGTBL_Trans_Simple     0x00000002l
 #define CFGTBL_Trans_Performant 0x00000004l
@@ -289,6 +290,7 @@ struct SenseSubsystem_info {
 #define BMIC_FLASH_FIRMWARE 0xF7
 #define BMIC_SENSE_CONTROLLER_PARAMETERS 0x64
 #define BMIC_IDENTIFY_PHYSICAL_DEVICE 0x15
+#define BMIC_IDENTIFY_CONTROLLER 0x11
 
 /* Command List Structure */
 union SCSI3Addr {
@@ -684,6 +686,16 @@ struct hpsa_pci_info {
 	unsigned short	domain;
 	u32		board_id;
 };
+
+struct bmic_identify_controller {
+	u8	configured_logical_drive_count;	/* offset 0 */
+	u8	pad1[153];
+	__le16	extended_logical_unit_count;	/* offset 154 */
+	u8	pad2[136];
+	u8	controller_mode;	/* offset 292 */
+	u8	pad3[32];
+};
+
 
 struct bmic_identify_physical_device {
 	u8    scsi_bus;          /* SCSI Bus number on controller */

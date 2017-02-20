@@ -2097,6 +2097,9 @@ alloc_init_file(struct inode *ino)
 		INIT_LIST_HEAD(&fp->fi_stateids);
 		INIT_LIST_HEAD(&fp->fi_delegations);
 		fp->fi_inode = igrab(ino);
+		if (current_fileid == 0)
+			/* reserved for delegation stateid's */
+			current_fileid++;
 		fp->fi_id = current_fileid++;
 		fp->fi_had_conflict = false;
 		memset(fp->fi_fds, 0, sizeof(fp->fi_fds));

@@ -2336,6 +2336,46 @@ static int nfs_compare_super(struct super_block *sb, void *data)
 	return nfs_compare_mount_options(sb, server, mntflags);
 }
 
+#ifdef CONFIG_NFS_FSCACHE
+static void nfs_get_cache_cookie(struct super_block *sb,
+				 struct nfs_parsed_mount_data *parsed,
+				 struct nfs_clone_mount *cloned)
+{
+	struct nfs_server *nfss = NFS_SB(sb);
+	char *uniq = NULL;
+	int ulen = 0;
+
+	nfss->fscache_key = NULL;
+	nfss->fscache = NULL;
+
+	if (parsed) {
+		if (!(parsed->options & NFS_OPTION_FSCACHE))
+			return;
+		if (parsed->fscache_uniq) {
+			uniq = parsed->fscache_uniq;
+			ulen = strlen(parsed->fscache_uniq);
+		}
+	} else if (cloned) {
+		struct nfs_server *mnt_s = NFS_SB(cloned->sb);
+		if (!(mnt_s->options & NFS_OPTION_FSCACHE))
+			return;
+		if (mnt_s->fscache_key) {
+			uniq = mnt_s->fscache_key->key.uniquifier;
+			ulen = mnt_s->fscache_key->key.uniq_len;
+		};
+	} else
+		return;
+
+	nfs_fscache_get_super_cookie(sb, uniq, ulen);
+}
+#else
+static void nfs_get_cache_cookie(struct super_block *sb,
+				 struct nfs_parsed_mount_data *parsed,
+				 struct nfs_clone_mount *cloned)
+{
+}
+#endif
+
 static int nfs_bdi_register(struct nfs_server *server)
 {
 	return bdi_register_dev(&server->backing_dev_info, server->s_dev);
@@ -2406,8 +2446,7 @@ static int nfs_get_sb(struct file_system_type *fs_type,
 	if (!s->s_root) {
 		/* initial superblock/root creation */
 		nfs_fill_super(s, data);
-		nfs_fscache_get_super_cookie(
-			s, data ? data->fscache_uniq : NULL, NULL);
+		nfs_get_cache_cookie(s, data, NULL);
 	}
 
 	mntroot = nfs_get_root(s, mntfh);
@@ -2520,7 +2559,7 @@ static int nfs_xdev_get_sb(struct file_system_type *fs_type, int flags,
 	if (!s->s_root) {
 		/* initial superblock/root creation */
 		nfs_clone_super(s, data->sb);
-		nfs_fscache_get_super_cookie(s, NULL, data);
+		nfs_get_cache_cookie(s, NULL, data);
 	}
 
 	mntroot = nfs_get_root(s, data->fh);
@@ -2781,8 +2820,7 @@ static int nfs4_remote_get_sb(struct file_system_type *fs_type,
 	if (!s->s_root) {
 		/* initial superblock/root creation */
 		nfs4_fill_super(s);
-		nfs_fscache_get_super_cookie(
-			s, data ? data->fscache_uniq : NULL, NULL);
+		nfs_get_cache_cookie(s, data, NULL);
 	}
 
 	mntroot = nfs4_get_root(s, mntfh);
@@ -3099,7 +3137,7 @@ static int nfs4_xdev_get_sb(struct file_system_type *fs_type, int flags,
 	if (!s->s_root) {
 		/* initial superblock/root creation */
 		nfs4_clone_super(s, data->sb);
-		nfs_fscache_get_super_cookie(s, NULL, data);
+		nfs_get_cache_cookie(s, NULL, data);
 	}
 
 	mntroot = nfs4_get_root(s, data->fh);
@@ -3198,7 +3236,7 @@ static int nfs4_remote_referral_get_sb(struct file_system_type *fs_type,
 	if (!s->s_root) {
 		/* initial superblock/root creation */
 		nfs4_fill_super(s);
-		nfs_fscache_get_super_cookie(s, NULL, data);
+		nfs_get_cache_cookie(s, NULL, data);
 	}
 
 	mntroot = nfs4_get_root(s, mntfh);

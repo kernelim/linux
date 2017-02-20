@@ -76,6 +76,7 @@ struct hpsa_scsi_dev_t {
 	struct hpsa_scsi_dev_t *phys_disk[RAID_MAP_MAX_ENTRIES];
 	int nphysical_disks;
 	int supports_aborts;
+	int external; /* 1-from external array 0-not <0-unknown */
 #define HPSA_DO_NOT_EXPOSE	0x0
 #define HPSA_SG_ATTACH		0x1
 #define HPSA_ULD_ATTACH		0x2
@@ -272,7 +273,7 @@ struct ctlr_info {
 	wait_queue_head_t abort_cmd_wait_queue;
 	wait_queue_head_t event_sync_wait_queue;
 	struct mutex reset_mutex;
-	u8 reset_in_progress;
+	bool reset_in_progress;
 };
 
 struct offline_device_entry {
