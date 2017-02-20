@@ -277,14 +277,15 @@ void acpi_tb_create_local_fadt(struct acpi_table_header *table, u32 length)
 {
 	/*
 	 * Check if the FADT is larger than the largest table that we expect
-	 * (the ACPI 2.0/3.0 version). If so, truncate the table, and issue
-	 * a warning.
+	 * (typically the current ACPI specification version). If so, truncate
+	 * the table, and issue a warning.
 	 */
 	if (length > sizeof(struct acpi_table_fadt)) {
 		ACPI_WARNING((AE_INFO,
-			      "FADT (revision %u) is longer than ACPI 2.0 version, "
+			      "FADT (revision %u) is longer than %s length, "
 			      "truncating length %u to %u",
-			      table->revision, length,
+			      table->revision, ACPI_FADT_CONFORMANCE,
+			      length,
 			      (u32)sizeof(struct acpi_table_fadt)));
 	}
 
@@ -350,10 +351,6 @@ static void acpi_tb_convert_fadt(void)
 	u32 address32;
 	u32 i;
 
-	/* Update the local FADT table header length */
-
-	acpi_gbl_FADT.header.length = sizeof(struct acpi_table_fadt);
-
 	/*
 	 * Expand the 32-bit FACS and DSDT addresses to 64-bit as necessary.
 	 * Later code will always use the X 64-bit field. Also, check for an
@@ -384,13 +381,20 @@ static void acpi_tb_convert_fadt(void)
 	 *
 	 * The ACPI 1.0 reserved fields that will be zeroed are the bytes located at
 	 * offset 45, 55, 95, and the word located at offset 109, 110.
+	 *
+	 * Note: The FADT revision value is unreliable. Only the length can be
+	 * trusted.
 	 */
-	if (acpi_gbl_FADT.header.revision < FADT2_REVISION_ID) {
+	if (acpi_gbl_FADT.header.length <= ACPI_FADT_V2_SIZE) {
 		acpi_gbl_FADT.preferred_profile = 0;
 		acpi_gbl_FADT.pstate_control = 0;
 		acpi_gbl_FADT.cst_control = 0;
 		acpi_gbl_FADT.boot_flags = 0;
 	}
+
+	/* Update the local FADT table header length */
+
+	acpi_gbl_FADT.header.length = sizeof(struct acpi_table_fadt);
 
 	/*
 	 * Expand the ACPI 1.0 32-bit addresses to the ACPI 2.0 64-bit "X"

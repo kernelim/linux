@@ -192,3 +192,7 @@ Version History
         New status (STATUSTYPE_INFO) fields: sync_action and mismatch_cnt.
 1.3.4   Add ability to restore transiently failed devices on resume.
 1.3.5   'mismatch_cnt' is zero unless [last_]sync_action is "check".
+1.3.6   Don't emit '- -' on the status table line in case the constructor
+        fails reading a superblock. Correctly emit 'maj:min1 maj:min2' and
+        'D' on the status line.  If '- -' is passed into the constructor, emit
+        '- -' on the table line and '-' as the status line health character.

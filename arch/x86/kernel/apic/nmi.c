@@ -560,7 +560,7 @@ static void disable_ioapic_nmi_watchdog(void)
 
 static int unknown_nmi_panic_callback(struct pt_regs *regs, int cpu)
 {
-	unsigned char reason = get_nmi_reason();
+	unsigned char reason = x86_platform.get_nmi_reason();
 	char buf[64];
 
 	sprintf(buf, "NMI received for unknown reason %02x\n", reason);

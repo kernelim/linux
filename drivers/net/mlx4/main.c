@@ -513,6 +513,14 @@ static int mlx4_dev_cap(struct mlx4_dev *dev, struct mlx4_dev_cap *dev_cap)
 		}
 	}
 
+	if (mlx4_is_master(dev) && (dev->caps.num_ports == 2) &&
+	    (port_type_array[0] == MLX4_PORT_TYPE_IB) &&
+	    (port_type_array[1] == MLX4_PORT_TYPE_ETH)) {
+		mlx4_warn(dev,
+			  "Granular QoS per VF not supported with IB/Eth configuration\n");
+		dev->caps.flags2 &= ~MLX4_DEV_CAP_FLAG2_QOS_VPP;
+	}
+
 	dev->caps.max_counters = 1 << ilog2(dev_cap->max_counters);
 
 	dev->caps.reserved_qps_cnt[MLX4_QP_REGION_FW] = dev_cap->reserved_qps;
@@ -873,6 +881,8 @@ static int mlx4_slave_cap(struct mlx4_dev *dev)
 		return -ENODEV;
 	}
 
+	mlx4_replace_zero_macs(dev);
+
 	dev->caps.qp0_qkey = kcalloc(dev->caps.num_ports, sizeof(u32), GFP_KERNEL);
 	dev->caps.qp0_tunnel = kcalloc(dev->caps.num_ports, sizeof (u32), GFP_KERNEL);
 	dev->caps.qp0_proxy = kcalloc(dev->caps.num_ports, sizeof (u32), GFP_KERNEL);
@@ -900,9 +910,10 @@ static int mlx4_slave_cap(struct mlx4_dev *dev)
 		dev->caps.qp1_proxy[i - 1] = func_cap.qp1_proxy_qpn;
 		dev->caps.port_mask[i] = dev->caps.port_type[i];
 		dev->caps.phys_port_id[i] = func_cap.phys_port_id;
-		if (mlx4_get_slave_pkey_gid_tbl_len(dev, i,
-						    &dev->caps.gid_table_len[i],
-						    &dev->caps.pkey_table_len[i]))
+		err = mlx4_get_slave_pkey_gid_tbl_len(dev, i,
+						      &dev->caps.gid_table_len[i],
+						      &dev->caps.pkey_table_len[i]);
+		if (err)
 			goto err_mem;
 	}
 
@@ -914,6 +925,7 @@ static int mlx4_slave_cap(struct mlx4_dev *dev)
 			 dev->caps.uar_page_size * dev->caps.num_uars,
 			 (unsigned long long)
 			 pci_resource_len(dev->persist->pdev, 2));
+		err = -ENOMEM;
 		goto err_mem;
 	}
 
@@ -2705,6 +2717,8 @@ static u64 mlx4_enable_sriov(struct mlx4_dev *dev, struct pci_dev *pdev,
 {
 	u64 dev_flags = dev->flags;
 	int err = 0;
+	int fw_enabled_sriov_vfs = min(pci_sriov_get_totalvfs(pdev),
+					MLX4_MAX_NUM_VF);
 
 	if (reset_flow) {
 		dev->dev_vfs = kcalloc(total_vfs, sizeof(*dev->dev_vfs),
@@ -2730,6 +2744,12 @@ static u64 mlx4_enable_sriov(struct mlx4_dev *dev, struct pci_dev *pdev,
 	}
 
 	if (!(dev->flags &  MLX4_FLAG_SRIOV)) {
+		if (total_vfs > fw_enabled_sriov_vfs) {
+			mlx4_err(dev, "requested vfs (%d) > available vfs (%d). Continuing without SR_IOV\n",
+				 total_vfs, fw_enabled_sriov_vfs);
+			err = -ENOMEM;
+			goto disable_sriov;
+		}
 		mlx4_warn(dev, "Enabling SR-IOV with %d VFs\n", total_vfs);
 		err = pci_enable_sriov(pdev, total_vfs);
 	}
@@ -2751,6 +2771,7 @@ disable_sriov:
 free_mem:
 	dev->persist->num_vfs = 0;
 	kfree(dev->dev_vfs);
+       dev->dev_vfs = NULL;
 	return dev_flags & ~MLX4_FLAG_MASTER;
 }
 
@@ -2902,6 +2923,7 @@ slave_start:
 								  existing_vfs,
 								  reset_flow);
 
+				mlx4_close_fw(dev);
 				mlx4_cmd_cleanup(dev, MLX4_CMD_CLEANUP_ALL);
 				dev->flags = dev_flags;
 				if (!SRIOV_VALID_STATE(dev->flags)) {
@@ -3220,20 +3242,20 @@ static int __mlx4_init_one(struct pci_dev *pdev, int pci_dev_data,
 			goto err_disable_pdev;
 		}
 	}
-	if (total_vfs >= MLX4_MAX_NUM_VF) {
+	if (total_vfs > MLX4_MAX_NUM_VF) {
 		dev_err(&pdev->dev,
-			"Requested more VF's (%d) than allowed (%d)\n",
-			total_vfs, MLX4_MAX_NUM_VF - 1);
+			"Requested more VF's (%d) than allowed by hw (%d)\n",
+			total_vfs, MLX4_MAX_NUM_VF);
 		err = -EINVAL;
 		goto err_disable_pdev;
 	}
 
 	for (i = 0; i < MLX4_MAX_PORTS; i++) {
-		if (nvfs[i] + nvfs[2] >= MLX4_MAX_NUM_VF_P_PORT) {
+		if (nvfs[i] + nvfs[2] > MLX4_MAX_NUM_VF_P_PORT) {
 			dev_err(&pdev->dev,
-				"Requested more VF's (%d) for port (%d) than allowed (%d)\n",
+				"Requested more VF's (%d) for port (%d) than allowed by driver (%d)\n",
 				nvfs[i] + nvfs[2], i + 1,
-				MLX4_MAX_NUM_VF_P_PORT - 1);
+				MLX4_MAX_NUM_VF_P_PORT);
 			err = -EINVAL;
 			goto err_disable_pdev;
 		}

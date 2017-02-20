@@ -103,7 +103,9 @@ fw-shipped-$(CONFIG_CHELSO_T4) += cxgb4/t4fw.bin \
 				  cxgb4/t4fw-1.13.32.0.bin \
 				  cxgb4/t5fw-1.13.32.0.bin \
 				  cxgb4/t4fw-1.14.4.0.bin \
-				  cxgb4/t5fw-1.14.4.0.bin
+				  cxgb4/t5fw-1.14.4.0.bin \
+				  cxgb4/t4fw-1.15.37.0.bin \
+				  cxgb4/t5fw-1.15.37.0.bin
 fw-shipped-$(CONFIG_DRM_MGA) += matrox/g200_warp.fw matrox/g400_warp.fw
 fw-shipped-$(CONFIG_DRM_R128) += r128/r128_cce.bin
 fw-shipped-$(CONFIG_DRM_RADEON) += radeon/R100_cp.bin radeon/R200_cp.bin \

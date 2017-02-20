@@ -723,6 +723,8 @@ struct gfs2_sbd {
 	struct list_head sd_ail1_list;
 	struct list_head sd_ail2_list;
 
+	unsigned int sd_log_rsrv_max;
+
 	/* Replay stuff */
 
 	struct list_head sd_revoke_list;

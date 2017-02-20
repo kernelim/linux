@@ -142,7 +142,7 @@ static void do_setup(struct net_device *netdev)
 	netdev->vlan_features = netdev->features;
 	netdev->features |= NETIF_F_HW_VLAN_TX;
 	netdev->features &= ~NETIF_F_LLTX;
-	random_ether_addr(netdev->dev_addr);
+	eth_hw_addr_random(netdev);
 }
 
 static struct vport *internal_dev_create(const struct vport_parms *parms)

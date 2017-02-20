@@ -532,20 +532,11 @@ unsigned long long __init find_and_reserve_crashkernel(unsigned long long size)
 	while (1) {
 		int ret;
 
-		start = find_e820_area(start, ULONG_MAX, size, alignment);
+		start = find_e820_area(start, KEXEC_RESERVE_UPPER_LIMIT, size, alignment);
 
 		if (start == -1ULL) {
 			pr_info("crashkernel reservation failed. "
 				"No suitable area found.\n");
-			return -1ULL;
-		}
-
-
-		if (start + size >= KEXEC_RESERVE_UPPER_LIMIT) {
-			pr_info("crashkernel reservation failed. "
-				"found area can not be reserved: "
-				"start=0x%llx, size=0x%llx \n",
-				start, size);
 			return -1ULL;
 		}
 
@@ -594,7 +585,7 @@ static void __init reserve_crashkernel(void)
 		if (crash_base == -1ULL)
 			return;
 	} else {
-		if (crash_base + crash_size >= KEXEC_RESERVE_UPPER_LIMIT) {
+		if (crash_base + crash_size > KEXEC_RESERVE_UPPER_LIMIT) {
 			pr_info("crashkernel reservation failed. "
 				"specified region can not be reserved.\n");
 			return;
@@ -807,6 +798,7 @@ static void rh_check_supported(void)
 		switch (boot_cpu_data.x86_model) {
 		case 94: /* Skylake-S */
 		case 86: /* Broadwell-DE SoC */
+		case 85: /* Purley */
 		case 79: /* Broadwell-EP and EX */
 		case 78: /* Skylake-Y */
 		case 77: /* Atom Avoton */

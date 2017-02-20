@@ -71,7 +71,6 @@ static int e_snprintf(char *str, size_t size, const char *format, ...)
 }
 
 static char *synthesize_perf_probe_point(struct perf_probe_point *pp);
-static void clear_probe_trace_event(struct probe_trace_event *tev);
 static struct machine *host_machine;
 
 /* Initialize symbol maps and path of vmlinux/modules */
@@ -161,8 +160,9 @@ static u64 kernel_get_symbol_address_by_name(const char *name, bool reloc)
 
 static struct map *kernel_get_module_map(const char *module)
 {
-	struct rb_node *nd;
 	struct map_groups *grp = &host_machine->kmaps;
+	struct maps *maps = &grp->maps[MAP__FUNCTION];
+	struct map *pos;
 
 	/* A file path -- this is an offline module */
 	if (module && strchr(module, '/'))
@@ -171,8 +171,7 @@ static struct map *kernel_get_module_map(const char *module)
 	if (!module)
 		module = "kernel";
 
-	for (nd = rb_first(&grp->maps[MAP__FUNCTION]); nd; nd = rb_next(nd)) {
-		struct map *pos = rb_entry(nd, struct map, rb_node);
+	for (pos = maps__first(maps); pos; pos = map__next(pos)) {
 		if (strncmp(pos->dso->short_name + 1, module,
 			    pos->dso->short_name_len - 2) == 0) {
 			return pos;
@@ -194,8 +193,7 @@ static void put_target_map(struct map *map, bool user)
 {
 	if (map && user) {
 		/* Only the user map needs to be released */
-		dso__delete(map->dso);
-		map__delete(map);
+		map__put(map);
 	}
 }
 
@@ -1762,8 +1760,7 @@ static int find_perf_probe_point_from_map(struct probe_trace_point *tp,
 
 out:
 	if (map && !is_kprobe) {
-		dso__delete(map->dso);
-		map__delete(map);
+		map__put(map);
 	}
 
 	return ret;
@@ -1869,7 +1866,7 @@ void clear_perf_probe_event(struct perf_probe_event *pev)
 	memset(pev, 0, sizeof(*pev));
 }
 
-static void clear_probe_trace_event(struct probe_trace_event *tev)
+void clear_probe_trace_event(struct probe_trace_event *tev)
 {
 	struct probe_trace_arg_ref *ref, *next;
 	int i;
@@ -2837,8 +2834,7 @@ int show_available_funcs(const char *target, struct strfilter *_filter,
 	dso__fprintf_symbols_by_name(map->dso, map->type, stdout);
 end:
 	if (user) {
-		dso__delete(map->dso);
-		map__delete(map);
+		map__put(map);
 	}
 	exit_symbol_maps();
 

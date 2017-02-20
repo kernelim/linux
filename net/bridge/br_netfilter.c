@@ -686,6 +686,9 @@ static unsigned int br_nf_forward_ip(unsigned int hook, struct sk_buff *skb,
 	if (!skb->nf_bridge)
 		return NF_ACCEPT;
 
+	if (skb_dst(skb) == NULL)
+		return NF_ACCEPT;
+
 	/* Need exclusive nf_bridge_info since we might have multiple
 	 * different physoutdevs. */
 	if (!nf_bridge_unshare(skb))
@@ -776,6 +779,9 @@ static unsigned int br_nf_local_out(unsigned int hook, struct sk_buff *skb,
 	if (!skb->nf_bridge)
 		return NF_ACCEPT;
 
+	if (skb_dst(skb) == NULL)
+		return NF_ACCEPT;
+
 	/* Need exclusive nf_bridge_info since we might have multiple
 	 * different physoutdevs. */
 	if (!nf_bridge_unshare(skb))
@@ -846,6 +852,9 @@ static unsigned int br_nf_post_routing(unsigned int hook, struct sk_buff *skb,
 #endif
 
 	if (!nf_bridge)
+		return NF_ACCEPT;
+
+	if (skb_dst(skb) == NULL)
 		return NF_ACCEPT;
 
 	if (!(nf_bridge->mask & (BRNF_BRIDGED | BRNF_BRIDGED_DNAT)))

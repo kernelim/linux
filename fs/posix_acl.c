@@ -153,10 +153,10 @@ posix_acl_valid(const struct posix_acl *acl)
  * file mode permission bits, or else 1. Returns -E... on error.
  */
 int
-posix_acl_equiv_mode(const struct posix_acl *acl, mode_t *mode_p)
+posix_acl_equiv_mode(const struct posix_acl *acl, umode_t *mode_p)
 {
 	const struct posix_acl_entry *pa, *pe;
-	mode_t mode = 0;
+	umode_t mode = 0;
 	int not_equiv = 0;
 
 	FOREACH_ACL_ENTRY(pa, acl, pe) {
@@ -337,6 +337,36 @@ posix_acl_create_masq(struct posix_acl *acl, mode_t *mode_p)
 	*mode_p = (*mode_p & ~S_IRWXUGO) | mode;
         return not_equiv;
 }
+
+/**
+ * posix_acl_update_mode  -  update mode in set_acl
+ *
+ * Update the file mode when setting an ACL: compute the new file permission
+ * bits based on the ACL.  In addition, if the ACL is equivalent to the new
+ * file mode, set *acl to NULL to indicate that no ACL should be set.
+ *
+ * As with chmod, clear the setgit bit if the caller is not in the owning group
+ * or capable of CAP_FSETID (see inode_change_ok).
+ *
+ * Called from set_acl inode operations.
+ */
+int posix_acl_update_mode(struct inode *inode, umode_t *mode_p,
+			  struct posix_acl **acl)
+{
+	umode_t mode = inode->i_mode;
+	int error;
+
+	error = posix_acl_equiv_mode(*acl, &mode);
+	if (error < 0)
+		return error;
+	if (error == 0)
+		*acl = NULL;
+	if (!in_group_p(inode->i_gid) && !capable(CAP_FSETID))
+		mode &= ~S_ISGID;
+	*mode_p = mode;
+	return 0;
+}
+EXPORT_SYMBOL(posix_acl_update_mode);
 
 /*
  * Modify the ACL for the chmod syscall.

@@ -47,6 +47,12 @@ extern int acpi_power_nocheck;
 
 int acpi_wakeup_device_init(void);
 
+#ifdef CONFIG_X86
+void acpi_early_processor_osc(void);
+#else
+static inline void acpi_early_processor_osc(void) {}
+#endif
+
 /* --------------------------------------------------------------------------
                                   Embedded Controller
    -------------------------------------------------------------------------- */

@@ -633,4 +633,38 @@ static void quirk_intel_soc_ixgbe_variant(struct pci_dev *dev)
 }
 DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL, 0x15AE,
 			quirk_intel_soc_ixgbe_variant);
+
+/*
+ * This "quirk" ensures that Intel Skylake systems are not paired with a
+ * Kaby Lake PCH.
+ *
+ * quirk_intel_skylake_check_supported() verifies that if the processor is
+ * an Intel Skylake that the PCH is a Sunrise Point PCH by verifying it has
+ * a device ID in the range of 0xA141 to 0xA15F.  If this is not the case
+ * the hardware is marked as not supported.
+ *
+ * The current Intel datasheet, page 26, documents the acceptable range as
+ * 0x141-0x15F:
+ *
+ * http://www.intel.com/content/www/us/en/chipsets/100-series-chipset-datasheet-vol-1.html?wapkw=intel+100+series
+ *
+ */
+static void quirk_intel_skylake_check_supported(struct pci_dev *dev)
+{
+	if (boot_cpu_data.x86_model != 78 && boot_cpu_data.x86_model != 94)
+		return;
+
+	if (((dev->class >> 8) & 0xffff) != PCI_CLASS_BRIDGE_ISA)
+		return;
+
+	if (dev->device >= 0xA141 && dev->device <= 0xA15F)
+		return;
+
+	pr_crit("Unknown Intel PCH (0x%0x) detected\n",	dev->device);
+	mark_hardware_unsupported("Intel Skylake processor with unknown PCH");
+}
+
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_INTEL, PCI_ANY_ID,
+			quirk_intel_skylake_check_supported);
+
 #endif

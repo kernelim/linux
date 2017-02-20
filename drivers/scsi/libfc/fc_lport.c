@@ -237,16 +237,19 @@ static const char *fc_lport_state(struct fc_lport *lport)
  * @remote_fid:	 The FID of the ptp rport
  * @remote_wwpn: The WWPN of the ptp rport
  * @remote_wwnn: The WWNN of the ptp rport
+ *
+ * Locking Note: The lport lock is expected to be held before calling
+ * this routine.
  */
 static void fc_lport_ptp_setup(struct fc_lport *lport,
 			       u32 remote_fid, u64 remote_wwpn,
 			       u64 remote_wwnn)
 {
-	mutex_lock(&lport->disc.disc_mutex);
 	if (lport->ptp_rdata) {
 		lport->tt.rport_logoff(lport->ptp_rdata);
 		kref_put(&lport->ptp_rdata->kref, lport->tt.rport_destroy);
 	}
+	mutex_lock(&lport->disc.disc_mutex);
 	lport->ptp_rdata = lport->tt.rport_create(lport, remote_fid);
 	kref_get(&lport->ptp_rdata->kref);
 	lport->ptp_rdata->ids.port_name = remote_wwpn;
@@ -301,7 +304,6 @@ struct fc_host_statistics *fc_get_host_stats(struct Scsi_Host *shost)
 {
 	struct fc_host_statistics *fc_stats;
 	struct fc_lport *lport = shost_priv(shost);
-	struct timespec v0, v1;
 	unsigned int cpu;
 	u64 fcp_in_bytes = 0;
 	u64 fcp_out_bytes = 0;
@@ -309,9 +311,7 @@ struct fc_host_statistics *fc_get_host_stats(struct Scsi_Host *shost)
 	fc_stats = &lport->host_stats;
 	memset(fc_stats, 0, sizeof(struct fc_host_statistics));
 
-	jiffies_to_timespec(jiffies, &v0);
-	jiffies_to_timespec(lport->boot_time, &v1);
-	fc_stats->seconds_since_last_reset = (v0.tv_sec - v1.tv_sec);
+	fc_stats->seconds_since_last_reset = (lport->boot_time - jiffies) / HZ;
 
 	for_each_possible_cpu(cpu) {
 		struct fc_stats *stats;
@@ -1003,8 +1003,10 @@ EXPORT_SYMBOL(fc_lport_reset);
  */
 static void fc_lport_reset_locked(struct fc_lport *lport)
 {
-	if (lport->dns_rdata)
+	if (lport->dns_rdata) {
 		lport->tt.rport_logoff(lport->dns_rdata);
+		lport->dns_rdata = NULL;
+	}
 
 	if (lport->ptp_rdata) {
 		lport->tt.rport_logoff(lport->ptp_rdata);
@@ -2073,7 +2075,7 @@ int fc_lport_bsg_request(struct fc_bsg_job *job)
 	struct fc_rport *rport;
 	struct fc_rport_priv *rdata;
 	int rc = -EINVAL;
-	u32 did;
+	u32 did, tov;
 
 	job->reply->reply_payload_rcv_len = 0;
 	if (rsp)
@@ -2104,15 +2106,20 @@ int fc_lport_bsg_request(struct fc_bsg_job *job)
 
 	case FC_BSG_HST_CT:
 		did = ntoh24(job->request->rqst_data.h_ct.port_id);
-		if (did == FC_FID_DIR_SERV)
+		if (did == FC_FID_DIR_SERV) {
 			rdata = lport->dns_rdata;
-		else
+			if (!rdata)
+				break;
+			tov = rdata->e_d_tov;
+		} else {
 			rdata = lport->tt.rport_lookup(lport, did);
+			if (!rdata)
+				break;
+			tov = rdata->e_d_tov;
+			kref_put(&rdata->kref, lport->tt.rport_destroy);
+		}
 
-		if (!rdata)
-			break;
-
-		rc = fc_lport_ct_request(job, lport, did, rdata->e_d_tov);
+		rc = fc_lport_ct_request(job, lport, did, tov);
 		break;
 
 	case FC_BSG_HST_ELS_NOLOGIN:

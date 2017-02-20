@@ -58,7 +58,8 @@ enum mcc_base_status {
 	MCC_STATUS_INSUFFICIENT_BUFFER = 4,
 	MCC_STATUS_UNAUTHORIZED_REQUEST = 5,
 	MCC_STATUS_NOT_SUPPORTED = 66,
-	MCC_STATUS_FEATURE_NOT_SUPPORTED = 68
+	MCC_STATUS_FEATURE_NOT_SUPPORTED = 68,
+	MCC_STATUS_INVALID_LENGTH = 116
 };
 
 /* Additional status */
@@ -66,7 +67,8 @@ enum mcc_addl_status {
 	MCC_ADDL_STATUS_INSUFFICIENT_RESOURCES = 0x16,
 	MCC_ADDL_STATUS_FLASH_IMAGE_CRC_MISMATCH = 0x4d,
 	MCC_ADDL_STATUS_TOO_MANY_INTERFACES = 0x4a,
-	MCC_ADDL_STATUS_INSUFFICIENT_VLANS = 0xab
+	MCC_ADDL_STATUS_INSUFFICIENT_VLANS = 0xab,
+	MCC_ADDL_STATUS_INSUFFICIENT_PRIVILEGES = 0x60
 };
 
 #define CQE_BASE_STATUS_MASK		0xFFFF
@@ -173,10 +175,53 @@ struct be_async_event_qnq {
 	u32 flags;
 } __packed;
 
-#define INCOMPATIBLE_SFP		0x3
+enum {
+	BE_PHY_FUNCTIONAL	= 0,
+	BE_PHY_NOT_PRESENT	= 1,
+	BE_PHY_DIFF_MEDIA	= 2,
+	BE_PHY_INCOMPATIBLE	= 3,
+	BE_PHY_UNQUALIFIED	= 4,
+	BE_PHY_UNCERTIFIED	= 5
+};
+
+#define PHY_STATE_MSG_SEVERITY		0x6
+#define PHY_STATE_OPER			0x1
+#define PHY_STATE_INFO_VALID		0x80
+#define	PHY_STATE_OPER_MSG_NONE		0x2
+#define DEFAULT_MSG_SEVERITY		0x1
+
+#define be_phy_state_unknown(phy_state) (phy_state > BE_PHY_UNCERTIFIED)
+#define be_phy_unqualified(phy_state)				\
+			(phy_state == BE_PHY_UNQUALIFIED ||	\
+			 phy_state == BE_PHY_UNCERTIFIED)
+#define be_phy_misconfigured(phy_state)				\
+			(phy_state == BE_PHY_INCOMPATIBLE ||	\
+			 phy_state == BE_PHY_UNQUALIFIED ||	\
+			 phy_state == BE_PHY_UNCERTIFIED)
+
+extern  char *be_misconfig_evt_port_state[];
+
 /* async event indicating misconfigured port */
 struct be_async_event_misconfig_port {
+ /* DATA_WORD1:
+  * phy state of port 0: bits 7 - 0
+  * phy state of port 1: bits 15 - 8
+  * phy state of port 2: bits 23 - 16
+  * phy state of port 3: bits 31 - 24
+  */
 	u32 event_data_word1;
+ /* DATA_WORD2:
+  * phy state info of port 0: bits 7 - 0
+  * phy state info of port 1: bits 15 - 8
+  * phy state info of port 2: bits 23 - 16
+  * phy state info of port 3: bits 31 - 24
+  *
+  * PHY STATE INFO:
+  * Link operability	 :bit 0
+  * Message severity	 :bit 2 - 1
+  * Rsvd			 :bits 6 - 3
+  * phy state info valid	 :bit 7
+  */
 	u32 event_data_word2;
 	u32 rsvd0;
 	u32 flags;
@@ -248,8 +293,8 @@ struct be_mcc_mailbox {
 #define OPCODE_COMMON_GET_PHY_DETAILS			102
 #define OPCODE_COMMON_SET_DRIVER_FUNCTION_CAP		103
 #define OPCODE_COMMON_GET_CNTL_ADDITIONAL_ATTRIBUTES	121
-#define OPCODE_COMMON_GET_EXT_FAT_CAPABILITES		125
-#define OPCODE_COMMON_SET_EXT_FAT_CAPABILITES		126
+#define OPCODE_COMMON_GET_EXT_FAT_CAPABILITIES		125
+#define OPCODE_COMMON_SET_EXT_FAT_CAPABILITIES		126
 #define OPCODE_COMMON_GET_MAC_LIST			147
 #define OPCODE_COMMON_SET_MAC_LIST			148
 #define OPCODE_COMMON_GET_HSW_CONFIG			152
@@ -262,6 +307,7 @@ struct be_mcc_mailbox {
 #define OPCODE_COMMON_READ_OBJECT			171
 #define OPCODE_COMMON_WRITE_OBJECT			172
 #define OPCODE_COMMON_DELETE_OBJECT			174
+#define OPCODE_COMMON_SET_FEATURES			191
 #define OPCODE_COMMON_MANAGE_IFACE_FILTERS		193
 #define OPCODE_COMMON_GET_IFACE_LIST			194
 #define OPCODE_COMMON_ENABLE_DISABLE_VF			196
@@ -289,9 +335,7 @@ struct be_cmd_req_hdr {
 	u32 timeout;		/* dword 1 */
 	u32 request_length;	/* dword 2 */
 	u8 version;		/* dword 3 */
-	u8 rsvd1;		/* dword 3 */
-	u8 pf_num;		/* dword 3 */
-	u8 rsvd2;		/* dword 3 */
+	u8 rsvd[3];		/* dword 3 */
 };
 
 #define RESP_HDR_INFO_OPCODE_SHIFT	0	/* bits 0 - 7 */
@@ -1492,7 +1536,9 @@ struct be_cmd_resp_acpi_wol_magic_config_v1 {
 	u8 rsvd0[2];
 	u8 wol_settings;
 	u8 rsvd1[5];
-	u32 rsvd2[295];
+	u32 rsvd2[288];
+	u8 magic_mac[6];
+	u8 rsvd3[22];
 } __packed;
 
 #define BE_GET_WOL_CAP			2
@@ -1652,16 +1698,16 @@ struct mgmt_hba_attribs {
 	u32 rsvd2[55];
 	u8 rsvd3[3];
 	u8 phy_port;
-	u32 rsvd4[13];
+	u32 rsvd4[15];
+	u8 rsvd5[2];
+	u8 pci_funcnum;
+	u8 rsvd6;
+	u32 rsvd7[6];
 } __packed;
 
 struct mgmt_controller_attrib {
 	struct mgmt_hba_attribs hba_attribs;
-	u32 rsvd0[2];
-	u16 rsvd1;
-	u8 pci_func_num;
-	u8 rsvd2;
-	u32 rsvd3[7];
+	u32 rsvd0[10];
 } __packed;
 
 struct be_cmd_req_cntl_attribs {
@@ -2068,6 +2114,9 @@ struct be_cmd_req_set_ext_fat_caps {
 #define IMM_SHIFT				6	/* Immediate */
 #define NOSV_SHIFT				7	/* No save */
 
+#define MISSION_NIC				1
+#define MISSION_RDMA				8
+
 struct be_res_desc_hdr {
 	u8 desc_type;
 	u8 desc_len;
@@ -2086,6 +2135,7 @@ struct be_port_res_desc {
 #define NV_TYPE_VXLAN				3
 #define SOCVID_SHIFT				2	/* Strip outer vlan */
 #define RCVID_SHIFT				4	/* Report vlan */
+#define PF_NUM_IGNORE				255
 	u8 nv_flags;
 	u8 rsvd2;
 	__le16 nv_port;					/* vxlan/gre port */
@@ -2183,6 +2233,7 @@ struct be_cmd_req_get_profile_config {
 	struct be_cmd_req_hdr hdr;
 	u8 rsvd;
 #define ACTIVE_PROFILE_TYPE			0x2
+#define SAVED_PROFILE_TYPE			0x0
 #define QUERY_MODIFIABLE_FIELDS_TYPE		BIT(3)
 	u8 type;
 	u16 rsvd1;
@@ -2248,8 +2299,44 @@ struct be_cmd_resp_get_iface_list {
 	struct be_if_desc if_desc;
 };
 
+/************** Set Features *******************/
+#define	BE_FEATURE_UE_RECOVERY		0x10
+#define	BE_UE_RECOVERY_UER_MASK		0x1
+
+struct be_req_ue_recovery {
+	u32	uer;
+	u32	rsvd;
+};
+
+struct be_cmd_req_set_features {
+	struct be_cmd_req_hdr hdr;
+	u32 features;
+	u32 parameter_len;
+	union {
+		struct be_req_ue_recovery req;
+		u32 rsvd[2];
+	} parameter;
+};
+
+struct be_resp_ue_recovery {
+	u32 uer;
+	u16 ue2rp;
+	u16 ue2sr;
+};
+
+struct be_cmd_resp_set_features {
+	struct be_cmd_resp_hdr hdr;
+	u32 features;
+	u32 parameter_len;
+	union {
+		struct be_resp_ue_recovery resp;
+		u32 rsvd[2];
+	} parameter;
+};
+
 /*************** Set logical link ********************/
-#define PLINK_TRACK_SHIFT	8
+#define PLINK_ENABLE            BIT(0)
+#define PLINK_TRACK             BIT(8)
 struct be_cmd_req_set_ll_link {
 	struct be_cmd_req_hdr hdr;
 	u32 link_config; /* Bit 0: UP_DOWN, Bit 9: PLINK */
@@ -2275,6 +2362,7 @@ struct be_cmd_req_manage_iface_filters {
 	u32 cap_control_flags;
 } __packed;
 
+u16 be_POST_stage_get(struct be_adapter *adapter);
 int be_pci_fnum_get(struct be_adapter *adapter);
 int be_fw_wait_ready(struct be_adapter *adapter);
 int be_cmd_mac_addr_query(struct be_adapter *adapter, u8 *mac_addr,
@@ -2395,7 +2483,9 @@ int be_cmd_query_port_name(struct be_adapter *adapter);
 int be_cmd_get_func_config(struct be_adapter *adapter,
 			   struct be_resources *res);
 int be_cmd_get_profile_config(struct be_adapter *adapter,
-			      struct be_resources *res, u8 query, u8 domain);
+			      struct be_resources *res,
+			      struct be_port_resources *port_res,
+			      u8 profile_type, u8 query, u8 domain);
 int be_cmd_get_active_profile(struct be_adapter *adapter, u16 *profile);
 int be_cmd_get_if_id(struct be_adapter *adapter, struct be_vf_cfg *vf_cfg,
 		     int vf_num);
@@ -2407,4 +2497,5 @@ int be_cmd_set_vxlan_port(struct be_adapter *adapter, __be16 port);
 int be_cmd_manage_iface(struct be_adapter *adapter, u32 iface, u8 op);
 int be_cmd_set_sriov_config(struct be_adapter *adapter,
 			    struct be_resources res, u16 num_vfs,
-			    u16 num_vf_qs);
+			    struct be_resources *vft_res);
+int be_cmd_set_features(struct be_adapter *adapter);

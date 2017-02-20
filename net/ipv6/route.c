@@ -981,12 +981,11 @@ static void ip6_rt_update_pmtu(struct dst_entry *dst, u32 mtu)
 {
 	struct rt6_info *rt6 = (struct rt6_info*)dst;
 
-	if (mtu < dst_mtu(dst) && rt6->rt6i_dst.plen == 128) {
+	if (mtu < dst_mtu(dst) && rt6->rt6i_dst.plen == 128 &&
+	    !(dst_metric_locked(dst, RTAX_MTU))) {
 		rt6->rt6i_flags |= RTF_MODIFIED;
-		if (mtu < IPV6_MIN_MTU) {
+		if (mtu < IPV6_MIN_MTU)
 			mtu = IPV6_MIN_MTU;
-			dst->metrics[RTAX_FEATURES-1] |= RTAX_FEATURE_ALLFRAG;
-		}
 		dst->metrics[RTAX_MTU-1] = mtu;
 		call_netevent_notifiers(NETEVENT_PMTU_UPDATE, dst);
 	}
@@ -1384,12 +1383,16 @@ install_route:
 			int type = nla_type(nla);
 
 			if (type) {
+				u32 val;
+
 				if (type > RTAX_MAX) {
 					err = -EINVAL;
 					goto out;
 				}
-
-				rt->u.dst.metrics[type - 1] = nla_get_u32(nla);
+				val = nla_get_u32(nla);
+				if (type == RTAX_HOPLIMIT && val > 255)
+					val = 255;
+				rt->u.dst.metrics[type - 1] = val;
 			}
 		}
 	}
@@ -1654,7 +1657,6 @@ void rt6_pmtu_discovery(struct in6_addr *daddr, struct in6_addr *saddr,
 {
 	struct rt6_info *rt, *nrt;
 	struct net *net = dev_net(dev);
-	int allfrag = 0;
 
 again:
 	rt = rt6_lookup(net, daddr, saddr, dev->ifindex, 0);
@@ -1666,19 +1668,12 @@ again:
 		goto again;
 	}
 
-	if (pmtu >= dst_mtu(&rt->u.dst))
+	if (pmtu >= dst_mtu(&rt->u.dst) ||
+	    dst_metric_locked(&rt->u.dst, RTAX_MTU))
 		goto out;
 
-	if (pmtu < IPV6_MIN_MTU) {
-		/*
-		 * According to RFC2460, PMTU is set to the IPv6 Minimum Link
-		 * MTU (1280) and a fragment header should always be included
-		 * after a node receiving Too Big message reporting PMTU is
-		 * less than the IPv6 Minimum Link MTU.
-		 */
+	if (pmtu < IPV6_MIN_MTU)
 		pmtu = IPV6_MIN_MTU;
-		allfrag = 1;
-	}
 
 	/* New mtu received -> path was valid.
 	   They are sent only in response to data packets,
@@ -1693,8 +1688,6 @@ again:
 	 */
 	if (rt->rt6i_flags & RTF_CACHE) {
 		rt->u.dst.metrics[RTAX_MTU-1] = pmtu;
-		if (allfrag)
-			rt->u.dst.metrics[RTAX_FEATURES-1] |= RTAX_FEATURE_ALLFRAG;
 		dst_set_expires(&rt->u.dst, net->ipv6.sysctl.ip6_rt_mtu_expires);
 		rt->rt6i_flags |= RTF_MODIFIED|RTF_EXPIRES;
 		goto out;
@@ -1712,8 +1705,6 @@ again:
 
 	if (nrt) {
 		nrt->u.dst.metrics[RTAX_MTU-1] = pmtu;
-		if (allfrag)
-			nrt->u.dst.metrics[RTAX_FEATURES-1] |= RTAX_FEATURE_ALLFRAG;
 
 		/* According to RFC 1981, detecting PMTU increase shouldn't be
 		 * happened within 5 mins, the recommended timer is 10 mins.
@@ -2836,11 +2827,15 @@ struct ctl_table *ipv6_route_sysctl_init(struct net *net)
 
 static int ip6_route_net_init(struct net *net)
 {
-	int ret = -ENOMEM;
+	int ret;
 
 	memcpy(&net->ipv6.ip6_dst_ops, &ip6_dst_ops_template,
 	       sizeof(net->ipv6.ip6_dst_ops));
-	dst_ops_extend_register(&net->ipv6.ip6_dst_ops, ip6_default_advmss);
+	ret = dst_ops_extend_register(&net->ipv6.ip6_dst_ops, ip6_default_advmss);
+	if (ret)
+		goto out;
+
+	ret = -ENOMEM;
 
 	net->ipv6.ip6_null_entry = kmemdup(&ip6_null_entry_template,
 					   sizeof(*net->ipv6.ip6_null_entry),
@@ -2893,6 +2888,7 @@ out_ip6_null_entry:
 	kfree(net->ipv6.ip6_null_entry);
 #endif
 out_ip6_dst_ops:
+	dst_ops_extend_unregister(&net->ipv6.ip6_dst_ops);
 	goto out;
 }
 
@@ -2955,7 +2951,9 @@ int __init ip6_route_init(void)
 		goto out_kmem_cache;
 
 	ip6_dst_blackhole_ops.kmem_cachep = ip6_dst_ops_template.kmem_cachep;
-	dst_ops_extend_register(&ip6_dst_blackhole_ops, ip6_default_advmss);
+	ret = dst_ops_extend_register(&ip6_dst_blackhole_ops, ip6_default_advmss);
+	if (ret)
+		goto out_register_subsys;
 
 	/* Registering of the loopback is done before this portion of code,
 	 * the loopback reference in rt6_info will not be taken, do it
@@ -2970,7 +2968,7 @@ int __init ip6_route_init(void)
   #endif
 	ret = fib6_init();
 	if (ret)
-		goto out_register_subsys;
+		goto out_dst_ops_extend;
 
 	ret = xfrm6_init();
 	if (ret)
@@ -3005,6 +3003,8 @@ xfrm6_init:
 	xfrm6_fini();
 out_fib6_init:
 	fib6_gc_cleanup();
+out_dst_ops_extend:
+	dst_ops_extend_unregister(&ip6_dst_blackhole_ops);
 out_register_subsys:
 	unregister_pernet_subsys(&ip6_route_net_ops);
 out_kmem_cache:

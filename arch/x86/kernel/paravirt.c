@@ -39,17 +39,17 @@
 #include <asm/timer.h>
 
 /* nop stub */
-void _paravirt_nop(void)
+void notrace _paravirt_nop(void)
 {
 }
 
 /* identity function, which can be inlined */
-u32 _paravirt_ident_32(u32 x)
+u32 notrace _paravirt_ident_32(u32 x)
 {
 	return x;
 }
 
-u64 _paravirt_ident_64(u64 x)
+u64 notrace _paravirt_ident_64(u64 x)
 {
 	return x;
 }

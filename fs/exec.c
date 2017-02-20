@@ -868,7 +868,7 @@ static int de_thread(struct task_struct *tsk)
 		sig->notify_count = -1;	/* for exit_notify() */
 		for (;;) {
 			threadgroup_change_begin(tsk);
-			write_lock_irq(&tasklist_lock);
+			tasklist_write_lock_irq();
 			if (likely(leader->exit_state))
 				break;
 			__set_current_state(TASK_UNINTERRUPTIBLE);
@@ -947,7 +947,7 @@ no_thread_group:
 		memcpy(newsighand->action, oldsighand->action,
 		       sizeof(newsighand->action));
 
-		write_lock_irq(&tasklist_lock);
+		tasklist_write_lock_irq();
 		spin_lock(&oldsighand->siglock);
 		rcu_assign_pointer(tsk->sighand, newsighand);
 		spin_unlock(&oldsighand->siglock);

@@ -2553,6 +2553,11 @@ struct drm_i915_cmd_table {
 
 /* Early gen2 have a totally busted CS tlb and require pinned batches. */
 #define HAS_BROKEN_CS_TLB(dev)		(IS_I830(dev) || IS_845G(dev))
+
+/* WaRsDisableCoarsePowerGating:skl,bxt */
+#define NEEDS_WaRsDisableCoarsePowerGating(dev) ((IS_BROXTON(dev) && (INTEL_REVID(dev) < BXT_REVID_B0)) || \
+						 IS_SKL_GT3(dev) || \
+						 IS_SKL_GT4(dev))
 /*
  * dp aux and gmbus irq on gen4 seems to be able to generate legacy interrupts
  * even when in MSI mode. This results in spurious interrupt warnings if the

@@ -7,7 +7,7 @@
 
 #include <asm/mc146818rtc.h>
 
-static inline unsigned char get_nmi_reason(void)
+static inline unsigned char default_get_nmi_reason(void)
 {
 	return inb(0x61);
 }

@@ -1434,16 +1434,6 @@ void print_events(const char *event_glob, bool name_only)
 	if (event_glob != NULL)
 		return;
 
-	printf("\n");
-	printf("  %-50s [%s]\n",
-	       "rNNN",
-	       event_type_descriptors[PERF_TYPE_RAW]);
-	printf("  %-50s [%s]\n",
-	       "cpu/t1=v1[,t2=v2,t3 ...]/modifier",
-	       event_type_descriptors[PERF_TYPE_RAW]);
-	printf("   (see 'perf list --help' on how to encode it)\n");
-	printf("\n");
-
 	if (!name_only) {
 		printf("  %-50s [%s]\n",
 		       "rNNN",

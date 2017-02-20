@@ -106,7 +106,6 @@ static int btrfs_set_acl(struct btrfs_trans_handle *trans,
 	int ret, size = 0;
 	const char *name;
 	char *value = NULL;
-	mode_t mode;
 
 	if (acl) {
 		ret = posix_acl_valid(acl);
@@ -117,13 +116,11 @@ static int btrfs_set_acl(struct btrfs_trans_handle *trans,
 
 	switch (type) {
 	case ACL_TYPE_ACCESS:
-		mode = inode->i_mode;
 		name = POSIX_ACL_XATTR_ACCESS;
 		if (acl) {
-			ret = posix_acl_equiv_mode(acl, &mode);
-			if (ret < 0)
+			ret = posix_acl_update_mode(inode, &inode->i_mode, &acl);
+			if (ret)
 				return ret;
-			inode->i_mode = mode;
 		}
 		ret = 0;
 		break;

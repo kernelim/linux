@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel Ethernet Controller XL710 Family Linux Driver
- * Copyright(c) 2013 - 2015 Intel Corporation.
+ * Copyright(c) 2013 - 2016 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -64,9 +64,6 @@
 #include "i40e_dcb.h"
 
 /* Useful i40e defaults */
-#define I40E_BASE_PF_SEID     16
-#define I40E_BASE_VSI_SEID    512
-#define I40E_BASE_VEB_SEID    288
 #define I40E_MAX_VEB          16
 
 #define I40E_MAX_NUM_DESCRIPTORS      4096
@@ -104,6 +101,7 @@
 #define I40E_PRIV_FLAGS_FD_ATR		BIT(2)
 #define I40E_PRIV_FLAGS_VEB_STATS	BIT(3)
 #define I40E_PRIV_FLAGS_PS		BIT(4)
+#define I40E_PRIV_FLAGS_HW_ATR_EVICT	BIT(5)
 
 #define I40E_NVM_VERSION_LO_SHIFT  0
 #define I40E_NVM_VERSION_LO_MASK   (0xff << I40E_NVM_VERSION_LO_SHIFT)
@@ -113,6 +111,7 @@
 #define I40E_OEM_VER_PATCH_MASK    0xff
 #define I40E_OEM_VER_BUILD_SHIFT   8
 #define I40E_OEM_VER_SHIFT         24
+#define I40E_PHY_DEBUG_PORT        BIT(4)
 
 /* The values in here are decimal coded as hex as is the case in the NVM map*/
 #define I40E_CURRENT_NVM_VERSION_HI 0x2
@@ -136,6 +135,19 @@
 
 /* default to trying for four seconds */
 #define I40E_TRY_LINK_TIMEOUT (4 * HZ)
+
+/**
+ * i40e_is_mac_710 - Return true if MAC is X710/XL710
+ * @hw: ptr to the hardware info
+ **/
+static inline bool i40e_is_mac_710(struct i40e_hw *hw)
+{
+	if ((hw->mac.type == I40E_MAC_X710) ||
+	    (hw->mac.type == I40E_MAC_XL710))
+		return true;
+
+	return false;
+}
 
 /* driver state flags */
 enum i40e_state_t {
@@ -229,7 +241,6 @@ struct i40e_fdir_filter {
 #define I40E_DCB_PRIO_TYPE_STRICT	0
 #define I40E_DCB_PRIO_TYPE_ETS		1
 #define I40E_DCB_STRICT_PRIO_CREDITS	127
-#define I40E_MAX_USER_PRIORITY	8
 /* DCB per TC information data structure */
 struct i40e_tc_info {
 	u16	qoffset;	/* Queue offset from base queue */
@@ -264,6 +275,7 @@ struct i40e_pf {
 #endif /* I40E_FCOE */
 	u16 num_lan_qps;           /* num lan queues this PF has set up */
 	u16 num_lan_msix;          /* num queue vectors for the base PF vsi */
+	u16 num_fdsb_msix;         /* num queue vectors for sideband Fdir */
 	int queues_left;           /* queues left unclaimed */
 	u16 alloc_rss_size;        /* allocated RSS queues */
 	u16 rss_size_max;          /* HW defined max RSS queues */
@@ -336,6 +348,12 @@ struct i40e_pf {
 #define I40E_FLAG_LINK_POLLING_ENABLED		BIT_ULL(39)
 #define I40E_FLAG_VEB_MODE_ENABLED		BIT_ULL(40)
 #define I40E_FLAG_NO_PCI_LINK_CHECK		BIT_ULL(42)
+#define I40E_FLAG_100M_SGMII_CAPABLE		BIT_ULL(43)
+#define I40E_FLAG_RESTART_AUTONEG		BIT_ULL(44)
+#define I40E_FLAG_NO_DCB_SUPPORT		BIT_ULL(45)
+#define I40E_FLAG_USE_SET_LLDP_MIB		BIT_ULL(46)
+#define I40E_FLAG_STOP_FW_LLDP			BIT_ULL(47)
+#define I40E_FLAG_HAVE_10GBASET_PHY		BIT_ULL(48)
 
 	/* tracks features that get auto disabled by errors */
 	u64 auto_disable_flags;
@@ -387,6 +405,7 @@ struct i40e_pf {
 	struct i40e_vf *vf;
 	int num_alloc_vfs;	/* actual number of VFs allocated */
 	u32 vf_aq_requests;
+	u32 arq_overflows;	/* Not fatal, possibly indicative of problems */
 
 	/* DCBx/DCBNL capability for PF that indicates
 	 * whether DCBx is managed by firmware or host
@@ -419,6 +438,7 @@ struct i40e_pf {
 
 	u32 ioremap_len;
 	u32 fd_inv;
+	u16 phy_led_val;
 };
 
 struct i40e_mac_filter {
@@ -489,6 +509,7 @@ struct i40e_vsi {
 	u32 tx_busy;
 	u64 tx_linearize;
 	u64 tx_force_wb;
+	u64 tx_lost_interrupt;
 	u32 rx_buf_failed;
 	u32 rx_page_failed;
 
@@ -497,13 +518,6 @@ struct i40e_vsi {
 	struct i40e_ring **tx_rings;
 
 	u16 work_limit;
-	/* high bit set means dynamic, use accessor routines to read/write.
-	 * hardware only supports 2us resolution for the ITR registers.
-	 * these values always store the USER setting, and must be converted
-	 * before programming to a register.
-	 */
-	u16 rx_itr_setting;
-	u16 tx_itr_setting;
 	u16 int_rate_limit;  /* value in usecs */
 
 	u16 rss_table_size; /* HW RSS table size */
@@ -532,7 +546,7 @@ struct i40e_vsi {
 	u16 num_queue_pairs; /* Used tx and rx pairs */
 	u16 num_desc;
 	enum i40e_vsi_type type;  /* VSI type, e.g., LAN, FCoE, etc */
-	u16 vf_id;		/* Virtual function ID for SRIOV VSIs */
+	s16 vf_id;		/* Virtual function ID for SRIOV VSIs */
 
 	struct i40e_tc_configuration tc_config;
 	struct i40e_aqc_vsi_properties_data info;
@@ -744,6 +758,9 @@ static inline void i40e_irq_dynamic_enable(struct i40e_vsi *vsi, int vector)
 	struct i40e_hw *hw = &pf->hw;
 	u32 val;
 
+	/* definitely clear the PBA here, as this function is meant to
+	 * clean out all previous interrupts AND enable the interrupt
+	 */
 	val = I40E_PFINT_DYN_CTLN_INTENA_MASK |
 	      I40E_PFINT_DYN_CTLN_CLEARPBA_MASK |
 	      (I40E_ITR_NONE << I40E_PFINT_DYN_CTLN_ITR_INDX_SHIFT);
@@ -751,9 +768,8 @@ static inline void i40e_irq_dynamic_enable(struct i40e_vsi *vsi, int vector)
 	/* skip the flush */
 }
 
-void i40e_irq_dynamic_disable(struct i40e_vsi *vsi, int vector);
 void i40e_irq_dynamic_disable_icr0(struct i40e_pf *pf);
-void i40e_irq_dynamic_enable_icr0(struct i40e_pf *pf);
+void i40e_irq_dynamic_enable_icr0(struct i40e_pf *pf, bool clearpba);
 #ifdef I40E_FCOE
 struct rtnl_link_stats64 *i40e_get_netdev_stats_struct(
 					     struct net_device *netdev,
@@ -768,12 +784,15 @@ void i40e_vlan_rx_add_vid(struct net_device *netdev, u16 vid);
 void i40e_vlan_rx_kill_vid(struct net_device *netdev, u16 vid);
 #endif
 int i40e_open(struct net_device *netdev);
+int i40e_close(struct net_device *netdev);
 int i40e_vsi_open(struct i40e_vsi *vsi);
 void i40e_vlan_stripping_disable(struct i40e_vsi *vsi);
 int i40e_vsi_add_vlan(struct i40e_vsi *vsi, s16 vid);
 int i40e_vsi_kill_vlan(struct i40e_vsi *vsi, s16 vid);
 struct i40e_mac_filter *i40e_put_mac_in_vlan(struct i40e_vsi *vsi, u8 *macaddr,
 					     bool is_vf, bool is_netdev);
+int i40e_del_mac_all_vlan(struct i40e_vsi *vsi, u8 *macaddr,
+			  bool is_vf, bool is_netdev);
 bool i40e_is_vsi_in_vlan(struct i40e_vsi *vsi);
 struct i40e_mac_filter *i40e_find_mac(struct i40e_vsi *vsi, u8 *macaddr,
 				      bool is_vf, bool is_netdev);

@@ -112,6 +112,26 @@ struct hd_struct {
 	struct rcu_head rcu_head;
 };
 
+/*
+ * struct hd_struct are always allocated in add_partition or are directly
+ * included in struct gendisk (field part0). However, we don't need the
+ * reference for part0, so we can allocate hd_struct_aux at the same time
+ * as hd_struct, in add_partition.
+ */
+struct hd_struct_aux {
+	atomic_t ref;
+};
+
+struct hd_struct_with_aux {
+	struct hd_struct part;
+	struct hd_struct_aux aux;
+};
+
+static inline struct hd_struct_aux *hd_get_aux(struct hd_struct *p)
+{
+	return &container_of(p, struct hd_struct_with_aux, part)->aux;
+}
+
 #define GENHD_FL_REMOVABLE			1
 #define GENHD_FL_DRIVERFS			2
 #define GENHD_FL_MEDIA_CHANGE_NOTIFY		4
@@ -238,8 +258,6 @@ extern void disk_part_iter_exit(struct disk_part_iter *piter);
 
 extern struct hd_struct *disk_map_sector_rcu(struct gendisk *disk,
 					     sector_t sector);
-extern int is_same_part(struct gendisk *, sector_t, sector_t,
-			struct hd_struct **, struct hd_struct **);
 
 /*
  * Macros to operate on percpu disk statistics:
@@ -541,6 +559,7 @@ extern int rescan_partitions(struct gendisk *disk, struct block_device *bdev);
 extern struct hd_struct * __must_check add_partition(struct gendisk *disk,
 						     int partno, sector_t start,
 						     sector_t len, int flags);
+extern void __delete_partition(struct hd_struct *);
 extern void delete_partition(struct gendisk *, int);
 extern void printk_all_partitions(void);
 
@@ -568,6 +587,44 @@ extern ssize_t part_fail_store(struct device *dev,
 			       struct device_attribute *attr,
 			       const char *buf, size_t count);
 #endif /* CONFIG_FAIL_MAKE_REQUEST */
+
+static inline atomic_t *hd_get_ref(struct hd_struct *p)
+{
+	if (p->partno)
+		return &hd_get_aux(p)->ref;
+	return NULL;
+}
+
+static inline void hd_ref_init(struct hd_struct *part)
+{
+	atomic_t *ref = hd_get_ref(part);
+	if (!ref)
+		return;
+	atomic_set(ref, 1);
+	smp_mb();
+}
+
+static inline void hd_struct_get(struct hd_struct *part)
+{
+	atomic_t *ref = hd_get_ref(part);
+	if (!ref)
+		return;
+	atomic_inc(ref);
+	smp_mb__after_atomic_inc();
+}
+
+static inline int hd_struct_try_get(struct hd_struct *part)
+{
+	atomic_t *ref = hd_get_ref(part);
+	return !ref || atomic_inc_not_zero(ref);
+}
+
+static inline void hd_struct_put(struct hd_struct *part)
+{
+	atomic_t *ref = hd_get_ref(part);
+	if (ref && atomic_dec_and_test(ref))
+		__delete_partition(part);
+}
 
 #else /* CONFIG_BLOCK */
 

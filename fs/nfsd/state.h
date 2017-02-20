@@ -341,7 +341,9 @@ struct nfs4_stateowner {
 	 * sequence id expected from the client: */
 	u32                     so_seqid;
 	struct xdr_netobj       so_owner;     /* open owner name */
-	int                     so_confirmed; /* successful OPEN_CONFIRM? */
+#define NFS4_OO_CONFIRMED 1
+#define NFS4_OO_NEW       4
+	unsigned char		so_flags;
 	struct nfs4_replay	so_replay;
 };
 

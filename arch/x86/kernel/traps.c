@@ -491,7 +491,7 @@ static notrace __kprobes void default_do_nmi(struct pt_regs *regs)
 
 	/* Only the BSP gets external NMIs from the system. */
 	if (!cpu)
-		reason = get_nmi_reason();
+		reason = x86_platform.get_nmi_reason();
 
 	if (!(reason & 0xc0)) {
 		if (notify_die(DIE_NMI_IPI, "nmi_ipi", regs, reason, 2, SIGINT)

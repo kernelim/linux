@@ -2282,13 +2282,23 @@ xfs_iflush_cluster(
 		 * We need to check under the i_flags_lock for a valid inode
 		 * here. Skip it if it is not valid or the wrong inode.
 		 */
-		spin_lock(&ip->i_flags_lock);
-		if (!ip->i_ino ||
-		    (XFS_INO_TO_AGINO(mp, iq->i_ino) & mask) != first_index) {
-			spin_unlock(&ip->i_flags_lock);
+		spin_lock(&iq->i_flags_lock);
+		if (!iq->i_ino ||
+		    __xfs_iflags_test(iq, XFS_ISTALE)) {
+			spin_unlock(&iq->i_flags_lock);
 			continue;
 		}
-		spin_unlock(&ip->i_flags_lock);
+
+		/*
+		 * Once we fall off the end of the cluster, no point checking
+		 * any more inodes in the list because they will also all be
+		 * outside the cluster.
+		 */
+		if ((XFS_INO_TO_AGINO(mp, iq->i_ino) & mask) != first_index) {
+			spin_unlock(&iq->i_flags_lock);
+			break;
+		}
+		spin_unlock(&iq->i_flags_lock);
 
 		/*
 		 * Do an un-protected check to see if the inode is dirty and
@@ -2310,6 +2320,19 @@ xfs_iflush_cluster(
 			continue;
 		}
 		if (xfs_ipincount(iq)) {
+			xfs_ifunlock(iq);
+			xfs_iunlock(iq, XFS_ILOCK_SHARED);
+			continue;
+		}
+
+
+		/*
+		 * Check the inode number again, just to be certain we are not
+		 * racing with freeing in xfs_reclaim_inode(). See the comments
+		 * in that function for more information as to why the initial
+		 * check is not sufficient.
+		 */
+		if (!iq->i_ino) {
 			xfs_ifunlock(iq);
 			xfs_iunlock(iq, XFS_ILOCK_SHARED);
 			continue;
@@ -2403,8 +2426,7 @@ xfs_iflush(
 	xfs_inode_t		*ip,
 	uint			flags)
 {
-	xfs_inode_log_item_t	*iip;
-	xfs_buf_t		*bp;
+	struct xfs_buf		*bp = NULL;
 	xfs_dinode_t		*dip;
 	xfs_mount_t		*mp;
 	int			error;
@@ -2416,7 +2438,6 @@ xfs_iflush(
 	ASSERT(ip->i_d.di_format != XFS_DINODE_FMT_BTREE ||
 	       ip->i_d.di_nextents > ip->i_df.if_ext_max);
 
-	iip = ip->i_itemp;
 	mp = ip->i_mount;
 
 	/*
@@ -2453,24 +2474,33 @@ xfs_iflush(
 	/*
 	 * This may have been unpinned because the filesystem is shutting
 	 * down forcibly. If that's the case we must not write this inode
-	 * to disk, because the log record didn't make it to disk!
+	 * to disk, because the log record didn't make it to disk.
+	 *
+	 * We also have to remove the log item from the AIL in this case,
+	 * as we wait for an empty AIL as part of the unmount process.
 	 */
 	if (XFS_FORCED_SHUTDOWN(mp)) {
-		if (iip)
-			iip->ili_fields = 0;
-		xfs_ifunlock(ip);
-		return XFS_ERROR(EIO);
+		error = XFS_ERROR(EIO);
+		goto abort_out;
 	}
 
 	/*
-	 * Get the buffer containing the on-disk inode.
+	 * Get the buffer containing the on-disk inode. We are doing a try-lock
+	 * operation here, so we may get  an EAGAIN error. In that case, we
+	 * simply want to return with the inode still dirty.
+	 *
+	 * If we get any other error, we effectively have a corruption situation
+	 * and we cannot flush the inode, so we treat it the same as failing
+	 * xfs_iflush_int().
 	 */
 	error = xfs_itobp(mp, NULL, ip, &dip, &bp,
 				(flags & SYNC_TRYLOCK) ? XBF_TRYLOCK : XBF_LOCK);
-	if (error || !bp) {
+	if (error == EAGAIN) {
 		xfs_ifunlock(ip);
 		return error;
 	}
+	if (error)
+		goto corrupt_out;
 
 	/*
 	 * First flush out the inode that xfs_iflush was called with.
@@ -2501,14 +2531,17 @@ xfs_iflush(
 	return error;
 
 corrupt_out:
-	xfs_buf_relse(bp);
+	if (bp)
+		xfs_buf_relse(bp);
 	xfs_force_shutdown(mp, SHUTDOWN_CORRUPT_INCORE);
 cluster_corrupt_out:
+	error = XFS_ERROR(EFSCORRUPTED);
+abort_out:
 	/*
 	 * Unlocks the flush lock
 	 */
 	xfs_iflush_abort(ip, false);
-	return XFS_ERROR(EFSCORRUPTED);
+	return error;
 }
 
 
@@ -3358,6 +3391,24 @@ xfs_iext_indirect_to_direct(
 }
 
 /*
+ * Remove all records from the indirection array.
+ */
+STATIC void
+xfs_iext_irec_remove_all(
+	struct xfs_ifork *ifp)
+{
+	int		nlists;
+	int		i;
+
+	ASSERT(ifp->if_flags & XFS_IFEXTIREC);
+	nlists = ifp->if_real_bytes / XFS_IEXT_BUFSZ;
+	for (i = 0; i < nlists; i++)
+		kmem_free(ifp->if_u1.if_ext_irec[i].er_extbuf);
+	kmem_free(ifp->if_u1.if_ext_irec);
+	ifp->if_flags &= ~XFS_IFEXTIREC;
+}
+
+/*
  * Free incore file extents.
  */
 void
@@ -3365,14 +3416,7 @@ xfs_iext_destroy(
 	xfs_ifork_t	*ifp)		/* inode fork pointer */
 {
 	if (ifp->if_flags & XFS_IFEXTIREC) {
-		int	erp_idx;
-		int	nlists;
-
-		nlists = ifp->if_real_bytes / XFS_IEXT_BUFSZ;
-		for (erp_idx = nlists - 1; erp_idx >= 0 ; erp_idx--) {
-			xfs_iext_irec_remove(ifp, erp_idx);
-		}
-		ifp->if_flags &= ~XFS_IFEXTIREC;
+		xfs_iext_irec_remove_all(ifp);
 	} else if (ifp->if_real_bytes) {
 		kmem_free(ifp->if_u1.if_extents);
 	} else if (ifp->if_bytes) {

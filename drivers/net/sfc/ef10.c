@@ -50,6 +50,12 @@ enum {
  */
 #define HUNT_FILTER_TBL_ROWS 8192
 
+#define EFX_EF10_FILTER_ID_INVALID 0xffff
+struct efx_ef10_dev_addr {
+	u8 addr[ETH_ALEN];
+	u16 id;
+};
+
 struct efx_ef10_filter_table {
 /* The RX match field masks supported by this fw & hw, in order of priority */
 	enum efx_filter_match_flags rx_match_flags[
@@ -70,13 +76,14 @@ struct efx_ef10_filter_table {
 /* Shadow of net_device address lists, guarded by mac_lock */
 #define EFX_EF10_FILTER_DEV_UC_MAX	32
 #define EFX_EF10_FILTER_DEV_MC_MAX	256
-	struct {
-		u8 addr[ETH_ALEN];
-		u16 id;
-	} dev_uc_list[EFX_EF10_FILTER_DEV_UC_MAX],
-	  dev_mc_list[EFX_EF10_FILTER_DEV_MC_MAX];
-	int dev_uc_count;		/* negative for PROMISC */
-	int dev_mc_count;		/* negative for PROMISC/ALLMULTI */
+	struct efx_ef10_dev_addr dev_uc_list[EFX_EF10_FILTER_DEV_UC_MAX];
+	struct efx_ef10_dev_addr dev_mc_list[EFX_EF10_FILTER_DEV_MC_MAX];
+	int dev_uc_count;
+	int dev_mc_count;
+/* Indices (like efx_ef10_dev_addr.id) for promisc/allmulti filters */
+	u16 ucdef_id;
+	u16 bcast_id;
+	u16 mcdef_id;
 };
 
 /* An arbitrary search limit for the software hash table */
@@ -147,7 +154,7 @@ static int efx_ef10_get_vf_index(struct efx_nic *efx)
 
 static int efx_ef10_init_datapath_caps(struct efx_nic *efx)
 {
-	MCDI_DECLARE_BUF(outbuf, MC_CMD_GET_CAPABILITIES_OUT_LEN);
+	MCDI_DECLARE_BUF(outbuf, MC_CMD_GET_CAPABILITIES_V2_OUT_LEN);
 	struct efx_ef10_nic_data *nic_data = efx->nic_data;
 	size_t outlen;
 	int rc;
@@ -158,7 +165,7 @@ static int efx_ef10_init_datapath_caps(struct efx_nic *efx)
 			  outbuf, sizeof(outbuf), &outlen);
 	if (rc)
 		return rc;
-	if (outlen < sizeof(outbuf)) {
+	if (outlen < MC_CMD_GET_CAPABILITIES_OUT_LEN) {
 		netif_err(efx, drv, efx->net_dev,
 			  "unable to read datapath firmware capabilities\n");
 		return -EIO;
@@ -166,6 +173,16 @@ static int efx_ef10_init_datapath_caps(struct efx_nic *efx)
 
 	nic_data->datapath_caps =
 		MCDI_DWORD(outbuf, GET_CAPABILITIES_OUT_FLAGS1);
+
+	if (outlen >= MC_CMD_GET_CAPABILITIES_V2_OUT_LEN) {
+		nic_data->datapath_caps2 = MCDI_DWORD(outbuf,
+				GET_CAPABILITIES_V2_OUT_FLAGS2);
+		nic_data->piobuf_size = MCDI_WORD(outbuf,
+				GET_CAPABILITIES_V2_OUT_SIZE_PIO_BUFF);
+	} else {
+		nic_data->datapath_caps2 = 0;
+		nic_data->piobuf_size = ER_DZ_TX_PIOBUF_SIZE;
+	}
 
 	/* record the DPCPU firmware IDs to determine VEB vswitching support.
 	 */
@@ -195,6 +212,116 @@ static int efx_ef10_get_sysclk_freq(struct efx_nic *efx)
 		return rc;
 	rc = MCDI_DWORD(outbuf, GET_CLOCK_OUT_SYS_FREQ);
 	return rc > 0 ? rc : -ERANGE;
+}
+
+static int efx_ef10_get_timer_workarounds(struct efx_nic *efx)
+{
+	struct efx_ef10_nic_data *nic_data = efx->nic_data;
+	unsigned int implemented;
+	unsigned int enabled;
+	int rc;
+
+	nic_data->workaround_35388 = false;
+	nic_data->workaround_61265 = false;
+
+	rc = efx_mcdi_get_workarounds(efx, &implemented, &enabled);
+
+	if (rc == -ENOSYS) {
+		/* Firmware without GET_WORKAROUNDS - not a problem. */
+		rc = 0;
+	} else if (rc == 0) {
+		/* Bug61265 workaround is always enabled if implemented. */
+		if (enabled & MC_CMD_GET_WORKAROUNDS_OUT_BUG61265)
+			nic_data->workaround_61265 = true;
+
+		if (enabled & MC_CMD_GET_WORKAROUNDS_OUT_BUG35388) {
+			nic_data->workaround_35388 = true;
+		} else if (implemented & MC_CMD_GET_WORKAROUNDS_OUT_BUG35388) {
+			/* Workaround is implemented but not enabled.
+			 * Try to enable it.
+			 */
+			rc = efx_mcdi_set_workaround(efx,
+						     MC_CMD_WORKAROUND_BUG35388,
+						     true, NULL);
+			if (rc == 0)
+				nic_data->workaround_35388 = true;
+			/* If we failed to set the workaround just carry on. */
+			rc = 0;
+		}
+	}
+
+	netif_dbg(efx, probe, efx->net_dev,
+		  "workaround for bug 35388 is %sabled\n",
+		  nic_data->workaround_35388 ? "en" : "dis");
+	netif_dbg(efx, probe, efx->net_dev,
+		  "workaround for bug 61265 is %sabled\n",
+		  nic_data->workaround_61265 ? "en" : "dis");
+
+	return rc;
+}
+
+static void efx_ef10_process_timer_config(struct efx_nic *efx,
+					  const efx_dword_t *data)
+{
+	unsigned int max_count;
+
+	if (EFX_EF10_WORKAROUND_61265(efx)) {
+		efx->timer_quantum_ns = MCDI_DWORD(data,
+			GET_EVQ_TMR_PROPERTIES_OUT_MCDI_TMR_STEP_NS);
+		efx->timer_max_ns = MCDI_DWORD(data,
+			GET_EVQ_TMR_PROPERTIES_OUT_MCDI_TMR_MAX_NS);
+	} else if (EFX_EF10_WORKAROUND_35388(efx)) {
+		efx->timer_quantum_ns = MCDI_DWORD(data,
+			GET_EVQ_TMR_PROPERTIES_OUT_BUG35388_TMR_NS_PER_COUNT);
+		max_count = MCDI_DWORD(data,
+			GET_EVQ_TMR_PROPERTIES_OUT_BUG35388_TMR_MAX_COUNT);
+		efx->timer_max_ns = max_count * efx->timer_quantum_ns;
+	} else {
+		efx->timer_quantum_ns = MCDI_DWORD(data,
+			GET_EVQ_TMR_PROPERTIES_OUT_TMR_REG_NS_PER_COUNT);
+		max_count = MCDI_DWORD(data,
+			GET_EVQ_TMR_PROPERTIES_OUT_TMR_REG_MAX_COUNT);
+		efx->timer_max_ns = max_count * efx->timer_quantum_ns;
+	}
+
+	netif_dbg(efx, probe, efx->net_dev,
+		  "got timer properties from MC: quantum %u ns; max %u ns\n",
+		  efx->timer_quantum_ns, efx->timer_max_ns);
+}
+
+static int efx_ef10_get_timer_config(struct efx_nic *efx)
+{
+	MCDI_DECLARE_BUF(outbuf, MC_CMD_GET_EVQ_TMR_PROPERTIES_OUT_LEN);
+	int rc;
+
+	rc = efx_ef10_get_timer_workarounds(efx);
+	if (rc)
+		return rc;
+
+	rc = efx_mcdi_rpc_quiet(efx, MC_CMD_GET_EVQ_TMR_PROPERTIES, NULL, 0,
+				outbuf, sizeof(outbuf), NULL);
+
+	if (rc == 0) {
+		efx_ef10_process_timer_config(efx, outbuf);
+	} else if (rc == -ENOSYS || rc == -EPERM) {
+		/* Not available - fall back to Huntington defaults. */
+		unsigned int quantum;
+
+		rc = efx_ef10_get_sysclk_freq(efx);
+		if (rc < 0)
+			return rc;
+
+		quantum = 1536000 / rc; /* 1536 cycles */
+		efx->timer_quantum_ns = quantum;
+		efx->timer_max_ns = efx->type->timer_period_max * quantum;
+		rc = 0;
+	} else {
+		efx_mcdi_display_error(efx, MC_CMD_GET_EVQ_TMR_PROPERTIES,
+				       MC_CMD_GET_EVQ_TMR_PROPERTIES_OUT_LEN,
+				       NULL, 0, rc);
+	}
+
+	return rc;
 }
 
 static int efx_ef10_get_mac_address_pf(struct efx_nic *efx, u8 *mac_address)
@@ -372,32 +499,9 @@ static int efx_ef10_probe(struct efx_nic *efx)
 	if (rc)
 		goto fail5;
 
-	rc = efx_ef10_get_sysclk_freq(efx);
+	rc = efx_ef10_get_timer_config(efx);
 	if (rc < 0)
 		goto fail5;
-	efx->timer_quantum_ns = 1536000 / rc; /* 1536 cycles */
-
-	/* Check whether firmware supports bug 35388 workaround.
-	 * First try to enable it, then if we get EPERM, just
-	 * ask if it's already enabled
-	 */
-	rc = efx_mcdi_set_workaround(efx, MC_CMD_WORKAROUND_BUG35388, true);
-	if (rc == 0) {
-		nic_data->workaround_35388 = true;
-	} else if (rc == -EPERM) {
-		unsigned int enabled;
-
-		rc = efx_mcdi_get_workarounds(efx, NULL, &enabled);
-		if (rc)
-			goto fail3;
-		nic_data->workaround_35388 = enabled &
-			MC_CMD_GET_WORKAROUNDS_OUT_BUG35388;
-	} else if (rc != -ENOSYS && rc != -ENOENT) {
-		goto fail5;
-	}
-	netif_dbg(efx, probe, efx->net_dev,
-		  "workaround for bug 35388 is %sabled\n",
-		  nic_data->workaround_35388 ? "en" : "dis");
 
 	rc = efx_mcdi_mon_probe(efx);
 	if (rc && rc != -EPERM)
@@ -480,10 +584,17 @@ static int efx_ef10_alloc_piobufs(struct efx_nic *efx, unsigned int n)
 	BUILD_BUG_ON(MC_CMD_ALLOC_PIOBUF_IN_LEN != 0);
 
 	for (i = 0; i < n; i++) {
-		rc = efx_mcdi_rpc(efx, MC_CMD_ALLOC_PIOBUF, NULL, 0,
-				  outbuf, sizeof(outbuf), &outlen);
-		if (rc)
+		rc = efx_mcdi_rpc_quiet(efx, MC_CMD_ALLOC_PIOBUF, NULL, 0,
+					outbuf, sizeof(outbuf), &outlen);
+		if (rc) {
+			/* Don't display the MC error if we didn't have space
+			 * for a VF.
+			 */
+			if (!(efx_ef10_is_vf(efx) && rc == -ENOSPC))
+				efx_mcdi_display_error(efx, MC_CMD_ALLOC_PIOBUF,
+						       0, outbuf, outlen, rc);
 			break;
+		}
 		if (outlen < MC_CMD_ALLOC_PIOBUF_OUT_LEN) {
 			rc = -EIO;
 			break;
@@ -548,8 +659,8 @@ static int efx_ef10_link_piobufs(struct efx_nic *efx)
 			offset = ((efx->tx_channel_offset + efx->n_tx_channels -
 				   tx_queue->channel->channel - 1) *
 				  efx_piobuf_size);
-			index = offset / ER_DZ_TX_PIOBUF_SIZE;
-			offset = offset % ER_DZ_TX_PIOBUF_SIZE;
+			index = offset / nic_data->piobuf_size;
+			offset = offset % nic_data->piobuf_size;
 
 			/* When the host page size is 4K, the first
 			 * host page in the WC mapping may be within
@@ -606,6 +717,17 @@ fail:
 	return rc;
 }
 
+static void efx_ef10_forget_old_piobufs(struct efx_nic *efx)
+{
+	struct efx_channel *channel;
+	struct efx_tx_queue *tx_queue;
+
+	/* All our existing PIO buffers went away */
+	efx_for_each_channel(channel, efx)
+		efx_for_each_channel_tx_queue(tx_queue, channel)
+			tx_queue->piobuf = NULL;
+}
+
 #else /* !EFX_USE_PIO */
 
 static int efx_ef10_alloc_piobufs(struct efx_nic *efx, unsigned int n)
@@ -619,6 +741,10 @@ static int efx_ef10_link_piobufs(struct efx_nic *efx)
 }
 
 static void efx_ef10_free_piobufs(struct efx_nic *efx)
+{
+}
+
+static void efx_ef10_forget_old_piobufs(struct efx_nic *efx)
 {
 }
 
@@ -674,6 +800,45 @@ static void efx_ef10_remove(struct efx_nic *efx)
 static int efx_ef10_probe_pf(struct efx_nic *efx)
 {
 	return efx_ef10_probe(efx);
+}
+
+int efx_ef10_vadaptor_query(struct efx_nic *efx, unsigned int port_id,
+			    u32 *port_flags, u32 *vadaptor_flags,
+			    unsigned int *vlan_tags)
+{
+	struct efx_ef10_nic_data *nic_data = efx->nic_data;
+	MCDI_DECLARE_BUF(inbuf, MC_CMD_VADAPTOR_QUERY_IN_LEN);
+	MCDI_DECLARE_BUF(outbuf, MC_CMD_VADAPTOR_QUERY_OUT_LEN);
+	size_t outlen;
+	int rc;
+
+	if (nic_data->datapath_caps &
+	    (1 << MC_CMD_GET_CAPABILITIES_OUT_VADAPTOR_QUERY_LBN)) {
+		MCDI_SET_DWORD(inbuf, VADAPTOR_QUERY_IN_UPSTREAM_PORT_ID,
+			       port_id);
+
+		rc = efx_mcdi_rpc(efx, MC_CMD_VADAPTOR_QUERY, inbuf, sizeof(inbuf),
+				  outbuf, sizeof(outbuf), &outlen);
+		if (rc)
+			return rc;
+
+		if (outlen < sizeof(outbuf)) {
+			rc = -EIO;
+			return rc;
+		}
+	}
+
+	if (port_flags)
+		*port_flags = MCDI_DWORD(outbuf, VADAPTOR_QUERY_OUT_PORT_FLAGS);
+	if (vadaptor_flags)
+		*vadaptor_flags =
+			MCDI_DWORD(outbuf, VADAPTOR_QUERY_OUT_VADAPTOR_FLAGS);
+	if (vlan_tags)
+		*vlan_tags =
+			MCDI_DWORD(outbuf,
+				   VADAPTOR_QUERY_OUT_NUM_AVAILABLE_VLAN_TAGS);
+
+	return 0;
 }
 
 int efx_ef10_vadaptor_alloc(struct efx_nic *efx, unsigned int port_id)
@@ -827,14 +992,20 @@ static int efx_ef10_dimension_resources(struct efx_nic *efx)
 	 * functions of the controller.
 	 */
 	if (efx_piobuf_size != 0 &&
-	    ER_DZ_TX_PIOBUF_SIZE / efx_piobuf_size * EF10_TX_PIOBUF_COUNT >=
+	    nic_data->piobuf_size / efx_piobuf_size * EF10_TX_PIOBUF_COUNT >=
 	    efx->n_tx_channels) {
 		unsigned int n_piobufs =
 			DIV_ROUND_UP(efx->n_tx_channels,
-				     ER_DZ_TX_PIOBUF_SIZE / efx_piobuf_size);
+				     nic_data->piobuf_size / efx_piobuf_size);
 
 		rc = efx_ef10_alloc_piobufs(efx, n_piobufs);
-		if (rc)
+		if (rc == -ENOSPC)
+			netif_dbg(efx, probe, efx->net_dev,
+				  "out of PIO buffers; cannot allocate more\n");
+		else if (rc == -EPERM)
+			netif_dbg(efx, probe, efx->net_dev,
+				  "not permitted to allocate PIO buffers\n");
+		else if (rc)
 			netif_err(efx, probe, efx->net_dev,
 				  "failed to allocate PIO buffers (%d)\n", rc);
 		else
@@ -981,8 +1152,14 @@ static int efx_ef10_init_nic(struct efx_nic *efx)
 				efx_ef10_free_piobufs(efx);
 		}
 
-		/* Log an error on failure, but this is non-fatal */
-		if (rc)
+		/* Log an error on failure, but this is non-fatal.
+		 * Permission errors are less important - we've presumably
+		 * had the PIO buffer licence removed.
+		 */
+		if (rc == -EPERM)
+			netif_dbg(efx, drv, efx->net_dev,
+				  "not permitted to restore PIO buffers\n");
+		else if (rc)
 			netif_err(efx, drv, efx->net_dev,
 				  "failed to restore PIO buffers (%d)\n", rc);
 		nic_data->must_restore_piobufs = false;
@@ -1005,6 +1182,7 @@ static void efx_ef10_reset_mc_allocations(struct efx_nic *efx)
 	nic_data->must_realloc_vis = true;
 	nic_data->must_restore_filters = true;
 	nic_data->must_restore_piobufs = true;
+	efx_ef10_forget_old_piobufs(efx);
 	nic_data->rx_rss_context = EFX_EF10_RSS_CONTEXT_INVALID;
 
 	/* Driver-created vswitches and vports must be re-created */
@@ -1198,9 +1376,10 @@ static const struct efx_hw_stat_desc efx_ef10_stat_desc[EF10_STAT_COUNT] = {
 			       (1ULL << GENERIC_STAT_rx_nodesc_trunc) |	\
 			       (1ULL << GENERIC_STAT_rx_noskb_drops))
 
-/* These statistics are only provided by the 10G MAC.  For a 10G/40G
- * switchable port we do not expose these because they might not
- * include all the packets they should.
+/* On 7000 series NICs, these statistics are only provided by the 10G MAC.
+ * For a 10G/40G switchable port we do not expose these because they might
+ * not include all the packets they should.
+ * On 8000 series NICs these statistics are always provided.
  */
 #define HUNT_10G_ONLY_STAT_MASK ((1ULL << EF10_STAT_port_tx_control) |	\
 				 (1ULL << EF10_STAT_port_tx_lt64) |	\
@@ -1246,10 +1425,15 @@ static u64 efx_ef10_raw_stat_mask(struct efx_nic *efx)
 	      1 << MC_CMD_DRV_ATTACH_EXT_OUT_FLAG_LINKCTRL))
 		return 0;
 
-	if (port_caps & (1 << MC_CMD_PHY_CAP_40000FDX_LBN))
+	if (port_caps & (1 << MC_CMD_PHY_CAP_40000FDX_LBN)) {
 		raw_mask |= HUNT_40G_EXTRA_STAT_MASK;
-	else
+		/* 8000 series have everything even at 40G */
+		if (nic_data->datapath_caps2 &
+		    (1 << MC_CMD_GET_CAPABILITIES_V2_OUT_MAC_STATS_40G_TX_SIZE_BINS_LBN))
+			raw_mask |= HUNT_10G_ONLY_STAT_MASK;
+	} else {
 		raw_mask |= HUNT_10G_ONLY_STAT_MASK;
+	}
 
 	if (nic_data->datapath_caps &
 	    (1 << MC_CMD_GET_CAPABILITIES_OUT_PM_AND_RXDP_COUNTERS_LBN))
@@ -1275,13 +1459,14 @@ static void efx_ef10_get_stat_mask(struct efx_nic *efx, unsigned long *mask)
 	}
 
 #if BITS_PER_LONG == 64
+	BUILD_BUG_ON(BITS_TO_LONGS(EF10_STAT_COUNT) != 2);
 	mask[0] = raw_mask[0];
 	mask[1] = raw_mask[1];
 #else
+	BUILD_BUG_ON(BITS_TO_LONGS(EF10_STAT_COUNT) != 3);
 	mask[0] = raw_mask[0] & 0xffffffff;
 	mask[1] = raw_mask[0] >> 32;
 	mask[2] = raw_mask[1] & 0xffffffff;
-	mask[3] = raw_mask[1] >> 32;
 #endif
 }
 
@@ -1501,27 +1686,43 @@ static size_t efx_ef10_update_stats_vf(struct efx_nic *efx, u64 *full_stats,
 static void efx_ef10_push_irq_moderation(struct efx_channel *channel)
 {
 	struct efx_nic *efx = channel->efx;
-	unsigned int mode, value;
+	unsigned int mode, usecs;
 	efx_dword_t timer_cmd;
 
-	if (channel->irq_moderation) {
+	if (channel->irq_moderation_us) {
 		mode = 3;
-		value = channel->irq_moderation - 1;
+		usecs = channel->irq_moderation_us;
 	} else {
 		mode = 0;
-		value = 0;
+		usecs = 0;
 	}
 
-	if (EFX_EF10_WORKAROUND_35388(efx)) {
+	if (EFX_EF10_WORKAROUND_61265(efx)) {
+		MCDI_DECLARE_BUF(inbuf, MC_CMD_SET_EVQ_TMR_IN_LEN);
+		unsigned int ns = usecs * 1000;
+
+		MCDI_SET_DWORD(inbuf, SET_EVQ_TMR_IN_INSTANCE,
+			       channel->channel);
+		MCDI_SET_DWORD(inbuf, SET_EVQ_TMR_IN_TMR_LOAD_REQ_NS, ns);
+		MCDI_SET_DWORD(inbuf, SET_EVQ_TMR_IN_TMR_RELOAD_REQ_NS, ns);
+		MCDI_SET_DWORD(inbuf, SET_EVQ_TMR_IN_TMR_MODE, mode);
+
+		efx_mcdi_rpc_async(efx, MC_CMD_SET_EVQ_TMR,
+				   inbuf, sizeof(inbuf), 0, NULL, 0);
+	} else if (EFX_EF10_WORKAROUND_35388(efx)) {
+		unsigned int ticks = efx_usecs_to_ticks(efx, usecs);
+
 		EFX_POPULATE_DWORD_3(timer_cmd, ERF_DD_EVQ_IND_TIMER_FLAGS,
 				     EFE_DD_EVQ_IND_TIMER_FLAGS,
 				     ERF_DD_EVQ_IND_TIMER_MODE, mode,
-				     ERF_DD_EVQ_IND_TIMER_VAL, value);
+				     ERF_DD_EVQ_IND_TIMER_VAL, ticks);
 		efx_writed_page(efx, &timer_cmd, ER_DD_EVQ_INDIRECT,
 				channel->channel);
 	} else {
+		unsigned int ticks = efx_usecs_to_ticks(efx, usecs);
+
 		EFX_POPULATE_DWORD_2(timer_cmd, ERF_DZ_TC_TIMER_MODE, mode,
-				     ERF_DZ_TC_TIMER_VAL, value);
+				     ERF_DZ_TC_TIMER_VAL, ticks);
 		efx_writed_page(efx, &timer_cmd, ER_DZ_EVQ_TMR,
 				channel->channel);
 	}
@@ -1692,14 +1893,18 @@ static irqreturn_t efx_ef10_legacy_interrupt(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static void efx_ef10_irq_test_generate(struct efx_nic *efx)
+static int efx_ef10_irq_test_generate(struct efx_nic *efx)
 {
 	MCDI_DECLARE_BUF(inbuf, MC_CMD_TRIGGER_INTERRUPT_IN_LEN);
+
+	if (efx_mcdi_set_workaround(efx, MC_CMD_WORKAROUND_BUG41750, true,
+				    NULL) == 0)
+		return -ENOTSUPP;
 
 	BUILD_BUG_ON(MC_CMD_TRIGGER_INTERRUPT_OUT_LEN != 0);
 
 	MCDI_SET_DWORD(inbuf, TRIGGER_INTERRUPT_IN_INTR_LEVEL, efx->irq_level);
-	(void) efx_mcdi_rpc(efx, MC_CMD_TRIGGER_INTERRUPT,
+	return efx_mcdi_rpc(efx, MC_CMD_TRIGGER_INTERRUPT,
 			    inbuf, sizeof(inbuf), NULL, 0, NULL);
 }
 
@@ -2261,6 +2466,29 @@ static int efx_ef10_ev_probe(struct efx_channel *channel)
 				    GFP_KERNEL);
 }
 
+static void efx_ef10_ev_fini(struct efx_channel *channel)
+{
+	MCDI_DECLARE_BUF(inbuf, MC_CMD_FINI_EVQ_IN_LEN);
+	MCDI_DECLARE_BUF_ERR(outbuf);
+	struct efx_nic *efx = channel->efx;
+	size_t outlen;
+	int rc;
+
+	MCDI_SET_DWORD(inbuf, FINI_EVQ_IN_INSTANCE, channel->channel);
+
+	rc = efx_mcdi_rpc_quiet(efx, MC_CMD_FINI_EVQ, inbuf, sizeof(inbuf),
+			  outbuf, sizeof(outbuf), &outlen);
+
+	if (rc && rc != -EALREADY)
+		goto fail;
+
+	return;
+
+fail:
+	efx_mcdi_display_error(efx, MC_CMD_FINI_EVQ, MC_CMD_FINI_EVQ_IN_LEN,
+			       outbuf, outlen, rc);
+}
+
 static int efx_ef10_ev_init(struct efx_channel *channel)
 {
 	MCDI_DECLARE_BUF(inbuf,
@@ -2272,6 +2500,7 @@ static int efx_ef10_ev_init(struct efx_channel *channel)
 	struct efx_ef10_nic_data *nic_data;
 	bool supports_rx_merge;
 	size_t inlen, outlen;
+	unsigned int enabled, implemented;
 	dma_addr_t dma_addr;
 	int rc;
 	int i;
@@ -2312,30 +2541,52 @@ static int efx_ef10_ev_init(struct efx_channel *channel)
 	rc = efx_mcdi_rpc(efx, MC_CMD_INIT_EVQ, inbuf, inlen,
 			  outbuf, sizeof(outbuf), &outlen);
 	/* IRQ return is ignored */
-	return rc;
-}
+	if (channel->channel || rc)
+		return rc;
 
-static void efx_ef10_ev_fini(struct efx_channel *channel)
-{
-	MCDI_DECLARE_BUF(inbuf, MC_CMD_FINI_EVQ_IN_LEN);
-	MCDI_DECLARE_BUF_ERR(outbuf);
-	struct efx_nic *efx = channel->efx;
-	size_t outlen;
-	int rc;
-
-	MCDI_SET_DWORD(inbuf, FINI_EVQ_IN_INSTANCE, channel->channel);
-
-	rc = efx_mcdi_rpc_quiet(efx, MC_CMD_FINI_EVQ, inbuf, sizeof(inbuf),
-			  outbuf, sizeof(outbuf), &outlen);
-
-	if (rc && rc != -EALREADY)
+	/* Successfully created event queue on channel 0 */
+	rc = efx_mcdi_get_workarounds(efx, &implemented, &enabled);
+	if (rc == -ENOSYS) {
+		/* GET_WORKAROUNDS was implemented before this workaround,
+		 * thus it must be unavailable in this firmware.
+		 */
+		nic_data->workaround_26807 = false;
+		rc = 0;
+	} else if (rc) {
 		goto fail;
+	} else {
+		nic_data->workaround_26807 =
+			!!(enabled & MC_CMD_GET_WORKAROUNDS_OUT_BUG26807);
 
-	return;
+		if (implemented & MC_CMD_GET_WORKAROUNDS_OUT_BUG26807 &&
+		    !nic_data->workaround_26807) {
+			unsigned int flags;
+
+			rc = efx_mcdi_set_workaround(efx,
+						     MC_CMD_WORKAROUND_BUG26807,
+						     true, &flags);
+
+			if (!rc) {
+				if (flags &
+				    1 << MC_CMD_WORKAROUND_EXT_OUT_FLR_DONE_LBN) {
+					netif_info(efx, drv, efx->net_dev,
+						   "other functions on NIC have been reset\n");
+					/* MC's boot count has incremented */
+					++nic_data->warm_boot_count;
+				}
+				nic_data->workaround_26807 = true;
+			} else if (rc == -EPERM) {
+				rc = 0;
+			}
+		}
+	}
+
+	if (!rc)
+		return 0;
 
 fail:
-	efx_mcdi_display_error(efx, MC_CMD_FINI_EVQ, MC_CMD_FINI_EVQ_IN_LEN,
-			       outbuf, outlen, rc);
+	efx_ef10_ev_fini(channel);
+	return rc;
 }
 
 static void efx_ef10_ev_remove(struct efx_channel *channel)
@@ -3290,6 +3541,19 @@ static int efx_ef10_filter_remove_safe(struct efx_nic *efx,
 					       filter_id, false);
 }
 
+static u32 efx_ef10_filter_get_unsafe_id(struct efx_nic *efx, u32 filter_id)
+{
+	return filter_id % HUNT_FILTER_TBL_ROWS;
+}
+
+static int efx_ef10_filter_remove_unsafe(struct efx_nic *efx,
+					 enum efx_filter_priority priority,
+					 u32 filter_id)
+{
+	return efx_ef10_filter_remove_internal(efx, 1U << priority,
+					       filter_id, true);
+}
+
 static int efx_ef10_filter_get_safe(struct efx_nic *efx,
 				    enum efx_filter_priority priority,
 				    u32 filter_id, struct efx_filter_spec *spec)
@@ -3663,6 +3927,10 @@ static int efx_ef10_filter_table_probe(struct efx_nic *efx)
 		goto fail;
 	}
 
+	table->ucdef_id = EFX_EF10_FILTER_ID_INVALID;
+	table->bcast_id = EFX_EF10_FILTER_ID_INVALID;
+	table->mcdef_id = EFX_EF10_FILTER_ID_INVALID;
+
 	efx->filter_state = table;
 	init_waitqueue_head(&table->waitq);
 	return 0;
@@ -3751,13 +4019,12 @@ static void efx_ef10_filter_table_remove(struct efx_nic *efx)
 			       MC_CMD_FILTER_OP_IN_OP_UNSUBSCRIBE);
 		MCDI_SET_QWORD(inbuf, FILTER_OP_IN_HANDLE,
 			       table->entry[filter_idx].handle);
-		rc = efx_mcdi_rpc(efx, MC_CMD_FILTER_OP, inbuf, sizeof(inbuf),
-				  NULL, 0, NULL);
+		rc = efx_mcdi_rpc_quiet(efx, MC_CMD_FILTER_OP, inbuf,
+					sizeof(inbuf), NULL, 0, NULL);
 		if (rc)
-			netdev_WARN(efx->net_dev,
-				    "filter_idx=%#x handle=%#llx\n",
-				    filter_idx,
-				    table->entry[filter_idx].handle);
+			netif_info(efx, drv, efx->net_dev,
+				   "%s: filter %04x remove failed\n",
+				   __func__, filter_idx);
 		kfree(spec);
 	}
 
@@ -3765,154 +4032,255 @@ static void efx_ef10_filter_table_remove(struct efx_nic *efx)
 	kfree(table);
 }
 
-/* Caller must hold efx->filter_sem for read if race against
- * efx_ef10_filter_table_remove() is possible
- */
-static void efx_ef10_filter_sync_rx_mode(struct efx_nic *efx)
+#define EFX_EF10_FILTER_DO_MARK_OLD(id) \
+		if (id != EFX_EF10_FILTER_ID_INVALID) { \
+			filter_idx = efx_ef10_filter_get_unsafe_id(efx, id); \
+			WARN_ON(!table->entry[filter_idx].spec); \
+			table->entry[filter_idx].spec |= EFX_EF10_FILTER_FLAG_AUTO_OLD; \
+		}
+static void efx_ef10_filter_mark_old(struct efx_nic *efx)
 {
 	struct efx_ef10_filter_table *table = efx->filter_state;
-	struct net_device *net_dev = efx->net_dev;
-	enum efx_filter_flags filter_flags;
-	struct efx_filter_spec spec;
-	bool remove_failed = false;
-	struct netdev_hw_addr *uc;
-	struct dev_mc_list *mc;
-	unsigned int filter_idx;
-	int i, n, rc;
-
-	if (!efx_dev_registered(efx))
-		return;
+	unsigned int filter_idx, i;
 
 	if (!table)
 		return;
 
 	/* Mark old filters that may need to be removed */
 	spin_lock_bh(&efx->filter_lock);
-	n = table->dev_uc_count < 0 ? 1 : table->dev_uc_count;
-	for (i = 0; i < n; i++) {
-		filter_idx = table->dev_uc_list[i].id % HUNT_FILTER_TBL_ROWS;
-		table->entry[filter_idx].spec |= EFX_EF10_FILTER_FLAG_AUTO_OLD;
-	}
-	n = table->dev_mc_count < 0 ? 1 : table->dev_mc_count;
-	for (i = 0; i < n; i++) {
-		filter_idx = table->dev_mc_list[i].id % HUNT_FILTER_TBL_ROWS;
-		table->entry[filter_idx].spec |= EFX_EF10_FILTER_FLAG_AUTO_OLD;
-	}
+	for (i = 0; i < table->dev_uc_count; i++)
+		EFX_EF10_FILTER_DO_MARK_OLD(table->dev_uc_list[i].id);
+	for (i = 0; i < table->dev_mc_count; i++)
+		EFX_EF10_FILTER_DO_MARK_OLD(table->dev_mc_list[i].id);
+	EFX_EF10_FILTER_DO_MARK_OLD(table->ucdef_id);
+	EFX_EF10_FILTER_DO_MARK_OLD(table->bcast_id);
+	EFX_EF10_FILTER_DO_MARK_OLD(table->mcdef_id);
 	spin_unlock_bh(&efx->filter_lock);
+}
+#undef EFX_EF10_FILTER_DO_MARK_OLD
 
-	/* Copy/convert the address lists; add the primary station
-	 * address and broadcast address
-	 */
-	netif_addr_lock_bh(net_dev);
-	if (net_dev->flags & IFF_PROMISC ||
-	    netdev_uc_count(net_dev) >= EFX_EF10_FILTER_DEV_UC_MAX) {
-		table->dev_uc_count = -1;
-	} else {
-		table->dev_uc_count = 1 + netdev_uc_count(net_dev);
-		ether_addr_copy(table->dev_uc_list[0].addr, net_dev->dev_addr);
-		i = 1;
-		netdev_for_each_uc_addr(uc, net_dev) {
-			ether_addr_copy(table->dev_uc_list[i].addr, uc->addr);
-			i++;
+static void efx_ef10_filter_uc_addr_list(struct efx_nic *efx, bool *promisc)
+{
+	struct efx_ef10_filter_table *table = efx->filter_state;
+	struct net_device *net_dev = efx->net_dev;
+	struct netdev_hw_addr *uc;
+	int addr_count;
+	unsigned int i;
+
+	table->ucdef_id = EFX_EF10_FILTER_ID_INVALID;
+	addr_count = netdev_uc_count(net_dev);
+	if (net_dev->flags & IFF_PROMISC)
+		*promisc = true;
+	table->dev_uc_count = 1 + addr_count;
+	ether_addr_copy(table->dev_uc_list[0].addr, net_dev->dev_addr);
+	i = 1;
+	netdev_for_each_uc_addr(uc, net_dev) {
+		if (i >= EFX_EF10_FILTER_DEV_UC_MAX) {
+			*promisc = true;
+			break;
 		}
+		ether_addr_copy(table->dev_uc_list[i].addr, uc->addr);
+		table->dev_uc_list[i].id = EFX_EF10_FILTER_ID_INVALID;
+		i++;
 	}
-	if (net_dev->flags & (IFF_PROMISC | IFF_ALLMULTI) ||
-	    netdev_mc_count(net_dev) >= EFX_EF10_FILTER_DEV_MC_MAX) {
-		table->dev_mc_count = -1;
-	} else {
-		table->dev_mc_count = 1 + netdev_mc_count(net_dev);
-		eth_broadcast_addr(table->dev_mc_list[0].addr);
-		i = 1;
-		netdev_for_each_mc_addr(mc, net_dev) {
-			ether_addr_copy(table->dev_mc_list[i].addr, mc->dmi_addr);
-			i++;
+}
+
+static void efx_ef10_filter_mc_addr_list(struct efx_nic *efx, bool *promisc)
+{
+	struct efx_ef10_filter_table *table = efx->filter_state;
+	struct net_device *net_dev = efx->net_dev;
+	struct dev_mc_list *mc;
+	unsigned int i, addr_count;
+
+	table->mcdef_id = EFX_EF10_FILTER_ID_INVALID;
+	table->bcast_id = EFX_EF10_FILTER_ID_INVALID;
+	if (net_dev->flags & (IFF_PROMISC | IFF_ALLMULTI))
+		*promisc = true;
+
+	addr_count = netdev_mc_count(net_dev);
+	i = 0;
+	netdev_for_each_mc_addr(mc, net_dev) {
+		if (i >= EFX_EF10_FILTER_DEV_MC_MAX) {
+			*promisc = true;
+			break;
 		}
+		ether_addr_copy(table->dev_mc_list[i].addr, mc->dmi_addr);
+		table->dev_mc_list[i].id = EFX_EF10_FILTER_ID_INVALID;
+		i++;
 	}
-	netif_addr_unlock_bh(net_dev);
+
+	table->dev_mc_count = i;
+}
+
+static int efx_ef10_filter_insert_addr_list(struct efx_nic *efx,
+					    bool multicast, bool rollback)
+{
+	struct efx_ef10_filter_table *table = efx->filter_state;
+	struct efx_ef10_dev_addr *addr_list;
+	enum efx_filter_flags filter_flags;
+	struct efx_filter_spec spec;
+	u8 baddr[ETH_ALEN];
+	unsigned int i, j;
+	int addr_count;
+	int rc;
+
+	if (multicast) {
+		addr_list = table->dev_mc_list;
+		addr_count = table->dev_mc_count;
+	} else {
+		addr_list = table->dev_uc_list;
+		addr_count = table->dev_uc_count;
+	}
 
 	filter_flags = efx_rss_enabled(efx) ? EFX_FILTER_FLAG_RX_RSS : 0;
 
-	/* Insert/renew unicast filters */
-	if (table->dev_uc_count >= 0) {
-		for (i = 0; i < table->dev_uc_count; i++) {
-			efx_filter_init_rx(&spec, EFX_FILTER_PRI_AUTO,
-					   filter_flags, 0);
-			efx_filter_set_eth_local(&spec, EFX_FILTER_VID_UNSPEC,
-						 table->dev_uc_list[i].addr);
-			rc = efx_ef10_filter_insert(efx, &spec, true);
-			if (rc < 0) {
-				/* Fall back to unicast-promisc */
-				while (i--)
-					efx_ef10_filter_remove_safe(
-						efx, EFX_FILTER_PRI_AUTO,
-						table->dev_uc_list[i].id);
-				table->dev_uc_count = -1;
-				break;
-			}
-			table->dev_uc_list[i].id = rc;
-		}
-	}
-	if (table->dev_uc_count < 0) {
-		efx_filter_init_rx(&spec, EFX_FILTER_PRI_AUTO,
-				   filter_flags, 0);
-		efx_filter_set_uc_def(&spec);
+	/* Insert/renew filters */
+	for (i = 0; i < addr_count; i++) {
+		efx_filter_init_rx(&spec, EFX_FILTER_PRI_AUTO, filter_flags, 0);
+		efx_filter_set_eth_local(&spec, EFX_FILTER_VID_UNSPEC,
+					 addr_list[i].addr);
 		rc = efx_ef10_filter_insert(efx, &spec, true);
 		if (rc < 0) {
-			WARN_ON(1);
-			table->dev_uc_count = 0;
+			if (rollback) {
+				netif_info(efx, drv, efx->net_dev,
+					   "efx_ef10_filter_insert failed rc=%d\n",
+					   rc);
+				/* Fall back to promiscuous */
+				for (j = 0; j < i; j++) {
+					if (addr_list[j].id == EFX_EF10_FILTER_ID_INVALID)
+						continue;
+					efx_ef10_filter_remove_unsafe(
+						efx, EFX_FILTER_PRI_AUTO,
+						addr_list[j].id);
+					addr_list[j].id = EFX_EF10_FILTER_ID_INVALID;
+				}
+				return rc;
+			} else {
+				/* mark as not inserted, and carry on */
+				rc = EFX_EF10_FILTER_ID_INVALID;
+			}
+		}
+		addr_list[i].id = efx_ef10_filter_get_unsafe_id(efx, rc);
+	}
+
+	if (multicast && rollback) {
+		/* Also need an Ethernet broadcast filter */
+		efx_filter_init_rx(&spec, EFX_FILTER_PRI_AUTO, filter_flags, 0);
+
+		eth_broadcast_addr(baddr);
+		efx_filter_set_eth_local(&spec, EFX_FILTER_VID_UNSPEC, baddr);
+		rc = efx_ef10_filter_insert(efx, &spec, true);
+		if (rc < 0) {
+			netif_warn(efx, drv, efx->net_dev,
+				   "Broadcast filter insert failed rc=%d\n", rc);
+			/* Fall back to promiscuous */
+			for (j = 0; j < i; j++) {
+				if (addr_list[j].id == EFX_EF10_FILTER_ID_INVALID)
+					continue;
+				efx_ef10_filter_remove_unsafe(
+					efx, EFX_FILTER_PRI_AUTO,
+					addr_list[j].id);
+				addr_list[j].id = EFX_EF10_FILTER_ID_INVALID;
+			}
+			return rc;
 		} else {
-			table->dev_uc_list[0].id = rc;
+			table->bcast_id = efx_ef10_filter_get_unsafe_id(efx, rc);
 		}
 	}
 
-	/* Insert/renew multicast filters */
-	if (table->dev_mc_count >= 0) {
-		for (i = 0; i < table->dev_mc_count; i++) {
-			efx_filter_init_rx(&spec, EFX_FILTER_PRI_AUTO,
-					   filter_flags, 0);
-			efx_filter_set_eth_local(&spec, EFX_FILTER_VID_UNSPEC,
-						 table->dev_mc_list[i].addr);
-			rc = efx_ef10_filter_insert(efx, &spec, true);
-			if (rc < 0) {
-				/* Fall back to multicast-promisc */
-				while (i--)
-					efx_ef10_filter_remove_safe(
-						efx, EFX_FILTER_PRI_AUTO,
-						table->dev_mc_list[i].id);
-				table->dev_mc_count = -1;
-				break;
-			}
-			table->dev_mc_list[i].id = rc;
-		}
-	}
-	if (table->dev_mc_count < 0) {
-		efx_filter_init_rx(&spec, EFX_FILTER_PRI_AUTO,
-				   filter_flags, 0);
+	return 0;
+}
+
+static int efx_ef10_filter_insert_def(struct efx_nic *efx, bool multicast,
+				      bool rollback)
+{
+	struct efx_ef10_filter_table *table = efx->filter_state;
+	struct efx_ef10_nic_data *nic_data = efx->nic_data;
+	struct efx_filter_spec spec;
+	u8 baddr[ETH_ALEN];
+	int rc;
+
+	efx_filter_init_rx(&spec, EFX_FILTER_PRI_AUTO,
+			   EFX_FILTER_FLAG_RX_RSS,
+			   0);
+
+	if (multicast)
 		efx_filter_set_mc_def(&spec);
-		rc = efx_ef10_filter_insert(efx, &spec, true);
-		if (rc < 0) {
-			WARN_ON(1);
-			table->dev_mc_count = 0;
-		} else {
-			table->dev_mc_list[0].id = rc;
-		}
-	}
+	else
+		efx_filter_set_uc_def(&spec);
 
-	/* Remove filters that weren't renewed.  Since nothing else
-	 * changes the AUTO_OLD flag or removes these filters, we
-	 * don't need to hold the filter_lock while scanning for
-	 * these filters.
-	 */
+	rc = efx_ef10_filter_insert(efx, &spec, true);
+	if (rc < 0) {
+		netif_warn(efx, drv, efx->net_dev,
+			   "%scast mismatch filter insert failed rc=%d\n",
+			   multicast ? "Multi" : "Uni", rc);
+	} else if (multicast) {
+		table->mcdef_id = efx_ef10_filter_get_unsafe_id(efx, rc);
+		if (!nic_data->workaround_26807) {
+			/* Also need an Ethernet broadcast filter */
+			efx_filter_init_rx(&spec, EFX_FILTER_PRI_AUTO,
+					   EFX_FILTER_FLAG_RX_RSS,
+					   0);
+			eth_broadcast_addr(baddr);
+			efx_filter_set_eth_local(&spec, EFX_FILTER_VID_UNSPEC,
+					         baddr);
+			rc = efx_ef10_filter_insert(efx, &spec, true);
+			if (rc < 0) {
+				netif_warn(efx, drv, efx->net_dev,
+					   "Broadcast filter insert failed rc=%d\n",
+					   rc);
+				if (rollback) {
+					/* Roll back the mc_def filter */
+					efx_ef10_filter_remove_unsafe(
+							efx, EFX_FILTER_PRI_AUTO,
+							table->mcdef_id);
+					table->mcdef_id = EFX_EF10_FILTER_ID_INVALID;
+					return rc;
+				}
+			} else {
+				table->bcast_id = efx_ef10_filter_get_unsafe_id(efx, rc);
+			}
+		}
+		rc = 0;
+	} else {
+		table->ucdef_id = rc;
+		rc = 0;
+	}
+	return rc;
+}
+
+/* Remove filters that weren't renewed.  Since nothing else changes the AUTO_OLD
+ * flag or removes these filters, we don't need to hold the filter_lock while
+ * scanning for these filters.
+ */
+static void efx_ef10_filter_remove_old(struct efx_nic *efx)
+{
+	struct efx_ef10_filter_table *table = efx->filter_state;
+	int remove_failed = 0;
+	int remove_noent = 0;
+	int rc;
+	int i;
+
 	for (i = 0; i < HUNT_FILTER_TBL_ROWS; i++) {
 		if (ACCESS_ONCE(table->entry[i].spec) &
 		    EFX_EF10_FILTER_FLAG_AUTO_OLD) {
-			if (efx_ef10_filter_remove_internal(
-				    efx, 1U << EFX_FILTER_PRI_AUTO,
-				    i, true) < 0)
-				remove_failed = true;
+			rc = efx_ef10_filter_remove_internal(efx,
+					1U << EFX_FILTER_PRI_AUTO, i, true);
+			if (rc == -ENOENT)
+				remove_noent++;
+			else if (rc)
+				remove_failed++;
 		}
 	}
-	WARN_ON(remove_failed);
+
+	if (remove_failed)
+		netif_info(efx, drv, efx->net_dev,
+			   "%s: failed to remove %d filters\n",
+			   __func__, remove_failed);
+	if (remove_noent)
+		netif_info(efx, drv, efx->net_dev,
+			   "%s: failed to remove %d non-existent filters\n",
+			   __func__, remove_noent);
 }
 
 static int efx_ef10_vport_set_mac_address(struct efx_nic *efx)
@@ -3981,6 +4349,87 @@ reset_nic:
 	return rc ? rc : rc2;
 }
 
+/* Caller must hold efx->filter_sem for read if race against
+ * efx_ef10_filter_table_remove() is possible
+ */
+static void efx_ef10_filter_sync_rx_mode(struct efx_nic *efx)
+{
+	struct efx_ef10_filter_table *table = efx->filter_state;
+	struct efx_ef10_nic_data *nic_data = efx->nic_data;
+	struct net_device *net_dev = efx->net_dev;
+	bool uc_promisc = false, mc_promisc = false;
+
+	if (!efx_dev_registered(efx))
+		return;
+
+	if (!table)
+		return;
+
+	efx_ef10_filter_mark_old(efx);
+
+	/* Copy/convert the address lists; add the primary station
+	 * address and broadcast address
+	 */
+	netif_addr_lock_bh(net_dev);
+	efx_ef10_filter_uc_addr_list(efx, &uc_promisc);
+	efx_ef10_filter_mc_addr_list(efx, &mc_promisc);
+	netif_addr_unlock_bh(net_dev);
+
+	/* Insert/renew unicast filters */
+	if (uc_promisc) {
+		efx_ef10_filter_insert_def(efx, false, false);
+		efx_ef10_filter_insert_addr_list(efx, false, false);
+	} else {
+		/* If any of the filters failed to insert, fall back to
+		 * promiscuous mode - add in the uc_def filter.  But keep
+		 * our individual unicast filters.
+		 */
+		if (efx_ef10_filter_insert_addr_list(efx, false, false))
+			efx_ef10_filter_insert_def(efx, false, false);
+	}
+
+	/* Insert/renew multicast filters */
+	/* If changing promiscuous state with cascaded multicast filters, remove
+	 * old filters first, so that packets are dropped rather than duplicated
+	 */
+	if (nic_data->workaround_26807 && efx->mc_promisc != mc_promisc)
+		efx_ef10_filter_remove_old(efx);
+	if (mc_promisc) {
+		if (nic_data->workaround_26807) {
+			/* If we failed to insert promiscuous filters, rollback
+			 * and fall back to individual multicast filters
+			 */
+			if (efx_ef10_filter_insert_def(efx, true, true)) {
+				/* Changing promisc state, so remove old filters */
+				efx_ef10_filter_remove_old(efx);
+				efx_ef10_filter_insert_addr_list(efx, true, false);
+			}
+		} else {
+			/* If we failed to insert promiscuous filters, don't
+			 * rollback.  Regardless, also insert the mc_list
+			 */
+			efx_ef10_filter_insert_def(efx, true, false);
+			efx_ef10_filter_insert_addr_list(efx, true, false);
+		}
+	} else {
+		/* If any filters failed to insert, rollback and fall back to
+		 * promiscuous mode - mc_def filter and maybe broadcast.  If
+		 * that fails, roll back again and insert as many of our
+		 * individual multicast filters as we can.
+		 */
+		if (efx_ef10_filter_insert_addr_list(efx, true, true)) {
+			/* Changing promisc state, so remove old filters */
+			if (nic_data->workaround_26807)
+				efx_ef10_filter_remove_old(efx);
+			if (efx_ef10_filter_insert_def(efx, true, true))
+				efx_ef10_filter_insert_addr_list(efx, true, false);
+		}
+	}
+
+	efx_ef10_filter_remove_old(efx);
+	efx->mc_promisc = mc_promisc;
+}
+
 static int efx_ef10_set_mac_address(struct efx_nic *efx)
 {
 	MCDI_DECLARE_BUF(inbuf, MC_CMD_VADAPTOR_SET_MAC_IN_LEN);
@@ -3990,6 +4439,8 @@ static int efx_ef10_set_mac_address(struct efx_nic *efx)
 
 	efx_device_detach_sync(efx);
 	efx_net_stop(efx->net_dev);
+
+	mutex_lock(&efx->mac_lock);
 	down_write(&efx->filter_sem);
 	efx_ef10_filter_table_remove(efx);
 
@@ -4002,6 +4453,8 @@ static int efx_ef10_set_mac_address(struct efx_nic *efx)
 
 	efx_ef10_filter_table_probe(efx);
 	up_write(&efx->filter_sem);
+	mutex_unlock(&efx->mac_lock);
+
 	if (was_enabled)
 		efx_net_open(efx->net_dev);
 	netif_device_attach(efx->net_dev);

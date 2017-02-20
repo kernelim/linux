@@ -415,6 +415,17 @@ enum {
 };
 
 enum {
+	/*
+	 * Max wqe size for rdma read is 512 bytes, so this
+	 * limits our max_sge_rd as the wqe needs to fit:
+	 * - ctrl segment (16 bytes)
+	 * - rdma segment (16 bytes)
+	 * - scatter elements (16 bytes each)
+	 */
+	MLX4_MAX_SGE_RD	= (512 - 16 - 16) / 16
+};
+
+enum {
 	MLX4_DEV_PMC_SUBTYPE_GUID_INFO	 = 0x14,
 	MLX4_DEV_PMC_SUBTYPE_PORT_INFO	 = 0x15,
 	MLX4_DEV_PMC_SUBTYPE_PKEY_TABLE	 = 0x16,
@@ -814,6 +825,7 @@ struct mlx4_dev {
 	struct mlx4_quotas	quotas;
 	struct radix_tree_root	qp_table_tree;
 	u8			rev_id;
+	u8			port_random_macs;
 	char			board_id[MLX4_BOARD_ID_LEN];
 	int			numa_node;
 	int			oper_log_mgm_entry_size;
@@ -939,10 +951,6 @@ struct mlx4_mad_ifc {
 #define mlx4_foreach_port(port, dev, type)				\
 	for ((port) = 1; (port) <= (dev)->caps.num_ports; (port)++)	\
 		if ((type) == (dev)->caps.port_mask[(port)])
-
-#define mlx4_foreach_non_ib_transport_port(port, dev)                     \
-	for ((port) = 1; (port) <= (dev)->caps.num_ports; (port)++)	  \
-		if (((dev)->caps.port_mask[port] != MLX4_PORT_TYPE_IB))
 
 #define mlx4_foreach_ib_transport_port(port, dev)                         \
 	for ((port) = 1; (port) <= (dev)->caps.num_ports; (port)++)	  \

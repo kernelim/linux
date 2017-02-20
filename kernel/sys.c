@@ -165,7 +165,7 @@ SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
 	if (niceval > 19)
 		niceval = 19;
 
-	read_lock(&tasklist_lock);
+	tasklist_read_lock();
 	switch (which) {
 		case PRIO_PROCESS:
 			if (who)
@@ -223,7 +223,7 @@ SYSCALL_DEFINE2(getpriority, int, which, int, who)
 	if (which > PRIO_USER || which < PRIO_PROCESS)
 		return -EINVAL;
 
-	read_lock(&tasklist_lock);
+	tasklist_read_lock();
 	switch (which) {
 		case PRIO_PROCESS:
 			if (who)
@@ -981,7 +981,7 @@ SYSCALL_DEFINE2(setpgid, pid_t, pid, pid_t, pgid)
 	/* From this point forward we keep holding onto the tasklist lock
 	 * so that our parent does not change from under us. -DaveM
 	 */
-	write_lock_irq(&tasklist_lock);
+	tasklist_write_lock_irq();
 
 	err = -ESRCH;
 	p = find_task_by_vpid(pid);
@@ -1105,7 +1105,7 @@ SYSCALL_DEFINE0(setsid)
 	pid_t session = pid_vnr(sid);
 	int err = -EPERM;
 
-	write_lock_irq(&tasklist_lock);
+	tasklist_write_lock_irq();
 	/* Fail if I am already a session leader */
 	if (group_leader->signal->leader)
 		goto out;
@@ -1269,7 +1269,7 @@ int setrlimit(struct task_struct *tsk, unsigned int resource,
 	/* optimization: 'current' doesn't need locking, e.g. setrlimit */
 	if (tsk != current) {
 		/* protect tsk->signal and tsk->sighand from disappearing */
-		read_lock(&tasklist_lock);
+		tasklist_read_lock();
 		if (!tsk->sighand) {
 			retval = -ESRCH;
 			goto out;

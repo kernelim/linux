@@ -394,7 +394,7 @@ register_pid_response_exit:
 	/* always for found nlmsg_request */
 	kref_put(&nlmsg_request->kref, iwpm_free_nlmsg_request);
 	barrier();
-	wake_up(&nlmsg_request->waitq);
+	up(&nlmsg_request->sem);
 	return 0;
 }
 EXPORT_SYMBOL(iwpm_register_pid_cb);
@@ -463,7 +463,7 @@ add_mapping_response_exit:
 	/* always for found request */
 	kref_put(&nlmsg_request->kref, iwpm_free_nlmsg_request);
 	barrier();
-	wake_up(&nlmsg_request->waitq);
+	up(&nlmsg_request->sem);
 	return 0;
 }
 EXPORT_SYMBOL(iwpm_add_mapping_cb);
@@ -555,7 +555,7 @@ query_mapping_response_exit:
 	/* always for found request */
 	kref_put(&nlmsg_request->kref, iwpm_free_nlmsg_request);
 	barrier();
-	wake_up(&nlmsg_request->waitq);
+	up(&nlmsg_request->sem);
 	return 0;
 }
 EXPORT_SYMBOL(iwpm_add_and_query_mapping_cb);
@@ -750,7 +750,7 @@ int iwpm_mapping_error_cb(struct sk_buff *skb, struct netlink_callback *cb)
 	/* always for found request */
 	kref_put(&nlmsg_request->kref, iwpm_free_nlmsg_request);
 	barrier();
-	wake_up(&nlmsg_request->waitq);
+	up(&nlmsg_request->sem);
 	return 0;
 }
 EXPORT_SYMBOL(iwpm_mapping_error_cb);

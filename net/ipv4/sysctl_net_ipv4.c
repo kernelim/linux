@@ -30,6 +30,8 @@ static int ip_local_port_range_min[] = { 1, 1 };
 static int ip_local_port_range_max[] = { 65535, 65535 };
 static int tcp_syn_retries_min = 1;
 static int tcp_syn_retries_max = MAX_TCP_SYNCNT;
+static int ip_ttl_min = 1;
+static int ip_ttl_max = 255;
 static int ip_ping_group_range_min[] = { 0, 0 };
 static int ip_ping_group_range_max[] = { GID_T_MAX, GID_T_MAX };
 
@@ -249,6 +251,30 @@ static int strategy_allowed_congestion_control(ctl_table *table,
 
 }
 
+static int ipv4_minmax_and_flush(ctl_table *ctl, int write, void __user *buffer,
+				 size_t *lenp, loff_t *ppos)
+{
+	int *valp = ctl->data;
+	int val = *valp;
+	int ret = proc_dointvec_minmax(ctl, write, buffer, lenp, ppos);
+
+	if (write && *valp != val)
+		rt_cache_flush(&init_net, 0);
+	return ret;
+}
+
+static int ipv4_minmax_and_flush_strategy(struct ctl_table *table,
+					  void __user *oldval,
+					  size_t __user *oldlenp,
+					  void __user *newval, size_t newlen)
+{
+	int ret = sysctl_intvec(table, oldval, oldlenp, newval, newlen);
+
+	if (!ret)
+		rt_cache_flush(&init_net, 0);
+	return ret;
+}
+
 static struct ctl_table ipv4_table[] = {
 	{
 		.ctl_name	= NET_IPV4_TCP_TIMESTAMPS,
@@ -288,9 +314,10 @@ static struct ctl_table ipv4_table[] = {
 		.data		= &sysctl_ip_default_ttl,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= ipv4_doint_and_flush,
-		.strategy	= ipv4_doint_and_flush_strategy,
-		.extra2		= &init_net,
+		.proc_handler	= ipv4_minmax_and_flush,
+		.strategy	= ipv4_minmax_and_flush_strategy,
+		.extra1		= &ip_ttl_min,
+		.extra2		= &ip_ttl_max,
 	},
 	{
 		.ctl_name	= NET_IPV4_NONLOCAL_BIND,
@@ -813,6 +840,13 @@ static struct ctl_table ipv4_table[] = {
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= &zero,
 		.extra2		= &gso_max_segs,
+	},
+	{
+		.procname	= "tcp_invalid_ratelimit",
+		.data		= &sysctl_tcp_invalid_ratelimit,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_ms_jiffies,
 	},
 	{
 		.ctl_name	= CTL_UNNUMBERED,

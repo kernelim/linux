@@ -196,7 +196,7 @@ struct acpi_table_facs {
 /*******************************************************************************
  *
  * FADT - Fixed ACPI Description Table (Signature "FACP")
- *        Version 4
+ *        Version 6
  *
  ******************************************************************************/
 
@@ -255,6 +255,9 @@ struct acpi_table_fadt {
 	struct acpi_generic_address xpm_timer_block;	/* 64-bit Extended Power Mgt Timer Ctrl Reg Blk address */
 	struct acpi_generic_address xgpe0_block;	/* 64-bit Extended General Purpose Event 0 Reg Blk address */
 	struct acpi_generic_address xgpe1_block;	/* 64-bit Extended General Purpose Event 1 Reg Blk address */
+	struct acpi_generic_address sleep_control;	/* 64-bit Sleep Control register */
+	struct acpi_generic_address sleep_status;	/* 64-bit Sleep Status register */
+	u64 hypervisor_id;	/* Hypervisor Vendor ID (ACPI 6.0) */
 };
 
 /* Masks for FADT Boot Architecture Flags (boot_flags) */
@@ -264,6 +267,7 @@ struct acpi_table_fadt {
 #define ACPI_FADT_NO_VGA            (1<<2)	/* 02: [V4] It is not safe to probe for VGA hardware */
 #define ACPI_FADT_NO_MSI            (1<<3)	/* 03: [V4] Message Signaled Interrupts (MSI) must not be enabled */
 #define ACPI_FADT_NO_ASPM           (1<<4)	/* 04: [V4] PCIe ASPM control must not be enabled */
+#define ACPI_FADT_NO_CMOS_RTC       (1<<5)	/* 05: [V5] No CMOS real-time clock present */
 
 #define FADT2_REVISION_ID               3
 
@@ -289,6 +293,8 @@ struct acpi_table_fadt {
 #define ACPI_FADT_REMOTE_POWER_ON   (1<<17)	/* 17: [V4] System is compatible with remote power on (ACPI 3.0) */
 #define ACPI_FADT_APIC_CLUSTER      (1<<18)	/* 18: [V4] All local APICs must use cluster model (ACPI 3.0) */
 #define ACPI_FADT_APIC_PHYSICAL     (1<<19)	/* 19: [V4] All local x_aPICs must use physical dest mode (ACPI 3.0) */
+#define ACPI_FADT_HW_REDUCED        (1<<20)	/* 20: [V5] ACPI hardware is not implemented (ACPI 5.0) */
+#define ACPI_FADT_LOW_POWER_S0      (1<<21)	/* 21: [V5] S0 power savings are equal or better than S3 (ACPI 5.0) */
 
 /* Values for preferred_profile (Prefered Power Management Profiles) */
 
@@ -299,14 +305,16 @@ enum acpi_prefered_pm_profiles {
 	PM_WORKSTATION = 3,
 	PM_ENTERPRISE_SERVER = 4,
 	PM_SOHO_SERVER = 5,
-	PM_APPLIANCE_PC = 6
+	PM_APPLIANCE_PC = 6,
+	PM_PERFORMANCE_SERVER = 7,
+	PM_TABLET = 8
 };
 
 /* Reset to default packing */
 
 #pragma pack()
 
-#define ACPI_FADT_OFFSET(f)             (u8) ACPI_OFFSET (struct acpi_table_fadt, f)
+#define ACPI_FADT_OFFSET(f)             (u16) ACPI_OFFSET (struct acpi_table_fadt, f)
 
 /*
  * Internal table-related structures
@@ -342,5 +350,28 @@ struct acpi_table_desc {
 
 #include <acpi/actbl1.h>
 #include <acpi/actbl2.h>
+
+/*
+ * Sizes of the various flavors of FADT. We need to look closely
+ * at the FADT length because the version number essentially tells
+ * us nothing because of many BIOS bugs where the version does not
+ * match the expected length. In other words, the length of the
+ * FADT is the bottom line as to what the version really is.
+ *
+ * For reference, the values below are as follows:
+ *     FADT V1 size: 0x074
+ *     FADT V2 size: 0x084
+ *     FADT V3 size: 0x0F4
+ *     FADT V4 size: 0x0F4
+ *     FADT V5 size: 0x10C
+ *     FADT V6 size: 0x114
+ */
+#define ACPI_FADT_V1_SIZE       (u32) (ACPI_FADT_OFFSET (flags) + 4)
+#define ACPI_FADT_V2_SIZE       (u32) (ACPI_FADT_OFFSET (reserved4[0]) + 3)
+#define ACPI_FADT_V3_SIZE       (u32) (ACPI_FADT_OFFSET (sleep_control))
+#define ACPI_FADT_V5_SIZE       (u32) (ACPI_FADT_OFFSET (hypervisor_id))
+#define ACPI_FADT_V6_SIZE       (u32) (sizeof (struct acpi_table_fadt))
+
+#define ACPI_FADT_CONFORMANCE   "ACPI 6.1 (FADT version 6)"
 
 #endif				/* __ACTBL_H__ */

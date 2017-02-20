@@ -723,7 +723,10 @@ int create_basic_memory_bitmaps(void)
 	struct memory_bitmap *bm1, *bm2;
 	int error = 0;
 
-	BUG_ON(forbidden_pages_map || free_pages_map);
+	if (forbidden_pages_map && free_pages_map)
+		return 0;
+	else
+		BUG_ON(forbidden_pages_map || free_pages_map);
 
 	bm1 = kzalloc(sizeof(struct memory_bitmap), GFP_KERNEL);
 	if (!bm1)
@@ -769,7 +772,8 @@ void free_basic_memory_bitmaps(void)
 {
 	struct memory_bitmap *bm1, *bm2;
 
-	BUG_ON(!(forbidden_pages_map && free_pages_map));
+	if (WARN_ON(!(forbidden_pages_map && free_pages_map)))
+		return;
 
 	bm1 = forbidden_pages_map;
 	bm2 = free_pages_map;

@@ -1599,12 +1599,20 @@ static void do_gro(struct sge_eth_rxq *rxq, const struct pkt_gl *gl,
 	skb->ip_summed = CHECKSUM_UNNECESSARY;
 	skb_record_rx_queue(skb, rxq->rspq.idx);
 
-	if (pkt->vlan_ex) {
-		__vlan_hwaccel_put_tag(skb, be16_to_cpu(pkt->vlan));
-		rxq->stats.vlan_ex++;
-	}
-	ret = napi_gro_frags(&rxq->rspq.napi);
+	if (unlikely(pkt->vlan_ex)) {
+		struct port_info *pi = netdev_priv(rxq->rspq.netdev);
+		struct vlan_group *grp = pi->vlan_grp;
 
+		rxq->stats.vlan_ex++;
+		if (likely(grp)) {
+			ret = vlan_gro_frags_gr(&rxq->rspq.napi, grp,
+					     be16_to_cpu(pkt->vlan));
+			goto stats;
+		}
+}
+	ret = napi_gro_frags_gr(&rxq->rspq.napi);
+
+stats:
 	if (ret == GRO_HELD)
 		rxq->stats.lro_pkts++;
 	else if (ret == GRO_MERGED || ret == GRO_MERGED_FREE)

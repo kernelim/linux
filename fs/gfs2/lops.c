@@ -349,9 +349,9 @@ static int buf_lo_scan_elements(struct gfs2_jdesc *jd, unsigned int start,
 	if (pass != 1 || be32_to_cpu(ld->ld_type) != GFS2_LOG_DESC_METADATA)
 		return 0;
 
-	gfs2_replay_incr_blk(sdp, &start);
+	gfs2_replay_incr_blk(jd, &start);
 
-	for (; blks; gfs2_replay_incr_blk(sdp, &start), blks--) {
+	for (; blks; gfs2_replay_incr_blk(jd, &start), blks--) {
 		blkno = be64_to_cpu(*ptr++);
 
 		sdp->sd_found_blocks++;
@@ -488,7 +488,7 @@ static int revoke_lo_scan_elements(struct gfs2_jdesc *jd, unsigned int start,
 
 	offset = sizeof(struct gfs2_log_descriptor);
 
-	for (; blks; gfs2_replay_incr_blk(sdp, &start), blks--) {
+	for (; blks; gfs2_replay_incr_blk(jd, &start), blks--) {
 		error = gfs2_replay_read_block(jd, start, &bh);
 		if (error)
 			return error;
@@ -659,8 +659,8 @@ static int databuf_lo_scan_elements(struct gfs2_jdesc *jd, unsigned int start,
 	if (pass != 1 || be32_to_cpu(ld->ld_type) != GFS2_LOG_DESC_JDATA)
 		return 0;
 
-	gfs2_replay_incr_blk(sdp, &start);
-	for (; blks; gfs2_replay_incr_blk(sdp, &start), blks--) {
+	gfs2_replay_incr_blk(jd, &start);
+	for (; blks; gfs2_replay_incr_blk(jd, &start), blks--) {
 		blkno = be64_to_cpu(*ptr++);
 		esc = be64_to_cpu(*ptr++);
 

@@ -2463,6 +2463,8 @@ static int ehea_open(struct net_device *dev)
 	if (netif_msg_ifup(port))
 		ehea_info("enabling port %s", dev->name);
 
+	netif_carrier_off(dev);
+
 	ret = ehea_up(dev);
 	if (!ret) {
 		port_napi_enable(port);

@@ -1272,6 +1272,8 @@ EXPORT_SYMBOL_GPL(eeh_add_device_tree_late);
 void eeh_remove_device(struct pci_dev *dev)
 {
 	struct device_node *dn;
+	struct pci_dn *pdn;
+
 	if (!dev || !eeh_subsystem_enabled)
 		return;
 
@@ -1279,11 +1281,15 @@ void eeh_remove_device(struct pci_dev *dev)
 	pr_debug("EEH: Removing device %s\n", pci_name(dev));
 
 	dn = pci_device_to_OF_node(dev);
-	if (PCI_DN(dn)->pcidev == NULL) {
-		pr_debug("EEH: Not referenced !\n");
-		return;
+	pdn = dn ? PCI_DN(dn) : NULL;
+	if (pdn != NULL) {
+		if (pdn->pcidev == NULL) {
+			pr_debug("EEH: Not referenced !\n");
+			return;
+		}
+
+		pdn->pcidev = NULL;
 	}
-	PCI_DN(dn)->pcidev = NULL;
 
 	pci_addr_cache_remove_device(dev);
 	eeh_sysfs_remove_device(dev);

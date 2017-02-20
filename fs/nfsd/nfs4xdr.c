@@ -1386,7 +1386,7 @@ nfsd4_decode_compound(struct nfsd4_compoundargs *argp)
 		goto xdr_error;
 
 	if (argp->opcnt > ARRAY_SIZE(argp->iops)) {
-		argp->ops = kmalloc(argp->opcnt * sizeof(*argp->ops), GFP_KERNEL);
+		argp->ops = kzalloc(argp->opcnt * sizeof(*argp->ops), GFP_KERNEL);
 		if (!argp->ops) {
 			argp->ops = argp->iops;
 			dprintk("nfsd: couldn't allocate room for COMPOUND\n");
@@ -2667,8 +2667,9 @@ nfsd4_encode_read(struct nfsd4_compoundres *resp, __be32 nfserr,
 		nfserr = nfserr_inval;
 	if (nfserr)
 		return nfserr;
-	eof = (read->rd_offset + maxcount >=
-	       read->rd_fhp->fh_dentry->d_inode->i_size);
+
+	eof = nfsd_eof_on_read(len, maxcount, read->rd_offset,
+				read->rd_fhp->fh_dentry->d_inode->i_size);
 
 	WRITE32(eof);
 	WRITE32(maxcount);

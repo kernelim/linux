@@ -5440,6 +5440,7 @@ stripe_cache_active_show(struct mddev *mddev, char *page)
 static struct md_sysfs_entry
 raid5_stripecache_active = __ATTR_RO(stripe_cache_active);
 
+#if 0 /* disable for RHEL6 */
 static ssize_t
 raid5_show_group_thread_cnt(struct mddev *mddev, char *page)
 {
@@ -5506,12 +5507,15 @@ static struct md_sysfs_entry
 raid5_group_thread_cnt = __ATTR(group_thread_cnt, S_IRUGO | S_IWUSR,
 				raid5_show_group_thread_cnt,
 				raid5_store_group_thread_cnt);
+#endif
 
 static struct attribute *raid5_attrs[] =  {
 	&raid5_stripecache_size.attr,
 	&raid5_stripecache_active.attr,
 	&raid5_preread_bypass_threshold.attr,
+#if 0 /* disable for RHEL6 */
 	&raid5_group_thread_cnt.attr,
+#endif
 	&raid5_skip_copy.attr,
 	NULL,
 };

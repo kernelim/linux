@@ -189,7 +189,11 @@ struct request {
 	/* for bidi */
 	struct request *next_rq;
 	/* For future extensions */
+#ifdef __GENKSYMS__
 	void *pad;
+#else
+	struct hd_struct *part;
+#endif
 };
 
 static inline unsigned short req_get_ioprio(struct request *req)

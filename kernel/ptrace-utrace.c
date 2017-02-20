@@ -352,7 +352,7 @@ static void ptrace_clone_attach(struct task_struct *child,
 		return;
 	}
 
-	write_lock_irq(&tasklist_lock);
+	tasklist_write_lock_irq();
 	tracer = parent->parent;
 	if (!(tracer->flags & PF_EXITING) && parent->ptrace) {
 		child->ptrace = parent->ptrace;
@@ -689,7 +689,7 @@ int ptrace_attach(struct task_struct *task)
 	if (unlikely(retval))
 		goto unlock_creds;
 
-	write_lock_irq(&tasklist_lock);
+	tasklist_write_lock_irq();
 	retval = -EPERM;
 	if (unlikely(task->exit_state))
 		goto unlock_tasklist;
@@ -724,7 +724,7 @@ int ptrace_traceme(void)
 		return ret;
 
 	ret = -EPERM;
-	write_lock_irq(&tasklist_lock);
+	tasklist_write_lock_irq();
 	BUG_ON(current->ptrace);
 	ret = security_ptrace_traceme(current->parent);
 	/*
@@ -748,7 +748,7 @@ static void ptrace_do_detach(struct task_struct *tracee, unsigned int data)
 {
 	bool detach, release;
 
-	write_lock_irq(&tasklist_lock);
+	tasklist_write_lock_irq();
 	/*
 	 * This tracee can be already killed. Make sure de_thread() or
 	 * our sub-thread doing do_wait() didn't do release_task() yet.

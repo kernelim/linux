@@ -295,11 +295,15 @@ static int acpi_memory_enable_device(struct acpi_memory_device *mem_device)
 						    PAGE_SHIFT,
 						    info->length >> PAGE_SHIFT,
 						    MEM_ONLINE, MEM_OFFLINE);
-			if (err_addr)
+			if (err_addr) {
 				printk(KERN_ERR PREFIX "Memory online failed "
 				       "for 0x%llx - 0x%llx\n",
 				       err_addr << PAGE_SHIFT,
 				       info->start_addr + info->length);
+				info->failed = 1;
+				info->enabled = 0;
+				continue;
+			}
 		}
 #endif
 		if (!result)

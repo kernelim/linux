@@ -44,6 +44,19 @@
  * path this potential over-use of the mutex is acceptable.
  */
 
+/*
+ * RPORT REFERENCE COUNTING
+ *
+ * A rport reference should be taken when:
+ * - an rport is allocated
+ * - a workqueue item is scheduled
+ * - an ELS request is send
+ * The reference should be dropped when:
+ * - the workqueue function has finished
+ * - the ELS response is handled
+ * - an rport is removed
+ */
+
 #include <linux/kernel.h>
 #include <linux/spinlock.h>
 #include <linux/interrupt.h>
@@ -93,17 +106,23 @@ static const char *fc_rport_state_names[] = {
  * @lport:   The local port to lookup the remote port on
  * @port_id: The remote port ID to look up
  *
- * The caller must hold either disc_mutex or rcu_read_lock().
+ * The reference count of the fc_rport_priv structure is
+ * increased by one.
  */
 static struct fc_rport_priv *fc_rport_lookup(const struct fc_lport *lport,
 					     u32 port_id)
 {
-	struct fc_rport_priv *rdata;
+	struct fc_rport_priv *rdata = NULL, *tmp_rdata;
 
-	list_for_each_entry_rcu(rdata, &lport->disc.rports, peers)
-		if (rdata->ids.port_id == port_id)
-			return rdata;
-	return NULL;
+	rcu_read_lock();
+	list_for_each_entry_rcu(tmp_rdata, &lport->disc.rports, peers)
+		if (tmp_rdata->ids.port_id == port_id &&
+		    kref_get_unless_zero(&tmp_rdata->kref)) {
+			rdata = tmp_rdata;
+			break;
+		}
+	rcu_read_unlock();
+	return rdata;
 }
 
 /**
@@ -246,6 +265,8 @@ static void fc_rport_state_enter(struct fc_rport_priv *rdata,
 /**
  * fc_rport_work() - Handler for remote port events in the rport_event_queue
  * @work: Handle to the remote port being dequeued
+ *
+ * Reference counting: drops kref on return
  */
 static void fc_rport_work(struct work_struct *work)
 {
@@ -333,7 +354,8 @@ static void fc_rport_work(struct work_struct *work)
 			FC_RPORT_DBG(rdata, "lld callback ev %d\n", event);
 			rdata->lld_event_callback(lport, rdata, event);
 		}
-		cancel_delayed_work_sync(&rdata->retry_work);
+		if (cancel_delayed_work_sync(&rdata->retry_work))
+			kref_put(&rdata->kref, lport->tt.rport_destroy);
 
 		/*
 		 * Reset any outstanding exchanges before freeing rport.
@@ -350,7 +372,6 @@ static void fc_rport_work(struct work_struct *work)
 			fc_remote_port_delete(rport);
 		}
 
-		mutex_lock(&lport->disc.disc_mutex);
 		mutex_lock(&rdata->rp_mutex);
 		if (rdata->rp_state == RPORT_ST_DELETE) {
 			if (port_id == FC_FID_DIR_SERV) {
@@ -367,7 +388,9 @@ static void fc_rport_work(struct work_struct *work)
 				mutex_unlock(&rdata->rp_mutex);
 			} else {
 				FC_RPORT_DBG(rdata, "work delete\n");
+				mutex_lock(&lport->disc.disc_mutex);
 				list_del_rcu(&rdata->peers);
+				mutex_unlock(&lport->disc.disc_mutex);
 				mutex_unlock(&rdata->rp_mutex);
 				kref_put(&rdata->kref, lport->tt.rport_destroy);
 			}
@@ -380,13 +403,13 @@ static void fc_rport_work(struct work_struct *work)
 				fc_rport_enter_ready(rdata);
 			mutex_unlock(&rdata->rp_mutex);
 		}
-		mutex_unlock(&lport->disc.disc_mutex);
 		break;
 
 	default:
 		mutex_unlock(&rdata->rp_mutex);
 		break;
 	}
+	kref_put(&rdata->kref, lport->tt.rport_destroy);
 }
 
 /**
@@ -405,6 +428,12 @@ static int fc_rport_login(struct fc_rport_priv *rdata)
 {
 	mutex_lock(&rdata->rp_mutex);
 
+	if (rdata->flags & FC_RP_STARTED) {
+		FC_RPORT_DBG(rdata, "port already started\n");
+		mutex_unlock(&rdata->rp_mutex);
+		return 0;
+	}
+
 	rdata->flags |= FC_RP_STARTED;
 	switch (rdata->rp_state) {
 	case RPORT_ST_READY:
@@ -414,9 +443,13 @@ static int fc_rport_login(struct fc_rport_priv *rdata)
 	case RPORT_ST_DELETE:
 		FC_RPORT_DBG(rdata, "Restart deleted port\n");
 		break;
-	default:
+	case RPORT_ST_INIT:
 		FC_RPORT_DBG(rdata, "Login to port\n");
 		fc_rport_enter_flogi(rdata);
+		break;
+	default:
+		FC_RPORT_DBG(rdata, "Login in progress, state %s\n",
+			     fc_rport_state(rdata));
 		break;
 	}
 	mutex_unlock(&rdata->rp_mutex);
@@ -437,10 +470,14 @@ static int fc_rport_login(struct fc_rport_priv *rdata)
  * Set the new event so that the old pending event will not occur.
  * Since we have the mutex, even if fc_rport_work() is already started,
  * it'll see the new event.
+ *
+ * Reference counting: does not modify kref
  */
 static void fc_rport_enter_delete(struct fc_rport_priv *rdata,
 				  enum fc_rport_event event)
 {
+	struct fc_lport *lport = rdata->local_port;
+
 	if (rdata->rp_state == RPORT_ST_DELETE)
 		return;
 
@@ -448,8 +485,11 @@ static void fc_rport_enter_delete(struct fc_rport_priv *rdata,
 
 	fc_rport_state_enter(rdata, RPORT_ST_DELETE);
 
-	if (rdata->event == RPORT_EV_NONE)
-		queue_work(rport_event_queue, &rdata->event_work);
+	kref_get(&rdata->kref);
+	if (rdata->event == RPORT_EV_NONE &&
+	    !queue_work(rport_event_queue, &rdata->event_work))
+		kref_put(&rdata->kref, lport->tt.rport_destroy);
+
 	rdata->event = event;
 }
 
@@ -463,6 +503,9 @@ static void fc_rport_enter_delete(struct fc_rport_priv *rdata,
  */
 static int fc_rport_logoff(struct fc_rport_priv *rdata)
 {
+	struct fc_lport *lport = rdata->local_port;
+	u32 port_id = rdata->ids.port_id;
+
 	mutex_lock(&rdata->rp_mutex);
 
 	FC_RPORT_DBG(rdata, "Remove port\n");
@@ -472,6 +515,15 @@ static int fc_rport_logoff(struct fc_rport_priv *rdata)
 		FC_RPORT_DBG(rdata, "Port in Delete state, not removing\n");
 		goto out;
 	}
+	/*
+	 * FC-LS states:
+	 * To explicitly Logout, the initiating Nx_Port shall terminate
+	 * other open Sequences that it initiated with the destination
+	 * Nx_Port prior to performing Logout.
+	 */
+	lport->tt.exch_mgr_reset(lport, 0, port_id);
+	lport->tt.exch_mgr_reset(lport, port_id, 0);
+
 	fc_rport_enter_logo(rdata);
 
 	/*
@@ -490,15 +542,22 @@ out:
  *
  * Locking Note: The rport lock is expected to be held before calling
  * this routine.
+ *
+ * Reference counting: schedules workqueue, does not modify kref
  */
 static void fc_rport_enter_ready(struct fc_rport_priv *rdata)
 {
+	struct fc_lport *lport = rdata->local_port;
+
 	fc_rport_state_enter(rdata, RPORT_ST_READY);
 
 	FC_RPORT_DBG(rdata, "Port is Ready\n");
 
-	if (rdata->event == RPORT_EV_NONE)
-		queue_work(rport_event_queue, &rdata->event_work);
+	kref_get(&rdata->kref);
+	if (rdata->event == RPORT_EV_NONE &&
+	    !queue_work(rport_event_queue, &rdata->event_work))
+		kref_put(&rdata->kref, lport->tt.rport_destroy);
+
 	rdata->event = RPORT_EV_READY;
 }
 
@@ -509,11 +568,14 @@ static void fc_rport_enter_ready(struct fc_rport_priv *rdata)
  * Locking Note: Called without the rport lock held. This
  * function will hold the rport lock, call an _enter_*
  * function and then unlock the rport.
+ *
+ * Reference counting: Drops kref on return.
  */
 static void fc_rport_timeout(struct work_struct *work)
 {
 	struct fc_rport_priv *rdata =
 		container_of(work, struct fc_rport_priv, retry_work.work);
+	struct fc_lport *lport = rdata->local_port;
 
 	mutex_lock(&rdata->rp_mutex);
 
@@ -541,6 +603,7 @@ static void fc_rport_timeout(struct work_struct *work)
 	}
 
 	mutex_unlock(&rdata->rp_mutex);
+	kref_put(&rdata->kref, lport->tt.rport_destroy);
 }
 
 /**
@@ -550,18 +613,28 @@ static void fc_rport_timeout(struct work_struct *work)
  *
  * Locking Note: The rport lock is expected to be held before
  * calling this routine
+ *
+ * Reference counting: does not modify kref
  */
 static void fc_rport_error(struct fc_rport_priv *rdata, struct fc_frame *fp)
 {
+	struct fc_lport *lport = rdata->local_port;
+
 	FC_RPORT_DBG(rdata, "Error %ld in state %s, retries %d\n",
 		     IS_ERR(fp) ? -PTR_ERR(fp) : 0,
 		     fc_rport_state(rdata), rdata->retries);
 
 	switch (rdata->rp_state) {
 	case RPORT_ST_FLOGI:
-	case RPORT_ST_PLOGI:
 		rdata->flags &= ~FC_RP_STARTED;
 		fc_rport_enter_delete(rdata, RPORT_EV_FAILED);
+		break;
+	case RPORT_ST_PLOGI:
+		if (lport->point_to_multipoint) {
+			rdata->flags &= ~FC_RP_STARTED;
+			fc_rport_enter_delete(rdata, RPORT_EV_FAILED);
+		} else
+			fc_rport_enter_logo(rdata);
 		break;
 	case RPORT_ST_RTV:
 		fc_rport_enter_ready(rdata);
@@ -588,11 +661,14 @@ static void fc_rport_error(struct fc_rport_priv *rdata, struct fc_frame *fp)
  *
  * Locking Note: The rport lock is expected to be held before
  * calling this routine
+ *
+ * Reference counting: increments kref when scheduling retry_work
  */
 static void fc_rport_error_retry(struct fc_rport_priv *rdata,
 				 struct fc_frame *fp)
 {
-	unsigned long delay = FC_DEF_E_D_TOV;
+	unsigned long delay = msecs_to_jiffies(FC_DEF_E_D_TOV);
+	struct fc_lport *lport = rdata->local_port;
 
 	/* make sure this isn't an FC_EX_CLOSED error, never retry those */
 	if (PTR_ERR(fp) == -FC_EX_CLOSED)
@@ -605,7 +681,9 @@ static void fc_rport_error_retry(struct fc_rport_priv *rdata,
 		/* no additional delay on exchange timeouts */
 		if (PTR_ERR(fp) == -FC_EX_TIMEOUT)
 			delay = 0;
-		schedule_delayed_work(&rdata->retry_work, delay);
+		kref_get(&rdata->kref);
+		if (!schedule_delayed_work(&rdata->retry_work, delay))
+			kref_put(&rdata->kref, lport->tt.rport_destroy);
 		return;
 	}
 
@@ -697,8 +775,10 @@ static void fc_rport_flogi_resp(struct fc_seq *sp, struct fc_frame *fp,
 		goto bad;
 
 	flogi = fc_frame_payload_get(fp, sizeof(*flogi));
-	if (!flogi)
+	if (!flogi) {
+		FC_RPORT_DBG(rdata, "Bad FLOGI response\n");
 		goto bad;
+	}
 	r_a_tov = ntohl(flogi->fl_csp.sp_r_a_tov);
 	if (r_a_tov > rdata->r_a_tov)
 		rdata->r_a_tov = r_a_tov;
@@ -712,10 +792,9 @@ out:
 err:
 	mutex_unlock(&rdata->rp_mutex);
 put:
-	kref_put(&rdata->kref, rdata->local_port->tt.rport_destroy);
+	kref_put(&rdata->kref, lport->tt.rport_destroy);
 	return;
 bad:
-	FC_RPORT_DBG(rdata, "Bad FLOGI response\n");
 	fc_rport_error_retry(rdata, fp);
 	goto out;
 }
@@ -726,6 +805,8 @@ bad:
  *
  * Locking Note: The rport lock is expected to be held before calling
  * this routine.
+ *
+ * Reference counting: increments kref when sending ELS
  */
 static void fc_rport_enter_flogi(struct fc_rport_priv *rdata)
 {
@@ -744,18 +825,21 @@ static void fc_rport_enter_flogi(struct fc_rport_priv *rdata)
 	if (!fp)
 		return fc_rport_error_retry(rdata, fp);
 
+	kref_get(&rdata->kref);
 	if (!lport->tt.elsct_send(lport, rdata->ids.port_id, fp, ELS_FLOGI,
 				  fc_rport_flogi_resp, rdata,
-				  2 * lport->r_a_tov))
+				  2 * lport->r_a_tov)) {
 		fc_rport_error_retry(rdata, NULL);
-	else
-		kref_get(&rdata->kref);
+		kref_put(&rdata->kref, lport->tt.rport_destroy);
+	}
 }
 
 /**
  * fc_rport_recv_flogi_req() - Handle Fabric Login (FLOGI) request in p-mp mode
  * @lport: The local port that received the PLOGI request
  * @rx_fp: The PLOGI request frame
+ *
+ * Reference counting: drops kref on return
  */
 static void fc_rport_recv_flogi_req(struct fc_lport *lport,
 				    struct fc_frame *rx_fp)
@@ -772,8 +856,6 @@ static void fc_rport_recv_flogi_req(struct fc_lport *lport,
 	FC_RPORT_ID_DBG(lport, sid, "Received FLOGI request\n");
 
 	disc = &lport->disc;
-	mutex_lock(&disc->disc_mutex);
-
 	if (!lport->point_to_multipoint) {
 		rjt_data.reason = ELS_RJT_UNSUP;
 		rjt_data.explan = ELS_EXPL_NONE;
@@ -812,13 +894,12 @@ static void fc_rport_recv_flogi_req(struct fc_lport *lport,
 		 * RPORT wouldn;t have created and 'rport_lookup' would have
 		 * failed anyway in that case.
 		 */
-		if (lport->point_to_multipoint)
-			break;
+		break;
 	case RPORT_ST_DELETE:
 		mutex_unlock(&rdata->rp_mutex);
 		rjt_data.reason = ELS_RJT_FIP;
 		rjt_data.explan = ELS_EXPL_NOT_NEIGHBOR;
-		goto reject;
+		goto reject_put;
 	case RPORT_ST_FLOGI:
 	case RPORT_ST_PLOGI_WAIT:
 	case RPORT_ST_PLOGI:
@@ -835,13 +916,13 @@ static void fc_rport_recv_flogi_req(struct fc_lport *lport,
 		mutex_unlock(&rdata->rp_mutex);
 		rjt_data.reason = ELS_RJT_BUSY;
 		rjt_data.explan = ELS_EXPL_NONE;
-		goto reject;
+		goto reject_put;
 	}
 	if (fc_rport_login_complete(rdata, fp)) {
 		mutex_unlock(&rdata->rp_mutex);
 		rjt_data.reason = ELS_RJT_LOGIC;
 		rjt_data.explan = ELS_EXPL_NONE;
-		goto reject;
+		goto reject_put;
 	}
 
 	fp = fc_frame_alloc(lport, sizeof(*flp));
@@ -855,18 +936,26 @@ static void fc_rport_recv_flogi_req(struct fc_lport *lport,
 	fc_fill_reply_hdr(fp, rx_fp, FC_RCTL_ELS_REP, 0);
 	lport->tt.frame_send(lport, fp);
 
-	if (rdata->ids.port_name < lport->wwpn)
-		fc_rport_enter_plogi(rdata);
-	else
-		fc_rport_state_enter(rdata, RPORT_ST_PLOGI_WAIT);
+	/*
+	 * Do not proceed with the state machine if our
+	 * FLOGI has crossed with an FLOGI from the
+	 * remote port; wait for the FLOGI response instead.
+	 */
+	if (rdata->rp_state != RPORT_ST_FLOGI) {
+		if (rdata->ids.port_name < lport->wwpn)
+			fc_rport_enter_plogi(rdata);
+		else
+			fc_rport_state_enter(rdata, RPORT_ST_PLOGI_WAIT);
+	}
 out:
 	mutex_unlock(&rdata->rp_mutex);
-	mutex_unlock(&disc->disc_mutex);
+	kref_put(&rdata->kref, lport->tt.rport_destroy);
 	fc_frame_free(rx_fp);
 	return;
 
+reject_put:
+	kref_put(&rdata->kref, lport->tt.rport_destroy);
 reject:
-	mutex_unlock(&disc->disc_mutex);
 	lport->tt.seq_els_rsp_send(rx_fp, ELS_LS_RJT, &rjt_data);
 	fc_frame_free(rx_fp);
 }
@@ -891,9 +980,12 @@ static void fc_rport_plogi_resp(struct fc_seq *sp, struct fc_frame *fp,
 	u16 cssp_seq;
 	u8 op;
 
-	mutex_lock(&rdata->rp_mutex);
-
 	FC_RPORT_DBG(rdata, "Received a PLOGI %s\n", fc_els_resp_type(fp));
+
+	if (fp == ERR_PTR(-FC_EX_CLOSED))
+		goto put;
+
+	mutex_lock(&rdata->rp_mutex);
 
 	if (rdata->rp_state != RPORT_ST_PLOGI) {
 		FC_RPORT_DBG(rdata, "Received a PLOGI response, but in state "
@@ -933,7 +1025,8 @@ out:
 	fc_frame_free(fp);
 err:
 	mutex_unlock(&rdata->rp_mutex);
-	kref_put(&rdata->kref, rdata->local_port->tt.rport_destroy);
+put:
+	kref_put(&rdata->kref, lport->tt.rport_destroy);
 }
 
 /**
@@ -942,6 +1035,8 @@ err:
  *
  * Locking Note: The rport lock is expected to be held before calling
  * this routine.
+ *
+ * Reference counting: increments kref when sending ELS
  */
 static void fc_rport_enter_plogi(struct fc_rport_priv *rdata)
 {
@@ -962,12 +1057,13 @@ static void fc_rport_enter_plogi(struct fc_rport_priv *rdata)
 	}
 	rdata->e_d_tov = lport->e_d_tov;
 
+	kref_get(&rdata->kref);
 	if (!lport->tt.elsct_send(lport, rdata->ids.port_id, fp, ELS_PLOGI,
 				  fc_rport_plogi_resp, rdata,
-				  2 * lport->r_a_tov))
+				  2 * lport->r_a_tov)) {
 		fc_rport_error_retry(rdata, NULL);
-	else
-		kref_get(&rdata->kref);
+		kref_put(&rdata->kref, lport->tt.rport_destroy);
+	}
 }
 
 /**
@@ -995,9 +1091,12 @@ static void fc_rport_prli_resp(struct fc_seq *sp, struct fc_frame *fp,
 	u8 op;
 	u8 resp_code = 0;
 
-	mutex_lock(&rdata->rp_mutex);
-
 	FC_RPORT_DBG(rdata, "Received a PRLI %s\n", fc_els_resp_type(fp));
+
+	if (fp == ERR_PTR(-FC_EX_CLOSED))
+		goto put;
+
+	mutex_lock(&rdata->rp_mutex);
 
 	if (rdata->rp_state != RPORT_ST_PRLI) {
 		FC_RPORT_DBG(rdata, "Received a PRLI response, but in state "
@@ -1066,6 +1165,7 @@ out:
 	fc_frame_free(fp);
 err:
 	mutex_unlock(&rdata->rp_mutex);
+put:
 	kref_put(&rdata->kref, rdata->local_port->tt.rport_destroy);
 }
 
@@ -1075,6 +1175,8 @@ err:
  *
  * Locking Note: The rport lock is expected to be held before calling
  * this routine.
+ *
+ * Reference counting: increments kref when sending ELS
  */
 static void fc_rport_enter_prli(struct fc_rport_priv *rdata)
 {
@@ -1118,11 +1220,12 @@ static void fc_rport_enter_prli(struct fc_rport_priv *rdata)
 		       fc_host_port_id(lport->host), FC_TYPE_ELS,
 		       FC_FC_FIRST_SEQ | FC_FC_END_SEQ | FC_FC_SEQ_INIT, 0);
 
+	kref_get(&rdata->kref);
 	if (!lport->tt.exch_seq_send(lport, fp, fc_rport_prli_resp,
-				    NULL, rdata, 2 * lport->r_a_tov))
+				     NULL, rdata, 2 * lport->r_a_tov)) {
 		fc_rport_error_retry(rdata, NULL);
-	else
-		kref_get(&rdata->kref);
+		kref_put(&rdata->kref, lport->tt.rport_destroy);
+	}
 }
 
 /**
@@ -1143,9 +1246,12 @@ static void fc_rport_rtv_resp(struct fc_seq *sp, struct fc_frame *fp,
 	struct fc_rport_priv *rdata = rdata_arg;
 	u8 op;
 
-	mutex_lock(&rdata->rp_mutex);
-
 	FC_RPORT_DBG(rdata, "Received a RTV %s\n", fc_els_resp_type(fp));
+
+	if (fp == ERR_PTR(-FC_EX_CLOSED))
+		goto put;
+
+	mutex_lock(&rdata->rp_mutex);
 
 	if (rdata->rp_state != RPORT_ST_RTV) {
 		FC_RPORT_DBG(rdata, "Received a RTV response, but in state "
@@ -1188,6 +1294,7 @@ out:
 	fc_frame_free(fp);
 err:
 	mutex_unlock(&rdata->rp_mutex);
+put:
 	kref_put(&rdata->kref, rdata->local_port->tt.rport_destroy);
 }
 
@@ -1197,6 +1304,8 @@ err:
  *
  * Locking Note: The rport lock is expected to be held before calling
  * this routine.
+ *
+ * Reference counting: increments kref when sending ELS
  */
 static void fc_rport_enter_rtv(struct fc_rport_priv *rdata)
 {
@@ -1214,12 +1323,13 @@ static void fc_rport_enter_rtv(struct fc_rport_priv *rdata)
 		return;
 	}
 
+	kref_get(&rdata->kref);
 	if (!lport->tt.elsct_send(lport, rdata->ids.port_id, fp, ELS_RTV,
 				  fc_rport_rtv_resp, rdata,
-				  2 * lport->r_a_tov))
+				  2 * lport->r_a_tov)) {
 		fc_rport_error_retry(rdata, NULL);
-	else
-		kref_get(&rdata->kref);
+		kref_put(&rdata->kref, lport->tt.rport_destroy);
+	}
 }
 
 /**
@@ -1229,15 +1339,16 @@ static void fc_rport_enter_rtv(struct fc_rport_priv *rdata)
  * @lport_arg: The local port
  */
 static void fc_rport_logo_resp(struct fc_seq *sp, struct fc_frame *fp,
-			       void *lport_arg)
+			       void *rdata_arg)
 {
-	struct fc_lport *lport = lport_arg;
+	struct fc_rport_priv *rdata = rdata_arg;
+	struct fc_lport *lport = rdata->local_port;
 
 	FC_RPORT_ID_DBG(lport, fc_seq_exch(sp)->did,
 			"Received a LOGO %s\n", fc_els_resp_type(fp));
-	if (IS_ERR(fp))
-		return;
-	fc_frame_free(fp);
+	if (!IS_ERR(fp))
+		fc_frame_free(fp);
+	kref_put(&rdata->kref, lport->tt.rport_destroy);
 }
 
 /**
@@ -1246,6 +1357,8 @@ static void fc_rport_logo_resp(struct fc_seq *sp, struct fc_frame *fp,
  *
  * Locking Note: The rport lock is expected to be held before calling
  * this routine.
+ *
+ * Reference counting: increments kref when sending ELS
  */
 static void fc_rport_enter_logo(struct fc_rport_priv *rdata)
 {
@@ -1258,8 +1371,10 @@ static void fc_rport_enter_logo(struct fc_rport_priv *rdata)
 	fp = fc_frame_alloc(lport, sizeof(struct fc_els_logo));
 	if (!fp)
 		return;
-	(void)lport->tt.elsct_send(lport, rdata->ids.port_id, fp, ELS_LOGO,
-				   fc_rport_logo_resp, lport, 0);
+	kref_get(&rdata->kref);
+	if (!lport->tt.elsct_send(lport, rdata->ids.port_id, fp, ELS_LOGO,
+				  fc_rport_logo_resp, rdata, 0))
+		kref_put(&rdata->kref, lport->tt.rport_destroy);
 }
 
 /**
@@ -1279,9 +1394,12 @@ static void fc_rport_adisc_resp(struct fc_seq *sp, struct fc_frame *fp,
 	struct fc_els_adisc *adisc;
 	u8 op;
 
-	mutex_lock(&rdata->rp_mutex);
-
 	FC_RPORT_DBG(rdata, "Received a ADISC response\n");
+
+	if (fp == ERR_PTR(-FC_EX_CLOSED))
+		goto put;
+
+	mutex_lock(&rdata->rp_mutex);
 
 	if (rdata->rp_state != RPORT_ST_ADISC) {
 		FC_RPORT_DBG(rdata, "Received a ADISC resp but in state %s\n",
@@ -1317,6 +1435,7 @@ out:
 	fc_frame_free(fp);
 err:
 	mutex_unlock(&rdata->rp_mutex);
+put:
 	kref_put(&rdata->kref, rdata->local_port->tt.rport_destroy);
 }
 
@@ -1326,6 +1445,8 @@ err:
  *
  * Locking Note: The rport lock is expected to be held before calling
  * this routine.
+ *
+ * Reference counting: increments kref when sending ELS
  */
 static void fc_rport_enter_adisc(struct fc_rport_priv *rdata)
 {
@@ -1342,12 +1463,13 @@ static void fc_rport_enter_adisc(struct fc_rport_priv *rdata)
 		fc_rport_error_retry(rdata, fp);
 		return;
 	}
+	kref_get(&rdata->kref);
 	if (!lport->tt.elsct_send(lport, rdata->ids.port_id, fp, ELS_ADISC,
 				  fc_rport_adisc_resp, rdata,
-				  2 * lport->r_a_tov))
+				  2 * lport->r_a_tov)) {
 		fc_rport_error_retry(rdata, NULL);
-	else
-		kref_get(&rdata->kref);
+		kref_put(&rdata->kref, lport->tt.rport_destroy);
+	}
 }
 
 /**
@@ -1461,20 +1583,19 @@ out:
  * The ELS opcode has already been validated by the caller.
  *
  * Locking Note: Called with the lport lock held.
+ *
+ * Reference counting: does not modify kref
  */
 static void fc_rport_recv_els_req(struct fc_lport *lport, struct fc_frame *fp)
 {
 	struct fc_rport_priv *rdata;
 	struct fc_seq_els_data els_data;
 
-	mutex_lock(&lport->disc.disc_mutex);
 	rdata = lport->tt.rport_lookup(lport, fc_frame_sid(fp));
-	if (!rdata) {
-		mutex_unlock(&lport->disc.disc_mutex);
+	if (!rdata)
 		goto reject;
-	}
+
 	mutex_lock(&rdata->rp_mutex);
-	mutex_unlock(&lport->disc.disc_mutex);
 
 	switch (rdata->rp_state) {
 	case RPORT_ST_PRLI:
@@ -1484,6 +1605,7 @@ static void fc_rport_recv_els_req(struct fc_lport *lport, struct fc_frame *fp)
 		break;
 	default:
 		mutex_unlock(&rdata->rp_mutex);
+		kref_put(&rdata->kref, lport->tt.rport_destroy);
 		goto reject;
 	}
 
@@ -1514,6 +1636,7 @@ static void fc_rport_recv_els_req(struct fc_lport *lport, struct fc_frame *fp)
 	}
 
 	mutex_unlock(&rdata->rp_mutex);
+	kref_put(&rdata->kref, rdata->local_port->tt.rport_destroy);
 	return;
 
 reject:
@@ -1529,6 +1652,8 @@ reject:
  * @fp:	   The request frame
  *
  * Locking Note: Called with the lport lock held.
+ *
+ * Reference counting: does not modify kref
  */
 static void fc_rport_recv_req(struct fc_lport *lport, struct fc_frame *fp)
 {
@@ -1573,6 +1698,8 @@ static void fc_rport_recv_req(struct fc_lport *lport, struct fc_frame *fp)
  * @rx_fp: The PLOGI request frame
  *
  * Locking Note: The rport lock is held before calling this function.
+ *
+ * Reference counting: increments kref on return
  */
 static void fc_rport_recv_plogi_req(struct fc_lport *lport,
 				    struct fc_frame *rx_fp)
@@ -1858,7 +1985,7 @@ static void fc_rport_recv_prlo_req(struct fc_rport_priv *rdata,
 	spp->spp_type_ext = rspp->spp_type_ext;
 	spp->spp_flags = FC_SPP_RESP_ACK;
 
-	fc_rport_enter_delete(rdata, RPORT_EV_LOGO);
+	fc_rport_enter_prli(rdata);
 
 	fc_fill_reply_hdr(fp, rx_fp, FC_RCTL_ELS_REP, 0);
 	lport->tt.frame_send(lport, fp);
@@ -1880,6 +2007,8 @@ drop:
  *
  * Locking Note: The rport lock is exected to be held before calling
  * this function.
+ *
+ * Reference counting: drops kref on return
  */
 static void fc_rport_recv_logo_req(struct fc_lport *lport, struct fc_frame *fp)
 {
@@ -1890,19 +2019,18 @@ static void fc_rport_recv_logo_req(struct fc_lport *lport, struct fc_frame *fp)
 
 	sid = fc_frame_sid(fp);
 
-	mutex_lock(&lport->disc.disc_mutex);
 	rdata = lport->tt.rport_lookup(lport, sid);
 	if (rdata) {
 		mutex_lock(&rdata->rp_mutex);
 		FC_RPORT_DBG(rdata, "Received LOGO request while in state %s\n",
 			     fc_rport_state(rdata));
 
-		fc_rport_enter_delete(rdata, RPORT_EV_LOGO);
+		fc_rport_enter_delete(rdata, RPORT_EV_STOP);
 		mutex_unlock(&rdata->rp_mutex);
+		kref_put(&rdata->kref, rdata->local_port->tt.rport_destroy);
 	} else
 		FC_RPORT_ID_DBG(lport, sid,
 				"Received LOGO from non-logged-in port\n");
-	mutex_unlock(&lport->disc.disc_mutex);
 	fc_frame_free(fp);
 }
 

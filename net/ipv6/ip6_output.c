@@ -82,22 +82,6 @@ int ip6_local_out(struct sk_buff *skb)
 }
 EXPORT_SYMBOL_GPL(ip6_local_out);
 
-static int ip6_output_finish(struct sk_buff *skb)
-{
-	struct dst_entry *dst = skb_dst(skb);
-
-	if (dst->hh)
-		return neigh_hh_output(dst->hh, skb);
-	else if (dst->neighbour)
-		return dst->neighbour->output(skb);
-
-	IP6_INC_STATS_BH(dev_net(dst->dev),
-			 ip6_dst_idev(dst), IPSTATS_MIB_OUTNOROUTES);
-	kfree_skb(skb);
-	return -EINVAL;
-
-}
-
 /* dev_loopback_xmit for use with netfilter. */
 static int ip6_dev_loopback_xmit(struct sk_buff *newskb)
 {
@@ -111,8 +95,7 @@ static int ip6_dev_loopback_xmit(struct sk_buff *newskb)
 	return 0;
 }
 
-
-static int ip6_output2(struct sk_buff *skb)
+static int ip6_finish_output2(struct sk_buff *skb)
 {
 	struct dst_entry *dst = skb_dst(skb);
 	struct net_device *dev = dst->dev;
@@ -151,26 +134,40 @@ static int ip6_output2(struct sk_buff *skb)
 				skb->len);
 	}
 
-	return NF_HOOK(PF_INET6, NF_INET_POST_ROUTING, skb, NULL, skb->dev,
-		       ip6_output_finish);
+	if (dst->hh)
+		return neigh_hh_output(dst->hh, skb);
+	else if (dst->neighbour)
+		return dst->neighbour->output(skb);
+
+	IP6_INC_STATS_BH(dev_net(dst->dev),
+			 ip6_dst_idev(dst), IPSTATS_MIB_OUTNOROUTES);
+	kfree_skb(skb);
+	return -EINVAL;
+}
+
+static int ip6_finish_output(struct sk_buff *skb)
+{
+	if ((skb->len > ip6_skb_dst_mtu(skb) && !skb_is_gso(skb)) ||
+	    dst_allfrag(skb_dst(skb)) ||
+	    (IP6CB(skb)->frag_max_size && skb->len > IP6CB(skb)->frag_max_size))
+		return ip6_fragment(skb, ip6_finish_output2);
+	else
+		return ip6_finish_output2(skb);
 }
 
 int ip6_output(struct sk_buff *skb)
 {
+	struct net_device *dev = skb_dst(skb)->dev;
 	struct inet6_dev *idev = ip6_dst_idev(skb_dst(skb));
 	if (unlikely(idev->cnf.disable_ipv6)) {
-		IP6_INC_STATS(dev_net(skb_dst(skb)->dev), idev,
+		IP6_INC_STATS(dev_net(dev), idev,
 			      IPSTATS_MIB_OUTDISCARDS);
 		kfree_skb(skb);
 		return 0;
 	}
 
-	if ((skb->len > ip6_skb_dst_mtu(skb) && !skb_is_gso(skb)) ||
-	    dst_allfrag(skb_dst(skb)) ||
-	    (IP6CB(skb)->frag_max_size && skb->len > IP6CB(skb)->frag_max_size))
-		return ip6_fragment(skb, ip6_output2);
-	else
-		return ip6_output2(skb);
+	return NF_HOOK(PF_INET6, NF_INET_POST_ROUTING, skb, NULL, dev,
+		       ip6_finish_output);
 }
 
 /*
@@ -971,36 +968,79 @@ int ip6_dst_lookup(struct sock *sk, struct dst_entry **dst, struct flowi *fl)
 EXPORT_SYMBOL_GPL(ip6_dst_lookup);
 
 /**
- *	ip6_sk_dst_lookup - perform socket cached route lookup on flow
- *	@sk: socket which provides the dst cache and route info
- *	@dst: pointer to dst_entry * for result
+ *	ip6_dst_lookup_flow - perform route lookup on flow with ipsec
+ *	@sk: socket which provides route info
  *	@fl: flow to lookup
+ *	@final_dst: final destination address for ipsec lookup
+ *	@want_blackhole: IPSEC blackhole handling desired
+ *
+ *	This function performs a route lookup on the given flow.
+ *
+ *	It returns a valid dst pointer on success, or a pointer encoded
+ *	error code.
+ */
+struct dst_entry *ip6_dst_lookup_flow(struct sock *sk, struct flowi *fl,
+				      const struct in6_addr *final_dst,
+				      bool want_blackhole)
+{
+	struct dst_entry *dst = NULL;
+	int err;
+
+	err = ip6_dst_lookup_tail(sk, &dst, fl);
+	if (err)
+		return ERR_PTR(err);
+	if (final_dst)
+		ipv6_addr_copy(&fl->fl6_dst, final_dst);
+	if (want_blackhole) {
+		err = __xfrm_lookup(sock_net(sk), &dst, fl, sk, XFRM_LOOKUP_WAIT);
+		if (err == -EREMOTE)
+			err = ip6_dst_blackhole(sk, &dst, fl);
+		if (err)
+			return ERR_PTR(err);
+	} else {
+		err = xfrm_lookup(sock_net(sk), &dst, fl, sk, 0);
+		if (err)
+			return ERR_PTR(err);
+	}
+	return dst;
+}
+EXPORT_SYMBOL_GPL(ip6_dst_lookup_flow);
+
+/**
+ *	ip6_sk_dst_lookup_flow - perform socket cached route lookup on flow
+ *	@sk: socket which provides the dst cache and route info
+ *	@fl: flow to lookup
+ *	@final_dst: final destination address for ipsec lookup
+ *	@want_blackhole: IPSEC blackhole handling desired
  *
  *	This function performs a route lookup on the given flow with the
  *	possibility of using the cached route in the socket if it is valid.
  *	It will take the socket dst lock when operating on the dst cache.
  *	As a result, this function can only be used in process context.
  *
- *	It returns zero on success, or a standard errno code on error.
+ *	It returns a valid dst pointer on success, or a pointer encoded
+ *	error code.
  */
-int ip6_sk_dst_lookup(struct sock *sk, struct dst_entry **dst, struct flowi *fl)
+struct dst_entry *ip6_sk_dst_lookup_flow(struct sock *sk, struct flowi *fl,
+					 const struct in6_addr *final_dst,
+					 bool want_blackhole)
 {
-	*dst = NULL;
-	if (sk) {
-		*dst = sk_dst_check(sk, inet6_sk(sk)->dst_cookie);
-		*dst = ip6_sk_dst_check(sk, *dst, fl);
-	}
+	struct dst_entry *dst = sk_dst_check(sk, inet6_sk(sk)->dst_cookie);
 
-	return ip6_dst_lookup_tail(sk, dst, fl);
+	dst = ip6_sk_dst_check(sk, dst, fl);
+	if (!dst)
+		dst = ip6_dst_lookup_flow(sk, fl, final_dst, want_blackhole);
+
+	return dst;
 }
-EXPORT_SYMBOL_GPL(ip6_sk_dst_lookup);
+EXPORT_SYMBOL_GPL(ip6_sk_dst_lookup_flow);
 
 static inline int ip6_ufo_append_data(struct sock *sk,
 			int getfrag(void *from, char *to, int offset, int len,
 			int odd, struct sk_buff *skb),
 			void *from, int length, int hh_len, int fragheaderlen,
-			int transhdrlen, int mtu,unsigned int flags,
-			struct rt6_info *rt)
+			int exthdrlen, int transhdrlen, int mtu,
+			unsigned int flags, struct rt6_info *rt)
 
 {
 	struct sk_buff *skb;
@@ -1025,7 +1065,7 @@ static inline int ip6_ufo_append_data(struct sock *sk,
 		skb_put(skb,fragheaderlen + transhdrlen);
 
 		/* initialize network header pointer */
-		skb_reset_network_header(skb);
+		skb_set_network_header(skb, exthdrlen);
 
 		/* initialize protocol header pointer */
 		skb->transport_header = skb->network_header + fragheaderlen;
@@ -1213,8 +1253,8 @@ int ip6_append_data(struct sock *sk, int getfrag(void *from, char *to,
 	    (sk->sk_protocol == IPPROTO_UDP) &&
 	    (rt->u.dst.dev->features & NETIF_F_UFO)) {
 		err = ip6_ufo_append_data(sk, getfrag, from, length, hh_len,
-					  fragheaderlen, transhdrlen, mtu,
-					  flags, rt);
+					  fragheaderlen, exthdrlen,
+					  transhdrlen, mtu, flags, rt);
 		if (err)
 			goto error;
 		return 0;

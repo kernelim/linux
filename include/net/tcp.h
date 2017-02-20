@@ -257,6 +257,7 @@ extern int sysctl_tcp_thin_dupack;
 extern int sysctl_tcp_limit_output_bytes;
 extern int sysctl_tcp_challenge_ack_limit;
 extern int sysctl_tcp_min_tso_segs;
+extern int sysctl_tcp_invalid_ratelimit;
 
 extern atomic_t tcp_memory_allocated;
 extern struct percpu_counter tcp_sockets_allocated;
@@ -1070,6 +1071,7 @@ static inline void tcp_openreq_init(struct request_sock *req,
 	req->rcv_wnd = 0;		/* So that tcp_send_synack() knows! */
 	req->cookie_ts = 0;
 	tcp_rsk(req)->rcv_isn = TCP_SKB_CB(skb)->seq;
+	tcp_rsk(req)->last_oow_ack_time = 0;
 	req->mss = rx_opt->mss_clamp;
 	req->ts_recent = rx_opt->saw_tstamp ? rx_opt->rcv_tsval : 0;
 	ireq->tstamp_ok = rx_opt->tstamp_ok;
@@ -1159,6 +1161,9 @@ static inline int tcp_paws_reject(const struct tcp_options_received *rx_opt,
 }
 
 #define TCP_CHECK_TIMER(sk) do { } while (0)
+
+bool tcp_oow_rate_limited(struct net *net, const struct sk_buff *skb,
+			  int mib_idx, u32 *last_oow_ack_time);
 
 static inline void tcp_mib_init(struct net *net)
 {

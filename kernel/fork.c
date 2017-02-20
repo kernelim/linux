@@ -69,6 +69,7 @@
 #include <linux/user-return-notifier.h>
 #include <linux/khugepaged.h>
 #include <linux/oom.h>
+#include <linux/signalfd.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -80,7 +81,7 @@
 #include <trace/events/sched.h>
 
 /*
- * Protected counters by write_lock_irq(&tasklist_lock)
+ * Protected counters by tasklist_write_lock_irq()
  */
 unsigned long total_forks;	/* Handle normal Linux uptimes. */
 int nr_threads; 		/* The idle threads do not count.. */
@@ -90,6 +91,34 @@ int max_threads;		/* tunable limit on nr_threads */
 DEFINE_PER_CPU(unsigned long, process_counts) = 0;
 
 __cacheline_aligned DEFINE_RWLOCK(tasklist_lock);  /* outer */
+/* Place it into the same section/cacheline with tasklist_lock */
+__attribute__((__section__(".data.cacheline_aligned")))
+atomic_t tasklist_waiters = ATOMIC_INIT(0);
+
+void tasklist_write_lock_irq(void)
+{
+	local_irq_disable();
+	if (write_trylock(&tasklist_lock))
+		return;
+
+	atomic_inc(&tasklist_waiters);
+	write_lock(&tasklist_lock);
+	atomic_dec(&tasklist_waiters);
+}
+
+void tasklist_read_lock(void)
+{
+	if (WARN_ON_ONCE(in_interrupt()))
+		goto no_wait;
+#ifdef CONFIG_LOCKDEP
+	if (WARN_ON_ONCE(lockdep_is_held(&tasklist_lock)))
+		goto no_wait;
+#endif
+	while (atomic_read(&tasklist_waiters))
+		cpu_relax();
+no_wait:
+	read_lock(&tasklist_lock);
+}
 
 int nr_processes(void)
 {
@@ -897,8 +926,10 @@ static int copy_sighand(unsigned long clone_flags, struct task_struct *tsk)
 
 void __cleanup_sighand(struct sighand_struct *sighand)
 {
-	if (atomic_dec_and_test(&sighand->count))
+	if (atomic_dec_and_test(&sighand->count)) {
+		signalfd_cleanup(sighand);
 		kmem_cache_free(sighand_cachep, sighand);
+	}
 }
 
 
@@ -1326,7 +1357,7 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	cgroup_callbacks_done = 1;
 
 	/* Need tasklist lock for parent etc handling! */
-	write_lock_irq(&tasklist_lock);
+	tasklist_write_lock_irq();
 
 	/* CLONE_PARENT re-uses the old parent */
 	if (clone_flags & (CLONE_PARENT|CLONE_THREAD)) {

@@ -446,7 +446,7 @@ static void kill_rules(struct audit_tree *tree)
 			/* not a half-baked one */
 			ab = audit_log_start(NULL, GFP_KERNEL, AUDIT_CONFIG_CHANGE);
 			audit_log_format(ab, "op=");
-			audit_log_string(ab, "remove rule");
+			audit_log_string(ab, "remove_rule");
 			audit_log_format(ab, " dir=");
 			audit_log_untrustedstring(ab, rule->tree->pathname);
 			audit_log_key(ab, rule->filterkey);

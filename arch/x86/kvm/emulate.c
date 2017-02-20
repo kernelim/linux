@@ -88,6 +88,7 @@
 #define Src2Mem16   (5<<29) /* Used for Ep encoding. First argument has to be
 			       in memory and second argument is located
 			       immediately after the first one in memory. */
+#define Src2Imm     (6<<29)
 #define Src2Mask    (7<<29)
 
 enum {
@@ -147,7 +148,8 @@ static u32 opcode_table[256] = {
 	0, 0, 0, DstReg | SrcMem32 | ModRM | Mov /* movsxd (x86/64) */ ,
 	0, 0, 0, 0,
 	/* 0x68 - 0x6F */
-	SrcImm | Mov | Stack, 0, SrcImmByte | Mov | Stack, 0,
+	SrcImm | Mov | Stack, DstReg | SrcMem | ModRM | Src2Imm,
+	SrcImmByte | Mov | Stack, DstReg | SrcMem | ModRM | Src2ImmByte,
 	SrcNone  | ByteOp  | ImplicitOps, SrcNone  | ImplicitOps, /* insb, insw/insd */
 	SrcNone  | ByteOp  | ImplicitOps, SrcNone  | ImplicitOps, /* outsb, outsw/outsd */
 	/* 0x70 - 0x77 */
@@ -268,7 +270,7 @@ static u32 twobyte_table[256] = {
 	0, DstMem | SrcReg | ModRM | BitOp | Lock,
 	DstMem | SrcReg | Src2ImmByte | ModRM,
 	DstMem | SrcReg | Src2CL | ModRM,
-	ModRM, 0,
+	ModRM, DstReg | SrcMem | ModRM,
 	/* 0xB0 - 0xB7 */
 	ByteOp | DstMem | SrcReg | ModRM | Lock, DstMem | SrcReg | ModRM | Lock,
 	0, DstMem | SrcReg | ModRM | BitOp | Lock,
@@ -438,13 +440,13 @@ static u32 group2_table[] = {
 #define ON64(x)
 #endif
 
-#define ____emulate_2op(_op, _src, _dst, _eflags, _x, _y, _suffix)	\
+#define ____emulate_2op(_op, _src, _dst, _eflags, _x, _y, _suffix, _dsttype) \
 	do {								\
 		__asm__ __volatile__ (					\
 			_PRE_EFLAGS("0", "4", "2")			\
 			_op _suffix " %"_x"3,%1; "			\
 			_POST_EFLAGS("0", "4", "2")			\
-			: "=m" (_eflags), "=m" ((_dst).val),		\
+			: "=m" (_eflags), "+q" (*(_dsttype*)&(_dst).val),\
 			  "=&r" (_tmp)					\
 			: _y ((_src).val), "i" (EFLAGS_MASK));		\
 	} while (0)
@@ -457,13 +459,13 @@ static u32 group2_table[] = {
 									\
 		switch ((_dst).bytes) {					\
 		case 2:							\
-			____emulate_2op(_op,_src,_dst,_eflags,_wx,_wy,"w"); \
+			____emulate_2op(_op,_src,_dst,_eflags,_wx,_wy,"w",u16);\
 			break;						\
 		case 4:							\
-			____emulate_2op(_op,_src,_dst,_eflags,_lx,_ly,"l"); \
+			____emulate_2op(_op,_src,_dst,_eflags,_lx,_ly,"l",u32);\
 			break;						\
 		case 8:							\
-			ON64(____emulate_2op(_op,_src,_dst,_eflags,_qx,_qy,"q")); \
+			ON64(____emulate_2op(_op,_src,_dst,_eflags,_qx,_qy,"q",u64)); \
 			break;						\
 		}							\
 	} while (0)
@@ -473,7 +475,7 @@ static u32 group2_table[] = {
 		unsigned long _tmp;					     \
 		switch ((_dst).bytes) {				             \
 		case 1:							     \
-			____emulate_2op(_op,_src,_dst,_eflags,_bx,_by,"b");  \
+			____emulate_2op(_op,_src,_dst,_eflags,_bx,_by,"b",u8); \
 			break;						     \
 		default:						     \
 			__emulate_2op_nobyte(_op, _src, _dst, _eflags,	     \
@@ -914,6 +916,54 @@ done:
 	return rc;
 }
 
+static unsigned imm_size(struct decode_cache *c)
+{
+	unsigned size;
+
+	size = (c->d & ByteOp) ? 1 : c->op_bytes;
+	if (size == 8)
+		size = 4;
+	return size;
+}
+
+static int decode_imm(struct x86_emulate_ctxt *ctxt, struct x86_emulate_ops *ops,
+		struct operand *op, unsigned size, bool sign_extension)
+{
+	struct decode_cache *c = &ctxt->decode;
+	int rc = X86EMUL_CONTINUE;
+
+	op->type = OP_IMM;
+	op->bytes = size;
+	op->ptr = (unsigned long *)c->eip;
+	/* NB. Immediates are sign-extended as necessary. */
+	switch (op->bytes) {
+	case 1:
+		op->val = insn_fetch(s8, 1, c->eip);
+		break;
+	case 2:
+		op->val = insn_fetch(s16, 2, c->eip);
+		break;
+	case 4:
+		op->val = insn_fetch(s32, 4, c->eip);
+		break;
+	}
+	if (!sign_extension) {
+		switch (op->bytes) {
+		case 1:
+			op->val &= 0xff;
+			break;
+		case 2:
+			op->val &= 0xffff;
+			break;
+		case 4:
+			op->val &= 0xffffffff;
+			break;
+		}
+	}
+done:
+	return rc;
+}
+
 int
 x86_decode_insn(struct x86_emulate_ctxt *ctxt, struct x86_emulate_ops *ops,
 		void *insn, int insn_len)
@@ -1145,6 +1195,9 @@ done_prefixes:
 		break;
 	}
 
+	if (rc != X86EMUL_CONTINUE)
+		goto done;
+
 	/*
 	 * Decode and fetch the second source operand: register, memory
 	 * or immediate.
@@ -1176,7 +1229,13 @@ done_prefixes:
 		c->src2.bytes = 2;
 		c->src2.type = OP_MEM;
 		break;
+	case Src2Imm:
+		rc = decode_imm(ctxt, ops, &c->src2, imm_size(c), true);
+		break;
 	}
+
+	if (rc != X86EMUL_CONTINUE)
+		goto done;
 
 	/* Decode and fetch the destination operand: register or memory. */
 	switch (c->d & DstMask) {
@@ -1462,6 +1521,22 @@ static int emulate_ret_far(struct x86_emulate_ctxt *ctxt,
 		return rc;
 	rc = kvm_load_segment_descriptor(ctxt->vcpu, (u16)cs, VCPU_SREG_CS);
 	return rc;
+}
+
+static int emulate_imul(struct x86_emulate_ctxt *ctxt)
+{
+	struct decode_cache *c = &ctxt->decode;
+
+	emulate_2op_SrcV_nobyte("imul", c->src, c->dst, ctxt->eflags);
+	return X86EMUL_CONTINUE;
+}
+
+static int emulate_imul_3op(struct x86_emulate_ctxt *ctxt)
+{
+	struct decode_cache *c = &ctxt->decode;
+
+	c->dst.val = c->src2.val;
+	return emulate_imul(ctxt);
 }
 
 static inline int writeback(struct x86_emulate_ctxt *ctxt,
@@ -2038,6 +2113,10 @@ special_insn:
 	case 0x68: /* push imm */
 	case 0x6a: /* push imm8 */
 		emulate_push(ctxt);
+		break;
+	case 0x69: /* imul imm */
+	case 0x6b: /* imul imm8 */
+		emulate_imul_3op(ctxt);
 		break;
 	case 0x6c:		/* insb */
 	case 0x6d:		/* insw/insd */
@@ -2645,6 +2724,9 @@ twobyte_insn:
 		emulate_2op_cl("shrd", c->src2, c->src, c->dst, ctxt->eflags);
 		break;
 	case 0xae:              /* clflush */
+		break;
+	case 0xaf:              /* imul */
+		emulate_imul(ctxt);
 		break;
 	case 0xb0 ... 0xb1:	/* cmpxchg */
 		/*

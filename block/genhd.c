@@ -230,35 +230,44 @@ struct hd_struct *disk_map_sector_rcu(struct gendisk *disk, sector_t sector)
 }
 EXPORT_SYMBOL_GPL(disk_map_sector_rcu);
 
-int is_same_part(struct gendisk *disk, sector_t sector1, sector_t sector2,
-		 struct hd_struct **part1, struct hd_struct **part2)
+/**
+ * part_valid - see if @check corresponds to a partition within @disk
+ * @disk: gendisk of interest
+ * @check: hd_struct pointer to check against the partition table
+ *
+ * Check to see if it is safe to dereference @check.  We don't always
+ * know if req->part is filled in by the block layer.  This routine
+ * is called to avoid dereferencing a bogus pointer.  See req_to_part.
+ *
+ * CONTEXT:
+ * RCU read locked.
+ *
+ * RETURNS:
+ * true on success, false on failure
+ */
+bool part_valid(struct gendisk *disk, struct hd_struct *check)
 {
 	struct disk_part_tbl *ptbl;
 	struct hd_struct *part;
-	int i = 1;
-
-	*part1 = *part2 = NULL;
+	int i;
 
 	ptbl = rcu_dereference(disk->part_tbl);
+
 	part = rcu_dereference(ptbl->last_lookup);
+	if (part && part == check)
+		return true;
 
-	do {
-		if (part) {
-			if (sector_in_part(part, sector1))
-				*part1 = part;
-			if (sector_in_part(part, sector2))
-				*part2 = part;
-
-			if (*part1 && *part2)
-				/* we found both partitions */
-				return *part1 == *part2;
-		}
-
+	for (i = 1; i < ptbl->len; i++) {
 		part = rcu_dereference(ptbl->part[i]);
-	} while (i++ < ptbl->len);
 
-	/* we did not found at least one partition */
-	return *part1 == *part2;
+		if (part && part == check)
+			return true;
+	}
+
+	if (check == &disk->part0)
+		return true;
+
+	return false;
 }
 
 /*
@@ -1231,6 +1240,8 @@ struct gendisk *alloc_disk_node(int minors, int node_id)
 			return NULL;
 		}
 		disk->part_tbl->part[0] = &disk->part0;
+
+		hd_ref_init(&disk->part0);
 
 		disk->minors = minors;
 		rand_initialize_disk(disk);

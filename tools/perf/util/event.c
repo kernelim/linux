@@ -324,8 +324,9 @@ int perf_event__synthesize_modules(struct perf_tool *tool,
 				   struct machine *machine)
 {
 	int rc = 0;
-	struct rb_node *nd;
+	struct map *pos;
 	struct map_groups *kmaps = &machine->kmaps;
+	struct maps *maps = &kmaps->maps[MAP__FUNCTION];
 	union perf_event *event = zalloc((sizeof(event->mmap) +
 					  machine->id_hdr_size));
 	if (event == NULL) {
@@ -345,10 +346,8 @@ int perf_event__synthesize_modules(struct perf_tool *tool,
 	else
 		event->header.misc = PERF_RECORD_MISC_GUEST_KERNEL;
 
-	for (nd = rb_first(&kmaps->maps[MAP__FUNCTION]);
-	     nd; nd = rb_next(nd)) {
+	for (pos = maps__first(maps); pos; pos = map__next(pos)) {
 		size_t size;
-		struct map *pos = rb_entry(nd, struct map, rb_node);
 
 		if (pos->dso->kernel)
 			continue;
@@ -877,6 +876,10 @@ void thread__find_addr_location(struct thread *thread,
 		al->sym = NULL;
 }
 
+/*
+ * Callers need to drop the reference to al->thread, obtained in
+ * machine__findnew_thread()
+ */
 int perf_event__preprocess_sample(const union perf_event *event,
 				  struct machine *machine,
 				  struct addr_location *al,
@@ -935,6 +938,17 @@ int perf_event__preprocess_sample(const union perf_event *event,
 	}
 
 	return 0;
+}
+
+/*
+ * The preprocess_sample method will return with reference counts for the
+ * in it, when done using (and perhaps getting ref counts if needing to
+ * keep a pointer to one of those entries) it must be paired with
+ * addr_location__put(), so that the refcounts can be decremented.
+ */
+void addr_location__put(struct addr_location *al)
+{
+	thread__zput(al->thread);
 }
 
 bool is_bts_event(struct perf_event_attr *attr)

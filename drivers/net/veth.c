@@ -261,6 +261,7 @@ static void veth_setup(struct net_device *dev)
 	ether_setup(dev);
 
 	netdev_extended(dev)->ext_priv_flags &= ~IFF_TX_SKB_SHARING;
+	netdev_extended(dev)->ext_priv_flags |= IFF_LIVE_ADDR_CHANGE;
 
 	dev->netdev_ops = &veth_netdev_ops;
 	set_netdev_ops_ext(dev, &veth_netdev_ops_ext);
@@ -346,7 +347,7 @@ static int veth_newlink(struct net_device *dev,
 	}
 
 	if (tbp[IFLA_ADDRESS] == NULL)
-		random_ether_addr(peer->dev_addr);
+		eth_hw_addr_random(peer);
 
 	err = register_netdevice(peer);
 	put_net(net);
@@ -364,7 +365,7 @@ static int veth_newlink(struct net_device *dev,
 	 */
 
 	if (tb[IFLA_ADDRESS] == NULL)
-		random_ether_addr(dev->dev_addr);
+		eth_hw_addr_random(dev);
 
 	if (tb[IFLA_IFNAME])
 		nla_strlcpy(dev->name, tb[IFLA_IFNAME], IFNAMSIZ);

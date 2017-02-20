@@ -64,6 +64,10 @@ static struct posix_acl *gfs2_acl_get(struct gfs2_inode *ip, int type)
 
 	acl = posix_acl_from_xattr(data, len);
 	kfree(data);
+
+	if (!IS_ERR(acl))
+		set_cached_acl(&ip->i_inode, type, acl);
+
 	return acl;
 }
 
@@ -264,7 +268,7 @@ static int gfs2_xattr_system_set(struct inode *inode, const char *name,
 				 const void *value, size_t size, int flags)
 {
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
-	struct posix_acl *acl = NULL;
+	struct posix_acl *acl = NULL, *real_acl = NULL;
 	int error = 0, type;
 
 	if (!sdp->sd_args.ar_posix_acl)
@@ -306,17 +310,13 @@ static int gfs2_xattr_system_set(struct inode *inode, const char *name,
 	if (acl->a_count > GFS2_ACL_MAX_ENTRIES(sdp))
 		goto out_release;
 
+	real_acl = acl;
 	if (type == ACL_TYPE_ACCESS) {
-		mode_t mode = inode->i_mode;
-		error = posix_acl_equiv_mode(acl, &mode);
+		umode_t mode;
 
-		if (error <= 0) {
-			posix_acl_release(acl);
-			acl = NULL;
-
-			if (error < 0)
-				return error;
-		}
+		error = posix_acl_update_mode(inode, &mode, &real_acl);
+		if (error)
+			goto out_release;
 
 		error = gfs2_set_mode(inode, mode);
 		if (error)
@@ -326,8 +326,8 @@ static int gfs2_xattr_system_set(struct inode *inode, const char *name,
 set_acl:
 	error = gfs2_xattr_set(inode, GFS2_EATYPE_SYS, name, value, size, 0);
 	if (!error) {
-		if (acl)
-			set_cached_acl(inode, type, acl);
+		if (real_acl)
+			set_cached_acl(inode, type, real_acl);
 		else
 			forget_cached_acl(inode, type);
 	}

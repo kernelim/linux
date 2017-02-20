@@ -772,7 +772,7 @@ core_initcall(cpufreq_tsc);
 static struct clocksource clocksource_tsc;
 
 /*
- * We used to compare the TSC to the cycle_last value in the clocksource
+ * We compare the TSC to the cycle_last value in the clocksource
  * structure to avoid a nasty time-warp. This can be observed in a
  * very small window right after one CPU updated cycle_last under
  * xtime/vsyscall_gtod lock and the other CPU reads a TSC value which
@@ -789,7 +789,10 @@ static struct clocksource clocksource_tsc;
  */
 static cycle_t read_tsc(struct clocksource *cs)
 {
-	return (cycle_t)get_cycles();
+	cycle_t ret = (cycle_t)get_cycles();
+
+	return ret >= clocksource_tsc.cycle_last ?
+		ret : clocksource_tsc.cycle_last;
 }
 
 #ifdef CONFIG_X86_64
@@ -806,9 +809,15 @@ static cycle_t __vsyscall_fn vread_tsc(void)
 	ret = (cycle_t)vget_cycles();
 	rdtsc_barrier();
 
-	return ret;
+	return ret >= __vsyscall_gtod_data.clock.cycle_last ?
+		ret : __vsyscall_gtod_data.clock.cycle_last;
 }
 #endif
+
+static void resume_tsc(void)
+{
+	clocksource_tsc.cycle_last = 0;
+}
 
 /*
  * .mask MUST be CLOCKSOURCE_MASK(64). See comment above read_tsc()
@@ -817,6 +826,7 @@ static struct clocksource clocksource_tsc = {
 	.name                   = "tsc",
 	.rating                 = 300,
 	.read                   = read_tsc,
+	.resume			= resume_tsc,
 	.mask                   = CLOCKSOURCE_MASK(64),
 	.shift                  = 22,
 	.flags                  = CLOCK_SOURCE_IS_CONTINUOUS |

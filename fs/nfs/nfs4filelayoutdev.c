@@ -164,7 +164,7 @@ nfs4_ds_connect(struct nfs_server *mds_srv, struct nfs4_pnfs_ds *ds)
 		dprintk("%s: DS %s: trying address %s\n",
 			__func__, ds->ds_remotestr, da->da_remotestr);
 
-		clp = nfs4_set_ds_client(mds_srv->nfs_client,
+		clp = nfs4_set_ds_client(mds_srv,
 				 (struct sockaddr *)&da->da_addr,
 				 da->da_addrlen, IPPROTO_TCP);
 		if (!IS_ERR(clp))

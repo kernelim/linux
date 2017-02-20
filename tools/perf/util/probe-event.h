@@ -111,6 +111,7 @@ extern bool perf_probe_event_need_dwarf(struct perf_probe_event *pev);
 
 /* Release event contents */
 extern void clear_perf_probe_event(struct perf_probe_event *pev);
+extern void clear_probe_trace_event(struct probe_trace_event *tev);
 
 /* Command string to line-range */
 extern int parse_line_range_desc(const char *cmd, struct line_range *lr);

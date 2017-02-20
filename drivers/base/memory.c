@@ -607,14 +607,16 @@ u64 set_memory_state(unsigned long start_pfn, unsigned long nr_pages,
 		if (valid_section_nr(i) && present_section_nr(i)) {
 			section = __nr_to_section(i);
 			mem = find_memory_block(section);
-			ret = memory_block_change_state(mem, to_state,
+			if ((mem->state != to_state) && (mem->state == from_state_req)) {
+				ret = memory_block_change_state(mem, to_state,
 							from_state_req);
-			if (ret) {
-				current_pfn = section_nr_to_pfn(start_sec);
-				printk(KERN_WARNING "memory (0x%0lx - 0x%0lx) "
-				       "online failed.", current_pfn,
-				       current_pfn + PAGES_PER_SECTION);
-				return current_pfn;
+				if (ret) {
+					current_pfn = section_nr_to_pfn(start_sec);
+					printk(KERN_WARNING "Memory (0x%0lx - 0x%0lx) "
+						"online failed [ret=%d]", current_pfn,
+						current_pfn + PAGES_PER_SECTION, ret);
+					return current_pfn;
+				}
 			}
 		}
 	}

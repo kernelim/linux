@@ -96,6 +96,7 @@ int sysctl_tcp_thin_dupack __read_mostly;
 
 int sysctl_tcp_moderate_rcvbuf __read_mostly = 1;
 int sysctl_tcp_abc __read_mostly;
+int sysctl_tcp_invalid_ratelimit __read_mostly = HZ/2;
 
 #define FLAG_DATA		0x01 /* Incoming frame contained data.		*/
 #define FLAG_WIN_UPDATE		0x02 /* Incoming ACK was a window update.	*/
@@ -3707,19 +3708,62 @@ static int tcp_process_frto(struct sock *sk, int flag)
 	return 0;
 }
 
+static bool __tcp_oow_rate_limited(struct net *net, int mib_idx,
+				   u32 *last_oow_ack_time)
+{
+	if (*last_oow_ack_time) {
+		s32 elapsed = (s32)(tcp_time_stamp - *last_oow_ack_time);
+
+		if (0 <= elapsed && elapsed < sysctl_tcp_invalid_ratelimit) {
+			NET_INC_STATS(net, mib_idx);
+			return true;	/* rate-limited: don't send yet! */
+		}
+	}
+
+	*last_oow_ack_time = tcp_time_stamp;
+
+	return false;	/* not rate-limited: go ahead, send dupack now! */
+}
+
+/* Return true if we're currently rate-limiting out-of-window ACKs and
+ * thus shouldn't send a dupack right now. We rate-limit dupacks in
+ * response to out-of-window SYNs or ACKs to mitigate ACK loops or DoS
+ * attacks that send repeated SYNs or ACKs for the same connection. To
+ * do this, we do not send a duplicate SYNACK or ACK if the remote
+ * endpoint is sending out-of-window SYNs or pure ACKs at a high rate.
+ */
+bool tcp_oow_rate_limited(struct net *net, const struct sk_buff *skb,
+			  int mib_idx, u32 *last_oow_ack_time)
+{
+	/* Data packets without SYNs are not likely part of an ACK loop. */
+	if ((TCP_SKB_CB(skb)->seq != TCP_SKB_CB(skb)->end_seq) &&
+	    !tcp_hdr(skb)->syn)
+		return false;
+
+	return __tcp_oow_rate_limited(net, mib_idx, last_oow_ack_time);
+}
+
 static u32 tcp_random_u32_max(u32 ep_ro)
 {
 	return (u32)(((u64) random32() * ep_ro) >> 32);
 }
 
 /* RFC 5961 7 [ACK Throttling] */
-static void tcp_send_challenge_ack(struct sock *sk)
+static void tcp_send_challenge_ack(struct sock *sk, const struct sk_buff *skb)
 {
 	/* unprotected vars, we dont care of overwrites */
 	static u32 challenge_timestamp;
 	static unsigned int challenge_count;
+	struct tcp_sock *tp = tcp_sk(sk);
 	u32 count, now;
 
+	/* First check our per-socket dupack rate limit. */
+	if (__tcp_oow_rate_limited(sock_net(sk),
+				   LINUX_MIB_TCPACKSKIPPEDCHALLENGE,
+				   &tp->last_oow_ack_time))
+		return;
+
+	/* Then check host-wide RFC 5961 rate limit. */
 	now = jiffies / HZ;
 	if (now != challenge_timestamp) {
 		u32 half = (sysctl_tcp_challenge_ack_limit + 1) >> 1;
@@ -3728,7 +3772,6 @@ static void tcp_send_challenge_ack(struct sock *sk)
 		WRITE_ONCE(challenge_count, half +
 			   tcp_random_u32_max(sysctl_tcp_challenge_ack_limit));
 	}
-
 	count = READ_ONCE(challenge_count);
 	if (count > 0) {
 		WRITE_ONCE(challenge_count, count - 1);
@@ -3781,7 +3824,7 @@ static int tcp_ack(struct sock *sk, struct sk_buff *skb, int flag)
 	if (before(ack, prior_snd_una)) {
 		/* RFC 5961 5.2 [Blind Data Injection Attack].[Mitigation] */
 		if (before(ack, prior_snd_una - tp->max_window)) {
-			tcp_send_challenge_ack(sk);
+			tcp_send_challenge_ack(sk, skb);
 			return -1;
 		}
 		goto old_ack;
@@ -5022,6 +5065,8 @@ static void tcp_check_space(struct sock *sk)
 {
 	if (sock_flag(sk, SOCK_QUEUE_SHRUNK)) {
 		sock_reset_flag(sk, SOCK_QUEUE_SHRUNK);
+		/* pairs with tcp_poll() */
+		smp_mb();
 		if (sk->sk_socket &&
 		    test_bit(SOCK_NOSPACE, &sk->sk_socket->flags))
 			tcp_new_space(sk);
@@ -5274,7 +5319,10 @@ static bool tcp_validate_incoming(struct sock *sk, struct sk_buff *skb,
 	    tcp_paws_discard(sk, skb)) {
 		if (!th->rst) {
 			NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_PAWSESTABREJECTED);
-			tcp_send_dupack(sk, skb);
+			if (!tcp_oow_rate_limited(sock_net(sk), skb,
+						  LINUX_MIB_TCPACKSKIPPEDPAWS,
+						  &tp->last_oow_ack_time))
+				tcp_send_dupack(sk, skb);
 			goto discard;
 		}
 		/* Reset is accepted even if it did not pass PAWS. */
@@ -5291,7 +5339,10 @@ static bool tcp_validate_incoming(struct sock *sk, struct sk_buff *skb,
 		if (!th->rst) {
 			if (th->syn)
 				goto syn_challenge;
-			tcp_send_dupack(sk, skb);
+			if (!tcp_oow_rate_limited(sock_net(sk), skb,
+						  LINUX_MIB_TCPACKSKIPPEDSEQ,
+						  &tp->last_oow_ack_time))
+				tcp_send_dupack(sk, skb);
 		}
 		goto discard;
 	}
@@ -5307,7 +5358,7 @@ static bool tcp_validate_incoming(struct sock *sk, struct sk_buff *skb,
 		if (TCP_SKB_CB(skb)->seq == tp->rcv_nxt)
 			tcp_reset(sk);
 		else
-			tcp_send_challenge_ack(sk);
+			tcp_send_challenge_ack(sk, skb);
 		goto discard;
 	}
 
@@ -5321,7 +5372,7 @@ syn_challenge:
 		if (syn_inerr)
 			TCP_INC_STATS_BH(sock_net(sk), TCP_MIB_INERRS);
 		NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_TCPSYNCHALLENGE);
-		tcp_send_challenge_ack(sk);
+		tcp_send_challenge_ack(sk, skb);
 		goto discard;
 	}
 

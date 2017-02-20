@@ -73,7 +73,7 @@ int
 generic_acl_set(struct inode *inode, struct generic_acl_operations *ops,
 		int type, const void *value, size_t size)
 {
-	struct posix_acl *acl = NULL;
+	struct posix_acl *acl = NULL, *real_acl = NULL;
 	int error;
 
 	if (S_ISLNK(inode->i_mode))
@@ -86,22 +86,15 @@ generic_acl_set(struct inode *inode, struct generic_acl_operations *ops,
 			return PTR_ERR(acl);
 	}
 	if (acl) {
-		mode_t mode;
-
 		error = posix_acl_valid(acl);
 		if (error)
 			goto failed;
+		real_acl = acl;
 		switch(type) {
 			case ACL_TYPE_ACCESS:
-				mode = inode->i_mode;
-				error = posix_acl_equiv_mode(acl, &mode);
-				if (error < 0)
+				error = posix_acl_update_mode(inode, &inode->i_mode, &real_acl);
+				if (error)
 					goto failed;
-				inode->i_mode = mode;
-				if (error == 0) {
-					posix_acl_release(acl);
-					acl = NULL;
-				}
 				break;
 
 			case ACL_TYPE_DEFAULT:
@@ -112,7 +105,7 @@ generic_acl_set(struct inode *inode, struct generic_acl_operations *ops,
 				break;
 		}
 	}
-	ops->setacl(inode, type, acl);
+	ops->setacl(inode, type, real_acl);
 	error = 0;
 failed:
 	posix_acl_release(acl);

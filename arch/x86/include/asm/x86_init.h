@@ -140,6 +140,7 @@ struct x86_platform_ops {
 	void (*iommu_shutdown)(void);
 	bool (*is_untracked_pat_range)(u64 start, u64 end);
 	void (*nmi_init)(void);
+	unsigned char (*get_nmi_reason)(void);
 	void (*save_sched_clock_state)(void);
 	void (*restore_sched_clock_state)(void);
 };

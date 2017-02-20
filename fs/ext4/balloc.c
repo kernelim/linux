@@ -123,6 +123,16 @@ unsigned ext4_init_block_bitmap(struct super_block *sb, struct buffer_head *bh,
 		bit_max += ext4_bg_num_gdb(sb, block_group);
 	}
 
+	if (bh && ((bit_max >> 3) >= bh->b_size)) {
+		ext4_error(sb, "Metadata block count (%d) too high in group %u",
+				bit_max, block_group);
+		ext4_free_blks_set(sb, gdp, 0);
+		ext4_free_inodes_set(sb, gdp, 0);
+		ext4_itable_unused_set(sb, gdp, 0);
+		memset(bh->b_data, 0xff, sb->s_blocksize);
+		return 0;
+	}
+
 	if (block_group == ngroups - 1) {
 		/*
 		 * Even though mke2fs always initialize first and last group
@@ -550,11 +560,15 @@ ext4_fsblk_t ext4_count_free_blocks(struct super_block *sb)
 
 static inline int test_root(ext4_group_t a, int b)
 {
-	int num = b;
-
-	while (a > num)
-		num *= b;
-	return num == a;
+	while (1) {
+		if (a < b)
+			return 0;
+		if (a == b)
+			return 1;
+		if ((a % b) != 0)
+			return 0;
+		a = a / b;
+	}
 }
 
 static int ext4_group_sparse(ext4_group_t group)

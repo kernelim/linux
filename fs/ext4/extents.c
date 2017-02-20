@@ -335,9 +335,13 @@ static int ext4_valid_extent(struct inode *inode, struct ext4_extent *ext)
 	ext4_fsblk_t block = ext4_ext_pblock(ext);
 	int len = ext4_ext_get_actual_len(ext);
 	ext4_lblk_t lblock = le32_to_cpu(ext->ee_block);
-	ext4_lblk_t last = lblock + len - 1;
 
-	if (len == 0 || lblock > last)
+	/*
+	 * We allow neither:
+	 *  - zero length
+	 *  - overflow/wrap-around
+	 */
+	if (lblock + len <= lblock)
 		return 0;
 	return ext4_data_block_valid(EXT4_SB(inode->i_sb), block, len);
 }
@@ -4479,6 +4483,35 @@ static int ext4_xattr_fiemap(struct inode *inode,
 }
 
 /*
+ * We have to make sure i_disksize gets properly updated before we truncate
+ * page cache due to hole punching or zero range. Otherwise i_disksize update
+ * can get lost as it may have been postponed to submission of writeback but
+ * that will never happen after we truncate page cache.
+ */
+int ext4_update_disksize_before_punch(struct inode *inode, loff_t offset,
+				      loff_t len)
+{
+	handle_t *handle;
+	loff_t size = i_size_read(inode);
+
+	WARN_ON(!mutex_is_locked(&inode->i_mutex));
+	if (offset > size || offset + len < size)
+		return 0;
+
+	if (EXT4_I(inode)->i_disksize >= size)
+		return 0;
+
+	handle = ext4_journal_start(inode, 1);
+	if (IS_ERR(handle))
+		return PTR_ERR(handle);
+	ext4_update_i_disksize(inode, size);
+	ext4_mark_inode_dirty(handle, inode);
+	ext4_journal_stop(handle);
+
+	return 0;
+}
+
+/*
  * ext4_ext_punch_hole
  *
  * Punches a hole of "length" bytes in a file starting
@@ -4545,6 +4578,9 @@ int ext4_ext_punch_hole(struct inode *inode, loff_t offset, loff_t length)
 
 	/* Now release the pages */
 	if (last_page_offset > first_page_offset) {
+		err = ext4_update_disksize_before_punch(inode, offset, length);
+		if (err)
+			goto out_mutex;
 		truncate_pagecache_range(inode, first_page_offset,
 					 last_page_offset - 1);
 	}

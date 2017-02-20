@@ -919,7 +919,7 @@ static int fm10k_set_mac(struct net_device *dev, void *p)
 	if (!err) {
 		ether_addr_copy(dev->dev_addr, addr->sa_data);
 		ether_addr_copy(hw->mac.addr, addr->sa_data);
-		dev->addr_assign_type &= ~NET_ADDR_RANDOM;
+		dev->addr_assign_type = NET_ADDR_PERM;
 	}
 
 	/* if we had a mailbox error suggest trying again */
@@ -1032,7 +1032,7 @@ void fm10k_restore_rx_state(struct fm10k_intfc *interface)
 			ether_addr_copy(hw->mac.addr, hw->mac.perm_addr);
 			ether_addr_copy(netdev->perm_addr, hw->mac.perm_addr);
 			ether_addr_copy(netdev->dev_addr, hw->mac.perm_addr);
-			netdev->addr_assign_type &= ~NET_ADDR_RANDOM;
+			netdev->addr_assign_type = NET_ADDR_PERM;
 		}
 
 		if (hw->mac.vlan_override)

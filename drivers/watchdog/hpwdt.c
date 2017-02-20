@@ -1,11 +1,11 @@
 /*
- *	HP WatchDog Driver
+ *	HPE WatchDog Driver
  *	based on
  *
  *	SoftDog	0.05:	A Software Watchdog Device
  *
- *	(c) Copyright 2007 Hewlett-Packard Development Company, L.P.
- *	Thomas Mingarelli <thomas.mingarelli@hp.com>
+ *	(c) Copyright 2015 Hewlett Packard Enterprise Development LP
+ *	Thomas Mingarelli <thomas.mingarelli@hpe.com>
  *
  *	This program is free software; you can redistribute it and/or
  *	modify it under the terms of the GNU General Public License
@@ -36,7 +36,7 @@
 #include <asm/cacheflush.h>
 #endif /* CONFIG_HPWDT_NMI_DECODING */
 
-#define HPWDT_VERSION			"1.3.3-rh"
+#define HPWDT_VERSION			"1.4.0-rh"
 #define SECS_TO_TICKS(secs)		((secs) * 1000 / 128)
 #define TICKS_TO_SECS(ticks)		((ticks) * 128 / 1000)
 #define HPWDT_MAX_TIMER			TICKS_TO_SECS(65535)
@@ -588,7 +588,7 @@ static const struct watchdog_info ident = {
 	.options = WDIOF_SETTIMEOUT |
 		   WDIOF_KEEPALIVEPING |
 		   WDIOF_MAGICCLOSE,
-	.identity = "HP iLO2+ HW Watchdog Timer",
+	.identity = "HPE iLO2+ HW Watchdog Timer",
 };
 
 static long hpwdt_ioctl(struct file *file, unsigned int cmd,
@@ -768,7 +768,7 @@ static int __devinit hpwdt_init_nmi_decoding(struct pci_dev *dev)
 	}
 
 	dev_info(&dev->dev,
-			"HP Watchdog Timer Driver: NMI decoding initialized"
+			"HPE Watchdog Timer Driver: NMI decoding initialized"
 			", allow kernel dump: %s (default = 1/ON)\n"
 			", priority: %s (default = 0/LAST).\n",
 			(allow_kdump == 0) ? "OFF" : "ON",
@@ -802,13 +802,6 @@ static int __devinit hpwdt_init_one(struct pci_dev *dev,
 {
 	int retval;
 
-
-	/*
-	 * Ignore all auxilary iLO devices with the following PCI ID
-	 */
-	if (dev->subsystem_device == 0x1979)
-		return -ENODEV;
-
 	/*
 	 * Check if we can do NMI decoding or not
 	 */
@@ -819,11 +812,19 @@ static int __devinit hpwdt_init_one(struct pci_dev *dev,
 	 * not run on a legacy ASM box.
 	 * So we only support the G5 ProLiant servers and higher.
 	 */
-	if (dev->subsystem_vendor != PCI_VENDOR_ID_HP) {
+	if (dev->subsystem_vendor != PCI_VENDOR_ID_HP &&
+	    dev->subsystem_vendor != PCI_VENDOR_ID_HP_3PAR) {
 		dev_warn(&dev->dev,
 			"This server does not have an iLO2+ ASIC.\n");
 		return -ENODEV;
 	}
+
+	/*
+	 * Ignore all auxilary iLO devices with the following PCI ID
+	 */
+	if (dev->subsystem_vendor == PCI_VENDOR_ID_HP &&
+	    dev->subsystem_device == 0x1979)
+		return -ENODEV;
 
 	if (pci_enable_device(dev)) {
 		dev_warn(&dev->dev,
@@ -862,7 +863,7 @@ static int __devinit hpwdt_init_one(struct pci_dev *dev,
 		goto error_misc_register;
 	}
 
-	dev_info(&dev->dev, "HP Watchdog Timer Driver: %s"
+	dev_info(&dev->dev, "HPE Watchdog Timer Driver: %s"
 			", timer margin: %d seconds (nowayout=%d).\n",
 			HPWDT_VERSION, soft_margin, nowayout);
 	return 0;

@@ -366,50 +366,94 @@ static void
 acpi_ns_exec_module_code(union acpi_operand_object *method_obj,
 			 struct acpi_evaluate_info *info)
 {
-	union acpi_operand_object *root_obj;
+	union acpi_operand_object *parent_obj;
+	struct acpi_namespace_node *parent_node;
+	acpi_object_type type;
 	acpi_status status;
 
 	ACPI_FUNCTION_TRACE(ns_exec_module_code);
 
+	/*
+	 * Get the parent node. We cheat by using the next_object field
+	 * of the method object descriptor.
+	 */
+	parent_node = ACPI_CAST_PTR(struct acpi_namespace_node,
+				    method_obj->method.next_object);
+	type = acpi_ns_get_type(parent_node);
+
+	/* Must clear next_object (acpi_ns_attach_object needs the field) */
+
+	method_obj->method.next_object = NULL;
+
 	/* Initialize the evaluation information block */
 
 	ACPI_MEMSET(info, 0, sizeof(struct acpi_evaluate_info));
-	info->prefix_node = acpi_gbl_root_node;
+	info->prefix_node = parent_node;
 
 	/*
-	 * Get the currently attached root object. Add a reference, because the
+	 * Get the currently attached parent object. Add a reference, because the
 	 * ref count will be decreased when the method object is installed to
-	 * the root node.
+	 * the parent node.
 	 */
-	root_obj = acpi_ns_get_attached_object(acpi_gbl_root_node);
-	acpi_ut_add_reference(root_obj);
+	parent_obj = acpi_ns_get_attached_object(parent_node);
+	if (parent_obj) {
+		acpi_ut_add_reference(parent_obj);
+	}
 
-	/* Install the method (module-level code) in the root node */
+	/* Install the method (module-level code) in the parent node */
 
-	status = acpi_ns_attach_object(acpi_gbl_root_node, method_obj,
+	status = acpi_ns_attach_object(parent_node, method_obj,
 				       ACPI_TYPE_METHOD);
 	if (ACPI_FAILURE(status)) {
 		goto exit;
 	}
 
-	/* Execute the root node as a control method */
+	/*
+	 * RHEL6-ONLY
+	 * Now that the method object is attached to the parent node and
+	 * the parent object has been detached, check if the method object
+	 * has exactly the same object list as the parent object. If left
+	 * unaltered, this case will result in a circular object list when
+	 * this parent object is reattached back to the parent node later on
+	 * in this routine. Therefore, such an object list is removed from
+	 * the currently detached parent object. In particular, this case
+	 * will occur if ACPI_TYPE_LOCAL_DATA objects are already attached
+	 * to the parent node prior to entry to this routine.
+	 */
+	if (method_obj->method.next_object &&
+	    parent_obj &&
+	    parent_obj->common.next_object == method_obj->method.next_object) {
+		parent_obj->common.next_object = NULL;
+	}
+
+	/* Execute the parent node as a control method */
 
 	status = acpi_ns_evaluate(info);
 
 	ACPI_DEBUG_PRINT((ACPI_DB_INIT, "Executed module-level code at %p\n",
 			  method_obj->method.aml_start));
 
+	/* Delete a possible implicit return value (in slack mode) */
+
+	if (info->return_object) {
+		acpi_ut_remove_reference(info->return_object);
+	}
+
 	/* Detach the temporary method object */
 
-	acpi_ns_detach_object(acpi_gbl_root_node);
+	acpi_ns_detach_object(parent_node);
 
-	/* Restore the original root object */
+	/* Restore the original parent object */
 
-	status =
-	    acpi_ns_attach_object(acpi_gbl_root_node, root_obj,
-				  ACPI_TYPE_DEVICE);
+	if (parent_obj) {
+		status = acpi_ns_attach_object(parent_node, parent_obj, type);
+	} else {
+		parent_node->type = (u8)type;
+	}
 
       exit:
-	acpi_ut_remove_reference(root_obj);
+	if (parent_obj) {
+		acpi_ut_remove_reference(parent_obj);
+	}
 	return_VOID;
 }

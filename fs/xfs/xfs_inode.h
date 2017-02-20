@@ -498,6 +498,7 @@ int		xfs_isilocked(xfs_inode_t *, uint);
 uint		xfs_ilock_map_shared(xfs_inode_t *);
 void		xfs_iunlock_map_shared(xfs_inode_t *, uint);
 void		xfs_inode_free(struct xfs_inode *ip);
+void		__xfs_inode_free(struct xfs_inode *);
 
 /*
  * xfs_inode.c prototypes.

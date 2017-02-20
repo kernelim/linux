@@ -165,6 +165,7 @@ static int br_set_mac_address(struct net_device *dev, void *p)
 
 	spin_lock_bh(&br->lock);
 	memcpy(dev->dev_addr, addr->sa_data, ETH_ALEN);
+	dev->addr_assign_type = NET_ADDR_PERM;
 	br_stp_change_bridge_id(br, addr->sa_data);
 	br->flags |= BR_SET_MAC_ADDR;
 	spin_unlock_bh(&br->lock);
@@ -286,7 +287,7 @@ static void br_vlan_rx_register(struct net_device *br_dev, struct vlan_group *gr
 			continue;
 
 		ops = p->dev->netdev_ops;
-		if (ops->ndo_vlan_rx_register)
+		if (ops->ndo_vlan_rx_register && (p->dev->features & NETIF_F_HW_VLAN_RX))
 			ops->ndo_vlan_rx_register(p->dev, grp);
 	}
 }
@@ -334,7 +335,7 @@ void br_dev_setup(struct net_device *dev)
 {
 	struct net_bridge *br = netdev_priv(dev);
 
-	random_ether_addr(dev->dev_addr);
+	eth_hw_addr_random(dev);
 	ether_setup(dev);
 
 	dev->netdev_ops = &br_netdev_ops;
@@ -350,8 +351,8 @@ void br_dev_setup(struct net_device *dev)
 	netdev_extended(dev)->ext_priv_flags &= ~IFF_TX_SKB_SHARING;
 
 	dev->features = COMMON_FEATURES | NETIF_F_LLTX | NETIF_F_NETNS_LOCAL |
-			NETIF_F_HW_VLAN_TX;
-	netdev_extended(dev)->hw_features = COMMON_FEATURES | NETIF_F_HW_VLAN_TX;
+			NETIF_F_HW_VLAN_TX | NETIF_F_HW_VLAN_RX;
+	netdev_extended(dev)->hw_features = COMMON_FEATURES | NETIF_F_HW_VLAN_TX | NETIF_F_HW_VLAN_RX;
 	dev->vlan_features = COMMON_FEATURES;
 
 	br->dev = dev;

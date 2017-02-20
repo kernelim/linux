@@ -86,6 +86,8 @@ extern unsigned long ext2_bg_num_gdb(struct super_block *sb, int group);
 extern ext2_fsblk_t ext2_new_block(struct inode *, unsigned long, int *);
 extern ext2_fsblk_t ext2_new_blocks(struct inode *, unsigned long,
 				unsigned long *, int *);
+extern int ext2_data_block_valid(struct ext2_sb_info *sbi, ext2_fsblk_t start_blk,
+				 unsigned int count);
 extern void ext2_free_blocks (struct inode *, unsigned long,
 			      unsigned long);
 extern unsigned long ext2_count_free_blocks (struct super_block *);

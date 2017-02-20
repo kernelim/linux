@@ -1102,13 +1102,16 @@ static void pci_init_capabilities(struct pci_dev *dev)
 	platform_pci_wakeup_init(dev);
 
 	/* Vital Product Data */
-	pci_vpd_pci22_init(dev);
+	pci_vpd_init(dev);
 
 	/* Alternative Routing-ID Forwarding */
 	pci_enable_ari(dev);
 
 	/* Single Root I/O Virtualization */
 	pci_iov_init(dev);
+
+	/* Address Translation Services */
+	pci_ats_init(dev);
 
 	/* Enable ACS P2P upstream forwarding */
 	pci_enable_acs(dev);

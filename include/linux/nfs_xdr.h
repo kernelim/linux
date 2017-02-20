@@ -1345,7 +1345,7 @@ struct nfs_rpc_ops {
 				int open_flags,
 				struct iattr *iattr);
 	int	(*init_client) (struct nfs_client *, const struct rpc_timeout *,
-				const char *, rpc_authflavor_t, int);
+				const char *, rpc_authflavor_t);
 };
 
 /*

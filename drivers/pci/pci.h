@@ -83,21 +83,27 @@ extern int pci_user_write_config_dword(struct pci_dev *dev, int where, u32 val);
 struct pci_vpd_ops {
 	ssize_t (*read)(struct pci_dev *dev, loff_t pos, size_t count, void *buf);
 	ssize_t (*write)(struct pci_dev *dev, loff_t pos, size_t count, const void *buf);
-	void (*release)(struct pci_dev *dev);
+	void (*release)(struct pci_dev *dev);   /* Deprecated, DO NOT USE */
+#ifndef __GENKSYMS__
+	int (*set_size)(struct pci_dev *dev, size_t len);
+#endif
 };
 
 struct pci_vpd {
-	unsigned int len;
+	unsigned int	len;
 	const struct pci_vpd_ops *ops;
 	struct bin_attribute *attr; /* descriptor for sysfs VPD entry */
+#ifndef __GENKSYMS__
+	struct mutex	lock;
+	u16		flag;
+	u8		cap;
+	u8		busy:1;
+	u8		valid:1;
+#endif
 };
 
-extern int pci_vpd_pci22_init(struct pci_dev *dev);
-static inline void pci_vpd_release(struct pci_dev *dev)
-{
-	if (dev->vpd)
-		dev->vpd->ops->release(dev);
-}
+int pci_vpd_init(struct pci_dev *dev);
+void pci_vpd_release(struct pci_dev *dev);
 
 /* PCI /proc functions */
 #ifdef CONFIG_PROC_FS
@@ -252,7 +258,7 @@ struct pci_ats {
 	int pos;	/* capability position */
 	int stu;	/* Smallest Translation Unit */
 	int qdep;	/* Invalidate Queue Depth */
-	int ref_cnt;	/* Physical Function reference count */
+	int ref_cnt;	/* number of VFs with ATS enabled */
 	int is_enabled:1;	/* Enable bit is set */
 };
 

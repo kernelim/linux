@@ -219,10 +219,6 @@ bool mlx5e_poll_rx_cq(struct mlx5e_cq *cq, int budget)
 	struct mlx5e_rq *rq = container_of(cq, struct mlx5e_rq, cq);
 	int i;
 
-	/* avoid accessing cq (dma coherent memory) if not needed */
-	if (!test_and_clear_bit(MLX5E_CQ_HAS_CQES, &cq->flags))
-		return false;
-
 	for (i = 0; i < budget; i++) {
 		struct mlx5e_rx_wqe *wqe;
 		struct mlx5_cqe64 *cqe;
@@ -268,10 +264,5 @@ wq_ll_pop:
 	/* ensure cq space is freed before enabling more cqes */
 	wmb();
 
-	if (i == budget) {
-		set_bit(MLX5E_CQ_HAS_CQES, &cq->flags);
-		return true;
-	}
-
-	return false;
+	return i;
 }

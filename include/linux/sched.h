@@ -256,6 +256,9 @@ extern unsigned long long time_sync_thresh;
 extern rwlock_t tasklist_lock;
 extern spinlock_t mmlist_lock;
 
+extern void tasklist_write_lock_irq(void);
+extern void tasklist_read_lock(void);
+
 struct task_struct;
 
 extern void sched_init(void);

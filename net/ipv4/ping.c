@@ -474,6 +474,9 @@ static int ping_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	if (len > 0xFFFF)
 		return -EMSGSIZE;
 
+	if (len < sizeof(user_icmph))
+		return -EINVAL;
+
 	/*
 	 *	Check the flags.
 	 */

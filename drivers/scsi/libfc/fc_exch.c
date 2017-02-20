@@ -842,6 +842,9 @@ static struct fc_exch *fc_exch_find(struct fc_exch_mgr *mp, u16 xid)
 	struct fc_exch *ep = NULL;
 	u16 cpu = xid & fc_cpu_mask;
 
+	if (xid == FC_XID_UNKNOWN)
+		return NULL;
+
 	if (cpu >= nr_cpu_ids || !cpu_possible(cpu)) {
 		printk_ratelimited(KERN_ERR
 			"libfc: lookup request for XID = %d, "
@@ -1767,7 +1770,6 @@ static void fc_exch_reset(struct fc_exch *ep)
 	int rc = 1;
 
 	spin_lock_bh(&ep->ex_lock);
-	fc_exch_abort_locked(ep, 0);
 	ep->state |= FC_EX_RST_CLEANUP;
 	if (cancel_delayed_work(&ep->timeout_work))
 		atomic_dec(&ep->ex_refcnt);	/* drop hold for timer */

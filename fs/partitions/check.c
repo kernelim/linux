@@ -355,6 +355,11 @@ static void delete_partition_rcu_cb(struct rcu_head *head)
 	put_device(part_to_dev(part));
 }
 
+void __delete_partition(struct hd_struct *part)
+{
+	call_rcu(&part->rcu_head, delete_partition_rcu_cb);
+}
+
 void delete_partition(struct gendisk *disk, int partno)
 {
 	struct disk_part_tbl *ptbl = disk->part_tbl;
@@ -372,7 +377,7 @@ void delete_partition(struct gendisk *disk, int partno)
 	kobject_put(part->holder_dir);
 	device_del(part_to_dev(part));
 
-	call_rcu(&part->rcu_head, delete_partition_rcu_cb);
+	hd_struct_put(part);
 }
 
 static ssize_t whole_disk_show(struct device *dev,
@@ -402,7 +407,7 @@ struct hd_struct *add_partition(struct gendisk *disk, int partno,
 	if (ptbl->part[partno])
 		return ERR_PTR(-EBUSY);
 
-	p = kzalloc(sizeof(*p), GFP_KERNEL);
+	p = kzalloc(sizeof(struct hd_struct_with_aux), GFP_KERNEL);
 	if (!p)
 		return ERR_PTR(-EBUSY);
 
@@ -463,6 +468,7 @@ struct hd_struct *add_partition(struct gendisk *disk, int partno,
 	if (!dev_get_uevent_suppress(ddev))
 		kobject_uevent(&pdev->kobj, KOBJ_ADD);
 
+	hd_ref_init(p);
 	return p;
 
 out_free_stats:

@@ -73,6 +73,9 @@
 #define BE_MAX_MTU              (BE_MAX_JUMBO_FRAME_SIZE -	\
 				 (ETH_HLEN + ETH_FCS_LEN))
 
+/* Accommodate for QnQ configurations where VLAN insertion is enabled in HW */
+#define BE_MAX_GSO_SIZE		(65535 - 2 * VLAN_HLEN)
+
 #define BE_NUM_VLANS_SUPPORTED	64
 #define BE_MAX_EQD		128u
 #define	BE_MAX_TX_FRAG_COUNT	30
@@ -90,8 +93,13 @@
 #define BE3_MAX_TX_QS		16
 #define BE3_MAX_EVT_QS		16
 #define BE3_SRIOV_MAX_EVT_QS	8
+#define SH_VF_MAX_NIC_EQS	3	/* Skyhawk VFs can have a max of 4 EQs
+					 * and at least 1 is granted to either
+					 * SURF/DPDK
+					 */
 
-#define MAX_RSS_IFACES		15
+#define MAX_PORT_RSS_TABLES	15
+#define MAX_NIC_FUNCS		16
 #define MAX_RX_QS		32
 #define MAX_EVT_QS		32
 #define MAX_TX_QS		32
@@ -111,6 +119,8 @@
 
 #define	RSS_INDIR_TABLE_LEN	128
 #define RSS_HASH_KEY_LEN	40
+
+#define BE_UNKNOWN_PHY_STATE	0xFF
 
 struct be_dma_mem {
 	void *va;
@@ -384,12 +394,16 @@ enum vf_state {
 #define BE_FLAGS_QNQ_ASYNC_EVT_RCVD		BIT(7)
 #define BE_FLAGS_VXLAN_OFFLOADS			BIT(8)
 #define BE_FLAGS_SETUP_DONE			BIT(9)
-#define BE_FLAGS_EVT_INCOMPATIBLE_SFP		BIT(10)
+#define BE_FLAGS_PHY_MISCONFIGURED		BIT(10)
 #define BE_FLAGS_ERR_DETECTION_SCHEDULED	BIT(11)
 #define BE_FLAGS_OS2BMC				BIT(12)
+#define BE_FLAGS_TRY_RECOVERY			BIT(13)
 
 #define BE_UC_PMAC_COUNT			30
 #define BE_VF_UC_PMAC_COUNT			2
+
+#define MAX_ERR_RECOVERY_RETRY_COUNT		3
+#define ERR_DETECTION_DELAY			1000
 
 /* Ethtool set_dump flags */
 #define LANCER_INITIATE_FW_DUMP			0x1
@@ -427,8 +441,20 @@ struct be_resources {
 	u16 max_iface_count;
 	u16 max_mcc_count;
 	u16 max_evt_qs;
+	u16 max_nic_evt_qs;	/* NIC's share of evt qs */
 	u32 if_cap_flags;
 	u32 vf_if_cap_flags;	/* VF if capability flags */
+	u32 flags;
+	/* Calculated PF Pool's share of RSS Tables. This is not enforced by
+	 * the FW, but is a self-imposed driver limitation.
+	 */
+	u16 max_rss_tables;
+};
+
+/* These are port-wide values */
+struct be_port_resources {
+	u16 max_vfs;
+	u16 nic_pfs;
 };
 
 #define be_is_os2bmc_enabled(adapter) (adapter->flags & BE_FLAGS_OS2BMC)
@@ -480,6 +506,70 @@ struct be_wrb_params {
 	u16 lso_mss;	/* MSS for LSO */
 };
 
+struct be_eth_addr {
+	unsigned char mac[ETH_ALEN];
+};
+
+#define BE_SEC	1000			/* in msec */
+#define BE_MIN	(60 * BE_SEC)		/* in msec */
+#define BE_HOUR	(60 * BE_MIN)		/* in msec */
+
+#define ERR_RECOVERY_MAX_RETRY_COUNT		3
+#define ERR_RECOVERY_DETECTION_DELAY		BE_SEC
+#define ERR_RECOVERY_RETRY_DELAY		(30 * BE_SEC)
+
+/* UE-detection-duration in BEx/Skyhawk:
+ * All PFs must wait for this duration after they detect UE before reading
+ * SLIPORT_SEMAPHORE register. At the end of this duration, the Firmware
+ * guarantees that the SLIPORT_SEMAPHORE register is updated to indicate
+ * if the UE is recoverable.
+ */
+#define ERR_RECOVERY_UE_DETECT_DURATION			BE_SEC
+
+/* Initial idle time (in msec) to elapse after driver load,
+ * before UE recovery is allowed.
+ */
+#define ERR_IDLE_HR			24
+#define ERR_RECOVERY_IDLE_TIME		(ERR_IDLE_HR * BE_HOUR)
+
+/* Time interval (in msec) after which UE recovery can be repeated */
+#define ERR_INTERVAL_HR			72
+#define ERR_RECOVERY_INTERVAL		(ERR_INTERVAL_HR * BE_HOUR)
+
+/* BEx/SH UE recovery state machine */
+enum {
+	ERR_RECOVERY_ST_NONE = 0,		/* No Recovery */
+	ERR_RECOVERY_ST_DETECT = 1,		/* UE detection duration */
+	ERR_RECOVERY_ST_RESET = 2,		/* Reset Phase (PF0 only) */
+	ERR_RECOVERY_ST_PRE_POLL = 3,		/* Pre-Poll Phase (all PFs) */
+	ERR_RECOVERY_ST_REINIT = 4		/* Re-initialize Phase */
+};
+
+struct be_error_recovery {
+	/* Lancer error recovery variables */
+	u8 recovery_retries;
+
+	/* BEx/Skyhawk error recovery variables */
+	u8 recovery_state;
+	u16 ue_to_reset_time;		/* Time after UE, to soft reset
+					 * the chip - PF0 only
+					 */
+	u16 ue_to_poll_time;		/* Time after UE, to Restart Polling
+					 * of SLIPORT_SEMAPHORE reg
+					 */
+	u16 last_err_code;
+	bool recovery_supported;
+	unsigned long probe_time;
+	unsigned long last_recovery_time;
+
+	/* Common to both Lancer & BEx/SH error recovery */
+	u32 resched_delay;
+	struct delayed_work err_detection_work;
+};
+
+/* Ethtool priv_flags */
+#define	BE_DISABLE_TPE_RECOVERY	0x1
+
 struct be_adapter {
 	struct pci_dev *pdev;
 	struct net_device *netdev;
@@ -495,7 +585,7 @@ struct be_adapter {
 	struct be_dma_mem mbox_mem_alloced;
 
 	struct be_mcc_obj mcc_obj;
-	spinlock_t mcc_lock;	/* For serializing mcc cmds to BE card */
+	struct mutex mcc_lock;	/* For serializing mcc cmds to BE card */
 	spinlock_t mcc_cq_lock;
 
 	u16 cfg_num_qs;		/* configured via set-channels */
@@ -527,8 +617,9 @@ struct be_adapter {
 	struct delayed_work work;
 	u16 work_counter;
 
-	struct delayed_work be_err_detection_work;
+	u8 recovery_retries;
 	u8 err_flags;
+	bool pcicfg_mapped;	/* pcicfg obtained via pci_iomap() */
 	u32 flags;
 	u32 cmd_privileges;
 	/* Ethtool knobs and info */
@@ -539,9 +630,13 @@ struct be_adapter {
 	int if_handle;		/* Used to configure filtering */
 	u32 if_flags;		/* Interface filtering flags */
 	u32 *pmac_id;		/* MAC addr handle used by BE card */
+	struct be_eth_addr *uc_list;/* list of uc-addrs programmed (not perm) */
 	u32 uc_macs;		/* Count of secondary UC MAC programmed */
+	struct be_eth_addr *mc_list;/* list of mcast addrs programmed */
+	u32 mc_count;
 	unsigned long vids[BITS_TO_LONGS(VLAN_N_VID)];
 	u16 vlans_added;
+	struct mutex rx_filter_lock;/* For protecting vids[] & mc/uc_list[] */
 
 	u32 beacon_state;	/* for set_phys_id */
 
@@ -572,6 +667,8 @@ struct be_adapter {
 	struct be_resources pool_res;	/* resources available for the port */
 	struct be_resources res;	/* resources available for the func */
 	u16 num_vfs;			/* Number of VFs provisioned by PF */
+	u8 pf_num;			/* Numbering used by FW, starts at 0 */
+	u8 vf_num;			/* Numbering used by FW, starts at 1 */
 	u8 virtfn;
 	struct be_vf_cfg *vf_cfg;
 	bool be3_native;
@@ -586,12 +683,23 @@ struct be_adapter {
 	u32 msg_enable;
 	int be_get_temp_freq;
 	struct be_hwmon hwmon_info;
-	u8 pf_number;
-	u8 pci_func_num;
 	struct rss_info rss_info;
 	/* Filters for packets that need to be sent to BMC */
 	u32 bmc_filt_mask;
 	u16 serial_num[CNTL_SERIAL_NUM_WORDS];
+	u8 phy_state; /* state of sfp optics (functional, faulted, etc.,) */
+	u8 dev_mac[ETH_ALEN];
+	u32 priv_flags; /* ethtool get/set_priv_flags() */
+	struct be_error_recovery error_recovery;
+};
+
+/* Used for defered FW config cmds. Add fields to this struct as reqd */
+struct be_cmd_work {
+	struct work_struct work;
+	struct be_adapter *adapter;
+	union {
+		__be16 vxlan_port;
+	} info;
 };
 
 #define be_physfn(adapter)		(!adapter->virtfn)
@@ -614,15 +722,20 @@ struct be_adapter {
 #define be_max_txqs(adapter)		(adapter->res.max_tx_qs)
 #define be_max_prio_txqs(adapter)	(adapter->res.max_prio_tx_qs)
 #define be_max_rxqs(adapter)		(adapter->res.max_rx_qs)
-#define be_max_eqs(adapter)		(adapter->res.max_evt_qs)
+/* Max number of EQs available for the function (NIC + RoCE (if enabled)) */
+#define be_max_func_eqs(adapter)	(adapter->res.max_evt_qs)
+/* Max number of EQs available avaialble only for NIC */
+#define be_max_nic_eqs(adapter)		(adapter->res.max_nic_evt_qs)
 #define be_if_cap_flags(adapter)	(adapter->res.if_cap_flags)
+#define be_max_pf_pool_rss_tables(adapter)	\
+				(adapter->pool_res.max_rss_tables)
 
 static inline u16 be_max_qs(struct be_adapter *adapter)
 {
 	/* If no RSS, need atleast the one def RXQ */
 	u16 num = max_t(u16, be_max_rss(adapter), 1);
 
-	num = min(num, be_max_eqs(adapter));
+	num = min(num, be_max_nic_eqs(adapter));
 	return min_t(u16, num, num_online_cpus());
 }
 
@@ -790,6 +903,9 @@ static inline bool is_ipv4_pkt(struct sk_buff *skb)
 {
 	return skb->protocol == htons(ETH_P_IP) && ip_hdr(skb)->version == 4;
 }
+
+#define be_error_recovering(adapter)	\
+		(adapter->flags & BE_FLAGS_TRY_RECOVERY)
 
 #define BE_ERROR_EEH		1
 #define BE_ERROR_UE		BIT(1)

@@ -65,19 +65,32 @@ xfs_fs_set_xstate(
 
 	if (sb->s_flags & MS_RDONLY)
 		return -EROFS;
-	if (op != Q_XQUOTARM && !XFS_IS_QUOTA_RUNNING(mp))
-		return -ENOSYS;
 
-	if (uflags & XFS_QUOTA_UDQ_ACCT)
-		flags |= XFS_UQUOTA_ACCT;
-	if (uflags & XFS_QUOTA_PDQ_ACCT)
-		flags |= XFS_PQUOTA_ACCT;
-	if (uflags & XFS_QUOTA_GDQ_ACCT)
-		flags |= XFS_GQUOTA_ACCT;
-	if (uflags & XFS_QUOTA_UDQ_ENFD)
-		flags |= XFS_UQUOTA_ENFD;
-	if (uflags & (XFS_QUOTA_PDQ_ENFD|XFS_QUOTA_GDQ_ENFD))
-		flags |= XFS_OQUOTA_ENFD;
+	if (op == Q_XQUOTARM) {
+		if (XFS_IS_QUOTA_ON(mp))
+			return -EINVAL;
+
+		if (uflags & XFS_USER_QUOTA)
+			flags |= XFS_DQ_USER;
+		if (uflags & XFS_GROUP_QUOTA)
+			flags |= XFS_DQ_GROUP;
+		if (uflags & XFS_PROJ_QUOTA)
+			flags |= XFS_DQ_PROJ;
+	} else {
+		if (!XFS_IS_QUOTA_RUNNING(mp))
+			return -ENOSYS;
+
+		if (uflags & XFS_QUOTA_UDQ_ACCT)
+			flags |= XFS_UQUOTA_ACCT;
+		if (uflags & XFS_QUOTA_PDQ_ACCT)
+			flags |= XFS_PQUOTA_ACCT;
+		if (uflags & XFS_QUOTA_GDQ_ACCT)
+			flags |= XFS_GQUOTA_ACCT;
+		if (uflags & XFS_QUOTA_UDQ_ENFD)
+			flags |= XFS_UQUOTA_ENFD;
+		if (uflags & (XFS_QUOTA_PDQ_ENFD|XFS_QUOTA_GDQ_ENFD))
+			flags |= XFS_OQUOTA_ENFD;
+	}
 
 	switch (op) {
 	case Q_XQUOTAON:

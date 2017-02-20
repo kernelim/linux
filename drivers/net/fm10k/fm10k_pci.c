@@ -1644,7 +1644,7 @@ static int fm10k_sw_init(struct fm10k_intfc *interface,
 		dev_warn(&pdev->dev,
 			 "Failed to obtain MAC address defaulting to random\n");
 		/* tag address assignment as random */
-		netdev->addr_assign_type |= NET_ADDR_RANDOM;
+		netdev->addr_assign_type = NET_ADDR_RANDOM;
 	}
 
 	memcpy(netdev->dev_addr, hw->mac.addr, netdev->addr_len);

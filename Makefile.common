@@ -11,7 +11,7 @@ CMARKER:=$(MARKER)
 RPM:=$(REDHAT)/rpm
 SRPMS:=$(RPM)/SRPMS
 SOURCES:=$(RPM)/SOURCES
-BUILD:=642
+BUILD:=696
 TESTPATCH:=$(REDHAT)/linux-kernel-test.patch
 FILTERDIFF:=/usr/bin/filterdiff -x '*redhat/*' -x '*/.gitignore' \
 	-x '*/makefile' -x '*/Makefile'
@@ -32,3 +32,5 @@ endif
 RC_PATCH := patch-2.6.$(SUBLEVEL)-rc$(RCREV).bz2
 GIT_PATCH := patch-2.6.$(SUBLEVEL)-rc$(RCREV)-git$(GITREV).bz2
 
+RHELMAJOR:=$(shell git show HEAD:Makefile | grep ^RHEL_MAJOR | sed -e s/RHEL_MAJOR\ =\ //)
+RHELMINOR:=$(shell git show HEAD:Makefile | grep ^RHEL_MINOR | sed -e s/RHEL_MINOR\ =\ //)

@@ -2549,6 +2549,15 @@ retry_avoidcopy:
 			old_page != pagecache_page)
 		outside_reserve = 1;
 
+	/*
+	 * For shared VM areas we will attempt to satisfy alocation without
+	 * using the existing reserves and rather allocate new one. This fixes
+	 * possible resv_huge_pages underflow in case of COW after force write
+	 * to shared mapping.
+	 */
+	if (vma->vm_flags & VM_SHARED)
+		outside_reserve = 1;
+
 	page_cache_get(old_page);
 
 	/* Drop page_table_lock as buddy allocator may be called */

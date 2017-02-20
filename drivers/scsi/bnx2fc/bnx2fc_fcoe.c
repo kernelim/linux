@@ -97,6 +97,20 @@ static void __exit bnx2fc_mod_exit(void);
 
 unsigned int bnx2fc_debug_level;
 module_param_named(debug_logging, bnx2fc_debug_level, int, S_IRUGO|S_IWUSR);
+MODULE_PARM_DESC(debug_logging,
+		"Option to enable extended logging,\n"
+		"\t\tDefault is 0 - no logging.\n"
+		"\t\t0x01 - SCSI cmd error, cleanup.\n"
+		"\t\t0x02 - Session setup, cleanup, etc.\n"
+		"\t\t0x04 - lport events, link, mtu, etc.\n"
+		"\t\t0x08 - ELS logs.\n"
+		"\t\t0x10 - fcoe L2 fame related logs.\n"
+		"\t\t0xff - LOG all messages.");
+
+uint bnx2fc_log_fka;
+module_param_named(log_fka, bnx2fc_log_fka, uint, S_IRUGO|S_IWUSR);
+MODULE_PARM_DESC(log_fka, " Print message to kernel log when fcoe is "
+	"initiating a FIP keep alive when debug logging is enabled.");
 
 static int bnx2fc_cpu_callback(struct notifier_block *nfb,
 			     unsigned long action, void *hcpu);
@@ -1054,6 +1068,20 @@ static u8 *bnx2fc_get_src_mac(struct fc_lport *lport)
  */
 static void bnx2fc_fip_send(struct fcoe_ctlr *fip, struct sk_buff *skb)
 {
+	struct fip_header *fiph;
+	struct ethhdr *eth_hdr;
+	u16 op;
+	u8 sub;
+
+	fiph = (struct fip_header *) ((void *)skb->data + 2 * ETH_ALEN + 2);
+	eth_hdr = (struct ethhdr *)skb_mac_header(skb);
+	op = ntohs(fiph->fip_op);
+	sub = fiph->fip_subcode;
+
+	if (op == FIP_OP_CTRL && sub == FIP_SC_SOL && bnx2fc_log_fka)
+		BNX2FC_MISC_DBG("Sending FKA from %pM to %pM.\n",
+		    eth_hdr->h_source, eth_hdr->h_dest);
+
 	skb->dev = bnx2fc_from_ctlr(fip)->netdev;
 	dev_queue_xmit(skb);
 }
@@ -1989,6 +2017,8 @@ static void bnx2fc_ulp_init(struct cnic_dev *dev)
 		printk(KERN_ERR PFX "hba initialization failed\n");
 		return;
 	}
+
+	pr_info(PFX "FCoE initialized for %s.\n", dev->netdev->name);
 
 	/* Add HBA to the adapter list */
 	mutex_lock(&bnx2fc_dev_lock);

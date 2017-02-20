@@ -2742,3 +2742,19 @@ int mlx4_ACCESS_REG_wrapper(struct mlx4_dev *dev, int slave,
 			    0, MLX4_CMD_ACCESS_REG, MLX4_CMD_TIME_CLASS_C,
 			    MLX4_CMD_NATIVE);
 }
+
+void mlx4_replace_zero_macs(struct mlx4_dev *dev)
+{
+	int i;
+	u8 mac_addr[ETH_ALEN];
+
+	dev->port_random_macs = 0;
+	for (i = 1; i <= dev->caps.num_ports; ++i)
+		if (!dev->caps.def_mac[i] &&
+		    dev->caps.port_type[i] == MLX4_PORT_TYPE_ETH) {
+			eth_random_addr(mac_addr);
+			dev->port_random_macs |= 1 << i;
+			dev->caps.def_mac[i] = mlx4_mac_to_u64(mac_addr);
+		}
+}
+EXPORT_SYMBOL_GPL(mlx4_replace_zero_macs);

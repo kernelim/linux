@@ -49,6 +49,52 @@ static inline void store_clock_comparator(__u64 *time)
 	asm volatile("stckc 0(%1)" : "=m" (*time) : "a" (time));
 }
 
+void __init ptff_init(void);
+
+extern unsigned char ptff_function_mask[16];
+extern unsigned long lpar_offset;
+
+/* Function codes for the ptff instruction. */
+#define PTFF_QAF	0x00	/* query available functions */
+#define PTFF_QTO	0x01	/* query tod offset */
+#define PTFF_QSI	0x02	/* query steering information */
+#define PTFF_ATO	0x40	/* adjust tod offset */
+#define PTFF_STO	0x41	/* set tod offset */
+#define PTFF_SFS	0x42	/* set fine steering rate */
+#define PTFF_SGS	0x43	/* set gross steering rate */
+
+/* Query TOD offset result */
+struct ptff_qto {
+	unsigned long long physical_clock;
+	unsigned long long tod_offset;
+	unsigned long long logical_tod_offset;
+	unsigned long long tod_epoch_difference;
+} __packed;
+
+static inline int ptff_query(unsigned int nr)
+{
+	unsigned char *ptr;
+
+	ptr = ptff_function_mask + (nr >> 3);
+	return (*ptr & (0x80 >> (nr & 7))) != 0;
+}
+
+static inline int ptff(void *ptff_block, size_t len, unsigned int func)
+{
+	typedef struct { char _[len]; } addrtype;
+	register unsigned int reg0 asm("0") = func;
+	register unsigned long reg1 asm("1") = (unsigned long) ptff_block;
+	int rc;
+
+	asm volatile(
+		"	.word	0x0104\n"
+		"	ipm	%0\n"
+		"	srl	%0,28\n"
+		: "=d" (rc), "+m" (*(addrtype *) ptff_block)
+		: "d" (reg0), "d" (reg1) : "cc");
+	return rc;
+}
+
 #define CLOCK_TICK_RATE	1193180 /* Underlying HZ */
 
 typedef unsigned long long cycles_t;

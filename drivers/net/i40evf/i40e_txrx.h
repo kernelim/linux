@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel Ethernet Controller XL710 Family Linux Virtual Function Driver
- * Copyright(c) 2013 - 2014 Intel Corporation.
+ * Copyright(c) 2013 - 2016 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -148,10 +148,39 @@ enum i40e_dyn_idx_t {
 
 #define I40E_MAX_BUFFER_TXD	8
 #define I40E_MIN_TX_LEN		17
-#define I40E_MAX_DATA_PER_TXD	8192
+
+/* The size limit for a transmit buffer in a descriptor is (16K - 1).
+ * In order to align with the read requests we will align the value to
+ * the nearest 4K which represents our maximum read request size.
+ */
+#define I40E_MAX_READ_REQ_SIZE		4096
+#define I40E_MAX_DATA_PER_TXD		(16 * 1024 - 1)
+#define I40E_MAX_DATA_PER_TXD_ALIGNED \
+	(I40E_MAX_DATA_PER_TXD & ~(I40E_MAX_READ_REQ_SIZE - 1))
+
+/* This ugly bit of math is equivalent to DIV_ROUNDUP(size, X) where X is
+ * the value I40E_MAX_DATA_PER_TXD_ALIGNED.  It is needed due to the fact
+ * that 12K is not a power of 2 and division is expensive.  It is used to
+ * approximate the number of descriptors used per linear buffer.  Note
+ * that this will overestimate in some cases as it doesn't account for the
+ * fact that we will add up to 4K - 1 in aligning the 12K buffer, however
+ * the error should not impact things much as large buffers usually mean
+ * we will use fewer descriptors then there are frags in an skb.
+ */
+static inline unsigned int i40e_txd_use_count(unsigned int size)
+{
+	const unsigned int max = I40E_MAX_DATA_PER_TXD_ALIGNED;
+	const unsigned int reciprocal = ((1ull << 32) - 1 + (max / 2)) / max;
+	unsigned int adjust = ~(u32)0;
+
+	/* if we rounded up on the reciprocal pull down the adjustment */
+	if ((max * reciprocal) > adjust)
+		adjust = ~(u32)(reciprocal - 1);
+
+	return (u32)((((u64)size * reciprocal) + adjust) >> 32);
+}
 
 /* Tx Descriptors needed, worst case */
-#define TXD_USE_COUNT(S) DIV_ROUND_UP((S), I40E_MAX_DATA_PER_TXD)
 #define DESC_NEEDED (MAX_SKB_FRAGS + 4)
 #define I40E_MIN_DESC_PENDING	4
 
@@ -204,6 +233,7 @@ struct i40e_tx_queue_stats {
 	u64 tx_done_old;
 	u64 tx_linearize;
 	u64 tx_force_wb;
+	u64 tx_lost_interrupt;
 };
 
 struct i40e_rx_queue_stats {
@@ -257,7 +287,6 @@ struct i40e_ring {
 #define I40E_RX_DTYPE_NO_SPLIT      0
 #define I40E_RX_DTYPE_HEADER_SPLIT  1
 #define I40E_RX_DTYPE_SPLIT_ALWAYS  2
-	u8  hsplit;
 #define I40E_RX_SPLIT_L2      0x1
 #define I40E_RX_SPLIT_IP      0x2
 #define I40E_RX_SPLIT_TCP_UDP 0x4
@@ -277,7 +306,6 @@ struct i40e_ring {
 
 	u16 flags;
 #define I40E_TXR_FLAGS_WB_ON_ITR	BIT(0)
-#define I40E_TXR_FLAGS_OUTER_UDP_CSUM	BIT(1)
 
 	/* stats structs */
 	struct i40e_queue_stats	stats;
@@ -317,8 +345,8 @@ struct i40e_ring_container {
 #define i40e_for_each_ring(pos, head) \
 	for (pos = (head).ring; pos != NULL; pos = pos->next)
 
-void i40evf_alloc_rx_buffers_ps(struct i40e_ring *rxr, u16 cleaned_count);
-void i40evf_alloc_rx_buffers_1buf(struct i40e_ring *rxr, u16 cleaned_count);
+bool i40evf_alloc_rx_buffers_ps(struct i40e_ring *rxr, u16 cleaned_count);
+bool i40evf_alloc_rx_buffers_1buf(struct i40e_ring *rxr, u16 cleaned_count);
 void i40evf_alloc_rx_headers(struct i40e_ring *rxr);
 netdev_tx_t i40evf_xmit_frame(struct sk_buff *skb, struct net_device *netdev);
 void i40evf_clean_tx_ring(struct i40e_ring *tx_ring);
@@ -328,7 +356,10 @@ int i40evf_setup_rx_descriptors(struct i40e_ring *rx_ring);
 void i40evf_free_tx_resources(struct i40e_ring *tx_ring);
 void i40evf_free_rx_resources(struct i40e_ring *rx_ring);
 int i40evf_napi_poll(struct napi_struct *napi, int budget);
-u32 i40evf_get_tx_pending(struct i40e_ring *ring);
+void i40evf_force_wb(struct i40e_vsi *vsi, struct i40e_q_vector *q_vector);
+u32 i40evf_get_tx_pending(struct i40e_ring *ring, bool in_sw);
+int __i40evf_maybe_stop_tx(struct i40e_ring *tx_ring, int size);
+bool __i40evf_chk_linearize(struct sk_buff *skb);
 
 /**
  * i40e_get_head - Retrieve head from head writeback
@@ -342,5 +373,78 @@ static inline u32 i40e_get_head(struct i40e_ring *tx_ring)
 	void *head = (struct i40e_tx_desc *)tx_ring->desc + tx_ring->count;
 
 	return le32_to_cpu(*(volatile __le32 *)head);
+}
+
+/**
+ * i40e_xmit_descriptor_count - calculate number of Tx descriptors needed
+ * @skb:     send buffer
+ * @tx_ring: ring to send buffer on
+ *
+ * Returns number of data descriptors needed for this skb. Returns 0 to indicate
+ * there is not enough descriptors available in this ring since we need at least
+ * one descriptor.
+ **/
+static inline int i40e_xmit_descriptor_count(struct sk_buff *skb)
+{
+	const struct skb_frag_struct *frag = &skb_shinfo(skb)->frags[0];
+	unsigned int nr_frags = skb_shinfo(skb)->nr_frags;
+	int count = 0, size = skb_headlen(skb);
+
+	for (;;) {
+		count += i40e_txd_use_count(size);
+
+		if (!nr_frags--)
+			break;
+
+		size = skb_frag_size(frag++);
+	}
+
+	return count;
+}
+
+/**
+ * i40e_maybe_stop_tx - 1st level check for Tx stop conditions
+ * @tx_ring: the ring to be checked
+ * @size:    the size buffer we want to assure is available
+ *
+ * Returns 0 if stop is not needed
+ **/
+static inline int i40e_maybe_stop_tx(struct i40e_ring *tx_ring, int size)
+{
+	if (likely(I40E_DESC_UNUSED(tx_ring) >= size))
+		return 0;
+	return __i40evf_maybe_stop_tx(tx_ring, size);
+}
+
+/**
+ * i40e_chk_linearize - Check if there are more than 8 fragments per packet
+ * @skb:      send buffer
+ * @count:    number of buffers used
+ *
+ * Note: Our HW can't scatter-gather more than 8 fragments to build
+ * a packet on the wire and so we need to figure out the cases where we
+ * need to linearize the skb.
+ **/
+static inline bool i40e_chk_linearize(struct sk_buff *skb, int count)
+{
+	/* Both TSO and single send will work if count is less than 8 */
+	if (likely(count < I40E_MAX_BUFFER_TXD))
+		return false;
+
+	if (skb_is_gso(skb))
+		return __i40evf_chk_linearize(skb);
+
+	/* we can support up to 8 data buffers for a single send */
+	return count != I40E_MAX_BUFFER_TXD;
+}
+
+/**
+ * i40e_rx_is_fcoe - returns true if the Rx packet type is FCoE
+ * @ptype: the packet type field from Rx descriptor write-back
+ **/
+static inline bool i40e_rx_is_fcoe(u16 ptype)
+{
+	return (ptype >= I40E_RX_PTYPE_L2_FCOE_PAY3) &&
+	       (ptype <= I40E_RX_PTYPE_L2_FCOE_VFT_FCOTHER);
 }
 #endif /* _I40E_TXRX_H_ */

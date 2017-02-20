@@ -59,6 +59,7 @@ static const struct pci_device_id rtsx_pci_ids[] = {
 	{ PCI_DEVICE(0x10EC, 0x522A), PCI_CLASS_OTHERS << 16, 0xFF0000 },
 	{ PCI_DEVICE(0x10EC, 0x5249), PCI_CLASS_OTHERS << 16, 0xFF0000 },
 	{ PCI_DEVICE(0x10EC, 0x5287), PCI_CLASS_OTHERS << 16, 0xFF0000 },
+	{ PCI_DEVICE(0x10EC, 0x525A), PCI_CLASS_OTHERS << 16, 0xFF0000 },
 	{ 0, }
 };
 
@@ -1091,6 +1092,10 @@ static int rtsx_pci_init_chip(struct rtsx_pcr *pcr)
 		rtl8411b_init_params(pcr);
 		break;
 #endif
+	case 0x525A:
+		rts525a_init_params(pcr);
+		break;
+
 	}
 
 	dev_dbg(&(pcr->pci->dev), "PID: 0x%04x, IC version: 0x%02x\n",
@@ -1129,7 +1134,7 @@ static int rtsx_pci_probe(struct pci_dev *pcidev,
 	struct rtsx_pcr *pcr;
 	struct pcr_handle *handle;
 	u32 base, len;
-	int ret, i;
+	int ret, i, bar = 0;
 
 	dev_dbg(&(pcidev->dev),
 		": Realtek PCI-E Card Reader found at %s [%04x:%04x] (rev %x)\n",
@@ -1175,8 +1180,10 @@ static int rtsx_pci_probe(struct pci_dev *pcidev,
 	pcr->pci = pcidev;
 	dev_set_drvdata(&pcidev->dev, handle);
 
-	len = pci_resource_len(pcidev, 0);
-	base = pci_resource_start(pcidev, 0);
+	if (CHK_PCI_PID(pcr, 0x525A))
+		bar = 1;
+	len = pci_resource_len(pcidev, bar);
+	base = pci_resource_start(pcidev, bar);
 	pcr->remap_addr = ioremap_nocache(base, len);
 	if (!pcr->remap_addr) {
 		ret = -ENOMEM;

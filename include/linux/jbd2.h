@@ -1308,6 +1308,9 @@ extern int jbd_blocks_per_page(struct inode *inode);
  */
 extern const char *jbd2_dev_to_name(dev_t device);
 
+#define EFSBADCRC      EBADMSG         /* Bad CRC detected */
+#define EFSCORRUPTED   EUCLEAN         /* Filesystem is corrupted */
+
 #endif	/* __KERNEL__ */
 
 #endif	/* _LINUX_JBD2_H */

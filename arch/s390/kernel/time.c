@@ -72,6 +72,28 @@ unsigned long long notrace sched_clock(void)
 	return tod_to_ns(get_clock_monotonic());
 }
 
+unsigned char ptff_function_mask[16];
+unsigned long lpar_offset;
+
+/*
+ * Get time offsets with PTFF
+ */
+void __init ptff_init(void)
+{
+	unsigned long long facility_bits;
+	struct ptff_qto qto;
+
+	if (stfle(&facility_bits, 1) <= 0)
+		return;
+	if (!(facility_bits & (1ULL << (63 - 28))))
+		return;
+	ptff(&ptff_function_mask, sizeof(ptff_function_mask), PTFF_QAF);
+
+	/* get LPAR offset */
+	if (ptff_query(PTFF_QTO) && ptff(&qto, sizeof(qto), PTFF_QTO) == 0)
+		lpar_offset = qto.tod_epoch_difference;
+}
+
 /*
  * Monotonic_clock - returns # of nanoseconds passed since time_init()
  */
@@ -321,11 +343,11 @@ static unsigned long clock_sync_flags;
 #define CLOCK_SYNC_STP		3
 
 /*
- * The synchronous get_clock function. It will write the current clock
- * value to the clock pointer and return 0 if the clock is in sync with
- * the external time source. If the clock mode is local it will return
- * -ENOSYS and -EAGAIN if the clock is not in sync with the external
- * reference.
+ * The get_clock function for the physical clock. It will get the current
+ * TOD clock, subtract the LPAR offset and write the result to *clock.
+ * The function returns 0 if the clock is in sync with the external time
+ * source. If the clock mode is local it will return -EOPNOTSUPP and
+ * -EAGAIN if the clock is not in sync with the external reference.
  */
 int get_sync_clock(unsigned long long *clock)
 {
@@ -334,7 +356,7 @@ int get_sync_clock(unsigned long long *clock)
 
 	sw_ptr = &get_cpu_var(clock_sync_word);
 	sw0 = atomic_read(sw_ptr);
-	*clock = get_clock();
+	*clock = get_clock() - lpar_offset;
 	sw1 = atomic_read(sw_ptr);
 	put_cpu_var(clock_sync_sync);
 	if (sw0 == sw1 && (sw0 & 0x80000000U))
@@ -736,6 +758,7 @@ static int etr_sync_clock(void *data)
 	unsigned long long clock, old_clock, delay, delta;
 	struct clock_sync_data *etr_sync;
 	struct etr_aib *sync_port, *aib;
+	struct ptff_qto qto;
 	int port;
 	int rc;
 
@@ -779,6 +802,10 @@ static int etr_sync_clock(void *data)
 			etr_sync->in_sync = -EAGAIN;
 			rc = -EAGAIN;
 		} else {
+			if (ptff_query(PTFF_QTO) &&
+			    ptff(&qto, sizeof(qto), PTFF_QTO) == 0)
+				/* Update LPAR offset */
+				lpar_offset = qto.tod_epoch_difference;
 			etr_sync->in_sync = 1;
 			rc = 0;
 		}
@@ -1504,6 +1531,7 @@ static int stp_sync_clock(void *data)
 	static int first;
 	unsigned long long old_clock, delta;
 	struct clock_sync_data *stp_sync;
+	struct ptff_qto qto;
 	int rc;
 
 	stp_sync = data;
@@ -1528,6 +1556,10 @@ static int stp_sync_clock(void *data)
 		rc = chsc_sstpc(stp_page, STP_OP_SYNC, 0);
 		if (rc == 0) {
 			delta = adjust_time(old_clock, get_clock(), 0);
+			if (ptff_query(PTFF_QTO) &&
+			    ptff(&qto, sizeof(qto), PTFF_QTO) == 0)
+				/* Update LPAR offset */
+				lpar_offset = qto.tod_epoch_difference;
 			fixup_clock_comparator(delta);
 			rc = chsc_sstpi(stp_page, &stp_info,
 					sizeof(struct stp_sstpi));

@@ -1900,10 +1900,6 @@ void mlx4_en_free_resources(struct mlx4_en_priv *priv)
 			mlx4_en_destroy_cq(priv, &priv->rx_cq[i]);
 	}
 
-	if (priv->base_tx_qpn) {
-		mlx4_qp_release_range(priv->mdev->dev, priv->base_tx_qpn, priv->tx_ring_num);
-		priv->base_tx_qpn = 0;
-	}
 }
 
 int mlx4_en_alloc_resources(struct mlx4_en_priv *priv)
@@ -2123,7 +2119,7 @@ static int mlx4_en_set_vf_mac(struct net_device *dev, int queue, u8 *mac)
 	struct mlx4_en_dev *mdev = en_priv->mdev;
 	u64 mac_u64 = mlx4_mac_to_u64(mac);
 
-	if (!is_valid_ether_addr(mac))
+	if (is_multicast_ether_addr(mac))
 		return -EINVAL;
 
 	return mlx4_set_vf_mac(mdev->dev, en_priv->port, queue, mac_u64);
@@ -2415,7 +2411,6 @@ int mlx4_en_init_netdev(struct mlx4_en_dev *mdev, int port,
 	struct mlx4_en_priv *priv;
 	int i;
 	int err;
-	u64 mac_u64;
 
 	dev = alloc_etherdev_mqs(sizeof(struct mlx4_en_priv),
 				 MAX_TX_RINGS, MAX_RX_RINGS);
@@ -2457,7 +2452,6 @@ int mlx4_en_init_netdev(struct mlx4_en_dev *mdev, int port,
 	priv->prof = prof;
 	priv->port = port;
 	priv->port_up = false;
-	priv->rx_csum = 1;
 	priv->flags = prof->flags;
 	priv->num_tx_rings_p_up = mdev->profile.num_tx_rings_p_up;
 	priv->tx_ring_num = prof->tx_ring_num;
@@ -2505,17 +2499,17 @@ int mlx4_en_init_netdev(struct mlx4_en_dev *mdev, int port,
 	dev->addr_len = ETH_ALEN;
 	mlx4_en_u64_to_mac(dev->dev_addr, mdev->dev->caps.def_mac[priv->port]);
 	if (!is_valid_ether_addr(dev->dev_addr)) {
-		if (mlx4_is_slave(priv->mdev->dev)) {
-			eth_hw_addr_random(dev);
-			en_warn(priv, "Assigned random MAC address %pM\n", dev->dev_addr);
-			mac_u64 = mlx4_mac_to_u64(dev->dev_addr);
-			mdev->dev->caps.def_mac[priv->port] = mac_u64;
-		} else {
-			en_err(priv, "Port: %d, invalid mac burned: %pM, quiting\n",
-			       priv->port, dev->dev_addr);
-			err = -EINVAL;
-			goto out;
-		}
+		en_err(priv, "Port: %d, invalid mac burned: %pM, quiting\n",
+		       priv->port, dev->dev_addr);
+		err = -EINVAL;
+		goto out;
+	} else if (mlx4_is_slave(priv->mdev->dev) &&
+		   (priv->mdev->dev->port_random_macs & 1 << priv->port)) {
+		/* Random MAC was assigned in mlx4_slave_cap
+		 * in mlx4_core module
+		 */
+		dev->addr_assign_type |= NET_ADDR_RANDOM;
+		en_warn(priv, "Assigned random MAC address %pM\n", dev->dev_addr);
 	}
 
 	memcpy(priv->current_mac, dev->dev_addr, sizeof(priv->current_mac));
@@ -2574,22 +2568,16 @@ int mlx4_en_init_netdev(struct mlx4_en_dev *mdev, int port,
 	/*
 	 * Set driver features
 	 */
-	dev->features |= NETIF_F_SG;
-	dev->vlan_features |= NETIF_F_SG;
-	dev->features |= NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM;
-	dev->vlan_features |= NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM;
-	dev->features |= NETIF_F_RXHASH;
-	dev->features |= NETIF_F_HIGHDMA;
-	dev->features |= NETIF_F_HW_VLAN_TX |
-			 NETIF_F_HW_VLAN_RX |
-			 NETIF_F_HW_VLAN_FILTER;
-	dev->features |= NETIF_F_GRO;
-	if (mdev->LSO_support) {
-		dev->features |= NETIF_F_TSO;
-		dev->features |= NETIF_F_TSO6;
-		dev->vlan_features |= NETIF_F_TSO;
-		dev->vlan_features |= NETIF_F_TSO6;
-	}
+	netdev_extended(dev)->hw_features = NETIF_F_SG | NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM;
+	if (mdev->LSO_support)
+		netdev_extended(dev)->hw_features |= NETIF_F_TSO | NETIF_F_TSO6;
+
+	dev->vlan_features = netdev_extended(dev)->hw_features;
+
+	netdev_extended(dev)->hw_features |= NETIF_F_RXCSUM | NETIF_F_RXHASH;
+	dev->features = netdev_extended(dev)->hw_features | NETIF_F_HIGHDMA |
+			NETIF_F_HW_VLAN_TX | NETIF_F_HW_VLAN_RX |
+			NETIF_F_HW_VLAN_FILTER | NETIF_F_GRO;
 
 	if (mdev->dev->caps.steering_mode ==
 	    MLX4_STEERING_MODE_DEVICE_MANAGED &&

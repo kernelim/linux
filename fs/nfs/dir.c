@@ -502,14 +502,17 @@ bool nfs_use_readdirplus(struct inode *dir, struct file *filp)
 }
 
 /*
- * This function is called by the lookup code to request the use of
- * readdirplus to accelerate any future lookups in the same
+ * This function is called by the lookup and getattr code to request the
+ * use of readdirplus to accelerate any future lookups in the same
  * directory.
  */
-static
 void nfs_advise_use_readdirplus(struct inode *dir)
 {
-	set_bit(NFS_INO_ADVISE_RDPLUS, &NFS_I(dir)->flags);
+	struct nfs_inode *nfsi = NFS_I(dir);
+
+	if (nfs_server_capable(dir, NFS_CAP_READDIRPLUS) &&
+	    !list_empty(&nfsi->open_files))
+		set_bit(NFS_INO_ADVISE_RDPLUS, &nfsi->flags);
 }
 
 /*
@@ -522,9 +525,12 @@ void nfs_advise_use_readdirplus(struct inode *dir)
  */
 void nfs_force_use_readdirplus(struct inode *dir)
 {
-	if (!list_empty(&NFS_I(dir)->open_files)) {
-		nfs_advise_use_readdirplus(dir);
-		nfs_zap_mapping(dir, dir->i_mapping);
+	struct nfs_inode *nfsi = NFS_I(dir);
+
+	if (nfs_server_capable(dir, NFS_CAP_READDIRPLUS) &&
+	    !list_empty(&nfsi->open_files)) {
+		set_bit(NFS_INO_ADVISE_RDPLUS, &nfsi->flags);
+		invalidate_mapping_pages(dir->i_mapping, 0, -1);
 	}
 }
 
@@ -910,17 +916,6 @@ int uncached_readdir(nfs_readdir_descriptor_t *desc, void *dirent,
 	goto out;
 }
 
-static bool nfs_dir_mapping_need_revalidate(struct inode *dir)
-{
-	struct nfs_inode *nfsi = NFS_I(dir);
-
-	if (nfs_attribute_cache_expired(dir))
-		return true;
-	if (nfsi->cache_validity & NFS_INO_INVALID_DATA)
-		return true;
-	return false;
-}
-
 /* The file offset position represents the dirent entry number.  A
    last cookie cache takes care of the common case of reading the
    whole directory.
@@ -953,7 +948,7 @@ static int nfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 	desc->plus = nfs_use_readdirplus(inode, filp) ? 1 : 0;
 
 	nfs_block_sillyrename(dentry);
-	if (filp->f_pos == 0 || nfs_dir_mapping_need_revalidate(inode))
+	if (filp->f_pos == 0 || nfs_attribute_cache_expired(inode))
 		res = nfs_revalidate_mapping(inode, filp->f_mapping);
 	if (res < 0)
 		goto out;
@@ -1183,7 +1178,7 @@ static int nfs_lookup_revalidate(struct dentry * dentry, struct nameidata *nd)
 	if (!inode) {
 		if (nfs_neg_need_reval(dir, dentry, nd))
 			goto out_bad;
-		goto out_valid_noent;
+		goto out_valid;
 	}
 
 	if (is_bad_inode(inode)) {
@@ -1200,6 +1195,7 @@ static int nfs_lookup_revalidate(struct dentry * dentry, struct nameidata *nd)
 	if (!nfs_is_exclusive_create(dir, nd) && nfs_check_verifier(dir, dentry)) {
 		if (nfs_lookup_verify_inode(inode, nd))
 			goto out_zap_parent;
+		nfs_advise_use_readdirplus(dir);
 		goto out_valid;
 	}
 
@@ -1222,12 +1218,13 @@ static int nfs_lookup_revalidate(struct dentry * dentry, struct nameidata *nd)
 
 	nfs_free_fattr(fattr);
 	nfs_free_fhandle(fhandle);
+
+	/* set a readdirplus hint that we had a cache miss */
+	nfs_force_use_readdirplus(dir);
+
 out_set_verifier:
 	nfs_set_verifier(dentry, nfs_save_change_attribute(dir));
  out_valid:
-	/* Success: notify readdir to use READDIRPLUS */
-	nfs_advise_use_readdirplus(dir);
- out_valid_noent:
 	dput(parent);
 	dfprintk(LOOKUPCACHE, "NFS: %s(%s/%s) is valid\n",
 			__func__, dentry->d_parent->d_name.name,
@@ -1422,8 +1419,8 @@ static struct dentry *nfs_lookup(struct inode *dir, struct dentry * dentry, stru
 	if (IS_ERR(res))
 		goto out_unblock_sillyrename;
 
-	/* Success: notify readdir to use READDIRPLUS */
-	nfs_advise_use_readdirplus(dir);
+	/* Notify readdir to use READDIRPLUS */
+	nfs_force_use_readdirplus(dir);
 
 no_entry:
 	res = d_materialise_unique(dentry, inode);

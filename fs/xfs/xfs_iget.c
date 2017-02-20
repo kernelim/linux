@@ -108,13 +108,7 @@ xfs_inode_free_callback(
 	struct xfs_inode	*ip = XFS_I(inode);
 
 	INIT_LIST_HEAD(&inode->i_dentry);
-	kmem_zone_free(xfs_inode_zone, ip);
-}
 
-void
-xfs_inode_free(
-	struct xfs_inode	*ip)
-{
 	switch (ip->i_d.di_mode & S_IFMT) {
 	case S_IFREG:
 	case S_IFDIR:
@@ -127,24 +121,7 @@ xfs_inode_free(
 		xfs_idestroy_fork(ip, XFS_ATTR_FORK);
 
 	if (ip->i_itemp) {
-		/*
-		 * Only if we are shutting down the fs will we see an
-		 * inode still in the AIL. If it is there, we should remove
-		 * it to prevent a use-after-free from occurring.
-		 */
-		xfs_log_item_t	*lip = &ip->i_itemp->ili_item;
-		struct xfs_ail	*ailp = lip->li_ailp;
-
-		ASSERT(((lip->li_flags & XFS_LI_IN_AIL) == 0) ||
-				       XFS_FORCED_SHUTDOWN(ip->i_mount));
-		if (lip->li_flags & XFS_LI_IN_AIL) {
-			spin_lock(&ailp->xa_lock);
-			if (lip->li_flags & XFS_LI_IN_AIL)
-				xfs_trans_ail_delete(ailp, lip,
-						     SHUTDOWN_CORRUPT_INCORE);
-			else
-				spin_unlock(&ailp->xa_lock);
-		}
+		ASSERT(!(ip->i_itemp->ili_item.li_flags & XFS_LI_IN_AIL));
 		xfs_inode_item_destroy(ip);
 		ip->i_itemp = NULL;
 	}
@@ -155,6 +132,21 @@ xfs_inode_free(
 	ASSERT(!spin_is_locked(&ip->i_flags_lock));
 	ASSERT(completion_done(&ip->i_flush));
 
+	kmem_zone_free(xfs_inode_zone, ip);
+}
+
+void
+__xfs_inode_free(
+	struct xfs_inode	*ip)
+{
+	call_rcu((struct rcu_head *)&VFS_I(ip)->i_dentry,
+		 xfs_inode_free_callback);
+}
+
+void
+xfs_inode_free(
+	struct xfs_inode	*ip)
+{
 	/*
 	 * Because we use RCU freeing we need to ensure the inode always
 	 * appears to be reclaimed with an invalid inode number when in the
@@ -165,7 +157,8 @@ xfs_inode_free(
 	ip->i_flags = XFS_IRECLAIM;
 	ip->i_ino = 0;
 	spin_unlock(&ip->i_flags_lock);
-	call_rcu((struct rcu_head *)&VFS_I(ip)->i_dentry, xfs_inode_free_callback);
+
+	__xfs_inode_free(ip);
 }
 
 /*

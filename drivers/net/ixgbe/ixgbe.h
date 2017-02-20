@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel 10 Gigabit PCI Express Linux driver
-  Copyright(c) 1999 - 2013 Intel Corporation.
+  Copyright(c) 1999 - 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -222,6 +222,8 @@ struct ixgbe_rx_queue_stats {
 	u64 csum_err;
 };
 
+#define IXGBE_TS_HDR_LEN 8
+
 enum ixgbe_ring_state_t {
 	__IXGBE_TX_FDIR_INIT_DONE,
 	__IXGBE_TX_XPS_INIT_DONE,
@@ -279,6 +281,8 @@ struct ixgbe_ring {
 					 */
 	u16 next_to_use;
 	u16 next_to_clean;
+
+	unsigned long last_rx_timestamp;
 
 	union {
 		u16 next_to_alloc;
@@ -676,6 +680,8 @@ struct ixgbe_adapter {
 #define IXGBE_FLAG_SRIOV_CAPABLE                (u32)(1 << 22)
 #define IXGBE_FLAG_SRIOV_ENABLED                (u32)(1 << 23)
 #define IXGBE_FLAG_VXLAN_OFFLOAD_CAPABLE	BIT(24)
+#define IXGBE_FLAG_RX_HWTSTAMP_ENABLED		BIT(25)
+#define IXGBE_FLAG_RX_HWTSTAMP_IN_REGISTER	BIT(26)
 
 	u32 flags2;
 #define IXGBE_FLAG2_RSC_CAPABLE                 (u32)(1 << 0)
@@ -702,6 +708,9 @@ struct ixgbe_adapter {
 	/* Rx fast path data */
 	int num_rx_queues;
 	u16 rx_itr_setting;
+
+	/* Port number used to identify VXLAN traffic */
+	__be16 vxlan_port;
 
 	/* TX */
 	struct ixgbe_ring *tx_ring[MAX_TX_QUEUES] ____cacheline_aligned_in_smp;
@@ -793,9 +802,12 @@ struct ixgbe_adapter {
 	unsigned long last_rx_ptp_check;
 	unsigned long last_rx_timestamp;
 	spinlock_t tmreg_lock;
-	struct cyclecounter cc;
-	struct timecounter tc;
+	struct cyclecounter hw_cc;
+	struct timecounter hw_tc;
 	u32 base_incval;
+	u32 tx_hwtstamp_timeouts;
+	u32 rx_hwtstamp_cleared;
+	void (*ptp_setup_sdp)(struct ixgbe_adapter *);
 #endif /* CONFIG_IXGBE_PTP */
 
 	/* SR-IOV */
@@ -809,9 +821,6 @@ struct ixgbe_adapter {
 	u32 timer_event_accumulator;
 	u32 vferr_refcount;
 	struct ixgbe_mac_addr *mac_table;
-#ifdef CONFIG_IXGBE_VXLAN
-	u16 vxlan_port;
-#endif
 	struct kobject *info_kobj;
 #ifdef CONFIG_IXGBE_HWMON
 	struct hwmon_buff ixgbe_hwmon_buff;
@@ -842,6 +851,7 @@ static inline u8 ixgbe_max_rss_indices(struct ixgbe_adapter *adapter)
 		return IXGBE_MAX_RSS_INDICES;
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		return IXGBE_MAX_RSS_INDICES_X550;
 	default:
 		return 0;
@@ -885,13 +895,15 @@ enum ixgbe_boards {
 	board_X540,
 	board_X550,
 	board_X550EM_x,
+	board_x550em_a,
 };
 
-extern struct ixgbe_info ixgbe_82598_info;
-extern struct ixgbe_info ixgbe_82599_info;
-extern struct ixgbe_info ixgbe_X540_info;
-extern struct ixgbe_info ixgbe_X550_info;
-extern struct ixgbe_info ixgbe_X550EM_x_info;
+extern const struct ixgbe_info ixgbe_82598_info;
+extern const struct ixgbe_info ixgbe_82599_info;
+extern const struct ixgbe_info ixgbe_X540_info;
+extern const struct ixgbe_info ixgbe_X550_info;
+extern const struct ixgbe_info ixgbe_X550EM_x_info;
+extern const struct ixgbe_info ixgbe_x550em_a_info;
 #ifdef CONFIG_IXGBE_DCB
 extern const struct dcbnl_rtnl_ops dcbnl_ops;
 #endif
@@ -1008,12 +1020,33 @@ void ixgbe_ptp_suspend(struct ixgbe_adapter *adapter);
 void ixgbe_ptp_stop(struct ixgbe_adapter *adapter);
 void ixgbe_ptp_overflow_check(struct ixgbe_adapter *adapter);
 void ixgbe_ptp_rx_hang(struct ixgbe_adapter *adapter);
-void ixgbe_ptp_rx_hwtstamp(struct ixgbe_adapter *adapter, struct sk_buff *skb);
+void ixgbe_ptp_rx_pktstamp(struct ixgbe_q_vector *, struct sk_buff *);
+void ixgbe_ptp_rx_rgtstamp(struct ixgbe_q_vector *, struct sk_buff *skb);
+static inline void ixgbe_ptp_rx_hwtstamp(struct ixgbe_ring *rx_ring,
+					 union ixgbe_adv_rx_desc *rx_desc,
+					 struct sk_buff *skb)
+{
+	if (unlikely(ixgbe_test_staterr(rx_desc, IXGBE_RXD_STAT_TSIP))) {
+		ixgbe_ptp_rx_pktstamp(rx_ring->q_vector, skb);
+		return;
+	}
+
+	if (unlikely(!ixgbe_test_staterr(rx_desc, IXGBE_RXDADV_STAT_TS)))
+		return;
+
+	ixgbe_ptp_rx_rgtstamp(rx_ring->q_vector, skb);
+
+	/* Update the last_rx_timestamp timer in order to enable watchdog check
+	 * for error case of latched timestamp on a dropped packet.
+	 */
+	rx_ring->last_rx_timestamp = jiffies;
+}
+
 int ixgbe_ptp_set_ts_config(struct ixgbe_adapter *adapter, struct ifreq *ifr);
 int ixgbe_ptp_get_ts_config(struct ixgbe_adapter *adapter, struct ifreq *ifr);
 void ixgbe_ptp_start_cyclecounter(struct ixgbe_adapter *adapter);
 void ixgbe_ptp_reset(struct ixgbe_adapter *adapter);
-void ixgbe_ptp_check_pps_event(struct ixgbe_adapter *adapter, u32 eicr);
+void ixgbe_ptp_check_pps_event(struct ixgbe_adapter *adapter);
 #endif /* CONFIG_IXGBE_PTP */
 #ifdef CONFIG_PCI_IOV
 void ixgbe_sriov_reinit(struct ixgbe_adapter *adapter);

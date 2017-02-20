@@ -203,7 +203,7 @@ void __init ima_init_policy(void)
 void ima_update_policy(void)
 {
 	const char *op = "policy_update";
-	const char *cause = "already exists";
+	const char *cause = "already-exists";
 	int result = 1;
 	int audit_info = 0;
 
@@ -438,7 +438,7 @@ ssize_t ima_parse_add_rule(char *rule)
 	/* Prevent installed policy from changing */
 	if (ima_measure != &measure_default_rules) {
 		integrity_audit_msg(AUDIT_INTEGRITY_STATUS, NULL,
-				    NULL, op, "already exists",
+				    NULL, op, "already-exists",
 				    -EACCES, audit_info);
 		return -EACCES;
 	}
@@ -464,7 +464,7 @@ ssize_t ima_parse_add_rule(char *rule)
 	if (result) {
 		kfree(entry);
 		integrity_audit_msg(AUDIT_INTEGRITY_STATUS, NULL,
-				    NULL, op, "invalid policy", result,
+				    NULL, op, "invalid-policy", result,
 				    audit_info);
 		return result;
 	}

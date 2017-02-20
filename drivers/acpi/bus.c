@@ -1013,6 +1013,9 @@ static int __init acpi_init(void)
 	if (acpi_disabled)
 		return result;
 
+	/* Set capability bits for _OSC under processor scope */
+	acpi_early_processor_osc();
+
 	/*
 	 * If the laptop falls into the DMI check table, the power state check
 	 * will be disabled in the course of device power transistion.

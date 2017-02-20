@@ -2205,7 +2205,7 @@ alloc_init_open_stateowner(unsigned int strhashval, struct nfs4_client *clp, str
 	sop->so_id = current_ownerid++;
 	sop->so_client = clp;
 	sop->so_seqid = open->op_seqid;
-	sop->so_confirmed = 0;
+	sop->so_flags = NFS4_OO_NEW;
 	rp = &sop->so_replay;
 	rp->rp_status = nfserr_serverfault;
 	rp->rp_buflen = 0;
@@ -2489,7 +2489,7 @@ nfsd4_process_open1(struct nfsd4_compound_state *cstate,
 	/* When sessions are used, skip open sequenceid processing */
 	if (nfsd4_has_session(cstate))
 		goto renew;
-	if (!sop->so_confirmed) {
+	if (!(sop->so_flags & NFS4_OO_CONFIRMED)) {
 		/* Replace unconfirmed owners without checking for replay. */
 		clp = sop->so_client;
 		release_openowner(sop);
@@ -2517,7 +2517,6 @@ renew:
 			return nfserr_resource;
 		open->op_stateowner = sop;
 	}
-	list_del_init(&sop->so_close_lru);
 	renew_client(sop->so_client);
 	return nfs_ok;
 }
@@ -2569,7 +2568,7 @@ out:
 		return nfs_ok;
 	if (status)
 		return status;
-	open->op_stateowner->so_confirmed = 1;
+	open->op_stateowner->so_flags |= NFS4_OO_CONFIRMED;
 	return nfs_ok;
 }
 
@@ -2699,7 +2698,7 @@ nfs4_upgrade_open(struct svc_rqst *rqstp, struct nfs4_file *fp, struct svc_fh *c
 static void
 nfs4_set_claim_prev(struct nfsd4_open *open)
 {
-	open->op_stateowner->so_confirmed = 1;
+	open->op_stateowner->so_flags |= NFS4_OO_CONFIRMED;
 	open->op_stateowner->so_client->cl_firststate = 1;
 }
 
@@ -2730,7 +2729,7 @@ nfs4_open_delegation(struct svc_fh *fh, struct nfsd4_open *open, struct nfs4_sta
 			 * had the chance to reclaim theirs.... */
 			if (locks_in_grace())
 				goto out;
-			if (!cb_up || !sop->so_confirmed)
+			if (!cb_up || !(sop->so_flags & NFS4_OO_CONFIRMED))
 				goto out;
 			if (open->op_share_access & NFS4_SHARE_ACCESS_WRITE)
 				flag = NFS4_OPEN_DELEGATE_WRITE;
@@ -2843,7 +2842,7 @@ nfsd4_process_open2(struct svc_rqst *rqstp, struct svc_fh *current_fh, struct nf
 	memcpy(&open->op_stateid, &stp->st_stateid, sizeof(stateid_t));
 
 	if (nfsd4_has_session(&resp->cstate))
-		open->op_stateowner->so_confirmed = 1;
+		open->op_stateowner->so_flags |= NFS4_OO_CONFIRMED;
 
 	/*
 	* Attempt to hand out a delegation. No error return, because the
@@ -2864,11 +2863,28 @@ out:
 	* To finish the open response, we just need to set the rflags.
 	*/
 	open->op_rflags = NFS4_OPEN_RESULT_LOCKTYPE_POSIX;
-	if (!open->op_stateowner->so_confirmed &&
+	if (!(open->op_stateowner->so_flags & NFS4_OO_CONFIRMED) &&
 	    !nfsd4_has_session(&resp->cstate))
 		open->op_rflags |= NFS4_OPEN_RESULT_CONFIRM;
 
 	return status;
+}
+
+void nfsd4_cleanup_open_state(struct nfsd4_open *open, __be32 status)
+{
+	if (open->op_stateowner) {
+		struct nfs4_stateowner *sop = open->op_stateowner;
+
+		if (!list_empty(&sop->so_stateids))
+			list_del_init(&sop->so_close_lru);
+		if (sop->so_flags & NFS4_OO_NEW) {
+			if (status) {
+				release_openowner(sop);
+				open->op_stateowner = NULL;
+			} else
+				sop->so_flags &= ~NFS4_OO_NEW;
+		}
+	}
 }
 
 __be32
@@ -3191,7 +3207,7 @@ nfs4_preprocess_stateid_op(struct nfsd4_compound_state *cstate,
 		status = nfserr_bad_stateid;
 		if (nfs4_check_fh(current_fh, stp))
 			goto out;
-		if (!stp->st_stateowner->so_confirmed)
+		if (!(stp->st_stateowner->so_flags & NFS4_OO_CONFIRMED))
 			goto out;
 		status = check_stateid_generation(stateid, &stp->st_stateid,
 						  flags);
@@ -3312,12 +3328,12 @@ nfs4_preprocess_seqid_op(struct nfsd4_compound_state *cstate, u32 seqid,
 	if (!(flags & HAS_SESSION) && seqid != sop->so_seqid)
 		goto check_replay;
 
-	if (sop->so_confirmed && flags & CONFIRM) {
+	if ((sop->so_flags & NFS4_OO_CONFIRMED) && flags & CONFIRM) {
 		dprintk("NFSD: preprocess_seqid_op: expected"
 				" unconfirmed stateowner!\n");
 		return nfserr_bad_stateid;
 	}
-	if (!sop->so_confirmed && !(flags & CONFIRM)) {
+	if (!(sop->so_flags & NFS4_OO_CONFIRMED) && !(flags & CONFIRM)) {
 		dprintk("NFSD: preprocess_seqid_op: stateowner not"
 				" confirmed yet!\n");
 		return nfserr_bad_stateid;
@@ -3365,7 +3381,7 @@ nfsd4_open_confirm(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 		goto out; 
 
 	sop = oc->oc_stateowner;
-	sop->so_confirmed = 1;
+	sop->so_flags |= NFS4_OO_CONFIRMED;
 	update_stateid(&stp->st_stateid);
 	memcpy(&oc->oc_resp_stateid, &stp->st_stateid, sizeof(stateid_t));
 	dprintk("NFSD: %s: success, seqid=%d stateid=" STATEID_FMT "\n",
@@ -3725,7 +3741,7 @@ alloc_init_lock_stateowner(unsigned int strhashval, struct nfs4_client *clp, str
 	/* It is the openowner seqid that will be incremented in encode in the
 	 * case of new lockowners; so increment the lock seqid manually: */
 	sop->so_seqid = lock->lk_new_lock_seqid + 1;
-	sop->so_confirmed = 1;
+	sop->so_flags = NFS4_OO_CONFIRMED;
 	rp = &sop->so_replay;
 	rp->rp_status = nfserr_serverfault;
 	rp->rp_buflen = 0;
@@ -4368,21 +4384,26 @@ set_max_delegations(void)
 
 /* initialization to perform when the nfsd service is started: */
 
-static int
-__nfs4_state_start(void)
+int
+nfs4_state_start(void)
 {
 	int ret;
 
+	nfsd4_load_reboot_recovery_data();
 	boot_time = get_seconds();
 	locks_start_grace(&nfsd4_manager);
 	printk(KERN_INFO "NFSD: starting %ld-second grace period\n",
 	       nfsd4_grace);
 	ret = set_callback_cred();
-	if (ret)
-		return -ENOMEM;
+	if (ret) {
+		ret = -ENOMEM;
+		goto out_recovery;
+	}
 	laundry_wq = create_singlethread_workqueue("nfsd4");
-	if (laundry_wq == NULL)
-		return -ENOMEM;
+	if (laundry_wq == NULL) {
+		ret = -ENOMEM;
+		goto out_recovery;
+	}
 	ret = nfsd4_create_callback_queue();
 	if (ret)
 		goto out_free_laundry;
@@ -4391,14 +4412,9 @@ __nfs4_state_start(void)
 	return 0;
 out_free_laundry:
 	destroy_workqueue(laundry_wq);
+out_recovery:
+	nfsd4_shutdown_recdir();
 	return ret;
-}
-
-int
-nfs4_state_start(void)
-{
-	nfsd4_load_reboot_recovery_data();
-	return __nfs4_state_start();
 }
 
 static void

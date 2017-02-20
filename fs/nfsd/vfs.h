@@ -122,4 +122,23 @@ static inline void fh_drop_write(struct svc_fh *fh)
 	}
 }
 
+static inline bool nfsd_eof_on_read(long requested, long read,
+				loff_t offset, loff_t size)
+{
+	/* We assume a short read means eof: */
+	if (requested > read)
+		return true;
+	/*
+	 * A non-short read might also reach end of file.  The spec
+	 * still requires us to set eof in that case.
+	 *
+	 * Further operations may have modified the file size since
+	 * the read, so the following check is not atomic with the read.
+	 * We've only seen that cause a problem for a client in the case
+	 * where the read returned a count of 0 without setting eof.
+	 * That case was fixed by the addition of the above check.
+	 */
+	return (offset + read >= size);
+}
+
 #endif /* LINUX_NFSD_VFS_H */

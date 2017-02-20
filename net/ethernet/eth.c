@@ -329,7 +329,7 @@ void eth_commit_mac_addr_change(struct net_device *dev, void *p)
 
 	memcpy(dev->dev_addr, addr->sa_data, ETH_ALEN);
 	/* if device marked as NET_ADDR_RANDOM, reset it */
-	dev->addr_assign_type &= ~NET_ADDR_RANDOM;
+	dev->addr_assign_type = NET_ADDR_PERM;
 }
 EXPORT_SYMBOL(eth_commit_mac_addr_change);
 

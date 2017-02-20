@@ -1184,7 +1184,6 @@ static void mlx5e_fill_indir_rqt_rqns(struct mlx5e_priv *priv, void *rqtc)
 			ix = mlx5e_bits_invert(i, MLX5E_LOG_INDIR_RQT_SIZE);
 
 		ix = priv->params.indirection_rqt[ix];
-		ix = ix % priv->params.num_channels;
 		MLX5_SET(rqtc, rqtc, rq_num[i],
 			 test_bit(MLX5E_STATE_OPENED, &priv->state) ?
 			 priv->channel[ix]->rq.rqn :
@@ -1302,7 +1301,22 @@ static void mlx5e_build_tir_ctx_lro(void *tirc, struct mlx5e_priv *priv)
 			      lro_timer_supported_periods[2]));
 }
 
-static int mlx5e_modify_tir_lro(struct mlx5e_priv *priv, int tt)
+void mlx5e_build_tir_ctx_hash(void *tirc, struct mlx5e_priv *priv)
+{
+	MLX5_SET(tirc, tirc, rx_hash_fn,
+		 mlx5e_rx_hash_fn(priv->params.rss_hfunc));
+	if (priv->params.rss_hfunc == ETH_RSS_HASH_TOP) {
+		void *rss_key = MLX5_ADDR_OF(tirc, tirc,
+					     rx_hash_toeplitz_key);
+		size_t len = MLX5_FLD_SZ_BYTES(tirc,
+					       rx_hash_toeplitz_key);
+
+		MLX5_SET(tirc, tirc, rx_hash_symmetric, 1);
+		memcpy(rss_key, priv->params.toeplitz_hash_key, len);
+	}
+}
+
+static int mlx5e_modify_tirs_lro(struct mlx5e_priv *priv)
 {
 	struct mlx5_core_dev *mdev = priv->mdev;
 
@@ -1310,6 +1324,7 @@ static int mlx5e_modify_tir_lro(struct mlx5e_priv *priv, int tt)
 	void *tirc;
 	int inlen;
 	int err;
+	int tt;
 
 	inlen = MLX5_ST_SZ_BYTES(modify_tir_in);
 	in = mlx5_vzalloc(inlen);
@@ -1321,7 +1336,11 @@ static int mlx5e_modify_tir_lro(struct mlx5e_priv *priv, int tt)
 
 	mlx5e_build_tir_ctx_lro(tirc, priv);
 
-	err = mlx5_core_modify_tir(mdev, priv->tirn[tt], in, inlen);
+	for (tt = 0; tt < MLX5E_NUM_TT; tt++) {
+		err = mlx5_core_modify_tir(mdev, priv->tirn[tt], in, inlen);
+		if (err)
+			break;
+	}
 
 	kvfree(in);
 
@@ -1368,7 +1387,7 @@ static int mlx5e_set_dev_port_mtu(struct net_device *netdev)
 {
 	struct mlx5e_priv *priv = netdev_priv(netdev);
 	struct mlx5_core_dev *mdev = priv->mdev;
-	int hw_mtu;
+	u16 hw_mtu;
 	int err;
 
 	err = mlx5_set_port_mtu(mdev, MLX5E_SW2HW_MTU(netdev->mtu), 1);
@@ -1666,17 +1685,7 @@ static void mlx5e_build_tir_ctx(struct mlx5e_priv *priv, u32 *tirc, int tt)
 	default:
 		MLX5_SET(tirc, tirc, indirect_table,
 			 priv->rqtn[MLX5E_INDIRECTION_RQT]);
-		MLX5_SET(tirc, tirc, rx_hash_fn,
-			 mlx5e_rx_hash_fn(priv->params.rss_hfunc));
-		if (priv->params.rss_hfunc == ETH_RSS_HASH_TOP) {
-			void *rss_key = MLX5_ADDR_OF(tirc, tirc,
-						     rx_hash_toeplitz_key);
-			size_t len = MLX5_FLD_SZ_BYTES(tirc,
-						       rx_hash_toeplitz_key);
-
-			MLX5_SET(tirc, tirc, rx_hash_symmetric, 1);
-			memcpy(rss_key, priv->params.toeplitz_hash_key, len);
-		}
+		mlx5e_build_tir_ctx_hash(tirc, priv);
 		break;
 	}
 
@@ -1879,8 +1888,10 @@ static int mlx5e_set_features(struct net_device *netdev,
 			mlx5e_close_locked(priv->netdev);
 
 		priv->params.lro_en = !!(features & NETIF_F_LRO);
-		mlx5e_modify_tir_lro(priv, MLX5E_TT_IPV4_TCP);
-		mlx5e_modify_tir_lro(priv, MLX5E_TT_IPV6_TCP);
+		err = mlx5e_modify_tirs_lro(priv);
+		if (err)
+			mlx5_core_warn(priv->mdev, "lro modify failed, %d\n",
+				       err);
 
 		if (was_opened)
 			err = mlx5e_open_locked(priv->netdev);
@@ -1898,22 +1909,27 @@ static int mlx5e_set_features(struct net_device *netdev,
 	return err;
 }
 
+#define MXL5_HW_MIN_MTU 64
+#define MXL5E_MIN_MTU (MXL5_HW_MIN_MTU + ETH_FCS_LEN)
+
 static int mlx5e_change_mtu(struct net_device *netdev, int new_mtu)
 {
 	struct mlx5e_priv *priv = netdev_priv(netdev);
 	struct mlx5_core_dev *mdev = priv->mdev;
 	bool was_opened;
-	int max_mtu;
+	u16 max_mtu;
+	u16 min_mtu;
 	int err = 0;
 
 	mlx5_query_port_max_mtu(mdev, &max_mtu, 1);
 
 	max_mtu = MLX5E_HW2SW_MTU(max_mtu);
+	min_mtu = MLX5E_HW2SW_MTU(MXL5E_MIN_MTU);
 
-	if (new_mtu > max_mtu) {
+	if (new_mtu > max_mtu || new_mtu < min_mtu) {
 		netdev_err(netdev,
-			   "%s: Bad MTU (%d) > (%d) Max\n",
-			   __func__, new_mtu, max_mtu);
+			   "%s: Bad MTU (%d), valid range is: [%d..%d]\n",
+			   __func__, new_mtu, min_mtu, max_mtu);
 		return -EINVAL;
 	}
 
@@ -1973,12 +1989,21 @@ static int mlx5e_check_required_hca_cap(struct mlx5_core_dev *mdev)
 	return 0;
 }
 
+
+void mlx5e_build_default_indir_rqt(u32 *indirection_rqt, int len,
+				   int num_channels)
+{
+	int i;
+
+	for (i = 0; i < len; i++)
+		indirection_rqt[i] = i % num_channels;
+}
+
 static void mlx5e_build_netdev_priv(struct mlx5_core_dev *mdev,
 				    struct net_device *netdev,
 				    int num_channels)
 {
 	struct mlx5e_priv *priv = netdev_priv(netdev);
-	int i;
 
 	priv->params.log_sq_size           =
 		MLX5E_PARAMS_DEFAULT_LOG_SQ_SIZE;
@@ -2001,8 +2026,8 @@ static void mlx5e_build_netdev_priv(struct mlx5_core_dev *mdev,
 	netdev_rss_key_fill(priv->params.toeplitz_hash_key,
 			    sizeof(priv->params.toeplitz_hash_key));
 
-	for (i = 0; i < MLX5E_INDIR_RQT_SIZE; i++)
-		priv->params.indirection_rqt[i] = i % num_channels;
+	mlx5e_build_default_indir_rqt(priv->params.indirection_rqt,
+				      MLX5E_INDIR_RQT_SIZE, num_channels);
 
 	priv->params.lro_wqe_sz            =
 		MLX5E_PARAMS_DEFAULT_LRO_WQE_SZ;
@@ -2060,11 +2085,12 @@ static void mlx5e_build_netdev(struct net_device *netdev)
 	if (!!MLX5_CAP_ETH(mdev, lro_cap))
 		netdev->vlan_features    |= NETIF_F_LRO;
 
-	netdev->features       = netdev->vlan_features;
-	netdev->features      |= NETIF_F_HW_VLAN_TX;
-	netdev->features      |= NETIF_F_HW_VLAN_RX;
-	netdev->features      |= NETIF_F_HW_VLAN_FILTER;
+	netdev_extended(netdev)->hw_features  = netdev->vlan_features;
+	netdev_extended(netdev)->hw_features |= NETIF_F_HW_VLAN_TX;
+	netdev_extended(netdev)->hw_features |= NETIF_F_HW_VLAN_RX;
+	netdev_extended(netdev)->hw_features |= NETIF_F_HW_VLAN_FILTER;
 
+	netdev->features = netdev_extended(netdev)->hw_features;
 	if (!priv->params.lro_en)
 		netdev->features  &= ~NETIF_F_LRO;
 

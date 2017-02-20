@@ -211,16 +211,7 @@ static int aio_setup_ring(struct kioctx *ctx)
 static void ctx_rcu_free(struct rcu_head *head)
 {
 	struct kioctx *ctx = container_of(head, struct kioctx, rcu_head);
-	unsigned nr_events = ctx->max_reqs;
-
 	kmem_cache_free(kioctx_cachep, ctx);
-
-	if (nr_events) {
-		spin_lock(&aio_nr_lock);
-		BUG_ON(aio_nr - nr_events > aio_nr);
-		aio_nr -= nr_events;
-		spin_unlock(&aio_nr_lock);
-	}
 }
 
 /* __put_ioctx
@@ -229,6 +220,7 @@ static void ctx_rcu_free(struct rcu_head *head)
  */
 static void __put_ioctx(struct kioctx *ctx)
 {
+	unsigned nr_events = ctx->max_reqs;
 	BUG_ON(ctx->reqs_active);
 
 	cancel_delayed_work(&ctx->wq);
@@ -236,6 +228,12 @@ static void __put_ioctx(struct kioctx *ctx)
 	aio_free_ring(ctx);
 	mmdrop(ctx->mm);
 	ctx->mm = NULL;
+	if (nr_events) {
+		spin_lock(&aio_nr_lock);
+		BUG_ON(aio_nr - nr_events > aio_nr);
+		aio_nr -= nr_events;
+		spin_unlock(&aio_nr_lock);
+	}
 	pr_debug("__put_ioctx: freeing %p\n", ctx);
 	call_rcu(&ctx->rcu_head, ctx_rcu_free);
 }
@@ -259,7 +257,7 @@ static struct kioctx *ioctx_alloc(unsigned nr_events)
 {
 	struct mm_struct *mm;
 	struct kioctx *ctx;
-	int did_sync = 0;
+	int err = -ENOMEM;
 
 	/* Prevent overflows */
 	if ((nr_events > (0x10000000U / sizeof(struct io_event))) ||
@@ -268,7 +266,7 @@ static struct kioctx *ioctx_alloc(unsigned nr_events)
 		return ERR_PTR(-EINVAL);
 	}
 
-	if ((unsigned long)nr_events > aio_max_nr)
+	if (!nr_events || (unsigned long)nr_events > aio_max_nr)
 		return ERR_PTR(-EAGAIN);
 
 	ctx = kmem_cache_zalloc(kioctx_cachep, GFP_KERNEL);
@@ -292,25 +290,14 @@ static struct kioctx *ioctx_alloc(unsigned nr_events)
 		goto out_freectx;
 
 	/* limit the number of system wide aios */
-	do {
-		spin_lock_bh(&aio_nr_lock);
-		if (aio_nr + nr_events > aio_max_nr ||
-		    aio_nr + nr_events < aio_nr)
-			ctx->max_reqs = 0;
-		else
-			aio_nr += ctx->max_reqs;
+	spin_lock_bh(&aio_nr_lock);
+	if (aio_nr + nr_events > aio_max_nr ||
+	    aio_nr + nr_events < aio_nr) {
 		spin_unlock_bh(&aio_nr_lock);
-		if (ctx->max_reqs || did_sync)
-			break;
-
-		/* wait for rcu callbacks to have completed before giving up */
-		synchronize_rcu();
-		did_sync = 1;
-		ctx->max_reqs = nr_events;
-	} while (1);
-
-	if (ctx->max_reqs == 0)
 		goto out_cleanup;
+	}
+	aio_nr += ctx->max_reqs;
+	spin_unlock_bh(&aio_nr_lock);
 
 	/* now link into global list. */
 	spin_lock(&mm->ioctx_lock);
@@ -322,16 +309,13 @@ static struct kioctx *ioctx_alloc(unsigned nr_events)
 	return ctx;
 
 out_cleanup:
-	__put_ioctx(ctx);
-	return ERR_PTR(-EAGAIN);
-
+	err = -EAGAIN;
+	aio_free_ring(ctx);
 out_freectx:
 	mmdrop(mm);
 	kmem_cache_free(kioctx_cachep, ctx);
-	ctx = ERR_PTR(-ENOMEM);
-
-	dprintk("aio: error allocating ioctx %p\n", ctx);
-	return ctx;
+	dprintk("aio: error allocating ioctx %d\n", err);
+	return ERR_PTR(err);
 }
 
 /* aio_cancel_all

@@ -138,6 +138,7 @@
 #include <linux/net_tstamp.h>
 #include <linux/hashtable.h>
 #include <linux/hrtimer.h>
+#include <linux/crash_dump.h>
 
 #include "net-sysfs.h"
 
@@ -1828,7 +1829,8 @@ EXPORT_SYMBOL(netif_set_real_num_rx_queues);
  */
 int netif_get_num_default_rss_queues()
 {
-	return min_t(int, DEFAULT_MAX_NUM_RSS_QUEUES, num_online_cpus());
+	return is_kdump_kernel() ?
+		1 : min_t(int, DEFAULT_MAX_NUM_RSS_QUEUES, num_online_cpus());
 }
 EXPORT_SYMBOL(netif_get_num_default_rss_queues);
 
@@ -2558,6 +2560,9 @@ static void skb_update_prio(struct sk_buff *skb)
 #define skb_update_prio(skb)
 #endif
 
+static DEFINE_PER_CPU(local_t, xmit_recursion);
+#define RECURSION_LIMIT 10
+
 /**
  *	dev_queue_xmit - transmit a buffer
  *	@skb: buffer to transmit
@@ -2626,11 +2631,18 @@ int dev_queue_xmit(struct sk_buff *skb)
 
 		if (txq->xmit_lock_owner != cpu) {
 
+			if (local_read(&__get_cpu_var(xmit_recursion)) > RECURSION_LIMIT)
+				goto recursion_alert;
+
 			HARD_TX_LOCK(dev, txq, cpu);
 
 			if (!netif_tx_queue_stopped(txq)) {
+				int xmit;
 				rc = NET_XMIT_SUCCESS;
-				if (!dev_hard_start_xmit(skb, dev, txq)) {
+				local_inc(&__get_cpu_var(xmit_recursion));
+				xmit = dev_hard_start_xmit(skb, dev, txq);
+				local_dec(&__get_cpu_var(xmit_recursion));
+				if (!xmit) {
 					HARD_TX_UNLOCK(dev, txq);
 					goto out;
 				}
@@ -2641,7 +2653,9 @@ int dev_queue_xmit(struct sk_buff *skb)
 				       "queue packet!\n", dev->name);
 		} else {
 			/* Recursion is detected! It is possible,
-			 * unfortunately */
+			 * unfortunately
+			 */
+recursion_alert:
 			if (net_ratelimit())
 				printk(KERN_CRIT "Dead loop on virtual device "
 				       "%s, fix it urgently!\n", dev->name);

@@ -685,6 +685,7 @@ static int mlx4_cmd_wait(struct mlx4_dev *dev, u64 in_param, u64 *out_param,
 {
 	struct mlx4_cmd *cmd = &mlx4_priv(dev)->cmd;
 	struct mlx4_cmd_context *context;
+	long ret_wait;
 	int err = 0;
 
 	down(&cmd->event_sem);
@@ -710,8 +711,20 @@ static int mlx4_cmd_wait(struct mlx4_dev *dev, u64 in_param, u64 *out_param,
 	if (err)
 		goto out_reset;
 
-	if (!wait_for_completion_timeout(&context->done,
-					 msecs_to_jiffies(timeout))) {
+	if (op == MLX4_CMD_SENSE_PORT) {
+		ret_wait =
+			wait_for_completion_interruptible_timeout(&context->done,
+								  msecs_to_jiffies(timeout));
+		if (ret_wait < 0) {
+			context->fw_status = 0;
+			context->out_param = 0;
+			context->result = 0;
+		}
+	} else {
+		ret_wait = (long)wait_for_completion_timeout(&context->done,
+							     msecs_to_jiffies(timeout));
+	}
+	if (!ret_wait) {
 		mlx4_warn(dev, "command 0x%x timed out (go bit not cleared)\n",
 			  op);
 		if (op == MLX4_CMD_NOP) {
@@ -993,7 +1006,7 @@ static int mlx4_MAD_IFC_wrapper(struct mlx4_dev *dev, int slave,
 		if (!(smp->mgmt_class == IB_MGMT_CLASS_SUBN_LID_ROUTED &&
 		      smp->method == IB_MGMT_METHOD_GET) || network_view) {
 			mlx4_err(dev, "Unprivileged slave %d is trying to execute a Subnet MGMT MAD, class 0x%x, method 0x%x, view=%s for attr 0x%x. Rejecting\n",
-				 slave, smp->method, smp->mgmt_class,
+				 slave, smp->mgmt_class, smp->method,
 				 network_view ? "Network" : "Host",
 				 be16_to_cpu(smp->attr_id));
 			return -EPERM;
@@ -2381,7 +2394,7 @@ int mlx4_multi_func_init(struct mlx4_dev *dev)
 			}
 		}
 
-		memset(&priv->mfunc.master.cmd_eqe, 0, dev->caps.eqe_size);
+		memset(&priv->mfunc.master.cmd_eqe, 0, sizeof(struct mlx4_eqe));
 		priv->mfunc.master.cmd_eqe.type = MLX4_EVENT_TYPE_CMD;
 		INIT_WORK(&priv->mfunc.master.comm_work,
 			  mlx4_master_comm_channel);
@@ -2412,7 +2425,7 @@ err_thread:
 	flush_workqueue(priv->mfunc.master.comm_wq);
 	destroy_workqueue(priv->mfunc.master.comm_wq);
 err_slaves:
-	while (--i) {
+	while (i--) {
 		for (port = 1; port <= MLX4_MAX_PORTS; port++)
 			kfree(priv->mfunc.master.slave_state[i].vlan_filter[port]);
 	}
@@ -2817,7 +2830,7 @@ int mlx4_set_vf_mac(struct mlx4_dev *dev, int port, int vf, u64 mac)
 	port = mlx4_slaves_closest_port(dev, slave, port);
 	s_info = &priv->mfunc.master.vf_admin[slave].vport[port];
 	s_info->mac = mac;
-	mlx4_info(dev, "default mac on vf %d port %d to %llX will take afect only after vf restart\n",
+	mlx4_info(dev, "default mac on vf %d port %d to %llX will take effect only after vf restart\n",
 		  vf, port, s_info->mac);
 	return 0;
 }

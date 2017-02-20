@@ -1082,7 +1082,7 @@ static void selinux_write_opts(struct seq_file *m,
 		seq_puts(m, prefix);
 		if (has_comma)
 			seq_putc(m, '\"');
-		seq_puts(m, opts->mnt_opts[i]);
+		seq_escape(m, opts->mnt_opts[i], "\"\n\\");
 		if (has_comma)
 			seq_putc(m, '\"');
 	}
@@ -2025,6 +2025,9 @@ static int selinux_sysctl(ctl_table *table, int op)
 	u32 av;
 	u32 tsid, sid;
 	int rc;
+
+	if (!ss_initialized)
+		return 0;
 
 	sid = current_sid();
 
@@ -4682,10 +4685,10 @@ static int selinux_nlmsg_perm(struct sock *sk, struct sk_buff *skb)
 	err = selinux_nlmsg_lookup(isec->sclass, nlh->nlmsg_type, &perm);
 	if (err) {
 		if (err == -EINVAL) {
-			audit_log(current->audit_context, GFP_KERNEL, AUDIT_SELINUX_ERR,
-				  "SELinux:  unrecognized netlink message"
-				  " type=%hu for sclass=%hu\n",
-				  nlh->nlmsg_type, isec->sclass);
+			printk(KERN_WARNING
+			       "SELinux: unrecognized netlink message:"
+			       " protocol=%hu nlmsg_type=%hu sclass=%hu\n",
+			       sk->sk_protocol, nlh->nlmsg_type, isec->sclass);
 			if (!selinux_enforcing || security_get_allow_unknown())
 				err = 0;
 		}

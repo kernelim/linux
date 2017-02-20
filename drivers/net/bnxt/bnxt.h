@@ -1,6 +1,6 @@
 /* Broadcom NetXtreme-C/E network driver.
  *
- * Copyright (c) 2014-2015 Broadcom Corporation
+ * Copyright (c) 2014-2016 Broadcom Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
 #include <net/flow_keys.h>
 
 #define DRV_MODULE_NAME		"bnxt_en"
-#define DRV_MODULE_VERSION	"1.0.0"
+#define DRV_MODULE_VERSION	"1.2.0"
 
 #define DRV_VER_MAJ	1
 #define DRV_VER_MIN	0
@@ -409,6 +409,15 @@ struct rx_tpa_end_cmp_ext {
 
 #define BNXT_PAGE_SIZE	(1 << BNXT_PAGE_SHIFT)
 
+/* The RXBD length is 16-bit so we can only support page sizes < 64K */
+#if (PAGE_SHIFT > 15)
+#define BNXT_RX_PAGE_SHIFT 15
+#else
+#define BNXT_RX_PAGE_SHIFT PAGE_SHIFT
+#endif
+
+#define BNXT_RX_PAGE_SIZE (1 << BNXT_RX_PAGE_SHIFT)
+
 #define BNXT_MIN_PKT_SIZE	45
 
 #define BNXT_NUM_TESTS(bp)	0
@@ -479,12 +488,16 @@ struct rx_tpa_end_cmp_ext {
 #define RING_CMP(idx)		((idx) & bp->cp_ring_mask)
 #define NEXT_CMP(idx)		RING_CMP(ADV_RAW_CMP(idx, 1))
 
-#define HWRM_CMD_TIMEOUT		500
+#define BNXT_HWRM_MAX_REQ_LEN		(bp->hwrm_max_req_len)
+#define DFLT_HWRM_CMD_TIMEOUT		500
+#define HWRM_CMD_TIMEOUT		(bp->hwrm_cmd_timeout)
 #define HWRM_RESET_TIMEOUT		((HWRM_CMD_TIMEOUT) * 4)
 #define HWRM_RESP_ERR_CODE_MASK		0xffff
+#define HWRM_RESP_LEN_OFFSET		4
 #define HWRM_RESP_LEN_MASK		0xffff0000
 #define HWRM_RESP_LEN_SFT		16
 #define HWRM_RESP_VALID_MASK		0xff000000
+#define HWRM_SEQ_ID_INVALID		-1
 #define BNXT_HWRM_REQ_MAX_SIZE		128
 #define BNXT_HWRM_REQS_PER_PAGE		(BNXT_PAGE_SIZE /	\
 					 BNXT_HWRM_REQ_MAX_SIZE)
@@ -644,19 +657,6 @@ struct bnxt_irq {
 
 #define INVALID_STATS_CTX_ID	-1
 
-struct hwrm_cmd_req_hdr {
-#define HWRM_CMPL_RING_MASK	0xffff0000
-#define HWRM_CMPL_RING_SFT	16
-	__le32	cmpl_ring_req_type;
-#define HWRM_SEQ_ID_MASK	0xffff
-#define HWRM_SEQ_ID_INVALID -1
-#define HWRM_RESP_LEN_OFFSET	4
-#define HWRM_TARGET_FID_MASK	0xffff0000
-#define HWRM_TARGET_FID_SFT	16
-	__le32	target_id_seq_id;
-	__le64	resp_addr;
-};
-
 struct bnxt_ring_grp_info {
 	u16	fw_stats_ctx;
 	u16	fw_grp_id;
@@ -800,7 +800,7 @@ struct bnxt_link_info {
 #define BNXT_LINK_AUTO_ALLSPDS	PORT_PHY_QCFG_RESP_AUTO_MODE_ALL_SPEEDS
 #define BNXT_LINK_AUTO_ONESPD	PORT_PHY_QCFG_RESP_AUTO_MODE_ONE_SPEED
 #define BNXT_LINK_AUTO_ONEORBELOW PORT_PHY_QCFG_RESP_AUTO_MODE_ONE_OR_BELOW
-#define BNXT_LINK_AUTO_MSK	PORT_PHY_QCFG_RESP_AUTO_MODE_MASK
+#define BNXT_LINK_AUTO_MSK	PORT_PHY_QCFG_RESP_AUTO_MODE_SPEED_MASK
 #define PHY_VER_LEN		3
 	u8			phy_ver[PHY_VER_LEN];
 	u16			link_speed;
@@ -824,7 +824,6 @@ struct bnxt_link_info {
 #define BNXT_LINK_SPEED_MSK_25GB PORT_PHY_QCFG_RESP_SUPPORT_SPEEDS_25GB
 #define BNXT_LINK_SPEED_MSK_40GB PORT_PHY_QCFG_RESP_SUPPORT_SPEEDS_40GB
 #define BNXT_LINK_SPEED_MSK_50GB PORT_PHY_QCFG_RESP_SUPPORT_SPEEDS_50GB
-	u16			auto_link_speed;
 	u16			force_link_speed;
 	u32			preemphasis;
 
@@ -890,6 +889,8 @@ struct bnxt {
 
 #define BNXT_PF(bp)		(!((bp)->flags & BNXT_FLAG_VF))
 #define BNXT_VF(bp)		((bp)->flags & BNXT_FLAG_VF)
+#define BNXT_NPAR(bp)		((bp)->port_partition_type)
+#define BNXT_SINGLE_PF(bp)	(BNXT_PF(bp) && !BNXT_NPAR(bp))
 
 	struct bnxt_napi	**bnapi;
 
@@ -943,6 +944,7 @@ struct bnxt {
 
 	u32			msg_enable;
 
+	u32			hwrm_spec_code;
 	u16			hwrm_cmd_seq;
 	u32			hwrm_intr_seq_id;
 	void			*hwrm_cmd_resp_addr;
@@ -950,6 +952,9 @@ struct bnxt {
 	void			*hwrm_dbg_resp_addr;
 	dma_addr_t		hwrm_dbg_resp_dma_addr;
 #define HWRM_DBG_REG_BUF_SIZE	128
+
+	u16			hwrm_max_req_len;
+	int			hwrm_cmd_timeout;
 	struct mutex		hwrm_cmd_lock;	/* serialize hwrm messages */
 	struct hwrm_ver_get_output	ver_resp;
 #define FW_VER_STR_LEN		32
@@ -961,6 +966,8 @@ struct bnxt {
 	__le16			vxlan_fw_dst_port_id;
 	u8			nge_port_cnt;
 	__le16			nge_fw_dst_port_id;
+	u8			port_partition_type;
+
 	u16			coal_ticks;
 	u16			coal_ticks_irq;
 	u16			coal_bufs;

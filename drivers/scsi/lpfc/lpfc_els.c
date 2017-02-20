@@ -6652,6 +6652,7 @@ lpfc_els_unsol_buffer(struct lpfc_hba *phba, struct lpfc_sli_ring *pring,
 	uint32_t cmd, did, newnode;
 	uint8_t rjt_exp, rjt_err = 0;
 	IOCB_t *icmd = &elsiocb->iocb;
+	bool no_msg = false;
 
 	if (!vport || !(elsiocb->context2))
 		goto dropit;
@@ -6989,6 +6990,10 @@ lpfc_els_unsol_buffer(struct lpfc_hba *phba, struct lpfc_sli_ring *pring,
 			rjt_err = LSRJT_UNABLE_TPC;
 			rjt_exp = LSEXP_INVALID_OX_RX;
 		break;
+	case ELS_CMD_LCB:
+	case ELS_CMD_RDP:
+		/* Unsupported ELS command, no hmsg */
+		no_msg = true;
 	default:
 		lpfc_debugfs_disc_trc(vport, LPFC_DISC_TRC_ELS_UNSOL,
 			"RCV ELS cmd:     cmd:x%x did:x%x/ste:x%x",
@@ -6999,9 +7004,10 @@ lpfc_els_unsol_buffer(struct lpfc_hba *phba, struct lpfc_sli_ring *pring,
 		rjt_exp = LSEXP_NOTHING_MORE;
 
 		/* Unknown ELS command <elsCmd> received from NPORT <did> */
-		lpfc_printf_vlog(vport, KERN_ERR, LOG_ELS,
-				 "0115 Unknown ELS command x%x "
-				 "received from NPORT x%x\n", cmd, did);
+		if (!no_msg)
+			lpfc_printf_vlog(vport, KERN_ERR, LOG_ELS,
+					 "0115 Unknown ELS command x%x "
+					 "received from NPORT x%x\n", cmd, did);
 		if (newnode)
 			lpfc_nlp_put(ndlp);
 		break;

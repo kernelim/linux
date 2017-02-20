@@ -90,7 +90,7 @@ static void check_hung_task(struct task_struct *t, unsigned long timeout)
 
 	trace_sched_process_hang(t);
 
-	if (!sysctl_hung_task_warnings)
+	if (!sysctl_hung_task_warnings && !sysctl_hung_task_panic)
 		return;
 	sysctl_hung_task_warnings--;
 

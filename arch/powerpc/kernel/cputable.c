@@ -486,9 +486,18 @@ static struct cpu_spec __initdata cpu_specs[] = {
 		.oprofile_type		= PPC_OPROFILE_POWER4,
 		.platform		= "power7+",
 	},
-	{	/* Power8 */
+	{	/* Power8E */
 		.pvr_mask		= 0xffff0000,
 		.pvr_value		= 0x004b0000,
+		.cpu_name		= "POWER8E (raw)",
+		.num_pmcs		= 6,
+		.oprofile_cpu_type	= "ppc64/power8",
+		.oprofile_type		= PPC_OPROFILE_INVALID,
+		.platform		= "power8",
+	},
+	{	/* Power8 */
+		.pvr_mask		= 0xffff0000,
+		.pvr_value		= 0x004d0000,
 		.cpu_name		= "POWER8 (raw)",
 		.num_pmcs		= 6,
 		.oprofile_cpu_type	= "ppc64/power8",

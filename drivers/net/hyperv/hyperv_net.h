@@ -157,6 +157,7 @@ struct netvsc_device_info {
 	unsigned char mac_adr[ETH_ALEN];
 	bool link_state;	/* 0 - link up, 1 - link down */
 	int  ring_size;
+	u32  max_num_vrss_chns;
 };
 
 enum rndis_device_state {
@@ -167,7 +168,7 @@ enum rndis_device_state {
 };
 
 struct rndis_device {
-	struct netvsc_device *net_dev;
+	struct net_device *ndev;
 
 	enum rndis_device_state state;
 	bool link_state;
@@ -588,6 +589,7 @@ struct nvsp_message {
 
 
 #define NETVSC_MTU 65536
+#define NETVSC_MTU_MIN 68
 
 #define NETVSC_RECEIVE_BUFFER_SIZE		(1024*1024*2)	/* 2MB */
 #define NETVSC_SEND_BUFFER_SIZE			(1024 * 1024)   /* 1MB */
@@ -611,20 +613,22 @@ struct multi_send_data {
 struct net_device_context {
 	/* point back to our device context */
 	struct hv_device *device_ctx;
+	/* netvsc_device */
+	struct netvsc_device *nvdev;
 	struct delayed_work dwork;
 	struct work_struct work;
 	u32 msg_enable; /* debug level */
+
+	/* the device is going away */
+	bool start_remove;
 };
 
 /* Per netvsc device */
 struct netvsc_device {
-	struct hv_device *dev;
-
 	u32 nvsp_version;
 
 	atomic_t num_outstanding_sends;
 	wait_queue_head_t wait_drain;
-	bool start_remove;
 	bool destroy;
 
 	/* Receive buffer allocated by us but manages by NetVSP */
@@ -650,11 +654,11 @@ struct netvsc_device {
 	struct nvsp_message revoke_packet;
 	/* unsigned char HwMacAddr[HW_MACADDR_LEN]; */
 
-	struct net_device *ndev;
-
 	struct vmbus_channel *chn_table[NR_CPUS];
 	u32 send_table[VRSS_SEND_TAB_SIZE];
 	u32 num_chn;
+	spinlock_t sc_lock; /* Protects num_sc_offered variable */
+	u32 num_sc_offered;
 	atomic_t queue_sends[NR_CPUS];
 
 	/* Holds rndis device info */
@@ -670,9 +674,6 @@ struct netvsc_device {
 	struct multi_send_data msd[NR_CPUS];
 	u32 max_pkt; /* max number of pkt in one send, e.g. 8 */
 	u32 pkt_align; /* alignment bytes, e.g. 8 */
-
-	/* The net device context */
-	struct net_device_context *nd_ctx;
 };
 
 /* NdisInitialize message */

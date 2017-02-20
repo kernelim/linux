@@ -4120,7 +4120,7 @@ static ssize_t
 trace_options_write(struct file *filp, const char __user *ubuf, size_t cnt,
 			 loff_t *ppos)
 {
-	struct trace_option_dentry *topt = filp->private_data;
+	struct trace_option_dentry *topt;
 	unsigned long val;
 	char buf[64];
 	int ret;
@@ -4137,6 +4137,16 @@ trace_options_write(struct file *filp, const char __user *ubuf, size_t cnt,
 	if (ret < 0)
 		return ret;
 
+	mutex_lock(&trace_types_lock);
+
+	topt = filp->private_data;
+
+	/* The tracer changed? */
+	if (topt->flags != current_trace->flags) {
+		mutex_unlock(&trace_types_lock);
+		return 0;
+	}
+
 	ret = 0;
 	switch (val) {
 	case 0:
@@ -4144,13 +4154,12 @@ trace_options_write(struct file *filp, const char __user *ubuf, size_t cnt,
 		if (!(topt->flags->val & topt->opt->bit))
 			break;
 
-		mutex_lock(&trace_types_lock);
 		if (current_trace->set_flag)
 			ret = current_trace->set_flag(topt->flags->val,
 						      topt->opt->bit, 0);
-		mutex_unlock(&trace_types_lock);
 		if (ret)
-			return ret;
+			break;
+
 		topt->flags->val &= ~topt->opt->bit;
 		break;
 	case 1:
@@ -4158,19 +4167,22 @@ trace_options_write(struct file *filp, const char __user *ubuf, size_t cnt,
 		if (topt->flags->val & topt->opt->bit)
 			break;
 
-		mutex_lock(&trace_types_lock);
 		if (current_trace->set_flag)
 			ret = current_trace->set_flag(topt->flags->val,
 						      topt->opt->bit, 1);
-		mutex_unlock(&trace_types_lock);
 		if (ret)
-			return ret;
+			break;
+
 		topt->flags->val |= topt->opt->bit;
 		break;
 
 	default:
-		return -EINVAL;
+		ret = -EINVAL;
 	}
+	mutex_unlock(&trace_types_lock);
+
+	if (ret)
+		return ret;
 
 	*ppos += cnt;
 

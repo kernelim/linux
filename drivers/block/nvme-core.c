@@ -88,6 +88,7 @@ static struct notifier_block nvme_nb;
 static struct class *nvme_class;
 
 static void nvme_reset_failed_dev(struct work_struct *ws);
+static long nvme_reset(struct nvme_dev *dev);
 
 struct async_cmd_info {
 	struct kthread_work work;
@@ -198,9 +199,10 @@ static int alloc_cmdid(struct nvme_queue *nvmeq, void *ctx,
 	} while (test_and_set_bit(cmdid, nvmeq->cmdid_data));
 
 	info[cmdid].fn = handler;
-	info[cmdid].ctx = ctx;
 	info[cmdid].timeout = jiffies + timeout;
 	info[cmdid].aborted = 0;
+	wmb();
+	info[cmdid].ctx = ctx;
 	return cmdid;
 }
 
@@ -953,7 +955,8 @@ static int nvme_process_cq(struct nvme_queue *nvmeq)
 	if (head == nvmeq->cq_head && phase == nvmeq->cq_phase)
 		return 0;
 
-	writel(head, nvmeq->q_db + nvmeq->dev->db_stride);
+	if (!nvmeq->q_suspended)
+		writel(head, nvmeq->q_db + nvmeq->dev->db_stride);
 	nvmeq->cq_head = head;
 	nvmeq->cq_phase = phase;
 
@@ -1025,7 +1028,7 @@ static int nvme_submit_sync_cmd(struct nvme_dev *dev, int q_idx,
 						struct nvme_command *cmd,
 						u32 *result, unsigned timeout)
 {
-	int cmdid;
+	int cmdid, ret;
 	struct sync_cmd_info cmdinfo;
 	struct nvme_queue *nvmeq;
 
@@ -1044,8 +1047,12 @@ static int nvme_submit_sync_cmd(struct nvme_dev *dev, int q_idx,
 	cmd->common.command_id = cmdid;
 
 	set_current_state(TASK_UNINTERRUPTIBLE);
-	nvme_submit_cmd(nvmeq, cmd);
+	ret = nvme_submit_cmd(nvmeq, cmd);
 	unlock_nvmeq(nvmeq);
+	if (ret) {
+		free_cmdid(nvmeq, cmdid, NULL);
+		return ret;
+	}
 	schedule();
 
 	if (result)
@@ -1267,9 +1274,9 @@ static void nvme_cancel_ios(struct nvme_queue *nvmeq, bool timeout)
 			.status = cpu_to_le16(NVME_SC_ABORT_REQ << 1),
 		};
 
-		if (timeout && !time_after(now, info[cmdid].timeout))
+		if (info[cmdid].ctx == CMD_CTX_CANCELLED || info[cmdid].ctx == CMD_CTX_COMPLETED)
 			continue;
-		if (info[cmdid].ctx == CMD_CTX_CANCELLED)
+		if (timeout && !time_after(now, info[cmdid].timeout))
 			continue;
 		if (timeout && info[cmdid].ctx == CMD_CTX_ASYNC)
 			continue;
@@ -1584,13 +1591,19 @@ static int nvme_configure_admin_queue(struct nvme_dev *dev)
 		return -ENODEV;
 	}
 
+	dev->subsystem = readl(&dev->bar->vs) >= NVME_VS(1, 1) ?
+					NVME_CAP_NSSRC(cap) : 0;
+
+	if (dev->subsystem && (readl(&dev->bar->csts) & NVME_CSTS_NSSRO))
+		writel(NVME_CSTS_NSSRO, &dev->bar->csts);
+
 	result = nvme_disable_ctrl(dev, cap);
 	if (result < 0)
 		return result;
 
 	nvmeq = raw_nvmeq(dev, 0);
 	if (!nvmeq) {
-		nvmeq = nvme_alloc_queue(dev, 0, 64, 0);
+		nvmeq = nvme_alloc_queue(dev, 0, 256, 0);
 		if (!nvmeq)
 			return -ENOMEM;
 	}
@@ -1772,10 +1785,7 @@ static int nvme_submit_io(struct nvme_ns *ns, struct nvme_user_io __user *uio)
 	c.rw.prp1 = cpu_to_le64(sg_dma_address(iod->sg));
 	c.rw.prp2 = cpu_to_le64(iod->first_dma);
 
-	if (length != (io.nblocks + 1) << ns->lba_shift)
-		status = -ENOMEM;
-	else
-		status = nvme_submit_io_cmd(dev, &c, NULL);
+	status = nvme_submit_io_cmd(dev, &c, NULL);
 
 	if (meta_len) {
 		if (status == NVME_SC_SUCCESS && !(io.opcode & 1)) {
@@ -1865,6 +1875,15 @@ static int nvme_user_cmd(struct nvme_dev *dev,
 		status = -EFAULT;
 
 	return status;
+}
+
+static int nvme_subsys_reset(struct nvme_dev *dev)
+{
+	if (!dev->subsystem)
+		return -ENOTTY;
+
+	writel(0x4E564D65, &dev->bar->nssr); /* "NVMe" */
+	return 0;
 }
 
 static int nvme_ioctl(struct block_device *bdev, fmode_t mode, unsigned int cmd,
@@ -2050,7 +2069,10 @@ static int nvme_kthread(void *data)
 		spin_lock(&dev_list_lock);
 		list_for_each_entry_safe(dev, next, &dev_list, node) {
 			int i;
-			if (readl(&dev->bar->csts) & NVME_CSTS_CFS) {
+			u32 csts = readl(&dev->bar->csts);
+
+			if ((dev->subsystem && (csts & NVME_CSTS_NSSRO)) ||
+							csts & NVME_CSTS_CFS) {
 				if (work_busy(&dev->reset_work))
 					continue;
 				list_del_init(&dev->node);
@@ -2375,6 +2397,15 @@ static int nvme_setup_io_queues(struct nvme_dev *dev)
 	/* Deregister the admin queue's interrupt */
 	free_irq(dev->entry[0].vector, adminq);
 
+	/*
+	 * If we enable msix early due to not intx, disable it again before
+	 * setting up the full range we need.
+	 */
+	if (pdev->msi_enabled)
+		pci_disable_msi(pdev);
+	else if (pdev->msix_enabled)
+		pci_disable_msix(pdev);
+
 	vecs = nr_io_queues;
 	for (i = 0; i < vecs; i++)
 		dev->entry[i].entry = i;
@@ -2469,8 +2500,13 @@ static int __devinit nvme_dev_add(struct nvme_dev *dev)
 	memcpy(dev->firmware_rev, ctrl->fr, sizeof(ctrl->fr));
 	if (ctrl->mdts)
 		dev->max_hw_sectors = 1 << (ctrl->mdts + shift - 9);
+	else
+		dev->max_hw_sectors = UINT_MAX;
 	if ((pdev->vendor == PCI_VENDOR_ID_INTEL) &&
-			(pdev->device == 0x0953) && ctrl->vs[3])
+			((pdev->device == 0x0953) ||
+			 (pdev->device == 0x0a53) ||
+			 (pdev->device == 0x0a54)) &&
+			ctrl->vs[3])
 		dev->stripe_size = 1 << (ctrl->vs[3] + shift);
 
 	id_ns = mem;
@@ -2509,7 +2545,6 @@ static int nvme_dev_map(struct nvme_dev *dev)
 	if (pci_enable_device_mem(pdev))
 		return result;
 
-	dev->entry[0].vector = pdev->irq;
 	pci_set_master(pdev);
 	bars = pci_select_bars(pdev, IORESOURCE_MEM);
 	if (pci_request_selected_regions(pdev, bars, "nvme"))
@@ -2525,10 +2560,27 @@ static int nvme_dev_map(struct nvme_dev *dev)
 	dev->bar = ioremap(pci_resource_start(pdev, 0), 8192);
 	if (!dev->bar)
 		goto disable;
+
 	if (readl(&dev->bar->csts) == -1) {
 		result = -ENODEV;
 		goto unmap;
 	}
+
+	/*
+	 * Some devices and/or platforms don't advertise or work with INTx
+	 * interrupts. Pre-enable a single MSIX or MSI vec for setup. We'll
+	 * adjust this later.
+	 */
+	if (pci_enable_msix(pdev, dev->entry, 1)) {
+		pci_enable_msi(pdev);
+		dev->entry[0].vector = pdev->irq;
+	}
+
+	if (!dev->entry[0].vector) {
+		result = -ENODEV;
+		goto unmap;
+	}
+
 	cap = readq(&dev->bar->cap);
 	dev->q_depth = min_t(int, NVME_CAP_MQES(cap) + 1, NVME_Q_DEPTH);
 	dev->db_stride = 1 << NVME_CAP_STRIDE(cap);
@@ -2723,9 +2775,11 @@ static void nvme_dev_shutdown(struct nvme_dev *dev)
 	int i;
 	u32 csts = -1;
 
-	dev->initialized = 0;
-	nvme_dev_list_remove(dev);
+	spin_lock(&dev_list_lock);
+	list_del_init(&dev->node);
+	spin_unlock(&dev_list_lock);
 
+	dev->initialized = 0;
 	if (dev->bar)
 		csts = readl(&dev->bar->csts);
 	if (csts & NVME_CSTS_CFS || !(csts & NVME_CSTS_RDY)) {
@@ -2742,6 +2796,7 @@ static void nvme_dev_shutdown(struct nvme_dev *dev)
 
 	for (i = dev->queue_count - 1; i >= 0; i--)
 		nvme_clear_queue(dev->queues[i]);
+	nvme_dev_list_remove(dev);
 }
 
 static void nvme_dev_remove(struct nvme_dev *dev)
@@ -2879,6 +2934,11 @@ static long nvme_dev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		return nvme_user_cmd(dev, (void __user *)arg, false);
 	case NVME_IOCTL_IO_CMD:
 		return nvme_user_cmd(dev, (void __user *)arg, true);
+	case NVME_IOCTL_RESET:
+		dev_warn(&dev->pci_dev->dev, "resetting controller\n");
+		return nvme_reset(dev);
+	case NVME_IOCTL_SUBSYS_RESET:
+		return nvme_subsys_reset(dev);
 	default:
 		return -ENOTTY;
 	}
@@ -2996,6 +3056,44 @@ static void nvme_reset_failed_dev(struct work_struct *ws)
 	nvme_dev_reset(dev);
 }
 
+static long nvme_reset(struct nvme_dev *dev)
+{
+	long ret = -EBUSY;
+
+	if (!dev->initialized)
+		return -ENODEV;
+
+	spin_lock(&dev_list_lock);
+	if (!work_pending(&dev->reset_work)) {
+		PREPARE_WORK(&dev->reset_work, nvme_reset_failed_dev);
+		queue_work(nvme_workq, &dev->reset_work);
+		ret = 0;
+	}
+	spin_unlock(&dev_list_lock);
+
+	if (!ret) {
+		flush_work(&dev->reset_work);
+		return 0;
+	}
+
+	return ret;
+}
+
+static ssize_t nvme_sysfs_reset(struct device *dev,
+                               struct device_attribute *attr, const char *buf,
+                               size_t count)
+{
+       struct nvme_dev *ndev = dev_get_drvdata(dev);
+       int ret;
+
+       ret = nvme_reset(ndev);
+       if (ret < 0)
+               return ret;
+
+       return count;
+}
+static DEVICE_ATTR(reset_controller, S_IWUSR, NULL, nvme_sysfs_reset);
+
 static void nvme_async_probe(struct work_struct *work);
 static int __devinit nvme_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
@@ -3039,12 +3137,19 @@ static int __devinit nvme_probe(struct pci_dev *pdev, const struct pci_device_id
 		goto release_pools;
 	}
 	get_device(dev->device);
+	dev_set_drvdata(dev->device, dev);
+
+	result = device_create_file(dev->device, &dev_attr_reset_controller);
+	if (result)
+		goto put_dev;
 
 	INIT_LIST_HEAD(&dev->node);
 	INIT_WORK(&dev->probe_work, nvme_async_probe);
 	schedule_work(&dev->probe_work);
 	return 0;
-
+ put_dev:
+	device_destroy(nvme_class, MKDEV(nvme_char_major, dev->instance));
+	put_device(dev->device);
  release_pools:
 	nvme_release_prp_pools(dev);
  release:
@@ -3076,10 +3181,12 @@ static void nvme_async_probe(struct work_struct *work)
 	dev->initialized = 1;
 	return;
  reset:
+	spin_lock(&dev_list_lock);
 	if (!work_busy(&dev->reset_work)) {
 		PREPARE_WORK(&dev->reset_work, nvme_reset_failed_dev);
 		queue_work(nvme_workq, &dev->reset_work);
 	}
+	spin_unlock(&dev_list_lock);
 }
 
 static void nvme_shutdown(struct pci_dev *pdev)
@@ -3100,6 +3207,7 @@ static void __devexit nvme_remove(struct pci_dev *pdev)
 	flush_work(&dev->probe_work);
 	flush_work(&dev->reset_work);
 	flush_work(&dev->cpu_work);
+	device_remove_file(dev->device, &dev_attr_reset_controller);
 	nvme_dev_shutdown(dev);
 	nvme_free_queues(dev, 0);
 	rcu_barrier();

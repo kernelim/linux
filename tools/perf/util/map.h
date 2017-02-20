@@ -4,6 +4,7 @@
 #include <linux/compiler.h>
 #include <linux/list.h>
 #include <linux/rbtree.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <linux/types.h>
@@ -32,7 +33,6 @@ struct map {
 	u64			start;
 	u64			end;
 	u8 /* enum map_type */	type;
-	bool			referenced;
 	bool			erange_warned;
 	u32			priv;
 	u32			prot;
@@ -50,6 +50,7 @@ struct map {
 
 	struct dso		*dso;
 	struct map_groups	*groups;
+	int			refcnt;
 };
 
 struct kmap {
@@ -57,9 +58,13 @@ struct kmap {
 	struct map_groups	*kmaps;
 };
 
+struct maps {
+	struct rb_root	 entries;
+	pthread_rwlock_t lock;
+};
+
 struct map_groups {
-	struct rb_root	 maps[MAP__NR_TYPES];
-	struct list_head removed_maps[MAP__NR_TYPES];
+	struct maps	 maps[MAP__NR_TYPES];
 	struct machine	 *machine;
 	int		 refcnt;
 };
@@ -70,7 +75,8 @@ bool map_groups__empty(struct map_groups *mg);
 
 static inline struct map_groups *map_groups__get(struct map_groups *mg)
 {
-	++mg->refcnt;
+	if (mg)
+		++mg->refcnt;
 	return mg;
 }
 
@@ -141,6 +147,24 @@ struct map *map__new(struct machine *machine, u64 start, u64 len,
 struct map *map__new2(u64 start, struct dso *dso, enum map_type type);
 void map__delete(struct map *map);
 struct map *map__clone(struct map *map);
+
+static inline struct map *map__get(struct map *map)
+{
+	if (map)
+		map->refcnt++;
+	return map;
+}
+
+void map__put(struct map *map);
+
+static inline void __map__zput(struct map **map)
+{
+	map__put(*map);
+	*map = NULL;
+}
+
+#define map__zput(map) __map__zput(&map)
+
 int map__overlap(struct map *l, struct map *r);
 size_t map__fprintf(struct map *map, FILE *fp);
 size_t map__fprintf_dsoname(struct map *map, FILE *fp);
@@ -159,11 +183,11 @@ void map__reloc_vmlinux(struct map *map);
 
 size_t __map_groups__fprintf_maps(struct map_groups *mg, enum map_type type,
 				  FILE *fp);
-void maps__insert(struct rb_root *maps, struct map *map);
-void maps__remove(struct rb_root *maps, struct map *map);
-struct map *maps__find(struct rb_root *maps, u64 addr);
-struct map *maps__first(struct rb_root *maps);
-struct map *maps__next(struct map *map);
+void maps__insert(struct maps *maps, struct map *map);
+void maps__remove(struct maps *maps, struct map *map);
+struct map *maps__find(struct maps *maps, u64 addr);
+struct map *maps__first(struct maps *maps);
+struct map *map__next(struct map *map);
 void map_groups__init(struct map_groups *mg, struct machine *machine);
 void map_groups__exit(struct map_groups *mg);
 int map_groups__clone(struct map_groups *mg,
@@ -198,7 +222,7 @@ static inline struct map *map_groups__first(struct map_groups *mg,
 
 static inline struct map *map_groups__next(struct map *map)
 {
-	return maps__next(map);
+	return map__next(map);
 }
 
 struct symbol *map_groups__find_symbol(struct map_groups *mg,
@@ -229,7 +253,5 @@ int map_groups__fixup_overlappings(struct map_groups *mg, struct map *map,
 
 struct map *map_groups__find_by_name(struct map_groups *mg,
 				     enum map_type type, const char *name);
-
-void map_groups__flush(struct map_groups *mg);
 
 #endif /* __PERF_MAP_H */

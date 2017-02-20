@@ -1677,6 +1677,9 @@ int bond_enslave(struct net_device *bond_dev, struct net_device *slave_dev)
 		}
 	}
 
+	/* set slave flag before open to prevent IPv6 addrconf */
+	slave_dev->flags |= IFF_SLAVE;
+
 	/* open the slave since the application closed it */
 	res = dev_open(slave_dev);
 	if (res) {
@@ -1942,6 +1945,7 @@ err_close:
 	dev_close(slave_dev);
 
 err_restore_mac:
+	slave_dev->flags &= ~IFF_SLAVE;
 	if (!bond->params.fail_over_mac ||
 	    BOND_MODE(bond) != BOND_MODE_ACTIVEBACKUP) {
 		/* XXX TODO - fom follow mode needs to change master's
@@ -2311,6 +2315,7 @@ static void bond_miimon_commit(struct bonding *bond)
 			continue;
 
 		case BOND_LINK_UP:
+			bond_update_speed_duplex(slave);
 			slave->link = BOND_LINK_UP;
 			slave->last_link_up = jiffies;
 

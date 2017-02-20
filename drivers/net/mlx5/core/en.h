@@ -285,14 +285,9 @@ enum {
 	MLX5E_RQ_STATE_POST_WQES_ENABLE,
 };
 
-enum cq_flags {
-	MLX5E_CQ_HAS_CQES = 1,
-};
-
 struct mlx5e_cq {
 	/* data path - accessed per cqe */
 	struct mlx5_cqwq           wq;
-	unsigned long              flags;
 
 	/* data path - accessed per napi poll */
 	struct napi_struct        *napi;
@@ -431,6 +426,8 @@ enum mlx5e_traffic_types {
 	MLX5E_TT_ANY,
 	MLX5E_NUM_TT,
 };
+
+#define IS_HASHING_TT(tt) (tt != MLX5E_TT_ANY)
 
 enum mlx5e_rqt_ix {
 	MLX5E_INDIRECTION_RQT,
@@ -582,9 +579,12 @@ int mlx5e_add_all_vlan_rules(struct mlx5e_priv *priv);
 void mlx5e_del_all_vlan_rules(struct mlx5e_priv *priv);
 
 int mlx5e_redirect_rqt(struct mlx5e_priv *priv, enum mlx5e_rqt_ix rqt_ix);
+void mlx5e_build_tir_ctx_hash(void *tirc, struct mlx5e_priv *priv);
 
 int mlx5e_open_locked(struct net_device *netdev);
 int mlx5e_close_locked(struct net_device *netdev);
+void mlx5e_build_default_indir_rqt(u32 *indirection_rqt, int len,
+				   int num_channels);
 
 static inline void mlx5e_tx_notify_hw(struct mlx5e_sq *sq,
 				      struct mlx5e_tx_wqe *wqe, int bf_sz)

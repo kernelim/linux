@@ -2,7 +2,7 @@
  * This file is part of the zfcp device driver for
  * FCP adapters for IBM System z9 and zSeries.
  *
- * Copyright IBM Corp. 2008, 2009
+ * Copyright IBM Corp. 2008, 2015
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -51,6 +51,11 @@ struct zfcp_dbf_rec_record_target {
 	u64 wwpn;
 	u64 fcp_lun;
 	u32 erp_count;
+};
+
+enum zfcp_dbf_pseudo_erp_act_type {
+	ZFCP_PSEUDO_ERP_ACTION_RPORT_ADD = 0xff,
+	ZFCP_PSEUDO_ERP_ACTION_RPORT_DEL = 0xfe,
 };
 
 struct zfcp_dbf_rec_record_trigger {

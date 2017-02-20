@@ -62,6 +62,7 @@
 #include <net/addrconf.h>
 #include <net/bonding.h>
 #include <asm/uaccess.h>
+#include <linux/crash_dump.h>
 
 #include "cxgb4.h"
 #include "t4_regs.h"
@@ -131,8 +132,8 @@ struct filter_entry {
 
 #include "t4_pci_id_tbl.h"
 
-#define FW4_FNAME "cxgb4/t4fw-1.14.4.0.bin"
-#define FW5_FNAME "cxgb4/t5fw-1.14.4.0.bin"
+#define FW4_FNAME "cxgb4/t4fw-1.15.37.0.bin"
+#define FW5_FNAME "cxgb4/t5fw-1.15.37.0.bin"
 #define FW6_FNAME "cxgb4/t6fw.bin"
 #define FW4_CFNAME "cxgb4/t4-config.txt"
 #define FW5_CFNAME "cxgb4/t5-config.txt"
@@ -236,7 +237,7 @@ MODULE_PARM_DESC(vf_acls, "if set enable virtualization L2 ACL enforcement, "
 static unsigned int num_vf[NUM_OF_PF_WITH_SRIOV];
 
 module_param_array(num_vf, uint, NULL, 0644);
-MODULE_PARM_DESC(num_vf, "number of VFs for each of PFs 0-3");
+MODULE_PARM_DESC(num_vf, "number of VFs for each of PFs 0-3, deprecated parameter - please use the pci sysfs interface.");
 #endif
 
 /* TX Queue select used to determine what algorithm to use for selecting TX
@@ -3704,7 +3705,8 @@ static int adap_init0(struct adapter *adap)
 		return ret;
 
 	/* Contact FW, advertising Master capability */
-	ret = t4_fw_hello(adap, adap->mbox, adap->mbox, MASTER_MAY, &state);
+	ret = t4_fw_hello(adap, adap->mbox, adap->mbox,
+			  is_kdump_kernel() ? MASTER_MUST : MASTER_MAY, &state);
 	if (ret < 0) {
 		dev_err(adap->pdev_dev, "could not connect to FW, error %d\n",
 			ret);
@@ -4332,6 +4334,11 @@ static void cfg_queues(struct adapter *adap)
 	if (q10g > netif_get_num_default_rss_queues())
 		q10g = netif_get_num_default_rss_queues();
 
+	/* Reduce memory usage in kdump environment, disable all offload.
+	 */
+	if (is_kdump_kernel())
+		adap->params.offload = 0;
+
 	for_each_port(adap, i) {
 		struct port_info *pi = adap2pinfo(adap, i);
 
@@ -4511,6 +4518,10 @@ static int enable_msix(struct adapter *adap)
 	}
 	for (i = 0; i < allocated; ++i)
 		adap->msix_info[i].vec = entries[i].vector;
+	dev_info(adap->pdev_dev, "%d MSI-X vectors allocated, "
+		 "nic %d iscsi %d rdma cpl %d rdma ciq %d\n",
+		 allocated, s->max_ethqsets, s->ofldqsets, s->rdmaqs,
+		 s->rdmaciqs);
 
 	kfree(entries);
 	return 0;
@@ -4622,6 +4633,66 @@ static void free_some_resources(struct adapter *adapter)
 #define VLAN_FEAT (NETIF_F_SG | NETIF_F_IP_CSUM | TSO_FLAGS | \
 		   NETIF_F_IPV6_CSUM | NETIF_F_HIGHDMA)
 #define SEGMENT_SIZE 128
+
+#ifdef CONFIG_PCI_IOV
+static int cxgb4_iov_configure(struct pci_dev *pdev, int num_vfs)
+{
+	int err = 0;
+	int current_vfs = pci_num_vf(pdev);
+	u32 pcie_fw;
+	void __iomem *regs;
+
+	regs = pci_ioremap_bar(pdev, 0);
+	if (!regs) {
+		dev_err(&pdev->dev, "cannot map device registers\n");
+		return -ENOMEM;
+	}
+
+	pcie_fw = readl(regs + PCIE_FW_A);
+	iounmap(regs);
+	/* Check if cxgb4 is the MASTER and fw is initialized */
+	if (!(pcie_fw & PCIE_FW_INIT_F) ||
+	   !(pcie_fw & PCIE_FW_MASTER_VLD_F) ||
+	   PCIE_FW_MASTER_G(pcie_fw) != 4) {
+		dev_warn(&pdev->dev,
+			"cxgb4 driver needs to be MASTER to support SRIOV\n");
+		return -EOPNOTSUPP;
+	}
+
+	/* If any of the VF's is already assigned to Guest OS, then
+	* SRIOV for the same cannot be modified
+	*/
+	if (current_vfs && pci_vfs_assigned(pdev)) {
+		dev_err(&pdev->dev,
+			"Cannot modify SR-IOV while VFs are assigned\n");
+		num_vfs = current_vfs;
+		return num_vfs;
+	}
+
+	/* Disable SRIOV when zero is passed.
+	* One needs to disable SRIOV before modifying it, else
+	* stack throws the below warning:
+	* " 'n' VFs already enabled. Disable before enabling 'm' VFs."
+	*/
+	if (!num_vfs) {
+		pci_disable_sriov(pdev);
+		return num_vfs;
+	}
+	/* " 'n' VFs already enabled. Disable before enabling 'm' VFs."
+	*/
+	if (!num_vfs) {
+		pci_disable_sriov(pdev);
+		return num_vfs;
+	}
+
+	if (num_vfs != current_vfs) {
+		err = pci_enable_sriov(pdev, num_vfs);
+		if (err)
+			return err;
+	}
+	return num_vfs;
+}
+#endif
 
 static int init_one(struct pci_dev *pdev,
 			      const struct pci_device_id *ent)
@@ -4906,11 +4977,16 @@ static int init_one(struct pci_dev *pdev,
 
 sriov:
 #ifdef CONFIG_PCI_IOV
-	if (func < ARRAY_SIZE(num_vf) && num_vf[func] > 0)
+	if (func < ARRAY_SIZE(num_vf) && num_vf[func] > 0) {
+		dev_warn(&pdev->dev,
+			 "Enabling SR-IOV VFs using the num_vf module "
+			 "parameter is deprecated - please use the pci sysfs "
+			 "interface instead.\n");
 		if (pci_enable_sriov(pdev, num_vf[func]) == 0)
 			dev_info(&pdev->dev,
 				 "instantiated %u virtual functions\n",
 				 num_vf[func]);
+	}
 #endif
 	return 0;
 
@@ -4995,6 +5071,10 @@ static void remove_one(struct pci_dev *pdev)
 		pci_release_regions(pdev);
 }
 
+static struct pci_driver_rh cxgb4_driver_rh = {
+	.sriov_configure = cxgb4_iov_configure
+};
+
 static struct pci_driver cxgb4_driver = {
 	.name     = KBUILD_MODNAME,
 	.id_table = cxgb4_pci_tbl,
@@ -5002,6 +5082,7 @@ static struct pci_driver cxgb4_driver = {
 	.remove   = remove_one,
 	.shutdown = remove_one,
 	.err_handler = &cxgb4_eeh,
+	.rh_reserved = &cxgb4_driver_rh
 };
 
 static int __init cxgb4_init_module(void)

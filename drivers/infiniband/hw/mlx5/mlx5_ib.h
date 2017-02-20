@@ -565,4 +565,9 @@ static inline u8 convert_access(int acc)
 	       MLX5_PERM_LOCAL_READ;
 }
 
+static inline int is_qp1(enum ib_qp_type qp_type)
+{
+	return qp_type == IB_QPT_GSI;
+}
+
 #endif /* MLX5_IB_H */

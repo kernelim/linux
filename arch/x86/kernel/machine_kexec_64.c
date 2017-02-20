@@ -14,6 +14,7 @@
 #include <linux/ftrace.h>
 #include <linux/io.h>
 #include <linux/suspend.h>
+#include <linux/bootmem.h>
 
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>
@@ -353,33 +354,69 @@ void arch_crash_save_vmcoreinfo(void)
 
 #ifdef CONFIG_KEXEC_AUTO_RESERVE
 
+/*
+ * With auto_crash_base we can record the base address of memory region
+ * which can be reserved successfully for crashkernel, no need to find
+ * it again later in reserve_crashkenrel().
+ */
+static unsigned long long auto_crash_base;
+
+unsigned long long __init arch_default_crash_base(void)
+{
+	return auto_crash_base;
+}
+
 #define KEXEC_AUTO_LOW_MIN	(256 * 1024 * 1024)
 #define KEXEC_AUTO_SCALE	( 64 * 1024 * 1024)
 
 /*
  * Scale the crash kernel size 64M each time till we find a suitable
- * area under 896M. But never smaller than 256M.
+ * area under 896M. But never smaller than 256M. And here try to
+ * reserve it with bootmem allocator, then free it after an available
+ * region is found successfully.
  *
  * Because we only support loading below 896M. If it's too large, it probally
- * can't be found. And if it's too small, kdump kernel probably won't
- * boot.
+ * can't be found. And if it's too small, kdump kernel probably won't boot.
+ * And there isn't a way to find an available region with bootmem allocator.
  */
 unsigned long long __init
 arch_crash_auto_scale(unsigned long long total_size, unsigned long long size)
 {
 	const unsigned long long alignment = 16<<20;    /* 16M */
-	unsigned long long start = -1ULL;
+	unsigned long long start = 0;
+
+	if (size == 0)
+		return 0;
 
 	if (size > KEXEC_RESERVE_UPPER_LIMIT)
 		size = KEXEC_RESERVE_UPPER_LIMIT;
 
-	do {
-		start = find_e820_area(0, KEXEC_RESERVE_UPPER_LIMIT, size, alignment);
-		if (start == -1ULL)
+	while (1) {
+		int ret;
+
+		start = find_e820_area(start, KEXEC_RESERVE_UPPER_LIMIT, size, alignment);
+		if (start == -1ULL) {
 			size -= KEXEC_AUTO_SCALE;
-		else
+			if (size < KEXEC_AUTO_LOW_MIN)
+				break;
+			start = 0;
+			continue;
+		}
+
+		/* Try to reserve firstly, then free it if an area is found */
+		ret = reserve_bootmem_generic(start, size, BOOTMEM_EXCLUSIVE);
+		if (ret >= 0) {
+			auto_crash_base = start;
+			free_bootmem(start, size);
+			pr_info("Found %ldMB of memory at %ldMB "
+				"for crashkernel auto \n",
+				(unsigned long)(size >> 20),
+				(unsigned long)(start >> 20));
 			return size;
-	} while (size >= KEXEC_AUTO_LOW_MIN);
+		}
+
+		start += alignment;
+	}
 
 	return 0;
 }

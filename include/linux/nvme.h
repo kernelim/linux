@@ -27,7 +27,7 @@ struct nvme_bar {
 	__u32			cc;	/* Controller Configuration */
 	__u32			rsvd1;	/* Reserved */
 	__u32			csts;	/* Controller Status */
-	__u32			rsvd2;	/* Reserved */
+	__u32			nssr;	/* Subsystem Reset */
 	__u32			aqa;	/* Admin Queue Attributes */
 	__u64			asq;	/* Admin SQ Base Address */
 	__u64			acq;	/* Admin CQ Base Address */
@@ -36,6 +36,7 @@ struct nvme_bar {
 #define NVME_CAP_MQES(cap)	((cap) & 0xffff)
 #define NVME_CAP_TIMEOUT(cap)	(((cap) >> 24) & 0xff)
 #define NVME_CAP_STRIDE(cap)	(((cap) >> 32) & 0xf)
+#define NVME_CAP_NSSRC(cap)	(((cap) >> 36) & 0x1)
 #define NVME_CAP_MPSMIN(cap)	(((cap) >> 48) & 0xf)
 #define NVME_CAP_MPSMAX(cap)	(((cap) >> 52) & 0xf)
 
@@ -54,6 +55,7 @@ enum {
 	NVME_CC_IOCQES		= 4 << 20,
 	NVME_CSTS_RDY		= 1 << 0,
 	NVME_CSTS_CFS		= 1 << 1,
+	NVME_CSTS_NSSRO		= 1 << 4,
 	NVME_CSTS_SHST_NORMAL	= 0 << 2,
 	NVME_CSTS_SHST_OCCUR	= 1 << 2,
 	NVME_CSTS_SHST_CMPLT	= 2 << 2,
@@ -93,6 +95,7 @@ struct nvme_dev {
 	char serial[20];
 	char model[40];
 	char firmware_rev[8];
+	bool subsystem;
 	u32 max_hw_sectors;
 	u32 stripe_size;
 	u32 page_size;

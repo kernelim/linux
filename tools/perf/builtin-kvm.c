@@ -610,6 +610,7 @@ static int process_sample_event(struct perf_tool *tool,
 				struct perf_evsel *evsel,
 				struct machine *machine)
 {
+	int err = 0;
 	struct thread *thread;
 	struct perf_kvm_stat *kvm = container_of(tool, struct perf_kvm_stat,
 						 tool);
@@ -625,9 +626,10 @@ static int process_sample_event(struct perf_tool *tool,
 	}
 
 	if (!handle_kvm_event(kvm, thread, evsel, sample))
-		return -1;
+		err = -1;
 
-	return 0;
+	thread__put(thread);
+	return err;
 }
 
 static int cpu_isa_config(struct perf_kvm_stat *kvm)

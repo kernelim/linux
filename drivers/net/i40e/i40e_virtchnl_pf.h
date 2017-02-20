@@ -60,6 +60,8 @@ enum i40e_vf_states {
 	I40E_VF_STAT_ACTIVE,
 	I40E_VF_STAT_FCOEENA,
 	I40E_VF_STAT_DISABLED,
+	I40E_VF_STAT_MC_PROMISC,
+	I40E_VF_STAT_UC_PROMISC,
 };
 
 /* VF capabilities */
@@ -73,7 +75,7 @@ struct i40e_vf {
 	struct i40e_pf *pf;
 
 	/* VF id in the PF space */
-	u16 vf_id;
+	s16 vf_id;
 	/* all VF vsis connect to the same parent */
 	enum i40e_switch_element_types parent_type;
 	struct i40e_virtchnl_version_info vf_ver;
@@ -91,8 +93,8 @@ struct i40e_vf {
 	 * When assigned, these will be non-zero, because VSI 0 is always
 	 * the main LAN VSI for the PF.
 	 */
-	u8 lan_vsi_idx;	        /* index into PF struct */
-	u8 lan_vsi_id;		/* ID as used by firmware */
+	u16 lan_vsi_idx;	/* index into PF struct */
+	u16 lan_vsi_id;		/* ID as used by firmware */
 
 	u8 num_queue_pairs;	/* num of qps assigned to VF vsis */
 	u64 num_mdd_events;	/* num of mdd events detected */
@@ -111,7 +113,7 @@ struct i40e_vf {
 void i40e_free_vfs(struct i40e_pf *pf);
 int i40e_pci_sriov_configure(struct pci_dev *dev, int num_vfs);
 int i40e_alloc_vfs(struct i40e_pf *pf, u16 num_alloc_vfs);
-int i40e_vc_process_vf_msg(struct i40e_pf *pf, u16 vf_id, u32 v_opcode,
+int i40e_vc_process_vf_msg(struct i40e_pf *pf, s16 vf_id, u32 v_opcode,
 			   u32 v_retval, u8 *msg, u16 msglen);
 int i40e_vc_process_vflr_event(struct i40e_pf *pf);
 void i40e_reset_vf(struct i40e_vf *vf, bool flr);

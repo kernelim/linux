@@ -4086,7 +4086,9 @@ struct mlx5_ifc_modify_tir_bitmask_bits {
 
 	u8         reserved_1[0x1b];
 	u8         self_lb_en[0x1];
-	u8         reserved_2[0x3];
+	u8         reserved_2[0x1];
+	u8         hash[0x1];
+	u8         reserved_at_3e[0x1];
 	u8         lro[0x1];
 };
 

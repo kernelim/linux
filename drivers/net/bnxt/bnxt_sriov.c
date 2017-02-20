@@ -1,6 +1,6 @@
 /* Broadcom NetXtreme-C/E network driver.
  *
- * Copyright (c) 2014-2015 Broadcom Corporation
+ * Copyright (c) 2014-2016 Broadcom Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -141,6 +141,9 @@ int bnxt_set_vf_vlan(struct net_device *dev, int vf_id, u16 vlan_id, u8 qos)
 	struct bnxt_vf_info *vf;
 	u16 vlan_tag;
 	int rc;
+
+	if (bp->hwrm_spec_code < 0x10201)
+		return -ENOTSUPP;
 
 	rc = bnxt_vf_ndo_prep(bp, vf_id);
 	if (rc)
@@ -721,12 +724,8 @@ static int bnxt_vf_set_link(struct bnxt *bp, struct bnxt_vf_info *vf)
 			    PORT_PHY_QCFG_RESP_LINK_NO_LINK) {
 				phy_qcfg_resp.link =
 					PORT_PHY_QCFG_RESP_LINK_LINK;
-				if (phy_qcfg_resp.auto_link_speed)
-					phy_qcfg_resp.link_speed =
-						phy_qcfg_resp.auto_link_speed;
-				else
-					phy_qcfg_resp.link_speed =
-						phy_qcfg_resp.force_link_speed;
+				phy_qcfg_resp.link_speed = cpu_to_le16(
+					PORT_PHY_QCFG_RESP_LINK_SPEED_10GB);
 				phy_qcfg_resp.duplex =
 					PORT_PHY_QCFG_RESP_DUPLEX_FULL;
 				phy_qcfg_resp.pause =
@@ -751,8 +750,8 @@ static int bnxt_vf_set_link(struct bnxt *bp, struct bnxt_vf_info *vf)
 static int bnxt_vf_req_validate_snd(struct bnxt *bp, struct bnxt_vf_info *vf)
 {
 	int rc = 0;
-	struct hwrm_cmd_req_hdr *encap_req = vf->hwrm_cmd_req_addr;
-	u32 req_type = le32_to_cpu(encap_req->cmpl_ring_req_type) & 0xffff;
+	struct input *encap_req = vf->hwrm_cmd_req_addr;
+	u32 req_type = le16_to_cpu(encap_req->req_type);
 
 	switch (req_type) {
 	case HWRM_CFA_L2_FILTER_ALLOC:
@@ -802,11 +801,11 @@ void bnxt_update_vf_mac(struct bnxt *bp)
 	if (_hwrm_send_message(bp, &req, sizeof(req), HWRM_CMD_TIMEOUT))
 		goto update_vf_mac_exit;
 
-	if (!is_valid_ether_addr(resp->perm_mac_address))
+	if (!is_valid_ether_addr(resp->mac_address))
 		goto update_vf_mac_exit;
 
-	if (!ether_addr_equal(resp->perm_mac_address, bp->vf.mac_addr))
-		memcpy(bp->vf.mac_addr, resp->perm_mac_address, ETH_ALEN);
+	if (!ether_addr_equal(resp->mac_address, bp->vf.mac_addr))
+		memcpy(bp->vf.mac_addr, resp->mac_address, ETH_ALEN);
 	/* overwrite netdev dev_adr with admin VF MAC */
 	memcpy(bp->dev->dev_addr, bp->vf.mac_addr, ETH_ALEN);
 update_vf_mac_exit:

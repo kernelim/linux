@@ -254,8 +254,7 @@ EXPORT_SYMBOL_GPL(vmbus_open);
  * create_gpadl_header - Creates a gpadl for the specified buffer
  */
 static int create_gpadl_header(void *kbuffer, u32 size,
-					 struct vmbus_channel_msginfo **msginfo,
-					 u32 *messagecount)
+			       struct vmbus_channel_msginfo **msginfo)
 {
 	int i;
 	int pagecount;
@@ -300,7 +299,6 @@ static int create_gpadl_header(void *kbuffer, u32 size,
 		for (i = 0; i < pfncount; i++)
 			gpadl_header->range[0].pfn_array[i] = pfn+i;
 		*msginfo = msgheader;
-		*messagecount = 1;
 
 		pfnsum = pfncount;
 		pfnleft = pagecount - pfncount;
@@ -340,7 +338,6 @@ static int create_gpadl_header(void *kbuffer, u32 size,
 			}
 
 			msgbody->msgsize = msgsize;
-			(*messagecount)++;
 			gpadl_body =
 				(struct vmbus_channel_gpadl_body *)msgbody->msg;
 
@@ -367,6 +364,8 @@ static int create_gpadl_header(void *kbuffer, u32 size,
 		msgheader = kzalloc(msgsize, GFP_KERNEL);
 		if (msgheader == NULL)
 			goto nomem;
+
+		INIT_LIST_HEAD(&msgheader->submsglist);
 		msgheader->msgsize = msgsize;
 
 		gpadl_header = (struct vmbus_channel_gpadl_header *)
@@ -380,7 +379,6 @@ static int create_gpadl_header(void *kbuffer, u32 size,
 			gpadl_header->range[0].pfn_array[i] = pfn+i;
 
 		*msginfo = msgheader;
-		*messagecount = 1;
 	}
 
 	return 0;
@@ -404,8 +402,7 @@ int vmbus_establish_gpadl(struct vmbus_channel *channel, void *kbuffer,
 	struct vmbus_channel_gpadl_header *gpadlmsg;
 	struct vmbus_channel_gpadl_body *gpadl_body;
 	struct vmbus_channel_msginfo *msginfo = NULL;
-	struct vmbus_channel_msginfo *submsginfo;
-	u32 msgcount;
+	struct vmbus_channel_msginfo *submsginfo, *tmp;
 	struct list_head *curr;
 	u32 next_gpadl_handle;
 	unsigned long flags;
@@ -414,7 +411,7 @@ int vmbus_establish_gpadl(struct vmbus_channel *channel, void *kbuffer,
 	next_gpadl_handle =
 		(atomic_inc_return(&vmbus_connection.next_gpadl_handle) - 1);
 
-	ret = create_gpadl_header(kbuffer, size, &msginfo, &msgcount);
+	ret = create_gpadl_header(kbuffer, size, &msginfo);
 	if (ret)
 		return ret;
 
@@ -437,24 +434,21 @@ int vmbus_establish_gpadl(struct vmbus_channel *channel, void *kbuffer,
 	if (ret != 0)
 		goto cleanup;
 
-	if (msgcount > 1) {
-		list_for_each(curr, &msginfo->submsglist) {
+	list_for_each(curr, &msginfo->submsglist) {
+		submsginfo = (struct vmbus_channel_msginfo *)curr;
+		gpadl_body =
+			(struct vmbus_channel_gpadl_body *)submsginfo->msg;
 
-			submsginfo = (struct vmbus_channel_msginfo *)curr;
-			gpadl_body =
-			     (struct vmbus_channel_gpadl_body *)submsginfo->msg;
+		gpadl_body->header.msgtype =
+			CHANNELMSG_GPADL_BODY;
+		gpadl_body->gpadl = next_gpadl_handle;
 
-			gpadl_body->header.msgtype =
-				CHANNELMSG_GPADL_BODY;
-			gpadl_body->gpadl = next_gpadl_handle;
+		ret = vmbus_post_msg(gpadl_body,
+				     submsginfo->msgsize -
+				     sizeof(*submsginfo));
+		if (ret != 0)
+			goto cleanup;
 
-			ret = vmbus_post_msg(gpadl_body,
-					       submsginfo->msgsize -
-					       sizeof(*submsginfo));
-			if (ret != 0)
-				goto cleanup;
-
-		}
 	}
 	wait_for_completion(&msginfo->waitevent);
 
@@ -465,6 +459,10 @@ cleanup:
 	spin_lock_irqsave(&vmbus_connection.channelmsg_lock, flags);
 	list_del(&msginfo->msglistentry);
 	spin_unlock_irqrestore(&vmbus_connection.channelmsg_lock, flags);
+	list_for_each_entry_safe(submsginfo, tmp, &msginfo->submsglist,
+				 msglistentry) {
+		kfree(submsginfo);
+	}
 
 	kfree(msginfo);
 	return ret;
@@ -787,6 +785,50 @@ EXPORT_SYMBOL_GPL(vmbus_sendpacket_pagebuffer);
 /*
  * vmbus_sendpacket_multipagebuffer - Send a multi-page buffer packet
  * using a GPADL Direct packet type.
+ * The buffer includes the vmbus descriptor.
+ */
+int vmbus_sendpacket_mpb_desc(struct vmbus_channel *channel,
+			      struct vmbus_packet_mpb_array *desc,
+			      u32 desc_size,
+			      void *buffer, u32 bufferlen, u64 requestid)
+{
+	int ret;
+	u32 packetlen;
+	u32 packetlen_aligned;
+	struct kvec bufferlist[3];
+	u64 aligned_data = 0;
+	bool signal = false;
+
+	packetlen = desc_size + bufferlen;
+	packetlen_aligned = ALIGN(packetlen, sizeof(u64));
+
+	/* Setup the descriptor */
+	desc->type = VM_PKT_DATA_USING_GPA_DIRECT;
+	desc->flags = VMBUS_DATA_PACKET_FLAG_COMPLETION_REQUESTED;
+	desc->dataoffset8 = desc_size >> 3; /* in 8-bytes grandularity */
+	desc->length8 = (u16)(packetlen_aligned >> 3);
+	desc->transactionid = requestid;
+	desc->rangecount = 1;
+
+	bufferlist[0].iov_base = desc;
+	bufferlist[0].iov_len = desc_size;
+	bufferlist[1].iov_base = buffer;
+	bufferlist[1].iov_len = bufferlen;
+	bufferlist[2].iov_base = &aligned_data;
+	bufferlist[2].iov_len = (packetlen_aligned - packetlen);
+
+	ret = hv_ringbuffer_write(&channel->outbound, bufferlist, 3, &signal);
+
+	if (ret == 0 && signal)
+		vmbus_setevent(channel);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(vmbus_sendpacket_mpb_desc);
+
+/*
+ * vmbus_sendpacket_multipagebuffer - Send a multi-page buffer packet
+ * using a GPADL Direct packet type.
  */
 int vmbus_sendpacket_multipagebuffer(struct vmbus_channel *channel,
 				struct hv_multipage_buffer *multi_pagebuffer,
@@ -860,46 +902,29 @@ EXPORT_SYMBOL_GPL(vmbus_sendpacket_multipagebuffer);
  *
  * Mainly used by Hyper-V drivers.
  */
-int vmbus_recvpacket(struct vmbus_channel *channel, void *buffer,
-			u32 bufferlen, u32 *buffer_actual_len, u64 *requestid)
+static inline int
+__vmbus_recvpacket(struct vmbus_channel *channel, void *buffer,
+		   u32 bufferlen, u32 *buffer_actual_len, u64 *requestid,
+		   bool raw)
 {
-	struct vmpacket_descriptor desc;
-	u32 packetlen;
-	u32 userlen;
 	int ret;
 	bool signal = false;
 
-	*buffer_actual_len = 0;
-	*requestid = 0;
-
-
-	ret = hv_ringbuffer_peek(&channel->inbound, &desc,
-			     sizeof(struct vmpacket_descriptor));
-	if (ret != 0)
-		return 0;
-
-	packetlen = desc.len8 << 3;
-	userlen = packetlen - (desc.offset8 << 3);
-
-	*buffer_actual_len = userlen;
-
-	if (userlen > bufferlen) {
-
-		pr_err("Buffer too small - got %d needs %d\n",
-			   bufferlen, userlen);
-		return -ETOOSMALL;
-	}
-
-	*requestid = desc.trans_id;
-
-	/* Copy over the packet to the user buffer */
-	ret = hv_ringbuffer_read(&channel->inbound, buffer, userlen,
-			     (desc.offset8 << 3), &signal);
+	ret = hv_ringbuffer_read(&channel->inbound, buffer, bufferlen,
+				 buffer_actual_len, requestid, &signal, raw);
 
 	if (signal)
 		vmbus_setevent(channel);
 
-	return 0;
+	return ret;
+}
+
+int vmbus_recvpacket(struct vmbus_channel *channel, void *buffer,
+		     u32 bufferlen, u32 *buffer_actual_len,
+		     u64 *requestid)
+{
+	return __vmbus_recvpacket(channel, buffer, bufferlen,
+				  buffer_actual_len, requestid, false);
 }
 EXPORT_SYMBOL(vmbus_recvpacket);
 
@@ -910,37 +935,7 @@ int vmbus_recvpacket_raw(struct vmbus_channel *channel, void *buffer,
 			      u32 bufferlen, u32 *buffer_actual_len,
 			      u64 *requestid)
 {
-	struct vmpacket_descriptor desc;
-	u32 packetlen;
-	int ret;
-	bool signal = false;
-
-	*buffer_actual_len = 0;
-	*requestid = 0;
-
-
-	ret = hv_ringbuffer_peek(&channel->inbound, &desc,
-			     sizeof(struct vmpacket_descriptor));
-	if (ret != 0)
-		return 0;
-
-
-	packetlen = desc.len8 << 3;
-
-	*buffer_actual_len = packetlen;
-
-	if (packetlen > bufferlen)
-		return -ENOBUFS;
-
-	*requestid = desc.trans_id;
-
-	/* Copy over the entire packet to the user buffer */
-	ret = hv_ringbuffer_read(&channel->inbound, buffer, packetlen, 0,
-				 &signal);
-
-	if (signal)
-		vmbus_setevent(channel);
-
-	return ret;
+	return __vmbus_recvpacket(channel, buffer, bufferlen,
+				  buffer_actual_len, requestid, true);
 }
 EXPORT_SYMBOL_GPL(vmbus_recvpacket_raw);

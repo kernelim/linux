@@ -468,6 +468,22 @@ out:
 	return NET_RX_DROP;
 }
 
+static void pppoe_unbind_sock_work(struct work_struct *work)
+{
+	struct pppox_sock *po = container_of(work, struct pppox_sock,
+					     proto.pppoe.padt_work);
+	struct sock *sk = sk_pppox(po);
+
+	lock_sock(sk);
+	if (po->pppoe_dev) {
+		dev_put(po->pppoe_dev);
+		po->pppoe_dev = NULL;
+	}
+	pppox_unbind_sock(sk);
+	release_sock(sk);
+	sock_put(sk);
+}
+
 /************************************************************************
  *
  * Receive a PPPoE Discovery frame.
@@ -513,7 +529,9 @@ static int pppoe_disc_rcv(struct sk_buff *skb, struct net_device *dev,
 		}
 
 		bh_unlock_sock(sk);
-		sock_put(sk);
+		if (!schedule_work(&po->proto.pppoe.padt_work))
+			sock_put(sk);
+
 	}
 
 abort:
@@ -561,6 +579,9 @@ static int pppoe_create(struct net *net, struct socket *sock)
 	sk->sk_type		= SOCK_STREAM;
 	sk->sk_family		= PF_PPPOX;
 	sk->sk_protocol		= PX_PROTO_OE;
+
+	INIT_WORK(&pppox_sk(sk)->proto.pppoe.padt_work,
+		  pppoe_unbind_sock_work);
 
 	return 0;
 }
@@ -655,8 +676,13 @@ static int pppoe_connect(struct socket *sock, struct sockaddr *uservaddr,
 			po->pppoe_dev = NULL;
 		}
 
-		memset(sk_pppox(po) + 1, 0,
-		       sizeof(struct pppox_sock) - sizeof(struct sock));
+		po->pppoe_ifindex = 0;
+		memset(&po->pppoe_pa, 0, sizeof(po->pppoe_pa));
+		memset(&po->pppoe_relay, 0, sizeof(po->pppoe_relay));
+		memset(&po->chan, 0, sizeof(po->chan));
+		po->next = NULL;
+		po->num = 0;
+
 		sk->sk_state = PPPOX_NONE;
 	}
 

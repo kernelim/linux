@@ -165,6 +165,26 @@ static int sense_buffer_size = PRE_WIN8_STORVSC_SENSE_BUFFER_SIZE;
 */
 static int vmstor_proto_version;
 
+#define STORVSC_LOGGING_NONE	0
+#define STORVSC_LOGGING_ERROR	1
+#define STORVSC_LOGGING_WARN	2
+
+static int logging_level = STORVSC_LOGGING_ERROR;
+module_param(logging_level, int, S_IRUGO|S_IWUSR);
+MODULE_PARM_DESC(logging_level,
+	"Logging level, 0 - None, 1 - Error (default), 2 - Warning.");
+
+static inline bool do_logging(int level)
+{
+	return logging_level >= level;
+}
+
+#define storvsc_log(dev, level, fmt, ...)			\
+do {								\
+	if (do_logging(level))					\
+		dev_warn(&(dev)->device, fmt, ##__VA_ARGS__);	\
+} while (0)
+
 struct vmscsi_win8_extension {
 	/*
 	 * The following were added in Windows 8
@@ -350,11 +370,14 @@ enum storvsc_request_type {
  */
 
 #define SRB_STATUS_AUTOSENSE_VALID	0x80
+#define SRB_STATUS_QUEUE_FROZEN		0x40
 #define SRB_STATUS_INVALID_LUN	0x20
 #define SRB_STATUS_SUCCESS	0x01
 #define SRB_STATUS_ABORTED	0x02
 #define SRB_STATUS_ERROR	0x04
 
+#define SRB_STATUS(status) \
+	(status & ~(SRB_STATUS_AUTOSENSE_VALID | SRB_STATUS_QUEUE_FROZEN))
 /*
  * This is the end of Protocol specific defines.
  */
@@ -409,7 +432,10 @@ struct storvsc_cmd_request {
 	struct completion wait_event;
 
 	unsigned char *sense_buffer;
-	struct hv_multipage_buffer data_buffer;
+	struct vmbus_channel_packet_multipage_buffer mpb;
+	struct vmbus_packet_mpb_array *payload;
+	u32 payload_sz;
+
 	struct vstor_packet vstor_packet;
 };
 
@@ -435,6 +461,10 @@ struct storvsc_device {
 	unsigned char path_id;
 	unsigned char target_id;
 
+	/*
+	 * Max I/O, the device can support.
+	 */
+	u32   max_transfer_bytes;
 	/* Used for vsc/vsp channel reset process */
 	struct storvsc_cmd_request init_request;
 	struct storvsc_cmd_request reset_request;
@@ -666,19 +696,6 @@ cleanup:
 	return NULL;
 }
 
-/* Disgusting wrapper functions */
-static inline unsigned long sg_kmap_atomic(struct scatterlist *sgl, int idx)
-{
-	void *addr = kmap_atomic(sg_page(sgl + idx), KM_IRQ0);
-	return (unsigned long)addr;
-}
-
-static inline void sg_kunmap_atomic(unsigned long addr)
-{
-	kunmap_atomic((void *)addr, KM_IRQ0);
-}
-
-
 /* Assume the original sgl has enough room */
 static unsigned int copy_from_bounce_buffer(struct scatterlist *orig_sgl,
 					    struct scatterlist *bounce_sgl,
@@ -693,32 +710,38 @@ static unsigned int copy_from_bounce_buffer(struct scatterlist *orig_sgl,
 	unsigned long bounce_addr = 0;
 	unsigned long dest_addr = 0;
 	unsigned long flags;
+	struct scatterlist *cur_dest_sgl;
+	struct scatterlist *cur_src_sgl;
 
 	local_irq_save(flags);
-
+	cur_dest_sgl = orig_sgl;
+	cur_src_sgl = bounce_sgl;
 	for (i = 0; i < orig_sgl_count; i++) {
-		dest_addr = sg_kmap_atomic(orig_sgl,i) + orig_sgl[i].offset;
+		dest_addr = (unsigned long)
+				kmap_atomic(sg_page(cur_dest_sgl), KM_IRQ0) +
+				cur_dest_sgl->offset;
 		dest = dest_addr;
-		destlen = orig_sgl[i].length;
+		destlen = cur_dest_sgl->length;
 
 		if (bounce_addr == 0)
-			bounce_addr = sg_kmap_atomic(bounce_sgl,j);
+			bounce_addr = (unsigned long)kmap_atomic(
+						sg_page(cur_src_sgl), KM_IRQ0);
 
 		while (destlen) {
-			src = bounce_addr + bounce_sgl[j].offset;
-			srclen = bounce_sgl[j].length - bounce_sgl[j].offset;
+			src = bounce_addr + cur_src_sgl->offset;
+			srclen = cur_src_sgl->length - cur_src_sgl->offset;
 
 			copylen = min(srclen, destlen);
 			memcpy((void *)dest, (void *)src, copylen);
 
 			total_copied += copylen;
-			bounce_sgl[j].offset += copylen;
+			cur_src_sgl->offset += copylen;
 			destlen -= copylen;
 			dest += copylen;
 
-			if (bounce_sgl[j].offset == bounce_sgl[j].length) {
+			if (cur_src_sgl->offset == cur_src_sgl->length) {
 				/* full */
-				sg_kunmap_atomic(bounce_addr);
+				kunmap_atomic((void *)bounce_addr, KM_IRQ0);
 				j++;
 
 				/*
@@ -732,21 +755,29 @@ static unsigned int copy_from_bounce_buffer(struct scatterlist *orig_sgl,
 					/*
 					 * We are done; cleanup and return.
 					 */
-					sg_kunmap_atomic(dest_addr - orig_sgl[i].offset);
+					kunmap_atomic((void *)(dest_addr -
+						cur_dest_sgl->offset), KM_IRQ0);
 					local_irq_restore(flags);
 					return total_copied;
 				}
 
 				/* if we need to use another bounce buffer */
-				if (destlen || i != orig_sgl_count - 1)
-					bounce_addr = sg_kmap_atomic(bounce_sgl,j);
+				if (destlen || i != orig_sgl_count - 1) {
+					cur_src_sgl = sg_next(cur_src_sgl);
+					bounce_addr = (unsigned long)
+							kmap_atomic(
+							sg_page(cur_src_sgl),
+							KM_IRQ0);
+				}
 			} else if (destlen == 0 && i == orig_sgl_count - 1) {
 				/* unmap the last bounce that is < PAGE_SIZE */
-				sg_kunmap_atomic(bounce_addr);
+				kunmap_atomic((void *)bounce_addr, KM_IRQ0);
 			}
 		}
 
-		sg_kunmap_atomic(dest_addr - orig_sgl[i].offset);
+		kunmap_atomic((void *)(dest_addr - cur_dest_sgl->offset),
+				KM_IRQ0);
+		cur_dest_sgl = sg_next(cur_dest_sgl);
 	}
 
 	local_irq_restore(flags);
@@ -767,48 +798,64 @@ static unsigned int copy_to_bounce_buffer(struct scatterlist *orig_sgl,
 	unsigned long bounce_addr = 0;
 	unsigned long src_addr = 0;
 	unsigned long flags;
+	struct scatterlist *cur_src_sgl;
+	struct scatterlist *cur_dest_sgl;
 
 	local_irq_save(flags);
 
+	cur_src_sgl = orig_sgl;
+	cur_dest_sgl = bounce_sgl;
+
 	for (i = 0; i < orig_sgl_count; i++) {
-		src_addr = sg_kmap_atomic(orig_sgl,i) + orig_sgl[i].offset;
+		src_addr = (unsigned long)
+				kmap_atomic(sg_page(cur_src_sgl), KM_IRQ0) +
+				cur_src_sgl->offset;
 		src = src_addr;
-		srclen = orig_sgl[i].length;
+		srclen = cur_src_sgl->length;
 
 		if (bounce_addr == 0)
-			bounce_addr = sg_kmap_atomic(bounce_sgl,j);
+			bounce_addr = (unsigned long)
+					kmap_atomic(sg_page(cur_dest_sgl),
+					KM_IRQ0);
 
 		while (srclen) {
 			/* assume bounce offset always == 0 */
-			dest = bounce_addr + bounce_sgl[j].length;
-			destlen = PAGE_SIZE - bounce_sgl[j].length;
+			dest = bounce_addr + cur_dest_sgl->length;
+			destlen = PAGE_SIZE - cur_dest_sgl->length;
 
 			copylen = min(srclen, destlen);
 			memcpy((void *)dest, (void *)src, copylen);
 
 			total_copied += copylen;
-			bounce_sgl[j].length += copylen;
+			cur_dest_sgl->length += copylen;
 			srclen -= copylen;
 			src += copylen;
 
-			if (bounce_sgl[j].length == PAGE_SIZE) {
+			if (cur_dest_sgl->length == PAGE_SIZE) {
 				/* full..move to next entry */
-				sg_kunmap_atomic(bounce_addr);
+				kunmap_atomic((void *)bounce_addr, KM_IRQ0);
 				bounce_addr = 0;
 				j++;
 			}
 
 			/* if we need to use another bounce buffer */
-			if (srclen && bounce_addr == 0)
-				bounce_addr = sg_kmap_atomic(bounce_sgl, j);
+			if (srclen && bounce_addr == 0) {
+				cur_dest_sgl = sg_next(cur_dest_sgl);
+				bounce_addr = (unsigned long)
+						kmap_atomic(
+						sg_page(cur_dest_sgl),
+						KM_IRQ0);
+			}
 
 		}
 
-		sg_kunmap_atomic(src_addr - orig_sgl[i].offset);
+		kunmap_atomic((void *)(src_addr - cur_src_sgl->offset),
+			KM_IRQ0);
+		cur_src_sgl = sg_next(cur_src_sgl);
 	}
 
 	if (bounce_addr)
-		sg_kunmap_atomic(bounce_addr);
+		kunmap_atomic((void *)bounce_addr, KM_IRQ0);
 
 	local_irq_restore(flags);
 
@@ -1044,6 +1091,8 @@ static int storvsc_channel_init(struct hv_device *device)
 		    STORAGE_CHANNEL_SUPPORTS_MULTI_CHANNEL)
 			process_sub_channels = true;
 	}
+	stor_device->max_transfer_bytes =
+		vstor_packet->storage_channel_properties.max_transfer_bytes;
 
 	memset(vstor_packet, 0, sizeof(struct vstor_packet));
 	vstor_packet->operation = VSTOR_OPERATION_END_INITIALIZATION;
@@ -1088,7 +1137,7 @@ static void storvsc_handle_error(struct vmscsi_request *vm_srb,
 	void (*process_err_fn)(struct work_struct *work);
 	bool do_work = false;
 
-	switch (vm_srb->srb_status) {
+	switch (SRB_STATUS(vm_srb->srb_status)) {
 	case SRB_STATUS_ERROR:
 		/*
 		 * If there is an error; offline the device since all
@@ -1116,8 +1165,9 @@ static void storvsc_handle_error(struct vmscsi_request *vm_srb,
 		do_work = true;
 		process_err_fn = storvsc_remove_lun;
 		break;
-	case (SRB_STATUS_ABORTED | SRB_STATUS_AUTOSENSE_VALID):
-		if ((asc == 0x2a) && (ascq == 0x9)) {
+	case SRB_STATUS_ABORTED:
+		if (vm_srb->srb_status & SRB_STATUS_AUTOSENSE_VALID &&
+		    (asc == 0x2a) && (ascq == 0x9)) {
 			do_work = true;
 			process_err_fn = storvsc_device_scan;
 			/*
@@ -1158,6 +1208,8 @@ static void storvsc_command_completion(struct storvsc_cmd_request *cmd_request)
 	struct Scsi_Host *host;
 	struct storvsc_device *stor_dev;
 	struct hv_device *dev = host_dev->dev;
+	u32 payload_sz = cmd_request->payload_sz;
+	void *payload = cmd_request->payload;
 
 	stor_dev = get_in_stor_device(dev);
 	host = stor_dev->host;
@@ -1177,7 +1229,10 @@ static void storvsc_command_completion(struct storvsc_cmd_request *cmd_request)
 
 	if (scmnd->result) {
 		if (scsi_normalize_sense(scmnd->sense_buffer,
-				SCSI_SENSE_BUFFERSIZE, &sense_hdr))
+				SCSI_SENSE_BUFFERSIZE, &sense_hdr) &&
+		    !(sense_hdr.sense_key == NOT_READY &&
+				 sense_hdr.asc == 0x03A) &&
+		    do_logging(STORVSC_LOGGING_ERROR))
 			scsi_print_sense_hdr("storvsc", &sense_hdr);
 	}
 
@@ -1186,7 +1241,7 @@ static void storvsc_command_completion(struct storvsc_cmd_request *cmd_request)
 					 sense_hdr.ascq);
 
 	scsi_set_resid(scmnd,
-		cmd_request->data_buffer.len -
+		cmd_request->payload->range.len -
 		vm_srb->data_transfer_length);
 
 	scsi_done_fn = scmnd->scsi_done;
@@ -1195,6 +1250,10 @@ static void storvsc_command_completion(struct storvsc_cmd_request *cmd_request)
 	scmnd->scsi_done = NULL;
 
 	scsi_done_fn(scmnd);
+
+	if (payload_sz >
+		sizeof(struct vmbus_channel_packet_multipage_buffer))
+		kfree(payload);
 
 	mempool_free(cmd_request, memp->request_mempool);
 }
@@ -1233,12 +1292,23 @@ static void storvsc_on_io_completion(struct hv_device *device,
 	stor_pkt->vm_srb.sense_info_length =
 	vstor_packet->vm_srb.sense_info_length;
 
+	if (vstor_packet->vm_srb.scsi_status != 0 ||
+	    vstor_packet->vm_srb.srb_status != SRB_STATUS_SUCCESS)
+		storvsc_log(device, STORVSC_LOGGING_WARN,
+			"cmd 0x%x scsi status 0x%x srb status 0x%x\n",
+			stor_pkt->vm_srb.cdb[0],
+			vstor_packet->vm_srb.scsi_status,
+			vstor_packet->vm_srb.srb_status);
 
 	if ((vstor_packet->vm_srb.scsi_status & 0xFF) == 0x02) {
 		/* CHECK_CONDITION */
 		if (vstor_packet->vm_srb.srb_status &
 			SRB_STATUS_AUTOSENSE_VALID) {
 			/* autosense data available */
+
+			storvsc_log(device, STORVSC_LOGGING_WARN,
+				"stor pkt %p autosense data valid - len %d\n",
+				request, vstor_packet->vm_srb.sense_info_length);
 
 			memcpy(request->sense_buffer,
 			       vstor_packet->vm_srb.sense_data,
@@ -1398,7 +1468,7 @@ static int storvsc_dev_remove(struct hv_device *device)
 }
 
 static int storvsc_do_io(struct hv_device *device,
-			      struct storvsc_cmd_request *request)
+			 struct storvsc_cmd_request *request)
 {
 	struct storvsc_device *stor_device;
 	struct vstor_packet *vstor_packet;
@@ -1430,19 +1500,20 @@ static int storvsc_do_io(struct hv_device *device,
 
 
 	vstor_packet->vm_srb.data_transfer_length =
-	request->data_buffer.len;
+	request->payload->range.len;
 
 	vstor_packet->operation = VSTOR_OPERATION_EXECUTE_SRB;
 
-	if (request->data_buffer.len) {
-		ret = vmbus_sendpacket_multipagebuffer(outgoing_channel,
-				&request->data_buffer,
+	if (request->payload->range.len) {
+
+		ret = vmbus_sendpacket_mpb_desc(outgoing_channel,
+				request->payload, request->payload_sz,
 				vstor_packet,
 				(sizeof(struct vstor_packet) -
 				vmscsi_size_delta),
 				(unsigned long)request);
 	} else {
-		ret = vmbus_sendpacket(device->channel, vstor_packet,
+		ret = vmbus_sendpacket(outgoing_channel, vstor_packet,
 			       (sizeof(struct vstor_packet) -
 				vmscsi_size_delta),
 			       (unsigned long)request,
@@ -1466,6 +1537,8 @@ static int storvsc_device_alloc(struct scsi_device *sdevice)
 	memp = kzalloc(sizeof(struct stor_mem_pools), GFP_KERNEL);
 	if (!memp)
 		return -ENOMEM;
+
+	get_device(&sdevice->sdev_dev);
 
 	memp->request_pool =
 		kmem_cache_create(dev_name(&sdevice->sdev_dev),
@@ -1491,6 +1564,7 @@ err1:
 
 err0:
 	kfree(memp);
+	put_device(&sdevice->sdev_dev);
 	return -ENOMEM;
 }
 
@@ -1504,6 +1578,7 @@ static void storvsc_device_destroy(struct scsi_device *sdevice)
 	mempool_destroy(memp->request_mempool);
 	kmem_cache_destroy(memp->request_pool);
 	kfree(memp);
+	put_device(&sdevice->sdev_dev);
 	sdevice->hostdata = NULL;
 }
 
@@ -1652,6 +1727,10 @@ static int storvsc_queuecommand(struct scsi_cmnd *scmnd,
 	unsigned int sg_count = 0;
 	struct vmscsi_request *vm_srb;
 	struct stor_mem_pools *memp = scmnd->device->hostdata;
+	struct scatterlist *cur_sgl;
+	struct vmbus_packet_mpb_array  *payload;
+	u32 payload_sz;
+	u32 length;
 
 	scmnd->scsi_done = done;
 
@@ -1693,8 +1772,7 @@ static int storvsc_queuecommand(struct scsi_cmnd *scmnd,
 	vm_srb->win8_extension.time_out_value = 60;
 
 	vm_srb->win8_extension.srb_flags |=
-		(SRB_FLAGS_QUEUE_ACTION_ENABLE |
-		SRB_FLAGS_DISABLE_SYNCH_TRANSFER);
+		SRB_FLAGS_DISABLE_SYNCH_TRANSFER;
 
 	/* Build the SRB */
 	switch (scmnd->sc_data_direction) {
@@ -1717,6 +1795,7 @@ static int storvsc_queuecommand(struct scsi_cmnd *scmnd,
 		 */
 		WARN(1, "Unexpected data direction: %d\n",
 		     scmnd->sc_data_direction);
+		mempool_free(cmd_request, memp->request_mempool);
 		return -EINVAL;
 	}
 
@@ -1733,16 +1812,19 @@ static int storvsc_queuecommand(struct scsi_cmnd *scmnd,
 	cmd_request->sense_buffer = scmnd->sense_buffer;
 
 
-	cmd_request->data_buffer.len = scsi_bufflen(scmnd);
-	if (scsi_sg_count(scmnd)) {
-		sgl = (struct scatterlist *)scsi_sglist(scmnd);
-		sg_count = scsi_sg_count(scmnd);
+	sgl = (struct scatterlist *)scsi_sglist(scmnd);
+	sg_count = scsi_sg_count(scmnd);
 
+	length = scsi_bufflen(scmnd);
+	payload = (struct vmbus_packet_mpb_array *)&cmd_request->mpb;
+	payload_sz = sizeof(cmd_request->mpb);
+
+	if (sg_count) {
 		/* check if we need to bounce the sgl */
 		if (do_bounce_buffer(sgl, scsi_sg_count(scmnd)) != -1) {
 			cmd_request->bounce_sgl =
-				create_bounce_buffer(sgl, scsi_sg_count(scmnd),
-						     scsi_bufflen(scmnd),
+				create_bounce_buffer(sgl, sg_count,
+						     length,
 						     vm_srb->data_in);
 			if (!cmd_request->bounce_sgl) {
 				ret = SCSI_MLQUEUE_HOST_BUSY;
@@ -1750,30 +1832,53 @@ static int storvsc_queuecommand(struct scsi_cmnd *scmnd,
 			}
 
 			cmd_request->bounce_sgl_count =
-				ALIGN(scsi_bufflen(scmnd), PAGE_SIZE) >>
-					PAGE_SHIFT;
+				ALIGN(length, PAGE_SIZE) >> PAGE_SHIFT;
 
 			if (vm_srb->data_in == WRITE_TYPE)
 				copy_to_bounce_buffer(sgl,
-					cmd_request->bounce_sgl,
-					scsi_sg_count(scmnd));
+					cmd_request->bounce_sgl, sg_count);
 
 			sgl = cmd_request->bounce_sgl;
 			sg_count = cmd_request->bounce_sgl_count;
 		}
 
-		cmd_request->data_buffer.offset = sgl[0].offset;
 
-		for (i = 0; i < sg_count; i++)
-			cmd_request->data_buffer.pfn_array[i] =
-				page_to_pfn(sg_page((&sgl[i])));
+		if (sg_count > MAX_PAGE_BUFFER_COUNT) {
+
+			payload_sz = (sg_count * sizeof(u64) +
+				      sizeof(struct vmbus_packet_mpb_array));
+			payload = kmalloc(payload_sz, GFP_ATOMIC);
+			if (!payload) {
+				if (cmd_request->bounce_sgl_count)
+					destroy_bounce_buffer(
+					cmd_request->bounce_sgl,
+					cmd_request->bounce_sgl_count);
+
+					return SCSI_MLQUEUE_DEVICE_BUSY;
+			}
+			memset(payload, 0, payload_sz);
+		}
+
+		payload->range.len = length;
+		payload->range.offset = sgl[0].offset;
+
+		cur_sgl = sgl;
+		for (i = 0; i < sg_count; i++) {
+			payload->range.pfn_array[i] =
+				page_to_pfn(sg_page((cur_sgl)));
+			cur_sgl = sg_next(cur_sgl);
+		}
 
 	} else if (scsi_sglist(scmnd)) {
-		cmd_request->data_buffer.offset =
+		payload->range.len = length;
+		payload->range.offset =
 			virt_to_phys(scsi_sglist(scmnd)) & (PAGE_SIZE-1);
-		cmd_request->data_buffer.pfn_array[0] =
+		payload->range.pfn_array[0] =
 			virt_to_phys(scsi_sglist(scmnd)) >> PAGE_SHIFT;
 	}
+
+	cmd_request->payload = payload;
+	cmd_request->payload_sz = payload_sz;
 
 	/* Invokes the vsc to start an IO */
 	ret = storvsc_do_io(dev, cmd_request);
@@ -1792,6 +1897,9 @@ static int storvsc_queuecommand(struct scsi_cmnd *scmnd,
 	return 0;
 
 queue_error:
+	if (payload_sz >
+		sizeof(struct vmbus_channel_packet_multipage_buffer))
+		kfree(payload);
 	mempool_free(cmd_request, memp->request_mempool);
 	scmnd->host_scribble = NULL;
 	return ret;
@@ -1809,10 +1917,7 @@ static struct scsi_host_template scsi_driver = {
 	.slave_configure =	storvsc_device_configure,
 	.cmd_per_lun =		255,
 	.this_id =		-1,
-	/* no use setting to 0 since ll_blk_rw reset it to 1 */
-	/* currently 32 */
-	.sg_tablesize =		MAX_MULTIPAGE_BUFFER_COUNT,
-	.use_clustering =	DISABLE_CLUSTERING,
+	.use_clustering =	ENABLE_CLUSTERING,
 	/* Make sure we dont get a sg segment crosses a page boundary */
 	.dma_boundary =		PAGE_SIZE-1,
 };
@@ -1935,6 +2040,12 @@ static int storvsc_probe(struct hv_device *device,
 	}
 	/* max cmd length */
 	host->max_cmd_len = STORVSC_MAX_CMD_LEN;
+
+	/*
+	 * set the table size based on the info we got
+	 * from the host.
+	 */
+	host->sg_tablesize = (stor_device->max_transfer_bytes >> PAGE_SHIFT);
 
 	/* Register the HBA and start the scsi bus scan */
 	ret = scsi_add_host(host, &device->device);

@@ -243,7 +243,6 @@ static int mlx4_en_prepare_rx_desc(struct mlx4_en_priv *priv,
 
 static inline bool mlx4_en_is_ring_empty(struct mlx4_en_rx_ring *ring)
 {
-	BUG_ON((u32)(ring->prod - ring->cons) > ring->actual_size);
 	return ring->prod == ring->cons;
 }
 
@@ -707,7 +706,7 @@ static int get_fixed_ipv6_csum(__wsum hw_checksum, struct sk_buff *skb,
 
 	if (ipv6h->nexthdr == IPPROTO_FRAGMENT || ipv6h->nexthdr == IPPROTO_HOPOPTS)
 		return -1;
-	hw_checksum = csum_add(hw_checksum, (__force __wsum)(ipv6h->nexthdr << 8));
+	hw_checksum = csum_add(hw_checksum, (__force __wsum)htons(ipv6h->nexthdr));
 
 	csum_pseudo_hdr = csum_partial(&ipv6h->saddr,
 				       sizeof(ipv6h->saddr) + sizeof(ipv6h->daddr), 0);
@@ -848,8 +847,8 @@ int mlx4_en_process_rx_cq(struct net_device *dev, struct mlx4_en_cq *cq, int bud
 		ring->bytes += length;
 		ring->packets++;
 
-	if (likely(priv->rx_csum)) {
-				if ((cqe->status & cpu_to_be16(MLX4_CQE_STATUS_IPOK)) &&
+		if (likely(dev->features & NETIF_F_RXCSUM)) {
+			if ((cqe->status & cpu_to_be16(MLX4_CQE_STATUS_IPOK)) &&
 			    (cqe->checksum == cpu_to_be16(0xffff))) {
 					ring->csum_ok++;
 		/* This packet is eligible for GRO if it is:
@@ -1206,8 +1205,6 @@ int mlx4_en_config_rss_steer(struct mlx4_en_priv *priv)
 		rss_context->hash_fn = MLX4_RSS_HASH_TOP;
 		memcpy(rss_context->rss_key, priv->rss_key,
 		       MLX4_EN_RSS_KEY_SIZE);
-		netdev_rss_key_fill(rss_context->rss_key,
-				    MLX4_EN_RSS_KEY_SIZE);
 	} else {
 		en_err(priv, "Unknown RSS hash function requested\n");
 		err = -EINVAL;

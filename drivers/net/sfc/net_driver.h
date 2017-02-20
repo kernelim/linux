@@ -387,7 +387,7 @@ enum efx_sync_events_state {
  * @eventq_init: Event queue initialised flag
  * @enabled: Channel enabled indicator
  * @irq: IRQ number (MSI and MSI-X only)
- * @irq_moderation: IRQ moderation value (in hardware ticks)
+ * @irq_moderation_us: IRQ moderation value (in microseconds)
  * @napi_dev: Net device used with NAPI
  * @napi_str: NAPI control structure
  * @state: state for NAPI vs busy polling
@@ -426,7 +426,7 @@ struct efx_channel {
 	bool eventq_init;
 	bool enabled;
 	int irq;
-	unsigned int irq_moderation;
+	unsigned int irq_moderation_us;
 	struct net_device *napi_dev;
 	struct napi_struct napi_str;
 #ifdef CONFIG_NET_RX_BUSY_POLL
@@ -831,8 +831,10 @@ struct vfdi_status;
  * @membase: Memory BAR value
  * @interrupt_mode: Interrupt mode
  * @timer_quantum_ns: Interrupt timer quantum, in nanoseconds
+ * @timer_max_ns: Interrupt timer maximum value, in nanoseconds
  * @irq_rx_adaptive: Adaptive IRQ moderation enabled for RX event queues
- * @irq_rx_moderation: IRQ moderation time for RX event queues
+ * @irq_rx_mod_step_us: Step size for IRQ moderation for RX event queues
+ * @irq_rx_moderation_us: IRQ moderation time for RX event queues
  * @msg_enable: Log message enable flags
  * @state: Device state number (%STATE_*). Serialised by the rtnl_lock.
  * @reset_pending: Bitmask for pending resets
@@ -889,6 +891,7 @@ struct vfdi_status;
  *	be held to modify it.
  * @port_initialized: Port initialized?
  * @net_dev: Operating system network device. Consider holding the rtnl lock
+ * @fixed_features: Features which cannot be turned off
  * @stats_buffer: DMA buffer for statistics
  * @phy_type: PHY type
  * @phy_op: PHY interface
@@ -937,6 +940,7 @@ struct vfdi_status;
  * @stats_lock: Statistics update lock. Must be held when calling
  *	efx_nic_type::{update,start,stop}_stats.
  * @n_rx_noskb_drops: Count of RX packets dropped due to failure to allocate an skb
+ * @mc_promisc: Whether in multicast promiscuous mode when last changed
  *
  * This is stored in the private area of the &struct net_device.
  */
@@ -960,8 +964,10 @@ struct efx_nic {
 
 	enum efx_int_mode interrupt_mode;
 	unsigned int timer_quantum_ns;
+	unsigned int timer_max_ns;
 	bool irq_rx_adaptive;
-	unsigned int irq_rx_moderation;
+	unsigned int irq_mod_step_us;
+	unsigned int irq_rx_moderation_us;
 	u32 msg_enable;
 
 	enum nic_state state;
@@ -1028,6 +1034,8 @@ struct efx_nic {
 	bool port_initialized;
 	struct net_device *net_dev;
 
+	netdev_features_t fixed_features;
+
 	struct efx_buffer stats_buffer;
 	u64 rx_nodesc_drops_total;
 	u64 rx_nodesc_drops_while_down;
@@ -1085,6 +1093,7 @@ struct efx_nic {
 	int last_irq_cpu;
 	spinlock_t stats_lock;
 	atomic_t n_rx_noskb_drops;
+	bool mc_promisc;
 };
 
 static inline int efx_dev_registered(struct efx_nic *efx)
@@ -1289,7 +1298,7 @@ struct efx_nic_type {
 	int (*mcdi_poll_reboot)(struct efx_nic *efx);
 	void (*mcdi_reboot_detected)(struct efx_nic *efx);
 	void (*irq_enable_master)(struct efx_nic *efx);
-	void (*irq_test_generate)(struct efx_nic *efx);
+	int (*irq_test_generate)(struct efx_nic *efx);
 	void (*irq_disable_non_ev)(struct efx_nic *efx);
 	irqreturn_t (*irq_handle_msi)(int irq, void *dev_id);
 	irqreturn_t (*irq_handle_legacy)(int irq, void *dev_id);

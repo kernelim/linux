@@ -546,7 +546,10 @@ static bool efx_mcdi_complete_async(struct efx_mcdi_iface *mcdi, bool timeout)
 		efx_mcdi_display_error(efx, async->cmd, async->inlen, errbuf,
 				       err_len, rc);
 	}
-	async->complete(efx, async->cookie, rc, outbuf, data_len);
+
+	if (async->complete)
+		async->complete(efx, async->cookie, rc, outbuf,
+				min(async->outlen, data_len));
 	kfree(async);
 
 	efx_mcdi_release(mcdi);
@@ -887,9 +890,9 @@ void efx_mcdi_display_error(struct efx_nic *efx, unsigned cmd,
 		code = MCDI_DWORD(outbuf, ERR_CODE);
 	if (outlen >= MC_CMD_ERR_ARG_OFST + 4)
 		err_arg = MCDI_DWORD(outbuf, ERR_ARG);
-	netif_err(efx, hw, efx->net_dev,
-		  "MC command 0x%x inlen %d failed rc=%d (raw=%d) arg=%d\n",
-		  cmd, (int)inlen, rc, code, err_arg);
+	netif_cond_dbg(efx, hw, efx->net_dev, rc == -EPERM, err,
+		       "MC command 0x%x inlen %zu failed rc=%d (raw=%d) arg=%d\n",
+		       cmd, inlen, rc, code, err_arg);
 }
 
 /* Switch to polled MCDI completions.  This can be called in various
@@ -1790,15 +1793,31 @@ int efx_mcdi_wol_filter_reset(struct efx_nic *efx)
 	return rc;
 }
 
-int efx_mcdi_set_workaround(struct efx_nic *efx, u32 type, bool enabled)
+int efx_mcdi_set_workaround(struct efx_nic *efx, u32 type, bool enabled,
+			    unsigned int *flags)
 {
 	MCDI_DECLARE_BUF(inbuf, MC_CMD_WORKAROUND_IN_LEN);
+	MCDI_DECLARE_BUF(outbuf, MC_CMD_WORKAROUND_EXT_OUT_LEN);
+	size_t outlen;
+	int rc;
 
 	BUILD_BUG_ON(MC_CMD_WORKAROUND_OUT_LEN != 0);
 	MCDI_SET_DWORD(inbuf, WORKAROUND_IN_TYPE, type);
 	MCDI_SET_DWORD(inbuf, WORKAROUND_IN_ENABLED, enabled);
-	return efx_mcdi_rpc(efx, MC_CMD_WORKAROUND, inbuf, sizeof(inbuf),
-			    NULL, 0, NULL);
+	rc = efx_mcdi_rpc(efx, MC_CMD_WORKAROUND, inbuf, sizeof(inbuf),
+			  outbuf, sizeof(outbuf), &outlen);
+	if (rc)
+		return rc;
+
+	if (!flags)
+		return 0;
+
+	if (outlen >= MC_CMD_WORKAROUND_EXT_OUT_LEN)
+		*flags = MCDI_DWORD(outbuf, WORKAROUND_EXT_OUT_FLAGS);
+	else
+		*flags = 0;
+
+	return 0;
 }
 
 int efx_mcdi_get_workarounds(struct efx_nic *efx, unsigned int *impl_out,
@@ -1827,7 +1846,11 @@ int efx_mcdi_get_workarounds(struct efx_nic *efx, unsigned int *impl_out,
 	return 0;
 
 fail:
-	netif_err(efx, hw, efx->net_dev, "%s: failed rc=%d\n", __func__, rc);
+	/* Older firmware lacks GET_WORKAROUNDS and this isn't especially
+	 * terrifying.  The call site will have to deal with it though.
+	 */
+	netif_cond_dbg(efx, hw, efx->net_dev, rc == -ENOSYS, err,
+		       "%s: failed rc=%d\n", __func__, rc);
 	return rc;
 }
 

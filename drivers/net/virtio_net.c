@@ -1597,7 +1597,7 @@ static int virtnet_probe(struct virtio_device *vdev)
 				  offsetof(struct virtio_net_config, mac),
 				  dev->dev_addr, dev->addr_len);
 	} else
-		random_ether_addr(dev->dev_addr);
+		eth_hw_addr_random(dev);
 
 	/* Set up our device-specific information */
 	vi = netdev_priv(dev);

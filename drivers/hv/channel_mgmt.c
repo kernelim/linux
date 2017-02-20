@@ -31,7 +31,6 @@
 #include <linux/delay.h>
 #include <linux/hyperv.h>
 
-#include <asm/hyperv.h>
 #include <linux/interrupt.h>
 
 #include "hyperv_vmbus.h"
@@ -140,14 +139,12 @@ EXPORT_SYMBOL_GPL(vmbus_prep_negotiate_resp);
  */
 static struct vmbus_channel *alloc_channel(void)
 {
-	static atomic_t chan_num = ATOMIC_INIT(0);
 	struct vmbus_channel *channel;
 
 	channel = kzalloc(sizeof(*channel), GFP_ATOMIC);
 	if (!channel)
 		return NULL;
 
-	channel->id = atomic_inc_return(&chan_num);
 	spin_lock_init(&channel->inbound_lock);
 	spin_lock_init(&channel->lock);
 

@@ -22,7 +22,7 @@
  *    Add TUNSETLINK ioctl to set the link encapsulation
  *
  *  Mark Smith <markzzzsmith@yahoo.com.au>
- *    Use random_ether_addr() for tap MAC address.
+ *    Use dev_hw_addr_random() for tap MAC address.
  *
  *  Harald Roelle <harald.roelle@ifi.lmu.de>  2004/04/20
  *    Fixes in packet dropping, queue length setting and queue wakeup.
@@ -506,7 +506,7 @@ static void tun_net_init(struct net_device *dev)
 		ether_setup(dev);
 		netdev_extended(dev)->ext_priv_flags &= ~IFF_TX_SKB_SHARING;
 
-		random_ether_addr(dev->dev_addr);
+		eth_hw_addr_random(dev);
 
 		dev->tx_queue_len = TUN_READQ_SIZE;  /* We prefer our own queue length */
 		break;

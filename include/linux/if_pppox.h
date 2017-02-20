@@ -25,6 +25,7 @@
 #include <linux/if.h>
 #include <linux/netdevice.h>
 #include <linux/ppp_channel.h>
+#include <linux/workqueue.h>
 #endif /* __KERNEL__ */
 #include <linux/if_pppol2tp.h>
 
@@ -139,6 +140,7 @@ struct pppoe_opt {
 	struct pppoe_addr	pa;	  /* what this socket is bound to*/
 	struct sockaddr_pppox	relay;	  /* what socket data will be
 					     relayed to (PPPoE relaying) */
+	struct work_struct      padt_work;/* Work item for handling PADT */
 };
 
 #include <net/sock.h>

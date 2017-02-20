@@ -324,6 +324,9 @@ void			xprt_disconnect_done(struct rpc_xprt *xprt);
 void			xprt_force_disconnect(struct rpc_xprt *xprt);
 void			xprt_conditional_disconnect(struct rpc_xprt *xprt, unsigned int cookie);
 
+bool			xprt_lock_connect(struct rpc_xprt *, struct rpc_task *, void *);
+void			xprt_unlock_connect(struct rpc_xprt *, void *);
+
 /*
  * Reserved bit positions in xprt->state
  */
@@ -334,8 +337,6 @@ void			xprt_conditional_disconnect(struct rpc_xprt *xprt, unsigned int cookie);
 #define XPRT_BOUND		(4)
 #define XPRT_BINDING		(5)
 #define XPRT_CLOSING		(6)
-#define XPRT_CONNECTION_ABORT	(7)
-#define XPRT_CONNECTION_CLOSE	(8)
 #define XPRT_CONGESTED		(9)
 
 static inline void xprt_set_connected(struct rpc_xprt *xprt)

@@ -1,6 +1,6 @@
 /* Broadcom NetXtreme-C/E network driver.
  *
- * Copyright (c) 2014-2015 Broadcom Corporation
+ * Copyright (c) 2014-2016 Broadcom Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -76,11 +76,31 @@ enum board_idx {
 	BCM57301,
 	BCM57302,
 	BCM57304,
+	BCM57417_NPAR,
+	BCM57311,
+	BCM57312,
 	BCM57402,
 	BCM57404,
 	BCM57406,
+	BCM57402_NPAR,
+	BCM57407,
+	BCM57412,
+	BCM57414,
+	BCM57416,
+	BCM57417,
+	BCM57412_NPAR,
+	BCM57314,
+	BCM57417_SFP,
+	BCM57416_SFP,
+	BCM57404_NPAR,
+	BCM57406_NPAR,
+	BCM57407_SFP,
+	BCM57414_NPAR,
+	BCM57416_NPAR,
 	BCM57304_VF,
 	BCM57404_VF,
+	BCM57414_VF,
+	BCM57314_VF,
 };
 
 /* indexed by enum above */
@@ -90,23 +110,63 @@ static const struct {
 	{ "Broadcom BCM57301 NetXtreme-C Single-port 10Gb Ethernet" },
 	{ "Broadcom BCM57302 NetXtreme-C Dual-port 10Gb/25Gb Ethernet" },
 	{ "Broadcom BCM57304 NetXtreme-C Dual-port 10Gb/25Gb/40Gb/50Gb Ethernet" },
+	{ "Broadcom BCM57417 NetXtreme-E Ethernet Partition" },
+	{ "Broadcom BCM57311 NetXtreme-C Single-port 10Gb Ethernet" },
+	{ "Broadcom BCM57312 NetXtreme-C Dual-port 10Gb/25Gb Ethernet" },
 	{ "Broadcom BCM57402 NetXtreme-E Dual-port 10Gb Ethernet" },
 	{ "Broadcom BCM57404 NetXtreme-E Dual-port 10Gb/25Gb Ethernet" },
 	{ "Broadcom BCM57406 NetXtreme-E Dual-port 10GBase-T Ethernet" },
+	{ "Broadcom BCM57402 NetXtreme-E Ethernet Partition" },
+	{ "Broadcom BCM57407 NetXtreme-E Dual-port 10GBase-T Ethernet" },
+	{ "Broadcom BCM57412 NetXtreme-E Dual-port 10Gb Ethernet" },
+	{ "Broadcom BCM57414 NetXtreme-E Dual-port 10Gb/25Gb Ethernet" },
+	{ "Broadcom BCM57416 NetXtreme-E Dual-port 10GBase-T Ethernet" },
+	{ "Broadcom BCM57417 NetXtreme-E Dual-port 10GBase-T Ethernet" },
+	{ "Broadcom BCM57412 NetXtreme-E Ethernet Partition" },
+	{ "Broadcom BCM57314 NetXtreme-C Dual-port 10Gb/25Gb/40Gb/50Gb Ethernet" },
+	{ "Broadcom BCM57417 NetXtreme-E Dual-port 10Gb/25Gb Ethernet" },
+	{ "Broadcom BCM57416 NetXtreme-E Dual-port 10Gb Ethernet" },
+	{ "Broadcom BCM57404 NetXtreme-E Ethernet Partition" },
+	{ "Broadcom BCM57406 NetXtreme-E Ethernet Partition" },
+	{ "Broadcom BCM57407 NetXtreme-E Dual-port 25Gb Ethernet" },
+	{ "Broadcom BCM57414 NetXtreme-E Ethernet Partition" },
+	{ "Broadcom BCM57416 NetXtreme-E Ethernet Partition" },
 	{ "Broadcom BCM57304 NetXtreme-C Ethernet Virtual Function" },
 	{ "Broadcom BCM57404 NetXtreme-E Ethernet Virtual Function" },
+	{ "Broadcom BCM57414 NetXtreme-E Ethernet Virtual Function" },
+	{ "Broadcom BCM57314 NetXtreme-E Ethernet Virtual Function" },
 };
 
 static const struct pci_device_id bnxt_pci_tbl[] = {
 	{ PCI_VDEVICE(BROADCOM, 0x16c8), .driver_data = BCM57301 },
 	{ PCI_VDEVICE(BROADCOM, 0x16c9), .driver_data = BCM57302 },
 	{ PCI_VDEVICE(BROADCOM, 0x16ca), .driver_data = BCM57304 },
+	{ PCI_VDEVICE(BROADCOM, 0x16cc), .driver_data = BCM57417_NPAR },
+	{ PCI_VDEVICE(BROADCOM, 0x16ce), .driver_data = BCM57311 },
+	{ PCI_VDEVICE(BROADCOM, 0x16cf), .driver_data = BCM57312 },
 	{ PCI_VDEVICE(BROADCOM, 0x16d0), .driver_data = BCM57402 },
 	{ PCI_VDEVICE(BROADCOM, 0x16d1), .driver_data = BCM57404 },
 	{ PCI_VDEVICE(BROADCOM, 0x16d2), .driver_data = BCM57406 },
+	{ PCI_VDEVICE(BROADCOM, 0x16d4), .driver_data = BCM57402_NPAR },
+	{ PCI_VDEVICE(BROADCOM, 0x16d5), .driver_data = BCM57407 },
+	{ PCI_VDEVICE(BROADCOM, 0x16d6), .driver_data = BCM57412 },
+	{ PCI_VDEVICE(BROADCOM, 0x16d7), .driver_data = BCM57414 },
+	{ PCI_VDEVICE(BROADCOM, 0x16d8), .driver_data = BCM57416 },
+	{ PCI_VDEVICE(BROADCOM, 0x16d9), .driver_data = BCM57417 },
+	{ PCI_VDEVICE(BROADCOM, 0x16de), .driver_data = BCM57412_NPAR },
+	{ PCI_VDEVICE(BROADCOM, 0x16df), .driver_data = BCM57314 },
+	{ PCI_VDEVICE(BROADCOM, 0x16e2), .driver_data = BCM57417_SFP },
+	{ PCI_VDEVICE(BROADCOM, 0x16e3), .driver_data = BCM57416_SFP },
+	{ PCI_VDEVICE(BROADCOM, 0x16e7), .driver_data = BCM57404_NPAR },
+	{ PCI_VDEVICE(BROADCOM, 0x16e8), .driver_data = BCM57406_NPAR },
+	{ PCI_VDEVICE(BROADCOM, 0x16e9), .driver_data = BCM57407_SFP },
+	{ PCI_VDEVICE(BROADCOM, 0x16ec), .driver_data = BCM57414_NPAR },
+	{ PCI_VDEVICE(BROADCOM, 0x16ee), .driver_data = BCM57416_NPAR },
 #ifdef CONFIG_BNXT_SRIOV
 	{ PCI_VDEVICE(BROADCOM, 0x16cb), .driver_data = BCM57304_VF },
 	{ PCI_VDEVICE(BROADCOM, 0x16d3), .driver_data = BCM57404_VF },
+	{ PCI_VDEVICE(BROADCOM, 0x16dc), .driver_data = BCM57414_VF },
+	{ PCI_VDEVICE(BROADCOM, 0x16e1), .driver_data = BCM57314_VF },
 #endif
 	{ 0 }
 };
@@ -121,7 +181,8 @@ static const u16 bnxt_vf_req_snif[] = {
 
 static bool bnxt_vf_pciid(enum board_idx idx)
 {
-	return (idx == BCM57304_VF || idx == BCM57404_VF);
+	return (idx == BCM57304_VF || idx == BCM57404_VF ||
+		idx == BCM57314_VF || idx == BCM57414_VF);
 }
 
 #define DB_CP_REARM_FLAGS	(DB_KEY_CP | DB_IDX_VALID)
@@ -279,7 +340,9 @@ static netdev_tx_t bnxt_start_xmit(struct sk_buff *skb, struct net_device *dev)
 			cpu_to_le32(DB_KEY_TX_PUSH | DB_LONG_TX_PUSH | prod);
 		txr->tx_prod = prod;
 
+		tx_buf->is_push = 1;
 		netdev_tx_sent_queue(txq, skb->len);
+		wmb();	/* Sync is_push and byte queue before pushing data */
 
 		push_len = (length + sizeof(*tx_push) + 7) / 8;
 		if (push_len > 16) {
@@ -291,7 +354,6 @@ static netdev_tx_t bnxt_start_xmit(struct sk_buff *skb, struct net_device *dev)
 					 push_len);
 		}
 
-		tx_buf->is_push = 1;
 		goto tx_done;
 	}
 
@@ -584,7 +646,7 @@ static inline int bnxt_alloc_rx_page(struct bnxt *bp,
 	if (!page)
 		return -ENOMEM;
 
-	mapping = dma_map_page(&pdev->dev, page, 0, PAGE_SIZE,
+	mapping = dma_map_page(&pdev->dev, page, 0, BNXT_RX_PAGE_SIZE,
 			       PCI_DMA_FROMDEVICE);
 	if (dma_mapping_error(&pdev->dev, mapping)) {
 		__free_page(page);
@@ -738,7 +800,7 @@ static struct sk_buff *bnxt_rx_pages(struct bnxt *bp, struct bnxt_napi *bnapi,
 			return NULL;
 		}
 
-		dma_unmap_page(&pdev->dev, mapping, PAGE_SIZE,
+		dma_unmap_page(&pdev->dev, mapping, BNXT_RX_PAGE_SIZE,
 			       PCI_DMA_FROMDEVICE);
 
 		skb->data_len += frag_len;
@@ -1345,6 +1407,10 @@ static int bnxt_poll_work(struct bnxt *bp, struct bnxt_napi *bnapi, int budget)
 		if (!TX_CMP_VALID(txcmp, raw_cons))
 			break;
 
+		/* The valid test of the entry must be done first before
+		 * reading any further.
+		 */
+		rmb();
 		if (TX_CMP_TYPE(txcmp) == CMP_TYPE_TX_L2_CMP) {
 			tx_pkts++;
 			/* return full budget so NAPI will complete. */
@@ -1573,7 +1639,7 @@ static void bnxt_free_rx_skbs(struct bnxt *bp)
 
 			dma_unmap_page(&pdev->dev,
 				       dma_unmap_addr(rx_agg_buf, mapping),
-				       PAGE_SIZE, PCI_DMA_FROMDEVICE);
+				       BNXT_RX_PAGE_SIZE, PCI_DMA_FROMDEVICE);
 
 			rx_agg_buf->page = NULL;
 			__clear_bit(j, rxr->rx_agg_bmap);
@@ -1977,7 +2043,7 @@ static int bnxt_init_one_rx_ring(struct bnxt *bp, int ring_nr)
 
 	ring = &rxr->rx_agg_ring_struct;
 
-	type = ((u32)PAGE_SIZE << RX_BD_LEN_SHIFT) |
+	type = ((u32)BNXT_RX_PAGE_SIZE << RX_BD_LEN_SHIFT) |
 		RX_BD_TYPE_RX_AGG_BD | RX_BD_FLAGS_SOP;
 
 	bnxt_init_rxbd_pages(ring, type);
@@ -2170,7 +2236,7 @@ void bnxt_set_ring_params(struct bnxt *bp)
 	bp->rx_agg_nr_pages = 0;
 
 	if (bp->flags & BNXT_FLAG_TPA)
-		agg_factor = 4;
+		agg_factor = min_t(u32, 4, 65536 / BNXT_RX_PAGE_SIZE);
 
 	bp->flags &= ~BNXT_FLAG_JUMBO;
 	if (rx_space > PAGE_SIZE) {
@@ -2573,99 +2639,104 @@ alloc_mem_err:
 void bnxt_hwrm_cmd_hdr_init(struct bnxt *bp, void *request, u16 req_type,
 			    u16 cmpl_ring, u16 target_id)
 {
-	struct hwrm_cmd_req_hdr *req = request;
+	struct input *req = request;
 
-	req->cmpl_ring_req_type =
-		cpu_to_le32(req_type | (cmpl_ring << HWRM_CMPL_RING_SFT));
-	req->target_id_seq_id = cpu_to_le32(target_id << HWRM_TARGET_FID_SFT);
+	req->req_type = cpu_to_le16(req_type);
+	req->cmpl_ring = cpu_to_le16(cmpl_ring);
+	req->target_id = cpu_to_le16(target_id);
 	req->resp_addr = cpu_to_le64(bp->hwrm_cmd_resp_dma_addr);
 }
 
-int _hwrm_send_message(struct bnxt *bp, void *msg, u32 msg_len, int timeout)
+static int bnxt_hwrm_do_send_msg(struct bnxt *bp, void *msg, u32 msg_len,
+				 int timeout, bool silent)
 {
-	int i, intr_process, rc;
-	struct hwrm_cmd_req_hdr *req = msg;
+	int i, intr_process, rc, tmo_count;
+	struct input *req = msg;
 	u32 *data = msg;
 	__le32 *resp_len, *valid;
 	u16 cp_ring_id, len = 0;
 	struct hwrm_err_output *resp = bp->hwrm_cmd_resp_addr;
 
-	req->target_id_seq_id |= cpu_to_le32(bp->hwrm_cmd_seq++);
+	req->seq_id = cpu_to_le16(bp->hwrm_cmd_seq++);
 	memset(resp, 0, PAGE_SIZE);
-	cp_ring_id = (le32_to_cpu(req->cmpl_ring_req_type) &
-		      HWRM_CMPL_RING_MASK) >>
-		     HWRM_CMPL_RING_SFT;
+	cp_ring_id = le16_to_cpu(req->cmpl_ring);
 	intr_process = (cp_ring_id == INVALID_HW_RING_ID) ? 0 : 1;
 
 	/* Write request msg to hwrm channel */
 	__iowrite32_copy(bp->bar0, data, msg_len / 4);
 
-	for (i = msg_len; i < HWRM_MAX_REQ_LEN; i += 4)
+	for (i = msg_len; i < BNXT_HWRM_MAX_REQ_LEN; i += 4)
 		writel(0, bp->bar0 + i);
 
 	/* currently supports only one outstanding message */
 	if (intr_process)
-		bp->hwrm_intr_seq_id = le32_to_cpu(req->target_id_seq_id) &
-				       HWRM_SEQ_ID_MASK;
+		bp->hwrm_intr_seq_id = le16_to_cpu(req->seq_id);
 
 	/* Ring channel doorbell */
 	writel(1, bp->bar0 + 0x100);
 
+	if (!timeout)
+		timeout = DFLT_HWRM_CMD_TIMEOUT;
+
 	i = 0;
+	tmo_count = timeout * 40;
 	if (intr_process) {
 		/* Wait until hwrm response cmpl interrupt is processed */
 		while (bp->hwrm_intr_seq_id != HWRM_SEQ_ID_INVALID &&
-		       i++ < timeout) {
-			usleep_range(600, 800);
+		       i++ < tmo_count) {
+			usleep_range(25, 40);
 		}
 
 		if (bp->hwrm_intr_seq_id != HWRM_SEQ_ID_INVALID) {
 			netdev_err(bp->dev, "Resp cmpl intr err msg: 0x%x\n",
-				   req->cmpl_ring_req_type);
+				   le16_to_cpu(req->req_type));
 			return -1;
 		}
 	} else {
 		/* Check if response len is updated */
 		resp_len = bp->hwrm_cmd_resp_addr + HWRM_RESP_LEN_OFFSET;
-		for (i = 0; i < timeout; i++) {
+		for (i = 0; i < tmo_count; i++) {
 			len = (le32_to_cpu(*resp_len) & HWRM_RESP_LEN_MASK) >>
 			      HWRM_RESP_LEN_SFT;
 			if (len)
 				break;
-			usleep_range(600, 800);
+			usleep_range(25, 40);
 		}
 
-		if (i >= timeout) {
+		if (i >= tmo_count) {
 			netdev_err(bp->dev, "Error (timeout: %d) msg {0x%x 0x%x} len:%d\n",
-				   timeout, req->cmpl_ring_req_type,
-				   req->target_id_seq_id, *resp_len);
+				   timeout, le16_to_cpu(req->req_type),
+				   le16_to_cpu(req->seq_id), *resp_len);
 			return -1;
 		}
 
 		/* Last word of resp contains valid bit */
 		valid = bp->hwrm_cmd_resp_addr + len - 4;
-		for (i = 0; i < timeout; i++) {
+		for (i = 0; i < 5; i++) {
 			if (le32_to_cpu(*valid) & HWRM_RESP_VALID_MASK)
 				break;
-			usleep_range(600, 800);
+			udelay(1);
 		}
 
-		if (i >= timeout) {
+		if (i >= 5) {
 			netdev_err(bp->dev, "Error (timeout: %d) msg {0x%x 0x%x} len:%d v:%d\n",
-				   timeout, req->cmpl_ring_req_type,
-				   req->target_id_seq_id, len, *valid);
+				   timeout, le16_to_cpu(req->req_type),
+				   le16_to_cpu(req->seq_id), len, *valid);
 			return -1;
 		}
 	}
 
 	rc = le16_to_cpu(resp->error_code);
-	if (rc) {
+	if (rc && !silent)
 		netdev_err(bp->dev, "hwrm req_type 0x%x seq id 0x%x error 0x%x\n",
 			   le16_to_cpu(resp->req_type),
 			   le16_to_cpu(resp->seq_id), rc);
-		return rc;
-	}
-	return 0;
+	return rc;
+}
+
+int _hwrm_send_message(struct bnxt *bp, void *msg, u32 msg_len, int timeout)
+{
+	return bnxt_hwrm_do_send_msg(bp, msg, msg_len, timeout, false);
 }
 
 int hwrm_send_message(struct bnxt *bp, void *msg, u32 msg_len, int timeout)
@@ -2694,7 +2765,7 @@ static int bnxt_hwrm_func_drv_rgtr(struct bnxt *bp)
 	 * only checks if it is non-zero to enable async event forwarding
 	 */
 	req.async_event_fwd[0] |= cpu_to_le32(1);
-	req.os_type = cpu_to_le16(1);
+	req.os_type = cpu_to_le16(FUNC_DRV_RGTR_REQ_OS_TYPE_LINUX);
 	req.ver_maj = DRV_VER_MAJ;
 	req.ver_min = DRV_VER_MIN;
 	req.ver_upd = DRV_VER_UPD;
@@ -2943,12 +3014,12 @@ static int bnxt_hwrm_vnic_set_tpa(struct bnxt *bp, u16 vnic_id, u32 tpa_flags)
 		/* Number of segs are log2 units, and first packet is not
 		 * included as part of this units.
 		 */
-		if (mss <= PAGE_SIZE) {
-			n = PAGE_SIZE / mss;
+		if (mss <= BNXT_RX_PAGE_SIZE) {
+			n = BNXT_RX_PAGE_SIZE / mss;
 			nsegs = (MAX_SKB_FRAGS - 1) * n;
 		} else {
-			n = mss / PAGE_SIZE;
-			if (mss & (PAGE_SIZE - 1))
+			n = mss / BNXT_RX_PAGE_SIZE;
+			if (mss & (BNXT_RX_PAGE_SIZE - 1))
 				n++;
 			nsegs = (MAX_SKB_FRAGS - n) / n;
 		}
@@ -3071,6 +3142,7 @@ static int bnxt_hwrm_vnic_cfg(struct bnxt *bp, u16 vnic_id)
 	int grp_idx = 0;
 	struct bnxt_vnic_info *vnic = &bp->vnic_info[vnic_id];
 	struct hwrm_vnic_cfg_input req = {0};
+	u16 def_vlan = 0;
 
 	bnxt_hwrm_cmd_hdr_init(bp, &req, HWRM_VNIC_CFG, -1, -1);
 	/* Only RSS support for now TBD: COS & LB */
@@ -3090,7 +3162,11 @@ static int bnxt_hwrm_vnic_cfg(struct bnxt *bp, u16 vnic_id)
 	req.mru = cpu_to_le16(bp->dev->mtu + ETH_HLEN + ETH_FCS_LEN +
 			      VLAN_HLEN);
 
-	if (bp->flags & BNXT_FLAG_STRIP_VLAN)
+#ifdef CONFIG_BNXT_SRIOV
+	if (BNXT_VF(bp))
+		def_vlan = bp->vf.vlan;
+#endif
+	if ((bp->flags & BNXT_FLAG_STRIP_VLAN) || def_vlan)
 		req.flags |= cpu_to_le32(VNIC_CFG_REQ_FLAGS_VLAN_STRIP_MODE);
 
 	return hwrm_send_message(bp, &req, sizeof(req), HWRM_CMD_TIMEOUT);
@@ -3614,6 +3690,39 @@ static int bnxt_hwrm_stat_ctx_alloc(struct bnxt *bp)
 	return 0;
 }
 
+static int bnxt_hwrm_func_qcfg(struct bnxt *bp)
+{
+	struct hwrm_func_qcfg_input req = {0};
+	struct hwrm_func_qcfg_output *resp = bp->hwrm_cmd_resp_addr;
+	int rc;
+
+	bnxt_hwrm_cmd_hdr_init(bp, &req, HWRM_FUNC_QCFG, -1, -1);
+	req.fid = cpu_to_le16(0xffff);
+	mutex_lock(&bp->hwrm_cmd_lock);
+	rc = _hwrm_send_message(bp, &req, sizeof(req), HWRM_CMD_TIMEOUT);
+	if (rc)
+		goto func_qcfg_exit;
+
+#ifdef CONFIG_BNXT_SRIOV
+	if (BNXT_VF(bp)) {
+		struct bnxt_vf_info *vf = &bp->vf;
+
+		vf->vlan = le16_to_cpu(resp->vlan) & VLAN_VID_MASK;
+	}
+#endif
+	switch (resp->port_partition_type) {
+	case FUNC_QCFG_RESP_PORT_PARTITION_TYPE_NPAR1_0:
+	case FUNC_QCFG_RESP_PORT_PARTITION_TYPE_NPAR1_5:
+	case FUNC_QCFG_RESP_PORT_PARTITION_TYPE_NPAR2_0:
+		bp->port_partition_type = resp->port_partition_type;
+		break;
+	}
+
+func_qcfg_exit:
+	mutex_unlock(&bp->hwrm_cmd_lock);
+	return rc;
+}
+
 static int bnxt_hwrm_func_qcaps(struct bnxt *bp)
 {
 	int rc = 0;
@@ -3633,7 +3742,7 @@ static int bnxt_hwrm_func_qcaps(struct bnxt *bp)
 
 		pf->fw_fid = le16_to_cpu(resp->fid);
 		pf->port_id = le16_to_cpu(resp->port_id);
-		memcpy(pf->mac_addr, resp->perm_mac_address, ETH_ALEN);
+		memcpy(pf->mac_addr, resp->mac_address, ETH_ALEN);
 		memcpy(bp->dev->dev_addr, pf->mac_addr, ETH_ALEN);
 		pf->max_rsscos_ctxs = le16_to_cpu(resp->max_rsscos_ctx);
 		pf->max_cp_rings = le16_to_cpu(resp->max_cmpl_rings);
@@ -3657,7 +3766,7 @@ static int bnxt_hwrm_func_qcaps(struct bnxt *bp)
 		struct bnxt_vf_info *vf = &bp->vf;
 
 		vf->fw_fid = le16_to_cpu(resp->fid);
-		memcpy(vf->mac_addr, resp->perm_mac_address, ETH_ALEN);
+		memcpy(vf->mac_addr, resp->mac_address, ETH_ALEN);
 		if (is_valid_ether_addr(vf->mac_addr))
 			/* overwrite netdev dev_adr with admin VF MAC */
 			memcpy(bp->dev->dev_addr, vf->mac_addr, ETH_ALEN);
@@ -3733,6 +3842,7 @@ static int bnxt_hwrm_ver_get(struct bnxt *bp)
 	struct hwrm_ver_get_input req = {0};
 	struct hwrm_ver_get_output *resp = bp->hwrm_cmd_resp_addr;
 
+	bp->hwrm_max_req_len = HWRM_MAX_REQ_LEN;
 	bnxt_hwrm_cmd_hdr_init(bp, &req, HWRM_VER_GET, -1, -1);
 	req.hwrm_intf_maj = HWRM_VERSION_MAJOR;
 	req.hwrm_intf_min = HWRM_VERSION_MINOR;
@@ -3744,6 +3854,8 @@ static int bnxt_hwrm_ver_get(struct bnxt *bp)
 
 	memcpy(&bp->ver_resp, resp, sizeof(struct hwrm_ver_get_output));
 
+	bp->hwrm_spec_code = resp->hwrm_intf_maj << 16 |
+			     resp->hwrm_intf_min << 8 | resp->hwrm_intf_upd;
 	if (resp->hwrm_intf_maj < 1) {
 		netdev_warn(bp->dev, "HWRM interface %d.%d.%d is older than 1.0.0.\n",
 			    resp->hwrm_intf_maj, resp->hwrm_intf_min,
@@ -3753,6 +3865,13 @@ static int bnxt_hwrm_ver_get(struct bnxt *bp)
 	snprintf(bp->fw_ver_str, BC_HWRM_STR_LEN, "bc %d.%d.%d rm %d.%d.%d",
 		 resp->hwrm_fw_maj, resp->hwrm_fw_min, resp->hwrm_fw_bld,
 		 resp->hwrm_intf_maj, resp->hwrm_intf_min, resp->hwrm_intf_upd);
+
+	bp->hwrm_cmd_timeout = le16_to_cpu(resp->def_req_timeout);
+	if (!bp->hwrm_cmd_timeout)
+		bp->hwrm_cmd_timeout = DFLT_HWRM_CMD_TIMEOUT;
+
+	if (resp->hwrm_intf_maj >= 1)
+		bp->hwrm_max_req_len = le16_to_cpu(resp->max_req_win_len);
 
 hwrm_ver_get_exit:
 	mutex_unlock(&bp->hwrm_cmd_lock);
@@ -3891,9 +4010,11 @@ static int bnxt_alloc_rfs_vnics(struct bnxt *bp)
 }
 
 static int bnxt_cfg_rx_mode(struct bnxt *);
+static bool bnxt_mc_list_updated(struct bnxt *, u32 *);
 
 static int bnxt_init_chip(struct bnxt *bp, bool irq_re_init)
 {
+	struct bnxt_vnic_info *vnic = &bp->vnic_info[0];
 	int rc = 0;
 
 	if (irq_re_init) {
@@ -3949,13 +4070,22 @@ static int bnxt_init_chip(struct bnxt *bp, bool irq_re_init)
 		netdev_err(bp->dev, "HWRM vnic filter failure rc: %x\n", rc);
 		goto err_out;
 	}
-	bp->vnic_info[0].uc_filter_count = 1;
+	vnic->uc_filter_count = 1;
 
-	bp->vnic_info[0].rx_mask = CFA_L2_SET_RX_MASK_REQ_MASK_BCAST;
+	vnic->rx_mask = CFA_L2_SET_RX_MASK_REQ_MASK_BCAST;
 
 	if ((bp->dev->flags & IFF_PROMISC) && BNXT_PF(bp))
-		bp->vnic_info[0].rx_mask |=
-				CFA_L2_SET_RX_MASK_REQ_MASK_PROMISCUOUS;
+		vnic->rx_mask |= CFA_L2_SET_RX_MASK_REQ_MASK_PROMISCUOUS;
+
+	if (bp->dev->flags & IFF_ALLMULTI) {
+		vnic->rx_mask |= CFA_L2_SET_RX_MASK_REQ_MASK_ALL_MCAST;
+		vnic->mc_list_count = 0;
+	} else {
+		u32 mask = 0;
+
+		bnxt_mc_list_updated(bp, &mask);
+		vnic->rx_mask |= mask;
+	}
 
 	rc = bnxt_cfg_rx_mode(bp);
 	if (rc)
@@ -3965,6 +4095,11 @@ static int bnxt_init_chip(struct bnxt *bp, bool irq_re_init)
 	if (rc)
 		netdev_warn(bp->dev, "HWRM set coalescing failure rc: %x\n",
 			    rc);
+
+	if (BNXT_VF(bp)) {
+		bnxt_hwrm_func_qcfg(bp);
+		netdev_update_features(bp->dev);
+	}
 
 	return 0;
 
@@ -4150,7 +4285,7 @@ static int bnxt_setup_int_mode(struct bnxt *bp)
 	if (bp->flags & BNXT_FLAG_MSIX_CAP)
 		rc = bnxt_setup_msix(bp);
 
-	if (!(bp->flags & BNXT_FLAG_USING_MSIX)) {
+	if (!(bp->flags & BNXT_FLAG_USING_MSIX) && BNXT_PF(bp)) {
 		/* fallback to INTA */
 		rc = bnxt_setup_inta(bp);
 	}
@@ -4372,7 +4507,6 @@ static int bnxt_update_link(struct bnxt *bp, bool chng_link_state)
 	else
 		link_info->link_speed = 0;
 	link_info->force_link_speed = le16_to_cpu(resp->force_link_speed);
-	link_info->auto_link_speed = le16_to_cpu(resp->auto_link_speed);
 	link_info->support_speeds = le16_to_cpu(resp->support_speeds);
 	link_info->auto_link_speeds = le16_to_cpu(resp->auto_link_speed_mask);
 	link_info->preemphasis = le32_to_cpu(resp->preemphasis);
@@ -4380,8 +4514,8 @@ static int bnxt_update_link(struct bnxt *bp, bool chng_link_state)
 	link_info->phy_ver[1] = resp->phy_min;
 	link_info->phy_ver[2] = resp->phy_bld;
 	link_info->media_type = resp->media_type;
-	link_info->transceiver = resp->transceiver_type;
-	link_info->phy_addr = resp->phy_addr;
+	link_info->transceiver = resp->xcvr_pkg_type;
+	link_info->phy_addr = resp->eee_config_phy_addr;
 
 	/* TODO: need to add more logic to report VF link */
 	if (chng_link_state) {
@@ -4406,7 +4540,7 @@ bnxt_hwrm_set_pause_common(struct bnxt *bp, struct hwrm_port_phy_cfg_input *req)
 		if (bp->link_info.req_flow_ctrl & BNXT_LINK_PAUSE_RX)
 			req->auto_pause |= PORT_PHY_CFG_REQ_AUTO_PAUSE_RX;
 		if (bp->link_info.req_flow_ctrl & BNXT_LINK_PAUSE_TX)
-			req->auto_pause |= PORT_PHY_CFG_REQ_AUTO_PAUSE_RX;
+			req->auto_pause |= PORT_PHY_CFG_REQ_AUTO_PAUSE_TX;
 		req->enables |=
 			cpu_to_le32(PORT_PHY_CFG_REQ_ENABLES_AUTO_PAUSE);
 	} else {
@@ -4428,7 +4562,7 @@ static void bnxt_hwrm_set_link_common(struct bnxt *bp,
 
 	if (autoneg & BNXT_AUTONEG_SPEED) {
 		req->auto_mode |=
-			PORT_PHY_CFG_REQ_AUTO_MODE_MASK;
+			PORT_PHY_CFG_REQ_AUTO_MODE_SPEED_MASK;
 
 		req->enables |= cpu_to_le32(
 			PORT_PHY_CFG_REQ_ENABLES_AUTO_LINK_SPEED_MASK);
@@ -4442,9 +4576,6 @@ static void bnxt_hwrm_set_link_common(struct bnxt *bp,
 		req->flags |= cpu_to_le32(PORT_PHY_CFG_REQ_FLAGS_FORCE);
 	}
 
-	/* currently don't support half duplex */
-	req->auto_duplex = PORT_PHY_CFG_REQ_AUTO_DUPLEX_FULL;
-	req->enables |= cpu_to_le32(PORT_PHY_CFG_REQ_ENABLES_AUTO_DUPLEX);
 	/* tell chimp that the setting takes effect immediately */
 	req->flags |= cpu_to_le32(PORT_PHY_CFG_REQ_FLAGS_RESET_PHY);
 }
@@ -4939,6 +5070,14 @@ skip_uc:
 
 static u32 bnxt_fix_features(struct net_device *dev, u32 features)
 {
+#ifdef CONFIG_BNXT_SRIOV
+	struct bnxt *bp = netdev_priv(dev);
+
+	if (BNXT_VF(bp)) {
+		if (bp->vf.vlan)
+			features &= ~(NETIF_F_HW_VLAN_RX);
+	}
+#endif
 	return features;
 }
 
@@ -5636,6 +5775,8 @@ static int bnxt_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 		rc = -1;
 		goto init_err;
 	}
+
+	bnxt_hwrm_func_qcfg(bp);
 
 	bnxt_set_tpa_flags(bp);
 	bnxt_set_ring_params(bp);

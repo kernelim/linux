@@ -3653,7 +3653,7 @@ cifs_construct_tcon(struct cifs_sb_info *cifs_sb, uid_t fsuid)
 	vol_info->no_linux_ext = !master_tcon->unix_ext;
 
 	/* FIXME: allow for other secFlg settings */
-	vol_info->secFlg = CIFSSEC_MUST_KRB5;
+	vol_info->secFlg = CIFSSEC_MUST_KRB5 | CIFSSEC_MAY_SIGN;
 
 	/* get a reference for the same TCP session */
 	spin_lock(&cifs_tcp_ses_lock);

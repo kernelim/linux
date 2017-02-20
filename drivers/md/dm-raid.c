@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2010-2011 Neil Brown
- * Copyright (C) 2010-2011 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2010-2016 Red Hat, Inc. All rights reserved.
  *
  * This file is released under the GPL.
  */
@@ -745,7 +745,8 @@ static int read_disk_sb(struct md_rdev *rdev, int size)
 		DMERR("Failed to read superblock of device at position %d",
 		      rdev->raid_disk);
 		md_error(rdev->mddev, rdev);
-		return -EINVAL;
+		set_bit(Faulty, &rdev->flags);
+		return -EIO;
 	}
 
 	rdev->sb_loaded = 1;
@@ -963,7 +964,12 @@ static int super_init_validation(struct mddev *mddev, struct md_rdev *rdev)
 
 static int super_validate(struct mddev *mddev, struct md_rdev *rdev)
 {
-	struct dm_raid_superblock *sb = page_address(rdev->sb_page);
+	struct dm_raid_superblock *sb;
+
+	if (!rdev->sb_page || rdev->raid_disk < 0)
+		return 0;
+
+	sb = page_address(rdev->sb_page);
 
 	/*
 	 * If mddev->events is not set, we know we have not yet initialized
@@ -1001,12 +1007,11 @@ static int super_validate(struct mddev *mddev, struct md_rdev *rdev)
 static int analyse_superblocks(struct dm_target *ti, struct raid_set *rs)
 {
 	int ret;
-	struct raid_dev *dev;
-	struct md_rdev *rdev, *tmp, *freshest;
+	struct md_rdev *rdev, *freshest;
 	struct mddev *mddev = &rs->md;
 
 	freshest = NULL;
-	rdev_for_each_safe(rdev, tmp, mddev) {
+	rdev_for_each(rdev, mddev) {
 		/*
 		 * Skipping super_load due to DMPF_SYNC will cause
 		 * the array to undergo initialization again as
@@ -1032,30 +1037,18 @@ static int analyse_superblocks(struct dm_target *ti, struct raid_set *rs)
 		case 0:
 			break;
 		default:
-			dev = container_of(rdev, struct raid_dev, rdev);
-			if (dev->meta_dev)
-				dm_put_device(ti, dev->meta_dev);
-			dev->meta_dev = NULL;
-			rdev->meta_bdev = NULL;
-
-			if (rdev->sb_page)
-				put_page(rdev->sb_page);
-			rdev->sb_page = NULL;
-
-			rdev->sb_loaded = 0;
-
+			/* This is a failure to read the superblock from the metadata device. */
 			/*
-			 * We might be able to salvage the data device
-			 * even though the meta device has failed.  For
-			 * now, we behave as though '- -' had been
-			 * passed in for this device via the CTR table.
+			 * We keep the dm_devs to be able to emit the device tuple
+			 * properly on the table line in raid_status() (rather than
+			 * mistakenly acting as if '- -' got passed into the constructor).
+			 *
+			 * The rdev has to stay on the same_set list to allow for
+			 * the attempt to restore faulty devices on second resume.
 			 */
-			if (dev->data_dev)
-				dm_put_device(ti, dev->data_dev);
-			dev->data_dev = NULL;
-			rdev->bdev = NULL;
-
-			list_del(&rdev->same_set);
+			set_bit(Faulty, &rdev->flags);
+			rdev->raid_disk = rdev->saved_raid_disk = -1;
+			break;
 		}
 	}
 
@@ -1284,9 +1277,12 @@ static int raid_status(struct dm_target *ti, status_type_t type,
 		 *  'D' = Dead/Failed device
 		 *  'a' = Alive but not in-sync
 		 *  'A' = Alive and in-sync
+		 *  '-' = Non-existing device (i.e. uspace passed '- -' into the ctr)
 		 */
 		for (i = 0; i < rs->md.raid_disks; i++) {
-			if (test_bit(Faulty, &rs->dev[i].rdev.flags))
+			if (!rs->dev[i].rdev.bdev)
+				DMEMIT("-");
+			else if (test_bit(Faulty, &rs->dev[i].rdev.flags))
 				DMEMIT("D");
 			else if (!array_in_sync ||
 				 !test_bit(In_sync, &rs->dev[i].rdev.flags))
@@ -1531,22 +1527,26 @@ static void attempt_restore_of_faulty_devices(struct raid_set *rs)
 			 * '>= 0' - meaning we must call this function
 			 * ourselves.
 			 */
-			if ((r->raid_disk >= 0) &&
-			    (r->mddev->pers->hot_remove_disk(r->mddev, r) != 0))
-				/* Failed to revive this device, try next */
-				continue;
-
-			r->raid_disk = i;
-			r->saved_raid_disk = i;
 			flags = r->flags;
+			clear_bit(In_sync, &r->flags); /* Mandatory for hot remove. */
+			if (r->raid_disk >= 0) {
+				if (r->mddev->pers->hot_remove_disk(r->mddev, r)) {
+					/* Failed to revive this device, try next */
+					r->flags = flags;
+					continue;
+				}
+			} else
+				r->raid_disk = r->saved_raid_disk = i;
+
 			clear_bit(Faulty, &r->flags);
 			clear_bit(WriteErrorSeen, &r->flags);
-			clear_bit(In_sync, &r->flags);
+
 			if (r->mddev->pers->hot_add_disk(r->mddev, r)) {
-				r->raid_disk = -1;
-				r->saved_raid_disk = -1;
+				/* Failed to revive this device, try next */
+				r->raid_disk = r->saved_raid_disk = -1;
 				r->flags = flags;
 			} else {
+				clear_bit(In_sync, &r->flags);
 				r->recovery_offset = 0;
 				cleared_failed_devices |= 1 << i;
 			}
@@ -1585,7 +1585,7 @@ static void raid_resume(struct dm_target *ti)
 
 static struct target_type raid_target = {
 	.name = "raid",
-	.version = {1, 3, 5},
+	.version = {1, 3, 6},
 	.module = THIS_MODULE,
 	.ctr = raid_ctr,
 	.dtr = raid_dtr,

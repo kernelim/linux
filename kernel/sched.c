@@ -2130,9 +2130,6 @@ static int effective_prio(struct task_struct *p)
 	return p->prio;
 }
 
-/*
- * activate_task - move a task to the runqueue.
- */
 static void activate_task(struct rq *rq, struct task_struct *p, int flags)
 {
 	if (task_contributes_to_load(p))
@@ -2141,9 +2138,6 @@ static void activate_task(struct rq *rq, struct task_struct *p, int flags)
 	enqueue_task(rq, p, flags);
 }
 
-/*
- * deactivate_task - remove a task from the runqueue.
- */
 static void deactivate_task(struct rq *rq, struct task_struct *p, int flags)
 {
 	if (task_contributes_to_load(p))
@@ -7102,7 +7096,7 @@ recheck:
 	on_rq = p->se.on_rq;
 	running = task_current(rq, p);
 	if (on_rq)
-		deactivate_task(rq, p, 0);
+		dequeue_task(rq, p, 0);
 	if (running)
 		p->sched_class->put_prev_task(rq, p);
 
@@ -7115,7 +7109,7 @@ recheck:
 	if (running)
 		p->sched_class->set_curr_task(rq);
 	if (on_rq) {
-		activate_task(rq, p, 0);
+		enqueue_task(rq, p, 0);
 
 		check_class_changed(rq, p, prev_class, oldprio, running);
 	}
@@ -8025,9 +8019,9 @@ static int __migrate_task(struct task_struct *p, int src_cpu, int dest_cpu)
 	 * placed properly.
 	 */
 	if (p->se.on_rq) {
-		deactivate_task(rq_src, p, 0);
+		dequeue_task(rq_src, p, 0);
 		set_task_cpu(p, dest_cpu);
-		activate_task(rq_dest, p, 0);
+		enqueue_task(rq_dest, p, 0);
 		check_preempt_curr(rq_dest, p, 0);
 	}
 done:
@@ -8878,11 +8872,11 @@ static int init_rootdomain(struct root_domain *rd, bool bootmem)
 	if (bootmem)
 		gfp = GFP_NOWAIT;
 
-	if (!alloc_cpumask_var(&rd->span, gfp))
+	if (!zalloc_cpumask_var(&rd->span, gfp))
 		goto out;
-	if (!alloc_cpumask_var(&rd->online, gfp))
+	if (!zalloc_cpumask_var(&rd->online, gfp))
 		goto free_span;
-	if (!alloc_cpumask_var(&rd->rto_mask, gfp))
+	if (!zalloc_cpumask_var(&rd->rto_mask, gfp))
 		goto free_online;
 
 	if (cpupri_init(&rd->cpupri, bootmem) != 0)
@@ -10635,10 +10629,10 @@ static void normalize_task(struct rq *rq, struct task_struct *p)
 
 	on_rq = p->se.on_rq;
 	if (on_rq)
-		deactivate_task(rq, p, 0);
+		dequeue_task(rq, p, 0);
 	__setscheduler(rq, p, SCHED_NORMAL, 0);
 	if (on_rq) {
-		activate_task(rq, p, 0);
+		enqueue_task(rq, p, 0);
 		resched_task(rq->curr);
 	}
 }

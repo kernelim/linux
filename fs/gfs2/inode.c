@@ -191,6 +191,10 @@ struct inode *gfs2_inode_lookup(struct super_block *sb, unsigned int type,
 		}
 
 		gfs2_set_iop(inode);
+
+		inode->i_atime.tv_sec = 0;
+		inode->i_atime.tv_nsec = 0;
+
 		unlock_new_inode(inode);
 	}
 
@@ -609,6 +613,10 @@ static void init_dinode(struct gfs2_inode *dip, struct gfs2_inode *ip,
 		memcpy(dibh->b_data + sizeof(struct gfs2_dinode), symname, ip->i_inode.i_size);
 		break;
 	}
+
+	/* Force SYSTEM flag on all files and subdirs of a SYSTEM directory */
+	if (dip->i_diskflags & GFS2_DIF_SYSTEM)
+		di->di_flags |= cpu_to_be32(GFS2_DIF_SYSTEM);
 
 	set_buffer_uptodate(dibh);
 

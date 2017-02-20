@@ -364,7 +364,7 @@ nfsd4_open(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 				goto out;
 			break;
 		case NFS4_OPEN_CLAIM_PREVIOUS:
-			open->op_stateowner->so_confirmed = 1;
+			open->op_stateowner->so_flags |= NFS4_OO_CONFIRMED;
 			/*
 			 * The CURRENT_FH is already set to the file being
 			 * opened.  (1) set open->op_cinfo, (2) set
@@ -377,7 +377,7 @@ nfsd4_open(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 				goto out;
 			break;
              	case NFS4_OPEN_CLAIM_DELEGATE_PREV:
-			open->op_stateowner->so_confirmed = 1;
+			open->op_stateowner->so_flags |= NFS4_OO_CONFIRMED;
 			dprintk("NFSD: unsupported OPEN claim type %d\n",
 				open->op_claim_type);
 			status = nfserr_notsupp;
@@ -395,6 +395,7 @@ nfsd4_open(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 	 */
 	status = nfsd4_process_open2(rqstp, &cstate->current_fh, open);
 out:
+	nfsd4_cleanup_open_state(open, status);
 	if (open->op_stateowner) {
 		nfs4_get_stateowner(open->op_stateowner);
 		cstate->replay_owner = open->op_stateowner;
@@ -776,6 +777,7 @@ nfsd4_secinfo(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 				    &exp, &dentry);
 	if (err)
 		return err;
+	fh_unlock(&cstate->current_fh);
 	if (dentry->d_inode == NULL) {
 		exp_put(exp);
 		err = nfserr_noent;

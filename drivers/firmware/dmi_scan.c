@@ -712,7 +712,7 @@ void __init dmi_scan_machine(void)
 		memcpy_fromio(buf, p, 32);
 		dmi_early_unmap(p, 32);
 
-		if (!dmi_present(buf + 0x10)) { /* offset of _DMI_ string */
+		if (!dmi_present(buf)) {
 			dmi_available = 1;
 			goto out;
 		}

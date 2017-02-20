@@ -439,6 +439,7 @@ _xfs_buf_find(
 	struct rb_node		**rbp;
 	struct rb_node		*parent;
 	xfs_buf_t		*bp;
+	xfs_daddr_t		eofs;
 
 	range_base = (ioff << BBSHIFT);
 	range_length = (isize << BBSHIFT);
@@ -446,6 +447,23 @@ _xfs_buf_find(
 	/* Check for IOs smaller than the sector size / not sector aligned */
 	ASSERT(!(range_length < (btp->bt_meta_sectorsize)));
 	ASSERT(!(range_base & (xfs_off_t)btp->bt_meta_sectormask));
+
+	/*
+	 * Corrupted block numbers can get through to here, unfortunately, so we
+	 * have to check that the buffer falls within the filesystem bounds.
+	 */
+	eofs = XFS_FSB_TO_BB(btp->bt_mount, btp->bt_mount->m_sb.sb_dblocks);
+	if (ioff < 0 || ioff >= eofs) {
+		/*
+		 * XXX (dgc): we should really be returning EFSCORRUPTED here,
+		 * but none of the higher level infrastructure supports
+		 * returning a specific error on buffer lookup failures.
+		 */
+		xfs_alert(btp->bt_mount,
+			  "%s: Block out of range: block 0x%llx, EOFS 0x%llx ",
+			  __func__, ioff, eofs);
+		return NULL;
+	}
 
 	/* get tree root */
 	pag = xfs_perag_get(btp->bt_mount,

@@ -135,6 +135,7 @@ struct rpc_program		nfsacl_program = {
 #endif  /* CONFIG_NFS_V3_ACL */
 
 struct nfs_client_initdata {
+	unsigned long init_flags;
 	const char *hostname;
 	const struct sockaddr *addr;
 	size_t addrlen;
@@ -500,8 +501,7 @@ static struct nfs_client *
 nfs_get_client(const struct nfs_client_initdata *cl_init,
 	       const struct rpc_timeout *timeparms,
 	       const char *ip_addr,
-	       rpc_authflavor_t authflavour,
-	       int noresvport)
+	       rpc_authflavor_t authflavour)
 {
 	struct nfs_client *clp, *new = NULL;
 	int error;
@@ -532,9 +532,10 @@ install_client:
 	clp = new;
 	list_add(&clp->cl_share_link, &nfs_client_list);
 	spin_unlock(&nfs_client_lock);
+	new->cl_flags = cl_init->init_flags;
 
 	error = cl_init->rpc_ops->init_client(clp, timeparms, ip_addr,
-					      authflavour, noresvport);
+					      authflavour);
 	if (error < 0) {
 		nfs_put_client(clp);
 		return ERR_PTR(error);
@@ -641,8 +642,7 @@ static void nfs_init_timeout_values(struct rpc_timeout *to, int proto,
  */
 static int nfs_create_rpc_client(struct nfs_client *clp,
 				 const struct rpc_timeout *timeparms,
-				 rpc_authflavor_t flavor,
-				 int discrtry, int noresvport)
+				 rpc_authflavor_t flavor)
 {
 	struct rpc_clnt		*clnt = NULL;
 	struct rpc_create_args args = {
@@ -657,9 +657,9 @@ static int nfs_create_rpc_client(struct nfs_client *clp,
 		.authflavor	= flavor,
 	};
 
-	if (discrtry)
+	if (test_bit(NFS_CS_DISCRTRY, &clp->cl_flags))
 		args.flags |= RPC_CLNT_CREATE_DISCRTRY;
-	if (noresvport)
+	if (test_bit(NFS_CS_NORESVPORT, &clp->cl_flags))
 		args.flags |= RPC_CLNT_CREATE_NONPRIVPORT;
 
 	if (!IS_ERR(clp->cl_rpcclient))
@@ -794,8 +794,7 @@ static int nfs_init_server_rpcclient(struct nfs_server *server,
  * Initialise an NFS2 or NFS3 client
  */
 int nfs_init_client(struct nfs_client *clp, const struct rpc_timeout *timeparms,
-		    const char *ip_addr, rpc_authflavor_t authflavour,
-		    int noresvport)
+		    const char *ip_addr, rpc_authflavor_t authflavour)
 {
 	int error;
 
@@ -809,8 +808,7 @@ int nfs_init_client(struct nfs_client *clp, const struct rpc_timeout *timeparms,
 	 * Create a client RPC handle for doing FSSTAT with UNIX auth only
 	 * - RFC 2623, sec 2.3.2
 	 */
-	error = nfs_create_rpc_client(clp, timeparms, RPC_AUTH_UNIX,
-				      0, noresvport);
+	error = nfs_create_rpc_client(clp, timeparms, RPC_AUTH_UNIX);
 	if (error < 0)
 		goto error;
 	nfs_mark_client_ready(clp, NFS_CS_READY);
@@ -848,10 +846,11 @@ static int nfs_init_server(struct nfs_server *server,
 
 	nfs_init_timeout_values(&timeparms, data->nfs_server.protocol,
 			data->timeo, data->retrans);
+	if (data->flags & NFS_MOUNT_NORESVPORT)
+		set_bit(NFS_CS_NORESVPORT, &cl_init.init_flags);
 
 	/* Allocate or find a client reference we can use */
-	clp = nfs_get_client(&cl_init, &timeparms, NULL, RPC_AUTH_UNIX,
-			     data->flags & NFS_MOUNT_NORESVPORT);
+	clp = nfs_get_client(&cl_init, &timeparms, NULL, RPC_AUTH_UNIX);
 	if (IS_ERR(clp)) {
 		dprintk("<-- nfs_init_server() = error %ld\n", PTR_ERR(clp));
 		return PTR_ERR(clp);
@@ -1347,8 +1346,7 @@ static int nfs4_init_client_minor_version(struct nfs_client *clp)
 int nfs4_init_client(struct nfs_client *clp,
 		     const struct rpc_timeout *timeparms,
 		     const char *ip_addr,
-		     rpc_authflavor_t authflavour,
-		     int noresvport)
+		     rpc_authflavor_t authflavour)
 {
 	int error;
 
@@ -1361,8 +1359,8 @@ int nfs4_init_client(struct nfs_client *clp,
 	/* Check NFS protocol revision and initialize RPC op vector */
 	clp->rpc_ops = &nfs_v4_clientops;
 
-	error = nfs_create_rpc_client(clp, timeparms, authflavour,
-				      1, noresvport);
+	__set_bit(NFS_CS_DISCRTRY, &clp->cl_flags);
+	error = nfs_create_rpc_client(clp, timeparms, authflavour);
 	if (error < 0)
 		goto error;
 	strlcpy(clp->cl_ipaddr, ip_addr, sizeof(clp->cl_ipaddr));
@@ -1414,9 +1412,11 @@ static int nfs4_set_client(struct nfs_server *server,
 
 	dprintk("--> nfs4_set_client()\n");
 
+	if (server->flags & NFS_MOUNT_NORESVPORT)
+		set_bit(NFS_CS_NORESVPORT, &cl_init.init_flags);
+
 	/* Allocate or find a client reference we can use */
-	clp = nfs_get_client(&cl_init, timeparms, ip_addr, authflavour,
-			     server->flags & NFS_MOUNT_NORESVPORT);
+	clp = nfs_get_client(&cl_init, timeparms, ip_addr, authflavour);
 	if (IS_ERR(clp)) {
 		error = PTR_ERR(clp);
 		goto error;
@@ -1449,10 +1449,11 @@ error:
  * low timeout interval so that if a connection is lost, we retry through
  * the MDS.
  */
-struct nfs_client *nfs4_set_ds_client(struct nfs_client* mds_clp,
+struct nfs_client *nfs4_set_ds_client(struct nfs_server* mds_srv,
 		const struct sockaddr *ds_addr,
 		int ds_addrlen, int ds_proto)
 {
+	struct nfs_client *mds_clp = mds_srv->nfs_client;
 	struct nfs_client_initdata cl_init = {
 		.addr = ds_addr,
 		.addrlen = ds_addrlen,
@@ -1463,6 +1464,9 @@ struct nfs_client *nfs4_set_ds_client(struct nfs_client* mds_clp,
 	struct rpc_timeout ds_timeout;
 	struct nfs_client *clp;
 
+	if (mds_srv->flags & NFS_MOUNT_NORESVPORT)
+		__set_bit(NFS_CS_NORESVPORT, &cl_init.init_flags);
+
 	/*
 	 * Set an authflavor equual to the MDS value. Use the MDS nfs_client
 	 * cl_ipaddr so as to use the same EXCHANGE_ID co_ownerid as the MDS
@@ -1470,7 +1474,7 @@ struct nfs_client *nfs4_set_ds_client(struct nfs_client* mds_clp,
 	 */
 	nfs_init_timeout_values(&ds_timeout, ds_proto, dataserver_timeo, dataserver_retrans);
 	clp = nfs_get_client(&cl_init, &ds_timeout, mds_clp->cl_ipaddr,
-			     mds_clp->cl_rpcclient->cl_auth->au_flavor, 0);
+			     mds_clp->cl_rpcclient->cl_auth->au_flavor);
 
 	dprintk("<-- %s %p\n", __func__, clp);
 	return clp;

@@ -1229,7 +1229,7 @@ static int kill_something_info(int sig, struct siginfo *info, pid_t pid)
 		return ret;
 	}
 
-	read_lock(&tasklist_lock);
+	tasklist_read_lock();
 	if (pid != -1) {
 		ret = __kill_pgrp_info(sig, info,
 				pid ? find_vpid(-pid) : task_pgrp(current));

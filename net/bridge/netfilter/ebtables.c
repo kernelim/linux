@@ -347,8 +347,13 @@ ebt_check_match(struct ebt_entry_match *m, struct xt_mtchk_param *par,
 	    left - sizeof(struct ebt_entry_match) < m->match_size)
 		return -EINVAL;
 
-	match = try_then_request_module(xt_find_match(NFPROTO_BRIDGE,
-		m->u.name, 0), "ebt_%s", m->u.name);
+	match = xt_find_match(NFPROTO_BRIDGE, m->u.name, 0);
+	if (IS_ERR_OR_NULL(match) || match->family != NFPROTO_BRIDGE) {
+		if (!IS_ERR_OR_NULL(match))
+			module_put(match->me);
+		request_module("ebt_%s", m->u.name);
+		match = xt_find_match(NFPROTO_BRIDGE, m->u.name, 0);
+	}
 	if (IS_ERR(match))
 		return PTR_ERR(match);
 	if (match == NULL)

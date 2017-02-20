@@ -2009,6 +2009,12 @@ W:	http://acpi4asus.sf.net
 S:	Maintained
 F:	drivers/platform/x86/eeepc-laptop.c
 
+EFIFB FRAMEBUFFER DRIVER
+L:	linux-fbdev@vger.kernel.org
+M:	Peter Jones <pjones@redhat.com>
+S:	Maintained
+F:	drivers/video/efifb.c
+
 EFS FILESYSTEM
 W:	http://aeschi.ch.eu.org/efs/
 S:	Orphan
@@ -3571,6 +3577,18 @@ W:	http://www.monstr.eu/fdt/
 T:	git git://git.monstr.eu/linux-2.6-microblaze.git
 S:	Supported
 F:	arch/microblaze/
+
+MICROSEMI SMART ARRAY SMARTPQI DRIVER (smartpqi)
+M:	Don Brace <don.brace@microsemi.com>
+L:	esc.storagedev@microsemi.com
+L:	linux-scsi@vger.kernel.org
+S:	Supported
+F:	drivers/scsi/smartpqi/smartpqi*.[ch]
+F:	drivers/scsi/smartpqi/Kconfig
+F:	drivers/scsi/smartpqi/Makefile
+F:	include/linux/cciss*.h
+F:	include/uapi/linux/cciss*.h
+F:	Documentation/scsi/smartpqi.txt
 
 MICROTEK X6 SCANNER
 M:	Oliver Neukum <oliver@neukum.name>

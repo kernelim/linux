@@ -146,6 +146,13 @@ struct dlm_node_addr {
 	struct sockaddr_storage *addr[DLM_MAX_ADDR_COUNT];
 };
 
+static struct listen_sock_callbacks {
+	void (*sk_error_report)(struct sock *);
+	void (*sk_data_ready)(struct sock *, int);
+	void (*sk_state_change)(struct sock *);
+	void (*sk_write_space)(struct sock *);
+} listen_sock;
+
 static LIST_HEAD(dlm_node_addrs);
 static DEFINE_SPINLOCK(dlm_node_addrs_spin);
 
@@ -466,17 +473,96 @@ int dlm_lowcomms_connect_node(int nodeid)
 	return 0;
 }
 
+static void lowcomms_error_report(struct sock *sk)
+{
+	struct connection *con;
+	struct sockaddr_storage saddr;
+	int buflen;
+	void (*orig_report)(struct sock *) = NULL;
+
+	read_lock_bh(&sk->sk_callback_lock);
+	con = sock2con(sk);
+	if (con == NULL)
+		goto out;
+
+	orig_report = listen_sock.sk_error_report;
+	if (con->sock == NULL ||
+	    kernel_getpeername(con->sock, (struct sockaddr *)&saddr, &buflen)) {
+		printk_ratelimited(KERN_ERR "dlm: node %d: socket error "
+				   "sending to node %d, port %d, "
+				   "sk_err=%d/%d\n", dlm_our_nodeid(),
+				   con->nodeid, dlm_config.ci_tcp_port,
+				   sk->sk_err, sk->sk_err_soft);
+	} else if (saddr.ss_family == AF_INET) {
+		struct sockaddr_in *sin4 = (struct sockaddr_in *)&saddr;
+
+		printk_ratelimited(KERN_ERR "dlm: node %d: socket error "
+				   "sending to node %d at " NIPQUAD_FMT ", "
+				   "port %d, sk_err=%d/%d\n", dlm_our_nodeid(),
+				   con->nodeid, NIPQUAD(sin4->sin_addr.s_addr),
+				   dlm_config.ci_tcp_port, sk->sk_err,
+				   sk->sk_err_soft);
+	} else {
+		struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&saddr;
+
+		printk_ratelimited(KERN_ERR "dlm: node %d: socket error "
+				   "sending to node %d at %u.%u.%u.%u, "
+				   "port %d, sk_err=%d/%d\n", dlm_our_nodeid(),
+				   con->nodeid, sin6->sin6_addr.s6_addr32[0],
+				   sin6->sin6_addr.s6_addr32[1],
+				   sin6->sin6_addr.s6_addr32[2],
+				   sin6->sin6_addr.s6_addr32[3],
+				   dlm_config.ci_tcp_port, sk->sk_err,
+				   sk->sk_err_soft);
+	}
+out:
+	read_unlock_bh(&sk->sk_callback_lock);
+	if (orig_report)
+		orig_report(sk);
+}
+
+/* Save the callbacks of the listen socket. */
+static void save_listen_callbacks(struct socket *sock)
+{
+	struct sock *sk = sock->sk;
+
+	write_lock_bh(&sk->sk_callback_lock);
+	listen_sock.sk_data_ready = sk->sk_data_ready;
+	listen_sock.sk_state_change = sk->sk_state_change;
+	listen_sock.sk_write_space = sk->sk_write_space;
+	listen_sock.sk_error_report = sk->sk_error_report;
+	write_unlock_bh(&sk->sk_callback_lock);
+}
+
+static void restore_callbacks(struct socket *sock)
+{
+	struct sock *sk = sock->sk;
+
+	write_lock_bh(&sk->sk_callback_lock);
+	sk->sk_user_data = NULL;
+	sk->sk_data_ready = listen_sock.sk_data_ready;
+	sk->sk_state_change = listen_sock.sk_state_change;
+	sk->sk_write_space = listen_sock.sk_write_space;
+	sk->sk_error_report = listen_sock.sk_error_report;
+	write_unlock_bh(&sk->sk_callback_lock);
+}
+
 /* Make a socket active */
 static int add_sock(struct socket *sock, struct connection *con)
 {
+	struct sock *sk = sock->sk;
+
+	write_lock_bh(&sk->sk_callback_lock);
 	con->sock = sock;
 
+	sk->sk_user_data = con;
 	/* Install a data_ready callback */
-	con->sock->sk->sk_data_ready = lowcomms_data_ready;
-	con->sock->sk->sk_write_space = lowcomms_write_space;
-	con->sock->sk->sk_state_change = lowcomms_state_change;
-	con->sock->sk->sk_user_data = con;
-	con->sock->sk->sk_allocation = GFP_NOFS;
+	sk->sk_data_ready = lowcomms_data_ready;
+	sk->sk_write_space = lowcomms_write_space;
+	sk->sk_state_change = lowcomms_state_change;
+	sk->sk_allocation = GFP_NOFS;
+	sk->sk_error_report = lowcomms_error_report;
+	write_unlock_bh(&sk->sk_callback_lock);
 	return 0;
 }
 
@@ -512,6 +598,7 @@ static void close_connection(struct connection *con, bool and_other,
 
 	mutex_lock(&con->sock_mutex);
 	if (con->sock) {
+		restore_callbacks(con->sock);
 		sock_release(con->sock);
 		con->sock = NULL;
 	}
@@ -1151,9 +1238,9 @@ static struct socket *tcp_create_listen_sock(struct connection *con,
 		log_print("Failed to set SO_REUSEADDR on socket: %d", result);
 	}
 	sock->sk->sk_user_data = con;
+	save_listen_callbacks(sock);
 	con->rx_action = tcp_accept_from_sock;
 	con->connect_action = tcp_connect_to_sock;
-	con->sock = sock;
 
 	/* Bind to our port */
 	make_sockaddr(saddr, dlm_config.ci_tcp_port, &addr_len);
@@ -1233,13 +1320,17 @@ static int sctp_listen_for_all(void)
 	if (result < 0)
 		log_print("Could not set SCTP NODELAY error %d\n", result);
 
+	write_lock_bh(&sock->sk->sk_callback_lock);
 	/* Init con struct */
 	sock->sk->sk_user_data = con;
+	save_listen_callbacks(sock);
+
 	con->sock = sock;
 	con->sock->sk->sk_data_ready = lowcomms_data_ready;
 	con->rx_action = sctp_accept_from_sock;
 	con->connect_action = sctp_connect_to_sock;
 
+	write_unlock_bh(&sock->sk->sk_callback_lock);
 	/* Bind to all addresses. */
 	if (sctp_bind_addrs(con, dlm_config.ci_tcp_port))
 		goto create_delsock;
@@ -1573,16 +1664,12 @@ void dlm_lowcomms_stop(void)
 	mutex_lock(&connections_lock);
 	dlm_allow_conn = 0;
 	foreach_conn(stop_conn);
+	clean_writequeues();
+	foreach_conn(free_conn);
 	mutex_unlock(&connections_lock);
 
 	work_stop();
 
-	mutex_lock(&connections_lock);
-	clean_writequeues();
-
-	foreach_conn(free_conn);
-
-	mutex_unlock(&connections_lock);
 	kmem_cache_destroy(con_cache);
 }
 

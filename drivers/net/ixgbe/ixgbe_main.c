@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel 10 Gigabit PCI Express Linux driver
-  Copyright(c) 1999 - 2015 Intel Corporation.
+  Copyright(c) 1999 - 2016 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -40,6 +40,7 @@
 #include <linux/pkt_sched.h>
 #include <linux/ipv6.h>
 #include <net/checksum.h>
+#include <net/ipv6.h>
 #include <net/ip6_checksum.h>
 #include <linux/ethtool.h>
 #include <linux/if_vlan.h>
@@ -64,7 +65,7 @@ char ixgbe_default_device_descr[] =
 #define DRV_VERSION "4.2.1-k"
 const char ixgbe_driver_version[] = DRV_VERSION;
 static const char ixgbe_copyright[] =
-				"Copyright (c) 1999-2015 Intel Corporation.";
+				"Copyright (c) 1999-2016 Intel Corporation.";
 
 static const char ixgbe_overheat_msg[] = "Network adapter has been stopped because it has over heated. Restart the computer. If the problem persists, power off the system and replace the adapter";
 
@@ -74,6 +75,7 @@ static const struct ixgbe_info *ixgbe_info_tbl[] = {
 	[board_X540]		= &ixgbe_X540_info,
 	[board_X550]		= &ixgbe_X550_info,
 	[board_X550EM_x]	= &ixgbe_X550EM_x_info,
+	[board_x550em_a]	= &ixgbe_x550em_a_info,
 };
 
 /* ixgbe_pci_tbl - PCI Device ID Table
@@ -116,10 +118,18 @@ static const struct pci_device_id ixgbe_pci_tbl[] = {
 	{PCI_VDEVICE(INTEL, IXGBE_DEV_ID_82599_SFP_SF_QP), board_82599 },
 	{PCI_VDEVICE(INTEL, IXGBE_DEV_ID_X540T1), board_X540 },
 	{PCI_VDEVICE(INTEL, IXGBE_DEV_ID_X550T), board_X550},
+	{PCI_VDEVICE(INTEL, IXGBE_DEV_ID_X550T1), board_X550},
 	{PCI_VDEVICE(INTEL, IXGBE_DEV_ID_X550EM_X_KX4), board_X550EM_x},
 	{PCI_VDEVICE(INTEL, IXGBE_DEV_ID_X550EM_X_KR), board_X550EM_x},
 	{PCI_VDEVICE(INTEL, IXGBE_DEV_ID_X550EM_X_10G_T), board_X550EM_x},
 	{PCI_VDEVICE(INTEL, IXGBE_DEV_ID_X550EM_X_SFP), board_X550EM_x},
+	{PCI_VDEVICE(INTEL, IXGBE_DEV_ID_X550EM_A_KR), board_x550em_a },
+	{PCI_VDEVICE(INTEL, IXGBE_DEV_ID_X550EM_A_KR_L), board_x550em_a },
+	{PCI_VDEVICE(INTEL, IXGBE_DEV_ID_X550EM_A_SFP_N), board_x550em_a },
+	{PCI_VDEVICE(INTEL, IXGBE_DEV_ID_X550EM_A_SGMII), board_x550em_a },
+	{PCI_VDEVICE(INTEL, IXGBE_DEV_ID_X550EM_A_SGMII_L), board_x550em_a },
+	{PCI_VDEVICE(INTEL, IXGBE_DEV_ID_X550EM_A_10G_T), board_x550em_a},
+	{PCI_VDEVICE(INTEL, IXGBE_DEV_ID_X550EM_A_SFP), board_x550em_a },
 	/* required last entry */
 	{0, }
 };
@@ -852,6 +862,7 @@ static void ixgbe_set_ivar(struct ixgbe_adapter *adapter, s8 direction,
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		if (direction == -1) {
 			/* other causes */
 			msix_vector |= IXGBE_IVAR_ALLOC_VAL;
@@ -890,6 +901,7 @@ static inline void ixgbe_irq_rearm_queues(struct ixgbe_adapter *adapter,
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		mask = (qmask & 0xFFFFFFFF);
 		IXGBE_WRITE_REG(&adapter->hw, IXGBE_EICS_EX(0), mask);
 		mask = (qmask >> 32);
@@ -1506,7 +1518,8 @@ static bool ixgbe_alloc_mapped_page(struct ixgbe_ring *rx_ring,
 
 	/* alloc new page for storage */
 	if (likely(!page)) {
-		page = alloc_pages(GFP_ATOMIC | __GFP_COLD | __GFP_COMP,
+		page = alloc_pages(GFP_ATOMIC | __GFP_COLD | 
+				   __GFP_COMP | __GFP_NOWARN,
 				   ixgbe_rx_pg_order(rx_ring));
 		if (unlikely(!page)) {
 			rx_ring->rx_stats.alloc_rx_page_failed++;
@@ -1743,6 +1756,7 @@ static void ixgbe_process_skb_fields(struct ixgbe_ring *rx_ring,
 				     struct sk_buff *skb)
 {
 	struct net_device *dev = rx_ring->netdev;
+	u32 flags = rx_ring->q_vector->adapter->flags;
 
 	ixgbe_update_rsc_stats(rx_ring, skb);
 
@@ -1751,8 +1765,8 @@ static void ixgbe_process_skb_fields(struct ixgbe_ring *rx_ring,
 	ixgbe_rx_checksum(rx_ring, rx_desc, skb);
 
 #ifdef CONFIG_IXGBE_PTP
-	if (unlikely(ixgbe_test_staterr(rx_desc, IXGBE_RXDADV_STAT_TS)))
-		ixgbe_ptp_rx_hwtstamp(rx_ring->q_vector->adapter, skb);
+	if (unlikely(flags & IXGBE_FLAG_RX_HWTSTAMP_ENABLED))
+		ixgbe_ptp_rx_hwtstamp(rx_ring, rx_desc, skb);
 #endif
 	if ((dev->features & NETIF_F_HW_VLAN_RX) &&
 	    ixgbe_test_staterr(rx_desc, IXGBE_RXD_STAT_VP)) {
@@ -2340,6 +2354,7 @@ static void ixgbe_configure_msix(struct ixgbe_adapter *adapter)
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		ixgbe_set_ivar(adapter, -1, 1, v_idx);
 		break;
 	default:
@@ -2451,6 +2466,7 @@ void ixgbe_write_eitr(struct ixgbe_q_vector *q_vector)
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		/*
 		 * set the WDIS bit to not clear the timer bits and cause an
 		 * immediate assertion of the interrupt
@@ -2612,6 +2628,7 @@ static inline bool ixgbe_is_sfp(struct ixgbe_hw *hw)
 		return false;
 	case ixgbe_mac_82599EB:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		switch (hw->mac.ops.get_media_type(hw)) {
 		case ixgbe_media_type_fiber:
 		case ixgbe_media_type_fiber_qsfp:
@@ -2686,6 +2703,7 @@ static inline void ixgbe_irq_enable_queues(struct ixgbe_adapter *adapter,
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		mask = (qmask & 0xFFFFFFFF);
 		if (mask)
 			IXGBE_WRITE_REG(hw, IXGBE_EIMS_EX(0), mask);
@@ -2714,6 +2732,7 @@ static inline void ixgbe_irq_disable_queues(struct ixgbe_adapter *adapter,
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		mask = (qmask & 0xFFFFFFFF);
 		if (mask)
 			IXGBE_WRITE_REG(hw, IXGBE_EIMC_EX(0), mask);
@@ -2749,6 +2768,7 @@ static inline void ixgbe_irq_enable(struct ixgbe_adapter *adapter, bool queues,
 		case ixgbe_mac_X540:
 		case ixgbe_mac_X550:
 		case ixgbe_mac_X550EM_x:
+		case ixgbe_mac_x550em_a:
 			mask |= IXGBE_EIMS_TS;
 			break;
 		default:
@@ -2764,7 +2784,10 @@ static inline void ixgbe_irq_enable(struct ixgbe_adapter *adapter, bool queues,
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
-		if (adapter->hw.device_id == IXGBE_DEV_ID_X550EM_X_SFP)
+	case ixgbe_mac_x550em_a:
+		if (adapter->hw.device_id == IXGBE_DEV_ID_X550EM_X_SFP ||
+		    adapter->hw.device_id == IXGBE_DEV_ID_X550EM_A_SFP ||
+		    adapter->hw.device_id == IXGBE_DEV_ID_X550EM_A_SFP_N)
 			mask |= IXGBE_EIMS_GPI_SDP0(&adapter->hw);
 		if (adapter->hw.phy.type == ixgbe_phy_x550em_ext_t)
 			mask |= IXGBE_EICR_GPI_SDP0_X540;
@@ -2822,6 +2845,7 @@ static irqreturn_t ixgbe_msix_other(int irq, void *data)
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		if (hw->phy.type == ixgbe_phy_x550em_ext_t &&
 		    (eicr & IXGBE_EICR_GPI_SDP0_X540)) {
 			adapter->flags2 |= IXGBE_FLAG2_PHY_INTERRUPT;
@@ -2863,7 +2887,7 @@ static irqreturn_t ixgbe_msix_other(int irq, void *data)
 
 #ifdef CONFIG_IXGBE_PTP
 	if (unlikely(eicr & IXGBE_EICR_TIMESYNC))
-		ixgbe_ptp_check_pps_event(adapter, eicr);
+		ixgbe_ptp_check_pps_event(adapter);
 #endif
 
 	/* re-enable the original interrupt state, no lsc, no queues */
@@ -3057,6 +3081,7 @@ static irqreturn_t ixgbe_intr(int irq, void *data)
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		if (eicr & IXGBE_EICR_ECC) {
 			e_info(link, "Received ECC Err, initiating reset\n");
 			adapter->flags2 |= IXGBE_FLAG2_RESET_REQUESTED;
@@ -3072,7 +3097,7 @@ static irqreturn_t ixgbe_intr(int irq, void *data)
 	ixgbe_check_fan_failure(adapter, eicr);
 #ifdef CONFIG_IXGBE_PTP
 	if (unlikely(eicr & IXGBE_EICR_TIMESYNC))
-		ixgbe_ptp_check_pps_event(adapter, eicr);
+		ixgbe_ptp_check_pps_event(adapter);
 #endif
 
 	/* would disable interrupts here but EIAM disabled it */
@@ -3155,6 +3180,7 @@ static inline void ixgbe_irq_disable(struct ixgbe_adapter *adapter)
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		IXGBE_WRITE_REG(&adapter->hw, IXGBE_EIMC, 0xFFFF0000);
 		IXGBE_WRITE_REG(&adapter->hw, IXGBE_EIMC_EX(0), ~0);
 		IXGBE_WRITE_REG(&adapter->hw, IXGBE_EIMC_EX(1), ~0);
@@ -3952,6 +3978,7 @@ static void ixgbe_setup_rdrxctl(struct ixgbe_adapter *adapter)
 		break;
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		if (adapter->num_vfs)
 			rdrxctl |= IXGBE_RDRXCTL_PSP;
 		/* fall through for older HW */
@@ -4061,6 +4088,7 @@ static void ixgbe_vlan_strip_disable(struct ixgbe_adapter *adapter)
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		for (i = 0; i < adapter->num_rx_queues; i++) {
 			struct ixgbe_ring *ring = adapter->rx_ring[i];
 
@@ -4097,6 +4125,7 @@ static void ixgbe_vlan_strip_enable(struct ixgbe_adapter *adapter)
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		for (i = 0; i < adapter->num_rx_queues; i++) {
 			struct ixgbe_ring *ring = adapter->rx_ring[i];
 
@@ -4453,10 +4482,9 @@ static void ixgbe_clear_vxlan_port(struct ixgbe_adapter *adapter)
 	switch (adapter->hw.mac.type) {
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		IXGBE_WRITE_REG(&adapter->hw, IXGBE_VXLANCTRL, 0);
-#ifdef CONFIG_IXGBE_VXLAN
 		adapter->vxlan_port = 0;
-#endif
 		break;
 	default:
 		break;
@@ -4555,6 +4583,7 @@ static int ixgbe_hpbthresh(struct ixgbe_adapter *adapter, int pb)
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		dv_id = IXGBE_DV_X540(link, tc);
 		break;
 	default:
@@ -4615,6 +4644,7 @@ static int ixgbe_lpbthresh(struct ixgbe_adapter *adapter, int pb)
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		dv_id = IXGBE_LOW_DV_X540(tc);
 		break;
 	default:
@@ -5042,6 +5072,7 @@ static void ixgbe_setup_gpie(struct ixgbe_adapter *adapter)
 		case ixgbe_mac_X540:
 		case ixgbe_mac_X550:
 		case ixgbe_mac_X550EM_x:
+		case ixgbe_mac_x550em_a:
 		default:
 			IXGBE_WRITE_REG(hw, IXGBE_EIAM_EX(0), 0xFFFFFFFF);
 			IXGBE_WRITE_REG(hw, IXGBE_EIAM_EX(1), 0xFFFFFFFF);
@@ -5092,6 +5123,7 @@ static void ixgbe_setup_gpie(struct ixgbe_adapter *adapter)
 		gpie |= IXGBE_SDP1_GPIEN_8259X | IXGBE_SDP2_GPIEN_8259X;
 		break;
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		gpie |= IXGBE_SDP0_GPIEN_X540;
 		break;
 	default:
@@ -5401,6 +5433,7 @@ void ixgbe_down(struct ixgbe_adapter *adapter)
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		IXGBE_WRITE_REG(hw, IXGBE_DMATXCTL,
 				(IXGBE_READ_REG(hw, IXGBE_DMATXCTL) &
 				 ~IXGBE_DMATXCTL_TE));
@@ -5516,6 +5549,7 @@ static int ixgbe_sw_init(struct ixgbe_adapter *adapter)
 			adapter->flags2 |= IXGBE_FLAG2_TEMP_SENSOR_CAPABLE;
 		break;
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 	case ixgbe_mac_X550:
 #ifdef CONFIG_IXGBE_DCA
 		adapter->flags &= ~IXGBE_FLAG_DCA_CAPABLE;
@@ -5541,6 +5575,7 @@ static int ixgbe_sw_init(struct ixgbe_adapter *adapter)
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		adapter->dcb_cfg.num_tcs.pg_tcs = X540_TRAFFIC_CLASS;
 		adapter->dcb_cfg.num_tcs.pfc_tcs = X540_TRAFFIC_CLASS;
 		break;
@@ -6134,6 +6169,7 @@ static int __ixgbe_shutdown(struct pci_dev *pdev, bool *enable_wake)
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		pci_wake_from_d3(pdev, !!wufc);
 		break;
 	default:
@@ -6269,6 +6305,7 @@ void ixgbe_update_stats(struct ixgbe_adapter *adapter)
 		case ixgbe_mac_X540:
 		case ixgbe_mac_X550:
 		case ixgbe_mac_X550EM_x:
+		case ixgbe_mac_x550em_a:
 			hwstats->pxonrxc[i] +=
 				IXGBE_READ_REG(hw, IXGBE_PXONRXCNT(i));
 			break;
@@ -6284,7 +6321,8 @@ void ixgbe_update_stats(struct ixgbe_adapter *adapter)
 		if ((hw->mac.type == ixgbe_mac_82599EB) ||
 		    (hw->mac.type == ixgbe_mac_X540) ||
 		    (hw->mac.type == ixgbe_mac_X550) ||
-		    (hw->mac.type == ixgbe_mac_X550EM_x)) {
+		    (hw->mac.type == ixgbe_mac_X550EM_x) ||
+		    (hw->mac.type == ixgbe_mac_x550em_a)) {
 			hwstats->qbtc[i] += IXGBE_READ_REG(hw, IXGBE_QBTC_L(i));
 			IXGBE_READ_REG(hw, IXGBE_QBTC_H(i)); /* to clear */
 			hwstats->qbrc[i] += IXGBE_READ_REG(hw, IXGBE_QBRC_L(i));
@@ -6309,6 +6347,7 @@ void ixgbe_update_stats(struct ixgbe_adapter *adapter)
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		/* OS2BMC stats are X540 and later */
 		hwstats->o2bgptc += IXGBE_READ_REG(hw, IXGBE_O2BGPTC);
 		hwstats->o2bspc += IXGBE_READ_REG(hw, IXGBE_O2BSPC);
@@ -6578,6 +6617,7 @@ static void ixgbe_watchdog_link_is_up(struct ixgbe_adapter *adapter)
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 	case ixgbe_mac_82599EB: {
 		u32 mflcn = IXGBE_READ_REG(hw, IXGBE_MFLCN);
 		u32 fccfg = IXGBE_READ_REG(hw, IXGBE_FCCFG);
@@ -7395,11 +7435,10 @@ static void ixgbe_atr(struct ixgbe_ring *ring,
 		struct ipv6hdr *ipv6;
 	} hdr;
 	struct tcphdr *th;
+	unsigned int hlen;
 	struct sk_buff *skb;
-#ifdef CONFIG_IXGBE_VXLAN
-	u8 encap = false;
-#endif /* CONFIG_IXGBE_VXLAN */
 	__be16 vlan_id;
+	int l4_proto;
 
 	/* if ring doesn't have a interrupt vector, cannot perform ATR */
 	if (!q_vector)
@@ -7411,40 +7450,50 @@ static void ixgbe_atr(struct ixgbe_ring *ring,
 
 	ring->atr_count++;
 
+	/* currently only IPv4/IPv6 with TCP is supported */
+	if ((first->protocol != htons(ETH_P_IP)) &&
+	    (first->protocol != htons(ETH_P_IPV6)))
+		return;
+
 	/* snag network header to get L4 type and address */
 	skb = first->skb;
 	hdr.network = skb_network_header(skb);
-	if (skb->encapsulation) {
 #ifdef CONFIG_IXGBE_VXLAN
+	if (skb->encapsulation &&
+	    first->protocol == htons(ETH_P_IP) &&
+	    hdr.ipv4->protocol != IPPROTO_UDP) {
 		struct ixgbe_adapter *adapter = q_vector->adapter;
 
-		if (!adapter->vxlan_port)
-			return;
-		if (first->protocol != htons(ETH_P_IP) ||
-		    hdr.ipv4->version != IPVERSION ||
-		    hdr.ipv4->protocol != IPPROTO_UDP) {
-			return;
-		}
-		if (ntohs(udp_hdr(skb)->dest) != adapter->vxlan_port)
-			return;
-		encap = true;
-		hdr.network = skb_inner_network_header(skb);
-		th = inner_tcp_hdr(skb);
-#else
-		return;
+		/* verify the port is recognized as VXLAN */
+		if (adapter->vxlan_port &&
+		    udp_hdr(skb)->dest == adapter->vxlan_port)
+			hdr.network = skb_inner_network_header(skb);
+	}
 #endif /* CONFIG_IXGBE_VXLAN */
-	} else {
-		/* Currently only IPv4/IPv6 with TCP is supported */
-		if ((first->protocol != htons(ETH_P_IPV6) ||
-		     hdr.ipv6->nexthdr != IPPROTO_TCP) &&
-		    (first->protocol != htons(ETH_P_IP) ||
-		     hdr.ipv4->protocol != IPPROTO_TCP))
-			return;
-		th = tcp_hdr(skb);
+
+	/* Currently only IPv4/IPv6 with TCP is supported */
+	switch (hdr.ipv4->version) {
+	case IPVERSION:
+		/* access ihl as u8 to avoid unaligned access on ia64 */
+		hlen = (hdr.network[0] & 0x0F) << 2;
+		l4_proto = hdr.ipv4->protocol;
+		break;
+	case 6:
+		hlen = hdr.network - skb->data;
+		l4_proto = ipv6_find_hdr(skb, &hlen, IPPROTO_TCP, NULL, NULL);
+		hlen -= hdr.network - skb->data;
+		break;
+	default:
+		return;
 	}
 
-	/* skip this packet since it is invalid or the socket is closing */
-	if (!th || th->fin)
+	if (l4_proto != IPPROTO_TCP)
+		return;
+
+	th = (struct tcphdr *)(hdr.network + hlen);
+
+	/* skip this packet since the socket is closing */
+	if (th->fin)
 		return;
 
 	/* sample on all syn packets or once every atr sample count */
@@ -7475,10 +7524,12 @@ static void ixgbe_atr(struct ixgbe_ring *ring,
 		common.port.src ^= th->dest ^ first->protocol;
 	common.port.dst ^= th->source;
 
-	if (first->protocol == htons(ETH_P_IP)) {
+	switch (hdr.ipv4->version) {
+	case IPVERSION:
 		input.formatted.flow_type = IXGBE_ATR_FLOW_TYPE_TCPV4;
 		common.ip ^= hdr.ipv4->saddr ^ hdr.ipv4->daddr;
-	} else {
+		break;
+	case 6:
 		input.formatted.flow_type = IXGBE_ATR_FLOW_TYPE_TCPV6;
 		common.ip ^= hdr.ipv6->saddr.s6_addr32[0] ^
 			     hdr.ipv6->saddr.s6_addr32[1] ^
@@ -7488,12 +7539,13 @@ static void ixgbe_atr(struct ixgbe_ring *ring,
 			     hdr.ipv6->daddr.s6_addr32[1] ^
 			     hdr.ipv6->daddr.s6_addr32[2] ^
 			     hdr.ipv6->daddr.s6_addr32[3];
+		break;
+	default:
+		break;
 	}
 
-#ifdef CONFIG_IXGBE_VXLAN
-	if (encap)
+	if (hdr.network != skb_network_header(skb))
 		input.formatted.flow_type |= IXGBE_ATR_L4TYPE_TUNNEL_MASK;
-#endif /* CONFIG_IXGBE_VXLAN */
 
 	/* This assumes the Rx queue and Tx queue are bound to the same CPU */
 	ixgbe_fdir_add_signature_filter_82599(&q_vector->adapter->hw,
@@ -8067,7 +8119,6 @@ static void ixgbe_add_vxlan_port(struct net_device *dev, sa_family_t sa_family,
 {
 	struct ixgbe_adapter *adapter = netdev_priv(dev);
 	struct ixgbe_hw *hw = &adapter->hw;
-	u16 new_port = ntohs(port);
 
 	if (!(adapter->flags & IXGBE_FLAG_VXLAN_OFFLOAD_CAPABLE))
 		return;
@@ -8075,18 +8126,18 @@ static void ixgbe_add_vxlan_port(struct net_device *dev, sa_family_t sa_family,
 	if (sa_family == AF_INET6)
 		return;
 
-	if (adapter->vxlan_port == new_port)
+	if (adapter->vxlan_port == port)
 		return;
 
 	if (adapter->vxlan_port) {
 		netdev_info(dev,
 			    "Hit Max num of VXLAN ports, not adding port %d\n",
-			    new_port);
+			    ntohs(port));
 		return;
 	}
 
-	adapter->vxlan_port = new_port;
-	IXGBE_WRITE_REG(hw, IXGBE_VXLANCTRL, new_port);
+	adapter->vxlan_port = port;
+	IXGBE_WRITE_REG(hw, IXGBE_VXLANCTRL, ntohs(port));
 }
 
 /**
@@ -8099,7 +8150,6 @@ static void ixgbe_del_vxlan_port(struct net_device *dev, sa_family_t sa_family,
 				 __be16 port)
 {
 	struct ixgbe_adapter *adapter = netdev_priv(dev);
-	u16 new_port = ntohs(port);
 
 	if (!(adapter->flags & IXGBE_FLAG_VXLAN_OFFLOAD_CAPABLE))
 		return;
@@ -8107,9 +8157,9 @@ static void ixgbe_del_vxlan_port(struct net_device *dev, sa_family_t sa_family,
 	if (sa_family == AF_INET6)
 		return;
 
-	if (adapter->vxlan_port != new_port) {
+	if (adapter->vxlan_port != port) {
 		netdev_info(dev, "Port %d was not found, not deleting\n",
-			    new_port);
+			    ntohs(port));
 		return;
 	}
 
@@ -8431,8 +8481,10 @@ int ixgbe_wol_supported(struct ixgbe_adapter *adapter, u16 device_id,
 	case IXGBE_DEV_ID_82599_SFP:
 		/* Only these subdevices could supports WOL */
 		switch (subdevice_id) {
-		case IXGBE_SUBDEV_ID_82599_SFP_WOL0:
 		case IXGBE_SUBDEV_ID_82599_560FLR:
+		case IXGBE_SUBDEV_ID_82599_LOM_SNAP6:
+		case IXGBE_SUBDEV_ID_82599_SFP_WOL0:
+		case IXGBE_SUBDEV_ID_82599_SFP_2OCP:
 			/* only support first port */
 			if (hw->bus.func != 0)
 				break;
@@ -8440,7 +8492,9 @@ int ixgbe_wol_supported(struct ixgbe_adapter *adapter, u16 device_id,
 		case IXGBE_SUBDEV_ID_82599_SFP:
 		case IXGBE_SUBDEV_ID_82599_RNDC:
 		case IXGBE_SUBDEV_ID_82599_ECNA_DP:
-		case IXGBE_SUBDEV_ID_82599_LOM_SFP:
+		case IXGBE_SUBDEV_ID_82599_SFP_1OCP:
+		case IXGBE_SUBDEV_ID_82599_SFP_LOM_OEM1:
+		case IXGBE_SUBDEV_ID_82599_SFP_LOM_OEM2:
 			is_wol_supported = 1;
 			break;
 		}
@@ -8464,6 +8518,7 @@ int ixgbe_wol_supported(struct ixgbe_adapter *adapter, u16 device_id,
 	case IXGBE_DEV_ID_X540T:
 	case IXGBE_DEV_ID_X540T1:
 	case IXGBE_DEV_ID_X550T:
+	case IXGBE_DEV_ID_X550T1:
 	case IXGBE_DEV_ID_X550EM_X_KX4:
 	case IXGBE_DEV_ID_X550EM_X_KR:
 	case IXGBE_DEV_ID_X550EM_X_10G_T:
@@ -8591,12 +8646,12 @@ static int ixgbe_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	adapter->bd_number = cards_found;
 
 	/* Setup hw api */
-	memcpy(&hw->mac.ops, ii->mac_ops, sizeof(hw->mac.ops));
+	hw->mac.ops   = *ii->mac_ops;
 	hw->mac.type  = ii->mac;
 	hw->mvals     = ii->mvals;
 
 	/* EEPROM */
-	memcpy(&hw->eeprom.ops, ii->eeprom_ops, sizeof(hw->eeprom.ops));
+	hw->eeprom.ops = *ii->eeprom_ops;
 	eec = IXGBE_READ_REG(hw, IXGBE_EEC(hw));
 	if (ixgbe_removed(hw->hw_addr)) {
 		err = -EIO;
@@ -8607,7 +8662,7 @@ static int ixgbe_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		hw->eeprom.ops.read = &ixgbe_read_eeprom_bit_bang_generic;
 
 	/* PHY */
-	memcpy(&hw->phy.ops, ii->phy_ops, sizeof(hw->phy.ops));
+	hw->phy.ops = *ii->phy_ops;
 	hw->phy.sfp_type = ixgbe_sfp_type_unknown;
 	/* ixgbe_identify_phy_generic will set prtad and mmds properly */
 	hw->phy.mdio.prtad = MDIO_PRTAD_NONE;
@@ -8630,6 +8685,7 @@ static int ixgbe_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	case ixgbe_mac_X540:
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
 		IXGBE_WRITE_REG(&adapter->hw, IXGBE_WUS, ~0);
 		break;
 	default:
@@ -8673,7 +8729,7 @@ static int ixgbe_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto skip_sriov;
 	/* Mailbox */
 	ixgbe_init_mbx_params_pf(hw);
-	memcpy(&hw->mbx.ops, ii->mbx_ops, sizeof(hw->mbx.ops));
+	hw->mbx.ops = ii->mbx_ops;
 	pci_sriov_set_totalvfs(pdev, IXGBE_MAX_VFS_DRV_LIMIT);
 	ixgbe_enable_sriov(adapter);
 skip_sriov:
@@ -8723,14 +8779,6 @@ skip_sriov:
 	netdev->hw_enc_features |= NETIF_F_SG | NETIF_F_IP_CSUM |
 				   NETIF_F_IPV6_CSUM;
 #endif
-	switch (adapter->hw.mac.type) {
-	case ixgbe_mac_X550:
-	case ixgbe_mac_X550EM_x:
-		netdev->features |= NETIF_F_RXCSUM;
-		break;
-	default:
-		break;
-	}
 
 #ifdef CONFIG_IXGBE_DCB
 	netdev->dcbnl_ops = &dcbnl_ops;
@@ -9093,6 +9141,9 @@ static pci_ers_result_t ixgbe_io_error_detected(struct pci_dev *pdev,
 			break;
 		case ixgbe_mac_X550EM_x:
 			device_id = IXGBE_DEV_ID_X550EM_X_VF;
+			break;
+		case ixgbe_mac_x550em_a:
+			device_id = IXGBE_DEV_ID_X550EM_A_VF;
 			break;
 		default:
 			device_id = 0;

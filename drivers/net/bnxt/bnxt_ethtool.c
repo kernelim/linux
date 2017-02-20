@@ -1,6 +1,6 @@
 /* Broadcom NetXtreme-C/E network driver.
  *
- * Copyright (c) 2014-2015 Broadcom Corporation
+ * Copyright (c) 2014-2016 Broadcom Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -561,7 +561,7 @@ static int bnxt_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 	ethtool_speed = bnxt_fw_to_ethtool_speed(link_info->link_speed);
 	ethtool_cmd_speed_set(cmd, ethtool_speed);
 	if (link_info->transceiver ==
-		PORT_PHY_QCFG_RESP_TRANSCEIVER_TYPE_XCVR_INTERNAL)
+	    PORT_PHY_QCFG_RESP_XCVR_PKG_TYPE_XCVR_INTERNAL)
 		cmd->transceiver = XCVR_INTERNAL;
 	else
 		cmd->transceiver = XCVR_EXTERNAL;
@@ -626,7 +626,7 @@ static int bnxt_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 	u32 speed, fw_advertising = 0;
 	bool set_pause = false;
 
-	if (BNXT_VF(bp))
+	if (!BNXT_SINGLE_PF(bp))
 		return rc;
 
 	if (cmd->autoneg == AUTONEG_ENABLE) {
@@ -694,8 +694,8 @@ static void bnxt_get_pauseparam(struct net_device *dev,
 	if (BNXT_VF(bp))
 		return;
 	epause->autoneg = !!(link_info->autoneg & BNXT_AUTONEG_FLOW_CTRL);
-	epause->rx_pause = ((link_info->pause & BNXT_LINK_PAUSE_RX) != 0);
-	epause->tx_pause = ((link_info->pause & BNXT_LINK_PAUSE_TX) != 0);
+	epause->rx_pause = !!(link_info->req_flow_ctrl & BNXT_LINK_PAUSE_RX);
+	epause->tx_pause = !!(link_info->req_flow_ctrl & BNXT_LINK_PAUSE_TX);
 }
 
 static int bnxt_set_pauseparam(struct net_device *dev,
@@ -705,7 +705,7 @@ static int bnxt_set_pauseparam(struct net_device *dev,
 	struct bnxt *bp = netdev_priv(dev);
 	struct bnxt_link_info *link_info = &bp->link_info;
 
-	if (BNXT_VF(bp))
+	if (!BNXT_SINGLE_PF(bp))
 		return rc;
 
 	if (epause->autoneg) {

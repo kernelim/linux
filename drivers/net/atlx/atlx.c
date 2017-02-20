@@ -80,6 +80,7 @@ static int atlx_set_mac(struct net_device *netdev, void *p)
 
 	memcpy(netdev->dev_addr, addr->sa_data, netdev->addr_len);
 	memcpy(adapter->hw.mac_addr, addr->sa_data, netdev->addr_len);
+	netdev->addr_assign_type = NET_ADDR_PERM;
 
 	atlx_set_mac_addr(&adapter->hw);
 	return 0;

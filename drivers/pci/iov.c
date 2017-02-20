@@ -754,7 +754,7 @@ int pci_num_vf(struct pci_dev *dev)
 }
 EXPORT_SYMBOL_GPL(pci_num_vf);
 
-static int ats_alloc_one(struct pci_dev *dev, int ps)
+static void ats_alloc_one(struct pci_dev *dev)
 {
 	int pos;
 	u16 cap;
@@ -762,26 +762,35 @@ static int ats_alloc_one(struct pci_dev *dev, int ps)
 
 	pos = pci_find_ext_capability(dev, PCI_EXT_CAP_ID_ATS);
 	if (!pos)
-		return -ENODEV;
+		return;
 
 	ats = kzalloc(sizeof(*ats), GFP_KERNEL);
-	if (!ats)
-		return -ENOMEM;
+	if (!ats) {
+		dev_warn(&dev->dev, "can't allocate space for ATS state\n");
+		return;
+	}
 
 	ats->pos = pos;
-	ats->stu = ps;
 	pci_read_config_word(dev, pos + PCI_ATS_CAP, &cap);
 	ats->qdep = PCI_ATS_CAP_QDEP(cap) ? PCI_ATS_CAP_QDEP(cap) :
 					    PCI_ATS_MAX_QDEP;
 	dev->ats = ats;
-
-	return 0;
 }
 
 static void ats_free_one(struct pci_dev *dev)
 {
 	kfree(dev->ats);
 	dev->ats = NULL;
+}
+
+void pci_ats_init(struct pci_dev *dev)
+{
+	ats_alloc_one(dev);
+}
+
+void pci_ats_free(struct pci_dev *dev)
+{
+	ats_free_one(dev);
 }
 
 /**
@@ -793,43 +802,35 @@ static void ats_free_one(struct pci_dev *dev)
  */
 int pci_enable_ats(struct pci_dev *dev, int ps)
 {
-	int rc;
 	u16 ctrl;
 
 	BUG_ON(dev->ats && dev->ats->is_enabled);
 
+	if (!dev->ats)
+		return -EINVAL;
+
 	if (ps < PCI_ATS_MIN_STU)
 		return -EINVAL;
 
-	if (dev->is_physfn || dev->is_virtfn) {
-		struct pci_dev *pdev = dev->is_physfn ? dev : dev->physfn;
-
-		mutex_lock(&pdev->sriov->lock);
-		if (pdev->ats)
-			rc = pdev->ats->stu == ps ? 0 : -EINVAL;
-		else
-			rc = ats_alloc_one(pdev, ps);
-
-		if (!rc)
-			pdev->ats->ref_cnt++;
-		mutex_unlock(&pdev->sriov->lock);
-		if (rc)
-			return rc;
-	}
-
-	if (!dev->is_physfn) {
-		rc = ats_alloc_one(dev, ps);
-		if (rc)
-			return rc;
-	}
-
+	/*
+	 * Note that enabling ATS on a VF fails unless it's already enabled
+	 * with the same STU on the PF.
+	 */
 	ctrl = PCI_ATS_CTRL_ENABLE;
-	if (!dev->is_virtfn)
-		ctrl |= PCI_ATS_CTRL_STU(ps - PCI_ATS_MIN_STU);
+	if (dev->is_virtfn) {
+		struct pci_dev *pdev = dev->physfn;
+
+		if (pdev->ats->stu != ps)
+			return -EINVAL;
+
+		pdev->ats->ref_cnt++;  /* count enabled VFs */
+	} else {
+		dev->ats->stu = ps;
+		ctrl |= PCI_ATS_CTRL_STU(dev->ats->stu - PCI_ATS_MIN_STU);
+	}
 	pci_write_config_word(dev, dev->ats->pos + PCI_ATS_CTRL, ctrl);
 
 	dev->ats->is_enabled = 1;
-
 	return 0;
 }
 
@@ -843,24 +844,20 @@ void pci_disable_ats(struct pci_dev *dev)
 
 	BUG_ON(!dev->ats || !dev->ats->is_enabled);
 
+	if (dev->ats->ref_cnt)
+		return;		/* VFs still enabled */
+
+	if (dev->is_virtfn) {
+		struct pci_dev *pdev = dev->physfn;
+
+		pdev->ats->ref_cnt--;
+	}
+
 	pci_read_config_word(dev, dev->ats->pos + PCI_ATS_CTRL, &ctrl);
 	ctrl &= ~PCI_ATS_CTRL_ENABLE;
 	pci_write_config_word(dev, dev->ats->pos + PCI_ATS_CTRL, ctrl);
 
 	dev->ats->is_enabled = 0;
-
-	if (dev->is_physfn || dev->is_virtfn) {
-		struct pci_dev *pdev = dev->is_physfn ? dev : dev->physfn;
-
-		mutex_lock(&pdev->sriov->lock);
-		pdev->ats->ref_cnt--;
-		if (!pdev->ats->ref_cnt)
-			ats_free_one(pdev);
-		mutex_unlock(&pdev->sriov->lock);
-	}
-
-	if (!dev->is_physfn)
-		ats_free_one(dev);
 }
 
 void pci_restore_ats_state(struct pci_dev *dev)
@@ -875,7 +872,6 @@ void pci_restore_ats_state(struct pci_dev *dev)
 	ctrl = PCI_ATS_CTRL_ENABLE;
 	if (!dev->is_virtfn)
 		ctrl |= PCI_ATS_CTRL_STU(dev->ats->stu - PCI_ATS_MIN_STU);
-
 	pci_write_config_word(dev, dev->ats->pos + PCI_ATS_CTRL, ctrl);
 }
 EXPORT_SYMBOL_GPL(pci_restore_ats_state);
@@ -894,23 +890,13 @@ EXPORT_SYMBOL_GPL(pci_restore_ats_state);
  */
 int pci_ats_queue_depth(struct pci_dev *dev)
 {
-	int pos;
-	u16 cap;
-
 	if (dev->is_virtfn)
 		return 0;
 
 	if (dev->ats)
 		return dev->ats->qdep;
 
-	pos = pci_find_ext_capability(dev, PCI_EXT_CAP_ID_ATS);
-	if (!pos)
-		return -ENODEV;
-
-	pci_read_config_word(dev, pos + PCI_ATS_CAP, &cap);
-
-	return PCI_ATS_CAP_QDEP(cap) ? PCI_ATS_CAP_QDEP(cap) :
-				       PCI_ATS_MAX_QDEP;
+	return -ENODEV;
 }
 
 /**

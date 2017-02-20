@@ -4228,7 +4228,8 @@ static cycle_t e1000e_cyclecounter_read(const struct cyclecounter *cc)
 	}
 
 	if ((hw->mac.type == e1000_82574) || (hw->mac.type == e1000_82583)) {
-		u64 incvalue, time_delta, rem, temp;
+		u64 time_delta, rem, temp;
+		u32 incvalue;
 		int i;
 
 		/* errata for 82574/82583 possible bad bits read from SYSTIMH/L
@@ -4243,7 +4244,8 @@ static cycle_t e1000e_cyclecounter_read(const struct cyclecounter *cc)
 
 			time_delta = systim_next - systim;
 			temp = time_delta;
-			rem = do_div(temp, incvalue);
+			/* VMWare users have seen incvalue of zero, don't div / 0 */
+			rem = incvalue ? do_div(temp, incvalue) : (time_delta != 0);
 
 			systim = systim_next;
 
@@ -7245,6 +7247,11 @@ static const struct pci_device_id e1000_pci_tbl[] = {
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_PCH_SPT_I219_V), board_pch_spt },
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_PCH_SPT_I219_LM2), board_pch_spt },
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_PCH_SPT_I219_V2), board_pch_spt },
+	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_PCH_LBG_I219_LM3), board_pch_spt },
+	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_PCH_SPT_I219_LM4), board_pch_spt },
+	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_PCH_SPT_I219_V4), board_pch_spt },
+	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_PCH_SPT_I219_LM5), board_pch_spt },
+	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_PCH_SPT_I219_V5), board_pch_spt },
 
 	{ 0, 0, 0, 0, 0, 0, 0 }	/* terminate list */
 };

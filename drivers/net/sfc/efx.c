@@ -269,6 +269,27 @@ static int efx_process_channel(struct efx_channel *channel, int budget)
  * NAPI guarantees serialisation of polls of the same device, which
  * provides the guarantee required by efx_process_channel().
  */
+static void efx_update_irq_mod(struct efx_nic *efx, struct efx_channel *channel)
+{
+	int step = efx->irq_mod_step_us;
+
+	if (channel->irq_mod_score < irq_adapt_low_thresh) {
+		if (channel->irq_moderation_us > step) {
+			channel->irq_moderation_us -= step;
+			efx->type->push_irq_moderation(channel);
+		}
+	} else if (channel->irq_mod_score > irq_adapt_high_thresh) {
+		if (channel->irq_moderation_us <
+		    efx->irq_rx_moderation_us) {
+			channel->irq_moderation_us += step;
+			efx->type->push_irq_moderation(channel);
+		}
+	}
+
+	channel->irq_count = 0;
+	channel->irq_mod_score = 0;
+}
+
 static int efx_poll(struct napi_struct *napi, int budget)
 {
 	struct efx_channel *channel =
@@ -289,22 +310,7 @@ static int efx_poll(struct napi_struct *napi, int budget)
 		if (efx_channel_has_rx_queue(channel) &&
 		    efx->irq_rx_adaptive &&
 		    unlikely(++channel->irq_count == 1000)) {
-			if (unlikely(channel->irq_mod_score <
-				     irq_adapt_low_thresh)) {
-				if (channel->irq_moderation > 1) {
-					channel->irq_moderation -= 1;
-					efx->type->push_irq_moderation(channel);
-				}
-			} else if (unlikely(channel->irq_mod_score >
-					    irq_adapt_high_thresh)) {
-				if (channel->irq_moderation <
-				    efx->irq_rx_moderation) {
-					channel->irq_moderation += 1;
-					efx->type->push_irq_moderation(channel);
-				}
-			}
-			channel->irq_count = 0;
-			channel->irq_mod_score = 0;
+			efx_update_irq_mod(efx, channel);
 		}
 		
 		efx_filter_rfs_expire(channel);
@@ -588,6 +594,7 @@ fail:
  */
 static void efx_start_datapath(struct efx_nic *efx)
 {
+	netdev_features_t old_features = efx->net_dev->features;
 	bool old_rx_scatter = efx->rx_scatter;
 	struct efx_tx_queue *tx_queue;
 	struct efx_rx_queue *rx_queue;
@@ -631,6 +638,15 @@ static void efx_start_datapath(struct efx_nic *efx)
 			  "RX buf len=%u step=%u bpp=%u; page batch=%u\n",
 			  efx->rx_dma_len, efx->rx_page_buf_step,
 			  efx->rx_bufs_per_page, efx->rx_pages_per_batch);
+
+	/* Restore previously fixed features in hw_features and remove
+	 * features which are fixed now
+	 */
+	netdev_extended(efx->net_dev)->hw_features |= efx->net_dev->features;
+	netdev_extended(efx->net_dev)->hw_features &= ~efx->fixed_features;
+	efx->net_dev->features |= efx->fixed_features;
+	if (efx->net_dev->features != old_features)
+		netdev_features_change(efx->net_dev);
 
 	/* RX filters may also have scatter-enabled flags */
 	if (efx->rx_scatter != old_rx_scatter)
@@ -1681,6 +1697,7 @@ static int efx_probe_nic(struct efx_nic *efx)
 	netif_set_real_num_rx_queues(efx->net_dev, efx->n_rx_channels);
 
 	/* Initialise the interrupt moderation settings */
+	efx->irq_mod_step_us = DIV_ROUND_UP(efx->timer_quantum_ns, 1000);
 	efx_init_irq_moderation(efx, tx_irq_mod_usec, rx_irq_mod_usec, true,
 				true);
 
@@ -1707,6 +1724,7 @@ static int efx_probe_filters(struct efx_nic *efx)
 
 	spin_lock_init(&efx->filter_lock);
 	init_rwsem(&efx->filter_sem);
+	mutex_lock(&efx->mac_lock);
 	down_write(&efx->filter_sem);
 	rc = efx->type->filter_table_probe(efx);
 	if (rc)
@@ -1726,6 +1744,7 @@ static int efx_probe_filters(struct efx_nic *efx)
 #endif
 out_unlock:
 	up_write(&efx->filter_sem);
+	mutex_unlock(&efx->mac_lock);
 	return rc;
 }
 
@@ -1903,14 +1922,21 @@ static void efx_remove_all(struct efx_nic *efx)
  * Interrupt moderation
  *
  **************************************************************************/
-
-static unsigned int irq_mod_ticks(unsigned int usecs, unsigned int quantum_ns)
+unsigned int efx_usecs_to_ticks(struct efx_nic *efx, unsigned int usecs)
 {
 	if (usecs == 0)
 		return 0;
-	if (usecs * 1000 < quantum_ns)
+	if (usecs * 1000 < efx->timer_quantum_ns)
 		return 1; /* never round down to 0 */
-	return usecs * 1000 / quantum_ns;
+	return usecs * 1000 / efx->timer_quantum_ns;
+}
+
+unsigned int efx_ticks_to_usecs(struct efx_nic *efx, unsigned int ticks)
+{
+	/* We must round up when converting ticks to microseconds
+	 * because we round down when converting the other way.
+	 */
+	return DIV_ROUND_UP(ticks * efx->timer_quantum_ns, 1000);
 }
 
 /* Set interrupt moderation parameters */
@@ -1919,21 +1945,16 @@ int efx_init_irq_moderation(struct efx_nic *efx, unsigned int tx_usecs,
 			    bool rx_may_override_tx)
 {
 	struct efx_channel *channel;
-	unsigned int irq_mod_max = DIV_ROUND_UP(efx->type->timer_period_max *
-						efx->timer_quantum_ns,
-						1000);
-	unsigned int tx_ticks;
-	unsigned int rx_ticks;
+	unsigned int timer_max_us;
 
 	EFX_ASSERT_RESET_SERIALISED(efx);
 
-	if (tx_usecs > irq_mod_max || rx_usecs > irq_mod_max)
+	timer_max_us = efx->timer_max_ns / 1000;
+
+	if (tx_usecs > timer_max_us || rx_usecs > timer_max_us)
 		return -EINVAL;
 
-	tx_ticks = irq_mod_ticks(tx_usecs, efx->timer_quantum_ns);
-	rx_ticks = irq_mod_ticks(rx_usecs, efx->timer_quantum_ns);
-
-	if (tx_ticks != rx_ticks && efx->tx_channel_offset == 0 &&
+	if (tx_usecs != rx_usecs && efx->tx_channel_offset == 0 &&
 	    !rx_may_override_tx) {
 		netif_err(efx, drv, efx->net_dev, "Channels are shared. "
 			  "RX and TX IRQ moderation must be equal\n");
@@ -1941,12 +1962,12 @@ int efx_init_irq_moderation(struct efx_nic *efx, unsigned int tx_usecs,
 	}
 
 	efx->irq_rx_adaptive = rx_adaptive;
-	efx->irq_rx_moderation = rx_ticks;
+	efx->irq_rx_moderation_us = rx_usecs;
 	efx_for_each_channel(channel, efx) {
 		if (efx_channel_has_rx_queue(channel))
-			channel->irq_moderation = rx_ticks;
+			channel->irq_moderation_us = rx_usecs;
 		else if (efx_channel_has_tx_queues(channel))
-			channel->irq_moderation = tx_ticks;
+			channel->irq_moderation_us = tx_usecs;
 	}
 
 	return 0;
@@ -1955,26 +1976,21 @@ int efx_init_irq_moderation(struct efx_nic *efx, unsigned int tx_usecs,
 void efx_get_irq_moderation(struct efx_nic *efx, unsigned int *tx_usecs,
 			    unsigned int *rx_usecs, bool *rx_adaptive)
 {
-	/* We must round up when converting ticks to microseconds
-	 * because we round down when converting the other way.
-	 */
-
 	*rx_adaptive = efx->irq_rx_adaptive;
-	*rx_usecs = DIV_ROUND_UP(efx->irq_rx_moderation *
-				 efx->timer_quantum_ns,
-				 1000);
+	*rx_usecs = efx->irq_rx_moderation_us;
 
 	/* If channels are shared between RX and TX, so is IRQ
 	 * moderation.  Otherwise, IRQ moderation is the same for all
 	 * TX channels and is not adaptive.
 	 */
-	if (efx->tx_channel_offset == 0)
+	if (efx->tx_channel_offset == 0) {
 		*tx_usecs = *rx_usecs;
-	else
-		*tx_usecs = DIV_ROUND_UP(
-			efx->channel[efx->tx_channel_offset]->irq_moderation *
-			efx->timer_quantum_ns,
-			1000);
+	} else {
+		struct efx_channel *tx_channel;
+
+		tx_channel = efx->channel[efx->tx_channel_offset];
+		*tx_usecs = tx_channel->irq_moderation_us;
+	}
 }
 
 /**************************************************************************
@@ -3128,18 +3144,17 @@ static int __devinit efx_pci_probe(struct pci_dev *pci_dev,
 		return -ENOMEM;
 	efx = netdev_priv(net_dev);
 	efx->type = (const struct efx_nic_type *) entry->driver_data;
+	efx->fixed_features |= NETIF_F_HIGHDMA;
 	net_dev->features |= (efx->type->offload_features | NETIF_F_SG |
-			      NETIF_F_HIGHDMA | NETIF_F_TSO |
-			      NETIF_F_RXCSUM);
+			      NETIF_F_TSO | NETIF_F_RXCSUM);
 	if (efx->type->offload_features & NETIF_F_V6_CSUM)
 		net_dev->features |= NETIF_F_TSO6;
 	/* Mask for features that also apply to VLAN devices */
 	net_dev->vlan_features |= (NETIF_F_ALL_CSUM | NETIF_F_SG |
 				   NETIF_F_HIGHDMA | NETIF_F_ALL_TSO |
 				   NETIF_F_RXCSUM);
-	/* All offloads can be toggled */
-	netdev_extended(net_dev)->hw_features = net_dev->features & ~NETIF_F_HIGHDMA;
-	efx = netdev_priv(net_dev);
+	net_dev->features |= efx->fixed_features;
+	netdev_extended(net_dev)->hw_features = net_dev->features & ~efx->fixed_features;
 	pci_set_drvdata(pci_dev, efx);
 	SET_NETDEV_DEV(net_dev, &pci_dev->dev);
 	rc = efx_init_struct(efx, pci_dev, net_dev);
@@ -3178,14 +3193,15 @@ static int __devinit efx_pci_probe(struct pci_dev *pci_dev,
 	rtnl_lock();
 	rc = efx_mtd_probe(efx);
 	rtnl_unlock();
-	if (rc)
+	if (rc && rc != -EPERM)
 		netif_warn(efx, probe, efx->net_dev,
 			   "failed to create MTDs (%d)\n", rc);
 
 	rc = pci_enable_pcie_error_reporting(pci_dev);
 	if (rc && rc != -EINVAL)
-		netif_warn(efx, probe, efx->net_dev,
-			   "pci_enable_pcie_error_reporting failed (%d)\n", rc);
+		netif_notice(efx, probe, efx->net_dev,
+			     "PCIE error reporting unavailable (%d).\n",
+			     rc);
 
 	return 0;
 

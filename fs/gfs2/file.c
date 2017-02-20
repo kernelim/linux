@@ -293,9 +293,9 @@ static int gfs2_set_flags(struct file *filp, u32 __user *ptr)
 		gfsflags &= ~GFS2_DIF_TOPDIR;
 		if (gfsflags & GFS2_DIF_INHERIT_JDATA)
 			gfsflags ^= (GFS2_DIF_JDATA | GFS2_DIF_INHERIT_JDATA);
-		return do_gfs2_set_flags(filp, gfsflags, ~0);
+		return do_gfs2_set_flags(filp, gfsflags, ~GFS2_DIF_SYSTEM);
 	}
-	return do_gfs2_set_flags(filp, gfsflags, ~GFS2_DIF_JDATA);
+	return do_gfs2_set_flags(filp, gfsflags, ~(GFS2_DIF_SYSTEM | GFS2_DIF_JDATA));
 }
 
 static long gfs2_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
@@ -366,9 +366,6 @@ static int gfs2_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf)
 
 	sb_start_pagefault(inode->i_sb);
 
-	/* Update file times before taking page lock */
-	file_update_time(vma->vm_file);
-
 	ret = gfs2_rsqa_alloc(ip);
 	if (ret)
 		goto out;
@@ -377,6 +374,9 @@ static int gfs2_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf)
 	ret = gfs2_glock_nq(&gh);
 	if (ret)
 		goto out_uninit;
+
+	/* Update file times before taking page lock */
+	file_update_time(vma->vm_file);
 
 	set_bit(GLF_DIRTY, &ip->i_gl->gl_flags);
 	set_bit(GIF_SW_PAGED, &ip->i_flags);
@@ -653,6 +653,29 @@ static ssize_t gfs2_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 	return generic_file_aio_write(iocb, iov, nr_segs, pos);
 }
 
+static ssize_t gfs2_file_splice_read(struct file *in, loff_t *ppos,
+				     struct pipe_inode_info *pipe, size_t len,
+				     unsigned int flags)
+{
+	struct inode *inode = in->f_mapping->host;
+	struct gfs2_inode *ip = GFS2_I(inode);
+	struct gfs2_holder gh;
+	int ret;
+
+	mutex_lock(&inode->i_mutex);
+
+	ret = gfs2_glock_nq_init(ip->i_gl, LM_ST_SHARED, 0, &gh);
+	if (ret) {
+		mutex_unlock(&inode->i_mutex);
+		return ret;
+	}
+
+	gfs2_glock_dq_uninit(&gh);
+	mutex_unlock(&inode->i_mutex);
+
+	return generic_file_splice_read(in, ppos, pipe, len, flags);
+}
+
 static ssize_t gfs2_file_splice_write(struct pipe_inode_info *pipe,
 				      struct file *out, loff_t *ppos,
 				      size_t len, unsigned int flags)
@@ -832,7 +855,7 @@ const struct file_operations gfs2_file_fops = {
 	.fsync		= gfs2_fsync,
 	.lock		= gfs2_lock,
 	.flock		= gfs2_flock,
-	.splice_read	= generic_file_splice_read,
+	.splice_read	= gfs2_file_splice_read,
 	.splice_write	= gfs2_file_splice_write,
 	.setlease	= gfs2_setlease,
 };
@@ -860,7 +883,7 @@ const struct file_operations gfs2_file_fops_nolock = {
 	.open		= gfs2_open,
 	.release	= gfs2_release,
 	.fsync		= gfs2_fsync,
-	.splice_read	= generic_file_splice_read,
+	.splice_read	= gfs2_file_splice_read,
 	.splice_write	= gfs2_file_splice_write,
 	.setlease	= generic_setlease,
 };

@@ -1506,6 +1506,7 @@ static void ap_scan_bus(struct work_struct *unused)
 			}
 			break;
 		case 11:
+		case 12:
 			ap_dev->device_type = 10;
 			break;
 		default:
@@ -1782,15 +1783,17 @@ void ap_queue_message(struct ap_device *ap_dev, struct ap_message *ap_msg)
 			rc = __ap_queue_message(ap_dev, ap_msg);
 		if (!rc)
 			wake_up(&ap_poll_wait);
-		if (rc == -ENODEV)
+		if (rc == -ENODEV) {
 			ap_dev->unregistered = 1;
+			ap_msg->receive(ap_dev, ap_msg, ERR_PTR(-ENODEV));
+		}
 	} else {
 		ap_msg->receive(ap_dev, ap_msg, ERR_PTR(-ENODEV));
 		rc = -ENODEV;
 	}
 	spin_unlock_bh(&ap_dev->lock);
-	if (rc == -ENODEV)
-		device_unregister(&ap_dev->device);
+
+	/* no device_unregister(), let ap_scan_bus() do the job */
 }
 EXPORT_SYMBOL(ap_queue_message);
 

@@ -540,6 +540,7 @@ struct fc_vft_header {
 #define ELS_CMD_TEST      0x11000000
 #define ELS_CMD_RRQ       0x12000000
 #define ELS_CMD_REC       0x13000000
+#define ELS_CMD_RDP       0x18000000
 #define ELS_CMD_PRLI      0x20100014
 #define ELS_CMD_PRLO      0x21100014
 #define ELS_CMD_PRLO_ACC  0x02100014
@@ -555,6 +556,7 @@ struct fc_vft_header {
 #define ELS_CMD_SCR       0x62000000
 #define ELS_CMD_RNID      0x78000000
 #define ELS_CMD_LIRR      0x7A000000
+#define ELS_CMD_LCB       0x81000000
 #else	/*  __LITTLE_ENDIAN_BITFIELD */
 #define ELS_CMD_MASK      0xffff
 #define ELS_RSP_MASK      0xff
@@ -577,6 +579,7 @@ struct fc_vft_header {
 #define ELS_CMD_TEST      0x11
 #define ELS_CMD_RRQ       0x12
 #define ELS_CMD_REC       0x13
+#define ELS_CMD_RDP       0x18
 #define ELS_CMD_PRLI      0x14001020
 #define ELS_CMD_PRLO      0x14001021
 #define ELS_CMD_PRLO_ACC  0x14001002
@@ -592,6 +595,7 @@ struct fc_vft_header {
 #define ELS_CMD_SCR       0x62
 #define ELS_CMD_RNID      0x78
 #define ELS_CMD_LIRR      0x7A
+#define ELS_CMD_LCB       0x81
 #endif
 
 /*

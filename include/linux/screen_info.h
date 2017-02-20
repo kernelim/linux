@@ -65,6 +65,8 @@ struct screen_info {
 
 #define VIDEO_TYPE_EFI		0x70	/* EFI graphic mode		*/
 
+#define VIDEO_CAPABILITY_SKIP_QUIRKS	(1 << 0)
+
 #ifdef __KERNEL__
 extern struct screen_info screen_info;
 

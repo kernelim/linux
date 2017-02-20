@@ -32,6 +32,7 @@
 
 #include <xen/xen.h>
 #include <asm/i8259.h>
+#include <asm/nmi.h>
 
 struct ms_hyperv_info ms_hyperv;
 EXPORT_SYMBOL_GPL(ms_hyperv);
@@ -160,6 +161,40 @@ static struct clocksource hyperv_cs = {
 	.flags		= CLOCK_SOURCE_IS_CONTINUOUS,
 };
 
+static unsigned char hv_get_nmi_reason(void)
+{
+	return 0;
+}
+
+#ifdef CONFIG_X86_LOCAL_APIC
+/*
+ * Prior to WS2016 Debug-VM sends NMIs to all CPUs which makes
+ * it dificult to process CHANNELMSG_UNLOAD in case of crash. Handle
+ * unknown NMI on the first CPU which gets it.
+ */
+int hv_nmi_unknown(struct notifier_block *self, unsigned long reason,
+		   void *data)
+{
+	static atomic_t nmi_cpu = ATOMIC_INIT(-1);
+
+	if (reason != DIE_NMIUNKNOWN)
+		return NOTIFY_DONE;
+
+	if (!unknown_nmi_panic)
+		return NOTIFY_DONE;
+
+	if (atomic_cmpxchg(&nmi_cpu, -1, raw_smp_processor_id()) != -1)
+		return NOTIFY_STOP;
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block hv_unknown_nmi_nb = {
+	.notifier_call = hv_nmi_unknown,
+	.priority = NMI_HIGH_PRIOR,
+};
+#endif
+
 static void __init ms_hyperv_init_platform(void)
 {
 	u64	hv_lapic_frequency;
@@ -186,6 +221,10 @@ static void __init ms_hyperv_init_platform(void)
 				lapic_timer_frequency);
 
 	}
+
+	if (register_die_notifier(&hv_unknown_nmi_nb))
+		printk(KERN_WARNING "Failed to register HV NMI handler\n");
+
 #endif
 
 	if (ms_hyperv.features & HV_X64_MSR_TIME_REF_COUNT_AVAILABLE)
@@ -197,6 +236,13 @@ static void __init ms_hyperv_init_platform(void)
 
 	machine_ops.shutdown = hv_machine_shutdown;
 	machine_ops.crash_shutdown = hv_machine_crash_shutdown;
+
+	/*
+	 * Generation 2 instances don't support reading the NMI status from
+	 * 0x61 port.
+	 */
+	if (efi_enabled)
+		x86_platform.get_nmi_reason = hv_get_nmi_reason;
 }
 
 const __refconst struct hypervisor_x86 x86_hyper_ms_hyperv = {

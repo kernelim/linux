@@ -2411,6 +2411,7 @@ static unsigned int xfrm_default_advmss(const struct dst_entry *dst)
 int xfrm_policy_register_afinfo(struct xfrm_policy_afinfo *afinfo)
 {
 	struct net *net;
+	size_t done = 0;
 	int err = 0;
 	if (unlikely(afinfo == NULL))
 		return -EINVAL;
@@ -2452,11 +2453,40 @@ int xfrm_policy_register_afinfo(struct xfrm_policy_afinfo *afinfo)
 			BUG();
 		}
 		*xfrm_dst_ops = *afinfo->dst_ops;
-		dst_ops_extend_register(xfrm_dst_ops, xfrm_default_advmss);
+		err = dst_ops_extend_register(xfrm_dst_ops, xfrm_default_advmss);
+		if (err)
+			goto abort;
+		done++;
 	}
+
+out:
 	rtnl_unlock();
 
 	return err;
+
+abort:
+	for_each_net(net) {
+		struct dst_ops *xfrm_dst_ops;
+
+		if (done-- == 0)
+			break;
+
+		switch (afinfo->family) {
+		case AF_INET:
+			xfrm_dst_ops = &net->xfrm4_dst_ops;
+			break;
+#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+		case AF_INET6:
+			xfrm_dst_ops = &net->xfrm6_dst_ops;
+			break;
+#endif
+		default:
+			xfrm_dst_ops = NULL;
+		}
+		dst_ops_extend_unregister(xfrm_dst_ops);
+	}
+
+	goto out;
 }
 EXPORT_SYMBOL(xfrm_policy_register_afinfo);
 
@@ -2492,24 +2522,37 @@ int xfrm_policy_unregister_afinfo(struct xfrm_policy_afinfo *afinfo)
 }
 EXPORT_SYMBOL(xfrm_policy_unregister_afinfo);
 
-static void __net_init xfrm_dst_ops_init(struct net *net)
+static int __net_init xfrm_dst_ops_init(struct net *net)
 {
 	struct xfrm_policy_afinfo *afinfo;
+	int ret = 0;
 
 	rcu_read_lock();
 	afinfo = rcu_dereference(xfrm_policy_afinfo[AF_INET]);
 	if (afinfo) {
 		net->xfrm4_dst_ops = *afinfo->dst_ops;
-		dst_ops_extend_register(&net->xfrm4_dst_ops, xfrm_default_advmss);
+		ret = dst_ops_extend_register(&net->xfrm4_dst_ops, xfrm_default_advmss);
 	}
 #if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
 	afinfo = rcu_dereference(xfrm_policy_afinfo[AF_INET6]);
-	if (afinfo) {
+	if (afinfo && ret == 0) {
 		net->xfrm6_dst_ops = *afinfo->dst_ops;
-		dst_ops_extend_register(&net->xfrm6_dst_ops, xfrm_default_advmss);
+		ret = dst_ops_extend_register(&net->xfrm6_dst_ops, xfrm_default_advmss);
+		if (ret != 0 && rcu_access_pointer(xfrm_policy_afinfo[AF_INET]))
+			dst_ops_extend_unregister(&net->xfrm4_dst_ops);
 	}
 #endif
 	rcu_read_unlock();
+
+	return ret;
+}
+
+static void xfrm_dst_ops_fini(struct net *net)
+{
+	dst_ops_extend_unregister(&net->xfrm4_dst_ops);
+#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+	dst_ops_extend_unregister(&net->xfrm6_dst_ops);
+#endif
 }
 
 static int xfrm_dev_event(struct notifier_block *this, unsigned long event, void *ptr)
@@ -2656,13 +2699,17 @@ static int __net_init xfrm_net_init(struct net *net)
 	rv = xfrm_policy_init(net);
 	if (rv < 0)
 		goto out_policy;
-	xfrm_dst_ops_init(net);
+	rv = xfrm_dst_ops_init(net);
+	if (rv < 0)
+		goto out_dstops;
 	rv = xfrm_sysctl_init(net);
 	if (rv < 0)
 		goto out_sysctl;
 	return 0;
 
 out_sysctl:
+	xfrm_dst_ops_fini(net);
+out_dstops:
 	xfrm_policy_fini(net);
 out_policy:
 	xfrm_state_fini(net);
@@ -2674,6 +2721,7 @@ out_statistics:
 
 static void __net_exit xfrm_net_exit(struct net *net)
 {
+	xfrm_dst_ops_fini(net);
 	xfrm_sysctl_fini(net);
 	xfrm_policy_fini(net);
 	xfrm_state_fini(net);

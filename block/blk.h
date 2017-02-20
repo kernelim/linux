@@ -201,6 +201,48 @@ static inline int blk_do_io_stat(struct request *rq)
 		(rq->cmd_type == REQ_TYPE_FS);
 }
 
+bool part_valid(struct gendisk *disk, struct hd_struct *check);
+
+/*
+ * KABI hack: rq->part is only valid if drive_stat_acct was called.
+ * Unfortunately, we can't know whether it was called.  Some 3rd party
+ * drivers copy parts of a struct request to a new request, and then
+ * issue I/O with that new request.  We can't guarantee that they
+ * copied rq->part, nor can we guarantee that they even initialized it
+ * to NULL.  So, check to see if rq->part points to a valid hd_struct.
+ * If it doesn't, fall back to the old method of using disk_map_sector_rcu.
+ * This function must be called with rcu_read_lock held.
+ */
+static inline struct hd_struct *req_to_part(struct request *rq)
+{
+	struct hd_struct *part = disk_map_sector_rcu(rq->rq_disk,
+						     blk_rq_pos(rq));
+	/*
+	 * The most common case is that the partition in the request
+	 * matches the one we found in the lookup.
+	 */
+	if (likely(rq->part == part))
+		return part;
+
+	/*
+	 * Some drivers copy portions of struct request, but not all
+	 * of it.  If req->part is NULL, just return the result of
+	 * the lookup.
+	 */
+	if (rq->part == NULL)
+		return part;
+
+	/*
+	 * In rare cases, partitions may overlap.  Here we check to
+	 * see if rq->part is actually a valid hd_struct.  If it is,
+	 * return it.  If not, return the result of the lookup.
+	 */
+	if (part_valid(rq->rq_disk, rq->part))
+		return rq->part;
+
+	return part;
+}
+
 #ifdef CONFIG_BLK_DEV_THROTTLING
 extern bool blk_throtl_bio(struct request_queue *q, struct bio *bio);
 extern void blk_throtl_drain(struct request_queue *q);

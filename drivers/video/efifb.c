@@ -15,10 +15,13 @@
 #include <linux/dmi.h>
 #include <linux/pci.h>
 #include <video/vga.h>
+#include <asm/sysfb.h>
+
+static bool request_mem_succeeded = false;
 
 static struct pci_dev *default_vga;
 
-static struct fb_var_screeninfo efifb_defined __initdata = {
+static struct fb_var_screeninfo efifb_defined = {
 	.activate		= FB_ACTIVATE_NOW,
 	.height			= -1,
 	.width			= -1,
@@ -29,113 +32,12 @@ static struct fb_var_screeninfo efifb_defined __initdata = {
 	.vmode			= FB_VMODE_NONINTERLACED,
 };
 
-static struct fb_fix_screeninfo efifb_fix __initdata = {
+static struct fb_fix_screeninfo efifb_fix = {
 	.id			= "EFI VGA",
 	.type			= FB_TYPE_PACKED_PIXELS,
 	.accel			= FB_ACCEL_NONE,
 	.visual			= FB_VISUAL_TRUECOLOR,
 };
-
-enum {
-	M_I17,		/* 17-Inch iMac */
-	M_I20,		/* 20-Inch iMac */
-	M_I20_SR,	/* 20-Inch iMac (Santa Rosa) */
-	M_I24,		/* 24-Inch iMac */
-	M_MINI,		/* Mac Mini */
-	M_MB,		/* MacBook */
-	M_MB_2,		/* MacBook, 2nd rev. */
-	M_MB_3,		/* MacBook, 3rd rev. */
-	M_MB_SR,	/* MacBook, 2nd gen, (Santa Rosa) */
-	M_MBA,		/* MacBook Air */
-	M_MBP,		/* MacBook Pro */
-	M_MBP_2,	/* MacBook Pro 2nd gen */
-	M_MBP_SR,	/* MacBook Pro (Santa Rosa) */
-	M_MBP_4,	/* MacBook Pro, 4th gen */
-	M_UNKNOWN	/* placeholder */
-};
-
-static struct efifb_dmi_info {
-	char *optname;
-	unsigned long base;
-	int stride;
-	int width;
-	int height;
-} dmi_list[] = {
-	[M_I17] = { "i17", 0x80010000, 1472 * 4, 1440, 900 },
-	[M_I20] = { "i20", 0x80010000, 1728 * 4, 1680, 1050 }, /* guess */
-	[M_I20_SR] = { "imac7", 0x40010000, 1728 * 4, 1680, 1050 },
-	[M_I24] = { "i24", 0x80010000, 2048 * 4, 1920, 1200 }, /* guess */
-	[M_MINI]= { "mini", 0x80000000, 2048 * 4, 1024, 768 },
-	[M_MB] = { "macbook", 0x80000000, 2048 * 4, 1280, 800 },
-	[M_MBA] = { "mba", 0x80000000, 2048 * 4, 1280, 800 },
-	[M_MBP] = { "mbp", 0x80010000, 1472 * 4, 1440, 900 },
-	[M_MBP_2] = { "mbp2", 0, 0, 0, 0 }, /* placeholder */
-	[M_MBP_SR] = { "mbp3", 0x80030000, 2048 * 4, 1440, 900 },
-	[M_MBP_4] = { "mbp4", 0xc0060000, 2048 * 4, 1920, 1200 },
-	[M_UNKNOWN] = { NULL, 0, 0, 0, 0 }
-};
-
-static int set_system(const struct dmi_system_id *id);
-
-#define EFIFB_DMI_SYSTEM_ID(vendor, name, enumid)		\
-	{ set_system, name, {					\
-		DMI_MATCH(DMI_BIOS_VENDOR, vendor),		\
-		DMI_MATCH(DMI_PRODUCT_NAME, name) },		\
-	  &dmi_list[enumid] }
-
-static struct dmi_system_id __initdata dmi_system_table[] = {
-	EFIFB_DMI_SYSTEM_ID("Apple Computer, Inc.", "iMac4,1", M_I17),
-	/* At least one of these two will be right; maybe both? */
-	EFIFB_DMI_SYSTEM_ID("Apple Computer, Inc.", "iMac5,1", M_I20),
-	EFIFB_DMI_SYSTEM_ID("Apple Inc.", "iMac5,1", M_I20),
-	/* At least one of these two will be right; maybe both? */
-	EFIFB_DMI_SYSTEM_ID("Apple Computer, Inc.", "iMac6,1", M_I24),
-	EFIFB_DMI_SYSTEM_ID("Apple Inc.", "iMac6,1", M_I24),
-	EFIFB_DMI_SYSTEM_ID("Apple Inc.", "iMac7,1", M_I20_SR),
-	EFIFB_DMI_SYSTEM_ID("Apple Computer, Inc.", "Macmini1,1", M_MINI),
-	EFIFB_DMI_SYSTEM_ID("Apple Computer, Inc.", "MacBook1,1", M_MB),
-	/* At least one of these two will be right; maybe both? */
-	EFIFB_DMI_SYSTEM_ID("Apple Computer, Inc.", "MacBook2,1", M_MB),
-	EFIFB_DMI_SYSTEM_ID("Apple Inc.", "MacBook2,1", M_MB),
-	/* At least one of these two will be right; maybe both? */
-	EFIFB_DMI_SYSTEM_ID("Apple Computer, Inc.", "MacBook3,1", M_MB),
-	EFIFB_DMI_SYSTEM_ID("Apple Inc.", "MacBook3,1", M_MB),
-	EFIFB_DMI_SYSTEM_ID("Apple Inc.", "MacBook4,1", M_MB),
-	EFIFB_DMI_SYSTEM_ID("Apple Inc.", "MacBookAir1,1", M_MBA),
-	EFIFB_DMI_SYSTEM_ID("Apple Computer, Inc.", "MacBookPro1,1", M_MBP),
-	EFIFB_DMI_SYSTEM_ID("Apple Computer, Inc.", "MacBookPro2,1", M_MBP_2),
-	EFIFB_DMI_SYSTEM_ID("Apple Inc.", "MacBookPro2,1", M_MBP_2),
-	EFIFB_DMI_SYSTEM_ID("Apple Computer, Inc.", "MacBookPro3,1", M_MBP_SR),
-	EFIFB_DMI_SYSTEM_ID("Apple Inc.", "MacBookPro3,1", M_MBP_SR),
-	EFIFB_DMI_SYSTEM_ID("Apple Inc.", "MacBookPro4,1", M_MBP_4),
-	{},
-};
-
-static int set_system(const struct dmi_system_id *id)
-{
-	struct efifb_dmi_info *info = id->driver_data;
-	if (info->base == 0)
-		return -ENODEV;
-
-	printk(KERN_INFO "efifb: dmi detected %s - framebuffer at %p "
-			 "(%dx%d, stride %d)\n", id->ident,
-			 (void *)info->base, info->width, info->height,
-			 info->stride);
-
-	/* Trust the bootloader over the DMI tables */
-	if (screen_info.lfb_base == 0)
-		screen_info.lfb_base = info->base;
-	if (screen_info.lfb_linelength == 0)
-		screen_info.lfb_linelength = info->stride;
-	if (screen_info.lfb_width == 0)
-		screen_info.lfb_width = info->width;
-	if (screen_info.lfb_height == 0)
-		screen_info.lfb_height = info->height;
-	if (screen_info.orig_video_isVGA == 0)
-		screen_info.orig_video_isVGA = VIDEO_TYPE_EFI;
-
-	return 0;
-}
 
 static int efifb_setcolreg(unsigned regno, unsigned red, unsigned green,
 			   unsigned blue, unsigned transp,
@@ -167,7 +69,8 @@ static void efifb_destroy(struct fb_info *info)
 {
 	if (info->screen_base)
 		iounmap(info->screen_base);
-	release_mem_region(info->aperture_base, info->aperture_size);
+	if (request_mem_succeeded)
+		release_mem_region(info->aperture_base, info->aperture_size);
 	framebuffer_release(info);
 }
 
@@ -190,7 +93,7 @@ void vga_set_default_device(struct pci_dev *pdev)
 	default_vga = pdev;
 }
 
-static int __init efifb_setup(char *options)
+static int efifb_setup(char *options)
 {
 	char *this_opt;
 	int i;
@@ -201,12 +104,12 @@ static int __init efifb_setup(char *options)
 			if (!*this_opt) continue;
 
 			for (i = 0; i < M_UNKNOWN; i++) {
-				if (!strcmp(this_opt, dmi_list[i].optname) &&
-				    dmi_list[i].base != 0) {
-					screen_info.lfb_base = dmi_list[i].base;
-					screen_info.lfb_linelength = dmi_list[i].stride;
-					screen_info.lfb_width = dmi_list[i].width;
-					screen_info.lfb_height = dmi_list[i].height;
+				if (efifb_dmi_list[i].base != 0 &&
+				    !strcmp(this_opt, efifb_dmi_list[i].optname)) {
+					screen_info.lfb_base = efifb_dmi_list[i].base;
+					screen_info.lfb_linelength = efifb_dmi_list[i].stride;
+					screen_info.lfb_width = efifb_dmi_list[i].width;
+					screen_info.lfb_height = efifb_dmi_list[i].height;
 				}
 			}
 			if (!strncmp(this_opt, "base:", 5))
@@ -247,14 +150,28 @@ static int __init efifb_setup(char *options)
 	return 0;
 }
 
-static int __init efifb_probe(struct platform_device *dev)
+static int efifb_probe(struct platform_device *dev)
 {
 	struct fb_info *info;
 	int err;
 	unsigned int size_vmode;
 	unsigned int size_remap;
 	unsigned int size_total;
-	int request_succeeded = 0;
+	char *option = NULL;
+
+	if (screen_info.orig_video_isVGA != VIDEO_TYPE_EFI)
+		return -ENODEV;
+
+	if (fb_get_options("efifb", &option))
+		return -ENODEV;
+	efifb_setup(option);
+
+	/* We don't get linelength from UGA Draw Protocol, only from
+	 * EFI Graphics Protocol.  So if it's not in DMI, and it's not
+	 * passed in from the user, we really can't use the framebuffer.
+	 */
+	if (!screen_info.lfb_linelength)
+		return -ENODEV;
 
 	if (!screen_info.lfb_depth)
 		screen_info.lfb_depth = 32;
@@ -308,7 +225,7 @@ static int __init efifb_probe(struct platform_device *dev)
 	efifb_fix.smem_len = size_remap;
 
 	if (request_mem_region(efifb_fix.smem_start, size_remap, "efifb")) {
-		request_succeeded = 1;
+		request_mem_succeeded = true;
 	} else {
 		/* We cannot make this fatal. Sometimes this comes from magic
 		   spaces our resource handlers simply don't know about */
@@ -407,52 +324,18 @@ err_unmap:
 err_release_fb:
 	framebuffer_release(info);
 err_release_mem:
-	if (request_succeeded)
+	if (request_mem_succeeded)
 		release_mem_region(efifb_fix.smem_start, size_total);
 	return err;
 }
 
 static struct platform_driver efifb_driver = {
-	.probe	= efifb_probe,
-	.driver	= {
-		.name	= "efifb",
+	.driver = {
+		.name = "efi-framebuffer",
+		.owner = THIS_MODULE,
 	},
+	.probe = efifb_probe,
 };
 
-static struct platform_device efifb_device = {
-	.name	= "efifb",
-};
-
-static int __init efifb_init(void)
-{
-	int ret;
-	char *option = NULL;
-
-	dmi_check_system(dmi_system_table);
-
-	if (screen_info.orig_video_isVGA != VIDEO_TYPE_EFI)
-		return -ENODEV;
-
-	if (fb_get_options("efifb", &option))
-		return -ENODEV;
-	efifb_setup(option);
-
-	/* We don't get linelength from UGA Draw Protocol, only from
-	 * EFI Graphics Protocol.  So if it's not in DMI, and it's not
-	 * passed in from the user, we really can't use the framebuffer.
-	 */
-	if (!screen_info.lfb_linelength)
-		return -ENODEV;
-
-	ret = platform_driver_register(&efifb_driver);
-
-	if (!ret) {
-		ret = platform_device_register(&efifb_device);
-		if (ret)
-			platform_driver_unregister(&efifb_driver);
-	}
-	return ret;
-}
-module_init(efifb_init);
-
+module_platform_driver(efifb_driver);
 MODULE_LICENSE("GPL");
