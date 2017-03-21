@@ -583,6 +583,9 @@ unsigned int kstat_irqs_usr(unsigned int irq)
 	int sum;
 	unsigned long flags;
 
+	if (!irq_to_desc(irq))
+		return 0;
+
 	spin_lock_irqsave(&sparse_irq_lock, flags);
 	sum = kstat_irqs(irq);
 	spin_unlock_irqrestore(&sparse_irq_lock, flags);
