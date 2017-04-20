@@ -10921,6 +10921,7 @@ struct task_group *sched_create_group(struct task_group *parent)
 	list_add_rcu(&tg->siblings, &parent->children);
 	spin_unlock_irqrestore(&task_group_lock, flags);
 
+	online_fair_sched_group(tg);
 	return tg;
 
 err:

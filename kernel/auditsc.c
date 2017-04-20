@@ -828,8 +828,10 @@ static int audit_filter_rules(struct task_struct *tsk,
 	}
 
 	if (ctx) {
-		if (rule->prio <= ctx->prio)
+		if (rule->prio <= ctx->prio) {
+			put_cred(cred);
 			return 0;
+		}
 		if (rule->filterkey) {
 			kfree(ctx->filterkey);
 			ctx->filterkey = kstrdup(rule->filterkey, GFP_ATOMIC);

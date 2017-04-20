@@ -2797,6 +2797,7 @@ extern void set_tg_uid(struct user_struct *user);
 
 extern struct task_group *sched_create_group(struct task_group *parent);
 extern void sched_destroy_group(struct task_group *tg);
+extern void online_fair_sched_group(struct task_group *tg);
 extern void sched_move_task(struct task_struct *tsk);
 extern void __sched_move_task(struct task_struct *tsk);
 #ifdef CONFIG_FAIR_GROUP_SCHED

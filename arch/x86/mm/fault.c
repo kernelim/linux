@@ -17,6 +17,7 @@
 #include <asm/traps.h>			/* dotraplinkage, ...		*/
 #include <asm/pgalloc.h>		/* pgd_*(), ...			*/
 #include <asm/kmemcheck.h>		/* kmemcheck_*(), ...		*/
+#include <asm/reboot.h>
 
 /*
  * Page fault error code bits:
@@ -225,6 +226,12 @@ void vmalloc_sync_all(void)
 
 	if (SHARED_KERNEL_PMD)
 		return;
+	/*
+	 * crash cpu should not get pgtable_lock which may be held but never
+	 * released by other mm component.
+	 */
+	if (in_crash_kexec && crashing_cpu == safe_smp_processor_id())
+		return;
 
 	for (address = VMALLOC_START & PMD_MASK;
 	     address >= TASK_SIZE && address < FIXADDR_TOP;
@@ -341,6 +348,12 @@ out:
 void vmalloc_sync_all(void)
 {
 	unsigned long address;
+	/*
+	 * crash cpu should not get pgtable_lock which may be held but never
+	 * released by other mm component.
+	 */
+	if (in_crash_kexec && crashing_cpu == safe_smp_processor_id())
+		return;
 
 	for (address = VMALLOC_START & PGDIR_MASK; address <= VMALLOC_END;
 	     address += PGDIR_SIZE) {

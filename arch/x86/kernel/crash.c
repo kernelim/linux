@@ -100,6 +100,8 @@ static void kdump_nmi_shootdown_cpus(void)
 #else
 static void kdump_nmi_shootdown_cpus(void)
 {
+	in_crash_kexec = 1;
+	crashing_cpu = safe_smp_processor_id();
 	/* There are no cpus to shootdown */
 }
 #endif
