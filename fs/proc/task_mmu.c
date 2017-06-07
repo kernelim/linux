@@ -213,7 +213,7 @@ static void show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
 	int flags = vma->vm_flags;
 	unsigned long ino = 0;
 	unsigned long long pgoff = 0;
-	unsigned long start;
+	unsigned long start, end;
 	dev_t dev = 0;
 	int len;
 
@@ -226,9 +226,13 @@ static void show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
 
 	/* We don't show the stack guard page in /proc/maps */
 	start = vma->vm_start;
-	if (vma->vm_flags & VM_GROWSDOWN)
-		if (!vma_stack_continue(vma->vm_prev, vma->vm_start))
-			start += PAGE_SIZE;
+	end = vma->vm_end;
+	if (stack_guard_area(vma, start)) {
+		if (vma->vm_flags & VM_GROWSDOWN)
+			start += stack_guard_gap;
+		else
+			end -= stack_guard_gap;
+	}
 
 	seq_printf(m, "%08lx-%08lx %c%c%c%c %08llx %02x:%02x %lu %n",
 			start,

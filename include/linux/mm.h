@@ -1366,15 +1366,18 @@ unsigned long ra_submit(struct file_ra_state *ra,
 			struct address_space *mapping,
 			struct file *filp);
 
+extern unsigned long stack_guard_gap;
 /* Do stack extension */
 extern int expand_stack(struct vm_area_struct *vma, unsigned long address);
+extern int stack_guard_area(struct vm_area_struct *vma, unsigned long address);
 #if VM_GROWSUP
-extern int expand_upwards(struct vm_area_struct *vma, unsigned long address);
+extern int expand_upwards(struct vm_area_struct *vma,
+			unsigned long address, unsigned long gap);
 #else
-  #define expand_upwards(vma, address) do { } while (0)
+  #define expand_upwards(vma, address, gap) do { } while (0)
 #endif
 extern int expand_stack_downwards(struct vm_area_struct *vma,
-				  unsigned long address);
+				  unsigned long address, unsigned long gap);
 
 /* Look up the first VMA which satisfies  addr < vm_end,  NULL if none. */
 extern struct vm_area_struct * find_vma(struct mm_struct * mm, unsigned long addr);

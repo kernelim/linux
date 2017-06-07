@@ -1829,18 +1829,22 @@ static int over_stack_limit(unsigned long sz)
  * update accounting. This is shared with both the
  * grow-up and grow-down cases.
  */
-static int acct_stack_growth(struct vm_area_struct *vma, unsigned long size, unsigned long grow)
+static int acct_stack_growth(struct vm_area_struct *vma, unsigned long size,
+				unsigned long grow, unsigned long gap)
 {
 	struct mm_struct *mm = vma->vm_mm;
 	struct rlimit *rlim = current->signal->rlim;
-	unsigned long new_start;
+	unsigned long new_start, actual_size;
 
 	/* address space limit tests */
 	if (!may_expand_vm(mm, grow))
 		return -ENOMEM;
 
 	/* Stack limit test */
-	if (over_stack_limit(size))
+	actual_size = size;
+	if (size && (vma->vm_flags & (VM_GROWSUP | VM_GROWSDOWN)))
+		actual_size -= gap;
+	if (over_stack_limit(actual_size))
 		return -ENOMEM;
 
 	/* mlock limit tests */
@@ -1879,9 +1883,9 @@ static int acct_stack_growth(struct vm_area_struct *vma, unsigned long size, uns
  * PA-RISC uses this for its stack; IA64 for its Register Backing Store.
  * vma is the last one with address > vma->vm_end.  Have to extend vma.
  */
-int expand_upwards(struct vm_area_struct *vma, unsigned long address)
+int expand_upwards(struct vm_area_struct *vma, unsigned long address, insigned long gap)
 {
-	int error;
+	int error = 0;
 
 	if (!(vma->vm_flags & VM_GROWSUP))
 		return -EFAULT;
@@ -1898,15 +1902,7 @@ int expand_upwards(struct vm_area_struct *vma, unsigned long address)
 	 * vma->vm_start/vm_end cannot change under us because the caller
 	 * is required to hold the mmap_sem in read mode.  We need the
 	 * anon_vma lock to serialize against concurrent expand_stacks.
-	 * Also guard against wrapping around to address 0.
 	 */
-	if (address < PAGE_ALIGN(address+4))
-		address = PAGE_ALIGN(address+4);
-	else {
-		vma_unlock_anon_vma(vma);
-		return -ENOMEM;
-	}
-	error = 0;
 
 	/* Somebody else might have raced and expanded it already */
 	if (address > vma->vm_end) {
@@ -1917,7 +1913,7 @@ int expand_upwards(struct vm_area_struct *vma, unsigned long address)
 
 		error = -ENOMEM;
 		if (vma->vm_pgoff + (size >> PAGE_SHIFT) >= vma->vm_pgoff) {
-			error = acct_stack_growth(vma, size, grow);
+			error = acct_stack_growth(vma, size, grow, gap);
 			if (!error) {
 				vma->vm_end = address;
 				perf_event_mmap(vma);
@@ -1934,7 +1930,7 @@ int expand_upwards(struct vm_area_struct *vma, unsigned long address)
  * vma is the first one with address < vma->vm_start.  Have to extend vma.
  */
 static int expand_downwards(struct vm_area_struct *vma,
-				   unsigned long address)
+				   unsigned long address, unsigned long gap)
 {
 	int error;
 
@@ -1967,7 +1963,7 @@ static int expand_downwards(struct vm_area_struct *vma,
 
 		error = -ENOMEM;
 		if (grow <= vma->vm_pgoff) {
-			error = acct_stack_growth(vma, size, grow);
+			error = acct_stack_growth(vma, size, grow, gap);
 			if (!error) {
 				vma->vm_start = address;
 				vma->vm_pgoff -= grow;
@@ -1980,15 +1976,71 @@ static int expand_downwards(struct vm_area_struct *vma,
 	return error;
 }
 
-int expand_stack_downwards(struct vm_area_struct *vma, unsigned long address)
+int expand_stack_downwards(struct vm_area_struct *vma, unsigned long address,
+			unsigned long gap)
 {
-	return expand_downwards(vma, address);
+	return expand_downwards(vma, address, gap);
 }
 
+/* enforced gap between the expanding stack and other mappings. */
+unsigned long stack_guard_gap = 1UL<<20;
+
 #ifdef CONFIG_STACK_GROWSUP
+unsigned long expandable_stack_area(struct vm_area_struct *vma,
+		unsigned long address, unsigned long *gap)
+{
+	struct vm_area_struct *next = vma->vm_next;
+	unsigned long guard_gap = stack_guard_gap;
+	unsigned long guard_addr;
+ 
+	address = ALIGN(address, PAGE_SIZE);;
+	if (!next)
+		goto out;
+
+	if (next->vm_flags & VM_GROWSUP) {
+		guard_gap = min(guard_gap, next->vm_start - address);
+		goto out;
+	}
+
+	if (next->vm_start - address < guard_gap)
+		return -ENOMEM;
+out:
+	if (TASK_SIZE - address < guard_gap)
+		guard_gap = TASK_SIZE - address;
+	guard_addr = address + guard_gap;
+	*gap = guard_gap;
+
+	return guard_addr;
+}
+
 int expand_stack(struct vm_area_struct *vma, unsigned long address)
 {
-	return expand_upwards(vma, address);
+	unsigned long gap;
+
+	address = expandable_stack_area(vma, address, &gap);
+	if (IS_ERR_VALUE(address))
+		return -ENOMEM;
+	return expand_upwards(vma, address, gap);
+}
+
+int stack_guard_area(struct vm_area_struct *vma, unsigned long address)
+{
+	struct vm_area_struct *next;
+
+	if (!(vma->vm_flags & VM_GROWSUP))
+		return 0;
+
+	/*
+	 * strictly speaking there is a guard gap between disjoint stacks
+	 * but the gap is not canonical (it might be smaller) and it is
+	 * reasonably safe to assume that we can ignore that gap for stack
+	 * POPULATE or /proc/<pid>[s]maps purposes
+	 */
+	next = vma->vm_next;
+	if (next && next->vm_flags & VM_GROWSUP)
+		return 0;
+
+	return vma->vm_end - address < stack_guard_gap;
 }
 
 struct vm_area_struct *
@@ -2009,9 +2061,72 @@ find_extend_vma(struct mm_struct *mm, unsigned long addr)
 	return prev;
 }
 #else
+unsigned long expandable_stack_area(struct vm_area_struct *vma,
+			unsigned long address, unsigned long *gap)
+{
+	struct vm_area_struct *prev = vma->vm_prev;
+	unsigned long guard_gap = stack_guard_gap;
+	unsigned long guard_addr;
+ 
+	address &= PAGE_MASK;
+	if (!prev)
+		goto out;
+
+	/*
+	 * Is there a mapping abutting this one below?
+	 *
+	 * That's only ok if it's the same stack mapping
+	 * that has gotten split or there is sufficient gap
+	 * between mappings
+	 */
+	if (prev->vm_flags & VM_GROWSDOWN) {
+		guard_gap = min(guard_gap, address - prev->vm_end);
+		goto out;
+	}
+
+	if (address - prev->vm_end < guard_gap)
+		return -ENOMEM;
+
+out:
+	/* make sure we won't underflow */
+	if (address < mmap_min_addr)
+		return -ENOMEM;
+	if (address - mmap_min_addr < guard_gap)
+		guard_gap = address - mmap_min_addr;
+
+	guard_addr = address - guard_gap;
+	*gap = guard_gap;
+
+	return guard_addr;
+}
+
 int expand_stack(struct vm_area_struct *vma, unsigned long address)
 {
-	return expand_downwards(vma, address);
+	unsigned long gap;
+
+	address = expandable_stack_area(vma, address, &gap);
+	if (IS_ERR_VALUE(address))
+		return -ENOMEM;
+	return expand_downwards(vma, address, gap);
+}
+int stack_guard_area(struct vm_area_struct *vma, unsigned long address)
+{
+	struct vm_area_struct *prev;
+
+	if (!(vma->vm_flags & VM_GROWSDOWN))
+		return 0;
+
+	/*
+	 * strictly speaking there is a guard gap between disjoint stacks
+	 * but the gap is not canonical (it might be smaller) and it is
+	 * reasonably safe to assume that we can ignore that gap for stack
+	 * POPULATE or /proc/<pid>[s]maps purposes
+	 */
+	prev = vma->vm_prev;
+	if (prev && prev->vm_flags & VM_GROWSDOWN)
+		return 0;
+
+	return address - vma->vm_start < stack_guard_gap;
 }
 
 struct vm_area_struct *
