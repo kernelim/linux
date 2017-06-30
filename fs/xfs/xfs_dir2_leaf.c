@@ -950,6 +950,8 @@ xfs_dir2_leaf_getdents(
 				ra_current -= mp->m_dirblkfsbs;
 			/*
 			 * Do we need more readahead?
+			 * Each loop tries to process 1 full dir blk; last may
+			 * be partial.
 			 */
 			for (ra_index = ra_offset = i = 0;
 			     ra_want > ra_current && i < map_blocks;
@@ -980,9 +982,16 @@ xfs_dir2_leaf_getdents(
 					ra_current = i;
 				}
 				/*
-				 * Advance offset through the mapping table.
+				 * Advance offset through the mapping table,
+				 * processing a full dir block even if it is
+				 * fragmented into several extents.
+				 * But stop if we have consumed all valid
+				 * mapings, even if it's not yet a full
+				 * directory block.
 				 */
-				for (j = 0; j < mp->m_dirblkfsbs; j += length) {
+				for (j = 0;
+				     j < mp->m_dirblkfsbs && ra_index < map_valid;
+				     j += length) {
 					/*
 					 * The rest of this extent but not
 					 * more than a dir block.

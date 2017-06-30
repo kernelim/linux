@@ -1985,6 +1985,20 @@ int expand_stack_downwards(struct vm_area_struct *vma, unsigned long address,
 /* enforced gap between the expanding stack and other mappings. */
 unsigned long stack_guard_gap = 1UL<<20;
 
+static int __init cmdline_parse_stack_guard_gap(char *p)
+{
+	unsigned long val;
+	char *endptr;
+
+	val = simple_strtoul(p, &endptr, 10);
+	if (!*endptr)
+		stack_guard_gap = val << PAGE_SHIFT;
+
+	return 0;
+}
+__setup("stack_guard_gap=", cmdline_parse_stack_guard_gap);
+
+
 #ifdef CONFIG_STACK_GROWSUP
 unsigned long expandable_stack_area(struct vm_area_struct *vma,
 		unsigned long address, unsigned long *gap)
@@ -1997,7 +2011,8 @@ unsigned long expandable_stack_area(struct vm_area_struct *vma,
 	if (!next)
 		goto out;
 
-	if (next->vm_flags & VM_GROWSUP) {
+	/* see comment in !CONFIG_STACK_GROWSUP */
+	if ((next->vm_flags & VM_GROWSUP) || !(next->vm_flags & (VM_WRITE|VM_READ))) 
 		guard_gap = min(guard_gap, next->vm_start - address);
 		goto out;
 	}
@@ -2078,8 +2093,13 @@ unsigned long expandable_stack_area(struct vm_area_struct *vma,
 	 * That's only ok if it's the same stack mapping
 	 * that has gotten split or there is sufficient gap
 	 * between mappings
+	 *
+	 * Please note that some application (e.g. Java) punches
+	 * MAP_FIXED inside the stack and then PROT_NONE it
+	 * to mimic a stack guard which will clash with our protection
+	 * so pretend tha PROT_NONE vmas are OK
 	 */
-	if (prev->vm_flags & VM_GROWSDOWN) {
+	if ((prev->vm_flags & VM_GROWSDOWN) || !(prev->vm_flags & (VM_WRITE|VM_READ))) {
 		guard_gap = min(guard_gap, address - prev->vm_end);
 		goto out;
 	}

@@ -254,6 +254,7 @@ struct sock_xprt {
 	/*
 	 * Connection of transports
 	 */
+	unsigned long           sock_state;
 	struct delayed_work	connect_worker;
 	struct sockaddr_storage	srcaddr;
 	unsigned short		srcport;
@@ -287,6 +288,8 @@ struct sock_xprt {
  * TCP RPC flags
  */
 #define TCP_RPC_REPLY		(1UL << 6)
+
+#define XPRT_SOCK_CONNECTING   1U
 
 static inline struct rpc_xprt *xprt_from_sock(struct sock *sk)
 {
@@ -1504,6 +1507,7 @@ out:
 static void xs_tcp_state_change(struct sock *sk)
 {
 	struct rpc_xprt *xprt;
+	struct sock_xprt *transport;
 
 	read_lock_bh(&sk->sk_callback_lock);
 	if (!(xprt = xprt_from_sock(sk)))
@@ -1515,12 +1519,11 @@ static void xs_tcp_state_change(struct sock *sk)
 			sock_flag(sk, SOCK_ZAPPED),
 			sk->sk_shutdown);
 
+	transport = container_of(xprt, struct sock_xprt, xprt);
 	switch (sk->sk_state) {
 	case TCP_ESTABLISHED:
 		spin_lock(&xprt->transport_lock);
 		if (!xprt_test_and_set_connected(xprt)) {
-			struct sock_xprt *transport = container_of(xprt,
-					struct sock_xprt, xprt);
 
 			/* Reset TCP record info */
 			transport->tcp_offset = 0;
@@ -1528,6 +1531,8 @@ static void xs_tcp_state_change(struct sock *sk)
 			transport->tcp_copied = 0;
 			transport->tcp_flags =
 				TCP_RCV_COPY_FRAGHDR | TCP_RCV_COPY_XID;
+			clear_bit(XPRT_SOCK_CONNECTING, &transport->sock_state);
+			xprt_clear_connecting(xprt);
 
 			xprt_wake_pending_tasks(xprt, -EAGAIN);
 		}
@@ -1563,6 +1568,9 @@ static void xs_tcp_state_change(struct sock *sk)
 		smp_mb__after_clear_bit();
 		break;
 	case TCP_CLOSE:
+		if (test_and_clear_bit(XPRT_SOCK_CONNECTING,
+					&transport->sock_state))
+			xprt_clear_connecting(xprt);
 		xs_sock_mark_closed(xprt);
 	}
  out:
@@ -2082,6 +2090,7 @@ static int xs_tcp_finish_connecting(struct rpc_xprt *xprt, struct socket *sock)
 	/* Tell the socket layer to start connecting... */
 	xprt->stat.connect_count++;
 	xprt->stat.connect_start = jiffies;
+	set_bit(XPRT_SOCK_CONNECTING, &transport->sock_state);
 	ret = kernel_connect(sock, xs_addr(xprt), xprt->addrlen, O_NONBLOCK);
 	switch (ret) {
 	case 0:
@@ -2148,7 +2157,6 @@ static void xs_tcp_setup_socket(struct work_struct *work)
 	case -EINPROGRESS:
 	case -EALREADY:
 		xprt_unlock_connect(xprt, transport);
-		xprt_clear_connecting(xprt);
 		current->flags &= ~PF_FSTRANS;
 		return;
 	case -EINVAL:
