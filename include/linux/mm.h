@@ -1367,17 +1367,40 @@ unsigned long ra_submit(struct file_ra_state *ra,
 			struct file *filp);
 
 extern unsigned long stack_guard_gap;
+
 /* Do stack extension */
 extern int expand_stack(struct vm_area_struct *vma, unsigned long address);
-extern int stack_guard_area(struct vm_area_struct *vma, unsigned long address);
 #if VM_GROWSUP
-extern int expand_upwards(struct vm_area_struct *vma,
-			unsigned long address, unsigned long gap);
+extern int expand_upwards(struct vm_area_struct *vma, unsigned long address);
 #else
-  #define expand_upwards(vma, address, gap) do { } while (0)
+  #define expand_upwards(vma, address) do { } while (0)
 #endif
 extern int expand_stack_downwards(struct vm_area_struct *vma,
-				  unsigned long address, unsigned long gap);
+				  unsigned long address);
+
+static inline unsigned long vm_start_gap(struct vm_area_struct *vma)
+{
+	unsigned long vm_start = vma->vm_start;
+
+	if (vma->vm_flags & VM_GROWSDOWN) {
+		vm_start -= stack_guard_gap;
+		if (vm_start > vma->vm_start)
+			vm_start = 0;
+	}
+	return vm_start;
+}
+
+static inline unsigned long vm_end_gap(struct vm_area_struct *vma)
+{
+	unsigned long vm_end = vma->vm_end;
+
+	if (vma->vm_flags & VM_GROWSUP) {
+		vm_end += stack_guard_gap;
+		if (vm_end < vma->vm_end)
+			vm_end = -PAGE_SIZE;
+	}
+	return vm_end;
+}
 
 /* Look up the first VMA which satisfies  addr < vm_end,  NULL if none. */
 extern struct vm_area_struct * find_vma(struct mm_struct * mm, unsigned long addr);

@@ -744,11 +744,13 @@ void zfcp_dbf_rec_trigger(char *id2, void *ref, u8 want, u8 need, void *action,
 }
 
 /**
- * zfcp_dbf_rec_action - trace event showing progress of recovery action
+ * zfcp_dbf_rec_action_lvl - trace event showing progress of recovery action
+ * @level: trace level to be used for event
  * @id2: identifier
  * @erp_action: error recovery action struct pointer
  */
-void zfcp_dbf_rec_action(char *id2, struct zfcp_erp_action *erp_action)
+void zfcp_dbf_rec_action_lvl(int level,
+			     char *id2, struct zfcp_erp_action *erp_action)
 {
 	struct zfcp_dbf *dbf = erp_action->adapter->dbf;
 	struct zfcp_dbf_rec_record *r = &dbf->rec_buf;
@@ -762,8 +764,18 @@ void zfcp_dbf_rec_action(char *id2, struct zfcp_erp_action *erp_action)
 	r->u.action.status = erp_action->status;
 	r->u.action.step = erp_action->step;
 	r->u.action.fsf_req = (unsigned long)erp_action->fsf_req;
-	debug_event(dbf->rec, 5, r, sizeof(*r));
+	debug_event(dbf->rec, level, r, sizeof(*r));
 	spin_unlock_irqrestore(&dbf->rec_lock, flags);
+}
+
+/**
+ * zfcp_dbf_rec_action - trace event showing progress of recovery action
+ * @id2: identifier
+ * @erp_action: error recovery action struct pointer
+ */
+void zfcp_dbf_rec_action(char *id2, struct zfcp_erp_action *erp_action)
+{
+	zfcp_dbf_rec_action_lvl(5, id2, erp_action);
 }
 
 /**

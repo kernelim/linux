@@ -435,6 +435,13 @@ struct request_queue
 	struct delayed_work	delay_work;
 
 	unsigned char		sgio_type;
+
+	/*
+	 * Number of active block driver functions for which blk_drain_queue()
+	 * must wait. Must be incremented around functions that unlock the
+	 * queue_lock internally, e.g. scsi_request_fn().
+	 */
+	unsigned int		request_fn_active;
 #endif /* __GENKSYMS__ */
 };
 

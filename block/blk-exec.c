@@ -71,8 +71,11 @@ void blk_execute_rq_nowait(struct request_queue *q, struct gendisk *bd_disk,
 	__elv_add_request(q, rq, where, 1);
 	__generic_unplug_device(q);
 	/* the queue is stopped so it won't be plugged+unplugged */
-	if (rq->cmd_type == REQ_TYPE_PM_RESUME)
+	if (rq->cmd_type == REQ_TYPE_PM_RESUME) {
+		q->request_fn_active++;
 		q->request_fn(q);
+		q->request_fn_active--;
+	}
 	spin_unlock_irq(q->queue_lock);
 }
 EXPORT_SYMBOL_GPL(blk_execute_rq_nowait);

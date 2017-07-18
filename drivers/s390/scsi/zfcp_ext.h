@@ -3,7 +3,7 @@
  *
  * External function declarations.
  *
- * Copyright IBM Corporation 2002, 2009
+ * Copyright IBM Corporation 2002, 2016
  */
 
 #ifndef ZFCP_EXT_H
@@ -46,6 +46,8 @@ extern void zfcp_dbf_rec_trigger(char *, void *, u8, u8, void *,
 				 struct zfcp_adapter *, struct zfcp_port *,
 				 struct zfcp_unit *);
 extern void zfcp_dbf_rec_action(char *, struct zfcp_erp_action *);
+extern void zfcp_dbf_rec_action_lvl(int level, char *id2,
+				    struct zfcp_erp_action *erp_action);
 extern void _zfcp_dbf_hba_fsf_response(const char *, int, struct zfcp_fsf_req *,
 				       struct zfcp_dbf *);
 extern void _zfcp_dbf_hba_fsf_unsol(const char *, int level, struct zfcp_dbf *,

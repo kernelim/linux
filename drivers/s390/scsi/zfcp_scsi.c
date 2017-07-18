@@ -122,9 +122,7 @@ static int zfcp_scsi_queuecommand(struct scsi_cmnd *scpnt,
 	}
 
 	if (unlikely(!(status & ZFCP_STATUS_COMMON_UNBLOCKED))) {
-		/* This could be either
-		 * open unit pending: this is temporary, will result in
-		 * 	open unit or ERP_FAILED, so retry command
+		/* This could be
 		 * call to rport_delete pending: mimic retry from
 		 * 	fc_remote_port_chkready until rport is BLOCKED
 		 */

@@ -2059,6 +2059,19 @@ static int xs_tcp_finish_connecting(struct rpc_xprt *xprt, struct socket *sock)
 
 	if (!transport->inet) {
 		struct sock *sk = sock->sk;
+		unsigned int keepidle = xprt->timeout->to_initval / HZ;
+		unsigned int keepcnt = xprt->timeout->to_retries + 1;
+		unsigned int opt_on = 1;
+
+		/* TCP Keepalive options */
+		kernel_setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE,
+				(char *)&opt_on, sizeof(opt_on));
+		kernel_setsockopt(sock, SOL_TCP, TCP_KEEPIDLE,
+				(char *)&keepidle, sizeof(keepidle));
+		kernel_setsockopt(sock, SOL_TCP, TCP_KEEPINTVL,
+				(char *)&keepidle, sizeof(keepidle));
+		kernel_setsockopt(sock, SOL_TCP, TCP_KEEPCNT,
+				(char *)&keepcnt, sizeof(keepcnt));
 
 		write_lock_bh(&sk->sk_callback_lock);
 
@@ -2100,6 +2113,10 @@ static int xs_tcp_finish_connecting(struct rpc_xprt *xprt, struct socket *sock)
 		xprt->connect_cookie++;
 		if (xprt->reestablish_timeout < XS_TCP_INIT_REEST_TO)
 			xprt->reestablish_timeout = XS_TCP_INIT_REEST_TO;
+		break;
+	case -EADDRNOTAVAIL:
+		/* Source port number is unavailable. Try a new one! */
+		transport->srcport = 0;
 	}
 out:
 	return ret;

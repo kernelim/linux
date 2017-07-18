@@ -2685,18 +2685,15 @@ and is between 256 and 4096 characters. It is defined in the file
 	st=		[HW,SCSI] SCSI tape parameters (buffers, etc.)
 			See Documentation/scsi/st.txt.
 
+	stack_guard_gap=        [MM]
+			override the default stack gap protection. The value
+			is in page units and it defines how many pages prior
+			to (for stacks growing down) resp. after (for stacks
+			growing up) the main stack are reserved for no other
+			mapping. Default value is 256 pages.
+
 	stacktrace	[FTRACE]
 			Enabled the stack tracer on boot up.
-
-	stack_guard_gap=nn
-			nn is the number of stack guard pages in the user
-			stack that are reserved between the stack and the
-			heap.  The default stack_guard_gap is calculated
-			as "stack_guard_gap = 1UL<<20" which is not page size
-			dependent.  This means that an architecture with a 
-			4KB page size has 256 stack guard pages where an
-			architecture with a 64KB page has 16 stack guard
-			pages.
 
 	sti=		[PARISC,HW]
 			Format: <num>
