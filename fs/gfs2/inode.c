@@ -146,7 +146,6 @@ struct inode *gfs2_inode_lookup(struct super_block *sb, unsigned int type,
 		error = gfs2_glock_get(sdp, no_addr, &gfs2_inode_glops, CREATE, &ip->i_gl);
 		if (unlikely(error))
 			goto fail;
-		ip->i_gl->gl_object = ip;
 
 		error = gfs2_glock_get(sdp, no_addr, &gfs2_iopen_glops, CREATE, &io_gl);
 		if (unlikely(error))
@@ -172,13 +171,14 @@ struct inode *gfs2_inode_lookup(struct super_block *sb, unsigned int type,
 					goto fail_put;
 			}
 		}
+		glock_set_object(ip->i_gl, ip);
 
 		set_bit(GIF_INVALID, &ip->i_flags);
 		error = gfs2_glock_nq_init(io_gl, LM_ST_SHARED, GL_EXACT, &ip->i_iopen_gh);
 		if (unlikely(error))
 			goto fail_put;
 
-		ip->i_iopen_gh.gh_gl->gl_object = ip;
+		glock_set_object(io_gl, ip);
 		gfs2_glock_put(io_gl);
 		io_gl = NULL;
 
@@ -204,15 +204,15 @@ struct inode *gfs2_inode_lookup(struct super_block *sb, unsigned int type,
 
 fail_refresh:
 	ip->i_iopen_gh.gh_flags |= GL_NOCACHE;
-	ip->i_iopen_gh.gh_gl->gl_object = NULL;
+	glock_clear_object(ip->i_iopen_gh.gh_gl, ip);
 	gfs2_glock_dq_wait(&ip->i_iopen_gh);
 	gfs2_holder_uninit(&ip->i_iopen_gh);
 fail_put:
 	if (io_gl)
 		gfs2_glock_put(io_gl);
+	glock_clear_object(ip->i_gl, ip);
 	if (gfs2_holder_initialized(&i_gh))
 		gfs2_glock_dq_uninit(&i_gh);
-	ip->i_gl->gl_object = NULL;
 fail:
 	iget_failed(inode);
 	return ERR_PTR(error);
@@ -796,7 +796,7 @@ int gfs2_create_inode(struct inode *dir, struct dentry *dentry,
 	if (error)
 		goto fail_free_inode;
 
-	ip->i_gl->gl_object = ip;
+	glock_set_object(ip->i_gl, ip);
 	error = gfs2_glock_nq_init(ip->i_gl, LM_ST_EXCLUSIVE, GL_SKIP, ghs + 1);
 	if (error)
 		goto fail_free_inode;
@@ -818,7 +818,7 @@ int gfs2_create_inode(struct inode *dir, struct dentry *dentry,
 	if (error)
 		goto fail_gunlock2;
 
-	ip->i_iopen_gh.gh_gl->gl_object = ip;
+	glock_set_object(io_gl, ip);
 	gfs2_glock_put(io_gl);
 	gfs2_set_iop(inode);
 	insert_inode_hash(inode);
@@ -855,12 +855,14 @@ int gfs2_create_inode(struct inode *dir, struct dentry *dentry,
 	return 0;
 
 fail_gunlock3:
+	glock_clear_object(io_gl, ip);
 	gfs2_glock_dq_uninit(&ip->i_iopen_gh);
 	gfs2_glock_put(io_gl);
 fail_gunlock2:
 	if (io_gl)
 		clear_bit(GLF_INODE_CREATING, &io_gl->gl_flags);
 
+	glock_clear_object(ip->i_gl, ip);
 	gfs2_glock_dq_uninit(ghs + 1);
 fail_free_inode:
 	if (ip->i_gl)

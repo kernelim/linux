@@ -493,7 +493,7 @@ void scsi_target_reap(struct scsi_target *starget)
 		return;
 
 	BUG_ON(state == STARGET_DEL);
-	if (state == STARGET_CREATED)
+	if ((state == STARGET_CREATED) || (state == STARGET_CREATED_REMOVE))
 		scsi_target_destroy(starget);
 	else
 		execute_in_process_context(scsi_target_reap_usercontext,
