@@ -2769,6 +2769,12 @@ MODULE_PARM_DESC(lpfc_poll, "FCP ring polling mode control:"
 static DEVICE_ATTR(lpfc_poll, S_IRUGO | S_IWUSR,
 		   lpfc_poll_show, lpfc_poll_store);
 
+int lpfc_no_hba_reset_cnt;
+unsigned long lpfc_no_hba_reset[MAX_HBAS_NO_RESET] = {
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+module_param_array(lpfc_no_hba_reset, ulong, &lpfc_no_hba_reset_cnt, 0444);
+MODULE_PARM_DESC(lpfc_no_hba_reset, "WWPN of HBAs that should not be reset");
+
 int  lpfc_sli_mode = 0;
 module_param(lpfc_sli_mode, int, S_IRUGO);
 MODULE_PARM_DESC(lpfc_sli_mode, "SLI mode selector:"

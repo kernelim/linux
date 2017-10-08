@@ -1248,10 +1248,10 @@ int ip6_append_data(struct sock *sk, int getfrag(void *from, char *to,
 
 	skb = skb_peek_tail(&sk->sk_write_queue);
 	inet->cork.length += length;
-	if (((length > mtu) ||
-	     (skb && skb_is_gso(skb))) &&
+	if ((skb && skb_is_gso(skb)) || (((length + fragheaderlen) > mtu) &&
+	    (skb_queue_len(&sk->sk_write_queue) <= 1) &&
 	    (sk->sk_protocol == IPPROTO_UDP) &&
-	    (rt->u.dst.dev->features & NETIF_F_UFO)) {
+	    (rt->u.dst.dev->features & NETIF_F_UFO))) {
 		err = ip6_ufo_append_data(sk, getfrag, from, length, hh_len,
 					  fragheaderlen, exthdrlen,
 					  transhdrlen, mtu, flags, rt);
