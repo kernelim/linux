@@ -3041,10 +3041,12 @@ static void sd_pkt_scan(struct gspca_dev *gspca_dev,
 
 		/* finish decoding current frame */
 		n = sof - data;
-		if (n > sd->sof_len)
+		if (n > sd->sof_len) {
+			gmb();
 			n -= sd->sof_len;
-		else
+		} else {
 			n = 0;
+		}
 		gspca_frame_add(gspca_dev, LAST_PACKET,
 				data, n);
 		gspca_frame_add(gspca_dev, FIRST_PACKET, NULL, 0);

@@ -189,6 +189,8 @@ static int init_pgtable(struct kimage *image, unsigned long start_pgtable)
 	pgd_t *level4p;
 	int result;
 	level4p = (pgd_t *)__va(start_pgtable);
+
+	clear_page(level4p);
 	result = init_level4_page(image, level4p, 0, max_pfn << PAGE_SHIFT);
 	if (result)
 		return result;

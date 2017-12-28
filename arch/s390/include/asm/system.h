@@ -340,6 +340,7 @@ __cmpxchg(volatile void *ptr, unsigned long old, unsigned long new, int size)
 #define smp_mb__before_clear_bit()     smp_mb()
 #define smp_mb__after_clear_bit()      smp_mb()
 
+#define gmb() do { } while (0)
 
 #define set_mb(var, value)      do { var = value; mb(); } while (0)
 

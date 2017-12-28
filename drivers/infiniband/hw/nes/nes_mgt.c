@@ -800,6 +800,7 @@ static void nes_mgt_ce_handler(struct nes_device *nesdev, struct nes_hw_nic_cq *
 			qp_id = le32_to_cpu(cq->cq_vbase[head].cqe_words[NES_NIC_CQE_ACCQP_ID_IDX]);
 			qp_id &= 0x001fffff;
 			if (qp_id < nesadapter->max_qp) {
+				gmb();
 				context = (unsigned long)nesadapter->qp_table[qp_id - NES_FIRST_QPN];
 				nesqp = (struct nes_qp *)context;
 			}

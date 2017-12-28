@@ -80,6 +80,12 @@ PHDRS {
 	note PT_NOTE FLAGS(0);          /* ___ */
 }
 
+#ifdef CONFIG_KAISER
+#define ALIGN_KAISER()	. = ALIGN(PAGE_SIZE);
+#else
+#define ALIGN_KAISER()
+#endif
+
 SECTIONS
 {
 #ifdef CONFIG_X86_32
@@ -104,8 +110,11 @@ SECTIONS
 		TEXT_TEXT
 		SCHED_TEXT
 		LOCK_TEXT
+		ALIGN_KAISER()
 		KPROBES_TEXT
+		ENTRY_TEXT
 		IRQENTRY_TEXT
+		ALIGN_KAISER()
 		*(.fixup)
 		*(.gnu.warning)
 		/* End of text section */

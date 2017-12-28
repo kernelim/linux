@@ -118,10 +118,18 @@ extern void __ptrace_unlink(struct task_struct *child);
 extern void exit_ptrace(struct task_struct *tracer);
 #define PTRACE_MODE_READ   1
 #define PTRACE_MODE_ATTACH 2
+#define PTRACE_MODE_NOACCESS_CHK 0x20
+#define PTRACE_MODE_SKIP_AUDIT 0x4000
+#define PTRACE_MODE_IBPB (PTRACE_MODE_ATTACH | PTRACE_MODE_NOACCESS_CHK | \
+			  PTRACE_MODE_SKIP_AUDIT)
 /* Returns 0 on success, -errno on denial. */
 extern int __ptrace_may_access(struct task_struct *task, unsigned int mode);
 /* Returns true on success, false on denial. */
 extern bool ptrace_may_access(struct task_struct *task, unsigned int mode);
+extern int ___ptrace_may_access(struct task_struct *tracer,
+				const struct cred *cred, /* tracer cred */
+				struct task_struct *task,
+				unsigned int mode);
 
 static inline int ptrace_reparented(struct task_struct *child)
 {

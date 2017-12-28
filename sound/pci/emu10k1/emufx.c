@@ -903,6 +903,7 @@ static int snd_emu10k1_list_controls(struct snd_emu10k1 *emu,
 		total++;
 		if (icode->gpr_list_controls &&
 		    i < icode->gpr_list_control_count) {
+			gmb();
 			memset(gctl, 0, sizeof(*gctl));
 			id = &ctl->kcontrol->id;
 			gctl->id.iface = id->iface;

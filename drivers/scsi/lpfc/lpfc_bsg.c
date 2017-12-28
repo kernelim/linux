@@ -1325,6 +1325,7 @@ lpfc_bsg_hba_get_event(struct fc_bsg_job *job)
 	}
 
 	if (evt_dat->len > job->request_payload.payload_len) {
+		gmb();
 		evt_dat->len = job->request_payload.payload_len;
 		lpfc_printf_log(phba, KERN_WARNING, LOG_LIBDFC,
 				"2618 Truncated event data at %d "

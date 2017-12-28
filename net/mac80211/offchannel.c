@@ -232,7 +232,10 @@ static void ieee80211_hw_roc_start(struct work_struct *work)
 		ieee80211_handle_roc_started(dep);
 
 		if (dep->duration > roc->duration) {
-			u32 dur = dep->duration;
+			u32 dur;
+
+			gmb();
+			dur = dep->duration;
 			dep->duration = dur - roc->duration;
 			roc->duration = dur;
 			list_move(&dep->list, &roc->list);

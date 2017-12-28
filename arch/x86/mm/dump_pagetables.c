@@ -15,6 +15,7 @@
 #include <linux/debugfs.h>
 #include <linux/mm.h>
 #include <linux/module.h>
+#include <linux/sched.h>
 #include <linux/seq_file.h>
 
 #include <asm/pgtable.h>
@@ -274,32 +275,35 @@ static void walk_pud_level(struct seq_file *m, struct pg_state *st, pgd_t addr,
 #define pgd_none(a)  pud_none(__pud(pgd_val(a)))
 #endif
 
-static void walk_pgd_level(struct seq_file *m)
+static void walk_pgd_level(struct seq_file *m, pgd_t *pgd)
 {
-#ifdef CONFIG_X86_64
-	pgd_t *start = (pgd_t *) &init_level4_pgt;
-#else
-	pgd_t *start = swapper_pg_dir;
-#endif
 	int i;
 	struct pg_state st;
+
+	if (!pgd) {
+#ifdef CONFIG_X86_64
+		pgd = (pgd_t *) &init_level4_pgt;
+#else
+		pgd = swapper_pg_dir;
+#endif
+	}
 
 	memset(&st, 0, sizeof(st));
 
 	for (i = 0; i < PTRS_PER_PGD; i++) {
 		st.current_address = normalize_addr(i * PGD_LEVEL_MULT);
-		if (!pgd_none(*start)) {
-			pgprotval_t prot = pgd_val(*start) & PTE_FLAGS_MASK;
+		if (!pgd_none(*pgd)) {
+			pgprotval_t prot = pgd_val(*pgd) & PTE_FLAGS_MASK;
 
-			if (pgd_large(*start) || !pgd_present(*start))
+			if (pgd_large(*pgd) || !pgd_present(*pgd))
 				note_page(m, &st, __pgprot(prot), 1);
 			else
-				walk_pud_level(m, &st, *start,
+				walk_pud_level(m, &st, *pgd,
 					       i * PGD_LEVEL_MULT);
 		} else
 			note_page(m, &st, __pgprot(0), 1);
 
-		start++;
+		pgd++;
 	}
 
 	/* Flush out the last page */
@@ -309,7 +313,7 @@ static void walk_pgd_level(struct seq_file *m)
 
 static int ptdump_show(struct seq_file *m, void *v)
 {
-	walk_pgd_level(m);
+	walk_pgd_level(m, NULL);
 	return 0;
 }
 
@@ -325,9 +329,60 @@ static const struct file_operations ptdump_fops = {
 	.release	= single_release,
 };
 
+static int ptdump_show_curknl(struct seq_file *m, void *v)
+{
+	if (current->mm->pgd) {
+		down_read(&current->mm->mmap_sem);
+		walk_pgd_level(m, current->mm->pgd);
+		up_read(&current->mm->mmap_sem);
+	}
+	return 0;
+}
+
+static int ptdump_open_curknl(struct inode *inode, struct file *filp)
+{
+	return single_open(filp, ptdump_show_curknl, NULL);
+}
+
+static const struct file_operations ptdump_curknl_fops = {
+	.owner		= THIS_MODULE,
+	.open		= ptdump_open_curknl,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
+#ifdef CONFIG_KAISER
+static int ptdump_show_curusr(struct seq_file *m, void *v)
+{
+	if (current->mm->pgd) {
+		down_read(&current->mm->mmap_sem);
+		walk_pgd_level(m, kernel_to_shadow_pgdp(current->mm->pgd));
+		up_read(&current->mm->mmap_sem);
+	}
+	return 0;
+}
+
+static int ptdump_open_curusr(struct inode *inode, struct file *filp)
+{
+	return single_open(filp, ptdump_show_curusr, NULL);
+}
+
+static const struct file_operations ptdump_curusr_fops = {
+	.owner		= THIS_MODULE,
+	.open		= ptdump_open_curusr,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+#endif
+
 static int pt_dump_init(void)
 {
-	struct dentry *pe;
+static struct dentry *dir, *pe_knl, *pe_curknl;
+#ifdef CONFIG_KAISER
+static struct dentry *pe_curusr;
+#endif
 
 #ifdef CONFIG_X86_32
 	/* Not a compile-time constant on x86-32 */
@@ -341,12 +396,29 @@ static int pt_dump_init(void)
 # endif
 #endif
 
-	pe = debugfs_create_file("kernel_page_tables", 0600, NULL, NULL,
-				 &ptdump_fops);
-	if (!pe)
+	dir = debugfs_create_dir("page_tables", NULL);
+	if (!dir)
 		return -ENOMEM;
 
+	pe_knl = debugfs_create_file("kernel", 0400, dir, NULL, &ptdump_fops);
+	if (!pe_knl)
+		goto err;
+
+	pe_curknl =  debugfs_create_file("current_kernel", 0400,
+					 dir, NULL, &ptdump_curknl_fops);
+	if (!pe_curknl)
+		goto err;
+
+#ifdef CONFIG_KAISER
+	pe_curusr =  debugfs_create_file("current_user", 0400,
+					 dir, NULL, &ptdump_curusr_fops);
+	if (!pe_curusr)
+		goto err;
+#endif
 	return 0;
+err:
+	debugfs_remove_recursive(dir);
+	return -ENOMEM;
 }
 
 __initcall(pt_dump_init);

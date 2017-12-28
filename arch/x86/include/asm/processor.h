@@ -29,6 +29,7 @@ struct mm_struct;
 #include <linux/math64.h>
 #include <linux/init.h>
 #include <linux/err.h>
+#include <linux/magic.h>
 
 /*
  * Default implementation of macro that returns current
@@ -134,6 +135,18 @@ struct cpuinfo_x86_rh {
 	int			x86_cache_occ_scale;	/* scale to bytes */
 } __attribute__((__aligned__(SMP_CACHE_BYTES)));
 
+
+struct cpuid_regs {
+	u32 eax, ebx, ecx, edx;
+};
+
+enum cpuid_regs_idx {
+	CPUID_EAX = 0,
+	CPUID_EBX,
+	CPUID_ECX,
+	CPUID_EDX,
+};
+
 #define X86_VENDOR_INTEL	0
 #define X86_VENDOR_CYRIX	1
 #define X86_VENDOR_AMD		2
@@ -201,6 +214,9 @@ extern void identify_boot_cpu(void);
 extern void identify_secondary_cpu(struct cpuinfo_x86 *);
 extern void print_cpu_info(struct cpuinfo_x86 *);
 extern void init_scattered_cpuid_features(struct cpuinfo_x86 *c);
+extern u32 get_scattered_cpuid_leaf(unsigned int level,
+				    unsigned int sub_leaf,
+				    enum cpuid_regs_idx reg);
 extern unsigned int init_intel_cacheinfo(struct cpuinfo_x86 *c);
 extern void init_amd_cacheinfo(struct cpuinfo_x86 *c);
 
@@ -218,11 +234,6 @@ static inline void native_cpuid(unsigned int *eax, unsigned int *ebx,
 	      "=d" (*edx)
 	    : "0" (*eax), "2" (*ecx)
 	    : "memory");
-}
-
-static inline void load_cr3(pgd_t *pgdir)
-{
-	write_cr3(__pa(pgdir));
 }
 
 #ifdef CONFIG_X86_32
@@ -300,11 +311,32 @@ struct tss_struct {
 	/*
 	 * .. and then another 0x100 bytes for the emergency kernel stack:
 	 */
+#ifndef __GENKSYMS__
+	unsigned long		stack_canary;
+#endif
 	unsigned long		stack[64];
 
-} ____cacheline_aligned;
+	/*
+	 *
+	 * The Intel SDM says (Volume 3, 7.2.1):
+	 *
+	 *  Avoid placing a page boundary in the part of the TSS that the
+	 *  processor reads during a task switch (the first 104 bytes). The
+	 *  processor may not correctly perform address translations if a
+	 *  boundary occurs in this area. During a task switch, the processor
+	 *  reads and writes into the first 104 bytes of each TSS (using
+	 *  contiguous physical addresses beginning with the physical address
+	 *  of the first byte of the TSS). So, after TSS access begins, if
+	 *  part of the 104 bytes is not physically contiguous, the processor
+	 *  will access incorrect information without generating a page-fault
+	 *  exception.
+	 *
+	 * There are also a lot of errata involving the TSS spanning a page
+	 * boundary.  Assert that we're not doing that.
+	 */
+} __attribute__((__aligned__(PAGE_SIZE)));
 
-DECLARE_PER_CPU_SHARED_ALIGNED(struct tss_struct, init_tss);
+DECLARE_PER_CPU_PAGE_ALIGNED_USER_MAPPED(struct tss_struct, init_tss);
 
 /*
  * Save the original ist values for checking stack pointers during debugging
@@ -972,7 +1004,8 @@ extern unsigned long thread_saved_pc(struct task_struct *tsk);
 }
 
 #define INIT_TSS  { \
-	.x86_tss.sp0 = (unsigned long)&init_stack + sizeof(init_stack) \
+	.x86_tss.sp0 = (unsigned long)&init_stack + sizeof(init_stack), \
+	.stack_canary		= STACK_END_MAGIC, \
 }
 
 /*

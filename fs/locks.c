@@ -884,14 +884,20 @@ static int __posix_lock_file(struct inode *inode, struct file_lock *request, str
 			 * lock yielding from the lower start address of both
 			 * locks to the higher end address.
 			 */
-			if (fl->fl_start > request->fl_start)
+			if (fl->fl_start > request->fl_start) {
+				gmb();
 				fl->fl_start = request->fl_start;
-			else
+			} else {
+				gmb();
 				request->fl_start = fl->fl_start;
-			if (fl->fl_end < request->fl_end)
+			}
+			if (fl->fl_end < request->fl_end) {
+				gmb();
 				fl->fl_end = request->fl_end;
-			else
+			} else {
+				gmb();
 				request->fl_end = fl->fl_end;
+			}
 			if (added) {
 				locks_delete_lock(before);
 				continue;

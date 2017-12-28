@@ -936,11 +936,14 @@ static int stb0899_table_lookup(const struct stb0899_tab *tab, int max, int val)
 	int res = 0;
 	int min = 0, med;
 
-	if (val < tab[min].read)
+	if (val < tab[min].read) {
+		gmb();
 		res = tab[min].real;
-	else if (val >= tab[max].read)
+	} else if (val >= tab[max].read) {
+		gmb();
 		res = tab[max].real;
-	else {
+	} else {
+		gmb();
 		while ((max - min) > 1) {
 			med = (max + min) / 2;
 			if (val >= tab[min].read && val < tab[med].read)

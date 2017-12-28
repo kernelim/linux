@@ -2435,6 +2435,7 @@ static void mpage_da_map_and_submit(struct mpage_da_data *mpd)
 	if (disksize > i_size_read(mpd->inode))
 		disksize = i_size_read(mpd->inode);
 	if (disksize > EXT4_I(mpd->inode)->i_disksize) {
+		gmb();
 		ext4_update_i_disksize(mpd->inode, disksize);
 		err = ext4_mark_inode_dirty(handle, mpd->inode);
 		if (err)

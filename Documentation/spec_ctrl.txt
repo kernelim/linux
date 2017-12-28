@@ -1,0 +1,337 @@
+= Speculation Control =
+
+== How to detect if the CPU supports Speculation Control ==
+
+When the first CPU boots or after a microcode update, if the CPU has
+speculation control capabilities these lines are printed:
+
+	FEATURE SPEC_CTRL Present
+	FEATURE IBPB_SUPPORT Present
+
+If speculation control is missing these lines are printed:
+
+	FEATURE SPEC_CTRL Not Present
+	FEATURE IBPB_SUPPORT Not Present
+
+Some CPUs only have IBPB_SUPPORT in which case this will be printed:
+
+	FEATURE SPEC_CTRL Not Present
+	FEATURE IBPB_SUPPORT Present
+
+Some CPUs can only disable IBP but have no IBPB support in which case
+these lines are printed and a special use_ibp_disable mode is
+used.
+
+	FEATURE SPEC_CTRL Present (Implicit)
+	FEATURE IBPB_SUPPORT Present (Implicit)
+
+== How to tune Speculation Control ==
+
+There are two main control knobs:
+
+/sys/kernel/debug/x86/ibrs_enabled
+/sys/kernel/debug/x86/ibpb_enabled
+
+If the features aren't present both are set to 0 and cannot be
+changed.
+
+If the features are present the ibrs_enabled and ibpb_enabled show the
+current kernel usage of the respective feature.
+
+When IBRS is enabled, it means IBP (Indirect Branch Prediction)
+restricted speculation and it slowdown the CPU significantly.
+
+ibrs_enabled 0: Disabled
+
+ibrs_enabled 1: IBRS enabled in kernel mode.
+
+		Kernel is protected from userland and guest
+                mode. Userland is not protected from guest mode. User
+                mode isn't protected from other user mode running in a
+                sibling hyperthread.
+
+		requires SPEC_CTRL present
+
+ibrs_enabled 2: IBRS enabled in user mode and kernel mode. Only guest
+	        can disable IBRS.
+
+		Kernel and usermode are both protected. This protects
+		userland from hyperthreading effects and from guest
+		mode too.
+
+		requires SPEC_CTRL present
+
+ibpb_enabled 0: Disabled
+
+ibpb_enabled 1: IBPB IBP barrier is used to flush the IBP across mm
+                switches (if next task has not enough credentials to
+                read the memory of the prev task by other means) and
+                across guest mode switches. This protects user and
+                guest mode against user and guest mode.
+
+		This doesn't protect against hyperthreading and
+                simultaneous multithreading effects.
+
+		This has to be used in combination with ibrs_enabled 1
+                or 2 to protect the kernel too, and ibrs_enabled 1 or
+                2 will protect the kernel against hyperthreading and
+                simultaneous multithreading effects too.
+
+		requires IBPB_SUPPORT present
+
+ibpb_enabled 2: IBPB is used instead of IBRS. ibrs_enabled is forced
+	        set to 0 until ibpb_enabled is again reduced to 0 or
+	        1.
+
+		This protects kernel mode from guest mode and user
+	        mode, and it protects user mode from guest mode as
+	        well. However it doesn't protect kernel mode from
+	        hyperthreading and simultaneous multithreading
+	        effects.
+
+		requires IBPB_SUPPORT present
+
+== Results with Speculation Control different tunings ==
+
+Results follows (with kpti enabled) on Broadwell Xeon(R) CPU E7-8860.
+
+ibrs_enabled 0 ibpb_enabled 0
+
+ Performance counter stats for 'dd if=/dev/zero of=/dev/null bs=1024M count=1' (3 runs):
+
+        421.901707      task-clock (msec)         #    0.998 CPUs utilized            ( +-  2.73%
+                 8      context-switches          #    0.019 K/sec
+                 0      cpu-migrations            #    0.000 K/sec
+             1,235      page-faults               #    0.003 M/sec                    ( +-  0.03%
+       870,685,529      cycles                    #    2.064 GHz                      ( +-  2.81%
+       577,533,068      instructions              #    0.66  insn per cycle           ( +-  0.01%
+       142,343,292      branches                  #  337.385 M/sec                    ( +-  0.01%
+           285,382      branch-misses             #    0.20% of all branches          ( +-  0.56%
+
+       0.422612567 seconds time elapsed                                          ( +-  2.73% )
+
+ Performance counter stats for 'bash -c dd if=/dev/sda bs=16M count=1 2>/dev/null | xz -c -9 >/dev/null' (3 runs):
+
+       3023.067522      task-clock (msec)         #    1.003 CPUs utilized            ( +-  0.55%
+             2,047      context-switches          #    0.677 K/sec
+                 3      cpu-migrations            #    0.001 K/sec                    ( +- 10.00%
+             3,785      page-faults               #    0.001 M/sec                    ( +-  0.99%
+     8,938,361,832      cycles                    #    2.957 GHz                      ( +-  0.36%
+    14,238,248,089      instructions              #    1.59  insn per cycle           ( +-  0.00%
+     1,943,393,023      branches                  #  642.855 M/sec                    ( +-  0.00%
+       107,555,768      branch-misses             #    5.53% of all branches          ( +-  0.05%
+
+       3.014166892 seconds time elapsed                                          ( +-  0.54% )
+
+
+ Performance counter stats for '/root/getppid' (3 runs):
+
+        399.873505      task-clock (msec)         #    0.998 CPUs utilized            ( +-  0.33%
+                 0      context-switches          #    0.000 K/sec
+                 0      cpu-migrations            #    0.000 K/sec
+               113      page-faults               #    0.283 K/sec
+       821,932,246      cycles                    #    2.055 GHz                      ( +-  0.00%
+       457,033,916      instructions              #    0.56  insn per cycle           ( +-  0.00%
+        75,414,615      branches                  #  188.596 M/sec                    ( +-  0.01%
+         1,008,675      branch-misses             #    1.34% of all branches          ( +-  0.13%
+
+       0.400512417 seconds time elapsed                                          ( +-  0.33% )
+
+
+ Performance counter stats for 'bash -c make -C /dev/shm/rhel7 clean &>/dev/null && make -C /dev/shm/rhel7 -j256 &>/dev/null' (3 runs):
+
+    7305102.437554      task-clock (msec)         #   56.944 CPUs utilized            ( +-  0.05%
+         4,687,305      context-switches          #    0.642 K/sec                    ( +-  0.53%
+           217,754      cpu-migrations            #    0.030 K/sec                    ( +-  0.23%
+       236,213,889      page-faults               #    0.032 M/sec                    ( +-  0.01%
+23,056,347,893,708      cycles                    #    3.156 GHz                      ( +-  0.05%
+16,085,515,474,979      instructions              #    0.70  insn per cycle           ( +-  0.02%
+ 3,523,047,224,345      branches                  #  482.272 M/sec                    ( +-  0.02%
+   111,508,305,815      branch-misses             #    3.17% of all branches          ( +-  0.01%
+
+     128.286610130 seconds time elapsed                                          ( +-  0.51% )
+
+ibrs_enabled 1 ibpb_enabled 1
+
+ Performance counter stats for 'dd if=/dev/zero of=/dev/null bs=1024M count=1' (3 runs):
+
+        895.589354      task-clock (msec)         #    0.999 CPUs utilized            ( +-  6.45%
+                 7      context-switches          #    0.008 K/sec                    ( +-  4.55%
+                 0      cpu-migrations            #    0.000 K/sec
+             1,235      page-faults               #    0.001 M/sec
+     2,480,620,163      cycles                    #    2.770 GHz                      ( +-  1.52%
+       579,130,828      instructions              #    0.23  insn per cycle           ( +-  0.04%
+       142,696,354      branches                  #  159.332 M/sec                    ( +-  0.04%
+           551,826      branch-misses             #    0.39% of all branches          ( +-  6.40%
+
+       0.896891008 seconds time elapsed                                          ( +-  6.44% )
+
+ Performance counter stats for 'bash -c dd if=/dev/sda bs=16M count=1 2>/dev/null | xz -c -9 >/dev/null' (3 runs):
+
+       2991.006110      task-clock (msec)         #    1.004 CPUs utilized            ( +-  1.62%
+             2,047      context-switches          #    0.684 K/sec                    ( +-  0.03%
+                 3      cpu-migrations            #    0.001 K/sec                    ( +- 10.00%
+             3,305      page-faults               #    0.001 M/sec                    ( +-  3.39%
+     9,014,691,619      cycles                    #    3.014 GHz                      ( +-  0.10%
+    14,236,350,904      instructions              #    1.58  insn per cycle           ( +-  0.00%
+     1,942,993,970      branches                  #  649.612 M/sec                    ( +-  0.01%
+       107,849,948      branch-misses             #    5.55% of all branches          ( +-  0.19%
+
+       2.977788257 seconds time elapsed                                          ( +-  1.60% )
+
+ Performance counter stats for '/root/getppid' (3 runs):
+
+       1061.441360      task-clock (msec)         #    0.999 CPUs utilized            ( +-  4.35%
+                 0      context-switches          #    0.000 K/sec                    ( +-100.00%
+                 0      cpu-migrations            #    0.000 K/sec
+               113      page-faults               #    0.106 K/sec
+     3,116,963,391      cycles                    #    2.937 GHz                      ( +-  1.40%
+       475,876,207      instructions              #    0.15  insn per cycle           ( +-  0.03%
+        78,025,143      branches                  #   73.509 M/sec                    ( +-  0.03%
+         1,033,849      branch-misses             #    1.33% of all branches          ( +-  0.35%
+
+       1.062364457 seconds time elapsed                                          ( +-  4.36% )
+
+ Performance counter stats for 'bash -c make -C /dev/shm/rhel7 clean &>/dev/null && make -C /dev/shm/rhel7 -j256 &>/dev/null' (3 runs):
+
+    8132129.462308      task-clock (msec)         #   54.904 CPUs utilized            ( +-  0.09%
+         4,617,240      context-switches          #    0.568 K/sec                    ( +-  0.79%
+           222,860      cpu-migrations            #    0.027 K/sec                    ( +-  0.06%
+       236,922,099      page-faults               #    0.029 M/sec                    ( +-  0.00%
+26,101,665,518,805      cycles                    #    3.210 GHz                      ( +-  0.07%
+16,091,081,573,700      instructions              #    0.62  insn per cycle           ( +-  0.03%
+ 3,523,864,849,353      branches                  #  433.326 M/sec                    ( +-  0.03%
+   125,680,568,054      branch-misses             #    3.57% of all branches          ( +-  0.03%
+
+     148.114462795 seconds time elapsed                                          ( +-  0.19% )
+
+ibrs_enabled 2 ibpb_enabled 1
+
+ Performance counter stats for 'dd if=/dev/zero of=/dev/null bs=1024M count=1' (3 runs):
+
+        892.135227      task-clock (msec)         #    0.999 CPUs utilized            ( +-  8.06%
+                 7      context-switches          #    0.008 K/sec                    ( +-  4.55%
+                 0      cpu-migrations            #    0.000 K/sec
+             1,234      page-faults               #    0.001 M/sec                    ( +-  0.03%
+     2,472,334,816      cycles                    #    2.771 GHz                      ( +-  1.63%
+       579,269,333      instructions              #    0.23  insn per cycle           ( +-  0.04%
+       142,747,572      branches                  #  160.007 M/sec                    ( +-  0.03%
+           487,309      branch-misses             #    0.34% of all branches          ( +- 13.44%
+
+       0.893209107 seconds time elapsed                                          ( +-  8.07% )
+
+ Performance counter stats for 'bash -c dd if=/dev/sda bs=16M count=1 2>/dev/null | xz -c -9 >/dev/null' (3 runs):
+
+       7098.530690      task-clock (msec)         #    1.003 CPUs utilized            ( +-  0.69%
+             2,049      context-switches          #    0.289 K/sec                    ( +-  0.02%
+                 3      cpu-migrations            #    0.000 K/sec
+             4,423      page-faults               #    0.623 K/sec                    ( +-  2.32%
+    22,219,592,454      cycles                    #    3.130 GHz                      ( +-  0.00%
+    14,256,654,703      instructions              #    0.64  insn per cycle           ( +-  0.00%
+     1,947,328,742      branches                  #  274.328 M/sec                    ( +-  0.00%
+       369,738,214      branch-misses             #    18.99% of all branches          ( +-  0.07%
+
+       7.078463714 seconds time elapsed                                          ( +-  0.74% )
+
+
+ Performance counter stats for '/root/getppid' (3 runs):
+
+        790.119106      task-clock (msec)         #    0.999 CPUs utilized            ( +-  7.64%
+                 0      context-switches          #    0.000 K/sec
+                 0      cpu-migrations            #    0.000 K/sec
+               113      page-faults               #    0.143 K/sec
+     2,203,635,060      cycles                    #    2.789 GHz                      ( +-  0.04%
+       458,779,918      instructions              #    0.21  insn per cycle           ( +-  0.05%
+        75,805,496      branches                  #   95.942 M/sec                    ( +-  0.06%
+         3,027,418      branch-misses             #    3.99% of all branches          ( +-  0.04%
+
+       0.791041880 seconds time elapsed                                          ( +-  7.65% )
+
+
+ Performance counter stats for 'bash -c make -C /dev/shm/rhel7 clean &>/dev/null && make -C /dev/shm/rhel7 -j256 &>/dev/null' (3 runs):
+
+   13404741.906900      task-clock (msec)         #   39.492 CPUs utilized            ( +-  0.08%
+         4,240,016      context-switches          #    0.316 K/sec                    ( +-  0.95%
+           240,174      cpu-migrations            #    0.018 K/sec                    ( +-  0.15%
+       243,771,025      page-faults               #    0.018 M/sec                    ( +-  0.00%
+42,479,369,706,685      cycles                    #    3.169 GHz                      ( +-  0.05%
+16,111,323,221,751      instructions              #    0.38  insn per cycle           ( +-  0.03%
+ 3,527,461,303,311      branches                  #  263.150 M/sec                    ( +-  0.04%
+   281,316,494,948      branch-misses             #    7.98% of all branches          ( +-  0.00%
+
+     339.428887376 seconds time elapsed                                          ( +-  0.48% )
+
+ibrs_enabled 0 ibpb_enabled 2
+
+ Performance counter stats for 'dd if=/dev/zero of=/dev/null bs=1024M count=1' (3 runs):
+
+        370.946869      task-clock (msec)         #    0.998 CPUs utilized            ( +-  4.12%
+                 7      context-switches          #    0.019 K/sec
+                 0      cpu-migrations            #    0.000 K/sec
+             1,234      page-faults               #    0.003 M/sec
+       856,238,222      cycles                    #    2.308 GHz                      ( +-  3.61%
+       577,294,341      instructions              #    0.67  insn per cycle           ( +-  0.01%
+       142,286,968      branches                  #  383.578 M/sec                    ( +-  0.01%
+           289,023      branch-misses             #    0.20% of all branches          ( +-  0.64%
+
+       0.371710140 seconds time elapsed                                          ( +-  4.11% )
+
+
+ Performance counter stats for 'bash -c dd if=/dev/sda bs=16M count=1 2>/dev/null | xz -c -9 >/dev/null' (3 runs):
+
+       3030.157946      task-clock (msec)         #    1.002 CPUs utilized            ( +-  0.28%
+             2,047      context-switches          #    0.676 K/sec
+                 4      cpu-migrations            #    0.001 K/sec                    ( +-  9.09%
+             3,437      page-faults               #    0.001 M/sec                    ( +-  4.61%
+     9,019,087,065      cycles                    #    2.976 GHz                      ( +-  0.33%
+    14,236,594,023      instructions              #    1.58  insn per cycle           ( +-  0.00%
+     1,943,041,559      branches                  #  641.234 M/sec                    ( +-  0.00%
+       106,810,969      branch-misses             #    5.50% of all branches          ( +-  0.03%
+
+       3.023220603 seconds time elapsed                                          ( +-  0.23% )
+
+ Performance counter stats for '/root/getppid' (3 runs):
+
+       2649.125173      task-clock (msec)         #    1.000 CPUs utilized            ( +-  1.29%
+                 1      context-switches          #    0.001 K/sec                    ( +- 25.00%
+                 0      cpu-migrations            #    0.000 K/sec
+               122      page-faults               #    0.046 K/sec
+     8,059,209,646      cycles                    #    3.042 GHz                      ( +-  0.08%
+       479,371,350      instructions              #    0.06  insn per cycle           ( +-  0.03%
+        80,422,576      branches                  #   30.358 M/sec                    ( +-  0.04%
+         3,055,877      branch-misses             #    3.80% of all branches          ( +-  0.18%
+
+       2.649871802 seconds time elapsed                                          ( +-  1.29% )
+
+ Performance counter stats for 'bash -c make -C /dev/shm/rhel7 clean &>/dev/null && make -C /dev/shm/rhel7 -j256 &>/dev/null' (3 runs):
+
+    9100066.198933      task-clock (msec)         #   56.289 CPUs utilized            ( +-  0.11%
+         4,594,668      context-switches          #    0.505 K/sec                    ( +-  0.53%
+           223,435      cpu-migrations            #    0.025 K/sec                    ( +-  0.15%
+       238,040,992      page-faults               #    0.026 M/sec                    ( +-  0.01%
+29,595,332,691,089      cycles                    #    3.252 GHz                      ( +-  0.03%
+16,099,326,972,032      instructions              #    0.54  insn per cycle           ( +-  0.01%
+ 3,526,473,262,355      branches                  #  387.522 M/sec                    ( +-  0.02%
+   136,700,131,245      branch-misses             #    3.88% of all branches          ( +-  0.00%
+
+     161.667318306 seconds time elapsed                                          ( +-  0.46% )
+
+== Evaluation of the results ==
+
+The reason ibrs_enabled 2 is faster at the syscall test is because it
+doesn't need to turn on and off IBRS: IBRS is left set in user and
+kernel space. No change is required when entering and exiting kernel.
+
+ibpb_enabled 2 may be the fastest spec_ctrl protection available for
+kernel intensive (but not syscall/irq) intensive workloads.
+
+ibrs_enabled 1 ibpb_enabled 1 is the fastest protection for syscall or
+irq intensive workloads.
+
+ibrs_enabled 1 ibpb_enabled 1 is more secure than ibrs_enabled 0
+ibpb_enabled 2 because it fully protects the kernel against HT/SMT
+effects. ipbp_enabled 2 has the only advantage of protecting user mode
+from guest mode (which ibrs_enabled 1 ipbp_enabled 1 doesn't do).
+
+Only ibrs_enabled 2 ibpb_enabled 1 protects user mode from SMT/HT
+effects and in addition it protects user mode from guest mode too.

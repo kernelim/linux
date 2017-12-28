@@ -2020,6 +2020,7 @@ static void cfq_arm_slice_timer(struct cfq_data *cfqd)
 	 */
 	if (sample_valid(cic->ttime_samples) &&
 	    (cfqq->slice_end - jiffies < cic->ttime_mean)) {
+		gmb();
 		cfq_log_cfqq(cfqd, cfqq, "Not idling. think_time:%d",
 				cic->ttime_mean);
 		return;

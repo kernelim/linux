@@ -1154,10 +1154,13 @@ static int tree_insert_offset(struct rb_root *root, u64 offset,
 		info = rb_entry(parent, struct btrfs_free_space, offset_index);
 
 		if (offset < info->offset) {
+			gmb();
 			p = &(*p)->rb_left;
 		} else if (offset > info->offset) {
+			gmb();
 			p = &(*p)->rb_right;
 		} else {
+			gmb();
 			/*
 			 * we could have a bitmap entry and an extent entry
 			 * share the same offset.  If this is the case, we want

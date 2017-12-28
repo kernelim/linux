@@ -408,6 +408,12 @@
 		*(.kprobes.text)					\
 		VMLINUX_SYMBOL(__kprobes_text_end) = .;
 
+#define ENTRY_TEXT							\
+		ALIGN_FUNCTION();					\
+		VMLINUX_SYMBOL(__entry_text_start) = .;			\
+		*(.entry.text)						\
+		VMLINUX_SYMBOL(__entry_text_end) = .;
+
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 #define IRQENTRY_TEXT							\
 		ALIGN_FUNCTION();					\
@@ -680,6 +686,13 @@
 				- LOAD_OFFSET) {			\
 		VMLINUX_SYMBOL(__per_cpu_start) = .;			\
 		*(.data.percpu.first)					\
+		. = ALIGN(PAGE_SIZE);					\
+		VMLINUX_SYMBOL(__per_cpu_user_mapped_start) = .;	\
+		*(.data.percpu.user_mapped.page_aligned)		\
+		*(.data.percpu.user_mapped)				\
+		*(.data.percpu.user_mapped.shared_aligned)		\
+		VMLINUX_SYMBOL(__per_cpu_user_mapped_end) = .;		\
+		. = ALIGN(PAGE_SIZE);					\
 		*(.data.percpu.page_aligned)				\
 		*(.data.percpu)						\
 		*(.data.percpu.shared_aligned)				\
@@ -706,6 +719,13 @@
 		VMLINUX_SYMBOL(__per_cpu_load) = .;			\
 		VMLINUX_SYMBOL(__per_cpu_start) = .;			\
 		*(.data.percpu.first)					\
+		. = ALIGN(PAGE_SIZE);					\
+		VMLINUX_SYMBOL(__per_cpu_user_mapped_start) = .;	\
+		*(.data.percpu.user_mapped.page_aligned)		\
+		*(.data.percpu.user_mapped)				\
+		*(.data.percpu.user_mapped.shared_aligned)		\
+		VMLINUX_SYMBOL(__per_cpu_user_mapped_end) = .;		\
+		. = ALIGN(PAGE_SIZE);					\
 		*(.data.percpu.page_aligned)				\
 		*(.data.percpu)						\
 		*(.data.percpu.shared_aligned)				\

@@ -694,11 +694,14 @@ static int au8522_led_ctrl(struct au8522_state *state, int led)
 			val &= ~led_config->led_states[i];
 
 		/* set selected LED state */
-		if (led < led_config->num_led_states)
+		if (led < led_config->num_led_states) {
+			gmb();
 			val |= led_config->led_states[led];
-		else if (led_config->num_led_states)
+		} else if (led_config->num_led_states) {
+			gmb();
 			val |=
 			led_config->led_states[led_config->num_led_states - 1];
+		}
 
 		ret = au8522_writereg(state, 0x8000 |
 				      (led_config->gpio_leds & ~0xc000), val);

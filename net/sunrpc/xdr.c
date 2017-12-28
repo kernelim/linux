@@ -748,6 +748,7 @@ void xdr_read_pages(struct xdr_stream *xdr, unsigned int len)
 	if (xdr->nwords == 0)
 		return;
 	if (nwords > xdr->nwords) {
+		gmb();
 		nwords = xdr->nwords;
 		len = nwords << 2;
 	}

@@ -1136,9 +1136,11 @@ void mmc_init_erase(struct mmc_card *card)
 			card->pref_erase = 2 * 1024 * 1024 / 512;
 		else
 			card->pref_erase = 4 * 1024 * 1024 / 512;
-		if (card->pref_erase < card->erase_size)
+		if (card->pref_erase < card->erase_size) {
+			gmb();
 			card->pref_erase = card->erase_size;
-		else {
+		} else {
+			gmb();
 			sz = card->pref_erase % card->erase_size;
 			if (sz)
 				card->pref_erase += card->erase_size - sz;

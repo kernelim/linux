@@ -13,6 +13,8 @@
 #include <asm/tlbflush.h>
 #include <asm/tlb.h>
 #include <asm/proto.h>
+#include <asm/cpufeature.h>
+#include <asm/mmu_context.h>
 
 DEFINE_PER_CPU(struct mmu_gather, mmu_gathers);
 
@@ -102,6 +104,47 @@ static void __init find_early_table_space(struct map_range *mr, int nr_range)
 		e820_table_top << PAGE_SHIFT);
 }
 
+static void setup_pcid(void)
+{
+#ifdef CONFIG_X86_64
+	if (boot_cpu_has(X86_FEATURE_PCID)) {
+		if (boot_cpu_has(X86_FEATURE_PGE)) {
+			/*
+			 * This can't be cr4_set_bits_and_update_boot() --
+			 * the trampoline code can't handle CR4.PCIDE and
+			 * it wouldn't do any good anyway.  Despite the name,
+			 * cr4_set_bits_and_update_boot() doesn't actually
+			 * cause the bits in question to remain set all the
+			 * way through the secondary boot asm.
+			 *
+			 * Instead, we brute-force it and set CR4.PCIDE
+			 * manually in start_secondary().
+			 */
+			set_in_cr4(X86_CR4_PCIDE);
+			/*
+			 * INVPCID's single-context modes (2/3) only work
+			 * if we set X86_CR4_PCIDE, *and* we INVPCID
+			 * support.  It's unusable on systems that have
+			 * X86_CR4_PCIDE clear, or that have no INVPCID
+			 * support at all.
+			 */
+			if (boot_cpu_has(X86_FEATURE_INVPCID))
+				setup_force_cpu_cap(X86_FEATURE_INVPCID_SINGLE);
+		} else {
+			/*
+			 * flush_tlb_all(), as currently implemented, won't
+			 * work if PCID is on but PGE is not.  Since that
+			 * combination doesn't exist on real hardware, there's
+			 * no reason to try to fully support it, but it's
+			 * polite to avoid corrupting data if we're on
+			 * an improperly configured VM.
+			 */
+			setup_clear_cpu_cap(X86_FEATURE_PCID);
+		}
+	}
+#endif
+}
+
 #ifdef CONFIG_X86_32
 #define NR_RANGE_MR 3
 #else /* CONFIG_X86_64 */
@@ -142,6 +185,7 @@ unsigned long __init_refok init_memory_mapping(unsigned long start,
 	int use_pse, use_gbpages;
 
 	printk(KERN_INFO "init_memory_mapping: %016lx-%016lx\n", start, end);
+	setup_pcid();
 
 #if defined(CONFIG_DEBUG_PAGEALLOC) || defined(CONFIG_KMEMCHECK)
 	/*

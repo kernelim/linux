@@ -660,6 +660,7 @@ static inline int read_direntry(struct jffs2_sb_info *c, struct jffs2_raw_node_r
 
 	/* Pick out the mctime of the latest dirent */
 	if(fd->version > rii->mctime_ver && je32_to_cpu(rd->mctime)) {
+		gmb();
 		rii->mctime_ver = fd->version;
 		rii->latest_mctime = je32_to_cpu(rd->mctime);
 	}

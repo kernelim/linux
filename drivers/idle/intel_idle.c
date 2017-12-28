@@ -64,6 +64,7 @@
 #include <asm/cpu_device_id.h>
 #include <asm/mwait.h>
 #include <asm/msr.h>
+#include <asm/spec_ctrl.h>
 
 #define INTEL_IDLE_VERSION "0.4"
 #define PREFIX "intel_idle: "
@@ -639,10 +640,12 @@ static int intel_idle(struct cpuidle_device *dev, int index)
 #endif
 	if (!need_resched()) {
 
+		spec_ctrl_disable_ibrs();
 		__monitor((void *)&current_thread_info()->flags, 0, 0);
 		smp_mb();
 		if (!need_resched())
 			__mwait(eax, ecx);
+		spec_ctrl_enable_ibrs();
 	}
 
 	start_critical_timings();

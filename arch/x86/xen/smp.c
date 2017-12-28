@@ -20,6 +20,7 @@
 #include <asm/desc.h>
 #include <asm/pgtable.h>
 #include <asm/cpu.h>
+#include <asm/mmu_context.h>
 
 #include <xen/interface/xen.h>
 #include <xen/interface/vcpu.h>

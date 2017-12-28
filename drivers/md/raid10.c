@@ -1275,6 +1275,7 @@ static int make_request(struct mddev *mddev, struct bio * bio)
 		bio->bi_sector + sectors > conf->reshape_progress)
 	     : (bio->bi_sector + sectors > conf->reshape_safe &&
 		bio->bi_sector < conf->reshape_progress))) {
+		gmb();
 		/* Need to update reshape_position in metadata */
 		mddev->reshape_position = conf->reshape_progress;
 		set_bit(MD_CHANGE_DEVS, &mddev->flags);

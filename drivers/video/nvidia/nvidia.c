@@ -887,6 +887,7 @@ static int nvidiafb_check_var(struct fb_var_screeninfo *var,
 		var->yres_virtual = vramlen / pitch;
 
 		if (var->yres_virtual < var->yres) {
+			gmb();
 			var->yres_virtual = var->yres;
 			var->xres_virtual = vramlen / var->yres_virtual;
 			var->xres_virtual /= var->bits_per_pixel / 8;

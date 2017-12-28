@@ -20,6 +20,7 @@
 #include <asm/idle.h>
 #include <asm/uaccess.h>
 #include <asm/i387.h>
+#include <asm/spec_ctrl.h>
 
 unsigned long idle_halt;
 EXPORT_SYMBOL(idle_halt);
@@ -391,10 +392,17 @@ void mwait_idle_with_hints(unsigned long ax, unsigned long cx)
 		if (cpu_has(&current_cpu_data, X86_FEATURE_CLFLUSH_MONITOR))
 			clflush((void *)&current_thread_info()->flags);
 
+		/*
+		 * IRQs must be disabled here and nmi uses the
+		 * save_paranoid model which always enables ibrs on
+		 * exception entry before any indirect jump can run.
+		 */
+		spec_ctrl_disable_ibrs();
 		__monitor((void *)&current_thread_info()->flags, 0, 0);
 		smp_mb();
 		if (!need_resched())
 			__mwait(ax, cx);
+		spec_ctrl_enable_ibrs();
 	}
 }
 

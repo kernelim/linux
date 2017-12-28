@@ -24,7 +24,7 @@
 #include "be_iscsi.h"
 #include "be_main.h"
 
-extern char const *beiscsi_obsolete_adapter_msg;
+extern char const beiscsi_obsolete_adapter_msg[];
 
 /* UE Status Low CSR */
 static const char * const desc_ue_status_low[] = {

@@ -3576,11 +3576,16 @@ static int stv090x_table_lookup(const struct stv090x_tab *tab, int max, int val)
 			tab[min].real;
 	} else {
 		if (tab[min].read < tab[max].read) {
-			if (val < tab[min].read)
+			gmb();
+			if (val < tab[min].read) {
+				gmb();
 				res = tab[min].real;
-			else if (val >= tab[max].read)
+			} else if (val >= tab[max].read) {
+				gmb();
 				res = tab[max].real;
+			}
 		} else {
+			gmb();
 			if (val >= tab[min].read)
 				res = tab[min].real;
 			else if (val < tab[max].read)

@@ -15,15 +15,121 @@
 #define __flush_tlb_single(addr) __native_flush_tlb_single(addr)
 #endif
 
+static inline void __invpcid(unsigned long pcid, unsigned long addr,
+			     unsigned long type)
+{
+	struct { u64 d[2]; } desc = { { pcid, addr } };
+
+	/*
+	 * The memory clobber is because the whole point is to invalidate
+	 * stale TLB entries and, especially if we're flushing global
+	 * mappings, we don't want the compiler to reorder any subsequent
+	 * memory accesses before the TLB flush.
+	 *
+	 * The hex opcode is invpcid (%ecx), %eax in 32-bit mode and
+	 * invpcid (%rcx), %rax in long mode.
+	 */
+	asm volatile (".byte 0x66, 0x0f, 0x38, 0x82, 0x01"
+		      : : "m" (desc), "a" (type), "c" (&desc) : "memory");
+}
+
+#define INVPCID_TYPE_INDIV_ADDR		0
+#define INVPCID_TYPE_SINGLE_CTXT	1
+#define INVPCID_TYPE_ALL_INCL_GLOBAL	2
+#define INVPCID_TYPE_ALL_NON_GLOBAL	3
+
+/* Flush all mappings for a given pcid and addr, not including globals. */
+static inline void invpcid_flush_one(unsigned long pcid,
+				     unsigned long addr)
+{
+	__invpcid(pcid, addr, INVPCID_TYPE_INDIV_ADDR);
+}
+
+/* Flush all mappings for a given PCID, not including globals. */
+static inline void invpcid_flush_single_context(unsigned long pcid)
+{
+	__invpcid(pcid, 0, INVPCID_TYPE_SINGLE_CTXT);
+}
+
+/* Flush all mappings, including globals, for all PCIDs. */
+static inline void invpcid_flush_all(void)
+{
+	__invpcid(0, 0, INVPCID_TYPE_ALL_INCL_GLOBAL);
+}
+
+/* Flush all mappings for all PCIDs except globals. */
+static inline void invpcid_flush_all_nonglobals(void)
+{
+	__invpcid(0, 0, INVPCID_TYPE_ALL_NON_GLOBAL);
+}
+
+#ifdef CONFIG_KAISER
+static __always_inline void __load_cr3(unsigned long cr3)
+{
+	if (static_cpu_has(X86_FEATURE_PCID) && kaiser_active()) {
+		unsigned long shadow_cr3;
+		VM_WARN_ON(cr3 & KAISER_SHADOW_PCID_ASID);
+		VM_WARN_ON(cr3 & (1<<KAISER_PGTABLE_SWITCH_BIT));
+		VM_WARN_ON(cr3 & X86_CR3_PCID_NOFLUSH);
+
+		if (this_cpu_has(X86_FEATURE_INVPCID_SINGLE)) {
+			invpcid_flush_single_context(KAISER_SHADOW_PCID_ASID);
+			write_cr3(cr3);
+			return;
+		}
+
+		shadow_cr3 = cr3 | (1<<KAISER_PGTABLE_SWITCH_BIT) |
+			KAISER_SHADOW_PCID_ASID;
+		asm volatile("\tjmp 1f\n\t"
+			     "2:\n\t"
+			     ".section .entry.text, \"ax\"\n\t"
+			     "1:\n\t"
+			     "pushf\n\t"
+			     "cli\n\t"
+			     "movq %0, %%cr3\n\t"
+			     "movq %1, %%cr3\n\t"
+			     "popf\n\t"
+			     "jmp 2b\n\t"
+			     ".previous" : :
+			     "r" (shadow_cr3), "r" (cr3) :
+			     "memory");
+	} else
+		write_cr3(cr3);
+}
+#else /* CONFIG_KAISER */
+static __always_inline void __load_cr3(unsigned long cr3)
+{
+	write_cr3(cr3);
+}
+#endif /* CONFIG_KAISER */
+
 static inline void __native_flush_tlb(void)
 {
-	native_write_cr3(native_read_cr3());
+	if (!static_cpu_has(X86_FEATURE_INVPCID)) {
+		__load_cr3(native_read_cr3());
+		return;
+	}
+	/*
+	 * Note, this works with CR4.PCIDE=0 or 1.
+	 */
+	invpcid_flush_all_nonglobals();
 }
 
 static inline void __native_flush_tlb_global(void)
 {
 	unsigned long flags;
 	unsigned long cr4;
+
+	if (static_cpu_has(X86_FEATURE_INVPCID)) {
+		/*
+		 * Using INVPCID is considerably faster than a pair of writes
+		 * to CR4 sandwiched inside an IRQ flag save/restore.
+		 *
+		 * Note, this works with CR4.PCIDE=0 or 1.
+		 */
+		invpcid_flush_all();
+		return;
+	}
 
 	/*
 	 * Read-modify-write to CR4 - protect it from preemption and
@@ -33,9 +139,24 @@ static inline void __native_flush_tlb_global(void)
 	raw_local_irq_save(flags);
 
 	cr4 = native_read_cr4();
-	/* clear PGE */
-	native_write_cr4(cr4 & ~X86_CR4_PGE);
-	/* write old PGE again and flush TLBs */
+	/*
+	 * This function is only called on systems that support X86_CR4_PGE
+	 * and where we expect X86_CR4_PGE to be set.  Warn if we are called
+	 * without PGE set.
+	 */
+	WARN_ON_ONCE(!(cr4 & X86_CR4_PGE));
+
+	/*
+	 * Architecturally, any _change_ to X86_CR4_PGE will fully flush
+	 * all entries.  Make sure that we _change_ the bit, regardless of
+	 * whether we had X86_CR4_PGE set in the first place.
+	 *
+	 * Note that just toggling PGE *also* flushes all entries from all
+	 * PCIDs, regardless of the state of X86_CR4_PCIDE.
+	 */
+	native_write_cr4(cr4 ^ X86_CR4_PGE);
+
+	/* Put original CR4 value back: */
 	native_write_cr4(cr4);
 
 	raw_local_irq_restore(flags);
@@ -43,7 +164,56 @@ static inline void __native_flush_tlb_global(void)
 
 static inline void __native_flush_tlb_single(unsigned long addr)
 {
-	asm volatile("invlpg (%0)" ::"r" (addr) : "memory");
+#ifdef CONFIG_KAISER
+	unsigned long cr3, shadow_cr3;
+
+	/* Flush the address out of both PCIDs. */
+	/*
+	 * An optimization here might be to determine addresses
+	 * that are only kernel-mapped and only flush the kernel
+	 * ASID.  But, userspace flushes are probably much more
+	 * important performance-wise.
+	 *
+	 * Make sure to do only a single invpcid when KAISER is
+	 * disabled and we have only a single ASID.
+	 */
+	if (static_cpu_has(X86_FEATURE_PCID) && kaiser_active()) {
+		/*
+		 * Some platforms #GP if we call invpcid(type=1/2) before
+		 * CR4.PCIDE=1.  Just call invpcid in the case we are called
+		 * early.
+		 */
+		if (this_cpu_has(X86_FEATURE_INVPCID_SINGLE)) {
+			invpcid_flush_one(KAISER_SHADOW_PCID_ASID, addr);
+			invpcid_flush_one(0, addr);
+			return;
+		}
+
+		cr3 = native_read_cr3();
+		VM_WARN_ON(cr3 & KAISER_SHADOW_PCID_ASID);
+		VM_WARN_ON(cr3 & (1<<KAISER_PGTABLE_SWITCH_BIT));
+		VM_WARN_ON(cr3 & X86_CR3_PCID_NOFLUSH);
+		cr3 |= X86_CR3_PCID_NOFLUSH;
+		shadow_cr3 = cr3 | (1<<KAISER_PGTABLE_SWITCH_BIT) |
+			KAISER_SHADOW_PCID_ASID;
+		asm volatile("\tjmp 1f\n\t"
+			     "2:\n\t"
+			     ".section .entry.text, \"ax\"\n\t"
+			     "1:\n\t"
+			     "pushf\n\t"
+			     "cli\n\t"
+			     "movq %0, %%cr3\n\t"
+			     "invlpg (%2)\n\t"
+			     "movq %1, %%cr3\n\t"
+			     "popf\n\t"
+			     "invlpg (%2)\n\t"
+			     "jmp 2b\n\t"
+			     ".previous" : :
+			     "r" (shadow_cr3), "r" (cr3), "r" (addr) :
+			     "memory");
+	} else
+#endif
+		asm volatile("invlpg (%0)" ::"r" (addr) : "memory");
 }
 
 static inline void __flush_tlb_all(void)

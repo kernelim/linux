@@ -321,6 +321,7 @@ static void quirk_amd_mmconfig_area(struct pnp_dev *dev)
 			 "%pR covers only part of AMD MMCONFIG area %pR; adding more reservations\n",
 			 res, mmconfig);
 		if (mmconfig->start < res->start) {
+			gmb();
 			start = mmconfig->start;
 			end = res->start - 1;
 			pnp_add_mem_resource(dev, start, end, 0);

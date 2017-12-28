@@ -1,6 +1,12 @@
 #ifndef _LINUX_PERCPU_DEFS_H
 #define _LINUX_PERCPU_DEFS_H
 
+#ifdef CONFIG_KAISER
+#define USER_MAPPED_SECTION ".user_mapped"
+#else
+#define USER_MAPPED_SECTION ""
+#endif
+
 /*
  * Determine the real variable name from the name visible in the
  * kernel sources.
@@ -85,6 +91,12 @@
 #define DEFINE_PER_CPU(type, name)					\
 	DEFINE_PER_CPU_SECTION(type, name, "")
 
+#define DECLARE_PER_CPU_USER_MAPPED(type, name)				\
+	DECLARE_PER_CPU_SECTION(type, name, USER_MAPPED_SECTION)
+
+#define DEFINE_PER_CPU_USER_MAPPED(type, name)				\
+	DEFINE_PER_CPU_SECTION(type, name, USER_MAPPED_SECTION)
+
 /*
  * Declaration/definition used for per-CPU variables that must come first in
  * the set of variables.
@@ -114,6 +126,14 @@
 	DEFINE_PER_CPU_SECTION(type, name, PER_CPU_SHARED_ALIGNED_SECTION) \
 	____cacheline_aligned_in_smp
 
+#define DECLARE_PER_CPU_SHARED_ALIGNED_USER_MAPPED(type, name)		\
+	DECLARE_PER_CPU_SECTION(type, name, USER_MAPPED_SECTION PER_CPU_SHARED_ALIGNED_SECTION) \
+	____cacheline_aligned_in_smp
+
+#define DEFINE_PER_CPU_SHARED_ALIGNED_USER_MAPPED(type, name)		\
+	DEFINE_PER_CPU_SECTION(type, name, USER_MAPPED_SECTION PER_CPU_SHARED_ALIGNED_SECTION) \
+	____cacheline_aligned_in_smp
+
 #define DECLARE_PER_CPU_ALIGNED(type, name)				\
 	DECLARE_PER_CPU_SECTION(type, name, PER_CPU_ALIGNED_SECTION)	\
 	____cacheline_aligned
@@ -131,6 +151,16 @@
 
 #define DEFINE_PER_CPU_PAGE_ALIGNED(type, name)				\
 	DEFINE_PER_CPU_SECTION(type, name, ".page_aligned")		\
+	__aligned(PAGE_SIZE)
+/*
+ * Declaration/definition used for per-CPU variables that must be page aligned and need to be mapped in user mode.
+ */
+#define DECLARE_PER_CPU_PAGE_ALIGNED_USER_MAPPED(type, name)		\
+	DECLARE_PER_CPU_SECTION(type, name, USER_MAPPED_SECTION".page_aligned") \
+	__aligned(PAGE_SIZE)
+
+#define DEFINE_PER_CPU_PAGE_ALIGNED_USER_MAPPED(type, name)		\
+	DEFINE_PER_CPU_SECTION(type, name, USER_MAPPED_SECTION".page_aligned") \
 	__aligned(PAGE_SIZE)
 
 /*

@@ -209,10 +209,12 @@ static void smssdio_interrupt(struct sdio_func *func)
 				}
 
 				buffer += smsdev->func->cur_blksize;
-				if (size > smsdev->func->cur_blksize)
+				if (size > smsdev->func->cur_blksize) {
+					gmb();
 					size -= smsdev->func->cur_blksize;
-				else
+				} else {
 					size = 0;
+				}
 			}
 		}
 	}

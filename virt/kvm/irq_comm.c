@@ -140,9 +140,11 @@ int kvm_set_irq(struct kvm *kvm, int irq_source_id, u32 irq, int level)
 	 */
 	rcu_read_lock();
 	irq_rt = rcu_dereference(kvm->irq_routing);
-	if (irq < irq_rt->nr_rt_entries)
+	if (irq < irq_rt->nr_rt_entries) {
+		gmb();
 		hlist_for_each_entry(e, n, &irq_rt->map[irq], link)
 			irq_set[i++] = *e;
+	}
 	rcu_read_unlock();
 
 	while(i--) {

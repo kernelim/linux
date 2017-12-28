@@ -1182,10 +1182,13 @@ int mlx4_en_config_rss_steer(struct mlx4_en_priv *priv)
 	mlx4_en_fill_qp_context(priv, 0, 0, 0, 1, priv->base_qpn,
 				priv->rx_ring[0]->cqn, -1, &context);
 
-	if (!priv->prof->rss_rings || priv->prof->rss_rings > priv->rx_ring_num)
+	if (!priv->prof->rss_rings || priv->prof->rss_rings > priv->rx_ring_num) {
+		gmb();
 		rss_rings = priv->rx_ring_num;
-	else
+	} else {
+		gmb();
 		rss_rings = priv->prof->rss_rings;
+	}
 
 	ptr = ((void *) &context) + offsetof(struct mlx4_qp_context, pri_path)
 					+ MLX4_RSS_OFFSET_IN_QPC_PRI_PATH;

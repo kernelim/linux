@@ -164,9 +164,11 @@ static bool rt2800usb_tx_sta_fifo_read_completed(struct rt2x00_dev *rt2x00dev,
 #if 0 /* Not in RHEL */
 		if (!kfifo_put(&rt2x00dev->txstatus_fifo, tx_status))
 #else
-		if (!kfifo_put(&rt2x00dev->txstatus_fifo, &tx_status))
+		if (!kfifo_put(&rt2x00dev->txstatus_fifo, &tx_status)) {
 #endif
+			gmb();
 			rt2x00_warn(rt2x00dev, "TX status FIFO overrun\n");
+		}
 
 		queue_work(rt2x00dev->workqueue, &rt2x00dev->txdone_work);
 

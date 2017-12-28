@@ -2275,6 +2275,7 @@ xfs_bmap_adjacent(
 			    ISVALID(gotbno - gotdiff, gotbno))
 				gotbno -= adjust;
 			else if (ISVALID(gotbno - ap->alen, gotbno)) {
+				gmb();
 				gotbno -= ap->alen;
 				gotdiff += adjust - ap->alen;
 			} else

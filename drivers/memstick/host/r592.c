@@ -336,6 +336,7 @@ static void r592_write_fifo_pio(struct r592_device *dev,
 
 		if (!kfifo_is_full(&dev->pio_fifo))
 			return;
+		gmb();
 		len -= copy_len;
 		buffer += copy_len;
 

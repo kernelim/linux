@@ -19,6 +19,7 @@
 #include <asm/mce.h>
 #include <asm/xcr.h>
 #include <asm/suspend.h>
+#include <asm/mmu_context.h>
 
 #ifdef CONFIG_X86_32
 static struct saved_context saved_context;
@@ -191,7 +192,6 @@ static void __restore_processor_state(struct saved_context *ctxt)
 	write_cr8(ctxt->cr8);
 	write_cr4(ctxt->cr4);
 #endif
-	write_cr3(ctxt->cr3);
 	write_cr2(ctxt->cr2);
 	write_cr0(ctxt->cr0);
 
@@ -236,6 +236,12 @@ static void __restore_processor_state(struct saved_context *ctxt)
 #endif
 
 	/*
+	 * __load_cr3 requires kernel %gs to be initialized to be able
+	 * to access per-cpu areas.
+	 */
+	__load_cr3(ctxt->cr3);
+
+	/*
 	 * restore XCR0 for xsave capable cpu's.
 	 */
 	if (cpu_has_xsave)
@@ -247,6 +253,7 @@ static void __restore_processor_state(struct saved_context *ctxt)
 	x86_platform.restore_sched_clock_state();
 	mtrr_bp_restore();
 	perf_restore_debug_store();
+	spec_ctrl_cpu_init();
 }
 
 /* Needed by apm.c */

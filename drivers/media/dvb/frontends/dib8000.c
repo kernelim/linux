@@ -859,13 +859,17 @@ static int dib8000_agc_soft_split(struct dib8000_state *state)
 	// n_agc_global
 	agc = dib8000_read_word(state, 390);
 
-	if (agc > state->current_agc->split.min_thres)
+	if (agc > state->current_agc->split.min_thres) {
+		gmb();
 		split_offset = state->current_agc->split.min;
-	else if (agc < state->current_agc->split.max_thres)
+	} else if (agc < state->current_agc->split.max_thres) {
+		gmb();
 		split_offset = state->current_agc->split.max;
-	else
+	} else {
+		gmb();
 		split_offset = state->current_agc->split.max *
 		    (agc - state->current_agc->split.min_thres) / (state->current_agc->split.max_thres - state->current_agc->split.min_thres);
+	}
 
 	dprintk("AGC split_offset: %d", split_offset);
 

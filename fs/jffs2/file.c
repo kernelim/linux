@@ -141,10 +141,13 @@ static int jffs2_write_begin(struct file *filp, struct address_space *mapping,
 
 	if (pageofs > inode->i_size) {
 		/* Make new hole frag from old EOF to new page */
-		struct jffs2_sb_info *c = JFFS2_SB_INFO(inode->i_sb);
+		struct jffs2_sb_info *c;
 		struct jffs2_raw_inode ri;
 		struct jffs2_full_dnode *fn;
 		uint32_t alloc_len;
+
+		gmb();
+		c = JFFS2_SB_INFO(inode->i_sb);
 
 		D1(printk(KERN_DEBUG "Writing new hole frag 0x%x-0x%x between current EOF and new page\n",
 			  (unsigned int)inode->i_size, pageofs));

@@ -4437,6 +4437,7 @@ static int hpsa_scsi_ioaccel2_queue_command(struct ctlr_info *h,
 	if (use_sg) {
 		curr_sg = cp->sg;
 		if (use_sg > h->ioaccel_maxsg) {
+			gmb();
 			addr64 = le64_to_cpu(
 				h->ioaccel2_cmd_sg_list[c->cmdindex]->address);
 			curr_sg->address = cpu_to_le64(addr64);

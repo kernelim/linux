@@ -3490,6 +3490,7 @@ static ssize_t osst_write(struct file * filp, const char __user * buf, size_t co
 				}
       			}	  
 			if ((STps->drv_file + STps->drv_block) > 0 && STps->drv_file < STp->filemark_cnt) {
+				gmb();
 				STp->filemark_cnt = STps->drv_file;
 				STp->last_mark_ppos =
 				       	ntohl(STp->header_cache->dat_fm_tab.fm_tab_ent[STp->filemark_cnt-1]);

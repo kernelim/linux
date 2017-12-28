@@ -1357,6 +1357,7 @@ ext4_ext_search_right(struct inode *inode, struct ext4_ext_path *path,
 	ex = path[depth].p_ext;
 	ee_len = ext4_ext_get_actual_len(ex);
 	if (*logical < le32_to_cpu(ex->ee_block)) {
+		gmb();
 		if (unlikely(EXT_FIRST_EXTENT(path[depth].p_hdr) != ex)) {
 			EXT4_ERROR_INODE(inode,
 					 "first_extent(path[%d].p_hdr) != ex",

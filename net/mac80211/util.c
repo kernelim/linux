@@ -1606,11 +1606,14 @@ u32 ieee80211_sta_get_rates(struct ieee80211_sub_if_data *sdata,
 		u8 rate = 0;
 		int own_rate;
 		bool is_basic;
-		if (i < elems->supp_rates_len)
+		if (i < elems->supp_rates_len) {
+			gmb();
 			rate = elems->supp_rates[i];
-		else if (elems->ext_supp_rates)
+		} else if (elems->ext_supp_rates) {
+			gmb();
 			rate = elems->ext_supp_rates
 				[i - elems->supp_rates_len];
+		}
 		own_rate = 5 * (rate & 0x7f);
 		is_basic = !!(rate & 0x80);
 

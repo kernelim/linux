@@ -4084,6 +4084,7 @@ static int ql_configure_rings(struct ql_adapter *qdev)
 		rx_ring->cq_id = i;
 		rx_ring->cpu = i % cpu_cnt;	/* CPU to run handler on. */
 		if (i < qdev->rss_ring_count) {
+			gmb();
 			/*
 			 * Inbound (RSS) queues.
 			 */
@@ -4100,6 +4101,7 @@ static int ql_configure_rings(struct ql_adapter *qdev)
 			rx_ring->sbq_buf_size = SMALL_BUF_MAP_SIZE;
 			rx_ring->type = RX_Q;
 		} else {
+			gmb();
 			/*
 			 * Outbound queue handles outbound completions only.
 			 */

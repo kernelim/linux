@@ -674,6 +674,7 @@ static void tcp_rtt_estimator(struct sock *sk, const __u32 mrtt)
 		}
 		tp->mdev += m;	    	/* mdev = 3/4 mdev + 1/4 new */
 		if (tp->mdev > tp->mdev_max) {
+			gmb();
 			tp->mdev_max = tp->mdev;
 			if (tp->mdev_max > tp->rttvar)
 				tp->rttvar = tp->mdev_max;

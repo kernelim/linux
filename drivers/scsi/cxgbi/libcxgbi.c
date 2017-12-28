@@ -1464,9 +1464,10 @@ static void ddp_tag_release(struct cxgbi_hba *chba, u32 tag)
 
 	idx = (tag >> PPOD_IDX_SHIFT) & ddp->idx_mask;
 	if (idx < ddp->nppods) {
-		struct cxgbi_gather_list *gl = ddp->gl_map[idx];
+		struct cxgbi_gather_list *gl;
 		unsigned int npods;
 
+		gmb();
 		if (!gl || !gl->nelem) {
 			pr_warn("tag 0x%x, idx %u, gl 0x%p, %u.\n",
 				tag, idx, gl, gl ? gl->nelem : 0);

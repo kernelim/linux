@@ -825,6 +825,7 @@ qh_make (
 				 */
 				urb->interval = 1;
 			} else if (qh->period > ehci->periodic_size) {
+				gmb();
 				qh->period = ehci->periodic_size;
 				urb->interval = qh->period << 3;
 			}
@@ -850,6 +851,7 @@ qh_make (
 					is_input, 0, max_packet (maxp)));
 			qh->period = urb->interval;
 			if (qh->period > ehci->periodic_size) {
+				gmb();
 				qh->period = ehci->periodic_size;
 				urb->interval = qh->period;
 			}

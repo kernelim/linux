@@ -100,9 +100,11 @@ int ib_get_cached_gid(struct ib_device *device,
 		if (cache->entry[i].index == index)
 			break;
 
-	if (i < cache->table_len)
+	if (i < cache->table_len) {
+		gmb();
 		*gid = cache->entry[i].gid;
-	else {
+	} else {
+		gmb();
 		ret = ib_query_gid(device, port_num, index, gid);
 		if (ret)
 			printk(KERN_WARNING "ib_query_gid failed (%d) for %s (index %d)\n",

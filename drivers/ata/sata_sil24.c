@@ -1032,6 +1032,7 @@ static void sil24_error_intr(struct ata_port *ap)
 			pmp = (context >> 5) & 0xf;
 
 			if (pmp < ap->nr_pmp_links) {
+				gmb();
 				link = &ap->pmp_link[pmp];
 				ehi = &link->eh_info;
 				qc = ata_qc_from_tag(ap, link->active_tag);

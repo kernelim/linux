@@ -58,6 +58,7 @@ config X86
 	select HAVE_USER_RETURN_NOTIFIER
 	select ARCH_HAVE_NMI_SAFE_CMPXCHG
 	select GENERIC_CLOCKEVENTS_MIN_ADJUST
+	select ARCH_SPEC_CTRL if X86_64
 
 config OUTPUT_FORMAT
 	string
@@ -1654,7 +1655,15 @@ config COMPAT_VDSO
 	depends on X86_32 || IA32_EMULATION
 	---help---
 	  Map the 32-bit VDSO to the predictable old-style address too.
-	---help---
+		# The VSYSCALL page comes from the kernel page tables
+		# and is not available when KAISER is enabled.
+		depends on ! KAISER
+
+		  When KAISER is enabled, the vsyscall area will become
+		  unreadable.  This emulation option still works, but KAISER
+		  will make it harder to do things like trace code using the
+		  emulation.
+
 	  Say N here if you are running a sufficiently recent glibc
 	  version (2.3.3 or later), to remove the high-mapped
 	  VDSO mapping and to exclusively use the randomized VDSO.

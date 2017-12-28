@@ -2020,6 +2020,7 @@ qla2x00_status_entry(scsi_qla_host_t *vha, struct rsp_que *rsp, void *pkt)
 
 	/* Validate handle. */
 	if (handle < req->num_outstanding_cmds) {
+		gmb();
 		sp = req->outstanding_cmds[handle];
 		if (!sp) {
 			ql_dbg(ql_dbg_io, vha, 0x3075,
@@ -2028,6 +2029,7 @@ qla2x00_status_entry(scsi_qla_host_t *vha, struct rsp_que *rsp, void *pkt)
 			return;
 		}
 	} else {
+		gmb();
 		ql_dbg(ql_dbg_io, vha, 0x3017,
 		    "Invalid status handle, out of range (0x%x).\n",
 		    sts->handle);

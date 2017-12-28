@@ -568,6 +568,7 @@ static void udf_table_free_blocks(struct super_block *sb,
 			aed->previousAllocExtLocation =
 				cpu_to_le32(oepos.block.logicalBlockNum);
 			if (epos.offset + adsize > sb->s_blocksize) {
+				gmb();
 				loffset = epos.offset;
 				aed->lengthAllocDescs = cpu_to_le32(adsize);
 				sptr = iinfo->i_ext.i_data + epos.offset
@@ -578,6 +579,7 @@ static void udf_table_free_blocks(struct super_block *sb,
 				epos.offset = sizeof(struct allocExtDesc) +
 						adsize;
 			} else {
+				gmb();
 				loffset = epos.offset + adsize;
 				aed->lengthAllocDescs = cpu_to_le32(0);
 				if (oepos.bh) {

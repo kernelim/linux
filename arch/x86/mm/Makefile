@@ -27,3 +27,5 @@ obj-$(CONFIG_ACPI_NUMA)		+= srat_$(BITS).o
 obj-$(CONFIG_TRACK_DIRTY_PAGES)	+= track.o
 
 obj-$(CONFIG_MEMTEST)		+= memtest.o
+
+obj-$(CONFIG_KAISER)		+= kaiser.o

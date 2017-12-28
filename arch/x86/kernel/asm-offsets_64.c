@@ -116,6 +116,9 @@ int main(void)
 	BLANK();
 #undef ENTRY
 	DEFINE(TSS_ist, offsetof(struct tss_struct, x86_tss.ist));
+	OFFSET(TSS_sp0, tss_struct, x86_tss.sp0);
+	OFFSET(TSS_stack, tss_struct, stack);
+	DEFINE(TSS_stack_size, sizeof(((struct tss_struct *)0)->stack));
 	BLANK();
 	DEFINE(crypto_tfm_ctx_offset, offsetof(struct crypto_tfm, __crt_ctx));
 	BLANK();

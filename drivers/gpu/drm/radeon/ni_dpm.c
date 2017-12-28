@@ -1344,10 +1344,12 @@ static int ni_get_std_voltage_value(struct radeon_device *rdev,
 				    u16 *std_voltage)
 {
 	if (rdev->pm.dpm.dyn_state.cac_leakage_table.entries &&
-	    ((u32)voltage->index < rdev->pm.dpm.dyn_state.cac_leakage_table.count))
+	    ((u32)voltage->index < rdev->pm.dpm.dyn_state.cac_leakage_table.count)) {
+		gmb();
 		*std_voltage = rdev->pm.dpm.dyn_state.cac_leakage_table.entries[voltage->index].vddc;
-	else
+	} else {
 		*std_voltage = be16_to_cpu(voltage->value);
+	}
 
 	return 0;
 }

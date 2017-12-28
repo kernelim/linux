@@ -345,7 +345,7 @@ int __init ftrace_dyn_arch_init(void *data)
 		"nop\n"
 		"nop\n"  /* 2 byte jmp + 3 bytes */
 		"ftrace_test_p6nop:"
-		P6_NOP5
+		_ASM_MK_NOP(P6_NOP5)
 		"jmp 1f\n"
 		"ftrace_test_nop5:"
 		".byte 0x66,0x66,0x66,0x66,0x90\n"

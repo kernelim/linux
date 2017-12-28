@@ -187,6 +187,7 @@ early_efi_write(struct console *con, const char *str, unsigned int num)
 		if (efi_y + font->height > si->lfb_height) {
 			u32 i;
 
+			gmb();
 			efi_y -= font->height;
 			early_efi_scroll_up();
 

@@ -271,7 +271,9 @@ static inline void fpu_save_init(struct fpu *fpu)
 	/* Use more nops than strictly needed in case the compiler
 	   varies code */
 	alternative_input(
-		"fnsave %[fx] ;fwait;" GENERIC_NOP8 GENERIC_NOP4,
+		"fnsave %[fx] ;fwait;"
+		_ASM_MK_NOP(GENERIC_NOP8)
+		_ASM_MK_NOP(GENERIC_NOP4),
 		"fxsave %[fx]\n"
 		"bt $7,%[fsw] ; jnc 1f ; fnclex\n1:",
 		X86_FEATURE_FXSR,
@@ -282,7 +284,8 @@ clear_state:
 	   is pending.  Clear the x87 state here by setting it to fixed
 	   values. safe_address is a random variable that should be in L1 */
 	alternative_input(
-		GENERIC_NOP8 GENERIC_NOP2,
+		_ASM_MK_NOP(GENERIC_NOP8)
+		_ASM_MK_NOP(GENERIC_NOP2),
 		"emms\n\t"	  	/* clear stack tags */
 		"fildl %[addr]", 	/* set F?P to defined value */
 		X86_FEATURE_FXSAVE_LEAK,

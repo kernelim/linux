@@ -99,8 +99,20 @@
 #define PAGE_READONLY_EXEC	__pgprot(_PAGE_PRESENT | _PAGE_USER |	\
 					 _PAGE_ACCESSED)
 
+/*
+ * Disable global pages for anything using the default
+ * __PAGE_KERNEL* macros.  PGE will still be enabled
+ * and _PAGE_GLOBAL may still be used carefully.
+ */
+#ifdef CONFIG_KAISER
+#define __PAGE_KERNEL_GLOBAL	0
+#else
+#define __PAGE_KERNEL_GLOBAL	_PAGE_GLOBAL
+#endif
+
 #define __PAGE_KERNEL_EXEC						\
-	(_PAGE_PRESENT | _PAGE_RW | _PAGE_DIRTY | _PAGE_ACCESSED | _PAGE_GLOBAL)
+	(_PAGE_PRESENT | _PAGE_RW | _PAGE_DIRTY | _PAGE_ACCESSED |	\
+	 __PAGE_KERNEL_GLOBAL)
 #define __PAGE_KERNEL		(__PAGE_KERNEL_EXEC | _PAGE_NX)
 
 #define __PAGE_KERNEL_RO		(__PAGE_KERNEL & ~_PAGE_RW)
@@ -157,6 +169,17 @@
 #define __S101	PAGE_READONLY_EXEC
 #define __S110	PAGE_SHARED_EXEC
 #define __S111	PAGE_SHARED_EXEC
+
+/* The ASID is the lower 12 bits of CR3 */
+#define X86_CR3_PCID_ASID_MASK  (_AC((1<<12)-1, UL))
+
+/* Mask for all the PCID-related bits in CR3: */
+#define X86_CR3_PCID_MASK       (X86_CR3_PCID_NOFLUSH | X86_CR3_PCID_ASID_MASK)
+
+/* Make sure this is only usable in KAISER #ifdef'd code: */
+#ifdef CONFIG_KAISER
+#define X86_CR3_KAISER_SWITCH_BIT 11
+#endif
 
 /*
  * early identity mapping  pte attrib macros.

@@ -69,8 +69,10 @@
 
 #include <asm/smpboot_hooks.h>
 #include <asm/i8259.h>
+#include <asm/spec_ctrl.h>
 
 #ifdef CONFIG_X86_32
+# include <asm/mmu_context.h>
 u8 apicid_2_node[MAX_APICID];
 #endif
 
@@ -311,12 +313,14 @@ die:
 notrace static void __cpuinit start_secondary(void *unused)
 {
 	/*
-	 * Don't put *anything* before cpu_init(), SMP booting is too
-	 * fragile that we want to limit the things done here to the
-	 * most necessary things.
+	 * Don't put *anything* except direct CPU state initialization
+	 * before cpu_init(), SMP booting is too fragile that we want to
+	 * limit the things done here to the most necessary things.
 	 */
-
-#ifdef CONFIG_X86_32
+#ifdef CONFIG_X86_64
+	if (boot_cpu_has(X86_FEATURE_PCID))
+		write_cr4(read_cr4() | X86_CR4_PCIDE);
+#else
 	/*
 	 * Switch away from the trampoline page-table
 	 *
@@ -1501,8 +1505,12 @@ void native_play_dead(void)
 	play_dead_common();
 	tboot_shutdown(TB_SHUTDOWN_WFS);
 
+	spec_ctrl_disable_ibrs();
+
 	mwait_play_dead();	/* Only returns on failure */
 	hlt_play_dead();
+
+	spec_ctrl_enable_ibrs();
 }
 
 #else /* ... !CONFIG_HOTPLUG_CPU */

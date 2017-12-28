@@ -3451,6 +3451,7 @@ _base_allocate_memory_pools(struct MPT3SAS_ADAPTER *ioc)
 	   ioc->max_sges_in_main_message)/ioc->max_sges_in_chain_message)
 	    + 1;
 	if (chains_needed_per_io > facts->MaxChainDepth) {
+		gmb();
 		chains_needed_per_io = facts->MaxChainDepth;
 		ioc->shost->sg_tablesize = min_t(u16,
 		ioc->max_sges_in_main_message + (ioc->max_sges_in_chain_message

@@ -2298,6 +2298,7 @@ static unsigned int udf_count_free(struct super_block *sb)
 			(struct logicalVolIntegrityDesc *)
 			sbi->s_lvid_bh->b_data;
 		if (le32_to_cpu(lvid->numOfPartitions) > sbi->s_partition) {
+			gmb();
 			accum = le32_to_cpu(
 					lvid->freeSpaceTable[sbi->s_partition]);
 			if (accum == 0xFFFFFFFF)

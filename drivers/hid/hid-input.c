@@ -641,6 +641,8 @@ mapped:
 	if (usage->type == EV_ABS &&
 	    (usage->hat_min < usage->hat_max || usage->hat_dir)) {
 		int i;
+
+		gmb();
 		for (i = usage->code; i < usage->code + 2 && i <= max; i++) {
 			input_set_abs_params(input, i, -1, 1, 0, 0);
 			set_bit(i, input->absbit);

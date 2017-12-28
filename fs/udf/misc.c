@@ -103,8 +103,10 @@ struct genericFormat *udf_add_extendedattr(struct inode *inode, uint32_t size,
 		if (type < 2048) {
 			if (le32_to_cpu(eahd->appAttrLocation) <
 					iinfo->i_lenEAttr) {
-				uint32_t aal =
-					le32_to_cpu(eahd->appAttrLocation);
+				uint32_t aal;
+
+				gmb();
+				aal = le32_to_cpu(eahd->appAttrLocation);
 				memmove(&ea[offset - aal + size],
 					&ea[aal], offset - aal);
 				offset -= aal;
@@ -113,8 +115,10 @@ struct genericFormat *udf_add_extendedattr(struct inode *inode, uint32_t size,
 			}
 			if (le32_to_cpu(eahd->impAttrLocation) <
 					iinfo->i_lenEAttr) {
-				uint32_t ial =
-					le32_to_cpu(eahd->impAttrLocation);
+				uint32_t ial;
+
+				gmb();
+				ial = le32_to_cpu(eahd->impAttrLocation);
 				memmove(&ea[offset - ial + size],
 					&ea[ial], offset - ial);
 				offset -= ial;
@@ -124,8 +128,10 @@ struct genericFormat *udf_add_extendedattr(struct inode *inode, uint32_t size,
 		} else if (type < 65536) {
 			if (le32_to_cpu(eahd->appAttrLocation) <
 					iinfo->i_lenEAttr) {
-				uint32_t aal =
-					le32_to_cpu(eahd->appAttrLocation);
+				uint32_t aal;
+
+				gmb();
+				aal = le32_to_cpu(eahd->appAttrLocation);
 				memmove(&ea[offset - aal + size],
 					&ea[aal], offset - aal);
 				offset -= aal;

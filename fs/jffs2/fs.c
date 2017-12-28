@@ -153,6 +153,7 @@ int jffs2_do_setattr (struct inode *inode, struct iattr *iattr)
 		jffs2_truncate_fragtree (c, &f->fragtree, iattr->ia_size);
 
 	if (ivalid & ATTR_SIZE && inode->i_size < iattr->ia_size) {
+		gmb();
 		jffs2_add_full_dnode_to_inode(c, f, new_metadata);
 		inode->i_size = iattr->ia_size;
 		inode->i_blocks = (inode->i_size + 511) >> 9;

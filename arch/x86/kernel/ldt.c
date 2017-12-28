@@ -9,6 +9,7 @@
 #include <linux/errno.h>
 #include <linux/sched.h>
 #include <linux/string.h>
+#include <linux/kaiser.h>
 #include <linux/mm.h>
 #include <linux/smp.h>
 #include <linux/vmalloc.h>
@@ -28,10 +29,19 @@ static void flush_ldt(void *current_mm)
 }
 #endif
 
+static void free_ldt(void *ldt, int size)
+{
+	if (size * LDT_ENTRY_SIZE > PAGE_SIZE)
+		vfree(ldt);
+	else
+		put_page(virt_to_page(ldt));
+}
+
 static int alloc_ldt(mm_context_t *pc, int mincount, int reload)
 {
 	void *oldldt, *newldt;
 	int oldsize;
+	int ret;
 
 	if (mincount <= pc->size)
 		return 0;
@@ -45,6 +55,13 @@ static int alloc_ldt(mm_context_t *pc, int mincount, int reload)
 
 	if (!newldt)
 		return -ENOMEM;
+	ret = kaiser_add_mapping((unsigned long)newldt,
+				 mincount * LDT_ENTRY_SIZE,
+				 __PAGE_KERNEL | _PAGE_GLOBAL);
+	if (ret) {
+		free_ldt(newldt, mincount);
+		return -ENOMEM;
+	}
 
 	if (oldsize)
 		memcpy(newldt, pc->ldt, oldsize * LDT_ENTRY_SIZE);
@@ -76,11 +93,10 @@ static int alloc_ldt(mm_context_t *pc, int mincount, int reload)
 #endif
 	}
 	if (oldsize) {
+		kaiser_remove_mapping((unsigned long)oldldt,
+				      oldsize * LDT_ENTRY_SIZE);
 		paravirt_free_ldt(oldldt, oldsize);
-		if (oldsize * LDT_ENTRY_SIZE > PAGE_SIZE)
-			vfree(oldldt);
-		else
-			put_page(virt_to_page(oldldt));
+		free_ldt(oldldt, oldsize);
 	}
 	return 0;
 }
@@ -131,6 +147,8 @@ void destroy_context(struct mm_struct *mm)
 		if (mm == current->active_mm)
 			clear_LDT();
 #endif
+		kaiser_remove_mapping((unsigned long)mm->context.ldt,
+				      mm->context.size * LDT_ENTRY_SIZE);
 		paravirt_free_ldt(mm->context.ldt, mm->context.size);
 		if (mm->context.size * LDT_ENTRY_SIZE > PAGE_SIZE)
 			vfree(mm->context.ldt);

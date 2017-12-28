@@ -72,6 +72,7 @@
 #include <linux/shmem_fs.h>
 #include <linux/perf_event.h>
 #include <linux/list.h>
+#include <linux/kaiser.h>
 #include <trace/boot.h>
 
 #include <asm/io.h>
@@ -563,6 +564,8 @@ static void __init mm_init(void)
 	kmem_cache_init();
 	pgtable_cache_init();
 	vmalloc_init();
+	/* This just needs to be done before we first run userspace: */
+	kaiser_init();
 }
 
 asmlinkage void __init start_kernel(void)

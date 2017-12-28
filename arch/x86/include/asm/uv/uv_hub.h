@@ -403,8 +403,10 @@ union uvh_apicid {
 /* socket phys RAM --> UV global physical address */
 static inline unsigned long uv_soc_phys_ram_to_gpa(unsigned long paddr)
 {
-	if (paddr < uv_hub_info->lowmem_remap_top)
+	if (paddr < uv_hub_info->lowmem_remap_top) {
+		gmb();
 		paddr |= uv_hub_info->lowmem_remap_base;
+	}
 	paddr |= uv_hub_info->gnode_upper;
 	paddr = ((paddr << uv_hub_info_m_shift) >> uv_hub_info_m_shift) |
 		((paddr >> uv_hub_info->m_val) << uv_hub_info_n_lshift);

@@ -239,6 +239,7 @@ void bnx2i_put_rq_buf(struct bnx2i_conn *bnx2i_conn, int count)
 	ep->qp.rq_prod_idx += count;
 
 	if (ep->qp.rq_prod_idx > bnx2i_conn->hba->max_rqes) {
+		gmb();
 		ep->qp.rq_prod_idx %= bnx2i_conn->hba->max_rqes;
 		if (!hi_bit)
 			ep->qp.rq_prod_idx |= 0x8000;

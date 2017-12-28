@@ -23,6 +23,7 @@
 #ifdef CONFIG_X86_32
 # include <linux/ctype.h>
 # include <linux/mc146818rtc.h>
+# include <asm/mmu_context.h>
 #else
 # include <asm/x86_init.h>
 #endif

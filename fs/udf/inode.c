@@ -1705,6 +1705,7 @@ int8_t udf_add_aext(struct inode *inode, struct extent_position *epos,
 			aed->previousAllocExtLocation =
 					cpu_to_le32(obloc.logicalBlockNum);
 		if (epos->offset + adsize > inode->i_sb->s_blocksize) {
+			gmb();
 			loffset = epos->offset;
 			aed->lengthAllocDescs = cpu_to_le32(adsize);
 			sptr = ptr - adsize;
@@ -1712,6 +1713,7 @@ int8_t udf_add_aext(struct inode *inode, struct extent_position *epos,
 			memcpy(dptr, sptr, adsize);
 			epos->offset = sizeof(struct allocExtDesc) + adsize;
 		} else {
+			gmb();
 			loffset = epos->offset + adsize;
 			aed->lengthAllocDescs = cpu_to_le32(0);
 			sptr = ptr;

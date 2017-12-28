@@ -4071,6 +4071,7 @@ static void __meminit adjust_zone_range_for_zone_movable(int nid,
 		/* Adjust for ZONE_MOVABLE starting within this range */
 		} else if (*zone_start_pfn < zone_movable_pfn[nid] &&
 				*zone_end_pfn > zone_movable_pfn[nid]) {
+			gmb();
 			*zone_end_pfn = zone_movable_pfn[nid];
 
 		/* Check if this whole range is within ZONE_MOVABLE */

@@ -36,6 +36,7 @@ static struct sk_buff *udp6_ufo_fragment(struct sk_buff *skb, int features)
 	int tnl_hlen;
 	const struct ipv6hdr *ipv6h;
 	struct udphdr *uh;
+	int err;
 
 	mss = skb_shinfo(skb)->gso_size;
 	if (unlikely(skb->len <= mss))
@@ -88,7 +89,10 @@ static struct sk_buff *udp6_ufo_fragment(struct sk_buff *skb, int features)
 	/* Find the unfragmentable header and shift it left by frag_hdr_sz
 	 * bytes to insert fragment header.
 	 */
-	unfrag_ip6hlen = ip6_find_1stfragopt(skb, &prevhdr);
+	err = ip6_find_1stfragopt(skb, &prevhdr);
+	if (err < 0)
+		return ERR_PTR(err);
+	unfrag_ip6hlen = err;
 	nexthdr = *prevhdr;
 	*prevhdr = NEXTHDR_FRAGMENT;
 	unfrag_len = (skb_network_header(skb) - skb_mac_header(skb)) +

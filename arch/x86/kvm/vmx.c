@@ -140,6 +140,8 @@ struct vcpu_vmx {
 	u64 		      msr_host_kernel_gs_base;
 	u64 		      msr_guest_kernel_gs_base;
 #endif
+	u64		      spec_ctrl;
+
 	struct vmcs          *vmcs;
 	struct msr_autoload {
 		unsigned nr;
@@ -931,6 +933,7 @@ static void vmx_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
 	if (per_cpu(current_vmcs, cpu) != vmx->vmcs) {
 		per_cpu(current_vmcs, cpu) = vmx->vmcs;
 		vmcs_load(vmx->vmcs);
+		spec_ctrl_ibpb();
 	}
 
 	if (vcpu->cpu != cpu) {
@@ -1242,6 +1245,9 @@ static int vmx_get_msr(struct kvm_vcpu *vcpu, u32 msr_index, u64 *pdata)
 	case MSR_IA32_TSC:
 		data = guest_read_tsc();
 		break;
+	case MSR_IA32_SPEC_CTRL:
+		data = to_vmx(vcpu)->spec_ctrl;
+		break;
 	case MSR_IA32_SYSENTER_CS:
 		data = vmcs_read32(GUEST_SYSENTER_CS);
 		break;
@@ -1307,6 +1313,9 @@ static int vmx_set_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 		break;
 	case MSR_IA32_TSC:
 		kvm_write_tsc(vcpu, msr_info);
+		break;
+	case MSR_IA32_SPEC_CTRL:
+		to_vmx(vcpu)->spec_ctrl = msr_info->data;
 		break;
 	case MSR_IA32_CR_PAT:
 		if (vmcs_config.vmentry_ctrl & VM_ENTRY_LOAD_IA32_PAT) {
@@ -4297,6 +4306,8 @@ static void vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	if (vcpu->arch.switch_db_regs)
 		set_debugreg(vcpu->arch.dr6, 6);
 
+	spec_ctrl_vmenter_ibrs(vmx->spec_ctrl);
+
 	atomic_switch_perf_msrs(vmx);
 
 	asm(
@@ -4366,6 +4377,23 @@ static void vmx_vcpu_run(struct kvm_vcpu *vcpu)
 
 		"pop  %%"R"bp; pop  %%"R"bp; pop  %%"R"dx \n\t"
 		"setbe %c[fail](%0) \n\t"
+		/*
+		 * Clear host registers marked as clobbered to prevent
+		 * speculative use.
+		 */
+		"xor %%" _ASM_BX ", %%" _ASM_BX " \n\t"
+		"xor %%" _ASM_SI ", %%" _ASM_SI " \n\t"
+		"xor %%" _ASM_DI ", %%" _ASM_DI " \n\t"
+#ifdef CONFIG_X86_64
+		"xor %%r8, %%r8 \n\t"
+		"xor %%r9, %%r9 \n\t"
+		"xor %%r10, %%r10 \n\t"
+		"xor %%r11, %%r11 \n\t"
+		"xor %%r12, %%r12 \n\t"
+		"xor %%r13, %%r13 \n\t"
+		"xor %%r14, %%r14 \n\t"
+		"xor %%r15, %%r15 \n\t"
+#endif
 	      : : "c"(vmx), "d"((unsigned long)HOST_RSP),
 		[launched]"i"(offsetof(struct vcpu_vmx, launched)),
 		[fail]"i"(offsetof(struct vcpu_vmx, fail)),
@@ -4395,6 +4423,12 @@ static void vmx_vcpu_run(struct kvm_vcpu *vcpu)
 #endif
 	      );
 
+	if (cpu_has_spec_ctrl()) {
+		rdmsrl(MSR_IA32_SPEC_CTRL, vmx->spec_ctrl);
+		__spec_ctrl_vmexit_ibrs(vmx->spec_ctrl);
+	}
+	stuff_RSB();
+
 	vcpu->arch.regs_avail = ~((1 << VCPU_REGS_RIP) | (1 << VCPU_REGS_RSP)
 				  | (1 << VCPU_EXREG_PDPTR));
 	vcpu->arch.regs_dirty = 0;
@@ -4423,6 +4457,12 @@ static void vmx_free_vmcs(struct kvm_vcpu *vcpu)
 		vcpu_clear(vmx);
 		free_vmcs(vmx->vmcs);
 		vmx->vmcs = NULL;
+
+		/*
+		 * The VMCS could be recycled, causing a false negative in
+		 * vmx_vcpu_load; block speculative execution.
+		 */
+		spec_ctrl_ibpb();
 	}
 }
 
@@ -4740,6 +4780,8 @@ static int __init vmx_init(void)
 	vmx_disable_intercept_for_msr(MSR_IA32_SYSENTER_CS, false);
 	vmx_disable_intercept_for_msr(MSR_IA32_SYSENTER_ESP, false);
 	vmx_disable_intercept_for_msr(MSR_IA32_SYSENTER_EIP, false);
+	vmx_disable_intercept_for_msr(MSR_IA32_SPEC_CTRL, false);
+	vmx_disable_intercept_for_msr(MSR_IA32_PRED_CMD, false);
 
 	if (enable_ept) {
 		bypass_guest_pf = 0;

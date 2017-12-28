@@ -1281,6 +1281,7 @@ retry:
 			 * buffer packet.
 			 */
 			if (ofs > dd->piosize2kmax_dwords) {
+				gmb();
 				for (j = pkt->index; j <= i; j++) {
 					ppd->sdma_descq[dtail].qw[0] |=
 						cpu_to_le64(1ULL << 14);

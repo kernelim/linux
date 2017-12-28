@@ -2460,8 +2460,10 @@ struct isci_request *sci_request_by_tag(struct isci_host *ihost, u16 io_tag)
 	task_index = ISCI_TAG_TCI(io_tag);
 
 	if (task_index < ihost->task_context_entries) {
-		struct isci_request *ireq = ihost->reqs[task_index];
+		struct isci_request *ireq;
 
+		gmb();
+		ireq = ihost->reqs[task_index];
 		if (test_bit(IREQ_ACTIVE, &ireq->flags)) {
 			task_sequence = ISCI_TAG_SEQ(io_tag);
 

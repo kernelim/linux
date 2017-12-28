@@ -26,6 +26,7 @@
 #include <asm/desc.h>
 #include <asm/mtrr.h>
 #include <asm/msr-index.h>
+#include <asm/spec_ctrl.h>
 
 /* KVM_MAX_VCPU_COUNT is RHEL6-only. Upstream uses KVM_MAX_VCPUS.
  * The macro was renamed because upstream code has the implicit assumption that

@@ -338,6 +338,7 @@ void mthca_cq_resize_copy_cqes(struct mthca_cq *cq)
 	 */
 	if (!mthca_is_memfree(to_mdev(cq->ibcq.device)) &&
 	    cq->ibcq.cqe < cq->resize_buf->cqe) {
+		gmb();
 		cq->cons_index &= cq->ibcq.cqe;
 		if (cqe_sw(get_cqe(cq, cq->ibcq.cqe)))
 			cq->cons_index -= cq->ibcq.cqe + 1;

@@ -1207,6 +1207,8 @@ and is between 256 and 4096 characters. It is defined in the file
 			Valid arguments: on, off
 			Default: on
 
+	kpti		[X86-64] Enable kernel page table isolation.
+
 	kstack=N	[X86] Print N words from the kernel stack
 			in oops dumps.
 
@@ -1851,6 +1853,8 @@ and is between 256 and 4096 characters. It is defined in the file
 	nointroute	[IA-64]
 
 	nojitter	[IA64] Disables jitter checking for ITC timers.
+
+	nopti		[X86-64] Disable kernel page table isolation.
 
 	nolapic		[X86-32,APIC] Do not enable or use the local APIC.
 

@@ -79,17 +79,30 @@ __setup("noreplace-paravirt", setup_noreplace_paravirt);
 #define DPRINTK(fmt, args...) if (debug_alternative) \
 	printk(KERN_DEBUG fmt, args)
 
+/*
+ * Each GENERIC_NOPX is of X bytes, and defined as an array of bytes
+ * that correspond to that nop. Getting from one nop to the next, we
+ * add to the array the offset that is equal to the sum of all sizes of
+ * nops preceding the one we are after.
+ *
+ * Note: The GENERIC_NOP5_ATOMIC is at the end, as it breaks the
+ * nice symmetry of sizes of the previous nops.
+ */
 #if defined(GENERIC_NOP1) && !defined(CONFIG_X86_64)
-/* Use inline assembly to define this because the nops are defined
-   as inline assembly strings in the include files and we cannot
-   get them easily into strings. */
-asm("\t" __stringify(__INITRODATA_OR_MODULE) "\nintelnops: "
-	GENERIC_NOP1 GENERIC_NOP2 GENERIC_NOP3 GENERIC_NOP4 GENERIC_NOP5 GENERIC_NOP6
-	GENERIC_NOP7 GENERIC_NOP8
-    "\t.previous");
-extern const unsigned char intelnops[];
-static const unsigned char *const __initconst_or_module
-intel_nops[ASM_NOP_MAX+1] = {
+static const unsigned char intelnops[] =
+{
+	GENERIC_NOP1,
+	GENERIC_NOP2,
+	GENERIC_NOP3,
+	GENERIC_NOP4,
+	GENERIC_NOP5,
+	GENERIC_NOP6,
+	GENERIC_NOP7,
+	GENERIC_NOP8,
+	GENERIC_NOP5_ATOMIC
+};
+static const unsigned char * const intel_nops[ASM_NOP_MAX+2] =
+{
 	NULL,
 	intelnops,
 	intelnops + 1,
@@ -99,17 +112,25 @@ intel_nops[ASM_NOP_MAX+1] = {
 	intelnops + 1 + 2 + 3 + 4 + 5,
 	intelnops + 1 + 2 + 3 + 4 + 5 + 6,
 	intelnops + 1 + 2 + 3 + 4 + 5 + 6 + 7,
+	intelnops + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8,
 };
 #endif
 
 #ifdef K8_NOP1
-asm("\t" __stringify(__INITRODATA_OR_MODULE) "\nk8nops: "
-	K8_NOP1 K8_NOP2 K8_NOP3 K8_NOP4 K8_NOP5 K8_NOP6
-	K8_NOP7 K8_NOP8
-    "\t.previous");
-extern const unsigned char k8nops[];
-static const unsigned char *const __initconst_or_module
-k8_nops[ASM_NOP_MAX+1] = {
+static const unsigned char k8nops[] =
+{
+	K8_NOP1,
+	K8_NOP2,
+	K8_NOP3,
+	K8_NOP4,
+	K8_NOP5,
+	K8_NOP6,
+	K8_NOP7,
+	K8_NOP8,
+	K8_NOP5_ATOMIC
+};
+static const unsigned char * const k8_nops[ASM_NOP_MAX+2] =
+{
 	NULL,
 	k8nops,
 	k8nops + 1,
@@ -119,17 +140,25 @@ k8_nops[ASM_NOP_MAX+1] = {
 	k8nops + 1 + 2 + 3 + 4 + 5,
 	k8nops + 1 + 2 + 3 + 4 + 5 + 6,
 	k8nops + 1 + 2 + 3 + 4 + 5 + 6 + 7,
+	k8nops + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8,
 };
 #endif
 
 #if defined(K7_NOP1) && !defined(CONFIG_X86_64)
-asm("\t" __stringify(__INITRODATA_OR_MODULE) "\nk7nops: "
-	K7_NOP1 K7_NOP2 K7_NOP3 K7_NOP4 K7_NOP5 K7_NOP6
-	K7_NOP7 K7_NOP8
-    "\t.previous");
-extern const unsigned char k7nops[];
-static const unsigned char *const __initconst_or_module
-k7_nops[ASM_NOP_MAX+1] = {
+static const unsigned char k7nops[] =
+{
+	K7_NOP1,
+	K7_NOP2,
+	K7_NOP3,
+	K7_NOP4,
+	K7_NOP5,
+	K7_NOP6,
+	K7_NOP7,
+	K7_NOP8,
+	K7_NOP5_ATOMIC
+};
+static const unsigned char * const k7_nops[ASM_NOP_MAX+2] =
+{
 	NULL,
 	k7nops,
 	k7nops + 1,
@@ -139,17 +168,25 @@ k7_nops[ASM_NOP_MAX+1] = {
 	k7nops + 1 + 2 + 3 + 4 + 5,
 	k7nops + 1 + 2 + 3 + 4 + 5 + 6,
 	k7nops + 1 + 2 + 3 + 4 + 5 + 6 + 7,
+	k7nops + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8,
 };
 #endif
 
 #ifdef P6_NOP1
-asm("\t" __stringify(__INITRODATA_OR_MODULE) "\np6nops: "
-	P6_NOP1 P6_NOP2 P6_NOP3 P6_NOP4 P6_NOP5 P6_NOP6
-	P6_NOP7 P6_NOP8
-    "\t.previous");
-extern const unsigned char p6nops[];
-static const unsigned char *const __initconst_or_module
-p6_nops[ASM_NOP_MAX+1] = {
+static const unsigned char  __initconst_or_module p6nops[] =
+{
+	P6_NOP1,
+	P6_NOP2,
+	P6_NOP3,
+	P6_NOP4,
+	P6_NOP5,
+	P6_NOP6,
+	P6_NOP7,
+	P6_NOP8,
+	P6_NOP5_ATOMIC
+};
+static const unsigned char * const p6_nops[ASM_NOP_MAX+2] =
+{
 	NULL,
 	p6nops,
 	p6nops + 1,
@@ -159,47 +196,53 @@ p6_nops[ASM_NOP_MAX+1] = {
 	p6nops + 1 + 2 + 3 + 4 + 5,
 	p6nops + 1 + 2 + 3 + 4 + 5 + 6,
 	p6nops + 1 + 2 + 3 + 4 + 5 + 6 + 7,
+	p6nops + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8,
 };
 #endif
 
+/* Initialize these to a safe default */
 #ifdef CONFIG_X86_64
+const unsigned char * const *ideal_nops = p6_nops;
+#else
+const unsigned char * const *ideal_nops = intel_nops;
+#endif
 
-extern char __vsyscall_0;
-static const unsigned char *const *__init_or_module find_nop_table(void)
+void __init arch_init_ideal_nops(void)
 {
-	if (boot_cpu_data.x86_vendor == X86_VENDOR_INTEL &&
-	    boot_cpu_has(X86_FEATURE_NOPL))
-		return p6_nops;
-	else
-		return k8_nops;
+	switch (boot_cpu_data.x86_vendor) {
+	case X86_VENDOR_INTEL:
+		if (boot_cpu_has(X86_FEATURE_NOPL)) {
+			   ideal_nops = p6_nops;
+		} else {
+#ifdef CONFIG_X86_64
+			ideal_nops = k8_nops;
+#else
+			ideal_nops = intel_nops;
+#endif
+		}
+
+	default:
+#ifdef CONFIG_X86_64
+		ideal_nops = k8_nops;
+#else
+		if (boot_cpu_has(X86_FEATURE_K8))
+			ideal_nops = k8_nops;
+		else if (boot_cpu_has(X86_FEATURE_K7))
+			ideal_nops = k7_nops;
+		else
+			ideal_nops = intel_nops;
+#endif
+	}
 }
-
-#else /* CONFIG_X86_64 */
-
-static const unsigned char *const *__init_or_module find_nop_table(void)
-{
-	if (boot_cpu_has(X86_FEATURE_K8))
-		return k8_nops;
-	else if (boot_cpu_has(X86_FEATURE_K7))
-		return k7_nops;
-	else if (boot_cpu_has(X86_FEATURE_NOPL))
-		return p6_nops;
-	else
-		return intel_nops;
-}
-
-#endif /* CONFIG_X86_64 */
 
 /* Use this to add nops to a buffer, then text_poke the whole buffer. */
 static void __init_or_module add_nops(void *insns, unsigned int len)
 {
-	const unsigned char *const *noptable = find_nop_table();
-
 	while (len > 0) {
 		unsigned int noplen = len;
 		if (noplen > ASM_NOP_MAX)
 			noplen = ASM_NOP_MAX;
-		memcpy(insns, noptable[noplen], noplen);
+		memcpy(insns, ideal_nops[noplen], noplen);
 		insns += noplen;
 		len -= noplen;
 	}
@@ -207,6 +250,7 @@ static void __init_or_module add_nops(void *insns, unsigned int len)
 
 extern struct alt_instr __alt_instructions[], __alt_instructions_end[];
 extern u8 *__smp_locks[], *__smp_locks_end[];
+extern char __vsyscall_0;
 static void *text_poke_early(void *addr, const void *opcode, size_t len);
 
 /* Replace instructions with better alternatives for this CPU type.

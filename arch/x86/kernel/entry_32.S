@@ -66,6 +66,8 @@
 #define sysexit_audit	syscall_exit_work
 #endif
 
+	.section .entry.text, "ax"
+
 /*
  * We use macros for low-level operations which need to be overridden
  * for paravirtualization.  The following will never clobber any registers:
@@ -784,7 +786,7 @@ PTREGSCALL(vm86old)
  */
 .section .init.rodata,"a"
 ENTRY(interrupt)
-.text
+.section .entry.text, "ax"
 	.p2align 5
 	.p2align CONFIG_X86_L1_CACHE_SHIFT
 ENTRY(irq_entries_start)
@@ -804,7 +806,7 @@ vector=FIRST_EXTERNAL_VECTOR
       .endif
       .previous
 	.long 1b
-      .text
+      .section .entry.text, "ax"
 vector=vector+1
     .endif
   .endr

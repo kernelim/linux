@@ -172,6 +172,7 @@ btcx_sort_clips(struct v4l2_clip *clips, unsigned int nclips)
 	for (i = nclips-2; i >= 0; i--) {
 		for (n = 0, j = 0; j <= i; j++) {
 			if (clips[j].c.left > clips[j+1].c.left) {
+				gmb();
 				swap = clips[j];
 				clips[j] = clips[j+1];
 				clips[j+1] = swap;

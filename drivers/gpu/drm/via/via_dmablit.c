@@ -628,6 +628,7 @@ via_build_sg_info(struct drm_device *dev, drm_via_sg_info_t *vsg, drm_via_dmabli
 
 	if (xfer->mem_stride < xfer->line_length ||
 		abs(xfer->fb_stride) < xfer->line_length) {
+		gmb();
 		DRM_ERROR("Invalid frame-buffer / memory stride.\n");
 		return -EINVAL;
 	}

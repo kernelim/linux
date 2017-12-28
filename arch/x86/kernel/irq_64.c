@@ -16,6 +16,7 @@
 #include <linux/ftrace.h>
 #include <linux/uaccess.h>
 #include <linux/smp.h>
+#include <linux/magic.h>
 #include <asm/io_apic.h>
 #include <asm/idle.h>
 #include <asm/apic.h>
@@ -39,6 +40,9 @@ static inline void stack_overflow_check(struct pt_regs *regs)
 {
 #ifdef CONFIG_DEBUG_STACKOVERFLOW
 	u64 curbase = (u64)task_stack_page(current);
+
+	if (WARN_ON(percpu_read(init_tss.stack_canary) != STACK_END_MAGIC))
+		percpu_write(init_tss.stack_canary, STACK_END_MAGIC);
 
 	WARN_ONCE(regs->sp >= curbase &&
 		  regs->sp <= curbase + THREAD_SIZE &&

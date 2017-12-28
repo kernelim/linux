@@ -309,6 +309,10 @@ struct zfcp_unit *zfcp_unit_enqueue(struct zfcp_port *port, u64 fcp_lun)
 	unit->port = port;
 	unit->fcp_lun = fcp_lun;
 
+	unit->erp_action.adapter = port->adapter;
+	unit->erp_action.port = port;
+	unit->erp_action.unit = unit;
+
 	if (dev_set_name(&unit->sysfs_device, "0x%016llx",
 			 (unsigned long long) fcp_lun)) {
 		kfree(unit);
@@ -528,6 +532,8 @@ int zfcp_adapter_enqueue(struct ccw_device *ccw_device)
 	adapter->ccw_device = ccw_device;
 	atomic_set(&adapter->refcount, 0);
 
+	adapter->erp_action.adapter = adapter;
+
 	if (zfcp_qdio_setup(adapter))
 		goto qdio_failed;
 
@@ -678,6 +684,9 @@ struct zfcp_port *zfcp_port_enqueue(struct zfcp_adapter *adapter, u64 wwpn,
 	port->d_id = d_id;
 	port->wwpn = wwpn;
 	port->rport_task = RPORT_NONE;
+
+	port->erp_action.adapter = adapter;
+	port->erp_action.port = port;
 
 	/* mark port unusable as long as sysfs registration is not complete */
 	atomic_set_mask(status | ZFCP_STATUS_COMMON_REMOVE, &port->status);

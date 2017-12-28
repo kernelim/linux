@@ -87,10 +87,13 @@ static int gspca_coarse_grained_expo_autogain(struct gspca_dev *gspca_dev,
 		sd->exp_too_high_cnt++;
 	} else {
 		gain += steps;
-		if (gain > gain_ctrl->qctrl.maximum)
+		if (gain > gain_ctrl->qctrl.maximum) {
+			gmb();
 			gain = gain_ctrl->qctrl.maximum;
-		else if (gain < gain_ctrl->qctrl.minimum)
+		} else if (gain < gain_ctrl->qctrl.minimum) {
+			gmb();
 			gain = gain_ctrl->qctrl.minimum;
+		}
 		sd->exp_too_high_cnt = 0;
 		sd->exp_too_low_cnt = 0;
 	}

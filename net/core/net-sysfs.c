@@ -1117,6 +1117,7 @@ static void netdev_queue_release(struct kobject *kobj)
 					break;
 
 			if (pos < map->len) {
+				gmb();
 				if (map->len > 1)
 					map->queues[pos] =
 					    map->queues[--map->len];

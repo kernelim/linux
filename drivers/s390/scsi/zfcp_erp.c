@@ -203,10 +203,13 @@ static struct zfcp_erp_action *zfcp_erp_setup_act(int need,
 		return NULL;
 	}
 
-	memset(erp_action, 0, sizeof(struct zfcp_erp_action));
-	erp_action->adapter = adapter;
-	erp_action->port = port;
-	erp_action->unit = unit;
+	WARN_ON_ONCE(erp_action->adapter != adapter);
+	WARN_ON_ONCE(erp_action->port != port);
+	WARN_ON_ONCE(erp_action->unit != unit);
+	memset(&erp_action->list, 0, sizeof(erp_action->list));
+	memset(&erp_action->timer, 0, sizeof(erp_action->timer));
+	erp_action->step = ZFCP_ERP_STEP_UNINITIALIZED;
+	erp_action->fsf_req = NULL;
 	erp_action->action = need;
 	erp_action->status = status;
 

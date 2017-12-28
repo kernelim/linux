@@ -592,6 +592,7 @@ static void pcpu_free_area(struct pcpu_chunk *chunk, int freeme)
 	}
 	/* merge with next? */
 	if (i + 1 < chunk->map_used && chunk->map[i + 1] >= 0) {
+		gmb();
 		chunk->map[i] += chunk->map[i + 1];
 		chunk->map_used--;
 		memmove(&chunk->map[i + 1], &chunk->map[i + 2],

@@ -589,6 +589,7 @@ int snd_interval_refine(struct snd_interval *i, const struct snd_interval *v)
 	if (snd_BUG_ON(snd_interval_empty(i)))
 		return -EINVAL;
 	if (i->min < v->min) {
+		gmb();
 		i->min = v->min;
 		i->openmin = v->openmin;
 		changed = 1;
@@ -597,6 +598,7 @@ int snd_interval_refine(struct snd_interval *i, const struct snd_interval *v)
 		changed = 1;
 	}
 	if (i->max > v->max) {
+		gmb();
 		i->max = v->max;
 		i->openmax = v->openmax;
 		changed = 1;
@@ -805,10 +807,12 @@ int snd_interval_ratnum(struct snd_interval *i,
 		den = div_up(num, q);
 		if (den < rats[k].den_min)
 			continue;
-		if (den > rats[k].den_max)
+		if (den > rats[k].den_max) {
+			gmb();
 			den = rats[k].den_max;
-		else {
+		} else {
 			unsigned int r;
+			gmb();
 			r = (den - rats[k].den_min) % rats[k].den_step;
 			if (r != 0)
 				den -= r;
@@ -846,10 +850,12 @@ int snd_interval_ratnum(struct snd_interval *i,
 		den = div_down(num, q);
 		if (den > rats[k].den_max)
 			continue;
-		if (den < rats[k].den_min)
+		if (den < rats[k].den_min) {
+			gmb();
 			den = rats[k].den_min;
-		else {
+		} else {
 			unsigned int r;
+			gmb();
 			r = (den - rats[k].den_min) % rats[k].den_step;
 			if (r != 0)
 				den += rats[k].den_step - r;
@@ -918,10 +924,12 @@ static int snd_interval_ratden(struct snd_interval *i,
 		num = mul(q, den);
 		if (num > rats[k].num_max)
 			continue;
-		if (num < rats[k].num_min)
+		if (num < rats[k].num_min) {
+			gmb();
 			num = rats[k].num_max;
-		else {
+		} else {
 			unsigned int r;
+			gmb();
 			r = (num - rats[k].num_min) % rats[k].num_step;
 			if (r != 0)
 				num += rats[k].num_step - r;
@@ -950,10 +958,12 @@ static int snd_interval_ratden(struct snd_interval *i,
 		num = mul(q, den);
 		if (num < rats[k].num_min)
 			continue;
-		if (num > rats[k].num_max)
+		if (num > rats[k].num_max) {
+			gmb();
 			num = rats[k].num_max;
-		else {
+		} else {
 			unsigned int r;
+			gmb();
 			r = (num - rats[k].num_min) % rats[k].num_step;
 			if (r != 0)
 				num -= r;

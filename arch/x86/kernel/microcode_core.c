@@ -84,6 +84,7 @@
 #include <asm/microcode.h>
 #include <asm/processor.h>
 #include <asm/perf_event.h>
+#include <asm/spec_ctrl.h>
 
 MODULE_DESCRIPTION("Microcode Update Driver");
 MODULE_AUTHOR("Tigran Aivazian <tigran@aivazian.fsnet.co.uk>");
@@ -219,8 +220,10 @@ static ssize_t microcode_write(struct file *file, const char __user *buf,
 	get_online_cpus();
 	mutex_lock(&microcode_mutex);
 
-	if (do_microcode_update(buf, len) == 0)
+	if (do_microcode_update(buf, len) == 0) {
 		ret = (ssize_t)len;
+		spec_ctrl_rescan_cpuid();
+	}
 
 	mutex_unlock(&microcode_mutex);
 	put_online_cpus();
@@ -305,8 +308,10 @@ static ssize_t reload_store(struct sys_device *dev,
 		mutex_lock(&microcode_mutex);
 		if (cpu_online(cpu))
 			ret = reload_for_cpu(cpu);
-		if (!ret)
+		if (!ret) {
 			perf_check_microcode();
+			spec_ctrl_rescan_cpuid();
+		}
 		mutex_unlock(&microcode_mutex);
 		put_online_cpus();
 	}
@@ -521,8 +526,10 @@ static int __init microcode_init(void)
 	mutex_lock(&microcode_mutex);
 
 	error = sysdev_driver_register(&cpu_sysdev_class, &mc_sysdev_driver);
-	if (!error)
+	if (!error) {
 		perf_check_microcode();
+		spec_ctrl_rescan_cpuid();
+	}
 	mutex_unlock(&microcode_mutex);
 	put_online_cpus();
 

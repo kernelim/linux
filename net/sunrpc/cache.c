@@ -433,6 +433,7 @@ static int cache_clean(void)
 		struct cache_head *ch, **cp;
 		struct cache_detail *d;
 
+		gmb();
 		write_lock(&current_detail->hash_lock);
 
 		/* Ok, now to clean this strand */

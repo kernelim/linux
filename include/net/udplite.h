@@ -79,6 +79,7 @@ static inline __wsum udplite_csum_outgoing(struct sock *sk, struct sk_buff *skb)
 		 * The special case "up->pcslen == 0" signifies full coverage.
 		 */
 		if (up->pcslen < up->len) {
+			gmb();
 			if (0 < up->pcslen)
 				cscov = up->pcslen;
 			udp_hdr(skb)->len = htons(up->pcslen);

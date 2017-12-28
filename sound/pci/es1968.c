@@ -1867,6 +1867,7 @@ static void snd_es1968_update_pcm(struct es1968 *chip, struct esschan *es)
 	es->count += diff;
 
 	if (es->count > es->frag_size) {
+		gmb();
 		spin_unlock(&chip->substream_lock);
 		snd_pcm_period_elapsed(subs);
 		spin_lock(&chip->substream_lock);
