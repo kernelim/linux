@@ -223,6 +223,8 @@ void spec_ctrl_init(struct cpuinfo_x86 *c)
 
 void spec_ctrl_rescan_cpuid(void)
 {
+	int cpu;
+
 	if (use_ibp_disable)
 		return;
 	mutex_lock(&spec_ctrl_mutex);
@@ -231,6 +233,22 @@ void spec_ctrl_rescan_cpuid(void)
 		/* detect spec ctrl related cpuid additions */
 		init_scattered_cpuid_features(&boot_cpu_data);
 		spec_ctrl_init(&boot_cpu_data);
+
+		/*
+		 * The SPEC_CTRL and IBPB_SUPPORT cpuid bits may have
+		 * just been set in the boot_cpu_data, transfer them
+		 * to the per-cpu data too. This must run after
+		 * spec_ctrl_init() to take care of
+		 * setup_force_cpu_cap() too.
+		 */
+		if (cpu_has_spec_ctrl())
+			for_each_online_cpu(cpu)
+				set_cpu_cap(&cpu_data(cpu),
+					    X86_FEATURE_SPEC_CTRL);
+		if (boot_cpu_has(X86_FEATURE_IBPB_SUPPORT))
+			for_each_online_cpu(cpu)
+				set_cpu_cap(&cpu_data(cpu),
+					    X86_FEATURE_IBPB_SUPPORT);
 	}
 	mutex_unlock(&spec_ctrl_mutex);
 }

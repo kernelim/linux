@@ -313,8 +313,10 @@ struct tss_struct {
 	 */
 #ifndef __GENKSYMS__
 	unsigned long		stack_canary;
-#endif
+	unsigned long		stack[256];
+#else
 	unsigned long		stack[64];
+#endif
 
 	/*
 	 *
