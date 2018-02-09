@@ -80,7 +80,7 @@ PHDRS {
 	note PT_NOTE FLAGS(0);          /* ___ */
 }
 
-#ifdef CONFIG_KAISER
+#ifdef CONFIG_PAGE_TABLE_ISOLATION
 #define ALIGN_KAISER()	. = ALIGN(PAGE_SIZE);
 #else
 #define ALIGN_KAISER()

@@ -162,4 +162,7 @@ config DMA_SHARED_BUFFER
 	  APIs extension; the file's descriptor can then be passed on to other
 	  driver.
 
+config GENERIC_CPU_VULNERABILITIES
+	bool
+
 endmenu

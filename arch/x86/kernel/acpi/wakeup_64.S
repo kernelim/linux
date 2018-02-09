@@ -5,6 +5,7 @@
 #include <asm/page_types.h>
 #include <asm/msr.h>
 #include <asm/asm-offsets.h>
+#include <asm/nospec-branch.h>
 
 # Copyright 2003 Pavel Machek <pavel@suse.cz>, distribute under GPLv2
 
@@ -32,7 +33,7 @@ ENTRY(wakeup_long64)
 	movq	saved_rbp, %rbp
 
 	movq	saved_rip, %rax
-	jmp	*%rax
+	JMP_NOSPEC %rax
 ENDPROC(wakeup_long64)
 
 bogus_64_magic:

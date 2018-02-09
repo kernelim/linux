@@ -397,12 +397,12 @@ void mwait_idle_with_hints(unsigned long ax, unsigned long cx)
 		 * save_paranoid model which always enables ibrs on
 		 * exception entry before any indirect jump can run.
 		 */
-		spec_ctrl_disable_ibrs();
+		spec_ctrl_ibrs_off();
 		__monitor((void *)&current_thread_info()->flags, 0, 0);
 		smp_mb();
 		if (!need_resched())
 			__mwait(ax, cx);
-		spec_ctrl_enable_ibrs();
+		spec_ctrl_ibrs_on();
 	}
 }
 

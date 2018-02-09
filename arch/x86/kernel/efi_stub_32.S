@@ -7,6 +7,7 @@
 
 #include <linux/linkage.h>
 #include <asm/page_types.h>
+#include <asm/nospec-branch.h>
 
 /*
  * efi_call_phys(void *, ...) is a function with variable parameters.
@@ -38,7 +39,7 @@ ENTRY(efi_call_phys)
 	 */
 	movl	$1f, %edx
 	subl	$__PAGE_OFFSET, %edx
-	jmp	*%edx
+	JMP_NOSPEC %edx
 1:
 
 	/*
@@ -73,7 +74,7 @@ ENTRY(efi_call_phys)
 	/*
 	 * 5. Call the physical function.
 	 */
-	jmp	*%ecx
+	JMP_NOSPEC %ecx
 
 2:
 	/*
@@ -95,7 +96,7 @@ ENTRY(efi_call_phys)
 	 * adding EIP with PAGE_OFFSET.
 	 */
 	movl	$1f, %edx
-	jmp	*%edx
+	JMP_NOSPEC %edx
 1:
 
 	/*

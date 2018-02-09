@@ -798,4 +798,10 @@ static void __exit __driver##_exit(void) \
 } \
 module_exit(__driver##_exit);
 
+extern ssize_t cpu_show_meltdown(struct device *dev,
+				 struct device_attribute *attr, char *buf);
+extern ssize_t cpu_show_spectre_v1(struct device *dev,
+				   struct device_attribute *attr, char *buf);
+extern ssize_t cpu_show_spectre_v2(struct device *dev,
+				   struct device_attribute *attr, char *buf);
 #endif /* _DEVICE_H_ */

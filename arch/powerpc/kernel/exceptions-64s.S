@@ -167,14 +167,14 @@ END_FTR_SECTION_IFSET(CPU_FTR_REAL_LE)
 	mtspr	SPRN_SRR0,r12
 	mfspr	r12,SPRN_SRR1
 	mtspr	SPRN_SRR1,r10
-	rfid
+	RFI_TO_KERNEL
 	b	.	/* prevent speculative execution */
 
 /* Fast LE/BE switch system call */
 1:	mfspr	r12,SPRN_SRR1
 	xori	r12,r12,MSR_LE
 	mtspr	SPRN_SRR1,r12
-	rfid		/* return to userspace */
+	RFI_TO_USER		/* return to userspace */
 	b	.
 
 	STD_EXCEPTION_PSERIES(0xd00, single_step)
@@ -229,8 +229,46 @@ masked_interrupt:
 	mtspr	SPRN_SRR1,r10
 	ld	r10,PACA_EXGEN+EX_R10(r13)
 	mfspr	r13,SPRN_SPRG_SCRATCH0
-	rfid
+	RFI_TO_KERNEL
 	b	.
+
+	.globl rfi_flush_fallback
+rfi_flush_fallback:
+	mtspr	SPRN_SPRG_SCRATCH0,r13
+	mfspr	r13, SPRN_SPRG_PACA
+	ld	r13,PACA_AUX_PTR(r13) /* r13 now = paca_aux pointer */
+	std	r9,PACA_EXRFI+EX_R9(r13)
+	std	r10,PACA_EXRFI+EX_R10(r13)
+	std	r11,PACA_EXRFI+EX_R11(r13)
+	std	r12,PACA_EXRFI+EX_R12(r13)
+	std	r8,PACA_EXRFI+EX_R13(r13)
+	mfctr	r9
+	ld	r10,PACA_RFI_FLUSH_FALLBACK_AREA(r13)
+	ld	r11,PACA_L1D_FLUSH_SETS(r13)
+	ld	r12,PACA_L1D_FLUSH_CONGRUENCE(r13)
+	addi	r12,r12,8
+	mtctr	r11
+	DCBT_STOP_ALL_STREAM_IDS(r11) /* Stop prefetch streams */
+
+	/* order ld/st prior to dcbt stop all streams with flushing */
+	sync
+1:	li	r8,0
+	.rept	8 /* 8-way set associative */
+	ldx	r11,r10,r8
+	add	r8,r8,r12
+	xor	r11,r11,r11	/* Ensure r11 is 0 even if fallback area is not */
+	add	r8,r8,r11	/* Add 0, this creates a dependency on the ldx */
+	.endr
+	addi	r10,r10,128 /* 128 byte cache line */
+	bdnz	1b
+	mtctr	r9
+	ld	r9,PACA_EXRFI+EX_R9(r13)
+	ld	r10,PACA_EXRFI+EX_R10(r13)
+	ld	r11,PACA_EXRFI+EX_R11(r13)
+	ld	r12,PACA_EXRFI+EX_R12(r13)
+	ld	r8,PACA_EXRFI+EX_R13(r13)
+	mfspr	r13,SPRN_SPRG_SCRATCH0
+	rfid
 
 	.align	7
 do_stab_bolted_pSeries:
@@ -284,6 +322,7 @@ slb_miss_user_pseries:
 	mtspr	SRR0,r12
 	mfspr	r12,SRR1			/* and SRR1 */
 	mtspr	SRR1,r10
+	/* Ignoring this rfid for rfi-flush */
 	rfid
 	b	.				/* prevent spec. execution */
 #endif /* __DISABLED__ */
@@ -452,6 +491,7 @@ slb_miss_user_common:
 	ld	r11,PACA_EXGEN+EX_R11(r13)
 	ld	r12,PACA_EXGEN+EX_R12(r13)
 	ld	r13,PACA_EXGEN+EX_R13(r13)
+	/* Ignoring this rfid for rfi-flush */
 	rfid
 	b	.
 
@@ -507,12 +547,18 @@ END_FW_FTR_SECTION_IFSET(FW_FEATURE_ISERIES)
 
 	mtlr	r10
 
+	andi.	r10,r12,MSR_PR	/* check for exception from user space */
+	cmpdi	cr4,r10,MSR_PR
+
 	andi.	r10,r12,MSR_RI	/* check for unrecoverable exception */
 	beq-	2f
+
+	bne	cr4,1f
 
 .machine	push
 .machine	"power4"
 	mtcrf	0x80,r9
+	mtcrf	0x08,r9
 	mtcrf	0x01,r9		/* slb_allocate uses cr0 and cr7 */
 .machine	pop
 
@@ -527,7 +573,29 @@ END_FW_FTR_SECTION_IFSET(FW_FEATURE_ISERIES)
 	ld	r11,PACA_EXSLB+EX_R11(r13)
 	ld	r12,PACA_EXSLB+EX_R12(r13)
 	ld	r13,PACA_EXSLB+EX_R13(r13)
-	rfid
+	RFI_TO_USER
+	b	.	/* prevent speculative execution */
+
+1:
+.machine	push
+.machine	"power4"
+	mtcrf	0x80,r9
+	mtcrf	0x08,r9
+	mtcrf	0x01,r9		/* slb_allocate uses cr0 and cr7 */
+.machine	pop
+
+#ifdef CONFIG_PPC_ISERIES
+BEGIN_FW_FTR_SECTION
+	mtspr	SPRN_SRR0,r11
+	mtspr	SPRN_SRR1,r12
+END_FW_FTR_SECTION_IFSET(FW_FEATURE_ISERIES)
+#endif /* CONFIG_PPC_ISERIES */
+	ld	r9,PACA_EXSLB+EX_R9(r13)
+	ld	r10,PACA_EXSLB+EX_R10(r13)
+	ld	r11,PACA_EXSLB+EX_R11(r13)
+	ld	r12,PACA_EXSLB+EX_R12(r13)
+	ld	r13,PACA_EXSLB+EX_R13(r13)
+	RFI_TO_KERNEL
 	b	.	/* prevent speculative execution */
 
 2:
@@ -542,7 +610,7 @@ END_FW_FTR_SECTION_IFSET(FW_FEATURE_ISERIES)
 	mtspr	SPRN_SRR0,r10
 	ld	r10,PACAKMSR(r13)
 	mtspr	SPRN_SRR1,r10
-	rfid
+	RFI_TO_KERNEL
 	b	.
 
 unrecov_slb:
@@ -706,7 +774,7 @@ fast_exception_return:
 	mtspr	SPRN_SRR0,r11
 	REST_4GPRS(10, r1)
 	ld	r1,GPR1(r1)
-	rfid
+	RFI_TO_USER_OR_KERNEL
 	b	.	/* prevent speculative execution */
 
 unrecov_fer:
@@ -944,7 +1012,22 @@ _GLOBAL(do_stab_bolted)
 	ld	r11,PACA_EXSLB+EX_R11(r13)
 	ld	r12,PACA_EXSLB+EX_R12(r13)
 	ld	r13,PACA_EXSLB+EX_R13(r13)
-	rfid
+	RFI_TO_USER
+	b	.	/* prevent speculative execution */
+
+1:
+.machine	push
+.machine	"power4"
+	mtcrf	0x80,r9
+	mtcrf	0x01,r9		/* slb_allocate uses cr0 and cr7 */
+.machine	pop
+
+	ld	r9,PACA_EXSLB+EX_R9(r13)
+	ld	r10,PACA_EXSLB+EX_R10(r13)
+	ld	r11,PACA_EXSLB+EX_R11(r13)
+	ld	r12,PACA_EXSLB+EX_R12(r13)
+	ld	r13,PACA_EXSLB+EX_R13(r13)
+	RFI_TO_KERNEL
 	b	.	/* prevent speculative execution */
 
 /*

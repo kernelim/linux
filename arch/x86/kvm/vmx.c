@@ -39,6 +39,7 @@
 #include <asm/xcr.h>
 #include <asm/perf_event.h>
 #include <asm/kexec.h>
+#include <asm/nospec-branch.h>
 
 #include "trace.h"
 
@@ -4306,9 +4307,9 @@ static void vmx_vcpu_run(struct kvm_vcpu *vcpu)
 	if (vcpu->arch.switch_db_regs)
 		set_debugreg(vcpu->arch.dr6, 6);
 
-	spec_ctrl_vmenter_ibrs(vmx->spec_ctrl);
-
 	atomic_switch_perf_msrs(vmx);
+
+	spec_ctrl_vmenter_ibrs(vmx->spec_ctrl);
 
 	asm(
 		/* Store host registers */
@@ -4427,7 +4428,9 @@ static void vmx_vcpu_run(struct kvm_vcpu *vcpu)
 		rdmsrl(MSR_IA32_SPEC_CTRL, vmx->spec_ctrl);
 		__spec_ctrl_vmexit_ibrs(vmx->spec_ctrl);
 	}
-	stuff_RSB();
+
+	/* Eliminate branch target predictions from guest mode */
+	fill_RSB();
 
 	vcpu->arch.regs_avail = ~((1 << VCPU_REGS_RIP) | (1 << VCPU_REGS_RSP)
 				  | (1 << VCPU_EXREG_PDPTR));

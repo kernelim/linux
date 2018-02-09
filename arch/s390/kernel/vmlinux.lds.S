@@ -66,6 +66,32 @@ SECTIONS
 	INIT_TEXT_SECTION(PAGE_SIZE)
 
 	/*
+	 * struct alt_inst entries. From the header (alternative.h):
+	 * "Alternative instructions for different CPU types or capabilities"
+	 * Think locking instructions on spinlocks.
+	 * Note, that it is a part of __init region.
+	 */
+	. = ALIGN(8);
+	.altinstructions : {
+		__alt_instructions = .;
+		*(.altinstructions)
+		__alt_instructions_end = .;
+		__alt_nobp = .;
+		*(.altnobp)
+		__alt_nobp_end = . ;
+	}
+
+	/*
+	 * And here are the replacement instructions. The linker sticks
+	 * them as binary blobs. The .altinstructions has enough data to
+	 * get the address and the length of them to patch the kernel safely.
+	 * Note, that it is a part of __init region.
+	 */
+	.altinstr_replacement : {
+		*(.altinstr_replacement)
+	}
+
+	/*
 	 * .exit.text is discarded at runtime, not link time,
 	 * to deal with references from __bug_table
 	*/

@@ -51,19 +51,20 @@
 static pteval_t kaiser_pte_mask __read_mostly = ~(_PAGE_NX | _PAGE_GLOBAL);
 
 /*
- * We need a two-stage enable/disable.  One (kaiser_enabled) to stop
- * the ongoing work that keeps KAISER from being disabled (like PGD
- * poisoning) and another (kaiser_asm_do_switch) that we set when it
- * is completely safe to run without doing KAISER switches.
+ * We need a two-stage enable/disable for X86_FEATURE_PTI.
+ * One (X86_FEATURE_PTI) to stop the ongoing work that keeps PTI from
+ * being disabled (like PGD poisoning) and another (percpu flag) that we set
+ * when it is completely safe to run without doing KAISER switches.
  */
-int kaiser_enabled __read_mostly;
 
 /*
- * The flag that captures the command line "nopti" option.
- *  0 - auto
- * -1 - disabled
+ * The flag that captures the command line "nopti" and "pti" options.
  */
-static int kpti_force_enabled __read_mostly;
+static enum {
+	PTI_AUTO = 0,
+	PTI_ENABLED,
+	PTI_DISABLED
+} pti_option __read_mostly;
 
 /*
  * At runtime, the only things we map are some things for CPU
@@ -377,12 +378,65 @@ void kaiser_add_mapping_cpu_entry(int cpu)
 				  __PAGE_KERNEL | _PAGE_GLOBAL);
 }
 
-static int __init force_nokpti(char *arg)
+static int __init force_nopti(char *arg)
 {
-	kpti_force_enabled = -1;
+	pti_option = PTI_DISABLED;
 	return 0;
 }
-early_param("nopti", force_nokpti);
+early_param("nopti", force_nopti);
+
+static int __init set_pti(char *arg)
+{
+	if (!arg)
+		return 0;
+	if (!strcmp(arg, "off"))
+		pti_option = PTI_DISABLED;
+	else if (!strcmp(arg, "on"))
+		pti_option = PTI_ENABLED;
+	else if (!strcmp(arg, "auto"))
+		pti_option = PTI_AUTO;
+	return 0;
+}
+early_param("pti", set_pti);
+
+#undef pr_fmt
+#define pr_fmt(fmt)	"Kernel/User page tables isolation: " fmt
+
+static void __init pti_print_if_insecure(const char *reason)
+{
+	if (boot_cpu_has_bug(X86_BUG_CPU_MELTDOWN))
+		pr_info("%s\n", reason);
+}
+
+static void __init pti_print_if_secure(const char *reason)
+{
+	if (!boot_cpu_has_bug(X86_BUG_CPU_MELTDOWN))
+		pr_info("%s\n", reason);
+}
+
+void __init pti_check_boottime_disable(void)
+{
+	if (xen_pv_domain()) {
+		pti_print_if_insecure("disabled on XEN PV.");
+		return;
+	}
+
+	if (pti_option == PTI_DISABLED) {
+		pti_print_if_insecure("disabled on command line.");
+		return;
+	} else if (pti_option == PTI_ENABLED) {
+		pti_print_if_secure("force enabled on command line.");
+		goto enable;
+	} else /* pti_option == PTI_AUTO */ {
+		if (!boot_cpu_has_bug(X86_BUG_CPU_MELTDOWN))
+			return;
+		pr_info("enabled\n");
+	}
+enable:
+	setup_force_cpu_cap(X86_FEATURE_PTI);
+	kaiser_enable_pcp(true);
+}
+
 
 /*
  * If anything in here fails, we will likely die on one of the
@@ -438,15 +492,7 @@ void __init kaiser_init(void)
 	kaiser_add_user_map_early((void *)VSYSCALL_START, PAGE_SIZE,
 				  __PAGE_KERNEL_VSYSCALL | _PAGE_GLOBAL);
 
-	if (xen_pv_domain()) {
-		pr_info("x86/pti: Xen PV detected, disabling PTI protection\n");
-	} else if ((kpti_force_enabled > 0) ||
-		   (boot_cpu_data.x86_vendor == X86_VENDOR_INTEL &&
-		   !kpti_force_enabled)) {
-		pr_info("x86/pti: Kernel page table isolation enabled\n");
-		kaiser_enable_pcp(true);
-		kaiser_enabled = 1;
-	}
+	pti_check_boottime_disable();
 }
 
 int kaiser_add_mapping(unsigned long addr, unsigned long size,
@@ -503,7 +549,7 @@ static ssize_t kaiser_enabled_read_file(struct file *file, char __user *user_buf
 	char buf[32];
 	unsigned int len;
 
-	len = sprintf(buf, "%d\n", kaiser_enabled);
+	len = sprintf(buf, "%d\n", !!boot_cpu_has(X86_FEATURE_PTI));
 	return simple_read_from_buffer(user_buf, count, ppos, buf, len);
 }
 
@@ -548,6 +594,7 @@ static ssize_t kaiser_enabled_write_file(struct file *file,
 		 const char __user *user_buf, size_t count, loff_t *ppos)
 {
 	char buf[32];
+	int cpu;
 	ssize_t len;
 	unsigned int enable;
 	ssize_t err;
@@ -565,7 +612,7 @@ static ssize_t kaiser_enabled_write_file(struct file *file,
 		return -EINVAL;
 
 	mutex_lock(&enable_mutex);
-	if (kaiser_enabled == enable)
+	if (!!boot_cpu_has(X86_FEATURE_PTI) == enable)
 		goto out_unlock;
 
 	first_stop_machine = FIRST_STOP_MACHINE_INIT;
@@ -575,8 +622,15 @@ static ssize_t kaiser_enabled_write_file(struct file *file,
 	if (err) {
 		VM_WARN_ON(1);
 		count = err;
-	} else
-		kaiser_enabled = enable;
+	} else if (enable) {
+		set_cpu_cap(&boot_cpu_data, X86_FEATURE_PTI);
+		for_each_possible_cpu(cpu)
+			set_cpu_cap(&cpu_data(cpu), X86_FEATURE_PTI);
+	} else {
+		clear_cpu_cap(&boot_cpu_data, X86_FEATURE_PTI);
+		for_each_possible_cpu(cpu)
+			clear_cpu_cap(&cpu_data(cpu), X86_FEATURE_PTI);
+	}
 
 out_unlock:
 	mutex_unlock(&enable_mutex);

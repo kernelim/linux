@@ -561,6 +561,7 @@ out:
 
 static void ipl_run(struct shutdown_trigger *trigger)
 {
+	__bpon();
 	diag308(DIAG308_IPL, NULL);
 	if (MACHINE_IS_VM)
 		__cpcmd("IPL", NULL, 0, NULL);

@@ -77,6 +77,9 @@ void init_scattered_cpuid_features(struct cpuinfo_x86 *c)
 		if (cpuid_ecx(6) & 0x1)
 			set_cpu_cap(c, X86_FEATURE_APERFMPERF);
 	}
+
+	if (cpu_has(c, X86_FEATURE_SPEC_CTRL))
+		set_cpu_cap(c, X86_FEATURE_IBPB_SUPPORT);
 }
 
 u32 get_scattered_cpuid_leaf(unsigned int level, unsigned int sub_leaf,

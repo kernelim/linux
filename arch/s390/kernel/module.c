@@ -32,6 +32,7 @@
 #include <linux/kernel.h>
 #include <linux/moduleloader.h>
 #include <linux/bug.h>
+#include <asm/alternative.h>
 
 #if 0
 #define DEBUGP printk
@@ -407,6 +408,18 @@ int module_finalize(const Elf_Ehdr *hdr,
 		    const Elf_Shdr *sechdrs,
 		    struct module *me)
 {
+	const Elf_Shdr *s;
+	char *secstrings = (void *)hdr + sechdrs[hdr->e_shstrndx].sh_offset;
+
+	for (s = sechdrs; s < sechdrs + hdr->e_shnum; s++) {
+		if (!strcmp(".altinstructions", secstrings + s->sh_name)) {
+			/* patch .altinstructions */
+			void *aseg = (void *)s->sh_addr;
+
+			apply_alternatives(aseg, aseg + s->sh_size);
+		}
+	}
+
 	vfree(me->arch.syminfo);
 	me->arch.syminfo = NULL;
 	return module_bug_finalize(hdr, sechdrs, me);

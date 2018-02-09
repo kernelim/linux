@@ -7,6 +7,7 @@
  */
 
 #include <linux/linkage.h>
+#include <asm/nospec-branch.h>
 
 #define SAVE_XMM			\
 	mov %rsp, %rax;			\
@@ -37,7 +38,7 @@
 ENTRY(efi_call0)
 	SAVE_XMM
 	subq $32, %rsp
-	call *%rdi
+	CALL_NOSPEC %rdi
 	addq $32, %rsp
 	RESTORE_XMM
 	ret
@@ -47,7 +48,7 @@ ENTRY(efi_call1)
 	SAVE_XMM
 	subq $32, %rsp
 	mov  %rsi, %rcx
-	call *%rdi
+	CALL_NOSPEC %rdi
 	addq $32, %rsp
 	RESTORE_XMM
 	ret
@@ -57,7 +58,7 @@ ENTRY(efi_call2)
 	SAVE_XMM
 	subq $32, %rsp
 	mov  %rsi, %rcx
-	call *%rdi
+	CALL_NOSPEC %rdi
 	addq $32, %rsp
 	RESTORE_XMM
 	ret
@@ -68,7 +69,7 @@ ENTRY(efi_call3)
 	subq $32, %rsp
 	mov  %rcx, %r8
 	mov  %rsi, %rcx
-	call *%rdi
+	CALL_NOSPEC %rdi
 	addq $32, %rsp
 	RESTORE_XMM
 	ret
@@ -80,7 +81,7 @@ ENTRY(efi_call4)
 	mov %r8, %r9
 	mov %rcx, %r8
 	mov %rsi, %rcx
-	call *%rdi
+	CALL_NOSPEC %rdi
 	addq $32, %rsp
 	RESTORE_XMM
 	ret
@@ -93,7 +94,7 @@ ENTRY(efi_call5)
 	mov %r8, %r9
 	mov %rcx, %r8
 	mov %rsi, %rcx
-	call *%rdi
+	CALL_NOSPEC %rdi
 	addq $48, %rsp
 	RESTORE_XMM
 	ret
@@ -109,7 +110,7 @@ ENTRY(efi_call6)
 	mov %r8, %r9
 	mov %rcx, %r8
 	mov %rsi, %rcx
-	call *%rdi
+	CALL_NOSPEC %rdi
 	addq $48, %rsp
 	RESTORE_XMM
 	ret

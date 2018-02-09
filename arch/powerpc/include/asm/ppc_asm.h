@@ -11,9 +11,7 @@
 #include <asm/ppc-opcode.h>
 #include <asm/firmware.h>
 
-#ifndef __ASSEMBLY__
-#error __FILE__ should only be used in assembler files
-#else
+#ifdef __ASSEMBLY__
 
 #define SZL			(BITS_PER_LONG/8)
 
@@ -23,6 +21,17 @@
  * in exception entry and exit and accumulate time to the
  * user_time and system_time fields in the paca.
  */
+
+/* The following stops all load and store data streams associated with stream
+ * ID (ie. streams created explicitly).  The embedded and server mnemonics for
+ * dcbt are different so we use machine "power4" here explicitly.
+ */
+#define DCBT_STOP_ALL_STREAM_IDS(scratch)	\
+.machine push ;					\
+.machine "power4" ;				\
+	lis     scratch,0x60000000@h;		\
+	dcbt    0,scratch,0b01010;		\
+.machine pop
 
 #ifndef CONFIG_VIRT_CPU_ACCOUNTING
 #define ACCOUNT_CPU_USER_ENTRY(ra, rb)

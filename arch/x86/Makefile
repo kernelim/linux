@@ -116,6 +116,23 @@ KBUILD_CFLAGS += $(call cc-option,-mno-sse -mno-mmx -mno-sse2 -mno-3dnow,)
 KBUILD_CFLAGS += $(mflags-y)
 KBUILD_AFLAGS += $(mflags-y)
 
+# Avoid indirect branches in kernel to deal with Spectre
+ifdef CONFIG_RETPOLINE
+    RETPOLINE_CFLAGS += $(call cc-option,-mindirect-branch=thunk-extern -mindirect-branch-register)
+    ifneq ($(RETPOLINE_CFLAGS),)
+        KBUILD_CFLAGS += $(RETPOLINE_CFLAGS) -DRETPOLINE
+    else
+        # Fail brew build, but let other users proceed with warning
+        RETPOLINE_MSG := CONFIG_RETPOLINE=y, but not supported by the compiler. Toolchain update recommended.
+        KBUILD_USER := $(shell id -un)
+        ifeq ($(KBUILD_USER), mockbuild)
+            $(error $(RETPOLINE_MSG))
+        else
+            $(warning $(RETPOLINE_MSG))
+        endif
+    endif
+endif
+
 ###
 # Kernel objects
 

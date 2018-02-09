@@ -2346,6 +2346,15 @@ static noinline struct module *load_module(void __user *umod,
 	if (err)
 		goto free_unload;
 
+#ifdef CONFIG_RETPOLINE
+{
+	extern void spectre_v2_report_unsafe_module(struct module *mod);
+
+	if (!get_modinfo(sechdrs, infoindex, "retpoline"))
+		spectre_v2_report_unsafe_module(mod);
+}
+#endif
+
 	/* Set up license info based on the info section */
 	set_license(mod, get_modinfo(sechdrs, infoindex, "license"));
 

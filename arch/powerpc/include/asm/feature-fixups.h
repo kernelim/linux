@@ -141,7 +141,19 @@ label##5:					       	\
 #define ALT_FW_FTR_SECTION_END_IFCLR(msk)	\
 	ALT_FW_FTR_SECTION_END_NESTED_IFCLR(msk, 97)
 
+#define RFI_FLUSH_FIXUP_SECTION				\
+951:							\
+	.pushsection __rfi_flush_fixup,"a";		\
+	.align 2;					\
+952:							\
+	FTR_ENTRY_OFFSET 951b-952b;			\
+	.popsection;
+
+
 #ifndef __ASSEMBLY__
+#include <linux/types.h>
+
+extern long __start___rfi_flush_fixup, __stop___rfi_flush_fixup;
 
 #define ASM_MMU_FTR_IF(section_if, section_else, msk, val)	\
 	stringify_in_c(BEGIN_MMU_FTR_SECTION)			\

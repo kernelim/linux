@@ -31,6 +31,7 @@
 
 #include <linux/linkage.h>
 #include <asm/inst.h>
+#include <asm/nospec-branch.h>
 
 /*
  * The following macros are used to move an (un)aligned 16 byte value to/from
@@ -2710,7 +2711,7 @@ ENTRY(aesni_xts_crypt8)
 	pxor 0x30(INP), STATE4
 	movdqu IV, 0x30(OUTP)
 
-	call *%r11
+	CALL_NOSPEC %r11
 
 	pxor 0x00(OUTP), STATE1
 	movdqu STATE1, 0x00(OUTP)
@@ -2747,7 +2748,7 @@ ENTRY(aesni_xts_crypt8)
 	_aesni_gf128mul_x_ble()
 	movups IV, (IVP)
 
-	call *%r11
+	CALL_NOSPEC %r11
 
 	pxor 0x40(OUTP), STATE1
 	movdqu STATE1, 0x40(OUTP)

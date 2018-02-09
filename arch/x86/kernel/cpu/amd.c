@@ -666,6 +666,9 @@ static void __cpuinit init_amd(struct cpuinfo_x86 *c)
 		mask |= (1 << 10);
 		wrmsrl(MSR_AMD64_MCx_MASK(4), mask);
 	}
+
+	if (c->x86 == 0x10 || c->x86 == 0x12)
+		set_cpu_cap(c, X86_FEATURE_IBP_DISABLE);
 }
 
 #ifdef CONFIG_X86_32

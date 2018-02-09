@@ -16,9 +16,9 @@ obj-y			+= proc.o capflags.o powerflags.o common.o
 obj-y			+= vmware.o hypervisor.o sched.o mshyperv.o
 obj-y			+= rdrand.o
 obj-y			+= match.o
+obj-y			+= bugs.o
 
-obj-$(CONFIG_X86_32)	+= bugs.o cmpxchg.o
-obj-$(CONFIG_X86_64)	+= bugs_64.o
+obj-$(CONFIG_X86_32)	+= cmpxchg.o
 
 obj-$(CONFIG_X86_CPU_DEBUG)		+= cpu_debug.o
 

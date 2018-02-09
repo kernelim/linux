@@ -359,7 +359,7 @@ static __always_inline int constant_test_bit(unsigned int nr, const volatile uns
 		(((unsigned long *)addr)[nr / BITS_PER_LONG])) != 0;
 }
 
-static inline int variable_test_bit(int nr, volatile const unsigned long *addr)
+static __always_inline int variable_test_bit(int nr, volatile const unsigned long *addr)
 {
 	int oldbit;
 

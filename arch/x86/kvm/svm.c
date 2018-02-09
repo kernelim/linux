@@ -30,6 +30,7 @@
 #include <asm/perf_event.h>
 #include <asm/tlbflush.h>
 #include <asm/desc.h>
+#include <asm/nospec-branch.h>
 
 #include <asm/virtext.h>
 #include "trace.h"
@@ -3305,7 +3306,9 @@ static void svm_vcpu_run(struct kvm_vcpu *vcpu)
 		rdmsrl(MSR_IA32_SPEC_CTRL, svm->spec_ctrl);
 		__spec_ctrl_vmexit_ibrs(svm->spec_ctrl);
 	}
-	stuff_RSB();
+
+	/* Eliminate branch target predictions from guest mode */
+	fill_RSB();
 
 	reload_tss(vcpu);
 

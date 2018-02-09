@@ -5,6 +5,7 @@
 #define _ASM_X86_CPUFEATURE_H
 
 #include <asm/required-features.h>
+#include <asm/cache.h>
 
 #define NCAPINTS	9	/* N 32-bit words worth of info */
 /*
@@ -194,6 +195,10 @@
 #define X86_FEATURE_INVPCID_SINGLE ( 7*32+15) /* Effectively INVPCID && CR4.PCIDE=1 */
 #define X86_FEATURE_SPEC_CTRL	( 7*32+16) /* Control Speculation Control */
 #define X86_FEATURE_IBPB_SUPPORT ( 7*32+17) /* Indirect Branch Prediction Barrier Support */
+#define X86_FEATURE_PTI		( 7*32+18) /* Kernel Page Table Isolation enabled */
+#define X86_FEATURE_RETPOLINE	( 7*32+19) /* Generic Retpoline mitigation for Spectre variant 2 */
+#define X86_FEATURE_RETPOLINE_AMD ( 7*32+20) /* AMD Retpoline mitigation for Spectre variant 2 */
+#define X86_FEATURE_IBP_DISABLE	( 7*32+21) /* Old AMD Indirect Branch Predictor Disable */
 
 /* Virtualization flags: Linux defined, word 8 */
 #define X86_FEATURE_TPR_SHADOW  (8*32+ 0) /* Intel TPR Shadow */
@@ -436,6 +441,20 @@ static __always_inline __pure bool __static_cpu_has(u16 bit)
 		__static_cpu_has(bit) :				\
 		boot_cpu_has(bit)				\
 )
+
+/*
+ * CPU bug word emulation
+ */
+extern unsigned long __cpu_bugs __read_mostly;
+#define boot_cpu_has_bug(bit)		test_bit(bit, &__cpu_bugs)
+#define boot_cpu_set_bug(bit)		set_bit(bit, &__cpu_bugs)
+#define boot_cpu_clear_bug(bit) 	clear_bit(bit, &__cpu_bugs)
+#define setup_force_cpu_bug(bit)	boot_cpu_set_bug(bit)
+
+#define X86_BUG(x)			(x)
+#define X86_BUG_CPU_MELTDOWN		X86_BUG(0) /* CPU is affected by meltdown attack and needs kernel page table isolation */
+#define X86_BUG_SPECTRE_V1		X86_BUG(1) /* CPU is affected by Spectre variant 1 attack with conditional branches */
+#define X86_BUG_SPECTRE_V2		X86_BUG(2) /* CPU is affected by Spectre variant 2 attack with indirect branches */
 
 #endif /* defined(__KERNEL__) && !defined(__ASSEMBLY__) */
 

@@ -47,6 +47,7 @@
 #include <linux/crash_dump.h>
 #include <linux/memory.h>
 
+#include <asm/alternative.h>
 #include <asm/ipl.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
@@ -1195,6 +1196,8 @@ setup_arch(char **cmdline_p)
         /* Setup default console */
 	conmode_default();
 	set_preferred_console();
+
+	apply_alternative_instructions();
 
 	/* Setup zfcpdump support */
 	setup_zfcpdump(console_devno);

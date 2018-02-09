@@ -352,7 +352,7 @@ static const struct file_operations ptdump_curknl_fops = {
 	.release	= single_release,
 };
 
-#ifdef CONFIG_KAISER
+#ifdef CONFIG_PAGE_TABLE_ISOLATION
 static int ptdump_show_curusr(struct seq_file *m, void *v)
 {
 	if (current->mm->pgd) {
@@ -380,7 +380,7 @@ static const struct file_operations ptdump_curusr_fops = {
 static int pt_dump_init(void)
 {
 static struct dentry *dir, *pe_knl, *pe_curknl;
-#ifdef CONFIG_KAISER
+#ifdef CONFIG_PAGE_TABLE_ISOLATION
 static struct dentry *pe_curusr;
 #endif
 
@@ -409,7 +409,7 @@ static struct dentry *pe_curusr;
 	if (!pe_curknl)
 		goto err;
 
-#ifdef CONFIG_KAISER
+#ifdef CONFIG_PAGE_TABLE_ISOLATION
 	pe_curusr =  debugfs_create_file("current_user", 0400,
 					 dir, NULL, &ptdump_curusr_fops);
 	if (!pe_curusr)

@@ -16,7 +16,7 @@
 #define BOOT_BITOPS_H
 #define _LINUX_BITOPS_H		/* Inhibit inclusion of <linux/bitops.h> */
 
-static inline int constant_test_bit(int nr, const void *addr)
+static __always_inline int constant_test_bit(int nr, const void *addr)
 {
 	const u32 *p = (const u32 *)addr;
 	return ((1UL << (nr & 31)) & (p[nr >> 5])) != 0;

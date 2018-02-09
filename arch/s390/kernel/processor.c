@@ -17,12 +17,37 @@
 #include <asm/elf.h>
 #include <asm/lowcore.h>
 #include <asm/param.h>
+#include <asm/system.h>
 
 void __cpuinit print_cpu_info(void)
 {
 	pr_info("Processor %d started, address %d, identification %06X\n",
 		S390_lowcore.cpu_nr, S390_lowcore.cpu_addr,
 		S390_lowcore.cpu_id.ident);
+}
+
+static void show_facilities(struct seq_file *m)
+{
+	unsigned long long *facility_bits;
+	int dwords, bit, i;
+
+	facility_bits = kzalloc(32 * BITS_PER_LONG, GFP_KERNEL);
+	if (!facility_bits)
+		return;
+
+	dwords = stfle(facility_bits, 32);
+	if (dwords < 0)
+		goto out;
+
+	seq_puts(m, "facilities      :");
+	for (i = 0; i < min(dwords, 32); i++)
+		for (bit = 0; bit < BITS_PER_LONG; bit++)
+			if (facility_bits[i] &
+			    (1ULL << (BITS_PER_LONG - 1 - bit)))
+				seq_printf(m, " %d", BITS_PER_LONG * i + bit);
+	seq_putc(m, '\n');
+out:
+	kfree(facility_bits);
 }
 
 /*
@@ -52,6 +77,7 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 			if (hwcap_str[i] && (elf_hwcap & (1UL << i)))
 				seq_printf(m, "%s ", hwcap_str[i]);
 		seq_puts(m, "\n");
+		show_facilities(m);
 	}
 
 	if (cpu_online(n)) {

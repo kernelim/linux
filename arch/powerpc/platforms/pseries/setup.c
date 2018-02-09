@@ -334,6 +334,38 @@ static int alloc_dispatch_logs(void)
 early_initcall(alloc_dispatch_logs);
 #endif /* CONFIG_VIRT_CPU_ACCOUNTING */
 
+static void pSeries_setup_rfi_flush(void)
+{
+	unsigned long character, behaviour, rc;
+	enum l1d_flush_type types;
+	bool enable;
+
+	/* Enable by default */
+	enable = true;
+
+	rc = plpar_get_cpu_characteristics(&character, &behaviour);
+	if (rc == H_SUCCESS) {
+		types = L1D_FLUSH_NONE;
+
+		if (character & H_GET_CPU_CHAR_CHAR_MTTRIG2_L1_FLUSH)
+			types |= L1D_FLUSH_MTTRIG;
+		if (character & H_GET_CPU_CHAR_CHAR_ORI30_L1_FLUSH)
+			types |= L1D_FLUSH_ORI;
+
+		/* Use fallback if nothing set in hcall */
+		if (types == L1D_FLUSH_NONE)
+			types = L1D_FLUSH_FALLBACK;
+
+		if (!(behaviour & H_GET_CPU_CHAR_BEHAV_L1_FLUSH_LOW_PRIV))
+			enable = false;
+	} else {
+		/* Default to fallback if case hcall is not available */
+		types = L1D_FLUSH_FALLBACK;
+	}
+
+	setup_rfi_flush(types, enable);
+}
+
 static void __init pSeries_setup_arch(void)
 {
 	if (!strncmp(cur_cpu_spec->platform, "power5", 6))
@@ -350,6 +382,8 @@ static void __init pSeries_setup_arch(void)
 	loops_per_jiffy = 50000000;
 
 	fwnmi_init();
+
+	pSeries_setup_rfi_flush();
 
 	/* By default, only probe PCI (can be overriden by rtas_pci) */
 	pci_add_flags(PCI_PROBE_ONLY);

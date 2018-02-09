@@ -256,7 +256,7 @@ static void pgd_prepopulate_pmd(struct mm_struct *mm, pgd_t *pgd, pmd_t *pmds[])
 	}
 }
 
-#ifdef CONFIG_KAISER
+#ifdef CONFIG_PAGE_TABLE_ISOLATION
 /*
  * Instead of one pgd, we aquire two pgds.  Being order-1, it is
  * both 8k in size and 8k-aligned.  That lets us just flip bit 12

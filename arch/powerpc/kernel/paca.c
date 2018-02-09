@@ -73,6 +73,13 @@ struct slb_shadow slb_shadow[] __cacheline_aligned = {
 struct paca_struct paca[NR_CPUS];
 EXPORT_SYMBOL(paca);
 
+/*
+ * Auxiliary structure that can be used to basically add fields to the
+ * paca without changing its size (for kABI purposes). Upstream code should
+ * have these fields directly in the paca.
+ */
+static struct paca_aux_struct paca_aux[NR_CPUS];
+
 void __init initialise_pacas(void)
 {
 	int cpu;
@@ -101,6 +108,9 @@ void __init initialise_pacas(void)
 #ifdef CONFIG_PPC_STD_MMU_64
 		new_paca->slb_shadow_ptr = &slb_shadow[cpu];
 #endif /* CONFIG_PPC_STD_MMU_64 */
+#ifdef CONFIG_PPC_BOOK3S_64
+		new_paca->aux_ptr = &paca_aux[cpu];
+#endif
 
 	}
 }

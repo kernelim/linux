@@ -23,7 +23,7 @@
 
 #ifndef __ASSEMBLY__
 
-#ifdef CONFIG_KAISER
+#ifdef CONFIG_PAGE_TABLE_ISOLATION
 #include <linux/percpu.h>
 
 /**

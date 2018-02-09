@@ -1,4 +1,4 @@
-#ifdef CONFIG_KAISER
+#ifdef CONFIG_PAGE_TABLE_ISOLATION
 
 #include <asm/processor-flags.h>
 #include <asm/kaiser.h>
@@ -119,7 +119,7 @@
 .Lnokaiser_\@:
 .endm
 
-#else /* CONFIG_KAISER=n: */
+#else /* CONFIG_PAGE_TABLE_ISOLATION=n: */
 
 .macro SWITCH_TO_KERNEL_CR3
 .endm

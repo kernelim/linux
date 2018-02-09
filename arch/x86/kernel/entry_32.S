@@ -55,6 +55,7 @@
 #include <asm/irq_vectors.h>
 #include <asm/cpufeature.h>
 #include <linux/err.h>
+#include <asm/nospec-branch.h>
 
 /* Avoid __ASSEMBLER__'ifying <linux/audit.h> just for this.  */
 #include <linux/elf-em.h>
@@ -458,7 +459,8 @@ sysenter_past_esp:
 sysenter_do_call:
 	cmpl $(nr_syscalls), %eax
 	jae syscall_badsys
-	call *sys_call_table(,%eax,4)
+	movl sys_call_table(,%eax,4), %eax
+	CALL_NOSPEC %eax
 	movl %eax,PT_EAX(%esp)
 	LOCKDEP_SYS_EXIT
 	DISABLE_INTERRUPTS(CLBR_ANY)
@@ -541,7 +543,8 @@ ENTRY(system_call)
 	cmpl $(nr_syscalls), %eax
 	jae syscall_badsys
 syscall_call:
-	call *sys_call_table(,%eax,4)
+	movl sys_call_table(,%eax,4), %eax
+	CALL_NOSPEC %eax
 	movl %eax,PT_EAX(%esp)		# store the return value
 syscall_exit:
 	LOCKDEP_SYS_EXIT
@@ -884,12 +887,7 @@ ENTRY(simd_coprocessor_error)
 661:	pushl $do_general_protection
 662:
 .section .altinstructions,"a"
-	.balign 4
-	.long 661b
-	.long 663f
-	.word X86_FEATURE_XMM
-	.byte 662b-661b
-	.byte 664f-663f
+	altinstruction_entry 661b, 663f, X86_FEATURE_XMM, 662b-661b, 664f-663f, 0
 .previous
 .section .altinstr_replacement,"ax"
 663:	pushl $do_simd_coprocessor_error
@@ -1042,7 +1040,7 @@ ENTRY(kernel_thread_helper)
 	movl %edx,%eax
 	push %edx
 	CFI_ADJUST_CFA_OFFSET 4
-	call *%ebx
+	CALL_NOSPEC %ebx
 	push %eax
 	CFI_ADJUST_CFA_OFFSET 4
 	call do_exit
@@ -1218,7 +1216,8 @@ trace:
 	movl 0x4(%ebp), %edx
 	subl $MCOUNT_INSN_SIZE, %eax
 
-	call *ftrace_trace_function
+	movl ftrace_trace_function, %ecx
+	CALL_NOSPEC %ecx
 
 	popl %edx
 	popl %ecx
@@ -1324,7 +1323,7 @@ error_code:
 	movl %ecx, %es
 	TRACE_IRQS_OFF
 	movl %esp,%eax			# pt_regs pointer
-	call *%edi
+	CALL_NOSPEC %edi
 	jmp ret_from_exception
 	CFI_ENDPROC
 END(page_fault)

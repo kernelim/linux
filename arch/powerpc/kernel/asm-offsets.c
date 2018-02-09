@@ -191,6 +191,14 @@ int main(void)
 	DEFINE(PACA_SYSTEM_TIME, offsetof(struct paca_struct, system_time));
 	DEFINE(PACA_DATA_OFFSET, offsetof(struct paca_struct, data_offset));
 	DEFINE(PACA_TRAP_SAVE, offsetof(struct paca_struct, trap_save));
+#ifdef CONFIG_PPC_BOOK3S_64
+	/* paca_aux_struct stuff: */
+	OFFSET(PACA_AUX_PTR, paca_struct, aux_ptr);
+	OFFSET(PACA_RFI_FLUSH_FALLBACK_AREA, paca_aux_struct, rfi_flush_fallback_area);
+	OFFSET(PACA_EXRFI, paca_aux_struct, exrfi);
+	OFFSET(PACA_L1D_FLUSH_CONGRUENCE, paca_aux_struct, l1d_flush_congruence);
+	OFFSET(PACA_L1D_FLUSH_SETS, paca_aux_struct, l1d_flush_sets);
+#endif
 #endif /* CONFIG_PPC64 */
 
 	/* RTAS */

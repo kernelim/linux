@@ -12,6 +12,22 @@ int smp_query_cpu_stopped(unsigned int pcpu);
 #define QCSS_HARDWARE_ERROR -1
 #define QCSS_HARDWARE_BUSY -2
 
+static inline long plpar_get_cpu_characteristics(unsigned long *character,
+						 unsigned long *behavior)
+{
+	long rc;
+	unsigned long retbuf[PLPAR_HCALL_BUFSIZE];
+
+	rc = plpar_hcall(H_GET_CPU_CHARACTERISTICS, retbuf);
+
+	if (character)
+		*character = retbuf[0];
+	if (behavior)
+		*behavior = retbuf[1];
+
+	return rc;
+}
+
 static inline long poll_pending(void)
 {
 	return plpar_hcall_norets(H_POLL_PENDING);

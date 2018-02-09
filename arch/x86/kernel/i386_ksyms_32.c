@@ -4,6 +4,7 @@
 #include <asm/pgtable.h>
 #include <asm/desc.h>
 #include <asm/ftrace.h>
+#include <asm/asm.h>
 
 #ifdef CONFIG_FUNCTION_TRACER
 /* mcount is defined in assembly */
@@ -36,3 +37,17 @@ EXPORT_SYMBOL(strstr);
 
 EXPORT_SYMBOL(csum_partial);
 EXPORT_SYMBOL(empty_zero_page);
+
+#ifdef CONFIG_RETPOLINE
+#define EXPORT_THUNK(reg)						\
+	extern void __x86_indirect_thunk_ ## reg(void);			\
+	EXPORT_SYMBOL(__x86_indirect_thunk_ ## reg)
+
+EXPORT_THUNK(eax);
+EXPORT_THUNK(ebx);
+EXPORT_THUNK(ecx);
+EXPORT_THUNK(edx);
+EXPORT_THUNK(esi);
+EXPORT_THUNK(edi);
+EXPORT_THUNK(ebp);
+#endif /* CONFIG_RETPOLINE */

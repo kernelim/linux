@@ -1505,12 +1505,12 @@ void native_play_dead(void)
 	play_dead_common();
 	tboot_shutdown(TB_SHUTDOWN_WFS);
 
-	spec_ctrl_disable_ibrs();
+	spec_ctrl_ibrs_off();
 
 	mwait_play_dead();	/* Only returns on failure */
 	hlt_play_dead();
 
-	spec_ctrl_enable_ibrs();
+	spec_ctrl_ibrs_on();
 }
 
 #else /* ... !CONFIG_HOTPLUG_CPU */

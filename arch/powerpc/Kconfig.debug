@@ -298,4 +298,14 @@ config STRICT_DEVMEM
 
 	  If you are unsure, say Y.
 
+config PPC_DEBUG_RFI
+	bool "Debug RFIs (Return From Interrupt)"
+	depends on PPC_BOOK3S_64 && BROKEN
+	help
+	  The enables extra debug code in some RFI (Return From Interrupt)
+	  sequences, to detect that we are returning to the correct context
+	  (user, kernel or guest). This adds some performance overhead.
+
+	  If unsure, say N.
+
 endmenu

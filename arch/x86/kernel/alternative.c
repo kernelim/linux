@@ -280,9 +280,14 @@ void __init_or_module apply_alternatives(struct alt_instr *start,
 	 */
 	for (a = start; a < end; a++) {
 		u8 *instr = a->instr;
+		u8 padlen = 0;
 
-		DPRINTK("#%d: cpuid = %d instrlen = %d replacementlen = %d\n",
-			count, a->cpuid, a->instrlen, a->replacementlen);
+#ifdef CONFIG_X86_64
+		padlen = a->padlen;
+#endif
+
+		DPRINTK("#%d: cpuid = %d instrlen = %d replacementlen = %d, pad = %d\n",
+			count, a->cpuid, a->instrlen, a->replacementlen, padlen);
 		if (fixup) {
 			DPRINTK("#%d: cpuid = %d instrlen = %d replacementlen = %d\n",
 				count, 0x00ff & a->cpuid,
@@ -293,7 +298,6 @@ void __init_or_module apply_alternatives(struct alt_instr *start,
 		}
 		count++;
 
-		BUG_ON(a->replacementlen > a->instrlen);
 		BUG_ON(a->instrlen > sizeof(insnbuf));
 		if (!boot_cpu_has(a->cpuid))
 			continue;
@@ -308,8 +312,11 @@ void __init_or_module apply_alternatives(struct alt_instr *start,
 		memcpy(insnbuf, a->replacement, a->replacementlen);
 		if (*insnbuf == 0xe8 && a->replacementlen == 5)
 		    *(s32 *)(insnbuf + 1) += a->replacement - a->instr;
-		add_nops(insnbuf + a->replacementlen,
-			 a->instrlen - a->replacementlen);
+
+		if (a->instrlen > a->replacementlen)
+			add_nops(insnbuf + a->replacementlen,
+				 a->instrlen - a->replacementlen);
+
 		text_poke_early(instr, insnbuf, a->instrlen);
 	}
 }

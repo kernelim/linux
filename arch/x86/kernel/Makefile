@@ -18,11 +18,12 @@ CFLAGS_REMOVE_pvclock.o = -pg
 endif
 
 #
-# vsyscalls (which work on the user stack) should have
-# no stack-protector checks:
+# vsyscalls (which work on the user stack) should have no stack-protector
+# checks. They should also not use the kernel indirect call/jump thunks.
 #
 nostackp := $(call cc-option, -fno-stack-protector)
-CFLAGS_vsyscall_64.o	:= $(PROFILING) -g0 $(nostackp)
+nothunks := $(call cc-option, -mindirect-branch=keep)
+CFLAGS_vsyscall_64.o	:= $(PROFILING) -g0 $(nostackp) $(nothunks)
 CFLAGS_hpet.o		:= $(nostackp)
 CFLAGS_tsc.o		:= $(nostackp)
 CFLAGS_paravirt.o	:= $(nostackp)
@@ -127,6 +128,7 @@ obj-$(CONFIG_X86_SYSFB)			+= sysfb_simplefb.o
 obj-$(CONFIG_EFI)			+= sysfb_efi.o
 
 obj-$(CONFIG_PERF_EVENTS)		+= perf_regs.o
+obj-y					+= spec_ctrl.o
 
 ###
 # 64 bit specific files
@@ -142,5 +144,3 @@ ifeq ($(CONFIG_X86_64),y)
 	obj-$(CONFIG_PCI_MMCONFIG)	+= mmconf-fam10h_64.o
 	obj-y				+= vsmp_64.o
 endif
-
-obj-$(CONFIG_SPEC_CTRL)		+= spec_ctrl.o

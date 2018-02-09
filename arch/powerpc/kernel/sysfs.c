@@ -24,6 +24,8 @@
 #ifdef CONFIG_PPC64
 #include <asm/paca.h>
 #include <asm/lppaca.h>
+#include <asm/ppc_asm.h>
+#include <asm/setup.h>
 #endif
 
 static DEFINE_PER_CPU(struct cpu, cpu_devices);
@@ -114,6 +116,42 @@ static int __init setup_smt_snooze_delay(char *str)
 __setup("smt-snooze-delay=", setup_smt_snooze_delay);
 
 #endif /* CONFIG_PPC64 */
+
+#ifdef CONFIG_PPC_BOOK3S_64
+extern bool rfi_flush;
+static ssize_t show_rfi_flush(struct sysdev_class *class, char *buf)
+{
+	return sprintf(buf, "%d\n", rfi_flush ? 1 : 0);
+}
+
+static ssize_t __used store_rfi_flush(struct sysdev_class *class,
+		const char *buf, size_t count)
+{
+	int val;
+	int ret = 0;
+
+	ret = sscanf(buf, "%d", &val);
+	if (ret != 1)
+		return -EINVAL;
+
+	if (val == 1)
+		rfi_flush_enable(true);
+	else if (val == 0)
+		rfi_flush_enable(false);
+	else
+		return -EINVAL;
+
+	return count;
+}
+
+static SYSDEV_CLASS_ATTR(rfi_flush, 0600,
+				show_rfi_flush, store_rfi_flush);
+
+static void sysfs_create_rfi_flush(void)
+{
+	sysfs_create_file(&cpu_sysdev_class.kset.kobj, &attr_rfi_flush.attr);
+}
+#endif /* CONFIG_PPC_BOOK3S_64 */
 
 /*
  * Enabling PMCs will slow partition context switch times so we only do
@@ -647,6 +685,9 @@ static int __init topology_init(void)
 		if (cpu_online(cpu))
 			register_cpu_online(cpu);
 	}
+#ifdef CONFIG_PPC_BOOK3S
+	sysfs_create_rfi_flush();
+#endif
 
 	return 0;
 }

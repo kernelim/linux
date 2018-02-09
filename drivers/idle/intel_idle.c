@@ -640,12 +640,12 @@ static int intel_idle(struct cpuidle_device *dev, int index)
 #endif
 	if (!need_resched()) {
 
-		spec_ctrl_disable_ibrs();
+		spec_ctrl_ibrs_off();
 		__monitor((void *)&current_thread_info()->flags, 0, 0);
 		smp_mb();
 		if (!need_resched())
 			__mwait(eax, ecx);
-		spec_ctrl_enable_ibrs();
+		spec_ctrl_ibrs_on();
 	}
 
 	start_critical_timings();

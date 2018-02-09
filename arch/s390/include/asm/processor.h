@@ -35,6 +35,7 @@ static inline void get_cpu_id(struct cpuid *ptr)
 extern void s390_adjust_jiffies(void);
 extern void print_cpu_info(void);
 extern int get_cpu_capability(unsigned int *);
+extern void __bpon(void);
 
 /*
  * User space process size: 2GB for 31 bit, 4TB or 8PT for 64 bit.

@@ -34,6 +34,7 @@
  * exception handlers (including pSeries LPAR) and iSeries LPAR
  * implementations as possible.
  */
+#include <asm/bug.h>
 
 #define EX_R9		0
 #define EX_R10		8
@@ -46,6 +47,43 @@
 #define EX_CCR		60
 #define EX_R3		64
 #define EX_LR		72
+
+/*
+ * The nop instructions allow us to insert one or more instructions to flush the
+ * L1-D cache when return to userspace or a guest.
+ */
+#define RFI_FLUSH_SLOT							\
+	RFI_FLUSH_FIXUP_SECTION;					\
+	nop;								\
+	nop;								\
+	nop
+
+#ifdef CONFIG_PPC_DEBUG_RFI
+#define CHECK_TARGET_MSR_PR(srr_reg, expected_pr)			\
+	mtspr	SPRN_SPRG_SCRATCH0,r3;					\
+	mfspr	r3,srr_reg;						\
+	extrdi	r3,r3,1,63-MSR_PR_LG;					\
+666:	tdnei	r3,expected_pr;						\
+	EMIT_BUG_ENTRY 666b,__FILE__,__LINE__,0;			\
+	mfspr	r3,SPRN_SPRG_SCRATCH0;
+#else
+#define CHECK_TARGET_MSR_PR(srr_reg, expected_pr)
+#endif
+
+#define RFI_TO_KERNEL							\
+	CHECK_TARGET_MSR_PR(SPRN_SRR1, 0);				\
+	rfid
+
+#define RFI_TO_USER							\
+	CHECK_TARGET_MSR_PR(SPRN_SRR1, 1);				\
+	RFI_FLUSH_SLOT;							\
+	rfid;								\
+	b	rfi_flush_fallback
+
+#define RFI_TO_USER_OR_KERNEL						\
+	RFI_FLUSH_SLOT;							\
+	rfid;								\
+	b	rfi_flush_fallback
 
 /*
  * We're short on space and time in the exception prolog, so we can't

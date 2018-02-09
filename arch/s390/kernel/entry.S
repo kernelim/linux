@@ -189,15 +189,38 @@ STACK_SIZE  = 1 << STACK_SHIFT
 	st	%r12,__SF_BACKCHAIN(%r15)	# clear back chain
 	.endm
 
-	.macro	RESTORE_ALL psworg,sync
-	mvc	\psworg(8),SP_PSW(%r15) # move user PSW to lowcore
-	.if !\sync
-	ni	\psworg+1,0xfd		# clear wait state bit
-	.endif
-	lm	%r0,%r15,SP_R0(%r15)	# load gprs 0-15 of user
-	stpt	__LC_EXIT_TIMER
-	lpsw	\psworg			# back to caller
+	.macro BPOFF
+	.pushsection .altinstr_replacement, "ax"
+660:	.long	0xb2e8c000
+	.popsection
+661:	.long	0x47000000
+	.pushsection .altnobp, "a"
+        .long 661b - .
+	.long 660b - .
+	.word 82
+	.byte 4
+	.byte 4
+	.popsection
 	.endm
+
+	.macro BPON
+	.pushsection .altinstr_replacement, "ax"
+662:	.long	0xb2e8d000
+	.popsection
+663:	.long	0x47000000
+	.pushsection .altnobp, "a"
+        .long 663b - .
+	.long 662b - .
+	.word 82
+	.byte 4
+	.byte 4
+	.popsection
+	.endm
+
+ENTRY(__bpon)
+	.globl __bpon
+	BPON
+	br	%r14
 
 /*
  * Scheduler resume function, called by switch_to
@@ -241,6 +264,7 @@ system_call:
 	stpt	__LC_SYNC_ENTER_TIMER
 sysc_saveall:
 	SAVE_ALL_BASE __LC_SAVE_AREA
+	BPOFF
 	SAVE_ALL_SVC __LC_SVC_OLD_PSW,__LC_SAVE_AREA
 	CREATE_STACK_FRAME __LC_SVC_OLD_PSW,__LC_SAVE_AREA
 	lh	%r7,0x8a	  # get svc number from lowcore
@@ -275,8 +299,12 @@ sysc_return:
 sysc_tif:
 	tm	__TI_flags+3(%r9),_TIF_WORK_SVC
 	bnz	BASED(sysc_work)  # there is work to do (signals etc.)
+	BPON
 sysc_restore:
-	RESTORE_ALL __LC_RETURN_PSW,1
+	mvc	__LC_RETURN_PSW(8),SP_PSW(%r15)
+	lm	%r0,%r15,SP_R0(%r15)
+	stpt	__LC_EXIT_TIMER
+	lpsw	__LC_RETURN_PSW
 sysc_done:
 
 #
@@ -467,6 +495,7 @@ pgm_check_handler:
  * for LPSW?).
  */
 	stpt	__LC_SYNC_ENTER_TIMER
+	BPOFF
 	SAVE_ALL_BASE __LC_SAVE_AREA
 	tm	__LC_PGM_INT_CODE+1,0x80 # check whether we got a per exception
 	bnz	BASED(pgm_per)		# got per exception -> special case
@@ -491,7 +520,10 @@ pgm_do_call:
 	basr	%r14,%r7		# branch to interrupt-handler
 pgm_exit:
 	TRACE_IRQS_CHECK_ON
-	b	BASED(sysc_return)
+	LOCKDEP_SYS_EXIT
+	tm	SP_PSW+1(%r15),0x01	# returning to user ?
+	bno	BASED(sysc_restore)
+	b	BASED(sysc_tif)
 
 #
 # handle per exception
@@ -539,7 +571,10 @@ pgm_no_vtime2:
 pgm_exit2:
 	TRACE_IRQS_ON
 	stosm	__SF_EMPTY(%r15),0x03	# reenable interrupts
-	b	BASED(sysc_return)
+	LOCKDEP_SYS_EXIT
+	tm	SP_PSW+1(%r15),0x01	# returning to user ?
+	bno	BASED(sysc_restore)
+	b	BASED(sysc_tif)
 
 #
 # it was a single stepped SVC that is causing all the trouble
@@ -582,6 +617,7 @@ kernel_per:
 io_int_handler:
 	stck	__LC_INT_CLOCK
 	stpt	__LC_ASYNC_ENTER_TIMER
+	BPOFF
 	SAVE_ALL_BASE __LC_SAVE_AREA+16
 	SAVE_ALL_ASYNC __LC_IO_OLD_PSW,__LC_SAVE_AREA+16
 	CREATE_STACK_FRAME __LC_IO_OLD_PSW,__LC_SAVE_AREA+16
@@ -603,7 +639,15 @@ io_tif:
 	tm	__TI_flags+3(%r9),_TIF_WORK_INT
 	bnz	BASED(io_work)		# there is work to do (signals etc.)
 io_restore:
-	RESTORE_ALL __LC_RETURN_PSW,0
+	mvc	__LC_RETURN_PSW(8),SP_PSW(%r15)
+	ni	__LC_RETURN_PSW+1,0xfd
+	tm	SP_PSW+1(%r15),0x01	# interrupting from user ?
+	bno	BASED(io_exit_kernel)
+	BPON
+io_exit_kernel:
+	lm	%r0,%r15,SP_R0(%r15)
+	stpt	__LC_EXIT_TIMER
+	lpsw	__LC_RETURN_PSW
 io_done:
 
 #
@@ -720,6 +764,7 @@ io_notify_resume:
 ext_int_handler:
 	stck	__LC_INT_CLOCK
 	stpt	__LC_ASYNC_ENTER_TIMER
+	BPOFF
 	SAVE_ALL_BASE __LC_SAVE_AREA+16
 	SAVE_ALL_ASYNC __LC_EXT_OLD_PSW,__LC_SAVE_AREA+16
 	CREATE_STACK_FRAME __LC_EXT_OLD_PSW,__LC_SAVE_AREA+16
@@ -746,6 +791,7 @@ __critical_end:
 	.globl mcck_int_handler
 mcck_int_handler:
 	stck	__LC_INT_CLOCK
+	BPOFF
 	spt	__LC_CPU_TIMER_SAVE_AREA	# revalidate cpu timer
 	lm	%r0,%r15,__LC_GPREGS_SAVE_AREA	# revalidate gprs
 	SAVE_ALL_BASE __LC_SAVE_AREA+32
@@ -815,15 +861,12 @@ mcck_return:
 	mvc	__LC_RETURN_MCCK_PSW(8),SP_PSW(%r15) # move return PSW
 	ni	__LC_RETURN_MCCK_PSW+1,0xfd # clear wait state bit
 	mvc	__LC_ASYNC_ENTER_TIMER(8),__LC_SAVE_AREA+52
+	lm	%r0,%r15,SP_R0(%r15)	# load gprs 0-15
 	tm	__LC_RETURN_MCCK_PSW+1,0x01 # returning to user ?
 	bno	BASED(0f)
-	lm	%r0,%r15,SP_R0(%r15)	# load gprs 0-15
+	BPON
 	stpt	__LC_EXIT_TIMER
-	lpsw	__LC_RETURN_MCCK_PSW	# back to caller
-0:	lm	%r0,%r15,SP_R0(%r15)	# load gprs 0-15
-	lpsw	__LC_RETURN_MCCK_PSW	# back to caller
-
-	RESTORE_ALL __LC_RETURN_MCCK_PSW,0
+0:	lpsw	__LC_RETURN_MCCK_PSW
 
 /*
  * Restart interruption handler, kick starter for additional CPUs

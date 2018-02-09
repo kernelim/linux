@@ -9,6 +9,7 @@
 
 #include <linux/kernel.h>
 #include <linux/errno.h>
+#include <asm/alternative.h>
 #include <asm/types.h>
 #include <asm/ptrace.h>
 #include <asm/setup.h>
@@ -327,6 +328,14 @@ __cmpxchg(volatile void *ptr, unsigned long old, unsigned long new, int size)
  * all memory ops have completed wrt other CPU's ( see 7-15 POP  DJB ).
  */
 
+static inline void gmb(void)
+{
+	asm volatile(
+		ALTERNATIVE("", ".long 0xb2e8f000", 81)
+		: : : "memory");
+}
+#define gmb gmb
+
 #define eieio()	asm volatile("bcr 15,0" : : : "memory")
 #define SYNC_OTHER_CORES(x)   eieio()
 #define mb()    eieio()
@@ -339,8 +348,6 @@ __cmpxchg(volatile void *ptr, unsigned long old, unsigned long new, int size)
 #define smp_read_barrier_depends()    read_barrier_depends()
 #define smp_mb__before_clear_bit()     smp_mb()
 #define smp_mb__after_clear_bit()      smp_mb()
-
-#define gmb() do { } while (0)
 
 #define set_mb(var, value)      do { var = value; mb(); } while (0)
 

@@ -11,6 +11,7 @@
 #include <asm/uaccess.h>
 #include <asm/desc.h>
 #include <asm/ftrace.h>
+#include <asm/asm.h>
 
 #ifdef CONFIG_FUNCTION_TRACER
 /* mcount is defined in assembly */
@@ -81,3 +82,25 @@ EXPORT_SYMBOL(memmove);
 EXPORT_SYMBOL(empty_zero_page);
 EXPORT_SYMBOL(init_level4_pgt);
 EXPORT_SYMBOL(load_gs_index);
+
+#ifdef CONFIG_RETPOLINE
+#define EXPORT_THUNK(reg)						\
+	extern void __x86_indirect_thunk_ ## reg(void);			\
+	EXPORT_SYMBOL(__x86_indirect_thunk_ ## reg)
+
+EXPORT_THUNK(rax);
+EXPORT_THUNK(rbx);
+EXPORT_THUNK(rcx);
+EXPORT_THUNK(rdx);
+EXPORT_THUNK(rsi);
+EXPORT_THUNK(rdi);
+EXPORT_THUNK(rbp);
+EXPORT_THUNK(r8);
+EXPORT_THUNK(r9);
+EXPORT_THUNK(r10);
+EXPORT_THUNK(r11);
+EXPORT_THUNK(r12);
+EXPORT_THUNK(r13);
+EXPORT_THUNK(r14);
+EXPORT_THUNK(r15);
+#endif /* CONFIG_RETPOLINE */
