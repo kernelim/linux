@@ -33,8 +33,8 @@ static void doublefault_fn(void)
 		if (ptr_ok(tss)) {
 			struct x86_hw_tss *t = (struct x86_hw_tss *)tss;
 
-			printk(KERN_EMERG "eip = %08lx, esp = %08lx\n",
-			       t->ip, t->sp);
+			printk(KERN_EMERG "eip = %08lx, esp = %08lx, ebp = %08lx\n",
+			       t->ip, t->sp, t->bp);
 
 			printk(KERN_EMERG "eax = %08lx, ebx = %08lx, ecx = %08lx, edx = %08lx\n",
 				t->ax, t->bx, t->cx, t->dx);
@@ -63,7 +63,7 @@ struct tss_struct doublefault_tss __cacheline_aligned = {
 		.ss		= __KERNEL_DS,
 		.ds		= __USER_DS,
 		.fs		= __KERNEL_PERCPU,
-
+		.gs		= __KERNEL_STACK_CANARY,
 		.__cr3		= __pa_nodebug(swapper_pg_dir),
 	}
 };

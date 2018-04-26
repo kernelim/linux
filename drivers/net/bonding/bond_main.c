@@ -3399,7 +3399,7 @@ u32 bond_xmit_hash(struct bonding *bond, struct sk_buff *skb)
 		break;
 	}
 
-	return hash;
+	return hash >> 1;
 }
 
 /*-------------------------- Device entry points ----------------------------*/

@@ -422,6 +422,7 @@ static __init void setup_transactional_execution(void)
 	    !(facility_bits[1] & (1ULL << (127 - 73))))
 		return;
 	S390_lowcore.machine_flags |= MACHINE_FLAG_TE;
+	__ctl_set_bit(0, 55);
 #endif
 }
 

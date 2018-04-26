@@ -43,7 +43,18 @@
 static pgd_t *save_pgd __initdata;
 static DEFINE_PER_CPU(unsigned long, efi_flags);
 static DEFINE_PER_CPU(unsigned long, save_cr3);
+/*
+ * With PTI on, 8k PGD is needed.
+ * It should also be aligned on even page boundary to avoid problem
+ * with NMI and other traps.
+ */
+#ifdef CONFIG_PAGE_TABLE_ISOLATION
+static pgd_t efi_pgd[2*PTRS_PER_PGD] __section(.bss.page_aligned)
+				     __aligned(2*PAGE_SIZE);
+#else
 static pgd_t efi_pgd[PTRS_PER_PGD] __page_aligned_bss;
+#endif
+
 
 static void __init early_code_mapping_set_exec(int executable)
 {

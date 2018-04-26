@@ -2511,6 +2511,9 @@ asmlinkage void smp_irq_move_cleanup_interrupt(void)
 			continue;
 
 		cfg = irq_cfg(irq);
+		if (!cfg)
+			continue;
+
 		spin_lock(&desc->lock);
 
 		/*

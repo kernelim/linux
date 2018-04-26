@@ -93,9 +93,15 @@ void foo(void)
 	OFFSET(pbe_orig_address, pbe, orig_address);
 	OFFSET(pbe_next, pbe, next);
 
-	/* Offset from the sysenter stack to tss.sp0 */
-	DEFINE(TSS_sysenter_sp0, offsetof(struct tss_struct, x86_tss.sp0) -
-		 sizeof(struct tss_struct));
+	/* Offset from the sysenter stack to task stack (tss.sp1) */
+	DEFINE(TSS_entry_stack, offsetof(struct tss_struct, x86_tss.sp1) -
+	       offsetofend(struct tss_struct, stack));
+
+	/* Offsets for the tss_struct */
+	OFFSET(TSS_stack, tss_struct, stack);
+	OFFSET(TSS_kernel_stack, tss_struct, x86_tss.sp1);
+	DEFINE(TSS_stack_size, sizeof(((struct tss_struct *)0)->stack));
+	DEFINE(PTREGS_SIZE, sizeof(struct pt_regs));
 
 	DEFINE(PAGE_SIZE_asm, PAGE_SIZE);
 	DEFINE(PAGE_SHIFT_asm, PAGE_SHIFT);

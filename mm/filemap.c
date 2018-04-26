@@ -824,13 +824,14 @@ unsigned find_get_pages(struct address_space *mapping, pgoff_t start,
 {
 	unsigned int i;
 	unsigned int ret;
-	unsigned int nr_found;
+	unsigned int nr_found, nr_skip;
 
 	rcu_read_lock();
 restart:
 	nr_found = radix_tree_gang_lookup_slot(&mapping->page_tree,
 				(void ***)pages, NULL, start, nr_pages);
 	ret = 0;
+	nr_skip = 0;
 	for (i = 0; i < nr_found; i++) {
 		struct page *page;
 repeat:
@@ -853,6 +854,7 @@ repeat:
 			 * here as an exceptional entry: so skip over it -
 			 * we only reach this from invalidate_mapping_pages().
 			 */
+			nr_skip++;
 			continue;
 		}
 
@@ -873,7 +875,7 @@ repeat:
 	 * If all entries were removed before we could secure them,
 	 * try again, because callers stop trying once 0 is returned.
 	 */
-	if (unlikely(!ret && nr_found)) {
+	if (unlikely(!ret && nr_found > nr_skip)) {
 		cpu_relax();
 		goto restart;
 	}

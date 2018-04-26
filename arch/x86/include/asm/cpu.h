@@ -36,4 +36,6 @@ int mwait_usable(const struct cpuinfo_x86 *);
 
 extern unsigned int boot_cpu_id;
 
+extern void check_bad_spectre_microcode(struct cpuinfo_x86 *c);
+
 #endif /* _ASM_X86_CPU_H */

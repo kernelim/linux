@@ -588,6 +588,16 @@ static int do_sched_rt_period_timer(struct rt_bandwidth *rt_b, int overrun)
 			if (rt_rq->rt_throttled && rt_rq->rt_time < runtime) {
 				rt_rq->rt_throttled = 0;
 				enqueue = 1;
+
+				/*
+				 * When we're idle and a woken (rt) task is
+				 * throttled check_preempt_curr() will set
+				 * skip_update and the time between the wakeup
+				 * and this unthrottle will get accounted as
+				 * 'runtime'.
+				 */
+				if (rt_rq->rt_nr_running && rq->curr == rq->idle)
+					rq_clock_skip_update(rq, false);
 			}
 			if (rt_rq->rt_time || rt_rq->rt_nr_running)
 				idle = 0;

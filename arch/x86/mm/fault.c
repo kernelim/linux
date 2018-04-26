@@ -313,15 +313,20 @@ static bool low_pfn(unsigned long pfn)
 	return pfn < max_low_pfn;
 }
 
-static void dump_pagetable(unsigned long address)
+static void __dump_pagetable(unsigned long address, bool user)
 {
 	pgd_t *base = __va(read_cr3());
-	pgd_t *pgd = &base[pgd_index(address)];
+	pgd_t *pgd;
 	pmd_t *pmd;
 	pte_t *pte;
 
+#ifdef CONFIG_PAGE_TABLE_ISOLATION
+	if (user)
+		base = kernel_to_shadow_pgdp(base);
+#endif
+	pgd = &base[pgd_index(address)];
 #ifdef CONFIG_X86_PAE
-	printk("*pdpt = %016Lx ", pgd_val(*pgd));
+	printk("%s *pdpt = %016Lx ", user ? "User  " : "Kernel", pgd_val(*pgd));
 	if (!low_pfn(pgd_val(*pgd) >> PAGE_SHIFT) || !pgd_present(*pgd))
 		goto out;
 #endif
@@ -480,18 +485,23 @@ static int bad_address(void *p)
 	return probe_kernel_address((unsigned long *)p, dummy);
 }
 
-static void dump_pagetable(unsigned long address)
+static void __dump_pagetable(unsigned long address, bool user)
 {
 	pgd_t *base = __va(read_cr3() & PHYSICAL_PAGE_MASK);
-	pgd_t *pgd = base + pgd_index(address);
+	pgd_t *pgd;
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
 
+#ifdef CONFIG_PAGE_TABLE_ISOLATION
+	if (user)
+		base = kernel_to_shadow_pgdp(base);
+#endif
+	pgd = base + pgd_index(address);
 	if (bad_address(pgd))
 		goto bad;
 
-	printk("PGD %lx ", pgd_val(*pgd));
+	printk("%s PGD %lx ", user ? "User  " : "Kernel", pgd_val(*pgd));
 
 	if (!pgd_present(*pgd))
 		goto out;
@@ -525,6 +535,15 @@ bad:
 }
 
 #endif /* CONFIG_X86_64 */
+
+static void dump_pagetable(unsigned long address)
+{
+	__dump_pagetable(address, 0);
+#ifdef CONFIG_PAGE_TABLE_ISOLATION
+	if (static_cpu_has(X86_FEATURE_PTI_SUPPORT))
+		__dump_pagetable(address, 1);
+#endif
+}
 
 /*
  * Workaround for K8 erratum #93 & buggy BIOS.
@@ -909,8 +928,17 @@ static int spurious_fault_check(unsigned long error_code, pte_t *pte)
  * cross-processor TLB flush, even if no stale TLB entries exist
  * on other processors.
  *
+ * Spurious faults may only occur if the TLB contains an entry with
+ * fewer permission than the page table entry.  Non-present (P = 0)
+ * and reserved bit (R = 1) faults are never spurious.
+ *
  * There are no security implications to leaving a stale TLB when
  * increasing the permissions on a page.
+ *
+ * Returns non-zero if a spurious fault was handled, zero otherwise.
+ *
+ * See Intel Developer's Manual Vol 3 Section 4.10.4.3, bullet 3
+ * (Optional Invalidation).
  */
 static noinline int
 spurious_fault(unsigned long error_code, unsigned long address)
@@ -921,8 +949,17 @@ spurious_fault(unsigned long error_code, unsigned long address)
 	pte_t *pte;
 	int ret;
 
-	/* Reserved-bit violation or user access to kernel space? */
-	if (error_code & (PF_USER | PF_RSVD))
+	/*
+	 * Only writes to RO or instruction fetches from NX may cause
+	 * spurious faults.
+	 *
+	 * These could be from user or supervisor accesses but the TLB
+	 * is only lazily flushed after a kernel mapping protection
+	 * change, so user accesses are not expected to cause spurious
+	 * faults.
+	 */
+	if (error_code != (PF_WRITE | PF_PROT)
+	    && error_code != (PF_INSTR | PF_PROT))
 		return 0;
 
 	pgd = init_mm.pgd + pgd_index(address);

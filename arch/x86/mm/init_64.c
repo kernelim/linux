@@ -108,7 +108,7 @@ static void sync_global_pgds(unsigned long start, unsigned long end)
 	unsigned long addr;
 
 	spin_lock(&pgd_lock);
-	for (addr = start; addr < end; addr += PGDIR_SIZE) {
+	for (addr = start; addr < end; addr = ALIGN(addr + 1, PGDIR_SIZE)) {
 		pgd_t *ref_pgd = pgd_offset_k(addr);
 		list_for_each_entry(page, &pgd_list, lru) {
 			spinlock_t *pgt_lock;

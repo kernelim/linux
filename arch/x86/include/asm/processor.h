@@ -946,10 +946,12 @@ static inline void spin_lock_prefetch(const void *x)
 #define INIT_TSS  {							  \
 	.x86_tss = {							  \
 		.sp0		= sizeof(init_stack) + (long)&init_stack, \
+		.sp1		= sizeof(init_stack) + (long)&init_stack, \
 		.ss0		= __KERNEL_DS,				  \
 		.ss1		= __KERNEL_CS,				  \
 		.io_bitmap_base	= INVALID_IO_BITMAP_OFFSET,		  \
 	 },								  \
+	.stack_canary		= STACK_END_MAGIC,			  \
 	.io_bitmap		= { [0 ... IO_BITMAP_LONGS] = ~0 },	  \
 }
 

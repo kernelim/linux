@@ -13,6 +13,21 @@
 #include <asm/cpufeature.h>
 #include <asm/nops.h>
 
+/*
+ * For old 32-bit AMD Athlons that lack SSE2, lfence is also not supported.
+ * As stated in AMD64 Architecture Programmer’s Manual Volume 3, 3.10
+ * (Feb 2005), "Support for the LFENCE instruction is indicated when the
+ * SSE2 bit (bit 26) is set to 1 in EDX after executing CPUID standard
+ * function 1."
+ *
+ * It is safe to patch out lfence in this case as there will be limited
+ * speculative execution and retpoline should have been enabled.
+ */
+#ifdef CONFIG_X86_32
+#define LFENCE	ALTERNATIVE	"", "lfence", X86_FEATURE_XMM2
+#else
+#define LFENCE	lfence
+#endif
 
 .macro __IBRS_ENTRY
 	movl $0, %edx
@@ -26,17 +41,17 @@
 	testl $SPEC_CTRL_PCP_IBRS, PER_CPU_VAR(spec_ctrl_pcp)
 	jz .Lskip_\@
 
-	pushq %rax
-	pushq %rcx
-	pushq %rdx
+	push %_ASM_AX
+	push %_ASM_CX
+	push %_ASM_DX
 	__IBRS_ENTRY
-	popq %rdx
-	popq %rcx
-	popq %rax
+	pop %_ASM_DX
+	pop %_ASM_CX
+	pop %_ASM_AX
 	jmp .Lend_\@
 
 .Lskip_\@:
-	lfence
+	LFENCE
 .Lend_\@:
 .endm
 
@@ -48,7 +63,7 @@
 	jmp .Lend_\@
 
 .Lskip_\@:
-	lfence
+	LFENCE
 .Lend_\@:
 .endm
 
@@ -72,7 +87,7 @@
 	 */
 	movl $FEATURE_ENABLE_IBRS, \save_reg
 
-	lfence
+	LFENCE
 .Lend_\@:
 .endm
 
@@ -89,13 +104,13 @@
 	testl $SPEC_CTRL_PCP_IBRS, PER_CPU_VAR(spec_ctrl_pcp)
 	jz .Lskip_\@
 
-	pushq %rax
-	pushq %rcx
-	pushq %rdx
+	push %_ASM_AX
+	push %_ASM_CX
+	push %_ASM_DX
 	__IBRS_EXIT
-	popq %rdx
-	popq %rcx
-	popq %rax
+	pop %_ASM_DX
+	pop %_ASM_CX
+	pop %_ASM_AX
 
 .Lskip_\@:
 .endm
@@ -162,6 +177,15 @@
 	xorq %r12, %r12
 	xorq %rbp, %rbp
 	xorq %rbx, %rbx
+.endm
+
+.macro CLEAR_R10_TO_R15
+	xorq %r15, %r15
+	xorq %r14, %r14
+	xorq %r13, %r13
+	xorq %r12, %r12
+	xorq %r11, %r11
+	xorq %r10, %r10
 .endm
 
 #else /* __ASSEMBLY__ */

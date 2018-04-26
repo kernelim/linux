@@ -229,6 +229,7 @@ int copy_thread(unsigned long clone_flags, unsigned long new_stackp,
 	p->thread.mm_segment = get_fs();
 	/* Don't copy debug registers */
 	memset(&p->thread.per_info, 0, sizeof(p->thread.per_info));
+	p->thread.per_flags = 0;
 	/* Initialize per thread user and system timer values */
 	ti = task_thread_info(p);
 	ti->user_timer = 0;

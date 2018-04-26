@@ -172,6 +172,11 @@ struct thread_info {
 
 #include <asm/percpu.h>
 
+#ifndef __ASSEMBLY__
+DECLARE_PER_CPU_USER_MAPPED(unsigned int, kaiser_enabled_pcp);
+DECLARE_PER_CPU_USER_MAPPED(unsigned int, spec_ctrl_pcp);
+#endif
+
 #ifdef CONFIG_X86_32
 
 #define STACK_WARN	(THREAD_SIZE/8)
@@ -181,8 +186,6 @@ struct thread_info {
  * preempt_count needs to be 1 initially, until the scheduler is functional.
  */
 #ifndef __ASSEMBLY__
-
-DECLARE_PER_CPU_USER_MAPPED(unsigned int, spec_ctrl_pcp);
 
 /* how to get the current stack pointer from C */
 register unsigned long current_stack_pointer asm("esp") __used;
@@ -218,8 +221,6 @@ static inline struct thread_info *current_thread_info(void)
 #ifndef __ASSEMBLY__
 DECLARE_PER_CPU(unsigned long, kernel_stack);
 DECLARE_PER_CPU(unsigned long, kernel_stack8k);
-DECLARE_PER_CPU_USER_MAPPED(unsigned int, kaiser_enabled_pcp);
-DECLARE_PER_CPU_USER_MAPPED(unsigned int, spec_ctrl_pcp);
 
 static inline struct thread_info *current_thread_info(void)
 {

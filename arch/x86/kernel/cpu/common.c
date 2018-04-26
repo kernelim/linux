@@ -845,9 +845,18 @@ static void __init early_identify_cpu(struct cpuinfo_x86 *c)
 	if (this_cpu->c_bsp_init)
 		this_cpu->c_bsp_init(c);
 
+	/*
+	 * Allow the use of _PAGE_GLOBAL in kernel page table when
+	 * the CPU is not affected by Meltdown.
+	 */
+	if (cpu_has_pge)
+		kernel_page_global = _PAGE_GLOBAL;
+
 	if (!x86_match_cpu(cpu_no_speculation)) {
-		if (cpu_vulnerable_to_meltdown(c))
+		if (cpu_vulnerable_to_meltdown(c)) {
 			setup_force_cpu_bug(X86_BUG_CPU_MELTDOWN);
+			kernel_page_global = 0;
+		}
 		setup_force_cpu_bug(X86_BUG_SPECTRE_V1);
 		setup_force_cpu_bug(X86_BUG_SPECTRE_V2);
 	}
@@ -1226,6 +1235,11 @@ static __init int setup_disablecpuid(char *arg)
 }
 __setup("clearcpuid=", setup_disablecpuid);
 
+DEFINE_PER_CPU_USER_MAPPED(unsigned int, kaiser_enabled_pcp) ____cacheline_aligned;
+DEFINE_PER_CPU_USER_MAPPED(unsigned int, spec_ctrl_pcp);
+EXPORT_PER_CPU_SYMBOL_GPL(spec_ctrl_pcp);
+DEFINE_PER_CPU_USER_MAPPED(unsigned long, kaiser_scratch);
+
 #ifdef CONFIG_X86_64
 struct desc_ptr idt_descr = { NR_VECTORS * 16 - 1, (unsigned long) idt_table };
 
@@ -1252,10 +1266,6 @@ DEFINE_PER_CPU(char *, irq_stack_ptr) =
 	init_per_cpu_var(irq_stack_union.irq_stack) + IRQ_STACK_SIZE - 64;
 
 DEFINE_PER_CPU(unsigned int, irq_count) = -1;
-DEFINE_PER_CPU_USER_MAPPED(unsigned int, kaiser_enabled_pcp) ____cacheline_aligned;
-DEFINE_PER_CPU_USER_MAPPED(unsigned int, spec_ctrl_pcp);
-EXPORT_PER_CPU_SYMBOL_GPL(spec_ctrl_pcp);
-DEFINE_PER_CPU_USER_MAPPED(unsigned long, kaiser_scratch);
 
 /*
  * Special IST stacks which the CPU switches to when it calls
@@ -1304,9 +1314,6 @@ DEFINE_PER_CPU(struct orig_ist, orig_ist);
 
 DEFINE_PER_CPU(struct task_struct *, current_task) = &init_task;
 EXPORT_PER_CPU_SYMBOL(current_task);
-
-DEFINE_PER_CPU_USER_MAPPED(unsigned int, spec_ctrl_pcp);
-EXPORT_PER_CPU_SYMBOL_GPL(spec_ctrl_pcp);
 
 #ifdef CONFIG_CC_STACKPROTECTOR
 DEFINE_PER_CPU_ALIGNED(struct stack_canary, stack_canary);
@@ -1492,7 +1499,18 @@ void __cpuinit cpu_init(void)
 	BUG_ON(curr->mm);
 	enter_lazy_tlb(&init_mm, curr);
 
-	load_sp0(t, thread);
+	if (boot_cpu_has(X86_FEATURE_PTI_SUPPORT)) {
+		unsigned long v = thread->sp0;
+
+		thread->sp0 = (unsigned long)t +
+			      offsetofend(struct tss_struct, stack);
+		load_sp0(t, thread);
+		WRITE_ONCE(t->x86_tss.sp0, thread->sp0);
+		thread->sp0 = v;	/* Restore original value */
+	} else {
+		load_sp0(t, thread);
+	}
+
 	set_tss_desc(cpu, t);
 	load_TR_desc();
 	load_LDT(&init_mm.context);

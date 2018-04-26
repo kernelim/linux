@@ -314,6 +314,64 @@ static inline int is_new_memtype_allowed(u64 paddr, unsigned long size,
 
 pmd_t *populate_extra_pmd(unsigned long vaddr);
 pte_t *populate_extra_pte(unsigned long vaddr);
+
+#ifdef CONFIG_PAGE_TABLE_ISOLATION
+/*
+ * All top-level KAISER page tables are order-1 pages (8k-aligned
+ * and 8k in size).  The kernel one is at the beginning 4k and
+ * the user (shadow) one is in the last 4k.  To switch between
+ * them, you just need to flip the 12th bit in their addresses.
+ */
+#define KAISER_PGTABLE_SWITCH_BIT	PAGE_SHIFT
+
+/*
+ * This generates better code than the inline assembly in
+ * __set_bit().
+ */
+static inline void *ptr_set_bit(void *ptr, int bit)
+{
+	unsigned long __ptr = (unsigned long)ptr;
+
+	__ptr |= (1<<bit);
+	return (void *)__ptr;
+}
+static inline void *ptr_clear_bit(void *ptr, int bit)
+{
+	unsigned long __ptr = (unsigned long)ptr;
+
+	__ptr &= ~(1<<bit);
+	return (void *)__ptr;
+}
+
+static inline pgd_t *kernel_to_shadow_pgdp(pgd_t *pgdp)
+{
+	return ptr_set_bit(pgdp, KAISER_PGTABLE_SWITCH_BIT);
+}
+static inline pgd_t *shadow_to_kernel_pgdp(pgd_t *pgdp)
+{
+	return ptr_clear_bit(pgdp, KAISER_PGTABLE_SWITCH_BIT);
+}
+
+pgd_t __pti_set_user_pgd(pgd_t *pgdp, pgd_t pgd);
+
+/*
+ * Take a PGD location (pgdp) and a pgd value that needs
+ * to be set there.  Populates the shadow and returns
+ * the resulting PGD that must be set in the kernel copy
+ * of the page tables.
+ */
+static inline pgd_t pti_set_user_pgd(pgd_t *pgdp, pgd_t pgd)
+{
+	if (!boot_cpu_has(X86_FEATURE_PTI_SUPPORT))
+		return pgd;
+	return __pti_set_user_pgd(pgdp, pgd);
+}
+#else
+static inline pgd_t pti_set_user_pgd(pgd_t *pgdp, pgd_t pgd)
+{
+	return pgd;
+}
+#endif /* CONFIG_PAGE_TABLE_ISOLATION */
 #endif	/* __ASSEMBLY__ */
 
 #ifndef __ASSEMBLY__
@@ -324,6 +382,28 @@ pte_t *populate_extra_pte(unsigned long vaddr);
 #else
 # include "pgtable_64.h"
 #endif
+
+/*
+ * Page table pages are page-aligned.  The lower half of the top
+ * level is used for userspace and the top half for the kernel.
+ *
+ * Returns true for parts of the PGD that map userspace and
+ * false for the parts that map the kernel.
+ */
+static inline bool pgdp_maps_userspace(void *__ptr)
+{
+	unsigned long ptr = (unsigned long)__ptr;
+
+	return (((ptr & ~PAGE_MASK) / sizeof(pgd_t)) < PGD_KERNEL_START);
+}
+
+/*
+ * Does this PGD allow access from userspace?
+ */
+static inline bool pgd_userspace_access(pgd_t pgd)
+{
+	return pgd.pgd & _PAGE_USER;
+}
 
 static inline int pte_none(pte_t pte)
 {
@@ -541,6 +621,7 @@ static inline int pgd_none(pgd_t pgd)
 #ifndef __ASSEMBLY__
 
 extern int direct_gbpages;
+extern pgprotval_t kernel_page_global __read_mostly;
 
 /* local pte updates need not use xchg for locking */
 static inline pte_t native_local_ptep_get_and_clear(pte_t *ptep)
@@ -639,6 +720,11 @@ static inline void ptep_set_wrprotect(struct mm_struct *mm,
 	pte_update(mm, addr, ptep);
 }
 
+static inline void __clone_pgd_range(pgd_t *dst, pgd_t *src, int count)
+{
+       memcpy(dst, src, count * sizeof(pgd_t));
+}
+
 /*
  * clone_pgd_range(pgd_t *dst, pgd_t *src, int count);
  *
@@ -651,11 +737,13 @@ static inline void ptep_set_wrprotect(struct mm_struct *mm,
  */
 static inline void clone_pgd_range(pgd_t *dst, pgd_t *src, int count)
 {
-       memcpy(dst, src, count * sizeof(pgd_t));
+	__clone_pgd_range(dst, src, count);
 #ifdef CONFIG_PAGE_TABLE_ISOLATION
 	/* Clone the shadow pgd part as well */
-	memcpy(kernel_to_shadow_pgdp(dst), kernel_to_shadow_pgdp(src),
-	       count * sizeof(pgd_t));
+	if (!static_cpu_has(X86_FEATURE_PTI_SUPPORT))
+		return;
+	__clone_pgd_range(kernel_to_shadow_pgdp(dst),
+			  kernel_to_shadow_pgdp(src), count);
 #endif
 }
 

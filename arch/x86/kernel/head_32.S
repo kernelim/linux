@@ -607,20 +607,31 @@ ENTRY(initial_code)
 ENTRY(initial_page_table)
 	.long pa(swapper_pg_dir)
 
+#ifdef CONFIG_PAGE_TABLE_ISOLATION
+#define PGD_ALIGN		(2 * PAGE_SIZE_asm)
+#define PTI_USER_PGD_FILL	1024
+#else
+#define PGD_ALIGN		(PAGE_SIZE_asm)
+#define PTI_USER_PGD_FILL	0
+#endif
+
 /*
  * BSS section
  */
 __PAGE_ALIGNED_BSS
-	.align PAGE_SIZE_asm
+	.align PGD_ALIGN
 #ifdef CONFIG_X86_PAE
 swapper_pg_pmd:
 	.fill 1024*KPMDS,4,0
+	.align PGD_ALIGN
 #else
 ENTRY(swapper_pg_dir)
 	.fill 1024,4,0
+	.fill PTI_USER_PGD_FILL,4,0
 #endif
 swapper_pg_fixmap:
 	.fill 1024,4,0
+	.align PGD_ALIGN
 #ifdef CONFIG_X86_TRAMPOLINE
 ENTRY(trampoline_pg_dir)
 	.fill 1024,4,0
@@ -634,7 +645,7 @@ ENTRY(empty_zero_page)
 #ifdef CONFIG_X86_PAE
 __PAGE_ALIGNED_DATA
 	/* Page-aligned for the benefit of paravirt? */
-	.align PAGE_SIZE_asm
+	.align PGD_ALIGN
 ENTRY(swapper_pg_dir)
 	.long	pa(swapper_pg_pmd+PGD_IDENT_ATTR),0	/* low identity map */
 # if KPMDS == 3
@@ -653,6 +664,7 @@ ENTRY(swapper_pg_dir)
 #  error "Kernel PMDs should be 1, 2 or 3"
 # endif
 	.align PAGE_SIZE_asm		/* needs to be page-sized too */
+	.fill PTI_USER_PGD_FILL,4,0
 #endif
 
 .data

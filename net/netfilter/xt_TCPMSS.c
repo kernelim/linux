@@ -50,7 +50,8 @@ tcpmss_mangle_packet(struct sk_buff *skb,
 {
 	const struct xt_tcpmss_info *info = par->targinfo;
 	struct tcphdr *tcph;
-	unsigned int tcplen, i;
+	int len, tcp_hdrlen;
+	unsigned int i;
 	__be16 oldval;
 	u16 newmss;
 	u8 *opt;
@@ -58,20 +59,15 @@ tcpmss_mangle_packet(struct sk_buff *skb,
 	if (!skb_make_writable(skb, skb->len))
 		return -1;
 
-	tcplen = skb->len - tcphoff;
-	tcph = (struct tcphdr *)(skb_network_header(skb) + tcphoff);
-
-	/* Since it passed flags test in tcp match, we know it is is
-	   not a fragment, and has data >= tcp header length.  SYN
-	   packets should not contain data: if they did, then we risk
-	   running over MTU, sending Frag Needed and breaking things
-	   badly. --RR */
-	if (tcplen != tcph->doff*4) {
-		if (net_ratelimit())
-			printk(KERN_ERR "xt_TCPMSS: bad length (%u bytes)\n",
-			       skb->len);
+	len = skb->len - tcphoff;
+	if (len < (int)sizeof(struct tcphdr))
 		return -1;
-	}
+
+	tcph = (struct tcphdr *)(skb_network_header(skb) + tcphoff);
+	tcp_hdrlen = tcph->doff * 4;
+
+	if (len < tcp_hdrlen || tcp_hdrlen < sizeof(struct tcphdr))
+		return -1;
 
 	if (info->mss == XT_TCPMSS_CLAMP_PMTU) {
 		if (dst_mtu(skb_dst(skb)) <= minlen) {
@@ -92,9 +88,8 @@ tcpmss_mangle_packet(struct sk_buff *skb,
 		newmss = info->mss;
 
 	opt = (u_int8_t *)tcph;
-	for (i = sizeof(struct tcphdr); i < tcph->doff*4; i += optlen(opt, i)) {
-		if (opt[i] == TCPOPT_MSS && tcph->doff*4 - i >= TCPOLEN_MSS &&
-		    opt[i+1] == TCPOLEN_MSS) {
+	for (i = sizeof(struct tcphdr); i <= tcp_hdrlen - TCPOLEN_MSS; i += optlen(opt, i)) {
+		if (opt[i] == TCPOPT_MSS && opt[i+1] == TCPOLEN_MSS) {
 			u_int16_t oldmss;
 
 			oldmss = (opt[i+2] << 8) | opt[i+3];
@@ -115,6 +110,17 @@ tcpmss_mangle_packet(struct sk_buff *skb,
 			return 0;
 		}
 	}
+
+	/* There is data after the header so the option can't be added
+	 * without moving it, and doing so may make the SYN packet
+	 * itself too large. Accept the packet unmodified instead.
+	 */
+	if (len > tcp_hdrlen)
+		return 0;
+
+	/* tcph->doff has 4 bits, do not wrap it to 0 */
+	if (tcp_hdrlen >= 15 * 4)
+		return 0;
 
 	/*
 	 * MSS Option not found ?! add it..
@@ -142,10 +148,10 @@ tcpmss_mangle_packet(struct sk_buff *skb,
 		newmss = min(newmss, (u16)1220);
 
 	opt = (u_int8_t *)tcph + sizeof(struct tcphdr);
-	memmove(opt + TCPOLEN_MSS, opt, tcplen - sizeof(struct tcphdr));
+	memmove(opt + TCPOLEN_MSS, opt, len - sizeof(struct tcphdr));
 
 	inet_proto_csum_replace2(&tcph->check, skb,
-				 htons(tcplen), htons(tcplen + TCPOLEN_MSS), 1);
+				 htons(len), htons(len + TCPOLEN_MSS), 1);
 	opt[0] = TCPOPT_MSS;
 	opt[1] = TCPOLEN_MSS;
 	opt[2] = (newmss & 0xff00) >> 8;

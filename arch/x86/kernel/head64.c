@@ -12,6 +12,7 @@
 #include <linux/percpu.h>
 #include <linux/start_kernel.h>
 #include <linux/io.h>
+#include <linux/kaiser.h>
 
 #include <asm/processor.h>
 #include <asm/proto.h>
@@ -72,6 +73,9 @@ void __init x86_64_start_kernel(char * real_mode_data)
 
 	/* clear bss before set_intr_gate with early_idt_handler */
 	clear_bss();
+
+	/* Preset X86_FEATURE_PTI_SUPPORT */
+	kaiser_early_init(1);
 
 	/* Make NULL pointers segfault */
 	zap_identity_mappings();

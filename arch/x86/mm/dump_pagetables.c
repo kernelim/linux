@@ -67,6 +67,24 @@ static struct addr_marker address_markers[] = {
 #define PUD_LEVEL_MULT (PTRS_PER_PMD * PMD_LEVEL_MULT)
 #define PGD_LEVEL_MULT (PTRS_PER_PUD * PUD_LEVEL_MULT)
 
+#define PGPROT_HIMEM	((pgprotval_t)-1)
+#ifdef CONFIG_HIGHMEM
+/*
+ * Return true if a kernel page table entry point to an address in the
+ * high memory area.
+ */
+static inline bool page_in_himem(pmdval_t val)
+{
+	return ((val & PTE_PFN_MASK) + (pteval_t)PAGE_OFFSET) >=
+			VMALLOC_START;
+}
+#else
+static inline bool page_in_himem(pmdval_t val)
+{
+	return false;
+}
+#endif
+
 /*
  * Print a readable form of a pgprot_t to the seq_file
  */
@@ -79,6 +97,9 @@ static void printk_prot(struct seq_file *m, pgprot_t prot, int level)
 	if (!pgprot_val(prot)) {
 		/* Not present */
 		seq_printf(m, "                          ");
+	} else if (pgprot_val(prot) == PGPROT_HIMEM) {
+		/* In high memory */
+		seq_printf(m, "         [HIMEM]          ");
 	} else {
 		if (pr & _PAGE_USER)
 			seq_printf(m, "USR ");
@@ -201,6 +222,10 @@ static void walk_pte_level(struct seq_file *m, struct pg_state *st, pmd_t addr,
 	int i;
 	pte_t *start;
 
+	if (page_in_himem(pmd_val(addr))) {
+		note_page(m, st, __pgprot(PGPROT_HIMEM), 3);
+		return;
+	}
 	start = (pte_t *) pmd_page_vaddr(addr);
 	for (i = 0; i < PTRS_PER_PTE; i++) {
 		pgprot_t prot = pte_pgprot(*start);
@@ -219,6 +244,10 @@ static void walk_pmd_level(struct seq_file *m, struct pg_state *st, pud_t addr,
 	int i;
 	pmd_t *start;
 
+	if (page_in_himem((pmdval_t)pud_val(addr))) {
+		note_page(m, st, __pgprot(PGPROT_HIMEM), 2);
+		return;
+	}
 	start = (pmd_t *) pud_page_vaddr(addr);
 	for (i = 0; i < PTRS_PER_PMD; i++) {
 		st->current_address = normalize_addr(P + i * PMD_LEVEL_MULT);

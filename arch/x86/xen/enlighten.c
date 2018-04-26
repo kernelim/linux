@@ -1349,8 +1349,7 @@ static int init_hvm_pv_info(int *major, int *minor)
 
 	xen_setup_features();
 
-	pv_info = xen_info;
-	pv_info.kernel_rpl = 0;
+	pv_info.name = "Xen HVM";
 
 	xen_domain_type = XEN_HVM_DOMAIN;
 

@@ -12,6 +12,7 @@
 #include <asm/spec_ctrl.h>
 #include <asm/cpufeature.h>
 #include <asm/nospec-branch.h>
+#include <asm/cpu.h>
 
 static DEFINE_MUTEX(spec_ctrl_mutex);
 
@@ -274,6 +275,10 @@ void spec_ctrl_rescan_cpuid(void)
 		if (old_spec == boot_cpu_has(X86_FEATURE_SPEC_CTRL) &&
 		    old_ibpb == boot_cpu_has(X86_FEATURE_IBPB_SUPPORT))
 			goto done;
+
+		/* Update the boot CPU microcode version */
+		boot_cpu_data.microcode = cpu_data(0).microcode;
+		check_bad_spectre_microcode(&boot_cpu_data);
 
 		/*
 		 * The SPEC_CTRL and IBPB_SUPPORT cpuid bits may have

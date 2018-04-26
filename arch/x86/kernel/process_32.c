@@ -356,9 +356,13 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 		load_user_cs_desc(cpu, next_p->mm);
 
 	/*
-	 * Reload esp0.
+	 * Reload esp0 on XEN PV.
 	 */
-	load_sp0(tss, next);
+	if (!static_cpu_has(X86_FEATURE_PTI_SUPPORT))
+		load_sp0(tss, next);
+
+	/* SYSENTER reads the task-stack from tss.sp1 */
+	WRITE_ONCE(tss->x86_tss.sp1, next->sp0);
 
 	/*
 	 * Save away %gs. No need to save %fs, as it was saved on the

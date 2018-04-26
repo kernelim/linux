@@ -475,7 +475,6 @@ ENTRY(ia32_syscall)
 	movq %r9, %rcx
 
 	IBRS_ENTRY
-	CLEAR_R8_TO_R15
 	FILL_RETURN_BUFFER /* no ret allowed before stuffing the RSB */
 
 	/*
@@ -497,8 +496,16 @@ ENTRY(ia32_syscall)
 	ja ia32_badsys
 ia32_do_call:
 	IA32_ARG_FIXUP
-	movq ia32_sys_call_table(,%rax,8), %rax # xxx: rip relative
-	CALL_NOSPEC %rax
+	SAVE_REST
+	CLEAR_R10_TO_R15
+#ifdef CONFIG_RETPOLINE
+	movq ia32_sys_call_table(,%rax,8), %rax
+	call __x86_indirect_thunk_rax
+#else
+	call *ia32_sys_call_table(,%rax,8)	# xxx: rip relative
+#endif
+ia32_ptregsret:
+	RESTORE_REST
 ia32_sysret:
 	movq %rax,RAX-ARGOFFSET(%rsp)
 ia32_ret_from_sys_call:
@@ -533,10 +540,16 @@ quiet_ni_syscall:
 \label:
 	leaq \func(%rip),%rax
 	leaq -ARGOFFSET+8(%rsp),\arg	/* 8 for return address */
-	jmp  ia32_ptregs_common	
+	cmpq $ia32_ptregsret, (%rsp)
+	jne  ia32_ptregs_common
+	/*  ia32_syscall? already has the full frame */
+	leaq 8(%rsp),\arg	/* 8 for return address */
+	jmp jmp_nospec
 	.endm
 
 	CFI_STARTPROC32
+jmp_nospec:
+	JMP_NOSPEC %rax
 
 	PTREGSCALL stub32_rt_sigreturn, sys32_rt_sigreturn, %rdi
 	PTREGSCALL stub32_sigreturn, sys32_sigreturn, %rdi

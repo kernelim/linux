@@ -114,66 +114,6 @@ static inline void native_pud_clear(pud_t *pud)
 	native_set_pud(pud, native_make_pud(0));
 }
 
-#ifdef CONFIG_PAGE_TABLE_ISOLATION
-/*
- * All top-level KAISER page tables are order-1 pages (8k-aligned
- * and 8k in size).  The kernel one is at the beginning 4k and
- * the user (shadow) one is in the last 4k.  To switch between
- * them, you just need to flip the 12th bit in their addresses.
- */
-#define KAISER_PGTABLE_SWITCH_BIT	PAGE_SHIFT
-
-/*
- * This generates better code than the inline assembly in
- * __set_bit().
- */
-static inline void *ptr_set_bit(void *ptr, int bit)
-{
-	unsigned long __ptr = (unsigned long)ptr;
-
-	__ptr |= (1<<bit);
-	return (void *)__ptr;
-}
-static inline void *ptr_clear_bit(void *ptr, int bit)
-{
-	unsigned long __ptr = (unsigned long)ptr;
-
-	__ptr &= ~(1<<bit);
-	return (void *)__ptr;
-}
-
-static inline pgd_t *kernel_to_shadow_pgdp(pgd_t *pgdp)
-{
-	return ptr_set_bit(pgdp, KAISER_PGTABLE_SWITCH_BIT);
-}
-static inline pgd_t *shadow_to_kernel_pgdp(pgd_t *pgdp)
-{
-	return ptr_clear_bit(pgdp, KAISER_PGTABLE_SWITCH_BIT);
-}
-#endif /* CONFIG_PAGE_TABLE_ISOLATION */
-
-/*
- * Page table pages are page-aligned.  The lower half of the top
- * level is used for userspace and the top half for the kernel.
- *
- * Returns true for parts of the PGD that map userspace and
- * false for the parts that map the kernel.
- */
-static inline bool pgdp_maps_userspace(void *__ptr)
-{
-	unsigned long ptr = (unsigned long)__ptr;
-
-	return (ptr & ~PAGE_MASK) < (PAGE_SIZE / 2);
-}
-
-/*
- * Does this PGD allow access from userspace?
- */
-static inline bool pgd_userspace_access(pgd_t pgd)
-{
-	return pgd.pgd & _PAGE_USER;
-}
-
 static inline void kaiser_poison_pgd(pgd_t *pgd)
 {
 	if (pgd->pgd & _PAGE_PRESENT && __supported_pte_mask & _PAGE_NX)
@@ -199,74 +139,10 @@ static inline void kaiser_unpoison_pgd_atomic(pgd_t *pgd)
 		clear_bit(_PAGE_BIT_NX, &pgd->pgd);
 }
 
-/*
- * Take a PGD location (pgdp) and a pgd value that needs
- * to be set there.  Populates the shadow and returns
- * the resulting PGD that must be set in the kernel copy
- * of the page tables.
- */
-static inline pgd_t kaiser_set_shadow_pgd(pgd_t *pgdp, pgd_t pgd)
-{
-#ifdef CONFIG_PAGE_TABLE_ISOLATION
-	if (pgd_userspace_access(pgd)) {
-		if (pgdp_maps_userspace(pgdp)) {
-			VM_WARN_ON_ONCE(!is_kaiser_pgd(pgdp));
-			/*
-			 * The user/shadow page tables get the full
-			 * PGD, accessible from userspace:
-			 */
-			kernel_to_shadow_pgdp(pgdp)->pgd = pgd.pgd;
-			/*
-			 * For the copy of the pgd that the kernel
-			 * uses, make it unusable to userspace.  This
-			 * ensures if we get out to userspace with the
-			 * wrong CR3 value, userspace will crash
-			 * instead of running.
-			 */
-			if (kaiser_active())
-				kaiser_poison_pgd(&pgd);
-		}
-	} else if (pgd_userspace_access(*pgdp)) {
-		/*
-		 * We are clearing a _PAGE_USER PGD for which we
-		 * presumably populated the shadow.  We must now
-		 * clear the shadow PGD entry.
-		 */
-		if (pgdp_maps_userspace(pgdp)) {
-			VM_WARN_ON_ONCE(!is_kaiser_pgd(pgdp));
-			kernel_to_shadow_pgdp(pgdp)->pgd = pgd.pgd;
-		} else {
-			/*
-			 * Attempted to clear a _PAGE_USER PGD which
-			 * is in the kernel porttion of the address
-			 * space.  PGDs are pre-populated and we
-			 * never clear them.
-			 */
-			VM_WARN_ON_ONCE(!is_kaiser_pgd(pgdp));
-		}
-	} else {
-		/*
-		 * _PAGE_USER was not set in either the PGD being set
-		 * or cleared.  All kernel PGDs should be
-		 * pre-populated so this should never happen after
-		 * boot.
-		 */
-		VM_WARN_ON_ONCE(system_state == SYSTEM_RUNNING &&
-				is_kaiser_pgd(pgdp));
-	}
-#endif
-	/* return the copy of the PGD we want the kernel to use: */
-	return pgd;
-}
-
 static inline void native_set_pgd(pgd_t *pgdp, pgd_t pgd)
 {
 	mm_track_pgd(pgdp);
-#ifdef CONFIG_PAGE_TABLE_ISOLATION
-	*pgdp = kaiser_set_shadow_pgd(pgdp, pgd);
-#else /* CONFIG_PAGE_TABLE_ISOLATION */
-	*pgdp = pgd;
-#endif
+	*pgdp = pti_set_user_pgd(pgdp, pgd);
 }
 
 static inline void native_pgd_clear(pgd_t *pgd)

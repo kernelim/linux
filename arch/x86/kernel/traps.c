@@ -1017,7 +1017,7 @@ void __init trap_init(void)
 	set_intr_gate_ist(1, &debug, DEBUG_STACK);
 	set_intr_gate_ist(2, &nmi, NMI_STACK);
 	/* int3 can be called from all */
-	set_system_intr_gate_ist(3, &int3, DEBUG_STACK);
+	set_system_intr_gate(3, &int3);
 	/* int4 can be called from all */
 	set_system_intr_gate(4, &overflow);
 	set_intr_gate(5, &bounds);
@@ -1064,7 +1064,7 @@ void __init trap_init(void)
 		printk("done.\n");
 	}
 
-	set_system_trap_gate(SYSCALL_VECTOR, &system_call);
+	set_system_intr_gate(SYSCALL_VECTOR, &system_call);
 	set_bit(SYSCALL_VECTOR, used_vectors);
 #endif
 

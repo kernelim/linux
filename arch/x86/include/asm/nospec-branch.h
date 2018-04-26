@@ -130,7 +130,7 @@
   * A simpler FILL_RETURN_BUFFER macro. Don't make people use the CPP
   * monstrosity above, manually.
   */
-.macro FILL_RETURN_BUFFER_CLOBBER reg=%rax
+.macro FILL_RETURN_BUFFER_CLOBBER reg=%_ASM_AX
 	ALTERNATIVE "jmp .Lskip_rsb_\@",				\
 		__stringify(__FILL_RETURN_BUFFER(\reg,			\
 			    RSB_CLEAR_LOOPS, %_ASM_SP))			\
@@ -139,9 +139,9 @@
 .endm
 
 .macro FILL_RETURN_BUFFER
-	push %rax
-	FILL_RETURN_BUFFER_CLOBBER reg=%rax
-	pop %rax
+	push %_ASM_AX
+	FILL_RETURN_BUFFER_CLOBBER reg=%_ASM_AX
+	pop %_ASM_AX
 .endm
 
 #else /* __ASSEMBLY__ */

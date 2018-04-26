@@ -95,11 +95,52 @@ static inline void native_set_pmd(pmd_t *pmdp, pmd_t pmd)
 	set_64bit((unsigned long long *)(pmdp), native_pmd_val(pmd));
 }
 
+/*
+ * PHYSICAL_PAGE_MASK is casted to 32 bits, so we can't use it here.
+ */
+#define PGD_PAE_PHYS_MASK	(__PHYSICAL_MASK & PAGE_MASK)
+
+/*
+ * PAE allows Base Address, P, PWT, PCD and AVL bits to be set in PGD entries.
+ * Bits 9-11 are ignored. All other bits are Reserved (must be zero).
+ */
+#define PGD_ALLOWED_BITS	(PGD_PAE_PHYS_MASK | _PAGE_PRESENT | \
+				 _PAGE_PWT | _PAGE_PCD | \
+				 _PAGE_UNUSED1 | _PAGE_IOMAP | _PAGE_HIDDEN)
+
 static inline void native_set_pud(pud_t *pudp, pud_t pud)
 {
 	mm_track_pud(pudp);
+#ifdef CONFIG_PAGE_TABLE_ISOLATION
+	pud.pgd.pgd &= PGD_ALLOWED_BITS;
+	pud.pgd = pti_set_user_pgd((pgd_t *)pudp, pud.pgd);
+#endif
 	set_64bit((unsigned long long *)(pudp), native_pud_val(pud));
 }
+
+#ifdef CONFIG_PAGE_TABLE_ISOLATION
+/*
+ * The NX bit isn't allowed in the PDPTE (PGD) entries in Physical Address
+ * Extension (PAE) mode. As a result, PGD entry poisoning for user PGD
+ * entries won't work.
+ */
+
+static inline void kaiser_poison_pgd(pgd_t *pgd)
+{
+}
+
+static inline void kaiser_unpoison_pgd(pgd_t *pgd)
+{
+}
+
+static inline void kaiser_poison_pgd_atomic(pgd_t *pgd)
+{
+}
+
+static inline void kaiser_unpoison_pgd_atomic(pgd_t *pgd)
+{
+}
+#endif
 
 /*
  * For PTEs and PDEs, we must clear the P-bit first when clearing a page table
@@ -131,6 +172,10 @@ static inline void pud_clear(pud_t *pudp)
 
 	mm_track_pud(pudp);
 	set_pud(pudp, __pud(0));
+
+#ifdef CONFIG_PAGE_TABLE_ISOLATION
+	pti_set_user_pgd((pgd_t *)pudp, __pgd(0));
+#endif
 
 	/*
 	 * According to Intel App note "TLBs, Paging-Structure Caches,

@@ -64,6 +64,12 @@ extern void kaiser_remove_mapping(unsigned long start, unsigned long size);
  */
 extern void kaiser_init(void);
 
+/**
+ * kaiser_early_init - Check if PTI can be enabled
+ * @preset: Preset X86_FEATURE_PTI_SUPPORT bit even earlier.
+ */
+extern void kaiser_early_init(bool preset);
+
 extern bool is_kaiser_pgd(pgd_t *pgd);
 
 extern int kaiser_enabled;

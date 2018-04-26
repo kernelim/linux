@@ -7,6 +7,7 @@
 
 #include <linux/init.h>
 #include <linux/start_kernel.h>
+#include <linux/kaiser.h>
 
 #include <asm/setup.h>
 #include <asm/sections.h>
@@ -51,6 +52,9 @@ void __init i386_start_kernel(void)
 		i386_default_early_setup();
 		break;
 	}
+
+	/* Preset X86_FEATURE_PTI_SUPPORT */
+	kaiser_early_init(1);
 
 	/*
 	 * At this point everything still needed from the boot loader

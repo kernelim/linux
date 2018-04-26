@@ -25,6 +25,7 @@
 #include <asm/tlbflush.h>
 #include <asm/vdso.h>
 #include <asm/proto.h>
+#include <asm/asm-offsets.h>
 
 enum {
 	VDSO_DISABLED = 0,
@@ -227,6 +228,7 @@ void enable_sep_cpu(void)
 {
 	int cpu = get_cpu();
 	struct tss_struct *tss = &per_cpu(init_tss, cpu);
+	unsigned long tss_stack;
 
 	if (!boot_cpu_has(X86_FEATURE_SEP)) {
 		put_cpu();
@@ -234,9 +236,9 @@ void enable_sep_cpu(void)
 	}
 
 	tss->x86_tss.ss1 = __KERNEL_CS;
-	tss->x86_tss.sp1 = sizeof(struct tss_struct) + (unsigned long) tss;
+	tss_stack = TSS_stack + TSS_stack_size + (unsigned long) tss;
 	wrmsr(MSR_IA32_SYSENTER_CS, __KERNEL_CS, 0);
-	wrmsr(MSR_IA32_SYSENTER_ESP, tss->x86_tss.sp1, 0);
+	wrmsr(MSR_IA32_SYSENTER_ESP, tss_stack, 0);
 	wrmsr(MSR_IA32_SYSENTER_EIP, (unsigned long) ia32_sysenter_target, 0);
 	put_cpu();	
 }

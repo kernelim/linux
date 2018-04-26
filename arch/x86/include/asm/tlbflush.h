@@ -63,7 +63,10 @@ static inline void invpcid_flush_all_nonglobals(void)
 	__invpcid(0, 0, INVPCID_TYPE_ALL_NON_GLOBAL);
 }
 
-#ifdef CONFIG_PAGE_TABLE_ISOLATION
+/*
+ * PCID isn't supported in the x86-32.
+ */
+#if defined(CONFIG_PAGE_TABLE_ISOLATION) && defined(CONFIG_X86_64)
 static __always_inline void __load_cr3(unsigned long cr3)
 {
 	if (static_cpu_has(X86_FEATURE_PCID) && kaiser_active()) {
@@ -96,12 +99,12 @@ static __always_inline void __load_cr3(unsigned long cr3)
 	} else
 		write_cr3(cr3);
 }
-#else /* CONFIG_PAGE_TABLE_ISOLATION */
+#else /* CONFIG_PAGE_TABLE_ISOLATION && CONFIG_X86_64 */
 static __always_inline void __load_cr3(unsigned long cr3)
 {
 	write_cr3(cr3);
 }
-#endif /* CONFIG_PAGE_TABLE_ISOLATION */
+#endif /* CONFIG_PAGE_TABLE_ISOLATION && CONFIG_X86_64 */
 
 static inline void __native_flush_tlb(void)
 {
@@ -164,7 +167,7 @@ static inline void __native_flush_tlb_global(void)
 
 static inline void __native_flush_tlb_single(unsigned long addr)
 {
-#ifdef CONFIG_PAGE_TABLE_ISOLATION
+#if defined(CONFIG_PAGE_TABLE_ISOLATION) && defined(CONFIG_X86_64)
 	unsigned long cr3, shadow_cr3;
 
 	/* Flush the address out of both PCIDs. */

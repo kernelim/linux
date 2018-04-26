@@ -37,7 +37,7 @@ int xen_platform_pci_unplug;
 EXPORT_SYMBOL_GPL(xen_platform_pci_unplug);
 static int xen_emul_unplug;
 
-static int __init check_platform_magic(void)
+static int check_platform_magic(void)
 {
 	short magic;
 	char protocol;

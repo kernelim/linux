@@ -199,6 +199,7 @@
 #define X86_FEATURE_RETPOLINE	( 7*32+19) /* Generic Retpoline mitigation for Spectre variant 2 */
 #define X86_FEATURE_RETPOLINE_AMD ( 7*32+20) /* AMD Retpoline mitigation for Spectre variant 2 */
 #define X86_FEATURE_IBP_DISABLE	( 7*32+21) /* Old AMD Indirect Branch Predictor Disable */
+#define X86_FEATURE_PTI_SUPPORT	( 7*32+22) /* "" Provide PTI support */
 
 /* Virtualization flags: Linux defined, word 8 */
 #define X86_FEATURE_TPR_SHADOW  (8*32+ 0) /* Intel TPR Shadow */

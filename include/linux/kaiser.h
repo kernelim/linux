@@ -11,6 +11,10 @@
  * disabled.
  */
 
+static inline void kaiser_early_init(bool preset)
+{
+}
+
 static inline void kaiser_init(void)
 {
 }

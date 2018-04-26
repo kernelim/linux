@@ -258,6 +258,13 @@ int machine_kexec_prepare(struct kimage *image)
 	if (result)
 		return result;
 
+#ifdef CONFIG_PAGE_TABLE_ISOLATION
+	/*
+	 * The second page of control_code_page may be corrupted by the
+	 * PTI code, so just clear the page for safety.
+	 */
+	clear_page(image->control_code_page + PAGE_SIZE);
+#endif
 	return 0;
 }
 

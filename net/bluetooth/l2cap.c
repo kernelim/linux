@@ -2459,7 +2459,7 @@ static int l2cap_parse_conf_rsp(struct sock *sk, void *rsp, int len,
 	void *endptr = data + size;
 	int type, olen;
 	unsigned long val;
-	struct l2cap_conf_rfc rfc;
+	struct l2cap_conf_rfc rfc = { .mode = L2CAP_MODE_BASIC };
 
 	BT_DBG("sk %p, rsp %p, len %d, req %p", sk, rsp, len, data);
 
