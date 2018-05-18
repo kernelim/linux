@@ -31,10 +31,8 @@ static const struct cpuid_bit cpuid_bits[] = {
 	{ X86_FEATURE_HWP_PKG_REQ,	CPUID_EAX,11, 0x00000006, 0 },
 	{ X86_FEATURE_APERFMPERF,	CPUID_ECX, 0, 0x00000006, 0 },
 	{ X86_FEATURE_EPB,		CPUID_ECX, 3, 0x00000006, 0 },
-	{ X86_FEATURE_SPEC_CTRL,	CPUID_EDX,26, 0x00000007, 0 },
 	{ X86_FEATURE_XSAVEOPT,		CPUID_EAX, 0, 0x0000000d, 1 },
 	{ X86_FEATURE_CPB,		CPUID_EDX, 9, 0x80000007, 0 },
-	{ X86_FEATURE_IBPB_SUPPORT,	CPUID_EDX,12, 0x80000008, 0 },
 	{ X86_FEATURE_NPT,		CPUID_EDX, 0, 0x8000000a, 0 },
 	{ X86_FEATURE_LBRV,		CPUID_EDX, 1, 0x8000000a, 0 },
 	{ X86_FEATURE_SVML,		CPUID_EDX, 2, 0x8000000a, 0 },
@@ -77,9 +75,6 @@ void init_scattered_cpuid_features(struct cpuinfo_x86 *c)
 		if (cpuid_ecx(6) & 0x1)
 			set_cpu_cap(c, X86_FEATURE_APERFMPERF);
 	}
-
-	if (cpu_has(c, X86_FEATURE_SPEC_CTRL))
-		set_cpu_cap(c, X86_FEATURE_IBPB_SUPPORT);
 }
 
 u32 get_scattered_cpuid_leaf(unsigned int level, unsigned int sub_leaf,

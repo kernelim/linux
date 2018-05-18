@@ -263,7 +263,7 @@ int machine_kexec_prepare(struct kimage *image)
 	 * The second page of control_code_page may be corrupted by the
 	 * PTI code, so just clear the page for safety.
 	 */
-	clear_page(image->control_code_page + PAGE_SIZE);
+	clear_page(page_address(image->control_code_page) + PAGE_SIZE);
 #endif
 	return 0;
 }

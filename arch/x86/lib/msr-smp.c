@@ -2,6 +2,7 @@
 #include <linux/preempt.h>
 #include <linux/smp.h>
 #include <asm/msr.h>
+#include <asm/spec_ctrl.h>
 
 static void __rdmsr_on_cpu(void *info)
 {
@@ -28,7 +29,15 @@ static void __wrmsr_on_cpu(void *info)
 	else
 		reg = &rv->reg;
 
-	wrmsr(rv->msr_no, reg->l, reg->h);
+	/*
+	 * We need to set the SSBD bit in the SPEC_CTRL MSR if TIF_SSBD
+	 * is set.
+	 */
+	if (unlikely((rv->msr_no == MSR_IA32_SPEC_CTRL) &&
+		      rds_tif_to_spec_ctrl(current_thread_info()->flags)))
+		wrmsr(rv->msr_no, reg->l | FEATURE_ENABLE_SSBD, reg->h);
+	else
+		wrmsr(rv->msr_no, reg->l, reg->h);
 }
 
 int rdmsr_on_cpu(unsigned int cpu, u32 msr_no, u32 *l, u32 *h)

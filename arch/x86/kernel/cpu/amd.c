@@ -7,6 +7,7 @@
 #include <asm/processor.h>
 #include <asm/apic.h>
 #include <asm/cpu.h>
+#include <asm/nospec-branch.h>
 #include <asm/pci-direct.h>
 
 #ifdef CONFIG_X86_64
@@ -470,6 +471,26 @@ static void __cpuinit early_init_amd(struct cpuinfo_x86 *c)
 			if (!(val & BIT(24)))
 				printk(KERN_WARNING FW_BUG "TSC doesn't count "
 					"with P0 frequency!\n");
+		}
+	}
+
+	if (c->x86 >= 0x15 && c->x86 <= 0x17) {
+		unsigned int bit;
+
+		switch (c->x86) {
+		case 0x15: bit = 54; break;
+		case 0x16: bit = 33; break;
+		case 0x17: bit = 10; break;
+		default: return;
+		}
+		/*
+		 * Try to cache the base value so further operations can
+		 * avoid RMW. If that faults, do not enable SSBD.
+		 */
+		if (!rdmsrl_safe(MSR_AMD64_LS_CFG, &x86_amd_ls_cfg_base)) {
+			setup_force_cpu_cap(X86_FEATURE_SSBD);
+			setup_force_cpu_cap(X86_FEATURE_AMD_SSBD);
+			x86_amd_ls_cfg_rds_mask = (1ULL << bit);
 		}
 	}
 }

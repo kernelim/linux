@@ -23,6 +23,7 @@
 #include <asm/cacheflush.h>
 #include <asm/nospec-branch.h>
 #include <asm/spec_ctrl.h>
+#include <linux/prctl.h>
 
 #ifdef CONFIG_X86_32
 static int __init no_halt(char *s)
@@ -170,14 +171,25 @@ static void __init spectre_v2_select_mitigation(void);
 void __init check_bugs(void)
 {
 	identify_boot_cpu();
+	spec_ctrl_save_msr();
+
 	if (!IS_ENABLED(CONFIG_SMP)) {
 		printk(KERN_INFO "CPU: ");
 		print_cpu_info(&boot_cpu_data);
 	}
 
+	/*
+	 * Select proper mitigation for any exposure to the Speculative Store
+	 * Bypass vulnerability (exposed as a bug in "Memory Disambiguation")
+	 * This has to be done before spec_ctrl_init() to make sure that its
+	 * SPEC_CTRL MSR value is properly set up.
+	 */
+	ssb_select_mitigation();
+
 	/* Select the proper spectre mitigation before patching alternatives */
 	spec_ctrl_init();
 	spectre_v2_select_mitigation();
+
 	spec_ctrl_cpu_init();
 
 #ifdef CONFIG_X86_32
@@ -202,6 +214,14 @@ void __init check_bugs(void)
 	if (!direct_gbpages)
 		set_memory_4k((unsigned long)__va(0), 1);
 #endif
+}
+
+void x86_amd_rds_enable(void)
+{
+	u64 msrval = x86_amd_ls_cfg_base | x86_amd_ls_cfg_rds_mask;
+
+	if (boot_cpu_has(X86_FEATURE_AMD_SSBD))
+		wrmsrl(MSR_AMD64_LS_CFG, msrval);
 }
 
 /* The kernel command line selection */
@@ -458,6 +478,171 @@ static void __init spectre_v2_select_mitigation(void)
 
 #undef pr_fmt
 
+#define pr_fmt(fmt)    "Speculative Store Bypass: " fmt
+
+enum ssb_mitigation ssb_mode = SPEC_STORE_BYPASS_NONE;
+
+/* The kernel command line selection */
+enum ssb_mitigation_cmd {
+	SPEC_STORE_BYPASS_CMD_NONE,
+	SPEC_STORE_BYPASS_CMD_AUTO,
+	SPEC_STORE_BYPASS_CMD_ON,
+	SPEC_STORE_BYPASS_CMD_PRCTL,
+};
+
+static const char *ssb_strings[] = {
+	[SPEC_STORE_BYPASS_NONE]	= "Vulnerable",
+	[SPEC_STORE_BYPASS_DISABLE]	= "Mitigation: Speculative Store Bypass disabled",
+	[SPEC_STORE_BYPASS_PRCTL]	= "Mitigation: Speculative Store Bypass disabled via prctl"
+};
+
+static enum ssb_mitigation_cmd  ssb_cmd = SPEC_STORE_BYPASS_CMD_AUTO;
+
+static int __init set_no_rds_disable(char *arg)
+{
+	ssb_cmd = SPEC_STORE_BYPASS_CMD_NONE;
+	return 0;
+}
+early_param("nospec_store_bypass_disable", set_no_rds_disable);
+
+static int __init set_rds_disable(char *arg)
+{
+	if (!arg)
+		return 0;
+
+	if (!strcmp(arg, "off")) {
+		ssb_cmd = SPEC_STORE_BYPASS_CMD_NONE;
+	} else if (!strcmp(arg, "on")) {
+		ssb_cmd = SPEC_STORE_BYPASS_CMD_ON;
+	} else if (!strcmp(arg, "auto")) {
+		ssb_cmd = SPEC_STORE_BYPASS_CMD_AUTO;
+	} else if (!strcmp(arg, "prctl")) {
+		ssb_cmd = SPEC_STORE_BYPASS_CMD_PRCTL;
+	}
+	return 0;
+}
+early_param("spec_store_bypass_disable", set_rds_disable);
+
+static enum ssb_mitigation __ssb_select_mitigation(void)
+{
+	enum ssb_mitigation mode = SPEC_STORE_BYPASS_NONE;
+	enum ssb_mitigation_cmd cmd = ssb_cmd;
+
+	if (!boot_cpu_has(X86_FEATURE_SSBD))
+		return mode;
+
+	if (!boot_cpu_has_bug(X86_BUG_SPEC_STORE_BYPASS) &&
+	    (cmd == SPEC_STORE_BYPASS_CMD_NONE ||
+	     cmd == SPEC_STORE_BYPASS_CMD_AUTO))
+		return mode;
+
+	switch (cmd) {
+	case SPEC_STORE_BYPASS_CMD_AUTO:
+		/* Choose prctl as the default mode */
+		mode = SPEC_STORE_BYPASS_PRCTL;
+		break;
+	case SPEC_STORE_BYPASS_CMD_ON:
+		mode = SPEC_STORE_BYPASS_DISABLE;
+		break;
+	case SPEC_STORE_BYPASS_CMD_PRCTL:
+		mode = SPEC_STORE_BYPASS_PRCTL;
+		break;
+	case SPEC_STORE_BYPASS_CMD_NONE:
+		break;
+	}
+
+	/*
+	 * We have three CPU feature flags that are in play here:
+	 *  - X86_BUG_SPEC_STORE_BYPASS - CPU is susceptible.
+	 *  - X86_FEATURE_SSBD - CPU is able to turn off speculative store bypass
+	 *  - X86_FEATURE_SPEC_STORE_BYPASS_DISABLE - engage the mitigation
+	 */
+	if (mode == SPEC_STORE_BYPASS_DISABLE) {
+		setup_force_cpu_cap(X86_FEATURE_SPEC_STORE_BYPASS_DISABLE);
+		/*
+		 * Intel uses the SPEC CTRL MSR Bit(2) for this, while AMD uses
+		 * a completely different MSR and bit dependent on family.
+		 */
+		switch (boot_cpu_data.x86_vendor) {
+		case X86_VENDOR_INTEL:
+			x86_spec_ctrl_base |= FEATURE_ENABLE_SSBD;
+			break;
+		case X86_VENDOR_AMD:
+			x86_amd_rds_enable();
+			break;
+		}
+	}
+
+	return mode;
+}
+
+void ssb_select_mitigation()
+{
+	ssb_mode = __ssb_select_mitigation();
+
+	if (boot_cpu_has_bug(X86_BUG_SPEC_STORE_BYPASS))
+		pr_info("%s\n", ssb_strings[ssb_mode]);
+}
+
+#undef pr_fmt
+
+static int ssb_prctl_set(unsigned long ctrl)
+{
+	bool ssbd = !!test_tsk_thread_flag(current, TIF_SSBD);
+
+	if (ssb_mode != SPEC_STORE_BYPASS_PRCTL)
+		return -ENXIO;
+
+	if (ctrl == PR_SPEC_ENABLE)
+		clear_tsk_thread_flag(current, TIF_SSBD);
+	else
+		set_tsk_thread_flag(current, TIF_SSBD);
+
+	if (ssbd != !!test_tsk_thread_flag(current, TIF_SSBD))
+		speculative_store_bypass_update();
+
+	return 0;
+}
+
+static int ssb_prctl_get(void)
+{
+	switch (ssb_mode) {
+	case SPEC_STORE_BYPASS_DISABLE:
+		return PR_SPEC_DISABLE;
+	case SPEC_STORE_BYPASS_PRCTL:
+		if (test_tsk_thread_flag(current, TIF_SSBD))
+			return PR_SPEC_PRCTL | PR_SPEC_DISABLE;
+		return PR_SPEC_PRCTL | PR_SPEC_ENABLE;
+	default:
+		if (boot_cpu_has_bug(X86_BUG_SPEC_STORE_BYPASS))
+			return PR_SPEC_ENABLE;
+		return PR_SPEC_NOT_AFFECTED;
+	}
+}
+
+int arch_prctl_spec_ctrl_set(unsigned long which, unsigned long ctrl)
+{
+	if (ctrl != PR_SPEC_ENABLE && ctrl != PR_SPEC_DISABLE)
+		return -ERANGE;
+
+	switch (which) {
+	case PR_SPEC_STORE_BYPASS:
+		return ssb_prctl_set(ctrl);
+	default:
+		return -ENODEV;
+	}
+}
+
+int arch_prctl_spec_ctrl_get(unsigned long which)
+{
+	switch (which) {
+	case PR_SPEC_STORE_BYPASS:
+		return ssb_prctl_get();
+	default:
+		return -ENODEV;
+	}
+}
+
 #ifdef CONFIG_SYSFS
 ssize_t cpu_show_meltdown(struct device *dev,
 			  struct device_attribute *attr, char *buf)
@@ -487,5 +672,13 @@ ssize_t cpu_show_spectre_v2(struct device *dev,
 	if (!boot_cpu_has_bug(X86_BUG_SPECTRE_V2))
 		return sprintf(buf, "Not affected\n");
 	return sprintf(buf, "%s\n", spectre_v2_strings[spectre_v2_enabled]);
+}
+
+ssize_t cpu_show_spec_store_bypass(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	if (!boot_cpu_has_bug(X86_BUG_SPEC_STORE_BYPASS))
+		return sprintf(buf, "Not affected\n");
+	return sprintf(buf, "%s\n", ssb_strings[ssb_mode]);
 }
 #endif

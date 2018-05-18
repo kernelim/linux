@@ -19,6 +19,7 @@
 #include <asm/bootparam.h>
 #include <asm/elf.h>
 #include <asm/suspend.h>
+#include <asm/spec_ctrl.h>
 
 #include <xen/interface/xen.h>
 
@@ -154,4 +155,10 @@ void foo(void)
 	OFFSET(BP_hardware_subarch, boot_params, hdr.hardware_subarch);
 	OFFSET(BP_version, boot_params, hdr.version);
 	OFFSET(BP_kernel_alignment, boot_params, hdr.kernel_alignment);
+
+	/* Kernel IBRS speculation control structure */
+	OFFSET(KERNEL_IBRS_SPEC_CTRL_enabled, kernel_ibrs_spec_ctrl, enabled);
+	OFFSET(KERNEL_IBRS_SPEC_CTRL_entry, kernel_ibrs_spec_ctrl, entry);
+	OFFSET(KERNEL_IBRS_SPEC_CTRL_exit, kernel_ibrs_spec_ctrl, exit);
+	OFFSET(KERNEL_IBRS_SPEC_CTRL_hi32, kernel_ibrs_spec_ctrl, hi32);
 }
