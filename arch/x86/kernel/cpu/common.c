@@ -177,6 +177,7 @@ static int __init x86_nopcid_setup(char *s)
 	return 0;
 }
 early_param("nopcid", x86_nopcid_setup);
+#endif
 
 static int __init x86_noinvpcid_setup(char *s)
 {
@@ -193,7 +194,6 @@ static int __init x86_noinvpcid_setup(char *s)
 	return 0;
 }
 early_param("noinvpcid", x86_noinvpcid_setup);
-#endif
 
 #ifdef CONFIG_X86_32
 static int cachesize_override __cpuinitdata = -1;
@@ -1160,7 +1160,7 @@ static void __cpuinit identify_cpu(struct cpuinfo_x86 *c)
 		wrmsrl(MSR_IA32_SPEC_CTRL, x86_spec_ctrl_base);
 
 	if (ssb_mode == SPEC_STORE_BYPASS_DISABLE)
-		x86_amd_rds_enable();
+		x86_amd_ssbd_enable();
 
 }
 

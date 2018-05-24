@@ -325,13 +325,16 @@ static __sched
 int __wait_on_atomic_t(wait_queue_head_t *wq, struct wait_bit_queue *q,
 		       int (*action)(atomic_t *), unsigned mode)
 {
+	atomic_t *val;
 	int ret = 0;
 
 	do {
 		prepare_to_wait(wq, &q->wait, mode);
-		if (atomic_read(q->key.flags) == 0)
-			ret = (*action)(q->key.flags);
-	} while (!ret && atomic_read(q->key.flags) != 0);
+		val = q->key.flags;
+		if (atomic_read(val) == 0)
+			break;
+		ret = (*action)(val);
+	} while (!ret && atomic_read(val) != 0);
 	finish_wait(wq, &q->wait);
 	return ret;
 }

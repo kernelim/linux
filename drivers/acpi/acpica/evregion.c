@@ -226,6 +226,21 @@ acpi_ev_execute_reg_method(union acpi_operand_object *region_obj, u32 function)
 	info->flags = ACPI_IGNORE_RETURN_VALUE;
 
 	/*
+	 * In most cases, the ACPI interpreter has not been entered by this
+	 * thread at this point. In those cases, routine acpi_ns_evaluate
+	 * can enter the interpreter without encountering a mutex deadlock.
+	 * However, _REG methods can be invoked for a region defined within
+	 * module-level AML code. In such a case, the interpreter has
+	 * already been entered by this thread.
+	 *
+	 * RHEL6-ONLY: If the interpreter is already active in this thread,
+	 * set flag to indicate this to acpi_ns_evaluate.
+	 */
+	if (acpi_ex_is_interpreter_entered()) {
+		info->flags |= ACPI_INTERPRETER_ENTERED;
+	}
+
+	/*
 	 * The _REG method has two arguments:
 	 *
 	 * Arg0 - Integer:

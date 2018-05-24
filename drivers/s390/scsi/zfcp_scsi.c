@@ -3,7 +3,7 @@
  *
  * Interface to Linux SCSI midlayer.
  *
- * Copyright IBM Corp. 2002, 2015
+ * Copyright IBM Corp. 2002, 2016
  */
 
 #define KMSG_COMPONENT "zfcp"
@@ -249,6 +249,57 @@ static int zfcp_scsi_eh_abort_handler(struct scsi_cmnd *scpnt)
 	return retval;
 }
 
+struct zfcp_scsi_req_filter {
+	u8 tmf_scope;
+	u32 lun_handle;
+	u32 port_handle;
+};
+
+static void zfcp_scsi_forget_cmnd(struct zfcp_fsf_req *old_req, void *data)
+{
+	struct zfcp_scsi_req_filter *filter =
+		(struct zfcp_scsi_req_filter *)data;
+
+	/* already aborted - prevent side-effects - or not a SCSI command */
+	if (old_req->data == NULL || old_req->fsf_command != FSF_QTCB_FCP_CMND)
+		return;
+
+	/* (tmf_scope == FCP_TMF_TGT_RESET || tmf_scope == FCP_TMF_LUN_RESET) */
+	if (old_req->qtcb->header.port_handle != filter->port_handle)
+		return;
+
+	if (filter->tmf_scope == FCP_TMF_LUN_RESET &&
+	    old_req->qtcb->header.lun_handle != filter->lun_handle)
+		return;
+
+	zfcp_dbf_scsi_nullcmnd("scfc", filter->tmf_scope,
+			       (struct scsi_cmnd *)old_req->data, old_req);
+	old_req->data = NULL;
+}
+
+static void zfcp_scsi_forget_cmnds(struct zfcp_unit *unit, u8 tm_flags)
+{
+	struct zfcp_adapter *adapter = unit->port->adapter;
+	struct zfcp_scsi_req_filter filter = {
+		.tmf_scope = FCP_TMF_TGT_RESET,
+		.port_handle = unit->port->handle,
+	};
+	unsigned long flags;
+
+	if (tm_flags == FCP_TMF_LUN_RESET) {
+		filter.tmf_scope = FCP_TMF_LUN_RESET;
+		filter.lun_handle = unit->handle;
+	}
+
+	/*
+	 * abort_lock secures against other processings - in the abort-function
+	 * and normal cmnd-handler - of (struct zfcp_fsf_req *)->data
+	 */
+	write_lock_irqsave(&adapter->abort_lock, flags);
+	zfcp_reqlist_apply_for_all(adapter, zfcp_scsi_forget_cmnd, &filter);
+	write_unlock_irqrestore(&adapter->abort_lock, flags);
+}
+
 static int zfcp_task_mgmt_function(struct scsi_cmnd *scpnt, u8 tm_flags)
 {
 	struct zfcp_unit *unit = scpnt->device->hostdata;
@@ -284,8 +335,10 @@ static int zfcp_task_mgmt_function(struct scsi_cmnd *scpnt, u8 tm_flags)
 	} else if (fsf_req->status & ZFCP_STATUS_FSFREQ_TMFUNCNOTSUPP) {
 		zfcp_dbf_scsi_devreset("nsup", tm_flags, unit, scpnt);
 		retval = FAILED;
-	} else
+	} else {
 		zfcp_dbf_scsi_devreset("okay", tm_flags, unit, scpnt);
+		zfcp_scsi_forget_cmnds(unit, tm_flags);
+	}
 
 	zfcp_fsf_req_free(fsf_req);
 	return retval;

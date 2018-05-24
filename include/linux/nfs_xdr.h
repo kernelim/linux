@@ -1142,6 +1142,22 @@ struct nfs41_free_stateid_res {
 	struct nfs4_sequence_res	seq_res;
 };
 
+static inline void
+nfs_free_pnfs_ds_cinfo(struct pnfs_ds_commit_info *cinfo)
+{
+	kfree(cinfo->buckets);
+}
+
+#else
+
+struct pnfs_ds_commit_info {
+};
+
+static inline void
+nfs_free_pnfs_ds_cinfo(struct pnfs_ds_commit_info *cinfo)
+{
+}
+
 #endif /* CONFIG_NFS_V4_1 */
 
 struct nfs_page;

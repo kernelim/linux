@@ -123,7 +123,7 @@ ifdef CONFIG_RETPOLINE
         KBUILD_CFLAGS += $(RETPOLINE_CFLAGS) -DRETPOLINE
     else
         # Fail brew build, but let other users proceed with warning
-        RETPOLINE_MSG := CONFIG_RETPOLINE=y, but not supported by the compiler. Toolchain update recommended.
+        RETPOLINE_MSG := CONFIG_RETPOLINE=y, but not supported by the compiler. Compiler update recommended.
         KBUILD_USER := $(shell id -un)
         ifeq ($(KBUILD_USER), mockbuild)
             $(error $(RETPOLINE_MSG))

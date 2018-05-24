@@ -3,7 +3,7 @@
  *
  * Global definitions for the zfcp device driver.
  *
- * Copyright IBM Corporation 2002, 2009
+ * Copyright IBM Corporation 2002, 2016
  */
 
 #ifndef ZFCP_DEF_H
@@ -627,6 +627,34 @@ zfcp_reqlist_find_safe(struct zfcp_adapter *adapter, struct zfcp_fsf_req *req)
 				return request;
 	}
 	return NULL;
+}
+
+/**
+ * zfcp_reqlist_apply_for_all() - apply a function to every request.
+ * @adapter: the adapter whose requestlist contains the target requests.
+ * @f: the function to apply to each request; the first parameter of the
+ *     function will be the target-request; the second parameter is the same
+ *     pointer as given with the argument @data.
+ * @data: freely chosen argument; passed through to @f as second parameter.
+ *
+ * Uses :c:macro:`list_for_each_entry` to iterate over the lists in the hash-
+ * table (not a 'safe' variant, so don't modify the list).
+ *
+ * Holds @adapter->req_list_lock over the entire request-iteration.
+ */
+static inline void
+zfcp_reqlist_apply_for_all(struct zfcp_adapter *adapter,
+			   void (*f)(struct zfcp_fsf_req *, void *), void *data)
+{
+	struct zfcp_fsf_req *req;
+	unsigned long flags;
+	unsigned int i;
+
+	spin_lock_irqsave(&adapter->req_list_lock, flags);
+	for (i = 0; i < REQUEST_LIST_SIZE; i++)
+		list_for_each_entry(req, &adapter->req_list[i], list)
+			f(req, data);
+	spin_unlock_irqrestore(&adapter->req_list_lock, flags);
 }
 
 /*

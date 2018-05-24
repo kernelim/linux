@@ -197,6 +197,7 @@ struct acpi_evaluate_info {
 /* Values for Flags above */
 
 #define ACPI_IGNORE_RETURN_VALUE        1
+#define ACPI_INTERPRETER_ENTERED        2  /* RHEL6-ONLY */
 
 /* Info used by acpi_ns_initialize_devices */
 

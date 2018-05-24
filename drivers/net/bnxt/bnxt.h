@@ -13,10 +13,10 @@
 #include <net/flow_keys.h>
 
 #define DRV_MODULE_NAME		"bnxt_en"
-#define DRV_MODULE_VERSION	"1.2.0"
+#define DRV_MODULE_VERSION	"1.5.0"
 
 #define DRV_VER_MAJ	1
-#define DRV_VER_MIN	0
+#define DRV_VER_MIN	5
 #define DRV_VER_UPD	0
 
 struct tx_bd {
@@ -108,11 +108,11 @@ struct tx_cmp {
 	 #define CMP_TYPE_REMOTE_DRIVER_REQ			 34
 	 #define CMP_TYPE_REMOTE_DRIVER_RESP			 36
 	 #define CMP_TYPE_ERROR_STATUS				 48
-	 #define CMPL_BASE_TYPE_STAT_EJECT			 (0x1aUL << 0)
-	 #define CMPL_BASE_TYPE_HWRM_DONE			 (0x20UL << 0)
-	 #define CMPL_BASE_TYPE_HWRM_FWD_REQ			 (0x22UL << 0)
-	 #define CMPL_BASE_TYPE_HWRM_FWD_RESP			 (0x24UL << 0)
-	 #define CMPL_BASE_TYPE_HWRM_ASYNC_EVENT		 (0x2eUL << 0)
+	 #define CMPL_BASE_TYPE_STAT_EJECT			 0x1aUL
+	 #define CMPL_BASE_TYPE_HWRM_DONE			 0x20UL
+	 #define CMPL_BASE_TYPE_HWRM_FWD_REQ			 0x22UL
+	 #define CMPL_BASE_TYPE_HWRM_FWD_RESP			 0x24UL
+	 #define CMPL_BASE_TYPE_HWRM_ASYNC_EVENT		 0x2eUL
 
 	#define TX_CMP_FLAGS_ERROR				(1 << 6)
 	#define TX_CMP_FLAGS_PUSH				(1 << 7)
@@ -360,7 +360,8 @@ struct rx_tpa_end_cmp {
 	 RX_TPA_END_CMP_FLAGS_PLACEMENT_ANY_GRO)
 
 #define TPA_END_GRO_TS(rx_tpa_end)					\
-	((rx_tpa_end)->rx_tpa_end_cmp_tsdelta & cpu_to_le32(RX_TPA_END_GRO_TS))
+	(!!((rx_tpa_end)->rx_tpa_end_cmp_tsdelta &			\
+	    cpu_to_le32(RX_TPA_END_GRO_TS)))
 
 struct rx_tpa_end_cmp_ext {
 	__le32 rx_tpa_end_cmp_dup_acks;
@@ -725,8 +726,8 @@ struct bnxt_vf_info {
 struct bnxt_pf_info {
 #define BNXT_FIRST_PF_FID	1
 #define BNXT_FIRST_VF_FID	128
-	u32	fw_fid;
-	u8	port_id;
+	u16	fw_fid;
+	u16	port_id;
 	u8	mac_addr[ETH_ALEN];
 	u16	max_rsscos_ctxs;
 	u16	max_cp_rings;
@@ -1099,9 +1100,11 @@ void bnxt_set_ring_params(struct bnxt *);
 void bnxt_hwrm_cmd_hdr_init(struct bnxt *, void *, u16, u16, u16);
 int _hwrm_send_message(struct bnxt *, void *, u32, int);
 int hwrm_send_message(struct bnxt *, void *, u32, int);
+int hwrm_send_message_silent(struct bnxt *, void *, u32, int);
 int bnxt_hwrm_set_coal(struct bnxt *);
 int bnxt_hwrm_set_pause(struct bnxt *);
 int bnxt_hwrm_set_link_setting(struct bnxt *, bool);
+int bnxt_hwrm_fw_set_time(struct bnxt *);
 int bnxt_open_nic(struct bnxt *, bool, bool);
 int bnxt_close_nic(struct bnxt *, bool, bool);
 void bnxt_get_max_rings(struct bnxt *, int *, int *);

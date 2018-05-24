@@ -5345,6 +5345,9 @@ int percpu_pagelist_fraction_sysctl_handler(ctl_table *table, int write,
 	unsigned int cpu;
 	int ret;
 
+	if (*length == 0)
+		return -EINVAL;
+
 	ret = proc_dointvec_minmax(table, write, buffer, length, ppos);
 	if (!write || (ret == -EINVAL))
 		return ret;

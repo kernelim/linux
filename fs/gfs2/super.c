@@ -838,9 +838,7 @@ static int gfs2_make_fs_ro(struct gfs2_sbd *sdp)
 		return error;
 
 	gfs2_meta_syncfs(sdp);
-	gfs2_log_shutdown(sdp);
-
-	clear_bit(SDF_JOURNAL_LIVE, &sdp->sd_flags);
+	gfs2_log_shutdown(sdp, 1);
 
 	if (gfs2_holder_initialized(&t_gh))
 		gfs2_glock_dq_uninit(&t_gh);
@@ -940,9 +938,16 @@ restart:
 static int gfs2_sync_fs(struct super_block *sb, int wait)
 {
 	struct gfs2_sbd *sdp = sb->s_fs_info;
-	if (wait && sdp)
-		gfs2_log_flush(sdp, NULL);
-	return 0;
+
+	if (wait) {
+		if (sb->s_writers.frozen != SB_UNFROZEN) {
+			/* Flush log and ail1 to prevent possible deadlock. */
+			gfs2_meta_syncfs(sdp);
+		} else {
+			gfs2_log_flush(sdp, NULL);
+		}
+	}
+	return sdp->sd_log_error;
 }
 
 /**
@@ -1053,9 +1058,11 @@ static int gfs2_statfs_slow(struct gfs2_sbd *sdp, struct gfs2_statfs_change_host
 					gfs2_holder_uninit(gh);
 					error = err;
 				} else {
-					if (!error)
-						error = statfs_slow_fill(
-							gh->gh_gl->gl_object, sc);
+					if (!error) {
+						struct gfs2_rgrpd *rgd =
+							gfs2_glock2rgrp(gh->gh_gl);
+						error = statfs_slow_fill(rgd, sc);
+					}
 					gfs2_glock_dq_uninit(gh);
 				}
 			}
@@ -1262,7 +1269,40 @@ static void gfs2_drop_inode(struct inode *inode)
 		if (test_bit(GLF_DEMOTE, &gl->gl_flags))
 			clear_nlink(inode);
 	}
+
+	/*
+	 * When under memory pressure when an inode's link count has dropped to
+	 * zero, defer deleting the inode to the delete workqueue.  This avoids
+	 * calling into DLM under memory pressure, which can deadlock.
+	 */
+	if (!inode->i_nlink &&
+	    unlikely(current->flags & PF_MEMALLOC) &&
+	    gfs2_holder_initialized(&ip->i_iopen_gh)) {
+		struct gfs2_glock *gl = ip->i_iopen_gh.gh_gl;
+
+		gfs2_glock_hold(gl);
+		if (queue_work(gfs2_delete_workqueue, &gl->gl_delete) == 0)
+			gfs2_glock_queue_put(gl);
+
+		generic_forget_inode(inode);
+		return;
+	}
+
 	generic_drop_inode(inode);
+}
+
+static int gfs2_glop_pending_wait(void *word)
+{
+	schedule();
+	return 0;
+}
+
+static void gfs2_glock_put_eventually(struct gfs2_glock *gl)
+{
+	if (current->flags & PF_MEMALLOC)
+		gfs2_glock_queue_put(gl);
+	else
+		gfs2_glock_put(gl);
 }
 
 /**
@@ -1282,15 +1322,18 @@ static void gfs2_clear_inode(struct inode *inode)
 	gfs2_rsqa_delete(ip, NULL);
 	gfs2_ordered_del_inode(ip);
 	glock_clear_object(ip->i_gl, ip);
-	flush_delayed_work(&ip->i_gl->gl_work);
+	wait_on_bit(&ip->i_flags, GIF_GLOP_PENDING, gfs2_glop_pending_wait, TASK_UNINTERRUPTIBLE);
 	gfs2_glock_add_to_lru(ip->i_gl);
-	gfs2_glock_put(ip->i_gl);
+	gfs2_glock_put_eventually(ip->i_gl);
 	ip->i_gl = NULL;
 	if (gfs2_holder_initialized(&ip->i_iopen_gh)) {
-		glock_clear_object(ip->i_iopen_gh.gh_gl, ip);
+		struct gfs2_glock *gl = ip->i_iopen_gh.gh_gl;
+
+		glock_clear_object(gl, ip);
 		ip->i_iopen_gh.gh_flags |= GL_NOCACHE;
-		gfs2_glock_dq_wait(&ip->i_iopen_gh);
-		gfs2_holder_uninit(&ip->i_iopen_gh);
+		gfs2_glock_hold(gl);
+		gfs2_glock_dq_uninit(&ip->i_iopen_gh);
+		gfs2_glock_put_eventually(gl);
 	}
 }
 
@@ -1509,21 +1552,24 @@ static void gfs2_delete_inode(struct inode *inode)
 	if (sb->s_flags & MS_RDONLY)
 		goto out;
 
+	if (test_bit(GIF_ALLOC_FAILED, &ip->i_flags)) {
+		BUG_ON(!gfs2_glock_is_locked_by_me(ip->i_gl));
+		gfs2_holder_mark_uninitialized(&gh);
+		goto alloc_failed;
+	}
+
 	/* Must not read inode block until block type has been verified */
 	error = gfs2_glock_nq_init(ip->i_gl, LM_ST_EXCLUSIVE, GL_SKIP, &gh);
 	if (unlikely(error)) {
 		glock_clear_object(ip->i_iopen_gh.gh_gl, ip);
 		ip->i_iopen_gh.gh_flags |= GL_NOCACHE;
-		gfs2_glock_dq_wait(&ip->i_iopen_gh);
-		gfs2_holder_uninit(&ip->i_iopen_gh);
+		gfs2_glock_dq_uninit(&ip->i_iopen_gh);
 		goto out;
 	}
 
-	if (!test_bit(GIF_ALLOC_FAILED, &ip->i_flags)) {
-		error = gfs2_check_blk_type(sdp, ip->i_no_addr, GFS2_BLKST_UNLINKED);
-		if (error)
-			goto out_truncate;
-	}
+	error = gfs2_check_blk_type(sdp, ip->i_no_addr, GFS2_BLKST_UNLINKED);
+	if (error)
+		goto out_truncate;
 
 	if (test_bit(GIF_INVALID, &ip->i_flags)) {
 		error = gfs2_inode_refresh(ip);
@@ -1531,6 +1577,13 @@ static void gfs2_delete_inode(struct inode *inode)
 			goto out_truncate;
 	}
 
+	/*
+	 * The inode may have been recreated in the meantime.
+	 */
+	if (inode->i_nlink)
+		goto out_truncate;
+
+alloc_failed:
 	if (gfs2_holder_initialized(&ip->i_iopen_gh) &&
 	    test_bit(HIF_HOLDER, &ip->i_iopen_gh.gh_iflags)) {
 		ip->i_iopen_gh.gh_flags |= GL_NOCACHE;
@@ -1616,15 +1669,23 @@ out_unlock:
 		gfs2_rs_deltree(&ip->i_res);
 
 	if (gfs2_holder_initialized(&ip->i_iopen_gh)) {
-		glock_clear_object(ip->i_iopen_gh.gh_gl, ip);
+		struct gfs2_glock *gl = ip->i_iopen_gh.gh_gl;
+
+		glock_clear_object(gl, ip);
 		if (test_bit(HIF_HOLDER, &ip->i_iopen_gh.gh_iflags)) {
 			ip->i_iopen_gh.gh_flags |= GL_NOCACHE;
-			gfs2_glock_dq_wait(&ip->i_iopen_gh);
+			gfs2_glock_dq(&ip->i_iopen_gh);
 		}
+		gfs2_glock_hold(gl);
 		gfs2_holder_uninit(&ip->i_iopen_gh);
+		gfs2_glock_put_eventually(gl);
 	}
 	glock_clear_object(ip->i_gl, ip);
-	gfs2_glock_dq_uninit(&gh);
+	if (gfs2_holder_initialized(&gh)) {
+		gfs2_glock_hold(ip->i_gl);
+		gfs2_glock_dq_uninit(&gh);
+		gfs2_glock_put_eventually(ip->i_gl);
+	}
 	if (error && error != GLR_TRYFAILED && error != -EROFS)
 		fs_warn(sdp, "gfs2_delete_inode: %d\n", error);
 out:

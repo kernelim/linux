@@ -1340,7 +1340,7 @@ static void release_offload_resources(struct cxgbi_sock *csk)
 #if IS_ENABLED(CONFIG_IPV6)
 	if (csk->csk_family == AF_INET6)
 		cxgb4_clip_release(ndev,
-				   (const struct in6_addr *)&(csk->saddr6.sin6_addr));
+				   (const u32*)&(csk->saddr6.sin6_addr), 1);
 #endif
 
 	if (cxgbi_sock_flag(csk, CTPF_HAS_ATID))
@@ -1406,7 +1406,7 @@ static int init_act_open(struct cxgbi_sock *csk)
 
 #if IS_ENABLED(CONFIG_IPV6)
 	if (csk->csk_family == AF_INET6)
-		cxgb4_clip_get(ndev, (const struct in6_addr *)&csk->saddr6.sin6_addr);
+		cxgb4_clip_get(ndev, (const u32 *)&(csk->saddr6.sin6_addr), 1);
 #endif
 
 	if (t4) {
@@ -1467,7 +1467,7 @@ rel_resource:
 #if IS_ENABLED(CONFIG_IPV6)
 	if (csk->csk_family == AF_INET6)
 		cxgb4_clip_release(ndev,
-				   (const struct in6_addr *)&csk->saddr6.sin6_addr);
+				   (const u32*)&(csk->saddr6.sin6_addr), 1);
 #endif
 rel_resource_without_clip:
 	if (n)

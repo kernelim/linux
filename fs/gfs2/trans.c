@@ -80,7 +80,8 @@ static void gfs2_print_trans(const struct gfs2_trans *tr)
 {
 	print_symbol(KERN_WARNING "GFS2: Transaction created at: %s\n", tr->tr_ip);
 	printk(KERN_WARNING "GFS2: blocks=%u revokes=%u reserved=%u touched=%d\n",
-	       tr->tr_blocks, tr->tr_revokes, tr->tr_reserved, tr->tr_touched);
+	       tr->tr_blocks, tr->tr_revokes, tr->tr_reserved,
+	       test_bit(TR_TOUCHED, &tr->tr_flags));
 	printk(KERN_WARNING "GFS2: Buf %u/%u Databuf %u/%u Revoke %u/%u\n",
 	       tr->tr_num_buf_new, tr->tr_num_buf_rm,
 	       tr->tr_num_databuf_new, tr->tr_num_databuf_rm,
@@ -94,7 +95,7 @@ void gfs2_trans_end(struct gfs2_sbd *sdp)
 	BUG_ON(!tr);
 	current->journal_info = NULL;
 
-	if (!tr->tr_touched) {
+	if (!test_bit(TR_TOUCHED, &tr->tr_flags)) {
 		gfs2_log_release(sdp, tr->tr_reserved);
 		if (gfs2_holder_initialized(&tr->tr_t_gh)) {
 			gfs2_glock_dq(&tr->tr_t_gh);
@@ -172,6 +173,10 @@ void gfs2_trans_add_data(struct gfs2_glock *gl, struct buffer_head *bh)
 	}
 
 	lock_buffer(bh);
+	if (buffer_pinned(bh)) {
+		set_bit(TR_TOUCHED, &tr->tr_flags);
+		goto out;
+	}
 	gfs2_log_lock(sdp);
 	bd = bh->b_private;
 	if (bd == NULL) {
@@ -185,7 +190,7 @@ void gfs2_trans_add_data(struct gfs2_glock *gl, struct buffer_head *bh)
 		gfs2_log_lock(sdp);
 	}
 	gfs2_assert(sdp, bd->bd_gl == gl);
-	tr->tr_touched = 1;
+	set_bit(TR_TOUCHED, &tr->tr_flags);
 	if (list_empty(&bd->bd_list)) {
 		set_bit(GLF_LFLUSH, &bd->bd_gl->gl_flags);
 		set_bit(GLF_DIRTY, &bd->bd_gl->gl_flags);
@@ -195,33 +200,8 @@ void gfs2_trans_add_data(struct gfs2_glock *gl, struct buffer_head *bh)
 		list_add_tail(&bd->bd_list, &sdp->sd_log_le_databuf);
 	}
 	gfs2_log_unlock(sdp);
+out:
 	unlock_buffer(bh);
-}
-
-static void meta_lo_add(struct gfs2_sbd *sdp, struct gfs2_bufdata *bd)
-{
-	struct gfs2_meta_header *mh;
-	struct gfs2_trans *tr;
-
-	tr = current->journal_info;
-	tr->tr_touched = 1;
-	if (!list_empty(&bd->bd_list))
-		return;
-	set_bit(GLF_LFLUSH, &bd->bd_gl->gl_flags);
-	set_bit(GLF_DIRTY, &bd->bd_gl->gl_flags);
-	mh = (struct gfs2_meta_header *)bd->bd_bh->b_data;
-	if (unlikely(mh->mh_magic != cpu_to_be32(GFS2_MAGIC))) {
-		printk(KERN_ERR
-		       "Attempting to add uninitialised block to journal (inplace block=%lld)\n",
-		       (unsigned long long)bd->bd_bh->b_blocknr);
-		BUG();
-	}
-	gfs2_pin(sdp, bd->bd_bh);
-	mh->__pad0 = cpu_to_be64(0);
-	mh->mh_jid = cpu_to_be32(sdp->sd_jdesc->jd_jid);
-	sdp->sd_log_num_buf++;
-	list_add(&bd->bd_list, &sdp->sd_log_le_buf);
-	tr->tr_num_buf_new++;
 }
 
 void gfs2_trans_add_meta(struct gfs2_glock *gl, struct buffer_head *bh)
@@ -229,8 +209,14 @@ void gfs2_trans_add_meta(struct gfs2_glock *gl, struct buffer_head *bh)
 
 	struct gfs2_sbd *sdp = gl->gl_sbd;
 	struct gfs2_bufdata *bd;
+	struct gfs2_meta_header *mh;
+	struct gfs2_trans *tr = current->journal_info;
 
 	lock_buffer(bh);
+	if (buffer_pinned(bh)) {
+		set_bit(TR_TOUCHED, &tr->tr_flags);
+		goto out;
+	}
 	gfs2_log_lock(sdp);
 	bd = bh->b_private;
 	if (bd == NULL) {
@@ -246,8 +232,27 @@ void gfs2_trans_add_meta(struct gfs2_glock *gl, struct buffer_head *bh)
 		gfs2_log_lock(sdp);
 	}
 	gfs2_assert(sdp, bd->bd_gl == gl);
-	meta_lo_add(sdp, bd);
+	set_bit(TR_TOUCHED, &tr->tr_flags);
+	if (!list_empty(&bd->bd_list))
+		goto out_unlock;
+	set_bit(GLF_LFLUSH, &bd->bd_gl->gl_flags);
+	set_bit(GLF_DIRTY, &bd->bd_gl->gl_flags);
+	mh = (struct gfs2_meta_header *)bd->bd_bh->b_data;
+	if (unlikely(mh->mh_magic != cpu_to_be32(GFS2_MAGIC))) {
+		printk(KERN_ERR
+		       "Attempting to add uninitialised block to journal (inplace block=%lld)\n",
+		       (unsigned long long)bd->bd_bh->b_blocknr);
+		BUG();
+	}
+	gfs2_pin(sdp, bd->bd_bh);
+	mh->__pad0 = cpu_to_be64(0);
+	mh->mh_jid = cpu_to_be32(sdp->sd_jdesc->jd_jid);
+	sdp->sd_log_num_buf++;
+	list_add(&bd->bd_list, &sdp->sd_log_le_buf);
+	tr->tr_num_buf_new++;
+out_unlock:
 	gfs2_log_unlock(sdp);
+out:
 	unlock_buffer(bh);
 }
 
@@ -260,7 +265,7 @@ void gfs2_trans_add_revoke(struct gfs2_sbd *sdp, struct gfs2_bufdata *bd)
 	BUG_ON(!list_empty(&bd->bd_ail_st_list));
 	BUG_ON(!list_empty(&bd->bd_ail_gl_list));
 	bd->bd_ops = &gfs2_revoke_lops;
-	tr->tr_touched = 1;
+	set_bit(TR_TOUCHED, &tr->tr_flags);
 	tr->tr_num_revoke++;
 	sdp->sd_log_num_revoke++;
 	atomic_inc(&gl->gl_revokes);

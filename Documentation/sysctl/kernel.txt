@@ -51,7 +51,7 @@ show up in /proc/sys/kernel:
 - pid_max
 - powersave-nap               [ PPC only ]
 - panic_on_unrecovered_nmi
-- panic_on_warn
+- panic_on_warn               [ X86 only ]
 - printk
 - randomize_va_space
 - real-root-dev               ==> Documentation/initrd.txt

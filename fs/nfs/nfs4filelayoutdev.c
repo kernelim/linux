@@ -864,6 +864,8 @@ nfs4_fl_prepare_ds(struct pnfs_layout_segment *lseg, u32 ds_idx)
 		nfs4_wait_ds_connect(ds);
 	}
 
+	if (ret->ds_clp == NULL)
+		return NULL;
 	if (dsaddr->flags & NFS4_DEVICE_ID_NEG_ENTRY) {
 		dprintk("%s Deviceid marked out of use\n", __func__);
 		return NULL;

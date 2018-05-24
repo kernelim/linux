@@ -57,7 +57,7 @@
 #include "hpsa.h"
 
 /* HPSA_DRIVER_VERSION must be 3 byte values (0-255) separated by '.' */
-#define HPSA_DRIVER_VERSION "3.4.10-0-RH3"
+#define HPSA_DRIVER_VERSION "3.4.10-0-RH4"
 #define DRIVER_NAME "HP HPSA Driver (v " HPSA_DRIVER_VERSION ")"
 #define HPSA "hpsa"
 
@@ -5060,7 +5060,7 @@ static void hpsa_command_resubmit_worker(struct work_struct *work)
 		return hpsa_cmd_free_and_done(c->h, c, cmd);
 	}
 	if (c->reset_pending)
-		return hpsa_cmd_resolve_and_free(c->h, c);
+		return hpsa_cmd_free_and_done(c->h, c, cmd);
 	if (c->abort_pending)
 		return hpsa_cmd_abort_and_free(c->h, c, cmd);
 	if (c->cmd_type == CMD_IOACCEL2) {
@@ -5206,6 +5206,7 @@ static void hpsa_scan_start(struct Scsi_Host *sh)
 	 */
 	if (h->reset_in_progress) {
 		h->drv_req_rescan = 1;
+		hpsa_scan_complete(h);
 		return;
 	}
 

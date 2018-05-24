@@ -418,7 +418,11 @@ struct _lowcore
 	__u32	paste[16];			/* 0x03c0 */
 
 	__u32   spinlock_lockval;		/* 0x0400 */
-	__u8	pad_0x0404[0x0e00-0x0404];	/* 0x0404 */
+	__u8	pad_0x0404[0x0500-0x0404];	/* 0x0404 */
+
+	/* br %r1 trampoline */
+	__u16	br_r1_trampoline;		/* 0x0500 */
+	__u8	pad_0x0502[0x0e00-0x0502];	/* 0x0502 */
 
 	/*
 	 * 0xe00 contains the address of the IPL Parameter Information

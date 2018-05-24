@@ -3619,24 +3619,6 @@ static int pool_merge(struct dm_target *ti, struct bvec_merge_data *bvm,
 	return min(max_size, q->merge_bvec_fn(q, bvm, biovec));
 }
 
-static void set_discard_limits(struct pool_c *pt, struct queue_limits *limits)
-{
-	struct pool *pool = pt->pool;
-	struct queue_limits *data_limits;
-
-	limits->max_discard_sectors = pool->sectors_per_block;
-
-	/*
-	 * discard_granularity is just a hint, and not enforced.
-	 */
-	if (pt->adjusted_pf.discard_passdown) {
-		data_limits = &bdev_get_queue(pt->data_dev->bdev)->limits;
-		limits->discard_granularity = max(data_limits->discard_granularity,
-						  pool->sectors_per_block << SECTOR_SHIFT);
-	} else
-		limits->discard_granularity = pool->sectors_per_block << SECTOR_SHIFT;
-}
-
 static void pool_io_hints(struct dm_target *ti, struct queue_limits *limits)
 {
 	struct pool_c *pt = ti->private;
@@ -3691,7 +3673,10 @@ static void pool_io_hints(struct dm_target *ti, struct queue_limits *limits)
 
 	disable_passdown_if_not_supported(pt);
 
-	set_discard_limits(pt, limits);
+	/*
+	 * The pool uses the same discard limits as the underlying data
+	 * device.  DM core has already set this up.
+	 */
 }
 
 static struct target_type pool_target = {
@@ -4078,6 +4063,18 @@ static int thin_iterate_devices(struct dm_target *ti,
 	return 0;
 }
 
+static void thin_io_hints(struct dm_target *ti, struct queue_limits *limits)
+{
+	struct thin_c *tc = ti->private;
+	struct pool *pool = tc->pool;
+
+	if (!pool->pf.discard_enabled)
+		return;
+
+	limits->discard_granularity = pool->sectors_per_block << SECTOR_SHIFT;
+	limits->max_discard_sectors = 2048 * 1024 * 16; /* 16G */
+}
+
 static struct target_type thin_target = {
 	.name = "thin",
 	.version = {1, 16, 1},
@@ -4092,6 +4089,7 @@ static struct target_type thin_target = {
 	.status = thin_status,
 	.merge = thin_merge,
 	.iterate_devices = thin_iterate_devices,
+	.io_hints = thin_io_hints,
 };
 
 /*----------------------------------------------------------------*/

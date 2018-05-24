@@ -1301,7 +1301,7 @@ int generic_detach_inode(struct inode *inode)
 }
 EXPORT_SYMBOL_GPL(generic_detach_inode);
 
-static void generic_forget_inode(struct inode *inode)
+void generic_forget_inode(struct inode *inode)
 {
 	if (!generic_detach_inode(inode))
 		return;
@@ -1311,6 +1311,7 @@ static void generic_forget_inode(struct inode *inode)
 	wake_up_inode(inode);
 	destroy_inode(inode);
 }
+EXPORT_SYMBOL_GPL(generic_forget_inode);
 
 /*
  * Normal UNIX filesystem behaviour: delete the

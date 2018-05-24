@@ -40,3 +40,24 @@ int seq_buf_vprintf(struct seq_buf *s, const char *fmt, va_list args)
 	seq_buf_set_overflow(s);
 	return -1;
 }
+
+/**
+ * seq_buf_printf - sequence printing of information
+ * @s: seq_buf descriptor
+ * @fmt: printf format string
+ *
+ * Writes a printf() format into the sequence buffer.
+ *
+ * Returns zero on success, -1 on overflow.
+ */
+int seq_buf_printf(struct seq_buf *s, const char *fmt, ...)
+{
+	va_list ap;
+	int ret;
+
+	va_start(ap, fmt);
+	ret = seq_buf_vprintf(s, fmt, ap);
+	va_end(ap);
+
+	return ret;
+}

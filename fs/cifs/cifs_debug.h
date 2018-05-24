@@ -82,6 +82,18 @@ do {						\
 		cifserror(fmt, ##arg);		\
 } while (0)
 
+#define cifserror_ratelimited(fmt, arg...)			\
+do {								\
+	if (cifsERROR)						\
+		printk_ratelimited(KERN_ERR "CIFS VFS: " fmt "\n", ##arg);\
+} while (0)
+
+#define cERROR_RATELIMITED(set, fmt, arg...)	\
+do {						\
+	if (set)				\
+		cifserror_ratelimited(fmt, ##arg);\
+} while (0)
+
 /*
  *	debug OFF
  *	---------

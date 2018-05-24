@@ -1083,6 +1083,7 @@ void setup_new_exec(struct linux_binprm * bprm)
 				tcomm[i++] = ch;
 	}
 	tcomm[i] = '\0';
+	perf_event_exec();
 	__set_task_comm(current, tcomm, true);
 
 	/* Set the new mm task size. We have to do that late because it may

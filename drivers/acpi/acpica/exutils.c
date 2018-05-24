@@ -199,6 +199,27 @@ void acpi_ex_relinquish_interpreter(void)
 
 /*******************************************************************************
  *
+ * FUNCTION:    acpi_ex_is_interpreter_entered
+ *
+ * PARAMETERS:  None
+ *
+ * RETURN:      TRUE if current thread is in the interpreter; FALSE otherwise
+ *
+ * DESCRIPTION: Test whether the current thread is currently entered into the
+ *              AML interpreter.
+ *              RHEL6-ONLY
+ *
+ ******************************************************************************/
+
+bool acpi_ex_is_interpreter_entered(void)
+{
+	ACPI_FUNCTION_TRACE(ex_is_interpreter_entered);
+
+	return acpi_ut_is_mutex_ours(ACPI_MTX_INTERPRETER);
+}
+
+/*******************************************************************************
+ *
  * FUNCTION:    acpi_ex_truncate_for32bit_table
  *
  * PARAMETERS:  obj_desc        - Object to be truncated

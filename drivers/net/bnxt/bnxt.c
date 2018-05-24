@@ -32,6 +32,7 @@
 #include <linux/mii.h>
 #include <linux/if.h>
 #include <linux/if_vlan.h>
+#include <linux/rtc.h>
 #include <net/ip.h>
 #include <net/tcp.h>
 #include <net/udp.h>
@@ -2749,6 +2750,17 @@ int hwrm_send_message(struct bnxt *bp, void *msg, u32 msg_len, int timeout)
 	return rc;
 }
 
+int hwrm_send_message_silent(struct bnxt *bp, void *msg, u32 msg_len,
+			     int timeout)
+{
+	int rc;
+
+	mutex_lock(&bp->hwrm_cmd_lock);
+	rc = bnxt_hwrm_do_send_msg(bp, msg, msg_len, timeout, true);
+	mutex_unlock(&bp->hwrm_cmd_lock);
+	return rc;
+}
+
 static int bnxt_hwrm_func_drv_rgtr(struct bnxt *bp)
 {
 	struct hwrm_func_drv_rgtr_input req = {0};
@@ -3825,6 +3837,9 @@ static int bnxt_hwrm_queue_qportcfg(struct bnxt *bp)
 	if (bp->max_tc > BNXT_MAX_QUEUE)
 		bp->max_tc = BNXT_MAX_QUEUE;
 
+	if (resp->queue_cfg_info & QUEUE_QPORTCFG_RESP_QUEUE_CFG_INFO_ASYM_CFG)
+		bp->max_tc = 1;
+
 	qptr = &resp->queue_id0;
 	for (i = 0; i < bp->max_tc; i++) {
 		bp->q_info[i].queue_id = *qptr++;
@@ -3862,7 +3877,7 @@ static int bnxt_hwrm_ver_get(struct bnxt *bp)
 			    resp->hwrm_intf_upd);
 		netdev_warn(bp->dev, "Please update firmware with HWRM interface 1.0.0 or newer.\n");
 	}
-	snprintf(bp->fw_ver_str, BC_HWRM_STR_LEN, "bc %d.%d.%d rm %d.%d.%d",
+	snprintf(bp->fw_ver_str, BC_HWRM_STR_LEN, "%d.%d.%d/%d.%d.%d",
 		 resp->hwrm_fw_maj, resp->hwrm_fw_min, resp->hwrm_fw_bld,
 		 resp->hwrm_intf_maj, resp->hwrm_intf_min, resp->hwrm_intf_upd);
 
@@ -3876,6 +3891,27 @@ static int bnxt_hwrm_ver_get(struct bnxt *bp)
 hwrm_ver_get_exit:
 	mutex_unlock(&bp->hwrm_cmd_lock);
 	return rc;
+}
+
+int bnxt_hwrm_fw_set_time(struct bnxt *bp)
+{
+	struct hwrm_fw_set_time_input req = {0};
+	struct rtc_time tm;
+	struct timeval tv;
+
+	if (bp->hwrm_spec_code < 0x10400)
+		return -EOPNOTSUPP;
+
+	do_gettimeofday(&tv);
+	rtc_time_to_tm(tv.tv_sec, &tm);
+	bnxt_hwrm_cmd_hdr_init(bp, &req, HWRM_FW_SET_TIME, -1, -1);
+	req.year = cpu_to_le16(1900 + tm.tm_year);
+	req.month = 1 + tm.tm_mon;
+	req.day = tm.tm_mday;
+	req.hour = tm.tm_hour;
+	req.minute = tm.tm_min;
+	req.second = tm.tm_sec;
+	return hwrm_send_message(bp, &req, sizeof(req), HWRM_CMD_TIMEOUT);
 }
 
 static void bnxt_hwrm_free_tunnel_ports(struct bnxt *bp)
@@ -5619,7 +5655,6 @@ static int bnxt_probe_phy(struct bnxt *bp)
 {
 	int rc = 0;
 	struct bnxt_link_info *link_info = &bp->link_info;
-	char phy_ver[PHY_VER_STR_LEN];
 
 	rc = bnxt_update_link(bp, false);
 	if (rc) {
@@ -5639,11 +5674,6 @@ static int bnxt_probe_phy(struct bnxt *bp)
 		link_info->req_duplex = link_info->duplex_setting;
 		link_info->req_flow_ctrl = link_info->force_pause_setting;
 	}
-	snprintf(phy_ver, PHY_VER_STR_LEN, " ph %d.%d.%d",
-		 link_info->phy_ver[0],
-		 link_info->phy_ver[1],
-		 link_info->phy_ver[2]);
-	strcat(bp->fw_ver_str, phy_ver);
 	return rc;
 }
 
@@ -5754,6 +5784,7 @@ static int bnxt_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	mutex_init(&bp->hwrm_cmd_lock);
 	bnxt_hwrm_ver_get(bp);
+	bnxt_hwrm_fw_set_time(bp);
 
 	rc = bnxt_hwrm_func_drv_rgtr(bp);
 	if (rc)

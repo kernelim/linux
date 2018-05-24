@@ -593,4 +593,16 @@ unsigned int kstat_irqs_usr(unsigned int irq)
 	return sum;
 }
 EXPORT_SYMBOL(kstat_irqs_usr);
+
+unsigned int kstat_irqs_usr_nolock(unsigned int irq)
+{
+	int sum;
+
+	if (!irq_to_desc(irq))
+		return 0;
+
+	sum = kstat_irqs(irq);
+	return sum;
+}
+EXPORT_SYMBOL(kstat_irqs_usr_nolock);
 #endif

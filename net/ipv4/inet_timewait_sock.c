@@ -328,7 +328,7 @@ void inet_twsk_schedule(struct inet_timewait_sock *tw,
 		       const int timeo, const int timewait_len)
 {
 	struct hlist_head *list;
-	int slot;
+	unsigned int slot;
 
 	/* timeout := RTO * 3.5
 	 *

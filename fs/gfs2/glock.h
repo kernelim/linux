@@ -189,6 +189,7 @@ int gfs2_glock_get(struct gfs2_sbd *sdp,
 void gfs2_glock_hold(struct gfs2_glock *gl);
 void gfs2_glock_put_nolock(struct gfs2_glock *gl);
 void gfs2_glock_put(struct gfs2_glock *gl);
+void gfs2_glock_queue_put(struct gfs2_glock *gl);
 void gfs2_holder_init(struct gfs2_glock *gl, unsigned int state, u16 flags,
 		      struct gfs2_holder *gh);
 void gfs2_holder_reinit(unsigned int state, u16 flags, struct gfs2_holder *gh);
@@ -270,9 +271,11 @@ static inline bool gfs2_holder_initialized(struct gfs2_holder *gh)
  */
 static inline void glock_set_object(struct gfs2_glock *gl, void *object)
 {
+	spin_lock(&gl->gl_spin);
 	if (gfs2_assert_warn(gl->gl_sbd, gl->gl_object == NULL))
 		__dump_glock(NULL, gl);
 	gl->gl_object = object;
+	spin_unlock(&gl->gl_spin);
 }
 
 /**
@@ -295,8 +298,10 @@ static inline void glock_set_object(struct gfs2_glock *gl, void *object)
  */
 static inline void glock_clear_object(struct gfs2_glock *gl, void *object)
 {
+	spin_lock(&gl->gl_spin);
 	if (gl->gl_object == object)
 		gl->gl_object = NULL;
+	spin_unlock(&gl->gl_spin);
 }
 
 #endif /* __GLOCK_DOT_H__ */

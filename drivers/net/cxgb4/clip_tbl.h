@@ -36,13 +36,8 @@ enum {
 
 struct clip_tbl *t4_init_clip_tbl(unsigned int clipt_start,
 				  unsigned int clipt_end);
-#ifdef v4_dot_0_code
 int cxgb4_clip_get(const struct net_device *dev, const u32 *lip, u8 v6);
 void cxgb4_clip_release(const struct net_device *dev, const u32 *lip, u8 v6);
-#else
-int cxgb4_clip_get(const struct net_device *dev, const struct in6_addr *lip);
-int cxgb4_clip_release(const struct net_device *dev, const struct in6_addr *lip);
-#endif /* v4_dot_0_code */
 int clip_tbl_show(struct seq_file *seq, void *v);
 int cxgb4_update_root_dev_clip(struct net_device *dev);
 void t4_cleanup_clip_tbl(struct adapter *adap);

@@ -9,6 +9,7 @@
 #define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
 
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/smp.h>
 #include <linux/seq_file.h>
@@ -121,3 +122,30 @@ const struct seq_operations cpuinfo_op = {
 	.show	= show_cpuinfo,
 };
 
+int s390_isolate_bp(void)
+{
+	unsigned long long facility_bits[2];
+	int nr_facilities;
+
+	nr_facilities = min(stfle(facility_bits, 2), 2) * BITS_PER_LONG;
+	facility_bits[1] &= ~(1ULL << 46);
+	if (nr_facilities < 2 || !(facility_bits[1] & (1ULL << 45)))
+		return -EOPNOTSUPP;
+	set_thread_flag(TIF_ISOLATE_BP);
+	return 0;
+}
+EXPORT_SYMBOL(s390_isolate_bp);
+
+int s390_isolate_bp_guest(void)
+{
+	unsigned long long facility_bits[2];
+	int nr_facilities;
+
+	nr_facilities = min(stfle(facility_bits, 2), 2) * BITS_PER_LONG;
+	facility_bits[1] &= ~(1ULL << 46);
+	if (nr_facilities < 2 || !(facility_bits[1] & (1ULL << 45)))
+		return -EOPNOTSUPP;
+	set_thread_flag(TIF_ISOLATE_BP_GUEST);
+	return 0;
+}
+EXPORT_SYMBOL(s390_isolate_bp_guest);

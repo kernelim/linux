@@ -30,7 +30,10 @@
 #define VSS_MINOR  0
 #define VSS_VERSION    (VSS_MAJOR << 16 | VSS_MINOR)
 
-#define VSS_USERSPACE_TIMEOUT (msecs_to_jiffies(10 * 1000))
+/*
+ * Timeout values are based on expecations from host
+ */
+#define VSS_FREEZE_TIMEOUT (15 * 60)
 
 /*
  * Global state maintained for transaction that is being processed. For a class
@@ -61,11 +64,11 @@ static struct cb_id vss_id = { CN_VSS_IDX, CN_VSS_VAL };
 static char vss_name[] = "vss_kernel_module";
 static __u8 *recv_buffer;
 
-static void vss_send_op(struct work_struct *dummy);
 static void vss_timeout_func(struct work_struct *dummy);
+static void vss_handle_request(struct work_struct *dummy);
 
 static DECLARE_DELAYED_WORK(vss_timeout_work, vss_timeout_func);
-static DECLARE_WORK(vss_send_op_work, vss_send_op);
+static DECLARE_WORK(vss_handle_request_work, vss_handle_request);
 
 static void vss_poll_wrapper(void *channel)
 {
@@ -110,6 +113,11 @@ vss_cn_callback(struct cn_msg *msg, struct netlink_skb_parms *nsp)
 		hv_poll_channel(vss_transaction.recv_channel, vss_poll_wrapper);
 	} else if (vss_transaction.state == HVUTIL_USERSPACE_REQ) {
 		vss_transaction.state = HVUTIL_USERSPACE_RECV;
+
+		if (vss_msg->vss_hdr.operation == VSS_OP_HOT_BACKUP)
+			vss_transaction.msg->vss_cf.flags =
+				VSS_HBU_NO_AUTO_RECOVERY;
+
 		if (cancel_delayed_work_sync(&vss_timeout_work)) {
 			vss_respond_to_host(vss_msg->error);
 			/* Transaction is finished, reset the state. */
@@ -123,8 +131,7 @@ vss_cn_callback(struct cn_msg *msg, struct netlink_skb_parms *nsp)
 	}
 }
 
-
-static void vss_send_op(struct work_struct *dummy)
+static void vss_send_op(void)
 {
 	int op = vss_transaction.msg->vss_hdr.operation;
 	int rc;
@@ -148,6 +155,10 @@ static void vss_send_op(struct work_struct *dummy)
 	msg->len = sizeof(struct hv_vss_msg);
 
 	vss_transaction.state = HVUTIL_USERSPACE_REQ;
+
+	schedule_delayed_work(&vss_timeout_work, op == VSS_OP_FREEZE ?
+			VSS_FREEZE_TIMEOUT * HZ : HV_UTIL_TIMEOUT * HZ);
+
 	rc = cn_netlink_send(msg, 0, GFP_ATOMIC);
 	if (rc) {
 		pr_warn("VSS: failed to communicate to the daemon: %d\n", rc);
@@ -160,6 +171,38 @@ static void vss_send_op(struct work_struct *dummy)
 	kfree(msg);
 
 	return;
+}
+
+static void vss_handle_request(struct work_struct *dummy)
+{
+	switch (vss_transaction.msg->vss_hdr.operation) {
+	/*
+	 * Initiate a "freeze/thaw" operation in the guest.
+	 * We respond to the host once the operation is complete.
+	 *
+	 * We send the message to the user space daemon and the operation is
+	 * performed in the daemon.
+	 */
+	case VSS_OP_THAW:
+	case VSS_OP_FREEZE:
+	case VSS_OP_HOT_BACKUP:
+		if (vss_transaction.state < HVUTIL_READY) {
+			/* Userspace is not registered yet */
+			vss_respond_to_host(HV_E_FAIL);
+			return;
+		}
+		vss_transaction.state = HVUTIL_HOSTMSG_RECEIVED;
+		vss_send_op();
+		return;
+	case VSS_OP_GET_DM_INFO:
+		vss_transaction.msg->dm_info.flags = 0;
+		break;
+	default:
+		break;
+	}
+
+	vss_respond_to_host(0);
+	hv_poll_channel(vss_transaction.recv_channel, vss_poll_wrapper);
 }
 
 /*
@@ -246,48 +289,8 @@ void hv_vss_onchannelcallback(void *context)
 			vss_transaction.recv_req_id = requestid;
 			vss_transaction.msg = (struct hv_vss_msg *)vss_msg;
 
-			switch (vss_msg->vss_hdr.operation) {
-				/*
-				 * Initiate a "freeze/thaw"
-				 * operation in the guest.
-				 * We respond to the host once
-				 * the operation is complete.
-				 *
-				 * We send the message to the
-				 * user space daemon and the
-				 * operation is performed in
-				 * the daemon.
-				 */
-			case VSS_OP_FREEZE:
-			case VSS_OP_THAW:
-				if (vss_transaction.state < HVUTIL_READY) {
-					/* Userspace is not registered yet */
-					vss_respond_to_host(HV_E_FAIL);
-					return;
-				}
-				vss_transaction.state = HVUTIL_HOSTMSG_RECEIVED;
-				schedule_work(&vss_send_op_work);
-				schedule_delayed_work(&vss_timeout_work,
-						      VSS_USERSPACE_TIMEOUT);
-				return;
-
-			case VSS_OP_HOT_BACKUP:
-				vss_msg->vss_cf.flags =
-					 VSS_HBU_NO_AUTO_RECOVERY;
-				vss_respond_to_host(0);
-				return;
-
-			case VSS_OP_GET_DM_INFO:
-				vss_msg->dm_info.flags = 0;
-				vss_respond_to_host(0);
-				return;
-
-			default:
-				vss_respond_to_host(0);
-				return;
-
-			}
-
+			schedule_work(&vss_handle_request_work);
+			return;
 		}
 
 		icmsghdrp->icflags = ICMSGHDRFLAG_TRANSACTION
@@ -333,5 +336,5 @@ void hv_vss_deinit(void)
 	vss_transaction.state = HVUTIL_DEVICE_DYING;
 	cn_del_callback(&vss_id);
 	cancel_delayed_work_sync(&vss_timeout_work);
-	cancel_work_sync(&vss_send_op_work);
+	cancel_work_sync(&vss_handle_request_work);
 }

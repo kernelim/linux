@@ -18,7 +18,6 @@
 #include "cxgb4.h"
 #include "clip_tbl.h"
 
-#ifdef v4_dot_0_code
 static inline unsigned int ipv4_clip_hash(struct clip_tbl *c, const u32 *key)
 {
 	unsigned int clipt_size_half = c->clipt_size / 2;
@@ -71,9 +70,7 @@ static int clip6_release_mbox(const struct net_device *dev,
 	*(__be64 *)&c.ip_lo = *(__be64 *)(lip->s6_addr + 8);
 	return t4_wr_mbox_meat(adap, adap->mbox, &c, sizeof(c), &c, false);
 }
-#endif
 
-#ifdef v4_dot_0_code
 int cxgb4_clip_get(const struct net_device *dev, const u32 *lip, u8 v6)
 {
 	struct adapter *adap = netdev2adap(dev);
@@ -183,42 +180,6 @@ found:
 	write_unlock_bh(&ctbl->lock);
 }
 EXPORT_SYMBOL(cxgb4_clip_release);
-#else /* rhel6 code from cxgb4_main.c */
-int cxgb4_clip_get(const struct net_device *dev,
-		   const struct in6_addr *lip)
-{
-	struct adapter *adap;
-	struct fw_clip_cmd c;
-
-	adap = netdev2adap(dev);
-	memset(&c, 0, sizeof(c));
-	c.op_to_write = htonl(FW_CMD_OP_V(FW_CLIP_CMD) |
-			FW_CMD_REQUEST_F | FW_CMD_WRITE_F);
-	c.alloc_to_len16 = htonl(FW_CLIP_CMD_ALLOC_F | FW_LEN16(c));
-	c.ip_hi = *(__be64 *)(lip->s6_addr);
-	c.ip_lo = *(__be64 *)(lip->s6_addr + 8);
-	return t4_wr_mbox_meat(adap, adap->mbox, &c, sizeof(c), &c, false);
-}
-EXPORT_SYMBOL(cxgb4_clip_get);
-
-int cxgb4_clip_release(const struct net_device *dev,
-                      const struct in6_addr *lip)
-{
-	struct adapter *adap;
-	struct fw_clip_cmd c;
-
-	adap = netdev2adap(dev);
-	memset(&c, 0, sizeof(c));
-	c.op_to_write = htonl(FW_CMD_OP_V(FW_CLIP_CMD) |
-			FW_CMD_REQUEST_F | FW_CMD_READ_F);
-	c.alloc_to_len16 = htonl(FW_CLIP_CMD_FREE_F | FW_LEN16(c));
-	c.ip_hi = *(__be64 *)(lip->s6_addr);
-	c.ip_lo = *(__be64 *)(lip->s6_addr + 8);
-	return t4_wr_mbox_meat(adap, adap->mbox, &c, sizeof(c), &c, false);
-}
-EXPORT_SYMBOL(cxgb4_clip_release);
-
-#endif /* v4_dot_0_code */
 
 /* Retrieves IPv6 addresses from a root device (bond, vlan) associated with
  * a physical device.
@@ -237,17 +198,10 @@ static int cxgb4_update_dev_clip(struct net_device *root_dev,
 
 	read_lock_bh(&idev->lock);
 	for (ifa = idev->addr_list; ifa; ifa = ifa->if_next) {
-		ret = cxgb4_clip_get(dev, &ifa->addr);
-		if (ret < 0)
-			break;
-	}
-#ifdef v4_dot_0_code
-	list_for_each_entry(ifa, &idev->addr_list, if_next) {
 		ret = cxgb4_clip_get(dev, (const u32 *)ifa->addr.s6_addr, 1);
 		if (ret < 0)
 			break;
 	}
-#endif
 	read_unlock_bh(&idev->lock);
 
 	return ret;

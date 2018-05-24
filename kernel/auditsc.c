@@ -1251,6 +1251,9 @@ static void audit_log_execve_info(struct audit_context *context,
 	 *       code below) ... at this point in time 96 is plenty */
 	char abuf[96];
 
+	if (axi->mm != current->mm)
+		return; /* execve failed, no additional info */
+
 	/* NOTE: we set MAX_EXECVE_AUDIT_LEN to a rather arbitrary limit, the
 	 *       current value of 7500 is not as important as the fact that it
 	 *       is less than 8k, a setting of 7500 gives us plenty of wiggle

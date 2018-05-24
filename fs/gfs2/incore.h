@@ -325,6 +325,7 @@ enum {
 	GIF_SW_PAGED		= 3,
 	GIF_ORDERED		= 4,
 	GIF_FREE_VFS_INODE      = 5,
+	GIF_GLOP_PENDING	= 6,
 };
 
 struct gfs2_inode {
@@ -409,6 +410,10 @@ struct gfs2_quota_data {
 	unsigned long qd_last_warn;
 };
 
+enum {
+	TR_TOUCHED = 1,
+};
+
 struct gfs2_trans {
 	unsigned long tr_ip;
 
@@ -418,7 +423,7 @@ struct gfs2_trans {
 
 	struct gfs2_holder tr_t_gh;
 
-	int tr_touched;
+	unsigned long tr_flags;
 
 	unsigned int tr_num_buf_new;
 	unsigned int tr_num_databuf_new;
@@ -715,6 +720,7 @@ struct gfs2_sbd {
 	struct rw_semaphore sd_log_flush_lock;
 	atomic_t sd_log_in_flight;
 	wait_queue_head_t sd_log_flush_wait;
+	int sd_log_error;
 
 	unsigned int sd_log_flush_head;
 	u64 sd_log_flush_wrapped;
@@ -768,6 +774,8 @@ static inline void gfs2_sbstats_inc(const struct gfs2_glock *gl, int which)
 	this_cpu_ptr(sdp->sd_lkstats)->lkstats[gl->gl_name.ln_type].stats[which]++;
 	preempt_enable();
 }
+
+extern struct gfs2_rgrpd *gfs2_glock2rgrp(struct gfs2_glock *gl);
 
 #endif /* __INCORE_DOT_H__ */
 

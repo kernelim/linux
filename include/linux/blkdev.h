@@ -442,6 +442,8 @@ struct request_queue
 	 * queue_lock internally, e.g. scsi_request_fn().
 	 */
 	unsigned int		request_fn_active;
+
+	wait_queue_head_t       freeze_wq;
 #endif /* __GENKSYMS__ */
 };
 
@@ -466,6 +468,7 @@ struct request_queue
 #define QUEUE_FLAG_ADD_RANDOM  18	/* Contributes to random pool */
 #define QUEUE_FLAG_SAME_FORCE  19	/* force complete on same CPU */
 #define QUEUE_FLAG_UNPRIV_SGIO 20	/* SG_IO free for unprivileged users */
+#define QUEUE_FLAG_PREEMPT_ONLY	21      /* only process REQ_PREEMPT requests */
 
 #define QUEUE_FLAG_DEFAULT	((1 << QUEUE_FLAG_IO_STAT) |		\
 				 (1 << QUEUE_FLAG_CLUSTER) |		\
@@ -605,6 +608,9 @@ enum {
 #define blk_queue_stackable(q)	\
 	test_bit(QUEUE_FLAG_STACKABLE, &(q)->queue_flags)
 #define blk_queue_discard(q)	test_bit(QUEUE_FLAG_DISCARD, &(q)->queue_flags)
+#define blk_queue_preempt_only(q)                              \
+	test_bit(QUEUE_FLAG_PREEMPT_ONLY, &(q)->queue_flags)
+extern void blk_set_preempt_only(struct request_queue *q, bool preempt_only);
 
 #define blk_noretry_request(rq) \
 	((rq)->cmd_flags & (REQ_FAILFAST_DEV|REQ_FAILFAST_TRANSPORT| \

@@ -1067,8 +1067,7 @@ list_add_event(struct perf_event *event, struct perf_event_context *ctx)
 	if (event->group_leader == event) {
 		struct list_head *list;
 
-		if (is_software_event(event))
-			event->group_flags |= PERF_GROUP_SOFTWARE;
+		event->group_caps = event->event_caps;
 
 		list = ctx_group_list(event, ctx);
 		list_add_tail(&event->group_entry, list);
@@ -1198,9 +1197,7 @@ static void perf_group_attach(struct perf_event *event)
 
 	WARN_ON_ONCE(group_leader->ctx != event->ctx);
 
-	if (group_leader->group_flags & PERF_GROUP_SOFTWARE &&
-			!is_software_event(event))
-		group_leader->group_flags &= ~PERF_GROUP_SOFTWARE;
+	group_leader->group_caps &= event->event_caps;
 
 	list_add_tail(&event->group_entry, &group_leader->sibling_list);
 	group_leader->nr_siblings++;
@@ -1303,7 +1300,7 @@ static void perf_group_detach(struct perf_event *event)
 		sibling->group_leader = sibling;
 
 		/* Inherit group flags from the previous leader */
-		sibling->group_flags = event->group_flags;
+		sibling->group_caps = event->group_caps;
 
 		WARN_ON_ONCE(sibling->ctx != event->ctx);
 	}
@@ -1774,7 +1771,7 @@ static int group_can_go_on(struct perf_event *event,
 	/*
 	 * Groups consisting entirely of software events can always go on.
 	 */
-	if (event->group_flags & PERF_GROUP_SOFTWARE)
+	if (event->group_caps & PERF_EV_CAP_SOFTWARE)
 		return 1;
 	/*
 	 * If an exclusive group is already on, no other hardware
@@ -2930,6 +2927,22 @@ out:
 
 	if (clone_ctx)
 		put_ctx(clone_ctx);
+}
+
+void perf_event_exec(void)
+{
+	struct perf_event_context *ctx;
+	int ctxn;
+
+	rcu_read_lock();
+	for_each_task_context_nr(ctxn) {
+		ctx = current->perf_event_ctxp[ctxn];
+		if (!ctx)
+			continue;
+
+		perf_event_enable_on_exec(ctx);
+	}
+	rcu_read_unlock();
 }
 
 /*
@@ -5055,18 +5068,6 @@ static void perf_event_comm_event(struct perf_comm_event *comm_event)
 void perf_event_comm(struct task_struct *task, bool exec)
 {
 	struct perf_comm_event comm_event;
-	struct perf_event_context *ctx;
-	int ctxn;
-
-	rcu_read_lock();
-	for_each_task_context_nr(ctxn) {
-		ctx = task->perf_event_ctxp[ctxn];
-		if (!ctx)
-			continue;
-
-		perf_event_enable_on_exec(ctx);
-	}
-	rcu_read_unlock();
 
 	if (!atomic_read(&nr_comm_events))
 		return;
@@ -7027,6 +7028,37 @@ static void mutex_lock_double(struct mutex *a, struct mutex *b)
 	mutex_lock_nested(b, SINGLE_DEPTH_NESTING);
 }
 
+/*
+ * Variation on perf_event_ctx_lock_nested(), except we take two context
+ * mutexes.
+ */
+static struct perf_event_context *
+__perf_event_ctx_lock_double(struct perf_event *group_leader,
+			     struct perf_event_context *ctx)
+{
+	struct perf_event_context *gctx;
+
+again:
+	rcu_read_lock();
+	gctx = READ_ONCE(group_leader->ctx);
+	if (!atomic_inc_not_zero(&gctx->refcount)) {
+		rcu_read_unlock();
+		goto again;
+	}
+	rcu_read_unlock();
+
+	mutex_lock_double(&gctx->mutex, &ctx->mutex);
+
+	if (group_leader->ctx != gctx) {
+		mutex_unlock(&ctx->mutex);
+		mutex_unlock(&gctx->mutex);
+		put_ctx(gctx);
+		goto again;
+	}
+
+	return gctx;
+}
+
 /**
  * sys_perf_event_open - open a performance event, associate it to a task/cpu
  *
@@ -7138,6 +7170,9 @@ SYSCALL_DEFINE5(perf_event_open,
 	 */
 	pmu = event->pmu;
 
+	if (pmu->task_ctx_nr == perf_sw_context)
+		event->event_caps |= PERF_EV_CAP_SOFTWARE;
+
 	if (group_leader &&
 	    (is_software_event(event) != is_software_event(group_leader))) {
 		if (is_software_event(event)) {
@@ -7151,7 +7186,7 @@ SYSCALL_DEFINE5(perf_event_open,
 			 */
 			pmu = group_leader->pmu;
 		} else if (is_software_event(group_leader) &&
-			   (group_leader->group_flags & PERF_GROUP_SOFTWARE)) {
+			   (group_leader->group_caps & PERF_EV_CAP_SOFTWARE)) {
 			/*
 			 * In case the group is a pure software group, and we
 			 * try to add a hardware event, move the whole group to
@@ -7232,27 +7267,25 @@ SYSCALL_DEFINE5(perf_event_open,
 	}
 
 	if (move_group) {
-		gctx = group_leader->ctx;
+		gctx = __perf_event_ctx_lock_double(group_leader, ctx);
 
 		/*
-		 * See perf_event_ctx_lock() for comments on the details
-		 * of swizzling perf_event::ctx.
+		 * Check if we raced against another sys_perf_event_open() call
+		 * moving the software group underneath us.
 		 */
-		mutex_lock_double(&gctx->mutex, &ctx->mutex);
-
-		perf_remove_from_context(group_leader, false);
-
-		/*
-		 * Removing from the context ends up with disabled
-		 * event. What we want here is event in the initial
-		 * startup state, ready to be add into new context.
-		 */
-		perf_event__state_init(group_leader);
-		list_for_each_entry(sibling, &group_leader->sibling_list,
-				    group_entry) {
-			perf_remove_from_context(sibling, false);
-			perf_event__state_init(sibling);
-			put_ctx(gctx);
+		if (!(group_leader->group_caps & PERF_EV_CAP_SOFTWARE)) {
+			/*
+			 * If someone moved the group out from under us, check
+			 * if this new event wound up on the same ctx, if so
+			 * its the regular !move_group case, otherwise fail.
+			 */
+			if (gctx != ctx) {
+				err = -EINVAL;
+				goto err_locked;
+			} else {
+				perf_event_ctx_unlock(group_leader, gctx);
+				move_group = 0;
+			}
 		}
 	} else {
 		mutex_lock(&ctx->mutex);
@@ -7262,27 +7295,56 @@ SYSCALL_DEFINE5(perf_event_open,
 
 	if (move_group) {
 		/*
+		 * See perf_event_ctx_lock() for comments on the details
+		 * of swizzling perf_event::ctx.
+		 */
+		perf_remove_from_context(group_leader, false);
+		put_ctx(gctx);
+
+		list_for_each_entry(sibling, &group_leader->sibling_list,
+				    group_entry) {
+			perf_remove_from_context(sibling, false);
+			put_ctx(gctx);
+		}
+
+		/*
 		 * Wait for everybody to stop referencing the events through
 		 * the old lists, before installing it on new lists.
 		 */
 		synchronize_rcu();
 
-		perf_install_in_context(ctx, group_leader, group_leader->cpu);
-		get_ctx(ctx);
+		/*
+		 * Install the group siblings before the group leader.
+		 *
+		 * Because a group leader will try and install the entire group
+		 * (through the sibling list, which is still in-tact), we can
+		 * end up with siblings installed in the wrong context.
+		 *
+		 * By installing siblings first we NO-OP because they're not
+		 * reachable through the group lists.
+		 */
 		list_for_each_entry(sibling, &group_leader->sibling_list,
 				    group_entry) {
+			perf_event__state_init(sibling);
 			perf_install_in_context(ctx, sibling, sibling->cpu);
 			get_ctx(ctx);
 		}
+
+		/*
+		 * Removing from the context ends up with disabled
+		 * event. What we want here is event in the initial
+		 * startup state, ready to be add into new context.
+		 */
+		perf_event__state_init(group_leader);
+		perf_install_in_context(ctx, group_leader, group_leader->cpu);
+		get_ctx(ctx);
 	}
 
 	perf_install_in_context(ctx, event, event->cpu);
 	perf_unpin_context(ctx);
 
-	if (move_group) {
-		mutex_unlock(&gctx->mutex);
-		put_ctx(gctx);
-	}
+	if (move_group)
+		perf_event_ctx_unlock(group_leader, gctx);
 	mutex_unlock(&ctx->mutex);
 
 	put_online_cpus();
@@ -7309,6 +7371,12 @@ SYSCALL_DEFINE5(perf_event_open,
 	fd_install(event_fd, event_file);
 	return event_fd;
 
+err_locked:
+	if (move_group)
+		perf_event_ctx_unlock(group_leader, gctx);
+	mutex_unlock(&ctx->mutex);
+/* err_file: */
+	fput(event_file);
 err_context:
 	perf_unpin_context(ctx);
 	put_ctx(ctx);
@@ -7400,8 +7468,35 @@ void perf_pmu_migrate_context(struct pmu *pmu, int src_cpu, int dst_cpu)
 		list_add(&event->migrate_entry, &events);
 	}
 
+	/*
+	 * Wait for the events to quiesce before re-instating them.
+	 */
 	synchronize_rcu();
 
+	/*
+	 * Re-instate events in 2 passes.
+	 *
+	 * Skip over group leaders and only install siblings on this first
+	 * pass, siblings will not get enabled without a leader, however a
+	 * leader will enable its siblings, even if those are still on the old
+	 * context.
+	 */
+	list_for_each_entry_safe(event, tmp, &events, migrate_entry) {
+		if (event->group_leader == event)
+			continue;
+
+		list_del(&event->migrate_entry);
+		if (event->state >= PERF_EVENT_STATE_OFF)
+			event->state = PERF_EVENT_STATE_INACTIVE;
+		account_event_cpu(event, dst_cpu);
+		perf_install_in_context(dst_ctx, event, dst_cpu);
+		get_ctx(dst_ctx);
+	}
+
+	/*
+	 * Once all the siblings are setup properly, install the group leaders
+	 * to make it go.
+	 */
 	list_for_each_entry_safe(event, tmp, &events, migrate_entry) {
 		list_del(&event->migrate_entry);
 		if (event->state >= PERF_EVENT_STATE_OFF)

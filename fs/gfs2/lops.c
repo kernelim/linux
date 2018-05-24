@@ -68,7 +68,7 @@ static void maybe_release_space(struct gfs2_bufdata *bd)
 {
 	struct gfs2_glock *gl = bd->bd_gl;
 	struct gfs2_sbd *sdp = gl->gl_sbd;
-	struct gfs2_rgrpd *rgd = gl->gl_object;
+	struct gfs2_rgrpd *rgd = gfs2_glock2rgrp(gl);
 	unsigned int index = bd->bd_bh->b_blocknr - gl->gl_name.ln_number;
 	struct gfs2_bitmap *bi = rgd->rd_bits + index;
 
@@ -156,6 +156,13 @@ static void gfs2_log_write_endio(struct buffer_head *bh, int uptodate)
 	bh->b_private = NULL;
 
 	end_buffer_write_sync(bh, uptodate);
+	if (!uptodate) {
+		sdp->sd_log_error = -EIO;
+		fs_err(sdp, "IO Error writing to journal, jid=%u\n",
+		       sdp->sd_jdesc->jd_jid);
+		wake_up_process(sdp->sd_logd_process);
+	}
+
 	if (atomic_dec_and_test(&sdp->sd_log_in_flight))
 		wake_up(&sdp->sd_log_flush_wait);
 }

@@ -75,6 +75,7 @@ struct alua_dh_data {
 	struct scsi_device	*sdev;
 	activate_complete	callback_fn;
 	void			*callback_data;
+	atomic_t		activation_inflight;
 };
 
 #define ALUA_POLICY_SWITCH_CURRENT	0
@@ -270,6 +271,7 @@ done:
 		h->callback_fn(h->callback_data, err);
 		h->callback_fn = h->callback_data = NULL;
 	}
+	atomic_dec(&h->activation_inflight);
 	return;
 }
 
@@ -742,6 +744,12 @@ static int alua_activate(struct scsi_device *sdev,
 	int err = SCSI_DH_OK;
 	int stpg = 0;
 
+	if (atomic_inc_return(&h->activation_inflight) != 1) {
+		/* activation is already running */
+		err = SCSI_DH_RETRY;
+		goto out;
+	}
+
 	err = alua_rtpg(sdev, h, 1);
 	if (err != SCSI_DH_OK)
 		goto out;
@@ -783,6 +791,7 @@ static int alua_activate(struct scsi_device *sdev,
 	}
 
 out:
+	atomic_dec(&h->activation_inflight);
 	if (fn)
 		fn(data, err);
 	return 0;
@@ -858,6 +867,7 @@ static int alua_bus_attach(struct scsi_device *sdev)
 	h->buff = h->inq;
 	h->bufflen = ALUA_INQUIRY_SIZE;
 	h->sdev = sdev;
+	atomic_set(&h->activation_inflight, 0);
 
 	err = alua_initialize(sdev, h);
 	if ((err != SCSI_DH_OK) && (err != SCSI_DH_DEV_OFFLINED))

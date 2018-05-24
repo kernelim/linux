@@ -261,10 +261,8 @@ static struct dst_entry *sctp_v6_get_dst(struct sctp_association *asoc,
 	struct dst_entry *dst = NULL;
 	struct sctp_bind_addr *bp;
 	struct sctp_sockaddr_entry *laddr;
-	union sctp_addr *baddr = NULL;
 	union sctp_addr dst_saddr;
 	__u8 matchlen = 0;
-	__u8 bmatchlen;
 	sctp_scope_t scope;
 	int err = 0;
 
@@ -315,30 +313,45 @@ static struct dst_entry *sctp_v6_get_dst(struct sctp_association *asoc,
                 dst = NULL;
         }
 
-        /* Walk through the bind address list and try to get the
-         * best source address for a given destination.
-         */
-        rcu_read_lock();
-        list_for_each_entry_rcu(laddr, &bp->address_list, list) {
-                if (!laddr->valid && laddr->state != SCTP_ADDR_SRC)
-                        continue;
-                if ((laddr->a.sa.sa_family == AF_INET6) &&
-                    (scope <= sctp_scope(&laddr->a))) {
-                        bmatchlen = sctp_v6_addr_match_len(daddr, &laddr->a);
-                        if (!baddr || (matchlen < bmatchlen)) {
-                                baddr = &laddr->a;
-                                matchlen = bmatchlen;
-                        }
-                }
-        }
-        rcu_read_unlock();
-        if (baddr) {
-                ipv6_addr_copy(&fl->fl6_src, &baddr->v6.sin6_addr);
-                err = ip6_dst_lookup(sk, &dst, fl);
-        }
+	/* Walk through the bind address list and try to get the
+	 * best source address for a given destination.
+	 */
+	rcu_read_lock();
+	list_for_each_entry_rcu(laddr, &bp->address_list, list) {
+		struct dst_entry *bdst;
+		__u8 bmatchlen;
+
+		if (!laddr->valid ||
+		    laddr->state != SCTP_ADDR_SRC ||
+		    laddr->a.sa.sa_family != AF_INET6 ||
+		    scope > sctp_scope(&laddr->a))
+			continue;
+
+		ipv6_addr_copy(&fl->fl6_src, &laddr->a.v6.sin6_addr);
+		err = ip6_dst_lookup(sk, &bdst, fl);
+
+		if (!err &&
+		    ipv6_chk_addr(dev_net(bdst->dev),
+				  &laddr->a.v6.sin6_addr, bdst->dev, 1)) {
+			if (!dst)
+				dst_release(dst);
+			dst = bdst;
+			break;
+		}
+
+		bmatchlen = sctp_v6_addr_match_len(daddr, &laddr->a);
+		if (matchlen > bmatchlen)
+			continue;
+
+		if (!dst)
+			dst_release(dst);
+		dst = bdst;
+		matchlen = bmatchlen;
+	}
+	rcu_read_unlock();
 
 out:
-	if (!err) {
+	if (dst) {
 		struct rt6_info *rt;
 		rt = (struct rt6_info *)dst;
 		SCTP_DEBUG_PRINTK("rt6_dst:%pI6 rt6_src:%pI6\n",
@@ -669,6 +682,9 @@ static struct sock *sctp_v6_create_accept_sk(struct sock *sk,
 	newnp = inet6_sk(newsk);
 
 	memcpy(newnp, np, sizeof(struct ipv6_pinfo));
+	newnp->ipv6_mc_list = NULL;
+	newnp->ipv6_ac_list = NULL;
+	newnp->ipv6_fl_list = NULL;
 
 	/* Initialize sk's sport, dport, rcv_saddr and daddr for getsockname()
 	 * and getpeername().

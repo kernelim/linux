@@ -365,3 +365,40 @@ acpi_status acpi_ut_release_mutex(acpi_mutex_handle mutex_id)
 	acpi_os_release_mutex(acpi_gbl_mutex_info[mutex_id].mutex);
 	return (AE_OK);
 }
+
+/*******************************************************************************
+ *
+ * FUNCTION:    acpi_ut_is_mutex_ours
+ *
+ * PARAMETERS:  mutex_id        - ID of the mutex to be tested
+ *
+ * RETURN:      TRUE if mutex object is owned by this thread; FALSE otherwise
+ *
+ * DESCRIPTION: Test whether a mutex object is currently owned by this thread.
+ *              RHEL6-ONLY
+ *
+ ******************************************************************************/
+
+bool acpi_ut_is_mutex_ours(acpi_mutex_handle mutex_id)
+{
+	acpi_thread_id mutex_owner_id;
+
+	ACPI_FUNCTION_NAME(ut_is_mutex_ours);
+
+	if (mutex_id > ACPI_MAX_MUTEX) {
+		ACPI_ERROR((AE_INFO,
+			    "Mutex id [0x%X] is not valid",
+			    mutex_id));
+		return FALSE;
+	}
+
+	mutex_owner_id = acpi_gbl_mutex_info[mutex_id].thread_id;
+
+	if (mutex_owner_id == ACPI_MUTEX_NOT_ACQUIRED) {
+		return FALSE;
+	}
+	if (mutex_owner_id == acpi_os_get_thread_id()) {
+		return TRUE;
+	}
+	return FALSE;
+}

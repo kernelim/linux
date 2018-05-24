@@ -244,7 +244,7 @@ enum ssb_mitigation {
 
 /* AMD specific Speculative Store Bypass MSR data */
 extern u64 x86_amd_ls_cfg_base;
-extern u64 x86_amd_ls_cfg_rds_mask;
+extern u64 x86_amd_ls_cfg_ssbd_mask;
 
 /*
  * On VMEXIT we must ensure that no RSB predictions learned in the guest

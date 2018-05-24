@@ -1,6 +1,7 @@
 #include <linux/module.h>
 #include <linux/uaccess.h>
 #include <asm/alternative.h>
+#include <asm/nospec-branch.h>
 
 #define MAX_PATCH_LEN (255 - 1)
 
@@ -13,19 +14,6 @@ static int __init disable_alternative_instructions(char *str)
 }
 
 early_param("noaltinstr", disable_alternative_instructions);
-
-static int nobp_flag = 1;
-static int __init nobp_setup_early(char *str)
-{
-	bool enabled;
-	int rc;
-
-	rc = strtobool(str, &enabled);
-	if (!rc)
-		nobp_flag = !!enabled;
-	return rc;
-}
-early_param("nobp", nobp_setup_early);
 
 struct brcl_insn {
 	u16 opc;
@@ -80,6 +68,10 @@ static void __init_or_module __apply_alternatives(struct alt_instr *start,
 	u8 insnbuf[MAX_PATCH_LEN];
 
 	nr_facilities = min(stfle(facility_bits, 2), 2) * BITS_PER_LONG;
+	if (gmb_flag == 0)	/* Clear facility bit 81 */
+		facility_bits[1] &= ~(1ULL << 46);
+	if (nobp_flag == 0)	/* Clear facility bit 82 */
+		facility_bits[1] &= ~(1ULL << 45);
 	/*
 	 * The scan order should be from start to end. A later scanned
 	 * alternative code can overwrite previously scanned alternative code.
@@ -122,10 +114,7 @@ void __init_or_module apply_alternatives(struct alt_instr *start,
 }
 
 extern struct alt_instr __alt_instructions[], __alt_instructions_end[];
-extern struct alt_instr __alt_nobp[], __alt_nobp_end[];
 void __init apply_alternative_instructions(void)
 {
 	apply_alternatives(__alt_instructions, __alt_instructions_end);
-	if (nobp_flag)
-		apply_alternatives(__alt_nobp, __alt_nobp_end);
 }

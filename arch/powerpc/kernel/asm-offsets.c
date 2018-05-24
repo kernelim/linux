@@ -196,8 +196,7 @@ int main(void)
 	OFFSET(PACA_AUX_PTR, paca_struct, aux_ptr);
 	OFFSET(PACA_RFI_FLUSH_FALLBACK_AREA, paca_aux_struct, rfi_flush_fallback_area);
 	OFFSET(PACA_EXRFI, paca_aux_struct, exrfi);
-	OFFSET(PACA_L1D_FLUSH_CONGRUENCE, paca_aux_struct, l1d_flush_congruence);
-	OFFSET(PACA_L1D_FLUSH_SETS, paca_aux_struct, l1d_flush_sets);
+	OFFSET(PACA_L1D_FLUSH_SIZE, paca_aux_struct, l1d_flush_size);
 #endif
 #endif /* CONFIG_PPC64 */
 

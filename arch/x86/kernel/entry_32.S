@@ -1182,6 +1182,8 @@ END(interrupt)
 common_interrupt:
 	addl $-0x80,(%esp)	/* Adjust vector into the [-256,-1] range */
 	SAVE_ALL switch_stacks=1
+	IBRS_ENTRY_CLOBBER
+	FILL_RETURN_BUFFER_CLOBBER reg=%eax
 	TRACE_IRQS_OFF
 	movl %esp,%eax
 	call do_IRQ
@@ -1199,6 +1201,8 @@ ENTRY(name)				\
 	pushl $~(nr);			\
 	CFI_ADJUST_CFA_OFFSET 4;	\
 	SAVE_ALL switch_stacks=1;	\
+	IBRS_ENTRY_CLOBBER;		\
+	FILL_RETURN_BUFFER_CLOBBER reg=%eax;\
 	TRACE_IRQS_OFF			\
 	movl %esp,%eax;			\
 	call fn;			\
@@ -1701,6 +1705,14 @@ ENTRY(debug)
 	RING0_INT_FRAME
 	pushl $-1			# mark this as an int
 	CFI_ADJUST_CFA_OFFSET 4
+
+	/*
+	 * #DB from userspace is treated as a regular exception.
+	 * N.B. esp points to the PT_GS slot at this point.
+	 */
+	testl $SEGMENT_RPL_MASK, PT_CS-PT_GS(%esp)
+	jnz   .Ldebug_userspace
+
 	SAVE_ALL_PARANOID cr3_reg=%edi
 	IBRS_ENTRY_SAVE_AND_CLOBBER save_reg=%esi
 
@@ -1729,6 +1741,16 @@ ENTRY(debug)
 	call do_debug
 	movl %ebp, %esp
 	jmp .Lparanoid_return
+
+.Ldebug_userspace:
+	SAVE_ALL switch_stacks=1
+	IBRS_ENTRY_CLOBBER
+	FILL_RETURN_BUFFER_CLOBBER reg=%eax
+	TRACE_IRQS_OFF
+	xorl %edx,%edx			# error code 0
+	movl %esp,%eax			# pt_regs pointer
+	call do_debug
+	jmp  ret_from_exception
 
 	CFI_ENDPROC
 END(debug)

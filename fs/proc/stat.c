@@ -74,6 +74,8 @@ static cputime64_t get_iowait_time(int cpu)
 
 #endif
 
+static unsigned int (*kstat_irqs_usr_fn)(unsigned int irq);
+
 static int show_stat(struct seq_file *p, void *v)
 {
 	int i, j;
@@ -151,7 +153,7 @@ static int show_stat(struct seq_file *p, void *v)
 
 	/* sum again ? it could be updated? */
 	for_each_irq_nr(j)
-		seq_printf(p, " %u", kstat_irqs_usr(j));
+		seq_printf(p, " %u", kstat_irqs_usr_fn(j));
 
 	seq_printf(p,
 		"\nctxt %llu\n"
@@ -205,8 +207,23 @@ static const struct file_operations proc_stat_operations = {
 	.release	= single_release,
 };
 
+static int __init rhel_set_kstat_irqs_usr_fn(char *str)
+{
+	kstat_irqs_usr_fn = kstat_irqs_usr_nolock;
+	return 1;
+}
+__setup("kstat_irq_nolock", rhel_set_kstat_irqs_usr_fn);
+
+static unsigned int kstat_irqs_usr_lock(unsigned int irq)
+{
+	return kstat_irqs_usr(irq);
+}
+
 static int __init proc_stat_init(void)
 {
+	if (!kstat_irqs_usr_fn)
+		kstat_irqs_usr_fn = kstat_irqs_usr_lock;
+
 	proc_create("stat", 0, NULL, &proc_stat_operations);
 	return 0;
 }

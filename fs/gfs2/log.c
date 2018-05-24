@@ -730,12 +730,16 @@ void gfs2_log_commit(struct gfs2_sbd *sdp, struct gfs2_trans *tr)
 /**
  * gfs2_log_shutdown - write a shutdown header into a journal
  * @sdp: the filesystem
+ * @ro: if the file system is being transitioned to ro
  *
  */
 
-void gfs2_log_shutdown(struct gfs2_sbd *sdp)
+void gfs2_log_shutdown(struct gfs2_sbd *sdp, int ro)
 {
 	down_write(&sdp->sd_log_flush_lock);
+
+	if (ro)
+		clear_bit(SDF_JOURNAL_LIVE, &sdp->sd_flags);
 
 	gfs2_assert_withdraw(sdp, !sdp->sd_log_blks_reserved);
 	gfs2_assert_withdraw(sdp, !sdp->sd_log_num_buf);
@@ -794,6 +798,15 @@ int gfs2_logd(void *data)
 	int need_flush;
 
 	while (!kthread_should_stop()) {
+		/* Check for errors writing to the journal */
+		if (sdp->sd_log_error) {
+			gfs2_lm_withdraw(sdp,
+					 "GFS2: fsid=%s: error %d: "
+					 "withdrawing the file system to "
+					 "prevent further damage.\n",
+					 sdp->sd_fsname, sdp->sd_log_error);
+		}
+
 		/* Advance the log tail */
 
 		t = sdp->sd_log_flush_time +

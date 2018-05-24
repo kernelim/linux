@@ -703,7 +703,7 @@ static void gfs2_metapath_ra(struct gfs2_glock *gl,
 }
 
 /**
- * do_strip - Look for a layer a particular layer of the file and strip it off
+ * do_strip - Look for a particular layer of the file and strip it off
  * @ip: the inode
  * @dibh: the dinode buffer
  * @bh: A buffer of pointers
@@ -782,8 +782,8 @@ static int do_strip(struct gfs2_inode *ip, struct buffer_head *dibh,
 	gfs2_rlist_alloc(&rlist, LM_ST_EXCLUSIVE);
 
 	for (x = 0; x < rlist.rl_rgrps; x++) {
-		struct gfs2_rgrpd *rgd;
-		rgd = rlist.rl_ghs[x].gh_gl->gl_object;
+		struct gfs2_glock *gl = rlist.rl_ghs[x].gh_gl;
+		struct gfs2_rgrpd *rgd = gfs2_glock2rgrp(gl);
 		rg_blocks += rgd->rd_length;
 	}
 
@@ -1110,6 +1110,7 @@ out:
 static int trunc_dealloc(struct gfs2_inode *ip, u64 size)
 {
 	struct gfs2_sbd *sdp = GFS2_SB(&ip->i_inode);
+	const u64 *arr = sdp->sd_heightsize;
 	unsigned int height = ip->i_height;
 	u64 lblock;
 	struct metapath mp;
@@ -1120,6 +1121,13 @@ static int trunc_dealloc(struct gfs2_inode *ip, u64 size)
 	else
 		lblock = (size - 1) >> sdp->sd_sb.sb_bsize_shift;
 
+	if ((lblock + 1) * sdp->sd_sb.sb_bsize > arr[ip->i_height]) {
+		/*
+		 * The truncate point lies beyond the allocated meta-data;
+		 * there is nothing to truncate.
+		 */
+		return 0;
+	}
 	find_metapath(sdp, lblock, &mp, ip->i_height);
 	error = gfs2_rindex_update(sdp);
 	if (error)
@@ -1367,7 +1375,7 @@ int gfs2_write_alloc_required(struct gfs2_inode *ip, u64 offset,
 
 	*alloc_required = 0;
 
-	if (!len)
+	if (!len || &ip->i_inode == sdp->sd_rindex)
 		return 0;
 
 	if (gfs2_is_stuffed(ip)) {

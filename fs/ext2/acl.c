@@ -178,7 +178,7 @@ ext2_get_acl(struct inode *inode, int type)
  * inode->i_mutex: down
  */
 static int
-ext2_set_acl(struct inode *inode, int type, struct posix_acl *acl)
+__ext2_set_acl(struct inode *inode, int type, struct posix_acl *acl)
 {
 	int name_index;
 	void *value = NULL;
@@ -193,13 +193,6 @@ ext2_set_acl(struct inode *inode, int type, struct posix_acl *acl)
 	switch(type) {
 		case ACL_TYPE_ACCESS:
 			name_index = EXT2_XATTR_INDEX_POSIX_ACL_ACCESS;
-			if (acl) {
-				error = posix_acl_update_mode(inode, &inode->i_mode, &acl);
-				if (error)
-					return error;
-				inode->i_ctime = CURRENT_TIME_SEC;
-				mark_inode_dirty(inode);
-			}
 			break;
 
 		case ACL_TYPE_DEFAULT:
@@ -222,6 +215,29 @@ ext2_set_acl(struct inode *inode, int type, struct posix_acl *acl)
 	kfree(value);
 	if (!error)
 		set_cached_acl(inode, type, acl);
+	return error;
+}
+
+static int
+ext2_set_acl(struct inode *inode, int type, struct posix_acl *acl)
+{
+	umode_t mode = inode->i_mode;
+	int update_mode = 0;
+	int error;
+
+	if (type == ACL_TYPE_ACCESS && acl) {
+		error = posix_acl_update_mode(inode, &mode, &acl);
+		if (error)
+			return error;
+		update_mode = 1;
+	}
+
+	error = __ext2_set_acl(inode, type, acl);
+	if (!error && update_mode) {
+		inode->i_mode = mode;
+		inode->i_ctime = CURRENT_TIME_SEC;
+		mark_inode_dirty(inode);
+	}
 	return error;
 }
 
@@ -267,7 +283,7 @@ ext2_init_acl(struct inode *inode, struct inode *dir)
 	       mode_t mode;
 
 		if (S_ISDIR(inode->i_mode)) {
-			error = ext2_set_acl(inode, ACL_TYPE_DEFAULT, acl);
+			error = __ext2_set_acl(inode, ACL_TYPE_DEFAULT, acl);
 			if (error)
 				goto cleanup;
 		}
@@ -281,8 +297,8 @@ ext2_init_acl(struct inode *inode, struct inode *dir)
 			inode->i_mode = mode;
 			if (error > 0) {
 				/* This is an extended ACL */
-				error = ext2_set_acl(inode,
-						     ACL_TYPE_ACCESS, clone);
+				error = __ext2_set_acl(inode,
+						       ACL_TYPE_ACCESS, clone);
 			}
 		}
 		posix_acl_release(clone);

@@ -1961,7 +1961,7 @@ static int __init uncore_pci_init(void)
 		ret = bdw_uncore_pci_init();
 		break;
 	default:
-		return 0;
+		return -ENODEV;
 	}
 
 	if (ret)
@@ -1981,15 +1981,6 @@ static int __init uncore_pci_init(void)
 		uncore_types_exit(uncore_pci_uncores);
 
 	return ret;
-}
-
-static void __init uncore_pci_exit(void)
-{
-	if (pcidrv_registered) {
-		pcidrv_registered = false;
-		pci_unregister_driver(uncore_pci_driver);
-		uncore_types_exit(uncore_pci_uncores);
-	}
 }
 
 static void __cpuinit uncore_cpu_dying(int cpu)
@@ -2254,7 +2245,7 @@ static int __init uncore_cpu_init(void)
 		bdx_uncore_cpu_init();
 		break;
 	default:
-		return 0;
+		return -ENODEV;
 	}
 
 	ret = uncore_types_init(uncore_msr_uncores);
@@ -2281,7 +2272,7 @@ static int __init uncore_pmus_register(void)
 	return 0;
 }
 
-static void __init uncore_cpumask_init(void)
+static void __init uncore_cpumask_init(bool msr)
 {
 	int cpu;
 
@@ -2305,7 +2296,9 @@ static void __init uncore_cpumask_init(void)
 		if (phys_id < 0)
 			continue;
 
-		uncore_cpu_prepare(cpu, phys_id);
+		if (msr)
+			uncore_cpu_prepare(cpu, phys_id);
+
 		uncore_event_init_cpu(cpu);
 	}
 	on_each_cpu(uncore_cpu_setup, NULL, 1);
@@ -2318,7 +2311,7 @@ static void __init uncore_cpumask_init(void)
 
 static int __init intel_uncore_init(void)
 {
-	int ret;
+	int pret, cret;
 
 	if (boot_cpu_data.x86_vendor != X86_VENDOR_INTEL)
 		return -ENODEV;
@@ -2326,19 +2319,15 @@ static int __init intel_uncore_init(void)
 	if (cpu_has_hypervisor)
 		return -ENODEV;
 
-	ret = uncore_pci_init();
-	if (ret)
-		goto fail;
-	ret = uncore_cpu_init();
-	if (ret) {
-		uncore_pci_exit();
-		goto fail;
-	}
-	uncore_cpumask_init();
+	pret = uncore_pci_init();
+	cret = uncore_cpu_init();
+
+	if (cret && pret)
+		return -ENODEV;
+
+	uncore_cpumask_init(!cret);
 
 	uncore_pmus_register();
 	return 0;
-fail:
-	return ret;
 }
 device_initcall(intel_uncore_init);

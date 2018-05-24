@@ -2346,6 +2346,32 @@ fuse_direct_IO(int rw, struct kiocb *iocb, const struct iovec *iov,
 	return ret;
 }
 
+static void fuse_punch_hole(struct inode *inode, loff_t lstart, loff_t lend)
+{
+	unsigned int partial_start = lstart & (PAGE_CACHE_SIZE - 1);
+	unsigned int partial_end = (lend + 1) & (PAGE_CACHE_SIZE - 1);
+	pgoff_t end_index = (lend + 1) >> PAGE_CACHE_SHIFT;
+	loff_t end_offset = end_index << PAGE_CACHE_SHIFT;
+
+	if (end_offset > lstart) {
+		truncate_pagecache_range(inode, lstart, end_offset - 1);
+		partial_start = 0;
+	}
+
+	/*
+	 * Zero out trailing partial page, because truncate_pagecache_range()
+	 * doesn't do it.
+	 */
+	if (partial_end) {
+		struct page *page = find_lock_page(inode->i_mapping, end_index);
+		if (page) {
+			zero_user_segment(page, partial_start, partial_end);
+			unlock_page(page);
+			page_cache_release(page);
+		}
+	}
+}
+
 long fuse_file_fallocate(struct inode *inode, struct fuse_file *ff, int mode,
 			 loff_t offset, loff_t length)
 {
@@ -2408,7 +2434,7 @@ long fuse_file_fallocate(struct inode *inode, struct fuse_file *ff, int mode,
 		fuse_write_update_size(inode, offset + length);
 
 	if (mode & FALLOC_FL_PUNCH_HOLE)
-		truncate_pagecache_range(inode, offset, offset + length - 1);
+		fuse_punch_hole(inode, offset, offset + length - 1);
 
 	fuse_invalidate_attr(inode);
 

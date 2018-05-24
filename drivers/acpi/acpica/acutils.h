@@ -531,6 +531,8 @@ acpi_status acpi_ut_acquire_mutex(acpi_mutex_handle mutex_id);
 
 acpi_status acpi_ut_release_mutex(acpi_mutex_handle mutex_id);
 
+bool acpi_ut_is_mutex_ours(acpi_mutex_handle mutex_id); /* RHEL6-ONLY */
+
 /*
  * utalloc - memory allocation and object caching
  */

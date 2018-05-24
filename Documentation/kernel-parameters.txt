@@ -1250,6 +1250,10 @@ and is between 256 and 4096 characters. It is defined in the file
 			feature (tagged TLBs) on capable Intel chips.
 			Default is 1 (enabled)
 
+	kstat_irq_nolock
+			Disables sparse IRQ locking for accesses to
+			/proc/stat.  Use with caution.
+
 	l2cr=		[PPC]
 
 	l3cr=		[PPC]
@@ -1811,7 +1815,7 @@ and is between 256 and 4096 characters. It is defined in the file
 			allow data leaks with this option, which is equivalent
 			to spectre_v2=off.
 
-	nospec_store_disable
+	nospec_store_bypass_disable
 			[HW] Disable all mitigations for the Speculative Store Bypass vulnerability
 
 	noxsave		[BUGS=X86] Disables x86 extended register state save
@@ -1973,7 +1977,7 @@ and is between 256 and 4096 characters. It is defined in the file
 	panic=		[KNL] Kernel behaviour on panic
 			Format: <timeout>
 
-	panic_on_warn	panic() instead of WARN().  Useful to cause kdump
+	panic_on_warn	[ X86 ] panic() instead of WARN().  Useful to cause kdump
 			on a WARN().
 
 	parkbd.port=	[HW] Parallel port number the keyboard adapter is

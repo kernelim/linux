@@ -241,20 +241,20 @@ struct kernel_ibrs_spec_ctrl {
 
 DECLARE_PER_CPU_USER_MAPPED(struct kernel_ibrs_spec_ctrl, spec_ctrl_pcp);
 
-extern void x86_amd_rds_enable(void);
+extern void x86_amd_ssbd_enable(void);
 
 /* The Intel SPEC CTRL MSR base value cache */
 extern u64 x86_spec_ctrl_base;
 
-static inline u64 rds_tif_to_spec_ctrl(u64 tifn)
+static inline u64 ssbd_tif_to_spec_ctrl(u64 tifn)
 {
 	BUILD_BUG_ON(TIF_SSBD < FEATURE_ENABLE_SSBD_SHIFT);
 	return (tifn & _TIF_SSBD) >> (TIF_SSBD - FEATURE_ENABLE_SSBD_SHIFT);
 }
 
-static inline u64 rds_tif_to_amd_ls_cfg(u64 tifn)
+static inline u64 ssbd_tif_to_amd_ls_cfg(u64 tifn)
 {
-	return (tifn & _TIF_SSBD) ? x86_amd_ls_cfg_rds_mask : 0ULL;
+	return (tifn & _TIF_SSBD) ? x86_amd_ls_cfg_ssbd_mask : 0ULL;
 }
 
 extern void speculative_store_bypass_update(void);
@@ -335,7 +335,7 @@ static __always_inline void __spec_ctrl_vm_ibrs(u64 vcpu_ibrs, bool vmenter)
 	}
 
 	if (boot_cpu_data.x86_vendor == X86_VENDOR_INTEL)
-		host_ibrs |= rds_tif_to_spec_ctrl(current_thread_info()->flags);
+		host_ibrs |= ssbd_tif_to_spec_ctrl(current_thread_info()->flags);
 
 	val = vmenter ? vcpu_ibrs : host_ibrs;
 	write_spec_ctrl = (!vmenter && host_ibrs) || (vcpu_ibrs != host_ibrs);
@@ -368,7 +368,7 @@ static __always_inline void spec_ctrl_ibrs_on(void)
 		u64 spec_ctrl = x86_spec_ctrl_base|FEATURE_ENABLE_IBRS;
 
 		if (boot_cpu_data.x86_vendor == X86_VENDOR_INTEL)
-			spec_ctrl |= rds_tif_to_spec_ctrl(
+			spec_ctrl |= ssbd_tif_to_spec_ctrl(
 					current_thread_info()->flags);
 
 		native_wrmsrl(MSR_IA32_SPEC_CTRL, spec_ctrl);
@@ -384,7 +384,7 @@ static __always_inline void spec_ctrl_ibrs_off(void)
 		u64 spec_ctrl = x86_spec_ctrl_base;
 
 		if (boot_cpu_data.x86_vendor == X86_VENDOR_INTEL)
-			spec_ctrl |= rds_tif_to_spec_ctrl(
+			spec_ctrl |= ssbd_tif_to_spec_ctrl(
 					current_thread_info()->flags);
 
 		native_wrmsrl(MSR_IA32_SPEC_CTRL, spec_ctrl);
@@ -412,7 +412,7 @@ static inline bool spec_ctrl_ibrs_on_firmware(void)
 		u64 spec_ctrl = x86_spec_ctrl_base|FEATURE_ENABLE_IBRS;
 
 		if (boot_cpu_data.x86_vendor == X86_VENDOR_INTEL)
-			spec_ctrl |= rds_tif_to_spec_ctrl(
+			spec_ctrl |= ssbd_tif_to_spec_ctrl(
 					current_thread_info()->flags);
 
 		native_wrmsrl(MSR_IA32_SPEC_CTRL, spec_ctrl);
@@ -431,7 +431,7 @@ static inline void spec_ctrl_ibrs_off_firmware(bool ibrs_on)
 		u64 spec_ctrl = x86_spec_ctrl_base;
 
 		if (boot_cpu_data.x86_vendor == X86_VENDOR_INTEL)
-			spec_ctrl |= rds_tif_to_spec_ctrl(
+			spec_ctrl |= ssbd_tif_to_spec_ctrl(
 					current_thread_info()->flags);
 
 		native_wrmsrl(MSR_IA32_SPEC_CTRL, spec_ctrl);

@@ -453,16 +453,13 @@ static void prune_one_dentry(struct dentry * dentry)
  * which flags are set. This means we don't need to maintain multiple
  * similar copies of this loop.
  */
-static void __shrink_dcache_sb(struct super_block *sb, int *count, int flags)
+static void __shrink_dcache_sb_locked(struct super_block *sb, int *count, int flags)
 {
 	LIST_HEAD(referenced);
 	LIST_HEAD(tmp);
 	struct dentry *dentry;
 	int cnt = 0;
 
-	BUG_ON(!sb);
-	BUG_ON((flags & DCACHE_REFERENCED) && count == NULL);
-	spin_lock(&dcache_lock);
 	if (count != NULL)
 		/* called from prune_dcache() and shrink_dcache_parent() */
 		cnt = *count;
@@ -519,6 +516,14 @@ restart:
 		*count = cnt;
 	if (!list_empty(&referenced))
 		list_splice(&referenced, &sb->s_dentry_lru);
+}
+
+static void __shrink_dcache_sb(struct super_block *sb, int *count, int flags)
+{
+	BUG_ON(!sb);
+	BUG_ON((flags & DCACHE_REFERENCED) && count == NULL);
+	spin_lock(&dcache_lock);
+	__shrink_dcache_sb_locked(sb, count, flags);
 	spin_unlock(&dcache_lock);
 }
 
@@ -734,14 +739,9 @@ static void unhash_offsprings(struct dentry *dentry)
 			spin_unlock(&loop->d_lock);
 			continue;
 		}
-
-		if (atomic_read(&loop->d_count)) {
-			__d_drop(loop);
-			spin_unlock(&loop->d_lock);
-			continue;
-		}
-
-		list_move_tail(&loop->d_lru, &tmp);
+		__d_drop(loop);
+		if (!atomic_read(&loop->d_count))
+			list_move_tail(&loop->d_lru, &tmp);
 		spin_unlock(&loop->d_lock);
 	}
 
@@ -754,7 +754,6 @@ static void unhash_offsprings(struct dentry *dentry)
 		 * removed.
 		 */
 		if (atomic_read(&loop->d_count)) {
-			__d_drop(loop);
 			spin_unlock(&loop->d_lock);
 			WARN_ON(1);
 			continue;
@@ -864,7 +863,6 @@ static int select_parent(struct dentry * parent)
 	struct list_head *next;
 	int found = 0;
 
-	spin_lock(&dcache_lock);
 repeat:
 	next = this_parent->d_subdirs.next;
 resume:
@@ -908,7 +906,6 @@ resume:
 		goto resume;
 	}
 out:
-	spin_unlock(&dcache_lock);
 	return found;
 }
 
@@ -921,11 +918,22 @@ out:
  
 void shrink_dcache_parent(struct dentry * parent)
 {
+	static DECLARE_WAIT_QUEUE_HEAD(shrinker_waitq);
 	struct super_block *sb = parent->d_sb;
 	int found;
 
+	spin_lock(&dcache_lock);
+	if (unlikely(parent->d_flags & DCACHE_SHRINKING)) {
+		spin_unlock(&dcache_lock);
+		wait_event(shrinker_waitq, !(parent->d_flags & DCACHE_SHRINKING));
+		spin_lock(&dcache_lock);
+	}
+	parent->d_flags |= DCACHE_SHRINKING;
 	while ((found = select_parent(parent)) != 0)
-		__shrink_dcache_sb(sb, &found, 0);
+		__shrink_dcache_sb_locked(sb, &found, 0);
+	parent->d_flags &= ~DCACHE_SHRINKING;
+	spin_unlock(&dcache_lock);
+	wake_up(&shrinker_waitq);
 }
 
 /*

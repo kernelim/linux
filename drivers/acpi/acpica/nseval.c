@@ -72,6 +72,9 @@ acpi_ns_exec_module_code(union acpi_operand_object *method_obj,
  *                  return_object   - Where to put method's return value (if
  *                                    any). If NULL, no value is returned.
  *                  Flags           - ACPI_IGNORE_RETURN_VALUE to delete return
+ *                                  - ACPI_INTERPRETER_ENTERED (RHEL6-ONLY)
+ *                                    Interpreter already entered. Don't enter
+ *                                    and exit interpreter.
  *
  * RETURN:      Status
  *
@@ -174,12 +177,26 @@ acpi_status acpi_ns_evaluate(struct acpi_evaluate_info * info)
 		 * interpreter locks to ensure that no thread is using the portion of
 		 * the namespace that is being deleted.
 		 *
-		 * Execute the method via the interpreter. The interpreter is locked
-		 * here before calling into the AML parser
+		 * Execute the method via the interpreter. The interpreter
+		 * must be locked before calling into the AML parser.
+		 *
+		 * RHEL6-ONLY: To prevent a mutex deadlock, if the caller
+		 * indicates that the interpreter has already been entered,
+		 * don't attempt to enter it again.
 		 */
-		acpi_ex_enter_interpreter();
+		if (!(info->flags & ACPI_INTERPRETER_ENTERED)) {
+			acpi_ex_enter_interpreter();
+		}
+
 		status = acpi_ps_execute_method(info);
-		acpi_ex_exit_interpreter();
+
+		/*
+		 * RHEL6-ONLY: Do not exit from the interpreter if we didn't
+		 * enter it.
+		 */
+		if (!(info->flags & ACPI_INTERPRETER_ENTERED)) {
+			acpi_ex_exit_interpreter();
+		}
 	} else {
 		/*
 		 * 2) Object is not a method, return its current value
@@ -221,14 +238,27 @@ acpi_status acpi_ns_evaluate(struct acpi_evaluate_info * info)
 		 * Even though we do not directly invoke the interpreter for object
 		 * resolution, we must lock it because we could access an opregion.
 		 * The opregion access code assumes that the interpreter is locked.
+		 *
+		 * RHEL6-ONLY: To prevent a mutex deadlock, if the caller
+		 * indicates that the interpreter has already been entered,
+		 * don't attempt to enter it again.
 		 */
-		acpi_ex_enter_interpreter();
+		if (!(info->flags & ACPI_INTERPRETER_ENTERED)) {
+			acpi_ex_enter_interpreter();
+		}
 
 		/* Function has a strange interface */
 
 		status =
 		    acpi_ex_resolve_node_to_value(&info->resolved_node, NULL);
-		acpi_ex_exit_interpreter();
+
+		/*
+		 * RHEL6-ONLY: Do not exit from the interpreter if we didn't
+		 * enter it.
+		 */
+		if (!(info->flags & ACPI_INTERPRETER_ENTERED)) {
+			acpi_ex_exit_interpreter();
+		}
 
 		/*
 		 * If acpi_ex_resolve_node_to_value() succeeded, the return value was placed

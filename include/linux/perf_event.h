@@ -1046,9 +1046,12 @@ typedef void (*perf_overflow_handler_t)(struct perf_event *,
 					struct perf_sample_data *,
 					struct pt_regs *regs);
 
-enum perf_group_flag {
-	PERF_GROUP_SOFTWARE		= 0x1,
-};
+/*
+ * Event capabilities. For event_caps and groups caps.
+ *
+ * PERF_EV_CAP_SOFTWARE: Is a software event.
+ */
+#define PERF_EV_CAP_SOFTWARE		BIT(0)
 
 #define SWEVENT_HLIST_BITS		8
 #define SWEVENT_HLIST_SIZE		(1 << SWEVENT_HLIST_BITS)
@@ -1125,7 +1128,14 @@ struct perf_event {
 
 	struct hlist_node		hlist_entry;
 	int				nr_siblings;
+
+#ifdef __GENKSYMS__
 	int				group_flags;
+#else
+	/* Not serialized. Only written during event initialization. */
+	int				event_caps;
+#endif
+
 	struct perf_event		*group_leader;
 	struct pmu			*pmu;
 
@@ -1240,6 +1250,9 @@ struct perf_event {
 
 #ifndef __GENKSYMS__
 	struct list_head		active_entry;
+
+	/* The cumulative AND of all event_caps for events in this group. */
+	int				group_caps;
 #endif
 #endif /* CONFIG_PERF_EVENTS */
 };
@@ -1447,7 +1460,7 @@ static inline bool is_sampling_event(struct perf_event *event)
  */
 static inline int is_software_event(struct perf_event *event)
 {
-	return event->pmu->task_ctx_nr == perf_sw_context;
+	return event->event_caps & PERF_EV_CAP_SOFTWARE;
 }
 
 extern atomic_t perf_swevent_enabled[PERF_COUNT_SW_MAX];
@@ -1514,6 +1527,7 @@ extern struct perf_guest_info_callbacks *perf_guest_cbs;
 extern int perf_register_guest_info_callbacks(struct perf_guest_info_callbacks *callbacks);
 extern int perf_unregister_guest_info_callbacks(struct perf_guest_info_callbacks *callbacks);
 
+extern void perf_event_exec(void);
 extern void perf_event_comm(struct task_struct *tsk, bool exec);
 extern void perf_event_fork(struct task_struct *tsk);
 
@@ -1588,7 +1602,7 @@ extern void perf_event_enable(struct perf_event *event);
 extern void perf_event_disable(struct perf_event *event);
 extern void perf_event_task_tick(void);
 extern void perf_restore_debug_store(void);
-#else
+#else /* !CONFIG_PERF_EVENTS: */
 static inline void
 perf_event_task_sched_in(struct task_struct *prev,
 			 struct task_struct *task)			{ }
@@ -1614,6 +1628,7 @@ static inline int perf_unregister_guest_info_callbacks
 (struct perf_guest_info_callbacks *callbacks)				{ return 0; }
 
 static inline void perf_event_mmap(struct vm_area_struct *vma)		{ }
+static inline void perf_event_exec(void)				{ }
 static inline void perf_event_comm(struct task_struct *tsk, bool exec)	{ }
 static inline void perf_event_fork(struct task_struct *tsk)		{ }
 static inline void perf_event_init(void)				{ }

@@ -141,6 +141,22 @@ label##5:					       	\
 #define ALT_FW_FTR_SECTION_END_IFCLR(msk)	\
 	ALT_FW_FTR_SECTION_END_NESTED_IFCLR(msk, 97)
 
+#define STF_ENTRY_BARRIER_FIXUP_SECTION			\
+953:							\
+	.pushsection __stf_entry_barrier_fixup,"a";	\
+	.align 2;					\
+954:							\
+	FTR_ENTRY_OFFSET 953b-954b;			\
+	.popsection;
+
+#define STF_EXIT_BARRIER_FIXUP_SECTION			\
+955:							\
+	.pushsection __stf_exit_barrier_fixup,"a";	\
+	.align 2;					\
+956:							\
+	FTR_ENTRY_OFFSET 955b-956b;			\
+	.popsection;
+
 #define RFI_FLUSH_FIXUP_SECTION				\
 951:							\
 	.pushsection __rfi_flush_fixup,"a";		\
@@ -153,6 +169,9 @@ label##5:					       	\
 #ifndef __ASSEMBLY__
 #include <linux/types.h>
 
+extern long stf_barrier_fallback;
+extern long __start___stf_entry_barrier_fixup, __stop___stf_entry_barrier_fixup;
+extern long __start___stf_exit_barrier_fixup, __stop___stf_exit_barrier_fixup;
 extern long __start___rfi_flush_fixup, __stop___rfi_flush_fixup;
 
 #define ASM_MMU_FTR_IF(section_if, section_else, msk, val)	\

@@ -2631,10 +2631,12 @@ static int cxgb4_inet6addr_handler(struct notifier_block *this,
 		list_for_each_entry(adap, &adapter_list, list_node) {
 			switch (event) {
 			case NETDEV_UP:
-				cxgb4_clip_get(adap->port[0], &ifa->addr);
+				cxgb4_clip_get(adap->port[0],
+						(const u32*)ifa, 1);
 				break;
 			case NETDEV_DOWN:
-				cxgb4_clip_release(adap->port[0], &ifa->addr);
+				cxgb4_clip_release(adap->port[0],
+						(const u32*)ifa, 1);
 				break;
 			default:
 				break;
@@ -2650,10 +2652,10 @@ static int cxgb4_inet6addr_handler(struct notifier_block *this,
 	if (parent && parent->driver == &cxgb4_driver.driver) {
 		switch (event) {
 		case NETDEV_UP:
-			cxgb4_clip_get(event_dev, &ifa->addr);
+			cxgb4_clip_get(event_dev, (const u32*)ifa, 1);
 			break;
 		case NETDEV_DOWN:
-			cxgb4_clip_release(event_dev, &ifa->addr);
+			cxgb4_clip_release(event_dev, (const u32*)ifa, 1);
 			break;
 		default:
 			break;

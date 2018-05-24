@@ -80,6 +80,12 @@ sie_inst:
 sie_exit:
 	lg	%r14,SP_GREGS(%r15)
 	stmg	%r0,%r13,0(%r14)		# save guest gprs 0-13
+	xgr	%r0,%r0				# clear guest registers to
+	xgr	%r1,%r1				# prevent speculative use
+	xgr	%r2,%r2
+	xgr	%r3,%r3
+	xgr	%r4,%r4
+	xgr	%r5,%r5
 	lghi	%r2,0
 	lmg	%r6,%r14,__SF_GPRS(%r15)
 	br	%r14
@@ -89,6 +95,12 @@ sie_err:
 	SPP	__LC_CMF_HPP			# set host id
 	lg	%r14,SP_GREGS(%r15)
 	stmg	%r0,%r13,0(%r14)		# save guest gprs 0-13
+	xgr	%r0,%r0				# clear guest registers to
+	xgr	%r1,%r1				# prevent speculative use
+	xgr	%r2,%r2
+	xgr	%r3,%r3
+	xgr	%r4,%r4
+	xgr	%r5,%r5
 	lghi	%r2,-EFAULT
 	lmg	%r6,%r14,__SF_GPRS(%r15)
 	br	%r14

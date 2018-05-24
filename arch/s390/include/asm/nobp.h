@@ -8,7 +8,7 @@
 662:	.long	0xb2e8d000
 	.popsection
 663:	.long	0x47000000
-	.pushsection .altnobp, "a"
+	.pushsection .altinstructions, "a"
         .long 663b - .
 	.long 662b - .
 	.word 82

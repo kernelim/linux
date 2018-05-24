@@ -106,10 +106,15 @@ struct dma_pinned_list *dma_pin_iovec_pages(struct iovec *iov, size_t len)
 			NULL);
 		up_read(&current->mm->mmap_sem);
 
-		if (ret != page_list->nr_pages)
+		if (ret < 0)
 			goto unpin;
 
 		local_list->nr_iovecs = i + 1;
+
+		if (ret != page_list->nr_pages) {
+			page_list->nr_pages = ret;
+			goto unpin;
+		}
 	}
 
 	return local_list;

@@ -357,7 +357,7 @@ uncork:
 	}
 
 	if (rc < 0 && rc != -EINTR)
-		cERROR(1, "Error %d sending data on socket to server", rc);
+		cERROR_RATELIMITED(1, "Error %d sending data on socket to server", rc);
 	else
 		rc = 0;
 

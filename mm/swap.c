@@ -590,6 +590,28 @@ static void lru_add_drain_per_cpu(struct work_struct *dummy)
 
 static DEFINE_PER_CPU(struct work_struct, lru_add_drain_work);
 
+/*
+ * lru_add_drain_wq is used to do lru_add_drain_all() from a WQ_MEM_RECLAIM
+ * workqueue, aiding in getting memory freed.
+ */
+static struct workqueue_struct *lru_add_drain_wq;
+
+static int __init lru_init(void)
+{
+#if 0	/* Not in RHEL6 */
+	lru_add_drain_wq = alloc_workqueue("lru-add-drain", WQ_MEM_RECLAIM, 0);
+#else
+	lru_add_drain_wq = create_workqueue("lru-add-drain");
+#endif
+
+	if (WARN(!lru_add_drain_wq,
+		"Failed to create workqueue lru_add_drain_wq"))
+		return -ENOMEM;
+
+	return 0;
+}
+__initcall(lru_init);
+
 void lru_add_drain_all(void)
 {
 	struct cpumask has_work;
@@ -612,7 +634,7 @@ void lru_add_drain_all(void)
 		    pagevec_count(&per_cpu(lru_rotate_pvecs, cpu)) ||
 		    pagevec_count(&per_cpu(lru_deactivate_pvecs, cpu))) {
 			if (cpu != smp_processor_id()) {
-				schedule_work_on(cpu, work);
+				queue_work_on(cpu, lru_add_drain_wq, work);
 				cpumask_set_cpu(cpu, &has_work);
 			}
 			else {

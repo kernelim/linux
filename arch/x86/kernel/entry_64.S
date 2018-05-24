@@ -1462,7 +1462,7 @@ apicinterrupt3 HYPERVISOR_CALLBACK_VECTOR \
 	.pushsection .kprobes.text, "ax"
 
 paranoidzeroentry_ist debug do_debug DEBUG_STACK
-zeroentry int3 do_int3
+paranoidzeroentry_ist int3 do_int3 DEBUG_STACK
 errorentry stack_segment do_stack_segment
 #ifdef CONFIG_XEN
 zeroentry xen_debug do_debug

@@ -681,9 +681,7 @@ void gfs2_clear_rgrpd(struct gfs2_sbd *sdp)
 		rb_erase(n, &sdp->sd_rindex_tree);
 
 		if (gl) {
-			spin_lock(&gl->gl_spin);
-			gl->gl_object = NULL;
-			spin_unlock(&gl->gl_spin);
+			glock_clear_object(gl, rgd);
 			gfs2_glock_add_to_lru(gl);
 			gfs2_glock_put(gl);
 		}
@@ -891,7 +889,7 @@ static int read_rindex_entry(struct gfs2_inode *ip,
 	error = rgd_insert(rgd);
 	spin_unlock(&sdp->sd_rindex_spin);
 	if (!error) {
-		rgd->rd_gl->gl_object = rgd;
+		glock_set_object(rgd->rd_gl, rgd);
 		return 0;
 	}
 

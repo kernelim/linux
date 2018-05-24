@@ -40,4 +40,6 @@ extern unsigned long rtas_poweron_auto;
 
 extern void find_udbg_vterm(void);
 
+void pseries_setup_rfi_flush(void);
+
 #endif /* _PSERIES_PSERIES_H */

@@ -382,4 +382,17 @@ void zfcp_dbf_scsi_devreset(const char *tag, u8 flag, struct zfcp_unit *unit,
 			    unit->port->adapter->dbf, scsi_cmnd, NULL, 0);
 }
 
+/**
+ * zfcp_dbf_scsi_nullcmnd() - trace NULLify of SCSI command in dev/tgt-reset.
+ * @scmnd: SCSI command that was NULLified.
+ * @fsf_req: request that owned @scmnd.
+ */
+static inline void zfcp_dbf_scsi_nullcmnd(const char *tag, u8 flag,
+					  struct scsi_cmnd *scmd,
+					  struct zfcp_fsf_req *fsf_req)
+{
+	zfcp_dbf_scsi(flag == FCP_TMF_TGT_RESET ? "trst" : "lrst", tag, 3,
+			fsf_req->adapter->dbf, scmd, fsf_req, 0);
+}
+
 #endif /* ZFCP_DBF_H */

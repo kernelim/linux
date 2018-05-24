@@ -1678,7 +1678,7 @@ static struct buffer_head *create_page_buffers(struct page *page, struct inode *
  * which will ultimately call blk_run_backing_dev(), which will end up
  * unplugging the device queue.
  */
-static int __block_write_full_page(struct inode *inode, struct page *page,
+int __block_write_full_page(struct inode *inode, struct page *page,
 			get_block_t *get_block, struct writeback_control *wbc,
 			bh_end_io_t *handler)
 {
@@ -1840,6 +1840,7 @@ recover:
 	unlock_page(page);
 	goto done;
 }
+EXPORT_SYMBOL(__block_write_full_page);
 
 /*
  * If a page has any new buffers, zero them out here, and mark them uptodate

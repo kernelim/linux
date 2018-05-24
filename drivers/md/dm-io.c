@@ -295,6 +295,7 @@ static void do_region(int rw, unsigned region, struct dm_io_region *where,
 	if (rw & BIO_DISCARD)
 		special_cmd_max_sectors = q->limits.max_discard_sectors;
 	if ((rw & BIO_DISCARD) && special_cmd_max_sectors == 0) {
+		atomic_inc(&io->count);
 		dec_count(io, region, -EOPNOTSUPP);
 		return;
 	}

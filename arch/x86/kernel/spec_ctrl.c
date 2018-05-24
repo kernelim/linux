@@ -55,10 +55,10 @@ static bool spec_ctrl_msr_write;
 
 /*
  * AMD specific MSR info for Store Bypass control.
- * x86_amd_ls_cfg_rds_mask is initialized in identify_boot_cpu().
+ * x86_amd_ls_cfg_ssbd_mask is initialized in identify_boot_cpu().
  */
 u64 __read_mostly x86_amd_ls_cfg_base;
-u64 __read_mostly x86_amd_ls_cfg_rds_mask;
+u64 __read_mostly x86_amd_ls_cfg_ssbd_mask;
 
 void spec_ctrl_save_msr(void)
 {
@@ -152,7 +152,7 @@ static void set_spec_ctrl_pcp(bool entry, bool exit)
  *
  *		entry	exit
  * ibrs		  1	 0
- * ibrs_always	  1	 x (not written on exit)
+ * ibrs_always	  1	 1
  * ibrs_user	  0	 1
  */
 

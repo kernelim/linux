@@ -48,6 +48,27 @@
 #define EX_R3		64
 #define EX_LR		72
 
+#define STF_ENTRY_BARRIER_SLOT						\
+	STF_ENTRY_BARRIER_FIXUP_SECTION;				\
+	mflr	r10;							\
+	bl	stf_barrier_fallback;					\
+	mtlr	r10
+
+#define STF_EXIT_BARRIER_SLOT						\
+	STF_EXIT_BARRIER_FIXUP_SECTION;					\
+	nop;								\
+	nop;								\
+	nop;								\
+	nop;								\
+	nop;								\
+	nop
+
+/*
+ * r10 must be free to use, r13 must be paca
+ */
+#define INTERRUPT_TO_KERNEL						\
+	STF_ENTRY_BARRIER_SLOT
+
 /*
  * The nop instructions allow us to insert one or more instructions to flush the
  * L1-D cache when return to userspace or a guest.
@@ -76,11 +97,13 @@
 
 #define RFI_TO_USER							\
 	CHECK_TARGET_MSR_PR(SPRN_SRR1, 1);				\
+	STF_EXIT_BARRIER_SLOT;						\
 	RFI_FLUSH_SLOT;							\
 	rfid;								\
 	b	rfi_flush_fallback
 
 #define RFI_TO_USER_OR_KERNEL						\
+	STF_EXIT_BARRIER_SLOT;						\
 	RFI_FLUSH_SLOT;							\
 	rfid;								\
 	b	rfi_flush_fallback
@@ -102,6 +125,7 @@
 	std	r12,area+EX_R12(r13);					\
 	mfspr	r9,SPRN_SPRG_SCRATCH0;					\
 	std	r9,area+EX_R13(r13);					\
+	INTERRUPT_TO_KERNEL;						\
 	mfcr	r9
 
 #define EXCEPTION_PROLOG_PSERIES_1(label)				\
@@ -213,6 +237,7 @@ label##_pSeries:							\
 	mfspr	r13,SPRN_SPRG_PACA;	/* get paca address into r13 */	\
 	std	r9,PACA_EXGEN+EX_R9(r13);	/* save r9, r10 */	\
 	std	r10,PACA_EXGEN+EX_R10(r13);				\
+	INTERRUPT_TO_KERNEL;						\
 	lbz	r10,PACASOFTIRQEN(r13);					\
 	mfcr	r9;							\
 	cmpwi	r10,0;							\

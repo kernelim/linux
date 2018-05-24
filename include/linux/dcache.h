@@ -200,6 +200,8 @@ d_automount:	no		no		no	 yes
 #define DCACHE_MANAGED_DENTRY \
 	(DCACHE_MOUNTED|DCACHE_NEED_AUTOMOUNT|DCACHE_MANAGE_TRANSIT)
 
+#define DCACHE_SHRINKING	0x80000000 /* dentry is being shrunk */
+
 extern spinlock_t dcache_lock;
 extern seqlock_t rename_lock;
 

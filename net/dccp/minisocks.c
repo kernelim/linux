@@ -64,9 +64,6 @@ void dccp_time_wait(struct sock *sk, int state, int timeo)
 			tw->tw_ipv6only = np->ipv6only;
 		}
 #endif
-		/* Linkage updates. */
-		__inet_twsk_hashdance(tw, sk, &dccp_hashinfo);
-
 		/* Get the TIME_WAIT timeout firing. */
 		if (timeo < rto)
 			timeo = rto;
@@ -74,6 +71,9 @@ void dccp_time_wait(struct sock *sk, int state, int timeo)
 		tw->tw_timeout = DCCP_TIMEWAIT_LEN;
 		if (state == DCCP_TIME_WAIT)
 			timeo = DCCP_TIMEWAIT_LEN;
+
+		/* Linkage updates. */
+		__inet_twsk_hashdance(tw, sk, &dccp_hashinfo);
 
 		inet_twsk_schedule(tw, &dccp_death_row, timeo,
 				   DCCP_TIMEWAIT_LEN);

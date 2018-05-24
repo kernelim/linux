@@ -26,6 +26,8 @@
 #include <asm/rtas.h>
 #include <asm/topology.h>
 
+#include "pseries.h"
+
 static u64 stream_id;
 static struct sys_device suspend_sysdev;
 static DECLARE_COMPLETION(suspend_work);
@@ -94,6 +96,10 @@ static int pseries_suspend_enter(suspend_state_t state)
 	/* Ensure suspending and suspend_data.done is seen on all CPUs,
 	 since they will be waking up shortly */
 	mb();
+
+	/* Possibly switch to a new RFI flush type */
+	pseries_setup_rfi_flush();
+
 	return rc;
 }
 

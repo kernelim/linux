@@ -7,6 +7,7 @@
  * the Free Software Foundation.
  */
 
+#include <linux/ctype.h>
 #include <linux/ethtool.h>
 #include <linux/interrupt.h>
 #include <linux/pci.h>
@@ -19,6 +20,10 @@
 #include "bnxt_nvm_defs.h"	/* NVRAM content constant and structure defs */
 #include "bnxt_fw_hdr.h"	/* Firmware hdr constant and structure defs */
 #define FLASH_NVRAM_TIMEOUT	((HWRM_CMD_TIMEOUT) * 100)
+#define FLASH_PACKAGE_TIMEOUT	((HWRM_CMD_TIMEOUT) * 200)
+#define INSTALL_PACKAGE_TIMEOUT	((HWRM_CMD_TIMEOUT) * 200)
+
+static char *bnxt_get_pkgver(struct net_device *dev, char *buf, size_t buflen);
 
 static u32 bnxt_get_msglevel(struct net_device *dev)
 {
@@ -427,10 +432,20 @@ static void bnxt_get_drvinfo(struct net_device *dev,
 			     struct ethtool_drvinfo *info)
 {
 	struct bnxt *bp = netdev_priv(dev);
+	char *pkglog;
+	char *pkgver = NULL;
 
+	pkglog = kmalloc(BNX_PKG_LOG_MAX_LENGTH, GFP_KERNEL);
+	if (pkglog)
+		pkgver = bnxt_get_pkgver(dev, pkglog, BNX_PKG_LOG_MAX_LENGTH);
 	strlcpy(info->driver, DRV_MODULE_NAME, sizeof(info->driver));
 	strlcpy(info->version, DRV_MODULE_VERSION, sizeof(info->version));
-	strlcpy(info->fw_version, bp->fw_ver_str, sizeof(info->fw_version));
+	if (pkgver && *pkgver != 0 && isdigit(*pkgver))
+		snprintf(info->fw_version, sizeof(info->fw_version) - 1,
+			 "%s pkg %s", bp->fw_ver_str, pkgver);
+	else
+		strlcpy(info->fw_version, bp->fw_ver_str,
+			sizeof(info->fw_version));
 	strlcpy(info->bus_info, pci_name(bp->pdev), sizeof(info->bus_info));
 	info->n_stats = BNXT_NUM_STATS * bp->cp_nr_rings;
 	info->testinfo_len = BNXT_NUM_TESTS(bp);
@@ -438,6 +453,7 @@ static void bnxt_get_drvinfo(struct net_device *dev,
 	info->eedump_len = 0;
 	/* TODO CHIMP FW: reg dump details */
 	info->regdump_len = 0;
+	kfree(pkglog);
 }
 
 static u32 bnxt_fw_to_ethtool_support_spds(struct bnxt_link_info *link_info)
@@ -746,6 +762,10 @@ static u32 bnxt_get_link(struct net_device *dev)
 	return bp->link_info.link_up;
 }
 
+static int bnxt_find_nvram_item(struct net_device *dev, u16 type, u16 ordinal,
+				u16 ext, u16 *index, u32 *item_length,
+				u32 *data_length);
+
 static int bnxt_flash_nvram(struct net_device *dev,
 			    u16 dir_type,
 			    u16 dir_ordinal,
@@ -784,6 +804,47 @@ static int bnxt_flash_nvram(struct net_device *dev,
 	return rc;
 }
 
+static int bnxt_firmware_reset(struct net_device *dev,
+			       u16 dir_type)
+{
+	struct bnxt *bp = netdev_priv(dev);
+	struct hwrm_fw_reset_input req = {0};
+
+	bnxt_hwrm_cmd_hdr_init(bp, &req, HWRM_FW_RESET, -1, -1);
+
+	/* TODO: Support ASAP ChiMP self-reset (e.g. upon PF driver unload) */
+	/* TODO: Address self-reset of APE/KONG/BONO/TANG or ungraceful reset */
+	/*       (e.g. when firmware isn't already running) */
+	switch (dir_type) {
+	case BNX_DIR_TYPE_CHIMP_PATCH:
+	case BNX_DIR_TYPE_BOOTCODE:
+	case BNX_DIR_TYPE_BOOTCODE_2:
+		req.embedded_proc_type = FW_RESET_REQ_EMBEDDED_PROC_TYPE_BOOT;
+		/* Self-reset ChiMP upon next PCIe reset: */
+		req.selfrst_status = FW_RESET_REQ_SELFRST_STATUS_SELFRSTPCIERST;
+		break;
+	case BNX_DIR_TYPE_APE_FW:
+	case BNX_DIR_TYPE_APE_PATCH:
+		req.embedded_proc_type = FW_RESET_REQ_EMBEDDED_PROC_TYPE_MGMT;
+		/* Self-reset APE upon next PCIe reset: */
+		req.selfrst_status = FW_RESET_REQ_SELFRST_STATUS_SELFRSTPCIERST;
+		break;
+	case BNX_DIR_TYPE_KONG_FW:
+	case BNX_DIR_TYPE_KONG_PATCH:
+		req.embedded_proc_type =
+			FW_RESET_REQ_EMBEDDED_PROC_TYPE_NETCTRL;
+		break;
+	case BNX_DIR_TYPE_BONO_FW:
+	case BNX_DIR_TYPE_BONO_PATCH:
+		req.embedded_proc_type = FW_RESET_REQ_EMBEDDED_PROC_TYPE_ROCE;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return hwrm_send_message(bp, &req, sizeof(req), HWRM_CMD_TIMEOUT);
+}
+
 static int bnxt_flash_firmware(struct net_device *dev,
 			       u16 dir_type,
 			       const u8 *fw_data,
@@ -799,6 +860,27 @@ static int bnxt_flash_firmware(struct net_device *dev,
 	case BNX_DIR_TYPE_BOOTCODE:
 	case BNX_DIR_TYPE_BOOTCODE_2:
 		code_type = CODE_BOOT;
+		break;
+	case BNX_DIR_TYPE_CHIMP_PATCH:
+		code_type = CODE_CHIMP_PATCH;
+		break;
+	case BNX_DIR_TYPE_APE_FW:
+		code_type = CODE_MCTP_PASSTHRU;
+		break;
+	case BNX_DIR_TYPE_APE_PATCH:
+		code_type = CODE_APE_PATCH;
+		break;
+	case BNX_DIR_TYPE_KONG_FW:
+		code_type = CODE_KONG_FW;
+		break;
+	case BNX_DIR_TYPE_KONG_PATCH:
+		code_type = CODE_KONG_PATCH;
+		break;
+	case BNX_DIR_TYPE_BONO_FW:
+		code_type = CODE_BONO_FW;
+		break;
+	case BNX_DIR_TYPE_BONO_PATCH:
+		code_type = CODE_BONO_PATCH;
 		break;
 	default:
 		netdev_err(dev, "Unsupported directory entry type: %u\n",
@@ -835,13 +917,62 @@ static int bnxt_flash_firmware(struct net_device *dev,
 			   (unsigned long)calculated_crc);
 		return -EINVAL;
 	}
-	/* TODO: Validate digital signature (RSA-encrypted SHA-256 hash) here */
 	rc = bnxt_flash_nvram(dev, dir_type, BNX_DIR_ORDINAL_FIRST,
 			      0, 0, fw_data, fw_size);
-	if (rc == 0) {	/* Firmware update successful */
-		/* TODO: Notify processor it needs to reset itself
-		 */
+	if (rc == 0)	/* Firmware update successful */
+		rc = bnxt_firmware_reset(dev, dir_type);
+
+	return rc;
+}
+
+static int bnxt_flash_microcode(struct net_device *dev,
+				u16 dir_type,
+				const u8 *fw_data,
+				size_t fw_size)
+{
+	struct bnxt_ucode_trailer *trailer;
+	u32 calculated_crc;
+	u32 stored_crc;
+	int rc = 0;
+
+	if (fw_size < sizeof(struct bnxt_ucode_trailer)) {
+		netdev_err(dev, "Invalid microcode file size: %u\n",
+			   (unsigned int)fw_size);
+		return -EINVAL;
 	}
+	trailer = (struct bnxt_ucode_trailer *)(fw_data + (fw_size -
+						sizeof(*trailer)));
+	if (trailer->sig != cpu_to_le32(BNXT_UCODE_TRAILER_SIGNATURE)) {
+		netdev_err(dev, "Invalid microcode trailer signature: %08X\n",
+			   le32_to_cpu(trailer->sig));
+		return -EINVAL;
+	}
+	if (le16_to_cpu(trailer->dir_type) != dir_type) {
+		netdev_err(dev, "Expected microcode type: %d, read: %d\n",
+			   dir_type, le16_to_cpu(trailer->dir_type));
+		return -EINVAL;
+	}
+	if (le16_to_cpu(trailer->trailer_length) <
+		sizeof(struct bnxt_ucode_trailer)) {
+		netdev_err(dev, "Invalid microcode trailer length: %d\n",
+			   le16_to_cpu(trailer->trailer_length));
+		return -EINVAL;
+	}
+
+	/* Confirm the CRC32 checksum of the file: */
+	stored_crc = le32_to_cpu(*(__le32 *)(fw_data + fw_size -
+					     sizeof(stored_crc)));
+	calculated_crc = ~crc32(~0, fw_data, fw_size - sizeof(stored_crc));
+	if (calculated_crc != stored_crc) {
+		netdev_err(dev,
+			   "CRC32 (%08lX) does not match calculated: %08lX\n",
+			   (unsigned long)stored_crc,
+			   (unsigned long)calculated_crc);
+		return -EINVAL;
+	}
+	rc = bnxt_flash_nvram(dev, dir_type, BNX_DIR_ORDINAL_FIRST,
+			      0, 0, fw_data, fw_size);
+
 	return rc;
 }
 
@@ -855,13 +986,15 @@ static bool bnxt_dir_type_is_ape_bin_format(u16 dir_type)
 	case BNX_DIR_TYPE_APE_PATCH:
 	case BNX_DIR_TYPE_KONG_FW:
 	case BNX_DIR_TYPE_KONG_PATCH:
+	case BNX_DIR_TYPE_BONO_FW:
+	case BNX_DIR_TYPE_BONO_PATCH:
 		return true;
 	}
 
 	return false;
 }
 
-static bool bnxt_dir_type_is_unprotected_exec_format(u16 dir_type)
+static bool bnxt_dir_type_is_other_exec_format(u16 dir_type)
 {
 	switch (dir_type) {
 	case BNX_DIR_TYPE_AVS:
@@ -882,7 +1015,7 @@ static bool bnxt_dir_type_is_unprotected_exec_format(u16 dir_type)
 static bool bnxt_dir_type_is_executable(u16 dir_type)
 {
 	return bnxt_dir_type_is_ape_bin_format(dir_type) ||
-		bnxt_dir_type_is_unprotected_exec_format(dir_type);
+		bnxt_dir_type_is_other_exec_format(dir_type);
 }
 
 static int bnxt_flash_firmware_from_file(struct net_device *dev,
@@ -892,9 +1025,6 @@ static int bnxt_flash_firmware_from_file(struct net_device *dev,
 	const struct firmware  *fw;
 	int			rc;
 
-	if (bnxt_dir_type_is_executable(dir_type) == false)
-		return -EINVAL;
-
 	rc = request_firmware(&fw, filename, &dev->dev);
 	if (rc != 0) {
 		netdev_err(dev, "Error %d requesting firmware file: %s\n",
@@ -903,6 +1033,8 @@ static int bnxt_flash_firmware_from_file(struct net_device *dev,
 	}
 	if (bnxt_dir_type_is_ape_bin_format(dir_type) == true)
 		rc = bnxt_flash_firmware(dev, dir_type, fw->data, fw->size);
+	else if (bnxt_dir_type_is_other_exec_format(dir_type) == true)
+		rc = bnxt_flash_microcode(dev, dir_type, fw->data, fw->size);
 	else
 		rc = bnxt_flash_nvram(dev, dir_type, BNX_DIR_ORDINAL_FIRST,
 				      0, 0, fw->data, fw->size);
@@ -911,10 +1043,83 @@ static int bnxt_flash_firmware_from_file(struct net_device *dev,
 }
 
 static int bnxt_flash_package_from_file(struct net_device *dev,
-					char *filename)
+					char *filename, u32 install_type)
 {
-	netdev_err(dev, "packages are not yet supported\n");
-	return -EINVAL;
+	struct bnxt *bp = netdev_priv(dev);
+	struct hwrm_nvm_install_update_output *resp = bp->hwrm_cmd_resp_addr;
+	struct hwrm_nvm_install_update_input install = {0};
+	const struct firmware *fw;
+	u32 item_len;
+	u16 index;
+	int rc;
+
+	bnxt_hwrm_fw_set_time(bp);
+
+	if (bnxt_find_nvram_item(dev, BNX_DIR_TYPE_UPDATE,
+				 BNX_DIR_ORDINAL_FIRST, BNX_DIR_EXT_NONE,
+				 &index, &item_len, NULL) != 0) {
+		netdev_err(dev, "PKG update area not created in nvram\n");
+		return -ENOBUFS;
+	}
+
+	rc = request_firmware(&fw, filename, &dev->dev);
+	if (rc != 0) {
+		netdev_err(dev, "PKG error %d requesting file: %s\n",
+			   rc, filename);
+		return rc;
+	}
+
+	if (fw->size > item_len) {
+		netdev_err(dev, "PKG insufficient update area in nvram: %lu",
+			   (unsigned long)fw->size);
+		rc = -EFBIG;
+	} else {
+		dma_addr_t dma_handle;
+		u8 *kmem;
+		struct hwrm_nvm_modify_input modify = {0};
+
+		bnxt_hwrm_cmd_hdr_init(bp, &modify, HWRM_NVM_MODIFY, -1, -1);
+
+		modify.dir_idx = cpu_to_le16(index);
+		modify.len = cpu_to_le32(fw->size);
+
+		kmem = dma_alloc_coherent(&bp->pdev->dev, fw->size,
+					  &dma_handle, GFP_KERNEL);
+		if (!kmem) {
+			netdev_err(dev,
+				   "dma_alloc_coherent failure, length = %u\n",
+				   (unsigned int)fw->size);
+			rc = -ENOMEM;
+		} else {
+			memcpy(kmem, fw->data, fw->size);
+			modify.host_src_addr = cpu_to_le64(dma_handle);
+
+			rc = hwrm_send_message(bp, &modify, sizeof(modify),
+					       FLASH_PACKAGE_TIMEOUT);
+			dma_free_coherent(&bp->pdev->dev, fw->size, kmem,
+					  dma_handle);
+		}
+	}
+	release_firmware(fw);
+	if (rc)
+		return rc;
+
+	if ((install_type & 0xffff) == 0)
+		install_type >>= 16;
+	bnxt_hwrm_cmd_hdr_init(bp, &install, HWRM_NVM_INSTALL_UPDATE, -1, -1);
+	install.install_type = cpu_to_le32(install_type);
+
+	rc = hwrm_send_message(bp, &install, sizeof(install),
+			       INSTALL_PACKAGE_TIMEOUT);
+	if (rc)
+		return -EOPNOTSUPP;
+
+	if (resp->result) {
+		netdev_err(dev, "PKG install error = %d, problem_item = %d\n",
+			   (s8)resp->result, (int)resp->problem_item);
+		return -ENOPKG;
+	}
+	return 0;
 }
 
 static int bnxt_flash_device(struct net_device *dev,
@@ -925,8 +1130,10 @@ static int bnxt_flash_device(struct net_device *dev,
 		return -EINVAL;
 	}
 
-	if (flash->region == ETHTOOL_FLASH_ALL_REGIONS)
-		return bnxt_flash_package_from_file(dev, flash->data);
+	if (flash->region == ETHTOOL_FLASH_ALL_REGIONS ||
+	    flash->region > 0xffff)
+		return bnxt_flash_package_from_file(dev, flash->data,
+						    flash->region);
 
 	return bnxt_flash_firmware_from_file(dev, flash->region, flash->data);
 }
@@ -1028,6 +1235,85 @@ static int bnxt_get_nvram_item(struct net_device *dev, u32 index, u32 offset,
 	return rc;
 }
 
+static int bnxt_find_nvram_item(struct net_device *dev, u16 type, u16 ordinal,
+				u16 ext, u16 *index, u32 *item_length,
+				u32 *data_length)
+{
+	struct bnxt *bp = netdev_priv(dev);
+	int rc;
+	struct hwrm_nvm_find_dir_entry_input req = {0};
+	struct hwrm_nvm_find_dir_entry_output *output = bp->hwrm_cmd_resp_addr;
+
+	bnxt_hwrm_cmd_hdr_init(bp, &req, HWRM_NVM_FIND_DIR_ENTRY, -1, -1);
+	req.enables = 0;
+	req.dir_idx = 0;
+	req.dir_type = cpu_to_le16(type);
+	req.dir_ordinal = cpu_to_le16(ordinal);
+	req.dir_ext = cpu_to_le16(ext);
+	req.opt_ordinal = NVM_FIND_DIR_ENTRY_REQ_OPT_ORDINAL_EQ;
+	rc = hwrm_send_message_silent(bp, &req, sizeof(req), HWRM_CMD_TIMEOUT);
+	if (rc == 0) {
+		if (index)
+			*index = le16_to_cpu(output->dir_idx);
+		if (item_length)
+			*item_length = le32_to_cpu(output->dir_item_length);
+		if (data_length)
+			*data_length = le32_to_cpu(output->dir_data_length);
+	}
+	return rc;
+}
+
+static char *bnxt_parse_pkglog(int desired_field, u8 *data, size_t datalen)
+{
+	char	*retval = NULL;
+	char	*p;
+	char	*value;
+	int	field = 0;
+
+	if (datalen < 1)
+		return NULL;
+	/* null-terminate the log data (removing last '\n'): */
+	data[datalen - 1] = 0;
+	for (p = data; *p != 0; p++) {
+		field = 0;
+		retval = NULL;
+		while (*p != 0 && *p != '\n') {
+			value = p;
+			while (*p != 0 && *p != '\t' && *p != '\n')
+				p++;
+			if (field == desired_field)
+				retval = value;
+			if (*p != '\t')
+				break;
+			*p = 0;
+			field++;
+			p++;
+		}
+		if (*p == 0)
+			break;
+		*p = 0;
+	}
+	return retval;
+}
+
+static char *bnxt_get_pkgver(struct net_device *dev, char *buf, size_t buflen)
+{
+	u16 index = 0;
+	u32 datalen;
+
+	if (bnxt_find_nvram_item(dev, BNX_DIR_TYPE_PKG_LOG,
+				 BNX_DIR_ORDINAL_FIRST, BNX_DIR_EXT_NONE,
+				 &index, NULL, &datalen) != 0)
+		return NULL;
+
+	memset(buf, 0, buflen);
+	if (bnxt_get_nvram_item(dev, index, 0, datalen, buf) != 0)
+		return NULL;
+
+	return bnxt_parse_pkglog(BNX_PKG_LOG_FIELD_IDX_PKG_VERSION, buf,
+		datalen);
+}
+
 static int bnxt_get_eeprom(struct net_device *dev,
 			   struct ethtool_eeprom *eeprom,
 			   u8 *data)
@@ -1091,7 +1377,7 @@ static int bnxt_set_eeprom(struct net_device *dev,
 
 	/* Create or re-write an NVM item: */
 	if (bnxt_dir_type_is_executable(type) == true)
-		return -EINVAL;
+		return -EOPNOTSUPP;
 	ext = eeprom->magic & 0xffff;
 	ordinal = eeprom->offset >> 16;
 	attr = eeprom->offset & 0xffff;

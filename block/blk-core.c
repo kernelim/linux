@@ -562,6 +562,9 @@ void blk_cleanup_queue(struct request_queue *q)
 	queue_flag_set(QUEUE_FLAG_NOMERGES, q);
 	queue_flag_set(QUEUE_FLAG_DEAD, q);
 
+	/* wake up contexts which is waiting for getting new requests */
+	wake_up_all(&q->freeze_wq);
+
 	if (q->queue_lock != &q->__queue_lock)
 		q->queue_lock = &q->__queue_lock;
 
@@ -665,6 +668,9 @@ struct request_queue *blk_alloc_queue_node(gfp_t gfp_mask, int node_id)
 	 * override it later if need be.
 	 */
 	q->queue_lock = &q->__queue_lock;
+
+	/* used by blk_queue_enter */
+	init_waitqueue_head(&q->freeze_wq);
 
 	return q;
 }
@@ -902,6 +908,49 @@ static bool blk_rq_should_init_elevator(struct bio *bio)
 	return true;
 }
 
+void blk_set_preempt_only(struct request_queue *q, bool preempt_only)
+{
+	/* prevent new normal request from entering queue */
+	spin_lock_irq(q->queue_lock);
+	if (preempt_only)
+		queue_flag_set(QUEUE_FLAG_PREEMPT_ONLY, q);
+	else
+		queue_flag_clear(QUEUE_FLAG_PREEMPT_ONLY, q);
+	spin_unlock_irq(q->queue_lock);
+
+	if (!preempt_only) {
+		wake_up_all(&q->freeze_wq);
+		return;
+	}
+
+	/* drain queue to make sure no requests in queue */
+	blk_drain_queue(q, true);
+}
+EXPORT_SYMBOL(blk_set_preempt_only);
+
+/* q->queue_lock is held before calling this function */
+static int blk_queue_enter(struct request_queue *q, bool no_wait, bool preempt)
+{
+	while (true) {
+		int ret;
+
+		if (likely(preempt || !blk_queue_preempt_only(q)))
+			return 0;
+
+		if (no_wait)
+			return -EBUSY;
+
+		ret = wait_event_interruptible_lock_irq(q->freeze_wq,
+				(preempt || !blk_queue_preempt_only(q)) ||
+				blk_queue_dead(q),
+				*q->queue_lock);
+		if (blk_queue_dead(q))
+			return -ENODEV;
+		if (ret)
+			return ret;
+	}
+}
+
 /**
  * get_request - get a free request
  * @q: request_queue to allocate request from
@@ -1078,14 +1127,23 @@ static struct request *get_request_wait(struct request_queue *q, int rw_flags,
 struct request *blk_get_request(struct request_queue *q, int rw, gfp_t gfp_mask)
 {
 	struct request *rq;
+	bool preempt = rw & REQ_PREEMPT;
 
+	rw &= ~REQ_PREEMPT;
 	BUG_ON(rw != READ && rw != WRITE);
 
 	spin_lock_irq(q->queue_lock);
+
+	if (blk_queue_enter(q, !(gfp_mask & __GFP_WAIT), preempt)) {
+		rq = NULL;
+		goto exit;
+	}
+
 	if (gfp_mask & __GFP_WAIT)
 		rq = get_request_wait(q, rw, NULL);
 	else
 		rq = get_request(q, rw, NULL, gfp_mask);
+exit:
 	if (!rq)
 		spin_unlock_irq(q->queue_lock);
 	/* q->queue_lock is unlocked at this point */
@@ -1388,7 +1446,7 @@ static inline bool queue_should_plug(struct request_queue *q)
 static int blk_queue_bio(struct request_queue *q, struct bio *bio)
 {
 	struct request *req;
-	int el_ret;
+	int el_ret, ret;
 	unsigned int bytes = bio->bi_size;
 	const unsigned short prio = bio_prio(bio);
 	const bool sync = bio_rw_flagged(bio, BIO_RW_SYNCIO);
@@ -1500,6 +1558,11 @@ get_rq:
 	if (sync)
 		rw_flags |= REQ_SYNC;
 
+	ret = blk_queue_enter(q, false, false);
+	if (ret) {
+		bio_endio(bio, ret == -ENODEV ?: -EAGAIN);	/* @q is dead */
+		goto out_unlock;
+	}
 	/*
 	 * Grab a free request. This is might sleep but can not fail.
 	 * Returns with the queue unlocked.

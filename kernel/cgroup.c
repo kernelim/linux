@@ -2589,10 +2589,11 @@ int cgroup_add_file(struct cgroup *cgrp,
 	dentry = lookup_one_len(name, dir, strlen(name));
 	if (!IS_ERR(dentry)) {
 		mode = cgroup_file_mode(cft);
+		dentry->d_fsdata = (void *)cft;
 		error = cgroup_create_file(dentry, mode | S_IFREG,
 						cgrp->root->sb);
-		if (!error)
-			dentry->d_fsdata = (void *)cft;
+		if (error)
+			dentry->d_fsdata = NULL;
 		dput(dentry);
 	} else
 		error = PTR_ERR(dentry);

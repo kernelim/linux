@@ -216,9 +216,9 @@ void __init check_bugs(void)
 #endif
 }
 
-void x86_amd_rds_enable(void)
+void x86_amd_ssbd_enable(void)
 {
-	u64 msrval = x86_amd_ls_cfg_base | x86_amd_ls_cfg_rds_mask;
+	u64 msrval = x86_amd_ls_cfg_base | x86_amd_ls_cfg_ssbd_mask;
 
 	if (boot_cpu_has(X86_FEATURE_AMD_SSBD))
 		wrmsrl(MSR_AMD64_LS_CFG, msrval);
@@ -498,14 +498,14 @@ static const char *ssb_strings[] = {
 
 static enum ssb_mitigation_cmd  ssb_cmd = SPEC_STORE_BYPASS_CMD_AUTO;
 
-static int __init set_no_rds_disable(char *arg)
+static int __init set_no_ssbd_disable(char *arg)
 {
 	ssb_cmd = SPEC_STORE_BYPASS_CMD_NONE;
 	return 0;
 }
-early_param("nospec_store_bypass_disable", set_no_rds_disable);
+early_param("nospec_store_bypass_disable", set_no_ssbd_disable);
 
-static int __init set_rds_disable(char *arg)
+static int __init set_ssbd_disable(char *arg)
 {
 	if (!arg)
 		return 0;
@@ -521,7 +521,7 @@ static int __init set_rds_disable(char *arg)
 	}
 	return 0;
 }
-early_param("spec_store_bypass_disable", set_rds_disable);
+early_param("spec_store_bypass_disable", set_ssbd_disable);
 
 static enum ssb_mitigation __ssb_select_mitigation(void)
 {
@@ -568,7 +568,7 @@ static enum ssb_mitigation __ssb_select_mitigation(void)
 			x86_spec_ctrl_base |= FEATURE_ENABLE_SSBD;
 			break;
 		case X86_VENDOR_AMD:
-			x86_amd_rds_enable();
+			x86_amd_ssbd_enable();
 			break;
 		}
 	}

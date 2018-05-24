@@ -15,6 +15,7 @@
 #include <linux/nmi.h>
 
 #include <asm/stacktrace.h>
+#include <asm/processor.h>
 
 
 void dump_trace(struct task_struct *task,
@@ -38,8 +39,18 @@ void dump_trace(struct task_struct *task,
 	bp = stack_frame(task, regs);
 	for (;;) {
 		struct thread_info *context;
+		struct tss_struct *t = &per_cpu(init_tss, smp_processor_id());
 
-		context = (struct thread_info *)
+		/*
+		 * With PTI-32, it is possible that the given stack is
+		 * pointing to the trampoline stack. In such case, we need
+		 * to use current_thread_info() instead.
+		 */
+		if ((stack >= t->stack) &&
+		    (stack <= t->stack + ARRAY_SIZE(t->stack)))
+			context = current_thread_info();
+		else
+			context = (struct thread_info *)
 			((unsigned long)stack & (~(THREAD_SIZE - 1)));
 		bp = ops->walk_stack(context, stack, bp, ops, data, NULL, &graph);
 

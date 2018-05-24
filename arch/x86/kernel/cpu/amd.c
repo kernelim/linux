@@ -486,11 +486,19 @@ static void __cpuinit early_init_amd(struct cpuinfo_x86 *c)
 		/*
 		 * Try to cache the base value so further operations can
 		 * avoid RMW. If that faults, do not enable SSBD.
+		 *
+		 * RHEL6 specific:
+		 * The access of the non-architectural MSR_AMD64_LS_CFG
+		 * MSR may cause fault in a VM. Fault in early boot may
+		 * panic the system. As a result, we have to disable the
+		 * AMD SSBD mitigation when running in a VM for the time
+		 * being.
 		 */
-		if (!rdmsrl_safe(MSR_AMD64_LS_CFG, &x86_amd_ls_cfg_base)) {
+		if (!boot_cpu_has(X86_FEATURE_HYPERVISOR) &&
+		    !rdmsrl_safe(MSR_AMD64_LS_CFG, &x86_amd_ls_cfg_base)) {
 			setup_force_cpu_cap(X86_FEATURE_SSBD);
 			setup_force_cpu_cap(X86_FEATURE_AMD_SSBD);
-			x86_amd_ls_cfg_rds_mask = (1ULL << bit);
+			x86_amd_ls_cfg_ssbd_mask = (1ULL << bit);
 		}
 	}
 }

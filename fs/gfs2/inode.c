@@ -171,6 +171,7 @@ struct inode *gfs2_inode_lookup(struct super_block *sb, unsigned int type,
 					goto fail_put;
 			}
 		}
+		flush_delayed_work(&ip->i_gl->gl_work);
 		glock_set_object(ip->i_gl, ip);
 
 		set_bit(GIF_INVALID, &ip->i_flags);
@@ -205,8 +206,7 @@ struct inode *gfs2_inode_lookup(struct super_block *sb, unsigned int type,
 fail_refresh:
 	ip->i_iopen_gh.gh_flags |= GL_NOCACHE;
 	glock_clear_object(ip->i_iopen_gh.gh_gl, ip);
-	gfs2_glock_dq_wait(&ip->i_iopen_gh);
-	gfs2_holder_uninit(&ip->i_iopen_gh);
+	gfs2_glock_dq_uninit(&ip->i_iopen_gh);
 fail_put:
 	if (io_gl)
 		gfs2_glock_put(io_gl);
@@ -246,32 +246,6 @@ fail_iput:
 	return ERR_PTR(error);
 }
 
-/**
- * gfs2_set_nlink - Set the inode's link count based on on-disk info
- * @inode: The inode in question
- * @nlink: The link count
- *
- * If the link count has hit zero, it must never be raised, whatever the
- * on-disk inode might say. When new struct inodes are created the link
- * count is set to 1, so that we can safely use this test even when reading
- * in on disk information for the first time.
- */
-
-static void gfs2_set_nlink(struct inode *inode, u32 nlink)
-{
-	/*
-	 * We will need to review setting the nlink count here in the
-	 * light of the forthcoming ro bind mount work. This is a reminder
-	 * to do that.
-	 */
-	if ((inode->i_nlink != nlink) && (inode->i_nlink != 0)) {
-		if (nlink == 0)
-			clear_nlink(inode);
-		else
-			inode->i_nlink = nlink;
-	}
-}
-
 static int gfs2_dinode_in(struct gfs2_inode *ip, const void *buf)
 {
 	const struct gfs2_dinode *str = buf;
@@ -293,7 +267,7 @@ static int gfs2_dinode_in(struct gfs2_inode *ip, const void *buf)
 
 	ip->i_inode.i_uid = be32_to_cpu(str->di_uid);
 	ip->i_inode.i_gid = be32_to_cpu(str->di_gid);
-	gfs2_set_nlink(&ip->i_inode, be32_to_cpu(str->di_nlink));
+	set_nlink(&ip->i_inode, be32_to_cpu(str->di_nlink));
 	i_size_write(&ip->i_inode, be64_to_cpu(str->di_size));
 	gfs2_set_inode_blocks(&ip->i_inode, be64_to_cpu(str->di_blocks));
 	atime.tv_sec = be64_to_cpu(str->di_atime);
@@ -742,6 +716,7 @@ int gfs2_create_inode(struct inode *dir, struct dentry *dentry,
 	error = gfs2_glock_nq_init(dip->i_gl, LM_ST_EXCLUSIVE, 0, ghs);
 	if (error)
 		goto fail;
+	gfs2_holder_mark_uninitialized(ghs + 1);
 
 	error = create_ok(dip, name, mode);
 	if ((error == -EEXIST) && S_ISREG(mode) && !excl) {
@@ -795,6 +770,7 @@ int gfs2_create_inode(struct inode *dir, struct dentry *dentry,
 	error = gfs2_glock_get(sdp, ip->i_no_addr, &gfs2_inode_glops, CREATE, &ip->i_gl);
 	if (error)
 		goto fail_free_inode;
+	flush_delayed_work(&ip->i_gl->gl_work);
 
 	glock_set_object(ip->i_gl, ip);
 	error = gfs2_glock_nq_init(ip->i_gl, LM_ST_EXCLUSIVE, GL_SKIP, ghs + 1);
@@ -861,12 +837,11 @@ fail_gunlock3:
 fail_gunlock2:
 	if (io_gl)
 		clear_bit(GLF_INODE_CREATING, &io_gl->gl_flags);
-
-	glock_clear_object(ip->i_gl, ip);
-	gfs2_glock_dq_uninit(ghs + 1);
 fail_free_inode:
-	if (ip->i_gl)
+	if (ip->i_gl) {
+		glock_clear_object(ip->i_gl, ip);
 		gfs2_glock_put(ip->i_gl);
+	}
 	gfs2_rsqa_delete(ip, NULL);
 fail_gunlock:
 	gfs2_glock_dq_uninit(ghs);
@@ -875,6 +850,8 @@ fail_gunlock:
 			&GFS2_I(inode)->i_flags);
 		iput(inode);
 	}
+	if (gfs2_holder_initialized(ghs + 1))
+		gfs2_glock_dq_uninit(ghs + 1);
 fail:
 	if (bh)
 		brelse(bh);

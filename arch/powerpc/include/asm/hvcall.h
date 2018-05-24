@@ -247,17 +247,18 @@
 #define MAX_HCALL_OPCODE	H_GET_MPP_X
 
 /* H_GET_CPU_CHARACTERISTICS return values */
-#define H_GET_CPU_CHAR_CHAR_ORI31_SPEC_BAR	PPC_BIT(0)
-#define H_GET_CPU_CHAR_CHAR_BCCTR_SERIAL	PPC_BIT(1)
-#define H_GET_CPU_CHAR_CHAR_ORI30_L1_FLUSH	PPC_BIT(2)
-#define H_GET_CPU_CHAR_CHAR_MTTRIG2_L1_FLUSH	PPC_BIT(3)
-#define H_GET_CPU_CHAR_CHAR_L1D_PRIVATE		PPC_BIT(4)
-#define H_GET_CPU_CHAR_CHAR_BC_HINTS_HONORED	PPC_BIT(5)
-#define H_GET_CPU_CHAR_CHAR_MTTRID01_THR_CFG	PPC_BIT(6)
+#define H_CPU_CHAR_SPEC_BAR_ORI31	(1ull << 63) // IBM bit 0
+#define H_CPU_CHAR_BCCTRL_SERIALISED	(1ull << 62) // IBM bit 1
+#define H_CPU_CHAR_L1D_FLUSH_ORI30	(1ull << 61) // IBM bit 2
+#define H_CPU_CHAR_L1D_FLUSH_TRIG2	(1ull << 60) // IBM bit 3
+#define H_CPU_CHAR_L1D_THREAD_PRIV	(1ull << 59) // IBM bit 4
+#define H_CPU_CHAR_BRANCH_HINTS_HONORED	(1ull << 58) // IBM bit 5
+#define H_CPU_CHAR_THREAD_RECONFIG_CTRL	(1ull << 57) // IBM bit 6
+#define H_CPU_CHAR_COUNT_CACHE_DISABLED	(1ull << 56) // IBM bit 7
 
-#define H_GET_CPU_CHAR_BEHAV_FAV_SEC_VS_PERF	PPC_BIT(0)
-#define H_GET_CPU_CHAR_BEHAV_L1_FLUSH_LOW_PRIV	PPC_BIT(1)
-#define H_GET_CPU_CHAR_BEHAV_SPEC_BAR_BNDS_CHK	PPC_BIT(2)
+#define H_CPU_BEHAV_FAVOUR_SECURITY	(1ull << 63) // IBM bit 0
+#define H_CPU_BEHAV_L1D_FLUSH_PR	(1ull << 62) // IBM bit 1
+#define H_CPU_BEHAV_BNDS_CHK_SPEC_BAR	(1ull << 61) // IBM bit 2
 
 #ifndef __ASSEMBLY__
 
@@ -362,6 +363,13 @@ static inline unsigned long cmo_get_page_size(void)
 	return CMO_PageSize;
 }
 #endif /* CONFIG_PPC_PSERIES */
+
+#include <asm/types.h>
+
+struct h_cpu_char_result {
+	u64 character;
+	u64 behaviour;
+};
 
 #endif /* __ASSEMBLY__ */
 #endif /* __KERNEL__ */
