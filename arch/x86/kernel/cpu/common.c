@@ -27,6 +27,7 @@
 #include <asm/apic.h>
 #include <asm/desc.h>
 #include <asm/i387.h>
+#include <asm/fpu-internal.h>
 #include <asm/mtrr.h>
 #include <linux/numa.h>
 #include <asm/asm.h>
@@ -670,17 +671,38 @@ static void init_speculation_control(struct cpuinfo_x86 *c)
 	 * and they also have a different bit for STIBP support. Also,
 	 * a hypervisor might have set the individual AMD bits even on
 	 * Intel CPUs, for finer-grained selection of what's available.
-	 *
-	 * We use the AMD bits in 0x8000_0008 EBX as the generic hardware
-	 * features, which are visible in /proc/cpuinfo and used by the
-	 * kernel. So set those accordingly from the Intel bits.
 	 */
 	if (cpu_has(c, X86_FEATURE_SPEC_CTRL)) {
 		set_cpu_cap(c, X86_FEATURE_IBRS);
 		set_cpu_cap(c, X86_FEATURE_IBPB);
+		set_cpu_cap(c, X86_FEATURE_MSR_SPEC_CTRL);
 	}
+
 	if (cpu_has(c, X86_FEATURE_INTEL_STIBP))
 		set_cpu_cap(c, X86_FEATURE_STIBP);
+
+	if (cpu_has(c, X86_FEATURE_SPEC_CTRL_SSBD) ||
+	    cpu_has(c, X86_FEATURE_VIRT_SSBD))
+		set_cpu_cap(c, X86_FEATURE_SSBD);
+
+	if (cpu_has(c, X86_FEATURE_AMD_IBRS)) {
+		set_cpu_cap(c, X86_FEATURE_IBRS);
+		set_cpu_cap(c, X86_FEATURE_MSR_SPEC_CTRL);
+	}
+
+	if (cpu_has(c, X86_FEATURE_AMD_IBPB))
+		set_cpu_cap(c, X86_FEATURE_IBPB);
+
+	if (cpu_has(c, X86_FEATURE_AMD_STIBP)) {
+		set_cpu_cap(c, X86_FEATURE_STIBP);
+		set_cpu_cap(c, X86_FEATURE_MSR_SPEC_CTRL);
+	}
+
+	if (cpu_has(c, X86_FEATURE_AMD_SSBD)) {
+		set_cpu_cap(c, X86_FEATURE_SSBD);
+		set_cpu_cap(c, X86_FEATURE_MSR_SPEC_CTRL);
+		clear_cpu_cap(c, X86_FEATURE_VIRT_SSBD);
+	}
 }
 
 void get_cpu_cap(struct cpuinfo_x86 *c)
@@ -759,6 +781,7 @@ void get_cpu_cap(struct cpuinfo_x86 *c)
 	if (c->extended_cpuid_level >= 0x80000007)
 		c->x86_power = cpuid_edx(0x80000007);
 
+	init_scattered_cpuid_features(c);
 	init_speculation_control(c);
 }
 
@@ -808,7 +831,16 @@ static const __initdata struct x86_cpu_id cpu_no_meltdown[] = {
 
 static bool __init cpu_vulnerable_to_meltdown(struct cpuinfo_x86 *c)
 {
+	u64 ia32_cap = 0;
+
 	if (x86_match_cpu(cpu_no_meltdown))
+		return false;
+
+	if (cpu_has(c, X86_FEATURE_ARCH_CAPABILITIES))
+		rdmsrl(MSR_IA32_ARCH_CAPABILITIES, ia32_cap);
+
+	/* Rogue Data Cache Load? No! */
+	if (ia32_cap & ARCH_CAP_RDCL_NO)
 		return false;
 
 	return true;
@@ -850,6 +882,7 @@ static const __initconst struct x86_cpu_id cpu_no_spec_store_bypass[] = {
 static void __init early_identify_cpu(struct cpuinfo_x86 *c)
 {
 	struct cpuinfo_x86_rh *rh = get_cpuinfo_x86_rh(c);
+	u64 ia32_cap = 0;
 
 #ifdef CONFIG_X86_64
 	c->x86_clflush_size = 64;
@@ -908,7 +941,12 @@ static void __init early_identify_cpu(struct cpuinfo_x86 *c)
 		setup_force_cpu_bug(X86_BUG_SPECTRE_V2);
 	}
 
-	if (!x86_match_cpu(cpu_no_spec_store_bypass))
+	if (cpu_has(c, X86_FEATURE_ARCH_CAPABILITIES))
+		rdmsrl(MSR_IA32_ARCH_CAPABILITIES, ia32_cap);
+
+	if (!x86_match_cpu(cpu_no_spec_store_bypass) &&
+	   !(ia32_cap & ARCH_CAP_SSB_NO) &&
+	   !cpu_has(c, X86_FEATURE_AMD_SSB_NO))
 		setup_force_cpu_bug(X86_BUG_SPEC_STORE_BYPASS);
 }
 
@@ -985,7 +1023,6 @@ static void __cpuinit generic_identify(struct cpuinfo_x86 *c)
 
 	get_model_name(c); /* Default name */
 
-	init_scattered_cpuid_features(c);
 	detect_nopl(c);
 }
 
@@ -1584,19 +1621,6 @@ void __cpuinit cpu_init(void)
 
 	clear_all_debug_regs();
 
-	/*
-	 * Force FPU initialization:
-	 */
-	current_thread_info()->status = 0;
-	clear_used_math();
-	mxcsr_feature_mask_init();
-
-	/*
-	 * Boot processor to setup the FP and extended state context info.
-	 */
-	if (smp_processor_id() == boot_cpu_id)
-		init_thread_xstate();
-
-	xsave_init();
+	fpu_init();
 }
 #endif

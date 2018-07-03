@@ -24,6 +24,7 @@
 #include <asm/processor.h>
 #include <asm/ucontext.h>
 #include <asm/i387.h>
+#include <asm/fpu-internal.h>
 #include <asm/vdso.h>
 #include <asm/mce.h>
 
@@ -117,7 +118,7 @@ restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc,
 		regs->orig_ax = -1;		/* disable syscall checks */
 
 		get_user_ex(buf, &sc->fpstate);
-		err |= restore_i387_xstate(buf);
+		err |= restore_xstate_sig(buf, config_enabled(CONFIG_X86_32));
 
 		get_user_ex(*pax, &sc->ax);
 	} get_user_catch(err);
@@ -210,35 +211,32 @@ get_sigframe(struct k_sigaction *ka, struct pt_regs *regs, size_t frame_size,
 	     void __user **fpstate)
 {
 	/* Default to using normal stack */
+	unsigned long math_size = 0;
 	unsigned long sp = regs->sp;
+	unsigned long buf_fx = 0;
 	int onsigstack = on_sig_stack(sp);
 
-#ifdef CONFIG_X86_64
 	/* redzone */
-	sp -= 128;
-#endif /* CONFIG_X86_64 */
+	if (config_enabled(CONFIG_X86_64))
+		sp -= 128;
 
 	if (!onsigstack) {
 		/* This is the X/Open sanctioned signal stack switching.  */
 		if (ka->sa.sa_flags & SA_ONSTACK) {
 			if (current->sas_ss_size)
 				sp = current->sas_ss_sp + current->sas_ss_size;
-		} else {
-#ifdef CONFIG_X86_32
-			/* This is the legacy signal stack switching. */
-			if ((regs->ss & 0xffff) != __USER_DS &&
-				!(ka->sa.sa_flags & SA_RESTORER) &&
-					ka->sa.sa_restorer)
+		} else if (config_enabled(CONFIG_X86_32) &&
+			   (regs->ss & 0xffff) != __USER_DS &&
+			   !(ka->sa.sa_flags & SA_RESTORER) &&
+			   ka->sa.sa_restorer) {
+				/* This is the legacy signal stack switching. */
 				sp = (unsigned long) ka->sa.sa_restorer;
-#endif /* CONFIG_X86_32 */
 		}
 	}
 
 	if (used_math()) {
-		sp -= sig_xstate_size;
-#ifdef CONFIG_X86_64
-		sp = round_down(sp, 64);
-#endif /* CONFIG_X86_64 */
+		sp = alloc_mathframe(sp, config_enabled(CONFIG_X86_32),
+				     &buf_fx, &math_size);
 		*fpstate = (void __user *)sp;
 	}
 
@@ -251,8 +249,9 @@ get_sigframe(struct k_sigaction *ka, struct pt_regs *regs, size_t frame_size,
 	if (onsigstack && !likely(on_sig_stack(sp)))
 		return (void __user *)-1L;
 
-	/* save i387 state */
-	if (used_math() && save_i387_xstate(*fpstate) < 0)
+	/* save i387 and extended state */
+	if (used_math() &&
+	    save_xstate_sig(*fpstate, (void __user *)buf_fx, math_size) < 0)
 		return (void __user *)-1L;
 
 	return (void __user *)sp;
@@ -643,40 +642,20 @@ static int signr_convert(int sig)
 	return sig;
 }
 
-#ifdef CONFIG_X86_32
-
-#define is_ia32	1
-#define ia32_setup_frame	__setup_frame
-#define ia32_setup_rt_frame	__setup_rt_frame
-
-#else /* !CONFIG_X86_32 */
-
-#ifdef CONFIG_IA32_EMULATION
-#define is_ia32	test_thread_flag(TIF_IA32)
-#else /* !CONFIG_IA32_EMULATION */
-#define is_ia32	0
-#endif /* CONFIG_IA32_EMULATION */
-
-int ia32_setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
-		sigset_t *set, struct pt_regs *regs);
-int ia32_setup_frame(int sig, struct k_sigaction *ka,
-		sigset_t *set, struct pt_regs *regs);
-
-#endif /* CONFIG_X86_32 */
-
 static int
 setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 	       sigset_t *set, struct pt_regs *regs)
 {
 	int usig = signr_convert(sig);
 	int ret;
+	compat_sigset_t *cset = (compat_sigset_t *) set;
 
 	/* Set up the stack frame */
-	if (is_ia32) {
+	if (is_ia32_frame()) {
 		if (ka->sa.sa_flags & SA_SIGINFO)
-			ret = ia32_setup_rt_frame(usig, ka, info, set, regs);
+			ret = ia32_setup_rt_frame(usig, ka, info, cset, regs);
 		else
-			ret = ia32_setup_frame(usig, ka, set, regs);
+			ret = ia32_setup_frame(usig, ka, cset, regs);
 	} else
 		ret = __setup_rt_frame(sig, ka, info, set, regs);
 
@@ -753,24 +732,9 @@ handle_signal(unsigned long sig, siginfo_t *info, struct k_sigaction *ka,
 
 	/*
 	 * Ensure the signal handler starts with the new fpu state.
-	 *
-	 * TS_USEDFPU was already cleared and X86_CR0_TS was already set by
-	 * save_i387_xstate(), it seems that we could just clear_used_math()
-	 * to trigger fpu_init() in math_state_restore() paths.
-	 *
-	 * However at this point we can own FPU again due to "preload_fpu"
-	 * logic in __switch_to(). So we need clear_fpu() to do this again.
 	 */
-	if (used_math()) {
-		/*
-		 * This doesn't look good without preempt_disable(), but RHEL6
-		 * doesn't use CONFIG_PREEMPT and "fpu_counter = 0" should help
-		 * anyway.
-		 */
-		current->fpu_counter = 0;
-		clear_fpu(current);
-		clear_used_math();
-	}
+	if (used_math())
+		fpu_reset_state(current);
 
 	spin_lock_irq(&current->sighand->siglock);
 	sigorsets(&current->blocked, &current->blocked, &ka->sa.sa_mask);

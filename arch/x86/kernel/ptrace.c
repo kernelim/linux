@@ -25,6 +25,7 @@
 #include <asm/system.h>
 #include <asm/processor.h>
 #include <asm/i387.h>
+#include <asm/fpu-internal.h>
 #include <asm/debugreg.h>
 #include <asm/ldt.h>
 #include <asm/desc.h>
@@ -1114,9 +1115,6 @@ static const struct user_regset_view user_x86_64_view = {
 #define user_regs_struct32	user_regs_struct
 #define genregs32_get		genregs_get
 #define genregs32_set		genregs_set
-
-#define user_i387_ia32_struct	user_i387_struct
-#define user32_fxsr_struct	user_fxsr_struct
 
 #endif	/* CONFIG_X86_64 */
 

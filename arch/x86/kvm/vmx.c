@@ -143,6 +143,8 @@ struct vcpu_vmx {
 #endif
 	u64		      spec_ctrl;
 
+	u64		      arch_capabilities;
+
 	struct vmcs          *vmcs;
 	struct msr_autoload {
 		unsigned nr;
@@ -1249,6 +1251,9 @@ static int vmx_get_msr(struct kvm_vcpu *vcpu, u32 msr_index, u64 *pdata)
 	case MSR_IA32_SPEC_CTRL:
 		data = to_vmx(vcpu)->spec_ctrl;
 		break;
+	case MSR_IA32_ARCH_CAPABILITIES:
+		data = to_vmx(vcpu)->arch_capabilities;
+		break;
 	case MSR_IA32_SYSENTER_CS:
 		data = vmcs_read32(GUEST_SYSENTER_CS);
 		break;
@@ -1317,6 +1322,9 @@ static int vmx_set_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 		break;
 	case MSR_IA32_SPEC_CTRL:
 		to_vmx(vcpu)->spec_ctrl = msr_info->data;
+		break;
+	case MSR_IA32_ARCH_CAPABILITIES:
+		vmx->arch_capabilities = data;
 		break;
 	case MSR_IA32_CR_PAT:
 		if (vmcs_config.vmentry_ctrl & VM_ENTRY_LOAD_IA32_PAT) {
@@ -1465,7 +1473,6 @@ static void vmclear_local_vcpus(void)
 				 local_vcpus_link)
 		__vcpu_clear(vmx);
 }
-
 
 /* Just like cpu_vmxoff(), but with the __kvm_handle_fault_on_reboot()
  * tricks.
@@ -2850,6 +2857,9 @@ static int vmx_vcpu_setup(struct vcpu_vmx *vmx)
 		vmx->guest_msrs[j].mask = -1ull;
 		++vmx->nmsrs;
 	}
+
+	if (boot_cpu_has(X86_FEATURE_ARCH_CAPABILITIES))
+		rdmsrl(MSR_IA32_ARCH_CAPABILITIES, vmx->arch_capabilities);
 
 	vmcs_write32(VM_EXIT_CONTROLS, vmcs_config.vmexit_ctrl);
 
@@ -4309,7 +4319,7 @@ static void vmx_vcpu_run(struct kvm_vcpu *vcpu)
 
 	atomic_switch_perf_msrs(vmx);
 
-	spec_ctrl_vmenter_ibrs(vmx->spec_ctrl);
+	x86_spec_ctrl_set_guest(vmx->spec_ctrl, 0);
 
 	asm(
 		/* Store host registers */
@@ -4426,7 +4436,7 @@ static void vmx_vcpu_run(struct kvm_vcpu *vcpu)
 
 	if (cpu_has_spec_ctrl()) {
 		rdmsrl(MSR_IA32_SPEC_CTRL, vmx->spec_ctrl);
-		__spec_ctrl_vmexit_ibrs(vmx->spec_ctrl);
+		x86_spec_ctrl_restore_host(vmx->spec_ctrl, 0);
 	}
 
 	/* Eliminate branch target predictions from guest mode */
@@ -4645,6 +4655,16 @@ static void vmx_sched_in(struct kvm_vcpu *vcpu, int cpu)
 		shrink_ple_window(vcpu);
 }
 
+static bool vmx_has_emulated_msr(int index)
+{
+	switch (index) {
+		case MSR_AMD64_VIRT_SPEC_CTRL:
+			return false;
+		default:
+			return true;
+	}
+}
+
 static struct kvm_x86_ops vmx_x86_ops = {
 	.cpu_has_kvm_support = cpu_has_kvm_support,
 	.disabled_by_bios = vmx_disabled_by_bios,
@@ -4684,6 +4704,7 @@ static struct kvm_x86_ops vmx_x86_ops = {
 	.cache_reg = vmx_cache_reg,
 	.get_rflags = vmx_get_rflags,
 	.set_rflags = vmx_set_rflags,
+	.fpu_activate = vmx_fpu_activate,
 	.fpu_deactivate = vmx_fpu_deactivate,
 
 	.tlb_flush = vmx_flush_tlb,
@@ -4720,6 +4741,8 @@ static struct kvm_x86_ops vmx_x86_ops = {
 	.compute_tsc_offset = vmx_compute_tsc_offset,
 
 	.sched_in = vmx_sched_in,
+
+	.has_emulated_msr = vmx_has_emulated_msr,
 };
 
 static int __init vmx_init(void)

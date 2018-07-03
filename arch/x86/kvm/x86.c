@@ -53,6 +53,7 @@
 #include <asm/mtrr.h>
 #include <asm/mce.h>
 #include <asm/i387.h>
+#include <asm/fpu-internal.h> /* Ugh! */
 #include <asm/xcr.h>
 #include <asm/pvclock.h>
 
@@ -77,7 +78,8 @@
 /* CPUID[eax=7,ecx=0].edx */
 #define KVM_CPUID_BIT_SPEC_CTRL		26
 #define KVM_CPUID_BIT_INTEL_STIBP	27
-#define KVM_CPUID_BIT_SSBD		31
+#define KVM_CPUID_BIT_ARCH_CAPABILITIES	29
+#define KVM_CPUID_BIT_SPEC_CTRL_SSBD	31
 
 #define KF(x) bit(KVM_CPUID_BIT_##x)
 
@@ -734,7 +736,10 @@ static u32 emulated_msrs[] = {
 	MSR_IA32_MISC_ENABLE,
 	MSR_IA32_MCG_STATUS,
 	MSR_IA32_MCG_CTL,
+	MSR_AMD64_VIRT_SPEC_CTRL,
 };
+
+static unsigned num_emulated_msrs;
 
 static int set_efer(struct kvm_vcpu *vcpu, u64 efer)
 {
@@ -2047,7 +2052,7 @@ long kvm_arch_dev_ioctl(struct file *filp,
 		if (copy_from_user(&msr_list, user_msr_list, sizeof msr_list))
 			goto out;
 		n = msr_list.nmsrs;
-		msr_list.nmsrs = num_msrs_to_save + ARRAY_SIZE(emulated_msrs);
+		msr_list.nmsrs = num_msrs_to_save + num_emulated_msrs;
 		if (copy_to_user(user_msr_list, &msr_list, sizeof msr_list))
 			goto out;
 		r = -E2BIG;
@@ -2059,7 +2064,7 @@ long kvm_arch_dev_ioctl(struct file *filp,
 			goto out;
 		if (copy_to_user(user_msr_list->indices + num_msrs_to_save,
 				 &emulated_msrs,
-				 ARRAY_SIZE(emulated_msrs) * sizeof(u32)))
+				 num_emulated_msrs * sizeof(u32)))
 			goto out;
 		r = 0;
 		break;
@@ -2343,11 +2348,13 @@ static void do_cpuid_ent(struct kvm_cpuid_entry2 *entry, u32 function,
 
 	/* cpuid 7.0.edx*/
 	const u32 kvm_cpuid_7_0_edx_x86_features =
-		KF(SPEC_CTRL) | KF(INTEL_STIBP) | KF(SSBD);
+		KF(SPEC_CTRL) | KF(INTEL_STIBP) | KF(SPEC_CTRL_SSBD) |
+		KF(ARCH_CAPABILITIES);
 
 	/* cpuid 0x80000008.ebx */
 	const u32 kvm_cpuid_8000_0008_ebx_x86_features =
-		F(IBPB) | F(IBRS) | F(STIBP);
+		F(AMD_IBPB) | F(AMD_IBRS) | F(AMD_STIBP) | F(AMD_SSBD) |
+		F(VIRT_SSBD) | F(AMD_SSB_NO);
 
 	/* all calls to cpuid_count() should be made on the same cpu */
 	get_cpu();
@@ -2526,13 +2533,26 @@ static void do_cpuid_ent(struct kvm_cpuid_entry2 *entry, u32 function,
 		if (!g_phys_as)
 			g_phys_as = phys_as;
 		entry->eax = g_phys_as | (virt_as << 8);
+		entry->edx = 0;
 		/*
-		 * Mask out what the KVM doesn't support and those that
-		 * are blacklisted by the kernel.
+		 * IBRS, IBPB and VIRT_SSBD aren't necessarily present in
+		 * hardware cpuid
 		 */
+		if (boot_cpu_has(X86_FEATURE_AMD_IBPB))
+			entry->ebx |= F(AMD_IBPB);
+		if (boot_cpu_has(X86_FEATURE_AMD_IBRS))
+			entry->ebx |= F(AMD_IBRS);
+		if (boot_cpu_has(X86_FEATURE_VIRT_SSBD))
+			entry->ebx |= F(VIRT_SSBD);
 		entry->ebx &= kvm_cpuid_8000_0008_ebx_x86_features;
 		cpuid_mask(&entry->ebx, 13);
-		entry->edx = 0;
+		/*
+		 * The preference is to use SPEC CTRL MSR instead of the
+		 * VIRT_SPEC MSR.
+		 */
+		if (boot_cpu_has(X86_FEATURE_LS_CFG_SSBD) &&
+		    !boot_cpu_has(X86_FEATURE_AMD_SSBD))
+			entry->ebx |= F(VIRT_SSBD);
 		break;
 	}
 	case 0x80000019:
@@ -3830,6 +3850,16 @@ static void kvm_init_msr_list(void)
 		j++;
 	}
 	num_msrs_to_save = j;
+
+	for (i = j = 0; i < ARRAY_SIZE(emulated_msrs); i++) {
+		if (!kvm_x86_ops->has_emulated_msr(emulated_msrs[i]))
+			continue;
+
+		if (j < i)
+			emulated_msrs[j] = emulated_msrs[i];
+		j++;
+	}
+	num_emulated_msrs = j;
 }
 
 static int vcpu_mmio_write(struct kvm_vcpu *vcpu, gpa_t addr, int len,
@@ -4808,9 +4838,9 @@ int kvm_arch_init(void *opaque)
 	if (r)
 		goto out;
 
+	kvm_x86_ops = ops;
 	kvm_init_msr_list();
 
-	kvm_x86_ops = ops;
 	kvm_mmu_set_nonpresent_ptes(0ull, 0ull);
 	kvm_mmu_set_base_ptes(PT_PRESENT_MASK);
 	kvm_mmu_set_mask_ptes(PT_USER_MASK, PT_ACCESSED_MASK,
@@ -5455,6 +5485,8 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
 	sigset_t sigsaved;
 
 	vcpu_load(vcpu);
+	if (!tsk_used_math(current) && init_fpu(current))
+		return -ENOMEM;
 
 	if (vcpu->sigset_active)
 		sigprocmask(SIG_SETMASK, &vcpu->sigset, &sigsaved);
@@ -6553,7 +6585,7 @@ void kvm_load_guest_fpu(struct kvm_vcpu *vcpu)
 	 */
 	kvm_put_guest_xcr0(vcpu);
 	vcpu->guest_fpu_loaded = 1;
-	kernel_fpu_begin();
+	__kernel_fpu_begin();
 	fpu_restore_checking(&vcpu->arch.guest_fpu);
 }
 EXPORT_SYMBOL_GPL(kvm_load_guest_fpu);
@@ -6567,9 +6599,10 @@ void kvm_put_guest_fpu(struct kvm_vcpu *vcpu)
 
 	vcpu->guest_fpu_loaded = 0;
 	fpu_save_init(&vcpu->arch.guest_fpu);
-	kernel_fpu_end();
+	__kernel_fpu_end();
 	++vcpu->stat.fpu_reload;
-	set_bit(KVM_REQ_DEACTIVATE_FPU, &vcpu->requests);
+	if (!use_eager_fpu())
+		set_bit(KVM_REQ_DEACTIVATE_FPU, &vcpu->requests);
 }
 EXPORT_SYMBOL_GPL(kvm_put_guest_fpu);
 
@@ -6584,7 +6617,16 @@ void kvm_arch_vcpu_free(struct kvm_vcpu *vcpu)
 struct kvm_vcpu *kvm_arch_vcpu_create(struct kvm *kvm,
 						unsigned int id)
 {
-	return kvm_x86_ops->vcpu_create(kvm, id);
+	struct kvm_vcpu *vcpu;
+
+	vcpu = kvm_x86_ops->vcpu_create(kvm, id);
+
+	/*
+	 * Activate fpu unconditionally in case the guest needs eager FPU.  It will be
+	 * deactivated soon if it doesn't.
+	 */
+	kvm_x86_ops->fpu_activate(vcpu);
+	return vcpu;
 }
 
 int kvm_arch_vcpu_setup(struct kvm_vcpu *vcpu)

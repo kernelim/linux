@@ -105,6 +105,7 @@
 #define X86_FEATURE_AMD_DCM     (3*32+27) /* multi-node processor */
 #define X86_FEATURE_APERFMPERF	(3*32+28) /* APERFMPERF */
 #define X86_FEATURE_UNFAIR_SPINLOCK (3*32+29) /* use unfair spinlocks */
+#define X86_FEATURE_EAGER_FPU	(3*32+30) /* "eagerfpu" Non lazy FPU restore */
 
 /* Intel-defined CPU features, CPUID level 0x00000001 (ecx), word 4 */
 #define X86_FEATURE_XMM3	(4*32+ 0) /* "pni" SSE-3 */
@@ -193,13 +194,19 @@
 #define X86_FEATURE_HWP_EPP	( 7*32+13) /* Intel HWP_EPP */
 #define X86_FEATURE_HWP_PKG_REQ ( 7*32+14) /* Intel HWP_PKG_REQ */
 #define X86_FEATURE_INVPCID_SINGLE ( 7*32+15) /* Effectively INVPCID && CR4.PCIDE=1 */
+#define X86_FEATURE_MSR_SPEC_CTRL  ( 7*32+16) /* "" MSR SPEC_CTRL is implemented */
+#define X86_FEATURE_SSBD	( 7*32+17) /* Speculative Store Bypass Disable */
 #define X86_FEATURE_PTI		( 7*32+18) /* Kernel Page Table Isolation enabled */
 #define X86_FEATURE_RETPOLINE	( 7*32+19) /* Generic Retpoline mitigation for Spectre variant 2 */
 #define X86_FEATURE_RETPOLINE_AMD ( 7*32+20) /* "" AMD Retpoline mitigation for Spectre variant 2 */
 #define X86_FEATURE_IBP_DISABLE	( 7*32+21) /* Old AMD Indirect Branch Predictor Disable */
 #define X86_FEATURE_PTI_SUPPORT	( 7*32+22) /* "" Provide PTI support */
 #define X86_FEATURE_SPEC_STORE_BYPASS_DISABLE (7*32+23) /* "" Disable Speculative Store Bypass. */
-#define X86_FEATURE_AMD_SSBD		      (7*32+24) /* "" AMD SSBD implementation */
+#define X86_FEATURE_LS_CFG_SSBD ( 7*32+24) /* "" AMD SSBD implementation */
+#define X86_FEATURE_IBRS	( 7*32+25) /* Indirect Branch Restricted Speculation */
+#define X86_FEATURE_IBPB	( 7*32+26) /* Indirect Branch Prediction Barrier */
+#define X86_FEATURE_STIBP	( 7*32+27) /* Single Thread Indirect Branch Predictors */
+#define X86_FEATURE_ZEN 	( 7*32+28) /* "" CPU is AMD family 0x17 (Zen) */
 
 /* Virtualization flags: Linux defined, word 8 */
 #define X86_FEATURE_TPR_SHADOW  (8*32+ 0) /* Intel TPR Shadow */
@@ -244,9 +251,12 @@
 
 /* AMD-defined CPU features, CPUID level 0x80000008 (ebx), word 13 */
 #define X86_FEATURE_CLZERO	(13*32+ 0) /* CLZERO instruction */
-#define X86_FEATURE_IBPB	(13*32+12) /* Indirect Branch Prediction Barrier */
-#define X86_FEATURE_IBRS	(13*32+14) /* Indirect Branch Restricted Speculation */
-#define X86_FEATURE_STIBP	(13*32+15) /* Single Thread Indirect Branch Predictors */
+#define X86_FEATURE_AMD_IBPB	(13*32+12) /* "" Indirect Branch Prediction Barrier */
+#define X86_FEATURE_AMD_IBRS	(13*32+14) /* "" Indirect Branch Restricted Speculation */
+#define X86_FEATURE_AMD_STIBP	(13*32+15) /* "" Single Thread Indirect Branch Predictors */
+#define X86_FEATURE_AMD_SSBD	(13*32+24) /* "" Speculative Store Bypass Disable */
+#define X86_FEATURE_VIRT_SSBD	(13*32+25) /* Virtualized Speculative Store Bypass Disable */
+#define X86_FEATURE_AMD_SSB_NO	(13*32+26) /* "" Speculative Store Bypass is fixed in hardware. */
 
 /* Intel-defined CPU features, CPUID level 0x00000007:0 (EDX), word 18 */
 #define X86_FEATURE_AVX512_4VNNIW	(18*32+ 2) /* AVX-512 Neural Network Instructions */
@@ -254,7 +264,7 @@
 #define X86_FEATURE_SPEC_CTRL		(18*32+26) /* "" Speculation Control (IBRS + IBPB) */
 #define X86_FEATURE_INTEL_STIBP		(18*32+27) /* "" Single Thread Indirect Branch Predictors */
 #define X86_FEATURE_ARCH_CAPABILITIES	(18*32+29) /* IA32_ARCH_CAPABILITIES MSR (Intel) */
-#define X86_FEATURE_SSBD		(18*32+31) /* Speculative Store Bypass Disable */
+#define X86_FEATURE_SPEC_CTRL_SSBD	(18*32+31) /* "" Speculative Store Bypass Disable */
 
 #if defined(__KERNEL__) && !defined(__ASSEMBLY__)
 
@@ -363,6 +373,7 @@ extern const char * const x86_power_flags[32];
 #define cpu_has_xmm4_2		boot_cpu_has(X86_FEATURE_XMM4_2)
 #define cpu_has_x2apic		boot_cpu_has(X86_FEATURE_X2APIC)
 #define cpu_has_xsave		boot_cpu_has(X86_FEATURE_XSAVE)
+#define cpu_has_xsaveopt	boot_cpu_has(X86_FEATURE_XSAVEOPT)
 #define cpu_has_osxsave		boot_cpu_has(X86_FEATURE_OSXSAVE)
 #define cpu_has_hypervisor	boot_cpu_has(X86_FEATURE_HYPERVISOR)
 #define cpu_has_pclmulqdq	boot_cpu_has(X86_FEATURE_PCLMULQDQ)
@@ -370,6 +381,7 @@ extern const char * const x86_power_flags[32];
 #define cpu_has_perfctr_nb	boot_cpu_has(X86_FEATURE_PERFCTR_NB)
 #define cpu_has_topoext		boot_cpu_has(X86_FEATURE_TOPOEXT)
 #define cpu_has_perfctr_l2	boot_cpu_has(X86_FEATURE_PERFCTR_L2)
+#define cpu_has_eager_fpu	boot_cpu_has(X86_FEATURE_EAGER_FPU)
 
 #if defined(CONFIG_X86_INVLPG) || defined(CONFIG_X86_64)
 # define cpu_has_invlpg		1

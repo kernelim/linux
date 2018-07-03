@@ -30,12 +30,14 @@ static void __wrmsr_on_cpu(void *info)
 		reg = &rv->reg;
 
 	/*
-	 * We need to set the SSBD bit in the SPEC_CTRL MSR if TIF_SSBD
-	 * is set.
+	 * We need to handle the SPEC_CTRL MSR specially.
+	 * The current content of the spec_ctrl_pcp will be written out
+	 * if the data value is SPEC_CTRL_MSR_REFRESH.
 	 */
 	if (unlikely((rv->msr_no == MSR_IA32_SPEC_CTRL) &&
-		      ssbd_tif_to_spec_ctrl(current_thread_info()->flags)))
-		wrmsr(rv->msr_no, reg->l | FEATURE_ENABLE_SSBD, reg->h);
+		     (reg->l == SPEC_CTRL_MSR_REFRESH)))
+		wrmsr(rv->msr_no, percpu_read(spec_ctrl_pcp.entry),
+				  percpu_read(spec_ctrl_pcp.hi32));
 	else
 		wrmsr(rv->msr_no, reg->l, reg->h);
 }

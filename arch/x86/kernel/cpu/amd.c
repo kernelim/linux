@@ -419,6 +419,7 @@ static void __cpuinit bsp_init_amd(struct cpuinfo_x86 *c)
 
 static void __cpuinit early_init_amd(struct cpuinfo_x86 *c)
 {
+	eager_fpu_not_needed();
 	early_init_amd_mc(c);
 
 	/*
@@ -480,7 +481,9 @@ static void __cpuinit early_init_amd(struct cpuinfo_x86 *c)
 		switch (c->x86) {
 		case 0x15: bit = 54; break;
 		case 0x16: bit = 33; break;
-		case 0x17: bit = 10; break;
+		case 0x17: bit = 10;
+			   set_cpu_cap(c, X86_FEATURE_ZEN);
+			   break;
 		default: return;
 		}
 		/*
@@ -496,9 +499,9 @@ static void __cpuinit early_init_amd(struct cpuinfo_x86 *c)
 		 */
 		if (!boot_cpu_has(X86_FEATURE_HYPERVISOR) &&
 		    !rdmsrl_safe(MSR_AMD64_LS_CFG, &x86_amd_ls_cfg_base)) {
+			setup_force_cpu_cap(X86_FEATURE_LS_CFG_SSBD);
 			setup_force_cpu_cap(X86_FEATURE_SSBD);
-			setup_force_cpu_cap(X86_FEATURE_AMD_SSBD);
-			x86_amd_ls_cfg_ssbd_mask = (1ULL << bit);
+			x86_amd_ls_cfg_ssbd_mask = 1ULL << bit;
 		}
 	}
 }

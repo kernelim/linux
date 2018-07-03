@@ -71,13 +71,16 @@
  *		Thanks to Stuart Swales for pointing out this bug.
  */
 #include <linux/platform_device.h>
+#include <linux/stop_machine.h>
 #include <linux/miscdevice.h>
 #include <linux/capability.h>
 #include <linux/smp_lock.h>
 #include <linux/kernel.h>
+#include <linux/delay.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/cpu.h>
+#include <linux/nmi.h>
 #include <linux/fs.h>
 #include <linux/mm.h>
 
@@ -107,6 +110,11 @@ static struct microcode_ops	*microcode_ops;
  * updated at any particular moment of time.
  */
 static DEFINE_MUTEX(microcode_mutex);
+
+/*
+ * Serialize late loading so that CPUs get updated one-by-one.
+ */
+static DEFINE_SPINLOCK(update_lock);
 
 struct ucode_cpu_info		ucode_cpu_info[NR_CPUS];
 EXPORT_SYMBOL_GPL(ucode_cpu_info);
@@ -271,52 +279,134 @@ MODULE_ALIAS_MISCDEV(MICROCODE_MINOR);
 /* fake device for request_firmware */
 static struct platform_device	*microcode_pdev;
 
-static int reload_for_cpu(int cpu)
+/*
+ * Late loading dance. Why the heavy-handed stomp_machine effort?
+ *
+ * - HT siblings must be idle and not execute other code while the other sibling
+ *   is loading microcode in order to avoid any negative interactions caused by
+ *   the loading.
+ *
+ * - In addition, microcode update on the cores must be serialized until this
+ *   requirement can be relaxed in the future. Right now, this is conservative
+ *   and good.
+ */
+#define SPINUNIT 100 /* 100 nsec */
+
+static atomic_t late_cpus_in;
+static atomic_t late_cpus_out;
+
+static int __wait_for_cpus(atomic_t *t, long long timeout)
 {
-	struct ucode_cpu_info *uci = ucode_cpu_info + cpu;
-	int err = 0;
+	int all_cpus = num_online_cpus();
 
-	if (uci->valid) {
-		enum ucode_state ustate;
+	atomic_inc(t);
 
-		ustate = microcode_ops->request_microcode_fw(cpu, &microcode_pdev->dev);
-		if (ustate == UCODE_OK)
-			apply_microcode_on_target(cpu);
-		else
-			if (ustate == UCODE_ERROR)
-				err = -EINVAL;
+	while (atomic_read(t) < all_cpus) {
+		if (timeout < SPINUNIT) {
+			pr_err("Timeout while waiting for CPUs rendezvous, remaining: %d\n",
+				all_cpus - atomic_read(t));
+			return 1;
+		}
+
+		ndelay(SPINUNIT);
+		timeout -= SPINUNIT;
+
+		touch_nmi_watchdog();
+	}
+	return 0;
+}
+
+/*
+ * Returns:
+ * < 0 - on error
+ *   0 - no update done
+ *   1 - microcode was updated
+ */
+static int __reload_late(void *info)
+{
+	int cpu = smp_processor_id();
+	enum ucode_state err;
+	int ret = 0;
+
+	/*
+	 * Wait for all CPUs to arrive. A load will not be attempted unless all
+	 * CPUs show up.
+	 * */
+	if (__wait_for_cpus(&late_cpus_in, NSEC_PER_SEC))
+		return -1;
+
+	spin_lock(&update_lock);
+	apply_microcode_local(&err);
+	spin_unlock(&update_lock);
+
+	if (err > UCODE_NFOUND) {
+		pr_warn("Error reloading microcode on CPU %d\n", cpu);
+		return -1;
+	} else {
+		return ret;
 	}
 
-	return err;
+	/*
+	 * Increase the wait timeout to a safe value here since we're
+	 * serializing the microcode update and that could take a while on a
+	 * large number of CPUs. And that is fine as the *actual* timeout will
+	 * be determined by the last CPU finished updating and thus cut short.
+	 */
+	if (__wait_for_cpus(&late_cpus_out, NSEC_PER_SEC * num_online_cpus()))
+		panic("Timeout during microcode update!\n");
+
+	return ret;
+}
+
+/*
+ * Reload microcode late on all CPUs. Wait for a sec until they
+ * all gather together.
+ */
+static int microcode_reload_late(void)
+{
+	int ret;
+
+	atomic_set(&late_cpus_in,  0);
+	atomic_set(&late_cpus_out, 0);
+
+	ret = stop_machine(__reload_late, NULL, cpu_online_mask);
+	if (ret > 0) {
+		perf_check_microcode();
+		spec_ctrl_rescan_cpuid();
+	}
+
+	return ret;
 }
 
 static ssize_t reload_store(struct sys_device *dev,
 			    struct sysdev_attribute *attr,
 			    const char *buf, size_t size)
 {
+	int bsp = boot_cpu_data.cpu_index;
 	unsigned long val;
-	int cpu = dev->id;
-	int ret = 0;
 	char *end;
+	ssize_t ret = 0, tmp_ret;
 
 	val = simple_strtoul(buf, &end, 0);
 	if (end == buf)
 		return -EINVAL;
 
-	if (val == 1) {
-		get_online_cpus();
-		mutex_lock(&microcode_mutex);
-		if (cpu_online(cpu))
-			ret = reload_for_cpu(cpu);
-		if (!ret) {
-			perf_check_microcode();
-			spec_ctrl_rescan_cpuid();
-		}
-		mutex_unlock(&microcode_mutex);
-		put_online_cpus();
-	}
+	if (val != 1)
+		return size;
 
-	if (!ret)
+	tmp_ret = microcode_ops->request_microcode_fw(bsp, &microcode_pdev->dev);
+	if (tmp_ret != UCODE_OK)
+		return size;
+
+	get_online_cpus();
+
+	mutex_lock(&microcode_mutex);
+	ret = microcode_reload_late();
+	mutex_unlock(&microcode_mutex);
+
+	put_online_cpus();
+
+	if (ret >= 0)
 		ret = size;
 
 	return ret;

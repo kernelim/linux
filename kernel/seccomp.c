@@ -9,6 +9,8 @@
 #include <linux/seccomp.h>
 #include <linux/sched.h>
 #include <linux/compat.h>
+#include <linux/nospec.h>
+#include <linux/prctl.h>
 
 /* #define SECCOMP_DEBUG 1 */
 #define NR_SECCOMP_MODES 1
@@ -57,6 +59,8 @@ void __secure_computing(int this_syscall)
 	do_exit(SIGKILL);
 }
 
+void __weak arch_seccomp_spec_mitigate(struct task_struct *task) { }
+
 long prctl_get_seccomp(void)
 {
 	return current->seccomp.mode;
@@ -74,6 +78,9 @@ long prctl_set_seccomp(unsigned long seccomp_mode)
 	ret = -EINVAL;
 	if (seccomp_mode && seccomp_mode <= NR_SECCOMP_MODES) {
 		current->seccomp.mode = seccomp_mode;
+
+		/* Assume seccomp processes want speculation flaw mitigation. */
+		arch_seccomp_spec_mitigate(current);
 		set_thread_flag(TIF_SECCOMP);
 #ifdef TIF_NOTSC
 		disable_TSC();

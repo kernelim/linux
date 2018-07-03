@@ -82,6 +82,10 @@ static int _nfs4_proc_getattr(struct nfs_server *server, struct nfs_fh *fhandle,
 static int nfs4_do_setattr(struct inode *inode, struct rpc_cred *cred,
 			    struct nfs_fattr *fattr, struct iattr *sattr,
 			    struct nfs4_state *state);
+static struct rpc_task *_nfs41_proc_sequence(struct nfs_client *clp,
+		struct rpc_cred *cred,
+		struct nfs4_slot *slot,
+		bool is_privileged);
 
 /* Prevent leaks of NFSv4 errors into userland */
 static int nfs4_map_errors(int err)
@@ -420,27 +424,35 @@ void nfs4_check_drain_bc_complete(struct nfs4_slot_table *tbl)
 	complete(&tbl->complete);
 }
 
-static void nfs41_sequence_free_slot(struct nfs4_sequence_res *res)
+static void nfs41_release_slot(struct nfs4_slot *slot)
 {
+	struct nfs4_session *session;
 	struct nfs4_slot_table *tbl;
 
-	tbl = &res->sr_session->fc_slot_table;
-	if (!res->sr_slot) {
+	if (!slot) {
 		/* just wake up the next guy waiting since
 		 * we may have not consumed a slot after all */
 		dprintk("%s: No slot\n", __func__);
 		return;
 	}
+	tbl = slot->table;
+	session = tbl->session;
 
 	spin_lock(&tbl->slot_tbl_lock);
-	nfs4_free_slot(tbl, res->sr_slot);
+	nfs4_free_slot(tbl, slot);
 	nfs4_check_drain_fc_complete(tbl);
 	spin_unlock(&tbl->slot_tbl_lock);
+}
+
+static void nfs41_sequence_free_slot(struct nfs4_sequence_res *res)
+{
+	nfs41_release_slot(res->sr_slot);
 	res->sr_slot = NULL;
 }
 
 static int nfs41_sequence_done(struct rpc_task *task, struct nfs4_sequence_res *res)
 {
+	struct nfs4_session *session;
 	unsigned long timestamp;
 	struct nfs_client *clp;
 	struct nfs4_slot *slot;
@@ -452,6 +464,7 @@ static int nfs41_sequence_done(struct rpc_task *task, struct nfs4_sequence_res *
 		goto out;
 
 	slot = res->sr_slot;
+	session = slot->table->session;
 
 	if (slot->interrupted) {
 		slot->interrupted = 0;
@@ -464,7 +477,7 @@ static int nfs41_sequence_done(struct rpc_task *task, struct nfs4_sequence_res *
 		/* Update the slot's sequence and clientid lease timer */
 		++res->sr_slot->seq_nr;
 		timestamp = res->sr_renewal_time;
-		clp = res->sr_session->clp;
+		clp = session->clp;
 		do_renew_lease(clp, timestamp);
 		/* Check sequence flags */
 		if (res->sr_status_flags != 0)
@@ -484,9 +497,9 @@ static int nfs41_sequence_done(struct rpc_task *task, struct nfs4_sequence_res *
 		 * returned NFS4ERR_DELAY as per Section 2.10.6.2
 		 * of RFC5661.
 		 */
-		dprintk("%s: slot=%td seq=%d: Operation in progress\n",
+		dprintk("%s: slot=%u seq=%u: Operation in progress\n",
 			__func__,
-			res->sr_slot - res->sr_session->fc_slot_table.slots,
+			slot->slot_nr,
 			res->sr_slot->seq_nr);
 		goto out_retry;
 	case -NFS4ERR_BADSLOT:
@@ -500,21 +513,21 @@ static int nfs41_sequence_done(struct rpc_task *task, struct nfs4_sequence_res *
 		 * Was the last operation on this sequence interrupted?
 		 * If so, retry after bumping the sequence number.
 		 */
-		if (interrupted) {
-			++slot->seq_nr;
-			goto retry_nowait;
-		}
+		if (interrupted)
+			goto retry_new_seq;
 		/*
 		 * Could this slot have been previously retired?
 		 * If so, then the server may be expecting seq_nr = 1!
 		 */
-		if (slot->seq_nr == 1)
-			break;
-		slot->seq_nr = 1;
-		goto retry_nowait;
+		if (slot->seq_nr != 1) {
+			slot->seq_nr = 1;
+			goto retry_nowait;
+		}
+		goto session_recover;
 	case -NFS4ERR_SEQ_FALSE_RETRY:
-		++slot->seq_nr;
-		goto retry_nowait;
+		if (interrupted)
+			goto retry_new_seq;
+		goto session_recover;
 	default:
 		/* Just update the slot sequence no. */
 		++res->sr_slot->seq_nr;
@@ -524,6 +537,11 @@ out:
 	dprintk("%s: Error %d free the slot \n", __func__, res->sr_status);
 	nfs41_sequence_free_slot(res);
 	return ret;
+session_recover:
+	nfs4_schedule_session_recovery(session);
+	goto retry_nowait;
+retry_new_seq:
+	++slot->seq_nr;
 retry_nowait:
 	if (rpc_restart_call_prepare(task)) {
 		task->tk_status = 0;
@@ -540,7 +558,7 @@ out_retry:
 static int nfs4_sequence_done(struct rpc_task *task,
 			       struct nfs4_sequence_res *res)
 {
-	if (res->sr_session == NULL || res->sr_slot == NULL)
+	if (res->sr_slot == NULL)
 		return 1;
 	return nfs41_sequence_done(task, res);
 }
@@ -581,12 +599,11 @@ out:
 static void nfs41_init_sequence(struct nfs4_sequence_args *args,
 		struct nfs4_sequence_res *res, int cache_reply)
 {
-	args->sa_session = NULL;
+	args->sa_slot = NULL;
 	args->sa_cache_this = 0;
 	args->sa_privileged = 0;
 	if (cache_reply)
 		args->sa_cache_this = 1;
-	res->sr_session = NULL;
 	res->sr_slot = NULL;
 }
 
@@ -595,10 +612,38 @@ static void nfs4_set_sequence_privileged(struct nfs4_sequence_args *args)
 	args->sa_privileged = 1;
 }
 
+static
+void nfs4_sequence_attach_slot(struct nfs4_sequence_args *args,
+		struct nfs4_sequence_res *res,
+		struct nfs4_slot *slot)
+{
+	if (!slot)
+		return;
+	args->sa_slot = slot;
+
+	res->sr_slot = slot;
+	res->sr_renewal_time = jiffies;
+	res->sr_status_flags = 0;
+	res->sr_status = 1;
+
+}
+
+static void
+nfs4_sequence_process_interrupted(struct nfs_client *client,
+		struct nfs4_slot *slot, struct rpc_cred *cred)
+{
+	struct rpc_task *task;
+
+	task = _nfs41_proc_sequence(client, cred, slot, true);
+	if (!IS_ERR(task))
+		rpc_put_task_async(task);
+}
+
+
 int nfs41_setup_sequence(struct nfs4_session *session,
-				struct nfs4_sequence_args *args,
-				struct nfs4_sequence_res *res,
-				struct rpc_task *task)
+			struct nfs4_sequence_args *args,
+			struct nfs4_sequence_res *res,
+			struct rpc_task *task)
 {
 	struct nfs4_slot *slot;
 	struct nfs4_slot_table *tbl;
@@ -611,42 +656,36 @@ int nfs41_setup_sequence(struct nfs4_session *session,
 
 	tbl = &session->fc_slot_table;
 
-	spin_lock(&tbl->slot_tbl_lock);
-	if (test_bit(NFS4_SLOT_TBL_DRAINING, &tbl->slot_tbl_state) &&
-	    !args->sa_privileged) {
-		/*
-		 * The state manager will wait until the slot table is empty.
-		 * Schedule the reset thread
-		 */
-		dprintk("%s Schedule Session Reset\n", __func__);
-		goto out_sleep;
-	}
+	for (;;) {
+		spin_lock(&tbl->slot_tbl_lock);
+		if (test_bit(NFS4_SLOT_TBL_DRAINING, &tbl->slot_tbl_state) &&
+			!args->sa_privileged) {
+			/*
+			 * The state manager will wait until the slot table is empty.
+			 * Schedule the reset thread
+			 */
+			dprintk("%s Schedule Session Reset\n", __func__);
+			goto out_sleep;
+		}
 
-	slotid = nfs4_find_slot(tbl);
-	if (slotid == NFS4_MAX_SLOT_TABLE) {
-		rpc_sleep_on(&tbl->slot_tbl_waitq, task, NULL);
+		slotid = nfs4_find_slot(tbl);
+		if (slotid == NFS4_MAX_SLOT_TABLE) {
+			rpc_sleep_on(&tbl->slot_tbl_waitq, task, NULL);
+			spin_unlock(&tbl->slot_tbl_lock);
+			dprintk("<-- %s: no free slots\n", __func__);
+			return -EAGAIN;
+		}
 		spin_unlock(&tbl->slot_tbl_lock);
-		dprintk("<-- %s: no free slots\n", __func__);
-		return -EAGAIN;
+		slot = tbl->slots + slotid;
+		if (likely(!slot->interrupted))
+			break;
+		nfs4_sequence_process_interrupted(session->clp,
+				slot, task->tk_msg.rpc_cred);
 	}
-	spin_unlock(&tbl->slot_tbl_lock);
-
+	nfs4_sequence_attach_slot(args, res, slot);
 	rpc_task_set_priority(task, RPC_PRIORITY_NORMAL);
-	slot = tbl->slots + slotid;
-	args->sa_session = session;
-	args->sa_slotid = slotid;
 
 	dprintk("<-- %s slotid=%d seqid=%d\n", __func__, slotid, slot->seq_nr);
-
-	res->sr_session = session;
-	res->sr_slot = slot;
-	res->sr_renewal_time = jiffies;
-	res->sr_status_flags = 0;
-	/*
-	 * sr_status is only set in decode_sequence, and so will remain
-	 * set to 1 if an rpc level failure occurs.
-	 */
-	res->sr_status = 1;
 	return 0;
 out_sleep:
 	/* Privileged tasks are queued with top priority */
@@ -669,9 +708,9 @@ int nfs4_setup_sequence(const struct nfs_server *server,
 	if (session == NULL)
 		goto out;
 
-	dprintk("--> %s clp %p session %p sr_slot %td\n",
+	dprintk("--> %s clp %p session %p sr_slot %d\n",
 		__func__, session->clp, session, res->sr_slot ?
-			res->sr_slot - session->fc_slot_table.slots : -1);
+			res->sr_slot->slot_nr : -1);
 
 	ret = nfs41_setup_sequence(session, args, res, task);
 out:
@@ -766,6 +805,15 @@ static int nfs4_sequence_done(struct rpc_task *task,
 {
 	return 1;
 }
+
+static void
+nfs4_sequence_process_interrupted(struct nfs_client *client,
+		struct nfs4_slot *slot, struct rpc_cred *cred)
+{
+	WARN_ON_ONCE(1);
+	slot->interrupted = 0;
+}
+
 #endif /* CONFIG_NFS_V4_1 */
 
 int _nfs4_call_sync(struct rpc_clnt *clnt,
@@ -5463,15 +5511,57 @@ int nfs4_proc_get_lease_time(struct nfs_client *clp, struct nfs_fsinfo *fsinfo)
 	return status;
 }
 
+struct nfs4_slot *nfs4_alloc_slots(struct nfs4_slot_table *table,
+		u32 max_slots, gfp_t gfp_flags)
+{
+	struct nfs4_slot *tbl;
+	u32 i;
+
+	tbl = kmalloc_array(max_slots, sizeof(*tbl), gfp_flags);
+	if (tbl != NULL) {
+		for (i = 0; i < max_slots; i++) {
+			tbl[i].table = table;
+			tbl[i].slot_nr = i;
+		}
+	}
+	return tbl;
+}
+
+static void nfs4_add_and_init_slots(struct nfs4_slot_table *tbl,
+		struct nfs4_slot *new,
+		u32 max_slots,
+		u32 ivalue)
+{
+	struct nfs4_slot *old = NULL;
+	u32 i;
+
+	spin_lock(&tbl->slot_tbl_lock);
+	if (new) {
+		old = tbl->slots;
+		tbl->slots = new;
+		tbl->max_slots = max_slots;
+	}
+	tbl->highest_used_slotid = -1;	/* no slot is currently used */
+	for (i = 0; i < tbl->max_slots; i++) {
+		tbl->slots[i].seq_nr = ivalue;
+		/* RHEL6: this is not needed since we don't reset slot tables on the
+		 * fly, they are always kcalloc-ed, but retain in case we backport
+		 * 87dda67e7386 NFSv4.1: Allow SEQUENCE to resize the slot table on the fly
+		 */
+		tbl->slots[i].interrupted = 0;
+	}
+	spin_unlock(&tbl->slot_tbl_lock);
+	kfree(old);
+}
+
 /*
- * Reset a slot table
+ * (re)Initialise a slot table
  */
-static int nfs4_reset_slot_table(struct nfs4_slot_table *tbl, u32 max_reqs,
-				 int ivalue)
+static int nfs4_realloc_slot_table(struct nfs4_slot_table *tbl, u32 max_reqs,
+				 u32 ivalue)
 {
 	struct nfs4_slot *new = NULL;
-	int i;
-	int ret = 0;
+	int ret = -ENOMEM;
 
 	dprintk("--> %s: max_reqs=%u, tbl->max_slots %d\n", __func__,
 		max_reqs, tbl->max_slots);
@@ -5484,24 +5574,13 @@ static int nfs4_reset_slot_table(struct nfs4_slot_table *tbl, u32 max_reqs,
 
 	/* Does the newly negotiated max_reqs match the existing slot table? */
 	if (max_reqs != tbl->max_slots) {
-		ret = -ENOMEM;
-		new = kmalloc(max_reqs * sizeof(struct nfs4_slot),
-			      GFP_NOFS);
+		new = nfs4_alloc_slots(tbl, max_reqs, GFP_NOFS);
 		if (!new)
 			goto out;
-		ret = 0;
-		kfree(tbl->slots);
 	}
-	spin_lock(&tbl->slot_tbl_lock);
-	if (new) {
-		tbl->slots = new;
-		tbl->max_slots = max_reqs;
-	}
-	for (i = 0; i < tbl->max_slots; ++i) {
-		tbl->slots[i].seq_nr = ivalue;
-		tbl->slots[i].interrupted = 0;
-	}
-	spin_unlock(&tbl->slot_tbl_lock);
+	ret = 0;
+
+	nfs4_add_and_init_slots(tbl, new, max_reqs, ivalue);
 	dprintk("%s: tbl=%p slots=%p max_slots=%d\n", __func__,
 		tbl, tbl->slots, tbl->max_slots);
 out:
@@ -5516,12 +5595,12 @@ static int nfs4_reset_slot_tables(struct nfs4_session *session)
 {
 	int status;
 
-	status = nfs4_reset_slot_table(&session->fc_slot_table,
+	status = nfs4_realloc_slot_table(&session->fc_slot_table,
 			session->fc_attrs.max_reqs, 1);
 	if (status)
 		return status;
 
-	status = nfs4_reset_slot_table(&session->bc_slot_table,
+	status = nfs4_realloc_slot_table(&session->bc_slot_table,
 			session->bc_attrs.max_reqs, 0);
 	return status;
 }
@@ -5541,62 +5620,28 @@ static void nfs4_destroy_slot_tables(struct nfs4_session *session)
 }
 
 /*
- * Initialize slot table
- */
-static int nfs4_init_slot_table(struct nfs4_slot_table *tbl,
-		int max_slots, int ivalue)
-{
-	struct nfs4_slot *slot;
-	int ret = -ENOMEM;
-
-	dprintk("--> %s: max_reqs=%u\n", __func__, max_slots);
-
-	if (max_slots > NFS4_MAX_SLOT_TABLE) {
-		max_slots = NFS4_MAX_SLOT_TABLE;
-		dprintk("%s: RESET max_slots=%u to NFS4_MAX_SLOT_TABLE",
-			__func__, max_slots);
-	}
-
-	slot = kcalloc(max_slots, sizeof(struct nfs4_slot), GFP_NOFS);
-	if (!slot)
-		goto out;
-	ret = 0;
-
-	spin_lock(&tbl->slot_tbl_lock);
-	tbl->max_slots = max_slots;
-	tbl->slots = slot;
-	tbl->highest_used_slotid = -1;  /* no slot is currently used */
-	spin_unlock(&tbl->slot_tbl_lock);
-	dprintk("%s: tbl=%p slots=%p max_slots=%d\n", __func__,
-		tbl, tbl->slots, tbl->max_slots);
-out:
-	dprintk("<-- %s: return %d\n", __func__, ret);
-	return ret;
-}
-
-/*
- * Initialize the forechannel and backchannel tables
+ * Initialize or reset the forechannel and backchannel tables
  */
 static int nfs4_init_slot_tables(struct nfs4_session *session)
 {
 	struct nfs4_slot_table *tbl;
 	int status = 0;
 
+	/* Fore channel */
 	tbl = &session->fc_slot_table;
-	if (tbl->slots == NULL) {
-		status = nfs4_init_slot_table(tbl,
-				session->fc_attrs.max_reqs, 1);
-		if (status)
-			return status;
-	}
+	tbl->session = session;
+	status = nfs4_realloc_slot_table(tbl, session->fc_attrs.max_reqs, 1);
+	if (status) /* -ENOMEM */
+		return status;
 
+	/* Back channel */
 	tbl = &session->bc_slot_table;
-	if (tbl->slots == NULL) {
-		status = nfs4_init_slot_table(tbl,
-				session->bc_attrs.max_reqs, 0);
-		if (status)
-			nfs4_destroy_slot_tables(session);
-	}
+	tbl->session = session;
+	status = nfs4_realloc_slot_table(tbl, session->bc_attrs.max_reqs, 0);
+	if (status && tbl->slots == NULL)
+		/* Fore and back channel share a connection so get
+		 * both slot tables or neither */
+		nfs4_destroy_slot_tables(session);
 
 	return status;
 }
@@ -5961,6 +6006,7 @@ static const struct rpc_call_ops nfs41_sequence_ops = {
 
 static struct rpc_task *_nfs41_proc_sequence(struct nfs_client *clp,
 		struct rpc_cred *cred,
+		struct nfs4_slot *slot,
 		bool is_privileged)
 {
 	struct nfs4_sequence_data *calldata;
@@ -5974,15 +6020,18 @@ static struct rpc_task *_nfs41_proc_sequence(struct nfs_client *clp,
 		.callback_ops = &nfs41_sequence_ops,
 		.flags = RPC_TASK_ASYNC | RPC_TASK_SOFT,
 	};
+	struct rpc_task *ret;
 
+	ret = ERR_PTR(-EIO);
 	if (!atomic_inc_not_zero(&clp->cl_count))
-		return ERR_PTR(-EIO);
+		goto out_err;
+
+	ret = ERR_PTR(-ENOMEM);
 	calldata = kzalloc(sizeof(*calldata), GFP_NOFS);
-	if (calldata == NULL) {
-		nfs_put_client(clp);
-		return ERR_PTR(-ENOMEM);
-	}
+	if (calldata == NULL)
+		goto out_put_clp;
 	nfs41_init_sequence(&calldata->args, &calldata->res, 0);
+	nfs4_sequence_attach_slot(&calldata->args, &calldata->res, slot);
 	if (is_privileged)
 		nfs4_set_sequence_privileged(&calldata->args);
 	msg.rpc_argp = &calldata->args;
@@ -5990,7 +6039,15 @@ static struct rpc_task *_nfs41_proc_sequence(struct nfs_client *clp,
 	calldata->clp = clp;
 	task_setup_data.callback_data = calldata;
 
-	return rpc_run_task(&task_setup_data);
+	ret = rpc_run_task(&task_setup_data);
+	if (IS_ERR(ret))
+		goto out_err;
+	return ret;
+out_put_clp:
+	nfs_put_client(clp);
+out_err:
+	nfs41_release_slot(slot);
+	return ret;
 }
 
 static int nfs41_proc_async_sequence(struct nfs_client *clp, struct rpc_cred *cred, unsigned renew_flags)
@@ -6000,7 +6057,7 @@ static int nfs41_proc_async_sequence(struct nfs_client *clp, struct rpc_cred *cr
 
 	if ((renew_flags & NFS4_RENEW_TIMEOUT) == 0)
 		return -EAGAIN;
-	task = _nfs41_proc_sequence(clp, cred, false);
+	task = _nfs41_proc_sequence(clp, cred, NULL, false);
 	if (IS_ERR(task))
 		ret = PTR_ERR(task);
 	else
@@ -6014,7 +6071,7 @@ static int nfs4_proc_sequence(struct nfs_client *clp, struct rpc_cred *cred)
 	struct rpc_task *task;
 	int ret;
 
-	task = _nfs41_proc_sequence(clp, cred, true);
+	task = _nfs41_proc_sequence(clp, cred, NULL, true);
 	if (IS_ERR(task)) {
 		ret = PTR_ERR(task);
 		goto out;

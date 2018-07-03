@@ -1779,9 +1779,8 @@ static int nfs4_recall_slot(struct nfs_client *clp)
 	int i;
 
 	nfs4_begin_drain_session(clp);
-	new = kmalloc(fc_tbl->target_max_slots * sizeof(struct nfs4_slot),
-		      GFP_NOFS);
-        if (!new)
+	new = nfs4_alloc_slots(fc_tbl, fc_tbl->target_max_slots, GFP_NOFS);
+	if (!new)
 		return -ENOMEM;
 
 	spin_lock(&fc_tbl->slot_tbl_lock);

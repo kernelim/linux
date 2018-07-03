@@ -603,6 +603,7 @@ struct kvm_x86_ops {
 	void (*cache_reg)(struct kvm_vcpu *vcpu, enum kvm_reg reg);
 	unsigned long (*get_rflags)(struct kvm_vcpu *vcpu);
 	void (*set_rflags)(struct kvm_vcpu *vcpu, unsigned long rflags);
+	void (*fpu_activate)(struct kvm_vcpu *vcpu);
 	void (*fpu_deactivate)(struct kvm_vcpu *vcpu);
 
 	void (*tlb_flush)(struct kvm_vcpu *vcpu);
@@ -637,6 +638,8 @@ struct kvm_x86_ops {
 	u64 (*compute_tsc_offset)(struct kvm_vcpu *vcpu, u64 target_tsc);
 
 	void (*sched_in)(struct kvm_vcpu *kvm, int cpu);
+
+	bool (*has_emulated_msr)(int index);
 };
 
 extern struct kvm_x86_ops *kvm_x86_ops;

@@ -1779,18 +1779,16 @@ static void encode_sequence(struct xdr_stream *xdr,
 			    struct compound_hdr *hdr)
 {
 #if defined(CONFIG_NFS_V4_1)
-	struct nfs4_session *session = args->sa_session;
+	struct nfs4_session *session;
 	struct nfs4_slot_table *tp;
-	struct nfs4_slot *slot;
+	struct nfs4_slot *slot = args->sa_slot;
 	__be32 *p;
 
-	if (!session)
+	if (slot == NULL)
 		return;
 
-	tp = &session->fc_slot_table;
-
-	WARN_ON(args->sa_slotid == NFS4_MAX_SLOT_TABLE);
-	slot = tp->slots + args->sa_slotid;
+	tp = slot->table;
+	session = tp->session;
 
 	p = reserve_space(xdr, 4 + NFS4_MAX_SESSIONID_LEN + 16);
 	*p++ = cpu_to_be32(OP_SEQUENCE);
@@ -1805,11 +1803,11 @@ static void encode_sequence(struct xdr_stream *xdr,
 		((u32 *)session->sess_id.data)[1],
 		((u32 *)session->sess_id.data)[2],
 		((u32 *)session->sess_id.data)[3],
-		slot->seq_nr, args->sa_slotid,
+		slot->seq_nr, slot->slot_nr,
 		tp->highest_used_slotid, args->sa_cache_this);
 	p = xdr_encode_opaque_fixed(p, session->sess_id.data, NFS4_MAX_SESSIONID_LEN);
 	*p++ = cpu_to_be32(slot->seq_nr);
-	*p++ = cpu_to_be32(args->sa_slotid);
+	*p++ = cpu_to_be32(slot->slot_nr);
 	*p++ = cpu_to_be32(tp->highest_used_slotid);
 	*p = cpu_to_be32(args->sa_cache_this);
 	hdr->nops++;
@@ -1951,8 +1949,9 @@ static void encode_free_stateid(struct xdr_stream *xdr,
 static u32 nfs4_xdr_minorversion(const struct nfs4_sequence_args *args)
 {
 #if defined(CONFIG_NFS_V4_1)
-	if (args->sa_session)
-		return args->sa_session->clp->cl_mvops->minor_version;
+
+	if (args->sa_slot)
+		return args->sa_slot->table->session->clp->cl_mvops->minor_version;
 #endif /* CONFIG_NFS_V4_1 */
 	return 0;
 }
@@ -5206,12 +5205,13 @@ static int decode_sequence(struct xdr_stream *xdr,
 			   struct rpc_rqst *rqstp)
 {
 #if defined(CONFIG_NFS_V4_1)
+	struct nfs4_session *session;
 	struct nfs4_sessionid id;
 	u32 dummy;
 	int status;
 	__be32 *p;
 
-	if (!res->sr_session)
+	if (res->sr_slot == NULL)
 		return 0;
 
 	status = decode_op_hdr(xdr, OP_SEQUENCE);
@@ -5225,8 +5225,9 @@ static int decode_sequence(struct xdr_stream *xdr,
 	 * sequence number, the server is looney tunes.
 	 */
 	status = -EREMOTEIO;
+	session = res->sr_slot->table->session;
 
-	if (memcmp(id.data, res->sr_session->sess_id.data,
+	if (memcmp(id.data, session->sess_id.data,
 		   NFS4_MAX_SESSIONID_LEN)) {
 		dprintk("%s Invalid session id\n", __func__);
 		goto out_err;
@@ -5244,7 +5245,7 @@ static int decode_sequence(struct xdr_stream *xdr,
 	}
 	/* slot id */
 	dummy = be32_to_cpup(p++);
-	if (dummy != res->sr_slot - res->sr_session->fc_slot_table.slots) {
+	if (dummy != res->sr_slot->slot_nr) {
 		dprintk("%s Invalid slot id\n", __func__);
 		goto out_err;
 	}

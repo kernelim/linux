@@ -21,6 +21,8 @@
 #include <asm/uaccess.h>
 #include <asm/i387.h>
 #include <asm/spec_ctrl.h>
+#include <asm/fpu-internal.h>
+#include <asm/debugreg.h>
 
 unsigned long idle_halt;
 EXPORT_SYMBOL(idle_halt);
@@ -40,7 +42,7 @@ int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 		ret = fpu_alloc((struct fpu *)&dst->thread.xstate);
 		if (ret)
 			return ret;
-		fpu_copy((struct fpu *)&dst->thread.xstate, (struct fpu *)&src->thread.xstate);
+		fpu_copy(dst, src);
 	}
 	return 0;
 }
@@ -86,6 +88,8 @@ void exit_thread(void)
 		put_cpu();
 		kfree(bp);
 	}
+
+	drop_fpu(me);
 }
 
 void show_regs_common(void)
@@ -127,12 +131,14 @@ void flush_thread(void)
 	tsk->thread.debugreg6 = 0;
 	tsk->thread.debugreg7 = 0;
 	memset(tsk->thread.tls_array, 0, sizeof(tsk->thread.tls_array));
-	/*
-	 * Forget coprocessor state..
-	 */
-	tsk->fpu_counter = 0;
-	clear_fpu(tsk);
-	clear_used_math();
+
+	if (!use_eager_fpu()) {
+		/* FPU state will be reallocated lazily at the first use. */
+		drop_fpu(tsk);
+		free_thread_xstate(tsk);
+	} else {
+		restore_init_xstate();
+	}
 }
 
 static void hard_disable_TSC(void)
@@ -193,25 +199,150 @@ int set_tsc_mode(unsigned int val)
 	return 0;
 }
 
-static __always_inline void __speculative_store_bypass_update(unsigned long tifn)
-{
-	u64 msr;
+#ifdef CONFIG_SMP
 
-	if (static_cpu_has(X86_FEATURE_AMD_SSBD)) {
-		msr = x86_amd_ls_cfg_base | ssbd_tif_to_amd_ls_cfg(tifn);
+struct ssb_state {
+	struct ssb_state	*shared_state;
+	raw_spinlock_t		lock;
+	unsigned int		disable_state;
+	unsigned long		local_state;
+};
+
+#define LSTATE_SSB	0
+
+static DEFINE_PER_CPU(struct ssb_state, ssb_state);
+
+void speculative_store_bypass_ht_init(void)
+{
+	unsigned int this_cpu = smp_processor_id();
+	unsigned int cpu;
+	struct ssb_state *st = &per_cpu(ssb_state, this_cpu);
+
+	st->local_state = 0;
+
+	/*
+	 * Shared state setup happens once on the first bringup
+	 * of the CPU. It's not destroyed on CPU hotunplug.
+	 */
+	if (st->shared_state)
+		return;
+
+	st->lock = (raw_spinlock_t)__RAW_SPIN_LOCK_UNLOCKED;
+
+	/*
+	 * Go over HT siblings and check whether one of them has set up the
+	 * shared state pointer already.
+	 */
+	for_each_cpu(cpu, topology_thread_cpumask(this_cpu)) {
+		if (cpu == this_cpu)
+			continue;
+
+		if (!per_cpu(ssb_state, cpu).shared_state)
+			continue;
+
+		/* Link it to the state of the sibling: */
+		st->shared_state = per_cpu(ssb_state, cpu).shared_state;
+		return;
+	}
+
+	/*
+	 * First HT sibling to come up on the core.  Link shared state of
+	 * the first HT sibling to itself. The siblings on the same core
+	 * which come up later will see the shared state pointer and link
+	 * themself to the state of this CPU.
+	 */
+	st->shared_state = st;
+}
+
+/*
+ * Logic is: First HT sibling enables SSBD for both siblings in the core
+ * and last sibling to disable it, disables it for the whole core. This how
+ * MSR_SPEC_CTRL works in "hardware":
+ *
+ *  CORE_SPEC_CTRL = THREAD0_SPEC_CTRL | THREAD1_SPEC_CTRL
+ */
+static __always_inline void amd_set_core_ssb_state(unsigned long tifn)
+{
+	struct ssb_state *st = &per_cpu(ssb_state, smp_processor_id());
+	u64 msr = x86_amd_ls_cfg_base;
+
+	if (!static_cpu_has(X86_FEATURE_ZEN)) {
+		msr |= ssbd_tif_to_amd_ls_cfg(tifn);
 		wrmsrl(MSR_AMD64_LS_CFG, msr);
+		return;
+	}
+
+	if (tifn & _TIF_SSBD) {
+		/*
+		 * Since this can race with prctl(), block reentry on the
+		 * same CPU.
+		 */
+		if (__test_and_set_bit(LSTATE_SSB, &st->local_state))
+			return;
+
+		msr |= x86_amd_ls_cfg_ssbd_mask;
+
+		__raw_spin_lock(&st->shared_state->lock);
+		/* First sibling enables SSBD: */
+		if (!st->shared_state->disable_state)
+			wrmsrl(MSR_AMD64_LS_CFG, msr);
+		st->shared_state->disable_state++;
+		__raw_spin_unlock(&st->shared_state->lock);
 	} else {
-		wrmsr_safe(MSR_IA32_SPEC_CTRL,
-			   percpu_read(spec_ctrl_pcp.entry) |
-			   ssbd_tif_to_spec_ctrl(tifn),
-			   percpu_read(spec_ctrl_pcp.hi32));
+		if (!__test_and_clear_bit(LSTATE_SSB, &st->local_state))
+			return;
+
+		__raw_spin_lock(&st->shared_state->lock);
+		st->shared_state->disable_state--;
+		if (!st->shared_state->disable_state)
+			wrmsrl(MSR_AMD64_LS_CFG, msr);
+		__raw_spin_unlock(&st->shared_state->lock);
 	}
 }
-
-void speculative_store_bypass_update(void)
+#else
+static __always_inline void amd_set_core_ssb_state(unsigned long tifn)
 {
-	__speculative_store_bypass_update(current_thread_info()->flags);
+	u64 msr = x86_amd_ls_cfg_base | ssbd_tif_to_amd_ls_cfg(tifn);
+
+	wrmsrl(MSR_AMD64_LS_CFG, msr);
 }
+#endif
+
+static __always_inline void amd_set_ssb_virt_state(unsigned long tifn)
+{
+	/*
+	 * SSBD has the same definition in SPEC_CTRL and VIRT_SPEC_CTRL,
+	 * so ssbd_tif_to_spec_ctrl() just works.
+	 */
+	wrmsrl(MSR_AMD64_VIRT_SPEC_CTRL, ssbd_tif_to_spec_ctrl(tifn));
+}
+
+static __always_inline void intel_set_ssb_state(unsigned long tifn)
+{
+	spec_ctrl_set_ssbd(ssbd_tif_to_spec_ctrl(tifn));
+	wrmsrl(MSR_IA32_SPEC_CTRL, spec_ctrl_pcp_read64());
+}
+
+static __always_inline void __speculative_store_bypass_update(unsigned long tifn)
+{
+	if (!ssb_is_user_settable(READ_ONCE(ssb_mode)))
+		return;	/* Don't do anything if not user settable */
+
+	if (static_cpu_has(X86_FEATURE_VIRT_SSBD))
+		amd_set_ssb_virt_state(tifn);
+	else if (static_cpu_has(X86_FEATURE_LS_CFG_SSBD))
+		amd_set_core_ssb_state(tifn);
+	else
+		intel_set_ssb_state(tifn);
+}
+
+void speculative_store_bypass_update(unsigned long tif)
+{
+	preempt_disable();
+	__speculative_store_bypass_update(tif);
+	preempt_enable();
+}
+EXPORT_SYMBOL_GPL(speculative_store_bypass_update);
 
 void __switch_to_xtra(struct task_struct *prev_p, struct task_struct *next_p,
 		      struct tss_struct *tss)

@@ -3,7 +3,8 @@
 
 #include <linux/types.h>
 #include <asm/processor.h>
-#include <asm/i387.h>
+
+#define XSTATE_CPUID		0x0000000d
 
 #define XSTATE_FP	0x1
 #define XSTATE_SSE	0x2
@@ -39,20 +40,15 @@
 
 extern unsigned int xstate_size;
 extern u64 pcntxt_mask;
-extern struct xsave_struct *init_xstate_buf;
 extern u64 xstate_fx_sw_bytes[USER_XSTATE_FX_SW_WORDS];
+extern struct xsave_struct *init_xstate_buf;
 
-extern void xsave_cntxt_init(void);
 extern void xsave_init(void);
 extern void update_regset_xstate_info(unsigned int size, u64 xstate_mask);
 extern int init_fpu(struct task_struct *child);
-extern int check_for_xstate(struct i387_fxsave_struct __user *buf,
-			    void __user *fpstate,
-			    struct _fpx_sw_bytes *sw);
 
-static inline int fpu_xrstor_checking(struct fpu *fpu)
+static inline int fpu_xrstor_checking(struct xsave_struct *fx)
 {
-	struct xsave_struct *fx = &fpu->state->xsave;
 	int err;
 
 	asm volatile("1: .byte " REX_PREFIX "0x0f,0xae,0x2f\n\t"
@@ -72,22 +68,25 @@ static inline int fpu_xrstor_checking(struct fpu *fpu)
 static inline int xsave_user(struct xsave_struct __user *buf)
 {
 	int err;
+
+	/*
+	 * Clear the xsave header first, so that reserved fields are
+	 * initialized to zero.
+	 */
+	err = __clear_user(&buf->xsave_hdr, sizeof(buf->xsave_hdr));
+	if (unlikely(err))
+		return -EFAULT;
+
 	__asm__ __volatile__("1: .byte " REX_PREFIX "0x0f,0xae,0x27\n"
 			     "2:\n"
 			     ".section .fixup,\"ax\"\n"
 			     "3:  movl $-1,%[err]\n"
 			     "    jmp  2b\n"
 			     ".previous\n"
-			     ".section __ex_table,\"a\"\n"
-			     _ASM_ALIGN "\n"
-			     _ASM_PTR "1b,3b\n"
-			     ".previous"
+			     _ASM_EXTABLE(1b,3b)
 			     : [err] "=r" (err)
 			     : "D" (buf), "a" (-1), "d" (-1), "0" (0)
 			     : "memory");
-	if (unlikely(err) && __clear_user(buf, xstate_size))
-		err = -EFAULT;
-	/* No need to clear here because the caller clears USED_MATH */
 	return err;
 }
 
@@ -104,10 +103,7 @@ static inline int xrestore_user(struct xsave_struct __user *buf, u64 mask)
 			     "3:  movl $-1,%[err]\n"
 			     "    jmp  2b\n"
 			     ".previous\n"
-			     ".section __ex_table,\"a\"\n"
-			     _ASM_ALIGN "\n"
-			     _ASM_PTR "1b,3b\n"
-			     ".previous"
+			     _ASM_EXTABLE(1b,3b)
 			     : [err] "=r" (err)
 			     : "D" (xstate), "a" (lmask), "d" (hmask), "0" (0)
 			     : "memory");	/* memory required? */

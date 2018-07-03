@@ -40,11 +40,6 @@
 .macro __IBRS_ENTRY
 	movl IBRS_HI32_PCP, %edx
 	movl IBRS_ENTRY_PCP, %eax
-	GET_THREAD_INFO(%_ASM_CX)
-	bt   $TIF_SSBD, TI_flags(%_ASM_CX)
-	jnc  .Lno_ssbd_\@
-	orl  $FEATURE_ENABLE_SSBD, %eax
-.Lno_ssbd_\@:
 	movl $MSR_IA32_SPEC_CTRL, %ecx
 	wrmsr
 .endm
@@ -101,9 +96,6 @@
 	 * Nowever, we can leave the save_reg as NO_IBRS_RESTORE
 	 * so that we won't do a rewrite on exit,
 	 *
-	 * When the values don't match, the state of the SSBD bit in the
-	 * MSR is transferred to new value.
-	 *
 	 * %edx is initialized by rdmsr above, and so it doesn't need
 	 * to be touched.
 	 */
@@ -112,8 +104,6 @@
 	je   .Lwrmsr_\@
 
 	movl %eax, \save_reg
-	andl $FEATURE_ENABLE_SSBD, %eax
-	orl  %ecx, %eax
 .Lwrmsr_\@:
 	movl $MSR_IA32_SPEC_CTRL, %ecx
 	wrmsr
@@ -127,11 +117,6 @@
 .macro __IBRS_EXIT
 	movl IBRS_HI32_PCP, %edx
 	movl IBRS_EXIT_PCP, %eax
-	GET_THREAD_INFO(%_ASM_CX)
-	bt   $TIF_SSBD, TI_flags(%_ASM_CX)
-	jnc  .Lno_ssbd_\@
-	orl  $FEATURE_ENABLE_SSBD, %eax
-.Lno_ssbd_\@:
 	movl $MSR_IA32_SPEC_CTRL, %ecx
 	wrmsr
 .endm
@@ -212,11 +197,19 @@
 #include <asm/intel-family.h>
 #include <asm/nospec-branch.h>
 
+/*
+ * Special SPEC_CTRL MSR value to write the content of the spec_ctrl_pcp.
+ */
+#define SPEC_CTRL_MSR_REFRESH	((unsigned)-1)
+
+extern enum ssb_mitigation ssb_mode;
+
 extern void spec_ctrl_rescan_cpuid(void);
 extern void spec_ctrl_init(void);
 extern void spec_ctrl_cpu_init(void);
 extern void spec_ctrl_save_msr(void);
 extern void ssb_select_mitigation(void);
+extern void ssb_print_mitigation(void);
 
 
 bool spec_ctrl_force_enable_ibrs(void);
@@ -225,6 +218,7 @@ bool spec_ctrl_enable_ibrs_always(void);
 bool spec_ctrl_force_enable_ibp_disabled(void);
 bool spec_ctrl_cond_enable_ibp_disabled(void);
 void spec_ctrl_enable_retpoline_ibrs_user(void);
+void spec_ctrl_set_ssbd(bool ssbd_on);
 
 bool unprotected_firmware_begin(void);
 void unprotected_firmware_end(bool ibrs_on);
@@ -234,22 +228,54 @@ void unprotected_firmware_end(bool ibrs_on);
  */
 struct kernel_ibrs_spec_ctrl {
 	unsigned int enabled;	/* Entry and exit enabled control bits */
-	unsigned int entry;	/* Lower 32-bit of SPEC_CTRL MSR for entry */
 	unsigned int exit;	/* Lower 32-bit of SPEC_CTRL MSR for exit */
-	unsigned int hi32;	/* Upper 32-bit of SPEC_CTRL MSR */
+	union {
+		struct {
+			/*
+			 * The lower and upper 32-bit of SPEC_CTRL MSR
+			 * when entering kernel.
+			 */
+			unsigned int entry;
+			unsigned int hi32;
+		};
+		u64	entry64;	/* Full 64-bit SPEC_CTRL MSR */
+	};
 };
 
 DECLARE_PER_CPU_USER_MAPPED(struct kernel_ibrs_spec_ctrl, spec_ctrl_pcp);
+
+/*
+ * percpu_read() of a 64-bit variable isn't allowed in 32-bit build.
+ */
+#ifdef CONFIG_X86_64
+static __always_inline u64 spec_ctrl_pcp_read64(void)
+{
+	return percpu_read(spec_ctrl_pcp.entry64);
+}
+#else /* CONFIG_X86_32 */
+static __always_inline u64 spec_ctrl_pcp_read64(void)
+{
+	return (((u64)percpu_read(spec_ctrl_pcp.hi32)) << 32) |
+		percpu_read(spec_ctrl_pcp.entry);
+}
+#endif
 
 extern void x86_amd_ssbd_enable(void);
 
 /* The Intel SPEC CTRL MSR base value cache */
 extern u64 x86_spec_ctrl_base;
+extern u64 x86_spec_ctrl_mask;
 
 static inline u64 ssbd_tif_to_spec_ctrl(u64 tifn)
 {
-	BUILD_BUG_ON(TIF_SSBD < FEATURE_ENABLE_SSBD_SHIFT);
-	return (tifn & _TIF_SSBD) >> (TIF_SSBD - FEATURE_ENABLE_SSBD_SHIFT);
+	BUILD_BUG_ON(TIF_SSBD < SPEC_CTRL_SSBD_SHIFT);
+	return (tifn & _TIF_SSBD) >> (TIF_SSBD - SPEC_CTRL_SSBD_SHIFT);
+}
+
+static inline unsigned long ssbd_spec_ctrl_to_tif(u64 spec_ctrl)
+{
+	BUILD_BUG_ON(TIF_SSBD < SPEC_CTRL_SSBD_SHIFT);
+	return (spec_ctrl & SPEC_CTRL_SSBD) << (TIF_SSBD - SPEC_CTRL_SSBD_SHIFT);
 }
 
 static inline u64 ssbd_tif_to_amd_ls_cfg(u64 tifn)
@@ -257,7 +283,23 @@ static inline u64 ssbd_tif_to_amd_ls_cfg(u64 tifn)
 	return (tifn & _TIF_SSBD) ? x86_amd_ls_cfg_ssbd_mask : 0ULL;
 }
 
-extern void speculative_store_bypass_update(void);
+static inline bool ssb_is_user_settable(unsigned int mode)
+{
+	return mode >= SPEC_STORE_BYPASS_PRCTL;
+}
+
+#ifdef CONFIG_SMP
+extern void speculative_store_bypass_ht_init(void);
+#else
+static inline void speculative_store_bypass_ht_init(void) { }
+#endif
+
+extern void speculative_store_bypass_update(unsigned long tif);
+
+static inline void speculative_store_bypass_update_current(void)
+{
+	speculative_store_bypass_update(current_thread_info()->flags);
+}
 
 enum {
 	IBRS_DISABLED,
@@ -276,7 +318,7 @@ enum {
 
 static __always_inline int cpu_has_spec_ctrl(void)
 {
-	if (boot_cpu_has(X86_FEATURE_IBRS))
+	if (boot_cpu_has(X86_FEATURE_MSR_SPEC_CTRL))
 		return 1;
 
 	/* rmb to prevent wrong speculation for security */
@@ -307,69 +349,120 @@ static inline bool ibpb_enabled(void)
  * the guest has, while on VMEXIT we restore the kernel view. This
  * would be easier if SPEC_CTRL were architecturally maskable or
  * shadowable for guests but this is not (currently) the case.
- * Takes the guest view of SPEC_CTRL MSR as a parameter.
+ * Takes the guest view of SPEC_CTRL MSR as a parameter and also
+ * the guest's version of VIRT_SPEC_CTRL, if emulated.
  */
 
-/*
- * RHEL note: Upstream implements two new functions to handle this:
- *
- *	- extern void x86_set_guest_spec_ctrl(u64);
- *	- extern void x86_restore_kernel_spec_ctrl(u64);
- *
- * We already have the following two functions in RHEL so the
- * above are not included in the RHEL version of the backport.
- */
-
-static __always_inline void __spec_ctrl_vm_ibrs(u64 vcpu_ibrs, bool vmenter)
+static __always_inline void
+x86_virt_spec_ctrl(u64 guest_spec_ctrl, u64 guest_virt_spec_ctrl, bool setguest)
 {
-	u64 host_ibrs = 0, val;
-	bool write_spec_ctrl;
+	/*
+	 * The per-cpu spec_ctrl_pcp.entry64 will be the SPEC_CTRL MSR value
+	 * to be used in host kernel. This is performance critical code.
+	 * Preemption is disabled, so we cannot race with sysfs writes.
+	 */
+	u64 msr, guestval, hostval = spec_ctrl_pcp_read64();
+	struct thread_info *ti = current_thread_info();
+	bool write_msr;
 
-	if (ibrs_enabled_kernel()) {
+	if (boot_cpu_has(X86_FEATURE_MSR_SPEC_CTRL)) {
 		/*
-		 * If IBRS is enabled for host kernel mode or
-		 * host always mode we must set
-		 * FEATURE_ENABLE_IBRS at vmexit.
+		 *  Restrict guest_spec_ctrl to supported values. Clear the
+		 *  modifiable bits in the host base value and or the
+		 *  modifiable bits from the guest value.
 		 */
-		host_ibrs = FEATURE_ENABLE_IBRS;
+		guestval = hostval & ~x86_spec_ctrl_mask;
+		guestval |= guest_spec_ctrl & x86_spec_ctrl_mask;
+
+		/*
+		 * IBRS may have barrier semantics so it must be set
+		 * during vmexit (!setguest) if SPEC_CTRL MSR write is
+		 * enabled at kernel entry.
+		 */
+		write_msr = (!setguest &&
+			    (percpu_read(spec_ctrl_pcp.enabled) &
+					   SPEC_CTRL_PCP_IBRS_ENTRY)) ||
+			    (hostval != guestval);
+
+		if (unlikely(write_msr)) {
+			msr = setguest ? guestval : hostval;
+			native_wrmsrl(MSR_IA32_SPEC_CTRL, msr);
+		}
 	}
 
-	if (boot_cpu_data.x86_vendor == X86_VENDOR_INTEL)
-		host_ibrs |= ssbd_tif_to_spec_ctrl(current_thread_info()->flags);
-
-	val = vmenter ? vcpu_ibrs : host_ibrs;
-	write_spec_ctrl = (!vmenter && host_ibrs) || (vcpu_ibrs != host_ibrs);
+	/*
+	 * If SSBD is not handled in MSR_SPEC_CTRL on AMD, update
+	 * MSR_AMD64_L2_CFG or MSR_VIRT_SPEC_CTRL if supported.
+	 */
+	if (!static_cpu_has(X86_FEATURE_LS_CFG_SSBD) &&
+	    !static_cpu_has(X86_FEATURE_VIRT_SSBD))
+		goto ret;
 
 	/*
-	 * IBRS may have barrier semantics so it must be set to
-	 * satisfy those semantics during vmexit.
+	 * If the SSBD mode is not user settable, grab the SSBD bit
+	 * from x86_spec_ctrl_base. Otherwise, evaluate current's TIF_SSBD
+	 * thread flag.
 	 */
-	if (write_spec_ctrl)
-		native_wrmsrl(MSR_IA32_SPEC_CTRL, x86_spec_ctrl_base|val);
+	if (!ssb_is_user_settable(READ_ONCE(ssb_mode)))
+		hostval = x86_spec_ctrl_base & SPEC_CTRL_SSBD;
 	else
+		hostval = ssbd_tif_to_spec_ctrl(ti->flags);
+
+	/* Sanitize the guest value */
+	guestval = guest_virt_spec_ctrl & SPEC_CTRL_SSBD;
+
+	if (hostval != guestval) {
+		unsigned long tif;
+
+		tif = setguest ? ssbd_spec_ctrl_to_tif(guestval) :
+				 ssbd_spec_ctrl_to_tif(hostval);
+
+		speculative_store_bypass_update(tif);
+	}
+
+ret:
+	/* rmb not needed when entering guest */
+	if (!setguest)
 		/* rmb to prevent wrong speculation for security */
 		rmb();
 }
 
-static __always_inline void spec_ctrl_vmenter_ibrs(u64 vcpu_ibrs)
+/**
+ * x86_spec_ctrl_set_guest - Set speculation control registers for the guest
+ * @guest_spec_ctrl:		The guest content of MSR_SPEC_CTRL
+ * @guest_virt_spec_ctrl:	The guest controlled bits of MSR_VIRT_SPEC_CTRL
+ *				(may get translated to MSR_AMD64_LS_CFG bits)
+ *
+ * Avoids writing to the MSR if the content/bits are the same
+ */
+static __always_inline void x86_spec_ctrl_set_guest(u64 guest_spec_ctrl,
+						    u64 guest_virt_spec_ctrl)
 {
-	if (cpu_has_spec_ctrl())
-		__spec_ctrl_vm_ibrs(vcpu_ibrs, true);
+	x86_virt_spec_ctrl(guest_spec_ctrl, guest_virt_spec_ctrl, true);
 }
 
-static __always_inline void __spec_ctrl_vmexit_ibrs(u64 vcpu_ibrs)
+/**
+ * x86_spec_ctrl_restore_host - Restore host speculation control registers
+ * @guest_spec_ctrl:		The guest content of MSR_SPEC_CTRL
+ * @guest_virt_spec_ctrl:	The guest controlled bits of MSR_VIRT_SPEC_CTRL
+ *				(may get translated to MSR_AMD64_LS_CFG bits)
+ *
+ * Avoids writing to the MSR if the content/bits are the same
+ */
+static __always_inline void x86_spec_ctrl_restore_host(u64 guest_spec_ctrl,
+						       u64 guest_virt_spec_ctrl)
 {
-	__spec_ctrl_vm_ibrs(vcpu_ibrs, false);
+	x86_virt_spec_ctrl(guest_spec_ctrl, guest_virt_spec_ctrl, false);
 }
 
+/*
+ * The spec_ctrl_ibrs_off() is called before a cpu enters idle state and
+ * spec_ctrl_ibrs_off() is called after exit from an idle state.
+ */
 static __always_inline void spec_ctrl_ibrs_on(void)
 {
 	if (ibrs_enabled_kernel()) {
-		u64 spec_ctrl = x86_spec_ctrl_base|FEATURE_ENABLE_IBRS;
-
-		if (boot_cpu_data.x86_vendor == X86_VENDOR_INTEL)
-			spec_ctrl |= ssbd_tif_to_spec_ctrl(
-					current_thread_info()->flags);
+		u64 spec_ctrl = spec_ctrl_pcp_read64();
 
 		native_wrmsrl(MSR_IA32_SPEC_CTRL, spec_ctrl);
 	} else {
@@ -383,7 +476,8 @@ static __always_inline void spec_ctrl_ibrs_off(void)
 	if (ibrs_enabled_kernel()) {
 		u64 spec_ctrl = x86_spec_ctrl_base;
 
-		if (boot_cpu_data.x86_vendor == X86_VENDOR_INTEL)
+		/* SSBD controlled in MSR_SPEC_CTRL */
+		if (static_cpu_has(X86_FEATURE_SPEC_CTRL_SSBD))
 			spec_ctrl |= ssbd_tif_to_spec_ctrl(
 					current_thread_info()->flags);
 
@@ -409,11 +503,7 @@ static inline bool spec_ctrl_ibrs_on_firmware(void)
 	bool ibrs_on = false;
 
 	if (cpu_has_spec_ctrl() && retp_enabled() && !ibrs_enabled_kernel()) {
-		u64 spec_ctrl = x86_spec_ctrl_base|FEATURE_ENABLE_IBRS;
-
-		if (boot_cpu_data.x86_vendor == X86_VENDOR_INTEL)
-			spec_ctrl |= ssbd_tif_to_spec_ctrl(
-					current_thread_info()->flags);
+		u64 spec_ctrl = spec_ctrl_pcp_read64() | SPEC_CTRL_IBRS;
 
 		native_wrmsrl(MSR_IA32_SPEC_CTRL, spec_ctrl);
 		ibrs_on = true;
@@ -428,11 +518,7 @@ static inline bool spec_ctrl_ibrs_on_firmware(void)
 static inline void spec_ctrl_ibrs_off_firmware(bool ibrs_on)
 {
 	if (ibrs_on) {
-		u64 spec_ctrl = x86_spec_ctrl_base;
-
-		if (boot_cpu_data.x86_vendor == X86_VENDOR_INTEL)
-			spec_ctrl |= ssbd_tif_to_spec_ctrl(
-					current_thread_info()->flags);
+		u64 spec_ctrl = spec_ctrl_pcp_read64();
 
 		native_wrmsrl(MSR_IA32_SPEC_CTRL, spec_ctrl);
 	} else {
@@ -443,7 +529,7 @@ static inline void spec_ctrl_ibrs_off_firmware(bool ibrs_on)
 
 static inline void __spec_ctrl_ibpb(void)
 {
-	native_wrmsrl(MSR_IA32_PRED_CMD, FEATURE_SET_IBPB);
+	native_wrmsrl(MSR_IA32_PRED_CMD, PRED_CMD_IBPB);
 }
 
 static inline void spec_ctrl_ibpb(void)
@@ -515,8 +601,6 @@ static inline bool is_skylake_era(void)
 	}
 	return false;
 }
-
-extern enum ssb_mitigation ssb_mode;
 
 #endif /* __ASSEMBLY__ */
 #endif /* _ASM_X86_SPEC_CTRL_H */

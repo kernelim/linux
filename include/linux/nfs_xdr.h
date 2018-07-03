@@ -176,19 +176,19 @@ struct nfs4_channel_attrs {
 
 /* nfs41 sessions slot seqid */
 struct nfs4_slot {
+	struct nfs4_slot_table	*table;
+	u32			slot_nr;
 	u32		 	seq_nr;
 	unsigned int		interrupted : 1;
 };
 
 struct nfs4_sequence_args {
-	struct nfs4_session	*sa_session;
-	u8			sa_slotid;
+	struct nfs4_slot	*sa_slot;
 	u8			sa_cache_this : 1,
 				sa_privileged : 1;
 };
 
 struct nfs4_sequence_res {
-	struct nfs4_session	*sr_session;
 	struct nfs4_slot	*sr_slot;	/* slot used to send request */
 	int			sr_status;	/* sequence operation status */
 	unsigned long		sr_renewal_time;

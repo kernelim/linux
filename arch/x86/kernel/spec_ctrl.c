@@ -23,9 +23,12 @@ unsigned int ibrs_mode __read_mostly;
 EXPORT_SYMBOL(ibrs_mode);
 
 /*
- * SPEC_CTRL MSR bits being managed by the kernel.
+ * The vendor and possibly platform specific bits which can be modified in
+ * x86_spec_ctrl_base.
+ *
  */
-#define SPEC_CTRL_MANAGED_MASK	(FEATURE_ENABLE_IBRS|FEATURE_ENABLE_SSBD)
+u64 __read_mostly x86_spec_ctrl_mask = SPEC_CTRL_IBRS|SPEC_CTRL_SSBD;
+EXPORT_SYMBOL_GPL(x86_spec_ctrl_mask);
 
 /*
  * The Intel specification for the SPEC_CTRL MSR requires that we
@@ -68,18 +71,22 @@ void spec_ctrl_save_msr(void)
 
 	spec_ctrl_msr_write = false;
 
+	/* Allow STIBP in MSR_SPEC_CTRL if supported */
+	if (boot_cpu_has(X86_FEATURE_STIBP))
+		x86_spec_ctrl_mask |= SPEC_CTRL_STIBP;
+
 	/*
 	 * Read the SPEC_CTRL MSR to account for reserved bits which may have
 	 * unknown values. AMD64_LS_CFG MSR is cached in the early AMD
 	 * init code as it is not enumerated and depends on the family.
 	 */
-	if (boot_cpu_has(X86_FEATURE_IBRS) && !savecnt) {
+	if (boot_cpu_has(X86_FEATURE_MSR_SPEC_CTRL) && !savecnt) {
 		/*
 		 * This part is run only the first time it is called.
 		 */
 		rdmsrl(MSR_IA32_SPEC_CTRL, x86_spec_ctrl_base);
-		if (x86_spec_ctrl_base & SPEC_CTRL_MANAGED_MASK) {
-			x86_spec_ctrl_base &= ~SPEC_CTRL_MANAGED_MASK;
+		if (x86_spec_ctrl_base & x86_spec_ctrl_mask) {
+			x86_spec_ctrl_base &= ~x86_spec_ctrl_mask;
 			spec_ctrl_msr_write = true;
 			native_wrmsrl(MSR_IA32_SPEC_CTRL, x86_spec_ctrl_base);
 		}
@@ -101,23 +108,50 @@ void spec_ctrl_save_msr(void)
 }
 
 /*
- * RHEL note:
- * Upstream has implemented the following APIs for getting and setting
- * the SPEC_CTRL MSR value.
- *
- *  - void x86_spec_ctrl_set(u64 val)
- *  - u64 x86_spec_ctrl_get_default(void)
- *
- * We don't use it directly since we have a lot of IBRS management code
- * that touches SPEC_CTRL directly.
+ * This is called for setting the entry or exit values in the spec_ctrl_pcp
+ * structure when the SSDB is user settable. The state of the SSBD bit
+ * is maintained.
  */
+static void set_spec_ctrl_value(unsigned int *ptr, unsigned int value)
+{
+	unsigned int old, new, val;
+
+	old = READ_ONCE(*ptr);
+	for (;;) {
+		new = value | (old & SPEC_CTRL_SSBD);
+		val = cmpxchg(ptr, old, new);
+		if (val == old)
+			break;
+		old = val;
+	}
+}
 
 static void set_spec_ctrl_pcp(bool entry, bool exit)
 {
 	unsigned int enabled   = percpu_read(spec_ctrl_pcp.enabled);
 	unsigned int entry_val = percpu_read(spec_ctrl_pcp.entry);
 	unsigned int exit_val  = percpu_read(spec_ctrl_pcp.exit);
-	int cpu;
+	int cpu, redo_cnt;
+	/*
+	 * Set if the SSBD bit of the SPEC_CTRL MSR is user settable.
+	 */
+	bool ssb_user_settable = boot_cpu_has(X86_FEATURE_SPEC_CTRL_SSBD) &&
+				 ssb_is_user_settable(READ_ONCE(ssb_mode));
+
+	/*
+	 * Mask off the SSBD bit first if it is user settable.
+	 * Otherwise, make sure that the SSBD bit of the entry and exit
+	 * values match that of the x86_spec_ctrl_base.
+	 */
+	if (ssb_user_settable) {
+		entry_val &= ~SPEC_CTRL_SSBD;
+		exit_val  &= ~SPEC_CTRL_SSBD;
+	} else {
+		entry_val = (entry_val & ~SPEC_CTRL_SSBD) |
+			    (x86_spec_ctrl_base & SPEC_CTRL_SSBD);
+		exit_val  = (exit_val & ~SPEC_CTRL_SSBD) |
+			    (x86_spec_ctrl_base & SPEC_CTRL_SSBD);
+	}
 
 	/*
 	 * For ibrs_always, we only need to write the MSR at kernel entry
@@ -131,20 +165,63 @@ static void set_spec_ctrl_pcp(bool entry, bool exit)
 		enabled = 0;
 
 	if (entry)
-		entry_val |= FEATURE_ENABLE_IBRS;
+		entry_val |= SPEC_CTRL_IBRS;
 	else
-		entry_val &= ~FEATURE_ENABLE_IBRS;
+		entry_val &= ~SPEC_CTRL_IBRS;
 
 	if (exit)
-		exit_val |= FEATURE_ENABLE_IBRS;
+		exit_val |= SPEC_CTRL_IBRS;
 	else
-		exit_val &= ~FEATURE_ENABLE_IBRS;
+		exit_val &= ~SPEC_CTRL_IBRS;
 
 	for_each_possible_cpu(cpu) {
+		unsigned int *pentry = &per_cpu(spec_ctrl_pcp.entry, cpu);
+		unsigned int *pexit  = &per_cpu(spec_ctrl_pcp.exit, cpu);
+
 		WRITE_ONCE(per_cpu(spec_ctrl_pcp.enabled, cpu), enabled);
-		WRITE_ONCE(per_cpu(spec_ctrl_pcp.entry, cpu), entry_val);
-		WRITE_ONCE(per_cpu(spec_ctrl_pcp.exit, cpu), exit_val);
+		if (!ssb_user_settable) {
+			WRITE_ONCE(*pentry, entry_val);
+			WRITE_ONCE(*pexit, exit_val);
+		} else {
+			/*
+			 * Since the entry and exit fields can be modified
+			 * concurrently by spec_ctrl_set_ssbd() to set or
+			 * clear the SSBD bit, We need to maintain the
+			 * SSBD bit and use atomic instruction to do the
+			 * modification here.
+			 */
+			set_spec_ctrl_value(pentry, entry_val);
+			set_spec_ctrl_value(pexit, exit_val);
+		}
 	}
+
+	if (!ssb_user_settable)
+		return;
+
+	/*
+	 * Because of the non-atomic read-modify-write nature of
+	 * spec_ctrl_set_ssbd() function, the atomic entry/exit value changes
+	 * above may be lost. So we need to recheck it again and reapply the
+	 * change, if necessary.
+	 */
+recheck:
+	redo_cnt = 0;
+	smp_mb();
+	for_each_possible_cpu(cpu) {
+		unsigned int *pentry = &per_cpu(spec_ctrl_pcp.entry, cpu);
+		unsigned int *pexit  = &per_cpu(spec_ctrl_pcp.exit, cpu);
+
+		if ((READ_ONCE(*pentry) & ~SPEC_CTRL_SSBD) != entry_val) {
+			set_spec_ctrl_value(pentry, entry_val);
+			redo_cnt++;
+		}
+		if ((READ_ONCE(*pexit) & ~SPEC_CTRL_SSBD) != exit_val) {
+			set_spec_ctrl_value(pexit, exit_val);
+			redo_cnt++;
+		}
+	}
+	if (redo_cnt)
+		goto recheck;
 }
 
 /*
@@ -180,20 +257,13 @@ void clear_spec_ctrl_pcp(void)
 	ibrs_mode = IBRS_DISABLED;
 }
 
-static void spec_ctrl_sync_all_cpus(u32 msr_nr, u64 val)
+static void sync_all_cpus_spec_ctrl(void)
 {
 	int cpu;
 	get_online_cpus();
 	for_each_online_cpu(cpu)
-		wrmsrl_on_cpu(cpu, msr_nr, val);
+		wrmsrl_on_cpu(cpu, MSR_IA32_SPEC_CTRL, SPEC_CTRL_MSR_REFRESH);
 	put_online_cpus();
-}
-
-static void sync_all_cpus_ibrs(bool enable)
-{
-	spec_ctrl_sync_all_cpus(MSR_IA32_SPEC_CTRL,
-				 enable ? (x86_spec_ctrl_base | FEATURE_ENABLE_IBRS)
-					: x86_spec_ctrl_base);
 }
 
 static void __sync_this_cpu_ibp(void *data)
@@ -361,25 +431,16 @@ static void spec_ctrl_reinit_all_cpus(void)
 		return;
 	}
 
-	if (ibrs_mode == IBRS_ENABLED_ALWAYS)
-		sync_all_cpus_ibrs(true);
-	else if (ibrs_mode == IBRS_DISABLED)
-		sync_all_cpus_ibrs(false);
+	if ((ibrs_mode == IBRS_ENABLED_ALWAYS) ||
+	    (ibrs_mode == IBRS_DISABLED) || spec_ctrl_msr_write) {
+		sync_all_cpus_spec_ctrl();
+		spec_ctrl_msr_write = false;
+	}
 }
 
 void spec_ctrl_init(void)
 {
 	spec_ctrl_print_features();
-
-	/*
-	 * If the x86_spec_ctrl_base is modified, propagate it to the
-	 * percpu spec_ctrl structure as well as forcing MSR write.
-	 */
-	if (x86_spec_ctrl_base) {
-		wrmsrl(MSR_IA32_SPEC_CTRL, x86_spec_ctrl_base);
-		spec_ctrl_save_msr();
-		spec_ctrl_msr_write = true;
-	}
 }
 
 void spec_ctrl_rescan_cpuid(void)
@@ -395,8 +456,6 @@ void spec_ctrl_rescan_cpuid(void)
 	mutex_lock(&spec_ctrl_mutex);
 	if (boot_cpu_data.x86_vendor == X86_VENDOR_INTEL ||
 	    boot_cpu_data.x86_vendor == X86_VENDOR_AMD) {
-		bool amd_ssbd = boot_cpu_has(X86_FEATURE_AMD_SSBD);
-
 		old_ibrs = boot_cpu_has(X86_FEATURE_IBRS);
 		old_ibpb = boot_cpu_has(X86_FEATURE_IBPB);
 		old_ssbd = boot_cpu_has(X86_FEATURE_SSBD);
@@ -404,18 +463,6 @@ void spec_ctrl_rescan_cpuid(void)
 
 		/* detect spec ctrl related cpuid additions */
 		get_cpu_cap(&boot_cpu_data);
-
-		/*
-		 * For AMD family 0x15-0x17, the SSBD bit is specially
-		 * hard-coded. Hence, a call to get_cpu_cap() will clear
-		 * the SSBD bit as it is part of an architectural leaf.
-		 * The Linux internal AMD_SSBD bit may not be cleared.
-		 * We need to detect this situation and correct it.
-		 */
-		if (amd_ssbd && !boot_cpu_has(X86_FEATURE_SSBD)) {
-			setup_force_cpu_cap(X86_FEATURE_SSBD);
-			setup_force_cpu_cap(X86_FEATURE_AMD_SSBD);
-		}
 
 		/* if there were no spec ctrl related changes, we're done */
 		ssbd_changed = (old_ssbd != boot_cpu_has(X86_FEATURE_SSBD));
@@ -460,7 +507,8 @@ void spec_ctrl_rescan_cpuid(void)
 				 * reset the right percpu values.
 				 */
 				spec_ctrl_save_msr();
-				sync_all_cpus_ibrs(false);
+				spec_ctrl_msr_write = true;
+
 			}
 		}
 
@@ -484,6 +532,29 @@ done:
 	mutex_unlock(&spec_ctrl_mutex);
 }
 EXPORT_SYMBOL_GPL(spec_ctrl_rescan_cpuid);
+
+/*
+ * Change the SSBD bit of the spec_ctrl structure of the current CPU.
+ * The caller has to make sure that preemption is disabled so that
+ * no CPU change is possible during the call.
+ *
+ * Since spec_ctrl_set_ssbd() is in the fast path, we are not doing
+ * any atomic update to the entry and exit values. The percpu logical
+ * operation used here is a single non-atomic read-modify-write instruction.
+ * As a result, we need to do more checking at the slowpath set_spec_ctrl_pcp()
+ * function to make sure that any changes in the ibrs_enabled value get
+ * reflected correctly in all the spec_ctrl_pcp structures.
+ */
+void spec_ctrl_set_ssbd(bool ssbd_on)
+{
+	if (ssbd_on) {
+		percpu_or(spec_ctrl_pcp.entry, SPEC_CTRL_SSBD);
+		percpu_or(spec_ctrl_pcp.exit,  SPEC_CTRL_SSBD);
+	} else {
+		percpu_and(spec_ctrl_pcp.entry, ~SPEC_CTRL_SSBD);
+		percpu_and(spec_ctrl_pcp.exit,  ~SPEC_CTRL_SSBD);
+	}
+}
 
 static ssize_t __enabled_read(struct file *file, char __user *user_buf,
 			      size_t count, loff_t *ppos, unsigned int *field)
@@ -556,14 +627,14 @@ static ssize_t ibrs_enabled_write(struct file *file,
 
 	if (enable == IBRS_DISABLED) {
 		clear_spec_ctrl_pcp();
-		sync_all_cpus_ibrs(false);
+		sync_all_cpus_spec_ctrl();
 		spectre_v2_retpoline_reset();
 	} else if (enable == IBRS_ENABLED) {
 		set_spec_ctrl_pcp_ibrs();
 		spectre_v2_set_mitigation(SPECTRE_V2_IBRS);
 	} else if (enable == IBRS_ENABLED_ALWAYS) {
 		set_spec_ctrl_pcp_ibrs_always();
-		sync_all_cpus_ibrs(true);
+		sync_all_cpus_spec_ctrl();
 		spectre_v2_set_mitigation(SPECTRE_V2_IBRS_ALWAYS);
 	} else {
 		WARN_ON(enable != IBRS_ENABLED_USER);
@@ -615,6 +686,151 @@ static const struct file_operations fops_retp_enabled = {
 	.llseek = default_llseek,
 };
 
+/*
+ * The ssb_mode variable controls the state of the Speculative Store Bypass
+ * Disable (SSBD) mitigation.
+ *  0 - SSBD is disabled (speculative store bypass is enabled).
+ *  1 - SSBD is enabled  (speculative store bypass is disabled).
+ *  2 - SSBD is controlled by prctl only.
+ *  3 - SSBD is controlled by both prctl and seccomp.
+ */
+static ssize_t ssbd_enabled_read(struct file *file, char __user *user_buf,
+				 size_t count, loff_t *ppos)
+{
+	unsigned int enabled = ssb_mode;
+	return __enabled_read(file, user_buf, count, ppos, &enabled);
+}
+
+static void ssbd_spec_ctrl_write(unsigned int mode)
+{
+	/*
+	 * We have to update the x86_spec_ctrl_base first and then all the
+	 * SPEC_CTRL MSRs. We also need to update the ssb_mode prior to
+	 * that if the new mode isn't user settable to make sure that
+	 * the existing SSBD bit in the spec_ctrl_pcp won't carry over.
+	 */
+	if (!ssb_is_user_settable(mode))
+		set_mb(ssb_mode, mode);
+
+	switch (ibrs_mode) {
+		case IBRS_DISABLED:
+			clear_spec_ctrl_pcp();
+			break;
+		case IBRS_ENABLED:
+			set_spec_ctrl_pcp_ibrs();
+			break;
+		case IBRS_ENABLED_ALWAYS:
+			set_spec_ctrl_pcp_ibrs_always();
+			break;
+		case IBRS_ENABLED_USER:
+			set_spec_ctrl_pcp_ibrs_user();
+			break;
+	}
+	sync_all_cpus_spec_ctrl();
+}
+
+static void ssbd_amd_write(unsigned int mode)
+{
+	u64 msrval;
+	int msr, cpu;
+
+	if (boot_cpu_has(X86_FEATURE_VIRT_SSBD)) {
+		msr    = MSR_AMD64_VIRT_SPEC_CTRL;
+		msrval = (mode == SPEC_STORE_BYPASS_DISABLE)
+		       ? SPEC_CTRL_SSBD : 0;
+	} else {
+		msr    = MSR_AMD64_LS_CFG;
+		msrval = x86_amd_ls_cfg_base;
+		if (mode == SPEC_STORE_BYPASS_DISABLE)
+			msrval |= x86_amd_ls_cfg_ssbd_mask;
+	}
+
+	/*
+	 * If the new mode isn't settable, we have to update the
+	 * ssb_mode first.
+	 */
+	if (!ssb_is_user_settable(mode))
+		set_mb(ssb_mode, mode);
+
+	/*
+	 * If the old mode isn't user settable, it is assumed that no
+	 * existing task will have the TIF_SSBD bit set. So we can safely
+	 * overwrite the MSRs.
+	 */
+	get_online_cpus();
+	for_each_online_cpu(cpu)
+		wrmsrl_on_cpu(cpu, msr, msrval);
+	put_online_cpus();
+}
+
+static ssize_t ssbd_enabled_write(struct file *file,
+				  const char __user *user_buf,
+				  size_t count, loff_t *ppos)
+{
+	char buf[32];
+	ssize_t len;
+	unsigned int mode;
+	const unsigned int mode_max = IS_ENABLED(CONFIG_SECCOMP)
+				    ? SPEC_STORE_BYPASS_SECCOMP
+				    : SPEC_STORE_BYPASS_PRCTL;
+
+	if (!boot_cpu_has_bug(X86_BUG_SPEC_STORE_BYPASS) ||
+	    !boot_cpu_has(X86_FEATURE_SSBD))
+		return -ENODEV;
+
+	len = min(count, sizeof(buf) - 1);
+	if (copy_from_user(buf, user_buf, len))
+		return -EFAULT;
+
+	buf[len] = '\0';
+	if (kstrtouint(buf, 0, &mode))
+		return -EINVAL;
+
+	if (mode > mode_max)
+		return -EINVAL;
+
+	mutex_lock(&spec_ctrl_mutex);
+
+	if (mode == ssb_mode)
+		goto out_unlock;
+
+	/* Set/clear the SSBD bit in x86_spec_ctrl_base accordingly */
+	if (mode == SPEC_STORE_BYPASS_DISABLE)
+		x86_spec_ctrl_base |= SPEC_CTRL_SSBD;
+	else
+		x86_spec_ctrl_base &= ~SPEC_CTRL_SSBD;
+
+	/*
+	 * If both the old and new SSB modes are user settable or it is
+	 * transitioning from SPEC_STORE_BYPASS_NONE to a user settable
+	 * mode, we don't need to touch the spec_ctrl_pcp structure or the
+	 * AMD LS_CFG MSRs at all and so the change can be made directly.
+	 */
+	if (ssb_is_user_settable(mode) &&
+	   (ssb_is_user_settable(ssb_mode) ||
+	   (ssb_mode == SPEC_STORE_BYPASS_NONE)))
+		goto out;
+
+	if (boot_cpu_has(X86_FEATURE_SPEC_CTRL_SSBD))
+		ssbd_spec_ctrl_write(mode);
+	else if (boot_cpu_has(X86_FEATURE_LS_CFG_SSBD) ||
+		 boot_cpu_has(X86_FEATURE_VIRT_SSBD))
+		ssbd_amd_write(mode);
+
+out:
+	WRITE_ONCE(ssb_mode, mode);
+	ssb_print_mitigation();
+out_unlock:
+	mutex_unlock(&spec_ctrl_mutex);
+	return count;
+}
+
+static const struct file_operations fops_ssbd_enabled = {
+	.read = ssbd_enabled_read,
+	.write = ssbd_enabled_write,
+	.llseek = default_llseek,
+};
+
 static int __init debugfs_spec_ctrl(void)
 {
 	debugfs_create_file("ibrs_enabled", S_IRUSR | S_IWUSR,
@@ -623,7 +839,8 @@ static int __init debugfs_spec_ctrl(void)
 			    arch_debugfs_dir, NULL, &fops_ibpb_enabled);
 	debugfs_create_file("retp_enabled", S_IRUSR,
 			    arch_debugfs_dir, NULL, &fops_retp_enabled);
-
+	debugfs_create_file("ssbd_enabled", S_IRUSR,
+			    arch_debugfs_dir, NULL, &fops_ssbd_enabled);
 	return 0;
 }
 late_initcall(debugfs_spec_ctrl);

@@ -940,7 +940,7 @@ static int kimage_load_segment(struct kimage *image,
 struct kimage *kexec_image;
 struct kimage *kexec_crash_image;
 
-static DEFINE_MUTEX(kexec_mutex);
+DEFINE_MUTEX(kexec_mutex);
 
 SYSCALL_DEFINE4(kexec_load, unsigned long, entry, unsigned long, nr_segments,
 		struct kexec_segment __user *, segments, unsigned long, flags)

@@ -42,6 +42,7 @@
 #include <asm/system.h>
 #include <asm/processor.h>
 #include <asm/i387.h>
+#include <asm/fpu-internal.h>
 #include <asm/mmu_context.h>
 #include <asm/prctl.h>
 #include <asm/desc.h>
@@ -281,6 +282,8 @@ int copy_thread(unsigned long clone_flags, unsigned long sp,
 
 	set_tsk_thread_flag(p, TIF_FORK);
 
+	p->fpu_counter = 0;
+
 	savesegment(gs, p->thread.gsindex);
 	p->thread.gs = p->thread.gsindex ? 0 : me->thread.gs;
 	savesegment(fs, p->thread.fsindex);
@@ -336,10 +339,6 @@ start_thread(struct pt_regs *regs, unsigned long new_ip, unsigned long new_sp)
 	regs->ss		= __USER_DS;
 	regs->flags		= 0x200;
 	set_fs(USER_DS);
-	/*
-	 * Free the old FP and other extended state
-	 */
-	free_thread_xstate(current);
 }
 EXPORT_SYMBOL_GPL(start_thread);
 
@@ -361,18 +360,9 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	int cpu = smp_processor_id();
 	struct tss_struct *tss = &per_cpu(init_tss, cpu);
 	unsigned fsindex, gsindex;
-	bool preload_fpu;
+	fpu_switch_t fpu;
 
-	/*
-	 * If the task has used fpu the last 5 timeslices, just do a full
-	 * restore of the math state immediately to avoid the trap; the
-	 * chances of needing FPU soon are obviously high now
-	 */
-	preload_fpu = tsk_used_math(next_p) && next_p->fpu_counter > 5;
-
-	/* we're going to use this soon, after a few expensive things */
-	if (preload_fpu)
-		prefetch(next->xstate);
+	fpu = switch_fpu_prepare(prev_p, next_p, cpu);
 
 #ifdef CONFIG_X86_32
 	/* Reload esp0 and ss1. */
@@ -392,13 +382,6 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	 * reference the correct GDT entries.
 	 */
 	load_TLS(next, cpu);
-
-	/* Must be after DS reload */
-	unlazy_fpu(prev_p);
-
-	/* Make sure cpu is ready for new context */
-	if (preload_fpu)
-		clts();
 
 	/*
 	 * Leave lazy mode, flushing any hypercalls made here.  This
@@ -497,6 +480,8 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 		wrmsrl(MSR_KERNEL_GS_BASE, next->gs);
 	prev->gsindex = gsindex;
 
+	switch_fpu_finish(next_p, fpu);
+
 	/*
 	 * Switch the PDA and FPU contexts.
 	 */
@@ -519,12 +504,6 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 		     task_thread_info(prev_p)->flags & _TIF_WORK_CTXSW_PREV))
 		__switch_to_xtra(prev_p, next_p, tss);
 
-	/*
-	 * Preload the FPU context, now that we've determined that the
-	 * task is likely to be using it. 
-	 */
-	if (preload_fpu)
-		__math_state_restore();
 	return prev_p;
 }
 

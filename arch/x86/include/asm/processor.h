@@ -210,6 +210,7 @@ extern void cpu_detect(struct cpuinfo_x86 *c);
 extern struct pt_regs *idle_regs(struct pt_regs *);
 
 extern void early_cpu_init(void);
+extern void eager_fpu_not_needed(void);
 extern void identify_boot_cpu(void);
 extern void identify_secondary_cpu(struct cpuinfo_x86 *);
 extern void print_cpu_info(struct cpuinfo_x86 *);
@@ -446,7 +447,7 @@ union thread_xstate {
 };
 
 struct fpu {
-       union thread_xstate *state;
+	union thread_xstate *state;
 };
 
 #ifdef CONFIG_X86_64

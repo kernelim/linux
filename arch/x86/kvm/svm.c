@@ -127,6 +127,12 @@ struct vcpu_svm {
 	u64 host_gs_base;
 
 	u64 spec_ctrl;
+	/*
+	 * Contains guest-controlled bits of VIRT_SPEC_CTRL, which will be
+	 * translated into the appropriate L2_CFG bits on the host to
+	 * perform speculative control.
+	 */
+	u64 virt_spec_ctrl;
 
 	u32 *msrpm;
 
@@ -907,6 +913,7 @@ static int svm_vcpu_reset(struct kvm_vcpu *vcpu)
 
 	init_vmcb(svm);
 
+	svm->virt_spec_ctrl = 0;
 	if (!kvm_vcpu_is_bsp(vcpu)) {
 		kvm_rip_write(vcpu, 0);
 		svm->vmcb->save.cs.base = svm->vcpu.arch.sipi_vector << 12;
@@ -1511,8 +1518,10 @@ static int ac_interception(struct vcpu_svm *svm)
 	return 1;
 }
 
-static int nm_interception(struct vcpu_svm *svm)
+static void svm_fpu_activate(struct kvm_vcpu *vcpu)
 {
+	struct vcpu_svm *svm = to_svm(vcpu);
+
 	svm->vmcb->control.intercept_exceptions &= ~(1 << NM_VECTOR);
 	if (!kvm_read_cr0_bits(&svm->vcpu, X86_CR0_TS))
 		svm->vmcb->save.cr0 &= ~X86_CR0_TS;
@@ -1521,6 +1530,11 @@ static int nm_interception(struct vcpu_svm *svm)
 	svm->vcpu.fpu_active = 1;
 	mark_dirty(svm->vmcb, VMCB_INTERCEPTS);
 	mark_dirty(svm->vmcb, VMCB_CR);
+}
+
+static int nm_interception(struct vcpu_svm *svm)
+{
+	svm_fpu_activate(&svm->vcpu);
 
 	return 1;
 }
@@ -2558,6 +2572,15 @@ static int cr8_write_interception(struct vcpu_svm *svm)
 	return 0;
 }
 
+static bool guest_cpuid_has_virt_ssbd(struct kvm_vcpu *vcpu)
+{
+	struct kvm_cpuid_entry2 *best;
+
+	/* AMD-defined CPU features, CPUID level 0x80000008 (EBX), word 13 */
+	best = kvm_find_cpuid_entry(vcpu, 0x80000008, 0);
+	return best && (best->ebx & bit(X86_FEATURE_VIRT_SSBD));
+}
+
 static int svm_get_msr(struct kvm_vcpu *vcpu, unsigned ecx, u64 *data)
 {
 	struct vcpu_svm *svm = to_svm(vcpu);
@@ -2626,6 +2649,12 @@ static int svm_get_msr(struct kvm_vcpu *vcpu, unsigned ecx, u64 *data)
 		break;
 	case MSR_IA32_SPEC_CTRL:
 		*data = svm->spec_ctrl;
+		break;
+	case MSR_AMD64_VIRT_SPEC_CTRL:
+		if (!guest_cpuid_has_virt_ssbd(vcpu))
+			return 1;
+
+		*data = svm->virt_spec_ctrl;
 		break;
 	case MSR_IA32_UCODE_REV:
 		*data = 0x01000065;
@@ -2717,6 +2746,16 @@ static int svm_set_msr(struct kvm_vcpu *vcpu, struct msr_data *msr)
 		break;
 	case MSR_IA32_SPEC_CTRL:
 		svm->spec_ctrl = data;
+		break;
+	case MSR_AMD64_VIRT_SPEC_CTRL:
+		if (!msr->host_initiated &&
+		    !guest_cpuid_has_virt_ssbd(vcpu))
+			return 1;
+
+		if (data & ~SPEC_CTRL_SSBD)
+			return 1;
+
+		svm->virt_spec_ctrl = data;
 		break;
 	default:
 		return kvm_set_msr_common(vcpu, msr);
@@ -3195,7 +3234,7 @@ static void svm_vcpu_run(struct kvm_vcpu *vcpu)
 
 	local_irq_enable();
 
-	spec_ctrl_vmenter_ibrs(svm->spec_ctrl);
+	x86_spec_ctrl_set_guest(svm->spec_ctrl, svm->virt_spec_ctrl);
 
 	asm volatile (
 		"push %%"R"bp; \n\t"
@@ -3302,10 +3341,10 @@ static void svm_vcpu_run(struct kvm_vcpu *vcpu)
 #endif
 	kvm_load_ldt(ldt_selector);
 
-	if (cpu_has_spec_ctrl()) {
+	if (cpu_has_spec_ctrl())
 		rdmsrl(MSR_IA32_SPEC_CTRL, svm->spec_ctrl);
-		__spec_ctrl_vmexit_ibrs(svm->spec_ctrl);
-	}
+
+	x86_spec_ctrl_restore_host(svm->spec_ctrl, svm->virt_spec_ctrl);
 
 	/* Eliminate branch target predictions from guest mode */
 	fill_RSB();
@@ -3444,6 +3483,11 @@ static void svm_sched_in(struct kvm_vcpu *vcpu, int cpu)
 {
 }
 
+static bool svm_has_emulated_msr(int index)
+{
+	return true;
+}
+
 static struct kvm_x86_ops svm_x86_ops = {
 	.cpu_has_kvm_support = has_svm,
 	.disabled_by_bios = is_disabled,
@@ -3485,6 +3529,7 @@ static struct kvm_x86_ops svm_x86_ops = {
 	.cache_reg = svm_cache_reg,
 	.get_rflags = svm_get_rflags,
 	.set_rflags = svm_set_rflags,
+	.fpu_activate = svm_fpu_activate,
 	.fpu_deactivate = svm_fpu_deactivate,
 
 	.tlb_flush = svm_flush_tlb,
@@ -3521,6 +3566,8 @@ static struct kvm_x86_ops svm_x86_ops = {
 	.compute_tsc_offset = svm_compute_tsc_offset,
 
 	.sched_in = svm_sched_in,
+
+	.has_emulated_msr = svm_has_emulated_msr,
 };
 
 static int __init svm_init(void)

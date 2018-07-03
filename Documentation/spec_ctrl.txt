@@ -132,3 +132,64 @@ retp_enabled 1: Retpolines are enabled in the kernel, which replace all
 		The state of retpolines can only be changed by
 		rebooting the system with a different spectre_v2=
 		command line option.
+
+= Speculation Control (Speculative Store Bypass Disable) =
+
+== How to detect if the CPU supports Speculative Store Bypass Disable ==
+
+When the first CPU boots or after a microcode update, if the CPU has
+speculative store bypass disable capabilities, a message like the
+following line is printed:
+
+	Speculative Store Bypass: Mitigation: <description>
+
+The <description> is the type of mitigation being activated. It depends
+on the boot command line options used. See the next section for additional
+detail.
+
+If speculative store bypass disable is missing this line is printed:
+
+	Speculative Store Bypass: Vulnerable
+
+If the CPU does not need speculative store bypass disable mitigation,
+the following line is printed:
+
+	Speculative Store Bypass: Not affected
+
+== How to tune Speculation Control ==
+
+The current speculative store bypass disable mitigation status can be
+determined by reading the following file:
+
+  /sys/devices/system/cpu/vulnerabilities/spec_store_bypass
+
+That file provides a basic status -- "Vulnerable" or "Mitigation" --
+along with a short description of the mitigation in use (or lack
+thereof).
+
+Speculative store bypass disable may be tuned from the kernel command
+line with the spec_store_bypass_disable= parameter.  For the available
+options, see Documentation/kernel-parameters.txt.
+
+It may also be tuned from debugfs.  There is only one control knob:
+
+  /sys/kernel/debug/x86/ssbd_enabled
+
+If the current CPU microcode does not support speculative store bypass
+disable or the CPU doesn't need the mitigation, ssbd_enabled is set to
+0 and cannot be changed.
+
+If speculative store bypass disable is supported, the following values
+can be written to the file to disable it or select different mitigations.
+
+ssbd_enabled 0: Disabled
+
+ssbd_enabled 1: Globally enable speculative store bypass disable for all
+		the tasks in the system.
+
+ssbd_enabled 2: Speculative store bypass is enabled by default.
+		Individual task can optionally disable speculative
+		store bypass by using the new PR_SET_SPECULATION_CTRL
+		command option with the prctl(2) system call.  See
+		Documentation/userspace-api/spec_ctrl.txt for more
+		information of what options are available.

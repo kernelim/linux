@@ -146,6 +146,7 @@ struct inode *gfs2_inode_lookup(struct super_block *sb, unsigned int type,
 		error = gfs2_glock_get(sdp, no_addr, &gfs2_inode_glops, CREATE, &ip->i_gl);
 		if (unlikely(error))
 			goto fail;
+		flush_delayed_work(&ip->i_gl->gl_work);
 
 		error = gfs2_glock_get(sdp, no_addr, &gfs2_iopen_glops, CREATE, &io_gl);
 		if (unlikely(error))
@@ -171,7 +172,7 @@ struct inode *gfs2_inode_lookup(struct super_block *sb, unsigned int type,
 					goto fail_put;
 			}
 		}
-		flush_delayed_work(&ip->i_gl->gl_work);
+
 		glock_set_object(ip->i_gl, ip);
 
 		set_bit(GIF_INVALID, &ip->i_flags);

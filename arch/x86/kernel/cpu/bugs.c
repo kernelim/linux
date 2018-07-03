@@ -194,13 +194,20 @@ void __init check_bugs(void)
 
 #ifdef CONFIG_X86_32
 	check_config();
-	check_fpu();
 	check_hlt();
 	check_popad();
 	init_utsname()->machine[1] =
 		'0' + (boot_cpu_data.x86 > 6 ? 6 : boot_cpu_data.x86);
 #endif
 	alternative_instructions();
+
+#ifdef CONFIG_X86_32
+	/*
+	 * kernel_fpu_begin/end() in check_fpu() relies on the patched
+	 * alternative instructions.
+	 */
+	check_fpu();
+#endif
 
 #ifdef CONFIG_X86_64
 	/*
@@ -220,7 +227,9 @@ void x86_amd_ssbd_enable(void)
 {
 	u64 msrval = x86_amd_ls_cfg_base | x86_amd_ls_cfg_ssbd_mask;
 
-	if (boot_cpu_has(X86_FEATURE_AMD_SSBD))
+	if (boot_cpu_has(X86_FEATURE_VIRT_SSBD))
+		wrmsrl(MSR_AMD64_VIRT_SPEC_CTRL, SPEC_CTRL_SSBD);
+	else if (boot_cpu_has(X86_FEATURE_LS_CFG_SSBD))
 		wrmsrl(MSR_AMD64_LS_CFG, msrval);
 }
 
@@ -480,7 +489,8 @@ static void __init spectre_v2_select_mitigation(void)
 
 #define pr_fmt(fmt)    "Speculative Store Bypass: " fmt
 
-enum ssb_mitigation ssb_mode = SPEC_STORE_BYPASS_NONE;
+enum ssb_mitigation ssb_mode __read_mostly = SPEC_STORE_BYPASS_NONE;
+EXPORT_SYMBOL_GPL(ssb_mode);
 
 /* The kernel command line selection */
 enum ssb_mitigation_cmd {
@@ -488,12 +498,14 @@ enum ssb_mitigation_cmd {
 	SPEC_STORE_BYPASS_CMD_AUTO,
 	SPEC_STORE_BYPASS_CMD_ON,
 	SPEC_STORE_BYPASS_CMD_PRCTL,
+	SPEC_STORE_BYPASS_CMD_SECCOMP,
 };
 
 static const char *ssb_strings[] = {
 	[SPEC_STORE_BYPASS_NONE]	= "Vulnerable",
 	[SPEC_STORE_BYPASS_DISABLE]	= "Mitigation: Speculative Store Bypass disabled",
-	[SPEC_STORE_BYPASS_PRCTL]	= "Mitigation: Speculative Store Bypass disabled via prctl"
+	[SPEC_STORE_BYPASS_PRCTL]	= "Mitigation: Speculative Store Bypass disabled via prctl",
+	[SPEC_STORE_BYPASS_SECCOMP]	= "Mitigation: Speculative Store Bypass disabled via prctl and seccomp",
 };
 
 static enum ssb_mitigation_cmd  ssb_cmd = SPEC_STORE_BYPASS_CMD_AUTO;
@@ -518,6 +530,8 @@ static int __init set_ssbd_disable(char *arg)
 		ssb_cmd = SPEC_STORE_BYPASS_CMD_AUTO;
 	} else if (!strcmp(arg, "prctl")) {
 		ssb_cmd = SPEC_STORE_BYPASS_CMD_PRCTL;
+	} else if (!strcmp(arg, "seccomp")) {
+		ssb_cmd = SPEC_STORE_BYPASS_CMD_SECCOMP;
 	}
 	return 0;
 }
@@ -538,8 +552,15 @@ static enum ssb_mitigation __ssb_select_mitigation(void)
 
 	switch (cmd) {
 	case SPEC_STORE_BYPASS_CMD_AUTO:
-		/* Choose prctl as the default mode */
-		mode = SPEC_STORE_BYPASS_PRCTL;
+	case SPEC_STORE_BYPASS_CMD_SECCOMP:
+		/*
+		 * Choose prctl+seccomp as the default mode if seccomp is
+		 * enabled.
+		 */
+		if (IS_ENABLED(CONFIG_SECCOMP))
+			mode = SPEC_STORE_BYPASS_SECCOMP;
+		else
+			mode = SPEC_STORE_BYPASS_PRCTL;
 		break;
 	case SPEC_STORE_BYPASS_CMD_ON:
 		mode = SPEC_STORE_BYPASS_DISABLE;
@@ -560,57 +581,108 @@ static enum ssb_mitigation __ssb_select_mitigation(void)
 	if (mode == SPEC_STORE_BYPASS_DISABLE) {
 		setup_force_cpu_cap(X86_FEATURE_SPEC_STORE_BYPASS_DISABLE);
 		/*
-		 * Intel uses the SPEC CTRL MSR Bit(2) for this, while AMD uses
-		 * a completely different MSR and bit dependent on family.
+		 * Intel uses the SPEC CTRL MSR Bit(2) for this, while AMD may
+		 * use a completely different MSR and bit dependent on family.
 		 */
-		switch (boot_cpu_data.x86_vendor) {
-		case X86_VENDOR_INTEL:
-			x86_spec_ctrl_base |= FEATURE_ENABLE_SSBD;
-			break;
-		case X86_VENDOR_AMD:
+		/*
+		 * Always set the SSBD bit for both AMD & Intel.
+		 */
+		x86_spec_ctrl_base |= SPEC_CTRL_SSBD;
+		if (!boot_cpu_has(X86_FEATURE_MSR_SPEC_CTRL))
 			x86_amd_ssbd_enable();
-			break;
+		else {
+			x86_spec_ctrl_mask |= SPEC_CTRL_SSBD;
+			wrmsrl(MSR_IA32_SPEC_CTRL, x86_spec_ctrl_base);
 		}
 	}
 
 	return mode;
 }
 
-void ssb_select_mitigation()
+void ssb_print_mitigation()
+{
+	pr_info("%s\n", ssb_strings[ssb_mode]);
+}
+
+void ssb_select_mitigation(void)
 {
 	ssb_mode = __ssb_select_mitigation();
 
 	if (boot_cpu_has_bug(X86_BUG_SPEC_STORE_BYPASS))
-		pr_info("%s\n", ssb_strings[ssb_mode]);
+		ssb_print_mitigation();
 }
 
 #undef pr_fmt
+#define pr_fmt(fmt)     "Speculation prctl: " fmt
 
-static int ssb_prctl_set(unsigned long ctrl)
+static int ssb_prctl_set(struct task_struct *task, unsigned long ctrl)
 {
-	bool ssbd = !!test_tsk_thread_flag(current, TIF_SSBD);
+	bool update;
 
-	if (ssb_mode != SPEC_STORE_BYPASS_PRCTL)
+	if (ssb_mode != SPEC_STORE_BYPASS_PRCTL &&
+	    ssb_mode != SPEC_STORE_BYPASS_SECCOMP)
 		return -ENXIO;
 
-	if (ctrl == PR_SPEC_ENABLE)
-		clear_tsk_thread_flag(current, TIF_SSBD);
-	else
-		set_tsk_thread_flag(current, TIF_SSBD);
+	switch (ctrl) {
+	case PR_SPEC_ENABLE:
+		/* If speculation is force disabled, enable is not allowed */
+		if (task_spec_ssb_force_disable(task))
+			return -EPERM;
+		task_clear_spec_ssb_disable(task);
+		update = test_and_clear_tsk_thread_flag(task, TIF_SSBD);
+		break;
+	case PR_SPEC_DISABLE:
+		task_set_spec_ssb_disable(task);
+		update = !test_and_set_tsk_thread_flag(task, TIF_SSBD);
+		break;
+	case PR_SPEC_FORCE_DISABLE:
+		task_set_spec_ssb_disable(task);
+		task_set_spec_ssb_force_disable(task);
+		update = !test_and_set_tsk_thread_flag(task, TIF_SSBD);
+		break;
+	default:
+		return -ERANGE;
+	}
 
-	if (ssbd != !!test_tsk_thread_flag(current, TIF_SSBD))
-		speculative_store_bypass_update();
+	/*
+	 * If being set on non-current task, delay setting the CPU
+	 * mitigation until it is next scheduled.
+	 */
+	if (task == current && update)
+		speculative_store_bypass_update_current();
 
 	return 0;
 }
 
-static int ssb_prctl_get(void)
+int arch_prctl_spec_ctrl_set(struct task_struct *task, unsigned long which,
+			     unsigned long ctrl)
+{
+	switch (which) {
+	case PR_SPEC_STORE_BYPASS:
+		return ssb_prctl_set(task, ctrl);
+	default:
+		return -ENODEV;
+	}
+}
+
+#ifdef CONFIG_SECCOMP
+void arch_seccomp_spec_mitigate(struct task_struct *task)
+{
+	if (ssb_mode == SPEC_STORE_BYPASS_SECCOMP)
+		ssb_prctl_set(task, PR_SPEC_FORCE_DISABLE);
+}
+#endif
+
+static int ssb_prctl_get(struct task_struct *task)
 {
 	switch (ssb_mode) {
 	case SPEC_STORE_BYPASS_DISABLE:
 		return PR_SPEC_DISABLE;
+	case SPEC_STORE_BYPASS_SECCOMP:
 	case SPEC_STORE_BYPASS_PRCTL:
-		if (test_tsk_thread_flag(current, TIF_SSBD))
+		if (task_spec_ssb_force_disable(task))
+			return PR_SPEC_PRCTL | PR_SPEC_FORCE_DISABLE;
+		if (task_spec_ssb_disable(task))
 			return PR_SPEC_PRCTL | PR_SPEC_DISABLE;
 		return PR_SPEC_PRCTL | PR_SPEC_ENABLE;
 	default:
@@ -620,24 +692,11 @@ static int ssb_prctl_get(void)
 	}
 }
 
-int arch_prctl_spec_ctrl_set(unsigned long which, unsigned long ctrl)
-{
-	if (ctrl != PR_SPEC_ENABLE && ctrl != PR_SPEC_DISABLE)
-		return -ERANGE;
-
-	switch (which) {
-	case PR_SPEC_STORE_BYPASS:
-		return ssb_prctl_set(ctrl);
-	default:
-		return -ENODEV;
-	}
-}
-
-int arch_prctl_spec_ctrl_get(unsigned long which)
+int arch_prctl_spec_ctrl_get(struct task_struct *task, unsigned long which)
 {
 	switch (which) {
 	case PR_SPEC_STORE_BYPASS:
-		return ssb_prctl_get();
+		return ssb_prctl_get(task);
 	default:
 		return -ENODEV;
 	}
@@ -671,7 +730,8 @@ ssize_t cpu_show_spectre_v2(struct device *dev,
 {
 	if (!boot_cpu_has_bug(X86_BUG_SPECTRE_V2))
 		return sprintf(buf, "Not affected\n");
-	return sprintf(buf, "%s\n", spectre_v2_strings[spectre_v2_enabled]);
+	return sprintf(buf, "%s%s\n", spectre_v2_strings[spectre_v2_enabled],
+		       ibpb_enabled() ?  ", IBPB" : "");
 }
 
 ssize_t cpu_show_spec_store_bypass(struct device *dev,

@@ -31,8 +31,14 @@
 
 /* Intel MSRs. Some also available on other CPUs */
 
-#define MSR_IA32_SPEC_CTRL		0x00000048
-#define MSR_IA32_PRED_CMD		0x00000049
+#define MSR_IA32_SPEC_CTRL		0x00000048 /* Speculation Control */
+#define SPEC_CTRL_IBRS			(1 << 0)   /* Indirect Branch Restricted Speculation */
+#define SPEC_CTRL_STIBP 		(1 << 1)   /* Single Thread Indirect Branch Predictors */
+#define SPEC_CTRL_SSBD_SHIFT		2	   /* Speculative Store Bypass Disable bit */
+#define SPEC_CTRL_SSBD			(1 << SPEC_CTRL_SSBD_SHIFT)   /* Speculative Store Bypass Disable */
+
+#define MSR_IA32_PRED_CMD		0x00000049 /* Prediction Command */
+#define PRED_CMD_IBPB			(1 << 0)   /* Indirect Branch Prediction Barrier */
 
 #define MSR_IA32_PERFCTR0		0x000000c1
 #define MSR_IA32_PERFCTR1		0x000000c2
@@ -49,6 +55,16 @@
 
 #define MSR_PLATFORM_INFO		0x000000ce
 #define MSR_MTRRcap			0x000000fe
+
+#define MSR_IA32_ARCH_CAPABILITIES	0x0000010a
+#define ARCH_CAP_RDCL_NO		(1 << 0)   /* Not susceptible to Meltdown */
+#define ARCH_CAP_IBRS_ALL		(1 << 1)   /* Enhanced IBRS support */
+#define ARCH_CAP_SSB_NO 		(1 << 4)   /*
+						    * Not susceptible to Speculative Store Bypass
+						    * attack, so no Reduced Data Speculation control
+						    * required.
+						    */
+
 #define MSR_IA32_BBL_CR_CTL		0x00000119
 #define MSR_IA32_BBL_CR_CTL3		0x0000011e
 
@@ -251,6 +267,7 @@
 #define MSR_AMD64_TSC_RATIO		0xc0000104
 #define MSR_AMD64_NB_CFG		0xc001001f
 #define MSR_AMD64_PATCH_LOADER		0xc0010020
+#define MSR_AMD64_VIRT_SPEC_CTRL	0xc001011f
 #define MSR_AMD64_DC_CFG		0xc0011022
 #define MSR_AMD64_OSVW_ID_LENGTH	0xc0010140
 #define MSR_AMD64_OSVW_STATUS		0xc0010141
@@ -368,10 +385,6 @@
 #define FEATURE_CONTROL_LOCKED				(1<<0)
 #define FEATURE_CONTROL_VMXON_ENABLED_INSIDE_SMX	(1<<1)
 #define FEATURE_CONTROL_VMXON_ENABLED_OUTSIDE_SMX	(1<<2)
-#define FEATURE_ENABLE_IBRS				(1<<0)
-#define FEATURE_SET_IBPB				(1<<0)
-#define FEATURE_ENABLE_SSBD_SHIFT	2
-#define FEATURE_ENABLE_SSBD		(1<<FEATURE_ENABLE_SSBD_SHIFT)  /* Speculative Store Bypass Disable */
 
 #define MSR_IA32_APICBASE		0x0000001b
 #define MSR_IA32_APICBASE_BSP		(1<<8)

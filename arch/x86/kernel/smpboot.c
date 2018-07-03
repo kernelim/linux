@@ -235,6 +235,8 @@ static void __cpuinit smp_callin(void)
 		      __func__, cpuid);
 	}
 
+	speculative_store_bypass_ht_init();
+
 	/*
 	 * the boot CPU has finished the init stage and is spinning
 	 * on callin_map until we finish. We are free to set up this
@@ -1214,6 +1216,8 @@ void __init native_smp_prepare_cpus(unsigned int max_cpus)
 		uv_system_init();
 
 	set_mtrr_aps_delayed_init();
+
+	speculative_store_bypass_ht_init();
 out:
 	preempt_enable();
 }
