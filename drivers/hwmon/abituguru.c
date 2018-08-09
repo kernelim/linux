@@ -33,6 +33,7 @@
 #include <linux/hwmon-sysfs.h>
 #include <linux/dmi.h>
 #include <linux/io.h>
+#include <linux/nospec.h>
 
 /* Banks */
 #define ABIT_UGURU_ALARM_BANK			0x20 /* 1x 3 bytes */
@@ -998,7 +999,7 @@ static ssize_t store_pwm_sensor(struct device *dev, struct device_attribute
 	mutex_lock(&data->update_lock);
 	if (val < data->bank1_sensors[ABIT_UGURU_TEMP_SENSOR]) {
 		u8 orig_val = data->pwm_settings[attr->index][0];
-		u8 address = data->bank1_address[ABIT_UGURU_TEMP_SENSOR][val];
+		u8 address = data->bank1_address[ABIT_UGURU_TEMP_SENSOR][array_index_nospec(val, ABIT_UGURU_MAX_BANK1_SENSORS)];
 		data->pwm_settings[attr->index][0] &= 0xF0;
 		data->pwm_settings[attr->index][0] |= address;
 		if (data->pwm_settings[attr->index][0] != orig_val) {

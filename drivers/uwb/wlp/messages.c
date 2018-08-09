@@ -24,6 +24,7 @@
  */
 
 #include <linux/wlp.h>
+#include <linux/nospec.h>
 
 #include "wlp-internal.h"
 
@@ -52,6 +53,8 @@ static const char *wlp_assoc_frame_str(unsigned id)
 {
 	if (id >= ARRAY_SIZE(__wlp_assoc_frame))
 		return "unknown association frame";
+	id = array_index_nospec(id, ARRAY_SIZE(__wlp_assoc_frame));
+
 	return __wlp_assoc_frame[id];
 }
 

@@ -31,6 +31,7 @@
 #include <linux/if_vlan.h>
 #include <linux/prefetch.h>
 #include <linux/random.h>
+#include <linux/nospec.h>
 #if defined(CONFIG_VLAN_8021Q) || defined(CONFIG_VLAN_8021Q_MODULE)
 #define BCM_VLAN 1
 #endif
@@ -382,6 +383,7 @@ static int cnic_iscsi_nl_msg_recv(struct cnic_dev *dev, u32 msg_type,
 		l5_cid = (u32) path_resp->handle;
 		if (l5_cid >= MAX_CM_SK_TBL_SZ)
 			break;
+		l5_cid = array_index_nospec(l5_cid, MAX_CM_SK_TBL_SZ);
 
 		if (!rcu_access_pointer(cp->ulp_ops[CNIC_ULP_L4])) {
 			rc = -ENODEV;

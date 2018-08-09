@@ -37,6 +37,7 @@
 #include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/ratelimit.h>
+#include <linux/nospec.h>
 #include "md.h"
 #include "raid1.h"
 #include "bitmap.h"
@@ -2903,6 +2904,8 @@ static struct r1conf *setup_conf(struct mddev *mddev)
 
 	conf->start_next_window = MaxSector;
 	conf->current_window_requests = conf->next_window_requests = 0;
+
+	barrier_nospec();
 
 	err = -EIO;
 	for (i = 0; i < conf->raid_disks * 2; i++) {

@@ -36,6 +36,7 @@
 #include <linux/kernel.h>
 #include <linux/blkdev.h>
 #include <linux/spinlock.h>
+#include <linux/nospec.h>
 #include <scsi/scsi.h>
 #include <scsi/scsi_host.h>
 #include <scsi/scsi_cmnd.h>
@@ -2745,11 +2746,15 @@ static unsigned int atapi_xlat(struct ata_queued_cmd *qc)
 static struct ata_device *ata_find_dev(struct ata_port *ap, int devno)
 {
 	if (!sata_pmp_attached(ap)) {
-		if (likely(devno < ata_link_max_devices(&ap->link)))
+		if (likely(devno < ata_link_max_devices(&ap->link))) {
+			devno = array_index_nospec(devno, ata_link_max_devices(&ap->link));
 			return &ap->link.device[devno];
+		}
 	} else {
-		if (likely(devno < ap->nr_pmp_links))
+		if (likely(devno < ap->nr_pmp_links)) {
+			devno = array_index_nospec(devno, ap->nr_pmp_links);
 			return &ap->pmp_link[devno].device[0];
+		}
 	}
 
 	return NULL;

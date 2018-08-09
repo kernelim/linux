@@ -20,6 +20,7 @@
 #include <linux/netdevice.h>
 #include <linux/net_tstamp.h>
 #include <linux/bitops.h>
+#include <linux/nospec.h>
 #include <asm/uaccess.h>
 
 #ifndef __GENKSYMS__
@@ -999,6 +1000,8 @@ static int ethtool_get_any_eeprom(struct net_device *dev, void __user *useraddr,
 	if (!data)
 		return -ENOMEM;
 
+	barrier_nospec();
+
 	bytes_remaining = eeprom.len;
 	while (bytes_remaining > 0) {
 		eeprom.len = min(bytes_remaining, (u32)PAGE_SIZE);
@@ -1061,6 +1064,8 @@ static int ethtool_set_eeprom(struct net_device *dev, void __user *useraddr)
 	data = kmalloc(PAGE_SIZE, GFP_USER);
 	if (!data)
 		return -ENOMEM;
+
+	barrier_nospec();
 
 	bytes_remaining = eeprom.len;
 	while (bytes_remaining > 0) {

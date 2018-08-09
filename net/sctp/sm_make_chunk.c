@@ -1518,10 +1518,13 @@ void sctp_chunk_assign_ssn(struct sctp_chunk *chunk)
 		if (lchunk->chunk_hdr->flags & SCTP_DATA_UNORDERED) {
 			ssn = 0;
 		} else {
-			if (lchunk->chunk_hdr->flags & SCTP_DATA_LAST_FRAG)
+			if (lchunk->chunk_hdr->flags & SCTP_DATA_LAST_FRAG) {
+				barrier_nospec();
 				ssn = sctp_ssn_next(stream, sid);
-			else
+			} else {
+				barrier_nospec();
 				ssn = sctp_ssn_peek(stream, sid);
+			}
 		}
 
 		lchunk->subh.data_hdr->ssn = htons(ssn);

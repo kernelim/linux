@@ -11,6 +11,7 @@
 #include <linux/audit.h>
 #include <linux/swap.h>
 #include <linux/vmalloc.h>
+#include <linux/nospec.h>
 
 #include <asm/uaccess.h>
 #include <linux/kmemtrace.h>
@@ -200,7 +201,7 @@ EXPORT_SYMBOL(kzfree);
 char *strndup_user(const char __user *s, long n)
 {
 	char *p;
-	long length;
+	long length, idx;
 
 	length = strnlen_user(s, n);
 
@@ -220,7 +221,8 @@ char *strndup_user(const char __user *s, long n)
 		return ERR_PTR(-EFAULT);
 	}
 
-	p[length - 1] = '\0';
+	idx = array_index_nospec(length - 1, n);
+	p[idx] = '\0';
 
 	return p;
 }

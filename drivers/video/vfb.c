@@ -20,6 +20,7 @@
 #include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
+#include <linux/nospec.h>
 
 #include <linux/fb.h>
 #include <linux/init.h>
@@ -360,6 +361,7 @@ static int vfb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
 
 		if (regno >= 16)
 			return 1;
+		regno = array_index_nospec(regno, 16);
 
 		v = (red << info->var.red.offset) |
 		    (green << info->var.green.offset) |

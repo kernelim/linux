@@ -35,6 +35,7 @@
 #include <linux/netdevice.h>
 #include <linux/firmware.h>
 #include <linux/etherdevice.h>
+#include <linux/nospec.h>
 #include <asm/unaligned.h>
 #include <net/mac80211.h>
 
@@ -1323,7 +1324,7 @@ il3945_hw_reg_fix_power_idx(int idx)
 		return 0;
 	if (idx >= IL_MAX_GAIN_ENTRIES)
 		return IL_MAX_GAIN_ENTRIES - 1;
-	return (u8) idx;
+	return (u8) array_index_nospec(idx, IL_MAX_GAIN_ENTRIES);
 }
 
 /* Kick off thermal recalibration check every 60 seconds */

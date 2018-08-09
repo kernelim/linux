@@ -35,6 +35,7 @@
 #include <linux/hid.h>
 #include <linux/hiddev.h>
 #include <linux/compat.h>
+#include <linux/nospec.h>
 #include "usbhid.h"
 
 #ifdef CONFIG_USB_DYNAMIC_MINORS
@@ -83,6 +84,7 @@ hiddev_lookup_report(struct hid_device *hid, struct hiddev_report_info *rinfo)
 	struct hid_report_enum *report_enum;
 	struct hid_report *report;
 	struct list_head *list;
+	u32 report_id;
 
 	if (rinfo->report_type < HID_REPORT_TYPE_MIN ||
 	    rinfo->report_type > HID_REPORT_TYPE_MAX)
@@ -121,7 +123,8 @@ hiddev_lookup_report(struct hid_device *hid, struct hiddev_report_info *rinfo)
 		return NULL;
 	}
 
-	return report_enum->report_id_hash[rinfo->report_id];
+	report_id = array_index_nospec(rinfo->report_id, HID_MAX_IDS);
+	return report_enum->report_id_hash[report_id];
 }
 
 /*
@@ -446,6 +449,7 @@ static noinline int hiddev_ioctl_usage(struct hiddev *hiddev, unsigned int cmd, 
 	struct hid_report *report;
 	struct hid_field *field;
 	int i;
+	u32 idx;
 
 	uref_multi = kmalloc(sizeof(struct hiddev_usage_ref_multi), GFP_KERNEL);
 	if (!uref_multi)
@@ -470,12 +474,14 @@ static noinline int hiddev_ioctl_usage(struct hiddev *hiddev, unsigned int cmd, 
 
 		if (uref->field_index >= report->maxfield)
 			goto inval;
+		idx = array_index_nospec(uref->field_index, report->maxfield);
 
-		field = report->field[uref->field_index];
+		field = report->field[idx];
 		if (uref->usage_index >= field->maxusage)
 			goto inval;
+		idx = array_index_nospec(uref->usage_index, field->maxusage);
 
-		uref->usage_code = field->usage[uref->usage_index].hid;
+		uref->usage_code = field->usage[idx].hid;
 
 		if (copy_to_user(user_arg, uref, sizeof(*uref)))
 			goto fault;
@@ -500,8 +506,10 @@ static noinline int hiddev_ioctl_usage(struct hiddev *hiddev, unsigned int cmd, 
 
 			if (uref->field_index >= report->maxfield)
 				goto inval;
+			idx = array_index_nospec(uref->field_index,
+						 report->maxfield);
 
-			field = report->field[uref->field_index];
+			field = report->field[idx];
 
 			if (cmd == HIDIOCGCOLLECTIONINDEX) {
 				if (uref->usage_index >= field->maxusage)
@@ -517,32 +525,44 @@ static noinline int hiddev_ioctl_usage(struct hiddev *hiddev, unsigned int cmd, 
 
 		switch (cmd) {
 		case HIDIOCGUSAGE:
-			uref->value = field->value[uref->usage_index];
+			idx = array_index_nospec(uref->usage_index,
+						 field->report_count);
+			uref->value = field->value[idx];
 			if (copy_to_user(user_arg, uref, sizeof(*uref)))
 				goto fault;
 			goto goodreturn;
 
 		case HIDIOCSUSAGE:
-			field->value[uref->usage_index] = uref->value;
+			idx = array_index_nospec(uref->usage_index,
+						 field->report_count);
+			field->value[idx] = uref->value;
 			goto goodreturn;
 
 		case HIDIOCGCOLLECTIONINDEX:
-			i = field->usage[uref->usage_index].collection_index;
+			idx = array_index_nospec(uref->usage_index,
+						 field->maxusage);
+			i = field->usage[idx].collection_index;
 			unlock_kernel();
 			kfree(uref_multi);
 			return i;
 		case HIDIOCGUSAGES:
-			for (i = 0; i < uref_multi->num_values; i++)
+			for (i = 0; i < uref_multi->num_values; i++) {
+				idx = array_index_nospec(uref->usage_index + i,
+							 field->report_count);
 				uref_multi->values[i] =
-				    field->value[uref->usage_index + i];
+				    field->value[idx];
+			}
 			if (copy_to_user(user_arg, uref_multi,
 					 sizeof(*uref_multi)))
 				goto fault;
 			goto goodreturn;
 		case HIDIOCSUSAGES:
-			for (i = 0; i < uref_multi->num_values; i++)
-				field->value[uref->usage_index + i] =
+			for (i = 0; i < uref_multi->num_values; i++) {
+				idx = array_index_nospec(uref->usage_index + i,
+							 field->report_count);
+				field->value[idx] =
 				    uref_multi->values[i];
+			}
 			goto goodreturn;
 		}
 
@@ -602,6 +622,7 @@ static long hiddev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	struct hid_field *field;
 	void __user *user_arg = (void __user *)arg;
 	int i, r = -EINVAL;
+	u32 idx;
 
 	/* Called without BKL by compat methods so no BKL taken */
 
@@ -755,8 +776,9 @@ static long hiddev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 		if (finfo.field_index >= report->maxfield)
 			break;
+		idx = array_index_nospec(finfo.field_index, report->maxfield);
 
-		field = report->field[finfo.field_index];
+		field = report->field[idx];
 		memset(&finfo, 0, sizeof(finfo));
 		finfo.report_type = rinfo.report_type;
 		finfo.report_id = rinfo.report_id;
@@ -795,10 +817,11 @@ static long hiddev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 		if (cinfo.index >= hid->maxcollection)
 			break;
+		idx = array_index_nospec(cinfo.index, hid->maxcollection);
 
-		cinfo.type = hid->collection[cinfo.index].type;
-		cinfo.usage = hid->collection[cinfo.index].usage;
-		cinfo.level = hid->collection[cinfo.index].level;
+		cinfo.type = hid->collection[idx].type;
+		cinfo.usage = hid->collection[idx].usage;
+		cinfo.level = hid->collection[idx].level;
 
 		r = copy_to_user(user_arg, &cinfo, sizeof(cinfo)) ?
 			-EFAULT : 0;

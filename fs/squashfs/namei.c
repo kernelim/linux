@@ -58,6 +58,7 @@
 #include <linux/string.h>
 #include <linux/dcache.h>
 #include <linux/zlib.h>
+#include <linux/nospec.h>
 
 #include "squashfs_fs.h"
 #include "squashfs_fs_sb.h"
@@ -157,6 +158,7 @@ static struct dentry *squashfs_lookup(struct inode *dir, struct dentry *dentry,
 		err = -ENAMETOOLONG;
 		goto failed;
 	}
+	len = array_index_nospec(len, SQUASHFS_NAME_LEN + 1);
 
 	length = get_dir_index_using_name(dir->i_sb, &block, &offset,
 				squashfs_i(dir)->dir_idx_start,

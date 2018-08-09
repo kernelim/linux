@@ -17,6 +17,7 @@
 #include <linux/init.h>
 #include <linux/mtd/compatmac.h>
 #include <linux/proc_fs.h>
+#include <linux/nospec.h>
 
 #include <linux/mtd/mtd.h>
 #include "internal.h"
@@ -448,6 +449,7 @@ struct mtd_info *get_mtd_device(struct mtd_info *mtd, int num)
 			if (mtd_table[i] == mtd)
 				ret = mtd_table[i];
 	} else if (num < MAX_MTD_DEVICES) {
+		num = array_index_nospec(num, MAX_MTD_DEVICES);
 		ret = mtd_table[num];
 		if (mtd && mtd != ret)
 			ret = NULL;

@@ -38,6 +38,7 @@
 #include <linux/vmalloc.h>
 #include <linux/module.h>
 #include <linux/reservation.h>
+#include <linux/nospec.h>
 
 void ttm_bo_free_old_node(struct ttm_buffer_object *bo)
 {
@@ -251,9 +252,11 @@ static int ttm_copy_io_ttm_page(struct ttm_tt *ttm, void *src,
 				unsigned long page,
 				pgprot_t prot)
 {
-	struct page *d = ttm->pages[page];
+	struct page *d;
 	void *dst;
 
+	page = array_index_nospec(page, ttm->num_pages);
+	d = ttm->pages[page];
 	if (!d)
 		return -ENOMEM;
 
@@ -288,9 +291,11 @@ static int ttm_copy_ttm_io_page(struct ttm_tt *ttm, void *dst,
 				unsigned long page,
 				pgprot_t prot)
 {
-	struct page *s = ttm->pages[page];
+	struct page *s;
 	void *src;
 
+	page = array_index_nospec(page, ttm->num_pages);
+	s = ttm->pages[page];
 	if (!s)
 		return -ENOMEM;
 

@@ -9,6 +9,7 @@
 #include <linux/types.h>
 #include <linux/bitops.h>
 #include <linux/ieee80211.h>
+#include <linux/nospec.h>
 #include <asm/unaligned.h>
 
 #include "michael.h"
@@ -66,6 +67,7 @@ void michael_mic(const u8 *key, struct ieee80211_hdr *hdr,
 	blocks = data_len / 4;
 	left = data_len % 4;
 
+	barrier_nospec();
 	for (block = 0; block < blocks; block++)
 		michael_block(&mctx, get_unaligned_le32(&data[block * 4]));
 

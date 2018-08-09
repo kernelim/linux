@@ -25,6 +25,7 @@
 #include <linux/slab.h>
 #include <linux/kthread.h>
 #include <linux/cgroup.h>
+#include <linux/nospec.h>
 
 #include <linux/net.h>
 #include <linux/if_packet.h>
@@ -630,6 +631,7 @@ static long vhost_set_vring(struct vhost_dev *d, int ioctl, void __user *argp)
 		return r;
 	if (idx >= d->nvqs)
 		return -ENOBUFS;
+	idx = array_index_nospec(idx, d->nvqs);
 
 	vq = d->vqs + idx;
 

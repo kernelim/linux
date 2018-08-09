@@ -13,6 +13,7 @@
 #include <linux/wait.h>
 #include <linux/slab.h>
 #include <linux/ieee80211.h>
+#include <linux/nospec.h>
 #include <net/cfg80211.h>
 #include <asm/unaligned.h>
 
@@ -1319,6 +1320,7 @@ static int lbs_cfg_connect(struct wiphy *wiphy, struct net_device *dev,
 	struct cfg80211_bss *bss = NULL;
 	int ret = 0;
 	u8 preamble = RADIO_PREAMBLE_SHORT;
+	u8 key_idx;
 
 	if (dev == priv->mesh_dev)
 		return -EOPNOTSUPP;
@@ -1378,9 +1380,10 @@ static int lbs_cfg_connect(struct wiphy *wiphy, struct net_device *dev,
 	case WLAN_CIPHER_SUITE_WEP40:
 	case WLAN_CIPHER_SUITE_WEP104:
 		/* Store provided WEP keys in priv-> */
-		priv->wep_tx_key = sme->key_idx;
-		priv->wep_key_len[sme->key_idx] = sme->key_len;
-		memcpy(priv->wep_key[sme->key_idx], sme->key, sme->key_len);
+		key_idx = array_index_nospec(sme->key_idx, 4);
+		priv->wep_tx_key = key_idx;
+		priv->wep_key_len[key_idx] = sme->key_len;
+		memcpy(priv->wep_key[key_idx], sme->key, sme->key_len);
 		/* Set WEP keys and WEP mode */
 		lbs_set_wep_keys(priv);
 		priv->mac_control |= CMD_ACT_MAC_WEP_ENABLE;

@@ -39,6 +39,7 @@
 #include <linux/slab.h>
 #include <linux/ratelimit.h>
 #include <linux/mount.h>
+#include <linux/nospec.h>
 #include "compat.h"
 #include "ctree.h"
 #include "disk-io.h"
@@ -4759,7 +4760,10 @@ fail:
 
 static inline u8 btrfs_inode_type(struct inode *inode)
 {
-	return btrfs_type_by_mode[(inode->i_mode & S_IFMT) >> S_SHIFT];
+	u32 idx = array_index_nospec((inode->i_mode & S_IFMT) >> S_SHIFT,
+				     S_IFMT >> S_SHIFT);
+
+	return btrfs_type_by_mode[idx];
 }
 
 /*

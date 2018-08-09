@@ -235,6 +235,7 @@ static int ehci_bus_suspend (struct usb_hcd *hcd)
 	return 0;
 }
 
+#include <linux/nospec.h>
 
 /* caller has locked the root hub, and should reset/reinit on error */
 static int ehci_bus_resume (struct usb_hcd *hcd)
@@ -432,6 +433,8 @@ static ssize_t store_companion(struct device *dev,
 	if (portnum <= 0 || portnum > HCS_N_PORTS(ehci->hcs_params))
 		return -ENOENT;
 	portnum--;
+	portnum = array_index_nospec(portnum, HCS_N_PORTS(ehci->hcs_params));
+
 	if (new_owner)
 		set_bit(portnum, &ehci->companion_ports);
 	else

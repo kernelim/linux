@@ -23,6 +23,7 @@
 #include <linux/kthread.h>
 #include <linux/mutex.h>
 #include <linux/freezer.h>
+#include <linux/nospec.h>
 
 #include <asm/uaccess.h>
 #include <asm/byteorder.h>
@@ -1719,6 +1720,8 @@ hub_ioctl(struct usb_interface *intf, unsigned int code, void *user_data)
 static int find_port_owner(struct usb_device *hdev, unsigned port1,
 		void ***ppowner)
 {
+	unsigned idx;
+
 	if (hdev->state == USB_STATE_NOTATTACHED)
 		return -ENODEV;
 	if (port1 == 0 || port1 > hdev->maxchild)
@@ -1727,7 +1730,8 @@ static int find_port_owner(struct usb_device *hdev, unsigned port1,
 	/* This assumes that devices not managed by the hub driver
 	 * will always have maxchild equal to 0.
 	 */
-	*ppowner = &(hdev_to_hub(hdev)->port_owners[port1 - 1]);
+	idx = array_index_nospec(port1 - 1, hdev->maxchild);
+	*ppowner = &(hdev_to_hub(hdev)->port_owners[idx]);
 	return 0;
 }
 

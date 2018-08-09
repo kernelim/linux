@@ -27,6 +27,7 @@
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
+#include <linux/nospec.h>
 
 #include <linux/usb.h>
 #include <linux/mm.h>
@@ -1157,8 +1158,12 @@ static int stk_vidioc_g_parm(struct file *filp,
 static int stk_vidioc_enum_framesizes(struct file *filp,
 		void *priv, struct v4l2_frmsizeenum *frms)
 {
+	u32 index;
+
 	if (frms->index >= ARRAY_SIZE(stk_sizes))
 		return -EINVAL;
+	index = array_index_nospec(frms->index, ARRAY_SIZE(stk_sizes));
+
 	switch (frms->pixel_format) {
 	case V4L2_PIX_FMT_RGB565:
 	case V4L2_PIX_FMT_RGB565X:
@@ -1166,8 +1171,8 @@ static int stk_vidioc_enum_framesizes(struct file *filp,
 	case V4L2_PIX_FMT_YUYV:
 	case V4L2_PIX_FMT_SBGGR8:
 		frms->type = V4L2_FRMSIZE_TYPE_DISCRETE;
-		frms->discrete.width = stk_sizes[frms->index].w;
-		frms->discrete.height = stk_sizes[frms->index].h;
+		frms->discrete.width = stk_sizes[index].w;
+		frms->discrete.height = stk_sizes[index].h;
 		return 0;
 	default: return -EINVAL;
 	}

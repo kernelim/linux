@@ -28,6 +28,7 @@
 #include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/vmalloc.h>
+#include <linux/nospec.h>
 
 #include "e1000.h"
 
@@ -568,11 +569,14 @@ static int e1000_set_eeprom(struct net_device *netdev,
 		ret_val = e1000_read_nvm(hw, first_word, 1, &eeprom_buff[0]);
 		ptr++;
 	}
-	if (((eeprom->offset + eeprom->len) & 1) && (!ret_val))
+	if (((eeprom->offset + eeprom->len) & 1) && (!ret_val)) {
 		/* need read/modify/write of last changed EEPROM word */
 		/* only the first byte of the word is being modified */
+		unsigned int idx = array_index_nospec(last_word - first_word,
+						      max_len);
 		ret_val = e1000_read_nvm(hw, last_word, 1,
-				  &eeprom_buff[last_word - first_word]);
+					 &eeprom_buff[idx]);
+	}
 
 	if (ret_val)
 		goto out;

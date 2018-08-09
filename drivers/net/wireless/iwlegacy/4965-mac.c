@@ -43,6 +43,7 @@
 #include <linux/firmware.h>
 #include <linux/etherdevice.h>
 #include <linux/if_arp.h>
+#include <linux/nospec.h>
 
 #include <net/mac80211.h>
 
@@ -1468,8 +1469,10 @@ static const u8 tid_to_ac[] = {
 static inline int
 il4965_get_ac_from_tid(u16 tid)
 {
-	if (likely(tid < ARRAY_SIZE(tid_to_ac)))
+	if (likely(tid < ARRAY_SIZE(tid_to_ac))) {
+		tid = array_index_nospec(tid, ARRAY_SIZE(tid_to_ac));
 		return tid_to_ac[tid];
+	}
 
 	/* no support for TIDs 8-15 yet */
 	return -EINVAL;
@@ -1485,8 +1488,10 @@ il4965_get_fifo_from_tid(u16 tid)
 		IL_TX_FIFO_BK,
 	};
 
-	if (likely(tid < ARRAY_SIZE(tid_to_ac)))
+	if (likely(tid < ARRAY_SIZE(tid_to_ac))) {
+		tid = array_index_nospec(tid, ARRAY_SIZE(tid_to_ac));
 		return ac_to_fifo[tid_to_ac[tid]];
+	}
 
 	/* no support for TIDs 8-15 yet */
 	return -EINVAL;
@@ -2254,6 +2259,7 @@ il4965_tx_agg_start(struct il_priv *il, struct ieee80211_vif *vif,
 	}
 	if (unlikely(tid >= MAX_TID_COUNT))
 		return -EINVAL;
+	tid = array_index_nospec(tid, MAX_TID_COUNT);
 
 	if (il->stations[sta_id].tid[tid].agg.state != IL_AGG_OFF) {
 		IL_ERR("Start AGG when state is not IL_AGG_OFF !\n");
@@ -2348,6 +2354,7 @@ il4965_tx_agg_stop(struct il_priv *il, struct ieee80211_vif *vif,
 
 	spin_lock_irqsave(&il->sta_lock, flags);
 
+	tid = array_index_nospec(tid, MAX_TID_COUNT);
 	tid_data = &il->stations[sta_id].tid[tid];
 	ssn = (tid_data->seq_number & IEEE80211_SCTL_SEQ) >> 4;
 	txq_id = tid_data->agg.txq_id;

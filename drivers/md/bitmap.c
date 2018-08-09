@@ -27,6 +27,7 @@
 #include <linux/mount.h>
 #include <linux/buffer_head.h>
 #include <linux/seq_file.h>
+#include <linux/nospec.h>
 #include "md.h"
 #include "bitmap.h"
 
@@ -45,25 +46,26 @@ static inline char *bmname(struct bitmap *bitmap)
  * if we find our page, we increment the page's refcount so that it stays
  * allocated while we're using it
  */
-static int bitmap_checkpage(struct bitmap_counts *bitmap,
-			    unsigned long page, int create)
+static int bitmap_checkpage_nospec(struct bitmap_counts *bitmap,
+			    unsigned long *page, int create)
 __releases(bitmap->lock)
 __acquires(bitmap->lock)
 {
 	unsigned char *mappage;
 
-	if (page >= bitmap->pages) {
+	if (*page >= bitmap->pages) {
 		/* This can happen if bitmap_start_sync goes beyond
 		 * End-of-device while looking for a whole page.
 		 * It is harmless.
 		 */
 		return -EINVAL;
 	}
+	*page = array_index_nospec(*page, bitmap->pages);
 
-	if (bitmap->bp[page].hijacked) /* it's hijacked, don't try to alloc */
+	if (bitmap->bp[*page].hijacked) /* it's hijacked, don't try to alloc */
 		return 0;
 
-	if (bitmap->bp[page].map) /* page is already allocated, just return */
+	if (bitmap->bp[*page].map) /* page is already allocated, just return */
 		return 0;
 
 	if (!create)
@@ -79,10 +81,10 @@ __acquires(bitmap->lock)
 		pr_debug("md/bitmap: map page allocation failed, hijacking\n");
 		/* failed - set the hijacked flag so that we can use the
 		 * pointer as a counter */
-		if (!bitmap->bp[page].map)
-			bitmap->bp[page].hijacked = 1;
-	} else if (bitmap->bp[page].map ||
-		   bitmap->bp[page].hijacked) {
+		if (!bitmap->bp[*page].map)
+			bitmap->bp[*page].hijacked = 1;
+	} else if (bitmap->bp[*page].map ||
+		   bitmap->bp[*page].hijacked) {
 		/* somebody beat us to getting the page */
 		kfree(mappage);
 		return 0;
@@ -90,7 +92,7 @@ __acquires(bitmap->lock)
 
 		/* no page was in place and we have one, so install it */
 
-		bitmap->bp[page].map = mappage;
+		bitmap->bp[*page].map = mappage;
 		bitmap->missing_pages--;
 	}
 	return 0;
@@ -1070,6 +1072,8 @@ static void bitmap_count_page(struct bitmap_counts *bitmap,
 {
 	sector_t chunk = offset >> bitmap->chunkshift;
 	unsigned long page = chunk >> PAGE_COUNTER_SHIFT;
+
+	page = array_index_nospec(page, bitmap->pages);
 	bitmap->bp[page].count += inc;
 	bitmap_checkfree(bitmap, page);
 }
@@ -1078,7 +1082,10 @@ static void bitmap_set_pending(struct bitmap_counts *bitmap, sector_t offset)
 {
 	sector_t chunk = offset >> bitmap->chunkshift;
 	unsigned long page = chunk >> PAGE_COUNTER_SHIFT;
-	struct bitmap_page *bp = &bitmap->bp[page];
+	struct bitmap_page *bp;
+
+	page = array_index_nospec(page, bitmap->pages);
+	bp = &bitmap->bp[page];
 
 	if (!bp->pending)
 		bp->pending = 1;
@@ -1231,7 +1238,7 @@ __acquires(bitmap->lock)
 	sector_t csize;
 	int err;
 
-	err = bitmap_checkpage(bitmap, page, create);
+	err = bitmap_checkpage_nospec(bitmap, &page, create);
 
 	if (bitmap->bp[page].hijacked ||
 	    bitmap->bp[page].map == NULL)

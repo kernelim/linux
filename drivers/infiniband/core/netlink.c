@@ -32,6 +32,7 @@
 
 #define pr_fmt(fmt) "%s:%s: " fmt, KBUILD_MODNAME, __func__
 
+#include <linux/nospec.h>
 #include <net/netlink.h>
 #include <net/net_namespace.h>
 #include <net/sock.h>
@@ -146,8 +147,11 @@ static int ibnl_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 
 	list_for_each_entry(client, &client_list, list) {
 		if (client->index == index) {
-			if (op < 0 || op >= client->nops ||
-			    !client->cb_table[op].dump)
+			if (op < 0 || op >= client->nops)
+				return -EINVAL;
+			op = array_index_nospec(op, client->nops);
+
+			if (!client->cb_table[op].dump)
 				return -EINVAL;
 
 			{

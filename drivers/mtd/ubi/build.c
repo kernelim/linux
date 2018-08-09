@@ -43,6 +43,7 @@
 #include <linux/kthread.h>
 #include <linux/reboot.h>
 #include <linux/kernel.h>
+#include <linux/nospec.h>
 #include "ubi.h"
 
 /* Maximum length of the 'mtd=' parameter */
@@ -1062,6 +1063,7 @@ int ubi_detach_mtd_dev(int ubi_num, int anyway)
 
 	if (ubi_num < 0 || ubi_num >= UBI_MAX_DEVICES)
 		return -EINVAL;
+	ubi_num = array_index_nospec(ubi_num, UBI_MAX_DEVICES);
 
 	ubi = ubi_get_device(ubi_num);
 	if (!ubi)

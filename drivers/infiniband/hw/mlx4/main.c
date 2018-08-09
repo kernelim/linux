@@ -38,6 +38,7 @@
 #include <linux/inetdevice.h>
 #include <linux/rtnetlink.h>
 #include <linux/if_vlan.h>
+#include <linux/nospec.h>
 #include <net/ipv6.h>
 #include <net/addrconf.h>
 
@@ -480,8 +481,13 @@ static int iboe_query_gid(struct ib_device *ibdev, u8 port, int index,
 			  union ib_gid *gid)
 {
 	struct mlx4_ib_dev *dev = to_mdev(ibdev);
+	u8 idx1;
+	int idx2;
 
-	*gid = dev->iboe.gid_table[port - 1][index];
+	idx1 = array_index_nospec(port - 1, MLX4_MAX_PORTS);
+	idx2 = array_index_nospec(index, 128);
+
+	*gid = dev->iboe.gid_table[idx1][idx2];
 
 	return 0;
 }

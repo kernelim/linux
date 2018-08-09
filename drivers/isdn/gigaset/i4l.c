@@ -14,6 +14,7 @@
  */
 
 #include "gigaset.h"
+#include <linux/nospec.h>
 
 /* == Handling of I4L IO =====================================================*/
 
@@ -50,6 +51,8 @@ static int writebuf_from_LL(int driverID, int channel, int ack,
 			__func__, channel);
 		return -ENODEV;
 	}
+	channel = array_index_nospec(channel, cs->channels);
+
 	bcs = &cs->bcs[channel];
 
 	/* can only handle linear sk_buffs */
@@ -129,6 +132,7 @@ static int command_from_LL(isdn_ctrl *cntrl)
 	struct bc_state *bcs;
 	int retval = 0;
 	struct setup_parm *sp;
+	ulong arg, idx;
 
 	gigaset_debugdrivers();
 
@@ -195,8 +199,9 @@ static int command_from_LL(isdn_ctrl *cntrl)
 				(int) cntrl->arg);
 			return -EINVAL;
 		}
+		arg = array_index_nospec(cntrl->arg, cs->channels);
 
-		if (!gigaset_add_event(cs, &cs->bcs[cntrl->arg].at_state,
+		if (!gigaset_add_event(cs, &cs->bcs[arg].at_state,
 				       EV_ACCEPT, NULL, 0, NULL)) {
 			//FIXME what should we do?
 			return -ENOMEM;
@@ -248,8 +253,9 @@ static int command_from_LL(isdn_ctrl *cntrl)
 				(int) cntrl->arg & 0xff);
 			return -EINVAL;
 		}
+		idx = array_index_nospec(cntrl->arg & 0xff, cs->channels);
 
-		if (!gigaset_add_event(cs, &cs->bcs[cntrl->arg & 0xff].at_state,
+		if (!gigaset_add_event(cs, &cs->bcs[idx].at_state,
 				       EV_PROTO_L2, NULL, cntrl->arg >> 8,
 				       NULL)) {
 			//FIXME what should we do?

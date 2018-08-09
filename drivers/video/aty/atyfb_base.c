@@ -68,6 +68,7 @@
 #include <linux/backlight.h>
 #include <linux/reboot.h>
 #include <linux/dmi.h>
+#include <linux/nospec.h>
 
 #include <asm/io.h>
 #include <linux/uaccess.h>
@@ -2907,6 +2908,7 @@ static int atyfb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
 	    (depth == 16 && regno > 63) ||
 	    (depth == 15 && regno > 31))
 		return 1;
+	regno = array_index_nospec(regno, 256);
 
 	red >>= 8;
 	green >>= 8;
@@ -2917,6 +2919,7 @@ static int atyfb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
 	par->palette[regno].blue = blue;
 
 	if (regno < 16) {
+		regno = array_index_nospec(regno, 16);
 		switch (depth) {
 		case 15:
 			pal[regno] = (regno << 10) | (regno << 5) | regno;
@@ -2942,10 +2945,12 @@ static int atyfb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
 
 	if (M64_HAS(INTEGRATED)) {
 		if (depth == 16) {
-			if (regno < 32)
+			if (regno < 32) {
+				regno = array_index_nospec(regno, 32);
 				aty_st_pal(regno << 3, red,
 					   par->palette[regno << 1].green,
 					   blue, par);
+			}
 			red = par->palette[regno >> 1].red;
 			blue = par->palette[regno >> 1].blue;
 			regno <<= 2;

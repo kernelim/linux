@@ -53,6 +53,7 @@
 #include <linux/ip.h>
 #include <linux/in.h>
 #include <linux/if_arp.h>
+#include <linux/nospec.h>
 
 #include "cpl5_cmd.h"
 #include "sge.h"
@@ -1364,6 +1365,7 @@ static void sge_rx(struct sge *sge, struct freelQ *fl, unsigned int len)
 	const struct cpl_rx_pkt *p;
 	struct adapter *adapter = sge->adapter;
 	struct sge_port_stats *st;
+	u8 iff;
 
 	skb = get_packet(adapter->pdev, fl, len - sge->rx_pkt_pad);
 	if (unlikely(!skb)) {
@@ -1376,11 +1378,14 @@ static void sge_rx(struct sge *sge, struct freelQ *fl, unsigned int len)
 		kfree_skb(skb);
 		return;
 	}
+	iff = p->iff;
+	iff = array_index_nospec(iff, adapter->params.nports);
+
 	__skb_pull(skb, sizeof(*p));
 
-	st = per_cpu_ptr(sge->port_stats[p->iff], smp_processor_id());
+	st = per_cpu_ptr(sge->port_stats[iff], smp_processor_id());
 
-	skb->protocol = eth_type_trans(skb, adapter->port[p->iff].dev);
+	skb->protocol = eth_type_trans(skb, adapter->port[iff].dev);
 	if ((adapter->flags & RX_CSUM_ENABLED) && p->csum == 0xffff &&
 	    skb->protocol == htons(ETH_P_IP) &&
 	    (skb->data[9] == IPPROTO_TCP || skb->data[9] == IPPROTO_UDP)) {

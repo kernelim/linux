@@ -23,6 +23,7 @@
 #include <linux/cpu.h>
 #include <linux/sched.h>
 #include <linux/gfp.h>
+#include <linux/nospec.h>
 #include <asm/mce.h>
 #include <asm/apic.h>
 #include <asm/nmi.h>
@@ -183,6 +184,7 @@ static ssize_t mce_write(struct file *filp, const char __user *ubuf,
 			 size_t usize, loff_t *off)
 {
 	struct mce m;
+	unsigned int num_possible_cpus = num_possible_cpus();
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
@@ -198,8 +200,9 @@ static ssize_t mce_write(struct file *filp, const char __user *ubuf,
 	if (copy_from_user(&m, ubuf, usize))
 		return -EFAULT;
 
-	if (m.extcpu >= num_possible_cpus() || !cpu_online(m.extcpu))
+	if (m.extcpu >= num_possible_cpus || !cpu_online(m.extcpu))
 		return -EINVAL;
+	m.extcpu = array_index_nospec(m.extcpu, num_possible_cpus);
 
 	/*
 	 * Need to give user space some time to set everything up,

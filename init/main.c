@@ -431,6 +431,26 @@ static void __init smp_init(void)
 	printk(KERN_DEBUG "sizeof(task_struct)=%u bytes\n", (unsigned int) sizeof(struct task_struct));
 }
 
+static int __init nosmt_init(void)
+{
+	unsigned int cpu;
+
+	/*
+	 * SMT soft disabling on X86 requires to bring the CPU out of the BIOS
+	 * 'wait for SIPI' state in order to set the CR4.MCE bit.  The CPU
+	 * marked itself as booted_once in cpu_notify_starting() so the
+	 * cpu_smt_allowed() check will now return false if this is not the
+	 * primary sibling.
+	 */
+	for_each_present_cpu(cpu) {
+		if (!cpu_smt_allowed(cpu))
+			cpu_down(cpu);
+	}
+
+	return 0;
+}
+late_initcall_sync(nosmt_init);
+
 #endif
 
 /*
@@ -607,6 +627,7 @@ asmlinkage void __init start_kernel(void)
 	setup_command_line(command_line);
 	setup_nr_cpu_ids();
 	setup_per_cpu_areas();
+	boot_cpu_state_init();
 	smp_prepare_boot_cpu();	/* arch-specific boot-cpu hooks */
 
 	build_all_zonelists(NULL);

@@ -19,6 +19,7 @@
 #include <linux/seq_file.h>
 
 #include <asm/pgtable.h>
+#include <asm/io.h>
 
 /*
  * The dumper groups pagetable entries of the same type into one, and for
@@ -406,9 +407,68 @@ static const struct file_operations ptdump_curusr_fops = {
 };
 #endif
 
+/*
+ * Check to see if L1 terminal fault is properly mitigated.
+ */
+static int ptcheck_show_l1tf(struct seq_file *m, void *v)
+{
+	u32 *page0;
+	int i, j;
+	bool print_page0 = false;
+
+	/*
+	 * Check the content of physical page 0 as the content of this
+	 * page may be exposed.
+	 *
+	 * Page 0 is marked as "BIOS data page" and is not used by the kernel.
+	 * The first 1k is Real Mode interrupt vector table. The next 256
+	 * bytes is BIOS data area. The rests may probably be used in the
+	 * bootup process.
+	 */
+	page0 = (u32 *)phys_to_virt(0);
+	for (i = 0; i < PAGE_SIZE/sizeof(u32); i += 8) {
+		for (j = 0; j < 8; j++)
+			if (page0[i + j])
+				break;
+		if (j == 8)
+			continue;
+
+		if (!print_page0) {
+			print_page0 = true;
+			seq_printf(m, "Page 0 non-zero content\n"
+				      "-----------------------\n");
+		}
+
+		/*
+		 * Print out the line with non-zero values.
+		 */
+		seq_printf(m, "%04x:", i * (int)sizeof(u32));
+		for (j = 0; j < 8; j++)
+			seq_printf(m, " %08x", page0[i + j]);
+		seq_printf(m, "\n");
+	}
+	if (print_page0)
+		seq_printf(m, "-----------------------\n");
+
+	return 0;
+}
+
+static int ptcheck_open_l1tf(struct inode *inode, struct file *filp)
+{
+	return single_open(filp, ptcheck_show_l1tf, NULL);
+}
+
+static const struct file_operations ptcheck_l1tf_fops = {
+	.owner		= THIS_MODULE,
+	.open		= ptcheck_open_l1tf,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
 static int pt_dump_init(void)
 {
-static struct dentry *dir, *pe_knl, *pe_curknl;
+static struct dentry *dir, *pe_knl, *pe_curknl, *pe_l1tf;
 #ifdef CONFIG_PAGE_TABLE_ISOLATION
 static struct dentry *pe_curusr;
 #endif
@@ -444,6 +504,10 @@ static struct dentry *pe_curusr;
 	if (!pe_curusr)
 		goto err;
 #endif
+
+	pe_l1tf = debugfs_create_file("check_l1tf", 0400,
+				      dir, NULL, &ptcheck_l1tf_fops);
+
 	return 0;
 err:
 	debugfs_remove_recursive(dir);

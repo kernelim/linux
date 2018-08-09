@@ -24,6 +24,7 @@
 #include <linux/mutex.h>
 #include <linux/rcupdate.h>
 #include <linux/smp_lock.h>
+#include <linux/nospec.h>
 
 MODULE_AUTHOR("Vojtech Pavlik <vojtech@suse.cz>");
 MODULE_DESCRIPTION("Input core");
@@ -167,7 +168,9 @@ static int input_handle_abs_event(struct input_dev *dev,
 	if (!is_mt_event) {
 		pold = &dev->abs[code];
 	} else if (mt) {
-		pold = &mt->slots[mt->slot].abs[code - ABS_MT_FIRST];
+		unsigned int idx = array_index_nospec(code - ABS_MT_FIRST,
+						ABS_MT_LAST - ABS_MT_FIRST + 1);
+		pold = &mt->slots[mt->slot].abs[idx];
 	} else {
 		/*
 		 * Bypass filtering for multitouch events when
@@ -246,8 +249,10 @@ static void input_handle_event(struct input_dev *dev,
 		break;
 
 	case EV_ABS:
-		if (is_event_supported(code, dev->absbit, ABS_MAX))
+		if (is_event_supported(code, dev->absbit, ABS_MAX)) {
+			code = array_index_nospec(code, ABS_MAX + 1);
 			disposition = input_handle_abs_event(dev, code, &value);
+		}
 
 		break;
 
@@ -282,7 +287,9 @@ static void input_handle_event(struct input_dev *dev,
 		break;
 
 	case EV_REP:
-		if (code <= REP_MAX && value >= 0 && dev->rep[code] != value) {
+		if (code <= REP_MAX && value >= 0 &&
+		    dev->rep[array_index_nospec(code, REP_MAX + 1)] != value) {
+			code = array_index_nospec(code, REP_MAX + 1);
 			dev->rep[code] = value;
 			disposition = INPUT_PASS_TO_ALL;
 		}
@@ -585,6 +592,7 @@ static int input_default_getkeycode(struct input_dev *dev,
 
 	if (scancode >= dev->keycodemax)
 		return -EINVAL;
+	scancode = array_index_nospec(scancode, dev->keycodemax);
 
 	*keycode = input_fetch_keycode(dev, scancode);
 
@@ -599,6 +607,7 @@ static int input_default_setkeycode(struct input_dev *dev,
 
 	if (scancode >= dev->keycodemax)
 		return -EINVAL;
+	scancode = array_index_nospec(scancode, dev->keycodemax);
 
 	if (!dev->keycodesize)
 		return -EINVAL;

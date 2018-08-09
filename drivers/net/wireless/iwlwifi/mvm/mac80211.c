@@ -69,6 +69,7 @@
 #include <linux/etherdevice.h>
 #include <linux/ip.h>
 #include <linux/if_arp.h>
+#include <linux/nospec.h>
 #if 0 /* Not in RHEL */
 #include <linux/devcoredump.h>
 #endif
@@ -833,6 +834,8 @@ static int iwl_mvm_mac_ampdu_action(struct ieee80211_hw *hw,
 
 	if (!(mvm->nvm_data->sku_cap_11n_enable))
 		return -EACCES;
+
+	tid = array_index_nospec(tid, IWL_MAX_TID_COUNT);
 
 	/* return from D0i3 before starting a new Tx aggregation */
 	switch (action) {

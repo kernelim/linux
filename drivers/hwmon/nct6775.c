@@ -60,6 +60,7 @@
 #include <linux/acpi.h>
 #include <linux/dmi.h>
 #include <linux/io.h>
+#include <linux/nospec.h>
 #include "lm75.h"
 
 #define USE_ALTERNATE
@@ -2433,7 +2434,7 @@ store_pwm_temp_sel(struct device *dev, struct device_attribute *attr,
 	struct nct6775_data *data = nct6775_update_device(dev);
 	struct sensor_device_attribute *sattr = to_sensor_dev_attr(attr);
 	int nr = sattr->index;
-	unsigned long val;
+	unsigned long val, idx;
 	int err, reg, src;
 
 	err = kstrtoul(buf, 10, &val);
@@ -2441,11 +2442,13 @@ store_pwm_temp_sel(struct device *dev, struct device_attribute *attr,
 		return err;
 	if (val == 0 || val > NUM_TEMP)
 		return -EINVAL;
-	if (!(data->have_temp & (1 << (val - 1))) || !data->temp_src[val - 1])
+
+	idx = array_index_nospec(val - 1, NUM_TEMP);
+	if (!(data->have_temp & (1 << (val - 1))) || !data->temp_src[idx])
 		return -EINVAL;
 
 	mutex_lock(&data->update_lock);
-	src = data->temp_src[val - 1];
+	src = data->temp_src[idx];
 	data->pwm_temp_sel[nr] = src;
 	reg = nct6775_read_value(data, data->REG_TEMP_SEL[nr]);
 	reg &= 0xe0;
@@ -2475,7 +2478,7 @@ store_pwm_weight_temp_sel(struct device *dev, struct device_attribute *attr,
 	struct nct6775_data *data = nct6775_update_device(dev);
 	struct sensor_device_attribute *sattr = to_sensor_dev_attr(attr);
 	int nr = sattr->index;
-	unsigned long val;
+	unsigned long val, idx;
 	int err, reg, src;
 
 	err = kstrtoul(buf, 10, &val);
@@ -2483,13 +2486,15 @@ store_pwm_weight_temp_sel(struct device *dev, struct device_attribute *attr,
 		return err;
 	if (val > NUM_TEMP)
 		return -EINVAL;
+
+	idx = array_index_nospec(val - 1, NUM_TEMP);
 	if (val && (!(data->have_temp & (1 << (val - 1))) ||
-		    !data->temp_src[val - 1]))
+		    !data->temp_src[idx]))
 		return -EINVAL;
 
 	mutex_lock(&data->update_lock);
 	if (val) {
-		src = data->temp_src[val - 1];
+		src = data->temp_src[idx];
 		data->pwm_weight_temp_sel[nr] = src;
 		reg = nct6775_read_value(data, data->REG_WEIGHT_TEMP_SEL[nr]);
 		reg &= 0xe0;

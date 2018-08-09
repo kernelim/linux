@@ -64,6 +64,7 @@
 #include <linux/uaccess.h>
 #include <linux/prefetch.h>
 #include <linux/u64_stats_sync.h>
+#include <linux/nospec.h>
 #include <linux/io.h>
 #include <asm/irq.h>
 
@@ -4588,6 +4589,7 @@ static int nv_set_ringparam(struct net_device *dev, struct ethtool_ringparam* ri
 	      ring->tx_pending > RING_MAX_DESC_VER_2_3))) {
 		return -EINVAL;
 	}
+	barrier_nospec();
 
 	/* allocate new rings */
 	if (!nv_optimized(np)) {

@@ -17,6 +17,7 @@
 #include <linux/crypto.h>
 #include <linux/scatterlist.h>
 #include <linux/pci.h>
+#include <linux/nospec.h>
 #include <scsi/scsi.h>
 #include <scsi/scsi_cmnd.h>
 #include <scsi/scsi_host.h>
@@ -511,6 +512,7 @@ static void sock_put_port(struct cxgbi_sock *csk)
 				ntohs(*port));
 			return;
 		}
+		idx = array_index_nospec(idx, pmap->max_connect);
 
 		spin_lock_bh(&pmap->lock);
 		pmap->port_csk[idx] = NULL;
@@ -1467,7 +1469,9 @@ static void ddp_tag_release(struct cxgbi_hba *chba, u32 tag)
 		struct cxgbi_gather_list *gl;
 		unsigned int npods;
 
-		gmb();
+		idx = array_index_nospec(idx, ddp->nppods);
+
+		gl = ddp->gl_map[idx];
 		if (!gl || !gl->nelem) {
 			pr_warn("tag 0x%x, idx %u, gl 0x%p, %u.\n",
 				tag, idx, gl, gl ? gl->nelem : 0);

@@ -75,6 +75,7 @@
 #include <linux/kthread.h>
 #include <linux/splice.h>
 #include <linux/falloc.h>
+#include <linux/nospec.h>
 
 #include <asm/uaccess.h>
 
@@ -960,6 +961,8 @@ loop_set_status(struct loop_device *lo, const struct loop_info64 *info)
 
 		if (type >= MAX_LO_CRYPT)
 			return -EINVAL;
+		type = array_index_nospec(type, MAX_LO_CRYPT);
+
 		xfer = xfer_funcs[type];
 		if (xfer == NULL)
 			return -EINVAL;

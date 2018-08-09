@@ -23,6 +23,7 @@
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/init.h>
+#include <linux/nospec.h>
 #include <asm/io.h>
 #include <asm/byteorder.h>
 
@@ -399,6 +400,7 @@ static int cfi_staa_read (struct mtd_info *mtd, loff_t from, size_t len, size_t 
 
 		if (chipnum >= cfi->numchips)
 			break;
+		chipnum = array_index_nospec(chipnum, cfi->numchips);
 
 		if ((len + ofs -1) >> cfi->chipshift)
 			thislen = (1<<cfi->chipshift) - ofs;
@@ -636,6 +638,7 @@ static int cfi_staa_write_buffers (struct mtd_info *mtd, loff_t to,
                 if (size > len)
                     size = len;
 
+		chipnum = array_index_nospec(chipnum, cfi->numchips);
                 ret = do_write_buffer(map, &cfi->chips[chipnum],
 				      ofs, buf, size);
 		if (ret)
@@ -956,6 +959,7 @@ static int cfi_staa_erase_varsize(struct mtd_info *mtd,
 	i=first;
 
 	while(len) {
+		chipnum = array_index_nospec(chipnum, cfi->numchips);
 		ret = do_erase_oneblock(map, &cfi->chips[chipnum], adr);
 
 		if (ret)
@@ -1165,6 +1169,7 @@ static int cfi_staa_lock(struct mtd_info *mtd, loff_t ofs, uint64_t len)
 		cfi_send_gen_cmd(0xff, 0x55, 0, map, cfi, cfi->device_type, NULL);
 #endif
 
+		chipnum = array_index_nospec(chipnum, cfi->numchips);
 		ret = do_lock_oneblock(map, &cfi->chips[chipnum], adr);
 
 #ifdef DEBUG_LOCK_BITS
@@ -1312,6 +1317,7 @@ static int cfi_staa_unlock(struct mtd_info *mtd, loff_t ofs, uint64_t len)
 	}
 #endif
 
+	chipnum = array_index_nospec(chipnum, cfi->numchips);
 	ret = do_unlock_oneblock(map, &cfi->chips[chipnum], adr);
 
 #ifdef DEBUG_LOCK_BITS

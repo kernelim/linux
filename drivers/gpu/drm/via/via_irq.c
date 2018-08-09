@@ -35,6 +35,7 @@
  * The refresh rate is also calculated for video playback sync purposes.
  */
 
+#include <linux/nospec.h>
 #include <drm/drmP.h>
 #include <drm/via_drm.h>
 #include "via_drv.h"
@@ -227,6 +228,7 @@ via_driver_irq_wait(struct drm_device *dev, unsigned int irq, int force_sequence
 		DRM_ERROR("Trying to wait on unknown irq %d\n", irq);
 		return -EINVAL;
 	}
+	irq = array_index_nospec(irq, drm_via_irq_num);
 
 	real_irq = dev_priv->irq_map[irq];
 

@@ -25,6 +25,7 @@
 #include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/init.h>
+#include <linux/nospec.h>
 #include <sound/core.h>
 #include <sound/control.h>
 #include <sound/tlv.h>
@@ -549,6 +550,8 @@ static int ak4xxx_capture_source_info(struct snd_kcontrol *kcontrol,
 	idx = uinfo->value.enumerated.item;
 	if (idx >= num_names)
 		return -EINVAL;
+	idx = array_index_nospec(idx, num_names);
+
 	input_names = ak->adc_info[mixer_ch].input_names;
 	strncpy(uinfo->value.enumerated.name, input_names[idx],
 		sizeof(uinfo->value.enumerated.name));

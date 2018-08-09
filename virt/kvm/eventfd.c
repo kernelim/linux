@@ -30,6 +30,7 @@
 #include <linux/list.h>
 #include <linux/eventfd.h>
 #include <linux/kernel.h>
+#include <linux/nospec.h>
 
 #include "iodev.h"
 
@@ -180,13 +181,15 @@ static void irqfd_update(struct kvm *kvm, struct _irqfd *irqfd,
 {
 	struct kvm_kernel_irq_routing_entry *e;
 	struct hlist_node *n;
+	int gsi;
 
 	if (irqfd->gsi >= irq_rt->nr_rt_entries) {
 		rcu_assign_pointer(irqfd->irq_entry, NULL);
 		return;
 	}
+	gsi = array_index_nospec(irqfd->gsi, irq_rt->nr_rt_entries);
 
-	hlist_for_each_entry(e, n, &irq_rt->map[irqfd->gsi], link) {
+	hlist_for_each_entry(e, n, &irq_rt->map[gsi], link) {
 		/* Only fast-path MSI. */
 		if (e->type == KVM_IRQ_ROUTING_MSI)
 			rcu_assign_pointer(irqfd->irq_entry, e);

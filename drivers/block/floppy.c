@@ -180,6 +180,7 @@ static int print_unex = 1;
 #include <linux/mod_devicetable.h>
 #include <linux/buffer_head.h>	/* for invalidate_buffers() */
 #include <linux/mutex.h>
+#include <linux/nospec.h>
 
 /*
  * PS/2 floppies have much slower step rates than regular floppies.
@@ -4184,6 +4185,8 @@ static struct kobject *floppy_find(dev_t dev, int *part, void *data)
 	    !(allowed_drive_mask & (1 << drive)) ||
 	    fdc_state[FDC(drive)].version == FDC_NONE)
 		return NULL;
+	drive = array_index_nospec(drive, N_DRIVE);
+
 	if (((*part >> 2) & 0x1f) >= ARRAY_SIZE(floppy_type))
 		return NULL;
 	*part = 0;

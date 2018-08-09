@@ -28,6 +28,7 @@
 #include <linux/netlink.h>
 #include <linux/sched.h>
 #include <linux/security.h>
+#include <linux/nospec.h>
 #include "audit.h"
 
 /*
@@ -866,7 +867,9 @@ static struct audit_entry *audit_find_rule(struct audit_entry *entry,
 		}
 		goto out;
 	} else {
-		*p = list = &audit_filter_list[entry->rule.listnr];
+		u32 idx = array_index_nospec(entry->rule.listnr,
+					     AUDIT_NR_FILTERS);
+		*p = list = &audit_filter_list[idx];
 	}
 
 	list_for_each_entry(e, list, list)
@@ -890,6 +893,7 @@ static inline int audit_add_rule(struct audit_entry *entry)
 	struct audit_tree *tree = entry->rule.tree;
 	struct list_head *list;
 	int h, err;
+	u32 idx;
 #ifdef CONFIG_AUDITSYSCALL
 	int dont_count = 0;
 
@@ -938,14 +942,13 @@ static inline int audit_add_rule(struct audit_entry *entry)
 			entry->rule.prio = --prio_low;
 	}
 
+	idx = array_index_nospec(entry->rule.listnr, AUDIT_NR_FILTERS);
 	if (entry->rule.flags & AUDIT_FILTER_PREPEND) {
-		list_add(&entry->rule.list,
-			 &audit_rules_list[entry->rule.listnr]);
+		list_add(&entry->rule.list, &audit_rules_list[idx]);
 		list_add_rcu(&entry->list, list);
 		entry->rule.flags &= ~AUDIT_FILTER_PREPEND;
 	} else {
-		list_add_tail(&entry->rule.list,
-			      &audit_rules_list[entry->rule.listnr]);
+		list_add_tail(&entry->rule.list, &audit_rules_list[idx]);
 		list_add_tail_rcu(&entry->list, list);
 	}
 #ifdef CONFIG_AUDITSYSCALL

@@ -33,6 +33,7 @@
 #include <sound/info.h>
 #include <linux/sound.h>
 #include <linux/mutex.h>
+#include <linux/nospec.h>
 
 #define SNDRV_OSS_MINORS 128
 
@@ -46,6 +47,8 @@ void *snd_lookup_oss_minor_data(unsigned int minor, int type)
 
 	if (minor >= ARRAY_SIZE(snd_oss_minors))
 		return NULL;
+	minor = array_index_nospec(minor, ARRAY_SIZE(snd_oss_minors));
+
 	mutex_lock(&sound_oss_mutex);
 	mreg = snd_oss_minors[minor];
 	if (mreg && mreg->type == type)

@@ -18,6 +18,7 @@
 #include <linux/input.h>
 #include <linux/slab.h>
 #include <linux/device.h>
+#include <linux/nospec.h>
 #include "rc-core-priv.h"
 
 /* Sizes are in bytes, 256 bytes allows for 32 entries on x64 */
@@ -439,6 +440,7 @@ static int ir_getkeycode(struct input_dev *idev,
 		retval = 0;
 		goto out;
 	}
+	index = array_index_nospec(index, rc_map->len);
 
 	*keycode = rc_map->scan[index].keycode;
 

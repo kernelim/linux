@@ -164,10 +164,26 @@ static inline int pgd_large(pgd_t pgd) { return 0; }
 /* PUD - Level3 access */
 
 /* PMD  - Level 2 access */
-#define pte_to_pgoff(pte) ((pte_val((pte)) & PHYSICAL_PAGE_MASK) >> PAGE_SHIFT)
-#define pgoff_to_pte(off) ((pte_t) { .pte = ((off) << PAGE_SHIFT) |	\
-					    _PAGE_FILE })
-#define PTE_FILE_MAX_BITS __PHYSICAL_MASK_SHIFT
+#define pte_to_pgoff(pte) ((~pte_val((pte)) & PHYSICAL_PAGE_MASK) >> PAGE_SHIFT)
+#define pgoff_to_pte(off) ((pte_t) { .pte =				\
+				((~off & (PHYSICAL_PAGE_MASK>>PAGE_SHIFT)) \
+				 << PAGE_SHIFT) | _PAGE_FILE })
+#ifdef PTE_FILE_MAX_BITS
+#error "must be undefined to activate pte_file_max_bits()"
+#endif
+static inline int pte_file_max_bits(void)
+{
+	/*
+	 * Set the highest allowed nonlinear pgoff to 1 bit less than
+	 * x86_phys_bits to guarantee the inversion of the highest bit
+	 * in the pgoff_to_pte conversion. The lowest x86_phys_bits is
+	 * 36 so x86 implementations with 36 bits will find themselves
+	 * unable to keep using remap_file_pages() with file offsets
+	 * above 128TiB (calculated as 1<<(36-1+PAGE_SHIFT)). More
+	 * recent CPUs will retain much higher max file offset limits.
+	 */
+	return min(__PHYSICAL_MASK_SHIFT, boot_cpu_data.x86_phys_bits - 1);
+}
 
 /* PTE - Level 1 access. */
 
@@ -179,23 +195,47 @@ static inline int pgd_large(pgd_t pgd) { return 0; }
 
 #define update_mmu_cache(vma, address, pte) do { } while (0)
 
-/* Encode and de-code a swap entry */
-#if _PAGE_BIT_FILE < _PAGE_BIT_PROTNONE
-#define SWP_TYPE_BITS (_PAGE_BIT_FILE - _PAGE_BIT_PRESENT - 1)
-#define SWP_OFFSET_SHIFT (_PAGE_BIT_PROTNONE + 1)
-#else
-#define SWP_TYPE_BITS (_PAGE_BIT_PROTNONE - _PAGE_BIT_PRESENT - 1)
-#define SWP_OFFSET_SHIFT (_PAGE_BIT_FILE + 1)
-#endif
+/*
+ * Encode and de-code a swap entry
+ *
+ * |     ...            | 11| 10|  9|8|7|6|5| 4| 3|2|1|0| <- bit number
+ * |     ...            |SW3|SW2|SW1|G|L|D|A|CD|WT|U|W|P| <- bit names
+ * | TYPE (59-63) | ~OFFSET (9-58)  |0|0|X|X| X| X|X|X|0| <- swp entry
+ *
+ *
+ * G (8) is aliased and used as a PROT_NONE indicator for
+ * !present ptes.  We need to start storing swap entries above
+ * there.  We also need to avoid using A and D because of an
+ * erratum where they can be incorrectly set by hardware on
+ * non-present PTEs.
+ *
+ * The offset is inverted by a binary not operation to make the high
+ * physical bits set.
+ */
+#define SWP_TYPE_BITS		5
+
+#define SWP_OFFSET_FIRST_BIT	(_PAGE_BIT_PROTNONE + 1)
+
+/* We always extract/encode the offset by shifting it all the way up, and then down again */
+#define SWP_OFFSET_SHIFT	(SWP_OFFSET_FIRST_BIT+SWP_TYPE_BITS)
 
 #define MAX_SWAPFILES_CHECK() BUILD_BUG_ON(MAX_SWAPFILES_SHIFT > SWP_TYPE_BITS)
 
-#define __swp_type(x)			(((x).val >> (_PAGE_BIT_PRESENT + 1)) \
-					 & ((1U << SWP_TYPE_BITS) - 1))
-#define __swp_offset(x)			((x).val >> SWP_OFFSET_SHIFT)
-#define __swp_entry(type, offset)	((swp_entry_t) { \
-					 ((type) << (_PAGE_BIT_PRESENT + 1)) \
-					 | ((offset) << SWP_OFFSET_SHIFT) })
+/* Extract the high bits for type */
+#define __swp_type(x) ((x).val >> (64 - SWP_TYPE_BITS))
+
+/* Shift up (to get rid of type), then down to get value */
+#define __swp_offset(x) (~(x).val << SWP_TYPE_BITS >> SWP_OFFSET_SHIFT)
+
+/*
+ * Shift the offset up "too far" by TYPE bits, then down again
+ * The offset is inverted by a binary not operation to make the high
+ * physical bits set.
+ */
+#define __swp_entry(type, offset) ((swp_entry_t) { \
+	(~(unsigned long)(offset) << SWP_OFFSET_SHIFT >> SWP_TYPE_BITS) \
+	| ((unsigned long)(type) << (64-SWP_TYPE_BITS)) })
+
 #define __pte_to_swp_entry(pte)		((swp_entry_t) { pte_val((pte)) })
 #define __swp_entry_to_pte(x)		((pte_t) { .pte = (x).val })
 
@@ -330,6 +370,8 @@ static inline pmd_t pmd_mknotpresent(pmd_t pmd)
 {
 	return pmd_clear_flags(pmd, _PAGE_PRESENT);
 }
+
+#include <asm/pgtable-invert.h>
 
 #endif /* !__ASSEMBLY__ */
 

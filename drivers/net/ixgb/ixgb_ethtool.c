@@ -28,6 +28,7 @@
 
 /* ethtool support for ixgb */
 
+#include <linux/nospec.h>
 #include "ixgb.h"
 
 #include <asm/uaccess.h>
@@ -459,7 +460,7 @@ ixgb_set_eeprom(struct net_device *netdev,
 	struct ixgb_hw *hw = &adapter->hw;
 	u16 *eeprom_buff;
 	void *ptr;
-	int max_len, first_word, last_word;
+	int max_len, first_word, last_word, idx;
 	u16 i;
 
 	if (eeprom->len == 0)
@@ -493,8 +494,8 @@ ixgb_set_eeprom(struct net_device *netdev,
 	if ((eeprom->offset + eeprom->len) & 1) {
 		/* need read/modify/write of last changed EEPROM word */
 		/* only the first byte of the word is being modified */
-		eeprom_buff[last_word - first_word]
-			= ixgb_read_eeprom(hw, last_word);
+		idx = array_index_nospec(last_word - first_word, max_len);
+		eeprom_buff[idx] = ixgb_read_eeprom(hw, last_word);
 	}
 
 	memcpy(ptr, bytes, eeprom->len);

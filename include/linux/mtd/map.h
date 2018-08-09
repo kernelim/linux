@@ -7,6 +7,7 @@
 #include <linux/types.h>
 #include <linux/list.h>
 #include <linux/string.h>
+#include <linux/nospec.h>
 
 #include <linux/mtd/compatmac.h>
 
@@ -335,6 +336,7 @@ static inline map_word map_word_load_partial(struct map_info *map, map_word orig
 		char *dest = (char *)&orig;
 		memcpy(dest+start, buf, len);
 	} else {
+		barrier_nospec();
 		for (i=start; i < start+len; i++) {
 			int bitpos;
 #ifdef __LITTLE_ENDIAN

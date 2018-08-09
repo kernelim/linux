@@ -549,33 +549,36 @@ void __cpuinit cpu_detect_cache_sizes(struct cpuinfo_x86 *c)
 	c->x86_cache_size = l2size;
 }
 
-void __cpuinit detect_ht(struct cpuinfo_x86 *c)
+int __cpuinit detect_ht_early(struct cpuinfo_x86 *c)
 {
 #ifdef CONFIG_X86_HT
 	u32 eax, ebx, ecx, edx;
-	int index_msb, core_bits;
-	static bool printed;
 
 	if (!cpu_has(c, X86_FEATURE_HT))
-		return;
+		return -1;
 
 	if (cpu_has(c, X86_FEATURE_CMP_LEGACY))
-		goto out;
+		return -1;
 
 	if (cpu_has(c, X86_FEATURE_XTOPOLOGY))
-		return;
+		return -1;
 
 	cpuid(1, &eax, &ebx, &ecx, &edx);
 
 	smp_num_siblings = (ebx & 0xff0000) >> 16;
+	if (smp_num_siblings == 1)
+		pr_info_once("CPU0: Hyper-Threading is disabled\n");
+#endif
+	return 0;
+}
 
-	if (smp_num_siblings == 1) {
-		printk_once(KERN_INFO "CPU0: Hyper-Threading is disabled\n");
-		goto out;
-	}
+void __cpuinit detect_ht(struct cpuinfo_x86 *c)
+{
+#ifdef CONFIG_X86_HT
+	int index_msb, core_bits;
 
-	if (smp_num_siblings <= 1)
-		goto out;
+	if (detect_ht_early(c) < 0)
+		return;
 
 	if (smp_num_siblings > nr_cpu_ids) {
 		pr_warning("CPU: Unsupported number of siblings %d",
@@ -595,15 +598,6 @@ void __cpuinit detect_ht(struct cpuinfo_x86 *c)
 
 	c->cpu_core_id = apic->phys_pkg_id(c->initial_apicid, index_msb) &
 				       ((1 << core_bits) - 1);
-
-out:
-	if (!printed && (c->x86_max_cores * smp_num_siblings) > 1) {
-		printk(KERN_INFO  "CPU: Physical Processor ID: %d\n",
-		       c->phys_proc_id);
-		printk(KERN_INFO  "CPU: Processor Core ID: %d\n",
-		       c->cpu_core_id);
-		printed = 1;
-	}
 #endif
 }
 
@@ -811,7 +805,7 @@ static void __cpuinit identify_cpu_without_cpuid(struct cpuinfo_x86 *c)
 #endif
 }
 
-static const __initdata struct x86_cpu_id cpu_no_speculation[] = {
+static const __initconst struct x86_cpu_id cpu_no_speculation[] = {
 	{ X86_VENDOR_INTEL,	6, INTEL_FAM6_ATOM_CEDARVIEW,	X86_FEATURE_ANY },
 	{ X86_VENDOR_INTEL,	6, INTEL_FAM6_ATOM_CLOVERVIEW,	X86_FEATURE_ANY },
 	{ X86_VENDOR_INTEL,	6, INTEL_FAM6_ATOM_LINCROFT,	X86_FEATURE_ANY },
@@ -824,51 +818,74 @@ static const __initdata struct x86_cpu_id cpu_no_speculation[] = {
 	{}
 };
 
-static const __initdata struct x86_cpu_id cpu_no_meltdown[] = {
+static const __initconst struct x86_cpu_id cpu_no_meltdown[] = {
 	{ X86_VENDOR_AMD },
 	{}
 };
 
-static bool __init cpu_vulnerable_to_meltdown(struct cpuinfo_x86 *c)
-{
-	u64 ia32_cap = 0;
-
-	if (x86_match_cpu(cpu_no_meltdown))
-		return false;
-
-	if (cpu_has(c, X86_FEATURE_ARCH_CAPABILITIES))
-		rdmsrl(MSR_IA32_ARCH_CAPABILITIES, ia32_cap);
-
-	/* Rogue Data Cache Load? No! */
-	if (ia32_cap & ARCH_CAP_RDCL_NO)
-		return false;
-
-	return true;
-}
-
+/* Only list CPUs which speculate but are non susceptible to SSB */
 static const __initconst struct x86_cpu_id cpu_no_spec_store_bypass[] = {
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_PINEVIEW	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_LINCROFT	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_PENWELL 	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_CLOVERVIEW	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_CEDARVIEW	},
 	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_SILVERMONT1	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_AIRMONT 	},
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_AIRMONT		},
 	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_SILVERMONT2	},
 	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_MERRIFIELD	},
 	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_CORE_YONAH		},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_XEON_PHI_KNL 	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_XEON_PHI_KNM 	},
-	{ X86_VENDOR_CENTAUR,	5					},
-	{ X86_VENDOR_INTEL,	5					},
-	{ X86_VENDOR_NSC,	5					},
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_XEON_PHI_KNL		},
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_XEON_PHI_KNM		},
 	{ X86_VENDOR_AMD,	0x12,					},
 	{ X86_VENDOR_AMD,	0x11,					},
 	{ X86_VENDOR_AMD,	0x10,					},
 	{ X86_VENDOR_AMD,	0xf,					},
-	{ X86_VENDOR_ANY,	4					},
 	{}
 };
+
+static const __initconst struct x86_cpu_id cpu_no_l1tf[] = {
+	/* in addition to cpu_no_speculation */
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_SILVERMONT1	},
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_SILVERMONT2	},
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_AIRMONT		},
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_MERRIFIELD	},
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_MOOREFIELD	},
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_GOLDMONT	},
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_DENVERTON	},
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_GEMINI_LAKE	},
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_XEON_PHI_KNL		},
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_XEON_PHI_KNM		},
+	{}
+};
+
+static void __init cpu_set_bug_bits(struct cpuinfo_x86 *c)
+{
+	u64 ia32_cap = 0;
+
+	if (x86_match_cpu(cpu_no_speculation))
+		return;
+
+	setup_force_cpu_bug(X86_BUG_SPECTRE_V1);
+	setup_force_cpu_bug(X86_BUG_SPECTRE_V2);
+
+	if (cpu_has(c, X86_FEATURE_ARCH_CAPABILITIES))
+		rdmsrl(MSR_IA32_ARCH_CAPABILITIES, ia32_cap);
+
+	if (!x86_match_cpu(cpu_no_spec_store_bypass) &&
+	   !(ia32_cap & ARCH_CAP_SSB_NO) &&
+	   !cpu_has(c, X86_FEATURE_AMD_SSB_NO))
+		setup_force_cpu_bug(X86_BUG_SPEC_STORE_BYPASS);
+
+	if (x86_match_cpu(cpu_no_meltdown))
+		return;
+
+	/* Rogue Data Cache Load? No! */
+	if (ia32_cap & ARCH_CAP_RDCL_NO)
+		return;
+
+	setup_force_cpu_bug(X86_BUG_CPU_MELTDOWN);
+
+	if (x86_match_cpu(cpu_no_l1tf))
+		return;
+
+	setup_force_cpu_bug(X86_BUG_L1TF);
+}
 
 /*
  * Do minimum CPU detection early.
@@ -882,7 +899,6 @@ static const __initconst struct x86_cpu_id cpu_no_spec_store_bypass[] = {
 static void __init early_identify_cpu(struct cpuinfo_x86 *c)
 {
 	struct cpuinfo_x86_rh *rh = get_cpuinfo_x86_rh(c);
-	u64 ia32_cap = 0;
 
 #ifdef CONFIG_X86_64
 	c->x86_clflush_size = 64;
@@ -932,22 +948,7 @@ static void __init early_identify_cpu(struct cpuinfo_x86 *c)
 	if (cpu_has_pge)
 		kernel_page_global = _PAGE_GLOBAL;
 
-	if (!x86_match_cpu(cpu_no_speculation)) {
-		if (cpu_vulnerable_to_meltdown(c)) {
-			setup_force_cpu_bug(X86_BUG_CPU_MELTDOWN);
-			kernel_page_global = 0;
-		}
-		setup_force_cpu_bug(X86_BUG_SPECTRE_V1);
-		setup_force_cpu_bug(X86_BUG_SPECTRE_V2);
-	}
-
-	if (cpu_has(c, X86_FEATURE_ARCH_CAPABILITIES))
-		rdmsrl(MSR_IA32_ARCH_CAPABILITIES, ia32_cap);
-
-	if (!x86_match_cpu(cpu_no_spec_store_bypass) &&
-	   !(ia32_cap & ARCH_CAP_SSB_NO) &&
-	   !cpu_has(c, X86_FEATURE_AMD_SSB_NO))
-		setup_force_cpu_bug(X86_BUG_SPEC_STORE_BYPASS);
+	cpu_set_bug_bits(c);
 }
 
 void __init early_cpu_init(void)

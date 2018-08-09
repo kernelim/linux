@@ -26,6 +26,7 @@
 #include "e1000.h"
 #include <linux/jiffies.h>
 #include <linux/uaccess.h>
+#include <linux/nospec.h>
 
 enum {NETDEV_STATS, E1000_STATS};
 
@@ -587,8 +588,10 @@ static int e1000_set_eeprom(struct net_device *netdev,
 	if (((eeprom->offset + eeprom->len) & 1) && (ret_val == 0)) {
 		/* need read/modify/write of last changed EEPROM word */
 		/* only the first byte of the word is being modified */
+		unsigned int idx = array_index_nospec(last_word - first_word,
+						      max_len);
 		ret_val = e1000_read_eeprom(hw, last_word, 1,
-					    &eeprom_buff[last_word - first_word]);
+					    &eeprom_buff[idx]);
 	}
 
 	/* Device's eeprom is always little-endian, word addressable */

@@ -16,6 +16,7 @@
 #include <linux/in.h>
 #include <linux/udp.h>
 #include <linux/netfilter.h>
+#include <linux/nospec.h>
 
 #include <net/netfilter/nf_conntrack.h>
 #include <net/netfilter/nf_conntrack_expect.h>
@@ -135,7 +136,7 @@ static int amanda_help(struct sk_buff *skb,
 		len = min_t(unsigned int, sizeof(pbuf) - 1, stop - off);
 		if (skb_copy_bits(skb, off, pbuf, len))
 			break;
-		pbuf[len] = '\0';
+		pbuf[array_index_nospec(len, ARRAY_SIZE(pbuf))] = '\0';
 
 		port = htons(simple_strtoul(pbuf, &tmp, 10));
 		len = tmp - pbuf;

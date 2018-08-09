@@ -42,6 +42,7 @@
 #include <linux/ethtool.h>
 #include <linux/rtnetlink.h>
 #include <linux/inetdevice.h>
+#include <linux/nospec.h>
 
 #include <asm/io.h>
 #include <asm/irq.h>
@@ -1112,13 +1113,15 @@ static int iwch_query_gid(struct ib_device *ibdev, u8 port,
 			  int index, union ib_gid *gid)
 {
 	struct iwch_dev *dev;
+	u8 idx;
 
 	PDBG("%s ibdev %p, port %d, index %d, gid %p\n",
 	       __func__, ibdev, port, index, gid);
 	dev = to_iwch_dev(ibdev);
 	BUG_ON(port == 0 || port > 2);
 	memset(&(gid->raw[0]), 0, sizeof(gid->raw));
-	memcpy(&(gid->raw[0]), dev->rdev.port_info.lldevs[port-1]->dev_addr, 6);
+	idx = array_index_nospec(port - 1, 2);
+	memcpy(&(gid->raw[0]), dev->rdev.port_info.lldevs[idx]->dev_addr, 6);
 	return 0;
 }
 

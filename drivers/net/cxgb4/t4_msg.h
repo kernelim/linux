@@ -98,7 +98,7 @@ enum {
 	CPL_TX_PKT_LSO        = 0xED,
 	CPL_TX_PKT_XT         = 0xEE,
 
-	NUM_CPL_CMDS
+	NUM_CPL_CMDS	      = 0x100,
 };
 
 enum CPL_error {

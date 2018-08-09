@@ -87,6 +87,7 @@ static void alloc_chunks(struct dm_mem_cache_client *cl,
 
 	local_irq_save(flags);
 	local_irq_disable();
+	barrier_nospec();
 	while (chunks--) {
 		unsigned p = cl->pages_per_chunk;
 
@@ -122,6 +123,7 @@ static void free_chunks(struct dm_mem_cache_client *cl,
 
 	local_irq_save(flags);
 	local_irq_disable();
+	barrier_nospec();
 	while (chunks--) {
 		for (pl = obj[chunks].pl; pl; pl = next) {
 			next = pl->next;

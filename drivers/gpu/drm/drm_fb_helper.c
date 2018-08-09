@@ -34,6 +34,7 @@
 #include <linux/slab.h>
 #include <linux/fb.h>
 #include <linux/module.h>
+#include <linux/nospec.h>
 #include <drm/drmP.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_fb_helper.h>
@@ -961,6 +962,8 @@ static int setcolreg(struct drm_crtc *crtc, u16 red, u16 green,
 		/* place color in psuedopalette */
 		if (regno > 16)
 			return -EINVAL;
+		regno = array_index_nospec(regno, 17);
+
 		palette = (u32 *)info->pseudo_palette;
 		red >>= (16 - info->var.red.length);
 		green >>= (16 - info->var.green.length);

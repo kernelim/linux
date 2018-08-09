@@ -48,6 +48,7 @@
 #include <linux/gfp.h>
 #include <linux/mutex.h>
 #include <linux/cpu.h>
+#include <linux/nospec.h>
 #include <xen/events.h>
 #include <xen/evtchn.h>
 #include <asm/xen/hypervisor.h>
@@ -328,6 +329,8 @@ static long evtchn_ioctl(struct file *file,
 		rc = -EINVAL;
 		if (unbind.port >= NR_EVENT_CHANNELS)
 			break;
+		unbind.port = array_index_nospec(unbind.port,
+						 NR_EVENT_CHANNELS);
 
 		spin_lock_irq(&port_user_lock);
 

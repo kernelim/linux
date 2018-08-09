@@ -56,6 +56,7 @@
 #include <linux/ipv6.h>
 #include <linux/net.h>
 #include <linux/inet.h>
+#include <linux/nospec.h>
 #include <net/sock.h>
 #include <net/inet_ecn.h>
 #include <linux/skbuff.h>
@@ -6171,6 +6172,7 @@ static int sctp_eat_data(const struct sctp_association *asoc,
 					SCTP_CHUNK(err));
 		return SCTP_IERROR_BAD_STREAM;
 	}
+	sid = array_index_nospec(sid, asoc->c.sinit_max_instreams);
 
 	/* Check to see if the SSN is possible for this TSN.
 	 * The biggest gap we can record is 4K wide.  Since SSNs wrap

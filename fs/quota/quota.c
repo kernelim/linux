@@ -18,6 +18,7 @@
 #include <linux/capability.h>
 #include <linux/quotaops.h>
 #include <linux/types.h>
+#include <linux/nospec.h>
 #include <net/netlink.h>
 #include <net/genetlink.h>
 
@@ -158,6 +159,8 @@ static int check_quotactl_valid(struct super_block *sb, int type, int cmd,
 		error = generic_quotactl_valid(sb, type, cmd, id);
 	if (!error)
 		error = security_quotactl(cmd, type, id, sb);
+
+	barrier_nospec();
 	return error;
 }
 
@@ -262,6 +265,7 @@ static int do_quotactl(struct super_block *sb, int type, int cmd, qid_t id,
 				up_read(&sb_dqopt(sb)->dqptr_sem);
 				return -ESRCH;
 			}
+			type = array_index_nospec(type, MAXQUOTAS);
 			fmt = sb_dqopt(sb)->info[type].dqi_format->qf_fmt_id;
 			up_read(&sb_dqopt(sb)->dqptr_sem);
 			if (copy_to_user(addr, &fmt, sizeof(fmt)))

@@ -23,6 +23,7 @@
 #include <sound/hwdep.h>
 #include <asm/uaccess.h>
 #include "emux_voice.h"
+#include <linux/nospec.h>
 
 
 #define TMP_CLIENT_ID	0x1001
@@ -60,19 +61,22 @@ static int
 snd_emux_hwdep_misc_mode(struct snd_emux *emu, void __user *arg)
 {
 	struct snd_emux_misc_mode info;
-	int i;
+	int i, mode;
 
 	if (copy_from_user(&info, arg, sizeof(info)))
 		return -EFAULT;
 	if (info.mode < 0 || info.mode >= EMUX_MD_END)
 		return -EINVAL;
+	mode = array_index_nospec(info.mode, EMUX_MD_END);
 
 	if (info.port < 0) {
 		for (i = 0; i < emu->num_ports; i++)
-			emu->portptrs[i]->ctrls[info.mode] = info.value;
+			emu->portptrs[i]->ctrls[mode] = info.value;
 	} else {
-		if (info.port < emu->num_ports)
-			emu->portptrs[info.port]->ctrls[info.mode] = info.value;
+		if (info.port < emu->num_ports) {
+			int port = array_index_nospec(info.port, emu->num_ports);
+			emu->portptrs[port]->ctrls[mode] = info.value;
+		}
 	}
 	return 0;
 }

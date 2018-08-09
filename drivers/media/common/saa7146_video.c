@@ -1,5 +1,6 @@
 #include <media/saa7146_vv.h>
 #include <media/v4l2-chip-ident.h>
+#include <linux/nospec.h>
 
 static int max_memory = 32;
 
@@ -148,7 +149,8 @@ int saa7146_start_preview(struct saa7146_fh *fh)
 	DEB_D(("%dx%d+%d+%d %s field=%s\n",
 		fh->ov.win.w.width,fh->ov.win.w.height,
 		fh->ov.win.w.left,fh->ov.win.w.top,
-		vv->ov_fmt->name,v4l2_field_names[fh->ov.win.field]));
+		vv->ov_fmt->name,
+		v4l2_field_names[array_index_nospec(fh->ov.win.field, V4L2_FIELD_INTERLACED_BT + 1)]));
 
 	if (0 != (ret = saa7146_enable_overlay(fh))) {
 		DEB_D(("enabling overlay failed: %d\n",ret));
@@ -566,11 +568,15 @@ static int vidioc_s_fbuf(struct file *file, void *fh, struct v4l2_framebuffer *f
 
 static int vidioc_enum_fmt_vid_cap(struct file *file, void *fh, struct v4l2_fmtdesc *f)
 {
+	u32 index;
+
 	if (f->index >= NUM_FORMATS)
 		return -EINVAL;
-	strlcpy((char *)f->description, formats[f->index].name,
+	index = array_index_nospec(f->index, NUM_FORMATS);
+
+	strlcpy((char *)f->description, formats[index].name,
 			sizeof(f->description));
-	f->pixelformat = formats[f->index].pixelformat;
+	f->pixelformat = formats[index].pixelformat;
 	return 0;
 }
 

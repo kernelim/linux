@@ -10,6 +10,7 @@
 #include <linux/topology.h>
 #include <linux/device.h>
 #include <linux/node.h>
+#include <linux/nospec.h>
 
 #include "base.h"
 
@@ -267,49 +268,53 @@ int __cpuinit register_cpu(struct cpu *cpu, int num)
 
 struct sys_device *get_cpu_sysdev(unsigned cpu)
 {
-	if (cpu < nr_cpu_ids && cpu_possible(cpu))
+	if (cpu < nr_cpu_ids && cpu_possible(cpu)) {
+		cpu = array_index_nospec(cpu, nr_cpu_ids);
 		return per_cpu(cpu_sys_devices, cpu);
-	else
+	} else
 		return NULL;
 }
 EXPORT_SYMBOL_GPL(get_cpu_sysdev);
 
 #ifdef CONFIG_GENERIC_CPU_VULNERABILITIES
 
-ssize_t __weak cpu_show_meltdown(struct device *dev,
-				 struct device_attribute *attr, char *buf)
+ssize_t __weak cpu_show_meltdown(struct sysdev_class *class, char *buf)
 {
 	return sprintf(buf, "Not affected\n");
 }
 
-ssize_t __weak cpu_show_spectre_v1(struct device *dev,
-				   struct device_attribute *attr, char *buf)
+ssize_t __weak cpu_show_spectre_v1(struct sysdev_class *class, char *buf)
 {
 	return sprintf(buf, "Not affected\n");
 }
 
-ssize_t __weak cpu_show_spectre_v2(struct device *dev,
-				   struct device_attribute *attr, char *buf)
+ssize_t __weak cpu_show_spectre_v2(struct sysdev_class *class, char *buf)
 {
 	return sprintf(buf, "Not affected\n");
 }
 
-ssize_t __weak cpu_show_spec_store_bypass(struct device *dev,
-					  struct device_attribute *attr, char *buf)
+ssize_t __weak cpu_show_spec_store_bypass(struct sysdev_class *class, char *buf)
 {
 	return sprintf(buf, "Not affected\n");
 }
 
-static DEVICE_ATTR(meltdown, 0400, cpu_show_meltdown, NULL);
-static DEVICE_ATTR(spectre_v1, 0400, cpu_show_spectre_v1, NULL);
-static DEVICE_ATTR(spectre_v2, 0400, cpu_show_spectre_v2, NULL);
-static DEVICE_ATTR(spec_store_bypass, 0400, cpu_show_spec_store_bypass, NULL);
+ssize_t __weak cpu_show_l1tf(struct sysdev_class *class, char *buf)
+{
+	return sprintf(buf, "Not affected\n");
+}
+
+static SYSDEV_CLASS_ATTR(meltdown, 0400, cpu_show_meltdown, NULL);
+static SYSDEV_CLASS_ATTR(spectre_v1, 0400, cpu_show_spectre_v1, NULL);
+static SYSDEV_CLASS_ATTR(spectre_v2, 0400, cpu_show_spectre_v2, NULL);
+static SYSDEV_CLASS_ATTR(spec_store_bypass, 0400, cpu_show_spec_store_bypass, NULL);
+static SYSDEV_CLASS_ATTR(l1tf, 0400, cpu_show_l1tf, NULL);
 
 static struct attribute *cpu_root_vulnerabilities_attrs[] = {
-	&dev_attr_meltdown.attr,
-	&dev_attr_spectre_v1.attr,
-	&dev_attr_spectre_v2.attr,
-	&dev_attr_spec_store_bypass.attr,
+	&attr_meltdown.attr,
+	&attr_spectre_v1.attr,
+	&attr_spectre_v2.attr,
+	&attr_spec_store_bypass.attr,
+	&attr_l1tf.attr,
 	NULL
 };
 

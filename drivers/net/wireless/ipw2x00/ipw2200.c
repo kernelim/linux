@@ -32,6 +32,7 @@
 
 #include <linux/sched.h>
 #include <linux/slab.h>
+#include <linux/nospec.h>
 #include <net/cfg80211-wext.h>
 #include "ipw2200.h"
 #include "ipw.h"
@@ -10491,6 +10492,8 @@ static int ipw_ethtool_get_eeprom(struct net_device *dev,
 
 	if (eeprom->offset + eeprom->len > IPW_EEPROM_IMAGE_SIZE)
 		return -EINVAL;
+	barrier_nospec();
+
 	mutex_lock(&p->mutex);
 	memcpy(bytes, &p->eeprom[eeprom->offset], eeprom->len);
 	mutex_unlock(&p->mutex);
@@ -10505,6 +10508,8 @@ static int ipw_ethtool_set_eeprom(struct net_device *dev,
 
 	if (eeprom->offset + eeprom->len > IPW_EEPROM_IMAGE_SIZE)
 		return -EINVAL;
+	barrier_nospec();
+
 	mutex_lock(&p->mutex);
 	memcpy(&p->eeprom[eeprom->offset], bytes, eeprom->len);
 	for (i = 0; i < IPW_EEPROM_IMAGE_SIZE; i++)

@@ -31,6 +31,7 @@
 #include <drm/ttm/ttm_placement.h>
 #include "vmwgfx_so.h"
 #include "vmwgfx_binding.h"
+#include <linux/nospec.h>
 
 #define VMW_RES_HT_ORDER 12
 
@@ -2678,6 +2679,8 @@ static int vmw_cmd_dx_view_define(struct vmw_private *dev_priv,
 	}
 
 	view_type = vmw_view_cmd_to_type(header->id);
+	view_type = array_index_nospec(view_type, vmw_view_max);
+
 	cmd = container_of(header, typeof(*cmd), header);
 	ret = vmw_cmd_res_check(dev_priv, sw_context, vmw_res_surface,
 				user_surface_converter,
@@ -4286,12 +4289,15 @@ int vmw_execbuf_ioctl(struct drm_device *dev, unsigned long data,
 		return -EINVAL;
 	}
 
-	if (arg.version > 1 &&
-	    copy_from_user(&arg.context_handle,
-			   (void __user *) (data + copy_offset[0]),
-			   copy_offset[arg.version - 1] -
-			   copy_offset[0]) != 0)
-		return -EFAULT;
+	if (arg.version > 1) {
+		u32 idx = array_index_nospec(arg.version - 1,
+					     DRM_VMW_EXECBUF_VERSION);
+
+		if (copy_from_user(&arg.context_handle,
+				  (void __user *) (data + copy_offset[0]),
+				  copy_offset[idx] - copy_offset[0]) != 0)
+			return -EFAULT;
+	}
 
 	switch (arg.version) {
 	case 1:

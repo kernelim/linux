@@ -71,6 +71,7 @@
 #include <asm/byteorder.h>
 #include <linux/serial_core.h>
 #include <linux/serial.h>
+#include <linux/nospec.h>
 
 
 #define DRIVER_VERSION			"1.2"
@@ -618,6 +619,7 @@ static struct hso_serial *get_serial_by_index(unsigned index)
 	unsigned long flags;
 
 	spin_lock_irqsave(&serial_table_lock, flags);
+	index = array_index_nospec(index, HSO_SERIAL_TTY_MINORS);
 	if (serial_table[index])
 		serial = dev2ser(serial_table[index]);
 	spin_unlock_irqrestore(&serial_table_lock, flags);

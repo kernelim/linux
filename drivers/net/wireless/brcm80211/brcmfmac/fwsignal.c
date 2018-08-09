@@ -22,6 +22,7 @@
 #include <linux/etherdevice.h>
 #include <linux/err.h>
 #include <linux/jiffies.h>
+#include <linux/nospec.h>
 #include <net/cfg80211.h>
 
 #include <brcmu_utils.h>
@@ -1898,6 +1899,7 @@ int brcmf_fws_process_skb(struct brcmf_if *ifp, struct sk_buff *skb)
 	/* determine the priority */
 	if (!skb->priority)
 		skb->priority = cfg80211_classify8021d(skb, NULL);
+	skb->priority = array_index_nospec(skb->priority, 8);
 
 	drvr->tx_multicast += !!multicast;
 

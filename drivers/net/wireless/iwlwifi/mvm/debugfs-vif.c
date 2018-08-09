@@ -62,6 +62,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  *****************************************************************************/
+#include <linux/nospec.h>
 #include "mvm.h"
 #include "fw-api-tof.h"
 #include "debugfs.h"
@@ -934,6 +935,7 @@ static ssize_t iwl_dbgfs_tof_range_request_write(struct ieee80211_vif *vif,
 			ret = -EINVAL;
 			goto out;
 		}
+		i = array_index_nospec(i, IWL_MVM_TOF_MAX_APS);
 
 		ap.burst_period = cpu_to_le16(burst_period);
 

@@ -14,6 +14,7 @@
 #include <linux/netlink.h>
 #include <net/netlink.h>
 #include <linux/seq_file.h>
+#include <linux/nospec.h>
 #include <net/netfilter/nf_conntrack.h>
 
 struct nf_conntrack_l3proto
@@ -90,6 +91,8 @@ __nf_ct_l3proto_find(u_int16_t l3proto)
 {
 	if (unlikely(l3proto >= AF_MAX))
 		return &nf_conntrack_l3proto_generic;
+	l3proto = array_index_nospec(l3proto, AF_MAX);
+
 	return rcu_dereference(nf_ct_l3protos[l3proto]);
 }
 

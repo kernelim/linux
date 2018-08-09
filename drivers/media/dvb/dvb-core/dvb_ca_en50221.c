@@ -32,11 +32,13 @@
 #include <linux/slab.h>
 #include <linux/list.h>
 #include <linux/module.h>
+#include <linux/nospec.h>
 #include <linux/vmalloc.h>
 #include <linux/delay.h>
 #include <linux/spinlock.h>
 #include <linux/sched.h>
 #include <linux/kthread.h>
+#include <linux/nospec.h>
 
 #include "dvb_ca_en50221.h"
 #include "dvb_ringbuffer.h"
@@ -1220,17 +1222,19 @@ static int dvb_ca_en50221_io_do_ioctl(struct inode *inode, struct file *file,
 
 	case CA_GET_SLOT_INFO: {
 		struct ca_slot_info *info = parg;
+		int num;
 
-		if ((info->num > ca->slot_count) || (info->num < 0))
+		if ((info->num >= ca->slot_count) || (info->num < 0))
 			return -EINVAL;
+		num = array_index_nospec(info->num, ca->slot_count);
 
 		info->type = CA_CI_LINK;
 		info->flags = 0;
-		if ((ca->slot_info[info->num].slot_state != DVB_CA_SLOTSTATE_NONE)
-			&& (ca->slot_info[info->num].slot_state != DVB_CA_SLOTSTATE_INVALID)) {
+		if ((ca->slot_info[num].slot_state != DVB_CA_SLOTSTATE_NONE)
+			&& (ca->slot_info[num].slot_state != DVB_CA_SLOTSTATE_INVALID)) {
 			info->flags = CA_CI_MODULE_PRESENT;
 		}
-		if (ca->slot_info[info->num].slot_state == DVB_CA_SLOTSTATE_RUNNING) {
+		if (ca->slot_info[num].slot_state == DVB_CA_SLOTSTATE_RUNNING) {
 			info->flags |= CA_CI_MODULE_READY;
 		}
 		break;
@@ -1298,6 +1302,10 @@ static ssize_t dvb_ca_en50221_io_write(struct file *file,
 		return -EFAULT;
 	buf += 2;
 	count -= 2;
+
+	if (slot >= ca->slot_count)
+		return -EINVAL;
+	slot = array_index_nospec(slot, ca->slot_count);
 
 	/* check if the slot is actually running */
 	if (ca->slot_info[slot].slot_state != DVB_CA_SLOTSTATE_RUNNING)

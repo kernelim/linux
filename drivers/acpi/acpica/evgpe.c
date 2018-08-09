@@ -41,6 +41,7 @@
  * POSSIBILITY OF SUCH DAMAGES.
  */
 
+#include <linux/nospec.h>
 #include <acpi/acpi.h>
 #include "accommon.h"
 #include "acevents.h"
@@ -332,10 +333,10 @@ struct acpi_gpe_event_info *acpi_ev_get_gpe_event_info(acpi_handle gpe_device,
 				    && (gpe_number <
 					gpe_block->block_base_number +
 					(gpe_block->register_count * 8))) {
-					return (&gpe_block->
-						event_info[gpe_number -
-							   gpe_block->
-							   block_base_number]);
+					u32 idx = array_index_nospec(gpe_number - gpe_block->block_base_number,
+								     gpe_block->register_count * 8);
+
+					return (&gpe_block->event_info[idx]);
 				}
 			}
 		}
@@ -358,8 +359,9 @@ struct acpi_gpe_event_info *acpi_ev_get_gpe_event_info(acpi_handle gpe_device,
 	if ((gpe_number >= gpe_block->block_base_number) &&
 	    (gpe_number <
 	     gpe_block->block_base_number + (gpe_block->register_count * 8))) {
-		return (&gpe_block->
-			event_info[gpe_number - gpe_block->block_base_number]);
+		u32 idx = array_index_nospec(gpe_number - gpe_block->block_base_number,
+					     gpe_block->register_count * 8);
+		return (&gpe_block->event_info[idx]);
 	}
 
 	return (NULL);

@@ -42,6 +42,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/device.h>
 #include <linux/dmi.h>
+#include <linux/nospec.h>
 #include <scsi/scsi_host.h>
 #include <scsi/scsi_cmnd.h>
 #include "ahci.h"
@@ -1462,9 +1463,10 @@ static ssize_t ahci_transmit_led_message(struct ata_port *ap, u32 state,
 
 	/* get the slot number from the message */
 	pmp = (state & EM_MSG_LED_PMP_SLOT) >> 8;
-	if (pmp < EM_MAX_SLOTS)
+	if (pmp < EM_MAX_SLOTS) {
+		pmp = array_index_nospec(pmp, EM_MAX_SLOTS);
 		emp = &pp->em_priv[pmp];
-	else
+	} else
 		return -EINVAL;
 
 	spin_lock_irqsave(ap->lock, flags);
@@ -1532,9 +1534,10 @@ static ssize_t ahci_led_store(struct ata_port *ap, const char *buf,
 
 	/* get the slot number from the message */
 	pmp = (state & EM_MSG_LED_PMP_SLOT) >> 8;
-	if (pmp < EM_MAX_SLOTS)
+	if (pmp < EM_MAX_SLOTS) {
+		pmp = array_index_nospec(pmp, EM_MAX_SLOTS);
 		emp = &pp->em_priv[pmp];
-	else
+	} else
 		return -EINVAL;
 
 	/* mask off the activity bits if we are in sw_activity

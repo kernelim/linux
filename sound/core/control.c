@@ -24,6 +24,7 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/time.h>
+#include <linux/nospec.h>
 #include <sound/core.h>
 #include <sound/minors.h>
 #include <sound/info.h>
@@ -1126,6 +1127,7 @@ static int snd_ctl_tlv_ioctl(struct snd_ctl_file *file,
 	struct snd_kcontrol_volatile *vd;
 	unsigned int len;
 	int err = 0;
+	unsigned int idx;
 
 	if (copy_from_user(&tlv, _tlv, sizeof(tlv)))
 		return -EFAULT;
@@ -1141,7 +1143,8 @@ static int snd_ctl_tlv_ioctl(struct snd_ctl_file *file,
 		err = -ENXIO;
 		goto __kctl_end;
 	}
-	vd = &kctl->vd[tlv.numid - kctl->id.numid];
+	idx = array_index_nospec(tlv.numid - kctl->id.numid, kctl->count);
+	vd = &kctl->vd[idx];
 	if ((op_flag == 0 && (vd->access & SNDRV_CTL_ELEM_ACCESS_TLV_READ) == 0) ||
 	    (op_flag > 0 && (vd->access & SNDRV_CTL_ELEM_ACCESS_TLV_WRITE) == 0) ||
 	    (op_flag < 0 && (vd->access & SNDRV_CTL_ELEM_ACCESS_TLV_COMMAND) == 0)) {

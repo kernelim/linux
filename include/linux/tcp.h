@@ -362,7 +362,11 @@ struct tcp_sock {
 	struct sk_buff *scoreboard_skb_hint;
 	struct sk_buff *retransmit_skb_hint;
 
-	struct sk_buff_head	out_of_order_queue; /* Out of order segments go here */
+#ifdef __GENKSYMS__
+	struct sk_buff_head     out_of_order_queue; /* Out of order segments go here */
+#else
+	struct sk_buff_head     deprecated_out_of_order_queue; /* Out of order segments go here */
+#endif
 
 	/* SACKs data, these 2 need to be together (see tcp_build_and_update_options) */
 	struct tcp_sack_block duplicate_sack[1]; /* D-SACK block */
@@ -452,6 +456,10 @@ struct tcp_sock {
 				 * The total number of segments sent.
 				 */
 	u32	last_oow_ack_time;  /* timestamp of last out-of-window ACK */
+
+	/* OOO segments go in this rbtree. Socket lock must be held. */
+	struct rb_root	out_of_order_queue;
+	struct sk_buff	*ooo_last_skb; /* cache rb_last(out_of_order_queue) */
 #endif
 };
 

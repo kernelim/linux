@@ -44,6 +44,7 @@
 #include <linux/slab.h>
 #include <linux/crc32.h>
 #include <linux/err.h>
+#include <linux/nospec.h>
 #include "ubi.h"
 
 /* Number of physical eraseblocks reserved for atomic LEB change operation */
@@ -333,6 +334,7 @@ int ubi_eba_unmap_leb(struct ubi_device *ubi, struct ubi_volume *vol,
 	if (err)
 		return err;
 
+	lnum = array_index_nospec(lnum, vol->reserved_pebs);
 	pnum = vol->eba_tbl[lnum];
 	if (pnum < 0)
 		/* This logical eraseblock is already unmapped */
@@ -604,6 +606,7 @@ int ubi_eba_write_leb(struct ubi_device *ubi, struct ubi_volume *vol, int lnum,
 	if (err)
 		return err;
 
+	lnum = array_index_nospec(lnum, vol->reserved_pebs);
 	pnum = vol->eba_tbl[lnum];
 	if (pnum >= 0) {
 		dbg_eba("write %d bytes at offset %d of LEB %d:%d, PEB %d",
@@ -903,6 +906,7 @@ retry:
 		goto write_error;
 	}
 
+	lnum = array_index_nospec(lnum, vol->reserved_pebs);
 	if (vol->eba_tbl[lnum] >= 0) {
 		err = ubi_wl_put_peb(ubi, vol->eba_tbl[lnum], 0);
 		if (err)

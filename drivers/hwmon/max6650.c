@@ -39,6 +39,7 @@
 #include <linux/hwmon.h>
 #include <linux/hwmon-sysfs.h>
 #include <linux/err.h>
+#include <linux/nospec.h>
 
 /*
  * Addresses to scan. There are four disjoint possibilities, by pin config.
@@ -361,6 +362,7 @@ static ssize_t set_enable(struct device *dev, struct device_attribute *devattr,
 			"illegal value for pwm1_enable (%d)\n", mode);
 		return -EINVAL;
 	}
+	mode = array_index_nospec(mode, 3);
 
 	mutex_lock(&data->update_lock);
 

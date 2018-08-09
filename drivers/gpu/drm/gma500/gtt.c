@@ -21,6 +21,7 @@
 
 #include <drm/drmP.h>
 #include <linux/shmem_fs.h>
+#include <linux/nospec.h>
 #include "psb_drv.h"
 #include "blitter.h"
 
@@ -169,6 +170,7 @@ void psb_gtt_roll(struct drm_device *dev, struct gtt_range *r, int roll)
 		WARN_ON(1);
 		return;
 	}
+	roll = array_index_nospec(roll, r->npage);
 
 	r->roll = roll;
 

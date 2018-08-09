@@ -36,6 +36,7 @@
 #include <linux/mm.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
+#include <linux/nospec.h>
 
 #include "em28xx.h"
 #include <media/v4l2-common.h>
@@ -1241,6 +1242,8 @@ static int vidioc_enum_input(struct file *file, void *priv,
 	n = i->index;
 	if (n >= MAX_EM28XX_INPUT)
 		return -EINVAL;
+	n = array_index_nospec(n, MAX_EM28XX_INPUT);
+
 	if (0 == INPUT(n)->type)
 		return -EINVAL;
 
@@ -1280,6 +1283,8 @@ static int vidioc_s_input(struct file *file, void *priv, unsigned int i)
 
 	if (i >= MAX_EM28XX_INPUT)
 		return -EINVAL;
+	i = array_index_nospec(i, MAX_EM28XX_INPUT);
+
 	if (0 == INPUT(i)->type)
 		return -EINVAL;
 
@@ -1336,18 +1341,20 @@ static int vidioc_s_audio(struct file *file, void *priv, struct v4l2_audio *a)
 {
 	struct em28xx_fh   *fh  = priv;
 	struct em28xx      *dev = fh->dev;
-
+	u32 index;
 
 	if (!dev->audio_mode.has_audio)
 		return -EINVAL;
 
 	if (a->index >= MAX_EM28XX_INPUT)
 		return -EINVAL;
-	if (0 == INPUT(a->index)->type)
+	index = array_index_nospec(a->index, MAX_EM28XX_INPUT);
+
+	if (0 == INPUT(index)->type)
 		return -EINVAL;
 
-	dev->ctl_ainput = INPUT(a->index)->amux;
-	dev->ctl_aoutput = INPUT(a->index)->aout;
+	dev->ctl_ainput = INPUT(index)->amux;
+	dev->ctl_aoutput = INPUT(index)->aout;
 
 	if (!dev->ctl_aoutput)
 		dev->ctl_aoutput = EM28XX_AOUT_MASTER;
@@ -1779,11 +1786,14 @@ static int vidioc_querycap(struct file *file, void  *priv,
 static int vidioc_enum_fmt_vid_cap(struct file *file, void  *priv,
 					struct v4l2_fmtdesc *f)
 {
+	u32 index;
+
 	if (unlikely(f->index >= ARRAY_SIZE(format)))
 		return -EINVAL;
+	index = array_index_nospec(f->index, ARRAY_SIZE(format));
 
-	strlcpy(f->description, format[f->index].name, sizeof(f->description));
-	f->pixelformat = format[f->index].fourcc;
+	strlcpy(f->description, format[index].name, sizeof(f->description));
+	f->pixelformat = format[index].fourcc;
 
 	return 0;
 }

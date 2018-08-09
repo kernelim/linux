@@ -23,6 +23,7 @@
 #include <linux/slab.h>
 #include <linux/time.h>
 #include <linux/string.h>
+#include <linux/nospec.h>
 #include <sound/core.h>
 #include <sound/minors.h>
 #include <sound/control.h>
@@ -261,6 +262,8 @@ static int snd_mixer_oss_get_volume(struct snd_mixer_oss_file *fmixer, int slot)
 
 	if (mixer == NULL || slot > 30)
 		return -EIO;
+	slot = array_index_nospec(slot, 31);
+
 	pslot = &mixer->slots[slot];
 	left = pslot->volume[0];
 	right = pslot->volume[1];
@@ -289,6 +292,8 @@ static int snd_mixer_oss_set_volume(struct snd_mixer_oss_file *fmixer,
 
 	if (mixer == NULL || slot > 30)
 		return -EIO;
+	slot = array_index_nospec(slot, 31);
+
 	pslot = &mixer->slots[slot];
 	if (left > 100)
 		left = 100;

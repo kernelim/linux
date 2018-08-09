@@ -21,6 +21,7 @@
 #include <linux/filter.h>
 #include <linux/compat.h>
 #include <linux/security.h>
+#include <linux/nospec.h>
 
 #include <net/scm.h>
 #include <net/sock.h>
@@ -794,6 +795,8 @@ asmlinkage long compat_sys_socketcall(int call, u32 __user *args)
 
 	if (call < SYS_SOCKET || call > SYS_SENDMMSG)
 		return -EINVAL;
+	call = array_index_nospec(call, SYS_SENDMMSG + 1);
+
 	if (copy_from_user(a, args, nas[call]))
 		return -EFAULT;
 	a0 = a[0];

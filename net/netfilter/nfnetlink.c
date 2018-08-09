@@ -25,6 +25,7 @@
 #include <linux/net.h>
 #include <linux/fcntl.h>
 #include <linux/skbuff.h>
+#include <linux/nospec.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
 #include <net/sock.h>
@@ -86,6 +87,7 @@ static inline const struct nfnetlink_subsystem *nfnetlink_get_subsys(u_int16_t t
 
 	if (subsys_id >= NFNL_SUBSYS_COUNT)
 		return NULL;
+	subsys_id = array_index_nospec(subsys_id, NFNL_SUBSYS_COUNT);
 
 	return subsys_table[subsys_id];
 }
@@ -97,6 +99,7 @@ nfnetlink_find_client(u_int16_t type, const struct nfnetlink_subsystem *ss)
 
 	if (cb_id >= ss->cb_count)
 		return NULL;
+	cb_id = array_index_nospec(cb_id, ss->cb_count);
 
 	return &ss->cb[cb_id];
 }
@@ -160,7 +163,8 @@ replay:
 
 	{
 		int min_len = NLMSG_SPACE(sizeof(struct nfgenmsg));
-		u_int8_t cb_id = NFNL_MSG_TYPE(nlh->nlmsg_type);
+		u_int8_t cb_id = array_index_nospec(NFNL_MSG_TYPE(nlh->nlmsg_type),
+						    ss->cb_count);
 		struct nlattr *cda[ss->cb[cb_id].attr_count + 1];
 		struct nlattr *attr = (void *)nlh + min_len;
 		int attrlen = nlh->nlmsg_len - min_len;

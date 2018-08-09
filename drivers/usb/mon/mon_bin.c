@@ -16,6 +16,7 @@
 #include <linux/compat.h>
 #include <linux/mm.h>
 #include <linux/smp_lock.h>
+#include <linux/nospec.h>
 
 #include <asm/uaccess.h>
 
@@ -1170,6 +1171,8 @@ static int mon_bin_vma_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	offset = vmf->pgoff << PAGE_SHIFT;
 	if (offset >= rp->b_size)
 		return VM_FAULT_SIGBUS;
+	offset = array_index_nospec(offset, rp->b_size);
+
 	chunk_idx = offset / CHUNK_SIZE;
 	pageptr = rp->b_vec[chunk_idx].pg;
 	get_page(pageptr);

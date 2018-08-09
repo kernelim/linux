@@ -24,6 +24,7 @@
 #include <linux/rtnetlink.h>
 #include <linux/wireless.h>
 #include <linux/etherdevice.h>
+#include <linux/nospec.h>
 #include <net/net_namespace.h>
 #include <net/iw_handler.h>
 #include <net/lib80211.h>
@@ -337,6 +338,7 @@ int hostap_set_encryption(local_info_t *local)
 	enum { NONE, WEP, OTHER } encrypt_type;
 
 	idx = local->crypt_info.tx_keyidx;
+	idx = array_index_nospec(idx, NUM_WEP_KEYS);
 	if (local->crypt_info.crypt[idx] == NULL ||
 	    local->crypt_info.crypt[idx]->ops == NULL)
 		encrypt_type = NONE;

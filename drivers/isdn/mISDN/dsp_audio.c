@@ -12,6 +12,7 @@
 #include <linux/delay.h>
 #include <linux/mISDNif.h>
 #include <linux/mISDNdsp.h>
+#include <linux/nospec.h>
 #include "core.h"
 #include "dsp.h"
 
@@ -425,6 +426,7 @@ dsp_change_volume(struct sk_buff *skb, int volume)
 	p = skb->data;
 	/* change volume */
 	while (i < ii) {
+		*p = array_index_nospec(*p, 256);
 		*p = volume_change[*p];
 		p++;
 		i++;

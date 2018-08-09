@@ -28,6 +28,7 @@
  * IN THE SOFTWARE.
  */
 #include <linux/compat.h>
+#include <linux/nospec.h>
 
 #include <drm/drmP.h>
 #include <drm/radeon_drm.h>
@@ -399,8 +400,11 @@ long radeon_compat_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	if (nr < DRM_COMMAND_BASE)
 		return drm_compat_ioctl(filp, cmd, arg);
 
-	if (nr < DRM_COMMAND_BASE + ARRAY_SIZE(radeon_compat_ioctls))
-		fn = radeon_compat_ioctls[nr - DRM_COMMAND_BASE];
+	if (nr < DRM_COMMAND_BASE + ARRAY_SIZE(radeon_compat_ioctls)) {
+		unsigned int idx = array_index_nospec(nr - DRM_COMMAND_BASE,
+						      ARRAY_SIZE(radeon_compat_ioctls));
+		fn = radeon_compat_ioctls[idx];
+	}
 
 	if (fn != NULL)
 		ret = (*fn) (filp, cmd, arg);

@@ -62,6 +62,7 @@ extern struct task_struct *__switch_to(struct task_struct *,
 
 #ifndef gmb
 #define gmb()		do { } while (0)
+#define barrier_nospec() gmb()
 #endif
 
 #define set_mb(var, value)  do { var = value;  mb(); } while (0)

@@ -37,6 +37,7 @@
 #include <linux/screen_info.h>
 #include <linux/vga_switcheroo.h>
 #include <linux/console.h>
+#include <linux/nospec.h>
 
 #include <drm/drmP.h>
 #include <drm/drm_crtc.h>
@@ -291,6 +292,7 @@ static void nouveau_fbcon_gamma_set(struct drm_crtc *crtc, u16 red, u16 green,
 {
 	struct nouveau_crtc *nv_crtc = nouveau_crtc(crtc);
 
+	regno = array_index_nospec(regno, 256);
 	nv_crtc->lut.r[regno] = red;
 	nv_crtc->lut.g[regno] = green;
 	nv_crtc->lut.b[regno] = blue;
@@ -301,6 +303,7 @@ static void nouveau_fbcon_gamma_get(struct drm_crtc *crtc, u16 *red, u16 *green,
 {
 	struct nouveau_crtc *nv_crtc = nouveau_crtc(crtc);
 
+	regno = array_index_nospec(regno, 256);
 	*red = nv_crtc->lut.r[regno];
 	*green = nv_crtc->lut.g[regno];
 	*blue = nv_crtc->lut.b[regno];

@@ -33,6 +33,7 @@
 
 #include <linux/string.h>
 #include <linux/slab.h>
+#include <linux/nospec.h>
 
 #include <rdma/ib_verbs.h>
 #include <rdma/ib_cache.h>
@@ -133,14 +134,16 @@ static u8 ib_rate_to_tavor(u8 static_rate)
 
 u8 mthca_get_rate(struct mthca_dev *dev, int static_rate, u8 port)
 {
-	u8 rate;
+	u8 rate, idx;
 
-	if (!static_rate || ib_rate_to_mult(static_rate) >= dev->rate[port - 1])
+	idx = array_index_nospec(port - 1, MTHCA_MAX_PORTS);
+
+	if (!static_rate || ib_rate_to_mult(static_rate) >= dev->rate[idx])
 		return 0;
 
 	if (mthca_is_memfree(dev))
 		rate = ib_rate_to_memfree(ib_rate_to_mult(static_rate),
-					  dev->rate[port - 1]);
+					  dev->rate[idx]);
 	else
 		rate = ib_rate_to_tavor(static_rate);
 

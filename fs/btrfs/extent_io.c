@@ -11,6 +11,7 @@
 #include <linux/writeback.h>
 #include <linux/pagevec.h>
 #include <linux/prefetch.h>
+#include <linux/nospec.h>
 #include "extent_io.h"
 #include "extent_map.h"
 #include "compat.h"
@@ -4636,6 +4637,8 @@ int map_private_extent_buffer(struct extent_buffer *eb, unsigned long start,
 		return -EINVAL;
 	}
 
+	barrier_nospec();
+
 	p = extent_buffer_page(eb, i);
 	kaddr = page_address(p);
 	*map = kaddr + offset;
@@ -4694,6 +4697,8 @@ void write_extent_buffer(struct extent_buffer *eb, const void *srcv,
 	WARN_ON(start + len > eb->start + eb->len);
 
 	offset = (start_offset + start) & ((unsigned long)PAGE_CACHE_SIZE - 1);
+
+	barrier_nospec();
 
 	while (len > 0) {
 		page = extent_buffer_page(eb, i);
@@ -4838,6 +4843,8 @@ void memcpy_extent_buffer(struct extent_buffer *dst, unsigned long dst_offset,
 		BUG_ON(1);
 	}
 
+	barrier_nospec();
+
 	while (len > 0) {
 		dst_off_in_page = (start_offset + dst_offset) &
 			((unsigned long)PAGE_CACHE_SIZE - 1);
@@ -4888,6 +4895,9 @@ void memmove_extent_buffer(struct extent_buffer *dst, unsigned long dst_offset,
 		memcpy_extent_buffer(dst, dst_offset, src_offset, len);
 		return;
 	}
+
+	barrier_nospec();
+
 	while (len > 0) {
 		dst_i = (start_offset + dst_end) >> PAGE_CACHE_SHIFT;
 		src_i = (start_offset + src_end) >> PAGE_CACHE_SHIFT;

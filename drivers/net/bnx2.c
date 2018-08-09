@@ -29,6 +29,7 @@
 #include <linux/skbuff.h>
 #include <linux/dma-mapping.h>
 #include <linux/bitops.h>
+#include <linux/nospec.h>
 #include <asm/io.h>
 #include <asm/irq.h>
 #include <linux/delay.h>
@@ -371,6 +372,7 @@ static void bnx2_setup_cnic_irq_info(struct bnx2 *bp)
 		cp->irq_arr[0].irq_flags &= ~CNIC_IRQ_FL_MSIX;
 	}
 
+	sb_id = array_index_nospec(sb_id, BNX2_MAX_MSIX_VEC);
 	cp->irq_arr[0].vector = bp->irq_tbl[sb_id].vector;
 	cp->irq_arr[0].status_blk = (void *)
 		((unsigned long) bnapi->status_blk.msi +

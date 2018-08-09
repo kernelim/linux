@@ -102,6 +102,7 @@
 #include <linux/notifier.h>
 #include <linux/device.h>
 #include <linux/io.h>
+#include <linux/nospec.h>
 #include <asm/system.h>
 #include <linux/uaccess.h>
 
@@ -715,7 +716,8 @@ void redraw_screen(struct vc_data *vc, int is_switch)
 
 int vc_cons_allocated(unsigned int i)
 {
-	return (i < MAX_NR_CONSOLES && vc_cons[i].d);
+	return (i < MAX_NR_CONSOLES &&
+		vc_cons[array_index_nospec(i, MAX_NR_CONSOLES)].d);
 }
 
 static void visual_init(struct vc_data *vc, int num, int init)
@@ -751,6 +753,8 @@ int vc_allocate(unsigned int currcons)	/* return 0 on success */
 
 	if (currcons >= MAX_NR_CONSOLES)
 		return -ENXIO;
+	currcons = array_index_nospec(currcons, MAX_NR_CONSOLES);
+
 	if (!vc_cons[currcons].d) {
 	    struct vc_data *vc;
 	    struct vt_notifier_param param;
@@ -4008,7 +4012,7 @@ static int con_font_set(struct vc_data *vc, struct console_font_op *op)
 		return -ENOSPC;
 	font.charcount = op->charcount;
 	font.height = op->height;
-	font.width = op->width;
+	font.width = array_index_nospec(op->width, 33);
 	font.data = kmalloc(size, GFP_KERNEL);
 	if (!font.data)
 		return -ENOMEM;
@@ -4071,8 +4075,10 @@ static int con_font_copy(struct vc_data *vc, struct console_font_op *op)
 		rc = -ENOTTY;
 	else if (con == vc->vc_num)	/* nothing to do */
 		rc = 0;
-	else
+	else {
+		con = array_index_nospec(con, MAX_NR_CONSOLES);
 		rc = vc->vc_sw->con_font_copy(vc, con);
+	}
 	release_console_sem();
 	return rc;
 }

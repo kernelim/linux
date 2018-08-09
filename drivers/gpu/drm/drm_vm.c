@@ -36,6 +36,7 @@
 #include <drm/drmP.h>
 #include <linux/export.h>
 #include <linux/seq_file.h>
+#include <linux/nospec.h>
 #if defined(__ia64__)
 #include <linux/efi.h>
 #include <linux/slab.h>
@@ -153,6 +154,7 @@ static int drm_do_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 		 * Get the page, inc the use count, and return it
 		 */
 		offset = (baddr - agpmem->bound) >> PAGE_SHIFT;
+		offset = array_index_nospec((int)offset, agpmem->pages);
 		page = agpmem->memory->pages[offset];
 		get_page(page);
 		vmf->page = page;
@@ -303,6 +305,7 @@ static int drm_do_vm_dma_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 
 	offset = (unsigned long)vmf->virtual_address - vma->vm_start;	/* vm_[pg]off[set] should be 0 */
 	page_nr = offset >> PAGE_SHIFT; /* page_nr could just be vmf->pgoff */
+	page_nr = array_index_nospec(page_nr, dma->page_count);
 	page = virt_to_page((void *)dma->pagelist[page_nr]);
 
 	get_page(page);
@@ -340,6 +343,7 @@ static int drm_do_vm_sg_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	offset = (unsigned long)vmf->virtual_address - vma->vm_start;
 	map_offset = map->offset - (unsigned long)dev->sg->virtual;
 	page_offset = (offset >> PAGE_SHIFT) + (map_offset >> PAGE_SHIFT);
+	page_offset = array_index_nospec(page_offset, entry->pages);
 	page = entry->pagelist[page_offset];
 	get_page(page);
 	vmf->page = page;

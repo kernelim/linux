@@ -33,6 +33,7 @@
 #include <linux/percpu.h>
 #include <linux/seq_file.h>
 #include <linux/proc_fs.h>
+#include <linux/nospec.h>
 
 #include "rds.h"
 
@@ -166,6 +167,7 @@ int rds_info_getsockopt(struct socket *sock, int optname, char __user *optval,
 	int ret;
 	int len;
 	int total;
+	int idx;
 
 	if (get_user(len, optlen)) {
 		ret = -EFAULT;
@@ -204,7 +206,9 @@ int rds_info_getsockopt(struct socket *sock, int optname, char __user *optval,
 	rdsdebug("len %d nr_pages %lu\n", len, nr_pages);
 
 call_func:
-	func = rds_info_funcs[optname - RDS_INFO_FIRST];
+	idx = array_index_nospec(optname - RDS_INFO_FIRST,
+				 ARRAY_SIZE(rds_info_funcs));
+	func = rds_info_funcs[idx];
 	if (!func) {
 		ret = -ENOPROTOOPT;
 		goto out;

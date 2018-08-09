@@ -16,6 +16,7 @@
 #include <linux/ipv6.h>
 #include <linux/ctype.h>
 #include <linux/inet.h>
+#include <linux/nospec.h>
 #include <net/checksum.h>
 #include <net/tcp.h>
 
@@ -383,6 +384,8 @@ static int help(struct sk_buff *skb,
 			 skb->len);
 		return NF_ACCEPT;
 	}
+	dataoff = array_index_nospec(dataoff, skb->len);
+
 	datalen = skb->len - dataoff;
 
 	spin_lock_bh(&nf_ftp_lock);

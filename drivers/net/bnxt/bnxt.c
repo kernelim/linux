@@ -26,6 +26,7 @@
 #include <linux/io.h>
 #include <linux/irq.h>
 #include <linux/delay.h>
+#include <linux/nospec.h>
 #include <asm/byteorder.h>
 #include <asm/page.h>
 #include <linux/time.h>
@@ -1560,6 +1561,7 @@ static void bnxt_free_tx_skbs(struct bnxt *bp)
 				int ring_idx = j & bp->tx_ring_mask;
 				skb_frag_t *frag = &skb_shinfo(skb)->frags[k];
 
+				barrier_nospec();
 				tx_buf = &txr->tx_buf_ring[ring_idx];
 				dma_unmap_page(
 					&pdev->dev,

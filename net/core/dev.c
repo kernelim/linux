@@ -93,6 +93,7 @@
 #include <linux/ethtool.h>
 #include <linux/notifier.h>
 #include <linux/skbuff.h>
+#include <linux/nospec.h>
 #include <net/net_namespace.h>
 #include <net/sock.h>
 #include <linux/rtnetlink.h>
@@ -2818,8 +2819,10 @@ static int get_rps_cpu(struct net_device *dev, struct sk_buff *skb,
 	case IPPROTO_AH:
 	case IPPROTO_SCTP:
 	case IPPROTO_UDPLITE:
-		if (pskb_may_pull(skb, (ihl * 4) + 4))
+		if (pskb_may_pull(skb, (ihl * 4) + 4)) {
+			barrier_nospec();
 			ports = *((u32 *) (skb->data + (ihl * 4)));
+		}
 		break;
 
 	default:
@@ -4539,6 +4542,8 @@ static void *ptype_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 	while (nxt == &ptype_base[hash]) {
 		if (++hash >= PTYPE_HASH_SIZE)
 			return NULL;
+		hash = array_index_nospec(hash, PTYPE_HASH_SIZE);
+
 		nxt = ptype_base[hash].next;
 	}
 found:

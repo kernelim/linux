@@ -22,6 +22,7 @@
 #include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/stat.h>
+#include <linux/nospec.h>
 #define _MASTER_FILE
 
 #include "global.h"
@@ -201,6 +202,8 @@ unsigned blue, unsigned transp, struct fb_info *info)
 	DEBUG_MSG(KERN_INFO "viafb_setcolreg!\n");
 	if (regno >= cmap_entries)
 		return 1;
+	regno = array_index_nospec(regno, cmap_entries);
+
 	if (UNICHROME_CLE266 == viaparinfo->chip_info->gfx_chip_name) {
 		/*
 		 * Read PCI bus 0,dev 0,function 0,index 0xF6 to get chip rev.

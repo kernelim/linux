@@ -21,6 +21,7 @@
 
 #include <linux/wait.h>
 #include <linux/slab.h>
+#include <linux/nospec.h>
 
 #include "saa7164.h"
 
@@ -438,9 +439,10 @@ int saa7164_api_set_videomux(struct saa7164_port *port)
 	struct saa7164_dev *dev = port->dev;
 	u8 inputs[] = { 1, 2, 2, 2, 5, 5, 5 };
 	int ret;
+	u8 idx = array_index_nospec(port->mux_input - 1, ARRAY_SIZE(inputs));
 
 	dprintk(DBGLVL_ENC, "%s() v_mux=%d a_mux=%d\n",
-		__func__, port->mux_input, inputs[port->mux_input - 1]);
+		__func__, port->mux_input, inputs[idx]);
 
 	/* Audio Mute */
 	ret = saa7164_api_audio_mute(port, 1);
@@ -456,7 +458,7 @@ int saa7164_api_set_videomux(struct saa7164_port *port)
 	/* Audio Mux */
 	ret = saa7164_cmd_send(port->dev, port->audfeat.sourceid, SET_CUR,
 		SU_INPUT_SELECT_CONTROL, sizeof(u8),
-		&inputs[port->mux_input - 1]);
+		&inputs[idx]);
 	if (ret != SAA_OK)
 		printk(KERN_ERR "%s() error, ret = 0x%x\n", __func__, ret);
 

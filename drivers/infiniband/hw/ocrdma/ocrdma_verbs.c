@@ -26,6 +26,7 @@
  *******************************************************************/
 
 #include <linux/dma-mapping.h>
+#include <linux/nospec.h>
 #include <rdma/ib_verbs.h>
 #include <rdma/ib_user_verbs.h>
 #include <rdma/iw_cm.h>
@@ -55,6 +56,7 @@ int ocrdma_query_gid(struct ib_device *ibdev, u8 port,
 	memset(sgid, 0, sizeof(*sgid));
 	if (index >= OCRDMA_MAX_SGID)
 		return -EINVAL;
+	index = array_index_nospec(index, OCRDMA_MAX_SGID);
 
 	memcpy(sgid, &dev->sgid_tbl[index], sizeof(*sgid));
 

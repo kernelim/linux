@@ -124,6 +124,7 @@
 #include <linux/ctype.h>
 #include <linux/seq_file.h>
 #include <linux/uaccess.h>
+#include <linux/nospec.h>
 #include <acpi/acpi_bus.h>
 #include <acpi/acpi_drivers.h>
 #include <linux/input.h>
@@ -451,6 +452,7 @@ static int pcc_getkeycode(struct input_dev *dev, int scancode, int *keycode)
 
 	if (scancode >= ARRAY_SIZE(pcc->keymap))
 		return -EINVAL;
+	scancode = array_index_nospec(scancode, ARRAY_SIZE(pcc->keymap));
 
 	*keycode = pcc->keymap[scancode];
 
@@ -476,6 +478,7 @@ static int pcc_setkeycode(struct input_dev *dev, int scancode, int keycode)
 
 	if (scancode >= ARRAY_SIZE(pcc->keymap))
 		return -EINVAL;
+	scancode = array_index_nospec(scancode, ARRAY_SIZE(pcc->keymap));
 
 	if (keycode < 0 || keycode > KEY_MAX)
 		return -EINVAL;

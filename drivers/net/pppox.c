@@ -32,6 +32,7 @@
 #include <linux/if_ppp.h>
 #include <linux/ppp_channel.h>
 #include <linux/kmod.h>
+#include <linux/nospec.h>
 
 #include <net/sock.h>
 
@@ -111,6 +112,7 @@ static int pppox_create(struct net *net, struct socket *sock, int protocol,
 
 	if (protocol < 0 || protocol > PX_MAX_PROTO)
 		goto out;
+	protocol = array_index_nospec(protocol, PX_MAX_PROTO + 1);
 
 	rc = -EPROTONOSUPPORT;
 	if (!pppox_protos[protocol])

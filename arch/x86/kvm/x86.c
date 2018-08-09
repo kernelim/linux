@@ -42,6 +42,7 @@
 #include <linux/srcu.h>
 #include <linux/slab.h>
 #include <linux/perf_event.h>
+#include <linux/nospec.h>
 #include <trace/events/kvm.h>
 #undef TRACE_INCLUDE_FILE
 #define CREATE_TRACE_POINTS
@@ -154,6 +155,7 @@ struct kvm_stats_debugfs_item debugfs_entries[] = {
 	{ "insn_emulation_fail", VCPU_STAT(insn_emulation_fail) },
 	{ "irq_injections", VCPU_STAT(irq_injections) },
 	{ "nmi_injections", VCPU_STAT(nmi_injections) },
+	{ "l1d_flush", VCPU_STAT(l1d_flush) },
 	{ "mmu_shadow_zapped", VM_STAT(mmu_shadow_zapped) },
 	{ "mmu_pte_write", VM_STAT(mmu_pte_write) },
 	{ "mmu_pte_updated", VM_STAT(mmu_pte_updated) },
@@ -3236,115 +3238,6 @@ static int kvm_vm_ioctl_get_nr_mmu_pages(struct kvm *kvm)
 	return kvm->arch.n_max_mmu_pages;
 }
 
-gfn_t unalias_gfn_instantiation(struct kvm *kvm, gfn_t gfn)
-{
-	int i;
-	struct kvm_mem_alias *alias;
-	struct kvm_mem_aliases *aliases;
-
-	aliases = rcu_dereference(kvm->arch.aliases);
-
-	for (i = 0; i < aliases->naliases; ++i) {
-		alias = &aliases->aliases[i];
-		if (alias->flags & KVM_ALIAS_INVALID)
-			continue;
-		if (gfn >= alias->base_gfn
-		    && gfn < alias->base_gfn + alias->npages)
-			return alias->target_gfn + gfn - alias->base_gfn;
-	}
-	return gfn;
-}
-
-gfn_t unalias_gfn(struct kvm *kvm, gfn_t gfn)
-{
-	int i;
-	struct kvm_mem_alias *alias;
-	struct kvm_mem_aliases *aliases;
-
-	aliases = rcu_dereference(kvm->arch.aliases);
-
-	for (i = 0; i < aliases->naliases; ++i) {
-		alias = &aliases->aliases[i];
-		if (gfn >= alias->base_gfn
-		    && gfn < alias->base_gfn + alias->npages)
-			return alias->target_gfn + gfn - alias->base_gfn;
-	}
-	return gfn;
-}
-
-/*
- * Set a new alias region.  Aliases map a portion of physical memory into
- * another portion.  This is useful for memory windows, for example the PC
- * VGA region.
- */
-static int kvm_vm_ioctl_set_memory_alias(struct kvm *kvm,
-					 struct kvm_memory_alias *alias)
-{
-	int r, n;
-	struct kvm_mem_alias *p;
-	struct kvm_mem_aliases *aliases, *old_aliases;
-
-	r = -EINVAL;
-	/* General sanity checks */
-	if (alias->memory_size & (PAGE_SIZE - 1))
-		goto out;
-	if (alias->guest_phys_addr & (PAGE_SIZE - 1))
-		goto out;
-	if (alias->slot >= KVM_ALIAS_SLOTS)
-		goto out;
-	if (alias->guest_phys_addr + alias->memory_size
-	    < alias->guest_phys_addr)
-		goto out;
-	if (alias->target_phys_addr + alias->memory_size
-	    < alias->target_phys_addr)
-		goto out;
-
-	r = -ENOMEM;
-	aliases = kzalloc(sizeof(struct kvm_mem_aliases), GFP_KERNEL);
-	if (!aliases)
-		goto out;
-
-	mutex_lock(&kvm->slots_lock);
-
-	/* invalidate any gfn reference in case of deletion/shrinking */
-	memcpy(aliases, kvm->arch.aliases, sizeof(struct kvm_mem_aliases));
-	aliases->aliases[alias->slot].flags |= KVM_ALIAS_INVALID;
-	old_aliases = kvm->arch.aliases;
-	rcu_assign_pointer(kvm->arch.aliases, aliases);
-	synchronize_srcu_expedited(&kvm->srcu);
-	kvm_mmu_zap_all(kvm);
-	kfree(old_aliases);
-
-	r = -ENOMEM;
-	aliases = kzalloc(sizeof(struct kvm_mem_aliases), GFP_KERNEL);
-	if (!aliases)
-		goto out_unlock;
-
-	memcpy(aliases, kvm->arch.aliases, sizeof(struct kvm_mem_aliases));
-
-	p = &aliases->aliases[alias->slot];
-	p->base_gfn = alias->guest_phys_addr >> PAGE_SHIFT;
-	p->npages = alias->memory_size >> PAGE_SHIFT;
-	p->target_gfn = alias->target_phys_addr >> PAGE_SHIFT;
-	p->flags &= ~(KVM_ALIAS_INVALID);
-
-	for (n = KVM_ALIAS_SLOTS; n > 0; --n)
-		if (aliases->aliases[n - 1].npages)
-			break;
-	aliases->naliases = n;
-
-	old_aliases = kvm->arch.aliases;
-	rcu_assign_pointer(kvm->arch.aliases, aliases);
-	synchronize_srcu_expedited(&kvm->srcu);
-	kfree(old_aliases);
-	r = 0;
-
-out_unlock:
-	mutex_unlock(&kvm->slots_lock);
-out:
-	return r;
-}
-
 static int kvm_vm_ioctl_get_irqchip(struct kvm *kvm, struct kvm_irqchip *chip)
 {
 	int r;
@@ -3475,14 +3368,16 @@ int kvm_vm_ioctl_get_dirty_log(struct kvm *kvm,
 	unsigned long n;
 	unsigned long is_dirty = 0;
 	unsigned long *dirty_bitmap = NULL;
+	u32 slot;
 
 	mutex_lock(&kvm->slots_lock);
 
 	r = -EINVAL;
 	if (log->slot >= KVM_MEMORY_SLOTS)
 		goto out;
+	slot = array_index_nospec(log->slot, KVM_MEMORY_SLOTS);
 
-	memslot = &kvm->memslots->memslots[log->slot];
+	memslot = &kvm->memslots->memslots[slot];
 	r = -ENOENT;
 	if (!memslot->dirty_bitmap)
 		goto out;
@@ -3506,17 +3401,17 @@ int kvm_vm_ioctl_get_dirty_log(struct kvm *kvm,
 			goto out_free;
 
 		memcpy(slots, kvm->memslots, sizeof(struct kvm_memslots));
-		slots->memslots[log->slot].dirty_bitmap = dirty_bitmap;
+		slots->memslots[slot].dirty_bitmap = dirty_bitmap;
 		slots->generation++;
 
 		old_slots = kvm->memslots;
 		rcu_assign_pointer(kvm->memslots, slots);
 		synchronize_srcu_expedited(&kvm->srcu);
-		dirty_bitmap = old_slots->memslots[log->slot].dirty_bitmap;
+		dirty_bitmap = old_slots->memslots[slot].dirty_bitmap;
 		kfree(old_slots);
 
 		spin_lock(&kvm->mmu_lock);
-		kvm_mmu_slot_remove_write_access(kvm, log->slot, false);
+		kvm_mmu_slot_remove_write_access(kvm, slot, false);
 		spin_unlock(&kvm->mmu_lock);
 	}
 
@@ -3544,7 +3439,6 @@ long kvm_arch_vm_ioctl(struct file *filp,
 	union {
 		struct kvm_pit_state ps;
 		struct kvm_pit_state2 ps2;
-		struct kvm_memory_alias alias;
 		struct kvm_pit_config pit_config;
 	} u;
 
@@ -3588,14 +3482,6 @@ long kvm_arch_vm_ioctl(struct file *filp,
 		break;
 	case KVM_GET_NR_MMU_PAGES:
 		r = kvm_vm_ioctl_get_nr_mmu_pages(kvm);
-		break;
-	case KVM_SET_MEMORY_ALIAS:
-		r = -EFAULT;
-		if (copy_from_user(&u.alias, argp, sizeof(struct kvm_memory_alias)))
-			goto out;
-		r = kvm_vm_ioctl_set_memory_alias(kvm, &u.alias);
-		if (r)
-			goto out;
 		break;
 	case KVM_CREATE_IRQCHIP: {
 		struct kvm_pic *vpic;
@@ -4006,6 +3892,9 @@ static int kvm_write_guest_virt_system(gva_t addr, void *val,
 				       unsigned int bytes,
 				       struct kvm_vcpu *vcpu, u32 *error)
 {
+	/* kvm_write_guest_virt_system can pull in tons of pages. */
+	vcpu->arch.l1tf_flush_l1d = true;
+
 	return kvm_write_guest_virt_helper(addr, val, bytes, vcpu, 0, error);
 }
 
@@ -4307,6 +4196,8 @@ int x86_emulate_instruction(struct kvm_vcpu *vcpu,
 	int r, shadow_mask;
 	struct decode_cache *c;
 	struct kvm_run *run = vcpu->run;
+
+	vcpu->arch.l1tf_flush_l1d = true;
 
 	kvm_clear_exception_queue(vcpu);
 	vcpu->arch.mmio_fault_cr2 = cr2;
@@ -5374,7 +5265,9 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 
 	kvm_get_msr(vcpu, MSR_IA32_TSC, &vcpu->arch.last_guest_tsc);
 	set_bit(KVM_REQ_KICK, &vcpu->requests);
-	local_irq_enable();
+
+	/* Interrupt is enabled by handle_external_intr() */
+	kvm_x86_ops->handle_external_intr(vcpu);
 
 	++vcpu->stat.exits;
 
@@ -5425,6 +5318,7 @@ static int __vcpu_run(struct kvm_vcpu *vcpu)
 	}
 
 	vcpu->srcu_idx = srcu_read_lock(&kvm->srcu);
+	vcpu->arch.l1tf_flush_l1d = true;
 
 	r = 1;
 	while (r > 0) {
@@ -6871,6 +6765,7 @@ void kvm_arch_vcpu_uninit(struct kvm_vcpu *vcpu)
 
 void kvm_arch_sched_in(struct kvm_vcpu *vcpu, int cpu)
 {
+	vcpu->arch.l1tf_flush_l1d = true;
 	kvm_x86_ops->sched_in(vcpu, cpu);
 }
 
@@ -6881,10 +6776,13 @@ struct  kvm *kvm_arch_create_vm(void)
 	if (!kvm)
 		return ERR_PTR(-ENOMEM);
 
-	kvm->arch.aliases = kzalloc(sizeof(struct kvm_mem_aliases), GFP_KERNEL);
-	if (!kvm->arch.aliases) {
-		kfree(kvm);
-		return ERR_PTR(-ENOMEM);
+	if (kvm_x86_ops->vm_init) {
+		int err = kvm_x86_ops->vm_init(kvm);
+
+		if (err) {
+			kfree(kvm);
+			return ERR_PTR(err);
+		}
 	}
 
 	INIT_LIST_HEAD(&kvm->arch.active_mmu_pages);
@@ -6939,6 +6837,8 @@ void kvm_arch_sync_events(struct kvm *kvm)
 
 void kvm_arch_destroy_vm(struct kvm *kvm)
 {
+	if (kvm_x86_ops->vm_destroy)
+		kvm_x86_ops->vm_destroy(kvm);
 	kvm_iommu_unmap_guest(kvm);
 	kfree(kvm->arch.vpic);
 	kfree(kvm->arch.vioapic);
@@ -6949,7 +6849,6 @@ void kvm_arch_destroy_vm(struct kvm *kvm)
 	if (kvm->arch.ept_identity_pagetable)
 		put_page(kvm->arch.ept_identity_pagetable);
 	cleanup_srcu_struct(&kvm->srcu);
-	kfree(kvm->arch.aliases);
 	kfree(kvm);
 }
 

@@ -7,6 +7,7 @@
  */
 
 #include <linux/smp_lock.h>
+#include <linux/nospec.h>
 #include "isofs.h"
 
 /*
@@ -37,6 +38,7 @@ isofs_cmp(struct dentry *dentry, const char *compare, int dlen)
 
 	qstr.name = compare;
 	qstr.len = dlen;
+	barrier_nospec();
 	return dentry->d_op->d_compare(dentry, &dentry->d_name, &qstr);
 }
 

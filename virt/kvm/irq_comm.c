@@ -20,6 +20,7 @@
  */
 
 #include <linux/kvm_host.h>
+#include <linux/nospec.h>
 #include <trace/events/kvm.h>
 
 #include <asm/msidef.h>
@@ -141,7 +142,7 @@ int kvm_set_irq(struct kvm *kvm, int irq_source_id, u32 irq, int level)
 	rcu_read_lock();
 	irq_rt = rcu_dereference(kvm->irq_routing);
 	if (irq < irq_rt->nr_rt_entries) {
-		gmb();
+		irq = array_index_nospec(irq, irq_rt->nr_rt_entries);
 		hlist_for_each_entry(e, n, &irq_rt->map[irq], link)
 			irq_set[i++] = *e;
 	}
@@ -288,12 +289,14 @@ static int setup_routing_entry(struct kvm_irq_routing_table *rt,
 	unsigned max_pin;
 	struct kvm_kernel_irq_routing_entry *ei;
 	struct hlist_node *n;
+	unsigned irqchip, pin;
+	u32 gsi = array_index_nospec(ue->gsi, rt->nr_rt_entries);
 
 	/*
 	 * Do not allow GSI to be mapped to the same irqchip more than once.
 	 * Allow only one to one mapping between GSI and MSI.
 	 */
-	hlist_for_each_entry(ei, n, &rt->map[ue->gsi], link)
+	hlist_for_each_entry(ei, n, &rt->map[gsi], link)
 		if (ei->type == KVM_IRQ_ROUTING_MSI ||
 		    ue->type == KVM_IRQ_ROUTING_MSI ||
 		    ue->u.irqchip.irqchip == ei->irqchip.irqchip)
@@ -325,7 +328,11 @@ static int setup_routing_entry(struct kvm_irq_routing_table *rt,
 		e->irqchip.pin = ue->u.irqchip.pin + delta;
 		if (e->irqchip.pin >= max_pin)
 			goto out;
-		rt->chip[ue->u.irqchip.irqchip][e->irqchip.pin] = ue->gsi;
+		irqchip = array_index_nospec(ue->u.irqchip.irqchip,
+					     KVM_NR_IRQCHIPS);
+		pin = array_index_nospec(e->irqchip.pin, KVM_IOAPIC_NUM_PINS);
+
+		rt->chip[irqchip][pin] = ue->gsi;
 		break;
 	case KVM_IRQ_ROUTING_MSI:
 		e->set = kvm_set_msi;
@@ -337,7 +344,7 @@ static int setup_routing_entry(struct kvm_irq_routing_table *rt,
 		goto out;
 	}
 
-	hlist_add_head(&e->link, &rt->map[e->gsi]);
+	hlist_add_head(&e->link, &rt->map[gsi]);
 	r = 0;
 out:
 	return r;

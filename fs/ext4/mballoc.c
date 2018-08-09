@@ -23,6 +23,7 @@
 
 #include "mballoc.h"
 #include <linux/debugfs.h>
+#include <linux/nospec.h>
 #include <trace/events/ext4.h>
 
 /*
@@ -416,6 +417,7 @@ static void *mb_find_buddy(struct ext4_buddy *e4b, int order, int *max)
 		*max = 0;
 		return NULL;
 	}
+	order = array_index_nospec(order, e4b->bd_blkbits + 2);
 
 	/* at order 0 we see each particular block */
 	*max = 1 << (e4b->bd_blkbits + 3);
@@ -1755,6 +1757,7 @@ void ext4_mb_simple_scan_group(struct ext4_allocation_context *ac,
 	int max;
 
 	BUG_ON(ac->ac_2order <= 0);
+	barrier_nospec();
 	for (i = ac->ac_2order; i <= sb->s_blocksize_bits + 1; i++) {
 		if (grp->bb_counters[i] == 0)
 			continue;
@@ -1913,6 +1916,8 @@ static int ext4_mb_good_group(struct ext4_allocation_context *ac,
 
 		if (grp->bb_largest_free_order < ac->ac_2order)
 			return 0;
+		ac->ac_2order = array_index_nospec(ac->ac_2order,
+						   grp->bb_largest_free_order + 1);
 
 		/* Avoid using the first bg of a flexgroup for data files */
 		if ((ac->ac_flags & EXT4_MB_HINT_DATA) &&

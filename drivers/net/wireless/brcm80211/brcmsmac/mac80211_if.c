@@ -24,6 +24,7 @@
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/bcma/bcma.h>
+#include <linux/nospec.h>
 #include <net/mac80211.h>
 #include <defs.h>
 #include "phy/phy_int.h"
@@ -828,6 +829,9 @@ brcms_ops_ampdu_action(struct ieee80211_hw *hw,
 
 	if (WARN_ON(scb->magic != SCB_MAGIC))
 		return -EIDRM;
+
+	tid = array_index_nospec(tid, AMPDU_MAX_SCB_TID);
+
 	switch (action) {
 	case IEEE80211_AMPDU_RX_START:
 		break;

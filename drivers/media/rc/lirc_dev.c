@@ -34,6 +34,7 @@
 #include <linux/bitops.h>
 #include <linux/device.h>
 #include <linux/cdev.h>
+#include <linux/nospec.h>
 
 #include <media/lirc.h>
 #include <media/lirc_dev.h>
@@ -424,17 +425,19 @@ int lirc_dev_fop_open(struct inode *inode, struct file *file)
 	struct irctl *ir;
 	struct cdev *cdev;
 	int retval = 0;
+	unsigned minor = iminor(inode);
 
-	if (iminor(inode) >= MAX_IRCTL_DEVICES) {
+	if (minor >= MAX_IRCTL_DEVICES) {
 		printk(KERN_WARNING "lirc_dev [%d]: open result = -ENODEV\n",
-		       iminor(inode));
+		       minor);
 		return -ENODEV;
 	}
+	minor = array_index_nospec(minor, MAX_IRCTL_DEVICES);
 
 	if (mutex_lock_interruptible(&lirc_dev_lock))
 		return -ERESTARTSYS;
 
-	ir = irctls[iminor(inode)];
+	ir = irctls[minor];
 	if (!ir) {
 		retval = -ENODEV;
 		goto error;

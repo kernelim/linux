@@ -20,6 +20,7 @@
 #include <linux/if_arp.h>
 #include <linux/init.h>
 #include <linux/random.h>
+#include <linux/nospec.h>
 #include <net/checksum.h>
 
 #include <net/inet_sock.h>
@@ -412,7 +413,8 @@ static int dccp_setsockopt_service(struct sock *sk, const __be32 service,
 		if (sl == NULL)
 			return -ENOMEM;
 
-		sl->dccpsl_nr = optlen / sizeof(u32) - 1;
+		sl->dccpsl_nr = array_index_nospec(optlen / sizeof(u32) - 1,
+						   DCCP_SERVICE_LIST_MAX_LEN);
 		if (copy_from_user(sl->dccpsl_list,
 				   optval + sizeof(service),
 				   optlen - sizeof(service)) ||

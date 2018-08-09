@@ -35,6 +35,7 @@
 #include <linux/timer.h>
 #include <linux/poll.h>
 #include <linux/gfp.h>
+#include <linux/nospec.h>
 
 #include "av7110.h"
 #include "av7110_hw.h"
@@ -277,13 +278,16 @@ static int dvb_ca_ioctl(struct inode *inode, struct file *file,
 	case CA_GET_SLOT_INFO:
 	{
 		ca_slot_info_t *info=(ca_slot_info_t *)parg;
+		int num;
 
 		if (info->num < 0 || info->num > 1)
 			return -EINVAL;
-		av7110->ci_slot[info->num].num = info->num;
-		av7110->ci_slot[info->num].type = FW_CI_LL_SUPPORT(av7110->arm_app) ?
+		num = array_index_nospec(info->num, 2);
+
+		av7110->ci_slot[num].num = info->num;
+		av7110->ci_slot[num].type = FW_CI_LL_SUPPORT(av7110->arm_app) ?
 							CA_CI_LINK : CA_CI;
-		memcpy(info, &av7110->ci_slot[info->num], sizeof(ca_slot_info_t));
+		memcpy(info, &av7110->ci_slot[num], sizeof(ca_slot_info_t));
 		break;
 	}
 

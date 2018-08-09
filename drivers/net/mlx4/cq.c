@@ -36,6 +36,7 @@
 
 #include <linux/init.h>
 #include <linux/hardirq.h>
+#include <linux/nospec.h>
 
 #include <linux/mlx4/cmd.h>
 #include <linux/mlx4/cq.h>
@@ -294,6 +295,8 @@ int mlx4_cq_alloc(struct mlx4_dev *dev, int nent,
 
 	if (vector > dev->caps.num_comp_vectors + dev->caps.comp_pool)
 		return -EINVAL;
+	vector = array_index_nospec(vector,
+				    dev->caps.num_comp_vectors + dev->caps.comp_pool + 1);
 
 	cq->vector = vector;
 

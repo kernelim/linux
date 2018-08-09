@@ -52,6 +52,7 @@
 #include <linux/pci.h>
 #include <linux/init.h>
 #include <linux/console.h>
+#include <linux/nospec.h>
 
 #include <asm/io.h>
 #include <asm/irq.h>
@@ -1211,6 +1212,7 @@ static int savagefb_setcolreg(unsigned        regno,
 
 	if (regno >= NR_PALETTE)
 		return -EINVAL;
+	regno = array_index_nospec(regno, NR_PALETTE);
 
 	par->palette[regno].red    = red;
 	par->palette[regno].green  = green;
@@ -1227,27 +1229,33 @@ static int savagefb_setcolreg(unsigned        regno,
 		break;
 
 	case 16:
-		if (regno < 16)
+		if (regno < 16) {
+			regno = array_index_nospec(regno, 16);
 			((u32 *)info->pseudo_palette)[regno] =
 				((red   & 0xf800)      ) |
 				((green & 0xfc00) >>  5) |
 				((blue  & 0xf800) >> 11);
+		}
 		break;
 
 	case 24:
-		if (regno < 16)
+		if (regno < 16) {
+			regno = array_index_nospec(regno, 16);
 			((u32 *)info->pseudo_palette)[regno] =
 				((red    & 0xff00) <<  8) |
 				((green  & 0xff00)      ) |
 				((blue   & 0xff00) >>  8);
+		}
 		break;
 	case 32:
-		if (regno < 16)
+		if (regno < 16) {
+			regno = array_index_nospec(regno, 16);
 			((u32 *)info->pseudo_palette)[regno] =
 				((transp & 0xff00) << 16) |
 				((red    & 0xff00) <<  8) |
 				((green  & 0xff00)      ) |
 				((blue   & 0xff00) >>  8);
+		}
 		break;
 
 	default:

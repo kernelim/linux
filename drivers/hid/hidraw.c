@@ -32,6 +32,7 @@
 #include <linux/mutex.h>
 #include <linux/sched.h>
 #include <linux/smp_lock.h>
+#include <linux/nospec.h>
 
 #include <linux/hidraw.h>
 
@@ -181,6 +182,7 @@ static int hidraw_open(struct inode *inode, struct file *file)
 	}
 
 	mutex_lock(&minors_lock);
+	minor = array_index_nospec(minor, HIDRAW_MAX_DEVICES);
 	if (!hidraw_table[minor]) {
 		kfree(list);
 		err = -ENODEV;

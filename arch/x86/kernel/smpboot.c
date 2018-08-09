@@ -101,6 +101,9 @@ static struct task_struct *idle_thread_array[NR_CPUS] __cpuinitdata ;
 int smp_num_siblings = 1;
 EXPORT_SYMBOL(smp_num_siblings);
 
+/* Maximum number of SMT threads on any online core */
+int __read_mostly __max_smt_threads = 1;
+
 /* Last level cache ID of each logical CPU */
 DEFINE_PER_CPU(u16, cpu_llc_id) = BAD_APICID;
 
@@ -442,7 +445,7 @@ static void __cpuinit link_thread_siblings(int cpu1, int cpu2)
 
 void __cpuinit set_cpu_sibling_map(int cpu)
 {
-	int i;
+	int i, threads;
 	struct cpuinfo_x86 *c = &cpu_data(cpu);
 
 	cpumask_set_cpu(cpu, cpu_sibling_setup_mask);
@@ -502,6 +505,10 @@ void __cpuinit set_cpu_sibling_map(int cpu)
 				c->booted_cores = cpu_data(i).booted_cores;
 		}
 	}
+
+	threads = cpumask_weight(cpu_sibling_mask(cpu));
+	if (threads > __max_smt_threads)
+		__max_smt_threads = threads;
 }
 
 /* maps the cpu to the sched domain representing multi-core */
@@ -1314,7 +1321,39 @@ __init void prefill_possible_map(void)
 	nr_cpu_ids = possible;
 }
 
+/**
+ * topology_smt_supported - Check whether SMT is supported by the CPUs
+ */
+bool topology_smt_supported(void)
+{
+	return smp_num_siblings > 1;
+}
+
+/**
+ * topology_is_primary_thread - Check whether CPU is the primary SMT thread
+ * @cpu:	CPU to check
+ */
+bool topology_is_primary_thread(unsigned int cpu)
+{
+	return apic_id_is_primary_thread(per_cpu(x86_cpu_to_apicid, cpu));
+}
+
 #ifdef CONFIG_HOTPLUG_CPU
+
+/* Recompute SMT state for all CPUs on offline */
+static void recompute_smt_state(void)
+{
+	int max_threads, cpu;
+
+	max_threads = 0;
+	for_each_online_cpu (cpu) {
+		int threads = cpumask_weight(cpu_sibling_mask(cpu));
+
+		if (threads > max_threads)
+			max_threads = threads;
+	}
+	__max_smt_threads = max_threads;
+}
 
 static void remove_siblinginfo(int cpu)
 {
@@ -1337,6 +1376,7 @@ static void remove_siblinginfo(int cpu)
 	c->phys_proc_id = 0;
 	c->cpu_core_id = 0;
 	cpumask_clear_cpu(cpu, cpu_sibling_setup_mask);
+	recompute_smt_state();
 }
 
 static void __ref remove_cpu_from_maps(int cpu)

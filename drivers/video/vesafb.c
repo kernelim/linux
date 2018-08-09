@@ -138,6 +138,7 @@ static int vesafb_setcolreg(unsigned regno, unsigned red, unsigned green,
 	
 	if (regno >= info->cmap.len)
 		return 1;
+	regno = array_index_nospec(regno, info->cmap.len);
 
 	if (info->var.bits_per_pixel == 8)
 		err = vesa_setpalette(regno,red,green,blue);

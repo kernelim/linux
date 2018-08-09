@@ -26,6 +26,7 @@
  */
 #include <linux/mtd/pfow.h>
 #include <linux/mtd/qinfo.h>
+#include <linux/nospec.h>
 
 static int lpddr_read(struct mtd_info *mtd, loff_t adr, size_t len,
 					size_t *retlen, u_char *buf);
@@ -486,7 +487,7 @@ int do_erase_oneblock(struct mtd_info *mtd, loff_t adr)
 	struct map_info *map = mtd->priv;
 	struct lpddr_private *lpddr = map->fldrv_priv;
 	int chipnum = adr >> lpddr->chipshift;
-	struct flchip *chip = &lpddr->chips[chipnum];
+	struct flchip *chip = &lpddr->chips[array_index_nospec(chipnum, lpddr->numchips)];
 	int ret;
 
 	spin_lock(chip->mutex);
@@ -514,7 +515,7 @@ static int lpddr_read(struct mtd_info *mtd, loff_t adr, size_t len,
 	struct map_info *map = mtd->priv;
 	struct lpddr_private *lpddr = map->fldrv_priv;
 	int chipnum = adr >> lpddr->chipshift;
-	struct flchip *chip = &lpddr->chips[chipnum];
+	struct flchip *chip = &lpddr->chips[array_index_nospec(chipnum, lpddr->numchips)];
 	int ret = 0;
 
 	spin_lock(chip->mutex);
@@ -671,6 +672,7 @@ static int lpddr_writev(struct mtd_info *mtd, const struct kvec *vecs,
 		if (size > len)
 			size = len;
 
+		chipnum = array_index_nospec(chipnum, lpddr->numchips);
 		ret = do_write_buffer(map, &lpddr->chips[chipnum],
 					  ofs, &vecs, &vec_seek, size);
 		if (ret)
@@ -724,7 +726,7 @@ int do_xxlock(struct mtd_info *mtd, loff_t adr, uint32_t len, int thunk)
 	struct map_info *map = mtd->priv;
 	struct lpddr_private *lpddr = map->fldrv_priv;
 	int chipnum = adr >> lpddr->chipshift;
-	struct flchip *chip = &lpddr->chips[chipnum];
+	struct flchip *chip = &lpddr->chips[array_index_nospec(chipnum, lpddr->numchips)];
 
 	spin_lock(chip->mutex);
 	ret = get_chip(map, chip, FL_LOCKING);

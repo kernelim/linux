@@ -26,6 +26,7 @@
 #include <linux/slab.h>
 #include <linux/usb.h>
 #include <linux/vmalloc.h>
+#include <linux/nospec.h>
 #include <media/v4l2-common.h>
 #include <media/tuner.h>
 
@@ -1116,6 +1117,7 @@ int cx231xx_init_bulk(struct cx231xx *dev, int max_packets,
 	int rc;
 
 	dev->video_input = dev->video_input > 2 ? 2 : dev->video_input;
+	dev->video_input = array_index_nospec(dev->video_input, 3);
 
 	cx231xx_coredbg("Setting Video mux to %d\n", dev->video_input);
 

@@ -16,6 +16,7 @@
 #include <linux/nodemask.h>
 #include <linux/pageblock-flags.h>
 #include <linux/bounds.h>
+#include <linux/nospec.h>
 #include <asm/atomic.h>
 #include <asm/page.h>
 
@@ -1061,9 +1062,11 @@ extern struct mem_section mem_section[NR_SECTION_ROOTS][SECTIONS_PER_ROOT];
 
 static inline struct mem_section *__nr_to_section(unsigned long nr)
 {
-	if (!mem_section[SECTION_NR_TO_ROOT(nr)])
+	int root = array_index_nospec(SECTION_NR_TO_ROOT(nr), NR_SECTION_ROOTS);
+
+	if (!mem_section[root])
 		return NULL;
-	return &mem_section[SECTION_NR_TO_ROOT(nr)][nr & SECTION_ROOT_MASK];
+	return &mem_section[root][nr & SECTION_ROOT_MASK];
 }
 extern int __section_nr(struct mem_section* ms);
 extern unsigned long usemap_size(void);
@@ -1113,9 +1116,13 @@ static inline struct mem_section *__pfn_to_section(unsigned long pfn)
 
 static inline int pfn_valid(unsigned long pfn)
 {
-	if (pfn_to_section_nr(pfn) >= NR_MEM_SECTIONS)
+	unsigned long nr = pfn_to_section_nr(pfn);
+
+	if (nr >= NR_MEM_SECTIONS)
 		return 0;
-	return valid_section(__nr_to_section(pfn_to_section_nr(pfn)));
+	nr = array_index_nospec(nr, NR_MEM_SECTIONS);
+
+	return valid_section(__nr_to_section(nr));
 }
 
 static inline int pfn_present(unsigned long pfn)

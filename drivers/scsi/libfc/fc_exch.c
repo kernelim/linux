@@ -859,10 +859,12 @@ static struct fc_exch *fc_exch_find(struct fc_exch_mgr *mp, u16 xid)
 		       lport->host->host_no, lport->port_id, xid, cpu);
 		return NULL;
 	}
+	cpu = array_index_nospec(cpu, nr_cpu_ids);
 
 	if ((xid >= mp->min_xid) && (xid <= mp->max_xid)) {
 		pool = per_cpu_ptr(mp->pool, cpu);
 		spin_lock_bh(&pool->lock);
+		barrier_nospec();
 		ep = fc_exch_ptr_get(pool, (xid - mp->min_xid) >> fc_cpu_order);
 		if (ep == &fc_quarantine_exch) {
 			FC_LPORT_DBG(lport, "xid %x quarantined\n", xid);

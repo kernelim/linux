@@ -370,9 +370,9 @@ int unhandled_signal(struct task_struct *tsk, int sig);
 	(((t)->sighand->action[(signr)-1].sa.sa_handler != SIG_DFL) &&	\
 	 ((t)->sighand->action[(signr)-1].sa.sa_handler != SIG_IGN))
 
-#define sig_fatal(t, signr) \
+#define sig_fatal_nospec(t, signr, sig_idx) \
 	(!siginmask(signr, SIG_KERNEL_IGNORE_MASK|SIG_KERNEL_STOP_MASK) && \
-	 (t)->sighand->action[(signr)-1].sa.sa_handler == SIG_DFL)
+	 (t)->sighand->action[sig_idx].sa.sa_handler == SIG_DFL)
 
 void signals_init(void);
 

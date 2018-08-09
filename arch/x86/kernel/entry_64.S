@@ -514,8 +514,9 @@ ENTRY(system_call_after_swapgs)
 	testl $_TIF_WORK_SYSCALL_ENTRY,TI_flags(%rcx)
 	jnz tracesys
 system_call_fastpath:
-	cmpq $__NR_syscall_max,%rax
-	ja badsys
+	cmpq $__NR_syscall_max+1,%rax
+	jae badsys
+	ARRAY_INDEX_NOSPEC_SYSCALL clobber_reg=%rcx
 	movq %r10,%rcx
 	movq sys_call_table(,%rax,8), %rax  # XXX:	 rip relative
 	CALL_NOSPEC %rax
@@ -633,8 +634,9 @@ tracesys:
 	 * the value it wants us to use in the table lookup.
 	 */
 	LOAD_ARGS ARGOFFSET, 1
-	cmpq $__NR_syscall_max,%rax
-	ja   1f	/* RAX(%rsp) set to -ENOSYS above */
+	cmpq $__NR_syscall_max+1,%rax
+	jae   1f	/* RAX(%rsp) set to -ENOSYS above */
+	ARRAY_INDEX_NOSPEC_SYSCALL clobber_reg=%rcx
 	movq %r10,%rcx	/* fixup for C */
 	movq sys_call_table(,%rax,8), %rax
 	CALL_NOSPEC %rax

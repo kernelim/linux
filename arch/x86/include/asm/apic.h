@@ -613,6 +613,13 @@ static inline physid_mask_t default_apicid_to_cpu_present(int phys_apicid)
 }
 
 #endif /* CONFIG_X86_LOCAL_APIC */
+
+#ifdef CONFIG_SMP
+bool apic_id_is_primary_thread(unsigned int id);
+#else
+static inline bool apic_id_is_primary_thread(unsigned int id) { return false; }
+#endif
+
 extern void irq_enter(void);
 extern void irq_exit(void);
 

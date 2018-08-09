@@ -27,6 +27,7 @@
 #include <linux/ethtool.h>
 #include <linux/workqueue.h>
 #include <linux/mii.h>
+#include <linux/nospec.h>
 #include <linux/usb.h>
 #include <linux/usb/usbnet.h>
 
@@ -457,6 +458,9 @@ static int net1080_rx_fixup(struct usbnet *dev, struct sk_buff *skb)
 		nc_ensure_sync(dev);
 		// switch (vendor/product ids) { ... }
 	}
+	packet_len = array_index_nospec(packet_len,
+					NC_MAX_PACKET - FRAMED_SIZE(0) + 1);
+
 	skb_pull(skb, hdr_len);
 
 	trailer = (struct nc_trailer *)

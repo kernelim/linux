@@ -79,6 +79,7 @@
 #include <linux/acpi.h>
 #include <linux/pci_ids.h>
 #include <linux/thinkpad_acpi.h>
+#include <linux/nospec.h>
 #include <sound/core.h>
 #include <sound/control.h>
 #include <sound/initval.h>
@@ -5279,7 +5280,7 @@ static int led_set_status(const unsigned int led,
 	}
 
 	if (!rc)
-		tpacpi_led_state_cache[led] = ledstatus;
+		tpacpi_led_state_cache[array_index_nospec(led, TPACPI_LED_NUMLEDS)] = ledstatus;
 
 	return rc;
 }
@@ -5558,7 +5559,7 @@ static int led_write(char *buf)
 			return -EINVAL;
 
 		if (led < 0 || led > (TPACPI_LED_NUMLEDS - 1) ||
-				tpacpi_leds[led].led < 0)
+		    tpacpi_leds[array_index_nospec(led, TPACPI_LED_NUMLEDS)].led < 0)
 			return -ENODEV;
 
 		if (strstr(cmd, "off")) {

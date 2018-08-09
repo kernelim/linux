@@ -33,6 +33,7 @@
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/firmware.h>
+#include <linux/nospec.h>
 #include <media/v4l2-common.h>
 #include <media/v4l2-ioctl.h>
 #include <media/cx2341x.h>
@@ -990,6 +991,7 @@ static int vidioc_s_input (struct file *file, void *priv, unsigned int i)
 
 	if (i >= 4)
 		return -EINVAL;
+	i = array_index_nospec(i, 4);
 
 	mutex_lock(&core->lock);
 	cx88_newstation(core);

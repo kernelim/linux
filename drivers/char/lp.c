@@ -127,6 +127,7 @@
 #include <linux/wait.h>
 #include <linux/jiffies.h>
 #include <linux/smp_lock.h>
+#include <linux/nospec.h>
 
 #include <linux/parport.h>
 #undef LP_STATS
@@ -497,6 +498,8 @@ static int lp_open(struct inode * inode, struct file * file)
 		ret = -ENXIO;
 		goto out;
 	}
+	minor = array_index_nospec(minor, LP_NO);
+
 	if ((LP_F(minor) & LP_EXIST) == 0) {
 		ret = -ENXIO;
 		goto out;

@@ -33,6 +33,7 @@
 #include <linux/cpufreq.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/nospec.h>
 
 #include <asm/io.h>
 #include <asm/uaccess.h>
@@ -864,10 +865,13 @@ static int acpi_get_throttling_value(struct acpi_processor *pr,
 {
 	int ret = -1;
 
-	if (state >= 0 && state <= pr->throttling.state_count) {
-		struct acpi_processor_tx_tss *tx =
-		    (struct acpi_processor_tx_tss *)&(pr->throttling.
-						      states_tss[state]);
+	if (state >= 0 && state < pr->throttling.state_count) {
+		struct acpi_processor_tx_tss *tx;
+
+		state = array_index_nospec(state, pr->throttling.state_count);
+
+		tx = (struct acpi_processor_tx_tss *)&(pr->throttling.
+						       states_tss[state]);
 		*value = tx->control;
 		ret = 0;
 	}

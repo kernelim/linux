@@ -21,6 +21,7 @@
 #include <linux/err.h>
 #include <linux/slab.h>
 #include <linux/powercap.h>
+#include <linux/nospec.h>
 
 #define to_powercap_zone(n) container_of(n, struct powercap_zone, dev)
 #define to_powercap_control_type(n) \
@@ -83,6 +84,7 @@ static ssize_t show_constraint_##_attr(struct device *dev, \
 		return -EINVAL; \
 	if (id >= power_zone->const_id_cnt)	\
 		return -EINVAL; \
+	id = array_index_nospec(id, power_zone->const_id_cnt); \
 	pconst = &power_zone->constraints[id]; \
 	if (pconst && pconst->ops && pconst->ops->get_##_attr) { \
 		if (!pconst->ops->get_##_attr(power_zone, id, &value)) \
@@ -108,6 +110,7 @@ static ssize_t store_constraint_##_attr(struct device *dev,\
 		return -EINVAL; \
 	if (id >= power_zone->const_id_cnt)	\
 		return -EINVAL; \
+	id = array_index_nospec(id, power_zone->const_id_cnt); \
 	pconst = &power_zone->constraints[id]; \
 	err = kstrtoull(buf, 10, &value); \
 	if (err) \
@@ -177,6 +180,8 @@ static ssize_t show_constraint_name(struct device *dev,
 		return -EINVAL;
 	if (id >= power_zone->const_id_cnt)
 		return -EINVAL;
+	id = array_index_nospec(id, power_zone->const_id_cnt);
+
 	pconst = &power_zone->constraints[id];
 
 	if (pconst && pconst->ops && pconst->ops->get_name) {

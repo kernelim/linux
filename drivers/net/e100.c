@@ -171,6 +171,7 @@
 #include <linux/string.h>
 #include <linux/firmware.h>
 #include <linux/rtnetlink.h>
+#include <linux/nospec.h>
 #include <asm/unaligned.h>
 
 
@@ -816,8 +817,10 @@ static int e100_eeprom_save(struct nic *nic, u16 start, u16 count)
 	if (start + count >= nic->eeprom_wc)
 		return -EINVAL;
 
-	for (addr = start; addr < start + count; addr++)
+	for (addr = start; addr < start + count; addr++) {
+		addr = array_index_nospec(addr, nic->eeprom_wc);
 		e100_eeprom_write(nic, addr_len, addr, nic->eeprom[addr]);
+	}
 
 	/* The checksum, stored in the last word, is calculated such that
 	 * the sum of words should be 0xBABA */

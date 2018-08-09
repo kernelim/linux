@@ -145,6 +145,7 @@ Include Files
 #include <linux/if_arp.h>
 #include <linux/ioport.h>
 #include <linux/bitops.h>
+#include <linux/nospec.h>
 
 #include <pcmcia/cs_types.h>
 #include <pcmcia/cs.h>
@@ -830,7 +831,7 @@ static int mace_config(struct net_device *dev, struct ifmap *map)
 {
   if ((map->port != (u_char)(-1)) && (map->port != dev->if_port)) {
     if (map->port <= 2) {
-      dev->if_port = map->port;
+      dev->if_port = array_index_nospec(map->port, 3);
       printk(KERN_INFO "%s: switched to %s port\n", dev->name,
 	     if_names[dev->if_port]);
     } else

@@ -33,6 +33,7 @@
 #include <linux/cdev.h>
 #include <linux/mutex.h>
 #include <linux/smp_lock.h>
+#include <linux/nospec.h>
 #include "dvbdev.h"
 
 static DEFINE_MUTEX(dvbdev_mutex);
@@ -71,7 +72,7 @@ static int dvb_device_open(struct inode *inode, struct file *file)
 
 	mutex_lock(&dvbdev_mutex);
 	down_read(&minor_rwsem);
-	dvbdev = dvb_minors[iminor(inode)];
+	dvbdev = dvb_minors[array_index_nospec(iminor(inode), MAX_DVB_MINORS)];
 
 	if (dvbdev && dvbdev->fops) {
 		int err = 0;

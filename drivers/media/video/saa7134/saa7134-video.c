@@ -26,6 +26,7 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/sort.h>
+#include <linux/nospec.h>
 
 #include "saa7134-reg.h"
 #include "saa7134.h"
@@ -871,16 +872,20 @@ static int start_preview(struct saa7134_dev *dev, struct saa7134_fh *fh)
 {
 	unsigned long base,control,bpl;
 	int err;
+	u32 ovfield;
 
 	err = verify_preview(dev,&fh->win);
 	if (0 != err)
 		return err;
 
 	dev->ovfield = fh->win.field;
+	ovfield = array_index_nospec(fh->win.field,
+				     V4L2_FIELD_INTERLACED_BT + 1);
+
 	dprintk("start_preview %dx%d+%d+%d %s field=%s\n",
 		fh->win.w.width,fh->win.w.height,
 		fh->win.w.left,fh->win.w.top,
-		dev->ovfmt->name,v4l2_field_names[dev->ovfield]);
+		dev->ovfmt->name,v4l2_field_names[ovfield]);
 
 	/* setup window + clipping */
 	set_size(dev,TASK_B,fh->win.w.width,fh->win.w.height,
@@ -1746,7 +1751,9 @@ static int saa7134_enum_input(struct file *file, void *priv,
 	n = i->index;
 	if (n >= SAA7134_INPUT_MAX)
 		return -EINVAL;
-	if (NULL == card_in(dev, i->index).name)
+	n = array_index_nospec(n, SAA7134_INPUT_MAX);
+
+	if (NULL == card_in(dev, n).name)
 		return -EINVAL;
 	i->index = n;
 	i->type  = V4L2_INPUT_TYPE_CAMERA;
@@ -1790,6 +1797,8 @@ static int saa7134_s_input(struct file *file, void *priv, unsigned int i)
 
 	if (i >= SAA7134_INPUT_MAX)
 		return -EINVAL;
+	i = array_index_nospec(i, SAA7134_INPUT_MAX);
+
 	if (NULL == card_in(dev, i).name)
 		return -EINVAL;
 	mutex_lock(&dev->lock);
@@ -2114,13 +2123,16 @@ static int saa7134_s_priority(struct file *file, void *f,
 static int saa7134_enum_fmt_vid_cap(struct file *file, void  *priv,
 					struct v4l2_fmtdesc *f)
 {
+	u32 index;
+
 	if (f->index >= FORMATS)
 		return -EINVAL;
+	index = array_index_nospec(f->index, FORMATS);
 
-	strlcpy(f->description, formats[f->index].name,
+	strlcpy(f->description, formats[index].name,
 		sizeof(f->description));
 
-	f->pixelformat = formats[f->index].fourcc;
+	f->pixelformat = formats[index].fourcc;
 
 	return 0;
 }
@@ -2128,18 +2140,24 @@ static int saa7134_enum_fmt_vid_cap(struct file *file, void  *priv,
 static int saa7134_enum_fmt_vid_overlay(struct file *file, void  *priv,
 					struct v4l2_fmtdesc *f)
 {
+	u32 index;
+
 	if (saa7134_no_overlay > 0) {
 		printk(KERN_ERR "V4L2_BUF_TYPE_VIDEO_OVERLAY: no_overlay\n");
 		return -EINVAL;
 	}
 
-	if ((f->index >= FORMATS) || formats[f->index].planar)
+	if (f->index >= FORMATS)
+		return -EINVAL;
+	index = array_index_nospec(f->index, FORMATS);
+
+	if (formats[index].planar)
 		return -EINVAL;
 
-	strlcpy(f->description, formats[f->index].name,
+	strlcpy(f->description, formats[index].name,
 		sizeof(f->description));
 
-	f->pixelformat = formats[f->index].fourcc;
+	f->pixelformat = formats[index].fourcc;
 
 	return 0;
 }

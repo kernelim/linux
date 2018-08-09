@@ -37,6 +37,7 @@
 #include <media/v4l2-chip-ident.h>
 #include <media/v4l2-event.h>
 #include <linux/dvb/audio.h>
+#include <linux/nospec.h>
 
 u16 ivtv_service2vbi(int type)
 {
@@ -801,7 +802,7 @@ static int ivtv_s_audio(struct file *file, void *fh, struct v4l2_audio *vout)
 	if (vout->index >= itv->nof_audio_inputs)
 		return -EINVAL;
 
-	itv->audio_input = vout->index;
+	itv->audio_input = array_index_nospec(vout->index, itv->nof_audio_inputs);
 	ivtv_audio_set_io(itv);
 
 	return 0;
@@ -941,11 +942,13 @@ static int ivtv_enum_fmt_vid_cap(struct file *file, void *fh, struct v4l2_fmtdes
 		}
 	};
 	enum v4l2_buf_type type = fmt->type;
+	u32 index;
 
 	if (fmt->index > 1)
 		return -EINVAL;
+	index = array_index_nospec(fmt->index, 2);
 
-	*fmt = formats[fmt->index];
+	*fmt = formats[index];
 	fmt->type = type;
 	return 0;
 }
@@ -965,14 +968,16 @@ static int ivtv_enum_fmt_vid_out(struct file *file, void *fh, struct v4l2_fmtdes
 		}
 	};
 	enum v4l2_buf_type type = fmt->type;
+	u32 index;
 
 	if (!(itv->v4l2_cap & V4L2_CAP_VIDEO_OUTPUT))
 		return -EINVAL;
 
 	if (fmt->index > 1)
 		return -EINVAL;
+	index = array_index_nospec(fmt->index, 2);
 
-	*fmt = formats[fmt->index];
+	*fmt = formats[index];
 	fmt->type = type;
 
 	return 0;
@@ -1039,6 +1044,7 @@ static int ivtv_s_output(struct file *file, void *fh, unsigned int outp)
 
 	if (outp >= itv->card->nof_outputs)
 		return -EINVAL;
+	outp = array_index_nospec(outp, itv->card->nof_outputs);
 
 	if (outp == itv->active_output) {
 		IVTV_DEBUG_INFO("Output unchanged\n");

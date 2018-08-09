@@ -30,6 +30,8 @@ struct cpu {
 	struct sys_device sysdev;
 };
 
+extern void boot_cpu_state_init(void);
+
 extern int register_cpu(struct cpu *cpu, int num);
 extern struct sys_device *get_cpu_sysdev(unsigned cpu);
 
@@ -45,6 +47,8 @@ extern int sched_create_sysfs_power_savings_entries(struct sysdev_class *cls);
 extern void unregister_cpu(struct cpu *cpu);
 extern ssize_t arch_cpu_probe(const char *, size_t);
 extern ssize_t arch_cpu_release(const char *, size_t);
+#else
+static inline int cpu_down(unsigned int cpu) { return -ENOSYS; }
 #endif
 struct notifier_block;
 
@@ -176,5 +180,34 @@ extern void enable_nonboot_cpus(void);
 static inline int disable_nonboot_cpus(void) { return 0; }
 static inline void enable_nonboot_cpus(void) {}
 #endif /* !CONFIG_PM_SLEEP_SMP */
+
+extern ssize_t cpu_show_meltdown(struct sysdev_class *class, char *buf);
+extern ssize_t cpu_show_spectre_v1(struct sysdev_class *class, char *buf);
+extern ssize_t cpu_show_spectre_v2(struct sysdev_class *class, char *buf);
+extern ssize_t cpu_show_spec_store_bypass(struct sysdev_class *class, char *buf);
+extern ssize_t cpu_show_l1tf(struct sysdev_class *class, char *buf);
+
+enum cpuhp_smt_control {
+	CPU_SMT_ENABLED,
+	CPU_SMT_DISABLED,
+	CPU_SMT_FORCE_DISABLED,
+	CPU_SMT_NOT_SUPPORTED,
+};
+
+#if defined(CONFIG_SMP) && defined(CONFIG_HOTPLUG_SMT)
+extern enum cpuhp_smt_control cpu_smt_control;
+extern void cpu_smt_disable(bool force);
+extern void cpu_smt_check_topology(void);
+#else
+# define cpu_smt_control		(CPU_SMT_ENABLED)
+static inline void cpu_smt_disable(bool force) { }
+static inline void cpu_smt_check_topology(void) { }
+#endif
+
+#ifdef CONFIG_HOTPLUG_SMT
+bool cpu_smt_allowed(unsigned int cpu);
+#else
+static inline bool cpu_smt_allowed(unsigned int cpu) { return true; }
+#endif
 
 #endif /* _LINUX_CPU_H_ */

@@ -41,6 +41,7 @@
 #include <linux/types.h>
 #include <linux/version.h>
 #include <linux/highmem.h>
+#include <linux/nospec.h>
 #include <scsi/sg.h>
 
 #include <trace/events/block.h>
@@ -1665,6 +1666,14 @@ struct nvme_iod *nvme_map_user_pages(struct nvme_dev *dev, int write,
 		goto put_pages;
 
 	sg = iod->sg;
+
+	/*
+	 * 'count' is user-derived (from 'addr' and 'length').  Ensure all
+	 * previous checks have completed before using 'count' as an array
+	 * index in sg_init_table().
+	 */
+	barrier_nospec();
+
 	sg_init_table(sg, count);
 	for (i = 0; i < count; i++) {
 		sg_set_page(&sg[i], pages[i],

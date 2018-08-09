@@ -18,6 +18,7 @@
 #include <linux/netlink.h>
 #include <linux/rculist.h>
 #include <linux/version.h>
+#include <linux/nospec.h>
 #include <net/netlink.h>
 
 #include <linux/netfilter.h>
@@ -1654,16 +1655,19 @@ ip_set_sockfn_get(struct sock *sk, int optval, void __user *user, int *len)
 	}
 	case IP_SET_OP_GET_BYINDEX: {
 		struct ip_set_req_get_set *req_get = data;
+		ip_set_id_t index;
 
 		if (*len != sizeof(struct ip_set_req_get_set) ||
 		    req_get->set.index >= ip_set_max) {
 			ret = -EINVAL;
 			goto done;
 		}
+		index = array_index_nospec(req_get->set.index, ip_set_max);
+
 		nfnl_lock();
 		strncpy(req_get->set.name,
-			ip_set_list[req_get->set.index]
-				? ip_set_list[req_get->set.index]->name : "",
+			ip_set_list[index]
+				? ip_set_list[index]->name : "",
 			IPSET_MAXNAMELEN);
 		nfnl_unlock();
 		goto copy;

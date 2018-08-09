@@ -21,6 +21,7 @@
 #include <linux/fs.h>
 #include <linux/stat.h>
 #include <linux/namei.h>
+#include <linux/nospec.h>
 #include "cifsfs.h"
 #include "cifspdu.h"
 #include "cifsglob.h"
@@ -126,6 +127,7 @@ CIFSParseMFSymlink(const u8 *buf,
 		return -EINVAL;
 
 	if (_link_str) {
+		barrier_nospec();
 		*_link_str = kstrndup(link_str, link_len, GFP_KERNEL);
 		if (!*_link_str)
 			return -ENOMEM;

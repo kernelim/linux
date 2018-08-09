@@ -31,6 +31,7 @@
 #include <linux/workqueue.h>
 #include <linux/swap.h>
 #include <linux/seq_file.h>
+#include <linux/nospec.h>
 
 #include <linux/netfilter.h>
 #include <linux/netfilter_ipv4.h>
@@ -2196,6 +2197,7 @@ do_ip_vs_set_ctl(struct sock *sk, int cmd, void __user *user, unsigned int len)
 	struct ip_vs_service *svc;
 	struct ip_vs_dest_user *udest_compat;
 	struct ip_vs_dest_user_kern udest;
+	int idx;
 
 	if (!capable(CAP_NET_ADMIN))
 		return -EPERM;
@@ -2204,9 +2206,12 @@ do_ip_vs_set_ctl(struct sock *sk, int cmd, void __user *user, unsigned int len)
 		return -EINVAL;
 	if (len < 0 || len >  MAX_ARG_LEN)
 		return -EINVAL;
-	if (len != set_arglen[SET_CMDID(cmd)]) {
+
+	idx = array_index_nospec(SET_CMDID(cmd),
+				 SET_CMDID(IP_VS_SO_SET_MAX)+1);
+	if (len != set_arglen[idx]) {
 		pr_err("set_ctl: len %u != %u\n",
-		       len, set_arglen[SET_CMDID(cmd)]);
+		       len, set_arglen[idx]);
 		return -EINVAL;
 	}
 
@@ -2480,21 +2485,23 @@ do_ip_vs_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
 {
 	unsigned char arg[128];
 	int ret = 0;
-	unsigned int copylen;
+	unsigned int copylen, idx;
 
 	if (!capable(CAP_NET_ADMIN))
 		return -EPERM;
 
 	if (cmd < IP_VS_BASE_CTL || cmd > IP_VS_SO_GET_MAX)
 		return -EINVAL;
+	idx = array_index_nospec(GET_CMDID(cmd),
+				 GET_CMDID(IP_VS_SO_GET_MAX)+1);
 
-	if (*len < get_arglen[GET_CMDID(cmd)]) {
+	if (*len < get_arglen[idx]) {
 		pr_err("get_ctl: len %u < %u\n",
-		       *len, get_arglen[GET_CMDID(cmd)]);
+		       *len, get_arglen[idx]);
 		return -EINVAL;
 	}
 
-	copylen = get_arglen[GET_CMDID(cmd)];
+	copylen = get_arglen[idx];
 	if (copylen > 128)
 		return -EINVAL;
 

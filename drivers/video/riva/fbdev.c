@@ -41,6 +41,7 @@
 #include <linux/pci.h>
 #include <linux/backlight.h>
 #include <linux/bitrev.h>
+#include <linux/nospec.h>
 #ifdef CONFIG_MTRR
 #include <asm/mtrr.h>
 #endif
@@ -1330,6 +1331,7 @@ static int rivafb_setcolreg(unsigned regno, unsigned red, unsigned green,
 	}
 
 	if (regno < 16 && info->fix.visual == FB_VISUAL_DIRECTCOLOR) {
+		regno = array_index_nospec(regno, 16);
 		((u32 *) info->pseudo_palette)[regno] =
 			(regno << info->var.red.offset) |
 			(regno << info->var.green.offset) |

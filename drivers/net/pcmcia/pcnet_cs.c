@@ -41,6 +41,7 @@
 #include <linux/log2.h>
 #include <linux/etherdevice.h>
 #include <linux/mii.h>
+#include <linux/nospec.h>
 #include "../8390.h"
 
 #include <pcmcia/cs_types.h>
@@ -1062,7 +1063,7 @@ static int set_config(struct net_device *dev, struct ifmap *map)
 	    return -EOPNOTSUPP;
 	else if ((map->port < 1) || (map->port > 2))
 	    return -EINVAL;
-	dev->if_port = map->port;
+	dev->if_port = array_index_nospec(map->port, 3);
 	printk(KERN_INFO "%s: switched to %s port\n",
 	       dev->name, if_names[dev->if_port]);
 	NS8390_init(dev, 1);

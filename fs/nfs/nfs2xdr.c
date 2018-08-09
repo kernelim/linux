@@ -22,6 +22,7 @@
 #include <linux/nfs.h>
 #include <linux/nfs2.h>
 #include <linux/nfs_fs.h>
+#include <linux/nospec.h>
 #include "internal.h"
 
 #define NFSDBG_FACILITY		NFSDBG_XDR
@@ -582,6 +583,8 @@ nfs_xdr_readlinkres(struct rpc_rqst *req, __be32 *p, void *dummy)
 		dprintk("nfs: server returned giant symlink!\n");
 		return -ENAMETOOLONG;
 	}
+	len = array_index_nospec(len, rcvbuf->page_len);
+
 	hdrlen = (u8 *) p - (u8 *) iov->iov_base;
 	if (iov->iov_len < hdrlen) {
 		dprintk("NFS: READLINK reply header overflowed:"
@@ -597,6 +600,7 @@ nfs_xdr_readlinkres(struct rpc_rqst *req, __be32 *p, void *dummy)
 				"count %u > recvd %u\n", len, recvd);
 		return -EIO;
 	}
+	len = array_index_nospec(len, recvd + 1);
 
 	xdr_terminate_string(rcvbuf, len);
 	return 0;

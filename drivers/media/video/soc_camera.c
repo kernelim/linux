@@ -28,6 +28,7 @@
 #include <linux/slab.h>
 #include <linux/pm_runtime.h>
 #include <linux/vmalloc.h>
+#include <linux/nospec.h>
 
 #include <media/soc_camera.h>
 #include <media/v4l2-common.h>
@@ -582,13 +583,15 @@ static int soc_camera_enum_fmt_vid_cap(struct file *file, void  *priv,
 {
 	struct soc_camera_device *icd = file->private_data;
 	const struct soc_mbus_pixelfmt *format;
+	u32 index;
 
 	WARN_ON(priv != file->private_data);
 
 	if (f->index >= icd->num_user_formats)
 		return -EINVAL;
+	index = array_index_nospec(f->index, icd->num_user_formats);
 
-	format = icd->user_formats[f->index].host_fmt;
+	format = icd->user_formats[index].host_fmt;
 
 	if (format->name)
 		strlcpy(f->description, format->name, sizeof(f->description));

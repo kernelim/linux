@@ -109,7 +109,7 @@ enum CPL_opcode {
 	CPL_TRACE_PKT = 0xA3,
 	CPL_RDMA_EC_STATUS = 0xA5,
 
-	NUM_CPL_CMDS		/* must be last and previous entries must be sorted */
+	NUM_CPL_CMDS = 0x100
 };
 
 enum CPL_error {

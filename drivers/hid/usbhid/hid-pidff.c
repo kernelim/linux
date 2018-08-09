@@ -26,6 +26,7 @@
 
 #include <linux/input.h>
 #include <linux/usb.h>
+#include <linux/nospec.h>
 
 #include <linux/hid.h>
 
@@ -522,6 +523,7 @@ static int pidff_playback(struct input_dev *dev, int effect_id, int value)
 {
 	struct pidff_device *pidff = dev->ff->private;
 
+	effect_id = array_index_nospec(effect_id, PID_EFFECTS_MAX);
 	pidff_playback_pid(pidff, pidff->pid_id[effect_id], value);
 
 	return 0;
@@ -543,8 +545,10 @@ static void pidff_erase_pid(struct pidff_device *pidff, int pid_id)
 static int pidff_erase_effect(struct input_dev *dev, int effect_id)
 {
 	struct pidff_device *pidff = dev->ff->private;
-	int pid_id = pidff->pid_id[effect_id];
+	int pid_id;
 
+	effect_id = array_index_nospec(effect_id, PID_EFFECTS_MAX);
+	pid_id = pidff->pid_id[effect_id];
 	debug("starting to erase %d/%d", effect_id, pidff->pid_id[effect_id]);
 	/* Wait for the queue to clear. We do not want a full fifo to
 	   prevent the effect removal. */

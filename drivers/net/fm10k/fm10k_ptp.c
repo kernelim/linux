@@ -18,6 +18,7 @@
  * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
  */
 
+#include <linux/nospec.h>
 #include <linux/ptp_classify.h>
 #include <linux/ptp_clock_kernel.h>
 
@@ -333,6 +334,7 @@ static int fm10k_ptp_enable(struct ptp_clock_info *ptp,
 	struct fm10k_hw *hw;
 	u64 period;
 	u32 step;
+	unsigned int index;
 
 	/* we can only support periodic output */
 	if (rq->type != PTP_CLK_REQ_PEROUT)
@@ -341,6 +343,7 @@ static int fm10k_ptp_enable(struct ptp_clock_info *ptp,
 	/* verify the requested channel is there */
 	if (rq->perout.index >= ptp->n_per_out)
 		return -EINVAL;
+	index = array_index_nospec(rq->perout.index, ptp->n_per_out);
 
 	/* we cannot enforce start time as there is no
 	 * mechanism for that in the hardware, we can only control
@@ -370,7 +373,7 @@ static int fm10k_ptp_enable(struct ptp_clock_info *ptp,
 		return -ERANGE;
 
 	/* notify hardware of request to being sending pulses */
-	fm10k_write_sw_reg(hw, FM10K_SW_SYSTIME_PULSE(rq->perout.index),
+	fm10k_write_sw_reg(hw, FM10K_SW_SYSTIME_PULSE(index),
 			   (u32)period);
 
 	return 0;

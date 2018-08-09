@@ -9,6 +9,7 @@
 //-----------------------------------------------------------------------------
 
 #include "dot11d.h"
+#include <linux/nospec.h>
 
 void
 Dot11d_Init(struct ieee80211_device *ieee)
@@ -101,8 +102,10 @@ Dot11d_UpdateCountryIe(
 
 		for(j = 0 ; j < pTriple->NumChnls; j++)
 		{
-			pDot11dInfo->channel_map[pTriple->FirstChnl + j] = 1;
-			pDot11dInfo->MaxTxPwrDbmList[pTriple->FirstChnl + j] = pTriple->MaxTxPowerInDbm;
+			u8 idx = array_index_nospec(pTriple->FirstChnl + j,
+						    MAX_CHANNEL_NUMBER + 1);
+			pDot11dInfo->channel_map[idx] = 1;
+			pDot11dInfo->MaxTxPwrDbmList[idx] = pTriple->MaxTxPowerInDbm;
 			MaxChnlNum = pTriple->FirstChnl + j;
 		}
 

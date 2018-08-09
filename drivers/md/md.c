@@ -51,6 +51,7 @@
 #include <linux/raid/md_p.h>
 #include <linux/raid/md_u.h>
 #include <linux/slab.h>
+#include <linux/nospec.h>
 #include "md.h"
 #include "bitmap.h"
 
@@ -1396,7 +1397,8 @@ static void super_90_sync(struct mddev *mddev, struct md_rdev *rdev)
 			desc_nr = rdev2->raid_disk;
 		else
 			desc_nr = next_spare++;
-		rdev2->desc_nr = desc_nr;
+
+		rdev2->desc_nr = array_index_nospec(desc_nr, MD_SB_DISKS);
 		d = &sb->disks[rdev2->desc_nr];
 		nr_disks++;
 		d->number = rdev2->desc_nr;
@@ -6026,10 +6028,12 @@ static int set_array_info(struct mddev *mddev, mdu_array_info_t *info)
 {
 
 	if (info->raid_disks == 0) {
+		int idx = array_index_nospec(info->major_version,
+					     ARRAY_SIZE(super_types));
 		/* just setting version number for superblock loading */
 		if (info->major_version < 0 ||
 		    info->major_version >= ARRAY_SIZE(super_types) ||
-		    super_types[info->major_version].name == NULL) {
+		    super_types[idx].name == NULL) {
 			/* maybe try to auto-load a module? */
 			printk(KERN_INFO
 				"md: superblock version %d not known\n",

@@ -37,6 +37,7 @@
 #include <linux/types.h>
 #include <linux/crypto.h>
 #include <linux/scatterlist.h>
+#include <linux/nospec.h>
 #include <net/sctp/sctp.h>
 #include <net/sctp/auth.h>
 
@@ -523,6 +524,7 @@ void sctp_auth_destroy_hmacs(struct crypto_hash *auth_hmacs[])
 
 struct sctp_hmac *sctp_auth_get_hmac(__u16 hmac_id)
 {
+	hmac_id = array_index_nospec(hmac_id, SCTP_AUTH_NUM_HMACS);
 	return &sctp_hmac_list[hmac_id];
 }
 
@@ -556,6 +558,7 @@ struct sctp_hmac *sctp_auth_asoc_get_hmac(const struct sctp_association *asoc)
 			id = 0;
 			continue;
 		}
+		id = array_index_nospec(id, SCTP_AUTH_HMAC_ID_MAX + 1);
 
 		/* See is we support the id.  Supported IDs have name and
 		 * length fields set, so that we can allocated and use
@@ -634,6 +637,7 @@ void sctp_auth_asoc_set_default_hmac(struct sctp_association *asoc,
 		/* Check the id is in the supported range */
 		if (id > SCTP_AUTH_HMAC_ID_MAX)
 			continue;
+		id = array_index_nospec(id, SCTP_AUTH_HMAC_ID_MAX + 1);
 
 		/* If this TFM has been allocated, use this id */
 		if (ep->auth_hmacs[id]) {
@@ -754,6 +758,7 @@ void sctp_auth_calculate_hmac(const struct sctp_association *asoc,
 	end = skb_tail_pointer(skb);
 	sg_init_one(&sg, auth, end - (unsigned char *)auth);
 
+	hmac_id = array_index_nospec(hmac_id, SCTP_AUTH_NUM_HMACS);
 	desc.tfm = asoc->ep->auth_hmacs[hmac_id];
 	desc.flags = 0;
 
@@ -786,6 +791,8 @@ int sctp_auth_ep_add_chunkid(struct sctp_endpoint *ep, __u8 chunk_id)
 	nchunks = param_len - sizeof(sctp_paramhdr_t);
 	if (nchunks == SCTP_NUM_CHUNK_TYPES)
 		return -EINVAL;
+
+	barrier_nospec();
 
 	p->chunks[nchunks] = chunk_id;
 	p->param_hdr.length = htons(param_len + 1);

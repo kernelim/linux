@@ -32,6 +32,7 @@
 #include <linux/interrupt.h>
 #include <linux/ptrace.h>
 #include <linux/poll.h>
+#include <linux/nospec.h>
 
 #include <linux/slab.h>
 #include <linux/tty.h>
@@ -82,6 +83,7 @@ static struct hci_uart_proto *hci_uart_get_proto(unsigned int id)
 {
 	if (id >= HCI_UART_MAX_PROTO)
 		return NULL;
+	id = array_index_nospec(id, HCI_UART_MAX_PROTO);
 
 	return hup[id];
 }

@@ -17,6 +17,7 @@
 #include <linux/ctype.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
+#include <linux/nospec.h>
 
 /* Version Information */
 #define DRIVER_AUTHOR "Hansjoerg Lipp <hjlipp@web.de>, Tilman Schmidt <tilman@imap.cc>, Stefan Eilers"
@@ -1072,7 +1073,7 @@ static struct cardstate *gigaset_get_cs_by_minor(unsigned minor)
 	list_for_each_entry(drv, &drivers, list) {
 		if (minor < drv->minor || minor >= drv->minor + drv->minors)
 			continue;
-		index = minor - drv->minor;
+		index = array_index_nospec(minor - drv->minor, drv->minors);
 		spin_lock(&drv->lock);
 		if (drv->cs[index].flags & VALID_MINOR)
 			ret = drv->cs + index;

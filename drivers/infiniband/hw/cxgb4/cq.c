@@ -30,6 +30,7 @@
  * SOFTWARE.
  */
 
+#include <linux/nospec.h>
 #include "iw_cxgb4.h"
 
 static int destroy_cq(struct c4iw_rdev *rdev, struct t4_cq *cq,
@@ -882,6 +883,7 @@ struct ib_cq *c4iw_create_cq(struct ib_device *ibdev, int entries,
 
 	if (vector >= rhp->rdev.lldi.nciq)
 		return ERR_PTR(-EINVAL);
+	vector = array_index_nospec(vector, rhp->rdev.lldi.nciq);
 
 	chp = kzalloc(sizeof(*chp), GFP_KERNEL);
 	if (!chp)

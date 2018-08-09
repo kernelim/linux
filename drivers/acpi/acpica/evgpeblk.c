@@ -41,6 +41,7 @@
  * POSSIBILITY OF SUCH DAMAGES.
  */
 
+#include <linux/nospec.h>
 #include <acpi/acpi.h>
 #include "accommon.h"
 #include "acevents.h"
@@ -255,7 +256,7 @@ acpi_ev_save_method_info(acpi_handle obj_handle,
 {
 	struct acpi_gpe_block_info *gpe_block = (void *)obj_desc;
 	struct acpi_gpe_event_info *gpe_event_info;
-	u32 gpe_number;
+	u32 gpe_number, idx;
 	char name[ACPI_NAME_SIZE + 1];
 	u8 type;
 	acpi_status status;
@@ -328,8 +329,10 @@ acpi_ev_save_method_info(acpi_handle obj_handle,
 	 * during dispatch of this GPE. Default type is RUNTIME, although this may
 	 * change when the _PRW methods are executed later.
 	 */
+	idx = array_index_nospec(gpe_number - gpe_block->block_base_number,
+				 gpe_block->register_count * 8);
 	gpe_event_info =
-	    &gpe_block->event_info[gpe_number - gpe_block->block_base_number];
+	    &gpe_block->event_info[idx];
 
 	gpe_event_info->flags = (u8)
 	    (type | ACPI_GPE_DISPATCH_METHOD | ACPI_GPE_TYPE_RUNTIME);

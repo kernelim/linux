@@ -39,6 +39,7 @@
  * Author: Tom Tucker <tom@opengridcomputing.com>
  */
 
+#include <linux/nospec.h>
 #include <linux/sunrpc/xdr.h>
 #include <linux/sunrpc/debug.h>
 #include <asm/unaligned.h>
@@ -110,6 +111,8 @@ static u32 *decode_write_list(u32 *va, u32 *vaend)
 			ary, nchunks, vaend);
 		return NULL;
 	}
+	barrier_nospec();
+
 	/*
 	 * rs_length is the 2nd 4B field in wc_target and taking its
 	 * address skips the list terminator
@@ -144,6 +147,8 @@ static u32 *decode_reply_array(u32 *va, u32 *vaend)
 			ary, nchunks, vaend);
 		return NULL;
 	}
+	barrier_nospec();
+
 	return (u32 *)&ary->wc_array[nchunks];
 }
 

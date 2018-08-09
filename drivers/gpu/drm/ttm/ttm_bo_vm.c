@@ -38,6 +38,7 @@
 #include <linux/rbtree.h>
 #include <linux/module.h>
 #include <linux/uaccess.h>
+#include <linux/nospec.h>
 
 #define TTM_BO_VM_NUM_PREFAULT 16
 
@@ -176,6 +177,7 @@ static int ttm_bo_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 		retval = VM_FAULT_SIGBUS;
 		goto out_io_unlock;
 	}
+	page_offset = array_index_nospec(page_offset, bo->num_pages);
 
 	/*
 	 * Make a local vma copy to modify the page_prot member

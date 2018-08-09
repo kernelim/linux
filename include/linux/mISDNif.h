@@ -22,6 +22,7 @@
 #include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/socket.h>
+#include <linux/nospec.h>
 
 /*
  * ABI Version 32 bit
@@ -337,8 +338,11 @@ struct ph_info {
 static inline int
 test_channelmap(u_int nr, u_char *map)
 {
-	if (nr <= MISDN_MAX_CHANNEL)
-		return map[nr >> 3] & (1 << (nr & 7));
+	if (nr <= MISDN_MAX_CHANNEL) {
+		int idx = array_index_nospec(nr >> 3, MISDN_CHMAP_SIZE);
+
+		return map[idx] & (1 << (nr & 7));
+	}
 	else
 		return 0;
 }

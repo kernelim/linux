@@ -33,6 +33,7 @@
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/init.h>
+#include <linux/nospec.h>
 #include <net/protocol.h>
 #include <linux/skbuff.h>
 #include <net/sock.h>
@@ -484,6 +485,7 @@ static int mif6_delete(struct net *net, int vifi)
 	struct inet6_dev *in6_dev;
 	if (vifi < 0 || vifi >= net->ipv6.maxvif)
 		return -EADDRNOTAVAIL;
+	vifi = array_index_nospec(vifi, net->ipv6.maxvif);
 
 	v = &net->ipv6.vif6_table[vifi];
 
@@ -1110,6 +1112,10 @@ static int ip6mr_mfc_add(struct net *net, struct mf6cctl *mfc, int mrtsock)
 	unsigned char ttls[MAXMIFS];
 	int i;
 
+	if (mfc->mf6cc_parent >= MAXMIFS)
+		return -ENFILE;
+	mfc->mf6cc_parent = array_index_nospec(mfc->mf6cc_parent, MAXMIFS);
+
 	memset(ttls, 255, MAXMIFS);
 	for (i = 0; i < MAXMIFS; i++) {
 		if (IF_ISSET(i, &mfc->mf6cc_ifset))
@@ -1314,6 +1320,8 @@ int ip6_mroute_setsockopt(struct sock *sk, int optname, char __user *optval, uns
 			return -EFAULT;
 		if (vif.mif6c_mifi >= MAXMIFS)
 			return -ENFILE;
+		vif.mif6c_mifi = array_index_nospec(vif.mif6c_mifi, MAXMIFS);
+
 		rtnl_lock();
 		ret = mif6_add(net, &vif, sk == net->ipv6.mroute6_sk);
 		rtnl_unlock();
@@ -1439,6 +1447,7 @@ int ip6mr_ioctl(struct sock *sk, int cmd, void __user *arg)
 	struct mif_device *vif;
 	struct mfc6_cache *c;
 	struct net *net = sock_net(sk);
+	mifi_t mifi;
 
 	switch (cmd) {
 	case SIOCGETMIFCNT_IN6:
@@ -1446,9 +1455,11 @@ int ip6mr_ioctl(struct sock *sk, int cmd, void __user *arg)
 			return -EFAULT;
 		if (vr.mifi >= net->ipv6.maxvif)
 			return -EINVAL;
+		mifi = array_index_nospec(vr.mifi, net->ipv6.maxvif);
+
 		read_lock(&mrt_lock);
-		vif = &net->ipv6.vif6_table[vr.mifi];
-		if (MIF_EXISTS(net, vr.mifi)) {
+		vif = &net->ipv6.vif6_table[mifi];
+		if (MIF_EXISTS(net, mifi)) {
 			vr.icount = vif->pkt_in;
 			vr.ocount = vif->pkt_out;
 			vr.ibytes = vif->bytes_in;
@@ -1689,13 +1700,15 @@ ip6mr_fill_mroute(struct sk_buff *skb, struct mfc6_cache *c, struct rtmsg *rtm)
 	struct net *net = mfc6_net(c);
 	u8 *b = skb_tail_pointer(skb);
 	struct rtattr *mp_head;
+	mifi_t mf6c_parent;
 
 	/* If cache is unresolved, don't try to parse IIF and OIF */
 	if (c->mf6c_parent >= MAXMIFS)
 		return -ENOENT;
+	mf6c_parent = array_index_nospec(c->mf6c_parent, MAXMIFS);
 
-	if (MIF_EXISTS(net, c->mf6c_parent))
-		RTA_PUT(skb, RTA_IIF, 4, &net->ipv6.vif6_table[c->mf6c_parent].dev->ifindex);
+	if (MIF_EXISTS(net, mf6c_parent))
+		RTA_PUT(skb, RTA_IIF, 4, &net->ipv6.vif6_table[mf6c_parent].dev->ifindex);
 
 	mp_head = (struct rtattr *)skb_put(skb, RTA_LENGTH(0));
 

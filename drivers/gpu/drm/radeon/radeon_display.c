@@ -36,6 +36,7 @@
 #include <drm/drm_edid.h>
 
 #include <linux/gcd.h>
+#include <linux/nospec.h>
 
 static void avivo_crtc_load_lut(struct drm_crtc *crtc)
 {
@@ -215,6 +216,7 @@ void radeon_crtc_fb_gamma_set(struct drm_crtc *crtc, u16 red, u16 green,
 {
 	struct radeon_crtc *radeon_crtc = to_radeon_crtc(crtc);
 
+	regno = array_index_nospec(regno, 256);
 	radeon_crtc->lut_r[regno] = red >> 6;
 	radeon_crtc->lut_g[regno] = green >> 6;
 	radeon_crtc->lut_b[regno] = blue >> 6;
@@ -226,6 +228,7 @@ void radeon_crtc_fb_gamma_get(struct drm_crtc *crtc, u16 *red, u16 *green,
 {
 	struct radeon_crtc *radeon_crtc = to_radeon_crtc(crtc);
 
+	regno = array_index_nospec(regno, 256);
 	*red = radeon_crtc->lut_r[regno] << 6;
 	*green = radeon_crtc->lut_g[regno] << 6;
 	*blue = radeon_crtc->lut_b[regno] << 6;

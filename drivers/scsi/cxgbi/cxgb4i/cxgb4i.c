@@ -15,6 +15,7 @@
 
 #include <linux/module.h>
 #include <linux/moduleparam.h>
+#include <linux/nospec.h>
 #include <scsi/scsi_host.h>
 #include <net/tcp.h>
 #include <net/dst.h>
@@ -1829,6 +1830,7 @@ static int t4_uld_rx_handler(void *handle, const __be64 *rsp,
 	log_debug(1 << CXGBI_DBG_TOE,
 		"cdev %p, opcode 0x%x(0x%x,0x%x), skb %p.\n",
 		 cdev, opc, rpl->ot.opcode_tid, ntohl(rpl->ot.opcode_tid), skb);
+	opc = array_index_nospec(opc, NUM_CPL_CMDS);
 	if (cxgb4i_cplhandlers[opc])
 		cxgb4i_cplhandlers[opc](cdev, skb);
 	else {

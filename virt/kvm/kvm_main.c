@@ -45,6 +45,7 @@
 #include <linux/spinlock.h>
 #include <linux/srcu.h>
 #include <linux/hugetlb.h>
+#include <linux/nospec.h>
 
 #include <asm/processor.h>
 #include <asm/io.h>
@@ -1277,6 +1278,7 @@ int __kvm_set_memory_region(struct kvm *kvm,
 	struct kvm_memory_slot *memslot;
 	struct kvm_memory_slot old, new;
 	struct kvm_memslots *slots, *old_memslots;
+	u32 slot;
 
 	r = -EINVAL;
 	/* General sanity checks */
@@ -1293,10 +1295,13 @@ int __kvm_set_memory_region(struct kvm *kvm,
 		goto out;
 	if (mem->slot >= KVM_MEMORY_SLOTS + KVM_PRIVATE_MEM_SLOTS)
 		goto out;
+	slot = array_index_nospec(mem->slot,
+				  KVM_MEMORY_SLOTS + KVM_PRIVATE_MEM_SLOTS);
+
 	if (mem->guest_phys_addr + mem->memory_size < mem->guest_phys_addr)
 		goto out;
 
-	memslot = &kvm->memslots->memslots[mem->slot];
+	memslot = &kvm->memslots->memslots[slot];
 	base_gfn = mem->guest_phys_addr >> PAGE_SHIFT;
 	npages = mem->memory_size >> PAGE_SHIFT;
 
@@ -1372,6 +1377,7 @@ int __kvm_set_memory_region(struct kvm *kvm,
 		if (!new.lpage_info[i])
 			goto out_free;
 
+		barrier_nospec();
 		if (base_gfn % KVM_PAGES_PER_HPAGE(level))
 			new.lpage_info[i][0].write_count = 1;
 		if ((base_gfn+npages) % KVM_PAGES_PER_HPAGE(level))
@@ -1413,7 +1419,7 @@ skip_lpage:
 		if (mem->slot >= slots->nmemslots)
 			slots->nmemslots = mem->slot + 1;
 		slots->generation++;
-		slots->memslots[mem->slot].flags |= KVM_MEMSLOT_INVALID;
+		slots->memslots[slot].flags |= KVM_MEMSLOT_INVALID;
 
 		old_memslots = kvm->memslots;
 		rcu_assign_pointer(kvm->memslots, slots);
@@ -1463,7 +1469,7 @@ skip_lpage:
 			new.lpage_info[i] = NULL;
 	}
 
-	slots->memslots[mem->slot] = new;
+	slots->memslots[slot] = new;
 	old_memslots = kvm->memslots;
 	rcu_assign_pointer(kvm->memslots, slots);
 	synchronize_srcu_expedited(&kvm->srcu);
@@ -1515,12 +1521,14 @@ int kvm_get_dirty_log(struct kvm *kvm,
 	int r, i;
 	unsigned long n;
 	unsigned long any = 0;
+	u32 slot;
 
 	r = -EINVAL;
 	if (log->slot >= KVM_MEMORY_SLOTS)
 		goto out;
+	slot = array_index_nospec(log->slot, KVM_MEMORY_SLOTS);
 
-	memslot = &kvm->memslots->memslots[log->slot];
+	memslot = &kvm->memslots->memslots[slot];
 	r = -ENOENT;
 	if (!memslot->dirty_bitmap)
 		goto out;
@@ -1584,7 +1592,7 @@ int kvm_is_error_hva(unsigned long addr)
 EXPORT_SYMBOL_GPL(kvm_is_error_hva);
 
 static struct kvm_memory_slot *
-__gfn_to_memslot_unaliased(struct kvm_memslots *slots, gfn_t gfn)
+__gfn_to_memslot(struct kvm_memslots *slots, gfn_t gfn)
 {
 	int i;
 
@@ -1598,25 +1606,18 @@ __gfn_to_memslot_unaliased(struct kvm_memslots *slots, gfn_t gfn)
 	return NULL;
 }
 
-struct kvm_memory_slot *gfn_to_memslot_unaliased(struct kvm *kvm, gfn_t gfn)
-{
-	struct kvm_memslots *slots = kvm_memslots(kvm);
-	return __gfn_to_memslot_unaliased(slots, gfn);
-}
-EXPORT_SYMBOL_GPL(gfn_to_memslot_unaliased);
-
 struct kvm_memory_slot *gfn_to_memslot(struct kvm *kvm, gfn_t gfn)
 {
-	gfn = unalias_gfn(kvm, gfn);
-	return gfn_to_memslot_unaliased(kvm, gfn);
+	struct kvm_memslots *slots = kvm_memslots(kvm);
+	return __gfn_to_memslot(slots, gfn);
 }
+EXPORT_SYMBOL_GPL(gfn_to_memslot);
 
 int kvm_is_visible_gfn(struct kvm *kvm, gfn_t gfn)
 {
 	int i;
 	struct kvm_memslots *slots = rcu_dereference(kvm->memslots);
 
-	gfn = unalias_gfn_instantiation(kvm, gfn);
 	for (i = 0; i < KVM_MEMORY_SLOTS; ++i) {
 		struct kvm_memory_slot *memslot = &slots->memslots[i];
 
@@ -1672,7 +1673,6 @@ int memslot_id(struct kvm *kvm, gfn_t gfn)
 	struct kvm_memslots *slots = rcu_dereference(kvm->memslots);
 	struct kvm_memory_slot *memslot = NULL;
 
-	gfn = unalias_gfn(kvm, gfn);
 	for (i = 0; i < slots->nmemslots; ++i) {
 		memslot = &slots->memslots[i];
 
@@ -1696,8 +1696,7 @@ unsigned long gfn_to_hva(struct kvm *kvm, gfn_t gfn)
 {
 	struct kvm_memory_slot *slot;
 
-	gfn = unalias_gfn_instantiation(kvm, gfn);
-	slot = gfn_to_memslot_unaliased(kvm, gfn);
+	slot = gfn_to_memslot(kvm, gfn);
 	return __gfn_to_hva(slot, gfn);
 }
 EXPORT_SYMBOL_GPL(gfn_to_hva);
@@ -1958,7 +1957,7 @@ int kvm_gfn_to_hva_cache_init(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
 
 	ghc->gpa = gpa;
 	ghc->generation = slots->generation;
-	ghc->memslot = __gfn_to_memslot_unaliased(slots, gfn);
+	ghc->memslot = __gfn_to_memslot(slots, gfn);
 	ghc->hva = __gfn_to_hva(ghc->memslot, gfn);
 	if (!kvm_is_error_hva(ghc->hva))
 		ghc->hva += offset;

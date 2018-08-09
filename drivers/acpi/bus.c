@@ -32,6 +32,7 @@
 #include <linux/device.h>
 #include <linux/proc_fs.h>
 #include <linux/acpi.h>
+#include <linux/nospec.h>
 #ifdef CONFIG_X86
 #include <asm/mpspec.h>
 #include <asm/uv/uv.h>
@@ -232,6 +233,7 @@ int acpi_bus_set_power(acpi_handle handle, int state)
 
 	if ((state < ACPI_STATE_D0) || (state > ACPI_STATE_D3))
 		return -EINVAL;
+	state = array_index_nospec(state, ACPI_STATE_D3 + 1);
 
 	/* Make sure this is a valid target state */
 

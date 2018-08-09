@@ -16,6 +16,7 @@
 
 #include <linux/init.h>
 #include <linux/slab.h>
+#include <linux/nospec.h>
 #include <linux/usb.h>
 #include <linux/usb/audio.h>
 #include <linux/usb/midi.h>
@@ -141,6 +142,7 @@ static int create_fixed_stream_quirk(struct snd_usb_audio *chip,
 	struct usb_interface_descriptor *altsd;
 	int stream, err;
 	unsigned *rate_table = NULL;
+	unsigned char altset_idx;
 
 	fp = kmemdup(quirk->data, sizeof(*fp), GFP_KERNEL);
 	if (!fp) {
@@ -175,7 +177,9 @@ static int create_fixed_stream_quirk(struct snd_usb_audio *chip,
 		kfree(rate_table);
 		return -EINVAL;
 	}
-	alts = &iface->altsetting[fp->altset_idx];
+	altset_idx = array_index_nospec(fp->altset_idx, iface->num_altsetting);
+
+	alts = &iface->altsetting[altset_idx];
 	altsd = get_iface_desc(alts);
 	fp->protocol = altsd->bInterfaceProtocol;
 

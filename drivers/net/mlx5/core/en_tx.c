@@ -32,6 +32,7 @@
 
 #include <linux/tcp.h>
 #include <linux/if_vlan.h>
+#include <linux/nospec.h>
 #include "en.h"
 
 #define MLX5E_SQ_NOPS_ROOM  MLX5_SEND_WQE_MAX_WQEBBS
@@ -113,6 +114,8 @@ u16 mlx5e_select_queue(struct net_device *dev, struct sk_buff *skb)
 		 priv->default_vlan_prio;
 	int tc = netdev_get_prio_tc_map(dev, up);
 
+	channel_ix = array_index_nospec(channel_ix, MLX5E_MAX_NUM_CHANNELS);
+	tc = array_index_nospec(tc, MLX5E_MAX_NUM_TC);
 	return priv->channeltc_to_txq_map[channel_ix][tc];
 }
 

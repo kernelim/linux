@@ -45,6 +45,7 @@
 #include <linux/init.h>
 #include <linux/proc_fs.h>
 #include <linux/rcupdate.h>
+#include <linux/nospec.h>
 #ifndef __GENKSYMS__
 #include <linux/interrupt.h>
 #endif
@@ -1191,6 +1192,8 @@ int ipmi_set_my_address(ipmi_user_t   user,
 {
 	if (channel >= IPMI_MAX_CHANNELS)
 		return -EINVAL;
+	channel = array_index_nospec(channel, IPMI_MAX_CHANNELS);
+
 	user->intf->channels[channel].address = address;
 	return 0;
 }
@@ -1202,6 +1205,8 @@ int ipmi_get_my_address(ipmi_user_t   user,
 {
 	if (channel >= IPMI_MAX_CHANNELS)
 		return -EINVAL;
+	channel = array_index_nospec(channel, IPMI_MAX_CHANNELS);
+
 	*address = user->intf->channels[channel].address;
 	return 0;
 }
@@ -1213,6 +1218,8 @@ int ipmi_set_my_LUN(ipmi_user_t   user,
 {
 	if (channel >= IPMI_MAX_CHANNELS)
 		return -EINVAL;
+	channel = array_index_nospec(channel, IPMI_MAX_CHANNELS);
+
 	user->intf->channels[channel].lun = LUN & 0x3;
 	return 0;
 }
@@ -1224,6 +1231,8 @@ int ipmi_get_my_LUN(ipmi_user_t   user,
 {
 	if (channel >= IPMI_MAX_CHANNELS)
 		return -EINVAL;
+	channel = array_index_nospec(channel, IPMI_MAX_CHANNELS);
+
 	*address = user->intf->channels[channel].lun;
 	return 0;
 }
@@ -1611,6 +1620,7 @@ static int i_ipmi_request(ipmi_user_t          user,
 	struct ipmi_smi_msg      *smi_msg;
 	struct ipmi_recv_msg     *recv_msg;
 	unsigned long            flags;
+	short                    channel;
 
 
 	if (supplied_recv)
@@ -1720,8 +1730,9 @@ static int i_ipmi_request(ipmi_user_t          user,
 			rv = -EINVAL;
 			goto out_err;
 		}
+		channel = array_index_nospec(addr->channel, IPMI_MAX_CHANNELS);
 
-		if (intf->channels[addr->channel].medium
+		if (intf->channels[channel].medium
 					!= IPMI_CHANNEL_MEDIUM_IPMB) {
 			ipmi_inc_stat(intf, sent_invalid_commands);
 			rv = -EINVAL;
@@ -1850,10 +1861,11 @@ static int i_ipmi_request(ipmi_user_t          user,
 			rv = -EINVAL;
 			goto out_err;
 		}
+		channel = array_index_nospec(addr->channel, IPMI_MAX_CHANNELS);
 
-		if ((intf->channels[addr->channel].medium
+		if ((intf->channels[channel].medium
 				!= IPMI_CHANNEL_MEDIUM_8023LAN)
-		    && (intf->channels[addr->channel].medium
+		    && (intf->channels[channel].medium
 				!= IPMI_CHANNEL_MEDIUM_ASYNC)) {
 			ipmi_inc_stat(intf, sent_invalid_commands);
 			rv = -EINVAL;
@@ -1985,10 +1997,14 @@ static int check_addr(ipmi_smi_t       intf,
 		      unsigned char    *saddr,
 		      unsigned char    *lun)
 {
+	short channel;
+
 	if (addr->channel >= IPMI_MAX_CHANNELS)
 		return -EINVAL;
-	*lun = intf->channels[addr->channel].lun;
-	*saddr = intf->channels[addr->channel].address;
+	channel = array_index_nospec(addr->channel, IPMI_MAX_CHANNELS);
+
+	*lun = intf->channels[channel].lun;
+	*saddr = intf->channels[channel].address;
 	return 0;
 }
 

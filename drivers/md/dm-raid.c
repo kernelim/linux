@@ -7,6 +7,7 @@
 
 #include <linux/slab.h>
 #include <linux/module.h>
+#include <linux/nospec.h>
 
 #include "md.h"
 #include "raid1.h"
@@ -352,6 +353,8 @@ static int validate_raid_redundancy(struct raid_set *rs)
 	unsigned i, rebuild_cnt = 0;
 	unsigned rebuilds_per_group = 0, copies, d;
 
+	barrier_nospec();
+
 	for (i = 0; i < rs->md.raid_disks; i++)
 		if (!test_bit(In_sync, &rs->dev[i].rdev.flags) ||
 		    !rs->dev[i].rdev.sb_page)
@@ -539,6 +542,8 @@ static int parse_raid_params(struct raid_set *rs, char **argv,
 				rs->ti->error = "Invalid rebuild index given";
 				return -EINVAL;
 			}
+			value = array_index_nospec(value, rs->md.raid_disks);
+
 			clear_bit(In_sync, &rs->dev[value].rdev.flags);
 			rs->dev[value].rdev.recovery_offset = 0;
 			rs->print_flags |= DMPF_REBUILD;
@@ -551,6 +556,8 @@ static int parse_raid_params(struct raid_set *rs, char **argv,
 				rs->ti->error = "Invalid write_mostly drive index given";
 				return -EINVAL;
 			}
+			value = array_index_nospec(value, rs->md.raid_disks);
+
 			set_bit(WriteMostly, &rs->dev[value].rdev.flags);
 		} else if (!strcasecmp(key, "max_write_behind")) {
 			if (rs->raid_type->level != 1) {

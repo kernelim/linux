@@ -39,6 +39,7 @@
 #include <linux/pm.h>
 #include <linux/pci.h>
 #include <linux/mutex.h>
+#include <linux/nospec.h>
 
 #include <acpi/acpi_bus.h>
 #include <acpi/acpi_drivers.h>
@@ -802,6 +803,7 @@ static int __init acpi_irq_penalty_update(char *str, int used)
 
 		if (irq >= ARRAY_SIZE(acpi_irq_penalty))
 			continue;
+		irq = array_index_nospec(irq, ARRAY_SIZE(acpi_irq_penalty));
 
 		if (used)
 			acpi_irq_penalty[irq] += PIRQ_PENALTY_ISA_USED;

@@ -15,6 +15,7 @@
 #include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/crc32.h>
+#include <linux/nospec.h>
 #include "net_driver.h"
 #include "bitfield.h"
 #include "efx.h"
@@ -2374,9 +2375,11 @@ efx_farch_filter_id_table_id(u32 id)
 {
 	unsigned int range = id >> EFX_FARCH_FILTER_INDEX_WIDTH;
 
-	if (range < ARRAY_SIZE(efx_farch_filter_range_table))
+	if (range < ARRAY_SIZE(efx_farch_filter_range_table)) {
+		range = array_index_nospec(range,
+				ARRAY_SIZE(efx_farch_filter_range_table));
 		return efx_farch_filter_range_table[range];
-	else
+	} else
 		return EFX_FARCH_FILTER_TABLE_COUNT; /* invalid */
 }
 
@@ -2624,6 +2627,8 @@ int efx_farch_filter_remove_safe(struct efx_nic *efx,
 	filter_idx = efx_farch_filter_id_index(filter_id);
 	if (filter_idx >= table->size)
 		return -ENOENT;
+	filter_idx = array_index_nospec(filter_idx, table->size);
+
 	spec = &table->spec[filter_idx];
 
 	spin_lock_bh(&efx->filter_lock);
@@ -2652,6 +2657,8 @@ int efx_farch_filter_get_safe(struct efx_nic *efx,
 	filter_idx = efx_farch_filter_id_index(filter_id);
 	if (filter_idx >= table->size)
 		return -ENOENT;
+	filter_idx = array_index_nospec(filter_idx, table->size);
+
 	spec = &table->spec[filter_idx];
 
 	spin_lock_bh(&efx->filter_lock);

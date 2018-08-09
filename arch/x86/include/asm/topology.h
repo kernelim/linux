@@ -192,6 +192,12 @@ extern const struct cpumask *cpu_coregroup_mask(int cpu);
 
 /* indicates that pointers to the topology cpumask_t maps are valid */
 #define arch_provides_topology_pointers		yes
+
+bool topology_is_primary_thread(unsigned int cpu);
+bool topology_smt_supported(void);
+#else
+static inline bool topology_is_primary_thread(unsigned int cpu) { return true; }
+static inline bool topology_smt_supported(void) { return false; }
 #endif
 
 static inline void arch_fix_phys_package_id(int num, u32 slot)
@@ -207,5 +213,12 @@ void x86_pci_root_bus_resources(int bus, struct list_head *resources);
 			(cpumask_weight(cpu_core_mask(0)) != nr_cpu_ids))
 #define smt_capable()			(smp_num_siblings > 1)
 #endif
+
+extern int __max_smt_threads;
+
+static inline int topology_max_smt_threads(void)
+{
+	return __max_smt_threads;
+}
 
 #endif /* _ASM_X86_TOPOLOGY_H */

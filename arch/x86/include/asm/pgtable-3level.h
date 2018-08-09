@@ -208,20 +208,66 @@ static inline pte_t native_ptep_get_and_clear(pte_t *ptep)
 #endif
 
 /*
- * Bits 0, 6 and 7 are taken in the low part of the pte,
- * put the 32 bits of offset into the high part.
+ * Bits 0, 6 and 7 are taken in the low part of the pte.
+ * The 32 bits of offset is split into both the lower and upper 32 bits
+ * of the pte as follows:
+ *
+ * Bits  0-08: _PAGE_FILE
+ * Bits  9-24: low 16 bits of the offset
+ * Bits 25-31: 1s
+ * --------------
+ * Bits 32-47: 1s
+ * Bits 48-63: high 16 bits of the offset
+ *
+ * So unless the system has more than (MAX-PA - 32M) of memory, the offset
+ * entry won't match any of the physical memory addresses.
  */
-#define pte_to_pgoff(pte) ((pte).pte_high)
-#define pgoff_to_pte(off)						\
-	((pte_t) { { .pte_low = _PAGE_FILE, .pte_high = (off) } })
+#define _PGOFF_ENTRY_SHIFT	9
+#define _PGOFF_HI16_MASK	0xffff0000
+#define _PGOFF_LO16_MASK	0x0000ffff
+
+#define pte_to_pgoff(pte)			\
+	(((pte).pte_high & _PGOFF_HI16_MASK) |	\
+	(((pte).pte_low >>_PGOFF_ENTRY_SHIFT) & _PGOFF_LO16_MASK))
+#define pgoff_to_pte(off) ((pte_t) { {		\
+	.pte_low = _PAGE_FILE |			\
+	(((off) | _PGOFF_HI16_MASK) << _PGOFF_ENTRY_SHIFT),	\
+	.pte_high = (off) | _PGOFF_LO16_MASK } })
 #define PTE_FILE_MAX_BITS       32
 
-/* Encode and de-code a swap entry */
+/*
+ * Encode and de-code a swap entry
+ *
+ * With a maximum supported physical address bit size of 46, there are 18
+ * high order bits available. So we can split the 32-bit swap entry into 2
+ * 16-bit halves and put them into the high and low 32-bit words of the PTE
+ * as follows:
+ *
+ *  bits  0-08: 0s
+ *  bits  9-24: low 16 bits of swap entry
+ *  bits 25-31: 1s
+ *  --------------
+ *  bits 32-47: 1s
+ *  bits 48-63: high 16 bits of swap entry
+ *
+ * So unless the system has more than (MAX-PA - 32M) of memory, the swap
+ * entry won't match any of the physical memory addresses.
+ */
 #define MAX_SWAPFILES_CHECK() BUILD_BUG_ON(MAX_SWAPFILES_SHIFT > 5)
 #define __swp_type(x)			(((x).val) & 0x1f)
 #define __swp_offset(x)			((x).val >> 5)
 #define __swp_entry(type, offset)	((swp_entry_t){(type) | (offset) << 5})
-#define __pte_to_swp_entry(pte)		((swp_entry_t){ (pte).pte_high })
-#define __swp_entry_to_pte(x)		((pte_t){ { .pte_high = (x).val } })
+
+#define _PTE_SWAP_ENTRY_SHIFT		9
+#define _SWAP_HI16_MASK 		0xffff0000
+#define _SWAP_LO16_MASK 		0x0000ffff
+#define __pte_to_swp_entry(pte) 	((swp_entry_t) { \
+	 ((pte).pte_high & _SWAP_HI16_MASK) | \
+	(((pte).pte_low >> _PTE_SWAP_ENTRY_SHIFT) & _SWAP_LO16_MASK) })
+#define __swp_entry_to_pte(x)		((pte_t) { { \
+	.pte_high =  (x).val | _SWAP_LO16_MASK, \
+	.pte_low  = ((x).val | _SWAP_HI16_MASK) << _PTE_SWAP_ENTRY_SHIFT } })
+
+#include <asm/pgtable-invert.h>
 
 #endif /* _ASM_X86_PGTABLE_3LEVEL_H */

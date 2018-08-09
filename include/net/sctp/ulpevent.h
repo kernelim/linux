@@ -49,6 +49,8 @@
 #ifndef __sctp_ulpevent_h__
 #define __sctp_ulpevent_h__
 
+#include <linux/nospec.h>
+
 /* A structure to carry information to the ULP (e.g. Sockets API) */
 /* Warning: This sits inside an skb.cb[] area.  Be very careful of
  * growing this structure as it is at the maximum limit now.
@@ -143,8 +145,11 @@ __u16 sctp_ulpevent_get_notification_type(const struct sctp_ulpevent *event);
 static inline int sctp_ulpevent_type_enabled(__u16 sn_type,
 					     struct sctp_event_subscribe *mask)
 {
+	u16 idx = array_index_nospec(sn_type - SCTP_SN_TYPE_BASE,
+				     sizeof(*mask));
+
 	char *amask = (char *) mask;
-	return amask[sn_type - SCTP_SN_TYPE_BASE];
+	return amask[idx];
 }
 
 /* Given an event subscription, is this event enabled? */

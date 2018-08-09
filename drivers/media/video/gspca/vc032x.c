@@ -22,6 +22,7 @@
 
 #define MODULE_NAME "vc032x"
 
+#include <linux/nospec.h>
 #include "gspca.h"
 
 MODULE_AUTHOR("Jean-François Moine <http://moinejf.free.fr>");
@@ -4163,12 +4164,15 @@ static int sd_querymenu(struct gspca_dev *gspca_dev,
 			struct v4l2_querymenu *menu)
 {
 	static const char *freq_nm[3] = {"NoFliker", "50 Hz", "60 Hz"};
+	u32 index;
 
 	switch (menu->id) {
 	case V4L2_CID_POWER_LINE_FREQUENCY:
 		if (menu->index >= ARRAY_SIZE(freq_nm))
 			break;
-		strcpy((char *) menu->name, freq_nm[menu->index]);
+		index = array_index_nospec(menu->index, ARRAY_SIZE(freq_nm));
+
+		strcpy((char *) menu->name, freq_nm[index]);
 		return 0;
 	}
 	return -EINVAL;

@@ -36,6 +36,7 @@
 #include <linux/timer.h>
 #include <linux/notifier.h>
 #include <linux/inetdevice.h>
+#include <linux/nospec.h>
 
 #include <net/neighbour.h>
 #include <net/netevent.h>
@@ -227,8 +228,13 @@ int iwch_resume_tid(struct iwch_ep *ep)
 
 static void set_emss(struct iwch_ep *ep, u16 opt)
 {
+	u16 idx;
+
 	PDBG("%s ep %p opt %u\n", __func__, ep, opt);
-	ep->emss = T3C_DATA(ep->com.tdev)->mtus[G_TCPOPT_MSS(opt)] - 40;
+
+	idx = array_index_nospec(G_TCPOPT_MSS(opt),
+				 T3C_DATA(ep->com.tdev)->nmtus);
+	ep->emss = T3C_DATA(ep->com.tdev)->mtus[idx] - 40;
 	if (G_TCPOPT_TSTAMP(opt))
 		ep->emss -= 12;
 	if (ep->emss < 128)

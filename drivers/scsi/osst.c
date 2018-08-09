@@ -51,6 +51,7 @@ static const char * osst_version = "0.99.4";
 #include <linux/delay.h>
 #include <linux/jiffies.h>
 #include <linux/smp_lock.h>
+#include <linux/nospec.h>
 #include <asm/uaccess.h>
 #include <asm/dma.h>
 #include <asm/system.h>
@@ -696,7 +697,8 @@ static int osst_verify_frame(struct osst_tape * STp, int frame_seq_number, int q
 
 		i = ntohl(aux->filemark_cnt);
 		if (STp->header_cache != NULL && i < OS_FM_TAB_MAX && (i > STp->filemark_cnt ||
-		    STp->first_frame_position - 1 != ntohl(STp->header_cache->dat_fm_tab.fm_tab_ent[i]))) {
+		    STp->first_frame_position - 1 != ntohl(STp->header_cache->dat_fm_tab.fm_tab_ent[array_index_nospec(i, OS_FM_TAB_MAX)]))) {
+			i = array_index_nospec(i, OS_FM_TAB_MAX);
 #if DEBUG
 			printk(OSST_DEB_MSG "%s:D: %s filemark %d at frame pos %d\n", name,
 				  STp->header_cache->dat_fm_tab.fm_tab_ent[i] == 0?"Learned":"Corrected",
@@ -1863,15 +1865,21 @@ static int osst_space_over_filemarks_backward(struct osst_tape * STp, struct oss
 		/*
 		 * direct lookup in header filemark list
 		 */
+		int idx;
+
 		cnt = ntohl(STp->buffer->aux->filemark_cnt);
+		idx = array_index_nospec(cnt - 1, OS_FM_TAB_MAX);
+
 		if (STp->header_ok                         && 
 		    STp->header_cache != NULL              &&
 		    (cnt - mt_count)  >= 0                 &&
 		    (cnt - mt_count)   < OS_FM_TAB_MAX     &&
 		    (cnt - mt_count)   < STp->filemark_cnt &&
-		    STp->header_cache->dat_fm_tab.fm_tab_ent[cnt-1] == STp->buffer->aux->last_mark_ppos)
+		    STp->header_cache->dat_fm_tab.fm_tab_ent[idx] == STp->buffer->aux->last_mark_ppos) {
+			int idx2 = array_index_nospec(cnt - mt_count, OS_FM_TAB_MAX);
 
-			last_mark_ppos = ntohl(STp->header_cache->dat_fm_tab.fm_tab_ent[cnt - mt_count]);
+			last_mark_ppos = ntohl(STp->header_cache->dat_fm_tab.fm_tab_ent[idx2]);
+		}
 #if DEBUG
 		if (STp->header_cache == NULL || (cnt - mt_count) < 0 || (cnt - mt_count) >= OS_FM_TAB_MAX)
 			printk(OSST_DEB_MSG "%s:D: Filemark lookup fail due to %s\n", name,
@@ -1880,7 +1888,7 @@ static int osst_space_over_filemarks_backward(struct osst_tape * STp, struct oss
 			printk(OSST_DEB_MSG "%s:D: Filemark lookup: prev mark %d (%s), skip %d to %d\n",
 				name, cnt,
 				((cnt == -1 && ntohl(STp->buffer->aux->last_mark_ppos) == -1) ||
-				 (STp->header_cache->dat_fm_tab.fm_tab_ent[cnt-1] ==
+				 (STp->header_cache->dat_fm_tab.fm_tab_ent[idx] ==
 					 STp->buffer->aux->last_mark_ppos))?"match":"error",
 			       mt_count, last_mark_ppos);
 #endif
@@ -2001,7 +2009,8 @@ static int osst_space_over_filemarks_forward_fast(struct osst_tape * STp, struct
 {
 	char  * name = tape_name(STp);
 	int	cnt  = 0,
-		next_mark_ppos = -1;
+		next_mark_ppos = -1,
+		idx;
 
 #if DEBUG
 	printk(OSST_DEB_MSG "%s:D: Reached space_over_filemarks_forward_fast %d %d\n", name, mt_op, mt_count);
@@ -2018,14 +2027,18 @@ static int osst_space_over_filemarks_forward_fast(struct osst_tape * STp, struct
 		 * direct lookup in header filemark list
 		 */
 		cnt = ntohl(STp->buffer->aux->filemark_cnt) - 1;
+		idx = array_index_nospec(cnt, OS_FM_TAB_MAX);
+
 		if (STp->header_ok                         && 
 		    STp->header_cache != NULL              &&
 		    (cnt + mt_count)   < OS_FM_TAB_MAX     &&
 		    (cnt + mt_count)   < STp->filemark_cnt &&
 		    ((cnt == -1 && ntohl(STp->buffer->aux->last_mark_ppos) == -1) ||
-		     (STp->header_cache->dat_fm_tab.fm_tab_ent[cnt] == STp->buffer->aux->last_mark_ppos)))
+		     (STp->header_cache->dat_fm_tab.fm_tab_ent[idx] == STp->buffer->aux->last_mark_ppos))) {
+			int idx2 = array_index_nospec(idx + mt_count, OS_FM_TAB_MAX);
 
-			next_mark_ppos = ntohl(STp->header_cache->dat_fm_tab.fm_tab_ent[cnt + mt_count]);
+			next_mark_ppos = ntohl(STp->header_cache->dat_fm_tab.fm_tab_ent[idx2]);
+		}
 #if DEBUG
 		if (STp->header_cache == NULL || (cnt + mt_count) >= OS_FM_TAB_MAX)
 			printk(OSST_DEB_MSG "%s:D: Filemark lookup fail due to %s\n", name,
@@ -2034,7 +2047,7 @@ static int osst_space_over_filemarks_forward_fast(struct osst_tape * STp, struct
 			printk(OSST_DEB_MSG "%s:D: Filemark lookup: prev mark %d (%s), skip %d to %d\n",
 			       name, cnt,
 			       ((cnt == -1 && ntohl(STp->buffer->aux->last_mark_ppos) == -1) ||
-				(STp->header_cache->dat_fm_tab.fm_tab_ent[cnt] ==
+				(STp->header_cache->dat_fm_tab.fm_tab_ent[idx] ==
 					 STp->buffer->aux->last_mark_ppos))?"match":"error",
 			       mt_count, next_mark_ppos);
 #endif
@@ -4458,7 +4471,8 @@ static int __os_scsi_tape_open(struct inode * inode, struct file * filp)
 
 	write_lock(&os_scsi_tapes_lock);
 	if (dev >= osst_max_dev || os_scsi_tapes == NULL ||
-	    (STp = os_scsi_tapes[dev]) == NULL || !STp->device) {
+	    (STp = os_scsi_tapes[array_index_nospec(dev, osst_max_dev)]) == NULL ||
+	    !STp->device) {
 		write_unlock(&os_scsi_tapes_lock);
 		return (-ENXIO);
 	}
@@ -4497,7 +4511,8 @@ static int __os_scsi_tape_open(struct inode * inode, struct file * filp)
 		new_session = 1;
 		STp->current_mode = mode;
 	}
-	STm = &(STp->modes[STp->current_mode]);
+	mode = array_index_nospec(STp->current_mode, ST_NBR_MODES);
+	STm = &(STp->modes[mode]);
 
 	flags = filp->f_flags;
 	STp->write_prot = ((flags & O_ACCMODE) == O_RDONLY);

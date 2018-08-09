@@ -27,6 +27,7 @@
  **************************************************************************/
 
 #include <linux/export.h>
+#include <linux/nospec.h>
 
 #include <drm/drmP.h>
 #include "vmwgfx_drv.h"
@@ -82,6 +83,7 @@ static int vmw_fb_setcolreg(unsigned regno, unsigned red, unsigned green,
 		DRM_ERROR("Bad regno %u.\n", regno);
 		return 1;
 	}
+	regno = array_index_nospec(regno, 16);
 
 	switch (par->set_fb->depth) {
 	case 24:

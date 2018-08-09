@@ -56,6 +56,7 @@
  * Ethernet Connection (3) I218-V
  */
 
+#include <linux/nospec.h>
 #include "e1000.h"
 
 /* ICH GbE Flash Hardware Sequencing Flash Status Register bit breakdown */
@@ -3244,9 +3245,10 @@ static s32 e1000_read_nvm_spt(struct e1000_hw *hw, u16 offset, u16 words,
 
 	for (i = 0; i < words; i += 2) {
 		if (words - i == 1) {
-			if (dev_spec->shadow_ram[offset + i].modified) {
+			u16 idx = array_index_nospec(offset + i, E1000_ICH8_SHADOW_RAM_WORDS);
+			if (dev_spec->shadow_ram[idx].modified) {
 				data[i] =
-				    dev_spec->shadow_ram[offset + i].value;
+				    dev_spec->shadow_ram[idx].value;
 			} else {
 				offset_to_read = act_offset + i -
 				    ((act_offset + i) % 2);
@@ -3262,9 +3264,13 @@ static s32 e1000_read_nvm_spt(struct e1000_hw *hw, u16 offset, u16 words,
 					data[i] = (u16)((dword >> 16) & 0xFFFF);
 			}
 		} else {
+			u16 idx1 = array_index_nospec(offset + i,
+						      E1000_ICH8_SHADOW_RAM_WORDS);
+			u16 idx2 = array_index_nospec(offset + i + 1,
+						      E1000_ICH8_SHADOW_RAM_WORDS);
 			offset_to_read = act_offset + i;
-			if (!(dev_spec->shadow_ram[offset + i].modified) ||
-			    !(dev_spec->shadow_ram[offset + i + 1].modified)) {
+			if (!(dev_spec->shadow_ram[idx1].modified) ||
+			    !(dev_spec->shadow_ram[idx2].modified)) {
 				ret_val =
 				  e1000_read_flash_dword_ich8lan(hw,
 								 offset_to_read,
@@ -3272,14 +3278,14 @@ static s32 e1000_read_nvm_spt(struct e1000_hw *hw, u16 offset, u16 words,
 				if (ret_val)
 					break;
 			}
-			if (dev_spec->shadow_ram[offset + i].modified)
+			if (dev_spec->shadow_ram[idx1].modified)
 				data[i] =
-				    dev_spec->shadow_ram[offset + i].value;
+				    dev_spec->shadow_ram[idx1].value;
 			else
 				data[i] = (u16)(dword & 0xFFFF);
-			if (dev_spec->shadow_ram[offset + i].modified)
+			if (dev_spec->shadow_ram[idx1].modified)
 				data[i + 1] =
-				    dev_spec->shadow_ram[offset + i + 1].value;
+				    dev_spec->shadow_ram[idx2].value;
 			else
 				data[i + 1] = (u16)(dword >> 16 & 0xFFFF);
 		}
@@ -3333,8 +3339,9 @@ static s32 e1000_read_nvm_ich8lan(struct e1000_hw *hw, u16 offset, u16 words,
 
 	ret_val = 0;
 	for (i = 0; i < words; i++) {
-		if (dev_spec->shadow_ram[offset + i].modified) {
-			data[i] = dev_spec->shadow_ram[offset + i].value;
+		u16 idx = array_index_nospec(offset + i, E1000_ICH8_SHADOW_RAM_WORDS);
+		if (dev_spec->shadow_ram[idx].modified) {
+			data[i] = dev_spec->shadow_ram[idx].value;
 		} else {
 			ret_val = e1000_read_flash_word_ich8lan(hw,
 								act_offset + i,
@@ -3713,8 +3720,9 @@ static s32 e1000_write_nvm_ich8lan(struct e1000_hw *hw, u16 offset, u16 words,
 	nvm->ops.acquire(hw);
 
 	for (i = 0; i < words; i++) {
-		dev_spec->shadow_ram[offset + i].modified = true;
-		dev_spec->shadow_ram[offset + i].value = data[i];
+		u16 idx = array_index_nospec(offset + i, E1000_ICH8_SHADOW_RAM_WORDS);
+		dev_spec->shadow_ram[idx].modified = true;
+		dev_spec->shadow_ram[idx].value = data[i];
 	}
 
 	nvm->ops.release(hw);

@@ -19,6 +19,7 @@
 
 #include <linux/module.h>
 #include <linux/tcp.h>
+#include <linux/nospec.h>
 
 #include <net/netfilter/nf_nat.h>
 #include <net/netfilter/nf_nat_helper.h>
@@ -153,7 +154,7 @@ pptp_outbound_pkt(struct sk_buff *skb,
 		break;
 	default:
 		pr_debug("unknown outbound packet 0x%04x:%s\n", msg,
-			 msg <= PPTP_MSG_MAX ? pptp_msg_name[msg] :
+			 msg <= PPTP_MSG_MAX ? pptp_msg_name[array_index_nospec(msg, PPTP_MSG_MAX + 1)] :
 					       pptp_msg_name[0]);
 		/* fall through */
 	case PPTP_SET_LINK_INFO:
@@ -247,7 +248,7 @@ pptp_inbound_pkt(struct sk_buff *skb,
 		break;
 	default:
 		pr_debug("unknown inbound packet %s\n",
-			 msg <= PPTP_MSG_MAX ? pptp_msg_name[msg] :
+			 msg <= PPTP_MSG_MAX ? pptp_msg_name[array_index_nospec(msg, PPTP_MSG_MAX + 1)] :
 					       pptp_msg_name[0]);
 		/* fall through */
 	case PPTP_START_SESSION_REQUEST:

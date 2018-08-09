@@ -59,6 +59,7 @@
 #include <linux/io.h>
 #include <linux/videodev2.h>
 #include <linux/i2c.h>
+#include <linux/nospec.h>
 
 #include <media/saa7115.h>
 #include <media/v4l2-common.h>
@@ -759,14 +760,17 @@ static int vidioc_querybuf(struct file *file,
 {
 	struct usb_usbvision *usbvision = video_drvdata(file);
 	struct usbvision_frame *frame;
+	u32 index;
 
 	/* FIXME : must control
 	   that buffers are mapped (VIDIOC_REQBUFS has been called) */
 	if (vb->index >= usbvision->num_frames)
 		return -EINVAL;
+	index = array_index_nospec(vb->index, usbvision->num_frames);
+
 	/* Updating the corresponding frame state */
 	vb->flags = 0;
-	frame = &usbvision->frame[vb->index];
+	frame = &usbvision->frame[index];
 	if (frame->grabstate >= frame_state_ready)
 		vb->flags |= V4L2_BUF_FLAG_QUEUED;
 	if (frame->grabstate >= frame_state_done)
@@ -782,8 +786,8 @@ static int vidioc_querybuf(struct file *file,
 	vb->length = usbvision->curwidth *
 		usbvision->curheight *
 		usbvision->palette.bytes_per_pixel;
-	vb->timestamp = usbvision->frame[vb->index].timestamp;
-	vb->sequence = usbvision->frame[vb->index].sequence;
+	vb->timestamp = usbvision->frame[index].timestamp;
+	vb->sequence = usbvision->frame[index].sequence;
 	return 0;
 }
 
@@ -792,12 +796,14 @@ static int vidioc_qbuf(struct file *file, void *priv, struct v4l2_buffer *vb)
 	struct usb_usbvision *usbvision = video_drvdata(file);
 	struct usbvision_frame *frame;
 	unsigned long lock_flags;
+	u32 index;
 
 	/* FIXME : works only on VIDEO_CAPTURE MODE, MMAP. */
 	if (vb->index >= usbvision->num_frames)
 		return -EINVAL;
+	index = array_index_nospec(vb->index, usbvision->num_frames);
 
-	frame = &usbvision->frame[vb->index];
+	frame = &usbvision->frame[index];
 
 	if (frame->grabstate != frame_state_unused)
 		return -EAGAIN;
@@ -813,7 +819,7 @@ static int vidioc_qbuf(struct file *file, void *priv, struct v4l2_buffer *vb)
 	frame->v4l2_format = usbvision->palette;
 
 	spin_lock_irqsave(&usbvision->queue_lock, lock_flags);
-	list_add_tail(&usbvision->frame[vb->index].frame, &usbvision->inqueue);
+	list_add_tail(&usbvision->frame[index].frame, &usbvision->inqueue);
 	spin_unlock_irqrestore(&usbvision->queue_lock, lock_flags);
 
 	return 0;
@@ -888,10 +894,14 @@ static int vidioc_streamoff(struct file *file,
 static int vidioc_enum_fmt_vid_cap(struct file *file, void  *priv,
 					struct v4l2_fmtdesc *vfd)
 {
+	u32 index;
+
 	if (vfd->index >= USBVISION_SUPPORTED_PALETTES - 1)
 		return -EINVAL;
-	strcpy(vfd->description, usbvision_v4l2_format[vfd->index].desc);
-	vfd->pixelformat = usbvision_v4l2_format[vfd->index].format;
+	index = array_index_nospec(vfd->index, USBVISION_SUPPORTED_PALETTES - 1);
+
+	strcpy(vfd->description, usbvision_v4l2_format[index].desc);
+	vfd->pixelformat = usbvision_v4l2_format[index].format;
 	return 0;
 }
 

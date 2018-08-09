@@ -335,6 +335,7 @@ static inline void gmb(void)
 		: : : "memory");
 }
 #define gmb gmb
+#define barrier_nospec gmb
 
 /**
  * array_index_mask_nospec - generate a mask for array_idx() that is

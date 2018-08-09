@@ -28,6 +28,7 @@
 #include <linux/pfn.h>
 #include <linux/suspend.h>
 #include <linux/mm_inline.h>
+#include <linux/nospec.h>
 
 #include <asm/tlbflush.h>
 
@@ -593,12 +594,14 @@ int __ref add_memory(int nid, u64 start, u64 size)
 		goto out;
 
 	if (!node_online(nid)) {
-		pgdat = hotadd_new_pgdat(nid, start);
+		pgdat = hotadd_new_pgdat(array_index_nospec(nid, MAX_NUMNODES),
+					 start);
 		ret = -ENOMEM;
 		if (!pgdat)
 			goto out;
 		new_pgdat = 1;
 	}
+	nid = array_index_nospec(nid, MAX_NUMNODES);
 
 	/* call arch's memory hotadd */
 	ret = arch_add_memory(nid, start, size);

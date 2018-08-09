@@ -32,6 +32,7 @@
 #include <linux/device.h>
 #include <linux/firmware.h>
 #include <linux/vmalloc.h>
+#include <linux/nospec.h>
 #include <media/v4l2-common.h>
 #include <media/v4l2-ioctl.h>
 #include <media/cx2341x.h>
@@ -1588,13 +1589,15 @@ static int vidioc_enum_input(struct file *file, void *priv,
 	struct cx231xx *dev = fh->dev;
 	struct cx231xx_input *input;
 	int n;
+	u32 index;
+
 	dprintk(3, "enter vidioc_enum_input()i->index=%d\n", i->index);
 
 	if (i->index >= 4)
 		return -EINVAL;
+	index = array_index_nospec(i->index, 4);
 
-
-	input = &cx231xx_boards[dev->model].input[i->index];
+	input = &cx231xx_boards[dev->model].input[index];
 
 	if (input->type == 0)
 		return -EINVAL;
@@ -1602,7 +1605,7 @@ static int vidioc_enum_input(struct file *file, void *priv,
 	/* FIXME
 	 * strcpy(i->name, input->name); */
 
-	n = i->index;
+	n = index;
 	strcpy(i->name, iname[INPUT(n)->type]);
 
 	if (input->type == CX231XX_VMUX_TELEVISION ||

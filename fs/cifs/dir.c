@@ -26,6 +26,7 @@
 #include <linux/namei.h>
 #include <linux/mount.h>
 #include <linux/file.h>
+#include <linux/nospec.h>
 #include "cifsfs.h"
 #include "cifspdu.h"
 #include "cifsglob.h"
@@ -82,6 +83,7 @@ cifs_bp_rename_retry:
 	full_path = kmalloc(namelen+1, GFP_KERNEL);
 	if (full_path == NULL)
 		return full_path;
+	barrier_nospec();
 	full_path[namelen] = 0;	/* trailing null */
 	for (temp = direntry; !IS_ROOT(temp);) {
 		namelen -= 1 + temp->d_name.len;

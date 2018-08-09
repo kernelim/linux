@@ -18,6 +18,7 @@
 #include <linux/icmp.h>
 #include <linux/netdevice.h>
 #include <linux/rtnetlink.h>
+#include <linux/nospec.h>
 #include <net/sock.h>
 #include <net/ip.h>
 #include <net/icmp.h>
@@ -505,6 +506,7 @@ static struct ip_options *ip_options_get_alloc(const int optlen)
 static int ip_options_get_finish(struct net *net, struct ip_options **optp,
 				 struct ip_options *opt, int optlen)
 {
+	barrier_nospec();
 	while (optlen & 3)
 		opt->__data[optlen++] = IPOPT_END;
 	opt->optlen = optlen;

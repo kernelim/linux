@@ -218,3 +218,16 @@ For 32-bit we have the following conventions - kernel is built with
 	.macro icebp
 	.byte 0xf1
 	.endm
+
+	/*
+	 * Must be called IMMEDIATELY after a branch to prevent speculation
+	 * past the bounds of the syscall table.  Uses the carry flag from the
+	 * most recent CMP instruction to set the scratch reg to -1 if the
+	 * syscall was in bounds and 0 if it was out of bounds.  So RAX --
+	 * which holds the syscall number -- is cleared to zero in the
+	 * speculative out-of-bounds case.
+	 */
+	.macro ARRAY_INDEX_NOSPEC_SYSCALL clobber_reg
+		sbb \clobber_reg, \clobber_reg
+		and \clobber_reg, %rax
+	.endm

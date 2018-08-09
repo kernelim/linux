@@ -98,6 +98,7 @@
 #include <linux/in.h>
 #include <linux/fs.h>
 #include <linux/slab.h>
+#include <linux/nospec.h>
 #include <asm/uaccess.h>
 #include <linux/skbuff.h>
 #include <linux/netdevice.h>
@@ -201,6 +202,8 @@ static int unix_mkname(struct sockaddr_un *sunaddr, int len, unsigned *hashp)
 {
 	if (len <= sizeof(short) || len > sizeof(*sunaddr))
 		return -EINVAL;
+	len = array_index_nospec(len, sizeof(*sunaddr) + 1);
+
 	if (!sunaddr || sunaddr->sun_family != AF_UNIX)
 		return -EINVAL;
 	if (sunaddr->sun_path[0]) {

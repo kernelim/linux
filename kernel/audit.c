@@ -756,9 +756,12 @@ static int audit_receive_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 
 				audit_log_format(ab, " data=");
 				size = nlmsg_len(nlh);
-				if (size > 0 &&
-				    ((unsigned char *)data)[size - 1] == '\0')
-					size--;
+				if (size > 0) {
+					barrier_nospec();
+
+					if (((unsigned char *)data)[size - 1] == '\0')
+						size--;
+				}
 				audit_log_n_untrustedstring(ab, data, size);
 			}
 			audit_set_pid(ab, pid);

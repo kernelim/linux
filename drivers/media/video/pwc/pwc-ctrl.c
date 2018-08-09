@@ -37,6 +37,7 @@
 
 /* Control functions for the cam; brightness, contrast, video mode, etc. */
 
+#include <linux/nospec.h>
 #ifdef __KERNEL__
 #include <asm/uaccess.h>
 #endif
@@ -249,6 +250,10 @@ static int set_video_mode_Nala(struct pwc_device *pdev, int size, int frames)
 
 	if (size < 0 || size > PSZ_CIF || frames < 4 || frames > 25)
 		return -EINVAL;
+
+	frames = array_index_nospec(frames, 26);
+	size = array_index_nospec(size, PSZ_CIF + 1);
+
 	frames = frames2frames[frames];
 	fps = frames2table[frames];
 	pEntry = &Nala_table[size][fps];
@@ -297,6 +302,8 @@ static int set_video_mode_Timon(struct pwc_device *pdev, int size, int frames, i
 
 	if (size >= PSZ_MAX || frames < 5 || frames > 30 || compression < 0 || compression > 3)
 		return -EINVAL;
+	size = array_index_nospec(size, PSZ_MAX);
+
 	if (size == PSZ_VGA && frames > 15)
 		return -EINVAL;
 	fps = (frames / 5) - 1;
@@ -306,6 +313,8 @@ static int set_video_mode_Timon(struct pwc_device *pdev, int size, int frames, i
 	*/
 	pChoose = NULL;
 	while (compression <= 3) {
+	   compression = array_index_nospec(compression, 4);
+	   fps = array_index_nospec(fps, PWC_FPS_MAX_TIMON);
 	   pChoose = &Timon_table[size][fps][compression];
 	   if (pChoose->alternate != 0)
 	     break;
@@ -351,6 +360,8 @@ static int set_video_mode_Kiara(struct pwc_device *pdev, int size, int frames, i
 
 	if (size >= PSZ_MAX || frames < 5 || frames > 30 || compression < 0 || compression > 3)
 		return -EINVAL;
+	size = array_index_nospec(size, PSZ_MAX);
+
 	if (size == PSZ_VGA && frames > 15)
 		return -EINVAL;
 	fps = (frames / 5) - 1;
@@ -373,6 +384,8 @@ static int set_video_mode_Kiara(struct pwc_device *pdev, int size, int frames, i
 		*/
 		snapshot = 0;
 		while (compression <= 3) {
+			compression = array_index_nospec(compression, 4);
+			fps = array_index_nospec(fps, PWC_FPS_MAX_TIMON);
 			pChoose = &Kiara_table[size][fps][compression];
 			if (pChoose->alternate != 0)
 				break;
@@ -447,7 +460,8 @@ int pwc_set_video_mode(struct pwc_device *pdev, int width, int height, int frame
 		ret = set_video_mode_Timon(pdev, size, frames, compression, snapshot);
 	}
 	if (ret < 0) {
-		PWC_ERROR("Failed to set video mode %s@%d fps; return code = %d\n", size2name[size], frames, ret);
+		PWC_ERROR("Failed to set video mode %s@%d fps; return code = %d\n",
+			  size2name[array_index_nospec(size, PSZ_MAX)], frames, ret);
 		return ret;
 	}
 	pdev->view.x = width;

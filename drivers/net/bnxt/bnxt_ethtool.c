@@ -14,6 +14,7 @@
 #include <linux/etherdevice.h>
 #include <linux/crc32.h>
 #include <linux/firmware.h>
+#include <linux/nospec.h>
 #include "bnxt_hsi.h"
 #include "bnxt.h"
 #include "bnxt_ethtool.h"
@@ -200,8 +201,10 @@ static int bnxt_set_ringparam(struct net_device *dev,
 	if (netif_running(dev))
 		bnxt_close_nic(bp, false, false);
 
-	bp->rx_ring_size = ering->rx_pending;
-	bp->tx_ring_size = ering->tx_pending;
+	bp->rx_ring_size = array_index_nospec(ering->rx_pending,
+					      BNXT_MAX_RX_DESC_CNT + 1);
+	bp->tx_ring_size = array_index_nospec(ering->tx_pending,
+					      BNXT_MAX_TX_DESC_CNT + 1);
 	bnxt_set_ring_params(bp);
 
 	if (netif_running(dev))

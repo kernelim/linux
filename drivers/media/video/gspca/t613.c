@@ -29,6 +29,7 @@
 #define MODULE_NAME "t613"
 
 #include <linux/slab.h>
+#include <linux/nospec.h>
 #include "gspca.h"
 
 #define V4L2_CID_EFFECTS (V4L2_CID_PRIVATE_BASE + 0)
@@ -1392,8 +1393,10 @@ static int sd_querymenu(struct gspca_dev *gspca_dev,
 		break;
 	case V4L2_CID_EFFECTS:
 		if ((unsigned) menu->index < ARRAY_SIZE(effects_control)) {
+			u32 index = array_index_nospec(menu->index,
+						       ARRAY_SIZE(effects_control));
 			strncpy((char *) menu->name,
-				effects_control[menu->index],
+				effects_control[index],
 				sizeof menu->name);
 			return 0;
 		}

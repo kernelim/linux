@@ -16,6 +16,8 @@
  *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  */
 
+#include <linux/nospec.h>
+
 MODULE_AUTHOR("Giuliano Pochini <pochini@shiny.it>");
 MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("Echoaudio " ECHOCARD_NAME " soundcards driver");
@@ -1464,14 +1466,16 @@ static int snd_echo_spdif_mode_info(struct snd_kcontrol *kcontrol,
 				    struct snd_ctl_elem_info *uinfo)
 {
 	static char *names[2] = {"Consumer", "Professional"};
+	unsigned int idx;
 
 	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
 	uinfo->value.enumerated.items = 2;
 	uinfo->count = 1;
 	if (uinfo->value.enumerated.item)
 		uinfo->value.enumerated.item = 1;
-	strcpy(uinfo->value.enumerated.name,
-	       names[uinfo->value.enumerated.item]);
+
+	idx = array_index_nospec(uinfo->value.enumerated.item, 2);
+	strcpy(uinfo->value.enumerated.name, names[idx]);
 	return 0;
 }
 

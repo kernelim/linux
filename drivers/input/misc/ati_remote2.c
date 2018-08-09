@@ -9,6 +9,7 @@
  * as published by the Free Software Foundation.
  */
 
+#include <linux/nospec.h>
 #include <linux/usb/input.h>
 
 #define DRIVER_DESC    "ATI/Philips USB RF remote driver"
@@ -482,6 +483,7 @@ static int ati_remote2_getkeycode(struct input_dev *idev,
 	mode = scancode >> 8;
 	if (mode > ATI_REMOTE2_PC || !((1 << mode) & ar2->mode_mask))
 		return -EINVAL;
+	mode = array_index_nospec(mode, ATI_REMOTE2_PC + 1);
 
 	index = ati_remote2_lookup(scancode & 0xFF);
 	if (index < 0)
@@ -499,6 +501,7 @@ static int ati_remote2_setkeycode(struct input_dev *idev, int scancode, int keyc
 	mode = scancode >> 8;
 	if (mode > ATI_REMOTE2_PC || !((1 << mode) & ar2->mode_mask))
 		return -EINVAL;
+	mode = array_index_nospec(mode, ATI_REMOTE2_PC + 1);
 
 	index = ati_remote2_lookup(scancode & 0xFF);
 	if (index < 0)

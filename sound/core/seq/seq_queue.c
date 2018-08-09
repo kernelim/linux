@@ -38,6 +38,7 @@
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <sound/core.h>
+#include <linux/nospec.h>
 
 #include "seq_memory.h"
 #include "seq_queue.h"
@@ -207,6 +208,8 @@ int snd_seq_queue_delete(int client, int queueid)
 
 	if (queueid < 0 || queueid >= SNDRV_SEQ_MAX_QUEUES)
 		return -EINVAL;
+	queueid = array_index_nospec(queueid, SNDRV_SEQ_MAX_QUEUES);
+
 	q = queue_list_remove(queueid, client);
 	if (q == NULL)
 		return -EINVAL;
@@ -224,6 +227,8 @@ struct snd_seq_queue *queueptr(int queueid)
 
 	if (queueid < 0 || queueid >= SNDRV_SEQ_MAX_QUEUES)
 		return NULL;
+	queueid = array_index_nospec(queueid, SNDRV_SEQ_MAX_QUEUES);
+
 	spin_lock_irqsave(&queue_list_lock, flags);
 	q = queue_list[queueid];
 	if (q)

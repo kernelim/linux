@@ -40,6 +40,7 @@
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/etherdevice.h>
+#include <linux/nospec.h>
 #include <net/mac80211.h>
 #include "carl9170.h"
 #include "hw.h"
@@ -117,6 +118,7 @@ static struct ieee80211_sta *__carl9170_get_tx_sta(struct ar9170 *ar,
 
 	if (WARN_ON_ONCE(vif_id >= AR9170_MAX_VIRTUAL_MAC))
 		return NULL;
+	vif_id = array_index_nospec(vif_id, AR9170_MAX_VIRTUAL_MAC);
 
 	vif = rcu_dereference(ar->vif_priv[vif_id].vif);
 	if (unlikely(!vif))
@@ -249,6 +251,7 @@ static void carl9170_release_dev_space(struct ar9170 *ar, struct sk_buff *skb)
 	if (unlikely(WARN_ON_ONCE(cookie == 0) ||
 	    WARN_ON_ONCE(cookie > ar->fw.mem_blocks)))
 		return;
+	cookie = array_index_nospec(cookie - 1, ar->fw.mem_blocks) + 1;
 
 	atomic_add(DIV_ROUND_UP(skb->len, ar->fw.mem_block_size),
 		   &ar->mem_free_blocks);

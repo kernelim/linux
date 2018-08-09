@@ -25,6 +25,7 @@
 #include <linux/module.h>
 #include <linux/vmalloc.h>
 #include <linux/mm.h>
+#include <linux/nospec.h>
 #include <asm/xen/hypervisor.h>
 #include <xen/events.h>
 #include <xen/page.h>
@@ -212,6 +213,7 @@ static int xenfb_setcolreg(unsigned regno, unsigned red, unsigned green,
 
 	if (regno > info->cmap.len)
 		return 1;
+	regno = array_index_nospec(regno, info->cmap.len + 1);
 
 #define CNVT_TOHW(val, width) ((((val)<<(width))+0x7FFF-(val))>>16)
 	red = CNVT_TOHW(red, info->var.red.length);

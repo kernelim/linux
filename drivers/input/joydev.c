@@ -122,6 +122,7 @@ static void joydev_event(struct input_handle *handle,
 	struct joydev *joydev = handle->private;
 	struct joydev_client *client;
 	struct js_event event;
+	unsigned int idx;
 
 	switch (type) {
 
@@ -129,12 +130,15 @@ static void joydev_event(struct input_handle *handle,
 		if (code < BTN_MISC || value == 2)
 			return;
 		event.type = JS_EVENT_BUTTON;
-		event.number = joydev->keymap[code - BTN_MISC];
+		idx = array_index_nospec(code - BTN_MISC,
+					 KEY_MAX - BTN_MISC + 1);
+		event.number = joydev->keymap[idx];
 		event.value = value;
 		break;
 
 	case EV_ABS:
 		event.type = JS_EVENT_AXIS;
+		code = array_index_nospec(code, ABS_MAX + 1);
 		event.number = joydev->absmap[code];
 		event.value = joydev_correct(value,
 					&joydev->corr[event.number]);

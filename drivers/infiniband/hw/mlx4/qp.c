@@ -34,6 +34,7 @@
 #include <linux/log2.h>
 #include <linux/netdevice.h>
 #include <linux/vmalloc.h>
+#include <linux/nospec.h>
 
 #include <rdma/ib_cache.h>
 #include <rdma/ib_pack.h>
@@ -1462,6 +1463,7 @@ static int __mlx4_ib_modify_qp(struct ib_qp *ibqp,
 	int sqd_event;
 	int steer_qp = 0;
 	int err = -EINVAL;
+	u8 alt_port_num;
 
 	/* APM is not supported under RoCE */
 	if (attr_mask & IB_QP_ALT_PATH &&
@@ -1584,14 +1586,16 @@ static int __mlx4_ib_modify_qp(struct ib_qp *ibqp,
 		if (attr->alt_port_num == 0 ||
 		    attr->alt_port_num > dev->dev->caps.num_ports)
 			goto out;
+		alt_port_num = array_index_nospec(attr->alt_port_num - 1,
+						  dev->dev->caps.num_ports) + 1;
 
 		if (attr->alt_pkey_index >=
-		    dev->dev->caps.pkey_table_len[attr->alt_port_num])
+		    dev->dev->caps.pkey_table_len[alt_port_num])
 			goto out;
 
 		if (mlx4_set_alt_path(dev, attr, attr_mask, qp,
 				      &context->alt_path,
-				      attr->alt_port_num))
+				      alt_port_num))
 			goto out;
 
 		context->alt_path.pkey_index = attr->alt_pkey_index;
@@ -1967,6 +1971,7 @@ int mlx4_ib_modify_qp(struct ib_qp *ibqp, struct ib_qp_attr *attr,
 			 new_state, ibqp->qp_type);
 		goto out;
 	}
+	attr->port_num = array_index_nospec(attr->port_num - 1, dev->num_ports) + 1;
 
 	if ((attr_mask & IB_QP_PORT) && (ibqp->qp_type == IB_QPT_RAW_PACKET) &&
 	    (rdma_port_get_link_layer(&dev->ib_dev, attr->port_num) !=

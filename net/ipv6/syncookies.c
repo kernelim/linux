@@ -18,6 +18,7 @@
 #include <linux/random.h>
 #include <linux/cryptohash.h>
 #include <linux/kernel.h>
+#include <linux/nospec.h>
 #include <net/ipv6.h>
 #include <net/tcp.h>
 
@@ -138,7 +139,11 @@ static inline int cookie_check(struct sk_buff *skb, __u32 cookie)
 	__u32 mssind = check_tcp_syn_cookie(cookie, &iph->saddr, &iph->daddr,
 					    th->source, th->dest, seq);
 
-	return mssind < ARRAY_SIZE(msstab) ? msstab[mssind] : 0;
+	if (mssind >= ARRAY_SIZE(msstab))
+		return 0;
+	mssind = array_index_nospec(mssind, ARRAY_SIZE(msstab));
+
+	return msstab[mssind];
 }
 
 struct sock *cookie_v6_check(struct sock *sk, struct sk_buff *skb)

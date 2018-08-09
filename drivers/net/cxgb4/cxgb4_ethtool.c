@@ -17,6 +17,7 @@
 
 #include <linux/firmware.h>
 #include <linux/mdio.h>
+#include <linux/nospec.h>
 
 #include "cxgb4.h"
 #include "t4_regs.h"
@@ -861,8 +862,10 @@ static int get_eeprom(struct net_device *dev, struct ethtool_eeprom *e,
 		return -ENOMEM;
 
 	e->magic = EEPROM_MAGIC;
-	for (i = e->offset & ~3; !err && i < e->offset + e->len; i += 4)
-		err = eeprom_rd_phys(adapter, i, (u32 *)&buf[i]);
+	for (i = e->offset & ~3; !err && i < e->offset + e->len; i += 4) {
+		int idx = array_index_nospec(i, EEPROMSIZE);
+		err = eeprom_rd_phys(adapter, i, (u32 *)&buf[idx]);
+	}
 
 	if (!err)
 		memcpy(data, buf + e->offset, e->len);
@@ -899,10 +902,13 @@ static int set_eeprom(struct net_device *dev, struct ethtool_eeprom *eeprom,
 		if (!buf)
 			return -ENOMEM;
 		err = eeprom_rd_phys(adapter, aligned_offset, (u32 *)buf);
-		if (!err && aligned_len > 4)
+		if (!err && aligned_len > 4) {
+			u32 idx = array_index_nospec(aligned_len - 4,
+						     aligned_len);
 			err = eeprom_rd_phys(adapter,
-					     aligned_offset + aligned_len - 4,
-					     (u32 *)&buf[aligned_len - 4]);
+					     aligned_offset + idx,
+					     (u32 *)&buf[idx]);
+		}
 		if (err)
 			goto out;
 		memcpy(buf + (eeprom->offset & 3), data, eeprom->len);

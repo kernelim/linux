@@ -25,6 +25,7 @@
  * Video and XvMC related functions.
  */
 
+#include <linux/nospec.h>
 #include <drm/drmP.h>
 #include <drm/via_drm.h>
 #include "via_drv.h"
@@ -72,21 +73,23 @@ int via_decoder_futex(struct drm_device *dev, void *data, struct drm_file *file_
 	drm_via_private_t *dev_priv = (drm_via_private_t *) dev->dev_private;
 	drm_via_sarea_t *sAPriv = dev_priv->sarea_priv;
 	int ret = 0;
+	u32 idx;
 
 	DRM_DEBUG("\n");
 
 	if (fx->lock >= VIA_NR_XVMC_LOCKS)
 		return -EFAULT;
+	idx = array_index_nospec(fx->lock, VIA_NR_XVMC_LOCKS);
 
-	lock = (volatile int *)XVMCLOCKPTR(sAPriv, fx->lock);
+	lock = (volatile int *)XVMCLOCKPTR(sAPriv, idx);
 
 	switch (fx->func) {
 	case VIA_FUTEX_WAIT:
-		DRM_WAIT_ON(ret, dev_priv->decoder_queue[fx->lock],
+		DRM_WAIT_ON(ret, dev_priv->decoder_queue[idx],
 			    (fx->ms / 10) * (HZ / 100), *lock != fx->val);
 		return ret;
 	case VIA_FUTEX_WAKE:
-		wake_up(&(dev_priv->decoder_queue[fx->lock]));
+		wake_up(&(dev_priv->decoder_queue[idx]));
 		return 0;
 	}
 	return 0;

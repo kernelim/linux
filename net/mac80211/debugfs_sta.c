@@ -11,6 +11,7 @@
 
 #include <linux/debugfs.h>
 #include <linux/ieee80211.h>
+#include <linux/nospec.h>
 #include "ieee80211_i.h"
 #include "debugfs.h"
 #include "debugfs_sta.h"
@@ -192,6 +193,7 @@ static ssize_t sta_agg_status_write(struct file *file, const char __user *userbu
 
 	if (tid >= IEEE80211_NUM_TIDS)
 		return -EINVAL;
+	tid = array_index_nospec(tid, IEEE80211_NUM_TIDS);
 
 	if (tx) {
 		if (start)

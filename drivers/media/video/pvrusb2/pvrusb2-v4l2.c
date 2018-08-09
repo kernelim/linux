@@ -22,6 +22,7 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/version.h>
+#include <linux/nospec.h>
 #include "pvrusb2-context.h"
 #include "pvrusb2-hdw.h"
 #include "pvrusb2.h"
@@ -251,6 +252,7 @@ static long pvr2_v4l2_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 		struct v4l2_input tmp;
 		unsigned int cnt;
 		int val;
+		u32 index;
 
 		cptr = pvr2_hdw_get_ctrl_by_id(hdw,PVR2_CID_INPUT);
 
@@ -261,7 +263,9 @@ static long pvr2_v4l2_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 			ret = -EINVAL;
 			break;
 		}
-		val = fh->input_map[vi->index];
+		index = array_index_nospec(vi->index, fh->input_cnt);
+
+		val = fh->input_map[index];
 		switch (val) {
 		case PVR2_CVAL_INPUT_TV:
 		case PVR2_CVAL_INPUT_DTV:
@@ -321,13 +325,17 @@ static long pvr2_v4l2_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 	case VIDIOC_S_INPUT:
 	{
 		struct v4l2_input *vi = (struct v4l2_input *)arg;
+		u32 index;
+
 		if (vi->index >= fh->input_cnt) {
 			ret = -ERANGE;
 			break;
 		}
+		index = array_index_nospec(vi->index, fh->input_cnt);
+
 		ret = pvr2_ctrl_set_value(
 			pvr2_hdw_get_ctrl_by_id(hdw,PVR2_CID_INPUT),
-			fh->input_map[vi->index]);
+			fh->input_map[index]);
 		break;
 	}
 

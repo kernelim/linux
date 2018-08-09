@@ -22,6 +22,7 @@
  *  02111-1307  USA
  */
 
+#include <linux/nospec.h>
 #include "cx18-driver.h"
 #include "cx18-io.h"
 #include "cx18-version.h"
@@ -515,7 +516,8 @@ static int cx18_s_audio(struct file *file, void *fh, struct v4l2_audio *vout)
 
 	if (vout->index >= cx->nof_audio_inputs)
 		return -EINVAL;
-	cx->audio_input = vout->index;
+	cx->audio_input = array_index_nospec(vout->index, cx->nof_audio_inputs);
+
 	cx18_audio_set_io(cx);
 	return 0;
 }
@@ -584,7 +586,7 @@ static int cx18_enum_fmt_vid_cap(struct file *file, void *fh,
 
 	if (fmt->index > 1)
 		return -EINVAL;
-	*fmt = formats[fmt->index];
+	*fmt = formats[array_index_nospec(fmt->index, 2)];
 	return 0;
 }
 

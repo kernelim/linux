@@ -25,6 +25,7 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/nospec.h>
 #include <asm/unaligned.h>
 #include <net/sock.h>
 
@@ -42,6 +43,7 @@ static struct phonet_protocol *phonet_proto_get(unsigned int protocol)
 
 	if (protocol >= PHONET_NPROTO)
 		return NULL;
+	protocol = array_index_nospec(protocol, PHONET_NPROTO);
 
 	rcu_read_lock();
 	pp = proto_tab[protocol];

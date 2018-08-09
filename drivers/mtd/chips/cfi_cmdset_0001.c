@@ -22,6 +22,7 @@
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/init.h>
+#include <linux/nospec.h>
 #include <asm/io.h>
 #include <asm/byteorder.h>
 
@@ -1452,6 +1453,7 @@ static int cfi_intelext_read (struct mtd_info *mtd, loff_t from, size_t len, siz
 
 		if (chipnum >= cfi->numchips)
 			break;
+		chipnum = array_index_nospec(chipnum, cfi->numchips);
 
 		if ((len + ofs -1) >> cfi->chipshift)
 			thislen = (1<<cfi->chipshift) - ofs;
@@ -1572,6 +1574,7 @@ static int cfi_intelext_write_words (struct mtd_info *mtd, loff_t to , size_t le
 		datum = map_word_ff(map);
 		datum = map_word_load_partial(map, datum, buf, gap, n);
 
+		chipnum = array_index_nospec(chipnum, cfi->numchips);
 		ret = do_write_oneword(map, &cfi->chips[chipnum],
 					       bus_ofs, datum, FL_WRITING);
 		if (ret)
@@ -1593,6 +1596,7 @@ static int cfi_intelext_write_words (struct mtd_info *mtd, loff_t to , size_t le
 	while(len >= map_bankwidth(map)) {
 		map_word datum = map_word_load(map, buf);
 
+		chipnum = array_index_nospec(chipnum, cfi->numchips);
 		ret = do_write_oneword(map, &cfi->chips[chipnum],
 				       ofs, datum, FL_WRITING);
 		if (ret)
@@ -1617,6 +1621,7 @@ static int cfi_intelext_write_words (struct mtd_info *mtd, loff_t to , size_t le
 		datum = map_word_ff(map);
 		datum = map_word_load_partial(map, datum, buf, 0, len);
 
+		chipnum = array_index_nospec(chipnum, cfi->numchips);
 		ret = do_write_oneword(map, &cfi->chips[chipnum],
 				       ofs, datum, FL_WRITING);
 		if (ret)
@@ -1816,6 +1821,7 @@ static int cfi_intelext_writev (struct mtd_info *mtd, const struct kvec *vecs,
 
 		if (size > len)
 			size = len;
+		chipnum = array_index_nospec(chipnum, cfi->numchips);
 		ret = do_write_buffer(map, &cfi->chips[chipnum],
 				      ofs, &vecs, &vec_seek, size);
 		if (ret)

@@ -77,6 +77,7 @@
 #include <linux/capability.h>
 #include <linux/quotaops.h>
 #include <linux/writeback.h> /* for inode_lock, oddly enough.. */
+#include <linux/nospec.h>
 
 #include <asm/uaccess.h>
 
@@ -336,6 +337,7 @@ static inline int clear_dquot_dirty(struct dquot *dquot)
 
 void mark_info_dirty(struct super_block *sb, int type)
 {
+	type = array_index_nospec(type, MAXQUOTAS);
 	set_bit(DQF_INFO_DIRTY_B, &sb_dqopt(sb)->info[type].dqi_flags);
 }
 EXPORT_SYMBOL(mark_info_dirty);
@@ -800,8 +802,10 @@ static int dqinit_needed(struct inode *inode, int type)
 
 	if (IS_NOQUOTA(inode))
 		return 0;
-	if (type != -1)
+	if (type != -1) {
+		type = array_index_nospec(type, MAXQUOTAS);
 		return !inode->i_dquot[type];
+	}
 	for (cnt = 0; cnt < MAXQUOTAS; cnt++)
 		if (!inode->i_dquot[cnt])
 			return 1;
@@ -1862,6 +1866,7 @@ int dquot_commit_info(struct super_block *sb, int type)
 	int ret;
 	struct quota_info *dqopt = sb_dqopt(sb);
 
+	type = array_index_nospec(type, MAXQUOTAS);
 	mutex_lock(&dqopt->dqio_mutex);
 	ret = dqopt->ops[type]->write_file_info(sb, type);
 	mutex_unlock(&dqopt->dqio_mutex);
@@ -2098,6 +2103,7 @@ static int vfs_load_quota_inode(struct inode *inode, int type, int format_id,
 	}
 
 	error = -EIO;
+	type = array_index_nospec(type, MAXQUOTAS);
 	dqopt->files[type] = igrab(inode);
 	if (!dqopt->files[type])
 		goto out_lock;

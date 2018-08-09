@@ -29,6 +29,7 @@
 #include <linux/signal.h>
 #include <linux/smp_lock.h>
 #include <linux/timex.h>
+#include <linux/nospec.h>
 
 #include <asm/io.h>
 #include <asm/uaccess.h>
@@ -240,7 +241,8 @@ do_kdsk_ioctl(int cmd, struct kbentry __user *user_kbe, int perm, struct kbd_str
 		}
 
 		if (KTYP(v) < NR_TYPES) {
-		    if (KVAL(v) > max_vals[KTYP(v)])
+		    unsigned char idx = array_index_nospec(KTYP(v), NR_TYPES);
+		    if (KVAL(v) > max_vals[idx])
 				return -EINVAL;
 		} else
 		    if (kbd->kbdmode != VC_UNICODE)
@@ -340,7 +342,7 @@ do_kdgkb_ioctl(int cmd, struct kbsentry __user *user_kdgkb, int perm)
 		goto reterr;
 	}
 	kbs->kb_string[sizeof(kbs->kb_string)-1] = '\0';
-	i = kbs->kb_func;
+	i = array_index_nospec(kbs->kb_func, MAX_NR_FUNC);
 
 	switch (cmd) {
 	case KDGKBSENT:
@@ -368,10 +370,10 @@ do_kdgkb_ioctl(int cmd, struct kbsentry __user *user_kdgkb, int perm)
 
 		q = func_table[i];
 		first_free = funcbufptr + (funcbufsize - funcbufleft);
-		for (j = i+1; j < MAX_NR_FUNC && !func_table[j]; j++) 
+		for (j = i+1; j < MAX_NR_FUNC && !func_table[array_index_nospec(j, MAX_NR_FUNC)]; j++) 
 			;
 		if (j < MAX_NR_FUNC)
-			fj = func_table[j];
+			fj = func_table[array_index_nospec(j, MAX_NR_FUNC)];
 		else
 			fj = first_free;
 
@@ -379,9 +381,11 @@ do_kdgkb_ioctl(int cmd, struct kbsentry __user *user_kdgkb, int perm)
 		if (delta <= funcbufleft) { 	/* it fits in current buf */
 		    if (j < MAX_NR_FUNC) {
 			memmove(fj + delta, fj, first_free - fj);
-			for (k = j; k < MAX_NR_FUNC; k++)
-			    if (func_table[k])
-				func_table[k] += delta;
+			for (k = j; k < MAX_NR_FUNC; k++) {
+			    int idx = array_index_nospec(k, MAX_NR_FUNC);
+			    if (func_table[idx])
+				func_table[idx] += delta;
+			}
 		    }
 		    if (!q)
 		      func_table[i] = fj;
@@ -400,15 +404,19 @@ do_kdgkb_ioctl(int cmd, struct kbsentry __user *user_kdgkb, int perm)
 		      func_table[i] = fj;
 		    if (fj > funcbufptr)
 			memmove(fnw, funcbufptr, fj - funcbufptr);
-		    for (k = 0; k < j; k++)
-		      if (func_table[k])
-			func_table[k] = fnw + (func_table[k] - funcbufptr);
+		    for (k = 0; k < j; k++) {
+		      int idx = array_index_nospec(k, MAX_NR_FUNC);
+		      if (func_table[idx])
+			func_table[idx] = fnw + (func_table[idx] - funcbufptr);
+		    }
 
 		    if (first_free > fj) {
 			memmove(fnw + (fj - funcbufptr) + delta, fj, first_free - fj);
-			for (k = j; k < MAX_NR_FUNC; k++)
-			  if (func_table[k])
-			    func_table[k] = fnw + (func_table[k] - funcbufptr) + delta;
+			for (k = j; k < MAX_NR_FUNC; k++) {
+		      	  int idx = array_index_nospec(k, MAX_NR_FUNC);
+			  if (func_table[idx])
+			    func_table[idx] = fnw + (func_table[idx] - funcbufptr) + delta;
+			}
 		    }
 		    if (funcbufptr != func_buf)
 		      kfree(funcbufptr);
@@ -993,10 +1001,14 @@ int vt_ioctl(struct tty_struct *tty, struct file * file,
 			ret = vc_allocate(vsa.console);
 			if (ret == 0) {
 				struct vc_data *nvc;
+				unsigned int console;
+
 				/* This is safe providing we don't drop the
 				   console sem between vc_allocate and
 				   finishing referencing nvc */
-				nvc = vc_cons[vsa.console].d;
+				console = array_index_nospec(vsa.console,
+							     MAX_NR_CONSOLES);
+				nvc = vc_cons[console].d;
 				nvc->vt_mode = vsa.mode;
 				nvc->vt_mode.frsig = 0;
 				put_pid(nvc->vt_pid);
@@ -1093,6 +1105,8 @@ int vt_ioctl(struct tty_struct *tty, struct file * file,
 			ret = -ENXIO;
 			break;
 		}
+		arg = array_index_nospec(arg, MAX_NR_CONSOLES + 1);
+
 		if (arg == 0) {
 		    /* deallocate all unused consoles, but leave 0 */
 			acquire_console_sem();

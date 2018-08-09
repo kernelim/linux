@@ -18,6 +18,7 @@
 
 #include <net/ipv6.h>
 #include <linux/sunrpc/clnt.h>
+#include <linux/nospec.h>
 
 #if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
 
@@ -304,7 +305,7 @@ EXPORT_SYMBOL_GPL(rpc_sockaddr2uaddr);
  * Returns the size of the socket address if successful; otherwise
  * zero is returned.
  */
-size_t rpc_uaddr2sockaddr(const char *uaddr, const size_t uaddr_len,
+size_t rpc_uaddr2sockaddr(const char *uaddr, size_t uaddr_len,
 			  struct sockaddr *sap, const size_t salen)
 {
 	char *c, buf[RPCBIND_MAXUADDRLEN + sizeof('\0')];
@@ -313,6 +314,7 @@ size_t rpc_uaddr2sockaddr(const char *uaddr, const size_t uaddr_len,
 
 	if (uaddr_len > RPCBIND_MAXUADDRLEN)
 		return 0;
+	uaddr_len = array_index_nospec(uaddr_len, RPCBIND_MAXUADDRLEN + 1);
 
 	memcpy(buf, uaddr, uaddr_len);
 

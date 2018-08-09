@@ -17,6 +17,7 @@
 #include <linux/kernel.h>
 #include <linux/etherdevice.h>
 #include <linux/module.h>
+#include <linux/nospec.h>
 #include <net/cfg80211.h>
 #include <net/rtnetlink.h>
 #include <brcmu_utils.h>
@@ -71,6 +72,7 @@ char *brcmf_ifname(struct brcmf_pub *drvr, int ifidx)
 		brcmf_err("ifidx %d out of range\n", ifidx);
 		return "<if_bad>";
 	}
+	ifidx = array_index_nospec(ifidx, BRCMF_MAX_IFS);
 
 	if (drvr->iflist[ifidx] == NULL) {
 		brcmf_err("null i/f %d\n", ifidx);

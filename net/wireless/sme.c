@@ -13,6 +13,7 @@
 #include <linux/workqueue.h>
 #include <linux/wireless.h>
 #include <linux/export.h>
+#include <linux/nospec.h>
 #include <net/iw_handler.h>
 #include <net/cfg80211.h>
 #include <net/rtnetlink.h>
@@ -990,7 +991,7 @@ int cfg80211_connect(struct cfg80211_registered_device *rdev,
 		int idx;
 		u32 cipher;
 
-		idx = connkeys->def;
+		idx = array_index_nospec(connkeys->def, 6);;
 		cipher = connkeys->params[idx].cipher;
 		/* If given a WEP key we may need it for shared key auth */
 		if (cipher == WLAN_CIPHER_SUITE_WEP40 ||

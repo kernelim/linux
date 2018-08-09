@@ -81,6 +81,7 @@
 #include <linux/ioport.h>
 #include <linux/bitops.h>
 #include <linux/mii.h>
+#include <linux/nospec.h>
 
 #include <pcmcia/cs_types.h>
 #include <pcmcia/cs.h>
@@ -1509,7 +1510,7 @@ do_config(struct net_device *dev, struct ifmap *map)
 	    dev->if_port = 1;
 	} else {
 	    local->probe_port = 0;
-	    dev->if_port = map->port;
+	    dev->if_port = array_index_nospec(map->port, 5);
 	}
 	printk(KERN_INFO "%s: switching to %s port\n",
 	       dev->name, if_names[dev->if_port]);

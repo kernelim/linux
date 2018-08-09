@@ -19,6 +19,7 @@
 #include <linux/videodev2.h>
 #include <linux/vmalloc.h>
 #include <linux/wait.h>
+#include <linux/nospec.h>
 #include <asm/atomic.h>
 
 #include "uvcvideo.h"
@@ -226,14 +227,16 @@ int uvc_query_buffer(struct uvc_video_queue *queue,
 		struct v4l2_buffer *v4l2_buf)
 {
 	int ret = 0;
+	u32 index;
 
 	mutex_lock(&queue->mutex);
 	if (v4l2_buf->index >= queue->count) {
 		ret = -EINVAL;
 		goto done;
 	}
+	index = array_index_nospec(v4l2_buf->index, queue->count);
 
-	__uvc_query_buffer(&queue->buffer[v4l2_buf->index], v4l2_buf);
+	__uvc_query_buffer(&queue->buffer[index], v4l2_buf);
 
 done:
 	mutex_unlock(&queue->mutex);
@@ -250,6 +253,7 @@ int uvc_queue_buffer(struct uvc_video_queue *queue,
 	struct uvc_buffer *buf;
 	unsigned long flags;
 	int ret = 0;
+	u32 index;
 
 	uvc_trace(UVC_TRACE_CAPTURE, "Queuing buffer %u.\n", v4l2_buf->index);
 
@@ -267,8 +271,9 @@ int uvc_queue_buffer(struct uvc_video_queue *queue,
 		ret = -EINVAL;
 		goto done;
 	}
+	index = array_index_nospec(v4l2_buf->index, queue->count);
 
-	buf = &queue->buffer[v4l2_buf->index];
+	buf = &queue->buffer[index];
 	if (buf->state != UVC_BUF_STATE_IDLE) {
 		uvc_trace(UVC_TRACE_CAPTURE, "[E] Invalid buffer state "
 			"(%u).\n", buf->state);

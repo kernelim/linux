@@ -37,6 +37,7 @@
 #include <linux/vmalloc.h>
 #include <linux/highmem.h>
 #include <linux/uaccess.h>
+#include <linux/nospec.h>
 
 #include "ixgbe.h"
 #include "ixgbe_phy.h"
@@ -895,8 +896,10 @@ static int ixgbe_set_eeprom(struct net_device *netdev,
 		 * need read/modify/write of last changed EEPROM word
 		 * only the first byte of the word is being modified
 		 */
+		unsigned int idx = array_index_nospec(last_word - first_word,
+						      max_len);
 		ret_val = hw->eeprom.ops.read(hw, last_word,
-					  &eeprom_buff[last_word - first_word]);
+					  &eeprom_buff[idx]);
 		if (ret_val)
 			goto err;
 	}
@@ -3153,6 +3156,8 @@ static int ixgbe_get_module_eeprom(struct net_device *dev,
 		return -EINVAL;
 
 	for (i = ee->offset; i < ee->offset + ee->len; i++) {
+		u32 idx;
+
 		/* I2C reads can take long time */
 		if (test_bit(__IXGBE_IN_SFP_INIT, &adapter->state))
 			return -EBUSY;
@@ -3165,7 +3170,8 @@ static int ixgbe_get_module_eeprom(struct net_device *dev,
 		if (status)
 			return -EIO;
 
-		data[i - ee->offset] = databyte;
+		idx = array_index_nospec(i - ee->offset, ee->len);
+		data[idx] = databyte;
 	}
 
 	return 0;

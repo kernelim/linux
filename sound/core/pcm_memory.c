@@ -24,6 +24,7 @@
 #include <linux/init.h>
 #include <linux/moduleparam.h>
 #include <linux/vmalloc.h>
+#include <linux/nospec.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/info.h>
@@ -326,6 +327,8 @@ struct page *snd_pcm_sgbuf_ops_page(struct snd_pcm_substream *substream, unsigne
 	unsigned int idx = offset >> PAGE_SHIFT;
 	if (idx >= (unsigned int)sgbuf->pages)
 		return NULL;
+	idx = array_index_nospec(idx, (unsigned int)sgbuf->pages);
+
 	return sgbuf->page_table[idx];
 }
 

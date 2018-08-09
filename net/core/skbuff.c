@@ -62,6 +62,7 @@
 #ifndef __GENKSYMS__
 #include <linux/if_vlan.h>
 #endif
+#include <linux/nospec.h>
 
 #include <net/protocol.h>
 #include <net/dst.h>
@@ -2005,6 +2006,8 @@ void skb_copy_and_csum_dev(const struct sk_buff *skb, u8 *to)
 	if (skb->ip_summed == CHECKSUM_PARTIAL) {
 		long csstuff = csstart + skb->csum_offset;
 
+		barrier_nospec();
+
 		*((__sum16 *)(to + csstuff)) = csum_fold(csum);
 	}
 }
@@ -2066,6 +2069,28 @@ void skb_queue_purge(struct sk_buff_head *list)
 		kfree_skb(skb);
 }
 EXPORT_SYMBOL(skb_queue_purge);
+
+/**
+ *	skb_rbtree_purge - empty a skb rbtree
+ *	@sk: the socket this rbtree belong to
+ *	@root: root of the rbtree to empty
+ *
+ *	Delete all buffers on an &sk_buff rbtree. Each buffer is removed from
+ *	the list and one reference dropped. This function does not take
+ *	any lock. Synchronization should be handled by the caller (e.g., TCP
+ *	out-of-order queue is protected by the socket lock).
+ */
+void skb_rbtree_purge(struct sock *sk, struct rb_root *root)
+{
+	struct sk_buff *skb, *next;
+
+	rbtree_postorder_for_each_entry_safe(skb, next, root, rbnode) {
+		skb->sk = sk;
+		kfree_skb(skb);
+	}
+
+	*root = RB_ROOT;
+}
 
 /**
  *	skb_queue_head - queue a buffer at the list head

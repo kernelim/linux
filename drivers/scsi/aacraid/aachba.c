@@ -32,6 +32,7 @@
 #include <linux/slab.h>
 #include <linux/completion.h>
 #include <linux/blkdev.h>
+#include <linux/nospec.h>
 #include <asm/uaccess.h>
 #include <linux/highmem.h> /* For flush_kernel_dcache_page */
 
@@ -2560,6 +2561,7 @@ static int query_disk(struct aac_dev *dev, void __user *arg)
 {
 	struct aac_query_disk qd;
 	struct fsa_dev_info *fsa_dev_ptr;
+	u32 cnum;
 
 	fsa_dev_ptr = dev->fsa_dev;
 	if (!fsa_dev_ptr)
@@ -2579,17 +2581,19 @@ static int query_disk(struct aac_dev *dev, void __user *arg)
 	}
 	else return -EINVAL;
 
-	qd.valid = fsa_dev_ptr[qd.cnum].valid != 0;
-	qd.locked = fsa_dev_ptr[qd.cnum].locked;
-	qd.deleted = fsa_dev_ptr[qd.cnum].deleted;
+	cnum = array_index_nospec(qd.cnum, dev->maximum_num_containers);
 
-	if (fsa_dev_ptr[qd.cnum].devname[0] == '\0')
+	qd.valid = fsa_dev_ptr[cnum].valid != 0;
+	qd.locked = fsa_dev_ptr[cnum].locked;
+	qd.deleted = fsa_dev_ptr[cnum].deleted;
+
+	if (fsa_dev_ptr[cnum].devname[0] == '\0')
 		qd.unmapped = 1;
 	else
 		qd.unmapped = 0;
 
-	strlcpy(qd.name, fsa_dev_ptr[qd.cnum].devname,
-	  min(sizeof(qd.name), sizeof(fsa_dev_ptr[qd.cnum].devname) + 1));
+	strlcpy(qd.name, fsa_dev_ptr[cnum].devname,
+	  min(sizeof(qd.name), sizeof(fsa_dev_ptr[cnum].devname) + 1));
 
 	if (copy_to_user(arg, &qd, sizeof (struct aac_query_disk)))
 		return -EFAULT;
@@ -2600,6 +2604,7 @@ static int force_delete_disk(struct aac_dev *dev, void __user *arg)
 {
 	struct aac_delete_disk dd;
 	struct fsa_dev_info *fsa_dev_ptr;
+	u32 cnum;
 
 	fsa_dev_ptr = dev->fsa_dev;
 	if (!fsa_dev_ptr)
@@ -2610,14 +2615,16 @@ static int force_delete_disk(struct aac_dev *dev, void __user *arg)
 
 	if (dd.cnum >= dev->maximum_num_containers)
 		return -EINVAL;
+	cnum = array_index_nospec(dd.cnum, dev->maximum_num_containers);
+
 	/*
 	 *	Mark this container as being deleted.
 	 */
-	fsa_dev_ptr[dd.cnum].deleted = 1;
+	fsa_dev_ptr[cnum].deleted = 1;
 	/*
 	 *	Mark the container as no longer valid
 	 */
-	fsa_dev_ptr[dd.cnum].valid = 0;
+	fsa_dev_ptr[cnum].valid = 0;
 	return 0;
 }
 
@@ -2625,6 +2632,7 @@ static int delete_disk(struct aac_dev *dev, void __user *arg)
 {
 	struct aac_delete_disk dd;
 	struct fsa_dev_info *fsa_dev_ptr;
+	u32 cnum;
 
 	fsa_dev_ptr = dev->fsa_dev;
 	if (!fsa_dev_ptr)
@@ -2635,17 +2643,19 @@ static int delete_disk(struct aac_dev *dev, void __user *arg)
 
 	if (dd.cnum >= dev->maximum_num_containers)
 		return -EINVAL;
+	cnum = array_index_nospec(dd.cnum, dev->maximum_num_containers);
+
 	/*
 	 *	If the container is locked, it can not be deleted by the API.
 	 */
-	if (fsa_dev_ptr[dd.cnum].locked)
+	if (fsa_dev_ptr[cnum].locked)
 		return -EBUSY;
 	else {
 		/*
 		 *	Mark the container as no longer being valid.
 		 */
-		fsa_dev_ptr[dd.cnum].valid = 0;
-		fsa_dev_ptr[dd.cnum].devname[0] = '\0';
+		fsa_dev_ptr[cnum].valid = 0;
+		fsa_dev_ptr[cnum].devname[0] = '\0';
 		return 0;
 	}
 }

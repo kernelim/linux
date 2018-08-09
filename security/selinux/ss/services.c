@@ -48,6 +48,7 @@
 #include <linux/selinux.h>
 #include <linux/flex_array.h>
 #include <linux/vmalloc.h>
+#include <linux/nospec.h>
 #include <net/netlabel.h>
 
 #include "flask.h"
@@ -191,8 +192,10 @@ err:
 
 static u16 unmap_class(u16 tclass)
 {
-	if (tclass < current_mapping_size)
+	if (tclass < current_mapping_size) {
+		tclass = array_index_nospec(tclass, current_mapping_size);
 		return current_mapping[tclass].value;
+	}
 
 	return tclass;
 }
@@ -600,6 +603,7 @@ static void context_struct_compute_av(struct context *scontext,
 	struct ebitmap *sattr, *tattr;
 	struct ebitmap_node *snode, *tnode;
 	unsigned int i, j;
+	u16 idx;
 
 	avd->allowed = 0;
 	avd->auditallow = 0;
@@ -611,7 +615,8 @@ static void context_struct_compute_av(struct context *scontext,
 		return;
 	}
 
-	tclass_datum = policydb.class_val_to_struct[tclass - 1];
+	idx = array_index_nospec(tclass - 1, policydb.p_classes.nprim);
+	tclass_datum = policydb.class_val_to_struct[idx];
 
 	/*
 	 * If a specific type enforcement rule was defined for
@@ -1218,6 +1223,7 @@ static int security_context_to_sid_core(const char *scontext, u32 scontext_len,
 	scontext2 = kmalloc(scontext_len+1, gfp_flags);
 	if (!scontext2)
 		return -ENOMEM;
+	barrier_nospec();
 	memcpy(scontext2, scontext, scontext_len);
 	scontext2[scontext_len] = 0;
 
@@ -1318,7 +1324,7 @@ static int compute_sid_handle_invalid_context(
 		  " scontext=%s"
 		  " tcontext=%s"
 		  " tclass=%s",
-		  n, s, t, policydb.p_class_val_to_name[tclass-1]);
+		  n, s, t, policydb.p_class_val_to_name[array_index_nospec(tclass-1, policydb.p_classes.nprim)]);
 out:
 	kfree(s);
 	kfree(t);

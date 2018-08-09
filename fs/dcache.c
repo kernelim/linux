@@ -26,6 +26,7 @@
 #include <linux/module.h>
 #include <linux/mount.h>
 #include <linux/file.h>
+#include <linux/nospec.h>
 #include <asm/uaccess.h>
 #include <linux/security.h>
 #include <linux/seqlock.h>
@@ -34,6 +35,7 @@
 #include <linux/fs_struct.h>
 #include <linux/hardirq.h>
 #include <linux/ratelimit.h>
+#include <linux/nospec.h>
 #include "internal.h"
 
 int sysctl_vfs_cache_pressure __read_mostly = 100;
@@ -996,6 +998,7 @@ struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 	dentry->d_name.len = name->len;
 	dentry->d_name.hash = name->hash;
 	memcpy(dname, name->name, name->len);
+	barrier_nospec();
 	dname[name->len] = 0;
 
 	atomic_set(&dentry->d_count, 1);
@@ -1508,6 +1511,7 @@ struct dentry * __d_lookup(struct dentry * parent, struct qstr * name)
 		 */
 		qstr = &dentry->d_name;
 		if (parent->d_op && parent->d_op->d_compare) {
+			barrier_nospec();
 			if (parent->d_op->d_compare(parent, qstr, name))
 				goto next;
 		} else {

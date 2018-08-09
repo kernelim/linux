@@ -3488,6 +3488,11 @@ static bool svm_has_emulated_msr(int index)
 	return true;
 }
 
+static void svm_handle_external_intr(struct kvm_vcpu *vcpu)
+{
+	local_irq_enable();
+}
+
 static struct kvm_x86_ops svm_x86_ops = {
 	.cpu_has_kvm_support = has_svm,
 	.disabled_by_bios = is_disabled,
@@ -3566,6 +3571,7 @@ static struct kvm_x86_ops svm_x86_ops = {
 	.compute_tsc_offset = svm_compute_tsc_offset,
 
 	.sched_in = svm_sched_in,
+	.handle_external_intr = svm_handle_external_intr,
 
 	.has_emulated_msr = svm_has_emulated_msr,
 };

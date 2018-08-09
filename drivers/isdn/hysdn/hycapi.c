@@ -15,6 +15,7 @@
 #include <linux/kernel.h>
 #include <linux/skbuff.h>
 #include <linux/netdevice.h>
+#include <linux/nospec.h>
 
 #define	VER_DRIVER	0
 #define	VER_CARDTYPE	1
@@ -52,6 +53,18 @@ static inline int _hycapi_appCheck(int app_id, int ctrl_no)
 		return -1;
 	}
 	return ((hycapi_applications[app_id-1].ctrl_mask & (1 << (ctrl_no-1))) != 0);
+}
+
+static inline int _hycapi_appCheck_nospec(u16 *app_id, int ctrl_no)
+{
+	if((ctrl_no <= 0) || (ctrl_no > CAPI_MAXCONTR) || (*app_id <= 0) ||
+	   (*app_id > CAPI_MAXAPPL))
+	{
+		printk(KERN_ERR "HYCAPI: Invalid request app_id %d for controller %d", *app_id, ctrl_no);
+		return -1;
+	}
+	*app_id = array_index_nospec(*app_id - 1, CAPI_MAXAPPL) + 1;
+	return ((hycapi_applications[*app_id-1].ctrl_mask & (1 << (ctrl_no-1))) != 0);
 }
 
 /******************************
@@ -223,7 +236,7 @@ hycapi_register_appl(struct capi_ctr *ctrl, __u16 appl,
 	int MaxLogicalConnections = 0, MaxBDataBlocks = 0, MaxBDataLen = 0;
 	hycapictrl_info *cinfo = (hycapictrl_info *)(ctrl->driverdata);
 	hysdn_card *card = cinfo->card;
-	int chk = _hycapi_appCheck(appl, ctrl->cnr);
+	int chk = _hycapi_appCheck_nospec(&appl, ctrl->cnr);
 	if(chk < 0) {
 		return;
 	}
@@ -297,7 +310,7 @@ hycapi_release_appl(struct capi_ctr *ctrl, __u16 appl)
 {
 	int chk;
 
-	chk = _hycapi_appCheck(appl, ctrl->cnr);
+	chk = _hycapi_appCheck_nospec(&appl, ctrl->cnr);
 	if(chk<0) {
 		printk(KERN_ERR "HYCAPI: Releasing invalid appl %d on controller %d\n", appl, ctrl->cnr);
 		return;
@@ -374,7 +387,7 @@ static u16 hycapi_send_message(struct capi_ctr *ctrl, struct sk_buff *skb)
 	u16 retval = CAPI_NOERROR;
 
 	appl_id = CAPIMSG_APPID(skb->data);
-	switch(_hycapi_appCheck(appl_id, ctrl->cnr))
+	switch(_hycapi_appCheck_nospec(&appl_id, ctrl->cnr))
 	{
 		case 0:
 /*			printk(KERN_INFO "Need to register\n"); */

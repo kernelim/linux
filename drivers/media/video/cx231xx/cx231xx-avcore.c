@@ -31,6 +31,7 @@
 #include <linux/i2c.h>
 #include <linux/mm.h>
 #include <linux/mutex.h>
+#include <linux/nospec.h>
 #include <media/tuner.h>
 
 #include <media/v4l2-common.h>
@@ -561,6 +562,7 @@ int cx231xx_set_video_input_mux(struct cx231xx *dev, u8 input)
 {
 	int status = 0;
 
+	input = array_index_nospec(input, MAX_CX231XX_INPUT);
 	switch (INPUT(input)->type) {
 	case CX231XX_VMUX_COMPOSITE1:
 	case CX231XX_VMUX_SVIDEO:

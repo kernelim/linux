@@ -52,6 +52,7 @@
 #include <linux/kref.h>
 #include <linux/sched.h>
 #include <linux/kthread.h>
+#include <linux/nospec.h>
 
 #include "qib_common.h"
 #include "qib_verbs.h"
@@ -1231,7 +1232,7 @@ static inline struct qib_ibport *to_iport(struct ib_device *ibdev, u8 port)
 	unsigned pidx = port - 1; /* IB number port from 1, hdw from 0 */
 
 	WARN_ON(pidx >= dd->num_pports);
-	return &dd->pport[pidx].ibport_data;
+	return &dd->pport[array_index_nospec(pidx, dd->num_pports)].ibport_data;
 }
 
 /*

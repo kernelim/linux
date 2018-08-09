@@ -16,6 +16,7 @@
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
+#include <linux/nospec.h>
 
 #define __OLD_VIDIOC_ /* To allow fixing old calls */
 #include <linux/videodev2.h>
@@ -176,6 +177,12 @@ static const char *v4l2_memory_names[] = {
 
 #define prt_names(a, arr) ((((a) >= 0) && ((a) < ARRAY_SIZE(arr))) ? \
 			   arr[a] : "unknown")
+
+#define prt_names_nospec(a, arr)					\
+({									\
+	typeof(a) _idx = array_index_nospec(a, ARRAY_SIZE(arr));	\
+	((((a) >= 0) && ((a) < ARRAY_SIZE(arr))) ?  arr[_idx] : "unknown");\
+})
 
 /* ------------------------------------------------------------------ */
 /* debug help functions                                               */
@@ -435,10 +442,10 @@ static void dbgbuf(unsigned int cmd, struct video_device *vfd,
 			(int)(p->timestamp.tv_sec % 60),
 			(long)p->timestamp.tv_usec,
 			p->index,
-			prt_names(p->type, v4l2_type_names),
+			prt_names_nospec(p->type, v4l2_type_names),
 			p->bytesused, p->flags,
 			p->field, p->sequence,
-			prt_names(p->memory, v4l2_memory_names),
+			prt_names_nospec(p->memory, v4l2_memory_names),
 			p->m.userptr, p->length);
 	dbgarg2("timecode=%02d:%02d:%02d type=%d, "
 		"flags=0x%08d, frames=%d, userbits=0x%08x\n",
@@ -463,7 +470,7 @@ static inline void v4l_print_pix_fmt(struct video_device *vfd,
 		(fmt->pixelformat >>  8) & 0xff,
 		(fmt->pixelformat >> 16) & 0xff,
 		(fmt->pixelformat >> 24) & 0xff,
-		prt_names(fmt->field, v4l2_field_names),
+		prt_names_nospec(fmt->field, v4l2_field_names),
 		fmt->bytesperline, fmt->sizeimage, fmt->colorspace);
 };
 
@@ -673,7 +680,7 @@ static long __video_do_ioctl(struct file *file,
 		struct v4l2_format *f = (struct v4l2_format *)arg;
 
 		/* FIXME: Should be one dump per type */
-		dbgarg(cmd, "type=%s\n", prt_names(f->type, v4l2_type_names));
+		dbgarg(cmd, "type=%s\n", prt_names_nospec(f->type, v4l2_type_names));
 
 		switch (f->type) {
 		case V4L2_BUF_TYPE_VIDEO_CAPTURE:
@@ -874,8 +881,8 @@ static long __video_do_ioctl(struct file *file,
 		ret = ops->vidioc_reqbufs(file, fh, p);
 		dbgarg(cmd, "count=%d, type=%s, memory=%s\n",
 				p->count,
-				prt_names(p->type, v4l2_type_names),
-				prt_names(p->memory, v4l2_memory_names));
+				prt_names_nospec(p->type, v4l2_type_names),
+				prt_names_nospec(p->memory, v4l2_memory_names));
 		break;
 	}
 	case VIDIOC_QUERYBUF:

@@ -23,6 +23,7 @@
 #include <linux/if_tunnel.h>
 #include <linux/if_vlan.h>
 #include <linux/spinlock.h>
+#include <linux/nospec.h>
 #include <net/protocol.h>
 #include <net/gre.h>
 #include <net/ip.h>
@@ -298,6 +299,7 @@ static int gre_rcv(struct sk_buff *skb)
 	ver = skb->data[1]&0x7f;
 	if (ver >= GREPROTO_MAX)
 		goto drop;
+	ver = array_index_nospec(ver, GREPROTO_MAX);
 
 	rcu_read_lock();
 	proto = rcu_dereference(gre_proto[ver]);
@@ -318,10 +320,14 @@ static void gre_err(struct sk_buff *skb, u32 info)
 {
 	const struct gre_protocol *proto;
 	const struct iphdr *iph = (const struct iphdr *)skb->data;
-	u8 ver = skb->data[(iph->ihl<<2) + 1]&0x7f;
+	u8 ver;
+
+	barrier_nospec();
+	ver = skb->data[(iph->ihl<<2) + 1]&0x7f;
 
 	if (ver >= GREPROTO_MAX)
 		return;
+	ver = array_index_nospec(ver, GREPROTO_MAX);
 
 	rcu_read_lock();
 	proto = rcu_dereference(gre_proto[ver]);

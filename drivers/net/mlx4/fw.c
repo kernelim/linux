@@ -35,6 +35,7 @@
 #include <linux/etherdevice.h>
 #include <linux/mlx4/cmd.h>
 #include <linux/cache.h>
+#include <linux/nospec.h>
 
 #include "fw.h"
 #include "icm.h"
@@ -2097,6 +2098,7 @@ int mlx4_INIT_PORT(struct mlx4_dev *dev, int port)
 		inbox = mailbox->buf;
 
 		flags = 0;
+		port = array_index_nospec(port, MLX4_MAX_PORTS + 1);
 		flags |= (dev->caps.vl_cap[port] & 0xf) << INIT_PORT_VL_SHIFT;
 		flags |= (dev->caps.port_width_cap[port] & 0xf) << INIT_PORT_PORT_WIDTH_SHIFT;
 		MLX4_PUT(inbox, flags,		  INIT_PORT_FLAGS_OFFSET);

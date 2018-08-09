@@ -56,6 +56,7 @@
    L: receive_xxxx_reply()     <-  R: send_xxxx_reply()
 */
 #include <linux/types.h>
+#include <linux/nospec.h>
 #include "dlm_internal.h"
 #include <linux/dlm_device.h>
 #include "memory.h"
@@ -627,6 +628,7 @@ static struct dlm_lkb *__find_lkb(struct dlm_ls *ls, uint32_t lkid)
 	struct dlm_lkb *lkb;
 	uint16_t bucket = (lkid >> 16);
 
+	bucket = array_index_nospec(bucket, ls->ls_lkbtbl_size);
 	list_for_each_entry(lkb, &ls->ls_lkbtbl[bucket].list, lkb_idtbl_list) {
 		if (lkb->lkb_id == lkid)
 			return lkb;
@@ -641,6 +643,7 @@ static int find_lkb(struct dlm_ls *ls, uint32_t lkid, struct dlm_lkb **lkb_ret)
 
 	if (bucket >= ls->ls_lkbtbl_size)
 		return -EBADSLT;
+	bucket = array_index_nospec(bucket, ls->ls_lkbtbl_size);
 
 	read_lock(&ls->ls_lkbtbl[bucket].lock);
 	lkb = __find_lkb(ls, lkid);
@@ -2132,6 +2135,7 @@ static int set_lock_args(int mode, struct dlm_lksb *lksb, uint32_t flags,
 
 	if (mode < 0 || mode > DLM_LOCK_EX)
 		goto out;
+	mode = array_index_nospec(mode, DLM_LOCK_EX + 1);
 
 	if (!(flags & DLM_LKF_CONVERT) && (namelen > DLM_RESNAME_MAXLEN))
 		goto out;

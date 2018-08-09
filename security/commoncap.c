@@ -28,6 +28,7 @@
 #include <linux/prctl.h>
 #include <linux/securebits.h>
 #include <linux/personality.h>
+#include <linux/nospec.h>
 
 /*
  * If a non-root user executes a setuid-root binary in
@@ -825,6 +826,7 @@ static long cap_prctl_drop(struct cred *new, unsigned long cap)
 		return -EPERM;
 	if (!cap_valid(cap))
 		return -EINVAL;
+	cap = array_index_nospec(cap, CAP_LAST_CAP + 1);
 
 	cap_lower(new->cap_bset, cap);
 	return 0;
@@ -873,6 +875,8 @@ int cap_task_prctl(int option, unsigned long arg2, unsigned long arg3,
 		error = -EINVAL;
 		if (!cap_valid(arg2))
 			goto error;
+		arg2 = array_index_nospec(arg2, CAP_LAST_CAP + 1);
+
 		error = !!cap_raised(new->cap_bset, arg2);
 		goto no_change;
 

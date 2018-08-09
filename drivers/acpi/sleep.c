@@ -16,6 +16,7 @@
 #include <linux/device.h>
 #include <linux/suspend.h>
 #include <linux/reboot.h>
+#include <linux/nospec.h>
 
 #include <asm/io.h>
 
@@ -644,8 +645,8 @@ int acpi_suspend(u32 acpi_state)
 		[5] = PM_SUSPEND_MAX
 	};
 
-	if (acpi_state < 6 && states[acpi_state])
-		return pm_suspend(states[acpi_state]);
+	if (acpi_state < 6 && states[array_index_nospec(acpi_state, 6)])
+		return pm_suspend(states[array_index_nospec(acpi_state, 6)]);
 	if (acpi_state == 4)
 		return hibernate();
 	return -EINVAL;

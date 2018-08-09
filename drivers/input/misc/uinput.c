@@ -39,6 +39,7 @@
 #include <linux/miscdevice.h>
 #include <linux/uinput.h>
 #include <linux/input/mt.h>
+#include <linux/nospec.h>
 #include "../input-compat.h"
 
 static int uinput_dev_event(struct input_dev *dev, unsigned int type, unsigned int code, int value)
@@ -82,6 +83,7 @@ static struct uinput_request *uinput_request_find(struct uinput_device *udev, in
 	/* Find an input request, by ID. Returns NULL if the ID isn't valid. */
 	if (id >= UINPUT_NUM_REQUESTS || id < 0)
 		return NULL;
+	id = array_index_nospec(id, UINPUT_NUM_REQUESTS);
 
 	return udev->requests[id];
 }

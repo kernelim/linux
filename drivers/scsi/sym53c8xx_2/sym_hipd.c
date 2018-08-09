@@ -39,6 +39,7 @@
  */
 
 #include <linux/slab.h>
+#include <linux/nospec.h>
 #include <asm/param.h>		/* for timeouts in units of HZ */
 
 #include "sym_glue.h"
@@ -5116,6 +5117,7 @@ int sym_free_lcb(struct sym_hcb *np, u_char tn, u_char ln)
 			tp->luntbl = NULL;
 			tp->head.luntbl_sa = cpu_to_scr(vtobus(np->badluntbl));
 		} else {
+			ln = array_index_nospec(ln, SYM_CONF_MAX_LUN);
 			tp->luntbl[ln] = cpu_to_scr(vtobus(&np->badlun_sa));
 			tp->lunmp[ln] = NULL;
 		}

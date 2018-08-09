@@ -23,6 +23,7 @@
 #include <linux/netdevice.h>
 #include <linux/ethtool.h>
 #include <linux/slab.h>
+#include <linux/nospec.h>
 
 #include "atl1c.h"
 
@@ -214,7 +215,9 @@ static int atl1c_get_eeprom(struct net_device *netdev,
 		return -ENOMEM;
 
 	for (i = first_dword; i < last_dword; i++) {
-		if (!atl1c_read_eeprom(hw, i * 4, &(eeprom_buff[i-first_dword]))) {
+		int idx = array_index_nospec(i - first_dword,
+					     last_dword - first_dword + 1);
+		if (!atl1c_read_eeprom(hw, i * 4, &(eeprom_buff[idx]))) {
 			kfree(eeprom_buff);
 			return -EIO;
 		}

@@ -30,6 +30,7 @@
  * IN THE SOFTWARE.
  */
 #include <linux/compat.h>
+#include <linux/nospec.h>
 
 #include <drm/drmP.h>
 #include <drm/r128_drm.h>
@@ -196,15 +197,18 @@ drm_ioctl_compat_t *r128_compat_ioctls[] = {
  */
 long r128_compat_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
-	unsigned int nr = DRM_IOCTL_NR(cmd);
+	unsigned int nr = DRM_IOCTL_NR(cmd), idx;
 	drm_ioctl_compat_t *fn = NULL;
 	int ret;
 
 	if (nr < DRM_COMMAND_BASE)
 		return drm_compat_ioctl(filp, cmd, arg);
 
-	if (nr < DRM_COMMAND_BASE + ARRAY_SIZE(r128_compat_ioctls))
-		fn = r128_compat_ioctls[nr - DRM_COMMAND_BASE];
+	if (nr < DRM_COMMAND_BASE + ARRAY_SIZE(r128_compat_ioctls)) {
+		idx = array_index_nospec(nr - DRM_COMMAND_BASE,
+					 ARRAY_SIZE(r128_compat_ioctls));
+		fn = r128_compat_ioctls[idx];
+	}
 
 	if (fn != NULL)
 		ret = (*fn) (filp, cmd, arg);

@@ -35,6 +35,7 @@
 #include <linux/skbuff.h>
 #include <linux/init.h>
 #include <linux/poll.h>
+#include <linux/nospec.h>
 #include <net/sock.h>
 #include <asm/ioctls.h>
 #include <linux/kmod.h>
@@ -136,6 +137,7 @@ static int bt_sock_create(struct net *net, struct socket *sock, int proto,
 
 	if (proto < 0 || proto >= BT_MAX_PROTO)
 		return -EINVAL;
+	proto = array_index_nospec(proto, BT_MAX_PROTO);
 
 	if (!bt_proto[proto])
 		request_module("bt-proto-%d", proto);

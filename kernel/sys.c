@@ -36,6 +36,7 @@
 #include <linux/cpu.h>
 #include <linux/ptrace.h>
 #include <linux/fs_struct.h>
+#include <linux/nospec.h>
 
 #include <linux/compat.h>
 #include <linux/syscalls.h>
@@ -49,6 +50,9 @@
 #include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/unistd.h>
+
+/* Hardening for Spectre-v1 */
+#include <linux/nospec.h>
 
 #ifndef SET_UNALIGN_CTL
 # define SET_UNALIGN_CTL(a,b)	(-EINVAL)
@@ -1224,6 +1228,9 @@ SYSCALL_DEFINE2(getrlimit, unsigned int, resource, struct rlimit __user *, rlim)
 		return -EINVAL;
 	else {
 		struct rlimit value;
+
+		resource = array_index_nospec(resource, RLIM_NLIMITS);
+
 		task_lock(current->group_leader);
 		value = current->signal->rlim[resource];
 		task_unlock(current->group_leader);
@@ -1244,6 +1251,7 @@ SYSCALL_DEFINE2(old_getrlimit, unsigned int, resource,
 	if (resource >= RLIM_NLIMITS)
 		return -EINVAL;
 
+	resource = array_index_nospec(resource, RLIM_NLIMITS);
 	task_lock(current->group_leader);
 	x = current->signal->rlim[resource];
 	task_unlock(current->group_leader);

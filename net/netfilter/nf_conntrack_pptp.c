@@ -24,6 +24,7 @@
 #include <linux/skbuff.h>
 #include <linux/in.h>
 #include <linux/tcp.h>
+#include <linux/nospec.h>
 
 #include <net/netfilter/nf_conntrack.h>
 #include <net/netfilter/nf_conntrack_core.h>
@@ -273,7 +274,8 @@ pptp_inbound_pkt(struct sk_buff *skb,
 	typeof(nf_nat_pptp_hook_inbound) nf_nat_pptp_inbound;
 
 	msg = ntohs(ctlh->messageType);
-	pr_debug("inbound control message %s\n", pptp_msg_name[msg]);
+	pr_debug("inbound control message %s\n",
+		 pptp_msg_name[array_index_nospec(msg, ARRAY_SIZE(pptp_msg_name))]);
 
 	switch (msg) {
 	case PPTP_START_SESSION_REPLY:
@@ -399,7 +401,8 @@ pptp_outbound_pkt(struct sk_buff *skb,
 	typeof(nf_nat_pptp_hook_outbound) nf_nat_pptp_outbound;
 
 	msg = ntohs(ctlh->messageType);
-	pr_debug("outbound control message %s\n", pptp_msg_name[msg]);
+	pr_debug("outbound control message %s\n",
+		 pptp_msg_name[array_index_nospec(msg, ARRAY_SIZE(pptp_msg_name))]);
 
 	switch (msg) {
 	case PPTP_START_SESSION_REQUEST:
@@ -550,7 +553,8 @@ conntrack_pptp_help(struct sk_buff *skb, unsigned int protoff,
 
 	reqlen = datalen;
 	msg = ntohs(ctlh->messageType);
-	if (msg > 0 && msg <= PPTP_MSG_MAX && reqlen < pptp_msg_size[msg])
+	if (msg > 0 && msg <= PPTP_MSG_MAX &&
+	    reqlen < pptp_msg_size[array_index_nospec(msg, PPTP_MSG_MAX + 1)])
 		return NF_ACCEPT;
 	if (reqlen > sizeof(*pptpReq))
 		reqlen = sizeof(*pptpReq);

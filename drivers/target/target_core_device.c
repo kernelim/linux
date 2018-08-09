@@ -33,6 +33,7 @@
 #include <linux/kthread.h>
 #include <linux/in.h>
 #include <linux/export.h>
+#include <linux/nospec.h>
 #include <net/sock.h>
 #include <net/tcp.h>
 #include <scsi/scsi.h>
@@ -1176,6 +1177,9 @@ struct se_lun *core_get_lun_from_tpg(struct se_portal_group *tpg, u32 unpacked_l
 		spin_unlock(&tpg->tpg_lun_lock);
 		return NULL;
 	}
+	unpacked_lun = array_index_nospec(unpacked_lun,
+					  TRANSPORT_MAX_LUNS_PER_TPG);
+
 	lun = tpg->tpg_lun_list[unpacked_lun];
 
 	if (lun->lun_status != TRANSPORT_LUN_STATUS_FREE) {

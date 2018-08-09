@@ -2,6 +2,7 @@
 #include <crypto/authenc.h>
 #include <linux/err.h>
 #include <linux/module.h>
+#include <linux/nospec.h>
 #include <net/ip.h>
 #include <net/xfrm.h>
 #include <net/esp.h>
@@ -147,6 +148,8 @@ static int esp_output(struct xfrm_state *x, struct sk_buff *skb)
 	req = esp_tmp_givreq(aead, iv);
 	asg = esp_givreq_sg(aead, req);
 	sg = asg + 1;
+
+	barrier_nospec();
 
 	/* Fill padding... */
 	tail = skb_tail_pointer(trailer);

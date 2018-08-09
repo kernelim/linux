@@ -26,6 +26,7 @@
  **************************************************************************/
 #include <linux/module.h>
 #include <linux/console.h>
+#include <linux/nospec.h>
 
 #include <drm/drmP.h>
 #include "vmwgfx_drv.h"
@@ -1093,8 +1094,11 @@ static long vmw_generic_ioctl(struct file *filp, unsigned int cmd,
 
 	if ((nr >= DRM_COMMAND_BASE) && (nr < DRM_COMMAND_END)
 	    && (nr < DRM_COMMAND_BASE + dev->driver->num_ioctls)) {
-		const struct drm_ioctl_desc *ioctl =
-			&vmw_ioctls[nr - DRM_COMMAND_BASE];
+		const struct drm_ioctl_desc *ioctl;
+		unsigned int idx = array_index_nospec(nr - DRM_COMMAND_BASE,
+						      ARRAY_SIZE(vmw_ioctls));
+
+		ioctl = &vmw_ioctls[idx];
 
 		if (nr == DRM_COMMAND_BASE + DRM_VMW_EXECBUF) {
 			ret = (long) drm_ioctl_permit(ioctl->flags, file_priv);

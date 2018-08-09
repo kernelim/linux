@@ -22,6 +22,7 @@
  *
  */
 
+#include <linux/nospec.h>
 #include "i915_drv.h"
 #include "i915_gem_batch_pool.h"
 
@@ -111,6 +112,8 @@ i915_gem_batch_pool_get(struct i915_gem_batch_pool *pool,
 	n = fls(size >> PAGE_SHIFT) - 1;
 	if (n >= ARRAY_SIZE(pool->cache_list))
 		n = ARRAY_SIZE(pool->cache_list) - 1;
+	n = array_index_nospec(n, ARRAY_SIZE(pool->cache_list));
+
 	list = &pool->cache_list[n];
 
 	list_for_each_entry_safe(tmp, next, list, batch_pool_link) {

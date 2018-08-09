@@ -23,6 +23,7 @@
 #include <linux/module.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
+#include <linux/nospec.h>
 #include "xp.h"
 
 /*
@@ -487,7 +488,11 @@ xpnet_dev_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 		if (dest_partid >= 0 &&
 		    dest_partid < xp_max_npartitions &&
-		    test_bit(dest_partid, xpnet_broadcast_partitions) != 0) {
+		    test_bit(array_index_nospec(dest_partid, xp_max_npartitions),
+			     xpnet_broadcast_partitions) != 0) {
+
+			dest_partid = array_index_nospec(dest_partid,
+							 xp_max_npartitions);
 
 			xpnet_send(skb, queued_msg, start_addr, end_addr,
 				   embedded_bytes, dest_partid);

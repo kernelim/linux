@@ -155,6 +155,7 @@
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/delay.h>
+#include <linux/nospec.h>
 #include <linux/mISDNhw.h>
 #include <linux/mISDNdsp.h>
 
@@ -4081,6 +4082,7 @@ open_bchannel(struct hfc_multi *hc, struct dchannel *dch,
 		ch = rq->adr.channel;
 	else
 		ch = (rq->adr.channel - 1) + (dch->slot - 2);
+	ch = array_index_nospec(ch, 32);
 	bch = hc->chan[ch].bch;
 	if (!bch) {
 		printk(KERN_ERR "%s:internal error ch %d has no bch\n",

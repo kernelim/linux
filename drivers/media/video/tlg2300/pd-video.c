@@ -5,6 +5,7 @@
 #include <linux/mm.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
+#include <linux/nospec.h>
 
 #include <media/v4l2-ioctl.h>
 #include <media/v4l2-dev.h>
@@ -705,12 +706,16 @@ static struct videobuf_queue_ops pd_video_qops = {
 static int vidioc_enum_fmt(struct file *file, void *fh,
 				struct v4l2_fmtdesc *f)
 {
+	u32 index;
+
 	if (ARRAY_SIZE(poseidon_formats) <= f->index)
 		return -EINVAL;
+	index = array_index_nospec(f->index, ARRAY_SIZE(poseidon_formats));
+
 	f->type		= V4L2_BUF_TYPE_VIDEO_CAPTURE;
 	f->flags	= 0;
-	f->pixelformat	= poseidon_formats[f->index].fourcc;
-	strcpy(f->description, poseidon_formats[f->index].name);
+	f->pixelformat	= poseidon_formats[index].fourcc;
+	strcpy(f->description, poseidon_formats[index].name);
 	return 0;
 }
 
@@ -890,10 +895,13 @@ static int vidioc_s_std(struct file *file, void *fh, v4l2_std_id *norm)
 static int vidioc_enum_input(struct file *file, void *fh, struct v4l2_input *in)
 {
 	struct front_face *front = fh;
+	u32 index;
 
 	if (in->index < 0 || in->index >= POSEIDON_INPUTS)
 		return -EINVAL;
-	strcpy(in->name, pd_inputs[in->index].name);
+	index = array_index_nospec(in->index, POSEIDON_INPUTS);
+
+	strcpy(in->name, pd_inputs[index].name);
 	in->type  = V4L2_INPUT_TYPE_TUNER;
 
 	/*

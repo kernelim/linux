@@ -20,6 +20,7 @@
 #include <linux/spinlock.h>
 #include <linux/rcupdate.h>
 #include <linux/workqueue.h>
+#include <linux/nospec.h>
 
 struct fdtable_defer {
 	spinlock_t lock;
@@ -470,6 +471,7 @@ repeat:
 	if (start <= files->next_fd)
 		files->next_fd = fd + 1;
 
+	fd = array_index_nospec(fd, fdt->max_fds);
 	FD_SET(fd, fdt->open_fds);
 	if (flags & O_CLOEXEC)
 		FD_SET(fd, fdt->close_on_exec);

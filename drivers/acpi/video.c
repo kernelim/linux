@@ -39,6 +39,7 @@
 #include <linux/sort.h>
 #include <linux/pci.h>
 #include <linux/pci_ids.h>
+#include <linux/nospec.h>
 #include <asm/uaccess.h>
 #include <linux/dmi.h>
 #include <acpi/acpi_bus.h>
@@ -452,6 +453,7 @@ video_set_cur_state(struct thermal_cooling_device *cooling_dev, unsigned long st
 
 	if ( state >= video->brightness->count - 2)
 		return -EINVAL;
+	state = array_index_nospec(state, video->brightness->count - 2);
 
 	state = video->brightness->count - state;
 	level = video->brightness->levels[state -1];

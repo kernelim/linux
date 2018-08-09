@@ -15,6 +15,7 @@
 #include <linux/stop_machine.h>
 #include <linux/mutex.h>
 #include <linux/suspend.h>
+#include <linux/device.h>
 
 #ifdef CONFIG_SMP
 /* Serializes the updates to cpu_online_mask, cpu_present_mask */
@@ -68,6 +69,8 @@ void put_online_cpus(void)
 EXPORT_SYMBOL_GPL(put_online_cpus);
 
 #endif	/* CONFIG_HOTPLUG_CPU */
+
+static DEFINE_PER_CPU(bool, booted_once);
 
 /*
  * The following two API's must be used when attempting
@@ -271,28 +274,80 @@ out_release:
 	return err;
 }
 
+static int cpu_down_maps_locked(unsigned int cpu)
+{
+	if (cpu_hotplug_disabled)
+		return -EBUSY;
+	return _cpu_down(cpu, 0);
+}
+
 int __ref cpu_down(unsigned int cpu)
 {
 	int err;
 
 	cpu_maps_update_begin();
-
-	if (cpu_hotplug_disabled) {
-		err = -EBUSY;
-		goto out;
-	}
-
-	err = _cpu_down(cpu, 0);
-
-out:
+	err = cpu_down_maps_locked(cpu);
 	cpu_maps_update_done();
 	return err;
 }
 EXPORT_SYMBOL(cpu_down);
 #endif /*CONFIG_HOTPLUG_CPU*/
 
+#ifdef CONFIG_HOTPLUG_SMT
+enum cpuhp_smt_control cpu_smt_control __read_mostly = CPU_SMT_ENABLED;
+EXPORT_SYMBOL_GPL(cpu_smt_control);
+
+void __init cpu_smt_disable(bool force)
+{
+	if (cpu_smt_control == CPU_SMT_FORCE_DISABLED ||
+		cpu_smt_control == CPU_SMT_NOT_SUPPORTED)
+		return;
+
+	if (force) {
+		pr_info("SMT: Force disabled\n");
+		cpu_smt_control = CPU_SMT_FORCE_DISABLED;
+	} else {
+		cpu_smt_control = CPU_SMT_DISABLED;
+	}
+}
+
+/*
+ * The decision whether SMT is supported can only be done after the full
+ * CPU identification. Called from architecture code.
+ */
+void __init cpu_smt_check_topology(void)
+{
+	if (!topology_smt_supported())
+		cpu_smt_control = CPU_SMT_NOT_SUPPORTED;
+}
+
+static int __init smt_cmdline_disable(char *str)
+{
+	cpu_smt_disable(str && !strcmp(str, "force"));
+	return 0;
+}
+early_param("nosmt", smt_cmdline_disable);
+
+bool cpu_smt_allowed(unsigned int cpu)
+{
+	if (cpu_smt_control == CPU_SMT_ENABLED)
+		return true;
+
+	if (topology_is_primary_thread(cpu))
+		return true;
+
+	/*
+	 * On x86 it's required to boot all logical CPUs at least once so
+	 * that the init code can get a chance to set CR4.MCE on each
+	 * CPU. Otherwise, a broadacasted MCE observing CR4.MCE=0b on any
+	 * core will shutdown the machine.
+	 */
+	return !per_cpu(booted_once, cpu);
+}
+#endif
+
 /* Requires cpu_add_remove_lock to be held */
-static int __cpuinit _cpu_up(unsigned int cpu, int tasks_frozen)
+static int _cpu_up(unsigned int cpu, int tasks_frozen)
 {
 	int ret, nr_calls = 0;
 	void *hcpu = (void *)(long)cpu;
@@ -376,6 +431,10 @@ int __cpuinit cpu_up(unsigned int cpu)
 
 	if (cpu_hotplug_disabled) {
 		err = -EBUSY;
+		goto out;
+	}
+	if (!cpu_smt_allowed(cpu)) {
+		err = -EPERM;
 		goto out;
 	}
 
@@ -558,6 +617,7 @@ void __cpuinit notify_cpu_starting(unsigned int cpu)
 {
 	unsigned long val = CPU_STARTING;
 
+	per_cpu(booted_once, cpu) = true;
 #ifdef CONFIG_PM_SLEEP_SMP
 	if (frozen_cpus != NULL && cpumask_test_cpu(cpu, frozen_cpus))
 		val = CPU_STARTING_FROZEN;
@@ -566,6 +626,144 @@ void __cpuinit notify_cpu_starting(unsigned int cpu)
 }
 
 #endif /* CONFIG_SMP */
+
+#if defined(CONFIG_SYSFS) && defined(CONFIG_HOTPLUG_CPU)
+
+#ifdef CONFIG_HOTPLUG_SMT
+
+static const char *smt_states[] = {
+	[CPU_SMT_ENABLED]		= "on",
+	[CPU_SMT_DISABLED]		= "off",
+	[CPU_SMT_FORCE_DISABLED]	= "forceoff",
+	[CPU_SMT_NOT_SUPPORTED]		= "notsupported",
+};
+
+static ssize_t
+show_smt_control(struct sysdev_class *class, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE - 2, "%s\n", smt_states[cpu_smt_control]);
+}
+
+static int cpuhp_smt_disable(enum cpuhp_smt_control ctrlval)
+{
+	int cpu, ret = 0;
+
+	cpu_maps_update_begin();
+	for_each_online_cpu(cpu) {
+		if (topology_is_primary_thread(cpu))
+			continue;
+		ret = cpu_down_maps_locked(cpu);
+		if (ret)
+			break;
+	}
+	if (!ret)
+		cpu_smt_control = ctrlval;
+	cpu_maps_update_done();
+	return ret;
+}
+
+static int cpuhp_smt_enable(void)
+{
+	int cpu, ret = 0;
+
+	cpu_maps_update_begin();
+	cpu_smt_control = CPU_SMT_ENABLED;
+	for_each_present_cpu(cpu) {
+		/* Skip online CPUs and CPUs on offline nodes */
+		if (cpu_online(cpu) || !node_online(cpu_to_node(cpu)))
+			continue;
+		ret = _cpu_up(cpu, 0);
+		if (ret)
+			break;
+		/* See comment in cpuhp_smt_disable() */
+	}
+	cpu_maps_update_done();
+	return ret;
+}
+
+static ssize_t
+store_smt_control(struct sysdev_class *class, const char *buf, size_t count)
+{
+	int ctrlval, ret = 0;
+
+	if (sysfs_streq(buf, "on"))
+		ctrlval = CPU_SMT_ENABLED;
+	else if (sysfs_streq(buf, "off"))
+		ctrlval = CPU_SMT_DISABLED;
+	else if (sysfs_streq(buf, "forceoff"))
+		ctrlval = CPU_SMT_FORCE_DISABLED;
+	else
+		return -EINVAL;
+
+	if (cpu_smt_control == CPU_SMT_FORCE_DISABLED)
+		return -EPERM;
+
+	if (cpu_smt_control == CPU_SMT_NOT_SUPPORTED)
+		return -ENODEV;
+
+	cpu_hotplug_driver_lock();
+	if (ctrlval != cpu_smt_control) {
+		switch (ctrlval) {
+		case CPU_SMT_ENABLED:
+			ret = cpuhp_smt_enable();
+			break;
+		case CPU_SMT_DISABLED:
+		case CPU_SMT_FORCE_DISABLED:
+			ret = cpuhp_smt_disable(ctrlval);
+			break;
+		}
+	}
+	cpu_hotplug_driver_unlock();
+
+	return ret ? ret : count;
+}
+static SYSDEV_CLASS_ATTR(control, 0644, show_smt_control, store_smt_control);
+
+static ssize_t
+show_smt_active(struct sysdev_class *class, char *buf)
+{
+	bool active = smp_num_siblings > 1;
+
+	return snprintf(buf, PAGE_SIZE - 2, "%d\n", active);
+}
+static SYSDEV_CLASS_ATTR(active, 0444, show_smt_active, NULL);
+
+static struct attribute *cpuhp_smt_attrs[] = {
+	&attr_control.attr,
+	&attr_active.attr,
+	NULL
+};
+
+static const struct attribute_group cpuhp_smt_attr_group = {
+	.attrs = cpuhp_smt_attrs,
+	.name = "smt",
+};
+
+static int __init cpu_smt_state_init(void)
+{
+	/*
+	 * If SMT was disabled by BIOS, detect it here, after the CPUs have
+	 * been brought online.  This ensures the smt/l1tf sysfs entries are
+	 * consistent with reality.  Note this may overwrite cpu_smt_control's
+	 * previous setting.
+	 */
+	if (topology_max_smt_threads() == 1)
+		cpu_smt_control = CPU_SMT_NOT_SUPPORTED;
+
+	return sysfs_create_group(&cpu_sysdev_class.kset.kobj,
+				  &cpuhp_smt_attr_group);
+}
+
+#else
+static inline int cpu_smt_state_init(void) { return 0; }
+#endif
+
+static int __init cpuhp_sysfs_init(void)
+{
+	return cpu_smt_state_init();
+}
+device_initcall(cpuhp_sysfs_init);
+#endif
 
 /*
  * cpu_bit_bitmap[] is a special, "compressed" data structure that
@@ -661,4 +859,9 @@ void init_cpu_possible(const struct cpumask *src)
 void init_cpu_online(const struct cpumask *src)
 {
 	cpumask_copy(to_cpumask(cpu_online_bits), src);
+}
+
+void __init boot_cpu_state_init(void)
+{
+	percpu_write(booted_once, true);
 }

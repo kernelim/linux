@@ -24,6 +24,7 @@
 #include <linux/slab.h>
 #include <linux/i2c.h>
 #include <linux/mutex.h>
+#include <linux/nospec.h>
 
 #define TSL2550_DRV_NAME	"tsl2550"
 #define DRIVER_VERSION		"1.2"
@@ -238,6 +239,7 @@ static ssize_t tsl2550_store_operating_mode(struct device *dev,
 
 	if (val < 0 || val > 1)
 		return -EINVAL;
+	val = array_index_nospec(val, 2);
 
 	if (data->power_state == 0)
 		return -EBUSY;

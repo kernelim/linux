@@ -20,6 +20,7 @@
 #include <linux/device.h>
 #include <linux/mutex.h>
 #include <linux/smp_lock.h>
+#include <linux/nospec.h>
 
 #include <asm/uaccess.h>
 
@@ -45,7 +46,7 @@ static const struct file_operations raw_ctl_fops; /* forward declaration */
  */
 static int raw_open(struct inode *inode, struct file *filp)
 {
-	const int minor = iminor(inode);
+	const int minor = array_index_nospec(iminor(inode), MAX_RAW_MINORS);
 	struct block_device *bdev;
 	int err;
 
@@ -162,6 +163,8 @@ static int raw_ctl_ioctl(struct inode *inode, struct file *filp,
 			err = -EINVAL;
 			goto out;
 		}
+		rq.raw_minor = array_index_nospec(rq.raw_minor, MAX_RAW_MINORS);
+
 		rawdev = &raw_devices[rq.raw_minor];
 
 		if (command == RAW_SETBIND) {

@@ -38,6 +38,7 @@
  */
 
 #include <linux/gfp.h>
+#include <linux/nospec.h>
 
 #ifndef SYM_HIPD_H
 #define SYM_HIPD_H
@@ -581,7 +582,7 @@ struct sym_pmc {
 #define sym_lp(tp, lun) (!lun) ? (tp)->lun0p : NULL
 #else
 #define sym_lp(tp, lun) \
-	(!lun) ? (tp)->lun0p : (tp)->lunmp ? (tp)->lunmp[(lun)] : NULL
+	(!lun) ? (tp)->lun0p : (tp)->lunmp ? (tp)->lunmp[array_index_nospec((lun), SYM_CONF_MAX_LUN)] : NULL
 #endif
 
 /*

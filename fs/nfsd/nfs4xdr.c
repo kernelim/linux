@@ -46,6 +46,7 @@
 #include <linux/nfsd_idmap.h>
 #include <linux/nfs4_acl.h>
 #include <linux/sunrpc/svcauth_gss.h>
+#include <linux/nospec.h>
 
 #include "xdr4.h"
 #include "vfs.h"
@@ -1365,7 +1366,7 @@ nfsd4_decode_compound(struct nfsd4_compoundargs *argp)
 	DECODE_HEAD;
 	struct nfsd4_op *op;
 	bool cachethis = false;
-	int i;
+	int i, opnum;
 
 	/*
 	 * XXX: According to spec, we should check the tag
@@ -1434,9 +1435,11 @@ nfsd4_decode_compound(struct nfsd4_compoundargs *argp)
 		}
 		op->opnum = ntohl(*argp->p++);
 
-		if (nfsd4_opnum_in_range(argp, op))
-			op->status = nfsd4_dec_ops[op->opnum](argp, &op->u);
-		else {
+		if (nfsd4_opnum_in_range(argp, op)) {
+			opnum = array_index_nospec(op->opnum,
+						   ARRAY_SIZE(nfsd4_dec_ops));
+			op->status = nfsd4_dec_ops[opnum](argp, &op->u);
+		} else {
 			op->opnum = OP_ILLEGAL;
 			op->status = nfserr_op_illegal;
 		}

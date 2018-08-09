@@ -29,6 +29,7 @@
  * ------------------------ This file is DEPRECATED! -------------------------
  */
 
+#include <linux/nospec.h>
 #include <drm/drmP.h>
 #include <drm/radeon_drm.h>
 #include "radeon_drv.h"
@@ -2261,6 +2262,7 @@ static int radeon_cp_vertex(struct drm_device *dev, void *data, struct drm_file 
 	struct drm_buf *buf;
 	drm_radeon_vertex_t *vertex = data;
 	drm_radeon_tcl_prim_t prim;
+	int idx;
 
 	LOCK_TEST_WITH_RETURN(dev, file_priv);
 
@@ -2274,6 +2276,8 @@ static int radeon_cp_vertex(struct drm_device *dev, void *data, struct drm_file 
 			  vertex->idx, dma->buf_count - 1);
 		return -EINVAL;
 	}
+	idx = array_index_nospec(vertex->idx, dma->buf_count);
+
 	if (vertex->prim < 0 || vertex->prim > RADEON_PRIM_TYPE_3VRT_LINE_LIST) {
 		DRM_ERROR("buffer prim %d\n", vertex->prim);
 		return -EINVAL;
@@ -2282,7 +2286,7 @@ static int radeon_cp_vertex(struct drm_device *dev, void *data, struct drm_file 
 	RING_SPACE_TEST_WITH_RETURN(dev_priv);
 	VB_AGE_TEST_WITH_RETURN(dev_priv);
 
-	buf = dma->buflist[vertex->idx];
+	buf = dma->buflist[idx];
 
 	if (buf->file_priv != file_priv) {
 		DRM_ERROR("process %d using buffer owned by %p\n",
@@ -2340,7 +2344,7 @@ static int radeon_cp_indices(struct drm_device *dev, void *data, struct drm_file
 	struct drm_buf *buf;
 	drm_radeon_indices_t *elts = data;
 	drm_radeon_tcl_prim_t prim;
-	int count;
+	int count, idx;
 
 	LOCK_TEST_WITH_RETURN(dev, file_priv);
 
@@ -2355,6 +2359,8 @@ static int radeon_cp_indices(struct drm_device *dev, void *data, struct drm_file
 			  elts->idx, dma->buf_count - 1);
 		return -EINVAL;
 	}
+	idx = array_index_nospec(elts->idx, dma->buf_count);
+
 	if (elts->prim < 0 || elts->prim > RADEON_PRIM_TYPE_3VRT_LINE_LIST) {
 		DRM_ERROR("buffer prim %d\n", elts->prim);
 		return -EINVAL;
@@ -2363,7 +2369,7 @@ static int radeon_cp_indices(struct drm_device *dev, void *data, struct drm_file
 	RING_SPACE_TEST_WITH_RETURN(dev_priv);
 	VB_AGE_TEST_WITH_RETURN(dev_priv);
 
-	buf = dma->buflist[elts->idx];
+	buf = dma->buflist[idx];
 
 	if (buf->file_priv != file_priv) {
 		DRM_ERROR("process %d using buffer owned by %p\n",
@@ -2477,6 +2483,7 @@ static int radeon_cp_indirect(struct drm_device *dev, void *data, struct drm_fil
 	struct drm_device_dma *dma = dev->dma;
 	struct drm_buf *buf;
 	drm_radeon_indirect_t *indirect = data;
+	int idx;
 	RING_LOCALS;
 
 	LOCK_TEST_WITH_RETURN(dev, file_priv);
@@ -2490,8 +2497,9 @@ static int radeon_cp_indirect(struct drm_device *dev, void *data, struct drm_fil
 			  indirect->idx, dma->buf_count - 1);
 		return -EINVAL;
 	}
+	idx = array_index_nospec(indirect->idx, dma->buf_count);
 
-	buf = dma->buflist[indirect->idx];
+	buf = dma->buflist[idx];
 
 	if (buf->file_priv != file_priv) {
 		DRM_ERROR("process %d using buffer owned by %p\n",
@@ -2546,7 +2554,7 @@ static int radeon_cp_vertex2(struct drm_device *dev, void *data, struct drm_file
 	struct drm_device_dma *dma = dev->dma;
 	struct drm_buf *buf;
 	drm_radeon_vertex2_t *vertex = data;
-	int i;
+	int i, idx;
 	unsigned char laststate;
 
 	LOCK_TEST_WITH_RETURN(dev, file_priv);
@@ -2561,11 +2569,12 @@ static int radeon_cp_vertex2(struct drm_device *dev, void *data, struct drm_file
 			  vertex->idx, dma->buf_count - 1);
 		return -EINVAL;
 	}
+	idx = array_index_nospec(vertex->idx, dma->buf_count);
 
 	RING_SPACE_TEST_WITH_RETURN(dev_priv);
 	VB_AGE_TEST_WITH_RETURN(dev_priv);
 
-	buf = dma->buflist[vertex->idx];
+	buf = dma->buflist[idx];
 
 	if (buf->file_priv != file_priv) {
 		DRM_ERROR("process %d using buffer owned by %p\n",

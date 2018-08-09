@@ -44,6 +44,7 @@
 #include <linux/anon_inodes.h>
 #include <linux/file.h>
 #include <linux/cdev.h>
+#include <linux/nospec.h>
 
 #include <asm/uaccess.h>
 
@@ -624,8 +625,12 @@ static ssize_t ib_uverbs_write(struct file *filp, const char __user *buf,
 
 		command = hdr.command & IB_USER_VERBS_CMD_COMMAND_MASK;
 
-		if (command >= ARRAY_SIZE(uverbs_cmd_table) ||
-		    !uverbs_cmd_table[command])
+		if (command >= ARRAY_SIZE(uverbs_cmd_table))
+			return -EINVAL;
+		command = array_index_nospec(command,
+					     ARRAY_SIZE(uverbs_cmd_table));
+		
+		if (!uverbs_cmd_table[command])
 			return -EINVAL;
 
 		if (!file->ucontext &&
@@ -658,8 +663,12 @@ static ssize_t ib_uverbs_write(struct file *filp, const char __user *buf,
 
 		command = hdr.command & IB_USER_VERBS_CMD_COMMAND_MASK;
 
-		if (command >= ARRAY_SIZE(uverbs_ex_cmd_table) ||
-		    !uverbs_ex_cmd_table[command])
+		if (command >= ARRAY_SIZE(uverbs_ex_cmd_table))
+			return -ENOSYS;
+		command = array_index_nospec(command,
+					     ARRAY_SIZE(uverbs_ex_cmd_table));
+
+		if (!uverbs_ex_cmd_table[command])
 			return -ENOSYS;
 
 		if (!file->ucontext)

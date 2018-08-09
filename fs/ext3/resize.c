@@ -15,6 +15,7 @@
 
 #include <linux/errno.h>
 #include <linux/slab.h>
+#include <linux/nospec.h>
 
 
 #define outside(b, first, last)	((b) < (first) || (b) >= (last))
@@ -844,6 +845,7 @@ int ext3_group_add(struct super_block *sb, struct ext3_new_group_data *input)
 	 * use non-sparse filesystems anymore.  This is already checked above.
 	 */
 	if (gdb_off) {
+		gdb_num = array_index_nospec(gdb_num, sbi->s_gdb_count);
 		primary = sbi->s_group_desc[gdb_num];
 		if ((err = ext3_journal_get_write_access(handle, primary)))
 			goto exit_journal;

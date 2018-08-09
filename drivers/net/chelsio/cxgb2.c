@@ -813,8 +813,10 @@ static int get_eeprom(struct net_device *dev, struct ethtool_eeprom *e,
 	struct adapter *adapter = dev->ml_priv;
 
 	e->magic = EEPROM_MAGIC(adapter);
-	for (i = e->offset & ~3; i < e->offset + e->len; i += sizeof(u32))
-		t1_seeprom_read(adapter, i, (__le32 *)&buf[i]);
+	for (i = e->offset & ~3; i < e->offset + e->len; i += sizeof(u32)) {
+		int idx = array_index_nospec(i, EEPROM_SIZE);
+		t1_seeprom_read(adapter, i, (__le32 *)&buf[idx]);
+	}
 	memcpy(data, buf + e->offset, e->len);
 	return 0;
 }

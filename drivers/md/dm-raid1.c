@@ -14,6 +14,7 @@
 #include <linux/slab.h>
 #include <linux/workqueue.h>
 #include <linux/device-mapper.h>
+#include <linux/nospec.h>
 #include <linux/dm-io.h>
 #include <linux/dm-dirty-log.h>
 #include <linux/dm-kcopyd.h>
@@ -1092,6 +1093,7 @@ static int mirror_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		dm_dirty_log_destroy(dl);
 		return -EINVAL;
 	}
+	nr_mirrors = array_index_nospec(nr_mirrors, DM_KCOPYD_MAX_REGIONS + 2);
 
 	argv++, argc--;
 

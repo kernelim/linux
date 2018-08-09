@@ -49,6 +49,7 @@
 #include <linux/videodev2.h>
 #include <linux/version.h>
 #include <linux/mm.h>
+#include <linux/nospec.h>
 #include <media/videobuf-vmalloc.h>
 #include <media/v4l2-common.h>
 #include <media/v4l2-device.h>
@@ -818,14 +819,20 @@ static int vidioc_querymenu(struct file *file, void *priv,
 		"On",
 		NULL
 	};
+	u32 index;
+
 	if (qmenu->id == V4L2_CID_PRIVATE_COLORFILTER) {
 		int i;
 		const char **menu_items = colorfilter;
-		for (i = 0; i < qmenu->index && menu_items[i]; i++)
+
+		index = array_index_nospec(qmenu->index,
+					   ARRAY_SIZE(colorfilter));
+
+		for (i = 0; i < index && menu_items[i]; i++)
 			; /* do nothing (from v4l2-common.c) */
 		if (menu_items[i] == NULL || menu_items[i][0] == '\0')
 			return -EINVAL;
-		strlcpy(qmenu->name, menu_items[qmenu->index],
+		strlcpy(qmenu->name, menu_items[index],
 			sizeof(qmenu->name));
 		return 0;
 	}
@@ -854,6 +861,7 @@ static int vidioc_enum_fmt_vid_cap(struct file *file, void *priv,
 
 	if (index >= ARRAY_SIZE(formats))
 		return -EINVAL;
+	index = array_index_nospec(index, ARRAY_SIZE(formats));
 
 	dprintk(4, "name %s\n", formats[index].name);
 	strlcpy(f->description, formats[index].name, sizeof(f->description));
@@ -1651,8 +1659,12 @@ static int vidioc_enum_frameintervals(struct file *file, void *priv,
 	int is_ntsc = 0;
 #define NUM_FRAME_ENUMS 4
 	int frm_dec[NUM_FRAME_ENUMS] = {1, 2, 3, 5};
+	u32 index;
+
 	if (fe->index < 0 || fe->index >= NUM_FRAME_ENUMS)
 		return -EINVAL;
+	index = array_index_nospec(fe->index, NUM_FRAME_ENUMS);
+
 	switch (fe->width) {
 	case 640:
 		if (fe->height != 240 && fe->height != 480)
@@ -1677,7 +1689,7 @@ static int vidioc_enum_frameintervals(struct file *file, void *priv,
 	}
 	fe->type = V4L2_FRMIVAL_TYPE_DISCRETE;
 	fe->discrete.denominator = is_ntsc ? 30000 : 25000;
-	fe->discrete.numerator = (is_ntsc ? 1001 : 1000) * frm_dec[fe->index];
+	fe->discrete.numerator = (is_ntsc ? 1001 : 1000) * frm_dec[index];
 	dprintk(4, "%s discrete %d/%d\n", __func__, fe->discrete.numerator,
 		fe->discrete.denominator);
 	return 0;

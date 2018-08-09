@@ -16,6 +16,7 @@
 #include <linux/kernel.h>
 #include <linux/delay.h>
 #include <linux/bitops.h>
+#include <linux/nospec.h>
 
 #include <brcm_hw_ids.h>
 #include <chipcommon.h>
@@ -2546,6 +2547,8 @@ int wlc_phy_rssi_compute(struct brcms_phy_pub *pih,
 		if (rssi > 127)
 			rssi -= 256;
 
+		gidx = array_index_nospec(gidx,
+			ARRAY_SIZE(lcnphy_gain_index_offset_for_pkt_rssi));
 		rssi = rssi + lcnphy_gain_index_offset_for_pkt_rssi[gidx];
 		if ((rssi > -46) && (gidx > 18))
 			rssi = rssi + 7;

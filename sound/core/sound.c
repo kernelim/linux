@@ -33,6 +33,7 @@
 #include <sound/initval.h>
 #include <linux/kmod.h>
 #include <linux/mutex.h>
+#include <linux/nospec.h>
 
 static int major = CONFIG_SND_MAJOR;
 int snd_major;
@@ -108,6 +109,8 @@ void *snd_lookup_minor_data(unsigned int minor, int type)
 
 	if (minor >= ARRAY_SIZE(snd_minors))
 		return NULL;
+	minor = array_index_nospec(minor, ARRAY_SIZE(snd_minors));
+
 	mutex_lock(&sound_mutex);
 	mreg = snd_minors[minor];
 	if (mreg && mreg->type == type)
@@ -129,6 +132,8 @@ static int __snd_open(struct inode *inode, struct file *file)
 
 	if (minor >= ARRAY_SIZE(snd_minors))
 		return -ENODEV;
+	minor = array_index_nospec(minor, ARRAY_SIZE(snd_minors));
+
 	mptr = snd_minors[minor];
 	if (mptr == NULL) {
 #ifdef CONFIG_MODULES

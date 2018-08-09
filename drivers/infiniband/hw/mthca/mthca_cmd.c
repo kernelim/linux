@@ -36,6 +36,7 @@
 #include <linux/pci.h>
 #include <linux/errno.h>
 #include <linux/sched.h>
+#include <linux/nospec.h>
 #include <asm/io.h>
 #include <rdma/ib_mad.h>
 
@@ -1767,6 +1768,9 @@ int mthca_MODIFY_QP(struct mthca_dev *dev, enum ib_qp_state cur,
 	u8 op_mod = 0;
 	int my_mailbox = 0;
 	int err;
+
+	cur  = array_index_nospec(cur,  IB_QPS_ERR + 1);
+	next = array_index_nospec(next, IB_QPS_ERR + 1);
 
 	if (op[cur][next] == CMD_ERR2RST_QPEE) {
 		op_mod = 3;	/* don't write outbox, any->reset */

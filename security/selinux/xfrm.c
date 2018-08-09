@@ -42,6 +42,7 @@
 #include <linux/tcp.h>
 #include <linux/skbuff.h>
 #include <linux/xfrm.h>
+#include <linux/nospec.h>
 #include <net/xfrm.h>
 #include <net/checksum.h>
 #include <net/udp.h>
@@ -244,6 +245,7 @@ static int selinux_xfrm_sec_ctx_alloc(struct xfrm_sec_ctx **ctxp,
 	str_len = uctx->ctx_len;
 	if (str_len >= PAGE_SIZE)
 		return -ENOMEM;
+	str_len = array_index_nospec(str_len, PAGE_SIZE);
 
 	*ctxp = ctx = kmalloc(sizeof(*ctx) +
 			      str_len + 1,

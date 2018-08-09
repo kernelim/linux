@@ -63,6 +63,7 @@
 #include <linux/ioport.h>
 #include <linux/console.h>
 #include <linux/backlight.h>
+#include <linux/nospec.h>
 #include <asm/io.h>
 
 #ifdef CONFIG_PPC_PMAC
@@ -2227,6 +2228,8 @@ static int aty128fb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
 		int i;
 		u32 *pal = info->pseudo_palette;
 
+		regno = array_index_nospec(regno, 16);
+
 		switch (par->crtc.depth) {
 		case 15:
 			pal[regno] = (regno << 10) | (regno << 5) | regno;
@@ -2252,15 +2255,16 @@ static int aty128fb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
 		 * goes in a different slot, and we have to avoid disturbing
 		 * the other fields in the slots we touch.
 		 */
-		par->green[regno] = green;
+		par->green[array_index_nospec(regno, 64)] = green;
 		if (regno < 32) {
+			regno = array_index_nospec(regno, 32);
 			par->red[regno] = red;
 			par->blue[regno] = blue;
 			aty128_st_pal(regno * 8, red, par->green[regno*2],
 				      blue, par);
 		}
-		red = par->red[regno/2];
-		blue = par->blue[regno/2];
+		red = par->red[array_index_nospec(regno/2, 32)];
+		blue = par->blue[array_index_nospec(regno/2, 32)];
 		regno <<= 2;
 	} else if (par->crtc.bpp == 16)
 		regno <<= 3;

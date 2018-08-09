@@ -20,6 +20,7 @@
 #include <linux/rwsem.h>
 #include <linux/smp_lock.h>
 #include <linux/usb.h>
+#include <linux/nospec.h>
 
 #include "usb.h"
 
@@ -36,7 +37,7 @@ static int usb_open(struct inode * inode, struct file * file)
 
 	lock_kernel();
 	down_read(&minor_rwsem);
-	c = usb_minors[minor];
+	c = usb_minors[array_index_nospec(minor, MAX_USB_MINORS)];
 
 	if (!c || !(new_fops = fops_get(c)))
 		goto done;

@@ -172,6 +172,8 @@ static int esp6_output(struct xfrm_state *x, struct sk_buff *skb)
 	asg = esp_givreq_sg(aead, req);
 	sg = asg + 1;
 
+	barrier_nospec();
+
 	/* Fill padding... */
 	tail = skb_tail_pointer(trailer);
 	do {

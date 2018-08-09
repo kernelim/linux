@@ -38,6 +38,7 @@
 #include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/mutex.h>
+#include <linux/nospec.h>
 #include <rdma/rdma_netlink.h>
 
 #include "core_priv.h"
@@ -578,6 +579,10 @@ int ib_query_port(struct ib_device *device,
 	if (port_num < start_port(device) || port_num > end_port(device))
 		return -EINVAL;
 
+	port_num = array_index_nospec(port_num - start_port(device),
+				      end_port(device) - start_port(device) + 1);
+	port_num += start_port(device);
+
 	return device->query_port(device, port_num, port_attr);
 }
 EXPORT_SYMBOL(ib_query_port);
@@ -655,6 +660,10 @@ int ib_modify_port(struct ib_device *device,
 
 	if (port_num < start_port(device) || port_num > end_port(device))
 		return -EINVAL;
+
+	port_num = array_index_nospec(port_num - start_port(device),
+				      end_port(device) - start_port(device) + 1);
+	port_num += start_port(device);
 
 	return device->modify_port(device, port_num, port_modify_mask,
 				   port_modify);

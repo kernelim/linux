@@ -27,6 +27,7 @@
 #include <linux/in.h>
 #include <linux/ctype.h>
 #include <linux/fs.h>
+#include <linux/nospec.h>
 #include <asm/div64.h>
 #include <asm/byteorder.h>
 #include <linux/inet.h>
@@ -194,6 +195,8 @@ cifs_convert_address(struct sockaddr *dst, const char *src, int len)
 		slen = len - (alen + 1);
 		if (slen <= 0 || slen > 12)
 			return 0;
+		slen = array_index_nospec(slen, 13);
+
 		memcpy(scope_id, pct + 1, slen);
 		scope_id[slen] = '\0';
 

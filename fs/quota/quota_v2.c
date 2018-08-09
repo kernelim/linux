@@ -11,6 +11,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/quotaops.h>
+#include <linux/nospec.h>
 
 #include <asm/byteorder.h>
 
@@ -80,6 +81,7 @@ static int v2_check_quota_file(struct super_block *sb, int type)
  
 	if (!v2_read_header(sb, type, &dqhead))
 		return 0;
+	type = array_index_nospec(type, MAXQUOTAS);
 	if (le32_to_cpu(dqhead.dqh_magic) != quota_magics[type] ||
 	    le32_to_cpu(dqhead.dqh_version) > quota_versions[type])
 		return 0;

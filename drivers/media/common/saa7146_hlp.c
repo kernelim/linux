@@ -1,4 +1,5 @@
 #include <linux/kernel.h>
+#include <linux/nospec.h>
 #include <media/saa7146_vv.h>
 
 static void calculate_output_format_register(struct saa7146_dev* saa, u32 palette, u32* clip_format)
@@ -70,6 +71,7 @@ static int calculate_h_scale_registers(struct saa7146_dev *dev,
 	u32 xim = 0, xp = 0, xsci =0;
 	/* vertical scale & gain */
 	u32 pfuv = 0;
+	u32 idx;
 
 	/* helper variables */
 	u32 h_atten = 0, i = 0;
@@ -118,7 +120,8 @@ static int calculate_h_scale_registers(struct saa7146_dev *dev,
 	xacm = 0;
 
 	/* set horizontal filter parameters (CXY = CXUV) */
-	cxy = hps_h_coeff_tab[( (xpsc - 1) < 63 ? (xpsc - 1) : 63 )].hps_coeff;
+	idx = array_index_nospec((xpsc - 1) < 63 ? (xpsc - 1) : 63, 64);
+	cxy = hps_h_coeff_tab[idx].hps_coeff;
 	cxuv = cxy;
 
 	/* calculate and set horizontal fine scale (xsci) */

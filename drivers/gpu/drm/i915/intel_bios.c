@@ -25,6 +25,7 @@
  *
  */
 #include <linux/dmi.h>
+#include <linux/nospec.h>
 #include <drm/drm_dp_helper.h>
 #include <drm/drmP.h>
 #include <drm/i915_drm.h>
@@ -866,6 +867,7 @@ parse_mipi(struct drm_i915_private *dev_priv, const struct bdb_header *bdb)
 	while (1) {
 		int seq_id = *data;
 		if (MIPI_SEQ_MAX > seq_id && seq_id > MIPI_SEQ_UNDEFINED) {
+			seq_id = array_index_nospec(seq_id, MIPI_SEQ_MAX);
 			dev_priv->vbt.dsi.sequence[seq_id] = data;
 			DRM_DEBUG_DRIVER("Found mipi sequence - %d\n", seq_id);
 		} else {

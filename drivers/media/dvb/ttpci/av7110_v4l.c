@@ -31,6 +31,7 @@
 #include <linux/fs.h>
 #include <linux/timer.h>
 #include <linux/poll.h>
+#include <linux/nospec.h>
 
 #include "av7110.h"
 #include "av7110_hw.h"
@@ -458,6 +459,7 @@ static int vidioc_enum_input(struct file *file, void *fh, struct v4l2_input *i)
 {
 	struct saa7146_dev *dev = ((struct saa7146_fh *)fh)->dev;
 	struct av7110 *av7110 = (struct av7110 *)dev->ext_priv;
+	u32 index;
 
 	dprintk(2, "VIDIOC_ENUMINPUT: %d\n", i->index);
 
@@ -469,7 +471,8 @@ static int vidioc_enum_input(struct file *file, void *fh, struct v4l2_input *i)
 			return -EINVAL;
 	}
 
-	memcpy(i, &inputs[i->index], sizeof(struct v4l2_input));
+	index = array_index_nospec(i->index, ARRAY_SIZE(inputs));
+	memcpy(i, &inputs[index], sizeof(struct v4l2_input));
 
 	return 0;
 }

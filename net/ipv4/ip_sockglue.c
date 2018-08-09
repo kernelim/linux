@@ -23,6 +23,7 @@
 #include <linux/icmp.h>
 #include <linux/inetdevice.h>
 #include <linux/netdevice.h>
+#include <linux/nospec.h>
 #include <net/sock.h>
 #include <net/ip.h>
 #include <net/icmp.h>
@@ -508,6 +509,8 @@ static int do_ip_setsockopt(struct sock *sk, int level,
 
 		if (optlen > 40 || optlen < 0)
 			goto e_inval;
+		optlen = array_index_nospec(optlen, 41);
+
 		err = ip_options_get_from_user(sock_net(sk), &opt,
 					       optval, optlen);
 		if (err)

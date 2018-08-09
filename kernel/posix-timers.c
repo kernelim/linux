@@ -35,6 +35,7 @@
 #include <linux/slab.h>
 #include <linux/time.h>
 #include <linux/mutex.h>
+#include <linux/nospec.h>
 
 #include <asm/uaccess.h>
 #include <linux/list.h>
@@ -488,15 +489,21 @@ static void release_posix_timer(struct k_itimer *tmr, int it_id_set)
 	call_rcu(&tmr->it.rcu, k_itimer_rcu_free);
 }
 
-static struct k_clock *clockid_to_kclock(const clockid_t id)
+static struct k_clock *clockid_to_kclock_nospec(clockid_t *id)
 {
-	if (id < 0)
-		return (id & CLOCKFD_MASK) == CLOCKFD ?
+	if (*id < 0) {
+		return (*id & CLOCKFD_MASK) == CLOCKFD ?
 			&clock_posix_dynamic : &clock_posix_cpu;
+	}
 
-	if (id >= MAX_CLOCKS || !posix_clocks[id].clock_getres)
+	if (*id >= MAX_CLOCKS)
 		return NULL;
-	return &posix_clocks[id];
+	*id = array_index_nospec(*id, MAX_CLOCKS);
+
+	if (!posix_clocks[*id].clock_getres)
+		return NULL;
+
+	return &posix_clocks[*id];
 }
 
 static int common_timer_create(struct k_itimer *new_timer)
@@ -507,11 +514,11 @@ static int common_timer_create(struct k_itimer *new_timer)
 
 /* Create a POSIX.1b interval timer. */
 
-SYSCALL_DEFINE3(timer_create, const clockid_t, which_clock,
+SYSCALL_DEFINE3(timer_create, clockid_t, which_clock,
 		struct sigevent __user *, timer_event_spec,
 		timer_t __user *, created_timer_id)
 {
-	struct k_clock *kc = clockid_to_kclock(which_clock);
+	struct k_clock *kc = clockid_to_kclock_nospec(&which_clock);
 	struct k_itimer *new_timer;
 	int error, new_timer_id;
 	sigevent_t event;
@@ -700,7 +707,7 @@ SYSCALL_DEFINE2(timer_gettime, timer_t, timer_id,
 	if (!timr)
 		return -EINVAL;
 
-	kc = clockid_to_kclock(timr->it_clock);
+	kc = clockid_to_kclock_nospec(&timr->it_clock);
 	if (WARN_ON_ONCE(!kc || !kc->timer_get))
 		ret = -EINVAL;
 	else
@@ -816,7 +823,7 @@ retry:
 	if (!timr)
 		return -EINVAL;
 
-	kc = clockid_to_kclock(timr->it_clock);
+	kc = clockid_to_kclock_nospec(&timr->it_clock);
 	if (WARN_ON_ONCE(!kc || !kc->timer_set))
 		error = -EINVAL;
 	else
@@ -846,7 +853,7 @@ static int common_timer_del(struct k_itimer *timer)
 
 static inline int timer_delete_hook(struct k_itimer *timer)
 {
-	struct k_clock *kc = clockid_to_kclock(timer->it_clock);
+	struct k_clock *kc = clockid_to_kclock_nospec(&timer->it_clock);
 
 	if (WARN_ON_ONCE(!kc || !kc->timer_del))
 		return -EINVAL;
@@ -922,10 +929,10 @@ void exit_itimers(struct signal_struct *sig)
 	}
 }
 
-SYSCALL_DEFINE2(clock_settime, const clockid_t, which_clock,
+SYSCALL_DEFINE2(clock_settime, clockid_t, which_clock,
 		const struct timespec __user *, tp)
 {
-	struct k_clock *kc = clockid_to_kclock(which_clock);
+	struct k_clock *kc = clockid_to_kclock_nospec(&which_clock);
 	struct timespec new_tp;
 
 	if (!kc || !kc->clock_set)
@@ -937,10 +944,10 @@ SYSCALL_DEFINE2(clock_settime, const clockid_t, which_clock,
 	return kc->clock_set(which_clock, &new_tp);
 }
 
-SYSCALL_DEFINE2(clock_gettime, const clockid_t, which_clock,
+SYSCALL_DEFINE2(clock_gettime, clockid_t, which_clock,
 		struct timespec __user *,tp)
 {
-	struct k_clock *kc = clockid_to_kclock(which_clock);
+	struct k_clock *kc = clockid_to_kclock_nospec(&which_clock);
 	struct timespec kernel_tp;
 	int error;
 
@@ -955,10 +962,10 @@ SYSCALL_DEFINE2(clock_gettime, const clockid_t, which_clock,
 	return error;
 }
 
-SYSCALL_DEFINE2(clock_adjtime, const clockid_t, which_clock,
+SYSCALL_DEFINE2(clock_adjtime, clockid_t, which_clock,
 		struct timex __user *, utx)
 {
-	struct k_clock *kc = clockid_to_kclock(which_clock);
+	struct k_clock *kc = clockid_to_kclock_nospec(&which_clock);
 	struct timex ktx;
 	int err;
 
@@ -978,10 +985,10 @@ SYSCALL_DEFINE2(clock_adjtime, const clockid_t, which_clock,
 	return err;
 }
 
-SYSCALL_DEFINE2(clock_getres, const clockid_t, which_clock,
+SYSCALL_DEFINE2(clock_getres, clockid_t, which_clock,
 		struct timespec __user *, tp)
 {
-	struct k_clock *kc = clockid_to_kclock(which_clock);
+	struct k_clock *kc = clockid_to_kclock_nospec(&which_clock);
 	struct timespec rtn_tp;
 	int error;
 
@@ -1007,11 +1014,11 @@ static int common_nsleep(const clockid_t which_clock, int flags,
 				 which_clock);
 }
 
-SYSCALL_DEFINE4(clock_nanosleep, const clockid_t, which_clock, int, flags,
+SYSCALL_DEFINE4(clock_nanosleep, clockid_t, which_clock, int, flags,
 		const struct timespec __user *, rqtp,
 		struct timespec __user *, rmtp)
 {
-	struct k_clock *kc = clockid_to_kclock(which_clock);
+	struct k_clock *kc = clockid_to_kclock_nospec(&which_clock);
 	struct timespec t;
 
 	if (!kc)
@@ -1035,7 +1042,7 @@ SYSCALL_DEFINE4(clock_nanosleep, const clockid_t, which_clock, int, flags,
 long clock_nanosleep_restart(struct restart_block *restart_block)
 {
 	clockid_t which_clock = restart_block->nanosleep.index;
-	struct k_clock *kc = clockid_to_kclock(which_clock);
+	struct k_clock *kc = clockid_to_kclock_nospec(&which_clock);
 
 	if (WARN_ON_ONCE(!kc || !kc->nsleep_restart))
 		return -EINVAL;

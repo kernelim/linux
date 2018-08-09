@@ -48,6 +48,7 @@
 #include <linux/vmalloc.h>
 #include <linux/fs.h>
 #include <linux/uaccess.h>
+#include <linux/nospec.h>
 
 #include "qib.h"
 #include "qib_common.h"
@@ -552,6 +553,7 @@ static ssize_t qib_diagpkt_write(struct file *fp,
 	struct qib_devdata *dd;
 	struct qib_pportdata *ppd;
 	ssize_t ret = 0;
+	u16 idx;
 
 	if (count != sizeof(dp)) {
 		ret = -EINVAL;
@@ -588,7 +590,8 @@ static ssize_t qib_diagpkt_write(struct file *fp,
 		ret = -EINVAL;
 		goto bail;
 	}
-	ppd = &dd->pport[dp.port - 1];
+	idx = array_index_nospec(dp.port - 1, dd->num_pports);
+	ppd = &dd->pport[idx];
 
 	/*
 	 * need total length before first word written, plus 2 Dwords. One Dword

@@ -44,6 +44,7 @@
 
 #include <linux/types.h>
 #include <linux/bitmap.h>
+#include <linux/nospec.h>
 #include <net/sctp/sctp.h>
 #include <net/sctp/sm.h>
 
@@ -256,6 +257,7 @@ static void sctp_tsnmap_update(struct sctp_tsnmap *map)
 	zero_bit = find_first_zero_bit(map->tsn_map, len);
 	if (!zero_bit)
 		return;		/* The first 0-bit is bit 0.  nothing to do */
+	barrier_nospec();
 
 	map->base_tsn += zero_bit;
 	map->cumulative_tsn_ack_point += zero_bit;

@@ -13,6 +13,7 @@
 
 #include <linux/module.h>
 #include <linux/rtc.h>
+#include <linux/nospec.h>
 
 static const unsigned char rtc_days_in_month[] = {
 	31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
@@ -32,6 +33,7 @@ static const unsigned short rtc_ydays[2][13] = {
  */
 int rtc_month_days(unsigned int month, unsigned int year)
 {
+	month = array_index_nospec(month, ARRAY_SIZE(rtc_days_in_month));
 	return rtc_days_in_month[month] + (is_leap_year(year) && month == 1);
 }
 EXPORT_SYMBOL(rtc_month_days);

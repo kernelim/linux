@@ -35,6 +35,7 @@
 #include <linux/vmalloc.h>
 #include <linux/init.h>
 #include <linux/mutex.h>
+#include <linux/nospec.h>
 
 #include <sound/core.h>
 #include <sound/tlv.h>
@@ -990,12 +991,15 @@ static int snd_emu10k1_ipcm_poke(struct snd_emu10k1 *emu,
 	unsigned int i;
 	int err = 0;
 	struct snd_emu10k1_fx8010_pcm *pcm;
+	unsigned int substream;
 
 	if (ipcm->substream >= EMU10K1_FX8010_PCM_COUNT)
 		return -EINVAL;
+	substream = array_index_nospec(ipcm->substream, EMU10K1_FX8010_PCM_COUNT);
+
 	if (ipcm->channels > 32)
 		return -EINVAL;
-	pcm = &emu->fx8010.pcm[ipcm->substream];
+	pcm = &emu->fx8010.pcm[substream];
 	mutex_lock(&emu->fx8010.lock);
 	spin_lock_irq(&emu->reg_lock);
 	if (pcm->opened) {
@@ -1036,10 +1040,13 @@ static int snd_emu10k1_ipcm_peek(struct snd_emu10k1 *emu,
 	unsigned int i;
 	int err = 0;
 	struct snd_emu10k1_fx8010_pcm *pcm;
+	unsigned int substream;
 
 	if (ipcm->substream >= EMU10K1_FX8010_PCM_COUNT)
 		return -EINVAL;
-	pcm = &emu->fx8010.pcm[ipcm->substream];
+	substream = array_index_nospec(ipcm->substream, EMU10K1_FX8010_PCM_COUNT);
+
+	pcm = &emu->fx8010.pcm[substream];
 	mutex_lock(&emu->fx8010.lock);
 	spin_lock_irq(&emu->reg_lock);
 	ipcm->channels = pcm->channels;

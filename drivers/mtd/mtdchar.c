@@ -15,6 +15,7 @@
 #include <linux/smp_lock.h>
 #include <linux/backing-dev.h>
 #include <linux/compat.h>
+#include <linux/nospec.h>
 
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/compatmac.h>
@@ -487,7 +488,7 @@ static int mtd_ioctl(struct inode *inode, struct file *file,
 		if (get_user(ur_idx, &(ur->regionindex)))
 			return -EFAULT;
 
-		kr = &(mtd->eraseregions[ur_idx]);
+		kr = &(mtd->eraseregions[array_index_nospec(ur_idx, mtd->numeraseregions)]);
 
 		if (put_user(kr->offset, &(ur->offset))
 		    || put_user(kr->erasesize, &(ur->erasesize))

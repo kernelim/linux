@@ -18,6 +18,7 @@
 #include <linux/vmalloc.h>
 #include <linux/slab.h>
 #include <linux/jiffies.h>
+#include <linux/nospec.h>
 
 #include <asm/types.h>
 
@@ -275,12 +276,14 @@ static void erase_callback(struct erase_info *erase)
 	part = (struct partition*)erase->priv;
 
 	i = (u32)erase->addr / part->block_size;
-	if (i >= part->total_blocks || part->blocks[i].offset != erase->addr ||
+	if (i >= part->total_blocks ||
+	    part->blocks[array_index_nospec(i, part->total_blocks)].offset != erase->addr ||
 	    erase->addr > UINT_MAX) {
 		printk(KERN_ERR PREFIX "erase callback for unknown offset %llx "
 				"on '%s'\n", (unsigned long long)erase->addr, part->mbd.mtd->name);
 		return;
 	}
+	i = array_index_nospec(i, part->total_blocks);
 
 	if (erase->state != MTD_ERASE_DONE) {
 		printk(KERN_WARNING PREFIX "erase failed at 0x%llx on '%s', "

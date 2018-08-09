@@ -59,6 +59,7 @@
 #include <linux/bitops.h>
 #include <linux/delay.h>
 #include <linux/vmalloc.h>
+#include <linux/nospec.h>
 
 /**
  * check_pattern - [GENERIC] check if a pattern is in the buffer
@@ -1196,6 +1197,12 @@ int nand_isbad_bbt(struct mtd_info *mtd, loff_t offs, int allowbbt)
 	int block;
 	uint8_t res;
 
+#ifdef CONFIG_X86_32
+	/* can't use array_index_nospec() with 64-bit values on 32-bit */
+	barrier_nospec();
+#else
+	offs = array_index_nospec(offs, this->chipsize);
+#endif
 	/* Get block number * 2 */
 	block = (int)(offs >> (this->bbt_erase_shift - 1));
 	res = (this->bbt[block >> 3] >> (block & 0x06)) & 0x03;

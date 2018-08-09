@@ -70,6 +70,7 @@
 #include <linux/spinlock.h>
 #include <linux/leds.h>
 #include <linux/in6.h>
+#include <linux/nospec.h>
 
 #include "iwl-op-mode.h"
 #include "iwl-trans.h"
@@ -892,6 +893,7 @@ iwl_mvm_sta_from_staid_protected(struct iwl_mvm *mvm, u8 sta_id)
 
 	if (sta_id >= ARRAY_SIZE(mvm->fw_id_to_mac_id))
 		return NULL;
+	sta_id = array_index_nospec(sta_id, ARRAY_SIZE(mvm->fw_id_to_mac_id));
 
 	sta = rcu_dereference_protected(mvm->fw_id_to_mac_id[sta_id],
 					lockdep_is_held(&mvm->mutex));

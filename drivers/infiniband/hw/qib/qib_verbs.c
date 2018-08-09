@@ -40,6 +40,7 @@
 #include <linux/mm.h>
 #include <linux/random.h>
 #include <linux/vmalloc.h>
+#include <linux/nospec.h>
 
 #include "qib.h"
 #include "qib_common.h"
@@ -1726,8 +1727,11 @@ static int qib_query_gid(struct ib_device *ibdev, u8 port,
 		gid->global.subnet_prefix = ibp->gid_prefix;
 		if (index == 0)
 			gid->global.interface_id = ppd->guid;
-		else if (index < QIB_GUIDS_PER_PORT)
-			gid->global.interface_id = ibp->guids[index - 1];
+		else if (index < QIB_GUIDS_PER_PORT) {
+			int idx = array_index_nospec(index - 1,
+						     QIB_GUIDS_PER_PORT - 1);
+			gid->global.interface_id = ibp->guids[idx];
+		}
 		else
 			ret = -EINVAL;
 	}

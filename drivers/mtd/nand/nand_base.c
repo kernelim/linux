@@ -46,6 +46,7 @@
 #include <linux/interrupt.h>
 #include <linux/bitops.h>
 #include <linux/leds.h>
+#include <linux/nospec.h>
 #include <asm/io.h>
 
 #ifdef CONFIG_MTD_PARTITIONS
@@ -363,6 +364,12 @@ static int nand_default_block_markbad(struct mtd_info *mtd, loff_t ofs)
 	uint8_t buf[2] = { 0, 0 };
 	int block, ret;
 
+#ifdef CONFIG_X86_32
+	/* can't use array_index_nospec() with 64-bit values on 32-bit */
+	barrier_nospec();
+#else
+	ofs = array_index_nospec(ofs, mtd->size);
+#endif
 	/* Get block number */
 	block = (int)(ofs >> chip->bbt_erase_shift);
 	if (chip->bbt)
@@ -898,8 +905,9 @@ static int nand_read_subpage(struct mtd_info *mtd, struct nand_chip *chip, uint3
 	   according to ecc.pos. Let make sure here that
 	   there are no gaps in ecc positions */
 	for (i = 0; i < eccfrag_len - 1; i++) {
-		if (eccpos[i + start_step * chip->ecc.bytes] + 1 !=
-			eccpos[i + start_step * chip->ecc.bytes + 1]) {
+		int idx1 = array_index_nospec(i + start_step * chip->ecc.bytes, 64);
+		int idx2 = array_index_nospec(i + start_step * chip->ecc.bytes + 1, 64);
+		if (eccpos[idx1] + 1 != eccpos[idx2]) {
 			gaps = 1;
 			break;
 		}
@@ -2204,6 +2212,7 @@ int nand_erase_nand(struct mtd_info *mtd, struct erase_info *instr,
 	/* Shift to get first page */
 	page = (int)(instr->addr >> chip->page_shift);
 	chipnr = (int)(instr->addr >> chip->chip_shift);
+	chipnr = array_index_nospec(chipnr, NAND_MAX_CHIPS);
 
 	/* Calculate pages in each block */
 	pages_per_block = 1 << (chip->phys_erase_shift - chip->page_shift);

@@ -13,6 +13,7 @@
 #include <linux/ctype.h>
 #include <linux/err.h>
 #include <linux/fb.h>
+#include <linux/nospec.h>
 
 #ifdef CONFIG_PMAC_BACKLIGHT
 #include <asm/backlight.h>
@@ -157,6 +158,8 @@ static ssize_t backlight_store_brightness(struct device *dev,
 		if (brightness > bd->props.max_brightness)
 			rc = -EINVAL;
 		else {
+			brightness = array_index_nospec(brightness,
+						bd->props.max_brightness + 1);
 			pr_debug("backlight: set brightness to %lu\n",
 				 brightness);
 			bd->props.brightness = brightness;

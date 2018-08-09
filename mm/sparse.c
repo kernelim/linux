@@ -8,6 +8,7 @@
 #include <linux/module.h>
 #include <linux/spinlock.h>
 #include <linux/vmalloc.h>
+#include <linux/nospec.h>
 #include "internal.h"
 #include <asm/dma.h>
 #include <asm/pgalloc.h>
@@ -83,6 +84,7 @@ static int __meminit sparse_index_init(unsigned long section_nr, int nid)
 	struct mem_section *section;
 	int ret = 0;
 
+	root = array_index_nospec(root, NR_SECTION_ROOTS);
 	if (mem_section[root])
 		return -EEXIST;
 

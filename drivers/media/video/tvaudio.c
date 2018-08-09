@@ -31,6 +31,7 @@
 #include <linux/init.h>
 #include <linux/kthread.h>
 #include <linux/freezer.h>
+#include <linux/nospec.h>
 
 #include <media/tvaudio.h>
 #include <media/v4l2-device.h>
@@ -1777,12 +1778,14 @@ static int tvaudio_s_routing(struct v4l2_subdev *sd,
 		return 0;
 	if (input >= 4)
 		return -EINVAL;
+	input = array_index_nospec(input, 4);
+
 	/* There are four inputs: tuner, radio, extern and intern. */
 	chip->input = input;
 	if (chip->muted)
 		return 0;
 	chip_write_masked(chip, desc->inputreg,
-			desc->inputmap[chip->input], desc->inputmask);
+			desc->inputmap[input], desc->inputmask);
 	return 0;
 }
 

@@ -22,6 +22,7 @@
 #include <linux/vmalloc.h>
 #include <linux/mutex.h>
 #include <linux/mm.h>
+#include <linux/nospec.h>
 #ifndef __GENKSYMS__
 #include <linux/audit.h>
 #endif
@@ -769,6 +770,8 @@ struct xt_table *xt_register_table(struct net *net,
 		ret = -ENOMEM;
 		goto out;
 	}
+
+	barrier_nospec();
 
 	ret = mutex_lock_interruptible(&xt[table->af].mutex);
 	if (ret != 0)

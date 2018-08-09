@@ -38,6 +38,7 @@
 
 #include <linux/interrupt.h>	/* For task queue support */
 #include <linux/slab.h>
+#include <linux/nospec.h>
 
 #include <linux/vgaarb.h>
 #include <linux/export.h>
@@ -1557,6 +1558,7 @@ int drm_modeset_ctl(struct drm_device *dev, void *data,
 	pipe = modeset->crtc;
 	if (pipe >= dev->num_crtcs)
 		return -EINVAL;
+	pipe = array_index_nospec(pipe, dev->num_crtcs);
 
 	switch (modeset->cmd) {
 	case _DRM_PRE_MODESET:
@@ -1701,6 +1703,7 @@ int drm_wait_vblank(struct drm_device *dev, void *data,
 		pipe = flags & _DRM_VBLANK_SECONDARY ? 1 : 0;
 	if (pipe >= dev->num_crtcs)
 		return -EINVAL;
+	pipe = array_index_nospec(pipe, dev->num_crtcs);
 
 	vblank = &dev->vblank[pipe];
 

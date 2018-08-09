@@ -42,6 +42,7 @@
 #include <linux/version.h>
 #include <linux/io.h>
 #include <linux/slab.h>
+#include <linux/nospec.h>
 #include <asm/irq.h>
 #include <asm/processor.h>
 #include <linux/libata.h>
@@ -3365,6 +3366,7 @@ static struct pmcraid_sglist *pmcraid_alloc_sglist(int buflen)
 		return NULL;
 
 	scatterlist = sglist->scatterlist;
+	barrier_nospec();
 	sg_init_table(scatterlist, num_elem);
 	sglist->order = order;
 	sglist->num_sg = num_elem;

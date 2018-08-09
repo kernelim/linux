@@ -20,6 +20,7 @@
 #include <linux/ctype.h>
 #include <linux/genhd.h>
 #include <linux/blktrace_api.h>
+#include <linux/nospec.h>
 
 #include "check.h"
 
@@ -367,6 +368,7 @@ void delete_partition(struct gendisk *disk, int partno)
 
 	if (partno >= ptbl->len)
 		return;
+	partno = array_index_nospec(partno, ptbl->len);
 
 	part = ptbl->part[partno];
 	if (!part)
@@ -404,6 +406,7 @@ struct hd_struct *add_partition(struct gendisk *disk, int partno,
 		return ERR_PTR(err);
 	ptbl = disk->part_tbl;
 
+	partno = array_index_nospec(partno, ptbl->len);
 	if (ptbl->part[partno])
 		return ERR_PTR(-EBUSY);
 

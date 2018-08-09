@@ -21,6 +21,7 @@
 
 #include <sound/opl3.h>
 #include <sound/asound_fm.h>
+#include <linux/nospec.h>
 
 #if defined(CONFIG_SND_SEQUENCER) || defined(CONFIG_SND_SEQUENCER_MODULE)
 #define OPL3_SUPPORT_SYNTH
@@ -446,7 +447,7 @@ static int snd_opl3_set_voice(struct snd_opl3 * opl3, struct snd_dm_fm_voice * v
 {
 	unsigned short reg_side;
 	unsigned char op_offset;
-	unsigned char voice_offset;
+	unsigned char voice_offset, voice_op;
 
 	unsigned short opl3_reg;
 	unsigned char reg_val;
@@ -471,7 +472,9 @@ static int snd_opl3_set_voice(struct snd_opl3 * opl3, struct snd_dm_fm_voice * v
 		voice_offset = voice->voice - MAX_OPL2_VOICES;
 	}
 	/* Get register offset of operator */
-	op_offset = snd_opl3_regmap[voice_offset][voice->op];
+	voice_offset = array_index_nospec(voice_offset, MAX_OPL2_VOICES);
+	voice_op = array_index_nospec(voice->op, 4);
+	op_offset = snd_opl3_regmap[voice_offset][voice_op];
 
 	reg_val = 0x00;
 	/* Set amplitude modulation (tremolo) effect */

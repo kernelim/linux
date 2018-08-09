@@ -14,6 +14,7 @@
 #include <linux/screen_info.h>
 #include <linux/dmi.h>
 #include <linux/pci.h>
+#include <linux/nospec.h>
 #include <video/vga.h>
 #include <asm/sysfb.h>
 
@@ -53,6 +54,7 @@ static int efifb_setcolreg(unsigned regno, unsigned red, unsigned green,
 
 	if (regno >= info->cmap.len)
 		return 1;
+	regno = array_index_nospec(regno, info->cmap.len);
 
 	if (regno < 16) {
 		red   >>= 8;

@@ -26,6 +26,7 @@
 #include <linux/security.h>
 #include <linux/pid.h>
 #include <linux/nsproxy.h>
+#include <linux/nospec.h>
 
 #include <asm/system.h>
 #include <asm/uaccess.h>
@@ -118,6 +119,8 @@ void __scm_destroy(struct scm_cookie *scm)
 			list_add_tail(&fpl->list, current->scm_work_list);
 		} else {
 			LIST_HEAD(work_list);
+
+			barrier_nospec();
 
 			current->scm_work_list = &work_list;
 

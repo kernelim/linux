@@ -14,6 +14,7 @@
 #include <linux/isdn.h>
 #include <linux/delay.h>
 #include <linux/smp_lock.h>
+#include <linux/nospec.h>
 #include "isdn_common.h"
 #include "isdn_tty.h"
 #ifdef CONFIG_ISDN_AUDIO
@@ -2332,7 +2333,7 @@ isdn_tty_at_cout(char *msg, modem_info * info)
 	u_long flags;
 	struct sk_buff *skb = NULL;
 	char *sp = NULL;
-	int l;
+	int l, isdn_channel;
 
 	if (!msg) {
 		printk(KERN_WARNING "isdn_tty: Null-Message in isdn_tty_at_cout\n");
@@ -2348,10 +2349,12 @@ isdn_tty_at_cout(char *msg, modem_info * info)
 		return;
 	}
 
+	isdn_channel = array_index_nospec(info->isdn_channel, ISDN_MAX_CHANNELS);
+
 	/* use queue instead of direct, if online and */
 	/* data is in queue or buffer is full */
 	if (info->online && ((tty_buffer_request_room(tty, l) < l) ||
-	    !skb_queue_empty(&dev->drv[info->isdn_driver]->rpqueue[info->isdn_channel]))) {
+	    !skb_queue_empty(&dev->drv[info->isdn_driver]->rpqueue[isdn_channel]))) {
 		skb = alloc_skb(l, GFP_ATOMIC);
 		if (!skb) {
 			spin_unlock_irqrestore(&info->readlock, flags);
@@ -2386,8 +2389,8 @@ isdn_tty_at_cout(char *msg, modem_info * info)
 		}
 	}
 	if (skb) {
-		__skb_queue_tail(&dev->drv[info->isdn_driver]->rpqueue[info->isdn_channel], skb);
-		dev->drv[info->isdn_driver]->rcvcount[info->isdn_channel] += skb->len;
+		__skb_queue_tail(&dev->drv[info->isdn_driver]->rpqueue[isdn_channel], skb);
+		dev->drv[info->isdn_driver]->rcvcount[isdn_channel] += skb->len;
 		spin_unlock_irqrestore(&info->readlock, flags);
 		/* Schedule dequeuing */
 		if (dev->modempoll && info->rcvsched)

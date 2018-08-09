@@ -29,19 +29,23 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/sched.h>
+#include <linux/nospec.h>
 
 /*
  * Check that the effect_id is a valid effect and whether the user
  * is the owner
  */
-static int check_effect_access(struct ff_device *ff, int effect_id,
-				struct file *file)
+static int check_effect_access_nospec(struct ff_device *ff, int *effect_id,
+				      struct file *file)
 {
-	if (effect_id < 0 || effect_id >= ff->max_effects ||
-	    !ff->effect_owners[effect_id])
+	if (*effect_id < 0 || *effect_id >= ff->max_effects)
+		return -EINVAL;
+	*effect_id = array_index_nospec(*effect_id, ff->max_effects);
+
+	if (!ff->effect_owners[*effect_id])
 		return -EINVAL;
 
-	if (file && ff->effect_owners[effect_id] != file)
+	if (file && ff->effect_owners[*effect_id] != file)
 		return -EACCES;
 
 	return 0;
@@ -151,7 +155,7 @@ int input_ff_upload(struct input_dev *dev, struct ff_effect *effect,
 	} else {
 		id = effect->id;
 
-		ret = check_effect_access(ff, id, file);
+		ret = check_effect_access_nospec(ff, &id, file);
 		if (ret)
 			goto out;
 
@@ -188,7 +192,7 @@ static int erase_effect(struct input_dev *dev, int effect_id,
 	struct ff_device *ff = dev->ff;
 	int error;
 
-	error = check_effect_access(ff, effect_id, file);
+	error = check_effect_access_nospec(ff, &effect_id, file);
 	if (error)
 		return error;
 
@@ -288,7 +292,7 @@ int input_ff_event(struct input_dev *dev, unsigned int type,
 		break;
 
 	default:
-		if (check_effect_access(ff, code, NULL) == 0)
+		if (check_effect_access_nospec(ff, &code, NULL) == 0)
 			ff->playback(dev, code, value);
 		break;
 	}

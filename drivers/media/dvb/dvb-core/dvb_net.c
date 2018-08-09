@@ -64,6 +64,7 @@
 #include <linux/crc32.h>
 #include <linux/mutex.h>
 #include <linux/sched.h>
+#include <linux/nospec.h>
 
 #include "dvb_demux.h"
 #include "dvb_net.h"
@@ -1372,12 +1373,15 @@ static int dvb_net_do_ioctl(struct inode *inode, struct file *file,
 		struct net_device *netdev;
 		struct dvb_net_priv *priv_data;
 		struct dvb_net_if *dvbnetif = parg;
+		u16 if_num;
 
 		if (dvbnetif->if_num >= DVB_NET_DEVICES_MAX ||
-		    !dvbnet->state[dvbnetif->if_num])
+		    !dvbnet->state[array_index_nospec(dvbnetif->if_num, DVB_NET_DEVICES_MAX)])
 			return -EINVAL;
+		if_num = array_index_nospec(dvbnetif->if_num,
+					    DVB_NET_DEVICES_MAX);
 
-		netdev = dvbnet->device[dvbnetif->if_num];
+		netdev = dvbnet->device[if_num];
 
 		priv_data = netdev_priv(netdev);
 		dvbnetif->pid=priv_data->pid;
@@ -1387,12 +1391,16 @@ static int dvb_net_do_ioctl(struct inode *inode, struct file *file,
 	case NET_REMOVE_IF:
 	{
 		int ret;
+		unsigned long arg;
 
 		if (!capable(CAP_SYS_ADMIN))
 			return -EPERM;
 		if ((unsigned long) parg >= DVB_NET_DEVICES_MAX)
 			return -EINVAL;
-		ret = dvb_net_remove_if(dvbnet, (unsigned long) parg);
+		arg = array_index_nospec((unsigned long)parg,
+					 DVB_NET_DEVICES_MAX);
+
+		ret = dvb_net_remove_if(dvbnet, arg);
 		if (!ret)
 			module_put(dvbdev->adapter->module);
 		return ret;
@@ -1423,12 +1431,17 @@ static int dvb_net_do_ioctl(struct inode *inode, struct file *file,
 		struct net_device *netdev;
 		struct dvb_net_priv *priv_data;
 		struct __dvb_net_if_old *dvbnetif = parg;
+		u16 if_num;
 
-		if (dvbnetif->if_num >= DVB_NET_DEVICES_MAX ||
-		    !dvbnet->state[dvbnetif->if_num])
+		if (dvbnetif->if_num >= DVB_NET_DEVICES_MAX)
+			return -EINVAL;
+		if_num = array_index_nospec(dvbnetif->if_num,
+					    DVB_NET_DEVICES_MAX);
+
+		if (!dvbnet->state[if_num])
 			return -EINVAL;
 
-		netdev = dvbnet->device[dvbnetif->if_num];
+		netdev = dvbnet->device[if_num];
 
 		priv_data = netdev_priv(netdev);
 		dvbnetif->pid=priv_data->pid;

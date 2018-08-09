@@ -2557,6 +2557,8 @@ static int i40e_add_fdir_ethtool(struct i40e_vsi *vsi,
 				   "Invalid VF id %d\n", vf_id);
 			goto free_input;
 		}
+		vf_id = array_index_nospec(vf_id, pf->num_alloc_vfs);
+
 		/* Find vsi id from vf id and override dest vsi */
 		input->dest_vsi = pf->vf[vf_id].lan_vsi_id;
 		if (input->q_index >= pf->vf[vf_id].num_queue_pairs) {

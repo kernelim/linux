@@ -25,6 +25,7 @@
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/init.h>
+#include <linux/nospec.h>
 #include <asm/io.h>
 #include <asm/byteorder.h>
 
@@ -937,6 +938,7 @@ static int cfi_amdstd_read (struct mtd_info *mtd, loff_t from, size_t len, size_
 
 		if (chipnum >= cfi->numchips)
 			break;
+		chipnum = array_index_nospec(chipnum, cfi->numchips);
 
 		if ((len + ofs -1) >> cfi->chipshift)
 			thislen = (1<<cfi->chipshift) - ofs;
@@ -1176,6 +1178,7 @@ static int cfi_amdstd_write_words(struct mtd_info *mtd, loff_t to, size_t len,
 
 	chipnum = to >> cfi->chipshift;
 	ofs = to  - (chipnum << cfi->chipshift);
+	chipnum = array_index_nospec(chipnum, cfi->numchips);
 	chipstart = cfi->chips[chipnum].start;
 
 	/* If it's not bus-aligned, do the first byte write */
@@ -1465,6 +1468,7 @@ static int cfi_amdstd_write_buffers(struct mtd_info *mtd, loff_t to, size_t len,
 		if (size % map_bankwidth(map))
 			size -= size % map_bankwidth(map);
 
+		chipnum = array_index_nospec(chipnum, cfi->numchips);
 		ret = do_write_buffer(map, &cfi->chips[chipnum],
 				      ofs, buf, size);
 		if (ret)

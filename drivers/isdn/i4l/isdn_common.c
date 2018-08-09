@@ -17,6 +17,7 @@
 #include <linux/vmalloc.h>
 #include <linux/isdn.h>
 #include <linux/smp_lock.h>
+#include <linux/nospec.h>
 #include "isdn_common.h"
 #include "isdn_tty.h"
 #include "isdn_net.h"
@@ -984,12 +985,14 @@ isdn_readbchan_tty(int di, int channel, struct tty_struct *tty, int cisco_hack)
 static inline int
 isdn_minor2drv(int minor)
 {
+	minor = array_index_nospec(minor, ISDN_MAX_CHANNELS);
 	return (dev->drvmap[minor]);
 }
 
 static inline int
 isdn_minor2chan(int minor)
 {
+	minor = array_index_nospec(minor, ISDN_MAX_CHANNELS);
 	return (dev->chanmap[minor]);
 }
 
@@ -2167,6 +2170,8 @@ static char *map_drvname(int di)
 {
   if ((di < 0) || (di >= ISDN_MAX_DRIVERS)) 
     return(NULL);
+  di = array_index_nospec(di, ISDN_MAX_DRIVERS);
+
   return(dev->drvid[di]); /* driver name */
 } /* map_drvname */
 

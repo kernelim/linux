@@ -35,6 +35,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/delay.h>
 #include <linux/kthread.h>
+#include <linux/nospec.h>
 #include <asm/div64.h>
 
 #include "cx88.h"
@@ -1147,11 +1148,14 @@ static int vidioc_querycap (struct file *file, void  *priv,
 static int vidioc_enum_fmt_vid_cap (struct file *file, void  *priv,
 					struct v4l2_fmtdesc *f)
 {
+	u32 index;
+
 	if (unlikely(f->index >= ARRAY_SIZE(formats)))
 		return -EINVAL;
+	index = array_index_nospec(f->index, ARRAY_SIZE(formats));
 
-	strlcpy(f->description,formats[f->index].name,sizeof(f->description));
-	f->pixelformat = formats[f->index].fourcc;
+	strlcpy(f->description,formats[index].name,sizeof(f->description));
+	f->pixelformat = formats[index].fourcc;
 
 	return 0;
 }
@@ -1250,6 +1254,8 @@ int cx88_enum_input (struct cx88_core  *core,struct v4l2_input *i)
 
 	if (n >= 4)
 		return -EINVAL;
+	n = array_index_nospec(n, 4);
+
 	if (0 == INPUT(n).type)
 		return -EINVAL;
 	i->type  = V4L2_INPUT_TYPE_CAMERA;
@@ -1284,6 +1290,7 @@ static int vidioc_s_input (struct file *file, void *priv, unsigned int i)
 
 	if (i >= 4)
 		return -EINVAL;
+	i = array_index_nospec(i, 4);
 
 	mutex_lock(&core->lock);
 	cx88_newstation(core);

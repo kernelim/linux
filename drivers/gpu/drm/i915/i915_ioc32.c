@@ -30,6 +30,7 @@
  * IN THE SOFTWARE.
  */
 #include <linux/compat.h>
+#include <linux/nospec.h>
 
 #include <drm/drmP.h>
 #include <drm/i915_drm.h>
@@ -87,8 +88,11 @@ long i915_compat_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	if (nr < DRM_COMMAND_BASE || nr >= DRM_COMMAND_END)
 		return drm_compat_ioctl(filp, cmd, arg);
 
-	if (nr < DRM_COMMAND_BASE + ARRAY_SIZE(i915_compat_ioctls))
-		fn = i915_compat_ioctls[nr - DRM_COMMAND_BASE];
+	if (nr < DRM_COMMAND_BASE + ARRAY_SIZE(i915_compat_ioctls)) {
+		unsigned int idx = array_index_nospec(nr - DRM_COMMAND_BASE,
+						ARRAY_SIZE(i915_compat_ioctls));
+		fn = i915_compat_ioctls[idx];
+	}
 
 	if (fn != NULL)
 		ret = (*fn) (filp, cmd, arg);

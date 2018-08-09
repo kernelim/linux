@@ -19,6 +19,7 @@
 #include <linux/compiler.h>
 #include <linux/time.h>
 #include <linux/cache.h>
+#include <linux/rbtree.h>
 
 #include <asm/atomic.h>
 #include <asm/types.h>
@@ -313,6 +314,7 @@ typedef unsigned char *sk_buff_data_t;
  *	@prev: Previous buffer in list
  *	@sk: Socket we are owned by
  *	@tstamp: Time we arrived
+ *	@rbnode: RB tree node, alternative to next/prev for netem/tcp
  *	@dev: Device we arrived on/are leaving by
  *	@transport_header: Transport layer header
  *	@network_header: Network layer header
@@ -364,11 +366,25 @@ typedef unsigned char *sk_buff_data_t;
  */
 
 struct sk_buff {
+#ifdef __GENKSYMS__
 	/* These two members must be first. */
 	struct sk_buff		*next;
 	struct sk_buff		*prev;
 
 	struct sock		*sk;
+#else
+	union {
+		struct {
+			/* These two members must be first. */
+			struct sk_buff		*next;
+			struct sk_buff		*prev;
+
+			struct sock		*sk;
+		};
+		struct rb_node	rbnode; /* used in netem & tcp stack */
+	};
+#endif
+
 	ktime_t			tstamp;
 	struct net_device	*dev;
 
@@ -1654,6 +1670,8 @@ static inline void __skb_queue_purge(struct sk_buff_head *list)
 		kfree_skb(skb);
 }
 
+void skb_rbtree_purge(struct sock *sk, struct rb_root *root);
+
 /**
  *	__dev_alloc_skb - allocate an skbuff for receiving
  *	@length: length to allocate
@@ -2087,6 +2105,12 @@ static inline int pskb_trim_rcsum(struct sk_buff *skb, unsigned int len)
 	return __pskb_trim(skb, len);
 }
 
+#define rb_to_skb(rb) rb_entry_safe(rb, struct sk_buff, rbnode)
+#define skb_rb_first(root) rb_to_skb(rb_first(root))
+#define skb_rb_last(root)  rb_to_skb(rb_last(root))
+#define skb_rb_next(skb)   rb_to_skb(rb_next(&(skb)->rbnode))
+#define skb_rb_prev(skb)   rb_to_skb(rb_prev(&(skb)->rbnode))
+
 #define skb_queue_walk(queue, skb) \
 		for (skb = (queue)->next;					\
 		     prefetch(skb->next), (skb != (struct sk_buff *)(queue));	\
@@ -2100,6 +2124,18 @@ static inline int pskb_trim_rcsum(struct sk_buff *skb, unsigned int len)
 #define skb_queue_walk_from(queue, skb)						\
 		for (; prefetch(skb->next), (skb != (struct sk_buff *)(queue));	\
 		     skb = skb->next)
+
+#define skb_rbtree_walk(skb, root)						\
+		for (skb = skb_rb_first(root); skb != NULL;			\
+		     skb = skb_rb_next(skb))
+
+#define skb_rbtree_walk_from(skb)						\
+		for (; skb != NULL;						\
+		     skb = skb_rb_next(skb))
+
+#define skb_rbtree_walk_from_safe(skb, tmp)					\
+		for (; tmp = skb ? skb_rb_next(skb) : NULL, (skb != NULL);	\
+		     skb = tmp)
 
 #define skb_queue_walk_from_safe(queue, skb, tmp)				\
 		for (tmp = skb->next;						\

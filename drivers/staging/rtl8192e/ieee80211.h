@@ -30,6 +30,7 @@
 #include <linux/jiffies.h>
 #include <linux/timer.h>
 #include <linux/sched.h>
+#include <linux/nospec.h>
 
 #include <linux/delay.h>
 #include <linux/wireless.h>
@@ -1362,7 +1363,8 @@ static const char *eap_types[] = {
 
 static inline const char *eap_get_type(int type)
 {
-	return ((u32)type >= ARRAY_SIZE(eap_types)) ? "Unknown" : eap_types[type];
+	return ((u32)type >= ARRAY_SIZE(eap_types)) ? "Unknown" :
+		eap_types[array_index_nospec((u32)type, ARRAY_SIZE(eap_types))];
 }
 //added by amy for reorder
 static inline u8 Frame_QoSTID(u8* buf)

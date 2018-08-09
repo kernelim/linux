@@ -32,6 +32,7 @@
 #include <linux/device.h>
 #include <linux/firmware.h>
 #include <linux/slab.h>
+#include <linux/nospec.h>
 #include <media/v4l2-common.h>
 #include <media/v4l2-ioctl.h>
 #include <media/cx2341x.h>
@@ -1218,11 +1219,13 @@ static int vidioc_enum_input(struct file *file, void *priv,
 	struct cx23885_dev *dev = fh->dev;
 	struct cx23885_input *input;
 	int n;
+	u32 index;
 
 	if (i->index >= 4)
 		return -EINVAL;
+	index = array_index_nospec(i->index, 4);
 
-	input = &cx23885_boards[dev->board].input[i->index];
+	input = &cx23885_boards[dev->board].input[index];
 
 	if (input->type == 0)
 		return -EINVAL;

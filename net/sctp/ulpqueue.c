@@ -43,6 +43,7 @@
 
 #include <linux/types.h>
 #include <linux/skbuff.h>
+#include <linux/nospec.h>
 #include <net/sock.h>
 #include <net/sctp/structs.h>
 #include <net/sctp/sctp.h>
@@ -764,6 +765,7 @@ static void sctp_ulpq_retrieve_ordered(struct sctp_ulpq *ulpq,
 		/* Have we not gone far enough?  */
 		if (csid < sid)
 			continue;
+		sid = array_index_nospec(sid, csid + 1);
 
 		if (cssn != sctp_ssn_peek(in, sid))
 			break;

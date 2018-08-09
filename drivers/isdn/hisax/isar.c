@@ -9,6 +9,7 @@
  */
 
 #include <linux/init.h>
+#include <linux/nospec.h>
 #include "hisax.h"
 #include "isar.h"
 #include "isdnl1.h"
@@ -1750,6 +1751,7 @@ isar_auxcmd(struct IsdnCardState *cs, isdn_ctrl *ic) {
 		debugl1(cs, "isar_auxcmd cmd/ch %x/%d", ic->command, ic->arg);
 	switch (ic->command) {
 		case (ISDN_CMD_FAXCMD):
+			ic->arg = array_index_nospec(ic->arg, 2 + MAX_WAITING_CALLS);
 			bcs = cs->channel[ic->arg].bcs;
 			if (cs->debug & L1_DEB_HSCX)
 				debugl1(cs, "isar_auxcmd cmd/subcmd %d/%d",

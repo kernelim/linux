@@ -291,13 +291,15 @@ static int c4iw_query_gid(struct ib_device *ibdev, u8 port, int index,
 			  union ib_gid *gid)
 {
 	struct c4iw_dev *dev;
+	u8 idx;
 
 	PDBG("%s ibdev %p, port %d, index %d, gid %p\n",
 	       __func__, ibdev, port, index, gid);
 	dev = to_c4iw_dev(ibdev);
 	BUG_ON(port == 0);
 	memset(&(gid->raw[0]), 0, sizeof(gid->raw));
-	memcpy(&(gid->raw[0]), dev->rdev.lldi.ports[port-1]->dev_addr, 6);
+	idx = array_index_nospec(port - 1, (u8)dev->rdev.lldi.nports);
+	memcpy(&(gid->raw[0]), dev->rdev.lldi.ports[idx]->dev_addr, 6);
 	return 0;
 }
 

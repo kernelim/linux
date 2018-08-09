@@ -41,6 +41,7 @@
 
 #include <linux/pagemap.h>
 #include <linux/slab.h>
+#include <linux/nospec.h>
 
 #define VIA_PGDN(x)	     (((unsigned long)(x)) & PAGE_MASK)
 #define VIA_PGOFF(x)	    (((unsigned long)(x)) & ~PAGE_MASK)
@@ -126,10 +127,13 @@ via_map_blit_for_device(struct pci_dev *pdev,
 			line_len -= remaining_len;
 
 			if (mode == 1) {
+				unsigned long idx;
+
+				idx = array_index_nospec(VIA_PFN(cur_mem) - VIA_PFN(first_addr),
+							 vsg->num_pages);
 				desc_ptr->mem_addr =
 					dma_map_page(&pdev->dev,
-						     vsg->pages[VIA_PFN(cur_mem) -
-								VIA_PFN(first_addr)],
+						     vsg->pages[idx],
 						     VIA_PGOFF(cur_mem), remaining_len,
 						     vsg->direction);
 				desc_ptr->dev_addr = cur_fb;

@@ -20,6 +20,7 @@
 #include <linux/module.h>
 #include <linux/cache.h>
 #include <linux/audit.h>
+#include <linux/nospec.h>
 #include <asm/uaccess.h>
 
 #include "xfrm_hash.h"
@@ -324,6 +325,7 @@ static struct xfrm_mode *xfrm_get_mode(unsigned int encap, int family)
 
 	if (unlikely(encap >= XFRM_MODE_MAX))
 		return NULL;
+	encap = array_index_nospec(encap, XFRM_MODE_MAX);
 
 retry:
 	afinfo = xfrm_state_get_afinfo(family);
@@ -1897,6 +1899,7 @@ int xfrm_user_policy(struct sock *sk, int optname, u8 __user *optval, int optlen
 	read_unlock(&xfrm_km_lock);
 
 	if (err >= 0) {
+		err = array_index_nospec(err, 2);
 		xfrm_sk_policy_insert(sk, err, pol);
 		xfrm_pol_put(pol);
 		err = 0;
@@ -1967,6 +1970,8 @@ static struct xfrm_state_afinfo *xfrm_state_get_afinfo(unsigned int family)
 	struct xfrm_state_afinfo *afinfo;
 	if (unlikely(family >= NPROTO))
 		return NULL;
+	family = array_index_nospec(family, NPROTO);
+
 	read_lock(&xfrm_state_afinfo_lock);
 	afinfo = xfrm_state_afinfo[family];
 	if (unlikely(!afinfo))

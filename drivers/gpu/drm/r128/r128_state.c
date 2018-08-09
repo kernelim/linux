@@ -28,6 +28,7 @@
  *    Gareth Hughes <gareth@valinux.com>
  */
 
+#include <linux/nospec.h>
 #include <drm/drmP.h>
 #include <drm/r128_drm.h>
 #include "r128_drv.h"
@@ -1322,6 +1323,7 @@ static int r128_cce_vertex(struct drm_device *dev, void *data, struct drm_file *
 	struct drm_buf *buf;
 	drm_r128_buf_priv_t *buf_priv;
 	drm_r128_vertex_t *vertex = data;
+	int idx;
 
 	LOCK_TEST_WITH_RETURN(dev, file_priv);
 
@@ -1335,6 +1337,8 @@ static int r128_cce_vertex(struct drm_device *dev, void *data, struct drm_file *
 			  vertex->idx, dma->buf_count - 1);
 		return -EINVAL;
 	}
+	idx = array_index_nospec(vertex->idx, dma->buf_count);
+
 	if (vertex->prim < 0 ||
 	    vertex->prim > R128_CCE_VC_CNTL_PRIM_TYPE_TRI_TYPE2) {
 		DRM_ERROR("buffer prim %d\n", vertex->prim);
@@ -1344,7 +1348,7 @@ static int r128_cce_vertex(struct drm_device *dev, void *data, struct drm_file *
 	RING_SPACE_TEST_WITH_RETURN(dev_priv);
 	VB_AGE_TEST_WITH_RETURN(dev_priv);
 
-	buf = dma->buflist[vertex->idx];
+	buf = dma->buflist[idx];
 	buf_priv = buf->dev_private;
 
 	if (buf->file_priv != file_priv) {
@@ -1374,7 +1378,7 @@ static int r128_cce_indices(struct drm_device *dev, void *data, struct drm_file 
 	struct drm_buf *buf;
 	drm_r128_buf_priv_t *buf_priv;
 	drm_r128_indices_t *elts = data;
-	int count;
+	int count, idx;
 
 	LOCK_TEST_WITH_RETURN(dev, file_priv);
 
@@ -1388,6 +1392,8 @@ static int r128_cce_indices(struct drm_device *dev, void *data, struct drm_file 
 			  elts->idx, dma->buf_count - 1);
 		return -EINVAL;
 	}
+	idx = array_index_nospec(elts->idx, dma->buf_count);
+
 	if (elts->prim < 0 ||
 	    elts->prim > R128_CCE_VC_CNTL_PRIM_TYPE_TRI_TYPE2) {
 		DRM_ERROR("buffer prim %d\n", elts->prim);
@@ -1397,7 +1403,7 @@ static int r128_cce_indices(struct drm_device *dev, void *data, struct drm_file 
 	RING_SPACE_TEST_WITH_RETURN(dev_priv);
 	VB_AGE_TEST_WITH_RETURN(dev_priv);
 
-	buf = dma->buflist[elts->idx];
+	buf = dma->buflist[idx];
 	buf_priv = buf->dev_private;
 
 	if (buf->file_priv != file_priv) {
@@ -1450,6 +1456,7 @@ static int r128_cce_blit(struct drm_device *dev, void *data, struct drm_file *fi
 			  blit->idx, dma->buf_count - 1);
 		return -EINVAL;
 	}
+	blit->idx = array_index_nospec(blit->idx, dma->buf_count);
 
 	RING_SPACE_TEST_WITH_RETURN(dev_priv);
 	VB_AGE_TEST_WITH_RETURN(dev_priv);
@@ -1520,6 +1527,7 @@ static int r128_cce_indirect(struct drm_device *dev, void *data, struct drm_file
 	struct drm_buf *buf;
 	drm_r128_buf_priv_t *buf_priv;
 	drm_r128_indirect_t *indirect = data;
+	int idx;
 #if 0
 	RING_LOCALS;
 #endif
@@ -1537,8 +1545,9 @@ static int r128_cce_indirect(struct drm_device *dev, void *data, struct drm_file
 			  indirect->idx, dma->buf_count - 1);
 		return -EINVAL;
 	}
+	idx = array_index_nospec(indirect->idx, dma->buf_count);
 
-	buf = dma->buflist[indirect->idx];
+	buf = dma->buflist[idx];
 	buf_priv = buf->dev_private;
 
 	if (buf->file_priv != file_priv) {

@@ -12,6 +12,7 @@
 #include <linux/ratelimit.h>
 #include <linux/printk.h>
 #include <linux/sunrpc/bc_xprt.h>
+#include <linux/nospec.h>
 #include "nfs4_fs.h"
 #include "callback.h"
 #include "internal.h"
@@ -101,6 +102,7 @@ static __be32 decode_string(struct xdr_stream *xdr, unsigned int *len, const cha
 static __be32 decode_fh(struct xdr_stream *xdr, struct nfs_fh *fh)
 {
 	__be32 *p;
+	unsigned short size;
 
 	p = read_buf(xdr, 4);
 	if (unlikely(p == NULL))
@@ -108,11 +110,13 @@ static __be32 decode_fh(struct xdr_stream *xdr, struct nfs_fh *fh)
 	fh->size = ntohl(*p);
 	if (fh->size > NFS4_FHSIZE)
 		return htonl(NFS4ERR_BADHANDLE);
-	p = read_buf(xdr, fh->size);
+	size = array_index_nospec(fh->size, NFS4_FHSIZE + 1);
+
+	p = read_buf(xdr, size);
 	if (unlikely(p == NULL))
 		return htonl(NFS4ERR_RESOURCE);
-	memcpy(&fh->data[0], p, fh->size);
-	memset(&fh->data[fh->size], 0, sizeof(fh->data) - fh->size);
+	memcpy(&fh->data[0], p, size);
+	memset(&fh->data[size], 0, sizeof(fh->data) - size);
 	return 0;
 }
 

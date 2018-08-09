@@ -31,6 +31,7 @@
 #include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/ieee80211.h>
+#include <linux/nospec.h>
 #include "iwl-io.h"
 #include "iwl-trans.h"
 #include "iwl-agn-hw.h"
@@ -517,6 +518,7 @@ int iwlagn_tx_agg_stop(struct iwl_priv *priv, struct ieee80211_vif *vif,
 
 	spin_lock_bh(&priv->sta_lock);
 
+	tid = array_index_nospec(tid, IWL_MAX_TID_COUNT);
 	tid_data = &priv->tid_data[sta_id][tid];
 	txq_id = tid_data->agg.txq_id;
 
@@ -609,6 +611,7 @@ int iwlagn_tx_agg_start(struct iwl_priv *priv, struct ieee80211_vif *vif,
 	}
 	if (unlikely(tid >= IWL_MAX_TID_COUNT))
 		return -EINVAL;
+	tid = array_index_nospec(tid, IWL_MAX_TID_COUNT);
 
 	if (priv->tid_data[sta_id][tid].agg.state != IWL_AGG_OFF) {
 		IWL_ERR(priv, "Start AGG when state is not IWL_AGG_OFF !\n");
@@ -665,6 +668,7 @@ int iwlagn_tx_agg_flush(struct iwl_priv *priv, struct ieee80211_vif *vif,
 	 */
 	spin_lock_bh(&priv->sta_lock);
 
+	tid = array_index_nospec(tid, IWL_MAX_TID_COUNT);
 	tid_data = &priv->tid_data[sta_id][tid];
 	txq_id = tid_data->agg.txq_id;
 	agg_state = tid_data->agg.state;
@@ -706,6 +710,7 @@ int iwlagn_tx_agg_oper(struct iwl_priv *priv, struct ieee80211_vif *vif,
 
 	buf_size = min_t(int, buf_size, LINK_QUAL_AGG_FRAME_LIMIT_DEF);
 
+	tid = array_index_nospec(tid, IWL_MAX_TID_COUNT);
 	spin_lock_bh(&priv->sta_lock);
 	ssn = priv->tid_data[sta_priv->sta_id][tid].agg.ssn;
 	q = priv->tid_data[sta_priv->sta_id][tid].agg.txq_id;

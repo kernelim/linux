@@ -40,6 +40,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/jiffies.h>
 #include <linux/prefetch.h>
+#include <linux/nospec.h>
 #include <net/ipv6.h>
 #include <net/tcp.h>
 #ifdef CONFIG_NET_RX_BUSY_POLL
@@ -2542,6 +2543,7 @@ int t4_sge_alloc_rxq(struct adapter *adap, struct sge_rspq *iq, bool fwevtq,
 	struct fw_iq_cmd c;
 	struct sge *s = &adap->sge;
 	struct port_info *pi = netdev_priv(dev);
+	unsigned int idx;
 
 	/* Size needs to be multiple of 16, including status entry. */
 	iq->size = roundup(iq->size, 16);
@@ -2633,14 +2635,18 @@ int t4_sge_alloc_rxq(struct adapter *adap, struct sge_rspq *iq, bool fwevtq,
 	/* set offset to -1 to distinguish ingress queues without FL */
 	iq->offset = fl ? 0 : -1;
 
-	adap->sge.ingr_map[iq->cntxt_id - adap->sge.ingr_start] = iq;
+	idx = array_index_nospec(iq->cntxt_id - adap->sge.ingr_start,
+				  adap->sge.ingr_sz);
+	adap->sge.ingr_map[idx] = iq;
 
 	if (fl) {
 		fl->cntxt_id = ntohs(c.fl0id);
 		fl->avail = fl->pend_cred = 0;
 		fl->pidx = fl->cidx = 0;
 		fl->alloc_failed = fl->large_alloc_failed = fl->starving = 0;
-		adap->sge.egr_map[fl->cntxt_id - adap->sge.egr_start] = fl;
+		idx = array_index_nospec(fl->cntxt_id - adap->sge.egr_start,
+					 adap->sge.egr_sz);
+		adap->sge.egr_map[idx] = fl;
 
 		/* Note, we must initialize the BAR2 Free List User Doorbell
 		 * information before refilling the Free List!

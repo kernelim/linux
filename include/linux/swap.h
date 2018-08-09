@@ -238,6 +238,9 @@ extern void swap_setup(void);
 
 extern void add_page_to_unevictable_list(struct page *page);
 
+extern unsigned long generic_max_swapfile_size(void);
+extern unsigned long max_swapfile_size(void);
+
 /**
  * lru_cache_add: add a page to the page lists
  * @page: the page to add

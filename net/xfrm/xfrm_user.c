@@ -1040,6 +1040,8 @@ static int verify_policy_type(u8 type)
 
 static int verify_newpolicy_info(struct xfrm_userpolicy_info *p)
 {
+	int ret;
+
 	switch (p->share) {
 	case XFRM_SHARE_ANY:
 	case XFRM_SHARE_SESSION:
@@ -1075,7 +1077,12 @@ static int verify_newpolicy_info(struct xfrm_userpolicy_info *p)
 		return -EINVAL;
 	}
 
-	return verify_policy_dir(p->dir);
+	ret = verify_policy_dir(p->dir);
+	if (ret)
+		return ret;
+	p->dir = array_index_nospec(p->dir, XFRM_POLICY_MAX);
+
+	return 0;
 }
 
 static int copy_from_user_sec_ctx(struct xfrm_policy *pol, struct nlattr **attrs)
@@ -1477,6 +1484,7 @@ static int xfrm_get_policy(struct sk_buff *skb, struct nlmsghdr *nlh,
 	err = verify_policy_dir(p->dir);
 	if (err)
 		return err;
+	p->dir = array_index_nospec(p->dir, XFRM_POLICY_MAX);
 
 	if (p->index)
 		xp = xfrm_policy_byid(net, mark, type, p->dir, p->index, delete, &err);
@@ -1751,6 +1759,7 @@ static int xfrm_add_pol_expire(struct sk_buff *skb, struct nlmsghdr *nlh,
 	err = verify_policy_dir(p->dir);
 	if (err)
 		return err;
+	p->dir = array_index_nospec(p->dir, XFRM_POLICY_MAX);
 
 	if (p->index)
 		xp = xfrm_policy_byid(net, mark, type, p->dir, p->index, 0, &err);

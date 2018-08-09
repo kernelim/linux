@@ -17,6 +17,7 @@
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/init.h>
+#include <linux/nospec.h>
 #include <linux/isdn/capiutil.h>
 
 /* from CAPI2.0 DDK AVM Berlin GmbH */
@@ -500,10 +501,14 @@ static void pars_2_message(_cmsg * cmsg)
 
 unsigned capi_cmsg2message(_cmsg * cmsg, u8 * msg)
 {
+	unsigned index;
+
 	cmsg->m = msg;
 	cmsg->l = 8;
 	cmsg->p = 0;
-	cmsg->par = cpars[command_2_index(cmsg->Command, cmsg->Subcommand)];
+	index = array_index_nospec(command_2_index(cmsg->Command, cmsg->Subcommand),
+				   ARRAY_SIZE(cpars));
+	cmsg->par = cpars[index];
 
 	pars_2_message(cmsg);
 
@@ -676,7 +681,9 @@ static char *mnames[] =
 
 char *capi_cmd2str(u8 cmd, u8 subcmd)
 {
-	return mnames[command_2_index(cmd, subcmd)];
+	int idx = array_index_nospec(command_2_index(cmd, subcmd),
+				     ARRAY_SIZE(mnames));
+	return mnames[idx];
 }
 
 

@@ -56,6 +56,7 @@
 #include <linux/miscdevice.h>
 #include <linux/smp_lock.h>
 #include <linux/compat.h>
+#include <linux/nospec.h>
 
 #include <asm/io.h>
 #include <asm/uaccess.h>
@@ -1308,7 +1309,7 @@ mptctl_getiocinfo (unsigned long arg, unsigned int data_size)
 
 	if (karg->hdr.port > 1)
 		return -EINVAL;
-	port = karg->hdr.port;
+	port = array_index_nospec(karg->hdr.port, 2);
 
 	karg->port = port;
 	pdev = (struct pci_dev *) ioc->pcidev;
@@ -2792,8 +2793,11 @@ mptctl_hp_targetinfo(unsigned long arg)
 		}
 	}
 	hd = shost_priv(ioc->sh);
-	if (hd != NULL)
-		karg.select_timeouts = hd->sel_timeout[karg.hdr.id];
+	if (hd != NULL) {
+		unsigned int id = array_index_nospec(karg.hdr.id,
+						     MPT_MAX_FC_DEVICES);
+		karg.select_timeouts = hd->sel_timeout[id];
+	}
 
 	/* Copy the data from kernel memory to user memory
 	 */

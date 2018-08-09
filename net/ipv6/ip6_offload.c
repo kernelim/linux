@@ -13,6 +13,7 @@
 #include <linux/netdevice.h>
 #include <linux/skbuff.h>
 #include <linux/printk.h>
+#include <linux/nospec.h>
 
 #include <net/protocol.h>
 #include <net/ipv6.h>
@@ -23,6 +24,8 @@ static int ipv6_gso_pull_exthdrs(struct sk_buff *skb, int proto)
 {
 	const struct net_offload *ops = NULL;
 	const struct inet6_protocol *proto_ops = NULL;
+
+	proto = array_index_nospec(proto, MAX_INET_PROTOS);
 
 	for (;;) {
 		struct ipv6_opt_hdr *opth;
@@ -53,7 +56,7 @@ static int ipv6_gso_pull_exthdrs(struct sk_buff *skb, int proto)
 		if (unlikely(!pskb_may_pull(skb, len)))
 			break;
 
-		proto = opth->nexthdr;
+		proto = array_index_nospec(opth->nexthdr, MAX_INET_PROTOS);
 		__skb_pull(skb, len);
 	}
 

@@ -42,6 +42,7 @@
 #include <linux/uaccess.h>
 #include <linux/compat.h>
 #include <linux/math64.h>
+#include <linux/nospec.h>
 #include <mtd/ubi-user.h>
 #include "ubi.h"
 
@@ -471,8 +472,10 @@ static long vol_cdev_ioctl(struct file *file, unsigned int cmd,
 		/* Validate the request */
 		err = -EINVAL;
 		if (req.lnum < 0 || req.lnum >= vol->reserved_pebs ||
-		    req.bytes < 0 || req.lnum >= vol->usable_leb_size)
+		    req.bytes < 0 || req.bytes >= vol->usable_leb_size)
 			break;
+		req.lnum = array_index_nospec(req.lnum, vol->reserved_pebs);
+
 		if (req.dtype != UBI_LONGTERM && req.dtype != UBI_SHORTTERM &&
 		    req.dtype != UBI_UNKNOWN)
 			break;
@@ -508,6 +511,7 @@ static long vol_cdev_ioctl(struct file *file, unsigned int cmd,
 			err = -EINVAL;
 			break;
 		}
+		lnum = array_index_nospec(lnum, vol->reserved_pebs);
 
 		dbg_gen("erase LEB %d:%d", vol->vol_id, lnum);
 		err = ubi_eba_unmap_leb(ubi, vol, lnum);

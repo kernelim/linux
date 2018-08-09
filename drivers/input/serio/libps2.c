@@ -21,6 +21,7 @@
 #include <linux/i8042.h>
 #include <linux/init.h>
 #include <linux/libps2.h>
+#include <linux/nospec.h>
 
 #define DRIVER_DESC	"PS/2 driver library"
 
@@ -194,6 +195,7 @@ int __ps2_command(struct ps2dev *ps2dev, unsigned char *param, int command)
 		WARN_ON(1);
 		return -1;
 	}
+	receive = array_index_nospec(receive, sizeof(ps2dev->cmdbuf) + 1);
 
 	if (send && !param) {
 		WARN_ON(1);

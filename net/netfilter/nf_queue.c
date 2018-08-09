@@ -6,6 +6,7 @@
 #include <linux/netfilter.h>
 #include <linux/seq_file.h>
 #include <linux/rcupdate.h>
+#include <linux/nospec.h>
 #include <net/protocol.h>
 #include <net/netfilter/nf_queue.h>
 
@@ -28,6 +29,7 @@ int nf_register_queue_handler(u_int8_t pf, const struct nf_queue_handler *qh)
 
 	if (pf >= ARRAY_SIZE(queue_handler))
 		return -EINVAL;
+	pf = array_index_nospec(pf, ARRAY_SIZE(queue_handler));
 
 	mutex_lock(&queue_handler_mutex);
 	if (queue_handler[pf] == qh)
@@ -49,6 +51,7 @@ int nf_unregister_queue_handler(u_int8_t pf, const struct nf_queue_handler *qh)
 {
 	if (pf >= ARRAY_SIZE(queue_handler))
 		return -EINVAL;
+	pf = array_index_nospec(pf, ARRAY_SIZE(queue_handler));
 
 	mutex_lock(&queue_handler_mutex);
 	if (queue_handler[pf] && queue_handler[pf] != qh) {

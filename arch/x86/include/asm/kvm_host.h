@@ -83,8 +83,6 @@
 
 #define IOPL_SHIFT 12
 
-#define KVM_ALIAS_SLOTS 4
-
 #define KVM_PERMILLE_MMU_PAGES 20
 #define KVM_MIN_ALLOC_MMU_PAGES 64
 #define KVM_MMU_HASH_SHIFT 10
@@ -446,26 +444,12 @@ struct kvm_vcpu_arch {
 		u64 msr_val;
 		struct gfn_to_hva_cache data;
 	} pv_eoi;
-};
 
-struct kvm_mem_alias {
-	gfn_t base_gfn;
-	unsigned long npages;
-	gfn_t target_gfn;
-#define KVM_ALIAS_INVALID     1UL
-	unsigned long flags;
-};
-
-#define KVM_ARCH_HAS_UNALIAS_INSTANTIATION
-
-struct kvm_mem_aliases {
-	struct kvm_mem_alias aliases[KVM_ALIAS_SLOTS];
-	int naliases;
+	/* Flush the L1 Data cache for L1TF mitigation on VMENTER */
+	bool l1tf_flush_l1d;
 };
 
 struct kvm_arch {
-	struct kvm_mem_aliases *aliases;
-
 	unsigned int n_used_mmu_pages;
 	unsigned int n_requested_mmu_pages;
 	unsigned int n_max_mmu_pages;
@@ -530,6 +514,7 @@ struct kvm_vcpu_stat {
 	u32 signal_exits;
 	u32 irq_window_exits;
 	u32 nmi_window_exits;
+	u32 l1d_flush;
 	u32 halt_exits;
 	u32 halt_successful_poll;
 	u32 halt_wakeup;
@@ -566,6 +551,9 @@ struct kvm_x86_ops {
 	void (*hardware_unsetup)(void);            /* __exit */
 	bool (*cpu_has_accelerated_tpr)(void);
 	void (*cpuid_update)(struct kvm_vcpu *vcpu);
+
+	int (*vm_init)(struct kvm *kvm);
+	void (*vm_destroy)(struct kvm *kvm);
 
 	/* Create, but do not attach this VCPU */
 	struct kvm_vcpu *(*vcpu_create)(struct kvm *kvm, unsigned id);
@@ -638,6 +626,7 @@ struct kvm_x86_ops {
 	u64 (*compute_tsc_offset)(struct kvm_vcpu *vcpu, u64 target_tsc);
 
 	void (*sched_in)(struct kvm_vcpu *kvm, int cpu);
+	void (*handle_external_intr)(struct kvm_vcpu *vcpu);
 
 	bool (*has_emulated_msr)(int index);
 };
@@ -818,8 +807,6 @@ void kvm_disable_tdp(void);
 int load_pdptrs(struct kvm_vcpu *vcpu, unsigned long cr3);
 int complete_pio(struct kvm_vcpu *vcpu);
 bool kvm_check_iopl(struct kvm_vcpu *vcpu);
-
-struct kvm_memory_slot *gfn_to_memslot_unaliased(struct kvm *kvm, gfn_t gfn);
 
 static inline struct kvm_mmu_page *page_header(hpa_t shadow_page)
 {

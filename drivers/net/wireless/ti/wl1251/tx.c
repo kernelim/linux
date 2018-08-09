@@ -22,6 +22,7 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/nospec.h>
 
 #include "wl1251.h"
 #include "reg.h"
@@ -219,6 +220,7 @@ static int wl1251_tx_send_packet(struct wl1251 *wl, struct sk_buff *skb,
 
 		/* check whether the current skb can be used */
 		if (skb_cloned(skb) || (skb_tailroom(skb) < offset)) {
+			u8 id;
 			struct sk_buff *newskb = skb_copy_expand(skb, 0, 3,
 								 GFP_KERNEL);
 
@@ -230,7 +232,9 @@ static int wl1251_tx_send_packet(struct wl1251 *wl, struct sk_buff *skb,
 			tx_hdr = (struct tx_double_buffer_desc *) newskb->data;
 
 			dev_kfree_skb_any(skb);
-			wl->tx_frames[tx_hdr->id] = skb = newskb;
+
+			id = array_index_nospec(tx_hdr->id, 16);
+			wl->tx_frames[id] = skb = newskb;
 
 			offset = (4 - (long)skb->data) & 0x03;
 			wl1251_debug(DEBUG_TX, "new skb offset %d", offset);

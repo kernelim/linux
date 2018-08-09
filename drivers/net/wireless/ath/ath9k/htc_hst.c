@@ -16,6 +16,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
+#include <linux/nospec.h>
 #include "htc.h"
 
 static int htc_issue_send(struct htc_target *target, struct sk_buff* skb,
@@ -113,9 +114,9 @@ static void htc_process_conn_rsp(struct htc_target *target,
 		((void *) htc_hdr + sizeof(struct htc_frame_hdr));
 
 	if (svc_rspmsg->status == HTC_SERVICE_SUCCESS) {
-		epid = svc_rspmsg->endpoint_id;
 		service_id = be16_to_cpu(svc_rspmsg->service_id);
 		max_msglen = be16_to_cpu(svc_rspmsg->max_msg_len);
+		epid = array_index_nospec(svc_rspmsg->endpoint_id, ENDPOINT_MAX);
 		endpoint = &target->endpoint[epid];
 
 		for (tepid = (ENDPOINT_MAX - 1); tepid > ENDPOINT0; tepid--) {
@@ -339,8 +340,12 @@ void ath9k_htc_txcompletion_cb(struct htc_target *htc_handle,
 	}
 
 	if (skb) {
+		u8 endpoint_id;
+
 		htc_hdr = (struct htc_frame_hdr *) skb->data;
-		endpoint = &htc_handle->endpoint[htc_hdr->endpoint_id];
+		endpoint_id = array_index_nospec(htc_hdr->endpoint_id,
+						 ENDPOINT_MAX);
+		endpoint = &htc_handle->endpoint[endpoint_id];
 		skb_pull(skb, sizeof(struct htc_frame_hdr));
 
 		if (endpoint->ep_callbacks.tx) {
@@ -421,6 +426,7 @@ void ath9k_htc_rx_msg(struct htc_target *htc_handle,
 			kfree_skb(skb);
 		return;
 	}
+	epid = array_index_nospec(epid, ENDPOINT_MAX);
 
 	if (epid == ENDPOINT0) {
 

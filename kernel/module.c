@@ -45,6 +45,7 @@
 #include <linux/string.h>
 #include <linux/mutex.h>
 #include <linux/rculist.h>
+#include <linux/nospec.h>
 #include <asm/uaccess.h>
 #include <asm/cacheflush.h>
 #include <asm/mmu_context.h>
@@ -2625,6 +2626,12 @@ SYSCALL_DEFINE3(init_module, void __user *, umod,
 	/* Must have permission */
 	if (!capable(CAP_SYS_MODULE) || modules_disabled)
 		return -EPERM;
+
+	/*
+	 * Make sure we don't speculate past the CAP_SYS_MODULE check.  The
+	 * module code trusts the module data completely.
+	 */
+	barrier_nospec();
 
 	/* Only one module load at a time, please */
 	if (mutex_lock_interruptible(&module_mutex) != 0)

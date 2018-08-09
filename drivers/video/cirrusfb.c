@@ -43,6 +43,7 @@
 #include <linux/delay.h>
 #include <linux/fb.h>
 #include <linux/init.h>
+#include <linux/nospec.h>
 #include <asm/pgtable.h>
 
 #ifdef CONFIG_ZORRO
@@ -1291,6 +1292,8 @@ static int cirrusfb_setcolreg(unsigned regno, unsigned red, unsigned green,
 
 		if (regno >= 16)
 			return 1;
+		regno = array_index_nospec(regno, 16);
+
 		v = (red << info->var.red.offset) |
 		    (green << info->var.green.offset) |
 		    (blue << info->var.blue.offset);

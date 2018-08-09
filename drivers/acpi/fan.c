@@ -31,6 +31,7 @@
 #include <linux/seq_file.h>
 #include <linux/uaccess.h>
 #include <linux/thermal.h>
+#include <linux/nospec.h>
 #include <acpi/acpi_bus.h>
 #include <acpi/acpi_drivers.h>
 #include <linux/sort.h>
@@ -204,6 +205,7 @@ static int fan_set_state_acpi4(struct acpi_device *device, unsigned long state)
 
 	if (state >= fan->fps_count)
 		return -EINVAL;
+	state = array_index_nospec(state, fan->fps_count);
 
 	arg0.integer.value = fan->fps[state].control;
 

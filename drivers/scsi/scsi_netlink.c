@@ -22,6 +22,7 @@
 #include <linux/jiffies.h>
 #include <linux/security.h>
 #include <linux/delay.h>
+#include <linux/nospec.h>
 #include <net/sock.h>
 #include <net/netlink.h>
 
@@ -81,7 +82,7 @@ scsi_nl_rcv_msg(struct sk_buff *skb)
 	struct scsi_nl_hdr *hdr;
 	unsigned long flags;
 	u32 rlen;
-	int err, tport;
+	int err, tport, idx;
 
 	while (skb->len >= NLMSG_SPACE(0)) {
 		err = 0;
@@ -127,14 +128,15 @@ scsi_nl_rcv_msg(struct sk_buff *skb)
 		spin_lock_irqsave(&scsi_nl_lock, flags);
 
 		tport = hdr->transport;
+		idx = array_index_nospec(tport, SCSI_NL_MAX_TRANSPORTS);
 		if ((tport < SCSI_NL_MAX_TRANSPORTS) &&
-		    !(transports[tport].flags & HANDLER_DELETING) &&
-		    (transports[tport].msg_handler)) {
-			transports[tport].refcnt++;
+		    !(transports[idx].flags & HANDLER_DELETING) &&
+		    (transports[idx].msg_handler)) {
+			transports[idx].refcnt++;
 			spin_unlock_irqrestore(&scsi_nl_lock, flags);
-			err = transports[tport].msg_handler(skb);
+			err = transports[idx].msg_handler(skb);
 			spin_lock_irqsave(&scsi_nl_lock, flags);
-			transports[tport].refcnt--;
+			transports[idx].refcnt--;
 		} else
 			err = -ENOENT;
 

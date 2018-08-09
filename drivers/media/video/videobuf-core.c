@@ -20,6 +20,7 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/interrupt.h>
+#include <linux/nospec.h>
 
 #include <media/videobuf-core.h>
 
@@ -500,6 +501,7 @@ EXPORT_SYMBOL_GPL(videobuf_reqbufs);
 int videobuf_querybuf(struct videobuf_queue *q, struct v4l2_buffer *b)
 {
 	int ret = -EINVAL;
+	u32 index;
 
 	videobuf_queue_lock(q);
 	if (unlikely(b->type != q->type)) {
@@ -510,12 +512,14 @@ int videobuf_querybuf(struct videobuf_queue *q, struct v4l2_buffer *b)
 		dprintk(1, "querybuf: index out of range.\n");
 		goto done;
 	}
-	if (unlikely(NULL == q->bufs[b->index])) {
+	index = array_index_nospec(b->index, VIDEO_MAX_FRAME);
+
+	if (unlikely(NULL == q->bufs[index])) {
 		dprintk(1, "querybuf: buffer is null.\n");
 		goto done;
 	}
 
-	videobuf_status(q, b, q->bufs[b->index], q->type);
+	videobuf_status(q, b, q->bufs[index], q->type);
 
 	ret = 0;
 done:
@@ -530,6 +534,7 @@ int videobuf_qbuf(struct videobuf_queue *q, struct v4l2_buffer *b)
 	enum v4l2_field field;
 	unsigned long flags = 0;
 	int retval;
+	u32 index;
 
 	MAGIC_CHECK(q->int_ops->magic, MAGIC_QTYPE_OPS);
 
@@ -551,7 +556,9 @@ int videobuf_qbuf(struct videobuf_queue *q, struct v4l2_buffer *b)
 		dprintk(1, "qbuf: index out of range.\n");
 		goto done;
 	}
-	buf = q->bufs[b->index];
+	index = array_index_nospec(b->index, VIDEO_MAX_FRAME);
+
+	buf = q->bufs[index];
 	if (NULL == buf) {
 		dprintk(1, "qbuf: buffer is null.\n");
 		goto done;

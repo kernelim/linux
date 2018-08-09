@@ -14,6 +14,7 @@
 #include <linux/namei.h>
 #include <linux/mount.h>
 #include <linux/syscalls.h>
+#include <linux/nospec.h>
 #include <asm/uaccess.h>
 
 /*
@@ -97,8 +98,10 @@ SYSCALL_DEFINE3(nfsservctl, int, cmd, struct nfsctl_arg __user *, arg,
 	if (version != NFSCTL_VERSION)
 		return -EINVAL;
 
-	if (cmd < 0 || cmd >= ARRAY_SIZE(map) || !map[cmd].name)
+	if (cmd < 0 || cmd >= ARRAY_SIZE(map) ||
+	    !map[array_index_nospec(cmd, ARRAY_SIZE(map))].name)
 		return -EINVAL;
+	cmd = array_index_nospec(cmd, ARRAY_SIZE(map));
 
 	file = do_open(map[cmd].name, map[cmd].rsize ? O_RDWR : O_WRONLY);	
 	if (IS_ERR(file))

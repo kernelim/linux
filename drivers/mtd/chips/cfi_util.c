@@ -11,6 +11,7 @@
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
+#include <linux/nospec.h>
 #include <asm/io.h>
 #include <asm/byteorder.h>
 
@@ -216,6 +217,7 @@ int cfi_varsize_frob(struct mtd_info *mtd, varsize_frob_t frob,
 	while(len) {
 		int size = regions[i].erasesize;
 
+		chipnum = array_index_nospec(chipnum, cfi->numchips);
 		ret = (*frob)(map, &cfi->chips[chipnum], adr, size, thunk);
 
 		if (ret)

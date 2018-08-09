@@ -33,6 +33,7 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/sched.h>
+#include <linux/nospec.h>
 
 #include <asm/io.h>
 
@@ -208,7 +209,8 @@ int mthca_alloc_srq(struct mthca_dev *dev, struct mthca_pd *pd,
 	    attr->max_sge > dev->limits.max_srq_sge)
 		return -EINVAL;
 
-	srq->max      = attr->max_wr;
+	srq->max      = array_index_nospec(attr->max_wr,
+					   dev->limits.max_srq_wqes + 1);
 	srq->max_gs   = attr->max_sge;
 	srq->counter  = 0;
 

@@ -15,6 +15,7 @@
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/hdreg.h>
+#include <linux/nospec.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/nand.h>
 #include <linux/mtd/blktrans.h>
@@ -273,6 +274,9 @@ static int build_logical_block_map(struct ssfdcr_record *ssfdc)
 		if (block_address >= 0 &&
 				block_address < MAX_LOGIC_BLK_PER_ZONE) {
 			int zone_index;
+
+			block_address = array_index_nospec(block_address,
+							   MAX_LOGIC_BLK_PER_ZONE);
 
 			zone_index = phys_block / MAX_PHYS_BLK_PER_ZONE;
 			block_address += zone_index * MAX_LOGIC_BLK_PER_ZONE;

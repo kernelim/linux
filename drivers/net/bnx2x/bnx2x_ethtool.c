@@ -24,6 +24,7 @@
 #include <linux/types.h>
 #include <linux/sched.h>
 #include <linux/crc32.h>
+#include <linux/nospec.h>
 #include "bnx2x.h"
 #include "bnx2x_cmn.h"
 #include "bnx2x_dump.h"
@@ -3545,6 +3546,8 @@ static int bnx2x_set_channels(struct net_device *dev,
 		DP(BNX2X_MSG_ETHTOOL, "command parameters not supported\n");
 		return -EINVAL;
 	}
+	channels->combined_count = array_index_nospec(channels->combined_count,
+						BNX2X_MAX_RSS_COUNT(bp) + 1);
 
 	/* Check if there was a change in the active parameters */
 	if (channels->combined_count == BNX2X_NUM_ETH_QUEUES(bp)) {

@@ -36,6 +36,7 @@
 #include <linux/delay.h>
 #include <linux/fb.h>
 #include <linux/init.h>
+#include <linux/nospec.h>
 #include <linux/vga_switcheroo.h>
 
 #include <drm/drmP.h>
@@ -284,6 +285,7 @@ static void intel_crtc_fb_gamma_set(struct drm_crtc *crtc, u16 red, u16 green,
 {
 	struct intel_crtc *intel_crtc = to_intel_crtc(crtc);
 
+	regno = array_index_nospec(regno, 256);
 	intel_crtc->lut_r[regno] = red >> 8;
 	intel_crtc->lut_g[regno] = green >> 8;
 	intel_crtc->lut_b[regno] = blue >> 8;
@@ -294,6 +296,7 @@ static void intel_crtc_fb_gamma_get(struct drm_crtc *crtc, u16 *red, u16 *green,
 {
 	struct intel_crtc *intel_crtc = to_intel_crtc(crtc);
 
+	regno = array_index_nospec(regno, 256);
 	*red = intel_crtc->lut_r[regno] << 8;
 	*green = intel_crtc->lut_g[regno] << 8;
 	*blue = intel_crtc->lut_b[regno] << 8;

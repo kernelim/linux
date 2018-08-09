@@ -91,6 +91,7 @@
 #include <linux/syscalls.h>
 #include <linux/ctype.h>
 #include <linux/mm_inline.h>
+#include <linux/nospec.h>
 
 #include <asm/tlbflush.h>
 #include <asm/uaccess.h>
@@ -1202,6 +1203,7 @@ static int get_nodes(nodemask_t *nodes, const unsigned long __user *nmask,
 	unsigned long k;
 	unsigned long nlongs;
 	unsigned long endmask;
+	unsigned long idx;
 
 	--maxnode;
 	nodes_clear(*nodes);
@@ -1237,7 +1239,9 @@ static int get_nodes(nodemask_t *nodes, const unsigned long __user *nmask,
 
 	if (copy_from_user(nodes_addr(*nodes), nmask, nlongs*sizeof(unsigned long)))
 		return -EFAULT;
-	nodes_addr(*nodes)[nlongs-1] &= endmask;
+
+	idx = array_index_nospec(nlongs - 1, BITS_TO_LONGS(MAX_NUMNODES));
+	nodes_addr(*nodes)[idx] &= endmask;
 	return 0;
 }
 

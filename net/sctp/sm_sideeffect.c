@@ -939,6 +939,7 @@ static void sctp_cmd_process_fwdtsn(struct sctp_ulpq *ulpq,
 	struct sctp_fwdtsn_skip *skip;
 	/* Walk through all the skipped SSNs */
 	sctp_walk_fwdtsn(skip, chunk) {
+		barrier_nospec();
 		sctp_ulpq_skip(ulpq, ntohs(skip->stream), ntohs(skip->ssn));
 	}
 

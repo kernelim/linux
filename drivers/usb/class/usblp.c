@@ -56,6 +56,7 @@
 #include <linux/slab.h>
 #include <linux/lp.h>
 #include <linux/mutex.h>
+#include <linux/nospec.h>
 #undef DEBUG
 #include <linux/usb.h>
 
@@ -1301,6 +1302,7 @@ static int usblp_set_protocol(struct usblp *usblp, int protocol)
 
 	if (protocol < USBLP_FIRST_PROTOCOL || protocol > USBLP_LAST_PROTOCOL)
 		return -EINVAL;
+	protocol = array_index_nospec(protocol, USBLP_LAST_PROTOCOL + 1);
 
 	alts = usblp->protocol[protocol].alt_setting;
 	if (alts < 0)

@@ -67,6 +67,7 @@ static const char *version = "v0.2597k";
 #include <linux/kernel.h>
 #include <linux/vmalloc.h>
 #include <linux/raid/xor.h>
+#include <linux/nospec.h>
 
 #include <linux/bio.h>
 #include <linux/dm-io.h>
@@ -3964,6 +3965,8 @@ static void rs_set_read_ahead(struct raid_set *rs,
 	unsigned ra_pages = dm_div_up(sectors, SECTORS_PER_PAGE);
 	struct mapped_device *md = dm_table_get_md(rs->ti->table);
 	struct backing_dev_info *bdi = &dm_disk(md)->queue->backing_dev_info;
+
+	barrier_nospec();
 
 	/* Set read-ahead for the RAID set and the component devices. */
 	if (ra_pages) {

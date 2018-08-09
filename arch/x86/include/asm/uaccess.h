@@ -119,6 +119,13 @@ extern int __get_user_4(void);
 extern int __get_user_8(void);
 extern int __get_user_bad(void);
 
+#define __uaccess_begin()
+#define __uaccess_end()
+#define __uaccess_begin_nospec()	\
+({					\
+	barrier_nospec();		\
+})
+
 #define __get_user_x(size, ret, x, ptr)		      \
 	asm volatile("call __get_user_" #size	      \
 		     : "=a" (ret), "=d" (x)	      \
@@ -176,7 +183,7 @@ extern int __get_user_bad(void);
 		break;							\
 	}								\
 	(x) = (__typeof__(*(ptr)))__val_gu;				\
-	__ret_gu;							\
+	__builtin_expect(__ret_gu, 0);					\
 })
 
 #define __put_user_x(size, x, ptr, __ret_pu)			\
@@ -271,7 +278,7 @@ extern void __put_user_8(void);
 		__put_user_x(X, __pu_val, ptr, __ret_pu);	\
 		break;						\
 	}							\
-	__ret_pu;						\
+	__builtin_expect(__ret_pu, 0);				\
 })
 
 #define __put_user_size(x, ptr, size, retval, errret)			\
@@ -297,6 +304,10 @@ do {									\
 	}								\
 } while (0)
 
+/*
+ * This doesn't do __uaccess_begin/end - the exception handling
+ * around it must do that.
+ */
 #define __put_user_size_ex(x, ptr, size)				\
 do {									\
 	__chk_user_ptr(ptr);						\
@@ -337,7 +348,7 @@ do {									\
 	if (unlikely(__copy_to_user_ll(ptr, &__pus_tmp,		\
 				       sizeof(*(ptr))) != 0))	\
 		__ret_pu = -EFAULT;				\
-	__ret_pu;						\
+	__builtin_expect(__ret_pu, 0);				\
 })
 #endif
 
@@ -385,6 +396,10 @@ do {									\
 		     : "=r" (err), ltype(x)				\
 		     : "m" (__m(addr)), "i" (errret), "0" (err))
 
+/*
+ * This doesn't do __uaccess_begin/end - the exception handling
+ * around it must do that.
+ */
 #define __get_user_size_ex(x, ptr, size)				\
 do {									\
 	__chk_user_ptr(ptr);						\
@@ -415,17 +430,21 @@ do {									\
 #define __put_user_nocheck(x, ptr, size)			\
 ({								\
 	int __pu_err;						\
+	__uaccess_begin();					\
 	__put_user_size((x), (ptr), (size), __pu_err, -EFAULT);	\
-	__pu_err;						\
+	__uaccess_end();					\
+	__builtin_expect(__pu_err, 0);				\
 })
 
 #define __get_user_nocheck(x, ptr, size)				\
 ({									\
 	int __gu_err;							\
 	unsigned long __gu_val;						\
+	__uaccess_begin_nospec();					\
 	__get_user_size(__gu_val, (ptr), (size), __gu_err, -EFAULT);	\
+	__uaccess_end();						\
 	(x) = (__force __typeof__(*(ptr)))__gu_val;			\
-	__gu_err;							\
+	__builtin_expect(__gu_err, 0);					\
 })
 
 /* FIXME: this hack is definitely wrong -AK */
@@ -460,9 +479,16 @@ struct __large_struct { unsigned long buf[100]; };
 #define uaccess_try	do {						\
 	int prev_err = current_thread_info()->uaccess_err;		\
 	current_thread_info()->uaccess_err = 0;				\
+	__uaccess_begin();						\
 	barrier();
 
+#define uaccess_try_nospec do {						\
+	int prev_err = current_thread_info()->uaccess_err;		\
+	current_thread_info()->uaccess_err = 0;				\
+	__uaccess_begin_nospec();					\
+
 #define uaccess_catch(err)						\
+	__uaccess_end();						\
 	(err) |= current_thread_info()->uaccess_err;			\
 	current_thread_info()->uaccess_err = prev_err;			\
 } while (0)
@@ -524,7 +550,7 @@ struct __large_struct { unsigned long buf[100]; };
  *	get_user_ex(...);
  * } get_user_catch(err)
  */
-#define get_user_try		uaccess_try
+#define get_user_try		uaccess_try_nospec
 #define get_user_catch(err)	uaccess_catch(err)
 
 #define get_user_ex(x, ptr)	do {					\

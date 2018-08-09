@@ -446,7 +446,7 @@ void spec_ctrl_init(void)
 void spec_ctrl_rescan_cpuid(void)
 {
 	enum spectre_v2_mitigation old_mode;
-	bool old_ibrs, old_ibpb, old_ssbd;
+	bool old_ibrs, old_ibpb, old_ssbd, old_l1df;
 	bool ssbd_changed;
 	int cpu;
 
@@ -459,10 +459,18 @@ void spec_ctrl_rescan_cpuid(void)
 		old_ibrs = boot_cpu_has(X86_FEATURE_IBRS);
 		old_ibpb = boot_cpu_has(X86_FEATURE_IBPB);
 		old_ssbd = boot_cpu_has(X86_FEATURE_SSBD);
+		old_l1df = boot_cpu_has(X86_FEATURE_FLUSH_L1D);
 		old_mode = spectre_v2_get_mitigation();
 
 		/* detect spec ctrl related cpuid additions */
 		get_cpu_cap(&boot_cpu_data);
+
+		/*
+		 * Populate the FLUSH_L1D cap bit to each CPU if it changes.
+		 */
+		if (!old_l1df && boot_cpu_has(X86_FEATURE_FLUSH_L1D))
+			for_each_online_cpu(cpu)
+				set_cpu_cap(&cpu_data(cpu), X86_FEATURE_FLUSH_L1D);
 
 		/* if there were no spec ctrl related changes, we're done */
 		ssbd_changed = (old_ssbd != boot_cpu_has(X86_FEATURE_SSBD));

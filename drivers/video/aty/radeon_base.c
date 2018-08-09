@@ -70,6 +70,7 @@
 #include <linux/pci.h>
 #include <linux/vmalloc.h>
 #include <linux/device.h>
+#include <linux/nospec.h>
 
 #include <asm/io.h>
 #include <linux/uaccess.h>
@@ -1062,6 +1063,7 @@ static int radeon_setcolreg (unsigned regno, unsigned red, unsigned green,
 
 	if (regno > 255)
 		return -EINVAL;
+	regno = array_index_nospec(regno, 256);
 
 	red >>= 8;
 	green >>= 8;
@@ -1088,6 +1090,7 @@ static int radeon_setcolreg (unsigned regno, unsigned red, unsigned green,
 			 * below
 			 */
 			if (rinfo->depth == 16) {
+				regno = array_index_nospec(regno, 64);
 		                OUTREG(PALETTE_INDEX, pindex>>1);
 	       	         	OUTREG(PALETTE_DATA,
 				       (rinfo->palette[regno>>1].red << 16) |
@@ -1105,6 +1108,7 @@ static int radeon_setcolreg (unsigned regno, unsigned red, unsigned green,
 	}
  	if (regno < 16) {
 		u32 *pal = rinfo->info->pseudo_palette;
+		regno = array_index_nospec(regno, 16);
         	switch (rinfo->depth) {
 		case 15:
 			pal[regno] = (regno << 10) | (regno << 5) | regno;

@@ -26,6 +26,7 @@
 #include <linux/module.h>
 #include <linux/platform_data/simplefb.h>
 #include <linux/platform_device.h>
+#include <linux/nospec.h>
 
 static struct fb_fix_screeninfo simplefb_fix = {
 	.id		= "simple",
@@ -52,6 +53,7 @@ static int simplefb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
 
 	if (regno >= 16)
 		return -EINVAL;
+	regno = array_index_nospec(regno, 16);
 
 	value = (cr << info->var.red.offset) |
 		(cg << info->var.green.offset) |

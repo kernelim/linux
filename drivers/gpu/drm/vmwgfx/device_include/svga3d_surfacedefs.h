@@ -27,6 +27,7 @@
 
 #ifdef __KERNEL__
 
+#include <linux/nospec.h>
 #include <drm/vmwgfx_drm.h>
 #define surf_size_struct struct drm_vmw_size
 
@@ -948,8 +949,11 @@ static inline u32 clamped_umul32(u32 a, u32 b)
 static inline const struct svga3d_surface_desc *
 svga3dsurface_get_desc(SVGA3dSurfaceFormat format)
 {
-	if (format < ARRAY_SIZE(svga3d_surface_descs))
+	if (format < ARRAY_SIZE(svga3d_surface_descs)) {
+		format = array_index_nospec(format,
+					    ARRAY_SIZE(svga3d_surface_descs));
 		return &svga3d_surface_descs[format];
+	}
 
 	return &svga3d_surface_descs[SVGA3D_FORMAT_INVALID];
 }

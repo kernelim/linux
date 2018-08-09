@@ -32,6 +32,7 @@
 #include <linux/lzo.h>
 #include <linux/string.h>
 #include <linux/vmalloc.h>
+#include <linux/nospec.h>
 
 #include "zram_drv.h"
 
@@ -539,7 +540,7 @@ out:
 /*
  * Check if request is within bounds and aligned on zram logical blocks.
  */
-static inline int valid_io_request(struct zram *zram, struct bio *bio)
+static inline int valid_io_request_nospec(struct zram *zram, struct bio *bio)
 {
 	if (unlikely(
 		(bio->bi_sector >= (zram->disksize >> SECTOR_SHIFT)) ||
@@ -548,6 +549,14 @@ static inline int valid_io_request(struct zram *zram, struct bio *bio)
 
 		return 0;
 	}
+
+#ifdef CONFIG_X86_32
+	/* can't use array_index_nospec() with 64-bit values on 32-bit */
+	barrier_nospec();
+#else
+	bio->bi_sector = array_index_nospec(bio->bi_sector,
+					    (zram->disksize >> SECTOR_SHIFT));
+#endif
 
 	/* I/O request is valid */
 	return 1;
@@ -567,7 +576,7 @@ static int zram_make_request(struct request_queue *queue, struct bio *bio)
 	if (unlikely(!zram->init_done))
 		goto error_unlock;
 
-	if (!valid_io_request(zram, bio)) {
+	if (!valid_io_request_nospec(zram, bio)) {
 		zram_stat64_inc(zram, &zram->stats.invalid_io);
 		goto error_unlock;
 	}

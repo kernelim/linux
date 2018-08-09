@@ -20,6 +20,7 @@
 #include <linux/videodev2.h>
 #include <linux/vmalloc.h>
 #include <linux/wait.h>
+#include <linux/nospec.h>
 #include <asm/atomic.h>
 
 #include "uvcvideo.h"
@@ -981,8 +982,9 @@ int uvc_query_v4l2_menu(struct uvc_video_chain *chain,
 		ret = -EINVAL;
 		goto done;
 	}
+	index = array_index_nospec(query_menu->index, mapping->menu_count);
 
-	menu_info = &mapping->menu_info[query_menu->index];
+	menu_info = &mapping->menu_info[index];
 	strlcpy(query_menu->name, menu_info->name, sizeof query_menu->name);
 
 done:
@@ -1134,6 +1136,7 @@ int uvc_ctrl_set(struct uvc_video_chain *chain,
 	s32 min;
 	s32 max;
 	int ret;
+	s32 idx;
 
 	ctrl = uvc_find_control(chain, xctrl->id, &mapping);
 	if (ctrl == NULL || (ctrl->info.flags & UVC_CONTROL_SET_CUR) == 0)
@@ -1170,7 +1173,9 @@ int uvc_ctrl_set(struct uvc_video_chain *chain,
 	case V4L2_CTRL_TYPE_MENU:
 		if (xctrl->value < 0 || xctrl->value >= mapping->menu_count)
 			return -ERANGE;
-		value = mapping->menu_info[xctrl->value].value;
+		idx = array_index_nospec(xctrl->value, mapping->menu_count);
+
+		value = mapping->menu_info[idx].value;
 		break;
 
 	default:

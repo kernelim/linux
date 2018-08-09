@@ -43,7 +43,7 @@
 #include <linux/sysfs.h>
 #include <linux/acpi.h>
 #include <linux/io.h>
-
+#include <linux/nospec.h>
 
 /* If force_addr is set to anything different from 0, we forcibly enable
    the device at the given address. */
@@ -265,8 +265,12 @@ static const u8 viaLUT[] =
    The +50 is because the temps start at -50 */
 static inline u8 TEMP_TO_REG(long val)
 {
-	return viaLUT[val <= -50000 ? 0 : val >= 110000 ? 160 :
-		      (val < 0 ? val - 500 : val + 500) / 1000 + 50];
+	unsigned long idx;
+
+	idx = array_index_nospec(val <= -50000 ? 0 : val >= 110000 ? 160 :
+				 (val < 0 ? val - 500 : val + 500) / 1000 + 50,
+				 ARRAY_SIZE(viaLUT));
+	return viaLUT[idx];
 }
 
 /* for 8-bit temperature hyst and over registers */

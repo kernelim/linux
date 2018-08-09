@@ -39,6 +39,7 @@
 #include <linux/ip.h>
 #include <linux/tcp.h>
 #include <linux/if_vlan.h>
+#include <linux/nospec.h>
 
 #include <net/neighbour.h>
 #include <net/netevent.h>
@@ -3895,7 +3896,7 @@ static void process_work(struct work_struct *work)
 	while ((skb = skb_dequeue(&rxq))) {
 		rpl = cplhdr(skb);
 		dev = *((struct c4iw_dev **) (skb->cb + sizeof(void *)));
-		opcode = rpl->ot.opcode;
+		opcode = array_index_nospec(rpl->ot.opcode, NUM_CPL_CMDS);
 
 		BUG_ON(!work_handlers[opcode]);
 		ret = work_handlers[opcode](dev, skb);

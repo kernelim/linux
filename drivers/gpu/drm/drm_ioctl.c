@@ -36,6 +36,7 @@
 
 #include <linux/pci.h>
 #include <linux/export.h>
+#include <linux/nospec.h>
 #ifdef CONFIG_X86
 #include <asm/mtrr.h>
 #endif
@@ -105,6 +106,7 @@ static int drm_setunique(struct drm_device *dev, void *data,
 
 	if (!u->unique_len || u->unique_len > 1024)
 		return -EINVAL;
+	u->unique_len = array_index_nospec(u->unique_len, 1025);
 
 	if (drm_core_check_feature(dev, DRIVER_MODESET))
 		return 0;
@@ -714,13 +716,19 @@ long drm_ioctl(struct file *filp,
 
 	if (is_driver_ioctl) {
 		/* driver ioctl */
-		if (nr - DRM_COMMAND_BASE >= dev->driver->num_ioctls)
+		unsigned int idx = nr - DRM_COMMAND_BASE;
+
+		if (idx >= dev->driver->num_ioctls)
 			goto err_i1;
-		ioctl = &dev->driver->ioctls[nr - DRM_COMMAND_BASE];
+		idx = array_index_nospec(idx, dev->driver->num_ioctls);
+
+		ioctl = &dev->driver->ioctls[idx];
 	} else {
 		/* core ioctl */
 		if (nr >= DRM_CORE_IOCTL_COUNT)
 			goto err_i1;
+		nr = array_index_nospec(nr, DRM_CORE_IOCTL_COUNT);
+
 		ioctl = &drm_ioctls[nr];
 	}
 
@@ -822,6 +830,7 @@ bool drm_ioctl_flags(unsigned int nr, unsigned int *flags)
 
 	if (nr >= DRM_CORE_IOCTL_COUNT)
 		return false;
+	nr = array_index_nospec(nr, DRM_CORE_IOCTL_COUNT);
 
 	*flags = drm_ioctls[nr].flags;
 	return true;

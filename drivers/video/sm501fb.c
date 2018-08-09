@@ -29,6 +29,7 @@
 #include <linux/platform_device.h>
 #include <linux/clk.h>
 #include <linux/console.h>
+#include <linux/nospec.h>
 
 #include <asm/io.h>
 #include <asm/uaccess.h>
@@ -908,6 +909,8 @@ static int sm501fb_setcolreg(unsigned regno,
 		if (regno < 16) {
 			u32 *pal = par->pseudo_palette;
 
+			regno = array_index_nospec(regno, 16);
+
 			val  = chan_to_field(red,   &info->var.red);
 			val |= chan_to_field(green, &info->var.green);
 			val |= chan_to_field(blue,  &info->var.blue);
@@ -918,6 +921,7 @@ static int sm501fb_setcolreg(unsigned regno,
 
 	case FB_VISUAL_PSEUDOCOLOR:
 		if (regno < 256) {
+			regno = array_index_nospec(regno, 256);
 			val = (red >> 8) << 16;
 			val |= (green >> 8) << 8;
 			val |= blue >> 8;

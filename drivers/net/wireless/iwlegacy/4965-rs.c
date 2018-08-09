@@ -612,15 +612,16 @@ static int
 il4965_rs_toggle_antenna(u32 valid_ant, u32 *rate_n_flags,
 			 struct il_scale_tbl_info *tbl)
 {
-	u8 new_ant_type;
+	u8 ant_type, new_ant_type;
 
 	if (!tbl->ant_type || tbl->ant_type > ANT_ABC)
 		return 0;
+	ant_type = array_index_nospec(tbl->ant_type, ANT_ABC + 1);
 
 	if (!il4965_rs_is_valid_ant(valid_ant, tbl->ant_type))
 		return 0;
 
-	new_ant_type = ant_toggle_lookup[tbl->ant_type];
+	new_ant_type = ant_toggle_lookup[ant_type];
 
 	while (new_ant_type != tbl->ant_type &&
 	       !il4965_rs_is_valid_ant(valid_ant, new_ant_type))

@@ -54,6 +54,7 @@
 #include <linux/kthread.h>
 #include <linux/freezer.h>
 #include <linux/videodev2.h>
+#include <linux/nospec.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-ioctl.h>
 #include <media/msp3400.h>
@@ -265,6 +266,7 @@ void msp_set_scart(struct i2c_client *client, int in, int out)
 	state->in_scart = in;
 
 	if (in >= 0 && in <= 7 && out >= 0 && out <= 2) {
+		in = array_index_nospec(in, 8);
 		if (-1 == scarts[out][in + 1])
 			return;
 

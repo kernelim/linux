@@ -47,6 +47,7 @@
 #include <linux/slab.h>
 #include <linux/ctype.h>
 #include <linux/kernel.h>
+#include <linux/nospec.h>
 
 #include "adf_accel_devices.h"
 #include "adf_common_drv.h"
@@ -260,6 +261,8 @@ static int qat_uclo_fetch_initmem_ae(struct icp_qat_fw_loader_handle *handle,
 		pr_err("QAT: ae %d out of range\n", *ae);
 		return -EINVAL;
 	}
+	*ae = array_index_nospec(*ae, ICP_QAT_UCLO_MAX_AE);
+
 	return 0;
 }
 

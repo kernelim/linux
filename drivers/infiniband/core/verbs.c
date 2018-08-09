@@ -40,6 +40,7 @@
 #include <linux/err.h>
 #include <linux/string.h>
 #include <linux/slab.h>
+#include <linux/nospec.h>
 
 #include <rdma/ib_verbs.h>
 #include <rdma/ib_cache.h>
@@ -834,6 +835,9 @@ int ib_modify_qp_is_ok(enum ib_qp_state cur_state, enum ib_qp_state next_state,
 	if (cur_state  < 0 || cur_state  > IB_QPS_ERR ||
 	    next_state < 0 || next_state > IB_QPS_ERR)
 		return 0;
+
+	cur_state  = array_index_nospec(cur_state,  IB_QPS_ERR + 1);
+	next_state = array_index_nospec(next_state, IB_QPS_ERR + 1);
 
 	if (mask & IB_QP_CUR_STATE  &&
 	    cur_state != IB_QPS_RTR && cur_state != IB_QPS_RTS &&

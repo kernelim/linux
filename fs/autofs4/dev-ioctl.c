@@ -22,6 +22,7 @@
 #include <linux/magic.h>
 #include <linux/dcache.h>
 #include <linux/uaccess.h>
+#include <linux/nospec.h>
 
 #include "autofs_i.h"
 
@@ -630,7 +631,8 @@ static ioctl_fn lookup_dev_ioctl(unsigned int cmd)
 	};
 	unsigned int idx = cmd_idx(cmd);
 
-	return (idx >= ARRAY_SIZE(_ioctls)) ? NULL : _ioctls[idx].fn;
+	return (idx >= ARRAY_SIZE(_ioctls)) ? NULL :
+		_ioctls[array_index_nospec(idx, ARRAY_SIZE(_ioctls))].fn;
 }
 
 /* ioctl dispatcher */

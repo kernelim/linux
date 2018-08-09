@@ -37,6 +37,7 @@
 #include <asm/unaligned.h>
 #include <linux/filter.h>
 #include <linux/if_vlan.h>
+#include <linux/nospec.h>
 
 /* No hurry in this branch */
 static void *__load_pointer(struct sk_buff *skb, int k)
@@ -408,6 +409,7 @@ int sk_chk_filter(struct sock_filter *filter, int flen)
 {
 	struct sock_filter *ftest;
 	int pc;
+	unsigned int idx;
 
 	if (flen == 0 || flen > BPF_MAXINSNS)
 		return -EINVAL;
@@ -497,7 +499,8 @@ int sk_chk_filter(struct sock_filter *filter, int flen)
 		}
 	}
 
-	return (BPF_CLASS(filter[flen - 1].code) == BPF_RET) ? 0 : -EINVAL;
+	idx = array_index_nospec(flen - 1, BPF_MAXINSNS);
+	return (BPF_CLASS(filter[idx].code) == BPF_RET) ? 0 : -EINVAL;
 }
 EXPORT_SYMBOL(sk_chk_filter);
 

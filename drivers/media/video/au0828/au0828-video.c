@@ -34,6 +34,7 @@
 #include <linux/device.h>
 #include <linux/suspend.h>
 #include <linux/version.h>
+#include <linux/nospec.h>
 #include <media/v4l2-common.h>
 #include <media/v4l2-ioctl.h>
 #include <media/v4l2-chip-ident.h>
@@ -1369,6 +1370,8 @@ static int vidioc_enum_input(struct file *file, void *priv,
 
 	if (tmp >= AU0828_MAX_INPUT)
 		return -EINVAL;
+	tmp = array_index_nospec(tmp, AU0828_MAX_INPUT);
+
 	if (AUVI_INPUT(tmp).type == 0)
 		return -EINVAL;
 
@@ -1403,6 +1406,8 @@ static int vidioc_s_input(struct file *file, void *priv, unsigned int index)
 		index);
 	if (index >= AU0828_MAX_INPUT)
 		return -EINVAL;
+	index = array_index_nospec(index, AU0828_MAX_INPUT);
+
 	if (AUVI_INPUT(index).type == 0)
 		return -EINVAL;
 	dev->ctrl_input = index;

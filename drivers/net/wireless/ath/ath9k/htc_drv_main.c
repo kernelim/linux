@@ -14,6 +14,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <linux/nospec.h>
 #include "htc.h"
 
 /*************/
@@ -716,6 +717,7 @@ static int ath9k_htc_tx_aggr_oper(struct ath9k_htc_priv *priv,
 
 	if (tid >= ATH9K_HTC_MAX_TID)
 		return -EINVAL;
+	tid = array_index_nospec(tid, ATH9K_HTC_MAX_TID);
 
 	memset(&aggr, 0, sizeof(struct ath9k_htc_target_aggr));
 	ista = (struct ath9k_htc_sta *) sta->drv_priv;
@@ -1687,6 +1689,7 @@ static int ath9k_htc_ampdu_action(struct ieee80211_hw *hw,
 	case IEEE80211_AMPDU_TX_OPERATIONAL:
 		ista = (struct ath9k_htc_sta *) sta->drv_priv;
 		spin_lock_bh(&priv->tx.tx_lock);
+		tid = array_index_nospec(tid, ATH9K_HTC_MAX_TID);
 		ista->tid_state[tid] = AGGR_OPERATIONAL;
 		spin_unlock_bh(&priv->tx.tx_lock);
 		break;

@@ -32,6 +32,7 @@
 #include <linux/mm.h>
 #include <linux/inet.h>
 #include <linux/netdevice.h>
+#include <linux/nospec.h>
 #include <net/snmp.h>
 #include <net/ip.h>
 #include <net/ipv6.h>
@@ -382,6 +383,7 @@ void ping_err(struct sk_buff *skb, u32 info)
 		}
 		err = EHOSTUNREACH;
 		if (code <= NR_ICMP_UNREACH) {
+			code = array_index_nospec(code, NR_ICMP_UNREACH + 1);
 			harderr = icmp_err_convert[code].fatal;
 			err = icmp_err_convert[code].errno;
 		}
@@ -496,6 +498,7 @@ static int ping_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 		return -EFAULT;
 	if (!ping_supported(user_icmph.type, user_icmph.code))
 		return -EINVAL;
+	user_icmph.type = ICMP_ECHO; /* nospec */
 
 	/*
 	 *	Get and verify the address.

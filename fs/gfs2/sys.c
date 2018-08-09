@@ -17,6 +17,7 @@
 #include <asm/uaccess.h>
 #include <linux/gfs2_ondisk.h>
 #include <linux/genhd.h>
+#include <linux/nospec.h>
 
 #include "gfs2.h"
 #include "incore.h"
@@ -234,6 +235,8 @@ static ssize_t demote_rq_store(struct gfs2_sbd *sdp, const char *buf, size_t len
 
 	if (gltype > LM_TYPE_JOURNAL)
 		return -EINVAL;
+	gltype = array_index_nospec(gltype, LM_TYPE_JOURNAL + 1);
+
 	glops = gfs2_glops_list[gltype];
 	if (glops == NULL)
 		return -EINVAL;

@@ -37,6 +37,7 @@
 #include <linux/errno.h>
 #include <linux/slab.h>
 #include <linux/workqueue.h>
+#include <linux/nospec.h>
 
 #include <rdma/ib_cache.h>
 
@@ -83,13 +84,16 @@ int ib_get_cached_gid(struct ib_device *device,
 	struct ib_gid_cache *cache;
 	unsigned long flags;
 	int i, ret = 0;
+	u8 idx;
 
 	if (port_num < start_port(device) || port_num > end_port(device))
 		return -EINVAL;
 
 	read_lock_irqsave(&device->cache.lock, flags);
 
-	cache = device->cache.gid_cache[port_num - start_port(device)];
+	idx = array_index_nospec(port_num - start_port(device),
+				 end_port(device) - start_port(device) + 1);
+	cache = device->cache.gid_cache[idx];
 
 	if (index < 0 || index >= cache->table_len) {
 		ret = -EINVAL;
@@ -160,13 +164,16 @@ int ib_get_cached_pkey(struct ib_device *device,
 	struct ib_pkey_cache *cache;
 	unsigned long flags;
 	int i, ret = 0;
+	u8 idx;
 
 	if (port_num < start_port(device) || port_num > end_port(device))
 		return -EINVAL;
 
 	read_lock_irqsave(&device->cache.lock, flags);
 
-	cache = device->cache.pkey_cache[port_num - start_port(device)];
+	idx = array_index_nospec(port_num - start_port(device),
+				 end_port(device) - start_port(device) + 1);
+	cache = device->cache.pkey_cache[idx];
 
 	if (index < 0 || index >= cache->table_len) {
 		ret = -EINVAL;
@@ -198,13 +205,16 @@ int ib_find_cached_pkey(struct ib_device *device,
 	int i;
 	int ret = -ENOENT;
 	int partial_ix = -1;
+	u8 idx;
 
 	if (port_num < start_port(device) || port_num > end_port(device))
 		return -EINVAL;
 
 	read_lock_irqsave(&device->cache.lock, flags);
 
-	cache = device->cache.pkey_cache[port_num - start_port(device)];
+	idx = array_index_nospec(port_num - start_port(device),
+				 end_port(device) - start_port(device) + 1);
+	cache = device->cache.pkey_cache[idx];
 
 	*index = -1;
 
@@ -238,13 +248,16 @@ int ib_find_exact_cached_pkey(struct ib_device *device,
 	unsigned long flags;
 	int i;
 	int ret = -ENOENT;
+	u8 idx;
 
 	if (port_num < start_port(device) || port_num > end_port(device))
 		return -EINVAL;
 
 	read_lock_irqsave(&device->cache.lock, flags);
 
-	cache = device->cache.pkey_cache[port_num - start_port(device)];
+	idx = array_index_nospec(port_num - start_port(device),
+				 end_port(device) - start_port(device) + 1);
+	cache = device->cache.pkey_cache[idx];
 
 	*index = -1;
 
@@ -267,12 +280,15 @@ int ib_get_cached_lmc(struct ib_device *device,
 {
 	unsigned long flags;
 	int ret = 0;
+	u8 idx;
 
 	if (port_num < start_port(device) || port_num > end_port(device))
 		return -EINVAL;
 
 	read_lock_irqsave(&device->cache.lock, flags);
-	*lmc = device->cache.lmc_cache[port_num - start_port(device)];
+	idx = array_index_nospec(port_num - start_port(device),
+				 end_port(device) - start_port(device) + 1);
+	*lmc = device->cache.lmc_cache[idx];
 	read_unlock_irqrestore(&device->cache.lock, flags);
 
 	return ret;
@@ -289,6 +305,7 @@ static void ib_cache_update(struct ib_device *device,
 	int                        ret;
 	union ib_gid		   gid, empty_gid;
 	u16			   pkey;
+	u8 idx;
 
 	tprops = kmalloc(sizeof *tprops, GFP_KERNEL);
 	if (!tprops)
@@ -379,13 +396,16 @@ static void ib_cache_update(struct ib_device *device,
 
 	write_lock_irq(&device->cache.lock);
 
-	old_pkey_cache = device->cache.pkey_cache[port - start_port(device)];
-	old_gid_cache  = device->cache.gid_cache [port - start_port(device)];
+	idx = array_index_nospec(port - start_port(device),
+				 end_port(device) - start_port(device) + 1);
 
-	device->cache.pkey_cache[port - start_port(device)] = pkey_cache;
-	device->cache.gid_cache [port - start_port(device)] = gid_cache;
+	old_pkey_cache = device->cache.pkey_cache[idx];
+	old_gid_cache  = device->cache.gid_cache [idx];
 
-	device->cache.lmc_cache[port - start_port(device)] = tprops->lmc;
+	device->cache.pkey_cache[idx] = pkey_cache;
+	device->cache.gid_cache [idx] = gid_cache;
+
+	device->cache.lmc_cache[idx] = tprops->lmc;
 
 	write_unlock_irq(&device->cache.lock);
 

@@ -19,6 +19,7 @@
  *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
+#include <linux/nospec.h>
 #include "saa7164.h"
 
 static struct saa7164_tvnorm saa7164_tvnorms[] = {
@@ -215,14 +216,16 @@ static int vidioc_enum_input(struct file *file, void *priv,
 	struct v4l2_input *i)
 {
 	int n;
+	u32 index;
 
 	char *inputs[] = { "tuner", "composite", "svideo", "aux",
 		"composite 2", "svideo 2", "aux 2" };
 
 	if (i->index >= 7)
 		return -EINVAL;
+	index = array_index_nospec(i->index, 7);
 
-	strcpy(i->name, inputs[i->index]);
+	strcpy(i->name, inputs[index]);
 
 	if (i->index == 0)
 		i->type = V4L2_INPUT_TYPE_TUNER;

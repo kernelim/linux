@@ -34,6 +34,7 @@
 #include <linux/ip.h>
 #include <linux/module.h>
 #include <linux/udp.h>
+#include <linux/nospec.h>
 
 /*
  *NOTICE!!!: This file will be very big, we should
@@ -1279,6 +1280,7 @@ bool rtl_action_proc(struct ieee80211_hw *hw, struct sk_buff *skb, u8 is_tx)
 				  le16_to_cpu(mgmt->u.action.u.addba_req.capab);
 				tid = (capab &
 				       IEEE80211_ADDBA_PARAM_TID_MASK) >> 2;
+				tid = array_index_nospec(tid, MAX_TID_COUNT);
 				tid_data = &sta_entry->tids[tid];
 				if (tid_data->agg.rx_agg_state ==
 				    RTL_RX_AGG_START)
@@ -1421,6 +1423,7 @@ int rtl_tx_agg_start(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 
 	if (unlikely(tid >= MAX_TID_COUNT))
 		return -EINVAL;
+	tid = array_index_nospec(tid, MAX_TID_COUNT);
 
 	sta_entry = (struct rtl_sta_info *)sta->drv_priv;
 	if (!sta_entry)
@@ -1453,6 +1456,7 @@ int rtl_tx_agg_stop(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 
 	if (unlikely(tid >= MAX_TID_COUNT))
 		return -EINVAL;
+	tid = array_index_nospec(tid, MAX_TID_COUNT);
 
 	sta_entry = (struct rtl_sta_info *)sta->drv_priv;
 	tid_data = &sta_entry->tids[tid];
@@ -1474,6 +1478,7 @@ int rtl_rx_agg_start(struct ieee80211_hw *hw,
 
 	if (unlikely(tid >= MAX_TID_COUNT))
 		return -EINVAL;
+	tid = array_index_nospec(tid, MAX_TID_COUNT);
 
 	sta_entry = (struct rtl_sta_info *)sta->drv_priv;
 	if (!sta_entry)
@@ -1502,6 +1507,7 @@ int rtl_rx_agg_stop(struct ieee80211_hw *hw,
 
 	if (unlikely(tid >= MAX_TID_COUNT))
 		return -EINVAL;
+	tid = array_index_nospec(tid, MAX_TID_COUNT);
 
 	sta_entry = (struct rtl_sta_info *)sta->drv_priv;
 	sta_entry->tids[tid].agg.rx_agg_state = RTL_RX_AGG_STOP;
@@ -1522,6 +1528,7 @@ int rtl_tx_agg_oper(struct ieee80211_hw *hw,
 
 	if (unlikely(tid >= MAX_TID_COUNT))
 		return -EINVAL;
+	tid = array_index_nospec(tid, MAX_TID_COUNT);
 
 	sta_entry = (struct rtl_sta_info *)sta->drv_priv;
 	sta_entry->tids[tid].agg.agg_state = RTL_AGG_OPERATIONAL;

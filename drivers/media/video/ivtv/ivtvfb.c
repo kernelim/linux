@@ -43,6 +43,7 @@
 #include <linux/fb.h>
 #include <linux/ivtvfb.h>
 #include <linux/slab.h>
+#include <linux/nospec.h>
 
 #ifdef CONFIG_MTRR
 #include <asm/mtrr.h>
@@ -872,6 +873,7 @@ static int ivtvfb_setcolreg(unsigned regno, unsigned red, unsigned green,
 
 	if (regno >= info->cmap.len)
 		return -EINVAL;
+	regno = array_index_nospec(regno, info->cmap.len);
 
 	color = ((transp & 0xFF00) << 16) |((red & 0xFF00) << 8) | (green & 0xFF00) | ((blue & 0xFF00) >> 8);
 	if (info->var.bits_per_pixel <= 8) {
@@ -882,6 +884,7 @@ static int ivtvfb_setcolreg(unsigned regno, unsigned red, unsigned green,
 	}
 	if (regno >= 16)
 		return -EINVAL;
+	regno = array_index_nospec(regno, 16);
 
 	palette = info->pseudo_palette;
 	if (info->var.bits_per_pixel == 16) {

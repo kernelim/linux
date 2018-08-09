@@ -17,6 +17,7 @@
 #include <linux/cache.h>
 #include <linux/init.h>
 #include <linux/time.h>
+#include <linux/nospec.h>
 
 #include <net/icmp.h>
 #include <net/tcp.h>
@@ -883,6 +884,8 @@ static int inet_diag_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 	if (nlh->nlmsg_type >= INET_DIAG_GETSOCK_MAX ||
 	    nlmsg_len(nlh) < hdrlen)
 		return -EINVAL;
+	nlh->nlmsg_type = array_index_nospec(nlh->nlmsg_type,
+					     INET_DIAG_GETSOCK_MAX);
 
 	if (nlh->nlmsg_flags & NLM_F_DUMP) {
 		if (nlmsg_attrlen(nlh, hdrlen)) {

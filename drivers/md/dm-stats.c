@@ -9,6 +9,7 @@
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/device-mapper.h>
+#include <linux/nospec.h>
 
 #include "dm.h"
 #include "dm-stats.h"
@@ -614,6 +615,8 @@ static void __dm_stat_bio(struct dm_stat *s, unsigned long bi_rw,
 			DMCRIT("Invalid area access in region id %d", s->id);
 			return;
 		}
+		entry = array_index_nospec(entry, s->n_entries);
+
 		fragment_len = todo;
 		if (fragment_len > s->step - offset)
 			fragment_len = s->step - offset;

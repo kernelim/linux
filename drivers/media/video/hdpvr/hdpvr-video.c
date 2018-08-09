@@ -19,6 +19,7 @@
 #include <linux/mutex.h>
 #include <linux/version.h>
 #include <linux/workqueue.h>
+#include <linux/nospec.h>
 
 #include <linux/videodev2.h>
 #include <media/v4l2-dev.h>
@@ -610,6 +611,7 @@ static int vidioc_enum_input(struct file *file, void *priv,
 	n = i->index;
 	if (n >= HDPVR_VIDEO_INPUTS)
 		return -EINVAL;
+	n = array_index_nospec(n, HDPVR_VIDEO_INPUTS);
 
 	i->type = V4L2_INPUT_TYPE_CAMERA;
 
@@ -668,6 +670,7 @@ static int vidioc_enumaudio(struct file *file, void *priv,
 	n = audio->index;
 	if (n >= HDPVR_AUDIO_INPUTS)
 		return -EINVAL;
+	n = array_index_nospec(n, HDPVR_AUDIO_INPUTS);
 
 	audio->capability = V4L2_AUDCAP_STEREO;
 

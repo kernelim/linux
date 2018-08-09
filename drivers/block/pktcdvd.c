@@ -57,6 +57,7 @@
 #include <linux/miscdevice.h>
 #include <linux/freezer.h>
 #include <linux/mutex.h>
+#include <linux/nospec.h>
 #include <scsi/scsi_cmnd.h>
 #include <scsi/scsi_ioctl.h>
 #include <scsi/scsi.h>
@@ -2413,6 +2414,8 @@ static struct pktcdvd_device *pkt_find_dev_from_minor(unsigned int dev_minor)
 {
 	if (dev_minor >= MAX_WRITERS)
 		return NULL;
+	dev_minor = array_index_nospec(dev_minor, MAX_WRITERS);
+
 	return pkt_devs[dev_minor];
 }
 

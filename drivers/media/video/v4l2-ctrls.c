@@ -20,6 +20,7 @@
 
 #include <linux/ctype.h>
 #include <linux/slab.h>
+#include <linux/nospec.h>
 #include <media/v4l2-ioctl.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-ctrls.h>
@@ -721,6 +722,8 @@ static int validate_new(struct v4l2_ctrl *ctrl)
 	case V4L2_CTRL_TYPE_MENU:
 		if (val < ctrl->minimum || val > ctrl->maximum)
 			return -ERANGE;
+		val = array_index_nospec(val, ctrl->maximum + 1);
+
 		if (ctrl->qmenu[val][0] == '\0' ||
 		    (ctrl->menu_skip_mask & (1 << val)))
 			return -EINVAL;
@@ -1381,6 +1384,8 @@ int v4l2_querymenu(struct v4l2_ctrl_handler *hdl, struct v4l2_querymenu *qm)
 	if (ctrl->qmenu == NULL ||
 	    i < ctrl->minimum || i > ctrl->maximum)
 		return -EINVAL;
+	i = array_index_nospec(i, ctrl->maximum + 1);
+
 	/* Use mask to see if this menu item should be skipped */
 	if (ctrl->menu_skip_mask & (1 << i))
 		return -EINVAL;

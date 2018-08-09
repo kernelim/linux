@@ -44,6 +44,7 @@
 #include <linux/sched.h>
 #include <linux/interrupt.h>
 #include <linux/kdev_t.h>
+#include <linux/nospec.h>
 #include "bttvp.h"
 #include <media/v4l2-common.h>
 #include <media/v4l2-ioctl.h>
@@ -1127,6 +1128,7 @@ video_mux(struct bttv *btv, unsigned int input)
 
 	if (input >= bttv_tvcards[btv->c.type].video_inputs)
 		return -EINVAL;
+	input = array_index_nospec(input, bttv_tvcards[btv->c.type].video_inputs);
 
 	/* needed by RemoteVideo MX */
 	mask2 = bttv_tvcards[btv->c.type].gpiomask2;
@@ -1174,8 +1176,10 @@ audio_mux(struct bttv *btv, int input, int mute)
 
 	if (mute)
 		gpio_val = bttv_tvcards[btv->c.type].gpiomute;
-	else
+	else {
+		barrier_nospec();
 		gpio_val = bttv_tvcards[btv->c.type].gpiomux[input];
+	}
 
 	switch (btv->c.type) {
 	case BTTV_BOARD_VOODOOTV_FM:
@@ -1187,8 +1191,10 @@ audio_mux(struct bttv *btv, int input, int mute)
 		gpio_bits(bttv_tvcards[btv->c.type].gpiomask, gpio_val);
 	}
 
-	if (bttv_gpio)
+	if (bttv_gpio) {
+		barrier_nospec();
 		bttv_gpio_tracking(btv, audio_modes[mute ? 4 : input]);
+	}
 	if (in_interrupt())
 		return 0;
 
@@ -1936,10 +1942,11 @@ static int bttv_s_input(struct file *file, void *priv, unsigned int i)
 	if (unlikely(err))
 		goto err;
 
-	if (i > bttv_tvcards[btv->c.type].video_inputs) {
+	if (i >= bttv_tvcards[btv->c.type].video_inputs) {
 		err = -EINVAL;
 		goto err;
 	}
+	i = array_index_nospec(i, bttv_tvcards[btv->c.type].video_inputs);
 
 	set_input(btv, i, btv->tvnorm);
 
@@ -2246,6 +2253,7 @@ verify_window_lock		(struct bttv_fh *               fh,
 		return -EINVAL;
 	if (win->clipcount > 2048)
 		return -EINVAL;
+	win->clipcount = array_index_nospec(win->clipcount, 2049);
 
 	field = win->field;
 

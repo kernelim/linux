@@ -44,6 +44,7 @@
 #include <linux/init.h>
 #include <linux/if_arp.h>
 #include <linux/highmem.h>
+#include <linux/nospec.h>
 #include <asm/io.h>
 #include <asm/irq.h>
 #include <asm/byteorder.h>
@@ -365,11 +366,13 @@ struct ib_qp *nes_get_qp(struct ib_device *device, int qpn)
 	struct nes_vnic *nesvnic = to_nesvnic(device);
 	struct nes_device *nesdev = nesvnic->nesdev;
 	struct nes_adapter *nesadapter = nesdev->nesadapter;
+	int idx;
 
 	if ((qpn < NES_FIRST_QPN) || (qpn >= (NES_FIRST_QPN + nesadapter->max_qp)))
 		return NULL;
 
-	return &nesadapter->qp_table[qpn - NES_FIRST_QPN]->ibqp;
+	idx = array_index_nospec(qpn - NES_FIRST_QPN, nesadapter->max_qp);
+	return &nesadapter->qp_table[idx]->ibqp;
 }
 
 

@@ -22,6 +22,7 @@
 
 #include <linux/module.h>
 #include <linux/err.h>
+#include <linux/nospec.h>
 #include <asm/div64.h>
 #include "ubi.h"
 
@@ -130,6 +131,7 @@ struct ubi_volume_desc *ubi_open_volume(int ubi_num, int vol_id, int mode)
 
 	if (ubi_num < 0 || ubi_num >= UBI_MAX_DEVICES)
 		return ERR_PTR(-EINVAL);
+	ubi_num = array_index_nospec(ubi_num, UBI_MAX_DEVICES);
 
 	if (mode != UBI_READONLY && mode != UBI_READWRITE &&
 	    mode != UBI_EXCLUSIVE)
@@ -146,6 +148,7 @@ struct ubi_volume_desc *ubi_open_volume(int ubi_num, int vol_id, int mode)
 		err = -EINVAL;
 		goto out_put_ubi;
 	}
+	vol_id = array_index_nospec(vol_id, ubi->vtbl_slots);
 
 	desc = kmalloc(sizeof(struct ubi_volume_desc), GFP_KERNEL);
 	if (!desc) {
@@ -248,6 +251,7 @@ struct ubi_volume_desc *ubi_open_volume_nm(int ubi_num, const char *name,
 
 	if (ubi_num < 0 || ubi_num >= UBI_MAX_DEVICES)
 		return ERR_PTR(-EINVAL);
+	ubi_num = array_index_nospec(ubi_num, UBI_MAX_DEVICES);
 
 	ubi = ubi_get_device(ubi_num);
 	if (!ubi)
@@ -572,6 +576,7 @@ int ubi_leb_unmap(struct ubi_volume_desc *desc, int lnum)
 
 	if (lnum < 0 || lnum >= vol->reserved_pebs)
 		return -EINVAL;
+	lnum = array_index_nospec(lnum, vol->reserved_pebs);
 
 	if (vol->upd_marker)
 		return -EBADF;
@@ -609,6 +614,7 @@ int ubi_leb_map(struct ubi_volume_desc *desc, int lnum, int dtype)
 
 	if (lnum < 0 || lnum >= vol->reserved_pebs)
 		return -EINVAL;
+	lnum = array_index_nospec(lnum, vol->reserved_pebs);
 
 	if (dtype != UBI_LONGTERM && dtype != UBI_SHORTTERM &&
 	    dtype != UBI_UNKNOWN)
@@ -648,6 +654,7 @@ int ubi_is_mapped(struct ubi_volume_desc *desc, int lnum)
 
 	if (lnum < 0 || lnum >= vol->reserved_pebs)
 		return -EINVAL;
+	lnum = array_index_nospec(lnum, vol->reserved_pebs);
 
 	if (vol->upd_marker)
 		return -EBADF;

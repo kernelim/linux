@@ -14,6 +14,7 @@
 #include <linux/slab.h>
 #include <linux/circ_buf.h>
 #include <linux/poll.h>
+#include <linux/nospec.h>
 
 #include "internal.h"
 
@@ -252,13 +253,16 @@ ring_buffer_init(struct ring_buffer *rb, long watermark, int flags)
 struct page *
 perf_mmap_to_page(struct ring_buffer *rb, unsigned long pgoff)
 {
+	unsigned long idx;
+
 	if (pgoff > rb->nr_pages)
 		return NULL;
 
 	if (pgoff == 0)
 		return virt_to_page(rb->user_page);
 
-	return virt_to_page(rb->data_pages[pgoff - 1]);
+	idx = array_index_nospec(pgoff - 1, rb->nr_pages);
+	return virt_to_page(rb->data_pages[idx]);
 }
 
 static void *perf_mmap_alloc_page(int cpu)

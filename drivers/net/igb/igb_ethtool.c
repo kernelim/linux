@@ -35,6 +35,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/highmem.h>
 #include <linux/mdio.h>
+#include <linux/nospec.h>
 
 #include "igb.h"
 
@@ -804,8 +805,10 @@ static int igb_set_eeprom(struct net_device *netdev,
 		/* need read/modify/write of last changed EEPROM word
 		 * only the first byte of the word is being modified
 		 */
+		unsigned int idx = array_index_nospec(last_word - first_word,
+						      max_len);
 		ret_val = hw->nvm.ops.read(hw, last_word, 1,
-				   &eeprom_buff[last_word - first_word]);
+				   &eeprom_buff[idx]);
 	}
 
 	/* Device's eeprom is always little-endian, word addressable */
@@ -3022,6 +3025,7 @@ static int igb_set_channels(struct net_device *netdev,
 	max_combined = igb_max_channels(adapter);
 	if (count > max_combined)
 		return -EINVAL;
+	count = array_index_nospec(count, max_combined + 1);
 
 	if (count != adapter->rss_queues) {
 		adapter->rss_queues = count;

@@ -206,6 +206,7 @@ int pvr2_ctrl_get_valname(struct pvr2_ctrl *cptr,int val,
 			const char * const *names;
 			names = cptr->info->def.type_enum.value_names;
 			if (pvr2_ctrl_range_check(cptr,val) == 0) {
+				barrier_nospec();
 				if (names[val]) {
 					*blen = scnprintf(
 						bptr,bmax,"%s",

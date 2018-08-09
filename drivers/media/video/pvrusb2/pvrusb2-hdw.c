@@ -23,6 +23,7 @@
 #include <linux/slab.h>
 #include <linux/firmware.h>
 #include <linux/videodev2.h>
+#include <linux/nospec.h>
 #include <media/v4l2-common.h>
 #include <media/tuner.h>
 #include "pvrusb2.h"
@@ -413,9 +414,12 @@ static int ctrl_channel_set(struct pvr2_ctrl *cptr,int m,int slotId)
 {
 	unsigned freq = 0;
 	struct pvr2_hdw *hdw = cptr->hdw;
+	int idx;
+
 	if ((slotId < 0) || (slotId > FREQTABLE_SIZE)) return 0;
 	if (slotId > 0) {
-		freq = hdw->freqTable[slotId-1];
+		idx = array_index_nospec(slotId - 1, FREQTABLE_SIZE);
+		freq = hdw->freqTable[idx];
 		if (!freq) return 0;
 		pvr2_hdw_set_cur_freq(hdw,freq);
 	}
@@ -944,6 +948,7 @@ static int ctrl_stdenumcur_set(struct pvr2_ctrl *cptr,int m,int v)
 	hdw->std_enum_cur = v;
 	if (!v) return 0;
 	v--;
+	v = array_index_nospec(v, hdw->std_enum_cnt);
 	if (hdw->std_mask_cur == hdw->std_defs[v].id) return 0;
 	hdw->std_mask_cur = hdw->std_defs[v].id;
 	hdw->std_dirty = !0;
