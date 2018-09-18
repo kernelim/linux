@@ -381,7 +381,7 @@ struct sk_buff {
 
 			struct sock		*sk;
 		};
-		struct rb_node	rbnode; /* used in netem & tcp stack */
+		struct rb_node	rbnode; /* used in netem, ip4 defrag, and tcp stack */
 	};
 #endif
 
@@ -1670,7 +1670,9 @@ static inline void __skb_queue_purge(struct sk_buff_head *list)
 		kfree_skb(skb);
 }
 
-void skb_rbtree_purge(struct sock *sk, struct rb_root *root);
+unsigned int skb_rbtree_purge(struct rb_root *root);
+
+void skb_rbtree_purge_sk(struct sock *sk, struct rb_root *root);
 
 /**
  *	__dev_alloc_skb - allocate an skbuff for receiving

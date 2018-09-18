@@ -160,6 +160,7 @@ void bsg_goose_queue(struct request_queue *q)
 	if (!q)
 		return;
 
+	lockdep_assert_held(q->queue_lock);
 	blk_run_queue_async(q);
 }
 EXPORT_SYMBOL_GPL(bsg_goose_queue);

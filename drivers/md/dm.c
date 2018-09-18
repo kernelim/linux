@@ -1079,6 +1079,9 @@ static void rq_end_stats(struct mapped_device *md, struct request *orig,
  */
 static void rq_completed(struct mapped_device *md, int rw, int run_queue)
 {
+	struct request_queue *q = md->queue;
+	unsigned long flags;
+
 	atomic_dec(&md->pending[rw]);
 
 	/* nudge anyone waiting on suspend queue */
@@ -1091,8 +1094,11 @@ static void rq_completed(struct mapped_device *md, int rw, int run_queue)
 	 * back into ->request_fn() could deadlock attempting to grab the
 	 * queue lock again.
 	 */
-	if (run_queue)
+	if (run_queue) {
+		spin_lock_irqsave(q->queue_lock, flags);
 		blk_run_queue_async(md->queue);
+		spin_unlock_irqrestore(q->queue_lock, flags);
+	}
 
 	/*
 	 * dm_put() must be at the end of this function. See the comment above

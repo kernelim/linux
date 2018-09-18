@@ -1,6 +1,8 @@
 #ifndef __NET_FRAG_H__
 #define __NET_FRAG_H__
 
+#include <linux/rbtree.h>
+
 /* RedHat kABI: cannot change netns_frags, because its is part of
  * structs netns_ipv4, netns_ipv6 and netns_nf_frag.  Which in turn
  * is part of (include/net/net_namespace.h) struct net.
@@ -42,8 +44,10 @@ struct inet_frag_queue {
 	struct list_head	lru_list;   /* lru list member */
 	struct hlist_node	list;
 	atomic_t		refcnt;
-	struct sk_buff		*fragments; /* list of received fragments */
+	struct sk_buff		*fragments;  /* Used in IPv6. */
+	struct rb_root		rb_fragments; /* Used in IPv4. */
 	struct sk_buff		*fragments_tail;
+	struct sk_buff		*last_run_head;
 	ktime_t			stamp;
 	int			len;        /* total length of orig datagram */
 	int			meat;
@@ -99,6 +103,9 @@ int inet_frag_evictor(struct netns_frags *nf, struct inet_frags *f, bool force);
 struct inet_frag_queue *inet_frag_find(struct netns_frags *nf,
 		struct inet_frags *f, void *key, unsigned int hash)
 	__releases(&f->lock);
+
+/* Free all skbs in the queue; return the sum of their truesizes. */
+unsigned int inet_frag_rbtree_purge(struct rb_root *root);
 
 static inline void inet_frag_put(struct inet_frag_queue *q, struct inet_frags *f)
 {

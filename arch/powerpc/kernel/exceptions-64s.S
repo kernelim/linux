@@ -243,12 +243,12 @@ stf_barrier_fallback:
 	sync
 	ld	r9,PACA_EXRFI+EX_R9(r13)
 	ld	r10,PACA_EXRFI+EX_R10(r13)
-	mfspr   r13,SPRN_SPRG_PACA
 	ori	31,31,0
 	.rept 14
 	b	1f
 1:
 	.endr
+	mfspr   r13,SPRN_SPRG_PACA
 	blr
 
 	.globl rfi_flush_fallback

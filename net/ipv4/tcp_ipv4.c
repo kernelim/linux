@@ -1895,7 +1895,7 @@ void tcp_v4_destroy_sock(struct sock *sk)
 	tcp_write_queue_purge(sk);
 
 	/* Cleans up our, hopefully empty, out_of_order_queue. */
-	skb_rbtree_purge(sk, &tp->out_of_order_queue);
+	skb_rbtree_purge_sk(sk, &tp->out_of_order_queue);
 
 #ifdef CONFIG_TCP_MD5SIG
 	/* Clean up the MD5 key list, if any */

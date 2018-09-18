@@ -19,6 +19,7 @@
 #include <asm/code-patching.h>
 #include <asm/system.h>
 #include <asm/setup.h>
+#include <asm/security_features.h>
 
 
 struct fixup_entry {

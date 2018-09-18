@@ -2815,7 +2815,7 @@ static void nvme_dev_remove(struct nvme_dev *dev)
 	list_for_each_entry(ns, &dev->namespaces, list) {
 		if (ns->disk->flags & GENHD_FL_UP)
 			del_gendisk(ns->disk);
-		if (!blk_queue_dead(ns->queue))
+		if (!blk_queue_dying(ns->queue))
 			blk_cleanup_queue(ns->queue);
 	}
 }

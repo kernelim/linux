@@ -452,7 +452,10 @@ struct request_queue
 #define QUEUE_FLAG_STOPPED	2	/* queue is stopped */
 #define	QUEUE_FLAG_SYNCFULL	3	/* read queue has been filled */
 #define QUEUE_FLAG_ASYNCFULL	4	/* write queue has been filled */
+
+/* QUEUE_FLAG_DEAD is obsolete, please QUEUE_FLAG_DYING */
 #define QUEUE_FLAG_DEAD		5	/* queue being torn down */
+#define QUEUE_FLAG_DYING	5	/* queue being torn down */
 #define __QUEUE_FLAG_REENTER	6	/* DEPRECATED: Re-entrancy avoidance */
 #define QUEUE_FLAG_PLUGGED	7	/* queue is plugged */
 #define QUEUE_FLAG_ELVSWITCH	8	/* don't use elevator, just do FIFO */
@@ -469,6 +472,9 @@ struct request_queue
 #define QUEUE_FLAG_SAME_FORCE  19	/* force complete on same CPU */
 #define QUEUE_FLAG_UNPRIV_SGIO 20	/* SG_IO free for unprivileged users */
 #define QUEUE_FLAG_PREEMPT_ONLY	21      /* only process REQ_PREEMPT requests */
+
+/* aligned to upstream's QUEUE_FLAG_DEAD */
+#define QUEUE_FLAG_REALLY_DEAD  22	/* queue tear-down finished */
 
 #define QUEUE_FLAG_DEFAULT	((1 << QUEUE_FLAG_IO_STAT) |		\
 				 (1 << QUEUE_FLAG_CLUSTER) |		\
@@ -597,7 +603,13 @@ enum {
 #define blk_queue_plugged(q)	test_bit(QUEUE_FLAG_PLUGGED, &(q)->queue_flags)
 #define blk_queue_tagged(q)	test_bit(QUEUE_FLAG_QUEUED, &(q)->queue_flags)
 #define blk_queue_stopped(q)	test_bit(QUEUE_FLAG_STOPPED, &(q)->queue_flags)
+
+/* blk_queue_dead() is obsolete, please blk_queue_dying() */
 #define blk_queue_dead(q)	test_bit(QUEUE_FLAG_DEAD, &(q)->queue_flags)
+#define blk_queue_dying(q)	test_bit(QUEUE_FLAG_DYING, &(q)->queue_flags)
+/* aligned to upstream's blk_queue_dead */
+#define blk_queue_really_dead(q) test_bit(QUEUE_FLAG_REALLY_DEAD, &(q)->queue_flags)
+
 #define blk_queue_nomerges(q)	test_bit(QUEUE_FLAG_NOMERGES, &(q)->queue_flags)
 #define blk_queue_unpriv_sgio(q) \
 	test_bit(QUEUE_FLAG_UNPRIV_SGIO, &(q)->queue_flags)

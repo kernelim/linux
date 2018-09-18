@@ -856,11 +856,12 @@ static void start_apic_timer(struct kvm_lapic *apic)
 					apic->lapic_timer.period)));
 	} else if (apic_lvtt_tscdeadline(apic)) {
 		/* lapic timer in tsc deadline mode */
-		u64 guest_tsc, tscdeadline = apic->lapic_timer.tscdeadline;
+		u64 tscdeadline = apic->lapic_timer.tscdeadline;
 		u64 ns = 0;
 		struct kvm_vcpu *vcpu = apic->vcpu;
 		unsigned long this_tsc_khz = vcpu_tsc_khz(vcpu);
 		unsigned long flags;
+		struct msr_data msr_info;
 
 		if (unlikely(!tscdeadline || !this_tsc_khz))
 			return;
@@ -868,9 +869,11 @@ static void start_apic_timer(struct kvm_lapic *apic)
 		local_irq_save(flags);
 
 		now = apic->lapic_timer.timer.base->get_time();
-		kvm_get_msr(vcpu, MSR_IA32_TSC, &guest_tsc);
-		if (likely(tscdeadline > guest_tsc)) {
-			ns = (tscdeadline - guest_tsc) * 1000000ULL;
+		msr_info.index = MSR_IA32_TSC;
+		msr_info.host_initiated = false;
+		kvm_get_msr(vcpu, &msr_info);
+		if (likely(tscdeadline > msr_info.data)) {
+			ns = (tscdeadline - msr_info.data) * 1000000ULL;
 			do_div(ns, this_tsc_khz);
 		}
 		hrtimer_start(&apic->lapic_timer.timer,

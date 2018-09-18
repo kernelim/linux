@@ -45,7 +45,7 @@ static void blk_end_sync_rq(struct request *rq, int error)
  *    for execution.  Don't wait for completion.
  *
  * Note:
- *    This function will invoke @done directly if the queue is dead
+ *    This function will invoke @done directly if the queue is dying
  */
 void blk_execute_rq_nowait(struct request_queue *q, struct gendisk *bd_disk,
 			   struct request *rq, int at_head,
@@ -60,7 +60,7 @@ void blk_execute_rq_nowait(struct request_queue *q, struct gendisk *bd_disk,
 
 	spin_lock_irq(q->queue_lock);
 
-	if (unlikely(blk_queue_dead(q))) {
+	if (unlikely(blk_queue_dying(q))) {
 		rq->cmd_flags |= REQ_QUIET; 
 		rq->errors = -ENXIO;
 		__blk_end_request_all(rq, rq->errors);
@@ -71,11 +71,8 @@ void blk_execute_rq_nowait(struct request_queue *q, struct gendisk *bd_disk,
 	__elv_add_request(q, rq, where, 1);
 	__generic_unplug_device(q);
 	/* the queue is stopped so it won't be plugged+unplugged */
-	if (rq->cmd_type == REQ_TYPE_PM_RESUME) {
-		q->request_fn_active++;
-		q->request_fn(q);
-		q->request_fn_active--;
-	}
+	if (rq->cmd_type == REQ_TYPE_PM_RESUME)
+		__blk_run_queue_uncond(q);
 	spin_unlock_irq(q->queue_lock);
 }
 EXPORT_SYMBOL_GPL(blk_execute_rq_nowait);

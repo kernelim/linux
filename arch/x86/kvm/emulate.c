@@ -1684,8 +1684,7 @@ emulate_syscall(struct x86_emulate_ctxt *ctxt, struct x86_emulate_ops *ops)
 {
 	struct decode_cache *c = &ctxt->decode;
 	struct kvm_segment cs, ss;
-	u64 msr_data;
-	u64 efer;
+	struct msr_data msr_info;
 
 	/* syscall is not available in real mode */
 	if (ctxt->mode == X86EMUL_MODE_REAL || ctxt->mode == X86EMUL_MODE_VM86)
@@ -1698,17 +1697,20 @@ emulate_syscall(struct x86_emulate_ctxt *ctxt, struct x86_emulate_ops *ops)
 
 	setup_syscalls_segments(ctxt, &cs, &ss);
 
-	kvm_x86_ops->get_msr(ctxt->vcpu, MSR_EFER, &efer);
+	msr_info.index = MSR_EFER;
+	msr_info.host_initiated = false;
+	kvm_x86_ops->get_msr(ctxt->vcpu, &msr_info);
 
-	if (!(efer & EFER_SCE)) {
+	if (!(msr_info.data & EFER_SCE)) {
 		kvm_queue_exception(ctxt->vcpu, UD_VECTOR);
 		return X86EMUL_PROPAGATE_FAULT;
 	}
 
-	kvm_x86_ops->get_msr(ctxt->vcpu, MSR_STAR, &msr_data);
-	msr_data >>= 32;
-	cs.selector = (u16)(msr_data & 0xfffc);
-	ss.selector = (u16)(msr_data + 8);
+	msr_info.index = MSR_STAR;
+	kvm_x86_ops->get_msr(ctxt->vcpu, &msr_info);
+	msr_info.data >>= 32;
+	cs.selector = (u16)(msr_info.data & 0xfffc);
+	ss.selector = (u16)(msr_info.data + 8);
 
 	if (is_long_mode(ctxt->vcpu)) {
 		cs.db = 0;
@@ -1722,18 +1724,20 @@ emulate_syscall(struct x86_emulate_ctxt *ctxt, struct x86_emulate_ops *ops)
 #ifdef CONFIG_X86_64
 		c->regs[VCPU_REGS_R11] = ctxt->eflags & ~EFLG_RF;
 
-		kvm_x86_ops->get_msr(ctxt->vcpu,
-			ctxt->mode == X86EMUL_MODE_PROT64 ?
-			MSR_LSTAR : MSR_CSTAR, &msr_data);
-		c->eip = msr_data;
+		msr_info.index = ctxt->mode == X86EMUL_MODE_PROT64 ?
+			MSR_LSTAR : MSR_CSTAR;
+		kvm_x86_ops->get_msr(ctxt->vcpu, &msr_info);
+		c->eip = msr_info.data;
 
-		kvm_x86_ops->get_msr(ctxt->vcpu, MSR_SYSCALL_MASK, &msr_data);
-		ctxt->eflags &= ~(msr_data | EFLG_RF);
+		msr_info.index = MSR_SYSCALL_MASK;
+		kvm_x86_ops->get_msr(ctxt->vcpu, &msr_info);
+		ctxt->eflags &= ~(msr_info.data | EFLG_RF);
 #endif
 	} else {
 		/* legacy mode */
-		kvm_x86_ops->get_msr(ctxt->vcpu, MSR_STAR, &msr_data);
-		c->eip = (u32)msr_data;
+		msr_info.index = MSR_STAR;
+		kvm_x86_ops->get_msr(ctxt->vcpu, &msr_info);
+		c->eip = (u32)msr_info.data;
 
 		ctxt->eflags &= ~(EFLG_VM | EFLG_IF | EFLG_RF);
 	}
@@ -1746,7 +1750,7 @@ emulate_sysenter(struct x86_emulate_ctxt *ctxt)
 {
 	struct decode_cache *c = &ctxt->decode;
 	struct kvm_segment cs, ss;
-	u64 msr_data;
+	struct msr_data msr_info;
 
 	/* inject #GP if in real mode */
 	if (ctxt->mode == X86EMUL_MODE_REAL) {
@@ -1762,14 +1766,16 @@ emulate_sysenter(struct x86_emulate_ctxt *ctxt)
 
 	setup_syscalls_segments(ctxt, &cs, &ss);
 
-	kvm_x86_ops->get_msr(ctxt->vcpu, MSR_IA32_SYSENTER_CS, &msr_data);
-	if ((msr_data & 0xfffc) == 0x0) {
+	msr_info.index = MSR_IA32_SYSENTER_CS;
+	msr_info.host_initiated = false;
+	kvm_x86_ops->get_msr(ctxt->vcpu, &msr_info);
+	if ((msr_info.data & 0xfffc) == 0x0) {
 		kvm_inject_gp(ctxt->vcpu, 0);
 		return X86EMUL_PROPAGATE_FAULT;
 	}
 
 	ctxt->eflags &= ~(EFLG_VM | EFLG_IF | EFLG_RF);
-	cs.selector = (u16)msr_data & ~SELECTOR_RPL_MASK;
+	cs.selector = (u16)msr_info.data & ~SELECTOR_RPL_MASK;
 	ss.selector = cs.selector + 8;
 	if (is_long_mode(ctxt->vcpu)) {
 		cs.db = 0;
@@ -1779,12 +1785,14 @@ emulate_sysenter(struct x86_emulate_ctxt *ctxt)
 	kvm_x86_ops->set_segment(ctxt->vcpu, &cs, VCPU_SREG_CS);
 	kvm_x86_ops->set_segment(ctxt->vcpu, &ss, VCPU_SREG_SS);
 
-	kvm_x86_ops->get_msr(ctxt->vcpu, MSR_IA32_SYSENTER_EIP, &msr_data);
-	c->eip = is_long_mode(ctxt->vcpu) ? msr_data : (u32)msr_data;
+	msr_info.index = MSR_IA32_SYSENTER_EIP;
+	kvm_x86_ops->get_msr(ctxt->vcpu, &msr_info);
+	c->eip = is_long_mode(ctxt->vcpu) ? msr_info.data : (u32)msr_info.data;
 
-	kvm_x86_ops->get_msr(ctxt->vcpu, MSR_IA32_SYSENTER_ESP, &msr_data);
-	c->regs[VCPU_REGS_RSP] = is_long_mode(ctxt->vcpu) ? msr_data :
-								(u32)msr_data;
+	msr_info.index = MSR_IA32_SYSENTER_ESP;
+	kvm_x86_ops->get_msr(ctxt->vcpu, &msr_info);
+	c->regs[VCPU_REGS_RSP] = is_long_mode(ctxt->vcpu) ? msr_info.data :
+		(u32)msr_info.data;
 
 	return X86EMUL_CONTINUE;
 }
@@ -1794,7 +1802,7 @@ emulate_sysexit(struct x86_emulate_ctxt *ctxt)
 {
 	struct decode_cache *c = &ctxt->decode;
 	struct kvm_segment cs, ss;
-	u64 msr_data;
+	struct msr_data msr_info;
 	int usermode;
 
 	/* inject #GP if in real mode or Virtual 8086 mode */
@@ -1813,19 +1821,21 @@ emulate_sysexit(struct x86_emulate_ctxt *ctxt)
 
 	cs.dpl = 3;
 	ss.dpl = 3;
-	kvm_x86_ops->get_msr(ctxt->vcpu, MSR_IA32_SYSENTER_CS, &msr_data);
+	msr_info.index = MSR_IA32_SYSENTER_CS;
+	msr_info.host_initiated = false;
+	kvm_x86_ops->get_msr(ctxt->vcpu, &msr_info);
 	switch (usermode) {
 	case X86EMUL_MODE_PROT32:
-		cs.selector = (u16)(msr_data + 16);
-		if ((msr_data & 0xfffc) == 0x0) {
+		cs.selector = (u16)(msr_info.data + 16);
+		if ((msr_info.data & 0xfffc) == 0x0) {
 			kvm_inject_gp(ctxt->vcpu, 0);
 			return X86EMUL_PROPAGATE_FAULT;
 		}
-		ss.selector = (u16)(msr_data + 24);
+		ss.selector = (u16)(msr_info.data + 24);
 		break;
 	case X86EMUL_MODE_PROT64:
-		cs.selector = (u16)(msr_data + 32);
-		if (msr_data == 0x0) {
+		cs.selector = (u16)(msr_info.data + 32);
+		if (msr_info.data == 0x0) {
 			kvm_inject_gp(ctxt->vcpu, 0);
 			return X86EMUL_PROPAGATE_FAULT;
 		}
@@ -1918,6 +1928,7 @@ x86_emulate_insn(struct x86_emulate_ctxt *ctxt, struct x86_emulate_ops *ops)
 	unsigned int port;
 	int io_dir_in;
 	int rc = X86EMUL_CONTINUE;
+	struct msr_data msr_info;
 
 	ctxt->interruptibility = 0;
 
@@ -2652,12 +2663,14 @@ twobyte_insn:
 		break;
 	case 0x32:
 		/* rdmsr */
-		if (kvm_get_msr(ctxt->vcpu, c->regs[VCPU_REGS_RCX], &msr_data)) {
+		msr_info.index = c->regs[VCPU_REGS_RCX];
+		msr_info.host_initiated = false;
+		if (kvm_get_msr(ctxt->vcpu, &msr_info)) {
 			kvm_inject_gp(ctxt->vcpu, 0);
 			c->eip = kvm_rip_read(ctxt->vcpu);
 		} else {
-			c->regs[VCPU_REGS_RAX] = (u32)msr_data;
-			c->regs[VCPU_REGS_RDX] = msr_data >> 32;
+			c->regs[VCPU_REGS_RAX] = (u32)msr_info.data;
+			c->regs[VCPU_REGS_RDX] = msr_info.data >> 32;
 		}
 		rc = X86EMUL_CONTINUE;
 		c->dst.type = OP_NONE;

@@ -440,6 +440,7 @@ nf_ct_frag6_reasm(struct frag_queue *fq, struct net_device *dev)
 					  head->csum);
 
 	fq->q.fragments = NULL;
+	fq->q.rb_fragments = RB_ROOT;
 	fq->q.fragments_tail = NULL;
 
 	/* all original skbs are linked into the NFCT_FRAG6_CB(head).orig */
@@ -571,6 +572,12 @@ struct sk_buff *nf_ct_frag6_gather(struct sk_buff *skb, u32 user)
 	skb_set_transport_header(clone, fhoff);
 	hdr = ipv6_hdr(clone);
 	fhdr = (struct frag_hdr *)skb_transport_header(clone);
+
+	if (skb->len - skb_network_offset(skb) < IPV6_MIN_MTU &&
+	    fhdr->frag_off & htons(IP6_MF)) {
+		pr_debug("Dropped non-last fragment smaller than minimum MTU");
+		goto ret_orig;
+	}
 
 	local_bh_disable();
 	inet_frag_evictor(&net->nf_frag.frags, &nf_frags, false);

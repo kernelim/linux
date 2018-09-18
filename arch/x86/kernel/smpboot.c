@@ -473,7 +473,7 @@ void __cpuinit set_cpu_sibling_map(int cpu)
 	if (current_cpu_data.x86_max_cores == 1) {
 		cpumask_copy(cpu_core_mask(cpu), cpu_sibling_mask(cpu));
 		c->booted_cores = 1;
-		return;
+		goto set_max_smt_threads; /* RHEL6 */
 	}
 
 	for_each_cpu(i, cpu_sibling_setup_mask) {
@@ -506,6 +506,7 @@ void __cpuinit set_cpu_sibling_map(int cpu)
 		}
 	}
 
+set_max_smt_threads:
 	threads = cpumask_weight(cpu_sibling_mask(cpu));
 	if (threads > __max_smt_threads)
 		__max_smt_threads = threads;

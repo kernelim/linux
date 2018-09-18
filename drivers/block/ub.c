@@ -2396,7 +2396,7 @@ static void ub_disconnect(struct usb_interface *intf)
 		del_gendisk(lun->disk);
 		/*
 		 * I wish I could do:
-		 *    queue_flag_set(QUEUE_FLAG_DEAD, q);
+		 *    queue_flag_set(QUEUE_FLAG_DYING, q);
 		 * As it is, we rely on our internal poisoning and let
 		 * the upper levels to spin furiously failing all the I/O.
 		 */
