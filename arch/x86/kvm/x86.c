@@ -572,6 +572,9 @@ static void update_cpuid(struct kvm_vcpu *vcpu)
 			apic->lapic_timer.timer_mode_mask = 1 << 17;
 	}
 
+	if (use_eager_fpu())
+		kvm_x86_ops->fpu_activate(vcpu);
+
 	kvm_pmu_cpuid_update(vcpu);
 }
 
@@ -6541,11 +6544,6 @@ struct kvm_vcpu *kvm_arch_vcpu_create(struct kvm *kvm,
 
 	vcpu = kvm_x86_ops->vcpu_create(kvm, id);
 
-	/*
-	 * Activate fpu unconditionally in case the guest needs eager FPU.  It will be
-	 * deactivated soon if it doesn't.
-	 */
-	kvm_x86_ops->fpu_activate(vcpu);
 	return vcpu;
 }
 

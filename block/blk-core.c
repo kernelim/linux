@@ -579,6 +579,7 @@ EXPORT_SYMBOL(blk_put_queue);
 void blk_cleanup_queue(struct request_queue *q)
 {
 	spinlock_t *lock = q->queue_lock;
+	bool lock_switched = false;
 
 	/* mark @q DYING, no new request or merges will be allowed afterwards */
 	mutex_lock(&q->sysfs_lock);
@@ -591,8 +592,10 @@ void blk_cleanup_queue(struct request_queue *q)
 	/* wake up contexts which is waiting for getting new requests */
 	wake_up_all(&q->freeze_wq);
 
-	if (q->queue_lock != &q->__queue_lock)
+	if (q->queue_lock != &q->__queue_lock) {
 		q->queue_lock = &q->__queue_lock;
+		lock_switched = true;
+	}
 
 	spin_unlock_irq(lock);
 	mutex_unlock(&q->sysfs_lock);
@@ -603,9 +606,22 @@ void blk_cleanup_queue(struct request_queue *q)
 	 * which case we don't want to call into draining.
 	 */
 	spin_lock_irq(lock);
-	if (q->elevator)
-		__blk_drain_queue(q, true);
-	queue_flag_set(QUEUE_FLAG_REALLY_DEAD, q);
+	if (q->elevator) {
+		if (lock_switched) {
+			spin_lock(q->queue_lock);
+			__blk_drain_queue(q, true);
+			spin_unlock(q->queue_lock);
+		} else {
+			__blk_drain_queue(q, true);
+		}
+	}
+	if (lock_switched) {
+		spin_lock(q->queue_lock);
+		queue_flag_set(QUEUE_FLAG_REALLY_DEAD, q);
+		spin_unlock(q->queue_lock);
+	} else {
+		queue_flag_set_unlocked(QUEUE_FLAG_REALLY_DEAD, q);
+	}
 	spin_unlock_irq(lock);
 
 	/* @q won't process any more reuqest, flush async actions */
