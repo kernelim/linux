@@ -6304,6 +6304,7 @@ int kvm_arch_vcpu_ioctl_set_sregs(struct kvm_vcpu *vcpu,
 				  struct kvm_sregs *sregs)
 {
 	int mmu_reset_needed = 0;
+	int cpuid_update_needed = 0;
 	int pending_vec, max_bits;
 	int ret = 0;
 	struct descriptor_table dt;
@@ -6338,8 +6339,10 @@ int kvm_arch_vcpu_ioctl_set_sregs(struct kvm_vcpu *vcpu,
 	vcpu->arch.cr0 = sregs->cr0;
 
 	mmu_reset_needed |= kvm_read_cr4(vcpu) != sregs->cr4;
+	cpuid_update_needed |= ((kvm_read_cr4(vcpu) ^ sregs->cr4) &
+				X86_CR4_OSXSAVE);
 	kvm_x86_ops->set_cr4(vcpu, sregs->cr4);
-	if (sregs->cr4 & X86_CR4_OSXSAVE)
+	if (cpuid_update_needed)
 		update_cpuid(vcpu);
 	if (!is_long_mode(vcpu) && is_pae(vcpu))
 		load_pdptrs(vcpu, vcpu->arch.cr3);
