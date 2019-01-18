@@ -106,8 +106,8 @@ static bool fanotify_should_send_event(struct fsnotify_mark *inode_mark,
 		return false;
 
 	/*
-	 * if the event is for a child and this inode doesn't care about
-	 * events on the child, don't send it!
+	 * If the event is for a child and this mark doesn't care about
+	 * events on a child, don't send it!
 	 */
 	if (inode_mark &&
 	    (!(event_mask & FS_EVENT_ON_CHILD) ||
@@ -116,7 +116,11 @@ static bool fanotify_should_send_event(struct fsnotify_mark *inode_mark,
 		marks_ignored_mask |= inode_mark->ignored_mask;
 	}
 
-	if (vfsmnt_mark) {
+	/*
+	 * Mount marks don't care about event on children. Ignore them as
+	 * otherwise we could report some events twice. 
+	 */
+	if (vfsmnt_mark && !(event_mask & FS_EVENT_ON_CHILD)) {
 		marks_mask |= vfsmnt_mark->mask;
 		marks_ignored_mask |= vfsmnt_mark->ignored_mask;
 	}

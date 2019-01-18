@@ -163,9 +163,9 @@ int __fsnotify_parent(const struct path *path, struct dentry *dentry, __u32 mask
 	parent = dget_parent(dentry);
 	p_inode = parent->d_inode;
 
-	if (unlikely(!fsnotify_inode_watches_children(p_inode)))
+	if (unlikely(!fsnotify_inode_watches_children(p_inode))) {
 		__fsnotify_update_child_dentry_flags(p_inode);
-	else if (p_inode->i_fsnotify_mask & mask) {
+	} else if (p_inode->i_fsnotify_mask & mask & ALL_FSNOTIFY_EVENTS) {
 		struct name_snapshot name;
 
 		/* we are notifying a parent so come up with the new mask which
@@ -300,7 +300,8 @@ int fsnotify(struct inode *to_tell, __u32 mask, const void *data, int data_is,
 		inode_node = srcu_dereference(inode_conn->list.first,
 					      &fsnotify_mark_srcu);
 
-	if (mnt) {
+	/* An event "on child" is not intended for a mount mark */
+	if (mnt && !(mask & FS_EVENT_ON_CHILD)) {
 		inode_conn = srcu_dereference(to_tell->i_fsnotify_marks,
 					      &fsnotify_mark_srcu);
 		if (inode_conn)
