@@ -351,7 +351,6 @@ static bool buffer_migrate_lock_buffers(struct buffer_head *head,
 	/* Simple case, sync compaction */
 	if (mode != MIGRATE_ASYNC) {
 		do {
-			get_bh(bh);
 			lock_buffer(bh);
 			bh = bh->b_this_page;
 
@@ -362,18 +361,15 @@ static bool buffer_migrate_lock_buffers(struct buffer_head *head,
 
 	/* async case, we cannot block on lock_buffer so use trylock_buffer */
 	do {
-		get_bh(bh);
 		if (!trylock_buffer(bh)) {
 			/*
 			 * We failed to lock the buffer and cannot stall in
 			 * async migration. Release the taken locks
 			 */
 			struct buffer_head *failed_bh = bh;
-			put_bh(failed_bh);
 			bh = head;
 			while (bh != failed_bh) {
 				unlock_buffer(bh);
-				put_bh(bh);
 				bh = bh->b_this_page;
 			}
 			return false;
@@ -391,6 +387,22 @@ static inline bool buffer_migrate_lock_buffers(struct buffer_head *head,
 }
 #endif /* CONFIG_BLOCK */
 
+static int expected_page_refs(struct page *page)
+{
+	int expected_count = 1;
+
+	/*
+	 * Device public or private pages have an extra refcount as they are
+	 * ZONE_DEVICE pages.
+	 */
+	expected_count += is_device_private_page(page);
+	expected_count += is_device_public_page(page);
+	if (page_mapping(page))
+		expected_count += 1 + page_has_private(page);
+
+	return expected_count;
+}
+
 /*
  * Replace the page in the mapping.
  *
@@ -406,15 +418,8 @@ int migrate_page_move_mapping(struct address_space *mapping,
 {
 	struct zone *oldzone, *newzone;
 	int dirty;
-	int expected_count = 1 + extra_count;
+	int expected_count = expected_page_refs(page) + extra_count;
 	void **pslot;
-
-	/*
-	 * Device public or private pages have an extra refcount as they are
-	 * ZONE_DEVICE pages.
-	 */
-	expected_count += is_device_private_page(page);
-	expected_count += is_device_public_page(page);
 
 	if (!mapping) {
 		/* Anonymous page without mapping */
@@ -438,7 +443,6 @@ int migrate_page_move_mapping(struct address_space *mapping,
 	pslot = radix_tree_lookup_slot(&mapping->page_tree,
  					page_index(page));
 
-	expected_count += 1 + page_has_private(page);
 	if (page_count(page) != expected_count ||
 		radix_tree_deref_slot_protected(pslot, &mapping->tree_lock) != page) {
 		spin_unlock_irq(&mapping->tree_lock);
@@ -724,34 +728,56 @@ int migrate_page(struct address_space *mapping,
 EXPORT_SYMBOL(migrate_page);
 
 #ifdef CONFIG_BLOCK
-/*
- * Migration function for pages with buffers. This function can only be used
- * if the underlying filesystem guarantees that no other references to "page"
- * exist.
- */
-int buffer_migrate_page(struct address_space *mapping,
-		struct page *newpage, struct page *page, enum migrate_mode mode)
+static int __buffer_migrate_page(struct address_space *mapping,
+		struct page *newpage, struct page *page, enum migrate_mode mode,
+		bool check_refs)
 {
 	struct buffer_head *bh, *head;
 	int rc;
+	int expected_count;
 
 	if (!page_has_buffers(page))
 		return migrate_page(mapping, newpage, page, mode);
 
+	/* Check whether page does not have extra refs before we do more work */
+	expected_count = expected_page_refs(page);
+	if (page_count(page) != expected_count)
+		return -EAGAIN;
+
 	head = page_buffers(page);
+	if (!buffer_migrate_lock_buffers(head, mode))
+		return -EAGAIN;
 
-	rc = migrate_page_move_mapping(mapping, newpage, page, head, mode, 0);
+	if (check_refs) {
+		bool busy;
+		bool invalidated = false;
 
+recheck_buffers:
+		busy = false;
+		spin_lock(&mapping->private_lock);
+		bh = head;
+		do {
+			if (atomic_read(&bh->b_count)) {
+				busy = true;
+				break;
+			}
+			bh = bh->b_this_page;
+		} while (bh != head);
+		spin_unlock(&mapping->private_lock);
+		if (busy) {
+			if (invalidated) {
+				rc = -EAGAIN;
+				goto unlock_buffers;
+			}
+			invalidate_bh_lrus();
+			invalidated = true;
+			goto recheck_buffers;
+		}
+	}
+
+	rc = migrate_page_move_mapping(mapping, newpage, page, NULL, mode, 0);
 	if (rc != MIGRATEPAGE_SUCCESS)
-		return rc;
-
-	/*
-	 * In the async case, migrate_page_move_mapping locked the buffers
-	 * with an IRQ-safe spinlock held. In the sync case, the buffers
-	 * need to be locked now
-	 */
-	if (mode != MIGRATE_ASYNC)
-		BUG_ON(!buffer_migrate_lock_buffers(head, mode));
+		goto unlock_buffers;
 
 	ClearPagePrivate(page);
 	set_page_private(newpage, page_private(page));
@@ -773,17 +799,41 @@ int buffer_migrate_page(struct address_space *mapping,
 	else
 		migrate_page_states(newpage, page);
 
+	rc = MIGRATEPAGE_SUCCESS;
+unlock_buffers:
 	bh = head;
 	do {
 		unlock_buffer(bh);
-		put_bh(bh);
 		bh = bh->b_this_page;
 
 	} while (bh != head);
 
-	return MIGRATEPAGE_SUCCESS;
+	return rc;
+}
+
+/*
+ * Migration function for pages with buffers. This function can only be used
+ * if the underlying filesystem guarantees that no other references to "page"
+ * exist. For example attached buffer heads are accessed only under page lock.
+ */
+int buffer_migrate_page(struct address_space *mapping,
+		struct page *newpage, struct page *page, enum migrate_mode mode)
+{
+	return __buffer_migrate_page(mapping, newpage, page, mode, false);
 }
 EXPORT_SYMBOL(buffer_migrate_page);
+
+/*
+ * Same as above except that this variant is more careful and checks that there
+ * are also no buffer head references. This function is the right one for
+ * mappings where buffer heads are directly looked up and referenced (such as
+ * block device mappings).
+ */
+int buffer_migrate_page_norefs(struct address_space *mapping,
+		struct page *newpage, struct page *page, enum migrate_mode mode)
+{
+	return __buffer_migrate_page(mapping, newpage, page, mode, true);
+}
 #endif
 
 /*

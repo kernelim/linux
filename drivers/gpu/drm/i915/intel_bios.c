@@ -2031,16 +2031,10 @@ intel_bios_is_lspcon_present(struct drm_i915_private *dev_priv,
 				enum port port)
 {
 	const struct child_device_config *child;
-	struct pci_dev *pdev = dev_priv->drm.pdev;
 	int i;
 
 	if (!HAS_LSPCON(dev_priv))
 		return false;
-
-	// XXX: workaround for a buggy Intel board (bsc#1111040)
-	if (pdev->subsystem_vendor == 0x8086 &&
-	    pdev->subsystem_device == 0x2212)
-		return true;
 
 	for (i = 0; i < dev_priv->vbt.child_dev_num; i++) {
 		child = dev_priv->vbt.child_dev + i;
