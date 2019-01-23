@@ -106,6 +106,9 @@ struct bpf_verifier_state {
 	struct bpf_verifier_state *parent;
 	int allocated_stack;
 	struct bpf_stack_state *stack;
+#ifndef __GENKSYMS__
+	bool speculative;
+#endif
 };
 
 /* linked list of verifier states used to prune search */
@@ -114,11 +117,20 @@ struct bpf_verifier_state_list {
 	struct bpf_verifier_state_list *next;
 };
 
+/* Possible states for alu_state member. */
+#define BPF_ALU_SANITIZE_SRC		1U
+#define BPF_ALU_SANITIZE_DST		2U
+#define BPF_ALU_NEG_VALUE		(1U << 2)
+#define BPF_ALU_NON_POINTER		(1U << 3)
+#define BPF_ALU_SANITIZE		(BPF_ALU_SANITIZE_SRC | \
+					 BPF_ALU_SANITIZE_DST)
+
 struct bpf_insn_aux_data {
 	union {
 		enum bpf_reg_type ptr_type;	/* pointer type for load/store insns */
 #ifndef __GENKSYMS__
 		unsigned long map_state;	/* pointer/poison value for maps */
+		u32 alu_limit;			/* limit for add/sub register with pointer */
 #else
 		struct bpf_map *map_ptr;        /* pointer for call insn into lookup_elem */
 #endif
@@ -127,6 +139,7 @@ struct bpf_insn_aux_data {
 	bool seen; /* this insn was processed by the verifier */
 #ifndef __GENKSYMS__
 	int sanitize_stack_off; /* stack slot to be cleared */
+	u8 alu_state; /* used in combination with alu_limit */
 #endif
 };
 
@@ -157,6 +170,10 @@ struct bpf_ext_analyzer_ops {
  * one verifier_env per bpf_check() call
  */
 struct bpf_verifier_env {
+#ifndef __GENKSYMS__
+	u32 insn_idx;
+	u32 prev_insn_idx;
+#endif
 	struct bpf_prog *prog;		/* eBPF program being verified */
 	const struct bpf_verifier_ops *ops;
 	struct bpf_verifier_stack_elem *head; /* stack of verifier states to be processed */

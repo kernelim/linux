@@ -28,9 +28,7 @@ int __blkdev_issue_discard(struct block_device *bdev, sector_t sector,
 {
 	struct request_queue *q = bdev_get_queue(bdev);
 	struct bio *bio = *biop;
-	unsigned int granularity;
 	unsigned int op;
-	int alignment;
 	sector_t bs_mask;
 
 	if (!q)
@@ -50,30 +48,14 @@ int __blkdev_issue_discard(struct block_device *bdev, sector_t sector,
 	if ((sector | nr_sects) & bs_mask)
 		return -EINVAL;
 
-	/* Zero-sector (unknown) and one-sector granularities are the same.  */
-	granularity = max(q->limits.discard_granularity >> 9, 1U);
-	alignment = (bdev_discard_alignment(bdev) >> 9) % granularity;
+	if (!nr_sects)
+		return -EINVAL;
 
 	while (nr_sects) {
-		unsigned int req_sects;
-		sector_t end_sect, tmp;
+		sector_t req_sects = min_t(sector_t, nr_sects,
+				bio_allowed_max_sectors(q));
 
-		/* Make sure bi_size doesn't overflow */
-		req_sects = min_t(sector_t, nr_sects, UINT_MAX >> 9);
-
-		/**
-		 * If splitting a request, and the next starting sector would be
-		 * misaligned, stop the discard at the previous aligned sector.
-		 */
-		end_sect = sector + req_sects;
-		tmp = end_sect;
-		if (req_sects < nr_sects &&
-		    sector_div(tmp, granularity) != alignment) {
-			end_sect = end_sect - alignment;
-			sector_div(end_sect, granularity);
-			end_sect = end_sect * granularity + alignment;
-			req_sects = end_sect - sector;
-		}
+		WARN_ON_ONCE((req_sects << 9) > UINT_MAX);
 
 		bio = next_bio(bio, 0, gfp_mask);
 		bio->bi_iter.bi_sector = sector;
@@ -81,8 +63,8 @@ int __blkdev_issue_discard(struct block_device *bdev, sector_t sector,
 		bio_set_op_attrs(bio, op, 0);
 
 		bio->bi_iter.bi_size = req_sects << 9;
+		sector += req_sects;
 		nr_sects -= req_sects;
-		sector = end_sect;
 
 		/*
 		 * We can loop for a long time in here, if someone does
@@ -163,7 +145,7 @@ static int __blkdev_issue_write_same(struct block_device *bdev, sector_t sector,
 		return -EOPNOTSUPP;
 
 	/* Ensure that max_write_same_sectors doesn't overflow bi_size */
-	max_write_same_sectors = UINT_MAX >> 9;
+	max_write_same_sectors = bio_allowed_max_sectors(q);
 
 	while (nr_sects) {
 		bio = next_bio(bio, 1, gfp_mask);
