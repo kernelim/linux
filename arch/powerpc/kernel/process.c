@@ -101,24 +101,18 @@ static void check_if_tm_restore_required(struct task_struct *tsk)
 	}
 }
 
-static inline bool msr_tm_active(unsigned long msr)
-{
-	return MSR_TM_ACTIVE(msr);
-}
-
 static bool tm_active_with_fp(struct task_struct *tsk)
 {
-	return msr_tm_active(tsk->thread.regs->msr) &&
+	return MSR_TM_ACTIVE(tsk->thread.regs->msr) &&
 		(tsk->thread.ckpt_regs.msr & MSR_FP);
 }
 
 static bool tm_active_with_altivec(struct task_struct *tsk)
 {
-	return msr_tm_active(tsk->thread.regs->msr) &&
+	return MSR_TM_ACTIVE(tsk->thread.regs->msr) &&
 		(tsk->thread.ckpt_regs.msr & MSR_VEC);
 }
 #else
-static inline bool msr_tm_active(unsigned long msr) { return false; }
 static inline void check_if_tm_restore_required(struct task_struct *tsk) { }
 static inline bool tm_active_with_fp(struct task_struct *tsk) { return false; }
 static inline bool tm_active_with_altivec(struct task_struct *tsk) { return false; }
@@ -245,7 +239,8 @@ void enable_kernel_fp(void)
 		 * giveup as this would save  to the 'live' structure not the
 		 * checkpointed structure.
 		 */
-		if(!msr_tm_active(cpumsr) && msr_tm_active(current->thread.regs->msr))
+		if (!MSR_TM_ACTIVE(cpumsr) &&
+		     MSR_TM_ACTIVE(current->thread.regs->msr))
 			return;
 		__giveup_fpu(current);
 	}
@@ -309,7 +304,8 @@ void enable_kernel_altivec(void)
 		 * giveup as this would save  to the 'live' structure not the
 		 * checkpointed structure.
 		 */
-		if(!msr_tm_active(cpumsr) && msr_tm_active(current->thread.regs->msr))
+		if (!MSR_TM_ACTIVE(cpumsr) &&
+		     MSR_TM_ACTIVE(current->thread.regs->msr))
 			return;
 		__giveup_altivec(current);
 	}
@@ -395,12 +391,9 @@ void enable_kernel_vsx(void)
 		 * giveup as this would save  to the 'live' structure not the
 		 * checkpointed structure.
 		 */
-		if(!msr_tm_active(cpumsr) && msr_tm_active(current->thread.regs->msr))
+		if (!MSR_TM_ACTIVE(cpumsr) &&
+		     MSR_TM_ACTIVE(current->thread.regs->msr))
 			return;
-		if (current->thread.regs->msr & MSR_FP)
-			__giveup_fpu(current);
-		if (current->thread.regs->msr & MSR_VEC)
-			__giveup_altivec(current);
 		__giveup_vsx(current);
 	}
 }
@@ -535,7 +528,7 @@ void restore_math(struct pt_regs *regs)
 {
 	unsigned long msr;
 
-	if (!msr_tm_active(regs->msr) &&
+	if (!MSR_TM_ACTIVE(regs->msr) &&
 		!current->thread.load_fp && !loadvec(current->thread))
 		return;
 
@@ -886,8 +879,7 @@ static inline bool tm_enabled(struct task_struct *tsk)
 	return tsk && tsk->thread.regs && (tsk->thread.regs->msr & MSR_TM);
 }
 
-static void tm_reclaim_thread(struct thread_struct *thr,
-			      struct thread_info *ti, uint8_t cause)
+static void tm_reclaim_thread(struct thread_struct *thr, uint8_t cause)
 {
 	/*
 	 * Use the current MSR TM suspended bit to track if we have
@@ -909,6 +901,8 @@ static void tm_reclaim_thread(struct thread_struct *thr,
 
 	giveup_all(container_of(thr, struct task_struct, thread));
 
+	tm_reclaim(thr, cause);
+
 	/*
 	 * If we are in a transaction and FP is off then we can't have
 	 * used FP inside that transaction. Hence the checkpointed
@@ -927,14 +921,12 @@ static void tm_reclaim_thread(struct thread_struct *thr,
 	if ((thr->ckpt_regs.msr & MSR_VEC) == 0)
 		memcpy(&thr->ckvr_state, &thr->vr_state,
 		       sizeof(struct thread_vr_state));
-
-	tm_reclaim(thr, thr->ckpt_regs.msr, cause);
 }
 
 void tm_reclaim_current(uint8_t cause)
 {
 	tm_enable();
-	tm_reclaim_thread(&current->thread, current_thread_info(), cause);
+	tm_reclaim_thread(&current->thread, cause);
 }
 
 static inline void tm_reclaim_task(struct task_struct *tsk)
@@ -957,13 +949,15 @@ static inline void tm_reclaim_task(struct task_struct *tsk)
 	if (!MSR_TM_ACTIVE(thr->regs->msr))
 		goto out_and_saveregs;
 
+	WARN_ON(tm_suspend_disabled);
+
 	TM_DEBUG("--- tm_reclaim on pid %d (NIP=%lx, "
 		 "ccr=%lx, msr=%lx, trap=%lx)\n",
 		 tsk->pid, thr->regs->nip,
 		 thr->regs->ccr, thr->regs->msr,
 		 thr->regs->trap);
 
-	tm_reclaim_thread(thr, task_thread_info(tsk), TM_CAUSE_RESCHED);
+	tm_reclaim_thread(thr, TM_CAUSE_RESCHED);
 
 	TM_DEBUG("--- tm_reclaim on pid %d complete\n",
 		 tsk->pid);
@@ -977,11 +971,9 @@ out_and_saveregs:
 	tm_save_sprs(thr);
 }
 
-extern void __tm_recheckpoint(struct thread_struct *thread,
-			      unsigned long orig_msr);
+extern void __tm_recheckpoint(struct thread_struct *thread);
 
-void tm_recheckpoint(struct thread_struct *thread,
-		     unsigned long orig_msr)
+void tm_recheckpoint(struct thread_struct *thread)
 {
 	unsigned long flags;
 
@@ -1000,15 +992,13 @@ void tm_recheckpoint(struct thread_struct *thread,
 	 */
 	tm_restore_sprs(thread);
 
-	__tm_recheckpoint(thread, orig_msr);
+	__tm_recheckpoint(thread);
 
 	local_irq_restore(flags);
 }
 
 static inline void tm_recheckpoint_new_task(struct task_struct *new)
 {
-	unsigned long msr;
-
 	if (!cpu_has_feature(CPU_FTR_TM))
 		return;
 
@@ -1027,13 +1017,11 @@ static inline void tm_recheckpoint_new_task(struct task_struct *new)
 		tm_restore_sprs(&new->thread);
 		return;
 	}
-	msr = new->thread.ckpt_regs.msr;
 	/* Recheckpoint to restore original checkpointed register state. */
-	TM_DEBUG("*** tm_recheckpoint of pid %d "
-		 "(new->msr 0x%lx, new->origmsr 0x%lx)\n",
-		 new->pid, new->thread.regs->msr, msr);
+	TM_DEBUG("*** tm_recheckpoint of pid %d (new->msr 0x%lx)\n",
+		 new->pid, new->thread.regs->msr);
 
-	tm_recheckpoint(&new->thread, msr);
+	tm_recheckpoint(&new->thread);
 
 	/*
 	 * The checkpointed state has been restored but the live state has

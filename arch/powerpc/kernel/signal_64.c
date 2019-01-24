@@ -207,12 +207,20 @@ static long setup_tm_sigcontexts(struct sigcontext __user *sc,
 	elf_vrreg_t __user *tm_v_regs = sigcontext_vmx_regs(tm_sc);
 #endif
 	struct pt_regs *regs = tsk->thread.regs;
-	unsigned long msr = tsk->thread.ckpt_regs.msr;
+	unsigned long msr = tsk->thread.regs->msr;
 	long err = 0;
 
 	BUG_ON(tsk != current);
 
 	BUG_ON(!MSR_TM_ACTIVE(regs->msr));
+
+	WARN_ON(tm_suspend_disabled);
+
+	/* Restore checkpointed FP, VEC, and VSX bits from ckpt_regs as
+	 * it contains the correct FP, VEC, VSX state after we treclaimed
+	 * the transaction and giveup_all() was called on reclaiming.
+	 */
+	msr |= tsk->thread.ckpt_regs.msr & (MSR_FP | MSR_VEC | MSR_VSX);
 
 	/* Remove TM bits from thread's MSR.  The MSR in the sigcontext
 	 * just indicates to userland that we were doing a transaction, but we
@@ -430,6 +438,9 @@ static long restore_tm_sigcontexts(struct task_struct *tsk,
 
 	BUG_ON(tsk != current);
 
+	if (tm_suspend_disabled)
+		return -EINVAL;
+
 	/* copy the GPRs */
 	err |= __copy_from_user(regs->gpr, tm_sc->gp_regs, sizeof(regs->gpr));
 	err |= __copy_from_user(&tsk->thread.ckpt_regs, sc->gp_regs,
@@ -451,20 +462,6 @@ static long restore_tm_sigcontexts(struct task_struct *tsk,
 	/* Don't allow reserved mode. */
 	if (MSR_TM_RESV(msr))
 		return -EINVAL;
-
-	/* pull in MSR TS bits from user context */
-	regs->msr = (regs->msr & ~MSR_TS_MASK) | (msr & MSR_TS_MASK);
-
-	/*
-	 * Ensure that TM is enabled in regs->msr before we leave the signal
-	 * handler. It could be the case that (a) user disabled the TM bit
-	 * through the manipulation of the MSR bits in uc_mcontext or (b) the
-	 * TM bit was disabled because a sufficient number of context switches
-	 * happened whilst in the signal handler and load_tm overflowed,
-	 * disabling the TM bit. In either case we can end up with an illegal
-	 * TM state leading to a TM Bad Thing when we return to userspace.
-	 */
-	regs->msr |= MSR_TM;
 
 	/* pull in MSR LE from user context */
 	regs->msr = (regs->msr & ~MSR_LE) | (msr & MSR_LE);
@@ -557,8 +554,36 @@ static long restore_tm_sigcontexts(struct task_struct *tsk,
 	tm_enable();
 	/* Make sure the transaction is marked as failed */
 	tsk->thread.tm_texasr |= TEXASR_FS;
+
+	/*
+	 * Disabling preemption, since it is unsafe to be preempted
+	 * with MSR[TS] set without recheckpointing.
+	 */
+	preempt_disable();
+
+	/* pull in MSR TS bits from user context */
+	regs->msr |= msr & MSR_TS_MASK;
+
+	/*
+	 * Ensure that TM is enabled in regs->msr before we leave the signal
+	 * handler. It could be the case that (a) user disabled the TM bit
+	 * through the manipulation of the MSR bits in uc_mcontext or (b) the
+	 * TM bit was disabled because a sufficient number of context switches
+	 * happened whilst in the signal handler and load_tm overflowed,
+	 * disabling the TM bit. In either case we can end up with an illegal
+	 * TM state leading to a TM Bad Thing when we return to userspace.
+	 *
+	 * CAUTION:
+	 * After regs->MSR[TS] being updated, make sure that get_user(),
+	 * put_user() or similar functions are *not* called. These
+	 * functions can generate page faults which will cause the process
+	 * to be de-scheduled with MSR[TS] set but without calling
+	 * tm_recheckpoint(). This can cause a bug.
+	 */
+	regs->msr |= MSR_TM;
+
 	/* This loads the checkpointed FP/VEC state, if used */
-	tm_recheckpoint(&tsk->thread, msr);
+	tm_recheckpoint(&tsk->thread);
 
 	msr_check_and_set(msr & (MSR_FP | MSR_VEC));
 	if (msr & MSR_FP) {
@@ -569,6 +594,8 @@ static long restore_tm_sigcontexts(struct task_struct *tsk,
 		load_vr_state(&tsk->thread.vr_state);
 		regs->msr |= MSR_VEC;
 	}
+
+	preempt_enable();
 
 	return err;
 }
@@ -720,6 +747,31 @@ int sys_rt_sigreturn(unsigned long r3, unsigned long r4, unsigned long r5,
 	if (MSR_TM_SUSPENDED(mfmsr()))
 		tm_reclaim_current(0);
 
+	/*
+	 * Disable MSR[TS] bit also, so, if there is an exception in the
+	 * code below (as a page fault in copy_ckvsx_to_user()), it does
+	 * not recheckpoint this task if there was a context switch inside
+	 * the exception.
+	 *
+	 * A major page fault can indirectly call schedule(). A reschedule
+	 * process in the middle of an exception can have a side effect
+	 * (Changing the CPU MSR[TS] state), since schedule() is called
+	 * with the CPU MSR[TS] disable and returns with MSR[TS]=Suspended
+	 * (switch_to() calls tm_recheckpoint() for the 'new' process). In
+	 * this case, the process continues to be the same in the CPU, but
+	 * the CPU state just changed.
+	 *
+	 * This can cause a TM Bad Thing, since the MSR in the stack will
+	 * have the MSR[TS]=0, and this is what will be used to RFID.
+	 *
+	 * Clearing MSR[TS] state here will avoid a recheckpoint if there
+	 * is any process reschedule in kernel space. The MSR[TS] state
+	 * does not need to be saved also, since it will be replaced with
+	 * the MSR[TS] that came from user context later, at
+	 * restore_tm_sigcontexts.
+	 */
+	regs->msr &= ~MSR_TS_MASK;
+
 	if (__get_user(msr, &uc->uc_mcontext.gp_regs[PT_MSR]))
 		goto badframe;
 	if (MSR_TM_ACTIVE(msr)) {
@@ -730,12 +782,25 @@ int sys_rt_sigreturn(unsigned long r3, unsigned long r4, unsigned long r5,
 		if (restore_tm_sigcontexts(current, &uc->uc_mcontext,
 					   &uc_transact->uc_mcontext))
 			goto badframe;
-	}
-	else
-	/* Fall through, for non-TM restore */
+	} else
 #endif
-	if (restore_sigcontext(current, NULL, 1, &uc->uc_mcontext))
-		goto badframe;
+	{
+		/*
+		 * Fall through, for non-TM restore
+		 *
+		 * Unset MSR[TS] on the thread regs since MSR from user
+		 * context does not have MSR active, and recheckpoint was
+		 * not called since restore_tm_sigcontexts() was not called
+		 * also.
+		 *
+		 * If not unsetting it, the code can RFID to userspace with
+		 * MSR[TS] set, but without CPU in the proper state,
+		 * causing a TM bad thing.
+		 */
+		current->thread.regs->msr &= ~MSR_TS_MASK;
+		if (restore_sigcontext(current, NULL, 1, &uc->uc_mcontext))
+			goto badframe;
+	}
 
 	if (restore_altstack(&uc->uc_stack))
 		goto badframe;
