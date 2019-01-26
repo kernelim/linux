@@ -1232,10 +1232,14 @@ void qla24xx_handle_gpdb_event(scsi_qla_host_t *vha, struct event_arg *ea)
 	if (fcport->disc_state == DSC_DELETE_PEND)
 		return;
 
-	if (fcport->fc4f_nvme)
+	if (fcport->fc4f_nvme &&
+	    (pd->current_login_state >> 4) == PDS_PRLI_COMPLETE)
 		ls = pd->current_login_state >> 4;
-	else
+	else {
+		fcport->fc4_type = FC4_TYPE_FCP_SCSI;
+		fcport->fc4f_nvme = 0;
 		ls = pd->current_login_state & 0xf;
+	}
 
 	if (ea->sp->gen2 != fcport->login_gen) {
 		/* target side must have changed it. */
