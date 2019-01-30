@@ -810,7 +810,6 @@ void snd_hda_codec_register(struct hda_codec *codec)
 	if (codec->registered)
 		return;
 	if (device_is_registered(hda_codec_dev(codec))) {
-		snd_hda_register_beep_device(codec);
 		snd_hdac_link_power(&codec->core, true);
 		pm_runtime_enable(hda_codec_dev(codec));
 		/* it was powered up in snd_hda_codec_new(), now all done */
@@ -822,14 +821,6 @@ void snd_hda_codec_register(struct hda_codec *codec)
 static int snd_hda_codec_dev_register(struct snd_device *device)
 {
 	snd_hda_codec_register(device->device_data);
-	return 0;
-}
-
-static int snd_hda_codec_dev_disconnect(struct snd_device *device)
-{
-	struct hda_codec *codec = device->device_data;
-
-	snd_hda_detach_beep_device(codec);
 	return 0;
 }
 
@@ -873,7 +864,6 @@ int snd_hda_codec_new(struct hda_bus *bus, struct snd_card *card,
 	int err;
 	static struct snd_device_ops dev_ops = {
 		.dev_register = snd_hda_codec_dev_register,
-		.dev_disconnect = snd_hda_codec_dev_disconnect,
 		.dev_free = snd_hda_codec_dev_free,
 	};
 
