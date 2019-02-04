@@ -176,7 +176,8 @@ void dwc3_gadget_giveback(struct dwc3_ep *dep, struct dwc3_request *req,
 	list_del(&req->list);
 	req->trb = NULL;
 	req->remaining = 0;
-	req->needs_extra_trb = false;
+	req->unaligned = false;
+	req->zero = false;
 
 	if (req->request.status == -EINPROGRESS)
 		req->request.status = status;

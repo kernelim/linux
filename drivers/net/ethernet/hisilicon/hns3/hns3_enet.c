@@ -234,7 +234,28 @@ static int hns3_nic_set_real_num_queue(struct net_device *netdev)
 	struct hnae3_handle *h = hns3_get_handle(netdev);
 	struct hnae3_knic_private_info *kinfo = &h->kinfo;
 	unsigned int queue_size = kinfo->rss_size * kinfo->num_tc;
-	int ret;
+	int i, ret;
+
+	if (kinfo->num_tc <= 1) {
+		netdev_reset_tc(netdev);
+	} else {
+		ret = netdev_set_num_tc(netdev, kinfo->num_tc);
+		if (ret) {
+			netdev_err(netdev,
+				   "netdev_set_num_tc fail, ret=%d!\n", ret);
+			return ret;
+		}
+
+		for (i = 0; i < HNAE3_MAX_TC; i++) {
+			if (!kinfo->tc_info[i].enable)
+				continue;
+
+			netdev_set_tc_queue(netdev,
+					    kinfo->tc_info[i].tc,
+					    kinfo->tc_info[i].tqp_count,
+					    kinfo->tc_info[i].tqp_offset);
+		}
+	}
 
 	ret = netif_set_real_num_tx_queues(netdev, queue_size);
 	if (ret) {
@@ -307,7 +328,9 @@ out_start_err:
 static int hns3_nic_net_open(struct net_device *netdev)
 {
 	struct hns3_nic_priv *priv = netdev_priv(netdev);
-	int ret;
+	struct hnae3_handle *h = hns3_get_handle(netdev);
+	struct hnae3_knic_private_info *kinfo;
+	int i, ret;
 
 	netif_carrier_off(netdev);
 
@@ -320,6 +343,12 @@ static int hns3_nic_net_open(struct net_device *netdev)
 		netdev_err(netdev,
 			   "hns net up fail, ret=%d!\n", ret);
 		return ret;
+	}
+
+	kinfo = &h->kinfo;
+	for (i = 0; i < HNAE3_MAX_USER_PRIO; i++) {
+		netdev_set_prio_tc_map(netdev, i,
+				       kinfo->prio_tc[i]);
 	}
 
 	priv->ae_handle->last_reset_time = jiffies;
@@ -867,35 +896,28 @@ static int hns3_fill_desc_vtags(struct sk_buff *skb,
 }
 
 static int hns3_fill_desc(struct hns3_enet_ring *ring, void *priv,
-			  int size, dma_addr_t dma, int frag_end,
-			  enum hns_desc_type type)
+			  int size, int frag_end, enum hns_desc_type type)
 {
 	struct hns3_desc_cb *desc_cb = &ring->desc_cb[ring->next_to_use];
 	struct hns3_desc *desc = &ring->desc[ring->next_to_use];
+	struct device *dev = ring_to_dev(ring);
 	u32 ol_type_vlan_len_msec = 0;
 	u16 bdtp_fe_sc_vld_ra_ri = 0;
+	struct skb_frag_struct *frag;
+	unsigned int frag_buf_num;
 	u32 type_cs_vlan_tso = 0;
 	struct sk_buff *skb;
 	u16 inner_vtag = 0;
 	u16 out_vtag = 0;
+	unsigned int k;
+	int sizeoflast;
 	u32 paylen = 0;
+	dma_addr_t dma;
 	u16 mss = 0;
 	__be16 protocol;
 	u8 ol4_proto;
 	u8 il4_proto;
 	int ret;
-
-	/* The txbd's baseinfo of DESC_TYPE_PAGE & DESC_TYPE_SKB */
-	desc_cb->priv = priv;
-	desc_cb->length = size;
-	desc_cb->dma = dma;
-	desc_cb->type = type;
-
-	/* now, fill the descriptor */
-	desc->addr = cpu_to_le64(dma);
-	desc->tx.send_size = cpu_to_le16((u16)size);
-	hns3_set_txbd_baseinfo(&bdtp_fe_sc_vld_ra_ri, frag_end);
-	desc->tx.bdtp_fe_sc_vld_ra_ri = cpu_to_le16(bdtp_fe_sc_vld_ra_ri);
 
 	if (type == DESC_TYPE_SKB) {
 		skb = (struct sk_buff *)priv;
@@ -938,38 +960,47 @@ static int hns3_fill_desc(struct hns3_enet_ring *ring, void *priv,
 		desc->tx.mss = cpu_to_le16(mss);
 		desc->tx.vlan_tag = cpu_to_le16(inner_vtag);
 		desc->tx.outer_vlan_tag = cpu_to_le16(out_vtag);
+
+		dma = dma_map_single(dev, skb->data, size, DMA_TO_DEVICE);
+	} else {
+		frag = (struct skb_frag_struct *)priv;
+		dma = skb_frag_dma_map(dev, frag, 0, size, DMA_TO_DEVICE);
 	}
 
-	/* move ring pointer to next.*/
-	ring_ptr_move_fw(ring, next_to_use);
+	if (dma_mapping_error(ring->dev, dma)) {
+		ring->stats.sw_err_cnt++;
+		return -ENOMEM;
+	}
 
-	return 0;
-}
-
-static int hns3_fill_desc_tso(struct hns3_enet_ring *ring, void *priv,
-			      int size, dma_addr_t dma, int frag_end,
-			      enum hns_desc_type type)
-{
-	unsigned int frag_buf_num;
-	unsigned int k;
-	int sizeoflast;
-	int ret;
+	desc_cb->length = size;
 
 	frag_buf_num = (size + HNS3_MAX_BD_SIZE - 1) / HNS3_MAX_BD_SIZE;
 	sizeoflast = size % HNS3_MAX_BD_SIZE;
 	sizeoflast = sizeoflast ? sizeoflast : HNS3_MAX_BD_SIZE;
 
-	/* When the frag size is bigger than hardware, split this frag */
+	/* When frag size is bigger than hardware limit, split this frag */
 	for (k = 0; k < frag_buf_num; k++) {
-		ret = hns3_fill_desc(ring, priv,
-				     (k == frag_buf_num - 1) ?
-				sizeoflast : HNS3_MAX_BD_SIZE,
-				dma + HNS3_MAX_BD_SIZE * k,
-				frag_end && (k == frag_buf_num - 1) ? 1 : 0,
-				(type == DESC_TYPE_SKB && !k) ?
-					DESC_TYPE_SKB : DESC_TYPE_PAGE);
-		if (ret)
-			return ret;
+		/* The txbd's baseinfo of DESC_TYPE_PAGE & DESC_TYPE_SKB */
+		desc_cb->priv = priv;
+		desc_cb->dma = dma + HNS3_MAX_BD_SIZE * k;
+		desc_cb->type = (type == DESC_TYPE_SKB && !k) ?
+					DESC_TYPE_SKB : DESC_TYPE_PAGE;
+
+		/* now, fill the descriptor */
+		desc->addr = cpu_to_le64(dma + HNS3_MAX_BD_SIZE * k);
+		desc->tx.send_size = cpu_to_le16((k == frag_buf_num - 1) ?
+				(u16)sizeoflast : (u16)HNS3_MAX_BD_SIZE);
+		hns3_set_txbd_baseinfo(&bdtp_fe_sc_vld_ra_ri,
+				       frag_end && (k == frag_buf_num - 1) ?
+						1 : 0);
+		desc->tx.bdtp_fe_sc_vld_ra_ri =
+				cpu_to_le16(bdtp_fe_sc_vld_ra_ri);
+
+		/* move ring pointer to next.*/
+		ring_ptr_move_fw(ring, next_to_use);
+
+		desc_cb = &ring->desc_cb[ring->next_to_use];
+		desc = &ring->desc[ring->next_to_use];
 	}
 
 	return 0;
@@ -1025,7 +1056,7 @@ static int hns3_nic_maybe_stop_tx(struct sk_buff **out_skb, int *bnum,
 	return 0;
 }
 
-static void hns_nic_dma_unmap(struct hns3_enet_ring *ring, int next_to_use_orig)
+static void hns3_clear_desc(struct hns3_enet_ring *ring, int next_to_use_orig)
 {
 	struct device *dev = ring_to_dev(ring);
 	unsigned int i;
@@ -1041,11 +1072,13 @@ static void hns_nic_dma_unmap(struct hns3_enet_ring *ring, int next_to_use_orig)
 					 ring->desc_cb[ring->next_to_use].dma,
 					ring->desc_cb[ring->next_to_use].length,
 					DMA_TO_DEVICE);
-		else
+		else if (ring->desc_cb[ring->next_to_use].length)
 			dma_unmap_page(dev,
 				       ring->desc_cb[ring->next_to_use].dma,
 				       ring->desc_cb[ring->next_to_use].length,
 				       DMA_TO_DEVICE);
+
+		ring->desc_cb[ring->next_to_use].length = 0;
 
 		/* rollback one */
 		ring_ptr_move_bw(ring, next_to_use);
@@ -1058,12 +1091,10 @@ netdev_tx_t hns3_nic_net_xmit(struct sk_buff *skb, struct net_device *netdev)
 	struct hns3_nic_ring_data *ring_data =
 		&tx_ring_data(priv, skb->queue_mapping);
 	struct hns3_enet_ring *ring = ring_data->ring;
-	struct device *dev = priv->dev;
 	struct netdev_queue *dev_queue;
 	struct skb_frag_struct *frag;
 	int next_to_use_head;
 	int next_to_use_frag;
-	dma_addr_t dma;
 	int buf_num;
 	int seg_num;
 	int size;
@@ -1098,35 +1129,23 @@ netdev_tx_t hns3_nic_net_xmit(struct sk_buff *skb, struct net_device *netdev)
 
 	next_to_use_head = ring->next_to_use;
 
-	dma = dma_map_single(dev, skb->data, size, DMA_TO_DEVICE);
-	if (dma_mapping_error(dev, dma)) {
-		netdev_err(netdev, "TX head DMA map failed\n");
-		ring->stats.sw_err_cnt++;
-		goto out_err_tx_ok;
-	}
-
-	ret = priv->ops.fill_desc(ring, skb, size, dma, seg_num == 1 ? 1 : 0,
-			   DESC_TYPE_SKB);
+	ret = priv->ops.fill_desc(ring, skb, size, seg_num == 1 ? 1 : 0,
+				  DESC_TYPE_SKB);
 	if (ret)
-		goto head_dma_map_err;
+		goto head_fill_err;
 
 	next_to_use_frag = ring->next_to_use;
 	/* Fill the fragments */
 	for (i = 1; i < seg_num; i++) {
 		frag = &skb_shinfo(skb)->frags[i - 1];
 		size = skb_frag_size(frag);
-		dma = skb_frag_dma_map(dev, frag, 0, size, DMA_TO_DEVICE);
-		if (dma_mapping_error(dev, dma)) {
-			netdev_err(netdev, "TX frag(%d) DMA map failed\n", i);
-			ring->stats.sw_err_cnt++;
-			goto frag_dma_map_err;
-		}
-		ret = priv->ops.fill_desc(ring, skb_frag_page(frag), size, dma,
-				    seg_num - 1 == i ? 1 : 0,
-				    DESC_TYPE_PAGE);
+
+		ret = priv->ops.fill_desc(ring, frag, size,
+					  seg_num - 1 == i ? 1 : 0,
+					  DESC_TYPE_PAGE);
 
 		if (ret)
-			goto frag_dma_map_err;
+			goto frag_fill_err;
 	}
 
 	/* Complete translate all packets */
@@ -1139,11 +1158,11 @@ netdev_tx_t hns3_nic_net_xmit(struct sk_buff *skb, struct net_device *netdev)
 
 	return NETDEV_TX_OK;
 
-frag_dma_map_err:
-	hns_nic_dma_unmap(ring, next_to_use_frag);
+frag_fill_err:
+	hns3_clear_desc(ring, next_to_use_frag);
 
-head_dma_map_err:
-	hns_nic_dma_unmap(ring, next_to_use_head);
+head_fill_err:
+	hns3_clear_desc(ring, next_to_use_head);
 
 out_err_tx_ok:
 	dev_kfree_skb_any(skb);
@@ -1205,13 +1224,10 @@ static int hns3_nic_set_features(struct net_device *netdev,
 	int ret;
 
 	if (changed & (NETIF_F_TSO | NETIF_F_TSO6)) {
-		if (features & (NETIF_F_TSO | NETIF_F_TSO6)) {
-			priv->ops.fill_desc = hns3_fill_desc_tso;
+		if (features & (NETIF_F_TSO | NETIF_F_TSO6))
 			priv->ops.maybe_stop_tx = hns3_nic_maybe_stop_tso;
-		} else {
-			priv->ops.fill_desc = hns3_fill_desc;
+		else
 			priv->ops.maybe_stop_tx = hns3_nic_maybe_stop_tx;
-		}
 	}
 
 	if ((changed & NETIF_F_HW_VLAN_CTAG_FILTER) &&
@@ -1312,7 +1328,6 @@ static int hns3_setup_tc(struct net_device *netdev, u8 tc)
 {
 	struct hnae3_handle *h = hns3_get_handle(netdev);
 	struct hnae3_knic_private_info *kinfo = &h->kinfo;
-	unsigned int i;
 	int ret;
 
 	if (tc > HNAE3_MAX_TC)
@@ -1324,26 +1339,9 @@ static int hns3_setup_tc(struct net_device *netdev, u8 tc)
 	if (!netdev)
 		return -EINVAL;
 
-	if (!tc) {
-		netdev_reset_tc(netdev);
-		return 0;
-	}
+	ret = hns3_nic_set_real_num_queue(netdev);
 
-	/* Set num_tc for netdev */
-	ret = netdev_set_num_tc(netdev, tc);
-	if (ret)
-		return ret;
-
-	/* Set per TC queues for the VSI */
-	for (i = 0; i < HNAE3_MAX_TC; i++) {
-		if (kinfo->tc_info[i].enable)
-			netdev_set_tc_queue(netdev,
-					    kinfo->tc_info[i].tc,
-					    kinfo->tc_info[i].tqp_count,
-					    kinfo->tc_info[i].tqp_offset);
-	}
-
-	return 0;
+	return ret;
 }
 
 static int hns3_nic_setup_tc(struct net_device *dev, enum tc_setup_type type,
@@ -1739,7 +1737,7 @@ static void hns3_unmap_buffer(struct hns3_enet_ring *ring,
 	if (cb->type == DESC_TYPE_SKB)
 		dma_unmap_single(ring_to_dev(ring), cb->dma, cb->length,
 				 ring_to_dma_dir(ring));
-	else
+	else if (cb->length)
 		dma_unmap_page(ring_to_dev(ring), cb->dma, cb->length,
 			       ring_to_dma_dir(ring));
 }
@@ -2623,7 +2621,7 @@ static int hns3_nic_init_vector_data(struct hns3_nic_priv *priv)
 	struct hnae3_handle *h = priv->ae_handle;
 	struct hns3_enet_tqp_vector *tqp_vector;
 	int ret = 0;
-	u16 i;
+	int i;
 
 	for (i = 0; i < priv->vector_num; i++) {
 		tqp_vector = &priv->tqp_vector[i];
@@ -2668,13 +2666,19 @@ static int hns3_nic_init_vector_data(struct hns3_nic_priv *priv)
 		hns3_free_vector_ring_chain(tqp_vector, &vector_ring_chain);
 
 		if (ret)
-			return ret;
+			goto map_ring_fail;
 
 		netif_napi_add(priv->netdev, &tqp_vector->napi,
 			       hns3_nic_common_poll, NAPI_POLL_WEIGHT);
 	}
 
 	return 0;
+
+map_ring_fail:
+	while (i--)
+		netif_napi_del(&priv->tqp_vector[i].napi);
+
+	return ret;
 }
 
 static int hns3_nic_alloc_vector_data(struct hns3_nic_priv *priv)
@@ -3059,14 +3063,12 @@ static void hns3_nic_set_priv_ops(struct net_device *netdev)
 {
 	struct hns3_nic_priv *priv = netdev_priv(netdev);
 
+	priv->ops.fill_desc = hns3_fill_desc;
 	if ((netdev->features & NETIF_F_TSO) ||
-	    (netdev->features & NETIF_F_TSO6)) {
-		priv->ops.fill_desc = hns3_fill_desc_tso;
+	    (netdev->features & NETIF_F_TSO6))
 		priv->ops.maybe_stop_tx = hns3_nic_maybe_stop_tso;
-	} else {
-		priv->ops.fill_desc = hns3_fill_desc;
+	else
 		priv->ops.maybe_stop_tx = hns3_nic_maybe_stop_tx;
-	}
 }
 
 static int hns3_client_init(struct hnae3_handle *handle)
@@ -3216,7 +3218,6 @@ static int hns3_client_setup_tc(struct hnae3_handle *handle, u8 tc)
 	struct net_device *ndev = kinfo->netdev;
 	bool if_running;
 	int ret;
-	u8 i;
 
 	if (tc > HNAE3_MAX_TC)
 		return -EINVAL;
@@ -3225,10 +3226,6 @@ static int hns3_client_setup_tc(struct hnae3_handle *handle, u8 tc)
 		return -ENODEV;
 
 	if_running = netif_running(ndev);
-
-	ret = netdev_set_num_tc(ndev, tc);
-	if (ret)
-		return ret;
 
 	if (if_running) {
 		(void)hns3_nic_net_stop(ndev);
@@ -3240,27 +3237,6 @@ static int hns3_client_setup_tc(struct hnae3_handle *handle, u8 tc)
 	if (ret)
 		goto err_out;
 
-	if (tc <= 1) {
-		netdev_reset_tc(ndev);
-		goto out;
-	}
-
-	for (i = 0; i < HNAE3_MAX_TC; i++) {
-		struct hnae3_tc_info *tc_info = &kinfo->tc_info[i];
-
-		if (tc_info->enable)
-			netdev_set_tc_queue(ndev,
-					    tc_info->tc,
-					    tc_info->tqp_count,
-					    tc_info->tqp_offset);
-	}
-
-	for (i = 0; i < HNAE3_MAX_USER_PRIO; i++) {
-		netdev_set_prio_tc_map(ndev, i,
-				       kinfo->prio_tc[i]);
-	}
-
-out:
 	ret = hns3_nic_set_real_num_queue(ndev);
 
 err_out:

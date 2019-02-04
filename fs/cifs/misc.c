@@ -30,9 +30,7 @@
 #include "smberr.h"
 #include "nterr.h"
 #include "cifs_unicode.h"
-#ifdef CONFIG_CIFS_SMB2
 #include "smb2pdu.h"
-#endif
 
 extern mempool_t *cifs_sm_req_poolp;
 extern mempool_t *cifs_req_poolp;
@@ -143,15 +141,12 @@ struct smb_hdr *
 cifs_buf_get(void)
 {
 	struct smb_hdr *ret_buf = NULL;
-	size_t buf_size = sizeof(struct smb_hdr);
-
-#ifdef CONFIG_CIFS_SMB2
 	/*
 	 * SMB2 header is bigger than CIFS one - no problems to clean some
 	 * more bytes for CIFS.
 	 */
-	buf_size = sizeof(struct smb2_hdr);
-#endif
+	size_t buf_size = sizeof(struct smb2_hdr);
+
 	/*
 	 * We could use negotiated size instead of max_msgsize -
 	 * but it may be more efficient to always alloc same size
@@ -614,9 +609,7 @@ void
 cifs_add_pending_open_locked(struct cifs_fid *fid, struct tcon_link *tlink,
 			     struct cifs_pending_open *open)
 {
-#ifdef CONFIG_CIFS_SMB2
 	memcpy(open->lease_key, fid->lease_key, SMB2_LEASE_KEY_SIZE);
-#endif
 	open->oplock = CIFS_OPLOCK_NO_CHANGE;
 	open->tlink = tlink;
 	fid->pending_open = open;
@@ -854,4 +847,58 @@ setup_aio_ctx_iter(struct cifs_aio_ctx *ctx, struct iov_iter *iter, int rw)
 	ctx->npages = npages;
 	iov_iter_bvec(&ctx->iter, ITER_BVEC | rw, ctx->bv, npages, ctx->len);
 	return 0;
+}
+
+/**
+ * cifs_alloc_hash - allocate hash and hash context together
+ *
+ * The caller has to make sure @sdesc is initialized to either NULL or
+ * a valid context. Both can be freed via cifs_free_hash().
+ */
+int
+cifs_alloc_hash(const char *name,
+		struct crypto_shash **shash, struct sdesc **sdesc)
+{
+	int rc = 0;
+	size_t size;
+
+	if (*sdesc != NULL)
+		return 0;
+
+	*shash = crypto_alloc_shash(name, 0, 0);
+	if (IS_ERR(*shash)) {
+		cifs_dbg(VFS, "could not allocate crypto %s\n", name);
+		rc = PTR_ERR(*shash);
+		*shash = NULL;
+		*sdesc = NULL;
+		return rc;
+	}
+
+	size = sizeof(struct shash_desc) + crypto_shash_descsize(*shash);
+	*sdesc = kmalloc(size, GFP_KERNEL);
+	if (*sdesc == NULL) {
+		cifs_dbg(VFS, "no memory left to allocate crypto %s\n", name);
+		crypto_free_shash(*shash);
+		*shash = NULL;
+		return -ENOMEM;
+	}
+
+	(*sdesc)->shash.tfm = *shash;
+	(*sdesc)->shash.flags = 0x0;
+	return 0;
+}
+
+/**
+ * cifs_free_hash - free hash and hash context together
+ *
+ * Freeing a NULL hash or context is safe.
+ */
+void
+cifs_free_hash(struct crypto_shash **shash, struct sdesc **sdesc)
+{
+	kfree(*sdesc);
+	*sdesc = NULL;
+	if (*shash)
+		crypto_free_shash(*shash);
+	*shash = NULL;
 }

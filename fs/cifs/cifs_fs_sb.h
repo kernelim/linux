@@ -50,6 +50,7 @@
 					      * root mountable
 					      */
 #define CIFS_MOUNT_UID_FROM_ACL 0x2000000 /* try to get UID via special SID */
+#define CIFS_MOUNT_NO_DFS 0x8000000
 
 struct cifs_sb_info {
 	struct rb_root tlink_tree;

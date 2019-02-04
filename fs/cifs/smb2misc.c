@@ -93,6 +93,39 @@ static const __le16 smb2_rsp_struct_sizes[NUMBER_OF_SMB2_COMMANDS] = {
 	/* SMB2_OPLOCK_BREAK */ cpu_to_le16(24)
 };
 
+static __u32 get_neg_ctxt_len(struct smb2_hdr *hdr, __u32 len, __u32 non_ctxlen)
+{
+	__u16 neg_count;
+	__u32 nc_offset, size_of_pad_before_neg_ctxts;
+	struct smb2_negotiate_rsp *pneg_rsp = (struct smb2_negotiate_rsp *)hdr;
+
+	/* Negotiate contexts are only valid for latest dialect SMB3.11 */
+	neg_count = le16_to_cpu(pneg_rsp->NegotiateContextCount);
+	if ((neg_count == 0) ||
+	   (pneg_rsp->DialectRevision != cpu_to_le16(SMB311_PROT_ID)))
+		return 0;
+
+	/* Make sure that negotiate contexts start after gss security blob */
+	nc_offset = le32_to_cpu(pneg_rsp->NegotiateContextOffset);
+	if (nc_offset < non_ctxlen - 4 /* RFC1001 len field */) {
+		printk_once(KERN_WARNING "invalid negotiate context offset\n");
+		return 0;
+	}
+	size_of_pad_before_neg_ctxts = nc_offset - (non_ctxlen - 4);
+
+	/* Verify that at least minimal negotiate contexts fit within frame */
+	if (len < nc_offset + (neg_count * sizeof(struct smb2_neg_context))) {
+		printk_once(KERN_WARNING "negotiate context goes beyond end\n");
+		return 0;
+	}
+
+	cifs_dbg(FYI, "length of negcontexts %d pad %d\n",
+		len - nc_offset, size_of_pad_before_neg_ctxts);
+
+	/* length of negcontexts including pad from end of sec blob to them */
+	return (len - nc_offset) + size_of_pad_before_neg_ctxts;
+}
+
 int
 smb2_check_message(char *buf, unsigned int length, struct TCP_Server_Info *srvr)
 {
@@ -196,6 +229,9 @@ smb2_check_message(char *buf, unsigned int length, struct TCP_Server_Info *srvr)
 	}
 
 	clc_len = smb2_calc_size(hdr);
+
+	if (shdr->Command == SMB2_NEGOTIATE)
+		clc_len += get_neg_ctxt_len(hdr, len, clc_len);
 
 	if (4 + len != clc_len) {
 		cifs_dbg(FYI, "Calculated size %u length %u mismatch mid %llu\n",
@@ -703,6 +739,68 @@ smb2_handle_cancelled_mid(char *buffer, struct TCP_Server_Info *server)
 	cancelled->tcon = tcon;
 	INIT_WORK(&cancelled->work, smb2_cancelled_close_fid);
 	queue_work(cifsiod_wq, &cancelled->work);
+
+	return 0;
+}
+
+/**
+ * smb311_update_preauth_hash - update @ses hash with the packet data in @iov
+ *
+ * Assumes @iov does not contain the rfc1002 length and iov[0] has the
+ * SMB2 header.
+ */
+int
+smb311_update_preauth_hash(struct cifs_ses *ses, struct kvec *iov, int nvec)
+{
+	int i, rc;
+	struct sdesc *d;
+	struct smb2_sync_hdr *hdr;
+
+	if (ses->server->tcpStatus == CifsGood) {
+		/* skip non smb311 connections */
+		if (ses->server->dialect != SMB311_PROT_ID)
+			return 0;
+
+		/* skip last sess setup response */
+		hdr = (struct smb2_sync_hdr *)iov[0].iov_base;
+		if (hdr->Flags & SMB2_FLAGS_SIGNED)
+			return 0;
+	}
+
+	rc = smb311_crypto_shash_allocate(ses->server);
+	if (rc)
+		return rc;
+
+	d = ses->server->secmech.sdescsha512;
+	rc = crypto_shash_init(&d->shash);
+	if (rc) {
+		cifs_dbg(VFS, "%s: could not init sha512 shash\n", __func__);
+		return rc;
+	}
+
+	rc = crypto_shash_update(&d->shash, ses->preauth_sha_hash,
+				 SMB2_PREAUTH_HASH_SIZE);
+	if (rc) {
+		cifs_dbg(VFS, "%s: could not update sha512 shash\n", __func__);
+		return rc;
+	}
+
+	for (i = 0; i < nvec; i++) {
+		rc = crypto_shash_update(&d->shash,
+					 iov[i].iov_base, iov[i].iov_len);
+		if (rc) {
+			cifs_dbg(VFS, "%s: could not update sha512 shash\n",
+				 __func__);
+			return rc;
+		}
+	}
+
+	rc = crypto_shash_final(&d->shash, ses->preauth_sha_hash);
+	if (rc) {
+		cifs_dbg(VFS, "%s: could not finalize sha512 shash\n",
+			 __func__);
+		return rc;
+	}
 
 	return 0;
 }

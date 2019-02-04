@@ -3655,6 +3655,8 @@ static int hclge_set_mac_loopback(struct hclge_dev *hdev, bool en)
 	/* 2 Then setup the loopback flag */
 	loop_en = le32_to_cpu(req->txrx_pad_fcs_loop_en);
 	hnae3_set_bit(loop_en, HCLGE_MAC_APP_LP_B, en ? 1 : 0);
+	hnae3_set_bit(loop_en, HCLGE_MAC_TX_EN_B, en ? 1 : 0);
+	hnae3_set_bit(loop_en, HCLGE_MAC_RX_EN_B, en ? 1 : 0);
 
 	req->txrx_pad_fcs_loop_en = cpu_to_le32(loop_en);
 
@@ -3666,27 +3668,6 @@ static int hclge_set_mac_loopback(struct hclge_dev *hdev, bool en)
 	if (ret)
 		dev_err(&hdev->pdev->dev,
 			"mac loopback set fail, ret =%d.\n", ret);
-	return ret;
-}
-
-static int hclge_set_loopback(struct hnae3_handle *handle,
-			      enum hnae3_loop loop_mode, bool en)
-{
-	struct hclge_vport *vport = hclge_get_vport(handle);
-	struct hclge_dev *hdev = vport->back;
-	int ret;
-
-	switch (loop_mode) {
-	case HNAE3_MAC_INTER_LOOP_MAC:
-		ret = hclge_set_mac_loopback(hdev, en);
-		break;
-	default:
-		ret = -ENOTSUPP;
-		dev_err(&hdev->pdev->dev,
-			"loop_mode %d is not supported\n", loop_mode);
-		break;
-	}
-
 	return ret;
 }
 
@@ -3708,6 +3689,33 @@ static int hclge_tqp_enable(struct hclge_dev *hdev, int tqp_id,
 		dev_err(&hdev->pdev->dev,
 			"Tqp enable fail, status =%d.\n", ret);
 	return ret;
+}
+
+static int hclge_set_loopback(struct hnae3_handle *handle,
+			      enum hnae3_loop loop_mode, bool en)
+{
+	struct hclge_vport *vport = hclge_get_vport(handle);
+	struct hclge_dev *hdev = vport->back;
+	int i, ret;
+
+	switch (loop_mode) {
+	case HNAE3_MAC_INTER_LOOP_MAC:
+		ret = hclge_set_mac_loopback(hdev, en);
+		break;
+	default:
+		ret = -ENOTSUPP;
+		dev_err(&hdev->pdev->dev,
+			"loop_mode %d is not supported\n", loop_mode);
+		break;
+	}
+
+	for (i = 0; i < vport->alloc_tqps; i++) {
+		ret = hclge_tqp_enable(hdev, i, 0, en);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
 }
 
 static void hclge_reset_tqp_stats(struct hnae3_handle *handle)
@@ -5418,6 +5426,8 @@ static int hclge_init_client_instance(struct hnae3_client *client,
 				goto clear_nic;
 			}
 
+			hnae3_set_client_init_flag(client, ae_dev, 1);
+
 			if (hdev->roce_client &&
 			    hnae3_dev_roce_supported(hdev)) {
 				struct hnae3_client *rc = hdev->roce_client;
@@ -5429,6 +5439,9 @@ static int hclge_init_client_instance(struct hnae3_client *client,
 				ret = rc->ops->init_instance(&vport->roce);
 				if (ret)
 					goto clear_roce;
+
+				hnae3_set_client_init_flag(hdev->roce_client,
+							   ae_dev, 1);
 			}
 
 			break;
@@ -5439,6 +5452,8 @@ static int hclge_init_client_instance(struct hnae3_client *client,
 			ret = client->ops->init_instance(&vport->nic);
 			if (ret)
 				goto clear_nic;
+
+			hnae3_set_client_init_flag(client, ae_dev, 1);
 
 			break;
 		case HNAE3_CLIENT_ROCE:
@@ -5455,6 +5470,8 @@ static int hclge_init_client_instance(struct hnae3_client *client,
 				ret = client->ops->init_instance(&vport->roce);
 				if (ret)
 					goto clear_roce;
+
+				hnae3_set_client_init_flag(client, ae_dev, 1);
 			}
 		}
 	}
