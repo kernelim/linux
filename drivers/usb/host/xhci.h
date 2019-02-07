@@ -1858,6 +1858,8 @@ struct xhci_hcd {
 	/* support xHCI 1.0 spec USB2 hardware LPM */
 	unsigned		hw_lpm_support:1;
 #ifndef __GENKSYMS__
+	/* quirk for renesas xhci implementation */
+	unsigned		zero_64b_regs:1;
 	/* Broken Suspend flag for SNPS Suspend resume issue */
 	unsigned		broken_suspend:1;
 #endif
