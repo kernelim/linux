@@ -617,15 +617,16 @@ struct ata_host {
 	void			*private_data;
 	struct ata_port_operations *ops;
 	unsigned long		flags;
-#ifndef __GENKSYMS__
-	struct kref		kref;
-#endif
 
 	struct mutex		eh_mutex;
 	struct task_struct	*eh_owner;
 
 	struct ata_port		*simplex_claimed;	/* channel owning the DMA */
 	struct ata_port		*ports[0];
+#ifndef __GENKSYMS__
+	struct kref		kref;
+#endif
+
 };
 
 struct ata_queued_cmd {
