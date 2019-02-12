@@ -170,10 +170,6 @@ struct bpf_ext_analyzer_ops {
  * one verifier_env per bpf_check() call
  */
 struct bpf_verifier_env {
-#ifndef __GENKSYMS__
-	u32 insn_idx;
-	u32 prev_insn_idx;
-#endif
 	struct bpf_prog *prog;		/* eBPF program being verified */
 	const struct bpf_verifier_ops *ops;
 	struct bpf_verifier_stack_elem *head; /* stack of verifier states to be processed */
@@ -191,6 +187,10 @@ struct bpf_verifier_env {
 	struct bpf_insn_aux_data *insn_aux_data; /* array of per-insn state */
 
 	struct bpf_verifer_log log;
+#ifndef __GENKSYMS__
+	u32 insn_idx;
+	u32 prev_insn_idx;
+#endif
 };
 
 static inline struct bpf_reg_state *cur_regs(struct bpf_verifier_env *env)
