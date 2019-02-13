@@ -623,10 +623,6 @@ struct ata_host {
 
 	struct ata_port		*simplex_claimed;	/* channel owning the DMA */
 	struct ata_port		*ports[0];
-#ifndef __GENKSYMS__
-	struct kref		kref;
-#endif
-
 };
 
 struct ata_queued_cmd {
