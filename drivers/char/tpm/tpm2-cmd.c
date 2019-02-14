@@ -398,11 +398,10 @@ static const struct tpm_input_header tpm2_get_tpm_pt_header = {
 
 /**
  * tpm2_flush_context_cmd() - execute a TPM2_FlushContext command
- * @chip: TPM chip to use
- * @payload: the key data in clear and encrypted form
- * @options: authentication values and other options
+ * @chip:	TPM chip to use
+ * @handle:	context handle
+ * @flags:	tpm transmit flags - bitmap
  *
- * Return: same as with tpm_transmit_cmd
  */
 void tpm2_flush_context_cmd(struct tpm_chip *chip, u32 handle,
 			    unsigned int flags)

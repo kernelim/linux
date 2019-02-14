@@ -82,6 +82,7 @@ enum {
 	Opt_wsync, Opt_noalign, Opt_swalloc, Opt_sunit, Opt_swidth, Opt_nouuid,
 	Opt_mtpt, Opt_grpid, Opt_nogrpid, Opt_bsdgroups, Opt_sysvgroups,
 	Opt_allocsize, Opt_norecovery, Opt_barrier, Opt_nobarrier,
+	Opt_barrierl,
 	Opt_inode64, Opt_inode32, Opt_ikeep, Opt_noikeep,
 	Opt_largeio, Opt_nolargeio, Opt_attr2, Opt_noattr2, Opt_filestreams,
 	Opt_quota, Opt_noquota, Opt_usrquota, Opt_grpquota, Opt_prjquota,
@@ -141,6 +142,7 @@ static const match_table_t tokens = {
 	{Opt_barrier,	"barrier"},	/* use writer barriers for log write and
 					 * unwritten extent conversion */
 	{Opt_nobarrier,	"nobarrier"},	/* .. disable */
+	{Opt_barrierl,	"barrier=%u"},	/* legacy support for old interface */
 
 	{Opt_err,	NULL},
 };
@@ -201,6 +203,7 @@ xfs_parseargs(
 	int			dswidth = 0;
 	int			iosize = 0;
 	uint8_t			iosizelog = 0;
+	int			barrierl = 0;
 
 	/*
 	 * set up the mount name first so all the errors will refer to the
@@ -383,6 +386,15 @@ xfs_parseargs(
 		case Opt_nobarrier:
 			xfs_warn(mp, "%s option is deprecated, ignoring.", p);
 			mp->m_flags &= ~XFS_MOUNT_BARRIER;
+			break;
+		case Opt_barrierl:
+			if (match_int(args, &barrierl))
+				return -EINVAL;
+			xfs_warn(mp, "%s option is deprecated, ignoring.", p);
+			if (barrierl)
+				mp->m_flags |= XFS_MOUNT_BARRIER;
+			else
+				mp->m_flags &= ~XFS_MOUNT_BARRIER;
 			break;
 		default:
 			xfs_warn(mp, "unknown mount option [%s].", p);
@@ -1257,6 +1269,7 @@ xfs_fs_remount(
 	substring_t		args[MAX_OPT_ARGS];
 	char			*p;
 	int			error;
+	int			barrierl = 0;
 
 	/* First, check for complete junk; i.e. invalid options */
 	error = xfs_test_remount_options(sb, mp, options);
@@ -1279,6 +1292,15 @@ xfs_fs_remount(
 		case Opt_nobarrier:
 			xfs_warn(mp, "%s option is deprecated, ignoring.", p);
 			mp->m_flags &= ~XFS_MOUNT_BARRIER;
+			break;
+		case Opt_barrierl:
+			if (match_int(args, &barrierl))
+				return -EINVAL;
+			xfs_warn(mp, "%s option is deprecated, ignoring.", p);
+			if (barrierl)
+				mp->m_flags |= XFS_MOUNT_BARRIER;
+			else
+				mp->m_flags &= ~XFS_MOUNT_BARRIER;
 			break;
 		case Opt_inode64:
 			mp->m_flags &= ~XFS_MOUNT_SMALL_INUMS;

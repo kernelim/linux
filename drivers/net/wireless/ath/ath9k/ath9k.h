@@ -272,7 +272,11 @@ struct ath_node {
 #endif
 	u8 key_idx[4];
 
+#ifdef __GENKSYMS__
 	u32 ackto;
+#else
+	int ackto;
+#endif
 	struct list_head list;
 };
 

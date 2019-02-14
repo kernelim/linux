@@ -674,9 +674,8 @@ void blk_cleanup_queue(struct request_queue *q)
 	 * dispatch may still be in-progress since we dispatch requests
 	 * from more than one contexts.
 	 *
-	 * No need to quiesce queue if it isn't initialized yet since
-	 * blk_freeze_queue() should be enough for cases of passthrough
-	 * request.
+	 * We rely on driver to deal with the race in case that queue
+	 * initialization isn't done.
 	 */
 	if (q->mq_ops && blk_queue_init_done(q))
 		blk_mq_quiesce_queue(q);
@@ -1994,14 +1993,18 @@ static inline bool bio_check_ro(struct bio *bio, struct hd_struct *part)
 {
 	const int op = bio_op(bio);
 
-	if (part->policy && (op_is_write(op) && !op_is_flush(op))) {
+	if (part->policy && op_is_write(op)) {
 		char b[BDEVNAME_SIZE];
 
-		printk(KERN_ERR
+		if (op_is_flush(bio->bi_opf) && !bio_sectors(bio))
+			return false;
+
+		WARN_ONCE(1,
 		       "generic_make_request: Trying to write "
 			"to read-only block-device %s (partno %d)\n",
 			bio_devname(bio, b), part->partno);
-		return true;
+		/* Older lvm-tools actually trigger this */
+		return false;
 	}
 
 	return false;

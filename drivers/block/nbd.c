@@ -1088,6 +1088,7 @@ static int nbd_start_device_ioctl(struct nbd_device *nbd, struct block_device *b
 		return ret;
 
 	bd_set_size(bdev, config->bytesize);
+	set_blocksize(bdev, config->blksize);
 	if (max_part)
 		bdev->bd_invalidated = 1;
 	mutex_unlock(&nbd->config_lock);
