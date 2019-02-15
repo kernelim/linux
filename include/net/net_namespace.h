@@ -38,7 +38,7 @@ struct net_device;
 struct sock;
 struct ctl_table_header;
 struct net_generic;
-struct sock;
+struct uevent_sock;
 struct netns_ipvs;
 
 
@@ -147,6 +147,14 @@ struct net {
 #endif
 	struct sock		*diag_nlsk;
 	atomic_t		fnhe_genid;
+#ifndef __GENKSYMS__
+	struct {
+		struct hlist_head head;
+		spinlock_t	lock;
+		u32		seq;
+	} ip6addrlbl_table;
+	struct uevent_sock	*uevent_sock;		/* uevent socket */
+#endif
 };
 
 #include <linux/seq_file_net.h>

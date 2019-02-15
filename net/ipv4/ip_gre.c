@@ -769,15 +769,14 @@ static int __net_init ipgre_init_net(struct net *net)
 	return ip_tunnel_init_net(net, ipgre_net_id, &ipgre_link_ops, NULL);
 }
 
-static void __net_exit ipgre_exit_net(struct net *net)
+static void __net_exit ipgre_exit_batch_net(struct list_head *list_net)
 {
-	struct ip_tunnel_net *itn = net_generic(net, ipgre_net_id);
-	ip_tunnel_delete_net(itn, &ipgre_link_ops);
+	ip_tunnel_delete_nets(list_net, ipgre_net_id, &ipgre_link_ops);
 }
 
 static struct pernet_operations ipgre_net_ops = {
 	.init = ipgre_init_net,
-	.exit = ipgre_exit_net,
+	.exit_batch = ipgre_exit_batch_net,
 	.id   = &ipgre_net_id,
 	.size = sizeof(struct ip_tunnel_net),
 };
@@ -1191,15 +1190,14 @@ static int __net_init ipgre_tap_init_net(struct net *net)
 	return ip_tunnel_init_net(net, gre_tap_net_id, &ipgre_tap_ops, "gretap0");
 }
 
-static void __net_exit ipgre_tap_exit_net(struct net *net)
+static void __net_exit ipgre_tap_exit_batch_net(struct list_head *list_net)
 {
-	struct ip_tunnel_net *itn = net_generic(net, gre_tap_net_id);
-	ip_tunnel_delete_net(itn, &ipgre_tap_ops);
+	ip_tunnel_delete_nets(list_net, gre_tap_net_id, &ipgre_tap_ops);
 }
 
 static struct pernet_operations ipgre_tap_net_ops = {
 	.init = ipgre_tap_init_net,
-	.exit = ipgre_tap_exit_net,
+	.exit_batch = ipgre_tap_exit_batch_net,
 	.id   = &gre_tap_net_id,
 	.size = sizeof(struct ip_tunnel_net),
 };
