@@ -16,7 +16,6 @@
 #include <linux/notifier.h>
 #include <linux/spinlock.h>
 #include <linux/cpu.h>
-#include <linux/cpuset.h>
 #include <linux/slab.h>
 #include <linux/of.h>
 
@@ -26,7 +25,6 @@
 #include <asm/prom.h>
 #include <asm/machdep.h>
 #include <linux/uaccess.h>
-#include <linux/delay.h>
 #include <asm/rtas.h>
 
 static struct workqueue_struct *pseries_hp_wq;
@@ -342,8 +340,6 @@ int dlpar_release_drc(u32 drc_index)
 	return 0;
 }
 
-static int dlpar_pmt(struct pseries_hp_errorlog *work);
-
 int handle_dlpar_errorlog(struct pseries_hp_errorlog *hp_elog)
 {
 	int rc;
@@ -371,9 +367,6 @@ int handle_dlpar_errorlog(struct pseries_hp_errorlog *hp_elog)
 		break;
 	case PSERIES_HP_ELOG_RESOURCE_CPU:
 		rc = dlpar_cpu(hp_elog);
-		break;
-	case PSERIES_HP_ELOG_RESOURCE_PMT:
-		rc = dlpar_pmt(hp_elog);
 		break;
 	default:
 		pr_warn_ratelimited("Invalid resource (%d) specified\n",
@@ -412,68 +405,6 @@ void queue_hotplug_event(struct pseries_hp_errorlog *hp_errlog)
 	} else {
 		kfree(hp_errlog_copy);
 	}
-}
-
-LIST_HEAD(dlpar_delayed_list);
-
-int dlpar_queue_action(int resource, int action, u32 drc_index)
-{
-	struct pseries_hp_errorlog *hp_errlog;
-
-	hp_errlog = kmalloc(sizeof(struct pseries_hp_errorlog), GFP_KERNEL);
-	if (!hp_errlog)
-		return -ENOMEM;
-
-	hp_errlog->resource = resource;
-	hp_errlog->action = action;
-	hp_errlog->id_type = PSERIES_HP_ELOG_ID_DRC_INDEX;
-	hp_errlog->_drc_u.drc_index = cpu_to_be32(drc_index);
-
-	list_add_tail(&hp_errlog->list, &dlpar_delayed_list);
-
-	return 0;
-}
-
-static int dlpar_pmt(struct pseries_hp_errorlog *work)
-{
-	struct list_head *pos, *q;
-
-	/* Rebuild the domains and init any memoryless nodes
-	 * first to avoid later sync issues with CPU readd.
-	 */
-	rebuild_sched_domains();
-	msleep(100);
-		/* Ensure that the worker for rebuild_sched_domains
-		 * has the opportunity to actually begin work as we
-		 * don't want it delayed by the CPU readd hotplug
-		 * locking.
-		 */
-
-	list_for_each_safe(pos, q, &dlpar_delayed_list) {
-		struct pseries_hp_errorlog *tmp;
-
-		tmp = list_entry(pos, struct pseries_hp_errorlog, list);
-		handle_dlpar_errorlog(tmp);
-
-		list_del(pos);
-		kfree(tmp);
-	}
-
-	return 0;
-}
-
-int dlpar_queued_actions_run(void)
-{
-	if (!list_empty(&dlpar_delayed_list)) {
-		struct pseries_hp_errorlog hp_errlog;
-
-		hp_errlog.resource = PSERIES_HP_ELOG_RESOURCE_PMT;
-		hp_errlog.action = 0;
-		hp_errlog.id_type = 0;
-
-		queue_hotplug_event(&hp_errlog);
-	}
-	return 0;
 }
 
 static int dlpar_parse_resource(char **cmd, struct pseries_hp_errorlog *hp_elog)

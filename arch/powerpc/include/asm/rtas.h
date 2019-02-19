@@ -323,14 +323,12 @@ struct pseries_hp_errorlog {
 		struct { __be32 count, index; } ic;
 		char	drc_name[1];
 	} _drc_u;
-	struct list_head list;
 };
 
 #define PSERIES_HP_ELOG_RESOURCE_CPU	1
 #define PSERIES_HP_ELOG_RESOURCE_MEM	2
 #define PSERIES_HP_ELOG_RESOURCE_SLOT	3
 #define PSERIES_HP_ELOG_RESOURCE_PHB	4
-#define PSERIES_HP_ELOG_RESOURCE_PMT	5
 
 #define PSERIES_HP_ELOG_ACTION_ADD	1
 #define PSERIES_HP_ELOG_ACTION_REMOVE	2

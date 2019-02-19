@@ -1072,7 +1072,6 @@ static int prrn_enabled;
 static void reset_topology_timer(void);
 static int topology_timer_secs = 1;
 static int topology_inited;
-static struct mutex topology_update_lock;
 
 /*
  * Change polling interval for associativity changes.
@@ -1314,11 +1313,6 @@ int numa_update_cpu_topology(bool cpus_locked)
 	if (!updates)
 		return 0;
 
-	if (!mutex_trylock(&topology_update_lock)) {
-		kfree(updates);
-		return 0;
-	}
-
 	cpumask_clear(&updated_cpus);
 
 	for_each_cpu(cpu, &cpu_associativity_changes_mask) {
@@ -1422,7 +1416,6 @@ int numa_update_cpu_topology(bool cpus_locked)
 
 out:
 	kfree(updates);
-	mutex_unlock(&topology_update_lock);
 	return changed;
 }
 
@@ -1464,13 +1457,6 @@ static void reset_topology_timer(void)
 
 #ifdef CONFIG_SMP
 
-static void stage_topology_update(int core_id)
-{
-	cpumask_or(&cpu_associativity_changes_mask,
-		&cpu_associativity_changes_mask, cpu_sibling_mask(core_id));
-	reset_topology_timer();
-}
-
 static int dt_update_callback(struct notifier_block *nb,
 				unsigned long action, void *data)
 {
@@ -1483,7 +1469,7 @@ static int dt_update_callback(struct notifier_block *nb,
 		    !of_prop_cmp(update->prop->name, "ibm,associativity")) {
 			u32 core_id;
 			of_property_read_u32(update->dn, "reg", &core_id);
-			stage_topology_update(core_id);
+			rc = dlpar_cpu_readd(core_id);
 			rc = NOTIFY_OK;
 		}
 		break;
@@ -1613,8 +1599,6 @@ static const struct file_operations topology_ops = {
 
 static int topology_update_init(void)
 {
-	mutex_init(&topology_update_lock);
-
 	/* Do not poll for changes if disabled at boot */
 	if (topology_updates_enabled)
 		start_topology_update();

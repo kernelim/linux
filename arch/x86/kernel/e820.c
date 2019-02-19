@@ -15,6 +15,7 @@
 #include <linux/firmware-map.h>
 #include <linux/memblock.h>
 #include <linux/sort.h>
+#include <linux/memory_hotplug.h>
 
 #include <asm/e820/api.h>
 #include <asm/setup.h>
@@ -858,6 +859,10 @@ static int __init parse_memopt(char *p)
 		return -EINVAL;
 
 	e820__range_remove(mem_size, ULLONG_MAX - mem_size, E820_TYPE_RAM, 1);
+
+#ifdef CONFIG_MEMORY_HOTPLUG
+	max_mem_size = mem_size;
+#endif
 
 	return 0;
 }

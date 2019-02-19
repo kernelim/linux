@@ -2512,10 +2512,12 @@ lpfc_sli_def_mbox_cmpl(struct lpfc_hba *phba, LPFC_MBOXQ_t *pmb)
 
 			if ((ndlp->nlp_flag & NLP_UNREG_INP) &&
 			    (ndlp->nlp_defer_did != NLP_EVT_NOTHING_PENDING)) {
+				ndlp->nlp_flag &= ~NLP_UNREG_INP;
 				ndlp->nlp_defer_did = NLP_EVT_NOTHING_PENDING;
 				lpfc_issue_els_plogi(vport, ndlp->nlp_DID, 0);
+			} else {
+				ndlp->nlp_flag &= ~NLP_UNREG_INP;
 			}
-			ndlp->nlp_flag &= ~NLP_UNREG_INP;
 		}
 		pmb->ctx_ndlp = NULL;
 	}
@@ -2583,12 +2585,14 @@ lpfc_sli4_unreg_rpi_cmpl_clr(struct lpfc_hba *phba, LPFC_MBOXQ_t *pmb)
 						"NPort x%x Data: x%x %p\n",
 						ndlp->nlp_rpi, ndlp->nlp_DID,
 						ndlp->nlp_defer_did, ndlp);
+					ndlp->nlp_flag &= ~NLP_UNREG_INP;
 					ndlp->nlp_defer_did =
 						NLP_EVT_NOTHING_PENDING;
 					lpfc_issue_els_plogi(
 						vport, ndlp->nlp_DID, 0);
+				} else {
+					ndlp->nlp_flag &= ~NLP_UNREG_INP;
 				}
-				ndlp->nlp_flag &= ~NLP_UNREG_INP;
 			}
 		}
 	}
@@ -13493,6 +13497,8 @@ lpfc_sli4_sp_handle_abort_xri_wcqe(struct lpfc_hba *phba,
 	return workposted;
 }
 
+#define FC_RCTL_MDS_DIAGS	0xF4
+
 /**
  * lpfc_sli4_sp_handle_rcqe - Process a receive-queue completion queue entry
  * @phba: Pointer to HBA context object.
@@ -13545,6 +13551,14 @@ lpfc_sli4_sp_handle_rcqe(struct lpfc_hba *phba, struct lpfc_rcqe *rcqe)
 
 		/* If a NVME LS event (type 0x28), treat it as Fast path */
 		fc_hdr = (struct fc_frame_header *)dma_buf->hbuf.virt;
+
+		if (fc_hdr->fh_r_ctl == FC_RCTL_MDS_DIAGS ||
+		    fc_hdr->fh_r_ctl == FC_RCTL_DD_UNSOL_DATA) {
+			spin_unlock_irqrestore(&phba->hbalock, iflags);
+			/* Handle MDS Loopback frames */
+			lpfc_sli4_handle_mds_loopback(phba->pport, dma_buf);
+			break;
+		}
 
 		/* save off the frame for the word thread to process */
 		list_add_tail(&dma_buf->cq_event.list,
@@ -14585,7 +14599,8 @@ lpfc_sli4_queue_alloc(struct lpfc_hba *phba, uint32_t page_size,
 			hw_page_size))/hw_page_size;
 
 	/* If needed, Adjust page count to match the max the adapter supports */
-	if (queue->page_count > phba->sli4_hba.pc_sli4_params.wqpcnt)
+	if (phba->sli4_hba.pc_sli4_params.wqpcnt &&
+	    (queue->page_count > phba->sli4_hba.pc_sli4_params.wqpcnt))
 		queue->page_count = phba->sli4_hba.pc_sli4_params.wqpcnt;
 
 	INIT_LIST_HEAD(&queue->list);
@@ -16952,8 +16967,6 @@ lpfc_fc_frame_check(struct lpfc_hba *phba, struct fc_frame_header *fc_hdr)
 	struct fc_vft_header *fc_vft_hdr;
 	uint32_t *header = (uint32_t *) fc_hdr;
 
-#define FC_RCTL_MDS_DIAGS	0xF4
-
 	switch (fc_hdr->fh_r_ctl) {
 	case FC_RCTL_DD_UNCAT:		/* uncategorized information */
 	case FC_RCTL_DD_SOL_DATA:	/* solicited data */
@@ -16992,15 +17005,12 @@ lpfc_fc_frame_check(struct lpfc_hba *phba, struct fc_frame_header *fc_hdr)
 		goto drop;
 	}
 
-#define FC_TYPE_VENDOR_UNIQUE	0xFF
-
 	switch (fc_hdr->fh_type) {
 	case FC_TYPE_BLS:
 	case FC_TYPE_ELS:
 	case FC_TYPE_FCP:
 	case FC_TYPE_CT:
 	case FC_TYPE_NVME:
-	case FC_TYPE_VENDOR_UNIQUE:
 		break;
 	case FC_TYPE_IP:
 	case FC_TYPE_ILS:
@@ -17830,6 +17840,7 @@ lpfc_sli4_mds_loopback_cmpl(struct lpfc_hba *phba, struct lpfc_iocbq *cmdiocb,
 		dma_pool_free(phba->lpfc_drb_pool, pcmd->virt, pcmd->phys);
 	kfree(pcmd);
 	lpfc_sli_release_iocbq(phba, cmdiocb);
+	lpfc_drain_txq(phba);
 }
 
 static void
@@ -17843,14 +17854,23 @@ lpfc_sli4_handle_mds_loopback(struct lpfc_vport *vport,
 	struct lpfc_dmabuf *pcmd = NULL;
 	uint32_t frame_len;
 	int rc;
+	unsigned long iflags;
 
 	fc_hdr = (struct fc_frame_header *)dmabuf->hbuf.virt;
 	frame_len = bf_get(lpfc_rcqe_length, &dmabuf->cq_event.cqe.rcqe_cmpl);
 
 	/* Send the received frame back */
 	iocbq = lpfc_sli_get_iocbq(phba);
-	if (!iocbq)
-		goto exit;
+	if (!iocbq) {
+		/* Queue cq event and wakeup worker thread to process it */
+		spin_lock_irqsave(&phba->hbalock, iflags);
+		list_add_tail(&dmabuf->cq_event.list,
+			      &phba->sli4_hba.sp_queue_event);
+		phba->hba_flag |= HBA_SP_QUEUE_EVT;
+		spin_unlock_irqrestore(&phba->hbalock, iflags);
+		lpfc_worker_wake_up(phba);
+		return;
+	}
 
 	/* Allocate buffer for command payload */
 	pcmd = kmalloc(sizeof(struct lpfc_dmabuf), GFP_KERNEL);
@@ -17935,6 +17955,14 @@ lpfc_sli4_handle_received_buffer(struct lpfc_hba *phba,
 	/* Process each received buffer */
 	fc_hdr = (struct fc_frame_header *)dmabuf->hbuf.virt;
 
+	if (fc_hdr->fh_r_ctl == FC_RCTL_MDS_DIAGS ||
+	    fc_hdr->fh_r_ctl == FC_RCTL_DD_UNSOL_DATA) {
+		vport = phba->pport;
+		/* Handle MDS Loopback frames */
+		lpfc_sli4_handle_mds_loopback(vport, dmabuf);
+		return;
+	}
+
 	/* check to see if this a valid type of frame */
 	if (lpfc_fc_frame_check(phba, fc_hdr)) {
 		lpfc_in_buf_free(phba, &dmabuf->dbuf);
@@ -17948,13 +17976,6 @@ lpfc_sli4_handle_received_buffer(struct lpfc_hba *phba,
 	else
 		fcfi = bf_get(lpfc_rcqe_fcf_id,
 			      &dmabuf->cq_event.cqe.rcqe_cmpl);
-
-	if (fc_hdr->fh_r_ctl == 0xF4 && fc_hdr->fh_type == 0xFF) {
-		vport = phba->pport;
-		/* Handle MDS Loopback frames */
-		lpfc_sli4_handle_mds_loopback(vport, dmabuf);
-		return;
-	}
 
 	/* d_id this frame is directed to */
 	did = sli4_did_from_fc_hdr(fc_hdr);

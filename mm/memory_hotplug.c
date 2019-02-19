@@ -156,10 +156,16 @@ void mem_hotplug_done(void)
 	mutex_unlock(&memory_add_remove_lock);
 }
 
+u64 max_mem_size = U64_MAX;
+
 /* add this memory to iomem resource */
 static struct resource *register_memory_resource(u64 start, u64 size)
 {
 	struct resource *res, *conflict;
+
+	if (start + size > max_mem_size)
+		return ERR_PTR(-E2BIG);
+
 	res = kzalloc(sizeof(struct resource), GFP_KERNEL);
 	if (!res)
 		return ERR_PTR(-ENOMEM);

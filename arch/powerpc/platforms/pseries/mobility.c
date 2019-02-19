@@ -373,9 +373,6 @@ static ssize_t migrate_store(struct class *class, struct class_attribute *attr,
 
 	start_topology_update();
 
-	/* Apply any necessary changes identified during fixup */
-	dlpar_queued_actions_run();
-
 	return count;
 }
 
