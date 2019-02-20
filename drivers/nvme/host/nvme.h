@@ -235,6 +235,7 @@ struct nvme_ctrl {
 	struct timer_list anatt_timer;
 	struct work_struct ana_work;
 #endif
+	struct mutex scan_lock;
 #endif
 };
 
