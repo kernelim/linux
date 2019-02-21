@@ -113,6 +113,7 @@ struct sun4i_usb_phy_cfg {
 	bool dedicated_clocks;
 	bool enable_pmu_unk1;
 	bool phy0_dual_route;
+	int missing_phys;
 };
 
 struct sun4i_usb_phy_data {
@@ -367,11 +368,13 @@ static bool sun4i_usb_phy0_poll(struct sun4i_usb_phy_data *data)
 		return true;
 
 	/*
-	 * The A31 companion pmic (axp221) does not generate vbus change
-	 * interrupts when the board is driving vbus, so we must poll
+	 * The A31/A23/A33 companion pmics (AXP221/AXP223) do not
+	 * generate vbus change interrupts when the board is driving
+	 * vbus using the N_VBUSEN pin on the pmic, so we must poll
 	 * when using the pmic for vbus-det _and_ we're driving vbus.
 	 */
-	if (data->cfg->type == sun6i_a31_phy &&
+	if ((data->cfg->type == sun6i_a31_phy ||
+	     data->cfg->type == sun8i_a33_phy) &&
 	    data->vbus_power_supply && data->phys[0].regulator_on)
 		return true;
 
@@ -600,6 +603,9 @@ static struct phy *sun4i_usb_phy_xlate(struct device *dev,
 	if (args->args[0] >= data->cfg->num_phys)
 		return ERR_PTR(-ENODEV);
 
+	if (data->cfg->missing_phys & BIT(args->args[0]))
+		return ERR_PTR(-ENODEV);
+
 	return data->phys[args->args[0]].phy;
 }
 
@@ -686,6 +692,9 @@ static int sun4i_usb_phy_probe(struct platform_device *pdev)
 	for (i = 0; i < data->cfg->num_phys; i++) {
 		struct sun4i_usb_phy *phy = data->phys + i;
 		char name[16];
+
+		if (data->cfg->missing_phys & BIT(i))
+			continue;
 
 		snprintf(name, sizeof(name), "usb%d_vbus", i);
 		phy->vbus = devm_regulator_get_optional(dev, name);
@@ -816,7 +825,7 @@ static const struct sun4i_usb_phy_cfg sun7i_a20_cfg = {
 
 static const struct sun4i_usb_phy_cfg sun8i_a23_cfg = {
 	.num_phys = 2,
-	.type = sun4i_a10_phy,
+	.type = sun6i_a31_phy,
 	.disc_thresh = 3,
 	.phyctl_offset = REG_PHYCTL_A10,
 	.dedicated_clocks = true,
