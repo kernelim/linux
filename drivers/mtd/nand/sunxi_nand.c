@@ -1730,6 +1730,10 @@ static int sunxi_nfc_setup_data_interface(struct mtd_info *mtd,
 	 */
 	chip->clk_rate = NSEC_PER_SEC / min_clk_period;
 	real_clk_rate = clk_round_rate(nfc->mod_clk, chip->clk_rate);
+	if (real_clk_rate <= 0) {
+		dev_err(nfc->dev, "Unable to round clk %lu\n", chip->clk_rate);
+		return -EINVAL;
+	}
 
 	/*
 	 * ONFI specification 3.1, paragraph 4.15.2 dictates that EDO data
@@ -1851,8 +1855,14 @@ static int sunxi_nand_hw_common_ecc_ctrl_init(struct mtd_info *mtd,
 
 	/* Add ECC info retrieval from DT */
 	for (i = 0; i < ARRAY_SIZE(strengths); i++) {
-		if (ecc->strength <= strengths[i])
+		if (ecc->strength <= strengths[i]) {
+			/*
+			 * Update ecc->strength value with the actual strength
+			 * that will be used by the ECC engine.
+			 */
+			ecc->strength = strengths[i];
 			break;
+		}
 	}
 
 	if (i >= ARRAY_SIZE(strengths)) {

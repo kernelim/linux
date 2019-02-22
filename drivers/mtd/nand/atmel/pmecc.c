@@ -363,7 +363,7 @@ atmel_pmecc_create_user(struct atmel_pmecc *pmecc,
 	size += (req->ecc.strength + 1) * sizeof(u16);
 	/* Reserve space for mu, dmu and delta. */
 	size = ALIGN(size, sizeof(s32));
-	size += (req->ecc.strength + 1) * sizeof(s32);
+	size += (req->ecc.strength + 1) * sizeof(s32) * 3;
 
 	user = kzalloc(size, GFP_KERNEL);
 	if (!user)
@@ -426,7 +426,7 @@ static int get_strength(struct atmel_pmecc_user *user)
 
 static int get_sectorsize(struct atmel_pmecc_user *user)
 {
-	return user->cache.cfg & PMECC_LOOKUP_TABLE_SIZE_1024 ? 1024 : 512;
+	return user->cache.cfg & PMECC_CFG_SECTOR1024 ? 1024 : 512;
 }
 
 static void atmel_pmecc_gen_syndrome(struct atmel_pmecc_user *user, int sector)

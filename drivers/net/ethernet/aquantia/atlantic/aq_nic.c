@@ -215,7 +215,6 @@ struct aq_nic_s *aq_nic_alloc_cold(const struct net_device_ops *ndev_ops,
 	SET_NETDEV_DEV(ndev, dev);
 
 	ndev->if_port = port;
-	ndev->min_mtu = ETH_MIN_MTU;
 	self->ndev = ndev;
 
 	self->aq_pci_func = aq_pci_func;
@@ -282,8 +281,11 @@ int aq_nic_ndev_init(struct aq_nic_s *self)
 
 	self->ndev->hw_features |= aq_hw_caps->hw_features;
 	self->ndev->features = aq_hw_caps->hw_features;
+	self->ndev->vlan_features |= NETIF_F_HW_CSUM | NETIF_F_RXCSUM |
+				     NETIF_F_RXHASH | NETIF_F_SG | NETIF_F_LRO;
 	self->ndev->priv_flags = aq_hw_caps->hw_priv_flags;
 	self->ndev->mtu = aq_nic_cfg->mtu - ETH_HLEN;
+	self->ndev->max_mtu = self->aq_hw_caps.mtu - ETH_FCS_LEN - ETH_HLEN;
 
 	return 0;
 }
@@ -697,16 +699,9 @@ int aq_nic_set_multicast_list(struct aq_nic_s *self, struct net_device *ndev)
 
 int aq_nic_set_mtu(struct aq_nic_s *self, int new_mtu)
 {
-	int err = 0;
-
-	if (new_mtu > self->aq_hw_caps.mtu) {
-		err = -EINVAL;
-		goto err_exit;
-	}
 	self->aq_nic_cfg.mtu = new_mtu;
 
-err_exit:
-	return err;
+	return 0;
 }
 
 int aq_nic_set_mac(struct aq_nic_s *self, struct net_device *ndev)
