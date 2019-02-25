@@ -34,6 +34,7 @@
 
 #include "hv_trace.h"
 
+extern int suse_hv_ringbuffer_get_debuginfo(const struct hv_ring_buffer_info *ring_info, struct hv_ring_buffer_debug_info *debug_info);
 /*
  * Timeout for services such as KVP and fcopy.
  */
