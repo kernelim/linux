@@ -159,6 +159,11 @@ static void FETCH_FUNC_NAME(memory, string)(struct pt_regs *regs,
 		((u8 *)get_rloc_data(dest))[0] = '\0';
 		*(u32 *)dest = make_data_rloc(0, get_rloc_offs(rloc));
 	} else {
+		/*
+		 * Include the terminating null byte. It was copied by
+		 * strncpy_from_user but not accounted for in ret.
+		 */
+		ret++;
 		*(u32 *)dest = make_data_rloc(ret, get_rloc_offs(rloc));
 	}
 }
