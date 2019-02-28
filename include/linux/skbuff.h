@@ -2995,6 +2995,7 @@ static inline void *skb_push_rcsum(struct sk_buff *skb, unsigned int len)
  *
  *	This is exactly the same as pskb_trim except that it ensures the
  *	checksum of received packets are still valid after the operation.
+ *	It can change skb pointers.
  */
 
 static inline int pskb_trim_rcsum(struct sk_buff *skb, unsigned int len)

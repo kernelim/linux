@@ -382,6 +382,7 @@ int __mdiobus_register(struct mii_bus *bus, struct module *owner)
 				dev_err(&bus->dev,
 					"mii_bus %s couldn't get reset GPIO\n",
 					bus->id);
+				device_del(&bus->dev);
 				return err;
 			}
 		} else {

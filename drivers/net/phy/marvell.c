@@ -1053,6 +1053,46 @@ static u32 fiber_lpa_to_ethtool_lpa_t(u32 lpa)
 	return result;
 }
 
+/* The VOD can be out of specification on link up. Poke an
+ * undocumented register, in an undocumented page, with a magic value
+ * to fix this.
+ */
+static int m88e6390_errata(struct phy_device *phydev)
+{
+	int err, oldpage;
+
+	err = phy_write(phydev, MII_BMCR,
+			BMCR_ANENABLE | BMCR_SPEED1000 | BMCR_FULLDPLX);
+	if (err)
+		return err;
+
+	usleep_range(300, 400);
+
+	oldpage = phy_read(phydev, MII_MARVELL_PHY_PAGE);
+	err = phy_write(phydev, MII_MARVELL_PHY_PAGE, 0xf8);
+	if (err < 0)
+		return err;
+
+	err = phy_write(phydev, 0x08, 0x36);
+	if (err)
+		return err;
+
+	phy_write(phydev, MII_MARVELL_PHY_PAGE, oldpage);
+
+	return genphy_soft_reset(phydev);
+}
+
+static int m88e6390_config_aneg(struct phy_device *phydev)
+{
+	int err;
+
+	err = m88e6390_errata(phydev);
+	if (err)
+		return err;
+
+	return m88e1510_config_aneg(phydev);
+}
+
 /**
  * marvell_update_link - update link status in real time in @phydev
  * @phydev: target phy_device struct
@@ -2162,7 +2202,7 @@ static struct phy_driver marvell_drivers[] = {
 		.flags = PHY_HAS_INTERRUPT,
 		.probe = m88e1510_probe,
 		.config_init = &marvell_config_init,
-		.config_aneg = &m88e1510_config_aneg,
+		.config_aneg = &m88e6390_config_aneg,
 		.read_status = &marvell_read_status,
 		.ack_interrupt = &marvell_ack_interrupt,
 		.config_intr = &marvell_config_intr,

@@ -3523,50 +3523,6 @@ static int bcmgenet_remove(struct platform_device *pdev)
 }
 
 #ifdef CONFIG_PM_SLEEP
-static int bcmgenet_suspend(struct device *d)
-{
-	struct net_device *dev = dev_get_drvdata(d);
-	struct bcmgenet_priv *priv = netdev_priv(dev);
-	int ret;
-
-	if (!netif_running(dev))
-		return 0;
-
-	netif_device_detach(dev);
-
-	bcmgenet_netif_stop(dev);
-
-	if (!device_may_wakeup(d))
-		phy_suspend(priv->phydev);
-
-	/* Disable MAC receive */
-	umac_enable_set(priv, CMD_RX_EN, false);
-
-	ret = bcmgenet_dma_teardown(priv);
-	if (ret)
-		return ret;
-
-	/* Disable MAC transmit. TX DMA disabled must be done before this */
-	umac_enable_set(priv, CMD_TX_EN, false);
-
-	/* tx reclaim */
-	bcmgenet_tx_reclaim_all(dev);
-	bcmgenet_fini_dma(priv);
-
-	/* Prepare the device for Wake-on-LAN and switch to the slow clock */
-	if (device_may_wakeup(d) && priv->wolopts) {
-		ret = bcmgenet_power_down(priv, GENET_POWER_WOL_MAGIC);
-		clk_prepare_enable(priv->clk_wol);
-	} else if (priv->internal_phy) {
-		ret = bcmgenet_power_down(priv, GENET_POWER_PASSIVE);
-	}
-
-	/* Turn off the clocks */
-	clk_disable_unprepare(priv->clk);
-
-	return ret;
-}
-
 static int bcmgenet_resume(struct device *d)
 {
 	struct net_device *dev = dev_get_drvdata(d);
@@ -3641,6 +3597,53 @@ out_clk_disable:
 	if (priv->internal_phy)
 		bcmgenet_power_down(priv, GENET_POWER_PASSIVE);
 	clk_disable_unprepare(priv->clk);
+	return ret;
+}
+
+static int bcmgenet_suspend(struct device *d)
+{
+	struct net_device *dev = dev_get_drvdata(d);
+	struct bcmgenet_priv *priv = netdev_priv(dev);
+	int ret;
+
+	if (!netif_running(dev))
+		return 0;
+
+	netif_device_detach(dev);
+
+	bcmgenet_netif_stop(dev);
+
+	if (!device_may_wakeup(d))
+		phy_suspend(priv->phydev);
+
+	/* Disable MAC receive */
+	umac_enable_set(priv, CMD_RX_EN, false);
+
+	ret = bcmgenet_dma_teardown(priv);
+	if (ret)
+		return ret;
+
+	/* Disable MAC transmit. TX DMA disabled must be done before this */
+	umac_enable_set(priv, CMD_TX_EN, false);
+
+	/* tx reclaim */
+	bcmgenet_tx_reclaim_all(dev);
+	bcmgenet_fini_dma(priv);
+
+	/* Prepare the device for Wake-on-LAN and switch to the slow clock */
+	if (device_may_wakeup(d) && priv->wolopts) {
+		ret = bcmgenet_power_down(priv, GENET_POWER_WOL_MAGIC);
+		clk_prepare_enable(priv->clk_wol);
+	} else if (priv->internal_phy) {
+		ret = bcmgenet_power_down(priv, GENET_POWER_PASSIVE);
+	}
+
+	/* Turn off the clocks */
+	clk_disable_unprepare(priv->clk);
+
+	if (ret)
+		bcmgenet_resume(d);
+
 	return ret;
 }
 #endif /* CONFIG_PM_SLEEP */
