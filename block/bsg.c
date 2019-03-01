@@ -151,13 +151,6 @@ static int blk_fill_sgv4_hdr_rq(struct request_queue *q, struct request *rq,
 			   hdr->request_len))
 		return -EFAULT;
 
-	if (hdr->response) {
-		req->sense = kzalloc(hdr->max_response_len, GFP_KERNEL);
-		if (!req->sense)
-			return -ENOMEM;
-	} else
-		req->sense = NULL;
-
 	if (hdr->subprotocol == BSG_SUB_PROTOCOL_SCSI_CMD) {
 		if (blk_verify_command(req->cmd, has_write_perm))
 			return -EPERM;
@@ -408,13 +401,12 @@ static int blk_complete_sgv4_hdr_rq(struct request *rq, struct sg_io_v4 *hdr,
 	if (hdr->device_status || hdr->transport_status || hdr->driver_status)
 		hdr->info |= SG_INFO_CHECK;
 	hdr->response_len = 0;
-
-	if (req->sense_len && hdr->response) {
+	if (req->sense && hdr->response) {
 		int len = min_t(unsigned int, hdr->max_response_len,
 					req->sense_len);
-
-		ret = copy_to_user((void __user *)(unsigned long)hdr->response,
-				   req->sense, len);
+		if (len > 0)
+			ret = copy_to_user((void __user *)(unsigned long)hdr->response,
+					   req->sense, len);
 		if (!ret)
 			hdr->response_len = len;
 		else
@@ -441,7 +433,6 @@ static int blk_complete_sgv4_hdr_rq(struct request *rq, struct sg_io_v4 *hdr,
 		ret = req->result;
 
 	blk_rq_unmap_user(bio);
-	kfree(req->sense);
 	scsi_req_free_cmd(req);
 	blk_put_request(rq);
 
