@@ -143,26 +143,29 @@
  * NVMe defines
  */
 #define	NVME_PRP_SIZE			8	/* PRP size */
-#define	NVME_CMD_PRP1_OFFSET		24	/* PRP1 offset in NVMe cmd */
-#define	NVME_CMD_PRP2_OFFSET		32	/* PRP2 offset in NVMe cmd */
 #define	NVME_ERROR_RESPONSE_SIZE	16	/* Max NVME Error Response */
 #define NVME_TASK_ABORT_MIN_TIMEOUT	6
 #define NVME_TASK_ABORT_MAX_TIMEOUT	60
 #define NVME_TASK_MNGT_CUSTOM_MASK	(0x0010)
 #define	NVME_PRP_PAGE_SIZE		4096	/* Page size */
 
-
-/*
- * reset phases
- */
-#define MPT3_IOC_PRE_RESET		1 /* prior to host reset */
-#define MPT3_IOC_AFTER_RESET		2 /* just after host reset */
-#define MPT3_IOC_DONE_RESET		3 /* links re-initialized */
+struct mpt3sas_nvme_cmd {
+	u8	rsvd[24];
+	__le64	prp1;
+	__le64	prp2;
+};
 
 /*
  * logging format
  */
-#define MPT3SAS_FMT			"%s: "
+#define ioc_err(ioc, fmt, ...)						\
+	pr_err("%s: " fmt, (ioc)->name, ##__VA_ARGS__)
+#define ioc_notice(ioc, fmt, ...)					\
+	pr_notice("%s: " fmt, (ioc)->name, ##__VA_ARGS__)
+#define ioc_warn(ioc, fmt, ...)						\
+	pr_warn("%s: " fmt, (ioc)->name, ##__VA_ARGS__)
+#define ioc_info(ioc, fmt, ...)						\
+	pr_info("%s: " fmt, (ioc)->name, ##__VA_ARGS__)
 
 /*
  *  WarpDrive Specific Log codes
@@ -1163,7 +1166,6 @@ struct MPT3SAS_ADAPTER {
 	struct mutex	reset_in_progress_mutex;
 	spinlock_t	ioc_reset_in_progress_lock;
 	u8		ioc_link_reset_in_progress;
-	u8		ioc_reset_in_progress_status;
 
 	u8		ignore_loginfos;
 	u8		remove_host;
@@ -1491,7 +1493,9 @@ struct scsi_cmnd *mpt3sas_scsih_scsi_lookup_get(struct MPT3SAS_ADAPTER *ioc,
 	u16 smid);
 u8 mpt3sas_scsih_event_callback(struct MPT3SAS_ADAPTER *ioc, u8 msix_index,
 	u32 reply);
-void mpt3sas_scsih_reset_handler(struct MPT3SAS_ADAPTER *ioc, int reset_phase);
+void mpt3sas_scsih_pre_reset_handler(struct MPT3SAS_ADAPTER *ioc);
+void mpt3sas_scsih_after_reset_handler(struct MPT3SAS_ADAPTER *ioc);
+void mpt3sas_scsih_reset_done_handler(struct MPT3SAS_ADAPTER *ioc);
 
 int mpt3sas_scsih_issue_tm(struct MPT3SAS_ADAPTER *ioc, u16 handle, u64 lun,
 	u8 type, u16 smid_task, u16 msix_task, u8 timeout, u8 tr_method);
@@ -1618,7 +1622,9 @@ void mpt3sas_ctl_init(ushort hbas_to_enumerate);
 void mpt3sas_ctl_exit(ushort hbas_to_enumerate);
 u8 mpt3sas_ctl_done(struct MPT3SAS_ADAPTER *ioc, u16 smid, u8 msix_index,
 	u32 reply);
-void mpt3sas_ctl_reset_handler(struct MPT3SAS_ADAPTER *ioc, int reset_phase);
+void mpt3sas_ctl_pre_reset_handler(struct MPT3SAS_ADAPTER *ioc);
+void mpt3sas_ctl_after_reset_handler(struct MPT3SAS_ADAPTER *ioc);
+void mpt3sas_ctl_reset_done_handler(struct MPT3SAS_ADAPTER *ioc);
 u8 mpt3sas_ctl_event_callback(struct MPT3SAS_ADAPTER *ioc,
 	u8 msix_index, u32 reply);
 void mpt3sas_ctl_add_to_event_log(struct MPT3SAS_ADAPTER *ioc,
