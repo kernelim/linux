@@ -520,11 +520,16 @@ static int apic_retrigger_irq(struct irq_data *irq_data)
 	return 1;
 }
 
+void apic_ack_irq(struct irq_data *data)
+{
+	irq_move_irq(data);
+	ack_APIC_irq();
+}
+
 void apic_ack_edge(struct irq_data *data)
 {
 	irq_complete_move(irqd_cfg(data));
-	irq_move_irq(data);
-	ack_APIC_irq();
+	apic_ack_irq(data);
 }
 
 static int apic_set_affinity(struct irq_data *irq_data,

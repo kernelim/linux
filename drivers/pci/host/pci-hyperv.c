@@ -400,12 +400,12 @@ struct hv_interrupt_entry {
 	u32	data;
 };
 
-#define HV_VP_SET_BANK_COUNT_MAX	5 /* current implementation limit */
+#define HV_VP_SET_BANK_COUNT_MAX	28 /* current implementation limit */
 
 struct hv_vp_set {
 	u64	format;			/* 0 (HvGenericSetSparse4k) */
 	u64	valid_banks;
-	u64	masks[HV_VP_SET_BANK_COUNT_MAX];
+	u64	banks[HV_VP_SET_BANK_COUNT_MAX];
 };
 
 /*
@@ -925,6 +925,7 @@ static void hv_irq_unmask(struct irq_data *data)
 	u32 var_size = 0;
 	int cpu_vmbus;
 	int cpu;
+	int index, maxindex = 0;
 	u64 res;
 
 	dest = irq_data_get_effective_affinity_mask(data);
@@ -964,14 +965,6 @@ static void hv_irq_unmask(struct irq_data *data)
 		 */
 		params->int_target.flags |=
 			HV_DEVICE_INTERRUPT_TARGET_PROCESSOR_SET;
-		params->int_target.vp_set.valid_banks =
-			(1ull << HV_VP_SET_BANK_COUNT_MAX) - 1;
-
-		/*
-		 * var-sized hypercall, var-size starts after vp_mask (thus
-		 * vp_set.format does not count, but vp_set.valid_banks does).
-		 */
-		var_size = 1 + HV_VP_SET_BANK_COUNT_MAX;
 
 		for_each_cpu_and(cpu, dest, cpu_online_mask) {
 			cpu_vmbus = hv_cpu_number_to_vp_number(cpu);
@@ -983,9 +976,18 @@ static void hv_irq_unmask(struct irq_data *data)
 				goto exit_unlock;
 			}
 
-			params->int_target.vp_set.masks[cpu_vmbus / 64] |=
+			index = cpu_vmbus / 64;
+			if (index > maxindex)
+				maxindex = index;
+			params->int_target.vp_set.banks[index] |=
 				(1ULL << (cpu_vmbus & 63));
 		}
+		/*
+		 * var-sized hypercall, var-size starts after vp_mask (thus
+		 * vp_set.format does not count, but vp_set.valid_banks does).
+		 */
+		var_size = 1 + maxindex + 1;
+		params->int_target.vp_set.valid_banks = (1ULL << (maxindex + 1)) - 1;
 	} else {
 		for_each_cpu_and(cpu, dest, cpu_online_mask) {
 			params->int_target.vp_mask |=
