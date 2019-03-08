@@ -71,5 +71,6 @@ int main(void)
 	/* constants for transactional execution */
 	DEFINE(__LC_PGM_TDB, offsetof(struct _lowcore, pgm_tdb));
 	DEFINE(__THREAD_trap_tdb, offsetof(struct task_struct, thread.trap_tdb));
+	DEFINE(__LC_BR_R1, offsetof(struct _lowcore, br_r1_trampoline));
 	return 0;
 }

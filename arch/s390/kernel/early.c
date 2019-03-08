@@ -340,7 +340,7 @@ static __init void detect_machine_facilities(void)
 {
 #ifdef CONFIG_64BIT
 	unsigned int facilities;
-	unsigned long long facility_bits[2];
+	unsigned long long facility_bits[3];
 	int dwords;
 
 	facilities = stfl();
@@ -352,11 +352,13 @@ static __init void detect_machine_facilities(void)
 		S390_lowcore.machine_flags |= MACHINE_FLAG_IDTE;
 	if (facilities & (1 << 4))
 		S390_lowcore.machine_flags |= MACHINE_FLAG_MVCOS;
-	dwords = stfle(facility_bits, 2);
+	dwords = stfle(facility_bits, 3);
 	if ((dwords > 0) && (facility_bits[0] & (1ULL << (63 - 40))))
 		S390_lowcore.machine_flags |= MACHINE_FLAG_SPP;
 	if ((dwords > 1) && (facility_bits[1] & (1ULL << (127 - 78))))
 		S390_lowcore.machine_flags |= MACHINE_FLAG_EDAT2;
+	if ((dwords > 2) && (facility_bits[2] & (1ULL << (191 - 156))))
+		S390_lowcore.machine_flags |= MACHINE_FLAG_ETOKEN;
 #endif
 }
 

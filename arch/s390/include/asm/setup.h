@@ -81,6 +81,7 @@ extern unsigned int user_mode;
 #define MACHINE_FLAG_EDAT2	(1UL << 11)
 #define MACHINE_FLAG_SPP	(1UL << 13)
 #define MACHINE_FLAG_TE		(1UL << 14)
+#define MACHINE_FLAG_ETOKEN	(1UL << 15)
 
 #define MACHINE_IS_VM		(S390_lowcore.machine_flags & MACHINE_FLAG_VM)
 #define MACHINE_IS_KVM		(S390_lowcore.machine_flags & MACHINE_FLAG_KVM)
@@ -99,6 +100,7 @@ extern unsigned int user_mode;
 #define MACHINE_HAS_EDAT2	(0)
 #define MACHINE_HAS_SPP		(0)
 #define MACHINE_HAS_TE		(0)
+#define MACHINE_HAS_ETOKEN	(0)
 #else /* __s390x__ */
 #define MACHINE_HAS_IEEE	(1)
 #define MACHINE_HAS_CSP		(1)
@@ -110,6 +112,7 @@ extern unsigned int user_mode;
 #define MACHINE_HAS_EDAT2	(S390_lowcore.machine_flags & MACHINE_FLAG_EDAT2)
 #define MACHINE_HAS_SPP		(S390_lowcore.machine_flags & MACHINE_FLAG_SPP)
 #define MACHINE_HAS_TE		(S390_lowcore.machine_flags & MACHINE_FLAG_TE)
+#define MACHINE_HAS_ETOKEN	(S390_lowcore.machine_flags & MACHINE_FLAG_ETOKEN)
 #endif /* __s390x__ */
 
 /*

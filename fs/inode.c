@@ -1649,3 +1649,29 @@ void init_special_inode(struct inode *inode, umode_t mode, dev_t rdev)
 				  inode->i_ino);
 }
 EXPORT_SYMBOL(init_special_inode);
+
+/**
+ * Init uid,gid,mode for new inode according to posix standards
+ * @inode: New inode
+ * @dir: Directory inode
+ * @mode: mode of the new inode
+ */
+void inode_init_owner(struct inode *inode, const struct inode *dir,
+			mode_t mode)
+{
+	inode->i_uid = current_fsuid();
+	if (dir && dir->i_mode & S_ISGID) {
+		inode->i_gid = dir->i_gid;
+
+		/* Directories are special, and always inherit S_ISGID */
+		if (S_ISDIR(mode))
+			mode |= S_ISGID;
+		else if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP) &&
+			 !in_group_p(inode->i_gid) &&
+			 !capable(CAP_FSETID))
+			mode &= ~S_ISGID;
+	} else
+		inode->i_gid = current_fsgid();
+	inode->i_mode = mode;
+}
+EXPORT_SYMBOL(inode_init_owner);

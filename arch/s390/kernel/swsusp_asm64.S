@@ -11,6 +11,7 @@
 #include <asm/ptrace.h>
 #include <asm/thread_info.h>
 #include <asm/asm-offsets.h>
+#include <asm/nospec-insn.h>
 
 /*
  * Save register context in absolute 0 lowcore and call swsusp_save() to
@@ -21,6 +22,8 @@
  * (see below) in the resume process.
  * This function runs with disabled interrupts.
  */
+	GEN_BR_THUNK %r14
+
 	.section .text
 	.align	4
 	.globl swsusp_arch_suspend
@@ -116,7 +119,7 @@ swsusp_arch_suspend:
 	spx	0x318(%r1)
 	lmg	%r6,%r15,STACK_FRAME_OVERHEAD + __SF_GPRS(%r15)
 	lghi	%r2,0
-	br	%r14
+	BR_EX	%r14
 
 /*
  * Restore saved memory image to correct place and restore register context.
@@ -197,11 +200,10 @@ pgm_check_entry:
 	larl	%r15,init_thread_union
 	ahi	%r15,1<<(PAGE_SHIFT+THREAD_ORDER)
 	larl	%r2,.Lpanic_string
-	larl	%r3,_sclp_print_early
 	lghi	%r1,0
 	sam31
 	sigp	%r1,%r0,0x12
-	basr	%r14,%r3
+	brasl	%r14,_sclp_print_early
 	larl	%r3,.Ldisabled_wait_31
 	lpsw	0(%r3)
 4:
@@ -288,7 +290,7 @@ restore_registers:
 	/* Return 0 */
 	lmg	%r6,%r15,STACK_FRAME_OVERHEAD + __SF_GPRS(%r15)
 	lghi	%r2,0
-	br	%r14
+	BR_EX	%r14
 
 	.section .data.nosave,"aw",@progbits
 	.align	8

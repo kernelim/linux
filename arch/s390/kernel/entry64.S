@@ -15,6 +15,7 @@
 #include <asm/cache.h>
 #include <asm/lowcore.h>
 #include <asm/errno.h>
+#include <asm/nospec-insn.h>
 #include <asm/ptrace.h>
 #include <asm/thread_info.h>
 #include <asm/asm-offsets.h>
@@ -259,72 +260,14 @@ _TIF_SYSCALL = (_TIF_SYSCALL_TRACE>>8 | _TIF_SYSCALL_AUDIT>>8 | \
 	.popsection
 	.endm
 
-#ifdef CONFIG_EXPOLINE
-
-	.macro GEN_BR_THUNK name,reg,tmp
-	.section .text.\name,"axG",@progbits,\name,comdat
-	.globl \name
-	.hidden \name
-	.type \name,@function
-\name:
-	.cfi_startproc
-#ifdef CONFIG_HAVE_MARCH_Z10_FEATURES
-	exrl	0,0f
-#else
-	larl	\tmp,0f
-	ex	0,0(\tmp)
-#endif
-	j	.
-0:	br	\reg
-	.cfi_endproc
-	.endm
-
-	GEN_BR_THUNK __s390x_indirect_jump_r1use_r9,%r9,%r1
-	GEN_BR_THUNK __s390x_indirect_jump_r1use_r14,%r14,%r1
-	GEN_BR_THUNK __s390x_indirect_jump_r13use_r14,%r14,%r13
-
-	.macro BASR_R14_R9
-0:	brasl	%r14,__s390x_indirect_jump_r1use_r9
-	.pushsection .s390_indirect_branches,"a",@progbits
-	.long	0b-.
-	.popsection
-	.endm
-
-	.macro BR_R1USE_R14
-0:	jg	__s390x_indirect_jump_r1use_r14
-	.pushsection .s390_indirect_branches,"a",@progbits
-	.long	0b-.
-	.popsection
-	.endm
-
-	.macro BR_R13USE_R14
-0:	jg	__s390x_indirect_jump_r13use_r14
-	.pushsection .s390_indirect_branches,"a",@progbits
-	.long	0b-.
-	.popsection
-	.endm
-
-#else	/* CONFIG_EXPOLINE */
-
-	.macro BASR_R14_R9
-	basr	%r14,%r9
-	.endm
-
-	.macro BR_R1USE_R14
-	br	%r14
-	.endm
-
-	.macro BR_R13USE_R14
-	br	%r14
-	.endm
-
-#endif /* CONFIG_EXPOLINE */
-
+	GEN_BR_THUNK %r9
+	GEN_BR_THUNK %r14
+	GEN_BR_THUNK %r14,%r13
 
 ENTRY(__bpon)
 	.globl __bpon
 	BPON
-	BR_R1USE_R14
+	BR_EX	%r14
 
 /*
  * Scheduler resume function, called by switch_to
@@ -353,7 +296,7 @@ __switch_to_no_mcck:
 	stg	%r3,__LC_THREAD_INFO
 	aghi	%r3,STACK_SIZE
 	stg	%r3,__LC_KERNEL_STACK	# __LC_KERNEL_STACK = new kernel stack
-	BR_R1USE_R14
+	BR_EX	%r14
 
 __critical_start:
 /*
@@ -406,7 +349,7 @@ sysc_noemu:
 	tm	__TI_flags+6(%r12),_TIF_SYSCALL
 	lgf	%r9,0(%r7,%r10) # load address of system call routine
 	jnz	sysc_tracesys
-	BASR_R14_R9				# call sys_xxxx
+	BASR_EX	%r14,%r9	# call sys_xxxx
 	stg	%r2,SP_R2(%r15) # store return value (change R2 on stack)
 
 sysc_return:
@@ -525,7 +468,7 @@ sysc_tracesys:
 sysc_tracego:
 	lmg	%r3,%r6,SP_R3(%r15)
 	lg	%r2,SP_ORIG_R2(%r15)
-	BASR_R14_R9			# call sys_xxx
+	BASR_EX	%r14,%r9		# call sys_xxx
 	stg	%r2,SP_R2(%r15)		# store return value
 sysc_tracenogo:
 	tm	__TI_flags+6(%r12),_TIF_SYSCALL
@@ -567,7 +510,7 @@ kernel_execve:
 	je	kernel_execve_ok
 	aghi	%r15,SP_SIZE
 	lmg	%r12,%r15,96(%r15)
-	BR_R1USE_R14
+	BR_EX	%r14
 	# execve succeeded.
 kernel_execve_ok:
 	stnsm	__SF_EMPTY(%r15),0xfc	# disable interrupts
@@ -644,7 +587,7 @@ pgm_do_call:
 	larl	%r1,pgm_check_table
 	lg	%r9,0(%r8,%r1)		# load address of handler routine
 	la	%r2,SP_PTREGS(%r15)	# address of register-save area
-	BASR_R14_R9			# branch to interrupt-handler
+	BASR_EX	%r14,%r9		# branch to interrupt-handler
 pgm_exit:
 	TRACE_IRQS_CHECK_ON
 	LOCKDEP_SYS_EXIT
@@ -712,7 +655,7 @@ pgm_no_vtime2:
 	larl	%r1,pgm_check_table
 	lg	%r9,0(%r8,%r1)		# load address of handler routine
 	la	%r2,SP_PTREGS(%r15)	# address of register-save area
-	BASR_R14_R9			# branch to interrupt-handler
+	BASR_EX	%r14,%r9		# branch to interrupt-handler
 pgm_exit2:
 	TRACE_IRQS_ON
 	stosm	__SF_EMPTY(%r15),0x03	# reenable interrupts
@@ -1184,7 +1127,7 @@ cleanup_critical:
 	clc	8(8,%r12),BASED(cleanup_table_io_restore+8)
 	jl	cleanup_io_restore
 0:
-	BR_R13USE_R14
+	BR_EX	%r14,%r13
 
 cleanup_table_system_call:
 	.quad	system_call, sysc_do_svc
@@ -1238,7 +1181,7 @@ cleanup_update:
 0:	mvc	__LC_RETURN_PSW+8(8),BASED(cleanup_table_system_call+8)
 	BPENTER __TI_flags+6(%r12),_TIF_ISOLATE_BP>>8
 	la	%r12,__LC_RETURN_PSW
-	BR_R13USE_R14
+	BR_EX	%r14,%r13
 cleanup_system_call_insn:
 	.quad	sysc_saveall
 	.quad	system_call
@@ -1250,7 +1193,7 @@ cleanup_sysc_tif:
 	mvc	__LC_RETURN_PSW(8),0(%r12)
 	mvc	__LC_RETURN_PSW+8(8),BASED(cleanup_table_sysc_tif)
 	la	%r12,__LC_RETURN_PSW
-	BR_R13USE_R14
+	BR_EX	%r14,%r13
 
 cleanup_sysc_restore:
 	clc	8(8,%r12),BASED(cleanup_sysc_restore_insn)
@@ -1267,7 +1210,7 @@ cleanup_sysc_restore:
 	lmg	%r0,%r10,SP_R0(%r15)
 	lg	%r15,SP_R15(%r15)
 2:	la	%r12,__LC_RETURN_PSW
-	BR_R13USE_R14
+	BR_EX	%r14,%r13
 cleanup_sysc_restore_insn:
 	.quad	sysc_done - 4
 	.quad	sysc_done - 16
@@ -1276,7 +1219,7 @@ cleanup_io_tif:
 	mvc	__LC_RETURN_PSW(8),0(%r12)
 	mvc	__LC_RETURN_PSW+8(8),BASED(cleanup_table_io_tif)
 	la	%r12,__LC_RETURN_PSW
-	BR_R13USE_R14
+	BR_EX	%r14,%r13
 
 cleanup_io_restore:
 	clc	8(8,%r12),BASED(cleanup_io_restore_insn)
@@ -1289,7 +1232,7 @@ cleanup_io_restore:
 	lmg	%r0,%r10,SP_R0(%r15)
 	lg	%r15,SP_R15(%r15)
 1:	la	%r12,__LC_RETURN_PSW
-	BR_R13USE_R14
+	BR_EX	%r14,%r13
 cleanup_io_restore_insn:
 	.quad	io_done - 4
 	.quad	io_done - 16

@@ -561,7 +561,6 @@ static int udf_create(struct inode *dir, struct dentry *dentry, int mode,
 		inode->i_data.a_ops = &udf_aops;
 	inode->i_op = &udf_file_inode_operations;
 	inode->i_fop = &udf_file_operations;
-	inode->i_mode = mode;
 	mark_inode_dirty(inode);
 
 	fi = udf_add_entry(dir, dentry, &fibh, &cfi, &err);
@@ -607,7 +606,6 @@ static int udf_mknod(struct inode *dir, struct dentry *dentry, int mode,
 		goto out;
 
 	iinfo = UDF_I(inode);
-	inode->i_uid = current_fsuid();
 	init_special_inode(inode, mode, rdev);
 	fi = udf_add_entry(dir, dentry, &fibh, &cfi, &err);
 	if (!fi) {
@@ -652,7 +650,7 @@ static int udf_mkdir(struct inode *dir, struct dentry *dentry, int mode)
 		goto out;
 
 	err = -EIO;
-	inode = udf_new_inode(dir, S_IFDIR, &err);
+	inode = udf_new_inode(dir, S_IFDIR | mode, &err);
 	if (!inode)
 		goto out;
 
@@ -675,9 +673,6 @@ static int udf_mkdir(struct inode *dir, struct dentry *dentry, int mode)
 			FID_FILE_CHAR_DIRECTORY | FID_FILE_CHAR_PARENT;
 	udf_write_fi(inode, &cfi, fi, &fibh, NULL, NULL);
 	brelse(fibh.sbh);
-	inode->i_mode = S_IFDIR | mode;
-	if (dir->i_mode & S_ISGID)
-		inode->i_mode |= S_ISGID;
 	mark_inode_dirty(inode);
 
 	fi = udf_add_entry(dir, dentry, &fibh, &cfi, &err);
@@ -884,7 +879,7 @@ static int udf_symlink(struct inode *dir, struct dentry *dentry,
 	struct udf_inode_info *iinfo;
 
 	lock_kernel();
-	inode = udf_new_inode(dir, S_IFLNK, &err);
+	inode = udf_new_inode(dir, S_IFLNK | S_IRWXUGO, &err);
 	if (!inode)
 		goto out;
 
@@ -895,7 +890,6 @@ static int udf_symlink(struct inode *dir, struct dentry *dentry,
 	}
 
 	iinfo = UDF_I(inode);
-	inode->i_mode = S_IFLNK | S_IRWXUGO;
 	inode->i_data.a_ops = &udf_symlink_aops;
 	inode->i_op = &page_symlink_inode_operations;
 

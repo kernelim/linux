@@ -1212,8 +1212,11 @@ struct perf_event {
 	/* mmap bits */
 	struct mutex			mmap_mutex;
 	atomic_t			mmap_count;
-	int				mmap_locked;
-	struct user_struct		*mmap_user;
+
+	/* removed, but kept around for KABI reasons */
+	int				rh_reserved_mmap_locked;
+	struct user_struct		*rh_reserved_mmap_user;
+
 	struct ring_buffer		*rb;
 	struct list_head		rb_entry;
 
@@ -1253,6 +1256,9 @@ struct perf_event {
 
 	/* The cumulative AND of all event_caps for events in this group. */
 	int				group_caps;
+#endif
+#ifndef __GENKSYMS__
+	int				rcu_pending;
 #endif
 #endif /* CONFIG_PERF_EVENTS */
 };

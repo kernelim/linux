@@ -39,7 +39,7 @@ $(obj)/%.so: $(obj)/%.so.dbg FORCE
 
 CFL := $(PROFILING) -mcmodel=small -fPIC -O2 -fasynchronous-unwind-tables -m64 \
        $(filter -g%,$(KBUILD_CFLAGS)) $(call cc-option, -fno-stack-protector) \
-       $(call cc-option, -mindirect-branch=thunk-inline)
+       $(call cc-option, -mindirect-branch=keep)
 
 $(vobjs): KBUILD_CFLAGS += $(CFL)
 

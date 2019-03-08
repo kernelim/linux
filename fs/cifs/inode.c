@@ -583,10 +583,6 @@ cifs_all_info_to_fattr(struct cifs_fattr *fattr, FILE_ALL_INFO *info,
 		 */
 		if (!tcon->unix_ext)
 			fattr->cf_flags |= CIFS_FATTR_UNKNOWN_NLINK;
-	} else if (fattr->cf_cifsattrs & ATTR_REPARSE) {
-		fattr->cf_mode = S_IFLNK;
-		fattr->cf_dtype = DT_LNK;
-		fattr->cf_nlink = le32_to_cpu(info->NumberOfLinks);
 	} else {
 		fattr->cf_mode = S_IFREG | cifs_sb->mnt_file_mode;
 		fattr->cf_dtype = DT_REG;
