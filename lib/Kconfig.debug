@@ -1872,6 +1872,28 @@ config TEST_PARMAN
 
 	  If unsure, say N.
 
+config TEST_LIVEPATCH
+	tristate "Test livepatching"
+	default n
+	depends on DYNAMIC_DEBUG
+	depends on LIVEPATCH
+	depends on m
+	help
+	  Test kernel livepatching features for correctness.  The tests will
+	  load test modules that will be livepatched in various scenarios.
+
+	  To run all the livepatching tests:
+
+	  make -C tools/testing/selftests TARGETS=livepatch run_tests
+
+	  Alternatively, individual tests may be invoked:
+
+	  tools/testing/selftests/livepatch/test-callbacks.sh
+	  tools/testing/selftests/livepatch/test-livepatch.sh
+	  tools/testing/selftests/livepatch/test-shadow-vars.sh
+
+	  If unsure, say N.
+
 endmenu # runtime tests
 
 config PROVIDE_OHCI1394_DMA_INIT
@@ -1994,7 +2016,6 @@ config TEST_UDELAY
 	  This builds the "udelay_test" module that helps to make sure
 	  that udelay() is working properly.
 
-	  If unsure, say N.
 
 config MEMTEST
 	bool "Memtest"
