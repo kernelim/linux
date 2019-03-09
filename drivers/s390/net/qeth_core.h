@@ -806,6 +806,7 @@ struct qeth_card {
 	struct qeth_seqno seqno;
 	struct qeth_card_options options;
 
+	struct workqueue_struct *event_wq;
 	wait_queue_head_t wait_q;
 	spinlock_t vlanlock;
 	spinlock_t mclock;
@@ -922,7 +923,6 @@ extern const struct attribute_group *qeth_osn_attr_groups[];
 extern const struct attribute_group qeth_device_attr_group;
 extern const struct attribute_group qeth_device_blkt_group;
 extern const struct device_type qeth_generic_devtype;
-extern struct workqueue_struct *qeth_wq;
 
 int qeth_card_hw_is_reachable(struct qeth_card *);
 const char *qeth_get_cardname_short(struct qeth_card *);
