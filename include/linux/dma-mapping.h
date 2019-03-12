@@ -11,6 +11,7 @@
 #include <linux/kmemcheck.h>
 #include <linux/bug.h>
 #include <linux/mem_encrypt.h>
+#include <linux/swiotlb.h>
 
 /**
  * List of possible attributes associated with a DMA mapping. The semantics
@@ -170,6 +171,8 @@ int dma_mmap_from_coherent(struct device *dev, struct vm_area_struct *vma,
 #define dma_release_from_coherent(dev, order, vaddr) (0)
 #define dma_mmap_from_coherent(dev, vma, vaddr, order, ret) (0)
 #endif /* CONFIG_HAVE_GENERIC_DMA_COHERENT */
+
+size_t dma_direct_max_mapping_size(struct device *dev);
 
 #ifdef CONFIG_HAS_DMA
 #include <asm/dma-mapping.h>
@@ -599,6 +602,15 @@ static inline u64 dma_get_mask(struct device *dev)
 	return DMA_BIT_MASK(32);
 }
 
+static inline size_t dma_max_mapping_size(struct device *dev)
+{
+	size_t size = SIZE_MAX;
+
+	if (is_swiotlb_active())
+		size = swiotlb_max_mapping_size(dev);
+
+	return size;
+}
 #ifdef CONFIG_ARCH_HAS_DMA_SET_COHERENT_MASK
 int dma_set_coherent_mask(struct device *dev, u64 mask);
 #else
