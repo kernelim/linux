@@ -658,6 +658,7 @@ static int esw_create_offloads_fdb_tables(struct mlx5_eswitch *esw, int nvports)
 	if (err)
 		goto miss_rule_err;
 
+	kvfree(flow_group_in);
 	return 0;
 
 miss_rule_err:
@@ -806,7 +807,8 @@ out:
 	return flow_rule;
 }
 
-static int esw_offloads_start(struct mlx5_eswitch *esw)
+static int esw_offloads_start(struct mlx5_eswitch *esw,
+			      struct netlink_ext_ack *extack)
 {
 	int err, err1, num_vfs = esw->dev->priv.sriov.num_vfs;
 
@@ -969,7 +971,8 @@ create_ft_err:
 	return err;
 }
 
-static int esw_offloads_stop(struct mlx5_eswitch *esw)
+static int esw_offloads_stop(struct mlx5_eswitch *esw,
+			     struct netlink_ext_ack *extack)
 {
 	int err, err1, num_vfs = esw->dev->priv.sriov.num_vfs;
 
@@ -1088,7 +1091,8 @@ static int mlx5_devlink_eswitch_check(struct devlink *devlink)
 	return 0;
 }
 
-int mlx5_devlink_eswitch_mode_set(struct devlink *devlink, u16 mode)
+int mlx5_devlink_eswitch_mode_set(struct devlink *devlink, u16 mode,
+				  struct netlink_ext_ack *extack)
 {
 	struct mlx5_core_dev *dev = devlink_priv(devlink);
 	u16 cur_mlx5_mode, mlx5_mode = 0;
@@ -1107,9 +1111,9 @@ int mlx5_devlink_eswitch_mode_set(struct devlink *devlink, u16 mode)
 		return 0;
 
 	if (mode == DEVLINK_ESWITCH_MODE_SWITCHDEV)
-		return esw_offloads_start(dev->priv.eswitch);
+		return esw_offloads_start(dev->priv.eswitch, extack);
 	else if (mode == DEVLINK_ESWITCH_MODE_LEGACY)
-		return esw_offloads_stop(dev->priv.eswitch);
+		return esw_offloads_stop(dev->priv.eswitch, extack);
 	else
 		return -EINVAL;
 }
@@ -1126,7 +1130,8 @@ int mlx5_devlink_eswitch_mode_get(struct devlink *devlink, u16 *mode)
 	return esw_mode_to_devlink(dev->priv.eswitch->mode, mode);
 }
 
-int mlx5_devlink_eswitch_inline_mode_set(struct devlink *devlink, u8 mode)
+int mlx5_devlink_eswitch_inline_mode_set(struct devlink *devlink, u8 mode,
+					 struct netlink_ext_ack *extack)
 {
 	struct mlx5_core_dev *dev = devlink_priv(devlink);
 	struct mlx5_eswitch *esw = dev->priv.eswitch;
@@ -1228,7 +1233,8 @@ out:
 	return 0;
 }
 
-int mlx5_devlink_eswitch_encap_mode_set(struct devlink *devlink, u8 encap)
+int mlx5_devlink_eswitch_encap_mode_set(struct devlink *devlink, u8 encap,
+					struct netlink_ext_ack *extack)
 {
 	struct mlx5_core_dev *dev = devlink_priv(devlink);
 	struct mlx5_eswitch *esw = dev->priv.eswitch;

@@ -922,7 +922,18 @@ static void dce110_stream_encoder_dp_blank(
 	* Poll for DP_VID_STREAM_STATUS == 0
 	*/
 
-	REG_WAIT(DP_VID_STREAM_CNTL, DP_VID_STREAM_STATUS,
+	/*
+	 * XXX Lyude: this is a RHEL specific hack. According to AMD, despite
+	 * the following register wait failing with MST displays this
+	 * apparently should not cause issues regardless according to AMD. So,
+	 * until there's a proper fix for this avoid printing a full WARN_ON()
+	 * when this fails and just print a normal error to the kernel log in
+	 * order to avoid scaring users.
+	 *
+	 * See https://bugzilla.redhat.com/show_bug.cgi?id=1638137 for more
+	 * info
+	 */
+	REG_WAIT_NO_WARN_ON_FAIL(DP_VID_STREAM_CNTL, DP_VID_STREAM_STATUS,
 			0,
 			10, max_retries);
 

@@ -72,7 +72,6 @@
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
 #include <linux/pci.h>
-#include <linux/pci-aspm.h>
 #include <linux/acpi.h>
 
 #include "fw/acpi.h"
@@ -1001,6 +1000,10 @@ static int iwl_pci_resume(struct device *device)
 	pci_write_config_byte(pdev, PCI_CFG_RETRY_TIMEOUT, 0x00);
 
 	if (!trans->op_mode)
+		return 0;
+
+	/* In WOWLAN, let iwl_trans_pcie_d3_resume do the rest of the work */
+	if (test_bit(STATUS_DEVICE_ENABLED, &trans->status))
 		return 0;
 
 	/* reconfigure the MSI-X mapping to get the correct IRQ for rfkill */

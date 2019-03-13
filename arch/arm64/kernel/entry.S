@@ -354,10 +354,6 @@ alternative_else_nop_endif
 	ldp	x28, x29, [sp, #16 * 14]
 	ldr	lr, [sp, #S_LR]
 	add	sp, sp, #S_FRAME_SIZE		// restore sp
-	/*
-	 * ARCH_HAS_MEMBARRIER_SYNC_CORE rely on eret context synchronization
-	 * when returning from IPI handler, and when returning to user-space.
-	 */
 
 	.if	\el == 0
 alternative_insn eret, nop, ARM64_UNMAP_KERNEL_AT_EL0
@@ -373,6 +369,7 @@ alternative_insn eret, nop, ARM64_UNMAP_KERNEL_AT_EL0
 	.else
 	eret
 	.endif
+	sb
 	.endm
 
 	.macro	irq_stack_entry
@@ -405,17 +402,7 @@ alternative_insn eret, nop, ARM64_UNMAP_KERNEL_AT_EL0
 	mov	sp, x19
 	.endm
 
-/*
- * These are the registers used in the syscall handler, and allow us to
- * have in theory up to 7 arguments to a function - x0 to x6.
- *
- * x7 is reserved for the system call number in 32-bit mode.
- */
-wsc_nr	.req	w25		// number of system calls
-xsc_nr	.req	x25		// number of system calls (zero-extended)
-wscno	.req	w26		// syscall number
-xscno	.req	x26		// syscall number (zero-extended)
-stbl	.req	x27		// syscall table pointer
+/* GPRs used by entry code */
 tsk	.req	x28		// current thread_info
 
 /*
@@ -720,14 +707,9 @@ el0_sync_compat:
 	b.ge	el0_dbg
 	b	el0_inv
 el0_svc_compat:
-	/*
-	 * AArch32 syscall handling
-	 */
-	ldr	x16, [tsk, #TSK_TI_FLAGS]	// load thread flags
-	adrp	stbl, compat_sys_call_table	// load compat syscall table pointer
-	mov	wscno, w7			// syscall number in w7 (r7)
-	mov     wsc_nr, #__NR_compat_syscalls
-	b	el0_svc_naked
+	mov	x0, sp
+	bl	el0_svc_compat_handler
+	b	ret_to_user
 
 	.align	6
 el0_irq_compat:
@@ -896,25 +878,6 @@ el0_error_naked:
 	b	ret_to_user
 ENDPROC(el0_error)
 
-
-/*
- * This is the fast syscall return path.  We do as little as possible here,
- * and this includes saving x0 back into the kernel stack.
- */
-ret_fast_syscall:
-	disable_daif
-	str	x0, [sp, #S_X0]			// returned x0
-	ldr	x1, [tsk, #TSK_TI_FLAGS]	// re-check for syscall tracing
-	and	x2, x1, #_TIF_SYSCALL_WORK
-	cbnz	x2, ret_fast_syscall_trace
-	and	x2, x1, #_TIF_WORK_MASK
-	cbnz	x2, work_pending
-	enable_step_tsk x1, x2
-	kernel_exit 0
-ret_fast_syscall_trace:
-	enable_daif
-	b	__sys_trace_return_skipped	// we already saved x0
-
 /*
  * Ok, we need to do extra processing, enter the slow path.
  */
@@ -944,85 +907,10 @@ ENDPROC(ret_to_user)
  */
 	.align	6
 el0_svc:
-	ldr	x16, [tsk, #TSK_TI_FLAGS]	// load thread flags
-	adrp	stbl, sys_call_table		// load syscall table pointer
-	mov	wscno, w8			// syscall number in w8
-	mov	wsc_nr, #__NR_syscalls
-
-#ifdef CONFIG_ARM64_SVE
-alternative_if_not ARM64_SVE
-	b	el0_svc_naked
-alternative_else_nop_endif
-	tbz	x16, #TIF_SVE, el0_svc_naked	// Skip unless TIF_SVE set:
-	bic	x16, x16, #_TIF_SVE		// discard SVE state
-	str	x16, [tsk, #TSK_TI_FLAGS]
-
-	/*
-	 * task_fpsimd_load() won't be called to update CPACR_EL1 in
-	 * ret_to_user unless TIF_FOREIGN_FPSTATE is still set, which only
-	 * happens if a context switch or kernel_neon_begin() or context
-	 * modification (sigreturn, ptrace) intervenes.
-	 * So, ensure that CPACR_EL1 is already correct for the fast-path case:
-	 */
-	mrs	x9, cpacr_el1
-	bic	x9, x9, #CPACR_EL1_ZEN_EL0EN	// disable SVE for el0
-	msr	cpacr_el1, x9			// synchronised by eret to el0
-#endif
-
-el0_svc_naked:					// compat entry point
-	stp	x0, xscno, [sp, #S_ORIG_X0]	// save the original x0 and syscall number
-	enable_daif
-	ct_user_exit 1
-
-	tst	x16, #_TIF_SYSCALL_WORK		// check for syscall hooks
-	b.ne	__sys_trace
-	cmp     wscno, wsc_nr			// check upper syscall limit
-	b.hs	ni_sys
-	mask_nospec64 xscno, xsc_nr, x19	// enforce bounds for syscall number
-	ldr	x16, [stbl, xscno, lsl #3]	// address in the syscall table
-	blr	x16				// call sys_* routine
-	b	ret_fast_syscall
-ni_sys:
 	mov	x0, sp
-	bl	do_ni_syscall
-	b	ret_fast_syscall
-ENDPROC(el0_svc)
-
-	/*
-	 * This is the really slow path.  We're going to be doing context
-	 * switches, and waiting for our parent to respond.
-	 */
-__sys_trace:
-	cmp     wscno, #NO_SYSCALL		// user-issued syscall(-1)?
-	b.ne	1f
-	mov	x0, #-ENOSYS			// set default errno if so
-	str	x0, [sp, #S_X0]
-1:	mov	x0, sp
-	bl	syscall_trace_enter
-	cmp	w0, #NO_SYSCALL			// skip the syscall?
-	b.eq	__sys_trace_return_skipped
-	mov	wscno, w0			// syscall number (possibly new)
-	mov	x1, sp				// pointer to regs
-	cmp	wscno, wsc_nr			// check upper syscall limit
-	b.hs	__ni_sys_trace
-	ldp	x0, x1, [sp]			// restore the syscall args
-	ldp	x2, x3, [sp, #S_X2]
-	ldp	x4, x5, [sp, #S_X4]
-	ldp	x6, x7, [sp, #S_X6]
-	ldr	x16, [stbl, xscno, lsl #3]	// address in the syscall table
-	blr	x16				// call sys_* routine
-
-__sys_trace_return:
-	str	x0, [sp, #S_X0]			// save returned x0
-__sys_trace_return_skipped:
-	mov	x0, sp
-	bl	syscall_trace_exit
+	bl	el0_svc_handler
 	b	ret_to_user
-
-__ni_sys_trace:
-	mov	x0, sp
-	bl	do_ni_syscall
-	b	__sys_trace_return
+ENDPROC(el0_svc)
 
 	.popsection				// .entry.text
 
@@ -1100,6 +988,7 @@ alternative_insn isb, nop, ARM64_WORKAROUND_QCOM_FALKOR_E1003
 	mrs	x30, far_el1
 	.endif
 	eret
+	sb
 	.endm
 
 	.align	11
@@ -1136,14 +1025,6 @@ __entry_tramp_data_start:
 	.popsection				// .rodata
 #endif /* CONFIG_RANDOMIZE_BASE */
 #endif /* CONFIG_UNMAP_KERNEL_AT_EL0 */
-
-/*
- * Special system call wrappers.
- */
-ENTRY(sys_rt_sigreturn_wrapper)
-	mov	x0, sp
-	b	sys_rt_sigreturn
-ENDPROC(sys_rt_sigreturn_wrapper)
 
 /*
  * Register switch for AArch64. The callee-saved registers need to be saved

@@ -513,12 +513,12 @@ static void virtio_scsi_init_hdr_pi(struct virtio_device *vdev,
 
 	if (sc->sc_data_direction == DMA_TO_DEVICE)
 		cmd_pi->pi_bytesout = cpu_to_virtio32(vdev,
-							blk_rq_sectors(rq) *
-							bi->tuple_size);
+						      bio_integrity_bytes(bi,
+							blk_rq_sectors(rq)));
 	else if (sc->sc_data_direction == DMA_FROM_DEVICE)
 		cmd_pi->pi_bytesin = cpu_to_virtio32(vdev,
-						       blk_rq_sectors(rq) *
-						       bi->tuple_size);
+						     bio_integrity_bytes(bi,
+							blk_rq_sectors(rq)));
 }
 #endif
 
@@ -719,8 +719,9 @@ static void virtscsi_target_destroy(struct scsi_target *starget)
 static int virtscsi_map_queues(struct Scsi_Host *shost)
 {
 	struct virtio_scsi *vscsi = shost_priv(shost);
+	struct blk_mq_queue_map *qmap = &shost->tag_set.map[0];
 
-	return blk_mq_virtio_map_queues(&shost->tag_set, vscsi->vdev, 2);
+	return blk_mq_virtio_map_queues(qmap, vscsi->vdev, 2);
 }
 
 /*

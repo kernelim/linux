@@ -1474,8 +1474,10 @@ static int eb_relocate_vma(struct i915_execbuffer *eb, struct i915_vma *vma)
 				 * can read from this userspace address.
 				 */
 				offset = gen8_canonical_addr(offset & ~UPDATE);
-				__put_user(offset,
-					   &urelocs[r-stack].presumed_offset);
+				if (unlikely(__put_user(offset, &urelocs[r-stack].presumed_offset))) {
+					remain = -EFAULT;
+					goto out;
+				}
 			}
 		} while (r++, --count);
 		urelocs += ARRAY_SIZE(stack);
@@ -1560,7 +1562,6 @@ static int eb_copy_relocations(const struct i915_execbuffer *eb)
 
 		relocs = kvmalloc_array(size, 1, GFP_KERNEL);
 		if (!relocs) {
-			kvfree(relocs);
 			err = -ENOMEM;
 			goto err;
 		}
@@ -1574,6 +1575,8 @@ static int eb_copy_relocations(const struct i915_execbuffer *eb)
 			if (__copy_from_user((char *)relocs + copied,
 					     (char __user *)urelocs + copied,
 					     len)) {
+end_user:
+				user_access_end();
 				kvfree(relocs);
 				err = -EFAULT;
 				goto err;
@@ -1592,12 +1595,13 @@ static int eb_copy_relocations(const struct i915_execbuffer *eb)
 		 * happened we would make the mistake of assuming that the
 		 * relocations were valid.
 		 */
-		user_access_begin();
+		if (!user_access_begin(urelocs, size))
+			goto end_user;
+
 		for (copied = 0; copied < nreloc; copied++)
 			unsafe_put_user(-1,
 					&urelocs[copied].presumed_offset,
 					end_user);
-end_user:
 		user_access_end();
 
 		eb->exec[i].relocs_ptr = (uintptr_t)relocs;
@@ -2646,7 +2650,16 @@ i915_gem_execbuffer2_ioctl(struct drm_device *dev, void *data,
 		unsigned int i;
 
 		/* Copy the new buffer offsets back to the user's exec list. */
-		user_access_begin();
+		/*
+		 * Note: count * sizeof(*user_exec_list) does not overflow,
+		 * because we checked 'count' in check_buffer_count().
+		 *
+		 * And this range already got effectively checked earlier
+		 * when we did the "copy_from_user()" above.
+		 */
+		if (!user_access_begin(user_exec_list, count * sizeof(*user_exec_list)))
+			goto end_user;
+
 		for (i = 0; i < args->buffer_count; i++) {
 			if (!(exec2_list[i].offset & UPDATE))
 				continue;

@@ -17,6 +17,8 @@
 #include <linux/atomic.h>
 #include <linux/wait.h>
 
+#include <linux/rh_kabi.h>
+
 struct file;
 struct dentry;
 struct iattr;
@@ -176,6 +178,10 @@ struct kernfs_syscall_ops {
 		      const char *new_name);
 	int (*show_path)(struct seq_file *sf, struct kernfs_node *kn,
 			 struct kernfs_root *root);
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 };
 
 struct kernfs_root {
@@ -265,6 +271,8 @@ struct kernfs_ops {
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 	struct lock_class_key	lockdep_key;
 #endif
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
 };
 
 #ifdef CONFIG_KERNFS

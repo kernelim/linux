@@ -30,6 +30,8 @@
 #include <net/snmp.h>
 #endif
 
+#include <linux/rh_kabi.h>
+
 #define XFRM_PROTO_ESP		50
 #define XFRM_PROTO_AH		51
 #define XFRM_PROTO_COMP		108
@@ -122,6 +124,8 @@ struct xfrm_state_walk {
 	u8			proto;
 	u32			seq;
 	struct xfrm_address_filter *filter;
+
+	RH_KABI_RESERVE(1)
 };
 
 struct xfrm_state_offload {
@@ -129,6 +133,11 @@ struct xfrm_state_offload {
 	unsigned long		offload_handle;
 	unsigned int		num_exthdrs;
 	u8			flags;
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 };
 
 /* Full description of state of transformer. */

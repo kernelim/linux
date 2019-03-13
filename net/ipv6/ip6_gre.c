@@ -989,6 +989,8 @@ static netdev_tx_t ip6erspan_tunnel_xmit(struct sk_buff *skb,
 		fl6.flowi6_uid = sock_net_uid(dev_net(dev), NULL);
 
 		dsfield = key->tos;
+		if (!(tun_info->key.tun_flags & TUNNEL_ERSPAN_OPT))
+			goto tx_err;
 		md = ip_tunnel_info_opts(tun_info);
 		if (!md)
 			goto tx_err;
@@ -1776,6 +1778,7 @@ static void ip6gre_netlink_parms(struct nlattr *data[],
 	if (data[IFLA_GRE_COLLECT_METADATA])
 		parms->collect_md = true;
 
+	parms->erspan_ver = 1;
 	if (data[IFLA_GRE_ERSPAN_VER])
 		parms->erspan_ver = nla_get_u8(data[IFLA_GRE_ERSPAN_VER]);
 

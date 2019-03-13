@@ -304,6 +304,18 @@ static int ipv6_nlattr_to_tuple(struct nlattr *tb[],
 }
 #endif
 
+static int ipv6_ct_tcp_fixup(struct nf_conn *ct, void *ignored)
+{
+	if (nf_ct_l3num(ct) == NFPROTO_IPV6 &&
+	    nf_ct_protonum(ct) == IPPROTO_TCP &&
+	    ct->proto.tcp.state == TCP_CONNTRACK_ESTABLISHED) {
+		ct->proto.tcp.seen[0].td_maxwin = 0;
+		ct->proto.tcp.seen[1].td_maxwin = 0;
+	}
+
+	return 0;
+}
+
 static int ipv6_hooks_register(struct net *net)
 {
 	struct conntrack6_net *cnet = net_generic(net, conntrack6_net_id);
@@ -319,6 +331,8 @@ static int ipv6_hooks_register(struct net *net)
 		cnet->users = 0;
 		goto out_unlock;
 	}
+
+	nf_ct_iterate_cleanup_net(net, ipv6_ct_tcp_fixup, NULL, 0, 0);
 
 	err = nf_register_net_hooks(net, ipv6_conntrack_ops,
 				    ARRAY_SIZE(ipv6_conntrack_ops));

@@ -173,7 +173,7 @@ static int bnxt_vf_rep_setup_tc_block(struct net_device *dev,
 	case TC_BLOCK_BIND:
 		return tcf_block_cb_register(f->block,
 					     bnxt_vf_rep_setup_tc_block_cb,
-					     vf_rep, vf_rep);
+					     vf_rep, vf_rep, f->extack);
 	case TC_BLOCK_UNBIND:
 		tcf_block_cb_unregister(f->block,
 					bnxt_vf_rep_setup_tc_block_cb, vf_rep);
@@ -523,7 +523,8 @@ int bnxt_dl_eswitch_mode_get(struct devlink *devlink, u16 *mode)
 	return 0;
 }
 
-int bnxt_dl_eswitch_mode_set(struct devlink *devlink, u16 mode)
+int bnxt_dl_eswitch_mode_set(struct devlink *devlink, u16 mode,
+			     struct netlink_ext_ack *extack)
 {
 	struct bnxt *bp = bnxt_get_bp_from_dl(devlink);
 	int rc = 0;

@@ -18,6 +18,7 @@
 #include <linux/pageblock-flags.h>
 #include <linux/page-flags-layout.h>
 #include <linux/atomic.h>
+#include <linux/rh_kabi.h>
 #include <asm/page.h>
 
 /* Free memory management - zoned buddy allocator.  */
@@ -503,6 +504,10 @@ struct zone {
 	bool			contiguous;
 
 	ZONE_PADDING(_pad3_)
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+
 	/* Zone statistics */
 	atomic_long_t		vm_stat[NR_VM_ZONE_STAT_ITEMS];
 	atomic_long_t		vm_numa_stat[NR_VM_NUMA_STAT_ITEMS];
@@ -718,6 +723,9 @@ typedef struct pglist_data {
 	unsigned long		flags;
 
 	ZONE_PADDING(_pad2_)
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
 
 	/* Per-node vmstats */
 	struct per_cpu_nodestat __percpu *per_cpu_nodestats;

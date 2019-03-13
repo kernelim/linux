@@ -43,6 +43,7 @@
 
 #include <asm/kmap_types.h>
 #include <linux/uaccess.h>
+#include <linux/nospec.h>
 
 #include "internal.h"
 
@@ -221,13 +222,9 @@ static struct file *aio_private_file(struct kioctx *ctx, loff_t nr_pages)
 	path.mnt = mntget(aio_mnt);
 
 	d_instantiate(path.dentry, inode);
-	file = alloc_file(&path, FMODE_READ | FMODE_WRITE, &aio_ring_fops);
-	if (IS_ERR(file)) {
+	file = alloc_file(&path, O_RDWR, &aio_ring_fops);
+	if (IS_ERR(file))
 		path_put(&path);
-		return file;
-	}
-
-	file->f_flags = O_RDWR;
 	return file;
 }
 
@@ -1039,6 +1036,7 @@ static struct kioctx *lookup_ioctx(unsigned long ctx_id)
 	if (!table || id >= table->nr)
 		goto out;
 
+	id = array_index_nospec(id, table->nr);
 	ctx = rcu_dereference(table->table[id]);
 	if (ctx && ctx->user_id == ctx_id) {
 		if (percpu_ref_tryget_live(&ctx->users))
@@ -1431,16 +1429,22 @@ static int aio_prep_rw(struct kiocb *req, struct iocb *iocb)
 		ret = ioprio_check_cap(iocb->aio_reqprio);
 		if (ret) {
 			pr_debug("aio ioprio check cap error: %d\n", ret);
-			return ret;
+			goto out_fput;
 		}
 
 		req->ki_ioprio = iocb->aio_reqprio;
 	} else
-		req->ki_ioprio = IOPRIO_PRIO_VALUE(IOPRIO_CLASS_NONE, 0);
+		req->ki_ioprio = get_current_ioprio();
 
 	ret = kiocb_set_rw_flags(req, iocb->aio_rw_flags);
 	if (unlikely(ret))
-		fput(req->ki_filp);
+		goto out_fput;
+
+	req->ki_flags &= ~IOCB_HIPRI; /* no one is going to poll for this I/O */
+	return 0;
+
+out_fput:
+	fput(req->ki_filp);
 	return ret;
 }
 

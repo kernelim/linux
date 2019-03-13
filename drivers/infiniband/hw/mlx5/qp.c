@@ -1626,7 +1626,7 @@ static int create_qp_common(struct mlx5_ib_dev *dev, struct ib_pd *pd,
 	struct mlx5_ib_resources *devr = &dev->devr;
 	int inlen = MLX5_ST_SZ_BYTES(create_qp_in);
 	struct mlx5_core_dev *mdev = dev->mdev;
-	struct mlx5_ib_create_qp_resp resp;
+	struct mlx5_ib_create_qp_resp resp = {};
 	struct mlx5_ib_cq *send_cq;
 	struct mlx5_ib_cq *recv_cq;
 	unsigned long flags;
@@ -3264,7 +3264,9 @@ static bool modify_dci_qp_is_ok(enum ib_qp_state cur_state, enum ib_qp_state new
 	int req = IB_QP_STATE;
 	int opt = 0;
 
-	if (cur_state == IB_QPS_RESET && new_state == IB_QPS_INIT) {
+	if (new_state == IB_QPS_RESET) {
+		return is_valid_mask(attr_mask, req, opt);
+	} else if (cur_state == IB_QPS_RESET && new_state == IB_QPS_INIT) {
 		req |= IB_QP_PKEY_INDEX | IB_QP_PORT;
 		return is_valid_mask(attr_mask, req, opt);
 	} else if (cur_state == IB_QPS_INIT && new_state == IB_QPS_INIT) {
@@ -4384,6 +4386,11 @@ int mlx5_ib_post_send(struct ib_qp *ibqp, struct ib_send_wr *wr,
 	u8 next_fence = 0;
 	u8 fence;
 
+	if (unlikely(mdev->state == MLX5_DEVICE_STATE_INTERNAL_ERROR)) {
+		*bad_wr = wr;
+		return -EIO;
+	}
+
 	if (unlikely(ibqp->qp_type == IB_QPT_GSI))
 		return mlx5_ib_gsi_post_send(ibqp, wr, bad_wr);
 
@@ -4392,13 +4399,6 @@ int mlx5_ib_post_send(struct ib_qp *ibqp, struct ib_send_wr *wr,
 	qend = qp->sq.qend;
 
 	spin_lock_irqsave(&qp->sq.lock, flags);
-
-	if (mdev->state == MLX5_DEVICE_STATE_INTERNAL_ERROR) {
-		err = -EIO;
-		*bad_wr = wr;
-		nreq = 0;
-		goto out;
-	}
 
 	for (nreq = 0; wr; nreq++, wr = wr->next) {
 		if (unlikely(wr->opcode >= ARRAY_SIZE(mlx5_ib_opcode))) {
@@ -4424,17 +4424,18 @@ int mlx5_ib_post_send(struct ib_qp *ibqp, struct ib_send_wr *wr,
 			goto out;
 		}
 
-		if (wr->opcode == IB_WR_LOCAL_INV ||
-		    wr->opcode == IB_WR_REG_MR) {
+		if (wr->opcode == IB_WR_REG_MR) {
 			fence = dev->umr_fence;
 			next_fence = MLX5_FENCE_MODE_INITIATOR_SMALL;
-		} else if (wr->send_flags & IB_SEND_FENCE) {
-			if (qp->next_fence)
-				fence = MLX5_FENCE_MODE_SMALL_AND_FENCE;
-			else
-				fence = MLX5_FENCE_MODE_FENCE;
-		} else {
-			fence = qp->next_fence;
+		} else  {
+			if (wr->send_flags & IB_SEND_FENCE) {
+				if (qp->next_fence)
+					fence = MLX5_FENCE_MODE_SMALL_AND_FENCE;
+				else
+					fence = MLX5_FENCE_MODE_FENCE;
+			} else {
+				fence = qp->next_fence;
+			}
 		}
 
 		switch (ibqp->qp_type) {
@@ -4709,17 +4710,15 @@ int mlx5_ib_post_recv(struct ib_qp *ibqp, struct ib_recv_wr *wr,
 	int ind;
 	int i;
 
+	if (unlikely(mdev->state == MLX5_DEVICE_STATE_INTERNAL_ERROR)) {
+		*bad_wr = wr;
+		return -EIO;
+	}
+
 	if (unlikely(ibqp->qp_type == IB_QPT_GSI))
 		return mlx5_ib_gsi_post_recv(ibqp, wr, bad_wr);
 
 	spin_lock_irqsave(&qp->rq.lock, flags);
-
-	if (mdev->state == MLX5_DEVICE_STATE_INTERNAL_ERROR) {
-		err = -EIO;
-		*bad_wr = wr;
-		nreq = 0;
-		goto out;
-	}
 
 	ind = qp->rq.head & (qp->rq.wqe_cnt - 1);
 
@@ -5365,7 +5364,9 @@ static int set_user_rq_size(struct mlx5_ib_dev *dev,
 
 	rwq->wqe_count = ucmd->rq_wqe_count;
 	rwq->wqe_shift = ucmd->rq_wqe_shift;
-	rwq->buf_size = (rwq->wqe_count << rwq->wqe_shift);
+	if (check_shl_overflow(rwq->wqe_count, rwq->wqe_shift, &rwq->buf_size))
+		return -EINVAL;
+
 	rwq->log_rq_stride = rwq->wqe_shift;
 	rwq->log_rq_size = ilog2(rwq->wqe_count);
 	return 0;
@@ -5444,8 +5445,7 @@ static int prepare_user_rq(struct ib_pd *pd,
 	err = create_user_rq(dev, pd, rwq, &ucmd);
 	if (err) {
 		mlx5_ib_dbg(dev, "err %d\n", err);
-		if (err)
-			return err;
+		return err;
 	}
 
 	rwq->user_index = ucmd.user_index;

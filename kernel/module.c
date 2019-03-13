@@ -70,6 +70,8 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/module.h>
 
+#include <linux/rh_features.h>
+
 #ifndef ARCH_SHF_SMALL
 #define ARCH_SHF_SMALL 0
 #endif
@@ -789,6 +791,7 @@ static struct module_attribute modinfo_##field = {                    \
 
 MODINFO_ATTR(version);
 MODINFO_ATTR(srcversion);
+MODINFO_ATTR(rhelversion);
 
 static char last_unloaded_module[MODULE_NAME_LEN+1];
 
@@ -1249,6 +1252,7 @@ static struct module_attribute *modinfo_attrs[] = {
 	&module_uevent,
 	&modinfo_version,
 	&modinfo_srcversion,
+	&modinfo_rhelversion,
 	&modinfo_initstate,
 	&modinfo_coresize,
 	&modinfo_initsize,
@@ -2783,7 +2787,8 @@ static int module_sig_check(struct load_info *info, int flags)
 	}
 
 	/* Not having a signature is only an error if we're strict. */
-	if (err == -ENOKEY && !is_module_sig_enforced())
+	if (err == -ENOKEY && !is_module_sig_enforced() &&
+	    !kernel_is_locked_down("Loading of untrusted modules"))
 		err = 0;
 
 	return err;
@@ -4373,6 +4378,8 @@ void print_modules(void)
 	if (last_unloaded_module[0])
 		pr_cont(" [last unloaded: %s]", last_unloaded_module);
 	pr_cont("\n");
+
+	rh_print_used_features();
 }
 
 #ifdef CONFIG_MODVERSIONS

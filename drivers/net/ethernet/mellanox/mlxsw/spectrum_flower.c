@@ -51,8 +51,7 @@ static int mlxsw_sp_flower_parse_actions(struct mlxsw_sp *mlxsw_sp,
 					 struct tcf_exts *exts)
 {
 	const struct tc_action *a;
-	LIST_HEAD(actions);
-	int err;
+	int err, i;
 
 	if (!tcf_exts_has_actions(exts))
 		return 0;
@@ -62,8 +61,7 @@ static int mlxsw_sp_flower_parse_actions(struct mlxsw_sp *mlxsw_sp,
 	if (err)
 		return err;
 
-	tcf_exts_to_list(exts, &actions);
-	list_for_each_entry(a, &actions, list) {
+	tcf_exts_for_each_action(i, a, exts) {
 		if (is_tcf_gact_ok(a)) {
 			err = mlxsw_sp_acl_rulei_act_terminate(rulei);
 			if (err)

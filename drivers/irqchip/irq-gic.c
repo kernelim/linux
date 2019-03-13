@@ -1095,6 +1095,13 @@ static int gic_init_bases(struct gic_chip_data *gic, int irq_start,
 	irq_hw_number_t hwirq_base;
 	int gic_irqs, irq_base, ret;
 
+	/* RHEL8 in theory expects GICv3 or newer IRQ chips, despite the fact
+	 * that Red Hat still carries lots of GICv2 machines at this moment.
+	 * Calling mark_hardware_removed() to print a warning and mark kernel
+	 * tainted with TAINT_SUPPORT_REMOVED flag.
+	 */
+	mark_hardware_removed("GICv2");
+
 	if (IS_ENABLED(CONFIG_GIC_NON_BANKED) && gic->percpu_offset) {
 		/* Frankein-GIC without banked registers... */
 		unsigned int cpu;

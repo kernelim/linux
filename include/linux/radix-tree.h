@@ -28,6 +28,7 @@
 #include <linux/rcupdate.h>
 #include <linux/spinlock.h>
 #include <linux/types.h>
+#include <linux/rh_kabi.h>
 
 /*
  * The bottom two bits of the slot determine how the remaining bits in the
@@ -81,6 +82,12 @@ static inline bool radix_tree_is_internal_node(void *ptr)
 #define RADIX_TREE_MAX_PATH (DIV_ROUND_UP(RADIX_TREE_INDEX_BITS, \
 					  RADIX_TREE_MAP_SHIFT))
 
+/**
+ * struct radix_tree_node_rh  - Red Hat KABI extension struct
+ */
+struct radix_tree_node_rh {
+};
+
 /*
  * @count is the count of every non-NULL element in the ->slots array
  * whether that is an exceptional entry, a retry entry, a user pointer,
@@ -102,6 +109,7 @@ struct radix_tree_node {
 	};
 	void __rcu	*slots[RADIX_TREE_MAP_SIZE];
 	unsigned long	tags[RADIX_TREE_MAX_TAGS][RADIX_TREE_TAG_LONGS];
+	RH_KABI_SIZE_AND_EXTEND(radix_tree_node);
 };
 
 /* The IDR tag is stored in the low bits of the GFP flags */
@@ -109,10 +117,17 @@ struct radix_tree_node {
 /* The top bits of gfp_mask are used to store the root tags */
 #define ROOT_TAG_SHIFT	(__GFP_BITS_SHIFT)
 
+/**
+ * struct radix_tree_root_rh  - Red Hat KABI extension struct
+ */
+struct radix_tree_root_rh {
+};
+
 struct radix_tree_root {
 	spinlock_t		xa_lock;
 	gfp_t			gfp_mask;
 	struct radix_tree_node	__rcu *rnode;
+	RH_KABI_SIZE_AND_EXTEND(radix_tree_root);
 };
 
 #define RADIX_TREE_INIT(name, mask)	{				\
@@ -135,6 +150,12 @@ static inline bool radix_tree_empty(const struct radix_tree_root *root)
 {
 	return root->rnode == NULL;
 }
+
+/**
+ * struct radix_tree_iter_rh  - Red Hat KABI extension struct
+ */
+struct radix_tree_iter_rh {
+};
 
 /**
  * struct radix_tree_iter - radix tree iterator state
@@ -160,6 +181,7 @@ struct radix_tree_iter {
 #ifdef CONFIG_RADIX_TREE_MULTIORDER
 	unsigned int	shift;
 #endif
+	RH_KABI_SIZE_AND_EXTEND(radix_tree_iter);
 };
 
 static inline unsigned int iter_shift(const struct radix_tree_iter *iter)

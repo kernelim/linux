@@ -547,6 +547,64 @@ int kvm_apic_set_irq(struct kvm_vcpu *vcpu, struct kvm_lapic_irq *irq,
 			irq->level, irq->trig_mode, dest_map);
 }
 
+int kvm_pv_send_ipi(struct kvm *kvm, unsigned long ipi_bitmap_low,
+		    unsigned long ipi_bitmap_high, u32 min,
+		    unsigned long icr, int op_64_bit)
+{
+	int i;
+	struct kvm_apic_map *map;
+	struct kvm_vcpu *vcpu;
+	struct kvm_lapic_irq irq = {0};
+	int cluster_size = op_64_bit ? 64 : 32;
+	int count = 0;
+
+	irq.vector = icr & APIC_VECTOR_MASK;
+	irq.delivery_mode = icr & APIC_MODE_MASK;
+	irq.level = (icr & APIC_INT_ASSERT) != 0;
+	irq.trig_mode = icr & APIC_INT_LEVELTRIG;
+
+	if (icr & APIC_DEST_MASK)
+		return -KVM_EINVAL;
+	if (icr & APIC_SHORT_MASK)
+		return -KVM_EINVAL;
+
+	rcu_read_lock();
+	map = rcu_dereference(kvm->arch.apic_map);
+
+	if (unlikely(!map)) {
+		count = -EOPNOTSUPP;
+		goto out;
+	}
+
+	if (min > map->max_apic_id)
+		goto out;
+	/* Bits above cluster_size are masked in the caller.  */
+	for_each_set_bit(i, &ipi_bitmap_low,
+		min((u32)BITS_PER_LONG, (map->max_apic_id - min + 1))) {
+		if (map->phys_map[min + i]) {
+			vcpu = map->phys_map[min + i]->vcpu;
+			count += kvm_apic_set_irq(vcpu, &irq, NULL);
+		}
+	}
+
+	min += cluster_size;
+
+	if (min > map->max_apic_id)
+		goto out;
+
+	for_each_set_bit(i, &ipi_bitmap_high,
+		min((u32)BITS_PER_LONG, (map->max_apic_id - min + 1))) {
+		if (map->phys_map[min + i]) {
+			vcpu = map->phys_map[min + i]->vcpu;
+			count += kvm_apic_set_irq(vcpu, &irq, NULL);
+		}
+	}
+
+out:
+	rcu_read_unlock();
+	return count;
+}
+
 static int pv_eoi_put_user(struct kvm_vcpu *vcpu, u8 val)
 {
 
@@ -1291,9 +1349,8 @@ EXPORT_SYMBOL_GPL(kvm_lapic_reg_read);
 
 static int apic_mmio_in_range(struct kvm_lapic *apic, gpa_t addr)
 {
-	return kvm_apic_hw_enabled(apic) &&
-	    addr >= apic->base_address &&
-	    addr < apic->base_address + LAPIC_MMIO_LENGTH;
+	return addr >= apic->base_address &&
+		addr < apic->base_address + LAPIC_MMIO_LENGTH;
 }
 
 static int apic_mmio_read(struct kvm_vcpu *vcpu, struct kvm_io_device *this,
@@ -1304,6 +1361,15 @@ static int apic_mmio_read(struct kvm_vcpu *vcpu, struct kvm_io_device *this,
 
 	if (!apic_mmio_in_range(apic, address))
 		return -EOPNOTSUPP;
+
+	if (!kvm_apic_hw_enabled(apic) || apic_x2apic_mode(apic)) {
+		if (!kvm_check_has_quirk(vcpu->kvm,
+					 KVM_X86_QUIRK_LAPIC_MMIO_HOLE))
+			return -EOPNOTSUPP;
+
+		memset(data, 0xff, len);
+		return 0;
+	}
 
 	kvm_lapic_reg_read(apic, offset, len, data);
 
@@ -1863,6 +1929,14 @@ static int apic_mmio_write(struct kvm_vcpu *vcpu, struct kvm_io_device *this,
 
 	if (!apic_mmio_in_range(apic, address))
 		return -EOPNOTSUPP;
+
+	if (!kvm_apic_hw_enabled(apic) || apic_x2apic_mode(apic)) {
+		if (!kvm_check_has_quirk(vcpu->kvm,
+					 KVM_X86_QUIRK_LAPIC_MMIO_HOLE))
+			return -EOPNOTSUPP;
+
+		return 0;
+	}
 
 	/*
 	 * APIC register must be aligned on 128-bits boundary.
@@ -2552,17 +2626,25 @@ int kvm_hv_vapic_msr_read(struct kvm_vcpu *vcpu, u32 reg, u64 *data)
 	return 0;
 }
 
-int kvm_lapic_enable_pv_eoi(struct kvm_vcpu *vcpu, u64 data)
+int kvm_lapic_enable_pv_eoi(struct kvm_vcpu *vcpu, u64 data, unsigned long len)
 {
 	u64 addr = data & ~KVM_MSR_ENABLED;
+	struct gfn_to_hva_cache *ghc = &vcpu->arch.pv_eoi.data;
+	unsigned long new_len;
+
 	if (!IS_ALIGNED(addr, 4))
 		return 1;
 
 	vcpu->arch.pv_eoi.msr_val = data;
 	if (!pv_eoi_enabled(vcpu))
 		return 0;
-	return kvm_gfn_to_hva_cache_init(vcpu->kvm, &vcpu->arch.pv_eoi.data,
-					 addr, sizeof(u8));
+
+	if (addr == ghc->gpa && len <= ghc->len)
+		new_len = ghc->len;
+	else
+		new_len = len;
+
+	return kvm_gfn_to_hva_cache_init(vcpu->kvm, ghc, addr, new_len);
 }
 
 void kvm_apic_accept_events(struct kvm_vcpu *vcpu)

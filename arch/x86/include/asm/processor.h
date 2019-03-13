@@ -32,6 +32,7 @@ struct vm86;
 #include <linux/err.h>
 #include <linux/irqflags.h>
 #include <linux/mem_encrypt.h>
+#include <linux/rh_kabi.h>
 
 /*
  * We handle most unaligned accesses in hardware.  On the other hand
@@ -80,6 +81,9 @@ extern u16 __read_mostly tlb_lld_4k[NR_INFO];
 extern u16 __read_mostly tlb_lld_2m[NR_INFO];
 extern u16 __read_mostly tlb_lld_4m[NR_INFO];
 extern u16 __read_mostly tlb_lld_1g[NR_INFO];
+
+struct cpuinfo_x86_extended_rh {
+};
 
 /*
  *  CPU type and hardware bug flags. Kept separately for each CPU.
@@ -132,7 +136,10 @@ struct cpuinfo_x86 {
 	/* Index into per_cpu list: */
 	u16			cpu_index;
 	u32			microcode;
+	/* Address space bits used by the cache internally */
+	u8			x86_cache_bits;
 	unsigned		initialized : 1;
+	RH_KABI_SIZE_AND_EXTEND(cpuinfo_x86_extended);
 } __randomize_layout;
 
 struct cpuid_regs {
@@ -180,6 +187,11 @@ extern const struct seq_operations cpuinfo_op;
 #define cache_line_size()	(boot_cpu_data.x86_cache_alignment)
 
 extern void cpu_detect(struct cpuinfo_x86 *c);
+
+static inline unsigned long long l1tf_pfn_limit(void)
+{
+	return BIT_ULL(boot_cpu_data.x86_cache_bits - 1 - PAGE_SHIFT);
+}
 
 extern void early_cpu_init(void);
 extern void identify_boot_cpu(void);
@@ -308,7 +320,13 @@ struct x86_hw_tss {
 	 */
 	u64			sp1;
 
+	/*
+	 * Since Linux does not use ring 2, the 'sp2' slot is unused by
+	 * hardware.  entry_SYSCALL_64 uses it as scratch space to stash
+	 * the user RSP value.
+	 */
 	u64			sp2;
+
 	u64			reserved2;
 	u64			ist[7];
 	u32			reserved3;
@@ -977,4 +995,16 @@ bool xen_set_default_idle(void);
 void stop_this_cpu(void *dummy);
 void df_debug(struct pt_regs *regs, long error_code);
 void microcode_check(void);
+
+enum l1tf_mitigations {
+	L1TF_MITIGATION_OFF,
+	L1TF_MITIGATION_FLUSH_NOWARN,
+	L1TF_MITIGATION_FLUSH,
+	L1TF_MITIGATION_FLUSH_NOSMT,
+	L1TF_MITIGATION_FULL,
+	L1TF_MITIGATION_FULL_FORCE
+};
+
+extern enum l1tf_mitigations l1tf_mitigation;
+
 #endif /* _ASM_X86_PROCESSOR_H */

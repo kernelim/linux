@@ -198,6 +198,7 @@ static int hns_roce_query_device(struct ib_device *ib_dev,
 
 	memset(props, 0, sizeof(*props));
 
+	props->fw_ver = hr_dev->caps.fw_ver;
 	props->sys_image_guid = cpu_to_be64(hr_dev->sys_image_guid);
 	props->max_mr_size = (u64)(~(0ULL));
 	props->page_size_cap = hr_dev->caps.page_size_cap;
@@ -208,7 +209,8 @@ static int hns_roce_query_device(struct ib_device *ib_dev,
 	props->max_qp_wr = hr_dev->caps.max_wqes;
 	props->device_cap_flags = IB_DEVICE_PORT_ACTIVE_EVENT |
 				  IB_DEVICE_RC_RNR_NAK_GEN;
-	props->max_sge = max(hr_dev->caps.max_sq_sg, hr_dev->caps.max_rq_sg);
+	props->max_send_sge = hr_dev->caps.max_sq_sg;
+	props->max_recv_sge = hr_dev->caps.max_rq_sg;
 	props->max_sge_rd = 1;
 	props->max_cq = hr_dev->caps.num_cqs;
 	props->max_cqe = hr_dev->caps.max_cqes;
@@ -534,6 +536,9 @@ static int hns_roce_register_device(struct hns_roce_dev *hr_dev)
 		(1ULL << IB_USER_VERBS_CMD_MODIFY_QP) |
 		(1ULL << IB_USER_VERBS_CMD_QUERY_QP) |
 		(1ULL << IB_USER_VERBS_CMD_DESTROY_QP);
+
+	ib_dev->uverbs_ex_cmd_mask |=
+		(1ULL << IB_USER_VERBS_EX_CMD_MODIFY_CQ);
 
 	/* HCA||device||port */
 	ib_dev->modify_device		= hns_roce_modify_device;
@@ -887,8 +892,7 @@ error_failed_cmd_init:
 
 error_failed_cmq_init:
 	if (hr_dev->hw->reset) {
-		ret = hr_dev->hw->reset(hr_dev, false);
-		if (ret)
+		if (hr_dev->hw->reset(hr_dev, false))
 			dev_err(dev, "Dereset RoCE engine failed!\n");
 	}
 

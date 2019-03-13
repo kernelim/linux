@@ -1673,7 +1673,7 @@ static u32 bio_flags_to_wire(struct drbd_connection *connection,
 		return bio->bi_opf & REQ_SYNC ? DP_RW_SYNC : 0;
 }
 
-/* Used to send write or TRIM aka REQ_DISCARD requests
+/* Used to send write or TRIM aka REQ_OP_DISCARD requests
  * R_PRIMARY -> Peer	(P_DATA, P_TRIM)
  */
 int drbd_send_dblock(struct drbd_peer_device *peer_device, struct drbd_request *req)
@@ -2103,14 +2103,10 @@ static void drbd_destroy_mempools(void)
 	mempool_exit(&drbd_md_io_page_pool);
 	mempool_exit(&drbd_ee_mempool);
 	mempool_exit(&drbd_request_mempool);
-	if (drbd_ee_cache)
-		kmem_cache_destroy(drbd_ee_cache);
-	if (drbd_request_cache)
-		kmem_cache_destroy(drbd_request_cache);
-	if (drbd_bm_ext_cache)
-		kmem_cache_destroy(drbd_bm_ext_cache);
-	if (drbd_al_ext_cache)
-		kmem_cache_destroy(drbd_al_ext_cache);
+	kmem_cache_destroy(drbd_ee_cache);
+	kmem_cache_destroy(drbd_request_cache);
+	kmem_cache_destroy(drbd_bm_ext_cache);
+	kmem_cache_destroy(drbd_al_ext_cache);
 
 	drbd_ee_cache        = NULL;
 	drbd_request_cache   = NULL;
@@ -2796,7 +2792,7 @@ enum drbd_ret_code drbd_create_device(struct drbd_config_context *adm_ctx, unsig
 
 	drbd_init_set_defaults(device);
 
-	q = blk_alloc_queue_node(GFP_KERNEL, NUMA_NO_NODE, &resource->req_lock);
+	q = blk_alloc_queue_node(GFP_KERNEL, NUMA_NO_NODE);
 	if (!q)
 		goto out_no_q;
 	device->rq_queue = q;

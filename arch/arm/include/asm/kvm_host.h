@@ -218,7 +218,6 @@ unsigned long kvm_call_hyp(void *hypfn, ...);
 void force_vm_exit(const cpumask_t *mask);
 
 #define KVM_ARCH_WANT_MMU_NOTIFIER
-int kvm_unmap_hva(struct kvm *kvm, unsigned long hva);
 int kvm_unmap_hva_range(struct kvm *kvm,
 			unsigned long start, unsigned long end);
 void kvm_set_spte_hva(struct kvm *kvm, unsigned long hva, pte_t pte);
@@ -349,5 +348,16 @@ static inline void kvm_vcpu_put_sysregs(struct kvm_vcpu *vcpu) {}
 #define __KVM_HAVE_ARCH_VM_ALLOC
 struct kvm *kvm_arch_alloc_vm(void);
 void kvm_arch_free_vm(struct kvm *kvm);
+
+static inline int kvm_arm_setup_stage2(struct kvm *kvm, unsigned long type)
+{
+	/*
+	 * On 32bit ARM, VMs get a static 40bit IPA stage2 setup,
+	 * so any non-zero value used as type is illegal.
+	 */
+	if (type)
+		return -EINVAL;
+	return 0;
+}
 
 #endif /* __ARM_KVM_HOST_H__ */

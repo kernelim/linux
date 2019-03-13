@@ -17,6 +17,8 @@
 #include <linux/bpf.h>
 #include <net/lwtunnel.h>
 
+#include <linux/rh_features.h>
+
 struct bpf_lwt_prog {
 	struct bpf_prog *prog;
 	char *name;
@@ -225,6 +227,8 @@ static int bpf_parse_prog(struct nlattr *attr, struct bpf_lwt_prog *prog,
 	p = bpf_prog_get_type(fd, type);
 	if (IS_ERR(p))
 		return PTR_ERR(p);
+
+	rh_mark_used_feature("eBPF/lwt");
 
 	prog->prog = p;
 

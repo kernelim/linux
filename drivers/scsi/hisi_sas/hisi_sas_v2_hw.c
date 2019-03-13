@@ -770,7 +770,7 @@ static u32 hisi_sas_phy_read32(struct hisi_hba *hisi_hba,
 
 /* This function needs to be protected from pre-emption. */
 static int
-slot_index_alloc_quirk_v2_hw(struct hisi_hba *hisi_hba, int *slot_idx,
+slot_index_alloc_quirk_v2_hw(struct hisi_hba *hisi_hba,
 			     struct domain_device *device)
 {
 	int sata_dev = dev_is_sata(device);
@@ -778,6 +778,7 @@ slot_index_alloc_quirk_v2_hw(struct hisi_hba *hisi_hba, int *slot_idx,
 	struct hisi_sas_device *sas_dev = device->lldd_dev;
 	int sata_idx = sas_dev->sata_idx;
 	int start, end;
+	unsigned long flags;
 
 	if (!sata_dev) {
 		/*
@@ -801,11 +802,14 @@ slot_index_alloc_quirk_v2_hw(struct hisi_hba *hisi_hba, int *slot_idx,
 		end = 64 * (sata_idx + 2);
 	}
 
+	spin_lock_irqsave(&hisi_hba->lock, flags);
 	while (1) {
 		start = find_next_zero_bit(bitmap,
 					hisi_hba->slot_index_count, start);
-		if (start >= end)
+		if (start >= end) {
+			spin_unlock_irqrestore(&hisi_hba->lock, flags);
 			return -SAS_QUEUE_FULL;
+		}
 		/*
 		  * SAS IPTT bit0 should be 1, and SATA IPTT bit0 should be 0.
 		  */
@@ -815,8 +819,8 @@ slot_index_alloc_quirk_v2_hw(struct hisi_hba *hisi_hba, int *slot_idx,
 	}
 
 	set_bit(start, bitmap);
-	*slot_idx = start;
-	return 0;
+	spin_unlock_irqrestore(&hisi_hba->lock, flags);
+	return start;
 }
 
 static bool sata_index_alloc_v2_hw(struct hisi_hba *hisi_hba, int *idx)
@@ -1665,22 +1669,27 @@ get_free_slot_v2_hw(struct hisi_hba *hisi_hba, struct hisi_sas_dq *dq)
 static void start_delivery_v2_hw(struct hisi_sas_dq *dq)
 {
 	struct hisi_hba *hisi_hba = dq->hisi_hba;
-	struct hisi_sas_slot *s, *s1;
+	struct hisi_sas_slot *s, *s1, *s2 = NULL;
 	struct list_head *dq_list;
 	int dlvry_queue = dq->id;
-	int wp, count = 0;
+	int wp;
 
 	dq_list = &dq->list;
 	list_for_each_entry_safe(s, s1, &dq->list, delivery) {
 		if (!s->ready)
 			break;
-		count++;
-		wp = (s->dlvry_queue_slot + 1) % HISI_SAS_QUEUE_SLOTS;
+		s2 = s;
 		list_del(&s->delivery);
 	}
 
-	if (!count)
+	if (!s2)
 		return;
+
+	/*
+	 * Ensure that memories for slots built on other CPUs is observed.
+	 */
+	smp_rmb();
+	wp = (s2->dlvry_queue_slot + 1) % HISI_SAS_QUEUE_SLOTS;
 
 	hisi_sas_write32(hisi_hba, DLVRY_Q_0_WR_PTR + (dlvry_queue * 0x14), wp);
 }
@@ -2478,7 +2487,6 @@ slot_complete_v2_hw(struct hisi_hba *hisi_hba, struct hisi_sas_slot *slot)
 	}
 
 out:
-	hisi_sas_slot_task_free(hisi_hba, task, slot);
 	sts = ts->stat;
 	spin_lock_irqsave(&task->task_state_lock, flags);
 	if (task->task_state_flags & SAS_TASK_STATE_ABORTED) {
@@ -2488,6 +2496,7 @@ out:
 	}
 	task->task_state_flags |= SAS_TASK_STATE_DONE;
 	spin_unlock_irqrestore(&task->task_state_lock, flags);
+	hisi_sas_slot_task_free(hisi_hba, task, slot);
 
 	if (!is_internal && (task->task_proto != SAS_PROTOCOL_SMP)) {
 		spin_lock_irqsave(&device->done_lock, flags);
@@ -2840,7 +2849,8 @@ static void phy_bcast_v2_hw(int phy_no, struct hisi_hba *hisi_hba)
 
 	hisi_sas_phy_write32(hisi_hba, phy_no, SL_RX_BCAST_CHK_MSK, 1);
 	bcast_status = hisi_sas_phy_read32(hisi_hba, phy_no, RX_PRIMS_STATUS);
-	if (bcast_status & RX_BCAST_CHG_MSK)
+	if ((bcast_status & RX_BCAST_CHG_MSK) &&
+	    !test_bit(HISI_SAS_RESET_BIT, &hisi_hba->flags))
 		sas_ha->notify_port_event(sas_phy, PORTE_BROADCAST_RCVD);
 	hisi_sas_phy_write32(hisi_hba, phy_no, CHL_INT0,
 			     CHL_INT0_SL_RX_BCST_ACK_MSK);
@@ -3234,8 +3244,7 @@ static irqreturn_t sata_int_v2_hw(int irq_no, void *p)
 	if (fis->status & ATA_ERR) {
 		dev_warn(dev, "sata int: phy%d FIS status: 0x%x\n", phy_no,
 				fis->status);
-		disable_phy_v2_hw(hisi_hba, phy_no);
-		enable_phy_v2_hw(hisi_hba, phy_no);
+		hisi_sas_notify_phy_event(phy, HISI_PHYE_LINK_RESET);
 		res = IRQ_NONE;
 		goto end;
 	}
@@ -3555,7 +3564,6 @@ static struct scsi_host_template sht_v2_hw = {
 	.scan_start		= hisi_sas_scan_start,
 	.change_queue_depth	= sas_change_queue_depth,
 	.bios_param		= sas_bios_param,
-	.can_queue		= 1,
 	.this_id		= -1,
 	.sg_tablesize		= SG_ALL,
 	.max_sectors		= SCSI_DEFAULT_MAX_SECTORS,

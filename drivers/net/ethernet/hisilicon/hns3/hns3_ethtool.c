@@ -59,7 +59,7 @@ static const struct hns3_stats hns3_rxq_stats[] = {
 
 #define HNS3_TQP_STATS_COUNT (HNS3_TXQ_STATS_COUNT + HNS3_RXQ_STATS_COUNT)
 
-#define HNS3_SELF_TEST_TPYE_NUM		1
+#define HNS3_SELF_TEST_TYPE_NUM		2
 #define HNS3_NIC_LB_TEST_PKT_NUM	1
 #define HNS3_NIC_LB_TEST_RING_ID	0
 #define HNS3_NIC_LB_TEST_PACKET_SIZE	128
@@ -77,6 +77,7 @@ struct hns3_link_mode_mapping {
 static int hns3_lp_setup(struct net_device *ndev, enum hnae3_loop loop, bool en)
 {
 	struct hnae3_handle *h = hns3_get_handle(ndev);
+	bool vlan_filter_enable;
 	int ret;
 
 	if (!h->ae_algo->ops->set_loopback ||
@@ -84,6 +85,7 @@ static int hns3_lp_setup(struct net_device *ndev, enum hnae3_loop loop, bool en)
 		return -EOPNOTSUPP;
 
 	switch (loop) {
+	case HNAE3_MAC_INTER_LOOP_SERDES:
 	case HNAE3_MAC_INTER_LOOP_MAC:
 		ret = h->ae_algo->ops->set_loopback(h, loop, en);
 		break;
@@ -95,7 +97,14 @@ static int hns3_lp_setup(struct net_device *ndev, enum hnae3_loop loop, bool en)
 	if (ret)
 		return ret;
 
-	h->ae_algo->ops->set_promisc_mode(h, en, en);
+	if (en) {
+		h->ae_algo->ops->set_promisc_mode(h, true, true);
+	} else {
+		/* recover promisc mode before loopback test */
+		hns3_update_promisc_mode(ndev, h->netdev_flags);
+		vlan_filter_enable = ndev->flags & IFF_PROMISC ? false : true;
+		hns3_enable_vlan_filter(ndev, vlan_filter_enable);
+	}
 
 	return ret;
 }
@@ -105,33 +114,19 @@ static int hns3_lp_up(struct net_device *ndev, enum hnae3_loop loop_mode)
 	struct hnae3_handle *h = hns3_get_handle(ndev);
 	int ret;
 
-	if (!h->ae_algo->ops->start)
-		return -EOPNOTSUPP;
-
 	ret = hns3_nic_reset_all_ring(h);
 	if (ret)
 		return ret;
 
-	ret = h->ae_algo->ops->start(h);
-	if (ret) {
-		netdev_err(ndev,
-			   "hns3_lb_up ae start return error: %d\n", ret);
-		return ret;
-	}
-
 	ret = hns3_lp_setup(ndev, loop_mode, true);
 	usleep_range(10000, 20000);
 
-	return ret;
+	return 0;
 }
 
 static int hns3_lp_down(struct net_device *ndev, enum hnae3_loop loop_mode)
 {
-	struct hnae3_handle *h = hns3_get_handle(ndev);
 	int ret;
-
-	if (!h->ae_algo->ops->stop)
-		return -EOPNOTSUPP;
 
 	ret = hns3_lp_setup(ndev, loop_mode, false);
 	if (ret) {
@@ -139,7 +134,6 @@ static int hns3_lp_down(struct net_device *ndev, enum hnae3_loop loop_mode)
 		return ret;
 	}
 
-	h->ae_algo->ops->stop(h);
 	usleep_range(10000, 20000);
 
 	return 0;
@@ -157,6 +151,7 @@ static void hns3_lp_setup_skb(struct sk_buff *skb)
 	packet = skb_put(skb, HNS3_NIC_LB_TEST_PACKET_SIZE);
 
 	memcpy(ethh->h_dest, ndev->dev_addr, ETH_ALEN);
+	ethh->h_dest[5] += 0x1f;
 	eth_zero_addr(ethh->h_source);
 	ethh->h_proto = htons(ETH_P_ARP);
 	skb_reset_mac_header(skb);
@@ -201,7 +196,9 @@ static u32 hns3_lb_check_rx_ring(struct hns3_nic_priv *priv, u32 budget)
 		rx_group = &ring->tqp_vector->rx_group;
 		pre_rx_pkt = rx_group->total_packets;
 
+		preempt_disable();
 		hns3_clean_rx_ring(ring, budget, hns3_lb_check_skb_data);
+		preempt_enable();
 
 		rcv_good_pkt_total += (rx_group->total_packets - pre_rx_pkt);
 		rx_group->total_packets = pre_rx_pkt;
@@ -217,7 +214,7 @@ static void hns3_lb_clear_tx_ring(struct hns3_nic_priv *priv, u32 start_ringid,
 	for (i = start_ringid; i <= end_ringid; i++) {
 		struct hns3_enet_ring *ring = priv->ring_data[i].ring;
 
-		hns3_clean_tx_ring(ring, budget);
+		hns3_clean_tx_ring(ring);
 	}
 }
 
@@ -291,7 +288,7 @@ static void hns3_self_test(struct net_device *ndev,
 {
 	struct hns3_nic_priv *priv = netdev_priv(ndev);
 	struct hnae3_handle *h = priv->ae_handle;
-	int st_param[HNS3_SELF_TEST_TPYE_NUM][2];
+	int st_param[HNS3_SELF_TEST_TYPE_NUM][2];
 	bool if_running = netif_running(ndev);
 #if IS_ENABLED(CONFIG_VLAN_8021Q)
 	bool dis_vlan_filter;
@@ -307,8 +304,12 @@ static void hns3_self_test(struct net_device *ndev,
 	st_param[HNAE3_MAC_INTER_LOOP_MAC][1] =
 			h->flags & HNAE3_SUPPORT_MAC_LOOPBACK;
 
+	st_param[HNAE3_MAC_INTER_LOOP_SERDES][0] = HNAE3_MAC_INTER_LOOP_SERDES;
+	st_param[HNAE3_MAC_INTER_LOOP_SERDES][1] =
+			h->flags & HNAE3_SUPPORT_SERDES_LOOPBACK;
+
 	if (if_running)
-		dev_close(ndev);
+		ndev->netdev_ops->ndo_stop(ndev);
 
 #if IS_ENABLED(CONFIG_VLAN_8021Q)
 	/* Disable the vlan filter for selftest does not support it */
@@ -320,7 +321,7 @@ static void hns3_self_test(struct net_device *ndev,
 
 	set_bit(HNS3_NIC_STATE_TESTING, &priv->state);
 
-	for (i = 0; i < HNS3_SELF_TEST_TPYE_NUM; i++) {
+	for (i = 0; i < HNS3_SELF_TEST_TYPE_NUM; i++) {
 		enum hnae3_loop loop_type = (enum hnae3_loop)st_param[i][0];
 
 		if (!st_param[i][1])
@@ -346,7 +347,7 @@ static void hns3_self_test(struct net_device *ndev,
 #endif
 
 	if (if_running)
-		dev_open(ndev);
+		ndev->netdev_ops->ndo_open(ndev);
 }
 
 static int hns3_get_sset_count(struct net_device *netdev, int stringset)
@@ -364,9 +365,10 @@ static int hns3_get_sset_count(struct net_device *netdev, int stringset)
 
 	case ETH_SS_TEST:
 		return ops->get_sset_count(h, stringset);
-	}
 
-	return 0;
+	default:
+		return -EOPNOTSUPP;
+	}
 }
 
 static void *hns3_update_strings(u8 *data, const struct hns3_stats *stats,
@@ -429,6 +431,8 @@ static void hns3_get_strings(struct net_device *netdev, u32 stringset, u8 *data)
 		break;
 	case ETH_SS_TEST:
 		ops->get_strings(h, stringset, data);
+		break;
+	default:
 		break;
 	}
 }
@@ -555,66 +559,78 @@ static int hns3_set_pauseparam(struct net_device *netdev,
 	return -EOPNOTSUPP;
 }
 
+static void hns3_get_ksettings(struct hnae3_handle *h,
+			       struct ethtool_link_ksettings *cmd)
+{
+	const struct hnae3_ae_ops *ops = h->ae_algo->ops;
+
+	/* 1.auto_neg & speed & duplex from cmd */
+	if (ops->get_ksettings_an_result)
+		ops->get_ksettings_an_result(h,
+					     &cmd->base.autoneg,
+					     &cmd->base.speed,
+					     &cmd->base.duplex);
+
+	/* 2.get link mode*/
+	if (ops->get_link_mode)
+		ops->get_link_mode(h,
+				   cmd->link_modes.supported,
+				   cmd->link_modes.advertising);
+
+	/* 3.mdix_ctrl&mdix get from phy reg */
+	if (ops->get_mdix_mode)
+		ops->get_mdix_mode(h, &cmd->base.eth_tp_mdix_ctrl,
+				   &cmd->base.eth_tp_mdix);
+}
+
 static int hns3_get_link_ksettings(struct net_device *netdev,
 				   struct ethtool_link_ksettings *cmd)
 {
 	struct hnae3_handle *h = hns3_get_handle(netdev);
-	u32 flowctrl_adv = 0;
+	const struct hnae3_ae_ops *ops;
+	u8 media_type;
 	u8 link_stat;
 
 	if (!h->ae_algo || !h->ae_algo->ops)
 		return -EOPNOTSUPP;
 
-	/* 1.auto_neg & speed & duplex from cmd */
-	if (netdev->phydev) {
+	ops = h->ae_algo->ops;
+	if (ops->get_media_type)
+		ops->get_media_type(h, &media_type);
+	else
+		return -EOPNOTSUPP;
+
+	switch (media_type) {
+	case HNAE3_MEDIA_TYPE_NONE:
+		cmd->base.port = PORT_NONE;
+		hns3_get_ksettings(h, cmd);
+		break;
+	case HNAE3_MEDIA_TYPE_FIBER:
+		cmd->base.port = PORT_FIBRE;
+		hns3_get_ksettings(h, cmd);
+		break;
+	case HNAE3_MEDIA_TYPE_COPPER:
+		if (!netdev->phydev)
+			return -EOPNOTSUPP;
+
+		cmd->base.port = PORT_TP;
 		phy_ethtool_ksettings_get(netdev->phydev, cmd);
 
+		break;
+	default:
+
+		netdev_warn(netdev, "Unknown media type");
 		return 0;
 	}
 
-	if (h->ae_algo->ops->get_ksettings_an_result)
-		h->ae_algo->ops->get_ksettings_an_result(h,
-							 &cmd->base.autoneg,
-							 &cmd->base.speed,
-							 &cmd->base.duplex);
-	else
-		return -EOPNOTSUPP;
+	/* mdio_support */
+	cmd->base.mdio_support = ETH_MDIO_SUPPORTS_C22;
 
 	link_stat = hns3_get_link(netdev);
 	if (!link_stat) {
 		cmd->base.speed = SPEED_UNKNOWN;
 		cmd->base.duplex = DUPLEX_UNKNOWN;
 	}
-
-	/* 2.get link mode and port type*/
-	if (h->ae_algo->ops->get_link_mode)
-		h->ae_algo->ops->get_link_mode(h,
-					       cmd->link_modes.supported,
-					       cmd->link_modes.advertising);
-
-	cmd->base.port = PORT_NONE;
-	if (h->ae_algo->ops->get_port_type)
-		h->ae_algo->ops->get_port_type(h,
-					       &cmd->base.port);
-
-	/* 3.mdix_ctrl&mdix get from phy reg */
-	if (h->ae_algo->ops->get_mdix_mode)
-		h->ae_algo->ops->get_mdix_mode(h, &cmd->base.eth_tp_mdix_ctrl,
-					       &cmd->base.eth_tp_mdix);
-	/* 4.mdio_support */
-	cmd->base.mdio_support = ETH_MDIO_SUPPORTS_C22;
-
-	/* 5.get flow control setttings */
-	if (h->ae_algo->ops->get_flowctrl_adv)
-		h->ae_algo->ops->get_flowctrl_adv(h, &flowctrl_adv);
-
-	if (flowctrl_adv & ADVERTISED_Pause)
-		ethtool_link_ksettings_add_link_mode(cmd, advertising,
-						     Pause);
-
-	if (flowctrl_adv & ADVERTISED_Asym_Pause)
-		ethtool_link_ksettings_add_link_mode(cmd, advertising,
-						     Asym_Pause);
 
 	return 0;
 }

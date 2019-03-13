@@ -957,6 +957,7 @@ nvmet_fc_find_target_assoc(struct nvmet_fc_tgtport *tgtport,
 	return ret;
 }
 
+bool tech_preview_warning_issued = false;
 
 /**
  * nvme_fc_register_targetport - transport entry point called by an
@@ -984,6 +985,11 @@ nvmet_fc_register_targetport(struct nvmet_fc_port_info *pinfo,
 	struct nvmet_fc_tgtport *newrec;
 	unsigned long flags;
 	int ret, idx;
+
+	if (!tech_preview_warning_issued) {
+		mark_driver_unsupported("NVMe over FC Target");
+		tech_preview_warning_issued = true;
+	}
 
 	if (!template->xmt_ls_rsp || !template->fcp_op ||
 	    !template->fcp_abort ||

@@ -189,7 +189,7 @@ static void copy_query_dev_fields(struct ib_uverbs_file *file,
 	resp->max_qp		= attr->max_qp;
 	resp->max_qp_wr		= attr->max_qp_wr;
 	resp->device_cap_flags	= lower_32_bits(attr->device_cap_flags);
-	resp->max_sge		= attr->max_sge;
+	resp->max_sge		= min(attr->max_send_sge, attr->max_recv_sge);
 	resp->max_sge_rd	= attr->max_sge_rd;
 	resp->max_cq		= attr->max_cq;
 	resp->max_cqe		= attr->max_cqe;
@@ -243,6 +243,27 @@ ssize_t ib_uverbs_query_device(struct ib_uverbs_file *file,
 	return in_len;
 }
 
+/*
+ * ib_uverbs_query_port_resp.port_cap_flags started out as just a copy of the
+ * PortInfo CapabilityMask, but was extended with unique bits.
+ */
+static u32 make_port_cap_flags(const struct ib_port_attr *attr)
+{
+	u32 res;
+
+	/* All IBA CapabilityMask bits are passed through here, except bit 26,
+	 * which is overridden with IP_BASED_GIDS. This is due to a historical
+	 * mistake in the implementation of IP_BASED_GIDS. Otherwise all other
+	 * bits match the IBA definition across all kernel versions.
+	 */
+	res = attr->port_cap_flags & ~(u32)IB_UVERBS_PCF_IP_BASED_GIDS;
+
+	if (attr->ip_gids)
+		res |= IB_UVERBS_PCF_IP_BASED_GIDS;
+
+	return res;
+}
+
 ssize_t ib_uverbs_query_port(struct ib_uverbs_file *file,
 			     struct ib_device *ib_dev,
 			     const char __user *buf,
@@ -269,7 +290,7 @@ ssize_t ib_uverbs_query_port(struct ib_uverbs_file *file,
 	resp.max_mtu 	     = attr.max_mtu;
 	resp.active_mtu      = attr.active_mtu;
 	resp.gid_tbl_len     = attr.gid_tbl_len;
-	resp.port_cap_flags  = attr.port_cap_flags;
+	resp.port_cap_flags  = make_port_cap_flags(&attr);
 	resp.max_msg_sz      = attr.max_msg_sz;
 	resp.bad_pkey_cntr   = attr.bad_pkey_cntr;
 	resp.qkey_viol_cntr  = attr.qkey_viol_cntr;
@@ -2048,33 +2069,55 @@ static int modify_qp(struct ib_uverbs_file *file,
 
 	if ((cmd->base.attr_mask & IB_QP_CUR_STATE &&
 	    cmd->base.cur_qp_state > IB_QPS_ERR) ||
-	    cmd->base.qp_state > IB_QPS_ERR) {
+	    (cmd->base.attr_mask & IB_QP_STATE &&
+	    cmd->base.qp_state > IB_QPS_ERR)) {
 		ret = -EINVAL;
 		goto release_qp;
 	}
 
-	attr->qp_state		  = cmd->base.qp_state;
-	attr->cur_qp_state	  = cmd->base.cur_qp_state;
-	attr->path_mtu		  = cmd->base.path_mtu;
-	attr->path_mig_state	  = cmd->base.path_mig_state;
-	attr->qkey		  = cmd->base.qkey;
-	attr->rq_psn		  = cmd->base.rq_psn;
-	attr->sq_psn		  = cmd->base.sq_psn;
-	attr->dest_qp_num	  = cmd->base.dest_qp_num;
-	attr->qp_access_flags	  = cmd->base.qp_access_flags;
-	attr->pkey_index	  = cmd->base.pkey_index;
-	attr->alt_pkey_index	  = cmd->base.alt_pkey_index;
-	attr->en_sqd_async_notify = cmd->base.en_sqd_async_notify;
-	attr->max_rd_atomic	  = cmd->base.max_rd_atomic;
-	attr->max_dest_rd_atomic  = cmd->base.max_dest_rd_atomic;
-	attr->min_rnr_timer	  = cmd->base.min_rnr_timer;
-	attr->port_num		  = cmd->base.port_num;
-	attr->timeout		  = cmd->base.timeout;
-	attr->retry_cnt		  = cmd->base.retry_cnt;
-	attr->rnr_retry		  = cmd->base.rnr_retry;
-	attr->alt_port_num	  = cmd->base.alt_port_num;
-	attr->alt_timeout	  = cmd->base.alt_timeout;
-	attr->rate_limit	  = cmd->rate_limit;
+	if (cmd->base.attr_mask & IB_QP_STATE)
+		attr->qp_state = cmd->base.qp_state;
+	if (cmd->base.attr_mask & IB_QP_CUR_STATE)
+		attr->cur_qp_state = cmd->base.cur_qp_state;
+	if (cmd->base.attr_mask & IB_QP_PATH_MTU)
+		attr->path_mtu = cmd->base.path_mtu;
+	if (cmd->base.attr_mask & IB_QP_PATH_MIG_STATE)
+		attr->path_mig_state = cmd->base.path_mig_state;
+	if (cmd->base.attr_mask & IB_QP_QKEY)
+		attr->qkey = cmd->base.qkey;
+	if (cmd->base.attr_mask & IB_QP_RQ_PSN)
+		attr->rq_psn = cmd->base.rq_psn;
+	if (cmd->base.attr_mask & IB_QP_SQ_PSN)
+		attr->sq_psn = cmd->base.sq_psn;
+	if (cmd->base.attr_mask & IB_QP_DEST_QPN)
+		attr->dest_qp_num = cmd->base.dest_qp_num;
+	if (cmd->base.attr_mask & IB_QP_ACCESS_FLAGS)
+		attr->qp_access_flags = cmd->base.qp_access_flags;
+	if (cmd->base.attr_mask & IB_QP_PKEY_INDEX)
+		attr->pkey_index = cmd->base.pkey_index;
+	if (cmd->base.attr_mask & IB_QP_EN_SQD_ASYNC_NOTIFY)
+		attr->en_sqd_async_notify = cmd->base.en_sqd_async_notify;
+	if (cmd->base.attr_mask & IB_QP_MAX_QP_RD_ATOMIC)
+		attr->max_rd_atomic = cmd->base.max_rd_atomic;
+	if (cmd->base.attr_mask & IB_QP_MAX_DEST_RD_ATOMIC)
+		attr->max_dest_rd_atomic = cmd->base.max_dest_rd_atomic;
+	if (cmd->base.attr_mask & IB_QP_MIN_RNR_TIMER)
+		attr->min_rnr_timer = cmd->base.min_rnr_timer;
+	if (cmd->base.attr_mask & IB_QP_PORT)
+		attr->port_num = cmd->base.port_num;
+	if (cmd->base.attr_mask & IB_QP_TIMEOUT)
+		attr->timeout = cmd->base.timeout;
+	if (cmd->base.attr_mask & IB_QP_RETRY_CNT)
+		attr->retry_cnt = cmd->base.retry_cnt;
+	if (cmd->base.attr_mask & IB_QP_RNR_RETRY)
+		attr->rnr_retry = cmd->base.rnr_retry;
+	if (cmd->base.attr_mask & IB_QP_ALT_PATH) {
+		attr->alt_port_num = cmd->base.alt_port_num;
+		attr->alt_timeout = cmd->base.alt_timeout;
+		attr->alt_pkey_index = cmd->base.alt_pkey_index;
+	}
+	if (cmd->base.attr_mask & IB_QP_RATE_LIMIT)
+		attr->rate_limit = cmd->rate_limit;
 
 	if (cmd->base.attr_mask & IB_QP_AV)
 		copy_ah_attr_from_uverbs(qp->device, &attr->ah_attr,
@@ -2812,6 +2855,9 @@ static struct ib_uflow_resources *flow_resources_alloc(size_t num_specs)
 	if (!resources)
 		goto err_res;
 
+	if (!num_specs)
+		goto out;
+
 	resources->counters =
 		kcalloc(num_specs, sizeof(*resources->counters), GFP_KERNEL);
 
@@ -2824,8 +2870,8 @@ static struct ib_uflow_resources *flow_resources_alloc(size_t num_specs)
 	if (!resources->collection)
 		goto err_collection;
 
+out:
 	resources->max = num_specs;
-
 	return resources;
 
 err_collection:

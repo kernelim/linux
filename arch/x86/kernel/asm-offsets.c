@@ -18,6 +18,7 @@
 #include <asm/bootparam.h>
 #include <asm/suspend.h>
 #include <asm/tlbflush.h>
+#include <asm/spec_ctrl.h>
 
 #ifdef CONFIG_XEN
 #include <xen/interface/xen.h>
@@ -99,8 +100,16 @@ void common(void) {
 	OFFSET(TLB_STATE_user_pcid_flush_mask, tlb_state, user_pcid_flush_mask);
 
 	/* Layout info for cpu_entry_area */
-	OFFSET(CPU_ENTRY_AREA_tss, cpu_entry_area, tss);
-	OFFSET(CPU_ENTRY_AREA_entry_trampoline, cpu_entry_area, entry_trampoline);
 	OFFSET(CPU_ENTRY_AREA_entry_stack, cpu_entry_area, entry_stack_page);
 	DEFINE(SIZEOF_entry_stack, sizeof(struct entry_stack));
+
+	/* Offset for fields in tss_struct */
+	OFFSET(TSS_sp0, tss_struct, x86_tss.sp0);
+	OFFSET(TSS_sp1, tss_struct, x86_tss.sp1);
+	OFFSET(TSS_sp2, tss_struct, x86_tss.sp2);
+
+	/* Kernel IBRS speculation control structure */
+	OFFSET(KERNEL_IBRS_SPEC_CTRL_entry, kernel_ibrs_spec_ctrl, entry);
+	OFFSET(KERNEL_IBRS_SPEC_CTRL_exit, kernel_ibrs_spec_ctrl, exit);
+	OFFSET(KERNEL_IBRS_SPEC_CTRL_hi32, kernel_ibrs_spec_ctrl, hi32);
 }

@@ -76,7 +76,7 @@
 /* 4G/4K = 1M */
 #define HNS_ROCE_SL_SHIFT			28
 #define HNS_ROCE_TCLASS_SHIFT			20
-#define HNS_ROCE_FLOW_LABLE_MASK		0xfffff
+#define HNS_ROCE_FLOW_LABEL_MASK		0xfffff
 
 #define HNS_ROCE_MAX_PORTS			6
 #define HNS_ROCE_MAX_GID_NUM			16
@@ -110,6 +110,7 @@
 
 enum {
 	HNS_ROCE_SUPPORT_RQ_RECORD_DB = 1 << 0,
+	HNS_ROCE_SUPPORT_SQ_RECORD_DB = 1 << 1,
 };
 
 enum {
@@ -190,7 +191,8 @@ enum {
 	HNS_ROCE_CAP_FLAG_REREG_MR		= BIT(0),
 	HNS_ROCE_CAP_FLAG_ROCE_V1_V2		= BIT(1),
 	HNS_ROCE_CAP_FLAG_RQ_INLINE		= BIT(2),
-	HNS_ROCE_CAP_FLAG_RECORD_DB		= BIT(3)
+	HNS_ROCE_CAP_FLAG_RECORD_DB		= BIT(3),
+	HNS_ROCE_CAP_FLAG_SQ_RECORD_DB		= BIT(4),
 };
 
 enum hns_roce_mtt_type {
@@ -385,6 +387,7 @@ struct hns_roce_db {
 		struct hns_roce_user_db_page *user_page;
 	} u;
 	dma_addr_t	dma;
+	void		*virt_addr;
 	int		index;
 	int		order;
 };
@@ -524,7 +527,9 @@ struct hns_roce_qp {
 	struct hns_roce_buf	hr_buf;
 	struct hns_roce_wq	rq;
 	struct hns_roce_db	rdb;
+	struct hns_roce_db	sdb;
 	u8			rdb_en;
+	u8			sdb_en;
 	u32			doorbell_qpn;
 	__le32			sq_signal_bits;
 	u32			sq_next_wqe;
@@ -579,22 +584,22 @@ struct hns_roce_ceqe {
 };
 
 struct hns_roce_aeqe {
-	u32 asyn;
+	__le32 asyn;
 	union {
 		struct {
-			u32 qp;
+			__le32 qp;
 			u32 rsv0;
 			u32 rsv1;
 		} qp_event;
 
 		struct {
-			u32 cq;
+			__le32 cq;
 			u32 rsv0;
 			u32 rsv1;
 		} cq_event;
 
 		struct {
-			u32 ceqe;
+			__le32 ceqe;
 			u32 rsv0;
 			u32 rsv1;
 		} ce_event;
@@ -641,6 +646,8 @@ struct hns_roce_eq {
 	int				shift;
 	dma_addr_t			cur_eqe_ba;
 	dma_addr_t			nxt_eqe_ba;
+	int				event_type;
+	int				sub_type;
 };
 
 struct hns_roce_eq_table {
@@ -649,6 +656,7 @@ struct hns_roce_eq_table {
 };
 
 struct hns_roce_caps {
+	u64		fw_ver;
 	u8		num_ports;
 	int		gid_table_len[HNS_ROCE_MAX_PORTS];
 	int		pkey_table_len[HNS_ROCE_MAX_PORTS];
@@ -658,7 +666,9 @@ struct hns_roce_caps {
 	u32		max_sq_sg;	/* 2 */
 	u32		max_sq_inline;	/* 32 */
 	u32		max_rq_sg;	/* 2 */
+	u32		max_extend_sg;
 	int		num_qps;	/* 256k */
+	int             reserved_qps;
 	u32		max_wqes;	/* 16k */
 	u32		max_sq_desc_sz;	/* 64 */
 	u32		max_rq_desc_sz;	/* 64 */
@@ -720,8 +730,20 @@ struct hns_roce_caps {
 	u32		eqe_ba_pg_sz;
 	u32		eqe_buf_pg_sz;
 	u32		eqe_hop_num;
+	u32		sl_num;
+	u32		tsq_buf_pg_sz;
+	u32		tpq_buf_pg_sz;
 	u32		chunk_sz;	/* chunk size in non multihop mode*/
 	u64		flags;
+};
+
+struct hns_roce_work {
+	struct hns_roce_dev *hr_dev;
+	struct work_struct work;
+	u32 qpn;
+	u32 cqn;
+	int event_type;
+	int sub_type;
 };
 
 struct hns_roce_hw {
@@ -816,6 +838,7 @@ struct hns_roce_dev {
 	u32			tptr_size; /*only for hw v1*/
 	const struct hns_roce_hw *hw;
 	void			*priv;
+	struct workqueue_struct *irq_workq;
 };
 
 static inline struct hns_roce_dev *to_hr_dev(struct ib_device *ib_dev)
@@ -864,7 +887,7 @@ static inline struct hns_roce_sqp *hr_to_hr_sqp(struct hns_roce_qp *hr_qp)
 	return container_of(hr_qp, struct hns_roce_sqp, hr_qp);
 }
 
-static inline void hns_roce_write64_k(__be32 val[2], void __iomem *dest)
+static inline void hns_roce_write64_k(__le32 val[2], void __iomem *dest)
 {
 	__raw_writeq(*(u64 *) val, dest);
 }

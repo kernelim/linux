@@ -27,6 +27,7 @@
 #include <linux/mm.h>
 #include <linux/platform_data/x86/apple.h>
 #include <linux/pm_runtime.h>
+#include <linux/switchtec.h>
 #include <asm/dma.h>	/* isa_dma_bridge_buggy */
 #include "pci.h"
 
@@ -460,6 +461,7 @@ static void quirk_nfp6000(struct pci_dev *dev)
 }
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_NETRONOME,	PCI_DEVICE_ID_NETRONOME_NFP4000,	quirk_nfp6000);
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_NETRONOME,	PCI_DEVICE_ID_NETRONOME_NFP6000,	quirk_nfp6000);
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_NETRONOME,	PCI_DEVICE_ID_NETRONOME_NFP5000,	quirk_nfp6000);
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_NETRONOME,	PCI_DEVICE_ID_NETRONOME_NFP6000_VF,	quirk_nfp6000);
 
 /*  On IBM Crocodile ipr SAS adapters, expand BAR to system page size */
@@ -2105,6 +2107,7 @@ static void quirk_netmos(struct pci_dev *dev)
 		if (dev->subsystem_vendor == PCI_VENDOR_ID_IBM &&
 				dev->subsystem_device == 0x0299)
 			return;
+		/* else: fall through */
 	case PCI_DEVICE_ID_NETMOS_9735:
 	case PCI_DEVICE_ID_NETMOS_9745:
 	case PCI_DEVICE_ID_NETMOS_9845:
@@ -2352,6 +2355,9 @@ static void quirk_paxc_bridge(struct pci_dev *pdev)
 }
 DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_BROADCOM, 0x16cd, quirk_paxc_bridge);
 DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_BROADCOM, 0x16f0, quirk_paxc_bridge);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_BROADCOM, 0xd750, quirk_paxc_bridge);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_BROADCOM, 0xd802, quirk_paxc_bridge);
+DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_BROADCOM, 0xd804, quirk_paxc_bridge);
 #endif
 
 /*
@@ -3740,6 +3746,9 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_MARVELL_EXT, 0x917a,
 /* https://bugzilla.kernel.org/show_bug.cgi?id=42679#c78 */
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_MARVELL_EXT, 0x9182,
 			 quirk_dma_func1_alias);
+/* https://bugzilla.kernel.org/show_bug.cgi?id=42679#c134 */
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_MARVELL_EXT, 0x9183,
+			 quirk_dma_func1_alias);
 /* https://bugzilla.kernel.org/show_bug.cgi?id=42679#c46 */
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_MARVELL_EXT, 0x91a0,
 			 quirk_dma_func1_alias);
@@ -3855,6 +3864,30 @@ DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_BROADCOM, 0x9000,
 				quirk_bridge_cavm_thrx2_pcie_root);
 DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_BROADCOM, 0x9084,
 				quirk_bridge_cavm_thrx2_pcie_root);
+
+/*
+ * PCI BAR 5 is not setup correctly for the on-board AHCI controller
+ * on Broadcom's Vulcan processor. Added a quirk to fix BAR 5 by
+ * using BAR 4's resources which are populated correctly and NOT
+ * actually used by the AHCI controller.
+ */
+static void quirk_fix_vulcan_ahci_bars(struct pci_dev *dev)
+{
+	struct resource *r =  &dev->resource[4];
+
+	if (!(r->flags & IORESOURCE_MEM) || (r->start == 0))
+		return;
+
+	/* Set BAR5 resource to BAR4 */
+	dev->resource[5] = *r;
+
+	/* Update BAR5 in pci config space */
+	pci_write_config_dword(dev, PCI_BASE_ADDRESS_5, r->start);
+
+	/* Clear BAR4's resource */
+	memset(r, 0, sizeof(*r));
+}
+DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_BROADCOM, 0x9027, quirk_fix_vulcan_ahci_bars);
 
 /*
  * Intersil/Techwell TW686[4589]-based video capture cards have an empty (zero)
@@ -4235,11 +4268,6 @@ static int pci_quirk_qcom_rp_acs(struct pci_dev *dev, u16 acs_flags)
  *
  * 0x9d10-0x9d1b PCI Express Root port #{1-12}
  *
- * The 300 series chipset suffers from the same bug so include those root
- * ports here as well.
- *
- * 0xa32c-0xa343 PCI Express Root port #{0-24}
- *
  * [1] http://www.intel.com/content/www/us/en/chipsets/100-series-chipset-datasheet-vol-2.html
  * [2] http://www.intel.com/content/www/us/en/chipsets/100-series-chipset-datasheet-vol-1.html
  * [3] http://www.intel.com/content/www/us/en/chipsets/100-series-chipset-spec-update.html
@@ -4257,7 +4285,6 @@ static bool pci_quirk_intel_spt_pch_acs_match(struct pci_dev *dev)
 	case 0xa110 ... 0xa11f: case 0xa167 ... 0xa16a: /* Sunrise Point */
 	case 0xa290 ... 0xa29f: case 0xa2e7 ... 0xa2ee: /* Union Point */
 	case 0x9d10 ... 0x9d1b: /* 7th & 8th Gen Mobile */
-	case 0xa32c ... 0xa343:				/* 300 series */
 		return true;
 	}
 
@@ -4553,27 +4580,79 @@ static int pci_quirk_enable_intel_spt_pch_acs(struct pci_dev *dev)
 	return 0;
 }
 
-static const struct pci_dev_enable_acs {
+static int pci_quirk_disable_intel_spt_pch_acs_redir(struct pci_dev *dev)
+{
+	int pos;
+	u32 cap, ctrl;
+
+	if (!pci_quirk_intel_spt_pch_acs_match(dev))
+		return -ENOTTY;
+
+	pos = pci_find_ext_capability(dev, PCI_EXT_CAP_ID_ACS);
+	if (!pos)
+		return -ENOTTY;
+
+	pci_read_config_dword(dev, pos + PCI_ACS_CAP, &cap);
+	pci_read_config_dword(dev, pos + INTEL_SPT_ACS_CTRL, &ctrl);
+
+	ctrl &= ~(PCI_ACS_RR | PCI_ACS_CR | PCI_ACS_EC);
+
+	pci_write_config_dword(dev, pos + INTEL_SPT_ACS_CTRL, ctrl);
+
+	pci_info(dev, "Intel SPT PCH root port workaround: disabled ACS redirect\n");
+
+	return 0;
+}
+
+static const struct pci_dev_acs_ops {
 	u16 vendor;
 	u16 device;
 	int (*enable_acs)(struct pci_dev *dev);
-} pci_dev_enable_acs[] = {
-	{ PCI_VENDOR_ID_INTEL, PCI_ANY_ID, pci_quirk_enable_intel_pch_acs },
-	{ PCI_VENDOR_ID_INTEL, PCI_ANY_ID, pci_quirk_enable_intel_spt_pch_acs },
-	{ 0 }
+	int (*disable_acs_redir)(struct pci_dev *dev);
+} pci_dev_acs_ops[] = {
+	{ PCI_VENDOR_ID_INTEL, PCI_ANY_ID,
+	    .enable_acs = pci_quirk_enable_intel_pch_acs,
+	},
+	{ PCI_VENDOR_ID_INTEL, PCI_ANY_ID,
+	    .enable_acs = pci_quirk_enable_intel_spt_pch_acs,
+	    .disable_acs_redir = pci_quirk_disable_intel_spt_pch_acs_redir,
+	},
 };
 
 int pci_dev_specific_enable_acs(struct pci_dev *dev)
 {
-	const struct pci_dev_enable_acs *i;
-	int ret;
+	const struct pci_dev_acs_ops *p;
+	int i, ret;
 
-	for (i = pci_dev_enable_acs; i->enable_acs; i++) {
-		if ((i->vendor == dev->vendor ||
-		     i->vendor == (u16)PCI_ANY_ID) &&
-		    (i->device == dev->device ||
-		     i->device == (u16)PCI_ANY_ID)) {
-			ret = i->enable_acs(dev);
+	for (i = 0; i < ARRAY_SIZE(pci_dev_acs_ops); i++) {
+		p = &pci_dev_acs_ops[i];
+		if ((p->vendor == dev->vendor ||
+		     p->vendor == (u16)PCI_ANY_ID) &&
+		    (p->device == dev->device ||
+		     p->device == (u16)PCI_ANY_ID) &&
+		    p->enable_acs) {
+			ret = p->enable_acs(dev);
+			if (ret >= 0)
+				return ret;
+		}
+	}
+
+	return -ENOTTY;
+}
+
+int pci_dev_specific_disable_acs_redir(struct pci_dev *dev)
+{
+	const struct pci_dev_acs_ops *p;
+	int i, ret;
+
+	for (i = 0; i < ARRAY_SIZE(pci_dev_acs_ops); i++) {
+		p = &pci_dev_acs_ops[i];
+		if ((p->vendor == dev->vendor ||
+		     p->vendor == (u16)PCI_ANY_ID) &&
+		    (p->device == dev->device ||
+		     p->device == (u16)PCI_ANY_ID) &&
+		    p->disable_acs_redir) {
+			ret = p->disable_acs_redir(dev);
 			if (ret >= 0)
 				return ret;
 		}
@@ -4753,3 +4832,262 @@ DECLARE_PCI_FIXUP_CLASS_FINAL(PCI_VENDOR_ID_AMD, PCI_ANY_ID,
 			      PCI_CLASS_MULTIMEDIA_HD_AUDIO, 8, quirk_gpu_hda);
 DECLARE_PCI_FIXUP_CLASS_FINAL(PCI_VENDOR_ID_NVIDIA, PCI_ANY_ID,
 			      PCI_CLASS_MULTIMEDIA_HD_AUDIO, 8, quirk_gpu_hda);
+
+/*
+ * Some IDT switches incorrectly flag an ACS Source Validation error on
+ * completions for config read requests even though PCIe r4.0, sec
+ * 6.12.1.1, says that completions are never affected by ACS Source
+ * Validation.  Here's the text of IDT 89H32H8G3-YC, erratum #36:
+ *
+ *   Item #36 - Downstream port applies ACS Source Validation to Completions
+ *   Section 6.12.1.1 of the PCI Express Base Specification 3.1 states that
+ *   completions are never affected by ACS Source Validation.  However,
+ *   completions received by a downstream port of the PCIe switch from a
+ *   device that has not yet captured a PCIe bus number are incorrectly
+ *   dropped by ACS Source Validation by the switch downstream port.
+ *
+ * The workaround suggested by IDT is to issue a config write to the
+ * downstream device before issuing the first config read.  This allows the
+ * downstream device to capture its bus and device numbers (see PCIe r4.0,
+ * sec 2.2.9), thus avoiding the ACS error on the completion.
+ *
+ * However, we don't know when the device is ready to accept the config
+ * write, so we do config reads until we receive a non-Config Request Retry
+ * Status, then do the config write.
+ *
+ * To avoid hitting the erratum when doing the config reads, we disable ACS
+ * SV around this process.
+ */
+int pci_idt_bus_quirk(struct pci_bus *bus, int devfn, u32 *l, int timeout)
+{
+	int pos;
+	u16 ctrl = 0;
+	bool found;
+	struct pci_dev *bridge = bus->self;
+
+	pos = pci_find_ext_capability(bridge, PCI_EXT_CAP_ID_ACS);
+
+	/* Disable ACS SV before initial config reads */
+	if (pos) {
+		pci_read_config_word(bridge, pos + PCI_ACS_CTRL, &ctrl);
+		if (ctrl & PCI_ACS_SV)
+			pci_write_config_word(bridge, pos + PCI_ACS_CTRL,
+					      ctrl & ~PCI_ACS_SV);
+	}
+
+	found = pci_bus_generic_read_dev_vendor_id(bus, devfn, l, timeout);
+
+	/* Write Vendor ID (read-only) so the endpoint latches its bus/dev */
+	if (found)
+		pci_bus_write_config_word(bus, devfn, PCI_VENDOR_ID, 0);
+
+	/* Re-enable ACS_SV if it was previously enabled */
+	if (ctrl & PCI_ACS_SV)
+		pci_write_config_word(bridge, pos + PCI_ACS_CTRL, ctrl);
+
+	return found;
+}
+
+/*
+ * Microsemi Switchtec NTB uses devfn proxy IDs to move TLPs between
+ * NT endpoints via the internal switch fabric. These IDs replace the
+ * originating requestor ID TLPs which access host memory on peer NTB
+ * ports. Therefore, all proxy IDs must be aliased to the NTB device
+ * to permit access when the IOMMU is turned on.
+ */
+static void quirk_switchtec_ntb_dma_alias(struct pci_dev *pdev)
+{
+	void __iomem *mmio;
+	struct ntb_info_regs __iomem *mmio_ntb;
+	struct ntb_ctrl_regs __iomem *mmio_ctrl;
+	struct sys_info_regs __iomem *mmio_sys_info;
+	u64 partition_map;
+	u8 partition;
+	int pp;
+
+	if (pci_enable_device(pdev)) {
+		pci_err(pdev, "Cannot enable Switchtec device\n");
+		return;
+	}
+
+	mmio = pci_iomap(pdev, 0, 0);
+	if (mmio == NULL) {
+		pci_disable_device(pdev);
+		pci_err(pdev, "Cannot iomap Switchtec device\n");
+		return;
+	}
+
+	pci_info(pdev, "Setting Switchtec proxy ID aliases\n");
+
+	mmio_ntb = mmio + SWITCHTEC_GAS_NTB_OFFSET;
+	mmio_ctrl = (void __iomem *) mmio_ntb + SWITCHTEC_NTB_REG_CTRL_OFFSET;
+	mmio_sys_info = mmio + SWITCHTEC_GAS_SYS_INFO_OFFSET;
+
+	partition = ioread8(&mmio_ntb->partition_id);
+
+	partition_map = ioread32(&mmio_ntb->ep_map);
+	partition_map |= ((u64) ioread32(&mmio_ntb->ep_map + 4)) << 32;
+	partition_map &= ~(1ULL << partition);
+
+	for (pp = 0; pp < (sizeof(partition_map) * 8); pp++) {
+		struct ntb_ctrl_regs __iomem *mmio_peer_ctrl;
+		u32 table_sz = 0;
+		int te;
+
+		if (!(partition_map & (1ULL << pp)))
+			continue;
+
+		pci_dbg(pdev, "Processing partition %d\n", pp);
+
+		mmio_peer_ctrl = &mmio_ctrl[pp];
+
+		table_sz = ioread16(&mmio_peer_ctrl->req_id_table_size);
+		if (!table_sz) {
+			pci_warn(pdev, "Partition %d table_sz 0\n", pp);
+			continue;
+		}
+
+		if (table_sz > 512) {
+			pci_warn(pdev,
+				 "Invalid Switchtec partition %d table_sz %d\n",
+				 pp, table_sz);
+			continue;
+		}
+
+		for (te = 0; te < table_sz; te++) {
+			u32 rid_entry;
+			u8 devfn;
+
+			rid_entry = ioread32(&mmio_peer_ctrl->req_id_table[te]);
+			devfn = (rid_entry >> 1) & 0xFF;
+			pci_dbg(pdev,
+				"Aliasing Partition %d Proxy ID %02x.%d\n",
+				pp, PCI_SLOT(devfn), PCI_FUNC(devfn));
+			pci_add_dma_alias(pdev, devfn);
+		}
+	}
+
+	pci_iounmap(pdev, mmio);
+	pci_disable_device(pdev);
+}
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8531,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8532,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8533,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8534,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8535,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8536,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8543,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8544,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8545,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8546,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8551,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8552,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8553,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8554,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8555,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8556,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8561,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8562,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8563,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8564,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8565,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8566,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8571,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8572,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8573,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8574,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8575,
+			quirk_switchtec_ntb_dma_alias);
+DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MICROSEMI, 0x8576,
+			quirk_switchtec_ntb_dma_alias);
+
+/*
+ * On certain Lenovo Thinkpad P50 SKUs, specifically those with a Nvidia
+ * Quadro M1000M, the BIOS will occasionally make the mistake of not resetting
+ * the nvidia GPU between reboots if the system is configured to use hybrid
+ * graphics mode. This results in the GPU being left in whatever state it was
+ * in during the previous boot which causes spurious interrupts from the GPU,
+ * which in turn cause us to disable the wrong IRQs and end up breaking the
+ * touchpad. Unsurprisingly, this also completely breaks nouveau.
+ *
+ * Luckily, it seems a simple reset of the PCI device for the nvidia GPU
+ * manages to bring the GPU back into a clean state and fix all of these
+ * issues. Additionally since the GPU will report NoReset+ when the machine is
+ * configured in Dedicated display mode, we don't need to worry about
+ * accidentally resetting the GPU when it's supposed to already be
+ * initialized.
+ */
+static void
+quirk_lenovo_thinkpad_p50_nvgpu_survives_reboot(struct pci_dev *pdev)
+{
+	void __iomem *map;
+	int ret;
+
+	if (pdev->subsystem_vendor != PCI_VENDOR_ID_LENOVO ||
+	    pdev->subsystem_device != 0x222e ||
+	    !pdev->reset_fn)
+		return;
+
+	/*
+	 * If we can't enable the device's mmio space, it's probably not even
+	 * initialized. This is fine, and means we can just skip the quirk
+	 * entirely.
+	 */
+	if (pci_enable_device_mem(pdev)) {
+		pci_dbg(pdev, "Can't enable device mem, no reset needed\n");
+		return;
+	}
+
+	/* Taken from drivers/gpu/drm/nouveau/engine/device/base.c */
+	map = ioremap(pci_resource_start(pdev, 0), 0x102000);
+	if (!map) {
+		pci_err(pdev, "Can't map MMIO space, this is probably very bad\n");
+		goto out_disable;
+	}
+
+	/*
+	 * Be extra careful, and make sure that the GPU firmware is posted
+	 * before trying a reset
+	 */
+	if (ioread32(map + 0x2240c) & 0x2) {
+		pci_info(pdev,
+			 FW_BUG "GPU left initialized by EFI, resetting\n");
+		ret = pci_reset_function(pdev);
+		if (ret < 0)
+			pci_err(pdev, "Failed to reset GPU: %d\n", ret);
+	}
+
+	iounmap(map);
+out_disable:
+	pci_disable_device(pdev);
+}
+
+DECLARE_PCI_FIXUP_CLASS_FINAL(PCI_VENDOR_ID_NVIDIA, 0x13b1,
+			      PCI_CLASS_DISPLAY_VGA, 8,
+			      quirk_lenovo_thinkpad_p50_nvgpu_survives_reboot);

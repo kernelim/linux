@@ -408,7 +408,7 @@ struct file *sock_alloc_file(struct socket *sock, int flags, const char *dname)
 
 	d_instantiate(path.dentry, SOCK_INODE(sock));
 
-	file = alloc_file(&path, FMODE_READ | FMODE_WRITE,
+	file = alloc_file(&path, O_RDWR | (flags & O_NONBLOCK),
 		  &socket_file_ops);
 	if (IS_ERR(file)) {
 		/* drop dentry, keep inode for a bit */
@@ -420,7 +420,6 @@ struct file *sock_alloc_file(struct socket *sock, int flags, const char *dname)
 	}
 
 	sock->file = file;
-	file->f_flags = O_RDWR | (flags & O_NONBLOCK);
 	file->private_data = sock;
 	return file;
 }
@@ -962,7 +961,8 @@ void dlci_ioctl_set(int (*hook) (unsigned int, void __user *))
 EXPORT_SYMBOL(dlci_ioctl_set);
 
 static long sock_do_ioctl(struct net *net, struct socket *sock,
-				 unsigned int cmd, unsigned long arg)
+			  unsigned int cmd, unsigned long arg,
+			  unsigned int ifreq_size)
 {
 	int err;
 	void __user *argp = (void __user *)arg;
@@ -988,11 +988,11 @@ static long sock_do_ioctl(struct net *net, struct socket *sock,
 	} else {
 		struct ifreq ifr;
 		bool need_copyout;
-		if (copy_from_user(&ifr, argp, sizeof(struct ifreq)))
+		if (copy_from_user(&ifr, argp, ifreq_size))
 			return -EFAULT;
 		err = dev_ioctl(net, cmd, &ifr, &need_copyout);
 		if (!err && need_copyout)
-			if (copy_to_user(argp, &ifr, sizeof(struct ifreq)))
+			if (copy_to_user(argp, &ifr, ifreq_size))
 				return -EFAULT;
 	}
 	return err;
@@ -1091,7 +1091,8 @@ static long sock_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 			err = open_related_ns(&net->ns, get_net_ns);
 			break;
 		default:
-			err = sock_do_ioctl(net, sock, cmd, arg);
+			err = sock_do_ioctl(net, sock, cmd, arg,
+					    sizeof(struct ifreq));
 			break;
 		}
 	return err;
@@ -2690,8 +2691,7 @@ EXPORT_SYMBOL(sock_unregister);
 
 bool sock_is_registered(int family)
 {
-	return family < NPROTO &&
-		rcu_access_pointer(net_families[array_index_nospec(family, NPROTO)]);
+	return family < NPROTO && rcu_access_pointer(net_families[family]);
 }
 
 static int __init sock_init(void)
@@ -2763,7 +2763,8 @@ static int do_siocgstamp(struct net *net, struct socket *sock,
 	int err;
 
 	set_fs(KERNEL_DS);
-	err = sock_do_ioctl(net, sock, cmd, (unsigned long)&ktv);
+	err = sock_do_ioctl(net, sock, cmd, (unsigned long)&ktv,
+			    sizeof(struct compat_ifreq));
 	set_fs(old_fs);
 	if (!err)
 		err = compat_put_timeval(&ktv, up);
@@ -2779,7 +2780,8 @@ static int do_siocgstampns(struct net *net, struct socket *sock,
 	int err;
 
 	set_fs(KERNEL_DS);
-	err = sock_do_ioctl(net, sock, cmd, (unsigned long)&kts);
+	err = sock_do_ioctl(net, sock, cmd, (unsigned long)&kts,
+			    sizeof(struct compat_ifreq));
 	set_fs(old_fs);
 	if (!err)
 		err = compat_put_timespec(&kts, up);
@@ -2884,9 +2886,14 @@ static int ethtool_ioctl(struct net *net, struct compat_ifreq __user *ifr32)
 		    copy_in_user(&rxnfc->fs.ring_cookie,
 				 &compat_rxnfc->fs.ring_cookie,
 				 (void __user *)(&rxnfc->fs.location + 1) -
-				 (void __user *)&rxnfc->fs.ring_cookie) ||
-		    copy_in_user(&rxnfc->rule_cnt, &compat_rxnfc->rule_cnt,
-				 sizeof(rxnfc->rule_cnt)))
+				 (void __user *)&rxnfc->fs.ring_cookie))
+			return -EFAULT;
+		if (ethcmd == ETHTOOL_GRXCLSRLALL) {
+			if (put_user(rule_cnt, &rxnfc->rule_cnt))
+				return -EFAULT;
+		} else if (copy_in_user(&rxnfc->rule_cnt,
+					&compat_rxnfc->rule_cnt,
+					sizeof(rxnfc->rule_cnt)))
 			return -EFAULT;
 	}
 
@@ -3085,7 +3092,8 @@ static int routing_ioctl(struct net *net, struct socket *sock,
 	}
 
 	set_fs(KERNEL_DS);
-	ret = sock_do_ioctl(net, sock, cmd, (unsigned long) r);
+	ret = sock_do_ioctl(net, sock, cmd, (unsigned long) r,
+			    sizeof(struct compat_ifreq));
 	set_fs(old_fs);
 
 out:
@@ -3198,7 +3206,8 @@ static int compat_sock_ioctl_trans(struct file *file, struct socket *sock,
 	case SIOCBONDSETHWADDR:
 	case SIOCBONDCHANGEACTIVE:
 	case SIOCGIFNAME:
-		return sock_do_ioctl(net, sock, cmd, arg);
+		return sock_do_ioctl(net, sock, cmd, arg,
+				     sizeof(struct compat_ifreq));
 	}
 
 	return -ENOIOCTLCMD;

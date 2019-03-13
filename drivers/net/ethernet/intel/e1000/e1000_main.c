@@ -227,6 +227,9 @@ static int __init e1000_init_module(void)
 
 	pr_info("%s\n", e1000_copyright);
 
+	add_taint(TAINT_SUPPORT_REMOVED, LOCKDEP_STILL_OK);
+	pr_warn("E1000 MODULE IS NOT SUPPORTED\n");
+
 	ret = pci_register_driver(&e1000_driver);
 	if (copybreak != COPYBREAK_DEFAULT) {
 		if (copybreak == 0)

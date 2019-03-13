@@ -22,6 +22,7 @@
 #include <linux/percpu.h>
 #include <linux/timer.h>
 #include <linux/timerqueue.h>
+#include <linux/rh_kabi.h>
 
 struct hrtimer_clock_base;
 struct hrtimer_cpu_base;
@@ -89,6 +90,12 @@ enum hrtimer_restart {
 #define HRTIMER_STATE_ENQUEUED	0x01
 
 /**
+ * struct hrtimer_rh - Red Hat KABI extension struct
+ */
+struct hrtimer_rh {
+};
+
+/**
  * struct hrtimer - the basic hrtimer structure
  * @node:	timerqueue node, which also manages node.expires,
  *		the absolute expiry time in the hrtimers internal
@@ -115,6 +122,7 @@ struct hrtimer {
 	u8				state;
 	u8				is_rel;
 	u8				is_soft;
+	RH_KABI_SIZE_AND_EXTEND_PTR(hrtimer);
 };
 
 /**

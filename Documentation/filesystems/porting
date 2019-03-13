@@ -602,3 +602,8 @@ in your dentry operations instead.
 	dentry separately, and it now has request_mask and query_flags arguments
 	to specify the fields and sync type requested by statx.  Filesystems not
 	supporting any statx-specific features may ignore the new arguments.
+--
+[mandatory]
+	->clone_file_range() and ->dedupe_file_range have been replaced with
+	->remap_file_range().  See Documentation/filesystems/vfs.txt for more
+	information.

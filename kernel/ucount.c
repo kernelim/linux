@@ -80,6 +80,22 @@ static struct ctl_table user_table[] = {
 	UCOUNT_ENTRY("max_inotify_instances"),
 	UCOUNT_ENTRY("max_inotify_watches"),
 #endif
+	{}, /* UCOUNT_KABI_RESERVE_1 */
+	{}, /* UCOUNT_KABI_RESERVE_1 */
+	{}, /* UCOUNT_KABI_RESERVE_2 */
+	{}, /* UCOUNT_KABI_RESERVE_3 */
+	{}, /* UCOUNT_KABI_RESERVE_4 */
+	{}, /* UCOUNT_KABI_RESERVE_5 */
+	{}, /* UCOUNT_KABI_RESERVE_6 */
+	{}, /* UCOUNT_KABI_RESERVE_7 */
+	{}, /* UCOUNT_KABI_RESERVE_8 */
+	{}, /* UCOUNT_KABI_RESERVE_9 */
+	{}, /* UCOUNT_KABI_RESERVE_10 */
+	{}, /* UCOUNT_KABI_RESERVE_11 */
+	{}, /* UCOUNT_KABI_RESERVE_12 */
+	{}, /* UCOUNT_KABI_RESERVE_13 */
+	{}, /* UCOUNT_KABI_RESERVE_14 */
+	{}, /* UCOUNT_KABI_RESERVE_15 */
 	{ }
 };
 #endif /* CONFIG_SYSCTL */

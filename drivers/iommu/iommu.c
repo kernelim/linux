@@ -19,6 +19,7 @@
 #define pr_fmt(fmt)    "iommu: " fmt
 
 #include <linux/device.h>
+#include <linux/dmi.h>
 #include <linux/kernel.h>
 #include <linux/bug.h>
 #include <linux/types.h>
@@ -36,7 +37,12 @@
 
 static struct kset *iommu_group_kset;
 static DEFINE_IDA(iommu_group_ida);
+#ifdef CONFIG_IOMMU_DEFAULT_PASSTHROUGH
+static unsigned int iommu_def_domain_type = IOMMU_DOMAIN_IDENTITY;
+#else
 static unsigned int iommu_def_domain_type = IOMMU_DOMAIN_DMA;
+#endif
+static bool iommu_dma_strict __read_mostly = true;
 
 struct iommu_callback_data {
 	const struct iommu_ops *ops;
@@ -126,6 +132,12 @@ static int __init iommu_set_def_domain_type(char *str)
 	return 0;
 }
 early_param("iommu.passthrough", iommu_set_def_domain_type);
+
+static int __init iommu_dma_setup(char *str)
+{
+	return kstrtobool(str, &iommu_dma_strict);
+}
+early_param("iommu.strict", iommu_dma_setup);
 
 static ssize_t iommu_group_attr_show(struct kobject *kobj,
 				     struct attribute *__attr, char *buf)
@@ -1036,6 +1048,13 @@ struct iommu_group *iommu_group_get_for_dev(struct device *dev)
 		group->default_domain = dom;
 		if (!group->domain)
 			group->domain = dom;
+
+		if (dom && !iommu_dma_strict) {
+			int attr = 1;
+			iommu_domain_set_attr(dom,
+					      DOMAIN_ATTR_DMA_USE_FLUSH_QUEUE,
+					      &attr);
+		}
 	}
 
 	ret = iommu_group_add_device(group, dev);
@@ -1380,6 +1399,15 @@ struct iommu_domain *iommu_get_domain_for_dev(struct device *dev)
 EXPORT_SYMBOL_GPL(iommu_get_domain_for_dev);
 
 /*
+ * For IOMMU_DOMAIN_DMA implementations which already provide their own
+ * guarantees that the group and its default domain are valid and correct.
+ */
+struct iommu_domain *iommu_get_dma_domain(struct device *dev)
+{
+	return dev->iommu_group->default_domain;
+}
+
+/*
  * IOMMU groups are really the natrual working unit of the IOMMU, but
  * the IOMMU API works on domains and devices.  Bridge that gap by
  * iterating over the devices in a group.  Ideally we'd have a single
@@ -1637,8 +1665,8 @@ size_t iommu_unmap_fast(struct iommu_domain *domain,
 }
 EXPORT_SYMBOL_GPL(iommu_unmap_fast);
 
-size_t default_iommu_map_sg(struct iommu_domain *domain, unsigned long iova,
-			 struct scatterlist *sg, unsigned int nents, int prot)
+size_t iommu_map_sg(struct iommu_domain *domain, unsigned long iova,
+		    struct scatterlist *sg, unsigned int nents, int prot)
 {
 	struct scatterlist *s;
 	size_t mapped = 0;
@@ -1678,7 +1706,7 @@ out_err:
 	return 0;
 
 }
-EXPORT_SYMBOL_GPL(default_iommu_map_sg);
+EXPORT_SYMBOL_GPL(iommu_map_sg);
 
 int iommu_domain_window_enable(struct iommu_domain *domain, u32 wnd_nr,
 			       phys_addr_t paddr, u64 size, int prot)
@@ -1976,3 +2004,24 @@ int iommu_fwspec_add_ids(struct device *dev, u32 *ids, int num_ids)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(iommu_fwspec_add_ids);
+
+#ifdef CONFIG_ARM64
+static int __init iommu_quirks(void)
+{
+	const char *vendor, *name;
+
+	vendor = dmi_get_system_info(DMI_SYS_VENDOR);
+	name = dmi_get_system_info(DMI_PRODUCT_NAME);
+
+	if (vendor &&
+	    (strncmp(vendor, "GIGABYTE", 8) == 0 && name &&
+	     (strncmp(name, "R120", 4) == 0 ||
+	      strncmp(name, "R270", 4) == 0))) {
+		pr_warn("Gigabyte %s detected, force iommu passthrough mode", name);
+		iommu_def_domain_type = IOMMU_DOMAIN_IDENTITY;
+	}
+
+	return 0;
+}
+arch_initcall(iommu_quirks);
+#endif

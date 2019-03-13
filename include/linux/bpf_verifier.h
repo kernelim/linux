@@ -41,6 +41,7 @@ enum bpf_reg_liveness {
 };
 
 struct bpf_reg_state {
+	/* Ordering of fields matters.  See states_equal() */
 	enum bpf_reg_type type;
 	union {
 		/* valid when type == PTR_TO_PACKET */
@@ -50,6 +51,9 @@ struct bpf_reg_state {
 		 *   PTR_TO_MAP_VALUE_OR_NULL
 		 */
 		struct bpf_map *map_ptr;
+
+		/* Max size from any of the above. */
+		unsigned long raw;
 	};
 	/* Fixed part of pointer offset, pointer types only */
 	s32 off;
@@ -59,7 +63,6 @@ struct bpf_reg_state {
 	 * came from, when one is tested for != NULL.
 	 */
 	u32 id;
-	/* Ordering of fields matters.  See states_equal() */
 	/* For scalar types (SCALAR_VALUE), this represents our knowledge of
 	 * the actual value.
 	 * For pointer types, this represents the variable part of the offset
@@ -76,15 +79,15 @@ struct bpf_reg_state {
 	s64 smax_value; /* maximum possible (s64)value */
 	u64 umin_value; /* minimum possible (u64)value */
 	u64 umax_value; /* maximum possible (u64)value */
+	/* parentage chain for liveness checking */
+	struct bpf_reg_state *parent;
 	/* Inside the callee two registers can be both PTR_TO_STACK like
 	 * R1=fp-8 and R2=fp-8, but one of them points to this function stack
 	 * while another to the caller's stack. To differentiate them 'frameno'
 	 * is used which is an index in bpf_verifier_state->frame[] array
 	 * pointing to bpf_func_state.
-	 * This field must be second to last, for states_equal() reasons.
 	 */
 	u32 frameno;
-	/* This field must be last, for states_equal() reasons. */
 	enum bpf_reg_liveness live;
 };
 
@@ -107,7 +110,6 @@ struct bpf_stack_state {
  */
 struct bpf_func_state {
 	struct bpf_reg_state regs[MAX_BPF_REG];
-	struct bpf_verifier_state *parent;
 	/* index of call instruction that called into this func */
 	int callsite;
 	/* stack frame number of this function state from pov of
@@ -129,8 +131,8 @@ struct bpf_func_state {
 struct bpf_verifier_state {
 	/* call stack tracking */
 	struct bpf_func_state *frame[MAX_CALL_FRAMES];
-	struct bpf_verifier_state *parent;
 	u32 curframe;
+	bool speculative;
 };
 
 /* linked list of verifier states used to prune search */
@@ -139,15 +141,25 @@ struct bpf_verifier_state_list {
 	struct bpf_verifier_state_list *next;
 };
 
+/* Possible states for alu_state member. */
+#define BPF_ALU_SANITIZE_SRC		1U
+#define BPF_ALU_SANITIZE_DST		2U
+#define BPF_ALU_NEG_VALUE		(1U << 2)
+#define BPF_ALU_NON_POINTER		(1U << 3)
+#define BPF_ALU_SANITIZE		(BPF_ALU_SANITIZE_SRC | \
+					 BPF_ALU_SANITIZE_DST)
+
 struct bpf_insn_aux_data {
 	union {
 		enum bpf_reg_type ptr_type;	/* pointer type for load/store insns */
 		unsigned long map_state;	/* pointer/poison value for maps */
 		s32 call_imm;			/* saved imm field of call insn */
+		u32 alu_limit;			/* limit for add/sub register with pointer */
 	};
 	int ctx_field_size; /* the ctx field size for load insn, maybe 0 */
 	int sanitize_stack_off; /* stack slot to be cleared */
 	bool seen; /* this insn was processed by the verifier */
+	u8 alu_state; /* used in combination with alu_limit */
 };
 
 #define MAX_USED_MAPS 64 /* max number of maps accessed by one eBPF program */
@@ -183,6 +195,8 @@ struct bpf_subprog_info {
  * one verifier_env per bpf_check() call
  */
 struct bpf_verifier_env {
+	u32 insn_idx;
+	u32 prev_insn_idx;
 	struct bpf_prog *prog;		/* eBPF program being verified */
 	const struct bpf_verifier_ops *ops;
 	struct bpf_verifier_stack_elem *head; /* stack of verifier states to be processed */

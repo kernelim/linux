@@ -78,6 +78,9 @@ static void nvmet_bdev_execute_rw(struct nvmet_req *req)
 		op = REQ_OP_READ;
 	}
 
+	if (is_pci_p2pdma_page(sg_page(req->sg)))
+		op_flags |= REQ_NOMERGE;
+
 	sector = le64_to_cpu(req->cmd->rw.slba);
 	sector <<= (req->ns->blksize_shift - 9);
 
@@ -107,8 +110,6 @@ static void nvmet_bdev_execute_rw(struct nvmet_req *req)
 	}
 
 	cookie = submit_bio(bio);
-
-	blk_poll(bdev_get_queue(req->ns->bdev), cookie);
 }
 
 static void nvmet_bdev_execute_flush(struct nvmet_req *req)

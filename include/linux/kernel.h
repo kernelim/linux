@@ -307,6 +307,38 @@ static inline void refcount_error_report(struct pt_regs *regs, const char *err)
 { }
 #endif
 
+#ifdef CONFIG_LOCK_DOWN_KERNEL
+extern void __init init_lockdown(void);
+extern bool __kernel_is_locked_down(const char *what, bool first);
+
+#ifndef CONFIG_LOCK_DOWN_MANDATORY
+#define kernel_is_locked_down(what)					\
+	({								\
+		static bool message_given;				\
+		bool locked_down = __kernel_is_locked_down(what, !message_given); \
+		message_given = true;					\
+		locked_down;						\
+	})
+#else
+#define kernel_is_locked_down(what)					\
+	({								\
+		static bool message_given;				\
+		__kernel_is_locked_down(what, !message_given);		\
+		message_given = true;					\
+		true;							\
+	})
+#endif
+#else
+static inline void __init init_lockdown(void)
+{
+}
+static inline bool __kernel_is_locked_down(const char *what, bool first)
+{
+	return false;
+}
+#define kernel_is_locked_down(what) ({ false; })
+#endif
+
 /* Internal, do not use. */
 int __must_check _kstrtoul(const char *s, unsigned int base, unsigned long *res);
 int __must_check _kstrtol(const char *s, unsigned int base, long *res);
@@ -565,7 +597,23 @@ extern enum system_states {
 #define TAINT_LIVEPATCH			15
 #define TAINT_AUX			16
 #define TAINT_RANDSTRUCT		17
-#define TAINT_FLAGS_COUNT		18
+#define TAINT_18			18
+#define TAINT_19			19
+#define TAINT_20			20
+#define TAINT_21			21
+#define TAINT_22			22
+#define TAINT_23			23
+#define TAINT_24			24
+#define TAINT_25			25
+#define TAINT_26			26
+/* Start of Red Hat-specific taint flags */
+#define TAINT_SUPPORT_REMOVED		27
+#define TAINT_28			28
+#define TAINT_TECH_PREVIEW		29
+#define TAINT_UNPRIVILEGED_BPF		30
+#define TAINT_31			31
+/* End of Red Hat-specific taint flags */
+#define TAINT_FLAGS_COUNT		32
 
 struct taint_flag {
 	char c_true;	/* character printed when tainted */
@@ -999,4 +1047,13 @@ static inline void ftrace_dump(enum ftrace_dump_mode oops_dump_mode) { }
 	 /* OTHER_WRITABLE?  Generally considered a bad idea. */		\
 	 BUILD_BUG_ON_ZERO((perms) & 2) +					\
 	 (perms))
+
+struct module;
+
+void mark_hardware_unsupported(const char *msg);
+void mark_hardware_deprecated(const char *msg);
+void mark_tech_preview(const char *msg, struct module *mod);
+void mark_driver_unsupported(const char *name);
+void mark_hardware_removed(const char *name);
+
 #endif

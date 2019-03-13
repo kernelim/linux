@@ -351,10 +351,7 @@ static struct wc_memory_superblock *sb(struct dm_writecache *wc)
 
 static struct wc_memory_entry *memory_entry(struct dm_writecache *wc, struct wc_entry *e)
 {
-	if (is_power_of_2(sizeof(struct wc_entry)) && 0)
-		return &sb(wc)->entries[e - wc->entries];
-	else
-		return &sb(wc)->entries[e->index];
+	return &sb(wc)->entries[e->index];
 }
 
 static void *memory_data(struct dm_writecache *wc, struct wc_entry *e)
@@ -457,7 +454,7 @@ static void ssd_commit_flushed(struct dm_writecache *wc)
 		COMPLETION_INITIALIZER_ONSTACK(endio.c),
 		ATOMIC_INIT(1),
 	};
-	unsigned bitmap_bits = wc->dirty_bitmap_size * BITS_PER_LONG;
+	unsigned bitmap_bits = wc->dirty_bitmap_size * 8;
 	unsigned i = 0;
 
 	while (1) {
@@ -2065,7 +2062,7 @@ invalid_optional:
 		if (IS_ERR(wc->flush_thread)) {
 			r = PTR_ERR(wc->flush_thread);
 			wc->flush_thread = NULL;
-			ti->error = "Couldn't spawn endio thread";
+			ti->error = "Couldn't spawn flush thread";
 			goto bad;
 		}
 		wake_up_process(wc->flush_thread);
@@ -2240,6 +2237,8 @@ static void writecache_status(struct dm_target *ti, status_type_t type,
 		DMEMIT("%c %s %s %u ", WC_MODE_PMEM(wc) ? 'p' : 's',
 				wc->dev->name, wc->ssd_dev->name, wc->block_size);
 		extra_args = 0;
+		if (wc->start_sector)
+			extra_args += 2;
 		if (wc->high_wm_percent_set)
 			extra_args += 2;
 		if (wc->low_wm_percent_set)
@@ -2254,6 +2253,8 @@ static void writecache_status(struct dm_target *ti, status_type_t type,
 			extra_args++;
 
 		DMEMIT("%u", extra_args);
+		if (wc->start_sector)
+			DMEMIT(" start_sector %llu", (unsigned long long)wc->start_sector);
 		if (wc->high_wm_percent_set) {
 			x = (uint64_t)wc->freelist_high_watermark * 100;
 			x += wc->n_blocks / 2;
@@ -2280,7 +2281,7 @@ static void writecache_status(struct dm_target *ti, status_type_t type,
 
 static struct target_type writecache_target = {
 	.name			= "writecache",
-	.version		= {1, 1, 0},
+	.version		= {1, 1, 1},
 	.module			= THIS_MODULE,
 	.ctr			= writecache_ctr,
 	.dtr			= writecache_dtr,

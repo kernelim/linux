@@ -48,6 +48,8 @@
 #include <linux/projid.h>
 #include <uapi/linux/quota.h>
 
+#include <linux/rh_kabi.h>
+
 #undef USRQUOTA
 #undef GRPQUOTA
 #undef PRJQUOTA
@@ -316,6 +318,8 @@ struct quota_format_ops {
 	int (*commit_dqblk)(struct dquot *dquot);	/* Write structure for one user */
 	int (*release_dqblk)(struct dquot *dquot);	/* Called when last reference to dquot is being dropped */
 	int (*get_next_id)(struct super_block *sb, struct kqid *qid);	/* Get next ID with existing structure in the quota file */
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
 };
 
 /* Operations working with dquots */
@@ -335,6 +339,8 @@ struct dquot_operations {
 	int (*get_inode_usage) (struct inode *, qsize_t *);
 	/* Get next ID with active quota structure */
 	int (*get_next_id) (struct super_block *sb, struct kqid *qid);
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
 };
 
 struct path;
@@ -444,6 +450,10 @@ struct quotactl_ops {
 	int (*set_dqblk)(struct super_block *, struct kqid, struct qc_dqblk *);
 	int (*get_state)(struct super_block *, struct qc_state *);
 	int (*rm_xquota)(struct super_block *, unsigned int);
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 };
 
 struct quota_format_type {

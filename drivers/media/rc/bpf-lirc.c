@@ -8,6 +8,8 @@
 #include <linux/bpf_lirc.h>
 #include "rc-core-priv.h"
 
+#include <linux/rh_features.h>
+
 /*
  * BPF interface for raw IR
  */
@@ -212,6 +214,8 @@ int lirc_prog_attach(const union bpf_attr *attr, struct bpf_prog *prog)
 {
 	struct rc_dev *rcdev;
 	int ret;
+
+	rh_mark_used_feature("eBPF/lirc");
 
 	if (attr->attach_flags)
 		return -EINVAL;

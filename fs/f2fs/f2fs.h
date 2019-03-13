@@ -1304,7 +1304,7 @@ static inline bool time_to_inject(struct f2fs_sb_info *sbi, int type)
  * and the return value is in kbytes. s is of struct f2fs_sb_info.
  */
 #define BD_PART_WRITTEN(s)						 \
-(((u64)part_stat_read((s)->sb->s_bdev->bd_part, sectors[1]) -		 \
+(((u64)part_stat_read((s)->sb->s_bdev->bd_part, sectors[STAT_WRITE]) -   \
 		(s)->sectors_written_start) >> 1)
 
 static inline void f2fs_update_time(struct f2fs_sb_info *sbi, int type)
@@ -1321,13 +1321,6 @@ static inline bool f2fs_time_over(struct f2fs_sb_info *sbi, int type)
 
 static inline bool is_idle(struct f2fs_sb_info *sbi)
 {
-	struct block_device *bdev = sbi->sb->s_bdev;
-	struct request_queue *q = bdev_get_queue(bdev);
-	struct request_list *rl = &q->root_rl;
-
-	if (rl->count[BLK_RW_SYNC] || rl->count[BLK_RW_ASYNC])
-		return 0;
-
 	return f2fs_time_over(sbi, REQ_TIME);
 }
 

@@ -107,7 +107,7 @@ static int glock_wake_function(wait_queue_entry_t *wait, unsigned int mode,
 
 static wait_queue_head_t *glock_waitqueue(struct lm_lockname *name)
 {
-	u32 hash = jhash2((u32 *)name, sizeof(*name) / 4, 0);
+	u32 hash = jhash2((u32 *)name, ht_parms.key_len / 4, 0);
 
 	return glock_wait_table + hash_32(hash, GLOCK_WAIT_TABLE_BITS);
 }
@@ -494,7 +494,8 @@ retry:
 			do_xmote(gl, gh, LM_ST_UNLOCKED);
 			break;
 		default: /* Everything else */
-			pr_err("wanted %u got %u\n", gl->gl_target, state);
+			fs_err(gl->gl_name.ln_sbd, "wanted %u got %u\n",
+			       gl->gl_target, state);
 			GLOCK_BUG_ON(gl, 1);
 		}
 		spin_unlock(&gl->gl_lockref.lock);
@@ -577,7 +578,7 @@ __acquires(&gl->gl_lockref.lock)
 			gfs2_glock_queue_work(gl, 0);
 		}
 		else if (ret) {
-			pr_err("lm_lock ret %d\n", ret);
+			fs_err(sdp, "lm_lock ret %d\n", ret);
 			GLOCK_BUG_ON(gl, !test_bit(SDF_SHUTDOWN,
 						   &sdp->sd_flags));
 		}
@@ -1064,13 +1065,13 @@ do_cancel:
 	return;
 
 trap_recursive:
-	pr_err("original: %pSR\n", (void *)gh2->gh_ip);
-	pr_err("pid: %d\n", pid_nr(gh2->gh_owner_pid));
-	pr_err("lock type: %d req lock state : %d\n",
+	fs_err(sdp, "original: %pSR\n", (void *)gh2->gh_ip);
+	fs_err(sdp, "pid: %d\n", pid_nr(gh2->gh_owner_pid));
+	fs_err(sdp, "lock type: %d req lock state : %d\n",
 	       gh2->gh_gl->gl_name.ln_type, gh2->gh_state);
-	pr_err("new: %pSR\n", (void *)gh->gh_ip);
-	pr_err("pid: %d\n", pid_nr(gh->gh_owner_pid));
-	pr_err("lock type: %d req lock state : %d\n",
+	fs_err(sdp, "new: %pSR\n", (void *)gh->gh_ip);
+	fs_err(sdp, "pid: %d\n", pid_nr(gh->gh_owner_pid));
+	fs_err(sdp, "lock type: %d req lock state : %d\n",
 	       gh->gh_gl->gl_name.ln_type, gh->gh_state);
 	gfs2_dump_glock(NULL, gl);
 	BUG();

@@ -17,7 +17,7 @@
  ******************************************************************************/
 
 #include <linux/list.h>
-#include <linux/percpu_ida.h>
+#include <linux/sched/signal.h>
 #include <net/ipv6.h>         /* ipv6_addr_equal() */
 #include <scsi/scsi_tcq.h>
 #include <scsi/iscsi_proto.h>
@@ -147,6 +147,32 @@ void iscsit_free_r2ts_from_list(struct iscsi_cmd *cmd)
 	spin_unlock_bh(&cmd->r2t_lock);
 }
 
+static int iscsit_wait_for_tag(struct se_session *se_sess, int state, int *cpup)
+{
+	int tag = -1;
+	DEFINE_SBQ_WAIT(wait);
+	struct sbq_wait_state *ws;
+	struct sbitmap_queue *sbq;
+
+	if (state == TASK_RUNNING)
+		return tag;
+
+	sbq = &se_sess->sess_tag_pool;
+	ws = &sbq->ws[0];
+	for (;;) {
+		sbitmap_prepare_to_wait(sbq, ws, &wait, state);
+		if (signal_pending_state(state, current))
+			break;
+		tag = sbitmap_queue_get(sbq, cpup);
+		if (tag >= 0)
+			break;
+		schedule();
+	}
+
+	sbitmap_finish_wait(sbq, ws, &wait);
+	return tag;
+}
+
 /*
  * May be called from software interrupt (timer) context for allocating
  * iSCSI NopINs.
@@ -155,9 +181,11 @@ struct iscsi_cmd *iscsit_allocate_cmd(struct iscsi_conn *conn, int state)
 {
 	struct iscsi_cmd *cmd;
 	struct se_session *se_sess = conn->sess->se_sess;
-	int size, tag;
+	int size, tag, cpu;
 
-	tag = percpu_ida_alloc(&se_sess->sess_tag_pool, state);
+	tag = sbitmap_queue_get(&se_sess->sess_tag_pool, &cpu);
+	if (tag < 0)
+		tag = iscsit_wait_for_tag(se_sess, state, &cpu);
 	if (tag < 0)
 		return NULL;
 
@@ -166,6 +194,7 @@ struct iscsi_cmd *iscsit_allocate_cmd(struct iscsi_conn *conn, int state)
 	memset(cmd, 0, size);
 
 	cmd->se_cmd.map_tag = tag;
+	cmd->se_cmd.map_cpu = cpu;
 	cmd->conn = conn;
 	cmd->data_direction = DMA_NONE;
 	INIT_LIST_HEAD(&cmd->i_conn_node);
@@ -711,7 +740,7 @@ void iscsit_release_cmd(struct iscsi_cmd *cmd)
 	kfree(cmd->iov_data);
 	kfree(cmd->text_in_ptr);
 
-	percpu_ida_free(&sess->se_sess->sess_tag_pool, se_cmd->map_tag);
+	target_free_tag(sess->se_sess, se_cmd);
 }
 EXPORT_SYMBOL(iscsit_release_cmd);
 

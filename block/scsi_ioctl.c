@@ -207,12 +207,13 @@ static void blk_set_cmd_filter_defaults(struct blk_cmd_filter *filter)
 	__set_bit(GPCMD_SET_READ_AHEAD, filter->write_ok);
 }
 
-int blk_verify_command(unsigned char *cmd, fmode_t mode)
+int blk_verify_command(struct request_queue *q, unsigned char *cmd,
+		       fmode_t mode)
 {
 	struct blk_cmd_filter *filter = &blk_default_cmd_filter;
 
 	/* root can do any command. */
-	if (capable(CAP_SYS_RAWIO))
+	if (capable(CAP_SYS_RAWIO) || blk_queue_unpriv_sgio(q))
 		return 0;
 
 	/* Anybody who can open the device can do a read-safe command */
@@ -234,7 +235,7 @@ static int blk_fill_sghdr_rq(struct request_queue *q, struct request *rq,
 
 	if (copy_from_user(req->cmd, hdr->cmdp, hdr->cmd_len))
 		return -EFAULT;
-	if (blk_verify_command(req->cmd, mode))
+	if (blk_verify_command(q, req->cmd, mode))
 		return -EPERM;
 
 	/*
@@ -468,7 +469,7 @@ int sg_scsi_ioctl(struct request_queue *q, struct gendisk *disk, fmode_t mode,
 	if (in_len && copy_from_user(buffer, sic->data + cmdlen, in_len))
 		goto error;
 
-	err = blk_verify_command(req->cmd, mode);
+	err = blk_verify_command(q, req->cmd, mode);
 	if (err)
 		goto error;
 

@@ -200,7 +200,7 @@ static int ip6_frag_queue(struct frag_queue *fq, struct sk_buff *skb,
 		 */
 		if (end < fq->q.len ||
 		    ((fq->q.flags & INET_FRAG_LAST_IN) && end != fq->q.len))
-			goto err;
+			goto discard_fq;
 		fq->q.flags |= INET_FRAG_LAST_IN;
 		fq->q.len = end;
 	} else {
@@ -217,20 +217,20 @@ static int ip6_frag_queue(struct frag_queue *fq, struct sk_buff *skb,
 		if (end > fq->q.len) {
 			/* Some bits beyond end -> corruption. */
 			if (fq->q.flags & INET_FRAG_LAST_IN)
-				goto err;
+				goto discard_fq;
 			fq->q.len = end;
 		}
 	}
 
 	if (end == offset)
-		goto err;
+		goto discard_fq;
 
 	/* Point into the IP datagram 'data' part. */
 	if (!pskb_pull(skb, (u8 *) (fhdr + 1) - skb->data))
-		goto err;
+		goto discard_fq;
 
 	if (pskb_trim_rcsum(skb, end - offset))
-		goto err;
+		goto discard_fq;
 
 	/* Find out which fragments are in front and at the back of us
 	 * in the chain of fragments so far.  We must know where to put
@@ -433,6 +433,7 @@ static int ip6_frag_reasm(struct frag_queue *fq, struct sk_buff *prev,
 		if (skb_try_coalesce(head, fp, &headstolen, &delta)) {
 			kfree_skb_partial(fp, headstolen);
 		} else {
+			fp->sk = NULL;
 			if (!skb_shinfo(head)->frag_list)
 				skb_shinfo(head)->frag_list = fp;
 			head->data_len += fp->len;
@@ -460,6 +461,7 @@ static int ip6_frag_reasm(struct frag_queue *fq, struct sk_buff *prev,
 	__IP6_INC_STATS(net, __in6_dev_get(dev), IPSTATS_MIB_REASMOKS);
 	rcu_read_unlock();
 	fq->q.fragments = NULL;
+	fq->q.rb_fragments = RB_ROOT;
 	fq->q.fragments_tail = NULL;
 	return 1;
 
@@ -472,6 +474,7 @@ out_fail:
 	rcu_read_lock();
 	__IP6_INC_STATS(net, __in6_dev_get(dev), IPSTATS_MIB_REASMFAILS);
 	rcu_read_unlock();
+	inet_frag_kill(&fq->q);
 	return -1;
 }
 
@@ -509,6 +512,10 @@ static int ipv6_frag_rcv(struct sk_buff *skb)
 		IP6CB(skb)->flags |= IP6SKB_FRAGMENTED;
 		return 1;
 	}
+
+	if (skb->len - skb_network_offset(skb) < IPV6_MIN_MTU &&
+	    fhdr->frag_off & htons(IP6_MF))
+		goto fail_hdr;
 
 	iif = skb->dev ? skb->dev->ifindex : 0;
 	fq = fq_find(net, fhdr->identification, hdr, iif);
@@ -603,7 +610,6 @@ static int __net_init ip6_frags_ns_sysctl_register(struct net *net)
 
 		table[0].data = &net->ipv6.frags.high_thresh;
 		table[0].extra1 = &net->ipv6.frags.low_thresh;
-		table[0].extra2 = &init_net.ipv6.frags.high_thresh;
 		table[1].data = &net->ipv6.frags.low_thresh;
 		table[1].extra2 = &net->ipv6.frags.high_thresh;
 		table[2].data = &net->ipv6.frags.timeout;

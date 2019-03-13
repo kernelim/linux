@@ -55,6 +55,8 @@
 
 #include <asm/irq_regs.h>
 
+#include <linux/rh_features.h>
+
 typedef int (*remote_function_f)(void *);
 
 struct remote_function_call {
@@ -8583,6 +8585,8 @@ static int perf_event_set_bpf_prog(struct perf_event *event, u32 prog_fd)
 	bool is_kprobe, is_tracepoint, is_syscall_tp;
 	struct bpf_prog *prog;
 	int ret;
+
+	rh_mark_used_feature("eBPF/event");
 
 	if (!perf_event_is_tracing(event))
 		return perf_event_set_bpf_handler(event, prog_fd);

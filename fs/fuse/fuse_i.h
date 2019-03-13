@@ -77,6 +77,9 @@ struct fuse_inode {
 	/** Time in jiffies until the file attributes are valid */
 	u64 i_time;
 
+	/* Which attributes are invalid */
+	u32 inval_mask;
+
 	/** The sticky bit in inode->i_mode may have been removed, so
 	    preserve the original mode */
 	umode_t orig_i_mode;
@@ -862,6 +865,7 @@ void fuse_request_send_background_locked(struct fuse_conn *fc,
 
 /* Abort all requests */
 void fuse_abort_conn(struct fuse_conn *fc, bool is_abort);
+void fuse_wait_aborted(struct fuse_conn *fc);
 
 /**
  * Invalidate inode attributes
@@ -974,8 +978,8 @@ int fuse_do_setattr(struct dentry *dentry, struct iattr *attr,
 
 void fuse_set_initialized(struct fuse_conn *fc);
 
-void fuse_unlock_inode(struct inode *inode);
-void fuse_lock_inode(struct inode *inode);
+void fuse_unlock_inode(struct inode *inode, bool locked);
+bool fuse_lock_inode(struct inode *inode);
 
 int fuse_setxattr(struct inode *inode, const char *name, const void *value,
 		  size_t size, int flags);

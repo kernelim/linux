@@ -29,6 +29,8 @@
 #include <linux/moduleparam.h>
 #include <linux/workqueue.h>
 #include <linux/uuid.h>
+#include <linux/nospec.h>
+#include <linux/dmi.h>
 
 #define PFX "IPMI message handler: "
 
@@ -883,7 +885,7 @@ static int deliver_response(struct ipmi_smi *intf, struct ipmi_recv_msg *msg)
 
 		if (user) {
 			user->handler->ipmi_recv_hndl(msg, user->handler_data);
-			release_ipmi_user(msg->user, index);
+			release_ipmi_user(user, index);
 		} else {
 			/* User went away, give up. */
 			ipmi_free_recv_msg(msg);
@@ -1182,6 +1184,7 @@ EXPORT_SYMBOL(ipmi_get_smi_info);
 static void free_user(struct kref *ref)
 {
 	struct ipmi_user *user = container_of(ref, struct ipmi_user, refcount);
+	cleanup_srcu_struct(&user->release_barrier);
 	kfree(user);
 }
 
@@ -1258,7 +1261,6 @@ int ipmi_destroy_user(struct ipmi_user *user)
 {
 	_ipmi_destroy_user(user);
 
-	cleanup_srcu_struct(&user->release_barrier);
 	kref_put(&user->refcount, free_user);
 
 	return 0;
@@ -1297,10 +1299,12 @@ int ipmi_set_my_address(struct ipmi_user *user,
 	if (!user)
 		return -ENODEV;
 
-	if (channel >= IPMI_MAX_CHANNELS)
+	if (channel >= IPMI_MAX_CHANNELS) {
 		rv = -EINVAL;
-	else
+	} else {
+		channel = array_index_nospec(channel, IPMI_MAX_CHANNELS);
 		user->intf->addrinfo[channel].address = address;
+	}
 	release_ipmi_user(user, index);
 
 	return rv;
@@ -1317,10 +1321,12 @@ int ipmi_get_my_address(struct ipmi_user *user,
 	if (!user)
 		return -ENODEV;
 
-	if (channel >= IPMI_MAX_CHANNELS)
+	if (channel >= IPMI_MAX_CHANNELS) {
 		rv = -EINVAL;
-	else
+	} else {
+		channel = array_index_nospec(channel, IPMI_MAX_CHANNELS);
 		*address = user->intf->addrinfo[channel].address;
+	}
 	release_ipmi_user(user, index);
 
 	return rv;
@@ -1337,10 +1343,12 @@ int ipmi_set_my_LUN(struct ipmi_user *user,
 	if (!user)
 		return -ENODEV;
 
-	if (channel >= IPMI_MAX_CHANNELS)
+	if (channel >= IPMI_MAX_CHANNELS) {
 		rv = -EINVAL;
-	else
+	} else {
+		channel = array_index_nospec(channel, IPMI_MAX_CHANNELS);
 		user->intf->addrinfo[channel].lun = LUN & 0x3;
+	}
 	release_ipmi_user(user, index);
 
 	return 0;
@@ -1357,10 +1365,12 @@ int ipmi_get_my_LUN(struct ipmi_user *user,
 	if (!user)
 		return -ENODEV;
 
-	if (channel >= IPMI_MAX_CHANNELS)
+	if (channel >= IPMI_MAX_CHANNELS) {
 		rv = -EINVAL;
-	else
+	} else {
+		channel = array_index_nospec(channel, IPMI_MAX_CHANNELS);
 		*address = user->intf->addrinfo[channel].lun;
+	}
 	release_ipmi_user(user, index);
 
 	return rv;
@@ -2184,6 +2194,7 @@ static int check_addr(struct ipmi_smi  *intf,
 {
 	if (addr->channel >= IPMI_MAX_CHANNELS)
 		return -EINVAL;
+	addr->channel = array_index_nospec(addr->channel, IPMI_MAX_CHANNELS);
 	*lun = intf->addrinfo[addr->channel].lun;
 	*saddr = intf->addrinfo[addr->channel].address;
 	return 0;
@@ -3381,39 +3392,45 @@ int ipmi_register_smi(const struct ipmi_smi_handlers *handlers,
 
 	rv = handlers->start_processing(send_info, intf);
 	if (rv)
-		goto out;
+		goto out_err;
 
 	rv = __bmc_get_device_id(intf, NULL, &id, NULL, NULL, i);
 	if (rv) {
 		dev_err(si_dev, "Unable to get the device id: %d\n", rv);
-		goto out;
+		goto out_err_started;
 	}
 
 	mutex_lock(&intf->bmc_reg_mutex);
 	rv = __scan_channels(intf, &id);
 	mutex_unlock(&intf->bmc_reg_mutex);
+	if (rv)
+		goto out_err_bmc_reg;
 
- out:
-	if (rv) {
-		ipmi_bmc_unregister(intf);
-		list_del_rcu(&intf->link);
-		mutex_unlock(&ipmi_interfaces_mutex);
-		synchronize_srcu(&ipmi_interfaces_srcu);
-		cleanup_srcu_struct(&intf->users_srcu);
-		kref_put(&intf->refcount, intf_free);
-	} else {
-		/*
-		 * Keep memory order straight for RCU readers.  Make
-		 * sure everything else is committed to memory before
-		 * setting intf_num to mark the interface valid.
-		 */
-		smp_wmb();
-		intf->intf_num = i;
-		mutex_unlock(&ipmi_interfaces_mutex);
+	/*
+	 * Keep memory order straight for RCU readers.  Make
+	 * sure everything else is committed to memory before
+	 * setting intf_num to mark the interface valid.
+	 */
+	smp_wmb();
+	intf->intf_num = i;
+	mutex_unlock(&ipmi_interfaces_mutex);
 
-		/* After this point the interface is legal to use. */
-		call_smi_watchers(i, intf->si_dev);
-	}
+	/* After this point the interface is legal to use. */
+	call_smi_watchers(i, intf->si_dev);
+
+	return 0;
+
+ out_err_bmc_reg:
+	ipmi_bmc_unregister(intf);
+ out_err_started:
+	if (intf->handlers->shutdown)
+		intf->handlers->shutdown(intf->send_info);
+ out_err:
+	list_del_rcu(&intf->link);
+	mutex_unlock(&ipmi_interfaces_mutex);
+	synchronize_srcu(&ipmi_interfaces_srcu);
+	cleanup_srcu_struct(&intf->users_srcu);
+	kref_put(&intf->refcount, intf_free);
 
 	return rv;
 }
@@ -3504,7 +3521,8 @@ void ipmi_unregister_smi(struct ipmi_smi *intf)
 	}
 	srcu_read_unlock(&intf->users_srcu, index);
 
-	intf->handlers->shutdown(intf->send_info);
+	if (intf->handlers->shutdown)
+		intf->handlers->shutdown(intf->send_info);
 
 	cleanup_smi_msgs(intf);
 
@@ -5046,6 +5064,20 @@ static int ipmi_init_msghandler(void)
 
 static int __init ipmi_init_msghandler_mod(void)
 {
+#ifdef CONFIG_ARM64
+	/* RHEL-only
+	 * If this is ARM-based HPE m400, return now, because that platform
+	 * reports the host-side ipmi address as intel port-io space, which
+	 * does not exist in the ARM architecture.
+	 */
+	const char *dmistr = dmi_get_system_info(DMI_PRODUCT_NAME);
+
+	if (dmistr && (strcmp("ProLiant m400 Server", dmistr) == 0)) {
+		pr_debug("%s does not support host ipmi\n", dmistr);
+		return -ENOSYS;
+	}
+	/* END RHEL-only */
+#endif
 	ipmi_init_msghandler();
 	return 0;
 }

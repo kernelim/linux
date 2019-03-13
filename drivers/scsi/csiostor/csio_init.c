@@ -258,7 +258,6 @@ static void
 csio_hw_exit_workers(struct csio_hw *hw)
 {
 	cancel_work_sync(&hw->evtq_work);
-	flush_scheduled_work();
 }
 
 static int
@@ -1263,3 +1262,4 @@ MODULE_DEVICE_TABLE(pci, csio_pci_tbl);
 MODULE_VERSION(CSIO_DRV_VERSION);
 MODULE_FIRMWARE(FW_FNAME_T5);
 MODULE_FIRMWARE(FW_FNAME_T6);
+MODULE_SOFTDEP("pre: cxgb4");

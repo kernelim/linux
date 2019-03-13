@@ -10,6 +10,7 @@
 #include <linux/rwsem.h>
 #include <linux/sysctl.h>
 #include <linux/err.h>
+#include <linux/rh_kabi.h>
 
 #define UID_GID_MAP_MAX_BASE_EXTENTS 5
 #define UID_GID_MAP_MAX_EXTENTS 340
@@ -49,6 +50,21 @@ enum ucount_type {
 	UCOUNT_INOTIFY_INSTANCES,
 	UCOUNT_INOTIFY_WATCHES,
 #endif
+	UCOUNT_KABI_RESERVE_1,
+	UCOUNT_KABI_RESERVE_2,
+	UCOUNT_KABI_RESERVE_3,
+	UCOUNT_KABI_RESERVE_4,
+	UCOUNT_KABI_RESERVE_5,
+	UCOUNT_KABI_RESERVE_6,
+	UCOUNT_KABI_RESERVE_7,
+	UCOUNT_KABI_RESERVE_8,
+	UCOUNT_KABI_RESERVE_9,
+	UCOUNT_KABI_RESERVE_10,
+	UCOUNT_KABI_RESERVE_11,
+	UCOUNT_KABI_RESERVE_12,
+	UCOUNT_KABI_RESERVE_13,
+	UCOUNT_KABI_RESERVE_14,
+	UCOUNT_KABI_RESERVE_15,
 	UCOUNT_COUNTS,
 };
 
@@ -76,6 +92,10 @@ struct user_namespace {
 #endif
 	struct ucounts		*ucounts;
 	int ucount_max[UCOUNT_COUNTS];
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 } __randomize_layout;
 
 struct ucounts {

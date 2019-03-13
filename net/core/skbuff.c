@@ -837,6 +837,9 @@ static void __copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
 	CHECK_SKB_FIELD(tc_index);
 #endif
 
+	BUILD_BUG_ON(offsetof(struct sk_buff, rh_reserved_end) -
+		     offsetof(struct sk_buff, rh_reserved_start) !=
+		     RH_KABI_SKBUFF_RESERVED);
 }
 
 /*
@@ -938,9 +941,6 @@ struct ubuf_info *sock_zerocopy_alloc(struct sock *sk, size_t size)
 	struct sk_buff *skb;
 
 	WARN_ON_ONCE(!in_task());
-
-	if (!sock_flag(sk, SOCK_ZEROCOPY))
-		return NULL;
 
 	skb = sock_omalloc(sk, 0, GFP_KERNEL);
 	if (!skb)
@@ -1848,8 +1848,9 @@ int pskb_trim_rcsum_slow(struct sk_buff *skb, unsigned int len)
 	if (skb->ip_summed == CHECKSUM_COMPLETE) {
 		int delta = skb->len - len;
 
-		skb->csum = csum_sub(skb->csum,
-				     skb_checksum(skb, len, delta, 0));
+		skb->csum = csum_block_sub(skb->csum,
+					   skb_checksum(skb, len, delta, 0),
+					   len);
 	}
 	return __pskb_trim(skb, len);
 }
@@ -2858,23 +2859,27 @@ EXPORT_SYMBOL(skb_queue_purge);
 /**
  *	skb_rbtree_purge - empty a skb rbtree
  *	@root: root of the rbtree to empty
+ *	Return value: the sum of truesizes of all purged skbs.
  *
  *	Delete all buffers on an &sk_buff rbtree. Each buffer is removed from
  *	the list and one reference dropped. This function does not take
  *	any lock. Synchronization should be handled by the caller (e.g., TCP
  *	out-of-order queue is protected by the socket lock).
  */
-void skb_rbtree_purge(struct rb_root *root)
+unsigned int skb_rbtree_purge(struct rb_root *root)
 {
 	struct rb_node *p = rb_first(root);
+	unsigned int sum = 0;
 
 	while (p) {
 		struct sk_buff *skb = rb_entry(p, struct sk_buff, rbnode);
 
 		p = rb_next(p);
 		rb_erase(&skb->rbnode, root);
+		sum += skb->truesize;
 		kfree_skb(skb);
 	}
+	return sum;
 }
 
 /**
@@ -4899,7 +4904,6 @@ EXPORT_SYMBOL(skb_try_coalesce);
  */
 void skb_scrub_packet(struct sk_buff *skb, bool xnet)
 {
-	skb->tstamp = 0;
 	skb->pkt_type = PACKET_HOST;
 	skb->skb_iif = 0;
 	skb->ignore_df = 0;
@@ -4912,8 +4916,8 @@ void skb_scrub_packet(struct sk_buff *skb, bool xnet)
 		return;
 
 	ipvs_reset(skb);
-	skb_orphan(skb);
 	skb->mark = 0;
+	skb->tstamp = 0;
 }
 EXPORT_SYMBOL_GPL(skb_scrub_packet);
 

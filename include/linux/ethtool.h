@@ -17,6 +17,8 @@
 #include <linux/compat.h>
 #include <uapi/linux/ethtool.h>
 
+#include <linux/rh_kabi.h>
+
 #ifdef CONFIG_COMPAT
 
 struct compat_ethtool_rx_flow_spec {
@@ -180,6 +182,9 @@ void ethtool_convert_legacy_u32_to_link_mode(unsigned long *dst,
 /* return false if src had higher bits set. lower bits always updated. */
 bool ethtool_convert_link_mode_to_legacy_u32(u32 *legacy_u32,
 				     const unsigned long *src);
+
+struct ethtool_ops_extended_rh {
+};
 
 /**
  * struct ethtool_ops - optional netdev operations
@@ -412,5 +417,38 @@ struct ethtool_ops {
 				      struct ethtool_fecparam *);
 	void	(*get_ethtool_phy_stats)(struct net_device *,
 					 struct ethtool_stats *, u64 *);
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
+	RH_KABI_RESERVE(5)
+	RH_KABI_RESERVE(6)
+	RH_KABI_RESERVE(7)
+	RH_KABI_RESERVE(8)
+	RH_KABI_RESERVE(9)
+	RH_KABI_RESERVE(10)
+	RH_KABI_RESERVE(11)
+	RH_KABI_RESERVE(12)
+	RH_KABI_RESERVE(13)
+	RH_KABI_RESERVE(14)
+	RH_KABI_RESERVE(15)
+	RH_KABI_RESERVE(16)
+	RH_KABI_RESERVE(17)
+	RH_KABI_RESERVE(18)
+	RH_KABI_RESERVE(19)
+	RH_KABI_RESERVE(20)
+	RH_KABI_RESERVE(21)
+	RH_KABI_RESERVE(22)
+	RH_KABI_RESERVE(23)
+	RH_KABI_RESERVE(24)
+	RH_KABI_RESERVE(25)
+	RH_KABI_RESERVE(26)
+	RH_KABI_RESERVE(27)
+	RH_KABI_RESERVE(28)
+	RH_KABI_RESERVE(29)
+	RH_KABI_RESERVE(30)
+	RH_KABI_RESERVE(31)
+	RH_KABI_SIZE_AND_EXTEND(ethtool_ops_extended)
 };
 #endif /* _LINUX_ETHTOOL_H */

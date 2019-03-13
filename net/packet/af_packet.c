@@ -275,9 +275,10 @@ static bool packet_use_direct_xmit(const struct packet_sock *po)
 	return po->xmit == packet_direct_xmit;
 }
 
-static u16 __packet_pick_tx_queue(struct net_device *dev, struct sk_buff *skb)
+static u16 __packet_pick_tx_queue(struct net_device *dev, struct sk_buff *skb,
+				  struct net_device *sb_dev)
 {
-	return (u16) raw_smp_processor_id() % dev->real_num_tx_queues;
+	return dev_pick_tx_cpu_id(dev, skb, sb_dev, NULL);
 }
 
 static u16 packet_pick_tx_queue(struct sk_buff *skb)
@@ -291,7 +292,7 @@ static u16 packet_pick_tx_queue(struct sk_buff *skb)
 						    __packet_pick_tx_queue);
 		queue_index = netdev_cap_txqueue(dev, queue_index);
 	} else {
-		queue_index = __packet_pick_tx_queue(dev, skb);
+		queue_index = __packet_pick_tx_queue(dev, skb, NULL);
 	}
 
 	return queue_index;
@@ -1951,6 +1952,7 @@ retry:
 		goto out_unlock;
 	}
 
+	sockc.transmit_time = 0;
 	sockc.tsflags = sk->sk_tsflags;
 	if (msg->msg_controllen) {
 		err = sock_cmsg_send(sk, msg, &sockc);
@@ -1962,6 +1964,7 @@ retry:
 	skb->dev = dev;
 	skb->priority = sk->sk_priority;
 	skb->mark = sk->sk_mark;
+	skb->tstamp = sockc.transmit_time;
 
 	sock_tx_timestamp(sk, sockc.tsflags, &skb_shinfo(skb)->tx_flags);
 
@@ -2457,6 +2460,7 @@ static int tpacket_fill_skb(struct packet_sock *po, struct sk_buff *skb,
 	skb->dev = dev;
 	skb->priority = po->sk.sk_priority;
 	skb->mark = po->sk.sk_mark;
+	skb->tstamp = sockc->transmit_time;
 	sock_tx_timestamp(&po->sk, sockc->tsflags, &skb_shinfo(skb)->tx_flags);
 	skb_shinfo(skb)->destructor_arg = ph.raw;
 
@@ -2633,6 +2637,7 @@ static int tpacket_snd(struct packet_sock *po, struct msghdr *msg)
 	if (unlikely(!(dev->flags & IFF_UP)))
 		goto out_put;
 
+	sockc.transmit_time = 0;
 	sockc.tsflags = po->sk.sk_tsflags;
 	if (msg->msg_controllen) {
 		err = sock_cmsg_send(&po->sk, msg, &sockc);
@@ -2712,10 +2717,12 @@ tpacket_error:
 			}
 		}
 
-		if (po->has_vnet_hdr && virtio_net_hdr_to_skb(skb, vnet_hdr,
-							      vio_le())) {
-			tp_len = -EINVAL;
-			goto tpacket_error;
+		if (po->has_vnet_hdr) {
+			if (virtio_net_hdr_to_skb(skb, vnet_hdr, vio_le())) {
+				tp_len = -EINVAL;
+				goto tpacket_error;
+			}
+			virtio_net_hdr_set_proto(skb, vnet_hdr);
 		}
 
 		skb->destructor = tpacket_destruct_skb;
@@ -2829,6 +2836,7 @@ static int packet_snd(struct socket *sock, struct msghdr *msg, size_t len)
 	if (unlikely(!(dev->flags & IFF_UP)))
 		goto out_unlock;
 
+	sockc.transmit_time = 0;
 	sockc.tsflags = sk->sk_tsflags;
 	sockc.mark = sk->sk_mark;
 	if (msg->msg_controllen) {
@@ -2905,12 +2913,14 @@ static int packet_snd(struct socket *sock, struct msghdr *msg, size_t len)
 	skb->dev = dev;
 	skb->priority = sk->sk_priority;
 	skb->mark = sockc.mark;
+	skb->tstamp = sockc.transmit_time;
 
 	if (has_vnet_hdr) {
 		err = virtio_net_hdr_to_skb(skb, &vnet_hdr, vio_le());
 		if (err)
 			goto out_free;
 		len += sizeof(vnet_hdr);
+		virtio_net_hdr_set_proto(skb, &vnet_hdr);
 	}
 
 	skb_probe_transport_header(skb, reserve);

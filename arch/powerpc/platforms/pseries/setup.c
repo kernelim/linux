@@ -41,6 +41,7 @@
 #include <linux/root_dev.h>
 #include <linux/of.h>
 #include <linux/of_pci.h>
+#include <linux/memblock.h>
 
 #include <asm/mmu.h>
 #include <asm/processor.h>
@@ -102,6 +103,13 @@ static void pSeries_show_cpuinfo(struct seq_file *m)
 static void __init fwnmi_init(void)
 {
 	unsigned long system_reset_addr, machine_check_addr;
+	u8 *mce_data_buf;
+	unsigned int i;
+	int nr_cpus = num_possible_cpus();
+#ifdef CONFIG_PPC_BOOK3S_64
+	struct slb_entry *slb_ptr;
+	size_t size;
+#endif
 
 	int ibm_nmi_register = rtas_token("ibm,nmi-register");
 	if (ibm_nmi_register == RTAS_UNKNOWN_SERVICE)
@@ -115,6 +123,27 @@ static void __init fwnmi_init(void)
 	if (0 == rtas_call(ibm_nmi_register, 2, 1, NULL, system_reset_addr,
 				machine_check_addr))
 		fwnmi_active = 1;
+
+	/*
+	 * Allocate a chunk for per cpu buffer to hold rtas errorlog.
+	 * It will be used in real mode mce handler, hence it needs to be
+	 * below RMA.
+	 */
+	mce_data_buf = __va(memblock_alloc_base(RTAS_ERROR_LOG_MAX * nr_cpus,
+					RTAS_ERROR_LOG_MAX, ppc64_rma_size));
+	for_each_possible_cpu(i) {
+		paca_ptrs[i]->mce_data_buf = mce_data_buf +
+						(RTAS_ERROR_LOG_MAX * i);
+	}
+
+#ifdef CONFIG_PPC_BOOK3S_64
+	/* Allocate per cpu slb area to save old slb contents during MCE */
+	size = sizeof(struct slb_entry) * mmu_slb_size * nr_cpus;
+	slb_ptr = __va(memblock_alloc_base(size, sizeof(struct slb_entry),
+					   ppc64_rma_size));
+	for_each_possible_cpu(i)
+		paca_ptrs[i]->mce_faulty_slbs = slb_ptr + (mmu_slb_size * i);
+#endif
 }
 
 static void pseries_8259_cascade(struct irq_desc *desc)
@@ -985,6 +1014,7 @@ define_machine(pseries) {
 	.calibrate_decr		= generic_calibrate_decr,
 	.progress		= rtas_progress,
 	.system_reset_exception = pSeries_system_reset_exception,
+	.machine_check_early	= pseries_machine_check_realmode,
 	.machine_check_exception = pSeries_machine_check_exception,
 #ifdef CONFIG_KEXEC_CORE
 	.machine_kexec          = pSeries_machine_kexec,

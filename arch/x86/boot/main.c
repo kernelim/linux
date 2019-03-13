@@ -147,8 +147,7 @@ void main(void)
 
 	/* Make sure we have all the proper CPU support */
 	if (validate_cpu()) {
-		puts("Unable to boot - please use a kernel appropriate "
-		     "for your CPU.\n");
+		puts("This processor is not supported in this version of RHEL.\n");
 		die();
 	}
 

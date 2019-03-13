@@ -271,16 +271,16 @@ static ssize_t size_write(struct file *filp, const char __user *buf,
 {
 	struct mlx5_cache_ent *ent = filp->private_data;
 	struct mlx5_ib_dev *dev = ent->dev;
-	char lbuf[20];
+	char lbuf[20] = {0};
 	u32 var;
 	int err;
 	int c;
 
-	if (copy_from_user(lbuf, buf, sizeof(lbuf)))
+	count = min(count, sizeof(lbuf) - 1);
+	if (copy_from_user(lbuf, buf, count))
 		return -EFAULT;
 
 	c = order2idx(dev, ent->order);
-	lbuf[sizeof(lbuf) - 1] = 0;
 
 	if (sscanf(lbuf, "%u", &var) != 1)
 		return -EINVAL;
@@ -310,19 +310,11 @@ static ssize_t size_read(struct file *filp, char __user *buf, size_t count,
 	char lbuf[20];
 	int err;
 
-	if (*pos)
-		return 0;
-
 	err = snprintf(lbuf, sizeof(lbuf), "%d\n", ent->size);
 	if (err < 0)
 		return err;
 
-	if (copy_to_user(buf, lbuf, err))
-		return -EFAULT;
-
-	*pos += err;
-
-	return err;
+	return simple_read_from_buffer(buf, count, pos, lbuf, err);
 }
 
 static const struct file_operations size_fops = {
@@ -337,16 +329,16 @@ static ssize_t limit_write(struct file *filp, const char __user *buf,
 {
 	struct mlx5_cache_ent *ent = filp->private_data;
 	struct mlx5_ib_dev *dev = ent->dev;
-	char lbuf[20];
+	char lbuf[20] = {0};
 	u32 var;
 	int err;
 	int c;
 
-	if (copy_from_user(lbuf, buf, sizeof(lbuf)))
+	count = min(count, sizeof(lbuf) - 1);
+	if (copy_from_user(lbuf, buf, count))
 		return -EFAULT;
 
 	c = order2idx(dev, ent->order);
-	lbuf[sizeof(lbuf) - 1] = 0;
 
 	if (sscanf(lbuf, "%u", &var) != 1)
 		return -EINVAL;
@@ -372,19 +364,11 @@ static ssize_t limit_read(struct file *filp, char __user *buf, size_t count,
 	char lbuf[20];
 	int err;
 
-	if (*pos)
-		return 0;
-
 	err = snprintf(lbuf, sizeof(lbuf), "%d\n", ent->limit);
 	if (err < 0)
 		return err;
 
-	if (copy_to_user(buf, lbuf, err))
-		return -EFAULT;
-
-	*pos += err;
-
-	return err;
+	return simple_read_from_buffer(buf, count, pos, lbuf, err);
 }
 
 static const struct file_operations limit_fops = {
@@ -560,6 +544,9 @@ void mlx5_mr_cache_free(struct mlx5_ib_dev *dev, struct mlx5_ib_mr *mr)
 	int shrink = 0;
 	int c;
 
+	if (!mr->allocated_from_cache)
+		return;
+
 	c = order2idx(dev, mr->order);
 	if (c < 0 || c >= MAX_MR_CACHE_ENTRIES) {
 		mlx5_ib_warn(dev, "order %d, cache index %d\n", mr->order, c);
@@ -704,7 +691,6 @@ int mlx5_mr_cache_init(struct mlx5_ib_dev *dev)
 		init_completion(&ent->compl);
 		INIT_WORK(&ent->work, cache_work_func);
 		INIT_DELAYED_WORK(&ent->dwork, delayed_cache_work_func);
-		queue_work(cache->wq, &ent->work);
 
 		if (i > MR_CACHE_LAST_STD_ENTRY) {
 			mlx5_odp_init_mr_cache_entry(ent);
@@ -724,6 +710,7 @@ int mlx5_mr_cache_init(struct mlx5_ib_dev *dev)
 			ent->limit = dev->mdev->profile->mr_cache[i].limit;
 		else
 			ent->limit = 0;
+		queue_work(cache->wq, &ent->work);
 	}
 
 	err = mlx5_mr_cache_debugfs_init(dev);
@@ -1663,18 +1650,19 @@ static void dereg_mr(struct mlx5_ib_dev *dev, struct mlx5_ib_mr *mr)
 		umem = NULL;
 	}
 #endif
-
 	clean_mr(dev, mr);
 
+	/*
+	 * We should unregister the DMA address from the HCA before
+	 * remove the DMA mapping.
+	 */
+	mlx5_mr_cache_free(dev, mr);
 	if (umem) {
 		ib_umem_release(umem);
 		atomic_sub(npages, &dev->mdev->priv.reg_pages);
 	}
-
 	if (!mr->allocated_from_cache)
 		kfree(mr);
-	else
-		mlx5_mr_cache_free(dev, mr);
 }
 
 int mlx5_ib_dereg_mr(struct ib_mr *ibmr)

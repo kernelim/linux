@@ -1354,8 +1354,7 @@ static int mlxsw_sp_port_add_cls_matchall(struct mlxsw_sp_port *mlxsw_sp_port,
 		return -ENOMEM;
 	mall_tc_entry->cookie = f->cookie;
 
-	tcf_exts_to_list(f->exts, &actions);
-	a = list_first_entry(&actions, struct tc_action, list);
+	a = tcf_exts_first_action(f->exts);
 
 	if (is_tcf_mirred_egress_mirror(a) && protocol == htons(ETH_P_ALL)) {
 		struct mlxsw_sp_port_mall_mirror_tc_entry *mirror;
@@ -1503,7 +1502,8 @@ static int mlxsw_sp_setup_tc_block_cb_flower(enum tc_setup_type type,
 
 static int
 mlxsw_sp_setup_tc_block_flower_bind(struct mlxsw_sp_port *mlxsw_sp_port,
-				    struct tcf_block *block, bool ingress)
+				    struct tcf_block *block, bool ingress,
+				    struct netlink_ext_ack *extack)
 {
 	struct mlxsw_sp *mlxsw_sp = mlxsw_sp_port->mlxsw_sp;
 	struct mlxsw_sp_acl_block *acl_block;
@@ -1518,7 +1518,7 @@ mlxsw_sp_setup_tc_block_flower_bind(struct mlxsw_sp_port *mlxsw_sp_port,
 			return -ENOMEM;
 		block_cb = __tcf_block_cb_register(block,
 						   mlxsw_sp_setup_tc_block_cb_flower,
-						   mlxsw_sp, acl_block);
+						   mlxsw_sp, acl_block, extack);
 		if (IS_ERR(block_cb)) {
 			err = PTR_ERR(block_cb);
 			goto err_cb_register;
@@ -1541,7 +1541,7 @@ mlxsw_sp_setup_tc_block_flower_bind(struct mlxsw_sp_port *mlxsw_sp_port,
 
 err_block_bind:
 	if (!tcf_block_cb_decref(block_cb)) {
-		__tcf_block_cb_unregister(block_cb);
+		__tcf_block_cb_unregister(block, block_cb);
 err_cb_register:
 		mlxsw_sp_acl_block_destroy(acl_block);
 	}
@@ -1571,7 +1571,7 @@ mlxsw_sp_setup_tc_block_flower_unbind(struct mlxsw_sp_port *mlxsw_sp_port,
 	err = mlxsw_sp_acl_block_unbind(mlxsw_sp, acl_block,
 					mlxsw_sp_port, ingress);
 	if (!err && !tcf_block_cb_decref(block_cb)) {
-		__tcf_block_cb_unregister(block_cb);
+		__tcf_block_cb_unregister(block, block_cb);
 		mlxsw_sp_acl_block_destroy(acl_block);
 	}
 }
@@ -1596,11 +1596,12 @@ static int mlxsw_sp_setup_tc_block(struct mlxsw_sp_port *mlxsw_sp_port,
 	switch (f->command) {
 	case TC_BLOCK_BIND:
 		err = tcf_block_cb_register(f->block, cb, mlxsw_sp_port,
-					    mlxsw_sp_port);
+					    mlxsw_sp_port, f->extack);
 		if (err)
 			return err;
 		err = mlxsw_sp_setup_tc_block_flower_bind(mlxsw_sp_port,
-							  f->block, ingress);
+							  f->block, ingress,
+							  f->extack);
 		if (err) {
 			tcf_block_cb_unregister(f->block, cb, mlxsw_sp_port);
 			return err;

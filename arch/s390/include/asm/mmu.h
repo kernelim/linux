@@ -5,6 +5,8 @@
 #include <linux/cpumask.h>
 #include <linux/errno.h>
 
+#include <linux/rh_kabi.h>
+
 typedef struct {
 	spinlock_t lock;
 	cpumask_t cpu_attach_mask;
@@ -16,7 +18,13 @@ typedef struct {
 	unsigned long asce;
 	unsigned long asce_limit;
 	unsigned long vdso_base;
-	/* The mmu context allocates 4K page tables. */
+	/*
+	 * The following bitfields need a down_write on the mm
+	 * semaphore when they are written to. As they are only
+	 * written once, they can be read without a lock.
+	 *
+	 * The mmu context allocates 4K page tables.
+	 */
 	unsigned int alloc_pgste:1;
 	/* The mmu context uses extended page tables. */
 	unsigned int has_pgste:1;
@@ -24,6 +32,11 @@ typedef struct {
 	unsigned int uses_skeys:1;
 	/* The mmu context uses CMM. */
 	unsigned int uses_cmm:1;
+	/* The gmaps associated with this context are allowed to use huge pages. */
+	unsigned int allow_gmap_hpage_1m:1;
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
 } mm_context_t;
 
 #define INIT_MM_CONTEXT(name)						   \

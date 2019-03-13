@@ -929,7 +929,8 @@ freeout:
 }
 
 static u16 cxgb_select_queue(struct net_device *dev, struct sk_buff *skb,
-			     void *accel_priv, select_queue_fallback_t fallback)
+			     struct net_device *sb_dev,
+			     select_queue_fallback_t fallback)
 {
 	int txq;
 
@@ -971,7 +972,7 @@ static u16 cxgb_select_queue(struct net_device *dev, struct sk_buff *skb,
 		return txq;
 	}
 
-	return fallback(dev, skb) % dev->real_num_tx_queues;
+	return fallback(dev, skb, NULL) % dev->real_num_tx_queues;
 }
 
 static int closest_timer(const struct sge *s, int time)
@@ -2748,6 +2749,27 @@ static int cxgb4_mgmt_set_vf_rate(struct net_device *dev, int vf,
 		return -EINVAL;
 	}
 
+	if (max_tx_rate == 0) {
+		/* unbind VF to to any Traffic Class */
+		fw_pfvf =
+		    (FW_PARAMS_MNEM_V(FW_PARAMS_MNEM_PFVF) |
+		     FW_PARAMS_PARAM_X_V(FW_PARAMS_PARAM_PFVF_SCHEDCLASS_ETH));
+		fw_class = 0xffffffff;
+		ret = t4_set_params(adap, adap->mbox, adap->pf, vf + 1, 1,
+				    &fw_pfvf, &fw_class);
+		if (ret) {
+			dev_err(adap->pdev_dev,
+				"Err %d in unbinding PF %d VF %d from TX Rate Limiting\n",
+				ret, adap->pf, vf);
+			return -EINVAL;
+		}
+		dev_info(adap->pdev_dev,
+			 "PF %d VF %d is unbound from TX Rate Limiting\n",
+			 adap->pf, vf);
+		adap->vfinfo[vf].tx_rate = 0;
+		return 0;
+	}
+
 	ret = t4_get_link_params(pi, &link_ok, &speed, &mtu);
 	if (ret != FW_SUCCESS) {
 		dev_err(adap->pdev_dev,
@@ -2797,8 +2819,8 @@ static int cxgb4_mgmt_set_vf_rate(struct net_device *dev, int vf,
 			    &fw_class);
 	if (ret) {
 		dev_err(adap->pdev_dev,
-			"Err %d in binding VF %d to Traffic Class %d\n",
-			ret, vf, class_id);
+			"Err %d in binding PF %d VF %d to Traffic Class %d\n",
+			ret, adap->pf, vf, class_id);
 		return -EINVAL;
 	}
 	dev_info(adap->pdev_dev, "PF %d VF %d is bound to Class %d\n",
@@ -3016,7 +3038,7 @@ static int cxgb_setup_tc_block(struct net_device *dev,
 	switch (f->command) {
 	case TC_BLOCK_BIND:
 		return tcf_block_cb_register(f->block, cxgb_setup_tc_block_cb,
-					     pi, dev);
+					     pi, dev, f->extack);
 	case TC_BLOCK_UNBIND:
 		tcf_block_cb_unregister(f->block, cxgb_setup_tc_block_cb, pi);
 		return 0;
@@ -3219,7 +3241,7 @@ static netdev_features_t cxgb_fix_features(struct net_device *dev,
 static const struct net_device_ops cxgb4_netdev_ops = {
 	.ndo_open             = cxgb_open,
 	.ndo_stop             = cxgb_close,
-	.ndo_start_xmit       = t4_eth_xmit,
+	.ndo_start_xmit       = t4_start_xmit,
 	.ndo_select_queue     =	cxgb_select_queue,
 	.ndo_get_stats64      = cxgb_get_stats,
 	.ndo_set_rx_mode      = cxgb_set_rxmode,
@@ -5705,7 +5727,7 @@ static int init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 		if (t4_read_reg(adapter, LE_DB_CONFIG_A) & HASHEN_F) {
 			u32 hash_base, hash_reg;
 
-			if (chip <= CHELSIO_T5) {
+			if (chip_ver <= CHELSIO_T5) {
 				hash_reg = LE_DB_TID_HASHBASE_A;
 				hash_base = t4_read_reg(adapter, hash_reg);
 				adapter->tids.hash_base = hash_base / 4;

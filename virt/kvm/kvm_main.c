@@ -273,7 +273,8 @@ void kvm_flush_remote_tlbs(struct kvm *kvm)
 	 * kvm_make_all_cpus_request() reads vcpu->mode. We reuse that
 	 * barrier here.
 	 */
-	if (kvm_make_all_cpus_request(kvm, KVM_REQ_TLB_FLUSH))
+	if (!kvm_arch_flush_remote_tlb(kvm)
+	    || kvm_make_all_cpus_request(kvm, KVM_REQ_TLB_FLUSH))
 		++kvm->stat.remote_tlb_flush;
 	cmpxchg(&kvm->tlbs_dirty, dirty_count, 0);
 }
@@ -1169,7 +1170,7 @@ int kvm_get_dirty_log_protect(struct kvm *kvm,
 
 	n = kvm_dirty_bitmap_bytes(memslot);
 
-	dirty_bitmap_buffer = dirty_bitmap + n / sizeof(long);
+	dirty_bitmap_buffer = kvm_second_dirty_bitmap(memslot);
 	memset(dirty_bitmap_buffer, 0, n);
 
 	spin_lock(&kvm->mmu_lock);
@@ -1342,17 +1343,15 @@ static inline int check_user_page_hwpoison(unsigned long addr)
 }
 
 /*
- * The atomic path to get the writable pfn which will be stored in @pfn,
- * true indicates success, otherwise false is returned.
+ * The fast path to get the writable pfn which will be stored in @pfn,
+ * true indicates success, otherwise false is returned.  It's also the
+ * only part that runs if we can are in atomic context.
  */
-static bool hva_to_pfn_fast(unsigned long addr, bool atomic, bool *async,
-			    bool write_fault, bool *writable, kvm_pfn_t *pfn)
+static bool hva_to_pfn_fast(unsigned long addr, bool write_fault,
+			    bool *writable, kvm_pfn_t *pfn)
 {
 	struct page *page[1];
 	int npages;
-
-	if (!(async || atomic))
-		return false;
 
 	/*
 	 * Fast pin a writable pfn only if it is a write fault request
@@ -1497,7 +1496,7 @@ static kvm_pfn_t hva_to_pfn(unsigned long addr, bool atomic, bool *async,
 	/* we can do it either atomically or asynchronously, not both */
 	BUG_ON(atomic && async);
 
-	if (hva_to_pfn_fast(addr, atomic, async, write_fault, writable, &pfn))
+	if (hva_to_pfn_fast(addr, write_fault, writable, &pfn))
 		return pfn;
 
 	if (atomic)
@@ -1918,32 +1917,33 @@ static int __kvm_gfn_to_hva_cache_init(struct kvm_memslots *slots,
 	gfn_t end_gfn = (gpa + len - 1) >> PAGE_SHIFT;
 	gfn_t nr_pages_needed = end_gfn - start_gfn + 1;
 	gfn_t nr_pages_avail;
+	int r = start_gfn <= end_gfn ? 0 : -EINVAL;
 
 	ghc->gpa = gpa;
 	ghc->generation = slots->generation;
 	ghc->len = len;
-	ghc->memslot = __gfn_to_memslot(slots, start_gfn);
-	ghc->hva = gfn_to_hva_many(ghc->memslot, start_gfn, NULL);
-	if (!kvm_is_error_hva(ghc->hva) && nr_pages_needed <= 1) {
-		ghc->hva += offset;
-	} else {
-		/*
-		 * If the requested region crosses two memslots, we still
-		 * verify that the entire region is valid here.
-		 */
-		while (start_gfn <= end_gfn) {
-			nr_pages_avail = 0;
-			ghc->memslot = __gfn_to_memslot(slots, start_gfn);
-			ghc->hva = gfn_to_hva_many(ghc->memslot, start_gfn,
-						   &nr_pages_avail);
-			if (kvm_is_error_hva(ghc->hva))
-				return -EFAULT;
-			start_gfn += nr_pages_avail;
-		}
-		/* Use the slow path for cross page reads and writes. */
-		ghc->memslot = NULL;
+	ghc->hva = KVM_HVA_ERR_BAD;
+
+	/*
+	 * If the requested region crosses two memslots, we still
+	 * verify that the entire region is valid here.
+	 */
+	while (!r && start_gfn <= end_gfn) {
+		ghc->memslot = __gfn_to_memslot(slots, start_gfn);
+		ghc->hva = gfn_to_hva_many(ghc->memslot, start_gfn,
+					   &nr_pages_avail);
+		if (kvm_is_error_hva(ghc->hva))
+			r = -EFAULT;
+		start_gfn += nr_pages_avail;
 	}
-	return 0;
+
+	/* Use the slow path for cross page reads and writes. */
+	if (!r && nr_pages_needed == 1)
+		ghc->hva += offset;
+	else
+		ghc->memslot = NULL;
+
+	return r;
 }
 
 int kvm_gfn_to_hva_cache_init(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
@@ -1955,7 +1955,8 @@ int kvm_gfn_to_hva_cache_init(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
 EXPORT_SYMBOL_GPL(kvm_gfn_to_hva_cache_init);
 
 int kvm_write_guest_offset_cached(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
-			   void *data, int offset, unsigned long len)
+				  void *data, unsigned int offset,
+				  unsigned long len)
 {
 	struct kvm_memslots *slots = kvm_memslots(kvm);
 	int r;
@@ -2127,16 +2128,22 @@ static void shrink_halt_poll_ns(struct kvm_vcpu *vcpu)
 
 static int kvm_vcpu_check_block(struct kvm_vcpu *vcpu)
 {
+	int ret = -EINTR;
+	int idx = srcu_read_lock(&vcpu->kvm->srcu);
+
 	if (kvm_arch_vcpu_runnable(vcpu)) {
 		kvm_make_request(KVM_REQ_UNHALT, vcpu);
-		return -EINTR;
+		goto out;
 	}
 	if (kvm_cpu_has_pending_timer(vcpu))
-		return -EINTR;
+		goto out;
 	if (signal_pending(current))
-		return -EINTR;
+		goto out;
 
-	return 0;
+	ret = 0;
+out:
+	srcu_read_unlock(&vcpu->kvm->srcu, idx);
+	return ret;
 }
 
 /*
@@ -2902,8 +2909,10 @@ static int kvm_ioctl_create_device(struct kvm *kvm,
 	if (ops->init)
 		ops->init(dev);
 
+	kvm_get_kvm(kvm);
 	ret = anon_inode_getfd(ops->name, &kvm_device_fops, dev, O_RDWR | O_CLOEXEC);
 	if (ret < 0) {
+		kvm_put_kvm(kvm);
 		mutex_lock(&kvm->lock);
 		list_del(&dev->vm_node);
 		mutex_unlock(&kvm->lock);
@@ -2911,7 +2920,6 @@ static int kvm_ioctl_create_device(struct kvm *kvm,
 		return ret;
 	}
 
-	kvm_get_kvm(kvm);
 	cd->fd = ret;
 	return 0;
 }

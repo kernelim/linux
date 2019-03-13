@@ -20,9 +20,9 @@
 #define HCLGE_MOD_VERSION "1.0"
 #define HCLGE_DRIVER_NAME "hclge"
 
-#define HCLGE_INVALID_VPORT 0xffff
+#define HCLGE_MAX_PF_NUM		8
 
-#define HCLGE_ROCE_VECTOR_OFFSET	96
+#define HCLGE_INVALID_VPORT 0xffff
 
 #define HCLGE_PF_CFG_BLOCK_SIZE		32
 #define HCLGE_PF_CFG_DESC_NUM \
@@ -40,7 +40,7 @@
 #define HCLGE_RSS_HASH_ALGO_TOEPLITZ	0
 #define HCLGE_RSS_HASH_ALGO_SIMPLE	1
 #define HCLGE_RSS_HASH_ALGO_SYMMETRIC	2
-#define HCLGE_RSS_HASH_ALGO_MASK	0xf
+#define HCLGE_RSS_HASH_ALGO_MASK	GENMASK(3, 0)
 #define HCLGE_RSS_CFG_TBL_NUM \
 	(HCLGE_RSS_IND_TBL_SIZE / HCLGE_RSS_CFG_TBL_SIZE)
 
@@ -60,6 +60,10 @@
 #define HCLGE_RSS_TC_SIZE_5		32
 #define HCLGE_RSS_TC_SIZE_6		64
 #define HCLGE_RSS_TC_SIZE_7		128
+
+#define HCLGE_UMV_TBL_SIZE		3072
+#define HCLGE_DEFAULT_UMV_SPACE_PER_PF \
+	(HCLGE_UMV_TBL_SIZE / HCLGE_MAX_PF_NUM)
 
 #define HCLGE_MTA_TBL_SIZE		4096
 
@@ -89,6 +93,7 @@
 
 /* Reset related Registers */
 #define HCLGE_MISC_RESET_STS_REG	0x20700
+#define HCLGE_MISC_VECTOR_INT_STS	0x20800
 #define HCLGE_GLOBAL_RESET_REG		0x20A00
 #define HCLGE_GLOBAL_RESET_BIT		0x0
 #define HCLGE_CORE_RESET_BIT		0x1
@@ -128,6 +133,7 @@ enum HCLGE_DEV_STATE {
 	HCLGE_STATE_MBX_SERVICE_SCHED,
 	HCLGE_STATE_MBX_HANDLING,
 	HCLGE_STATE_STATISTICS_UPDATING,
+	HCLGE_STATE_CMD_DISABLE,
 	HCLGE_STATE_MAX
 };
 
@@ -190,7 +196,6 @@ struct hclge_hw {
 	int num_vec;
 	struct hclge_cmq cmq;
 	struct hclge_caps caps;
-	void *back;
 };
 
 /* TQP stats */
@@ -249,6 +254,7 @@ struct hclge_cfg {
 	u8 default_speed;
 	u32 numa_node_map;
 	u8 speed_ability;
+	u16 umv_space;
 };
 
 struct hclge_tm_info {
@@ -265,109 +271,6 @@ struct hclge_tm_info {
 struct hclge_comm_stats_str {
 	char desc[ETH_GSTRING_LEN];
 	unsigned long offset;
-};
-
-/* all 64bit stats, opcode id: 0x0030 */
-struct hclge_64_bit_stats {
-	/* query_igu_stat */
-	u64 igu_rx_oversize_pkt;
-	u64 igu_rx_undersize_pkt;
-	u64 igu_rx_out_all_pkt;
-	u64 igu_rx_uni_pkt;
-	u64 igu_rx_multi_pkt;
-	u64 igu_rx_broad_pkt;
-	u64 rsv0;
-
-	/* query_egu_stat */
-	u64 egu_tx_out_all_pkt;
-	u64 egu_tx_uni_pkt;
-	u64 egu_tx_multi_pkt;
-	u64 egu_tx_broad_pkt;
-
-	/* ssu_ppp packet stats */
-	u64 ssu_ppp_mac_key_num;
-	u64 ssu_ppp_host_key_num;
-	u64 ppp_ssu_mac_rlt_num;
-	u64 ppp_ssu_host_rlt_num;
-
-	/* ssu_tx_in_out_dfx_stats */
-	u64 ssu_tx_in_num;
-	u64 ssu_tx_out_num;
-	/* ssu_rx_in_out_dfx_stats */
-	u64 ssu_rx_in_num;
-	u64 ssu_rx_out_num;
-};
-
-/* all 32bit stats, opcode id: 0x0031 */
-struct hclge_32_bit_stats {
-	u64 igu_rx_err_pkt;
-	u64 igu_rx_no_eof_pkt;
-	u64 igu_rx_no_sof_pkt;
-	u64 egu_tx_1588_pkt;
-	u64 egu_tx_err_pkt;
-	u64 ssu_full_drop_num;
-	u64 ssu_part_drop_num;
-	u64 ppp_key_drop_num;
-	u64 ppp_rlt_drop_num;
-	u64 ssu_key_drop_num;
-	u64 pkt_curr_buf_cnt;
-	u64 qcn_fb_rcv_cnt;
-	u64 qcn_fb_drop_cnt;
-	u64 qcn_fb_invaild_cnt;
-	u64 rsv0;
-	u64 rx_packet_tc0_in_cnt;
-	u64 rx_packet_tc1_in_cnt;
-	u64 rx_packet_tc2_in_cnt;
-	u64 rx_packet_tc3_in_cnt;
-	u64 rx_packet_tc4_in_cnt;
-	u64 rx_packet_tc5_in_cnt;
-	u64 rx_packet_tc6_in_cnt;
-	u64 rx_packet_tc7_in_cnt;
-	u64 rx_packet_tc0_out_cnt;
-	u64 rx_packet_tc1_out_cnt;
-	u64 rx_packet_tc2_out_cnt;
-	u64 rx_packet_tc3_out_cnt;
-	u64 rx_packet_tc4_out_cnt;
-	u64 rx_packet_tc5_out_cnt;
-	u64 rx_packet_tc6_out_cnt;
-	u64 rx_packet_tc7_out_cnt;
-
-	/* Tx packet level statistics */
-	u64 tx_packet_tc0_in_cnt;
-	u64 tx_packet_tc1_in_cnt;
-	u64 tx_packet_tc2_in_cnt;
-	u64 tx_packet_tc3_in_cnt;
-	u64 tx_packet_tc4_in_cnt;
-	u64 tx_packet_tc5_in_cnt;
-	u64 tx_packet_tc6_in_cnt;
-	u64 tx_packet_tc7_in_cnt;
-	u64 tx_packet_tc0_out_cnt;
-	u64 tx_packet_tc1_out_cnt;
-	u64 tx_packet_tc2_out_cnt;
-	u64 tx_packet_tc3_out_cnt;
-	u64 tx_packet_tc4_out_cnt;
-	u64 tx_packet_tc5_out_cnt;
-	u64 tx_packet_tc6_out_cnt;
-	u64 tx_packet_tc7_out_cnt;
-
-	/* packet buffer statistics */
-	u64 pkt_curr_buf_tc0_cnt;
-	u64 pkt_curr_buf_tc1_cnt;
-	u64 pkt_curr_buf_tc2_cnt;
-	u64 pkt_curr_buf_tc3_cnt;
-	u64 pkt_curr_buf_tc4_cnt;
-	u64 pkt_curr_buf_tc5_cnt;
-	u64 pkt_curr_buf_tc6_cnt;
-	u64 pkt_curr_buf_tc7_cnt;
-
-	u64 mb_uncopy_num;
-	u64 lo_pri_unicast_rlt_drop_num;
-	u64 hi_pri_multicast_rlt_drop_num;
-	u64 lo_pri_multicast_rlt_drop_num;
-	u64 rx_oq_drop_pkt_cnt;
-	u64 tx_oq_drop_pkt_cnt;
-	u64 nic_l2_err_drop_pkt_cnt;
-	u64 roc_l2_err_drop_pkt_cnt;
 };
 
 /* mac stats ,opcode id: 0x0032 */
@@ -461,8 +364,6 @@ struct hclge_mac_stats {
 #define HCLGE_STATS_TIMER_INTERVAL	(60 * 5)
 struct hclge_hw_stats {
 	struct hclge_mac_stats      mac_stats;
-	struct hclge_64_bit_stats   all_64_bit_stats;
-	struct hclge_32_bit_stats   all_32_bit_stats;
 	u32 stats_timer;
 };
 
@@ -520,6 +421,7 @@ struct hclge_dev {
 	u16 num_msi;
 	u16 num_msi_left;
 	u16 num_msi_used;
+	u16 roce_base_msix_offset;
 	u32 base_msi_vector;
 	u16 *vector_status;
 	int *vector_irq;
@@ -557,6 +459,9 @@ struct hclge_dev {
 	u32 flag;
 
 	u32 pkt_buf_size; /* Total pf buf size for tx/rx */
+	u32 tx_buf_size; /* Tx buffer size for each TC */
+	u32 dv_buf_size; /* Dv buffer size for each TC */
+
 	u32 mps; /* Max packet size */
 
 	enum hclge_mta_dmac_sel_type mta_mac_sel_type;
@@ -565,6 +470,15 @@ struct hclge_dev {
 	struct hclge_vlan_type_cfg vlan_type_cfg;
 
 	unsigned long vlan_table[VLAN_N_VID][BITS_TO_LONGS(HCLGE_VPORT_NUM)];
+
+	u16 wanted_umv_size;
+	/* max available unicast mac vlan space */
+	u16 max_umv_size;
+	/* private unicast mac vlan space, it's same for PF and its VFs */
+	u16 priv_umv_size;
+	/* unicast mac vlan space shared by PF and its VFs */
+	u16 share_umv_size;
+	struct mutex umv_mutex; /* protect share_umv_size */
 };
 
 /* VPort level vlan tag configuration for TX direction */
@@ -616,6 +530,8 @@ struct hclge_vport {
 
 	struct hclge_tx_vtag_cfg  txvlan_cfg;
 	struct hclge_rx_vtag_cfg  rxvlan_cfg;
+
+	u16 used_umv_num;
 
 	int vport_id;
 	struct hclge_dev *back;  /* Back reference to associated dev */

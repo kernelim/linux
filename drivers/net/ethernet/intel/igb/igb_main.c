@@ -22,7 +22,6 @@
 #include <linux/if.h>
 #include <linux/if_vlan.h>
 #include <linux/pci.h>
-#include <linux/pci-aspm.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/ip.h>
@@ -2698,7 +2697,7 @@ static int igb_setup_tc_cls_flower(struct igb_adapter *adapter,
 	case TC_CLSFLOWER_STATS:
 		return -EOPNOTSUPP;
 	default:
-		return -EINVAL;
+		return -EOPNOTSUPP;
 	}
 }
 
@@ -2728,7 +2727,7 @@ static int igb_setup_tc_block(struct igb_adapter *adapter,
 	switch (f->command) {
 	case TC_BLOCK_BIND:
 		return tcf_block_cb_register(f->block, igb_setup_tc_block_cb,
-					     adapter, adapter);
+					     adapter, adapter, f->extack);
 	case TC_BLOCK_UNBIND:
 		tcf_block_cb_unregister(f->block, igb_setup_tc_block_cb,
 					adapter);

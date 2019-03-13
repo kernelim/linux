@@ -568,6 +568,7 @@ asmlinkage __visible void __init start_kernel(void)
 	page_alloc_init();
 
 	pr_notice("Kernel command line: %s\n", boot_command_line);
+	pr_notice("Specific versions of hardware are certified with Red Hat Enterprise Linux 8. Please see the list of hardware certified with Red Hat Enterprise Linux 8 at https://access.redhat.com/ecosystem.\n");
 	parse_early_param();
 	after_dashes = parse_args("Booting kernel",
 				  static_command_line, __start___param,
@@ -987,17 +988,6 @@ static void __init do_pre_smp_initcalls(void)
 		do_one_initcall(*fn);
 }
 
-/*
- * This function requests modules which should be loaded by default and is
- * called twice right after initrd is mounted and right before init is
- * exec'd.  If such modules are on either initrd or rootfs, they will be
- * loaded before control is passed to userland.
- */
-void __init load_default_modules(void)
-{
-	load_default_elevator_module();
-}
-
 static int run_init_process(const char *init_filename)
 {
 	argv_init[0] = init_filename;
@@ -1029,6 +1019,17 @@ static int __init set_debug_rodata(char *str)
 	return strtobool(str, &rodata_enabled);
 }
 __setup("rodata=", set_debug_rodata);
+#endif
+
+#ifdef CONFIG_LOCKUP_DETECTOR
+extern int watchdog_thresh;
+
+static int __init watchdog_thresh_setup(char *str)
+{
+	get_option(&str, &watchdog_thresh);
+	return 1;
+}
+__setup("watchdog_thresh=", watchdog_thresh_setup);
 #endif
 
 #ifdef CONFIG_STRICT_KERNEL_RWX
@@ -1164,5 +1165,4 @@ static noinline void __init kernel_init_freeable(void)
 	 */
 
 	integrity_load_keys();
-	load_default_modules();
 }

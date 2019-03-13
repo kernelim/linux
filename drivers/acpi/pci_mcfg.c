@@ -141,6 +141,11 @@ static struct mcfg_fixup mcfg_quirks[] = {
 	XGENE_V2_ECAM_MCFG(4, 0),
 	XGENE_V2_ECAM_MCFG(4, 1),
 	XGENE_V2_ECAM_MCFG(4, 2),
+
+#define BCM_ECAM_MCFG(rev, seg) \
+	{"BRCM  ", "BRCM-SRX", rev, seg, MCFG_BUS_ANY, \
+		&iproc_pcie_paxcv2_ecam_ops }
+	BCM_ECAM_MCFG(1, 8),
 };
 
 static char mcfg_oem_id[ACPI_OEM_ID_SIZE];

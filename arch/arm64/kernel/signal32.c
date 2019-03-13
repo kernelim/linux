@@ -282,8 +282,9 @@ static int compat_restore_sigframe(struct pt_regs *regs,
 	return err;
 }
 
-asmlinkage int compat_sys_sigreturn(struct pt_regs *regs)
+COMPAT_SYSCALL_DEFINE0(sigreturn)
 {
+	struct pt_regs *regs = current_pt_regs();
 	struct compat_sigframe __user *frame;
 
 	/* Always make any pending restarted system calls return -EINTR */
@@ -312,8 +313,9 @@ badframe:
 	return 0;
 }
 
-asmlinkage int compat_sys_rt_sigreturn(struct pt_regs *regs)
+COMPAT_SYSCALL_DEFINE0(rt_sigreturn)
 {
+	struct pt_regs *regs = current_pt_regs();
 	struct compat_rt_sigframe __user *frame;
 
 	/* Always make any pending restarted system calls return -EINTR */

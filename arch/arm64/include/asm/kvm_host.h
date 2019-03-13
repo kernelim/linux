@@ -61,12 +61,13 @@ struct kvm_arch {
 	u64    vmid_gen;
 	u32    vmid;
 
-	/* 1-level 2nd stage table and lock */
-	spinlock_t pgd_lock;
+	/* stage2 entry level table */
 	pgd_t *pgd;
 
 	/* VTTBR value associated with above pgd and vmid */
 	u64    vttbr;
+	/* VTCR_EL2 value for this VM */
+	u64    vtcr;
 
 	/* The last vcpu id that ran on each physical CPU */
 	int __percpu *last_vcpu_ran;
@@ -352,7 +353,6 @@ int kvm_arm_get_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg);
 int kvm_arm_set_reg(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg);
 
 #define KVM_ARCH_WANT_MMU_NOTIFIER
-int kvm_unmap_hva(struct kvm *kvm, unsigned long hva);
 int kvm_unmap_hva_range(struct kvm *kvm,
 			unsigned long start, unsigned long end);
 void kvm_set_spte_hva(struct kvm *kvm, unsigned long hva, pte_t pte);
@@ -380,14 +380,19 @@ int kvm_perf_teardown(void);
 
 struct kvm_vcpu *kvm_mpidr_to_vcpu(struct kvm *kvm, unsigned long mpidr);
 
-void __kvm_set_tpidr_el2(u64 tpidr_el2);
 DECLARE_PER_CPU(kvm_cpu_context_t, kvm_host_cpu_state);
 
 static inline void __cpu_init_hyp_mode(phys_addr_t pgd_ptr,
 				       unsigned long hyp_stack_ptr,
 				       unsigned long vector_ptr)
 {
-	u64 tpidr_el2;
+	/*
+	 * Calculate the raw per-cpu offset without a translation from the
+	 * kernel's mapping to the linear mapping, and store it in tpidr_el2
+	 * so that we can use adr_l to access per-cpu variables in EL2.
+	 */
+	u64 tpidr_el2 = ((u64)this_cpu_ptr(&kvm_host_cpu_state) -
+			 (u64)kvm_ksym_ref(kvm_host_cpu_state));
 
 	/*
 	 * Call initialization code, and switch to the full blown HYP code.
@@ -396,17 +401,7 @@ static inline void __cpu_init_hyp_mode(phys_addr_t pgd_ptr,
 	 * cpus_have_const_cap() wrapper.
 	 */
 	BUG_ON(!static_branch_likely(&arm64_const_caps_ready));
-	__kvm_call_hyp((void *)pgd_ptr, hyp_stack_ptr, vector_ptr);
-
-	/*
-	 * Calculate the raw per-cpu offset without a translation from the
-	 * kernel's mapping to the linear mapping, and store it in tpidr_el2
-	 * so that we can use adr_l to access per-cpu variables in EL2.
-	 */
-	tpidr_el2 = (u64)this_cpu_ptr(&kvm_host_cpu_state)
-		- (u64)kvm_ksym_ref(kvm_host_cpu_state);
-
-	kvm_call_hyp(__kvm_set_tpidr_el2, tpidr_el2);
+	__kvm_call_hyp((void *)pgd_ptr, hyp_stack_ptr, vector_ptr, tpidr_el2);
 }
 
 static inline bool kvm_arch_check_sve_has_vhe(void)
@@ -440,13 +435,7 @@ int kvm_arm_vcpu_arch_get_attr(struct kvm_vcpu *vcpu,
 int kvm_arm_vcpu_arch_has_attr(struct kvm_vcpu *vcpu,
 			       struct kvm_device_attr *attr);
 
-static inline void __cpu_init_stage2(void)
-{
-	u32 parange = kvm_call_hyp(__init_stage2_translation);
-
-	WARN_ONCE(parange < 40,
-		  "PARange is %d bits, unsupported configuration!", parange);
-}
+static inline void __cpu_init_stage2(void) {}
 
 /* Guest/host FPSIMD coordination helpers */
 int kvm_arch_vcpu_run_map_fp(struct kvm_vcpu *vcpu);
@@ -509,8 +498,12 @@ static inline int kvm_arm_have_ssbd(void)
 void kvm_vcpu_load_sysregs(struct kvm_vcpu *vcpu);
 void kvm_vcpu_put_sysregs(struct kvm_vcpu *vcpu);
 
+void kvm_set_ipa_limit(void);
+
 #define __KVM_HAVE_ARCH_VM_ALLOC
 struct kvm *kvm_arch_alloc_vm(void);
 void kvm_arch_free_vm(struct kvm *kvm);
+
+int kvm_arm_setup_stage2(struct kvm *kvm, unsigned long type);
 
 #endif /* __ARM64_KVM_HOST_H__ */

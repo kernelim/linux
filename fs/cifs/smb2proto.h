@@ -197,6 +197,9 @@ void smb2_cancelled_close_fid(struct work_struct *work);
 extern int SMB2_QFS_info(const unsigned int xid, struct cifs_tcon *tcon,
 			 u64 persistent_file_id, u64 volatile_file_id,
 			 struct kstatfs *FSData);
+extern int SMB311_posix_qfs_info(const unsigned int xid, struct cifs_tcon *tcon,
+			 u64 persistent_file_id, u64 volatile_file_id,
+			 struct kstatfs *FSData);
 extern int SMB2_QFS_attr(const unsigned int xid, struct cifs_tcon *tcon,
 			 u64 persistent_file_id, u64 volatile_file_id, int lvl);
 extern int SMB2_lock(const unsigned int xid, struct cifs_tcon *tcon,
@@ -213,9 +216,7 @@ extern int smb3_validate_negotiate(const unsigned int, struct cifs_tcon *);
 
 extern enum securityEnum smb2_select_sectype(struct TCP_Server_Info *,
 					enum securityEnum);
-#ifdef CONFIG_CIFS_SMB311
 extern int smb311_crypto_shash_allocate(struct TCP_Server_Info *server);
 extern int smb311_update_preauth_hash(struct cifs_ses *ses,
 				      struct kvec *iov, int nvec);
-#endif
 #endif			/* _SMB2PROTO_H */

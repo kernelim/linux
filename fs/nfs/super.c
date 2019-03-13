@@ -884,7 +884,7 @@ int nfs_show_stats(struct seq_file *m, struct dentry *root)
 #endif
 	seq_printf(m, "\n");
 
-	rpc_print_iostats(m, nfss->client);
+	rpc_clnt_show_stats(m, nfss->client);
 
 	return 0;
 }
@@ -2409,8 +2409,7 @@ static int nfs_compare_mount_options(const struct super_block *s, const struct n
 		goto Ebusy;
 	if (a->acdirmax != b->acdirmax)
 		goto Ebusy;
-	if (b->auth_info.flavor_len > 0 &&
-	   clnt_a->cl_auth->au_flavor != clnt_b->cl_auth->au_flavor)
+	if (clnt_a->cl_auth->au_flavor != clnt_b->cl_auth->au_flavor)
 		goto Ebusy;
 	return 1;
 Ebusy:

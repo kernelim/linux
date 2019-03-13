@@ -587,6 +587,8 @@ static void erspan_fb_xmit(struct sk_buff *skb, struct net_device *dev,
 		goto err_free_skb;
 
 	key = &tun_info->key;
+	if (!(tun_info->key.tun_flags & TUNNEL_ERSPAN_OPT))
+		goto err_free_rt;
 	md = ip_tunnel_info_opts(tun_info);
 	if (!md)
 		goto err_free_rt;
@@ -1511,11 +1513,14 @@ nla_put_failure:
 
 static void erspan_setup(struct net_device *dev)
 {
+	struct ip_tunnel *t = netdev_priv(dev);
+
 	ether_setup(dev);
 	dev->netdev_ops = &erspan_netdev_ops;
 	dev->priv_flags &= ~IFF_TX_SKB_SHARING;
 	dev->priv_flags |= IFF_LIVE_ADDR_CHANGE;
 	ip_tunnel_setup(dev, erspan_net_id);
+	t->erspan_ver = 1;
 }
 
 static const struct nla_policy ipgre_policy[IFLA_GRE_MAX + 1] = {

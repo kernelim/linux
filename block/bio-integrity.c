@@ -160,28 +160,6 @@ int bio_integrity_add_page(struct bio *bio, struct page *page,
 EXPORT_SYMBOL(bio_integrity_add_page);
 
 /**
- * bio_integrity_intervals - Return number of integrity intervals for a bio
- * @bi:		blk_integrity profile for device
- * @sectors:	Size of the bio in 512-byte sectors
- *
- * Description: The block layer calculates everything in 512 byte
- * sectors but integrity metadata is done in terms of the data integrity
- * interval size of the storage device.  Convert the block layer sectors
- * to the appropriate number of integrity intervals.
- */
-static inline unsigned int bio_integrity_intervals(struct blk_integrity *bi,
-						   unsigned int sectors)
-{
-	return sectors >> (bi->interval_exp - 9);
-}
-
-static inline unsigned int bio_integrity_bytes(struct blk_integrity *bi,
-					       unsigned int sectors)
-{
-	return bio_integrity_intervals(bi, sectors) * bi->tuple_size;
-}
-
-/**
  * bio_integrity_process - Process integrity metadata for a bio
  * @bio:	bio to generate/verify integrity metadata for
  * @proc_iter:  iterator to process
@@ -328,6 +306,8 @@ bool bio_integrity_prep(struct bio *bio)
 	if (bio_data_dir(bio) == WRITE) {
 		bio_integrity_process(bio, &bio->bi_iter,
 				      bi->profile->generate_fn);
+	} else {
+		bip->bio_iter = bio->bi_iter;
 	}
 	return true;
 
@@ -353,20 +333,14 @@ static void bio_integrity_verify_fn(struct work_struct *work)
 		container_of(work, struct bio_integrity_payload, bip_work);
 	struct bio *bio = bip->bip_bio;
 	struct blk_integrity *bi = blk_get_integrity(bio->bi_disk);
-	struct bvec_iter iter = bio->bi_iter;
 
 	/*
 	 * At the moment verify is called bio's iterator was advanced
 	 * during split and completion, we need to rewind iterator to
 	 * it's original position.
 	 */
-	if (bio_rewind_iter(bio, &iter, iter.bi_done)) {
-		bio->bi_status = bio_integrity_process(bio, &iter,
-						       bi->profile->verify_fn);
-	} else {
-		bio->bi_status = BLK_STS_IOERR;
-	}
-
+	bio->bi_status = bio_integrity_process(bio, &bip->bio_iter,
+						bi->profile->verify_fn);
 	bio_integrity_free(bio);
 	bio_endio(bio);
 }

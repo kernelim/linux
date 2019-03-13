@@ -458,8 +458,10 @@ static int xsk_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 		goto out_unlock;
 	} else {
 		/* This xsk has its own umem. */
-		xskq_set_umem(xs->umem->fq, &xs->umem->props);
-		xskq_set_umem(xs->umem->cq, &xs->umem->props);
+		xskq_set_umem(xs->umem->fq, xs->umem->size,
+			      xs->umem->chunk_mask);
+		xskq_set_umem(xs->umem->cq, xs->umem->size,
+			      xs->umem->chunk_mask);
 
 		err = xdp_umem_assign_dev(xs->umem, dev, qid, flags);
 		if (err)
@@ -469,8 +471,8 @@ static int xsk_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 	xs->dev = dev;
 	xs->zc = xs->umem->zc;
 	xs->queue_id = qid;
-	xskq_set_umem(xs->rx, &xs->umem->props);
-	xskq_set_umem(xs->tx, &xs->umem->props);
+	xskq_set_umem(xs->rx, xs->umem->size, xs->umem->chunk_mask);
+	xskq_set_umem(xs->tx, xs->umem->size, xs->umem->chunk_mask);
 	xdp_add_sk_umem(xs->umem, xs);
 
 out_unlock:
@@ -743,6 +745,8 @@ static int xsk_create(struct net *net, struct socket *sock, int protocol,
 
 	sk->sk_destruct = xsk_destruct;
 	sk_refcnt_debug_inc(sk);
+
+	sock_set_flag(sk, SOCK_RCU_FREE);
 
 	xs = xdp_sk(sk);
 	mutex_init(&xs->mutex);

@@ -111,8 +111,6 @@ void hclge_cmd_setup_basic_desc(struct hclge_desc *desc,
 
 	if (is_read)
 		desc->flag |= cpu_to_le16(HCLGE_CMD_FLAG_WR);
-	else
-		desc->flag &= cpu_to_le16(~HCLGE_CMD_FLAG_WR);
 }
 
 static void hclge_cmd_config_regs(struct hclge_cmq_ring *ring)
@@ -152,33 +150,27 @@ static void hclge_cmd_init_regs(struct hclge_hw *hw)
 
 static int hclge_cmd_csq_clean(struct hclge_hw *hw)
 {
-	struct hclge_dev *hdev = (struct hclge_dev *)hw->back;
+	struct hclge_dev *hdev = container_of(hw, struct hclge_dev, hw);
 	struct hclge_cmq_ring *csq = &hw->cmq.csq;
-	u16 ntc = csq->next_to_clean;
-	struct hclge_desc *desc;
-	int clean = 0;
 	u32 head;
+	int clean;
 
-	desc = &csq->desc[ntc];
 	head = hclge_read_dev(hw, HCLGE_NIC_CSQ_HEAD_REG);
 	rmb(); /* Make sure head is ready before touch any data */
 
 	if (!is_valid_csq_clean_head(csq, head)) {
-		dev_warn(&hdev->pdev->dev, "wrong head (%d, %d-%d)\n", head,
-			   csq->next_to_use, csq->next_to_clean);
-		return 0;
+		dev_warn(&hdev->pdev->dev, "wrong cmd head (%d, %d-%d)\n", head,
+			 csq->next_to_use, csq->next_to_clean);
+		dev_warn(&hdev->pdev->dev,
+			 "Disabling any further commands to IMP firmware\n");
+		set_bit(HCLGE_STATE_CMD_DISABLE, &hdev->state);
+		dev_warn(&hdev->pdev->dev,
+			 "IMP firmware watchdog reset soon expected!\n");
+		return -EIO;
 	}
 
-	while (head != ntc) {
-		memset(desc, 0, sizeof(*desc));
-		ntc++;
-		if (ntc == csq->desc_num)
-			ntc = 0;
-		desc = &csq->desc[ntc];
-		clean++;
-	}
-	csq->next_to_clean = ntc;
-
+	clean = (head - csq->next_to_clean + csq->desc_num) % csq->desc_num;
+	csq->next_to_clean = head;
 	return clean;
 }
 
@@ -216,7 +208,7 @@ static bool hclge_is_special_opcode(u16 opcode)
  **/
 int hclge_cmd_send(struct hclge_hw *hw, struct hclge_desc *desc, int num)
 {
-	struct hclge_dev *hdev = (struct hclge_dev *)hw->back;
+	struct hclge_dev *hdev = container_of(hw, struct hclge_dev, hw);
 	struct hclge_desc *desc_to_use;
 	bool complete = false;
 	u32 timeout = 0;
@@ -227,7 +219,8 @@ int hclge_cmd_send(struct hclge_hw *hw, struct hclge_desc *desc, int num)
 
 	spin_lock_bh(&hw->cmq.csq.lock);
 
-	if (num > hclge_ring_space(&hw->cmq.csq)) {
+	if (num > hclge_ring_space(&hw->cmq.csq) ||
+	    test_bit(HCLGE_STATE_CMD_DISABLE, &hdev->state)) {
 		spin_unlock_bh(&hw->cmq.csq.lock);
 		return -EBUSY;
 	}
@@ -295,10 +288,11 @@ int hclge_cmd_send(struct hclge_hw *hw, struct hclge_desc *desc, int num)
 
 	/* Clean the command send queue */
 	handle = hclge_cmd_csq_clean(hw);
-	if (handle != num) {
+	if (handle < 0)
+		retval = handle;
+	else if (handle != num)
 		dev_warn(&hdev->pdev->dev,
 			 "cleaned %d, need to clean %d\n", handle, num);
-	}
 
 	spin_unlock_bh(&hw->cmq.csq.lock);
 
@@ -369,6 +363,7 @@ int hclge_cmd_init(struct hclge_dev *hdev)
 	spin_lock_init(&hdev->hw.cmq.crq.lock);
 
 	hclge_cmd_init_regs(&hdev->hw);
+	clear_bit(HCLGE_STATE_CMD_DISABLE, &hdev->state);
 
 	ret = hclge_cmd_query_firmware_version(&hdev->hw, &version);
 	if (ret) {

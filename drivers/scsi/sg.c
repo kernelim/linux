@@ -240,11 +240,12 @@ static int sg_check_file_access(struct file *filp, const char *caller)
 static int sg_allow_access(struct file *filp, unsigned char *cmd)
 {
 	struct sg_fd *sfp = filp->private_data;
+	struct scsi_device *device = sfp->parentdp->device;
 
 	if (sfp->parentdp->device->type == TYPE_SCANNER)
 		return 0;
 
-	return blk_verify_command(cmd, filp->f_mode);
+	return blk_verify_command(device->request_queue, cmd, filp->f_mode);
 }
 
 static int
@@ -822,7 +823,7 @@ sg_common_write(Sg_fd * sfp, Sg_request * srp,
 	if (atomic_read(&sdp->detaching)) {
 		if (srp->bio) {
 			scsi_req_free_cmd(scsi_req(srp->rq));
-			blk_end_request_all(srp->rq, BLK_STS_IOERR);
+			blk_put_request(srp->rq);
 			srp->rq = NULL;
 		}
 
@@ -1399,7 +1400,7 @@ sg_rq_end_io(struct request *rq, blk_status_t status)
 	 */
 	srp->rq = NULL;
 	scsi_req_free_cmd(scsi_req(rq));
-	__blk_put_request(rq->q, rq);
+	blk_put_request(rq);
 
 	write_lock_irqsave(&sfp->rq_list_lock, iflags);
 	if (unlikely(srp->orphan)) {

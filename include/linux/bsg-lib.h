@@ -31,6 +31,9 @@ struct device;
 struct scatterlist;
 struct request_queue;
 
+typedef int (bsg_job_fn) (struct bsg_job *);
+typedef enum blk_eh_timer_return (bsg_timeout_fn)(struct request *);
+
 struct bsg_buffer {
 	unsigned int payload_len;
 	int sg_cnt;
@@ -67,12 +70,16 @@ struct bsg_job {
 	unsigned int reply_payload_rcv_len;
 
 	void *dd_data;		/* Used for driver-specific storage */
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
 };
 
 void bsg_job_done(struct bsg_job *job, int result,
 		  unsigned int reply_payload_rcv_len);
 struct request_queue *bsg_setup_queue(struct device *dev, const char *name,
-		bsg_job_fn *job_fn, int dd_job_size);
+		bsg_job_fn *job_fn, bsg_timeout_fn *timeout, int dd_job_size);
+void bsg_remove_queue(struct request_queue *q);
 void bsg_job_put(struct bsg_job *job);
 int __must_check bsg_job_get(struct bsg_job *job);
 

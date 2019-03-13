@@ -19,6 +19,8 @@
 #include <net/neighbour.h>
 #include <asm/processor.h>
 
+#include <linux/rh_kabi.h>
+
 #define DST_GC_MIN	(HZ/10)
 #define DST_GC_INC	(HZ/2)
 #define DST_GC_MAX	(120*HZ)
@@ -88,6 +90,17 @@ struct dst_entry {
 #ifndef CONFIG_64BIT
 	atomic_t		__refcnt;	/* 32-bit offset 64 */
 #endif
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
+	RH_KABI_RESERVE(5)
+	RH_KABI_RESERVE(6)
+	RH_KABI_RESERVE(7)
+	RH_KABI_RESERVE(8)
+	RH_KABI_RESERVE(9)
+	RH_KABI_RESERVE(10)
 };
 
 struct dst_metrics {
@@ -511,6 +524,16 @@ static inline void skb_dst_update_pmtu(struct sk_buff *skb, u32 mtu)
 
 	if (dst && dst->ops->update_pmtu)
 		dst->ops->update_pmtu(dst, NULL, skb, mtu);
+}
+
+static inline void skb_tunnel_check_pmtu(struct sk_buff *skb,
+					 struct dst_entry *encap_dst,
+					 int headroom)
+{
+	u32 encap_mtu = dst_mtu(encap_dst);
+
+	if (skb->len > encap_mtu - headroom)
+		skb_dst_update_pmtu(skb, encap_mtu - headroom);
 }
 
 #endif /* _NET_DST_H */

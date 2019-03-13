@@ -127,20 +127,20 @@ int of_dma_configure(struct device *dev, struct device_node *np, bool force_dma)
 	}
 
 	/*
-	 * Set default coherent_dma_mask to 32 bit.  Drivers are expected to
-	 * setup the correct supported mask.
+	 * If @dev is expected to be DMA-capable then the bus code that created
+	 * it should have initialised its dma_mask pointer by this point. For
+	 * now, we'll continue the legacy behaviour of coercing it to the
+	 * coherent mask if not, but we'll no longer do so quietly.
 	 */
-	if (!dev->coherent_dma_mask)
-		dev->coherent_dma_mask = DMA_BIT_MASK(32);
-	/*
-	 * Set it to coherent_dma_mask by default if the architecture
-	 * code has not set it.
-	 */
-	if (!dev->dma_mask)
+	if (!dev->dma_mask) {
+		dev_warn(dev, "DMA mask not set\n");
 		dev->dma_mask = &dev->coherent_dma_mask;
+	}
 
-	if (!size)
+	if (!size && dev->coherent_dma_mask)
 		size = max(dev->coherent_dma_mask, dev->coherent_dma_mask + 1);
+	else if (!size)
+		size = 1ULL << 32;
 
 	dev->dma_pfn_offset = offset;
 
@@ -149,6 +149,7 @@ int of_dma_configure(struct device *dev, struct device_node *np, bool force_dma)
 	 * set by the driver.
 	 */
 	mask = DMA_BIT_MASK(ilog2(dma_addr + size - 1) + 1);
+	dev->bus_dma_mask = mask;
 	dev->coherent_dma_mask &= mask;
 	*dev->dma_mask &= mask;
 
@@ -168,18 +169,6 @@ int of_dma_configure(struct device *dev, struct device_node *np, bool force_dma)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(of_dma_configure);
-
-/**
- * of_dma_deconfigure - Clean up DMA configuration
- * @dev:	Device for which to clean up DMA configuration
- *
- * Clean up all configuration performed by of_dma_configure_ops() and free all
- * resources that have been allocated.
- */
-void of_dma_deconfigure(struct device *dev)
-{
-	arch_teardown_dma_ops(dev);
-}
 
 int of_device_register(struct platform_device *pdev)
 {

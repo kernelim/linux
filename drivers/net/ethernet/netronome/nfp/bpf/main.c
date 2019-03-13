@@ -202,14 +202,11 @@ static int nfp_bpf_setup_tc_block(struct net_device *netdev,
 	if (f->binder_type != TCF_BLOCK_BINDER_TYPE_CLSACT_INGRESS)
 		return -EOPNOTSUPP;
 
-	if (tcf_block_shared(f->block))
-		return -EOPNOTSUPP;
-
 	switch (f->command) {
 	case TC_BLOCK_BIND:
 		return tcf_block_cb_register(f->block,
 					     nfp_bpf_setup_tc_block_cb,
-					     nn, nn);
+					     nn, nn, f->extack);
 	case TC_BLOCK_UNBIND:
 		tcf_block_cb_unregister(f->block,
 					nfp_bpf_setup_tc_block_cb,
@@ -441,11 +438,6 @@ err_free_neutral_maps:
 err_free_bpf:
 	kfree(bpf);
 	return err;
-}
-
-static void nfp_check_rhashtable_empty(void *ptr, void *arg)
-{
-	WARN_ON_ONCE(1);
 }
 
 static void nfp_bpf_clean(struct nfp_app *app)

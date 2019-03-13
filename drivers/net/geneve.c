@@ -236,7 +236,8 @@ static void geneve_rx(struct geneve_dev *geneve, struct geneve_sock *gs,
 		}
 		/* Update tunnel dst according to Geneve options. */
 		ip_tunnel_info_opts_set(&tun_dst->u.tun_info,
-					gnvh->options, gnvh->opt_len * 4);
+					gnvh->options, gnvh->opt_len * 4,
+					TUNNEL_GENEVE_OPT);
 	} else {
 		/* Drop packets w/ critical options,
 		 * since we don't support any...
@@ -674,7 +675,8 @@ static void geneve_build_header(struct genevehdr *geneveh,
 	geneveh->proto_type = htons(ETH_P_TEB);
 	geneveh->rsvd2 = 0;
 
-	ip_tunnel_info_opts_get(geneveh->options, info);
+	if (info->key.tun_flags & TUNNEL_GENEVE_OPT)
+		ip_tunnel_info_opts_get(geneveh->options, info);
 }
 
 static int geneve_build_skb(struct dst_entry *dst, struct sk_buff *skb,
@@ -827,12 +829,8 @@ static int geneve_xmit_skb(struct sk_buff *skb, struct net_device *dev,
 	if (IS_ERR(rt))
 		return PTR_ERR(rt);
 
-	if (skb_dst(skb)) {
-		int mtu = dst_mtu(&rt->dst) - GENEVE_IPV4_HLEN -
-			  info->options_len;
-
-		skb_dst_update_pmtu(skb, mtu);
-	}
+	skb_tunnel_check_pmtu(skb, &rt->dst,
+			      GENEVE_IPV4_HLEN + info->options_len);
 
 	sport = udp_flow_src_port(geneve->net, skb, 1, USHRT_MAX, true);
 	if (geneve->collect_md) {
@@ -873,11 +871,7 @@ static int geneve6_xmit_skb(struct sk_buff *skb, struct net_device *dev,
 	if (IS_ERR(dst))
 		return PTR_ERR(dst);
 
-	if (skb_dst(skb)) {
-		int mtu = dst_mtu(dst) - GENEVE_IPV6_HLEN - info->options_len;
-
-		skb_dst_update_pmtu(skb, mtu);
-	}
+	skb_tunnel_check_pmtu(skb, dst, GENEVE_IPV6_HLEN + info->options_len);
 
 	sport = udp_flow_src_port(geneve->net, skb, 1, USHRT_MAX, true);
 	if (geneve->collect_md) {
@@ -1411,9 +1405,13 @@ static void geneve_link_config(struct net_device *dev,
 	}
 #if IS_ENABLED(CONFIG_IPV6)
 	case AF_INET6: {
-		struct rt6_info *rt = rt6_lookup(geneve->net,
-						 &info->key.u.ipv6.dst, NULL, 0,
-						 NULL, 0);
+		struct rt6_info *rt;
+
+		if (!__in6_dev_get(dev))
+			break;
+
+		rt = rt6_lookup(geneve->net, &info->key.u.ipv6.dst, NULL, 0,
+				NULL, 0);
 
 		if (rt && rt->dst.dev)
 			ldev_mtu = rt->dst.dev->mtu - GENEVE_IPV6_HLEN;

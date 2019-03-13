@@ -853,13 +853,9 @@ qla2xxx_queuecommand(struct Scsi_Host *host, struct scsi_cmnd *cmd)
 	}
 
 	if (ha->mqenable) {
-		if (shost_use_blk_mq(vha->host)) {
-			tag = blk_mq_unique_tag(cmd->request);
-			hwq = blk_mq_unique_tag_to_hwq(tag);
-			qpair = ha->queue_pair_map[hwq];
-		} else if (vha->vp_idx && vha->qpair) {
-			qpair = vha->qpair;
-		}
+		tag = blk_mq_unique_tag(cmd->request);
+		hwq = blk_mq_unique_tag_to_hwq(tag);
+		qpair = ha->queue_pair_map[hwq];
 
 		if (qpair)
 			return qla2xxx_mqueuecommand(host, cmd, qpair);
@@ -1428,7 +1424,7 @@ __qla2xxx_eh_generic_reset(char *name, enum nexus_wait_type type,
 		goto eh_reset_failed;
 	}
 	err = 2;
-	if (do_reset(fcport, cmd->device->lun, cmd->request->cpu + 1)
+	if (do_reset(fcport, cmd->device->lun, blk_mq_rq_cpu(cmd->request) + 1)
 		!= QLA_SUCCESS) {
 		ql_log(ql_log_warn, vha, 0x800c,
 		    "do_reset failed for cmd=%p.\n", cmd);
@@ -1744,6 +1740,7 @@ __qla2x00_abort_all_cmds(struct qla_qpair *qp, int res)
 				    !ha->flags.eeh_busy &&
 				    (!test_bit(ABORT_ISP_ACTIVE,
 					&vha->dpc_flags)) &&
+				    !qla2x00_isp_reg_stat(ha) &&
 				    (sp->type == SRB_SCSI_CMD)) {
 					/*
 					 * Don't abort commands in
@@ -2724,6 +2721,9 @@ static void qla2x00_iocb_work_fn(struct work_struct *work)
 	spin_unlock_irqrestore(&vha->work_lock, flags);
 }
 
+static struct pci_device_id qla2xxx_pci_tbl[];
+static struct pci_device_id qla2xxx_pci_ids_removed[];
+
 /*
  * PCI driver interface
  */
@@ -2742,6 +2742,10 @@ qla2x00_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 	struct req_que *req = NULL;
 	struct rsp_que *rsp = NULL;
 	int i;
+
+	if (pci_device_support_removed(qla2xxx_pci_tbl,
+				qla2xxx_pci_ids_removed, pdev))
+		return -ENODEV;
 
 	bars = pci_select_bars(pdev, IORESOURCE_MEM | IORESOURCE_IO);
 	sht = &qla2xxx_driver_template;
@@ -3108,7 +3112,7 @@ qla2x00_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto probe_failed;
 	}
 
-	if (ha->mqenable && shost_use_blk_mq(host)) {
+	if (ha->mqenable) {
 		/* number of hardware queues supported by blk/scsi-mq*/
 		host->nr_hw_queues = ha->max_qpairs;
 
@@ -3220,25 +3224,17 @@ qla2x00_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 	    base_vha->mgmt_svr_loop_id, host->sg_tablesize);
 
 	if (ha->mqenable) {
-		bool mq = false;
 		bool startit = false;
 
-		if (QLA_TGT_MODE_ENABLED()) {
-			mq = true;
+		if (QLA_TGT_MODE_ENABLED())
 			startit = false;
-		}
 
-		if ((ql2x_ini_mode == QLA2XXX_INI_MODE_ENABLED) &&
-		    shost_use_blk_mq(host)) {
-			mq = true;
+		if (ql2x_ini_mode == QLA2XXX_INI_MODE_ENABLED)
 			startit = true;
-		}
 
-		if (mq) {
-			/* Create start of day qpairs for Block MQ */
-			for (i = 0; i < ha->max_qpairs; i++)
-				qla2xxx_create_qpair(base_vha, 5, 0, startit);
-		}
+		/* Create start of day qpairs for Block MQ */
+		for (i = 0; i < ha->max_qpairs; i++)
+			qla2xxx_create_qpair(base_vha, 5, 0, startit);
 	}
 
 	if (ha->flags.running_gold_fw)
@@ -6825,11 +6821,12 @@ static int qla2xxx_map_queues(struct Scsi_Host *shost)
 {
 	int rc;
 	scsi_qla_host_t *vha = (scsi_qla_host_t *)shost->hostdata;
+	struct blk_mq_queue_map *qmap = &shost->tag_set.map[0];
 
 	if (USER_CTRL_IRQ(vha->hw))
-		rc = blk_mq_map_queues(&shost->tag_set);
+		rc = blk_mq_map_queues(qmap);
 	else
-		rc = blk_mq_pci_map_queues(&shost->tag_set, vha->hw->pdev, 0);
+		rc = blk_mq_pci_map_queues(qmap, vha->hw->pdev, vha->irq_offset);
 	return rc;
 }
 
@@ -6866,6 +6863,26 @@ static struct pci_device_id qla2xxx_pci_tbl[] = {
 	{ 0 },
 };
 MODULE_DEVICE_TABLE(pci, qla2xxx_pci_tbl);
+
+static struct pci_device_id qla2xxx_pci_ids_removed[] = {
+	{ PCI_DEVICE(PCI_VENDOR_ID_QLOGIC, PCI_DEVICE_ID_QLOGIC_ISP2100) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_QLOGIC, PCI_DEVICE_ID_QLOGIC_ISP2200) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_QLOGIC, PCI_DEVICE_ID_QLOGIC_ISP2300) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_QLOGIC, PCI_DEVICE_ID_QLOGIC_ISP2312) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_QLOGIC, PCI_DEVICE_ID_QLOGIC_ISP2322) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_QLOGIC, PCI_DEVICE_ID_QLOGIC_ISP6312) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_QLOGIC, PCI_DEVICE_ID_QLOGIC_ISP6322) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_QLOGIC, PCI_DEVICE_ID_QLOGIC_ISP2422) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_QLOGIC, PCI_DEVICE_ID_QLOGIC_ISP2432) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_QLOGIC, PCI_DEVICE_ID_QLOGIC_ISP8432) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_QLOGIC, PCI_DEVICE_ID_QLOGIC_ISP5422) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_QLOGIC, PCI_DEVICE_ID_QLOGIC_ISP5432) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_QLOGIC, PCI_DEVICE_ID_QLOGIC_ISP8001) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_QLOGIC, PCI_DEVICE_ID_QLOGIC_ISP8021) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_QLOGIC, PCI_DEVICE_ID_QLOGIC_ISPF001) },
+	{ PCI_DEVICE(PCI_VENDOR_ID_QLOGIC, PCI_DEVICE_ID_QLOGIC_ISP8044) },
+	{ 0 },
+};
 
 static struct pci_driver qla2xxx_pci_driver = {
 	.name		= QLA2XXX_DRIVER_NAME,

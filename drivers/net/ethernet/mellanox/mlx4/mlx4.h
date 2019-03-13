@@ -84,7 +84,6 @@ enum {
 	MLX4_MIN_MGM_LOG_ENTRY_SIZE = 7,
 	MLX4_MAX_MGM_LOG_ENTRY_SIZE = 12,
 	MLX4_MAX_QP_PER_MGM = 4 * ((1 << MLX4_MAX_MGM_LOG_ENTRY_SIZE) / 16 - 2),
-	MLX4_MTT_ENTRY_PER_SEG	= 8,
 };
 
 enum {
@@ -541,8 +540,8 @@ struct slave_list {
 struct resource_allocator {
 	spinlock_t alloc_lock; /* protect quotas */
 	union {
-		int res_reserved;
-		int res_port_rsvd[MLX4_MAX_PORTS];
+		unsigned int res_reserved;
+		unsigned int res_port_rsvd[MLX4_MAX_PORTS];
 	};
 	union {
 		int res_free;

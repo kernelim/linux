@@ -80,7 +80,7 @@
 #define PGDIR_SHIFT		ARM64_HW_PGTABLE_LEVEL_SHIFT(4 - CONFIG_PGTABLE_LEVELS)
 #define PGDIR_SIZE		(_AC(1, UL) << PGDIR_SHIFT)
 #define PGDIR_MASK		(~(PGDIR_SIZE-1))
-#define PTRS_PER_PGD		(1 << (VA_BITS - PGDIR_SHIFT))
+#define PTRS_PER_PGD		(1 << (MAX_USER_VA_BITS - PGDIR_SHIFT))
 
 /*
  * Section address mask and size definitions.
@@ -211,6 +211,8 @@
 #define PHYS_MASK_SHIFT		(CONFIG_ARM64_PA_BITS)
 #define PHYS_MASK		((UL(1) << PHYS_MASK_SHIFT) - 1)
 
+#define TTBR_CNP_BIT		(UL(1) << 0)
+
 /*
  * TCR flags.
  */
@@ -302,6 +304,12 @@
  * TTBR_ELx[1] is RES0 in this configuration.
  */
 #define TTBR_BADDR_MASK_52	(((UL(1) << 46) - 1) << 2)
+#endif
+
+#ifdef CONFIG_ARM64_USER_VA_BITS_52
+/* Must be at least 64-byte aligned to prevent corruption of the TTBR */
+#define TTBR1_BADDR_4852_OFFSET	(((UL(1) << (52 - PGDIR_SHIFT)) - \
+				 (UL(1) << (48 - PGDIR_SHIFT))) * 8)
 #endif
 
 #endif

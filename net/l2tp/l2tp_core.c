@@ -1110,7 +1110,7 @@ int l2tp_xmit_skb(struct l2tp_session *session, struct sk_buff *skb, int hdr_len
 
 	/* Get routing info from the tunnel socket */
 	skb_dst_drop(skb);
-	skb_dst_set(skb, dst_clone(__sk_dst_check(sk, 0)));
+	skb_dst_set(skb, sk_dst_check(sk, 0));
 
 	inet = inet_sk(sk);
 	fl = &inet->cork.fl;
@@ -1503,12 +1503,7 @@ int l2tp_tunnel_register(struct l2tp_tunnel *tunnel, struct net *net,
 			goto err_sock;
 	}
 
-	sk = sock->sk;
-
-	sock_hold(sk);
-	tunnel->sock = sk;
 	tunnel->l2tp_net = net;
-
 	pn = l2tp_pernet(net);
 
 	spin_lock_bh(&pn->l2tp_tunnel_list_lock);
@@ -1522,6 +1517,10 @@ int l2tp_tunnel_register(struct l2tp_tunnel *tunnel, struct net *net,
 	}
 	list_add_rcu(&tunnel->list, &pn->l2tp_tunnel_list);
 	spin_unlock_bh(&pn->l2tp_tunnel_list_lock);
+
+	sk = sock->sk;
+	sock_hold(sk);
+	tunnel->sock = sk;
 
 	if (tunnel->encap == L2TP_ENCAPTYPE_UDP) {
 		struct udp_tunnel_sock_cfg udp_cfg = {

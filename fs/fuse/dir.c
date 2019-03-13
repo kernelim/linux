@@ -97,13 +97,18 @@ static u64 entry_attr_timeout(struct fuse_entry_out *o)
 	return time_to_jiffies(o->attr_valid, o->attr_valid_nsec);
 }
 
+static void fuse_invalidate_attr_mask(struct inode *inode, u32 mask)
+{
+	set_mask_bits(&get_fuse_inode(inode)->inval_mask, 0, mask);
+}
+
 /*
  * Mark the attributes as stale, so that at the next call to
  * ->getattr() they will be fetched from userspace
  */
 void fuse_invalidate_attr(struct inode *inode)
 {
-	get_fuse_inode(inode)->i_time = 0;
+	fuse_invalidate_attr_mask(inode, STATX_BASIC_STATS);
 }
 
 /**
@@ -113,7 +118,7 @@ void fuse_invalidate_attr(struct inode *inode)
 void fuse_invalidate_atime(struct inode *inode)
 {
 	if (!IS_RDONLY(inode))
-		fuse_invalidate_attr(inode);
+		fuse_invalidate_attr_mask(inode, STATX_ATIME);
 }
 
 /*
@@ -355,11 +360,12 @@ static struct dentry *fuse_lookup(struct inode *dir, struct dentry *entry,
 	struct inode *inode;
 	struct dentry *newent;
 	bool outarg_valid = true;
+	bool locked;
 
-	fuse_lock_inode(dir);
+	locked = fuse_lock_inode(dir);
 	err = fuse_lookup_name(dir->i_sb, get_node_id(dir), &entry->d_name,
 			       &outarg, &inode);
-	fuse_unlock_inode(dir);
+	fuse_unlock_inode(dir, locked);
 	if (err == -ENOENT) {
 		outarg_valid = false;
 		err = 0;
@@ -924,7 +930,8 @@ static int fuse_do_getattr(struct inode *inode, struct kstat *stat,
 }
 
 static int fuse_update_get_attr(struct inode *inode, struct file *file,
-				struct kstat *stat, unsigned int flags)
+				struct kstat *stat, u32 request_mask,
+				unsigned int flags)
 {
 	struct fuse_inode *fi = get_fuse_inode(inode);
 	int err = 0;
@@ -934,6 +941,8 @@ static int fuse_update_get_attr(struct inode *inode, struct file *file,
 		sync = true;
 	else if (flags & AT_STATX_DONT_SYNC)
 		sync = false;
+	else if (request_mask & READ_ONCE(fi->inval_mask))
+		sync = true;
 	else
 		sync = time_before64(fi->i_time, get_jiffies_64());
 
@@ -951,7 +960,9 @@ static int fuse_update_get_attr(struct inode *inode, struct file *file,
 
 int fuse_update_attributes(struct inode *inode, struct file *file)
 {
-	return fuse_update_get_attr(inode, file, NULL, 0);
+	/* Do *not* need to get atime for internal purposes */
+	return fuse_update_get_attr(inode, file, NULL,
+				    STATX_BASIC_STATS & ~STATX_ATIME, 0);
 }
 
 int fuse_reverse_inval_entry(struct super_block *sb, u64 parent_nodeid,
@@ -1340,6 +1351,7 @@ static int fuse_readdir(struct file *file, struct dir_context *ctx)
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	struct fuse_req *req;
 	u64 attr_version = 0;
+	bool locked;
 
 	if (is_bad_inode(inode))
 		return -EIO;
@@ -1367,9 +1379,9 @@ static int fuse_readdir(struct file *file, struct dir_context *ctx)
 		fuse_read_fill(req, file, ctx->pos, PAGE_SIZE,
 			       FUSE_READDIR);
 	}
-	fuse_lock_inode(inode);
+	locked = fuse_lock_inode(inode);
 	fuse_request_send(fc, req);
-	fuse_unlock_inode(inode);
+	fuse_unlock_inode(inode, locked);
 	nbytes = req->out.args[0].size;
 	err = req->out.h.error;
 	fuse_put_request(fc, req);
@@ -1802,7 +1814,7 @@ static int fuse_getattr(const struct path *path, struct kstat *stat,
 	if (!fuse_allow_current_process(fc))
 		return -EACCES;
 
-	return fuse_update_get_attr(inode, NULL, stat, flags);
+	return fuse_update_get_attr(inode, NULL, stat, request_mask, flags);
 }
 
 static const struct inode_operations fuse_dir_inode_operations = {

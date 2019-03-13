@@ -12,6 +12,8 @@
 #ifndef __ASSEMBLY__
 #include <linux/compiler.h>
 #include <linux/types.h>
+#include <linux/rh_kabi.h>
+
 /*
  * Resources are tree-like, allowing
  * nesting etc..
@@ -23,6 +25,10 @@ struct resource {
 	unsigned long flags;
 	unsigned long desc;
 	struct resource *parent, *sibling, *child;
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 };
 
 /*

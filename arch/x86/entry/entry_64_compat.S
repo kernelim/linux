@@ -14,6 +14,7 @@
 #include <asm/irqflags.h>
 #include <asm/asm.h>
 #include <asm/smap.h>
+#include <asm/spec_ctrl.h>
 #include <linux/linkage.h>
 #include <linux/err.h>
 
@@ -54,6 +55,8 @@ ENTRY(entry_SYSENTER_compat)
 	SWITCH_TO_KERNEL_CR3 scratch_reg=%rsp
 
 	movq	PER_CPU_VAR(cpu_current_top_of_stack), %rsp
+
+	IBRS_ENTRY
 
 	/*
 	 * User tracing code (ptrace or signal handlers) might assume that
@@ -209,6 +212,8 @@ ENTRY(entry_SYSCALL_compat)
 	/* Switch to the kernel stack */
 	movq	PER_CPU_VAR(cpu_current_top_of_stack), %rsp
 
+	IBRS_ENTRY
+
 	/* Construct struct pt_regs on stack */
 	pushq	$__USER32_DS		/* pt_regs->ss */
 	pushq	%r8			/* pt_regs->sp */
@@ -262,6 +267,7 @@ GLOBAL(entry_SYSCALL_compat_after_hwframe)
 	/* Opportunistic SYSRET */
 sysret32_from_system_call:
 	TRACE_IRQS_ON			/* User mode traces as IRQs on. */
+	IBRS_EXIT_CLOBBER
 	movq	RBX(%rsp), %rbx		/* pt_regs->rbx */
 	movq	RBP(%rsp), %rbp		/* pt_regs->rbp */
 	movq	EFLAGS(%rsp), %r11	/* pt_regs->flags (in r11) */
@@ -358,6 +364,8 @@ ENTRY(entry_INT80_compat)
 	SWITCH_TO_KERNEL_CR3 scratch_reg=%rdi
 	movq	%rsp, %rdi
 	movq	PER_CPU_VAR(cpu_current_top_of_stack), %rsp
+
+	IBRS_ENTRY
 
 	pushq	6*8(%rdi)		/* regs->ss */
 	pushq	5*8(%rdi)		/* regs->rsp */

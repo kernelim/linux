@@ -14,10 +14,12 @@
 #include <linux/rtnetlink.h>
 #include <linux/refcount.h>
 
+#define RH_KABI_IPV4_DEVCONF_STORAGE		(RH_IPV4_DEVCONF_BASE + 16)
+
 struct ipv4_devconf {
 	void	*sysctl;
-	int	data[IPV4_DEVCONF_MAX];
-	DECLARE_BITMAP(state, IPV4_DEVCONF_MAX);
+	int	data[RH_KABI_IPV4_DEVCONF_STORAGE];
+	DECLARE_BITMAP(state, RH_KABI_IPV4_DEVCONF_STORAGE);
 };
 
 #define MC_HASH_SZ_LOG 9
@@ -37,7 +39,9 @@ struct in_device {
 	unsigned long		mr_v1_seen;
 	unsigned long		mr_v2_seen;
 	unsigned long		mr_maxdelay;
-	unsigned char		mr_qrv;
+	unsigned long		mr_qi;		/* Query Interval */
+	unsigned long		mr_qri;		/* Query Response Interval */
+	unsigned char		mr_qrv;		/* Query Robustness Variable */
 	unsigned char		mr_gq_running;
 	unsigned char		mr_ifc_count;
 	struct timer_list	mr_gq_timer;	/* general query timer */

@@ -112,7 +112,8 @@ int qedr_query_device(struct ib_device *ibdev,
 	    IB_DEVICE_RC_RNR_NAK_GEN |
 	    IB_DEVICE_LOCAL_DMA_LKEY | IB_DEVICE_MEM_MGT_EXTENSIONS;
 
-	attr->max_sge = qattr->max_sge;
+	attr->max_send_sge = qattr->max_sge;
+	attr->max_recv_sge = qattr->max_sge;
 	attr->max_sge_rd = qattr->max_sge;
 	attr->max_cq = qattr->max_cq;
 	attr->max_cqe = qattr->max_cqe;
@@ -224,7 +225,7 @@ int qedr_query_port(struct ib_device *ibdev, u8 port, struct ib_port_attr *attr)
 	attr->lmc = 0;
 	attr->sm_lid = 0;
 	attr->sm_sl = 0;
-	attr->port_cap_flags = IB_PORT_IP_BASED_GIDS;
+	attr->ip_gids = true;
 	if (rdma_protocol_iwarp(&dev->ibdev, 1)) {
 		attr->gid_tbl_len = 1;
 		attr->pkey_tbl_len = 1;

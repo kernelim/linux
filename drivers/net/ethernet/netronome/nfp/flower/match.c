@@ -56,7 +56,7 @@ nfp_flower_compile_meta_tci(struct nfp_flower_meta_tci *frame,
 						      FLOW_DISSECTOR_KEY_VLAN,
 						      target);
 		/* Populate the tci field. */
-		if (flow_vlan->vlan_id) {
+		if (flow_vlan->vlan_id || flow_vlan->vlan_priority) {
 			tmp_tci = FIELD_PREP(NFP_FLOWER_MASK_VLAN_PRIO,
 					     flow_vlan->vlan_priority) |
 				  FIELD_PREP(NFP_FLOWER_MASK_VLAN_VID,
@@ -262,6 +262,21 @@ nfp_flower_compile_ipv6(struct nfp_flower_ipv6 *frame,
 	nfp_flower_compile_ip_ext(&frame->ip_ext, flow, mask_version);
 }
 
+static int
+nfp_flower_compile_geneve_opt(void *key_buf, struct tc_cls_flower_offload *flow,
+			      bool mask_version)
+{
+	struct fl_flow_key *target = mask_version ? flow->mask : flow->key;
+	struct flow_dissector_key_enc_opts *opts;
+
+	opts = skb_flow_dissector_target(flow->dissector,
+					 FLOW_DISSECTOR_KEY_ENC_OPTS,
+					 target);
+	memcpy(key_buf, opts->data, opts->len);
+
+	return 0;
+}
+
 static void
 nfp_flower_compile_ipv4_udp_tun(struct nfp_flower_ipv4_udp_tun *frame,
 				struct tc_cls_flower_offload *flow,
@@ -414,6 +429,16 @@ int nfp_flower_compile_flow_match(struct tc_cls_flower_offload *flow,
 			 */
 			nfp_flow->nfp_tun_ipv4_addr = tun_dst;
 			nfp_tunnel_add_ipv4_off(netdev_repr->app, tun_dst);
+		}
+
+		if (key_ls->key_layer_two & NFP_FLOWER_LAYER2_GENEVE_OP) {
+			err = nfp_flower_compile_geneve_opt(ext, flow, false);
+			if (err)
+				return err;
+
+			err = nfp_flower_compile_geneve_opt(msk, flow, true);
+			if (err)
+				return err;
 		}
 	}
 

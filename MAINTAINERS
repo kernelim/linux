@@ -7177,7 +7177,7 @@ F:	Documentation/networking/ixgb.txt
 F:	Documentation/networking/ixgbe.txt
 F:	Documentation/networking/ixgbevf.txt
 F:	Documentation/networking/i40e.txt
-F:	Documentation/networking/i40evf.txt
+F:	Documentation/networking/iavf.txt
 F:	Documentation/networking/ice.txt
 F:	drivers/net/ethernet/intel/
 F:	drivers/net/ethernet/intel/*/
@@ -12039,9 +12039,9 @@ T:	git git://git.kernel.org/pub/scm/linux/kernel/git/paulmck/linux-rcu.git
 F:	Documentation/RCU/
 X:	Documentation/RCU/torture.txt
 F:	include/linux/rcu*
-X:	include/linux/srcu.h
+X:	include/linux/srcu*.h
 F:	kernel/rcu/
-X:	kernel/torture.c
+X:	kernel/rcu/srcu*.c
 
 REAL TIME CLOCK (RTC) SUBSYSTEM
 M:	Alessandro Zummo <a.zummo@towertech.it>
@@ -12417,6 +12417,18 @@ L:	linux-s390@vger.kernel.org
 W:	http://www.ibm.com/developerworks/linux/linux390/
 S:	Supported
 F:	drivers/s390/crypto/
+
+S390 VFIO AP DRIVER
+M:	Tony Krowiak <akrowiak@linux.ibm.com>
+M:	Pierre Morel <pmorel@linux.ibm.com>
+M:	Halil Pasic <pasic@linux.ibm.com>
+L:	linux-s390@vger.kernel.org
+W:	http://www.ibm.com/developerworks/linux/linux390/
+S:	Supported
+F:	drivers/s390/crypto/vfio_ap_drv.c
+F:	drivers/s390/crypto/vfio_ap_private.h
+F:	drivers/s390/crypto/vfio_ap_ops.c
+F:	Documentation/s390/vfio-ap.txt
 
 S390 ZFCP DRIVER
 M:	Steffen Maier <maier@linux.ibm.com>
@@ -13078,8 +13090,8 @@ L:	linux-kernel@vger.kernel.org
 W:	http://www.rdrop.com/users/paulmck/RCU/
 S:	Supported
 T:	git git://git.kernel.org/pub/scm/linux/kernel/git/paulmck/linux-rcu.git
-F:	include/linux/srcu.h
-F:	kernel/rcu/srcu.c
+F:	include/linux/srcu*.h
+F:	kernel/rcu/srcu*.c
 
 SERIAL LOW-POWER INTER-CHIP MEDIA BUS (SLIMbus)
 M:	Srinivas Kandagatla <srinivas.kandagatla@linaro.org>
@@ -14438,6 +14450,7 @@ T:	git git://git.kernel.org/pub/scm/linux/kernel/git/paulmck/linux-rcu.git
 F:	Documentation/RCU/torture.txt
 F:	kernel/torture.c
 F:	kernel/rcu/rcutorture.c
+F:	kernel/rcu/rcuperf.c
 F:	kernel/locking/locktorture.c
 
 TOSHIBA ACPI EXTRAS DRIVER

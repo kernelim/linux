@@ -75,19 +75,12 @@ struct hclge_cmq {
 	enum hclge_cmd_status last_status;
 };
 
-#define HCLGE_CMD_FLAG_IN_VALID_SHIFT	0
-#define HCLGE_CMD_FLAG_OUT_VALID_SHIFT	1
-#define HCLGE_CMD_FLAG_NEXT_SHIFT	2
-#define HCLGE_CMD_FLAG_WR_OR_RD_SHIFT	3
-#define HCLGE_CMD_FLAG_NO_INTR_SHIFT	4
-#define HCLGE_CMD_FLAG_ERR_INTR_SHIFT	5
-
-#define HCLGE_CMD_FLAG_IN	BIT(HCLGE_CMD_FLAG_IN_VALID_SHIFT)
-#define HCLGE_CMD_FLAG_OUT	BIT(HCLGE_CMD_FLAG_OUT_VALID_SHIFT)
-#define HCLGE_CMD_FLAG_NEXT	BIT(HCLGE_CMD_FLAG_NEXT_SHIFT)
-#define HCLGE_CMD_FLAG_WR	BIT(HCLGE_CMD_FLAG_WR_OR_RD_SHIFT)
-#define HCLGE_CMD_FLAG_NO_INTR	BIT(HCLGE_CMD_FLAG_NO_INTR_SHIFT)
-#define HCLGE_CMD_FLAG_ERR_INTR	BIT(HCLGE_CMD_FLAG_ERR_INTR_SHIFT)
+#define HCLGE_CMD_FLAG_IN	BIT(0)
+#define HCLGE_CMD_FLAG_OUT	BIT(1)
+#define HCLGE_CMD_FLAG_NEXT	BIT(2)
+#define HCLGE_CMD_FLAG_WR	BIT(3)
+#define HCLGE_CMD_FLAG_NO_INTR	BIT(4)
+#define HCLGE_CMD_FLAG_ERR_INTR	BIT(5)
 
 enum hclge_opcode_type {
 	/* Generic command */
@@ -115,6 +108,7 @@ enum hclge_opcode_type {
 	HCLGE_OPC_QUERY_LINK_STATUS	= 0x0307,
 	HCLGE_OPC_CONFIG_MAX_FRM_SIZE	= 0x0308,
 	HCLGE_OPC_CONFIG_SPEED_DUP	= 0x0309,
+	HCLGE_OPC_SERDES_LOOPBACK       = 0x0315,
 	/* MACSEC command */
 
 	/* PFC/Pause CMD*/
@@ -197,6 +191,7 @@ enum hclge_opcode_type {
 	HCLGE_OPC_MAC_VLAN_REMOVE	    = 0x1001,
 	HCLGE_OPC_MAC_VLAN_TYPE_ID	    = 0x1002,
 	HCLGE_OPC_MAC_VLAN_INSERT	    = 0x1003,
+	HCLGE_OPC_MAC_VLAN_ALLOCATE	    = 0x1004,
 	HCLGE_OPC_MAC_ETHTYPE_ADD	    = 0x1010,
 	HCLGE_OPC_MAC_ETHTYPE_REMOVE	= 0x1011,
 	HCLGE_OPC_MAC_VLAN_MASK_SET	= 0x1012,
@@ -381,11 +376,15 @@ struct hclge_pf_res_cmd {
 	__le16 buf_size;
 	__le16 msixcap_localid_ba_nic;
 	__le16 msixcap_localid_ba_rocee;
+#define HCLGE_MSIX_OFT_ROCEE_S		0
+#define HCLGE_MSIX_OFT_ROCEE_M		GENMASK(15, 0)
 #define HCLGE_PF_VEC_NUM_S		0
-#define HCLGE_PF_VEC_NUM_M		(0xff << HCLGE_PF_VEC_NUM_S)
+#define HCLGE_PF_VEC_NUM_M		GENMASK(7, 0)
 	__le16 pf_intr_vector_number;
 	__le16 pf_own_fun_number;
-	__le32 rsv[3];
+	__le16 tx_buf_size;
+	__le16 dv_buf_size;
+	__le32 rsv[2];
 };
 
 #define HCLGE_CFG_OFFSET_S	0
@@ -415,6 +414,8 @@ struct hclge_pf_res_cmd {
 #define HCLGE_CFG_RSS_SIZE_M	GENMASK(31, 24)
 #define HCLGE_CFG_SPEED_ABILITY_S	0
 #define HCLGE_CFG_SPEED_ABILITY_M	GENMASK(7, 0)
+#define HCLGE_CFG_UMV_TBL_SPACE_S	16
+#define HCLGE_CFG_UMV_TBL_SPACE_M	GENMASK(31, 16)
 
 struct hclge_cfg_param_cmd {
 	__le32 offset;
@@ -471,8 +472,8 @@ struct hclge_rss_tc_mode_cmd {
 	u8 rsv[8];
 };
 
-#define HCLGE_LINK_STS_B	0
-#define HCLGE_LINK_STATUS	BIT(HCLGE_LINK_STS_B)
+#define HCLGE_LINK_STATUS_UP_B	0
+#define HCLGE_LINK_STATUS_UP_M	BIT(HCLGE_LINK_STATUS_UP_B)
 struct hclge_link_status_cmd {
 	u8 status;
 	u8 rsv[23];
@@ -571,7 +572,8 @@ struct hclge_config_auto_neg_cmd {
 
 struct hclge_config_max_frm_size_cmd {
 	__le16  max_frm_size;
-	u8      rsv[22];
+	u8      min_frm_size;
+	u8      rsv[21];
 };
 
 enum hclge_mac_vlan_tbl_opcode {
@@ -610,6 +612,14 @@ struct hclge_mac_vlan_mask_entry_cmd {
 	u8 rsv1;
 	u8 mac_mask[6];
 	u8 rsv2[14];
+};
+
+#define HCLGE_UMV_SPC_ALC_B	0
+struct hclge_umv_spc_alc_cmd {
+	u8 allocate;
+	u8 rsv1[3];
+	__le32 space_size;
+	u8 rsv2[16];
 };
 
 #define HCLGE_MAC_MGR_MASK_VLAN_B		BIT(0)
@@ -795,10 +805,22 @@ struct hclge_reset_cmd {
 	u8 fun_reset_vfid;
 	u8 rsv[22];
 };
+
+#define HCLGE_CMD_SERDES_SERIAL_INNER_LOOP_B	BIT(0)
+#define HCLGE_CMD_SERDES_DONE_B			BIT(0)
+#define HCLGE_CMD_SERDES_SUCCESS_B		BIT(1)
+struct hclge_serdes_lb_cmd {
+	u8 mask;
+	u8 enable;
+	u8 result;
+	u8 rsv[21];
+};
+
 #define HCLGE_DEFAULT_TX_BUF		0x4000	 /* 16k  bytes */
 #define HCLGE_TOTAL_PKT_BUF		0x108000 /* 1.03125M bytes */
 #define HCLGE_DEFAULT_DV		0xA000	 /* 40k byte */
 #define HCLGE_DEFAULT_NON_DCB_DV	0x7800	/* 30K byte */
+#define HCLGE_NON_DCB_ADDITIONAL_BUF	0x200	/* 512 byte */
 
 #define HCLGE_TYPE_CRQ			0
 #define HCLGE_TYPE_CSQ			1

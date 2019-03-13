@@ -482,8 +482,6 @@ void __init arm64_memblock_init(void)
 	high_memory = __va(memblock_end_of_DRAM() - 1) + 1;
 
 	dma_contiguous_reserve(arm64_dma_phys_limit);
-
-	memblock_allow_resize();
 }
 
 void __init bootmem_init(void)
@@ -608,7 +606,7 @@ void __init mem_init(void)
 	 * detected at build time already.
 	 */
 #ifdef CONFIG_COMPAT
-	BUILD_BUG_ON(TASK_SIZE_32			> TASK_SIZE_64);
+	BUILD_BUG_ON(TASK_SIZE_32 > DEFAULT_MAP_WINDOW_64);
 #endif
 
 #ifdef CONFIG_SPARSEMEM_VMEMMAP

@@ -16,6 +16,8 @@
 #include <linux/bpf-cgroup.h>
 #include <net/sock.h>
 
+#include <linux/rh_features.h>
+
 DEFINE_STATIC_KEY_FALSE(cgroup_bpf_enabled_key);
 EXPORT_SYMBOL(cgroup_bpf_enabled_key);
 
@@ -95,7 +97,7 @@ static int compute_effective_progs(struct cgroup *cgrp,
 				   enum bpf_attach_type type,
 				   struct bpf_prog_array __rcu **array)
 {
-	struct bpf_prog_array __rcu *progs;
+	struct bpf_prog_array *progs;
 	struct bpf_prog_list *pl;
 	struct cgroup *p = cgrp;
 	int cnt = 0;
@@ -120,13 +122,12 @@ static int compute_effective_progs(struct cgroup *cgrp,
 					    &p->bpf.progs[type], node) {
 				if (!pl->prog)
 					continue;
-				rcu_dereference_protected(progs, 1)->
-					progs[cnt++] = pl->prog;
+				progs->progs[cnt++] = pl->prog;
 			}
 		p = cgroup_parent(p);
 	} while (p);
 
-	*array = progs;
+	rcu_assign_pointer(*array, progs);
 	return 0;
 }
 
@@ -438,6 +439,7 @@ int cgroup_bpf_prog_attach(const union bpf_attr *attr,
 	if (IS_ERR(cgrp))
 		return PTR_ERR(cgrp);
 
+	rh_mark_used_feature("eBPF/cgroup");
 	ret = cgroup_bpf_attach(cgrp, prog, attr->attach_type,
 				attr->attach_flags);
 	cgroup_put(cgrp);

@@ -46,6 +46,8 @@
 #include <asm/fpu/types.h>
 #include <asm/fpu/internal.h>
 
+#include <linux/rh_kabi.h>
+
 static inline void set_cpu_flag(int flag)
 {
 	S390_lowcore.cpu_flags |= (1UL << flag);
@@ -143,6 +145,12 @@ struct thread_struct {
 	struct gs_cb *gs_cb;		/* Current guarded storage cb */
 	struct gs_cb *gs_bc_cb;		/* Broadcast guarded storage cb */
 	unsigned char trap_tdb[256];	/* Transaction abort diagnose block */
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
+
 	/*
 	 * Warning: 'fpu' is dynamically-sized. It *MUST* be at
 	 * the end.

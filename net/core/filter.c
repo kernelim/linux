@@ -69,6 +69,8 @@
 #include <net/seg6.h>
 #include <net/seg6_local.h>
 
+#include <linux/rh_features.h>
+
 /**
  *	sk_filter_trim_cap - run a packet through a socket filter
  *	@sk: sock associated with &sk_buff
@@ -1575,6 +1577,8 @@ int sk_attach_bpf(u32 ufd, struct sock *sk)
 	if (IS_ERR(prog))
 		return PTR_ERR(prog);
 
+	rh_mark_used_feature("eBPF/sock");
+
 	err = __sk_attach_prog(prog, sk);
 	if (err < 0) {
 		bpf_prog_put(prog);
@@ -1591,6 +1595,8 @@ int sk_reuseport_attach_bpf(u32 ufd, struct sock *sk)
 
 	if (IS_ERR(prog))
 		return PTR_ERR(prog);
+
+	rh_mark_used_feature("eBPF/reuseport");
 
 	err = __reuseport_attach_prog(prog, sk);
 	if (err < 0) {
@@ -2272,14 +2278,21 @@ static const struct bpf_func_proto bpf_msg_cork_bytes_proto = {
 	.arg2_type      = ARG_ANYTHING,
 };
 
+#define sk_msg_iter_var(var)			\
+	do {					\
+		var++;				\
+		if (var == MAX_SKB_FRAGS)	\
+			var = 0;		\
+	} while (0)
+
 BPF_CALL_4(bpf_msg_pull_data,
 	   struct sk_msg_buff *, msg, u32, start, u32, end, u64, flags)
 {
-	unsigned int len = 0, offset = 0, copy = 0;
+	unsigned int len = 0, offset = 0, copy = 0, poffset = 0;
+	int bytes = end - start, bytes_sg_total;
 	struct scatterlist *sg = msg->sg_data;
 	int first_sg, last_sg, i, shift;
 	unsigned char *p, *to, *from;
-	int bytes = end - start;
 	struct page *page;
 
 	if (unlikely(flags || end <= start))
@@ -2289,21 +2302,22 @@ BPF_CALL_4(bpf_msg_pull_data,
 	i = msg->sg_start;
 	do {
 		len = sg[i].length;
-		offset += len;
 		if (start < offset + len)
 			break;
-		i++;
-		if (i == MAX_SKB_FRAGS)
-			i = 0;
+		offset += len;
+		sk_msg_iter_var(i);
 	} while (i != msg->sg_end);
 
 	if (unlikely(start >= offset + len))
 		return -EINVAL;
 
-	if (!msg->sg_copy[i] && bytes <= len)
-		goto out;
-
 	first_sg = i;
+	/* The start may point into the sg element so we need to also
+	 * account for the headroom.
+	 */
+	bytes_sg_total = start - offset + bytes;
+	if (!msg->sg_copy[i] && bytes_sg_total <= len)
+		goto out;
 
 	/* At this point we need to linearize multiple scatterlist
 	 * elements or a single shared page. Either way we need to
@@ -2317,37 +2331,33 @@ BPF_CALL_4(bpf_msg_pull_data,
 	 */
 	do {
 		copy += sg[i].length;
-		i++;
-		if (i == MAX_SKB_FRAGS)
-			i = 0;
-		if (bytes < copy)
+		sk_msg_iter_var(i);
+		if (bytes_sg_total <= copy)
 			break;
 	} while (i != msg->sg_end);
 	last_sg = i;
 
-	if (unlikely(copy < end - start))
+	if (unlikely(bytes_sg_total > copy))
 		return -EINVAL;
 
-	page = alloc_pages(__GFP_NOWARN | GFP_ATOMIC, get_order(copy));
+	page = alloc_pages(__GFP_NOWARN | GFP_ATOMIC | __GFP_COMP,
+			   get_order(copy));
 	if (unlikely(!page))
 		return -ENOMEM;
 	p = page_address(page);
-	offset = 0;
 
 	i = first_sg;
 	do {
 		from = sg_virt(&sg[i]);
 		len = sg[i].length;
-		to = p + offset;
+		to = p + poffset;
 
 		memcpy(to, from, len);
-		offset += len;
+		poffset += len;
 		sg[i].length = 0;
 		put_page(sg_page(&sg[i]));
 
-		i++;
-		if (i == MAX_SKB_FRAGS)
-			i = 0;
+		sk_msg_iter_var(i);
 	} while (i != last_sg);
 
 	sg[first_sg].length = copy;
@@ -2357,11 +2367,15 @@ BPF_CALL_4(bpf_msg_pull_data,
 	 * had a single entry though we can just replace it and
 	 * be done. Otherwise walk the ring and shift the entries.
 	 */
-	shift = last_sg - first_sg - 1;
+	WARN_ON_ONCE(last_sg == first_sg);
+	shift = last_sg > first_sg ?
+		last_sg - first_sg - 1 :
+		MAX_SKB_FRAGS - first_sg + last_sg - 1;
 	if (!shift)
 		goto out;
 
-	i = first_sg + 1;
+	i = first_sg;
+	sk_msg_iter_var(i);
 	do {
 		int move_from;
 
@@ -2378,15 +2392,13 @@ BPF_CALL_4(bpf_msg_pull_data,
 		sg[move_from].page_link = 0;
 		sg[move_from].offset = 0;
 
-		i++;
-		if (i == MAX_SKB_FRAGS)
-			i = 0;
+		sk_msg_iter_var(i);
 	} while (1);
 	msg->sg_end -= shift;
 	if (msg->sg_end < 0)
 		msg->sg_end += MAX_SKB_FRAGS;
 out:
-	msg->data = sg_virt(&sg[i]) + start - offset;
+	msg->data = sg_virt(&sg[first_sg]) + start - offset;
 	msg->data_end = msg->data + bytes;
 
 	return 0;
@@ -3681,7 +3693,7 @@ BPF_CALL_3(bpf_skb_set_tunnel_opt, struct sk_buff *, skb,
 	if (unlikely(size > IP_TUNNEL_OPTS_MAX))
 		return -ENOMEM;
 
-	ip_tunnel_info_opts_set(info, from, size);
+	ip_tunnel_info_opts_set(info, from, size, TUNNEL_OPTIONS_PRESENT);
 
 	return 0;
 }

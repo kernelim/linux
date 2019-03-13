@@ -14,6 +14,11 @@
 #include <net/dst.h>
 #include <net/fib_rules.h>
 
+#include <linux/rh_kabi.h>
+
+struct l3mdev_ops_extended_rh {
+};
+
 /**
  * struct l3mdev_ops - l3mdev operations
  *
@@ -37,6 +42,15 @@ struct l3mdev_ops {
 	/* IPv6 ops */
 	struct dst_entry * (*l3mdev_link_scope_lookup)(const struct net_device *dev,
 						 struct flowi6 *fl6);
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
+	RH_KABI_RESERVE(5)
+	RH_KABI_RESERVE(6)
+	RH_KABI_RESERVE(7)
+	RH_KABI_SIZE_AND_EXTEND(l3mdev_ops_extended)
 };
 
 #ifdef CONFIG_NET_L3_MASTER_DEV

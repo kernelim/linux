@@ -18,6 +18,7 @@
 #include <linux/kexec.h>
 #include <linux/of_device.h>
 #include <linux/acpi.h>
+#include <linux/kernel.h>
 #include "pci.h"
 #include "pcie/portdrv.h"
 
@@ -277,6 +278,112 @@ static const struct pci_device_id *pci_match_device(struct pci_driver *drv,
 
 	return found_id;
 }
+
+/**
+ * pci_table_subset tells if a pci_device_id is a subset
+ * of another table
+ * @ids: first table
+ * @subset: a potential subset of ids
+ *
+ * returns 1 if yes, 0 otherwise
+ */
+static int pci_table_subset(const struct pci_device_id *ids,
+			    const struct pci_device_id *subset)
+{
+	const struct pci_device_id *id = ids;
+	int found = 0;
+
+	if (!subset || !ids)
+		return 0;
+
+	while (subset->vendor || subset->subvendor || subset->class_mask) {
+		while (id->vendor || id->subvendor || id->class_mask) {
+			if ((id->vendor == subset->vendor &&
+			     id->device == subset->device &&
+			     id->subvendor == subset->subvendor &&
+			     id->class == subset->class &&
+			     id->subdevice == subset->subdevice &&
+			     id->class_mask == subset->class_mask)){
+				found = 1;
+				break;
+			}
+			id++;
+		}
+		if (!found)
+			return 0;
+		found = 0;
+
+		id = ids;
+		subset++;
+	}
+
+	return 1;
+}
+
+
+/**
+ * pci_hw_vendor_status - Tell if a PCI device is supported by the HW vendor
+ * @ids: array of PCI device id structures to search in
+ * @dev: the PCI device structure to match against
+ *
+ * Used by a driver to check whether this device is in its list of unsupported
+ * devices.  Returns the matching pci_device_id structure or %NULL if there is
+ * no match.
+ *
+ * Reserved for Internal Red Hat use only.
+ */
+const struct pci_device_id *pci_hw_vendor_status(
+						const struct pci_device_id *ids,
+						struct pci_dev *dev)
+{
+	char devinfo[64];
+	const struct pci_device_id *ret = pci_match_id(ids, dev);
+
+	if (ret) {
+		snprintf(devinfo, sizeof(devinfo), "%s %s",
+			 dev_driver_string(&dev->dev), dev_name(&dev->dev));
+		mark_hardware_deprecated(devinfo);
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL(pci_hw_vendor_status);
+
+/**
+ * pci_device_support_removed - Tell if a PCI device support is removed
+ * @ids: array of PCI device id structures to search in
+ * @dev: the PCI device structure to match against
+ *
+ * Used by a driver to check whether this device is in its list of removed
+ * devices.  Returns the matching pci_device_id structure or %NULL if there is
+ * no match.
+ *
+ * Reserved for Internal Red Hat use only.
+ */
+const struct pci_device_id *pci_device_support_removed(
+				const struct pci_device_id *ids,
+				const struct pci_device_id *removed_ids,
+				struct pci_dev *dev)
+{
+	char devinfo[64];
+	const struct pci_device_id *ret;
+
+	if (!pci_table_subset(ids, removed_ids))
+		WARN(1, "driver %s, pci tables do not match\n",
+				dev_driver_string(&dev->dev));
+
+	ret = pci_match_id(removed_ids, dev);
+	if (ret) {
+		snprintf(devinfo, sizeof(devinfo), "%s %s [%04x:%04x]",
+			 dev_driver_string(&dev->dev), dev_name(&dev->dev),
+			 dev->vendor, dev->device);
+		mark_hardware_removed(devinfo);
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL(pci_device_support_removed);
+
 
 struct drv_dev_and_id {
 	struct pci_driver *drv;
@@ -1668,7 +1775,7 @@ static int __init pci_driver_init(void)
 	if (ret)
 		return ret;
 #endif
-
+	dma_debug_add_bus(&pci_bus_type);
 	return 0;
 }
 postcore_initcall(pci_driver_init);

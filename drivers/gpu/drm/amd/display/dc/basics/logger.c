@@ -346,7 +346,7 @@ void dm_logger_append_va(
 		if (size < LOG_MAX_LINE_SIZE - 1) {
 			append_entry(entry, buffer, size);
 		} else {
-			append_entry(entry, "LOG_ERROR, line too long\n", 27);
+			append_entry(entry, "LOG_ERROR, line too long\n", 25);
 		}
 	}
 }

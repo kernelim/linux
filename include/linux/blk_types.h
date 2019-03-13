@@ -9,6 +9,7 @@
 #include <linux/types.h>
 #include <linux/bvec.h>
 #include <linux/ktime.h>
+#include <linux/rh_kabi.h>
 
 struct bio_set;
 struct bio;
@@ -174,15 +175,13 @@ struct bio {
 	void			*bi_private;
 #ifdef CONFIG_BLK_CGROUP
 	/*
-	 * Optional ioc and css associated with this bio.  Put on bio
-	 * release.  Read comment on top of bio_associate_current().
+	 * Represents the association of the css and request_queue for the bio.
+	 * If a bio goes direct to device, it will not have a blkg as it will
+	 * not have a request_queue associated with it.  The reference is put
+	 * on release of the bio.
 	 */
-	struct io_context	*bi_ioc;
-	struct cgroup_subsys_state *bi_css;
-#ifdef CONFIG_BLK_DEV_THROTTLING_LOW
-	void			*bi_cg_private;
+	struct blkcg_gq		*bi_blkg;
 	struct bio_issue	bi_issue;
-#endif
 #endif
 	union {
 #if defined(CONFIG_BLK_DEV_INTEGRITY)
@@ -203,6 +202,10 @@ struct bio {
 	struct bio_vec		*bi_io_vec;	/* the actual vec list */
 
 	struct bio_set		*bi_pool;
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
 
 	/*
 	 * We can inline a number of vecs at the end of the bio, to avoid
@@ -286,8 +289,6 @@ enum req_opf {
 	REQ_OP_FLUSH		= 2,
 	/* discard sectors */
 	REQ_OP_DISCARD		= 3,
-	/* get zone information */
-	REQ_OP_ZONE_REPORT	= 4,
 	/* securely erase sectors */
 	REQ_OP_SECURE_ERASE	= 5,
 	/* seset a zone write pointer */
@@ -327,9 +328,11 @@ enum req_flag_bits {
 	/* command specific flags for REQ_OP_WRITE_ZEROES: */
 	__REQ_NOUNMAP,		/* do not free blocks when zeroing */
 
+	__REQ_HIPRI,
+
 	/* for driver use */
 	__REQ_DRV,
-
+	__REQ_SWAP,		/* swapping request. */
 	__REQ_NR_BITS,		/* stops here */
 };
 
@@ -347,16 +350,25 @@ enum req_flag_bits {
 #define REQ_RAHEAD		(1ULL << __REQ_RAHEAD)
 #define REQ_BACKGROUND		(1ULL << __REQ_BACKGROUND)
 #define REQ_NOWAIT		(1ULL << __REQ_NOWAIT)
-
 #define REQ_NOUNMAP		(1ULL << __REQ_NOUNMAP)
+#define REQ_HIPRI		(1ULL << __REQ_HIPRI)
 
 #define REQ_DRV			(1ULL << __REQ_DRV)
+#define REQ_SWAP		(1ULL << __REQ_SWAP)
 
 #define REQ_FAILFAST_MASK \
 	(REQ_FAILFAST_DEV | REQ_FAILFAST_TRANSPORT | REQ_FAILFAST_DRIVER)
 
 #define REQ_NOMERGE_FLAGS \
 	(REQ_NOMERGE | REQ_PREFLUSH | REQ_FUA)
+
+enum stat_group {
+	STAT_READ,
+	STAT_WRITE,
+	STAT_DISCARD,
+
+	NR_STAT_GROUPS
+};
 
 #define bio_op(bio) \
 	((bio)->bi_opf & REQ_OP_MASK)
@@ -393,6 +405,18 @@ static inline bool op_is_sync(unsigned int op)
 {
 	return (op & REQ_OP_MASK) == REQ_OP_READ ||
 		(op & (REQ_SYNC | REQ_FUA | REQ_PREFLUSH));
+}
+
+static inline bool op_is_discard(unsigned int op)
+{
+	return (op & REQ_OP_MASK) == REQ_OP_DISCARD;
+}
+
+static inline int op_stat_group(unsigned int op)
+{
+	if (op_is_discard(op))
+		return STAT_DISCARD;
+	return op_is_write(op);
 }
 
 typedef unsigned int blk_qc_t;

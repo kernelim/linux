@@ -6,6 +6,8 @@
 #ifndef __LINUX_NET_XDP_H__
 #define __LINUX_NET_XDP_H__
 
+#include <linux/rh_kabi.h>
+
 /**
  * DOC: XDP RX-queue information
  *
@@ -61,6 +63,20 @@ struct xdp_rxq_info {
 	u32 queue_index;
 	u32 reg_state;
 	struct xdp_mem_info mem;
+	/* RHEL: This structure is not considered part of the kABI
+	 * whitelist. However, it is embedded in struct netdev_rx_queue
+	 * which is referenced from struct net_device::_rx as an array.
+	 * Therefore, we need to protect the size of struct xdp_rxq_info. */
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
+	RH_KABI_RESERVE(5)
+	RH_KABI_RESERVE(6)
+	/* Note that there is more space available after the reserved fields
+	 * due to the cache alignment of this structure. Be sure to verify
+	 * the result with pahole on all supported archs before using the
+	 * padding, though. */
 } ____cacheline_aligned; /* perf critical, avoid false-sharing */
 
 struct xdp_buff {
@@ -84,6 +100,15 @@ struct xdp_frame {
 	struct net_device *dev_rx; /* used by cpumap */
 };
 
+/* Clear kernel pointers in xdp_frame */
+static inline void xdp_scrub_frame(struct xdp_frame *frame)
+{
+	frame->data = NULL;
+	frame->dev_rx = NULL;
+}
+
+struct xdp_frame *xdp_convert_zc_to_xdp_frame(struct xdp_buff *xdp);
+
 /* Convert xdp_buff to xdp_frame */
 static inline
 struct xdp_frame *convert_to_xdp_frame(struct xdp_buff *xdp)
@@ -92,9 +117,8 @@ struct xdp_frame *convert_to_xdp_frame(struct xdp_buff *xdp)
 	int metasize;
 	int headroom;
 
-	/* TODO: implement clone, copy, use "native" MEM_TYPE */
 	if (xdp->rxq->mem.type == MEM_TYPE_ZERO_COPY)
-		return NULL;
+		return xdp_convert_zc_to_xdp_frame(xdp);
 
 	/* Assure headroom is available for storing info */
 	headroom = xdp->data - xdp->data_hard_start;
@@ -121,6 +145,10 @@ void xdp_return_frame(struct xdp_frame *xdpf);
 void xdp_return_frame_rx_napi(struct xdp_frame *xdpf);
 void xdp_return_buff(struct xdp_buff *xdp);
 
+/* RHEL: increase the version of xdp_rxq_info_reg kABI whenever XDP is
+ * changed in a kABI incompatible way. That includes changes to ndo_xdp* and
+ * ndo_bpf ops, inline function changes and XDP struct changes. */
+RH_KABI_FORCE_CHANGE(1)
 int xdp_rxq_info_reg(struct xdp_rxq_info *xdp_rxq,
 		     struct net_device *dev, u32 queue_index);
 void xdp_rxq_info_unreg(struct xdp_rxq_info *xdp_rxq);
@@ -128,6 +156,7 @@ void xdp_rxq_info_unused(struct xdp_rxq_info *xdp_rxq);
 bool xdp_rxq_info_is_reg(struct xdp_rxq_info *xdp_rxq);
 int xdp_rxq_info_reg_mem_model(struct xdp_rxq_info *xdp_rxq,
 			       enum xdp_mem_type type, void *allocator);
+void xdp_rxq_info_unreg_mem_model(struct xdp_rxq_info *xdp_rxq);
 
 /* Drivers not supporting XDP metadata can use this helper, which
  * rejects any room expansion for metadata as a result.
@@ -143,5 +172,18 @@ xdp_data_meta_unsupported(const struct xdp_buff *xdp)
 {
 	return unlikely(xdp->data_meta > xdp->data);
 }
+
+struct xdp_attachment_info {
+	struct bpf_prog *prog;
+	u32 flags;
+};
+
+struct netdev_bpf;
+int xdp_attachment_query(struct xdp_attachment_info *info,
+			 struct netdev_bpf *bpf);
+bool xdp_attachment_flags_ok(struct xdp_attachment_info *info,
+			     struct netdev_bpf *bpf);
+void xdp_attachment_setup(struct xdp_attachment_info *info,
+			  struct netdev_bpf *bpf);
 
 #endif /* __LINUX_NET_XDP_H__ */

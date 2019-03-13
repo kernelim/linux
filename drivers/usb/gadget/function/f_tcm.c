@@ -1071,15 +1071,16 @@ static struct usbg_cmd *usbg_get_cmd(struct f_uas *fu,
 {
 	struct se_session *se_sess = tv_nexus->tvn_se_sess;
 	struct usbg_cmd *cmd;
-	int tag;
+	int tag, cpu;
 
-	tag = percpu_ida_alloc(&se_sess->sess_tag_pool, TASK_RUNNING);
+	tag = sbitmap_queue_get(&se_sess->sess_tag_pool, &cpu);
 	if (tag < 0)
 		return ERR_PTR(-ENOMEM);
 
 	cmd = &((struct usbg_cmd *)se_sess->sess_cmd_map)[tag];
 	memset(cmd, 0, sizeof(*cmd));
 	cmd->se_cmd.map_tag = tag;
+	cmd->se_cmd.map_cpu = cpu;
 	cmd->se_cmd.tag = cmd->tag = scsi_tag;
 	cmd->fu = fu;
 
@@ -1288,7 +1289,7 @@ static void usbg_release_cmd(struct se_cmd *se_cmd)
 	struct se_session *se_sess = se_cmd->se_sess;
 
 	kfree(cmd->data_buf);
-	percpu_ida_free(&se_sess->sess_tag_pool, se_cmd->map_tag);
+	target_free_tag(se_sess, se_cmd);
 }
 
 static u32 usbg_sess_get_index(struct se_session *se_sess)

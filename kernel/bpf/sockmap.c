@@ -45,6 +45,8 @@
 #include <net/inet_common.h>
 #include <linux/sched/signal.h>
 
+#include <linux/rh_features.h>
+
 #define SOCK_CREATE_FLAG_MASK \
 	(BPF_F_NUMA_NODE | BPF_F_RDONLY | BPF_F_WRONLY)
 
@@ -2038,6 +2040,8 @@ int sockmap_get_from_fd(const union bpf_attr *attr, int type,
 	struct bpf_map *map;
 	struct fd f;
 	int err;
+
+	rh_mark_used_feature("eBPF/sockmap");
 
 	f = fdget(ufd);
 	map = __bpf_map_get(f);

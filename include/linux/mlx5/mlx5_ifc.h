@@ -654,7 +654,9 @@ struct mlx5_ifc_per_protocol_networking_offload_caps_bits {
 	u8         swp[0x1];
 	u8         swp_csum[0x1];
 	u8         swp_lso[0x1];
-	u8         reserved_at_23[0x1b];
+	u8         reserved_at_23[0xd];
+	u8         max_vxlan_udp_ports[0x8];
+	u8         reserved_at_38[0x6];
 	u8         max_geneve_opt_len[0x1];
 	u8         tunnel_stateless_geneve_rx[0x1];
 
@@ -874,7 +876,8 @@ struct mlx5_ifc_cmd_hca_cap_bits {
 	u8         log_max_eq_sz[0x8];
 	u8         reserved_at_e8[0x2];
 	u8         log_max_mkey[0x6];
-	u8         reserved_at_f0[0xc];
+	u8         reserved_at_f0[0xb];
+	u8         fast_teardown[0x1];
 	u8         log_max_eq[0x4];
 
 	u8         max_indirection[0x8];
@@ -1113,7 +1116,10 @@ struct mlx5_ifc_cmd_hca_cap_bits {
 	u8         reserved_at_3f8[0x3];
 	u8         log_max_current_uc_list[0x5];
 
-	u8         reserved_at_400[0x80];
+	u8         reserved_at_400[0x60];
+
+	u8         reserved_at_460[0x10];
+	u8         max_num_eqs[0x10];
 
 	u8         reserved_at_480[0x3];
 	u8         log_max_l2_table[0x5];
@@ -3316,12 +3322,13 @@ struct mlx5_ifc_teardown_hca_out_bits {
 
 	u8         reserved_at_40[0x3f];
 
-	u8         force_state[0x1];
+	u8         state[0x1];
 };
 
 enum {
 	MLX5_TEARDOWN_HCA_IN_PROFILE_GRACEFUL_CLOSE  = 0x0,
 	MLX5_TEARDOWN_HCA_IN_PROFILE_FORCE_CLOSE     = 0x1,
+	MLX5_TEARDOWN_HCA_IN_PROFILE_PREPARE_FAST_TEARDOWN = 0x2,
 };
 
 struct mlx5_ifc_teardown_hca_in_bits {

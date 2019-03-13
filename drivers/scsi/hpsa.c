@@ -60,7 +60,7 @@
  * HPSA_DRIVER_VERSION must be 3 byte values (0-255) separated by '.'
  * with an optional trailing '-' followed by a byte value (0-255).
  */
-#define HPSA_DRIVER_VERSION "3.4.20-125"
+#define HPSA_DRIVER_VERSION "3.4.20-125-RH1"
 #define DRIVER_NAME "HP HPSA Driver (v " HPSA_DRIVER_VERSION ")"
 #define HPSA "hpsa"
 
@@ -81,7 +81,6 @@ MODULE_DESCRIPTION("Driver for HP Smart Array Controller version " \
 MODULE_SUPPORTED_DEVICE("HP Smart Array Controllers");
 MODULE_VERSION(HPSA_DRIVER_VERSION);
 MODULE_LICENSE("GPL");
-MODULE_ALIAS("cciss");
 
 static int hpsa_simple_mode;
 module_param(hpsa_simple_mode, int, S_IRUGO|S_IWUSR);
@@ -143,10 +142,6 @@ static const struct pci_device_id hpsa_pci_device_id[] = {
 	{PCI_VENDOR_ID_HP_3PAR, 0x0075, 0x1590, 0x007D},
 	{PCI_VENDOR_ID_HP_3PAR, 0x0075, 0x1590, 0x0088},
 	{PCI_VENDOR_ID_HP, 0x333f, 0x103c, 0x333f},
-	{PCI_VENDOR_ID_HP,     PCI_ANY_ID,	PCI_ANY_ID, PCI_ANY_ID,
-		PCI_CLASS_STORAGE_RAID << 8, 0xffff << 8, 0},
-	{PCI_VENDOR_ID_COMPAQ,     PCI_ANY_ID,	PCI_ANY_ID, PCI_ANY_ID,
-		PCI_CLASS_STORAGE_RAID << 8, 0xffff << 8, 0},
 	{0,}
 };
 
@@ -157,26 +152,6 @@ MODULE_DEVICE_TABLE(pci, hpsa_pci_device_id);
  *  access = Address of the struct of function pointers
  */
 static struct board_type products[] = {
-	{0x40700E11, "Smart Array 5300", &SA5A_access},
-	{0x40800E11, "Smart Array 5i", &SA5B_access},
-	{0x40820E11, "Smart Array 532", &SA5B_access},
-	{0x40830E11, "Smart Array 5312", &SA5B_access},
-	{0x409A0E11, "Smart Array 641", &SA5A_access},
-	{0x409B0E11, "Smart Array 642", &SA5A_access},
-	{0x409C0E11, "Smart Array 6400", &SA5A_access},
-	{0x409D0E11, "Smart Array 6400 EM", &SA5A_access},
-	{0x40910E11, "Smart Array 6i", &SA5A_access},
-	{0x3225103C, "Smart Array P600", &SA5A_access},
-	{0x3223103C, "Smart Array P800", &SA5A_access},
-	{0x3234103C, "Smart Array P400", &SA5A_access},
-	{0x3235103C, "Smart Array P400i", &SA5A_access},
-	{0x3211103C, "Smart Array E200i", &SA5A_access},
-	{0x3212103C, "Smart Array E200", &SA5A_access},
-	{0x3213103C, "Smart Array E200i", &SA5A_access},
-	{0x3214103C, "Smart Array E200i", &SA5A_access},
-	{0x3215103C, "Smart Array E200i", &SA5A_access},
-	{0x3237103C, "Smart Array E500", &SA5A_access},
-	{0x323D103C, "Smart Array P700m", &SA5A_access},
 	{0x3241103C, "Smart Array P212", &SA5_access},
 	{0x3243103C, "Smart Array P410", &SA5_access},
 	{0x3245103C, "Smart Array P410i", &SA5_access},
@@ -976,7 +951,7 @@ static struct scsi_host_template hpsa_driver_template = {
 #endif
 	.sdev_attrs = hpsa_sdev_attrs,
 	.shost_attrs = hpsa_shost_attrs,
-	.max_sectors = 1024,
+	.max_sectors = 2048,
 	.no_write_same = 1,
 };
 

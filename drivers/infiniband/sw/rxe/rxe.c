@@ -91,7 +91,8 @@ static void rxe_init_device_param(struct rxe_dev *rxe)
 	rxe->attr.max_qp			= RXE_MAX_QP;
 	rxe->attr.max_qp_wr			= RXE_MAX_QP_WR;
 	rxe->attr.device_cap_flags		= RXE_DEVICE_CAP_FLAGS;
-	rxe->attr.max_sge			= RXE_MAX_SGE;
+	rxe->attr.max_send_sge			= RXE_MAX_SGE;
+	rxe->attr.max_recv_sge			= RXE_MAX_SGE;
 	rxe->attr.max_sge_rd			= RXE_MAX_SGE_RD;
 	rxe->attr.max_cq			= RXE_MAX_CQ;
 	rxe->attr.max_cqe			= (1 << RXE_MAX_LOG_CQE) - 1;
@@ -342,6 +343,8 @@ void rxe_remove(struct rxe_dev *rxe)
 static int __init rxe_module_init(void)
 {
 	int err;
+
+	mark_tech_preview("Soft-RoCE Transport Driver", THIS_MODULE);
 
 	/* initialize slab caches for managed objects */
 	err = rxe_cache_init();

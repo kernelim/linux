@@ -2498,6 +2498,8 @@ void __init devinet_init(void)
 {
 	int i;
 
+	BUILD_BUG_ON(__IPV4_DEVCONF_MAX > RH_KABI_IPV4_DEVCONF_STORAGE);
+
 	for (i = 0; i < IN4_ADDR_HSIZE; i++)
 		INIT_HLIST_HEAD(&inet_addr_lst[i]);
 

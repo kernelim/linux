@@ -166,7 +166,8 @@ int bnxt_re_query_device(struct ib_device *ibdev,
 				    | IB_DEVICE_MEM_WINDOW
 				    | IB_DEVICE_MEM_WINDOW_TYPE_2B
 				    | IB_DEVICE_MEM_MGT_EXTENSIONS;
-	ib_attr->max_sge = dev_attr->max_qp_sges;
+	ib_attr->max_send_sge = dev_attr->max_qp_sges;
+	ib_attr->max_recv_sge = dev_attr->max_qp_sges;
 	ib_attr->max_sge_rd = dev_attr->max_qp_sges;
 	ib_attr->max_cq = dev_attr->max_cq;
 	ib_attr->max_cqe = dev_attr->max_cq_wqes;
@@ -243,8 +244,8 @@ int bnxt_re_query_port(struct ib_device *ibdev, u8 port_num,
 	port_attr->gid_tbl_len = dev_attr->max_sgid;
 	port_attr->port_cap_flags = IB_PORT_CM_SUP | IB_PORT_REINIT_SUP |
 				    IB_PORT_DEVICE_MGMT_SUP |
-				    IB_PORT_VENDOR_CLASS_SUP |
-				    IB_PORT_IP_BASED_GIDS;
+				    IB_PORT_VENDOR_CLASS_SUP;
+	port_attr->ip_gids = true;
 
 	port_attr->max_msg_sz = (u32)BNXT_RE_MAX_MR_SIZE_LOW;
 	port_attr->bad_pkey_cntr = 0;
@@ -844,6 +845,8 @@ int bnxt_re_destroy_qp(struct ib_qp *ib_qp)
 				"Failed to destroy Shadow QP");
 			return rc;
 		}
+		bnxt_qplib_free_qp_res(&rdev->qplib_res,
+				       &rdev->qp1_sqp->qplib_qp);
 		mutex_lock(&rdev->qp_lock);
 		list_del(&rdev->qp1_sqp->list);
 		atomic_dec(&rdev->qp_count);

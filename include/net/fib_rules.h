@@ -11,6 +11,8 @@
 #include <net/rtnetlink.h>
 #include <net/fib_notifier.h>
 
+#include <linux/rh_kabi.h>
+
 struct fib_kuid_range {
 	kuid_t start;
 	kuid_t end;
@@ -43,6 +45,15 @@ struct fib_rule {
 	struct fib_rule_port_range	sport_range;
 	struct fib_rule_port_range	dport_range;
 	struct rcu_head		rcu;
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
+	RH_KABI_RESERVE(5)
+	RH_KABI_RESERVE(6)
+	RH_KABI_RESERVE(7)
+	RH_KABI_RESERVE(8)
 };
 
 struct fib_lookup_arg {

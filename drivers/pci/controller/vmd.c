@@ -197,8 +197,19 @@ static struct vmd_irq_list *vmd_next_irq(struct vmd_dev *vmd, struct msi_desc *d
 	int i, best = 1;
 	unsigned long flags;
 
-	if (pci_is_bridge(msi_desc_to_pci_dev(desc)) || vmd->msix_count == 1)
+	if (vmd->msix_count == 1)
 		return &vmd->irqs[0];
+
+	/*
+	 * White list for fast-interrupt handlers. All others will share the
+	 * "slow" interrupt vector.
+	 */
+	switch (msi_desc_to_pci_dev(desc)->class) {
+	case PCI_CLASS_STORAGE_EXPRESS:
+		break;
+	default:
+		return &vmd->irqs[0];
+	}
 
 	raw_spin_lock_irqsave(&list_lock, flags);
 	for (i = 1; i < vmd->msix_count; i++)
@@ -383,22 +394,15 @@ static void vmd_sync_sg_for_device(struct device *dev, struct scatterlist *sg,
 	vmd_dma_ops(dev)->sync_sg_for_device(to_vmd_dev(dev), sg, nents, dir);
 }
 
-static int vmd_mapping_error(struct device *dev, dma_addr_t addr)
-{
-	return vmd_dma_ops(dev)->mapping_error(to_vmd_dev(dev), addr);
-}
-
 static int vmd_dma_supported(struct device *dev, u64 mask)
 {
 	return vmd_dma_ops(dev)->dma_supported(to_vmd_dev(dev), mask);
 }
 
-#ifdef ARCH_HAS_DMA_GET_REQUIRED_MASK
 static u64 vmd_get_required_mask(struct device *dev)
 {
 	return vmd_dma_ops(dev)->get_required_mask(to_vmd_dev(dev));
 }
-#endif
 
 static void vmd_teardown_dma_ops(struct vmd_dev *vmd)
 {
@@ -437,11 +441,8 @@ static void vmd_setup_dma_ops(struct vmd_dev *vmd)
 	ASSIGN_VMD_DMA_OPS(source, dest, sync_single_for_device);
 	ASSIGN_VMD_DMA_OPS(source, dest, sync_sg_for_cpu);
 	ASSIGN_VMD_DMA_OPS(source, dest, sync_sg_for_device);
-	ASSIGN_VMD_DMA_OPS(source, dest, mapping_error);
 	ASSIGN_VMD_DMA_OPS(source, dest, dma_supported);
-#ifdef ARCH_HAS_DMA_GET_REQUIRED_MASK
 	ASSIGN_VMD_DMA_OPS(source, dest, get_required_mask);
-#endif
 	add_dma_domain(domain);
 }
 #undef ASSIGN_VMD_DMA_OPS

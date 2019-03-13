@@ -60,6 +60,17 @@ config IOMMU_IO_PGTABLE_ARMV7S_SELFTEST
 
 endmenu
 
+config IOMMU_DEFAULT_PASSTHROUGH
+	bool "IOMMU passthrough by default"
+	depends on IOMMU_API
+	help
+	  Enable passthrough by default, removing the need to pass in
+	  iommu.passthrough=on or iommu=pt through command line. If this
+	  is enabled, you can still disable with iommu.passthrough=off
+	  or iommu=nopt depending on the architecture.
+
+	  If unsure, say N here.
+
 config IOMMU_IOVA
 	tristate
 
@@ -334,6 +345,14 @@ config S390_IOMMU
 config S390_CCW_IOMMU
 	bool "S390 CCW IOMMU Support"
 	depends on S390 && CCW
+	select IOMMU_API
+	help
+	  Enables bits of IOMMU API required by VFIO. The iommu_ops
+	  is not implemented as it is not necessary for VFIO.
+
+config S390_AP_IOMMU
+	bool "S390 AP IOMMU Support"
+	depends on S390 && ZCRYPT
 	select IOMMU_API
 	help
 	  Enables bits of IOMMU API required by VFIO. The iommu_ops

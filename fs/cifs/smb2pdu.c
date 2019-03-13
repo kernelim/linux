@@ -370,7 +370,7 @@ smb2_plain_req_init(__le16 smb2_command, struct cifs_tcon *tcon,
 	return rc;
 }
 
-#ifdef CONFIG_CIFS_SMB311
+
 /* offset is sizeof smb2_negotiate_req but rounded up to 8 bytes */
 #define OFFSET_OF_NEG_CONTEXT 0x68  /* sizeof(struct smb2_negotiate_req) */
 
@@ -585,13 +585,6 @@ add_posix_context(struct kvec *iov, unsigned int *num_iovec, umode_t mode)
 	return 0;
 }
 
-#else
-static void assemble_neg_contexts(struct smb2_negotiate_req *req,
-				  unsigned int *total_len)
-{
-	return;
-}
-#endif /* SMB311 */
 
 /*
  *
@@ -636,10 +629,9 @@ SMB2_negotiate(const unsigned int xid, struct cifs_ses *ses)
 		return rc;
 
 	req->sync_hdr.SessionId = 0;
-#ifdef CONFIG_CIFS_SMB311
+
 	memset(server->preauth_sha_hash, 0, SMB2_PREAUTH_HASH_SIZE);
 	memset(ses->preauth_sha_hash, 0, SMB2_PREAUTH_HASH_SIZE);
-#endif
 
 	if (strcmp(ses->server->vals->version_string,
 		   SMB3ANY_VERSION_STRING) == 0) {
@@ -741,10 +733,8 @@ SMB2_negotiate(const unsigned int xid, struct cifs_ses *ses)
 		cifs_dbg(FYI, "negotiated smb3.0 dialect\n");
 	else if (rsp->DialectRevision == cpu_to_le16(SMB302_PROT_ID))
 		cifs_dbg(FYI, "negotiated smb3.02 dialect\n");
-#ifdef CONFIG_CIFS_SMB311
 	else if (rsp->DialectRevision == cpu_to_le16(SMB311_PROT_ID))
 		cifs_dbg(FYI, "negotiated smb3.1.1 dialect\n");
-#endif /* SMB311 */
 	else {
 		cifs_dbg(VFS, "Illegal dialect returned by server 0x%x\n",
 			 le16_to_cpu(rsp->DialectRevision));
@@ -753,9 +743,6 @@ SMB2_negotiate(const unsigned int xid, struct cifs_ses *ses)
 	}
 	server->dialect = le16_to_cpu(rsp->DialectRevision);
 
-	/* BB: add check that dialect was valid given dialect(s) we asked for */
-
-#ifdef CONFIG_CIFS_SMB311
 	/*
 	 * Keep a copy of the hash after negprot. This hash will be
 	 * the starting hash value for all sessions made from this
@@ -763,7 +750,7 @@ SMB2_negotiate(const unsigned int xid, struct cifs_ses *ses)
 	 */
 	memcpy(server->preauth_sha_hash, ses->preauth_sha_hash,
 	       SMB2_PREAUTH_HASH_SIZE);
-#endif
+
 	/* SMB2 only has an extended negflavor */
 	server->negflavor = CIFS_NEGFLAVOR_EXTENDED;
 	/* set it to the maximum buffer size value we can send with 1 credit */
@@ -804,7 +791,6 @@ SMB2_negotiate(const unsigned int xid, struct cifs_ses *ses)
 			rc = -EIO;
 	}
 
-#ifdef CONFIG_CIFS_SMB311
 	if (rsp->DialectRevision == cpu_to_le16(SMB311_PROT_ID)) {
 		if (rsp->NegotiateContextCount)
 			rc = smb311_decode_neg_context(rsp, server,
@@ -812,7 +798,6 @@ SMB2_negotiate(const unsigned int xid, struct cifs_ses *ses)
 		else
 			cifs_dbg(VFS, "Missing expected negotiate contexts\n");
 	}
-#endif /* CONFIG_CIFS_SMB311 */
 neg_exit:
 	free_rsp_buf(resp_buftype, rsp);
 	return rc;
@@ -1373,13 +1358,11 @@ SMB2_sess_setup(const unsigned int xid, struct cifs_ses *ses,
 	sess_data->nls_cp = (struct nls_table *) nls_cp;
 	sess_data->previous_session = ses->Suid;
 
-#ifdef CONFIG_CIFS_SMB311
 	/*
 	 * Initialize the session hash with the server one.
 	 */
 	memcpy(ses->preauth_sha_hash, ses->server->preauth_sha_hash,
 	       SMB2_PREAUTH_HASH_SIZE);
-#endif
 
 	while (sess_data->func)
 		sess_data->func(sess_data);
@@ -1920,7 +1903,6 @@ alloc_path_with_tree_prefix(__le16 **out_path, int *out_size, int *out_len,
 	return 0;
 }
 
-#ifdef CONFIG_CIFS_SMB311
 int smb311_posix_mkdir(const unsigned int xid, struct inode *inode,
 			       umode_t mode, struct cifs_tcon *tcon,
 			       const char *full_path,
@@ -2071,7 +2053,6 @@ smb311_mkdir_exit:
 	return rc;
 
 }
-#endif /* SMB311 */
 
 int
 SMB2_open(const unsigned int xid, struct cifs_open_parms *oparms, __le16 *path,
@@ -2211,7 +2192,6 @@ SMB2_open(const unsigned int xid, struct cifs_open_parms *oparms, __le16 *path,
 		dhc_buf = iov[n_iov-1].iov_base;
 	}
 
-#ifdef CONFIG_CIFS_SMB311
 	if (tcon->posix_extensions) {
 		if (n_iov > 2) {
 			struct create_context *ccontext =
@@ -2230,7 +2210,6 @@ SMB2_open(const unsigned int xid, struct cifs_open_parms *oparms, __le16 *path,
 		}
 		pc_buf = iov[n_iov-1].iov_base;
 	}
-#endif /* SMB311 */
 
 	memset(&rqst, 0, sizeof(struct smb_rqst));
 	rqst.rq_iov = iov;
@@ -3939,6 +3918,25 @@ copy_fs_info_to_kstatfs(struct smb2_fs_full_size_info *pfs_inf,
 	return;
 }
 
+static void
+copy_posix_fs_info_to_kstatfs(FILE_SYSTEM_POSIX_INFO *response_data,
+			struct kstatfs *kst)
+{
+	kst->f_bsize = le32_to_cpu(response_data->BlockSize);
+	kst->f_blocks = le64_to_cpu(response_data->TotalBlocks);
+	kst->f_bfree =  le64_to_cpu(response_data->BlocksAvail);
+	if (response_data->UserBlocksAvail == cpu_to_le64(-1))
+		kst->f_bavail = kst->f_bfree;
+	else
+		kst->f_bavail = le64_to_cpu(response_data->UserBlocksAvail);
+	if (response_data->TotalFileNodes != cpu_to_le64(-1))
+		kst->f_files = le64_to_cpu(response_data->TotalFileNodes);
+	if (response_data->FreeFileNodes != cpu_to_le64(-1))
+		kst->f_ffree = le64_to_cpu(response_data->FreeFileNodes);
+
+	return;
+}
+
 static int
 build_qfs_info_req(struct kvec *iov, struct cifs_tcon *tcon, int level,
 		   int outbuf_len, u64 persistent_fid, u64 volatile_fid)
@@ -3973,6 +3971,54 @@ build_qfs_info_req(struct kvec *iov, struct cifs_tcon *tcon, int level,
 	iov->iov_base = (char *)req;
 	iov->iov_len = total_len;
 	return 0;
+}
+
+int
+SMB311_posix_qfs_info(const unsigned int xid, struct cifs_tcon *tcon,
+	      u64 persistent_fid, u64 volatile_fid, struct kstatfs *fsdata)
+{
+	struct smb_rqst rqst;
+	struct smb2_query_info_rsp *rsp = NULL;
+	struct kvec iov;
+	struct kvec rsp_iov;
+	int rc = 0;
+	int resp_buftype;
+	struct cifs_ses *ses = tcon->ses;
+	FILE_SYSTEM_POSIX_INFO *info = NULL;
+	int flags = 0;
+
+	rc = build_qfs_info_req(&iov, tcon, FS_POSIX_INFORMATION,
+				sizeof(FILE_SYSTEM_POSIX_INFO),
+				persistent_fid, volatile_fid);
+	if (rc)
+		return rc;
+
+	if (smb3_encryption_required(tcon))
+		flags |= CIFS_TRANSFORM_REQ;
+
+	memset(&rqst, 0, sizeof(struct smb_rqst));
+	rqst.rq_iov = &iov;
+	rqst.rq_nvec = 1;
+
+	rc = cifs_send_recv(xid, ses, &rqst, &resp_buftype, flags, &rsp_iov);
+	cifs_small_buf_release(iov.iov_base);
+	if (rc) {
+		cifs_stats_fail_inc(tcon, SMB2_QUERY_INFO_HE);
+		goto posix_qfsinf_exit;
+	}
+	rsp = (struct smb2_query_info_rsp *)rsp_iov.iov_base;
+
+	info = (FILE_SYSTEM_POSIX_INFO *)(
+		le16_to_cpu(rsp->OutputBufferOffset) + (char *)rsp);
+	rc = validate_iov(le16_to_cpu(rsp->OutputBufferOffset),
+			  le32_to_cpu(rsp->OutputBufferLength), &rsp_iov,
+			  sizeof(FILE_SYSTEM_POSIX_INFO));
+	if (!rc)
+		copy_posix_fs_info_to_kstatfs(info, fsdata);
+
+posix_qfsinf_exit:
+	free_rsp_buf(resp_buftype, rsp_iov.iov_base);
+	return rc;
 }
 
 int

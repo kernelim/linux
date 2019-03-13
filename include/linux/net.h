@@ -28,6 +28,8 @@
 
 #include <uapi/linux/net.h>
 
+#include <linux/rh_kabi.h>
+
 struct poll_table_struct;
 struct pipe_inode_info;
 struct inode;
@@ -130,6 +132,9 @@ struct sk_buff;
 typedef int (*sk_read_actor_t)(read_descriptor_t *, struct sk_buff *,
 			       unsigned int, size_t);
 
+struct proto_ops_extended_rh {
+};
+
 struct proto_ops {
 	int		family;
 	struct module	*owner;
@@ -198,6 +203,15 @@ struct proto_ops {
 	int		(*sendmsg_locked)(struct sock *sk, struct msghdr *msg,
 					  size_t size);
 	int		(*set_rcvlowat)(struct sock *sk, int val);
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
+	RH_KABI_RESERVE(5)
+	RH_KABI_RESERVE(6)
+	RH_KABI_RESERVE(7)
+	RH_KABI_SIZE_AND_EXTEND(proto_ops_extended)
 };
 
 #define DECLARE_SOCKADDR(type, dst, src)	\

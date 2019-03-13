@@ -87,6 +87,7 @@ struct kvmppc_spapr_tce_table *kvmppc_find_table(struct kvm *kvm,
 }
 EXPORT_SYMBOL_GPL(kvmppc_find_table);
 
+#ifdef CONFIG_KVM_BOOK3S_HV_POSSIBLE
 /*
  * Validates TCE address.
  * At the moment flags and page mask are validated.
@@ -94,14 +95,14 @@ EXPORT_SYMBOL_GPL(kvmppc_find_table);
  * to the table and user space is supposed to process them), we can skip
  * checking other things (such as TCE is a guest RAM address or the page
  * was actually allocated).
- *
- * WARNING: This will be called in real-mode on HV KVM and virtual
- *          mode on PR KVM
  */
-long kvmppc_tce_validate(struct kvmppc_spapr_tce_table *stt, unsigned long tce)
+static long kvmppc_rm_tce_validate(struct kvmppc_spapr_tce_table *stt,
+		unsigned long tce)
 {
 	unsigned long gpa = tce & ~(TCE_PCI_READ | TCE_PCI_WRITE);
 	enum dma_data_direction dir = iommu_tce_direction(tce);
+	struct kvmppc_spapr_tce_iommu_table *stit;
+	unsigned long ua = 0;
 
 	/* Allow userspace to poison TCE table */
 	if (dir == DMA_NONE)
@@ -110,9 +111,26 @@ long kvmppc_tce_validate(struct kvmppc_spapr_tce_table *stt, unsigned long tce)
 	if (iommu_tce_check_gpa(stt->page_shift, gpa))
 		return H_PARAMETER;
 
+	if (kvmppc_gpa_to_ua(stt->kvm, tce & ~(TCE_PCI_READ | TCE_PCI_WRITE),
+				&ua, NULL))
+		return H_TOO_HARD;
+
+	list_for_each_entry_lockless(stit, &stt->iommu_tables, next) {
+		unsigned long hpa = 0;
+		struct mm_iommu_table_group_mem_t *mem;
+		long shift = stit->tbl->it_page_shift;
+
+		mem = mm_iommu_lookup_rm(stt->kvm->mm, ua, 1ULL << shift);
+		if (!mem)
+			return H_TOO_HARD;
+
+		if (mm_iommu_ua_to_hpa_rm(mem, ua, shift, &hpa))
+			return H_TOO_HARD;
+	}
+
 	return H_SUCCESS;
 }
-EXPORT_SYMBOL_GPL(kvmppc_tce_validate);
+#endif /* CONFIG_KVM_BOOK3S_HV_POSSIBLE */
 
 /* Note on the use of page_address() in real mode,
  *
@@ -187,12 +205,35 @@ long kvmppc_gpa_to_ua(struct kvm *kvm, unsigned long gpa,
 EXPORT_SYMBOL_GPL(kvmppc_gpa_to_ua);
 
 #ifdef CONFIG_KVM_BOOK3S_HV_POSSIBLE
-static void kvmppc_rm_clear_tce(struct iommu_table *tbl, unsigned long entry)
+static long iommu_tce_xchg_rm(struct mm_struct *mm, struct iommu_table *tbl,
+		unsigned long entry, unsigned long *hpa,
+		enum dma_data_direction *direction)
+{
+	long ret;
+
+	ret = tbl->it_ops->exchange_rm(tbl, entry, hpa, direction);
+
+	if (!ret && ((*direction == DMA_FROM_DEVICE) ||
+				(*direction == DMA_BIDIRECTIONAL))) {
+		__be64 *pua = IOMMU_TABLE_USERSPACE_ENTRY_RM(tbl, entry);
+		/*
+		 * kvmppc_rm_tce_iommu_do_map() updates the UA cache after
+		 * calling this so we still get here a valid UA.
+		 */
+		if (pua && *pua)
+			mm_iommu_ua_mark_dirty_rm(mm, be64_to_cpu(*pua));
+	}
+
+	return ret;
+}
+
+static void kvmppc_rm_clear_tce(struct kvm *kvm, struct iommu_table *tbl,
+		unsigned long entry)
 {
 	unsigned long hpa = 0;
 	enum dma_data_direction dir = DMA_NONE;
 
-	iommu_tce_xchg_rm(tbl, entry, &hpa, &dir);
+	iommu_tce_xchg_rm(kvm->mm, tbl, entry, &hpa, &dir);
 }
 
 static long kvmppc_rm_tce_iommu_mapped_dec(struct kvm *kvm,
@@ -200,23 +241,19 @@ static long kvmppc_rm_tce_iommu_mapped_dec(struct kvm *kvm,
 {
 	struct mm_iommu_table_group_mem_t *mem = NULL;
 	const unsigned long pgsize = 1ULL << tbl->it_page_shift;
-	unsigned long *pua = IOMMU_TABLE_USERSPACE_ENTRY(tbl, entry);
+	__be64 *pua = IOMMU_TABLE_USERSPACE_ENTRY_RM(tbl, entry);
 
 	if (!pua)
 		/* it_userspace allocation might be delayed */
 		return H_TOO_HARD;
 
-	pua = (void *) vmalloc_to_phys(pua);
-	if (WARN_ON_ONCE_RM(!pua))
-		return H_HARDWARE;
-
-	mem = mm_iommu_lookup_rm(kvm->mm, *pua, pgsize);
+	mem = mm_iommu_lookup_rm(kvm->mm, be64_to_cpu(*pua), pgsize);
 	if (!mem)
 		return H_TOO_HARD;
 
 	mm_iommu_mapped_dec(mem);
 
-	*pua = 0;
+	*pua = cpu_to_be64(0);
 
 	return H_SUCCESS;
 }
@@ -228,7 +265,7 @@ static long kvmppc_rm_tce_iommu_do_unmap(struct kvm *kvm,
 	unsigned long hpa = 0;
 	long ret;
 
-	if (iommu_tce_xchg_rm(tbl, entry, &hpa, &dir))
+	if (iommu_tce_xchg_rm(kvm->mm, tbl, entry, &hpa, &dir))
 		/*
 		 * real mode xchg can fail if struct page crosses
 		 * a page boundary
@@ -240,7 +277,7 @@ static long kvmppc_rm_tce_iommu_do_unmap(struct kvm *kvm,
 
 	ret = kvmppc_rm_tce_iommu_mapped_dec(kvm, tbl, entry);
 	if (ret)
-		iommu_tce_xchg_rm(tbl, entry, &hpa, &dir);
+		iommu_tce_xchg_rm(kvm->mm, tbl, entry, &hpa, &dir);
 
 	return ret;
 }
@@ -268,7 +305,7 @@ static long kvmppc_rm_tce_iommu_do_map(struct kvm *kvm, struct iommu_table *tbl,
 {
 	long ret;
 	unsigned long hpa = 0;
-	unsigned long *pua = IOMMU_TABLE_USERSPACE_ENTRY(tbl, entry);
+	__be64 *pua = IOMMU_TABLE_USERSPACE_ENTRY_RM(tbl, entry);
 	struct mm_iommu_table_group_mem_t *mem;
 
 	if (!pua)
@@ -281,16 +318,12 @@ static long kvmppc_rm_tce_iommu_do_map(struct kvm *kvm, struct iommu_table *tbl,
 
 	if (WARN_ON_ONCE_RM(mm_iommu_ua_to_hpa_rm(mem, ua, tbl->it_page_shift,
 			&hpa)))
-		return H_HARDWARE;
-
-	pua = (void *) vmalloc_to_phys(pua);
-	if (WARN_ON_ONCE_RM(!pua))
-		return H_HARDWARE;
+		return H_TOO_HARD;
 
 	if (WARN_ON_ONCE_RM(mm_iommu_mapped_inc(mem)))
-		return H_CLOSED;
+		return H_TOO_HARD;
 
-	ret = iommu_tce_xchg_rm(tbl, entry, &hpa, &dir);
+	ret = iommu_tce_xchg_rm(kvm->mm, tbl, entry, &hpa, &dir);
 	if (ret) {
 		mm_iommu_mapped_dec(mem);
 		/*
@@ -303,7 +336,7 @@ static long kvmppc_rm_tce_iommu_do_map(struct kvm *kvm, struct iommu_table *tbl,
 	if (dir != DMA_NONE)
 		kvmppc_rm_tce_iommu_mapped_dec(kvm, tbl, entry);
 
-	*pua = ua;
+	*pua = cpu_to_be64(ua);
 
 	return 0;
 }
@@ -353,7 +386,7 @@ long kvmppc_rm_h_put_tce(struct kvm_vcpu *vcpu, unsigned long liobn,
 	if (ret != H_SUCCESS)
 		return ret;
 
-	ret = kvmppc_tce_validate(stt, tce);
+	ret = kvmppc_rm_tce_validate(stt, tce);
 	if (ret != H_SUCCESS)
 		return ret;
 
@@ -379,7 +412,7 @@ long kvmppc_rm_h_put_tce(struct kvm_vcpu *vcpu, unsigned long liobn,
 			return ret;
 
 		WARN_ON_ONCE_RM(1);
-		kvmppc_rm_clear_tce(stit->tbl, entry);
+		kvmppc_rm_clear_tce(vcpu->kvm, stit->tbl, entry);
 	}
 
 	kvmppc_tce_put(stt, entry, tce);
@@ -486,7 +519,7 @@ long kvmppc_rm_h_put_tce_indirect(struct kvm_vcpu *vcpu,
 
 		rmap = (void *) vmalloc_to_phys(rmap);
 		if (WARN_ON_ONCE_RM(!rmap))
-			return H_HARDWARE;
+			return H_TOO_HARD;
 
 		/*
 		 * Synchronize with the MMU notifier callbacks in
@@ -506,7 +539,7 @@ long kvmppc_rm_h_put_tce_indirect(struct kvm_vcpu *vcpu,
 	for (i = 0; i < npages; ++i) {
 		unsigned long tce = be64_to_cpu(((u64 *)tces)[i]);
 
-		ret = kvmppc_tce_validate(stt, tce);
+		ret = kvmppc_rm_tce_validate(stt, tce);
 		if (ret != H_SUCCESS)
 			goto unlock_exit;
 
@@ -528,7 +561,7 @@ long kvmppc_rm_h_put_tce_indirect(struct kvm_vcpu *vcpu,
 				goto unlock_exit;
 
 			WARN_ON_ONCE_RM(1);
-			kvmppc_rm_clear_tce(stit->tbl, entry);
+			kvmppc_rm_clear_tce(vcpu->kvm, stit->tbl, entry);
 		}
 
 		kvmppc_tce_put(stt, entry + i, tce);
@@ -579,7 +612,7 @@ long kvmppc_rm_h_stuff_tce(struct kvm_vcpu *vcpu,
 				return ret;
 
 			WARN_ON_ONCE_RM(1);
-			kvmppc_rm_clear_tce(stit->tbl, entry);
+			kvmppc_rm_clear_tce(vcpu->kvm, stit->tbl, entry);
 		}
 	}
 

@@ -100,6 +100,9 @@ static int sctp_stream_alloc_out(struct sctp_stream *stream, __u16 outcnt,
 	if (stream->out) {
 		memcpy(out, stream->out, min(outcnt, stream->outcnt) *
 					 sizeof(*out));
+		if (stream->out_curr)
+			stream->out_curr = out +
+					   (stream->out_curr - stream->out);
 		kfree(stream->out);
 	}
 
@@ -491,7 +494,6 @@ int sctp_send_add_streams(struct sctp_association *asoc,
 		goto out;
 	}
 
-	stream->incnt = incnt;
 	stream->outcnt = outcnt;
 
 	asoc->strreset_outstanding = !!out + !!in;

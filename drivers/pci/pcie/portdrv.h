@@ -50,7 +50,10 @@ struct pcie_port_service_driver {
 	int (*probe) (struct pcie_device *dev);
 	void (*remove) (struct pcie_device *dev);
 	int (*suspend) (struct pcie_device *dev);
+	int (*resume_noirq) (struct pcie_device *dev);
 	int (*resume) (struct pcie_device *dev);
+	int (*runtime_suspend) (struct pcie_device *dev);
+	int (*runtime_resume) (struct pcie_device *dev);
 
 	/* Device driver may resume normal operations */
 	void (*error_resume)(struct pci_dev *dev);
@@ -82,7 +85,10 @@ extern struct bus_type pcie_port_bus_type;
 int pcie_port_device_register(struct pci_dev *dev);
 #ifdef CONFIG_PM
 int pcie_port_device_suspend(struct device *dev);
+int pcie_port_device_resume_noirq(struct device *dev);
 int pcie_port_device_resume(struct device *dev);
+int pcie_port_device_runtime_suspend(struct device *dev);
+int pcie_port_device_runtime_resume(struct device *dev);
 #endif
 void pcie_port_device_remove(struct pci_dev *dev);
 int __must_check pcie_port_bus_register(void);
@@ -119,10 +125,6 @@ static inline int pcie_aer_get_firmware_first(struct pci_dev *pci_dev)
 		return pci_dev->__aer_firmware_first;
 	return 0;
 }
-#endif
-
-#ifdef CONFIG_PCIEAER
-irqreturn_t aer_irq(int irq, void *context);
 #endif
 
 struct pcie_port_service_driver *pcie_port_find_service(struct pci_dev *dev,

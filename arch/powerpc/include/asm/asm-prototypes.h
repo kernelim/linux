@@ -143,4 +143,25 @@ struct kvm_vcpu;
 void _kvmppc_restore_tm_pr(struct kvm_vcpu *vcpu, u64 guest_msr);
 void _kvmppc_save_tm_pr(struct kvm_vcpu *vcpu, u64 guest_msr);
 
+#ifdef CONFIG_PPC_TRANSACTIONAL_MEM
+void kvmppc_save_tm_hv(struct kvm_vcpu *vcpu, u64 msr, bool preserve_nv);
+void kvmppc_restore_tm_hv(struct kvm_vcpu *vcpu, u64 msr, bool preserve_nv);
+#else
+static inline void kvmppc_save_tm_hv(struct kvm_vcpu *vcpu, u64 msr,
+				     bool preserve_nv) { }
+static inline void kvmppc_restore_tm_hv(struct kvm_vcpu *vcpu, u64 msr,
+					bool preserve_nv) { }
+#endif /* CONFIG_PPC_TRANSACTIONAL_MEM */
+
+void kvmhv_save_host_pmu(void);
+void kvmhv_load_host_pmu(void);
+void kvmhv_save_guest_pmu(struct kvm_vcpu *vcpu, bool pmu_in_use);
+void kvmhv_load_guest_pmu(struct kvm_vcpu *vcpu);
+
+int __kvmhv_vcpu_entry_p9(struct kvm_vcpu *vcpu);
+
+long kvmppc_h_set_dabr(struct kvm_vcpu *vcpu, unsigned long dabr);
+long kvmppc_h_set_xdabr(struct kvm_vcpu *vcpu, unsigned long dabr,
+			unsigned long dabrx);
+
 #endif /* _ASM_POWERPC_ASM_PROTOTYPES_H */

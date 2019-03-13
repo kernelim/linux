@@ -31,16 +31,15 @@ static inline struct hclgevf_dev *hclgevf_ae_get_hdev(
 
 static int hclgevf_tqps_update_stats(struct hnae3_handle *handle)
 {
+	struct hnae3_knic_private_info *kinfo = &handle->kinfo;
 	struct hclgevf_dev *hdev = hclgevf_ae_get_hdev(handle);
-	struct hnae3_queue *queue;
 	struct hclgevf_desc desc;
 	struct hclgevf_tqp *tqp;
 	int status;
 	int i;
 
-	for (i = 0; i < hdev->num_tqps; i++) {
-		queue = handle->kinfo.tqp[i];
-		tqp = container_of(queue, struct hclgevf_tqp, q);
+	for (i = 0; i < kinfo->num_tqps; i++) {
+		tqp = container_of(kinfo->tqp[i], struct hclgevf_tqp, q);
 		hclgevf_cmd_setup_basic_desc(&desc,
 					     HCLGEVF_OPC_QUERY_RX_STATUS,
 					     true);
@@ -77,17 +76,16 @@ static int hclgevf_tqps_update_stats(struct hnae3_handle *handle)
 static u64 *hclgevf_tqps_get_stats(struct hnae3_handle *handle, u64 *data)
 {
 	struct hnae3_knic_private_info *kinfo = &handle->kinfo;
-	struct hclgevf_dev *hdev = hclgevf_ae_get_hdev(handle);
 	struct hclgevf_tqp *tqp;
 	u64 *buff = data;
 	int i;
 
-	for (i = 0; i < hdev->num_tqps; i++) {
-		tqp = container_of(handle->kinfo.tqp[i], struct hclgevf_tqp, q);
+	for (i = 0; i < kinfo->num_tqps; i++) {
+		tqp = container_of(kinfo->tqp[i], struct hclgevf_tqp, q);
 		*buff++ = tqp->tqp_stats.rcb_tx_ring_pktnum_rcd;
 	}
 	for (i = 0; i < kinfo->num_tqps; i++) {
-		tqp = container_of(handle->kinfo.tqp[i], struct hclgevf_tqp, q);
+		tqp = container_of(kinfo->tqp[i], struct hclgevf_tqp, q);
 		*buff++ = tqp->tqp_stats.rcb_rx_ring_pktnum_rcd;
 	}
 
@@ -96,28 +94,28 @@ static u64 *hclgevf_tqps_get_stats(struct hnae3_handle *handle, u64 *data)
 
 static int hclgevf_tqps_get_sset_count(struct hnae3_handle *handle, int strset)
 {
-	struct hclgevf_dev *hdev = hclgevf_ae_get_hdev(handle);
+	struct hnae3_knic_private_info *kinfo = &handle->kinfo;
 
-	return hdev->num_tqps * 2;
+	return kinfo->num_tqps * 2;
 }
 
 static u8 *hclgevf_tqps_get_strings(struct hnae3_handle *handle, u8 *data)
 {
-	struct hclgevf_dev *hdev = hclgevf_ae_get_hdev(handle);
+	struct hnae3_knic_private_info *kinfo = &handle->kinfo;
 	u8 *buff = data;
 	int i = 0;
 
-	for (i = 0; i < hdev->num_tqps; i++) {
-		struct hclgevf_tqp *tqp = container_of(handle->kinfo.tqp[i],
-			struct hclgevf_tqp, q);
+	for (i = 0; i < kinfo->num_tqps; i++) {
+		struct hclgevf_tqp *tqp = container_of(kinfo->tqp[i],
+						       struct hclgevf_tqp, q);
 		snprintf(buff, ETH_GSTRING_LEN, "txq#%d_pktnum_rcd",
 			 tqp->index);
 		buff += ETH_GSTRING_LEN;
 	}
 
-	for (i = 0; i < hdev->num_tqps; i++) {
-		struct hclgevf_tqp *tqp = container_of(handle->kinfo.tqp[i],
-			struct hclgevf_tqp, q);
+	for (i = 0; i < kinfo->num_tqps; i++) {
+		struct hclgevf_tqp *tqp = container_of(kinfo->tqp[i],
+						       struct hclgevf_tqp, q);
 		snprintf(buff, ETH_GSTRING_LEN, "rxq#%d_pktnum_rcd",
 			 tqp->index);
 		buff += ETH_GSTRING_LEN;
@@ -182,7 +180,7 @@ static int hclgevf_get_tc_info(struct hclgevf_dev *hdev)
 	return 0;
 }
 
-static int hclge_get_queue_info(struct hclgevf_dev *hdev)
+static int hclgevf_get_queue_info(struct hclgevf_dev *hdev)
 {
 #define HCLGEVF_TQPS_RSS_INFO_LEN	8
 	u8 resp_msg[HCLGEVF_TQPS_RSS_INFO_LEN];
@@ -299,6 +297,9 @@ void hclgevf_update_link_status(struct hclgevf_dev *hdev, int link_state)
 
 	client = handle->client;
 
+	link_state =
+		test_bit(HCLGEVF_STATE_DOWN, &hdev->state) ? 0 : link_state;
+
 	if (link_state != hdev->hw.mac.link) {
 		client->ops->link_status_change(handle, !!link_state);
 		hdev->hw.mac.link = link_state;
@@ -330,6 +331,12 @@ static int hclgevf_set_handle_info(struct hclgevf_dev *hdev)
 
 static void hclgevf_free_vector(struct hclgevf_dev *hdev, int vector_id)
 {
+	if (hdev->vector_status[vector_id] == HCLGEVF_INVALID_VPORT) {
+		dev_warn(&hdev->pdev->dev,
+			 "vector(vector_id %d) has been freed.\n", vector_id);
+		return;
+	}
+
 	hdev->vector_status[vector_id] = HCLGEVF_INVALID_VPORT;
 	hdev->num_msi_left += 1;
 	hdev->num_msi_used -= 1;
@@ -444,12 +451,12 @@ static int hclgevf_set_rss_tc_mode(struct hclgevf_dev *hdev,  u16 rss_size)
 
 	hclgevf_cmd_setup_basic_desc(&desc, HCLGEVF_OPC_RSS_TC_MODE, false);
 	for (i = 0; i < HCLGEVF_MAX_TC_NUM; i++) {
-		hnae_set_bit(req->rss_tc_mode[i], HCLGEVF_RSS_TC_VALID_B,
-			     (tc_valid[i] & 0x1));
-		hnae_set_field(req->rss_tc_mode[i], HCLGEVF_RSS_TC_SIZE_M,
-			       HCLGEVF_RSS_TC_SIZE_S, tc_size[i]);
-		hnae_set_field(req->rss_tc_mode[i], HCLGEVF_RSS_TC_OFFSET_M,
-			       HCLGEVF_RSS_TC_OFFSET_S, tc_offset[i]);
+		hnae3_set_bit(req->rss_tc_mode[i], HCLGEVF_RSS_TC_VALID_B,
+			      (tc_valid[i] & 0x1));
+		hnae3_set_field(req->rss_tc_mode[i], HCLGEVF_RSS_TC_SIZE_M,
+				HCLGEVF_RSS_TC_SIZE_S, tc_size[i]);
+		hnae3_set_field(req->rss_tc_mode[i], HCLGEVF_RSS_TC_OFFSET_M,
+				HCLGEVF_RSS_TC_OFFSET_S, tc_offset[i]);
 	}
 	status = hclgevf_cmd_send(&hdev->hw, &desc, 1);
 	if (status)
@@ -547,24 +554,18 @@ static int hclgevf_get_tc_size(struct hnae3_handle *handle)
 }
 
 static int hclgevf_bind_ring_to_vector(struct hnae3_handle *handle, bool en,
-				       int vector,
+				       int vector_id,
 				       struct hnae3_ring_chain_node *ring_chain)
 {
 	struct hclgevf_dev *hdev = hclgevf_ae_get_hdev(handle);
 	struct hnae3_ring_chain_node *node;
 	struct hclge_mbx_vf_to_pf_cmd *req;
 	struct hclgevf_desc desc;
-	int i = 0, vector_id;
+	int i = 0;
 	int status;
 	u8 type;
 
 	req = (struct hclge_mbx_vf_to_pf_cmd *)desc.data;
-	vector_id = hclgevf_get_vector_index(hdev, vector);
-	if (vector_id < 0) {
-		dev_err(&handle->pdev->dev,
-			"Get vector index fail. ret =%d\n", vector_id);
-		return vector_id;
-	}
 
 	for (node = ring_chain; node; node = node->next) {
 		int idx_offset = HCLGE_MBX_RING_MAP_BASIC_MSG_NUM +
@@ -582,11 +583,11 @@ static int hclgevf_bind_ring_to_vector(struct hnae3_handle *handle, bool en,
 		}
 
 		req->msg[idx_offset] =
-				hnae_get_bit(node->flag, HNAE3_RING_TYPE_B);
+				hnae3_get_bit(node->flag, HNAE3_RING_TYPE_B);
 		req->msg[idx_offset + 1] = node->tqp_index;
-		req->msg[idx_offset + 2] = hnae_get_field(node->int_gl_idx,
-							  HNAE3_RING_GL_IDX_M,
-							  HNAE3_RING_GL_IDX_S);
+		req->msg[idx_offset + 2] = hnae3_get_field(node->int_gl_idx,
+							   HNAE3_RING_GL_IDX_M,
+							   HNAE3_RING_GL_IDX_S);
 
 		i++;
 		if ((i == (HCLGE_MBX_VF_MSG_DATA_NUM -
@@ -617,7 +618,17 @@ static int hclgevf_bind_ring_to_vector(struct hnae3_handle *handle, bool en,
 static int hclgevf_map_ring_to_vector(struct hnae3_handle *handle, int vector,
 				      struct hnae3_ring_chain_node *ring_chain)
 {
-	return hclgevf_bind_ring_to_vector(handle, true, vector, ring_chain);
+	struct hclgevf_dev *hdev = hclgevf_ae_get_hdev(handle);
+	int vector_id;
+
+	vector_id = hclgevf_get_vector_index(hdev, vector);
+	if (vector_id < 0) {
+		dev_err(&handle->pdev->dev,
+			"Get vector index fail. ret =%d\n", vector_id);
+		return vector_id;
+	}
+
+	return hclgevf_bind_ring_to_vector(handle, true, vector_id, ring_chain);
 }
 
 static int hclgevf_unmap_ring_from_vector(
@@ -635,7 +646,7 @@ static int hclgevf_unmap_ring_from_vector(
 		return vector_id;
 	}
 
-	ret = hclgevf_bind_ring_to_vector(handle, false, vector, ring_chain);
+	ret = hclgevf_bind_ring_to_vector(handle, false, vector_id, ring_chain);
 	if (ret)
 		dev_err(&handle->pdev->dev,
 			"Unmap ring from vector fail. vector=%d, ret =%d\n",
@@ -648,8 +659,17 @@ static int hclgevf_unmap_ring_from_vector(
 static int hclgevf_put_vector(struct hnae3_handle *handle, int vector)
 {
 	struct hclgevf_dev *hdev = hclgevf_ae_get_hdev(handle);
+	int vector_id;
 
-	hclgevf_free_vector(hdev, vector);
+	vector_id = hclgevf_get_vector_index(hdev, vector);
+	if (vector_id < 0) {
+		dev_err(&handle->pdev->dev,
+			"hclgevf_put_vector get vector index fail. ret =%d\n",
+			vector_id);
+		return vector_id;
+	}
+
+	hclgevf_free_vector(hdev, vector_id);
 
 	return 0;
 }
@@ -716,14 +736,12 @@ static int hclgevf_get_queue_id(struct hnae3_queue *queue)
 
 static void hclgevf_reset_tqp_stats(struct hnae3_handle *handle)
 {
-	struct hclgevf_dev *hdev = hclgevf_ae_get_hdev(handle);
-	struct hnae3_queue *queue;
+	struct hnae3_knic_private_info *kinfo = &handle->kinfo;
 	struct hclgevf_tqp *tqp;
 	int i;
 
-	for (i = 0; i < hdev->num_tqps; i++) {
-		queue = handle->kinfo.tqp[i];
-		tqp = container_of(queue, struct hclgevf_tqp, q);
+	for (i = 0; i < kinfo->num_tqps; i++) {
+		tqp = container_of(kinfo->tqp[i], struct hclgevf_tqp, q);
 		memset(&tqp->tqp_stats, 0, sizeof(tqp->tqp_stats));
 	}
 }
@@ -990,8 +1008,8 @@ static int hclgevf_reset_wait(struct hclgevf_dev *hdev)
 
 	/* wait to check the hardware reset completion status */
 	val = hclgevf_read_dev(&hdev->hw, HCLGEVF_FUN_RST_ING);
-	while (hnae_get_bit(val, HCLGEVF_FUN_RST_ING_B) &&
-			    (cnt < HCLGEVF_RESET_WAIT_CNT)) {
+	while (hnae3_get_bit(val, HCLGEVF_FUN_RST_ING_B) &&
+	       (cnt < HCLGEVF_RESET_WAIT_CNT)) {
 		msleep(HCLGEVF_RESET_WAIT_MS);
 		val = hclgevf_read_dev(&hdev->hw, HCLGEVF_FUN_RST_ING);
 		cnt++;
@@ -1322,8 +1340,10 @@ static int hclgevf_configure(struct hclgevf_dev *hdev)
 {
 	int ret;
 
+	hdev->hw.mac.media_type = HNAE3_MEDIA_TYPE_NONE;
+
 	/* get queue configuration from PF */
-	ret = hclge_get_queue_info(hdev);
+	ret = hclgevf_get_queue_info(hdev);
 	if (ret)
 		return ret;
 	/* get tc configuration from PF */
@@ -1351,14 +1371,13 @@ static int hclgevf_init_roce_base_info(struct hclgevf_dev *hdev)
 	struct hnae3_handle *roce = &hdev->roce;
 	struct hnae3_handle *nic = &hdev->nic;
 
-	roce->rinfo.num_vectors = HCLGEVF_ROCEE_VECTOR_NUM;
+	roce->rinfo.num_vectors = hdev->num_roce_msix;
 
 	if (hdev->num_msi_left < roce->rinfo.num_vectors ||
 	    hdev->num_msi_left == 0)
 		return -EINVAL;
 
-	roce->rinfo.base_vector =
-		hdev->vector_status[hdev->num_msi_used];
+	roce->rinfo.base_vector = hdev->roce_base_vector;
 
 	roce->rinfo.netdev = nic->kinfo.netdev;
 	roce->rinfo.roce_io_base = hdev->hw.io_base;
@@ -1399,12 +1418,13 @@ static int hclgevf_init_vlan_config(struct hclgevf_dev *hdev)
 
 static int hclgevf_ae_start(struct hnae3_handle *handle)
 {
+	struct hnae3_knic_private_info *kinfo = &handle->kinfo;
 	struct hclgevf_dev *hdev = hclgevf_ae_get_hdev(handle);
 	int i, queue_id;
 
-	for (i = 0; i < handle->kinfo.num_tqps; i++) {
+	for (i = 0; i < kinfo->num_tqps; i++) {
 		/* ring enable */
-		queue_id = hclgevf_get_queue_id(handle->kinfo.tqp[i]);
+		queue_id = hclgevf_get_queue_id(kinfo->tqp[i]);
 		if (queue_id < 0) {
 			dev_warn(&hdev->pdev->dev,
 				 "Get invalid queue id, ignore it\n");
@@ -1427,12 +1447,15 @@ static int hclgevf_ae_start(struct hnae3_handle *handle)
 
 static void hclgevf_ae_stop(struct hnae3_handle *handle)
 {
+	struct hnae3_knic_private_info *kinfo = &handle->kinfo;
 	struct hclgevf_dev *hdev = hclgevf_ae_get_hdev(handle);
 	int i, queue_id;
 
-	for (i = 0; i < hdev->num_tqps; i++) {
+	set_bit(HCLGEVF_STATE_DOWN, &hdev->state);
+
+	for (i = 0; i < kinfo->num_tqps; i++) {
 		/* Ring disable */
-		queue_id = hclgevf_get_queue_id(handle->kinfo.tqp[i]);
+		queue_id = hclgevf_get_queue_id(kinfo->tqp[i]);
 		if (queue_id < 0) {
 			dev_warn(&hdev->pdev->dev,
 				 "Get invalid queue id, ignore it\n");
@@ -1501,10 +1524,15 @@ static int hclgevf_init_msi(struct hclgevf_dev *hdev)
 	if (hclgevf_dev_ongoing_reset(hdev))
 		return 0;
 
-	hdev->num_msi = HCLGEVF_MAX_VF_VECTOR_NUM;
+	if (hnae3_get_bit(hdev->ae_dev->flag, HNAE3_DEV_SUPPORT_ROCE_B))
+		vectors = pci_alloc_irq_vectors(pdev,
+						hdev->roce_base_msix_offset + 1,
+						hdev->num_msi,
+						PCI_IRQ_MSIX);
+	else
+		vectors = pci_alloc_irq_vectors(pdev, 1, hdev->num_msi,
+						PCI_IRQ_MSI | PCI_IRQ_MSIX);
 
-	vectors = pci_alloc_irq_vectors(pdev, 1, hdev->num_msi,
-					PCI_IRQ_MSI | PCI_IRQ_MSIX);
 	if (vectors < 0) {
 		dev_err(&pdev->dev,
 			"failed(%d) to allocate MSI/MSI-X vectors\n",
@@ -1519,6 +1547,7 @@ static int hclgevf_init_msi(struct hclgevf_dev *hdev)
 	hdev->num_msi = vectors;
 	hdev->num_msi_left = vectors;
 	hdev->base_msi_vector = pdev->irq;
+	hdev->roce_base_vector = pdev->irq + hdev->roce_base_msix_offset;
 
 	hdev->vector_status = devm_kcalloc(&pdev->dev, hdev->num_msi,
 					   sizeof(u16), GFP_KERNEL);
@@ -1582,9 +1611,10 @@ static void hclgevf_misc_irq_uninit(struct hclgevf_dev *hdev)
 	hclgevf_free_vector(hdev, 0);
 }
 
-static int hclgevf_init_instance(struct hclgevf_dev *hdev,
-				 struct hnae3_client *client)
+static int hclgevf_init_client_instance(struct hnae3_client *client,
+					struct hnae3_ae_dev *ae_dev)
 {
+	struct hclgevf_dev *hdev = ae_dev->priv;
 	int ret;
 
 	switch (client->type) {
@@ -1594,17 +1624,22 @@ static int hclgevf_init_instance(struct hclgevf_dev *hdev,
 
 		ret = client->ops->init_instance(&hdev->nic);
 		if (ret)
-			return ret;
+			goto clear_nic;
+
+		hnae3_set_client_init_flag(client, ae_dev, 1);
 
 		if (hdev->roce_client && hnae3_dev_roce_supported(hdev)) {
 			struct hnae3_client *rc = hdev->roce_client;
 
 			ret = hclgevf_init_roce_base_info(hdev);
 			if (ret)
-				return ret;
+				goto clear_roce;
 			ret = rc->ops->init_instance(&hdev->roce);
 			if (ret)
-				return ret;
+				goto clear_roce;
+
+			hnae3_set_client_init_flag(hdev->roce_client, ae_dev,
+						   1);
 		}
 		break;
 	case HNAE3_CLIENT_UNIC:
@@ -1613,7 +1648,9 @@ static int hclgevf_init_instance(struct hclgevf_dev *hdev,
 
 		ret = client->ops->init_instance(&hdev->nic);
 		if (ret)
-			return ret;
+			goto clear_nic;
+
+		hnae3_set_client_init_flag(client, ae_dev, 1);
 		break;
 	case HNAE3_CLIENT_ROCE:
 		if (hnae3_dev_roce_supported(hdev)) {
@@ -1624,44 +1661,50 @@ static int hclgevf_init_instance(struct hclgevf_dev *hdev,
 		if (hdev->roce_client && hdev->nic_client) {
 			ret = hclgevf_init_roce_base_info(hdev);
 			if (ret)
-				return ret;
+				goto clear_roce;
 
 			ret = client->ops->init_instance(&hdev->roce);
 			if (ret)
-				return ret;
+				goto clear_roce;
 		}
+
+		hnae3_set_client_init_flag(client, ae_dev, 1);
+		break;
+	default:
+		return -EINVAL;
 	}
 
 	return 0;
+
+clear_nic:
+	hdev->nic_client = NULL;
+	hdev->nic.client = NULL;
+	return ret;
+clear_roce:
+	hdev->roce_client = NULL;
+	hdev->roce.client = NULL;
+	return ret;
 }
 
-static void hclgevf_uninit_instance(struct hclgevf_dev *hdev,
-				    struct hnae3_client *client)
+static void hclgevf_uninit_client_instance(struct hnae3_client *client,
+					   struct hnae3_ae_dev *ae_dev)
 {
+	struct hclgevf_dev *hdev = ae_dev->priv;
+
 	/* un-init roce, if it exists */
-	if (hdev->roce_client)
+	if (hdev->roce_client) {
 		hdev->roce_client->ops->uninit_instance(&hdev->roce, 0);
+		hdev->roce_client = NULL;
+		hdev->roce.client = NULL;
+	}
 
 	/* un-init nic/unic, if this was not called by roce client */
-	if ((client->ops->uninit_instance) &&
-	    (client->type != HNAE3_CLIENT_ROCE))
+	if (client->ops->uninit_instance && hdev->nic_client &&
+	    client->type != HNAE3_CLIENT_ROCE) {
 		client->ops->uninit_instance(&hdev->nic, 0);
-}
-
-static int hclgevf_register_client(struct hnae3_client *client,
-				   struct hnae3_ae_dev *ae_dev)
-{
-	struct hclgevf_dev *hdev = ae_dev->priv;
-
-	return hclgevf_init_instance(hdev, client);
-}
-
-static void hclgevf_unregister_client(struct hnae3_client *client,
-				      struct hnae3_ae_dev *ae_dev)
-{
-	struct hclgevf_dev *hdev = ae_dev->priv;
-
-	hclgevf_uninit_instance(hdev, client);
+		hdev->nic_client = NULL;
+		hdev->nic.client = NULL;
+	}
 }
 
 static int hclgevf_pci_init(struct hclgevf_dev *hdev)
@@ -1727,6 +1770,45 @@ static void hclgevf_pci_uninit(struct hclgevf_dev *hdev)
 	pci_disable_device(pdev);
 }
 
+static int hclgevf_query_vf_resource(struct hclgevf_dev *hdev)
+{
+	struct hclgevf_query_res_cmd *req;
+	struct hclgevf_desc desc;
+	int ret;
+
+	hclgevf_cmd_setup_basic_desc(&desc, HCLGEVF_OPC_QUERY_VF_RSRC, true);
+	ret = hclgevf_cmd_send(&hdev->hw, &desc, 1);
+	if (ret) {
+		dev_err(&hdev->pdev->dev,
+			"query vf resource failed, ret = %d.\n", ret);
+		return ret;
+	}
+
+	req = (struct hclgevf_query_res_cmd *)desc.data;
+
+	if (hnae3_get_bit(hdev->ae_dev->flag, HNAE3_DEV_SUPPORT_ROCE_B)) {
+		hdev->roce_base_msix_offset =
+		hnae3_get_field(__le16_to_cpu(req->msixcap_localid_ba_rocee),
+				HCLGEVF_MSIX_OFT_ROCEE_M,
+				HCLGEVF_MSIX_OFT_ROCEE_S);
+		hdev->num_roce_msix =
+		hnae3_get_field(__le16_to_cpu(req->vf_intr_vector_number),
+				HCLGEVF_VEC_NUM_M, HCLGEVF_VEC_NUM_S);
+
+		/* VF should have NIC vectors and Roce vectors, NIC vectors
+		 * are queued before Roce vectors. The offset is fixed to 64.
+		 */
+		hdev->num_msi = hdev->num_roce_msix +
+				hdev->roce_base_msix_offset;
+	} else {
+		hdev->num_msi =
+		hnae3_get_field(__le16_to_cpu(req->vf_intr_vector_number),
+				HCLGEVF_VEC_NUM_M, HCLGEVF_VEC_NUM_S);
+	}
+
+	return 0;
+}
+
 static int hclgevf_init_hdev(struct hclgevf_dev *hdev)
 {
 	struct pci_dev *pdev = hdev->pdev;
@@ -1744,17 +1826,25 @@ static int hclgevf_init_hdev(struct hclgevf_dev *hdev)
 		return ret;
 	}
 
-	ret = hclgevf_init_msi(hdev);
-	if (ret) {
-		dev_err(&pdev->dev, "failed(%d) to init MSI/MSI-X\n", ret);
-		goto err_irq_init;
-	}
-
-	hclgevf_state_init(hdev);
-
 	ret = hclgevf_cmd_init(hdev);
 	if (ret)
 		goto err_cmd_init;
+
+	/* Get vf resource */
+	ret = hclgevf_query_vf_resource(hdev);
+	if (ret) {
+		dev_err(&hdev->pdev->dev,
+			"Query vf status error, ret = %d.\n", ret);
+		goto err_query_vf;
+	}
+
+	ret = hclgevf_init_msi(hdev);
+	if (ret) {
+		dev_err(&pdev->dev, "failed(%d) to init MSI/MSI-X\n", ret);
+		goto err_query_vf;
+	}
+
+	hclgevf_state_init(hdev);
 
 	ret = hclgevf_misc_irq_init(hdev);
 	if (ret) {
@@ -1811,11 +1901,11 @@ static int hclgevf_init_hdev(struct hclgevf_dev *hdev)
 err_config:
 	hclgevf_misc_irq_uninit(hdev);
 err_misc_irq_init:
-	hclgevf_cmd_uninit(hdev);
-err_cmd_init:
 	hclgevf_state_uninit(hdev);
 	hclgevf_uninit_msi(hdev);
-err_irq_init:
+err_query_vf:
+	hclgevf_cmd_uninit(hdev);
+err_cmd_init:
 	hclgevf_pci_uninit(hdev);
 	return ret;
 }
@@ -1885,11 +1975,11 @@ static void hclgevf_get_channels(struct hnae3_handle *handle,
 }
 
 static void hclgevf_get_tqps_and_rss_info(struct hnae3_handle *handle,
-					  u16 *free_tqps, u16 *max_rss_size)
+					  u16 *alloc_tqps, u16 *max_rss_size)
 {
 	struct hclgevf_dev *hdev = hclgevf_ae_get_hdev(handle);
 
-	*free_tqps = 0;
+	*alloc_tqps = hdev->num_tqps;
 	*max_rss_size = hdev->rss_size_max;
 }
 
@@ -1921,11 +2011,19 @@ void hclgevf_update_speed_duplex(struct hclgevf_dev *hdev, u32 speed,
 	hdev->hw.mac.duplex = duplex;
 }
 
+static void hclgevf_get_media_type(struct hnae3_handle *handle,
+				  u8 *media_type)
+{
+	struct hclgevf_dev *hdev = hclgevf_ae_get_hdev(handle);
+	if (media_type)
+		*media_type = hdev->hw.mac.media_type;
+}
+
 static const struct hnae3_ae_ops hclgevf_ops = {
 	.init_ae_dev = hclgevf_init_ae_dev,
 	.uninit_ae_dev = hclgevf_uninit_ae_dev,
-	.init_client_instance = hclgevf_register_client,
-	.uninit_client_instance = hclgevf_unregister_client,
+	.init_client_instance = hclgevf_init_client_instance,
+	.uninit_client_instance = hclgevf_uninit_client_instance,
 	.start = hclgevf_ae_start,
 	.stop = hclgevf_ae_stop,
 	.map_ring_to_vector = hclgevf_map_ring_to_vector,
@@ -1958,6 +2056,7 @@ static const struct hnae3_ae_ops hclgevf_ops = {
 	.get_tqps_and_rss_info = hclgevf_get_tqps_and_rss_info,
 	.get_status = hclgevf_get_status,
 	.get_ksettings_an_result = hclgevf_get_ksettings_an_result,
+	.get_media_type = hclgevf_get_media_type,
 };
 
 static struct hnae3_ae_algo ae_algovf = {

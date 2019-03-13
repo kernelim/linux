@@ -49,6 +49,7 @@ int mod_verify_sig(const void *mod, unsigned long *_modlen)
 {
 	struct module_signature ms;
 	size_t modlen = *_modlen, sig_len;
+	int err;
 
 	pr_devel("==>%s(,%zu)\n", __func__, modlen);
 
@@ -80,7 +81,25 @@ int mod_verify_sig(const void *mod, unsigned long *_modlen)
 		return -EBADMSG;
 	}
 
-	return verify_pkcs7_signature(mod, modlen, mod + modlen, sig_len,
-				      NULL, VERIFYING_MODULE_SIGNATURE,
+	/*
+	 * Check signature using built-in trusted keys and, if configured,
+	 * secondary trusted keys.
+	 */
+	err =  verify_pkcs7_signature(mod, modlen, mod + modlen, sig_len,
+				      VERIFY_USE_SECONDARY_KEYRING,
+				      VERIFYING_MODULE_SIGNATURE,
 				      NULL, NULL);
+	if (IS_ENABLED(CONFIG_INTEGRITY_PLATFORM_KEYRING) && err) {
+		/*
+		 * Check signature using platform trusted keys. This does
+		 * not consider the built-in keys, so must be done separately
+		 * from above, if possible and necessary.
+		 */
+		err =  verify_pkcs7_signature(mod, modlen, mod + modlen,
+					      sig_len,
+					      VERIFY_USE_PLATFORM_KEYRING,
+					      VERIFYING_MODULE_SIGNATURE,
+					      NULL, NULL);
+	}
+	return err;
 }

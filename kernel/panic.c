@@ -327,6 +327,20 @@ const struct taint_flag taint_flags[TAINT_FLAGS_COUNT] = {
 	[ TAINT_LIVEPATCH ]		= { 'K', ' ', true },
 	[ TAINT_AUX ]			= { 'X', ' ', true },
 	[ TAINT_RANDSTRUCT ]		= { 'T', ' ', true },
+	[ TAINT_18 ]			= { '?', '-', false },
+	[ TAINT_19 ]			= { '?', '-', false },
+	[ TAINT_20 ]			= { '?', '-', false },
+	[ TAINT_21 ]			= { '?', '-', false },
+	[ TAINT_22 ]			= { '?', '-', false },
+	[ TAINT_23 ]			= { '?', '-', false },
+	[ TAINT_24 ]			= { '?', '-', false },
+	[ TAINT_25 ]			= { '?', '-', false },
+	[ TAINT_26 ]			= { '?', '-', false },
+	[ TAINT_SUPPORT_REMOVED ]	= { 'r', ' ', false },
+	[ TAINT_28 ]			= { '?', '-', false },
+	[ TAINT_TECH_PREVIEW ]		= { 't', ' ', true },
+	[ TAINT_UNPRIVILEGED_BPF ]	= { 'u', ' ', false },
+	[ TAINT_31 ]			= { '?', '-', false },
 };
 
 /**

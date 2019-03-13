@@ -367,8 +367,10 @@ void bpf_prog_kallsyms_del_all(struct bpf_prog *fp)
 #ifdef CONFIG_BPF_JIT
 /* All BPF JIT sysctl knobs here. */
 int bpf_jit_enable   __read_mostly = IS_BUILTIN(CONFIG_BPF_JIT_ALWAYS_ON);
-int bpf_jit_harden   __read_mostly;
-int bpf_jit_kallsyms __read_mostly;
+/* RHEL-only: set it to 1 by default */
+int bpf_jit_harden   __read_mostly = 1;
+/* RHEL-only: set it to 1 by default */
+int bpf_jit_kallsyms __read_mostly = 1;
 
 static __always_inline void
 bpf_get_prog_addr_region(const struct bpf_prog *prog,

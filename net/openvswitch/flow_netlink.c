@@ -2516,7 +2516,9 @@ static int validate_and_copy_set_tun(const struct nlattr *attr,
 	struct ovs_tunnel_info *ovs_tun;
 	struct nlattr *a;
 	int err = 0, start, opts_type;
+	__be16 dst_opt_type;
 
+	dst_opt_type = 0;
 	ovs_match_init(&match, &key, true, NULL);
 	opts_type = ip_tun_from_nlattr(nla_data(attr), &match, false, log);
 	if (opts_type < 0)
@@ -2528,10 +2530,13 @@ static int validate_and_copy_set_tun(const struct nlattr *attr,
 			err = validate_geneve_opts(&key);
 			if (err < 0)
 				return err;
+			dst_opt_type = TUNNEL_GENEVE_OPT;
 			break;
 		case OVS_TUNNEL_KEY_ATTR_VXLAN_OPTS:
+			dst_opt_type = TUNNEL_VXLAN_OPT;
 			break;
 		case OVS_TUNNEL_KEY_ATTR_ERSPAN_OPTS:
+			dst_opt_type = TUNNEL_ERSPAN_OPT;
 			break;
 		}
 	}
@@ -2574,7 +2579,7 @@ static int validate_and_copy_set_tun(const struct nlattr *attr,
 	 */
 	ip_tunnel_info_opts_set(tun_info,
 				TUN_METADATA_OPTS(&key, key.tun_opts_len),
-				key.tun_opts_len);
+				key.tun_opts_len, dst_opt_type);
 	add_nested_action_end(*sfa, start);
 
 	return err;
@@ -2990,7 +2995,7 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 			 * is already present */
 			if (mac_proto != MAC_PROTO_NONE)
 				return -EINVAL;
-			mac_proto = MAC_PROTO_NONE;
+			mac_proto = MAC_PROTO_ETHERNET;
 			break;
 
 		case OVS_ACTION_ATTR_POP_ETH:
@@ -2998,7 +3003,7 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 				return -EINVAL;
 			if (vlan_tci & htons(VLAN_TAG_PRESENT))
 				return -EINVAL;
-			mac_proto = MAC_PROTO_ETHERNET;
+			mac_proto = MAC_PROTO_NONE;
 			break;
 
 		case OVS_ACTION_ATTR_PUSH_NSH:

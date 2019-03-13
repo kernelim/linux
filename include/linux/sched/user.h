@@ -5,6 +5,7 @@
 #include <linux/uidgid.h>
 #include <linux/atomic.h>
 #include <linux/ratelimit.h>
+#include <linux/rh_kabi.h>
 
 struct key;
 
@@ -45,6 +46,9 @@ struct user_struct {
 
 	/* Miscellaneous per-user rate limit */
 	struct ratelimit_state ratelimit;
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
 };
 
 extern int uids_sysfs_init(void);

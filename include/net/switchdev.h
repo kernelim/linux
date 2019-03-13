@@ -16,6 +16,8 @@
 #include <linux/list.h>
 #include <net/ip_fib.h>
 
+#include <linux/rh_kabi.h>
+
 #define SWITCHDEV_F_NO_RECURSE		BIT(0)
 #define SWITCHDEV_F_SKIP_EOPNOTSUPP	BIT(1)
 #define SWITCHDEV_F_DEFER		BIT(2)
@@ -85,6 +87,11 @@ struct switchdev_obj {
 	u32 flags;
 	void *complete_priv;
 	void (*complete)(struct net_device *dev, int err, void *priv);
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 };
 
 /* SWITCHDEV_OBJ_ID_PORT_VLAN */
@@ -115,6 +122,9 @@ void *switchdev_trans_item_dequeue(struct switchdev_trans *trans);
 
 typedef int switchdev_obj_dump_cb_t(struct switchdev_obj *obj);
 
+struct switchdev_ops_extended_rh {
+};
+
 /**
  * struct switchdev_ops - switchdev operations
  *
@@ -137,6 +147,15 @@ struct switchdev_ops {
 					  struct switchdev_trans *trans);
 	int	(*switchdev_port_obj_del)(struct net_device *dev,
 					  const struct switchdev_obj *obj);
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
+	RH_KABI_RESERVE(5)
+	RH_KABI_RESERVE(6)
+	RH_KABI_RESERVE(7)
+	RH_KABI_SIZE_AND_EXTEND(switchdev_ops_extended)
 };
 
 enum switchdev_notifier_type {

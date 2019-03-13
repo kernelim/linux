@@ -112,6 +112,10 @@ struct hclge_cfg_pause_param_cmd {
 	u8 pause_trans_gap;
 	u8 rsvd;
 	__le16 pause_trans_time;
+	u8 rsvd1[6];
+	/* extra mac address to do double check for pause frame */
+	u8 mac_addr_extra[ETH_ALEN];
+	u16 rsvd2;
 };
 
 struct hclge_pfc_stats_cmd {
@@ -123,16 +127,17 @@ struct hclge_port_shapping_cmd {
 };
 
 #define hclge_tm_set_field(dest, string, val) \
-			hnae_set_field((dest), (HCLGE_TM_SHAP_##string##_MSK), \
-				       (HCLGE_TM_SHAP_##string##_LSH), val)
+			   hnae3_set_field((dest), \
+			   (HCLGE_TM_SHAP_##string##_MSK), \
+			   (HCLGE_TM_SHAP_##string##_LSH), val)
 #define hclge_tm_get_field(src, string) \
-			hnae_get_field((src), (HCLGE_TM_SHAP_##string##_MSK), \
+			hnae3_get_field((src), (HCLGE_TM_SHAP_##string##_MSK), \
 				       (HCLGE_TM_SHAP_##string##_LSH))
 
 int hclge_tm_schd_init(struct hclge_dev *hdev);
 int hclge_pause_setup_hw(struct hclge_dev *hdev);
 int hclge_tm_schd_mode_hw(struct hclge_dev *hdev);
-int hclge_tm_prio_tc_info_update(struct hclge_dev *hdev, u8 *prio_tc);
+void hclge_tm_prio_tc_info_update(struct hclge_dev *hdev, u8 *prio_tc);
 void hclge_tm_schd_info_update(struct hclge_dev *hdev, u8 num_tc);
 int hclge_tm_dwrr_cfg(struct hclge_dev *hdev);
 int hclge_tm_map_cfg(struct hclge_dev *hdev);

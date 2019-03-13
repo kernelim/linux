@@ -382,7 +382,7 @@ qla2x00_async_adisc_sp_done(void *ptr, int res)
 	    "Async done-%s res %x %8phC\n",
 	    sp->name, res, sp->fcport->port_name);
 
-	sp->fcport->flags &= ~FCF_ASYNC_SENT;
+	sp->fcport->flags &= ~(FCF_ASYNC_SENT | FCF_ASYNC_ACTIVE);
 
 	memset(&ea, 0, sizeof(ea));
 	ea.event = FCME_ADISC_DONE;
@@ -1739,25 +1739,15 @@ qla24xx_handle_plogi_done_event(struct scsi_qla_host *vha, struct event_arg *ea)
 		cid.b.rsvd_1 = 0;
 
 		ql_dbg(ql_dbg_disc, vha, 0x20ec,
-		    "%s %d %8phC LoopID 0x%x in use post gnl\n",
+		    "%s %d %8phC lid %#x in use with pid %06x post gnl\n",
 		    __func__, __LINE__, ea->fcport->port_name,
-		    ea->fcport->loop_id);
+		    ea->fcport->loop_id, cid.b24);
 
-		if (IS_SW_RESV_ADDR(cid)) {
-			set_bit(ea->fcport->loop_id, vha->hw->loop_id_map);
-			ea->fcport->loop_id = FC_NO_LOOP_ID;
-		} else {
-			qla2x00_clear_loop_id(ea->fcport);
-		}
+		set_bit(ea->fcport->loop_id, vha->hw->loop_id_map);
+		ea->fcport->loop_id = FC_NO_LOOP_ID;
 		qla24xx_post_gnl_work(vha, ea->fcport);
 		break;
 	case MBS_PORT_ID_USED:
-		ql_dbg(ql_dbg_disc, vha, 0x20ed,
-		    "%s %d %8phC NPortId %02x%02x%02x inuse post gidpn\n",
-		    __func__, __LINE__, ea->fcport->port_name,
-		    ea->fcport->d_id.b.domain, ea->fcport->d_id.b.area,
-		    ea->fcport->d_id.b.al_pa);
-
 		lid = ea->iop[1] & 0xffff;
 		qlt_find_sess_invalidate_other(vha,
 		    wwn_to_u64(ea->fcport->port_name),
@@ -4498,6 +4488,7 @@ qla2x00_alloc_fcport(scsi_qla_host_t *vha, gfp_t flags)
 	fcport->loop_id = FC_NO_LOOP_ID;
 	qla2x00_set_fcport_state(fcport, FCS_UNCONFIGURED);
 	fcport->supported_classes = FC_COS_UNSPECIFIED;
+	fcport->fp_speed = PORT_SPEED_UNKNOWN;
 
 	fcport->ct_desc.ct_sns = dma_alloc_coherent(&vha->hw->pdev->dev,
 		sizeof(struct ct_sns_pkt), &fcport->ct_desc.ct_sns_dma,

@@ -99,7 +99,7 @@ static void dealloc_oc_sq(struct c4iw_rdev *rdev, struct t4_sq *sq)
 static void dealloc_host_sq(struct c4iw_rdev *rdev, struct t4_sq *sq)
 {
 	dma_free_coherent(&(rdev->lldi.pdev->dev), sq->memsize, sq->queue,
-			  pci_unmap_addr(sq, mapping));
+			  dma_unmap_addr(sq, mapping));
 }
 
 static void dealloc_sq(struct c4iw_rdev *rdev, struct t4_sq *sq)
@@ -132,7 +132,7 @@ static int alloc_host_sq(struct c4iw_rdev *rdev, struct t4_sq *sq)
 	if (!sq->queue)
 		return -ENOMEM;
 	sq->phys_addr = virt_to_phys(sq->queue);
-	pci_unmap_addr_set(sq, mapping, sq->dma_addr);
+	dma_unmap_addr_set(sq, mapping, sq->dma_addr);
 	return 0;
 }
 
@@ -1388,6 +1388,12 @@ static void flush_qp(struct c4iw_qp *qhp)
 	schp = to_c4iw_cq(qhp->ibqp.send_cq);
 
 	if (qhp->ibqp.uobject) {
+
+		/* for user qps, qhp->wq.flushed is protected by qhp->mutex */
+		if (qhp->wq.flushed)
+			return;
+
+		qhp->wq.flushed = 1;
 		t4_set_wq_in_error(&qhp->wq);
 		t4_set_cq_in_error(&rchp->cq);
 		spin_lock_irqsave(&rchp->comp_handler_lock, flag);

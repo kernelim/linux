@@ -154,7 +154,7 @@ uint32_t generic_reg_update_ex(const struct dc_context *ctx,
 unsigned int generic_reg_wait(const struct dc_context *ctx,
 	uint32_t addr, uint32_t mask, uint32_t shift, uint32_t condition_value,
 	unsigned int delay_between_poll_us, unsigned int time_out_num_tries,
-	const char *func_name, int line);
+	const char *func_name, int line, bool warn_on_fail);
 
 
 /* These macros need to be used with soc15 registers in order to retrieve

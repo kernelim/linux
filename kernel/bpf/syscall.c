@@ -32,6 +32,9 @@
 #include <linux/ctype.h>
 #include <linux/btf.h>
 #include <linux/nospec.h>
+#include <linux/init.h>
+
+#include <linux/rh_features.h>
 
 #define IS_FD_ARRAY(map) ((map)->map_type == BPF_MAP_TYPE_PROG_ARRAY || \
 			   (map)->map_type == BPF_MAP_TYPE_PERF_EVENT_ARRAY || \
@@ -48,7 +51,25 @@ static DEFINE_SPINLOCK(prog_idr_lock);
 static DEFINE_IDR(map_idr);
 static DEFINE_SPINLOCK(map_idr_lock);
 
-int sysctl_unprivileged_bpf_disabled __read_mostly;
+/* RHEL-only: default to 1 */
+int sysctl_unprivileged_bpf_disabled __read_mostly = 1;
+
+static int __init unprivileged_bpf_setup(char *str)
+{
+	unsigned long disabled;
+	if (!kstrtoul(str, 0, &disabled))
+		sysctl_unprivileged_bpf_disabled = !!disabled;
+
+	if (!sysctl_unprivileged_bpf_disabled) {
+		pr_warn("Unprivileged BPF has been enabled "
+			"(unprivileged_bpf_disabled=0 has been supplied "
+			"in boot parameters), tainting the kernel");
+		add_taint(TAINT_UNPRIVILEGED_BPF, LOCKDEP_STILL_OK);
+	}
+
+	return 1;
+}
+__setup("unprivileged_bpf_disabled=", unprivileged_bpf_setup);
 
 static const struct bpf_map_ops * const bpf_map_types[] = {
 #define BPF_PROG_TYPE(_id, _ops)
@@ -1443,6 +1464,8 @@ static int bpf_raw_tracepoint_open(const union bpf_attr *attr)
 	char tp_name[128];
 	int tp_fd, err;
 
+	rh_mark_used_feature("eBPF/rawtrace");
+
 	if (strncpy_from_user(tp_name, u64_to_user_ptr(attr->raw_tracepoint.name),
 			      sizeof(tp_name) - 1) < 0)
 		return -EFAULT;
@@ -1683,6 +1706,8 @@ static int bpf_prog_test_run(const union bpf_attr *attr,
 	prog = bpf_prog_get(attr->test.prog_fd);
 	if (IS_ERR(prog))
 		return PTR_ERR(prog);
+
+	rh_mark_used_feature("eBPF/test");
 
 	if (prog->aux->ops->test_run)
 		ret = prog->aux->ops->test_run(prog, attr, uattr);

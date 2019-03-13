@@ -59,6 +59,23 @@ enum {
 	/**/NETIF_F_GSO_LAST =		/* last bit, see GSO_MASK */
 		NETIF_F_GSO_UDP_L4_BIT,
 
+	/* RHEL only: bits reserved for future features.
+	 * GSO-related bit must be allocated from the top of this list, and
+	 * moved before NETIF_F_GSO_LAST, other features must be allocated
+	 * from the bottom of the list.
+	 * The reserved space is limited: we need good reasons to use each
+	 * bit.
+	 */
+	__NETIF_F_RH_KABI_PLACEHOLDER_1,
+	__NETIF_F_RH_KABI_PLACEHOLDER_2,
+	__NETIF_F_RH_KABI_PLACEHOLDER_3,
+	__NETIF_F_RH_KABI_PLACEHOLDER_4,
+	__NETIF_F_RH_KABI_PLACEHOLDER_5,
+	__NETIF_F_RH_KABI_PLACEHOLDER_6,
+	__NETIF_F_RH_KABI_PLACEHOLDER_7,
+	__NETIF_F_RH_KABI_PLACEHOLDER_8,
+	__NETIF_F_RH_KABI_PLACEHOLDER_9,
+
 	NETIF_F_FCOE_CRC_BIT,		/* FCoE CRC32 */
 	NETIF_F_SCTP_CRC_BIT,		/* SCTP checksum offload */
 	NETIF_F_FCOE_MTU_BIT,		/* Supports max FCoE MTU, 2158 bytes*/

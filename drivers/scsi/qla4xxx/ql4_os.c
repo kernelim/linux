@@ -8590,6 +8590,9 @@ exit_login_resp:
 				  fw_ddb_entry, fw_ddb_entry_dma);
 }
 
+static struct pci_device_id qla4xxx_pci_tbl[];
+static struct pci_device_id qla4xxx_pci_ids_removed[];
+
 /**
  * qla4xxx_probe_adapter - callback function to probe HBA
  * @pdev: pointer to pci_dev structure
@@ -8609,6 +8612,10 @@ static int qla4xxx_probe_adapter(struct pci_dev *pdev,
 	char buf[34];
 	struct qla4_8xxx_legacy_intr_set *nx_legacy_intr;
 	uint32_t dev_state;
+
+	if (pci_device_support_removed(qla4xxx_pci_tbl,
+				qla4xxx_pci_ids_removed, pdev))
+		return -ENODEV;
 
 	if (pci_enable_device(pdev))
 		return -1;
@@ -9875,6 +9882,28 @@ static struct pci_device_id qla4xxx_pci_tbl[] = {
 	{0, 0},
 };
 MODULE_DEVICE_TABLE(pci, qla4xxx_pci_tbl);
+
+static struct pci_device_id qla4xxx_pci_ids_removed[] = {
+	{
+		.vendor         = PCI_VENDOR_ID_QLOGIC,
+		.device         = PCI_DEVICE_ID_QLOGIC_ISP8022,
+		.subvendor      = PCI_ANY_ID,
+		.subdevice      = PCI_ANY_ID,
+	},
+	{
+		.vendor		= PCI_VENDOR_ID_QLOGIC,
+		.device		= PCI_DEVICE_ID_QLOGIC_ISP8324,
+		.subvendor	= PCI_ANY_ID,
+		.subdevice	= PCI_ANY_ID,
+	},
+	{
+		.vendor		= PCI_VENDOR_ID_QLOGIC,
+		.device		= PCI_DEVICE_ID_QLOGIC_ISP8042,
+		.subvendor	= PCI_ANY_ID,
+		.subdevice	= PCI_ANY_ID,
+	},
+	{0, 0},
+};
 
 static struct pci_driver qla4xxx_pci_driver = {
 	.name		= DRIVER_NAME,

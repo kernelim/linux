@@ -123,6 +123,37 @@ memory layout to fit in user mode), check KVM_CAP_MIPS_VZ and use the
 flag KVM_VM_MIPS_VZ.
 
 
+On arm64, the physical address size for a VM (IPA Size limit) is limited
+to 40bits by default. The limit can be configured if the host supports the
+extension KVM_CAP_ARM_VM_IPA_SIZE. When supported, use
+KVM_VM_TYPE_ARM_IPA_SIZE(IPA_Bits) to set the size in the machine type
+identifier, where IPA_Bits is the maximum width of any physical
+address used by the VM. The IPA_Bits is encoded in bits[7-0] of the
+machine type identifier.
+
+e.g, to configure a guest to use 48bit physical address size :
+
+    vm_fd = ioctl(dev_fd, KVM_CREATE_VM, KVM_VM_TYPE_ARM_IPA_SIZE(48));
+
+The requested size (IPA_Bits) must be :
+  0 - Implies default size, 40bits (for backward compatibility)
+
+  or
+
+  N - Implies N bits, where N is a positive integer such that,
+      32 <= N <= Host_IPA_Limit
+
+Host_IPA_Limit is the maximum possible value for IPA_Bits on the host and
+is dependent on the CPU capability and the kernel configuration. The limit can
+be retrieved using KVM_CAP_ARM_VM_IPA_SIZE of the KVM_CHECK_EXTENSION
+ioctl() at run-time.
+
+Please note that configuring the IPA size does not affect the capability
+exposed by the guest CPUs in ID_AA64MMFR0_EL1[PARange]. It only affects
+size of the address translated by the stage2 level (guest physical to
+host physical address translations).
+
+
 4.3 KVM_GET_MSR_INDEX_LIST, KVM_GET_MSR_FEATURE_INDEX_LIST
 
 Capability: basic, KVM_CAP_GET_MSR_FEATURES for KVM_GET_MSR_FEATURE_INDEX_LIST
@@ -1864,6 +1895,7 @@ registers, find a list below:
   PPC   | KVM_REG_PPC_TIDR              | 64
   PPC   | KVM_REG_PPC_PSSCR             | 64
   PPC   | KVM_REG_PPC_DEC_EXPIRY        | 64
+  PPC   | KVM_REG_PPC_PTCR              | 64
   PPC   | KVM_REG_PPC_TM_GPR0           | 64
           ...
   PPC   | KVM_REG_PPC_TM_GPR31          | 64
@@ -2210,6 +2242,10 @@ The supported flags are:
     - KVM_PPC_1T_SEGMENTS
         The emulated MMU supports 1T segments in addition to the
         standard 256M ones.
+
+    - KVM_PPC_NO_HASH
+	This flag indicates that HPT guests are not supported by KVM,
+	thus all guests must use radix MMU mode.
 
 The "slb_size" field indicates how many SLB entries are supported
 
@@ -3561,6 +3597,62 @@ Returns: 0 on success,
 	-ENOENT on deassign if the conn_id isn't registered
 	-EEXIST on assign if the conn_id is already registered
 
+4.114 KVM_GET_NESTED_STATE
+
+Capability: KVM_CAP_NESTED_STATE
+Architectures: x86
+Type: vcpu ioctl
+Parameters: struct kvm_nested_state (in/out)
+Returns: 0 on success, -1 on error
+Errors:
+  E2BIG:     the total state size (including the fixed-size part of struct
+             kvm_nested_state) exceeds the value of 'size' specified by
+             the user; the size required will be written into size.
+
+struct kvm_nested_state {
+	__u16 flags;
+	__u16 format;
+	__u32 size;
+	union {
+		struct kvm_vmx_nested_state vmx;
+		struct kvm_svm_nested_state svm;
+		__u8 pad[120];
+	};
+	__u8 data[0];
+};
+
+#define KVM_STATE_NESTED_GUEST_MODE	0x00000001
+#define KVM_STATE_NESTED_RUN_PENDING	0x00000002
+
+#define KVM_STATE_NESTED_SMM_GUEST_MODE	0x00000001
+#define KVM_STATE_NESTED_SMM_VMXON	0x00000002
+
+struct kvm_vmx_nested_state {
+	__u64 vmxon_pa;
+	__u64 vmcs_pa;
+
+	struct {
+		__u16 flags;
+	} smm;
+};
+
+This ioctl copies the vcpu's nested virtualization state from the kernel to
+userspace.
+
+The maximum size of the state, including the fixed-size part of struct
+kvm_nested_state, can be retrieved by passing KVM_CAP_NESTED_STATE to
+the KVM_CHECK_EXTENSION ioctl().
+
+4.115 KVM_SET_NESTED_STATE
+
+Capability: KVM_CAP_NESTED_STATE
+Architectures: x86
+Type: vcpu ioctl
+Parameters: struct kvm_nested_state (in)
+Returns: 0 on success, -1 on error
+
+This copies the vcpu's kvm_nested_state struct from userspace to the kernel.  For
+the definition of struct kvm_nested_state, see KVM_GET_NESTED_STATE.
 
 5. The kvm_run structure
 ------------------------
@@ -4390,6 +4482,46 @@ just pass the KVM_CHECK_EXTENSION result to KVM_ENABLE_CAP to disable
 all such vmexits.
 
 Do not enable KVM_FEATURE_PV_UNHALT if you disable HLT exits.
+
+7.14 KVM_CAP_S390_HPAGE_1M
+
+Architectures: s390
+Parameters: none
+Returns: 0 on success, -EINVAL if hpage module parameter was not set
+	 or cmma is enabled, or the VM has the KVM_VM_S390_UCONTROL
+	 flag set
+
+With this capability the KVM support for memory backing with 1m pages
+through hugetlbfs can be enabled for a VM. After the capability is
+enabled, cmma can't be enabled anymore and pfmfi and the storage key
+interpretation are disabled. If cmma has already been enabled or the
+hpage module parameter is not set to 1, -EINVAL is returned.
+
+While it is generally possible to create a huge page backed VM without
+this capability, the VM will not be able to run.
+
+7.14 KVM_CAP_MSR_PLATFORM_INFO
+
+Architectures: x86
+Parameters: args[0] whether feature should be enabled or not
+
+With this capability, a guest may read the MSR_PLATFORM_INFO MSR. Otherwise,
+a #GP would be raised when the guest tries to access. Currently, this
+capability does not enable write permissions of this MSR for the guest.
+
+7.16 KVM_CAP_PPC_NESTED_HV
+
+Architectures: ppc
+Parameters: none
+Returns: 0 on success, -EINVAL when the implementation doesn't support
+	 nested-HV virtualization.
+
+HV-KVM on POWER9 and later systems allows for "nested-HV"
+virtualization, which provides a way for a guest VM to run guests that
+can run using the CPU's supervisor mode (privileged non-hypervisor
+state).  Enabling this capability on a VM depends on the CPU having
+the necessary functionality and on the facility being enabled with a
+kvm-hv module parameter.
 
 8. Other capabilities.
 ----------------------

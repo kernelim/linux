@@ -13,6 +13,9 @@ struct bsg_ops {
 				fmode_t mode);
 	int	(*complete_rq)(struct request *rq, struct sg_io_v4 *hdr);
 	void	(*free_rq)(struct request *rq);
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
 };
 
 struct bsg_class_device {
@@ -20,6 +23,9 @@ struct bsg_class_device {
 	int minor;
 	struct request_queue *queue;
 	const struct bsg_ops *ops;
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
 };
 
 int bsg_register_queue(struct request_queue *q, struct device *parent,

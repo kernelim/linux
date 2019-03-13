@@ -19,6 +19,7 @@
 #include <linux/list.h>
 #include <linux/proc_fs.h>
 #include <linux/acpi.h> /* For acpi_handle */
+#include <linux/rh_kabi.h>
 
 struct module;
 struct device;
@@ -28,6 +29,11 @@ struct device;
  * send and receive messages.
  */
 typedef struct ipmi_user *ipmi_user_t;
+
+/* RHEL extension to the ipmi_recv_msg() struct
+ */
+struct ipmi_recv_msg_rh {
+};
 
 /*
  * Stuff coming from the receive interface comes as one of these.
@@ -70,10 +76,17 @@ struct ipmi_recv_msg {
 	 * the size or existence of this, since it may change.
 	 */
 	unsigned char   msg_data[IPMI_MAX_MSG_LENGTH];
+
+	RH_KABI_SIZE_AND_EXTEND(ipmi_recv_msg)
 };
 
 /* Allocate and free the receive message. */
 void ipmi_free_recv_msg(struct ipmi_recv_msg *msg);
+
+/* RHEL extension to struct ipmi_user_hndl.
+ */
+struct ipmi_user_hndl_rh {
+};
 
 struct ipmi_user_hndl {
 	/*
@@ -105,6 +118,7 @@ struct ipmi_user_hndl {
 	 * if it is not usable.
 	 */
 	void (*shutdown)(void *handler_data);
+	RH_KABI_SIZE_AND_EXTEND(ipmi_user_hndl)
 };
 
 /* Create a new user of the IPMI layer on the given interface number. */

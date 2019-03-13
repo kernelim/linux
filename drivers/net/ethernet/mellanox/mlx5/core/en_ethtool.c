@@ -32,6 +32,7 @@
 
 #include "en.h"
 #include "en/port.h"
+#include "lib/clock.h"
 
 void mlx5e_ethtool_get_drvinfo(struct mlx5e_priv *priv,
 			       struct ethtool_drvinfo *drvinfo)
@@ -133,6 +134,13 @@ void mlx5e_build_ptys2ethtool_map(void)
 	MLX5_BUILD_PTYS2ETHTOOL_CONFIG(MLX5E_50GBASE_KR2,
 				       ETHTOOL_LINK_MODE_50000baseKR2_Full_BIT);
 }
+
+static const char mlx5e_priv_flags[][ETH_GSTRING_LEN] = {
+	"rx_cqe_moder",
+	"tx_cqe_moder",
+	"rx_cqe_compress",
+	"rx_striding_rq",
+};
 
 int mlx5e_ethtool_get_sset_count(struct mlx5e_priv *priv, int sset)
 {
@@ -310,7 +318,7 @@ static int mlx5e_set_ringparam(struct net_device *dev,
 void mlx5e_ethtool_get_channels(struct mlx5e_priv *priv,
 				struct ethtool_channels *ch)
 {
-	ch->max_combined   = priv->profile->max_nch(priv->mdev);
+	ch->max_combined   = mlx5e_get_netdev_max_channels(priv->netdev);
 	ch->combined_count = priv->channels.params.num_channels;
 }
 
@@ -969,33 +977,6 @@ static int mlx5e_set_rxfh(struct net_device *dev, const u32 *indir,
 	return 0;
 }
 
-static int mlx5e_get_rxnfc(struct net_device *netdev,
-			   struct ethtool_rxnfc *info, u32 *rule_locs)
-{
-	struct mlx5e_priv *priv = netdev_priv(netdev);
-	int err = 0;
-
-	switch (info->cmd) {
-	case ETHTOOL_GRXRINGS:
-		info->data = priv->channels.params.num_channels;
-		break;
-	case ETHTOOL_GRXCLSRLCNT:
-		info->rule_cnt = priv->fs.ethtool.tot_num_rules;
-		break;
-	case ETHTOOL_GRXCLSRULE:
-		err = mlx5e_ethtool_get_flow(priv, info, info->fs.location);
-		break;
-	case ETHTOOL_GRXCLSRLALL:
-		err = mlx5e_ethtool_get_all_flows(priv, info, rule_locs);
-		break;
-	default:
-		err = -EOPNOTSUPP;
-		break;
-	}
-
-	return err;
-}
-
 #define MLX5E_PFC_PREVEN_AUTO_TOUT_MSEC		100
 #define MLX5E_PFC_PREVEN_TOUT_MAX_MSEC		8000
 #define MLX5E_PFC_PREVEN_MINOR_PRECENT		85
@@ -1133,10 +1114,10 @@ int mlx5e_ethtool_get_ts_info(struct mlx5e_priv *priv,
 	if (ret)
 		return ret;
 
-	info->phc_index = mdev->clock.ptp ?
-			  ptp_clock_index(mdev->clock.ptp) : -1;
+	info->phc_index = mlx5_clock_get_ptp_index(mdev);
 
-	if (!MLX5_CAP_GEN(priv->mdev, device_frequency_khz))
+	if (!MLX5_CAP_GEN(priv->mdev, device_frequency_khz) ||
+	    info->phc_index == -1)
 		return 0;
 
 	info->so_timestamping |= SOF_TIMESTAMPING_TX_HARDWARE |
@@ -1606,26 +1587,6 @@ static u32 mlx5e_get_priv_flags(struct net_device *netdev)
 	return priv->channels.params.pflags;
 }
 
-static int mlx5e_set_rxnfc(struct net_device *dev, struct ethtool_rxnfc *cmd)
-{
-	int err = 0;
-	struct mlx5e_priv *priv = netdev_priv(dev);
-
-	switch (cmd->cmd) {
-	case ETHTOOL_SRXCLSRLINS:
-		err = mlx5e_ethtool_flow_replace(priv, &cmd->fs);
-		break;
-	case ETHTOOL_SRXCLSRLDEL:
-		err = mlx5e_ethtool_flow_remove(priv, cmd->fs.location);
-		break;
-	default:
-		err = -EOPNOTSUPP;
-		break;
-	}
-
-	return err;
-}
-
 int mlx5e_ethtool_flash_device(struct mlx5e_priv *priv,
 			       struct ethtool_flash *flash)
 {
@@ -1678,8 +1639,10 @@ const struct ethtool_ops mlx5e_ethtool_ops = {
 	.get_rxfh_indir_size = mlx5e_get_rxfh_indir_size,
 	.get_rxfh          = mlx5e_get_rxfh,
 	.set_rxfh          = mlx5e_set_rxfh,
+#ifdef CONFIG_MLX5_EN_RXNFC
 	.get_rxnfc         = mlx5e_get_rxnfc,
 	.set_rxnfc         = mlx5e_set_rxnfc,
+#endif
 	.flash_device      = mlx5e_flash_device,
 	.get_tunable       = mlx5e_get_tunable,
 	.set_tunable       = mlx5e_set_tunable,
@@ -1696,5 +1659,4 @@ const struct ethtool_ops mlx5e_ethtool_ops = {
 	.self_test         = mlx5e_self_test,
 	.get_msglevel      = mlx5e_get_msglevel,
 	.set_msglevel      = mlx5e_set_msglevel,
-
 };

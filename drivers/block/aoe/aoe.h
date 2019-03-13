@@ -1,4 +1,6 @@
 /* Copyright (c) 2013 Coraid, Inc.  See COPYING for GPL terms. */
+#include <linux/blk-mq.h>
+
 #define VERSION "85"
 #define AOE_MAJOR 152
 #define DEVICE_NAME "aoe"
@@ -98,6 +100,10 @@ enum {
 	MAX_TAINT = 1000,	/* cap on aoetgt taint */
 };
 
+struct aoe_req {
+	unsigned long nr_bios;
+};
+
 struct buf {
 	ulong nframesout;
 	struct bio *bio;
@@ -164,6 +170,8 @@ struct aoedev {
 	struct gendisk *gd;
 	struct dentry *debugfs;
 	struct request_queue *blkq;
+	struct list_head rq_list;
+	struct blk_mq_tag_set tag_set;
 	struct hd_geometry geo;
 	sector_t ssize;
 	struct timer_list timer;

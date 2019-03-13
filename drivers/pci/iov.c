@@ -133,6 +133,8 @@ static void pci_read_vf_config_common(struct pci_dev *virtfn)
 			     &physfn->sriov->subsystem_vendor);
 	pci_read_config_word(virtfn, PCI_SUBSYSTEM_ID,
 			     &physfn->sriov->subsystem_device);
+
+	physfn->sriov->cfg_size = pci_cfg_space_size(virtfn);
 }
 
 int pci_iov_add_virtfn(struct pci_dev *dev, int id)
@@ -818,15 +820,15 @@ int pci_sriov_set_totalvfs(struct pci_dev *dev, u16 numvfs)
 {
 	if (!dev->is_physfn)
 		return -ENOSYS;
+
 	if (numvfs > dev->sriov->total_VFs)
 		return -EINVAL;
 
 	/* Shouldn't change if VFs already enabled */
 	if (dev->sriov->ctrl & PCI_SRIOV_CTRL_VFE)
 		return -EBUSY;
-	else
-		dev->sriov->driver_max_VFs = numvfs;
 
+	dev->sriov->driver_max_VFs = numvfs;
 	return 0;
 }
 EXPORT_SYMBOL_GPL(pci_sriov_set_totalvfs);

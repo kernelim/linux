@@ -982,8 +982,9 @@ void qlt_free_session_done(struct work_struct *work)
 
 			logo.id = sess->d_id;
 			logo.cmd_count = 0;
+			if (!own)
+				qlt_send_first_logo(vha, &logo);
 			sess->send_els_logo = 0;
-			qlt_send_first_logo(vha, &logo);
 		}
 
 		if (sess->logout_on_delete && sess->loop_id != FC_NO_LOOP_ID) {
@@ -1256,7 +1257,8 @@ void qlt_schedule_sess_for_deletion(struct fc_port *sess)
 	qla24xx_chk_fcp_state(sess);
 
 	ql_dbg(ql_dbg_tgt, sess->vha, 0xe001,
-	    "Scheduling sess %p for deletion\n", sess);
+	    "Scheduling sess %p for deletion %8phC\n",
+	    sess, sess->port_name);
 
 	INIT_WORK(&sess->del_work, qla24xx_delete_sess_fn);
 	WARN_ON(!queue_work(sess->vha->hw->wq, &sess->del_work));
@@ -3782,7 +3784,7 @@ void qlt_free_cmd(struct qla_tgt_cmd *cmd)
 		return;
 	}
 	cmd->jiffies_at_free = get_jiffies_64();
-	percpu_ida_free(&sess->se_sess->sess_tag_pool, cmd->se_cmd.map_tag);
+	target_free_tag(sess->se_sess, &cmd->se_cmd);
 }
 EXPORT_SYMBOL(qlt_free_cmd);
 
@@ -4145,7 +4147,7 @@ out_term:
 	qlt_send_term_exchange(qpair, NULL, &cmd->atio, 1, 0);
 
 	qlt_decr_num_pend_cmds(vha);
-	percpu_ida_free(&sess->se_sess->sess_tag_pool, cmd->se_cmd.map_tag);
+	target_free_tag(sess->se_sess, &cmd->se_cmd);
 	spin_unlock_irqrestore(qpair->qp_lock_ptr, flags);
 
 	spin_lock_irqsave(&ha->tgt.sess_lock, flags);
@@ -4276,9 +4278,9 @@ static struct qla_tgt_cmd *qlt_get_tag(scsi_qla_host_t *vha,
 {
 	struct se_session *se_sess = sess->se_sess;
 	struct qla_tgt_cmd *cmd;
-	int tag;
+	int tag, cpu;
 
-	tag = percpu_ida_alloc(&se_sess->sess_tag_pool, TASK_RUNNING);
+	tag = sbitmap_queue_get(&se_sess->sess_tag_pool, &cpu);
 	if (tag < 0)
 		return NULL;
 
@@ -4291,6 +4293,7 @@ static struct qla_tgt_cmd *qlt_get_tag(scsi_qla_host_t *vha,
 	qlt_incr_num_pend_cmds(vha);
 	cmd->vha = vha;
 	cmd->se_cmd.map_tag = tag;
+	cmd->se_cmd.map_cpu = cpu;
 	cmd->sess = sess;
 	cmd->loop_id = sess->loop_id;
 	cmd->conf_compl_supported = sess->conf_compl_supported;
@@ -5293,7 +5296,7 @@ qlt_alloc_qfull_cmd(struct scsi_qla_host *vha,
 	struct fc_port *sess;
 	struct se_session *se_sess;
 	struct qla_tgt_cmd *cmd;
-	int tag;
+	int tag, cpu;
 	unsigned long flags;
 
 	if (unlikely(tgt->tgt_stop)) {
@@ -5325,7 +5328,7 @@ qlt_alloc_qfull_cmd(struct scsi_qla_host *vha,
 
 	se_sess = sess->se_sess;
 
-	tag = percpu_ida_alloc(&se_sess->sess_tag_pool, TASK_RUNNING);
+	tag = sbitmap_queue_get(&se_sess->sess_tag_pool, &cpu);
 	if (tag < 0)
 		return;
 
@@ -5356,6 +5359,7 @@ qlt_alloc_qfull_cmd(struct scsi_qla_host *vha,
 	cmd->reset_count = ha->base_qpair->chip_reset;
 	cmd->q_full = 1;
 	cmd->qpair = ha->base_qpair;
+	cmd->se_cmd.map_cpu = cpu;
 
 	if (qfull) {
 		cmd->q_full = 1;

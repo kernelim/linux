@@ -61,7 +61,6 @@ void pnv_cxl_phb_set_peer_afu(struct pci_dev *dev, struct cxl_afu *afu);
 
 struct pnv_php_slot {
 	struct hotplug_slot		slot;
-	struct hotplug_slot_info	slot_info;
 	uint64_t			id;
 	char				*name;
 	int				slot_no;
@@ -79,6 +78,7 @@ struct pnv_php_slot {
 	struct pci_dev			*pdev;
 	struct pci_bus			*bus;
 	bool				power_state_check;
+	u8				attention_state;
 	void				*fdt;
 	void				*dt;
 	struct of_changeset		ocs;

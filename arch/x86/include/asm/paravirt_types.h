@@ -2,6 +2,8 @@
 #ifndef _ASM_X86_PARAVIRT_TYPES_H
 #define _ASM_X86_PARAVIRT_TYPES_H
 
+#include <linux/rh_kabi.h>
+
 /* Bitmask of what can be clobbered: usually at least eax. */
 #define CLBR_NONE 0
 #define CLBR_EAX  (1 << 0)
@@ -54,6 +56,7 @@ struct desc_struct;
 struct task_struct;
 struct cpumask;
 struct flush_tlb_info;
+struct mmu_gather;
 
 /*
  * Wrapper type for pointers to code which uses the non-standard
@@ -195,6 +198,8 @@ struct pv_irq_ops {
 	void (*safe_halt)(void);
 	void (*halt)(void);
 
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
 } __no_randomize_layout;
 
 struct pv_mmu_ops {
@@ -221,6 +226,8 @@ struct pv_mmu_ops {
 	void (*flush_tlb_one_user)(unsigned long addr);
 	void (*flush_tlb_others)(const struct cpumask *cpus,
 				 const struct flush_tlb_info *info);
+
+	void (*tlb_remove_table)(struct mmu_gather *tlb, void *table);
 
 	/* Hooks for allocating and freeing a pagetable top-level */
 	int  (*pgd_alloc)(struct mm_struct *mm);
@@ -295,6 +302,11 @@ struct pv_mmu_ops {
 	   an mfn.  We can tell which is which from the index. */
 	void (*set_fixmap)(unsigned /* enum fixed_addresses */ idx,
 			   phys_addr_t phys, pgprot_t flags);
+
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 } __no_randomize_layout;
 
 struct arch_spinlock;
@@ -312,6 +324,8 @@ struct pv_lock_ops {
 	void (*kick)(int cpu);
 
 	struct paravirt_callee_save vcpu_is_preempted;
+
+	RH_KABI_RESERVE(1)
 } __no_randomize_layout;
 
 /* This contains all the paravirt structures: we get a convenient

@@ -27,6 +27,8 @@
 #include <linux/memremap.h>
 #include <linux/overflow.h>
 
+#include <linux/rh_kabi.h>
+
 struct mempolicy;
 struct anon_vma;
 struct anon_vma_chain;
@@ -450,6 +452,10 @@ struct vm_operations_struct {
 	 */
 	struct page *(*find_special_page)(struct vm_area_struct *vma,
 					  unsigned long addr);
+	RH_KABI_RESERVE(1)
+	RH_KABI_RESERVE(2)
+	RH_KABI_RESERVE(3)
+	RH_KABI_RESERVE(4)
 };
 
 static inline void vma_init(struct vm_area_struct *vma, struct mm_struct *mm)
@@ -889,6 +895,19 @@ static inline bool is_device_public_page(const struct page *page)
 		page->pgmap->type == MEMORY_DEVICE_PUBLIC;
 }
 
+#ifdef CONFIG_PCI_P2PDMA
+static inline bool is_pci_p2pdma_page(const struct page *page)
+{
+	return is_zone_device_page(page) &&
+		page->pgmap->type == MEMORY_DEVICE_PCI_P2PDMA;
+}
+#else /* CONFIG_PCI_P2PDMA */
+static inline bool is_pci_p2pdma_page(const struct page *page)
+{
+	return false;
+}
+#endif /* CONFIG_PCI_P2PDMA */
+
 #else /* CONFIG_DEV_PAGEMAP_OPS */
 static inline void dev_pagemap_get_ops(void)
 {
@@ -909,6 +928,11 @@ static inline bool is_device_private_page(const struct page *page)
 }
 
 static inline bool is_device_public_page(const struct page *page)
+{
+	return false;
+}
+
+static inline bool is_pci_p2pdma_page(const struct page *page)
 {
 	return false;
 }
@@ -1732,11 +1756,15 @@ int __pud_alloc(struct mm_struct *mm, p4d_t *p4d, unsigned long address);
 
 static inline void mm_inc_nr_puds(struct mm_struct *mm)
 {
+	if (mm_pud_folded(mm))
+		return;
 	atomic_long_add(PTRS_PER_PUD * sizeof(pud_t), &mm->pgtables_bytes);
 }
 
 static inline void mm_dec_nr_puds(struct mm_struct *mm)
 {
+	if (mm_pud_folded(mm))
+		return;
 	atomic_long_sub(PTRS_PER_PUD * sizeof(pud_t), &mm->pgtables_bytes);
 }
 #endif
@@ -1756,11 +1784,15 @@ int __pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address);
 
 static inline void mm_inc_nr_pmds(struct mm_struct *mm)
 {
+	if (mm_pmd_folded(mm))
+		return;
 	atomic_long_add(PTRS_PER_PMD * sizeof(pmd_t), &mm->pgtables_bytes);
 }
 
 static inline void mm_dec_nr_pmds(struct mm_struct *mm)
 {
+	if (mm_pmd_folded(mm))
+		return;
 	atomic_long_sub(PTRS_PER_PMD * sizeof(pmd_t), &mm->pgtables_bytes);
 }
 #endif
@@ -2665,12 +2697,7 @@ extern int randomize_va_space;
 const char * arch_vma_name(struct vm_area_struct *vma);
 void print_vma_addr(char *prefix, unsigned long rip);
 
-void sparse_mem_maps_populate_node(struct page **map_map,
-				   unsigned long pnum_begin,
-				   unsigned long pnum_end,
-				   unsigned long map_count,
-				   int nodeid);
-
+void *sparse_buffer_alloc(unsigned long size);
 struct page *sparse_mem_map_populate(unsigned long pnum, int nid,
 		struct vmem_altmap *altmap);
 pgd_t *vmemmap_pgd_populate(unsigned long addr, int node);

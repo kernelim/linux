@@ -216,6 +216,8 @@ static int xgbe_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	int bar_mask;
 	int ret;
 
+	mark_tech_preview(XGBE_DRV_NAME, THIS_MODULE);
+
 	pdata = xgbe_alloc_pdata(dev);
 	if (IS_ERR(pdata)) {
 		ret = PTR_ERR(pdata);

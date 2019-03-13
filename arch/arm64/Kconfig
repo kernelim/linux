@@ -11,6 +11,8 @@ config ARM64
 	select ARCH_CLOCKSOURCE_DATA
 	select ARCH_HAS_DEBUG_VIRTUAL
 	select ARCH_HAS_DEVMEM_IS_ALLOWED
+	select ARCH_HAS_DMA_COHERENT_TO_PFN
+	select ARCH_HAS_DMA_MMAP_PGPROT
 	select ARCH_HAS_ACPI_TABLE_UPGRADE if ACPI
 	select ARCH_HAS_ELF_RANDOMIZE
 	select ARCH_HAS_FAST_MULTIPLIER
@@ -24,6 +26,9 @@ config ARM64
 	select ARCH_HAS_SG_CHAIN
 	select ARCH_HAS_STRICT_KERNEL_RWX
 	select ARCH_HAS_STRICT_MODULE_RWX
+	select ARCH_HAS_SYNC_DMA_FOR_DEVICE
+	select ARCH_HAS_SYNC_DMA_FOR_CPU
+	select ARCH_HAS_SYSCALL_WRAPPER
 	select ARCH_HAS_TICK_BROADCAST if GENERIC_CLOCKEVENTS_BROADCAST
 	select ARCH_HAVE_NMI_SAFE_CMPXCHG
 	select ARCH_INLINE_READ_LOCK if !PREEMPT
@@ -42,8 +47,19 @@ config ARM64
 	select ARCH_INLINE_WRITE_UNLOCK_BH if !PREEMPT
 	select ARCH_INLINE_WRITE_UNLOCK_IRQ if !PREEMPT
 	select ARCH_INLINE_WRITE_UNLOCK_IRQRESTORE if !PREEMPT
+	select ARCH_INLINE_SPIN_TRYLOCK if !PREEMPT
+	select ARCH_INLINE_SPIN_TRYLOCK_BH if !PREEMPT
+	select ARCH_INLINE_SPIN_LOCK if !PREEMPT
+	select ARCH_INLINE_SPIN_LOCK_BH if !PREEMPT
+	select ARCH_INLINE_SPIN_LOCK_IRQ if !PREEMPT
+	select ARCH_INLINE_SPIN_LOCK_IRQSAVE if !PREEMPT
+	select ARCH_INLINE_SPIN_UNLOCK if !PREEMPT
+	select ARCH_INLINE_SPIN_UNLOCK_BH if !PREEMPT
+	select ARCH_INLINE_SPIN_UNLOCK_IRQ if !PREEMPT
+	select ARCH_INLINE_SPIN_UNLOCK_IRQRESTORE if !PREEMPT
 	select ARCH_USE_CMPXCHG_LOCKREF
 	select ARCH_USE_QUEUED_RWLOCKS
+	select ARCH_USE_QUEUED_SPINLOCKS
 	select ARCH_SUPPORTS_MEMORY_FAILURE
 	select ARCH_SUPPORTS_ATOMIC_RMW
 	select ARCH_SUPPORTS_INT128 if GCC_VERSION >= 50000 || CC_IS_CLANG
@@ -64,7 +80,7 @@ config ARM64
 	select COMMON_CLK
 	select CPU_PM if (SUSPEND || CPU_IDLE)
 	select DCACHE_WORD_ACCESS
-	select DMA_DIRECT_OPS
+	select DMA_DIRECT_REMAP
 	select EDAC_SUPPORT
 	select FRAME_POINTER
 	select GENERIC_ALLOCATOR
@@ -127,6 +143,7 @@ config ARM64
 	select HAVE_PERF_USER_STACK_DUMP
 	select HAVE_REGS_AND_STACK_ACCESS_API
 	select HAVE_RCU_TABLE_FREE
+	select HAVE_RSEQ
 	select HAVE_STACKPROTECTOR
 	select HAVE_SYSCALL_TRACEPOINTS
 	select HAVE_KPROBES
@@ -253,7 +270,7 @@ config PGTABLE_LEVELS
 	int
 	default 2 if ARM64_16K_PAGES && ARM64_VA_BITS_36
 	default 2 if ARM64_64K_PAGES && ARM64_VA_BITS_42
-	default 3 if ARM64_64K_PAGES && ARM64_VA_BITS_48
+	default 3 if ARM64_64K_PAGES && (ARM64_VA_BITS_48 || ARM64_USER_VA_BITS_52)
 	default 3 if ARM64_4K_PAGES && ARM64_VA_BITS_39
 	default 3 if ARM64_16K_PAGES && ARM64_VA_BITS_47
 	default 4 if !ARM64_64K_PAGES && ARM64_VA_BITS_48
@@ -648,7 +665,35 @@ config ARM64_VA_BITS_47
 config ARM64_VA_BITS_48
 	bool "48-bit"
 
+config ARM64_USER_VA_BITS_52
+	bool "52-bit (user)"
+	depends on ARM64_64K_PAGES && (ARM64_PAN || !ARM64_SW_TTBR0_PAN)
+	help
+	  Enable 52-bit virtual addressing for userspace when explicitly
+	  requested via a hint to mmap(). The kernel will continue to
+	  use 48-bit virtual addresses for its own mappings.
+
+	  NOTE: Enabling 52-bit virtual addressing in conjunction with
+	  ARMv8.3 Pointer Authentication will result in the PAC being
+	  reduced from 7 bits to 3 bits, which may have a significant
+	  impact on its susceptibility to brute-force attacks.
+
+	  If unsure, select 48-bit virtual addressing instead.
+
 endchoice
+
+config ARM64_FORCE_52BIT
+	bool "Force 52-bit virtual addresses for userspace"
+	depends on ARM64_USER_VA_BITS_52 && EXPERT
+	help
+	  For systems with 52-bit userspace VAs enabled, the kernel will attempt
+	  to maintain compatibility with older software by providing 48-bit VAs
+	  unless a hint is supplied to mmap.
+
+	  This configuration option disables the 48-bit compatibility logic, and
+	  forces all userspace addresses to be 52-bit on HW that supports it. One
+	  should only enable this configuration option for stress testing userspace
+	  memory management code. If unsure say N here.
 
 config ARM64_VA_BITS
 	int
@@ -656,7 +701,7 @@ config ARM64_VA_BITS
 	default 39 if ARM64_VA_BITS_39
 	default 42 if ARM64_VA_BITS_42
 	default 47 if ARM64_VA_BITS_47
-	default 48 if ARM64_VA_BITS_48
+	default 48 if ARM64_VA_BITS_48 || ARM64_USER_VA_BITS_52
 
 choice
 	prompt "Physical address space size"
@@ -935,6 +980,20 @@ config ARM64_SSBD
 
 	  If unsure, say Y.
 
+config RODATA_FULL_DEFAULT_ENABLED
+	bool "Apply r/o permissions of VM areas also to their linear aliases"
+	default y
+	help
+	  Apply read-only attributes of VM areas to the linear alias of
+	  the backing pages as well. This prevents code or read-only data
+	  from being modified (inadvertently or intentionally) via another
+	  mapping of the same memory page. This additional enhancement can
+	  be turned off at runtime by passing rodata=[off|on] (and turned on
+	  with rodata=full if this option is set to 'n')
+
+	  This requires the linear region to be mapped down to pages,
+	  which may adversely affect performance in some cases.
+
 menuconfig ARMV8_DEPRECATED
 	bool "Emulate deprecated/obsolete ARMv8 instructions"
 	depends on COMPAT
@@ -1124,6 +1183,20 @@ config ARM64_RAS_EXTN
 	  and access the new registers if the system supports the extension.
 	  Platform RAS features may additionally depend on firmware support.
 
+config ARM64_CNP
+	bool "Enable support for Common Not Private (CNP) translations"
+	default y
+	depends on ARM64_PAN || !ARM64_SW_TTBR0_PAN
+	help
+	  Common Not Private (CNP) allows translation table entries to
+	  be shared between different PEs in the same inner shareable
+	  domain, so the hardware can use this fact to optimise the
+	  caching of such entries in the TLB.
+
+	  Selecting this option allows the CNP feature to be detected
+	  at runtime, and does not affect PEs that do not implement
+	  this feature.
+
 endmenu
 
 config ARM64_SVE
@@ -1246,6 +1319,7 @@ config EFI
 	bool "UEFI runtime support"
 	depends on OF && !CPU_BIG_ENDIAN
 	depends on KERNEL_MODE_NEON
+	select ARCH_SUPPORTS_ACPI
 	select LIBFDT
 	select UCS2_STRING
 	select EFI_PARAMS_FROM_FDT

@@ -30,6 +30,11 @@ struct device;
 /* Structure for the low-level drivers. */
 typedef struct ipmi_smi *ipmi_smi_t;
 
+/* RHEL extension for struct ipmi_smi_msg
+ */
+struct ipmi_smi_msg_rh {
+};
+
 /*
  * Messages to/from the lower layer.  The smi interface will take one
  * of these to send. After the send has occurred and a response has
@@ -58,6 +63,16 @@ struct ipmi_smi_msg {
 	/* Will be called when the system is done with the message
 	   (presumably to free it). */
 	void (*done)(struct ipmi_smi_msg *msg);
+
+	RH_KABI_SIZE_AND_EXTEND(ipmi_smi_msg)
+};
+
+/* RHEL extension to struct ipmi_smi_handlers
+ * This extension must be dynamically allocated for every instance of
+ * ipmi_smi_handlers, because ipmi_smi_handlers is embedded in another
+ * struct.
+ */
+struct ipmi_smi_handlers_rh {
 };
 
 struct ipmi_smi_handlers {
@@ -140,6 +155,8 @@ struct ipmi_smi_handlers {
 	 * block.
 	 */
 	void (*set_maintenance_mode)(void *send_info, bool enable);
+
+	RH_KABI_SIZE_AND_EXTEND_PTR(ipmi_smi_handlers)
 };
 
 struct ipmi_device_id {

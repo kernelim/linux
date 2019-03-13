@@ -243,6 +243,11 @@ static struct dst_entry *rxe_find_route(struct rxe_dev *rxe,
 					rt6_get_cookie((struct rt6_info *)dst);
 #endif
 		}
+
+		if (dst && (qp_type(qp) == IB_QPT_RC)) {
+			dst_hold(dst);
+			sk_dst_set(qp->sk->sk, dst);
+		}
 	}
 
 	dev_put(ndev);
@@ -418,11 +423,7 @@ static int prepare4(struct rxe_dev *rxe, struct rxe_pkt_info *pkt,
 	prepare_ipv4_hdr(dst, skb, saddr->s_addr, daddr->s_addr, IPPROTO_UDP,
 			 av->grh.traffic_class, av->grh.hop_limit, df, xnet);
 
-	if (qp_type(qp) == IB_QPT_RC)
-		sk_dst_set(qp->sk->sk, dst);
-	else
-		dst_release(dst);
-
+	dst_release(dst);
 	return 0;
 }
 
@@ -450,11 +451,7 @@ static int prepare6(struct rxe_dev *rxe, struct rxe_pkt_info *pkt,
 			 av->grh.traffic_class,
 			 av->grh.hop_limit);
 
-	if (qp_type(qp) == IB_QPT_RC)
-		sk_dst_set(qp->sk->sk, dst);
-	else
-		dst_release(dst);
-
+	dst_release(dst);
 	return 0;
 }
 

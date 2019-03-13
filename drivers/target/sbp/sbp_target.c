@@ -926,15 +926,16 @@ static struct sbp_target_request *sbp_mgt_get_req(struct sbp_session *sess,
 {
 	struct se_session *se_sess = sess->se_sess;
 	struct sbp_target_request *req;
-	int tag;
+	int tag, cpu;
 
-	tag = percpu_ida_alloc(&se_sess->sess_tag_pool, TASK_RUNNING);
+	tag = sbitmap_queue_get(&se_sess->sess_tag_pool, &cpu);
 	if (tag < 0)
 		return ERR_PTR(-ENOMEM);
 
 	req = &((struct sbp_target_request *)se_sess->sess_cmd_map)[tag];
 	memset(req, 0, sizeof(*req));
 	req->se_cmd.map_tag = tag;
+	req->se_cmd.map_cpu = cpu;
 	req->se_cmd.tag = next_orb;
 
 	return req;
@@ -1460,7 +1461,7 @@ static void sbp_free_request(struct sbp_target_request *req)
 	kfree(req->pg_tbl);
 	kfree(req->cmd_buf);
 
-	percpu_ida_free(&se_sess->sess_tag_pool, se_cmd->map_tag);
+	target_free_tag(se_sess, se_cmd);
 }
 
 static void sbp_mgt_agent_process(struct work_struct *work)

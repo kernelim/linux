@@ -221,8 +221,7 @@ static int nsim_change_mtu(struct net_device *dev, int new_mtu)
 {
 	struct netdevsim *ns = netdev_priv(dev);
 
-	if (ns->xdp_prog_mode == XDP_ATTACHED_DRV &&
-	    new_mtu > NSIM_XDP_MAX_MTU)
+	if (ns->xdp.prog && new_mtu > NSIM_XDP_MAX_MTU)
 		return -EBUSY;
 
 	dev->mtu = new_mtu;
@@ -260,7 +259,7 @@ nsim_setup_tc_block(struct net_device *dev, struct tc_block_offload *f)
 	switch (f->command) {
 	case TC_BLOCK_BIND:
 		return tcf_block_cb_register(f->block, nsim_setup_tc_block_cb,
-					     ns, ns);
+					     ns, ns, f->extack);
 	case TC_BLOCK_UNBIND:
 		tcf_block_cb_unregister(f->block, nsim_setup_tc_block_cb, ns);
 		return 0;

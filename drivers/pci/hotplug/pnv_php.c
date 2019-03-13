@@ -328,10 +328,15 @@ out:
 	return ret;
 }
 
+static inline struct pnv_php_slot *to_pnv_php_slot(struct hotplug_slot *slot)
+{
+	return container_of(slot, struct pnv_php_slot, slot);
+}
+
 int pnv_php_set_slot_power_state(struct hotplug_slot *slot,
 				 uint8_t state)
 {
-	struct pnv_php_slot *php_slot = slot->private;
+	struct pnv_php_slot *php_slot = to_pnv_php_slot(slot);
 	struct opal_msg msg;
 	int ret;
 
@@ -363,7 +368,7 @@ EXPORT_SYMBOL_GPL(pnv_php_set_slot_power_state);
 
 static int pnv_php_get_power_state(struct hotplug_slot *slot, u8 *state)
 {
-	struct pnv_php_slot *php_slot = slot->private;
+	struct pnv_php_slot *php_slot = to_pnv_php_slot(slot);
 	uint8_t power_state = OPAL_PCI_SLOT_POWER_ON;
 	int ret;
 
@@ -378,7 +383,6 @@ static int pnv_php_get_power_state(struct hotplug_slot *slot, u8 *state)
 			 ret);
 	} else {
 		*state = power_state;
-		slot->info->power_status = power_state;
 	}
 
 	return 0;
@@ -386,7 +390,7 @@ static int pnv_php_get_power_state(struct hotplug_slot *slot, u8 *state)
 
 static int pnv_php_get_adapter_state(struct hotplug_slot *slot, u8 *state)
 {
-	struct pnv_php_slot *php_slot = slot->private;
+	struct pnv_php_slot *php_slot = to_pnv_php_slot(slot);
 	uint8_t presence = OPAL_PCI_SLOT_EMPTY;
 	int ret;
 
@@ -397,7 +401,6 @@ static int pnv_php_get_adapter_state(struct hotplug_slot *slot, u8 *state)
 	ret = pnv_pci_get_presence_state(php_slot->id, &presence);
 	if (ret >= 0) {
 		*state = presence;
-		slot->info->adapter_status = presence;
 		ret = 0;
 	} else {
 		pci_warn(php_slot->pdev, "Error %d getting presence\n", ret);
@@ -406,10 +409,20 @@ static int pnv_php_get_adapter_state(struct hotplug_slot *slot, u8 *state)
 	return ret;
 }
 
+static int pnv_php_get_attention_state(struct hotplug_slot *slot, u8 *state)
+{
+	struct pnv_php_slot *php_slot = to_pnv_php_slot(slot);
+
+	*state = php_slot->attention_state;
+	return 0;
+}
+
 static int pnv_php_set_attention_state(struct hotplug_slot *slot, u8 state)
 {
+	struct pnv_php_slot *php_slot = to_pnv_php_slot(slot);
+
 	/* FIXME: Make it real once firmware supports it */
-	slot->info->attention_status = state;
+	php_slot->attention_state = state;
 
 	return 0;
 }
@@ -501,15 +514,14 @@ scan:
 
 static int pnv_php_enable_slot(struct hotplug_slot *slot)
 {
-	struct pnv_php_slot *php_slot = container_of(slot,
-						     struct pnv_php_slot, slot);
+	struct pnv_php_slot *php_slot = to_pnv_php_slot(slot);
 
 	return pnv_php_enable(php_slot, true);
 }
 
 static int pnv_php_disable_slot(struct hotplug_slot *slot)
 {
-	struct pnv_php_slot *php_slot = slot->private;
+	struct pnv_php_slot *php_slot = to_pnv_php_slot(slot);
 	int ret;
 
 	if (php_slot->state != PNV_PHP_STATE_POPULATED)
@@ -530,17 +542,17 @@ static int pnv_php_disable_slot(struct hotplug_slot *slot)
 	return ret;
 }
 
-static struct hotplug_slot_ops php_slot_ops = {
+static const struct hotplug_slot_ops php_slot_ops = {
 	.get_power_status	= pnv_php_get_power_state,
 	.get_adapter_status	= pnv_php_get_adapter_state,
+	.get_attention_status	= pnv_php_get_attention_state,
 	.set_attention_status	= pnv_php_set_attention_state,
 	.enable_slot		= pnv_php_enable_slot,
 	.disable_slot		= pnv_php_disable_slot,
 };
 
-static void pnv_php_release(struct hotplug_slot *slot)
+static void pnv_php_release(struct pnv_php_slot *php_slot)
 {
-	struct pnv_php_slot *php_slot = slot->private;
 	unsigned long flags;
 
 	/* Remove from global or child list */
@@ -595,9 +607,6 @@ static struct pnv_php_slot *pnv_php_alloc_slot(struct device_node *dn)
 	php_slot->id	                = id;
 	php_slot->power_state_check     = false;
 	php_slot->slot.ops              = &php_slot_ops;
-	php_slot->slot.info             = &php_slot->slot_info;
-	php_slot->slot.release          = pnv_php_release;
-	php_slot->slot.private          = php_slot;
 
 	INIT_LIST_HEAD(&php_slot->children);
 	INIT_LIST_HEAD(&php_slot->link);
@@ -924,6 +933,7 @@ static void pnv_php_unregister_one(struct device_node *dn)
 
 	php_slot->state = PNV_PHP_STATE_OFFLINE;
 	pci_hp_deregister(&php_slot->slot);
+	pnv_php_release(php_slot);
 	pnv_php_put_slot(php_slot);
 }
 

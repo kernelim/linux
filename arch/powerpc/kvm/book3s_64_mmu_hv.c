@@ -269,14 +269,13 @@ int kvmppc_mmu_hv_init(void)
 {
 	unsigned long host_lpid, rsvd_lpid;
 
-	if (!cpu_has_feature(CPU_FTR_HVMODE))
-		return -EINVAL;
-
 	if (!mmu_has_feature(MMU_FTR_LOCKLESS_TLBIE))
 		return -EINVAL;
 
 	/* POWER7 has 10-bit LPIDs (12-bit in POWER8) */
-	host_lpid = mfspr(SPRN_LPID);
+	host_lpid = 0;
+	if (cpu_has_feature(CPU_FTR_HVMODE))
+		host_lpid = mfspr(SPRN_LPID);
 	rsvd_lpid = LPID_RSVD;
 
 	kvmppc_init_lpid(rsvd_lpid + 1);
@@ -359,7 +358,7 @@ static int kvmppc_mmu_book3s_64_hv_xlate(struct kvm_vcpu *vcpu, gva_t eaddr,
 	unsigned long pp, key;
 	unsigned long v, orig_v, gr;
 	__be64 *hptep;
-	int index;
+	long int index;
 	int virtmode = vcpu->arch.shregs.msr & (data ? MSR_DR : MSR_IR);
 
 	if (kvm_is_radix(vcpu->kvm))
@@ -745,12 +744,15 @@ void kvmppc_rmap_reset(struct kvm *kvm)
 	srcu_idx = srcu_read_lock(&kvm->srcu);
 	slots = kvm_memslots(kvm);
 	kvm_for_each_memslot(memslot, slots) {
+		/* Mutual exclusion with kvm_unmap_hva_range etc. */
+		spin_lock(&kvm->mmu_lock);
 		/*
 		 * This assumes it is acceptable to lose reference and
 		 * change bits across a reset.
 		 */
 		memset(memslot->arch.rmap, 0,
 		       memslot->npages * sizeof(*memslot->arch.rmap));
+		spin_unlock(&kvm->mmu_lock);
 	}
 	srcu_read_unlock(&kvm->srcu, srcu_idx);
 }
@@ -898,11 +900,12 @@ void kvmppc_core_flush_memslot_hv(struct kvm *kvm,
 
 	gfn = memslot->base_gfn;
 	rmapp = memslot->arch.rmap;
+	if (kvm_is_radix(kvm)) {
+		kvmppc_radix_flush_memslot(kvm, memslot);
+		return;
+	}
+
 	for (n = memslot->npages; n; --n, ++gfn) {
-		if (kvm_is_radix(kvm)) {
-			kvm_unmap_radix(kvm, memslot, gfn);
-			continue;
-		}
 		/*
 		 * Testing the present bit without locking is OK because
 		 * the memslot has been marked invalid already, and hence
