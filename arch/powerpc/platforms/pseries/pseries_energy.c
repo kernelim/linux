@@ -38,27 +38,33 @@ static int sysfs_entries;
 static u32 cpu_to_drc_index(int cpu)
 {
 	struct device_node *dn = NULL;
-	const int *indexes;
+	u32 nr_drc_indexes, i_drc_index;
 	int i;
-	int rc = 1;
+	int rc;
 	u32 ret = 0;
 
 	dn = of_find_node_by_path("/cpus");
 	if (dn == NULL)
 		goto err;
-	indexes = of_get_property(dn, "ibm,drc-indexes", NULL);
-	if (indexes == NULL)
-		goto err_of_node_put;
+
 	/* Convert logical cpu number to core number */
 	i = cpu_core_index_of_thread(cpu);
+
 	/*
-	 * The first element indexes[0] is the number of drc_indexes
-	 * returned in the list.  Hence i+1 will get the drc_index
-	 * corresponding to core number i.
+	 * The first element of "ibm,drc-indexes" is the number of
+	 * drc_indexes returned in the list.  Hence i + 1 will get the
+	 * drc_index corresponding to core number i.
 	 */
-	WARN_ON(i > indexes[0]);
-	ret = indexes[i + 1];
-	rc = 0;
+	rc = of_property_read_u32_index(dn, "ibm,drc-indexes",
+					0, &nr_drc_indexes);
+	if (rc)
+		goto err_of_node_put;
+
+	WARN_ON(i > nr_drc_indexes);
+	rc = of_property_read_u32_index(dn, "ibm,drc-indexes",
+					i + 1, &i_drc_index);
+	if (!rc)
+		ret = i_drc_index;
 
 err_of_node_put:
 	of_node_put(dn);

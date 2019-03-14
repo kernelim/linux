@@ -518,4 +518,22 @@ static inline struct xfrm_state *dst_xfrm(const struct dst_entry *dst)
 }
 #endif
 
+static inline void skb_dst_update_pmtu(struct sk_buff *skb, u32 mtu)
+{
+	struct dst_entry *dst = skb_dst(skb);
+
+	if (dst && dst->ops->update_pmtu)
+		dst->ops->update_pmtu(dst, NULL, skb, mtu);
+}
+
+static inline void skb_tunnel_check_pmtu(struct sk_buff *skb,
+					 struct dst_entry *encap_dst,
+					 int headroom)
+{
+	u32 encap_mtu = dst_mtu(encap_dst);
+
+	if (skb->len > encap_mtu - headroom)
+		skb_dst_update_pmtu(skb, encap_mtu - headroom);
+}
+
 #endif /* _NET_DST_H */
