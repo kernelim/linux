@@ -140,6 +140,7 @@ static noinline void switch_commit_roots(struct btrfs_transaction *trans,
 		if (is_fstree(root->objectid))
 			btrfs_unpin_free_ino(root);
 		clear_btree_io_tree(&root->dirty_log_pages);
+		btrfs_qgroup_clean_swapped_blocks(root);
 	}
 
 	/* We can free old roots now. */

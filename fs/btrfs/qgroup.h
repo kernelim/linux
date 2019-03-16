@@ -19,6 +19,8 @@
 #ifndef __BTRFS_QGROUP__
 #define __BTRFS_QGROUP__
 
+#include <linux/spinlock.h>
+#include <linux/rbtree.h>
 #include "ulist.h"
 #include "delayed-ref.h"
 
@@ -51,6 +53,66 @@
  */
 
 /*
+ * Special performance optimization for balance.
+ *
+ * For balance, we need to swap subtree of subvolume and reloc trees.
+ * In theory, we need to trace all subtree blocks of both subvolume and reloc
+ * trees, since their owner has changed during such swap.
+ *
+ * However since balance has ensured that both subtrees are containing the
+ * same contents and have the same tree structures, such swap won't cause
+ * qgroup number change.
+ *
+ * But there is a race window between subtree swap and transaction commit,
+ * during that window, if we increase/decrease tree level or merge/split tree
+ * blocks, we still need to trace the original subtrees.
+ *
+ * So for balance, we use a delayed subtree tracing, whose workflow is:
+ *
+ * 1) Record the subtree root block get swapped.
+ *
+ *    During subtree swap:
+ *    O = Old tree blocks
+ *    N = New tree blocks
+ *          reloc tree                     subvolume tree X
+ *             Root                               Root
+ *            /    \                             /    \
+ *          NA     OB                          OA      OB
+ *        /  |     |  \                      /  |      |  \
+ *      NC  ND     OE  OF                   OC  OD     OE  OF
+ *
+ *   In this case, NA and OA are going to be swapped, record (NA, OA) into
+ *   subvolume tree X.
+ *
+ * 2) After subtree swap.
+ *          reloc tree                     subvolume tree X
+ *             Root                               Root
+ *            /    \                             /    \
+ *          OA     OB                          NA      OB
+ *        /  |     |  \                      /  |      |  \
+ *      OC  OD     OE  OF                   NC  ND     OE  OF
+ *
+ * 3a) COW happens for OB
+ *     If we are going to COW tree block OB, we check OB's bytenr against
+ *     tree X's swapped_blocks structure.
+ *     If it doesn't fit any, nothing will happen.
+ *
+ * 3b) COW happens for NA
+ *     Check NA's bytenr against tree X's swapped_blocks, and get a hit.
+ *     Then we do subtree scan on both subtrees OA and NA.
+ *     Resulting 6 tree blocks to be scanned (OA, OC, OD, NA, NC, ND).
+ *
+ *     Then no matter what we do to subvolume tree X, qgroup numbers will
+ *     still be correct.
+ *     Then NA's record gets removed from X's swapped_blocks.
+ *
+ * 4)  Transaction commit
+ *     Any record in X's swapped_blocks gets removed, since there is no
+ *     modification to the swapped subtrees, no need to trigger heavy qgroup
+ *     subtree rescan for them.
+ */
+
+/*
  * Record a dirty extent, and info qgroup to update quota on it
  * TODO: Use kmem cache to alloc it.
  */
@@ -59,6 +121,24 @@ struct btrfs_qgroup_extent_record {
 	u64 bytenr;
 	u64 num_bytes;
 	struct ulist *old_roots;
+};
+
+struct btrfs_qgroup_swapped_block {
+	struct rb_node node;
+
+	int level;
+	bool trace_leaf;
+
+	/* bytenr/generation of the tree block in subvolume tree after swap */
+	u64 subvol_bytenr;
+	u64 subvol_generation;
+
+	/* bytenr/generation of the tree block in reloc tree after swap */
+	u64 reloc_bytenr;
+	u64 reloc_generation;
+
+	u64 last_snapshot;
+	struct btrfs_key first_key;
 };
 
 /*
@@ -230,6 +310,7 @@ int btrfs_qgroup_trace_subtree(struct btrfs_trans_handle *trans,
 			       struct btrfs_root *root,
 			       struct extent_buffer *root_eb,
 			       u64 root_gen, int root_level);
+
 int
 btrfs_qgroup_account_extent(struct btrfs_trans_handle *trans,
 			    struct btrfs_fs_info *fs_info,
@@ -315,12 +396,24 @@ void btrfs_qgroup_free_meta_all_pertrans(struct btrfs_root *root);
 void btrfs_qgroup_convert_reserved_meta(struct btrfs_root *root, int num_bytes);
 
 void btrfs_qgroup_check_reserved_leak(struct inode *inode);
+/* btrfs_qgroup_swapped_blocks related functions */
+void btrfs_qgroup_init_swapped_blocks(
+	struct btrfs_qgroup_swapped_blocks *swapped_blocks);
 
-
+void btrfs_qgroup_clean_swapped_blocks(struct btrfs_root *root);
+int btrfs_qgroup_add_swapped_blocks(struct btrfs_trans_handle *trans,
+		struct btrfs_root *subvol_root,
+		struct btrfs_block_group_cache *bg,
+		struct extent_buffer *subvol_parent, int subvol_slot,
+		struct extent_buffer *reloc_parent, int reloc_slot,
+		u64 last_snapshot);
+int btrfs_qgroup_trace_subtree_after_cow(struct btrfs_trans_handle *trans,
+		struct btrfs_root *root, struct extent_buffer *eb);
 /*
  * These are only used as a workaround for relocation recovery since it
  * degrades into accounting the entire tree at once.
  */
 int btrfs_quota_suspend(struct btrfs_fs_info *fs_info);
 void btrfs_quota_resume(struct btrfs_fs_info *fs_info);
+
 #endif /* __BTRFS_QGROUP__ */

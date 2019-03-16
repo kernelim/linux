@@ -1175,6 +1175,18 @@ struct btrfs_subvolume_writers {
 #define BTRFS_ROOT_FORCE_COW		6
 #define BTRFS_ROOT_MULTI_LOG_TASKS	7
 #define BTRFS_ROOT_DIRTY		8
+#define BTRFS_ROOT_DEAD_RELOC_TREE	10
+
+/*
+ * Record swapped tree blocks of a subvolume tree for delayed subtree trace
+ * code. For detail check comment in fs/btrfs/qgroup.c.
+ */
+struct btrfs_qgroup_swapped_blocks {
+	spinlock_t lock;
+	/* RM_EMPTY_ROOT() of above blocks[] */
+	bool swapped;
+	struct rb_root blocks[BTRFS_MAX_LEVEL];
+};
 
 /*
  * in ram representation of the tree.  extent_root is used for all allocations
@@ -1227,6 +1239,9 @@ struct btrfs_root {
 	u32 type;
 
 	u64 highest_objectid;
+
+	/* Record pairs of swapped blocks for qgroup */
+	struct btrfs_qgroup_swapped_blocks swapped_blocks;
 
 #ifdef CONFIG_BTRFS_FS_RUN_SANITY_TESTS
 	/* only used with CONFIG_BTRFS_FS_RUN_SANITY_TESTS is enabled */
@@ -1289,6 +1304,14 @@ struct btrfs_root {
 	struct list_head ordered_extents;
 	struct list_head ordered_root;
 	u64 nr_ordered_extents;
+
+	/*
+	 * Not empty if this subvolume root has gone through tree block swap
+	 * (relocation)
+	 *
+	 * Will be used by reloc_control::dirty_subvol_roots.
+	 */
+	struct list_head reloc_dirty_list;
 
 	/*
 	 * Number of currently running SEND ioctls to prevent
