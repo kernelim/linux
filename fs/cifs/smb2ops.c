@@ -286,9 +286,12 @@ SMB3_request_interfaces(const unsigned int xid, struct cifs_tcon *tcon)
 			FSCTL_QUERY_NETWORK_INTERFACE_INFO, true /* is_fsctl */,
 			NULL /* no data input */, 0 /* no data input */,
 			(char **)&out_buf, &ret_data_len);
-	if (rc != 0)
+	if (rc == -EOPNOTSUPP) {
+		cifs_dbg(FYI,
+			 "server does not support query network interfaces\n");
+	} else if (rc != 0) {
 		cifs_dbg(VFS, "error %d on ioctl to get interface list\n", rc);
-	else if (ret_data_len < sizeof(struct network_interface_info_ioctl_rsp)) {
+	} else if (ret_data_len < sizeof(struct network_interface_info_ioctl_rsp)) {
 		cifs_dbg(VFS, "server returned bad net interface info buf\n");
 		rc = -EINVAL;
 	} else {

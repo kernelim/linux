@@ -568,6 +568,7 @@ static void ch_destroy(struct kref *ref)
 {
 	scsi_changer *ch = container_of(ref, scsi_changer, ref);
 
+	ch->device = NULL;
 	kfree(ch->dt);
 	kfree(ch);
 }
@@ -577,9 +578,10 @@ ch_release(struct inode *inode, struct file *file)
 {
 	scsi_changer *ch = file->private_data;
 
+	mutex_lock(&ch_mutex);
 	scsi_device_put(ch->device);
-	ch->device = NULL;
 	file->private_data = NULL;
+	mutex_unlock(&ch_mutex);
 	kref_put(&ch->ref, ch_destroy);
 	return 0;
 }
@@ -594,14 +596,17 @@ ch_open(struct inode *inode, struct file *file)
 	spin_lock(&ch_index_lock);
 	ch = idr_find(&ch_index_idr, minor);
 
-	if (NULL == ch || scsi_device_get(ch->device)) {
+	if (NULL == ch || kref_get_unless_zero(&ch->ref)) {
 		spin_unlock(&ch_index_lock);
 		mutex_unlock(&ch_mutex);
 		return -ENXIO;
 	}
-	kref_get(&ch->ref);
 	spin_unlock(&ch_index_lock);
 
+	if (!ch->device || scsi_device_get(ch->device)) {
+		kref_put(&ch->ref, ch_destroy);
+		return -ENXIO;
+	}
 	file->private_data = ch;
 	mutex_unlock(&ch_mutex);
 	return 0;
@@ -974,6 +979,7 @@ static int ch_remove(struct device *dev)
 
 	spin_lock(&ch_index_lock);
 	idr_remove(&ch_index_idr, ch->minor);
+	dev_set_drvdata(dev, NULL);
 	spin_unlock(&ch_index_lock);
 
 	device_destroy(ch_sysfs_class, MKDEV(SCSI_CHANGER_MAJOR,ch->minor));
