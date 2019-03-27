@@ -100,8 +100,7 @@ struct iwl_nvm_data *iwl_fw_get_nvm(struct iwl_fw_runtime *fwrt)
 	}
 
 	rsp = (void *)hcmd.resp_pkt->data;
-	if (le32_to_cpu(rsp->general.flags) & NVM_GENERAL_FLAGS_EMPTY_OTP)
-		empty_otp = !!(le32_to_cpu(rsp->general.flags) &
+	empty_otp = !!(le32_to_cpu(rsp->general.flags) &
 				NVM_GENERAL_FLAGS_EMPTY_OTP);
 	if (empty_otp)
 		IWL_INFO(fwrt, "OTP is empty\n");

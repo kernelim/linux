@@ -2958,21 +2958,6 @@ static int lock_extent_range(struct inode *inode, u64 off, u64 len,
 	return 0;
 }
 
-static void btrfs_double_inode_unlock(struct inode *inode1, struct inode *inode2)
-{
-	inode_unlock(inode1);
-	inode_unlock(inode2);
-}
-
-static void btrfs_double_inode_lock(struct inode *inode1, struct inode *inode2)
-{
-	if (inode1 < inode2)
-		swap(inode1, inode2);
-
-	inode_lock_nested(inode1, I_MUTEX_PARENT);
-	inode_lock_nested(inode2, I_MUTEX_CHILD);
-}
-
 static void btrfs_double_extent_unlock(struct inode *inode1, u64 loff1,
 				      struct inode *inode2, u64 loff2, u64 len)
 {
@@ -3249,7 +3234,7 @@ static int btrfs_extent_same(struct inode *src, u64 loff, u64 olen,
 	if (same_inode)
 		inode_lock(src);
 	else
-		btrfs_double_inode_lock(src, dst);
+		lock_two_nondirectories(src, dst);
 
 	/* don't make the dst file partly checksummed */
 	if ((BTRFS_I(src)->flags & BTRFS_INODE_NODATASUM) !=
@@ -3307,7 +3292,7 @@ out_unlock:
 	if (same_inode)
 		inode_unlock(src);
 	else
-		btrfs_double_inode_unlock(src, dst);
+		unlock_two_nondirectories(src, dst);
 
 	return ret;
 }
@@ -3945,7 +3930,7 @@ static noinline int btrfs_clone_files(struct file *file, struct file *file_src,
 		return -EISDIR;
 
 	if (!same_inode) {
-		btrfs_double_inode_lock(src, inode);
+		lock_two_nondirectories(src, inode);
 	} else {
 		inode_lock(src);
 	}
@@ -4038,7 +4023,7 @@ static noinline int btrfs_clone_files(struct file *file, struct file *file_src,
 				round_up(destoff + len, PAGE_SIZE) - 1);
 out_unlock:
 	if (!same_inode)
-		btrfs_double_inode_unlock(src, inode);
+		unlock_two_nondirectories(src, inode);
 	else
 		inode_unlock(src);
 	return ret;
