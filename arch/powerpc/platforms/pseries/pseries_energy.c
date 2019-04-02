@@ -60,7 +60,7 @@ static u32 cpu_to_drc_index(int cpu)
 	if (rc)
 		goto err_of_node_put;
 
-	WARN_ON(i > nr_drc_indexes);
+	WARN_ON_ONCE(i > nr_drc_indexes);
 	rc = of_property_read_u32_index(dn, "ibm,drc-indexes",
 					i + 1, &i_drc_index);
 	if (!rc)
