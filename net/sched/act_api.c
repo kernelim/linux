@@ -87,6 +87,8 @@ int __tcf_hash_release(struct tc_action *p, bool bind, bool strict)
 {
 	int ret = 0;
 
+	ASSERT_RTNL();
+
 	if (p) {
 		if (bind)
 			p->tcfa_bindcnt--;

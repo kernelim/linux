@@ -151,7 +151,9 @@ void tcf_hashinfo_destroy(const struct tc_action_ops *ops,
 
 static inline void tc_action_net_exit(struct tc_action_net *tn)
 {
+	rtnl_lock();
 	tcf_hashinfo_destroy(tn->ops, tn->hinfo);
+	rtnl_unlock();
 	kfree(tn->hinfo);
 }
 

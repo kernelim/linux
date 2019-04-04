@@ -1176,6 +1176,8 @@ struct btrfs_subvolume_writers {
 #define BTRFS_ROOT_MULTI_LOG_TASKS	7
 #define BTRFS_ROOT_DIRTY		8
 #define BTRFS_ROOT_DEAD_RELOC_TREE	10
+/* Mark dead root stored on device whose cleanup needs to be resumed */
+#define BTRFS_ROOT_DEAD_TREE		11
 
 /*
  * Record swapped tree blocks of a subvolume tree for delayed subtree trace
