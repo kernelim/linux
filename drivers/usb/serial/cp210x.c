@@ -1314,8 +1314,14 @@ static int cp210x_gpio_get(struct gpio_chip *gc, unsigned int gpio)
 	int result;
 	u8 buf;
 
+	result = usb_autopm_get_interface(serial->interface);
+	if (result)
+		return result;
+
 	result = cp210x_read_vendor_block(serial, REQTYPE_INTERFACE_TO_HOST,
-					  CP210X_READ_LATCH, &buf, sizeof(buf));
+				  	CP210X_READ_LATCH, &buf, sizeof(buf));
+	
+	usb_autopm_put_interface(serial->interface);
 	if (result < 0)
 		return result;
 
@@ -1326,6 +1332,7 @@ static void cp210x_gpio_set(struct gpio_chip *gc, unsigned int gpio, int value)
 {
 	struct usb_serial *serial = gpiochip_get_data(gc);
 	struct cp210x_gpio_write buf;
+	int result;
 
 	if (value == 1)
 		buf.state = BIT(gpio);
@@ -1334,8 +1341,13 @@ static void cp210x_gpio_set(struct gpio_chip *gc, unsigned int gpio, int value)
 
 	buf.mask = BIT(gpio);
 
+	result = usb_autopm_get_interface(serial->interface);
+	if (result)
+		return;
+
 	cp210x_write_vendor_block(serial, REQTYPE_HOST_TO_INTERFACE,
 				  CP210X_WRITE_LATCH, &buf, sizeof(buf));
+	usb_autopm_put_interface(serial->interface);
 }
 
 static int cp210x_gpio_direction_get(struct gpio_chip *gc, unsigned int gpio)
@@ -1522,6 +1534,10 @@ static int cp210x_attach(struct usb_serial *serial)
 
 	usb_set_serial_data(serial, priv);
 
+	result = usb_autopm_get_interface(serial->interface);
+	if (result)
+		goto out;
+
 	if (priv->partnum == CP210X_PARTNUM_CP2105) {
 		result = cp2105_shared_gpio_init(serial);
 		if (result < 0) {
@@ -1529,6 +1545,8 @@ static int cp210x_attach(struct usb_serial *serial)
 				"GPIO initialisation failed, continuing without GPIO support\n");
 		}
 	}
+	usb_autopm_put_interface(serial->interface);
+out:
 
 	return 0;
 }

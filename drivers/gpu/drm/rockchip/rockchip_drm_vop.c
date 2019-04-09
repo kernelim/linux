@@ -492,6 +492,18 @@ static void vop_line_flag_irq_disable(struct vop *vop)
 	spin_unlock_irqrestore(&vop->irq_lock, flags);
 }
 
+static void vop_win_disable(struct vop *vop, const struct vop_win_data *win)
+{
+	if (win->phy->scl && win->phy->scl->ext) {
+		VOP_SCL_SET_EXT(vop, win, yrgb_hor_scl_mode, SCALE_NONE);
+		VOP_SCL_SET_EXT(vop, win, yrgb_ver_scl_mode, SCALE_NONE);
+		VOP_SCL_SET_EXT(vop, win, cbcr_hor_scl_mode, SCALE_NONE);
+		VOP_SCL_SET_EXT(vop, win, cbcr_ver_scl_mode, SCALE_NONE);
+	}
+
+	VOP_WIN_SET(vop, win, enable, 0);
+}
+
 static int vop_enable(struct drm_crtc *crtc)
 {
 	struct vop *vop = to_vop(crtc);
@@ -539,7 +551,7 @@ static int vop_enable(struct drm_crtc *crtc)
 		const struct vop_win_data *win = vop_win->data;
 
 		spin_lock(&vop->reg_lock);
-		VOP_WIN_SET(vop, win, enable, 0);
+		vop_win_disable(vop, win);
 		spin_unlock(&vop->reg_lock);
 	}
 
@@ -695,7 +707,7 @@ static void vop_plane_atomic_disable(struct drm_plane *plane,
 
 	spin_lock(&vop->reg_lock);
 
-	VOP_WIN_SET(vop, win, enable, 0);
+	vop_win_disable(vop, win);
 
 	spin_unlock(&vop->reg_lock);
 }
@@ -1425,7 +1437,7 @@ static int vop_initial(struct vop *vop)
 		int channel = i * 2 + 1;
 
 		VOP_WIN_SET(vop, win, channel, (channel + 1) << 4 | channel);
-		VOP_WIN_SET(vop, win, enable, 0);
+		vop_win_disable(vop, win);
 		VOP_WIN_SET(vop, win, gate, 1);
 	}
 
