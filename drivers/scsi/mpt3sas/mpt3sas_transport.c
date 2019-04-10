@@ -2004,12 +2004,8 @@ _transport_smp_handler(struct Scsi_Host *shost, struct sas_rphy *rphy,
 				  __func__,
 				  le16_to_cpu(mpi_reply->ResponseDataLength)));
 
-		scsi_req(req)->sense_len = 0;
-		if (scsi_req(req)->sense) {
-			memcpy(scsi_req(req)->sense, mpi_reply,
-			       sizeof(*mpi_reply));
-			scsi_req(req)->sense_len = sizeof(*mpi_reply);
-		}
+		memcpy(scsi_req(req)->sense, mpi_reply, sizeof(*mpi_reply));
+		scsi_req(req)->sense_len = sizeof(*mpi_reply);
 		scsi_req(req)->resid_len = 0;
 		scsi_req(rsp)->resid_len -=
 		    le16_to_cpu(mpi_reply->ResponseDataLength);

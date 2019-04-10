@@ -837,6 +837,18 @@ static void dec_pending(struct dm_io *io, blk_status_t error)
 	}
 }
 
+void disable_discard(struct mapped_device *md)
+{
+	struct queue_limits *limits = dm_get_queue_limits(md);
+	unsigned long flags;
+
+	/* device doesn't really support DISCARD, disable it */
+	limits->max_discard_sectors = 0;
+	spin_lock_irqsave(md->queue->queue_lock, flags);
+	queue_flag_clear(QUEUE_FLAG_DISCARD, md->queue);
+	spin_unlock_irqrestore(md->queue->queue_lock, flags);
+}
+
 void disable_write_same(struct mapped_device *md)
 {
 	struct queue_limits *limits = dm_get_queue_limits(md);
@@ -862,10 +874,13 @@ static void clone_endio(struct bio *bio)
 	dm_endio_fn endio = tio->ti->type->end_io;
 
 	if (unlikely(error == BLK_STS_TARGET)) {
-		if (bio_op(bio) == REQ_OP_WRITE_SAME &&
+		if (bio_op(bio) == REQ_OP_DISCARD &&
+		    !bio->bi_disk->queue->limits.max_discard_sectors)
+			disable_discard(md);
+		else if (bio_op(bio) == REQ_OP_WRITE_SAME &&
 		    !bio->bi_disk->queue->limits.max_write_same_sectors)
 			disable_write_same(md);
-		if (bio_op(bio) == REQ_OP_WRITE_ZEROES &&
+		else if (bio_op(bio) == REQ_OP_WRITE_ZEROES &&
 		    !bio->bi_disk->queue->limits.max_write_zeroes_sectors)
 			disable_write_zeroes(md);
 	}

@@ -214,6 +214,23 @@ static void sas_host_release(struct device *dev)
 		blk_cleanup_queue(q);
 }
 
+/*
+ * struct scsi_request must be first so that scsi_req works properly.
+ * See commit 82ed4db499b (block: split scsi_request out of struct request).
+ */
+struct sas_scsi_request {
+	struct scsi_request sreq;
+	char sense[SCSI_SENSE_BUFFERSIZE];
+};
+
+static void sas_initialize_rq(struct request *rq)
+{
+	struct sas_scsi_request *req = blk_mq_rq_to_pdu(rq);
+
+	scsi_req_init(&req->sreq);
+	req->sreq.sense = req->sense;
+}
+
 static int sas_bsg_initialize(struct Scsi_Host *shost, struct sas_rphy *rphy)
 {
 	struct request_queue *q;
@@ -231,8 +248,8 @@ static int sas_bsg_initialize(struct Scsi_Host *shost, struct sas_rphy *rphy)
 	q = blk_alloc_queue(GFP_KERNEL);
 	if (!q)
 		return -ENOMEM;
-	q->initialize_rq_fn = scsi_initialize_rq;
-	q->cmd_size = sizeof(struct scsi_request);
+	q->initialize_rq_fn = sas_initialize_rq;
+	q->cmd_size = sizeof(struct sas_scsi_request);
 
 	if (rphy) {
 		q->request_fn = sas_non_host_smp_request;

@@ -401,12 +401,13 @@ static int blk_complete_sgv4_hdr_rq(struct request *rq, struct sg_io_v4 *hdr,
 	if (hdr->device_status || hdr->transport_status || hdr->driver_status)
 		hdr->info |= SG_INFO_CHECK;
 	hdr->response_len = 0;
-	if (req->sense && hdr->response) {
+
+	if (req->sense_len && hdr->response) {
 		int len = min_t(unsigned int, hdr->max_response_len,
 					req->sense_len);
-		if (len > 0)
-			ret = copy_to_user((void __user *)(unsigned long)hdr->response,
-					   req->sense, len);
+
+		ret = copy_to_user((void __user *)(unsigned long)hdr->response,
+				   req->sense, len);
 		if (!ret)
 			hdr->response_len = len;
 		else

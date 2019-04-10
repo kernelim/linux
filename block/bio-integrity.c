@@ -33,6 +33,11 @@
 static struct kmem_cache *bip_slab;
 static struct workqueue_struct *kintegrityd_wq;
 
+struct __bio_integrity_payload {
+	struct bvec_iter	bio_iter;	/* for rewinding parent bio */
+	struct bio_integrity_payload bip_orig;
+};
+
 void blk_flush_integrity(void)
 {
 	flush_workqueue(kintegrityd_wq);
@@ -52,23 +57,25 @@ struct bio_integrity_payload *bio_integrity_alloc(struct bio *bio,
 						  gfp_t gfp_mask,
 						  unsigned int nr_vecs)
 {
+	struct __bio_integrity_payload *__bip;
 	struct bio_integrity_payload *bip;
 	struct bio_set *bs = bio->bi_pool;
 	unsigned inline_vecs;
 
 	if (!bs || !bs->bio_integrity_pool) {
-		bip = kmalloc(sizeof(struct bio_integrity_payload) +
+		__bip = kmalloc(sizeof(struct __bio_integrity_payload) +
 			      sizeof(struct bio_vec) * nr_vecs, gfp_mask);
 		inline_vecs = nr_vecs;
 	} else {
-		bip = mempool_alloc(bs->bio_integrity_pool, gfp_mask);
+		__bip = mempool_alloc(bs->bio_integrity_pool, gfp_mask);
 		inline_vecs = BIP_INLINE_VECS;
 	}
 
-	if (unlikely(!bip))
+	if (unlikely(!__bip))
 		return ERR_PTR(-ENOMEM);
 
-	memset(bip, 0, sizeof(*bip));
+	memset(__bip, 0, sizeof(*__bip));
+	bip = &__bip->bip_orig;
 
 	if (nr_vecs > inline_vecs) {
 		unsigned long idx = 0;
@@ -90,7 +97,7 @@ struct bio_integrity_payload *bio_integrity_alloc(struct bio *bio,
 
 	return bip;
 err:
-	mempool_free(bip, bs->bio_integrity_pool);
+	mempool_free(__bip, bs->bio_integrity_pool);
 	return ERR_PTR(-ENOMEM);
 }
 EXPORT_SYMBOL(bio_integrity_alloc);
@@ -105,6 +112,8 @@ EXPORT_SYMBOL(bio_integrity_alloc);
 static void bio_integrity_free(struct bio *bio)
 {
 	struct bio_integrity_payload *bip = bio_integrity(bio);
+	struct __bio_integrity_payload *__bip =
+		container_of(bip, struct __bio_integrity_payload, bip_orig);
 	struct bio_set *bs = bio->bi_pool;
 
 	if (bip->bip_flags & BIP_BLOCK_INTEGRITY)
@@ -114,9 +123,9 @@ static void bio_integrity_free(struct bio *bio)
 	if (bs && bs->bio_integrity_pool) {
 		bvec_free(bs->bvec_integrity_pool, bip->bip_vec, bip->bip_slab);
 
-		mempool_free(bip, bs->bio_integrity_pool);
+		mempool_free(__bip, bs->bio_integrity_pool);
 	} else {
-		kfree(bip);
+		kfree(__bip);
 	}
 
 	bio->bi_integrity = NULL;
@@ -306,6 +315,10 @@ bool bio_integrity_prep(struct bio *bio)
 	if (bio_data_dir(bio) == WRITE) {
 		bio_integrity_process(bio, &bio->bi_iter,
 				      bi->profile->generate_fn);
+	} else {
+		struct __bio_integrity_payload *__bip =
+			container_of(bip, struct __bio_integrity_payload, bip_orig);
+		__bip->bio_iter = bio->bi_iter;
 	}
 	return true;
 
@@ -329,22 +342,18 @@ static void bio_integrity_verify_fn(struct work_struct *work)
 {
 	struct bio_integrity_payload *bip =
 		container_of(work, struct bio_integrity_payload, bip_work);
+	struct __bio_integrity_payload *__bip =
+		container_of(bip, struct __bio_integrity_payload, bip_orig);
 	struct bio *bio = bip->bip_bio;
 	struct blk_integrity *bi = blk_get_integrity(bio->bi_disk);
-	struct bvec_iter iter = bio->bi_iter;
 
 	/*
 	 * At the moment verify is called bio's iterator was advanced
 	 * during split and completion, we need to rewind iterator to
 	 * it's original position.
 	 */
-	if (bio_rewind_iter(bio, &iter, iter.bi_done)) {
-		bio->bi_status = bio_integrity_process(bio, &iter,
-						       bi->profile->verify_fn);
-	} else {
-		bio->bi_status = BLK_STS_IOERR;
-	}
-
+	bio->bi_status = bio_integrity_process(bio, &__bip->bio_iter,
+						bi->profile->verify_fn);
 	bio_integrity_free(bio);
 	bio_endio(bio);
 }
@@ -482,7 +491,7 @@ void __init bio_integrity_init(void)
 		panic("Failed to create kintegrityd\n");
 
 	bip_slab = kmem_cache_create("bio_integrity_payload",
-				     sizeof(struct bio_integrity_payload) +
+				     sizeof(struct __bio_integrity_payload) +
 				     sizeof(struct bio_vec) * BIP_INLINE_VECS,
 				     0, SLAB_HWCACHE_ALIGN|SLAB_PANIC, NULL);
 }

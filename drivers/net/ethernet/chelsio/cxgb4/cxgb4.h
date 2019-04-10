@@ -656,6 +656,9 @@ struct sge_eth_stats {              /* Ethernet queue statistics */
 	unsigned long rx_cso;       /* # of Rx checksum offloads */
 	unsigned long vlan_ex;      /* # of Rx VLAN extractions */
 	unsigned long rx_drops;     /* # of packets dropped due to no mem */
+#ifndef __GENKSYMS__
+	unsigned long bad_rx_pkts;  /* # of packets with err_vec!=0 */
+#endif
 };
 
 struct sge_eth_rxq {                /* SW Ethernet Rx queue */
