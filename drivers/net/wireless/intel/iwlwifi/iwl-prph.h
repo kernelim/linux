@@ -361,7 +361,7 @@
 
 /* FW monitor */
 #define MON_BUFF_SAMPLE_CTL		(0xa03c00)
-#define MON_BUFF_BASE_ADDR		(0xa03c3c)
+#define MON_BUFF_BASE_ADDR		(0xa03c1c)
 #define MON_BUFF_END_ADDR		(0xa03c40)
 #define MON_BUFF_WRPTR			(0xa03c44)
 #define MON_BUFF_CYCLE_CNT		(0xa03c48)

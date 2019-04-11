@@ -3,6 +3,7 @@
  * Copyright(c) 2003 - 2014 Intel Corporation. All rights reserved.
  * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
  * Copyright(c) 2016 - 2017 Intel Deutschland GmbH
+ * Copyright(c) 2018 - 2019 Intel Corporation
  *
  * Portions of this file are derived from the ipw3945 project, as well
  * as portions of the ieee80211 subsystem header files.
@@ -1893,9 +1894,7 @@ static int iwl_pcie_send_hcmd_sync(struct iwl_trans *trans,
 			       iwl_get_cmd_string(trans, cmd->id));
 		ret = -ETIMEDOUT;
 
-		iwl_force_nmi(trans);
-		iwl_trans_fw_error(trans);
-
+		iwl_trans_sync_nmi(trans);
 		goto cancel;
 	}
 

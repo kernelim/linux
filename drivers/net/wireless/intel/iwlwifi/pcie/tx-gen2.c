@@ -6,6 +6,7 @@
  * GPL LICENSE SUMMARY
  *
  * Copyright(c) 2017 Intel Deutschland GmbH
+ * Copyright(c) 2018 - 2019 Intel Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -19,6 +20,7 @@
  * BSD LICENSE
  *
  * Copyright(c) 2017 Intel Deutschland GmbH
+ * Copyright(c) 2018 - 2019 Intel Corporation
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -849,9 +851,7 @@ static int iwl_pcie_gen2_send_hcmd_sync(struct iwl_trans *trans,
 			       cmd_str);
 		ret = -ETIMEDOUT;
 
-		iwl_force_nmi(trans);
-		iwl_trans_fw_error(trans);
-
+		iwl_trans_sync_nmi(trans);
 		goto cancel;
 	}
 

@@ -314,6 +314,21 @@ struct vpd_params {
 	u8 na[MACADDR_LEN + 1];
 };
 
+/* Maximum resources provisioned for a PCI PF.
+ */
+struct pf_resources {
+	unsigned int nvi;		/* N virtual interfaces */
+	unsigned int neq;		/* N egress Qs */
+	unsigned int nethctrl;		/* N egress ETH or CTRL Qs */
+	unsigned int niqflint;		/* N ingress Qs/w free list(s) & intr */
+	unsigned int niq;		/* N ingress Qs */
+	unsigned int tc;		/* PCI-E traffic class */
+	unsigned int pmask;		/* port access rights mask */
+	unsigned int nexactf;		/* N exact MPS filters */
+	unsigned int r_caps;		/* read capabilities */
+	unsigned int wx_caps;		/* write/execute capabilities */
+};
+
 struct pci_params {
 #ifndef __GENKSYMS__
 	unsigned int vpd_cap_addr;
@@ -391,6 +406,7 @@ struct adapter_params {
 #ifndef __GENKSYMS__
 	bool write_w_imm_support;       /* FW supports WRITE_WITH_IMMEDIATE */
 	bool write_cmpl_support;        /* FW supports WRITE_CMPL */
+	struct pf_resources pfres;
 #endif
 };
 
@@ -1551,6 +1567,7 @@ int t4_eeprom_ptov(unsigned int phys_addr, unsigned int fn, unsigned int sz);
 int t4_seeprom_wp(struct adapter *adapter, bool enable);
 int t4_get_raw_vpd_params(struct adapter *adapter, struct vpd_params *p);
 int t4_get_vpd_params(struct adapter *adapter, struct vpd_params *p);
+int t4_get_pfres(struct adapter *adapter);
 int t4_read_flash(struct adapter *adapter, unsigned int addr,
 		  unsigned int nwords, u32 *data, int byte_oriented);
 int t4_load_fw(struct adapter *adapter, const u8 *fw_data, unsigned int size);
