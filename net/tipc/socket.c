@@ -364,11 +364,13 @@ static int tipc_sk_sock_err(struct socket *sock, long *timeout)
 
 #define tipc_wait_for_cond(sock_, timeo_, condition_)			       \
 ({                                                                             \
+	DEFINE_WAIT_FUNC(wait_, woken_wake_function);                          \
 	struct sock *sk_;						       \
 	int rc_;							       \
 									       \
 	while ((rc_ = !(condition_))) {					       \
-		DEFINE_WAIT_FUNC(wait_, woken_wake_function);	               \
+		/* coupled with smp_wmb() in tipc_sk_proto_rcv() */            \
+		smp_rmb();                                                     \
 		sk_ = (sock_)->sk;					       \
 		rc_ = tipc_sk_sock_err((sock_), timeo_);		       \
 		if (rc_)						       \
@@ -1692,6 +1694,8 @@ static bool filter_rcv(struct sock *sk, struct sk_buff *skb,
 		onode = msg_orignode(hdr);
 		kfree_skb(skb);
 		u32_del(&tsk->cong_links, onode);
+		/* coupled with smp_rmb() in tipc_wait_for_cond() */
+		smp_wmb();
 		tsk->cong_link_cnt--;
 		sk->sk_write_space(sk);
 		return false;

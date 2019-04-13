@@ -39,6 +39,8 @@ struct net_proto_family;
 struct sk_buff;
 struct net;
 
+void __icmp_send(struct sk_buff *skb_in, int type, int code, __be32 info,
+		 const struct ip_options *opt);
 void icmp_send(struct sk_buff *skb_in, int type, int code, __be32 info);
 int icmp_rcv(struct sk_buff *skb);
 void icmp_err(struct sk_buff *skb, u32 info);

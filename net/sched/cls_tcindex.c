@@ -276,9 +276,9 @@ tcindex_set_parms(struct net *net, struct tcf_proto *tp, unsigned long base,
 		  struct nlattr *est, bool ovr)
 {
 	struct tcindex_filter_result new_filter_result, *old_r = r;
-	struct tcindex_filter_result cr;
 	struct tcindex_data *cp = NULL, *oldp;
 	struct tcindex_filter *f = NULL; /* make gcc behave */
+	struct tcf_result cr = {};
 	int err, balloc = 0;
 	struct tcf_exts e;
 
@@ -319,11 +319,8 @@ tcindex_set_parms(struct net *net, struct tcf_proto *tp, unsigned long base,
 	err = tcindex_filter_result_init(&new_filter_result);
 	if (err < 0)
 		goto errout1;
-	err = tcindex_filter_result_init(&cr);
-	if (err < 0)
-		goto errout1;
 	if (old_r)
-		cr.res = r->res;
+		cr = r->res;
 
 	if (tb[TCA_TCINDEX_HASH])
 		cp->hash = nla_get_u32(tb[TCA_TCINDEX_HASH]);
@@ -414,8 +411,8 @@ tcindex_set_parms(struct net *net, struct tcf_proto *tp, unsigned long base,
 	}
 
 	if (tb[TCA_TCINDEX_CLASSID]) {
-		cr.res.classid = nla_get_u32(tb[TCA_TCINDEX_CLASSID]);
-		tcf_bind_filter(tp, &cr.res, base);
+		cr.classid = nla_get_u32(tb[TCA_TCINDEX_CLASSID]);
+		tcf_bind_filter(tp, &cr, base);
 	}
 
 	if (old_r && old_r != r) {
@@ -427,7 +424,7 @@ tcindex_set_parms(struct net *net, struct tcf_proto *tp, unsigned long base,
 	}
 
 	oldp = p;
-	r->res = cr.res;
+	r->res = cr;
 	tcf_exts_change(tp, &r->exts, &e);
 
 	rcu_assign_pointer(tp->root, cp);
@@ -446,6 +443,8 @@ tcindex_set_parms(struct net *net, struct tcf_proto *tp, unsigned long base,
 				; /* nothing */
 
 		rcu_assign_pointer(*fp, f);
+	} else {
+		tcf_exts_destroy(&new_filter_result.exts);
 	}
 
 	if (oldp)
@@ -458,7 +457,6 @@ errout_alloc:
 	else if (balloc == 2)
 		kfree(cp->h);
 errout1:
-	tcf_exts_destroy(&cr.exts);
 	tcf_exts_destroy(&new_filter_result.exts);
 errout:
 	kfree(cp);
