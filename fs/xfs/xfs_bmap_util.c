@@ -1112,7 +1112,7 @@ xfs_adjust_extent_unmap_boundaries(
 	return 0;
 }
 
-static int
+int
 xfs_flush_unmap_range(
 	struct xfs_inode	*ip,
 	xfs_off_t		offset,
@@ -1851,7 +1851,7 @@ xfs_swap_extents(
 	 */
 	lock_two_nondirectories(VFS_I(ip), VFS_I(tip));
 	lock_flags = XFS_MMAPLOCK_EXCL;
-	xfs_lock_two_inodes(ip, tip, XFS_MMAPLOCK_EXCL);
+	xfs_lock_two_inodes(ip, XFS_MMAPLOCK_EXCL, tip, XFS_MMAPLOCK_EXCL);
 
 	/* Verify that both files have the same format */
 	if ((VFS_I(ip)->i_mode & S_IFMT) != (VFS_I(tip)->i_mode & S_IFMT)) {
@@ -1898,7 +1898,7 @@ xfs_swap_extents(
 	 * Lock and join the inodes to the tansaction so that transaction commit
 	 * or cancel will unlock the inodes from this point onwards.
 	 */
-	xfs_lock_two_inodes(ip, tip, XFS_ILOCK_EXCL);
+	xfs_lock_two_inodes(ip, XFS_ILOCK_EXCL, tip, XFS_ILOCK_EXCL);
 	lock_flags |= XFS_ILOCK_EXCL;
 	xfs_trans_ijoin(tp, ip, 0);
 	xfs_trans_ijoin(tp, tip, 0);

@@ -87,4 +87,7 @@ int	xfs_swap_extents(struct xfs_inode *ip, struct xfs_inode *tip,
 
 xfs_daddr_t xfs_fsb_to_db(struct xfs_inode *ip, xfs_fsblock_t fsb);
 xfs_extnum_t xfs_bmap_count_leaves(struct xfs_ifork *ifp, xfs_filblks_t *count);
+
+int	xfs_flush_unmap_range(struct xfs_inode *ip, xfs_off_t offset,
+			      xfs_off_t len);
 #endif	/* __XFS_BMAP_UTIL_H__ */

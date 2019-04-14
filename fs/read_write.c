@@ -1760,6 +1760,8 @@ int vfs_clone_file_prep_inodes(struct inode *inode_in, loff_t pos_in,
 		if (pos_in > isize)
 			return -EINVAL;
 		*len = isize - pos_in;
+		if (*len == 0)
+			return 0;
 	}
 
 	/* Ensure offsets don't wrap and the input is inside i_size */
@@ -2011,6 +2013,9 @@ int vfs_dedupe_file_range(struct file *file, struct file_dedupe_range *same)
 	if (off + len > i_size_read(src))
 		return -EINVAL;
 
+	/* Arbitrary 1G limit on a single dedupe request, can be raised. */
+	len = min_t(u64, len, 1 << 30);
+
 	/* pre-format output fields to sane values */
 	for (i = 0; i < count; i++) {
 		same->info[i].bytes_deduped = 0ULL;
@@ -2031,7 +2036,7 @@ int vfs_dedupe_file_range(struct file *file, struct file_dedupe_range *same)
 		ret = mnt_want_write_file(dst_file);
 		if (ret) {
 			info->status = ret;
-			goto next_loop;
+			goto next_fdput;
 		}
 
 		dst_off = info->dest_offset;
@@ -2066,9 +2071,9 @@ int vfs_dedupe_file_range(struct file *file, struct file_dedupe_range *same)
 
 next_file:
 		mnt_drop_write_file(dst_file);
-next_loop:
+next_fdput:
 		fdput(dst_fd);
-
+next_loop:
 		if (fatal_signal_pending(current))
 			goto out;
 	}
