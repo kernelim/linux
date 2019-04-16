@@ -824,6 +824,7 @@ struct sge {
 	struct timer_list tx_timer; /* checks Tx queues */
 #ifndef __GENKSYMS__
 	u16 dbqtimer_val[SGE_NDBQTIMERS];
+	u16 dbqtimer_tick;
 #endif
 };
 

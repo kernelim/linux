@@ -3049,6 +3049,7 @@ static void cxgb_del_udp_tunnel(struct net_device *netdev,
 
 		adapter->geneve_port = 0;
 		t4_write_reg(adapter, MPS_RX_GENEVE_TYPE_A, 0);
+		break;
 	default:
 		return;
 	}
@@ -3134,6 +3135,7 @@ static void cxgb_add_udp_tunnel(struct net_device *netdev,
 
 		t4_write_reg(adapter, MPS_RX_GENEVE_TYPE_A,
 			     GENEVE_V(be16_to_cpu(ti->port)) | GENEVE_EN_F);
+		break;
 	default:
 		return;
 	}
@@ -4257,8 +4259,18 @@ static int adap_init0(struct adapter *adap)
 	/* Grab the SGE Doorbell Queue Timer values.  If successful, that
 	 * indicates that the Firmware and Hardware support this.
 	 */
-	ret = t4_read_sge_dbqtimers(adap, ARRAY_SIZE(adap->sge.dbqtimer_val),
-				    adap->sge.dbqtimer_val);
+	params[0] = (FW_PARAMS_MNEM_V(FW_PARAMS_MNEM_DEV) |
+		    FW_PARAMS_PARAM_X_V(FW_PARAMS_PARAM_DEV_DBQ_TIMERTICK));
+	ret = t4_query_params(adap, adap->mbox, adap->pf, 0,
+			      1, params, val);
+
+	if (!ret) {
+		adap->sge.dbqtimer_tick = val[0];
+		ret = t4_read_sge_dbqtimers(adap,
+					    ARRAY_SIZE(adap->sge.dbqtimer_val),
+					    adap->sge.dbqtimer_val);
+	}
+
 	if (!ret)
 		adap->flags |= SGE_DBQ_TIMER;
 
