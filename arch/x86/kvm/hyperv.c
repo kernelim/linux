@@ -549,7 +549,10 @@ static int stimer_set_config(struct kvm_vcpu_hv_stimer *stimer, u64 config,
 	if ((stimer->config & HV_STIMER_ENABLE) && HV_STIMER_SINT(config) == 0)
 		config &= ~HV_STIMER_ENABLE;
 	stimer->config = config;
-	stimer_mark_pending(stimer, false);
+
+	if (stimer->config & HV_STIMER_ENABLE)
+		stimer_mark_pending(stimer, false);
+
 	return 0;
 }
 
@@ -565,7 +568,10 @@ static int stimer_set_count(struct kvm_vcpu_hv_stimer *stimer, u64 count,
 		stimer->config &= ~HV_STIMER_ENABLE;
 	else if (stimer->config & HV_STIMER_AUTOENABLE)
 		stimer->config |= HV_STIMER_ENABLE;
-	stimer_mark_pending(stimer, false);
+
+	if (stimer->config & HV_STIMER_ENABLE)
+		stimer_mark_pending(stimer, false);
+
 	return 0;
 }
 
