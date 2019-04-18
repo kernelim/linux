@@ -2883,15 +2883,17 @@ static int meminfo_show(struct seq_file *seq, void *v)
 	mem_region_show(seq, "uP Extmem2:", meminfo.up_extmem2_lo,
 			meminfo.up_extmem2_hi);
 
-	seq_printf(seq, "\n%u Rx pages of size %uKiB for %u channels\n",
-		   meminfo.rx_pages_data[0], meminfo.rx_pages_data[1],
-		   meminfo.rx_pages_data[2]);
+	seq_printf(seq, "\n%u Rx pages (%u free) of size %uKiB for %u channels\n",
+		   meminfo.rx_pages_data[0], meminfo.free_rx_cnt,
+		   meminfo.rx_pages_data[1], meminfo.rx_pages_data[2]);
 
-	seq_printf(seq, "%u Tx pages of size %u%ciB for %u channels\n",
-		   meminfo.tx_pages_data[0], meminfo.tx_pages_data[1],
-		   meminfo.tx_pages_data[2], meminfo.tx_pages_data[3]);
+	seq_printf(seq, "%u Tx pages (%u free) of size %u%ciB for %u channels\n",
+		   meminfo.tx_pages_data[0], meminfo.free_tx_cnt,
+		   meminfo.tx_pages_data[1], meminfo.tx_pages_data[2],
+		   meminfo.tx_pages_data[3]);
 
-	seq_printf(seq, "%u p-structs\n\n", meminfo.p_structs);
+	seq_printf(seq, "%u p-structs (%u free)\n\n",
+			meminfo.p_structs, meminfo.p_structs_free_cnt);
 
 	for (i = 0; i < 4; i++)
 		/* For T6 these are MAC buffer groups */

@@ -360,6 +360,7 @@ struct cxgb4_lld_info {
 #ifndef __GENKSYMS__
 	bool write_w_imm_support;         /* FW supports WRITE_WITH_IMMEDIATE */
 	bool write_cmpl_support;             /* FW supports WRITE_CMPL WR */
+	unsigned int sge_host_page_size;     /* SGE host page size */
 #endif
 };
 

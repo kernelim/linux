@@ -4222,6 +4222,7 @@ int t4_link_l1cfg_core(struct adapter *adapter, unsigned int mbox,
  */
 int t4_restart_aneg(struct adapter *adap, unsigned int mbox, unsigned int port)
 {
+	unsigned int fw_caps = adap->params.fw_caps_support;
 	struct fw_port_cmd c;
 
 	memset(&c, 0, sizeof(c));
@@ -4229,9 +4230,14 @@ int t4_restart_aneg(struct adapter *adap, unsigned int mbox, unsigned int port)
 				     FW_CMD_REQUEST_F | FW_CMD_EXEC_F |
 				     FW_PORT_CMD_PORTID_V(port));
 	c.action_to_len16 =
-		cpu_to_be32(FW_PORT_CMD_ACTION_V(FW_PORT_ACTION_L1_CFG) |
+		cpu_to_be32(FW_PORT_CMD_ACTION_V(fw_caps == FW_CAPS16
+						 ? FW_PORT_ACTION_L1_CFG
+						 : FW_PORT_ACTION_L1_CFG32) |
 			    FW_LEN16(c));
-	c.u.l1cfg.rcap = cpu_to_be32(FW_PORT_CAP32_ANEG);
+	if (fw_caps == FW_CAPS16)
+		c.u.l1cfg.rcap = cpu_to_be32(FW_PORT_CAP_ANEG);
+	else
+		c.u.l1cfg32.rcap32 = cpu_to_be32(FW_PORT_CAP32_ANEG);
 	return t4_wr_mbox(adap, mbox, &c, sizeof(c), NULL);
 }
 
@@ -7199,20 +7205,9 @@ int t4_fixup_host_params(struct adapter *adap, unsigned int page_size,
 			 unsigned int cache_line_size)
 {
 	unsigned int page_shift = fls(page_size) - 1;
-	unsigned int sge_hps = page_shift - 10;
 	unsigned int stat_len = cache_line_size > 64 ? 128 : 64;
 	unsigned int fl_align = cache_line_size < 32 ? 32 : cache_line_size;
 	unsigned int fl_align_log = fls(fl_align) - 1;
-
-	t4_write_reg(adap, SGE_HOST_PAGE_SIZE_A,
-		     HOSTPAGESIZEPF0_V(sge_hps) |
-		     HOSTPAGESIZEPF1_V(sge_hps) |
-		     HOSTPAGESIZEPF2_V(sge_hps) |
-		     HOSTPAGESIZEPF3_V(sge_hps) |
-		     HOSTPAGESIZEPF4_V(sge_hps) |
-		     HOSTPAGESIZEPF5_V(sge_hps) |
-		     HOSTPAGESIZEPF6_V(sge_hps) |
-		     HOSTPAGESIZEPF7_V(sge_hps));
 
 	if (is_t4(adap->params.chip)) {
 		t4_set_reg_field(adap, SGE_CONTROL_A,
@@ -8752,7 +8747,7 @@ static int t4_get_flash_params(struct adapter *adap)
 	};
 
 	unsigned int part, manufacturer;
-	unsigned int density, size;
+	unsigned int density, size = 0;
 	u32 flashid = 0;
 	int ret;
 
@@ -8822,11 +8817,6 @@ static int t4_get_flash_params(struct adapter *adap)
 		case 0x22: /* 256MB */
 			size = 1 << 28;
 			break;
-
-		default:
-			dev_err(adap->pdev_dev, "Micron Flash Part has bad size, ID = %#x, Density code = %#x\n",
-				flashid, density);
-			return -EINVAL;
 		}
 		break;
 	}
@@ -8842,10 +8832,6 @@ static int t4_get_flash_params(struct adapter *adap)
 		case 0x17: /* 64MB */
 			size = 1 << 26;
 			break;
-		default:
-			dev_err(adap->pdev_dev, "ISSI Flash Part has bad size, ID = %#x, Density code = %#x\n",
-				flashid, density);
-			return -EINVAL;
 		}
 		break;
 	}
@@ -8861,10 +8847,6 @@ static int t4_get_flash_params(struct adapter *adap)
 		case 0x18: /* 16MB */
 			size = 1 << 24;
 			break;
-		default:
-			dev_err(adap->pdev_dev, "Macronix Flash Part has bad size, ID = %#x, Density code = %#x\n",
-				flashid, density);
-			return -EINVAL;
 		}
 		break;
 	}
@@ -8880,17 +8862,21 @@ static int t4_get_flash_params(struct adapter *adap)
 		case 0x18: /* 16MB */
 			size = 1 << 24;
 			break;
-		default:
-			dev_err(adap->pdev_dev, "Winbond Flash Part has bad size, ID = %#x, Density code = %#x\n",
-				flashid, density);
-			return -EINVAL;
 		}
 		break;
 	}
-	default:
-		dev_err(adap->pdev_dev, "Unsupported Flash Part, ID = %#x\n",
-			flashid);
-		return -EINVAL;
+	}
+
+	/* If we didn't recognize the FLASH part, that's no real issue: the
+	 * Hardware/Software contract says that Hardware will _*ALWAYS*_
+	 * use a FLASH part which is at least 4MB in size and has 64KB
+	 * sectors.  The unrecognized FLASH part is likely to be much larger
+	 * than 4MB, but that's all we really need.
+	 */
+	if (size == 0) {
+		dev_warn(adap->pdev_dev, "Unknown Flash Part, ID = %#x, assuming 4MB\n",
+			 flashid);
+		size = 1 << 22;
 	}
 
 	/* Store decoded Flash size and fall through into vetting code. */
