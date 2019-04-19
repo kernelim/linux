@@ -1852,4 +1852,5 @@ void free_tx_desc(struct adapter *adap, struct sge_txq *q,
 void free_txq(struct adapter *adap, struct sge_txq *q);
 int t4_set_vlan_acl(struct adapter *adap, unsigned int mbox, unsigned int vf,
 		    u16 vlan);
+int cxgb4_dcb_enabled(const struct net_device *dev);
 #endif /* __CXGB4_H__ */
