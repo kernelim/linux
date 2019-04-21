@@ -279,10 +279,11 @@ static int dump_qp(int id, void *p, void *data)
 
 			set_ep_sin_addrs(ep, &lsin, &rsin, &m_lsin, &m_rsin);
 			cc = snprintf(qpd->buf + qpd->pos, space,
-				      "rc qp sq id %u rq id %u state %u "
+				      "rc qp sq id %u %s id %u state %u "
 				      "onchip %u ep tid %u state %u "
 				      "%pI4:%u/%u->%pI4:%u/%u\n",
-				      qp->wq.sq.qid, qp->wq.rq.qid,
+				      qp->wq.sq.qid, qp->srq ? "srq" : "rq",
+				      qp->srq ? qp->srq->idx : qp->wq.rq.qid,
 				      (int)qp->attr.state,
 				      qp->wq.sq.flags & T4_SQ_ONCHIP,
 				      ep->hwtid, (int)ep->com.state,
@@ -484,6 +485,9 @@ static int stats_show(struct seq_file *seq, void *v)
 	seq_printf(seq, "      QID: %10llu %10llu %10llu %10llu\n",
 			dev->rdev.stats.qid.total, dev->rdev.stats.qid.cur,
 			dev->rdev.stats.qid.max, dev->rdev.stats.qid.fail);
+	seq_printf(seq, "     SRQS: %10llu %10llu %10llu %10llu\n",
+		   dev->rdev.stats.srqt.total, dev->rdev.stats.srqt.cur,
+			dev->rdev.stats.srqt.max, dev->rdev.stats.srqt.fail);
 	seq_printf(seq, "   TPTMEM: %10llu %10llu %10llu %10llu\n",
 			dev->rdev.stats.stag.total, dev->rdev.stats.stag.cur,
 			dev->rdev.stats.stag.max, dev->rdev.stats.stag.fail);
@@ -532,6 +536,8 @@ static ssize_t stats_clear(struct file *file, const char __user *buf,
 	dev->rdev.stats.stag.fail = 0;
 	dev->rdev.stats.pbl.max = 0;
 	dev->rdev.stats.pbl.fail = 0;
+	dev->rdev.stats.rqt.max = 0;
+	dev->rdev.stats.rqt.fail = 0;
 	dev->rdev.stats.rqt.max = 0;
 	dev->rdev.stats.rqt.fail = 0;
 	dev->rdev.stats.ocqp.max = 0;
@@ -839,10 +845,12 @@ static int c4iw_rdev_open(struct c4iw_rdev *rdev)
 	rdev->stats.stag.total = rdev->lldi.vr->stag.size;
 	rdev->stats.pbl.total = rdev->lldi.vr->pbl.size;
 	rdev->stats.rqt.total = rdev->lldi.vr->rq.size;
+	rdev->stats.srqt.total = rdev->lldi.vr->srq.size;
 	rdev->stats.ocqp.total = rdev->lldi.vr->ocq.size;
 	rdev->stats.qid.total = rdev->lldi.vr->qp.size;
 
-	err = c4iw_init_resource(rdev, c4iw_num_stags(rdev), T4_MAX_NUM_PD);
+	err = c4iw_init_resource(rdev, c4iw_num_stags(rdev),
+				 T4_MAX_NUM_PD, rdev->lldi.vr->srq.size);
 	if (err) {
 		pr_err("error %d initializing resources\n", err);
 		return err;
