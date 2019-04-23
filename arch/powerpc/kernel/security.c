@@ -7,6 +7,7 @@
 #include <linux/kernel.h>
 #include <linux/device.h>
 #include <linux/seq_buf.h>
+#include <linux/cpu.h>
 
 #include <asm/asm-prototypes.h>
 #include <asm/code-patching.h>
@@ -52,7 +53,7 @@ void setup_barrier_nospec(void)
 	enable = security_ftr_enabled(SEC_FTR_FAVOUR_SECURITY) &&
 		 security_ftr_enabled(SEC_FTR_BNDS_CHK_SPEC_BAR);
 
-	if (!no_nospec)
+	if (!no_nospec && !cpu_mitigations_off())
 		enable_barrier_nospec(enable);
 }
 
@@ -274,7 +275,7 @@ void setup_stf_barrier(void)
 
 	stf_enabled_flush_types = type;
 
-	if (!no_stf_barrier)
+	if (!no_stf_barrier && !cpu_mitigations_off())
 		stf_barrier_enable(enable);
 }
 

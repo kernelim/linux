@@ -2090,3 +2090,18 @@ static void get_online_cpus(void) { cpus_read_lock(); }
 static void put_online_cpus(void) { cpus_read_unlock(); }
 EXPORT_SYMBOL_GPL(get_online_cpus);
 EXPORT_SYMBOL_GPL(put_online_cpus);
+
+enum cpu_mitigations cpu_mitigations __ro_after_init = CPU_MITIGATIONS_AUTO;
+
+static int __init mitigations_parse_cmdline(char *arg)
+{
+	if (!strcmp(arg, "off"))
+		cpu_mitigations = CPU_MITIGATIONS_OFF;
+	else if (!strcmp(arg, "auto"))
+		cpu_mitigations = CPU_MITIGATIONS_AUTO;
+	else if (!strcmp(arg, "auto,nosmt"))
+		cpu_mitigations = CPU_MITIGATIONS_AUTO_NOSMT;
+
+	return 0;
+}
+early_param("mitigations", mitigations_parse_cmdline);
