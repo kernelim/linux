@@ -384,7 +384,7 @@ struct cxgb4_uld_info {
 	void (*lro_flush)(struct t4_lro_mgr *);
 };
 
-int cxgb4_register_uld(enum cxgb4_uld type, const struct cxgb4_uld_info *p);
+void cxgb4_register_uld(enum cxgb4_uld type, const struct cxgb4_uld_info *p);
 int cxgb4_unregister_uld(enum cxgb4_uld type);
 int cxgb4_ofld_send(struct net_device *dev, struct sk_buff *skb);
 int cxgb4_crypto_send(struct net_device *dev, struct sk_buff *skb);
