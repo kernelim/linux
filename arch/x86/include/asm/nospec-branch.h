@@ -144,6 +144,24 @@
 	pop %_ASM_AX
 .endm
 
+/*
+ * MDS_USER_CLEAR_CPU_BUFFERS macro is the assembly equivalent of
+ * upstream mds_user_clear_cpu_buffers(). Like the C version, the
+ * __KERNEL_DS is used for verw. Alternative is used here as
+ * static_key isn't available in RHEL6.
+ */
+.macro MDS_USER_CLEAR_CPU_BUFFERS
+	ALTERNATIVE "jmp .Ldone_\@", "", X86_FEATURE_MDS_USR_CLR
+
+	jmp	.Lverw_\@
+	.balign 2
+.Lds_\@:
+	.word	__KERNEL_DS
+.Lverw_\@:
+	verw	.Lds_\@(%rip)
+.Ldone_\@:
+.endm
+
 #else /* __ASSEMBLY__ */
 
 /*
@@ -274,6 +292,44 @@ extern void spectre_v2_retpoline_reset(void);
 extern void __spectre_v2_select_mitigation(void);
 extern void spectre_v2_print_mitigation(void);
 extern bool spectre_v2_has_full_retpoline(void);
+
+extern bool mds_idle_clear;
+
+#include <asm/segment.h>
+
+/**
+ * mds_clear_cpu_buffers - Mitigation for MDS vulnerability
+ *
+ * This uses the otherwise unused and obsolete VERW instruction in
+ * combination with microcode which triggers a CPU buffer flush when the
+ * instruction is executed.
+ */
+static inline void mds_clear_cpu_buffers(void)
+{
+	static const u16 ds = __KERNEL_DS;
+
+	/*
+	 * Has to be the memory-operand variant because only that
+	 * guarantees the CPU buffer flush functionality according to
+	 * documentation. The register-operand variant does not.
+	 * Works with any segment selector, but a valid writable
+	 * data segment is the fastest variant.
+	 *
+	 * "cc" clobber is required because VERW modifies ZF.
+	 */
+	asm volatile("verw %[ds]" : : [ds] "m" (ds) : "cc");
+}
+
+/**
+ * mds_idle_clear_cpu_buffers - Mitigation for MDS vulnerability
+ *
+ * Clear CPU buffers if the corresponding static key is enabled
+ */
+static inline void mds_idle_clear_cpu_buffers(void)
+{
+	if (unlikely(mds_idle_clear))
+		mds_clear_cpu_buffers();
+}
 
 #endif /* __ASSEMBLY__ */
 #endif /* __NOSPEC_BRANCH_H__ */

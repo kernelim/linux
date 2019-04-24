@@ -586,6 +586,7 @@
 
 	/* User cr3 in \cr3_reg - write it to hardware cr3 */
 	movl	\cr3_reg, %cr3
+	call mds_user_clear_cpu_buffers
 
 .Lswitched_\@:
 
@@ -642,6 +643,21 @@ ENTRY(ret_from_fork)
 	jmp syscall_exit
 	CFI_ENDPROC
 END(ret_from_fork)
+
+/*
+ * i686 does not have IP-relative addressing. So we can't directly
+ * use the MDS_USER_CLEAR_CPU_BUFFERS macro. Instead, we provides a
+ * separate version for 32-bit code.
+ */
+	.balign 2
+ENTRY(__verw_ds)
+	.word	__KERNEL_DS
+
+ENTRY(mds_user_clear_cpu_buffers)
+	ALTERNATIVE "ret", "", X86_FEATURE_MDS_USR_CLR
+	verw	__verw_ds
+	ret
+END(mds_user_clear_cpu_buffers)
 
 /*
  * Interrupt exit functions should be protected against kprobes
@@ -808,6 +824,7 @@ sysenter_exit:
 	movl PT_EBX(%esp), %ebx
 	movl PT_EDI(%esp), %edi
 	movl PT_ESI(%esp), %esi
+	call mds_user_clear_cpu_buffers
 
 	ENABLE_INTERRUPTS_SYSEXIT
 
@@ -968,6 +985,7 @@ restore_all:
 	SWITCH_TO_ENTRY_STACK
 	CHECK_AND_APPLY_ESPFIX
 	RESTORE_REGS pop=4 switch_cr3=1	# skip orig_eax/error_code
+	call mds_user_clear_cpu_buffers
 	CFI_ADJUST_CFA_OFFSET -4
 irq_return:
 	INTERRUPT_RETURN

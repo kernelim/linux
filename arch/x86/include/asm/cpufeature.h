@@ -188,6 +188,7 @@
 #define X86_FEATURE_PLN		(7*32+ 5) /* Intel Power Limit Notification */
 #define X86_FEATURE_PTS		(7*32+ 6) /* Intel Package Thermal Status */
 #define X86_FEATURE_DTHERM	(7*32+ 7) /* Digital Thermal Sensor */
+#define X86_FEATURE_MDS_USR_CLR (7*32+ 8) /* "" Clear cpu buffers on userspace exit */
 #define X86_FEATURE_HWP		( 7*32+ 10) /* "hwp" Intel HWP */
 #define X86_FEATURE_HWP_NOITFY	( 7*32+ 11) /* Intel HWP_NOTIFY */
 #define X86_FEATURE_HWP_ACT_WINDOW ( 7*32+ 12) /* Intel HWP_ACT_WINDOW */
@@ -262,6 +263,7 @@
 /* Intel-defined CPU features, CPUID level 0x00000007:0 (EDX), word 18 */
 #define X86_FEATURE_AVX512_4VNNIW	(18*32+ 2) /* AVX-512 Neural Network Instructions */
 #define X86_FEATURE_AVX512_4FMAPS	(18*32+ 3) /* AVX-512 Multiply Accumulation Single precision */
+#define X86_FEATURE_MD_CLEAR		(18*32+10) /* VERW clears CPU buffers */
 #define X86_FEATURE_SPEC_CTRL		(18*32+26) /* "" Speculation Control (IBRS + IBPB) */
 #define X86_FEATURE_INTEL_STIBP		(18*32+27) /* "" Single Thread Indirect Branch Predictors */
 #define X86_FEATURE_FLUSH_L1D		(18*32+28) /* Flush L1D cache */
@@ -486,6 +488,8 @@ extern unsigned long __cpu_bugs __read_mostly;
 #define X86_BUG_SPECTRE_V2		X86_BUG(2) /* CPU is affected by Spectre variant 2 attack with indirect branches */
 #define X86_BUG_SPEC_STORE_BYPASS	X86_BUG(3) /* CPU is affected by speculative store bypass attack */
 #define X86_BUG_L1TF			X86_BUG(4) /* CPU is affected by L1 Terminal Fault */
+#define X86_BUG_MDS			X86_BUG(5) /* CPU is affected by Microarchitectural data sampling */
+#define X86_BUG_MSBDS_ONLY		X86_BUG(6) /* CPU is only affected by the  MSDBS variant of BUG_MDS */
 
 #endif /* defined(__KERNEL__) && !defined(__ASSEMBLY__) */
 

@@ -9,6 +9,7 @@
 #include <linux/percpu.h>
 #include <linux/debugfs.h>
 #include <linux/uaccess.h>
+#include <linux/sched.h>
 #include <asm/spec_ctrl.h>
 #include <asm/cpufeature.h>
 #include <asm/nospec-branch.h>
@@ -535,6 +536,23 @@ void spec_ctrl_rescan_cpuid(void)
 		/* print any mitigation changes */
 		if (old_mode != spectre_v2_get_mitigation())
 			spectre_v2_print_mitigation();
+
+		/*
+		 * Look for X86_FEATURE_MD_CLEAR change for CPUs that are
+		 * vulnerable to MDS & reflect that in the mds vulnerabilities
+		 * file.
+		 */
+		if (boot_cpu_has_bug(X86_BUG_MDS) &&
+		   (mds_mitigation != MDS_MITIGATION_OFF)) {
+			enum mds_mitigations new;
+
+			new = boot_cpu_has(X86_FEATURE_MD_CLEAR)
+			    ? MDS_MITIGATION_FULL : MDS_MITIGATION_VMWERV;
+			if (new != mds_mitigation) {
+				mds_mitigation = new;
+				mds_print_mitigation();
+			}
+		}
 	}
 done:
 	mutex_unlock(&spec_ctrl_mutex);
@@ -839,6 +857,19 @@ static const struct file_operations fops_ssbd_enabled = {
 	.llseek = default_llseek,
 };
 
+static ssize_t smt_present_read(struct file *file, char __user *user_buf,
+				 size_t count, loff_t *ppos)
+{
+	unsigned int present = atomic_read(&sched_smt_present);
+
+	return __enabled_read(file, user_buf, count, ppos, &present);
+}
+
+static const struct file_operations fops_smt_present = {
+	.read = smt_present_read,
+	.llseek = default_llseek,
+};
+
 static int __init debugfs_spec_ctrl(void)
 {
 	debugfs_create_file("ibrs_enabled", S_IRUSR | S_IWUSR,
@@ -849,6 +880,8 @@ static int __init debugfs_spec_ctrl(void)
 			    arch_debugfs_dir, NULL, &fops_retp_enabled);
 	debugfs_create_file("ssbd_enabled", S_IRUSR,
 			    arch_debugfs_dir, NULL, &fops_ssbd_enabled);
+	debugfs_create_file("smt_present", S_IRUSR,
+			    arch_debugfs_dir, NULL, &fops_smt_present);
 	return 0;
 }
 late_initcall(debugfs_spec_ctrl);

@@ -161,6 +161,12 @@ static void cpu_notify_nofail(unsigned long val, void *v)
 	BUG_ON(err);
 }
 
+/*
+ * Architectures that need SMT-specific errata handling during SMT hotplug
+ * should override this.
+ */
+void __weak arch_smt_update(void) { };
+
 #ifdef CONFIG_HOTPLUG_CPU
 
 EXPORT_SYMBOL(register_cpu_notifier);
@@ -246,10 +252,18 @@ static int __ref _cpu_down(unsigned int cpu, int tasks_frozen)
 		goto out_release;
 	}
 
+	/*
+	 * The sibling_mask will be cleared in take_cpu_down when the
+	 * operation succeeds. So we can't test the sibling mask after
+	 * that. We needs to call sched_cpu_activate() if it fails.
+	 */
+	sched_cpu_deactivate(cpu);
+
 	err = __stop_machine(take_cpu_down, &tcd_param, cpumask_of(cpu));
 	if (err) {
 		/* CPU didn't die: tell everyone.  Can't complain. */
 		cpu_notify_nofail(CPU_DOWN_FAILED | mod, hcpu);
+		sched_cpu_activate(cpu);
 
 		goto out_release;
 	}
@@ -271,6 +285,7 @@ out_release:
 	cpu_hotplug_done();
 	if (!err)
 		cpu_notify_nofail(CPU_POST_DEAD | mod, hcpu);
+	arch_smt_update();
 	return err;
 }
 
@@ -377,11 +392,14 @@ static int _cpu_up(unsigned int cpu, int tasks_frozen)
 	/* Now call notifier in preparation. */
 	cpu_notify(CPU_ONLINE | mod, hcpu);
 
+	sched_cpu_activate(cpu);
+
 out_notify:
 	if (ret != 0)
 		__cpu_notify(CPU_UP_CANCELED | mod, hcpu, nr_calls, NULL);
 out:
 	cpu_hotplug_done();
+	arch_smt_update();
 
 	return ret;
 }

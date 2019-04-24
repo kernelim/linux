@@ -19,8 +19,6 @@ vulnerability is not present on:
    - A range of Intel ATOM processors (Cedarview, Cloverview, Lincroft,
      Penwell, Pineview, Slivermont, Airmont, Merrifield)
 
-   - The Intel Core Duo Yonah variants (2006 - 2008)
-
    - The Intel XEON PHI family
 
    - Intel processors which have the ARCH_CAP_RDCL_NO bit set in the
@@ -407,6 +405,9 @@ time with the option "l1tf=". The valid arguments for this option are:
 
   off		Disables hypervisor mitigations and doesn't emit any
 		warnings.
+		It also drops the swap size and available RAM limit restrictions
+		on both hypervisor and bare metal.
+
   ============  =============================================================
 
 The default is 'flush'. For details about L1D flushing see :ref:`l1d_flush`.
@@ -444,6 +445,7 @@ The default is 'cond'. If 'l1tf=full,force' is given on the kernel command
 line, then 'always' is enforced and the kvm-intel.vmentry_l1d_flush
 module parameter is ignored and writes to the sysfs file are rejected.
 
+.. _mitigation_selection:
 
 Mitigation selection guide
 --------------------------
@@ -548,6 +550,27 @@ available:
     EPT can be disabled in the hypervisor via the 'kvm-intel.ept'
     parameter.
 
+3.4. Nested virtual machines
+""""""""""""""""""""""""""""
+
+When nested virtualization is in use, three operating systems are involved:
+the bare metal hypervisor, the nested hypervisor and the nested virtual
+machine.  VMENTER operations from the nested hypervisor into the nested
+guest will always be processed by the bare metal hypervisor. If KVM is the
+bare metal hypervisor it will:
+
+ - Flush the L1D cache on every switch from the nested hypervisor to the
+   nested virtual machine, so that the nested hypervisor's secrets are not
+   exposed to the nested virtual machine;
+
+ - Flush the L1D cache on every switch from the nested virtual machine to
+   the nested hypervisor; this is a complex operation, and flushing the L1D
+   cache avoids that the bare metal hypervisor's secrets are exposed to the
+   nested virtual machine;
+
+ - Instruct the nested hypervisor to not perform any L1D cache flush. This
+   is an optimization to avoid double L1D flushing.
+
 
 .. _default_mitigations:
 
@@ -557,7 +580,8 @@ Default mitigations
   The kernel default mitigations for vulnerable processors are:
 
   - PTE inversion to protect against malicious user space. This is done
-    unconditionally and cannot be controlled.
+    unconditionally and cannot be controlled. The swap storage is limited
+    to ~16TB.
 
   - L1D conditional flushing on VMENTER when EPT is enabled for
     a guest.

@@ -303,11 +303,17 @@ ssize_t __weak cpu_show_l1tf(struct sysdev_class *class, char *buf)
 	return sprintf(buf, "Not affected\n");
 }
 
+ssize_t __weak cpu_show_mds(struct sysdev_class *class, char *buf)
+{
+	return sprintf(buf, "Not affected\n");
+}
+
 static SYSDEV_CLASS_ATTR(meltdown, 0400, cpu_show_meltdown, NULL);
 static SYSDEV_CLASS_ATTR(spectre_v1, 0400, cpu_show_spectre_v1, NULL);
 static SYSDEV_CLASS_ATTR(spectre_v2, 0400, cpu_show_spectre_v2, NULL);
 static SYSDEV_CLASS_ATTR(spec_store_bypass, 0400, cpu_show_spec_store_bypass, NULL);
 static SYSDEV_CLASS_ATTR(l1tf, 0400, cpu_show_l1tf, NULL);
+static SYSDEV_CLASS_ATTR(mds, 0400, cpu_show_mds, NULL);
 
 static struct attribute *cpu_root_vulnerabilities_attrs[] = {
 	&attr_meltdown.attr,
@@ -315,6 +321,7 @@ static struct attribute *cpu_root_vulnerabilities_attrs[] = {
 	&attr_spectre_v2.attr,
 	&attr_spec_store_bypass.attr,
 	&attr_l1tf.attr,
+	&attr_mds.attr,
 	NULL
 };
 

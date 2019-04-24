@@ -24,10 +24,12 @@
 #include <asm/cacheflush.h>
 #include <asm/nospec-branch.h>
 #include <asm/spec_ctrl.h>
+#include <asm/hypervisor.h>
 #include <linux/prctl.h>
 #include <asm/e820.h>
 
 static void __init l1tf_select_mitigation(void);
+static void __init mds_select_mitigation(void);
 
 #ifdef CONFIG_X86_32
 static int __init no_halt(char *s)
@@ -171,6 +173,10 @@ static void __init check_config(void)
 unsigned long __cpu_bugs __read_mostly;
 EXPORT_SYMBOL_GPL(__cpu_bugs);
 
+/* Control MDS CPU buffer clear before idling (halt, mwait) */
+bool mds_idle_clear __read_mostly;
+EXPORT_SYMBOL_GPL(mds_idle_clear);
+
 static void __init spectre_v2_select_mitigation(void);
 
 void __init check_bugs(void)
@@ -198,6 +204,8 @@ void __init check_bugs(void)
 	ssb_select_mitigation();
 
 	l1tf_select_mitigation();
+
+	mds_select_mitigation();
 
 	/* Select the proper spectre mitigation before patching alternatives */
 	spec_ctrl_init();
@@ -271,6 +279,65 @@ static const char *spectre_v2_strings[] = {
 	[SPECTRE_V2_IBRS_ALWAYS]		= "Mitigation: IBRS (kernel and user space)",
 	[SPECTRE_V2_IBP_DISABLED]		= "Mitigation: IBP disabled",
 };
+
+#undef pr_fmt
+#define pr_fmt(fmt)	"MDS: " fmt
+
+/* Default mitigation for L1TF-affected CPUs */
+enum mds_mitigations mds_mitigation = MDS_MITIGATION_FULL;
+static bool mds_nosmt = false;
+
+static const char * const mds_strings[] = {
+	[MDS_MITIGATION_OFF]	= "Vulnerable",
+	[MDS_MITIGATION_FULL]	= "Mitigation: Clear CPU buffers",
+	[MDS_MITIGATION_VMWERV]	= "Vulnerable: Clear CPU buffers attempted, no microcode",
+};
+
+static void __init mds_select_mitigation(void)
+{
+	if (!boot_cpu_has_bug(X86_BUG_MDS)) {
+		mds_mitigation = MDS_MITIGATION_OFF;
+		return;
+	}
+
+	if (mds_mitigation == MDS_MITIGATION_FULL) {
+		if (!boot_cpu_has(X86_FEATURE_MD_CLEAR))
+			mds_mitigation = MDS_MITIGATION_VMWERV;
+
+		setup_force_cpu_cap(X86_FEATURE_MDS_USR_CLR);
+
+		if (mds_nosmt && !boot_cpu_has(X86_BUG_MSBDS_ONLY))
+			cpu_smt_disable(false);
+	}
+
+	pr_info("%s\n", mds_strings[mds_mitigation]);
+}
+
+void mds_print_mitigation(void)
+{
+	pr_info("%s\n", mds_strings[mds_mitigation]);
+}
+
+static int __init mds_cmdline(char *str)
+{
+	if (!boot_cpu_has_bug(X86_BUG_MDS))
+		return 0;
+
+	if (!str)
+		return -EINVAL;
+
+	if (!strcmp(str, "off"))
+		mds_mitigation = MDS_MITIGATION_OFF;
+	else if (!strcmp(str, "full"))
+		mds_mitigation = MDS_MITIGATION_FULL;
+	else if (!strcmp(str, "full,nosmt")) {
+		mds_mitigation = MDS_MITIGATION_FULL;
+		mds_nosmt = true;
+	}
+
+	return 0;
+}
+early_param("mds", mds_cmdline);
 
 #undef pr_fmt
 #define pr_fmt(fmt)     "Spectre V2 : " fmt
@@ -489,6 +556,51 @@ void spectre_v2_retpoline_reset(void)
 void spectre_v2_print_mitigation(void)
 {
 	pr_info("%s\n", spectre_v2_strings[spectre_v2_enabled]);
+}
+
+#undef pr_fmt
+#define pr_fmt(fmt) fmt
+
+/* Update the static key controlling the MDS CPU buffer clear in idle */
+static void update_mds_branch_idle(void)
+{
+	/*
+	 * Enable the idle clearing if SMT is active on CPUs which are
+	 * affected only by MSBDS and not any other MDS variant.
+	 *
+	 * The other variants cannot be mitigated when SMT is enabled, so
+	 * clearing the buffers on idle just to prevent the Store Buffer
+	 * repartitioning leak would be a window dressing exercise.
+	 */
+	if (!boot_cpu_has_bug(X86_BUG_MSBDS_ONLY))
+		return;
+
+	if (sched_smt_active())
+		mds_idle_clear = true;
+	else
+		mds_idle_clear = false;
+}
+
+#define MDS_MSG_SMT "MDS CPU bug present and SMT on, data leak possible. See https://www.kernel.org/doc/html/latest/admin-guide/hw-vuln/mds.html for more details.\n"
+
+void arch_smt_update(void)
+{
+	static DEFINE_MUTEX(spec_ctrl_mutex);
+
+	mutex_lock(&spec_ctrl_mutex);
+
+	switch (mds_mitigation) {
+	case MDS_MITIGATION_FULL:
+	case MDS_MITIGATION_VMWERV:
+		if (sched_smt_active() && !boot_cpu_has(X86_BUG_MSBDS_ONLY))
+			pr_warn_once(MDS_MSG_SMT);
+		update_mds_branch_idle();
+		break;
+	case MDS_MITIGATION_OFF:
+		break;
+	}
+
+	mutex_unlock(&spec_ctrl_mutex);
 }
 
 static void __init spectre_v2_select_mitigation(void)
@@ -788,6 +900,7 @@ static int __init l1tf_cmdline(char *str)
 early_param("l1tf", l1tf_cmdline);
 
 #undef pr_fmt
+#define pr_fmt(fmt) fmt
 
 #ifdef CONFIG_SYSFS
 ssize_t cpu_show_meltdown(struct sysdev_class *class, char *buf)
@@ -842,9 +955,16 @@ static ssize_t l1tf_show_state(char *buf)
 	if (l1tf_vmx_mitigation == VMENTER_L1D_FLUSH_AUTO)
 		return sprintf(buf, "%s\n", L1TF_DEFAULT_MSG);
 
-	return sprintf(buf, "%s; VMX: SMT %s, L1D %s\n", L1TF_DEFAULT_MSG,
-		       cpu_smt_control == CPU_SMT_ENABLED ? "vulnerable" : "disabled",
-		       l1tf_vmx_states[l1tf_vmx_mitigation]);
+	if (l1tf_vmx_mitigation == VMENTER_L1D_FLUSH_EPT_DISABLED ||
+	    (l1tf_vmx_mitigation == VMENTER_L1D_FLUSH_NEVER &&
+	     sched_smt_active())) {
+		return sprintf(buf, "%s; VMX: %s\n", L1TF_DEFAULT_MSG,
+			       l1tf_vmx_states[l1tf_vmx_mitigation]);
+	}
+
+	return sprintf(buf, "%s; VMX: %s, SMT %s\n", L1TF_DEFAULT_MSG,
+		       l1tf_vmx_states[l1tf_vmx_mitigation],
+		       sched_smt_active() ? "vulnerable" : "disabled");
 }
 #else
 static ssize_t l1tf_show_state(char *buf)
@@ -858,5 +978,28 @@ ssize_t cpu_show_l1tf(struct sysdev_class *class, char *buf)
 	if (!boot_cpu_has(X86_FEATURE_L1TF_PTEINV))
 		return sprintf(buf, "Not affected\n");
 	return l1tf_show_state(buf);
+}
+
+static ssize_t mds_show_state(char *buf)
+{
+	if (x86_hyper) {
+		return sprintf(buf, "%s; SMT Host state unknown\n",
+			       mds_strings[mds_mitigation]);
+	}
+
+	if (boot_cpu_has_bug(X86_BUG_MSBDS_ONLY)) {
+		return sprintf(buf, "%s; SMT %s\n", mds_strings[mds_mitigation],
+			       sched_smt_active() ? "mitigated" : "disabled");
+	}
+
+	return sprintf(buf, "%s; SMT %s\n", mds_strings[mds_mitigation],
+		       sched_smt_active() ? "vulnerable" : "disabled");
+}
+
+ssize_t cpu_show_mds(struct sysdev_class *class, char *buf)
+{
+	if (!boot_cpu_has_bug(X86_BUG_MDS))
+		return sprintf(buf, "Not affected\n");
+	return mds_show_state(buf);
 }
 #endif

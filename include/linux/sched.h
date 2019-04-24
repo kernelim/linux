@@ -2919,6 +2919,21 @@ static inline unsigned long rlimit_max(unsigned int limit)
 	return task_rlimit_max(current, limit);
 }
 
+#ifdef CONFIG_SCHED_SMT
+extern atomic_t sched_smt_present;
+
+extern void sched_cpu_activate(unsigned int cpu);
+extern void sched_cpu_deactivate(unsigned int cpu);
+static __always_inline bool sched_smt_active(void)
+{
+	return atomic_read(&sched_smt_present);
+}
+#else /* CONFIG_SCHED_SMT */
+static __always_inline void sched_cpu_activate(unsigned int cpu)   { }
+static __always_inline void sched_cpu_deactivate(unsigned int cpu) { }
+static __always_inline bool sched_smt_active(void) { return false; }
+#endif /* CONFIG_SCHED_SMT */
+
 #endif /* __KERNEL__ */
 
 #endif

@@ -21,6 +21,7 @@ struct mm_struct;
 #include <asm/msr.h>
 #include <asm/desc_defs.h>
 #include <asm/nops.h>
+#include <asm/nospec-branch.h>
 
 #include <linux/personality.h>
 #include <linux/cpumask.h>
@@ -815,6 +816,8 @@ static __always_inline void __monitor(const void *eax, unsigned long ecx,
 
 static __always_inline void __mwait(unsigned long eax, unsigned long ecx)
 {
+	mds_idle_clear_cpu_buffers();
+
 	/* "mwait %eax, %ecx;" */
 	asm volatile(".byte 0x0f, 0x01, 0xc9;"
 		     :: "a" (eax), "c" (ecx));
@@ -823,6 +826,8 @@ static __always_inline void __mwait(unsigned long eax, unsigned long ecx)
 static inline void __sti_mwait(unsigned long eax, unsigned long ecx)
 {
 	trace_hardirqs_on();
+	mds_idle_clear_cpu_buffers();
+
 	/* "mwait %eax, %ecx;" */
 	asm volatile("sti; .byte 0x0f, 0x01, 0xc9;"
 		     :: "a" (eax), "c" (ecx));
@@ -1102,5 +1107,13 @@ enum l1tf_mitigations {
 };
 
 extern enum l1tf_mitigations l1tf_mitigation;
+
+enum mds_mitigations {
+	MDS_MITIGATION_OFF,
+	MDS_MITIGATION_FULL,
+	MDS_MITIGATION_VMWERV,
+};
+
+extern enum mds_mitigations mds_mitigation;
 
 #endif /* _ASM_X86_PROCESSOR_H */
