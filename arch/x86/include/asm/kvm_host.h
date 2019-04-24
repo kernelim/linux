@@ -1114,11 +1114,13 @@ struct kvm_x86_ops {
 	int (*mem_enc_reg_region)(struct kvm *kvm, struct kvm_enc_region *argp);
 	int (*mem_enc_unreg_region)(struct kvm *kvm, struct kvm_enc_region *argp);
 
+
 #ifndef __GENKSYMS__
 	bool (*has_emulated_msr)(int index);
 	int (*get_msr_feature)(struct kvm_msr_entry *entry);
 	struct kvm *(*vm_alloc)(void);
 	void (*vm_free)(struct kvm *);
+	bool (*need_emulation_on_page_fault)(struct kvm_vcpu *vcpu);
 #endif
 };
 

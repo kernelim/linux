@@ -99,6 +99,7 @@ struct controller {
 	unsigned int link_active_reporting:1;
 	unsigned int notification_enabled:1;
 	unsigned int power_fault_detected;
+	atomic_t pending_events;
 };
 
 #define INT_PRESENCE_ON			1

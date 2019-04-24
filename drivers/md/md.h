@@ -474,6 +474,9 @@ struct mddev {
 
 #ifndef __GENKSYMS__
 	bool	has_superblocks:1;
+	ktime_t start_flush, last_flush; /* last_flush is when the last completed
+					  * flush was started.
+					  */
 #endif
 };
 

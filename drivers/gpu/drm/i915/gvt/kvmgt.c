@@ -641,7 +641,7 @@ static inline bool intel_vgpu_in_aperture(struct intel_vgpu *vgpu, uint64_t off)
 static int intel_vgpu_aperture_rw(struct intel_vgpu *vgpu, uint64_t off,
 		void *buf, unsigned long count, bool is_write)
 {
-	void *aperture_va;
+	void __iomem *aperture_va;
 
 	if (!intel_vgpu_in_aperture(vgpu, off) ||
 	    !intel_vgpu_in_aperture(vgpu, off + count)) {
@@ -656,9 +656,9 @@ static int intel_vgpu_aperture_rw(struct intel_vgpu *vgpu, uint64_t off,
 		return -EIO;
 
 	if (is_write)
-		memcpy(aperture_va + offset_in_page(off), buf, count);
+		memcpy_toio(aperture_va + offset_in_page(off), buf, count);
 	else
-		memcpy(buf, aperture_va + offset_in_page(off), count);
+		memcpy_fromio(buf, aperture_va + offset_in_page(off), count);
 
 	io_mapping_unmap(aperture_va);
 
