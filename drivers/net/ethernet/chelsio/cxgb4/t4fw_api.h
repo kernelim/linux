@@ -1209,6 +1209,7 @@ enum fw_params_param_dev {
 	FW_PARAMS_PARAM_DEV_HMA_SIZE	= 0x20,
 	FW_PARAMS_PARAM_DEV_RDMA_WRITE_WITH_IMM = 0x21,
 	FW_PARAMS_PARAM_DEV_RI_WRITE_CMPL_WR    = 0x24,
+	FW_PARAMS_PARAM_DEV_OPAQUE_VIID_SMT_EXTN = 0x27,
 	FW_PARAMS_PARAM_DEV_DBQ_TIMER   = 0x29,
 	FW_PARAMS_PARAM_DEV_DBQ_TIMERTICK = 0x2A,
 };
@@ -2072,6 +2073,19 @@ struct fw_vi_cmd {
 #define FW_VI_CMD_FREE_V(x)	((x) << FW_VI_CMD_FREE_S)
 #define FW_VI_CMD_FREE_F	FW_VI_CMD_FREE_V(1U)
 
+#define FW_VI_CMD_VFVLD_S	24
+#define FW_VI_CMD_VFVLD_M	0x1
+#define FW_VI_CMD_VFVLD_V(x)	((x) << FW_VI_CMD_VFVLD_S)
+#define FW_VI_CMD_VFVLD_G(x)	\
+	(((x) >> FW_VI_CMD_VFVLD_S) & FW_VI_CMD_VFVLD_M)
+#define FW_VI_CMD_VFVLD_F	FW_VI_CMD_VFVLD_V(1U)
+
+#define FW_VI_CMD_VIN_S		16
+#define FW_VI_CMD_VIN_M		0xff
+#define FW_VI_CMD_VIN_V(x)	((x) << FW_VI_CMD_VIN_S)
+#define FW_VI_CMD_VIN_G(x)	\
+	(((x) >> FW_VI_CMD_VIN_S) & FW_VI_CMD_VIN_M)
+
 #define FW_VI_CMD_VIID_S	0
 #define FW_VI_CMD_VIID_M	0xfff
 #define FW_VI_CMD_VIID_V(x)	((x) << FW_VI_CMD_VIID_S)
@@ -2136,6 +2150,12 @@ struct fw_vi_mac_cmd {
 		} raw;
 	} u;
 };
+
+#define FW_VI_MAC_CMD_SMTID_S		12
+#define FW_VI_MAC_CMD_SMTID_M		0xff
+#define FW_VI_MAC_CMD_SMTID_V(x)	((x) << FW_VI_MAC_CMD_SMTID_S)
+#define FW_VI_MAC_CMD_SMTID_G(x)	\
+	(((x) >> FW_VI_MAC_CMD_SMTID_S) & FW_VI_MAC_CMD_SMTID_M)
 
 #define FW_VI_MAC_CMD_VIID_S	0
 #define FW_VI_MAC_CMD_VIID_V(x)	((x) << FW_VI_MAC_CMD_VIID_S)
