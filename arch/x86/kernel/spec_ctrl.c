@@ -225,7 +225,7 @@ static inline void atomic_update_stibp_pcp(atomic_t *pval,
 	if (enable_stibp)
 		atomic_or(SPEC_CTRL_STIBP, pval);
 	else
-		atomic_and(~SPEC_CTRL_STIBP, pval);
+		atomic_and((int)~SPEC_CTRL_STIBP, pval);
 }
 
 /*
