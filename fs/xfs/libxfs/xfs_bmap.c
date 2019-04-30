@@ -1172,7 +1172,7 @@ xfs_bmap_add_attrfork(
 			xfs_log_sb(tp);
 	}
 
-	error = xfs_defer_finish(&tp, &dfops, NULL);
+	error = xfs_defer_finish(&tp, &dfops);
 	if (error)
 		goto bmap_cancel;
 	error = xfs_trans_commit(tp);
@@ -5955,7 +5955,7 @@ xfs_bmap_split_extent(
 	if (error)
 		goto out;
 
-	error = xfs_defer_finish(&tp, &dfops, NULL);
+	error = xfs_defer_finish(&tp, &dfops);
 	if (error)
 		goto out;
 
@@ -6005,7 +6005,7 @@ __xfs_bmap_add(
 	bi->bi_whichfork = whichfork;
 	bi->bi_bmap = *bmap;
 
-	error = xfs_defer_join(dfops, bi->bi_owner);
+	error = xfs_defer_ijoin(dfops, bi->bi_owner);
 	if (error) {
 		kmem_free(bi);
 		return error;

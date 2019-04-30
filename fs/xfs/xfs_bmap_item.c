@@ -490,7 +490,7 @@ xfs_bui_recover(
 		goto err_dfops;
 
 	/* Finish transaction, free inodes. */
-	error = xfs_defer_finish(&tp, &dfops, NULL);
+	error = xfs_defer_finish(&tp, &dfops);
 	if (error)
 		goto err_dfops;
 

@@ -353,15 +353,30 @@ enum smca_bank_types {
 	SMCA_IF,	/* Instruction Fetch */
 	SMCA_L2_CACHE,	/* L2 Cache */
 	SMCA_DE,	/* Decoder Unit */
+#ifndef __GENKSYMS__
+	SMCA_RESERVED,	/* Reserved */
+#endif
 	SMCA_EX,	/* Execution Unit */
 	SMCA_FP,	/* Floating Point */
 	SMCA_L3_CACHE,	/* L3 Cache */
 	SMCA_CS,	/* Coherent Slave */
+#ifndef __GENKSYMS__
+	SMCA_CS_V2,	/* Coherent Slave */
+#endif
 	SMCA_PIE,	/* Power, Interrupts, etc. */
 	SMCA_UMC,	/* Unified Memory Controller */
 	SMCA_PB,	/* Parameter Block */
 	SMCA_PSP,	/* Platform Security Processor */
+#ifndef __GENKSYMS__
+	SMCA_PSP_V2,	/* Platform Security Processor */
+#endif
 	SMCA_SMU,	/* System Management Unit */
+#ifndef __GENKSYMS__
+	SMCA_SMU_V2,	/* System Management Unit */
+	SMCA_MP5,	/* Microprocessor 5 Unit */
+	SMCA_NBIO,	/* Northbridge IO Unit */
+	SMCA_PCIE,	/* PCI Express Unit */
+#endif
 	N_SMCA_BANK_TYPES
 };
 

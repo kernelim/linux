@@ -54,12 +54,13 @@ static inline void __blk_get_queue(struct request_queue *q)
 }
 
 struct blk_flush_queue *blk_alloc_flush_queue(struct request_queue *q,
-		int node, int cmd_size);
+		int node, int cmd_size, gfp_t flags);
 void blk_free_flush_queue(struct blk_flush_queue *q);
 
 int blk_init_rl(struct request_list *rl, struct request_queue *q,
 		gfp_t gfp_mask);
 void blk_exit_rl(struct request_queue *q, struct request_list *rl);
+void blk_exit_queue(struct request_queue *q);
 void blk_rq_bio_prep(struct request_queue *q, struct request *rq,
 			struct bio *bio);
 void blk_queue_bypass_start(struct request_queue *q);
@@ -148,6 +149,8 @@ static inline void blk_clear_rq_complete(struct request *rq)
 #define ELV_ON_HASH(rq) ((rq)->rq_flags & RQF_HASHED)
 
 void blk_insert_flush(struct request *rq);
+int elevator_switch_mq(struct request_queue *q,
+			      struct elevator_type *new_e);
 
 static inline struct request *__elv_next_request(struct request_queue *q)
 {

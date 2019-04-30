@@ -992,7 +992,7 @@ xfs_alloc_file_space(
 		/*
 		 * Complete the transaction
 		 */
-		error = xfs_defer_finish(&tp, &dfops, NULL);
+		error = xfs_defer_finish(&tp, &dfops);
 		if (error)
 			goto error0;
 
@@ -1058,7 +1058,8 @@ xfs_unmap_extent(
 	if (error)
 		goto out_bmap_cancel;
 
-	error = xfs_defer_finish(&tp, &dfops, ip);
+	xfs_defer_ijoin(&dfops, ip);
+	error = xfs_defer_finish(&tp, &dfops);
 	if (error)
 		goto out_bmap_cancel;
 
@@ -1349,7 +1350,7 @@ xfs_collapse_file_space(
 		if (error)
 			goto out_bmap_cancel;
 
-		error = xfs_defer_finish(&tp, &dfops, NULL);
+		error = xfs_defer_finish(&tp, &dfops);
 		if (error)
 			goto out_bmap_cancel;
 		error = xfs_trans_commit(tp);
@@ -1424,7 +1425,7 @@ xfs_insert_file_space(
 		if (error)
 			goto out_bmap_cancel;
 
-		error = xfs_defer_finish(&tp, &dfops, NULL);
+		error = xfs_defer_finish(&tp, &dfops);
 		if (error)
 			goto out_bmap_cancel;
 		error = xfs_trans_commit(tp);
@@ -1649,7 +1650,8 @@ xfs_swap_extent_rmap(
 			if (error)
 				goto out_defer;
 
-			error = xfs_defer_finish(tpp, &dfops, ip);
+			xfs_defer_ijoin(&dfops, ip);
+			error = xfs_defer_finish(tpp, &dfops);
 			if (error)
 				goto out_defer;
 
@@ -1809,7 +1811,7 @@ xfs_swap_change_owner(
 		if (error != -EAGAIN)
 			break;
 
-		error = xfs_trans_roll(tpp, NULL);
+		error = xfs_trans_roll(tpp);
 		if (error)
 			break;
 		tp = *tpp;
