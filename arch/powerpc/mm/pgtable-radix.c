@@ -12,6 +12,7 @@
 #include <linux/memblock.h>
 #include <linux/of_fdt.h>
 #include <linux/mm.h>
+#include <linux/string_helpers.h>
 #include <linux/stop_machine.h>
 
 #include <asm/pgtable.h>
@@ -179,20 +180,25 @@ void radix__mark_rodata_ro(void)
 }
 #endif /* CONFIG_STRICT_KERNEL_RWX */
 
-static inline void __meminit print_mapping(unsigned long start,
-					   unsigned long end,
-					   unsigned long size)
+static inline void __meminit
+print_mapping(unsigned long start, unsigned long end, unsigned long size, bool exec)
 {
+	char buf[10];
+
 	if (end <= start)
 		return;
 
-	pr_info("Mapped range 0x%lx - 0x%lx with 0x%lx\n", start, end, size);
+	string_get_size(size, 1, STRING_UNITS_2, buf, sizeof(buf));
+
+	pr_info("Mapped 0x%016lx-0x%016lx with %s pages%s\n", start, end, buf,
+		exec ? " (exec)" : "");
 }
 
 static int __meminit create_physical_mapping(unsigned long start,
 					     unsigned long end)
 {
 	unsigned long vaddr, addr, mapping_size = 0;
+	bool prev_exec, exec = false;
 	pgprot_t prot;
 	unsigned long max_mapping_size;
 #ifdef CONFIG_STRICT_KERNEL_RWX
@@ -208,6 +214,7 @@ static int __meminit create_physical_mapping(unsigned long start,
 
 		gap = end - addr;
 		previous_size = mapping_size;
+		prev_exec = exec;
 		max_mapping_size = PUD_SIZE;
 
 retry:
@@ -233,25 +240,28 @@ retry:
 		    (addr + mapping_size) >= __pa_symbol(_stext))
 			mapping_size = PAGE_SIZE;
 
-		if (mapping_size != previous_size) {
-			print_mapping(start, addr, previous_size);
-			start = addr;
-		}
-
 		vaddr = (unsigned long)__va(addr);
 
 		if (overlaps_kernel_text(vaddr, vaddr + mapping_size) ||
-		    overlaps_interrupt_vector_text(vaddr, vaddr + mapping_size))
+		    overlaps_interrupt_vector_text(vaddr, vaddr + mapping_size)) {
 			prot = PAGE_KERNEL_X;
-		else
+			exec = true;
+		} else {
 			prot = PAGE_KERNEL;
+			exec = false;
+		}
+
+		if (mapping_size != previous_size || exec != prev_exec) {
+			print_mapping(start, addr, previous_size, prev_exec);
+			start = addr;
+		}
 
 		rc = radix__map_kernel_page(vaddr, addr, prot, mapping_size);
 		if (rc)
 			return rc;
 	}
 
-	print_mapping(start, addr, mapping_size);
+	print_mapping(start, addr, mapping_size, exec);
 	return 0;
 }
 
