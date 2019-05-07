@@ -2467,9 +2467,6 @@ static int run_one_delayed_ref(struct btrfs_trans_handle *trans,
 			}
 		}
 
-		/* Also free its reserved qgroup space */
-		btrfs_qgroup_free_delayed_ref(fs_info, head->qgroup_ref_root,
-					      head->qgroup_reserved);
 		return ret;
 	}
 

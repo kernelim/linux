@@ -616,14 +616,12 @@ add_delayed_ref_head(struct btrfs_fs_info *fs_info,
 	INIT_LIST_HEAD(&head_ref->ref_add_list);
 	head_ref->processing = 0;
 	head_ref->total_ref_mod = count_mod;
-	head_ref->qgroup_reserved = 0;
-	head_ref->qgroup_ref_root = 0;
 
 	/* Record qgroup extent info if provided */
 	if (qrecord) {
 		if (ref_root && reserved) {
-			head_ref->qgroup_ref_root = ref_root;
-			head_ref->qgroup_reserved = reserved;
+			qrecord->data_rsv = reserved;
+			qrecord->data_rsv_refroot = ref_root;
 		}
 
 		qrecord->bytenr = bytenr;
@@ -643,8 +641,6 @@ add_delayed_ref_head(struct btrfs_fs_info *fs_info,
 	existing = htree_insert(&delayed_refs->href_root,
 				&head_ref->href_node);
 	if (existing) {
-		WARN_ON(ref_root && reserved && existing->qgroup_ref_root
-			&& existing->qgroup_reserved);
 		update_existing_head_ref(delayed_refs, &existing->node, ref,
 					 old_ref_mod);
 		/*
@@ -808,7 +804,7 @@ int btrfs_add_delayed_tree_ref(struct btrfs_fs_info *fs_info,
 
 	if (test_bit(BTRFS_FS_QUOTA_ENABLED, &fs_info->flags) &&
 	    is_fstree(ref_root)) {
-		record = kmalloc(sizeof(*record), GFP_NOFS);
+		record = kzalloc(sizeof(*record), GFP_NOFS);
 		if (!record)
 			goto free_head_ref;
 	}
@@ -867,7 +863,7 @@ int btrfs_add_delayed_data_ref(struct btrfs_fs_info *fs_info,
 
 	if (test_bit(BTRFS_FS_QUOTA_ENABLED, &fs_info->flags) &&
 	    is_fstree(ref_root)) {
-		record = kmalloc(sizeof(*record), GFP_NOFS);
+		record = kzalloc(sizeof(*record), GFP_NOFS);
 		if (!record) {
 			kmem_cache_free(btrfs_delayed_data_ref_cachep, ref);
 			kmem_cache_free(btrfs_delayed_ref_head_cachep,
