@@ -7423,6 +7423,13 @@ int __init qlt_init(void)
 		return -EINVAL;
 	}
 
+	qla_tgt_wq = alloc_workqueue("qla_tgt_wq", 0, 0);
+	if (!qla_tgt_wq) {
+		ql_log(ql_log_fatal, NULL, 0xe06f,
+		    "alloc_workqueue for qla_tgt_wq failed\n");
+		return -ENOMEM;
+	}
+
 	if (!QLA_TGT_MODE_ENABLED())
 		return 0;
 
@@ -7432,7 +7439,8 @@ int __init qlt_init(void)
 	if (!qla_tgt_mgmt_cmd_cachep) {
 		ql_log(ql_log_fatal, NULL, 0xd04b,
 		    "kmem_cache_create for qla_tgt_mgmt_cmd_cachep failed\n");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto out_workqueue;
 	}
 
 	qla_tgt_plogi_cachep = kmem_cache_create("qla_tgt_plogi_cachep",
@@ -7455,33 +7463,27 @@ int __init qlt_init(void)
 		goto out_plogi_cachep;
 	}
 
-	qla_tgt_wq = alloc_workqueue("qla_tgt_wq", 0, 0);
-	if (!qla_tgt_wq) {
-		ql_log(ql_log_fatal, NULL, 0xe06f,
-		    "alloc_workqueue for qla_tgt_wq failed\n");
-		ret = -ENOMEM;
-		goto out_cmd_mempool;
-	}
 	/*
 	 * Return 1 to signal that initiator-mode is being disabled
 	 */
 	return (ql2x_ini_mode == QLA2XXX_INI_MODE_DISABLED) ? 1 : 0;
 
-out_cmd_mempool:
-	mempool_destroy(qla_tgt_mgmt_cmd_mempool);
 out_plogi_cachep:
 	kmem_cache_destroy(qla_tgt_plogi_cachep);
 out_mgmt_cmd_cachep:
 	kmem_cache_destroy(qla_tgt_mgmt_cmd_cachep);
+out_workqueue:
+	destroy_workqueue(qla_tgt_wq);
 	return ret;
 }
 
 void qlt_exit(void)
 {
+	destroy_workqueue(qla_tgt_wq);
+
 	if (!QLA_TGT_MODE_ENABLED())
 		return;
 
-	destroy_workqueue(qla_tgt_wq);
 	mempool_destroy(qla_tgt_mgmt_cmd_mempool);
 	kmem_cache_destroy(qla_tgt_plogi_cachep);
 	kmem_cache_destroy(qla_tgt_mgmt_cmd_cachep);
