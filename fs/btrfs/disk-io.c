@@ -4269,26 +4269,28 @@ static int btrfs_destroy_delayed_refs(struct btrfs_transaction *trans,
 
 	while ((node = rb_first(&delayed_refs->href_root)) != NULL) {
 		struct btrfs_delayed_ref_head *head;
-		struct btrfs_delayed_ref_node *tmp;
+		struct rb_node *n;
 		bool pin_bytes = false;
 
 		head = rb_entry(node, struct btrfs_delayed_ref_head,
 				href_node);
 		if (!mutex_trylock(&head->mutex)) {
-			refcount_inc(&head->node.refs);
+			refcount_inc(&head->refs);
 			spin_unlock(&delayed_refs->lock);
 
 			mutex_lock(&head->mutex);
 			mutex_unlock(&head->mutex);
-			btrfs_put_delayed_ref(&head->node);
+			btrfs_put_delayed_ref_head(head);
 			spin_lock(&delayed_refs->lock);
 			continue;
 		}
 		spin_lock(&head->lock);
-		list_for_each_entry_safe_reverse(ref, tmp, &head->ref_list,
-						 list) {
+		while ((n = rb_first(&head->ref_tree)) != NULL) {
+			ref = rb_entry(n, struct btrfs_delayed_ref_node,
+				       ref_node);
 			ref->in_tree = 0;
-			list_del(&ref->list);
+			rb_erase(&ref->ref_node, &head->ref_tree);
+			RB_CLEAR_NODE(&ref->ref_node);
 			if (!list_empty(&ref->add_list))
 				list_del(&ref->add_list);
 			atomic_dec(&delayed_refs->num_entries);
@@ -4301,16 +4303,16 @@ static int btrfs_destroy_delayed_refs(struct btrfs_transaction *trans,
 		if (head->processing == 0)
 			delayed_refs->num_heads_ready--;
 		atomic_dec(&delayed_refs->num_entries);
-		head->node.in_tree = 0;
 		rb_erase(&head->href_node, &delayed_refs->href_root);
+		RB_CLEAR_NODE(&head->href_node);
 		spin_unlock(&head->lock);
 		spin_unlock(&delayed_refs->lock);
 		mutex_unlock(&head->mutex);
 
 		if (pin_bytes)
-			btrfs_pin_extent(fs_info, head->node.bytenr,
-					 head->node.num_bytes, 1);
-		btrfs_put_delayed_ref(&head->node);
+			btrfs_pin_extent(fs_info, head->bytenr,
+					 head->num_bytes, 1);
+		btrfs_put_delayed_ref_head(head);
 		cond_resched();
 		spin_lock(&delayed_refs->lock);
 	}

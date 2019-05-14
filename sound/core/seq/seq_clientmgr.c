@@ -179,6 +179,41 @@ struct snd_seq_client *snd_seq_client_use_ptr(int clientid)
 	return client;
 }
 
+/* Take refcount and perform ioctl_mutex lock on the given client;
+ * used only for OSS sequencer
+ * Unlock via snd_seq_client_ioctl_unlock() below
+ */
+bool snd_seq_client_ioctl_lock(int clientid)
+{
+	struct snd_seq_client *client;
+
+	client = snd_seq_client_use_ptr(clientid);
+	if (!client)
+		return false;
+	mutex_lock(&client->ioctl_mutex);
+	/* The client isn't unrefed here; see snd_seq_client_ioctl_unlock() */
+	return true;
+}
+EXPORT_SYMBOL_GPL(snd_seq_client_ioctl_lock);
+
+/* Unlock and unref the given client; for OSS sequencer use only */
+void snd_seq_client_ioctl_unlock(int clientid)
+{
+	struct snd_seq_client *client;
+
+	client = snd_seq_client_use_ptr(clientid);
+	if (WARN_ON(!client))
+		return;
+	mutex_unlock(&client->ioctl_mutex);
+	/* The doubly unrefs below are intentional; the first one releases the
+	 * leftover from snd_seq_client_ioctl_lock() above, and the second one
+	 * is for releasing snd_seq_client_use_ptr() in this function
+	 */
+	snd_seq_client_unlock(client);
+	snd_seq_client_unlock(client);
+}
+EXPORT_SYMBOL_GPL(snd_seq_client_ioctl_unlock);
+
 static void usage_alloc(struct snd_seq_usage *res, int num)
 {
 	res->cur += num;
@@ -2225,12 +2260,13 @@ int snd_seq_delete_kernel_client(int client)
 
 EXPORT_SYMBOL(snd_seq_delete_kernel_client);
 
-/* skeleton to enqueue event, called from snd_seq_kernel_client_enqueue
- * and snd_seq_kernel_client_enqueue_blocking
+/*
+ * exported, called by kernel clients to enqueue events (w/o blocking)
+ *
+ * RETURN VALUE: zero if succeed, negative if error
  */
-static int kernel_client_enqueue(int client, struct snd_seq_event *ev,
-				 struct file *file, int blocking,
-				 int atomic, int hop)
+int snd_seq_kernel_client_enqueue(int client, struct snd_seq_event *ev,
+				  struct file *file, bool blocking)
 {
 	struct snd_seq_client *cptr;
 	int result;
@@ -2253,42 +2289,20 @@ static int kernel_client_enqueue(int client, struct snd_seq_event *ev,
 	if (cptr == NULL)
 		return -EINVAL;
 	
-	if (! cptr->accept_output)
+	if (!cptr->accept_output) {
 		result = -EPERM;
-	else /* send it */
+	} else { /* send it */
+		mutex_lock(&cptr->ioctl_mutex);
 		result = snd_seq_client_enqueue_event(cptr, ev, file, blocking,
-						      atomic, hop, NULL);
+						      false, 0,
+						      &cptr->ioctl_mutex);
+		mutex_unlock(&cptr->ioctl_mutex);
+	}
 
 	snd_seq_client_unlock(cptr);
 	return result;
 }
-
-/*
- * exported, called by kernel clients to enqueue events (w/o blocking)
- *
- * RETURN VALUE: zero if succeed, negative if error
- */
-int snd_seq_kernel_client_enqueue(int client, struct snd_seq_event * ev,
-				  int atomic, int hop)
-{
-	return kernel_client_enqueue(client, ev, NULL, 0, atomic, hop);
-}
-
 EXPORT_SYMBOL(snd_seq_kernel_client_enqueue);
-
-/*
- * exported, called by kernel clients to enqueue events (with blocking)
- *
- * RETURN VALUE: zero if succeed, negative if error
- */
-int snd_seq_kernel_client_enqueue_blocking(int client, struct snd_seq_event * ev,
-					   struct file *file,
-					   int atomic, int hop)
-{
-	return kernel_client_enqueue(client, ev, file, 1, atomic, hop);
-}
-
-EXPORT_SYMBOL(snd_seq_kernel_client_enqueue_blocking);
 
 /* 
  * exported, called by kernel clients to dispatch events directly to other
@@ -2543,3 +2557,20 @@ void __exit snd_sequencer_device_done(void)
 	snd_unregister_device(&seq_dev);
 	put_device(&seq_dev);
 }
+
+/* XXX kABI compatibility for SLE15 XXX */
+#undef snd_seq_kernel_client_enqueue
+int snd_seq_kernel_client_enqueue(int client, struct snd_seq_event *ev,
+				  int atomic, int hop)
+{
+	return __snd_seq_kernel_client_enqueue(client, ev, NULL, false);
+}
+EXPORT_SYMBOL(snd_seq_kernel_client_enqueue);
+
+int snd_seq_kernel_client_enqueue_blocking(int client, struct snd_seq_event *ev,
+					   struct file *file, int atomic,
+					   int hop)
+{
+	return __snd_seq_kernel_client_enqueue(client, ev, file, true);
+}
+EXPORT_SYMBOL(snd_seq_kernel_client_enqueue_blocking);

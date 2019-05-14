@@ -26,18 +26,8 @@
 #define BTRFS_ADD_DELAYED_EXTENT 3 /* record a full extent allocation */
 #define BTRFS_UPDATE_DELAYED_HEAD 4 /* not changing ref count on head ref */
 
-/*
- * XXX: Qu: I really hate the design that ref_head and tree/data ref shares the
- * same ref_node structure.
- * Ref_head is in a higher logic level than tree/data ref, and duplicated
- * bytenr/num_bytes in ref_node is really a waste or memory, they should be
- * referred from ref_head.
- * This gets more disgusting after we use list to store tree/data ref in
- * ref_head. Must clean this mess up later.
- */
 struct btrfs_delayed_ref_node {
-	/*data/tree ref use list, stored in ref_head->ref_list. */
-	struct list_head list;
+	struct rb_node ref_node;
 	/*
 	 * If action is BTRFS_ADD_DELAYED_REF, also link this node to
 	 * ref_head->ref_add_list, then we do not need to iterate the
@@ -91,8 +81,9 @@ struct btrfs_delayed_extent_op {
  * reference count modifications we've queued up.
  */
 struct btrfs_delayed_ref_head {
-	struct btrfs_delayed_ref_node node;
-
+	u64 bytenr;
+	u64 num_bytes;
+	refcount_t refs;
 	/*
 	 * the mutex is held while running the refs, and it is also
 	 * held when checking the sum of reference modifications.
@@ -100,7 +91,7 @@ struct btrfs_delayed_ref_head {
 	struct mutex mutex;
 
 	spinlock_t lock;
-	struct list_head ref_list;
+	struct rb_root ref_tree;
 	/* accumulate add BTRFS_ADD_DELAYED_REF nodes to this ref_add_list. */
 	struct list_head ref_add_list;
 
@@ -114,6 +105,14 @@ struct btrfs_delayed_ref_head {
 	 * this is meant to track if we need to do the csum accounting or not.
 	 */
 	int total_ref_mod;
+
+	/*
+	 * This is the current outstanding mod references for this bytenr.  This
+	 * is used with lookup_extent_info to get an accurate reference count
+	 * for a bytenr, so it is adjusted as delayed refs are run so that any
+	 * on disk reference count + ref_mod is accurate.
+	 */
+	int ref_mod;
 
 	/*
 	 * when a new extent is allocated, it is just reserved in memory
@@ -189,6 +188,83 @@ struct btrfs_delayed_ref_root {
 	u64 qgroup_to_skip;
 };
 
+enum btrfs_ref_type {
+	BTRFS_REF_NOT_SET,
+	BTRFS_REF_DATA,
+	BTRFS_REF_METADATA,
+	BTRFS_REF_LAST,
+};
+
+struct btrfs_data_ref {
+	/* For EXTENT_DATA_REF */
+
+	/* Root which refers to this data extent */
+	u64 ref_root;
+
+	/* Inode which refers to this data extent */
+	u64 ino;
+
+	/*
+	 * file_offset - extent_offset
+	 *
+	 * file_offset is the key.offset of the EXTENT_DATA key.
+	 * extent_offset is btrfs_file_extent_offset() of the EXTENT_DATA data.
+	 */
+	u64 offset;
+};
+
+struct btrfs_tree_ref {
+	/*
+	 * Level of this tree block
+	 *
+	 * Shared for skinny (TREE_BLOCK_REF) and normal tree ref.
+	 */
+	int level;
+
+	/*
+	 * Root which refers to this tree block.
+	 *
+	 * For TREE_BLOCK_REF (skinny metadata, either inline or keyed)
+	 */
+	u64 root;
+
+	/* For non-skinny metadata, no special member needed */
+};
+
+struct btrfs_ref {
+	enum btrfs_ref_type type;
+	int action;
+
+	/*
+	 * Whether this extent should go through qgroup record.
+	 *
+	 * Normally false, but for certain cases like delayed subtree scan,
+	 * setting this flag can hugely reduce qgroup overhead.
+	 */
+	bool skip_qgroup;
+
+	/*
+	 * Optional. For which root is this modification.
+	 * Mostly used for qgroup optimization.
+	 *
+	 * When unset, data/tree ref init code will populate it.
+	 * In certain cases, we're modifying reference for a different root.
+	 * E.g. COW fs tree blocks for balance.
+	 * In that case, tree_ref::root will be fs tree, but we're doing this
+	 * for reloc tree, then we should set @real_root to reloc tree.
+	 */
+	u64 real_root;
+	u64 bytenr;
+	u64 len;
+
+	/* Bytenr of the parent tree block */
+	u64 parent;
+	union {
+		struct btrfs_data_ref data_ref;
+		struct btrfs_tree_ref tree_ref;
+	};
+};
+
 extern struct kmem_cache *btrfs_delayed_ref_head_cachep;
 extern struct kmem_cache *btrfs_delayed_tree_ref_cachep;
 extern struct kmem_cache *btrfs_delayed_data_ref_cachep;
@@ -196,6 +272,38 @@ extern struct kmem_cache *btrfs_delayed_extent_op_cachep;
 
 int btrfs_delayed_ref_init(void);
 void btrfs_delayed_ref_exit(void);
+
+static inline void btrfs_init_generic_ref(struct btrfs_ref *generic_ref,
+				int action, u64 bytenr, u64 len, u64 parent)
+{
+	generic_ref->action = action;
+	generic_ref->bytenr = bytenr;
+	generic_ref->len = len;
+	generic_ref->parent = parent;
+}
+
+static inline void btrfs_init_tree_ref(struct btrfs_ref *generic_ref,
+				int level, u64 root)
+{
+	/* If @real_root not set, use @root as fallback */
+	if (!generic_ref->real_root)
+		generic_ref->real_root = root;
+	generic_ref->tree_ref.level = level;
+	generic_ref->tree_ref.root = root;
+	generic_ref->type = BTRFS_REF_METADATA;
+}
+
+static inline void btrfs_init_data_ref(struct btrfs_ref *generic_ref,
+				u64 ref_root, u64 ino, u64 offset)
+{
+	/* If @real_root not set, use @root as fallback */
+	if (!generic_ref->real_root)
+		generic_ref->real_root = ref_root;
+	generic_ref->data_ref.ref_root = ref_root;
+	generic_ref->data_ref.ino = ino;
+	generic_ref->data_ref.offset = offset;
+	generic_ref->type = BTRFS_REF_DATA;
+}
 
 static inline struct btrfs_delayed_extent_op *
 btrfs_alloc_delayed_extent_op(void)
@@ -224,13 +332,16 @@ static inline void btrfs_put_delayed_ref(struct btrfs_delayed_ref_node *ref)
 		case BTRFS_SHARED_DATA_REF_KEY:
 			kmem_cache_free(btrfs_delayed_data_ref_cachep, ref);
 			break;
-		case 0:
-			kmem_cache_free(btrfs_delayed_ref_head_cachep, ref);
-			break;
 		default:
 			BUG();
 		}
 	}
+}
+
+static inline void btrfs_put_delayed_ref_head(struct btrfs_delayed_ref_head *head)
+{
+	if (refcount_dec_and_test(&head->refs))
+		kmem_cache_free(btrfs_delayed_ref_head_cachep, head);
 }
 
 int btrfs_add_delayed_tree_ref(struct btrfs_fs_info *fs_info,
@@ -273,35 +384,17 @@ int btrfs_check_delayed_seq(struct btrfs_fs_info *fs_info,
 			    u64 seq);
 
 /*
- * a node might live in a head or a regular ref, this lets you
- * test for the proper type to use.
- */
-static int btrfs_delayed_ref_is_head(struct btrfs_delayed_ref_node *node)
-{
-	return node->is_head;
-}
-
-/*
  * helper functions to cast a node into its container
  */
 static inline struct btrfs_delayed_tree_ref *
 btrfs_delayed_node_to_tree_ref(struct btrfs_delayed_ref_node *node)
 {
-	WARN_ON(btrfs_delayed_ref_is_head(node));
 	return container_of(node, struct btrfs_delayed_tree_ref, node);
 }
 
 static inline struct btrfs_delayed_data_ref *
 btrfs_delayed_node_to_data_ref(struct btrfs_delayed_ref_node *node)
 {
-	WARN_ON(btrfs_delayed_ref_is_head(node));
 	return container_of(node, struct btrfs_delayed_data_ref, node);
-}
-
-static inline struct btrfs_delayed_ref_head *
-btrfs_delayed_node_to_head(struct btrfs_delayed_ref_node *node)
-{
-	WARN_ON(!btrfs_delayed_ref_is_head(node));
-	return container_of(node, struct btrfs_delayed_ref_head, node);
 }
 #endif

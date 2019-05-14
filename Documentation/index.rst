@@ -34,6 +34,7 @@ the kernel interface as seen by application developers.
    :maxdepth: 2
 
    userspace-api/index	      
+   x86/index
 
 
 Introduction to kernel development

@@ -145,7 +145,14 @@ struct hd_struct {
 enum {
 	DISK_EVENT_MEDIA_CHANGE			= 1 << 0, /* media changed */
 	DISK_EVENT_EJECT_REQUEST		= 1 << 1, /* eject requested */
+	/* Poll even if events_poll_msecs is unset */
+	DISK_EVENT_FLAG_POLL			= 1 << 16,
+	/* Forward events to udev */
+	DISK_EVENT_FLAG_UEVENT			= 1 << 17,
 };
+
+#define DISK_EVENT_TYPES_MASK \
+	(DISK_EVENT_MEDIA_CHANGE | DISK_EVENT_EJECT_REQUEST)
 
 struct disk_part_tbl {
 	struct rcu_head rcu_head;

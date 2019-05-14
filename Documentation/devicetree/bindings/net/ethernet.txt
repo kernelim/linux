@@ -29,7 +29,7 @@ The following properties are common to the Ethernet controllers:
   * "smii"
   * "xgmii"
   * "trgmii"
-  * "2000base-x",
+  * "1000base-x",
   * "2500base-x",
   * "rxaui"
   * "xaui"

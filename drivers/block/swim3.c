@@ -1242,6 +1242,7 @@ static int swim3_attach(struct macio_dev *mdev,
 	disk->first_minor = index;
 	disk->fops = &floppy_fops;
 	disk->private_data = &floppy_states[index];
+	disk->events = DISK_EVENT_MEDIA_CHANGE;
 	disk->flags |= GENHD_FL_REMOVABLE;
 	sprintf(disk->disk_name, "fd%d", index);
 	set_capacity(disk, 2880);

@@ -712,7 +712,8 @@ static int sr_probe(struct device *dev)
 	sprintf(disk->disk_name, "sr%d", minor);
 	disk->fops = &sr_bdops;
 	disk->flags = GENHD_FL_CD | GENHD_FL_BLOCK_EVENTS_ON_EXCL_WRITE;
-	disk->events = DISK_EVENT_MEDIA_CHANGE | DISK_EVENT_EJECT_REQUEST;
+	disk->events = DISK_EVENT_MEDIA_CHANGE | DISK_EVENT_EJECT_REQUEST
+		| DISK_EVENT_FLAG_POLL | DISK_EVENT_FLAG_UEVENT;
 
 	blk_queue_rq_timeout(sdev->request_queue, SR_TIMEOUT);
 
