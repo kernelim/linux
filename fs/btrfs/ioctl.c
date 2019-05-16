@@ -3774,13 +3774,18 @@ process_slot:
 								datal);
 
 				if (disko) {
+					struct btrfs_ref ref = { 0 };
+
 					inode_add_bytes(inode, datal);
+					btrfs_init_generic_ref(&ref,
+						BTRFS_ADD_DELAYED_REF, disko,
+						diskl, 0);
+					btrfs_init_data_ref(&ref,
+						root->root_key.objectid,
+						btrfs_ino(BTRFS_I(inode)),
+						new_key.offset - datao);
 					ret = btrfs_inc_extent_ref(trans,
-							fs_info,
-							disko, diskl, 0,
-							root->root_key.objectid,
-							btrfs_ino(BTRFS_I(inode)),
-							new_key.offset - datao);
+							fs_info, &ref);
 					if (ret) {
 						btrfs_abort_transaction(trans,
 									ret);

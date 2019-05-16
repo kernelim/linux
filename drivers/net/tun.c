@@ -1220,9 +1220,6 @@ static ssize_t tun_get_user(struct tun_struct *tun, struct tun_file *tfile,
 	int err;
 	u32 rxhash;
 
-	if (!(tun->dev->flags & IFF_UP))
-		return -EIO;
-
 	if (!(tun->flags & IFF_NO_PI)) {
 		if (len < sizeof(pi))
 			return -EINVAL;
@@ -1297,9 +1294,11 @@ static ssize_t tun_get_user(struct tun_struct *tun, struct tun_file *tfile,
 		err = skb_copy_datagram_from_iter(skb, 0, from, len);
 
 	if (err) {
+		err = -EFAULT;
+drop:
 		this_cpu_inc(tun->pcpu_stats->rx_dropped);
 		kfree_skb(skb);
-		return -EFAULT;
+		return err;
 	}
 
 	if (virtio_net_hdr_to_skb(skb, &gso, tun_is_little_endian(tun))) {
@@ -1350,11 +1349,20 @@ static ssize_t tun_get_user(struct tun_struct *tun, struct tun_file *tfile,
 	skb_probe_transport_header(skb, 0);
 
 	rxhash = skb_get_hash(skb);
+
+	rcu_read_lock();
+	if (unlikely(!(tun->dev->flags & IFF_UP))) {
+		err = -EIO;
+		rcu_read_unlock();
+		goto drop;
+	}
+
 #ifndef CONFIG_4KSTACKS
 	tun_rx_batched(tun, tfile, skb, more);
 #else
 	netif_rx_ni(skb);
 #endif
+	rcu_read_unlock();
 
 	stats = get_cpu_ptr(tun->pcpu_stats);
 	u64_stats_update_begin(&stats->syncp);
