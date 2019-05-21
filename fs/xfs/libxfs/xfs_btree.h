@@ -257,6 +257,14 @@ typedef struct xfs_btree_cur
  */
 #define	XFS_BUF_TO_BLOCK(bp)	((struct xfs_btree_block *)((bp)->b_addr))
 
+/*
+ * Internal long and short btree block checks.  They return NULL if the
+ * block is ok or the address of the failed check otherwise.
+ */
+xfs_failaddr_t __xfs_btree_check_lblock(struct xfs_btree_cur *cur,
+		struct xfs_btree_block *block, int level, struct xfs_buf *bp);
+xfs_failaddr_t __xfs_btree_check_sblock(struct xfs_btree_cur *cur,
+		struct xfs_btree_block *block, int level, struct xfs_buf *bp);
 
 /*
  * Check that block header is ok.
@@ -271,10 +279,19 @@ xfs_btree_check_block(
 /*
  * Check that (long) pointer is ok.
  */
-int					/* error (0 or EFSCORRUPTED) */
+bool					/* error (0 or EFSCORRUPTED) */
 xfs_btree_check_lptr(
 	struct xfs_btree_cur	*cur,	/* btree cursor */
-	xfs_fsblock_t		ptr,	/* btree block disk address */
+	xfs_fsblock_t		fsbno,	/* btree block disk address */
+	int			level);	/* btree block level */
+
+/*
+ * Check that (short) pointer is ok.
+ */
+bool					/* error (0 or EFSCORRUPTED) */
+xfs_btree_check_sptr(
+	struct xfs_btree_cur	*cur,	/* btree cursor */
+	xfs_agblock_t		agbno,	/* btree block disk address */
 	int			level);	/* btree block level */
 
 /*
@@ -506,5 +523,18 @@ int xfs_btree_visit_blocks(struct xfs_btree_cur *cur,
 		xfs_btree_visit_blocks_fn fn, void *data);
 
 int xfs_btree_count_blocks(struct xfs_btree_cur *cur, xfs_extlen_t *blocks);
+
+union xfs_btree_rec *xfs_btree_rec_addr(struct xfs_btree_cur *cur, int n,
+		struct xfs_btree_block *block);
+union xfs_btree_key *xfs_btree_key_addr(struct xfs_btree_cur *cur, int n,
+		struct xfs_btree_block *block);
+union xfs_btree_key *xfs_btree_high_key_addr(struct xfs_btree_cur *cur, int n,
+		struct xfs_btree_block *block);
+union xfs_btree_ptr *xfs_btree_ptr_addr(struct xfs_btree_cur *cur, int n,
+		struct xfs_btree_block *block);
+int xfs_btree_lookup_get_block(struct xfs_btree_cur *cur, int level,
+		union xfs_btree_ptr *pp, struct xfs_btree_block **blkp);
+struct xfs_btree_block *xfs_btree_get_block(struct xfs_btree_cur *cur,
+		int level, struct xfs_buf **bpp);
 
 #endif	/* __XFS_BTREE_H__ */

@@ -34,6 +34,7 @@
 #include "xfs_rmap_btree.h"
 #include "xfs_trans_space.h"
 #include "xfs_trace.h"
+#include "xfs_errortag.h"
 #include "xfs_error.h"
 #include "xfs_extent_busy.h"
 #include "xfs_bmap.h"
@@ -179,7 +180,8 @@ done:
 	return error;
 }
 
-static int
+/* Convert an internal btree record to an rmap record. */
+int
 xfs_rmap_btrec_to_irec(
 	union xfs_btree_rec	*rec,
 	struct xfs_rmap_irec	*irec)
@@ -2086,8 +2088,7 @@ xfs_rmap_finish_one(
 			startoff, blockcount, state);
 
 	if (XFS_TEST_ERROR(false, mp,
-			XFS_ERRTAG_RMAP_FINISH_ONE,
-			XFS_RANDOM_RMAP_FINISH_ONE))
+			XFS_ERRTAG_RMAP_FINISH_ONE))
 		return -EIO;
 
 	/*

@@ -256,7 +256,7 @@ const struct xfs_buf_ops xfs_dir3_leafn_buf_ops = {
 	.verify_write = xfs_dir3_leafn_write_verify,
 };
 
-static int
+int
 xfs_dir3_leaf_read(
 	struct xfs_trans	*tp,
 	struct xfs_inode	*dp,
@@ -850,9 +850,13 @@ xfs_dir2_leaf_addname(
 	/*
 	 * Mark the initial part of our freespace in use for the new entry.
 	 */
-	xfs_dir2_data_use_free(args, dbp, dup,
-		(xfs_dir2_data_aoff_t)((char *)dup - (char *)hdr), length,
-		&needlog, &needscan);
+	error = xfs_dir2_data_use_free(args, dbp, dup,
+			(xfs_dir2_data_aoff_t)((char *)dup - (char *)hdr),
+			length, &needlog, &needscan);
+	if (error) {
+		xfs_trans_brelse(tp, lbp);
+		return error;
+	}
 	/*
 	 * Initialize our new entry (at last).
 	 */

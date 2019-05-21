@@ -722,6 +722,15 @@ static int pppol2tp_connect(struct socket *sock, struct sockaddr *uservaddr,
 				.encap = L2TP_ENCAPTYPE_UDP,
 				.debug = 0,
 			};
+
+			/* Prevent l2tp_tunnel_register() from trying to set up
+			 * a kernel socket.
+			 */
+			if (fd < 0) {
+				error = -EBADF;
+				goto end;
+			}
+
 			error = l2tp_tunnel_create(sock_net(sk), fd, ver, tunnel_id, peer_tunnel_id, &tcfg, &tunnel);
 			if (error < 0)
 				goto end;
@@ -746,6 +755,12 @@ static int pppol2tp_connect(struct socket *sock, struct sockaddr *uservaddr,
 	session = l2tp_session_get(sock_net(sk), tunnel, session_id);
 	if (session) {
 		drop_refcnt = true;
+
+		if (session->pwtype != L2TP_PWTYPE_PPP) {
+			error = -EPROTOTYPE;
+			goto end;
+		}
+
 		ps = l2tp_session_priv(session);
 
 		/* Using a pre-existing session is fine as long as it hasn't
@@ -1199,13 +1214,18 @@ static int pppol2tp_tunnel_ioctl(struct l2tp_tunnel *tunnel,
 				l2tp_session_get(sock_net(sk), tunnel,
 						 stats.session_id);
 
-			if (session) {
-				err = pppol2tp_session_ioctl(session, cmd,
-							     arg);
-				l2tp_session_dec_refcount(session);
-			} else {
+			if (!session) {
 				err = -EBADR;
+				break;
 			}
+			if (session->pwtype != L2TP_PWTYPE_PPP) {
+				l2tp_session_dec_refcount(session);
+				err = -EBADR;
+				break;
+			}
+
+			err = pppol2tp_session_ioctl(session, cmd, arg);
+			l2tp_session_dec_refcount(session);
 			break;
 		}
 #ifdef CONFIG_XFRM

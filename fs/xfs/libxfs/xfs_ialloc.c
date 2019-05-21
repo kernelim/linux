@@ -31,6 +31,7 @@
 #include "xfs_ialloc_btree.h"
 #include "xfs_alloc.h"
 #include "xfs_rtalloc.h"
+#include "xfs_errortag.h"
 #include "xfs_error.h"
 #include "xfs_bmap.h"
 #include "xfs_cksum.h"
@@ -46,7 +47,7 @@
 /*
  * Allocation group level functions.
  */
-static inline int
+int
 xfs_ialloc_cluster_alignment(
 	struct xfs_mount	*mp)
 {
@@ -98,24 +99,15 @@ xfs_inobt_update(
 	return xfs_btree_update(cur, &rec);
 }
 
-/*
- * Get the data from the pointed-to record.
- */
-int					/* error */
-xfs_inobt_get_rec(
-	struct xfs_btree_cur	*cur,	/* btree cursor */
-	xfs_inobt_rec_incore_t	*irec,	/* btree record */
-	int			*stat)	/* output: success/failure */
+/* Convert on-disk btree record to incore inobt record. */
+void
+xfs_inobt_btrec_to_irec(
+	struct xfs_mount		*mp,
+	union xfs_btree_rec		*rec,
+	struct xfs_inobt_rec_incore	*irec)
 {
-	union xfs_btree_rec	*rec;
-	int			error;
-
-	error = xfs_btree_get_rec(cur, &rec, stat);
-	if (error || *stat == 0)
-		return error;
-
 	irec->ir_startino = be32_to_cpu(rec->inobt.ir_startino);
-	if (xfs_sb_version_hassparseinodes(&cur->bc_mp->m_sb)) {
+	if (xfs_sb_version_hassparseinodes(&mp->m_sb)) {
 		irec->ir_holemask = be16_to_cpu(rec->inobt.ir_u.sp.ir_holemask);
 		irec->ir_count = rec->inobt.ir_u.sp.ir_count;
 		irec->ir_freecount = rec->inobt.ir_u.sp.ir_freecount;
@@ -130,6 +122,25 @@ xfs_inobt_get_rec(
 				be32_to_cpu(rec->inobt.ir_u.f.ir_freecount);
 	}
 	irec->ir_free = be64_to_cpu(rec->inobt.ir_free);
+}
+
+/*
+ * Get the data from the pointed-to record.
+ */
+int
+xfs_inobt_get_rec(
+	struct xfs_btree_cur		*cur,
+	struct xfs_inobt_rec_incore	*irec,
+	int				*stat)
+{
+	union xfs_btree_rec		*rec;
+	int				error;
+
+	error = xfs_btree_get_rec(cur, &rec, stat);
+	if (error || *stat == 0)
+		return error;
+
+	xfs_inobt_btrec_to_irec(cur->bc_mp, rec, irec);
 
 	return 0;
 }
@@ -2539,8 +2550,7 @@ xfs_agi_read_verify(
 	    !xfs_buf_verify_cksum(bp, XFS_AGI_CRC_OFF))
 		xfs_buf_ioerror(bp, -EFSBADCRC);
 	else if (XFS_TEST_ERROR(!xfs_agi_verify(bp), mp,
-				XFS_ERRTAG_IALLOC_READ_AGI,
-				XFS_RANDOM_IALLOC_READ_AGI))
+				XFS_ERRTAG_IALLOC_READ_AGI))
 		xfs_buf_ioerror(bp, -EFSCORRUPTED);
 
 	if (bp->b_error)
@@ -2654,4 +2664,94 @@ xfs_ialloc_pagi_init(
 	if (bp)
 		xfs_trans_brelse(tp, bp);
 	return 0;
+}
+
+/* Calculate the first and last possible inode number in an AG. */
+void
+xfs_ialloc_agino_range(
+	struct xfs_mount	*mp,
+	xfs_agnumber_t		agno,
+	xfs_agino_t		*first,
+	xfs_agino_t		*last)
+{
+	xfs_agblock_t		bno;
+	xfs_agblock_t		eoag;
+
+	eoag = xfs_ag_block_count(mp, agno);
+
+	/*
+	 * Calculate the first inode, which will be in the first
+	 * cluster-aligned block after the AGFL.
+	 */
+	bno = round_up(XFS_AGFL_BLOCK(mp) + 1,
+			xfs_ialloc_cluster_alignment(mp));
+	*first = XFS_OFFBNO_TO_AGINO(mp, bno, 0);
+
+	/*
+	 * Calculate the last inode, which will be at the end of the
+	 * last (aligned) cluster that can be allocated in the AG.
+	 */
+	bno = round_down(eoag, xfs_ialloc_cluster_alignment(mp));
+	*last = XFS_OFFBNO_TO_AGINO(mp, bno, 0) - 1;
+}
+
+/*
+ * Verify that an AG inode number pointer neither points outside the AG
+ * nor points at static metadata.
+ */
+bool
+xfs_verify_agino(
+	struct xfs_mount	*mp,
+	xfs_agnumber_t		agno,
+	xfs_agino_t		agino)
+{
+	xfs_agino_t		first;
+	xfs_agino_t		last;
+
+	xfs_ialloc_agino_range(mp, agno, &first, &last);
+	return agino >= first && agino <= last;
+}
+
+/*
+ * Verify that an FS inode number pointer neither points outside the
+ * filesystem nor points at static AG metadata.
+ */
+bool
+xfs_verify_ino(
+	struct xfs_mount	*mp,
+	xfs_ino_t		ino)
+{
+	xfs_agnumber_t		agno = XFS_INO_TO_AGNO(mp, ino);
+	xfs_agino_t		agino = XFS_INO_TO_AGINO(mp, ino);
+
+	if (agno >= mp->m_sb.sb_agcount)
+		return false;
+	if (XFS_AGINO_TO_INO(mp, agno, agino) != ino)
+		return false;
+	return xfs_verify_agino(mp, agno, agino);
+}
+
+/* Is this an internal inode number? */
+bool
+xfs_internal_inum(
+	struct xfs_mount	*mp,
+	xfs_ino_t		ino)
+{
+	return ino == mp->m_sb.sb_rbmino || ino == mp->m_sb.sb_rsumino ||
+		(xfs_sb_version_hasquota(&mp->m_sb) &&
+		 xfs_is_quota_inode(&mp->m_sb, ino));
+}
+
+/*
+ * Verify that a directory entry's inode number doesn't point at an internal
+ * inode, empty space, or static AG metadata.
+ */
+bool
+xfs_verify_dir_ino(
+	struct xfs_mount	*mp,
+	xfs_ino_t		ino)
+{
+	if (xfs_internal_inum(mp, ino))
+		return false;
+	return xfs_verify_ino(mp, ino);
 }

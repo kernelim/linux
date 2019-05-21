@@ -769,10 +769,13 @@ xfs_mountfs(
 	if (error)
 		goto out_del_stats;
 
+	error = xfs_errortag_init(mp);
+	if (error)
+		goto out_remove_error_sysfs;
 
 	error = xfs_uuid_mount(mp);
 	if (error)
-		goto out_remove_error_sysfs;
+		goto out_remove_errortag;
 
 	/*
 	 * Set the minimum read and write sizes
@@ -1062,6 +1065,8 @@ xfs_mountfs(
 	xfs_da_unmount(mp);
  out_remove_uuid:
 	xfs_uuid_unmount(mp);
+ out_remove_errortag:
+	xfs_errortag_del(mp);
  out_remove_error_sysfs:
 	xfs_error_sysfs_del(mp);
  out_del_stats:
@@ -1165,10 +1170,11 @@ xfs_unmountfs(
 	xfs_uuid_unmount(mp);
 
 #if defined(DEBUG)
-	xfs_errortag_clearall(mp, 0);
+	xfs_errortag_clearall(mp);
 #endif
 	xfs_free_perag(mp);
 
+	xfs_errortag_del(mp);
 	xfs_error_sysfs_del(mp);
 	xfs_sysfs_del(&mp->m_stats.xs_kobj);
 	xfs_sysfs_del(&mp->m_kobj);
@@ -1415,4 +1421,17 @@ xfs_dev_is_read_only(
 		return -EROFS;
 	}
 	return 0;
+}
+
+/* Force the summary counters to be recalculated at next mount. */
+void
+xfs_force_summary_recalc(
+	struct xfs_mount	*mp)
+{
+	if (!xfs_sb_version_haslazysbcount(&mp->m_sb))
+		return;
+
+	spin_lock(&mp->m_sb_lock);
+	mp->m_flags |= XFS_MOUNT_BAD_SUMMARY;
+	spin_unlock(&mp->m_sb_lock);
 }

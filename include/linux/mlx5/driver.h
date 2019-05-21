@@ -749,6 +749,10 @@ struct mlx5_pagefault {
 };
 
 struct mlx5_td {
+	/* protects tirs list changes while tirs refresh */
+#ifndef __GENKSYMS__
+	struct mutex     list_lock;
+#endif
 	struct list_head tirs_list;
 	u32              tdn;
 };

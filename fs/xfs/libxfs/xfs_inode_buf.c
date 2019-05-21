@@ -24,6 +24,7 @@
 #include "xfs_mount.h"
 #include "xfs_defer.h"
 #include "xfs_inode.h"
+#include "xfs_errortag.h"
 #include "xfs_error.h"
 #include "xfs_cksum.h"
 #include "xfs_icache.h"
@@ -107,8 +108,7 @@ xfs_inode_buf_verify(
 		di_ok = dip->di_magic == cpu_to_be16(XFS_DINODE_MAGIC) &&
 			xfs_dinode_good_version(mp, dip->di_version);
 		if (unlikely(XFS_TEST_ERROR(!di_ok, mp,
-						XFS_ERRTAG_ITOBP_INOTOBP,
-						XFS_RANDOM_ITOBP_INOTOBP))) {
+						XFS_ERRTAG_ITOBP_INOTOBP))) {
 			if (readahead) {
 				bp->b_flags &= ~XBF_DONE;
 				xfs_buf_ioerror(bp, -EIO);
@@ -384,7 +384,7 @@ xfs_log_dinode_to_disk(
 	}
 }
 
-static bool
+bool
 xfs_dinode_verify(
 	struct xfs_mount	*mp,
 	xfs_ino_t		ino,
