@@ -2163,4 +2163,46 @@
  * to the path_reset sysfs attribute of the device.
  * If the problem persists, report it to your support organization.
  */
+
 /*? Text: "%s: %d output lines suppressed due to ratelimiting\n" */
+
+/*?
+ * Text: "%s: Path %x.%02x (pathmask %02x) is operational despite excessive IFCCs\n"
+ * Severity: Error
+ * Parameter:
+ *   @1: bus ID of the DASD
+ *   @2: cssid
+ *   @3: chpid
+ *   @4: logical path mask
+ * Description:
+ * The threshold value for interface or channel control checks (IFCCs) for the
+ * channel path was exceeded.
+ * The channel path remains operational because the autodisable feature for
+ * defective channel paths is not active.
+ * Defective channel paths can adversely affect performance.
+ * User action:
+ * Ensure that the cabling between the storage server and the mainframe
+ * system is securely in place.
+ * If you observe performance impacts, consider setting the channel path offline.
+ * By default, the DASD device driver disables defective channel paths for you.
+ * You can restore this default, for example, by writing '1' to the
+ * path_autodisable sysfs attribute.
+ * If the problem persists, report it to your support organization.
+ */
+
+/*?
+ * Text: "%s: Last path %x.%02x (pathmask %02x) is operational despite excessive IFCCs\n"
+ * Severity: Error
+ * Parameter:
+ *   @1: bus ID of the DASD
+ *   @2: cssid
+ *   @3: chpid
+ *   @4: logical path mask
+ * Description:
+ * The threshold value for interface or channel control checks (IFCCs) for the channel path was exceeded.
+ * The channel path was not removed from regular operations because it is the last remaining channel path for the DASD.
+ * User action:
+ * Ensure that the cabling between the storage server and the mainframe
+ * system is securely in place.
+ * If the problem persists, report it to your support organization.
+ */

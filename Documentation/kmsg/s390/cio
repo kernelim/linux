@@ -245,3 +245,4 @@
  * Report the problem to your support organization.
  */
 /*? Text: "%s: %d output lines suppressed due to ratelimiting\n" */
+/*? Text: "%s: SME is active, device will require DMA bounce buffers\n" */

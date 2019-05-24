@@ -707,3 +707,5 @@
  * support organization of the storage system.
  */
 /*? Text: "%s: %d output lines suppressed due to ratelimiting\n" */
+/*? Text: "%s: SME is active, device will require DMA bounce buffers\n" */
+/*? Text: "Invalid address limit on user-mode return" */
