@@ -1763,6 +1763,7 @@ static void nvme_rdma_reset_ctrl_work(struct work_struct *work)
 
 	nvme_stop_ctrl(&ctrl->ctrl);
 	nvme_rdma_shutdown_ctrl(ctrl, false);
+	flush_work(&ctrl->ctrl.scan_work);
 
 	if (!nvme_change_ctrl_state(&ctrl->ctrl, NVME_CTRL_CONNECTING)) {
 		/* state change failure should never happen */

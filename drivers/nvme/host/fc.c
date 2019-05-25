@@ -2926,6 +2926,7 @@ nvme_fc_reset_ctrl_work(struct work_struct *work)
 
 	__nvme_fc_terminate_io(ctrl);
 
+	flush_work(&ctrl->ctrl.scan_work);
 	nvme_stop_ctrl(&ctrl->ctrl);
 
 	if (ctrl->rport->remoteport.port_state == FC_OBJSTATE_ONLINE)
