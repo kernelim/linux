@@ -17,13 +17,10 @@
 #include <linux/delay.h>
 #include <linux/pm.h>
 #include <linux/platform_device.h>
-#include <linux/of_gpio.h>
 #include <linux/gpio.h>
 #include <linux/slab.h>
 #include <linux/i2c.h>
-#include <linux/firmware.h>
 #include <linux/regmap.h>
-#include <linux/proc_fs.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/clk.h>
@@ -2232,14 +2229,6 @@ static const struct i2c_device_id cx2072x_i2c_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, cx2072x_i2c_id);
 
-static const struct of_device_id cx2072x_of_match[] = {
-	{ .compatible = "cnxt,cx20721", },
-	{ .compatible = "cnxt,cx20723", },
-	{ .compatible = "cnxt,cx7601", },
-	{}
-};
-MODULE_DEVICE_TABLE(of, cx2072x_of_match);
-
 #ifdef CONFIG_ACPI
 static struct acpi_device_id cx2072x_acpi_match[] = {
 	{ "14F10720", 0 },
@@ -2254,7 +2243,6 @@ static struct i2c_driver cx2072x_i2c_driver = {
 	.id_table = cx2072x_i2c_id,
 	.driver = {
 		.name = "cx2072x",
-		.of_match_table = cx2072x_of_match,
 		.acpi_match_table = ACPI_PTR(cx2072x_acpi_match),
 	},
 };

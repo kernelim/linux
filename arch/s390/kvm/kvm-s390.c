@@ -86,6 +86,7 @@ struct kvm_stats_debugfs_item debugfs_entries[] = {
 	{ "deliver_prefix_signal", VCPU_STAT(deliver_prefix_signal) },
 	{ "deliver_restart_signal", VCPU_STAT(deliver_restart_signal) },
 	{ "deliver_program_interruption", VCPU_STAT(deliver_program_int) },
+	{ "deliver_io_interrupt", VCPU_STAT(deliver_io_int) },
 	{ "exit_wait_state", VCPU_STAT(exit_wait_state) },
 	{ "instruction_epsw", VCPU_STAT(instruction_epsw) },
 	{ "instruction_gs", VCPU_STAT(instruction_gs) },
@@ -635,7 +636,7 @@ static int kvm_vm_ioctl_enable_cap(struct kvm *kvm, struct kvm_enable_cap *cap)
 	case KVM_CAP_S390_GS:
 		r = -EINVAL;
 		mutex_lock(&kvm->lock);
-		if (atomic_read(&kvm->online_vcpus)) {
+		if (kvm->created_vcpus) {
 			r = -EBUSY;
 		} else if (test_facility(133)) {
 			set_kvm_facility(kvm->arch.model.fac_mask, 133);
@@ -1155,7 +1156,7 @@ static int kvm_s390_set_processor_feat(struct kvm *kvm,
 		return -EINVAL;
 
 	mutex_lock(&kvm->lock);
-	if (!atomic_read(&kvm->online_vcpus)) {
+	if (!kvm->created_vcpus) {
 		bitmap_copy(kvm->arch.cpu_feat, (unsigned long *) data.feat,
 			    KVM_S390_VM_CPU_FEAT_NR_BITS);
 		ret = 0;
@@ -2146,6 +2147,7 @@ static void sca_add_vcpu(struct kvm_vcpu *vcpu)
 		/* we still need the basic sca for the ipte control */
 		vcpu->arch.sie_block->scaoh = (__u32)(((__u64)sca) >> 32);
 		vcpu->arch.sie_block->scaol = (__u32)(__u64)sca;
+		return;
 	}
 	read_lock(&vcpu->kvm->arch.sca_lock);
 	if (vcpu->kvm->arch.use_esca) {
