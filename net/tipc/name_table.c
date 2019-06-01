@@ -989,7 +989,8 @@ static int tipc_nl_seq_list(struct net *net, struct tipc_nl_msg *msg,
 	for (; i < TIPC_NAMETBL_SIZE; i++) {
 		seq_head = &tn->nametbl->seq_hlist[i];
 
-		if (*last_type) {
+		if (*last_type ||
+		    (!i && *last_publ && (*last_lower == *last_publ))) {
 			seq = nametbl_find_seq(net, *last_type);
 			if (!seq)
 				return -EPIPE;

@@ -160,15 +160,19 @@ static struct stmmac_pci_dmi_data quark_pci_dmi_data[] = {
 		.func = 6,
 		.phy_addr = 1,
 	},
+	/*
+	 * There are 2 types of SIMATIC IOT2000: IOT20202 and IOT2040.
+	 * The asset tag "6ES7647-0AA00-0YA2" is only for IOT2020 which
+	 * has only one pci network device while other asset tags are
+	 * for IOT2040 which has two.
+	 */
 	{
 		.name = "SIMATIC IOT2000",
-		.asset_tag = "6ES7647-0AA00-1YA2",
 		.func = 6,
 		.phy_addr = 1,
 	},
 	{
 		.name = "SIMATIC IOT2000",
-		.asset_tag = "6ES7647-0AA00-1YA2",
 		.func = 7,
 		.phy_addr = 1,
 	},
