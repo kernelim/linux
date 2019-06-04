@@ -908,8 +908,10 @@ static int qedf_xmit(struct fc_lport *lport, struct fc_frame *fp)
 		    "Dropping FCoE frame to %06x.\n", ntoh24(fh->fh_d_id));
 		kfree_skb(skb);
 		rdata = fc_rport_lookup(lport, ntoh24(fh->fh_d_id));
-		if (rdata)
+		if (rdata) {
 			rdata->retries = lport->max_rport_retry_count;
+			kref_put(&rdata->kref, fc_rport_destroy);
+		}
 		return -EINVAL;
 	}
 	/* End NPIV filtering */
@@ -1369,9 +1371,11 @@ static void qedf_rport_event_handler(struct fc_lport *lport,
 		 */
 		fcport = (struct qedf_rport *)&rp[1];
 
+		spin_lock_irqsave(&fcport->rport_lock, flags);
 		/* Only free this fcport if it is offloaded already */
 		if (test_bit(QEDF_RPORT_SESSION_READY, &fcport->flags)) {
 			set_bit(QEDF_RPORT_UPLOADING_CONNECTION, &fcport->flags);
+			spin_unlock_irqrestore(&fcport->rport_lock, flags);
 			qedf_cleanup_fcport(qedf, fcport);
 
 			/*
@@ -1385,8 +1389,9 @@ static void qedf_rport_event_handler(struct fc_lport *lport,
 			clear_bit(QEDF_RPORT_UPLOADING_CONNECTION,
 			    &fcport->flags);
 			atomic_dec(&qedf->num_offloads);
+		} else {
+			spin_unlock_irqrestore(&fcport->rport_lock, flags);
 		}
-
 		break;
 
 	case RPORT_EV_NONE:

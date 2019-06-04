@@ -1531,13 +1531,13 @@ static int nvme_revalidate_disk(struct gendisk *disk)
 	struct nvme_ns_ids ids;
 	int ret = 0;
 
-	if (ctrl->state != NVME_CTRL_LIVE)
-		return 0;
-
 	if (test_bit(NVME_NS_DEAD, &ns->flags)) {
 		set_capacity(disk, 0);
 		return -ENODEV;
 	}
+
+	if (ctrl->state != NVME_CTRL_LIVE)
+		return 0;
 
 	id = nvme_identify_ns(ctrl, ns->head->ns_id);
 	if (!id)
@@ -3224,6 +3224,8 @@ static int nvme_scan_ns_list(struct nvme_ctrl *ctrl, unsigned nn)
 		return -ENOMEM;
 
 	for (i = 0; i < num_lists; i++) {
+		if (ctrl->state != NVME_CTRL_LIVE)
+			goto free;
 		ret = nvme_identify_ns_list(ctrl, prev, ns_list);
 		if (ret)
 			goto free;
@@ -3302,6 +3304,8 @@ static void nvme_scan_work(struct work_struct *work)
 	if (test_and_clear_bit(NVME_AER_NOTICE_NS_CHANGED, &ctrl->events)) {
 		dev_info(ctrl->device, "rescanning namespaces.\n");
 		nvme_clear_changed_ns_log(ctrl);
+		if (ctrl->state != NVME_CTRL_LIVE)
+			return;
 	}
 
 	if (nvme_identify_ctrl(ctrl, &id))
