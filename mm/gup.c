@@ -155,6 +155,7 @@ retry:
 	if (flags & FOLL_GET) {
 		if (unlikely(!try_get_page(page))) {
 			page = ERR_PTR(-ENOMEM);
+			put_dev_pagemap(pgmap);
 			goto out;
 		}
 
