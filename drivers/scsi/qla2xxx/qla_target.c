@@ -2193,7 +2193,7 @@ static void qlt_24xx_handle_abts(struct scsi_qla_host *vha,
 	sess = ha->tgt.tgt_ops->find_sess_by_s_id(vha, s_id);
 	if (!sess) {
 		ql_dbg(ql_dbg_tgt_mgt, vha, 0xf012,
-		    "qla_target(%d): task abort for non-existant session\n",
+		    "qla_target(%d): task abort for non-existent session\n",
 		    vha->vp_idx);
 		spin_unlock_irqrestore(&ha->tgt.sess_lock, flags);
 
@@ -2379,20 +2379,20 @@ void qlt_xmit_tm_rsp(struct qla_tgt_mgmt_cmd *mcmd)
 	}
 
 	if (mcmd->flags == QLA24XX_MGMT_SEND_NACK) {
-		if (mcmd->orig_iocb.imm_ntfy.u.isp24.status_subcode ==
-		    ELS_LOGO ||
-		    mcmd->orig_iocb.imm_ntfy.u.isp24.status_subcode ==
-		    ELS_PRLO ||
-		    mcmd->orig_iocb.imm_ntfy.u.isp24.status_subcode ==
-		    ELS_TPRLO) {
+		switch (mcmd->orig_iocb.imm_ntfy.u.isp24.status_subcode) {
+		case ELS_LOGO:
+		case ELS_PRLO:
+		case ELS_TPRLO:
 			ql_dbg(ql_dbg_disc, vha, 0x2106,
 			    "TM response logo %phC status %#x state %#x",
 			    mcmd->sess->port_name, mcmd->fc_tm_rsp,
 			    mcmd->flags);
 			qlt_schedule_sess_for_deletion(mcmd->sess);
-		} else {
+			break;
+		default:
 			qlt_send_notify_ack(vha->hw->base_qpair,
 			    &mcmd->orig_iocb.imm_ntfy, 0, 0, 0, 0, 0, 0);
+			break;
 		}
 	} else {
 		if (mcmd->orig_iocb.atio.u.raw.entry_type == ABTS_RECV_24XX) {
@@ -2425,7 +2425,7 @@ static int qlt_pci_map_calc_cnt(struct qla_tgt_prm *prm)
 	BUG_ON(cmd->sg_cnt == 0);
 
 	prm->sg = (struct scatterlist *)cmd->sg;
-	prm->seg_cnt = pci_map_sg(cmd->qpair->pdev, cmd->sg,
+	prm->seg_cnt = dma_map_sg(&cmd->qpair->pdev->dev, cmd->sg,
 	    cmd->sg_cnt, cmd->dma_data_direction);
 	if (unlikely(prm->seg_cnt == 0))
 		goto out_err;
@@ -2452,7 +2452,7 @@ static int qlt_pci_map_calc_cnt(struct qla_tgt_prm *prm)
 
 		if (cmd->prot_sg_cnt) {
 			prm->prot_sg      = cmd->prot_sg;
-			prm->prot_seg_cnt = pci_map_sg(cmd->qpair->pdev,
+			prm->prot_seg_cnt = dma_map_sg(&cmd->qpair->pdev->dev,
 				cmd->prot_sg, cmd->prot_sg_cnt,
 				cmd->dma_data_direction);
 			if (unlikely(prm->prot_seg_cnt == 0))
@@ -2487,12 +2487,12 @@ static void qlt_unmap_sg(struct scsi_qla_host *vha, struct qla_tgt_cmd *cmd)
 
 	qpair = cmd->qpair;
 
-	pci_unmap_sg(qpair->pdev, cmd->sg, cmd->sg_cnt,
+	dma_unmap_sg(&qpair->pdev->dev, cmd->sg, cmd->sg_cnt,
 	    cmd->dma_data_direction);
 	cmd->sg_mapped = 0;
 
 	if (cmd->prot_sg_cnt)
-		pci_unmap_sg(qpair->pdev, cmd->prot_sg, cmd->prot_sg_cnt,
+		dma_unmap_sg(&qpair->pdev->dev, cmd->prot_sg, cmd->prot_sg_cnt,
 			cmd->dma_data_direction);
 
 	if (!cmd->ctx)
@@ -2660,9 +2660,9 @@ static void qlt_load_cont_data_segments(struct qla_tgt_prm *prm)
 		    cnt < QLA_TGT_DATASEGS_PER_CONT_24XX && prm->seg_cnt;
 		    cnt++, prm->seg_cnt--) {
 			*dword_ptr++ =
-			    cpu_to_le32(pci_dma_lo32
+			    cpu_to_le32(lower_32_bits
 				(sg_dma_address(prm->sg)));
-			*dword_ptr++ = cpu_to_le32(pci_dma_hi32
+			*dword_ptr++ = cpu_to_le32(upper_32_bits
 			    (sg_dma_address(prm->sg)));
 			*dword_ptr++ = cpu_to_le32(sg_dma_len(prm->sg));
 
@@ -2704,9 +2704,9 @@ static void qlt_load_data_segments(struct qla_tgt_prm *prm)
 	    (cnt < QLA_TGT_DATASEGS_PER_CMD_24XX) && prm->seg_cnt;
 	    cnt++, prm->seg_cnt--) {
 		*dword_ptr++ =
-		    cpu_to_le32(pci_dma_lo32(sg_dma_address(prm->sg)));
+		    cpu_to_le32(lower_32_bits(sg_dma_address(prm->sg)));
 
-		*dword_ptr++ = cpu_to_le32(pci_dma_hi32(
+		*dword_ptr++ = cpu_to_le32(upper_32_bits(
 			sg_dma_address(prm->sg)));
 
 		*dword_ptr++ = cpu_to_le32(sg_dma_len(prm->sg));
@@ -6599,10 +6599,11 @@ static void qlt_lport_dump(struct scsi_qla_host *vha, u64 wwpn,
 /**
  * qla_tgt_lport_register - register lport with external module
  *
- * @qla_tgt_ops: Pointer for tcm_qla2xxx qla_tgt_ops
- * @wwpn: Passwd FC target WWPN
- * @callback:  lport initialization callback for tcm_qla2xxx code
  * @target_lport_ptr: pointer for tcm_qla2xxx specific lport data
+ * @phys_wwpn: physical port WWPN
+ * @npiv_wwpn: NPIV WWPN
+ * @npiv_wwnn: NPIV WWNN
+ * @callback:  lport initialization callback for tcm_qla2xxx code
  */
 int qlt_lport_register(void *target_lport_ptr, u64 phys_wwpn,
 		       u64 npiv_wwpn, u64 npiv_wwnn,

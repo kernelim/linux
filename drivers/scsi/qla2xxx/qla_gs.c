@@ -21,11 +21,10 @@ static int qla_async_rsnn_nn(scsi_qla_host_t *);
 
 /**
  * qla2x00_prep_ms_iocb() - Prepare common MS/CT IOCB fields for SNS CT query.
- * @ha: HA context
- * @req_size: request size in bytes
- * @rsp_size: response size in bytes
+ * @vha: HA context
+ * @arg: CT arguments
  *
- * Returns a pointer to the @ha's ms_iocb.
+ * Returns a pointer to the @vha's ms_iocb.
  */
 void *
 qla2x00_prep_ms_iocb(scsi_qla_host_t *vha, struct ct_arg *arg)
@@ -61,9 +60,8 @@ qla2x00_prep_ms_iocb(scsi_qla_host_t *vha, struct ct_arg *arg)
 
 /**
  * qla24xx_prep_ms_iocb() - Prepare common CT IOCB fields for SNS CT query.
- * @ha: HA context
- * @req_size: request size in bytes
- * @rsp_size: response size in bytes
+ * @vha: HA context
+ * @arg: CT arguments
  *
  * Returns a pointer to the @ha's ms_iocb.
  */
@@ -101,7 +99,7 @@ qla24xx_prep_ms_iocb(scsi_qla_host_t *vha, struct ct_arg *arg)
 
 /**
  * qla2x00_prep_ct_req() - Prepare common CT request fields for SNS query.
- * @ct_req: CT request buffer
+ * @p: CT request buffer
  * @cmd: GS command
  * @rsp_size: response size in bytes
  *
@@ -196,7 +194,7 @@ qla2x00_chk_ms_status(scsi_qla_host_t *vha, ms_iocb_entry_t *ms_pkt,
 
 /**
  * qla2x00_ga_nxt() - SNS scan for fabric devices via GA_NXT command.
- * @ha: HA context
+ * @vha: HA context
  * @fcport: fcport entry to updated
  *
  * Returns 0 on success.
@@ -283,7 +281,7 @@ qla2x00_gid_pt_rsp_size(scsi_qla_host_t *vha)
 
 /**
  * qla2x00_gid_pt() - SNS scan for fabric devices via GID_PT command.
- * @ha: HA context
+ * @vha: HA context
  * @list: switch info entries to populate
  *
  * NOTE: Non-Nx_Ports are not requested.
@@ -371,7 +369,7 @@ qla2x00_gid_pt(scsi_qla_host_t *vha, sw_info_t *list)
 
 /**
  * qla2x00_gpn_id() - SNS Get Port Name (GPN_ID) query.
- * @ha: HA context
+ * @vha: HA context
  * @list: switch info entries to populate
  *
  * Returns 0 on success.
@@ -441,7 +439,7 @@ qla2x00_gpn_id(scsi_qla_host_t *vha, sw_info_t *list)
 
 /**
  * qla2x00_gnn_id() - SNS Get Node Name (GNN_ID) query.
- * @ha: HA context
+ * @vha: HA context
  * @list: switch info entries to populate
  *
  * Returns 0 on success.
@@ -583,7 +581,7 @@ err2:
 
 /**
  * qla2x00_rft_id() - SNS Register FC-4 TYPEs (RFT_ID) supported by the HBA.
- * @ha: HA context
+ * @vha: HA context
  *
  * Returns 0 on success.
  */
@@ -677,7 +675,8 @@ done:
 
 /**
  * qla2x00_rff_id() - SNS Register FC-4 Features (RFF_ID) supported by the HBA.
- * @ha: HA context
+ * @vha: HA context
+ * @type: not used
  *
  * Returns 0 on success.
  */
@@ -773,7 +772,7 @@ done:
 
 /**
  * qla2x00_rnn_id() - SNS Register Node Name (RNN_ID) of the HBA.
- * @ha: HA context
+ * @vha: HA context
  *
  * Returns 0 on success.
  */
@@ -880,7 +879,7 @@ qla2x00_get_sym_node_name(scsi_qla_host_t *vha, uint8_t *snn, size_t size)
 
 /**
  * qla2x00_rsnn_nn() - SNS Register Symbolic Node Name (RSNN_NN) of the HBA.
- * @ha: HA context
+ * @vha: HA context
  *
  * Returns 0 on success.
  */
@@ -978,7 +977,7 @@ done:
 
 /**
  * qla2x00_prep_sns_cmd() - Prepare common SNS command request fields for query.
- * @ha: HA context
+ * @vha: HA context
  * @cmd: GS command
  * @scmd_len: Subcommand length
  * @data_size: response size in bytes
@@ -1011,7 +1010,7 @@ qla2x00_prep_sns_cmd(scsi_qla_host_t *vha, uint16_t cmd, uint16_t scmd_len,
 
 /**
  * qla2x00_sns_ga_nxt() - SNS scan for fabric devices via GA_NXT command.
- * @ha: HA context
+ * @vha: HA context
  * @fcport: fcport entry to updated
  *
  * This command uses the old Exectute SNS Command mailbox routine.
@@ -1075,7 +1074,7 @@ qla2x00_sns_ga_nxt(scsi_qla_host_t *vha, fc_port_t *fcport)
 
 /**
  * qla2x00_sns_gid_pt() - SNS scan for fabric devices via GID_PT command.
- * @ha: HA context
+ * @vha: HA context
  * @list: switch info entries to populate
  *
  * This command uses the old Exectute SNS Command mailbox routine.
@@ -1148,7 +1147,7 @@ qla2x00_sns_gid_pt(scsi_qla_host_t *vha, sw_info_t *list)
 
 /**
  * qla2x00_sns_gpn_id() - SNS Get Port Name (GPN_ID) query.
- * @ha: HA context
+ * @vha: HA context
  * @list: switch info entries to populate
  *
  * This command uses the old Exectute SNS Command mailbox routine.
@@ -1204,7 +1203,7 @@ qla2x00_sns_gpn_id(scsi_qla_host_t *vha, sw_info_t *list)
 
 /**
  * qla2x00_sns_gnn_id() - SNS Get Node Name (GNN_ID) query.
- * @ha: HA context
+ * @vha: HA context
  * @list: switch info entries to populate
  *
  * This command uses the old Exectute SNS Command mailbox routine.
@@ -1267,7 +1266,7 @@ qla2x00_sns_gnn_id(scsi_qla_host_t *vha, sw_info_t *list)
 
 /**
  * qla2x00_snd_rft_id() - SNS Register FC-4 TYPEs (RFT_ID) supported by the HBA.
- * @ha: HA context
+ * @vha: HA context
  *
  * This command uses the old Exectute SNS Command mailbox routine.
  *
@@ -1316,8 +1315,7 @@ qla2x00_sns_rft_id(scsi_qla_host_t *vha)
 
 /**
  * qla2x00_sns_rnn_id() - SNS Register Node Name (RNN_ID) of the HBA.
- * HBA.
- * @ha: HA context
+ * @vha: HA context
  *
  * This command uses the old Exectute SNS Command mailbox routine.
  *
@@ -1373,7 +1371,7 @@ qla2x00_sns_rnn_id(scsi_qla_host_t *vha)
 
 /**
  * qla2x00_mgmt_svr_login() - Login to fabric Management Service.
- * @ha: HA context
+ * @vha: HA context
  *
  * Returns 0 on success.
  */
@@ -1409,7 +1407,7 @@ qla2x00_mgmt_svr_login(scsi_qla_host_t *vha)
 
 /**
  * qla2x00_prep_ms_fdmi_iocb() - Prepare common MS IOCB fields for FDMI query.
- * @ha: HA context
+ * @vha: HA context
  * @req_size: request size in bytes
  * @rsp_size: response size in bytes
  *
@@ -1447,7 +1445,7 @@ qla2x00_prep_ms_fdmi_iocb(scsi_qla_host_t *vha, uint32_t req_size,
 
 /**
  * qla24xx_prep_ms_fdmi_iocb() - Prepare common MS IOCB fields for FDMI query.
- * @ha: HA context
+ * @vha: HA context
  * @req_size: request size in bytes
  * @rsp_size: response size in bytes
  *
@@ -1504,7 +1502,7 @@ qla2x00_update_ms_fdmi_iocb(scsi_qla_host_t *vha, uint32_t req_size)
 
 /**
  * qla2x00_prep_ct_req() - Prepare common CT request fields for SNS query.
- * @ct_req: CT request buffer
+ * @p: CT request buffer
  * @cmd: GS command
  * @rsp_size: response size in bytes
  *
@@ -1526,8 +1524,8 @@ qla2x00_prep_ct_fdmi_req(struct ct_sns_pkt *p, uint16_t cmd,
 }
 
 /**
- * qla2x00_fdmi_rhba() -
- * @ha: HA context
+ * qla2x00_fdmi_rhba() - perform RHBA FDMI registration
+ * @vha: HA context
  *
  * Returns 0 on success.
  */
@@ -1736,8 +1734,8 @@ qla2x00_fdmi_rhba(scsi_qla_host_t *vha)
 }
 
 /**
- * qla2x00_fdmi_rpa() -
- * @ha: HA context
+ * qla2x00_fdmi_rpa() - perform RPA registration
+ * @vha: HA context
  *
  * Returns 0 on success.
  */
@@ -1948,8 +1946,8 @@ qla2x00_fdmi_rpa(scsi_qla_host_t *vha)
 }
 
 /**
- * qla2x00_fdmiv2_rhba() -
- * @ha: HA context
+ * qla2x00_fdmiv2_rhba() - perform RHBA FDMI v2 registration
+ * @vha: HA context
  *
  * Returns 0 on success.
  */
@@ -2262,7 +2260,7 @@ qla2x00_fdmiv2_rhba(scsi_qla_host_t *vha)
 
 /**
  * qla2x00_fdmi_dhba() -
- * @ha: HA context
+ * @vha: HA context
  *
  * Returns 0 on success.
  */
@@ -2310,7 +2308,7 @@ qla2x00_fdmi_dhba(scsi_qla_host_t *vha)
 
 /**
  * qla2x00_fdmiv2_rpa() -
- * @ha: HA context
+ * @vha: HA context
  *
  * Returns 0 on success.
  */
@@ -2640,7 +2638,7 @@ qla2x00_fdmiv2_rpa(scsi_qla_host_t *vha)
 
 /**
  * qla2x00_fdmi_register() -
- * @ha: HA context
+ * @vha: HA context
  *
  * Returns 0 on success.
  */
@@ -2698,7 +2696,7 @@ out:
 
 /**
  * qla2x00_gfpn_id() - SNS Get Fabric Port Name (GFPN_ID) query.
- * @ha: HA context
+ * @vha: HA context
  * @list: switch info entries to populate
  *
  * Returns 0 on success.
@@ -2783,7 +2781,7 @@ qla24xx_prep_ct_fm_req(struct ct_sns_pkt *p, uint16_t cmd,
 
 /**
  * qla2x00_gpsc() - FCS Get Port Speed Capabilities (GPSC) query.
- * @ha: HA context
+ * @vha: HA context
  * @list: switch info entries to populate
  *
  * Returns 0 on success.
@@ -2897,7 +2895,7 @@ qla2x00_gpsc(scsi_qla_host_t *vha, sw_info_t *list)
 /**
  * qla2x00_gff_id() - SNS Get FC-4 Features (GFF_ID) query.
  *
- * @ha: HA context
+ * @vha: HA context
  * @list: switch info entries to populate
  *
  */
