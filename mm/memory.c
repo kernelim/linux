@@ -1803,6 +1803,7 @@ static int insert_pfn(struct vm_area_struct *vma, unsigned long addr,
 			entry = maybe_mkwrite(pte_mkdirty(entry), vma);
 			if (ptep_set_access_flags(vma, addr, pte, entry, 1))
 				update_mmu_cache(vma, addr, pte);
+			retval = 0;
 		}
 		goto out_unlock;
 	}

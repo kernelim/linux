@@ -1175,7 +1175,7 @@ static ssize_t __ref rescan_store(struct device *dev,
 	unlock_device_hotplug();
 	return rc ? rc : count;
 }
-static DEVICE_ATTR(rescan, 0200, NULL, rescan_store);
+static DEVICE_ATTR_WO(rescan);
 #endif /* CONFIG_HOTPLUG_CPU */
 
 static int __init s390_smp_init(void)

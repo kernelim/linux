@@ -774,11 +774,8 @@ static void release_napi(struct ibmvnic_adapter *adapter)
 		return;
 
 	for (i = 0; i < adapter->num_active_rx_napi; i++) {
-		if (&adapter->napi[i]) {
-			netdev_dbg(adapter->netdev,
-				   "Releasing napi[%d]\n", i);
-			netif_napi_del(&adapter->napi[i]);
-		}
+		netdev_dbg(adapter->netdev, "Releasing napi[%d]\n", i);
+		netif_napi_del(&adapter->napi[i]);
 	}
 
 	kfree(adapter->napi);
@@ -1972,13 +1969,11 @@ static void __ibmvnic_reset(struct work_struct *work)
 {
 	struct ibmvnic_rwi *rwi;
 	struct ibmvnic_adapter *adapter;
-	struct net_device *netdev;
 	bool we_lock_rtnl = false;
 	u32 reset_state;
 	int rc = 0;
 
 	adapter = container_of(work, struct ibmvnic_adapter, ibmvnic_reset);
-	netdev = adapter->netdev;
 
 	/* netif_set_real_num_xx_queues needs to take rtnl lock here
 	 * unless wait_for_reset is set, in which case the rtnl lock
@@ -2924,8 +2919,10 @@ static int init_sub_crq_irqs(struct ibmvnic_adapter *adapter)
 			goto req_tx_irq_failed;
 		}
 
+		snprintf(scrq->name, sizeof(scrq->name), "ibmvnic-%x-tx%d",
+			 adapter->vdev->unit_address, i);
 		rc = request_irq(scrq->irq, ibmvnic_interrupt_tx,
-				 0, "ibmvnic_tx", scrq);
+				 0, scrq->name, scrq);
 
 		if (rc) {
 			dev_err(dev, "Couldn't register tx irq 0x%x. rc=%d\n",
@@ -2945,8 +2942,10 @@ static int init_sub_crq_irqs(struct ibmvnic_adapter *adapter)
 			dev_err(dev, "Error mapping irq\n");
 			goto req_rx_irq_failed;
 		}
+		snprintf(scrq->name, sizeof(scrq->name), "ibmvnic-%x-rx%d",
+			 adapter->vdev->unit_address, i);
 		rc = request_irq(scrq->irq, ibmvnic_interrupt_rx,
-				 0, "ibmvnic_rx", scrq);
+				 0, scrq->name, scrq);
 		if (rc) {
 			dev_err(dev, "Couldn't register rx irq 0x%x. rc=%d\n",
 				scrq->irq, rc);
@@ -4676,8 +4675,9 @@ static int init_crq_queue(struct ibmvnic_adapter *adapter)
 		     (unsigned long)adapter);
 
 	netdev_dbg(adapter->netdev, "registering irq 0x%x\n", vdev->irq);
-	rc = request_irq(vdev->irq, ibmvnic_interrupt, 0, IBMVNIC_NAME,
-			 adapter);
+	snprintf(crq->name, sizeof(crq->name), "ibmvnic-%x",
+		 adapter->vdev->unit_address);
+	rc = request_irq(vdev->irq, ibmvnic_interrupt, 0, crq->name, adapter);
 	if (rc) {
 		dev_err(dev, "Couldn't register irq 0x%x. rc=%d\n",
 			vdev->irq, rc);
@@ -4976,7 +4976,7 @@ static ssize_t failover_store(struct device *dev, struct device_attribute *attr,
 	return count;
 }
 
-static DEVICE_ATTR(failover, 0200, NULL, failover_store);
+static DEVICE_ATTR_WO(failover);
 
 static unsigned long ibmvnic_get_desired_dma(struct vio_dev *vdev)
 {
