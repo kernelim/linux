@@ -2235,7 +2235,7 @@ int qed_mcp_halt(struct qed_hwfn *p_hwfn, struct qed_ptt *p_ptt)
 		return -EBUSY;
 	}
 
-	qed_mcp_cmd_set_blocking(p_hwfn, false);
+	qed_mcp_cmd_set_blocking(p_hwfn, true);
 
 	return 0;
 }
@@ -2261,7 +2261,7 @@ int qed_mcp_resume(struct qed_hwfn *p_hwfn, struct qed_ptt *p_ptt)
 		return -EBUSY;
 	}
 
-	qed_mcp_cmd_set_blocking(p_hwfn, true);
+	qed_mcp_cmd_set_blocking(p_hwfn, false);
 
 	return 0;
 }

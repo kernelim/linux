@@ -280,6 +280,9 @@ enum
 	LINUX_MIB_TCPDELIVERED,			/* TCPDelivered */
 	LINUX_MIB_TCPDELIVEREDCE,		/* TCPDeliveredCE */
 	LINUX_MIB_TCPACKCOMPRESSED,		/* TCPAckCompressed */
+#ifndef __GENKSYMS__
+	LINUX_MIB_TCPWQUEUETOOBIG,		/* TCPWqueueTooBig */
+#endif
 	__LINUX_MIB_MAX
 };
 

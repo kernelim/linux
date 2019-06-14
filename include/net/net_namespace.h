@@ -159,6 +159,9 @@ struct net {
 #endif
 	struct sock		*diag_nlsk;
 	atomic_t		fnhe_genid;
+
+	RH_KABI_EXTEND(int	ipv4_sysctl_ip_fwd_update_priority)
+	RH_KABI_EXTEND(int	ipv4_sysctl_tcp_min_snd_mss)
 } __randomize_layout;
 
 #include <linux/seq_file_net.h>
