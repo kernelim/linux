@@ -498,4 +498,7 @@ static inline struct tcp_timewait_sock *tcp_twsk(const struct sock *sk)
 
 #endif
 
+int tcp_skb_shift(struct sk_buff *to, struct sk_buff *from, int pcount,
+		  int shiftlen);
+
 #endif	/* _LINUX_TCP_H */

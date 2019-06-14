@@ -30,6 +30,8 @@ static int ip_local_port_range_min[] = { 1, 1 };
 static int ip_local_port_range_max[] = { 65535, 65535 };
 static int tcp_syn_retries_min = 1;
 static int tcp_syn_retries_max = MAX_TCP_SYNCNT;
+static int tcp_min_snd_mss_min = TCP_MIN_SND_MSS;
+static int tcp_min_snd_mss_max = 65535;
 static int ip_ttl_min = 1;
 static int ip_ttl_max = 255;
 static int ip_ping_group_range_min[] = { 0, 0 };
@@ -877,6 +879,16 @@ static struct ctl_table ipv4_table[] = {
 		.proc_handler	= proc_dointvec_minmax,
 		.strategy	= sysctl_intvec,
 		.extra1		= &zero
+	},
+	{
+		.ctl_name	= CTL_UNNUMBERED,
+		.procname	= "tcp_min_snd_mss",
+		.data		= &sysctl_tcp_min_snd_mss,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &tcp_min_snd_mss_min,
+		.extra2		= &tcp_min_snd_mss_max,
 	},
 	{ .ctl_name = 0 }
 };

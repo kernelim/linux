@@ -283,7 +283,7 @@ static const char *spectre_v2_strings[] = {
 #undef pr_fmt
 #define pr_fmt(fmt)	"MDS: " fmt
 
-/* Default mitigation for L1TF-affected CPUs */
+/* Default mitigation for MDS-affected CPUs */
 enum mds_mitigations mds_mitigation = MDS_MITIGATION_FULL;
 static bool mds_nosmt = false;
 
@@ -306,7 +306,7 @@ static void __init mds_select_mitigation(void)
 
 		setup_force_cpu_cap(X86_FEATURE_MDS_USR_CLR);
 
-		if (mds_nosmt && !boot_cpu_has(X86_BUG_MSBDS_ONLY))
+		if (mds_nosmt && !boot_cpu_has_bug(X86_BUG_MSBDS_ONLY))
 			cpu_smt_disable(false);
 	}
 
@@ -592,7 +592,8 @@ void arch_smt_update(void)
 	switch (mds_mitigation) {
 	case MDS_MITIGATION_FULL:
 	case MDS_MITIGATION_VMWERV:
-		if (sched_smt_active() && !boot_cpu_has(X86_BUG_MSBDS_ONLY))
+		if (sched_smt_active() && !mds_nosmt &&
+		   !boot_cpu_has_bug(X86_BUG_MSBDS_ONLY))
 			pr_warn_once(MDS_MSG_SMT);
 		update_mds_branch_idle();
 		break;
@@ -989,7 +990,8 @@ static ssize_t mds_show_state(char *buf)
 
 	if (boot_cpu_has_bug(X86_BUG_MSBDS_ONLY)) {
 		return sprintf(buf, "%s; SMT %s\n", mds_strings[mds_mitigation],
-			       sched_smt_active() ? "mitigated" : "disabled");
+			       (mds_mitigation == MDS_MITIGATION_OFF ? "vulnerable" :
+			        sched_smt_active() ? "mitigated" : "disabled"));
 	}
 
 	return sprintf(buf, "%s; SMT %s\n", mds_strings[mds_mitigation],

@@ -81,6 +81,7 @@ int sysctl_tcp_ecn __read_mostly = 2;
 int sysctl_tcp_dsack __read_mostly = 1;
 int sysctl_tcp_app_win __read_mostly = 31;
 int sysctl_tcp_adv_win_scale __read_mostly = 2;
+int sysctl_tcp_min_snd_mss __read_mostly = TCP_MIN_SND_MSS;
 
 /* rfc5961 challenge ack rate limiting */
 int sysctl_tcp_challenge_ack_limit = 1000;
@@ -1418,13 +1419,13 @@ static u8 tcp_sacktag_one(struct sk_buff *skb, struct sock *sk,
 	return sacked;
 }
 
-static int tcp_shifted_skb(struct sock *sk, struct sk_buff *skb,
+static int tcp_shifted_skb(struct sock *sk, struct sk_buff *prev,
+			   struct sk_buff *skb,
 			   struct tcp_sacktag_state *state,
 			   unsigned int pcount, int shifted, int mss,
 			   int dup_sack)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
-	struct sk_buff *prev = tcp_write_queue_prev(sk, skb);
 
 	BUG_ON(!pcount);
 
@@ -1435,7 +1436,7 @@ static int tcp_shifted_skb(struct sock *sk, struct sk_buff *skb,
 	TCP_SKB_CB(skb)->seq += shifted;
 
 	skb_shinfo(prev)->gso_segs += pcount;
-	BUG_ON(skb_shinfo(skb)->gso_segs < pcount);
+	WARN_ON_ONCE(tcp_skb_pcount(skb) < pcount);
 	skb_shinfo(skb)->gso_segs -= pcount;
 
 	/* When we're adding to gso_segs == 1, gso_size will be zero,
@@ -1501,6 +1502,21 @@ static int tcp_skb_seglen(struct sk_buff *skb)
 static int skb_can_shift(struct sk_buff *skb)
 {
 	return !skb_headlen(skb) && skb_is_nonlinear(skb);
+}
+
+int tcp_skb_shift(struct sk_buff *to, struct sk_buff *from,
+		  int pcount, int shiftlen)
+{
+	/* TCP min gso_size is 8 bytes (TCP_MIN_GSO_SIZE)
+	 * Since TCP_SKB_CB(skb)->tcp_gso_segs is 16 bits, we need
+	 * to make sure not storing more than 65535 * 8 bytes per skb,
+	 * even if current MSS is bigger.
+	 */
+	if (unlikely(to->len + shiftlen >= 65535 * TCP_MIN_GSO_SIZE))
+		return 0;
+	if (unlikely(tcp_skb_pcount(to) + pcount > 65535))
+		return 0;
+	return skb_shift(to, from, shiftlen);
 }
 
 /* Try collapsing SACK blocks spanning across multiple skbs to a single
@@ -1604,9 +1620,9 @@ static struct sk_buff *tcp_shift_skb_data(struct sock *sk, struct sk_buff *skb,
 		}
 	}
 
-	if (!skb_shift(prev, skb, len))
+	if (!tcp_skb_shift(prev, skb, pcount, len))
 		goto fallback;
-	if (!tcp_shifted_skb(sk, skb, state, pcount, len, mss, dup_sack))
+	if (!tcp_shifted_skb(sk, prev, skb, state, pcount, len, mss, dup_sack))
 		goto out;
 
 	/* Hole filled allows collapsing with the next as well, this is very
@@ -1623,9 +1639,10 @@ static struct sk_buff *tcp_shift_skb_data(struct sock *sk, struct sk_buff *skb,
 		goto out;
 
 	len = skb->len;
-	if (skb_shift(prev, skb, len)) {
+	if (tcp_skb_shift(prev, skb, tcp_skb_pcount(skb), len)) {
 		pcount += tcp_skb_pcount(skb);
-		tcp_shifted_skb(sk, skb, state, tcp_skb_pcount(skb), len, mss, 0);
+		tcp_shifted_skb(sk, prev, skb, state, tcp_skb_pcount(skb),
+				len, mss, 0);
 	}
 
 out:

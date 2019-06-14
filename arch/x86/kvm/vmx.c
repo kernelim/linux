@@ -367,7 +367,7 @@ static int vmentry_l1d_flush_set(const char *s, struct kernel_param *kp)
 {
 	int l1tf, ret;
 
-	if (!boot_cpu_has(X86_BUG_L1TF))
+	if (!boot_cpu_has_bug(X86_BUG_L1TF))
 		return 0;
 
 	l1tf = vmentry_l1d_flush_parse(s);
@@ -4849,7 +4849,7 @@ free_vcpu:
 
 static int vmx_vm_init(struct kvm *kvm)
 {
-	if (boot_cpu_has(X86_BUG_L1TF) && enable_ept) {
+	if (boot_cpu_has_bug(X86_BUG_L1TF) && enable_ept) {
 		switch (l1tf_mitigation) {
 		case L1TF_MITIGATION_OFF:
 		case L1TF_MITIGATION_FLUSH_NOWARN:
@@ -5140,7 +5140,7 @@ static int __init vmx_init(void)
 	 * contain 'auto' which will be turned into the default 'cond'
 	 * mitigation mode.
 	 */
-	if (boot_cpu_has(X86_BUG_L1TF)) {
+	if (boot_cpu_has_bug(X86_BUG_L1TF)) {
 		r = vmx_setup_l1d_flush(vmentry_l1d_flush_param);
 		if (r) {
 			vmx_exit();

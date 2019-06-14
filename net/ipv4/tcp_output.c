@@ -992,6 +992,12 @@ int tcp_fragment(struct sock *sk, struct sk_buff *skb, u32 len,
 	if (nsize < 0)
 		nsize = 0;
 
+	if (unlikely((sk->sk_wmem_queued >> 1) > sk->sk_sndbuf) ||
+	    skb_queue_len(&sk->sk_write_queue) > 2048) {
+		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPWQUEUETOOBIG);
+		return -ENOMEM;
+	}
+
 	if (skb_cloned(skb) &&
 	    skb_is_nonlinear(skb) &&
 	    pskb_expand_head(skb, 0, 0, GFP_ATOMIC))
@@ -1152,6 +1158,7 @@ int tcp_mtu_to_mss(struct sock *sk, int pmtu)
 	/* Now subtract TCP options size, not including SACKs */
 	mss_now -= tp->tcp_header_len - sizeof(struct tcphdr);
 
+	mss_now = max(mss_now, sysctl_tcp_min_snd_mss);
 	return mss_now;
 }
 
