@@ -331,6 +331,7 @@ struct pci_dev {
 #ifndef __GENKSYMS__
 	unsigned int	clear_retrain_link:1;	/* Need to clear Retrain Link
 						   bit manually */
+	unsigned int	skip_bus_pm:1;	/* Internal: Skip bus-level PM */
 #endif
 	unsigned int	d3_delay;	/* D3->D0 transition time in ms */
 	unsigned int	d3cold_delay;	/* D3cold->D0 transition time in ms */
