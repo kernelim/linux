@@ -47,7 +47,6 @@ static int get_cof(int family, union msr_pstate pstate)
 	int fid, did;
 
 	did = get_did(family, pstate);
-
 	t = 0x10;
 	fid = pstate.bits.fid;
 	if (family == 0x11)
