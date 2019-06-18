@@ -1474,6 +1474,9 @@ static void nvme_update_disk_info(struct gendisk *disk,
 	sector_t capacity = le64_to_cpup(&id->nsze) << (ns->lba_shift - 9);
 	unsigned short bs = 1 << ns->lba_shift;
 
+	if (ns->ctrl->state != NVME_CTRL_LIVE)
+		return;
+
 	blk_mq_freeze_queue(disk->queue);
 	blk_integrity_unregister(disk);
 

@@ -154,6 +154,7 @@ struct net {
 		u32		seq;
 	} ip6addrlbl_table;
 	struct uevent_sock	*uevent_sock;		/* uevent socket */
+	int sysctl_tcp_min_snd_mss;
 #endif
 };
 
