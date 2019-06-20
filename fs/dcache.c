@@ -930,10 +930,14 @@ void shrink_dcache_parent(struct dentry * parent)
 		wait_event(shrinker_waitq, !(parent->d_flags & DCACHE_SHRINKING));
 		spin_lock(&dcache_lock);
 	}
+	spin_lock(&parent->d_lock);
 	parent->d_flags |= DCACHE_SHRINKING;
+	spin_unlock(&parent->d_lock);
 	while ((found = select_parent(parent)) != 0)
 		__shrink_dcache_sb_locked(sb, &found, 0);
+	spin_lock(&parent->d_lock);
 	parent->d_flags &= ~DCACHE_SHRINKING;
+	spin_unlock(&parent->d_lock);
 	spin_unlock(&dcache_lock);
 	wake_up(&shrinker_waitq);
 }

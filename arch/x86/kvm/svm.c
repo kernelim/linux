@@ -811,6 +811,7 @@ static void init_vmcb(struct vcpu_svm *svm)
 	control->intercept = 	(1ULL << INTERCEPT_INTR) |
 				(1ULL << INTERCEPT_NMI) |
 				(1ULL << INTERCEPT_SMI) |
+				(1ULL << INTERCEPT_SELECTIVE_CR0) |
 				(1ULL << INTERCEPT_RDPMC) |
 				(1ULL << INTERCEPT_CPUID) |
 				(1ULL << INTERCEPT_INVD) |
@@ -884,10 +885,8 @@ static void init_vmcb(struct vcpu_svm *svm)
 		control->intercept &= ~((1ULL << INTERCEPT_TASK_SWITCH) |
 					(1ULL << INTERCEPT_INVLPG));
 		control->intercept_exceptions &= ~(1 << PF_VECTOR);
-		control->intercept_cr_read &= ~(INTERCEPT_CR0_MASK|
-						INTERCEPT_CR3_MASK);
-		control->intercept_cr_write &= ~(INTERCEPT_CR0_MASK|
-						 INTERCEPT_CR3_MASK);
+		control->intercept_cr_read &= ~INTERCEPT_CR3_MASK;
+		control->intercept_cr_write &= ~INTERCEPT_CR3_MASK;
 		save->g_pat = 0x0007040600070406ULL;
 		save->cr3 = 0;
 		save->cr4 = 0;
@@ -1224,6 +1223,27 @@ static void svm_decache_cr4_guest_bits(struct kvm_vcpu *vcpu)
 {
 }
 
+static void update_cr0_intercept(struct vcpu_svm *svm)
+{
+	ulong gcr0 = svm->vcpu.arch.cr0;
+	u64 *hcr0 = &svm->vmcb->save.cr0;
+
+	if (!svm->vcpu.fpu_active)
+		*hcr0 |= SVM_CR0_SELECTIVE_MASK;
+	else
+		*hcr0 = (*hcr0 & ~SVM_CR0_SELECTIVE_MASK)
+			| (gcr0 & SVM_CR0_SELECTIVE_MASK);
+
+
+	if (gcr0 == *hcr0 && svm->vcpu.fpu_active) {
+		svm->vmcb->control.intercept_cr_read &= ~INTERCEPT_CR0_MASK;
+		svm->vmcb->control.intercept_cr_write &= ~INTERCEPT_CR0_MASK;
+	} else {
+		svm->vmcb->control.intercept_cr_read |= INTERCEPT_CR0_MASK;
+		svm->vmcb->control.intercept_cr_write |= INTERCEPT_CR0_MASK;
+	}
+}
+
 static void svm_set_cr0(struct kvm_vcpu *vcpu, unsigned long cr0)
 {
 	struct vcpu_svm *svm = to_svm(vcpu);
@@ -1241,15 +1261,13 @@ static void svm_set_cr0(struct kvm_vcpu *vcpu, unsigned long cr0)
 		}
 	}
 #endif
-	if (npt_enabled)
-		goto set;
-
 	vcpu->arch.cr0 = cr0;
-	cr0 |= X86_CR0_PG | X86_CR0_WP;
+
+	if (!npt_enabled)
+		cr0 |= X86_CR0_PG | X86_CR0_WP;
 
 	if (!vcpu->fpu_active)
 		cr0 |= X86_CR0_TS;
-set:
 	/*
 	 * re-enable caching here because the QEMU bios
 	 * does not do it - this results in some delay at
@@ -1257,6 +1275,7 @@ set:
 	 */
 	cr0 &= ~(X86_CR0_CD | X86_CR0_NW);
 	svm->vmcb->save.cr0 = cr0;
+	update_cr0_intercept(svm);
 	mark_dirty(to_svm(vcpu)->vmcb, VMCB_CR);
 }
 
@@ -1523,11 +1542,8 @@ static void svm_fpu_activate(struct kvm_vcpu *vcpu)
 	struct vcpu_svm *svm = to_svm(vcpu);
 
 	svm->vmcb->control.intercept_exceptions &= ~(1 << NM_VECTOR);
-	if (!kvm_read_cr0_bits(&svm->vcpu, X86_CR0_TS))
-		svm->vmcb->save.cr0 &= ~X86_CR0_TS;
-	else
-		svm->vmcb->save.cr0 |= X86_CR0_TS;
 	svm->vcpu.fpu_active = 1;
+	update_cr0_intercept(svm);
 	mark_dirty(svm->vmcb, VMCB_INTERCEPTS);
 	mark_dirty(svm->vmcb, VMCB_CR);
 }
@@ -2828,7 +2844,7 @@ static int (*svm_exit_handlers[])(struct vcpu_svm *svm) = {
 	[SVM_EXIT_READ_CR3]           		= cr_interception,
 	[SVM_EXIT_READ_CR4]           		= cr_interception,
 	[SVM_EXIT_READ_CR8]           		= cr_interception,
-	/* for now: */
+	[SVM_EXIT_CR0_SEL_WRITE]		= emulate_on_interception,
 	[SVM_EXIT_WRITE_CR0]          		= cr_interception,
 	[SVM_EXIT_WRITE_CR3]          		= cr_interception,
 	[SVM_EXIT_WRITE_CR4]          		= cr_interception,
@@ -2862,7 +2878,6 @@ static int (*svm_exit_handlers[])(struct vcpu_svm *svm) = {
 	[SVM_EXIT_INIT]				= nop_on_interception,
 	[SVM_EXIT_VINTR]			= interrupt_window_interception,
 	[SVM_EXIT_RDPMC]			= rdpmc_interception,
-	/* [SVM_EXIT_CR0_SEL_WRITE]		= emulate_on_interception, */
 	[SVM_EXIT_CPUID]			= cpuid_interception,
 	[SVM_EXIT_IRET]                         = iret_interception,
 	[SVM_EXIT_INVD]                         = emulate_on_interception,
@@ -2921,21 +2936,10 @@ static int handle_exit(struct kvm_vcpu *vcpu)
 
 	svm_complete_interrupts(svm);
 
-	if (npt_enabled) {
-		int mmu_reload = 0;
-		if ((kvm_read_cr0_bits(vcpu, X86_CR0_PG) ^ svm->vmcb->save.cr0)
-		    & X86_CR0_PG) {
-			svm_set_cr0(vcpu, svm->vmcb->save.cr0);
-			mmu_reload = 1;
-		}
+	if (!(svm->vmcb->control.intercept_cr_write & INTERCEPT_CR0_MASK))
 		vcpu->arch.cr0 = svm->vmcb->save.cr0;
+	if (npt_enabled)
 		vcpu->arch.cr3 = svm->vmcb->save.cr3;
-		if (mmu_reload) {
-			kvm_mmu_reset_context(vcpu);
-			kvm_mmu_load(vcpu);
-		}
-	}
-
 
 	if (svm->vmcb->control.exit_code == SVM_EXIT_ERR) {
 		kvm_run->exit_reason = KVM_EXIT_FAIL_ENTRY;
@@ -3476,8 +3480,8 @@ static void svm_fpu_deactivate(struct kvm_vcpu *vcpu)
 		return;
 	}
 
+	update_cr0_intercept(svm);
 	svm->vmcb->control.intercept_exceptions |= 1 << NM_VECTOR;
-	svm->vmcb->save.cr0 |= X86_CR0_TS;
 	mark_dirty(svm->vmcb, VMCB_INTERCEPTS);
 	mark_dirty(svm->vmcb, VMCB_CR);
 }

@@ -554,6 +554,7 @@ static int xenbus_file_release(struct inode *inode, struct file *filp)
 	struct xenbus_file_priv *u = filp->private_data;
 	struct xenbus_transaction_holder *trans, *tmp;
 	struct watch_adapter *watch, *tmp_watch;
+	struct read_buffer *rb, *tmp_rb;
 
 	/*
 	 * No need for locking here because there are no other users,
@@ -572,6 +573,10 @@ static int xenbus_file_release(struct inode *inode, struct file *filp)
 		free_watch_adapter(watch);
 	}
 
+	list_for_each_entry_safe(rb, tmp_rb, &u->read_buffers, list) {
+		list_del(&rb->list);
+		kfree(rb);
+	}
 	kfree(u);
 
 	return 0;
