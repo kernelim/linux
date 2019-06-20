@@ -148,6 +148,8 @@ MODULE_DEVICE_TABLE(usb, id_table);
 #define UART_OVERRUN_ERROR		0x40
 #define UART_CTS			0x80
 
+#define PL2303_FLOWCTRL_MASK		0xf0
+
 static void pl2303_set_break(struct usb_serial_port *port, bool enable);
 
 enum pl2303_type {
@@ -224,6 +226,29 @@ static int pl2303_vendor_write(struct usb_serial *serial, u16 value, u16 index)
 	}
 
 	return 0;
+}
+
+static int pl2303_update_reg(struct usb_serial *serial, u8 reg, u8 mask, u8 val)
+{
+	int ret = 0;
+	u8 *buf;
+
+	buf = kmalloc(1, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	ret = pl2303_vendor_read(serial, reg | 0x80, buf);
+	if (ret)
+		goto out_free;
+
+	*buf &= ~mask;
+	*buf |= val & mask;
+
+	ret = pl2303_vendor_write(serial, reg, *buf);
+out_free:
+	kfree(buf);
+
+	return ret;
 }
 
 static int pl2303_probe(struct usb_serial *serial,
@@ -670,11 +695,11 @@ static void pl2303_set_termios(struct tty_struct *tty,
 
 	if (C_CRTSCTS(tty)) {
 		if (spriv->quirks & PL2303_QUIRK_LEGACY)
-			pl2303_vendor_write(serial, 0x0, 0x41);
+			pl2303_update_reg(serial, 0, PL2303_FLOWCTRL_MASK, 0x40);
 		else
-			pl2303_vendor_write(serial, 0x0, 0x61);
+			pl2303_update_reg(serial, 0, PL2303_FLOWCTRL_MASK, 0x60);
 	} else {
-		pl2303_vendor_write(serial, 0x0, 0x0);
+		pl2303_update_reg(serial, 0, PL2303_FLOWCTRL_MASK, 0);
 	}
 
 	kfree(buf);

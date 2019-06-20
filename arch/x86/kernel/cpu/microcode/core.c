@@ -853,6 +853,9 @@ int __init microcode_init(void)
 		goto out_ucode_group;
 
 	register_syscore_ops(&mc_syscore_ops);
+
+#define CPUHP_AP_MICROCODE_LOADER	CPUHP_AP_ARM_MVEBU_COHERENCY
+
 	cpuhp_setup_state_nocalls(CPUHP_AP_MICROCODE_LOADER, "x86/microcode:online",
 				  mc_cpu_online, mc_cpu_down_prep);
 
