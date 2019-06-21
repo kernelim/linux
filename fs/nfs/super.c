@@ -76,8 +76,12 @@
 #define NFS_DEFAULT_VERSION 2
 #endif
 
+#ifdef CONFIG_SUSE_PRODUCT_SLE
 #if CONFIG_SUSE_VERSION < 15 || (CONFIG_SUSE_VERSION == 15 && CONFIG_SUSE_PATCHLEVEL == 0)
 static int max_minor_version = 1;
+#else
+static int max_minor_version = 2;
+#endif
 #else
 static int max_minor_version = 2;
 #endif
