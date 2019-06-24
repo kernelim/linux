@@ -2931,7 +2931,7 @@ static int selinux_sb_kern_mount(struct super_block *sb, int flags, void *data)
 		return rc;
 
 	/* Allow all mounts performed by the kernel */
-	if (flags & MS_KERNMOUNT)
+	if (flags & (MS_KERNMOUNT | MS_SUBMOUNT))
 		return 0;
 
 	ad.type = LSM_AUDIT_DATA_DENTRY;
@@ -4618,7 +4618,7 @@ static int selinux_socket_bind(struct socket *sock, struct sockaddr *address, in
 		struct lsm_network_audit net = {0,};
 		struct sockaddr_in *addr4 = NULL;
 		struct sockaddr_in6 *addr6 = NULL;
-		u16 family_sa = address->sa_family;
+		u16 family_sa;
 		unsigned short snum;
 		u32 sid, node_perm;
 
@@ -4628,6 +4628,9 @@ static int selinux_socket_bind(struct socket *sock, struct sockaddr *address, in
 		 * need to check address->sa_family as it is possible to have
 		 * sk->sk_family = PF_INET6 with addr->sa_family = AF_INET.
 		 */
+		if (addrlen < offsetofend(struct sockaddr, sa_family))
+			return -EINVAL;
+		family_sa = address->sa_family;
 		switch (family_sa) {
 		case AF_UNSPEC:
 		case AF_INET:
@@ -4740,6 +4743,14 @@ static int selinux_socket_connect_helper(struct socket *sock,
 	err = sock_has_perm(sk, SOCKET__CONNECT);
 	if (err)
 		return err;
+	if (addrlen < offsetofend(struct sockaddr, sa_family))
+		return -EINVAL;
+
+	/* connect(AF_UNSPEC) has special handling, as it is a documented
+	 * way to disconnect the socket
+	 */
+	if (address->sa_family == AF_UNSPEC)
+		return 0;
 
 	/*
 	 * If a TCP, DCCP or SCTP socket, check name_connect permission

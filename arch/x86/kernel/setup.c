@@ -821,9 +821,11 @@ static bool valid_amd_processor(__u8 family, const char *model_id, bool guest)
 				len += 3;
 				/*
 				 * AMD EPYC 7xx1 == NAPLES
+				 * AMD EPYC 7xx2 == ROME
 				 */
 				if (strlen(model_id) >= len) {
-					if (model_id[len-1] == '1')
+					if (model_id[len-1] == '1' ||
+					    model_id[len-1] == '2')
 						valid = true;
 				}
 			}
@@ -851,11 +853,11 @@ static bool valid_intel_processor(__u8 family, __u8 model, __u8 stepping)
 
 	switch(model) {
 	case INTEL_FAM6_KABYLAKE_DESKTOP:
-		valid = (stepping <= 10 || stepping == 12);
+		valid = (stepping <= 13);
 		break;
 
 	case INTEL_FAM6_KABYLAKE_MOBILE:
-		valid = (stepping <= 11);
+		valid = (stepping <= 12);
 		break;
 
 	case INTEL_FAM6_XEON_PHI_KNM:
