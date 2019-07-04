@@ -793,7 +793,7 @@ static int nvme_rdma_configure_admin_queue(struct nvme_rdma_ctrl *ctrl,
 		goto out_cleanup_queue;
 
 	ctrl->ctrl.max_hw_sectors =
-		(ctrl->max_fr_pages - 1) << (PAGE_SHIFT - 9);
+		(ctrl->max_fr_pages - 1) << (ilog2(SZ_4K) - 9);
 
 	error = nvme_init_identify(&ctrl->ctrl);
 	if (error)
