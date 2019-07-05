@@ -23,6 +23,9 @@ EVENT(PM_BR_MPRED_CMPL,				0x400f6)
 EVENT(PM_LD_REF_L1,				0x100fc)
 /* Load Missed L1 */
 EVENT(PM_LD_MISS_L1_FIN,			0x2c04e)
+EVENT(PM_LD_MISS_L1,				0x3e054)
+/* Alternate event code for PM_LD_MISS_L1 */
+EVENT(PM_LD_MISS_L1_ALT,			0x400f0)
 /* Store Missed L1 */
 EVENT(PM_ST_MISS_L1,				0x300f0)
 /* L1 cache data prefetches */
@@ -51,13 +54,21 @@ EVENT(PM_DTLB_MISS,				0x300fc)
 EVENT(PM_ITLB_MISS,				0x400fc)
 /* Run_Instructions */
 EVENT(PM_RUN_INST_CMPL,				0x500fa)
+/* Alternate event code for PM_RUN_INST_CMPL */
+EVENT(PM_RUN_INST_CMPL_ALT,			0x400fa)
 /* Run_cycles */
 EVENT(PM_RUN_CYC,				0x600f4)
+/* Alternate event code for Run_cycles */
+EVENT(PM_RUN_CYC_ALT,				0x200f4)
 /* Instruction Dispatched */
 EVENT(PM_INST_DISP,				0x200f2)
 EVENT(PM_INST_DISP_ALT,				0x300f2)
 /* Alternate Branch event code */
 EVENT(PM_BR_CMPL_ALT,				0x10012)
+/* Branch event that are not strongly biased */
+EVENT(PM_BR_2PATH,				0x20036)
+/* ALternate branch event that are not strongly biased */
+EVENT(PM_BR_2PATH_ALT,				0x40036)
 
 /* Blacklisted events */
 EVENT(PM_MRK_ST_DONE_L2,			0x10134)

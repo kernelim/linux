@@ -3483,8 +3483,7 @@ static int mvpp2_prs_ip6_init(struct mvpp2 *priv)
 }
 
 /* Find tcam entry with matched pair <vid,port> */
-static int mvpp2_prs_vid_range_find(struct mvpp2 *priv, int pmap, u16 vid,
-				    u16 mask)
+static int mvpp2_prs_vid_range_find(struct mvpp2_port *port, u16 vid, u16 mask)
 {
 	unsigned char byte[2], enable[2];
 	struct mvpp2_prs_entry pe;
@@ -3492,13 +3491,13 @@ static int mvpp2_prs_vid_range_find(struct mvpp2 *priv, int pmap, u16 vid,
 	int tid;
 
 	/* Go through the all entries with MVPP2_PRS_LU_VID */
-	for (tid = MVPP2_PE_VID_FILT_RANGE_START;
-	     tid <= MVPP2_PE_VID_FILT_RANGE_END; tid++) {
-		if (!priv->prs_shadow[tid].valid ||
-		    priv->prs_shadow[tid].lu != MVPP2_PRS_LU_VID)
+	for (tid = MVPP2_PRS_VID_PORT_FIRST(port->id);
+	     tid <= MVPP2_PRS_VID_PORT_LAST(port->id); tid++) {
+		if (!port->priv->prs_shadow[tid].valid ||
+		    port->priv->prs_shadow[tid].lu != MVPP2_PRS_LU_VID)
 			continue;
 
-		mvpp2_prs_init_from_hw(priv, &pe, tid);
+		mvpp2_prs_init_from_hw(port->priv, &pe, tid);
 
 		mvpp2_prs_tcam_data_byte_get(&pe, 2, &byte[0], &enable[0]);
 		mvpp2_prs_tcam_data_byte_get(&pe, 3, &byte[1], &enable[1]);
@@ -3528,7 +3527,7 @@ static int mvpp2_prs_vid_entry_add(struct mvpp2_port *port, u16 vid)
 	memset(&pe, 0, sizeof(pe));
 
 	/* Scan TCAM and see if entry with this <vid,port> already exist */
-	tid = mvpp2_prs_vid_range_find(priv, (1 << port->id), vid, mask);
+	tid = mvpp2_prs_vid_range_find(port, vid, mask);
 
 	reg_val = mvpp2_read(priv, MVPP2_MH_REG(port->id));
 	if (reg_val & MVPP2_DSA_EXTENDED)
@@ -3586,7 +3585,7 @@ static void mvpp2_prs_vid_entry_remove(struct mvpp2_port *port, u16 vid)
 	int tid;
 
 	/* Scan TCAM and see if entry with this <vid,port> already exist */
-	tid = mvpp2_prs_vid_range_find(priv, (1 << port->id), vid, 0xfff);
+	tid = mvpp2_prs_vid_range_find(port, vid, 0xfff);
 
 	/* No such entry */
 	if (tid < 0)
@@ -3604,8 +3603,10 @@ static void mvpp2_prs_vid_remove_all(struct mvpp2_port *port)
 
 	for (tid = MVPP2_PRS_VID_PORT_FIRST(port->id);
 	     tid <= MVPP2_PRS_VID_PORT_LAST(port->id); tid++) {
-		if (priv->prs_shadow[tid].valid)
-			mvpp2_prs_vid_entry_remove(port, tid);
+		if (priv->prs_shadow[tid].valid) {
+			mvpp2_prs_hw_inv(priv, tid);
+			priv->prs_shadow[tid].valid = false;
+		}
 	}
 }
 
@@ -5231,8 +5232,8 @@ static void mvpp2_ethtool_get_strings(struct net_device *netdev, u32 sset,
 		int i;
 
 		for (i = 0; i < ARRAY_SIZE(mvpp2_ethtool_regs); i++)
-			memcpy(data + i * ETH_GSTRING_LEN,
-			       &mvpp2_ethtool_regs[i].string, ETH_GSTRING_LEN);
+			strscpy(data + i * ETH_GSTRING_LEN,
+			        mvpp2_ethtool_regs[i].string, ETH_GSTRING_LEN);
 	}
 }
 
