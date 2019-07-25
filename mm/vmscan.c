@@ -1315,12 +1315,22 @@ static unsigned long shrink_inactive_list(unsigned long max_scan,
 	struct zone_reclaim_stat *reclaim_stat = get_reclaim_stat(mz);
 	struct zone *zone = mz->zone;
 	int order = 0;
+	bool stalled = false;
 
 	if (!COMPACTION_BUILD)
 		order = sc->order;
 
 	while (unlikely(too_many_isolated(zone, file, sc))) {
-		congestion_wait(BLK_RW_ASYNC, HZ/10);
+		if (likely(sysctl_legacy_scan_congestion_wait)) {
+			congestion_wait(BLK_RW_ASYNC, HZ/10);
+		} else {
+			if (stalled)
+				return 0;
+
+			/* wait a bit for the reclaimer. */
+			msleep(100);
+			stalled = true;
+		}
 
 		/* We are about to die and free our memory. Return now. */
 		if (fatal_signal_pending(current))

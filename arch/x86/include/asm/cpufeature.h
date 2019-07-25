@@ -189,6 +189,7 @@
 #define X86_FEATURE_PTS		(7*32+ 6) /* Intel Package Thermal Status */
 #define X86_FEATURE_DTHERM	(7*32+ 7) /* Digital Thermal Sensor */
 #define X86_FEATURE_MDS_USR_CLR (7*32+ 8) /* "" Clear cpu buffers on userspace exit */
+#define X86_FEATURE_FENCE_SWAPGS_USER	(7*32+ 9) /* "" LFENCE in user entry SWAPGS path */
 #define X86_FEATURE_HWP		( 7*32+ 10) /* "hwp" Intel HWP */
 #define X86_FEATURE_HWP_NOITFY	( 7*32+ 11) /* Intel HWP_NOTIFY */
 #define X86_FEATURE_HWP_ACT_WINDOW ( 7*32+ 12) /* Intel HWP_ACT_WINDOW */
@@ -209,6 +210,7 @@
 #define X86_FEATURE_STIBP	( 7*32+27) /* Single Thread Indirect Branch Predictors */
 #define X86_FEATURE_ZEN 	( 7*32+28) /* "" CPU is AMD family 0x17 (Zen) */
 #define X86_FEATURE_L1TF_PTEINV	( 7*32+29) /* "" L1TF workaround PTE inversion */
+#define X86_FEATURE_FENCE_SWAPGS_KERNEL	(7*32+30) /* "" LFENCE in kernel entry SWAPGS path */
 
 /* Virtualization flags: Linux defined, word 8 */
 #define X86_FEATURE_TPR_SHADOW  (8*32+ 0) /* Intel TPR Shadow */

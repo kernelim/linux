@@ -31,6 +31,11 @@
 static void __init l1tf_select_mitigation(void);
 static void __init mds_select_mitigation(void);
 
+static inline bool retp_compiler(void)
+{
+	return IS_ENABLED(RETPOLINE);
+}
+
 #ifdef CONFIG_X86_32
 static int __init no_halt(char *s)
 {
@@ -177,6 +182,7 @@ EXPORT_SYMBOL_GPL(__cpu_bugs);
 bool mds_idle_clear __read_mostly;
 EXPORT_SYMBOL_GPL(mds_idle_clear);
 
+static void __init spectre_v1_select_mitigation(void);
 static void __init spectre_v2_select_mitigation(void);
 
 void __init check_bugs(void)
@@ -207,10 +213,10 @@ void __init check_bugs(void)
 
 	mds_select_mitigation();
 
-	/* Select the proper spectre mitigation before patching alternatives */
+	/* Select the proper CPU mitigations before patching alternatives */
 	spec_ctrl_init();
+	spectre_v1_select_mitigation();
 	spectre_v2_select_mitigation();
-
 	spec_ctrl_cpu_init();
 
 #ifdef CONFIG_X86_32
@@ -270,7 +276,6 @@ static const char *spectre_v2_strings[] = {
 	[SPECTRE_V2_RETPOLINE_MINIMAL]		= "Vulnerable: Minimal ASM retpoline",
 	[SPECTRE_V2_RETPOLINE_MINIMAL_AMD]	= "Vulnerable: Minimal AMD ASM retpoline",
 	[SPECTRE_V2_RETPOLINE_NO_IBPB]		= "Vulnerable: Retpoline without IBPB",
-	[SPECTRE_V2_RETPOLINE_SKYLAKE]		= "Vulnerable: Retpoline on Skylake+",
 	[SPECTRE_V2_RETPOLINE_AMD]		= "Mitigation: Full AMD retpoline",
 	[SPECTRE_V2_RETPOLINE_UNSAFE_MODULE]	= "Vulnerable: Retpoline with unsafe module(s)",
 	[SPECTRE_V2_RETPOLINE]			= "Mitigation: Full retpoline",
@@ -338,6 +343,83 @@ static int __init mds_cmdline(char *str)
 	return 0;
 }
 early_param("mds", mds_cmdline);
+
+#undef pr_fmt
+#define pr_fmt(fmt)     "Spectre V1 : " fmt
+
+enum spectre_v1_mitigation {
+	SPECTRE_V1_MITIGATION_NONE,
+	SPECTRE_V1_MITIGATION_AUTO,
+};
+
+static enum spectre_v1_mitigation spectre_v1_mitigation __read_mostly =
+	SPECTRE_V1_MITIGATION_AUTO;
+
+static const char * const spectre_v1_strings[] = {
+	[SPECTRE_V1_MITIGATION_NONE] = "Vulnerable: Load fences, __user pointer sanitization and usercopy barriers only; no swapgs barriers",
+	[SPECTRE_V1_MITIGATION_AUTO] = "Mitigation: Load fences, usercopy/swapgs barriers and __user pointer sanitization",
+};
+
+static bool is_swapgs_serializing(void)
+{
+	/*
+	 * Technically, swapgs isn't serializing on AMD (despite it previously
+	 * being documented as such in the APM).  But according to AMD, %gs is
+	 * updated non-speculatively, and the issuing of %gs-relative memory
+	 * operands will be blocked until the %gs update completes, which is
+	 * good enough for our purposes.
+	 */
+	return boot_cpu_data.x86_vendor == X86_VENDOR_AMD;
+}
+
+static void __init spectre_v1_select_mitigation(void)
+{
+	if (!boot_cpu_has_bug(X86_BUG_SPECTRE_V1)) {
+		spectre_v1_mitigation = SPECTRE_V1_MITIGATION_NONE;
+		return;
+	}
+
+	if (spectre_v1_mitigation == SPECTRE_V1_MITIGATION_AUTO) {
+		/*
+		 * With Spectre v1, a user can speculatively control either
+		 * path of a conditional swapgs with a user-controlled GS
+		 * value.  The mitigation is to add lfences to both code paths.
+		 *
+		 * If FSGSBASE is enabled, the user can put a kernel address in
+		 * GS, in which case SMAP provides no protection.
+		 *
+		 * [ NOTE: Don't check for X86_FEATURE_FSGSBASE until the
+		 *	   FSGSBASE enablement patches have been merged. ]
+		 *
+		 * If FSGSBASE is disabled, the user can only put a user space
+		 * address in GS.  That makes an attack harder, but still
+		 * possible if there's no SMAP protection.
+		 */
+
+		/*
+		 * Mitigation can be provided from SWAPGS itself if
+		 * it is serializing. If not, mitigate with an LFENCE.
+		 */
+		if (!is_swapgs_serializing())
+			setup_force_cpu_cap(X86_FEATURE_FENCE_SWAPGS_USER);
+
+		/*
+		 * Enable lfences in the kernel entry (non-swapgs)
+		 * paths, to prevent user entry from speculatively
+		 * skipping swapgs.
+		 */
+		setup_force_cpu_cap(X86_FEATURE_FENCE_SWAPGS_KERNEL);
+	}
+
+	pr_info("%s\n", spectre_v1_strings[spectre_v1_mitigation]);
+}
+
+static int __init nospectre_v1_cmdline(char *str)
+{
+	spectre_v1_mitigation = SPECTRE_V1_MITIGATION_NONE;
+	return 0;
+}
+early_param("nospectre_v1", nospectre_v1_cmdline);
 
 #undef pr_fmt
 #define pr_fmt(fmt)     "Spectre V2 : " fmt
@@ -513,9 +595,6 @@ retpoline_generic:
 				   ? SPECTRE_V2_RETPOLINE
 				   : SPECTRE_V2_RETPOLINE_MINIMAL;
 		setup_force_cpu_cap(X86_FEATURE_RETPOLINE);
-
-		if (retp_compiler() && is_skylake_era())
-			spectre_v2_enabled = SPECTRE_V2_RETPOLINE_SKYLAKE;
 	}
 
 	spectre_v2_retpoline = spectre_v2_enabled;
@@ -541,8 +620,7 @@ void spectre_v2_set_mitigation(enum spectre_v2_mitigation mode)
 bool spectre_v2_has_full_retpoline(void)
 {
 	return spectre_v2_retpoline == SPECTRE_V2_RETPOLINE ||
-	       spectre_v2_retpoline == SPECTRE_V2_RETPOLINE_AMD ||
-	       spectre_v2_retpoline == SPECTRE_V2_RETPOLINE_SKYLAKE;
+	       spectre_v2_retpoline == SPECTRE_V2_RETPOLINE_AMD;
 }
 
 /*
@@ -921,7 +999,7 @@ ssize_t cpu_show_spectre_v1(struct sysdev_class *class, char *buf)
 	 * Load fences have been added in various places within the RHEL6
 	 * kernel to mitigate this vulnerability.
 	 */
-	return sprintf(buf, "Mitigation: Load fences\n");
+	return sprintf(buf, "%s\n", spectre_v1_strings[spectre_v1_mitigation]);
 }
 
 ssize_t cpu_show_spectre_v2(struct sysdev_class *class, char *buf)

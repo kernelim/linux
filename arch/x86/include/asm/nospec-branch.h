@@ -223,7 +223,6 @@ enum spectre_v2_mitigation {
 	SPECTRE_V2_RETPOLINE_MINIMAL,
 	SPECTRE_V2_RETPOLINE_MINIMAL_AMD,
 	SPECTRE_V2_RETPOLINE_NO_IBPB,
-	SPECTRE_V2_RETPOLINE_SKYLAKE,
 	SPECTRE_V2_RETPOLINE_AMD,
 	SPECTRE_V2_RETPOLINE_UNSAFE_MODULE,
 	SPECTRE_V2_RETPOLINE,
@@ -279,11 +278,6 @@ static inline void fill_RSB(void)
 	asm volatile (__stringify(__FILL_RETURN_BUFFER(%0, RSB_CLEAR_LOOPS, %1))
 		      : "=r" (loops), "+r" (sp)
 		      : : "memory" );
-}
-
-static inline bool retp_compiler(void)
-{
-	return IS_ENABLED(RETPOLINE);
 }
 
 extern enum spectre_v2_mitigation spectre_v2_get_mitigation(void);

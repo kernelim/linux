@@ -538,7 +538,7 @@ static void kaiser_enable_pcp(bool enable)
 	int cpu, val = 0;
 	if (enable) {
 		val = KAISER_PCP_ENABLED;
-		if (boot_cpu_has(X86_FEATURE_PCID))
+		if (IS_ENABLED(CONFIG_X86_64) && boot_cpu_has(X86_FEATURE_PCID))
 			val |= KAISER_PCP_PCID;
 	}
 	for_each_possible_cpu(cpu)

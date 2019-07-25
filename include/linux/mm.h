@@ -31,6 +31,7 @@ extern int page_cluster;
 
 #ifdef CONFIG_SYSCTL
 extern int sysctl_legacy_va_layout;
+extern int sysctl_legacy_scan_congestion_wait;
 extern unsigned int sysctl_unmap_area_factor;
 #else
 #define sysctl_legacy_va_layout 0

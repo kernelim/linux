@@ -51,7 +51,6 @@
 #include <linux/string.h>
 #include <linux/errno.h>
 #include <linux/i2c.h>
-#include <linux/nospec.h>
 #if defined(CONFIG_SPI)
 #include <linux/spi/spi.h>
 #endif
@@ -203,7 +202,6 @@ int v4l2_ctrl_query_menu(struct v4l2_querymenu *qmenu, struct v4l2_queryctrl *qc
 	       const char * const *menu_items)
 {
 	int i;
-	u32 index;
 
 	qmenu->reserved = 0;
 	if (menu_items == NULL)
@@ -211,12 +209,10 @@ int v4l2_ctrl_query_menu(struct v4l2_querymenu *qmenu, struct v4l2_queryctrl *qc
 	if (menu_items == NULL ||
 	    (qctrl && (qmenu->index < qctrl->minimum || qmenu->index > qctrl->maximum)))
 		return -EINVAL;
-	index = array_index_nospec(qmenu->index, qctrl->maximum + 1);
-
 	for (i = 0; i < qmenu->index && menu_items[i]; i++) ;
 	if (menu_items[i] == NULL || menu_items[i][0] == '\0')
 		return -EINVAL;
-	strlcpy(qmenu->name, menu_items[index], sizeof(qmenu->name));
+	strlcpy(qmenu->name, menu_items[qmenu->index], sizeof(qmenu->name));
 	return 0;
 }
 EXPORT_SYMBOL(v4l2_ctrl_query_menu);

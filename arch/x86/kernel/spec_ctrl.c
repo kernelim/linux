@@ -335,6 +335,12 @@ bool spec_ctrl_cond_enable_ibrs(bool full_retp)
 	    !noibrs_cmdline) {
 		set_spec_ctrl_pcp_ibrs();
 		spectre_v2_set_mitigation(SPECTRE_V2_IBRS);
+		/*
+		 * Print a warning message about performance
+		 * impact of enabling IBRS vs. retpoline.
+		 */
+		pr_warn_once("Using IBRS as the default Spectre v2 mitigation for a Skylake-\n");
+		pr_warn_once("generation CPU.  This may have a negative performance impact.\n");
 		return true;
 	}
 

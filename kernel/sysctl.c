@@ -241,6 +241,19 @@ extern struct ctl_table epoll_table[];
 int sysctl_legacy_va_layout;
 #endif
 
+/*
+ * RHEL6 bz1658254
+ * In order to safely backport a changeset from upstream commit
+ * db73ee0d46 "mm, vmscan: do not loop on too_many_isolated for ever"
+ * that will get rid of congestion wait mechanism for shrink_inactive_list()
+ * at reclaim-scanning path, we are introducing a new sysctl called
+ * vm.legacy_scan_congestion_wait to keep the old scanning behaviour by default,
+ * while granting sysadmins the ability to disable the congestion wait
+ * for the reclaim path, allowing the OOM-killer to kick-in faster in
+ * case of memory shortage due to overcommitment.
+ */
+int sysctl_legacy_scan_congestion_wait __read_mostly = 1;
+
 extern int prove_locking;
 extern int lock_stat;
 
@@ -1689,6 +1702,16 @@ static struct ctl_table vm_table[] = {
 		.maxlen		= sizeof(sysctl_admin_reserve_kbytes),
 		.mode		= 0644,
 		.proc_handler	= proc_doulongvec_minmax,
+	},
+	{
+		.procname	= "legacy_scan_congestion_wait",
+		.data		= &sysctl_legacy_scan_congestion_wait,
+		.maxlen		= sizeof(sysctl_legacy_scan_congestion_wait),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+		.strategy	= &sysctl_intvec,
+		.extra1		= &zero,
+		.extra2		= &one,
 	},
 
 /*

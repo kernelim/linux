@@ -327,13 +327,17 @@ ENTRY(save_args)
 	testl $3, CS(%rdi)
 	je sa_from_kernel
 	SWAPGS
+	FENCE_SWAPGS_USER_ENTRY
 	SWITCH_TO_KERNEL_CR3
 	IBRS_ENTRY_CLOBBER /* no indirect jump allowed before IBRS */
 	movq %rsp, %rsi
 	movq PER_CPU_VAR(kernel_stack), %rsp
 	FILL_RETURN_BUFFER_CLOBBER /* no ret allowed before stuffing the RSB */
 	movq %rsi, %rsp
+	jmp sa_from_kernel2
 sa_from_kernel:
+	FENCE_SWAPGS_KERNEL_ENTRY
+sa_from_kernel2:
 	/* Check to see if we're on the trampoline stack. */
 	movq PER_CPU_VAR(init_tss + TSS_sp0), %rcx
 	cmpq %rcx, %rsp
@@ -402,8 +406,12 @@ ENTRY(save_paranoid)
 	testl %edx,%edx
 	js 1f	/* negative -> in kernel */
 	SWAPGS
+	FENCE_SWAPGS_USER_ENTRY
 	xorl %ebx,%ebx
+	jmp 2f
 1:
+	FENCE_SWAPGS_KERNEL_ENTRY
+2:
 	SAVE_AND_SWITCH_TO_KERNEL_CR3 scratch_reg=%rax save_reg=%r14
 	/* no indirect jump allowed before IBRS */
 	IBRS_ENTRY_SAVE_AND_CLOBBER save_reg=%r13d
@@ -1581,6 +1589,7 @@ ENTRY(error_entry)
 	je error_kernelspace
 error_swapgs:
 	SWAPGS
+	FENCE_SWAPGS_USER_ENTRY
 	SWITCH_TO_KERNEL_CR3
 	IBRS_ENTRY_CLOBBER /* no indirect jump allowed before IBRS */
 	FILL_RETURN_BUFFER_CLOBBER /* no ret allowed before stuffing the RSB */
@@ -1625,6 +1634,7 @@ error_kernelspace:
 	je error_swapgs
 	cmpq $gs_change,RIP+8(%rsp)
 	je error_swapgs
+	FENCE_SWAPGS_KERNEL_ENTRY
 	jmp error_sti
 END(error_entry)
 
@@ -1671,6 +1681,7 @@ ENTRY(nmi)
 	/* Use %rsi as out temp variable throughout */
 	pushq	%rsi
 	SWAPGS_UNSAFE_STACK
+	FENCE_SWAPGS_USER_ENTRY
 	SWITCH_TO_KERNEL_CR3
 	cld
 	movq	%rsp, %rsi

@@ -208,6 +208,31 @@ static void mincore_page_range(struct vm_area_struct *vma,
 	} while (pgd++, addr = next, addr != end);
 }
 
+static inline bool can_do_mincore(struct vm_area_struct *vma)
+{
+	struct inode *inode;
+
+	/* !vma->vm_ops means this vma is ANONYMOUS */
+	if (!vma->vm_ops)
+		return true;
+
+	if (!vma->vm_file)
+		return false;
+
+	inode = (vma->vm_file->f_path.dentry) ?
+		 vma->vm_file->f_path.dentry->d_inode : NULL;
+	if (!inode)
+		return false;
+
+	/*
+	 * Reveal pagecache information only for non-anonymous mappings that
+	 * correspond to the files the calling process could (if tried) open
+	 * for writing; otherwise we'd be including shared non-exclusive
+	 * mappings, which opens a side channel.
+	 */
+	return is_owner_or_cap(inode) || inode_permission(inode, MAY_WRITE) == 0;
+}
+
 /*
  * Do a chunk of "sys_mincore()". We've already checked
  * all the arguments, we hold the mmap semaphore: we should
@@ -223,6 +248,12 @@ static long do_mincore(unsigned long addr, unsigned long pages, unsigned char *v
 		return -ENOMEM;
 
 	end = min(vma->vm_end, addr + (pages << PAGE_SHIFT));
+
+	if (!can_do_mincore(vma)) {
+		unsigned long pages = DIV_ROUND_UP(end - addr, PAGE_SIZE);
+		memset(vec, 1, pages);
+		return pages;
+	}
 
 	if (is_vm_hugetlb_page(vma)) {
 		mincore_hugetlb_page_range(vma, addr, end, vec);

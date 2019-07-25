@@ -108,7 +108,7 @@ static __always_inline void __load_cr3(unsigned long cr3)
 
 static inline void __native_flush_tlb(void)
 {
-	if (!static_cpu_has(X86_FEATURE_INVPCID)) {
+	if (IS_ENABLED(CONFIG_X86_32) || !static_cpu_has(X86_FEATURE_INVPCID)) {
 		__load_cr3(native_read_cr3());
 		return;
 	}
@@ -123,7 +123,7 @@ static inline void __native_flush_tlb_global(void)
 	unsigned long flags;
 	unsigned long cr4;
 
-	if (static_cpu_has(X86_FEATURE_INVPCID)) {
+	if (IS_ENABLED(CONFIG_X86_64) && static_cpu_has(X86_FEATURE_INVPCID)) {
 		/*
 		 * Using INVPCID is considerably faster than a pair of writes
 		 * to CR4 sandwiched inside an IRQ flag save/restore.
