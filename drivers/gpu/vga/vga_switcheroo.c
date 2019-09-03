@@ -199,6 +199,8 @@ static void vga_switcheroo_enable(void)
 			return;
 
 		client->id = ret;
+		if (client->ops->gpu_bound)
+			client->ops->gpu_bound(client->pdev, ret);
 	}
 	vga_switcheroo_debugfs_init(&vgasr_priv);
 	vgasr_priv.active = true;

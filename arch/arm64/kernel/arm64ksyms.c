@@ -83,3 +83,5 @@ extern long long __ashrti3(long long a, int b);
 EXPORT_SYMBOL(__ashrti3);
 extern long long __lshrti3(long long a, int b);
 EXPORT_SYMBOL(__lshrti3);
+
+EXPORT_SYMBOL(kimage_vaddr);
