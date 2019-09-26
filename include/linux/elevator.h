@@ -51,7 +51,7 @@ struct elevator_mq_ops {
 	void (*init_icq)(struct io_cq *);
 	void (*exit_icq)(struct io_cq *);
 
-	RH_KABI_RESERVE(1)
+	RH_KABI_USE(1, void (*depth_updated)(struct blk_mq_hw_ctx *))
 	RH_KABI_RESERVE(2)
 	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)

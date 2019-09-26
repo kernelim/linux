@@ -169,7 +169,8 @@ int __meminit arch_remove_memory(u64 start, u64 size, struct vmem_altmap *altmap
 	 */
 	vm_unmap_aliases();
 
-	resize_hpt_for_hotplug(memblock_phys_mem_size());
+	if (resize_hpt_for_hotplug(memblock_phys_mem_size()) == -ENOSPC)
+		pr_warn("Hash collision while resizing HPT\n");
 
 	return ret;
 }
@@ -247,35 +248,19 @@ static int __init mark_nonram_nosave(void)
 }
 #endif
 
-static bool zone_limits_final;
-
 /*
- * The memory zones past TOP_ZONE are managed by generic mm code.
- * These should be set to zero since that's what every other
- * architecture does.
+ * Zones usage:
+ *
+ * We setup ZONE_DMA to be 31-bits on all platforms and ZONE_NORMAL to be
+ * everything else. GFP_DMA32 page allocations automatically fall back to
+ * ZONE_DMA.
+ *
+ * By using 31-bit unconditionally, we can exploit ARCH_ZONE_DMA_BITS to
+ * inform the generic DMA mapping code.  32-bit only devices (if not handled
+ * by an IOMMU anyway) will take a first dip into ZONE_NORMAL and get
+ * otherwise served by ZONE_DMA.
  */
-static unsigned long max_zone_pfns[MAX_NR_ZONES] = {
-	[0            ... TOP_ZONE        ] = ~0UL,
-	[TOP_ZONE + 1 ... MAX_NR_ZONES - 1] = 0
-};
-
-/*
- * Restrict the specified zone and all more restrictive zones
- * to be below the specified pfn.  May not be called after
- * paging_init().
- */
-void __init limit_zone_pfn(enum zone_type zone, unsigned long pfn_limit)
-{
-	int i;
-
-	if (WARN_ON(zone_limits_final))
-		return;
-
-	for (i = zone; i >= 0; i--) {
-		if (max_zone_pfns[i] > pfn_limit)
-			max_zone_pfns[i] = pfn_limit;
-	}
-}
+static unsigned long max_zone_pfns[MAX_NR_ZONES];
 
 /*
  * Find the least restrictive zone that is entirely below the
@@ -325,11 +310,21 @@ void __init paging_init(void)
 	printk(KERN_DEBUG "Memory hole size: %ldMB\n",
 	       (long int)((top_of_ram - total_ram) >> 20));
 
-#ifdef CONFIG_HIGHMEM
-	limit_zone_pfn(ZONE_NORMAL, lowmem_end_addr >> PAGE_SHIFT);
+#if defined(CONFIG_ZONE_DMA) && defined(CONFIG_PPC_BOOK3E_64)
+	max_zone_pfns[ZONE_DMA]	= min(max_low_pfn, 0x7fffffffUL >> PAGE_SHIFT);
 #endif
-	limit_zone_pfn(TOP_ZONE, top_of_ram >> PAGE_SHIFT);
-	zone_limits_final = true;
+#if defined(CONFIG_ZONE_DMA) && !defined(CONFIG_PPC_BOOK3E_64)
+	/*
+	 * Reduce the window where gfp_allowed_mask isn't out of control of
+	 * powerpc in between kernel_init_freeable() and free_initmem().
+	 */
+	gfp_allowed_mask &= ~(__GFP_DMA|__GFP_DMA32);
+#endif
+	max_zone_pfns[ZONE_NORMAL] = max_low_pfn;
+#ifdef CONFIG_HIGHMEM
+	max_zone_pfns[ZONE_HIGHMEM] = max_pfn;
+#endif
+
 	free_area_init_nodes(max_zone_pfns);
 
 	mark_nonram_nosave();
@@ -399,6 +394,18 @@ void free_initmem(void)
 	mark_initmem_nx();
 	init_mem_is_free = true;
 	free_initmem_default(POISON_FREE_INITMEM);
+#if defined(CONFIG_ZONE_DMA) && !defined(CONFIG_PPC_BOOK3E_64)
+	/*
+	 * At this point "gfp_allowed_mask" won't be overwritten by
+	 * the common code anymore so we can set it for our purpose.
+	 *
+	 * We leave the ZONE_DMA enabled to preserve the kABI, but
+	 * it's empty, so __GFP_DMA must be ignored when building the
+	 * zonelist in prepare_alloc_pages->node_zonelist or all
+	 * driver GFP_DMA allocations will fail for no good reason.
+	 */
+	gfp_allowed_mask &= ~(__GFP_DMA|__GFP_DMA32);
+#endif
 }
 
 #ifdef CONFIG_BLK_DEV_INITRD

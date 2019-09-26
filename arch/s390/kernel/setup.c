@@ -49,7 +49,9 @@
 #include <linux/crash_dump.h>
 #include <linux/memory.h>
 #include <linux/compat.h>
+#include <linux/version.h>
 
+#include <asm/boot_data.h>
 #include <asm/ipl.h>
 #include <asm/facility.h>
 #include <asm/smp.h>
@@ -69,6 +71,8 @@
 #include <asm/numa.h>
 #include <asm/alternative.h>
 #include <asm/nospec-branch.h>
+#include <asm/mem_detect.h>
+#include <asm/uv.h>
 #include "entry.h"
 
 /*
@@ -88,9 +92,15 @@ char elf_platform[ELF_PLATFORM_SIZE];
 
 unsigned long int_hwcap = 0;
 
-int __initdata memory_end_set;
-unsigned long __initdata memory_end;
-unsigned long __initdata max_physmem_end;
+#ifdef CONFIG_PROTECTED_VIRTUALIZATION_GUEST
+int __bootdata_preserved(prot_virt_guest);
+#endif
+
+int __bootdata(noexec_disabled);
+int __bootdata(memory_end_set);
+unsigned long __bootdata(memory_end);
+unsigned long __bootdata(max_physmem_end);
+struct mem_detect_info __bootdata(mem_detect);
 
 unsigned long VMALLOC_START;
 EXPORT_SYMBOL(VMALLOC_START);
@@ -283,15 +293,6 @@ void machine_power_off(void)
 void (*pm_power_off)(void) = machine_power_off;
 EXPORT_SYMBOL_GPL(pm_power_off);
 
-static int __init early_parse_mem(char *p)
-{
-	memory_end = memparse(p, &p);
-	memory_end &= PAGE_MASK;
-	memory_end_set = 1;
-	return 0;
-}
-early_param("mem", early_parse_mem);
-
 static int __init parse_vmalloc(char *arg)
 {
 	if (!arg)
@@ -474,14 +475,21 @@ static void __init setup_memory_end(void)
 {
 	unsigned long vmax, vmalloc_size, tmp;
 
-	/* Choose kernel address space layout: 2, 3, or 4 levels. */
+	/* Choose kernel address space layout: 3 or 4 levels. */
 	vmalloc_size = VMALLOC_END ?: (128UL << 30) - MODULES_LEN;
-	tmp = (memory_end ?: max_physmem_end) / PAGE_SIZE;
-	tmp = tmp * (sizeof(struct page) + PAGE_SIZE);
-	if (tmp + vmalloc_size + MODULES_LEN <= _REGION2_SIZE)
-		vmax = _REGION2_SIZE; /* 3-level kernel page table */
-	else
-		vmax = _REGION1_SIZE; /* 4-level kernel page table */
+	if (IS_ENABLED(CONFIG_KASAN)) {
+		vmax = IS_ENABLED(CONFIG_KASAN_S390_4_LEVEL_PAGING)
+			   ? _REGION1_SIZE
+			   : _REGION2_SIZE;
+	} else {
+		tmp = (memory_end ?: max_physmem_end) / PAGE_SIZE;
+		tmp = tmp * (sizeof(struct page) + PAGE_SIZE);
+		if (tmp + vmalloc_size + MODULES_LEN <= _REGION2_SIZE)
+			vmax = _REGION2_SIZE; /* 3-level kernel page table */
+		else
+			vmax = _REGION1_SIZE; /* 4-level kernel page table */
+	}
+
 	/* module area is at the end of the kernel address space. */
 	MODULES_END = vmax;
 	MODULES_VADDR = MODULES_END - MODULES_LEN;
@@ -499,6 +507,11 @@ static void __init setup_memory_end(void)
 
 	/* Take care that memory_end is set and <= vmemmap */
 	memory_end = min(memory_end ?: max_physmem_end, tmp);
+#ifdef CONFIG_KASAN
+	/* fit in kasan shadow memory region between 1:1 and vmemmap */
+	memory_end = min(memory_end, KASAN_SHADOW_START);
+	vmemmap = max(vmemmap, (struct page *)KASAN_SHADOW_END);
+#endif
 	max_pfn = max_low_pfn = PFN_DOWN(memory_end);
 	memblock_remove(memory_end, ULONG_MAX);
 
@@ -539,17 +552,8 @@ static struct notifier_block kdump_mem_nb = {
  */
 static void reserve_memory_end(void)
 {
-#ifdef CONFIG_CRASH_DUMP
-	if (ipl_info.type == IPL_TYPE_FCP_DUMP &&
-	    !OLDMEM_BASE && sclp.hsa_size) {
-		memory_end = sclp.hsa_size;
-		memory_end &= PAGE_MASK;
-		memory_end_set = 1;
-	}
-#endif
-	if (!memory_end_set)
-		return;
-	memblock_reserve(memory_end, ULONG_MAX);
+	if (memory_end_set)
+		memblock_reserve(memory_end, ULONG_MAX);
 }
 
 /*
@@ -657,6 +661,71 @@ static void __init reserve_initrd(void)
 }
 
 /*
+ * Reserve the memory area used to pass the certificate lists
+ */
+static void __init reserve_certificate_list(void)
+{
+	if (ipl_cert_list_addr)
+		memblock_reserve(ipl_cert_list_addr, ipl_cert_list_size);
+}
+
+static void __init reserve_mem_detect_info(void)
+{
+	unsigned long start, size;
+
+	get_mem_detect_reserved(&start, &size);
+	if (size)
+		memblock_reserve(start, size);
+}
+
+static void __init free_mem_detect_info(void)
+{
+	unsigned long start, size;
+
+	get_mem_detect_reserved(&start, &size);
+	if (size)
+		memblock_free(start, size);
+}
+
+static void __init memblock_physmem_add(phys_addr_t start, phys_addr_t size)
+{
+	memblock_dbg("memblock_physmem_add: [%#016llx-%#016llx]\n",
+		     start, start + size - 1);
+	memblock_add_range(&memblock.memory, start, size, 0, 0);
+	memblock_add_range(&memblock.physmem, start, size, 0, 0);
+}
+
+static const char * __init get_mem_info_source(void)
+{
+	switch (mem_detect.info_source) {
+	case MEM_DETECT_SCLP_STOR_INFO:
+		return "sclp storage info";
+	case MEM_DETECT_DIAG260:
+		return "diag260";
+	case MEM_DETECT_SCLP_READ_INFO:
+		return "sclp read info";
+	case MEM_DETECT_BIN_SEARCH:
+		return "binary search";
+	}
+	return "none";
+}
+
+static void __init memblock_add_mem_detect_info(void)
+{
+	unsigned long start, end;
+	int i;
+
+	memblock_dbg("physmem info source: %s (%hhd)\n",
+		     get_mem_info_source(), mem_detect.info_source);
+	/* keep memblock lists close to the kernel */
+	memblock_set_bottom_up(true);
+	for_each_mem_detect_block(i, &start, &end)
+		memblock_physmem_add(start, end - start);
+	memblock_set_bottom_up(false);
+	memblock_dump_all();
+}
+
+/*
  * Check for initrd being in usable memory
  */
 static void __init check_initrd(void)
@@ -681,12 +750,12 @@ static void __init reserve_kernel(void)
 #ifdef CONFIG_DMA_API_DEBUG
 	/*
 	 * DMA_API_DEBUG code stumbles over addresses from the
-	 * range [_ehead, _stext]. Mark the memory as reserved
+	 * range [PARMAREA_END, _stext]. Mark the memory as reserved
 	 * so it is not used for CONFIG_DMA_API_DEBUG=y.
 	 */
 	memblock_reserve(0, PFN_PHYS(start_pfn));
 #else
-	memblock_reserve(0, (unsigned long)_ehead);
+	memblock_reserve(0, PARMAREA_END);
 	memblock_reserve((unsigned long)_stext, PFN_PHYS(start_pfn)
 			 - (unsigned long)_stext);
 #endif
@@ -787,7 +856,15 @@ static int __init setup_hwcaps(void)
 			elf_hwcap |= HWCAP_S390_VXRS_EXT;
 		if (test_facility(135))
 			elf_hwcap |= HWCAP_S390_VXRS_BCD;
+		if (test_facility(148))
+			elf_hwcap |= HWCAP_S390_VXRS_EXT2;
+		if (test_facility(152))
+			elf_hwcap |= HWCAP_S390_VXRS_PDE;
 	}
+	if (test_facility(150))
+		elf_hwcap |= HWCAP_S390_SORT;
+	if (test_facility(151))
+		elf_hwcap |= HWCAP_S390_DFLT;
 
 	/*
 	 * Guarded storage support HWCAP_S390_GS is bit 12.
@@ -873,6 +950,57 @@ static void __init setup_task_size(void)
 }
 
 /*
+ * Issue diagnose 318 to set the control program name and
+ * version codes.
+ */
+static void __init setup_control_program_code(void)
+{
+	union diag318_info diag318_info = {
+		.cpnc = CPNC_LINUX,
+		.cpvc_linux = 0,
+		.cpvc_distro = {0},
+	};
+
+	if (!sclp.has_diag318)
+		return;
+
+	diag_stat_inc(DIAG_STAT_X318);
+	asm volatile("diag %0,0,0x318\n" : : "d" (diag318_info.val));
+}
+
+/*
+ * Print the component list from the IPL report
+ */
+static void __init log_component_list(void)
+{
+	struct ipl_rb_component_entry *ptr, *end;
+	char *str;
+
+	if (!early_ipl_comp_list_addr)
+		return;
+	if (ipl_block.hdr.flags & IPL_PL_FLAG_IPLSR)
+		pr_info("Linux is running with Secure-IPL enabled\n");
+	else
+		pr_info("Linux is running with Secure-IPL disabled\n");
+	ptr = (void *) early_ipl_comp_list_addr;
+	end = (void *) ptr + early_ipl_comp_list_size;
+	pr_info("The IPL report contains the following components:\n");
+	while (ptr < end) {
+		if (ptr->flags & IPL_RB_COMPONENT_FLAG_SIGNED) {
+			if (ptr->flags & IPL_RB_COMPONENT_FLAG_VERIFIED)
+				str = "signed, verified";
+			else
+				str = "signed, verification failed";
+		} else {
+			str = "not signed";
+		}
+		pr_info("%016llx - %016llx (%s)\n",
+			ptr->addr, ptr->addr + ptr->len, str);
+		ptr++;
+	}
+}
+
+/*
  * Setup function called from init/main.c just after the banner
  * was printed.
  */
@@ -889,6 +1017,8 @@ void __init setup_arch(char **cmdline_p)
 		pr_info("Linux is running under KVM in 64-bit mode\n");
 	else if (MACHINE_IS_LPAR)
 		pr_info("Linux is running natively in 64-bit mode\n");
+
+	log_component_list();
 
 	/* Have one command line that is parsed and saved in /proc/cmdline */
 	/* boot_command_line has been already set up in early.c */
@@ -914,17 +1044,21 @@ void __init setup_arch(char **cmdline_p)
 	os_info_init();
 	setup_ipl();
 	setup_task_size();
+	setup_control_program_code();
 
 	/* Do some memory reservations *before* memory is added to memblock */
 	reserve_memory_end();
 	reserve_oldmem();
 	reserve_kernel();
 	reserve_initrd();
+	reserve_certificate_list();
+	reserve_mem_detect_info();
 	memblock_allow_resize();
 
 	/* Get information about *all* installed memory */
-	detect_memory_memblock();
+	memblock_add_mem_detect_info();
 
+	free_mem_detect_info();
 	remove_oldmem();
 
 	/*

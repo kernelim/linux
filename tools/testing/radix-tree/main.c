@@ -214,7 +214,7 @@ void copy_tag_check(void)
 	}
 
 //	printf("\ncopying tags...\n");
-	tagged = tag_tagged_items(&tree, NULL, start, end, ITEMS, 0, 1);
+	tagged = tag_tagged_items(&tree, start, end, ITEMS, XA_MARK_0, XA_MARK_1);
 
 //	printf("checking copied tags\n");
 	assert(tagged == count);
@@ -223,7 +223,7 @@ void copy_tag_check(void)
 	/* Copy tags in several rounds */
 //	printf("\ncopying tags...\n");
 	tmp = rand() % (count / 10 + 2);
-	tagged = tag_tagged_items(&tree, NULL, start, end, tmp, 0, 2);
+	tagged = tag_tagged_items(&tree, start, end, tmp, XA_MARK_0, XA_MARK_2);
 	assert(tagged == count);
 
 //	printf("%lu %lu %lu\n", tagged, tmp, count);
@@ -324,7 +324,7 @@ static void single_thread_tests(bool long_run)
 	printv(2, "after dynamic_height_check: %d allocated, preempt %d\n",
 		nr_allocated, preempt_count);
 	idr_checks();
-	ida_checks();
+	ida_tests();
 	rcu_barrier();
 	printv(2, "after idr_checks: %d allocated, preempt %d\n",
 		nr_allocated, preempt_count);
@@ -365,13 +365,14 @@ int main(int argc, char **argv)
 	rcu_register_thread();
 	radix_tree_init();
 
+	xarray_tests();
 	regression1_test();
 	regression2_test();
 	regression3_test();
+	regression4_test();
 	iteration_test(0, 10 + 90 * long_run);
 	iteration_test(7, 10 + 90 * long_run);
 	single_thread_tests(long_run);
-	ida_thread_tests();
 
 	/* Free any remaining preallocated nodes */
 	radix_tree_cpu_dead(0);

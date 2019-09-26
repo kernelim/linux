@@ -5,6 +5,13 @@ SUBLEVEL = 0
 EXTRAVERSION =
 NAME = Merciless Moray
 
+#
+# DRM backport version
+#
+RHEL_DRM_VERSION = 5
+RHEL_DRM_PATCHLEVEL = 1
+RHEL_DRM_SUBLEVEL = 21
+
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
 # More info can be located in ./README
@@ -403,7 +410,9 @@ USERINCLUDE    := \
 LINUXINCLUDE    := \
 		-I$(srctree)/arch/$(SRCARCH)/include \
 		-I$(objtree)/arch/$(SRCARCH)/include/generated \
+		$(if $(KBUILD_SRC), -I$(srctree)/include/drm-backport) \
 		$(if $(KBUILD_SRC), -I$(srctree)/include) \
+		-I$(objtree)/include/drm-backport \
 		-I$(objtree)/include \
 		$(USERINCLUDE)
 
@@ -664,7 +673,7 @@ endif
 ifneq ($(DISABLE_WERROR),1)
 ifneq ($(WITH_GCOV),1)
 ifeq ($(KBUILD_EXTMOD),)
-ifneq (,$(filter $(ARCH), x86 x86_64 powerpc))
+ifneq (,$(filter $(ARCH), x86 x86_64 powerpc s390))
 KBUILD_CFLAGS   += -Werror
 endif
 # powerpc is compiled with -O3. Starting with gcc 4.8, there have been some
@@ -762,12 +771,22 @@ ifdef CONFIG_FUNCTION_TRACER
 ifndef CC_FLAGS_FTRACE
 CC_FLAGS_FTRACE := -pg
 endif
-export CC_FLAGS_FTRACE
-ifdef CONFIG_HAVE_FENTRY
-CC_USING_FENTRY	:= $(call cc-option, -mfentry -DCC_USING_FENTRY)
+ifdef CONFIG_FTRACE_MCOUNT_RECORD
+  # gcc 5 supports generating the mcount tables directly
+  ifeq ($(call cc-option-yn,-mrecord-mcount),y)
+    CC_FLAGS_FTRACE	+= -mrecord-mcount
+    export CC_USING_RECORD_MCOUNT := 1
+  endif
 endif
-KBUILD_CFLAGS	+= $(CC_FLAGS_FTRACE) $(CC_USING_FENTRY)
-KBUILD_AFLAGS	+= $(CC_USING_FENTRY)
+ifdef CONFIG_HAVE_FENTRY
+  ifeq ($(call cc-option-yn, -mfentry),y)
+    CC_FLAGS_FTRACE	+= -mfentry
+    CC_FLAGS_USING	+= -DCC_USING_FENTRY
+  endif
+endif
+export CC_FLAGS_FTRACE
+KBUILD_CFLAGS	+= $(CC_FLAGS_FTRACE) $(CC_FLAGS_USING)
+KBUILD_AFLAGS	+= $(CC_FLAGS_USING)
 ifdef CONFIG_DYNAMIC_FTRACE
 	ifdef CONFIG_HAVE_C_RECORDMCOUNT
 		BUILD_C_RECORDMCOUNT := y

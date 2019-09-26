@@ -10,6 +10,7 @@
 #include <linux/of_mdio.h>
 #include <linux/of_platform.h>
 #include <linux/skbuff.h>
+#include <net/switchdev.h>
 
 #include "ocelot.h"
 
@@ -281,6 +282,7 @@ static int mscc_ocelot_probe(struct platform_device *pdev)
 	}
 
 	register_netdevice_notifier(&ocelot_netdevice_nb);
+	register_switchdev_blocking_notifier(&ocelot_switchdev_blocking_nb);
 
 	dev_info(&pdev->dev, "Ocelot switch probed\n");
 
@@ -295,6 +297,7 @@ static int mscc_ocelot_remove(struct platform_device *pdev)
 	struct ocelot *ocelot = platform_get_drvdata(pdev);
 
 	ocelot_deinit(ocelot);
+	unregister_switchdev_blocking_notifier(&ocelot_switchdev_blocking_nb);
 	unregister_netdevice_notifier(&ocelot_netdevice_nb);
 
 	return 0;

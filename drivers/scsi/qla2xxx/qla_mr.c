@@ -629,17 +629,20 @@ qlafx00_soc_cpu_reset(scsi_qla_host_t *vha)
  *
  * Returns 0 on success.
  */
-void
+int
 qlafx00_soft_reset(scsi_qla_host_t *vha)
 {
 	struct qla_hw_data *ha = vha->hw;
+	int rval = QLA_FUNCTION_FAILED;
 
 	if (unlikely(pci_channel_offline(ha->pdev) &&
 	    ha->flags.pci_channel_io_perm_failure))
-		return;
+		return rval;
 
 	ha->isp_ops->disable_intrs(ha);
 	qlafx00_soc_cpu_reset(vha);
+
+	return QLA_SUCCESS;
 }
 
 /**
@@ -1138,8 +1141,8 @@ qlafx00_find_all_targets(scsi_qla_host_t *vha,
 
 	ql_dbg(ql_dbg_disc + ql_dbg_init, vha, 0x2088,
 	    "Listing Target bit map...\n");
-	ql_dump_buffer(ql_dbg_disc + ql_dbg_init, vha,
-	    0x2089, (uint8_t *)ha->gid_list, 32);
+	ql_dump_buffer(ql_dbg_disc + ql_dbg_init, vha, 0x2089,
+	    ha->gid_list, 32);
 
 	/* Allocate temporary rmtport for any new rmtports discovered. */
 	new_fcport = qla2x00_alloc_fcport(vha, GFP_KERNEL);
@@ -1913,8 +1916,7 @@ qlafx00_fx_disc(scsi_qla_host_t *vha, fc_port_t *fcport, uint16_t fx_type)
 			    phost_info->domainname,
 			    phost_info->hostdriver);
 			ql_dump_buffer(ql_dbg_init + ql_dbg_disc, vha, 0x014d,
-			    (uint8_t *)phost_info,
-			    sizeof(struct host_system_info));
+			    phost_info, sizeof(*phost_info));
 		}
 	}
 
@@ -1968,7 +1970,7 @@ qlafx00_fx_disc(scsi_qla_host_t *vha, fc_port_t *fcport, uint16_t fx_type)
 		vha->d_id.b.al_pa = pinfo->port_id[2];
 		qlafx00_update_host_attr(vha, pinfo);
 		ql_dump_buffer(ql_dbg_init + ql_dbg_buffer, vha, 0x0141,
-		    (uint8_t *)pinfo, 16);
+		    pinfo, 16);
 	} else if (fx_type == FXDISC_GET_TGT_NODE_INFO) {
 		struct qlafx00_tgt_node_info *pinfo =
 		    (struct qlafx00_tgt_node_info *) fdisc->u.fxiocb.rsp_addr;
@@ -1976,12 +1978,12 @@ qlafx00_fx_disc(scsi_qla_host_t *vha, fc_port_t *fcport, uint16_t fx_type)
 		memcpy(fcport->port_name, pinfo->tgt_node_wwpn, WWN_SIZE);
 		fcport->port_type = FCT_TARGET;
 		ql_dump_buffer(ql_dbg_init + ql_dbg_buffer, vha, 0x0144,
-		    (uint8_t *)pinfo, 16);
+		    pinfo, 16);
 	} else if (fx_type == FXDISC_GET_TGT_NODE_LIST) {
 		struct qlafx00_tgt_node_info *pinfo =
 		    (struct qlafx00_tgt_node_info *) fdisc->u.fxiocb.rsp_addr;
 		ql_dump_buffer(ql_dbg_init + ql_dbg_buffer, vha, 0x0146,
-		    (uint8_t *)pinfo, 16);
+		    pinfo, 16);
 		memcpy(vha->hw->gid_list, pinfo, QLAFX00_TGT_NODE_LIST_SIZE);
 	} else if (fx_type == FXDISC_ABORT_IOCTL)
 		fdisc->u.fxiocb.result =
@@ -2212,7 +2214,7 @@ qlafx00_ioctl_iosb_entry(scsi_qla_host_t *vha, struct req_que *req,
 	struct bsg_job *bsg_job;
 	struct fc_bsg_reply *bsg_reply;
 	struct srb_iocb *iocb_job;
-	int res;
+	int res = 0;
 	struct qla_mt_iocb_rsp_fx00 fstatus;
 	uint8_t	*fw_sts_ptr;
 
@@ -2248,18 +2250,16 @@ qlafx00_ioctl_iosb_entry(scsi_qla_host_t *vha, struct req_que *req,
 
 		fw_sts_ptr = bsg_job->reply + sizeof(struct fc_bsg_reply);
 
-		memcpy(fw_sts_ptr, (uint8_t *)&fstatus,
-		    sizeof(struct qla_mt_iocb_rsp_fx00));
+		memcpy(fw_sts_ptr, &fstatus, sizeof(fstatus));
 		bsg_job->reply_len = sizeof(struct fc_bsg_reply) +
 			sizeof(struct qla_mt_iocb_rsp_fx00) + sizeof(uint8_t);
 
 		ql_dump_buffer(ql_dbg_user + ql_dbg_verbose,
-		    sp->fcport->vha, 0x5080,
-		    (uint8_t *)pkt, sizeof(struct ioctl_iocb_entry_fx00));
+		    sp->vha, 0x5080, pkt, sizeof(*pkt));
 
 		ql_dump_buffer(ql_dbg_user + ql_dbg_verbose,
-		    sp->fcport->vha, 0x5074,
-		    (uint8_t *)fw_sts_ptr, sizeof(struct qla_mt_iocb_rsp_fx00));
+		    sp->vha, 0x5074,
+		    fw_sts_ptr, sizeof(fstatus));
 
 		res = bsg_reply->result = DID_OK << 16;
 		bsg_reply->reply_payload_rcv_len =
@@ -2597,7 +2597,7 @@ qlafx00_status_cont_entry(struct rsp_que *rsp, sts_cont_entry_t *pkt)
 
 		/* Move sense data. */
 		ql_dump_buffer(ql_dbg_io + ql_dbg_buffer, vha, 0x304e,
-		    (uint8_t *)pkt, sizeof(sts_cont_entry_t));
+		    pkt, sizeof(*pkt));
 		memcpy(sense_ptr, pkt->data, sense_sz);
 		ql_dump_buffer(ql_dbg_io + ql_dbg_buffer, vha, 0x304a,
 		    sense_ptr, sense_sz);
@@ -2624,7 +2624,7 @@ qlafx00_status_cont_entry(struct rsp_que *rsp, sts_cont_entry_t *pkt)
  * qlafx00_multistatus_entry() - Process Multi response queue entries.
  * @vha: SCSI driver HA context
  * @rsp: response queue
- * @pkt:
+ * @pkt: received packet
  */
 static void
 qlafx00_multistatus_entry(struct scsi_qla_host *vha,
@@ -2681,12 +2681,10 @@ qlafx00_multistatus_entry(struct scsi_qla_host *vha,
  * @vha: SCSI driver HA context
  * @rsp: response queue
  * @pkt: Entry pointer
- * @estatus:
- * @etype:
  */
 static void
 qlafx00_error_entry(scsi_qla_host_t *vha, struct rsp_que *rsp,
-		    struct sts_entry_fx00 *pkt, uint8_t estatus, uint8_t etype)
+		    struct sts_entry_fx00 *pkt)
 {
 	srb_t *sp;
 	struct qla_hw_data *ha = vha->hw;
@@ -2694,9 +2692,6 @@ qlafx00_error_entry(scsi_qla_host_t *vha, struct rsp_que *rsp,
 	uint16_t que = 0;
 	struct req_que *req = NULL;
 	int res = DID_ERROR << 16;
-
-	ql_dbg(ql_dbg_async, vha, 0x507f,
-	    "type of error status in response: 0x%x\n", estatus);
 
 	req = ha->req_q_map[que];
 
@@ -2745,9 +2740,11 @@ qlafx00_process_response_queue(struct scsi_qla_host *vha,
 
 		if (pkt->entry_status != 0 &&
 		    pkt->entry_type != IOCTL_IOSB_TYPE_FX00) {
+			ql_dbg(ql_dbg_async, vha, 0x507f,
+			       "type of error status in response: 0x%x\n",
+			       pkt->entry_status);
 			qlafx00_error_entry(vha, rsp,
-			    (struct sts_entry_fx00 *)pkt, pkt->entry_status,
-			    pkt->entry_type);
+					    (struct sts_entry_fx00 *)pkt);
 			continue;
 		}
 
@@ -2867,7 +2864,7 @@ qlafx00_async_event(scsi_qla_host_t *vha)
 /**
  * qlafx00x_mbx_completion() - Process mailbox command completions.
  * @vha: SCSI driver HA context
- * @mb0:
+ * @mb0: value to be written into mailbox register 0
  */
 static void
 qlafx00_mbx_completion(scsi_qla_host_t *vha, uint32_t mb0)
@@ -2893,7 +2890,7 @@ qlafx00_mbx_completion(scsi_qla_host_t *vha, uint32_t mb0)
 
 /**
  * qlafx00_intr_handler() - Process interrupts for the ISPFX00.
- * @irq:
+ * @irq: interrupt number
  * @dev_id: SCSI driver HA context
  *
  * Called by system whenever the host adapter generates an interrupt.
@@ -3059,13 +3056,13 @@ qlafx00_build_scsi_iocbs(srb_t *sp, struct cmd_type_7_fx00 *cmd_pkt,
 		if (avail_dsds == 0 && cont == 1) {
 			cont = 0;
 			memcpy_toio((void __iomem *)cont_pkt, &lcont_pkt,
-			    REQUEST_ENTRY_SIZE);
+			    sizeof(lcont_pkt));
 		}
 
 	}
 	if (avail_dsds != 0 && cont == 1) {
 		memcpy_toio((void __iomem *)cont_pkt, &lcont_pkt,
-		    REQUEST_ENTRY_SIZE);
+		    sizeof(lcont_pkt));
 	}
 }
 
@@ -3175,9 +3172,9 @@ qlafx00_start_scsi(srb_t *sp)
 	lcmd_pkt.entry_status = (uint8_t) rsp->id;
 
 	ql_dump_buffer(ql_dbg_io + ql_dbg_buffer, vha, 0x302e,
-	    (uint8_t *)cmd->cmnd, cmd->cmd_len);
+	    cmd->cmnd, cmd->cmd_len);
 	ql_dump_buffer(ql_dbg_io + ql_dbg_buffer, vha, 0x3032,
-	    (uint8_t *)&lcmd_pkt, REQUEST_ENTRY_SIZE);
+	    &lcmd_pkt, sizeof(lcmd_pkt));
 
 	memcpy_toio((void __iomem *)cmd_pkt, &lcmd_pkt, REQUEST_ENTRY_SIZE);
 	wmb();
@@ -3457,10 +3454,8 @@ qlafx00_fxdisc_iocb(srb_t *sp, struct fxdisc_entry_fx00 *pfxiocb)
 	}
 
 	ql_dump_buffer(ql_dbg_user + ql_dbg_verbose,
-	    sp->vha, 0x3047,
-	    (uint8_t *)&fx_iocb, sizeof(struct fxdisc_entry_fx00));
+	    sp->vha, 0x3047, &fx_iocb, sizeof(fx_iocb));
 
-	memcpy_toio((void __iomem *)pfxiocb, &fx_iocb,
-	    sizeof(struct fxdisc_entry_fx00));
+	memcpy_toio((void __iomem *)pfxiocb, &fx_iocb, sizeof(fx_iocb));
 	wmb();
 }

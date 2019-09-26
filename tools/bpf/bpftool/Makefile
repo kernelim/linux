@@ -23,10 +23,10 @@ endif
 
 LIBBPF = $(BPF_PATH)libbpf.a
 
-BPFTOOL_VERSION=$(shell make --no-print-directory -sC ../../.. kernelversion)
+BPFTOOL_VERSION := $(shell make --no-print-directory -sC ../../.. kernelversion)
 
 $(LIBBPF): FORCE
-	$(Q)$(MAKE) -C $(BPF_DIR) OUTPUT=$(OUTPUT) $(OUTPUT)libbpf.a FEATURES_DUMP=$(FEATURE_DUMP_EXPORT)
+	$(Q)$(MAKE) -C $(BPF_DIR) OUTPUT=$(OUTPUT) $(OUTPUT)libbpf.a
 
 $(LIBBPF)-clean:
 	$(call QUIET_CLEAN, libbpf)
@@ -34,8 +34,6 @@ $(LIBBPF)-clean:
 
 prefix ?= /usr/local
 bash_compdir ?= /usr/share/bash-completion/completions
-
-CC = gcc
 
 CFLAGS += -O2
 CFLAGS += -W -Wall -Wextra -Wno-unused-parameter -Wshadow -Wno-missing-field-initializers
@@ -53,13 +51,13 @@ ifneq ($(EXTRA_LDFLAGS),)
 LDFLAGS += $(EXTRA_LDFLAGS)
 endif
 
-LIBS = -lelf -lbfd -lopcodes $(LIBBPF)
+LIBS = -lelf $(LIBBPF)
 
 INSTALL ?= install
 RM ?= rm -f
 
 FEATURE_USER = .bpftool
-FEATURE_TESTS = libbfd disassembler-four-args
+FEATURE_TESTS = libbfd disassembler-four-args reallocarray
 FEATURE_DISPLAY = libbfd disassembler-four-args
 
 check_feat := 1
@@ -82,11 +80,31 @@ ifeq ($(feature-disassembler-four-args), 1)
 CFLAGS += -DDISASM_FOUR_ARGS_SIGNATURE
 endif
 
+ifeq ($(feature-reallocarray), 0)
+CFLAGS += -DCOMPAT_NEED_REALLOCARRAY
+endif
+
 include $(wildcard $(OUTPUT)*.d)
 
 all: $(OUTPUT)bpftool
 
-SRCS = $(wildcard *.c)
+BFD_SRCS = jit_disasm.c
+
+SRCS = $(filter-out $(BFD_SRCS),$(wildcard *.c))
+
+ifeq ($(feature-libbfd),1)
+  LIBS += -lbfd -ldl -lopcodes
+else ifeq ($(feature-libbfd-liberty),1)
+  LIBS += -lbfd -ldl -lopcodes -liberty
+else ifeq ($(feature-libbfd-liberty-z),1)
+  LIBS += -lbfd -ldl -lopcodes -liberty -lz
+endif
+
+ifneq ($(filter -lbfd,$(LIBS)),)
+CFLAGS += -DHAVE_LIBBFD_SUPPORT
+SRCS += $(BFD_SRCS)
+endif
+
 OBJS = $(patsubst %.c,$(OUTPUT)%.o,$(SRCS)) $(OUTPUT)disasm.o
 
 $(OUTPUT)disasm.o: $(srctree)/kernel/bpf/disasm.c

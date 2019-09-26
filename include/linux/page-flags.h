@@ -101,6 +101,13 @@ enum pageflags {
 	PG_young,
 	PG_idle,
 #endif
+#ifndef __GENKSYMS__
+	/*
+	 * RHEL8: New page flags should be put here to avoid changing
+	 * kABI signature.
+	 */
+	PG_workingset,
+#endif
 	__NR_PAGEFLAGS,
 
 	/* Filesystems */
@@ -288,6 +295,8 @@ PAGEFLAG(Dirty, dirty, PF_HEAD) TESTSCFLAG(Dirty, dirty, PF_HEAD)
 PAGEFLAG(LRU, lru, PF_HEAD) __CLEARPAGEFLAG(LRU, lru, PF_HEAD)
 PAGEFLAG(Active, active, PF_HEAD) __CLEARPAGEFLAG(Active, active, PF_HEAD)
 	TESTCLEARFLAG(Active, active, PF_HEAD)
+PAGEFLAG(Workingset, workingset, PF_HEAD)
+	TESTCLEARFLAG(Workingset, workingset, PF_HEAD)
 __PAGEFLAG(Slab, slab, PF_NO_TAIL)
 __PAGEFLAG(SlobFree, slob_free, PF_NO_TAIL)
 PAGEFLAG(Checked, checked, PF_NO_COMPOUND)	   /* Used by some filesystems */
@@ -378,8 +387,13 @@ PAGEFLAG_FALSE(Uncached)
 PAGEFLAG(HWPoison, hwpoison, PF_ANY)
 TESTSCFLAG(HWPoison, hwpoison, PF_ANY)
 #define __PG_HWPOISON (1UL << PG_hwpoison)
+extern bool set_hwpoison_free_buddy_page(struct page *page);
 #else
 PAGEFLAG_FALSE(HWPoison)
+static inline bool set_hwpoison_free_buddy_page(struct page *page)
+{
+	return 0;
+}
 #define __PG_HWPOISON 0
 #endif
 
@@ -662,7 +676,7 @@ PAGEFLAG_FALSE(DoubleMap)
 #define PAGE_TYPE_BASE	0xf0000000
 /* Reserve		0x0000007f to catch underflows of page_mapcount */
 #define PG_buddy	0x00000080
-#define PG_balloon	0x00000100
+#define PG_offline	0x00000100
 #define PG_kmemcg	0x00000200
 #define PG_table	0x00000400
 
@@ -692,10 +706,13 @@ static __always_inline void __ClearPage##uname(struct page *page)	\
 PAGE_TYPE_OPS(Buddy, buddy)
 
 /*
- * PageBalloon() is true for pages that are on the balloon page list
- * (see mm/balloon_compaction.c).
+ * PageOffline() indicates that the page is logically offline although the
+ * containing section is online. (e.g. inflated in a balloon driver or
+ * not onlined when onlining the section).
+ * The content of these pages is effectively stale. Such pages should not
+ * be touched (read/write/dump/save) except by their owner.
  */
-PAGE_TYPE_OPS(Balloon, balloon)
+PAGE_TYPE_OPS(Offline, offline)
 
 /*
  * If kmemcg is enabled, the buddy allocator will set PageKmemcg() on

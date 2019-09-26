@@ -16,6 +16,7 @@
 #include <linux/workqueue.h>
 #include <linux/scatterlist.h>
 #include <rdma/ib_verbs.h>
+#include <rdma/ib_cache.h>
 
 #include "smc_pnet.h"
 #include "smc_ib.h"
@@ -144,17 +145,21 @@ out:
 
 static int smc_ib_fill_mac(struct smc_ib_device *smcibdev, u8 ibport)
 {
-	struct ib_gid_attr gattr;
-	union ib_gid gid;
-	int rc;
+	const struct ib_gid_attr *attr;
+	int rc = 0;
 
-	rc = ib_query_gid(smcibdev->ibdev, ibport, 0, &gid, &gattr);
-	if (rc || !gattr.ndev)
+	attr = rdma_get_gid_attr(smcibdev->ibdev, ibport, 0);
+	if (IS_ERR(attr))
 		return -ENODEV;
 
-	memcpy(smcibdev->mac[ibport - 1], gattr.ndev->dev_addr, ETH_ALEN);
-	dev_put(gattr.ndev);
-	return 0;
+	if (attr->ndev)
+		memcpy(smcibdev->mac[ibport - 1], attr->ndev->dev_addr,
+		       ETH_ALEN);
+	else
+		rc = -ENODEV;
+
+	rdma_put_gid_attr(attr);
+	return rc;
 }
 
 /* Create an identifier unique for this instance of SMC-R.
@@ -179,29 +184,27 @@ bool smc_ib_port_active(struct smc_ib_device *smcibdev, u8 ibport)
 int smc_ib_determine_gid(struct smc_ib_device *smcibdev, u8 ibport,
 			 unsigned short vlan_id, u8 gid[], u8 *sgid_index)
 {
-	struct ib_gid_attr gattr;
-	union ib_gid _gid;
+	const struct ib_gid_attr *attr;
 	int i;
 
 	for (i = 0; i < smcibdev->pattr[ibport - 1].gid_tbl_len; i++) {
-		memset(&_gid, 0, SMC_GID_SIZE);
-		memset(&gattr, 0, sizeof(gattr));
-		if (ib_query_gid(smcibdev->ibdev, ibport, i, &_gid, &gattr))
+		attr = rdma_get_gid_attr(smcibdev->ibdev, ibport, i);
+		if (IS_ERR(attr))
 			continue;
-		if (!gattr.ndev)
-			continue;
-		if (((!vlan_id && !is_vlan_dev(gattr.ndev)) ||
-		     (vlan_id && is_vlan_dev(gattr.ndev) &&
-		      vlan_dev_vlan_id(gattr.ndev) == vlan_id)) &&
-		    gattr.gid_type == IB_GID_TYPE_IB) {
+
+		if (attr->ndev &&
+		    ((!vlan_id && !is_vlan_dev(attr->ndev)) ||
+		     (vlan_id && is_vlan_dev(attr->ndev) &&
+		      vlan_dev_vlan_id(attr->ndev) == vlan_id)) &&
+		    attr->gid_type == IB_GID_TYPE_ROCE) {
 			if (gid)
-				memcpy(gid, &_gid, SMC_GID_SIZE);
+				memcpy(gid, &attr->gid, SMC_GID_SIZE);
 			if (sgid_index)
-				*sgid_index = i;
-			dev_put(gattr.ndev);
+				*sgid_index = attr->index;
+			rdma_put_gid_attr(attr);
 			return 0;
 		}
-		dev_put(gattr.ndev);
+		rdma_put_gid_attr(attr);
 	}
 	return -ENODEV;
 }
@@ -254,12 +257,20 @@ static void smc_ib_global_event_handler(struct ib_event_handler *handler,
 	smcibdev = container_of(handler, struct smc_ib_device, event_handler);
 
 	switch (ibevent->event) {
-	case IB_EVENT_PORT_ERR:
 	case IB_EVENT_DEVICE_FATAL:
-	case IB_EVENT_PORT_ACTIVE:
-		port_idx = ibevent->element.port_num - 1;
-		set_bit(port_idx, &smcibdev->port_event_mask);
+		/* terminate all ports on device */
+		for (port_idx = 0; port_idx < SMC_MAX_PORTS; port_idx++)
+			set_bit(port_idx, &smcibdev->port_event_mask);
 		schedule_work(&smcibdev->port_event_work);
+		break;
+	case IB_EVENT_PORT_ERR:
+	case IB_EVENT_PORT_ACTIVE:
+	case IB_EVENT_GID_CHANGE:
+		port_idx = ibevent->element.port_num - 1;
+		if (port_idx < SMC_MAX_PORTS) {
+			set_bit(port_idx, &smcibdev->port_event_mask);
+			schedule_work(&smcibdev->port_event_work);
+		}
 		break;
 	default:
 		break;
@@ -286,18 +297,18 @@ int smc_ib_create_protection_domain(struct smc_link *lnk)
 
 static void smc_ib_qp_event_handler(struct ib_event *ibevent, void *priv)
 {
-	struct smc_ib_device *smcibdev =
-		(struct smc_ib_device *)ibevent->device;
+	struct smc_link *lnk = (struct smc_link *)priv;
+	struct smc_ib_device *smcibdev = lnk->smcibdev;
 	u8 port_idx;
 
 	switch (ibevent->event) {
-	case IB_EVENT_DEVICE_FATAL:
-	case IB_EVENT_GID_CHANGE:
-	case IB_EVENT_PORT_ERR:
+	case IB_EVENT_QP_FATAL:
 	case IB_EVENT_QP_ACCESS_ERR:
-		port_idx = ibevent->element.port_num - 1;
-		set_bit(port_idx, &smcibdev->port_event_mask);
-		schedule_work(&smcibdev->port_event_work);
+		port_idx = ibevent->element.qp->port - 1;
+		if (port_idx < SMC_MAX_PORTS) {
+			set_bit(port_idx, &smcibdev->port_event_mask);
+			schedule_work(&smcibdev->port_event_work);
+		}
 		break;
 	default:
 		break;
@@ -553,7 +564,6 @@ static void smc_ib_remove_dev(struct ib_device *ibdev, void *client_data)
 	spin_lock(&smc_ib_devices.lock);
 	list_del_init(&smcibdev->list); /* remove from smc_ib_devices */
 	spin_unlock(&smc_ib_devices.lock);
-	smc_pnet_remove_by_ibdev(smcibdev);
 	smc_ib_cleanup_per_ibdev(smcibdev);
 	ib_unregister_event_handler(&smcibdev->event_handler);
 	kfree(smcibdev);

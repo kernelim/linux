@@ -515,6 +515,8 @@ static struct notifier_block dlci_notifier = {
 
 static int __init init_dlci(void)
 {
+	mark_driver_unsupported("DLCI");
+
 	dlci_ioctl_set(dlci_ioctl);
 	register_netdevice_notifier(&dlci_notifier);
 

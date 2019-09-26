@@ -1200,8 +1200,6 @@ extern void efi_reboot(enum reboot_mode reboot_mode, const char *__unused);
 
 extern bool efi_is_table_address(unsigned long phys_addr);
 extern void __init efi_set_secure_boot(enum efi_secureboot_mode mode);
-
-extern int efi_apply_persistent_mem_reservations(void);
 #else
 static inline bool efi_enabled(int feature)
 {
@@ -1221,10 +1219,6 @@ static inline bool efi_is_table_address(unsigned long phys_addr)
 	return false;
 }
 
-static inline int efi_apply_persistent_mem_reservations(void)
-{
-	return 0;
-}
 static inline void efi_set_secure_boot(enum efi_secureboot_mode mode) {}
 #endif
 

@@ -4,11 +4,12 @@
  *
  * Handling for IPMI devices on the PCI bus.
  */
+
+#define pr_fmt(fmt) "ipmi_pci: " fmt
+
 #include <linux/module.h>
 #include <linux/pci.h>
 #include "ipmi_si.h"
-
-#define PFX "ipmi_pci: "
 
 static bool pci_registered;
 
@@ -45,8 +46,7 @@ static int ipmi_pci_probe_regspacing(struct si_sm_io *io)
 		for (regspacing = DEFAULT_REGSPACING; regspacing <= 16;) {
 			io->regspacing = regspacing;
 			if (io->io_setup(io)) {
-				dev_err(io->dev,
-					"Could not setup I/O space\n");
+				dev_err(io->dev, "Could not setup I/O space\n");
 				return DEFAULT_REGSPACING;
 			}
 			/* write invalid cmd */
@@ -112,10 +112,10 @@ static int ipmi_pci_probe(struct pci_dev *pdev,
 	io.addr_source_data = pdev;
 
 	if (pci_resource_flags(pdev, 0) & IORESOURCE_IO) {
-		io.addr_type = IPMI_IO_ADDR_SPACE;
+		io.addr_space = IPMI_IO_ADDR_SPACE;
 		io.io_setup = ipmi_si_port_setup;
 	} else {
-		io.addr_type = IPMI_MEM_ADDR_SPACE;
+		io.addr_space = IPMI_MEM_ADDR_SPACE;
 		io.io_setup = ipmi_si_mem_setup;
 	}
 	io.addr_data = pci_resource_start(pdev, 0);
@@ -131,7 +131,7 @@ static int ipmi_pci_probe(struct pci_dev *pdev,
 	io.dev = &pdev->dev;
 
 	dev_info(&pdev->dev, "%pR regsize %d spacing %d irq %d\n",
-		&pdev->resource[0], io.regsize, io.regspacing, io.irq);
+		 &pdev->resource[0], io.regsize, io.regspacing, io.irq);
 
 	rv = ipmi_si_add_smi(&io);
 	if (rv)
@@ -166,7 +166,7 @@ void ipmi_si_pci_init(void)
 	if (si_trypci) {
 		int rv = pci_register_driver(&ipmi_pci_driver);
 		if (rv)
-			pr_err(PFX "Unable to register PCI driver: %d\n", rv);
+			pr_err("Unable to register PCI driver: %d\n", rv);
 		else
 			pci_registered = true;
 	}

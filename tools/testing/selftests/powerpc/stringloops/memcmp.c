@@ -100,5 +100,6 @@ static int testcase(void)
 
 int main(void)
 {
+	test_harness_set_timeout(300);
 	return test_harness(testcase, "memcmp");
 }

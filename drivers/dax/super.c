@@ -72,27 +72,18 @@ struct dax_device *fs_dax_get_by_bdev(struct block_device *bdev)
 EXPORT_SYMBOL_GPL(fs_dax_get_by_bdev);
 #endif
 
-/**
- * __bdev_dax_supported() - Check if the device supports dax for filesystem
- * @bdev: block device to check
- * @blocksize: The block size of the device
- *
- * This is a library function for filesystems to check if the block device
- * can be mounted with dax option.
- *
- * Return: true if supported, false if unsupported
- */
-bool __bdev_dax_supported(struct block_device *bdev, int blocksize)
+bool __generic_fsdax_supported(struct dax_device *dax_dev,
+		struct block_device *bdev, int blocksize, sector_t start,
+		sector_t sectors)
 {
-	struct dax_device *dax_dev;
 	bool dax_enabled = false;
-	struct request_queue *q;
-	pgoff_t pgoff;
-	int err, id;
-	void *kaddr;
-	pfn_t pfn;
-	long len;
+	pgoff_t pgoff, pgoff_end;
 	char buf[BDEVNAME_SIZE];
+	void *kaddr, *end_kaddr;
+	pfn_t pfn, end_pfn;
+	sector_t last_page;
+	long len, len2;
+	int err, id;
 
 	if (blocksize != PAGE_SIZE) {
 		pr_debug("%s: error: unsupported blocksize for dax\n",
@@ -100,36 +91,29 @@ bool __bdev_dax_supported(struct block_device *bdev, int blocksize)
 		return false;
 	}
 
-	q = bdev_get_queue(bdev);
-	if (!q || !blk_queue_dax(q)) {
-		pr_debug("%s: error: request queue doesn't support dax\n",
-				bdevname(bdev, buf));
-		return false;
-	}
-
-	err = bdev_dax_pgoff(bdev, 0, PAGE_SIZE, &pgoff);
+	err = bdev_dax_pgoff(bdev, start, PAGE_SIZE, &pgoff);
 	if (err) {
 		pr_debug("%s: error: unaligned partition for dax\n",
 				bdevname(bdev, buf));
 		return false;
 	}
 
-	dax_dev = dax_get_by_host(bdev->bd_disk->disk_name);
-	if (!dax_dev) {
-		pr_debug("%s: error: device does not support dax\n",
+	last_page = PFN_DOWN((start + sectors - 1) * 512) * PAGE_SIZE / 512;
+	err = bdev_dax_pgoff(bdev, last_page, PAGE_SIZE, &pgoff_end);
+	if (err) {
+		pr_debug("%s: error: unaligned partition for dax\n",
 				bdevname(bdev, buf));
 		return false;
 	}
 
 	id = dax_read_lock();
 	len = dax_direct_access(dax_dev, pgoff, 1, &kaddr, &pfn);
+	len2 = dax_direct_access(dax_dev, pgoff_end, 1, &end_kaddr, &end_pfn);
 	dax_read_unlock(id);
 
-	put_dax(dax_dev);
-
-	if (len < 1) {
+	if (len < 1 || len2 < 1) {
 		pr_debug("%s: error: dax access failed (%ld)\n",
-				bdevname(bdev, buf), len);
+				bdevname(bdev, buf), len < 1 ? len : len2);
 		return false;
 	}
 
@@ -144,13 +128,20 @@ bool __bdev_dax_supported(struct block_device *bdev, int blocksize)
 		 */
 		WARN_ON(IS_ENABLED(CONFIG_ARCH_HAS_PMEM_API));
 		dax_enabled = true;
-	} else if (pfn_t_devmap(pfn)) {
-		struct dev_pagemap *pgmap;
+	} else if (pfn_t_devmap(pfn) && pfn_t_devmap(end_pfn)) {
+		struct dev_pagemap *pgmap, *end_pgmap;
 
 		pgmap = get_dev_pagemap(pfn_t_to_pfn(pfn), NULL);
-		if (pgmap && pgmap->type == MEMORY_DEVICE_FS_DAX)
+		end_pgmap = get_dev_pagemap(pfn_t_to_pfn(end_pfn), NULL);
+		if (pgmap && pgmap == end_pgmap && pgmap->type == MEMORY_DEVICE_FS_DAX
+				&& pfn_t_to_page(pfn)->pgmap == pgmap
+				&& pfn_t_to_page(end_pfn)->pgmap == pgmap
+				&& pfn_t_to_pfn(pfn) == PHYS_PFN(__pa(kaddr))
+				&& pfn_t_to_pfn(end_pfn) == PHYS_PFN(__pa(end_kaddr)))
 			dax_enabled = true;
 		put_dev_pagemap(pgmap);
+		put_dev_pagemap(end_pgmap);
+
 	}
 
 	if (!dax_enabled) {
@@ -159,6 +150,49 @@ bool __bdev_dax_supported(struct block_device *bdev, int blocksize)
 		return false;
 	}
 	return true;
+}
+EXPORT_SYMBOL_GPL(__generic_fsdax_supported);
+
+/**
+ * __bdev_dax_supported() - Check if the device supports dax for filesystem
+ * @bdev: block device to check
+ * @blocksize: The block size of the device
+ *
+ * This is a library function for filesystems to check if the block device
+ * can be mounted with dax option.
+ *
+ * Return: true if supported, false if unsupported
+ */
+bool __bdev_dax_supported(struct block_device *bdev, int blocksize)
+{
+	struct dax_device *dax_dev;
+	struct request_queue *q;
+	char buf[BDEVNAME_SIZE];
+	bool ret;
+	int id;
+
+	q = bdev_get_queue(bdev);
+	if (!q || !blk_queue_dax(q)) {
+		pr_debug("%s: error: request queue doesn't support dax\n",
+				bdevname(bdev, buf));
+		return false;
+	}
+
+	dax_dev = dax_get_by_host(bdev->bd_disk->disk_name);
+	if (!dax_dev) {
+		pr_debug("%s: error: device does not support dax\n",
+				bdevname(bdev, buf));
+		return false;
+	}
+
+	id = dax_read_lock();
+	ret = dax_supported(dax_dev, bdev, blocksize, 0,
+			i_size_read(bdev->bd_inode) / 512);
+	dax_read_unlock(id);
+
+	put_dax(dax_dev);
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(__bdev_dax_supported);
 #endif
@@ -284,6 +318,15 @@ long dax_direct_access(struct dax_device *dax_dev, pgoff_t pgoff, long nr_pages,
 	return min(avail, nr_pages);
 }
 EXPORT_SYMBOL_GPL(dax_direct_access);
+
+bool dax_supported(struct dax_device *dax_dev, struct block_device *bdev,
+		int blocksize, sector_t start, sector_t len)
+{
+	if (!dax_alive(dax_dev))
+		return false;
+
+	return dax_dev->ops->dax_supported(dax_dev, bdev, blocksize, start, len);
+}
 
 size_t dax_copy_from_iter(struct dax_device *dax_dev, pgoff_t pgoff, void *addr,
 		size_t bytes, struct iov_iter *i)

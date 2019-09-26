@@ -52,6 +52,24 @@ enum smc_wr_reg_state {
 	FAILED		/* ib_wr_reg_mr response: failure */
 };
 
+struct smc_rdma_sge {				/* sges for RDMA writes */
+	struct ib_sge		wr_tx_rdma_sge[SMC_IB_MAX_SEND_SGE];
+};
+
+#define SMC_MAX_RDMA_WRITES	2		/* max. # of RDMA writes per
+						 * message send
+						 */
+
+struct smc_rdma_sges {				/* sges per message send */
+	struct smc_rdma_sge	tx_rdma_sge[SMC_MAX_RDMA_WRITES];
+};
+
+struct smc_rdma_wr {				/* work requests per message
+						 * send
+						 */
+	struct ib_rdma_wr	wr_tx_rdma[SMC_MAX_RDMA_WRITES];
+};
+
 struct smc_link {
 	struct smc_ib_device	*smcibdev;	/* ib-device */
 	u8			ibport;		/* port - values 1 | 2 */
@@ -64,6 +82,8 @@ struct smc_link {
 	struct smc_wr_buf	*wr_tx_bufs;	/* WR send payload buffers */
 	struct ib_send_wr	*wr_tx_ibs;	/* WR send meta data */
 	struct ib_sge		*wr_tx_sges;	/* WR send gather meta data */
+	struct smc_rdma_sges	*wr_tx_rdma_sges;/*RDMA WRITE gather meta data*/
+	struct smc_rdma_wr	*wr_tx_rdmas;	/* WR RDMA WRITE */
 	struct smc_wr_tx_pend	*wr_tx_pends;	/* WR send waiting for CQE */
 	/* above four vectors have wr_tx_cnt elements and use the same index */
 	dma_addr_t		wr_tx_dma_addr;	/* DMA address of wr_tx_bufs */
@@ -209,6 +229,24 @@ struct smc_link_group {
 	};
 };
 
+struct smc_clc_msg_local;
+
+struct smc_init_info {
+	u8			is_smcd;
+	unsigned short		vlan_id;
+	int			srv_first_contact;
+	int			cln_first_contact;
+	/* SMC-R */
+	struct smc_clc_msg_local *ib_lcl;
+	struct smc_ib_device	*ib_dev;
+	u8			ib_gid[SMC_GID_SIZE];
+	u8			ib_port;
+	u32			ib_clcqpn;
+	/* SMC-D */
+	u64			ism_gid;
+	struct smcd_dev		*ism_dev;
+};
+
 /* Find the connection associated with the given alert token in the link group.
  * To use rbtrees we have to implement our own search core.
  * Requires @conns_lock
@@ -261,13 +299,10 @@ void smc_sndbuf_sync_sg_for_cpu(struct smc_connection *conn);
 void smc_sndbuf_sync_sg_for_device(struct smc_connection *conn);
 void smc_rmb_sync_sg_for_cpu(struct smc_connection *conn);
 void smc_rmb_sync_sg_for_device(struct smc_connection *conn);
-int smc_vlan_by_tcpsk(struct socket *clcsock, unsigned short *vlan_id);
+int smc_vlan_by_tcpsk(struct socket *clcsock, struct smc_init_info *ini);
 
 void smc_conn_free(struct smc_connection *conn);
-int smc_conn_create(struct smc_sock *smc, bool is_smcd, int srv_first_contact,
-		    struct smc_ib_device *smcibdev, u8 ibport, u32 clcqpn,
-		    struct smc_clc_msg_local *lcl, struct smcd_dev *smcd,
-		    u64 peer_gid);
+int smc_conn_create(struct smc_sock *smc, struct smc_init_info *ini);
 void smcd_conn_free(struct smc_connection *conn);
 void smc_lgr_schedule_free_work_fast(struct smc_link_group *lgr);
 void smc_core_exit(void);

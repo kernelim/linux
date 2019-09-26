@@ -120,6 +120,8 @@ rio_probe1 (struct pci_dev *pdev, const struct pci_device_id *ent)
 	void *ring_space;
 	dma_addr_t ring_dma;
 
+	mark_hardware_unsupported(DRV_NAME);
+
 	if (!version_printed++)
 		printk ("%s", version);
 

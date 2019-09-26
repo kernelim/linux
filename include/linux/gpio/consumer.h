@@ -30,6 +30,7 @@ struct gpio_descs {
 #define GPIOD_FLAGS_BIT_DIR_OUT		BIT(1)
 #define GPIOD_FLAGS_BIT_DIR_VAL		BIT(2)
 #define GPIOD_FLAGS_BIT_OPEN_DRAIN	BIT(3)
+#define GPIOD_FLAGS_BIT_NONEXCLUSIVE	BIT(4)
 
 /**
  * Optional flags that can be passed to one of gpiod_* to configure direction
@@ -145,6 +146,7 @@ int gpiod_is_active_low(const struct gpio_desc *desc);
 int gpiod_cansleep(const struct gpio_desc *desc);
 
 int gpiod_to_irq(const struct gpio_desc *desc);
+void gpiod_set_consumer_name(struct gpio_desc *desc, const char *name);
 
 /* Convert between the old gpio_ and new gpiod_ interfaces */
 struct gpio_desc *gpio_to_desc(unsigned gpio);
@@ -465,6 +467,12 @@ static inline int gpiod_to_irq(const struct gpio_desc *desc)
 	/* GPIO can never have been requested */
 	WARN_ON(1);
 	return -EINVAL;
+}
+
+static inline void gpiod_set_consumer_name(struct gpio_desc *desc, const char *name)
+{
+	/* GPIO can never have been requested */
+	WARN_ON(1);
 }
 
 static inline struct gpio_desc *gpio_to_desc(unsigned gpio)

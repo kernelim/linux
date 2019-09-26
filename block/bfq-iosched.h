@@ -32,6 +32,8 @@
 #define BFQ_DEFAULT_GRP_IOPRIO	0
 #define BFQ_DEFAULT_GRP_CLASS	IOPRIO_CLASS_BE
 
+#define MAX_PID_STR_LENGTH 12
+
 /*
  * Soft real-time applications are extremely more latency sensitive
  * than interactive ones. Over-raise the weight of the former to
@@ -240,6 +242,13 @@ struct bfq_queue {
 	/* next ioprio and ioprio class if a change is in progress */
 	unsigned short new_ioprio, new_ioprio_class;
 
+	/* last total-service-time sample, see bfq_update_inject_limit() */
+	u64 last_serv_time_ns;
+	/* limit for request injection */
+	unsigned int inject_limit;
+	/* last time the inject limit has been decreased, in jiffies */
+	unsigned long decrease_time_jif;
+
 	/*
 	 * Shared bfq_queue if queue is cooperating with one or more
 	 * other queues.
@@ -357,29 +366,6 @@ struct bfq_queue {
 
 	/* max service rate measured so far */
 	u32 max_service_rate;
-	/*
-	 * Ratio between the service received by bfqq while it is in
-	 * service, and the cumulative service (of requests of other
-	 * queues) that may be injected while bfqq is empty but still
-	 * in service. To increase precision, the coefficient is
-	 * measured in tenths of unit. Here are some example of (1)
-	 * ratios, (2) resulting percentages of service injected
-	 * w.r.t. to the total service dispatched while bfqq is in
-	 * service, and (3) corresponding values of the coefficient:
-	 * 1 (50%) -> 10
-	 * 2 (33%) -> 20
-	 * 10 (9%) -> 100
-	 * 9.9 (9%) -> 99
-	 * 1.5 (40%) -> 15
-	 * 0.5 (66%) -> 5
-	 * 0.1 (90%) -> 1
-	 *
-	 * So, if the coefficient is lower than 10, then
-	 * injected service is more than bfqq service.
-	 */
-	unsigned int inject_coeff;
-	/* amount of service injected in current service slot */
-	unsigned int injected_service;
 };
 
 /**
@@ -419,6 +405,15 @@ struct bfq_io_cq {
 	bool was_in_burst_list;
 
 	/*
+	 * Save the weight when a merge occurs, to be able
+	 * to restore it in case of split. If the weight is not
+	 * correctly resumed when the queue is recycled,
+	 * then the weight of the recycled queue could differ
+	 * from the weight of the original queue.
+	 */
+	unsigned int saved_weight;
+
+	/*
 	 * Similar to previous fields: save wr information.
 	 */
 	unsigned long saved_wr_coeff;
@@ -450,7 +445,7 @@ struct bfq_data {
 	 * weight-raised @bfq_queue (see the comments to the functions
 	 * bfq_weights_tree_[add|remove] for further details).
 	 */
-	struct rb_root queue_weights_tree;
+	struct rb_root_cached queue_weights_tree;
 
 	/*
 	 * Number of groups with at least one descendant process that
@@ -501,16 +496,20 @@ struct bfq_data {
 	unsigned int num_groups_with_pending_reqs;
 
 	/*
-	 * Number of bfq_queues containing requests (including the
-	 * queue in service, even if it is idling).
+	 * Per-class (RT, BE, IDLE) number of bfq_queues containing
+	 * requests (including the queue in service, even if it is
+	 * idling).
 	 */
-	int busy_queues;
+	unsigned int busy_queues[3];
 	/* number of weight-raised busy @bfq_queues */
 	int wr_busy_queues;
 	/* number of queued requests */
 	int queued;
 	/* number of requests dispatched and waiting for completion */
 	int rq_in_driver;
+
+	/* true if the device is non rotational and performs queueing */
+	bool nonrot_with_queueing;
 
 	/*
 	 * Maximum number of requests in driver in the last
@@ -537,8 +536,31 @@ struct bfq_data {
 	/* on-disk position of the last served request */
 	sector_t last_position;
 
+	/* position of the last served request for the in-service queue */
+	sector_t in_serv_last_pos;
+
 	/* time of last request completion (ns) */
 	u64 last_completion;
+
+	/* time of last transition from empty to non-empty (ns) */
+	u64 last_empty_occupied_ns;
+
+	/*
+	 * Flag set to activate the sampling of the total service time
+	 * of a just-arrived first I/O request (see
+	 * bfq_update_inject_limit()). This will cause the setting of
+	 * waited_rq when the request is finally dispatched.
+	 */
+	bool wait_dispatch;
+	/*
+	 *  If set, then bfq_update_inject_limit() is invoked when
+	 *  waited_rq is eventually completed.
+	 */
+	struct request *waited_rq;
+	/*
+	 * True if some request has been injected during the last service hole.
+	 */
+	bool rqs_injected;
 
 	/* time of first rq dispatch in current observation interval (ns) */
 	u64 first_dispatch;
@@ -549,6 +571,7 @@ struct bfq_data {
 	ktime_t last_budget_start;
 	/* beginning of the last idle slice */
 	ktime_t last_idling_start;
+	unsigned long last_idling_start_jiffies;
 
 	/* number of samples in current observation interval */
 	int peak_rate_samples;
@@ -894,10 +917,10 @@ void bic_set_bfqq(struct bfq_io_cq *bic, struct bfq_queue *bfqq, bool is_sync);
 struct bfq_data *bic_to_bfqd(struct bfq_io_cq *bic);
 void bfq_pos_tree_add_move(struct bfq_data *bfqd, struct bfq_queue *bfqq);
 void bfq_weights_tree_add(struct bfq_data *bfqd, struct bfq_queue *bfqq,
-			  struct rb_root *root);
+			  struct rb_root_cached *root);
 void __bfq_weights_tree_remove(struct bfq_data *bfqd,
 			       struct bfq_queue *bfqq,
-			       struct rb_root *root);
+			       struct rb_root_cached *root);
 void bfq_weights_tree_remove(struct bfq_data *bfqd,
 			     struct bfq_queue *bfqq);
 void bfq_bfqq_expire(struct bfq_data *bfqd, struct bfq_queue *bfqq,
@@ -974,6 +997,7 @@ extern struct blkcg_policy blkcg_policy_bfq;
 
 struct bfq_group *bfq_bfqq_to_bfqg(struct bfq_queue *bfqq);
 struct bfq_queue *bfq_entity_to_bfqq(struct bfq_entity *entity);
+unsigned int bfq_tot_busy_queues(struct bfq_data *bfqd);
 struct bfq_service_tree *bfq_entity_service_tree(struct bfq_entity *entity);
 struct bfq_entity *bfq_entity_of(struct rb_node *node);
 unsigned short bfq_ioprio_to_weight(int ioprio);
@@ -990,7 +1014,7 @@ bool __bfq_deactivate_entity(struct bfq_entity *entity,
 			     bool ins_into_idle_tree);
 bool next_queue_may_preempt(struct bfq_data *bfqd);
 struct bfq_queue *bfq_get_next_queue(struct bfq_data *bfqd);
-void __bfq_bfqd_reset_in_service(struct bfq_data *bfqd);
+bool __bfq_bfqd_reset_in_service(struct bfq_data *bfqd);
 void bfq_deactivate_bfqq(struct bfq_data *bfqd, struct bfq_queue *bfqq,
 			 bool ins_into_idle_tree, bool expiration);
 void bfq_activate_bfqq(struct bfq_data *bfqd, struct bfq_queue *bfqq);
@@ -1003,13 +1027,23 @@ void bfq_add_bfqq_busy(struct bfq_data *bfqd, struct bfq_queue *bfqq);
 /* --------------- end of interface of B-WF2Q+ ---------------- */
 
 /* Logging facilities. */
+static inline void bfq_pid_to_str(int pid, char *str, int len)
+{
+	if (pid != -1)
+		snprintf(str, len, "%d", pid);
+	else
+		snprintf(str, len, "SHARED-");
+}
+
 #ifdef CONFIG_BFQ_GROUP_IOSCHED
 struct bfq_group *bfqq_group(struct bfq_queue *bfqq);
 
 #define bfq_log_bfqq(bfqd, bfqq, fmt, args...)	do {			\
+	char pid_str[MAX_PID_STR_LENGTH];	\
+	bfq_pid_to_str((bfqq)->pid, pid_str, MAX_PID_STR_LENGTH);	\
 	blk_add_cgroup_trace_msg((bfqd)->queue,				\
 			bfqg_to_blkg(bfqq_group(bfqq))->blkcg,		\
-			"bfq%d%c " fmt, (bfqq)->pid,			\
+			"bfq%s%c " fmt, pid_str,			\
 			bfq_bfqq_sync((bfqq)) ? 'S' : 'A', ##args);	\
 } while (0)
 
@@ -1020,10 +1054,13 @@ struct bfq_group *bfqq_group(struct bfq_queue *bfqq);
 
 #else /* CONFIG_BFQ_GROUP_IOSCHED */
 
-#define bfq_log_bfqq(bfqd, bfqq, fmt, args...)	\
-	blk_add_trace_msg((bfqd)->queue, "bfq%d%c " fmt, (bfqq)->pid,	\
+#define bfq_log_bfqq(bfqd, bfqq, fmt, args...) do {	\
+	char pid_str[MAX_PID_STR_LENGTH];	\
+	bfq_pid_to_str((bfqq)->pid, pid_str, MAX_PID_STR_LENGTH);	\
+	blk_add_trace_msg((bfqd)->queue, "bfq%s%c " fmt, pid_str,	\
 			bfq_bfqq_sync((bfqq)) ? 'S' : 'A',		\
-				##args)
+				##args);	\
+} while (0)
 #define bfq_log_bfqg(bfqd, bfqg, fmt, args...)		do {} while (0)
 
 #endif /* CONFIG_BFQ_GROUP_IOSCHED */

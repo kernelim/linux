@@ -171,11 +171,9 @@ EXPORT_SYMBOL(phy_aneg_done);
  * settings were found.
  */
 static const struct phy_setting *
-phy_find_valid(int speed, int duplex, u32 supported)
+phy_find_valid(int speed, int duplex, unsigned long *supported)
 {
-	unsigned long mask = supported;
-
-	return phy_lookup_setting(speed, duplex, &mask, BITS_PER_LONG, false);
+	return phy_lookup_setting(speed, duplex, supported, false);
 }
 
 /**
@@ -192,9 +190,7 @@ unsigned int phy_supported_speeds(struct phy_device *phy,
 				  unsigned int *speeds,
 				  unsigned int size)
 {
-	unsigned long supported = phy->supported;
-
-	return phy_speeds(speeds, size, &supported, BITS_PER_LONG);
+	return phy_speeds(speeds, size, phy->supported);
 }
 
 /**
@@ -206,11 +202,10 @@ unsigned int phy_supported_speeds(struct phy_device *phy,
  *
  * Description: Returns true if there is a valid setting, false otherwise.
  */
-static inline bool phy_check_valid(int speed, int duplex, u32 features)
+static inline bool phy_check_valid(int speed, int duplex,
+				   unsigned long *features)
 {
-	unsigned long mask = features;
-
-	return !!phy_lookup_setting(speed, duplex, &mask, BITS_PER_LONG, true);
+	return !!phy_lookup_setting(speed, duplex, features, true);
 }
 
 /**
@@ -224,13 +219,13 @@ static inline bool phy_check_valid(int speed, int duplex, u32 features)
 static void phy_sanitize_settings(struct phy_device *phydev)
 {
 	const struct phy_setting *setting;
-	u32 features = phydev->supported;
 
 	/* Sanitize settings based on PHY capabilities */
-	if ((features & SUPPORTED_Autoneg) == 0)
+	if (linkmode_test_bit(ETHTOOL_LINK_MODE_Autoneg_BIT, phydev->supported))
 		phydev->autoneg = AUTONEG_DISABLE;
 
-	setting = phy_find_valid(phydev->speed, phydev->duplex, features);
+	setting = phy_find_valid(phydev->speed, phydev->duplex,
+				 phydev->supported);
 	if (setting) {
 		phydev->speed = setting->speed;
 		phydev->duplex = setting->duplex;
@@ -256,13 +251,15 @@ static void phy_sanitize_settings(struct phy_device *phydev)
  */
 int phy_ethtool_sset(struct phy_device *phydev, struct ethtool_cmd *cmd)
 {
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(advertising);
 	u32 speed = ethtool_cmd_speed(cmd);
 
 	if (cmd->phy_address != phydev->mdio.addr)
 		return -EINVAL;
 
 	/* We make sure that we don't pass unsupported values in to the PHY */
-	cmd->advertising &= phydev->supported;
+	ethtool_convert_legacy_u32_to_link_mode(advertising, cmd->advertising);
+	linkmode_and(advertising, advertising, phydev->supported);
 
 	/* Verify the settings we care about. */
 	if (cmd->autoneg != AUTONEG_ENABLE && cmd->autoneg != AUTONEG_DISABLE)
@@ -283,12 +280,14 @@ int phy_ethtool_sset(struct phy_device *phydev, struct ethtool_cmd *cmd)
 
 	phydev->speed = speed;
 
-	phydev->advertising = cmd->advertising;
+	linkmode_copy(phydev->advertising, advertising);
 
 	if (AUTONEG_ENABLE == cmd->autoneg)
-		phydev->advertising |= ADVERTISED_Autoneg;
+		linkmode_set_bit(ETHTOOL_LINK_MODE_Autoneg_BIT,
+				 phydev->advertising);
 	else
-		phydev->advertising &= ~ADVERTISED_Autoneg;
+		linkmode_clear_bit(ETHTOOL_LINK_MODE_Autoneg_BIT,
+				   phydev->advertising);
 
 	phydev->duplex = cmd->duplex;
 
@@ -304,25 +303,24 @@ EXPORT_SYMBOL(phy_ethtool_sset);
 int phy_ethtool_ksettings_set(struct phy_device *phydev,
 			      const struct ethtool_link_ksettings *cmd)
 {
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(advertising);
 	u8 autoneg = cmd->base.autoneg;
 	u8 duplex = cmd->base.duplex;
 	u32 speed = cmd->base.speed;
-	u32 advertising;
 
 	if (cmd->base.phy_address != phydev->mdio.addr)
 		return -EINVAL;
 
-	ethtool_convert_link_mode_to_legacy_u32(&advertising,
-						cmd->link_modes.advertising);
+	linkmode_copy(advertising, cmd->link_modes.advertising);
 
 	/* We make sure that we don't pass unsupported values in to the PHY */
-	advertising &= phydev->supported;
+	linkmode_and(advertising, advertising, phydev->supported);
 
 	/* Verify the settings we care about. */
 	if (autoneg != AUTONEG_ENABLE && autoneg != AUTONEG_DISABLE)
 		return -EINVAL;
 
-	if (autoneg == AUTONEG_ENABLE && advertising == 0)
+	if (autoneg == AUTONEG_ENABLE && linkmode_empty(advertising))
 		return -EINVAL;
 
 	if (autoneg == AUTONEG_DISABLE &&
@@ -337,12 +335,14 @@ int phy_ethtool_ksettings_set(struct phy_device *phydev,
 
 	phydev->speed = speed;
 
-	phydev->advertising = advertising;
+	linkmode_copy(phydev->advertising, advertising);
 
 	if (autoneg == AUTONEG_ENABLE)
-		phydev->advertising |= ADVERTISED_Autoneg;
+		linkmode_set_bit(ETHTOOL_LINK_MODE_Autoneg_BIT,
+				 phydev->advertising);
 	else
-		phydev->advertising &= ~ADVERTISED_Autoneg;
+		linkmode_clear_bit(ETHTOOL_LINK_MODE_Autoneg_BIT,
+				   phydev->advertising);
 
 	phydev->duplex = duplex;
 
@@ -358,14 +358,9 @@ EXPORT_SYMBOL(phy_ethtool_ksettings_set);
 void phy_ethtool_ksettings_get(struct phy_device *phydev,
 			       struct ethtool_link_ksettings *cmd)
 {
-	ethtool_convert_legacy_u32_to_link_mode(cmd->link_modes.supported,
-						phydev->supported);
-
-	ethtool_convert_legacy_u32_to_link_mode(cmd->link_modes.advertising,
-						phydev->advertising);
-
-	ethtool_convert_legacy_u32_to_link_mode(cmd->link_modes.lp_advertising,
-						phydev->lp_advertising);
+	linkmode_copy(cmd->link_modes.supported, phydev->supported);
+	linkmode_copy(cmd->link_modes.advertising, phydev->advertising);
+	linkmode_copy(cmd->link_modes.lp_advertising, phydev->lp_advertising);
 
 	cmd->base.speed = phydev->speed;
 	cmd->base.duplex = phydev->duplex;
@@ -434,7 +429,8 @@ int phy_mii_ioctl(struct phy_device *phydev, struct ifreq *ifr, int cmd)
 				}
 				break;
 			case MII_ADVERTISE:
-				phydev->advertising = mii_adv_to_ethtool_adv_t(val);
+				mii_adv_mod_linkmode_adv_t(phydev->advertising,
+							   val);
 				change_autoneg = true;
 				break;
 			default:
@@ -467,6 +463,14 @@ int phy_mii_ioctl(struct phy_device *phydev, struct ifreq *ifr, int cmd)
 }
 EXPORT_SYMBOL(phy_mii_ioctl);
 
+static int phy_config_aneg(struct phy_device *phydev)
+{
+	if (phydev->drv->config_aneg)
+		return phydev->drv->config_aneg(phydev);
+	else
+		return genphy_config_aneg(phydev);
+}
+
 /**
  * phy_start_aneg_priv - start auto-negotiation for this PHY device
  * @phydev: the phy_device struct
@@ -491,12 +495,9 @@ static int phy_start_aneg_priv(struct phy_device *phydev, bool sync)
 		phy_sanitize_settings(phydev);
 
 	/* Invalidate LP advertising flags */
-	phydev->lp_advertising = 0;
+	linkmode_zero(phydev->lp_advertising);
 
-	if (phydev->drv->config_aneg)
-		err = phydev->drv->config_aneg(phydev);
-	else
-		err = genphy_config_aneg(phydev);
+	err = phy_config_aneg(phydev);
 	if (err < 0)
 		goto out_unlock;
 
@@ -545,6 +546,117 @@ int phy_start_aneg(struct phy_device *phydev)
 	return phy_start_aneg_priv(phydev, true);
 }
 EXPORT_SYMBOL(phy_start_aneg);
+
+static int phy_poll_aneg_done(struct phy_device *phydev)
+{
+	unsigned int retries = 100;
+	int ret;
+
+	do {
+		msleep(100);
+		ret = phy_aneg_done(phydev);
+	} while (!ret && --retries);
+
+	if (!ret)
+		return -ETIMEDOUT;
+
+	return ret < 0 ? ret : 0;
+}
+
+/**
+ * phy_speed_down - set speed to lowest speed supported by both link partners
+ * @phydev: the phy_device struct
+ * @sync: perform action synchronously
+ *
+ * Description: Typically used to save energy when waiting for a WoL packet
+ *
+ * WARNING: Setting sync to false may cause the system being unable to suspend
+ * in case the PHY generates an interrupt when finishing the autonegotiation.
+ * This interrupt may wake up the system immediately after suspend.
+ * Therefore use sync = false only if you're sure it's safe with the respective
+ * network chip.
+ */
+int phy_speed_down(struct phy_device *phydev, bool sync)
+{
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(adv_old);
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(adv);
+	int ret;
+
+	if (phydev->autoneg != AUTONEG_ENABLE)
+		return 0;
+
+	linkmode_copy(adv_old, phydev->advertising);
+	linkmode_copy(adv, phydev->lp_advertising);
+	linkmode_and(adv, adv, phydev->supported);
+
+	if (linkmode_test_bit(ETHTOOL_LINK_MODE_10baseT_Half_BIT, adv) ||
+	    linkmode_test_bit(ETHTOOL_LINK_MODE_10baseT_Full_BIT, adv)) {
+		linkmode_clear_bit(ETHTOOL_LINK_MODE_100baseT_Half_BIT,
+				   phydev->advertising);
+		linkmode_clear_bit(ETHTOOL_LINK_MODE_100baseT_Full_BIT,
+				   phydev->advertising);
+		linkmode_clear_bit(ETHTOOL_LINK_MODE_1000baseT_Half_BIT,
+				   phydev->advertising);
+		linkmode_clear_bit(ETHTOOL_LINK_MODE_1000baseT_Full_BIT,
+				   phydev->advertising);
+	} else if (linkmode_test_bit(ETHTOOL_LINK_MODE_100baseT_Half_BIT,
+				     adv) ||
+		   linkmode_test_bit(ETHTOOL_LINK_MODE_100baseT_Full_BIT,
+				     adv)) {
+		linkmode_clear_bit(ETHTOOL_LINK_MODE_1000baseT_Half_BIT,
+				   phydev->advertising);
+		linkmode_clear_bit(ETHTOOL_LINK_MODE_1000baseT_Full_BIT,
+				   phydev->advertising);
+	}
+
+	if (linkmode_equal(phydev->advertising, adv_old))
+		return 0;
+
+	ret = phy_config_aneg(phydev);
+	if (ret)
+		return ret;
+
+	return sync ? phy_poll_aneg_done(phydev) : 0;
+}
+EXPORT_SYMBOL_GPL(phy_speed_down);
+
+/**
+ * phy_speed_up - (re)set advertised speeds to all supported speeds
+ * @phydev: the phy_device struct
+ *
+ * Description: Used to revert the effect of phy_speed_down
+ */
+int phy_speed_up(struct phy_device *phydev)
+{
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(all_speeds) = { 0, };
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(not_speeds);
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(supported);
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(adv_old);
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(speeds);
+
+	linkmode_copy(adv_old, phydev->advertising);
+
+	if (phydev->autoneg != AUTONEG_ENABLE)
+		return 0;
+
+	linkmode_set_bit(ETHTOOL_LINK_MODE_10baseT_Half_BIT, all_speeds);
+	linkmode_set_bit(ETHTOOL_LINK_MODE_10baseT_Full_BIT, all_speeds);
+	linkmode_set_bit(ETHTOOL_LINK_MODE_100baseT_Half_BIT, all_speeds);
+	linkmode_set_bit(ETHTOOL_LINK_MODE_100baseT_Full_BIT, all_speeds);
+	linkmode_set_bit(ETHTOOL_LINK_MODE_1000baseT_Half_BIT, all_speeds);
+	linkmode_set_bit(ETHTOOL_LINK_MODE_1000baseT_Full_BIT, all_speeds);
+
+	linkmode_andnot(not_speeds, adv_old, all_speeds);
+	linkmode_copy(supported, phydev->supported);
+	linkmode_and(speeds, supported, all_speeds);
+	linkmode_or(phydev->advertising, not_speeds, speeds);
+
+	if (linkmode_equal(phydev->advertising, adv_old))
+		return 0;
+
+	return phy_config_aneg(phydev);
+}
+EXPORT_SYMBOL_GPL(phy_speed_up);
 
 /**
  * phy_start_machine - start PHY state machine tracking
@@ -1053,6 +1165,30 @@ void phy_mac_interrupt(struct phy_device *phydev)
 }
 EXPORT_SYMBOL(phy_mac_interrupt);
 
+static void mmd_eee_adv_to_linkmode(unsigned long *advertising, u16 eee_adv)
+{
+	linkmode_zero(advertising);
+
+	if (eee_adv & MDIO_EEE_100TX)
+		linkmode_set_bit(ETHTOOL_LINK_MODE_100baseT_Full_BIT,
+				 advertising);
+	if (eee_adv & MDIO_EEE_1000T)
+		linkmode_set_bit(ETHTOOL_LINK_MODE_1000baseT_Full_BIT,
+				 advertising);
+	if (eee_adv & MDIO_EEE_10GT)
+		linkmode_set_bit(ETHTOOL_LINK_MODE_10000baseT_Full_BIT,
+				 advertising);
+	if (eee_adv & MDIO_EEE_1000KX)
+		linkmode_set_bit(ETHTOOL_LINK_MODE_1000baseKX_Full_BIT,
+				 advertising);
+	if (eee_adv & MDIO_EEE_10GKX4)
+		linkmode_set_bit(ETHTOOL_LINK_MODE_10000baseKX4_Full_BIT,
+				 advertising);
+	if (eee_adv & MDIO_EEE_10GKR)
+		linkmode_set_bit(ETHTOOL_LINK_MODE_10000baseKR_Full_BIT,
+				 advertising);
+}
+
 /**
  * phy_init_eee - init and check the EEE feature
  * @phydev: target phy_device struct
@@ -1071,9 +1207,12 @@ int phy_init_eee(struct phy_device *phydev, bool clk_stop_enable)
 	/* According to 802.3az,the EEE is supported only in full duplex-mode.
 	 */
 	if (phydev->duplex == DUPLEX_FULL) {
+		__ETHTOOL_DECLARE_LINK_MODE_MASK(common);
+		__ETHTOOL_DECLARE_LINK_MODE_MASK(lp);
+		__ETHTOOL_DECLARE_LINK_MODE_MASK(adv);
 		int eee_lp, eee_cap, eee_adv;
-		u32 lp, cap, adv;
 		int status;
+		u32 cap;
 
 		/* Read phy status to properly get the right settings */
 		status = phy_read_status(phydev);
@@ -1100,9 +1239,11 @@ int phy_init_eee(struct phy_device *phydev, bool clk_stop_enable)
 		if (eee_adv <= 0)
 			goto eee_exit_err;
 
-		adv = mmd_eee_adv_to_ethtool_adv_t(eee_adv);
-		lp = mmd_eee_adv_to_ethtool_adv_t(eee_lp);
-		if (!phy_check_valid(phydev->speed, phydev->duplex, lp & adv))
+		mmd_eee_adv_to_linkmode(adv, eee_adv);
+		mmd_eee_adv_to_linkmode(lp, eee_lp);
+		linkmode_and(common, adv, lp);
+
+		if (!phy_check_valid(phydev->speed, phydev->duplex, common))
 			goto eee_exit_err;
 
 		if (clk_stop_enable) {

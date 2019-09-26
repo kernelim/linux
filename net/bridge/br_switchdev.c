@@ -14,7 +14,8 @@ static int br_switchdev_mark_get(struct net_bridge *br, struct net_device *dev)
 
 	/* dev is yet to be added to the port list. */
 	list_for_each_entry(p, &br->port_list, list) {
-		if (switchdev_port_same_parent_id(dev, p->dev))
+		if (netdev_port_same_parent_id(dev, p->dev) ||
+		    switchdev_port_same_parent_id(dev, p->dev))
 			return p->offload_fwd_mark;
 	}
 
@@ -23,6 +24,7 @@ static int br_switchdev_mark_get(struct net_bridge *br, struct net_device *dev)
 
 int nbp_switchdev_mark_set(struct net_bridge_port *p)
 {
+	const struct net_device_ops *ops = p->dev->netdev_ops;
 	struct switchdev_attr attr = {
 		.orig_dev = p->dev,
 		.id = SWITCHDEV_ATTR_ID_PORT_PARENT_ID,
@@ -31,7 +33,10 @@ int nbp_switchdev_mark_set(struct net_bridge_port *p)
 
 	ASSERT_RTNL();
 
-	err = switchdev_port_attr_get(p->dev, &attr);
+	if (ops->ndo_get_port_parent_id)
+		err = dev_get_port_parent_id(p->dev, &attr.u.ppid, true);
+	else
+		err = switchdev_port_attr_get(p->dev, &attr);
 	if (err) {
 		if (err == -EOPNOTSUPP)
 			return 0;
@@ -67,21 +72,19 @@ int br_switchdev_set_port_flag(struct net_bridge_port *p,
 {
 	struct switchdev_attr attr = {
 		.orig_dev = p->dev,
-		.id = SWITCHDEV_ATTR_ID_PORT_BRIDGE_FLAGS_SUPPORT,
+		.id = SWITCHDEV_ATTR_ID_PORT_PRE_BRIDGE_FLAGS,
+		.u.brport_flags = mask,
 	};
 	int err;
 
 	if (mask & ~BR_PORT_FLAGS_HW_OFFLOAD)
 		return 0;
 
-	err = switchdev_port_attr_get(p->dev, &attr);
+	err = switchdev_port_attr_set(p->dev, &attr);
 	if (err == -EOPNOTSUPP)
 		return 0;
-	if (err)
-		return err;
 
-	/* Check if specific bridge flag attribute offload is supported */
-	if (!(attr.u.brport_flags_support & mask)) {
+	if (err) {
 		br_warn(p->br, "bridge flag offload is not supported %u(%s)\n",
 			(unsigned int)p->port_no, p->dev->name);
 		return -EOPNOTSUPP;
@@ -90,6 +93,7 @@ int br_switchdev_set_port_flag(struct net_bridge_port *p,
 	attr.id = SWITCHDEV_ATTR_ID_PORT_BRIDGE_FLAGS;
 	attr.flags = SWITCHDEV_F_DEFER;
 	attr.u.brport_flags = flags;
+
 	err = switchdev_port_attr_set(p->dev, &attr);
 	if (err) {
 		br_warn(p->br, "error setting offload flag on port %u(%s)\n",
@@ -103,7 +107,7 @@ int br_switchdev_set_port_flag(struct net_bridge_port *p,
 static void
 br_switchdev_fdb_call_notifiers(bool adding, const unsigned char *mac,
 				u16 vid, struct net_device *dev,
-				bool added_by_user)
+				bool added_by_user, bool offloaded)
 {
 	struct switchdev_notifier_fdb_info info;
 	unsigned long notifier_type;
@@ -111,8 +115,9 @@ br_switchdev_fdb_call_notifiers(bool adding, const unsigned char *mac,
 	info.addr = mac;
 	info.vid = vid;
 	info.added_by_user = added_by_user;
+	info.offloaded = offloaded;
 	notifier_type = adding ? SWITCHDEV_FDB_ADD_TO_DEVICE : SWITCHDEV_FDB_DEL_TO_DEVICE;
-	call_switchdev_notifiers(notifier_type, dev, &info.info);
+	call_switchdev_notifiers(notifier_type, dev, &info.info, NULL);
 }
 
 void
@@ -126,18 +131,21 @@ br_switchdev_fdb_notify(const struct net_bridge_fdb_entry *fdb, int type)
 		br_switchdev_fdb_call_notifiers(false, fdb->key.addr.addr,
 						fdb->key.vlan_id,
 						fdb->dst->dev,
-						fdb->added_by_user);
+						fdb->added_by_user,
+						fdb->offloaded);
 		break;
 	case RTM_NEWNEIGH:
 		br_switchdev_fdb_call_notifiers(true, fdb->key.addr.addr,
 						fdb->key.vlan_id,
 						fdb->dst->dev,
-						fdb->added_by_user);
+						fdb->added_by_user,
+						fdb->offloaded);
 		break;
 	}
 }
 
-int br_switchdev_port_vlan_add(struct net_device *dev, u16 vid, u16 flags)
+int br_switchdev_port_vlan_add(struct net_device *dev, u16 vid, u16 flags,
+			       struct netlink_ext_ack *extack)
 {
 	struct switchdev_obj_port_vlan v = {
 		.obj.orig_dev = dev,
@@ -147,7 +155,7 @@ int br_switchdev_port_vlan_add(struct net_device *dev, u16 vid, u16 flags)
 		.vid_end = vid,
 	};
 
-	return switchdev_port_obj_add(dev, &v.obj);
+	return switchdev_port_obj_add(dev, &v.obj, extack);
 }
 
 int br_switchdev_port_vlan_del(struct net_device *dev, u16 vid)

@@ -8,6 +8,9 @@
 #include <linux/security.h>
 #include <linux/pid.h>
 #include <linux/nsproxy.h>
+#ifndef __GENKSYMS__
+#include <linux/sched/signal.h>
+#endif
 
 /* Well, we should have at least one descriptor open
  * to accept passed FDs 8)

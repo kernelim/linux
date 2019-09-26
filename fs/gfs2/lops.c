@@ -81,7 +81,7 @@ static void maybe_release_space(struct gfs2_bufdata *bd)
 	if (sdp->sd_args.ar_discard)
 		gfs2_rgrp_send_discards(sdp, rgd->rd_data0, bd->bd_bh, bi, 1, NULL);
 	memcpy(bi->bi_clone + bi->bi_offset,
-	       bd->bd_bh->b_data + bi->bi_offset, bi->bi_len);
+	       bd->bd_bh->b_data + bi->bi_offset, bi->bi_bytes);
 	clear_bit(GBF_FULL, &bi->bi_flags);
 	rgd->rd_free_clone = rgd->rd_free;
 	rgd->rd_extfail_pt = rgd->rd_free;
@@ -523,7 +523,7 @@ static void buf_lo_before_scan(struct gfs2_jdesc *jd,
 	jd->jd_replayed_blocks = 0;
 }
 
-static int buf_lo_scan_elements(struct gfs2_jdesc *jd, unsigned int start,
+static int buf_lo_scan_elements(struct gfs2_jdesc *jd, u32 start,
 				struct gfs2_log_descriptor *ld, __be64 *ptr,
 				int pass)
 {
@@ -678,7 +678,7 @@ static void revoke_lo_before_scan(struct gfs2_jdesc *jd,
 	jd->jd_replay_tail = head->lh_tail;
 }
 
-static int revoke_lo_scan_elements(struct gfs2_jdesc *jd, unsigned int start,
+static int revoke_lo_scan_elements(struct gfs2_jdesc *jd, u32 start,
 				   struct gfs2_log_descriptor *ld, __be64 *ptr,
 				   int pass)
 {
@@ -760,7 +760,7 @@ static void databuf_lo_before_commit(struct gfs2_sbd *sdp, struct gfs2_trans *tr
 	gfs2_before_commit(sdp, limit, nbuf, &tr->tr_databuf, 1);
 }
 
-static int databuf_lo_scan_elements(struct gfs2_jdesc *jd, unsigned int start,
+static int databuf_lo_scan_elements(struct gfs2_jdesc *jd, u32 start,
 				    struct gfs2_log_descriptor *ld,
 				    __be64 *ptr, int pass)
 {

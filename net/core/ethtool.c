@@ -27,6 +27,11 @@
 #include <linux/rtnetlink.h>
 #include <linux/sched/signal.h>
 #include <linux/net.h>
+#include <net/devlink.h>
+#ifndef __GENKSYMS__
+#include <net/xdp_sock.h>
+#endif
+#include <net/flow_offload.h>
 
 /*
  * Some useful ethtool_ops methods that're device independent.
@@ -111,6 +116,7 @@ static const char netdev_features_strings[NETDEV_FEATURE_COUNT][ETH_GSTRING_LEN]
 	[NETIF_F_RX_UDP_TUNNEL_PORT_BIT] =	 "rx-udp_tunnel-port-offload",
 	[NETIF_F_HW_TLS_RECORD_BIT] =	"tls-hw-record",
 	[NETIF_F_HW_TLS_TX_BIT] =	 "tls-hw-tx-offload",
+	[NETIF_F_HW_TLS_RX_BIT] =	 "tls-hw-rx-offload",
 };
 
 static const char
@@ -538,6 +544,134 @@ struct ethtool_link_usettings {
 	} link_modes;
 };
 
+/* RHEL: RHEL-8.0 knows only 51 link modes so its bitmaps used
+ * in ethtool_link_ksettings are array of longs with just 1 item.
+ * The RHEL code uses more link modes so the size of fields
+ * supported, advertising and lp_advertising are larger so
+ * the current struct ethtool_link_ksettings cannot be used
+ * for drivers compiled against RHEL-8.0.
+ * We need to declare a compatibility structure that will
+ * be used for these old drivers.
+ */
+#define __ETHTOOL_DECLARE_LINK_MODE_MASK_RH80(name)	\
+	DECLARE_BITMAP(name, __ETHTOOL_LINK_MODE_LAST_RH80 + 1)
+
+struct ethtool_link_ksettings_rh80 {
+	struct ethtool_link_settings base;
+	struct {
+		__ETHTOOL_DECLARE_LINK_MODE_MASK_RH80(supported);
+		__ETHTOOL_DECLARE_LINK_MODE_MASK_RH80(advertising);
+		__ETHTOOL_DECLARE_LINK_MODE_MASK_RH80(lp_advertising);
+	} link_modes;
+};
+
+/* RHEL: Helper function to check whether a driver implements
+ * ethtool_ops->get_link_ksettings() callback or its older
+ * variant used in RHEL-8.0.
+ */
+static inline
+bool __rh_has_get_link_ksettings(struct net_device *dev)
+{
+	return (dev->ethtool_ops->get_link_ksettings ||
+		dev->ethtool_ops->get_link_ksettings_rh80);
+}
+
+/* RHEL: Helper function to check whether a driver implements
+ * ethtool_ops->set_link_ksettings() callback or its older
+ * variant used in RHEL-8.0.
+ */
+static inline
+bool __rh_has_set_link_ksettings(struct net_device *dev)
+{
+	return (dev->ethtool_ops->set_link_ksettings ||
+		dev->ethtool_ops->set_link_ksettings_rh80);
+}
+
+/* RHEL: Helper function to call ethtool_ops->get_link_ksettings()
+ * callback or its older variant used RHEL-8.0 depending on what
+ * the driver implements.
+ *
+ * Newer callback is called directly and link_ksettings parameter
+ * is passed through.
+ * For older callback a temporary storage is used and its content
+ * is then translated for caller.
+ */
+static inline
+int __rh_call_get_link_ksettings(struct net_device *dev,
+				 struct ethtool_link_ksettings *link_ksettings)
+{
+	int err = -ENOTSUPP;
+
+	if (dev->ethtool_ops->get_link_ksettings) {
+		err = dev->ethtool_ops->get_link_ksettings(dev, link_ksettings);
+	} else if (dev->ethtool_ops->get_link_ksettings_rh80) {
+		struct ethtool_link_ksettings_rh80 tmp;
+
+		memset(&tmp, 0, sizeof(tmp));
+		err = dev->ethtool_ops->get_link_ksettings_rh80(dev, &tmp);
+		if (!err) {
+			link_ksettings->base = tmp.base;
+			bitmap_zero(link_ksettings->link_modes.supported,
+				    __ETHTOOL_LINK_MODE_LAST);
+			bitmap_copy(link_ksettings->link_modes.supported,
+				    tmp.link_modes.supported,
+				    __ETHTOOL_LINK_MODE_LAST_RH80);
+			bitmap_zero(link_ksettings->link_modes.advertising,
+				    __ETHTOOL_LINK_MODE_LAST);
+			bitmap_copy(link_ksettings->link_modes.advertising,
+				    tmp.link_modes.advertising,
+				    __ETHTOOL_LINK_MODE_LAST_RH80);
+			bitmap_zero(link_ksettings->link_modes.lp_advertising,
+				    __ETHTOOL_LINK_MODE_LAST);
+			bitmap_copy(link_ksettings->link_modes.lp_advertising,
+				    tmp.link_modes.lp_advertising,
+				    __ETHTOOL_LINK_MODE_LAST_RH80);
+		}
+	}
+
+	return err;
+}
+
+/* RHEL: Helper function to call ethtool_ops->set_link_ksettings()
+ * callback or its older variant used RHEL-8.0 depending on what
+ * the driver implements.
+ *
+ * Newer callback is called directly and link_ksettings parameter
+ * is passed through.
+ * For older callback a temporary storage is used and its content
+ * is filled from input buffer (link modes bitmaps truncated).
+ */
+static inline
+int __rh_call_set_link_ksettings(struct net_device *dev,
+				 const struct ethtool_link_ksettings *link_ksettings)
+{
+	int err = -ENOTSUPP;
+
+	if (dev->ethtool_ops->set_link_ksettings) {
+		err = dev->ethtool_ops->set_link_ksettings(dev, link_ksettings);
+	} else if (dev->ethtool_ops->set_link_ksettings_rh80) {
+		struct ethtool_link_ksettings_rh80 tmp;
+
+		/* Copy only link modes that are known for RHEL-8.0 based
+		 * drivers.
+		 */
+		tmp.base = link_ksettings->base;
+		bitmap_copy(tmp.link_modes.supported,
+			    link_ksettings->link_modes.supported,
+			    __ETHTOOL_LINK_MODE_LAST_RH80);
+		bitmap_copy(tmp.link_modes.advertising,
+			    link_ksettings->link_modes.advertising,
+			    __ETHTOOL_LINK_MODE_LAST_RH80);
+		bitmap_copy(tmp.link_modes.lp_advertising,
+			    link_ksettings->link_modes.lp_advertising,
+			    __ETHTOOL_LINK_MODE_LAST_RH80);
+
+		err = dev->ethtool_ops->set_link_ksettings_rh80(dev, &tmp);
+	}
+
+	return err;
+}
+
 /* Internal kernel helper to query a device ethtool_link_settings.
  *
  * Backward compatibility note: for compatibility with legacy drivers
@@ -556,10 +690,9 @@ int __ethtool_get_link_ksettings(struct net_device *dev,
 
 	ASSERT_RTNL();
 
-	if (dev->ethtool_ops->get_link_ksettings) {
+	if (__rh_has_get_link_ksettings(dev)) {
 		memset(link_ksettings, 0, sizeof(*link_ksettings));
-		return dev->ethtool_ops->get_link_ksettings(dev,
-							    link_ksettings);
+		return __rh_call_get_link_ksettings(dev, link_ksettings);
 	}
 
 	/* driver doesn't support %ethtool_link_ksettings API. revert to
@@ -652,7 +785,7 @@ static int ethtool_get_link_ksettings(struct net_device *dev,
 
 	ASSERT_RTNL();
 
-	if (!dev->ethtool_ops->get_link_ksettings)
+	if (!__rh_has_get_link_ksettings(dev))
 		return -EOPNOTSUPP;
 
 	/* handle bitmap nbits handshake */
@@ -686,7 +819,7 @@ static int ethtool_get_link_ksettings(struct net_device *dev,
 	 */
 
 	memset(&link_ksettings, 0, sizeof(link_ksettings));
-	err = dev->ethtool_ops->get_link_ksettings(dev, &link_ksettings);
+	err = __rh_call_get_link_ksettings(dev, &link_ksettings);
 	if (err < 0)
 		return err;
 
@@ -716,7 +849,7 @@ static int ethtool_set_link_ksettings(struct net_device *dev,
 
 	ASSERT_RTNL();
 
-	if (!dev->ethtool_ops->set_link_ksettings)
+	if (!__rh_has_set_link_ksettings(dev))
 		return -EOPNOTSUPP;
 
 	/* make sure nbits field has expected value */
@@ -740,7 +873,7 @@ static int ethtool_set_link_ksettings(struct net_device *dev,
 	    != link_ksettings.base.link_mode_masks_nwords)
 		return -EINVAL;
 
-	return dev->ethtool_ops->set_link_ksettings(dev, &link_ksettings);
+	return __rh_call_set_link_ksettings(dev, &link_ksettings);
 }
 
 /* Query device for its ethtool_cmd settings.
@@ -759,14 +892,13 @@ static int ethtool_get_settings(struct net_device *dev, void __user *useraddr)
 
 	ASSERT_RTNL();
 
-	if (dev->ethtool_ops->get_link_ksettings) {
+	if (__rh_has_get_link_ksettings(dev)) {
 		/* First, use link_ksettings API if it is supported */
 		int err;
 		struct ethtool_link_ksettings link_ksettings;
 
 		memset(&link_ksettings, 0, sizeof(link_ksettings));
-		err = dev->ethtool_ops->get_link_ksettings(dev,
-							   &link_ksettings);
+		err = __rh_call_get_link_ksettings(dev, &link_ksettings);
 		if (err < 0)
 			return err;
 		convert_link_ksettings_to_legacy_settings(&cmd,
@@ -817,7 +949,7 @@ static int ethtool_set_settings(struct net_device *dev, void __user *useraddr)
 		return -EFAULT;
 
 	/* first, try new %ethtool_link_ksettings API. */
-	if (dev->ethtool_ops->set_link_ksettings) {
+	if (__rh_has_set_link_ksettings(dev)) {
 		struct ethtool_link_ksettings link_ksettings;
 
 		if (!convert_legacy_settings_to_link_ksettings(&link_ksettings,
@@ -827,8 +959,7 @@ static int ethtool_set_settings(struct net_device *dev, void __user *useraddr)
 		link_ksettings.base.cmd = ETHTOOL_SLINKSETTINGS;
 		link_ksettings.base.link_mode_masks_nwords
 			= __ETHTOOL_LINK_MODE_MASK_NU32;
-		return dev->ethtool_ops->set_link_ksettings(dev,
-							    &link_ksettings);
+		return __rh_call_set_link_ksettings(dev, &link_ksettings);
 	}
 
 	/* legacy %ethtool_cmd API */
@@ -879,10 +1010,21 @@ static noinline_for_stack int ethtool_get_drvinfo(struct net_device *dev,
 		if (rc >= 0)
 			info.n_priv_flags = rc;
 	}
-	if (ops->get_regs_len)
-		info.regdump_len = ops->get_regs_len(dev);
+	if (ops->get_regs_len) {
+		int ret = ops->get_regs_len(dev);
+
+		if (ret > 0)
+			info.regdump_len = ret;
+	}
+
 	if (ops->get_eeprom_len)
 		info.eedump_len = ops->get_eeprom_len(dev);
+
+	rtnl_unlock();
+	if (!info.fw_version[0])
+		devlink_compat_running_version(dev, info.fw_version,
+					       sizeof(info.fw_version));
+	rtnl_lock();
 
 	if (copy_to_user(useraddr, &info, sizeof(info)))
 		return -EFAULT;
@@ -1420,6 +1562,9 @@ static int ethtool_get_regs(struct net_device *dev, char __user *useraddr)
 		return -EFAULT;
 
 	reglen = ops->get_regs_len(dev);
+	if (reglen <= 0)
+		return reglen;
+
 	if (regs.len > reglen)
 		regs.len = reglen;
 
@@ -1430,13 +1575,16 @@ static int ethtool_get_regs(struct net_device *dev, char __user *useraddr)
 			return -ENOMEM;
 	}
 
+	if (regs.len < reglen)
+		reglen = regs.len;
+
 	ops->get_regs(dev, &regs, regbuf);
 
 	ret = -EFAULT;
 	if (copy_to_user(useraddr, &regs, sizeof(regs)))
 		goto out;
 	useraddr += offsetof(struct ethtool_regs, data);
-	if (regbuf && copy_to_user(useraddr, regbuf, regs.len))
+	if (copy_to_user(useraddr, regbuf, reglen))
 		goto out;
 	ret = 0;
 
@@ -1742,8 +1890,10 @@ static noinline_for_stack int ethtool_get_channels(struct net_device *dev,
 static noinline_for_stack int ethtool_set_channels(struct net_device *dev,
 						   void __user *useraddr)
 {
-	struct ethtool_channels channels, max = { .cmd = ETHTOOL_GCHANNELS };
+	struct ethtool_channels channels, curr = { .cmd = ETHTOOL_GCHANNELS };
+	u16 from_channel, to_channel;
 	u32 max_rx_in_use = 0;
+	unsigned int i;
 
 	if (!dev->ethtool_ops->set_channels || !dev->ethtool_ops->get_channels)
 		return -EOPNOTSUPP;
@@ -1751,13 +1901,13 @@ static noinline_for_stack int ethtool_set_channels(struct net_device *dev,
 	if (copy_from_user(&channels, useraddr, sizeof(channels)))
 		return -EFAULT;
 
-	dev->ethtool_ops->get_channels(dev, &max);
+	dev->ethtool_ops->get_channels(dev, &curr);
 
 	/* ensure new counts are within the maximums */
-	if ((channels.rx_count > max.max_rx) ||
-	    (channels.tx_count > max.max_tx) ||
-	    (channels.combined_count > max.max_combined) ||
-	    (channels.other_count > max.max_other))
+	if (channels.rx_count > curr.max_rx ||
+	    channels.tx_count > curr.max_tx ||
+	    channels.combined_count > curr.max_combined ||
+	    channels.other_count > curr.max_other)
 		return -EINVAL;
 
 	/* ensure the new Rx count fits within the configured Rx flow
@@ -1766,6 +1916,14 @@ static noinline_for_stack int ethtool_set_channels(struct net_device *dev,
 	    !ethtool_get_max_rxfh_channel(dev, &max_rx_in_use) &&
 	    (channels.combined_count + channels.rx_count) <= max_rx_in_use)
 	    return -EINVAL;
+
+	/* Disabling channels, query zero-copy AF_XDP sockets */
+	from_channel = channels.combined_count +
+		min(channels.rx_count, channels.tx_count);
+	to_channel = curr.combined_count + max(curr.rx_count, curr.tx_count);
+	for (i = from_channel; i < to_channel; i++)
+		if (xdp_get_umem_from_qid(dev, i))
+			return -EINVAL;
 
 	return dev->ethtool_ops->set_channels(dev, &channels);
 }
@@ -2091,11 +2249,17 @@ static noinline_for_stack int ethtool_flash_device(struct net_device *dev,
 
 	if (copy_from_user(&efl, useraddr, sizeof(efl)))
 		return -EFAULT;
-
-	if (!dev->ethtool_ops->flash_device)
-		return -EOPNOTSUPP;
-
 	efl.data[ETHTOOL_FLASH_MAX_FILENAME - 1] = 0;
+
+	if (!dev->ethtool_ops->flash_device) {
+		int ret;
+
+		rtnl_unlock();
+		ret = devlink_compat_flash_update(dev, efl.data);
+		rtnl_lock();
+
+		return ret;
+	}
 
 	return dev->ethtool_ops->flash_device(dev, &efl);
 }
@@ -2627,6 +2791,7 @@ int dev_ethtool(struct net *net, struct ifreq *ifr)
 	case ETHTOOL_GPHYSTATS:
 	case ETHTOOL_GTSO:
 	case ETHTOOL_GPERMADDR:
+	case ETHTOOL_GUFO:
 	case ETHTOOL_GGSO:
 	case ETHTOOL_GGRO:
 	case ETHTOOL_GFLAGS:
@@ -2873,3 +3038,245 @@ int dev_ethtool(struct net *net, struct ifreq *ifr)
 
 	return rc;
 }
+
+struct ethtool_rx_flow_key {
+	struct flow_dissector_key_basic			basic;
+	union {
+		struct flow_dissector_key_ipv4_addrs	ipv4;
+		struct flow_dissector_key_ipv6_addrs	ipv6;
+	};
+	struct flow_dissector_key_ports			tp;
+	struct flow_dissector_key_ip			ip;
+	struct flow_dissector_key_vlan			vlan;
+	struct flow_dissector_key_eth_addrs		eth_addrs;
+} __aligned(BITS_PER_LONG / 8); /* Ensure that we can do comparisons as longs. */
+
+struct ethtool_rx_flow_match {
+	struct flow_dissector		dissector;
+	struct ethtool_rx_flow_key	key;
+	struct ethtool_rx_flow_key	mask;
+};
+
+struct ethtool_rx_flow_rule *
+ethtool_rx_flow_rule_create(const struct ethtool_rx_flow_spec_input *input)
+{
+	const struct ethtool_rx_flow_spec *fs = input->fs;
+	static struct in6_addr zero_addr = {};
+	struct ethtool_rx_flow_match *match;
+	struct ethtool_rx_flow_rule *flow;
+	struct flow_action_entry *act;
+
+	flow = kzalloc(sizeof(struct ethtool_rx_flow_rule) +
+		       sizeof(struct ethtool_rx_flow_match), GFP_KERNEL);
+	if (!flow)
+		return ERR_PTR(-ENOMEM);
+
+	/* ethtool_rx supports only one single action per rule. */
+	flow->rule = flow_rule_alloc(1);
+	if (!flow->rule) {
+		kfree(flow);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	match = (struct ethtool_rx_flow_match *)flow->priv;
+	flow->rule->match.dissector	= &match->dissector;
+	flow->rule->match.mask		= &match->mask;
+	flow->rule->match.key		= &match->key;
+
+	match->mask.basic.n_proto = htons(0xffff);
+
+	switch (fs->flow_type & ~(FLOW_EXT | FLOW_MAC_EXT | FLOW_RSS)) {
+	case TCP_V4_FLOW:
+	case UDP_V4_FLOW: {
+		const struct ethtool_tcpip4_spec *v4_spec, *v4_m_spec;
+
+		match->key.basic.n_proto = htons(ETH_P_IP);
+
+		v4_spec = &fs->h_u.tcp_ip4_spec;
+		v4_m_spec = &fs->m_u.tcp_ip4_spec;
+
+		if (v4_m_spec->ip4src) {
+			match->key.ipv4.src = v4_spec->ip4src;
+			match->mask.ipv4.src = v4_m_spec->ip4src;
+		}
+		if (v4_m_spec->ip4dst) {
+			match->key.ipv4.dst = v4_spec->ip4dst;
+			match->mask.ipv4.dst = v4_m_spec->ip4dst;
+		}
+		if (v4_m_spec->ip4src ||
+		    v4_m_spec->ip4dst) {
+			match->dissector.used_keys |=
+				BIT(FLOW_DISSECTOR_KEY_IPV4_ADDRS);
+			match->dissector.offset[FLOW_DISSECTOR_KEY_IPV4_ADDRS] =
+				offsetof(struct ethtool_rx_flow_key, ipv4);
+		}
+		if (v4_m_spec->psrc) {
+			match->key.tp.src = v4_spec->psrc;
+			match->mask.tp.src = v4_m_spec->psrc;
+		}
+		if (v4_m_spec->pdst) {
+			match->key.tp.dst = v4_spec->pdst;
+			match->mask.tp.dst = v4_m_spec->pdst;
+		}
+		if (v4_m_spec->psrc ||
+		    v4_m_spec->pdst) {
+			match->dissector.used_keys |=
+				BIT(FLOW_DISSECTOR_KEY_PORTS);
+			match->dissector.offset[FLOW_DISSECTOR_KEY_PORTS] =
+				offsetof(struct ethtool_rx_flow_key, tp);
+		}
+		if (v4_m_spec->tos) {
+			match->key.ip.tos = v4_spec->tos;
+			match->mask.ip.tos = v4_m_spec->tos;
+			match->dissector.used_keys |=
+				BIT(FLOW_DISSECTOR_KEY_IP);
+			match->dissector.offset[FLOW_DISSECTOR_KEY_IP] =
+				offsetof(struct ethtool_rx_flow_key, ip);
+		}
+		}
+		break;
+	case TCP_V6_FLOW:
+	case UDP_V6_FLOW: {
+		const struct ethtool_tcpip6_spec *v6_spec, *v6_m_spec;
+
+		match->key.basic.n_proto = htons(ETH_P_IPV6);
+
+		v6_spec = &fs->h_u.tcp_ip6_spec;
+		v6_m_spec = &fs->m_u.tcp_ip6_spec;
+		if (memcmp(v6_m_spec->ip6src, &zero_addr, sizeof(zero_addr))) {
+			memcpy(&match->key.ipv6.src, v6_spec->ip6src,
+			       sizeof(match->key.ipv6.src));
+			memcpy(&match->mask.ipv6.src, v6_m_spec->ip6src,
+			       sizeof(match->mask.ipv6.src));
+		}
+		if (memcmp(v6_m_spec->ip6dst, &zero_addr, sizeof(zero_addr))) {
+			memcpy(&match->key.ipv6.dst, v6_spec->ip6dst,
+			       sizeof(match->key.ipv6.dst));
+			memcpy(&match->mask.ipv6.dst, v6_m_spec->ip6dst,
+			       sizeof(match->mask.ipv6.dst));
+		}
+		if (memcmp(v6_m_spec->ip6src, &zero_addr, sizeof(zero_addr)) ||
+		    memcmp(v6_m_spec->ip6src, &zero_addr, sizeof(zero_addr))) {
+			match->dissector.used_keys |=
+				BIT(FLOW_DISSECTOR_KEY_IPV6_ADDRS);
+			match->dissector.offset[FLOW_DISSECTOR_KEY_IPV6_ADDRS] =
+				offsetof(struct ethtool_rx_flow_key, ipv6);
+		}
+		if (v6_m_spec->psrc) {
+			match->key.tp.src = v6_spec->psrc;
+			match->mask.tp.src = v6_m_spec->psrc;
+		}
+		if (v6_m_spec->pdst) {
+			match->key.tp.dst = v6_spec->pdst;
+			match->mask.tp.dst = v6_m_spec->pdst;
+		}
+		if (v6_m_spec->psrc ||
+		    v6_m_spec->pdst) {
+			match->dissector.used_keys |=
+				BIT(FLOW_DISSECTOR_KEY_PORTS);
+			match->dissector.offset[FLOW_DISSECTOR_KEY_PORTS] =
+				offsetof(struct ethtool_rx_flow_key, tp);
+		}
+		if (v6_m_spec->tclass) {
+			match->key.ip.tos = v6_spec->tclass;
+			match->mask.ip.tos = v6_m_spec->tclass;
+			match->dissector.used_keys |=
+				BIT(FLOW_DISSECTOR_KEY_IP);
+			match->dissector.offset[FLOW_DISSECTOR_KEY_IP] =
+				offsetof(struct ethtool_rx_flow_key, ip);
+		}
+		}
+		break;
+	default:
+		ethtool_rx_flow_rule_destroy(flow);
+		return ERR_PTR(-EINVAL);
+	}
+
+	switch (fs->flow_type & ~(FLOW_EXT | FLOW_MAC_EXT | FLOW_RSS)) {
+	case TCP_V4_FLOW:
+	case TCP_V6_FLOW:
+		match->key.basic.ip_proto = IPPROTO_TCP;
+		break;
+	case UDP_V4_FLOW:
+	case UDP_V6_FLOW:
+		match->key.basic.ip_proto = IPPROTO_UDP;
+		break;
+	}
+	match->mask.basic.ip_proto = 0xff;
+
+	match->dissector.used_keys |= BIT(FLOW_DISSECTOR_KEY_BASIC);
+	match->dissector.offset[FLOW_DISSECTOR_KEY_BASIC] =
+		offsetof(struct ethtool_rx_flow_key, basic);
+
+	if (fs->flow_type & FLOW_EXT) {
+		const struct ethtool_flow_ext *ext_h_spec = &fs->h_ext;
+		const struct ethtool_flow_ext *ext_m_spec = &fs->m_ext;
+
+		if (ext_m_spec->vlan_etype) {
+			match->key.vlan.vlan_tpid = ext_h_spec->vlan_etype;
+			match->mask.vlan.vlan_tpid = ext_m_spec->vlan_etype;
+		}
+
+		if (ext_m_spec->vlan_tci) {
+			match->key.vlan.vlan_id =
+				ntohs(ext_h_spec->vlan_tci) & 0x0fff;
+			match->mask.vlan.vlan_id =
+				ntohs(ext_m_spec->vlan_tci) & 0x0fff;
+
+			match->key.vlan.vlan_priority =
+				(ntohs(ext_h_spec->vlan_tci) & 0xe000) >> 13;
+			match->mask.vlan.vlan_priority =
+				(ntohs(ext_m_spec->vlan_tci) & 0xe000) >> 13;
+		}
+
+		if (ext_m_spec->vlan_etype ||
+		    ext_m_spec->vlan_tci) {
+			match->dissector.used_keys |=
+				BIT(FLOW_DISSECTOR_KEY_VLAN);
+			match->dissector.offset[FLOW_DISSECTOR_KEY_VLAN] =
+				offsetof(struct ethtool_rx_flow_key, vlan);
+		}
+	}
+	if (fs->flow_type & FLOW_MAC_EXT) {
+		const struct ethtool_flow_ext *ext_h_spec = &fs->h_ext;
+		const struct ethtool_flow_ext *ext_m_spec = &fs->m_ext;
+
+		memcpy(match->key.eth_addrs.dst, ext_h_spec->h_dest,
+		       ETH_ALEN);
+		memcpy(match->mask.eth_addrs.dst, ext_m_spec->h_dest,
+		       ETH_ALEN);
+
+		match->dissector.used_keys |=
+			BIT(FLOW_DISSECTOR_KEY_ETH_ADDRS);
+		match->dissector.offset[FLOW_DISSECTOR_KEY_ETH_ADDRS] =
+			offsetof(struct ethtool_rx_flow_key, eth_addrs);
+	}
+
+	act = &flow->rule->action.entries[0];
+	switch (fs->ring_cookie) {
+	case RX_CLS_FLOW_DISC:
+		act->id = FLOW_ACTION_DROP;
+		break;
+	case RX_CLS_FLOW_WAKE:
+		act->id = FLOW_ACTION_WAKE;
+		break;
+	default:
+		act->id = FLOW_ACTION_QUEUE;
+		if (fs->flow_type & FLOW_RSS)
+			act->queue.ctx = input->rss_ctx;
+
+		act->queue.vf = ethtool_get_flow_spec_ring_vf(fs->ring_cookie);
+		act->queue.index = ethtool_get_flow_spec_ring(fs->ring_cookie);
+		break;
+	}
+
+	return flow;
+}
+EXPORT_SYMBOL(ethtool_rx_flow_rule_create);
+
+void ethtool_rx_flow_rule_destroy(struct ethtool_rx_flow_rule *flow)
+{
+	kfree(flow->rule);
+	kfree(flow);
+}
+EXPORT_SYMBOL(ethtool_rx_flow_rule_destroy);

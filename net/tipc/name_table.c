@@ -735,7 +735,7 @@ int tipc_nametbl_init(struct net *net)
 	struct name_table *nt;
 	int i;
 
-	nt = kzalloc(sizeof(*nt), GFP_ATOMIC);
+	nt = kzalloc(sizeof(*nt), GFP_KERNEL);
 	if (!nt)
 		return -ENOMEM;
 
@@ -909,7 +909,8 @@ static int tipc_nl_service_list(struct net *net, struct tipc_nl_msg *msg,
 	for (; i < TIPC_NAMETBL_SIZE; i++) {
 		head = &tn->nametbl->services[i];
 
-		if (*last_type) {
+		if (*last_type ||
+		    (!i && *last_key && (*last_lower == *last_key))) {
 			service = tipc_service_find(net, *last_type);
 			if (!service)
 				return -EPIPE;

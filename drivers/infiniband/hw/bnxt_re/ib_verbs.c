@@ -365,8 +365,7 @@ int bnxt_re_del_gid(const struct ib_gid_attr *attr, void **context)
 	return rc;
 }
 
-int bnxt_re_add_gid(const union ib_gid *gid,
-		    const struct ib_gid_attr *attr, void **context)
+int bnxt_re_add_gid(const struct ib_gid_attr *attr, void **context)
 {
 	int rc;
 	u32 tbl_idx = 0;
@@ -378,7 +377,7 @@ int bnxt_re_add_gid(const union ib_gid *gid,
 	if ((attr->ndev) && is_vlan_dev(attr->ndev))
 		vlan_id = vlan_dev_vlan_id(attr->ndev);
 
-	rc = bnxt_qplib_add_sgid(sgid_tbl, (struct bnxt_qplib_gid *)gid,
+	rc = bnxt_qplib_add_sgid(sgid_tbl, (struct bnxt_qplib_gid *)&attr->gid,
 				 rdev->qplib_res.netdev->dev_addr,
 				 vlan_id, true, &tbl_idx);
 	if (rc == -EALREADY) {
@@ -648,13 +647,14 @@ fail:
 }
 
 /* Address Handles */
-int bnxt_re_destroy_ah(struct ib_ah *ib_ah)
+int bnxt_re_destroy_ah(struct ib_ah *ib_ah, u32 flags)
 {
 	struct bnxt_re_ah *ah = container_of(ib_ah, struct bnxt_re_ah, ib_ah);
 	struct bnxt_re_dev *rdev = ah->rdev;
 	int rc;
 
-	rc = bnxt_qplib_destroy_ah(&rdev->qplib_res, &ah->qplib_ah);
+	rc = bnxt_qplib_destroy_ah(&rdev->qplib_res, &ah->qplib_ah,
+				   !(flags & RDMA_DESTROY_AH_SLEEPABLE));
 	if (rc) {
 		dev_err(rdev_to_dev(rdev), "Failed to destroy HW AH");
 		return rc;
@@ -663,18 +663,36 @@ int bnxt_re_destroy_ah(struct ib_ah *ib_ah)
 	return 0;
 }
 
+static u8 bnxt_re_stack_to_dev_nw_type(enum rdma_network_type ntype)
+{
+	u8 nw_type;
+
+	switch (ntype) {
+	case RDMA_NETWORK_IPV4:
+		nw_type = CMDQ_CREATE_AH_TYPE_V2IPV4;
+		break;
+	case RDMA_NETWORK_IPV6:
+		nw_type = CMDQ_CREATE_AH_TYPE_V2IPV6;
+		break;
+	default:
+		nw_type = CMDQ_CREATE_AH_TYPE_V1;
+		break;
+	}
+	return nw_type;
+}
+
 struct ib_ah *bnxt_re_create_ah(struct ib_pd *ib_pd,
 				struct rdma_ah_attr *ah_attr,
+				u32 flags,
 				struct ib_udata *udata)
 {
 	struct bnxt_re_pd *pd = container_of(ib_pd, struct bnxt_re_pd, ib_pd);
-	struct bnxt_re_dev *rdev = pd->rdev;
-	struct bnxt_re_ah *ah;
 	const struct ib_global_route *grh = rdma_ah_read_grh(ah_attr);
-	int rc;
+	struct bnxt_re_dev *rdev = pd->rdev;
+	const struct ib_gid_attr *sgid_attr;
+	struct bnxt_re_ah *ah;
 	u8 nw_type;
-
-	struct ib_gid_attr sgid_attr;
+	int rc;
 
 	if (!(rdma_ah_get_ah_flags(ah_attr) & IB_AH_GRH)) {
 		dev_err(rdev_to_dev(rdev), "Failed to alloc AH: GRH not set");
@@ -701,47 +719,22 @@ struct ib_ah *bnxt_re_create_ah(struct ib_pd *ib_pd,
 	ah->qplib_ah.flow_label = grh->flow_label;
 	ah->qplib_ah.hop_limit = grh->hop_limit;
 	ah->qplib_ah.sl = rdma_ah_get_sl(ah_attr);
-	if (ib_pd->uobject &&
-	    !rdma_is_multicast_addr((struct in6_addr *)
-				    grh->dgid.raw) &&
-	    !rdma_link_local_addr((struct in6_addr *)
-				  grh->dgid.raw)) {
-		union ib_gid sgid;
 
-		rc = ib_get_cached_gid(&rdev->ibdev, 1,
-				       grh->sgid_index, &sgid,
-				       &sgid_attr);
-		if (rc) {
-			dev_err(rdev_to_dev(rdev),
-				"Failed to query gid at index %d",
-				grh->sgid_index);
-			goto fail;
-		}
-		dev_put(sgid_attr.ndev);
-		/* Get network header type for this GID */
-		nw_type = ib_gid_to_network_type(sgid_attr.gid_type, &sgid);
-		switch (nw_type) {
-		case RDMA_NETWORK_IPV4:
-			ah->qplib_ah.nw_type = CMDQ_CREATE_AH_TYPE_V2IPV4;
-			break;
-		case RDMA_NETWORK_IPV6:
-			ah->qplib_ah.nw_type = CMDQ_CREATE_AH_TYPE_V2IPV6;
-			break;
-		default:
-			ah->qplib_ah.nw_type = CMDQ_CREATE_AH_TYPE_V1;
-			break;
-		}
-	}
+	sgid_attr = grh->sgid_attr;
+	/* Get network header type for this GID */
+	nw_type = rdma_gid_attr_network_type(sgid_attr);
+	ah->qplib_ah.nw_type = bnxt_re_stack_to_dev_nw_type(nw_type);
 
 	memcpy(ah->qplib_ah.dmac, ah_attr->roce.dmac, ETH_ALEN);
-	rc = bnxt_qplib_create_ah(&rdev->qplib_res, &ah->qplib_ah);
+	rc = bnxt_qplib_create_ah(&rdev->qplib_res, &ah->qplib_ah,
+				  !(flags & RDMA_CREATE_AH_SLEEPABLE));
 	if (rc) {
 		dev_err(rdev_to_dev(rdev), "Failed to allocate HW AH");
 		goto fail;
 	}
 
 	/* Write AVID to shared page. */
-	if (ib_pd->uobject) {
+	if (udata) {
 		struct ib_ucontext *ib_uctx = ib_pd->uobject->context;
 		struct bnxt_re_ucontext *uctx;
 		unsigned long flag;
@@ -830,7 +823,7 @@ int bnxt_re_destroy_qp(struct ib_qp *ib_qp)
 
 	if (ib_qp->qp_type == IB_QPT_GSI && rdev->qp1_sqp) {
 		rc = bnxt_qplib_destroy_ah(&rdev->qplib_res,
-					   &rdev->sqp_ah->qplib_ah);
+					   &rdev->sqp_ah->qplib_ah, false);
 		if (rc) {
 			dev_err(rdev_to_dev(rdev),
 				"Failed to destroy HW AH for shadow QP");
@@ -891,7 +884,7 @@ static int bnxt_re_init_user_qp(struct bnxt_re_dev *rdev, struct bnxt_re_pd *pd,
 	struct bnxt_re_qp_req ureq;
 	struct bnxt_qplib_qp *qplib_qp = &qp->qplib_qp;
 	struct ib_umem *umem;
-	int bytes = 0;
+	int bytes = 0, psn_sz;
 	struct ib_ucontext *context = pd->ib_pd.uobject->context;
 	struct bnxt_re_ucontext *cntx = container_of(context,
 						     struct bnxt_re_ucontext,
@@ -901,8 +894,12 @@ static int bnxt_re_init_user_qp(struct bnxt_re_dev *rdev, struct bnxt_re_pd *pd,
 
 	bytes = (qplib_qp->sq.max_wqe * BNXT_QPLIB_MAX_SQE_ENTRY_SIZE);
 	/* Consider mapping PSN search memory only for RC QPs. */
-	if (qplib_qp->type == CMDQ_CREATE_QP_TYPE_RC)
-		bytes += (qplib_qp->sq.max_wqe * sizeof(struct sq_psn_search));
+	if (qplib_qp->type == CMDQ_CREATE_QP_TYPE_RC) {
+		psn_sz = bnxt_qplib_is_chip_gen_p5(&rdev->chip_ctx) ?
+					sizeof(struct sq_psn_search_ext) :
+					sizeof(struct sq_psn_search);
+		bytes += (qplib_qp->sq.max_wqe * psn_sz);
+	}
 	bytes = PAGE_ALIGN(bytes);
 	umem = ib_umem_get(context, ureq.qpsva, bytes,
 			   IB_ACCESS_LOCAL_WRITE, 1);
@@ -970,7 +967,7 @@ static struct bnxt_re_ah *bnxt_re_create_shadow_qp_ah
 	/* Have DMAC same as SMAC */
 	ether_addr_copy(ah->qplib_ah.dmac, rdev->netdev->dev_addr);
 
-	rc = bnxt_qplib_create_ah(&rdev->qplib_res, &ah->qplib_ah);
+	rc = bnxt_qplib_create_ah(&rdev->qplib_res, &ah->qplib_ah, false);
 	if (rc) {
 		dev_err(rdev_to_dev(rdev),
 			"Failed to allocate HW AH for Shadow QP");
@@ -1075,12 +1072,17 @@ struct ib_qp *bnxt_re_create_qp(struct ib_pd *ib_pd,
 	qp->qplib_qp.pd = &pd->qplib_pd;
 	qp->qplib_qp.qp_handle = (u64)(unsigned long)(&qp->qplib_qp);
 	qp->qplib_qp.type = __from_ib_qp_type(qp_init_attr->qp_type);
+
+	if (qp_init_attr->qp_type == IB_QPT_GSI &&
+	    bnxt_qplib_is_chip_gen_p5(&rdev->chip_ctx))
+		qp->qplib_qp.type = CMDQ_CREATE_QP_TYPE_GSI;
 	if (qp->qplib_qp.type == IB_QPT_MAX) {
 		dev_err(rdev_to_dev(rdev), "QP type 0x%x not supported",
 			qp->qplib_qp.type);
 		rc = -EINVAL;
 		goto fail;
 	}
+
 	qp->qplib_qp.max_inline_data = qp_init_attr->cap.max_inline_data;
 	qp->qplib_qp.sig_type = ((qp_init_attr->sq_sig_type ==
 				  IB_SIGNAL_ALL_WR) ? true : false);
@@ -1141,7 +1143,8 @@ struct ib_qp *bnxt_re_create_qp(struct ib_pd *ib_pd,
 
 	qp->qplib_qp.mtu = ib_mtu_enum_to_int(iboe_get_mtu(rdev->netdev->mtu));
 
-	if (qp_init_attr->qp_type == IB_QPT_GSI) {
+	if (qp_init_attr->qp_type == IB_QPT_GSI &&
+	    !(bnxt_qplib_is_chip_gen_p5(&rdev->chip_ctx))) {
 		/* Allocate 1 more than what's provided */
 		entries = roundup_pow_of_two(qp_init_attr->cap.max_send_wr + 1);
 		qp->qplib_qp.sq.max_wqe = min_t(u32, entries,
@@ -1411,7 +1414,7 @@ struct ib_srq *bnxt_re_create_srq(struct ib_pd *ib_pd,
 	}
 
 	if (srq_init_attr->srq_type != IB_SRQT_BASIC) {
-		rc = -ENOTSUPP;
+		rc = -EOPNOTSUPP;
 		goto exit;
 	}
 
@@ -1533,8 +1536,8 @@ int bnxt_re_query_srq(struct ib_srq *ib_srq, struct ib_srq_attr *srq_attr)
 	return 0;
 }
 
-int bnxt_re_post_srq_recv(struct ib_srq *ib_srq, struct ib_recv_wr *wr,
-			  struct ib_recv_wr **bad_wr)
+int bnxt_re_post_srq_recv(struct ib_srq *ib_srq, const struct ib_recv_wr *wr,
+			  const struct ib_recv_wr **bad_wr)
 {
 	struct bnxt_re_srq *srq = container_of(ib_srq, struct bnxt_re_srq,
 					       ib_srq);
@@ -1602,9 +1605,6 @@ int bnxt_re_modify_qp(struct ib_qp *ib_qp, struct ib_qp_attr *qp_attr,
 	struct bnxt_qplib_dev_attr *dev_attr = &rdev->dev_attr;
 	enum ib_qp_state curr_qp_state, new_qp_state;
 	int rc, entries;
-	int status;
-	union ib_gid sgid;
-	struct ib_gid_attr sgid_attr;
 	unsigned int flags;
 	u8 nw_type;
 
@@ -1613,8 +1613,7 @@ int bnxt_re_modify_qp(struct ib_qp *ib_qp, struct ib_qp_attr *qp_attr,
 		curr_qp_state = __to_ib_qp_state(qp->qplib_qp.cur_qp_state);
 		new_qp_state = qp_attr->qp_state;
 		if (!ib_modify_qp_is_ok(curr_qp_state, new_qp_state,
-					ib_qp->qp_type, qp_attr_mask,
-					IB_LINK_LAYER_ETHERNET)) {
+					ib_qp->qp_type, qp_attr_mask)) {
 			dev_err(rdev_to_dev(rdev),
 				"Invalid attribute mask: %#x specified ",
 				qp_attr_mask);
@@ -1659,6 +1658,9 @@ int bnxt_re_modify_qp(struct ib_qp *ib_qp, struct ib_qp_attr *qp_attr,
 			__from_ib_access_flags(qp_attr->qp_access_flags);
 		/* LOCAL_WRITE access must be set to allow RC receive */
 		qp->qplib_qp.access |= BNXT_QPLIB_ACCESS_LOCAL_WRITE;
+		/* Temp: Set all params on QP as of now */
+		qp->qplib_qp.access |= CMDQ_MODIFY_QP_ACCESS_REMOTE_WRITE;
+		qp->qplib_qp.access |= CMDQ_MODIFY_QP_ACCESS_REMOTE_READ;
 	}
 	if (qp_attr_mask & IB_QP_PKEY_INDEX) {
 		qp->qplib_qp.modify_flags |= CMDQ_MODIFY_QP_MODIFY_MASK_PKEY;
@@ -1671,6 +1673,7 @@ int bnxt_re_modify_qp(struct ib_qp *ib_qp, struct ib_qp_attr *qp_attr,
 	if (qp_attr_mask & IB_QP_AV) {
 		const struct ib_global_route *grh =
 			rdma_ah_read_grh(&qp_attr->ah_attr);
+		const struct ib_gid_attr *sgid_attr;
 
 		qp->qplib_qp.modify_flags |= CMDQ_MODIFY_QP_MODIFY_MASK_DGID |
 				     CMDQ_MODIFY_QP_MODIFY_MASK_FLOW_LABEL |
@@ -1694,29 +1697,23 @@ int bnxt_re_modify_qp(struct ib_qp *ib_qp, struct ib_qp_attr *qp_attr,
 		ether_addr_copy(qp->qplib_qp.ah.dmac,
 				qp_attr->ah_attr.roce.dmac);
 
-		status = ib_get_cached_gid(&rdev->ibdev, 1,
-					   grh->sgid_index,
-					   &sgid, &sgid_attr);
-		if (!status) {
-			memcpy(qp->qplib_qp.smac, sgid_attr.ndev->dev_addr,
-			       ETH_ALEN);
-			dev_put(sgid_attr.ndev);
-			nw_type = ib_gid_to_network_type(sgid_attr.gid_type,
-							 &sgid);
-			switch (nw_type) {
-			case RDMA_NETWORK_IPV4:
-				qp->qplib_qp.nw_type =
-					CMDQ_MODIFY_QP_NETWORK_TYPE_ROCEV2_IPV4;
-				break;
-			case RDMA_NETWORK_IPV6:
-				qp->qplib_qp.nw_type =
-					CMDQ_MODIFY_QP_NETWORK_TYPE_ROCEV2_IPV6;
-				break;
-			default:
-				qp->qplib_qp.nw_type =
-					CMDQ_MODIFY_QP_NETWORK_TYPE_ROCEV1;
-				break;
-			}
+		sgid_attr = qp_attr->ah_attr.grh.sgid_attr;
+		memcpy(qp->qplib_qp.smac, sgid_attr->ndev->dev_addr,
+		       ETH_ALEN);
+		nw_type = rdma_gid_attr_network_type(sgid_attr);
+		switch (nw_type) {
+		case RDMA_NETWORK_IPV4:
+			qp->qplib_qp.nw_type =
+				CMDQ_MODIFY_QP_NETWORK_TYPE_ROCEV2_IPV4;
+			break;
+		case RDMA_NETWORK_IPV6:
+			qp->qplib_qp.nw_type =
+				CMDQ_MODIFY_QP_NETWORK_TYPE_ROCEV2_IPV6;
+			break;
+		default:
+			qp->qplib_qp.nw_type =
+				CMDQ_MODIFY_QP_NETWORK_TYPE_ROCEV1;
+			break;
 		}
 	}
 
@@ -1898,19 +1895,17 @@ out:
 /* Routine for sending QP1 packets for RoCE V1 an V2
  */
 static int bnxt_re_build_qp1_send_v2(struct bnxt_re_qp *qp,
-				     struct ib_send_wr *wr,
+				     const struct ib_send_wr *wr,
 				     struct bnxt_qplib_swqe *wqe,
 				     int payload_size)
 {
-	struct ib_device *ibdev = &qp->rdev->ibdev;
 	struct bnxt_re_ah *ah = container_of(ud_wr(wr)->ah, struct bnxt_re_ah,
 					     ib_ah);
 	struct bnxt_qplib_ah *qplib_ah = &ah->qplib_ah;
+	const struct ib_gid_attr *sgid_attr = ah->ib_ah.sgid_attr;
 	struct bnxt_qplib_sge sge;
-	union ib_gid sgid;
 	u8 nw_type;
 	u16 ether_type;
-	struct ib_gid_attr sgid_attr;
 	union ib_gid dgid;
 	bool is_eth = false;
 	bool is_vlan = false;
@@ -1923,22 +1918,10 @@ static int bnxt_re_build_qp1_send_v2(struct bnxt_re_qp *qp,
 
 	memset(&qp->qp1_hdr, 0, sizeof(qp->qp1_hdr));
 
-	rc = ib_get_cached_gid(ibdev, 1,
-			       qplib_ah->host_sgid_index, &sgid,
-			       &sgid_attr);
-	if (rc) {
-		dev_err(rdev_to_dev(qp->rdev),
-			"Failed to query gid at index %d",
-			qplib_ah->host_sgid_index);
-		return rc;
-	}
-	if (sgid_attr.ndev) {
-		if (is_vlan_dev(sgid_attr.ndev))
-			vlan_id = vlan_dev_vlan_id(sgid_attr.ndev);
-		dev_put(sgid_attr.ndev);
-	}
+	if (is_vlan_dev(sgid_attr->ndev))
+		vlan_id = vlan_dev_vlan_id(sgid_attr->ndev);
 	/* Get network header type for this GID */
-	nw_type = ib_gid_to_network_type(sgid_attr.gid_type, &sgid);
+	nw_type = rdma_gid_attr_network_type(sgid_attr);
 	switch (nw_type) {
 	case RDMA_NETWORK_IPV4:
 		nw_type = BNXT_RE_ROCEV2_IPV4_PACKET;
@@ -1951,9 +1934,9 @@ static int bnxt_re_build_qp1_send_v2(struct bnxt_re_qp *qp,
 		break;
 	}
 	memcpy(&dgid.raw, &qplib_ah->dgid, 16);
-	is_udp = sgid_attr.gid_type == IB_GID_TYPE_ROCE_UDP_ENCAP;
+	is_udp = sgid_attr->gid_type == IB_GID_TYPE_ROCE_UDP_ENCAP;
 	if (is_udp) {
-		if (ipv6_addr_v4mapped((struct in6_addr *)&sgid)) {
+		if (ipv6_addr_v4mapped((struct in6_addr *)&sgid_attr->gid)) {
 			ip_version = 4;
 			ether_type = ETH_P_IP;
 		} else {
@@ -1986,9 +1969,10 @@ static int bnxt_re_build_qp1_send_v2(struct bnxt_re_qp *qp,
 	}
 
 	if (is_grh || (ip_version == 6)) {
-		memcpy(qp->qp1_hdr.grh.source_gid.raw, sgid.raw, sizeof(sgid));
+		memcpy(qp->qp1_hdr.grh.source_gid.raw, sgid_attr->gid.raw,
+		       sizeof(sgid_attr->gid));
 		memcpy(qp->qp1_hdr.grh.destination_gid.raw, qplib_ah->dgid.data,
-		       sizeof(sgid));
+		       sizeof(sgid_attr->gid));
 		qp->qp1_hdr.grh.hop_limit     = qplib_ah->hop_limit;
 	}
 
@@ -1998,7 +1982,7 @@ static int bnxt_re_build_qp1_send_v2(struct bnxt_re_qp *qp,
 		qp->qp1_hdr.ip4.frag_off = htons(IP_DF);
 		qp->qp1_hdr.ip4.ttl = qplib_ah->hop_limit;
 
-		memcpy(&qp->qp1_hdr.ip4.saddr, sgid.raw + 12, 4);
+		memcpy(&qp->qp1_hdr.ip4.saddr, sgid_attr->gid.raw + 12, 4);
 		memcpy(&qp->qp1_hdr.ip4.daddr, qplib_ah->dgid.data + 12, 4);
 		qp->qp1_hdr.ip4.check = ib_ud_ip4_csum(&qp->qp1_hdr);
 	}
@@ -2083,7 +2067,7 @@ static int bnxt_re_build_qp1_send_v2(struct bnxt_re_qp *qp,
  * and the MAD datagram out to the provided SGE.
  */
 static int bnxt_re_build_qp1_shadow_qp_recv(struct bnxt_re_qp *qp,
-					    struct ib_recv_wr *wr,
+					    const struct ib_recv_wr *wr,
 					    struct bnxt_qplib_swqe *wqe,
 					    int payload_size)
 {
@@ -2124,11 +2108,12 @@ static int bnxt_re_build_qp1_shadow_qp_recv(struct bnxt_re_qp *qp,
 
 static int is_ud_qp(struct bnxt_re_qp *qp)
 {
-	return qp->qplib_qp.type == CMDQ_CREATE_QP_TYPE_UD;
+	return (qp->qplib_qp.type == CMDQ_CREATE_QP_TYPE_UD ||
+		qp->qplib_qp.type == CMDQ_CREATE_QP_TYPE_GSI);
 }
 
 static int bnxt_re_build_send_wqe(struct bnxt_re_qp *qp,
-				  struct ib_send_wr *wr,
+				  const struct ib_send_wr *wr,
 				  struct bnxt_qplib_swqe *wqe)
 {
 	struct bnxt_re_ah *ah = NULL;
@@ -2166,7 +2151,7 @@ static int bnxt_re_build_send_wqe(struct bnxt_re_qp *qp,
 	return 0;
 }
 
-static int bnxt_re_build_rdma_wqe(struct ib_send_wr *wr,
+static int bnxt_re_build_rdma_wqe(const struct ib_send_wr *wr,
 				  struct bnxt_qplib_swqe *wqe)
 {
 	switch (wr->opcode) {
@@ -2198,7 +2183,7 @@ static int bnxt_re_build_rdma_wqe(struct ib_send_wr *wr,
 	return 0;
 }
 
-static int bnxt_re_build_atomic_wqe(struct ib_send_wr *wr,
+static int bnxt_re_build_atomic_wqe(const struct ib_send_wr *wr,
 				    struct bnxt_qplib_swqe *wqe)
 {
 	switch (wr->opcode) {
@@ -2225,7 +2210,7 @@ static int bnxt_re_build_atomic_wqe(struct ib_send_wr *wr,
 	return 0;
 }
 
-static int bnxt_re_build_inv_wqe(struct ib_send_wr *wr,
+static int bnxt_re_build_inv_wqe(const struct ib_send_wr *wr,
 				 struct bnxt_qplib_swqe *wqe)
 {
 	wqe->type = BNXT_QPLIB_SWQE_TYPE_LOCAL_INV;
@@ -2244,7 +2229,7 @@ static int bnxt_re_build_inv_wqe(struct ib_send_wr *wr,
 	return 0;
 }
 
-static int bnxt_re_build_reg_wqe(struct ib_reg_wr *wr,
+static int bnxt_re_build_reg_wqe(const struct ib_reg_wr *wr,
 				 struct bnxt_qplib_swqe *wqe)
 {
 	struct bnxt_re_mr *mr = container_of(wr->mr, struct bnxt_re_mr, ib_mr);
@@ -2286,7 +2271,7 @@ static int bnxt_re_build_reg_wqe(struct ib_reg_wr *wr,
 }
 
 static int bnxt_re_copy_inline_data(struct bnxt_re_dev *rdev,
-				    struct ib_send_wr *wr,
+				    const struct ib_send_wr *wr,
 				    struct bnxt_qplib_swqe *wqe)
 {
 	/*  Copy the inline data to the data  field */
@@ -2316,7 +2301,7 @@ static int bnxt_re_copy_inline_data(struct bnxt_re_dev *rdev,
 }
 
 static int bnxt_re_copy_wr_payload(struct bnxt_re_dev *rdev,
-				   struct ib_send_wr *wr,
+				   const struct ib_send_wr *wr,
 				   struct bnxt_qplib_swqe *wqe)
 {
 	int payload_sz = 0;
@@ -2348,7 +2333,7 @@ static void bnxt_ud_qp_hw_stall_workaround(struct bnxt_re_qp *qp)
 
 static int bnxt_re_post_send_shadow_qp(struct bnxt_re_dev *rdev,
 				       struct bnxt_re_qp *qp,
-				struct ib_send_wr *wr)
+				       const struct ib_send_wr *wr)
 {
 	struct bnxt_qplib_swqe wqe;
 	int rc = 0, payload_sz = 0;
@@ -2396,8 +2381,8 @@ bad:
 	return rc;
 }
 
-int bnxt_re_post_send(struct ib_qp *ib_qp, struct ib_send_wr *wr,
-		      struct ib_send_wr **bad_wr)
+int bnxt_re_post_send(struct ib_qp *ib_qp, const struct ib_send_wr *wr,
+		      const struct ib_send_wr **bad_wr)
 {
 	struct bnxt_re_qp *qp = container_of(ib_qp, struct bnxt_re_qp, ib_qp);
 	struct bnxt_qplib_swqe wqe;
@@ -2428,7 +2413,7 @@ int bnxt_re_post_send(struct ib_qp *ib_qp, struct ib_send_wr *wr,
 		switch (wr->opcode) {
 		case IB_WR_SEND:
 		case IB_WR_SEND_WITH_IMM:
-			if (ib_qp->qp_type == IB_QPT_GSI) {
+			if (qp->qplib_qp.type == CMDQ_CREATE_QP1_TYPE_GSI) {
 				rc = bnxt_re_build_qp1_send_v2(qp, wr, &wqe,
 							       payload_sz);
 				if (rc)
@@ -2444,7 +2429,7 @@ int bnxt_re_post_send(struct ib_qp *ib_qp, struct ib_send_wr *wr,
 			default:
 				break;
 			}
-			/* Fall thru to build the wqe */
+			/* fall through */
 		case IB_WR_SEND_WITH_INV:
 			rc = bnxt_re_build_send_wqe(qp, wr, &wqe);
 			break;
@@ -2496,7 +2481,7 @@ bad:
 
 static int bnxt_re_post_recv_shadow_qp(struct bnxt_re_dev *rdev,
 				       struct bnxt_re_qp *qp,
-				       struct ib_recv_wr *wr)
+				       const struct ib_recv_wr *wr)
 {
 	struct bnxt_qplib_swqe wqe;
 	int rc = 0;
@@ -2529,8 +2514,8 @@ static int bnxt_re_post_recv_shadow_qp(struct bnxt_re_dev *rdev,
 	return rc;
 }
 
-int bnxt_re_post_recv(struct ib_qp *ib_qp, struct ib_recv_wr *wr,
-		      struct ib_recv_wr **bad_wr)
+int bnxt_re_post_recv(struct ib_qp *ib_qp, const struct ib_recv_wr *wr,
+		      const struct ib_recv_wr **bad_wr)
 {
 	struct bnxt_re_qp *qp = container_of(ib_qp, struct bnxt_re_qp, ib_qp);
 	struct bnxt_qplib_swqe wqe;
@@ -2558,7 +2543,8 @@ int bnxt_re_post_recv(struct ib_qp *ib_qp, struct ib_recv_wr *wr,
 		wqe.wr_id = wr->wr_id;
 		wqe.type = BNXT_QPLIB_SWQE_TYPE_RECV;
 
-		if (ib_qp->qp_type == IB_QPT_GSI)
+		if (ib_qp->qp_type == IB_QPT_GSI &&
+		    qp->qplib_qp.type != CMDQ_CREATE_QP_TYPE_GSI)
 			rc = bnxt_re_build_qp1_shadow_qp_recv(qp, wr, &wqe,
 							      payload_sz);
 		if (!rc)
@@ -2697,6 +2683,7 @@ struct ib_cq *bnxt_re_create_cq(struct ib_device *ibdev,
 	nq->budget++;
 
 	atomic_inc(&rdev->cq_count);
+	spin_lock_init(&cq->cq_lock);
 
 	if (context) {
 		struct bnxt_re_cq_resp resp;
@@ -3152,19 +3139,33 @@ static void bnxt_re_process_res_shadow_qp_wc(struct bnxt_re_qp *qp,
 	}
 }
 
-static void bnxt_re_process_res_ud_wc(struct ib_wc *wc,
+static void bnxt_re_process_res_ud_wc(struct bnxt_re_qp *qp,
+				      struct ib_wc *wc,
 				      struct bnxt_qplib_cqe *cqe)
 {
+	u8 nw_type;
+
 	wc->opcode = IB_WC_RECV;
 	wc->status = __rc_to_ib_wc_status(cqe->status);
 
-	if (cqe->flags & CQ_RES_RC_FLAGS_IMM)
+	if (cqe->flags & CQ_RES_UD_FLAGS_IMM)
 		wc->wc_flags |= IB_WC_WITH_IMM;
-	if (cqe->flags & CQ_RES_RC_FLAGS_INV)
-		wc->wc_flags |= IB_WC_WITH_INVALIDATE;
-	if ((cqe->flags & (CQ_RES_RC_FLAGS_RDMA | CQ_RES_RC_FLAGS_IMM)) ==
-	    (CQ_RES_RC_FLAGS_RDMA | CQ_RES_RC_FLAGS_IMM))
-		wc->opcode = IB_WC_RECV_RDMA_WITH_IMM;
+	/* report only on GSI QP for Thor */
+	if (qp->qplib_qp.type == CMDQ_CREATE_QP_TYPE_GSI) {
+		wc->wc_flags |= IB_WC_GRH;
+		memcpy(wc->smac, cqe->smac, ETH_ALEN);
+		wc->wc_flags |= IB_WC_WITH_SMAC;
+		if (cqe->flags & CQ_RES_UD_FLAGS_META_FORMAT_VLAN) {
+			wc->vlan_id = (cqe->cfa_meta & 0xFFF);
+			if (wc->vlan_id < 0x1000)
+				wc->wc_flags |= IB_WC_WITH_VLAN;
+		}
+		nw_type = (cqe->flags & CQ_RES_UD_FLAGS_ROCE_IP_VER_MASK) >>
+			   CQ_RES_UD_FLAGS_ROCE_IP_VER_SFT;
+		wc->network_hdr_type = bnxt_re_to_ib_nw_type(nw_type);
+		wc->wc_flags |= IB_WC_WITH_NETWORK_HDR_TYPE;
+	}
+
 }
 
 static int send_phantom_wqe(struct bnxt_re_qp *qp)
@@ -3256,7 +3257,7 @@ int bnxt_re_poll_cq(struct ib_cq *ib_cq, int num_entries, struct ib_wc *wc)
 
 			switch (cqe->opcode) {
 			case CQ_BASE_CQE_TYPE_REQ:
-				if (qp->qplib_qp.id ==
+				if (qp->rdev->qp1_sqp && qp->qplib_qp.id ==
 				    qp->rdev->qp1_sqp->qplib_qp.id) {
 					/* Handle this completion with
 					 * the stored completion
@@ -3291,7 +3292,7 @@ int bnxt_re_poll_cq(struct ib_cq *ib_cq, int num_entries, struct ib_wc *wc)
 				bnxt_re_process_res_rc_wc(wc, cqe);
 				break;
 			case CQ_BASE_CQE_TYPE_RES_UD:
-				if (qp->qplib_qp.id ==
+				if (qp->rdev->qp1_sqp && qp->qplib_qp.id ==
 				    qp->rdev->qp1_sqp->qplib_qp.id) {
 					/* Handle this completion with
 					 * the stored completion
@@ -3304,7 +3305,7 @@ int bnxt_re_poll_cq(struct ib_cq *ib_cq, int num_entries, struct ib_wc *wc)
 						break;
 					}
 				}
-				bnxt_re_process_res_ud_wc(wc, cqe);
+				bnxt_re_process_res_ud_wc(qp, wc, cqe);
 				break;
 			default:
 				dev_err(rdev_to_dev(cq->rdev),
@@ -3331,10 +3332,10 @@ int bnxt_re_req_notify_cq(struct ib_cq *ib_cq,
 	spin_lock_irqsave(&cq->cq_lock, flags);
 	/* Trigger on the very next completion */
 	if (ib_cqn_flags & IB_CQ_NEXT_COMP)
-		type = DBR_DBR_TYPE_CQ_ARMALL;
+		type = DBC_DBC_TYPE_CQ_ARMALL;
 	/* Trigger on the next solicited completion */
 	else if (ib_cqn_flags & IB_CQ_SOLICITED)
-		type = DBR_DBR_TYPE_CQ_ARMSE;
+		type = DBC_DBC_TYPE_CQ_ARMSE;
 
 	/* Poll to see if there are missed events */
 	if ((ib_cqn_flags & IB_CQ_REPORT_MISSED_EVENTS) &&
@@ -3694,9 +3695,10 @@ struct ib_ucontext *bnxt_re_alloc_ucontext(struct ib_device *ibdev,
 					   struct ib_udata *udata)
 {
 	struct bnxt_re_dev *rdev = to_bnxt_re_dev(ibdev, ibdev);
+	struct bnxt_qplib_dev_attr *dev_attr = &rdev->dev_attr;
 	struct bnxt_re_uctx_resp resp;
 	struct bnxt_re_ucontext *uctx;
-	struct bnxt_qplib_dev_attr *dev_attr = &rdev->dev_attr;
+	u32 chip_met_rev_num = 0;
 	int rc;
 
 	dev_dbg(rdev_to_dev(rdev), "ABI version requested %d",
@@ -3721,14 +3723,24 @@ struct ib_ucontext *bnxt_re_alloc_ucontext(struct ib_device *ibdev,
 	}
 	spin_lock_init(&uctx->sh_lock);
 
-	resp.dev_id = rdev->en_dev->pdev->devfn; /*Temp, Use idr_alloc instead*/
+	resp.comp_mask = BNXT_RE_UCNTX_CMASK_HAVE_CCTX;
+	chip_met_rev_num = rdev->chip_ctx.chip_num;
+	chip_met_rev_num |= ((u32)rdev->chip_ctx.chip_rev & 0xFF) <<
+			     BNXT_RE_CHIP_ID0_CHIP_REV_SFT;
+	chip_met_rev_num |= ((u32)rdev->chip_ctx.chip_metal & 0xFF) <<
+			     BNXT_RE_CHIP_ID0_CHIP_MET_SFT;
+	resp.chip_id0 = chip_met_rev_num;
+	/* Future extension of chip info */
+	resp.chip_id1 = 0;
+	/*Temp, Use idr_alloc instead */
+	resp.dev_id = rdev->en_dev->pdev->devfn;
 	resp.max_qp = rdev->qplib_ctx.qpc_count;
 	resp.pg_size = PAGE_SIZE;
 	resp.cqe_sz = sizeof(struct cq_base);
 	resp.max_cqd = dev_attr->max_cq_wqes;
 	resp.rsvd    = 0;
 
-	rc = ib_copy_to_udata(udata, &resp, sizeof(resp));
+	rc = ib_copy_to_udata(udata, &resp, min(udata->outlen, sizeof(resp)));
 	if (rc) {
 		dev_err(rdev_to_dev(rdev), "Failed to copy user context");
 		rc = -EFAULT;

@@ -417,10 +417,10 @@ void rds_ib_recv_refill(struct rds_connection *conn, int prefill, gfp_t gfp)
 				&recv->r_frag->f_sg));
 
 		/* XXX when can this fail? */
-		ret = ib_post_recv(ic->i_cm_id->qp, &recv->r_wr, &failed_wr);
+		ret = ib_post_recv(ic->i_cm_id->qp, &recv->r_wr, NULL);
 		if (ret) {
 			rds_ib_conn_error(conn, "recv post on "
-			       "%pI4 returned %d, disconnecting and "
+			       "%pI6c returned %d, disconnecting and "
 			       "reconnecting\n", &conn->c_faddr,
 			       ret);
 			break;

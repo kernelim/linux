@@ -2803,29 +2803,20 @@ static void hns3_clear_ring_group(struct hns3_enet_ring_group *group)
 	group->count = 0;
 }
 
-static int hns3_nic_uninit_vector_data(struct hns3_nic_priv *priv)
+static void hns3_nic_uninit_vector_data(struct hns3_nic_priv *priv)
 {
 	struct hnae3_ring_chain_node vector_ring_chain;
 	struct hnae3_handle *h = priv->ae_handle;
 	struct hns3_enet_tqp_vector *tqp_vector;
-	int i, ret;
+	int i;
 
 	for (i = 0; i < priv->vector_num; i++) {
 		tqp_vector = &priv->tqp_vector[i];
 
-		ret = hns3_get_vector_ring_chain(tqp_vector,
-						 &vector_ring_chain);
-		if (ret)
-			return ret;
+		hns3_get_vector_ring_chain(tqp_vector, &vector_ring_chain);
 
-		ret = h->ae_algo->ops->unmap_ring_from_vector(h,
+		h->ae_algo->ops->unmap_ring_from_vector(h,
 			tqp_vector->vector_irq, &vector_ring_chain);
-		if (ret)
-			return ret;
-
-		ret = h->ae_algo->ops->put_vector(h, tqp_vector->vector_irq);
-		if (ret)
-			return ret;
 
 		hns3_free_vector_ring_chain(tqp_vector, &vector_ring_chain);
 
@@ -2842,8 +2833,6 @@ static int hns3_nic_uninit_vector_data(struct hns3_nic_priv *priv)
 		hns3_clear_ring_group(&tqp_vector->tx_group);
 		netif_napi_del(&priv->tqp_vector[i].napi);
 	}
-
-	return 0;
 }
 
 static int hns3_nic_dealloc_vector_data(struct hns3_nic_priv *priv)
@@ -3151,6 +3140,25 @@ static void hns3_uninit_mac_addr(struct net_device *netdev)
 		h->ae_algo->ops->rm_uc_addr(h, netdev->dev_addr);
 }
 
+static int hns3_init_phy(struct net_device *netdev)
+{
+	struct hnae3_handle *h = hns3_get_handle(netdev);
+	int ret = 0;
+
+	if (h->ae_algo->ops->mac_connect_phy)
+		ret = h->ae_algo->ops->mac_connect_phy(h);
+
+	return ret;
+}
+
+static void hns3_uninit_phy(struct net_device *netdev)
+{
+	struct hnae3_handle *h = hns3_get_handle(netdev);
+
+	if (h->ae_algo->ops->mac_disconnect_phy)
+		h->ae_algo->ops->mac_disconnect_phy(h);
+}
+
 static void hns3_nic_set_priv_ops(struct net_device *netdev)
 {
 	struct hns3_nic_priv *priv = netdev_priv(netdev);
@@ -3230,6 +3238,10 @@ static int hns3_client_init(struct hnae3_handle *handle)
 		goto out_init_ring_data;
 	}
 
+	ret = hns3_init_phy(netdev);
+	if (ret)
+		goto out_init_phy;
+
 	ret = register_netdev(netdev);
 	if (ret) {
 		dev_err(priv->dev, "probe register netdev fail!\n");
@@ -3244,8 +3256,11 @@ static int hns3_client_init(struct hnae3_handle *handle)
 	return ret;
 
 out_reg_netdev_fail:
+	hns3_uninit_phy(netdev);
+out_init_phy:
+	hns3_uninit_all_ring(priv);
 out_init_ring_data:
-	(void)hns3_nic_uninit_vector_data(priv);
+	hns3_nic_uninit_vector_data(priv);
 out_init_vector_data:
 	hns3_nic_dealloc_vector_data(priv);
 out_alloc_vector_data:
@@ -3267,9 +3282,9 @@ static void hns3_client_uninit(struct hnae3_handle *handle, bool reset)
 
 	hns3_force_clear_all_rx_ring(handle);
 
-	ret = hns3_nic_uninit_vector_data(priv);
-	if (ret)
-		netdev_err(netdev, "uninit vector error\n");
+	hns3_uninit_phy(netdev);
+
+	hns3_nic_uninit_vector_data(priv);
 
 	ret = hns3_nic_dealloc_vector_data(priv);
 	if (ret)
@@ -3594,11 +3609,7 @@ static int hns3_reset_notify_uninit_enet(struct hnae3_handle *handle)
 
 	hns3_force_clear_all_rx_ring(handle);
 
-	ret = hns3_nic_uninit_vector_data(priv);
-	if (ret) {
-		netdev_err(netdev, "uninit vector error\n");
-		return ret;
-	}
+	hns3_nic_uninit_vector_data(priv);
 
 	hns3_store_coal(priv);
 
@@ -3640,45 +3651,6 @@ static int hns3_reset_notify(struct hnae3_handle *handle,
 	return ret;
 }
 
-static int hns3_modify_tqp_num(struct net_device *netdev, u16 new_tqp_num)
-{
-	struct hns3_nic_priv *priv = netdev_priv(netdev);
-	struct hnae3_handle *h = hns3_get_handle(netdev);
-	int ret;
-
-	ret = h->ae_algo->ops->set_channels(h, new_tqp_num);
-	if (ret)
-		return ret;
-
-	ret = hns3_get_ring_config(priv);
-	if (ret)
-		return ret;
-
-	ret = hns3_nic_alloc_vector_data(priv);
-	if (ret)
-		goto err_alloc_vector;
-
-	hns3_restore_coal(priv);
-
-	ret = hns3_nic_init_vector_data(priv);
-	if (ret)
-		goto err_uninit_vector;
-
-	ret = hns3_init_all_ring(priv);
-	if (ret)
-		goto err_put_ring;
-
-	return 0;
-
-err_put_ring:
-	hns3_put_ring_config(priv);
-err_uninit_vector:
-	hns3_nic_uninit_vector_data(priv);
-err_alloc_vector:
-	hns3_nic_dealloc_vector_data(priv);
-	return ret;
-}
-
 static int hns3_adjust_tqps_num(u8 num_tc, u32 new_tqp_num)
 {
 	return (new_tqp_num / num_tc) * num_tc;
@@ -3687,10 +3659,8 @@ static int hns3_adjust_tqps_num(u8 num_tc, u32 new_tqp_num)
 int hns3_set_channels(struct net_device *netdev,
 		      struct ethtool_channels *ch)
 {
-	struct hns3_nic_priv *priv = netdev_priv(netdev);
 	struct hnae3_handle *h = hns3_get_handle(netdev);
 	struct hnae3_knic_private_info *kinfo = &h->kinfo;
-	bool if_running = netif_running(netdev);
 	u32 new_tqp_num = ch->combined_count;
 	u16 org_tqp_num;
 	int ret;
@@ -3711,27 +3681,18 @@ int hns3_set_channels(struct net_device *netdev,
 	if (kinfo->num_tqps == new_tqp_num)
 		return 0;
 
-	if (if_running)
-		hns3_nic_net_stop(netdev);
+	ret = hns3_reset_notify(h, HNAE3_DOWN_CLIENT);
+	if (ret)
+		return ret;
 
-	ret = hns3_nic_uninit_vector_data(priv);
-	if (ret) {
-		dev_err(&netdev->dev,
-			"Unbind vector with tqp fail, nothing is changed");
-		goto open_netdev;
-	}
-
-	hns3_store_coal(priv);
-
-	hns3_nic_dealloc_vector_data(priv);
-
-	hns3_uninit_all_ring(priv);
-	hns3_put_ring_config(priv);
+	ret = hns3_reset_notify(h, HNAE3_UNINIT_CLIENT);
+	if (ret)
+		return ret;
 
 	org_tqp_num = h->kinfo.num_tqps;
-	ret = hns3_modify_tqp_num(netdev, new_tqp_num);
+	ret = h->ae_algo->ops->set_channels(h, new_tqp_num);
 	if (ret) {
-		ret = hns3_modify_tqp_num(netdev, org_tqp_num);
+		ret = h->ae_algo->ops->set_channels(h, org_tqp_num);
 		if (ret) {
 			/* If revert to old tqp failed, fatal error occurred */
 			dev_err(&netdev->dev,
@@ -3741,12 +3702,11 @@ int hns3_set_channels(struct net_device *netdev,
 		dev_info(&netdev->dev,
 			 "Change tqp num fail, Revert to old tqp num");
 	}
+	ret = hns3_reset_notify(h, HNAE3_INIT_CLIENT);
+	if (ret)
+		return ret;
 
-open_netdev:
-	if (if_running)
-		hns3_nic_net_open(netdev);
-
-	return ret;
+	return hns3_reset_notify(h, HNAE3_UP_CLIENT);
 }
 
 static const struct hnae3_client_ops client_ops = {

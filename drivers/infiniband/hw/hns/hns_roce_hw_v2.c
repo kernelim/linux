@@ -55,7 +55,7 @@ static void set_data_seg_v2(struct hns_roce_v2_wqe_data_seg *dseg,
 	dseg->len  = cpu_to_le32(sg->length);
 }
 
-static void set_extend_sge(struct hns_roce_qp *qp, struct ib_send_wr *wr,
+static void set_extend_sge(struct hns_roce_qp *qp, const struct ib_send_wr *wr,
 			   unsigned int *sge_ind)
 {
 	struct hns_roce_v2_wqe_data_seg *dseg;
@@ -102,10 +102,10 @@ static void set_extend_sge(struct hns_roce_qp *qp, struct ib_send_wr *wr,
 	}
 }
 
-static int set_rwqe_data_seg(struct ib_qp *ibqp, struct ib_send_wr *wr,
+static int set_rwqe_data_seg(struct ib_qp *ibqp, const struct ib_send_wr *wr,
 			     struct hns_roce_v2_rc_send_wqe *rc_sq_wqe,
 			     void *wqe, unsigned int *sge_ind,
-			     struct ib_send_wr **bad_wr)
+			     const struct ib_send_wr **bad_wr)
 {
 	struct hns_roce_dev *hr_dev = to_hr_dev(ibqp->device);
 	struct hns_roce_v2_wqe_data_seg *dseg = wqe;
@@ -172,8 +172,9 @@ static int hns_roce_v2_modify_qp(struct ib_qp *ibqp,
 				 int attr_mask, enum ib_qp_state cur_state,
 				 enum ib_qp_state new_state);
 
-static int hns_roce_v2_post_send(struct ib_qp *ibqp, struct ib_send_wr *wr,
-				 struct ib_send_wr **bad_wr)
+static int hns_roce_v2_post_send(struct ib_qp *ibqp,
+				 const struct ib_send_wr *wr,
+				 const struct ib_send_wr **bad_wr)
 {
 	struct hns_roce_dev *hr_dev = to_hr_dev(ibqp->device);
 	struct hns_roce_ah *ah = to_hr_ah(ud_wr(wr)->ah);
@@ -522,8 +523,9 @@ out:
 	return ret;
 }
 
-static int hns_roce_v2_post_recv(struct ib_qp *ibqp, struct ib_recv_wr *wr,
-				 struct ib_recv_wr **bad_wr)
+static int hns_roce_v2_post_recv(struct ib_qp *ibqp,
+				 const struct ib_recv_wr *wr,
+				 const struct ib_recv_wr **bad_wr)
 {
 	struct hns_roce_dev *hr_dev = to_hr_dev(ibqp->device);
 	struct hns_roce_qp *hr_qp = to_hr_qp(ibqp);
@@ -1659,7 +1661,7 @@ static int hns_roce_config_sgid_table(struct hns_roce_dev *hr_dev,
 }
 
 static int hns_roce_v2_set_gid(struct hns_roce_dev *hr_dev, u8 port,
-			       int gid_index, union ib_gid *gid,
+			       int gid_index, const union ib_gid *gid,
 			       const struct ib_gid_attr *attr)
 {
 	enum hns_roce_sgid_type sgid_type = GID_TYPE_FLAG_ROCE_V1;
@@ -3563,12 +3565,10 @@ static int hns_roce_v2_modify_qp(struct ib_qp *ibqp,
 	if (attr_mask & IB_QP_AV) {
 		const struct ib_global_route *grh =
 					    rdma_ah_read_grh(&attr->ah_attr);
-		struct ib_gid_attr gid_attr = {.gid_type = IB_GID_TYPE_ROCE};
+		const struct ib_gid_attr *gid_attr = NULL;
 		u8 src_mac[ETH_ALEN];
 		int is_roce_protocol;
 		u16 vlan = 0xffff;
-		union ib_gid gid;
-		int status;
 		u8 ib_port;
 		u8 hr_port;
 
@@ -3579,19 +3579,9 @@ static int hns_roce_v2_modify_qp(struct ib_qp *ibqp,
 			       rdma_ah_get_ah_flags(&attr->ah_attr) & IB_AH_GRH;
 
 		if (is_roce_protocol) {
-			int index = grh->sgid_index;
-
-			status = ib_get_cached_gid(ibqp->device, ib_port, index,
-						   &gid, &gid_attr);
-			if (!status && !memcmp(&gid, &zgid, sizeof(gid))) {
-				dev_err(hr_dev->dev,
-						"get gid during modifing QP failed\n");
-				ret = -EAGAIN;
-				goto out;
-			}
-
-			vlan = rdma_vlan_dev_vlan_id(gid_attr.ndev);
-			memcpy(src_mac, gid_attr.ndev->dev_addr, ETH_ALEN);
+			gid_attr = attr->ah_attr.grh.sgid_attr;
+			vlan = rdma_vlan_dev_vlan_id(gid_attr->ndev);
+			memcpy(src_mac, gid_attr->ndev->dev_addr, ETH_ALEN);
 		}
 
 		roce_set_field(context->byte_24_mtu_tc,
@@ -3618,7 +3608,7 @@ static int hns_roce_v2_modify_qp(struct ib_qp *ibqp,
 
 		roce_set_field(context->byte_52_udpspn_dmac,
 			   V2_QPC_BYTE_52_UDPSPN_M, V2_QPC_BYTE_52_UDPSPN_S,
-			   (gid_attr.gid_type != IB_GID_TYPE_ROCE_UDP_ENCAP) ?
+			   (gid_attr->gid_type != IB_GID_TYPE_ROCE_UDP_ENCAP) ?
 			   0 : 0x12b7);
 
 		roce_set_field(qpc_mask->byte_52_udpspn_dmac,
@@ -3884,7 +3874,7 @@ out:
 
 static int hns_roce_v2_destroy_qp_common(struct hns_roce_dev *hr_dev,
 					 struct hns_roce_qp *hr_qp,
-					 int is_user)
+					 bool is_user)
 {
 	struct hns_roce_cq *send_cq, *recv_cq;
 	struct device *dev = hr_dev->dev;
@@ -3960,7 +3950,7 @@ static int hns_roce_v2_destroy_qp(struct ib_qp *ibqp)
 	struct hns_roce_qp *hr_qp = to_hr_qp(ibqp);
 	int ret;
 
-	ret = hns_roce_v2_destroy_qp_common(hr_dev, hr_qp, !!ibqp->pd->uobject);
+	ret = hns_roce_v2_destroy_qp_common(hr_dev, hr_qp, ibqp->uobject);
 	if (ret) {
 		dev_err(hr_dev->dev, "Destroy qp failed(%d)\n", ret);
 		return ret;
@@ -5204,6 +5194,16 @@ static void hns_roce_v2_cleanup_eq_table(struct hns_roce_dev *hr_dev)
 	destroy_workqueue(hr_dev->irq_workq);
 }
 
+static const struct ib_device_ops hns_roce_v2_dev_ops = {
+	.destroy_qp = hns_roce_v2_destroy_qp,
+	.modify_cq = hns_roce_v2_modify_cq,
+	.poll_cq = hns_roce_v2_poll_cq,
+	.post_recv = hns_roce_v2_post_recv,
+	.post_send = hns_roce_v2_post_send,
+	.query_qp = hns_roce_v2_query_qp,
+	.req_notify_cq = hns_roce_v2_req_notify_cq,
+};
+
 static const struct hns_roce_hw hns_roce_hw_v2 = {
 	.cmq_init = hns_roce_v2_cmq_init,
 	.cmq_exit = hns_roce_v2_cmq_exit,
@@ -5229,6 +5229,7 @@ static const struct hns_roce_hw hns_roce_hw_v2 = {
 	.poll_cq = hns_roce_v2_poll_cq,
 	.init_eq = hns_roce_v2_init_eq_table,
 	.cleanup_eq = hns_roce_v2_cleanup_eq_table,
+	.hns_roce_dev_ops = &hns_roce_v2_dev_ops,
 };
 
 static const struct pci_device_id hns_roce_hw_v2_pci_tbl[] = {
@@ -5284,7 +5285,7 @@ static int hns_roce_hw_v2_init_instance(struct hnae3_handle *handle)
 	struct hns_roce_dev *hr_dev;
 	int ret;
 
-	hr_dev = (struct hns_roce_dev *)ib_alloc_device(sizeof(*hr_dev));
+	hr_dev = ib_alloc_device(hns_roce_dev, ib_dev);
 	if (!hr_dev)
 		return -ENOMEM;
 

@@ -176,7 +176,6 @@ static int tipc_udp_xmit(struct net *net, struct sk_buff *skb,
 			goto tx_error;
 		}
 
-		skb->dev = rt->dst.dev;
 		ttl = ip4_dst_hoplimit(&rt->dst);
 		udp_tunnel_xmit_skb(rt, ub->ubsock->sk, skb, src->ipv4.s_addr,
 				    dst->ipv4.s_addr, 0, ttl, 0, src->port,
@@ -195,10 +194,9 @@ static int tipc_udp_xmit(struct net *net, struct sk_buff *skb,
 		if (err)
 			goto tx_error;
 		ttl = ip6_dst_hoplimit(ndst);
-		err = udp_tunnel6_xmit_skb(ndst, ub->ubsock->sk, skb,
-					   ndst->dev, &src->ipv6,
-					   &dst->ipv6, 0, ttl, 0, src->port,
-					   dst->port, false);
+		err = udp_tunnel6_xmit_skb(ndst, ub->ubsock->sk, skb, NULL,
+					   &src->ipv6, &dst->ipv6, 0, ttl, 0,
+					   src->port, dst->port, false);
 #endif
 	}
 	return err;
@@ -245,10 +243,8 @@ static int tipc_udp_send_msg(struct net *net, struct sk_buff *skb,
 		}
 
 		err = tipc_udp_xmit(net, _skb, ub, src, &rcast->addr);
-		if (err) {
-			kfree_skb(_skb);
+		if (err)
 			goto out;
-		}
 	}
 	err = 0;
 out:
@@ -356,25 +352,21 @@ static int tipc_udp_recv(struct sock *sk, struct sk_buff *skb)
 	skb_pull(skb, sizeof(struct udphdr));
 	hdr = buf_msg(skb);
 
-	rcu_read_lock();
-	b = rcu_dereference_rtnl(ub->bearer);
+	b = rcu_dereference(ub->bearer);
 	if (!b)
-		goto rcu_out;
+		goto out;
 
 	if (b && test_bit(0, &b->up)) {
 		tipc_rcv(sock_net(sk), skb, b);
-		rcu_read_unlock();
 		return 0;
 	}
 
 	if (unlikely(msg_user(hdr) == LINK_CONFIG)) {
 		err = tipc_udp_rcast_disc(b, skb);
 		if (err)
-			goto rcu_out;
+			goto out;
 	}
 
-rcu_out:
-	rcu_read_unlock();
 out:
 	kfree_skb(skb);
 	return 0;
@@ -650,6 +642,7 @@ static int tipc_udp_enable(struct net *net, struct tipc_bearer *b,
 	struct udp_tunnel_sock_cfg tuncfg = {NULL};
 	struct nlattr *opts[TIPC_NLA_UDP_MAX + 1];
 	u8 node_id[NODE_ID_LEN] = {0,};
+	int rmcast = 0;
 
 	ub = kzalloc(sizeof(*ub), GFP_ATOMIC);
 	if (!ub)
@@ -680,6 +673,14 @@ static int tipc_udp_enable(struct net *net, struct tipc_bearer *b,
 	if (err)
 		goto err;
 
+	if (remote.proto != local.proto) {
+		err = -EINVAL;
+		goto err;
+	}
+
+	/* Checking remote ip address */
+	rmcast = tipc_udp_is_mcast_addr(&remote);
+
 	/* Autoconfigure own node identity if needed */
 	if (!tipc_own_id(net)) {
 		memcpy(node_id, local.ipv6.in6_u.u6_addr8, 16);
@@ -705,7 +706,12 @@ static int tipc_udp_enable(struct net *net, struct tipc_bearer *b,
 			goto err;
 		}
 		udp_conf.family = AF_INET;
-		udp_conf.local_ip.s_addr = htonl(INADDR_ANY);
+
+		/* Switch to use ANY to receive packets from group */
+		if (rmcast)
+			udp_conf.local_ip.s_addr = htonl(INADDR_ANY);
+		else
+			udp_conf.local_ip.s_addr = local.ipv4.s_addr;
 		udp_conf.use_udp_checksums = false;
 		ub->ifindex = dev->ifindex;
 		if (tipc_mtu_bad(dev, sizeof(struct iphdr) +
@@ -719,7 +725,10 @@ static int tipc_udp_enable(struct net *net, struct tipc_bearer *b,
 		udp_conf.family = AF_INET6;
 		udp_conf.use_udp6_tx_checksums = true;
 		udp_conf.use_udp6_rx_checksums = true;
-		udp_conf.local_ip6 = in6addr_any;
+		if (rmcast)
+			udp_conf.local_ip6 = in6addr_any;
+		else
+			udp_conf.local_ip6 = local.ipv6;
 		b->mtu = 1280;
 #endif
 	} else {
@@ -741,7 +750,7 @@ static int tipc_udp_enable(struct net *net, struct tipc_bearer *b,
 	 * is used if it's a multicast address.
 	 */
 	memcpy(&b->bcast_addr.value, &remote, sizeof(remote));
-	if (tipc_udp_is_mcast_addr(&remote))
+	if (rmcast)
 		err = enable_mcast(ub, &remote);
 	else
 		err = tipc_udp_rcast_add(b, &remote);

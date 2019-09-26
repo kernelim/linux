@@ -99,6 +99,7 @@ struct elan_tp_data {
 	u8			max_baseline;
 	bool			baseline_ready;
 	u8			clickpad;
+	bool			middle_button;
 };
 
 static int elan_get_fwinfo(u16 ic_type, u16 *validpage_count,
@@ -366,27 +367,62 @@ static unsigned int elan_convert_resolution(u8 val)
 
 static int elan_query_device_parameters(struct elan_tp_data *data)
 {
+	struct i2c_client *client = data->client;
 	unsigned int x_traces, y_traces;
+	u32 x_mm, y_mm;
 	u8 hw_x_res, hw_y_res;
 	int error;
 
-	error = data->ops->get_max(data->client, &data->max_x, &data->max_y);
-	if (error)
-		return error;
+	if (device_property_read_u32(&client->dev,
+				     "touchscreen-size-x", &data->max_x) ||
+	    device_property_read_u32(&client->dev,
+				     "touchscreen-size-y", &data->max_y)) {
+		error = data->ops->get_max(data->client,
+					   &data->max_x,
+					   &data->max_y);
+		if (error)
+			return error;
+	} else {
+		/* size is the maximum + 1 */
+		--data->max_x;
+		--data->max_y;
+	}
 
-	error = data->ops->get_num_traces(data->client, &x_traces, &y_traces);
-	if (error)
-		return error;
-
+	if (device_property_read_u32(&client->dev,
+				     "elan,x_traces",
+				     &x_traces) ||
+	    device_property_read_u32(&client->dev,
+				     "elan,y_traces",
+				     &y_traces)) {
+		error = data->ops->get_num_traces(data->client,
+						  &x_traces, &y_traces);
+		if (error)
+			return error;
+	}
 	data->width_x = data->max_x / x_traces;
 	data->width_y = data->max_y / y_traces;
 
-	error = data->ops->get_resolution(data->client, &hw_x_res, &hw_y_res);
-	if (error)
-		return error;
+	if (device_property_read_u32(&client->dev,
+				     "touchscreen-x-mm", &x_mm) ||
+	    device_property_read_u32(&client->dev,
+				     "touchscreen-y-mm", &y_mm)) {
+		error = data->ops->get_resolution(data->client,
+						  &hw_x_res, &hw_y_res);
+		if (error)
+			return error;
 
-	data->x_res = elan_convert_resolution(hw_x_res);
-	data->y_res = elan_convert_resolution(hw_y_res);
+		data->x_res = elan_convert_resolution(hw_x_res);
+		data->y_res = elan_convert_resolution(hw_y_res);
+	} else {
+		data->x_res = (data->max_x + 1) / x_mm;
+		data->y_res = (data->max_y + 1) / y_mm;
+	}
+
+	if (device_property_read_bool(&client->dev, "elan,clickpad"))
+		data->clickpad = 1;
+
+	if (device_property_read_bool(&client->dev, "elan,middle-button"))
+		data->middle_button = true;
 
 	return 0;
 }
@@ -926,8 +962,9 @@ static void elan_report_absolute(struct elan_tp_data *data, u8 *packet)
 			finger_data += ETP_FINGER_DATA_LEN;
 	}
 
-	input_report_key(input, BTN_LEFT, tp_info & 0x01);
-	input_report_key(input, BTN_RIGHT, tp_info & 0x02);
+	input_report_key(input, BTN_LEFT,   tp_info & BIT(0));
+	input_report_key(input, BTN_MIDDLE, tp_info & BIT(2));
+	input_report_key(input, BTN_RIGHT,  tp_info & BIT(1));
 	input_report_abs(input, ABS_DISTANCE, hover_event != 0);
 	input_mt_report_pointer_emulation(input, true);
 	input_sync(input);
@@ -980,6 +1017,8 @@ static irqreturn_t elan_isr(int irq, void *dev_id)
 	error = data->ops->get_report(data->client, report);
 	if (error)
 		goto out;
+
+	pm_wakeup_event(dev, 0);
 
 	switch (report[ETP_REPORT_ID_OFFSET]) {
 	case ETP_REPORT_ID:
@@ -1059,10 +1098,13 @@ static int elan_setup_input_device(struct elan_tp_data *data)
 
 	__set_bit(EV_ABS, input->evbit);
 	__set_bit(INPUT_PROP_POINTER, input->propbit);
-	if (data->clickpad)
+	if (data->clickpad) {
 		__set_bit(INPUT_PROP_BUTTONPAD, input->propbit);
-	else
+	} else {
 		__set_bit(BTN_RIGHT, input->keybit);
+		if (data->middle_button)
+			__set_bit(BTN_MIDDLE, input->keybit);
+	}
 	__set_bit(BTN_LEFT, input->keybit);
 
 	/* Set up ST parameters */

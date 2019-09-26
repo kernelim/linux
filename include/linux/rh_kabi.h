@@ -219,13 +219,17 @@
  * a pointer in a base struct.  The name of the new struct is the name
  * of the base struct appended with _rh.
  */
-#define RH_KABI_SIZE_AND_EXTEND_PTR(_struct)				\
+#define _RH_KABI_SIZE_AND_EXTEND_PTR(_struct)				\
 	size_t _struct##_size_rh;					\
 	RH_KABI_EXCLUDE(struct _struct##_rh *_struct##_rh)
+#define RH_KABI_SIZE_AND_EXTEND_PTR(_struct)				\
+	_RH_KABI_SIZE_AND_EXTEND_PTR(_struct)
 
-#define RH_KABI_SIZE_AND_EXTEND(_struct)				\
+#define _RH_KABI_SIZE_AND_EXTEND(_struct)				\
 	size_t _struct##_size_rh;					\
 	RH_KABI_EXCLUDE(struct _struct##_rh _struct##_rh)
+#define RH_KABI_SIZE_AND_EXTEND(_struct)				\
+	_RH_KABI_SIZE_AND_EXTEND(_struct)
 
 /*
  * RH_KABI_SET_SIZE calculates and sets the size of the extended struct and
@@ -233,9 +237,11 @@
  * This macro MUST be called when expanding a base struct with
  * RH_KABI_SIZE_AND_EXTEND, and it MUST be called from the allocation site
  * regardless of being allocated in the kernel or a module.
+ * Note: since this macro is intended to be invoked outside of a struct,
+ * a semicolon is necessary at the end of the line where it is invoked.
  */
 #define RH_KABI_SET_SIZE(_name, _struct) ({				\
-	_name._struct##_size_rh = sizeof(struct _struct##_rh);		\
+	_name->_struct##_size_rh = sizeof(struct _struct##_rh);		\
 })
 
 /*

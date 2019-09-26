@@ -9,9 +9,13 @@ enum pid_type
 	PIDTYPE_PID,
 	PIDTYPE_PGID,
 	PIDTYPE_SID,
+#ifndef __GENKSYMS__
+	PIDTYPE_TGID,
+#endif
 	PIDTYPE_MAX,
-	/* only valid to __task_pid_nr_ns() */
+#ifdef __GENKSYMS__
 	__PIDTYPE_TGID
+#endif
 };
 
 /*
@@ -177,7 +181,7 @@ pid_t pid_vnr(struct pid *pid);
 	do {								\
 		if ((pid) != NULL)					\
 			hlist_for_each_entry_rcu((task),		\
-				&(pid)->tasks[type], pids[type].node) {
+				&(pid)->tasks[type], pid_links[type]) {
 
 			/*
 			 * Both old and new leaders may be attached to

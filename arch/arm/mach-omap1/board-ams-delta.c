@@ -288,9 +288,7 @@ static struct regulator_init_data modem_nreset_data = {
 static struct fixed_voltage_config modem_nreset_config = {
 	.supply_name		= "modem_nreset",
 	.microvolts		= 3300000,
-	.gpio			= AMS_DELTA_GPIO_PIN_MODEM_NRESET,
 	.startup_delay		= 25000,
-	.enable_high		= 1,
 	.enabled_at_boot	= 1,
 	.init_data		= &modem_nreset_data,
 };
@@ -300,6 +298,15 @@ static struct platform_device modem_nreset_device = {
 	.id	= -1,
 	.dev	= {
 		.platform_data	= &modem_nreset_config,
+	},
+};
+
+static struct gpiod_lookup_table ams_delta_nreset_gpiod_table = {
+	.dev_id = "reg-fixed-voltage",
+	.table = {
+		GPIO_LOOKUP(LATCH2_LABEL, LATCH2_PIN_MODEM_NRESET,
+			    NULL, GPIO_ACTIVE_HIGH),
+		{ },
 	},
 };
 
@@ -533,6 +540,7 @@ static struct platform_device *late_devices[] __initdata = {
 };
 
 static struct gpiod_lookup_table *ams_delta_gpio_tables[] __initdata = {
+	&ams_delta_nreset_gpiod_table,
 	&ams_delta_audio_gpio_table,
 	&ams_delta_serio_gpio_table,
 };

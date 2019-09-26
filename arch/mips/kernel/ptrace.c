@@ -104,7 +104,7 @@ int ptrace_getregs(struct task_struct *child, struct user_pt_regs __user *data)
 	struct pt_regs *regs;
 	int i;
 
-	if (!access_ok(VERIFY_WRITE, data, 38 * 8))
+	if (!access_ok(data, 38 * 8))
 		return -EIO;
 
 	regs = task_pt_regs(child);
@@ -131,7 +131,7 @@ int ptrace_setregs(struct task_struct *child, struct user_pt_regs __user *data)
 	struct pt_regs *regs;
 	int i;
 
-	if (!access_ok(VERIFY_READ, data, 38 * 8))
+	if (!access_ok(data, 38 * 8))
 		return -EIO;
 
 	regs = task_pt_regs(child);
@@ -154,7 +154,7 @@ int ptrace_getfpregs(struct task_struct *child, __u32 __user *data)
 {
 	int i;
 
-	if (!access_ok(VERIFY_WRITE, data, 33 * 8))
+	if (!access_ok(data, 33 * 8))
 		return -EIO;
 
 	if (tsk_used_math(child)) {
@@ -180,7 +180,7 @@ int ptrace_setfpregs(struct task_struct *child, __u32 __user *data)
 	u32 value;
 	int i;
 
-	if (!access_ok(VERIFY_READ, data, 33 * 8))
+	if (!access_ok(data, 33 * 8))
 		return -EIO;
 
 	init_fp_ctx(child);
@@ -207,7 +207,7 @@ int ptrace_get_watch_regs(struct task_struct *child,
 
 	if (!cpu_has_watch || boot_cpu_data.watch_reg_use_cnt == 0)
 		return -EIO;
-	if (!access_ok(VERIFY_WRITE, addr, sizeof(struct pt_watch_regs)))
+	if (!access_ok(addr, sizeof(struct pt_watch_regs)))
 		return -EIO;
 
 #ifdef CONFIG_32BIT
@@ -249,7 +249,7 @@ int ptrace_set_watch_regs(struct task_struct *child,
 
 	if (!cpu_has_watch || boot_cpu_data.watch_reg_use_cnt == 0)
 		return -EIO;
-	if (!access_ok(VERIFY_READ, addr, sizeof(struct pt_watch_regs)))
+	if (!access_ok(addr, sizeof(struct pt_watch_regs)))
 		return -EIO;
 	/* Check the values. */
 	for (i = 0; i < boot_cpu_data.watch_reg_use_cnt; i++) {

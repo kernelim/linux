@@ -825,6 +825,12 @@ static int rtnl_net_dumpid(struct sk_buff *skb, struct netlink_callback *cb)
 		.s_idx = cb->args[0],
 	};
 
+	if (cb->strict_check &&
+	    nlmsg_attrlen(cb->nlh, sizeof(struct rtgenmsg))) {
+			NL_SET_ERR_MSG(cb->extack, "Unknown data in network namespace id dump request");
+			return -EINVAL;
+	}
+
 	spin_lock_bh(&net->nsid_lock);
 	idr_for_each(&net->netns_ids, rtnl_net_dumpid_one, &net_cb);
 	spin_unlock_bh(&net->nsid_lock);
@@ -973,22 +979,18 @@ static int register_pernet_operations(struct list_head *list,
 	int error;
 
 	if (ops->id) {
-again:
-		error = ida_get_new_above(&net_generic_ids, MIN_PERNET_OPS_ID, ops->id);
-		if (error < 0) {
-			if (error == -EAGAIN) {
-				ida_pre_get(&net_generic_ids, GFP_KERNEL);
-				goto again;
-			}
+		error = ida_alloc_min(&net_generic_ids, MIN_PERNET_OPS_ID,
+				GFP_KERNEL);
+		if (error < 0)
 			return error;
-		}
+		*ops->id = error;
 		max_gen_ptrs = max(max_gen_ptrs, *ops->id + 1);
 	}
 	error = __register_pernet_operations(list, ops);
 	if (error) {
 		rcu_barrier();
 		if (ops->id)
-			ida_remove(&net_generic_ids, *ops->id);
+			ida_free(&net_generic_ids, *ops->id);
 	}
 
 	return error;
@@ -999,7 +1001,7 @@ static void unregister_pernet_operations(struct pernet_operations *ops)
 	__unregister_pernet_operations(ops);
 	rcu_barrier();
 	if (ops->id)
-		ida_remove(&net_generic_ids, *ops->id);
+		ida_free(&net_generic_ids, *ops->id);
 }
 
 /**

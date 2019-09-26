@@ -63,16 +63,21 @@ void item_sanity(struct item *item, unsigned long index)
 	assert((item->index | mask) == (index | mask));
 }
 
+void item_free(struct item *item, unsigned long index)
+{
+	item_sanity(item, index);
+	free(item);
+}
+
 int item_delete(struct radix_tree_root *root, unsigned long index)
 {
 	struct item *item = radix_tree_delete(root, index);
 
-	if (item) {
-		item_sanity(item, index);
-		free(item);
-		return 1;
-	}
-	return 0;
+	if (!item)
+		return 0;
+
+	item_free(item, index);
+	return 1;
 }
 
 static void item_free_rcu(struct rcu_head *head)
@@ -176,35 +181,28 @@ void item_full_scan(struct radix_tree_root *root, unsigned long start,
 }
 
 /* Use the same pattern as tag_pages_for_writeback() in mm/page-writeback.c */
-int tag_tagged_items(struct radix_tree_root *root, pthread_mutex_t *lock,
-			unsigned long start, unsigned long end, unsigned batch,
-			unsigned iftag, unsigned thentag)
+int tag_tagged_items(struct xarray *xa, unsigned long start, unsigned long end,
+		unsigned batch, xa_mark_t iftag, xa_mark_t thentag)
 {
-	unsigned long tagged = 0;
-	struct radix_tree_iter iter;
-	void **slot;
+	XA_STATE(xas, xa, start);
+	unsigned int tagged = 0;
+	struct item *item;
 
 	if (batch == 0)
 		batch = 1;
 
-	if (lock)
-		pthread_mutex_lock(lock);
-	radix_tree_for_each_tagged(slot, root, &iter, start, iftag) {
-		if (iter.index > end)
-			break;
-		radix_tree_iter_tag_set(root, &iter, thentag);
-		tagged++;
-		if ((tagged % batch) != 0)
+	xas_lock_irq(&xas);
+	xas_for_each_marked(&xas, item, end, iftag) {
+		xas_set_mark(&xas, thentag);
+		if (++tagged % batch)
 			continue;
-		slot = radix_tree_iter_resume(slot, &iter);
-		if (lock) {
-			pthread_mutex_unlock(lock);
-			rcu_barrier();
-			pthread_mutex_lock(lock);
-		}
+
+		xas_pause(&xas);
+		xas_unlock_irq(&xas);
+		rcu_barrier();
+		xas_lock_irq(&xas);
 	}
-	if (lock)
-		pthread_mutex_unlock(lock);
+	xas_unlock_irq(&xas);
 
 	return tagged;
 }
@@ -281,7 +279,7 @@ static int verify_node(struct radix_tree_node *slot, unsigned int tag,
 
 void verify_tag_consistency(struct radix_tree_root *root, unsigned int tag)
 {
-	struct radix_tree_node *node = root->rnode;
+	struct radix_tree_node *node = root->xa_head;
 	if (!radix_tree_is_internal_node(node))
 		return;
 	verify_node(node, tag, !!root_tag_get(root, tag));
@@ -295,7 +293,7 @@ void item_kill_tree(struct radix_tree_root *root)
 	int nfound;
 
 	radix_tree_for_each_slot(slot, root, &iter, 0) {
-		if (radix_tree_exceptional_entry(*slot))
+		if (xa_is_value(*slot))
 			radix_tree_delete(root, iter.index);
 	}
 
@@ -311,13 +309,13 @@ void item_kill_tree(struct radix_tree_root *root)
 		}
 	}
 	assert(radix_tree_gang_lookup(root, (void **)items, 0, 32) == 0);
-	assert(root->rnode == NULL);
+	assert(root->xa_head == NULL);
 }
 
 void tree_verify_min_height(struct radix_tree_root *root, int maxindex)
 {
 	unsigned shift;
-	struct radix_tree_node *node = root->rnode;
+	struct radix_tree_node *node = root->xa_head;
 	if (!radix_tree_is_internal_node(node)) {
 		assert(maxindex == 0);
 		return;

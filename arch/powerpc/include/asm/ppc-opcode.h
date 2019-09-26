@@ -302,6 +302,7 @@
 /* Misc instructions for BPF compiler */
 #define PPC_INST_LBZ			0x88000000
 #define PPC_INST_LD			0xe8000000
+#define PPC_INST_LDX			0x7c00002a
 #define PPC_INST_LHZ			0xa0000000
 #define PPC_INST_LWZ			0x80000000
 #define PPC_INST_LHBRX			0x7c00062c
@@ -309,6 +310,7 @@
 #define PPC_INST_STB			0x98000000
 #define PPC_INST_STH			0xb0000000
 #define PPC_INST_STD			0xf8000000
+#define PPC_INST_STDX			0x7c00012a
 #define PPC_INST_STDU			0xf8000001
 #define PPC_INST_STW			0x90000000
 #define PPC_INST_STWU			0x94000000
@@ -343,6 +345,8 @@
 #define PPC_INST_SLW			0x7c000030
 #define PPC_INST_SLD			0x7c000036
 #define PPC_INST_SRW			0x7c000430
+#define PPC_INST_SRAW			0x7c000630
+#define PPC_INST_SRAWI			0x7c000670
 #define PPC_INST_SRD			0x7c000436
 #define PPC_INST_SRAD			0x7c000634
 #define PPC_INST_SRADI			0x7c000674

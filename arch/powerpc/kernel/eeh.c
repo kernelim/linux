@@ -169,6 +169,11 @@ static size_t eeh_dump_dev_log(struct eeh_dev *edev, char *buf, size_t len)
 	int n = 0, l = 0;
 	char buffer[128];
 
+	if (!pdn) {
+		pr_warn("EEH: Note: No error log for absent device.\n");
+		return 0;
+	}
+
 	n += scnprintf(buf+n, len-n, "%04x:%02x:%02x.%01x\n",
 		       pdn->phb->global_number, pdn->busno,
 		       PCI_SLOT(pdn->devfn), PCI_FUNC(pdn->devfn));
@@ -399,7 +404,7 @@ static int eeh_phb_check_failure(struct eeh_pe *pe)
 	}
 
 	/* Isolate the PHB and send event */
-	eeh_pe_state_mark(phb_pe, EEH_PE_ISOLATED);
+	eeh_pe_mark_isolated(phb_pe);
 	eeh_serialize_unlock(flags);
 
 	pr_err("EEH: PHB#%x failure detected, location: %s\n",
@@ -558,7 +563,7 @@ int eeh_dev_check_failure(struct eeh_dev *edev)
 	 * with other functions on this device, and functions under
 	 * bridges.
 	 */
-	eeh_pe_state_mark(pe, EEH_PE_ISOLATED);
+	eeh_pe_mark_isolated(pe);
 	eeh_serialize_unlock(flags);
 
 	/* Most EEH events are due to device driver bugs.  Having
@@ -676,7 +681,7 @@ int eeh_pci_enable(struct eeh_pe *pe, int function)
 
 	/* Check if the request is finished successfully */
 	if (active_flag) {
-		rc = eeh_ops->wait_state(pe, PCI_BUS_RESET_WAIT_MSEC);
+		rc = eeh_wait_state(pe, PCI_BUS_RESET_WAIT_MSEC);
 		if (rc < 0)
 			return rc;
 
@@ -818,14 +823,15 @@ int pcibios_set_pcie_reset_state(struct pci_dev *dev, enum pcie_reset_state stat
 	switch (state) {
 	case pcie_deassert_reset:
 		eeh_ops->reset(pe, EEH_RESET_DEACTIVATE);
-		eeh_unfreeze_pe(pe, false);
+		eeh_unfreeze_pe(pe);
 		if (!(pe->type & EEH_PE_VF))
-			eeh_pe_state_clear(pe, EEH_PE_CFG_BLOCKED);
+			eeh_pe_state_clear(pe, EEH_PE_CFG_BLOCKED, true);
 		eeh_pe_dev_traverse(pe, eeh_restore_dev_state, dev);
-		eeh_pe_state_clear(pe, EEH_PE_ISOLATED);
+		eeh_pe_state_clear(pe, EEH_PE_ISOLATED, true);
 		break;
 	case pcie_hot_reset:
-		eeh_pe_state_mark_with_cfg(pe, EEH_PE_ISOLATED);
+		eeh_pe_mark_isolated(pe);
+		eeh_pe_state_clear(pe, EEH_PE_CFG_BLOCKED, true);
 		eeh_ops->set_option(pe, EEH_OPT_FREEZE_PE);
 		eeh_pe_dev_traverse(pe, eeh_disable_and_save_dev_state, dev);
 		if (!(pe->type & EEH_PE_VF))
@@ -833,7 +839,8 @@ int pcibios_set_pcie_reset_state(struct pci_dev *dev, enum pcie_reset_state stat
 		eeh_ops->reset(pe, EEH_RESET_HOT);
 		break;
 	case pcie_warm_reset:
-		eeh_pe_state_mark_with_cfg(pe, EEH_PE_ISOLATED);
+		eeh_pe_mark_isolated(pe);
+		eeh_pe_state_clear(pe, EEH_PE_CFG_BLOCKED, true);
 		eeh_ops->set_option(pe, EEH_OPT_FREEZE_PE);
 		eeh_pe_dev_traverse(pe, eeh_disable_and_save_dev_state, dev);
 		if (!(pe->type & EEH_PE_VF))
@@ -841,7 +848,7 @@ int pcibios_set_pcie_reset_state(struct pci_dev *dev, enum pcie_reset_state stat
 		eeh_ops->reset(pe, EEH_RESET_FUNDAMENTAL);
 		break;
 	default:
-		eeh_pe_state_clear(pe, EEH_PE_ISOLATED | EEH_PE_CFG_BLOCKED);
+		eeh_pe_state_clear(pe, EEH_PE_ISOLATED | EEH_PE_CFG_BLOCKED, true);
 		return -EINVAL;
 	};
 
@@ -870,6 +877,24 @@ static void *eeh_set_dev_freset(struct eeh_dev *edev, void *flag)
 	return NULL;
 }
 
+static void eeh_pe_refreeze_passed(struct eeh_pe *root)
+{
+	struct eeh_pe *pe;
+	int state;
+
+	eeh_for_each_pe(root, pe) {
+		if (eeh_pe_passed(pe)) {
+			state = eeh_ops->get_state(pe, NULL);
+			if (state &
+			   (EEH_STATE_MMIO_ACTIVE | EEH_STATE_MMIO_ENABLED)) {
+				pr_info("EEH: Passed-through PE PHB#%x-PE#%x was thawed by reset, re-freezing for safety.\n",
+					pe->phb->global_number, pe->addr);
+				eeh_pe_set_option(pe, EEH_OPT_FREEZE_PE);
+			}
+		}
+	}
+}
+
 /**
  * eeh_pe_reset_full - Complete a full reset process on the indicated PE
  * @pe: EEH PE
@@ -882,12 +907,12 @@ static void *eeh_set_dev_freset(struct eeh_dev *edev, void *flag)
  *
  * This function will attempt to reset a PE three times before failing.
  */
-int eeh_pe_reset_full(struct eeh_pe *pe)
+int eeh_pe_reset_full(struct eeh_pe *pe, bool include_passed)
 {
 	int reset_state = (EEH_PE_RESET | EEH_PE_CFG_BLOCKED);
 	int type = EEH_RESET_HOT;
 	unsigned int freset = 0;
-	int i, state, ret;
+	int i, state = 0, ret;
 
 	/*
 	 * Determine the type of reset to perform - hot or fundamental.
@@ -904,33 +929,42 @@ int eeh_pe_reset_full(struct eeh_pe *pe)
 
 	/* Make three attempts at resetting the bus */
 	for (i = 0; i < 3; i++) {
-		ret = eeh_pe_reset(pe, type);
-		if (ret)
-			break;
-
-		ret = eeh_pe_reset(pe, EEH_RESET_DEACTIVATE);
-		if (ret)
-			break;
+		ret = eeh_pe_reset(pe, type, include_passed);
+		if (!ret)
+			ret = eeh_pe_reset(pe, EEH_RESET_DEACTIVATE,
+					   include_passed);
+		if (ret) {
+			ret = -EIO;
+			pr_warn("EEH: Failure %d resetting PHB#%x-PE#%x (attempt %d)\n\n",
+				state, pe->phb->global_number, pe->addr, i + 1);
+			continue;
+		}
+		if (i)
+			pr_warn("EEH: PHB#%x-PE#%x: Successful reset (attempt %d)\n",
+				pe->phb->global_number, pe->addr, i + 1);
 
 		/* Wait until the PE is in a functioning state */
-		state = eeh_ops->wait_state(pe, PCI_BUS_RESET_WAIT_MSEC);
-		if (eeh_state_active(state))
-			break;
-
+		state = eeh_wait_state(pe, PCI_BUS_RESET_WAIT_MSEC);
 		if (state < 0) {
-			pr_warn("%s: Unrecoverable slot failure on PHB#%x-PE#%x",
-				__func__, pe->phb->global_number, pe->addr);
+			pr_warn("EEH: Unrecoverable slot failure on PHB#%x-PE#%x",
+				pe->phb->global_number, pe->addr);
 			ret = -ENOTRECOVERABLE;
 			break;
 		}
-
-		/* Set error in case this is our last attempt */
-		ret = -EIO;
-		pr_warn("%s: Failure %d resetting PHB#%x-PE#%x\n (%d)\n",
-			__func__, state, pe->phb->global_number, pe->addr, (i + 1));
+		if (eeh_state_active(state))
+			break;
+		else
+			pr_warn("EEH: PHB#%x-PE#%x: Slot inactive after reset: 0x%x (attempt %d)\n",
+				pe->phb->global_number, pe->addr, state, i + 1);
 	}
 
-	eeh_pe_state_clear(pe, reset_state);
+	/* Resetting the PE may have unfrozen child PEs. If those PEs have been
+	 * (potentially) passed through to a guest, re-freeze them:
+	 */
+	if (!include_passed)
+		eeh_pe_refreeze_passed(pe);
+
+	eeh_pe_state_clear(pe, reset_state, true);
 	return ret;
 }
 
@@ -1036,6 +1070,11 @@ void eeh_probe_devices(void)
 		pdn = hose->pci_data;
 		traverse_pci_dn(pdn, eeh_ops->probe, NULL);
 	}
+	if (eeh_enabled())
+		pr_info("EEH: PCI Enhanced I/O Error Handling Enabled\n");
+	else
+		pr_info("EEH: No capable adapters found\n");
+
 }
 
 /**
@@ -1079,18 +1118,7 @@ static int eeh_init(void)
 		eeh_dev_phb_init_dynamic(hose);
 
 	/* Initialize EEH event */
-	ret = eeh_event_init();
-	if (ret)
-		return ret;
-
-	eeh_probe_devices();
-
-	if (eeh_enabled())
-		pr_info("EEH: PCI Enhanced I/O Error Handling Enabled\n");
-	else
-		pr_info("EEH: No capable adapters found\n");
-
-	return ret;
+	return eeh_event_init();
 }
 
 core_initcall_sync(eeh_init);
@@ -1309,7 +1337,7 @@ void eeh_remove_device(struct pci_dev *dev)
 	edev->mode &= ~EEH_DEV_SYSFS;
 }
 
-int eeh_unfreeze_pe(struct eeh_pe *pe, bool sw_state)
+int eeh_unfreeze_pe(struct eeh_pe *pe)
 {
 	int ret;
 
@@ -1326,10 +1354,6 @@ int eeh_unfreeze_pe(struct eeh_pe *pe, bool sw_state)
 			__func__, ret, pe->phb->global_number, pe->addr);
 		return ret;
 	}
-
-	/* Clear software isolated state */
-	if (sw_state && (pe->state & EEH_PE_ISOLATED))
-		eeh_pe_state_clear(pe, EEH_PE_ISOLATED);
 
 	return ret;
 }
@@ -1382,7 +1406,10 @@ static int eeh_pe_change_owner(struct eeh_pe *pe)
 		}
 	}
 
-	return eeh_unfreeze_pe(pe, true);
+	ret = eeh_unfreeze_pe(pe);
+	if (!ret)
+		eeh_pe_state_clear(pe, EEH_PE_ISOLATED, true);
+	return ret;
 }
 
 /**
@@ -1612,13 +1639,12 @@ int eeh_pe_get_state(struct eeh_pe *pe)
 }
 EXPORT_SYMBOL_GPL(eeh_pe_get_state);
 
-static int eeh_pe_reenable_devices(struct eeh_pe *pe)
+static int eeh_pe_reenable_devices(struct eeh_pe *pe, bool include_passed)
 {
 	struct eeh_dev *edev, *tmp;
 	struct pci_dev *pdev;
 	int ret = 0;
 
-	/* Restore config space */
 	eeh_pe_restore_bars(pe);
 
 	/*
@@ -1639,7 +1665,14 @@ static int eeh_pe_reenable_devices(struct eeh_pe *pe)
 	}
 
 	/* The PE is still in frozen state */
-	return eeh_unfreeze_pe(pe, true);
+	if (include_passed || !eeh_pe_passed(pe)) {
+		ret = eeh_unfreeze_pe(pe);
+	} else
+		pr_info("EEH: Note: Leaving passthrough PHB#%x-PE#%x frozen.\n",
+			pe->phb->global_number, pe->addr);
+	if (!ret)
+		eeh_pe_state_clear(pe, EEH_PE_ISOLATED, include_passed);
+	return ret;
 }
 
 
@@ -1652,7 +1685,7 @@ static int eeh_pe_reenable_devices(struct eeh_pe *pe)
  * indicated type, either fundamental reset or hot reset.
  * PE reset is the most important part for error recovery.
  */
-int eeh_pe_reset(struct eeh_pe *pe, int option)
+int eeh_pe_reset(struct eeh_pe *pe, int option, bool include_passed)
 {
 	int ret = 0;
 
@@ -1666,11 +1699,11 @@ int eeh_pe_reset(struct eeh_pe *pe, int option)
 	switch (option) {
 	case EEH_RESET_DEACTIVATE:
 		ret = eeh_ops->reset(pe, option);
-		eeh_pe_state_clear(pe, EEH_PE_CFG_BLOCKED);
+		eeh_pe_state_clear(pe, EEH_PE_CFG_BLOCKED, include_passed);
 		if (ret)
 			break;
 
-		ret = eeh_pe_reenable_devices(pe);
+		ret = eeh_pe_reenable_devices(pe, include_passed);
 		break;
 	case EEH_RESET_HOT:
 	case EEH_RESET_FUNDAMENTAL:

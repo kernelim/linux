@@ -74,7 +74,7 @@ enum {
 	__NETIF_F_RH_KABI_PLACEHOLDER_6,
 	__NETIF_F_RH_KABI_PLACEHOLDER_7,
 	__NETIF_F_RH_KABI_PLACEHOLDER_8,
-	__NETIF_F_RH_KABI_PLACEHOLDER_9,
+	NETIF_F_HW_TLS_RX_BIT,		/* Hardware TLS RX offload */
 
 	NETIF_F_FCOE_CRC_BIT,		/* FCoE CRC32 */
 	NETIF_F_SCTP_CRC_BIT,		/* SCTP checksum offload */
@@ -168,6 +168,7 @@ enum {
 #define NETIF_F_HW_TLS_RECORD	__NETIF_F(HW_TLS_RECORD)
 #define NETIF_F_GSO_UDP_L4	__NETIF_F(GSO_UDP_L4)
 #define NETIF_F_HW_TLS_TX	__NETIF_F(HW_TLS_TX)
+#define NETIF_F_HW_TLS_RX	__NETIF_F(HW_TLS_RX)
 
 #define for_each_netdev_feature(mask_addr, bit)	\
 	for_each_set_bit(bit, (unsigned long *)mask_addr, NETDEV_FEATURE_COUNT)

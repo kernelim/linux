@@ -13,8 +13,14 @@
 /*
  * Size of kernel stack for each process
  */
+#ifdef CONFIG_KASAN
+#define THREAD_SIZE_ORDER 4
+#define ASYNC_ORDER  4
+#else
 #define THREAD_SIZE_ORDER 2
 #define ASYNC_ORDER  2
+#endif
+#define BOOT_STACK_ORDER  2
 
 #define THREAD_SIZE (PAGE_SIZE << THREAD_SIZE_ORDER)
 #define ASYNC_SIZE  (PAGE_SIZE << ASYNC_ORDER)

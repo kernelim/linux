@@ -30,7 +30,7 @@
  * The stack trace can start at any of the three stacks and can potentially
  * touch all of them. The order is: panic stack, async stack, sync stack.
  */
-static unsigned long
+static unsigned long __no_sanitize_address
 __dump_trace(dump_trace_func_t func, void *data, unsigned long sp,
 	     unsigned long low, unsigned long high)
 {
@@ -124,7 +124,7 @@ void show_registers(struct pt_regs *regs)
 	char *mode;
 
 	mode = user_mode(regs) ? "User" : "Krnl";
-	printk("%s PSW : %p %p", mode, (void *)regs->psw.mask, (void *)regs->psw.addr);
+	printk("%s PSW : %px %px", mode, (void *)regs->psw.mask, (void *)regs->psw.addr);
 	if (!user_mode(regs))
 		pr_cont(" (%pSR)", (void *)regs->psw.addr);
 	pr_cont("\n");

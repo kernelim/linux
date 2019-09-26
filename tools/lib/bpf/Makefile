@@ -1,9 +1,9 @@
-# SPDX-License-Identifier: GPL-2.0
+# SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause)
 # Most of this file is copied from tools/lib/traceevent/Makefile
 
 BPF_VERSION = 0
 BPF_PATCHLEVEL = 0
-BPF_EXTRAVERSION = 1
+BPF_EXTRAVERSION = 2
 
 MAKEFLAGS += --no-print-directory
 
@@ -66,10 +66,10 @@ ifndef VERBOSE
 endif
 
 FEATURE_USER = .libbpf
-FEATURE_TESTS = libelf libelf-getphdrnum libelf-mmap bpf
+FEATURE_TESTS = libelf libelf-mmap bpf reallocarray cxx
 FEATURE_DISPLAY = libelf bpf
 
-INCLUDES = -I. -I$(srctree)/tools/include -I$(srctree)/tools/arch/$(ARCH)/include/uapi -I$(srctree)/tools/include/uapi -I$(srctree)/tools/perf
+INCLUDES = -I. -I$(srctree)/tools/include -I$(srctree)/tools/arch/$(ARCH)/include/uapi -I$(srctree)/tools/include/uapi
 FEATURE_CHECK_CFLAGS-bpf = $(INCLUDES)
 
 check_feat := 1
@@ -94,8 +94,6 @@ export prefix libdir src obj
 libdir_SQ = $(subst ','\'',$(libdir))
 libdir_relative_SQ = $(subst ','\'',$(libdir_relative))
 
-LIB_FILE = libbpf.a libbpf.so
-
 VERSION		= $(BPF_VERSION)
 PATCHLEVEL	= $(BPF_PATCHLEVEL)
 EXTRAVERSION	= $(BPF_EXTRAVERSION)
@@ -103,7 +101,10 @@ EXTRAVERSION	= $(BPF_EXTRAVERSION)
 OBJ		= $@
 N		=
 
-LIBBPF_VERSION = $(BPF_VERSION).$(BPF_PATCHLEVEL).$(BPF_EXTRAVERSION)
+LIBBPF_VERSION	= $(BPF_VERSION).$(BPF_PATCHLEVEL).$(BPF_EXTRAVERSION)
+
+LIB_TARGET	= libbpf.a libbpf.so.$(LIBBPF_VERSION)
+LIB_FILE	= libbpf.a libbpf.so*
 
 # Set compile option CFLAGS
 ifdef EXTRA_CFLAGS
@@ -116,8 +117,8 @@ ifeq ($(feature-libelf-mmap), 1)
   override CFLAGS += -DHAVE_LIBELF_MMAP_SUPPORT
 endif
 
-ifeq ($(feature-libelf-getphdrnum), 1)
-  override CFLAGS += -DHAVE_ELF_GETPHDRNUM_SUPPORT
+ifeq ($(feature-reallocarray), 0)
+  override CFLAGS += -DCOMPAT_NEED_REALLOCARRAY
 endif
 
 # Append required CFLAGS
@@ -125,6 +126,7 @@ override CFLAGS += $(EXTRA_WARNINGS)
 override CFLAGS += -Werror -Wall
 override CFLAGS += -fPIC
 override CFLAGS += $(INCLUDES)
+override CFLAGS += -fvisibility=hidden
 
 ifeq ($(VERBOSE),1)
   Q =
@@ -142,16 +144,30 @@ all:
 export srctree OUTPUT CC LD CFLAGS V
 include $(srctree)/tools/build/Makefile.include
 
-BPF_IN    := $(OUTPUT)libbpf-in.o
-LIB_FILE := $(addprefix $(OUTPUT),$(LIB_FILE))
+BPF_IN		:= $(OUTPUT)libbpf-in.o
+VERSION_SCRIPT	:= libbpf.map
 
-CMD_TARGETS = $(LIB_FILE)
+LIB_TARGET	:= $(addprefix $(OUTPUT),$(LIB_TARGET))
+LIB_FILE	:= $(addprefix $(OUTPUT),$(LIB_FILE))
+
+GLOBAL_SYM_COUNT = $(shell readelf -s $(BPF_IN) | \
+			   awk '/GLOBAL/ && /DEFAULT/ && !/UND/ {s++} END{print s}')
+VERSIONED_SYM_COUNT = $(shell readelf -s $(OUTPUT)libbpf.so | \
+			      grep -Eo '[^ ]+@LIBBPF_' | cut -d@ -f1 | sort -u | wc -l)
+
+CMD_TARGETS = $(LIB_TARGET)
+
+CXX_TEST_TARGET = $(OUTPUT)test_libbpf
+
+ifeq ($(feature-cxx), 1)
+	CMD_TARGETS += $(CXX_TEST_TARGET)
+endif
 
 TARGETS = $(CMD_TARGETS)
 
 all: fixdep all_cmd
 
-all_cmd: $(CMD_TARGETS)
+all_cmd: $(CMD_TARGETS) check
 
 $(BPF_IN): force elfdep bpfdep
 	@(test -f ../../include/uapi/linux/bpf.h -a -f ../../../include/uapi/linux/bpf.h && ( \
@@ -168,11 +184,37 @@ $(BPF_IN): force elfdep bpfdep
 	echo "Warning: Kernel ABI header at 'tools/include/uapi/linux/if_link.h' differs from latest version at 'include/uapi/linux/if_link.h'" >&2 )) || true
 	$(Q)$(MAKE) $(build)=libbpf
 
-$(OUTPUT)libbpf.so: $(BPF_IN)
-	$(QUIET_LINK)$(CC) --shared $^ -o $@
+$(OUTPUT)libbpf.so: $(OUTPUT)libbpf.so.$(LIBBPF_VERSION)
+
+$(OUTPUT)libbpf.so.$(LIBBPF_VERSION): $(BPF_IN)
+	$(QUIET_LINK)$(CC) --shared -Wl,-soname,libbpf.so.$(VERSION) \
+				    -Wl,--version-script=$(VERSION_SCRIPT) $^ -o $@
+	@ln -sf $(@F) $(OUTPUT)libbpf.so
+	@ln -sf $(@F) $(OUTPUT)libbpf.so.$(VERSION)
 
 $(OUTPUT)libbpf.a: $(BPF_IN)
 	$(QUIET_LINK)$(RM) $@; $(AR) rcs $@ $^
+
+$(OUTPUT)test_libbpf: test_libbpf.cpp $(OUTPUT)libbpf.a
+	$(QUIET_LINK)$(CXX) $^ -lelf -o $@
+
+check: check_abi
+
+check_abi: $(OUTPUT)libbpf.so
+	@if [ "$(GLOBAL_SYM_COUNT)" != "$(VERSIONED_SYM_COUNT)" ]; then	 \
+		echo "Warning: Num of global symbols in $(BPF_IN)"	 \
+		     "($(GLOBAL_SYM_COUNT)) does NOT match with num of"	 \
+		     "versioned symbols in $^ ($(VERSIONED_SYM_COUNT))." \
+		     "Please make sure all LIBBPF_API symbols are"	 \
+		     "versioned in $(VERSION_SCRIPT)." >&2;		 \
+		exit 1;							 \
+	fi
+
+define do_install_mkdir
+	if [ ! -d '$(DESTDIR_SQ)$1' ]; then		\
+		$(INSTALL) -d -m 755 '$(DESTDIR_SQ)$1';	\
+	fi
+endef
 
 define do_install
 	if [ ! -d '$(DESTDIR_SQ)$2' ]; then		\
@@ -182,8 +224,9 @@ define do_install
 endef
 
 install_lib: all_cmd
-	$(call QUIET_INSTALL, $(LIB_FILE)) \
-		$(call do_install,$(LIB_FILE),$(libdir_SQ))
+	$(call QUIET_INSTALL, $(LIB_TARGET)) \
+		$(call do_install_mkdir,$(libdir_SQ)); \
+		cp -fpR $(LIB_FILE) $(DESTDIR)$(libdir_SQ)
 
 install_headers:
 	$(call QUIET_INSTALL, headers) \
@@ -200,8 +243,8 @@ config-clean:
 	$(Q)$(MAKE) -C $(srctree)/tools/build/feature/ clean >/dev/null
 
 clean:
-	$(call QUIET_CLEAN, libbpf) $(RM) *.o *~ $(TARGETS) *.a *.so .*.d .*.cmd \
-		$(RM) LIBBPF-CFLAGS
+	$(call QUIET_CLEAN, libbpf) $(RM) $(TARGETS) $(CXX_TEST_TARGET) \
+		*.o *~ *.a *.so *.so.$(VERSION) .*.d .*.cmd LIBBPF-CFLAGS
 	$(call QUIET_CLEAN, core-gen) $(RM) $(OUTPUT)FEATURE-DUMP.libbpf
 
 

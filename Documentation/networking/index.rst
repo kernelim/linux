@@ -12,6 +12,7 @@ Contents:
    dpaa2/index
    e100
    e1000
+   devlink-info-versions
    kapi
    z8530book
    msg_zerocopy

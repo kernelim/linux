@@ -417,6 +417,8 @@ struct hnae3_ae_ops {
 			      unsigned long *supported,
 			      unsigned long *advertising);
 	void (*get_port_type)(struct hnae3_handle *handle, u8 *port_type);
+	int (*mac_connect_phy)(struct hnae3_handle *handle);
+	void (*mac_disconnect_phy)(struct hnae3_handle *handle);
 };
 
 struct hnae3_dcb_ops {

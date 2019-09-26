@@ -64,9 +64,10 @@ extern const struct qstr slash_name;
 struct dentry_stat_t {
 	long nr_dentry;
 	long nr_unused;
-	long age_limit;          /* age in seconds */
-	long want_pages;         /* pages requested by system */
-	long dummy[2];
+	long age_limit;		/* age in seconds */
+	long want_pages;	/* pages requested by system */
+	long nr_negative;	/* # of unused negative dentries */
+	long dummy;		/* Reserved for future use */
 };
 extern struct dentry_stat_t dentry_stat;
 
@@ -119,8 +120,11 @@ struct dentry {
 		struct hlist_bl_node d_in_lookup_hash;	/* only for in-lookup ones */
 	 	struct rcu_head d_rcu;
 	} d_u;
+#ifdef __GENKSYMS__
+	/* Undo RH_KABI_RESERVE() */
 	RH_KABI_RESERVE(1)
 	RH_KABI_RESERVE(2)
+#endif
 } __randomize_layout;
 
 /*

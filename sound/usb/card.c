@@ -246,7 +246,7 @@ static int snd_usb_create_streams(struct snd_usb_audio *chip, int ctrlif)
 		h1 = snd_usb_find_csint_desc(host_iface->extra,
 							 host_iface->extralen,
 							 NULL, UAC_HEADER);
-		if (!h1) {
+		if (!h1 || h1->bLength < sizeof(*h1)) {
 			dev_err(&dev->dev, "cannot find UAC_HEADER\n");
 			return -EINVAL;
 		}
@@ -811,7 +811,7 @@ static int usb_audio_suspend(struct usb_interface *intf, pm_message_t message)
 		snd_power_change_state(chip->card, SNDRV_CTL_POWER_D3hot);
 	if (!chip->num_suspended_intf++) {
 		list_for_each_entry(as, &chip->pcm_list, list) {
-			snd_pcm_suspend_all(as->pcm);
+			snd_usb_pcm_suspend(as);
 			as->substream[0].need_setup_ep =
 				as->substream[1].need_setup_ep = true;
 		}
@@ -827,6 +827,7 @@ static int usb_audio_suspend(struct usb_interface *intf, pm_message_t message)
 static int __usb_audio_resume(struct usb_interface *intf, bool reset_resume)
 {
 	struct snd_usb_audio *chip = usb_get_intfdata(intf);
+	struct snd_usb_stream *as;
 	struct usb_mixer_interface *mixer;
 	struct list_head *p;
 	int err = 0;
@@ -837,6 +838,13 @@ static int __usb_audio_resume(struct usb_interface *intf, bool reset_resume)
 		return 0;
 
 	atomic_inc(&chip->active); /* avoid autopm */
+
+	list_for_each_entry(as, &chip->pcm_list, list) {
+		err = snd_usb_pcm_resume(as);
+		if (err < 0)
+			goto err_out;
+	}
+
 	/*
 	 * ALSA leaves material resumption to user space
 	 * we just notify and restart the mixers

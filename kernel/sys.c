@@ -1280,7 +1280,7 @@ SYSCALL_DEFINE1(olduname, struct oldold_utsname __user *, name)
 
 	if (!name)
 		return -EFAULT;
-	if (!access_ok(VERIFY_WRITE, name, sizeof(struct oldold_utsname)))
+	if (!access_ok(name, sizeof(struct oldold_utsname)))
 		return -EFAULT;
 
 	down_read(&uts_sem);
@@ -2627,7 +2627,7 @@ COMPAT_SYSCALL_DEFINE1(sysinfo, struct compat_sysinfo __user *, info)
 		s.freehigh >>= bitcount;
 	}
 
-	if (!access_ok(VERIFY_WRITE, info, sizeof(struct compat_sysinfo)) ||
+	if (!access_ok(info, sizeof(struct compat_sysinfo)) ||
 	    __put_user(s.uptime, &info->uptime) ||
 	    __put_user(s.loads[0], &info->loads[0]) ||
 	    __put_user(s.loads[1], &info->loads[1]) ||

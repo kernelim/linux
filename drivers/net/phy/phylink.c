@@ -68,33 +68,6 @@ struct phylink {
 	struct sfp_bus *sfp_bus;
 };
 
-static inline void linkmode_zero(unsigned long *dst)
-{
-	bitmap_zero(dst, __ETHTOOL_LINK_MODE_MASK_NBITS);
-}
-
-static inline void linkmode_copy(unsigned long *dst, const unsigned long *src)
-{
-	bitmap_copy(dst, src, __ETHTOOL_LINK_MODE_MASK_NBITS);
-}
-
-static inline void linkmode_and(unsigned long *dst, const unsigned long *a,
-				const unsigned long *b)
-{
-	bitmap_and(dst, a, b, __ETHTOOL_LINK_MODE_MASK_NBITS);
-}
-
-static inline void linkmode_or(unsigned long *dst, const unsigned long *a,
-				const unsigned long *b)
-{
-	bitmap_or(dst, a, b, __ETHTOOL_LINK_MODE_MASK_NBITS);
-}
-
-static inline bool linkmode_empty(const unsigned long *src)
-{
-	return bitmap_empty(src, __ETHTOOL_LINK_MODE_MASK_NBITS);
-}
-
 /**
  * phylink_set_port_modes() - set the port type modes in the ethtool mask
  * @mask: ethtool link mode mask
@@ -218,8 +191,7 @@ static int phylink_parse_fixedlink(struct phylink *pl,
 	phylink_validate(pl, pl->supported, &pl->link_config);
 
 	s = phy_lookup_setting(pl->link_config.speed, pl->link_config.duplex,
-			       pl->supported,
-			       __ETHTOOL_LINK_MODE_MASK_NBITS, true);
+			       pl->supported, true);
 	linkmode_zero(pl->supported);
 	phylink_set(pl->supported, MII);
 	if (s) {
@@ -661,13 +633,11 @@ static int phylink_bringup_phy(struct phylink *pl, struct phy_device *phy)
 {
 	struct phylink_link_state config;
 	__ETHTOOL_DECLARE_LINK_MODE_MASK(supported);
-	u32 advertising;
 	int ret;
 
 	memset(&config, 0, sizeof(config));
-	ethtool_convert_legacy_u32_to_link_mode(supported, phy->supported);
-	ethtool_convert_legacy_u32_to_link_mode(config.advertising,
-						phy->advertising);
+	linkmode_copy(supported, phy->supported);
+	linkmode_copy(config.advertising, phy->advertising);
 	config.interface = pl->link_config.interface;
 
 	/*
@@ -700,15 +670,14 @@ static int phylink_bringup_phy(struct phylink *pl, struct phy_device *phy)
 	linkmode_copy(pl->link_config.advertising, config.advertising);
 
 	/* Restrict the phy advertisement according to the MAC support. */
-	ethtool_convert_link_mode_to_legacy_u32(&advertising, config.advertising);
-	phy->advertising = advertising;
+	linkmode_copy(phy->advertising, config.advertising);
 	mutex_unlock(&pl->state_mutex);
 	mutex_unlock(&phy->lock);
 
 	netdev_dbg(pl->netdev,
-		   "phy: setting supported %*pb advertising 0x%08x\n",
+		   "phy: setting supported %*pb advertising %*pb\n",
 		   __ETHTOOL_LINK_MODE_MASK_NBITS, pl->supported,
-		   phy->advertising);
+		   __ETHTOOL_LINK_MODE_MASK_NBITS, phy->advertising);
 
 	phy_start_machine(phy);
 	if (phy->irq > 0)
@@ -1106,8 +1075,7 @@ int phylink_ethtool_ksettings_set(struct phylink *pl,
 		 * duplex.
 		 */
 		s = phy_lookup_setting(kset->base.speed, kset->base.duplex,
-				       pl->supported,
-				       __ETHTOOL_LINK_MODE_MASK_NBITS, false);
+				       pl->supported, false);
 		if (!s)
 			return -EINVAL;
 

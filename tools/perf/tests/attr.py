@@ -1,4 +1,3 @@
-#! /usr/bin/python
 # SPDX-License-Identifier: GPL-2.0
 
 from __future__ import print_function
@@ -10,11 +9,11 @@ import optparse
 import tempfile
 import logging
 import shutil
+
 try:
-    import ConfigParser as configparser
-except ImportError:
-    # Python 3 renamed ConfigParser to configparser
     import configparser
+except ImportError:
+    import ConfigParser as configparser
 
 def data_equal(a, b):
     # Allow multiple values in assignment separated by '|'
@@ -369,7 +368,7 @@ def main():
     parser.add_option("-p", "--perf",
                       action="store", type="string", dest="perf")
     parser.add_option("-v", "--verbose",
-                      action="count", dest="verbose")
+                      default=0, action="count", dest="verbose")
 
     options, args = parser.parse_args()
     if args:

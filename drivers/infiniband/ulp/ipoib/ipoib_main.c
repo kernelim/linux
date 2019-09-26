@@ -167,7 +167,7 @@ int ipoib_open(struct net_device *dev)
 			if (flags & IFF_UP)
 				continue;
 
-			dev_change_flags(cpriv->dev, flags | IFF_UP);
+			dev_change_flags(cpriv->dev, flags | IFF_UP, NULL);
 		}
 		up_read(&priv->vlan_rwsem);
 	}
@@ -207,7 +207,7 @@ static int ipoib_stop(struct net_device *dev)
 			if (!(flags & IFF_UP))
 				continue;
 
-			dev_change_flags(cpriv->dev, flags & ~IFF_UP);
+			dev_change_flags(cpriv->dev, flags & ~IFF_UP, NULL);
 		}
 		up_read(&priv->vlan_rwsem);
 	}
@@ -243,7 +243,8 @@ static int ipoib_change_mtu(struct net_device *dev, int new_mtu)
 		return 0;
 	}
 
-	if (new_mtu > IPOIB_UD_MTU(priv->max_ib_mtu))
+	if (new_mtu < (ETH_MIN_MTU + IPOIB_ENCAP_LEN) ||
+	    new_mtu > IPOIB_UD_MTU(priv->max_ib_mtu))
 		return -EINVAL;
 
 	priv->admin_mtu = new_mtu;
@@ -765,8 +766,10 @@ static void path_rec_completion(int status,
 		struct rdma_ah_attr av;
 
 		if (!ib_init_ah_attr_from_path(priv->ca, priv->port,
-					       pathrec, &av))
+					       pathrec, &av, NULL)) {
 			ah = ipoib_create_ah(dev, priv->pd, &av);
+			rdma_destroy_ah_attr(&av);
+		}
 	}
 
 	spin_lock_irqsave(&priv->lock, flags);
@@ -1194,7 +1197,9 @@ static void ipoib_timeout(struct net_device *dev)
 static int ipoib_hard_header(struct sk_buff *skb,
 			     struct net_device *dev,
 			     unsigned short type,
-			     const void *daddr, const void *saddr, unsigned len)
+			     const void *daddr,
+			     const void *saddr,
+			     unsigned int len)
 {
 	struct ipoib_header *header;
 
@@ -1513,7 +1518,7 @@ static int ipoib_neigh_hash_init(struct ipoib_dev_priv *priv)
 	if (!htbl)
 		return -ENOMEM;
 	size = roundup_pow_of_two(arp_tbl.gc_thresh3);
-	buckets = kcalloc(size, sizeof(*buckets), GFP_KERNEL);
+	buckets = kvcalloc(size, sizeof(*buckets), GFP_KERNEL);
 	if (!buckets) {
 		kfree(htbl);
 		return -ENOMEM;
@@ -1540,7 +1545,7 @@ static void neigh_hash_free_rcu(struct rcu_head *head)
 	struct ipoib_neigh __rcu **buckets = htbl->buckets;
 	struct ipoib_neigh_table *ntbl = htbl->ntbl;
 
-	kfree(buckets);
+	kvfree(buckets);
 	kfree(htbl);
 	complete(&ntbl->deleted);
 }
@@ -1767,7 +1772,8 @@ static int ipoib_dev_init(struct net_device *dev)
 		goto out_free_pd;
 	}
 
-	if (ipoib_neigh_hash_init(priv) < 0) {
+	ret = ipoib_neigh_hash_init(priv);
+	if (ret) {
 		pr_warn("%s failed to init neigh hash\n", dev->name);
 		goto out_dev_uninit;
 	}
@@ -1817,7 +1823,7 @@ static void ipoib_parent_unregister_pre(struct net_device *ndev)
 	 * running ensures the it will not add more work.
 	 */
 	rtnl_lock();
-	dev_change_flags(priv->dev, priv->dev->flags & ~IFF_UP);
+	dev_change_flags(priv->dev, priv->dev->flags & ~IFF_UP, NULL);
 	rtnl_unlock();
 
 	/* ipoib_event() cannot be running once this returns */
@@ -1865,7 +1871,7 @@ static int ipoib_parent_init(struct net_device *ndev)
 		return result;
 	}
 
-	result = ib_query_gid(priv->ca, priv->port, 0, &priv->local_gid, NULL);
+	result = rdma_query_gid(priv->ca, priv->port, 0, &priv->local_gid);
 	if (result) {
 		pr_warn("%s: rdma_query_gid port %d failed (ret = %d)\n",
 			priv->ca->name, priv->port, result);
@@ -1875,6 +1881,8 @@ static int ipoib_parent_init(struct net_device *ndev)
 	       sizeof(union ib_gid));
 
 	SET_NETDEV_DEV(priv->dev, priv->ca->dev.parent);
+	priv->dev->dev_port = priv->port - 1;
+	/* Let's set this one too for backwards compatibility. */
 	priv->dev->dev_id = priv->port - 1;
 
 	return 0;
@@ -2380,6 +2388,35 @@ int ipoib_add_pkey_attr(struct net_device *dev)
 	return device_create_file(&dev->dev, &dev_attr_pkey);
 }
 
+/*
+ * We erroneously exposed the iface's port number in the dev_id
+ * sysfs field long after dev_port was introduced for that purpose[1],
+ * and we need to stop everyone from relying on that.
+ * Let's overload the shower routine for the dev_id file here
+ * to gently bring the issue up.
+ *
+ * [1] https://www.spinics.net/lists/netdev/msg272123.html
+ */
+static ssize_t dev_id_show(struct device *dev,
+			   struct device_attribute *attr, char *buf)
+{
+	struct net_device *ndev = to_net_dev(dev);
+
+	if (ndev->dev_id == ndev->dev_port)
+		netdev_info_once(ndev,
+			"\"%s\" wants to know my dev_id. Should it look at dev_port instead? See Documentation/ABI/testing/sysfs-class-net for more info.\n",
+			current->comm);
+
+	return sprintf(buf, "%#x\n", ndev->dev_id);
+}
+static DEVICE_ATTR_RO(dev_id);
+
+static int ipoib_intercept_dev_id_attr(struct net_device *dev)
+{
+	device_remove_file(&dev->dev, &dev_attr_dev_id);
+	return device_create_file(&dev->dev, &dev_attr_dev_id);
+}
+
 static struct net_device *ipoib_add_port(const char *format,
 					 struct ib_device *hca, u8 port)
 {
@@ -2416,8 +2453,8 @@ static struct net_device *ipoib_add_port(const char *format,
 		return ERR_PTR(result);
 	}
 
-	if (hca->rdma_netdev_get_params) {
-		int rc = hca->rdma_netdev_get_params(hca, port,
+	if (hca->ops.rdma_netdev_get_params) {
+		int rc = hca->ops.rdma_netdev_get_params(hca, port,
 						     RDMA_NETDEV_IPOIB,
 						     &params);
 
@@ -2432,6 +2469,8 @@ static struct net_device *ipoib_add_port(const char *format,
 	 */
 	ndev->priv_destructor = ipoib_intf_free;
 
+	if (ipoib_intercept_dev_id_attr(ndev))
+		goto sysfs_failed;
 	if (ipoib_cm_add_mode_attr(ndev))
 		goto sysfs_failed;
 	if (ipoib_add_pkey_attr(ndev))

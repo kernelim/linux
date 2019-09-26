@@ -37,7 +37,8 @@ struct vmcoredd_node {
 };
 
 #ifdef CONFIG_PROC_KCORE
-extern void kclist_add(struct kcore_list *, void *, size_t, int type);
+void __init kclist_add(struct kcore_list *, void *, size_t, int type);
+
 static inline
 void kclist_add_remap(struct kcore_list *m, void *addr, void *vaddr, size_t sz)
 {

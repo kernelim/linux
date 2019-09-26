@@ -159,7 +159,8 @@ static int usnic_ib_fill_create_qp_resp(struct usnic_ib_qp_grp *qp_grp,
 
 	err = ib_copy_to_udata(udata, &resp, sizeof(resp));
 	if (err) {
-		usnic_err("Failed to copy udata for %s", us_ibdev->ib_dev.name);
+		usnic_err("Failed to copy udata for %s",
+			  dev_name(&us_ibdev->ib_dev.dev));
 		return err;
 	}
 
@@ -197,7 +198,7 @@ find_free_vf_and_create_qp_grp(struct usnic_ib_dev *us_ibdev,
 			vnic = vf->vnic;
 			if (!usnic_vnic_check_room(vnic, res_spec)) {
 				usnic_dbg("Found used vnic %s from %s\n",
-						us_ibdev->ib_dev.name,
+						dev_name(&us_ibdev->ib_dev.dev),
 						pci_name(usnic_vnic_get_pdev(
 									vnic)));
 				qp_grp = usnic_ib_qp_grp_create(us_ibdev->ufdev,
@@ -230,7 +231,8 @@ find_free_vf_and_create_qp_grp(struct usnic_ib_dev *us_ibdev,
 		spin_unlock(&vf->lock);
 	}
 
-	usnic_info("No free qp grp found on %s\n", us_ibdev->ib_dev.name);
+	usnic_info("No free qp grp found on %s\n",
+		   dev_name(&us_ibdev->ib_dev.dev));
 	return ERR_PTR(-ENOMEM);
 
 qp_grp_check:
@@ -447,7 +449,7 @@ struct net_device *usnic_get_netdev(struct ib_device *device, u8 port_num)
 int usnic_ib_query_pkey(struct ib_device *ibdev, u8 port, u16 index,
 				u16 *pkey)
 {
-	if (index > 1)
+	if (index > 0)
 		return -EINVAL;
 
 	*pkey = 0xffff;
@@ -474,7 +476,7 @@ struct ib_pd *usnic_ib_alloc_pd(struct ib_device *ibdev,
 	}
 
 	usnic_info("domain 0x%p allocated for context 0x%p and device %s\n",
-			pd, context, ibdev->name);
+		   pd, context, dev_name(&ibdev->dev));
 	return &pd->ibpd;
 }
 
@@ -511,20 +513,20 @@ struct ib_qp *usnic_ib_create_qp(struct ib_pd *pd,
 	err = ib_copy_from_udata(&cmd, udata, sizeof(cmd));
 	if (err) {
 		usnic_err("%s: cannot copy udata for create_qp\n",
-				us_ibdev->ib_dev.name);
+			  dev_name(&us_ibdev->ib_dev.dev));
 		return ERR_PTR(-EINVAL);
 	}
 
 	err = create_qp_validate_user_data(cmd);
 	if (err) {
 		usnic_err("%s: Failed to validate user data\n",
-				us_ibdev->ib_dev.name);
+			  dev_name(&us_ibdev->ib_dev.dev));
 		return ERR_PTR(-EINVAL);
 	}
 
 	if (init_attr->qp_type != IB_QPT_UD) {
 		usnic_err("%s asked to make a non-UD QP: %d\n",
-				us_ibdev->ib_dev.name, init_attr->qp_type);
+			  dev_name(&us_ibdev->ib_dev.dev), init_attr->qp_type);
 		return ERR_PTR(-EINVAL);
 	}
 
@@ -669,7 +671,7 @@ int usnic_ib_dereg_mr(struct ib_mr *ibmr)
 
 	usnic_dbg("va 0x%lx length 0x%zx\n", mr->umem->va, mr->umem->length);
 
-	usnic_uiom_reg_release(mr->umem, ibmr->pd->uobject->context->closing);
+	usnic_uiom_reg_release(mr->umem, ibmr->uobject->context);
 	kfree(mr);
 	return 0;
 }
@@ -761,6 +763,7 @@ int usnic_ib_mmap(struct ib_ucontext *context,
 /* In ib callbacks section -  Start of stub funcs */
 struct ib_ah *usnic_ib_create_ah(struct ib_pd *pd,
 				 struct rdma_ah_attr *ah_attr,
+				 u32 flags,
 				 struct ib_udata *udata)
 
 {
@@ -768,21 +771,21 @@ struct ib_ah *usnic_ib_create_ah(struct ib_pd *pd,
 	return ERR_PTR(-EPERM);
 }
 
-int usnic_ib_destroy_ah(struct ib_ah *ah)
+int usnic_ib_destroy_ah(struct ib_ah *ah, u32 flags)
 {
 	usnic_dbg("\n");
 	return -EINVAL;
 }
 
-int usnic_ib_post_send(struct ib_qp *ibqp, struct ib_send_wr *wr,
-				struct ib_send_wr **bad_wr)
+int usnic_ib_post_send(struct ib_qp *ibqp, const struct ib_send_wr *wr,
+		       const struct ib_send_wr **bad_wr)
 {
 	usnic_dbg("\n");
 	return -EINVAL;
 }
 
-int usnic_ib_post_recv(struct ib_qp *ibqp, struct ib_recv_wr *wr,
-				struct ib_recv_wr **bad_wr)
+int usnic_ib_post_recv(struct ib_qp *ibqp, const struct ib_recv_wr *wr,
+		       const struct ib_recv_wr **bad_wr)
 {
 	usnic_dbg("\n");
 	return -EINVAL;

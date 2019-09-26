@@ -618,7 +618,7 @@ static ssize_t read_port(struct file *file, char __user *buf,
 	if (kernel_is_locked_down("/dev/port read"))
 		return -EPERM;
 
-	if (!access_ok(VERIFY_WRITE, buf, count))
+	if (!access_ok(buf, count))
 		return -EFAULT;
 	while (count-- > 0 && i < 65536) {
 		if (__put_user(inb(i), tmp) < 0)
@@ -639,7 +639,7 @@ static ssize_t write_port(struct file *file, const char __user *buf,
 	if (kernel_is_locked_down("/dev/port write"))
 		return -EPERM;
 
-	if (!access_ok(VERIFY_READ, buf, count))
+	if (!access_ok(buf, count))
 		return -EFAULT;
 	while (count-- > 0 && i < 65536) {
 		char c;

@@ -45,6 +45,7 @@
 #define VMCI_CAPS_GUESTCALL     0x2
 #define VMCI_CAPS_DATAGRAM      0x4
 #define VMCI_CAPS_NOTIFICATIONS 0x8
+#define VMCI_CAPS_PPN64         0x10
 
 /* Interrupt Cause register bits. */
 #define VMCI_ICR_DATAGRAM      0x1
@@ -68,9 +69,18 @@ enum {
 
 /*
  * A single VMCI device has an upper limit of 128MB on the amount of
- * memory that can be used for queue pairs.
+ * memory that can be used for queue pairs. Since each queue pair
+ * consists of at least two pages, the memory limit also dictates the
+ * number of queue pairs a guest can create.
  */
 #define VMCI_MAX_GUEST_QP_MEMORY (128 * 1024 * 1024)
+#define VMCI_MAX_GUEST_QP_COUNT  (VMCI_MAX_GUEST_QP_MEMORY / PAGE_SIZE / 2)
+
+/*
+ * There can be at most PAGE_SIZE doorbells since there is one doorbell
+ * per byte in the doorbell bitmap page.
+ */
+#define VMCI_MAX_GUEST_DOORBELL_COUNT PAGE_SIZE
 
 /*
  * Queues with pre-mapped data pages must be small, so that we don't pin
@@ -569,8 +579,10 @@ struct vmci_resource_query_msg {
  */
 struct vmci_notify_bm_set_msg {
 	struct vmci_datagram hdr;
-	u32 bitmap_ppn;
-	u32 _pad;
+	union {
+		u32 bitmap_ppn32;
+		u64 bitmap_ppn64;
+	};
 };
 
 /*

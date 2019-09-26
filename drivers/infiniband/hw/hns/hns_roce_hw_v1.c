@@ -58,8 +58,9 @@ static void set_raddr_seg(struct hns_roce_wqe_raddr_seg *rseg, u64 remote_addr,
 	rseg->len   = 0;
 }
 
-static int hns_roce_v1_post_send(struct ib_qp *ibqp, struct ib_send_wr *wr,
-				 struct ib_send_wr **bad_wr)
+static int hns_roce_v1_post_send(struct ib_qp *ibqp,
+				 const struct ib_send_wr *wr,
+				 const struct ib_send_wr **bad_wr)
 {
 	struct hns_roce_dev *hr_dev = to_hr_dev(ibqp->device);
 	struct hns_roce_ah *ah = to_hr_ah(ud_wr(wr)->ah);
@@ -346,8 +347,9 @@ out:
 	return ret;
 }
 
-static int hns_roce_v1_post_recv(struct ib_qp *ibqp, struct ib_recv_wr *wr,
-				 struct ib_recv_wr **bad_wr)
+static int hns_roce_v1_post_recv(struct ib_qp *ibqp,
+				 const struct ib_recv_wr *wr,
+				 const struct ib_recv_wr **bad_wr)
 {
 	int ret = 0;
 	int nreq = 0;
@@ -996,7 +998,8 @@ static int hns_roce_v1_send_lp_wqe(struct hns_roce_qp *hr_qp)
 {
 	struct hns_roce_dev *hr_dev = to_hr_dev(hr_qp->ibqp.device);
 	struct device *dev = &hr_dev->pdev->dev;
-	struct ib_send_wr send_wr, *bad_wr;
+	struct ib_send_wr send_wr;
+	const struct ib_send_wr *bad_wr;
 	int ret;
 
 	memset(&send_wr, 0, sizeof(send_wr));
@@ -1773,7 +1776,7 @@ static int hns_roce_v1_chk_mbox(struct hns_roce_dev *hr_dev,
 }
 
 static int hns_roce_v1_set_gid(struct hns_roce_dev *hr_dev, u8 port,
-			       int gid_index, union ib_gid *gid,
+			       int gid_index, const union ib_gid *gid,
 			       const struct ib_gid_attr *attr)
 {
 	u32 *p = NULL;
@@ -3922,7 +3925,7 @@ int hns_roce_v1_destroy_qp(struct ib_qp *ibqp)
 	struct hns_roce_qp_work *qp_work;
 	struct hns_roce_v1_priv *priv;
 	struct hns_roce_cq *send_cq, *recv_cq;
-	int is_user = !!ibqp->pd->uobject;
+	bool is_user = ibqp->uobject;
 	int is_timeout = 0;
 	int ret;
 
@@ -4789,6 +4792,16 @@ static void hns_roce_v1_cleanup_eq_table(struct hns_roce_dev *hr_dev)
 	kfree(eq_table->eq);
 }
 
+static const struct ib_device_ops hns_roce_v1_dev_ops = {
+	.destroy_qp = hns_roce_v1_destroy_qp,
+	.modify_cq = hns_roce_v1_modify_cq,
+	.poll_cq = hns_roce_v1_poll_cq,
+	.post_recv = hns_roce_v1_post_recv,
+	.post_send = hns_roce_v1_post_send,
+	.query_qp = hns_roce_v1_query_qp,
+	.req_notify_cq = hns_roce_v1_req_notify_cq,
+};
+
 static const struct hns_roce_hw hns_roce_hw_v1 = {
 	.reset = hns_roce_v1_reset,
 	.hw_profile = hns_roce_v1_profile,
@@ -4814,6 +4827,7 @@ static const struct hns_roce_hw hns_roce_hw_v1 = {
 	.destroy_cq = hns_roce_v1_destroy_cq,
 	.init_eq = hns_roce_v1_init_eq_table,
 	.cleanup_eq = hns_roce_v1_cleanup_eq_table,
+	.hns_roce_dev_ops = &hns_roce_v1_dev_ops,
 };
 
 static const struct of_device_id hns_roce_of_match[] = {
@@ -4989,7 +5003,7 @@ static int hns_roce_probe(struct platform_device *pdev)
 	struct hns_roce_dev *hr_dev;
 	struct device *dev = &pdev->dev;
 
-	hr_dev = (struct hns_roce_dev *)ib_alloc_device(sizeof(*hr_dev));
+	hr_dev = ib_alloc_device(hns_roce_dev, ib_dev);
 	if (!hr_dev)
 		return -ENOMEM;
 

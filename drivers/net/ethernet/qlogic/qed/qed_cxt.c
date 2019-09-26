@@ -40,7 +40,6 @@
 #include <linux/pci.h>
 #include <linux/slab.h>
 #include <linux/string.h>
-#include <linux/bitops.h>
 #include "qed.h"
 #include "qed_cxt.h"
 #include "qed_dev_api.h"
@@ -1531,7 +1530,7 @@ void qed_qm_init_pf(struct qed_hwfn *p_hwfn,
 }
 
 /* CM PF */
-void qed_cm_init_pf(struct qed_hwfn *p_hwfn)
+static void qed_cm_init_pf(struct qed_hwfn *p_hwfn)
 {
 	/* XCM pure-LB queue */
 	STORE_RT_REG(p_hwfn, XCM_REG_CON_PHY_Q3_RT_OFFSET,
@@ -2130,17 +2129,18 @@ int qed_cxt_set_pf_params(struct qed_hwfn *p_hwfn, u32 rdma_tasks)
 					       rdma_tasks);
 		/* no need for break since RoCE coexist with Ethernet */
 	}
+	/* fall through */
 	case QED_PCI_ETH:
 	{
 		struct qed_eth_pf_params *p_params =
 		    &p_hwfn->pf_params.eth_pf_params;
 
-			if (!p_params->num_vf_cons)
-				p_params->num_vf_cons =
-				    ETH_PF_PARAMS_VF_CONS_DEFAULT;
-			qed_cxt_set_proto_cid_count(p_hwfn, PROTOCOLID_ETH,
-						    p_params->num_cons,
-						    p_params->num_vf_cons);
+		if (!p_params->num_vf_cons)
+			p_params->num_vf_cons =
+			    ETH_PF_PARAMS_VF_CONS_DEFAULT;
+		qed_cxt_set_proto_cid_count(p_hwfn, PROTOCOLID_ETH,
+					    p_params->num_cons,
+					    p_params->num_vf_cons);
 		p_hwfn->p_cxt_mngr->arfs_count = p_params->num_arfs_filters;
 		break;
 	}

@@ -275,14 +275,13 @@ static int pnv_php_add_devtree(struct pnv_php_slot *php_slot)
 		goto free_fdt1;
 	}
 
-	fdt = kzalloc(fdt_totalsize(fdt1), GFP_KERNEL);
+	fdt = kmemdup(fdt1, fdt_totalsize(fdt1), GFP_KERNEL);
 	if (!fdt) {
 		ret = -ENOMEM;
 		goto free_fdt1;
 	}
 
 	/* Unflatten device tree blob */
-	memcpy(fdt, fdt1, fdt_totalsize(fdt1));
 	dt = of_fdt_unflatten_tree(fdt, php_slot->dn, NULL);
 	if (!dt) {
 		ret = -EINVAL;
@@ -747,7 +746,7 @@ static irqreturn_t pnv_php_interrupt(int irq, void *data)
 		pe = edev ? edev->pe : NULL;
 		if (pe) {
 			eeh_serialize_lock(&flags);
-			eeh_pe_state_mark(pe, EEH_PE_ISOLATED);
+			eeh_pe_mark_isolated(pe);
 			eeh_serialize_unlock(flags);
 			eeh_pe_set_option(pe, EEH_OPT_FREEZE_PE);
 		}

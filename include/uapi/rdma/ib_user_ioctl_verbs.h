@@ -35,10 +35,22 @@
 #define IB_USER_IOCTL_VERBS_H
 
 #include <linux/types.h>
+#include <rdma/ib_user_verbs.h>
 
 #ifndef RDMA_UAPI_PTR
 #define RDMA_UAPI_PTR(_type, _name)	__aligned_u64 _name
 #endif
+
+enum ib_uverbs_access_flags {
+	IB_UVERBS_ACCESS_LOCAL_WRITE = 1 << 0,
+	IB_UVERBS_ACCESS_REMOTE_WRITE = 1 << 1,
+	IB_UVERBS_ACCESS_REMOTE_READ = 1 << 2,
+	IB_UVERBS_ACCESS_REMOTE_ATOMIC = 1 << 3,
+	IB_UVERBS_ACCESS_MW_BIND = 1 << 4,
+	IB_UVERBS_ACCESS_ZERO_BASED = 1 << 5,
+	IB_UVERBS_ACCESS_ON_DEMAND = 1 << 6,
+	IB_UVERBS_ACCESS_HUGETLB = 1 << 7,
+};
 
 enum ib_uverbs_query_port_cap_flags {
 	IB_UVERBS_PCF_SM = 1 << 1,
@@ -76,6 +88,10 @@ enum ib_uverbs_query_port_cap_flags {
 
 	/* NOTE this is an internal flag, not an IBA flag */
 	IB_UVERBS_PCF_IP_BASED_GIDS = 1 << 26,
+};
+
+enum ib_uverbs_query_port_flags {
+	IB_UVERBS_QPF_GRH_REQUIRED = 1 << 0,
 };
 
 enum ib_uverbs_flow_action_esp_keymat {
@@ -135,6 +151,26 @@ struct ib_uverbs_flow_action_esp {
 	__u32		tfc_pad;
 	__u32		flags;
 	__aligned_u64	hard_limit_pkts;
+};
+
+enum ib_uverbs_read_counters_flags {
+	/* prefer read values from driver cache */
+	IB_UVERBS_READ_COUNTERS_PREFER_CACHED = 1 << 0,
+};
+
+enum ib_uverbs_advise_mr_advice {
+	IB_UVERBS_ADVISE_MR_ADVICE_PREFETCH,
+	IB_UVERBS_ADVISE_MR_ADVICE_PREFETCH_WRITE,
+};
+
+enum ib_uverbs_advise_mr_flag {
+	IB_UVERBS_ADVISE_MR_FLAG_FLUSH = 1 << 0,
+};
+
+struct ib_uverbs_query_port_resp_ex {
+	struct ib_uverbs_query_port_resp legacy_resp;
+	__u16 port_cap_flags2;
+	__u8  reserved[6];
 };
 
 #endif

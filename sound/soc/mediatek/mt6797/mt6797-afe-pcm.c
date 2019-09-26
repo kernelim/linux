@@ -401,9 +401,7 @@ static const struct mtk_base_memif_data memif_data[MT6797_MEMIF_NUM] = {
 		.hd_reg = AFE_MEMIF_HD_MODE,
 		.hd_shift = DL1_HD_SFT,
 		.agent_disable_reg = -1,
-		.agent_disable_shift = -1,
 		.msb_reg = -1,
-		.msb_shift = -1,
 	},
 	[MT6797_MEMIF_DL2] = {
 		.name = "DL2",
@@ -420,9 +418,7 @@ static const struct mtk_base_memif_data memif_data[MT6797_MEMIF_NUM] = {
 		.hd_reg = AFE_MEMIF_HD_MODE,
 		.hd_shift = DL2_HD_SFT,
 		.agent_disable_reg = -1,
-		.agent_disable_shift = -1,
 		.msb_reg = -1,
-		.msb_shift = -1,
 	},
 	[MT6797_MEMIF_DL3] = {
 		.name = "DL3",
@@ -439,9 +435,7 @@ static const struct mtk_base_memif_data memif_data[MT6797_MEMIF_NUM] = {
 		.hd_reg = AFE_MEMIF_HD_MODE,
 		.hd_shift = DL3_HD_SFT,
 		.agent_disable_reg = -1,
-		.agent_disable_shift = -1,
 		.msb_reg = -1,
-		.msb_shift = -1,
 	},
 	[MT6797_MEMIF_VUL] = {
 		.name = "VUL",
@@ -458,9 +452,7 @@ static const struct mtk_base_memif_data memif_data[MT6797_MEMIF_NUM] = {
 		.hd_reg = AFE_MEMIF_HD_MODE,
 		.hd_shift = VUL_HD_SFT,
 		.agent_disable_reg = -1,
-		.agent_disable_shift = -1,
 		.msb_reg = -1,
-		.msb_shift = -1,
 	},
 	[MT6797_MEMIF_AWB] = {
 		.name = "AWB",
@@ -477,9 +469,7 @@ static const struct mtk_base_memif_data memif_data[MT6797_MEMIF_NUM] = {
 		.hd_reg = AFE_MEMIF_HD_MODE,
 		.hd_shift = AWB_HD_SFT,
 		.agent_disable_reg = -1,
-		.agent_disable_shift = -1,
 		.msb_reg = -1,
-		.msb_shift = -1,
 	},
 	[MT6797_MEMIF_VUL12] = {
 		.name = "VUL12",
@@ -496,9 +486,7 @@ static const struct mtk_base_memif_data memif_data[MT6797_MEMIF_NUM] = {
 		.hd_reg = AFE_MEMIF_HD_MODE,
 		.hd_shift = VUL_DATA2_HD_SFT,
 		.agent_disable_reg = -1,
-		.agent_disable_shift = -1,
 		.msb_reg = -1,
-		.msb_shift = -1,
 	},
 	[MT6797_MEMIF_DAI] = {
 		.name = "DAI",
@@ -515,9 +503,7 @@ static const struct mtk_base_memif_data memif_data[MT6797_MEMIF_NUM] = {
 		.hd_reg = AFE_MEMIF_HD_MODE,
 		.hd_shift = DAI_HD_SFT,
 		.agent_disable_reg = -1,
-		.agent_disable_shift = -1,
 		.msb_reg = -1,
-		.msb_shift = -1,
 	},
 	[MT6797_MEMIF_MOD_DAI] = {
 		.name = "MOD_DAI",
@@ -534,9 +520,7 @@ static const struct mtk_base_memif_data memif_data[MT6797_MEMIF_NUM] = {
 		.hd_reg = AFE_MEMIF_HD_MODE,
 		.hd_shift = MOD_DAI_HD_SFT,
 		.agent_disable_reg = -1,
-		.agent_disable_shift = -1,
 		.msb_reg = -1,
-		.msb_shift = -1,
 	},
 };
 
@@ -733,6 +717,34 @@ static const struct snd_soc_component_driver mt6797_afe_component = {
 	.probe = mt6797_afe_component_probe,
 };
 
+static int mt6797_dai_memif_register(struct mtk_base_afe *afe)
+{
+	struct mtk_base_afe_dai *dai;
+
+	dai = devm_kzalloc(afe->dev, sizeof(*dai), GFP_KERNEL);
+	if (!dai)
+		return -ENOMEM;
+
+	list_add(&dai->list, &afe->sub_dais);
+
+	dai->dai_drivers = mt6797_memif_dai_driver;
+	dai->num_dai_drivers = ARRAY_SIZE(mt6797_memif_dai_driver);
+
+	dai->dapm_widgets = mt6797_memif_widgets;
+	dai->num_dapm_widgets = ARRAY_SIZE(mt6797_memif_widgets);
+	dai->dapm_routes = mt6797_memif_routes;
+	dai->num_dapm_routes = ARRAY_SIZE(mt6797_memif_routes);
+	return 0;
+}
+
+typedef int (*dai_register_cb)(struct mtk_base_afe *);
+static const dai_register_cb dai_register_cbs[] = {
+	mt6797_dai_adda_register,
+	mt6797_dai_pcm_register,
+	mt6797_dai_hostless_register,
+	mt6797_dai_memif_register,
+};
+
 static int mt6797_afe_pcm_dev_probe(struct platform_device *pdev)
 {
 	struct mtk_base_afe *afe;
@@ -800,7 +812,7 @@ static int mt6797_afe_pcm_dev_probe(struct platform_device *pdev)
 	/* request irq */
 	irq_id = platform_get_irq(pdev, 0);
 	if (!irq_id) {
-		dev_err(dev, "%s no irq found\n", dev->of_node->name);
+		dev_err(dev, "%pOFn no irq found\n", dev->of_node);
 		return -ENXIO;
 	}
 	ret = devm_request_irq(dev, irq_id, mt6797_afe_irq_handler,
@@ -811,29 +823,24 @@ static int mt6797_afe_pcm_dev_probe(struct platform_device *pdev)
 	}
 
 	/* init sub_dais */
-	afe->num_sub_dais = MT6797_DAI_NUM;
-	afe->sub_dais = devm_kcalloc(dev, afe->num_sub_dais,
-				     sizeof(*afe->sub_dais),
-				     GFP_KERNEL);
-	if (!afe->sub_dais)
-		return -ENOMEM;
+	INIT_LIST_HEAD(&afe->sub_dais);
 
-	mt6797_dai_adda_register(afe);
-	mt6797_dai_pcm_register(afe);
-	mt6797_dai_hostless_register(afe);
-
-	afe->sub_dais[MT6797_MEMIF_DL1].dai_drivers = mt6797_memif_dai_driver;
-	afe->sub_dais[MT6797_MEMIF_DL1].num_dai_drivers =
-		ARRAY_SIZE(mt6797_memif_dai_driver);
-	afe->sub_dais[MT6797_MEMIF_DL1].dapm_widgets = mt6797_memif_widgets;
-	afe->sub_dais[MT6797_MEMIF_DL1].num_dapm_widgets =
-		ARRAY_SIZE(mt6797_memif_widgets);
-	afe->sub_dais[MT6797_MEMIF_DL1].dapm_routes = mt6797_memif_routes;
-	afe->sub_dais[MT6797_MEMIF_DL1].num_dapm_routes =
-		ARRAY_SIZE(mt6797_memif_routes);
+	for (i = 0; i < ARRAY_SIZE(dai_register_cbs); i++) {
+		ret = dai_register_cbs[i](afe);
+		if (ret) {
+			dev_warn(afe->dev, "dai register i %d fail, ret %d\n",
+				 i, ret);
+			return ret;
+		}
+	}
 
 	/* init dai_driver and component_driver */
-	mtk_afe_combine_sub_dai(afe);
+	ret = mtk_afe_combine_sub_dai(afe);
+	if (ret) {
+		dev_warn(afe->dev, "mtk_afe_combine_sub_dai fail, ret %d\n",
+			 ret);
+		return ret;
+	}
 
 	afe->mtk_afe_hardware = &mt6797_afe_hardware;
 	afe->memif_fs = mt6797_memif_fs;

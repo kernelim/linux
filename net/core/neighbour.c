@@ -2158,15 +2158,47 @@ errout:
 	return err;
 }
 
+static int neightbl_valid_dump_info(const struct nlmsghdr *nlh,
+				    struct netlink_ext_ack *extack)
+{
+	struct ndtmsg *ndtm;
+
+	if (nlh->nlmsg_len < nlmsg_msg_size(sizeof(*ndtm))) {
+		NL_SET_ERR_MSG(extack, "Invalid header for neighbor table dump request");
+		return -EINVAL;
+	}
+
+	ndtm = nlmsg_data(nlh);
+	if (ndtm->ndtm_pad1  || ndtm->ndtm_pad2) {
+		NL_SET_ERR_MSG(extack, "Invalid values in header for neighbor table dump request");
+		return -EINVAL;
+	}
+
+	if (nlmsg_attrlen(nlh, sizeof(*ndtm))) {
+		NL_SET_ERR_MSG(extack, "Invalid data after header in neighbor table dump request");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static int neightbl_dump_info(struct sk_buff *skb, struct netlink_callback *cb)
 {
+	const struct nlmsghdr *nlh = cb->nlh;
 	struct net *net = sock_net(skb->sk);
 	int family, tidx, nidx = 0;
 	int tbl_skip = cb->args[0];
 	int neigh_skip = cb->args[1];
 	struct neigh_table *tbl;
 
-	family = ((struct rtgenmsg *) nlmsg_data(cb->nlh))->rtgen_family;
+	if (cb->strict_check) {
+		int err = neightbl_valid_dump_info(nlh, cb->extack);
+
+		if (err < 0)
+			return err;
+	}
+
+	family = ((struct rtgenmsg *)nlmsg_data(nlh))->rtgen_family;
 
 	for (tidx = 0; tidx < NEIGH_NR_TABLES; tidx++) {
 		struct neigh_parms *p;
@@ -2179,7 +2211,7 @@ static int neightbl_dump_info(struct sk_buff *skb, struct netlink_callback *cb)
 			continue;
 
 		if (neightbl_fill_info(skb, tbl, NETLINK_CB(cb->skb).portid,
-				       cb->nlh->nlmsg_seq, RTM_NEWNEIGHTBL,
+				       nlh->nlmsg_seq, RTM_NEWNEIGHTBL,
 				       NLM_F_MULTI) < 0)
 			break;
 
@@ -2194,7 +2226,7 @@ static int neightbl_dump_info(struct sk_buff *skb, struct netlink_callback *cb)
 
 			if (neightbl_fill_param_info(skb, tbl, p,
 						     NETLINK_CB(cb->skb).portid,
-						     cb->nlh->nlmsg_seq,
+						     nlh->nlmsg_seq,
 						     RTM_NEWNEIGHTBL,
 						     NLM_F_MULTI) < 0)
 				goto out;
@@ -2308,7 +2340,7 @@ static bool neigh_master_filtered(struct net_device *dev, int master_idx)
 	if (!master_idx)
 		return false;
 
-	master = netdev_master_upper_dev_get(dev);
+	master = dev ? netdev_master_upper_dev_get(dev) : NULL;
 	if (!master || master->ifindex != master_idx)
 		return true;
 
@@ -2317,41 +2349,30 @@ static bool neigh_master_filtered(struct net_device *dev, int master_idx)
 
 static bool neigh_ifindex_filtered(struct net_device *dev, int filter_idx)
 {
-	if (filter_idx && dev->ifindex != filter_idx)
+	if (filter_idx && (!dev || dev->ifindex != filter_idx))
 		return true;
 
 	return false;
 }
 
+struct neigh_dump_filter {
+	int master_idx;
+	int dev_idx;
+};
+
 static int neigh_dump_table(struct neigh_table *tbl, struct sk_buff *skb,
-			    struct netlink_callback *cb)
+			    struct netlink_callback *cb,
+			    struct neigh_dump_filter *filter)
 {
 	struct net *net = sock_net(skb->sk);
-	const struct nlmsghdr *nlh = cb->nlh;
-	struct nlattr *tb[NDA_MAX + 1];
 	struct neighbour *n;
 	int rc, h, s_h = cb->args[1];
 	int idx, s_idx = idx = cb->args[2];
 	struct neigh_hash_table *nht;
-	int filter_master_idx = 0, filter_idx = 0;
 	unsigned int flags = NLM_F_MULTI;
-	int err;
 
-	err = nlmsg_parse(nlh, sizeof(struct ndmsg), tb, NDA_MAX, NULL, NULL);
-	if (!err) {
-		if (tb[NDA_IFINDEX]) {
-			if (nla_len(tb[NDA_IFINDEX]) != sizeof(u32))
-				return -EINVAL;
-			filter_idx = nla_get_u32(tb[NDA_IFINDEX]);
-		}
-		if (tb[NDA_MASTER]) {
-			if (nla_len(tb[NDA_MASTER]) != sizeof(u32))
-				return -EINVAL;
-			filter_master_idx = nla_get_u32(tb[NDA_MASTER]);
-		}
-		if (filter_idx || filter_master_idx)
-			flags |= NLM_F_DUMP_FILTERED;
-	}
+	if (filter->dev_idx || filter->master_idx)
+		flags |= NLM_F_DUMP_FILTERED;
 
 	rcu_read_lock_bh();
 	nht = rcu_dereference_bh(tbl->nht);
@@ -2364,8 +2385,8 @@ static int neigh_dump_table(struct neigh_table *tbl, struct sk_buff *skb,
 		     n = rcu_dereference_bh(n->next)) {
 			if (idx < s_idx || !net_eq(dev_net(n->dev), net))
 				goto next;
-			if (neigh_ifindex_filtered(n->dev, filter_idx) ||
-			    neigh_master_filtered(n->dev, filter_master_idx))
+			if (neigh_ifindex_filtered(n->dev, filter->dev_idx) ||
+			    neigh_master_filtered(n->dev, filter->master_idx))
 				goto next;
 			if (neigh_fill_info(skb, n, NETLINK_CB(cb->skb).portid,
 					    cb->nlh->nlmsg_seq,
@@ -2387,12 +2408,17 @@ out:
 }
 
 static int pneigh_dump_table(struct neigh_table *tbl, struct sk_buff *skb,
-			     struct netlink_callback *cb)
+			     struct netlink_callback *cb,
+			     struct neigh_dump_filter *filter)
 {
 	struct pneigh_entry *n;
 	struct net *net = sock_net(skb->sk);
 	int rc, h, s_h = cb->args[3];
 	int idx, s_idx = idx = cb->args[4];
+	unsigned int flags = NLM_F_MULTI;
+
+	if (filter->dev_idx || filter->master_idx)
+		flags |= NLM_F_DUMP_FILTERED;
 
 	read_lock_bh(&tbl->lock);
 
@@ -2402,10 +2428,12 @@ static int pneigh_dump_table(struct neigh_table *tbl, struct sk_buff *skb,
 		for (n = tbl->phash_buckets[h], idx = 0; n; n = n->next) {
 			if (idx < s_idx || pneigh_net(n) != net)
 				goto next;
+			if (neigh_ifindex_filtered(n->dev, filter->dev_idx) ||
+			    neigh_master_filtered(n->dev, filter->master_idx))
+				goto next;
 			if (pneigh_fill_info(skb, n, NETLINK_CB(cb->skb).portid,
 					    cb->nlh->nlmsg_seq,
-					    RTM_NEWNEIGH,
-					    NLM_F_MULTI, tbl) < 0) {
+					    RTM_NEWNEIGH, flags, tbl) < 0) {
 				read_unlock_bh(&tbl->lock);
 				rc = -1;
 				goto out;
@@ -2424,21 +2452,95 @@ out:
 
 }
 
+static int neigh_valid_dump_req(const struct nlmsghdr *nlh,
+				bool strict_check,
+				struct neigh_dump_filter *filter,
+				struct netlink_ext_ack *extack)
+{
+	struct nlattr *tb[NDA_MAX + 1];
+	int err, i;
+
+	if (strict_check) {
+		struct ndmsg *ndm;
+
+		if (nlh->nlmsg_len < nlmsg_msg_size(sizeof(*ndm))) {
+			NL_SET_ERR_MSG(extack, "Invalid header for neighbor dump request");
+			return -EINVAL;
+		}
+
+		ndm = nlmsg_data(nlh);
+		if (ndm->ndm_pad1  || ndm->ndm_pad2  || ndm->ndm_ifindex ||
+		    ndm->ndm_state || ndm->ndm_type) {
+			NL_SET_ERR_MSG(extack, "Invalid values in header for neighbor dump request");
+			return -EINVAL;
+		}
+
+		if (ndm->ndm_flags & ~NTF_PROXY) {
+			NL_SET_ERR_MSG(extack, "Invalid flags in header for neighbor dump request");
+			return -EINVAL;
+		}
+
+		err = nlmsg_parse_strict(nlh, sizeof(struct ndmsg), tb, NDA_MAX,
+					 NULL, extack);
+	} else {
+		err = nlmsg_parse(nlh, sizeof(struct ndmsg), tb, NDA_MAX,
+				  NULL, extack);
+	}
+	if (err < 0)
+		return err;
+
+	for (i = 0; i <= NDA_MAX; ++i) {
+		if (!tb[i])
+			continue;
+
+		/* all new attributes should require strict_check */
+		switch (i) {
+		case NDA_IFINDEX:
+			if (nla_len(tb[i]) != sizeof(u32)) {
+				NL_SET_ERR_MSG(extack, "Invalid IFINDEX attribute in neighbor dump request");
+				return -EINVAL;
+			}
+			filter->dev_idx = nla_get_u32(tb[i]);
+			break;
+		case NDA_MASTER:
+			if (nla_len(tb[i]) != sizeof(u32)) {
+				NL_SET_ERR_MSG(extack, "Invalid MASTER attribute in neighbor dump request");
+				return -EINVAL;
+			}
+			filter->master_idx = nla_get_u32(tb[i]);
+			break;
+		default:
+			if (strict_check) {
+				NL_SET_ERR_MSG(extack, "Unsupported attribute in neighbor dump request");
+				return -EINVAL;
+			}
+		}
+	}
+
+	return 0;
+}
+
 static int neigh_dump_info(struct sk_buff *skb, struct netlink_callback *cb)
 {
+	const struct nlmsghdr *nlh = cb->nlh;
+	struct neigh_dump_filter filter = {};
 	struct neigh_table *tbl;
 	int t, family, s_t;
 	int proxy = 0;
 	int err;
 
-	family = ((struct rtgenmsg *) nlmsg_data(cb->nlh))->rtgen_family;
+	family = ((struct rtgenmsg *)nlmsg_data(nlh))->rtgen_family;
 
 	/* check for full ndmsg structure presence, family member is
 	 * the same for both structures
 	 */
-	if (nlmsg_len(cb->nlh) >= sizeof(struct ndmsg) &&
-	    ((struct ndmsg *) nlmsg_data(cb->nlh))->ndm_flags == NTF_PROXY)
+	if (nlmsg_len(nlh) >= sizeof(struct ndmsg) &&
+	    ((struct ndmsg *)nlmsg_data(nlh))->ndm_flags == NTF_PROXY)
 		proxy = 1;
+
+	err = neigh_valid_dump_req(nlh, cb->strict_check, &filter, cb->extack);
+	if (err < 0 && cb->strict_check)
+		return err;
 
 	s_t = cb->args[0];
 
@@ -2453,9 +2555,9 @@ static int neigh_dump_info(struct sk_buff *skb, struct netlink_callback *cb)
 			memset(&cb->args[1], 0, sizeof(cb->args) -
 						sizeof(cb->args[0]));
 		if (proxy)
-			err = pneigh_dump_table(tbl, skb, cb);
+			err = pneigh_dump_table(tbl, skb, cb, &filter);
 		else
-			err = neigh_dump_table(tbl, skb, cb);
+			err = neigh_dump_table(tbl, skb, cb, &filter);
 		if (err < 0)
 			break;
 	}
@@ -2741,6 +2843,7 @@ static void *neigh_get_idx_any(struct seq_file *seq, loff_t *pos)
 }
 
 void *neigh_seq_start(struct seq_file *seq, loff_t *pos, struct neigh_table *tbl, unsigned int neigh_seq_flags)
+	__acquires(tbl->lock)
 	__acquires(rcu_bh)
 {
 	struct neigh_seq_state *state = seq->private;
@@ -2751,6 +2854,7 @@ void *neigh_seq_start(struct seq_file *seq, loff_t *pos, struct neigh_table *tbl
 
 	rcu_read_lock_bh();
 	state->nht = rcu_dereference_bh(tbl->nht);
+	read_lock(&tbl->lock);
 
 	return *pos ? neigh_get_idx_any(seq, pos) : SEQ_START_TOKEN;
 }
@@ -2784,8 +2888,13 @@ out:
 EXPORT_SYMBOL(neigh_seq_next);
 
 void neigh_seq_stop(struct seq_file *seq, void *v)
+	__releases(tbl->lock)
 	__releases(rcu_bh)
 {
+	struct neigh_seq_state *state = seq->private;
+	struct neigh_table *tbl = state->tbl;
+
+	read_unlock(&tbl->lock);
 	rcu_read_unlock_bh();
 }
 EXPORT_SYMBOL(neigh_seq_stop);

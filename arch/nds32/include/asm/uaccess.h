@@ -13,9 +13,6 @@
 #include <asm/types.h>
 #include <linux/mm.h>
 
-#define VERIFY_READ	0
-#define VERIFY_WRITE	1
-
 #define __asmeq(x, y)  ".ifnc " x "," y " ; .err ; .endif\n\t"
 
 /*
@@ -53,7 +50,7 @@ static inline void set_fs(mm_segment_t fs)
 
 #define __range_ok(addr, size) (size <= get_fs() && addr <= (get_fs() -size))
 
-#define access_ok(type, addr, size)                 \
+#define access_ok(addr, size)                 \
 	__range_ok((unsigned long)addr, (unsigned long)size)
 /*
  * Single-value transfer routines.  They automatically use the right
@@ -78,7 +75,7 @@ static inline void set_fs(mm_segment_t fs)
 #define get_user(x,p)							\
 ({									\
 	long __e = -EFAULT;						\
-	if(likely(access_ok(VERIFY_READ,  p, sizeof(*p)))) {		\
+	if(likely(access_ok(p, sizeof(*p)))) {				\
 		__e = __get_user(x,p);					\
 	} else								\
 		x = 0;							\
@@ -169,7 +166,7 @@ do {									\
 #define put_user(x,p)							\
 ({									\
 	long __e = -EFAULT;						\
-	if(likely(access_ok(VERIFY_WRITE,  p, sizeof(*p)))) {		\
+	if(likely(access_ok(p, sizeof(*p)))) {				\
 		__e = __put_user(x,p);					\
 	}								\
 	__e;								\
@@ -270,7 +267,7 @@ extern unsigned long __arch_copy_to_user(void __user * to, const void *from,
 #define INLINE_COPY_TO_USER
 static inline unsigned long clear_user(void __user * to, unsigned long n)
 {
-	if (access_ok(VERIFY_WRITE, to, n))
+	if (access_ok(to, n))
 		n = __arch_clear_user(to, n);
 	return n;
 }

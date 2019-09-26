@@ -13,6 +13,7 @@
 #include <linux/compiler.h>
 #include <linux/types.h>
 #include <linux/rh_kabi.h>
+#include <linux/bits.h>
 
 /*
  * Resources are tree-like, allowing
@@ -139,6 +140,15 @@ enum {
 	IORES_DESC_PERSISTENT_MEMORY_LEGACY	= 5,
 	IORES_DESC_DEVICE_PRIVATE_MEMORY	= 6,
 	IORES_DESC_DEVICE_PUBLIC_MEMORY		= 7,
+	IORES_DESC_RESERVED			= 8,
+};
+
+/*
+ * Flags controlling ioremap() behavior.
+ */
+enum {
+	IORES_MAP_SYSTEM_RAM		= BIT(0),
+	IORES_MAP_ENCRYPTED		= BIT(1),
 };
 
 /* helpers to define resources */

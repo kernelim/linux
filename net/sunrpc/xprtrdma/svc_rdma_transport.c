@@ -85,7 +85,6 @@ static const struct svc_xprt_ops svc_rdma_ops = {
 	.xpo_release_rqst = svc_rdma_release_rqst,
 	.xpo_detach = svc_rdma_detach,
 	.xpo_free = svc_rdma_free,
-	.xpo_prep_reply_hdr = svc_rdma_prep_reply_hdr,
 	.xpo_has_wspace = svc_rdma_has_wspace,
 	.xpo_accept = svc_rdma_accept,
 	.xpo_secure_port = svc_rdma_secure_port,
@@ -110,7 +109,6 @@ static const struct svc_xprt_ops svc_rdma_bc_ops = {
 	.xpo_create = svc_rdma_bc_create,
 	.xpo_detach = svc_rdma_bc_detach,
 	.xpo_free = svc_rdma_bc_free,
-	.xpo_prep_reply_hdr = svc_rdma_prep_reply_hdr,
 	.xpo_secure_port = svc_rdma_secure_port,
 };
 
@@ -136,7 +134,6 @@ static struct svc_xprt *svc_rdma_bc_create(struct svc_serv *serv,
 
 	svc_xprt_init(net, &svc_rdma_bc_class, xprt, serv);
 	set_bit(XPT_CONG_CTRL, &xprt->xpt_flags);
-	serv->sv_bc_xprt = xprt;
 
 	dprintk("svcrdma: %s(%p)\n", __func__, xprt);
 	return xprt;
@@ -296,7 +293,6 @@ static int rdma_listen_handler(struct rdma_cm_id *cma_id,
 			       struct rdma_cm_event *event)
 {
 	struct sockaddr *sap = (struct sockaddr *)&cma_id->route.addr.src_addr;
-	int ret = 0;
 
 	trace_svcrdma_cm_event(event, sap);
 
@@ -315,7 +311,7 @@ static int rdma_listen_handler(struct rdma_cm_id *cma_id,
 		break;
 	}
 
-	return ret;
+	return 0;
 }
 
 static int rdma_cma_handler(struct rdma_cm_id *cma_id,

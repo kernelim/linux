@@ -238,9 +238,6 @@ int snd_gf1_mem_init(struct snd_gus_card * gus)
 {
 	struct snd_gf1_mem *alloc;
 	struct snd_gf1_mem_block block;
-#ifdef CONFIG_SND_DEBUG
-	struct snd_info_entry *entry;
-#endif
 
 	alloc = &gus->gf1.mem_alloc;
 	mutex_init(&alloc->memory_mutex);
@@ -263,8 +260,7 @@ int snd_gf1_mem_init(struct snd_gus_card * gus)
 	if (snd_gf1_mem_xalloc(alloc, &block) == NULL)
 		return -ENOMEM;
 #ifdef CONFIG_SND_DEBUG
-	if (! snd_card_proc_new(gus->card, "gusmem", &entry))
-		snd_info_set_text_ops(entry, gus, snd_gf1_mem_info_read);
+	snd_card_ro_proc_new(gus->card, "gusmem", gus, snd_gf1_mem_info_read);
 #endif
 	return 0;
 }
@@ -310,7 +306,7 @@ static void snd_gf1_mem_info_read(struct snd_info_entry *entry,
 	used = 0;
 	for (block = alloc->first, i = 0; block; block = block->next, i++) {
 		used += block->size;
-		snd_iprintf(buffer, "Block %i at 0x%lx onboard 0x%x size %i (0x%x):\n", i, (long) block, block->ptr, block->size, block->size);
+		snd_iprintf(buffer, "Block %i onboard 0x%x size %i (0x%x):\n", i, block->ptr, block->size, block->size);
 		if (block->share ||
 		    block->share_id[0] || block->share_id[1] ||
 		    block->share_id[2] || block->share_id[3])

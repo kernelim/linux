@@ -122,7 +122,7 @@ static int check_keys(struct rxe_dev *rxe, struct rxe_pkt_info *pkt,
 			set_bad_pkey_cntr(port);
 			goto err1;
 		}
-	} else if (qpn != 0) {
+	} else {
 		if (unlikely(!pkey_match(pkey,
 					 port->pkey_tbl[qp->attr.pkey_index]
 					))) {
@@ -134,7 +134,7 @@ static int check_keys(struct rxe_dev *rxe, struct rxe_pkt_info *pkt,
 	}
 
 	if ((qp_type(qp) == IB_QPT_UD || qp_type(qp) == IB_QPT_GSI) &&
-	    qpn != 0 && pkt->mask) {
+	    pkt->mask) {
 		u32 qkey = (qpn == 1) ? GSI_QKEY : qp->attr.qkey;
 
 		if (unlikely(deth_qkey(pkt) != qkey)) {
@@ -261,8 +261,7 @@ static int hdr_check(struct rxe_pkt_info *pkt)
 	return 0;
 
 err2:
-	if (qp)
-		rxe_drop_ref(qp);
+	rxe_drop_ref(qp);
 err1:
 	return -EINVAL;
 }
@@ -333,6 +332,7 @@ err1:
 
 static int rxe_match_dgid(struct rxe_dev *rxe, struct sk_buff *skb)
 {
+	const struct ib_gid_attr *gid_attr;
 	union ib_gid dgid;
 	union ib_gid *pdgid;
 
@@ -344,9 +344,14 @@ static int rxe_match_dgid(struct rxe_dev *rxe, struct sk_buff *skb)
 		pdgid = (union ib_gid *)&ipv6_hdr(skb)->daddr;
 	}
 
-	return ib_find_cached_gid_by_port(&rxe->ib_dev, pdgid,
-					  IB_GID_TYPE_ROCE_UDP_ENCAP,
-					  1, skb->dev, NULL);
+	gid_attr = rdma_find_gid_by_port(&rxe->ib_dev, pdgid,
+					 IB_GID_TYPE_ROCE_UDP_ENCAP,
+					 1, skb->dev);
+	if (IS_ERR(gid_attr))
+		return PTR_ERR(gid_attr);
+
+	rdma_put_gid_attr(gid_attr);
+	return 0;
 }
 
 /* rxe_rcv is called from the interface driver */

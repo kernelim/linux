@@ -12,6 +12,15 @@
 #define IBRS_HI32_PCP		PER_CPU_VAR(spec_ctrl_pcp + \
 				KERNEL_IBRS_SPEC_CTRL_hi32)
 
+/*
+ * The BIT() macro is a shift by 1UL, and it is used as part of the
+ * SPEC_CTRL_IBRS macro.  Older assemblers (prior to binutils 2.28) do
+ * not accept the L or LL suffixes, however.  Redefine BIT here in a
+ * way that will work with the older toolchains.
+ */
+#undef BIT
+#define BIT(nr) (_AC(1,UL) << (nr))
+
 .macro __IBRS_ENTRY
 	movl $MSR_IA32_SPEC_CTRL, %ecx
 	movl IBRS_HI32_PCP, %edx

@@ -181,7 +181,23 @@ enum node_stat_item {
 	NR_VMSCAN_IMMEDIATE,	/* Prioritise for reclaim when writeback ends */
 	NR_DIRTIED,		/* page dirtyings since bootup */
 	NR_WRITTEN,		/* page writings since bootup */
-	NR_INDIRECTLY_RECLAIMABLE_BYTES, /* measured in bytes */
+	RH_KABI_RENAME(NR_INDIRECTLY_RECLAIMABLE_BYTES,
+		       NR_KERNEL_MISC_RECLAIMABLE),
+				/* reclaimable non-slab kernel pages */
+#ifndef __GENKSYMS__
+	/*
+	 * RHEL8:
+	 * New node stat item should be put here to avoid changing kABI
+	 * signature of pg_data_t. The size of vm_stat[] will change.
+	 * However, vm_stat is the last field of pg_data_t and so it won't
+	 * affect offsets of existing fields. The per-node pg_data_t is
+	 * allocated by the core kernel code and accessed by other as
+	 * an array of pointers to pg_data_t. So changing the size of
+	 * pg_data_t because of additional vm_stat items will not impact
+	 * others.
+	 */
+	WORKINGSET_RESTORE,
+#endif
 	NR_VM_NODE_STAT_ITEMS
 };
 
@@ -313,7 +329,7 @@ enum zone_type {
 	 * Architecture		Limit
 	 * ---------------------------
 	 * parisc, ia64, sparc	<4G
-	 * s390			<2G
+	 * s390, powerpc	<2G
 	 * arm			Various
 	 * alpha		Unlimited or 0-16MB.
 	 *
@@ -675,13 +691,13 @@ typedef struct pglist_data {
 #endif
 #ifdef CONFIG_NUMA_BALANCING
 	/* Lock serializing the migrate rate limiting window */
-	spinlock_t numabalancing_migrate_lock;
+	RH_KABI_DEPRECATE(spinlock_t, numabalancing_migrate_lock)
 
 	/* Rate limiting time interval */
-	unsigned long numabalancing_migrate_next_window;
+	RH_KABI_DEPRECATE(unsigned long, numabalancing_migrate_next_window)
 
 	/* Number of pages migrated during the rate limiting time interval */
-	unsigned long numabalancing_migrate_nr_pages;
+	RH_KABI_DEPRECATE(unsigned long, numabalancing_migrate_nr_pages)
 #endif
 	/*
 	 * This is a per-node reserve of pages that are not available

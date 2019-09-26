@@ -10,3 +10,12 @@ comment "Compiler: $(CC_VERSION_TEXT)"
 source "scripts/Kconfig.include"
 
 source "arch/$(SRCARCH)/Kconfig"
+
+config RH_KABI_SIZE_ALIGN_CHECKS
+	bool "Enables more stringent kabi checks in the macros"
+	default y
+	help
+	  This option enables more stringent kabi checks. Those must be disable
+	  in case of a debug-build because they allow to change struct sizes.
+
+

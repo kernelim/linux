@@ -73,8 +73,10 @@ libperf-y += vdso.o
 libperf-y += counts.o
 libperf-y += stat.o
 libperf-y += stat-shadow.o
+libperf-y += stat-display.o
 libperf-y += record.o
 libperf-y += srcline.o
+libperf-y += srccode.o
 libperf-y += data.o
 libperf-y += tsc.o
 libperf-y += cloexec.o
@@ -87,6 +89,7 @@ libperf-$(CONFIG_AUXTRACE) += intel-pt.o
 libperf-$(CONFIG_AUXTRACE) += intel-bts.o
 libperf-$(CONFIG_AUXTRACE) += arm-spe.o
 libperf-$(CONFIG_AUXTRACE) += arm-spe-pkt-decoder.o
+libperf-$(CONFIG_AUXTRACE) += s390-cpumsf.o
 
 ifdef CONFIG_LIBOPENCSD
 libperf-$(CONFIG_AUXTRACE) += cs-etm.o

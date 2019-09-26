@@ -280,48 +280,6 @@ static const struct pci_device_id *pci_match_device(struct pci_driver *drv,
 }
 
 /**
- * pci_table_subset tells if a pci_device_id is a subset
- * of another table
- * @ids: first table
- * @subset: a potential subset of ids
- *
- * returns 1 if yes, 0 otherwise
- */
-static int pci_table_subset(const struct pci_device_id *ids,
-			    const struct pci_device_id *subset)
-{
-	const struct pci_device_id *id = ids;
-	int found = 0;
-
-	if (!subset || !ids)
-		return 0;
-
-	while (subset->vendor || subset->subvendor || subset->class_mask) {
-		while (id->vendor || id->subvendor || id->class_mask) {
-			if ((id->vendor == subset->vendor &&
-			     id->device == subset->device &&
-			     id->subvendor == subset->subvendor &&
-			     id->class == subset->class &&
-			     id->subdevice == subset->subdevice &&
-			     id->class_mask == subset->class_mask)){
-				found = 1;
-				break;
-			}
-			id++;
-		}
-		if (!found)
-			return 0;
-		found = 0;
-
-		id = ids;
-		subset++;
-	}
-
-	return 1;
-}
-
-
-/**
  * pci_hw_vendor_status - Tell if a PCI device is supported by the HW vendor
  * @ids: array of PCI device id structures to search in
  * @dev: the PCI device structure to match against
@@ -348,42 +306,6 @@ const struct pci_device_id *pci_hw_vendor_status(
 	return ret;
 }
 EXPORT_SYMBOL(pci_hw_vendor_status);
-
-/**
- * pci_device_support_removed - Tell if a PCI device support is removed
- * @ids: array of PCI device id structures to search in
- * @dev: the PCI device structure to match against
- *
- * Used by a driver to check whether this device is in its list of removed
- * devices.  Returns the matching pci_device_id structure or %NULL if there is
- * no match.
- *
- * Reserved for Internal Red Hat use only.
- */
-const struct pci_device_id *pci_device_support_removed(
-				const struct pci_device_id *ids,
-				const struct pci_device_id *removed_ids,
-				struct pci_dev *dev)
-{
-	char devinfo[64];
-	const struct pci_device_id *ret;
-
-	if (!pci_table_subset(ids, removed_ids))
-		WARN(1, "driver %s, pci tables do not match\n",
-				dev_driver_string(&dev->dev));
-
-	ret = pci_match_id(removed_ids, dev);
-	if (ret) {
-		snprintf(devinfo, sizeof(devinfo), "%s %s [%04x:%04x]",
-			 dev_driver_string(&dev->dev), dev_name(&dev->dev),
-			 dev->vendor, dev->device);
-		mark_hardware_removed(devinfo);
-	}
-
-	return ret;
-}
-EXPORT_SYMBOL(pci_device_support_removed);
-
 
 struct drv_dev_and_id {
 	struct pci_driver *drv;
@@ -1358,30 +1280,29 @@ static int pci_pm_runtime_suspend(struct device *dev)
 		return 0;
 	}
 
-	if (!pm || !pm->runtime_suspend)
-		return -ENOSYS;
-
 	pci_dev->state_saved = false;
-	error = pm->runtime_suspend(dev);
-	if (error) {
+	if (pm && pm->runtime_suspend) {
+		error = pm->runtime_suspend(dev);
 		/*
 		 * -EBUSY and -EAGAIN is used to request the runtime PM core
 		 * to schedule a new suspend, so log the event only with debug
 		 * log level.
 		 */
-		if (error == -EBUSY || error == -EAGAIN)
+		if (error == -EBUSY || error == -EAGAIN) {
 			dev_dbg(dev, "can't suspend now (%pf returned %d)\n",
 				pm->runtime_suspend, error);
-		else
+			return error;
+		} else if (error) {
 			dev_err(dev, "can't suspend (%pf returned %d)\n",
 				pm->runtime_suspend, error);
-
-		return error;
+			return error;
+		}
 	}
 
 	pci_fixup_device(pci_fixup_suspend, pci_dev);
 
-	if (!pci_dev->state_saved && pci_dev->current_state != PCI_D0
+	if (pm && pm->runtime_suspend
+	    && !pci_dev->state_saved && pci_dev->current_state != PCI_D0
 	    && pci_dev->current_state != PCI_UNKNOWN) {
 		WARN_ONCE(pci_dev->current_state != prev,
 			"PCI PM: State of device not saved by %pF\n",
@@ -1399,7 +1320,7 @@ static int pci_pm_runtime_suspend(struct device *dev)
 
 static int pci_pm_runtime_resume(struct device *dev)
 {
-	int rc;
+	int rc = 0;
 	struct pci_dev *pci_dev = to_pci_dev(dev);
 	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
 
@@ -1413,14 +1334,12 @@ static int pci_pm_runtime_resume(struct device *dev)
 	if (!pci_dev->driver)
 		return 0;
 
-	if (!pm || !pm->runtime_resume)
-		return -ENOSYS;
-
 	pci_fixup_device(pci_fixup_resume_early, pci_dev);
 	pci_enable_wake(pci_dev, PCI_D0, false);
 	pci_fixup_device(pci_fixup_resume, pci_dev);
 
-	rc = pm->runtime_resume(dev);
+	if (pm && pm->runtime_resume)
+		rc = pm->runtime_resume(dev);
 
 	pci_dev->runtime_d3cold = false;
 

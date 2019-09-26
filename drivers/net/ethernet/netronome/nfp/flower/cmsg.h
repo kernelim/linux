@@ -1,35 +1,5 @@
-/*
- * Copyright (C) 2017 Netronome Systems, Inc.
- *
- * This software is dual licensed under the GNU General License Version 2,
- * June 1991 as shown in the file COPYING in the top-level directory of this
- * source tree or the BSD 2-Clause License provided below.  You have the
- * option to license this software under the complete terms of either license.
- *
- * The BSD 2-Clause License:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      1. Redistributions of source code must retain the above
- *         copyright notice, this list of conditions and the following
- *         disclaimer.
- *
- *      2. Redistributions in binary form must reproduce the above
- *         copyright notice, this list of conditions and the following
- *         disclaimer in the documentation and/or other materials
- *         provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+/* SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause) */
+/* Copyright (C) 2017-2018 Netronome Systems, Inc. */
 
 #ifndef NFP_FLOWER_CMSG_H
 #define NFP_FLOWER_CMSG_H
@@ -38,6 +8,7 @@
 #include <linux/skbuff.h>
 #include <linux/types.h>
 #include <net/geneve.h>
+#include <net/vxlan.h>
 
 #include "../nfp_app.h"
 #include "../nfpcore/nfp_cpp.h"
@@ -55,7 +26,7 @@
 #define NFP_FLOWER_LAYER2_GENEVE_OP	BIT(6)
 
 #define NFP_FLOWER_MASK_VLAN_PRIO	GENMASK(15, 13)
-#define NFP_FLOWER_MASK_VLAN_CFI	BIT(12)
+#define NFP_FLOWER_MASK_VLAN_PRESENT	BIT(12)
 #define NFP_FLOWER_MASK_VLAN_VID	GENMASK(11, 0)
 
 #define NFP_FLOWER_MASK_MPLS_LB		GENMASK(31, 12)
@@ -111,7 +82,6 @@
 #define NFP_FL_OUT_FLAGS_TYPE_IDX	GENMASK(2, 0)
 
 #define NFP_FL_PUSH_VLAN_PRIO		GENMASK(15, 13)
-#define NFP_FL_PUSH_VLAN_CFI		BIT(12)
 #define NFP_FL_PUSH_VLAN_VID		GENMASK(11, 0)
 
 #define IPV6_FLOW_LABEL_MASK		cpu_to_be32(0x000fffff)
@@ -125,6 +95,9 @@
 #define NFP_FL_IPV4_PRE_TUN_INDEX	GENMASK(2, 0)
 
 #define NFP_FLOWER_WORKQ_MAX_SKBS	30000
+
+/* Cmesg reply (empirical) timeout*/
+#define NFP_FL_REPLY_TIMEOUT		msecs_to_jiffies(40)
 
 #define nfp_flower_cmsg_warn(app, fmt, args...)                         \
 	do {                                                            \
@@ -390,7 +363,7 @@ struct nfp_flower_ipv6 {
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  * |                         ipv4_addr_dst                         |
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- * |                            Reserved                           |
+ * |           Reserved            |      tos      |      ttl      |
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  * |                            Reserved                           |
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -400,7 +373,10 @@ struct nfp_flower_ipv6 {
 struct nfp_flower_ipv4_udp_tun {
 	__be32 ip_src;
 	__be32 ip_dst;
-	__be32 reserved[2];
+	__be16 reserved1;
+	u8 tos;
+	u8 ttl;
+	__be32 reserved2;
 	__be32 tun_id;
 };
 
@@ -524,6 +500,32 @@ static inline void *nfp_flower_cmsg_get_data(struct sk_buff *skb)
 static inline int nfp_flower_cmsg_get_data_len(struct sk_buff *skb)
 {
 	return skb->len - NFP_FLOWER_CMSG_HLEN;
+}
+
+static inline bool
+nfp_fl_netdev_is_tunnel_type(struct net_device *netdev,
+			     enum nfp_flower_tun_type tun_type)
+{
+	if (netif_is_vxlan(netdev))
+		return tun_type == NFP_FL_TUNNEL_VXLAN;
+	if (netif_is_geneve(netdev))
+		return tun_type == NFP_FL_TUNNEL_GENEVE;
+
+	return false;
+}
+
+static inline bool nfp_fl_is_netdev_to_offload(struct net_device *netdev)
+{
+	if (!netdev->rtnl_link_ops)
+		return false;
+	if (!strcmp(netdev->rtnl_link_ops->kind, "openvswitch"))
+		return true;
+	if (netif_is_vxlan(netdev))
+		return true;
+	if (netif_is_geneve(netdev))
+		return true;
+
+	return false;
 }
 
 struct sk_buff *

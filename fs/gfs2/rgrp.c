@@ -90,7 +90,7 @@ static inline void gfs2_setbit(const struct gfs2_rbm *rbm, bool do_clone,
 {
 	unsigned char *byte1, *byte2, *end, cur_state;
 	struct gfs2_bitmap *bi = rbm_bi(rbm);
-	unsigned int buflen = bi->bi_len;
+	unsigned int buflen = bi->bi_bytes;
 	const unsigned int bit = (rbm->offset % GFS2_NBBY) * GFS2_BIT_SIZE;
 
 	byte1 = bi->bi_bh->b_data + bi->bi_offset + (rbm->offset / GFS2_NBBY);
@@ -108,8 +108,8 @@ static inline void gfs2_setbit(const struct gfs2_rbm *rbm, bool do_clone,
 		fs_warn(sdp, "rgrp=0x%llx bi_start=0x%x biblk: 0x%llx\n",
 			(unsigned long long)rbm->rgd->rd_addr, bi->bi_start,
 			(unsigned long long)bi->bi_bh->b_blocknr);
-		fs_warn(sdp, "bi_offset=0x%x bi_len=0x%x block=0x%llx\n",
-			bi->bi_offset, bi->bi_len,
+		fs_warn(sdp, "bi_offset=0x%x bi_bytes=0x%x block=0x%llx\n",
+			bi->bi_offset, bi->bi_bytes,
 			(unsigned long long)gfs2_rbm_to_block(rbm));
 		dump_stack();
 		gfs2_consist_rgrpd(rbm->rgd);
@@ -386,7 +386,7 @@ static u32 gfs2_free_extlen(const struct gfs2_rbm *rrbm, u32 len)
 		if (bi->bi_clone)
 			start = bi->bi_clone;
 		start += bi->bi_offset;
-		end = start + bi->bi_len;
+		end = start + bi->bi_bytes;
 		BUG_ON(rbm.offset & 3);
 		start += (rbm.offset / GFS2_NBBY);
 		bytes = min_t(u32, len / GFS2_NBBY, (end - start));
@@ -471,7 +471,7 @@ void gfs2_rgrp_verify(struct gfs2_rgrpd *rgd)
 			count[x] += gfs2_bitcount(rgd,
 						  bi->bi_bh->b_data +
 						  bi->bi_offset,
-						  bi->bi_len, x);
+						  bi->bi_bytes, x);
 	}
 
 	if (count[0] != rgd->rd_free) {
@@ -796,21 +796,21 @@ static int compute_bitstructs(struct gfs2_rgrpd *rgd)
 			bytes = bytes_left;
 			bi->bi_offset = sizeof(struct gfs2_rgrp);
 			bi->bi_start = 0;
-			bi->bi_len = bytes;
+			bi->bi_bytes = bytes;
 			bi->bi_blocks = bytes * GFS2_NBBY;
 		/* header block */
 		} else if (x == 0) {
 			bytes = sdp->sd_sb.sb_bsize - sizeof(struct gfs2_rgrp);
 			bi->bi_offset = sizeof(struct gfs2_rgrp);
 			bi->bi_start = 0;
-			bi->bi_len = bytes;
+			bi->bi_bytes = bytes;
 			bi->bi_blocks = bytes * GFS2_NBBY;
 		/* last block */
 		} else if (x + 1 == length) {
 			bytes = bytes_left;
 			bi->bi_offset = sizeof(struct gfs2_meta_header);
 			bi->bi_start = rgd->rd_bitbytes - bytes_left;
-			bi->bi_len = bytes;
+			bi->bi_bytes = bytes;
 			bi->bi_blocks = bytes * GFS2_NBBY;
 		/* other blocks */
 		} else {
@@ -818,7 +818,7 @@ static int compute_bitstructs(struct gfs2_rgrpd *rgd)
 				sizeof(struct gfs2_meta_header);
 			bi->bi_offset = sizeof(struct gfs2_meta_header);
 			bi->bi_start = rgd->rd_bitbytes - bytes_left;
-			bi->bi_len = bytes;
+			bi->bi_bytes = bytes;
 			bi->bi_blocks = bytes * GFS2_NBBY;
 		}
 
@@ -830,11 +830,11 @@ static int compute_bitstructs(struct gfs2_rgrpd *rgd)
 		return -EIO;
 	}
 	bi = rgd->rd_bits + (length - 1);
-	if ((bi->bi_start + bi->bi_len) * GFS2_NBBY != rgd->rd_data) {
+	if ((bi->bi_start + bi->bi_bytes) * GFS2_NBBY != rgd->rd_data) {
 		if (gfs2_consist_rgrpd(rgd)) {
 			gfs2_rindex_print(rgd);
 			fs_err(sdp, "start=%u len=%u offset=%u\n",
-			       bi->bi_start, bi->bi_len, bi->bi_offset);
+			       bi->bi_start, bi->bi_bytes, bi->bi_offset);
 		}
 		return -EIO;
 	}
@@ -1161,8 +1161,8 @@ static u32 count_unlinked(struct gfs2_rgrpd *rgd)
 		goal = 0;
 		buffer = bi->bi_bh->b_data + bi->bi_offset;
 		WARN_ON(!buffer_uptodate(bi->bi_bh));
-		while (goal < bi->bi_len * GFS2_NBBY) {
-			goal = gfs2_bitfit(buffer, bi->bi_len, goal,
+		while (goal < bi->bi_blocks) {
+			goal = gfs2_bitfit(buffer, bi->bi_bytes, goal,
 					   GFS2_BLKST_UNLINKED);
 			if (goal == BFITNOENT)
 				break;
@@ -1334,7 +1334,7 @@ int gfs2_rgrp_send_discards(struct gfs2_sbd *sdp, u64 offset,
 	u32 trimmed = 0;
 	u8 diff;
 
-	for (x = 0; x < bi->bi_len; x++) {
+	for (x = 0; x < bi->bi_bytes; x++) {
 		const u8 *clone = bi->bi_clone ? bi->bi_clone : bi->bi_bh->b_data;
 		clone += bi->bi_offset;
 		clone += x;
@@ -1734,25 +1734,22 @@ fail:
 static int gfs2_rbm_find(struct gfs2_rbm *rbm, u8 state, u32 *minext,
 			 const struct gfs2_inode *ip, bool nowrap)
 {
+	bool scan_from_start = rbm->bii == 0 && rbm->offset == 0;
 	struct buffer_head *bh;
-	int initial_bii;
-	u32 initial_offset;
-	int first_bii = rbm->bii;
-	u32 first_offset = rbm->offset;
+	int last_bii;
 	u32 offset;
 	u8 *buffer;
-	int n = 0;
-	int iters = rbm->rgd->rd_length;
+	bool wrapped = false;
 	int ret;
 	struct gfs2_bitmap *bi;
 	struct gfs2_extent maxext = { .rbm.rgd = rbm->rgd, };
 
-	/* If we are not starting at the beginning of a bitmap, then we
-	 * need to add one to the bitmap count to ensure that we search
-	 * the starting bitmap twice.
+	/*
+	 * Determine the last bitmap to search.  If we're not starting at the
+	 * beginning of a bitmap, we need to search that bitmap twice to scan
+	 * the entire resource group.
 	 */
-	if (rbm->offset != 0)
-		iters++;
+	last_bii = rbm->bii - (rbm->offset == 0);
 
 	while(1) {
 		bi = rbm_bi(rbm);
@@ -1766,35 +1763,29 @@ static int gfs2_rbm_find(struct gfs2_rbm *rbm, u8 state, u32 *minext,
 		WARN_ON(!buffer_uptodate(bh));
 		if (state != GFS2_BLKST_UNLINKED && bi->bi_clone)
 			buffer = bi->bi_clone + bi->bi_offset;
-		initial_offset = rbm->offset;
-		offset = gfs2_bitfit(buffer, bi->bi_len, rbm->offset, state);
-		if (offset == BFITNOENT)
-			goto bitmap_full;
+		offset = gfs2_bitfit(buffer, bi->bi_bytes, rbm->offset, state);
+		if (offset == BFITNOENT) {
+			if (state == GFS2_BLKST_FREE && rbm->offset == 0)
+				set_bit(GBF_FULL, &bi->bi_flags);
+			goto next_bitmap;
+		}
 		rbm->offset = offset;
 		if (ip == NULL)
 			return 0;
 
-		initial_bii = rbm->bii;
 		ret = gfs2_reservation_check_and_update(rbm, ip,
 							minext ? *minext : 0,
 							&maxext);
 		if (ret == 0)
 			return 0;
-		if (ret > 0) {
-			n += (rbm->bii - initial_bii);
+		if (ret > 0)
 			goto next_iter;
-		}
 		if (ret == -E2BIG) {
 			rbm->bii = 0;
 			rbm->offset = 0;
-			n += (rbm->bii - initial_bii);
 			goto res_covered_end_of_rgrp;
 		}
 		return ret;
-
-bitmap_full:	/* Mark bitmap as full and fall through */
-		if ((state == GFS2_BLKST_FREE) && initial_offset == 0)
-			set_bit(GBF_FULL, &bi->bi_flags);
 
 next_bitmap:	/* Find next bitmap in the rgrp */
 		rbm->offset = 0;
@@ -1802,11 +1793,16 @@ next_bitmap:	/* Find next bitmap in the rgrp */
 		if (rbm->bii == rbm->rgd->rd_length)
 			rbm->bii = 0;
 res_covered_end_of_rgrp:
-		if ((rbm->bii == 0) && nowrap)
-			break;
-		n++;
+		if (rbm->bii == 0) {
+			if (wrapped)
+				break;
+			wrapped = true;
+			if (nowrap)
+				break;
+		}
 next_iter:
-		if (n >= iters)
+		/* Have we scanned the entire resource group? */
+		if (wrapped && rbm->bii > last_bii)
 			break;
 	}
 
@@ -1816,8 +1812,8 @@ next_iter:
 	/* If the extent was too small, and it's smaller than the smallest
 	   to have failed before, remember for future reference that it's
 	   useless to search this rgrp again for this amount or more. */
-	if ((first_offset == 0) && (first_bii == 0) &&
-	    (*minext < rbm->rgd->rd_extfail_pt))
+	if (wrapped && (scan_from_start || rbm->bii > last_bii) &&
+	    *minext < rbm->rgd->rd_extfail_pt)
 		rbm->rgd->rd_extfail_pt = *minext;
 
 	/* If the maximum extent we found is big enough to fulfill the
@@ -2252,7 +2248,7 @@ static struct gfs2_rgrpd *rgblk_free(struct gfs2_sbd *sdp, u64 bstart,
 						      GFP_NOFS | __GFP_NOFAIL);
 				memcpy(bi->bi_clone + bi->bi_offset,
 				       bi->bi_bh->b_data + bi->bi_offset,
-				       bi->bi_len);
+				       bi->bi_bytes);
 			}
 			gfs2_trans_add_meta(rbm.rgd->rd_gl, bi->bi_bh);
 			bi_prev = bi;

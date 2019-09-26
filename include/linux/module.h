@@ -483,8 +483,8 @@ struct module {
 	struct error_injection_entry *ei_funcs;
 	unsigned int num_ei_funcs;
 #endif
-	RH_KABI_RESERVE(1);
-	RH_KABI_RESERVE(2);
+	RH_KABI_USE(1, unsigned int num_bpf_raw_events);
+	RH_KABI_USE(2, struct bpf_raw_event_map *bpf_raw_events);
 	RH_KABI_RESERVE(3);
 	RH_KABI_RESERVE(4);
 } ____cacheline_aligned __randomize_layout;

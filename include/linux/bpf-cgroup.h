@@ -2,46 +2,119 @@
 #ifndef _BPF_CGROUP_H
 #define _BPF_CGROUP_H
 
+#ifndef __GENKSYMS__
+#include <linux/bpf.h>
+#endif
 #include <linux/errno.h>
 #include <linux/jump_label.h>
+#include <linux/percpu.h>
+#include <linux/percpu-refcount.h>
+#include <linux/rbtree.h>
 #include <uapi/linux/bpf.h>
+
+#include <linux/rh_kabi.h>
 
 struct sock;
 struct sockaddr;
 struct cgroup;
 struct sk_buff;
+struct bpf_map;
+struct bpf_prog;
 struct bpf_sock_ops_kern;
+struct bpf_cgroup_storage;
 
 #ifdef CONFIG_CGROUP_BPF
 
 extern struct static_key_false cgroup_bpf_enabled_key;
 #define cgroup_bpf_enabled static_branch_unlikely(&cgroup_bpf_enabled_key)
 
+DECLARE_PER_CPU(struct bpf_cgroup_storage*,
+		bpf_cgroup_storage[MAX_BPF_CGROUP_STORAGE_TYPE]);
+
+#define for_each_cgroup_storage_type(stype) \
+	for (stype = 0; stype < MAX_BPF_CGROUP_STORAGE_TYPE; stype++)
+
+struct bpf_cgroup_storage_map;
+
+struct bpf_storage_buffer {
+	struct rcu_head rcu;
+	char data[0];
+};
+
+struct bpf_cgroup_storage {
+	union {
+		struct bpf_storage_buffer *buf;
+		void __percpu *percpu_buf;
+	};
+	struct bpf_cgroup_storage_map *map;
+	struct bpf_cgroup_storage_key key;
+	struct list_head list;
+	struct rb_node node;
+	struct rcu_head rcu;
+};
+
 struct bpf_prog_list {
 	struct list_head node;
 	struct bpf_prog *prog;
+	struct bpf_cgroup_storage *storage[MAX_BPF_CGROUP_STORAGE_TYPE];
 };
 
 struct bpf_prog_array;
 
+#define RH_MAX_BPF_ATTACH_TYPE	64
+
 struct cgroup_bpf {
+	/* RHEL kABI: Beware, this struct is embedded in struct cgroup,
+	 * which in turn is embedded in struct cgroup_root. Any changes here
+	 * need to be done with a great caution. We grew the size of the
+	 * struct once but should not do that again. */
+
 	/* array of effective progs in this cgroup */
-	struct bpf_prog_array __rcu *effective[MAX_BPF_ATTACH_TYPE];
+	RH_KABI_REPLACE_UNSAFE(
+		struct bpf_prog_array __rcu *effective[MAX_BPF_ATTACH_TYPE],
+		struct bpf_prog_array __rcu *effective[RH_MAX_BPF_ATTACH_TYPE]
+	)
 
 	/* attached progs to this cgroup and attach flags
 	 * when flags == 0 or BPF_F_ALLOW_OVERRIDE the progs list will
 	 * have either zero or one element
 	 * when BPF_F_ALLOW_MULTI the list can have up to BPF_CGROUP_MAX_PROGS
 	 */
-	struct list_head progs[MAX_BPF_ATTACH_TYPE];
-	u32 flags[MAX_BPF_ATTACH_TYPE];
+	RH_KABI_REPLACE_UNSAFE(
+		struct list_head progs[MAX_BPF_ATTACH_TYPE],
+		struct list_head progs[RH_MAX_BPF_ATTACH_TYPE]
+	)
+	RH_KABI_REPLACE_UNSAFE(
+		u32 flags[MAX_BPF_ATTACH_TYPE],
+		u32 flags[RH_MAX_BPF_ATTACH_TYPE]
+	)
 
 	/* temp storage for effective prog array used by prog_attach/detach */
 	struct bpf_prog_array __rcu *inactive;
+
+	RH_KABI_EXTEND(struct percpu_ref refcnt)
+	RH_KABI_EXTEND(struct work_struct release_work)
+
+	RH_KABI_EXTEND(unsigned long rh_reserved1)
+	RH_KABI_EXTEND(unsigned long rh_reserved2)
+	RH_KABI_EXTEND(unsigned long rh_reserved3)
+	RH_KABI_EXTEND(unsigned long rh_reserved4)
+	RH_KABI_EXTEND(unsigned long rh_reserved5)
+	RH_KABI_EXTEND(unsigned long rh_reserved6)
+	RH_KABI_EXTEND(unsigned long rh_reserved7)
+	RH_KABI_EXTEND(unsigned long rh_reserved8)
+	RH_KABI_EXTEND(unsigned long rh_reserved9)
+	RH_KABI_EXTEND(unsigned long rh_reserved10)
+	RH_KABI_EXTEND(unsigned long rh_reserved11)
+	RH_KABI_EXTEND(unsigned long rh_reserved12)
+	RH_KABI_EXTEND(unsigned long rh_reserved13)
+	RH_KABI_EXTEND(unsigned long rh_reserved14)
+	RH_KABI_EXTEND(unsigned long rh_reserved15)
+	RH_KABI_EXTEND(unsigned long rh_reserved16)
 };
 
-void cgroup_bpf_put(struct cgroup *cgrp);
 int cgroup_bpf_inherit(struct cgroup *cgrp);
+void cgroup_bpf_offline(struct cgroup *cgrp);
 
 int __cgroup_bpf_attach(struct cgroup *cgrp, struct bpf_prog *prog,
 			enum bpf_attach_type type, u32 flags);
@@ -76,6 +149,38 @@ int __cgroup_bpf_run_filter_sock_ops(struct sock *sk,
 
 int __cgroup_bpf_check_dev_permission(short dev_type, u32 major, u32 minor,
 				      short access, enum bpf_attach_type type);
+
+static inline enum bpf_cgroup_storage_type cgroup_storage_type(
+	struct bpf_map *map)
+{
+	if (map->map_type == BPF_MAP_TYPE_PERCPU_CGROUP_STORAGE)
+		return BPF_CGROUP_STORAGE_PERCPU;
+
+	return BPF_CGROUP_STORAGE_SHARED;
+}
+
+static inline void bpf_cgroup_storage_set(struct bpf_cgroup_storage
+					  *storage[MAX_BPF_CGROUP_STORAGE_TYPE])
+{
+	enum bpf_cgroup_storage_type stype;
+
+	for_each_cgroup_storage_type(stype)
+		this_cpu_write(bpf_cgroup_storage[stype], storage[stype]);
+}
+
+struct bpf_cgroup_storage *bpf_cgroup_storage_alloc(struct bpf_prog *prog,
+					enum bpf_cgroup_storage_type stype);
+void bpf_cgroup_storage_free(struct bpf_cgroup_storage *storage);
+void bpf_cgroup_storage_link(struct bpf_cgroup_storage *storage,
+			     struct cgroup *cgroup,
+			     enum bpf_attach_type type);
+void bpf_cgroup_storage_unlink(struct bpf_cgroup_storage *storage);
+int bpf_cgroup_storage_assign(struct bpf_prog *prog, struct bpf_map *map);
+void bpf_cgroup_storage_release(struct bpf_prog *prog, struct bpf_map *map);
+
+int bpf_percpu_cgroup_storage_copy(struct bpf_map *map, void *key, void *value);
+int bpf_percpu_cgroup_storage_update(struct bpf_map *map, void *key,
+				     void *value, u64 flags);
 
 /* Wrappers for __cgroup_bpf_run_filter_skb() guarded by cgroup_bpf_enabled. */
 #define BPF_CGROUP_RUN_PROG_INET_INGRESS(sk, skb)			      \
@@ -199,8 +304,8 @@ int cgroup_bpf_prog_query(const union bpf_attr *attr,
 
 struct bpf_prog;
 struct cgroup_bpf {};
-static inline void cgroup_bpf_put(struct cgroup *cgrp) {}
 static inline int cgroup_bpf_inherit(struct cgroup *cgrp) { return 0; }
+static inline void cgroup_bpf_offline(struct cgroup *cgrp) {}
 
 static inline int cgroup_bpf_prog_attach(const union bpf_attr *attr,
 					 enum bpf_prog_type ptype,
@@ -221,6 +326,25 @@ static inline int cgroup_bpf_prog_query(const union bpf_attr *attr,
 	return -EINVAL;
 }
 
+static inline void bpf_cgroup_storage_set(
+	struct bpf_cgroup_storage *storage[MAX_BPF_CGROUP_STORAGE_TYPE]) {}
+static inline int bpf_cgroup_storage_assign(struct bpf_prog *prog,
+					    struct bpf_map *map) { return 0; }
+static inline void bpf_cgroup_storage_release(struct bpf_prog *prog,
+					      struct bpf_map *map) {}
+static inline struct bpf_cgroup_storage *bpf_cgroup_storage_alloc(
+	struct bpf_prog *prog, enum bpf_cgroup_storage_type stype) { return NULL; }
+static inline void bpf_cgroup_storage_free(
+	struct bpf_cgroup_storage *storage) {}
+static inline int bpf_percpu_cgroup_storage_copy(struct bpf_map *map, void *key,
+						 void *value) {
+	return 0;
+}
+static inline int bpf_percpu_cgroup_storage_update(struct bpf_map *map,
+					void *key, void *value, u64 flags) {
+	return 0;
+}
+
 #define cgroup_bpf_enabled (0)
 #define BPF_CGROUP_PRE_CONNECT_ENABLED(sk) (0)
 #define BPF_CGROUP_RUN_PROG_INET_INGRESS(sk,skb) ({ 0; })
@@ -238,6 +362,8 @@ static inline int cgroup_bpf_prog_query(const union bpf_attr *attr,
 #define BPF_CGROUP_RUN_PROG_UDP6_SENDMSG_LOCK(sk, uaddr, t_ctx) ({ 0; })
 #define BPF_CGROUP_RUN_PROG_SOCK_OPS(sock_ops) ({ 0; })
 #define BPF_CGROUP_RUN_PROG_DEVICE_CGROUP(type,major,minor,access) ({ 0; })
+
+#define for_each_cgroup_storage_type(stype) for (; false; )
 
 #endif /* CONFIG_CGROUP_BPF */
 

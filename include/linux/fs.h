@@ -1454,11 +1454,26 @@ struct super_block {
 	struct user_namespace *s_user_ns;
 
 	/*
-	 * Keep the lru lists last in the structure so they always sit on their
-	 * own individual cachelines.
+	 * The list_lru structure is essentially just a pointer to a table
+	 * of per-node lru lists, each of which has its own spinlock.
+	 * There is no need to put them into separate cachelines.
+	 *
+	 * RHEL8: The original list_lru structure has 3 pointers. By
+	 * moving s_inode_lru and s_dentry_lru together in the same
+	 * cacheline, we free up 3 slots for additional fields as well
+	 * as allowing the list_lru structure to grow to 32 bytes.
+	 * Third-party kernel modules should not touch s_inode_lru at all.
 	 */
+#ifdef __GENKSYMS__
 	struct list_lru		s_dentry_lru ____cacheline_aligned_in_smp;
 	struct list_lru		s_inode_lru ____cacheline_aligned_in_smp;
+#else
+	struct list_lru		s_dentry_lru ____cacheline_aligned_in_smp;
+	struct list_lru		s_inode_lru;
+	long			rh_reserve_1 ____cacheline_aligned_in_smp;
+	long			rh_reserve_2;
+	long			rh_reserve_3;
+#endif
 	struct rcu_head		rcu;
 	struct work_struct	destroy_work;
 

@@ -1805,6 +1805,9 @@ config TEST_BITMAP
 config TEST_UUID
 	tristate "Test functions located in the uuid module at runtime"
 
+config TEST_XARRAY
+	tristate "Test the XArray code at runtime"
+
 config TEST_OVERFLOW
 	tristate "Test check_*_overflow() functions at runtime"
 
@@ -1826,6 +1829,9 @@ config TEST_HASH
 
 	  This is intended to help people writing architecture-specific
 	  optimized versions.  If unsure, say N.
+
+config TEST_IDA
+	tristate "Perform selftest on IDA functions"
 
 config TEST_PARMAN
 	tristate "Perform selftest on priority array manager"
@@ -1933,7 +1939,6 @@ config TEST_KMOD
 	tristate "kmod stress tester"
 	default n
 	depends on m
-	depends on BLOCK && (64BIT || LBDAF)	  # for XFS, BTRFS
 	depends on NETDEVICES && NET_CORE && INET # for TUN
 	select TEST_LKM
 	select XFS_FS
@@ -1963,6 +1968,16 @@ config TEST_DEBUG_VIRTUAL
 	  Test the kernel's ability to detect incorrect calls to
 	  virt_to_phys() done against the non-linear part of the
 	  kernel's virtual address map.
+
+	  If unsure, say N.
+
+config TEST_OBJAGG
+	tristate "Perform selftest on object aggreration manager"
+	default n
+	depends on OBJAGG
+	help
+	  Enable this option to test object aggregation manager on boot
+	  (or module load).
 
 	  If unsure, say N.
 

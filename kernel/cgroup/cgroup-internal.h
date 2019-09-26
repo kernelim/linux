@@ -8,6 +8,37 @@
 #include <linux/list.h>
 #include <linux/refcount.h>
 
+#define TRACE_CGROUP_PATH_LEN 1024
+extern spinlock_t trace_cgroup_path_lock;
+extern char trace_cgroup_path[TRACE_CGROUP_PATH_LEN];
+extern bool cgroup_debug;
+extern void __init enable_debug_cgroup(void);
+
+/*
+ * cgroup_path() takes a spin lock. It is good practice not to take
+ * spin locks within trace point handlers, as they are mostly hidden
+ * from normal view. As cgroup_path() can take the kernfs_rename_lock
+ * spin lock, it is best to not call that function from the trace event
+ * handler.
+ *
+ * Note: trace_cgroup_##type##_enabled() is a static branch that will only
+ *       be set when the trace event is enabled.
+ */
+#define TRACE_CGROUP_PATH(type, cgrp, ...)				\
+	do {								\
+		if (trace_cgroup_##type##_enabled()) {			\
+			unsigned long flags;				\
+			spin_lock_irqsave(&trace_cgroup_path_lock,	\
+					  flags);			\
+			cgroup_path(cgrp, trace_cgroup_path,		\
+				    TRACE_CGROUP_PATH_LEN);		\
+			trace_cgroup_##type(cgrp, trace_cgroup_path,	\
+					    ##__VA_ARGS__);		\
+			spin_unlock_irqrestore(&trace_cgroup_path_lock, \
+					       flags);			\
+		}							\
+	} while (0)
+
 /*
  * A cgroup can be associated with multiple css_sets as different tasks may
  * belong to different cgroups on different hierarchies.  In the other
@@ -170,7 +201,7 @@ int cgroup_path_ns_locked(struct cgroup *cgrp, char *buf, size_t buflen,
 
 void cgroup_free_root(struct cgroup_root *root);
 void init_cgroup_root(struct cgroup_root *root, struct cgroup_sb_opts *opts);
-int cgroup_setup_root(struct cgroup_root *root, u16 ss_mask, int ref_flags);
+int cgroup_setup_root(struct cgroup_root *root, u16 ss_mask);
 int rebind_subsystems(struct cgroup_root *dst_root, u16 ss_mask);
 struct dentry *cgroup_do_mount(struct file_system_type *fs_type, int flags,
 			       struct cgroup_root *root, unsigned long magic,
@@ -198,6 +229,7 @@ int cgroup_rmdir(struct kernfs_node *kn);
 int cgroup_show_path(struct seq_file *sf, struct kernfs_node *kf_node,
 		     struct kernfs_root *kf_root);
 
+int __cgroup_task_count(const struct cgroup *cgrp);
 int cgroup_task_count(const struct cgroup *cgrp);
 
 /*

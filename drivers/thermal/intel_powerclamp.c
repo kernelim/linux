@@ -28,7 +28,7 @@
  *              case of external interrupts without need for ack, clamping down
  *              cpu in non-irq context does not reduce irq. for majority of the
  *              cases, clamping down cpu does help reduce irq as well, we should
- *              be able to differenciate the two cases and give a quantitative
+ *              be able to differentiate the two cases and give a quantitative
  *              solution for the irqs that we can control. perhaps based on
  *              get_cpu_iowait_time_us()
  *
@@ -494,7 +494,7 @@ static void start_power_clamp_worker(unsigned long cpu)
 	struct powerclamp_worker_data *w_data = per_cpu_ptr(worker_data, cpu);
 	struct kthread_worker *worker;
 
-	worker = kthread_create_worker_on_cpu(cpu, 0, "kidle_inject/%ld", cpu);
+	worker = kthread_create_worker_on_cpu(cpu, 0, "kidle_inj/%ld", cpu);
 	if (IS_ERR(worker))
 		return;
 
