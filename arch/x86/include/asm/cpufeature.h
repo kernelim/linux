@@ -492,6 +492,8 @@ extern unsigned long __cpu_bugs __read_mostly;
 #define X86_BUG_L1TF			X86_BUG(4) /* CPU is affected by L1 Terminal Fault */
 #define X86_BUG_MDS			X86_BUG(5) /* CPU is affected by Microarchitectural data sampling */
 #define X86_BUG_MSBDS_ONLY		X86_BUG(6) /* CPU is only affected by the  MSDBS variant of BUG_MDS */
+#define X86_BUG_TAA			X86_BUG(7) /* CPU is affected by TSX Async Abort(TAA) */
+#define X86_BUG_ITLB_MULTIHIT		X86_BUG(8) /* CPU may incur MCE during certain page attribute changes */
 
 #endif /* defined(__KERNEL__) && !defined(__ASSEMBLY__) */
 

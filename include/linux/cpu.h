@@ -187,6 +187,8 @@ extern ssize_t cpu_show_spectre_v2(struct sysdev_class *class, char *buf);
 extern ssize_t cpu_show_spec_store_bypass(struct sysdev_class *class, char *buf);
 extern ssize_t cpu_show_l1tf(struct sysdev_class *class, char *buf);
 extern ssize_t cpu_show_mds(struct sysdev_class *class, char *buf);
+extern ssize_t cpu_show_itlb_multihit(struct sysdev_class *class, char *buf);
+extern ssize_t cpu_show_tsx_async_abort(struct sysdev_class *class, char *buf);
 
 enum cpuhp_smt_control {
 	CPU_SMT_ENABLED,

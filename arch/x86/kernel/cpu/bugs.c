@@ -28,8 +28,11 @@
 #include <linux/prctl.h>
 #include <asm/e820.h>
 
+#include "cpu.h"
+
 static void __init l1tf_select_mitigation(void);
 static void __init mds_select_mitigation(void);
+static void __init taa_select_mitigation(void);
 
 static inline bool retp_compiler(void)
 {
@@ -212,6 +215,7 @@ void __init check_bugs(void)
 	l1tf_select_mitigation();
 
 	mds_select_mitigation();
+	taa_select_mitigation();
 
 	/* Select the proper CPU mitigations before patching alternatives */
 	spec_ctrl_init();
@@ -343,6 +347,100 @@ static int __init mds_cmdline(char *str)
 	return 0;
 }
 early_param("mds", mds_cmdline);
+
+#undef pr_fmt
+#define pr_fmt(fmt)	"TAA: " fmt
+
+/* Default mitigation for TAA-affected CPUs */
+enum taa_mitigations taa_mitigation __read_mostly = TAA_MITIGATION_VERW;
+static bool taa_nosmt __read_mostly;
+
+static const char * const taa_strings[] = {
+	[TAA_MITIGATION_OFF]		= "Vulnerable",
+	[TAA_MITIGATION_UCODE_NEEDED]	= "Vulnerable: Clear CPU buffers attempted, no microcode",
+	[TAA_MITIGATION_VERW]		= "Mitigation: Clear CPU buffers",
+	[TAA_MITIGATION_TSX_DISABLED]	= "Mitigation: TSX disabled",
+};
+
+static void __init taa_select_mitigation(void)
+{
+	u64 ia32_cap;
+
+	if (!boot_cpu_has_bug(X86_BUG_TAA)) {
+		taa_mitigation = TAA_MITIGATION_OFF;
+		return;
+	}
+
+	/* TSX previously disabled by tsx=off */
+	if (!boot_cpu_has(X86_FEATURE_RTM)) {
+		taa_mitigation = TAA_MITIGATION_TSX_DISABLED;
+		goto out;
+	}
+
+	/* TAA mitigation is turned off on the cmdline (tsx_async_abort=off) */
+	if (taa_mitigation == TAA_MITIGATION_OFF)
+		goto out;
+
+	if (boot_cpu_has(X86_FEATURE_MD_CLEAR))
+		taa_mitigation = TAA_MITIGATION_VERW;
+	else
+		taa_mitigation = TAA_MITIGATION_UCODE_NEEDED;
+
+	/*
+	 * VERW doesn't clear the CPU buffers when MD_CLEAR=1 and MDS_NO=1.
+	 * A microcode update fixes this behavior to clear CPU buffers. It also
+	 * adds support for MSR_IA32_TSX_CTRL which is enumerated by the
+	 * ARCH_CAP_TSX_CTRL_MSR bit.
+	 *
+	 * On MDS_NO=1 CPUs if ARCH_CAP_TSX_CTRL_MSR is not set, microcode
+	 * update is required.
+	 */
+	ia32_cap = x86_read_arch_cap_msr();
+	if ( (ia32_cap & ARCH_CAP_MDS_NO) &&
+	    !(ia32_cap & ARCH_CAP_TSX_CTRL_MSR))
+		taa_mitigation = TAA_MITIGATION_UCODE_NEEDED;
+
+	/*
+	 * TSX is enabled, select alternate mitigation for TAA which is
+	 * the same as MDS. Enable MDS static branch to clear CPU buffers.
+	 *
+	 * For guests that can't determine whether the correct microcode is
+	 * present on host, enable the mitigation for UCODE_NEEDED as well.
+	 */
+	setup_force_cpu_cap(X86_FEATURE_MDS_USR_CLR);
+
+	if (taa_nosmt)
+		cpu_smt_disable(false);
+
+out:
+	pr_info("%s\n", taa_strings[taa_mitigation]);
+}
+
+void taa_print_mitigation(void)
+{
+	pr_info("%s\n", taa_strings[taa_mitigation]);
+}
+
+static int __init tsx_async_abort_parse_cmdline(char *str)
+{
+	if (!boot_cpu_has_bug(X86_BUG_TAA))
+		return 0;
+
+	if (!str)
+		return -EINVAL;
+
+	if (!strcmp(str, "off")) {
+		taa_mitigation = TAA_MITIGATION_OFF;
+	} else if (!strcmp(str, "full")) {
+		taa_mitigation = TAA_MITIGATION_VERW;
+	} else if (!strcmp(str, "full,nosmt")) {
+		taa_mitigation = TAA_MITIGATION_VERW;
+		taa_nosmt = true;
+	}
+
+	return 0;
+}
+early_param("tsx_async_abort", tsx_async_abort_parse_cmdline);
 
 #undef pr_fmt
 #define pr_fmt(fmt)     "Spectre V1 : " fmt
@@ -660,6 +758,7 @@ static void update_mds_branch_idle(void)
 }
 
 #define MDS_MSG_SMT "MDS CPU bug present and SMT on, data leak possible. See https://www.kernel.org/doc/html/latest/admin-guide/hw-vuln/mds.html for more details.\n"
+#define TAA_MSG_SMT "TAA CPU bug present and SMT on, data leak possible. See https://www.kernel.org/doc/html/latest/admin-guide/hw-vuln/tsx_async_abort.html for more details.\n"
 
 void arch_smt_update(void)
 {
@@ -676,6 +775,17 @@ void arch_smt_update(void)
 		update_mds_branch_idle();
 		break;
 	case MDS_MITIGATION_OFF:
+		break;
+	}
+
+	switch (taa_mitigation) {
+	case TAA_MITIGATION_VERW:
+	case TAA_MITIGATION_UCODE_NEEDED:
+		if (sched_smt_active())
+			pr_warn_once(TAA_MSG_SMT);
+		break;
+	case TAA_MITIGATION_TSX_DISABLED:
+	case TAA_MITIGATION_OFF:
 		break;
 	}
 
@@ -906,6 +1016,9 @@ int arch_prctl_spec_ctrl_get(struct task_struct *task, unsigned long which)
 	}
 }
 
+int itlb_multihit_kvm_mitigation = -1;
+EXPORT_SYMBOL_GPL(itlb_multihit_kvm_mitigation);
+
 #undef pr_fmt
 #define pr_fmt(fmt)	"L1TF: " fmt
 
@@ -1045,10 +1158,26 @@ static ssize_t l1tf_show_state(char *buf)
 		       l1tf_vmx_states[l1tf_vmx_mitigation],
 		       sched_smt_active() ? "vulnerable" : "disabled");
 }
+
+static ssize_t itlb_multihit_show_state(char *buf)
+{
+	if (itlb_multihit_kvm_mitigation == -1)
+		return sprintf(buf, "Processor vulnerable\n");
+
+	if (itlb_multihit_kvm_mitigation)
+		return sprintf(buf, "KVM: Mitigation: Disabled huge pages\n");
+	else
+		return sprintf(buf, "KVM: Vulnerable\n");
+}
 #else
 static ssize_t l1tf_show_state(char *buf)
 {
 	return sprintf(buf, "%s\n", L1TF_DEFAULT_MSG);
+}
+
+static ssize_t itlb_multihit_show_state(char *buf)
+{
+	return sprintf(buf, "Processor vulnerable\n");
 }
 #endif
 
@@ -1057,6 +1186,13 @@ ssize_t cpu_show_l1tf(struct sysdev_class *class, char *buf)
 	if (!boot_cpu_has(X86_FEATURE_L1TF_PTEINV))
 		return sprintf(buf, "Not affected\n");
 	return l1tf_show_state(buf);
+}
+
+ssize_t cpu_show_itlb_multihit(struct sysdev_class *class, char *buf)
+{
+	if (!boot_cpu_has_bug(X86_BUG_ITLB_MULTIHIT))
+		return sprintf(buf, "Not affected\n");
+	return itlb_multihit_show_state(buf);
 }
 
 static ssize_t mds_show_state(char *buf)
@@ -1081,5 +1217,27 @@ ssize_t cpu_show_mds(struct sysdev_class *class, char *buf)
 	if (!boot_cpu_has_bug(X86_BUG_MDS))
 		return sprintf(buf, "Not affected\n");
 	return mds_show_state(buf);
+}
+
+static ssize_t tsx_async_abort_show_state(char *buf)
+{
+	if ((taa_mitigation == TAA_MITIGATION_TSX_DISABLED) ||
+	    (taa_mitigation == TAA_MITIGATION_OFF))
+		return sprintf(buf, "%s\n", taa_strings[taa_mitigation]);
+
+	if (boot_cpu_has(X86_FEATURE_HYPERVISOR)) {
+		return sprintf(buf, "%s; SMT Host state unknown\n",
+			       taa_strings[taa_mitigation]);
+	}
+
+	return sprintf(buf, "%s; SMT %s\n", taa_strings[taa_mitigation],
+		       sched_smt_active() ? "vulnerable" : "disabled");
+}
+
+ssize_t cpu_show_tsx_async_abort(struct sysdev_class *class, char *buf)
+{
+	if (!boot_cpu_has_bug(X86_BUG_TAA))
+		return sprintf(buf, "Not affected\n");
+	return tsx_async_abort_show_state(buf);
 }
 #endif

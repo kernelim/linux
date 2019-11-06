@@ -19,6 +19,10 @@
 #include <linux/hrtimer.h>
 #include <trace/events/power.h>
 
+#ifdef X86
+#include <asm/spec_ctrl.h>
+#endif
+
 #include "cpuidle.h"
 
 DEFINE_PER_CPU(struct cpuidle_device *, cpuidle_devices);
@@ -153,8 +157,14 @@ static int poll_idle(struct cpuidle_device *dev, int index)
 
 	t1 = ktime_get();
 	local_irq_enable();
+#ifdef X86
+	spec_ctrl_ibrs_off();
+#endif
 	while (!need_resched())
 		cpu_relax();
+#ifdef X86
+	spec_ctrl_ibrs_on();
+#endif
 
 	t2 = ktime_get();
 	diff = ktime_to_us(ktime_sub(t2, t1));

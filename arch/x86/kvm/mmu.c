@@ -47,6 +47,11 @@
  */
 bool tdp_enabled = false;
 
+extern int itlb_multihit_kvm_mitigation;
+
+static int __read_mostly no_huge_pages = false;
+module_param(no_huge_pages, bool, 0444);
+
 #undef MMU_DEBUG
 
 #undef AUDIT
@@ -480,6 +485,9 @@ static int mapping_level(struct kvm_vcpu *vcpu, gfn_t large_gfn)
 {
 	struct kvm_memory_slot *slot;
 	int host_level, level, max_level;
+
+	if (no_huge_pages)
+		return PT_PAGE_TABLE_LEVEL;
 
 	slot = gfn_to_memslot(vcpu->kvm, large_gfn);
 	if (slot && slot->dirty_bitmap)
@@ -3053,10 +3061,12 @@ void kvm_mmu_module_exit(void)
 	mmu_destroy_caches();
 	percpu_counter_destroy(&kvm_total_used_mmu_pages);
 	unregister_shrinker(&mmu_shrinker);
+	itlb_multihit_kvm_mitigation = -1;
 }
 
 int kvm_mmu_module_init(void)
 {
+	itlb_multihit_kvm_mitigation = no_huge_pages;
 	pte_chain_cache = kmem_cache_create("kvm_pte_chain",
 					    sizeof(struct kvm_pte_chain),
 					    0, 0, NULL);

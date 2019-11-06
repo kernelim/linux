@@ -1116,4 +1116,13 @@ enum mds_mitigations {
 
 extern enum mds_mitigations mds_mitigation;
 
+enum taa_mitigations {
+	TAA_MITIGATION_OFF,
+	TAA_MITIGATION_UCODE_NEEDED,
+	TAA_MITIGATION_VERW,
+	TAA_MITIGATION_TSX_DISABLED,
+};
+
+extern enum taa_mitigations taa_mitigation;
+
 #endif /* _ASM_X86_PROCESSOR_H */

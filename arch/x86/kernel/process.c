@@ -471,6 +471,7 @@ static inline int hlt_use_halt(void)
  */
 void default_idle(void)
 {
+	spec_ctrl_ibrs_off();
 	if (hlt_use_halt()) {
 		trace_power_start(POWER_CSTATE, 1, smp_processor_id());
 		current_thread_info()->status &= ~TS_POLLING;
@@ -490,6 +491,7 @@ void default_idle(void)
 		/* loop is done by the caller */
 		cpu_relax();
 	}
+	spec_ctrl_ibrs_on();
 }
 #ifdef CONFIG_APM_MODULE
 EXPORT_SYMBOL(default_idle);
@@ -569,12 +571,14 @@ static void mwait_idle(void)
 		if (cpu_has(&current_cpu_data, X86_FEATURE_CLFLUSH_MONITOR))
 			clflush((void *)&current_thread_info()->flags);
 
+		spec_ctrl_ibrs_off();
 		__monitor((void *)&current_thread_info()->flags, 0, 0);
 		smp_mb();
 		if (!need_resched())
 			__sti_mwait(0, 0);
 		else
 			local_irq_enable();
+		spec_ctrl_ibrs_on();
 	} else
 		local_irq_enable();
 }
@@ -588,8 +592,10 @@ static void poll_idle(void)
 {
 	trace_power_start(POWER_CSTATE, 0, smp_processor_id());
 	local_irq_enable();
+	spec_ctrl_ibrs_off();
 	while (!need_resched())
 		cpu_relax();
+	spec_ctrl_ibrs_on();
 	trace_power_end(0);
 }
 

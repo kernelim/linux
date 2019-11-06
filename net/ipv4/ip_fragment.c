@@ -290,6 +290,8 @@ out_put:
 	}
 out:
 	spin_unlock(&qp->q.lock);
+	if (head)
+		kfree_skb(head);
 	ipq_put(qp);
 }
 

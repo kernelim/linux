@@ -555,18 +555,28 @@ void spec_ctrl_rescan_cpuid(void)
 
 		/*
 		 * Look for X86_FEATURE_MD_CLEAR change for CPUs that are
-		 * vulnerable to MDS & reflect that in the mds vulnerabilities
-		 * file.
+		 * vulnerable to MDS & reflect that in the mds and taa
+		 * vulnerabilities files.
 		 */
 		if (boot_cpu_has_bug(X86_BUG_MDS) &&
-		   (mds_mitigation != MDS_MITIGATION_OFF)) {
-			enum mds_mitigations new;
+		   ((mds_mitigation != MDS_MITIGATION_OFF) ||
+		    (taa_mitigation != TAA_MITIGATION_OFF))) {
+			enum mds_mitigations new_mds;
+			enum taa_mitigations new_taa;
 
-			new = boot_cpu_has(X86_FEATURE_MD_CLEAR)
-			    ? MDS_MITIGATION_FULL : MDS_MITIGATION_VMWERV;
-			if (new != mds_mitigation) {
-				mds_mitigation = new;
+			new_mds = boot_cpu_has(X86_FEATURE_MD_CLEAR)
+				? MDS_MITIGATION_FULL : MDS_MITIGATION_VMWERV;
+			new_taa = boot_cpu_has(X86_FEATURE_MD_CLEAR)
+				? TAA_MITIGATION_VERW
+				: TAA_MITIGATION_UCODE_NEEDED;
+			if (new_mds != mds_mitigation) {
+				mds_mitigation = new_mds;
 				mds_print_mitigation();
+			}
+			if (boot_cpu_has_bug(X86_BUG_TAA) &&
+			    (new_taa != taa_mitigation)) {
+				taa_mitigation = new_taa;
+				taa_print_mitigation();
 			}
 		}
 	}

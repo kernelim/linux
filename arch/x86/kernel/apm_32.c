@@ -236,6 +236,7 @@
 #include <asm/olpc.h>
 #include <asm/paravirt.h>
 #include <asm/reboot.h>
+#include <asm/spec_ctrl.h>
 
 #if defined(CONFIG_APM_DISPLAY_BLANK) && defined(CONFIG_VT)
 extern int (*console_blank_hook)(int);
@@ -831,8 +832,10 @@ static int apm_do_idle(void)
 		smp_mb();
 	}
 	if (!need_resched()) {
+		spec_ctrl_ibrs_off();
 		idled = 1;
 		ret = apm_bios_call_simple(APM_FUNC_IDLE, 0, 0, &eax, &err);
+		spec_ctrl_ibrs_on();
 	}
 	if (polling)
 		current_thread_info()->status |= TS_POLLING;

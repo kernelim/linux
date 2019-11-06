@@ -56,6 +56,7 @@
 #include <asm/cpu.h>
 #include <asm/idle.h>
 #include <asm/syscalls.h>
+#include <asm/spec_ctrl.h>
 
 asmlinkage void ret_from_fork(void) __asm__("ret_from_fork");
 
@@ -98,6 +99,7 @@ void cpu_idle(void)
 	/* endless idle loop with no priority at all */
 	while (1) {
 		tick_nohz_stop_sched_tick(1);
+		spec_ctrl_ibrs_off();
 		while (!need_resched()) {
 
 			check_pgt_cache();
@@ -112,6 +114,7 @@ void cpu_idle(void)
 			pm_idle();
 			start_critical_timings();
 		}
+		spec_ctrl_ibrs_on();
 		tick_nohz_restart_sched_tick();
 		preempt_enable_no_resched();
 		schedule();
