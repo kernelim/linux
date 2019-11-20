@@ -23,22 +23,7 @@ static int coalesced_mmio_in_range(struct kvm_coalesced_mmio_dev *dev,
 				   gpa_t addr, int len)
 {
 	struct kvm_coalesced_mmio_zone *zone;
-	struct kvm_coalesced_mmio_ring *ring;
-	unsigned avail;
 	int i;
-
-	/* Are we able to batch it ? */
-
-	/* last is the first free entry
-	 * check if we don't meet the first used entry
-	 * there is always one unused entry in the buffer
-	 */
-	ring = dev->kvm->coalesced_mmio_ring;
-	avail = (ring->first - ring->last - 1) % KVM_COALESCED_MMIO_MAX;
-	if (avail < KVM_MAX_VCPU_COUNT) {
-		/* full */
-		return 0;
-	}
 
 	/* is it in a batchable area ? */
 
@@ -56,23 +41,53 @@ static int coalesced_mmio_in_range(struct kvm_coalesced_mmio_dev *dev,
 	return 0;
 }
 
+static int coalesced_mmio_has_room(struct kvm_coalesced_mmio_dev *dev, u32 last)
+{
+	struct kvm_coalesced_mmio_ring *ring;
+	unsigned avail;
+
+	/* Are we able to batch it ? */
+
+	/* last is the first free entry
+	 * check if we don't meet the first used entry
+	 * there is always one unused entry in the buffer
+	 */
+	ring = dev->kvm->coalesced_mmio_ring;
+	avail = (ring->first - last - 1) % KVM_COALESCED_MMIO_MAX;
+	if (avail == 0) {
+		/* full */
+		return 0;
+	}
+
+	return 1;
+}
+
 static int coalesced_mmio_write(struct kvm_io_device *this,
 				gpa_t addr, int len, const void *val)
 {
 	struct kvm_coalesced_mmio_dev *dev = to_mmio(this);
 	struct kvm_coalesced_mmio_ring *ring = dev->kvm->coalesced_mmio_ring;
+	__u32 insert;
+
 	if (!coalesced_mmio_in_range(dev, addr, len))
 		return -EOPNOTSUPP;
 
 	spin_lock(&dev->lock);
 
+	insert = READ_ONCE(ring->last);
+	if (!coalesced_mmio_has_room(dev, insert) ||
+	    insert >= KVM_COALESCED_MMIO_MAX) {
+		spin_unlock(&dev->lock);
+		return -EOPNOTSUPP;
+	}
+
 	/* copy data in first free entry of the ring */
 
-	ring->coalesced_mmio[ring->last].phys_addr = addr;
-	ring->coalesced_mmio[ring->last].len = len;
-	memcpy(ring->coalesced_mmio[ring->last].data, val, len);
+	ring->coalesced_mmio[insert].phys_addr = addr;
+	ring->coalesced_mmio[insert].len = len;
+	memcpy(ring->coalesced_mmio[insert].data, val, len);
 	smp_wmb();
-	ring->last = (ring->last + 1) % KVM_COALESCED_MMIO_MAX;
+	ring->last = (insert + 1) % KVM_COALESCED_MMIO_MAX;
 	spin_unlock(&dev->lock);
 	return 0;
 }
