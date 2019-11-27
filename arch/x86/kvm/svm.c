@@ -1314,7 +1314,8 @@ static __init int svm_hardware_setup(void)
 
 	init_msrpm_offsets();
 
-	mark_tech_preview("nested virtualization", THIS_MODULE);
+	if (nested)
+		mark_tech_preview("nested virtualization", THIS_MODULE);
 
 	if (boot_cpu_has(X86_FEATURE_NX))
 		kvm_enable_efer_bits(EFER_NX);

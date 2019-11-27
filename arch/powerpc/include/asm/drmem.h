@@ -17,6 +17,9 @@ struct drmem_lmb {
 	u32     drc_index;
 	u32     aa_index;
 	u32     flags;
+#ifdef CONFIG_MEMORY_HOTPLUG
+	int	nid;
+#endif
 };
 
 struct drmem_lmb_info {
@@ -97,6 +100,29 @@ int drmem_update_dt(void);
 #ifdef CONFIG_PPC_PSERIES
 void __init walk_drmem_lmbs_early(unsigned long node,
 			void (*func)(struct drmem_lmb *, const __be32 **));
+#endif
+
+static inline void invalidate_lmb_associativity_index(struct drmem_lmb *lmb)
+{
+	lmb->aa_index = 0xffffffff;
+}
+
+#ifdef CONFIG_MEMORY_HOTPLUG
+static inline void lmb_set_nid(struct drmem_lmb *lmb)
+{
+	lmb->nid = memory_add_physaddr_to_nid(lmb->base_addr);
+}
+static inline void lmb_clear_nid(struct drmem_lmb *lmb)
+{
+	lmb->nid = -1;
+}
+#else
+static inline void lmb_set_nid(struct drmem_lmb *lmb)
+{
+}
+static inline void lmb_clear_nid(struct drmem_lmb *lmb)
+{
+}
 #endif
 
 #endif /* _ASM_POWERPC_LMB_H */

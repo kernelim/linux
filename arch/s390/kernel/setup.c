@@ -50,6 +50,7 @@
 #include <linux/memory.h>
 #include <linux/compat.h>
 #include <linux/version.h>
+#include <linux/security.h>
 
 #include <asm/boot_data.h>
 #include <asm/ipl.h>
@@ -1019,6 +1020,7 @@ void __init setup_arch(char **cmdline_p)
 		pr_info("Linux is running natively in 64-bit mode\n");
 
 	log_component_list();
+	init_lockdown();
 
 	/* Have one command line that is parsed and saved in /proc/cmdline */
 	/* boot_command_line has been already set up in early.c */
