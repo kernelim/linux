@@ -1343,6 +1343,9 @@ static int vmwgfx_pm_notifier(struct notifier_block *nb, unsigned long val,
 
 	switch (val) {
 	case PM_HIBERNATION_PREPARE:
+		/* if we have any fifo resources just fail hibernate */
+		if (atomic_read(&dev_priv->num_fifo_resources) != 0)
+			return -ENOSYS;
 		if (dev_priv->enable_fb)
 			vmw_fb_off(dev_priv);
 		ttm_suspend_lock(&dev_priv->reservation_sem);
@@ -1359,6 +1362,8 @@ static int vmwgfx_pm_notifier(struct notifier_block *nb, unsigned long val,
 		break;
 	case PM_POST_HIBERNATION:
 	case PM_POST_RESTORE:
+		if (atomic_read(&dev_priv->num_fifo_resources) != 0)
+			return -ENOSYS;
 		vmw_fence_fifo_up(dev_priv->fman);
 		ttm_suspend_unlock(&dev_priv->reservation_sem);
 		if (dev_priv->enable_fb)
