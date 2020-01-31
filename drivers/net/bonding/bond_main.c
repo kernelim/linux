@@ -540,41 +540,43 @@ down:
 /* Get link speed and duplex from the slave's base driver
  * using ethtool. If for some reason the call fails or the
  * values are invalid, set speed and duplex to -1,
- * and return.
+ * and return. Return 1 if speed or duplex settings are
+ * UNKNOWN; 0 otherwise.
  */
-static void bond_update_speed_duplex(struct slave *slave)
+static int bond_update_speed_duplex(struct slave *slave)
 {
 	struct net_device *slave_dev = slave->dev;
 	struct ethtool_cmd etool = { .cmd = ETHTOOL_GSET };
-	u32 slave_speed;
 	int res;
 
 	slave->speed = SPEED_UNKNOWN;
 	slave->duplex = DUPLEX_UNKNOWN;
 
 	if (!slave_dev->ethtool_ops || !slave_dev->ethtool_ops->get_settings)
-		return;
+		return 1;
 
 	res = slave_dev->ethtool_ops->get_settings(slave_dev, &etool);
-	if (res < 0)
-		return;
-
-	slave_speed = ethtool_cmd_speed(&etool);
-	if (slave_speed == 0 || slave_speed == ((__u32) -1))
-		return;
-
+	if (res < 0) {
+		slave->link = BOND_LINK_DOWN;
+		return 1;
+	}
+	if (etool.speed == 0 || etool.speed == ((__u32) -1)) {
+		slave->link = BOND_LINK_DOWN;
+		return 1;
+	}
 	switch (etool.duplex) {
 	case DUPLEX_FULL:
 	case DUPLEX_HALF:
 		break;
 	default:
-		return;
+		slave->link = BOND_LINK_DOWN;
+		return 1;
 	}
 
-	slave->speed = slave_speed;
+	slave->speed = etool.speed;
 	slave->duplex = etool.duplex;
 
-	return;
+	return 0;
 }
 
 const char *bond_slave_link_status(s8 link)
@@ -3152,8 +3154,6 @@ static int bond_slave_netdev_event(unsigned long event,
 	struct slave *slave = bond_slave_get_rtnl(slave_dev), *primary;
 	struct bonding *bond;
 	struct net_device *bond_dev;
-	u32 old_speed;
-	u8 old_duplex;
 
 	/* A netdev event can be generated while enslaving a device
 	 * before netdev_rx_handler_register is called in which case
@@ -3174,17 +3174,20 @@ static int bond_slave_netdev_event(unsigned long event,
 		break;
 	case NETDEV_UP:
 	case NETDEV_CHANGE:
-		old_speed = slave->speed;
-		old_duplex = slave->duplex;
+		/* For 802.3ad mode only:
+		 * Getting invalid Speed/Duplex values here will put slave
+		 * in weird state. So mark it as link-down for the time
+		 * being and let link-monitoring (miimon) set it right when
+		 * correct speeds/duplex are available.
+		 */
+		if (bond_update_speed_duplex(slave) &&
+		    BOND_MODE(bond) == BOND_MODE_8023AD)
+			slave->link = BOND_LINK_DOWN;
 
-		bond_update_speed_duplex(slave);
-
-		if (BOND_MODE(bond) == BOND_MODE_8023AD) {
-			if (old_speed != slave->speed)
-				bond_3ad_adapter_speed_changed(slave);
-			if (old_duplex != slave->duplex)
-				bond_3ad_adapter_duplex_changed(slave);
-		}
+		if (BOND_MODE(bond) == BOND_MODE_8023AD)
+			bond_3ad_adapter_speed_duplex_changed(slave);
+		/* Fallthrough */
+	case NETDEV_DOWN:
 		/* Refresh slave-array if applicable!
 		 * If the setup does not use miimon or arpmon (mode-specific!),
 		 * then these events will not cause the slave-array to be
@@ -3193,10 +3196,6 @@ static int bond_slave_netdev_event(unsigned long event,
 		 * events. If these (miimon/arpmon) parameters are configured
 		 * then array gets refreshed twice and that should be fine!
 		 */
-		if (bond_mode_uses_xmit_hash(bond))
-			bond_update_slave_arr(bond, NULL);
-		break;
-	case NETDEV_DOWN:
 		if (bond_mode_uses_xmit_hash(bond))
 			bond_update_slave_arr(bond, NULL);
 		break;

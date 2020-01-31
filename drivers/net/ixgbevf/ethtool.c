@@ -106,22 +106,17 @@ static int ixgbevf_get_settings(struct net_device *netdev,
 				struct ethtool_cmd *ecmd)
 {
 	struct ixgbevf_adapter *adapter = netdev_priv(netdev);
-	struct ixgbe_hw *hw = &adapter->hw;
-	u32 link_speed = 0;
-	bool link_up;
 
 	ecmd->supported = SUPPORTED_10000baseT_Full;
 	ecmd->autoneg = AUTONEG_DISABLE;
 	ecmd->transceiver = XCVR_DUMMY1;
 	ecmd->port = -1;
 
-	hw->mac.get_link_status = 1;
-	hw->mac.ops.check_link(hw, &link_speed, &link_up, false);
 
-	if (link_up) {
+	if (adapter->link_up) {
 		__u32 speed = SPEED_10000;
 
-		switch (link_speed) {
+		switch (adapter->link_speed) {
 		case IXGBE_LINK_SPEED_10GB_FULL:
 			speed = SPEED_10000;
 			break;
