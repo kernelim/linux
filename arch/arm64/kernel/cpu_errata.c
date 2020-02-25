@@ -98,13 +98,21 @@ has_mismatched_cache_type(const struct arm64_cpu_capabilities *entry,
 }
 
 static void
-cpu_enable_trap_ctr_access(const struct arm64_cpu_capabilities *__unused)
+cpu_enable_trap_ctr_access(const struct arm64_cpu_capabilities *cap)
 {
 	u64 mask = arm64_ftr_reg_ctrel0.strict_mask;
+	bool enable_uct_trap = false;
 
 	/* Trap CTR_EL0 access on this CPU, only if it has a mismatch */
 	if ((read_cpuid_cachetype() & mask) !=
 	    (arm64_ftr_reg_ctrel0.sys_val & mask))
+		enable_uct_trap = true;
+
+	/* ... or if the system is affected by an erratum */
+	if (cap->capability == ARM64_WORKAROUND_1542419)
+		enable_uct_trap = true;
+
+	if (enable_uct_trap)
 		sysreg_clear_set(sctlr_el1, SCTLR_EL1_UCT, 0);
 }
 
@@ -502,6 +510,22 @@ static const struct midr_range arm64_ssb_cpus[] = {
 	{},
 };
 
+#ifdef CONFIG_ARM64_ERRATUM_1463225
+DEFINE_PER_CPU(int, __in_cortex_a76_erratum_1463225_wa);
+
+static bool
+has_cortex_a76_erratum_1463225(const struct arm64_cpu_capabilities *entry,
+			       int scope)
+{
+	u32 midr = read_cpuid_id();
+	/* Cortex-A76 r0p0 - r3p1 */
+	struct midr_range range = MIDR_RANGE(MIDR_CORTEX_A76, 0, 0, 3, 1);
+
+	WARN_ON(scope != SCOPE_LOCAL_CPU || preemptible());
+	return is_midr_in_range(midr, &range) && is_kernel_in_hyp_mode();
+}
+#endif
+
 #define CAP_MIDR_RANGE(model, v_min, r_min, v_max, r_max)	\
 	.matches = is_affected_midr_range,			\
 	.midr_range = MIDR_RANGE(model, v_min, r_min, v_max, r_max)
@@ -633,11 +657,37 @@ check_branch_predictor(const struct arm64_cpu_capabilities *entry, int scope)
 	return (need_wa > 0);
 }
 
+static bool __maybe_unused
+has_neoverse_n1_erratum_1542419(const struct arm64_cpu_capabilities *entry,
+				int scope)
+{
+	u32 midr = read_cpuid_id();
+	bool has_dic = read_cpuid_cachetype() & BIT(CTR_DIC_SHIFT);
+	const struct midr_range range = MIDR_ALL_VERSIONS(MIDR_NEOVERSE_N1);
+
+	WARN_ON(scope != SCOPE_LOCAL_CPU || preemptible());
+	return is_midr_in_range(midr, &range) && has_dic;
+}
+
 #ifdef CONFIG_HARDEN_EL2_VECTORS
 
 static const struct midr_range arm64_harden_el2_vectors[] = {
 	MIDR_ALL_VERSIONS(MIDR_CORTEX_A57),
 	MIDR_ALL_VERSIONS(MIDR_CORTEX_A72),
+	{},
+};
+
+#endif
+
+#ifdef CONFIG_ARM64_WORKAROUND_REPEAT_TLBI
+
+static const struct midr_range arm64_repeat_tlbi_cpus[] = {
+#ifdef CONFIG_QCOM_FALKOR_ERRATUM_1009
+	MIDR_RANGE(MIDR_QCOM_FALKOR_V1, 0, 0, 0, 0),
+#endif
+#ifdef CONFIG_ARM64_ERRATUM_1286807
+	MIDR_RANGE(MIDR_CORTEX_A76, 0, 0, 3, 0),
+#endif
 	{},
 };
 
@@ -677,6 +727,20 @@ static const struct midr_range workaround_clean_cache[] = {
 	/* Cortex-A53 r0p[01] : ARM errata 819472 */
 	MIDR_REV_RANGE(MIDR_CORTEX_A53, 0, 0, 1),
 #endif
+	{},
+};
+#endif
+
+#ifdef CONFIG_ARM64_ERRATUM_1418040
+/*
+ * - 1188873 affects r0p0 to r2p0
+ * - 1418040 affects r0p0 to r3p1
+ */
+static const struct midr_range erratum_1418040_list[] = {
+	/* Cortex-A76 r0p0 to r3p1 */
+	MIDR_RANGE(MIDR_CORTEX_A76, 0, 0, 3, 1),
+	/* Neoverse-N1 r0p0 to r3p1 */
+	MIDR_RANGE(MIDR_NEOVERSE_N1, 0, 0, 3, 1),
 	{},
 };
 #endif
@@ -770,11 +834,11 @@ const struct arm64_cpu_capabilities arm64_errata[] = {
 		.matches = is_kryo_midr,
 	},
 #endif
-#ifdef CONFIG_QCOM_FALKOR_ERRATUM_1009
+#ifdef CONFIG_ARM64_WORKAROUND_REPEAT_TLBI
 	{
-		.desc = "Qualcomm Technologies Falkor erratum 1009",
+		.desc = "Qualcomm erratum 1009, ARM erratum 1286807",
 		.capability = ARM64_WORKAROUND_REPEAT_TLBI,
-		ERRATA_MIDR_REV(MIDR_QCOM_FALKOR_V1, 0, 0),
+		ERRATA_MIDR_RANGE_LIST(arm64_repeat_tlbi_cpus),
 	},
 #endif
 #ifdef CONFIG_ARM64_ERRATUM_858921
@@ -805,12 +869,11 @@ const struct arm64_cpu_capabilities arm64_errata[] = {
 		.matches = has_ssbd_mitigation,
 		.midr_range_list = arm64_ssb_cpus,
 	},
-#ifdef CONFIG_ARM64_ERRATUM_1188873
+#ifdef CONFIG_ARM64_ERRATUM_1418040
 	{
-		/* Cortex-A76 r0p0 to r2p0 */
-		.desc = "ARM erratum 1188873",
-		.capability = ARM64_WORKAROUND_1188873,
-		ERRATA_MIDR_RANGE(MIDR_CORTEX_A76, 0, 0, 2, 0),
+		.desc = "ARM erratum 1418040",
+		.capability = ARM64_WORKAROUND_1418040,
+		ERRATA_MIDR_RANGE_LIST(erratum_1418040_list),
 	},
 #endif
 #ifdef CONFIG_ARM64_ERRATUM_1165522
@@ -819,6 +882,24 @@ const struct arm64_cpu_capabilities arm64_errata[] = {
 		.desc = "ARM erratum 1165522",
 		.capability = ARM64_WORKAROUND_1165522,
 		ERRATA_MIDR_RANGE(MIDR_CORTEX_A76, 0, 0, 2, 0),
+	},
+#endif
+#ifdef CONFIG_ARM64_ERRATUM_1463225
+	{
+		.desc = "ARM erratum 1463225",
+		.capability = ARM64_WORKAROUND_1463225,
+		.type = ARM64_CPUCAP_LOCAL_CPU_ERRATUM,
+		.matches = has_cortex_a76_erratum_1463225,
+	},
+#endif
+#ifdef CONFIG_ARM64_ERRATUM_1542419
+	{
+		/* we depend on the firmware portion for correctness */
+		.desc = "ARM erratum 1542419 (kernel portion)",
+		.capability = ARM64_WORKAROUND_1542419,
+		.type = ARM64_CPUCAP_LOCAL_CPU_ERRATUM,
+		.matches = has_neoverse_n1_erratum_1542419,
+		.cpu_enable = cpu_enable_trap_ctr_access,
 	},
 #endif
 	{

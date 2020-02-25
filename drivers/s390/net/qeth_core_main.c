@@ -1898,6 +1898,7 @@ static int qeth_idx_activate_channel(struct qeth_card *card,
 		       &card->seqno.trans_hdr, QETH_SEQ_NO_LENGTH);
 	}
 	tmp = ((u8)card->dev->dev_port) | 0x80;
+	tmp |= QETH_IDX_ACT_INVAL_FRAME;
 	memcpy(QETH_IDX_ACT_PNO(iob->data), &tmp, 1);
 	memcpy(QETH_IDX_ACT_ISSUER_RM_TOKEN(iob->data),
 	       &card->token.issuer_rm_w, QETH_MPC_TOKEN_LENGTH);
@@ -3202,7 +3203,7 @@ static int qeth_check_qdio_errors(struct qeth_card *card,
 			       buf->element[14].sflags);
 		QETH_CARD_TEXT_(card, 2, " qerr=%X", qdio_error);
 		if ((buf->element[15].sflags) == 0x12) {
-			card->stats.rx_dropped++;
+			card->stats.rx_fifo_errors++;
 			return 0;
 		} else
 			return 1;
@@ -4503,7 +4504,9 @@ static int qeth_mdio_read(struct net_device *dev, int phy_id, int regnum)
 	case MII_NWAYTEST: /* N-way auto-neg test register */
 		break;
 	case MII_RERRCOUNTER: /* rx error counter */
-		rc = card->stats.rx_errors;
+		rc = card->stats.rx_length_errors +
+		     card->stats.rx_frame_errors +
+		     card->stats.rx_fifo_errors;
 		break;
 	case MII_SREVISION: /* silicon revision */
 		break;
@@ -5240,27 +5243,15 @@ out:
 }
 EXPORT_SYMBOL_GPL(qeth_core_hardsetup_card);
 
-static void qeth_create_skb_frag(struct qdio_buffer_element *element,
-				 struct sk_buff *skb, int offset, int data_len)
+static void qeth_create_skb_frag(struct sk_buff *skb, char *data, int data_len)
 {
-	struct page *page = virt_to_page(element->addr);
+	struct page *page = virt_to_page(data);
 	unsigned int next_frag;
-
-	/* first fill the linear space */
-	if (!skb->len) {
-		unsigned int linear = min(data_len, skb_tailroom(skb));
-
-		skb_put_data(skb, element->addr + offset, linear);
-		data_len -= linear;
-		if (!data_len)
-			return;
-		offset += linear;
-		/* fall through to add page frag for remaining data */
-	}
 
 	next_frag = skb_shinfo(skb)->nr_frags;
 	get_page(page);
-	skb_add_rx_frag(skb, next_frag, page, offset, data_len, data_len);
+	skb_add_rx_frag(skb, next_frag, page, offset_in_page(data), data_len,
+			data_len);
 }
 
 static inline int qeth_is_last_sbale(struct qdio_buffer_element *sbale)
@@ -5275,14 +5266,14 @@ struct sk_buff *qeth_core_get_next_skb(struct qeth_card *card,
 {
 	struct qdio_buffer_element *element = *__element;
 	struct qdio_buffer *buffer = qethbuffer->buffer;
+	unsigned int linear_len = 0;
 	int offset = *__offset;
+	bool use_rx_sg = false;
+	unsigned int headroom;
 	struct sk_buff *skb;
 	int skb_len = 0;
-	void *data_ptr;
-	int data_len;
-	int headroom = 0;
-	int use_rx_sg = 0;
 
+next_packet:
 	/* qeth_hdr must not cross element boundaries */
 	while (element->length < offset + sizeof(struct qeth_hdr)) {
 		if (qeth_is_last_sbale(element))
@@ -5293,71 +5284,131 @@ struct sk_buff *qeth_core_get_next_skb(struct qeth_card *card,
 	*hdr = element->addr + offset;
 
 	offset += sizeof(struct qeth_hdr);
+	skb = NULL;
+
 	switch ((*hdr)->hdr.l2.id) {
 	case QETH_HEADER_TYPE_LAYER2:
 		skb_len = (*hdr)->hdr.l2.pkt_length;
+		linear_len = ETH_HLEN;
+		headroom = 0;
 		break;
 	case QETH_HEADER_TYPE_LAYER3:
 		skb_len = (*hdr)->hdr.l3.length;
+		if (!IS_LAYER3(card)) {
+			card->stats.rx_dropped++;
+			QETH_CARD_STAT_INC(card, rx_dropped_notsupp);
+			goto walk_packet;
+		}
+
+		if ((*hdr)->hdr.l3.flags & QETH_HDR_PASSTHRU) {
+			linear_len = ETH_HLEN;
+			headroom = 0;
+			break;
+		}
+
+		if ((*hdr)->hdr.l3.flags & QETH_HDR_IPV6)
+			linear_len = sizeof(struct ipv6hdr);
+		else
+			linear_len = sizeof(struct iphdr);
 		headroom = ETH_HLEN;
 		break;
 	case QETH_HEADER_TYPE_OSN:
 		skb_len = (*hdr)->hdr.osn.pdu_length;
+		if (!IS_OSN(card)) {
+			card->stats.rx_dropped++;
+			QETH_CARD_STAT_INC(card, rx_dropped_notsupp);
+			goto walk_packet;
+		}
+
+		linear_len = skb_len;
 		headroom = sizeof(struct qeth_hdr);
 		break;
 	default:
-		break;
+		if ((*hdr)->hdr.l2.id & QETH_HEADER_MASK_INVAL) {
+			card->stats.rx_frame_errors++;
+		} else {
+			card->stats.rx_dropped++;
+			QETH_CARD_STAT_INC(card, rx_dropped_notsupp);
+		}
+
+		/* Can't determine packet length, drop the whole buffer. */
+		return NULL;
 	}
 
-	if (!skb_len)
-		return NULL;
+	if (skb_len < linear_len) {
+		card->stats.rx_dropped++;
+		QETH_CARD_STAT_INC(card, rx_dropped_runt);
+		goto walk_packet;
+	}
 
-	if (((skb_len >= card->options.rx_sg_cb) &&
-	     (!(card->info.type == QETH_CARD_TYPE_OSN)) &&
-	     (!atomic_read(&card->force_alloc_skb))) ||
-	    (card->options.cq == QETH_CQ_ENABLED))
-		use_rx_sg = 1;
+	use_rx_sg = (card->options.cq == QETH_CQ_ENABLED) ||
+		    ((skb_len >= card->options.rx_sg_cb) &&
+		     !atomic_read(&card->force_alloc_skb) &&
+		     !IS_OSN(card));
 
 	if (use_rx_sg && qethbuffer->rx_skb) {
 		/* QETH_CQ_ENABLED only: */
 		skb = qethbuffer->rx_skb;
 		qethbuffer->rx_skb = NULL;
 	} else {
-		unsigned int linear = (use_rx_sg) ? QETH_RX_PULL_LEN : skb_len;
-
-		skb = napi_alloc_skb(&card->napi, linear + headroom);
+		if (!use_rx_sg)
+			linear_len = skb_len;
+		skb = napi_alloc_skb(&card->napi, linear_len + headroom);
 	}
-	if (!skb)
-		goto no_mem;
-	if (headroom)
+
+	if (!skb) {
+		card->stats.rx_dropped++;
+		QETH_CARD_STAT_INC(card, rx_dropped_nomem);
+	}
+	else if (headroom)
 		skb_reserve(skb, headroom);
 
-	data_ptr = element->addr + offset;
+walk_packet:
 	while (skb_len) {
-		data_len = min(skb_len, (int)(element->length - offset));
-		if (data_len) {
-			if (use_rx_sg)
-				qeth_create_skb_frag(element, skb, offset,
-						     data_len);
-			else
-				skb_put_data(skb, data_ptr, data_len);
-		}
+		int data_len = min(skb_len, (int)(element->length - offset));
+		char *data = element->addr + offset;
+
 		skb_len -= data_len;
+		offset += data_len;
+
+		/* Extract data from current element: */
+		if (skb && data_len) {
+			if (linear_len) {
+				unsigned int copy_len;
+
+				copy_len = min_t(unsigned int, linear_len,
+						 data_len);
+
+				skb_put_data(skb, data, copy_len);
+				linear_len -= copy_len;
+				data_len -= copy_len;
+				data += copy_len;
+			}
+
+			if (data_len)
+				qeth_create_skb_frag(skb, data, data_len);
+		}
+
+		/* Step forward to next element: */
 		if (skb_len) {
 			if (qeth_is_last_sbale(element)) {
 				QETH_CARD_TEXT(card, 4, "unexeob");
 				QETH_CARD_HEX(card, 2, buffer, sizeof(void *));
-				dev_kfree_skb_any(skb);
-				card->stats.rx_errors++;
+				if (skb) {
+					dev_kfree_skb_any(skb);
+					card->stats.rx_length_errors++;
+				}
 				return NULL;
 			}
 			element++;
 			offset = 0;
-			data_ptr = element->addr;
-		} else {
-			offset += data_len;
 		}
 	}
+
+	/* This packet was skipped, go get another one: */
+	if (!skb)
+		goto next_packet;
+
 	*__element = element;
 	*__offset = offset;
 	if (use_rx_sg && card->options.performance_stats) {
@@ -5365,12 +5416,6 @@ struct sk_buff *qeth_core_get_next_skb(struct qeth_card *card,
 		card->perf_stats.sg_frags_rx += skb_shinfo(skb)->nr_frags;
 	}
 	return skb;
-no_mem:
-	if (net_ratelimit()) {
-		QETH_CARD_TEXT(card, 2, "noskbmem");
-	}
-	card->stats.rx_dropped++;
-	return NULL;
 }
 EXPORT_SYMBOL_GPL(qeth_core_get_next_skb);
 
@@ -6079,7 +6124,10 @@ static struct {
 	{"tx linfail"},
 	{"cq handler count"},
 	{"cq handler time"},
-	{"rx csum"}
+	{"rx csum"},
+	{"rx dropped, no memory"},
+	{"rx dropped, bad format"},
+	{"rx dropped, runt"},
 };
 
 int qeth_core_get_sset_count(struct net_device *dev, int stringset)
@@ -6142,6 +6190,9 @@ void qeth_core_get_ethtool_stats(struct net_device *dev,
 	data[36] = card->perf_stats.cq_cnt;
 	data[37] = card->perf_stats.cq_time;
 	data[38] = card->perf_stats.rx_csum;
+	data[39] = card->perf_stats.rx_dropped_nomem;
+	data[40] = card->perf_stats.rx_dropped_notsupp;
+	data[41] = card->perf_stats.rx_dropped_runt;
 }
 EXPORT_SYMBOL_GPL(qeth_core_get_ethtool_stats);
 

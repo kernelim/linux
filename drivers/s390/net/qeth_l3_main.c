@@ -1296,6 +1296,15 @@ static int qeth_l3_vlan_rx_kill_vid(struct net_device *dev,
 static void qeth_l3_rebuild_skb(struct qeth_card *card, struct sk_buff *skb,
 				struct qeth_hdr *hdr)
 {
+	struct af_iucv_trans_hdr *iucv = (struct af_iucv_trans_hdr *) skb->data;
+	struct net_device *dev = skb->dev;
+
+	if (IS_IQD(card) && iucv->magic == ETH_P_AF_IUCV) {
+		dev_hard_header(skb, dev, ETH_P_AF_IUCV, dev->dev_addr,
+				"FAKELL", skb->len);
+		return;
+	}
+
 	if (!(hdr->hdr.l3.flags & QETH_HDR_PASSTHRU)) {
 		u16 prot = (hdr->hdr.l3.flags & QETH_HDR_IPV6) ? ETH_P_IPV6 :
 								 ETH_P_IP;
@@ -1330,8 +1339,6 @@ static void qeth_l3_rebuild_skb(struct qeth_card *card, struct sk_buff *skb,
 				tg_addr, "FAKELL", skb->len);
 	}
 
-	skb->protocol = eth_type_trans(skb, card->dev);
-
 	/* copy VLAN tag from hdr into skb */
 	if (!card->options.sniffer &&
 	    (hdr->hdr.l3.ext_flags & (QETH_HDR_EXT_VLAN_FRAME |
@@ -1348,12 +1355,9 @@ static void qeth_l3_rebuild_skb(struct qeth_card *card, struct sk_buff *skb,
 static int qeth_l3_process_inbound_buffer(struct qeth_card *card,
 				int budget, int *done)
 {
-	struct net_device *dev = card->dev;
 	int work_done = 0;
 	struct sk_buff *skb;
 	struct qeth_hdr *hdr;
-	unsigned int len;
-	__u16 magic;
 
 	*done = 0;
 	WARN_ON_ONCE(!budget);
@@ -1365,37 +1369,17 @@ static int qeth_l3_process_inbound_buffer(struct qeth_card *card,
 			*done = 1;
 			break;
 		}
-		switch (hdr->hdr.l3.id) {
-		case QETH_HEADER_TYPE_LAYER3:
-			magic = *(__u16 *)skb->data;
-			if ((card->info.type == QETH_CARD_TYPE_IQD) &&
-			    (magic == ETH_P_AF_IUCV)) {
-				len = skb->len;
-				dev_hard_header(skb, dev, ETH_P_AF_IUCV,
-						dev->dev_addr, "FAKELL", len);
-				skb->protocol = eth_type_trans(skb, dev);
-				netif_receive_skb(skb);
-			} else {
-				qeth_l3_rebuild_skb(card, skb, hdr);
-				len = skb->len;
-				napi_gro_receive(&card->napi, skb);
-			}
-			break;
-		case QETH_HEADER_TYPE_LAYER2: /* for HiperSockets sniffer */
-			skb->protocol = eth_type_trans(skb, skb->dev);
-			len = skb->len;
-			netif_receive_skb(skb);
-			break;
-		default:
-			dev_kfree_skb_any(skb);
-			QETH_CARD_TEXT(card, 3, "inbunkno");
-			QETH_DBF_HEX(CTRL, 3, hdr, sizeof(*hdr));
-			continue;
-		}
+
+		if (hdr->hdr.l3.id == QETH_HEADER_TYPE_LAYER3)
+			qeth_l3_rebuild_skb(card, skb, hdr);
+
+		skb->protocol = eth_type_trans(skb, skb->dev);
+		card->stats.rx_packets++;
+		card->stats.rx_bytes += skb->len;
+
+		napi_gro_receive(&card->napi, skb);
 		work_done++;
 		budget--;
-		card->stats.rx_packets++;
-		card->stats.rx_bytes += len;
 	}
 	return work_done;
 }

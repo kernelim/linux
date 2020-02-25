@@ -164,6 +164,9 @@ struct qeth_perf_stats {
 	unsigned int tx_lin;
 	unsigned int tx_linfail;
 	unsigned int rx_csum;
+	unsigned int rx_dropped_nomem;
+	unsigned int rx_dropped_notsupp;
+	unsigned int rx_dropped_runt;
 };
 
 /* Routing stuff */
@@ -407,6 +410,7 @@ enum qeth_header_ids {
 	QETH_HEADER_TYPE_L3_TSO	= 0x03,
 	QETH_HEADER_TYPE_OSN    = 0x04,
 	QETH_HEADER_TYPE_L2_TSO	= 0x06,
+	QETH_HEADER_MASK_INVAL	= 0x80,
 };
 /* flags for qeth_hdr.ext_flags */
 #define QETH_HDR_EXT_VLAN_FRAME       0x01
@@ -643,7 +647,6 @@ struct qeth_seqno {
 	__u32 pdu_hdr;
 	__u32 pdu_hdr_ack;
 	__u16 ipa;
-	__u32 pkt_seqno;
 };
 
 struct qeth_reply {
@@ -828,6 +831,14 @@ struct qeth_card {
 	int reclaim_index;
 	struct work_struct close_dev_work;
 };
+
+#define QETH_CARD_STAT_INC(__c, __stat)			\
+({							\
+	struct qeth_card *__card = __c;			\
+							\
+	if (__card->options.performance_stats)		\
+		(__card->perf_stats.__stat)++;		\
+})
 
 struct qeth_card_list_struct {
 	struct list_head list;
