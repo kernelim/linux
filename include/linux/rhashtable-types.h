@@ -9,14 +9,14 @@
 #ifndef _LINUX_RHASHTABLE_TYPES_H
 #define _LINUX_RHASHTABLE_TYPES_H
 
+#include <linux/rh_kabi.h>
+
 #include <linux/atomic.h>
 #include <linux/compiler.h>
 #include <linux/mutex.h>
 #include <linux/workqueue.h>
 
-#ifdef __GENKSYMS__
-#include <linux/rhashtable.h>
-#endif
+#include RH_KABI_FAKE_INCLUDE(<linux/rhashtable.h>)
 
 struct rhash_head {
 	struct rhash_head __rcu		*next;

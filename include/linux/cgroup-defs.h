@@ -485,13 +485,15 @@ struct cgroup {
 	 *
 	 * The ancestor_ids[] arrary has to be at the end of structure.
 	 */
-	RH_KABI_EXTEND(struct cgroup *old_dom_cgrp) /* used while enabling threaded */
+	RH_KABI_BROKEN_INSERT_BLOCK(
+	struct cgroup *old_dom_cgrp; /* used while enabling threaded */
 
 	/* Used to store internal freezer state */
-	RH_KABI_EXTEND(struct cgroup_freezer_state freezer)
+	struct cgroup_freezer_state freezer;
 
 	/* used to track pressure stalls */
-	RH_KABI_EXTEND(struct psi_group psi)
+	struct psi_group psi;
+	) /* RH_KABI_BROKEN_INSERT_BLOCK */
 
 	/*
 	 * RHEL8:
@@ -632,8 +634,8 @@ struct cftype {
 	 * also not supposed to access this structure anyway. So it is
 	 * safe to extend it.
 	 */
-	RH_KABI_EXTEND(__poll_t (*poll)(struct kernfs_open_file *of,
-					struct poll_table_struct *pt))
+	RH_KABI_BROKEN_INSERT(__poll_t (*poll)(struct kernfs_open_file *of,
+					       struct poll_table_struct *pt))
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 	struct lock_class_key	lockdep_key;

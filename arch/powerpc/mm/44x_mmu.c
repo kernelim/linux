@@ -30,7 +30,7 @@
 #include <asm/page.h>
 #include <asm/cacheflush.h>
 
-#include "mmu_decl.h"
+#include <mm/mmu_decl.h>
 
 /* Used by the 44x TLB replacement exception handler.
  * Just needed it declared someplace.

@@ -231,7 +231,6 @@ static void ni_tio_set_bits_transient(struct ni_gpct *counter,
 		counter_dev->regs[reg] &= ~mask;
 		counter_dev->regs[reg] |= (value & mask);
 		ni_tio_write(counter, counter_dev->regs[reg] | transient, reg);
-		mmiowb();
 		spin_unlock_irqrestore(&counter_dev->regs_lock, flags);
 	}
 }

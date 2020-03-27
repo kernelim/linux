@@ -176,6 +176,10 @@ struct user_sve_header {
  *	FPCR	uint32_t			FPCR
  *
  * Additional data might be appended in the future.
+ *
+ * The Z-, P- and FFR registers are represented in memory in an endianness-
+ * invariant layout which differs from the layout used for the FPSIMD
+ * V-registers on big-endian systems: see sigcontext.h for more explanation.
  */
 
 #define SVE_PT_SVE_ZREG_SIZE(vq)	__SVE_ZREG_SIZE(vq)
@@ -225,6 +229,26 @@ struct user_sve_header {
 	 (((flags) & SVE_PT_REGS_MASK) == SVE_PT_REGS_SVE ?		\
 		  SVE_PT_SVE_OFFSET + SVE_PT_SVE_SIZE(vq, flags)	\
 		: SVE_PT_FPSIMD_OFFSET + SVE_PT_FPSIMD_SIZE(vq, flags))
+
+/* pointer authentication masks (NT_ARM_PAC_MASK) */
+
+struct user_pac_mask {
+	__u64		data_mask;
+	__u64		insn_mask;
+};
+
+/* pointer authentication keys (NT_ARM_PACA_KEYS, NT_ARM_PACG_KEYS) */
+
+struct user_pac_address_keys {
+	__uint128_t	apiakey;
+	__uint128_t	apibkey;
+	__uint128_t	apdakey;
+	__uint128_t	apdbkey;
+};
+
+struct user_pac_generic_keys {
+	__uint128_t	apgakey;
+};
 
 #endif /* __ASSEMBLY__ */
 

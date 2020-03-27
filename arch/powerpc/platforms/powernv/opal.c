@@ -63,6 +63,8 @@ static DEFINE_SPINLOCK(opal_write_lock);
 static struct atomic_notifier_head opal_msg_notifier_head[OPAL_MSG_TYPE_MAX];
 static uint32_t opal_heartbeat;
 static struct task_struct *kopald_tsk;
+static struct opal_msg *opal_msg;
+static u32 opal_msg_size __ro_after_init;
 
 void opal_configure_cores(void)
 {
@@ -267,14 +269,9 @@ static void opal_message_do_notify(uint32_t msg_type, void *msg)
 static void opal_handle_message(void)
 {
 	s64 ret;
-	/*
-	 * TODO: pre-allocate a message buffer depending on opal-msg-size
-	 * value in /proc/device-tree.
-	 */
-	static struct opal_msg msg;
 	u32 type;
 
-	ret = opal_get_msg(__pa(&msg), sizeof(msg));
+	ret = opal_get_msg(__pa(opal_msg), opal_msg_size);
 	/* No opal message pending. */
 	if (ret == OPAL_RESOURCE)
 		return;
@@ -286,14 +283,14 @@ static void opal_handle_message(void)
 		return;
 	}
 
-	type = be32_to_cpu(msg.msg_type);
+	type = be32_to_cpu(opal_msg->msg_type);
 
 	/* Sanity check */
 	if (type >= OPAL_MSG_TYPE_MAX) {
 		pr_warn_once("%s: Unknown message type: %u\n", __func__, type);
 		return;
 	}
-	opal_message_do_notify(type, (void *)&msg);
+	opal_message_do_notify(type, (void *)opal_msg);
 }
 
 static irqreturn_t opal_message_notify(int irq, void *data)
@@ -302,9 +299,23 @@ static irqreturn_t opal_message_notify(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-static int __init opal_message_init(void)
+static int __init opal_message_init(struct device_node *opal_node)
 {
 	int ret, i, irq;
+
+	ret = of_property_read_u32(opal_node, "opal-msg-size", &opal_msg_size);
+	if (ret) {
+		pr_notice("Failed to read opal-msg-size property\n");
+		opal_msg_size = sizeof(struct opal_msg);
+	}
+
+	opal_msg = kmalloc(opal_msg_size, GFP_KERNEL);
+	if (!opal_msg) {
+		opal_msg_size = sizeof(struct opal_msg);
+		/* Try to allocate fixed message size */
+		opal_msg = kmalloc(opal_msg_size, GFP_KERNEL);
+		BUG_ON(opal_msg == NULL);
+	}
 
 	for (i = 0; i < OPAL_MSG_TYPE_MAX; i++)
 		ATOMIC_INIT_NOTIFIER_HEAD(&opal_msg_notifier_head[i]);
@@ -344,70 +355,125 @@ int opal_get_chars(uint32_t vtermno, char *buf, int count)
 	return 0;
 }
 
-int opal_put_chars(uint32_t vtermno, const char *data, int total_len)
+static int __opal_put_chars(uint32_t vtermno, const char *data, int total_len, bool atomic)
 {
-	int written = 0;
+	unsigned long flags = 0 /* shut up gcc */;
+	int written;
 	__be64 olen;
-	s64 len, rc;
-	unsigned long flags;
-	__be64 evt;
+	s64 rc;
 
 	if (!opal.entry)
 		return -ENODEV;
 
-	/* We want put_chars to be atomic to avoid mangling of hvsi
-	 * packets. To do that, we first test for room and return
-	 * -EAGAIN if there isn't enough.
-	 *
-	 * Unfortunately, opal_console_write_buffer_space() doesn't
-	 * appear to work on opal v1, so we just assume there is
-	 * enough room and be done with it
-	 */
-	spin_lock_irqsave(&opal_write_lock, flags);
+	if (atomic)
+		spin_lock_irqsave(&opal_write_lock, flags);
 	rc = opal_console_write_buffer_space(vtermno, &olen);
-	len = be64_to_cpu(olen);
-	if (rc || len < total_len) {
-		spin_unlock_irqrestore(&opal_write_lock, flags);
+	if (rc || be64_to_cpu(olen) < total_len) {
 		/* Closed -> drop characters */
 		if (rc)
-			return total_len;
-		opal_poll_events(NULL);
-		return -EAGAIN;
-	}
-
-	/* We still try to handle partial completions, though they
-	 * should no longer happen.
-	 */
-	rc = OPAL_BUSY;
-	while(total_len > 0 && (rc == OPAL_BUSY ||
-				rc == OPAL_BUSY_EVENT || rc == OPAL_SUCCESS)) {
-		olen = cpu_to_be64(total_len);
-		rc = opal_console_write(vtermno, &olen, data);
-		len = be64_to_cpu(olen);
-
-		/* Closed or other error drop */
-		if (rc != OPAL_SUCCESS && rc != OPAL_BUSY &&
-		    rc != OPAL_BUSY_EVENT) {
 			written = total_len;
-			break;
-		}
-		if (rc == OPAL_SUCCESS) {
-			total_len -= len;
-			data += len;
-			written += len;
-		}
-		/* This is a bit nasty but we need that for the console to
-		 * flush when there aren't any interrupts. We will clean
-		 * things a bit later to limit that to synchronous path
-		 * such as the kernel console and xmon/udbg
-		 */
-		do
-			opal_poll_events(&evt);
-		while(rc == OPAL_SUCCESS &&
-			(be64_to_cpu(evt) & OPAL_EVENT_CONSOLE_OUTPUT));
+		else
+			written = -EAGAIN;
+		goto out;
 	}
-	spin_unlock_irqrestore(&opal_write_lock, flags);
+
+	/* Should not get a partial write here because space is available. */
+	olen = cpu_to_be64(total_len);
+	rc = opal_console_write(vtermno, &olen, data);
+	if (rc == OPAL_BUSY || rc == OPAL_BUSY_EVENT) {
+		if (rc == OPAL_BUSY_EVENT) {
+			mdelay(OPAL_BUSY_DELAY_MS);
+			opal_poll_events(NULL);
+		} else if (rc == OPAL_BUSY_EVENT) {
+			mdelay(OPAL_BUSY_DELAY_MS);
+		}
+		written = -EAGAIN;
+		goto out;
+	}
+
+	/* Closed or other error drop */
+	if (rc != OPAL_SUCCESS) {
+		written = opal_error_code(rc);
+		goto out;
+	}
+
+	written = be64_to_cpu(olen);
+	if (written < total_len) {
+		if (atomic) {
+			/* Should not happen */
+			pr_warn("atomic console write returned partial "
+				"len=%d written=%d\n", total_len, written);
+		}
+		if (!written)
+			written = -EAGAIN;
+	}
+
+out:
+	if (atomic)
+		spin_unlock_irqrestore(&opal_write_lock, flags);
+
+	/* In the -EAGAIN case, callers loop, so we have to flush the console
+	 * here in case they have interrupts off (and we don't want to wait
+	 * for async flushing if we can make immediate progress here). If
+	 * necessary the API could be made entirely non-flushing if the
+	 * callers had a ->flush API to use.
+	 */
+	if (written == -EAGAIN)
+		opal_flush_console(vtermno);
+
 	return written;
+}
+
+int opal_put_chars(uint32_t vtermno, const char *data, int total_len)
+{
+	return __opal_put_chars(vtermno, data, total_len, false);
+}
+
+/*
+ * opal_put_chars_atomic will not perform partial-writes. Data will be
+ * atomically written to the terminal or not at all. This is not strictly
+ * true at the moment because console space can race with OPAL's console
+ * writes.
+ */
+int opal_put_chars_atomic(uint32_t vtermno, const char *data, int total_len)
+{
+	return __opal_put_chars(vtermno, data, total_len, true);
+}
+
+int opal_flush_console(uint32_t vtermno)
+{
+	s64 rc;
+
+	if (!opal_check_token(OPAL_CONSOLE_FLUSH)) {
+		__be64 evt;
+
+		WARN_ONCE(1, "opal: OPAL_CONSOLE_FLUSH missing.\n");
+		/*
+		 * If OPAL_CONSOLE_FLUSH is not implemented in the firmware,
+		 * the console can still be flushed by calling the polling
+		 * function while it has OPAL_EVENT_CONSOLE_OUTPUT events.
+		 */
+		do {
+			opal_poll_events(&evt);
+		} while (be64_to_cpu(evt) & OPAL_EVENT_CONSOLE_OUTPUT);
+
+		return OPAL_SUCCESS;
+	}
+
+	do  {
+		rc = OPAL_BUSY;
+		while (rc == OPAL_BUSY || rc == OPAL_BUSY_EVENT) {
+			rc = opal_console_flush(vtermno);
+			if (rc == OPAL_BUSY_EVENT) {
+				mdelay(OPAL_BUSY_DELAY_MS);
+				opal_poll_events(NULL);
+			} else if (rc == OPAL_BUSY) {
+				mdelay(OPAL_BUSY_DELAY_MS);
+			}
+		}
+	} while (rc == OPAL_PARTIAL); /* More to flush */
+
+	return opal_error_code(rc);
 }
 
 static int opal_recover_mce(struct pt_regs *regs,
@@ -809,7 +875,7 @@ static int __init opal_init(void)
 	}
 
 	/* Initialise OPAL messaging system */
-	opal_message_init();
+	opal_message_init(opal_node);
 
 	/* Initialise OPAL asynchronous completion interface */
 	opal_async_comp_init();

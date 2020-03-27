@@ -10,11 +10,14 @@ enum {
 };
 
 struct mlx5e_tc_table {
+	/* protects flow table */
+	struct mutex			t_lock;
 	struct mlx5_flow_table		*t;
 
 	struct rhashtable               ht;
 
-	DECLARE_HASHTABLE(mod_hdr_tbl, 8);
+	struct mod_hdr_tbl mod_hdr;
+	struct mutex hairpin_tbl_lock; /* protects hairpin_tbl */
 	DECLARE_HASHTABLE(hairpin_tbl, 8);
 
 	struct notifier_block     netdevice_nb;
@@ -132,12 +135,17 @@ struct mlx5e_ethtool_steering {
 
 void mlx5e_ethtool_init_steering(struct mlx5e_priv *priv);
 void mlx5e_ethtool_cleanup_steering(struct mlx5e_priv *priv);
-int mlx5e_set_rxnfc(struct net_device *dev, struct ethtool_rxnfc *cmd);
-int mlx5e_get_rxnfc(struct net_device *dev,
-		    struct ethtool_rxnfc *info, u32 *rule_locs);
+int mlx5e_ethtool_set_rxnfc(struct net_device *dev, struct ethtool_rxnfc *cmd);
+int mlx5e_ethtool_get_rxnfc(struct net_device *dev,
+			    struct ethtool_rxnfc *info, u32 *rule_locs);
 #else
 static inline void mlx5e_ethtool_init_steering(struct mlx5e_priv *priv)    { }
 static inline void mlx5e_ethtool_cleanup_steering(struct mlx5e_priv *priv) { }
+static inline int mlx5e_ethtool_set_rxnfc(struct net_device *dev, struct ethtool_rxnfc *cmd)
+{ return -EOPNOTSUPP; }
+static inline int mlx5e_ethtool_get_rxnfc(struct net_device *dev,
+					  struct ethtool_rxnfc *info, u32 *rule_locs)
+{ return -EOPNOTSUPP; }
 #endif /* CONFIG_MLX5_EN_RXNFC */
 
 #ifdef CONFIG_MLX5_EN_ARFS

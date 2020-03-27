@@ -19,6 +19,7 @@
 #include <linux/types.h>
 #include <linux/bitops.h>
 #include <linux/log2.h>
+#include <linux/zalloc.h>
 #include <cpuid.h>
 
 #include "../../perf.h"

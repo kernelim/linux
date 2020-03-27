@@ -236,7 +236,7 @@ int lwtunnel_fill_encap(struct sk_buff *skb, struct lwtunnel_state *lwtstate)
 	    lwtstate->type > LWTUNNEL_ENCAP_MAX)
 		return 0;
 
-	nest = nla_nest_start(skb, RTA_ENCAP);
+	nest = nla_nest_start_noflag(skb, RTA_ENCAP);
 	if (!nest)
 		return -EMSGSIZE;
 

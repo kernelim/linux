@@ -51,6 +51,9 @@ config NET_INGRESS
 config NET_EGRESS
 	bool
 
+config SKB_EXTENSIONS
+	bool
+
 menu "Networking options"
 
 source "net/packet/Kconfig"
@@ -399,7 +402,7 @@ config LWTUNNEL
 
 config LWTUNNEL_BPF
 	bool "Execute BPF program as route nexthop action"
-	depends on LWTUNNEL
+	depends on LWTUNNEL && INET
 	default y if LWTUNNEL=y
 	---help---
 	  Allows to run BPF programs as a nexthop action following a route
@@ -425,11 +428,8 @@ config NET_SOCK_MSG
 	  with the help of BPF programs.
 
 config NET_DEVLINK
-	bool "Network physical/parent device Netlink interface"
-	help
-	  Network physical/parent device Netlink interface provides
-	  infrastructure to support access to physical chip-wide config and
-	  monitoring.
+	bool
+	default n
 
 config PAGE_POOL
        bool

@@ -368,7 +368,8 @@ xfs_buf_allocate_memory(
 	 */
 	size = BBTOB(bp->b_length);
 	if (size < PAGE_SIZE) {
-		bp->b_addr = kmem_alloc(size, KM_NOFS);
+		int align_mask = xfs_buftarg_dma_alignment(bp->b_target);
+		bp->b_addr = kmem_alloc_io(size, align_mask, KM_NOFS);
 		if (!bp->b_addr) {
 			/* low memory - use alloc_page loop instead */
 			goto use_alloc_page;
@@ -383,7 +384,7 @@ xfs_buf_allocate_memory(
 		}
 		bp->b_offset = offset_in_page(bp->b_addr);
 		bp->b_pages = bp->b_page_array;
-		bp->b_pages[0] = virt_to_page(bp->b_addr);
+		bp->b_pages[0] = kmem_to_page(bp->b_addr);
 		bp->b_page_count = 1;
 		bp->b_flags |= _XBF_KMEM;
 		return 0;
@@ -776,29 +777,24 @@ _xfs_buf_read(
 }
 
 /*
- * Set buffer ops on an unchecked buffer and validate it, if possible.
+ * Reverify a buffer found in cache without an attached ->b_ops.
  *
- * If the caller passed in an ops structure and the buffer doesn't have ops
- * assigned, set the ops and use them to verify the contents.  If the contents
- * cannot be verified, we'll clear XBF_DONE.  We assume the buffer has no
- * recorded errors and is already in XBF_DONE state.
+ * If the caller passed an ops structure and the buffer doesn't have ops
+ * assigned, set the ops and use it to verify the contents. If verification
+ * fails, clear XBF_DONE. We assume the buffer has no recorded errors and is
+ * already in XBF_DONE state on entry.
  *
- * Under normal operations, every in-core buffer must have buffer ops assigned
- * to them when the buffer is read in from disk so that we can validate the
- * metadata.
- *
- * However, there are two scenarios where one can encounter in-core buffers
- * that don't have buffer ops.  The first is during log recovery of buffers on
- * a V4 filesystem, though these buffers are purged at the end of recovery.
- *
- * The other is online repair, which tries to match arbitrary metadata blocks
- * with btree types in order to find the root.  If online repair doesn't match
- * the buffer with /any/ btree type, the buffer remains in memory in DONE state
- * with no ops, and a subsequent read_buf call from elsewhere will not set the
- * ops.  This function helps us fix this situation.
+ * Under normal operations, every in-core buffer is verified on read I/O
+ * completion. There are two scenarios that can lead to in-core buffers without
+ * an assigned ->b_ops. The first is during log recovery of buffers on a V4
+ * filesystem, though these buffers are purged at the end of recovery. The
+ * other is online repair, which intentionally reads with a NULL buffer ops to
+ * run several verifiers across an in-core buffer in order to establish buffer
+ * type.  If repair can't establish that, the buffer will be left in memory
+ * with NULL buffer ops.
  */
 int
-xfs_buf_ensure_ops(
+xfs_buf_reverify(
 	struct xfs_buf		*bp,
 	const struct xfs_buf_ops *ops)
 {
@@ -840,7 +836,7 @@ xfs_buf_read_map(
 		return bp;
 	}
 
-	xfs_buf_ensure_ops(bp, ops);
+	xfs_buf_reverify(bp, ops);
 
 	if (flags & XBF_ASYNC) {
 		/*
@@ -938,17 +934,6 @@ xfs_buf_set_empty(
 	bp->b_maps[0].bm_len = bp->b_length;
 }
 
-static inline struct page *
-mem_to_page(
-	void			*addr)
-{
-	if ((!is_vmalloc_addr(addr))) {
-		return virt_to_page(addr);
-	} else {
-		return vmalloc_to_page(addr);
-	}
-}
-
 int
 xfs_buf_associate_memory(
 	xfs_buf_t		*bp,
@@ -981,7 +966,7 @@ xfs_buf_associate_memory(
 	bp->b_offset = offset;
 
 	for (i = 0; i < bp->b_page_count; i++) {
-		bp->b_pages[i] = mem_to_page((void *)pageaddr);
+		bp->b_pages[i] = kmem_to_page((void *)pageaddr);
 		pageaddr += PAGE_SIZE;
 	}
 
@@ -2208,4 +2193,41 @@ void xfs_buf_set_ref(struct xfs_buf *bp, int lru_ref)
 		lru_ref = 0;
 
 	atomic_set(&bp->b_lru_ref, lru_ref);
+}
+
+/*
+ * Verify an on-disk magic value against the magic value specified in the
+ * verifier structure. The verifier magic is in disk byte order so the caller is
+ * expected to pass the value directly from disk.
+ */
+bool
+xfs_verify_magic(
+	struct xfs_buf		*bp,
+	__be32			dmagic)
+{
+	struct xfs_mount	*mp = bp->b_target->bt_mount;
+	int			idx;
+
+	idx = xfs_sb_version_hascrc(&mp->m_sb);
+	if (unlikely(WARN_ON(!bp->b_ops || !bp->b_ops->magic[idx])))
+		return false;
+	return dmagic == bp->b_ops->magic[idx];
+}
+/*
+ * Verify an on-disk magic value against the magic value specified in the
+ * verifier structure. The verifier magic is in disk byte order so the caller is
+ * expected to pass the value directly from disk.
+ */
+bool
+xfs_verify_magic16(
+	struct xfs_buf		*bp,
+	__be16			dmagic)
+{
+	struct xfs_mount	*mp = bp->b_target->bt_mount;
+	int			idx;
+
+	idx = xfs_sb_version_hascrc(&mp->m_sb);
+	if (unlikely(WARN_ON(!bp->b_ops || !bp->b_ops->magic16[idx])))
+		return false;
+	return dmagic == bp->b_ops->magic16[idx];
 }

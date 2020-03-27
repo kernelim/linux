@@ -92,7 +92,7 @@ struct acpi_gpio_info {
 };
 
 /* gpio suffixes used for ACPI and device tree lookup */
-static const char * const gpio_suffixes[] = { "gpios", "gpio" };
+static __maybe_unused const char * const gpio_suffixes[] = { "gpios", "gpio" };
 
 #ifdef CONFIG_OF_GPIO
 struct gpio_desc *of_find_gpio(struct device *dev,
@@ -193,12 +193,6 @@ int gpiod_set_array_value_complex(bool raw, bool can_sleep,
 				   struct gpio_desc **desc_array,
 				   int *value_array);
 
-/* This is just passed between gpiolib and devres */
-struct gpio_desc *gpiod_get_from_of_node(struct device_node *node,
-					 const char *propname, int index,
-					 enum gpiod_flags dflags,
-					 const char *label);
-
 extern struct spinlock gpio_lock;
 extern struct list_head gpio_devices;
 
@@ -237,9 +231,6 @@ static inline int gpio_chip_hwgpio(const struct gpio_desc *desc)
 {
 	return desc - &desc->gdev->descs[0];
 }
-
-void devprop_gpiochip_set_names(struct gpio_chip *chip,
-				const struct fwnode_handle *fwnode);
 
 /* With descriptor prefix */
 

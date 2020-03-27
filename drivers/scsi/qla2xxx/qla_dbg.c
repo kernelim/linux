@@ -445,7 +445,7 @@ qla2xxx_dump_ram(struct qla_hw_data *ha, uint32_t addr, uint16_t *ram,
 		}
 	}
 
-	*nxt = rval == QLA_SUCCESS ? &ram[cnt]: NULL;
+	*nxt = rval == QLA_SUCCESS ? &ram[cnt] : NULL;
 	return rval;
 }
 
@@ -2519,12 +2519,6 @@ qla83xx_fw_dump_failed:
 /*                         Driver Debug Functions.                          */
 /****************************************************************************/
 
-static inline int
-ql_mask_match(uint level)
-{
-	return (level & ql2xextended_error_logging) == level;
-}
-
 /*
  * This function is for formatting and logging debug information.
  * It is to be used when vha is available. It formats the message
@@ -2743,7 +2737,8 @@ ql_dump_regs(uint level, scsi_qla_host_t *vha, uint id)
 
 
 void
-ql_dump_buffer(uint level, scsi_qla_host_t *vha, uint id, void *buf, uint size)
+ql_dump_buffer(uint level, scsi_qla_host_t *vha, uint id, const void *buf,
+	       uint size)
 {
 	uint cnt;
 

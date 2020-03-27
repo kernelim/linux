@@ -508,7 +508,8 @@ static const struct pci_device_id intel_early_ids[] __initconst = {
 	INTEL_I945G_IDS(&gen3_early_ops),
 	INTEL_I945GM_IDS(&gen3_early_ops),
 	INTEL_VLV_IDS(&gen6_early_ops),
-	INTEL_PINEVIEW_IDS(&gen3_early_ops),
+	INTEL_PINEVIEW_G_IDS(&gen3_early_ops),
+	INTEL_PINEVIEW_M_IDS(&gen3_early_ops),
 	INTEL_I965G_IDS(&gen3_early_ops),
 	INTEL_G33_IDS(&gen3_early_ops),
 	INTEL_I965GM_IDS(&gen3_early_ops),
@@ -688,6 +689,8 @@ static struct chipset early_qrk[] __initdata = {
 	 *    http://www.intel.com/content/dam/www/public/us/en/documents/datasheets/atom-z8000-datasheet-vol-1.pdf
 	 */
 	{ PCI_VENDOR_ID_INTEL, 0x0f00,
+		PCI_CLASS_BRIDGE_HOST, PCI_ANY_ID, 0, force_disable_hpet},
+	{ PCI_VENDOR_ID_INTEL, 0x3ec4,
 		PCI_CLASS_BRIDGE_HOST, PCI_ANY_ID, 0, force_disable_hpet},
 	{ PCI_VENDOR_ID_BROADCOM, 0x4331,
 	  PCI_CLASS_NETWORK_OTHER, PCI_ANY_ID, 0, apple_airport_reset},

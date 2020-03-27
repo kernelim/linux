@@ -520,8 +520,6 @@ void octeon_droq_check_oom(struct octeon_droq *droq)
 			 */
 			wmb();
 			writel(desc_refilled, droq->pkts_credit_reg);
-			/* make sure mmio write completes */
-			mmiowb();
 		}
 		spin_unlock_bh(&droq->lock);
 	}
@@ -715,8 +713,6 @@ octeon_droq_fast_process_packets(struct octeon_device *oct,
 			 */
 			wmb();
 			writel((desc_refilled), droq->pkts_credit_reg);
-			/* make sure mmio write completes */
-			mmiowb();
 		}
 
 	}                       /* for (each packet)... */

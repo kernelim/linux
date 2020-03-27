@@ -54,7 +54,7 @@ static inline void ladder_do_selection(struct cpuidle_device *dev,
 {
 	ldev->states[old_idx].stats.promotion_count = 0;
 	ldev->states[old_idx].stats.demotion_count = 0;
-	dev->last_state_idx = new_idx;
+	dev->rh_cpuidle_dev.last_state_idx = new_idx;
 }
 
 /**
@@ -68,7 +68,7 @@ static int ladder_select_state(struct cpuidle_driver *drv,
 {
 	struct ladder_device *ldev = this_cpu_ptr(&ladder_devices);
 	struct ladder_device_state *last_state;
-	int last_residency, last_idx = dev->last_state_idx;
+	int last_residency, last_idx = dev->rh_cpuidle_dev.last_state_idx;
 	int first_idx = drv->states[0].flags & CPUIDLE_FLAG_POLLING ? 1 : 0;
 	int latency_req = cpuidle_governor_latency_req(dev->cpu);
 
@@ -80,7 +80,7 @@ static int ladder_select_state(struct cpuidle_driver *drv,
 
 	last_state = &ldev->states[last_idx];
 
-	last_residency = cpuidle_get_last_residency(dev) - drv->states[last_idx].exit_latency;
+	last_residency = dev->last_residency - drv->states[last_idx].exit_latency;
 
 	/* consider promotion */
 	if (last_idx < drv->state_count - 1 &&
@@ -139,7 +139,7 @@ static int ladder_enable_device(struct cpuidle_driver *drv,
 	struct ladder_device_state *lstate;
 	struct cpuidle_state *state;
 
-	dev->last_state_idx = first_idx;
+	dev->rh_cpuidle_dev.last_state_idx = first_idx;
 
 	for (i = first_idx; i < drv->state_count; i++) {
 		state = &drv->states[i];
@@ -168,7 +168,7 @@ static int ladder_enable_device(struct cpuidle_driver *drv,
 static void ladder_reflect(struct cpuidle_device *dev, int index)
 {
 	if (index > 0)
-		dev->last_state_idx = index;
+		dev->rh_cpuidle_dev.last_state_idx = index;
 }
 
 static struct cpuidle_governor ladder_governor = {

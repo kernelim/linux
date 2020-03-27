@@ -17,6 +17,7 @@
 #include <linux/netdevice.h>
 #include <linux/pci.h>
 #include <linux/io-64-nonatomic-hi-lo.h>
+#include <linux/semaphore.h>
 #include <net/xdp.h>
 
 #include "nfp_net_ctrl.h"
@@ -392,7 +393,7 @@ struct nfp_net_r_vector {
 		struct {
 			struct tasklet_struct tasklet;
 			struct sk_buff_head queue;
-			struct spinlock lock;
+			spinlock_t lock;
 		};
 	};
 
@@ -539,12 +540,17 @@ struct nfp_net_dp {
  * @shared_handler:     Handler for shared interrupts
  * @shared_name:        Name for shared interrupt
  * @me_freq_mhz:        ME clock_freq (MHz)
- * @reconfig_lock:	Protects HW reconfiguration request regs/machinery
+ * @reconfig_lock:	Protects @reconfig_posted, @reconfig_timer_active,
+ *			@reconfig_sync_present and HW reconfiguration request
+ *			regs/machinery from async requests (sync must take
+ *			@bar_lock)
  * @reconfig_posted:	Pending reconfig bits coming from async sources
  * @reconfig_timer_active:  Timer for reading reconfiguration results is pending
  * @reconfig_sync_present:  Some thread is performing synchronous reconfig
  * @reconfig_timer:	Timer for async reading of reconfig results
  * @reconfig_in_progress_update:	Update FW is processing now (debug only)
+ * @bar_lock:		vNIC config BAR access lock, protects: update,
+ *			mailbox area
  * @link_up:            Is the link up?
  * @link_status_lock:	Protects @link_* and ensures atomicity with BAR reading
  * @rx_coalesce_usecs:      RX interrupt moderation usecs delay parameter
@@ -557,6 +563,10 @@ struct nfp_net_dp {
  * @tx_bar:             Pointer to mapped TX queues
  * @rx_bar:             Pointer to mapped FL/RX queues
  * @tlv_caps:		Parsed TLV capabilities
+ * @mbox_cmsg:		Common Control Message via vNIC mailbox state
+ * @mbox_cmsg.queue:	CCM mbox queue of pending messages
+ * @mbox_cmsg.wq:	CCM mbox wait queue of waiting processes
+ * @mbox_cmsg.tag:	CCM mbox message tag allocator
  * @debugfs_dir:	Device directory in debugfs
  * @vnic_list:		Entry on device vNIC list
  * @pdev:		Backpointer to PCI device
@@ -615,6 +625,8 @@ struct nfp_net {
 	struct timer_list reconfig_timer;
 	u32 reconfig_in_progress_update;
 
+	struct semaphore bar_lock;
+
 	u32 rx_coalesce_usecs;
 	u32 rx_coalesce_max_frames;
 	u32 tx_coalesce_usecs;
@@ -629,6 +641,12 @@ struct nfp_net {
 	u8 __iomem *rx_bar;
 
 	struct nfp_net_tlv_caps tlv_caps;
+
+	struct {
+		struct sk_buff_head queue;
+		wait_queue_head_t wq;
+		u16 tag;
+	} mbox_cmsg;
 
 	struct dentry *debugfs_dir;
 
@@ -839,6 +857,16 @@ static inline void nfp_ctrl_unlock(struct nfp_net *nn)
 	spin_unlock_bh(&nn->r_vecs[0].lock);
 }
 
+static inline void nn_ctrl_bar_lock(struct nfp_net *nn)
+{
+	down(&nn->bar_lock);
+}
+
+static inline void nn_ctrl_bar_unlock(struct nfp_net *nn)
+{
+	up(&nn->bar_lock);
+}
+
 /* Globals */
 extern const char nfp_driver_version[];
 
@@ -866,12 +894,15 @@ void nfp_ctrl_close(struct nfp_net *nn);
 
 void nfp_net_set_ethtool_ops(struct net_device *netdev);
 void nfp_net_info(struct nfp_net *nn);
+int __nfp_net_reconfig(struct nfp_net *nn, u32 update);
 int nfp_net_reconfig(struct nfp_net *nn, u32 update);
 unsigned int nfp_net_rss_key_sz(struct nfp_net *nn);
 void nfp_net_rss_write_itbl(struct nfp_net *nn);
 void nfp_net_rss_write_key(struct nfp_net *nn);
 void nfp_net_coalesce_write_cfg(struct nfp_net *nn);
-int nfp_net_reconfig_mbox(struct nfp_net *nn, u32 mbox_cmd);
+int nfp_net_mbox_lock(struct nfp_net *nn, unsigned int data_size);
+int nfp_net_mbox_reconfig(struct nfp_net *nn, u32 mbox_cmd);
+int nfp_net_mbox_reconfig_and_unlock(struct nfp_net *nn, u32 mbox_cmd);
 
 unsigned int
 nfp_net_irqs_alloc(struct pci_dev *pdev, struct msix_entry *irq_entries,

@@ -35,6 +35,7 @@
 #include <linux/platform_device.h>
 #include <rdma/ib_addr.h>
 #include <rdma/ib_umem.h>
+#include <rdma/uverbs_ioctl.h>
 #include "hns_roce_common.h"
 #include "hns_roce_device.h"
 #include "hns_roce_hem.h"
@@ -537,6 +538,8 @@ static int hns_roce_create_qp_common(struct hns_roce_dev *hr_dev,
 	struct device *dev = hr_dev->dev;
 	struct hns_roce_ib_create_qp ucmd;
 	struct hns_roce_ib_create_qp_resp resp = {};
+	struct hns_roce_ucontext *uctx = rdma_udata_to_drv_context(
+		udata, struct hns_roce_ucontext, ibucontext);
 	unsigned long qpn = 0;
 	int ret = 0;
 	u32 page_shift;
@@ -607,9 +610,8 @@ static int hns_roce_create_qp_common(struct hns_roce_dev *hr_dev,
 			goto err_rq_sge_list;
 		}
 
-		hr_qp->umem = ib_umem_get(ib_pd->uobject->context,
-					  ucmd.buf_addr, hr_qp->buff_size, 0,
-					  0);
+		hr_qp->umem = ib_umem_get(udata, ucmd.buf_addr,
+					  hr_qp->buff_size, 0, 0);
 		if (IS_ERR(hr_qp->umem)) {
 			dev_err(dev, "ib_umem_get error for create qp\n");
 			ret = PTR_ERR(hr_qp->umem);
@@ -617,19 +619,19 @@ static int hns_roce_create_qp_common(struct hns_roce_dev *hr_dev,
 		}
 
 		hr_qp->mtt.mtt_type = MTT_TYPE_WQE;
+		page_shift = PAGE_SHIFT;
 		if (hr_dev->caps.mtt_buf_pg_sz) {
 			npages = (ib_umem_page_count(hr_qp->umem) +
 				  (1 << hr_dev->caps.mtt_buf_pg_sz) - 1) /
-				  (1 << hr_dev->caps.mtt_buf_pg_sz);
-			page_shift = PAGE_SHIFT + hr_dev->caps.mtt_buf_pg_sz;
+				 (1 << hr_dev->caps.mtt_buf_pg_sz);
+			page_shift += hr_dev->caps.mtt_buf_pg_sz;
 			ret = hns_roce_mtt_init(hr_dev, npages,
 				    page_shift,
 				    &hr_qp->mtt);
 		} else {
 			ret = hns_roce_mtt_init(hr_dev,
-				    ib_umem_page_count(hr_qp->umem),
-				    hr_qp->umem->page_shift,
-				    &hr_qp->mtt);
+						ib_umem_page_count(hr_qp->umem),
+						page_shift, &hr_qp->mtt);
 		}
 		if (ret) {
 			dev_err(dev, "hns_roce_mtt_init error for create qp\n");
@@ -647,9 +649,8 @@ static int hns_roce_create_qp_common(struct hns_roce_dev *hr_dev,
 		    (udata->inlen >= sizeof(ucmd)) &&
 		    (udata->outlen >= sizeof(resp)) &&
 		    hns_roce_qp_has_sq(init_attr)) {
-			ret = hns_roce_db_map_user(
-					to_hr_ucontext(ib_pd->uobject->context),
-					ucmd.sdb_addr, &hr_qp->sdb);
+			ret = hns_roce_db_map_user(uctx, udata, ucmd.sdb_addr,
+						   &hr_qp->sdb);
 			if (ret) {
 				dev_err(dev, "sq record doorbell map failed!\n");
 				goto err_mtt;
@@ -663,9 +664,8 @@ static int hns_roce_create_qp_common(struct hns_roce_dev *hr_dev,
 		if ((hr_dev->caps.flags & HNS_ROCE_CAP_FLAG_RECORD_DB) &&
 		    (udata->outlen >= sizeof(resp)) &&
 		    hns_roce_qp_has_rq(init_attr)) {
-			ret = hns_roce_db_map_user(
-					to_hr_ucontext(ib_pd->uobject->context),
-					ucmd.db_addr, &hr_qp->rdb);
+			ret = hns_roce_db_map_user(uctx, udata, ucmd.db_addr,
+						   &hr_qp->rdb);
 			if (ret) {
 				dev_err(dev, "rq record doorbell map failed!\n");
 				goto err_sq_dbmap;
@@ -809,9 +809,7 @@ err_wrid:
 		if ((hr_dev->caps.flags & HNS_ROCE_CAP_FLAG_RECORD_DB) &&
 		    (udata->outlen >= sizeof(resp)) &&
 		    hns_roce_qp_has_rq(init_attr))
-			hns_roce_db_unmap_user(
-					to_hr_ucontext(ib_pd->uobject->context),
-					&hr_qp->rdb);
+			hns_roce_db_unmap_user(uctx, &hr_qp->rdb);
 	} else {
 		kfree(hr_qp->sq.wrid);
 		kfree(hr_qp->rq.wrid);
@@ -823,18 +821,15 @@ err_sq_dbmap:
 		    (udata->inlen >= sizeof(ucmd)) &&
 		    (udata->outlen >= sizeof(resp)) &&
 		    hns_roce_qp_has_sq(init_attr))
-			hns_roce_db_unmap_user(
-					to_hr_ucontext(ib_pd->uobject->context),
-					&hr_qp->sdb);
+			hns_roce_db_unmap_user(uctx, &hr_qp->sdb);
 
 err_mtt:
 	hns_roce_mtt_cleanup(hr_dev, &hr_qp->mtt);
 
 err_buf:
-	if (hr_qp->umem)
-		ib_umem_release(hr_qp->umem);
-	else
+	if (!hr_qp->umem)
 		hns_roce_buf_free(hr_dev, hr_qp->buff_size, &hr_qp->hr_buf);
+	ib_umem_release(hr_qp->umem);
 
 err_db:
 	if (!udata && hns_roce_qp_has_rq(init_attr) &&

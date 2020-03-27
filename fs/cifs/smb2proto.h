@@ -203,6 +203,9 @@ extern int SMB2_set_compression(const unsigned int xid, struct cifs_tcon *tcon,
 extern int SMB2_oplock_break(const unsigned int xid, struct cifs_tcon *tcon,
 			     const u64 persistent_fid, const u64 volatile_fid,
 			     const __u8 oplock_level);
+extern int smb2_handle_cancelled_close(struct cifs_tcon *tcon,
+				       __u64 persistent_fid,
+				       __u64 volatile_fid);
 extern int smb2_handle_cancelled_mid(char *buffer,
 					struct TCP_Server_Info *server);
 void smb2_cancelled_close_fid(struct work_struct *work);
@@ -228,9 +231,10 @@ extern int smb3_validate_negotiate(const unsigned int, struct cifs_tcon *);
 
 extern enum securityEnum smb2_select_sectype(struct TCP_Server_Info *,
 					enum securityEnum);
-extern __u8 smb2_parse_lease_state(struct TCP_Server_Info *server,
-				   struct smb2_create_rsp *rsp,
-				   unsigned int *epoch, char *lease_key);
+extern void smb2_parse_contexts(struct TCP_Server_Info *server,
+				struct smb2_create_rsp *rsp,
+				unsigned int *epoch, char *lease_key,
+				__u8 *oplock, struct smb2_file_all_info *buf);
 extern int smb3_encryption_required(const struct cifs_tcon *tcon);
 extern int smb2_validate_iov(unsigned int offset, unsigned int buffer_length,
 			     struct kvec *iov, unsigned int min_buf_size);

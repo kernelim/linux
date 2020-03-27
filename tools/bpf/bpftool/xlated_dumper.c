@@ -31,9 +31,7 @@ void kernel_syms_load(struct dump_data *dd)
 	if (!fp)
 		return;
 
-	while (!feof(fp)) {
-		if (!fgets(buff, sizeof(buff), fp))
-			break;
+	while (fgets(buff, sizeof(buff), fp)) {
 		tmp = reallocarray(dd->sym_mapping, dd->sym_count + 1,
 				   sizeof(*dd->sym_mapping));
 		if (!tmp) {
@@ -176,7 +174,7 @@ static const char *print_call(void *private_data,
 	struct kernel_sym *sym;
 
 	if (insn->src_reg == BPF_PSEUDO_CALL &&
-	    (__u32) insn->imm < dd->nr_jited_ksyms)
+	    (__u32) insn->imm < dd->nr_jited_ksyms && dd->jited_ksyms)
 		address = dd->jited_ksyms[insn->imm];
 
 	sym = kernel_syms_search(dd, address);
@@ -195,6 +193,9 @@ static const char *print_imm(void *private_data,
 	if (insn->src_reg == BPF_PSEUDO_MAP_FD)
 		snprintf(dd->scratch_buff, sizeof(dd->scratch_buff),
 			 "map[id:%u]", insn->imm);
+	else if (insn->src_reg == BPF_PSEUDO_MAP_VALUE)
+		snprintf(dd->scratch_buff, sizeof(dd->scratch_buff),
+			 "map[id:%u][0]+%u", insn->imm, (insn + 1)->imm);
 	else
 		snprintf(dd->scratch_buff, sizeof(dd->scratch_buff),
 			 "0x%llx", (unsigned long long)full_imm);

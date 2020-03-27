@@ -122,7 +122,7 @@ userptr_mn_invalidate_range_start(struct mmu_notifier *_mn,
 	while (it) {
 		struct drm_i915_gem_object *obj;
 
-		if (!range->blockable) {
+		if (!mmu_notifier_range_blockable(range)) {
 			ret = -EAGAIN;
 			break;
 		}
@@ -673,22 +673,12 @@ i915_gem_userptr_put_pages(struct drm_i915_gem_object *obj,
 	if (!pages)
 		return;
 
-	if (obj->mm.madv != I915_MADV_WILLNEED)
-		obj->mm.dirty = false;
-
+	__i915_gem_object_release_shmem(obj, pages, true);
 	i915_gem_gtt_finish_pages(obj, pages);
 
 	for_each_sgt_page(page, sgt_iter, pages) {
 		if (obj->mm.dirty)
-			/*
-			 * As this may not be anonymous memory (e.g. shmem)
-			 * but exist on a real mapping, we have to lock
-			 * the page in order to dirty it -- holding
-			 * the page reference is not sufficient to
-			 * prevent the inode from being truncated.
-			 * Play safe and take the lock.
-			 */
-			set_page_dirty_lock(page);
+			set_page_dirty(page);
 
 		mark_page_accessed(page);
 		put_page(page);
@@ -803,7 +793,7 @@ i915_gem_userptr_ioctl(struct drm_device *dev,
 			return -ENODEV;
 	}
 
-	obj = i915_gem_object_alloc(dev_priv);
+	obj = i915_gem_object_alloc();
 	if (obj == NULL)
 		return -ENOMEM;
 

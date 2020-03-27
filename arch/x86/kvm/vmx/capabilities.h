@@ -2,6 +2,8 @@
 #ifndef __KVM_X86_VMX_CAPS_H
 #define __KVM_X86_VMX_CAPS_H
 
+#include <asm/vmx.h>
+
 #include "lapic.h"
 
 extern bool __read_mostly enable_vpid;
@@ -145,6 +147,11 @@ static inline bool vmx_umip_emulated(void)
 		SECONDARY_EXEC_DESC;
 }
 
+static inline bool vmx_pku_supported(void)
+{
+	return boot_cpu_has(X86_FEATURE_PKU);
+}
+
 static inline bool cpu_has_vmx_rdtscp(void)
 {
 	return vmcs_config.cpu_based_2nd_exec_ctrl &
@@ -245,6 +252,12 @@ static inline bool vmx_xsaves_supported(void)
 {
 	return vmcs_config.cpu_based_2nd_exec_ctrl &
 		SECONDARY_EXEC_XSAVES;
+}
+
+static inline bool vmx_waitpkg_supported(void)
+{
+	return vmcs_config.cpu_based_2nd_exec_ctrl &
+		SECONDARY_EXEC_ENABLE_USR_WAIT_PAUSE;
 }
 
 static inline bool cpu_has_vmx_tsc_scaling(void)

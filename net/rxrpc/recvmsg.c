@@ -645,7 +645,7 @@ int rxrpc_kernel_recv_data(struct socket *sock, struct rxrpc_call *call,
 
 	iov.iov_base = buf + *_offset;
 	iov.iov_len = size - *_offset;
-	iov_iter_kvec(&iter, ITER_KVEC | READ, &iov, 1, size - *_offset);
+	iov_iter_kvec(&iter, READ, &iov, 1, size - *_offset);
 
 	mutex_lock(&call->user_mutex);
 

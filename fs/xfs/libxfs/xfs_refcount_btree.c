@@ -209,7 +209,7 @@ xfs_refcountbt_verify(
 	xfs_failaddr_t		fa;
 	unsigned int		level;
 
-	if (block->bb_magic != cpu_to_be32(XFS_REFC_CRC_MAGIC))
+	if (!xfs_verify_magic(bp, block->bb_magic))
 		return __this_address;
 
 	if (!xfs_sb_version_hasreflink(&mp->m_sb))
@@ -264,6 +264,7 @@ xfs_refcountbt_write_verify(
 
 const struct xfs_buf_ops xfs_refcountbt_buf_ops = {
 	.name			= "xfs_refcountbt",
+	.magic			= { 0, cpu_to_be32(XFS_REFC_CRC_MAGIC) },
 	.verify_read		= xfs_refcountbt_read_verify,
 	.verify_write		= xfs_refcountbt_write_verify,
 	.verify_struct		= xfs_refcountbt_verify,
@@ -425,6 +426,15 @@ xfs_refcountbt_calc_reserves(
 	agblocks = be32_to_cpu(agf->agf_length);
 	tree_len = be32_to_cpu(agf->agf_refcount_blocks);
 	xfs_trans_brelse(tp, agbp);
+
+	/*
+	 * The log is permanently allocated, so the space it occupies will
+	 * never be available for the kinds of things that would require btree
+	 * expansion.  We therefore can pretend the space isn't there.
+	 */
+	if (mp->m_sb.sb_logstart &&
+	    XFS_FSB_TO_AGNO(mp, mp->m_sb.sb_logstart) == agno)
+		agblocks -= mp->m_sb.sb_logblocks;
 
 	*ask += xfs_refcountbt_max_size(mp, agblocks);
 	*used += tree_len;

@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * rt5682.c  --  RT5682 ALSA SoC audio component driver
  *
  * Copyright 2018 Realtek Semiconductor Corp.
  * Author: Bard Liao <bardliao@realtek.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -47,6 +44,7 @@ static const struct rt5682_platform_data i2s_default_platform_data = {
 	.dmic1_data_pin = RT5682_DMIC1_DATA_GPIO2,
 	.dmic1_clk_pin = RT5682_DMIC1_CLK_GPIO3,
 	.jd_src = RT5682_JD1,
+	.btndet_delay = 16,
 };
 
 struct rt5682_priv {
@@ -998,6 +996,16 @@ static int rt5682_set_jack_detect(struct snd_soc_component *component,
 {
 	struct rt5682_priv *rt5682 = snd_soc_component_get_drvdata(component);
 
+	rt5682->hs_jack = hs_jack;
+
+	if (!hs_jack) {
+		regmap_update_bits(rt5682->regmap, RT5682_IRQ_CTRL_2,
+				   RT5682_JD1_EN_MASK, RT5682_JD1_DIS);
+		regmap_update_bits(rt5682->regmap, RT5682_RC_CLK_CTRL,
+				   RT5682_POW_JDH | RT5682_POW_JDL, 0);
+		return 0;
+	}
+
 	switch (rt5682->pdata.jd_src) {
 	case RT5682_JD1:
 		snd_soc_component_update_bits(component, RT5682_CBJ_CTRL_2,
@@ -1019,6 +1027,18 @@ static int rt5682_set_jack_detect(struct snd_soc_component *component,
 		regmap_update_bits(rt5682->regmap, RT5682_IRQ_CTRL_2,
 			RT5682_JD1_EN_MASK | RT5682_JD1_POL_MASK,
 			RT5682_JD1_EN | RT5682_JD1_POL_NOR);
+		regmap_update_bits(rt5682->regmap, RT5682_4BTN_IL_CMD_4,
+			0x7f7f, (rt5682->pdata.btndet_delay << 8 |
+			rt5682->pdata.btndet_delay));
+		regmap_update_bits(rt5682->regmap, RT5682_4BTN_IL_CMD_5,
+			0x7f7f, (rt5682->pdata.btndet_delay << 8 |
+			rt5682->pdata.btndet_delay));
+		regmap_update_bits(rt5682->regmap, RT5682_4BTN_IL_CMD_6,
+			0x7f7f, (rt5682->pdata.btndet_delay << 8 |
+			rt5682->pdata.btndet_delay));
+		regmap_update_bits(rt5682->regmap, RT5682_4BTN_IL_CMD_7,
+			0x7f7f, (rt5682->pdata.btndet_delay << 8 |
+			rt5682->pdata.btndet_delay));
 		mod_delayed_work(system_power_efficient_wq,
 			   &rt5682->jack_detect_work, msecs_to_jiffies(250));
 		break;
@@ -1034,8 +1054,6 @@ static int rt5682_set_jack_detect(struct snd_soc_component *component,
 		dev_warn(component->dev, "Wrong JD source\n");
 		break;
 	}
-
-	rt5682->hs_jack = hs_jack;
 
 	return 0;
 }
@@ -2462,6 +2480,8 @@ static int rt5682_parse_dt(struct rt5682_priv *rt5682, struct device *dev)
 		&rt5682->pdata.dmic1_clk_pin);
 	device_property_read_u32(dev, "realtek,jd-src",
 		&rt5682->pdata.jd_src);
+	device_property_read_u32(dev, "realtek,btndet-delay",
+		&rt5682->pdata.btndet_delay);
 
 	rt5682->pdata.ldo1_en = of_get_named_gpio(dev->of_node,
 		"realtek,ldo1-en-gpios", 0);
@@ -2665,15 +2685,9 @@ static int rt5682_i2c_probe(struct i2c_client *i2c,
 
 	}
 
-	return snd_soc_register_component(&i2c->dev, &soc_component_dev_rt5682,
-			rt5682_dai, ARRAY_SIZE(rt5682_dai));
-}
-
-static int rt5682_i2c_remove(struct i2c_client *i2c)
-{
-	snd_soc_unregister_component(&i2c->dev);
-
-	return 0;
+	return devm_snd_soc_register_component(&i2c->dev,
+					&soc_component_dev_rt5682,
+					rt5682_dai, ARRAY_SIZE(rt5682_dai));
 }
 
 static void rt5682_i2c_shutdown(struct i2c_client *client)
@@ -2706,7 +2720,6 @@ static struct i2c_driver rt5682_i2c_driver = {
 		.acpi_match_table = ACPI_PTR(rt5682_acpi_match),
 	},
 	.probe = rt5682_i2c_probe,
-	.remove = rt5682_i2c_remove,
 	.shutdown = rt5682_i2c_shutdown,
 	.id_table = rt5682_i2c_id,
 };

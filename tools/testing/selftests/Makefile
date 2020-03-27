@@ -18,6 +18,7 @@ TARGETS += ipc
 TARGETS += kcmp
 TARGETS += kvm
 TARGETS += lib
+TARGETS += livepatch
 TARGETS += membarrier
 TARGETS += memfd
 TARGETS += memory-hotplug
@@ -42,6 +43,7 @@ TARGETS += sysctl
 ifneq (1, $(quicktest))
 TARGETS += timers
 endif
+TARGETS += tpm2
 TARGETS += user
 TARGETS += vm
 TARGETS += x86
@@ -72,12 +74,6 @@ endif
 ifndef BUILD
   BUILD := $(shell pwd)
 endif
-
-# KSFT_TAP_LEVEL is used from KSFT framework to prevent nested TAP header
-# printing from tests. Applicable to run_tests case where run_tests adds
-# TAP header prior running tests and when a test program invokes another
-# with system() call. Export it here to cover override RUN_TESTS defines.
-export KSFT_TAP_LEVEL=`echo 1`
 
 export BUILD
 all:
@@ -121,7 +117,9 @@ ALL_SCRIPT := $(INSTALL_PATH)/run_kselftest.sh
 install:
 ifdef INSTALL_PATH
 	@# Ask all targets to install their files
-	mkdir -p $(INSTALL_PATH)
+	mkdir -p $(INSTALL_PATH)/kselftest
+	install -m 744 kselftest/runner.sh $(INSTALL_PATH)/kselftest/
+	install -m 744 kselftest/prefix.pl $(INSTALL_PATH)/kselftest/
 	@for TARGET in $(TARGETS); do \
 		BUILD_TARGET=$$BUILD/$$TARGET;	\
 		make OUTPUT=$$BUILD_TARGET -C $$TARGET INSTALL_PATH=$(INSTALL_PATH)/$$TARGET install; \
@@ -131,24 +129,20 @@ ifdef INSTALL_PATH
 	echo "#!/bin/sh" > $(ALL_SCRIPT)
 	echo "BASE_DIR=\$$(realpath \$$(dirname \$$0))" >> $(ALL_SCRIPT)
 	echo "cd \$$BASE_DIR" >> $(ALL_SCRIPT)
+	echo ". ./kselftest/runner.sh" >> $(ALL_SCRIPT)
 	echo "ROOT=\$$PWD" >> $(ALL_SCRIPT)
 	echo "if [ \"\$$1\" = \"--summary\" ]; then" >> $(ALL_SCRIPT)
-	echo "  OUTPUT=\$$BASE_DIR/output.log" >> $(ALL_SCRIPT)
-	echo "  cat /dev/null > \$$OUTPUT" >> $(ALL_SCRIPT)
-	echo "else" >> $(ALL_SCRIPT)
-	echo "  OUTPUT=/dev/stdout" >> $(ALL_SCRIPT)
+	echo "  logfile=\$$BASE_DIR/output.log" >> $(ALL_SCRIPT)
+	echo "  cat /dev/null > \$$logfile" >> $(ALL_SCRIPT)
 	echo "fi" >> $(ALL_SCRIPT)
-	echo "export KSFT_TAP_LEVEL=1" >> $(ALL_SCRIPT)
-	echo "export skip=4" >> $(ALL_SCRIPT)
 
 	for TARGET in $(TARGETS); do \
 		BUILD_TARGET=$$BUILD/$$TARGET;	\
-		echo "echo ; echo TAP version 13" >> $(ALL_SCRIPT);	\
-		echo "echo Running tests in $$TARGET" >> $(ALL_SCRIPT); \
-		echo "echo ========================================" >> $(ALL_SCRIPT); \
 		echo "[ -w /dev/kmsg ] && echo \"kselftest: Running tests in $$TARGET\" >> /dev/kmsg" >> $(ALL_SCRIPT); \
 		echo "cd $$TARGET" >> $(ALL_SCRIPT); \
+		echo -n "run_many" >> $(ALL_SCRIPT); \
 		make -s --no-print-directory OUTPUT=$$BUILD_TARGET -C $$TARGET emit_tests >> $(ALL_SCRIPT); \
+		echo "" >> $(ALL_SCRIPT);	    \
 		echo "cd \$$ROOT" >> $(ALL_SCRIPT); \
 	done;
 

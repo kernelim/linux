@@ -828,10 +828,44 @@ static void __init trim_low_memory_range(void)
 	memblock_reserve(0, ALIGN(reserve_low, PAGE_SIZE));
 }
 
+static bool valid_amd_epyc(const char *model_id)
+{
+	int len;
+
+	len = strlen("AMD EPYC 7");
+
+	if (!strncmp(model_id, "AMD EPYC 7", len)) {
+		len += 3;
+		/*
+		 * AMD EPYC 7xx1 == NAPLES (8.0)
+		 * AMD EPYC 7xx2 == ROME   (8.1/8.0z)
+		 */
+		if (strlen(model_id) >= len) {
+			if (model_id[len-1] == '1' ||
+			    model_id[len-1] == '2')
+				return true;
+		}
+	}
+
+	return false;
+}
+
+static bool valid_amd_ryzen(const char *model_id)
+{
+	const char *ryzen5 = "AMD Ryzen 5";
+	const char *ryzen7 = "AMD Ryzen 7";
+
+	if (!strncmp(model_id, ryzen5, strlen(ryzen5)))
+		return true;
+	else if (!strncmp(model_id, ryzen7, strlen(ryzen7)))
+		return true;
+
+	return false;
+}
+
 static bool valid_amd_processor(__u8 family, const char *model_id, bool guest)
 {
 	bool valid = false;
-	int len;
 
 	switch(family) {
 	case 0x15:
@@ -840,19 +874,10 @@ static bool valid_amd_processor(__u8 family, const char *model_id, bool guest)
 
 	case 0x17:
 		if (!guest) {
-			len = strlen("AMD EPYC 7");
-			if (!strncmp(model_id, "AMD EPYC 7", len)) {
-				len += 3;
-				/*
-				 * AMD EPYC 7xx1 == NAPLES
-				 * AMD EPYC 7xx2 == ROME
-				 */
-				if (strlen(model_id) >= len) {
-					if (model_id[len-1] == '1' ||
-					    model_id[len-1] == '2')
-						valid = true;
-				}
-			}
+			if (!strncmp(model_id, "AMD EPYC", 8))
+				valid = valid_amd_epyc(model_id);
+			else if (!strncmp(model_id, "AMD Ryzen", 9))
+				valid = valid_amd_ryzen(model_id);
 		}
 		else {
 			/* guest names do not conform to bare metal */
@@ -876,40 +901,47 @@ static bool valid_intel_processor(__u8 family, __u8 model, __u8 stepping)
 		return false;
 
 	switch(model) {
-	case INTEL_FAM6_KABYLAKE_DESKTOP:
+	case INTEL_FAM6_KABYLAKE: /* 8.0, 8.1 CFL(s13) */
 		valid = (stepping <= 13);
 		break;
 
-	case INTEL_FAM6_KABYLAKE_MOBILE:
+	case INTEL_FAM6_KABYLAKE_L: /* 8.0, 8.1 WHL(s12) */
 		valid = (stepping <= 12);
 		break;
 
-	case INTEL_FAM6_XEON_PHI_KNM:
-	case INTEL_FAM6_ATOM_GOLDMONT:
-	case INTEL_FAM6_ATOM_GOLDMONT_PLUS:
-	case INTEL_FAM6_ATOM_GOLDMONT_X:
-	case INTEL_FAM6_XEON_PHI_KNL:
-	case INTEL_FAM6_BROADWELL_XEON_D:
-	case INTEL_FAM6_BROADWELL_X:
-	case INTEL_FAM6_ATOM_SILVERMONT_X:
-	case INTEL_FAM6_BROADWELL_GT3E:
-	case INTEL_FAM6_HASWELL_GT3E:
-	case INTEL_FAM6_HASWELL_ULT:
+	case INTEL_FAM6_COMETLAKE: /* 8.2 CML-H/CML-S */
+		valid = (stepping <= 5);
+		break;
+
+	case INTEL_FAM6_COMETLAKE_L: /* 8.2 CML-U(v1) */
+		valid = (stepping == 0);
+		break;
+
+	case INTEL_FAM6_XEON_PHI_KNM: /* 8.0 */
+	case INTEL_FAM6_ATOM_GOLDMONT: /* 8.0 */
+	case INTEL_FAM6_ATOM_GOLDMONT_PLUS: /* 8.0 */
+	case INTEL_FAM6_ATOM_GOLDMONT_D: /* 8.0 */
+	case INTEL_FAM6_XEON_PHI_KNL: /* 8.0 */
+	case INTEL_FAM6_BROADWELL_D: /* 8.0 */
+	case INTEL_FAM6_BROADWELL_X: /* 8.0 */
+	case INTEL_FAM6_ATOM_SILVERMONT_D: /* 8.0 */
+	case INTEL_FAM6_BROADWELL_G: /* 8.0 */
+	case INTEL_FAM6_HASWELL_G: /* 8.0 */
+	case INTEL_FAM6_HASWELL_L: /* 8.0 */
 		valid = true;
 		break;
 
-	case INTEL_FAM6_SKYLAKE_MOBILE:
-	case INTEL_FAM6_SKYLAKE_DESKTOP:
-		/* stepping > 4 is Cascade Lake and is not supported */
+	case INTEL_FAM6_SKYLAKE_L: /* 8.0 */
+	case INTEL_FAM6_SKYLAKE: /* 8.0 */
 		valid = (stepping <= 4);
 		break;
 
-	case INTEL_FAM6_SKYLAKE_X:
-		valid = (stepping <= 7);
+	case INTEL_FAM6_SKYLAKE_X: /* 8.0:SKX,CLX  8.2:CPX */
+		valid = (stepping <= 11);
 		break;
 
 	default:
-		valid = (model <= INTEL_FAM6_HASWELL_X);
+		valid = (model <= INTEL_FAM6_HASWELL_X); /* 8.0 */
 		break;
 	}
 
@@ -1066,6 +1098,8 @@ void __init setup_arch(char **cmdline_p)
 
 	idt_setup_early_traps();
 	early_cpu_init();
+	arch_init_ideal_nops();
+	jump_label_init();
 	early_ioremap_init();
 
 	setup_olpc_ofw_pgd();
@@ -1211,6 +1245,7 @@ void __init setup_arch(char **cmdline_p)
 	 */
 	init_hypervisor_platform();
 
+	tsc_early_init();
 	x86_init.resources.probe_roms();
 
 	/* after parse_early_param, so could debug it */
@@ -1382,7 +1417,6 @@ void __init setup_arch(char **cmdline_p)
 
 	memblock_find_dma_reserve();
 
-	tsc_early_delay_calibrate();
 	if (!early_xdbc_setup_hardware())
 		early_xdbc_register_console();
 
@@ -1452,8 +1486,6 @@ void __init setup_arch(char **cmdline_p)
 	x86_init.timers.wallclock_init();
 
 	mcheck_init();
-
-	arch_init_ideal_nops();
 
 	register_refined_jiffies(CLOCK_TICK_RATE);
 

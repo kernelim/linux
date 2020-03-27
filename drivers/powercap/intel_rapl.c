@@ -30,8 +30,9 @@
 #include <linux/cpu.h>
 #include <linux/powercap.h>
 #include <linux/suspend.h>
-#include <asm/iosf_mbi.h>
+#include <linux/intel_rapl.h>
 
+#include <asm/iosf_mbi.h>
 #include <asm/processor.h>
 #include <asm/cpu_device_id.h>
 #include <asm/intel-family.h>
@@ -86,119 +87,33 @@ enum unit_type {
 	TIME_UNIT,
 };
 
-enum rapl_domain_type {
-	RAPL_DOMAIN_PACKAGE, /* entire package/socket */
-	RAPL_DOMAIN_PP0, /* core power plane */
-	RAPL_DOMAIN_PP1, /* graphics uncore */
-	RAPL_DOMAIN_DRAM,/* DRAM control_type */
-	RAPL_DOMAIN_PLATFORM, /* PSys control_type */
-	RAPL_DOMAIN_MAX,
-};
-
-enum rapl_domain_msr_id {
-	RAPL_DOMAIN_MSR_LIMIT,
-	RAPL_DOMAIN_MSR_STATUS,
-	RAPL_DOMAIN_MSR_PERF,
-	RAPL_DOMAIN_MSR_POLICY,
-	RAPL_DOMAIN_MSR_INFO,
-	RAPL_DOMAIN_MSR_MAX,
+/* private data for RAPL MSR Interface */
+static struct rapl_if_priv rapl_msr_priv = {
+	.reg_unit = MSR_RAPL_POWER_UNIT,
+	.regs[RAPL_DOMAIN_PACKAGE] = {
+		MSR_PKG_POWER_LIMIT, MSR_PKG_ENERGY_STATUS, MSR_PKG_PERF_STATUS, 0, MSR_PKG_POWER_INFO },
+	.regs[RAPL_DOMAIN_PP0] = {
+		MSR_PP0_POWER_LIMIT, MSR_PP0_ENERGY_STATUS, 0, MSR_PP0_POLICY, 0 },
+	.regs[RAPL_DOMAIN_PP1] = {
+		MSR_PP1_POWER_LIMIT, MSR_PP1_ENERGY_STATUS, 0, MSR_PP1_POLICY, 0 },
+	.regs[RAPL_DOMAIN_DRAM] = {
+		MSR_DRAM_POWER_LIMIT, MSR_DRAM_ENERGY_STATUS, MSR_DRAM_PERF_STATUS, 0, MSR_DRAM_POWER_INFO },
+	.regs[RAPL_DOMAIN_PLATFORM] = {
+		MSR_PLATFORM_POWER_LIMIT, MSR_PLATFORM_ENERGY_STATUS, 0, 0, 0},
 };
 
 /* per domain data, some are optional */
-enum rapl_primitives {
-	ENERGY_COUNTER,
-	POWER_LIMIT1,
-	POWER_LIMIT2,
-	FW_LOCK,
-
-	PL1_ENABLE,  /* power limit 1, aka long term */
-	PL1_CLAMP,   /* allow frequency to go below OS request */
-	PL2_ENABLE,  /* power limit 2, aka short term, instantaneous */
-	PL2_CLAMP,
-
-	TIME_WINDOW1, /* long term */
-	TIME_WINDOW2, /* short term */
-	THERMAL_SPEC_POWER,
-	MAX_POWER,
-
-	MIN_POWER,
-	MAX_TIME_WINDOW,
-	THROTTLED_TIME,
-	PRIORITY_LEVEL,
-
-	/* below are not raw primitive data */
-	AVERAGE_POWER,
-	NR_RAPL_PRIMITIVES,
-};
-
 #define NR_RAW_PRIMITIVES (NR_RAPL_PRIMITIVES - 2)
-
-/* Can be expanded to include events, etc.*/
-struct rapl_domain_data {
-	u64 primitives[NR_RAPL_PRIMITIVES];
-	unsigned long timestamp;
-};
-
-struct msrl_action {
-	u32 msr_no;
-	u64 clear_mask;
-	u64 set_mask;
-	int err;
-};
 
 #define	DOMAIN_STATE_INACTIVE           BIT(0)
 #define	DOMAIN_STATE_POWER_LIMIT_SET    BIT(1)
 #define DOMAIN_STATE_BIOS_LOCKED        BIT(2)
 
-#define NR_POWER_LIMITS (2)
-struct rapl_power_limit {
-	struct powercap_zone_constraint *constraint;
-	int prim_id; /* primitive ID used to enable */
-	struct rapl_domain *domain;
-	const char *name;
-	u64 last_power_limit;
-};
-
 static const char pl1_name[] = "long_term";
 static const char pl2_name[] = "short_term";
 
-struct rapl_package;
-struct rapl_domain {
-	const char *name;
-	enum rapl_domain_type id;
-	int msrs[RAPL_DOMAIN_MSR_MAX];
-	struct powercap_zone power_zone;
-	struct rapl_domain_data rdd;
-	struct rapl_power_limit rpl[NR_POWER_LIMITS];
-	u64 attr_map; /* track capabilities */
-	unsigned int state;
-	unsigned int domain_energy_unit;
-	struct rapl_package *rp;
-};
 #define power_zone_to_rapl_domain(_zone) \
 	container_of(_zone, struct rapl_domain, power_zone)
-
-
-/* Each physical package contains multiple domains, these are the common
- * data across RAPL domains within a package.
- */
-struct rapl_package {
-	unsigned int id; /* physical package/socket id */
-	unsigned int nr_domains;
-	unsigned long domain_map; /* bit map of active domains */
-	unsigned int power_unit;
-	unsigned int energy_unit;
-	unsigned int time_unit;
-	struct rapl_domain *domains; /* array of domains, sized at runtime */
-	struct powercap_zone *power_zone; /* keep track of parent zone */
-	unsigned long power_limit_irq; /* keep track of package power limit
-					* notify interrupt enable status.
-					*/
-	struct list_head plist;
-	int lead_cpu; /* one active cpu per package for access */
-	/* Track active cpus */
-	struct cpumask cpumask;
-};
 
 struct rapl_defaults {
 	u8 floor_freq_reg_addr;
@@ -224,7 +139,7 @@ struct rapl_primitive_info {
 	const char *name;
 	u64 mask;
 	int shift;
-	enum rapl_domain_msr_id id;
+	enum rapl_domain_reg_id id;
 	enum unit_type unit;
 	u32 flag;
 };
@@ -260,16 +175,14 @@ static const char * const rapl_domain_names[] = {
 	"psys",
 };
 
-static struct powercap_control_type *control_type; /* PowerCap Controller */
-static struct rapl_domain *platform_rapl_domain; /* Platform (PSys) domain */
-
 /* caller to ensure CPU hotplug lock is held */
-static struct rapl_package *find_package_by_id(int id)
+static struct rapl_package *rapl_find_package_domain(int cpu, struct rapl_if_priv *priv)
 {
+	int id = topology_logical_die_id(cpu);
 	struct rapl_package *rp;
 
 	list_for_each_entry(rp, &rapl_packages, plist) {
-		if (rp->id == id)
+		if (rp->id == id && rp->priv->control_type == priv->control_type)
 			return rp;
 	}
 
@@ -645,15 +558,17 @@ static void rapl_init_domains(struct rapl_package *rp)
 
 	for (i = 0; i < RAPL_DOMAIN_MAX; i++) {
 		unsigned int mask = rp->domain_map & (1 << i);
+
+		rd->regs[RAPL_DOMAIN_REG_LIMIT] = rp->priv->regs[i][RAPL_DOMAIN_REG_LIMIT];
+		rd->regs[RAPL_DOMAIN_REG_STATUS] = rp->priv->regs[i][RAPL_DOMAIN_REG_STATUS];
+		rd->regs[RAPL_DOMAIN_REG_PERF] = rp->priv->regs[i][RAPL_DOMAIN_REG_PERF];
+		rd->regs[RAPL_DOMAIN_REG_POLICY] = rp->priv->regs[i][RAPL_DOMAIN_REG_POLICY];
+		rd->regs[RAPL_DOMAIN_REG_INFO] = rp->priv->regs[i][RAPL_DOMAIN_REG_INFO];
+
 		switch (mask) {
 		case BIT(RAPL_DOMAIN_PACKAGE):
 			rd->name = rapl_domain_names[RAPL_DOMAIN_PACKAGE];
 			rd->id = RAPL_DOMAIN_PACKAGE;
-			rd->msrs[0] = MSR_PKG_POWER_LIMIT;
-			rd->msrs[1] = MSR_PKG_ENERGY_STATUS;
-			rd->msrs[2] = MSR_PKG_PERF_STATUS;
-			rd->msrs[3] = 0;
-			rd->msrs[4] = MSR_PKG_POWER_INFO;
 			rd->rpl[0].prim_id = PL1_ENABLE;
 			rd->rpl[0].name = pl1_name;
 			rd->rpl[1].prim_id = PL2_ENABLE;
@@ -662,33 +577,18 @@ static void rapl_init_domains(struct rapl_package *rp)
 		case BIT(RAPL_DOMAIN_PP0):
 			rd->name = rapl_domain_names[RAPL_DOMAIN_PP0];
 			rd->id = RAPL_DOMAIN_PP0;
-			rd->msrs[0] = MSR_PP0_POWER_LIMIT;
-			rd->msrs[1] = MSR_PP0_ENERGY_STATUS;
-			rd->msrs[2] = 0;
-			rd->msrs[3] = MSR_PP0_POLICY;
-			rd->msrs[4] = 0;
 			rd->rpl[0].prim_id = PL1_ENABLE;
 			rd->rpl[0].name = pl1_name;
 			break;
 		case BIT(RAPL_DOMAIN_PP1):
 			rd->name = rapl_domain_names[RAPL_DOMAIN_PP1];
 			rd->id = RAPL_DOMAIN_PP1;
-			rd->msrs[0] = MSR_PP1_POWER_LIMIT;
-			rd->msrs[1] = MSR_PP1_ENERGY_STATUS;
-			rd->msrs[2] = 0;
-			rd->msrs[3] = MSR_PP1_POLICY;
-			rd->msrs[4] = 0;
 			rd->rpl[0].prim_id = PL1_ENABLE;
 			rd->rpl[0].name = pl1_name;
 			break;
 		case BIT(RAPL_DOMAIN_DRAM):
 			rd->name = rapl_domain_names[RAPL_DOMAIN_DRAM];
 			rd->id = RAPL_DOMAIN_DRAM;
-			rd->msrs[0] = MSR_DRAM_POWER_LIMIT;
-			rd->msrs[1] = MSR_DRAM_ENERGY_STATUS;
-			rd->msrs[2] = MSR_DRAM_PERF_STATUS;
-			rd->msrs[3] = 0;
-			rd->msrs[4] = MSR_DRAM_POWER_INFO;
 			rd->rpl[0].prim_id = PL1_ENABLE;
 			rd->rpl[0].name = pl1_name;
 			rd->domain_energy_unit =
@@ -743,37 +643,37 @@ static u64 rapl_unit_xlate(struct rapl_domain *rd, enum unit_type type,
 static struct rapl_primitive_info rpi[] = {
 	/* name, mask, shift, msr index, unit divisor */
 	PRIMITIVE_INFO_INIT(ENERGY_COUNTER, ENERGY_STATUS_MASK, 0,
-				RAPL_DOMAIN_MSR_STATUS, ENERGY_UNIT, 0),
+				RAPL_DOMAIN_REG_STATUS, ENERGY_UNIT, 0),
 	PRIMITIVE_INFO_INIT(POWER_LIMIT1, POWER_LIMIT1_MASK, 0,
-				RAPL_DOMAIN_MSR_LIMIT, POWER_UNIT, 0),
+				RAPL_DOMAIN_REG_LIMIT, POWER_UNIT, 0),
 	PRIMITIVE_INFO_INIT(POWER_LIMIT2, POWER_LIMIT2_MASK, 32,
-				RAPL_DOMAIN_MSR_LIMIT, POWER_UNIT, 0),
+				RAPL_DOMAIN_REG_LIMIT, POWER_UNIT, 0),
 	PRIMITIVE_INFO_INIT(FW_LOCK, POWER_PP_LOCK, 31,
-				RAPL_DOMAIN_MSR_LIMIT, ARBITRARY_UNIT, 0),
+				RAPL_DOMAIN_REG_LIMIT, ARBITRARY_UNIT, 0),
 	PRIMITIVE_INFO_INIT(PL1_ENABLE, POWER_LIMIT1_ENABLE, 15,
-				RAPL_DOMAIN_MSR_LIMIT, ARBITRARY_UNIT, 0),
+				RAPL_DOMAIN_REG_LIMIT, ARBITRARY_UNIT, 0),
 	PRIMITIVE_INFO_INIT(PL1_CLAMP, POWER_LIMIT1_CLAMP, 16,
-				RAPL_DOMAIN_MSR_LIMIT, ARBITRARY_UNIT, 0),
+				RAPL_DOMAIN_REG_LIMIT, ARBITRARY_UNIT, 0),
 	PRIMITIVE_INFO_INIT(PL2_ENABLE, POWER_LIMIT2_ENABLE, 47,
-				RAPL_DOMAIN_MSR_LIMIT, ARBITRARY_UNIT, 0),
+				RAPL_DOMAIN_REG_LIMIT, ARBITRARY_UNIT, 0),
 	PRIMITIVE_INFO_INIT(PL2_CLAMP, POWER_LIMIT2_CLAMP, 48,
-				RAPL_DOMAIN_MSR_LIMIT, ARBITRARY_UNIT, 0),
+				RAPL_DOMAIN_REG_LIMIT, ARBITRARY_UNIT, 0),
 	PRIMITIVE_INFO_INIT(TIME_WINDOW1, TIME_WINDOW1_MASK, 17,
-				RAPL_DOMAIN_MSR_LIMIT, TIME_UNIT, 0),
+				RAPL_DOMAIN_REG_LIMIT, TIME_UNIT, 0),
 	PRIMITIVE_INFO_INIT(TIME_WINDOW2, TIME_WINDOW2_MASK, 49,
-				RAPL_DOMAIN_MSR_LIMIT, TIME_UNIT, 0),
+				RAPL_DOMAIN_REG_LIMIT, TIME_UNIT, 0),
 	PRIMITIVE_INFO_INIT(THERMAL_SPEC_POWER, POWER_INFO_THERMAL_SPEC_MASK,
-				0, RAPL_DOMAIN_MSR_INFO, POWER_UNIT, 0),
+				0, RAPL_DOMAIN_REG_INFO, POWER_UNIT, 0),
 	PRIMITIVE_INFO_INIT(MAX_POWER, POWER_INFO_MAX_MASK, 32,
-				RAPL_DOMAIN_MSR_INFO, POWER_UNIT, 0),
+				RAPL_DOMAIN_REG_INFO, POWER_UNIT, 0),
 	PRIMITIVE_INFO_INIT(MIN_POWER, POWER_INFO_MIN_MASK, 16,
-				RAPL_DOMAIN_MSR_INFO, POWER_UNIT, 0),
+				RAPL_DOMAIN_REG_INFO, POWER_UNIT, 0),
 	PRIMITIVE_INFO_INIT(MAX_TIME_WINDOW, POWER_INFO_MAX_TIME_WIN_MASK, 48,
-				RAPL_DOMAIN_MSR_INFO, TIME_UNIT, 0),
+				RAPL_DOMAIN_REG_INFO, TIME_UNIT, 0),
 	PRIMITIVE_INFO_INIT(THROTTLED_TIME, PERF_STATUS_THROTTLE_TIME_MASK, 0,
-				RAPL_DOMAIN_MSR_PERF, TIME_UNIT, 0),
+				RAPL_DOMAIN_REG_PERF, TIME_UNIT, 0),
 	PRIMITIVE_INFO_INIT(PRIORITY_LEVEL, PP_POLICY_MASK, 0,
-				RAPL_DOMAIN_MSR_POLICY, ARBITRARY_UNIT, 0),
+				RAPL_DOMAIN_REG_POLICY, ARBITRARY_UNIT, 0),
 	/* non-hardware */
 	PRIMITIVE_INFO_INIT(AVERAGE_POWER, 0, 0, 0, POWER_UNIT,
 				RAPL_PRIMITIVE_DERIVED),
@@ -797,16 +697,16 @@ static int rapl_read_data_raw(struct rapl_domain *rd,
 			enum rapl_primitives prim,
 			bool xlate, u64 *data)
 {
-	u64 value, final;
-	u32 msr;
+	u64 value;
 	struct rapl_primitive_info *rp = &rpi[prim];
+	struct reg_action ra;
 	int cpu;
 
 	if (!rp->name || rp->flag & RAPL_PRIMITIVE_DUMMY)
 		return -EINVAL;
 
-	msr = rd->msrs[rp->id];
-	if (!msr)
+	ra.reg = rd->regs[rp->id];
+	if (!ra.reg)
 		return -EINVAL;
 
 	cpu = rd->rp->lead_cpu;
@@ -822,45 +722,21 @@ static int rapl_read_data_raw(struct rapl_domain *rd,
 		return 0;
 	}
 
-	if (rdmsrl_safe_on_cpu(cpu, msr, &value)) {
-		pr_debug("failed to read msr 0x%x on cpu %d\n", msr, cpu);
+	ra.mask = rp->mask;
+
+	if (rd->rp->priv->read_raw(cpu, &ra)) {
+		pr_debug("failed to read reg 0x%x on cpu %d\n", ra.reg, cpu);
 		return -EIO;
 	}
 
-	final = value & rp->mask;
-	final = final >> rp->shift;
+	value = ra.value >> rp->shift;
+
 	if (xlate)
-		*data = rapl_unit_xlate(rd, rp->unit, final, 0);
+		*data = rapl_unit_xlate(rd, rp->unit, value, 0);
 	else
-		*data = final;
+		*data = value;
 
 	return 0;
-}
-
-
-static int msrl_update_safe(u32 msr_no, u64 clear_mask, u64 set_mask)
-{
-	int err;
-	u64 val;
-
-	err = rdmsrl_safe(msr_no, &val);
-	if (err)
-		goto out;
-
-	val &= ~clear_mask;
-	val |= set_mask;
-
-	err = wrmsrl_safe(msr_no, val);
-
-out:
-	return err;
-}
-
-static void msrl_update_func(void *info)
-{
-	struct msrl_action *ma = info;
-
-	ma->err = msrl_update_safe(ma->msr_no, ma->clear_mask, ma->set_mask);
 }
 
 /* Similar use of primitive info in the read counterpart */
@@ -871,7 +747,7 @@ static int rapl_write_data_raw(struct rapl_domain *rd,
 	struct rapl_primitive_info *rp = &rpi[prim];
 	int cpu;
 	u64 bits;
-	struct msrl_action ma;
+	struct reg_action ra;
 	int ret;
 
 	cpu = rd->rp->lead_cpu;
@@ -879,17 +755,13 @@ static int rapl_write_data_raw(struct rapl_domain *rd,
 	bits <<= rp->shift;
 	bits &= rp->mask;
 
-	memset(&ma, 0, sizeof(ma));
+	memset(&ra, 0, sizeof(ra));
 
-	ma.msr_no = rd->msrs[rp->id];
-	ma.clear_mask = rp->mask;
-	ma.set_mask = bits;
+	ra.reg = rd->regs[rp->id];
+	ra.mask = rp->mask;
+	ra.value = bits;
 
-	ret = smp_call_function_single(cpu, msrl_update_func, &ma, 1);
-	if (ret)
-		WARN_ON_ONCE(ret);
-	else
-		ret = ma.err;
+	ret = rd->rp->priv->write_raw(cpu, &ra);
 
 	return ret;
 }
@@ -907,51 +779,56 @@ static int rapl_write_data_raw(struct rapl_domain *rd,
  */
 static int rapl_check_unit_core(struct rapl_package *rp, int cpu)
 {
-	u64 msr_val;
+	struct reg_action ra;
 	u32 value;
 
-	if (rdmsrl_safe_on_cpu(cpu, MSR_RAPL_POWER_UNIT, &msr_val)) {
-		pr_err("Failed to read power unit MSR 0x%x on CPU %d, exit.\n",
-			MSR_RAPL_POWER_UNIT, cpu);
+	ra.reg = rp->priv->reg_unit;
+	ra.mask = ~0;
+	if (rp->priv->read_raw(cpu, &ra)) {
+		pr_err("Failed to read power unit REG 0x%x on CPU %d, exit.\n",
+			rp->priv->reg_unit, cpu);
 		return -ENODEV;
 	}
 
-	value = (msr_val & ENERGY_UNIT_MASK) >> ENERGY_UNIT_OFFSET;
+	value = (ra.value & ENERGY_UNIT_MASK) >> ENERGY_UNIT_OFFSET;
 	rp->energy_unit = ENERGY_UNIT_SCALE * 1000000 / (1 << value);
 
-	value = (msr_val & POWER_UNIT_MASK) >> POWER_UNIT_OFFSET;
+	value = (ra.value & POWER_UNIT_MASK) >> POWER_UNIT_OFFSET;
 	rp->power_unit = 1000000 / (1 << value);
 
-	value = (msr_val & TIME_UNIT_MASK) >> TIME_UNIT_OFFSET;
+	value = (ra.value & TIME_UNIT_MASK) >> TIME_UNIT_OFFSET;
 	rp->time_unit = 1000000 / (1 << value);
 
-	pr_debug("Core CPU package %d energy=%dpJ, time=%dus, power=%duW\n",
-		rp->id, rp->energy_unit, rp->time_unit, rp->power_unit);
+	pr_debug("Core CPU %s energy=%dpJ, time=%dus, power=%duW\n",
+		rp->name, rp->energy_unit, rp->time_unit, rp->power_unit);
 
 	return 0;
 }
 
 static int rapl_check_unit_atom(struct rapl_package *rp, int cpu)
 {
-	u64 msr_val;
+	struct reg_action ra;
 	u32 value;
 
-	if (rdmsrl_safe_on_cpu(cpu, MSR_RAPL_POWER_UNIT, &msr_val)) {
-		pr_err("Failed to read power unit MSR 0x%x on CPU %d, exit.\n",
-			MSR_RAPL_POWER_UNIT, cpu);
+	ra.reg = rp->priv->reg_unit;
+	ra.mask = ~0;
+	if (rp->priv->read_raw(cpu, &ra)) {
+		pr_err("Failed to read power unit REG 0x%x on CPU %d, exit.\n",
+			rp->priv->reg_unit, cpu);
 		return -ENODEV;
 	}
-	value = (msr_val & ENERGY_UNIT_MASK) >> ENERGY_UNIT_OFFSET;
+
+	value = (ra.value & ENERGY_UNIT_MASK) >> ENERGY_UNIT_OFFSET;
 	rp->energy_unit = ENERGY_UNIT_SCALE * 1 << value;
 
-	value = (msr_val & POWER_UNIT_MASK) >> POWER_UNIT_OFFSET;
+	value = (ra.value & POWER_UNIT_MASK) >> POWER_UNIT_OFFSET;
 	rp->power_unit = (1 << value) * 1000;
 
-	value = (msr_val & TIME_UNIT_MASK) >> TIME_UNIT_OFFSET;
+	value = (ra.value & TIME_UNIT_MASK) >> TIME_UNIT_OFFSET;
 	rp->time_unit = 1000000 / (1 << value);
 
-	pr_debug("Atom package %d energy=%dpJ, time=%dus, power=%duW\n",
-		rp->id, rp->energy_unit, rp->time_unit, rp->power_unit);
+	pr_debug("Atom %s energy=%dpJ, time=%dus, power=%duW\n",
+		rp->name, rp->energy_unit, rp->time_unit, rp->power_unit);
 
 	return 0;
 }
@@ -1140,23 +1017,24 @@ static const struct x86_cpu_id rapl_ids[] __initconst = {
 	INTEL_CPU_FAM6(IVYBRIDGE,		rapl_defaults_core),
 	INTEL_CPU_FAM6(IVYBRIDGE_X,		rapl_defaults_core),
 
-	INTEL_CPU_FAM6(HASWELL_CORE,		rapl_defaults_core),
-	INTEL_CPU_FAM6(HASWELL_ULT,		rapl_defaults_core),
-	INTEL_CPU_FAM6(HASWELL_GT3E,		rapl_defaults_core),
+	INTEL_CPU_FAM6(HASWELL,		rapl_defaults_core),
+	INTEL_CPU_FAM6(HASWELL_L,		rapl_defaults_core),
+	INTEL_CPU_FAM6(HASWELL_G,		rapl_defaults_core),
 	INTEL_CPU_FAM6(HASWELL_X,		rapl_defaults_hsw_server),
 
-	INTEL_CPU_FAM6(BROADWELL_CORE,		rapl_defaults_core),
-	INTEL_CPU_FAM6(BROADWELL_GT3E,		rapl_defaults_core),
-	INTEL_CPU_FAM6(BROADWELL_XEON_D,	rapl_defaults_core),
+	INTEL_CPU_FAM6(BROADWELL,		rapl_defaults_core),
+	INTEL_CPU_FAM6(BROADWELL_G,		rapl_defaults_core),
+	INTEL_CPU_FAM6(BROADWELL_D,	rapl_defaults_core),
 	INTEL_CPU_FAM6(BROADWELL_X,		rapl_defaults_hsw_server),
 
-	INTEL_CPU_FAM6(SKYLAKE_DESKTOP,		rapl_defaults_core),
-	INTEL_CPU_FAM6(SKYLAKE_MOBILE,		rapl_defaults_core),
+	INTEL_CPU_FAM6(SKYLAKE,		rapl_defaults_core),
+	INTEL_CPU_FAM6(SKYLAKE_L,		rapl_defaults_core),
 	INTEL_CPU_FAM6(SKYLAKE_X,		rapl_defaults_hsw_server),
-	INTEL_CPU_FAM6(KABYLAKE_MOBILE,		rapl_defaults_core),
-	INTEL_CPU_FAM6(KABYLAKE_DESKTOP,	rapl_defaults_core),
-	INTEL_CPU_FAM6(CANNONLAKE_MOBILE,	rapl_defaults_core),
-	INTEL_CPU_FAM6(ICELAKE_MOBILE,		rapl_defaults_core),
+	INTEL_CPU_FAM6(KABYLAKE_L,		rapl_defaults_core),
+	INTEL_CPU_FAM6(KABYLAKE,	rapl_defaults_core),
+	INTEL_CPU_FAM6(CANNONLAKE_L,	rapl_defaults_core),
+	INTEL_CPU_FAM6(ICELAKE_L,		rapl_defaults_core),
+	INTEL_CPU_FAM6(ICELAKE_X,		rapl_defaults_hsw_server),
 
 	INTEL_CPU_FAM6(ATOM_SILVERMONT,		rapl_defaults_byt),
 	INTEL_CPU_FAM6(ATOM_AIRMONT,		rapl_defaults_cht),
@@ -1164,8 +1042,8 @@ static const struct x86_cpu_id rapl_ids[] __initconst = {
 	INTEL_CPU_FAM6(ATOM_AIRMONT_MID,	rapl_defaults_ann),
 	INTEL_CPU_FAM6(ATOM_GOLDMONT,		rapl_defaults_core),
 	INTEL_CPU_FAM6(ATOM_GOLDMONT_PLUS,	rapl_defaults_core),
-	INTEL_CPU_FAM6(ATOM_GOLDMONT_X,		rapl_defaults_core),
-	INTEL_CPU_FAM6(ATOM_TREMONT_X,		rapl_defaults_core),
+	INTEL_CPU_FAM6(ATOM_GOLDMONT_D,		rapl_defaults_core),
+	INTEL_CPU_FAM6(ATOM_TREMONT_D,		rapl_defaults_core),
 
 	INTEL_CPU_FAM6(XEON_PHI_KNL,		rapl_defaults_hsw_server),
 	INTEL_CPU_FAM6(XEON_PHI_KNM,		rapl_defaults_hsw_server),
@@ -1180,7 +1058,7 @@ static void rapl_update_domain_data(struct rapl_package *rp)
 	u64 val;
 
 	for (dmn = 0; dmn < rp->nr_domains; dmn++) {
-		pr_debug("update package %d domain %s data\n", rp->id,
+		pr_debug("update %s domain %s data\n", rp->name,
 			 rp->domains[dmn].name);
 		/* exclude non-raw primitives */
 		for (prim = 0; prim < NR_RAW_PRIMITIVES; prim++) {
@@ -1192,20 +1070,9 @@ static void rapl_update_domain_data(struct rapl_package *rp)
 
 }
 
-static void rapl_unregister_powercap(void)
-{
-	if (platform_rapl_domain) {
-		powercap_unregister_zone(control_type,
-					 &platform_rapl_domain->power_zone);
-		kfree(platform_rapl_domain);
-	}
-	powercap_unregister_control_type(control_type);
-}
-
 static int rapl_package_register_powercap(struct rapl_package *rp)
 {
 	struct rapl_domain *rd;
-	char dev_name[17]; /* max domain name = 7 + 1 + 8 for int + 1 for null*/
 	struct powercap_zone *power_zone = NULL;
 	int nr_pl, ret;
 
@@ -1216,20 +1083,16 @@ static int rapl_package_register_powercap(struct rapl_package *rp)
 	for (rd = rp->domains; rd < rp->domains + rp->nr_domains; rd++) {
 		if (rd->id == RAPL_DOMAIN_PACKAGE) {
 			nr_pl = find_nr_power_limit(rd);
-			pr_debug("register socket %d package domain %s\n",
-				rp->id, rd->name);
-			memset(dev_name, 0, sizeof(dev_name));
-			snprintf(dev_name, sizeof(dev_name), "%s-%d",
-				rd->name, rp->id);
+			pr_debug("register package domain %s\n", rp->name);
 			power_zone = powercap_register_zone(&rd->power_zone,
-							control_type,
-							dev_name, NULL,
+							rp->priv->control_type,
+							rp->name, NULL,
 							&zone_ops[rd->id],
 							nr_pl,
 							&constraint_ops);
 			if (IS_ERR(power_zone)) {
-				pr_debug("failed to register package, %d\n",
-					rp->id);
+				pr_debug("failed to register power zone %s\n",
+					rp->name);
 				return PTR_ERR(power_zone);
 			}
 			/* track parent zone in per package/socket data */
@@ -1249,14 +1112,14 @@ static int rapl_package_register_powercap(struct rapl_package *rp)
 		/* number of power limits per domain varies */
 		nr_pl = find_nr_power_limit(rd);
 		power_zone = powercap_register_zone(&rd->power_zone,
-						control_type, rd->name,
+						rp->priv->control_type, rd->name,
 						rp->power_zone,
 						&zone_ops[rd->id], nr_pl,
 						&constraint_ops);
 
 		if (IS_ERR(power_zone)) {
-			pr_debug("failed to register power_zone, %d:%s:%s\n",
-				rp->id, rd->name, dev_name);
+			pr_debug("failed to register power_zone, %s:%s\n",
+				rp->name, rd->name);
 			ret = PTR_ERR(power_zone);
 			goto err_cleanup;
 		}
@@ -1269,23 +1132,30 @@ err_cleanup:
 	 * failed after the first domain setup.
 	 */
 	while (--rd >= rp->domains) {
-		pr_debug("unregister package %d domain %s\n", rp->id, rd->name);
-		powercap_unregister_zone(control_type, &rd->power_zone);
+		pr_debug("unregister %s domain %s\n", rp->name, rd->name);
+		powercap_unregister_zone(rp->priv->control_type, &rd->power_zone);
 	}
 
 	return ret;
 }
 
-static int __init rapl_register_psys(void)
+static int __init rapl_add_platform_domain(struct rapl_if_priv *priv)
 {
 	struct rapl_domain *rd;
 	struct powercap_zone *power_zone;
-	u64 val;
+	struct reg_action ra;
+	int ret;
 
-	if (rdmsrl_safe_on_cpu(0, MSR_PLATFORM_ENERGY_STATUS, &val) || !val)
+	ra.reg = priv->regs[RAPL_DOMAIN_PLATFORM][RAPL_DOMAIN_REG_STATUS];
+	ra.mask = ~0;
+	ret = priv->read_raw(0, &ra);
+	if (ret || !ra.value)
 		return -ENODEV;
 
-	if (rdmsrl_safe_on_cpu(0, MSR_PLATFORM_POWER_LIMIT, &val) || !val)
+	ra.reg = priv->regs[RAPL_DOMAIN_PLATFORM][RAPL_DOMAIN_REG_LIMIT];
+	ra.mask = ~0;
+	ret = priv->read_raw(0, &ra);
+	if (ret || !ra.value)
 		return -ENODEV;
 
 	rd = kzalloc(sizeof(*rd), GFP_KERNEL);
@@ -1294,15 +1164,15 @@ static int __init rapl_register_psys(void)
 
 	rd->name = rapl_domain_names[RAPL_DOMAIN_PLATFORM];
 	rd->id = RAPL_DOMAIN_PLATFORM;
-	rd->msrs[0] = MSR_PLATFORM_POWER_LIMIT;
-	rd->msrs[1] = MSR_PLATFORM_ENERGY_STATUS;
+	rd->regs[RAPL_DOMAIN_REG_LIMIT] = priv->regs[RAPL_DOMAIN_PLATFORM][RAPL_DOMAIN_REG_LIMIT];
+	rd->regs[RAPL_DOMAIN_REG_STATUS] = priv->regs[RAPL_DOMAIN_PLATFORM][RAPL_DOMAIN_REG_STATUS];
 	rd->rpl[0].prim_id = PL1_ENABLE;
 	rd->rpl[0].name = pl1_name;
 	rd->rpl[1].prim_id = PL2_ENABLE;
 	rd->rpl[1].name = pl2_name;
-	rd->rp = find_package_by_id(0);
+	rd->rp = rapl_find_package_domain(0, priv);
 
-	power_zone = powercap_register_zone(&rd->power_zone, control_type,
+	power_zone = powercap_register_zone(&rd->power_zone, priv->control_type,
 					    "psys", NULL,
 					    &zone_ops[RAPL_DOMAIN_PLATFORM],
 					    2, &constraint_ops);
@@ -1312,38 +1182,30 @@ static int __init rapl_register_psys(void)
 		return PTR_ERR(power_zone);
 	}
 
-	platform_rapl_domain = rd;
+	priv->platform_rapl_domain = rd;
 
 	return 0;
 }
 
-static int __init rapl_register_powercap(void)
+static void rapl_remove_platform_domain(struct rapl_if_priv *priv)
 {
-	control_type = powercap_register_control_type(NULL, "intel-rapl", NULL);
-	if (IS_ERR(control_type)) {
-		pr_debug("failed to register powercap control_type.\n");
-		return PTR_ERR(control_type);
+	if (priv->platform_rapl_domain) {
+		powercap_unregister_zone(priv->control_type,
+			&priv->platform_rapl_domain->power_zone);
+		kfree(priv->platform_rapl_domain);
 	}
-	return 0;
 }
 
-static int rapl_check_domain(int cpu, int domain)
+static int rapl_check_domain(int cpu, int domain, struct rapl_package *rp)
 {
-	unsigned msr;
-	u64 val = 0;
+	struct reg_action ra;
 
 	switch (domain) {
 	case RAPL_DOMAIN_PACKAGE:
-		msr = MSR_PKG_ENERGY_STATUS;
-		break;
 	case RAPL_DOMAIN_PP0:
-		msr = MSR_PP0_ENERGY_STATUS;
-		break;
 	case RAPL_DOMAIN_PP1:
-		msr = MSR_PP1_ENERGY_STATUS;
-		break;
 	case RAPL_DOMAIN_DRAM:
-		msr = MSR_DRAM_ENERGY_STATUS;
+		ra.reg = rp->priv->regs[domain][RAPL_DOMAIN_REG_STATUS];
 		break;
 	case RAPL_DOMAIN_PLATFORM:
 		/* PSYS(PLATFORM) is not a CPU domain, so avoid printng error */
@@ -1355,7 +1217,9 @@ static int rapl_check_domain(int cpu, int domain)
 	/* make sure domain counters are available and contains non-zero
 	 * values, otherwise skip it.
 	 */
-	if (rdmsrl_safe_on_cpu(cpu, msr, &val) || !val)
+
+	ra.mask = ~0;
+	if (rp->priv->read_raw(cpu, &ra) || !ra.value)
 		return -ENODEV;
 
 	return 0;
@@ -1379,8 +1243,8 @@ static void rapl_detect_powerlimit(struct rapl_domain *rd)
 	/* check if the domain is locked by BIOS, ignore if MSR doesn't exist */
 	if (!rapl_read_data_raw(rd, FW_LOCK, false, &val64)) {
 		if (val64) {
-			pr_info("RAPL package %d domain %s locked by BIOS\n",
-				rd->rp->id, rd->name);
+			pr_info("RAPL %s domain %s locked by BIOS\n",
+				rd->rp->name, rd->name);
 			rd->state |= DOMAIN_STATE_BIOS_LOCKED;
 		}
 	}
@@ -1402,17 +1266,17 @@ static int rapl_detect_domains(struct rapl_package *rp, int cpu)
 
 	for (i = 0; i < RAPL_DOMAIN_MAX; i++) {
 		/* use physical package id to read counters */
-		if (!rapl_check_domain(cpu, i)) {
+		if (!rapl_check_domain(cpu, i, rp)) {
 			rp->domain_map |= 1 << i;
 			pr_info("Found RAPL domain %s\n", rapl_domain_names[i]);
 		}
 	}
 	rp->nr_domains = bitmap_weight(&rp->domain_map,	RAPL_DOMAIN_MAX);
 	if (!rp->nr_domains) {
-		pr_debug("no valid rapl domains found in package %d\n", rp->id);
+		pr_debug("no valid rapl domains found in %s\n", rp->name);
 		return -ENODEV;
 	}
-	pr_debug("found %d domains on package %d\n", rp->nr_domains, rp->id);
+	pr_debug("found %d domains on %s\n", rp->nr_domains, rp->name);
 
 	rp->domains = kcalloc(rp->nr_domains + 1, sizeof(struct rapl_domain),
 			GFP_KERNEL);
@@ -1445,20 +1309,22 @@ static void rapl_remove_package(struct rapl_package *rp)
 			rd_package = rd;
 			continue;
 		}
-		pr_debug("remove package, undo power limit on %d: %s\n",
-			 rp->id, rd->name);
-		powercap_unregister_zone(control_type, &rd->power_zone);
+		pr_debug("remove package, undo power limit on %s: %s\n",
+			 rp->name, rd->name);
+		powercap_unregister_zone(rp->priv->control_type, &rd->power_zone);
 	}
 	/* do parent zone last */
-	powercap_unregister_zone(control_type, &rd_package->power_zone);
+	powercap_unregister_zone(rp->priv->control_type, &rd_package->power_zone);
 	list_del(&rp->plist);
 	kfree(rp);
 }
 
 /* called from CPU hotplug notifier, hotplug lock held */
-static struct rapl_package *rapl_add_package(int cpu, int pkgid)
+static struct rapl_package *rapl_add_package(int cpu, struct rapl_if_priv *priv)
 {
+	int id = topology_logical_die_id(cpu);
 	struct rapl_package *rp;
+	struct cpuinfo_x86 *c = &cpu_data(cpu);
 	int ret;
 
 	rp = kzalloc(sizeof(struct rapl_package), GFP_KERNEL);
@@ -1466,8 +1332,17 @@ static struct rapl_package *rapl_add_package(int cpu, int pkgid)
 		return ERR_PTR(-ENOMEM);
 
 	/* add the new package to the list */
-	rp->id = pkgid;
+	rp->id = id;
 	rp->lead_cpu = cpu;
+	rp->priv = priv;
+
+	if (topology_max_die_per_package() > 1)
+		snprintf(rp->name, PACKAGE_DOMAIN_NAME_LENGTH,
+			"package-%d-die-%d", c->phys_proc_id,
+			 c->cpuinfo_x86_extended_rh.cpu_die_id);
+	else
+		snprintf(rp->name, PACKAGE_DOMAIN_NAME_LENGTH, "package-%d",
+			c->phys_proc_id);
 
 	/* check if the package contains valid domains */
 	if (rapl_detect_domains(rp, cpu) ||
@@ -1497,12 +1372,11 @@ err_free_package:
  */
 static int rapl_cpu_online(unsigned int cpu)
 {
-	int pkgid = topology_physical_package_id(cpu);
 	struct rapl_package *rp;
 
-	rp = find_package_by_id(pkgid);
+	rp = rapl_find_package_domain(cpu, &rapl_msr_priv);
 	if (!rp) {
-		rp = rapl_add_package(cpu, pkgid);
+		rp = rapl_add_package(cpu, &rapl_msr_priv);
 		if (IS_ERR(rp))
 			return PTR_ERR(rp);
 	}
@@ -1512,11 +1386,10 @@ static int rapl_cpu_online(unsigned int cpu)
 
 static int rapl_cpu_down_prep(unsigned int cpu)
 {
-	int pkgid = topology_physical_package_id(cpu);
 	struct rapl_package *rp;
 	int lead_cpu;
 
-	rp = find_package_by_id(pkgid);
+	rp = rapl_find_package_domain(cpu, &rapl_msr_priv);
 	if (!rp)
 		return 0;
 
@@ -1528,8 +1401,6 @@ static int rapl_cpu_down_prep(unsigned int cpu)
 		rp->lead_cpu = lead_cpu;
 	return 0;
 }
-
-static enum cpuhp_state pcap_rapl_online;
 
 static void power_limit_state_save(void)
 {
@@ -1617,6 +1488,43 @@ static struct notifier_block rapl_pm_notifier = {
 	.notifier_call = rapl_pm_callback,
 };
 
+static int rapl_msr_read_raw(int cpu, struct reg_action *ra)
+{
+	if (rdmsrl_safe_on_cpu(cpu, ra->reg, &ra->value)) {
+		pr_debug("failed to read msr 0x%x on cpu %d\n", ra->reg, cpu);
+		return -EIO;
+	}
+	ra->value &= ra->mask;
+	return 0;
+}
+
+static void rapl_msr_update_func(void *info)
+{
+	struct reg_action *ra = info;
+	u64 val;
+
+	ra->err = rdmsrl_safe(ra->reg, &val);
+	if (ra->err)
+		return;
+
+	val &= ~ra->mask;
+	val |= ra->value;
+
+	ra->err = wrmsrl_safe(ra->reg, val);
+}
+
+
+static int rapl_msr_write_raw(int cpu, struct reg_action *ra)
+{
+	int ret;
+
+	ret = smp_call_function_single(cpu, rapl_msr_update_func, ra, 1);
+	if (WARN_ON_ONCE(ret))
+		return ret;
+
+	return ra->err;
+}
+
 static int __init rapl_init(void)
 {
 	const struct x86_cpu_id *id;
@@ -1632,18 +1540,23 @@ static int __init rapl_init(void)
 
 	rapl_defaults = (struct rapl_defaults *)id->driver_data;
 
-	ret = rapl_register_powercap();
-	if (ret)
-		return ret;
+	rapl_msr_priv.read_raw = rapl_msr_read_raw;
+	rapl_msr_priv.write_raw = rapl_msr_write_raw;
+
+	rapl_msr_priv.control_type = powercap_register_control_type(NULL, "intel-rapl", NULL);
+	if (IS_ERR(rapl_msr_priv.control_type)) {
+		pr_debug("failed to register powercap control_type.\n");
+		return PTR_ERR(rapl_msr_priv.control_type);
+	}
 
 	ret = cpuhp_setup_state(CPUHP_AP_ONLINE_DYN, "powercap/rapl:online",
 				rapl_cpu_online, rapl_cpu_down_prep);
 	if (ret < 0)
 		goto err_unreg;
-	pcap_rapl_online = ret;
+	rapl_msr_priv.pcap_rapl_online = ret;
 
 	/* Don't bail out if PSys is not supported */
-	rapl_register_psys();
+	rapl_add_platform_domain(&rapl_msr_priv);
 
 	ret = register_pm_notifier(&rapl_pm_notifier);
 	if (ret)
@@ -1652,18 +1565,19 @@ static int __init rapl_init(void)
 	return 0;
 
 err_unreg_all:
-	cpuhp_remove_state(pcap_rapl_online);
+	cpuhp_remove_state(rapl_msr_priv.pcap_rapl_online);
 
 err_unreg:
-	rapl_unregister_powercap();
+	powercap_unregister_control_type(rapl_msr_priv.control_type);
 	return ret;
 }
 
 static void __exit rapl_exit(void)
 {
 	unregister_pm_notifier(&rapl_pm_notifier);
-	cpuhp_remove_state(pcap_rapl_online);
-	rapl_unregister_powercap();
+	cpuhp_remove_state(rapl_msr_priv.pcap_rapl_online);
+	rapl_remove_platform_domain(&rapl_msr_priv);
+	powercap_unregister_control_type(rapl_msr_priv.control_type);
 }
 
 module_init(rapl_init);

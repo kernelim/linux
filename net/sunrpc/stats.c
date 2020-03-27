@@ -176,6 +176,8 @@ void rpc_count_iostats_metrics(const struct rpc_task *task,
 
 	execute = ktime_sub(now, task->tk_start);
 	op_metrics->om_execute = ktime_add(op_metrics->om_execute, execute);
+	if (task->tk_status < 0)
+		op_metrics->om_error_status++;
 
 	spin_unlock(&op_metrics->om_lock);
 
@@ -218,13 +220,14 @@ static void _add_rpc_iostats(struct rpc_iostats *a, struct rpc_iostats *b)
 	a->om_queue = ktime_add(a->om_queue, b->om_queue);
 	a->om_rtt = ktime_add(a->om_rtt, b->om_rtt);
 	a->om_execute = ktime_add(a->om_execute, b->om_execute);
+	a->om_error_status += b->om_error_status;
 }
 
 static void _print_rpc_iostats(struct seq_file *seq, struct rpc_iostats *stats,
 			       int op, const struct rpc_procinfo *procs)
 {
 	_print_name(seq, op, procs);
-	seq_printf(seq, "%lu %lu %lu %Lu %Lu %Lu %Lu %Lu\n",
+	seq_printf(seq, "%lu %lu %lu %llu %llu %llu %llu %llu %lu\n",
 		   stats->om_ops,
 		   stats->om_ntrans,
 		   stats->om_timeouts,
@@ -232,7 +235,8 @@ static void _print_rpc_iostats(struct seq_file *seq, struct rpc_iostats *stats,
 		   stats->om_bytes_recv,
 		   ktime_to_ms(stats->om_queue),
 		   ktime_to_ms(stats->om_rtt),
-		   ktime_to_ms(stats->om_execute));
+		   ktime_to_ms(stats->om_execute),
+		   stats->om_error_status);
 }
 
 void rpc_clnt_show_stats(struct seq_file *seq, struct rpc_clnt *clnt)
@@ -334,4 +338,3 @@ void rpc_proc_exit(struct net *net)
 	dprintk("RPC:       unregistering /proc/net/rpc\n");
 	remove_proc_entry("rpc", net->proc_net);
 }
-

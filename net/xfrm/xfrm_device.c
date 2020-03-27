@@ -28,8 +28,8 @@ struct sk_buff *validate_xmit_xfrm(struct sk_buff *skb, netdev_features_t featur
 	int err;
 	unsigned long flags;
 	struct xfrm_state *x;
-	struct sk_buff *skb2;
 	struct softnet_data *sd;
+	struct sk_buff *skb2, *pskb = NULL;
 	netdev_features_t esp_features = features;
 	struct xfrm_offload *xo = xfrm_offload(skb);
 
@@ -56,7 +56,7 @@ struct sk_buff *validate_xmit_xfrm(struct sk_buff *skb, netdev_features_t featur
 	if (skb_is_gso(skb)) {
 		struct net_device *dev = skb->dev;
 
-		if (unlikely(!x->xso.offload_handle || (x->xso.dev != dev))) {
+		if (unlikely(x->xso.dev != dev)) {
 			struct sk_buff *segs;
 
 			/* Packet got rerouted, fixup features and segment it. */
@@ -117,14 +117,14 @@ struct sk_buff *validate_xmit_xfrm(struct sk_buff *skb, netdev_features_t featur
 		} else {
 			if (skb == skb2)
 				skb = nskb;
-
-			if (!skb)
-				return NULL;
+			else
+				pskb->next = nskb;
 
 			goto skip_push;
 		}
 
 		skb_push(skb2, skb2->data - skb_mac_header(skb2));
+		pskb = skb2;
 
 skip_push:
 		skb2 = nskb;
@@ -192,9 +192,13 @@ int xfrm_dev_state_add(struct net *net, struct xfrm_state *x,
 
 	err = dev->xfrmdev_ops->xdo_dev_state_add(x);
 	if (err) {
+		xso->num_exthdrs = 0;
+		xso->flags = 0;
 		xso->dev = NULL;
 		dev_put(dev);
-		return err;
+
+		if (err != -EOPNOTSUPP)
+			return err;
 	}
 
 	return 0;
@@ -211,8 +215,8 @@ bool xfrm_dev_offload_ok(struct sk_buff *skb, struct xfrm_state *x)
 	if (!x->type_offload || x->encap)
 		return false;
 
-	if ((!dev || (x->xso.offload_handle && (dev == xfrm_dst_path(dst)->dev))) &&
-	     (!xdst->child->xfrm && x->type->get_mtu)) {
+	if ((!dev || (dev == xfrm_dst_path(dst)->dev)) &&
+	    (!xdst->child->xfrm && x->type->get_mtu)) {
 		mtu = x->type->get_mtu(x, xdst->child_mtu_cached);
 
 		if (skb->len <= mtu)
@@ -307,12 +311,6 @@ static int xfrm_dev_register(struct net_device *dev)
 	return xfrm_api_check(dev);
 }
 
-static int xfrm_dev_unregister(struct net_device *dev)
-{
-	xfrm_policy_cache_flush();
-	return NOTIFY_DONE;
-}
-
 static int xfrm_dev_feat_change(struct net_device *dev)
 {
 	return xfrm_api_check(dev);
@@ -323,7 +321,6 @@ static int xfrm_dev_down(struct net_device *dev)
 	if (dev->features & NETIF_F_HW_ESP)
 		xfrm_dev_state_flush(dev_net(dev), dev, true);
 
-	xfrm_policy_cache_flush();
 	return NOTIFY_DONE;
 }
 
@@ -334,9 +331,6 @@ static int xfrm_dev_event(struct notifier_block *this, unsigned long event, void
 	switch (event) {
 	case NETDEV_REGISTER:
 		return xfrm_dev_register(dev);
-
-	case NETDEV_UNREGISTER:
-		return xfrm_dev_unregister(dev);
 
 	case NETDEV_FEAT_CHANGE:
 		return xfrm_dev_feat_change(dev);

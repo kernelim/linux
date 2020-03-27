@@ -59,6 +59,7 @@ show up in /proc/sys/kernel:
 - panic_on_stackoverflow
 - panic_on_unrecovered_nmi
 - panic_on_warn
+- panic_print
 - panic_on_rcu_stall
 - perf_cpu_time_max_percent
 - perf_event_paranoid
@@ -77,6 +78,7 @@ show up in /proc/sys/kernel:
 - reboot-cmd                  [ SPARC only ]
 - rtsig-max
 - rtsig-nr
+- sched_energy_aware
 - seccomp/                    ==> Documentation/userspace-api/seccomp_filter.rst
 - sem
 - sem_next_id		      [ sysv ipc ]
@@ -640,6 +642,22 @@ a kernel rebuild when attempting to kdump at the location of a WARN().
 
 ==============================================================
 
+panic_print:
+
+Bitmask for printing system info when panic happens. User can chose
+combination of the following bits:
+
+bit 0: print all tasks info
+bit 1: print system memory info
+bit 2: print timer info
+bit 3: print locks info if CONFIG_LOCKDEP is on
+bit 4: print ftrace buffer
+
+So for example to print tasks and memory info on panic, user can:
+  echo 3 > /proc/sys/kernel/panic_print
+
+==============================================================
+
 panic_on_rcu_stall:
 
 When set to 1, calls panic() after RCU stall detection messages. This
@@ -859,6 +877,17 @@ rtsig-nr shows the number of RT signals currently queued.
 
 ==============================================================
 
+sched_energy_aware:
+
+Enables/disables Energy Aware Scheduling (EAS). EAS starts
+automatically on platforms where it can run (that is,
+platforms with asymmetric CPU topologies and having an Energy
+Model available). If your platform happens to meet the
+requirements for EAS but you do not want to use it, change
+this value to 0.
+
+==============================================================
+
 sched_schedstats:
 
 Enables/disables scheduler statistics. Enabling this feature
@@ -1016,15 +1045,11 @@ During initialization the kernel sets this value such that even if the
 maximum number of threads is created, the thread structures occupy only
 a part (1/8th) of the available RAM pages.
 
-The minimum value that can be written to threads-max is 20.
+The minimum value that can be written to threads-max is 1.
 The maximum value that can be written to threads-max is given by the
 constant FUTEX_TID_MASK (0x3fffffff).
 If a value outside of this range is written to threads-max an error
 EINVAL occurs.
-
-The value written is checked against the available RAM pages. If the
-thread structures would occupy too much (more than 1/8th) of the
-available RAM pages threads-max is reduced accordingly.
 
 ==============================================================
 

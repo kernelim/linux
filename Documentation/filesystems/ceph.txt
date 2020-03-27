@@ -118,6 +118,10 @@ Mount Options
 	of a non-responsive Ceph file system.  The default is 30
 	seconds.
 
+  caps_max=X
+	Specify the maximum number of caps to hold. Unused caps are released
+	when number of caps exceeds the limit. The default is 0 (no limit)
+
   rbytes
 	When stat() is called on a directory, set st_size to 'rbytes',
 	the summation of file sizes over all files nested beneath that
@@ -150,6 +154,20 @@ Mount Options
   noquotadf
         Report overall filesystem usage in statfs instead of using the root
         directory quota.
+
+  recover_session=<no|clean>
+	Set auto reconnect mode in the case where the client is blacklisted. The
+	available modes are "no" and "clean". The default is "no".
+
+	* no: never attempt to reconnect when client detects that it has been
+	blacklisted. Operations will generally fail after being blacklisted.
+
+	* clean: client reconnects to the ceph cluster automatically when it
+	detects that it has been blacklisted. During reconnect, client drops
+	dirty data/metadata, invalidates page caches and writable file handles.
+	After reconnect, file locks become stale because the MDS loses track
+	of them. If an inode contains any stale file locks, read/write on the
+	inode is not allowed until applications release all stale file locks.
 
 More Information
 ================

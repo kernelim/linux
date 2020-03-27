@@ -6,6 +6,10 @@
  * 93065ac753e4 ("mm, oom: distinguish blockable mode for mmu notifiers")
  * 5d6527a784f7 ("mm/mmu_notifier: use structure for invalidate_range_start/end callback")
  * ac46d4f3c432 ("mm/mmu_notifier: use structure for invalidate_range_start/end calls v2")
+ *
+ * If modifying these, please keep in mind that the RHEL8 kernel does not
+ * currently support non-blockable mmu_notifier_ranges. This means that we
+ * need to ensure that ALL ranges passed to callbacks are blockable.
  */
 
 #ifndef __RH_DRM_BACKPORT_MMU_NOTIFIER_H__
@@ -200,6 +204,12 @@ __rh_drm_mmu_notifier_unregister(struct __rh_drm_mmu_notifier *mn,
 						   struct mm_struct *))
 {
 	orig_func(&mn->base, mm);
+}
+
+static inline bool
+mmu_notifier_range_blockable(const struct mmu_notifier_range *range)
+{
+	return true;
 }
 
 #define mmu_notifier     __rh_drm_mmu_notifier

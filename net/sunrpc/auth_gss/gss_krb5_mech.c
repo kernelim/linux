@@ -53,6 +53,7 @@
 static struct gss_api_mech gss_kerberos_mech;	/* forward declaration */
 
 static const struct gss_krb5_enctype supported_gss_krb5_enctypes[] = {
+#ifndef CONFIG_SUNRPC_DISABLE_INSECURE_ENCTYPES
 	/*
 	 * DES (All DES enctypes are mapped to the same gss functionality)
 	 */
@@ -74,6 +75,7 @@ static const struct gss_krb5_enctype supported_gss_krb5_enctypes[] = {
 	  .cksumlength = 8,
 	  .keyed_cksum = 0,
 	},
+#endif	/* CONFIG_SUNRPC_DISABLE_INSECURE_ENCTYPES */
 	/*
 	 * RC4-HMAC
 	 */
@@ -275,6 +277,7 @@ out_err:
 static int
 gss_import_v1_context(const void *p, const void *end, struct krb5_ctx *ctx)
 {
+	u32 seq_send;
 	int tmp;
 
 	p = simple_get_bytes(p, end, &ctx->initiate, sizeof(ctx->initiate));
@@ -316,9 +319,10 @@ gss_import_v1_context(const void *p, const void *end, struct krb5_ctx *ctx)
 	p = simple_get_bytes(p, end, &ctx->endtime, sizeof(ctx->endtime));
 	if (IS_ERR(p))
 		goto out_err;
-	p = simple_get_bytes(p, end, &ctx->seq_send, sizeof(ctx->seq_send));
+	p = simple_get_bytes(p, end, &seq_send, sizeof(seq_send));
 	if (IS_ERR(p))
 		goto out_err;
+	atomic_set(&ctx->seq_send, seq_send);
 	p = simple_get_netobj(p, end, &ctx->mech_used);
 	if (IS_ERR(p))
 		goto out_err;
@@ -610,6 +614,7 @@ static int
 gss_import_v2_context(const void *p, const void *end, struct krb5_ctx *ctx,
 		gfp_t gfp_mask)
 {
+	u64 seq_send64;
 	int keylen;
 
 	p = simple_get_bytes(p, end, &ctx->flags, sizeof(ctx->flags));
@@ -620,14 +625,15 @@ gss_import_v2_context(const void *p, const void *end, struct krb5_ctx *ctx,
 	p = simple_get_bytes(p, end, &ctx->endtime, sizeof(ctx->endtime));
 	if (IS_ERR(p))
 		goto out_err;
-	p = simple_get_bytes(p, end, &ctx->seq_send64, sizeof(ctx->seq_send64));
+	p = simple_get_bytes(p, end, &seq_send64, sizeof(seq_send64));
 	if (IS_ERR(p))
 		goto out_err;
+	atomic64_set(&ctx->seq_send64, seq_send64);
 	/* set seq_send for use by "older" enctypes */
-	ctx->seq_send = ctx->seq_send64;
-	if (ctx->seq_send64 != ctx->seq_send) {
-		dprintk("%s: seq_send64 %lx, seq_send %x overflow?\n", __func__,
-			(unsigned long)ctx->seq_send64, ctx->seq_send);
+	atomic_set(&ctx->seq_send, seq_send64);
+	if (seq_send64 != atomic_read(&ctx->seq_send)) {
+		dprintk("%s: seq_send64 %llx, seq_send %x overflow?\n", __func__,
+			seq_send64, atomic_read(&ctx->seq_send));
 		p = ERR_PTR(-EINVAL);
 		goto out_err;
 	}

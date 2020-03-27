@@ -41,6 +41,8 @@
 #endif
 #define pr_fmt(fmt) KBUILD_MODNAME ":pid:%d:%s: " fmt, current->pid, __func__
 
+extern struct file_system_type autofs_fs_type;
+
 /*
  * Unified info structure.  This is pointed to by both the dentry and
  * inode structures.  Each file in the filesystem has an instance of this
@@ -102,6 +104,7 @@ struct autofs_wait_queue {
 
 #define AUTOFS_SBI_CATATONIC	0x0001
 #define AUTOFS_SBI_STRICTEXPIRE 0x0002
+#define AUTOFS_SBI_IGNORE	0x0004
 
 struct autofs_sb_info {
 	u32 magic;

@@ -316,34 +316,34 @@ static void usnic_get_dev_fw_str(struct ib_device *device, char *str)
 }
 
 static const struct ib_device_ops usnic_dev_ops = {
+	.owner = THIS_MODULE,
+	.driver_id = RDMA_DRIVER_USNIC,
+	.uverbs_abi_ver = USNIC_UVERBS_ABI_VERSION,
+
 	.alloc_pd = usnic_ib_alloc_pd,
 	.alloc_ucontext = usnic_ib_alloc_ucontext,
-	.create_ah = usnic_ib_create_ah,
 	.create_cq = usnic_ib_create_cq,
 	.create_qp = usnic_ib_create_qp,
 	.dealloc_pd = usnic_ib_dealloc_pd,
 	.dealloc_ucontext = usnic_ib_dealloc_ucontext,
 	.dereg_mr = usnic_ib_dereg_mr,
-	.destroy_ah = usnic_ib_destroy_ah,
 	.destroy_cq = usnic_ib_destroy_cq,
 	.destroy_qp = usnic_ib_destroy_qp,
 	.get_dev_fw_str = usnic_get_dev_fw_str,
-	.get_dma_mr = usnic_ib_get_dma_mr,
 	.get_link_layer = usnic_ib_port_link_layer,
 	.get_netdev = usnic_get_netdev,
 	.get_port_immutable = usnic_port_immutable,
 	.mmap = usnic_ib_mmap,
 	.modify_qp = usnic_ib_modify_qp,
-	.poll_cq = usnic_ib_poll_cq,
-	.post_recv = usnic_ib_post_recv,
-	.post_send = usnic_ib_post_send,
 	.query_device = usnic_ib_query_device,
 	.query_gid = usnic_ib_query_gid,
 	.query_pkey = usnic_ib_query_pkey,
 	.query_port = usnic_ib_query_port,
 	.query_qp = usnic_ib_query_qp,
 	.reg_user_mr = usnic_ib_reg_mr,
-	.req_notify_cq = usnic_ib_req_notify_cq,
+	INIT_RDMA_OBJ_SIZE(ib_pd, usnic_ib_pd, ibpd),
+	INIT_RDMA_OBJ_SIZE(ib_cq, usnic_ib_cq, ibcq),
+	INIT_RDMA_OBJ_SIZE(ib_ucontext, usnic_ib_ucontext, ibucontext),
 };
 
 /* Start of PF discovery section */
@@ -377,12 +377,10 @@ static void *usnic_ib_device_add(struct pci_dev *dev)
 
 	us_ibdev->pdev = dev;
 	us_ibdev->netdev = pci_get_drvdata(dev);
-	us_ibdev->ib_dev.owner = THIS_MODULE;
 	us_ibdev->ib_dev.node_type = RDMA_NODE_USNIC_UDP;
 	us_ibdev->ib_dev.phys_port_cnt = USNIC_IB_PORT_CNT;
 	us_ibdev->ib_dev.num_comp_vectors = USNIC_IB_NUM_COMP_VECTORS;
 	us_ibdev->ib_dev.dev.parent = &dev->dev;
-	us_ibdev->ib_dev.uverbs_abi_ver = USNIC_UVERBS_ABI_VERSION;
 
 	us_ibdev->ib_dev.uverbs_cmd_mask =
 		(1ull << IB_USER_VERBS_CMD_GET_CONTEXT) |
@@ -405,10 +403,9 @@ static void *usnic_ib_device_add(struct pci_dev *dev)
 
 	ib_set_device_ops(&us_ibdev->ib_dev, &usnic_dev_ops);
 
-	us_ibdev->ib_dev.driver_id = RDMA_DRIVER_USNIC;
 	rdma_set_device_sysfs_group(&us_ibdev->ib_dev, &usnic_attr_group);
 
-	if (ib_register_device(&us_ibdev->ib_dev, "usnic_%d", NULL))
+	if (ib_register_device(&us_ibdev->ib_dev, "usnic_%d"))
 		goto err_fwd_dealloc;
 
 	us_ibdev->netdev_nb.notifier_call = usnic_ib_netdevice_event;
@@ -429,11 +426,16 @@ static void *usnic_ib_device_add(struct pci_dev *dev)
 	if (netif_carrier_ok(us_ibdev->netdev))
 		usnic_fwd_carrier_up(us_ibdev->ufdev);
 
-	ind = in_dev_get(netdev);
-	if (ind->ifa_list)
-		usnic_fwd_add_ipaddr(us_ibdev->ufdev,
-				     ind->ifa_list->ifa_address);
-	in_dev_put(ind);
+	rcu_read_lock();
+	ind = __in_dev_get_rcu(netdev);
+	if (ind) {
+		const struct in_ifaddr *ifa;
+
+		ifa = rcu_dereference(ind->ifa_list);
+		if (ifa)
+			usnic_fwd_add_ipaddr(us_ibdev->ufdev, ifa->ifa_address);
+	}
+	rcu_read_unlock();
 
 	usnic_mac_ip_to_gid(us_ibdev->netdev->perm_addr,
 				us_ibdev->ufdev->inaddr, &gid.raw[0]);
@@ -680,7 +682,6 @@ static int __init usnic_ib_init(void)
 out_pci_unreg:
 	pci_unregister_driver(&usnic_ib_pci_driver);
 out_umem_fini:
-	usnic_uiom_fini();
 
 	return err;
 }
@@ -691,7 +692,6 @@ static void __exit usnic_ib_destroy(void)
 	usnic_debugfs_exit();
 	usnic_transport_fini();
 	pci_unregister_driver(&usnic_ib_pci_driver);
-	usnic_uiom_fini();
 }
 
 MODULE_DESCRIPTION("Cisco VIC (usNIC) Verbs Driver");

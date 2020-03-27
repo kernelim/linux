@@ -52,6 +52,51 @@ config CHROMEOS_TBMC
 config CROS_EC_CTL
         tristate
 
+config CROS_EC_I2C
+	tristate "ChromeOS Embedded Controller (I2C)"
+	depends on MFD_CROS_EC && I2C
+
+	help
+	  If you say Y here, you get support for talking to the ChromeOS
+	  EC through an I2C bus. This uses a simple byte-level protocol with
+	  a checksum. Failing accesses will be retried three times to
+	  improve reliability.
+
+config CROS_EC_RPMSG
+	tristate "ChromeOS Embedded Controller (rpmsg)"
+	depends on MFD_CROS_EC && RPMSG && OF
+	help
+	  If you say Y here, you get support for talking to the ChromeOS EC
+	  through rpmsg. This uses a simple byte-level protocol with a
+	  checksum. Also since there's no addition EC-to-host interrupt, this
+	  use a byte in message to distinguish host event from host command.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called cros_ec_rpmsg.
+
+config CROS_EC_ISHTP
+	tristate "ChromeOS Embedded Controller (ISHTP)"
+	depends on MFD_CROS_EC
+	depends on INTEL_ISH_HID
+	help
+	  If you say Y here, you get support for talking to the ChromeOS EC
+	  firmware running on Intel Integrated Sensor Hub (ISH), using the
+	  ISH Transport protocol (ISH-TP). This uses a simple byte-level
+	  protocol with a checksum.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called cros_ec_ishtp.
+
+config CROS_EC_SPI
+	tristate "ChromeOS Embedded Controller (SPI)"
+	depends on MFD_CROS_EC && SPI
+
+	---help---
+	  If you say Y here, you get support for talking to the ChromeOS EC
+	  through a SPI bus, using a byte-level protocol. Since the EC's
+	  response time cannot be guaranteed, we support ignoring
+	  'pre-amble' bytes before the response actually starts.
+
 config CROS_EC_LPC
         tristate "ChromeOS Embedded Controller (LPC)"
         depends on MFD_CROS_EC && ACPI && (X86 || COMPILE_TEST)

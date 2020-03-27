@@ -38,11 +38,7 @@ static int lru_shrinker_id(struct list_lru *lru)
 
 static inline bool list_lru_memcg_aware(struct list_lru *lru)
 {
-	/*
-	 * This needs node 0 to be always present, even
-	 * in the systems supporting sparse numa ids.
-	 */
-	return !!lru->node[0].memcg_lrus;
+	return lru->memcg_aware;
 }
 
 static inline struct list_lru_one *
@@ -184,25 +180,19 @@ void list_lru_isolate_move(struct list_lru_one *list, struct list_head *item,
 }
 EXPORT_SYMBOL_GPL(list_lru_isolate_move);
 
-static unsigned long __list_lru_count_one(struct list_lru *lru,
-					  int nid, int memcg_idx)
+unsigned long list_lru_count_one(struct list_lru *lru,
+				 int nid, struct mem_cgroup *memcg)
 {
 	struct list_lru_node *nlru = &lru->node[nid];
 	struct list_lru_one *l;
 	unsigned long count;
 
 	rcu_read_lock();
-	l = list_lru_from_memcg_idx(nlru, memcg_idx);
+	l = list_lru_from_memcg_idx(nlru, memcg_cache_id(memcg));
 	count = l->nr_items;
 	rcu_read_unlock();
 
 	return count;
-}
-
-unsigned long list_lru_count_one(struct list_lru *lru,
-				 int nid, struct mem_cgroup *memcg)
-{
-	return __list_lru_count_one(lru, nid, memcg_cache_id(memcg));
 }
 EXPORT_SYMBOL_GPL(list_lru_count_one);
 
@@ -216,17 +206,15 @@ unsigned long list_lru_count_node(struct list_lru *lru, int nid)
 EXPORT_SYMBOL_GPL(list_lru_count_node);
 
 static unsigned long
-__list_lru_walk_one(struct list_lru *lru, int nid, int memcg_idx,
+__list_lru_walk_one(struct list_lru_node *nlru, int memcg_idx,
 		    list_lru_walk_cb isolate, void *cb_arg,
 		    unsigned long *nr_to_walk)
 {
 
-	struct list_lru_node *nlru = &lru->node[nid];
 	struct list_lru_one *l;
 	struct list_head *item, *n;
 	unsigned long isolated = 0;
 
-	spin_lock(&nlru->lock);
 	l = list_lru_from_memcg_idx(nlru, memcg_idx);
 restart:
 	list_for_each_safe(item, n, &l->list) {
@@ -272,8 +260,6 @@ restart:
 			BUG();
 		}
 	}
-
-	spin_unlock(&nlru->lock);
 	return isolated;
 }
 
@@ -282,10 +268,31 @@ list_lru_walk_one(struct list_lru *lru, int nid, struct mem_cgroup *memcg,
 		  list_lru_walk_cb isolate, void *cb_arg,
 		  unsigned long *nr_to_walk)
 {
-	return __list_lru_walk_one(lru, nid, memcg_cache_id(memcg),
-				   isolate, cb_arg, nr_to_walk);
+	struct list_lru_node *nlru = &lru->node[nid];
+	unsigned long ret;
+
+	spin_lock(&nlru->lock);
+	ret = __list_lru_walk_one(nlru, memcg_cache_id(memcg), isolate, cb_arg,
+				  nr_to_walk);
+	spin_unlock(&nlru->lock);
+	return ret;
 }
 EXPORT_SYMBOL_GPL(list_lru_walk_one);
+
+unsigned long
+list_lru_walk_one_irq(struct list_lru *lru, int nid, struct mem_cgroup *memcg,
+		      list_lru_walk_cb isolate, void *cb_arg,
+		      unsigned long *nr_to_walk)
+{
+	struct list_lru_node *nlru = &lru->node[nid];
+	unsigned long ret;
+
+	spin_lock_irq(&nlru->lock);
+	ret = __list_lru_walk_one(nlru, memcg_cache_id(memcg), isolate, cb_arg,
+				  nr_to_walk);
+	spin_unlock_irq(&nlru->lock);
+	return ret;
+}
 
 unsigned long list_lru_walk_node(struct list_lru *lru, int nid,
 				 list_lru_walk_cb isolate, void *cb_arg,
@@ -294,12 +301,18 @@ unsigned long list_lru_walk_node(struct list_lru *lru, int nid,
 	long isolated = 0;
 	int memcg_idx;
 
-	isolated += __list_lru_walk_one(lru, nid, -1, isolate, cb_arg,
-					nr_to_walk);
+	isolated += list_lru_walk_one(lru, nid, NULL, isolate, cb_arg,
+				      nr_to_walk);
 	if (*nr_to_walk > 0 && list_lru_memcg_aware(lru)) {
 		for_each_memcg_cache_index(memcg_idx) {
-			isolated += __list_lru_walk_one(lru, nid, memcg_idx,
-						isolate, cb_arg, nr_to_walk);
+			struct list_lru_node *nlru = &lru->node[nid];
+
+			spin_lock(&nlru->lock);
+			isolated += __list_lru_walk_one(nlru, memcg_idx,
+							isolate, cb_arg,
+							nr_to_walk);
+			spin_unlock(&nlru->lock);
+
 			if (*nr_to_walk <= 0)
 				break;
 		}
@@ -341,7 +354,7 @@ static int __memcg_init_list_lru_node(struct list_lru_memcg *memcg_lrus,
 	}
 	return 0;
 fail:
-	__memcg_destroy_list_lru_node(memcg_lrus, begin, i - 1);
+	__memcg_destroy_list_lru_node(memcg_lrus, begin, i);
 	return -ENOMEM;
 }
 
@@ -434,6 +447,8 @@ static void memcg_cancel_update_list_lru_node(struct list_lru_node *nlru,
 static int memcg_init_list_lru(struct list_lru *lru, bool memcg_aware)
 {
 	int i;
+
+	lru->memcg_aware = memcg_aware;
 
 	if (!memcg_aware)
 		return 0;

@@ -67,6 +67,7 @@ struct synproxy_options {
 	u8				options;
 	u8				wscale;
 	u16				mss;
+	u16				mss_encode;
 	u32				tsval;
 	u32				tsecr;
 };

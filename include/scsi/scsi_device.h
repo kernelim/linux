@@ -235,8 +235,8 @@ struct scsi_device {
 	 * The following padding has been inserted before ABI freeze to
 	 * allow extending the structure while preserving ABI.
 	 */
-	RH_KABI_RESERVE(1)
-	RH_KABI_RESERVE(2)
+	RH_KABI_USE(1, struct scsi_vpd __rcu *vpd_pg0)
+	RH_KABI_USE(2, struct scsi_vpd __rcu *vpd_pg89)
 	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)
 	RH_KABI_RESERVE(5)

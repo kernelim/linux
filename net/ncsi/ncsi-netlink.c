@@ -75,7 +75,7 @@ static int ncsi_write_channel_info(struct sk_buff *skb,
 	nla_put_u32(skb, NCSI_CHANNEL_ATTR_VERSION_MINOR, nc->version.alpha2);
 	nla_put_string(skb, NCSI_CHANNEL_ATTR_VERSION_STR, nc->version.fw_name);
 
-	vid_nest = nla_nest_start(skb, NCSI_CHANNEL_ATTR_VLAN_LIST);
+	vid_nest = nla_nest_start_noflag(skb, NCSI_CHANNEL_ATTR_VLAN_LIST);
 	if (!vid_nest)
 		return -ENOMEM;
 	ncf = &nc->vlan_filter;
@@ -109,19 +109,19 @@ static int ncsi_write_package_info(struct sk_buff *skb,
 	NCSI_FOR_EACH_PACKAGE(ndp, np) {
 		if (np->id != id)
 			continue;
-		pnest = nla_nest_start(skb, NCSI_PKG_ATTR);
+		pnest = nla_nest_start_noflag(skb, NCSI_PKG_ATTR);
 		if (!pnest)
 			return -ENOMEM;
 		nla_put_u32(skb, NCSI_PKG_ATTR_ID, np->id);
 		if (ndp->force_package == np)
 			nla_put_flag(skb, NCSI_PKG_ATTR_FORCED);
-		cnest = nla_nest_start(skb, NCSI_PKG_ATTR_CHANNEL_LIST);
+		cnest = nla_nest_start_noflag(skb, NCSI_PKG_ATTR_CHANNEL_LIST);
 		if (!cnest) {
 			nla_nest_cancel(skb, pnest);
 			return -ENOMEM;
 		}
 		NCSI_FOR_EACH_CHANNEL(np, nc) {
-			nest = nla_nest_start(skb, NCSI_CHANNEL_ATTR);
+			nest = nla_nest_start_noflag(skb, NCSI_CHANNEL_ATTR);
 			if (!nest) {
 				nla_nest_cancel(skb, cnest);
 				nla_nest_cancel(skb, pnest);
@@ -183,7 +183,7 @@ static int ncsi_pkg_info_nl(struct sk_buff *msg, struct genl_info *info)
 
 	package_id = nla_get_u32(info->attrs[NCSI_ATTR_PACKAGE_ID]);
 
-	attr = nla_nest_start(skb, NCSI_ATTR_PACKAGE_LIST);
+	attr = nla_nest_start_noflag(skb, NCSI_ATTR_PACKAGE_LIST);
 	if (!attr) {
 		kfree_skb(skb);
 		return -EMSGSIZE;
@@ -216,8 +216,8 @@ static int ncsi_pkg_info_all_nl(struct sk_buff *skb,
 	void *hdr;
 	int rc;
 
-	rc = genlmsg_parse(cb->nlh, &ncsi_genl_family, attrs, NCSI_ATTR_MAX,
-			   ncsi_genl_policy, NULL);
+	rc = genlmsg_parse_deprecated(cb->nlh, &ncsi_genl_family, attrs, NCSI_ATTR_MAX,
+				      ncsi_genl_policy, NULL);
 	if (rc)
 		return rc;
 
@@ -246,7 +246,11 @@ static int ncsi_pkg_info_all_nl(struct sk_buff *skb,
 		goto err;
 	}
 
-	attr = nla_nest_start(skb, NCSI_ATTR_PACKAGE_LIST);
+	attr = nla_nest_start_noflag(skb, NCSI_ATTR_PACKAGE_LIST);
+	if (!attr) {
+		rc = -EMSGSIZE;
+		goto err;
+	}
 	rc = ncsi_write_package_info(skb, ndp, package->id);
 	if (rc) {
 		nla_nest_cancel(skb, attr);
@@ -369,20 +373,20 @@ static int ncsi_clear_interface_nl(struct sk_buff *msg, struct genl_info *info)
 static const struct genl_ops ncsi_ops[] = {
 	{
 		.cmd = NCSI_CMD_PKG_INFO,
-		.policy = ncsi_genl_policy,
+		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
 		.doit = ncsi_pkg_info_nl,
 		.dumpit = ncsi_pkg_info_all_nl,
 		.flags = 0,
 	},
 	{
 		.cmd = NCSI_CMD_SET_INTERFACE,
-		.policy = ncsi_genl_policy,
+		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
 		.doit = ncsi_set_interface_nl,
 		.flags = GENL_ADMIN_PERM,
 	},
 	{
 		.cmd = NCSI_CMD_CLEAR_INTERFACE,
-		.policy = ncsi_genl_policy,
+		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
 		.doit = ncsi_clear_interface_nl,
 		.flags = GENL_ADMIN_PERM,
 	},
@@ -392,6 +396,7 @@ static struct genl_family ncsi_genl_family __ro_after_init = {
 	.name = "NCSI",
 	.version = 0,
 	.maxattr = NCSI_ATTR_MAX,
+	.policy = ncsi_genl_policy,
 	.module = THIS_MODULE,
 	.ops = ncsi_ops,
 	.n_ops = ARRAY_SIZE(ncsi_ops),

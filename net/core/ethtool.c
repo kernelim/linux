@@ -11,6 +11,8 @@
  * (at your option) any later version.
  */
 
+#include <linux/rh_kabi.h>
+
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/capability.h>
@@ -28,9 +30,7 @@
 #include <linux/sched/signal.h>
 #include <linux/net.h>
 #include <net/devlink.h>
-#ifndef __GENKSYMS__
-#include <net/xdp_sock.h>
-#endif
+#include RH_KABI_HIDE_INCLUDE(<net/xdp_sock.h>)
 #include <net/flow_offload.h>
 
 /*
@@ -138,6 +138,7 @@ static const char
 phy_tunable_strings[__ETHTOOL_PHY_TUNABLE_COUNT][ETH_GSTRING_LEN] = {
 	[ETHTOOL_ID_UNSPEC]     = "Unspec",
 	[ETHTOOL_PHY_DOWNSHIFT]	= "phy-downshift",
+	[ETHTOOL_PHY_FAST_LINK_DOWN] = "phy-fast-link-down",
 };
 
 static int ethtool_get_features(struct net_device *dev, void __user *useraddr)
@@ -1020,11 +1021,9 @@ static noinline_for_stack int ethtool_get_drvinfo(struct net_device *dev,
 	if (ops->get_eeprom_len)
 		info.eedump_len = ops->get_eeprom_len(dev);
 
-	rtnl_unlock();
 	if (!info.fw_version[0])
 		devlink_compat_running_version(dev, info.fw_version,
 					       sizeof(info.fw_version));
-	rtnl_lock();
 
 	if (copy_to_user(useraddr, &info, sizeof(info)))
 		return -EFAULT;
@@ -1630,6 +1629,7 @@ static int ethtool_get_wol(struct net_device *dev, char __user *useraddr)
 static int ethtool_set_wol(struct net_device *dev, char __user *useraddr)
 {
 	struct ethtool_wolinfo wol;
+	int ret;
 
 	if (!dev->ethtool_ops->set_wol)
 		return -EOPNOTSUPP;
@@ -1637,7 +1637,13 @@ static int ethtool_set_wol(struct net_device *dev, char __user *useraddr)
 	if (copy_from_user(&wol, useraddr, sizeof(wol)))
 		return -EFAULT;
 
-	return dev->ethtool_ops->set_wol(dev, &wol);
+	ret = dev->ethtool_ops->set_wol(dev, &wol);
+	if (ret)
+		return ret;
+
+	dev->wol_enabled = !!wol.wolopts;
+
+	return 0;
 }
 
 static int ethtool_get_eee(struct net_device *dev, char __user *useraddr)
@@ -2251,15 +2257,8 @@ static noinline_for_stack int ethtool_flash_device(struct net_device *dev,
 		return -EFAULT;
 	efl.data[ETHTOOL_FLASH_MAX_FILENAME - 1] = 0;
 
-	if (!dev->ethtool_ops->flash_device) {
-		int ret;
-
-		rtnl_unlock();
-		ret = devlink_compat_flash_update(dev, efl.data);
-		rtnl_lock();
-
-		return ret;
-	}
+	if (!dev->ethtool_ops->flash_device)
+		return devlink_compat_flash_update(dev, efl.data);
 
 	return dev->ethtool_ops->flash_device(dev, &efl);
 }
@@ -2650,6 +2649,7 @@ static int ethtool_phy_tunable_valid(const struct ethtool_tunable *tuna)
 {
 	switch (tuna->id) {
 	case ETHTOOL_PHY_DOWNSHIFT:
+	case ETHTOOL_PHY_FAST_LINK_DOWN:
 		if (tuna->len != sizeof(u8) ||
 		    tuna->type_id != ETHTOOL_TUNABLE_U8)
 			return -EINVAL;

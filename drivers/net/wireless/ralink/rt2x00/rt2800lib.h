@@ -76,6 +76,7 @@ struct rt2800_ops {
 				  const u8 *data, const size_t len);
 	int (*drv_init_registers)(struct rt2x00_dev *rt2x00dev);
 	__le32 *(*drv_get_txwi)(struct queue_entry *entry);
+	unsigned int (*drv_get_dma_done)(struct data_queue *queue);
 };
 
 static inline u32 rt2800_register_read(struct rt2x00_dev *rt2x00dev,
@@ -177,6 +178,13 @@ static inline __le32 *rt2800_drv_get_txwi(struct queue_entry *entry)
 	return rt2800ops->drv_get_txwi(entry);
 }
 
+static inline unsigned int rt2800_drv_get_dma_done(struct data_queue *queue)
+{
+	const struct rt2800_ops *rt2800ops = queue->rt2x00dev->ops->drv;
+
+	return rt2800ops->drv_get_dma_done(queue);
+}
+
 void rt2800_mcu_request(struct rt2x00_dev *rt2x00dev,
 			const u8 command, const u8 token,
 			const u8 arg0, const u8 arg1);
@@ -195,6 +203,12 @@ void rt2800_process_rxwi(struct queue_entry *entry, struct rxdone_entry_desc *tx
 
 void rt2800_txdone_entry(struct queue_entry *entry, u32 status, __le32 *txwi,
 			 bool match);
+void rt2800_txdone(struct rt2x00_dev *rt2x00dev, unsigned int quota);
+void rt2800_txdone_nostatus(struct rt2x00_dev *rt2x00dev);
+bool rt2800_txstatus_timeout(struct rt2x00_dev *rt2x00dev);
+bool rt2800_txstatus_pending(struct rt2x00_dev *rt2x00dev);
+
+void rt2800_watchdog(struct rt2x00_dev *rt2x00dev);
 
 void rt2800_write_beacon(struct queue_entry *entry, struct txentry_desc *txdesc);
 void rt2800_clear_beacon(struct queue_entry *entry);
@@ -254,5 +268,6 @@ void rt2800_disable_wpdma(struct rt2x00_dev *rt2x00dev);
 void rt2800_get_txwi_rxwi_size(struct rt2x00_dev *rt2x00dev,
 			       unsigned short *txwi_size,
 			       unsigned short *rxwi_size);
+void rt2800_pre_reset_hw(struct rt2x00_dev *rt2x00dev);
 
 #endif /* RT2800LIB_H */

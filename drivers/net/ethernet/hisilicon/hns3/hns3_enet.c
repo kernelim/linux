@@ -753,7 +753,6 @@ static void hns3_set_l2l3l4_len(struct sk_buff *skb, u8 ol4_proto,
  */
 static bool hns3_tunnel_csum_bug(struct sk_buff *skb)
 {
-#define IANA_VXLAN_PORT	4789
 	union {
 		struct tcphdr *tcp;
 		struct udphdr *udp;
@@ -763,7 +762,8 @@ static bool hns3_tunnel_csum_bug(struct sk_buff *skb)
 
 	l4.hdr = skb_transport_header(skb);
 
-	if (!(!skb->encapsulation && l4.udp->dest == htons(IANA_VXLAN_PORT)))
+	if (!(!skb->encapsulation &&
+	      l4.udp->dest == htons(IANA_VXLAN_UDP_PORT)))
 		return false;
 
 	skb_checksum_help(skb);
@@ -2306,7 +2306,7 @@ static int hns3_handle_rx_bd(struct hns3_enet_ring *ring,
 		ring->stats.seg_pkt_cnt++;
 		u64_stats_update_end(&ring->syncp);
 
-		pull_len = eth_get_headlen(va, HNS3_RX_HEAD_SIZE);
+		pull_len = eth_get_headlen(netdev, va, HNS3_RX_HEAD_SIZE);
 
 		memcpy(__skb_put(skb, pull_len), va,
 		       ALIGN(pull_len, sizeof(long)));

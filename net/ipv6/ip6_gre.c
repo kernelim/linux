@@ -971,7 +971,7 @@ static netdev_tx_t ip6erspan_tunnel_xmit(struct sk_buff *skb,
 		if (unlikely(!tun_info ||
 			     !(tun_info->mode & IP_TUNNEL_INFO_TX) ||
 			     ip_tunnel_info_af(tun_info) != AF_INET6))
-			return -EINVAL;
+			goto tx_err;
 
 		key = &tun_info->key;
 		memset(&fl6, 0, sizeof(fl6));
@@ -1120,7 +1120,7 @@ static void ip6gre_tnl_link_config_route(struct ip6_tnl *t, int set_mtu,
 			return;
 
 		if (rt->dst.dev) {
-			dev->hard_header_len = rt->dst.dev->hard_header_len +
+			dev->needed_headroom = rt->dst.dev->hard_header_len +
 					       t_hlen;
 
 			if (set_mtu) {
@@ -1146,7 +1146,7 @@ static int ip6gre_calc_hlen(struct ip6_tnl *tunnel)
 	tunnel->hlen = tunnel->tun_hlen + tunnel->encap_hlen;
 
 	t_hlen = tunnel->hlen + sizeof(struct ipv6hdr);
-	tunnel->dev->hard_header_len = LL_MAX_HEADER + t_hlen;
+	tunnel->dev->needed_headroom = LL_MAX_HEADER + t_hlen;
 	return t_hlen;
 }
 
@@ -1828,7 +1828,7 @@ static int ip6erspan_calc_hlen(struct ip6_tnl *tunnel)
 		       erspan_hdr_len(tunnel->parms.erspan_ver);
 
 	t_hlen = tunnel->hlen + sizeof(struct ipv6hdr);
-	tunnel->dev->hard_header_len = LL_MAX_HEADER + t_hlen;
+	tunnel->dev->needed_headroom = LL_MAX_HEADER + t_hlen;
 	return t_hlen;
 }
 
@@ -2195,6 +2195,7 @@ static void ip6erspan_tap_setup(struct net_device *dev)
 {
 	ether_setup(dev);
 
+	dev->max_mtu = 0;
 	dev->netdev_ops = &ip6erspan_netdev_ops;
 	dev->needs_free_netdev = true;
 	dev->priv_destructor = ip6gre_dev_free;

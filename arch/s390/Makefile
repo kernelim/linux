@@ -16,6 +16,10 @@ KBUILD_AFLAGS_MODULE += -fPIC
 KBUILD_CFLAGS_MODULE += -fPIC
 KBUILD_AFLAGS	+= -m64
 KBUILD_CFLAGS	+= -m64
+ifeq ($(CONFIG_RELOCATABLE),y)
+KBUILD_CFLAGS	+= -fPIE
+LDFLAGS_vmlinux	:= -pie
+endif
 aflags_dwarf	:= -Wa,-gdwarf-2
 KBUILD_AFLAGS_DECOMPRESSOR := -m64 -D__ASSEMBLY__
 KBUILD_AFLAGS_DECOMPRESSOR += $(if $(CONFIG_DEBUG_INFO),$(aflags_dwarf))
@@ -40,6 +44,7 @@ mflags-$(CONFIG_MARCH_Z196)   := -march=z196
 mflags-$(CONFIG_MARCH_ZEC12)  := -march=zEC12
 mflags-$(CONFIG_MARCH_Z13)    := -march=z13
 mflags-$(CONFIG_MARCH_Z14)    := -march=z14
+mflags-$(CONFIG_MARCH_Z15)    := -march=z15
 
 export CC_FLAGS_MARCH := $(mflags-y)
 
@@ -54,6 +59,7 @@ cflags-$(CONFIG_MARCH_Z196_TUNE)	+= -mtune=z196
 cflags-$(CONFIG_MARCH_ZEC12_TUNE)	+= -mtune=zEC12
 cflags-$(CONFIG_MARCH_Z13_TUNE)		+= -mtune=z13
 cflags-$(CONFIG_MARCH_Z14_TUNE)		+= -mtune=z14
+cflags-$(CONFIG_MARCH_Z15_TUNE)		+= -mtune=z15
 
 cflags-y += -Wa,-I$(srctree)/arch/$(ARCH)/include
 

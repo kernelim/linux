@@ -29,6 +29,11 @@
 #include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
 
+/* RHEL-only, missing 9de7d833e370 */
+#ifndef nmi_uaccess_okay
+# define nmi_uaccess_okay() true
+#endif
+
 struct mmu_gather {
 	struct mm_struct *mm;
 	struct mmu_table_batch *batch;

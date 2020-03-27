@@ -26,6 +26,7 @@
 #include "util/symbol.h"
 #include "util/time-utils.h"
 #include "util/probe-file.h"
+#include <linux/err.h>
 
 static int build_id_cache__kcore_buildid(const char *proc_dir, char *sbuildid)
 {
@@ -416,12 +417,12 @@ int cmd_buildid_cache(int argc, const char **argv)
 		nsi = nsinfo__new(ns_id);
 
 	if (missing_filename) {
-		data.file.path = missing_filename;
-		data.force     = force;
+		data.path  = missing_filename;
+		data.force = force;
 
 		session = perf_session__new(&data, false, NULL);
-		if (session == NULL)
-			return -1;
+		if (IS_ERR(session))
+			return PTR_ERR(session);
 	}
 
 	if (symbol__init(session ? &session->header.env : NULL) < 0)

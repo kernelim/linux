@@ -27,6 +27,7 @@
 #include <linux/irq.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/pci_hotplug.h>
 #include <asm/eeh.h>
 #include <asm/eeh_event.h>
 #include <asm/ppc-pci.h>
@@ -113,8 +114,16 @@ static bool eeh_dev_removed(struct eeh_dev *edev)
 
 static bool eeh_edev_actionable(struct eeh_dev *edev)
 {
-	return (edev->pdev && !eeh_dev_removed(edev) &&
-		!eeh_pe_passed(edev->pe));
+	if (!edev->pdev)
+		return false;
+	if (edev->pdev->error_state == pci_channel_io_perm_failure)
+		return false;
+	if (eeh_dev_removed(edev))
+		return false;
+	if (eeh_pe_passed(edev->pe))
+		return false;
+
+	return true;
 }
 
 /**
@@ -744,6 +753,99 @@ static int eeh_reset_device(struct eeh_pe *pe, struct pci_bus *bus,
  */
 #define MAX_WAIT_FOR_RECOVERY 300
 
+
+/* Walks the PE tree after processing an event to remove any stale PEs.
+ *
+ * NB: This needs to be recursive to ensure the leaf PEs get removed
+ * before their parents do. Although this is possible to do recursively
+ * we don't since this is easier to read and we need to garantee
+ * the leaf nodes will be handled first.
+ */
+static void eeh_pe_cleanup(struct eeh_pe *pe)
+{
+	struct eeh_pe *child_pe, *tmp;
+
+	list_for_each_entry_safe(child_pe, tmp, &pe->child_list, child)
+		eeh_pe_cleanup(child_pe);
+
+	if (pe->state & EEH_PE_KEEP)
+		return;
+
+	if (!(pe->state & EEH_PE_INVALID))
+		return;
+
+	if (list_empty(&pe->edevs) && list_empty(&pe->child_list)) {
+		list_del(&pe->child);
+		kfree(pe);
+	}
+}
+
+/**
+ * eeh_check_slot_presence - Check if a device is still present in a slot
+ * @pdev: pci_dev to check
+ *
+ * This function may return a false positive if we can't determine the slot's
+ * presence state. This might happen for for PCIe slots if the PE containing
+ * the upstream bridge is also frozen, or the bridge is part of the same PE
+ * as the device.
+ *
+ * This shouldn't happen often, but you might see it if you hotplug a PCIe
+ * switch.
+ */
+static bool eeh_slot_presence_check(struct pci_dev *pdev)
+{
+	const struct hotplug_slot_ops *ops;
+	struct pci_slot *slot;
+	u8 state;
+	int rc;
+
+	if (!pdev)
+		return false;
+
+	if (pdev->error_state == pci_channel_io_perm_failure)
+		return false;
+
+	slot = pdev->slot;
+	if (!slot || !slot->hotplug)
+		return true;
+
+	ops = slot->hotplug->ops;
+	if (!ops || !ops->get_adapter_status)
+		return true;
+
+	/* set the attention indicator while we've got the slot ops */
+	if (ops->set_attention_status)
+		ops->set_attention_status(slot->hotplug, 1);
+
+	rc = ops->get_adapter_status(slot->hotplug, &state);
+	if (rc)
+		return true;
+
+	return !!state;
+}
+
+static void eeh_clear_slot_attention(struct pci_dev *pdev)
+{
+	const struct hotplug_slot_ops *ops;
+	struct pci_slot *slot;
+
+	if (!pdev)
+		return;
+
+	if (pdev->error_state == pci_channel_io_perm_failure)
+		return;
+
+	slot = pdev->slot;
+	if (!slot || !slot->hotplug)
+		return;
+
+	ops = slot->hotplug->ops;
+	if (!ops || !ops->set_attention_status)
+		return;
+
+	ops->set_attention_status(slot->hotplug, 0);
+}
+
 /**
  * eeh_handle_normal_event - Handle EEH events on a specific PE
  * @pe: EEH PE - which should not be used after we return, as it may
@@ -774,6 +876,7 @@ void eeh_handle_normal_event(struct eeh_pe *pe)
 	enum pci_ers_result result = PCI_ERS_RESULT_NONE;
 	struct eeh_rmv_data rmv_data =
 		{LIST_HEAD_INIT(rmv_data.removed_vf_list), 0};
+	int devices = 0;
 
 	bus = eeh_pe_bus_get(pe);
 	if (!bus) {
@@ -782,7 +885,59 @@ void eeh_handle_normal_event(struct eeh_pe *pe)
 		return;
 	}
 
-	eeh_pe_state_mark(pe, EEH_PE_RECOVERING);
+	/*
+	 * When devices are hot-removed we might get an EEH due to
+	 * a driver attempting to touch the MMIO space of a removed
+	 * device. In this case we don't have a device to recover
+	 * so suppress the event if we can't find any present devices.
+	 *
+	 * The hotplug driver should take care of tearing down the
+	 * device itself.
+	 */
+	eeh_for_each_pe(pe, tmp_pe)
+		eeh_pe_for_each_dev(tmp_pe, edev, tmp)
+			if (eeh_slot_presence_check(edev->pdev))
+				devices++;
+
+	if (!devices) {
+		pr_debug("EEH: Frozen PHB#%x-PE#%x is empty!\n",
+			pe->phb->global_number, pe->addr);
+		goto out; /* nothing to recover */
+	}
+
+	/* Log the event */
+	if (pe->type & EEH_PE_PHB) {
+		pr_err("EEH: PHB#%x failure detected, location: %s\n",
+			pe->phb->global_number, eeh_pe_loc_get(pe));
+	} else {
+		struct eeh_pe *phb_pe = eeh_phb_pe_get(pe->phb);
+
+		pr_err("EEH: Frozen PHB#%x-PE#%x detected\n",
+		       pe->phb->global_number, pe->addr);
+		pr_err("EEH: PE location: %s, PHB location: %s\n",
+		       eeh_pe_loc_get(pe), eeh_pe_loc_get(phb_pe));
+	}
+
+#ifdef CONFIG_STACKTRACE
+	/*
+	 * Print the saved stack trace now that we've verified there's
+	 * something to recover.
+	 */
+	if (pe->trace_entries) {
+		void **ptrs = (void **) pe->stack_trace;
+		int i;
+
+		pr_err("EEH: Frozen PHB#%x-PE#%x detected\n",
+		       pe->phb->global_number, pe->addr);
+
+		/* FIXME: Use the same format as dump_stack() */
+		pr_err("EEH: Call Trace:\n");
+		for (i = 0; i < pe->trace_entries; i++)
+			pr_err("EEH: [%pK] %pS\n", ptrs[i], ptrs[i]);
+
+		pe->trace_entries = 0;
+	}
+#endif /* CONFIG_STACKTRACE */
 
 	eeh_pe_update_time_stamp(pe);
 	pe->freeze_count++;
@@ -969,6 +1124,19 @@ void eeh_handle_normal_event(struct eeh_pe *pe)
 			return;
 		}
 	}
+
+out:
+	/*
+	 * Clean up any PEs without devices. While marked as EEH_PE_RECOVERYING
+	 * we don't want to modify the PE tree structure so we do it here.
+	 */
+	eeh_pe_cleanup(pe);
+
+	/* clear the slot attention LED for all recovered devices */
+	eeh_for_each_pe(pe, tmp_pe)
+		eeh_pe_for_each_dev(tmp_pe, edev, tmp)
+			eeh_clear_slot_attention(edev->pdev);
+
 	eeh_pe_state_clear(pe, EEH_PE_RECOVERING, true);
 }
 
@@ -1040,6 +1208,7 @@ void eeh_handle_special_event(void)
 		 */
 		if (rc == EEH_NEXT_ERR_FROZEN_PE ||
 		    rc == EEH_NEXT_ERR_FENCED_PHB) {
+			eeh_pe_state_mark(pe, EEH_PE_RECOVERING);
 			eeh_handle_normal_event(pe);
 		} else {
 			pci_lock_rescan_remove();

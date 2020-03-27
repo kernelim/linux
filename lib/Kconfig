@@ -548,6 +548,14 @@ config SIGNATURE
 	  Digital signature verification. Currently only RSA is supported.
 	  Implementation is done using GnuPG MPI library
 
+config DIMLIB
+	bool "DIM library"
+	default y
+	help
+	  Dynamic Interrupt Moderation library.
+	  Implements an algorithm for dynamically change CQ modertion values
+	  according to run time performance.
+
 #
 # libfdt files, only selected if needed.
 #
@@ -593,6 +601,10 @@ config ARCH_HAS_UACCESS_FLUSHCACHE
 
 config ARCH_HAS_UACCESS_MCSAFE
 	bool
+
+# Temporary. Goes away when all archs are cleaned up
+config ARCH_STACKWALK
+       bool
 
 config STACKDEPOT
 	bool

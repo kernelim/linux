@@ -16,6 +16,7 @@
 
 #ifdef CONFIG_PPC64
 
+#include <linux/rh_kabi.h>
 #include <linux/string.h>
 #include <asm/types.h>
 #include <asm/lppaca.h>
@@ -33,6 +34,8 @@
 #include <asm/hmi.h>
 #include <asm/cpuidle.h>
 #include <asm/atomic.h>
+
+#include <asm-generic/mmiowb_types.h>
 
 register struct paca_struct *local_paca asm("r13");
 
@@ -166,7 +169,6 @@ struct paca_struct {
 	u16 trap_save;			/* Used when bad stack is encountered */
 	u8 irq_soft_mask;		/* mask for irq soft masking */
 	u8 irq_happened;		/* irq happened while soft-disabled */
-	u8 io_sync;			/* writel() needs spin_unlock sync */
 	u8 irq_work_pending;		/* IRQ_WORK interrupt while soft-disable */
 	u8 nap_state_lost;		/* NV GPR values lost in power7_idle */
 #ifdef CONFIG_KVM_BOOK3S_HV_POSSIBLE
@@ -256,6 +258,13 @@ struct paca_struct {
 	struct slb_entry *mce_faulty_slbs;
 	u16 slb_save_cache_ptr;
 #endif /* CONFIG_PPC_BOOK3S_64 */
+#ifdef CONFIG_MMIOWB
+	struct mmiowb_state mmiowb_state;
+#endif
+
+#ifdef CONFIG_STACKPROTECTOR
+	RH_KABI_EXTEND(unsigned long canary)
+#endif
 } ____cacheline_aligned;
 
 extern void copy_mm_to_paca(struct mm_struct *mm);

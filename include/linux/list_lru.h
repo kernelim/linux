@@ -49,11 +49,30 @@ struct list_lru_node {
 	long nr_items;
 } ____cacheline_aligned_in_smp;
 
+/*
+ * RHEL8 NOTE:
+ * struct list_lru gets embedded into struct super_block, thus we're
+ * kABI constrained to 32 bytes in size to not break other's layout
+ * compromises. Currently, we only have a 3-byte padding hole
+ * available in this struct for any future extention:
+ *
+ * struct list_lru {
+ *	struct list_lru_node * node;                     //     0     8
+ *	struct list_head   list;                         //     8    16
+ *	int                        shrinker_id;          //    24     4
+ *	bool                       memcg_aware;          //    28     1
+ *
+ *	// size: 32, cachelines: 1, members: 4
+ *	// padding: 3
+ *	// last cacheline: 32 bytes
+ * };
+ */
 struct list_lru {
 	struct list_lru_node	*node;
 #ifdef CONFIG_MEMCG_KMEM
 	struct list_head	list;
 	RH_KABI_EXTEND(int	shrinker_id)
+	RH_KABI_EXTEND(bool	memcg_aware)
 #endif
 };
 
@@ -166,6 +185,23 @@ unsigned long list_lru_walk_one(struct list_lru *lru,
 				int nid, struct mem_cgroup *memcg,
 				list_lru_walk_cb isolate, void *cb_arg,
 				unsigned long *nr_to_walk);
+/**
+ * list_lru_walk_one_irq: walk a list_lru, isolating and disposing freeable items.
+ * @lru: the lru pointer.
+ * @nid: the node id to scan from.
+ * @memcg: the cgroup to scan from.
+ * @isolate: callback function that is resposible for deciding what to do with
+ *  the item currently being scanned
+ * @cb_arg: opaque type that will be passed to @isolate
+ * @nr_to_walk: how many items to scan.
+ *
+ * Same as @list_lru_walk_one except that the spinlock is acquired with
+ * spin_lock_irq().
+ */
+unsigned long list_lru_walk_one_irq(struct list_lru *lru,
+				    int nid, struct mem_cgroup *memcg,
+				    list_lru_walk_cb isolate, void *cb_arg,
+				    unsigned long *nr_to_walk);
 unsigned long list_lru_walk_node(struct list_lru *lru, int nid,
 				 list_lru_walk_cb isolate, void *cb_arg,
 				 unsigned long *nr_to_walk);
@@ -176,6 +212,14 @@ list_lru_shrink_walk(struct list_lru *lru, struct shrink_control *sc,
 {
 	return list_lru_walk_one(lru, sc->nid, sc->memcg, isolate, cb_arg,
 				 &sc->nr_to_scan);
+}
+
+static inline unsigned long
+list_lru_shrink_walk_irq(struct list_lru *lru, struct shrink_control *sc,
+			 list_lru_walk_cb isolate, void *cb_arg)
+{
+	return list_lru_walk_one_irq(lru, sc->nid, sc->memcg, isolate, cb_arg,
+				     &sc->nr_to_scan);
 }
 
 static inline unsigned long

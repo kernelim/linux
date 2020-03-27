@@ -11,6 +11,8 @@ static const char *__doc__ =
 #include <bpf/libbpf.h>
 #include <getopt.h>
 
+#include "bpf_rlimit.h"
+
 static const struct option long_options[] = {
 	{"help",	no_argument,		NULL, 'h' },
 	{"debug",	no_argument,		NULL, 'D' },
@@ -67,7 +69,7 @@ int test_walk_maps(struct bpf_object *obj, bool verbose)
 	struct bpf_map *map;
 	int cnt = 0;
 
-	bpf_map__for_each(map, obj) {
+	bpf_object__for_each_map(map, obj) {
 		cnt++;
 		if (verbose)
 			printf("Map (count:%d) name: %s\n", cnt,

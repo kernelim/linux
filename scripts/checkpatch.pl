@@ -570,6 +570,27 @@ foreach my $entry (@mode_permission_funcs) {
 }
 $mode_perms_search = "(?:${mode_perms_search})";
 
+our %deprecated_apis = (
+	"synchronize_rcu_bh"			=> "synchronize_rcu",
+	"synchronize_rcu_bh_expedited"		=> "synchronize_rcu_expedited",
+	"call_rcu_bh"				=> "call_rcu",
+	"rcu_barrier_bh"			=> "rcu_barrier",
+	"synchronize_sched"			=> "synchronize_rcu",
+	"synchronize_sched_expedited"		=> "synchronize_rcu_expedited",
+	"call_rcu_sched"			=> "call_rcu",
+	"rcu_barrier_sched"			=> "rcu_barrier",
+	"get_state_synchronize_sched"		=> "get_state_synchronize_rcu",
+	"cond_synchronize_sched"		=> "cond_synchronize_rcu",
+);
+
+#Create a search pattern for all these strings to speed up a loop below
+our $deprecated_apis_search = "";
+foreach my $entry (keys %deprecated_apis) {
+	$deprecated_apis_search .= '|' if ($deprecated_apis_search ne "");
+	$deprecated_apis_search .= $entry;
+}
+$deprecated_apis_search = "(?:${deprecated_apis_search})";
+
 our $mode_perms_world_writable = qr{
 	S_IWUGO		|
 	S_IWOTH		|
@@ -5544,7 +5565,7 @@ sub process {
 			# ignore udelay's < 10, however
 			if (! ($delay < 10) ) {
 				CHK("USLEEP_RANGE",
-				    "usleep_range is preferred over udelay; see Documentation/timers/timers-howto.txt\n" . $herecurr);
+				    "usleep_range is preferred over udelay; see Documentation/timers/timers-howto.rst\n" . $herecurr);
 			}
 			if ($delay > 2000) {
 				WARN("LONG_UDELAY",
@@ -5556,7 +5577,7 @@ sub process {
 		if ($line =~ /\bmsleep\s*\((\d+)\);/) {
 			if ($1 < 20) {
 				WARN("MSLEEP",
-				     "msleep < 20ms can sleep for up to 20ms; see Documentation/timers/timers-howto.txt\n" . $herecurr);
+				     "msleep < 20ms can sleep for up to 20ms; see Documentation/timers/timers-howto.rst\n" . $herecurr);
 			}
 		}
 
@@ -5827,7 +5848,7 @@ sub process {
 				while ($fmt =~ /(\%[\*\d\.]*p(\w))/g) {
 					$specifier = $1;
 					$extension = $2;
-					if ($extension !~ /[SsBKRraEhMmIiUDdgVCbGNOx]/) {
+					if ($extension !~ /[SsBKRraEhMmIiUDdgVCbGNOxt]/) {
 						$bad_specifier = $specifier;
 						last;
 					}
@@ -5947,11 +5968,11 @@ sub process {
 			my $max = $7;
 			if ($min eq $max) {
 				WARN("USLEEP_RANGE",
-				     "usleep_range should not use min == max args; see Documentation/timers/timers-howto.txt\n" . "$here\n$stat\n");
+				     "usleep_range should not use min == max args; see Documentation/timers/timers-howto.rst\n" . "$here\n$stat\n");
 			} elsif ($min =~ /^\d+$/ && $max =~ /^\d+$/ &&
 				 $min > $max) {
 				WARN("USLEEP_RANGE",
-				     "usleep_range args reversed, use min then max; see Documentation/timers/timers-howto.txt\n" . "$here\n$stat\n");
+				     "usleep_range args reversed, use min then max; see Documentation/timers/timers-howto.rst\n" . "$here\n$stat\n");
 			}
 		}
 
@@ -6267,6 +6288,20 @@ sub process {
 		if ($line =~ /^.\s*__initcall\s*\(/) {
 			WARN("USE_DEVICE_INITCALL",
 			     "please use device_initcall() or more appropriate function instead of __initcall() (see include/linux/init.h)\n" . $herecurr);
+		}
+
+# check for spin_is_locked(), suggest lockdep instead
+		if ($line =~ /\bspin_is_locked\(/) {
+			WARN("USE_LOCKDEP",
+			     "Where possible, use lockdep_assert_held instead of assertions based on spin_is_locked\n" . $herecurr);
+		}
+
+# check for deprecated apis
+		if ($line =~ /\b($deprecated_apis_search)\b\s*\(/) {
+			my $deprecated_api = $1;
+			my $new_api = $deprecated_apis{$deprecated_api};
+			WARN("DEPRECATED_API",
+			     "Deprecated use of '$deprecated_api', prefer '$new_api' instead\n" . $herecurr);
 		}
 
 # check for various structs that are normally const (ops, kgdb, device_tree)

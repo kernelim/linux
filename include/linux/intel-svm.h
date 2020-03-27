@@ -20,7 +20,7 @@ struct device;
 
 struct svm_dev_ops {
 	void (*fault_cb)(struct device *dev, int pasid, u64 address,
-			 u32 private, int rwxp, int response);
+			 void *private, int rwxp, int response);
 };
 
 /* Values for rxwp in fault_cb callback */
@@ -57,7 +57,7 @@ struct svm_dev_ops {
 
 /**
  * intel_svm_bind_mm() - Bind the current process to a PASID
- * @dev:	Device to be granted acccess
+ * @dev:	Device to be granted access
  * @pasid:	Address for allocated PASID
  * @flags:	Flags. Later for requesting supervisor mode, etc.
  * @ops:	Callbacks to device driver

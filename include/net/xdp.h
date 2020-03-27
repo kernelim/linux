@@ -145,10 +145,25 @@ void xdp_return_frame(struct xdp_frame *xdpf);
 void xdp_return_frame_rx_napi(struct xdp_frame *xdpf);
 void xdp_return_buff(struct xdp_buff *xdp);
 
+/* When sending xdp_frame into the network stack, then there is no
+ * return point callback, which is needed to release e.g. DMA-mapping
+ * resources with page_pool.  Thus, have explicit function to release
+ * frame resources.
+ */
+void __xdp_release_frame(void *data, struct xdp_mem_info *mem);
+static inline void xdp_release_frame(struct xdp_frame *xdpf)
+{
+	struct xdp_mem_info *mem = &xdpf->mem;
+
+	/* Curr only page_pool needs this */
+	if (mem->type == MEM_TYPE_PAGE_POOL)
+		__xdp_release_frame(xdpf->data, mem);
+}
+
 /* RHEL: increase the version of xdp_rxq_info_reg kABI whenever XDP is
  * changed in a kABI incompatible way. That includes changes to ndo_xdp* and
  * ndo_bpf ops, inline function changes and XDP struct changes. */
-RH_KABI_FORCE_CHANGE(1)
+RH_KABI_FORCE_CHANGE(2)
 int xdp_rxq_info_reg(struct xdp_rxq_info *xdp_rxq,
 		     struct net_device *dev, u32 queue_index);
 void xdp_rxq_info_unreg(struct xdp_rxq_info *xdp_rxq);

@@ -260,7 +260,7 @@ static void br_multicast_group_expired(struct timer_list *t)
 	hlist_del_rcu(&mp->hlist[mdb->ver]);
 	mdb->size--;
 
-	call_rcu_bh(&mp->rcu, br_multicast_free_group);
+	call_rcu(&mp->rcu, br_multicast_free_group);
 
 out:
 	spin_unlock(&br->multicast_lock);
@@ -291,7 +291,7 @@ static void br_multicast_del_pg(struct net_bridge *br,
 		del_timer(&p->timer);
 		br_mdb_notify(br->dev, p->port, &pg->addr, RTM_DELMDB,
 			      p->flags);
-		call_rcu_bh(&p->rcu, br_multicast_free_pg);
+		call_rcu(&p->rcu, br_multicast_free_pg);
 
 		if (!mp->ports && !mp->host_joined &&
 		    netif_running(br->dev))
@@ -358,7 +358,7 @@ static int br_mdb_rehash(struct net_bridge_mdb_htable __rcu **mdbp, int max,
 	}
 
 	br_mdb_rehash_seq++;
-	call_rcu_bh(&mdb->rcu, br_mdb_free);
+	call_rcu(&mdb->rcu, br_mdb_free);
 
 out:
 	rcu_assign_pointer(*mdbp, mdb);
@@ -1628,10 +1628,13 @@ br_multicast_leave_group(struct net_bridge *br,
 			if (!br_port_group_equal(p, port, src))
 				continue;
 
+			if (p->flags & MDB_PG_FLAGS_PERMANENT)
+				break;
+
 			rcu_assign_pointer(*pp, p->next);
 			hlist_del_init(&p->mglist);
 			del_timer(&p->timer);
-			call_rcu_bh(&p->rcu, br_multicast_free_pg);
+			call_rcu(&p->rcu, br_multicast_free_pg);
 			br_mdb_notify(br->dev, port, group, RTM_DELMDB,
 				      p->flags);
 
@@ -2045,19 +2048,19 @@ void br_multicast_dev_del(struct net_bridge *br)
 		hlist_for_each_entry_safe(mp, n, &mdb->mhash[i],
 					  hlist[ver]) {
 			del_timer(&mp->timer);
-			call_rcu_bh(&mp->rcu, br_multicast_free_group);
+			call_rcu(&mp->rcu, br_multicast_free_group);
 		}
 	}
 
 	if (mdb->old) {
 		spin_unlock_bh(&br->multicast_lock);
-		rcu_barrier_bh();
+		rcu_barrier();
 		spin_lock_bh(&br->multicast_lock);
 		WARN_ON(mdb->old);
 	}
 
 	mdb->old = mdb;
-	call_rcu_bh(&mdb->rcu, br_mdb_free);
+	call_rcu(&mdb->rcu, br_mdb_free);
 
 out:
 	spin_unlock_bh(&br->multicast_lock);
@@ -2154,7 +2157,8 @@ static void br_multicast_start_querier(struct net_bridge *br,
 
 	__br_multicast_open(br, query);
 
-	list_for_each_entry(port, &br->port_list, list) {
+	rcu_read_lock();
+	list_for_each_entry_rcu(port, &br->port_list, list) {
 		if (port->state == BR_STATE_DISABLED ||
 		    port->state == BR_STATE_BLOCKING)
 			continue;
@@ -2166,6 +2170,7 @@ static void br_multicast_start_querier(struct net_bridge *br,
 			br_multicast_enable(&port->ip6_own_query);
 #endif
 	}
+	rcu_read_unlock();
 }
 
 int br_multicast_toggle(struct net_bridge *br, unsigned long val)

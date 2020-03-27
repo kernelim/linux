@@ -33,6 +33,7 @@
 #include <linux/list.h>
 #include <linux/hash.h>
 #include <linux/rcupdate.h>
+#include <linux/kprobes.h>
 
 #include <trace/events/sched.h>
 
@@ -196,7 +197,7 @@ static void ftrace_sync(struct work_struct *work)
 {
 	/*
 	 * This function is just a stub to implement a hard force
-	 * of synchronize_sched(). This requires synchronizing
+	 * of synchronize_rcu(). This requires synchronizing
 	 * tasks even in userspace and idle.
 	 *
 	 * Yes, function tracing is rude.
@@ -962,7 +963,7 @@ ftrace_profile_write(struct file *filp, const char __user *ubuf,
 			ftrace_profile_enabled = 0;
 			/*
 			 * unregister_ftrace_profiler calls stop_machine
-			 * so this acts like an synchronize_sched.
+			 * so this acts like an synchronize_rcu.
 			 */
 			unregister_ftrace_profiler();
 		}
@@ -1116,7 +1117,7 @@ struct ftrace_ops *ftrace_ops_trampoline(unsigned long addr)
 
 	/*
 	 * Some of the ops may be dynamically allocated,
-	 * they are freed after a synchronize_sched().
+	 * they are freed after a synchronize_rcu().
 	 */
 	preempt_disable_notrace();
 
@@ -1316,7 +1317,7 @@ static void free_ftrace_hash_rcu(struct ftrace_hash *hash)
 {
 	if (!hash || hash == EMPTY_HASH)
 		return;
-	call_rcu_sched(&hash->rcu, __free_ftrace_hash_rcu);
+	call_rcu(&hash->rcu, __free_ftrace_hash_rcu);
 }
 
 void ftrace_free_filter(struct ftrace_ops *ops)
@@ -1531,7 +1532,7 @@ static bool hash_contains_ip(unsigned long ip,
  * the ip is not in the ops->notrace_hash.
  *
  * This needs to be called with preemption disabled as
- * the hashes are freed with call_rcu_sched().
+ * the hashes are freed with call_rcu().
  */
 static int
 ftrace_ops_test(struct ftrace_ops *ops, unsigned long ip, void *regs)
@@ -3138,6 +3139,14 @@ t_probe_next(struct seq_file *m, loff_t *pos)
 		hnd = &iter->probe_entry->hlist;
 
 	hash = iter->probe->ops.func_hash->filter_hash;
+
+	/*
+	 * A probe being registered may temporarily have an empty hash
+	 * and it's at the end of the func_probes list.
+	 */
+	if (!hash || hash == EMPTY_HASH)
+		return NULL;
+
 	size = 1 << hash->size_bits;
 
  retry:
@@ -4330,11 +4339,20 @@ register_ftrace_function_probe(char *glob, struct trace_array *tr,
 
 	mutex_unlock(&ftrace_lock);
 
+	/*
+	 * Note, there's a small window here that the func_hash->filter_hash
+	 * may be NULL or empty. Need to be carefule when reading the loop.
+	 */
 	mutex_lock(&probe->ops.func_hash->regex_lock);
 
 	orig_hash = &probe->ops.func_hash->filter_hash;
 	old_hash = *orig_hash;
 	hash = alloc_and_copy_ftrace_hash(FTRACE_HASH_DEFAULT_BITS, old_hash);
+
+	if (!hash) {
+		ret = -ENOMEM;
+		goto out;
+	}
 
 	ret = ftrace_match_records(hash, glob, strlen(glob));
 
@@ -4524,7 +4542,7 @@ unregister_ftrace_function_probe_func(char *glob, struct trace_array *tr,
 	if (ftrace_enabled && !ftrace_hash_empty(hash))
 		ftrace_run_modify_code(&probe->ops, FTRACE_UPDATE_CALLS,
 				       &old_hash_ops);
-	synchronize_sched();
+	synchronize_rcu();
 
 	hlist_for_each_entry_safe(entry, tmp, &hhd, hlist) {
 		hlist_del(&entry->hlist);
@@ -5342,7 +5360,7 @@ ftrace_graph_release(struct inode *inode, struct file *file)
 		mutex_unlock(&graph_lock);
 
 		/* Wait till all users are no longer using the old hash */
-		synchronize_sched();
+		synchronize_rcu();
 
 		free_ftrace_hash(old_hash);
 	}
@@ -5735,7 +5753,7 @@ void ftrace_release_mod(struct module *mod)
 	list_for_each_entry_safe(mod_map, n, &ftrace_mod_maps, list) {
 		if (mod_map->mod == mod) {
 			list_del_rcu(&mod_map->list);
-			call_rcu_sched(&mod_map->rcu, ftrace_free_mod_map);
+			call_rcu(&mod_map->rcu, ftrace_free_mod_map);
 			break;
 		}
 	}
@@ -5955,7 +5973,7 @@ ftrace_mod_address_lookup(unsigned long addr, unsigned long *size,
 	struct ftrace_mod_map *mod_map;
 	const char *ret = NULL;
 
-	/* mod_map is freed via call_rcu_sched() */
+	/* mod_map is freed via call_rcu() */
 	preempt_disable();
 	list_for_each_entry_rcu(mod_map, &ftrace_mod_maps, list) {
 		ret = ftrace_func_address_lookup(mod_map, addr, size, off, sym);
@@ -6277,7 +6295,7 @@ void ftrace_reset_array_ops(struct trace_array *tr)
 	tr->ops->func = ftrace_stub;
 }
 
-static inline void
+static nokprobe_inline void
 __ftrace_ops_list_func(unsigned long ip, unsigned long parent_ip,
 		       struct ftrace_ops *ignored, struct pt_regs *regs)
 {
@@ -6290,7 +6308,7 @@ __ftrace_ops_list_func(unsigned long ip, unsigned long parent_ip,
 
 	/*
 	 * Some of the ops may be dynamically allocated,
-	 * they must be freed after a synchronize_sched().
+	 * they must be freed after a synchronize_rcu().
 	 */
 	preempt_disable_notrace();
 
@@ -6337,11 +6355,13 @@ static void ftrace_ops_list_func(unsigned long ip, unsigned long parent_ip,
 {
 	__ftrace_ops_list_func(ip, parent_ip, NULL, regs);
 }
+NOKPROBE_SYMBOL(ftrace_ops_list_func);
 #else
 static void ftrace_ops_no_ops(unsigned long ip, unsigned long parent_ip)
 {
 	__ftrace_ops_list_func(ip, parent_ip, NULL, NULL);
 }
+NOKPROBE_SYMBOL(ftrace_ops_no_ops);
 #endif
 
 /*
@@ -6368,6 +6388,7 @@ static void ftrace_ops_assist_func(unsigned long ip, unsigned long parent_ip,
 	preempt_enable_notrace();
 	trace_clear_recursion(bit);
 }
+NOKPROBE_SYMBOL(ftrace_ops_assist_func);
 
 /**
  * ftrace_ops_get_func - get the function a trampoline should call
@@ -6461,7 +6482,7 @@ static void clear_ftrace_pids(struct trace_array *tr)
 	rcu_assign_pointer(tr->function_pids, NULL);
 
 	/* Wait till all users are no longer using pid filtering */
-	synchronize_sched();
+	synchronize_rcu();
 
 	trace_free_pid_list(pid_list);
 }
@@ -6608,7 +6629,7 @@ ftrace_pid_write(struct file *filp, const char __user *ubuf,
 	rcu_assign_pointer(tr->function_pids, pid_list);
 
 	if (filtered_pids) {
-		synchronize_sched();
+		synchronize_rcu();
 		trace_free_pid_list(filtered_pids);
 	} else if (pid_list) {
 		/* Register a probe to set whether to ignore the tracing of a task */

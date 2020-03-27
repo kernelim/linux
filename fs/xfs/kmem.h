@@ -59,6 +59,7 @@ kmem_flags_convert(xfs_km_flags_t flags)
 }
 
 extern void *kmem_alloc(size_t, xfs_km_flags_t);
+extern void *kmem_alloc_io(size_t size, int align_mask, xfs_km_flags_t flags);
 extern void *kmem_alloc_large(size_t size, xfs_km_flags_t);
 extern void *kmem_realloc(const void *, size_t, xfs_km_flags_t);
 static inline void  kmem_free(const void *ptr)
@@ -122,6 +123,14 @@ static inline void *
 kmem_zone_zalloc(kmem_zone_t *zone, xfs_km_flags_t flags)
 {
 	return kmem_zone_alloc(zone, flags | KM_ZERO);
+}
+
+static inline struct page *
+kmem_to_page(void *addr)
+{
+	if (is_vmalloc_addr(addr))
+		return vmalloc_to_page(addr);
+	return virt_to_page(addr);
 }
 
 #endif /* __XFS_SUPPORT_KMEM_H__ */

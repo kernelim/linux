@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: MIT */
 #ifndef __NOUVEAU_DRV_H__
 #define __NOUVEAU_DRV_H__
 
@@ -55,12 +55,12 @@
 #include <drm/ttm/ttm_module.h>
 #include <drm/ttm/ttm_page_alloc.h>
 
+#include <drm/drm_audio_component.h>
+
 #include "uapi/drm/nouveau_drm.h"
 
 struct nouveau_channel;
 struct platform_device;
-
-#define DRM_FILE_PAGE_OFFSET (0x100000000ULL >> PAGE_SHIFT)
 
 #include "nouveau_fence.h"
 #include "nouveau_bios.h"
@@ -214,6 +214,11 @@ struct nouveau_drm {
 	struct nouveau_svm *svm;
 
 	struct nouveau_dmem *dmem;
+
+	struct {
+		struct drm_audio_component *component;
+		bool component_registered;
+	} audio;
 };
 
 static inline struct nouveau_drm *

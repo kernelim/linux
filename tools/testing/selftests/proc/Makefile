@@ -12,5 +12,6 @@ TEST_GEN_PROGS += proc-self-wchan
 TEST_GEN_PROGS += proc-uptime-001
 TEST_GEN_PROGS += proc-uptime-002
 TEST_GEN_PROGS += read
+TEST_GEN_PROGS += setns-dcache
 
 include ../lib.mk

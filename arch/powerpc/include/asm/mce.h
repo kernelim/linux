@@ -125,7 +125,8 @@ struct machine_check_event {
 			enum MCE_UeErrorType ue_error_type:8;
 			uint8_t		effective_address_provided;
 			uint8_t		physical_address_provided;
-			uint8_t		reserved_1[5];
+			uint8_t		ignore_event;
+			uint8_t		reserved_1[4];
 			uint64_t	effective_address;
 			uint64_t	physical_address;
 			uint8_t		reserved_2[8];
@@ -194,6 +195,7 @@ struct mce_error_info {
 	} u;
 	enum MCE_Severity	severity:8;
 	enum MCE_Initiator	initiator:8;
+	bool			ignore_event;
 };
 
 #define MAX_MC_EVT	100
@@ -210,6 +212,7 @@ extern void release_mce_event(void);
 extern void machine_check_queue_event(void);
 extern void machine_check_print_event_info(struct machine_check_event *evt,
 					   bool user_mode, bool in_guest);
+unsigned long addr_to_pfn(struct pt_regs *regs, unsigned long addr);
 #ifdef CONFIG_PPC_BOOK3S_64
 void flush_and_reload_slb(void);
 #endif /* CONFIG_PPC_BOOK3S_64 */

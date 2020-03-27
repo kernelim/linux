@@ -32,7 +32,7 @@
 #include <asm/mmu.h>
 #include <asm/machdep.h>
 
-#include "mmu_decl.h"
+#include <mm/mmu_decl.h>
 
 struct hash_pte *Hash, *Hash_end;
 unsigned long Hash_size, Hash_mask;

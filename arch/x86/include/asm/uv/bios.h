@@ -153,7 +153,7 @@ extern s64 uv_bios_reserved_page_pa(u64, u64 *, u64 *, u64 *);
 extern int uv_bios_set_legacy_vga_target(bool decode, int domain, int bus);
 
 #ifdef CONFIG_EFI
-extern void uv_bios_init(void);
+extern int uv_bios_init(void);
 #else
 void uv_bios_init(void) { }
 #endif

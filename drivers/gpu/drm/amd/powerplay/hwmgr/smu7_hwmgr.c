@@ -24,6 +24,7 @@
 #include <linux/delay.h>
 #include <linux/fb.h>
 #include <linux/module.h>
+#include <linux/pci.h>
 #include <linux/slab.h>
 #include <asm/div64.h>
 #include <drm/amdgpu_drm.h>
@@ -77,7 +78,7 @@
 #define PCIE_BUS_CLK                10000
 #define TCLK                        (PCIE_BUS_CLK / 10)
 
-static const struct profile_mode_setting smu7_profiling[7] =
+static struct profile_mode_setting smu7_profiling[7] =
 					{{0, 0, 0, 0, 0, 0, 0, 0},
 					 {1, 0, 100, 30, 1, 0, 100, 10},
 					 {1, 10, 0, 30, 0, 0, 0, 0},
@@ -3476,25 +3477,38 @@ static int smu7_get_pp_table_entry(struct pp_hwmgr *hwmgr,
 
 static int smu7_get_gpu_power(struct pp_hwmgr *hwmgr, u32 *query)
 {
+	struct amdgpu_device *adev = hwmgr->adev;
 	int i;
 	u32 tmp = 0;
 
 	if (!query)
 		return -EINVAL;
 
-	smum_send_msg_to_smc_with_parameter(hwmgr, PPSMC_MSG_GetCurrPkgPwr, 0);
-	tmp = cgs_read_register(hwmgr->device, mmSMC_MSG_ARG_0);
-	*query = tmp;
+	/*
+	 * PPSMC_MSG_GetCurrPkgPwr is not supported on:
+	 *  - Hawaii
+	 *  - Bonaire
+	 *  - Fiji
+	 *  - Tonga
+	 */
+	if ((adev->asic_type != CHIP_HAWAII) &&
+	    (adev->asic_type != CHIP_BONAIRE) &&
+	    (adev->asic_type != CHIP_FIJI) &&
+	    (adev->asic_type != CHIP_TONGA)) {
+		smum_send_msg_to_smc_with_parameter(hwmgr, PPSMC_MSG_GetCurrPkgPwr, 0);
+		tmp = cgs_read_register(hwmgr->device, mmSMC_MSG_ARG_0);
+		*query = tmp;
 
-	if (tmp != 0)
-		return 0;
+		if (tmp != 0)
+			return 0;
+	}
 
 	smum_send_msg_to_smc(hwmgr, PPSMC_MSG_PmStatusLogStart);
 	cgs_write_ind_register(hwmgr->device, CGS_IND_REG__SMC,
 							ixSMU_PM_STATUS_95, 0);
 
 	for (i = 0; i < 10; i++) {
-		mdelay(500);
+		msleep(500);
 		smum_send_msg_to_smc(hwmgr, PPSMC_MSG_PmStatusLogSample);
 		tmp = cgs_read_ind_register(hwmgr->device,
 						CGS_IND_REG__SMC,
@@ -3532,9 +3546,12 @@ static int smu7_read_sensor(struct pp_hwmgr *hwmgr, int idx,
 		*size = 4;
 		return 0;
 	case AMDGPU_PP_SENSOR_GPU_LOAD:
+	case AMDGPU_PP_SENSOR_MEM_LOAD:
 		offset = data->soft_regs_start + smum_get_offsetof(hwmgr,
 								SMU_SoftRegisters,
-								AverageGraphicsActivity);
+								(idx == AMDGPU_PP_SENSOR_GPU_LOAD) ?
+								AverageGraphicsActivity:
+								AverageMemoryActivity);
 
 		activity_percent = cgs_read_ind_register(hwmgr->device, CGS_IND_REG__SMC, offset);
 		activity_percent += 0x80;
@@ -4063,6 +4080,11 @@ static int smu7_program_display_gap(struct pp_hwmgr *hwmgr)
 	pre_vbi_time_in_us = frame_time_in_us - 200 - hwmgr->display_config->min_vblank_time;
 
 	data->frame_time_x2 = frame_time_in_us * 2 / 100;
+
+	if (data->frame_time_x2 < 280) {
+		pr_debug("%s: enforce minimal VBITimeout: %d -> 280\n", __func__, data->frame_time_x2);
+		data->frame_time_x2 = 280;
+	}
 
 	display_gap2 = pre_vbi_time_in_us * (ref_clock / 100);
 
@@ -4984,17 +5006,27 @@ static int smu7_set_power_profile_mode(struct pp_hwmgr *hwmgr, long *input, uint
 	mode = input[size];
 	switch (mode) {
 	case PP_SMC_POWER_PROFILE_CUSTOM:
-		if (size < 8)
+		if (size < 8 && size != 0)
 			return -EINVAL;
-
-		tmp.bupdate_sclk = input[0];
-		tmp.sclk_up_hyst = input[1];
-		tmp.sclk_down_hyst = input[2];
-		tmp.sclk_activity = input[3];
-		tmp.bupdate_mclk = input[4];
-		tmp.mclk_up_hyst = input[5];
-		tmp.mclk_down_hyst = input[6];
-		tmp.mclk_activity = input[7];
+		/* If only CUSTOM is passed in, use the saved values. Check
+		 * that we actually have a CUSTOM profile by ensuring that
+		 * the "use sclk" or the "use mclk" bits are set
+		 */
+		tmp = smu7_profiling[PP_SMC_POWER_PROFILE_CUSTOM];
+		if (size == 0) {
+			if (tmp.bupdate_sclk == 0 && tmp.bupdate_mclk == 0)
+				return -EINVAL;
+		} else {
+			tmp.bupdate_sclk = input[0];
+			tmp.sclk_up_hyst = input[1];
+			tmp.sclk_down_hyst = input[2];
+			tmp.sclk_activity = input[3];
+			tmp.bupdate_mclk = input[4];
+			tmp.mclk_up_hyst = input[5];
+			tmp.mclk_down_hyst = input[6];
+			tmp.mclk_activity = input[7];
+			smu7_profiling[PP_SMC_POWER_PROFILE_CUSTOM] = tmp;
+		}
 		if (!smum_update_dpm_settings(hwmgr, &tmp)) {
 			memcpy(&data->current_profile_setting, &tmp, sizeof(struct profile_mode_setting));
 			hwmgr->power_profile_mode = mode;

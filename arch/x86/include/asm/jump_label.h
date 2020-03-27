@@ -15,6 +15,8 @@
 #error asm/jump_label.h included on a non-jump-label kernel
 #endif
 
+#define HAVE_JUMP_LABEL_BATCH
+
 #define JUMP_LABEL_NOP_SIZE 5
 
 #ifdef CONFIG_X86_64

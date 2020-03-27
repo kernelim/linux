@@ -236,7 +236,7 @@ static void kvmppc_fast_vcpu_kick_hv(struct kvm_vcpu *vcpu)
 
 	wqp = kvm_arch_vcpu_wq(vcpu);
 	if (swq_has_sleeper(wqp)) {
-		swake_up(wqp);
+		swake_up_one(wqp);
 		++vcpu->stat.halt_wakeup;
 	}
 
@@ -745,7 +745,7 @@ static bool kvmppc_doorbell_pending(struct kvm_vcpu *vcpu)
 	/*
 	 * Ensure that the read of vcore->dpdes comes after the read
 	 * of vcpu->doorbell_request.  This barrier matches the
-	 * smb_wmb() in kvmppc_guest_entry_inject().
+	 * smp_wmb() in kvmppc_guest_entry_inject().
 	 */
 	smp_rmb();
 	vc = vcpu->arch.vcore;
@@ -795,6 +795,80 @@ static int kvmppc_h_set_mode(struct kvm_vcpu *vcpu, unsigned long mflags,
 	default:
 		return H_TOO_HARD;
 	}
+}
+
+/* Copy guest memory in place - must reside within a single memslot */
+static int kvmppc_copy_guest(struct kvm *kvm, gpa_t to, gpa_t from,
+				  unsigned long len)
+{
+	struct kvm_memory_slot *to_memslot = NULL;
+	struct kvm_memory_slot *from_memslot = NULL;
+	unsigned long to_addr, from_addr;
+	int r;
+
+	/* Get HPA for from address */
+	from_memslot = gfn_to_memslot(kvm, from >> PAGE_SHIFT);
+	if (!from_memslot)
+		return -EFAULT;
+	if ((from + len) >= ((from_memslot->base_gfn + from_memslot->npages)
+			     << PAGE_SHIFT))
+		return -EINVAL;
+	from_addr = gfn_to_hva_memslot(from_memslot, from >> PAGE_SHIFT);
+	if (kvm_is_error_hva(from_addr))
+		return -EFAULT;
+	from_addr |= (from & (PAGE_SIZE - 1));
+
+	/* Get HPA for to address */
+	to_memslot = gfn_to_memslot(kvm, to >> PAGE_SHIFT);
+	if (!to_memslot)
+		return -EFAULT;
+	if ((to + len) >= ((to_memslot->base_gfn + to_memslot->npages)
+			   << PAGE_SHIFT))
+		return -EINVAL;
+	to_addr = gfn_to_hva_memslot(to_memslot, to >> PAGE_SHIFT);
+	if (kvm_is_error_hva(to_addr))
+		return -EFAULT;
+	to_addr |= (to & (PAGE_SIZE - 1));
+
+	/* Perform copy */
+	r = raw_copy_in_user((void __user *)to_addr, (void __user *)from_addr,
+			     len);
+	if (r)
+		return -EFAULT;
+	mark_page_dirty(kvm, to >> PAGE_SHIFT);
+	return 0;
+}
+
+static long kvmppc_h_page_init(struct kvm_vcpu *vcpu, unsigned long flags,
+			       unsigned long dest, unsigned long src)
+{
+	u64 pg_sz = SZ_4K;		/* 4K page size */
+	u64 pg_mask = SZ_4K - 1;
+	int ret;
+
+	/* Check for invalid flags (H_PAGE_SET_LOANED covers all CMO flags) */
+	if (flags & ~(H_ICACHE_INVALIDATE | H_ICACHE_SYNCHRONIZE |
+		      H_ZERO_PAGE | H_COPY_PAGE | H_PAGE_SET_LOANED))
+		return H_PARAMETER;
+
+	/* dest (and src if copy_page flag set) must be page aligned */
+	if ((dest & pg_mask) || ((flags & H_COPY_PAGE) && (src & pg_mask)))
+		return H_PARAMETER;
+
+	/* zero and/or copy the page as determined by the flags */
+	if (flags & H_COPY_PAGE) {
+		ret = kvmppc_copy_guest(vcpu->kvm, dest, src, pg_sz);
+		if (ret < 0)
+			return H_PARAMETER;
+	} else if (flags & H_ZERO_PAGE) {
+		ret = kvm_clear_guest(vcpu->kvm, dest, pg_sz);
+		if (ret < 0)
+			return H_PARAMETER;
+	}
+
+	/* We can ignore the remaining flags */
+
+	return H_SUCCESS;
 }
 
 static int kvm_arch_vcpu_yield_to(struct kvm_vcpu *target)
@@ -999,6 +1073,11 @@ int kvmppc_pseries_do_hcall(struct kvm_vcpu *vcpu)
 		if (nesting_enabled(vcpu->kvm))
 			ret = kvmhv_copy_tofrom_guest_nested(vcpu);
 		break;
+	case H_PAGE_INIT:
+		ret = kvmppc_h_page_init(vcpu, kvmppc_get_gpr(vcpu, 4),
+					 kvmppc_get_gpr(vcpu, 5),
+					 kvmppc_get_gpr(vcpu, 6));
+		break;
 	default:
 		return RESUME_HOST;
 	}
@@ -1043,6 +1122,7 @@ static int kvmppc_hcall_impl_hv(unsigned long cmd)
 	case H_IPOLL:
 	case H_XIRR_X:
 #endif
+	case H_PAGE_INIT:
 		return 1;
 	}
 
@@ -2504,37 +2584,6 @@ static void kvmppc_prepare_radix_vcpu(struct kvm_vcpu *vcpu, int pcpu)
 	}
 }
 
-static void kvmppc_radix_check_need_tlb_flush(struct kvm *kvm, int pcpu,
-					      struct kvm_nested_guest *nested)
-{
-	cpumask_t *need_tlb_flush;
-	int lpid;
-
-	if (!cpu_has_feature(CPU_FTR_HVMODE))
-		return;
-
-	if (cpu_has_feature(CPU_FTR_ARCH_300))
-		pcpu &= ~0x3UL;
-
-	if (nested) {
-		lpid = nested->shadow_lpid;
-		need_tlb_flush = &nested->need_tlb_flush;
-	} else {
-		lpid = kvm->arch.lpid;
-		need_tlb_flush = &kvm->arch.need_tlb_flush;
-	}
-
-	mtspr(SPRN_LPID, lpid);
-	isync();
-	smp_mb();
-
-	if (cpumask_test_cpu(pcpu, need_tlb_flush)) {
-		radix__local_flush_tlb_lpid_guest(lpid);
-		/* Clear the bit after the TLB flush */
-		cpumask_clear_cpu(pcpu, need_tlb_flush);
-	}
-}
-
 static void kvmppc_start_thread(struct kvm_vcpu *vcpu, struct kvmppc_vcore *vc)
 {
 	int cpu;
@@ -3228,19 +3277,11 @@ static noinline void kvmppc_run_core(struct kvmppc_vcore *vc)
 	for (sub = 0; sub < core_info.n_subcores; ++sub)
 		spin_unlock(&core_info.vc[sub]->lock);
 
-	if (kvm_is_radix(vc->kvm)) {
-		/*
-		 * Do we need to flush the process scoped TLB for the LPAR?
-		 *
-		 * On POWER9, individual threads can come in here, but the
-		 * TLB is shared between the 4 threads in a core, hence
-		 * invalidating on one thread invalidates for all.
-		 * Thus we make all 4 threads use the same bit here.
-		 *
-		 * Hash must be flushed in realmode in order to use tlbiel.
-		 */
-		kvmppc_radix_check_need_tlb_flush(vc->kvm, pcpu, NULL);
-	}
+	guest_enter_irqoff();
+
+	srcu_idx = srcu_read_lock(&vc->kvm->srcu);
+
+	this_cpu_disable_ftrace();
 
 	/*
 	 * Interrupts will be enabled once we get into the guest,
@@ -3248,19 +3289,14 @@ static noinline void kvmppc_run_core(struct kvmppc_vcore *vc)
 	 */
 	trace_hardirqs_on();
 
-	guest_enter_irqoff();
-
-	srcu_idx = srcu_read_lock(&vc->kvm->srcu);
-
-	this_cpu_disable_ftrace();
-
 	trap = __kvmppc_vcore_entry();
+
+	trace_hardirqs_off();
 
 	this_cpu_enable_ftrace();
 
 	srcu_read_unlock(&vc->kvm->srcu, srcu_idx);
 
-	trace_hardirqs_off();
 	set_irq_happened(trap);
 
 	spin_lock(&vc->lock);
@@ -3764,7 +3800,7 @@ static void kvmppc_vcore_blocked(struct kvmppc_vcore *vc)
 		}
 	}
 
-	prepare_to_swait(&vc->wq, &wait, TASK_INTERRUPTIBLE);
+	prepare_to_swait_exclusive(&vc->wq, &wait, TASK_INTERRUPTIBLE);
 
 	if (kvmppc_vcore_check_block(vc)) {
 		finish_swait(&vc->wq, &wait);
@@ -3892,7 +3928,7 @@ static int kvmppc_run_vcpu(struct kvm_run *kvm_run, struct kvm_vcpu *vcpu)
 			kvmppc_start_thread(vcpu, vc);
 			trace_kvm_guest_enter(vcpu);
 		} else if (vc->vcore_state == VCORE_SLEEPING) {
-			swake_up(&vc->wq);
+			swake_up_one(&vc->wq);
 		}
 
 	}
@@ -3987,7 +4023,7 @@ int kvmhv_run_single_vcpu(struct kvm_run *kvm_run,
 			  unsigned long lpcr)
 {
 	int trap, r, pcpu;
-	int srcu_idx;
+	int srcu_idx, lpid;
 	struct kvmppc_vcore *vc;
 	struct kvm *kvm = vcpu->kvm;
 	struct kvm_nested_guest *nested = vcpu->arch.nested;
@@ -4063,8 +4099,12 @@ int kvmhv_run_single_vcpu(struct kvm_run *kvm_run,
 	vc->vcore_state = VCORE_RUNNING;
 	trace_kvmppc_run_core(vc, 0);
 
-	if (cpu_has_feature(CPU_FTR_HVMODE))
-		kvmppc_radix_check_need_tlb_flush(kvm, pcpu, nested);
+	if (cpu_has_feature(CPU_FTR_HVMODE)) {
+		lpid = nested ? nested->shadow_lpid : kvm->arch.lpid;
+		mtspr(SPRN_LPID, lpid);
+		isync();
+		kvmppc_check_need_tlb_flush(kvm, pcpu, nested);
+	}
 
 	guest_enter_irqoff();
 

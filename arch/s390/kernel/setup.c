@@ -103,6 +103,15 @@ unsigned long __bootdata(memory_end);
 unsigned long __bootdata(max_physmem_end);
 struct mem_detect_info __bootdata(mem_detect);
 
+struct exception_table_entry *__bootdata_preserved(__start_dma_ex_table);
+struct exception_table_entry *__bootdata_preserved(__stop_dma_ex_table);
+unsigned long __bootdata_preserved(__swsusp_reset_dma);
+unsigned long __bootdata_preserved(__stext_dma);
+unsigned long __bootdata_preserved(__etext_dma);
+unsigned long __bootdata_preserved(__sdma);
+unsigned long __bootdata_preserved(__edma);
+unsigned long __bootdata_preserved(__kaslr_offset);
+
 unsigned long VMALLOC_START;
 EXPORT_SYMBOL(VMALLOC_START);
 
@@ -748,18 +757,10 @@ static void __init reserve_kernel(void)
 {
 	unsigned long start_pfn = PFN_UP(__pa(_end));
 
-#ifdef CONFIG_DMA_API_DEBUG
-	/*
-	 * DMA_API_DEBUG code stumbles over addresses from the
-	 * range [PARMAREA_END, _stext]. Mark the memory as reserved
-	 * so it is not used for CONFIG_DMA_API_DEBUG=y.
-	 */
-	memblock_reserve(0, PFN_PHYS(start_pfn));
-#else
-	memblock_reserve(0, PARMAREA_END);
+	memblock_reserve(0, HEAD_END);
 	memblock_reserve((unsigned long)_stext, PFN_PHYS(start_pfn)
 			 - (unsigned long)_stext);
-#endif
+	memblock_reserve(__sdma, __edma - __sdma);
 }
 
 static void __init setup_memory(void)
@@ -909,6 +910,10 @@ static int __init setup_hwcaps(void)
 	case 0x3907:
 		strcpy(elf_platform, "z14");
 		break;
+	case 0x8561:
+	case 0x8562:
+		strcpy(elf_platform, "z15");
+		break;
 	}
 
 	/*
@@ -1028,8 +1033,7 @@ void __init setup_arch(char **cmdline_p)
 
         ROOT_DEV = Root_RAM0;
 
-	/* Is init_mm really needed? */
-	init_mm.start_code = PAGE_OFFSET;
+	init_mm.start_code = (unsigned long) _text;
 	init_mm.end_code = (unsigned long) _etext;
 	init_mm.end_data = (unsigned long) _edata;
 	init_mm.brk = (unsigned long) _end;

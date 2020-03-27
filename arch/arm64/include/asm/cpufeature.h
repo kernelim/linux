@@ -262,7 +262,7 @@ extern struct arm64_ftr_reg arm64_ftr_reg_ctrel0;
 /*
  * CPU feature detected at boot time based on system-wide value of a
  * feature. It is safe for a late CPU to have this feature even though
- * the system hasn't enabled it, although the featuer will not be used
+ * the system hasn't enabled it, although the feature will not be used
  * by Linux in this case. If the system has enabled this feature already,
  * then every late CPU must have it.
  */
@@ -321,19 +321,20 @@ struct arm64_cpu_capabilities {
 			bool sign;
 			unsigned long hwcap;
 		};
-		/*
-		 * A list of "matches/cpu_enable" pair for the same
-		 * "capability" of the same "type" as described by the parent.
-		 * Only matches(), cpu_enable() and fields relevant to these
-		 * methods are significant in the list. The cpu_enable is
-		 * invoked only if the corresponding entry "matches()".
-		 * However, if a cpu_enable() method is associated
-		 * with multiple matches(), care should be taken that either
-		 * the match criteria are mutually exclusive, or that the
-		 * method is robust against being called multiple times.
-		 */
-		const struct arm64_cpu_capabilities *match_list;
 	};
+
+	/*
+	 * An optional list of "matches/cpu_enable" pair for the same
+	 * "capability" of the same "type" as described by the parent.
+	 * Only matches(), cpu_enable() and fields relevant to these
+	 * methods are significant in the list. The cpu_enable is
+	 * invoked only if the corresponding entry "matches()".
+	 * However, if a cpu_enable() method is associated
+	 * with multiple matches(), care should be taken that either
+	 * the match criteria are mutually exclusive, or that the
+	 * method is robust against being called multiple times.
+	 */
+	const struct arm64_cpu_capabilities *match_list;
 };
 
 static inline int cpucap_default_scope(const struct arm64_cpu_capabilities *cap)
@@ -351,6 +352,39 @@ static inline bool
 cpucap_late_cpu_permitted(const struct arm64_cpu_capabilities *cap)
 {
 	return !!(cap->type & ARM64_CPUCAP_PERMITTED_FOR_LATE_CPU);
+}
+
+/*
+ * Generic helper for handling capabilties with multiple (match,enable) pairs
+ * of call backs, sharing the same capability bit.
+ * Iterate over each entry to see if at least one matches.
+ */
+static inline bool
+cpucap_multi_entry_cap_matches(const struct arm64_cpu_capabilities *entry,
+			       int scope)
+{
+	const struct arm64_cpu_capabilities *caps;
+
+	for (caps = entry->match_list; caps->matches; caps++)
+		if (caps->matches(caps, scope))
+			return true;
+
+	return false;
+}
+
+/*
+ * Take appropriate action for all matching entries in the shared capability
+ * entry.
+ */
+static inline void
+cpucap_multi_entry_cap_cpu_enable(const struct arm64_cpu_capabilities *entry)
+{
+	const struct arm64_cpu_capabilities *caps;
+
+	for (caps = entry->match_list; caps->matches; caps++)
+		if (caps->matches(caps, SCOPE_LOCAL_CPU) &&
+		    caps->cpu_enable)
+			caps->cpu_enable(caps);
 }
 
 extern DECLARE_BITMAP(cpu_hwcaps, ARM64_NCAPS);
@@ -473,7 +507,6 @@ static inline bool id_aa64pfr0_sve(u64 pfr0)
 void __init setup_cpu_features(void);
 void check_local_cpu_capabilities(void);
 
-
 u64 read_sanitised_ftr_reg(u32 id);
 
 static inline bool cpu_supports_mixed_endian_el0(void)
@@ -560,6 +593,26 @@ static inline bool system_supports_cnp(void)
 {
 	return IS_ENABLED(CONFIG_ARM64_CNP) &&
 		cpus_have_const_cap(ARM64_HAS_CNP);
+}
+
+#define ARM64_BP_HARDEN_UNKNOWN		-1
+#define ARM64_BP_HARDEN_WA_NEEDED	0
+#define ARM64_BP_HARDEN_NOT_REQUIRED	1
+
+int get_spectre_v2_workaround_state(void);
+
+static inline bool system_supports_address_auth(void)
+{
+	return IS_ENABLED(CONFIG_ARM64_PTR_AUTH) &&
+		(cpus_have_const_cap(ARM64_HAS_ADDRESS_AUTH_ARCH) ||
+		 cpus_have_const_cap(ARM64_HAS_ADDRESS_AUTH_IMP_DEF));
+}
+
+static inline bool system_supports_generic_auth(void)
+{
+	return IS_ENABLED(CONFIG_ARM64_PTR_AUTH) &&
+		(cpus_have_const_cap(ARM64_HAS_GENERIC_AUTH_ARCH) ||
+		 cpus_have_const_cap(ARM64_HAS_GENERIC_AUTH_IMP_DEF));
 }
 
 #define ARM64_SSBD_UNKNOWN		-1

@@ -48,6 +48,7 @@
 #include <linux/cpumask.h>
 #include <linux/module.h>
 #include <linux/interrupt.h>
+#include <linux/numa.h>
 
 #include "hfi.h"
 #include "affinity.h"
@@ -478,6 +479,8 @@ static int _dev_comp_vect_mappings_create(struct hfi1_devdata *dd,
 			  rvt_get_ibdev_name(&(dd)->verbs_dev.rdi), i, cpu);
 	}
 
+	free_cpumask_var(available_cpus);
+	free_cpumask_var(non_intr_cpus);
 	return 0;
 
 fail:
@@ -777,7 +780,7 @@ void hfi1_dev_affinity_clean_up(struct hfi1_devdata *dd)
 	_dev_comp_vect_cpu_mask_clean_up(dd, entry);
 unlock:
 	mutex_unlock(&node_affinity.lock);
-	dd->node = -1;
+	dd->node = NUMA_NO_NODE;
 }
 
 /*

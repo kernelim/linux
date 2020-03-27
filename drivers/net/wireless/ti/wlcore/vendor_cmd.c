@@ -40,8 +40,8 @@ wlcore_vendor_cmd_smart_config_start(struct wiphy *wiphy,
 	if (!data)
 		return -EINVAL;
 
-	ret = nla_parse(tb, MAX_WLCORE_VENDOR_ATTR, data, data_len,
-			wlcore_vendor_attr_policy, NULL);
+	ret = nla_parse_deprecated(tb, MAX_WLCORE_VENDOR_ATTR, data, data_len,
+				   wlcore_vendor_attr_policy, NULL);
 	if (ret)
 		return ret;
 
@@ -115,8 +115,8 @@ wlcore_vendor_cmd_smart_config_set_group_key(struct wiphy *wiphy,
 	if (!data)
 		return -EINVAL;
 
-	ret = nla_parse(tb, MAX_WLCORE_VENDOR_ATTR, data, data_len,
-			wlcore_vendor_attr_policy, NULL);
+	ret = nla_parse_deprecated(tb, MAX_WLCORE_VENDOR_ATTR, data, data_len,
+				   wlcore_vendor_attr_policy, NULL);
 	if (ret)
 		return ret;
 

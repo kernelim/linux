@@ -5,6 +5,8 @@
 #ifndef _ASM_X86_FPU_H
 #define _ASM_X86_FPU_H
 
+#include <linux/rh_kabi.h>
+
 /*
  * The legacy x87 FPU state format, as saved by FSAVE and
  * restored by the FRSTOR instructions:
@@ -293,14 +295,7 @@ struct fpu {
 	 */
 	unsigned int			last_cpu;
 
-	/*
-	 * @initialized:
-	 *
-	 * This flag indicates whether this context is initialized: if the task
-	 * is not running then we can restore from this context, if the task
-	 * is running then we should save into this context.
-	 */
-	unsigned char			initialized;
+	RH_KABI_DEPRECATE(unsigned char, initialized)
 
 	/*
 	 * @state:

@@ -111,7 +111,7 @@ struct bnxt_qplib_pd_tbl {
 };
 
 struct bnxt_qplib_sgid_tbl {
-	struct bnxt_qplib_gid		*tbl;
+	struct bnxt_qplib_gid_info	*tbl;
 	u16				*hw_id;
 	u16				max;
 	u16				active;
@@ -186,7 +186,9 @@ struct bnxt_qplib_chip_ctx {
 	u8	chip_metal;
 };
 
-#define CHIP_NUM_57500          0x1750
+#define CHIP_NUM_57508		0x1750
+#define CHIP_NUM_57504		0x1751
+#define CHIP_NUM_57502		0x1752
 
 struct bnxt_qplib_res {
 	struct pci_dev			*pdev;
@@ -203,7 +205,9 @@ struct bnxt_qplib_res {
 
 static inline bool bnxt_qplib_is_chip_gen_p5(struct bnxt_qplib_chip_ctx *cctx)
 {
-	return (cctx->chip_num == CHIP_NUM_57500);
+	return (cctx->chip_num == CHIP_NUM_57508 ||
+		cctx->chip_num == CHIP_NUM_57504 ||
+		cctx->chip_num == CHIP_NUM_57502);
 }
 
 static inline u8 bnxt_qplib_get_hwq_type(struct bnxt_qplib_res *res)
@@ -219,6 +223,12 @@ static inline u8 bnxt_qplib_get_ring_type(struct bnxt_qplib_chip_ctx *cctx)
 	       RING_ALLOC_REQ_RING_TYPE_ROCE_CMPL;
 }
 
+struct bnxt_qplib_sg_info {
+	struct scatterlist		*sglist;
+	u32				nmap;
+	u32				npages;
+};
+
 #define to_bnxt_qplib(ptr, type, member)	\
 	container_of(ptr, type, member)
 
@@ -227,7 +237,7 @@ struct bnxt_qplib_dev_attr;
 
 void bnxt_qplib_free_hwq(struct pci_dev *pdev, struct bnxt_qplib_hwq *hwq);
 int bnxt_qplib_alloc_init_hwq(struct pci_dev *pdev, struct bnxt_qplib_hwq *hwq,
-			      struct scatterlist *sl, int nmap, u32 *elements,
+			      struct bnxt_qplib_sg_info *sg_info, u32 *elements,
 			      u32 elements_per_page, u32 aux, u32 pg_size,
 			      enum bnxt_qplib_hwq_type hwq_type);
 void bnxt_qplib_get_guid(u8 *dev_addr, u8 *guid);

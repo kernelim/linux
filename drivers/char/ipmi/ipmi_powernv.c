@@ -261,7 +261,7 @@ static int ipmi_powernv_probe(struct platform_device *pdev)
 		goto err_unregister;
 	}
 
-	rc = ipmi_register_smi(&ipmi_powernv_smi_handlers, ipmi, dev, 0);
+	rc = ipmi_register_smi_mod(&ipmi_powernv_smi_handlers, ipmi, dev, 0);
 	if (rc) {
 		dev_warn(dev, "IPMI SMI registration failed (%d)\n", rc);
 		goto err_free_msg;

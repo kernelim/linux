@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * AMD Cryptographic Coprocessor (CCP) driver
  *
  * Copyright (C) 2016,2017 Advanced Micro Devices, Inc.
  *
  * Author: Gary R Hook <gary.hook@amd.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -795,6 +792,18 @@ static int ccp5_init(struct ccp_device *ccp)
 
 	/* Find available queues */
 	qmr = ioread32(ccp->io_regs + Q_MASK_REG);
+	/*
+	 * Check for a access to the registers.  If this read returns
+	 * 0xffffffff, it's likely that the system is running a broken
+	 * BIOS which disallows access to the device. Stop here and fail
+	 * the initialization (but not the load, as the PSP could get
+	 * properly initialized).
+	 */
+	if (qmr == 0xffffffff) {
+		dev_notice(dev, "ccp: unable to access the device: you might be running a broken BIOS.\n");
+		return 1;
+	}
+
 	for (i = 0; i < MAX_HW_QUEUES; i++) {
 
 		if (!(qmr & (1 << i)))
@@ -822,9 +831,9 @@ static int ccp5_init(struct ccp_device *ccp)
 		/* Page alignment satisfies our needs for N <= 128 */
 		BUILD_BUG_ON(COMMANDS_PER_QUEUE > 128);
 		cmd_q->qsize = Q_SIZE(Q_DESC_SIZE);
-		cmd_q->qbase = dma_zalloc_coherent(dev, cmd_q->qsize,
-						   &cmd_q->qbase_dma,
-						   GFP_KERNEL);
+		cmd_q->qbase = dma_alloc_coherent(dev, cmd_q->qsize,
+						  &cmd_q->qbase_dma,
+						  GFP_KERNEL);
 		if (!cmd_q->qbase) {
 			dev_err(dev, "unable to allocate command queue\n");
 			ret = -ENOMEM;
@@ -860,7 +869,7 @@ static int ccp5_init(struct ccp_device *ccp)
 
 	if (ccp->cmd_q_count == 0) {
 		dev_notice(dev, "no command queues available\n");
-		ret = -EIO;
+		ret = 1;
 		goto e_pool;
 	}
 

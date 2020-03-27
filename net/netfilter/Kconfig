@@ -611,6 +611,13 @@ config NFT_FIB_INET
 	  The lookup will be delegated to the IPv4 or IPv6 FIB depending
 	  on the protocol of the packet.
 
+config NFT_XFRM
+	tristate "Netfilter nf_tables xfrm/IPSec security association matching"
+	depends on XFRM
+	help
+	  This option adds an expression that you can use to extract properties
+	  of a packets security association.
+
 config NFT_SOCKET
 	tristate "Netfilter nf_tables socket match support"
 	depends on IPV6 || IPV6=n
@@ -619,6 +626,16 @@ config NFT_SOCKET
 	help
 	  This option allows matching for the presence or absence of a
 	  corresponding socket and its attributes.
+
+config NFT_TPROXY
+	tristate "Netfilter nf_tables tproxy support"
+	depends on IPV6 || IPV6=n
+	select NF_DEFRAG_IPV4
+	select NF_DEFRAG_IPV6 if NF_TABLES_IPV6
+	select NF_TPROXY_IPV4
+	select NF_TPROXY_IPV6 if NF_TABLES_IPV6
+	help
+	  This makes transparent proxy support available in nftables.
 
 if NF_TABLES_NETDEV
 
@@ -657,7 +674,7 @@ config NF_FLOW_TABLE_INET
 	tristate "Netfilter flow table mixed IPv4/IPv6 module"
 	depends on NF_FLOW_TABLE
 	help
-          This option adds the flow table mixed IPv4/IPv6 support.
+	  This option adds the flow table mixed IPv4/IPv6 support.
 
 	  To compile it as a module, choose M here.
 

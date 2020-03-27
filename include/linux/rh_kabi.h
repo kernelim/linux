@@ -2,7 +2,7 @@
  * rh_kabi.h - Red Hat kABI abstraction header
  *
  * Copyright (c) 2014 Don Zickus
- * Copyright (c) 2015-2018 Jiri Benc
+ * Copyright (c) 2015-2020 Jiri Benc
  * Copyright (c) 2015 Sabrina Dubroca, Hannes Frederic Sowa
  * Copyright (c) 2016-2018 Prarit Bhargava
  * Copyright (c) 2017 Paolo Abeni, Larry Woodman
@@ -30,6 +30,14 @@
 #include <linux/stringify.h>
 
 /*
+ * NOTE
+ *   Unless indicated otherwise, don't use ';' after these macros as it
+ *   messes up the kABI checker by changing what the resulting token string
+ *   looks like.  Instead let the macros add the ';' so it can be properly
+ *   hidden from the kABI checker (mainly for RH_KABI_EXTEND, but applied to
+ *   most macros for uniformity).
+ *
+ *
  * RH_KABI_CONST
  *   Adds a new const modifier to a function parameter preserving the old
  *   checksum.
@@ -45,16 +53,29 @@
  * RH_KABI_EXTEND
  *   Simple macro for adding a new element to a struct.
  *
- *   Warning: only use if a hole exists for _all_ arches.  Use pahole to verify.
+ * RH_KABI_EXTEND_WITH_SIZE
+ *   Adds a new element (usually a struct) to a struct and reserves extra
+ *   space for the new element.  The provided 'size' is the total space to
+ *   be added in longs (i.e. it's 8 * 'size' bytes), including the size of
+ *   the added element.  It is automatically checked that the new element
+ *   does not overflow the reserved space, now nor in the future. However,
+ *   no attempt is done to check the content of the added element (struct)
+ *   for kABI conformance - kABI checking inside the added element is
+ *   effectively switched off.
+ *   For any struct being added by RH_KABI_EXTEND_WITH_SIZE, it is
+ *   recommended its content to be documented as not covered by kABI
+ *   guarantee.
  *
  * RH_KABI_FILL_HOLE
  *   Simple macro for filling a hole in a struct.
+ *
+ *   Warning: only use if a hole exists for _all_ arches.  Use pahole to verify.
  *
  * RH_KABI_RENAME
  *   Simple macro for renaming an element without changing its type.  This
  *   macro can be used in bitfields, for example.
  *
- *   NOTE: does not include the final ';'
+ *   NOTE: this macro does not add the final ';'
  *
  * RH_KABI_REPLACE
  *   Simple replacement of _orig with a union of _orig and _new.
@@ -68,6 +89,23 @@
  *
  * RH_KABI_REPLACE_UNSAFE
  *   Unsafe version of RH_KABI_REPLACE.  Only use for typedefs.
+ *
+ * RH_KABI_HIDE_INCLUDE
+ *   Hides the given include file from kABI checksum computations.  This is
+ *   used when a newly added #include makes a previously opaque struct
+ *   visible.
+ *
+ *   Example usage:
+ *   #include RH_KABI_HIDE_INCLUDE(<linux/poll.h>)
+ *
+ * RH_KABI_FAKE_INCLUDE
+ *   Pretends inclusion of the given file for kABI checksum computations.
+ *   This is used when upstream removed a particular #include but that made
+ *   some structures opaque that were previously visible and is causing kABI
+ *   checker failures.
+ *
+ *   Example usage:
+ *   #include RH_KABI_FAKE_INCLUDE(<linux/rhashtable.h>)
  *
  * RH_KABI_FORCE_CHANGE
  *   Force change of the symbol checksum.  The argument of the macro is a
@@ -102,13 +140,35 @@
  *   of the size is not allowed and would constitute a silent kABI breakage.
  *   Beware that the RH_KABI_EXCLUDE macro does not do any size checks.
  *
- * NOTE
- *   Don't use ';' after these macros as it messes up the kABI checker by
- *   changing what the resulting token string looks like.  Instead let this
- *   macro add the ';' so it can be properly hidden from the kABI checker
- *   (mainly for RH_KABI_EXTEND, but applied to all macros for uniformity).
+ * RH_KABI_BROKEN_INSERT
+ * RH_KABI_BROKEN_REMOVE
+ *   Insert a field to the middle of a struct / delete a field from a struct.
+ *   Note that this breaks kABI! It can be done only when it's certain that
+ *   no 3rd party driver can validly reach into the struct.  A typical
+ *   example is a struct that is:  both (a) referenced only through a long
+ *   chain of pointers from another struct that is part of a whitelisted
+ *   symbol and (b) kernel internal only, it should have never been visible
+ *   to genksyms in the first place.
+ *
+ *   Another example are structs that are explicitly exempt from kABI
+ *   guarantee but we did not have enough foresight to use RH_KABI_EXCLUDE.
+ *   In this case, the warning for RH_KABI_EXCLUDE applies.
+ *
+ *   A detailed explanation of correctness of every RH_KABI_BROKEN_* macro
+ *   use is especially important.
+ *
+ * RH_KABI_BROKEN_INSERT_BLOCK
+ * RH_KABI_BROKEN_REMOVE_BLOCK
+ *   A version of RH_KABI_BROKEN_INSERT / REMOVE that allows multiple fields
+ *   to be inserted or removed together.  All fields need to be terminated
+ *   by ';' inside(!) the macro parameter.  The macro itself must not be
+ *   terminated by ';'.
  *
  */
+
+#undef linux
+#define linux linux
+
 #ifdef __GENKSYMS__
 
 # define RH_KABI_CONST
@@ -116,6 +176,12 @@
 # define RH_KABI_FILL_HOLE(_new)
 # define RH_KABI_FORCE_CHANGE(ver)		__attribute__((rh_kabi_change ## ver))
 # define RH_KABI_RENAME(_orig, _new)		_orig
+# define RH_KABI_HIDE_INCLUDE(_file)		<linux/rh_kabi.h>
+# define RH_KABI_FAKE_INCLUDE(_file)		_file
+# define RH_KABI_BROKEN_INSERT(_new)
+# define RH_KABI_BROKEN_REMOVE(_orig)		_orig;
+# define RH_KABI_BROKEN_INSERT_BLOCK(_new)
+# define RH_KABI_BROKEN_REMOVE_BLOCK(_orig)	_orig
 
 # define _RH_KABI_DEPRECATE(_type, _orig)	_type _orig
 # define _RH_KABI_DEPRECATE_FN(_type, _orig, _args...)	_type (*_orig)(_args)
@@ -132,6 +198,12 @@
 # define RH_KABI_FILL_HOLE(_new)		_new;
 # define RH_KABI_FORCE_CHANGE(ver)
 # define RH_KABI_RENAME(_orig, _new)		_new
+# define RH_KABI_HIDE_INCLUDE(_file)		_file
+# define RH_KABI_FAKE_INCLUDE(_file)		<linux/rh_kabi.h>
+# define RH_KABI_BROKEN_INSERT(_new)		_new;
+# define RH_KABI_BROKEN_REMOVE(_orig)
+# define RH_KABI_BROKEN_INSERT_BLOCK(_new)	_new
+# define RH_KABI_BROKEN_REMOVE_BLOCK(_orig)
 
 
 #if IS_BUILTIN(CONFIG_RH_KABI_SIZE_ALIGN_CHECKS)
@@ -142,9 +214,15 @@
 		_Static_assert(__alignof__(struct{_new;}) <= __alignof__(struct{_orig;}), \
 			       __FILE__ ":" __stringify(__LINE__) ": "  __stringify(_orig) " is not aligned the same as " __stringify(_new) RH_KABI_ALIGN_WARNING); \
 	}
+# define __RH_KABI_CHECK_SIZE(_item, _size)				\
+	_Static_assert(sizeof(struct{_item;}) <= _size,			\
+		       __FILE__ ":" __stringify(__LINE__) ": " __stringify(_item) " is larger than the reserved size (" __stringify(_size) " bytes)" RH_KABI_ALIGN_WARNING)
 #else
 # define __RH_KABI_CHECK_SIZE_ALIGN(_orig, _new)
+# define __RH_KABI_CHECK_SIZE(_item, _size)
 #endif
+
+#define RH_KABI_UNIQUE_ID	__PASTE(rh_kabi_hidden_, __LINE__)
 
 # define _RH_KABI_DEPRECATE(_type, _orig)	_type rh_reserved_##_orig
 # define _RH_KABI_DEPRECATE_FN(_type, _orig, _args...)  \
@@ -154,7 +232,7 @@
 		_new;					  \
 		struct {				  \
 			_orig;				  \
-		} __UNIQUE_ID(rh_kabi_hide);		  \
+		} RH_KABI_UNIQUE_ID;			  \
 		__RH_KABI_CHECK_SIZE_ALIGN(_orig, _new);  \
 	}
 # define _RH_KABI_REPLACE_UNSAFE(_orig, _new)	_new
@@ -194,6 +272,16 @@
 # define _RH_KABI_RESERVE(n)		unsigned long rh_reserved##n
 
 #define RH_KABI_EXCLUDE(_elem)		_RH_KABI_EXCLUDE(_elem);
+
+/*
+ * Extending a struct while reserving extra space.
+ */
+#define RH_KABI_EXTEND_WITH_SIZE(_new, _size)				\
+	RH_KABI_EXTEND(union {						\
+		_new;							\
+		unsigned long RH_KABI_UNIQUE_ID[_size];			\
+		__RH_KABI_CHECK_SIZE(_new, 8 * (_size));		\
+	})
 
 /*
  * RHEL macros to extend structs.

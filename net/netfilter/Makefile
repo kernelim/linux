@@ -79,7 +79,8 @@ nf_tables-objs := nf_tables_core.o nf_tables_api.o nft_chain_filter.o \
 		  nft_dynset.o nft_meta.o nft_rt.o nft_exthdr.o
 
 nf_tables_set-objs := nf_tables_set_core.o \
-		      nft_set_hash.o nft_set_bitmap.o nft_set_rbtree.o
+		      nft_set_hash.o nft_set_bitmap.o nft_set_rbtree.o \
+		      nft_set_pipapo.o
 
 obj-$(CONFIG_NF_TABLES)		+= nf_tables.o
 obj-$(CONFIG_NF_TABLES_SET)	+= nf_tables_set.o
@@ -105,6 +106,8 @@ obj-$(CONFIG_NFT_FIB_INET)	+= nft_fib_inet.o
 obj-$(CONFIG_NFT_FIB_NETDEV)	+= nft_fib_netdev.o
 obj-$(CONFIG_NF_OSF)		+= nf_osf.o
 obj-$(CONFIG_NFT_SOCKET)	+= nft_socket.o
+obj-$(CONFIG_NFT_TPROXY)	+= nft_tproxy.o
+obj-$(CONFIG_NFT_XFRM)		+= nft_xfrm.o
 
 # nf_tables netdev
 obj-$(CONFIG_NFT_DUP_NETDEV)	+= nft_dup_netdev.o

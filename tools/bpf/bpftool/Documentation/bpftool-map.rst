@@ -25,12 +25,17 @@ MAP COMMANDS
 |	**bpftool** **map create**     *FILE* **type** *TYPE* **key** *KEY_SIZE* **value** *VALUE_SIZE* \
 |		**entries** *MAX_ENTRIES* **name** *NAME* [**flags** *FLAGS*] [**dev** *NAME*]
 |	**bpftool** **map dump**       *MAP*
-|	**bpftool** **map update**     *MAP*  **key** *DATA*   **value** *VALUE* [*UPDATE_FLAGS*]
-|	**bpftool** **map lookup**     *MAP*  **key** *DATA*
+|	**bpftool** **map update**     *MAP* [**key** *DATA*] [**value** *VALUE*] [*UPDATE_FLAGS*]
+|	**bpftool** **map lookup**     *MAP* [**key** *DATA*]
 |	**bpftool** **map getnext**    *MAP* [**key** *DATA*]
 |	**bpftool** **map delete**     *MAP*  **key** *DATA*
 |	**bpftool** **map pin**        *MAP*  *FILE*
 |	**bpftool** **map event_pipe** *MAP* [**cpu** *N* **index** *M*]
+|	**bpftool** **map peek**       *MAP*
+|	**bpftool** **map push**       *MAP* **value** *VALUE*
+|	**bpftool** **map pop**        *MAP*
+|	**bpftool** **map enqueue**    *MAP* **value** *VALUE*
+|	**bpftool** **map dequeue**    *MAP*
 |	**bpftool** **map help**
 |
 |	*MAP* := { **id** *MAP_ID* | **pinned** *FILE* }
@@ -62,7 +67,7 @@ DESCRIPTION
 	**bpftool map dump**    *MAP*
 		  Dump all entries in a given *MAP*.
 
-	**bpftool map update**  *MAP*  **key** *DATA*   **value** *VALUE* [*UPDATE_FLAGS*]
+	**bpftool map update**  *MAP* [**key** *DATA*] [**value** *VALUE*] [*UPDATE_FLAGS*]
 		  Update map entry for a given *KEY*.
 
 		  *UPDATE_FLAGS* can be one of: **any** update existing entry
@@ -75,7 +80,7 @@ DESCRIPTION
 		  the bytes are parsed as decimal values, unless a "0x" prefix
 		  (for hexadecimal) or a "0" prefix (for octal) is provided.
 
-	**bpftool map lookup**  *MAP*  **key** *DATA*
+	**bpftool map lookup**  *MAP* [**key** *DATA*]
 		  Lookup **key** in the map.
 
 	**bpftool map getnext** *MAP* [**key** *DATA*]
@@ -107,6 +112,21 @@ DESCRIPTION
 		  replace any existing ring.  Any other application will stop
 		  receiving events if it installed its rings earlier.
 
+	**bpftool map peek**  *MAP*
+		  Peek next **value** in the queue or stack.
+
+	**bpftool map push**  *MAP* **value** *VALUE*
+		  Push **value** onto the stack.
+
+	**bpftool map pop**  *MAP*
+		  Pop and print **value** from the stack.
+
+	**bpftool map enqueue**  *MAP* **value** *VALUE*
+		  Enqueue **value** into the queue.
+
+	**bpftool map dequeue**  *MAP*
+		  Dequeue and print **value** from the queue.
+
 	**bpftool map help**
 		  Print short help message.
 
@@ -115,7 +135,7 @@ OPTIONS
 	-h, --help
 		  Print short generic help message (similar to **bpftool help**).
 
-	-v, --version
+	-V, --version
 		  Print version number (similar to **bpftool version**).
 
 	-j, --json
@@ -131,6 +151,10 @@ OPTIONS
 	-n, --nomount
 		  Do not automatically attempt to mount any virtual file system
 		  (such as tracefs or BPF virtual file system) when necessary.
+
+	-d, --debug
+		  Print all logs available from libbpf, including debug-level
+		  information.
 
 EXAMPLES
 ========
@@ -238,4 +262,5 @@ SEE ALSO
 	**bpftool-cgroup**\ (8),
 	**bpftool-feature**\ (8),
 	**bpftool-net**\ (8),
-	**bpftool-perf**\ (8)
+	**bpftool-perf**\ (8),
+	**bpftool-btf**\ (8)

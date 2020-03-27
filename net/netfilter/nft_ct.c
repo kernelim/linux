@@ -277,7 +277,7 @@ static void nft_ct_set_eval(const struct nft_expr *expr,
 {
 	const struct nft_ct *priv = nft_expr_priv(expr);
 	struct sk_buff *skb = pkt->skb;
-#ifdef CONFIG_NF_CONNTRACK_MARK
+#if defined(CONFIG_NF_CONNTRACK_MARK) || defined(CONFIG_NF_CONNTRACK_SECMARK)
 	u32 value = regs->data[priv->sreg];
 #endif
 	enum ip_conntrack_info ctinfo;
@@ -293,6 +293,14 @@ static void nft_ct_set_eval(const struct nft_expr *expr,
 		if (ct->mark != value) {
 			ct->mark = value;
 			nf_conntrack_event_cache(IPCT_MARK, ct);
+		}
+		break;
+#endif
+#ifdef CONFIG_NF_CONNTRACK_SECMARK
+	case NFT_CT_SECMARK:
+		if (ct->secmark != value) {
+			ct->secmark = value;
+			nf_conntrack_event_cache(IPCT_SECMARK, ct);
 		}
 		break;
 #endif
@@ -563,6 +571,13 @@ static int nft_ct_set_init(const struct nft_ctx *ctx,
 		len = sizeof(u32);
 		break;
 #endif
+#ifdef CONFIG_NF_CONNTRACK_SECMARK
+	case NFT_CT_SECMARK:
+		if (tb[NFTA_CT_DIRECTION])
+			return -EINVAL;
+		len = sizeof(u32);
+		break;
+#endif
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -773,6 +788,7 @@ static int nft_ct_helper_obj_init(const struct nft_ctx *ctx,
 	struct nf_conntrack_helper *help4, *help6;
 	char name[NF_CT_HELPER_NAME_LEN];
 	int family = ctx->family;
+	int err;
 
 	if (!tb[NFTA_CT_HELPER_NAME] || !tb[NFTA_CT_HELPER_L4PROTO])
 		return -EINVAL;
@@ -823,7 +839,18 @@ static int nft_ct_helper_obj_init(const struct nft_ctx *ctx,
 	priv->helper4 = help4;
 	priv->helper6 = help6;
 
+	err = nf_ct_netns_get(ctx->net, ctx->family);
+	if (err < 0)
+		goto err_put_helper;
+
 	return 0;
+
+err_put_helper:
+	if (priv->helper4)
+		nf_conntrack_helper_put(priv->helper4);
+	if (priv->helper6)
+		nf_conntrack_helper_put(priv->helper6);
+	return err;
 }
 
 static void nft_ct_helper_obj_destroy(const struct nft_ctx *ctx,
@@ -835,6 +862,8 @@ static void nft_ct_helper_obj_destroy(const struct nft_ctx *ctx,
 		nf_conntrack_helper_put(priv->helper4);
 	if (priv->helper6)
 		nf_conntrack_helper_put(priv->helper6);
+
+	nf_ct_netns_put(ctx->net, ctx->family);
 }
 
 static void nft_ct_helper_obj_eval(struct nft_object *obj,

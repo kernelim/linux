@@ -51,9 +51,16 @@ static bool rt2800soc_hwcrypt_disabled(struct rt2x00_dev *rt2x00dev)
 
 static void rt2800soc_disable_radio(struct rt2x00_dev *rt2x00dev)
 {
+	u32 reg;
+
 	rt2800_disable_radio(rt2x00dev);
 	rt2x00mmio_register_write(rt2x00dev, PWR_PIN_CFG, 0);
-	rt2x00mmio_register_write(rt2x00dev, TX_PIN_CFG, 0);
+
+	reg = 0;
+	if (rt2x00_rt(rt2x00dev, RT3883))
+		rt2x00_set_field32(&reg, TX_PIN_CFG_RFTR_EN, 1);
+
+	rt2x00mmio_register_write(rt2x00dev, TX_PIN_CFG, reg);
 }
 
 static int rt2800soc_set_device_state(struct rt2x00_dev *rt2x00dev,
@@ -176,6 +183,7 @@ static const struct rt2800_ops rt2800soc_rt2800_ops = {
 	.drv_write_firmware	= rt2800soc_write_firmware,
 	.drv_init_registers	= rt2800mmio_init_registers,
 	.drv_get_txwi		= rt2800mmio_get_txwi,
+	.drv_get_dma_done	= rt2800mmio_get_dma_done,
 };
 
 static const struct rt2x00lib_ops rt2800soc_rt2x00_ops = {
@@ -185,7 +193,7 @@ static const struct rt2x00lib_ops rt2800soc_rt2x00_ops = {
 	.tbtt_tasklet		= rt2800mmio_tbtt_tasklet,
 	.rxdone_tasklet		= rt2800mmio_rxdone_tasklet,
 	.autowake_tasklet	= rt2800mmio_autowake_tasklet,
-	.probe_hw		= rt2800_probe_hw,
+	.probe_hw		= rt2800mmio_probe_hw,
 	.get_firmware_name	= rt2800soc_get_firmware_name,
 	.check_firmware		= rt2800soc_check_firmware,
 	.load_firmware		= rt2800soc_load_firmware,
@@ -200,10 +208,11 @@ static const struct rt2x00lib_ops rt2800soc_rt2x00_ops = {
 	.link_tuner		= rt2800_link_tuner,
 	.gain_calibration	= rt2800_gain_calibration,
 	.vco_calibration	= rt2800_vco_calibration,
+	.watchdog		= rt2800_watchdog,
 	.start_queue		= rt2800mmio_start_queue,
 	.kick_queue		= rt2800mmio_kick_queue,
 	.stop_queue		= rt2800mmio_stop_queue,
-	.flush_queue		= rt2x00mmio_flush_queue,
+	.flush_queue		= rt2800mmio_flush_queue,
 	.write_tx_desc		= rt2800mmio_write_tx_desc,
 	.write_tx_data		= rt2800_write_tx_data,
 	.write_beacon		= rt2800_write_beacon,
@@ -216,6 +225,7 @@ static const struct rt2x00lib_ops rt2800soc_rt2x00_ops = {
 	.config_erp		= rt2800_config_erp,
 	.config_ant		= rt2800_config_ant,
 	.config			= rt2800_config,
+	.pre_reset_hw		= rt2800_pre_reset_hw,
 };
 
 static const struct rt2x00_ops rt2800soc_ops = {

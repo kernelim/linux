@@ -12,7 +12,10 @@
 #define EP_OFFSET		0x10008
 #define EP_STRING		"S390EP"
 #define PARMAREA		0x10400
-#define PARMAREA_END		0x11000
+#define EARLY_SCCB_OFFSET	0x11000
+#define HEAD_END		0x12000
+
+#define EARLY_SCCB_SIZE		PAGE_SIZE
 
 /*
  * Machine features detected in early.c
@@ -79,6 +82,7 @@ extern int noexec_disabled;
 extern int memory_end_set;
 extern unsigned long memory_end;
 extern unsigned long max_physmem_end;
+extern unsigned long __swsusp_reset_dma;
 
 #define MACHINE_IS_VM		(S390_lowcore.machine_flags & MACHINE_FLAG_VM)
 #define MACHINE_IS_KVM		(S390_lowcore.machine_flags & MACHINE_FLAG_KVM)
@@ -143,6 +147,12 @@ void cmma_init_nodat(void);
 extern void (*_machine_restart)(char *command);
 extern void (*_machine_halt)(void);
 extern void (*_machine_power_off)(void);
+
+extern unsigned long __kaslr_offset;
+static inline unsigned long kaslr_offset(void)
+{
+	return __kaslr_offset;
+}
 
 #else /* __ASSEMBLY__ */
 

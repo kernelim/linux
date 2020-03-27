@@ -13,6 +13,7 @@
 #include <linux/slab.h>
 #include <linux/gpio/consumer.h>
 #include <linux/gpio/driver.h>
+#include <linux/export.h>
 
 #include "gpiolib.h"
 
@@ -62,3 +63,4 @@ void devprop_gpiochip_set_names(struct gpio_chip *chip,
 
 	kfree(names);
 }
+EXPORT_SYMBOL_GPL(devprop_gpiochip_set_names);

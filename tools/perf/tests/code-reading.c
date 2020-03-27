@@ -15,12 +15,14 @@
 #include "thread_map.h"
 #include "cpumap.h"
 #include "machine.h"
+#include "map.h"
+#include "symbol.h"
 #include "event.h"
 #include "thread.h"
 
 #include "tests.h"
 
-#include "sane_ctype.h"
+#include <linux/ctype.h>
 
 #define BUFSZ	1024
 #define READLEN	128

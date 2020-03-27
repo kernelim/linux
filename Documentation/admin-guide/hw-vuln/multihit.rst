@@ -2,11 +2,11 @@ iTLB multihit
 =============
 
 iTLB multihit is an erratum where some processors may incur a machine check
-error, possibly resulting in an unrecoverable CPU hang, when an instruction fetch
-hits multiple entries in the instruction TLB. This can occur when the page
-size is changed along with either the physical address or cache type. A
-malicious guest running on a virtualized system can exploit this erratum to
-perform a denial of service attack.
+error, possibly resulting in an unrecoverable CPU lockup, when an
+instruction fetch hits multiple entries in the instruction TLB. This can
+occur when the page size is changed along with either the physical address
+or cache type. A malicious guest running on a virtualized system can
+exploit this erratum to perform a denial of service attack.
 
 
 Affected processors
@@ -60,7 +60,7 @@ Attack scenarios
 ----------------
 
 Attacks against the iTLB multihit erratum can be mounted from malicious
-privileged actors running as guests in a virtualized system.
+guests in a virtualized system.
 
 
 iTLB multihit system information
@@ -108,21 +108,20 @@ In order to mitigate the vulnerability, KVM initially marks all huge pages
 as non-executable. If the guest attempts to execute in one of those pages,
 the page is broken down into 4K pages, which are then marked executable.
 
-If EPT is disabled or not available on the host, KVM is in control of
-TLB flushes and the problematic situation cannot happen.  However, the
-shadow EPT paging mechanism used by nested virtualization is vulnerable,
-because the nested guest can trigger multiple iTLB hits by modifying its own
+If EPT is disabled or not available on the host, KVM is in control of TLB
+flushes and the problematic situation cannot happen.  However, the shadow
+EPT paging mechanism used by nested virtualization is vulnerable, because
+the nested guest can trigger multiple iTLB hits by modifying its own
 (non-nested) page tables.  For simplicity, KVM will make large pages
 non-executable in all shadow paging modes.
 
 Mitigation control on the kernel command line and KVM - module parameter
 ------------------------------------------------------------------------
 
-The kernel command line allows to control the iTLB multihit mitigations at boot
-time with the option "kvm.nx_huge_pages=". The KVM hypervisor mitigation
-mechanism for marking huge pages as non-executable can be controlled with a
-module parameter "nx_huge_pages=".
-
+The KVM hypervisor mitigation mechanism for marking huge pages as
+non-executable can be controlled with a module parameter "nx_huge_pages=".
+The kernel command line allows to control the iTLB multihit mitigations at
+boot time with the option "kvm.nx_huge_pages=".
 
 The valid arguments for these options are:
 
@@ -137,6 +136,7 @@ The valid arguments for these options are:
 
   auto        Enable mitigation only if the platform is affected and the kernel
               was not booted with the "mitigations=off" command line parameter.
+	      This is the default option.
   ==========  ================================================================
 
 

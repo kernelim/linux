@@ -292,8 +292,6 @@ int intel_pmic_install_opregion_handler(struct device *dev, acpi_handle handle,
 						    intel_pmic_thermal_handler,
 						    NULL, opregion);
 	if (ACPI_FAILURE(status)) {
-		acpi_remove_address_space_handler(handle, PMIC_POWER_OPREGION_ID,
-						  intel_pmic_power_handler);
 		ret = -ENODEV;
 		goto out_remove_power_handler;
 	}
@@ -359,6 +357,15 @@ int intel_soc_pmic_exec_mipi_pmic_seq_element(u16 i2c_address, u32 reg_address,
 		ret = d->exec_mipi_pmic_seq_element(intel_pmic_opregion->regmap,
 						    i2c_address, reg_address,
 						    value, mask);
+	} else if (d->pmic_i2c_address) {
+		if (i2c_address == d->pmic_i2c_address) {
+			ret = regmap_update_bits(intel_pmic_opregion->regmap,
+						 reg_address, mask, value);
+		} else {
+			pr_err("%s: Unexpected i2c-addr: 0x%02x (reg-addr 0x%x value 0x%x mask 0x%x)\n",
+			       __func__, i2c_address, reg_address, value, mask);
+			ret = -ENXIO;
+		}
 	} else {
 		pr_warn("%s: Not implemented\n", __func__);
 		pr_warn("%s: i2c-addr: 0x%x reg-addr 0x%x value 0x%x mask 0x%x\n",

@@ -14,6 +14,17 @@
 #define to_rh_drm_mmu_notifier(mn) \
 	container_of(mn, struct __rh_drm_mmu_notifier, base)
 
+static inline struct mmu_notifier_range
+fill_range(struct mm_struct *mm, unsigned long start, unsigned long end)
+{
+	return (struct mmu_notifier_range) {
+		.mm = mm,
+		.start = start,
+		.end = end,
+		.blockable = true,
+	};
+}
+
 static void rh_drm_mmu_notifier_release(struct mmu_notifier *mn,
 					struct mm_struct *mm)
 {
@@ -68,12 +79,7 @@ rh_drm_mmu_notifier_invalidate_range_start(struct mmu_notifier *mn,
 					   unsigned long end)
 {
 	struct __rh_drm_mmu_notifier *drm_mn = to_rh_drm_mmu_notifier(mn);
-	struct mmu_notifier_range range = {
-		.mm = mm,
-		.start = start,
-		.end = end,
-		.blockable = true,
-	};
+	struct mmu_notifier_range range = fill_range(mm, start, end);
 
 	drm_mn->ops->invalidate_range_start(drm_mn, &range);
 }
@@ -84,9 +90,7 @@ static void rh_drm_mmu_notifier_invalidate_range_end(struct mmu_notifier *mn,
 						     unsigned long end)
 {
 	struct __rh_drm_mmu_notifier *drm_mn = to_rh_drm_mmu_notifier(mn);
-	struct mmu_notifier_range range = {
-		.mm = mm, .start = start, .end = end
-	};
+	struct mmu_notifier_range range = fill_range(mm, start, end);
 
 	drm_mn->ops->invalidate_range_end(drm_mn, &range);
 }

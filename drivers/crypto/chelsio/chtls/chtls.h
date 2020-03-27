@@ -148,6 +148,11 @@ struct chtls_dev {
 	struct key_map kmap;
 };
 
+struct chtls_listen {
+	struct chtls_dev *cdev;
+	struct sock *sk;
+};
+
 struct chtls_hws {
 	struct sk_buff_head sk_recv_queue;
 	u8 txqid;

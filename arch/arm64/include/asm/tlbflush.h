@@ -147,6 +147,15 @@ static inline void local_flush_tlb_all(void)
 	isb();
 }
 
+static inline void local_flush_tlb_asid(unsigned long asid)
+{
+	asid = __TLBI_VADDR(0, __ASID(asid));
+	dsb(nshst);
+	__tlbi(aside1, asid);
+	__tlbi_user(aside1, asid);
+	dsb(nsh);
+}
+
 static inline void flush_tlb_all(void)
 {
 	dsb(ishst);
@@ -155,14 +164,44 @@ static inline void flush_tlb_all(void)
 	isb();
 }
 
+DECLARE_PER_CPU(bool, cpu_not_lazy_tlb);
+
+enum tlb_flush_types {
+	TLB_FLUSH_NO,
+	TLB_FLUSH_LOCAL,
+	TLB_FLUSH_BROADCAST,
+};
+extern enum tlb_flush_types tlb_flush_check(struct mm_struct *mm,
+					    unsigned int cpu);
+
 static inline void flush_tlb_mm(struct mm_struct *mm)
 {
 	unsigned long asid = __TLBI_VADDR(0, ASID(mm));
+	enum tlb_flush_types flush;
 
-	dsb(ishst);
-	__tlbi(aside1is, asid);
-	__tlbi_user(aside1is, asid);
-	dsb(ish);
+	flush = tlb_flush_check(mm, get_cpu());
+	switch (flush) {
+	case TLB_FLUSH_LOCAL:
+
+		dsb(nshst);
+		__tlbi(aside1, asid);
+		__tlbi_user(aside1, asid);
+		dsb(nsh);
+
+		/* fall through */
+	case TLB_FLUSH_NO:
+		put_cpu();
+		break;
+	case TLB_FLUSH_BROADCAST:
+		put_cpu();
+
+		dsb(ishst);
+		__tlbi(aside1is, asid);
+		__tlbi_user(aside1is, asid);
+		dsb(ish);
+
+		break;
+	}
 }
 
 static inline void flush_tlb_page_nosync(struct vm_area_struct *vma,
@@ -178,8 +217,33 @@ static inline void flush_tlb_page_nosync(struct vm_area_struct *vma,
 static inline void flush_tlb_page(struct vm_area_struct *vma,
 				  unsigned long uaddr)
 {
-	flush_tlb_page_nosync(vma, uaddr);
-	dsb(ish);
+	struct mm_struct *mm = vma->vm_mm;
+	unsigned long addr = __TLBI_VADDR(uaddr, ASID(mm));
+	enum tlb_flush_types flush;
+
+	flush = tlb_flush_check(mm, get_cpu());
+	switch (flush) {
+	case TLB_FLUSH_LOCAL:
+
+		dsb(nshst);
+		__tlbi(vale1, addr);
+		__tlbi_user(vale1, addr);
+		dsb(nsh);
+
+		/* fall through */
+	case TLB_FLUSH_NO:
+		put_cpu();
+		break;
+	case TLB_FLUSH_BROADCAST:
+		put_cpu();
+
+		dsb(ishst);
+		__tlbi(vale1is, addr);
+		__tlbi_user(vale1is, addr);
+		dsb(ish);
+
+		break;
+	}
 }
 
 /*
@@ -192,11 +256,13 @@ static inline void __flush_tlb_range(struct vm_area_struct *vma,
 				     unsigned long start, unsigned long end,
 				     unsigned long stride, bool last_level)
 {
-	unsigned long asid = ASID(vma->vm_mm);
+	struct mm_struct *mm = vma->vm_mm;
+	unsigned long asid = ASID(mm);
 	unsigned long addr;
+	enum tlb_flush_types flush;
 
 	if ((end - start) > (MAX_TLBI_OPS * stride)) {
-		flush_tlb_mm(vma->vm_mm);
+		flush_tlb_mm(mm);
 		return;
 	}
 
@@ -206,17 +272,43 @@ static inline void __flush_tlb_range(struct vm_area_struct *vma,
 	start = __TLBI_VADDR(start, asid);
 	end = __TLBI_VADDR(end, asid);
 
-	dsb(ishst);
-	for (addr = start; addr < end; addr += stride) {
-		if (last_level) {
-			__tlbi(vale1is, addr);
-			__tlbi_user(vale1is, addr);
-		} else {
-			__tlbi(vae1is, addr);
-			__tlbi_user(vae1is, addr);
+	flush = tlb_flush_check(mm, get_cpu());
+	switch (flush) {
+	case TLB_FLUSH_LOCAL:
+
+		dsb(nshst);
+		for (addr = start; addr < end; addr += stride) {
+			if (last_level) {
+				__tlbi(vale1, addr);
+				__tlbi_user(vale1, addr);
+			} else {
+				__tlbi(vae1, addr);
+				__tlbi_user(vae1, addr);
+			}
 		}
+		dsb(nsh);
+
+		/* fall through */
+	case TLB_FLUSH_NO:
+		put_cpu();
+		break;
+	case TLB_FLUSH_BROADCAST:
+		put_cpu();
+
+		dsb(ishst);
+		for (addr = start; addr < end; addr += stride) {
+			if (last_level) {
+				__tlbi(vale1is, addr);
+				__tlbi_user(vale1is, addr);
+			} else {
+				__tlbi(vae1is, addr);
+				__tlbi_user(vae1is, addr);
+			}
+		}
+		dsb(ish);
+
+		break;
 	}
-	dsb(ish);
 }
 
 static inline void flush_tlb_range(struct vm_area_struct *vma,

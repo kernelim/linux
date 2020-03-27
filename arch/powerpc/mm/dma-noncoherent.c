@@ -35,7 +35,7 @@
 #include <asm/tlbflush.h>
 #include <asm/dma.h>
 
-#include "mmu_decl.h"
+#include <mm/mmu_decl.h>
 
 /*
  * This address range defaults to a value that is safe for all

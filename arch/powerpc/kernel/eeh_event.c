@@ -52,7 +52,6 @@ static int eeh_event_handler(void * dummy)
 {
 	unsigned long flags;
 	struct eeh_event *event;
-	struct eeh_pe *pe;
 
 	while (!kthread_should_stop()) {
 		if (down_interruptible(&eeh_eventlist_sem))
@@ -71,19 +70,10 @@ static int eeh_event_handler(void * dummy)
 			continue;
 
 		/* We might have event without binding PE */
-		pe = event->pe;
-		if (pe) {
-			if (pe->type & EEH_PE_PHB)
-				pr_info("EEH: Detected error on PHB#%x\n",
-					 pe->phb->global_number);
-			else
-				pr_info("EEH: Detected PCI bus error on "
-					"PHB#%x-PE#%x\n",
-					pe->phb->global_number, pe->addr);
-			eeh_handle_normal_event(pe);
-		} else {
+		if (event->pe)
+			eeh_handle_normal_event(event->pe);
+		else
 			eeh_handle_special_event();
-		}
 
 		kfree(event);
 	}
@@ -135,6 +125,30 @@ int eeh_send_failure_event(struct eeh_pe *pe)
 		return -ENOMEM;
 	}
 	event->pe = pe;
+
+	/*
+	 * Mark the PE as recovering before inserting it in the queue.
+	 * This prevents the PE from being free()ed by a hotplug driver
+	 * while the PE is sitting in the event queue.
+	 */
+	if (pe) {
+#ifdef CONFIG_STACKTRACE
+		/*
+		 * Save the current stack trace so we can dump it from the
+		 * event handler thread.
+		 */
+		struct stack_trace trace = {
+			.entries        = pe->stack_trace,
+			.max_entries    = ARRAY_SIZE(pe->stack_trace),
+			.skip           = 1,
+		};
+
+		save_stack_trace(&trace);
+		pe->trace_entries = trace.nr_entries;
+#endif /* CONFIG_STACKTRACE */
+
+		eeh_pe_state_mark(pe, EEH_PE_RECOVERING);
+	}
 
 	/* We may or may not be called in an interrupt context */
 	spin_lock_irqsave(&eeh_eventlist_lock, flags);

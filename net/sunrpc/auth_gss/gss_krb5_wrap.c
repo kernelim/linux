@@ -228,9 +228,7 @@ gss_wrap_kerberos_v1(struct krb5_ctx *kctx, int offset,
 
 	memcpy(ptr + GSS_KRB5_TOK_HDR_LEN, md5cksum.data, md5cksum.len);
 
-	spin_lock(&krb5_seq_lock);
-	seq_send = kctx->seq_send++;
-	spin_unlock(&krb5_seq_lock);
+	seq_send = atomic_fetch_inc(&kctx->seq_send);
 
 	/* XXX would probably be more efficient to compute checksum
 	 * and encrypt at the same time: */
@@ -477,9 +475,7 @@ gss_wrap_kerberos_v2(struct krb5_ctx *kctx, u32 offset,
 	*be16ptr++ = 0;
 
 	be64ptr = (__be64 *)be16ptr;
-	spin_lock(&krb5_seq_lock);
-	*be64ptr = cpu_to_be64(kctx->seq_send64++);
-	spin_unlock(&krb5_seq_lock);
+	*be64ptr = cpu_to_be64(atomic64_fetch_inc(&kctx->seq_send64));
 
 	err = (*kctx->gk5e->encrypt_v2)(kctx, offset, buf, pages);
 	if (err)
@@ -574,14 +570,16 @@ gss_unwrap_kerberos_v2(struct krb5_ctx *kctx, int offset, struct xdr_buf *buf)
 	 */
 	movelen = min_t(unsigned int, buf->head[0].iov_len, buf->len);
 	movelen -= offset + GSS_KRB5_TOK_HDR_LEN + headskip;
-	BUG_ON(offset + GSS_KRB5_TOK_HDR_LEN + headskip + movelen >
-							buf->head[0].iov_len);
+	if (offset + GSS_KRB5_TOK_HDR_LEN + headskip + movelen >
+	    buf->head[0].iov_len)
+		return GSS_S_FAILURE;
 	memmove(ptr, ptr + GSS_KRB5_TOK_HDR_LEN + headskip, movelen);
 	buf->head[0].iov_len -= GSS_KRB5_TOK_HDR_LEN + headskip;
 	buf->len -= GSS_KRB5_TOK_HDR_LEN + headskip;
 
 	/* Trim off the trailing "extra count" and checksum blob */
-	xdr_buf_trim(buf, ec + GSS_KRB5_TOK_HDR_LEN + tailskip);
+	buf->len -= ec + GSS_KRB5_TOK_HDR_LEN + tailskip;
+
 	return GSS_S_COMPLETE;
 }
 
@@ -621,4 +619,3 @@ gss_unwrap_kerberos(struct gss_ctx *gctx, int offset, struct xdr_buf *buf)
 		return gss_unwrap_kerberos_v2(kctx, offset, buf);
 	}
 }
-

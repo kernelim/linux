@@ -11,12 +11,14 @@ snd-usb-audio-objs := 	card.o \
 			mixer.o \
 			mixer_quirks.o \
 			mixer_scarlett.o \
+			mixer_scarlett_gen2.o \
 			mixer_us16x08.o \
 			pcm.o \
 			power.o \
 			proc.o \
 			quirks.o \
-			stream.o
+			stream.o \
+			validate.o
 
 snd-usbmidi-lib-objs := midi.o
 

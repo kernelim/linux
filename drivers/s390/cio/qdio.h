@@ -82,6 +82,7 @@ enum qdio_irq_states {
 #define QDIO_SIGA_WRITE		0x00
 #define QDIO_SIGA_READ		0x01
 #define QDIO_SIGA_SYNC		0x02
+#define QDIO_SIGA_WRITEM	0x03
 #define QDIO_SIGA_WRITEQ	0x04
 #define QDIO_SIGA_QEBSM_FLAG	0x80
 
@@ -206,8 +207,6 @@ struct qdio_output_q {
 	struct qdio_outbuf_state *sbal_state;
 	/* timer to check for more outbound work */
 	struct timer_list timer;
-	/* used SBALs before tasklet schedule */
-	int scan_threshold;
 };
 
 /*
@@ -227,9 +226,6 @@ struct qdio_q {
 	 * outbound: next buffer to check if adapter processed it
 	 */
 	int first_to_check;
-
-	/* first_to_check of the last time */
-	int last_move;
 
 	/* beginning position for calling the program */
 	int first_to_kick;
@@ -298,6 +294,7 @@ struct qdio_irq {
 	struct qdio_ssqd_desc ssqd_desc;
 	void (*orig_handler) (struct ccw_device *, unsigned long, struct irb *);
 
+	unsigned int scan_threshold;	/* used SBALs before tasklet schedule */
 	int perf_stat_enabled;
 
 	struct qdr *qdr;
@@ -341,8 +338,7 @@ static inline int multicast_outbound(struct qdio_q *q)
 	       (q->nr == q->irq_ptr->nr_output_qs - 1);
 }
 
-#define pci_out_supported(q) \
-	(q->irq_ptr->qib.ac & QIB_AC_OUTBOUND_PCI_SUPPORTED)
+#define pci_out_supported(irq) ((irq)->qib.ac & QIB_AC_OUTBOUND_PCI_SUPPORTED)
 #define is_qebsm(q)			(q->irq_ptr->sch_token != 0)
 
 #define need_siga_in(q)			(q->irq_ptr->siga_flag.input)

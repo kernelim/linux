@@ -285,8 +285,14 @@ int rtw_mac_power_on(struct rtw_dev *rtwdev)
 		goto err;
 
 	ret = rtw_mac_power_switch(rtwdev, true);
-	if (ret)
+	if (ret == -EALREADY) {
+		rtw_mac_power_switch(rtwdev, false);
+		ret = rtw_mac_power_switch(rtwdev, true);
+		if (ret)
+			goto err;
+	} else if (ret) {
 		goto err;
+	}
 
 	ret = rtw_mac_init_system_cfg(rtwdev);
 	if (ret)
@@ -700,9 +706,6 @@ int rtw_download_firmware(struct rtw_dev *rtwdev, struct rtw_fw_state *fw)
 
 	rtwdev->h2c.last_box_num = 0;
 	rtwdev->h2c.seq = 0;
-
-	rtw_fw_send_general_info(rtwdev);
-	rtw_fw_send_phydm_info(rtwdev);
 
 	rtw_flag_set(rtwdev, RTW_FLAG_FW_RUNNING);
 

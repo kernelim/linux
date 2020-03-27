@@ -138,8 +138,9 @@ extern int audit_classify_compat_syscall(int abi, unsigned syscall);
 
 struct filename;
 
-extern void audit_log_session_info(struct audit_buffer *ab);
-
+#define AUDIT_OFF	0
+#define AUDIT_ON	1
+#define AUDIT_LOCKED	2
 #ifdef CONFIG_AUDIT
 /* These are defined in audit.c */
 				/* Public API */
@@ -169,18 +170,30 @@ extern void		    audit_log_d_path(struct audit_buffer *ab,
 					     const struct path *path);
 extern void		    audit_log_key(struct audit_buffer *ab,
 					  char *key);
-extern void		    audit_log_link_denied(const char *operation);
+extern void		    audit_log_path_denied(int type,
+						  const char *operation);
 extern void		    audit_log_lost(const char *message);
 
 extern int audit_log_task_context(struct audit_buffer *ab);
-extern void audit_log_task_info(struct audit_buffer *ab,
-				struct task_struct *tsk);
+extern void audit_log_task_info(struct audit_buffer *ab);
 
 extern int		    audit_update_lsm_rules(void);
 
 				/* Private API (for audit.c only) */
 extern int audit_rule_change(int type, int seq, void *data, size_t datasz);
 extern int audit_list_rules_send(struct sk_buff *request_skb, int seq);
+
+extern int audit_set_loginuid(kuid_t loginuid);
+
+static inline kuid_t audit_get_loginuid(struct task_struct *tsk)
+{
+	return tsk->loginuid;
+}
+
+static inline unsigned int audit_get_sessionid(struct task_struct *tsk)
+{
+	return tsk->sessionid;
+}
 
 extern u32 audit_enabled;
 #else /* CONFIG_AUDIT */
@@ -216,16 +229,26 @@ static inline void audit_log_d_path(struct audit_buffer *ab,
 { }
 static inline void audit_log_key(struct audit_buffer *ab, char *key)
 { }
-static inline void audit_log_link_denied(const char *string)
+static inline void audit_log_path_denied(int type, const char *operation)
 { }
 static inline int audit_log_task_context(struct audit_buffer *ab)
 {
 	return 0;
 }
-static inline void audit_log_task_info(struct audit_buffer *ab,
-				       struct task_struct *tsk)
+static inline void audit_log_task_info(struct audit_buffer *ab)
 { }
-#define audit_enabled 0
+
+static inline kuid_t audit_get_loginuid(struct task_struct *tsk)
+{
+	return INVALID_UID;
+}
+
+static inline unsigned int audit_get_sessionid(struct task_struct *tsk)
+{
+	return AUDIT_SID_UNSET;
+}
+
+#define audit_enabled AUDIT_OFF
 #endif /* CONFIG_AUDIT */
 
 #ifdef CONFIG_AUDIT_COMPAT_GENERIC
@@ -233,6 +256,10 @@ static inline void audit_log_task_info(struct audit_buffer *ab,
 #else
 #define audit_is_compat(arch)  false
 #endif
+
+#define AUDIT_INODE_PARENT	1	/* dentry represents the parent */
+#define AUDIT_INODE_HIDDEN	2	/* audit record should be hidden */
+#define AUDIT_INODE_NOEVAL	4	/* audit record incomplete */
 
 #ifdef CONFIG_AUDITSYSCALL
 #include <asm/syscall.h> /* for syscall_get_arch() */
@@ -247,8 +274,6 @@ extern void __audit_syscall_exit(int ret_success, long ret_value);
 extern struct filename *__audit_reusename(const __user char *uptr);
 extern void __audit_getname(struct filename *name);
 
-#define AUDIT_INODE_PARENT	1	/* dentry represents the parent */
-#define AUDIT_INODE_HIDDEN	2	/* audit record should be hidden */
 extern void __audit_inode(struct filename *name, const struct dentry *dentry,
 				unsigned int flags);
 extern void __audit_file(const struct file *);
@@ -309,13 +334,9 @@ static inline void audit_getname(struct filename *name)
 }
 static inline void audit_inode(struct filename *name,
 				const struct dentry *dentry,
-				unsigned int parent) {
-	if (unlikely(!audit_dummy_context())) {
-		unsigned int flags = 0;
-		if (parent)
-			flags |= AUDIT_INODE_PARENT;
-		__audit_inode(name, dentry, flags);
-	}
+				unsigned int aflags) {
+	if (unlikely(!audit_dummy_context()))
+		__audit_inode(name, dentry, aflags);
 }
 static inline void audit_file(struct file *file)
 {
@@ -344,21 +365,6 @@ static inline void audit_ptrace(struct task_struct *t)
 }
 
 				/* Private API (for audit.c only) */
-extern unsigned int audit_serial(void);
-extern int auditsc_get_stamp(struct audit_context *ctx,
-			      struct timespec64 *t, unsigned int *serial);
-extern int audit_set_loginuid(kuid_t loginuid);
-
-static inline kuid_t audit_get_loginuid(struct task_struct *tsk)
-{
-	return tsk->loginuid;
-}
-
-static inline unsigned int audit_get_sessionid(struct task_struct *tsk)
-{
-	return tsk->sessionid;
-}
-
 extern void __audit_ipc_obj(struct kern_ipc_perm *ipcp);
 extern void __audit_ipc_set_perm(unsigned long qbytes, uid_t uid, gid_t gid, umode_t mode);
 extern void __audit_bprm(struct linux_binprm *bprm);
@@ -554,7 +560,7 @@ static inline void __audit_inode_child(struct inode *parent,
 { }
 static inline void audit_inode(struct filename *name,
 				const struct dentry *dentry,
-				unsigned int parent)
+				unsigned int aflags)
 { }
 static inline void audit_file(struct file *file)
 {
@@ -573,19 +579,6 @@ static inline void audit_seccomp(unsigned long syscall, long signr, int code)
 static inline void audit_seccomp_actions_logged(const char *names,
 						const char *old_names, int res)
 { }
-static inline int auditsc_get_stamp(struct audit_context *ctx,
-			      struct timespec64 *t, unsigned int *serial)
-{
-	return 0;
-}
-static inline kuid_t audit_get_loginuid(struct task_struct *tsk)
-{
-	return INVALID_UID;
-}
-static inline unsigned int audit_get_sessionid(struct task_struct *tsk)
-{
-	return AUDIT_SID_UNSET;
-}
 static inline void audit_ipc_obj(struct kern_ipc_perm *ipcp)
 { }
 static inline void audit_ipc_set_perm(unsigned long qbytes, uid_t uid,

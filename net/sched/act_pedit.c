@@ -47,7 +47,7 @@ static struct tcf_pedit_key_ex *tcf_pedit_keys_ex_parse(struct nlattr *nla,
 	int err = -EINVAL;
 	int rem;
 
-	if (!nla || !n)
+	if (!nla)
 		return NULL;
 
 	keys_ex = kcalloc(n, sizeof(*k), GFP_KERNEL);
@@ -70,8 +70,9 @@ static struct tcf_pedit_key_ex *tcf_pedit_keys_ex_parse(struct nlattr *nla,
 			goto err_out;
 		}
 
-		err = nla_parse_nested(tb, TCA_PEDIT_KEY_EX_MAX, ka,
-				       pedit_key_ex_policy, NULL);
+		err = nla_parse_nested_deprecated(tb, TCA_PEDIT_KEY_EX_MAX,
+						  ka, pedit_key_ex_policy,
+						  NULL);
 		if (err)
 			goto err_out;
 
@@ -108,14 +109,15 @@ err_out:
 static int tcf_pedit_key_ex_dump(struct sk_buff *skb,
 				 struct tcf_pedit_key_ex *keys_ex, int n)
 {
-	struct nlattr *keys_start = nla_nest_start(skb, TCA_PEDIT_KEYS_EX);
+	struct nlattr *keys_start = nla_nest_start_noflag(skb,
+							  TCA_PEDIT_KEYS_EX);
 
 	if (!keys_start)
 		goto nla_failure;
 	for (; n > 0; n--) {
 		struct nlattr *key_start;
 
-		key_start = nla_nest_start(skb, TCA_PEDIT_KEY_EX);
+		key_start = nla_nest_start_noflag(skb, TCA_PEDIT_KEY_EX);
 		if (!key_start)
 			goto nla_failure;
 
@@ -139,7 +141,8 @@ nla_failure:
 static int tcf_pedit_init(struct net *net, struct nlattr *nla,
 			  struct nlattr *est, struct tc_action **a,
 			  int ovr, int bind, bool rtnl_held,
-			  struct tcf_proto *tp, struct netlink_ext_ack *extack)
+			  struct tcf_proto *tp, u32 flags,
+			  struct netlink_ext_ack *extack)
 {
 	struct tc_action_net *tn = net_generic(net, pedit_net_id);
 	struct nlattr *tb[TCA_PEDIT_MAX + 1];
@@ -158,7 +161,8 @@ static int tcf_pedit_init(struct net *net, struct nlattr *nla,
 		return -EINVAL;
 	}
 
-	err = nla_parse_nested(tb, TCA_PEDIT_MAX, nla, pedit_policy, NULL);
+	err = nla_parse_nested_deprecated(tb, TCA_PEDIT_MAX, nla,
+					  pedit_policy, NULL);
 	if (err < 0)
 		return err;
 
@@ -171,6 +175,10 @@ static int tcf_pedit_init(struct net *net, struct nlattr *nla,
 	}
 
 	parm = nla_data(pattr);
+	if (!parm->nkeys) {
+		NL_SET_ERR_MSG_MOD(extack, "Pedit requires keys to be passed");
+		return -EINVAL;
+	}
 	ksize = parm->nkeys * sizeof(struct tc_pedit_key);
 	if (nla_len(pattr) < sizeof(*parm) + ksize) {
 		NL_SET_ERR_MSG_ATTR(extack, pattr, "Length of TCA_PEDIT_PARMS or TCA_PEDIT_PARMS_EX pedit attribute is invalid");
@@ -184,14 +192,8 @@ static int tcf_pedit_init(struct net *net, struct nlattr *nla,
 	index = parm->index;
 	err = tcf_idr_check_alloc(tn, &index, a, bind);
 	if (!err) {
-		if (!parm->nkeys) {
-			tcf_idr_cleanup(tn, index);
-			NL_SET_ERR_MSG_MOD(extack, "Pedit requires keys to be passed");
-			ret = -EINVAL;
-			goto out_free;
-		}
 		ret = tcf_idr_create(tn, index, est, a,
-				     &act_pedit_ops, bind, false);
+				     &act_pedit_ops, bind, false, 0);
 		if (ret) {
 			tcf_idr_cleanup(tn, index);
 			goto out_free;
@@ -499,7 +501,7 @@ static __net_init int pedit_init_net(struct net *net)
 {
 	struct tc_action_net *tn = net_generic(net, pedit_net_id);
 
-	return tc_action_net_init(tn, &act_pedit_ops);
+	return tc_action_net_init(net, tn, &act_pedit_ops);
 }
 
 static void __net_exit pedit_exit_net(struct list_head *net_list)

@@ -30,6 +30,7 @@
 #include <linux/times.h>
 #include <net/net_namespace.h>
 #include <net/neighbour.h>
+#include <net/arp.h>
 #include <net/dst.h>
 #include <net/sock.h>
 #include <net/netevent.h>
@@ -633,6 +634,7 @@ struct pneigh_entry * pneigh_lookup(struct neigh_table *tbl,
 	if (!n)
 		goto out;
 
+	n->protocol = 0;
 	write_pnet(&n->net, net);
 	memcpy(n->key, pkey, key_len);
 	n->dev = dev;
@@ -1020,6 +1022,7 @@ int __neigh_event_send(struct neighbour *neigh, struct sk_buff *skb)
 
 			atomic_set(&neigh->probes,
 				   NEIGH_VAR(neigh->parms, UCAST_PROBES));
+			neigh_del_timer(neigh);
 			neigh->nud_state     = NUD_INCOMPLETE;
 			neigh->updated = now;
 			next = now + max(NEIGH_VAR(neigh->parms, RETRANS_TIME),
@@ -1036,6 +1039,7 @@ int __neigh_event_send(struct neighbour *neigh, struct sk_buff *skb)
 		}
 	} else if (neigh->nud_state & NUD_STALE) {
 		neigh_dbg(2, "neigh %p is delayed\n", neigh);
+		neigh_del_timer(neigh);
 		neigh->nud_state = NUD_DELAY;
 		neigh->updated = jiffies;
 		neigh_add_timer(neigh, jiffies +
@@ -1118,8 +1122,9 @@ static void neigh_update_hhs(struct neighbour *neigh)
    Caller MUST hold reference count on the entry.
  */
 
-int neigh_update(struct neighbour *neigh, const u8 *lladdr, u8 new,
-		 u32 flags, u32 nlmsg_pid)
+static int __neigh_update(struct neighbour *neigh, const u8 *lladdr,
+			  u8 new, u32 flags, u32 nlmsg_pid,
+			  struct netlink_ext_ack *extack)
 {
 	u8 old;
 	int err;
@@ -1136,8 +1141,10 @@ int neigh_update(struct neighbour *neigh, const u8 *lladdr, u8 new,
 	if (!(flags & NEIGH_UPDATE_F_ADMIN) &&
 	    (old & (NUD_NOARP | NUD_PERMANENT)))
 		goto out;
-	if (neigh->dead)
+	if (neigh->dead) {
+		NL_SET_ERR_MSG(extack, "Neighbor entry is now dead");
 		goto out;
+	}
 
 	neigh_update_ext_learned(neigh, flags, &notify);
 
@@ -1174,8 +1181,10 @@ int neigh_update(struct neighbour *neigh, const u8 *lladdr, u8 new,
 		   use it, otherwise discard the request.
 		 */
 		err = -EINVAL;
-		if (!(old & NUD_VALID))
+		if (!(old & NUD_VALID)) {
+			NL_SET_ERR_MSG(extack, "No link layer address given");
 			goto out;
+		}
 		lladdr = neigh->ha;
 	}
 
@@ -1287,6 +1296,12 @@ out:
 		neigh_update_notify(neigh, nlmsg_pid);
 
 	return err;
+}
+
+int neigh_update(struct neighbour *neigh, const u8 *lladdr, u8 new,
+		 u32 flags, u32 nlmsg_pid)
+{
+	return __neigh_update(neigh, lladdr, new, flags, nlmsg_pid, NULL);
 }
 EXPORT_SYMBOL(neigh_update);
 
@@ -1643,6 +1658,18 @@ static struct neigh_table *neigh_find_table(int family)
 	return tbl;
 }
 
+const struct nla_policy nda_policy[NDA_MAX+1] = {
+	[NDA_DST]		= { .type = NLA_BINARY, .len = MAX_ADDR_LEN },
+	[NDA_LLADDR]		= { .type = NLA_BINARY, .len = MAX_ADDR_LEN },
+	[NDA_CACHEINFO]		= { .len = sizeof(struct nda_cacheinfo) },
+	[NDA_PROBES]		= { .type = NLA_U32 },
+	[NDA_VLAN]		= { .type = NLA_U16 },
+	[NDA_PORT]		= { .type = NLA_U16 },
+	[NDA_VNI]		= { .type = NLA_U32 },
+	[NDA_IFINDEX]		= { .type = NLA_U32 },
+	[NDA_MASTER]		= { .type = NLA_U32 },
+};
+
 static int neigh_delete(struct sk_buff *skb, struct nlmsghdr *nlh,
 			struct netlink_ext_ack *extack)
 {
@@ -1659,8 +1686,10 @@ static int neigh_delete(struct sk_buff *skb, struct nlmsghdr *nlh,
 		goto out;
 
 	dst_attr = nlmsg_find_attr(nlh, sizeof(*ndm), NDA_DST);
-	if (dst_attr == NULL)
+	if (!dst_attr) {
+		NL_SET_ERR_MSG(extack, "Network address not specified");
 		goto out;
+	}
 
 	ndm = nlmsg_data(nlh);
 	if (ndm->ndm_ifindex) {
@@ -1675,8 +1704,10 @@ static int neigh_delete(struct sk_buff *skb, struct nlmsghdr *nlh,
 	if (tbl == NULL)
 		return -EAFNOSUPPORT;
 
-	if (nla_len(dst_attr) < (int)tbl->key_len)
+	if (nla_len(dst_attr) < (int)tbl->key_len) {
+		NL_SET_ERR_MSG(extack, "Invalid network address");
 		goto out;
+	}
 
 	if (ndm->ndm_flags & NTF_PROXY) {
 		err = pneigh_delete(tbl, net, nla_data(dst_attr), dev);
@@ -1692,10 +1723,9 @@ static int neigh_delete(struct sk_buff *skb, struct nlmsghdr *nlh,
 		goto out;
 	}
 
-	err = neigh_update(neigh, NULL, NUD_FAILED,
-			   NEIGH_UPDATE_F_OVERRIDE |
-			   NEIGH_UPDATE_F_ADMIN,
-			   NETLINK_CB(skb).portid);
+	err = __neigh_update(neigh, NULL, NUD_FAILED,
+			     NEIGH_UPDATE_F_OVERRIDE | NEIGH_UPDATE_F_ADMIN,
+			     NETLINK_CB(skb).portid, extack);
 	write_lock_bh(&tbl->lock);
 	neigh_release(neigh);
 	neigh_remove_one(neigh, tbl);
@@ -1716,16 +1746,20 @@ static int neigh_add(struct sk_buff *skb, struct nlmsghdr *nlh,
 	struct net_device *dev = NULL;
 	struct neighbour *neigh;
 	void *dst, *lladdr;
+	u8 protocol = 0;
 	int err;
 
 	ASSERT_RTNL();
-	err = nlmsg_parse(nlh, sizeof(*ndm), tb, NDA_MAX, NULL, extack);
+	err = nlmsg_parse_deprecated(nlh, sizeof(*ndm), tb, NDA_MAX,
+				     NULL, extack);
 	if (err < 0)
 		goto out;
 
 	err = -EINVAL;
-	if (tb[NDA_DST] == NULL)
+	if (!tb[NDA_DST]) {
+		NL_SET_ERR_MSG(extack, "Network address not specified");
 		goto out;
+	}
 
 	ndm = nlmsg_data(nlh);
 	if (ndm->ndm_ifindex) {
@@ -1735,18 +1769,31 @@ static int neigh_add(struct sk_buff *skb, struct nlmsghdr *nlh,
 			goto out;
 		}
 
-		if (tb[NDA_LLADDR] && nla_len(tb[NDA_LLADDR]) < dev->addr_len)
+		if (tb[NDA_LLADDR] && nla_len(tb[NDA_LLADDR]) < dev->addr_len) {
+			NL_SET_ERR_MSG(extack, "Invalid link address");
 			goto out;
+		}
 	}
 
 	tbl = neigh_find_table(ndm->ndm_family);
 	if (tbl == NULL)
 		return -EAFNOSUPPORT;
 
-	if (nla_len(tb[NDA_DST]) < (int)tbl->key_len)
+	if (nla_len(tb[NDA_DST]) < (int)tbl->key_len) {
+		NL_SET_ERR_MSG(extack, "Invalid network address");
 		goto out;
+	}
+
 	dst = nla_data(tb[NDA_DST]);
 	lladdr = tb[NDA_LLADDR] ? nla_data(tb[NDA_LLADDR]) : NULL;
+
+	if (tb[NDA_PROTOCOL]) {
+		if (nla_len(tb[NDA_PROTOCOL]) != sizeof(u8)) {
+			NL_SET_ERR_MSG(extack, "Invalid protocol attribute");
+			goto out;
+		}
+		protocol = nla_get_u8(tb[NDA_PROTOCOL]);
+	}
 
 	if (ndm->ndm_flags & NTF_PROXY) {
 		struct pneigh_entry *pn;
@@ -1755,13 +1802,17 @@ static int neigh_add(struct sk_buff *skb, struct nlmsghdr *nlh,
 		pn = pneigh_lookup(tbl, net, dst, dev, 1);
 		if (pn) {
 			pn->flags = ndm->ndm_flags;
+			if (protocol)
+				pn->protocol = protocol;
 			err = 0;
 		}
 		goto out;
 	}
 
-	if (dev == NULL)
+	if (!dev) {
+		NL_SET_ERR_MSG(extack, "Device not specified");
 		goto out;
+	}
 
 	neigh = neigh_lookup(tbl, dst, dev);
 	if (neigh == NULL) {
@@ -1793,8 +1844,12 @@ static int neigh_add(struct sk_buff *skb, struct nlmsghdr *nlh,
 		neigh_event_send(neigh, NULL);
 		err = 0;
 	} else
-		err = neigh_update(neigh, lladdr, ndm->ndm_state, flags,
-				   NETLINK_CB(skb).portid);
+		err = __neigh_update(neigh, lladdr, ndm->ndm_state, flags,
+				     NETLINK_CB(skb).portid, extack);
+
+	if (protocol)
+		neigh->protocol = protocol;
+
 	neigh_release(neigh);
 
 out:
@@ -1805,7 +1860,7 @@ static int neightbl_fill_parms(struct sk_buff *skb, struct neigh_parms *parms)
 {
 	struct nlattr *nest;
 
-	nest = nla_nest_start(skb, NDTA_PARMS);
+	nest = nla_nest_start_noflag(skb, NDTA_PARMS);
 	if (nest == NULL)
 		return -ENOBUFS;
 
@@ -2007,8 +2062,8 @@ static int neightbl_set(struct sk_buff *skb, struct nlmsghdr *nlh,
 	bool found = false;
 	int err, tidx;
 
-	err = nlmsg_parse(nlh, sizeof(*ndtmsg), tb, NDTA_MAX,
-			  nl_neightbl_policy, extack);
+	err = nlmsg_parse_deprecated(nlh, sizeof(*ndtmsg), tb, NDTA_MAX,
+				     nl_neightbl_policy, extack);
 	if (err < 0)
 		goto errout;
 
@@ -2045,8 +2100,9 @@ static int neightbl_set(struct sk_buff *skb, struct nlmsghdr *nlh,
 		struct neigh_parms *p;
 		int i, ifindex = 0;
 
-		err = nla_parse_nested(tbp, NDTPA_MAX, tb[NDTA_PARMS],
-				       nl_ntbl_parm_policy, extack);
+		err = nla_parse_nested_deprecated(tbp, NDTPA_MAX,
+						  tb[NDTA_PARMS],
+						  nl_ntbl_parm_policy, extack);
 		if (err < 0)
 			goto errout_tbl_lock;
 
@@ -2288,6 +2344,9 @@ static int neigh_fill_info(struct sk_buff *skb, struct neighbour *neigh,
 	    nla_put(skb, NDA_CACHEINFO, sizeof(ci), &ci))
 		goto nla_put_failure;
 
+	if (neigh->protocol && nla_put_u8(skb, NDA_PROTOCOL, neigh->protocol))
+		goto nla_put_failure;
+
 	nlmsg_end(skb, nlh);
 	return 0;
 
@@ -2317,6 +2376,9 @@ static int pneigh_fill_info(struct sk_buff *skb, struct pneigh_entry *pn,
 	ndm->ndm_state	 = NUD_NONE;
 
 	if (nla_put(skb, NDA_DST, tbl->key_len, pn->key))
+		goto nla_put_failure;
+
+	if (pn->protocol && nla_put_u8(skb, NDA_PROTOCOL, pn->protocol))
 		goto nla_put_failure;
 
 	nlmsg_end(skb, nlh);
@@ -2480,11 +2542,11 @@ static int neigh_valid_dump_req(const struct nlmsghdr *nlh,
 			return -EINVAL;
 		}
 
-		err = nlmsg_parse_strict(nlh, sizeof(struct ndmsg), tb, NDA_MAX,
-					 NULL, extack);
+		err = nlmsg_parse_deprecated_strict(nlh, sizeof(struct ndmsg),
+						    tb, NDA_MAX, NULL, extack);
 	} else {
-		err = nlmsg_parse(nlh, sizeof(struct ndmsg), tb, NDA_MAX,
-				  NULL, extack);
+		err = nlmsg_parse_deprecated(nlh, sizeof(struct ndmsg), tb,
+					     NDA_MAX, NULL, extack);
 	}
 	if (err < 0)
 		return err;
@@ -2566,6 +2628,186 @@ static int neigh_dump_info(struct sk_buff *skb, struct netlink_callback *cb)
 	return skb->len;
 }
 
+static int neigh_valid_get_req(const struct nlmsghdr *nlh,
+			       struct neigh_table **tbl,
+			       void **dst, int *dev_idx, u8 *ndm_flags,
+			       struct netlink_ext_ack *extack)
+{
+	struct nlattr *tb[NDA_MAX + 1];
+	struct ndmsg *ndm;
+	int err, i;
+
+	if (nlh->nlmsg_len < nlmsg_msg_size(sizeof(*ndm))) {
+		NL_SET_ERR_MSG(extack, "Invalid header for neighbor get request");
+		return -EINVAL;
+	}
+
+	ndm = nlmsg_data(nlh);
+	if (ndm->ndm_pad1  || ndm->ndm_pad2  || ndm->ndm_state ||
+	    ndm->ndm_type) {
+		NL_SET_ERR_MSG(extack, "Invalid values in header for neighbor get request");
+		return -EINVAL;
+	}
+
+	if (ndm->ndm_flags & ~NTF_PROXY) {
+		NL_SET_ERR_MSG(extack, "Invalid flags in header for neighbor get request");
+		return -EINVAL;
+	}
+
+	err = nlmsg_parse_deprecated_strict(nlh, sizeof(struct ndmsg), tb,
+					    NDA_MAX, nda_policy, extack);
+	if (err < 0)
+		return err;
+
+	*ndm_flags = ndm->ndm_flags;
+	*dev_idx = ndm->ndm_ifindex;
+	*tbl = neigh_find_table(ndm->ndm_family);
+	if (*tbl == NULL) {
+		NL_SET_ERR_MSG(extack, "Unsupported family in header for neighbor get request");
+		return -EAFNOSUPPORT;
+	}
+
+	for (i = 0; i <= NDA_MAX; ++i) {
+		if (!tb[i])
+			continue;
+
+		switch (i) {
+		case NDA_DST:
+			if (nla_len(tb[i]) != (int)(*tbl)->key_len) {
+				NL_SET_ERR_MSG(extack, "Invalid network address in neighbor get request");
+				return -EINVAL;
+			}
+			*dst = nla_data(tb[i]);
+			break;
+		default:
+			NL_SET_ERR_MSG(extack, "Unsupported attribute in neighbor get request");
+			return -EINVAL;
+		}
+	}
+
+	return 0;
+}
+
+static inline size_t neigh_nlmsg_size(void)
+{
+	return NLMSG_ALIGN(sizeof(struct ndmsg))
+	       + nla_total_size(MAX_ADDR_LEN) /* NDA_DST */
+	       + nla_total_size(MAX_ADDR_LEN) /* NDA_LLADDR */
+	       + nla_total_size(sizeof(struct nda_cacheinfo))
+	       + nla_total_size(4)  /* NDA_PROBES */
+	       + nla_total_size(1); /* NDA_PROTOCOL */
+}
+
+static int neigh_get_reply(struct net *net, struct neighbour *neigh,
+			   u32 pid, u32 seq)
+{
+	struct sk_buff *skb;
+	int err = 0;
+
+	skb = nlmsg_new(neigh_nlmsg_size(), GFP_KERNEL);
+	if (!skb)
+		return -ENOBUFS;
+
+	err = neigh_fill_info(skb, neigh, pid, seq, RTM_NEWNEIGH, 0);
+	if (err) {
+		kfree_skb(skb);
+		goto errout;
+	}
+
+	err = rtnl_unicast(skb, net, pid);
+errout:
+	return err;
+}
+
+static inline size_t pneigh_nlmsg_size(void)
+{
+	return NLMSG_ALIGN(sizeof(struct ndmsg))
+	       + nla_total_size(MAX_ADDR_LEN) /* NDA_DST */
+	       + nla_total_size(1); /* NDA_PROTOCOL */
+}
+
+static int pneigh_get_reply(struct net *net, struct pneigh_entry *neigh,
+			    u32 pid, u32 seq, struct neigh_table *tbl)
+{
+	struct sk_buff *skb;
+	int err = 0;
+
+	skb = nlmsg_new(pneigh_nlmsg_size(), GFP_KERNEL);
+	if (!skb)
+		return -ENOBUFS;
+
+	err = pneigh_fill_info(skb, neigh, pid, seq, RTM_NEWNEIGH, 0, tbl);
+	if (err) {
+		kfree_skb(skb);
+		goto errout;
+	}
+
+	err = rtnl_unicast(skb, net, pid);
+errout:
+	return err;
+}
+
+static int neigh_get(struct sk_buff *in_skb, struct nlmsghdr *nlh,
+		     struct netlink_ext_ack *extack)
+{
+	struct net *net = sock_net(in_skb->sk);
+	struct net_device *dev = NULL;
+	struct neigh_table *tbl = NULL;
+	struct neighbour *neigh;
+	void *dst = NULL;
+	u8 ndm_flags = 0;
+	int dev_idx = 0;
+	int err;
+
+	err = neigh_valid_get_req(nlh, &tbl, &dst, &dev_idx, &ndm_flags,
+				  extack);
+	if (err < 0)
+		return err;
+
+	if (dev_idx) {
+		dev = __dev_get_by_index(net, dev_idx);
+		if (!dev) {
+			NL_SET_ERR_MSG(extack, "Unknown device ifindex");
+			return -ENODEV;
+		}
+	}
+
+	if (!dst) {
+		NL_SET_ERR_MSG(extack, "Network address not specified");
+		return -EINVAL;
+	}
+
+	if (ndm_flags & NTF_PROXY) {
+		struct pneigh_entry *pn;
+
+		pn = pneigh_lookup(tbl, net, dst, dev, 0);
+		if (!pn) {
+			NL_SET_ERR_MSG(extack, "Proxy neighbour entry not found");
+			return -ENOENT;
+		}
+		return pneigh_get_reply(net, pn, NETLINK_CB(in_skb).portid,
+					nlh->nlmsg_seq, tbl);
+	}
+
+	if (!dev) {
+		NL_SET_ERR_MSG(extack, "No device specified");
+		return -EINVAL;
+	}
+
+	neigh = neigh_lookup(tbl, dst, dev);
+	if (!neigh) {
+		NL_SET_ERR_MSG(extack, "Neighbour entry not found");
+		return -ENOENT;
+	}
+
+	err = neigh_get_reply(net, neigh, NETLINK_CB(in_skb).portid,
+			      nlh->nlmsg_seq);
+
+	neigh_release(neigh);
+
+	return err;
+}
+
 void neigh_for_each(struct neigh_table *tbl, void (*cb)(struct neighbour *, void *), void *cookie)
 {
 	int chain;
@@ -2635,7 +2877,13 @@ int neigh_xmit(int index, struct net_device *dev,
 		if (!tbl)
 			goto out;
 		rcu_read_lock_bh();
-		neigh = __neigh_lookup_noref(tbl, addr, dev);
+		if (index == NEIGH_ARP_TABLE) {
+			u32 key = *((u32 *)addr);
+
+			neigh = __ipv4_neigh_lookup_noref(dev, key);
+		} else {
+			neigh = __neigh_lookup_noref(tbl, addr, dev);
+		}
 		if (!neigh)
 			neigh = __neigh_create(tbl, addr, dev, false);
 		err = PTR_ERR(neigh);
@@ -2980,15 +3228,6 @@ static const struct seq_operations neigh_stat_seq_ops = {
 };
 #endif /* CONFIG_PROC_FS */
 
-static inline size_t neigh_nlmsg_size(void)
-{
-	return NLMSG_ALIGN(sizeof(struct ndmsg))
-	       + nla_total_size(MAX_ADDR_LEN) /* NDA_DST */
-	       + nla_total_size(MAX_ADDR_LEN) /* NDA_LLADDR */
-	       + nla_total_size(sizeof(struct nda_cacheinfo))
-	       + nla_total_size(4); /* NDA_PROBES */
-}
-
 static void __neigh_notify(struct neighbour *n, int type, int flags,
 			   u32 pid)
 {
@@ -3021,8 +3260,6 @@ void neigh_app_ns(struct neighbour *n)
 EXPORT_SYMBOL(neigh_app_ns);
 
 #ifdef CONFIG_SYSCTL
-static int zero;
-static int int_max = INT_MAX;
 static int unres_qlen_max = INT_MAX / SKB_TRUESIZE(ETH_FRAME_LEN);
 
 static int proc_unres_qlen(struct ctl_table *ctl, int write,
@@ -3031,7 +3268,7 @@ static int proc_unres_qlen(struct ctl_table *ctl, int write,
 	int size, ret;
 	struct ctl_table tmp = *ctl;
 
-	tmp.extra1 = &zero;
+	tmp.extra1 = SYSCTL_ZERO;
 	tmp.extra2 = &unres_qlen_max;
 	tmp.data = &size;
 
@@ -3096,8 +3333,8 @@ static int neigh_proc_dointvec_zero_intmax(struct ctl_table *ctl, int write,
 	struct ctl_table tmp = *ctl;
 	int ret;
 
-	tmp.extra1 = &zero;
-	tmp.extra2 = &int_max;
+	tmp.extra1 = SYSCTL_ZERO;
+	tmp.extra2 = SYSCTL_INT_MAX;
 
 	ret = proc_dointvec_minmax(&tmp, write, buffer, lenp, ppos);
 	neigh_proc_update(ctl, write);
@@ -3242,24 +3479,24 @@ static struct neigh_sysctl_table {
 			.procname	= "gc_thresh1",
 			.maxlen		= sizeof(int),
 			.mode		= 0644,
-			.extra1 	= &zero,
-			.extra2		= &int_max,
+			.extra1		= SYSCTL_ZERO,
+			.extra2		= SYSCTL_INT_MAX,
 			.proc_handler	= proc_dointvec_minmax,
 		},
 		[NEIGH_VAR_GC_THRESH2] = {
 			.procname	= "gc_thresh2",
 			.maxlen		= sizeof(int),
 			.mode		= 0644,
-			.extra1 	= &zero,
-			.extra2		= &int_max,
+			.extra1		= SYSCTL_ZERO,
+			.extra2		= SYSCTL_INT_MAX,
 			.proc_handler	= proc_dointvec_minmax,
 		},
 		[NEIGH_VAR_GC_THRESH3] = {
 			.procname	= "gc_thresh3",
 			.maxlen		= sizeof(int),
 			.mode		= 0644,
-			.extra1 	= &zero,
-			.extra2		= &int_max,
+			.extra1		= SYSCTL_ZERO,
+			.extra2		= SYSCTL_INT_MAX,
 			.proc_handler	= proc_dointvec_minmax,
 		},
 		{},
@@ -3372,7 +3609,7 @@ static int __init neigh_init(void)
 {
 	rtnl_register(PF_UNSPEC, RTM_NEWNEIGH, neigh_add, NULL, 0);
 	rtnl_register(PF_UNSPEC, RTM_DELNEIGH, neigh_delete, NULL, 0);
-	rtnl_register(PF_UNSPEC, RTM_GETNEIGH, NULL, neigh_dump_info, 0);
+	rtnl_register(PF_UNSPEC, RTM_GETNEIGH, neigh_get, neigh_dump_info, 0);
 
 	rtnl_register(PF_UNSPEC, RTM_GETNEIGHTBL, NULL, neightbl_dump_info,
 		      0);
