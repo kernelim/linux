@@ -258,13 +258,23 @@ void clear_spec_ctrl_pcp(void)
 	ibrs_mode = IBRS_DISABLED;
 }
 
-static void sync_all_cpus_spec_ctrl(void)
+static void __sync_all_cpus_msr(u32 msr_no, u64 val)
 {
 	int cpu;
 	get_online_cpus();
 	for_each_online_cpu(cpu)
-		wrmsrl_on_cpu(cpu, MSR_IA32_SPEC_CTRL, SPEC_CTRL_MSR_REFRESH);
+		wrmsrl_on_cpu(cpu, msr_no, val);
 	put_online_cpus();
+}
+
+static void sync_all_cpus_spec_ctrl(void)
+{
+	__sync_all_cpus_msr(MSR_IA32_SPEC_CTRL, SPEC_CTRL_MSR_REFRESH);
+}
+
+static void sync_all_cpus_srbds(u64 val)
+{
+	__sync_all_cpus_msr(MSR_IA32_MCU_OPT_CTRL, val);
 }
 
 static void __sync_this_cpu_ibp(void *data)
@@ -453,7 +463,7 @@ void spec_ctrl_init(void)
 void spec_ctrl_rescan_cpuid(void)
 {
 	enum spectre_v2_mitigation old_mode;
-	bool old_ibrs, old_ibpb, old_ssbd, old_l1df, old_mds;
+	bool old_ibrs, old_ibpb, old_ssbd, old_l1df, old_mds, old_srbds;
 	bool ssbd_changed;
 	int cpu;
 
@@ -469,6 +479,7 @@ void spec_ctrl_rescan_cpuid(void)
 		old_l1df = boot_cpu_has(X86_FEATURE_FLUSH_L1D);
 		old_mds  = boot_cpu_has(X86_FEATURE_MD_CLEAR);
 		old_mode = spectre_v2_get_mitigation();
+		old_srbds = boot_cpu_has(X86_FEATURE_SRBDS_CTRL);
 
 		/* detect spec ctrl related cpuid additions */
 		get_cpu_cap(&boot_cpu_data);
@@ -488,6 +499,7 @@ void spec_ctrl_rescan_cpuid(void)
 		if (old_ibrs == boot_cpu_has(X86_FEATURE_IBRS) &&
 		    old_ibpb == boot_cpu_has(X86_FEATURE_IBPB) &&
 		    old_mds  == boot_cpu_has(X86_FEATURE_MD_CLEAR) &&
+		    old_srbds == boot_cpu_has(X86_FEATURE_SRBDS_CTRL) &&
 		    !ssbd_changed)
 			goto done;
 
@@ -577,6 +589,23 @@ void spec_ctrl_rescan_cpuid(void)
 			    (new_taa != taa_mitigation)) {
 				taa_mitigation = new_taa;
 				taa_print_mitigation();
+			}
+		}
+
+		/*
+		 * Update setting when SRBDS mitigation MSR first appears.
+		 */
+		if (!old_srbds && boot_cpu_has(X86_FEATURE_SRBDS_CTRL)) {
+			srbds_select_mitigation();
+			if (srbds_mitigation_off()) {
+				/*
+				 * Turn off SRBDS mitigation for all CPUs.
+				 */
+				u64 mcu_ctrl;
+
+				rdmsrl(MSR_IA32_MCU_OPT_CTRL, mcu_ctrl);
+				mcu_ctrl |= RNGDS_MITG_DIS;
+				sync_all_cpus_srbds(mcu_ctrl);
 			}
 		}
 	}

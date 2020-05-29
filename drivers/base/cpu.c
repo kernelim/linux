@@ -317,6 +317,10 @@ ssize_t __weak cpu_show_tsx_async_abort(struct sysdev_class *class, char *buf)
 {
 	return sprintf(buf, "Not affected\n");
 }
+ssize_t __weak cpu_show_srbds(struct sysdev_class *class, char *buf)
+{
+	return sprintf(buf, "Not affected\n");
+}
 
 static SYSDEV_CLASS_ATTR(meltdown, 0400, cpu_show_meltdown, NULL);
 static SYSDEV_CLASS_ATTR(spectre_v1, 0400, cpu_show_spectre_v1, NULL);
@@ -326,6 +330,7 @@ static SYSDEV_CLASS_ATTR(l1tf, 0400, cpu_show_l1tf, NULL);
 static SYSDEV_CLASS_ATTR(mds, 0400, cpu_show_mds, NULL);
 static SYSDEV_CLASS_ATTR(itlb_multihit, 0400, cpu_show_itlb_multihit, NULL);
 static SYSDEV_CLASS_ATTR(tsx_async_abort, 0400, cpu_show_tsx_async_abort, NULL);
+static SYSDEV_CLASS_ATTR(srbds, 0400, cpu_show_srbds, NULL);
 
 static struct attribute *cpu_root_vulnerabilities_attrs[] = {
 	&attr_meltdown.attr,
@@ -336,6 +341,7 @@ static struct attribute *cpu_root_vulnerabilities_attrs[] = {
 	&attr_mds.attr,
 	&attr_itlb_multihit.attr,
 	&attr_tsx_async_abort.attr,
+	&attr_srbds.attr,
 	NULL
 };
 

@@ -557,11 +557,9 @@ static int bond_update_speed_duplex(struct slave *slave)
 
 	res = slave_dev->ethtool_ops->get_settings(slave_dev, &etool);
 	if (res < 0) {
-		slave->link = BOND_LINK_DOWN;
 		return 1;
 	}
 	if (etool.speed == 0 || etool.speed == ((__u32) -1)) {
-		slave->link = BOND_LINK_DOWN;
 		return 1;
 	}
 	switch (etool.duplex) {
@@ -569,7 +567,6 @@ static int bond_update_speed_duplex(struct slave *slave)
 	case DUPLEX_HALF:
 		break;
 	default:
-		slave->link = BOND_LINK_DOWN;
 		return 1;
 	}
 

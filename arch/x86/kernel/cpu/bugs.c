@@ -216,6 +216,7 @@ void __init check_bugs(void)
 
 	mds_select_mitigation();
 	taa_select_mitigation();
+	srbds_select_mitigation();
 
 	/* Select the proper CPU mitigations before patching alternatives */
 	spec_ctrl_init();
@@ -441,6 +442,106 @@ static int __init tsx_async_abort_parse_cmdline(char *str)
 	return 0;
 }
 early_param("tsx_async_abort", tsx_async_abort_parse_cmdline);
+
+#undef pr_fmt
+#define pr_fmt(fmt)	"SRBDS: " fmt
+
+enum srbds_mitigations {
+	SRBDS_MITIGATION_OFF,
+	SRBDS_MITIGATION_UCODE_NEEDED,
+	SRBDS_MITIGATION_FULL,
+	SRBDS_MITIGATION_TSX_OFF,
+	SRBDS_MITIGATION_HYPERVISOR,
+};
+
+static enum srbds_mitigations srbds_mitigation __read_mostly = SRBDS_MITIGATION_FULL;
+
+static const char * const srbds_strings[] = {
+	[SRBDS_MITIGATION_OFF]		= "Vulnerable",
+	[SRBDS_MITIGATION_UCODE_NEEDED]	= "Vulnerable: No microcode",
+	[SRBDS_MITIGATION_FULL]		= "Mitigation: Microcode",
+	[SRBDS_MITIGATION_TSX_OFF]	= "Mitigation: TSX disabled",
+	[SRBDS_MITIGATION_HYPERVISOR]	= "Unknown: Dependent on hypervisor status",
+};
+
+static bool srbds_off;
+
+void update_srbds_msr(void)
+{
+	u64 mcu_ctrl;
+
+	if (!boot_cpu_has_bug(X86_BUG_SRBDS))
+		return;
+
+	if (boot_cpu_has(X86_FEATURE_HYPERVISOR))
+		return;
+
+	if (srbds_mitigation == SRBDS_MITIGATION_UCODE_NEEDED)
+		return;
+
+	rdmsrl(MSR_IA32_MCU_OPT_CTRL, mcu_ctrl);
+
+	switch (srbds_mitigation) {
+	case SRBDS_MITIGATION_OFF:
+	case SRBDS_MITIGATION_TSX_OFF:
+		mcu_ctrl |= RNGDS_MITG_DIS;
+		break;
+	case SRBDS_MITIGATION_FULL:
+		mcu_ctrl &= ~RNGDS_MITG_DIS;
+		break;
+	default:
+		break;
+	}
+
+	wrmsrl(MSR_IA32_MCU_OPT_CTRL, mcu_ctrl);
+}
+
+void srbds_select_mitigation(void)
+{
+	u64 ia32_cap;
+
+	if (!boot_cpu_has_bug(X86_BUG_SRBDS))
+		return;
+
+	/* Reset srbds_mitigation */
+	srbds_mitigation = SRBDS_MITIGATION_FULL;
+
+	/*
+	 * Check to see if this is one of the MDS_NO systems supporting
+	 * TSX that are only exposed to SRBDS when TSX is enabled.
+	 */
+	ia32_cap = x86_read_arch_cap_msr();
+	if ((ia32_cap & ARCH_CAP_MDS_NO) && !boot_cpu_has(X86_FEATURE_RTM))
+		srbds_mitigation = SRBDS_MITIGATION_TSX_OFF;
+	else if (boot_cpu_has(X86_FEATURE_HYPERVISOR))
+		srbds_mitigation = SRBDS_MITIGATION_HYPERVISOR;
+	else if (!boot_cpu_has(X86_FEATURE_SRBDS_CTRL))
+		srbds_mitigation = SRBDS_MITIGATION_UCODE_NEEDED;
+	else if (srbds_off)
+		srbds_mitigation = SRBDS_MITIGATION_OFF;
+
+	update_srbds_msr();
+	pr_info("%s\n", srbds_strings[srbds_mitigation]);
+}
+
+static int __init srbds_parse_cmdline(char *str)
+{
+	if (!str)
+		return -EINVAL;
+
+	if (!boot_cpu_has_bug(X86_BUG_SRBDS))
+		return 0;
+
+	srbds_off = !strcmp(str, "off");
+	return 0;
+}
+early_param("srbds", srbds_parse_cmdline);
+
+bool srbds_mitigation_off(void)
+{
+	return (srbds_mitigation == SRBDS_MITIGATION_OFF) ||
+	       (srbds_mitigation == SRBDS_MITIGATION_TSX_OFF);
+}
 
 #undef pr_fmt
 #define pr_fmt(fmt)     "Spectre V1 : " fmt
@@ -1239,5 +1340,17 @@ ssize_t cpu_show_tsx_async_abort(struct sysdev_class *class, char *buf)
 	if (!boot_cpu_has_bug(X86_BUG_TAA))
 		return sprintf(buf, "Not affected\n");
 	return tsx_async_abort_show_state(buf);
+}
+
+static ssize_t srbds_show_state(char *buf)
+{
+	return sprintf(buf, "%s\n", srbds_strings[srbds_mitigation]);
+}
+
+ssize_t cpu_show_srbds(struct sysdev_class *class, char *buf)
+{
+	if (!boot_cpu_has_bug(X86_BUG_SRBDS))
+		return sprintf(buf, "Not affected\n");
+	return srbds_show_state(buf);
 }
 #endif
