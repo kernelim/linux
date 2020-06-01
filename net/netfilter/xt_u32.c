@@ -12,6 +12,7 @@
 #include <linux/types.h>
 #include <linux/netfilter/x_tables.h>
 #include <linux/netfilter/xt_u32.h>
+#include <linux/rh_features.h>
 
 static bool u32_match_it(const struct xt_u32 *data,
 			 const struct sk_buff *skb)
@@ -106,6 +107,7 @@ static struct xt_match xt_u32_mt_reg __read_mostly = {
 
 static int __init u32_mt_init(void)
 {
+	rh_mark_used_feature("xt_u32");
 	return xt_register_match(&xt_u32_mt_reg);
 }
 

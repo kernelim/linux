@@ -49,6 +49,30 @@ const struct x86_cpu_id *x86_match_cpu(const struct x86_cpu_id *match)
 }
 EXPORT_SYMBOL(x86_match_cpu);
 
+const struct x86_cpu_id_v2 *x86_match_cpu_v2(const struct x86_cpu_id_v2 *match)
+{
+	const struct x86_cpu_id_v2 *m;
+	struct cpuinfo_x86 *c = &boot_cpu_data;
+
+	for (m = match;
+	     m->vendor | m->family | m->model | m->steppings | m->feature;
+	     m++) {
+		if (m->vendor != X86_VENDOR_ANY && c->x86_vendor != m->vendor)
+			continue;
+		if (m->family != X86_FAMILY_ANY && c->x86 != m->family)
+			continue;
+		if (m->model != X86_MODEL_ANY && c->x86_model != m->model)
+			continue;
+		if (m->steppings != X86_STEPPING_ANY &&
+		    !(BIT(c->x86_stepping) & m->steppings))
+			continue;
+		if (m->feature != X86_FEATURE_ANY && !cpu_has(c, m->feature))
+			continue;
+		return m;
+	}
+	return NULL;
+}
+
 static const struct x86_cpu_desc *
 x86_match_cpu_with_stepping(const struct x86_cpu_desc *match)
 {

@@ -229,6 +229,9 @@ export srctree objtree VPATH
 # of make so .config is not included in this case either (for *config).
 
 version_h := include/generated/uapi/linux/version.h
+
+export version_h
+
 old_version_h := include/linux/version.h
 
 clean-targets := %clean mrproper cleandocs
@@ -1161,7 +1164,7 @@ define filechk_version.h
 	echo '#define RHEL_RELEASE "$(RHEL_RELEASE)"';)
 endef
 
-$(version_h): $(srctree)/Makefile FORCE
+$(version_h): $(srctree)/Makefile $(srctree)/Makefile.rhelver FORCE
 	$(call filechk,version.h)
 	$(Q)rm -f $(old_version_h)
 
