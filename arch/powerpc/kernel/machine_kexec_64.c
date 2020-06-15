@@ -26,6 +26,7 @@
 #include <asm/sections.h>	/* _end */
 #include <asm/prom.h>
 #include <asm/smp.h>
+#include <asm/asm-prototypes.h>
 
 int default_machine_kexec_prepare(struct kimage *image)
 {

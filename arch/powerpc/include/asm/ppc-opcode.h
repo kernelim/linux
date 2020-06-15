@@ -53,6 +53,8 @@
 #define PPC_INST_TLBIVAX		0x7c000624
 #define PPC_INST_TLBSRX_DOT		0x7c0006a5
 
+#define PPC_INST_BLR			0x4e800020
+
 /* macros to insert fields into opcodes */
 #define __PPC_RA(a)	(((a) & 0x1f) << 16)
 #define __PPC_RB(b)	(((b) & 0x1f) << 11)

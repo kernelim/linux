@@ -4,9 +4,6 @@
 #ifndef _ASM_POWERPC_SYSTEM_H
 #define _ASM_POWERPC_SYSTEM_H
 
-#include <linux/kernel.h>
-#include <linux/irqflags.h>
-
 #include <asm/hw_irq.h>
 
 /*
@@ -39,7 +36,6 @@
 #define rmb()  __asm__ __volatile__ ("sync" : : : "memory")
 #define wmb()  __asm__ __volatile__ ("sync" : : : "memory")
 #define gmb()  __asm__ __volatile__ ("ori 31,31,0": : : "memory")
-#define barrier_nospec() gmb()
 
 #define read_barrier_depends()  do { } while(0)
 
@@ -75,6 +71,23 @@
  */
 #define data_barrier(x)	\
 	asm volatile("twi 0,%0,0; isync" : : "r" (x) : "memory");
+
+#ifdef CONFIG_PPC_BARRIER_NOSPEC
+/*
+ * Prevent execution of subsequent instructions until preceding branches have
+ * been fully resolved and are no longer executing speculatively.
+ */
+#define barrier_nospec_asm NOSPEC_BARRIER_FIXUP_SECTION; nop
+
+// This also acts as a compiler barrier due to the memory clobber.
+#define barrier_nospec() asm (stringify_in_c(barrier_nospec_asm) ::: "memory")
+
+#else /* !CONFIG_PPC_BARRIER_NOSPEC */
+#define barrier_nospec_asm
+#define barrier_nospec()
+#endif /* CONFIG_PPC_BARRIER_NOSPEC */
+
+#ifndef __ASSEMBLY__
 
 struct task_struct;
 struct pt_regs;
@@ -550,5 +563,6 @@ extern void account_system_vtime(struct task_struct *);
 
 extern struct dentry *powerpc_debugfs_root;
 
+#endif /* __ASSEMBLY__ */
 #endif /* __KERNEL__ */
 #endif /* _ASM_POWERPC_SYSTEM_H */

@@ -59,6 +59,7 @@
 #include <asm/dbell.h>
 #endif
 #include <asm/fadump.h>
+#include <asm/asm-prototypes.h>
 
 #if defined(CONFIG_DEBUGGER) || defined(CONFIG_KEXEC)
 int (*__debugger)(struct pt_regs *regs);

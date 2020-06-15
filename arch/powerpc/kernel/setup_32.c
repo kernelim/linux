@@ -41,8 +41,6 @@
 #include <asm/mmu_context.h>
 #include <asm/swiotlb.h>
 
-#include "setup.h"
-
 #define DBG(fmt...)
 
 extern void bootx_init(unsigned long r4, unsigned long phys);

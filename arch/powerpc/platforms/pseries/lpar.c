@@ -39,6 +39,7 @@
 #include <asm/cputable.h>
 #include <asm/udbg.h>
 #include <asm/smp.h>
+#include <asm/asm-prototypes.h>
 
 #include "plpar_wrappers.h"
 #include "pseries.h"

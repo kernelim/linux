@@ -20,6 +20,7 @@
  */
 #include <linux/uaccess.h>
 #include <linux/hardirq.h>
+#include <asm/asm-prototypes.h>
 
 int enter_vmx_usercopy(void)
 {

@@ -50,6 +50,7 @@
 #include <asm/paca.h>
 #endif
 #include <asm/vdso.h>
+#include <asm/asm-prototypes.h>
 
 #ifdef DEBUG
 #include <asm/udbg.h>

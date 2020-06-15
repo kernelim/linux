@@ -65,8 +65,6 @@
 #include <asm/swiotlb.h>
 #include <asm/mmu_context.h>
 
-#include "setup.h"
-
 #ifdef DEBUG
 #define DBG(fmt...) udbg_printf(fmt)
 #else
@@ -571,6 +569,8 @@ void __init setup_arch(char **cmdline_p)
 	if (ppc_swiotlb_enable)
 		swiotlb_init(1);
 #endif
+
+	setup_barrier_nospec();
 
 	paging_init();
 

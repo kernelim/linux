@@ -11,6 +11,8 @@
 #include <asm/ptrace.h>
 #include <asm/processor.h>
 
+#ifndef __ASSEMBLY__
+
 extern void timer_interrupt(struct pt_regs *);
 
 #ifdef CONFIG_PPC64
@@ -135,5 +137,6 @@ static inline int irqs_disabled_flags(unsigned long flags)
  */
 struct irq_chip;
 
+#endif  /* __ASSEMBLY__ */
 #endif	/* __KERNEL__ */
 #endif	/* _ASM_POWERPC_HW_IRQ_H */
