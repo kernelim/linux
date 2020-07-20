@@ -141,8 +141,10 @@ static int pefile_strip_sig_wrapper(const void *pebuf,
 
 	/* Both pesign and sbsign round up the length of certificate table
 	 * (in optional header data directories) to 8 byte alignment.
+	 * This key wrapper must fit within the remaining signature space.
+	 * But it's ok if there's leftover space, perhaps for other sigs.
 	 */
-	if (round_up(wrapper.length, 8) != ctx->sig_len) {
+	if (round_up(wrapper.length, 8) > ctx->sig_len) {
 		pr_debug("Signature wrapper len wrong\n");
 		return -ELIBBAD;
 	}
