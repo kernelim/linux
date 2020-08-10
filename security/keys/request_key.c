@@ -499,6 +499,9 @@ struct key *request_key_and_link(struct key_type *type,
 	       type->name, description, callout_info, callout_len, aux,
 	       dest_keyring, flags);
 
+	if (!type->match)
+		return ERR_PTR(-EINVAL);
+
 	/* search all the process keyrings for a key */
 	key_ref = search_process_keyrings(type, description, type->match,
 					  false, cred);
