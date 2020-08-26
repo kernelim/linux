@@ -105,7 +105,14 @@ static struct resource *register_memory_resource(u64 start, u64 size)
 {
 	struct resource *res, *conflict;
 
-	if (start + size > max_mem_size)
+
+	/*
+	 * Make sure value parsed from 'mem=' only restricts memory adding
+	 * while booting, so that memory hotplug won't be impacted. Please
+	 * refer to document of 'mem=' in kernel-parameters.txt for more
+	 * details.
+	 */
+	if (start + size > max_mem_size && system_state < SYSTEM_RUNNING)
 		return ERR_PTR(-E2BIG);
 
 	res = kzalloc(sizeof(struct resource), GFP_KERNEL);

@@ -519,9 +519,9 @@ struct iommu_fwspec {
 	const struct iommu_ops	*ops;
 	struct fwnode_handle	*iommu_fwnode;
 	void			*iommu_priv;
+	RH_KABI_BROKEN_INSERT(u32	flags)
 	unsigned int		num_ids;
 	u32			ids[1];
-	RH_KABI_EXTEND(u32	flags)
 };
 
 /* ATS is supported */

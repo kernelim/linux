@@ -74,6 +74,7 @@
 #include <asm/nospec-branch.h>
 #include <asm/mem_detect.h>
 #include <asm/uv.h>
+#include <asm/asm-offsets.h>
 #include "entry.h"
 
 /*
@@ -391,6 +392,8 @@ static void __init setup_lowcore_dat_off(void)
 	arch_spin_lock_setup(0);
 #endif
 	lc->br_r1_trampoline = 0x07f1;	/* br %r1 */
+	lc->return_lpswe = gen_lpswe(__LC_RETURN_PSW);
+	lc->return_mcck_lpswe = gen_lpswe(__LC_RETURN_MCCK_PSW);
 
 	set_prefix((u32)(unsigned long) lc);
 	lowcore_ptr[0] = lc;
