@@ -37,7 +37,7 @@ static inline void __put_page(struct page *page)
 	atomic_dec(&page->_count);
 }
 
-static inline void __get_page_tail_foll(struct page *page,
+static inline bool __get_page_tail_foll(struct page *page,
 					bool get_page_head)
 {
 	/*
@@ -51,31 +51,41 @@ static inline void __get_page_tail_foll(struct page *page,
 	 * speculative page access (like in
 	 * page_cache_get_speculative()) on tail pages.
 	 */
-	VM_BUG_ON(atomic_read(&page->first_page->_count) <= 0);
+	VM_BUG_ON(atomic_read(&page->first_page->_count) == 0);
+	if (WARN_ON_ONCE(atomic_read(&page->first_page->_count) < 0))
+		return false;
+
 	VM_BUG_ON(atomic_read(&page->_count) != 0);
 	VM_BUG_ON(page_mapcount(page) < 0);
 	if (get_page_head)
 		atomic_inc(&page->first_page->_count);
 	atomic_inc(&page->_mapcount);
+
+	return true;
 }
 
-static inline void get_page_foll(struct page *page)
+static inline bool get_page_foll(struct page *page)
 {
-	if (unlikely(PageTail(page)))
+	if (unlikely(PageTail(page))) {
 		/*
 		 * This is safe only because
 		 * __split_huge_page_refcount() can't run under
 		 * get_page_foll() because we hold the proper PT lock.
 		 */
-		__get_page_tail_foll(page, true);
-	else {
+		if (!__get_page_tail_foll(page, true))
+			return false;
+	} else {
 		/*
 		 * Getting a normal page or the head of a compound page
 		 * requires to already have an elevated page->_count.
 		 */
-		VM_BUG_ON(atomic_read(&page->_count) <= 0);
+		VM_BUG_ON(atomic_read(&page->_count) == 0);
+		if (WARN_ON_ONCE(atomic_read(&page->_count) < 0))
+			return false;
 		atomic_inc(&page->_count);
 	}
+
+	return true;
 }
 
 extern unsigned long highest_memmap_pfn;

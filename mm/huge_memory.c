@@ -967,7 +967,8 @@ struct page *follow_trans_huge_pmd(struct mm_struct *mm,
 	page += (addr & ~HPAGE_PMD_MASK) >> PAGE_SHIFT;
 	VM_BUG_ON(!PageCompound(page));
 	if (flags & FOLL_GET)
-		get_page_foll(page);
+		if (!get_page_foll(page))
+			return ERR_PTR(-ENOMEM);
 
 out:
 	return page;

@@ -17,6 +17,19 @@
 #ifdef __HAVE_ARCH_PTE_SPECIAL
 
 /*
+ * Return the compund head page with ref appropriately incremented,
+ * or NULL if that failed.
+ */
+static inline struct page *try_get_compound_head(struct page *head, int refs)
+{
+       if (WARN_ON_ONCE(page_count(head) < 0))
+               return NULL;
+       if (unlikely(!page_cache_add_speculative(head, refs)))
+               return NULL;
+       return head;
+}
+
+/*
  * The performance critical leaf functions are made noinline otherwise gcc
  * inlines everything into a single function which results in too much
  * register pressure.
@@ -41,7 +54,7 @@ static noinline int gup_pte_range(pmd_t pmd, unsigned long addr,
 			return 0;
 		VM_BUG_ON(!pfn_valid(pte_pfn(pte)));
 		page = pte_page(pte);
-		if (!page_cache_get_speculative(page))
+		if (!try_get_compound_head(page, 1))
 			return 0;
 		if (unlikely(pte_val(pte) != pte_val(*ptep))) {
 			put_page(page);
@@ -91,7 +104,7 @@ static noinline int gup_huge_pte(pte_t *ptep, struct hstate *hstate,
 		refs++;
 	} while (*addr += PAGE_SIZE, *addr != end);
 
-	if (!page_cache_add_speculative(head, refs)) {
+	if (!try_get_compound_head(head, refs)) {
 		*nr -= refs;
 		return 0;
 	}

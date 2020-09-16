@@ -1296,8 +1296,13 @@ split_fallthrough:
 		page = pte_page(pte);
 	}
 
-	if (flags & FOLL_GET)
-		get_page_foll(page);
+	if (flags & FOLL_GET) {
+		if (!get_page_foll(page)) {
+			page = ERR_PTR(-ENOMEM);
+			pte_unmap_unlock(ptep, ptl);
+			goto out;
+		}
+	}
 	if (flags & FOLL_TOUCH) {
 		if ((flags & FOLL_WRITE) &&
 		    !pte_dirty(pte) && !PageDirty(page))

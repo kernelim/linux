@@ -59,8 +59,7 @@ static bool __get_page_tail(struct page *page)
 		/* Ref to put_compound_page() comment. */
 		if (PageSlab(page_head)) {
 			if (likely(PageTail(page))) {
-				__get_page_tail_foll(page, false);
-				return true;
+				return __get_page_tail_foll(page, false);
 			} else {
 				put_page(page_head);
 				return false;
@@ -76,8 +75,7 @@ static bool __get_page_tail(struct page *page)
 		flags = compound_lock_irqsave(page_head);
 		/* here __split_huge_page_refcount won't run anymore */
 		if (likely(PageTail(page))) {
-			__get_page_tail_foll(page, false);
-			got = true;
+			got = __get_page_tail_foll(page, false);
 		}
 		compound_unlock_irqrestore(page_head, flags);
 		if (unlikely(!got))

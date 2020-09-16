@@ -88,6 +88,10 @@ static noinline int gup_pte_range(pmd_t pmd, unsigned long addr,
 		}
 		VM_BUG_ON(!pfn_valid(pte_pfn(pte)));
 		page = pte_page(pte);
+		if ((atomic_read(&page->_count) + 1) < 0) {
+			pte_unmap(ptep);
+			return 0;
+		}
 		get_page(page);
 		pages[*nr] = page;
 		(*nr)++;
@@ -122,9 +126,13 @@ static noinline int gup_huge_pmd(pmd_t pmd, unsigned long addr,
 	VM_BUG_ON(pte_flags(pte) & _PAGE_SPECIAL);
 	VM_BUG_ON(!pfn_valid(pte_pfn(pte)));
 
-	refs = 0;
 	head = pte_page(pte);
 	page = head + ((addr & ~PMD_MASK) >> PAGE_SHIFT);
+	refs = (end - addr)/PAGE_SIZE;
+
+	if ((atomic_read(&page->_count) + refs) <= 0)
+		return 0;
+
 	do {
 		VM_BUG_ON(compound_head(page) != head);
 		pages[*nr] = page;
@@ -132,7 +140,6 @@ static noinline int gup_huge_pmd(pmd_t pmd, unsigned long addr,
 			get_huge_page_tail(page);
 		(*nr)++;
 		page++;
-		refs++;
 	} while (addr += PAGE_SIZE, addr != end);
 	get_head_page_multiple(head, refs);
 
@@ -192,9 +199,12 @@ static noinline int gup_huge_pud(pud_t pud, unsigned long addr,
 	VM_BUG_ON(pte_flags(pte) & _PAGE_SPECIAL);
 	VM_BUG_ON(!pfn_valid(pte_pfn(pte)));
 
-	refs = 0;
 	head = pte_page(pte);
 	page = head + ((addr & ~PUD_MASK) >> PAGE_SHIFT);
+	refs = (end - addr)/PAGE_SIZE;;
+
+	if ((atomic_read(&page->_count) + refs) <= 0)
+		return 0;
 	do {
 		VM_BUG_ON(compound_head(page) != head);
 		pages[*nr] = page;
@@ -202,7 +212,6 @@ static noinline int gup_huge_pud(pud_t pud, unsigned long addr,
 			get_huge_page_tail(page);
 		(*nr)++;
 		page++;
-		refs++;
 	} while (addr += PAGE_SIZE, addr != end);
 	get_head_page_multiple(head, refs);
 
