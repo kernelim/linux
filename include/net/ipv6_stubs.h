@@ -42,10 +42,18 @@ struct ipv6_stub {
 	u32 (*ip6_mtu_from_fib6)(struct fib6_info *f6i, struct in6_addr *daddr,
 				 struct in6_addr *saddr);
 
+	void (*fib6_rt_update)(struct net *net, struct fib6_info *rt,
+			       struct nl_info *info);
+
 	void (*udpv6_encap_enable)(void);
 	void (*ndisc_send_na)(struct net_device *dev, const struct in6_addr *daddr,
 			      const struct in6_addr *solicited_addr,
 			      bool router, bool solicited, bool override, bool inc_opt);
+#if IS_ENABLED(CONFIG_XFRM)
+	int (*xfrm6_udp_encap_rcv)(struct sock *sk, struct sk_buff *skb);
+	int (*xfrm6_rcv_encap)(struct sk_buff *skb, int nexthdr, __be32 spi,
+			       int encap_type);
+#endif
 	struct neigh_table *nd_tbl;
 };
 extern const struct ipv6_stub *ipv6_stub __read_mostly;

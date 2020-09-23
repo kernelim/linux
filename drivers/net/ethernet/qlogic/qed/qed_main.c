@@ -67,10 +67,9 @@
 #define QED_ROCE_QPS			(8192)
 #define QED_ROCE_DPIS			(8)
 #define QED_RDMA_SRQS                   QED_ROCE_QPS
-#define QED_NVM_CFG_SET_FLAGS		0xE
-#define QED_NVM_CFG_SET_PF_FLAGS	0x1E
 #define QED_NVM_CFG_GET_FLAGS		0xA
 #define QED_NVM_CFG_GET_PF_FLAGS	0x1A
+#define QED_NVM_CFG_MAX_ATTRS		50
 
 static char version[] =
 	"QLogic FastLinQ 4xxxx Core Module qed " DRV_MODULE_VERSION "\n";
@@ -1088,9 +1087,6 @@ static void qed_update_pf_params(struct qed_dev *cdev,
 #define QED_PERIODIC_DB_REC_INTERVAL_MS		100
 #define QED_PERIODIC_DB_REC_INTERVAL \
 	msecs_to_jiffies(QED_PERIODIC_DB_REC_INTERVAL_MS)
-#define QED_PERIODIC_DB_REC_WAIT_COUNT		10
-#define QED_PERIODIC_DB_REC_WAIT_INTERVAL \
-	(QED_PERIODIC_DB_REC_INTERVAL_MS / QED_PERIODIC_DB_REC_WAIT_COUNT)
 
 static int qed_slowpath_delayed_work(struct qed_hwfn *hwfn,
 				     enum qed_slowpath_wq_flag wq_flag,
@@ -1124,7 +1120,7 @@ void qed_periodic_db_rec_start(struct qed_hwfn *p_hwfn)
 
 static void qed_slowpath_wq_stop(struct qed_dev *cdev)
 {
-	int i, sleep_count = QED_PERIODIC_DB_REC_WAIT_COUNT;
+	int i;
 
 	if (IS_VF(cdev))
 		return;
@@ -1136,13 +1132,7 @@ static void qed_slowpath_wq_stop(struct qed_dev *cdev)
 		/* Stop queuing new delayed works */
 		cdev->hwfns[i].slowpath_wq_active = false;
 
-		/* Wait until the last periodic doorbell recovery is executed */
-		while (test_bit(QED_SLOWPATH_PERIODIC_DB_REC,
-				&cdev->hwfns[i].slowpath_task_flags) &&
-		       sleep_count--)
-			msleep(QED_PERIODIC_DB_REC_WAIT_INTERVAL);
-
-		flush_workqueue(cdev->hwfns[i].slowpath_wq);
+		cancel_delayed_work(&cdev->hwfns[i].slowpath_task);
 		destroy_workqueue(cdev->hwfns[i].slowpath_wq);
 	}
 }
@@ -1950,6 +1940,15 @@ void qed_link_update(struct qed_hwfn *hwfn, struct qed_ptt *ptt)
 		op->link_update(cookie, &if_link);
 }
 
+void qed_bw_update(struct qed_hwfn *hwfn, struct qed_ptt *ptt)
+{
+	void *cookie = hwfn->cdev->ops_cookie;
+	struct qed_common_cb_ops *op = hwfn->cdev->protocol_ops.common;
+
+	if (IS_LEAD_HWFN(hwfn) && cookie && op && op->bw_update)
+		op->bw_update(cookie);
+}
+
 static int qed_drain(struct qed_dev *cdev)
 {
 	struct qed_hwfn *hwfn;
@@ -2255,6 +2254,7 @@ static int qed_nvm_flash_cfg_write(struct qed_dev *cdev, const u8 **data)
 {
 	struct qed_hwfn *hwfn = QED_LEADING_HWFN(cdev);
 	u8 entity_id, len, buf[32];
+	bool need_nvm_init = true;
 	struct qed_ptt *ptt;
 	u16 cfg_id, count;
 	int rc = 0, i;
@@ -2271,8 +2271,10 @@ static int qed_nvm_flash_cfg_write(struct qed_dev *cdev, const u8 **data)
 
 	DP_VERBOSE(cdev, NETIF_MSG_DRV,
 		   "Read config ids: num_attrs = %0d\n", count);
-	/* NVM CFG ID attributes */
-	for (i = 0; i < count; i++) {
+	/* NVM CFG ID attributes. Start loop index from 1 to avoid additional
+	 * arithmetic operations in the implementation.
+	 */
+	for (i = 1; i <= count; i++) {
 		cfg_id = *((u16 *)*data);
 		*data += 2;
 		entity_id = **data;
@@ -2282,8 +2284,21 @@ static int qed_nvm_flash_cfg_write(struct qed_dev *cdev, const u8 **data)
 		memcpy(buf, *data, len);
 		*data += len;
 
-		flags = entity_id ? QED_NVM_CFG_SET_PF_FLAGS :
-			QED_NVM_CFG_SET_FLAGS;
+		flags = 0;
+		if (need_nvm_init) {
+			flags |= QED_NVM_CFG_OPTION_INIT;
+			need_nvm_init = false;
+		}
+
+		/* Commit to flash and free the resources */
+		if (!(i % QED_NVM_CFG_MAX_ATTRS) || i == count) {
+			flags |= QED_NVM_CFG_OPTION_COMMIT |
+				 QED_NVM_CFG_OPTION_FREE;
+			need_nvm_init = true;
+		}
+
+		if (entity_id)
+			flags |= QED_NVM_CFG_OPTION_ENTITY_SEL;
 
 		DP_VERBOSE(cdev, NETIF_MSG_DRV,
 			   "cfg_id = %d entity = %d len = %d\n", cfg_id,
@@ -2622,7 +2637,7 @@ static int qed_set_grc_config(struct qed_dev *cdev, u32 cfg_id, u32 val)
 	if (!ptt)
 		return -EAGAIN;
 
-	rc = qed_dbg_grc_config(hwfn, ptt, cfg_id, val);
+	rc = qed_dbg_grc_config(hwfn, cfg_id, val);
 
 	qed_ptt_release(hwfn, ptt);
 

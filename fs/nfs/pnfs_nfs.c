@@ -30,12 +30,11 @@ EXPORT_SYMBOL_GPL(pnfs_generic_rw_release);
 /* Fake up some data that will cause nfs_commit_release to retry the writes. */
 void pnfs_generic_prepare_to_resend_writes(struct nfs_commit_data *data)
 {
-	struct nfs_page *first = nfs_list_entry(data->pages.next);
+	struct nfs_writeverf *verf = data->res.verf;
 
 	data->task.tk_status = 0;
-	memcpy(&data->verf.verifier, &first->wb_verf,
-	       sizeof(data->verf.verifier));
-	data->verf.verifier.data[0]++; /* ensure verifier mismatch */
+	memset(&verf->verifier, 0, sizeof(verf->verifier));
+	verf->committed = NFS_UNSTABLE;
 }
 EXPORT_SYMBOL_GPL(pnfs_generic_prepare_to_resend_writes);
 
@@ -626,11 +625,16 @@ static int _nfs4_pnfs_v3_ds_connect(struct nfs_server *mds_srv,
 			/* Add this address as an alias */
 			rpc_clnt_add_xprt(clp->cl_rpcclient, &xprt_args,
 					rpc_clnt_test_and_add_xprt, NULL);
-		} else
-			clp = get_v3_ds_connect(mds_srv,
-					(struct sockaddr *)&da->da_addr,
-					da->da_addrlen, IPPROTO_TCP,
-					timeo, retrans);
+			continue;
+		}
+		clp = get_v3_ds_connect(mds_srv,
+				(struct sockaddr *)&da->da_addr,
+				da->da_addrlen, IPPROTO_TCP,
+				timeo, retrans);
+		if (IS_ERR(clp))
+			continue;
+		clp->cl_rpcclient->cl_softerr = 0;
+		clp->cl_rpcclient->cl_softrtry = 0;
 	}
 
 	if (IS_ERR(clp)) {

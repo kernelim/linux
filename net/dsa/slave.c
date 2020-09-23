@@ -1080,11 +1080,11 @@ static struct device_type dsa_type = {
 	.name	= "dsa",
 };
 
-static void dsa_slave_phylink_validate(struct net_device *dev,
+static void dsa_slave_phylink_validate(struct phylink_config *config,
 				       unsigned long *supported,
 				       struct phylink_link_state *state)
 {
-	struct dsa_port *dp = dsa_slave_to_port(dev);
+	struct dsa_port *dp = container_of(config, struct dsa_port, pl_config);
 	struct dsa_switch *ds = dp->ds;
 
 	if (!ds->ops->phylink_validate)
@@ -1093,10 +1093,10 @@ static void dsa_slave_phylink_validate(struct net_device *dev,
 	ds->ops->phylink_validate(ds, dp->index, supported, state);
 }
 
-static int dsa_slave_phylink_mac_link_state(struct net_device *dev,
+static int dsa_slave_phylink_mac_link_state(struct phylink_config *config,
 					    struct phylink_link_state *state)
 {
-	struct dsa_port *dp = dsa_slave_to_port(dev);
+	struct dsa_port *dp = container_of(config, struct dsa_port, pl_config);
 	struct dsa_switch *ds = dp->ds;
 
 	/* Only called for SGMII and 802.3z */
@@ -1106,11 +1106,11 @@ static int dsa_slave_phylink_mac_link_state(struct net_device *dev,
 	return ds->ops->phylink_mac_link_state(ds, dp->index, state);
 }
 
-static void dsa_slave_phylink_mac_config(struct net_device *dev,
+static void dsa_slave_phylink_mac_config(struct phylink_config *config,
 					 unsigned int mode,
 					 const struct phylink_link_state *state)
 {
-	struct dsa_port *dp = dsa_slave_to_port(dev);
+	struct dsa_port *dp = container_of(config, struct dsa_port, pl_config);
 	struct dsa_switch *ds = dp->ds;
 
 	if (!ds->ops->phylink_mac_config)
@@ -1119,9 +1119,9 @@ static void dsa_slave_phylink_mac_config(struct net_device *dev,
 	ds->ops->phylink_mac_config(ds, dp->index, mode, state);
 }
 
-static void dsa_slave_phylink_mac_an_restart(struct net_device *dev)
+static void dsa_slave_phylink_mac_an_restart(struct phylink_config *config)
 {
-	struct dsa_port *dp = dsa_slave_to_port(dev);
+	struct dsa_port *dp = container_of(config, struct dsa_port, pl_config);
 	struct dsa_switch *ds = dp->ds;
 
 	if (!ds->ops->phylink_mac_an_restart)
@@ -1130,11 +1130,12 @@ static void dsa_slave_phylink_mac_an_restart(struct net_device *dev)
 	ds->ops->phylink_mac_an_restart(ds, dp->index);
 }
 
-static void dsa_slave_phylink_mac_link_down(struct net_device *dev,
+static void dsa_slave_phylink_mac_link_down(struct phylink_config *config,
 					    unsigned int mode,
 					    phy_interface_t interface)
 {
-	struct dsa_port *dp = dsa_slave_to_port(dev);
+	struct dsa_port *dp = container_of(config, struct dsa_port, pl_config);
+	struct net_device *dev = dp->slave;
 	struct dsa_switch *ds = dp->ds;
 
 	if (!ds->ops->phylink_mac_link_down) {
@@ -1146,12 +1147,13 @@ static void dsa_slave_phylink_mac_link_down(struct net_device *dev,
 	ds->ops->phylink_mac_link_down(ds, dp->index, mode, interface);
 }
 
-static void dsa_slave_phylink_mac_link_up(struct net_device *dev,
+static void dsa_slave_phylink_mac_link_up(struct phylink_config *config,
 					  unsigned int mode,
 					  phy_interface_t interface,
 					  struct phy_device *phydev)
 {
-	struct dsa_port *dp = dsa_slave_to_port(dev);
+	struct dsa_port *dp = container_of(config, struct dsa_port, pl_config);
+	struct net_device *dev = dp->slave;
 	struct dsa_switch *ds = dp->ds;
 
 	if (!ds->ops->phylink_mac_link_up) {
@@ -1219,7 +1221,10 @@ static int dsa_slave_phy_setup(struct net_device *slave_dev)
 	if (mode < 0)
 		mode = PHY_INTERFACE_MODE_NA;
 
-	dp->pl = phylink_create(slave_dev, of_fwnode_handle(port_dn), mode,
+	dp->pl_config.dev = &slave_dev->dev;
+	dp->pl_config.type = PHYLINK_NETDEV;
+
+	dp->pl = phylink_create(&dp->pl_config, of_fwnode_handle(port_dn), mode,
 				&dsa_slave_phylink_mac_ops);
 	if (IS_ERR(dp->pl)) {
 		netdev_err(slave_dev,
@@ -1253,15 +1258,6 @@ static int dsa_slave_phy_setup(struct net_device *slave_dev)
 	}
 
 	return 0;
-}
-
-static struct lock_class_key dsa_slave_netdev_xmit_lock_key;
-static void dsa_slave_set_lockdep_class_one(struct net_device *dev,
-					    struct netdev_queue *txq,
-					    void *_unused)
-{
-	lockdep_set_class(&txq->_xmit_lock,
-			  &dsa_slave_netdev_xmit_lock_key);
 }
 
 int dsa_slave_suspend(struct net_device *slave_dev)
@@ -1339,9 +1335,6 @@ int dsa_slave_create(struct dsa_port *port)
 	slave_dev->min_mtu = 0;
 	slave_dev->max_mtu = ETH_MAX_MTU;
 	SET_NETDEV_DEVTYPE(slave_dev, &dsa_type);
-
-	netdev_for_each_tx_queue(slave_dev, dsa_slave_set_lockdep_class_one,
-				 NULL);
 
 	SET_NETDEV_DEV(slave_dev, port->ds->dev);
 	slave_dev->dev.of_node = port->dn;

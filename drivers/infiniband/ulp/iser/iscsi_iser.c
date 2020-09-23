@@ -644,6 +644,7 @@ iscsi_iser_session_create(struct iscsi_endpoint *ep,
 		if (ib_conn->pi_support) {
 			u32 sig_caps = ib_conn->device->ib_device->attrs.sig_prot_cap;
 
+			shost->sg_prot_tablesize = shost->sg_tablesize;
 			scsi_host_set_prot(shost, iser_dif_prot_caps(sig_caps));
 			scsi_host_set_guard(shost, SHOST_DIX_GUARD_IP |
 						   SHOST_DIX_GUARD_CRC);
@@ -781,7 +782,7 @@ static int iscsi_iser_get_ep_param(struct iscsi_endpoint *ep,
  * iscsi_iser_ep_connect() - Initiate iSER connection establishment
  * @shost:          scsi_host
  * @dst_addr:       destination address
- * @non-blocking:   indicate if routine can block
+ * @non_blocking:   indicate if routine can block
  *
  * Allocate an iscsi endpoint, an iser_conn structure and bind them.
  * After that start RDMA connection establishment via rdma_cm. We
@@ -973,7 +974,7 @@ static int iscsi_iser_slave_alloc(struct scsi_device *sdev)
 	ib_dev = iser_conn->ib_conn.device->ib_device;
 
 	if (!(ib_dev->attrs.device_cap_flags & IB_DEVICE_SG_GAPS_REG))
-		blk_queue_virt_boundary(sdev->request_queue, ~MASK_4K);
+		blk_queue_virt_boundary(sdev->request_queue, SZ_4K - 1);
 
 	mutex_unlock(&unbind_iser_conn_mutex);
 

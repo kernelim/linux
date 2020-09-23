@@ -772,21 +772,43 @@ int nvm_submit_io(struct nvm_tgt_dev *tgt_dev, struct nvm_rq *rqd)
 }
 EXPORT_SYMBOL(nvm_submit_io);
 
+static void nvm_sync_end_io(struct nvm_rq *rqd)
+{
+	struct completion *waiting = rqd->private;
+
+	complete(waiting);
+}
+
+static int nvm_submit_io_wait(struct nvm_dev *dev, struct nvm_rq *rqd)
+{
+	DECLARE_COMPLETION_ONSTACK(wait);
+	int ret = 0;
+
+	rqd->end_io = nvm_sync_end_io;
+	rqd->private = &wait;
+
+	ret = dev->ops->submit_io(dev, rqd);
+	if (ret)
+		return ret;
+
+	wait_for_completion_io(&wait);
+
+	return 0;
+}
+
 int nvm_submit_io_sync(struct nvm_tgt_dev *tgt_dev, struct nvm_rq *rqd)
 {
 	struct nvm_dev *dev = tgt_dev->parent;
 	int ret;
 
-	if (!dev->ops->submit_io_sync)
+	if (!dev->ops->submit_io)
 		return -ENODEV;
 
 	nvm_rq_tgt_to_dev(tgt_dev, rqd);
 
 	rqd->dev = tgt_dev;
 
-	/* In case of error, fail with right address format */
-	ret = dev->ops->submit_io_sync(dev, rqd);
-	nvm_rq_dev_to_tgt(tgt_dev, rqd);
+	ret = nvm_submit_io_wait(dev, rqd);
 
 	return ret;
 }

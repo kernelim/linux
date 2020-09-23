@@ -68,10 +68,12 @@ static int nfs_superblock_set_dummy_root(struct super_block *sb, struct inode *i
 /*
  * get an NFS2/NFS3 root dentry from the root filehandle
  */
-struct dentry *nfs_get_root(struct super_block *sb, struct nfs_fh *mntfh,
+struct dentry *nfs_get_root(struct super_block *sb,
+			    struct nfs_mount_info *mount_info,
 			    const char *devname)
 {
 	struct nfs_server *server = NFS_SB(sb);
+	struct nfs_fh *mntfh = mount_info->mntfh;
 	struct nfs_fsinfo fsinfo;
 	struct dentry *ret;
 	struct inode *inode;
@@ -88,24 +90,30 @@ struct dentry *nfs_get_root(struct super_block *sb, struct nfs_fh *mntfh,
 		return ERR_PTR(-ENOMEM);
 	}
 
+	fsinfo.fattr->label = nfs4_label_alloc(server, GFP_KERNEL);
+	if (IS_ERR(fsinfo.fattr->label)) {
+		ret = ERR_CAST(fsinfo.fattr->label);
+		goto out;
+	}
+
 	error = server->nfs_client->rpc_ops->getroot(server, mntfh, &fsinfo);
 	if (error < 0) {
 		dprintk("nfs_get_root: getattr error = %d\n", -error);
 		ret = ERR_PTR(error);
-		goto out;
+		goto out_label;
 	}
 
 	inode = nfs_fhget(sb, mntfh, fsinfo.fattr, NULL);
 	if (IS_ERR(inode)) {
 		dprintk("nfs_get_root: get root inode failed\n");
 		ret = ERR_CAST(inode);
-		goto out;
+		goto out_label;
 	}
 
 	error = nfs_superblock_set_dummy_root(sb, inode);
 	if (error != 0) {
 		ret = ERR_PTR(error);
-		goto out;
+		goto out_label;
 	}
 
 	/* root dentries normally start off anonymous and get spliced in later
@@ -115,7 +123,7 @@ struct dentry *nfs_get_root(struct super_block *sb, struct nfs_fh *mntfh,
 	ret = d_obtain_root(inode);
 	if (IS_ERR(ret)) {
 		dprintk("nfs_get_root: get root dentry failed\n");
-		goto out;
+		goto out_label;
 	}
 
 	security_d_instantiate(ret, inode);
@@ -126,8 +134,22 @@ struct dentry *nfs_get_root(struct super_block *sb, struct nfs_fh *mntfh,
 		name = NULL;
 	}
 	spin_unlock(&ret->d_lock);
+
+	error = mount_info->set_security(sb, ret, mount_info);
+	if (error)
+		goto error_splat_root;
+
+	nfs_setsecurity(inode, fsinfo.fattr, fsinfo.fattr->label);
+
+out_label:
+	nfs4_label_free(fsinfo.fattr->label);
 out:
 	kfree(name);
 	nfs_free_fattr(fsinfo.fattr);
 	return ret;
+
+error_splat_root:
+	dput(ret);
+	ret = ERR_PTR(error);
+	goto out_label;
 }

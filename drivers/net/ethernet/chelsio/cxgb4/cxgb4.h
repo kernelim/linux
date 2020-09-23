@@ -56,9 +56,11 @@
 #include <asm/io.h>
 #include "t4_chip_type.h"
 #include "cxgb4_uld.h"
+#include "t4fw_api.h"
 
 #define CH_WARN(adap, fmt, ...) dev_warn(adap->pdev_dev, fmt, ## __VA_ARGS__)
 extern struct list_head adapter_list;
+extern struct list_head uld_list;
 extern struct mutex uld_mutex;
 
 /* Suspend an Ethernet Tx queue with fewer available descriptors than this.
@@ -67,6 +69,16 @@ extern struct mutex uld_mutex;
  */
 #define ETHTXQ_STOP_THRES \
 	(1 + DIV_ROUND_UP((3 * MAX_SKB_FRAGS) / 2 + (MAX_SKB_FRAGS & 1), 8))
+
+#define FW_PARAM_DEV(param) \
+	(FW_PARAMS_MNEM_V(FW_PARAMS_MNEM_DEV) | \
+	 FW_PARAMS_PARAM_X_V(FW_PARAMS_PARAM_DEV_##param))
+
+#define FW_PARAM_PFVF(param) \
+	(FW_PARAMS_MNEM_V(FW_PARAMS_MNEM_PFVF) | \
+	 FW_PARAMS_PARAM_X_V(FW_PARAMS_PARAM_PFVF_##param) |  \
+	 FW_PARAMS_PARAM_Y_V(0) | \
+	 FW_PARAMS_PARAM_Z_V(0))
 
 enum {
 	MAX_NPORTS	= 4,     /* max # of ports */
@@ -392,6 +404,7 @@ struct adapter_params {
 	struct arch_specific_params arch;  /* chip specific params */
 	unsigned char offload;
 	unsigned char crypto;		/* HW capability for crypto */
+	unsigned char ethofld;		/* QoS support */
 
 	unsigned char bypass;
 	unsigned char hash_filter;
@@ -503,6 +516,7 @@ struct link_config {
 
 	enum cc_pause  requested_fc;     /* flow control user has requested */
 	enum cc_pause  fc;               /* actual link flow control */
+	enum cc_pause  advertised_fc;    /* actual advertised flow control */
 
 	enum cc_fec    requested_fec;	 /* Forward Error Correction: */
 	enum cc_fec    fec;		 /* requested and actual in use */
@@ -602,6 +616,8 @@ struct port_info {
 	u8 vivld;
 	u8 smt_idx;
 	u8 rx_cchan;
+
+	bool tc_block_shared;
 };
 
 struct dentry;
@@ -625,6 +641,7 @@ enum {                                 /* adapter flags */
 enum {
 	ULP_CRYPTO_LOOKASIDE = 1 << 0,
 	ULP_CRYPTO_IPSEC_INLINE = 1 << 1,
+	ULP_CRYPTO_KTLS_INLINE  = 1 << 3,
 };
 
 struct rx_sw_desc;
@@ -711,6 +728,7 @@ struct sge_eth_rxq {                /* SW Ethernet Rx queue */
 	struct sge_rspq rspq;
 	struct sge_fl fl;
 	struct sge_eth_stats stats;
+	struct msix_info *msix;
 } ____cacheline_aligned_in_smp;
 
 struct sge_ofld_stats {             /* offload queue statistics */
@@ -724,13 +742,19 @@ struct sge_ofld_rxq {               /* SW offload Rx queue */
 	struct sge_rspq rspq;
 	struct sge_fl fl;
 	struct sge_ofld_stats stats;
+	struct msix_info *msix;
 } ____cacheline_aligned_in_smp;
 
 struct tx_desc {
 	__be64 flit[8];
 };
 
-struct tx_sw_desc;
+struct ulptx_sgl;
+
+struct tx_sw_desc {
+	struct sk_buff *skb; /* SKB to free after getting completion */
+	dma_addr_t addr[MAX_SKB_FRAGS + 1]; /* DMA mapped addresses */
+};
 
 struct sge_txq {
 	unsigned int  in_use;       /* # of in-use Tx descriptors */
@@ -762,6 +786,7 @@ struct sge_eth_txq {                /* state for an SGE Ethernet Tx queue */
 	u8 dbqt;                    /* SGE Doorbell Queue Timer in use */
 	unsigned int dbqtimerix;    /* SGE Doorbell Queue Timer Index */
 	unsigned long tso;          /* # of TSO requests */
+	unsigned long uso;          /* # of USO requests */
 	unsigned long tx_cso;       /* # of Tx checksum offloads */
 	unsigned long vlan_ins;     /* # of Tx VLAN insertions */
 	unsigned long mapping_err;  /* # of I/O MMU packet mapping errors */
@@ -788,7 +813,6 @@ struct sge_ctrl_txq {               /* state for an SGE control Tx queue */
 struct sge_uld_rxq_info {
 	char name[IFNAMSIZ];	/* name of ULD driver */
 	struct sge_ofld_rxq *uldrxq; /* Rxq's for ULD */
-	u16 *msix_tbl;		/* msix_tbl for uld */
 	u16 *rspq_id;		/* response queue id's of rxq */
 	u16 nrxq;		/* # of ingress uld queues */
 	u16 nciq;		/* # of completion queues */
@@ -799,6 +823,58 @@ struct sge_uld_txq_info {
 	struct sge_uld_txq *uldtxq; /* Txq's for ULD */
 	atomic_t users;		/* num users */
 	u16 ntxq;		/* # of egress uld queues */
+};
+
+/* struct to maintain ULD list to reallocate ULD resources on hotplug */
+struct cxgb4_uld_list {
+	struct cxgb4_uld_info uld_info;
+	struct list_head list_node;
+	enum cxgb4_uld uld_type;
+};
+
+enum sge_eosw_state {
+	CXGB4_EO_STATE_CLOSED = 0, /* Not ready to accept traffic */
+	CXGB4_EO_STATE_FLOWC_OPEN_SEND, /* Send FLOWC open request */
+	CXGB4_EO_STATE_FLOWC_OPEN_REPLY, /* Waiting for FLOWC open reply */
+	CXGB4_EO_STATE_ACTIVE, /* Ready to accept traffic */
+	CXGB4_EO_STATE_FLOWC_CLOSE_SEND, /* Send FLOWC close request */
+	CXGB4_EO_STATE_FLOWC_CLOSE_REPLY, /* Waiting for FLOWC close reply */
+};
+
+struct sge_eosw_txq {
+	spinlock_t lock; /* Per queue lock to synchronize completions */
+	enum sge_eosw_state state; /* Current ETHOFLD State */
+	struct tx_sw_desc *desc; /* Descriptor ring to hold packets */
+	u32 ndesc; /* Number of descriptors */
+	u32 pidx; /* Current Producer Index */
+	u32 last_pidx; /* Last successfully transmitted Producer Index */
+	u32 cidx; /* Current Consumer Index */
+	u32 last_cidx; /* Last successfully reclaimed Consumer Index */
+	u32 flowc_idx; /* Descriptor containing a FLOWC request */
+	u32 inuse; /* Number of packets held in ring */
+
+	u32 cred; /* Current available credits */
+	u32 ncompl; /* # of completions posted */
+	u32 last_compl; /* # of credits consumed since last completion req */
+
+	u32 eotid; /* Index into EOTID table in software */
+	u32 hwtid; /* Hardware EOTID index */
+
+	u32 hwqid; /* Underlying hardware queue index */
+	struct net_device *netdev; /* Pointer to netdevice */
+	struct tasklet_struct qresume_tsk; /* Restarts the queue */
+	struct completion completion; /* completion for FLOWC rendezvous */
+};
+
+struct sge_eohw_txq {
+	spinlock_t lock; /* Per queue lock */
+	struct sge_txq q; /* HW Txq */
+	struct adapter *adap; /* Backpointer to adapter */
+	unsigned long tso; /* # of TSO requests */
+	unsigned long uso; /* # of USO requests */
+	unsigned long tx_cso; /* # of Tx checksum offloads */
+	unsigned long vlan_ins; /* # of Tx VLAN insertions */
+	unsigned long mapping_err; /* # of I/O MMU packet mapping errors */
 };
 
 struct sge {
@@ -814,11 +890,16 @@ struct sge {
 	struct sge_rspq intrq ____cacheline_aligned_in_smp;
 	spinlock_t intrq_lock;
 
+	struct sge_eohw_txq *eohw_txq;
+	struct sge_ofld_rxq *eohw_rxq;
+
 	u16 max_ethqsets;           /* # of available Ethernet queue sets */
 	u16 ethqsets;               /* # of active Ethernet queue sets */
 	u16 ethtxq_rover;           /* Tx queue to clean up next */
 	u16 ofldqsets;              /* # of active ofld queue sets */
 	u16 nqs_per_uld;	    /* # of Rx queues per ULD */
+	u16 eoqsets;                /* # of ETHOFLD queues */
+
 	u16 timer_val[SGE_NTIMERS];
 	u8 counter_val[SGE_NCOUNTERS];
 	u16 dbqtimer_tick;
@@ -841,6 +922,9 @@ struct sge {
 	unsigned long *blocked_fl;
 	struct timer_list rx_timer; /* refills starving FLs */
 	struct timer_list tx_timer; /* checks Tx queues */
+
+	int fwevtq_msix_idx; /* Index to firmware event queue MSI-X info */
+	int nd_msix_idx; /* Index to non-data interrupts MSI-X info */
 };
 
 #define for_each_ethrxq(sge, i) for (i = 0; i < (sge)->ethqsets; i++)
@@ -870,13 +954,13 @@ struct hash_mac_addr {
 	unsigned int iface_mac;
 };
 
-struct uld_msix_bmap {
+struct msix_bmap {
 	unsigned long *msix_bmap;
 	unsigned int mapsize;
 	spinlock_t lock; /* lock for acquiring bitmap */
 };
 
-struct uld_msix_info {
+struct msix_info {
 	unsigned short vec;
 	char desc[IFNAMSIZ + 10];
 	unsigned int idx;
@@ -945,14 +1029,9 @@ struct adapter {
 	struct cxgb4_virt_res vres;
 	unsigned int swintr;
 
-	struct msix_info {
-		unsigned short vec;
-		char desc[IFNAMSIZ + 10];
-		cpumask_var_t aff_mask;
-	} msix_info[MAX_INGQ + 1];
-	struct uld_msix_info *msix_info_ulds; /* msix info for uld's */
-	struct uld_msix_bmap msix_bmap_ulds; /* msix bitmap for all uld */
-	int msi_idx;
+	/* MSI-X Info for NIC and OFLD queues */
+	struct msix_info *msix_info;
+	struct msix_bmap msix_bmap;
 
 	struct doorbell_stats db_stats;
 	struct sge sge;
@@ -1022,6 +1101,7 @@ struct adapter {
 
 	/* TC u32 offload */
 	struct cxgb4_tc_u32_table *tc_u32;
+	struct chcr_ktls chcr_ktls;
 	struct chcr_stats_debug chcr_stats;
 
 	/* TC flower offload */
@@ -1044,25 +1124,32 @@ struct adapter {
 #if IS_ENABLED(CONFIG_THERMAL)
 	struct ch_thermal ch_thermal;
 #endif
+
+	/* TC MQPRIO offload */
+	struct cxgb4_tc_mqprio *tc_mqprio;
+
+	/* TC MATCHALL classifier offload */
+	struct cxgb4_tc_matchall *tc_matchall;
 };
 
 /* Support for "sched-class" command to allow a TX Scheduling Class to be
  * programmed with various parameters.
  */
 struct ch_sched_params {
-	s8   type;                     /* packet or flow */
+	u8   type;                     /* packet or flow */
 	union {
 		struct {
-			s8   level;    /* scheduler hierarchy level */
-			s8   mode;     /* per-class or per-flow */
-			s8   rateunit; /* bit or packet rate */
-			s8   ratemode; /* %port relative or kbps absolute */
-			s8   channel;  /* scheduler channel [0..N] */
-			s8   class;    /* scheduler class [0..N] */
-			s32  minrate;  /* minimum rate */
-			s32  maxrate;  /* maximum rate */
-			s16  weight;   /* percent weight */
-			s16  pktsize;  /* average packet size */
+			u8   level;    /* scheduler hierarchy level */
+			u8   mode;     /* per-class or per-flow */
+			u8   rateunit; /* bit or packet rate */
+			u8   ratemode; /* %port relative or kbps absolute */
+			u8   channel;  /* scheduler channel [0..N] */
+			u8   class;    /* scheduler class [0..N] */
+			u32  minrate;  /* minimum rate */
+			u32  maxrate;  /* maximum rate */
+			u16  weight;   /* percent weight */
+			u16  pktsize;  /* average packet size */
+			u16  burstsize;  /* burst buffer size */
 		} params;
 	} u;
 };
@@ -1073,10 +1160,12 @@ enum {
 
 enum {
 	SCHED_CLASS_LEVEL_CL_RL = 0,    /* class rate limiter */
+	SCHED_CLASS_LEVEL_CH_RL = 2,    /* channel rate limiter */
 };
 
 enum {
 	SCHED_CLASS_MODE_CLASS = 0,     /* per-class scheduling */
+	SCHED_CLASS_MODE_FLOW,          /* per-flow scheduling */
 };
 
 enum {
@@ -1087,17 +1176,20 @@ enum {
 	SCHED_CLASS_RATEMODE_ABS = 1,   /* Kb/s */
 };
 
-struct tx_sw_desc {                /* SW state per Tx descriptor */
-	struct sk_buff *skb;
-	struct ulptx_sgl *sgl;
-};
-
 /* Support for "sched_queue" command to allow one or more NIC TX Queues
  * to be bound to a TX Scheduling Class.
  */
 struct ch_sched_queue {
 	s8   queue;    /* queue index */
 	s8   class;    /* class index */
+};
+
+/* Support for "sched_flowc" command to allow one or more FLOWC
+ * to be bound to a TX Scheduling Class.
+ */
+struct ch_sched_flowc {
+	s32 tid;   /* TID to bind */
+	s8  class; /* class index */
 };
 
 /* Defined bit width of user definable filter tuples
@@ -1214,8 +1306,11 @@ struct ch_filter_specification {
 	u16 nat_lport;		/* local port to use after NAT'ing */
 	u16 nat_fport;		/* foreign port to use after NAT'ing */
 
+	u32 tc_prio;		/* TC's filter priority index */
+	u64 tc_cookie;		/* Unique cookie identifying TC rules */
+
 	/* reservation for future additions */
-	u8 rsvd[24];
+	u8 rsvd[12];
 
 	/* Filter rule value/mask pairs.
 	 */
@@ -1291,6 +1386,11 @@ static inline int is_pci_uld(const struct adapter *adap)
 static inline int is_uld(const struct adapter *adap)
 {
 	return (adap->params.offload || adap->params.crypto);
+}
+
+static inline int is_ethofld(const struct adapter *adap)
+{
+	return adap->params.ethofld;
 }
 
 static inline u32 t4_read_reg(struct adapter *adap, u32 reg_addr)
@@ -1426,6 +1526,9 @@ int t4_sge_mod_ctrl_txq(struct adapter *adap, unsigned int eqid,
 int t4_sge_alloc_uld_txq(struct adapter *adap, struct sge_uld_txq *txq,
 			 struct net_device *dev, unsigned int iqid,
 			 unsigned int uld_type);
+int t4_sge_alloc_ethofld_txq(struct adapter *adap, struct sge_eohw_txq *txq,
+			     struct net_device *dev, u32 iqid);
+void t4_sge_free_ethofld_txq(struct adapter *adap, struct sge_eohw_txq *txq);
 irqreturn_t t4_sge_intr_msix(int irq, void *cookie);
 int t4_sge_init(struct adapter *adap);
 void t4_sge_start(struct adapter *adap);
@@ -1862,9 +1965,10 @@ int t4_sge_ctxt_rd(struct adapter *adap, unsigned int mbox, unsigned int cid,
 		   enum ctxt_type ctype, u32 *data);
 int t4_sge_ctxt_rd_bd(struct adapter *adap, unsigned int cid,
 		      enum ctxt_type ctype, u32 *data);
-int t4_sched_params(struct adapter *adapter, int type, int level, int mode,
-		    int rateunit, int ratemode, int channel, int class,
-		    int minrate, int maxrate, int weight, int pktsize);
+int t4_sched_params(struct adapter *adapter, u8 type, u8 level, u8 mode,
+		    u8 rateunit, u8 ratemode, u8 channel, u8 class,
+		    u32 minrate, u32 maxrate, u16 weight, u16 pktsize,
+		    u16 burstsize);
 void t4_sge_decode_idma_state(struct adapter *adapter, int state);
 void t4_idma_monitor_init(struct adapter *adapter,
 			  struct sge_idma_monitor_state *idma);
@@ -1890,6 +1994,12 @@ int t4_i2c_rd(struct adapter *adap, unsigned int mbox, int port,
 void free_rspq_fl(struct adapter *adap, struct sge_rspq *rq, struct sge_fl *fl);
 void free_tx_desc(struct adapter *adap, struct sge_txq *q,
 		  unsigned int n, bool unmap);
+void cxgb4_eosw_txq_free_desc(struct adapter *adap, struct sge_eosw_txq *txq,
+			      u32 ndesc);
+int cxgb4_ethofld_send_flowc(struct net_device *dev, u32 eotid, u32 tc);
+void cxgb4_ethofld_restart(unsigned long data);
+int cxgb4_ethofld_rx_handler(struct sge_rspq *q, const __be64 *rsp,
+			     const struct pkt_gl *si);
 void free_txq(struct adapter *adap, struct sge_txq *q);
 void cxgb4_reclaim_completed_tx(struct adapter *adap,
 				struct sge_txq *q, bool unmap);
@@ -1948,5 +2058,13 @@ int cxgb4_alloc_raw_mac_filt(struct adapter *adap,
 int cxgb4_update_mac_filt(struct port_info *pi, unsigned int viid,
 			  int *tcam_idx, const u8 *addr,
 			  bool persistent, u8 *smt_idx);
-
+int cxgb4_get_msix_idx_from_bmap(struct adapter *adap);
+void cxgb4_free_msix_idx_in_bmap(struct adapter *adap, u32 msix_idx);
+int cxgb_open(struct net_device *dev);
+int cxgb_close(struct net_device *dev);
+void cxgb4_enable_rx(struct adapter *adap, struct sge_rspq *q);
+void cxgb4_quiesce_rx(struct sge_rspq *q);
+#ifdef CONFIG_CHELSIO_TLS_DEVICE
+int cxgb4_set_ktls_feature(struct adapter *adap, bool enable);
+#endif
 #endif /* __CXGB4_H__ */

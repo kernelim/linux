@@ -2386,15 +2386,21 @@ static int init_percpu_info(struct f2fs_sb_info *sbi)
 }
 
 #ifdef CONFIG_BLK_DEV_ZONED
+static int f2fs_report_zone_cb(struct blk_zone *zone, unsigned int idx,
+			       void *data)
+{
+	struct f2fs_dev_info *dev = data;
+
+	if (zone->type != BLK_ZONE_TYPE_CONVENTIONAL)
+		set_bit(idx, dev->blkz_seq);
+	return 0;
+}
+
 static int init_blkz_info(struct f2fs_sb_info *sbi, int devi)
 {
 	struct block_device *bdev = FDEV(devi).bdev;
 	sector_t nr_sectors = bdev->bd_part->nr_sects;
-	sector_t sector = 0;
-	struct blk_zone *zones;
-	unsigned int i, nr_zones;
-	unsigned int n = 0;
-	int err = -EIO;
+	int ret;
 
 	if (!f2fs_sb_has_blkzoned(sbi->sb))
 		return 0;
@@ -2430,9 +2436,7 @@ static int init_blkz_info(struct f2fs_sb_info *sbi, int devi)
 	while (zones && sector < nr_sectors) {
 
 		nr_zones = F2FS_REPORT_NR_ZONES;
-		err = blkdev_report_zones(bdev, sector,
-					  zones, &nr_zones,
-					  GFP_KERNEL);
+		err = blkdev_report_zones(bdev, sector, zones, &nr_zones);
 		if (err)
 			break;
 		if (!nr_zones) {

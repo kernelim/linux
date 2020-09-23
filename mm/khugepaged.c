@@ -1079,6 +1079,7 @@ static void collapse_huge_page(struct mm_struct *mm,
 	BUG_ON(!pmd_none(*pmd));
 	page_add_new_anon_rmap(new_page, vma, address, true);
 	mem_cgroup_commit_charge(new_page, memcg, false, true);
+	count_memcg_events(memcg, THP_COLLAPSE_ALLOC, 1);
 	lru_cache_add_active_or_unevictable(new_page, vma);
 	pgtable_trans_huge_deposit(mm, pmd, pgtable);
 	set_pmd_at(mm, address, pmd, _pmd);
@@ -1517,14 +1518,16 @@ tree_unlocked:
 		SetPageUptodate(new_page);
 		page_ref_unfreeze(new_page, HPAGE_PMD_NR);
 		mem_cgroup_commit_charge(new_page, memcg, false, true);
+		count_memcg_events(memcg, THP_COLLAPSE_ALLOC, 1);
 		lru_cache_add_anon(new_page);
 		unlock_page(new_page);
 
 		*hpage = NULL;
 	} else {
 		/* Something went wrong: rollback changes to the radix-tree */
-		shmem_uncharge(mapping->host, nr_none);
 		xa_lock_irq(&mapping->i_pages);
+		mapping->nrpages -= nr_none;
+		shmem_uncharge(mapping->host, nr_none);
 		radix_tree_for_each_slot(slot, &mapping->i_pages, &iter, start) {
 			if (iter.index >= end)
 				break;

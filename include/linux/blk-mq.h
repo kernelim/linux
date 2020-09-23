@@ -71,14 +71,11 @@ struct blk_mq_hw_ctx {
 	struct dentry		*sched_debugfs_dir;
 #endif
 
-#ifdef __GENKSYMS__
-	RH_KABI_RESERVE(1)
-	RH_KABI_RESERVE(2)
-#else
-	struct list_head	hctx_list;	//use reserve 1 and 2
-#endif
-	RH_KABI_RESERVE(3)
-	RH_KABI_RESERVE(4)
+	RH_KABI_USE(1, 2, struct list_head hctx_list)
+
+	/** @cpuhp_online: List to store request if CPU is going to die */
+	RH_KABI_USE(3, 4, struct hlist_node	cpuhp_online)
+
 	RH_KABI_RESERVE(5)
 	RH_KABI_RESERVE(6)
 	RH_KABI_RESERVE(7)
@@ -88,6 +85,16 @@ struct blk_mq_hw_ctx {
 	struct srcu_struct	srcu[0];
 };
 
+/**
+ * struct blk_mq_queue_map - ctx -> hctx mapping
+ * @mq_map:       CPU ID to hardware queue index map. This is an array
+ *	with nr_cpu_ids elements. Each element has a value in the range
+ *	[@queue_offset, @queue_offset + @nr_queues).
+ * @nr_queues:    Number of hardware queues to map CPU IDs onto.
+ * @queue_offset: First hardware queue to map onto. Used by the PCIe NVMe
+ *	driver to map each hardware queue type (enum hctx_type) onto a distinct
+ *	set of hardware queues.
+ */
 struct blk_mq_queue_map {
 	unsigned int *mq_map;
 	unsigned int nr_queues;
@@ -103,23 +110,45 @@ enum hctx_type {
 	RH_HCTX_MAX_TYPES = 6,	/* RH extend for reserving space*/
 };
 
+/**
+ * struct blk_mq_tag_set - tag set that can be shared between request queues
+ * @map:	   One or more ctx -> hctx mappings. One map exists for each
+ *		   hardware queue type (enum hctx_type) that the driver wishes
+ *		   to support. There are no restrictions on maps being of the
+ *		   same size, and it's perfectly legal to share maps between
+ *		   types.
+ * @nr_maps:	   Number of elements in the @map array. A number in the range
+ *		   [1, HCTX_MAX_TYPES].
+ * @ops:	   Pointers to functions that implement block driver behavior.
+ * @nr_hw_queues:  Number of hardware queues supported by the block driver that
+ *		   owns this data structure.
+ * @queue_depth:   Number of tags per hardware queue, reserved tags included.
+ * @reserved_tags: Number of tags to set aside for BLK_MQ_REQ_RESERVED tag
+ *		   allocations.
+ * @cmd_size:	   Number of additional bytes to allocate per request. The block
+ *		   driver owns these additional bytes.
+ * @numa_node:	   NUMA node the storage adapter has been connected to.
+ * @timeout:	   Request processing timeout in jiffies.
+ * @flags:	   Zero or more BLK_MQ_F_* flags.
+ * @driver_data:   Pointer to data owned by the block driver that created this
+ *		   tag set.
+ * @tags:	   Tag sets. One tag set per hardware queue. Has @nr_hw_queues
+ *		   elements.
+ * @tag_list_lock: Serializes tag_list accesses.
+ * @tag_list:	   List of the request queues that use this tag set. See also
+ *		   request_queue.tag_set_list.
+ */
 struct blk_mq_tag_set {
-	/*
-	 * map[] holds ctx -> hctx mappings, one map exists for each type
-	 * that the driver wishes to support. There are no restrictions
-	 * on maps being of the same size, and it's perfectly legal to
-	 * share maps between types.
-	 */
 	struct blk_mq_queue_map	map[RH_HCTX_MAX_TYPES];
-	unsigned int		nr_maps;	/* nr entries in map[] */
+	unsigned int		nr_maps;
 	const struct blk_mq_ops	*ops;
-	unsigned int		nr_hw_queues;	/* nr hw queues across maps */
-	unsigned int		queue_depth;	/* max hw supported */
+	unsigned int		nr_hw_queues;
+	unsigned int		queue_depth;
 	unsigned int		reserved_tags;
-	unsigned int		cmd_size;	/* per-request extra data */
+	unsigned int		cmd_size;
 	int			numa_node;
 	unsigned int		timeout;
-	unsigned int		flags;		/* BLK_MQ_F_* */
+	unsigned int		flags;
 	void			*driver_data;
 
 	struct blk_mq_tags	**tags;
@@ -259,6 +288,11 @@ enum {
 	BLK_MQ_F_SHOULD_MERGE	= 1 << 0,
 	BLK_MQ_F_TAG_SHARED	= 1 << 1,
 	BLK_MQ_F_SG_MERGE	= 1 << 2,	/* obsolete */
+	/*
+	 * Set when this device requires underlying blk-mq device for
+	 * completing IO:
+	 */
+	BLK_MQ_F_STACKING	= 1 << 3,
 	BLK_MQ_F_BLOCKING	= 1 << 5,
 	BLK_MQ_F_NO_SCHED	= 1 << 6,
 	BLK_MQ_F_ALLOC_POLICY_START_BIT = 8,
@@ -267,6 +301,9 @@ enum {
 	BLK_MQ_S_STOPPED	= 0,
 	BLK_MQ_S_TAG_ACTIVE	= 1,
 	BLK_MQ_S_SCHED_RESTART	= 2,
+
+	/* hw queue is inactive after all its CPUs become offline */
+	BLK_MQ_S_INACTIVE	= 3,
 
 	BLK_MQ_MAX_DEPTH	= 10240,
 
@@ -281,7 +318,8 @@ enum {
 
 struct request_queue *blk_mq_init_queue(struct blk_mq_tag_set *);
 struct request_queue *blk_mq_init_allocated_queue(struct blk_mq_tag_set *set,
-						  struct request_queue *q);
+						  struct request_queue *q,
+						  bool elevator_init);
 struct request_queue *blk_mq_init_sq_queue(struct blk_mq_tag_set *set,
 						const struct blk_mq_ops *ops,
 						unsigned int queue_depth,
@@ -294,7 +332,6 @@ void blk_mq_free_tag_set(struct blk_mq_tag_set *set);
 void blk_mq_flush_plug_list(struct blk_plug *plug, bool from_schedule);
 
 void blk_mq_free_request(struct request *rq);
-bool blk_mq_can_queue(struct blk_mq_hw_ctx *);
 
 bool blk_mq_queue_inflight(struct request_queue *q);
 
@@ -333,9 +370,25 @@ static inline u16 blk_mq_unique_tag_to_tag(u32 unique_tag)
 	return unique_tag & BLK_MQ_UNIQUE_TAG_MASK;
 }
 
+/**
+ * blk_mq_rq_state() - read the current MQ_RQ_* state of a request
+ * @rq: target request.
+ */
+static inline enum mq_rq_state blk_mq_rq_state(struct request *rq)
+{
+	return READ_ONCE(rq->state);
+}
 
-int blk_mq_request_started(struct request *rq);
-int blk_mq_request_completed(struct request *rq);
+static inline int blk_mq_request_started(struct request *rq)
+{
+	return blk_mq_rq_state(rq) != MQ_RQ_IDLE;
+}
+
+static inline int blk_mq_request_completed(struct request *rq)
+{
+	return blk_mq_rq_state(rq) == MQ_RQ_COMPLETE;
+}
+
 void blk_mq_start_request(struct request *rq);
 void blk_mq_end_request(struct request *rq, blk_status_t error);
 void __blk_mq_end_request(struct request *rq, blk_status_t error);
@@ -344,6 +397,7 @@ void blk_mq_requeue_request(struct request *rq, bool kick_requeue_list);
 void blk_mq_kick_requeue_list(struct request_queue *q);
 void blk_mq_delay_kick_requeue_list(struct request_queue *q, unsigned long msecs);
 bool blk_mq_complete_request(struct request *rq);
+void blk_mq_force_complete_rq(struct request *rq);
 bool blk_mq_bio_list_merge(struct request_queue *q, struct list_head *list,
 			   struct bio *bio);
 bool blk_mq_queue_stopped(struct request_queue *q);
@@ -356,7 +410,7 @@ void blk_mq_start_stopped_hw_queues(struct request_queue *q, bool async);
 void blk_mq_quiesce_queue(struct request_queue *q);
 void blk_mq_unquiesce_queue(struct request_queue *q);
 void blk_mq_delay_run_hw_queue(struct blk_mq_hw_ctx *hctx, unsigned long msecs);
-bool blk_mq_run_hw_queue(struct blk_mq_hw_ctx *hctx, bool async);
+void blk_mq_run_hw_queue(struct blk_mq_hw_ctx *hctx, bool async);
 void blk_mq_run_hw_queues(struct request_queue *q, bool async);
 void blk_mq_delay_run_hw_queues(struct request_queue *q, unsigned long msecs);
 void blk_mq_tagset_busy_iter(struct blk_mq_tag_set *tagset,

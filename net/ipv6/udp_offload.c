@@ -116,7 +116,7 @@ out:
 }
 
 INDIRECT_CALLABLE_SCOPE
-struct sk_buff **udp6_gro_receive(struct sk_buff **head, struct sk_buff *skb)
+struct sk_buff *udp6_gro_receive(struct list_head *head, struct sk_buff *skb)
 {
 	struct udphdr *uh = udp_gro_udphdr(skb);
 

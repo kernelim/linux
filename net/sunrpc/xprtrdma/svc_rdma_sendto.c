@@ -233,11 +233,15 @@ void svc_rdma_send_ctxt_put(struct svcxprt_rdma *rdma,
 	/* The first SGE contains the transport header, which
 	 * remains mapped until @ctxt is destroyed.
 	 */
-	for (i = 1; i < ctxt->sc_send_wr.num_sge; i++)
+	for (i = 1; i < ctxt->sc_send_wr.num_sge; i++) {
 		ib_dma_unmap_page(device,
 				  ctxt->sc_sges[i].addr,
 				  ctxt->sc_sges[i].length,
 				  DMA_TO_DEVICE);
+		trace_svcrdma_dma_unmap_page(rdma,
+					     ctxt->sc_sges[i].addr,
+					     ctxt->sc_sges[i].length);
+	}
 
 	for (i = 0; i < ctxt->sc_page_count; ++i)
 		put_page(ctxt->sc_pages[i]);
@@ -306,15 +310,17 @@ int svc_rdma_send(struct svcxprt_rdma *rdma, struct ib_send_wr *wr)
 		}
 
 		svc_xprt_get(&rdma->sc_xprt);
+		trace_svcrdma_post_send(wr);
 		ret = ib_post_send(rdma->sc_qp, wr, NULL);
-		trace_svcrdma_post_send(wr, ret);
-		if (ret) {
-			set_bit(XPT_CLOSE, &rdma->sc_xprt.xpt_flags);
-			svc_xprt_put(&rdma->sc_xprt);
-			wake_up(&rdma->sc_send_wait);
-		}
-		break;
+		if (ret)
+			break;
+		return 0;
 	}
+
+	trace_svcrdma_sq_post_err(rdma, ret);
+	set_bit(XPT_CLOSE, &rdma->sc_xprt.xpt_flags);
+	svc_xprt_put(&rdma->sc_xprt);
+	wake_up(&rdma->sc_send_wait);
 	return ret;
 }
 
@@ -490,6 +496,7 @@ static int svc_rdma_dma_map_page(struct svcxprt_rdma *rdma,
 	dma_addr_t dma_addr;
 
 	dma_addr = ib_dma_map_page(dev, page, offset, len, DMA_TO_DEVICE);
+	trace_svcrdma_dma_map_page(rdma, dma_addr, len);
 	if (ib_dma_mapping_error(dev, dma_addr))
 		goto out_maperr;
 
@@ -499,7 +506,6 @@ static int svc_rdma_dma_map_page(struct svcxprt_rdma *rdma,
 	return 0;
 
 out_maperr:
-	trace_svcrdma_dma_map_page(rdma, page);
 	return -EIO;
 }
 
@@ -782,7 +788,6 @@ static int svc_rdma_send_error_msg(struct svcxprt_rdma *rdma,
 				   struct svc_rqst *rqstp)
 {
 	__be32 *p;
-	int ret;
 
 	p = ctxt->sc_xprt_buf;
 	trace_svcrdma_err_chunk(*p);
@@ -794,13 +799,7 @@ static int svc_rdma_send_error_msg(struct svcxprt_rdma *rdma,
 	svc_rdma_save_io_pages(rqstp, ctxt);
 
 	ctxt->sc_send_wr.opcode = IB_WR_SEND;
-	ret = svc_rdma_send(rdma, &ctxt->sc_send_wr);
-	if (ret) {
-		svc_rdma_send_ctxt_put(rdma, ctxt);
-		return ret;
-	}
-
-	return 0;
+	return svc_rdma_send(rdma, &ctxt->sc_send_wr);
 }
 
 /**

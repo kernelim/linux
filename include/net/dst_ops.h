@@ -28,8 +28,11 @@ struct dst_ops {
 					  struct net_device *dev, int how);
 	struct dst_entry *	(*negative_advice)(struct dst_entry *);
 	void			(*link_failure)(struct sk_buff *);
-	void			(*update_pmtu)(struct dst_entry *dst, struct sock *sk,
-					       struct sk_buff *skb, u32 mtu);
+	RH_KABI_REPLACE(void	(*update_pmtu)(struct dst_entry *dst, struct sock *sk,
+					       struct sk_buff *skb, u32 mtu),
+			void	(*update_pmtu)(struct dst_entry *dst, struct sock *sk,
+					       struct sk_buff *skb, u32 mtu,
+					       bool confirm_neigh))
 	void			(*redirect)(struct dst_entry *dst, struct sock *sk,
 					    struct sk_buff *skb);
 	int			(*local_out)(struct net *net, struct sock *sk, struct sk_buff *skb);

@@ -390,21 +390,38 @@ unsigned int fib6_tables_seq_read(struct net *net)
 	return fib_seq;
 }
 
-static int call_fib6_entry_notifier(struct notifier_block *nb, struct net *net,
+static int call_fib6_entry_notifier(struct notifier_block *nb,
 				    enum fib_event_type event_type,
-				    struct fib6_info *rt)
+				    struct fib6_info *rt,
+				    struct netlink_ext_ack *extack)
 {
 	struct fib6_entry_notifier_info info = {
+		.info.extack = extack,
 		.rt = rt,
 	};
 
-	return call_fib6_notifier(nb, net, event_type, &info.info);
+	return call_fib6_notifier(nb, event_type, &info.info);
 }
 
-static int call_fib6_entry_notifiers(struct net *net,
-				     enum fib_event_type event_type,
-				     struct fib6_info *rt,
-				     struct netlink_ext_ack *extack)
+static int call_fib6_multipath_entry_notifier(struct notifier_block *nb,
+					      enum fib_event_type event_type,
+					      struct fib6_info *rt,
+					      unsigned int nsiblings,
+					      struct netlink_ext_ack *extack)
+{
+	struct fib6_entry_notifier_info info = {
+		.info.extack = extack,
+		.rt = rt,
+		.nsiblings = nsiblings,
+	};
+
+	return call_fib6_notifier(nb, event_type, &info.info);
+}
+
+int call_fib6_entry_notifiers(struct net *net,
+			      enum fib_event_type event_type,
+			      struct fib6_info *rt,
+			      struct netlink_ext_ack *extack)
 {
 	struct fib6_entry_notifier_info info = {
 		.info.extack = extack,
@@ -415,43 +432,88 @@ static int call_fib6_entry_notifiers(struct net *net,
 	return call_fib6_notifiers(net, event_type, &info.info);
 }
 
+int call_fib6_multipath_entry_notifiers(struct net *net,
+					enum fib_event_type event_type,
+					struct fib6_info *rt,
+					unsigned int nsiblings,
+					struct netlink_ext_ack *extack)
+{
+	struct fib6_entry_notifier_info info = {
+		.info.extack = extack,
+		.rt = rt,
+		.nsiblings = nsiblings,
+	};
+
+	rt->fib6_table->fib_seq++;
+	return call_fib6_notifiers(net, event_type, &info.info);
+}
+
+int call_fib6_entry_notifiers_replace(struct net *net, struct fib6_info *rt)
+{
+	struct fib6_entry_notifier_info info = {
+		.rt = rt,
+		.nsiblings = rt->fib6_nsiblings,
+	};
+
+	rt->fib6_table->fib_seq++;
+	return call_fib6_notifiers(net, FIB_EVENT_ENTRY_REPLACE, &info.info);
+}
+
 struct fib6_dump_arg {
 	struct net *net;
 	struct notifier_block *nb;
+	struct netlink_ext_ack *extack;
 };
 
-static void fib6_rt_dump(struct fib6_info *rt, struct fib6_dump_arg *arg)
+static int fib6_rt_dump(struct fib6_info *rt, struct fib6_dump_arg *arg)
 {
-	if (rt == arg->net->ipv6.fib6_null_entry)
-		return;
-	call_fib6_entry_notifier(arg->nb, arg->net, FIB_EVENT_ENTRY_ADD, rt);
+	enum fib_event_type fib_event = FIB_EVENT_ENTRY_REPLACE;
+	int err;
+
+	if (!rt || rt == arg->net->ipv6.fib6_null_entry)
+		return 0;
+
+	if (rt->fib6_nsiblings)
+		err = call_fib6_multipath_entry_notifier(arg->nb, fib_event,
+							 rt,
+							 rt->fib6_nsiblings,
+							 arg->extack);
+	else
+		err = call_fib6_entry_notifier(arg->nb, fib_event, rt,
+					       arg->extack);
+
+	return err;
 }
 
 static int fib6_node_dump(struct fib6_walker *w)
 {
-	struct fib6_info *rt;
+	int err;
 
-	for_each_fib6_walker_rt(w)
-		fib6_rt_dump(rt, w->args);
+	err = fib6_rt_dump(w->leaf, w->args);
 	w->leaf = NULL;
-	return 0;
+	return err;
 }
 
-static void fib6_table_dump(struct net *net, struct fib6_table *tb,
-			    struct fib6_walker *w)
+static int fib6_table_dump(struct net *net, struct fib6_table *tb,
+			   struct fib6_walker *w)
 {
+	int err;
+
 	w->root = &tb->tb6_root;
 	spin_lock_bh(&tb->tb6_lock);
-	fib6_walk(net, w);
+	err = fib6_walk(net, w);
 	spin_unlock_bh(&tb->tb6_lock);
+	return err;
 }
 
 /* Called with rcu_read_lock() */
-int fib6_tables_dump(struct net *net, struct notifier_block *nb)
+int fib6_tables_dump(struct net *net, struct notifier_block *nb,
+		     struct netlink_ext_ack *extack)
 {
 	struct fib6_dump_arg arg;
 	struct fib6_walker *w;
 	unsigned int h;
+	int err = 0;
 
 	w = kzalloc(sizeof(*w), GFP_ATOMIC);
 	if (!w)
@@ -460,19 +522,24 @@ int fib6_tables_dump(struct net *net, struct notifier_block *nb)
 	w->func = fib6_node_dump;
 	arg.net = net;
 	arg.nb = nb;
+	arg.extack = extack;
 	w->args = &arg;
 
 	for (h = 0; h < FIB6_TABLE_HASHSZ; h++) {
 		struct hlist_head *head = &net->ipv6.fib_table_hash[h];
 		struct fib6_table *tb;
 
-		hlist_for_each_entry_rcu(tb, head, tb6_hlist)
-			fib6_table_dump(net, tb, w);
+		hlist_for_each_entry_rcu(tb, head, tb6_hlist) {
+			err = fib6_table_dump(net, tb, w);
+			if (err < 0)
+				goto out;
+		}
 	}
 
+out:
 	kfree(w);
 
-	return 0;
+	return err;
 }
 
 static int fib6_dump_node(struct fib6_walker *w)
@@ -630,7 +697,7 @@ static int inet6_dump_fib(struct sk_buff *skb, struct netlink_callback *cb)
 	if (arg.filter.table_id) {
 		tb = fib6_get_table(net, arg.filter.table_id);
 		if (!tb) {
-			if (arg.filter.dump_all_families)
+			if (rtnl_msg_family(cb->nlh) != PF_INET6)
 				goto out;
 
 			NL_SET_ERR_MSG_MOD(cb->extack, "FIB table does not exist");
@@ -994,6 +1061,7 @@ static int fib6_add_rt2node(struct fib6_node *fn, struct fib6_info *rt,
 		   (info->nlh->nlmsg_flags & NLM_F_CREATE));
 	int found = 0;
 	bool rt_can_ecmp = rt6_qualify_for_ecmp(rt);
+	bool notify_sibling_rt = false;
 	u16 nlflags = NLM_F_EXCL;
 	int err;
 
@@ -1023,8 +1091,7 @@ static int fib6_add_rt2node(struct fib6_node *fn, struct fib6_info *rt,
 					found++;
 					break;
 				}
-				if (rt_can_ecmp)
-					fallback_ins = fallback_ins ?: ins;
+				fallback_ins = fallback_ins ?: ins;
 				goto next_iter;
 			}
 
@@ -1067,7 +1134,9 @@ next_iter:
 	}
 
 	if (fallback_ins && !found) {
-		/* No ECMP-able route found, replace first non-ECMP one */
+		/* No matching route with same ecmp-able-ness found, replace
+		 * first matching route
+		 */
 		ins = fallback_ins;
 		iter = rcu_dereference_protected(*ins,
 				    lockdep_is_held(&rt->fib6_table->tb6_lock));
@@ -1085,6 +1154,7 @@ next_iter:
 
 		/* Find the first route that have the same metric */
 		sibling = leaf;
+		notify_sibling_rt = true;
 		while (sibling) {
 			if (sibling->fib6_metric == rt->fib6_metric &&
 			    rt6_qualify_for_ecmp(sibling)) {
@@ -1094,6 +1164,7 @@ next_iter:
 			}
 			sibling = rcu_dereference_protected(sibling->fib6_next,
 				    lockdep_is_held(&rt->fib6_table->tb6_lock));
+			notify_sibling_rt = false;
 		}
 		/* For each sibling in the list, increment the counter of
 		 * siblings. BUG() if counters does not match, list of siblings
@@ -1120,26 +1191,39 @@ next_iter:
 add:
 		nlflags |= NLM_F_CREATE;
 
-		err = call_fib6_entry_notifiers(info->nl_net,
-						FIB_EVENT_ENTRY_ADD,
-						rt, extack);
-		if (err) {
-			struct fib6_info *sibling, *next_sibling;
+		/* The route should only be notified if it is the first
+		 * route in the node or if it is added as a sibling
+		 * route to the first route in the node.
+		 */
+		if (!info->skip_notify_kernel &&
+		    (notify_sibling_rt || ins == &fn->leaf)) {
+			enum fib_event_type fib_event;
 
-			/* If the route has siblings, then it first
-			 * needs to be unlinked from them.
-			 */
-			if (!rt->fib6_nsiblings)
+			if (notify_sibling_rt)
+				fib_event = FIB_EVENT_ENTRY_APPEND;
+			else
+				fib_event = FIB_EVENT_ENTRY_REPLACE;
+			err = call_fib6_entry_notifiers(info->nl_net,
+							fib_event, rt,
+							extack);
+			if (err) {
+				struct fib6_info *sibling, *next_sibling;
+
+				/* If the route has siblings, then it first
+				 * needs to be unlinked from them.
+				 */
+				if (!rt->fib6_nsiblings)
+					return err;
+
+				list_for_each_entry_safe(sibling, next_sibling,
+							 &rt->fib6_siblings,
+							 fib6_siblings)
+					sibling->fib6_nsiblings--;
+				rt->fib6_nsiblings = 0;
+				list_del_init(&rt->fib6_siblings);
+				rt6_multipath_rebalance(next_sibling);
 				return err;
-
-			list_for_each_entry_safe(sibling, next_sibling,
-						 &rt->fib6_siblings,
-						 fib6_siblings)
-				sibling->fib6_nsiblings--;
-			rt->fib6_nsiblings = 0;
-			list_del_init(&rt->fib6_siblings);
-			rt6_multipath_rebalance(next_sibling);
-			return err;
+			}
 		}
 
 		rcu_assign_pointer(rt->fib6_next, iter);
@@ -1165,11 +1249,13 @@ add:
 			return -ENOENT;
 		}
 
-		err = call_fib6_entry_notifiers(info->nl_net,
-						FIB_EVENT_ENTRY_REPLACE,
-						rt, extack);
-		if (err)
-			return err;
+		if (!info->skip_notify_kernel && ins == &fn->leaf) {
+			err = call_fib6_entry_notifiers(info->nl_net,
+							FIB_EVENT_ENTRY_REPLACE,
+							rt, extack);
+			if (err)
+				return err;
+		}
 
 		atomic_inc(&rt->fib6_ref);
 		rcu_assign_pointer(rt->fib6_node, fn);
@@ -1784,12 +1870,28 @@ static struct fib6_node *fib6_repair_tree(struct net *net,
 static void fib6_del_route(struct fib6_table *table, struct fib6_node *fn,
 			   struct fib6_info __rcu **rtp, struct nl_info *info)
 {
+	struct fib6_info *leaf, *replace_rt = NULL;
 	struct fib6_walker *w;
 	struct fib6_info *rt = rcu_dereference_protected(*rtp,
 				    lockdep_is_held(&table->tb6_lock));
 	struct net *net = info->nl_net;
+	bool notify_del = false;
 
 	RT6_TRACE("fib6_del_route\n");
+
+	/* If the deleted route is the first in the node and it is not part of
+	 * a multipath route, then we need to replace it with the next route
+	 * in the node, if exists.
+	 */
+	leaf = rcu_dereference_protected(fn->leaf,
+					 lockdep_is_held(&table->tb6_lock));
+	if (leaf == rt && !rt->fib6_nsiblings) {
+		if (rcu_access_pointer(rt->fib6_next))
+			replace_rt = rcu_dereference_protected(rt->fib6_next,
+					    lockdep_is_held(&table->tb6_lock));
+		else
+			notify_del = true;
+	}
 
 	/* Unlink it */
 	*rtp = rt->fib6_next;
@@ -1808,6 +1910,14 @@ static void fib6_del_route(struct fib6_table *table, struct fib6_node *fn,
 	if (rt->fib6_nsiblings) {
 		struct fib6_info *sibling, *next_sibling;
 
+		/* The route is deleted from a multipath route. If this
+		 * multipath route is the first route in the node, then we need
+		 * to emit a delete notification. Otherwise, we need to skip
+		 * the notification.
+		 */
+		if (rt->fib6_metric == leaf->fib6_metric &&
+		    rt6_qualify_for_ecmp(leaf))
+			notify_del = true;
 		list_for_each_entry_safe(sibling, next_sibling,
 					 &rt->fib6_siblings, fib6_siblings)
 			sibling->fib6_nsiblings--;
@@ -1843,9 +1953,16 @@ static void fib6_del_route(struct fib6_table *table, struct fib6_node *fn,
 
 	fib6_purge_rt(rt, fn, net);
 
-	call_fib6_entry_notifiers(net, FIB_EVENT_ENTRY_DEL, rt, NULL);
+	if (!info->skip_notify_kernel) {
+		if (notify_del)
+			call_fib6_entry_notifiers(net, FIB_EVENT_ENTRY_DEL,
+						  rt, NULL);
+		else if (replace_rt)
+			call_fib6_entry_notifiers_replace(net, replace_rt);
+	}
 	if (!info->skip_notify)
 		inet6_rt_notify(RTM_DELROUTE, rt, info, 0);
+
 	fib6_info_release(rt);
 }
 

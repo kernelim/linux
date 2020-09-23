@@ -160,12 +160,12 @@ int drm_atomic_set_mode_prop_for_crtc(struct drm_crtc_state *state,
 EXPORT_SYMBOL(drm_atomic_set_mode_prop_for_crtc);
 
 /**
- * drm_atomic_set_crtc_for_plane - set crtc for plane
+ * drm_atomic_set_crtc_for_plane - set CRTC for plane
  * @plane_state: the plane whose incoming state to update
- * @crtc: crtc to use for the plane
+ * @crtc: CRTC to use for the plane
  *
- * Changing the assigned crtc for a plane requires us to grab the lock and state
- * for the new crtc, as needed. This function takes care of all these details
+ * Changing the assigned CRTC for a plane requires us to grab the lock and state
+ * for the new CRTC, as needed. This function takes care of all these details
  * besides updating the pointer in the state object itself.
  *
  * Returns:
@@ -279,12 +279,12 @@ drm_atomic_set_fence_for_plane(struct drm_plane_state *plane_state,
 EXPORT_SYMBOL(drm_atomic_set_fence_for_plane);
 
 /**
- * drm_atomic_set_crtc_for_connector - set crtc for connector
+ * drm_atomic_set_crtc_for_connector - set CRTC for connector
  * @conn_state: atomic state object for the connector
- * @crtc: crtc to use for the connector
+ * @crtc: CRTC to use for the connector
  *
- * Changing the assigned crtc for a connector requires us to grab the lock and
- * state for the new crtc, as needed. This function takes care of all these
+ * Changing the assigned CRTC for a connector requires us to grab the lock and
+ * state for the new CRTC, as needed. This function takes care of all these
  * details besides updating the pointer in the state object itself.
  *
  * Returns:
@@ -747,6 +747,8 @@ static int drm_atomic_connector_set_property(struct drm_connector *connector,
 			return -EINVAL;
 		}
 		state->content_protection = val;
+	} else if (property == config->hdcp_content_type_property) {
+		state->hdcp_content_type = val;
 	} else if (property == connector->colorspace_property) {
 		state->colorspace = val;
 	} else if (property == config->writeback_fb_id_property) {
@@ -831,6 +833,8 @@ drm_atomic_connector_get_property(struct drm_connector *connector,
 			state->hdr_output_metadata->base.id : 0;
 	} else if (property == config->content_protection_property) {
 		*val = state->content_protection;
+	} else if (property == config->hdcp_content_type_property) {
+		*val = state->hdcp_content_type;
 	} else if (property == config->writeback_fb_id_property) {
 		/* Writeback framebuffer is one-shot, write and forget */
 		*val = 0;
@@ -1033,7 +1037,7 @@ int drm_atomic_set_property(struct drm_atomic_state *state,
  * As a contrast, with implicit fencing the kernel keeps track of any
  * ongoing rendering, and automatically ensures that the atomic update waits
  * for any pending rendering to complete. For shared buffers represented with
- * a &struct dma_buf this is tracked in &struct reservation_object.
+ * a &struct dma_buf this is tracked in &struct dma_resv.
  * Implicit syncing is how Linux traditionally worked (e.g. DRI2/3 on X.org),
  * whereas explicit fencing is what Android wants.
  *
@@ -1401,7 +1405,7 @@ retry:
 	} else if (arg->flags & DRM_MODE_ATOMIC_NONBLOCK) {
 		ret = drm_atomic_nonblocking_commit(state);
 	} else {
-		if (unlikely(drm_debug & DRM_UT_STATE))
+		if (drm_debug_enabled(DRM_UT_STATE))
 			drm_atomic_print_state(state);
 
 		ret = drm_atomic_commit(state);

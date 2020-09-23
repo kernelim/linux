@@ -26,7 +26,6 @@
 /*
  * Pre-requisites: headers required by header of this unit
  */
-#if defined(CONFIG_DRM_AMD_DC_DCN2_0)
 #include "hw_translate_dcn20.h"
 
 #include "dm_services.h"
@@ -71,7 +70,7 @@ static bool offset_to_id(
 {
 	switch (offset) {
 	/* GENERIC */
-	case REG(DC_GENERICA):
+	case REG(DC_GPIO_GENERIC_A):
 		*id = GPIO_ID_GENERIC;
 		switch (mask) {
 		case DC_GPIO_GENERIC_A__DC_GPIO_GENERICA_A_MASK:
@@ -379,4 +378,3 @@ void dal_hw_translate_dcn20_init(struct hw_translate *tr)
 	tr->funcs = &funcs;
 }
 
-#endif

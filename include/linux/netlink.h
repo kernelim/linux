@@ -188,7 +188,7 @@ struct netlink_callback {
 	/* the module that dump function belong to */
 	struct module		*module;
 	u16			family;
-	u16			min_dump_alloc;
+	u16			RH_KABI_RENAME(min_dump_alloc, min_dump_alloc_rh_old);
 	unsigned int		prev_seq, seq;
 	RH_KABI_REPLACE(long	args[6],
 		        union {
@@ -202,6 +202,7 @@ struct netlink_callback {
 	RH_KABI_EXTEND(struct netlink_ext_ack *extack)
 	RH_KABI_EXTEND(bool strict_check)
 	RH_KABI_EXTEND(u16 answer_flags)
+	RH_KABI_EXTEND(u32	min_dump_alloc)
 };
 
 struct netlink_notify {

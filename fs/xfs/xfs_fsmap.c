@@ -9,16 +9,12 @@
 #include "xfs_format.h"
 #include "xfs_log_format.h"
 #include "xfs_trans_resv.h"
-#include "xfs_sb.h"
 #include "xfs_mount.h"
-#include "xfs_defer.h"
 #include "xfs_inode.h"
 #include "xfs_trans.h"
-#include "xfs_error.h"
 #include "xfs_btree.h"
 #include "xfs_rmap_btree.h"
 #include "xfs_trace.h"
-#include "xfs_log.h"
 #include "xfs_rmap.h"
 #include "xfs_alloc.h"
 #include "xfs_bit.h"
@@ -254,7 +250,7 @@ xfs_getfsmap_helper(
 		rec_daddr += XFS_FSB_TO_BB(mp, rec->rm_blockcount);
 		if (info->next_daddr < rec_daddr)
 			info->next_daddr = rec_daddr;
-		return XFS_BTREE_QUERY_RANGE_CONTINUE;
+		return 0;
 	}
 
 	/* Are we just counting mappings? */
@@ -263,14 +259,14 @@ xfs_getfsmap_helper(
 			info->head->fmh_entries++;
 
 		if (info->last)
-			return XFS_BTREE_QUERY_RANGE_CONTINUE;
+			return 0;
 
 		info->head->fmh_entries++;
 
 		rec_daddr += XFS_FSB_TO_BB(mp, rec->rm_blockcount);
 		if (info->next_daddr < rec_daddr)
 			info->next_daddr = rec_daddr;
-		return XFS_BTREE_QUERY_RANGE_CONTINUE;
+		return 0;
 	}
 
 	/*
@@ -280,7 +276,7 @@ xfs_getfsmap_helper(
 	 */
 	if (rec_daddr > info->next_daddr) {
 		if (info->head->fmh_entries >= info->head->fmh_count)
-			return XFS_BTREE_QUERY_RANGE_ABORT;
+			return -ECANCELED;
 
 		fmr.fmr_device = info->dev;
 		fmr.fmr_physical = info->next_daddr;
@@ -299,7 +295,7 @@ xfs_getfsmap_helper(
 
 	/* Fill out the extent we found */
 	if (info->head->fmh_entries >= info->head->fmh_count)
-		return XFS_BTREE_QUERY_RANGE_ABORT;
+		return -ECANCELED;
 
 	trace_xfs_fsmap_mapping(mp, info->dev, info->agno, rec);
 
@@ -332,7 +328,7 @@ out:
 	rec_daddr += XFS_FSB_TO_BB(mp, rec->rm_blockcount);
 	if (info->next_daddr < rec_daddr)
 		info->next_daddr = rec_daddr;
-	return XFS_BTREE_QUERY_RANGE_CONTINUE;
+	return 0;
 }
 
 /* Transform a rmapbt irec into a fsmap */
@@ -899,6 +895,14 @@ xfs_getfsmap(
 	info.format_arg = arg;
 	info.head = head;
 
+	/*
+	 * If fsmap runs concurrently with a scrub, the freeze can be delayed
+	 * indefinitely as we walk the rmapbt and iterate over metadata
+	 * buffers.  Freeze quiesces the log (which waits for the buffer LRU to
+	 * be emptied) and that won't happen while we're reading buffers.
+	 */
+	sb_start_write(mp->m_super);
+
 	/* For each device we support... */
 	for (i = 0; i < XFS_GETFSMAP_DEVS; i++) {
 		/* Is this device within the range the user asked for? */
@@ -938,6 +942,7 @@ xfs_getfsmap(
 
 	if (tp)
 		xfs_trans_cancel(tp);
+	sb_end_write(mp->m_super);
 	head->fmh_oflags = FMH_OF_DEV_T;
 	return error;
 }

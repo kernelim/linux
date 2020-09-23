@@ -14,4 +14,9 @@ udpgso_bench_rx
 udpgso_bench_tx
 tcp_inq
 tls
+txring_overwrite
 ip_defrag
+ipv6_flowlabel
+ipv6_flowlabel_mgr
+so_txtime
+nettest

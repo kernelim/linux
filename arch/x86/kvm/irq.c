@@ -1,23 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * irq.c: API for in kernel interrupt controller
  * Copyright (c) 2007, Intel Corporation.
  * Copyright 2009 Red Hat, Inc. and/or its affiliates.
  *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc., 59 Temple
- * Place - Suite 330, Boston, MA 02111-1307 USA.
  * Authors:
  *   Yaozu (Eddie) Dong <Eddie.dong@intel.com>
- *
  */
 
 #include <linux/export.h>
@@ -95,6 +83,7 @@ int kvm_cpu_has_injectable_intr(struct kvm_vcpu *v)
 
 	return kvm_apic_has_interrupt(v) != -1; /* LAPIC */
 }
+EXPORT_SYMBOL_GPL(kvm_cpu_has_injectable_intr);
 
 /*
  * check if there is pending interrupt without
@@ -171,6 +160,8 @@ void __kvm_migrate_timers(struct kvm_vcpu *vcpu)
 {
 	__kvm_migrate_apic_timer(vcpu);
 	__kvm_migrate_pit_timer(vcpu);
+	if (kvm_x86_ops.migrate_timers)
+		kvm_x86_ops.migrate_timers(vcpu);
 }
 
 bool kvm_arch_irqfd_allowed(struct kvm *kvm, struct kvm_irqfd *args)

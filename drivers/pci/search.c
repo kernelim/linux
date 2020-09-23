@@ -15,7 +15,6 @@
 #include "pci.h"
 
 DECLARE_RWSEM(pci_bus_sem);
-EXPORT_SYMBOL_GPL(pci_bus_sem);
 
 /*
  * pci_for_each_dma_alias - Iterate over DMA aliases for a device
@@ -32,6 +31,12 @@ int pci_for_each_dma_alias(struct pci_dev *pdev,
 {
 	struct pci_bus *bus;
 	int ret;
+
+	/*
+	 * The device may have an explicit alias requester ID for DMA where the
+	 * requester is on another PCI bus.
+	 */
+	pdev = pci_real_dma_dev(pdev);
 
 	ret = fn(pdev, pci_dev_id(pdev), data);
 	if (ret)

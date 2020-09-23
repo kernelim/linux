@@ -35,7 +35,8 @@ typedef struct {
 	/* The gmaps associated with this context are allowed to use huge pages. */
 	unsigned int allow_gmap_hpage_1m:1;
 
-	RH_KABI_RESERVE(1)
+	/* The mmu context belongs to a secure guest. */
+	RH_KABI_USE(1, atomic_t is_protected)
 	RH_KABI_RESERVE(2)
 } mm_context_t;
 

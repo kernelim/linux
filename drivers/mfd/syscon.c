@@ -175,7 +175,7 @@ struct regmap *syscon_regmap_lookup_by_compatible(const char *s)
 }
 EXPORT_SYMBOL_GPL(syscon_regmap_lookup_by_compatible);
 
-static int syscon_match_pdevname(struct device *dev, void *data)
+static int syscon_match_pdevname(struct device *dev, const void *data)
 {
 	return !strcmp(dev_name(dev), (const char *)data);
 }

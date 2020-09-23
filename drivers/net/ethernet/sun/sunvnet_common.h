@@ -135,7 +135,7 @@ int sunvnet_open_common(struct net_device *dev);
 int sunvnet_close_common(struct net_device *dev);
 void sunvnet_set_rx_mode_common(struct net_device *dev, struct vnet *vp);
 int sunvnet_set_mac_addr_common(struct net_device *dev, void *p);
-void sunvnet_tx_timeout_common(struct net_device *dev);
+void sunvnet_tx_timeout_common(struct net_device *dev, unsigned int txqueue);
 int sunvnet_start_xmit_common(struct sk_buff *skb, struct net_device *dev,
 			   struct vnet_port *(*vnet_tx_port)
 			   (struct sk_buff *, struct net_device *));

@@ -45,11 +45,12 @@
 #include <asm/sections.h>
 #include <asm/machdep.h>
 #include <asm/asm-prototypes.h>
+#include <asm/ultravisor-api.h>
 
 #include <linux/linux_logo.h>
 
 /* All of prom_init bss lives here */
-#define __prombss __initdata
+#define __prombss __section(.bss.prominit)
 
 /*
  * Eventually bump that one up
@@ -99,7 +100,7 @@ static int of_workarounds __prombss;
 #define PROM_BUG() do {						\
         prom_printf("kernel BUG at %s line 0x%x!\n",		\
 		    __FILE__, __LINE__);			\
-        __asm__ __volatile__(".long " BUG_ILLEGAL_INSTR);	\
+	__builtin_trap();					\
 } while (0)
 
 #ifdef DEBUG_PROM
@@ -176,6 +177,10 @@ static unsigned long __prombss prom_tce_alloc_end;
 #ifdef CONFIG_PPC_PSERIES
 static bool __prombss prom_radix_disable;
 static bool __prombss prom_xive_disable;
+#endif
+
+#ifdef CONFIG_PPC_SVM
+static bool __prombss prom_svm_enable;
 #endif
 
 struct platform_support {
@@ -819,6 +824,17 @@ static void __init early_cmdline_parse(void)
 		prom_debug("XIVE disabled from cmdline\n");
 	}
 #endif /* CONFIG_PPC_PSERIES */
+
+#ifdef CONFIG_PPC_SVM
+	opt = prom_strstr(prom_cmd_line, "svm=");
+	if (opt) {
+		bool val;
+
+		opt += sizeof("svm=") - 1;
+		if (!prom_strtobool(opt, &val))
+			prom_svm_enable = val;
+	}
+#endif /* CONFIG_PPC_SVM */
 }
 
 #ifdef CONFIG_PPC_PSERIES
@@ -922,7 +938,7 @@ struct ibm_arch_vec {
 	struct option_vector6 vec6;
 } __packed;
 
-struct ibm_arch_vec __cacheline_aligned ibm_architecture_vec = {
+static const struct ibm_arch_vec ibm_architecture_vec_template __initconst = {
 	.pvrs = {
 		{
 			.mask = cpu_to_be32(0xfffe0000), /* POWER5/POWER5+ */
@@ -1044,7 +1060,7 @@ struct ibm_arch_vec __cacheline_aligned ibm_architecture_vec = {
 		.reserved2 = 0,
 		.reserved3 = 0,
 		.subprocessors = 1,
-		.byte22 = OV5_FEAT(OV5_DRMEM_V2),
+		.byte22 = OV5_FEAT(OV5_DRMEM_V2) | OV5_FEAT(OV5_DRC_INFO),
 		.intarch = 0,
 		.mmu = 0,
 		.hash_ext = 0,
@@ -1059,6 +1075,8 @@ struct ibm_arch_vec __cacheline_aligned ibm_architecture_vec = {
 		.os_name = OV6_LINUX,
 	},
 };
+
+static struct ibm_arch_vec __prombss ibm_architecture_vec  ____cacheline_aligned;
 
 /* Old method - ELF header with PT_NOTE sections only works on BE */
 #ifdef __BIG_ENDIAN__
@@ -1095,7 +1113,7 @@ static struct fake_elf {
 			u32	ignore_me;
 		} rpadesc;
 	} rpanote;
-} fake_elf = {
+} fake_elf __initconst = {
 	.elfhdr = {
 		.e_ident = { 0x7f, 'E', 'L', 'F',
 			     ELFCLASS32, ELFDATA2MSB, EV_CURRENT },
@@ -1276,6 +1294,10 @@ static void __init prom_check_platform_support(void)
 	};
 	int prop_len = prom_getproplen(prom.chosen,
 				       "ibm,arch-vec-5-platform-support");
+
+	/* First copy the architecture vec template */
+	ibm_architecture_vec = ibm_architecture_vec_template;
+
 	if (prop_len > 1) {
 		int i;
 		u8 vec[prop_len];
@@ -1708,6 +1730,46 @@ static void __init prom_close_stdin(void)
 		call_prom("close", 1, 0, stdin);
 	}
 }
+
+#ifdef CONFIG_PPC_SVM
+static int prom_rtas_hcall(uint64_t args)
+{
+	register uint64_t arg1 asm("r3") = H_RTAS;
+	register uint64_t arg2 asm("r4") = args;
+
+	asm volatile("sc 1\n" : "=r" (arg1) :
+			"r" (arg1),
+			"r" (arg2) :);
+	return arg1;
+}
+
+static struct rtas_args __prombss os_term_args;
+
+static void __init prom_rtas_os_term(char *str)
+{
+	phandle rtas_node;
+	__be32 val;
+	u32 token;
+
+	prom_debug("%s: start...\n", __func__);
+	rtas_node = call_prom("finddevice", 1, 1, ADDR("/rtas"));
+	prom_debug("rtas_node: %x\n", rtas_node);
+	if (!PHANDLE_VALID(rtas_node))
+		return;
+
+	val = 0;
+	prom_getprop(rtas_node, "ibm,os-term", &val, sizeof(val));
+	token = be32_to_cpu(val);
+	prom_debug("ibm,os-term: %x\n", token);
+	if (token == 0)
+		prom_panic("Could not get token for ibm,os-term\n");
+	os_term_args.token = cpu_to_be32(token);
+	os_term_args.nargs = cpu_to_be32(1);
+	os_term_args.nret = cpu_to_be32(1);
+	os_term_args.args[0] = cpu_to_be32(__pa(str));
+	prom_rtas_hcall((uint64_t)&os_term_args);
+}
+#endif /* CONFIG_PPC_SVM */
 
 /*
  * Allocate room for and instantiate RTAS
@@ -2265,7 +2327,7 @@ static void __init prom_check_displays(void)
 	ihandle ih;
 	int i;
 
-	static unsigned char default_colors[] = {
+	static const unsigned char default_colors[] __initconst = {
 		0x00, 0x00, 0x00,
 		0x00, 0x00, 0xaa,
 		0x00, 0xaa, 0x00,
@@ -3166,6 +3228,59 @@ static void unreloc_toc(void)
 #endif
 #endif
 
+#ifdef CONFIG_PPC_SVM
+/*
+ * Perform the Enter Secure Mode ultracall.
+ */
+static int enter_secure_mode(unsigned long kbase, unsigned long fdt)
+{
+	register unsigned long r3 asm("r3") = UV_ESM;
+	register unsigned long r4 asm("r4") = kbase;
+	register unsigned long r5 asm("r5") = fdt;
+
+	asm volatile("sc 2" : "+r"(r3) : "r"(r4), "r"(r5));
+
+	return r3;
+}
+
+/*
+ * Call the Ultravisor to transfer us to secure memory if we have an ESM blob.
+ */
+static void setup_secure_guest(unsigned long kbase, unsigned long fdt)
+{
+	int ret;
+
+	if (!prom_svm_enable)
+		return;
+
+	/* Switch to secure mode. */
+	prom_printf("Switching to secure mode.\n");
+
+	/*
+	 * The ultravisor will do an integrity check of the kernel image but we
+	 * relocated it so the check will fail. Restore the original image by
+	 * relocating it back to the kernel virtual base address.
+	 */
+	if (IS_ENABLED(CONFIG_RELOCATABLE))
+		relocate(KERNELBASE);
+
+	ret = enter_secure_mode(kbase, fdt);
+
+	/* Relocate the kernel again. */
+	if (IS_ENABLED(CONFIG_RELOCATABLE))
+		relocate(kbase);
+
+	if (ret != U_SUCCESS) {
+		prom_printf("Returned %d from switching to secure mode.\n", ret);
+		prom_rtas_os_term("Switch to secure mode failed.\n");
+	}
+}
+#else
+static void setup_secure_guest(unsigned long kbase, unsigned long fdt)
+{
+}
+#endif /* CONFIG_PPC_SVM */
+
 /*
  * We enter here early on, when the Open Firmware prom is still
  * handling exceptions and the MMU hash table for us.
@@ -3363,6 +3478,9 @@ unsigned long __init prom_init(unsigned long r3, unsigned long r4,
 #else
 	unreloc_toc();
 #endif
+
+	/* Move to secure memory if we're supposed to be secure guests. */
+	setup_secure_guest(kbase, hdr);
 
 	__start(hdr, kbase, 0, 0, 0, 0, 0);
 

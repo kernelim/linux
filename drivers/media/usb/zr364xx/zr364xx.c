@@ -1,8 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Zoran 364xx based USB webcam module version 0.73
  *
  * Allows you to use your USB webcam with V4L2 applications
- * This is still in heavy developpement !
+ * This is still in heavy development !
  *
  * Copyright (C) 2004  Antoine Jacquet <royale@zerezo.com>
  * http://royale.zerezo.com/zr364xx/
@@ -11,16 +12,6 @@
  * V4L2 version inspired by meye.c driver
  *
  * Some video buffer code by Lamarque based on s2255drv.c and vivi.c drivers.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 
@@ -29,7 +20,6 @@
 #include <linux/usb.h>
 #include <linux/vmalloc.h>
 #include <linux/slab.h>
-#include <linux/proc_fs.h>
 #include <linux/highmem.h>
 #include <media/v4l2-common.h>
 #include <media/v4l2-ioctl.h>
@@ -702,15 +692,11 @@ static int zr364xx_vidioc_querycap(struct file *file, void *priv,
 {
 	struct zr364xx_camera *cam = video_drvdata(file);
 
-	strlcpy(cap->driver, DRIVER_DESC, sizeof(cap->driver));
-	strlcpy(cap->card, cam->udev->product, sizeof(cap->card));
-	strlcpy(cap->bus_info, dev_name(&cam->udev->dev),
+	strscpy(cap->driver, DRIVER_DESC, sizeof(cap->driver));
+	if (cam->udev->product)
+		strscpy(cap->card, cam->udev->product, sizeof(cap->card));
+	strscpy(cap->bus_info, dev_name(&cam->udev->dev),
 		sizeof(cap->bus_info));
-	cap->device_caps = V4L2_CAP_VIDEO_CAPTURE |
-			    V4L2_CAP_READWRITE |
-			    V4L2_CAP_STREAMING;
-	cap->capabilities = cap->device_caps | V4L2_CAP_DEVICE_CAPS;
-
 	return 0;
 }
 
@@ -719,7 +705,7 @@ static int zr364xx_vidioc_enum_input(struct file *file, void *priv,
 {
 	if (i->index != 0)
 		return -EINVAL;
-	strcpy(i->name, DRIVER_DESC " Camera");
+	strscpy(i->name, DRIVER_DESC " Camera", sizeof(i->name));
 	i->type = V4L2_INPUT_TYPE_CAMERA;
 	return 0;
 }
@@ -765,7 +751,7 @@ static int zr364xx_vidioc_enum_fmt_vid_cap(struct file *file,
 	if (f->index > 0)
 		return -EINVAL;
 	f->flags = V4L2_FMT_FLAG_COMPRESSED;
-	strcpy(f->description, formats[0].name);
+	strscpy(f->description, formats[0].name, sizeof(f->description));
 	f->pixelformat = formats[0].fourcc;
 	return 0;
 }
@@ -1337,6 +1323,8 @@ static const struct video_device zr364xx_template = {
 	.fops = &zr364xx_fops,
 	.ioctl_ops = &zr364xx_ioctl_ops,
 	.release = video_device_release_empty,
+	.device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_READWRITE |
+		       V4L2_CAP_STREAMING,
 };
 
 

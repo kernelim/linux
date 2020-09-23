@@ -187,6 +187,18 @@ __be32 fib_info_update_nh_saddr(struct net *net, struct fib_nh *nh);
 #define FIB_RES_PREFSRC(net, res)	((res).fi->fib_prefsrc ? : \
 					 FIB_RES_SADDR(net, res))
 
+struct fib_rt_info {
+	struct fib_info		*fi;
+	u32			tb_id;
+	__be32			dst;
+	int			dst_len;
+	u8			tos;
+	u8			type;
+	u8			offload:1,
+				trap:1,
+				unused:6;
+};
+
 struct fib_entry_notifier_info {
 	struct fib_notifier_info info; /* must be first */
 	u32 dst;
@@ -202,7 +214,7 @@ struct fib_nh_notifier_info {
 	struct fib_nh *fib_nh;
 };
 
-int call_fib4_notifier(struct notifier_block *nb, struct net *net,
+int call_fib4_notifier(struct notifier_block *nb,
 		       enum fib_event_type event_type,
 		       struct fib_notifier_info *info);
 int call_fib4_notifiers(struct net *net, enum fib_event_type event_type,
@@ -211,7 +223,8 @@ int call_fib4_notifiers(struct net *net, enum fib_event_type event_type,
 int __net_init fib4_notifier_init(struct net *net);
 void __net_exit fib4_notifier_exit(struct net *net);
 
-void fib_notify(struct net *net, struct notifier_block *nb);
+int fib_notify(struct net *net, struct notifier_block *nb,
+	       struct netlink_ext_ack *extack);
 
 struct fib_table {
 	struct hlist_node	tb_hlist;
@@ -226,7 +239,6 @@ struct fib_dump_filter {
 	u32			table_id;
 	/* filter_set is an optimization that an entry is set */
 	bool			filter_set;
-	bool			dump_all_families;
 	bool			dump_routes;
 	bool			dump_exceptions;
 	unsigned char		protocol;
@@ -297,7 +309,8 @@ static inline bool fib4_rule_default(const struct fib_rule *rule)
 	return true;
 }
 
-static inline int fib4_rules_dump(struct net *net, struct notifier_block *nb)
+static inline int fib4_rules_dump(struct net *net, struct notifier_block *nb,
+				  struct netlink_ext_ack *extack)
 {
 	return 0;
 }
@@ -359,7 +372,8 @@ out:
 }
 
 bool fib4_rule_default(const struct fib_rule *rule);
-int fib4_rules_dump(struct net *net, struct notifier_block *nb);
+int fib4_rules_dump(struct net *net, struct notifier_block *nb,
+		    struct netlink_ext_ack *extack);
 unsigned int fib4_rules_seq_read(struct net *net);
 
 static inline bool fib4_rules_early_flow_dissect(struct net *net,
@@ -419,6 +433,7 @@ void fib_select_path(struct net *net, struct fib_result *res,
 		     struct flowi4 *fl4, const struct sk_buff *skb);
 
 /* Exported by fib_trie.c */
+void fib_alias_hw_flags_set(struct net *net, const struct fib_rt_info *fri);
 void fib_trie_init(void);
 struct fib_table *fib_trie_table(u32 id, struct fib_table *alias);
 

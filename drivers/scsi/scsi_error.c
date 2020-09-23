@@ -966,7 +966,6 @@ void scsi_eh_prep_cmnd(struct scsi_cmnd *scmd, struct scsi_eh_save *ses,
 	ses->cmnd = scmd->cmnd;
 	ses->data_direction = scmd->sc_data_direction;
 	ses->sdb = scmd->sdb;
-	ses->next_rq = scmd->request->next_rq;
 	ses->result = scmd->result;
 	ses->resid_len = scmd->req.resid_len;
 	ses->underflow = scmd->underflow;
@@ -978,7 +977,6 @@ void scsi_eh_prep_cmnd(struct scsi_cmnd *scmd, struct scsi_eh_save *ses,
 	scmd->cmnd = ses->eh_cmnd;
 	memset(scmd->cmnd, 0, BLK_MAX_CDB);
 	memset(&scmd->sdb, 0, sizeof(scmd->sdb));
-	scmd->request->next_rq = NULL;
 	scmd->result = 0;
 	scmd->req.resid_len = 0;
 
@@ -1032,7 +1030,6 @@ void scsi_eh_restore_cmnd(struct scsi_cmnd* scmd, struct scsi_eh_save *ses)
 	scmd->cmnd = ses->cmnd;
 	scmd->sc_data_direction = ses->data_direction;
 	scmd->sdb = ses->sdb;
-	scmd->request->next_rq = ses->next_rq;
 	scmd->result = ses->result;
 	scmd->req.resid_len = ses->resid_len;
 	scmd->underflow = ses->underflow;
@@ -2335,6 +2332,7 @@ scsi_ioctl_reset(struct scsi_device *dev, int __user *arg)
 	struct request *rq;
 	unsigned long flags;
 	int error = 0, rtn, val;
+	void *p;
 
 	if (!capable(CAP_SYS_ADMIN) || !capable(CAP_SYS_RAWIO))
 		return -EACCES;
@@ -2347,10 +2345,13 @@ scsi_ioctl_reset(struct scsi_device *dev, int __user *arg)
 		return -EIO;
 
 	error = -EIO;
-	rq = kzalloc(sizeof(struct request) + sizeof(struct scsi_cmnd) +
+	p = kzalloc(sizeof(struct request_aux) + sizeof(struct request) + sizeof(struct scsi_cmnd) +
 			shost->hostt->cmd_size, GFP_KERNEL);
-	if (!rq)
+	if (!p)
 		goto out_put_autopm_host;
+
+	rq = p + sizeof(struct request_aux);
+
 	blk_rq_init(NULL, rq);
 
 	scmd = (struct scsi_cmnd *)(rq + 1);
@@ -2416,7 +2417,7 @@ scsi_ioctl_reset(struct scsi_device *dev, int __user *arg)
 	scsi_run_host_queues(shost);
 
 	scsi_put_command(scmd);
-	kfree(rq);
+	kfree(p);
 
 out_put_autopm_host:
 	scsi_autopm_put_host(shost);

@@ -34,6 +34,22 @@
 	(offsetof(TYPE, FIELD) + sizeof(((TYPE *)0)->FIELD))
 #endif
 
+/* Symbol versioning is different between static and shared library.
+ * Properly versioned symbols are needed for shared library, but
+ * only the symbol of the new version is needed for static library.
+ */
+#ifdef SHARED
+# define COMPAT_VERSION(internal_name, api_name, version) \
+	asm(".symver " #internal_name "," #api_name "@" #version);
+# define DEFAULT_VERSION(internal_name, api_name, version) \
+	asm(".symver " #internal_name "," #api_name "@@" #version);
+#else
+# define COMPAT_VERSION(internal_name, api_name, version)
+# define DEFAULT_VERSION(internal_name, api_name, version) \
+	extern typeof(internal_name) api_name \
+	__attribute__((alias(#internal_name)));
+#endif
+
 extern void libbpf_print(enum libbpf_print_level level,
 			 const char *format, ...)
 	__attribute__((format(printf, 2, 3)));
@@ -83,6 +99,23 @@ int parse_cpu_mask_str(const char *s, bool **mask, int *mask_sz);
 int parse_cpu_mask_file(const char *fcpu, bool **mask, int *mask_sz);
 int libbpf__load_raw_btf(const char *raw_types, size_t types_len,
 			 const char *str_sec, size_t str_len);
+
+int bpf_object__section_size(const struct bpf_object *obj, const char *name,
+			     __u32 *size);
+int bpf_object__variable_offset(const struct bpf_object *obj, const char *name,
+				__u32 *off);
+
+struct nlattr;
+typedef int (*libbpf_dump_nlmsg_t)(void *cookie, void *msg, struct nlattr **tb);
+int libbpf_netlink_open(unsigned int *nl_pid);
+int libbpf_nl_get_link(int sock, unsigned int nl_pid,
+		       libbpf_dump_nlmsg_t dump_link_nlmsg, void *cookie);
+int libbpf_nl_get_class(int sock, unsigned int nl_pid, int ifindex,
+			libbpf_dump_nlmsg_t dump_class_nlmsg, void *cookie);
+int libbpf_nl_get_qdisc(int sock, unsigned int nl_pid, int ifindex,
+			libbpf_dump_nlmsg_t dump_qdisc_nlmsg, void *cookie);
+int libbpf_nl_get_filter(int sock, unsigned int nl_pid, int ifindex, int handle,
+			 libbpf_dump_nlmsg_t dump_filter_nlmsg, void *cookie);
 
 struct btf_ext_info {
 	/*
@@ -144,7 +177,11 @@ struct bpf_line_info_min {
  */
 enum bpf_field_info_kind {
 	BPF_FIELD_BYTE_OFFSET = 0,	/* field byte offset */
+	BPF_FIELD_BYTE_SIZE = 1,
 	BPF_FIELD_EXISTS = 2,		/* field existence in target kernel */
+	BPF_FIELD_SIGNED = 3,
+	BPF_FIELD_LSHIFT_U64 = 4,
+	BPF_FIELD_RSHIFT_U64 = 5,
 };
 
 /* The minimum bpf_field_reloc checked by the loader

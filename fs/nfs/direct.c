@@ -63,13 +63,6 @@
 
 static struct kmem_cache *nfs_direct_cachep;
 
-/*
- * This represents a set of asynchronous requests that we're waiting on
- */
-struct nfs_direct_mirror {
-	ssize_t count;
-};
-
 struct nfs_direct_req {
 	struct kref		kref;		/* release manager */
 
@@ -82,9 +75,6 @@ struct nfs_direct_req {
 	/* completion state */
 	atomic_t		io_count;	/* i/os we're waiting for */
 	spinlock_t		lock;		/* protect completion state */
-
-	struct nfs_direct_mirror mirrors[NFS_PAGEIO_DESCRIPTOR_MIRROR_MAX];
-	int			mirror_count;
 
 	loff_t			io_start;	/* Start offset for I/O */
 	ssize_t			count,		/* bytes actually processed */
@@ -126,8 +116,6 @@ nfs_direct_handle_truncated(struct nfs_direct_req *dreq,
 			    const struct nfs_pgio_header *hdr,
 			    ssize_t dreq_len)
 {
-	struct nfs_direct_mirror *mirror = &dreq->mirrors[hdr->pgio_mirror_idx];
-
 	if (!(test_bit(NFS_IOHDR_ERROR, &hdr->flags) ||
 	      test_bit(NFS_IOHDR_EOF, &hdr->flags)))
 		return;
@@ -141,15 +129,12 @@ nfs_direct_handle_truncated(struct nfs_direct_req *dreq,
 		else /* Clear outstanding error if this is EOF */
 			dreq->error = 0;
 	}
-	if (mirror->count > dreq_len)
-		mirror->count = dreq_len;
 }
 
 static void
 nfs_direct_count_bytes(struct nfs_direct_req *dreq,
 		       const struct nfs_pgio_header *hdr)
 {
-	struct nfs_direct_mirror *mirror = &dreq->mirrors[hdr->pgio_mirror_idx];
 	loff_t hdr_end = hdr->io_start + hdr->good_bytes;
 	ssize_t dreq_len = 0;
 
@@ -161,8 +146,6 @@ nfs_direct_count_bytes(struct nfs_direct_req *dreq,
 	if (dreq_len > dreq->max_count)
 		dreq_len = dreq->max_count;
 
-	if (mirror->count < dreq_len)
-		mirror->count = dreq_len;
 	if (dreq->count < dreq_len)
 		dreq->count = dreq_len;
 }
@@ -261,10 +244,10 @@ static int nfs_direct_cmp_commit_data_verf(struct nfs_direct_req *dreq,
 					 data->ds_commit_index);
 
 	/* verifier not set so always fail */
-	if (verfp->committed < 0)
+	if (verfp->committed < 0 || data->res.verf->committed <= NFS_UNSTABLE)
 		return 1;
 
-	return nfs_direct_cmp_verf(verfp, &data->verf);
+	return nfs_direct_cmp_verf(verfp, data->res.verf);
 }
 
 /**
@@ -309,18 +292,6 @@ void nfs_init_cinfo_from_dreq(struct nfs_commit_info *cinfo,
 	cinfo->completion_ops = &nfs_direct_commit_completion_ops;
 }
 
-static inline void nfs_direct_setup_mirroring(struct nfs_direct_req *dreq,
-					     struct nfs_pageio_descriptor *pgio,
-					     struct nfs_page *req)
-{
-	int mirror_count = 1;
-
-	if (pgio->pg_ops->pg_get_mirror_count)
-		mirror_count = pgio->pg_ops->pg_get_mirror_count(pgio, req);
-
-	dreq->mirror_count = mirror_count;
-}
-
 static inline struct nfs_direct_req *nfs_direct_req_alloc(void)
 {
 	struct nfs_direct_req *dreq;
@@ -335,7 +306,6 @@ static inline struct nfs_direct_req *nfs_direct_req_alloc(void)
 	INIT_LIST_HEAD(&dreq->mds_cinfo.list);
 	dreq->verf.committed = NFS_INVALID_STABLE_HOW;	/* not set yet */
 	INIT_WORK(&dreq->work, nfs_direct_write_schedule_work);
-	dreq->mirror_count = 1;
 	spin_lock_init(&dreq->lock);
 
 	return dreq;
@@ -507,7 +477,7 @@ static ssize_t nfs_direct_read_schedule_iovec(struct nfs_direct_req *dreq,
 			struct nfs_page *req;
 			unsigned int req_len = min_t(size_t, bytes, PAGE_SIZE - pgbase);
 			/* XXX do we need to do the eof zeroing found in async_filler? */
-			req = nfs_create_request(dreq->ctx, pagevec[i], NULL,
+			req = nfs_create_request(dreq->ctx, pagevec[i],
 						 pgbase, req_len);
 			if (IS_ERR(req)) {
 				result = PTR_ERR(req);
@@ -654,7 +624,6 @@ static void nfs_direct_write_reschedule(struct nfs_direct_req *dreq)
 	LIST_HEAD(reqs);
 	struct nfs_commit_info cinfo;
 	LIST_HEAD(failed);
-	int i;
 
 	nfs_init_cinfo_from_dreq(&cinfo, dreq);
 	nfs_direct_write_scan_commit_list(dreq->inode, &reqs, &cinfo);
@@ -665,22 +634,15 @@ static void nfs_direct_write_reschedule(struct nfs_direct_req *dreq)
 		dreq->max_count += req->wb_bytes;
 	dreq->verf.committed = NFS_INVALID_STABLE_HOW;
 	nfs_clear_pnfs_ds_commit_verifiers(&dreq->ds_cinfo);
-	for (i = 0; i < dreq->mirror_count; i++)
-		dreq->mirrors[i].count = 0;
 	get_dreq(dreq);
 
 	nfs_pageio_init_write(&desc, dreq->inode, FLUSH_STABLE, false,
 			      &nfs_direct_write_completion_ops);
 	desc.pg_dreq = dreq;
 
-	req = nfs_list_entry(reqs.next);
-	nfs_direct_setup_mirroring(dreq, &desc, req);
-	if (desc.pg_error < 0) {
-		list_splice_init(&reqs, &failed);
-		goto out_failed;
-	}
-
 	list_for_each_entry_safe(req, tmp, &reqs, wb_list) {
+		/* Bump the transmission count */
+		req->wb_nio++;
 		if (!nfs_pageio_add_request(&desc, req)) {
 			nfs_list_move_request(req, &failed);
 			spin_lock(&cinfo.inode->i_lock);
@@ -695,7 +657,6 @@ static void nfs_direct_write_reschedule(struct nfs_direct_req *dreq)
 	}
 	nfs_pageio_complete(&desc);
 
-out_failed:
 	while (!list_empty(&failed)) {
 		req = nfs_list_entry(failed.next);
 		nfs_list_remove_request(req);
@@ -721,6 +682,11 @@ static void nfs_direct_commit_complete(struct nfs_commit_data *data)
 		req = nfs_list_entry(data->pages.next);
 		nfs_list_remove_request(req);
 		if (dreq->flags == NFS_ODIRECT_RESCHED_WRITES) {
+			/*
+			 * Despite the reboot, the write was successful,
+			 * so reset wb_nio.
+			 */
+			req->wb_nio = 0;
 			/* Note the rewrite will go through mds */
 			nfs_mark_request_commit(req, NULL, &cinfo, 0);
 		} else
@@ -857,7 +823,8 @@ static void nfs_direct_write_reschedule_io(struct nfs_pgio_header *hdr)
 		dreq->flags = NFS_ODIRECT_RESCHED_WRITES;
 		/* fake unstable write to let common nfs resend pages */
 		hdr->verf.committed = NFS_UNSTABLE;
-		hdr->good_bytes = hdr->args.count;
+		hdr->good_bytes = hdr->args.offset + hdr->args.count -
+			hdr->io_start;
 	}
 	spin_unlock(&dreq->lock);
 }
@@ -916,14 +883,13 @@ static ssize_t nfs_direct_write_schedule_iovec(struct nfs_direct_req *dreq,
 			struct nfs_page *req;
 			unsigned int req_len = min_t(size_t, bytes, PAGE_SIZE - pgbase);
 
-			req = nfs_create_request(dreq->ctx, pagevec[i], NULL,
+			req = nfs_create_request(dreq->ctx, pagevec[i],
 						 pgbase, req_len);
 			if (IS_ERR(req)) {
 				result = PTR_ERR(req);
 				break;
 			}
 
-			nfs_direct_setup_mirroring(dreq, &desc, req);
 			if (desc.pg_error < 0) {
 				nfs_free_request(req);
 				result = desc.pg_error;

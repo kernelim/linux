@@ -10,6 +10,7 @@
  * 2 of the License, or (at your option) any later version.
  */
 
+#include <linux/rh_kabi.h>
 #include <asm/reg.h>
 
 #ifdef CONFIG_VSX
@@ -267,7 +268,7 @@ struct thread_struct {
 	unsigned 	mmcr0;
 
 	unsigned 	used_ebb;
-	unsigned int	used_vas;
+	RH_KABI_DEPRECATE(unsigned int, used_vas)
 #endif
 };
 
@@ -417,14 +418,17 @@ static inline unsigned long get_clean_sp(unsigned long sp, int is_32)
 }
 #endif
 
+/* asm stubs */
+extern unsigned long isa300_idle_stop_noloss(unsigned long psscr_val);
+extern unsigned long isa300_idle_stop_mayloss(unsigned long psscr_val);
+extern unsigned long isa206_idle_insn_mayloss(unsigned long type);
+
 extern unsigned long cpuidle_disable;
 enum idle_boot_override {IDLE_NO_OVERRIDE = 0, IDLE_POWERSAVE_OFF};
 
 extern int powersave_nap;	/* set if nap mode can be used in idle loop */
-extern unsigned long power7_idle_insn(unsigned long type); /* PNV_THREAD_NAP/etc*/
+
 extern void power7_idle_type(unsigned long type);
-extern unsigned long power9_idle_stop(unsigned long psscr_val);
-extern unsigned long power9_offline_stop(unsigned long psscr_val);
 extern void power9_idle_type(unsigned long stop_psscr_val,
 			      unsigned long stop_psscr_mask);
 

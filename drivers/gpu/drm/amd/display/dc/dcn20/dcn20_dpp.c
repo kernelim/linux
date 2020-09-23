@@ -72,6 +72,21 @@ void dpp20_read_state(struct dpp *dpp_base,
 	}
 }
 
+void dpp2_power_on_obuf(
+		struct dpp *dpp_base,
+	bool power_on)
+{
+	struct dcn20_dpp *dpp = TO_DCN20_DPP(dpp_base);
+
+	REG_UPDATE(CM_MEM_PWR_CTRL, SHARED_MEM_PWR_DIS, power_on == true ? 1:0);
+
+	REG_UPDATE(OBUF_MEM_PWR_CTRL,
+			OBUF_MEM_PWR_FORCE, power_on == true ? 0:1);
+
+	REG_UPDATE(DSCL_MEM_PWR_CTRL,
+			LUT_MEM_PWR_FORCE, power_on == true ? 0:1);
+}
+
 void dpp2_dummy_program_input_lut(
 		struct dpp *dpp_base,
 		const struct dc_gamma *gamma)
@@ -89,7 +104,7 @@ static void dpp2_cnv_setup (
 	uint32_t pixel_format = 0;
 	uint32_t alpha_en = 1;
 	enum dc_color_space color_space = COLOR_SPACE_SRGB;
-	enum dcn10_input_csc_select select = INPUT_CSC_SELECT_BYPASS;
+	enum dcn20_input_csc_select select = DCN2_ICSC_SELECT_BYPASS;
 	bool force_disable_cursor = false;
 	struct out_csc_color_matrix tbl_entry;
 	uint32_t is_2bit = 0;
@@ -130,25 +145,25 @@ static void dpp2_cnv_setup (
 		force_disable_cursor = false;
 		pixel_format = 65;
 		color_space = COLOR_SPACE_YCBCR709;
-		select = INPUT_CSC_SELECT_ICSC;
+		select = DCN2_ICSC_SELECT_ICSC_A;
 		break;
 	case SURFACE_PIXEL_FORMAT_VIDEO_420_YCrCb:
 		force_disable_cursor = true;
 		pixel_format = 64;
 		color_space = COLOR_SPACE_YCBCR709;
-		select = INPUT_CSC_SELECT_ICSC;
+		select = DCN2_ICSC_SELECT_ICSC_A;
 		break;
 	case SURFACE_PIXEL_FORMAT_VIDEO_420_10bpc_YCbCr:
 		force_disable_cursor = true;
 		pixel_format = 67;
 		color_space = COLOR_SPACE_YCBCR709;
-		select = INPUT_CSC_SELECT_ICSC;
+		select = DCN2_ICSC_SELECT_ICSC_A;
 		break;
 	case SURFACE_PIXEL_FORMAT_VIDEO_420_10bpc_YCrCb:
 		force_disable_cursor = true;
 		pixel_format = 66;
 		color_space = COLOR_SPACE_YCBCR709;
-		select = INPUT_CSC_SELECT_ICSC;
+		select = DCN2_ICSC_SELECT_ICSC_A;
 		break;
 	case SURFACE_PIXEL_FORMAT_GRPH_ARGB16161616:
 		pixel_format = 22;
@@ -162,7 +177,7 @@ static void dpp2_cnv_setup (
 	case SURFACE_PIXEL_FORMAT_VIDEO_AYCrCb8888:
 		pixel_format = 12;
 		color_space = COLOR_SPACE_YCBCR709;
-		select = INPUT_CSC_SELECT_ICSC;
+		select = DCN2_ICSC_SELECT_ICSC_A;
 		break;
 	case SURFACE_PIXEL_FORMAT_GRPH_RGB111110_FIX:
 		pixel_format = 112;
@@ -173,13 +188,13 @@ static void dpp2_cnv_setup (
 	case SURFACE_PIXEL_FORMAT_VIDEO_ACrYCb2101010:
 		pixel_format = 114;
 		color_space = COLOR_SPACE_YCBCR709;
-		select = INPUT_CSC_SELECT_ICSC;
+		select = DCN2_ICSC_SELECT_ICSC_A;
 		is_2bit = 1;
 		break;
 	case SURFACE_PIXEL_FORMAT_VIDEO_CrYCbA1010102:
 		pixel_format = 115;
 		color_space = COLOR_SPACE_YCBCR709;
-		select = INPUT_CSC_SELECT_ICSC;
+		select = DCN2_ICSC_SELECT_ICSC_A;
 		is_2bit = 1;
 		break;
 	case SURFACE_PIXEL_FORMAT_GRPH_RGB111110_FLOAT:
@@ -212,13 +227,13 @@ static void dpp2_cnv_setup (
 		tbl_entry.color_space = input_color_space;
 
 		if (color_space >= COLOR_SPACE_YCBCR601)
-			select = INPUT_CSC_SELECT_ICSC;
+			select = DCN2_ICSC_SELECT_ICSC_A;
 		else
-			select = INPUT_CSC_SELECT_BYPASS;
+			select = DCN2_ICSC_SELECT_BYPASS;
 
-		dpp1_program_input_csc(dpp_base, color_space, select, &tbl_entry);
+		dpp2_program_input_csc(dpp_base, color_space, select, &tbl_entry);
 	} else
-	dpp1_program_input_csc(dpp_base, color_space, select, NULL);
+	dpp2_program_input_csc(dpp_base, color_space, select, NULL);
 
 	if (force_disable_cursor) {
 		REG_UPDATE(CURSOR_CONTROL,
@@ -227,6 +242,7 @@ static void dpp2_cnv_setup (
 				CUR0_ENABLE, 0);
 
 	}
+	dpp2_power_on_obuf(dpp_base, true);
 
 }
 
@@ -326,14 +342,18 @@ void dpp2_cnv_set_alpha_keyer(
 
 void dpp2_set_cursor_attributes(
 		struct dpp *dpp_base,
-		enum dc_cursor_color_format color_format)
+		struct dc_cursor_attributes *cursor_attributes)
 {
+	enum dc_cursor_color_format color_format = cursor_attributes->color_format;
 	struct dcn20_dpp *dpp = TO_DCN20_DPP(dpp_base);
 	int cur_rom_en = 0;
 
 	if (color_format == CURSOR_MODE_COLOR_PRE_MULTIPLIED_ALPHA ||
-		color_format == CURSOR_MODE_COLOR_UN_PRE_MULTIPLIED_ALPHA)
-		cur_rom_en = 1;
+		color_format == CURSOR_MODE_COLOR_UN_PRE_MULTIPLIED_ALPHA) {
+		if (cursor_attributes->attribute_flags.bits.ENABLE_CURSOR_DEGAMMA) {
+			cur_rom_en = 1;
+		}
+	}
 
 	REG_UPDATE_3(CURSOR0_CONTROL,
 			CUR0_MODE, color_format,
@@ -356,13 +376,6 @@ bool dpp2_get_optimal_number_of_taps(
 		struct scaler_data *scl_data,
 		const struct scaling_taps *in_taps)
 {
-	uint32_t pixel_width;
-
-	if (scl_data->viewport.width > scl_data->recout.width)
-		pixel_width = scl_data->recout.width;
-	else
-		pixel_width = scl_data->viewport.width;
-
 	/* Some ASICs does not support  FP16 scaling, so we reject modes require this*/
 	if (scl_data->viewport.width  != scl_data->h_active &&
 		scl_data->viewport.height != scl_data->v_active &&
@@ -444,8 +457,8 @@ static struct dpp_funcs dcn20_dpp_funcs = {
 	.dpp_read_state = dpp20_read_state,
 	.dpp_reset = dpp_reset,
 	.dpp_set_scaler = dpp1_dscl_set_scaler_manual_scale,
-	.dpp_get_optimal_number_of_taps = dpp2_get_optimal_number_of_taps,
-	.dpp_set_gamut_remap = dpp1_cm_set_gamut_remap,
+	.dpp_get_optimal_number_of_taps = dpp1_get_optimal_number_of_taps,
+	.dpp_set_gamut_remap = dpp2_cm_set_gamut_remap,
 	.dpp_set_csc_adjustment = NULL,
 	.dpp_set_csc_default = NULL,
 	.dpp_program_regamma_pwl = oppn20_dummy_program_regamma_pwl,

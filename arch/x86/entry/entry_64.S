@@ -251,7 +251,6 @@ GLOBAL(entry_SYSCALL_64_after_hwframe)
 	 */
 syscall_return_via_sysret:
 	/* rcx and r11 are already restored (see code above) */
-	UNWIND_HINT_EMPTY
 	IBRS_EXIT
 	POP_REGS pop_rdi=0 skip_r11rcx=1
 
@@ -261,6 +260,7 @@ syscall_return_via_sysret:
 	 */
 	movq	%rsp, %rdi
 	movq	PER_CPU_VAR(cpu_tss_rw + TSS_sp0), %rsp
+	UNWIND_HINT_EMPTY
 
 	pushq	RSP-RDI(%rdi)	/* RSP */
 	pushq	(%rdi)		/* RDI */
@@ -281,7 +281,6 @@ END(entry_SYSCALL_64)
  * %rsi: next task
  */
 ENTRY(__switch_to_asm)
-	UNWIND_HINT_FUNC
 	/*
 	 * Save callee-saved registers
 	 * This must match the order in inactive_task_frame
@@ -324,7 +323,7 @@ ENTRY(__switch_to_asm)
 	popq	%rbp
 
 	jmp	__switch_to
-END(__switch_to_asm)
+ENDPROC(__switch_to_asm)
 
 /*
  * A newly forked process directly context switches into this address.
@@ -515,7 +514,7 @@ END(spurious_entries_start)
  * +----------------------------------------------------+
  */
 ENTRY(interrupt_entry)
-	UNWIND_HINT_FUNC
+	UNWIND_HINT_IRET_REGS offset=16
 	ASM_CLAC
 	cld
 
@@ -548,9 +547,9 @@ ENTRY(interrupt_entry)
 	pushq	5*8(%rdi)		/* regs->eflags */
 	pushq	4*8(%rdi)		/* regs->cs */
 	pushq	3*8(%rdi)		/* regs->ip */
+	UNWIND_HINT_IRET_REGS
 	pushq	2*8(%rdi)		/* regs->orig_ax */
 	pushq	8(%rdi)			/* return address */
-	UNWIND_HINT_FUNC
 
 	movq	(%rdi), %rdi
 	jmp	2f
@@ -641,6 +640,7 @@ GLOBAL(swapgs_restore_regs_and_return_to_usermode)
 	 */
 	movq	%rsp, %rdi
 	movq	PER_CPU_VAR(cpu_tss_rw + TSS_sp0), %rsp
+	UNWIND_HINT_EMPTY
 
 	/* Copy the IRET frame to the trampoline stack. */
 	pushq	6*8(%rdi)	/* SS */
@@ -667,7 +667,7 @@ GLOBAL(swapgs_restore_regs_and_return_to_usermode)
 
 /* Returning to kernel space */
 retint_kernel:
-#ifdef CONFIG_PREEMPT
+#ifdef CONFIG_PREEMPTION
 	/* Interrupts are off */
 	/* Check if we need preemption */
 	btl	$9, EFLAGS(%rsp)		/* were interrupts off? */
@@ -870,15 +870,16 @@ apicinterrupt IRQ_WORK_VECTOR			irq_work_interrupt		smp_irq_work_interrupt
 /**
  * idtentry - Generate an IDT entry stub
  * @sym:		Name of the generated entry point
- * @do_sym: 		C function to be called
- * @has_error_code: 	True if this IDT vector has an error code on the stack
- * @paranoid: 		non-zero means that this vector may be invoked from
+ * @do_sym:		C function to be called
+ * @has_error_code:	True if this IDT vector has an error code on the stack
+ * @paranoid:		non-zero means that this vector may be invoked from
  *			kernel mode with user GSBASE and/or user CR3.
  *			2 is special -- see below.
  * @shift_ist:		Set to an IST index if entries from kernel mode should
- *             		decrement the IST stack so that nested entries get a
+ *			decrement the IST stack so that nested entries get a
  *			fresh stack.  (This is for #DB, which has a nasty habit
- *             		of recursing.)
+ *			of recursing.)
+ * @create_gap:		create a 6-word stack gap when coming from kernel mode.
  *
  * idtentry generates an IDT stub that sets up a usable kernel context,
  * creates struct pt_regs, and calls @do_sym.  The stub has the following
@@ -903,13 +904,17 @@ apicinterrupt IRQ_WORK_VECTOR			irq_work_interrupt		smp_irq_work_interrupt
  * @paranoid == 2 is special: the stub will never switch stacks.  This is for
  * #DF: if the thread stack is somehow unusable, we'll still get a useful OOPS.
  */
-.macro idtentry sym do_sym has_error_code:req paranoid=0 shift_ist=-1
+.macro idtentry sym do_sym has_error_code:req paranoid=0 shift_ist=-1 create_gap=0
 ENTRY(\sym)
 	UNWIND_HINT_IRET_REGS offset=\has_error_code*8
 
 	/* Sanity check */
-	.if \shift_ist != -1 && \paranoid == 0
+	.if \shift_ist != -1 && \paranoid != 1
 	.error "using shift_ist requires paranoid=1"
+	.endif
+
+	.if \create_gap && \paranoid
+	.error "using create_gap requires paranoid=0"
 	.endif
 
 	ASM_CLAC
@@ -921,6 +926,20 @@ ENTRY(\sym)
 	.if \paranoid == 1
 	testb	$3, CS-ORIG_RAX(%rsp)		/* If coming from userspace, switch stacks */
 	jnz	.Lfrom_usermode_switch_stack_\@
+	.endif
+
+	.if \create_gap == 1
+	/*
+	 * If coming from kernel space, create a 6-word gap to allow the
+	 * int3 handler to emulate a call instruction.
+	 */
+	testb	$3, CS-ORIG_RAX(%rsp)
+	jnz	.Lfrom_usermode_no_gap_\@
+	.rept	6
+	pushq	5*8(%rsp)
+	.endr
+	UNWIND_HINT_IRET_REGS offset=8
+.Lfrom_usermode_no_gap_\@:
 	.endif
 
 	.if \paranoid
@@ -1083,7 +1102,7 @@ ENTRY(xen_do_hypervisor_callback)		/* do_hypervisor_callback(struct *pt_regs) */
 	call	xen_evtchn_do_upcall
 	LEAVE_IRQ_STACK
 
-#ifndef CONFIG_PREEMPT
+#ifndef CONFIG_PREEMPTION
 	call	xen_maybe_preempt_hcall
 #endif
 	jmp	error_exit
@@ -1151,7 +1170,7 @@ apicinterrupt3 HYPERV_STIMER0_VECTOR \
 #endif /* CONFIG_HYPERV */
 
 idtentry debug			do_debug		has_error_code=0	paranoid=1 shift_ist=DEBUG_STACK
-idtentry int3			do_int3			has_error_code=0
+idtentry int3			do_int3			has_error_code=0	create_gap=1
 idtentry stack_segment		do_stack_segment	has_error_code=1
 
 #ifdef CONFIG_XEN
@@ -1698,7 +1717,7 @@ ENTRY(rewind_stack_do_exit)
 
 	movq	PER_CPU_VAR(cpu_current_top_of_stack), %rax
 	leaq	-PTREGS_SIZE(%rax), %rsp
-	UNWIND_HINT_FUNC sp_offset=PTREGS_SIZE
+	UNWIND_HINT_REGS
 
 	call	do_exit
 END(rewind_stack_do_exit)

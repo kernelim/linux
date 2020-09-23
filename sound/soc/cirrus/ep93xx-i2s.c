@@ -365,11 +365,11 @@ static int ep93xx_i2s_set_sysclk(struct snd_soc_dai *cpu_dai, int clk_id,
 }
 
 #ifdef CONFIG_PM
-static int ep93xx_i2s_suspend(struct snd_soc_dai *dai)
+static int ep93xx_i2s_suspend(struct snd_soc_component *component)
 {
-	struct ep93xx_i2s_info *info = snd_soc_dai_get_drvdata(dai);
+	struct ep93xx_i2s_info *info = snd_soc_component_get_drvdata(component);
 
-	if (!dai->active)
+	if (!component->active)
 		return 0;
 
 	ep93xx_i2s_disable(info, SNDRV_PCM_STREAM_PLAYBACK);
@@ -378,11 +378,11 @@ static int ep93xx_i2s_suspend(struct snd_soc_dai *dai)
 	return 0;
 }
 
-static int ep93xx_i2s_resume(struct snd_soc_dai *dai)
+static int ep93xx_i2s_resume(struct snd_soc_component *component)
 {
-	struct ep93xx_i2s_info *info = snd_soc_dai_get_drvdata(dai);
+	struct ep93xx_i2s_info *info = snd_soc_component_get_drvdata(component);
 
-	if (!dai->active)
+	if (!component->active)
 		return 0;
 
 	ep93xx_i2s_enable(info, SNDRV_PCM_STREAM_PLAYBACK);
@@ -407,8 +407,6 @@ static const struct snd_soc_dai_ops ep93xx_i2s_dai_ops = {
 static struct snd_soc_dai_driver ep93xx_i2s_dai = {
 	.symmetric_rates= 1,
 	.probe		= ep93xx_i2s_dai_probe,
-	.suspend	= ep93xx_i2s_suspend,
-	.resume		= ep93xx_i2s_resume,
 	.playback	= {
 		.channels_min	= 2,
 		.channels_max	= 2,
@@ -426,6 +424,8 @@ static struct snd_soc_dai_driver ep93xx_i2s_dai = {
 
 static const struct snd_soc_component_driver ep93xx_i2s_component = {
 	.name		= "ep93xx-i2s",
+	.suspend	= ep93xx_i2s_suspend,
+	.resume		= ep93xx_i2s_resume,
 };
 
 static int ep93xx_i2s_probe(struct platform_device *pdev)

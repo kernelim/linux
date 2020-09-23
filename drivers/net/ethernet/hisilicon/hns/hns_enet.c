@@ -1503,7 +1503,7 @@ static int hns_nic_net_stop(struct net_device *ndev)
 }
 
 static void hns_tx_timeout_reset(struct hns_nic_priv *priv);
-static void hns_nic_net_timeout(struct net_device *ndev)
+static void hns_nic_net_timeout(struct net_device *ndev, unsigned int txqueue)
 {
 	struct hns_nic_priv *priv = netdev_priv(ndev);
 

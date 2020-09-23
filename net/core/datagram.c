@@ -51,6 +51,7 @@
 #include <linux/slab.h>
 #include <linux/pagemap.h>
 #include <linux/uio.h>
+#include <linux/indirect_call_wrapper.h>
 
 #include <net/protocol.h>
 #include <linux/skbuff.h>
@@ -82,7 +83,8 @@ static int receiver_wake_function(wait_queue_entry_t *wait, unsigned int mode, i
 /*
  * Wait for the last received packet to be different from skb
  */
-int __skb_wait_for_more_packets(struct sock *sk, int *err, long *timeo_p,
+int __skb_wait_for_more_packets(struct sock *sk, struct sk_buff_head *queue,
+				int *err, long *timeo_p,
 				const struct sk_buff *skb)
 {
 	int error;
@@ -95,7 +97,7 @@ int __skb_wait_for_more_packets(struct sock *sk, int *err, long *timeo_p,
 	if (error)
 		goto out_err;
 
-	if (sk->sk_receive_queue.prev != skb)
+	if (READ_ONCE(queue->prev) != skb)
 		goto out;
 
 	/* Socket shut down? */
@@ -165,7 +167,7 @@ struct sk_buff *__skb_try_recv_from_queue(struct sock *sk,
 					  unsigned int flags,
 					  void (*destructor)(struct sock *sk,
 							   struct sk_buff *skb),
-					  int *peeked, int *off, int *err,
+					  int *off, int *err,
 					  struct sk_buff **last)
 {
 	bool peek_at_off = false;
@@ -192,7 +194,6 @@ struct sk_buff *__skb_try_recv_from_queue(struct sock *sk,
 					return NULL;
 				}
 			}
-			*peeked = 1;
 			refcount_inc(&skb->users);
 		} else {
 			__skb_unlink(skb, queue);
@@ -208,9 +209,9 @@ struct sk_buff *__skb_try_recv_from_queue(struct sock *sk,
 /**
  *	__skb_try_recv_datagram - Receive a datagram skbuff
  *	@sk: socket
+ *	@queue: socket queue from which to receive
  *	@flags: MSG\_ flags
  *	@destructor: invoked under the receive lock on successful dequeue
- *	@peeked: returns non-zero if this packet has been seen before
  *	@off: an offset in bytes to peek skb from. Returns an offset
  *	      within an skb where data actually starts
  *	@err: error code returned
@@ -241,13 +242,14 @@ struct sk_buff *__skb_try_recv_from_queue(struct sock *sk,
  *	quite explicitly by POSIX 1003.1g, don't change them without having
  *	the standard around please.
  */
-struct sk_buff *__skb_try_recv_datagram(struct sock *sk, unsigned int flags,
+struct sk_buff *__skb_try_recv_datagram(struct sock *sk,
+					struct sk_buff_head *queue,
+					unsigned int flags,
 					void (*destructor)(struct sock *sk,
 							   struct sk_buff *skb),
-					int *peeked, int *off, int *err,
+					int *off, int *err,
 					struct sk_buff **last)
 {
-	struct sk_buff_head *queue = &sk->sk_receive_queue;
 	struct sk_buff *skb;
 	unsigned long cpu_flags;
 	/*
@@ -258,7 +260,6 @@ struct sk_buff *__skb_try_recv_datagram(struct sock *sk, unsigned int flags,
 	if (error)
 		goto no_packet;
 
-	*peeked = 0;
 	do {
 		/* Again only user level code calls this function, so nothing
 		 * interrupt level will suddenly eat the receive_queue.
@@ -268,7 +269,7 @@ struct sk_buff *__skb_try_recv_datagram(struct sock *sk, unsigned int flags,
 		 */
 		spin_lock_irqsave(&queue->lock, cpu_flags);
 		skb = __skb_try_recv_from_queue(sk, queue, flags, destructor,
-						peeked, off, &error, last);
+						off, &error, last);
 		spin_unlock_irqrestore(&queue->lock, cpu_flags);
 		if (error)
 			goto no_packet;
@@ -279,7 +280,7 @@ struct sk_buff *__skb_try_recv_datagram(struct sock *sk, unsigned int flags,
 			break;
 
 		sk_busy_loop(sk, flags & MSG_DONTWAIT);
-	} while (sk->sk_receive_queue.prev != *last);
+	} while (READ_ONCE(queue->prev) != *last);
 
 	error = -EAGAIN;
 
@@ -289,10 +290,12 @@ no_packet:
 }
 EXPORT_SYMBOL(__skb_try_recv_datagram);
 
-struct sk_buff *__skb_recv_datagram(struct sock *sk, unsigned int flags,
+struct sk_buff *__skb_recv_datagram(struct sock *sk,
+				    struct sk_buff_head *sk_queue,
+				    unsigned int flags,
 				    void (*destructor)(struct sock *sk,
 						       struct sk_buff *skb),
-				    int *peeked, int *off, int *err)
+				    int *off, int *err)
 {
 	struct sk_buff *skb, *last;
 	long timeo;
@@ -300,7 +303,7 @@ struct sk_buff *__skb_recv_datagram(struct sock *sk, unsigned int flags,
 	timeo = sock_rcvtimeo(sk, flags & MSG_DONTWAIT);
 
 	do {
-		skb = __skb_try_recv_datagram(sk, flags, destructor, peeked,
+		skb = __skb_try_recv_datagram(sk, sk_queue, flags, destructor,
 					      off, err, &last);
 		if (skb)
 			return skb;
@@ -308,7 +311,8 @@ struct sk_buff *__skb_recv_datagram(struct sock *sk, unsigned int flags,
 		if (*err != -EAGAIN)
 			break;
 	} while (timeo &&
-		!__skb_wait_for_more_packets(sk, err, &timeo, last));
+		 !__skb_wait_for_more_packets(sk, sk_queue, err,
+					      &timeo, last));
 
 	return NULL;
 }
@@ -317,10 +321,11 @@ EXPORT_SYMBOL(__skb_recv_datagram);
 struct sk_buff *skb_recv_datagram(struct sock *sk, unsigned int flags,
 				  int noblock, int *err)
 {
-	int peeked, off = 0;
+	int off = 0;
 
-	return __skb_recv_datagram(sk, flags | (noblock ? MSG_DONTWAIT : 0),
-				   NULL, &peeked, &off, err);
+	return __skb_recv_datagram(sk, &sk->sk_receive_queue,
+				   flags | (noblock ? MSG_DONTWAIT : 0),
+				   NULL, &off, err);
 }
 EXPORT_SYMBOL(skb_recv_datagram);
 
@@ -408,10 +413,15 @@ int skb_kill_datagram(struct sock *sk, struct sk_buff *skb, unsigned int flags)
 }
 EXPORT_SYMBOL(skb_kill_datagram);
 
-int __skb_datagram_iter(const struct sk_buff *skb, int offset,
-			struct iov_iter *to, int len, bool fault_short,
-			size_t (*cb)(const void *, size_t, void *, struct iov_iter *),
-			void *data)
+INDIRECT_CALLABLE_DECLARE(static size_t simple_copy_to_iter(const void *addr,
+						size_t bytes,
+						void *data __always_unused,
+						struct iov_iter *i));
+
+static int __skb_datagram_iter(const struct sk_buff *skb, int offset,
+			       struct iov_iter *to, int len, bool fault_short,
+			       size_t (*cb)(const void *, size_t, void *,
+					    struct iov_iter *), void *data)
 {
 	int start = skb_headlen(skb);
 	int i, copy = start - offset, start_off = offset, n;
@@ -421,7 +431,8 @@ int __skb_datagram_iter(const struct sk_buff *skb, int offset,
 	if (copy > 0) {
 		if (copy > len)
 			copy = len;
-		n = cb(skb->data + offset, copy, data, to);
+		n = INDIRECT_CALL_1(cb, simple_copy_to_iter,
+				    skb->data + offset, copy, data, to);
 		offset += n;
 		if (n != copy)
 			goto short_copy;
@@ -443,8 +454,9 @@ int __skb_datagram_iter(const struct sk_buff *skb, int offset,
 
 			if (copy > len)
 				copy = len;
-			n = cb(vaddr + frag->page_offset +
-				offset - start, copy, data, to);
+			n = INDIRECT_CALL_1(cb, simple_copy_to_iter,
+					vaddr + skb_frag_off(frag) + offset - start,
+					copy, data, to);
 			kunmap(page);
 			offset += n;
 			if (n != copy)
@@ -641,7 +653,7 @@ int __zerocopy_sg_from_iter(struct sock *sk, struct sk_buff *skb,
 		skb->len += copied;
 		skb->truesize += truesize;
 		if (sk && sk->sk_type == SOCK_STREAM) {
-			sk->sk_wmem_queued += truesize;
+			sk_wmem_queued_add(sk, truesize);
 			sk_mem_charge(sk, truesize);
 		} else {
 			refcount_add(truesize, &skb->sk->sk_wmem_alloc);
@@ -811,7 +823,7 @@ __poll_t datagram_poll(struct file *file, struct socket *sock,
 	mask = 0;
 
 	/* exceptional events? */
-	if (sk->sk_err || !skb_queue_empty(&sk->sk_error_queue))
+	if (sk->sk_err || !skb_queue_empty_lockless(&sk->sk_error_queue))
 		mask |= EPOLLERR |
 			(sock_flag(sk, SOCK_SELECT_ERR_QUEUE) ? EPOLLPRI : 0);
 
@@ -821,7 +833,7 @@ __poll_t datagram_poll(struct file *file, struct socket *sock,
 		mask |= EPOLLHUP;
 
 	/* readable? */
-	if (!skb_queue_empty(&sk->sk_receive_queue))
+	if (!skb_queue_empty_lockless(&sk->sk_receive_queue))
 		mask |= EPOLLIN | EPOLLRDNORM;
 
 	/* Connection-based need to check for termination and startup */

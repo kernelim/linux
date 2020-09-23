@@ -139,6 +139,7 @@ phy_tunable_strings[__ETHTOOL_PHY_TUNABLE_COUNT][ETH_GSTRING_LEN] = {
 	[ETHTOOL_ID_UNSPEC]     = "Unspec",
 	[ETHTOOL_PHY_DOWNSHIFT]	= "phy-downshift",
 	[ETHTOOL_PHY_FAST_LINK_DOWN] = "phy-fast-link-down",
+	[ETHTOOL_PHY_EDPD]	= "phy-energy-detect-power-down",
 };
 
 static int ethtool_get_features(struct net_device *dev, void __user *useraddr)
@@ -613,17 +614,17 @@ int __rh_call_get_link_ksettings(struct net_device *dev,
 		if (!err) {
 			link_ksettings->base = tmp.base;
 			bitmap_zero(link_ksettings->link_modes.supported,
-				    __ETHTOOL_LINK_MODE_LAST);
+				    __ETHTOOL_LINK_MODE_MASK_NBITS - 1);
 			bitmap_copy(link_ksettings->link_modes.supported,
 				    tmp.link_modes.supported,
 				    __ETHTOOL_LINK_MODE_LAST_RH80);
 			bitmap_zero(link_ksettings->link_modes.advertising,
-				    __ETHTOOL_LINK_MODE_LAST);
+				    __ETHTOOL_LINK_MODE_MASK_NBITS - 1);
 			bitmap_copy(link_ksettings->link_modes.advertising,
 				    tmp.link_modes.advertising,
 				    __ETHTOOL_LINK_MODE_LAST_RH80);
 			bitmap_zero(link_ksettings->link_modes.lp_advertising,
-				    __ETHTOOL_LINK_MODE_LAST);
+				    __ETHTOOL_LINK_MODE_MASK_NBITS - 1);
 			bitmap_copy(link_ksettings->link_modes.lp_advertising,
 				    tmp.link_modes.lp_advertising,
 				    __ETHTOOL_LINK_MODE_LAST_RH80);
@@ -1828,6 +1829,64 @@ static noinline_for_stack int ethtool_get_coalesce(struct net_device *dev,
 	return 0;
 }
 
+static bool
+ethtool_set_coalesce_supported(struct net_device *dev,
+			       struct ethtool_coalesce *coalesce)
+{
+	u32 supported_params = dev->ethtool_ops->supported_coalesce_params;
+	u32 nonzero_params = 0;
+
+	if (!supported_params)
+		return true;
+
+	if (coalesce->rx_coalesce_usecs)
+		nonzero_params |= ETHTOOL_COALESCE_RX_USECS;
+	if (coalesce->rx_max_coalesced_frames)
+		nonzero_params |= ETHTOOL_COALESCE_RX_MAX_FRAMES;
+	if (coalesce->rx_coalesce_usecs_irq)
+		nonzero_params |= ETHTOOL_COALESCE_RX_USECS_IRQ;
+	if (coalesce->rx_max_coalesced_frames_irq)
+		nonzero_params |= ETHTOOL_COALESCE_RX_MAX_FRAMES_IRQ;
+	if (coalesce->tx_coalesce_usecs)
+		nonzero_params |= ETHTOOL_COALESCE_TX_USECS;
+	if (coalesce->tx_max_coalesced_frames)
+		nonzero_params |= ETHTOOL_COALESCE_TX_MAX_FRAMES;
+	if (coalesce->tx_coalesce_usecs_irq)
+		nonzero_params |= ETHTOOL_COALESCE_TX_USECS_IRQ;
+	if (coalesce->tx_max_coalesced_frames_irq)
+		nonzero_params |= ETHTOOL_COALESCE_TX_MAX_FRAMES_IRQ;
+	if (coalesce->stats_block_coalesce_usecs)
+		nonzero_params |= ETHTOOL_COALESCE_STATS_BLOCK_USECS;
+	if (coalesce->use_adaptive_rx_coalesce)
+		nonzero_params |= ETHTOOL_COALESCE_USE_ADAPTIVE_RX;
+	if (coalesce->use_adaptive_tx_coalesce)
+		nonzero_params |= ETHTOOL_COALESCE_USE_ADAPTIVE_TX;
+	if (coalesce->pkt_rate_low)
+		nonzero_params |= ETHTOOL_COALESCE_PKT_RATE_LOW;
+	if (coalesce->rx_coalesce_usecs_low)
+		nonzero_params |= ETHTOOL_COALESCE_RX_USECS_LOW;
+	if (coalesce->rx_max_coalesced_frames_low)
+		nonzero_params |= ETHTOOL_COALESCE_RX_MAX_FRAMES_LOW;
+	if (coalesce->tx_coalesce_usecs_low)
+		nonzero_params |= ETHTOOL_COALESCE_TX_USECS_LOW;
+	if (coalesce->tx_max_coalesced_frames_low)
+		nonzero_params |= ETHTOOL_COALESCE_TX_MAX_FRAMES_LOW;
+	if (coalesce->pkt_rate_high)
+		nonzero_params |= ETHTOOL_COALESCE_PKT_RATE_HIGH;
+	if (coalesce->rx_coalesce_usecs_high)
+		nonzero_params |= ETHTOOL_COALESCE_RX_USECS_HIGH;
+	if (coalesce->rx_max_coalesced_frames_high)
+		nonzero_params |= ETHTOOL_COALESCE_RX_MAX_FRAMES_HIGH;
+	if (coalesce->tx_coalesce_usecs_high)
+		nonzero_params |= ETHTOOL_COALESCE_TX_USECS_HIGH;
+	if (coalesce->tx_max_coalesced_frames_high)
+		nonzero_params |= ETHTOOL_COALESCE_TX_MAX_FRAMES_HIGH;
+	if (coalesce->rate_sample_interval)
+		nonzero_params |= ETHTOOL_COALESCE_RATE_SAMPLE_INTERVAL;
+
+	return (supported_params & nonzero_params) == nonzero_params;
+}
+
 static noinline_for_stack int ethtool_set_coalesce(struct net_device *dev,
 						   void __user *useraddr)
 {
@@ -1838,6 +1897,9 @@ static noinline_for_stack int ethtool_set_coalesce(struct net_device *dev,
 
 	if (copy_from_user(&coalesce, useraddr, sizeof(coalesce)))
 		return -EFAULT;
+
+	if (!ethtool_set_coalesce_supported(dev, &coalesce))
+		return -EOPNOTSUPP;
 
 	return dev->ethtool_ops->set_coalesce(dev, &coalesce);
 }
@@ -2372,8 +2434,8 @@ static int ethtool_get_ts_info(struct net_device *dev, void __user *useraddr)
 	memset(&info, 0, sizeof(info));
 	info.cmd = ETHTOOL_GET_TS_INFO;
 
-	if (phydev && phydev->drv && phydev->drv->ts_info) {
-		err = phydev->drv->ts_info(phydev, &info);
+	if (phy_has_tsinfo(phydev)) {
+		err = phy_ts_info(phydev, &info);
 	} else if (ops->get_ts_info) {
 		err = ops->get_ts_info(dev, &info);
 	} else {
@@ -2604,6 +2666,11 @@ static int ethtool_set_per_queue_coalesce(struct net_device *dev,
 			goto roll_back;
 		}
 
+		if (!ethtool_set_coalesce_supported(dev, &coalesce)) {
+			ret = -EOPNOTSUPP;
+			goto roll_back;
+		}
+
 		ret = dev->ethtool_ops->set_per_queue_coalesce(dev, bit, &coalesce);
 		if (ret != 0)
 			goto roll_back;
@@ -2652,6 +2719,11 @@ static int ethtool_phy_tunable_valid(const struct ethtool_tunable *tuna)
 	case ETHTOOL_PHY_FAST_LINK_DOWN:
 		if (tuna->len != sizeof(u8) ||
 		    tuna->type_id != ETHTOOL_TUNABLE_U8)
+			return -EINVAL;
+		break;
+	case ETHTOOL_PHY_EDPD:
+		if (tuna->len != sizeof(u16) ||
+		    tuna->type_id != ETHTOOL_TUNABLE_U16)
 			return -EINVAL;
 		break;
 	default:

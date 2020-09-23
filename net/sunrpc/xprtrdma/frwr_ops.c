@@ -7,67 +7,37 @@
 /* Lightweight memory registration using Fast Registration Work
  * Requests (FRWR).
  *
- * FRWR features ordered asynchronous registration and deregistration
- * of arbitrarily sized memory regions. This is the fastest and safest
+ * FRWR features ordered asynchronous registration and invalidation
+ * of arbitrarily-sized memory regions. This is the fastest and safest
  * but most complex memory registration mode.
  */
 
 /* Normal operation
  *
- * A Memory Region is prepared for RDMA READ or WRITE using a FAST_REG
+ * A Memory Region is prepared for RDMA Read or Write using a FAST_REG
  * Work Request (frwr_map). When the RDMA operation is finished, this
  * Memory Region is invalidated using a LOCAL_INV Work Request
- * (frwr_unmap_sync).
+ * (frwr_unmap_async and frwr_unmap_sync).
  *
- * Typically these Work Requests are not signaled, and neither are RDMA
- * SEND Work Requests (with the exception of signaling occasionally to
- * prevent provider work queue overflows). This greatly reduces HCA
+ * Typically FAST_REG Work Requests are not signaled, and neither are
+ * RDMA Send Work Requests (with the exception of signaling occasionally
+ * to prevent provider work queue overflows). This greatly reduces HCA
  * interrupt workload.
- *
- * As an optimization, frwr_unmap marks MRs INVALID before the
- * LOCAL_INV WR is posted. If posting succeeds, the MR is placed on
- * rb_mrs immediately so that no work (like managing a linked list
- * under a spinlock) is needed in the completion upcall.
- *
- * But this means that frwr_map() can occasionally encounter an MR
- * that is INVALID but the LOCAL_INV WR has not completed. Work Queue
- * ordering prevents a subsequent FAST_REG WR from executing against
- * that MR while it is still being invalidated.
  */
 
 /* Transport recovery
  *
- * ->op_map and the transport connect worker cannot run at the same
- * time, but ->op_unmap can fire while the transport connect worker
- * is running. Thus MR recovery is handled in ->op_map, to guarantee
- * that recovered MRs are owned by a sending RPC, and not one where
- * ->op_unmap could fire at the same time transport reconnect is
- * being done.
+ * frwr_map and frwr_unmap_* cannot run at the same time the transport
+ * connect worker is running. The connect worker holds the transport
+ * send lock, just as ->send_request does. This prevents frwr_map and
+ * the connect worker from running concurrently. When a connection is
+ * closed, the Receive completion queue is drained before the allowing
+ * the connect worker to get control. This prevents frwr_unmap and the
+ * connect worker from running concurrently.
  *
- * When the underlying transport disconnects, MRs are left in one of
- * four states:
- *
- * INVALID:	The MR was not in use before the QP entered ERROR state.
- *
- * VALID:	The MR was registered before the QP entered ERROR state.
- *
- * FLUSHED_FR:	The MR was being registered when the QP entered ERROR
- *		state, and the pending WR was flushed.
- *
- * FLUSHED_LI:	The MR was being invalidated when the QP entered ERROR
- *		state, and the pending WR was flushed.
- *
- * When frwr_map encounters FLUSHED and VALID MRs, they are recovered
- * with ib_dereg_mr and then are re-initialized. Because MR recovery
- * allocates fresh resources, it is deferred to a workqueue, and the
- * recovered MRs are placed back on the rb_mrs list when recovery is
- * complete. frwr_map allocates another MR for the current RPC while
- * the broken MR is reset.
- *
- * To ensure that frwr_map doesn't encounter an MR that is marked
- * INVALID but that is about to be flushed due to a previous transport
- * disconnect, the transport connect worker attempts to drain all
- * pending send queue WRs before the transport is reconnected.
+ * When the underlying transport disconnects, MRs that are in flight
+ * are flushed and are likely unusable. Thus all MRs are destroyed.
+ * New MRs are created on demand.
  */
 
 #include <linux/sunrpc/rpc_rdma.h>
@@ -79,28 +49,6 @@
 #if IS_ENABLED(CONFIG_SUNRPC_DEBUG)
 # define RPCDBG_FACILITY	RPCDBG_TRANS
 #endif
-
-/**
- * frwr_is_supported - Check if device supports FRWR
- * @device: interface adapter to check
- *
- * Returns true if device supports FRWR, otherwise false
- */
-bool frwr_is_supported(struct ib_device *device)
-{
-	struct ib_device_attr *attrs = &device->attrs;
-
-	if (!(attrs->device_cap_flags & IB_DEVICE_MEM_MGT_EXTENSIONS))
-		goto out_not_supported;
-	if (attrs->max_fast_reg_page_list_len == 0)
-		goto out_not_supported;
-	return true;
-
-out_not_supported:
-	pr_info("rpcrdma: 'frwr' mode is not supported by device %s\n",
-		device->name);
-	return false;
-}
 
 /**
  * frwr_release_mr - Destroy one MR
@@ -118,13 +66,8 @@ void frwr_release_mr(struct rpcrdma_mr *mr)
 	kfree(mr);
 }
 
-/* MRs are dynamically allocated, so simply clean up and release the MR.
- * A replacement MR will subsequently be allocated on demand.
- */
-static void
-frwr_mr_recycle_worker(struct work_struct *work)
+static void frwr_mr_recycle(struct rpcrdma_mr *mr)
 {
-	struct rpcrdma_mr *mr = container_of(work, struct rpcrdma_mr, mr_recycle);
 	struct rpcrdma_xprt *r_xprt = mr->mr_xprt;
 
 	trace_xprtrdma_mr_recycle(mr);
@@ -136,10 +79,10 @@ frwr_mr_recycle_worker(struct work_struct *work)
 		mr->mr_dir = DMA_NONE;
 	}
 
-	spin_lock(&r_xprt->rx_buf.rb_mrlock);
+	spin_lock(&r_xprt->rx_buf.rb_lock);
 	list_del(&mr->mr_all);
 	r_xprt->rx_stats.mrs_recycled++;
-	spin_unlock(&r_xprt->rx_buf.rb_mrlock);
+	spin_unlock(&r_xprt->rx_buf.rb_lock);
 
 	frwr_release_mr(mr);
 }
@@ -156,12 +99,10 @@ frwr_mr_recycle_worker(struct work_struct *work)
  */
 void frwr_reset(struct rpcrdma_req *req)
 {
-	while (!list_empty(&req->rl_registered)) {
-		struct rpcrdma_mr *mr;
+	struct rpcrdma_mr *mr;
 
-		mr = rpcrdma_mr_pop(&req->rl_registered);
-		rpcrdma_mr_unmap_and_put(mr);
-	}
+	while ((mr = rpcrdma_mr_pop(&req->rl_registered)))
+		rpcrdma_mr_put(mr);
 }
 
 /**
@@ -183,14 +124,13 @@ int frwr_init_mr(struct rpcrdma_ia *ia, struct rpcrdma_mr *mr)
 	if (IS_ERR(frmr))
 		goto out_mr_err;
 
-	sg = kcalloc(depth, sizeof(*sg), GFP_KERNEL);
+	sg = kcalloc(depth, sizeof(*sg), GFP_NOFS);
 	if (!sg)
 		goto out_list_err;
 
 	mr->frwr.fr_mr = frmr;
 	mr->mr_dir = DMA_NONE;
 	INIT_LIST_HEAD(&mr->mr_list);
-	INIT_WORK(&mr->mr_recycle, frwr_mr_recycle_worker);
 	init_completion(&mr->frwr.fr_linv_done);
 
 	sg_init_table(sg, depth);
@@ -203,33 +143,53 @@ out_mr_err:
 	return rc;
 
 out_list_err:
-	dprintk("RPC:       %s: sg allocation failure\n",
-		__func__);
 	ib_dereg_mr(frmr);
 	return -ENOMEM;
 }
 
 /**
- * frwr_open - Prepare an endpoint for use with FRWR
- * @ia: interface adapter this endpoint will use
- * @ep: endpoint to prepare
+ * frwr_query_device - Prepare a transport for use with FRWR
+ * @r_xprt: controlling transport instance
+ * @device: RDMA device to query
  *
  * On success, sets:
- *	ep->rep_attr.cap.max_send_wr
- *	ep->rep_attr.cap.max_recv_wr
+ *	ep->rep_attr
  *	ep->rep_max_requests
- *	ia->ri_max_segs
+ *	ia->ri_max_rdma_segs
  *
  * And these FRWR-related fields:
  *	ia->ri_max_frwr_depth
  *	ia->ri_mrtype
  *
- * On failure, a negative errno is returned.
+ * Return values:
+ *   On success, returns zero.
+ *   %-EINVAL - the device does not support FRWR memory registration
+ *   %-ENOMEM - the device is not sufficiently capable for NFS/RDMA
  */
-int frwr_open(struct rpcrdma_ia *ia, struct rpcrdma_ep *ep)
+int frwr_query_device(struct rpcrdma_xprt *r_xprt,
+		      const struct ib_device *device)
 {
-	struct ib_device_attr *attrs = &ia->ri_id->device->attrs;
+	const struct ib_device_attr *attrs = &device->attrs;
+	struct rpcrdma_ia *ia = &r_xprt->rx_ia;
+	struct rpcrdma_ep *ep = &r_xprt->rx_ep;
 	int max_qp_wr, depth, delta;
+	unsigned int max_sge;
+
+	if (!(attrs->device_cap_flags & IB_DEVICE_MEM_MGT_EXTENSIONS) ||
+	    attrs->max_fast_reg_page_list_len == 0) {
+		pr_err("rpcrdma: 'frwr' mode is not supported by device %s\n",
+		       device->name);
+		return -EINVAL;
+	}
+
+	max_sge = min_t(unsigned int, attrs->max_send_sge,
+			RPCRDMA_MAX_SEND_SGES);
+	if (max_sge < RPCRDMA_MIN_SEND_SGES) {
+		pr_err("rpcrdma: HCA provides only %u send SGEs\n", max_sge);
+		return -ENOMEM;
+	}
+	ep->rep_attr.cap.max_send_sge = max_sge;
+	ep->rep_attr.cap.max_recv_sge = 1;
 
 	ia->ri_mrtype = IB_MR_TYPE_MEM_REG;
 	if (attrs->device_cap_flags & IB_DEVICE_SG_GAPS_REG)
@@ -239,14 +199,12 @@ int frwr_open(struct rpcrdma_ia *ia, struct rpcrdma_ep *ep)
 	 * capability, but perform optimally when the MRs are not larger
 	 * than a page.
 	 */
-	if (attrs->max_sge_rd > 1)
+	if (attrs->max_sge_rd > RPCRDMA_MAX_HDR_SEGS)
 		ia->ri_max_frwr_depth = attrs->max_sge_rd;
 	else
 		ia->ri_max_frwr_depth = attrs->max_fast_reg_page_list_len;
 	if (ia->ri_max_frwr_depth > RPCRDMA_MAX_DATA_SEGS)
 		ia->ri_max_frwr_depth = RPCRDMA_MAX_DATA_SEGS;
-	dprintk("RPC:       %s: max FR page list depth = %u\n",
-		__func__, ia->ri_max_frwr_depth);
 
 	/* Add room for frwr register and invalidate WRs.
 	 * 1. FRWR reg WR for head
@@ -270,7 +228,7 @@ int frwr_open(struct rpcrdma_ia *ia, struct rpcrdma_ep *ep)
 		} while (delta > 0);
 	}
 
-	max_qp_wr = ia->ri_id->device->attrs.max_qp_wr;
+	max_qp_wr = attrs->max_qp_wr;
 	max_qp_wr -= RPCRDMA_BACKWARD_WRS;
 	max_qp_wr -= 1;
 	if (max_qp_wr < RPCRDMA_MIN_SLOT_TABLE)
@@ -281,7 +239,7 @@ int frwr_open(struct rpcrdma_ia *ia, struct rpcrdma_ep *ep)
 	if (ep->rep_attr.cap.max_send_wr > max_qp_wr) {
 		ep->rep_max_requests = max_qp_wr / depth;
 		if (!ep->rep_max_requests)
-			return -EINVAL;
+			return -ENOMEM;
 		ep->rep_attr.cap.max_send_wr = ep->rep_max_requests * depth;
 	}
 	ep->rep_attr.cap.max_send_wr += RPCRDMA_BACKWARD_WRS;
@@ -290,30 +248,22 @@ int frwr_open(struct rpcrdma_ia *ia, struct rpcrdma_ep *ep)
 	ep->rep_attr.cap.max_recv_wr += RPCRDMA_BACKWARD_WRS;
 	ep->rep_attr.cap.max_recv_wr += 1; /* for ib_drain_rq */
 
-	ia->ri_max_segs = max_t(unsigned int, 1, RPCRDMA_MAX_DATA_SEGS /
-				ia->ri_max_frwr_depth);
+	ia->ri_max_rdma_segs =
+		DIV_ROUND_UP(RPCRDMA_MAX_DATA_SEGS, ia->ri_max_frwr_depth);
 	/* Reply chunks require segments for head and tail buffers */
-	ia->ri_max_segs += 2;
-	if (ia->ri_max_segs > RPCRDMA_MAX_HDR_SEGS)
-		ia->ri_max_segs = RPCRDMA_MAX_HDR_SEGS;
+	ia->ri_max_rdma_segs += 2;
+	if (ia->ri_max_rdma_segs > RPCRDMA_MAX_HDR_SEGS)
+		ia->ri_max_rdma_segs = RPCRDMA_MAX_HDR_SEGS;
+
+	/* Ensure the underlying device is capable of conveying the
+	 * largest r/wsize NFS will ask for. This guarantees that
+	 * failing over from one RDMA device to another will not
+	 * break NFS I/O.
+	 */
+	if ((ia->ri_max_rdma_segs * ia->ri_max_frwr_depth) < RPCRDMA_MAX_SEGS)
+		return -ENOMEM;
+
 	return 0;
-}
-
-/**
- * frwr_maxpages - Compute size of largest payload
- * @r_xprt: transport
- *
- * Returns maximum size of an RPC message, in pages.
- *
- * FRWR mode conveys a list of pages per chunk segment. The
- * maximum length of that list is the FRWR page list depth.
- */
-size_t frwr_maxpages(struct rpcrdma_xprt *r_xprt)
-{
-	struct rpcrdma_ia *ia = &r_xprt->rx_ia;
-
-	return min_t(unsigned int, RPCRDMA_MAX_DATA_SEGS,
-		     (ia->ri_max_segs - 2) * ia->ri_max_frwr_depth);
 }
 
 /**
@@ -323,30 +273,24 @@ size_t frwr_maxpages(struct rpcrdma_xprt *r_xprt)
  * @nsegs: number of segments remaining
  * @writing: true when RDMA Write will be used
  * @xid: XID of RPC using the registered memory
- * @out: initialized MR
+ * @mr: MR to fill in
  *
  * Prepare a REG_MR Work Request to register a memory region
  * for remote access via RDMA READ or RDMA WRITE.
  *
  * Returns the next segment or a negative errno pointer.
- * On success, the prepared MR is planted in @out.
+ * On success, @mr is filled in.
  */
 struct rpcrdma_mr_seg *frwr_map(struct rpcrdma_xprt *r_xprt,
 				struct rpcrdma_mr_seg *seg,
 				int nsegs, bool writing, __be32 xid,
-				struct rpcrdma_mr **out)
+				struct rpcrdma_mr *mr)
 {
 	struct rpcrdma_ia *ia = &r_xprt->rx_ia;
-	bool holes_ok = ia->ri_mrtype == IB_MR_TYPE_SG_GAPS;
-	struct rpcrdma_mr *mr;
-	struct ib_mr *ibmr;
 	struct ib_reg_wr *reg_wr;
-	int i, n;
+	int i, n, dma_nents;
+	struct ib_mr *ibmr;
 	u8 key;
-
-	mr = rpcrdma_mr_get(r_xprt);
-	if (!mr)
-		goto out_getmr_err;
 
 	if (nsegs > ia->ri_max_frwr_depth)
 		nsegs = ia->ri_max_frwr_depth;
@@ -362,22 +306,23 @@ struct rpcrdma_mr_seg *frwr_map(struct rpcrdma_xprt *r_xprt,
 
 		++seg;
 		++i;
-		if (holes_ok)
+		if (ia->ri_mrtype == IB_MR_TYPE_SG_GAPS)
 			continue;
 		if ((i < nsegs && offset_in_page(seg->mr_offset)) ||
 		    offset_in_page((seg-1)->mr_offset + (seg-1)->mr_len))
 			break;
 	}
 	mr->mr_dir = rpcrdma_data_dir(writing);
+	mr->mr_nents = i;
 
-	mr->mr_nents =
-		ib_dma_map_sg(ia->ri_id->device, mr->mr_sg, i, mr->mr_dir);
-	if (!mr->mr_nents)
+	dma_nents = ib_dma_map_sg(ia->ri_id->device, mr->mr_sg, mr->mr_nents,
+				  mr->mr_dir);
+	if (!dma_nents)
 		goto out_dmamap_err;
 
 	ibmr = mr->frwr.fr_mr;
-	n = ib_map_mr_sg(ibmr, mr->mr_sg, mr->mr_nents, NULL, PAGE_SIZE);
-	if (unlikely(n != mr->mr_nents))
+	n = ib_map_mr_sg(ibmr, mr->mr_sg, dma_nents, NULL, PAGE_SIZE);
+	if (n != dma_nents)
 		goto out_mapmr_err;
 
 	ibmr->iova &= 0x00000000ffffffff;
@@ -397,22 +342,15 @@ struct rpcrdma_mr_seg *frwr_map(struct rpcrdma_xprt *r_xprt,
 	mr->mr_offset = ibmr->iova;
 	trace_xprtrdma_mr_map(mr);
 
-	*out = mr;
 	return seg;
-
-out_getmr_err:
-	xprt_wait_for_buffer_space(&r_xprt->rx_xprt);
-	return ERR_PTR(-EAGAIN);
 
 out_dmamap_err:
 	mr->mr_dir = DMA_NONE;
 	trace_xprtrdma_frwr_sgerr(mr, i);
-	rpcrdma_mr_put(mr);
 	return ERR_PTR(-EIO);
 
 out_mapmr_err:
 	trace_xprtrdma_frwr_maperr(mr, n);
-	rpcrdma_mr_recycle(mr);
 	return ERR_PTR(-EIO);
 }
 
@@ -449,7 +387,7 @@ int frwr_send(struct rpcrdma_ia *ia, struct rpcrdma_req *req)
 	struct ib_send_wr *post_wr;
 	struct rpcrdma_mr *mr;
 
-	post_wr = &req->rl_sendctx->sc_wr;
+	post_wr = &req->rl_wr;
 	list_for_each_entry(mr, &req->rl_registered, mr_list) {
 		struct rpcrdma_frwr *frwr;
 
@@ -465,9 +403,6 @@ int frwr_send(struct rpcrdma_ia *ia, struct rpcrdma_req *req)
 		post_wr = &frwr->fr_regwr.wr;
 	}
 
-	/* If ib_post_send fails, the next ->send_request for
-	 * @req will queue these MRs for recovery.
-	 */
 	return ib_post_send(ia->ri_id->qp, post_wr, NULL);
 }
 
@@ -485,7 +420,7 @@ void frwr_reminv(struct rpcrdma_rep *rep, struct list_head *mrs)
 		if (mr->mr_handle == rep->rr_inv_rkey) {
 			list_del_init(&mr->mr_list);
 			trace_xprtrdma_mr_remoteinv(mr);
-			rpcrdma_mr_unmap_and_put(mr);
+			rpcrdma_mr_put(mr);
 			break;	/* only one invalidated MR per RPC */
 		}
 }
@@ -493,9 +428,9 @@ void frwr_reminv(struct rpcrdma_rep *rep, struct list_head *mrs)
 static void __frwr_release_mr(struct ib_wc *wc, struct rpcrdma_mr *mr)
 {
 	if (wc->status != IB_WC_SUCCESS)
-		rpcrdma_mr_recycle(mr);
+		frwr_mr_recycle(mr);
 	else
-		rpcrdma_mr_unmap_and_put(mr);
+		rpcrdma_mr_put(mr);
 }
 
 /**
@@ -532,8 +467,8 @@ static void frwr_wc_localinv_wake(struct ib_cq *cq, struct ib_wc *wc)
 
 	/* WARNING: Only wr_cqe and status are reliable at this point */
 	trace_xprtrdma_wc_li_wake(wc, frwr);
-	complete(&frwr->fr_linv_done);
 	__frwr_release_mr(wc, mr);
+	complete(&frwr->fr_linv_done);
 }
 
 /**
@@ -562,8 +497,7 @@ void frwr_unmap_sync(struct rpcrdma_xprt *r_xprt, struct rpcrdma_req *req)
 	 */
 	frwr = NULL;
 	prev = &first;
-	while (!list_empty(&req->rl_registered)) {
-		mr = rpcrdma_mr_pop(&req->rl_registered);
+	while ((mr = rpcrdma_mr_pop(&req->rl_registered))) {
 
 		trace_xprtrdma_mr_localinv(mr);
 		r_xprt->rx_stats.local_inv_needed++;
@@ -616,7 +550,7 @@ void frwr_unmap_sync(struct rpcrdma_xprt *r_xprt, struct rpcrdma_req *req)
 		bad_wr = bad_wr->next;
 
 		list_del_init(&mr->mr_list);
-		rpcrdma_mr_recycle(mr);
+		frwr_mr_recycle(mr);
 	}
 }
 
@@ -632,11 +566,15 @@ static void frwr_wc_localinv_done(struct ib_cq *cq, struct ib_wc *wc)
 	struct rpcrdma_frwr *frwr =
 		container_of(cqe, struct rpcrdma_frwr, fr_cqe);
 	struct rpcrdma_mr *mr = container_of(frwr, struct rpcrdma_mr, frwr);
+	struct rpcrdma_rep *rep = mr->mr_req->rl_reply;
 
 	/* WARNING: Only wr_cqe and status are reliable at this point */
 	trace_xprtrdma_wc_li_done(wc, frwr);
-	rpcrdma_complete_rqst(frwr->fr_req->rl_reply);
 	__frwr_release_mr(wc, mr);
+
+	/* Ensure @rep is generated before __frwr_release_mr */
+	smp_rmb();
+	rpcrdma_complete_rqst(rep);
 }
 
 /**
@@ -662,15 +600,13 @@ void frwr_unmap_async(struct rpcrdma_xprt *r_xprt, struct rpcrdma_req *req)
 	 */
 	frwr = NULL;
 	prev = &first;
-	while (!list_empty(&req->rl_registered)) {
-		mr = rpcrdma_mr_pop(&req->rl_registered);
+	while ((mr = rpcrdma_mr_pop(&req->rl_registered))) {
 
 		trace_xprtrdma_mr_localinv(mr);
 		r_xprt->rx_stats.local_inv_needed++;
 
 		frwr = &mr->frwr;
 		frwr->fr_cqe.done = frwr_wc_localinv;
-		frwr->fr_req = req;
 		last = &frwr->fr_invwr;
 		last->next = NULL;
 		last->wr_cqe = &frwr->fr_cqe;
@@ -708,7 +644,7 @@ void frwr_unmap_async(struct rpcrdma_xprt *r_xprt, struct rpcrdma_req *req)
 		mr = container_of(frwr, struct rpcrdma_mr, frwr);
 		bad_wr = bad_wr->next;
 
-		rpcrdma_mr_recycle(mr);
+		frwr_mr_recycle(mr);
 	}
 
 	/* The final LOCAL_INV WR in the chain is supposed to

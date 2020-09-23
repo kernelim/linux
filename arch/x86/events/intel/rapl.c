@@ -633,7 +633,7 @@ static void cleanup_rapl_pmus(void)
 	kfree(rapl_pmus);
 }
 
-const struct attribute_group *rapl_attr_update[] = {
+static const struct attribute_group *rapl_attr_update[] = {
 	&rapl_events_cores_group,
 	&rapl_events_pkg_group,
 	&rapl_events_ram_group,
@@ -666,9 +666,6 @@ static int __init init_rapl_pmus(void)
 	rapl_pmus->pmu.capabilities	= PERF_PMU_CAP_NO_EXCLUDE;
 	return 0;
 }
-
-#define X86_RAPL_MODEL_MATCH(model, init)	\
-	{ X86_VENDOR_INTEL, 6, model, X86_FEATURE_ANY, (unsigned long)&init }
 
 static struct rapl_model model_snb = {
 	.events		= BIT(PERF_RAPL_PP0) |
@@ -715,34 +712,37 @@ static struct rapl_model model_skl = {
 };
 
 static const struct x86_cpu_id rapl_model_match[] __initconst = {
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_SANDYBRIDGE,		model_snb),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_SANDYBRIDGE_X,		model_snbep),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_IVYBRIDGE,		model_snb),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_IVYBRIDGE_X,		model_snbep),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_HASWELL,		model_hsw),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_HASWELL_X,		model_hsx),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_HASWELL_L,		model_hsw),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_HASWELL_G,		model_hsw),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_BROADWELL,		model_hsw),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_BROADWELL_G,		model_hsw),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_BROADWELL_X,		model_hsx),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_BROADWELL_D,		model_hsx),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_XEON_PHI_KNL,		model_knl),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_XEON_PHI_KNM,		model_knl),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_SKYLAKE_L,		model_skl),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_SKYLAKE,		model_skl),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_SKYLAKE_X,		model_hsx),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_KABYLAKE_L,		model_skl),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_KABYLAKE,		model_skl),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_CANNONLAKE_L,	model_skl),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_ATOM_GOLDMONT,		model_hsw),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_ATOM_GOLDMONT_D,	model_hsw),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_ATOM_GOLDMONT_PLUS,	model_hsw),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_ICELAKE_L,		model_skl),
-	X86_RAPL_MODEL_MATCH(INTEL_FAM6_ICELAKE,		model_skl),
+	X86_MATCH_INTEL_FAM6_MODEL(SANDYBRIDGE,		&model_snb),
+	X86_MATCH_INTEL_FAM6_MODEL(SANDYBRIDGE_X,	&model_snbep),
+	X86_MATCH_INTEL_FAM6_MODEL(IVYBRIDGE,		&model_snb),
+	X86_MATCH_INTEL_FAM6_MODEL(IVYBRIDGE_X,		&model_snbep),
+	X86_MATCH_INTEL_FAM6_MODEL(HASWELL,		&model_hsw),
+	X86_MATCH_INTEL_FAM6_MODEL(HASWELL_X,		&model_hsx),
+	X86_MATCH_INTEL_FAM6_MODEL(HASWELL_L,		&model_hsw),
+	X86_MATCH_INTEL_FAM6_MODEL(HASWELL_G,		&model_hsw),
+	X86_MATCH_INTEL_FAM6_MODEL(BROADWELL,		&model_hsw),
+	X86_MATCH_INTEL_FAM6_MODEL(BROADWELL_G,		&model_hsw),
+	X86_MATCH_INTEL_FAM6_MODEL(BROADWELL_X,		&model_hsx),
+	X86_MATCH_INTEL_FAM6_MODEL(BROADWELL_D,		&model_hsx),
+	X86_MATCH_INTEL_FAM6_MODEL(XEON_PHI_KNL,	&model_knl),
+	X86_MATCH_INTEL_FAM6_MODEL(XEON_PHI_KNM,	&model_knl),
+	X86_MATCH_INTEL_FAM6_MODEL(SKYLAKE_L,		&model_skl),
+	X86_MATCH_INTEL_FAM6_MODEL(SKYLAKE,		&model_skl),
+	X86_MATCH_INTEL_FAM6_MODEL(SKYLAKE_X,		&model_hsx),
+	X86_MATCH_INTEL_FAM6_MODEL(KABYLAKE_L,		&model_skl),
+	X86_MATCH_INTEL_FAM6_MODEL(KABYLAKE,		&model_skl),
+	X86_MATCH_INTEL_FAM6_MODEL(CANNONLAKE_L,	&model_skl),
+	X86_MATCH_INTEL_FAM6_MODEL(ATOM_GOLDMONT,	&model_hsw),
+	X86_MATCH_INTEL_FAM6_MODEL(ATOM_GOLDMONT_D,	&model_hsw),
+	X86_MATCH_INTEL_FAM6_MODEL(ATOM_GOLDMONT_PLUS,	&model_hsw),
+	X86_MATCH_INTEL_FAM6_MODEL(ICELAKE_L,		&model_skl),
+	X86_MATCH_INTEL_FAM6_MODEL(ICELAKE,		&model_skl),
+	X86_MATCH_INTEL_FAM6_MODEL(ICELAKE_D,		&model_hsx),
+	X86_MATCH_INTEL_FAM6_MODEL(ICELAKE_X,		&model_hsx),
+	X86_MATCH_INTEL_FAM6_MODEL(COMETLAKE_L,		&model_skl),
+	X86_MATCH_INTEL_FAM6_MODEL(COMETLAKE,		&model_skl),
 	{},
 };
-
 MODULE_DEVICE_TABLE(x86cpu, rapl_model_match);
 
 static int __init rapl_pmu_init(void)

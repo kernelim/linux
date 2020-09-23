@@ -170,7 +170,7 @@ struct genl_ops {
 	RH_KABI_RESERVE(5)
 	RH_KABI_RESERVE(6)
 	RH_KABI_RESERVE(7)
-	RH_KABI_SIZE_AND_EXTEND(genl_ops_extended)
+	RH_KABI_AUX_EMBED(genl_ops_extended)
 };
 
 int genl_register_family(struct genl_family *family);

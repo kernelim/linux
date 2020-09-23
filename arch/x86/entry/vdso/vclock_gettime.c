@@ -17,7 +17,7 @@
 #include <asm/unistd.h>
 #include <asm/msr.h>
 #include <asm/pvclock.h>
-#include <asm/mshyperv.h>
+#include <clocksource/hyperv_timer.h>
 #include <linux/math64.h>
 #include <linux/time.h>
 #include <linux/kernel.h>
@@ -33,7 +33,7 @@ extern u8 pvclock_page
 	__attribute__((visibility("hidden")));
 #endif
 
-#ifdef CONFIG_HYPERV_TSCPAGE
+#ifdef CONFIG_HYPERV_TIMER
 extern u8 hvclock_page
 	__attribute__((visibility("hidden")));
 #endif
@@ -149,7 +149,7 @@ static notrace u64 vread_pvclock(int *mode)
 	return last;
 }
 #endif
-#ifdef CONFIG_HYPERV_TSCPAGE
+#ifdef CONFIG_HYPERV_TIMER
 static notrace u64 vread_hvclock(int *mode)
 {
 	const struct ms_hyperv_tsc_page *tsc_pg =
@@ -195,7 +195,7 @@ notrace static inline u64 vgetsns(int *mode)
 	else if (gtod->vclock_mode == VCLOCK_PVCLOCK)
 		cycles = vread_pvclock(mode);
 #endif
-#ifdef CONFIG_HYPERV_TSCPAGE
+#ifdef CONFIG_HYPERV_TIMER
 	else if (gtod->vclock_mode == VCLOCK_HVCLOCK)
 		cycles = vread_hvclock(mode);
 #endif

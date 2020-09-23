@@ -20,6 +20,7 @@
 #include <net/genetlink.h>
 #include <net/sock.h>
 #include <net/gro_cells.h>
+#include <linux/if_arp.h>
 
 #include <uapi/linux/if_macsec.h>
 
@@ -64,9 +65,9 @@ struct macsec_eth_header {
 
 #define MACSEC_NUM_AN 4 /* 2 bits for the association number */
 
-#define for_each_rxsc(secy, sc)			\
+#define for_each_rxsc(secy, sc)				\
 	for (sc = rcu_dereference_bh(secy->rx_sc);	\
-	     sc;				\
+	     sc;					\
 	     sc = rcu_dereference_bh(sc->next))
 #define for_each_rxsc_rtnl(secy, sc)			\
 	for (sc = rtnl_dereference(secy->rx_sc);	\
@@ -271,7 +272,6 @@ struct macsec_dev {
 	struct pcpu_secy_stats __percpu *stats;
 	struct list_head secys;
 	struct gro_cells gro_cells;
-	unsigned int nest_level;
 };
 
 /**
@@ -1142,6 +1142,7 @@ static rx_handler_result_t macsec_handle_frame(struct sk_buff **pskb)
 
 	list_for_each_entry_rcu(macsec, &rxd->secys, secys) {
 		struct macsec_rx_sc *sc = find_rx_sc(&macsec->secy, sci);
+
 		sc = sc ? macsec_rxsc_get(sc) : NULL;
 
 		if (sc) {
@@ -1584,7 +1585,6 @@ static struct macsec_rx_sa *get_rxsa_from_nl(struct net *net,
 	*scp = rx_sc;
 	return rx_sa;
 }
-
 
 static const struct nla_policy macsec_genl_policy[NUM_MACSEC_ATTR] = {
 	[MACSEC_ATTR_IFINDEX] = { .type = NLA_U32 },
@@ -2153,7 +2153,7 @@ static int macsec_upd_rxsc(struct sk_buff *skb, struct genl_info *info)
 }
 
 static int copy_tx_sa_stats(struct sk_buff *skb,
-			     struct macsec_tx_sa_stats __percpu *pstats)
+			    struct macsec_tx_sa_stats __percpu *pstats)
 {
 	struct macsec_tx_sa_stats sum = {0, };
 	int cpu;
@@ -2173,7 +2173,7 @@ static int copy_tx_sa_stats(struct sk_buff *skb,
 }
 
 static int copy_rx_sa_stats(struct sk_buff *skb,
-			     struct macsec_rx_sa_stats __percpu *pstats)
+			    struct macsec_rx_sa_stats __percpu *pstats)
 {
 	struct macsec_rx_sa_stats sum = {0, };
 	int cpu;
@@ -2199,7 +2199,7 @@ static int copy_rx_sa_stats(struct sk_buff *skb,
 }
 
 static int copy_rx_sc_stats(struct sk_buff *skb,
-			     struct pcpu_rx_sc_stats __percpu *pstats)
+			    struct pcpu_rx_sc_stats __percpu *pstats)
 {
 	struct macsec_rx_sc_stats sum = {0, };
 	int cpu;
@@ -2263,7 +2263,7 @@ static int copy_rx_sc_stats(struct sk_buff *skb,
 }
 
 static int copy_tx_sc_stats(struct sk_buff *skb,
-			     struct pcpu_tx_sc_stats __percpu *pstats)
+			    struct pcpu_tx_sc_stats __percpu *pstats)
 {
 	struct macsec_tx_sc_stats sum = {0, };
 	int cpu;
@@ -2303,7 +2303,7 @@ static int copy_tx_sc_stats(struct sk_buff *skb,
 }
 
 static int copy_secy_stats(struct sk_buff *skb,
-			    struct pcpu_secy_stats __percpu *pstats)
+			   struct pcpu_secy_stats __percpu *pstats)
 {
 	struct macsec_dev_stats sum = {0, };
 	int cpu;
@@ -2752,7 +2752,6 @@ static netdev_tx_t macsec_start_xmit(struct sk_buff *skb,
 
 #define MACSEC_FEATURES \
 	(NETIF_F_SG | NETIF_F_HIGHDMA | NETIF_F_FRAGLIST)
-static struct lock_class_key macsec_netdev_addr_lock_key;
 
 static int macsec_dev_init(struct net_device *dev)
 {
@@ -2960,13 +2959,6 @@ static int macsec_get_iflink(const struct net_device *dev)
 	return macsec_priv(dev)->real_dev->ifindex;
 }
 
-
-static int macsec_get_nest_level(struct net_device *dev)
-{
-	return macsec_priv(dev)->nest_level;
-}
-
-
 static const struct net_device_ops macsec_netdev_ops = {
 	.ndo_init		= macsec_dev_init,
 	.ndo_uninit		= macsec_dev_uninit,
@@ -2980,7 +2972,6 @@ static const struct net_device_ops macsec_netdev_ops = {
 	.ndo_start_xmit		= macsec_start_xmit,
 	.ndo_get_stats64	= macsec_get_stats64,
 	.ndo_get_iflink		= macsec_get_iflink,
-	.ndo_get_lock_subclass  = macsec_get_nest_level,
 };
 
 static const struct device_type macsec_type = {
@@ -2989,6 +2980,7 @@ static const struct device_type macsec_type = {
 
 static const struct nla_policy macsec_rtnl_policy[IFLA_MACSEC_MAX + 1] = {
 	[IFLA_MACSEC_SCI] = { .type = NLA_U64 },
+	[IFLA_MACSEC_PORT] = { .type = NLA_U16 },
 	[IFLA_MACSEC_ICV_LEN] = { .type = NLA_U8 },
 	[IFLA_MACSEC_CIPHER_SUITE] = { .type = NLA_U64 },
 	[IFLA_MACSEC_WINDOW] = { .type = NLA_U32 },
@@ -3235,17 +3227,19 @@ static int macsec_newlink(struct net *net, struct net_device *dev,
 			  struct netlink_ext_ack *extack)
 {
 	struct macsec_dev *macsec = macsec_priv(dev);
-	struct net_device *real_dev;
-	int err;
-	sci_t sci;
-	u8 icv_len = DEFAULT_ICV_LEN;
 	rx_handler_func_t *rx_handler;
+	u8 icv_len = DEFAULT_ICV_LEN;
+	struct net_device *real_dev;
+	int err, mtu;
+	sci_t sci;
 
 	if (!tb[IFLA_LINK])
 		return -EINVAL;
 	real_dev = __dev_get_by_index(net, nla_get_u32(tb[IFLA_LINK]));
 	if (!real_dev)
 		return -ENODEV;
+	if (real_dev->type != ARPHRD_ETHER)
+		return -EINVAL;
 
 	dev->priv_flags |= IFF_MACSEC;
 
@@ -3253,7 +3247,11 @@ static int macsec_newlink(struct net *net, struct net_device *dev,
 
 	if (data && data[IFLA_MACSEC_ICV_LEN])
 		icv_len = nla_get_u8(data[IFLA_MACSEC_ICV_LEN]);
-	dev->mtu = real_dev->mtu - icv_len - macsec_extra_len(true);
+	mtu = real_dev->mtu - icv_len - macsec_extra_len(true);
+	if (mtu < 0)
+		dev->mtu = 0;
+	else
+		dev->mtu = mtu;
 
 	rx_handler = rtnl_dereference(real_dev->rx_handler);
 	if (rx_handler && rx_handler != macsec_handle_frame)
@@ -3262,12 +3260,6 @@ static int macsec_newlink(struct net *net, struct net_device *dev,
 	err = register_netdevice(dev);
 	if (err < 0)
 		return err;
-
-	macsec->nest_level = dev_get_nest_level(real_dev) + 1;
-	netdev_lockdep_set_classes(dev);
-	lockdep_set_class_and_subclass(&dev->addr_list_lock,
-				       &macsec_netdev_addr_lock_key,
-				       macsec_get_nest_level(dev));
 
 	err = netdev_upper_dev_link(real_dev, dev, extack);
 	if (err < 0)

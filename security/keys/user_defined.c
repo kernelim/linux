@@ -9,7 +9,7 @@
  * 2 of the License, or (at your option) any later version.
  */
 
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/seq_file.h>
@@ -172,7 +172,7 @@ EXPORT_SYMBOL_GPL(user_describe);
  * read the key data
  * - the key's semaphore is read-locked
  */
-long user_read(const struct key *key, char __user *buffer, size_t buflen)
+long user_read(const struct key *key, char *buffer, size_t buflen)
 {
 	const struct user_key_payload *upayload;
 	long ret;
@@ -185,8 +185,7 @@ long user_read(const struct key *key, char __user *buffer, size_t buflen)
 		if (buflen > upayload->datalen)
 			buflen = upayload->datalen;
 
-		if (copy_to_user(buffer, upayload->data, buflen) != 0)
-			ret = -EFAULT;
+		memcpy(buffer, upayload->data, buflen);
 	}
 
 	return ret;

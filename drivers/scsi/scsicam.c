@@ -21,10 +21,6 @@
 
 #include <scsi/scsicam.h>
 
-
-static int setsize(unsigned long capacity, unsigned int *cyls, unsigned int *hds,
-		   unsigned int *secs);
-
 /**
  * scsi_bios_ptable - Read PC partition table out of first sector of device.
  * @dev: from this device
@@ -35,79 +31,20 @@ static int setsize(unsigned long capacity, unsigned int *cyls, unsigned int *hds
  */
 unsigned char *scsi_bios_ptable(struct block_device *dev)
 {
-	unsigned char *res = kmalloc(66, GFP_KERNEL);
-	if (res) {
-		struct block_device *bdev = dev->bd_contains;
-		Sector sect;
-		void *data = read_dev_sector(bdev, 0, &sect);
-		if (data) {
-			memcpy(res, data + 0x1be, 66);
-			put_dev_sector(sect);
-		} else {
-			kfree(res);
-			res = NULL;
-		}
-	}
+	struct address_space *mapping = dev->bd_contains->bd_inode->i_mapping;
+	unsigned char *res = NULL;
+	struct page *page;
+
+	page = read_mapping_page(mapping, 0, NULL);
+	if (IS_ERR(page))
+		return NULL;
+
+	if (!PageError(page))
+		res = kmemdup(page_address(page) + 0x1be, 66, GFP_KERNEL);
+	put_page(page);
 	return res;
 }
 EXPORT_SYMBOL(scsi_bios_ptable);
-
-/**
- * scsicam_bios_param - Determine geometry of a disk in cylinders/heads/sectors.
- * @bdev: which device
- * @capacity: size of the disk in sectors
- * @ip: return value: ip[0]=heads, ip[1]=sectors, ip[2]=cylinders
- *
- * Description : determine the BIOS mapping/geometry used for a drive in a
- *      SCSI-CAM system, storing the results in ip as required
- *      by the HDIO_GETGEO ioctl().
- *
- * Returns : -1 on failure, 0 on success.
- */
-
-int scsicam_bios_param(struct block_device *bdev, sector_t capacity, int *ip)
-{
-	unsigned char *p;
-	u64 capacity64 = capacity;	/* Suppress gcc warning */
-	int ret;
-
-	p = scsi_bios_ptable(bdev);
-	if (!p)
-		return -1;
-
-	/* try to infer mapping from partition table */
-	ret = scsi_partsize(p, (unsigned long)capacity, (unsigned int *)ip + 2,
-			       (unsigned int *)ip + 0, (unsigned int *)ip + 1);
-	kfree(p);
-
-	if (ret == -1 && capacity64 < (1ULL << 32)) {
-		/* pick some standard mapping with at most 1024 cylinders,
-		   and at most 62 sectors per track - this works up to
-		   7905 MB */
-		ret = setsize((unsigned long)capacity, (unsigned int *)ip + 2,
-		       (unsigned int *)ip + 0, (unsigned int *)ip + 1);
-	}
-
-	/* if something went wrong, then apparently we have to return
-	   a geometry with more than 1024 cylinders */
-	if (ret || ip[0] > 255 || ip[1] > 63) {
-		if ((capacity >> 11) > 65534) {
-			ip[0] = 255;
-			ip[1] = 63;
-		} else {
-			ip[0] = 64;
-			ip[1] = 32;
-		}
-
-		if (capacity > 65535*63*255)
-			ip[2] = 65535;
-		else
-			ip[2] = (unsigned long)capacity / (ip[0] * ip[1]);
-	}
-
-	return 0;
-}
-EXPORT_SYMBOL(scsicam_bios_param);
 
 /**
  * scsi_partsize - Parse cylinders/heads/sectors from PC partition table
@@ -258,3 +195,62 @@ static int setsize(unsigned long capacity, unsigned int *cyls, unsigned int *hds
 	*hds = (unsigned int) heads;
 	return (rv);
 }
+
+/**
+ * scsicam_bios_param - Determine geometry of a disk in cylinders/heads/sectors.
+ * @bdev: which device
+ * @capacity: size of the disk in sectors
+ * @ip: return value: ip[0]=heads, ip[1]=sectors, ip[2]=cylinders
+ *
+ * Description : determine the BIOS mapping/geometry used for a drive in a
+ *      SCSI-CAM system, storing the results in ip as required
+ *      by the HDIO_GETGEO ioctl().
+ *
+ * Returns : -1 on failure, 0 on success.
+ */
+int scsicam_bios_param(struct block_device *bdev, sector_t capacity, int *ip)
+{
+	unsigned char *p;
+	u64 capacity64 = capacity;	/* Suppress gcc warning */
+	int ret;
+
+	p = scsi_bios_ptable(bdev);
+	if (!p)
+		return -1;
+
+	/* try to infer mapping from partition table */
+	ret = scsi_partsize(p, (unsigned long)capacity, (unsigned int *)ip + 2,
+			       (unsigned int *)ip + 0, (unsigned int *)ip + 1);
+	kfree(p);
+
+	if (ret == -1 && capacity64 < (1ULL << 32)) {
+		/*
+		 * Pick some standard mapping with at most 1024 cylinders, and
+		 * at most 62 sectors per track - this works up to 7905 MB.
+		 */
+		ret = setsize((unsigned long)capacity, (unsigned int *)ip + 2,
+		       (unsigned int *)ip + 0, (unsigned int *)ip + 1);
+	}
+
+	/*
+	 * If something went wrong, then apparently we have to return a geometry
+	 * with more than 1024 cylinders.
+	 */
+	if (ret || ip[0] > 255 || ip[1] > 63) {
+		if ((capacity >> 11) > 65534) {
+			ip[0] = 255;
+			ip[1] = 63;
+		} else {
+			ip[0] = 64;
+			ip[1] = 32;
+		}
+
+		if (capacity > 65535*63*255)
+			ip[2] = 65535;
+		else
+			ip[2] = (unsigned long)capacity / (ip[0] * ip[1]);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(scsicam_bios_param);

@@ -154,6 +154,7 @@ struct freerunning_counters {
 	unsigned int box_offset;
 	unsigned int num_counters;
 	unsigned int bits;
+	unsigned *box_offsets;
 };
 
 struct pci2phy_map {
@@ -310,7 +311,9 @@ unsigned int uncore_freerunning_counter(struct intel_uncore_box *box,
 
 	return pmu->type->freerunning[type].counter_base +
 	       pmu->type->freerunning[type].counter_offset * idx +
-	       pmu->type->freerunning[type].box_offset * pmu->pmu_idx;
+	       (pmu->type->freerunning[type].box_offsets ?
+	        pmu->type->freerunning[type].box_offsets[pmu->pmu_idx] :
+	        pmu->type->freerunning[type].box_offset * pmu->pmu_idx);
 }
 
 static inline
@@ -441,18 +444,6 @@ static inline int uncore_freerunning_hw_config(struct intel_uncore_box *box,
 	return -EINVAL;
 }
 
-static inline void uncore_disable_box(struct intel_uncore_box *box)
-{
-	if (box->pmu->type->ops->disable_box)
-		box->pmu->type->ops->disable_box(box);
-}
-
-static inline void uncore_enable_box(struct intel_uncore_box *box)
-{
-	if (box->pmu->type->ops->enable_box)
-		box->pmu->type->ops->enable_box(box);
-}
-
 static inline void uncore_disable_event(struct intel_uncore_box *box,
 				struct perf_event *event)
 {
@@ -539,6 +530,8 @@ void snb_uncore_cpu_init(void);
 void nhm_uncore_cpu_init(void);
 void skl_uncore_cpu_init(void);
 void icl_uncore_cpu_init(void);
+void tgl_uncore_mmio_init(void);
+void tgl_l_uncore_mmio_init(void);
 int snb_pci2phy_map_init(int devid);
 
 /* uncore_snbep.c */
@@ -557,6 +550,9 @@ void skx_uncore_cpu_init(void);
 int snr_uncore_pci_init(void);
 void snr_uncore_cpu_init(void);
 void snr_uncore_mmio_init(void);
+int icx_uncore_pci_init(void);
+void icx_uncore_cpu_init(void);
+void icx_uncore_mmio_init(void);
 
 /* uncore_nhmex.c */
 void nhmex_uncore_cpu_init(void);

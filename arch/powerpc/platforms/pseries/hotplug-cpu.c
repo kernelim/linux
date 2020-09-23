@@ -203,6 +203,7 @@ static void pseries_cpu_die(unsigned int cpu)
 	int tries;
 	int cpu_status = 1;
 	unsigned int pcpu = get_hard_smp_processor_id(cpu);
+	unsigned long timeout = jiffies + msecs_to_jiffies(120000);
 
 	if (get_preferred_offline_state(cpu) == CPU_STATE_INACTIVE) {
 		cpu_status = 1;
@@ -214,13 +215,19 @@ static void pseries_cpu_die(unsigned int cpu)
 			msleep(1);
 		}
 	} else if (get_preferred_offline_state(cpu) == CPU_STATE_OFFLINE) {
-
-		for (tries = 0; tries < 25; tries++) {
+		while (true) {
 			cpu_status = smp_query_cpu_stopped(pcpu);
 			if (cpu_status == QCSS_STOPPED ||
 			    cpu_status == QCSS_HARDWARE_ERROR)
 				break;
-			cpu_relax();
+
+			if (time_after(jiffies, timeout)) {
+				pr_warn("CPU %i (hwid %i) didn't die after 120 seconds\n",
+					cpu, pcpu);
+				timeout = jiffies + msecs_to_jiffies(120000);
+			}
+
+			cond_resched();
 		}
 	}
 
@@ -469,17 +476,67 @@ static bool dlpar_cpu_exists(struct device_node *parent, u32 drc_index)
 	return found;
 }
 
+static bool drc_info_valid_index(struct device_node *parent, u32 drc_index)
+{
+	struct property *info;
+	struct of_drc_info drc;
+	const __be32 *value;
+	u32 index;
+	int count, i, j;
+
+	info = of_find_property(parent, "ibm,drc-info", NULL);
+	if (!info)
+		return false;
+
+	value = of_prop_next_u32(info, NULL, &count);
+
+	/* First value of ibm,drc-info is number of drc-info records */
+	if (value)
+		value++;
+	else
+		return false;
+
+	for (i = 0; i < count; i++) {
+		if (of_read_drc_info_cell(&info, &value, &drc))
+			return false;
+
+		if (strncmp(drc.drc_type, "CPU", 3))
+			break;
+
+		if (drc_index > drc.last_drc_index)
+			continue;
+
+		index = drc.drc_index_start;
+		for (j = 0; j < drc.num_sequential_elems; j++) {
+			if (drc_index == index)
+				return true;
+
+			index += drc.sequential_inc;
+		}
+	}
+
+	return false;
+}
+
 static bool valid_cpu_drc_index(struct device_node *parent, u32 drc_index)
 {
 	bool found = false;
 	int rc, index;
 
-	index = 0;
+	if (of_find_property(parent, "ibm,drc-info", NULL))
+		return drc_info_valid_index(parent, drc_index);
+
+	/* Note that the format of the ibm,drc-indexes array is
+	 * the number of entries in the array followed by the array
+	 * of drc values so we start looking at index = 1.
+	 */
+	index = 1;
 	while (!found) {
 		u32 drc;
 
 		rc = of_property_read_u32_index(parent, "ibm,drc-indexes",
 						index++, &drc);
+
 		if (rc)
 			break;
 
@@ -722,18 +779,51 @@ static int dlpar_cpu_remove_by_count(u32 cpus_to_remove)
 	return rc;
 }
 
-static int find_dlpar_cpus_to_add(u32 *cpu_drcs, u32 cpus_to_add)
+static int find_drc_info_cpus_to_add(struct device_node *cpus,
+				     struct property *info,
+				     u32 *cpu_drcs, u32 cpus_to_add)
 {
-	struct device_node *parent;
+	struct of_drc_info drc;
+	const __be32 *value;
+	u32 count, drc_index;
+	int cpus_found = 0;
+	int i, j;
+
+	if (!info)
+		return -1;
+
+	value = of_prop_next_u32(info, NULL, &count);
+	if (value)
+		value++;
+
+	for (i = 0; i < count; i++) {
+		of_read_drc_info_cell(&info, &value, &drc);
+		if (strncmp(drc.drc_type, "CPU", 3))
+			break;
+
+		drc_index = drc.drc_index_start;
+		for (j = 0; j < drc.num_sequential_elems; j++) {
+			if (dlpar_cpu_exists(cpus, drc_index))
+				continue;
+
+			cpu_drcs[cpus_found++] = drc_index;
+
+			if (cpus_found == cpus_to_add)
+				return cpus_found;
+
+			drc_index += drc.sequential_inc;
+		}
+	}
+
+	return cpus_found;
+}
+
+static int find_drc_index_cpus_to_add(struct device_node *cpus,
+				      u32 *cpu_drcs, u32 cpus_to_add)
+{
 	int cpus_found = 0;
 	int index, rc;
-
-	parent = of_find_node_by_path("/cpus");
-	if (!parent) {
-		pr_warn("Could not find CPU root node in device tree\n");
-		kfree(cpu_drcs);
-		return -1;
-	}
+	u32 drc_index;
 
 	/* Search the ibm,drc-indexes array for possible CPU drcs to
 	 * add. Note that the format of the ibm,drc-indexes array is
@@ -742,25 +832,25 @@ static int find_dlpar_cpus_to_add(u32 *cpu_drcs, u32 cpus_to_add)
 	 */
 	index = 1;
 	while (cpus_found < cpus_to_add) {
-		u32 drc;
+		rc = of_property_read_u32_index(cpus, "ibm,drc-indexes",
+						index++, &drc_index);
 
-		rc = of_property_read_u32_index(parent, "ibm,drc-indexes",
-						index++, &drc);
 		if (rc)
 			break;
 
-		if (dlpar_cpu_exists(parent, drc))
+		if (dlpar_cpu_exists(cpus, drc_index))
 			continue;
 
-		cpu_drcs[cpus_found++] = drc;
+		cpu_drcs[cpus_found++] = drc_index;
 	}
 
-	of_node_put(parent);
 	return cpus_found;
 }
 
 static int dlpar_cpu_add_by_count(u32 cpus_to_add)
 {
+	struct device_node *parent;
+	struct property *info;
 	u32 *cpu_drcs;
 	int cpus_added = 0;
 	int cpus_found;
@@ -772,7 +862,21 @@ static int dlpar_cpu_add_by_count(u32 cpus_to_add)
 	if (!cpu_drcs)
 		return -EINVAL;
 
-	cpus_found = find_dlpar_cpus_to_add(cpu_drcs, cpus_to_add);
+	parent = of_find_node_by_path("/cpus");
+	if (!parent) {
+		pr_warn("Could not find CPU root node in device tree\n");
+		kfree(cpu_drcs);
+		return -1;
+	}
+
+	info = of_find_property(parent, "ibm,drc-info", NULL);
+	if (info)
+		cpus_found = find_drc_info_cpus_to_add(parent, info, cpu_drcs, cpus_to_add);
+	else
+		cpus_found = find_drc_index_cpus_to_add(parent, cpu_drcs, cpus_to_add);
+
+	of_node_put(parent);
+
 	if (cpus_found < cpus_to_add) {
 		pr_warn("Failed to find enough CPUs (%d of %d) to add\n",
 			cpus_found, cpus_to_add);

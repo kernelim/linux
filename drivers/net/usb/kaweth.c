@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /****************************************************************
  *
  *     kaweth.c - driver for KL5KUSB101 based USB->Ethernet
@@ -13,19 +14,6 @@
  *     Based off of (and with thanks to) Petko Manolov's pegaus.c driver.
  *     Also many thanks to Joel Silverman and Ed Surprenant at Kawasaki
  *     for providing the firmware and driver resources.
- *
- *     This program is free software; you can redistribute it and/or
- *     modify it under the terms of the GNU General Public License as
- *     published by the Free Software Foundation; either version 2, or
- *     (at your option) any later version.
- *
- *     This program is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public License
- *     along with this program; if not, see <http://www.gnu.org/licenses/>.
  *
  ****************************************************************/
 
@@ -906,7 +894,7 @@ static void kaweth_async_set_rx_mode(struct kaweth_device *kaweth)
 /****************************************************************
  *     kaweth_tx_timeout
  ****************************************************************/
-static void kaweth_tx_timeout(struct net_device *net)
+static void kaweth_tx_timeout(struct net_device *net, unsigned int txqueue)
 {
 	struct kaweth_device *kaweth = netdev_priv(net);
 

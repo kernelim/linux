@@ -22,11 +22,6 @@ static const struct of_device_id fpga_region_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, fpga_region_of_match);
 
-static int fpga_region_of_node_match(struct device *dev, const void *data)
-{
-	return dev->of_node == data;
-}
-
 /**
  * of_fpga_region_find - find FPGA region
  * @np: device node of FPGA Region
@@ -37,7 +32,7 @@ static int fpga_region_of_node_match(struct device *dev, const void *data)
  */
 static struct fpga_region *of_fpga_region_find(struct device_node *np)
 {
-	return fpga_region_class_find(NULL, np, fpga_region_of_node_match);
+	return fpga_region_class_find(NULL, np, device_match_of_node);
 }
 
 /**
@@ -405,12 +400,14 @@ static int of_fpga_region_probe(struct platform_device *pdev)
 	struct fpga_manager *mgr;
 	int ret;
 
+	mark_tech_preview("FPGA Region", THIS_MODULE);
+
 	/* Find the FPGA mgr specified by region or parent region. */
 	mgr = of_fpga_region_get_mgr(np);
 	if (IS_ERR(mgr))
 		return -EPROBE_DEFER;
 
-	region = fpga_region_create(dev, mgr, of_fpga_region_get_bridges);
+	region = devm_fpga_region_create(dev, mgr, of_fpga_region_get_bridges);
 	if (!region) {
 		ret = -ENOMEM;
 		goto eprobe_mgr_put;
@@ -418,17 +415,15 @@ static int of_fpga_region_probe(struct platform_device *pdev)
 
 	ret = fpga_region_register(region);
 	if (ret)
-		goto eprobe_free;
+		goto eprobe_mgr_put;
 
 	of_platform_populate(np, fpga_region_of_match, NULL, &region->dev);
-	dev_set_drvdata(dev, region);
+	platform_set_drvdata(pdev, region);
 
 	dev_info(dev, "FPGA Region probed\n");
 
 	return 0;
 
-eprobe_free:
-	fpga_region_free(region);
 eprobe_mgr_put:
 	fpga_mgr_put(mgr);
 	return ret;
@@ -437,9 +432,10 @@ eprobe_mgr_put:
 static int of_fpga_region_remove(struct platform_device *pdev)
 {
 	struct fpga_region *region = platform_get_drvdata(pdev);
+	struct fpga_manager *mgr = region->mgr;
 
 	fpga_region_unregister(region);
-	fpga_mgr_put(region->mgr);
+	fpga_mgr_put(mgr);
 
 	return 0;
 }

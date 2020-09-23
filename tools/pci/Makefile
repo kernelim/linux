@@ -18,7 +18,6 @@ ALL_TARGETS := pcitest
 ALL_PROGRAMS := $(patsubst %,$(OUTPUT)%,$(ALL_TARGETS))
 
 SCRIPTS := pcitest.sh
-ALL_SCRIPTS := $(patsubst %,$(OUTPUT)%,$(SCRIPTS))
 
 all: $(ALL_PROGRAMS)
 
@@ -50,7 +49,7 @@ install: $(ALL_PROGRAMS)
 	for program in $(ALL_PROGRAMS); do		\
 		install $$program $(DESTDIR)$(bindir);	\
 	done;						\
-	for script in $(ALL_SCRIPTS); do		\
+	for script in $(SCRIPTS); do			\
 		install $$script $(DESTDIR)$(bindir);	\
 	done
 

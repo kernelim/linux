@@ -50,7 +50,7 @@ struct l3mdev_ops {
 	RH_KABI_RESERVE(5)
 	RH_KABI_RESERVE(6)
 	RH_KABI_RESERVE(7)
-	RH_KABI_SIZE_AND_EXTEND(l3mdev_ops_extended)
+	RH_KABI_AUX_EMBED(l3mdev_ops_extended)
 };
 
 #ifdef CONFIG_NET_L3_MASTER_DEV

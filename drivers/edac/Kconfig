@@ -473,4 +473,11 @@ config EDAC_TI
 	  Support for error detection and correction on the
           TI SoCs.
 
+config EDAC_BLUEFIELD
+	tristate "Mellanox BlueField Memory ECC"
+	depends on ARM64 && ((MELLANOX_PLATFORM && ACPI) || COMPILE_TEST)
+	help
+	  Support for error detection and correction on the
+	  Mellanox BlueField SoCs.
+
 endif # EDAC

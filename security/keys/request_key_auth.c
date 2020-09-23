@@ -11,7 +11,6 @@
  * See Documentation/security/keys/request-key.rst
  */
 
-#include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/err.h>
 #include <linux/seq_file.h>
@@ -27,7 +26,7 @@ static int request_key_auth_instantiate(struct key *,
 static void request_key_auth_describe(const struct key *, struct seq_file *);
 static void request_key_auth_revoke(struct key *);
 static void request_key_auth_destroy(struct key *);
-static long request_key_auth_read(const struct key *, char __user *, size_t);
+static long request_key_auth_read(const struct key *, char *, size_t);
 
 /*
  * The request-key authorisation key type definition.
@@ -82,7 +81,7 @@ static void request_key_auth_describe(const struct key *key,
  * - the key's semaphore is read-locked
  */
 static long request_key_auth_read(const struct key *key,
-				  char __user *buffer, size_t buflen)
+				  char *buffer, size_t buflen)
 {
 	struct request_key_auth *rka = key->payload.data[0];
 	size_t datalen;
@@ -96,8 +95,7 @@ static long request_key_auth_read(const struct key *key,
 		if (buflen > datalen)
 			buflen = datalen;
 
-		if (copy_to_user(buffer, rka->callout_info, buflen) != 0)
-			ret = -EFAULT;
+		memcpy(buffer, rka->callout_info, buflen);
 	}
 
 	return ret;

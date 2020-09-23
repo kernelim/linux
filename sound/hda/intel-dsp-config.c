@@ -9,7 +9,7 @@
 #include <sound/intel-dsp-config.h>
 #include <sound/intel-nhlt.h>
 
-static int dsp_driver = 1;
+static int dsp_driver;
 
 module_param(dsp_driver, int, 0444);
 MODULE_PARM_DESC(dsp_driver, "Force the DSP driver for Intel DSP (0=auto, 1=legacy, 2=SST, 3=SOF)");

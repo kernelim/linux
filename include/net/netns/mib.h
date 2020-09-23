@@ -26,4 +26,10 @@ struct netns_mib {
 #endif
 };
 
+struct netns_mptcp_mib {
+#ifdef CONFIG_MPTCP
+	DEFINE_SNMP_STAT(struct mptcp_mib, mptcp_statistics);
+#endif
+};
+
 #endif

@@ -102,7 +102,7 @@ int hfi1_mmu_rb_register(void *ops_arg, struct mm_struct *mm,
 	struct mmu_rb_handler *handlr;
 	int ret;
 
-	handlr = kmalloc(sizeof(*handlr), GFP_KERNEL);
+	handlr = kzalloc(sizeof(*handlr), GFP_KERNEL);
 	if (!handlr)
 		return -ENOMEM;
 

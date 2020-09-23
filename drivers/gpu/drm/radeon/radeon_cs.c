@@ -26,11 +26,11 @@
  */
 
 #include <linux/list_sort.h>
+#include <linux/pci.h>
 #include <linux/uaccess.h>
 
 #include <drm/drm_device.h>
 #include <drm/drm_file.h>
-#include <drm/drm_pci.h>
 #include <drm/radeon_drm.h>
 
 #include "radeon.h"
@@ -255,9 +255,9 @@ static int radeon_cs_sync_rings(struct radeon_cs_parser *p)
 	int r;
 
 	list_for_each_entry(reloc, &p->validated, tv.head) {
-		struct reservation_object *resv;
+		struct dma_resv *resv;
 
-		resv = reloc->robj->tbo.resv;
+		resv = reloc->robj->tbo.base.resv;
 		r = radeon_sync_resv(p->rdev, &p->ib.sync, resv,
 				     reloc->tv.num_shared);
 		if (r)
@@ -443,7 +443,7 @@ static void radeon_cs_parser_fini(struct radeon_cs_parser *parser, int error, bo
 			if (bo == NULL)
 				continue;
 
-			drm_gem_object_put_unlocked(&bo->gem_base);
+			drm_gem_object_put_unlocked(&bo->tbo.base);
 		}
 	}
 	kfree(parser->track);

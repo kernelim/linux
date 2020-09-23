@@ -24,6 +24,7 @@
 #include <net/tcp_states.h> /* for TCP_TIME_WAIT */
 #include <net/netfilter/nf_tables.h>
 #include <net/netfilter/nf_tables_core.h>
+#include <net/netfilter/nf_tables_offload.h>
 
 #include <uapi/linux/netfilter_bridge.h> /* NF_BR_PRE_ROUTING */
 
@@ -510,6 +511,35 @@ static void nft_meta_set_destroy(const struct nft_ctx *ctx,
 		static_branch_dec(&nft_trace_enabled);
 }
 
+static int nft_meta_get_offload(struct nft_offload_ctx *ctx,
+				struct nft_flow_rule *flow,
+				const struct nft_expr *expr)
+{
+	const struct nft_meta *priv = nft_expr_priv(expr);
+	struct nft_offload_reg *reg = &ctx->regs[priv->dreg];
+
+	switch (priv->key) {
+	case NFT_META_PROTOCOL:
+		NFT_OFFLOAD_MATCH(FLOW_DISSECTOR_KEY_BASIC, basic, n_proto,
+				  sizeof(__u16), reg);
+		nft_offload_set_dependency(ctx, NFT_OFFLOAD_DEP_NETWORK);
+		break;
+	case NFT_META_L4PROTO:
+		NFT_OFFLOAD_MATCH(FLOW_DISSECTOR_KEY_BASIC, basic, ip_proto,
+				  sizeof(__u8), reg);
+		nft_offload_set_dependency(ctx, NFT_OFFLOAD_DEP_TRANSPORT);
+		break;
+	case NFT_META_IIF:
+		NFT_OFFLOAD_MATCH(FLOW_DISSECTOR_KEY_META, meta,
+				  ingress_ifindex, sizeof(__u32), reg);
+		break;
+	default:
+		return -EOPNOTSUPP;
+	}
+
+	return 0;
+}
+
 static const struct nft_expr_ops nft_meta_get_ops = {
 	.type		= &nft_meta_type,
 	.size		= NFT_EXPR_SIZE(sizeof(struct nft_meta)),
@@ -517,6 +547,7 @@ static const struct nft_expr_ops nft_meta_get_ops = {
 	.init		= nft_meta_get_init,
 	.dump		= nft_meta_get_dump,
 	.validate	= nft_meta_get_validate,
+	.offload	= nft_meta_get_offload,
 };
 
 static const struct nft_expr_ops nft_meta_set_ops = {

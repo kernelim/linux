@@ -255,13 +255,13 @@ static int proc_bus_pci_mmap(struct file *file, struct vm_area_struct *vma)
 	}
 
 	/* Make sure the caller is mapping a real resource for this device */
-	for (i = 0; i < PCI_ROM_RESOURCE; i++) {
+	for (i = 0; i < PCI_STD_NUM_BARS; i++) {
 		if (dev->resource[i].flags & res_bit &&
 		    pci_mmap_fits(dev, i, vma,  PCI_MMAP_PROCFS))
 			break;
 	}
 
-	if (i >= PCI_ROM_RESOURCE)
+	if (i >= PCI_STD_NUM_BARS)
 		return -ENODEV;
 
 	if (fpriv->mmap_state == pci_mmap_mem &&
@@ -384,7 +384,7 @@ static int show_device(struct seq_file *m, void *v)
 	}
 	seq_putc(m, '\t');
 	if (drv)
-		seq_printf(m, "%s", drv->name);
+		seq_puts(m, drv->name);
 	seq_putc(m, '\n');
 	return 0;
 }

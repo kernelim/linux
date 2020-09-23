@@ -1146,7 +1146,8 @@ ENTRY(mcck_int_handler)
 	jnz	4f
 	TSTMSK	__LC_MCCK_CODE,MCCK_CODE_PSW_IA_VALID
 	jno	.Lmcck_panic
-4:	SWITCH_ASYNC __LC_GPREGS_SAVE_AREA+64,__LC_MCCK_ENTER_TIMER
+4:	ssm	__LC_PGM_NEW_PSW	# turn dat on, keep irqs off
+	SWITCH_ASYNC __LC_GPREGS_SAVE_AREA+64,__LC_MCCK_ENTER_TIMER
 .Lmcck_skip:
 	lghi	%r14,__LC_GPREGS_SAVE_AREA+64
 	stmg	%r0,%r7,__PT_R0(%r11)
@@ -1173,7 +1174,6 @@ ENTRY(mcck_int_handler)
 	xc	__SF_BACKCHAIN(8,%r1),__SF_BACKCHAIN(%r1)
 	la	%r11,STACK_FRAME_OVERHEAD(%r1)
 	lgr	%r15,%r1
-	ssm	__LC_PGM_NEW_PSW	# turn dat on, keep irqs off
 	TSTMSK	__LC_CPU_FLAGS,_CIF_MCCK_PENDING
 	jno	.Lmcck_return
 	TRACE_IRQS_OFF

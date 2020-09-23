@@ -338,7 +338,7 @@ extern u8 aty_ld_pll_ct(int offset, const struct atyfb_par *par);
      *  Hardware cursor support
      */
 
-extern int aty_init_cursor(struct fb_info *info);
+extern int aty_init_cursor(struct fb_info *info, struct fb_ops *atyfb_ops);
 
     /*
      *  Hardware acceleration

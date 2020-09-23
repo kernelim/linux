@@ -117,6 +117,7 @@ struct msm_pinctrl_soc_data {
 	unsigned ngroups;
 	unsigned ngpios;
 	bool pull_no_keeper;
+	const int *reserved_gpios;
 };
 
 int msm_pinctrl_probe(struct platform_device *pdev,

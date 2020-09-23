@@ -3,3 +3,5 @@ subpage_prot
 tempfile
 prot_sao
 segv_errors
+stack_expansion_ldst
+stack_expansion_signal

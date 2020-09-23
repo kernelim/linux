@@ -12,11 +12,11 @@
 #define BNXT_H
 
 #define DRV_MODULE_NAME		"bnxt_en"
-#define DRV_MODULE_VERSION	"1.10.0"
+#define DRV_MODULE_VERSION	"1.10.1"
 
 #define DRV_VER_MAJ	1
 #define DRV_VER_MIN	10
-#define DRV_VER_UPD	0
+#define DRV_VER_UPD	1
 
 #include <linux/interrupt.h>
 #include <linux/rhashtable.h>
@@ -721,6 +721,7 @@ struct bnxt_ring_mem_info {
 #define BNXT_RMEM_USE_FULL_PAGE_FLAG	4
 
 	u16			depth;
+	u8			init_val;
 
 	void			**pg_arr;
 	dma_addr_t		*dma_arr;
@@ -1063,7 +1064,6 @@ struct bnxt_vf_info {
 #define BNXT_VF_LINK_FORCED	0x4
 #define BNXT_VF_LINK_UP		0x8
 #define BNXT_VF_TRUST		0x10
-	u32	func_flags; /* func cfg flags */
 	u32	min_tx_rate;
 	u32	max_tx_rate;
 	void	*hwrm_cmd_req_addr;
@@ -1225,7 +1225,8 @@ struct bnxt_led_info {
 struct bnxt_test_info {
 	u8 offline_mask;
 	u8 flags;
-#define BNXT_TEST_FL_EXT_LPBK	0x1
+#define BNXT_TEST_FL_EXT_LPBK		0x1
+#define BNXT_TEST_FL_AN_PHY_LPBK	0x2
 	u16 timeout;
 	char string[BNXT_MAX_TEST][ETH_GSTRING_LEN];
 };
@@ -1352,6 +1353,7 @@ struct bnxt_ctx_mem_info {
 	u32	tim_max_entries;
 	u16	mrav_num_entries_units;
 	u8	tqm_entries_multiple;
+	u8	ctx_kind_initializer;
 
 	u32	flags;
 	#define BNXT_CTX_FLAG_INITED	0x01
@@ -1384,6 +1386,7 @@ struct bnxt_fw_health {
 	u32 last_fw_reset_cnt;
 	u8 enabled:1;
 	u8 master:1;
+	u8 fatal:1;
 	u8 tmr_multiplier;
 	u8 tmr_counter;
 	u8 fw_reset_seq_cnt;
@@ -1442,6 +1445,8 @@ struct bnxt {
 #define CHIP_NUM_57414L		0x16db
 
 #define CHIP_NUM_5745X		0xd730
+#define CHIP_NUM_57452		0xc452
+#define CHIP_NUM_57454		0xc454
 
 #define CHIP_NUM_57508		0x1750
 #define CHIP_NUM_57504		0x1751
@@ -1450,6 +1455,8 @@ struct bnxt {
 #define CHIP_NUM_58802		0xd802
 #define CHIP_NUM_58804		0xd804
 #define CHIP_NUM_58808		0xd808
+
+	u8			chip_rev;
 
 #define BNXT_CHIP_NUM_5730X(chip_num)		\
 	((chip_num) >= CHIP_NUM_57301 &&	\
@@ -1474,7 +1481,10 @@ struct bnxt {
 	 ((chip_num) == CHIP_NUM_58700)
 
 #define BNXT_CHIP_NUM_5745X(chip_num)		\
-	 ((chip_num) == CHIP_NUM_5745X)
+	((chip_num) == CHIP_NUM_5745X ||	\
+	 (chip_num) == CHIP_NUM_57452 ||	\
+	 (chip_num) == CHIP_NUM_57454)
+
 
 #define BNXT_CHIP_NUM_57X0X(chip_num)		\
 	(BNXT_CHIP_NUM_5730X(chip_num) || BNXT_CHIP_NUM_5740X(chip_num))
@@ -1486,6 +1496,10 @@ struct bnxt {
 	((chip_num) == CHIP_NUM_58802 ||	\
 	 (chip_num) == CHIP_NUM_58804 ||        \
 	 (chip_num) == CHIP_NUM_58808)
+
+#define BNXT_VPD_FLD_LEN	32
+	char			board_partno[BNXT_VPD_FLD_LEN];
+	char			board_serialno[BNXT_VPD_FLD_LEN];
 
 	struct net_device	*dev;
 	struct pci_dev		*pdev;
@@ -1540,6 +1554,8 @@ struct bnxt {
 #define BNXT_NPAR(bp)		((bp)->port_partition_type)
 #define BNXT_MH(bp)		((bp)->flags & BNXT_FLAG_MULTI_HOST)
 #define BNXT_SINGLE_PF(bp)	(BNXT_PF(bp) && !BNXT_NPAR(bp) && !BNXT_MH(bp))
+#define BNXT_PHY_CFG_ABLE(bp)	(BNXT_SINGLE_PF(bp) ||			\
+				 ((bp)->fw_cap & BNXT_FW_CAP_SHARED_PORT_CFG))
 #define BNXT_CHIP_TYPE_NITRO_A0(bp) ((bp)->flags & BNXT_FLAG_CHIP_NITRO_A0)
 #define BNXT_RX_PAGE_MODE(bp)	((bp)->flags & BNXT_FLAG_RX_PAGE_MODE)
 #define BNXT_SUPPORTS_TPA(bp)	(!BNXT_CHIP_TYPE_NITRO_A0(bp) &&	\
@@ -1669,11 +1685,12 @@ struct bnxt {
 	#define BNXT_FW_CAP_ERROR_RECOVERY		0x00002000
 	#define BNXT_FW_CAP_PKG_VER			0x00004000
 	#define BNXT_FW_CAP_CFA_ADV_FLOW		0x00008000
-	#define BNXT_FW_CAP_CFA_RFS_RING_TBL_IDX	0x00010000
+	#define BNXT_FW_CAP_CFA_RFS_RING_TBL_IDX_V2	0x00010000
 	#define BNXT_FW_CAP_PCIE_STATS_SUPPORTED	0x00020000
 	#define BNXT_FW_CAP_EXT_STATS_SUPPORTED		0x00040000
 	#define BNXT_FW_CAP_ERR_RECOVER_RELOAD		0x00100000
 	#define BNXT_FW_CAP_HOT_RESET			0x00200000
+	#define BNXT_FW_CAP_SHARED_PORT_CFG		0x00400000
 
 #define BNXT_NEW_RM(bp)		((bp)->fw_cap & BNXT_FW_CAP_NEW_RM)
 	u32			hwrm_spec_code;
@@ -1702,7 +1719,7 @@ struct bnxt {
 	u16			fw_rx_stats_ext_size;
 	u16			fw_tx_stats_ext_size;
 	u16			hw_ring_stats_size;
-	u8			pri2cos[8];
+	u8			pri2cos_idx[8];
 	u8			pri2cos_valid;
 
 	u16			hwrm_max_req_len;
@@ -1714,6 +1731,7 @@ struct bnxt {
 #define BC_HWRM_STR_LEN		21
 #define PHY_VER_STR_LEN         (FW_VER_STR_LEN - BC_HWRM_STR_LEN)
 	char			fw_ver_str[FW_VER_STR_LEN];
+	char			hwrm_ver_supp[FW_VER_STR_LEN];
 	__be16			vxlan_port;
 	u8			vxlan_port_cnt;
 	__le16			vxlan_fw_dst_port_id;
@@ -1755,6 +1773,7 @@ struct bnxt {
 #define BNXT_RING_COAL_NOW_SP_EVENT	17
 #define BNXT_FW_RESET_NOTIFY_SP_EVENT	18
 #define BNXT_FW_EXCEPTION_SP_EVENT	19
+#define BNXT_LINK_CFG_CHANGE_SP_EVENT	21
 
 	struct delayed_work	fw_reset_task;
 	int			fw_reset_state;
@@ -1833,10 +1852,9 @@ struct bnxt {
 	enum devlink_eswitch_mode eswitch_mode;
 	struct bnxt_vf_rep	**vf_reps; /* array of vf-rep ptrs */
 	u16			*cfa_code_map; /* cfa_code -> vf_idx map */
-	u8			switch_id[8];
+	u8			dsn[8];
 	struct bnxt_tc_info	*tc_info;
 	struct list_head	tc_indr_block_list;
-	struct notifier_block	tc_netdev_nb;
 	struct dentry		*debugfs_pdev;
 	struct device		*hwmon_dev;
 };

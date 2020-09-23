@@ -208,7 +208,7 @@ static inline void tlb_remove_check_page_size_change(struct mmu_gather *tlb,
 
 #define __tlb_end_vma(tlb, vma)					\
 	do {							\
-		if (!tlb->fullmm)				\
+		if (!(tlb)->fullmm)				\
 			tlb_flush_mmu_tlbonly(tlb);		\
 	} while (0)
 

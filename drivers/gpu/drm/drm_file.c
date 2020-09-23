@@ -31,7 +31,9 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
+#include <linux/anon_inodes.h>
 #include <linux/dma-fence.h>
+#include <linux/file.h>
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/poll.h>
@@ -147,8 +149,7 @@ struct drm_file *drm_file_alloc(struct drm_minor *minor)
 	if (drm_core_check_feature(dev, DRIVER_SYNCOBJ))
 		drm_syncobj_open(file);
 
-	if (drm_core_check_feature(dev, DRIVER_PRIME))
-		drm_prime_init_file_private(&file->prime);
+	drm_prime_init_file_private(&file->prime);
 
 	if (dev->driver->open) {
 		ret = dev->driver->open(dev, file);
@@ -159,8 +160,7 @@ struct drm_file *drm_file_alloc(struct drm_minor *minor)
 	return file;
 
 out_prime_destroy:
-	if (drm_core_check_feature(dev, DRIVER_PRIME))
-		drm_prime_destroy_file_private(&file->prime);
+	drm_prime_destroy_file_private(&file->prime);
 	if (drm_core_check_feature(dev, DRIVER_SYNCOBJ))
 		drm_syncobj_release(file);
 	if (drm_core_check_feature(dev, DRIVER_GEM))
@@ -253,8 +253,7 @@ void drm_file_free(struct drm_file *file)
 	if (dev->driver->postclose)
 		dev->driver->postclose(dev, file);
 
-	if (drm_core_check_feature(dev, DRIVER_PRIME))
-		drm_prime_destroy_file_private(&file->prime);
+	drm_prime_destroy_file_private(&file->prime);
 
 	WARN_ON(!list_empty(&file->event_list));
 
@@ -288,7 +287,7 @@ static int drm_cpu_valid(void)
 }
 
 /*
- * Called whenever a process opens /dev/drm.
+ * Called whenever a process opens a drm node
  *
  * \param filp file pointer.
  * \param minor acquired minor-object.
@@ -757,3 +756,43 @@ void drm_send_event(struct drm_device *dev, struct drm_pending_event *e)
 	spin_unlock_irqrestore(&dev->event_lock, irqflags);
 }
 EXPORT_SYMBOL(drm_send_event);
+
+/**
+ * mock_drm_getfile - Create a new struct file for the drm device
+ * @minor: drm minor to wrap (e.g. #drm_device.primary)
+ * @flags: file creation mode (O_RDWR etc)
+ *
+ * This create a new struct file that wraps a DRM file context around a
+ * DRM minor. This mimicks userspace opening e.g. /dev/dri/card0, but without
+ * invoking userspace. The struct file may be operated on using its f_op
+ * (the drm_device.driver.fops) to mimick userspace operations, or be supplied
+ * to userspace facing functions as an internal/anonymous client.
+ *
+ * RETURNS:
+ * Pointer to newly created struct file, ERR_PTR on failure.
+ */
+struct file *mock_drm_getfile(struct drm_minor *minor, unsigned int flags)
+{
+	struct drm_device *dev = minor->dev;
+	struct drm_file *priv;
+	struct file *file;
+
+	priv = drm_file_alloc(minor);
+	if (IS_ERR(priv))
+		return ERR_CAST(priv);
+
+	file = anon_inode_getfile("drm", dev->driver->fops, priv, flags);
+	if (IS_ERR(file)) {
+		drm_file_free(priv);
+		return file;
+	}
+
+	/* Everyone shares a single global address space */
+	file->f_mapping = dev->anon_inode->i_mapping;
+
+	drm_dev_get(dev);
+	priv->filp = file;
+
+	return file;
+}
+EXPORT_SYMBOL_FOR_TESTS_ONLY(mock_drm_getfile);

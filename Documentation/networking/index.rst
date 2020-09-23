@@ -9,14 +9,16 @@ Contents:
    af_xdp
    batman-adv
    can
+   can_ucan_protocol
    dpaa2/index
    e100
    e1000
    device_drivers/google/gve.rst
-   devlink-info-versions
    kapi
    z8530book
    msg_zerocopy
+   phy
+   sfp-phylink
    tls
    tls-offload
 

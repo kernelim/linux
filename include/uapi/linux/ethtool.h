@@ -263,10 +263,32 @@ struct ethtool_tunable {
 #define ETHTOOL_PHY_FAST_LINK_DOWN_ON	0
 #define ETHTOOL_PHY_FAST_LINK_DOWN_OFF	0xff
 
+/* Energy Detect Power Down (EDPD) is a feature supported by some PHYs, where
+ * the PHY's RX & TX blocks are put into a low-power mode when there is no
+ * link detected (typically cable is un-plugged). For RX, only a minimal
+ * link-detection is available, and for TX the PHY wakes up to send link pulses
+ * to avoid any lock-ups in case the peer PHY may also be running in EDPD mode.
+ *
+ * Some PHYs may support configuration of the wake-up interval for TX pulses,
+ * and some PHYs may support only disabling TX pulses entirely. For the latter
+ * a special value is required (ETHTOOL_PHY_EDPD_NO_TX) so that this can be
+ * configured from userspace (should the user want it).
+ *
+ * The interval units for TX wake-up are in milliseconds, since this should
+ * cover a reasonable range of intervals:
+ *  - from 1 millisecond, which does not sound like much of a power-saver
+ *  - to ~65 seconds which is quite a lot to wait for a link to come up when
+ *    plugging a cable
+ */
+#define ETHTOOL_PHY_EDPD_DFLT_TX_MSECS		0xffff
+#define ETHTOOL_PHY_EDPD_NO_TX			0xfffe
+#define ETHTOOL_PHY_EDPD_DISABLE		0
+
 enum phy_tunable_id {
 	ETHTOOL_PHY_ID_UNSPEC,
 	ETHTOOL_PHY_DOWNSHIFT,
 	ETHTOOL_PHY_FAST_LINK_DOWN,
+	ETHTOOL_PHY_EDPD,
 	/*
 	 * Add your fresh new phy tunable attribute above and remember to update
 	 * phy_tunable_strings[] in net/core/ethtool.c
@@ -1444,6 +1466,13 @@ enum ethtool_link_mode_bit_indices {
 	ETHTOOL_LINK_MODE_56000baseSR4_Full_BIT	= 29,
 	ETHTOOL_LINK_MODE_56000baseLR4_Full_BIT	= 30,
 	ETHTOOL_LINK_MODE_25000baseCR_Full_BIT	= 31,
+
+	/* Last allowed bit for __ETHTOOL_LINK_MODE_LEGACY_MASK is bit
+	 * 31. Please do NOT define any SUPPORTED_* or ADVERTISED_*
+	 * macro for bits > 31. The only way to use indices > 31 is to
+	 * use the new ETHTOOL_GLINKSETTINGS/ETHTOOL_SLINKSETTINGS API.
+	 */
+
 	ETHTOOL_LINK_MODE_25000baseKR_Full_BIT	= 32,
 	ETHTOOL_LINK_MODE_25000baseSR_Full_BIT	= 33,
 	ETHTOOL_LINK_MODE_50000baseCR2_Full_BIT	= 34,
@@ -1480,22 +1509,31 @@ enum ethtool_link_mode_bit_indices {
 	ETHTOOL_LINK_MODE_200000baseLR4_ER4_FR4_Full_BIT = 64,
 	ETHTOOL_LINK_MODE_200000baseDR4_Full_BIT	 = 65,
 	ETHTOOL_LINK_MODE_200000baseCR4_Full_BIT	 = 66,
+	ETHTOOL_LINK_MODE_100baseT1_Full_BIT		 = 67,
+	ETHTOOL_LINK_MODE_1000baseT1_Full_BIT		 = 68,
+	ETHTOOL_LINK_MODE_400000baseKR8_Full_BIT	 = 69,
+	ETHTOOL_LINK_MODE_400000baseSR8_Full_BIT	 = 70,
+	ETHTOOL_LINK_MODE_400000baseLR8_ER8_FR8_Full_BIT = 71,
+	ETHTOOL_LINK_MODE_400000baseDR8_Full_BIT	 = 72,
+	ETHTOOL_LINK_MODE_400000baseCR8_Full_BIT	 = 73,
 
-	/* Last allowed bit for __ETHTOOL_LINK_MODE_LEGACY_MASK is bit
-	 * 31. Please do NOT define any SUPPORTED_* or ADVERTISED_*
-	 * macro for bits > 31. The only way to use indices > 31 is to
-	 * use the new ETHTOOL_GLINKSETTINGS/ETHTOOL_SLINKSETTINGS API.
+	/* must be last entry */
+	__ETHTOOL_LINK_MODE_MASK_NBITS,
+
+	/* RHEL: Last known value for RHEL 8.0 needed for emulation layer
+         * for old binary drivers compiled against RHEL 8.0
+         */
+	__ETHTOOL_LINK_MODE_LAST_RH80 = ETHTOOL_LINK_MODE_FEC_BASER_BIT,
+
+#ifdef __GENKSYMS__
+	/* RHEL: Enum __ETHTOOL_LINK_MODE_LAST and its value is protected by
+	 * KABI checker.
+	 * We also need to define __ETHTOOL_LINK_MODE_MASK_NBITS as macro
+	 * for KABI checker to preserve existing checksums of several
+	 * ethtool symbols.
 	 */
-
-	/* RHEL */
-	__ETHTOOL_LINK_MODE_LAST_RH80
-	  = ETHTOOL_LINK_MODE_FEC_BASER_BIT,
-
-	__ETHTOOL_LINK_MODE_LAST
-#ifndef __GENKSYMS__
-	  = ETHTOOL_LINK_MODE_200000baseCR4_Full_BIT,
-#else
-	  = __ETHTOOL_LINK_MODE_LAST_RH80,
+	__ETHTOOL_LINK_MODE_LAST = __ETHTOOL_LINK_MODE_LAST_RH80,
+#define __ETHTOOL_LINK_MODE_MASK_NBITS (__ETHTOOL_LINK_MODE_LAST + 1)
 #endif
 };
 
@@ -1605,6 +1643,7 @@ enum ethtool_link_mode_bit_indices {
 #define SPEED_56000		56000
 #define SPEED_100000		100000
 #define SPEED_200000		200000
+#define SPEED_400000		400000
 
 #define SPEED_UNKNOWN		-1
 

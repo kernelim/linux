@@ -381,8 +381,10 @@ static int kcm_parse_func_strparser(struct strparser *strp, struct sk_buff *skb)
 {
 	struct kcm_psock *psock = container_of(strp, struct kcm_psock, strp);
 	struct bpf_prog *prog = psock->bpf_prog;
+	int res;
 
-	return (*prog->bpf_func)(skb, prog->insnsi);
+	res = bpf_prog_run_pin_on_cpu(prog, skb);
+	return res;
 }
 
 static int kcm_read_sock_done(struct strparser *strp, int err)

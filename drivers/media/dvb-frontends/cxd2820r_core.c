@@ -540,7 +540,7 @@ struct dvb_frontend *cxd2820r_attach(const struct cxd2820r_config *config,
 	pdata.attach_in_use = true;
 
 	memset(&board_info, 0, sizeof(board_info));
-	strlcpy(board_info.type, "cxd2820r", I2C_NAME_SIZE);
+	strscpy(board_info.type, "cxd2820r", I2C_NAME_SIZE);
 	board_info.addr = config->i2c_address;
 	board_info.platform_data = &pdata;
 	client = i2c_new_device(adapter, &board_info);
@@ -645,9 +645,9 @@ static int cxd2820r_probe(struct i2c_client *client,
 	 * one dummy I2C client in in order to get own I2C client for each
 	 * register bank.
 	 */
-	priv->client[1] = i2c_new_dummy(client->adapter, client->addr | (1 << 1));
-	if (!priv->client[1]) {
-		ret = -ENODEV;
+	priv->client[1] = i2c_new_dummy_device(client->adapter, client->addr | (1 << 1));
+	if (IS_ERR(priv->client[1])) {
+		ret = PTR_ERR(priv->client[1]);
 		dev_err(&client->dev, "I2C registration failed\n");
 		if (ret)
 			goto err_regmap_0_regmap_exit;

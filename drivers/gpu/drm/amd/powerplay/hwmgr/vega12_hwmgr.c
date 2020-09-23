@@ -499,8 +499,6 @@ static int vega12_get_number_of_dpm_level(struct pp_hwmgr *hwmgr,
 static int vega12_get_dpm_frequency_by_index(struct pp_hwmgr *hwmgr,
 		PPCLK_e clkID, uint32_t index, uint32_t *clock)
 {
-	int result = 0;
-
 	/*
 	 *SMU expects the Clock ID to be in the top 16 bits.
 	 *Lower 16 bits specify the level
@@ -512,7 +510,7 @@ static int vega12_get_dpm_frequency_by_index(struct pp_hwmgr *hwmgr,
 
 	*clock = smum_get_argument(hwmgr);
 
-	return result;
+	return 0;
 }
 
 static int vega12_setup_single_dpm_table(struct pp_hwmgr *hwmgr,
@@ -2639,6 +2637,30 @@ static int vega12_get_performance_level(struct pp_hwmgr *hwmgr, const struct pp_
 	return 0;
 }
 
+static int vega12_set_mp1_state(struct pp_hwmgr *hwmgr,
+				enum pp_mp1_state mp1_state)
+{
+	uint16_t msg;
+	int ret;
+
+	switch (mp1_state) {
+	case PP_MP1_STATE_UNLOAD:
+		msg = PPSMC_MSG_PrepareMp1ForUnload;
+		break;
+	case PP_MP1_STATE_SHUTDOWN:
+	case PP_MP1_STATE_RESET:
+	case PP_MP1_STATE_NONE:
+	default:
+		return 0;
+	}
+
+	PP_ASSERT_WITH_CODE((ret = smum_send_msg_to_smc(hwmgr, msg)) == 0,
+			    "[PrepareMp1] Failed!",
+			    return ret);
+
+	return 0;
+}
+
 static const struct pp_hwmgr_func vega12_hwmgr_funcs = {
 	.backend_init = vega12_hwmgr_backend_init,
 	.backend_fini = vega12_hwmgr_backend_fini,
@@ -2695,7 +2717,7 @@ static const struct pp_hwmgr_func vega12_hwmgr_funcs = {
 	.set_asic_baco_state = vega12_baco_set_state,
 	.get_ppfeature_status = vega12_get_ppfeature_status,
 	.set_ppfeature_status = vega12_set_ppfeature_status,
-
+	.set_mp1_state = vega12_set_mp1_state,
 };
 
 int vega12_hwmgr_init(struct pp_hwmgr *hwmgr)

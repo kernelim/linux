@@ -30,7 +30,7 @@
 #include <linux/etherdevice.h>
 #include <linux/interrupt.h>
 #include <linux/ioctl.h>
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 #include <linux/ethtool.h>
 #include <linux/rtnetlink.h>
 #include <linux/platform_device.h>
@@ -460,7 +460,7 @@ static void iss_net_set_multicast_list(struct net_device *dev)
 {
 }
 
-static void iss_net_tx_timeout(struct net_device *dev)
+static void iss_net_tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
 }
 
@@ -646,7 +646,7 @@ static int __init iss_net_setup(char *str)
 		return 1;
 	}
 
-	new = alloc_bootmem(sizeof(*new));
+	new = memblock_alloc(sizeof(*new), 0);
 	if (new == NULL) {
 		pr_err("Alloc_bootmem failed\n");
 		return 1;

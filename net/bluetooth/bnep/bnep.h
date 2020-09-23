@@ -84,14 +84,14 @@ struct bnep_setup_conn_req {
 	__u8 type;
 	__u8 ctrl;
 	__u8 uuid_size;
-	__u8 service[0];
+	__u8 service[];
 } __packed;
 
 struct bnep_set_filter_req {
 	__u8 type;
 	__u8 ctrl;
 	__be16 len;
-	__u8 list[0];
+	__u8 list[];
 } __packed;
 
 struct bnep_control_rsp {
@@ -103,7 +103,7 @@ struct bnep_control_rsp {
 struct bnep_ext_hdr {
 	__u8 type;
 	__u8 len;
-	__u8 data[0];
+	__u8 data[];
 } __packed;
 
 /* BNEP ioctl defines */

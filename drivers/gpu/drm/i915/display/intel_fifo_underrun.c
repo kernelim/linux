@@ -26,7 +26,8 @@
  */
 
 #include "i915_drv.h"
-#include "intel_drv.h"
+#include "i915_trace.h"
+#include "intel_display_types.h"
 #include "intel_fbc.h"
 #include "intel_fifo_underrun.h"
 
@@ -125,8 +126,8 @@ static void i9xx_set_fifo_underrun_reporting(struct drm_device *dev,
 	}
 }
 
-static void ironlake_set_fifo_underrun_reporting(struct drm_device *dev,
-						 enum pipe pipe, bool enable)
+static void ilk_set_fifo_underrun_reporting(struct drm_device *dev,
+					    enum pipe pipe, bool enable)
 {
 	struct drm_i915_private *dev_priv = to_i915(dev);
 	u32 bit = (pipe == PIPE_A) ?
@@ -138,7 +139,7 @@ static void ironlake_set_fifo_underrun_reporting(struct drm_device *dev,
 		ilk_disable_display_irq(dev_priv, bit);
 }
 
-static void ivybridge_check_fifo_underruns(struct intel_crtc *crtc)
+static void ivb_check_fifo_underruns(struct intel_crtc *crtc)
 {
 	struct drm_i915_private *dev_priv = to_i915(crtc->base.dev);
 	enum pipe pipe = crtc->pipe;
@@ -156,9 +157,9 @@ static void ivybridge_check_fifo_underruns(struct intel_crtc *crtc)
 	DRM_ERROR("fifo underrun on pipe %c\n", pipe_name(pipe));
 }
 
-static void ivybridge_set_fifo_underrun_reporting(struct drm_device *dev,
-						  enum pipe pipe,
-						  bool enable, bool old)
+static void ivb_set_fifo_underrun_reporting(struct drm_device *dev,
+					    enum pipe pipe, bool enable,
+					    bool old)
 {
 	struct drm_i915_private *dev_priv = to_i915(dev);
 	if (enable) {
@@ -179,8 +180,8 @@ static void ivybridge_set_fifo_underrun_reporting(struct drm_device *dev,
 	}
 }
 
-static void broadwell_set_fifo_underrun_reporting(struct drm_device *dev,
-						  enum pipe pipe, bool enable)
+static void bdw_set_fifo_underrun_reporting(struct drm_device *dev,
+					    enum pipe pipe, bool enable)
 {
 	struct drm_i915_private *dev_priv = to_i915(dev);
 
@@ -263,11 +264,11 @@ static bool __intel_set_cpu_fifo_underrun_reporting(struct drm_device *dev,
 	if (HAS_GMCH(dev_priv))
 		i9xx_set_fifo_underrun_reporting(dev, pipe, enable, old);
 	else if (IS_GEN_RANGE(dev_priv, 5, 6))
-		ironlake_set_fifo_underrun_reporting(dev, pipe, enable);
+		ilk_set_fifo_underrun_reporting(dev, pipe, enable);
 	else if (IS_GEN(dev_priv, 7))
-		ivybridge_set_fifo_underrun_reporting(dev, pipe, enable, old);
+		ivb_set_fifo_underrun_reporting(dev, pipe, enable, old);
 	else if (INTEL_GEN(dev_priv) >= 8)
-		broadwell_set_fifo_underrun_reporting(dev, pipe, enable);
+		bdw_set_fifo_underrun_reporting(dev, pipe, enable);
 
 	return old;
 }
@@ -426,7 +427,7 @@ void intel_check_cpu_fifo_underruns(struct drm_i915_private *dev_priv)
 		if (HAS_GMCH(dev_priv))
 			i9xx_check_fifo_underruns(crtc);
 		else if (IS_GEN(dev_priv, 7))
-			ivybridge_check_fifo_underruns(crtc);
+			ivb_check_fifo_underruns(crtc);
 	}
 
 	spin_unlock_irq(&dev_priv->irq_lock);

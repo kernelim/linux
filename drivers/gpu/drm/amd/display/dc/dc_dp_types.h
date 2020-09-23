@@ -90,6 +90,13 @@ enum dc_post_cursor2 {
 	POST_CURSOR2_MAX_LEVEL = POST_CURSOR2_LEVEL3,
 };
 
+enum dc_dp_training_pattern {
+	DP_TRAINING_PATTERN_SEQUENCE_1 = 0,
+	DP_TRAINING_PATTERN_SEQUENCE_2,
+	DP_TRAINING_PATTERN_SEQUENCE_3,
+	DP_TRAINING_PATTERN_SEQUENCE_4,
+};
+
 struct dc_link_settings {
 	enum dc_lane_count lane_count;
 	enum dc_link_rate link_rate;
@@ -109,6 +116,21 @@ struct dc_link_training_settings {
 	struct dc_lane_settings lane_settings[LANE_COUNT_DP_MAX];
 };
 
+struct dc_link_training_overrides {
+	enum dc_voltage_swing *voltage_swing;
+	enum dc_pre_emphasis *pre_emphasis;
+	enum dc_post_cursor2 *post_cursor2;
+
+	uint16_t *cr_pattern_time;
+	uint16_t *eq_pattern_time;
+	enum dc_dp_training_pattern *pattern_for_eq;
+
+	enum dc_link_spread *downspread;
+	bool *alternate_scrambler_reset;
+	bool *enhanced_framing;
+	bool *mst_enable;
+	bool *fec_enable;
+};
 
 union dpcd_rev {
 	struct {
@@ -447,13 +469,13 @@ union training_aux_rd_interval {
 /* Automated test structures */
 union test_request {
 	struct {
-	uint8_t LINK_TRAINING         :1;
-	uint8_t LINK_TEST_PATTRN      :1;
-	uint8_t EDID_READ             :1;
-	uint8_t PHY_TEST_PATTERN      :1;
-	uint8_t AUDIO_TEST_PATTERN    :1;
-	uint8_t RESERVED              :1;
-	uint8_t TEST_STEREO_3D        :1;
+	uint8_t LINK_TRAINING                :1;
+	uint8_t LINK_TEST_PATTRN             :1;
+	uint8_t EDID_READ                    :1;
+	uint8_t PHY_TEST_PATTERN             :1;
+	uint8_t RESERVED                     :1;
+	uint8_t AUDIO_TEST_PATTERN           :1;
+	uint8_t TEST_AUDIO_DISABLED_VIDEO    :1;
 	} bits;
 	uint8_t raw;
 };
@@ -500,19 +522,52 @@ union link_test_pattern {
 
 union test_misc {
 	struct dpcd_test_misc_bits {
-		unsigned char SYNC_CLOCK :1;
+		unsigned char SYNC_CLOCK  :1;
 		/* dpcd_test_color_format */
-		unsigned char CLR_FORMAT :2;
+		unsigned char CLR_FORMAT  :2;
 		/* dpcd_test_dyn_range */
-		unsigned char DYN_RANGE  :1;
-		unsigned char YCBCR      :1;
+		unsigned char DYN_RANGE   :1;
+		unsigned char YCBCR_COEFS :1;
 		/* dpcd_test_bit_depth */
-		unsigned char BPC        :3;
+		unsigned char BPC         :3;
 	} bits;
 	unsigned char raw;
 };
 
-#ifdef CONFIG_DRM_AMD_DC_DSC_SUPPORT
+union audio_test_mode {
+	struct {
+		unsigned char sampling_rate   :4;
+		unsigned char channel_count   :4;
+	} bits;
+	unsigned char raw;
+};
+
+union audio_test_pattern_period {
+	struct {
+		unsigned char pattern_period   :4;
+		unsigned char reserved         :4;
+	} bits;
+	unsigned char raw;
+};
+
+struct audio_test_pattern_type {
+	unsigned char value;
+};
+
+struct dp_audio_test_data_flags {
+	uint8_t test_requested  :1;
+	uint8_t disable_video   :1;
+};
+
+struct dp_audio_test_data {
+
+	struct dp_audio_test_data_flags flags;
+	uint8_t sampling_rate;
+	uint8_t channel_count;
+	uint8_t pattern_type;
+	uint8_t pattern_period[8];
+};
+
 /* FEC capability DPCD register field bits-*/
 union dpcd_fec_capability {
 	struct {
@@ -637,6 +692,5 @@ struct dpcd_dsc_capabilities {
 	union dpcd_dsc_ext_capabilities dsc_ext_caps;
 };
 
-#endif /* CONFIG_DRM_AMD_DC_DSC_SUPPORT */
 
 #endif /* DC_DP_TYPES_H */

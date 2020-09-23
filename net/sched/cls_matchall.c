@@ -161,6 +161,7 @@ static void *mall_get(struct tcf_proto *tp, u32 handle)
 static const struct nla_policy mall_policy[TCA_MATCHALL_MAX + 1] = {
 	[TCA_MATCHALL_UNSPEC]		= { .type = NLA_UNSPEC },
 	[TCA_MATCHALL_CLASSID]		= { .type = NLA_U32 },
+	[TCA_MATCHALL_FLAGS]		= { .type = NLA_U32 },
 };
 
 static int mall_set_parms(struct net *net, struct tcf_proto *tp,
@@ -341,7 +342,9 @@ static void mall_stats_hw_filter(struct tcf_proto *tp,
 	tc_setup_cb_call(block, TC_SETUP_CLSMATCHALL, &cls_mall, false, true);
 
 	tcf_exts_stats_update(&head->exts, cls_mall.stats.bytes,
-			      cls_mall.stats.pkts, cls_mall.stats.lastused);
+			      cls_mall.stats.pkts, cls_mall.stats.lastused,
+			      cls_mall.stats.used_hw_stats,
+			      cls_mall.stats.used_hw_stats_valid);
 }
 
 static int mall_dump(struct net *net, struct tcf_proto *tp, void *fh,

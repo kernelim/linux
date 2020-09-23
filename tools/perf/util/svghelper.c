@@ -18,13 +18,14 @@
 #include <unistd.h>
 #include <string.h>
 #include <linux/bitmap.h>
+#include <linux/string.h>
 #include <linux/time64.h>
 #include <linux/zalloc.h>
+#include <internal/cpumap.h>
+#include <perf/cpumap.h>
 
 #include "env.h"
-#include "perf.h"
 #include "svghelper.h"
-#include "cpumap.h"
 
 static u64 first_time, last_time;
 static u64 turbo_frequency, max_freq;
@@ -730,10 +731,10 @@ static int str_to_bitmap(char *s, cpumask_t *b, int nr_cpus)
 {
 	int i;
 	int ret = 0;
-	struct cpu_map *m;
+	struct perf_cpu_map *m;
 	int c;
 
-	m = cpu_map__new(s);
+	m = perf_cpu_map__new(s);
 	if (!m)
 		return -1;
 
@@ -747,7 +748,7 @@ static int str_to_bitmap(char *s, cpumask_t *b, int nr_cpus)
 		set_bit(c, cpumask_bits(b));
 	}
 
-	cpu_map__put(m);
+	perf_cpu_map__put(m);
 
 	return ret;
 }

@@ -468,30 +468,32 @@ static void vfio_bar_fixup(struct vfio_pci_device *vdev)
 {
 	struct pci_dev *pdev = vdev->pdev;
 	int i;
-	__le32 *bar;
+	__le32 *vbar;
 	u64 mask;
 
-	bar = (__le32 *)&vdev->vconfig[PCI_BASE_ADDRESS_0];
+	vbar = (__le32 *)&vdev->vconfig[PCI_BASE_ADDRESS_0];
 
-	for (i = PCI_STD_RESOURCES; i <= PCI_STD_RESOURCE_END; i++, bar++) {
-		if (!pci_resource_start(pdev, i)) {
-			*bar = 0; /* Unmapped by host = unimplemented to user */
+	for (i = 0; i < PCI_STD_NUM_BARS; i++, vbar++) {
+		int bar = i + PCI_STD_RESOURCES;
+
+		if (!pci_resource_start(pdev, bar)) {
+			*vbar = 0; /* Unmapped by host = unimplemented to user */
 			continue;
 		}
 
-		mask = ~(pci_resource_len(pdev, i) - 1);
+		mask = ~(pci_resource_len(pdev, bar) - 1);
 
-		*bar &= cpu_to_le32((u32)mask);
-		*bar |= vfio_generate_bar_flags(pdev, i);
+		*vbar &= cpu_to_le32((u32)mask);
+		*vbar |= vfio_generate_bar_flags(pdev, bar);
 
-		if (*bar & cpu_to_le32(PCI_BASE_ADDRESS_MEM_TYPE_64)) {
-			bar++;
-			*bar &= cpu_to_le32((u32)(mask >> 32));
+		if (*vbar & cpu_to_le32(PCI_BASE_ADDRESS_MEM_TYPE_64)) {
+			vbar++;
+			*vbar &= cpu_to_le32((u32)(mask >> 32));
 			i++;
 		}
 	}
 
-	bar = (__le32 *)&vdev->vconfig[PCI_ROM_ADDRESS];
+	vbar = (__le32 *)&vdev->vconfig[PCI_ROM_ADDRESS];
 
 	/*
 	 * NB. REGION_INFO will have reported zero size if we weren't able
@@ -501,14 +503,14 @@ static void vfio_bar_fixup(struct vfio_pci_device *vdev)
 	if (pci_resource_start(pdev, PCI_ROM_RESOURCE)) {
 		mask = ~(pci_resource_len(pdev, PCI_ROM_RESOURCE) - 1);
 		mask |= PCI_ROM_ADDRESS_ENABLE;
-		*bar &= cpu_to_le32((u32)mask);
+		*vbar &= cpu_to_le32((u32)mask);
 	} else if (pdev->resource[PCI_ROM_RESOURCE].flags &
 					IORESOURCE_ROM_SHADOW) {
 		mask = ~(0x20000 - 1);
 		mask |= PCI_ROM_ADDRESS_ENABLE;
-		*bar &= cpu_to_le32((u32)mask);
+		*vbar &= cpu_to_le32((u32)mask);
 	} else
-		*bar = 0;
+		*vbar = 0;
 
 	vdev->bardirty = false;
 }
@@ -1210,8 +1212,10 @@ static int vfio_msi_cap_len(struct vfio_pci_device *vdev, u8 pos)
 		return -ENOMEM;
 
 	ret = init_pci_cap_msi_perm(vdev->msi_perm, len, flags);
-	if (ret)
+	if (ret) {
+		kfree(vdev->msi_perm);
 		return ret;
+	}
 
 	return len;
 }
@@ -1492,7 +1496,12 @@ static int vfio_cap_init(struct vfio_pci_device *vdev)
 		if (ret)
 			return ret;
 
-		if (cap <= PCI_CAP_ID_MAX) {
+		/*
+		 * ID 0 is a NULL capability, conflicting with our fake
+		 * PCI_CAP_ID_BASIC.  As it has no content, consider it
+		 * hidden for now.
+		 */
+		if (cap && cap <= PCI_CAP_ID_MAX) {
 			len = pci_cap_length[cap];
 			if (len == 0xFF) { /* Variable length */
 				len = vfio_cap_len(vdev, cap, pos);
@@ -1769,8 +1778,11 @@ void vfio_config_free(struct vfio_pci_device *vdev)
 	vdev->vconfig = NULL;
 	kfree(vdev->pci_config_map);
 	vdev->pci_config_map = NULL;
-	kfree(vdev->msi_perm);
-	vdev->msi_perm = NULL;
+	if (vdev->msi_perm) {
+		free_perm_bits(vdev->msi_perm);
+		kfree(vdev->msi_perm);
+		vdev->msi_perm = NULL;
+	}
 }
 
 /*

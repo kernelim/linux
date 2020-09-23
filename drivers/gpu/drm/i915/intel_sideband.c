@@ -24,10 +24,8 @@
 
 #include <asm/iosf_mbi.h>
 
-#include "intel_sideband.h"
-
 #include "i915_drv.h"
-#include "intel_drv.h"
+#include "intel_sideband.h"
 
 /*
  * IOSF sideband, see VLV2_SidebandMsg_HAS.docx and
@@ -62,7 +60,7 @@ static void __vlv_punit_get(struct drm_i915_private *i915)
 	 * to the Valleyview P-unit and not all sideband communications.
 	 */
 	if (IS_VALLEYVIEW(i915)) {
-		pm_qos_update_request(&i915->sb_qos, 0);
+		cpu_latency_qos_update_request(&i915->sb_qos, 0);
 		on_each_cpu(ping, NULL, 1);
 	}
 }
@@ -70,7 +68,8 @@ static void __vlv_punit_get(struct drm_i915_private *i915)
 static void __vlv_punit_put(struct drm_i915_private *i915)
 {
 	if (IS_VALLEYVIEW(i915))
-		pm_qos_update_request(&i915->sb_qos, PM_QOS_DEFAULT_VALUE);
+		cpu_latency_qos_update_request(&i915->sb_qos,
+					       PM_QOS_DEFAULT_VALUE);
 
 	iosf_mbi_punit_release();
 }
@@ -107,8 +106,8 @@ static int vlv_sideband_rw(struct drm_i915_private *i915,
 	if (intel_wait_for_register(uncore,
 				    VLV_IOSF_DOORBELL_REQ, IOSF_SB_BUSY, 0,
 				    5)) {
-		DRM_DEBUG_DRIVER("IOSF sideband idle wait (%s) timed out\n",
-				 is_read ? "read" : "write");
+		drm_dbg(&i915->drm, "IOSF sideband idle wait (%s) timed out\n",
+			is_read ? "read" : "write");
 		return -EAGAIN;
 	}
 
@@ -131,8 +130,8 @@ static int vlv_sideband_rw(struct drm_i915_private *i915,
 			*val = intel_uncore_read_fw(uncore, VLV_IOSF_DATA);
 		err = 0;
 	} else {
-		DRM_DEBUG_DRIVER("IOSF sideband finish wait (%s) timed out\n",
-				 is_read ? "read" : "write");
+		drm_dbg(&i915->drm, "IOSF sideband finish wait (%s) timed out\n",
+			is_read ? "read" : "write");
 		err = -ETIMEDOUT;
 	}
 
@@ -285,7 +284,8 @@ static int intel_sbi_rw(struct drm_i915_private *i915, u16 reg,
 	if (intel_wait_for_register_fw(uncore,
 				       SBI_CTL_STAT, SBI_BUSY, 0,
 				       100)) {
-		DRM_ERROR("timeout waiting for SBI to become ready\n");
+		drm_err(&i915->drm,
+			"timeout waiting for SBI to become ready\n");
 		return -EBUSY;
 	}
 
@@ -303,12 +303,13 @@ static int intel_sbi_rw(struct drm_i915_private *i915, u16 reg,
 	if (__intel_wait_for_register_fw(uncore,
 					 SBI_CTL_STAT, SBI_BUSY, 0,
 					 100, 100, &cmd)) {
-		DRM_ERROR("timeout waiting for SBI to complete read\n");
+		drm_err(&i915->drm,
+			"timeout waiting for SBI to complete read\n");
 		return -ETIMEDOUT;
 	}
 
 	if (cmd & SBI_RESPONSE_FAIL) {
-		DRM_ERROR("error during SBI read of reg %x\n", reg);
+		drm_err(&i915->drm, "error during SBI read of reg %x\n", reg);
 		return -ENXIO;
 	}
 
@@ -428,8 +429,9 @@ int sandybridge_pcode_read(struct drm_i915_private *i915, u32 mbox,
 	mutex_unlock(&i915->sb_lock);
 
 	if (err) {
-		DRM_DEBUG_DRIVER("warning: pcode (read from mbox %x) mailbox access failed for %ps: %d\n",
-				 mbox, __builtin_return_address(0), err);
+		drm_dbg(&i915->drm,
+			"warning: pcode (read from mbox %x) mailbox access failed for %ps: %d\n",
+			mbox, __builtin_return_address(0), err);
 	}
 
 	return err;
@@ -449,8 +451,9 @@ int sandybridge_pcode_write_timeout(struct drm_i915_private *i915,
 	mutex_unlock(&i915->sb_lock);
 
 	if (err) {
-		DRM_DEBUG_DRIVER("warning: pcode (write of 0x%08x to mbox %x) mailbox access failed for %ps: %d\n",
-				 val, mbox, __builtin_return_address(0), err);
+		drm_dbg(&i915->drm,
+			"warning: pcode (write of 0x%08x to mbox %x) mailbox access failed for %ps: %d\n",
+			val, mbox, __builtin_return_address(0), err);
 	}
 
 	return err;
@@ -521,7 +524,8 @@ int skl_pcode_request(struct drm_i915_private *i915, u32 mbox, u32 request,
 	 * requests, and for any quirks of the PCODE firmware that delays
 	 * the request completion.
 	 */
-	DRM_DEBUG_KMS("PCODE timeout, retrying with preemption disabled\n");
+	drm_dbg_kms(&i915->drm,
+		    "PCODE timeout, retrying with preemption disabled\n");
 	WARN_ON_ONCE(timeout_base_ms > 3);
 	preempt_disable();
 	ret = wait_for_atomic(COND, 50);

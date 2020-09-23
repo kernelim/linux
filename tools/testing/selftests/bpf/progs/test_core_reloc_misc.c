@@ -3,15 +3,15 @@
 
 #include <linux/bpf.h>
 #include <stdint.h>
-#include "bpf_helpers.h"
-#include "bpf_core_read.h"
+#include <bpf/bpf_helpers.h>
+#include <bpf/bpf_core_read.h>
 
 char _license[] SEC("license") = "GPL";
 
-static volatile struct data {
+struct {
 	char in[256];
 	char out[256];
-} data;
+} data = {};
 
 struct core_reloc_misc_output {
 	int a, b, c;

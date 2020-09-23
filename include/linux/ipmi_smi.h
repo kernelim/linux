@@ -74,7 +74,7 @@ struct ipmi_smi_msg {
 	 */
 	void (*done)(struct ipmi_smi_msg *msg);
 
-	RH_KABI_SIZE_AND_EXTEND(ipmi_smi_msg)
+	RH_KABI_AUX_EMBED(ipmi_smi_msg)
 };
 
 /* RHEL extension to struct ipmi_smi_handlers
@@ -172,7 +172,7 @@ struct ipmi_smi_handlers {
 	 */
 	void (*set_maintenance_mode)(void *send_info, bool enable);
 
-	RH_KABI_SIZE_AND_EXTEND_PTR(ipmi_smi_handlers)
+	RH_KABI_AUX_PTR(ipmi_smi_handlers)
 };
 
 struct ipmi_device_id {

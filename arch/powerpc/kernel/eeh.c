@@ -156,6 +156,16 @@ static int __init eeh_setup(char *str)
 }
 __setup("eeh=", eeh_setup);
 
+void eeh_show_enabled(void)
+{
+	if (eeh_has_flag(EEH_FORCE_DISABLED))
+		pr_info("EEH: Recovery disabled by kernel parameter.\n");
+	else if (eeh_has_flag(EEH_ENABLED))
+		pr_info("EEH: Capable adapter found: recovery enabled.\n");
+	else
+		pr_info("EEH: No capable adapters found: recovery disabled.\n");
+}
+
 /*
  * This routine captures assorted PCI configuration space data
  * for the indicated PCI device, and puts them into a buffer
@@ -455,8 +465,7 @@ int eeh_dev_check_failure(struct eeh_dev *edev)
 	/* Access to IO BARs might get this far and still not want checking. */
 	if (!pe) {
 		eeh_stats.ignored_check++;
-		pr_debug("EEH: Ignored check for %s\n",
-			eeh_pci_name(dev));
+		eeh_edev_dbg(edev, "Ignored check\n");
 		return 0;
 	}
 
@@ -496,12 +505,11 @@ int eeh_dev_check_failure(struct eeh_dev *edev)
 			if (dn)
 				location = of_get_property(dn, "ibm,loc-code",
 						NULL);
-			printk(KERN_ERR "EEH: %d reads ignored for recovering device at "
-				"location=%s driver=%s pci addr=%s\n",
+			eeh_edev_err(edev, "%d reads ignored for recovering device at location=%s driver=%s\n",
 				pe->check_count,
 				location ? location : "unknown",
-				eeh_driver_name(dev), eeh_pci_name(dev));
-			printk(KERN_ERR "EEH: Might be infinite loop in %s driver\n",
+				eeh_driver_name(dev));
+			eeh_edev_err(edev, "Might be infinite loop in %s driver\n",
 				eeh_driver_name(dev));
 			dump_stack();
 		}
@@ -687,7 +695,7 @@ int eeh_pci_enable(struct eeh_pe *pe, int function)
 	return rc;
 }
 
-static void *eeh_disable_and_save_dev_state(struct eeh_dev *edev,
+static void eeh_disable_and_save_dev_state(struct eeh_dev *edev,
 					    void *userdata)
 {
 	struct pci_dev *pdev = eeh_dev_to_pci_dev(edev);
@@ -698,7 +706,7 @@ static void *eeh_disable_and_save_dev_state(struct eeh_dev *edev,
 	 * state for the specified device
 	 */
 	if (!pdev || pdev == dev)
-		return NULL;
+		return;
 
 	/* Ensure we have D0 power state */
 	pci_set_power_state(pdev, PCI_D0);
@@ -711,18 +719,16 @@ static void *eeh_disable_and_save_dev_state(struct eeh_dev *edev,
 	 * interrupt from the device
 	 */
 	pci_write_config_word(pdev, PCI_COMMAND, PCI_COMMAND_INTX_DISABLE);
-
-	return NULL;
 }
 
-static void *eeh_restore_dev_state(struct eeh_dev *edev, void *userdata)
+static void eeh_restore_dev_state(struct eeh_dev *edev, void *userdata)
 {
 	struct pci_dn *pdn = eeh_dev_to_pdn(edev);
 	struct pci_dev *pdev = eeh_dev_to_pci_dev(edev);
 	struct pci_dev *dev = userdata;
 
 	if (!pdev)
-		return NULL;
+		return;
 
 	/* Apply customization from firmware */
 	if (pdn && eeh_ops->restore_config)
@@ -731,8 +737,6 @@ static void *eeh_restore_dev_state(struct eeh_dev *edev, void *userdata)
 	/* The caller should restore state for the specified device */
 	if (pdev != dev)
 		pci_restore_state(pdev);
-
-	return NULL;
 }
 
 int eeh_restore_vf_config(struct pci_dn *pdn)
@@ -858,7 +862,7 @@ int pcibios_set_pcie_reset_state(struct pci_dev *dev, enum pcie_reset_state stat
  * the indicated device and its children so that the bunch of the
  * devices could be reset properly.
  */
-static void *eeh_set_dev_freset(struct eeh_dev *edev, void *flag)
+static void eeh_set_dev_freset(struct eeh_dev *edev, void *flag)
 {
 	struct pci_dev *dev;
 	unsigned int *freset = (unsigned int *)flag;
@@ -866,8 +870,6 @@ static void *eeh_set_dev_freset(struct eeh_dev *edev, void *flag)
 	dev = eeh_dev_to_pci_dev(edev);
 	if (dev)
 		*freset |= dev->needs_freset;
-
-	return NULL;
 }
 
 static void eeh_pe_refreeze_passed(struct eeh_pe *root)
@@ -1053,23 +1055,6 @@ static struct notifier_block eeh_reboot_nb = {
 	.notifier_call = eeh_reboot_notifier,
 };
 
-void eeh_probe_devices(void)
-{
-	struct pci_controller *hose, *tmp;
-	struct pci_dn *pdn;
-
-	/* Enable EEH for all adapters */
-	list_for_each_entry_safe(hose, tmp, &hose_list, list_node) {
-		pdn = hose->pci_data;
-		traverse_pci_dn(pdn, eeh_ops->probe, NULL);
-	}
-	if (eeh_enabled())
-		pr_info("EEH: PCI Enhanced I/O Error Handling Enabled\n");
-	else
-		pr_info("EEH: No capable adapters found\n");
-
-}
-
 /**
  * eeh_init - EEH initialization
  *
@@ -1109,6 +1094,8 @@ static int eeh_init(void)
 	/* Initialize PHB PEs */
 	list_for_each_entry_safe(hose, tmp, &hose_list, list_node)
 		eeh_dev_phb_init_dynamic(hose);
+
+	eeh_addr_cache_init();
 
 	/* Initialize EEH event */
 	return eeh_event_init();
@@ -1180,15 +1167,14 @@ void eeh_add_device_late(struct pci_dev *dev)
 	struct pci_dn *pdn;
 	struct eeh_dev *edev;
 
-	if (!dev || !eeh_enabled())
+	if (!dev)
 		return;
-
-	pr_debug("EEH: Adding device %s\n", pci_name(dev));
 
 	pdn = pci_get_pdn_by_devfn(dev->bus, dev->devfn);
 	edev = pdn_to_eeh_dev(pdn);
+	eeh_edev_dbg(edev, "Adding device\n");
 	if (edev->pdev == dev) {
-		pr_debug("EEH: Already referenced !\n");
+		eeh_edev_dbg(edev, "Device already referenced!\n");
 		return;
 	}
 
@@ -1222,53 +1208,8 @@ void eeh_add_device_late(struct pci_dev *dev)
 	dev->dev.archdata.edev = edev;
 
 	eeh_addr_cache_insert_dev(dev);
+	eeh_sysfs_add_device(dev);
 }
-
-/**
- * eeh_add_device_tree_late - Perform EEH initialization for the indicated PCI bus
- * @bus: PCI bus
- *
- * This routine must be used to perform EEH initialization for PCI
- * devices which are attached to the indicated PCI bus. The PCI bus
- * is added after system boot through hotplug or dlpar.
- */
-void eeh_add_device_tree_late(struct pci_bus *bus)
-{
-	struct pci_dev *dev;
-
-	list_for_each_entry(dev, &bus->devices, bus_list) {
-		eeh_add_device_late(dev);
-		if (dev->hdr_type == PCI_HEADER_TYPE_BRIDGE) {
-			struct pci_bus *subbus = dev->subordinate;
-			if (subbus)
-				eeh_add_device_tree_late(subbus);
-		}
-	}
-}
-EXPORT_SYMBOL_GPL(eeh_add_device_tree_late);
-
-/**
- * eeh_add_sysfs_files - Add EEH sysfs files for the indicated PCI bus
- * @bus: PCI bus
- *
- * This routine must be used to add EEH sysfs files for PCI
- * devices which are attached to the indicated PCI bus. The PCI bus
- * is added after system boot through hotplug or dlpar.
- */
-void eeh_add_sysfs_files(struct pci_bus *bus)
-{
-	struct pci_dev *dev;
-
-	list_for_each_entry(dev, &bus->devices, bus_list) {
-		eeh_sysfs_add_device(dev);
-		if (dev->hdr_type == PCI_HEADER_TYPE_BRIDGE) {
-			struct pci_bus *subbus = dev->subordinate;
-			if (subbus)
-				eeh_add_sysfs_files(subbus);
-		}
-	}
-}
-EXPORT_SYMBOL_GPL(eeh_add_sysfs_files);
 
 /**
  * eeh_remove_device - Undo EEH setup for the indicated pci device
@@ -1289,10 +1230,10 @@ void eeh_remove_device(struct pci_dev *dev)
 	edev = pci_dev_to_eeh_dev(dev);
 
 	/* Unregister the device with the EEH/PCI address search system */
-	pr_debug("EEH: Removing device %s\n", pci_name(dev));
+	dev_dbg(&dev->dev, "EEH: Removing device\n");
 
 	if (!edev || !edev->pdev || !edev->pe) {
-		pr_debug("EEH: Not referenced !\n");
+		dev_dbg(&dev->dev, "EEH: Device not referenced!\n");
 		return;
 	}
 

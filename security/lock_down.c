@@ -9,6 +9,7 @@
  * 2 of the Licence, or (at your option) any later version.
  */
 
+#include <linux/security.h>
 #include <linux/export.h>
 #include <linux/sched.h>
 #include <linux/efi.h>
@@ -22,6 +23,8 @@ static __ro_after_init bool kernel_locked_down;
 #else
 #define kernel_locked_down true
 #endif
+
+static const char *const lockdown_levels[] = { "none", "integrity" };
 
 /*
  * Put the kernel into lock-down mode.
@@ -76,3 +79,31 @@ bool __kernel_is_locked_down(const char *what, bool first)
 	return kernel_locked_down;
 }
 EXPORT_SYMBOL(__kernel_is_locked_down);
+
+static ssize_t lockdown_read(struct file *filp, char __user *buf, size_t count,
+			     loff_t *ppos)
+{
+	char temp[32];
+
+	if (__kernel_is_locked_down(NULL, false))
+		sprintf(temp, "%s [%s]\n", lockdown_levels[0], lockdown_levels[1]);
+	else
+		sprintf(temp, "[%s] %s\n", lockdown_levels[0], lockdown_levels[1]);
+
+	return simple_read_from_buffer(buf, count, ppos, temp, strlen(temp));
+}
+
+static const struct file_operations lockdown_ops = {
+	.read  = lockdown_read,
+};
+
+static int __init lockdown_secfs_init(void)
+{
+	struct dentry *dentry;
+
+	dentry = securityfs_create_file("lockdown", 0444, NULL, NULL,
+					&lockdown_ops);
+	return PTR_ERR_OR_ZERO(dentry);
+}
+
+core_initcall(lockdown_secfs_init);

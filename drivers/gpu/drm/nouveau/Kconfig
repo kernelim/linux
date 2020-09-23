@@ -2,7 +2,8 @@
 config DRM_NOUVEAU
 	tristate "Nouveau (NVIDIA) cards"
 	depends on DRM && PCI && MMU
-        select FW_LOADER
+	select IOMMU_API
+	select FW_LOADER
 	select DRM_KMS_HELPER
 	select DRM_TTM
 	select BACKLIGHT_CLASS_DEVICE if DRM_NOUVEAU_BACKLIGHT
@@ -87,9 +88,10 @@ config DRM_NOUVEAU_SVM
 	bool "(EXPERIMENTAL) Enable SVM (Shared Virtual Memory) support"
 	depends on DEVICE_PRIVATE
 	depends on DRM_NOUVEAU
-	depends on HMM_MIRROR
+	depends on MMU
 	depends on STAGING
-	select MIGRATE_VMA_HELPER
+	select HMM_MIRROR
+	select MMU_NOTIFIER
 	default n
 	help
 	  Say Y here if you want to enable experimental support for

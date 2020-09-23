@@ -32,8 +32,8 @@
  * The following internal entries have a special meaning:
  *
  * 0-62: Sibling entries
- * 256: Zero entry
- * 257: Retry entry
+ * 256: Retry entry
+ * 257: Zero entry
  *
  * Errors are also represented as internal entries, but use the negative
  * space (-4094 to -2).  They're never stored in the slots array; only
@@ -230,8 +230,8 @@ static inline int xa_err(void *entry)
  * This structure is used either directly or via the XA_LIMIT() macro
  * to communicate the range of IDs that are valid for allocation.
  * Two common ranges are predefined for you:
- *  * xa_limit_32b	- [0 - UINT_MAX]
- *  * xa_limit_31b	- [0 - INT_MAX]
+ * * xa_limit_32b	- [0 - UINT_MAX]
+ * * xa_limit_31b	- [0 - INT_MAX]
  */
 struct xa_limit {
 	u32 max;
@@ -265,6 +265,7 @@ enum xa_lock_type {
 #define XA_FLAGS_TRACK_FREE	((__force gfp_t)4U)
 #define XA_FLAGS_ZERO_BUSY	((__force gfp_t)8U)
 #define XA_FLAGS_ALLOC_WRAPPED	((__force gfp_t)16U)
+#define XA_FLAGS_ACCOUNT	((__force gfp_t)32U)
 #define XA_FLAGS_MARK(mark)	((__force gfp_t)((1U << __GFP_BITS_SHIFT) << \
 						(__force unsigned)(mark)))
 
@@ -292,7 +293,7 @@ struct radix_tree_node {
         ((RADIX_TREE_MAP_SIZE + BITS_PER_LONG - 1) / BITS_PER_LONG)
 	void __rcu	*slots[RADIX_TREE_MAP_SIZE];
 	unsigned long tags[RADIX_TREE_MAX_TAGS][RADIX_TREE_TAG_LONGS];
-	RH_KABI_SIZE_AND_EXTEND(radix_tree_node);
+	RH_KABI_AUX_EMBED(radix_tree_node);
 };
 #endif
 
@@ -323,14 +324,14 @@ struct RH_KABI_RENAME(radix_tree_root, xarray) {
 /* private: The rest of the data structure is not to be used directly. */
 	gfp_t		RH_KABI_RENAME(gfp_mask, xa_flags);
 	RH_KABI_RENAME(struct radix_tree_node __rcu *rnode, void __rcu * xa_head);
-	RH_KABI_SIZE_AND_EXTEND(RH_KABI_RENAME(radix_tree_root, xarray));
+	RH_KABI_AUX_EMBED(RH_KABI_RENAME(radix_tree_root, xarray));
 };
 
 #define XARRAY_INIT(name, flags) {				\
 	.xa_lock = __SPIN_LOCK_UNLOCKED(name.xa_lock),		\
 	.xa_flags = flags,					\
 	.xa_head = NULL,					\
-	RH_KABI_INIT_SIZE(xarray)				\
+	RH_KABI_AUX_INIT_SIZE(xarray)				\
 }
 
 /**
@@ -408,7 +409,7 @@ static inline void xa_init_flags(struct xarray *xa, gfp_t flags)
 	spin_lock_init(&xa->xa_lock);
 	xa->xa_flags = flags;
 	xa->xa_head = NULL;
-	RH_KABI_SET_SIZE(xa, xarray);
+	RH_KABI_AUX_SET_SIZE(xa, xarray);
 	_xa_init_flags(xa, flags);
 }
 
@@ -451,6 +452,36 @@ static inline bool xa_marked(const struct xarray *xa, xa_mark_t mark)
 }
 
 /**
+ * xa_for_each_range() - Iterate over a portion of an XArray.
+ * @xa: XArray.
+ * @index: Index of @entry.
+ * @entry: Entry retrieved from array.
+ * @start: First index to retrieve from array.
+ * @last: Last index to retrieve from array.
+ *
+ * During the iteration, @entry will have the value of the entry stored
+ * in @xa at @index.  You may modify @index during the iteration if you
+ * want to skip or reprocess indices.  It is safe to modify the array
+ * during the iteration.  At the end of the iteration, @entry will be set
+ * to NULL and @index will have a value less than or equal to max.
+ *
+ * xa_for_each_range() is O(n.log(n)) while xas_for_each() is O(n).  You have
+ * to handle your own locking with xas_for_each(), and if you have to unlock
+ * after each iteration, it will also end up being O(n.log(n)).
+ * xa_for_each_range() will spin if it hits a retry entry; if you intend to
+ * see retry entries, you should use the xas_for_each() iterator instead.
+ * The xas_for_each() iterator will expand into more inline code than
+ * xa_for_each_range().
+ *
+ * Context: Any context.  Takes and releases the RCU lock.
+ */
+#define xa_for_each_range(xa, index, entry, start, last)		\
+	for (index = start,						\
+	     entry = xa_find(xa, &index, last, XA_PRESENT);		\
+	     entry;							\
+	     entry = xa_find_after(xa, &index, last, XA_PRESENT))
+
+/**
  * xa_for_each_start() - Iterate over a portion of an XArray.
  * @xa: XArray.
  * @index: Index of @entry.
@@ -473,11 +504,8 @@ static inline bool xa_marked(const struct xarray *xa, xa_mark_t mark)
  *
  * Context: Any context.  Takes and releases the RCU lock.
  */
-#define xa_for_each_start(xa, index, entry, start)			\
-	for (index = start,						\
-	     entry = xa_find(xa, &index, ULONG_MAX, XA_PRESENT);	\
-	     entry;							\
-	     entry = xa_find_after(xa, &index, ULONG_MAX, XA_PRESENT))
+#define xa_for_each_start(xa, index, entry, start) \
+	xa_for_each_range(xa, index, entry, start, ULONG_MAX)
 
 /**
  * xa_for_each() - Iterate over present entries in an XArray.
@@ -542,6 +570,14 @@ static inline bool xa_marked(const struct xarray *xa, xa_mark_t mark)
 				spin_lock_irqsave(&(xa)->xa_lock, flags)
 #define xa_unlock_irqrestore(xa, flags) \
 				spin_unlock_irqrestore(&(xa)->xa_lock, flags)
+#define xa_lock_nested(xa, subclass) \
+				spin_lock_nested(&(xa)->xa_lock, subclass)
+#define xa_lock_bh_nested(xa, subclass) \
+				spin_lock_bh_nested(&(xa)->xa_lock, subclass)
+#define xa_lock_irq_nested(xa, subclass) \
+				spin_lock_irq_nested(&(xa)->xa_lock, subclass)
+#define xa_lock_irqsave_nested(xa, flags, subclass) \
+		spin_lock_irqsave_nested(&(xa)->xa_lock, flags, subclass)
 
 /*
  * Versions of the normal API which require the caller to hold the
@@ -1648,6 +1684,7 @@ static inline void *xas_next_marked(struct xa_state *xas, unsigned long max,
 								xa_mark_t mark)
 {
 	struct xa_node *node = xas->xa_node;
+	void *entry;
 	unsigned int offset;
 
 	if (unlikely(xas_not_node(node) || node->shift))
@@ -1659,7 +1696,10 @@ static inline void *xas_next_marked(struct xa_state *xas, unsigned long max,
 		return NULL;
 	if (offset == XA_CHUNK_SIZE)
 		return xas_find_marked(xas, max, mark);
-	return xa_entry(xas->xa, node, offset);
+	entry = xa_entry(xas->xa, node, offset);
+	if (!entry)
+		return xas_find_marked(xas, max, mark);
+	return entry;
 }
 
 /*

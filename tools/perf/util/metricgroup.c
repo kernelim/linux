@@ -15,22 +15,27 @@
 /* Manage metrics and groups of metrics from JSON files */
 
 #include "metricgroup.h"
+#include "debug.h"
 #include "evlist.h"
+#include "evsel.h"
 #include "strbuf.h"
 #include "pmu.h"
 #include "expr.h"
 #include "rblist.h"
 #include <string.h>
-#include <stdbool.h>
 #include <errno.h>
 #include "pmu-events/pmu-events.h"
 #include "strlist.h"
 #include <assert.h>
 #include <linux/ctype.h>
+#include <linux/string.h>
 #include <linux/zalloc.h>
+#include <subcmd/parse-options.h>
+#include <api/fs/fs.h>
+#include "util.h"
 
 struct metric_event *metricgroup__lookup(struct rblist *metric_events,
-					 struct perf_evsel *evsel,
+					 struct evsel *evsel,
 					 bool create)
 {
 	struct rb_node *nd;
@@ -93,63 +98,72 @@ struct egroup {
 	const char **ids;
 	const char *metric_name;
 	const char *metric_expr;
+	const char *metric_unit;
 };
 
-static bool record_evsel(int *ind, struct perf_evsel **start,
-			 int idnum,
-			 struct perf_evsel **metric_events,
-			 struct perf_evsel *ev)
+static struct evsel *find_evsel_group(struct evlist *perf_evlist,
+				      const char **ids,
+				      int idnum,
+				      struct evsel **metric_events,
+				      bool *evlist_used)
 {
-	metric_events[*ind] = ev;
-	if (*ind == 0)
-		*start = ev;
-	if (++*ind == idnum) {
-		metric_events[*ind] = NULL;
-		return true;
-	}
-	return false;
-}
-
-static struct perf_evsel *find_evsel_group(struct perf_evlist *perf_evlist,
-					   const char **ids,
-					   int idnum,
-					   struct perf_evsel **metric_events)
-{
-	struct perf_evsel *ev, *start = NULL;
-	int ind = 0;
+	struct evsel *ev;
+	int i = 0, j = 0;
+	bool leader_found;
 
 	evlist__for_each_entry (perf_evlist, ev) {
-		if (ev->collect_stat)
+		if (evlist_used[j++])
 			continue;
-		if (!strcmp(ev->name, ids[ind])) {
-			if (record_evsel(&ind, &start, idnum,
-					 metric_events, ev))
-				return start;
+		if (!strcmp(ev->name, ids[i])) {
+			if (!metric_events[i])
+				metric_events[i] = ev;
+			i++;
+			if (i == idnum)
+				break;
 		} else {
-			/*
-			 * We saw some other event that is not
-			 * in our list of events. Discard
-			 * the whole match and start again.
-			 */
-			ind = 0;
-			start = NULL;
-			if (!strcmp(ev->name, ids[ind])) {
-				if (record_evsel(&ind, &start, idnum,
-						 metric_events, ev))
-					return start;
+			/* Discard the whole match and start again */
+			i = 0;
+			memset(metric_events, 0,
+				sizeof(struct evsel *) * idnum);
+
+			if (!strcmp(ev->name, ids[i])) {
+				if (!metric_events[i])
+					metric_events[i] = ev;
+				i++;
+				if (i == idnum)
+					break;
 			}
 		}
 	}
-	/*
-	 * This can happen when an alias expands to multiple
-	 * events, like for uncore events.
-	 * We don't support this case for now.
-	 */
-	return NULL;
+
+	if (i != idnum) {
+		/* Not whole match */
+		return NULL;
+	}
+
+	metric_events[idnum] = NULL;
+
+	for (i = 0; i < idnum; i++) {
+		leader_found = false;
+		evlist__for_each_entry(perf_evlist, ev) {
+			if (!leader_found && (ev == metric_events[i]))
+				leader_found = true;
+
+			if (leader_found &&
+			    !strcmp(ev->name, metric_events[i]->name)) {
+				ev->metric_leader = metric_events[i];
+			}
+			j++;
+		}
+		ev = metric_events[i];
+		evlist_used[ev->idx] = true;
+	}
+
+	return metric_events[0];
 }
 
 static int metricgroup__setup_events(struct list_head *groups,
-				     struct perf_evlist *perf_evlist,
+				     struct evlist *perf_evlist,
 				     struct rblist *metric_events_list)
 {
 	struct metric_event *me;
@@ -157,10 +171,17 @@ static int metricgroup__setup_events(struct list_head *groups,
 	int i = 0;
 	int ret = 0;
 	struct egroup *eg;
-	struct perf_evsel *evsel;
+	struct evsel *evsel;
+	bool *evlist_used;
+
+	evlist_used = calloc(perf_evlist->core.nr_entries, sizeof(bool));
+	if (!evlist_used) {
+		ret = -ENOMEM;
+		return ret;
+	}
 
 	list_for_each_entry (eg, groups, nd) {
-		struct perf_evsel **metric_events;
+		struct evsel **metric_events;
 
 		metric_events = calloc(sizeof(void *), eg->idnum + 1);
 		if (!metric_events) {
@@ -168,7 +189,7 @@ static int metricgroup__setup_events(struct list_head *groups,
 			break;
 		}
 		evsel = find_evsel_group(perf_evlist, eg->ids, eg->idnum,
-					 metric_events);
+					 metric_events, evlist_used);
 		if (!evsel) {
 			pr_debug("Cannot resolve %s: %s\n",
 					eg->metric_name, eg->metric_expr);
@@ -188,9 +209,13 @@ static int metricgroup__setup_events(struct list_head *groups,
 		}
 		expr->metric_expr = eg->metric_expr;
 		expr->metric_name = eg->metric_name;
+		expr->metric_unit = eg->metric_unit;
 		expr->metric_events = metric_events;
 		list_add(&expr->nd, &me->head);
 	}
+
+	free(evlist_used);
+
 	return ret;
 }
 
@@ -396,13 +421,85 @@ void metricgroup__print(bool metrics, bool metricgroups, char *filter,
 	strlist__delete(metriclist);
 }
 
+static void metricgroup__add_metric_weak_group(struct strbuf *events,
+					       const char **ids,
+					       int idnum)
+{
+	bool no_group = false;
+	int i;
+
+	for (i = 0; i < idnum; i++) {
+		pr_debug("found event %s\n", ids[i]);
+		/*
+		 * Duration time maps to a software event and can make
+		 * groups not count. Always use it outside a
+		 * group.
+		 */
+		if (!strcmp(ids[i], "duration_time")) {
+			if (i > 0)
+				strbuf_addf(events, "}:W,");
+			strbuf_addf(events, "duration_time");
+			no_group = true;
+			continue;
+		}
+		strbuf_addf(events, "%s%s",
+			i == 0 || no_group ? "{" : ",",
+			ids[i]);
+		no_group = false;
+	}
+	if (!no_group)
+		strbuf_addf(events, "}:W");
+}
+
+static void metricgroup__add_metric_non_group(struct strbuf *events,
+					      const char **ids,
+					      int idnum)
+{
+	int i;
+
+	for (i = 0; i < idnum; i++)
+		strbuf_addf(events, ",%s", ids[i]);
+}
+
+static void metricgroup___watchdog_constraint_hint(const char *name, bool foot)
+{
+	static bool violate_nmi_constraint;
+
+	if (!foot) {
+		pr_warning("Splitting metric group %s into standalone metrics.\n", name);
+		violate_nmi_constraint = true;
+		return;
+	}
+
+	if (!violate_nmi_constraint)
+		return;
+
+	pr_warning("Try disabling the NMI watchdog to comply NO_NMI_WATCHDOG metric constraint:\n"
+		   "    echo 0 > /proc/sys/kernel/nmi_watchdog\n"
+		   "    perf stat ...\n"
+		   "    echo 1 > /proc/sys/kernel/nmi_watchdog\n");
+}
+
+static bool metricgroup__has_constraint(struct pmu_event *pe)
+{
+	if (!pe->metric_constraint)
+		return false;
+
+	if (!strcmp(pe->metric_constraint, "NO_NMI_WATCHDOG") &&
+	    sysctl__nmi_watchdog_enabled()) {
+		metricgroup___watchdog_constraint_hint(pe->metric_name, false);
+		return true;
+	}
+
+	return false;
+}
+
 static int metricgroup__add_metric(const char *metric, struct strbuf *events,
 				   struct list_head *group_list)
 {
 	struct pmu_events_map *map = perf_pmu__find_map(NULL);
 	struct pmu_event *pe;
-	int ret = -EINVAL;
-	int i, j;
+	int i, ret = -EINVAL;
 
 	if (!map)
 		return 0;
@@ -419,7 +516,6 @@ static int metricgroup__add_metric(const char *metric, struct strbuf *events,
 			const char **ids;
 			int idnum;
 			struct egroup *eg;
-			bool no_group = false;
 
 			pr_debug("metric expr %s for %s\n", pe->metric_expr, pe->metric_name);
 
@@ -428,27 +524,11 @@ static int metricgroup__add_metric(const char *metric, struct strbuf *events,
 				continue;
 			if (events->len > 0)
 				strbuf_addf(events, ",");
-			for (j = 0; j < idnum; j++) {
-				pr_debug("found event %s\n", ids[j]);
-				/*
-				 * Duration time maps to a software event and can make
-				 * groups not count. Always use it outside a
-				 * group.
-				 */
-				if (!strcmp(ids[j], "duration_time")) {
-					if (j > 0)
-						strbuf_addf(events, "}:W,");
-					strbuf_addf(events, "duration_time");
-					no_group = true;
-					continue;
-				}
-				strbuf_addf(events, "%s%s",
-					j == 0 || no_group ? "{" : ",",
-					ids[j]);
-				no_group = false;
-			}
-			if (!no_group)
-				strbuf_addf(events, "}:W");
+
+			if (metricgroup__has_constraint(pe))
+				metricgroup__add_metric_non_group(events, ids, idnum);
+			else
+				metricgroup__add_metric_weak_group(events, ids, idnum);
 
 			eg = malloc(sizeof(struct egroup));
 			if (!eg) {
@@ -459,6 +539,7 @@ static int metricgroup__add_metric(const char *metric, struct strbuf *events,
 			eg->idnum = idnum;
 			eg->metric_name = pe->metric_name;
 			eg->metric_expr = pe->metric_expr;
+			eg->metric_unit = pe->unit;
 			list_add_tail(&eg->nd, group_list);
 			ret = 0;
 		}
@@ -489,6 +570,10 @@ static int metricgroup__add_metric_list(const char *list, struct strbuf *events,
 		}
 	}
 	free(nlist);
+
+	if (!ret)
+		metricgroup___watchdog_constraint_hint(NULL, true);
+
 	return ret;
 }
 
@@ -511,7 +596,7 @@ int metricgroup__parse_groups(const struct option *opt,
 			   struct rblist *metric_events)
 {
 	struct parse_events_error parse_error;
-	struct perf_evlist *perf_evlist = *(struct perf_evlist **)opt->value;
+	struct evlist *perf_evlist = *(struct evlist **)opt->value;
 	struct strbuf extra_events;
 	LIST_HEAD(group_list);
 	int ret;
@@ -522,7 +607,7 @@ int metricgroup__parse_groups(const struct option *opt,
 	if (ret)
 		return ret;
 	pr_debug("adding %s\n", extra_events.buf);
-	memset(&parse_error, 0, sizeof(struct parse_events_error));
+	bzero(&parse_error, sizeof(parse_error));
 	ret = parse_events(perf_evlist, extra_events.buf, &parse_error);
 	if (ret) {
 		parse_events_print_error(&parse_error, extra_events.buf);

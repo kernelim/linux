@@ -1408,8 +1408,8 @@ static int vpfe_querycap(struct file *file, void  *priv,
 
 	vpfe_dbg(2, vpfe, "vpfe_querycap\n");
 
-	strlcpy(cap->driver, VPFE_MODULE_NAME, sizeof(cap->driver));
-	strlcpy(cap->card, "TI AM437x VPFE", sizeof(cap->card));
+	strscpy(cap->driver, VPFE_MODULE_NAME, sizeof(cap->driver));
+	strscpy(cap->card, "TI AM437x VPFE", sizeof(cap->card));
 	snprintf(cap->bus_info, sizeof(cap->bus_info),
 			"platform:%s", vpfe->v4l2_dev.name);
 	cap->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING |
@@ -2091,13 +2091,6 @@ static int vpfe_cropcap(struct file *file, void *priv,
 	if (vpfe->std_index >= ARRAY_SIZE(vpfe_standards))
 		return -EINVAL;
 
-	memset(crop, 0, sizeof(struct v4l2_cropcap));
-
-	crop->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-	crop->defrect.width = vpfe_standards[vpfe->std_index].width;
-	crop->bounds.width = crop->defrect.width;
-	crop->defrect.height = vpfe_standards[vpfe->std_index].height;
-	crop->bounds.height = crop->defrect.height;
 	crop->pixelaspect = vpfe_standards[vpfe->std_index].pixelaspect;
 
 	return 0;
@@ -2108,12 +2101,17 @@ vpfe_g_selection(struct file *file, void *fh, struct v4l2_selection *s)
 {
 	struct vpfe_device *vpfe = video_drvdata(file);
 
+	if (s->type != V4L2_BUF_TYPE_VIDEO_CAPTURE ||
+	    vpfe->std_index >= ARRAY_SIZE(vpfe_standards))
+		return -EINVAL;
+
 	switch (s->target) {
 	case V4L2_SEL_TGT_CROP_BOUNDS:
 	case V4L2_SEL_TGT_CROP_DEFAULT:
-		s->r.left = s->r.top = 0;
-		s->r.width = vpfe->crop.width;
-		s->r.height = vpfe->crop.height;
+		s->r.left = 0;
+		s->r.top = 0;
+		s->r.width = vpfe_standards[vpfe->std_index].width;
+		s->r.height = vpfe_standards[vpfe->std_index].height;
 		break;
 
 	case V4L2_SEL_TGT_CROP:
@@ -2386,7 +2384,7 @@ static int vpfe_probe_complete(struct vpfe_device *vpfe)
 	INIT_LIST_HEAD(&vpfe->dma_queue);
 
 	vdev = &vpfe->video_dev;
-	strlcpy(vdev->name, VPFE_MODULE_NAME, sizeof(vdev->name));
+	strscpy(vdev->name, VPFE_MODULE_NAME, sizeof(vdev->name));
 	vdev->release = video_device_release_empty;
 	vdev->fops = &vpfe_fops;
 	vdev->ioctl_ops = &vpfe_ioctl_ops;

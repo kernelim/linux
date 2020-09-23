@@ -15,7 +15,6 @@
 
 #include <linux/vmw_vmci_defs.h>
 #include <linux/vmw_vmci_api.h>
-#include <linux/moduleparam.h>
 #include <linux/miscdevice.h>
 #include <linux/interrupt.h>
 #include <linux/highmem.h>
@@ -115,6 +114,11 @@ bool vmci_host_code_active(void)
 	return vmci_host_device_initialized &&
 	    (!vmci_guest_code_active() ||
 	     atomic_read(&vmci_host_active_users) > 0);
+}
+
+int vmci_host_users(void)
+{
+	return atomic_read(&vmci_host_active_users);
 }
 
 /*
@@ -346,6 +350,8 @@ static int vmci_host_do_init_context(struct vmci_host_dev *vmci_host_dev,
 
 	vmci_host_dev->ct_type = VMCIOBJ_CONTEXT;
 	atomic_inc(&vmci_host_active_users);
+
+	vmci_call_vsock_callback(true);
 
 	retval = 0;
 
@@ -983,7 +989,7 @@ static const struct file_operations vmuser_fops = {
 	.release	= vmci_host_close,
 	.poll		= vmci_host_poll,
 	.unlocked_ioctl	= vmci_host_unlocked_ioctl,
-	.compat_ioctl	= vmci_host_unlocked_ioctl,
+	.compat_ioctl	= compat_ptr_ioctl,
 };
 
 static struct miscdevice vmci_host_miscdev = {

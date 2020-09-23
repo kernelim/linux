@@ -47,7 +47,6 @@
  * @stack_node:	list node for klp_ops func_stack list
  * @old_size:	size of the old function
  * @new_size:	size of the new function
- * @kobj_added: @kobj has been added and needs freeing
  * @nop:        temporary patch to use the original code again; dyn. allocated
  * @patched:	the func has been added to the klp_ops list
  * @transition:	the func is currently being applied or reverted
@@ -86,7 +85,6 @@ struct klp_func {
 	struct list_head node;
 	struct list_head stack_node;
 	unsigned long old_size, new_size;
-	bool kobj_added;
 	bool nop;
 	bool patched;
 	bool transition;
@@ -126,7 +124,6 @@ struct klp_callbacks {
  * @node:	list node for klp_patch obj_list
  * @mod:	kernel module associated with the patched object
  *		(NULL for vmlinux)
- * @kobj_added: @kobj has been added and needs freeing
  * @dynamic:    temporary object for nop functions; dynamically allocated
  * @patched:	the object's funcs have been added to the klp_ops list
  */
@@ -141,20 +138,31 @@ struct klp_object {
 	struct list_head func_list;
 	struct list_head node;
 	struct module *mod;
-	bool kobj_added;
 	bool dynamic;
 	bool patched;
+};
+
+/**
+ * struct klp_state - state of the system modified by the livepatch
+ * @id:		system state identifier (non-zero)
+ * @version:	version of the change
+ * @data:	custom data
+ */
+struct klp_state {
+	unsigned long id;
+	unsigned int version;
+	void *data;
 };
 
 /**
  * struct klp_patch - patch structure for live patching
  * @mod:	reference to the live patch module
  * @objs:	object entries for kernel objects to be patched
+ * @states:	system states that can get modified
  * @replace:	replace all actively used patches
  * @list:	list node for global list of actively used patches
  * @kobj:	kobject for sysfs resources
  * @obj_list:	dynamic list of the object entries
- * @kobj_added: @kobj has been added and needs freeing
  * @enabled:	the patch is enabled (but operation may be incomplete)
  * @forced:	was involved in a forced transition
  * @free_work:	patch cleanup from workqueue-context
@@ -164,13 +172,13 @@ struct klp_patch {
 	/* external */
 	struct module *mod;
 	struct klp_object *objs;
+	struct klp_state *states;
 	bool replace;
 
 	/* internal */
 	struct list_head list;
 	struct kobject kobj;
 	struct list_head obj_list;
-	bool kobj_added;
 	bool enabled;
 	bool forced;
 	struct work_struct free_work;
@@ -234,6 +242,9 @@ void *klp_shadow_get_or_alloc(void *obj, unsigned long id,
 			      klp_shadow_ctor_t ctor, void *ctor_data);
 void klp_shadow_free(void *obj, unsigned long id, klp_shadow_dtor_t dtor);
 void klp_shadow_free_all(unsigned long id, klp_shadow_dtor_t dtor);
+
+struct klp_state *klp_get_state(struct klp_patch *patch, unsigned long id);
+struct klp_state *klp_get_prev_state(unsigned long id);
 
 #else /* !CONFIG_LIVEPATCH */
 

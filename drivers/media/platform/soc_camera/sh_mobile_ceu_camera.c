@@ -1568,9 +1568,9 @@ static __poll_t sh_mobile_ceu_poll(struct file *file, poll_table *pt)
 static int sh_mobile_ceu_querycap(struct soc_camera_host *ici,
 				  struct v4l2_capability *cap)
 {
-	strlcpy(cap->card, "SuperH_Mobile_CEU", sizeof(cap->card));
-	strlcpy(cap->driver, "sh_mobile_ceu", sizeof(cap->driver));
-	strlcpy(cap->bus_info, "platform:sh_mobile_ceu", sizeof(cap->bus_info));
+	strscpy(cap->card, "SuperH_Mobile_CEU", sizeof(cap->card));
+	strscpy(cap->driver, "sh_mobile_ceu", sizeof(cap->driver));
+	strscpy(cap->bus_info, "platform:sh_mobile_ceu", sizeof(cap->bus_info));
 	cap->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING;
 	cap->capabilities = cap->device_caps | V4L2_CAP_DEVICE_CAPS;
 
@@ -1712,8 +1712,7 @@ static int sh_mobile_ceu_probe(struct platform_device *pdev)
 	if (res) {
 		err = dma_declare_coherent_memory(&pdev->dev, res->start,
 						  res->start,
-						  resource_size(res),
-						  DMA_MEMORY_EXCLUSIVE);
+						  resource_size(res));
 		if (err) {
 			dev_err(&pdev->dev, "Unable to declare CEU memory.\n");
 			return err;

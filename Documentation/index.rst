@@ -81,8 +81,10 @@ needed).
 
    driver-api/index
    core-api/index
+   infiniband/index
    media/index
    networking/index
+   virtual/index
    input/index
    gpu/index
    security/index
@@ -91,6 +93,7 @@ needed).
    filesystems/index
    vm/index
    bpf/index
+   PCI/index
 
 Architecture-specific documentation
 -----------------------------------

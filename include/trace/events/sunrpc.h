@@ -14,6 +14,69 @@
 #include <linux/net.h>
 #include <linux/tracepoint.h>
 
+DECLARE_EVENT_CLASS(xdr_buf_class,
+	TP_PROTO(
+		const struct xdr_buf *xdr
+	),
+
+	TP_ARGS(xdr),
+
+	TP_STRUCT__entry(
+		__field(const void *, head_base)
+		__field(size_t, head_len)
+		__field(const void *, tail_base)
+		__field(size_t, tail_len)
+		__field(unsigned int, page_len)
+		__field(unsigned int, msg_len)
+	),
+
+	TP_fast_assign(
+		__entry->head_base = xdr->head[0].iov_base;
+		__entry->head_len = xdr->head[0].iov_len;
+		__entry->tail_base = xdr->tail[0].iov_base;
+		__entry->tail_len = xdr->tail[0].iov_len;
+		__entry->page_len = xdr->page_len;
+		__entry->msg_len = xdr->len;
+	),
+
+	TP_printk("head=[%p,%zu] page=%u tail=[%p,%zu] len=%u",
+		__entry->head_base, __entry->head_len, __entry->page_len,
+		__entry->tail_base, __entry->tail_len, __entry->msg_len
+	)
+);
+
+#define DEFINE_XDRBUF_EVENT(name)					\
+		DEFINE_EVENT(xdr_buf_class, name,			\
+				TP_PROTO(				\
+					const struct xdr_buf *xdr	\
+				),					\
+				TP_ARGS(xdr))
+
+DEFINE_XDRBUF_EVENT(xprt_sendto);
+DEFINE_XDRBUF_EVENT(xprt_recvfrom);
+DEFINE_XDRBUF_EVENT(svc_recvfrom);
+DEFINE_XDRBUF_EVENT(svc_sendto);
+
+TRACE_DEFINE_ENUM(RPC_AUTH_OK);
+TRACE_DEFINE_ENUM(RPC_AUTH_BADCRED);
+TRACE_DEFINE_ENUM(RPC_AUTH_REJECTEDCRED);
+TRACE_DEFINE_ENUM(RPC_AUTH_BADVERF);
+TRACE_DEFINE_ENUM(RPC_AUTH_REJECTEDVERF);
+TRACE_DEFINE_ENUM(RPC_AUTH_TOOWEAK);
+TRACE_DEFINE_ENUM(RPCSEC_GSS_CREDPROBLEM);
+TRACE_DEFINE_ENUM(RPCSEC_GSS_CTXPROBLEM);
+
+#define rpc_show_auth_stat(status)					\
+	__print_symbolic(status,					\
+		{ RPC_AUTH_OK,			"AUTH_OK" },		\
+		{ RPC_AUTH_BADCRED,		"BADCRED" },		\
+		{ RPC_AUTH_REJECTEDCRED,	"REJECTEDCRED" },	\
+		{ RPC_AUTH_BADVERF,		"BADVERF" },		\
+		{ RPC_AUTH_REJECTEDVERF,	"REJECTEDVERF" },	\
+		{ RPC_AUTH_TOOWEAK,		"TOOWEAK" },		\
+		{ RPCSEC_GSS_CREDPROBLEM,	"GSS_CREDPROBLEM" },	\
+		{ RPCSEC_GSS_CTXPROBLEM,	"GSS_CTXPROBLEM" })	\
+
 DECLARE_EVENT_CLASS(rpc_task_status,
 
 	TP_PROTO(const struct rpc_task *task),
@@ -82,7 +145,6 @@ TRACE_DEFINE_ENUM(RPC_TASK_SWAPPER);
 TRACE_DEFINE_ENUM(RPC_CALL_MAJORSEEN);
 TRACE_DEFINE_ENUM(RPC_TASK_ROOTCREDS);
 TRACE_DEFINE_ENUM(RPC_TASK_DYNAMIC);
-TRACE_DEFINE_ENUM(RPC_TASK_KILLED);
 TRACE_DEFINE_ENUM(RPC_TASK_SOFT);
 TRACE_DEFINE_ENUM(RPC_TASK_SOFTCONN);
 TRACE_DEFINE_ENUM(RPC_TASK_SENT);
@@ -97,7 +159,6 @@ TRACE_DEFINE_ENUM(RPC_TASK_NO_RETRANS_TIMEOUT);
 		{ RPC_CALL_MAJORSEEN, "MAJORSEEN" },			\
 		{ RPC_TASK_ROOTCREDS, "ROOTCREDS" },			\
 		{ RPC_TASK_DYNAMIC, "DYNAMIC" },			\
-		{ RPC_TASK_KILLED, "KILLED" },				\
 		{ RPC_TASK_SOFT, "SOFT" },				\
 		{ RPC_TASK_SOFTCONN, "SOFTCONN" },			\
 		{ RPC_TASK_SENT, "SENT" },				\
@@ -111,6 +172,7 @@ TRACE_DEFINE_ENUM(RPC_TASK_ACTIVE);
 TRACE_DEFINE_ENUM(RPC_TASK_NEED_XMIT);
 TRACE_DEFINE_ENUM(RPC_TASK_NEED_RECV);
 TRACE_DEFINE_ENUM(RPC_TASK_MSG_PIN_WAIT);
+TRACE_DEFINE_ENUM(RPC_TASK_SIGNALLED);
 
 #define rpc_show_runstate(flags)					\
 	__print_flags(flags, "|",					\
@@ -119,7 +181,8 @@ TRACE_DEFINE_ENUM(RPC_TASK_MSG_PIN_WAIT);
 		{ (1UL << RPC_TASK_ACTIVE), "ACTIVE" },			\
 		{ (1UL << RPC_TASK_NEED_XMIT), "NEED_XMIT" },		\
 		{ (1UL << RPC_TASK_NEED_RECV), "NEED_RECV" },		\
-		{ (1UL << RPC_TASK_MSG_PIN_WAIT), "MSG_PIN_WAIT" })
+		{ (1UL << RPC_TASK_MSG_PIN_WAIT), "MSG_PIN_WAIT" },	\
+		{ (1UL << RPC_TASK_SIGNALLED), "SIGNALLED" })
 
 DECLARE_EVENT_CLASS(rpc_task_running,
 
@@ -165,6 +228,8 @@ DECLARE_EVENT_CLASS(rpc_task_running,
 DEFINE_RPC_RUNNING_EVENT(begin);
 DEFINE_RPC_RUNNING_EVENT(run_action);
 DEFINE_RPC_RUNNING_EVENT(complete);
+DEFINE_RPC_RUNNING_EVENT(signalled);
+DEFINE_RPC_RUNNING_EVENT(end);
 
 DECLARE_EVENT_CLASS(rpc_task_queued,
 
@@ -186,7 +251,7 @@ DECLARE_EVENT_CLASS(rpc_task_queued,
 		__entry->client_id = task->tk_client ?
 				     task->tk_client->cl_clid : -1;
 		__entry->task_id = task->tk_pid;
-		__entry->timeout = task->tk_timeout;
+		__entry->timeout = rpc_task_timeout(task);
 		__entry->runstate = task->tk_runstate;
 		__entry->status = task->tk_status;
 		__entry->flags = task->tk_flags;
@@ -712,7 +777,8 @@ TRACE_EVENT(xprt_transmit,
 
 	TP_fast_assign(
 		__entry->task_id = rqst->rq_task->tk_pid;
-		__entry->client_id = rqst->rq_task->tk_client->cl_clid;
+		__entry->client_id = rqst->rq_task->tk_client ?
+			rqst->rq_task->tk_client->cl_clid : -1;
 		__entry->xid = be32_to_cpu(rqst->rq_xid);
 		__entry->seqno = rqst->rq_seqno;
 		__entry->status = status;
@@ -742,7 +808,8 @@ TRACE_EVENT(xprt_enq_xmit,
 
 	TP_fast_assign(
 		__entry->task_id = task->tk_pid;
-		__entry->client_id = task->tk_client->cl_clid;
+		__entry->client_id = task->tk_client ?
+			task->tk_client->cl_clid : -1;
 		__entry->xid = be32_to_cpu(task->tk_rqstp->rq_xid);
 		__entry->seqno = task->tk_rqstp->rq_seqno;
 		__entry->stage = stage;
@@ -774,6 +841,99 @@ TRACE_EVENT(xprt_ping,
 	TP_printk("peer=[%s]:%s status=%d",
 			__get_str(addr), __get_str(port), __entry->status)
 );
+
+DECLARE_EVENT_CLASS(xprt_writelock_event,
+	TP_PROTO(
+		const struct rpc_xprt *xprt, const struct rpc_task *task
+	),
+
+	TP_ARGS(xprt, task),
+
+	TP_STRUCT__entry(
+		__field(unsigned int, task_id)
+		__field(unsigned int, client_id)
+		__field(unsigned int, snd_task_id)
+	),
+
+	TP_fast_assign(
+		if (task) {
+			__entry->task_id = task->tk_pid;
+			__entry->client_id = task->tk_client ?
+					     task->tk_client->cl_clid : -1;
+		} else {
+			__entry->task_id = -1;
+			__entry->client_id = -1;
+		}
+		__entry->snd_task_id = xprt->snd_task ?
+					xprt->snd_task->tk_pid : -1;
+	),
+
+	TP_printk("task:%u@%u snd_task:%u",
+			__entry->task_id, __entry->client_id,
+			__entry->snd_task_id)
+);
+
+#define DEFINE_WRITELOCK_EVENT(name) \
+	DEFINE_EVENT(xprt_writelock_event, xprt_##name, \
+			TP_PROTO( \
+				const struct rpc_xprt *xprt, \
+				const struct rpc_task *task \
+			), \
+			TP_ARGS(xprt, task))
+
+DEFINE_WRITELOCK_EVENT(reserve_xprt);
+DEFINE_WRITELOCK_EVENT(release_xprt);
+
+DECLARE_EVENT_CLASS(xprt_cong_event,
+	TP_PROTO(
+		const struct rpc_xprt *xprt, const struct rpc_task *task
+	),
+
+	TP_ARGS(xprt, task),
+
+	TP_STRUCT__entry(
+		__field(unsigned int, task_id)
+		__field(unsigned int, client_id)
+		__field(unsigned int, snd_task_id)
+		__field(unsigned long, cong)
+		__field(unsigned long, cwnd)
+		__field(bool, wait)
+	),
+
+	TP_fast_assign(
+		if (task) {
+			__entry->task_id = task->tk_pid;
+			__entry->client_id = task->tk_client ?
+					     task->tk_client->cl_clid : -1;
+		} else {
+			__entry->task_id = -1;
+			__entry->client_id = -1;
+		}
+		__entry->snd_task_id = xprt->snd_task ?
+					xprt->snd_task->tk_pid : -1;
+		__entry->cong = xprt->cong;
+		__entry->cwnd = xprt->cwnd;
+		__entry->wait = test_bit(XPRT_CWND_WAIT, &xprt->state);
+	),
+
+	TP_printk("task:%u@%u snd_task:%u cong=%lu cwnd=%lu%s",
+			__entry->task_id, __entry->client_id,
+			__entry->snd_task_id, __entry->cong, __entry->cwnd,
+			__entry->wait ? " (wait)" : "")
+);
+
+#define DEFINE_CONG_EVENT(name) \
+	DEFINE_EVENT(xprt_cong_event, xprt_##name, \
+			TP_PROTO( \
+				const struct rpc_xprt *xprt, \
+				const struct rpc_task *task \
+			), \
+			TP_ARGS(xprt, task))
+
+DEFINE_CONG_EVENT(reserve_cong);
+DEFINE_CONG_EVENT(release_cong);
+DEFINE_CONG_EVENT(get_cong);
+DEFINE_CONG_EVENT(put_cong);
 
 TRACE_EVENT(xs_stream_read_data,
 	TP_PROTO(struct rpc_xprt *xprt, ssize_t err, size_t total),
@@ -862,6 +1022,41 @@ TRACE_EVENT(svc_recv,
 	TP_printk("addr=%s xid=0x%08x len=%d flags=%s",
 			__get_str(addr), __entry->xid, __entry->len,
 			show_rqstp_flags(__entry->flags))
+);
+
+#define svc_show_status(status)				\
+	__print_symbolic(status,			\
+		{ SVC_GARBAGE,	"SVC_GARBAGE" },	\
+		{ SVC_SYSERR,	"SVC_SYSERR" },		\
+		{ SVC_VALID,	"SVC_VALID" },		\
+		{ SVC_NEGATIVE,	"SVC_NEGATIVE" },	\
+		{ SVC_OK,	"SVC_OK" },		\
+		{ SVC_DROP,	"SVC_DROP" },		\
+		{ SVC_CLOSE,	"SVC_CLOSE" },		\
+		{ SVC_DENIED,	"SVC_DENIED" },		\
+		{ SVC_PENDING,	"SVC_PENDING" },	\
+		{ SVC_COMPLETE,	"SVC_COMPLETE" })
+
+TRACE_EVENT(svc_authenticate,
+	TP_PROTO(const struct svc_rqst *rqst, int auth_res, __be32 auth_stat),
+
+	TP_ARGS(rqst, auth_res, auth_stat),
+
+	TP_STRUCT__entry(
+		__field(u32, xid)
+		__field(unsigned long, svc_status)
+		__field(unsigned long, auth_stat)
+	),
+
+	TP_fast_assign(
+		__entry->xid = be32_to_cpu(rqst->rq_xid);
+		__entry->svc_status = auth_res;
+		__entry->auth_stat = be32_to_cpu(auth_stat);
+	),
+
+	TP_printk("xid=0x%08x auth_res=%s auth_stat=%s",
+			__entry->xid, svc_show_status(__entry->svc_status),
+			rpc_show_auth_stat(__entry->auth_stat))
 );
 
 TRACE_EVENT(svc_process,

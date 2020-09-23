@@ -10,9 +10,9 @@
 #include <linux/version.h>
 #include <uapi/linux/bpf.h>
 #include <uapi/linux/in6.h>
-#include "bpf_helpers.h"
+#include <bpf/bpf_helpers.h>
 #include "bpf_legacy.h"
-#include "bpf_tracing.h"
+#include <bpf/bpf_tracing.h>
 
 #define MAX_NR_PORTS 65536
 
@@ -118,7 +118,7 @@ int trace_sys_connect(struct pt_regs *ctx)
 	if (addrlen != sizeof(*in6))
 		return 0;
 
-	ret = bpf_probe_read(dst6, sizeof(dst6), &in6->sin6_addr);
+	ret = bpf_probe_read_user(dst6, sizeof(dst6), &in6->sin6_addr);
 	if (ret) {
 		inline_ret = ret;
 		goto done;
@@ -129,7 +129,7 @@ int trace_sys_connect(struct pt_regs *ctx)
 
 	test_case = dst6[7];
 
-	ret = bpf_probe_read(&port, sizeof(port), &in6->sin6_port);
+	ret = bpf_probe_read_user(&port, sizeof(port), &in6->sin6_port);
 	if (ret) {
 		inline_ret = ret;
 		goto done;

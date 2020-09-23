@@ -17,6 +17,8 @@ static int alt_pr_platform_probe(struct platform_device *pdev)
 	void __iomem *reg_base;
 	struct resource *res;
 
+	mark_tech_preview("Altera Partial Reconfiguration IP Platform Driver", THIS_MODULE);
+
 	/* First mmio base is for register access */
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 
@@ -32,7 +34,9 @@ static int alt_pr_platform_remove(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 
-	return alt_pr_unregister(dev);
+	alt_pr_unregister(dev);
+
+	return 0;
 }
 
 static const struct of_device_id alt_pr_of_match[] = {

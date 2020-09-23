@@ -136,7 +136,7 @@ static struct mlx5dr_qp *dr_create_rc_qp(struct mlx5_core_dev *mdev,
 	err = mlx5_wq_qp_create(mdev, &wqp, temp_qpc, &dr_qp->wq,
 				&dr_qp->wq_ctrl);
 	if (err) {
-		mlx5_core_info(mdev, "Can't create QP WQ\n");
+		mlx5_core_warn(mdev, "Can't create QP WQ\n");
 		goto err_wq;
 	}
 
@@ -181,7 +181,7 @@ static struct mlx5dr_qp *dr_create_rc_qp(struct mlx5_core_dev *mdev,
 							 in, pas));
 
 	err = mlx5_core_create_qp(mdev, &dr_qp->mqp, in, inlen);
-	kfree(in);
+	kvfree(in);
 
 	if (err) {
 		mlx5_core_warn(mdev, " Can't create QP\n");
@@ -358,9 +358,11 @@ static int dr_postsend_icm_data(struct mlx5dr_domain *dmn,
 	u32 buff_offset;
 	int ret;
 
+	spin_lock(&send_ring->lock);
+
 	ret = dr_handle_pending_wc(dmn, send_ring);
 	if (ret)
-		return ret;
+		goto out_unlock;
 
 	if (send_info->write.length > dmn->info.max_inline_size) {
 		buff_offset = (send_ring->tx_head &
@@ -378,7 +380,9 @@ static int dr_postsend_icm_data(struct mlx5dr_domain *dmn,
 	dr_fill_data_segs(send_ring, send_info);
 	dr_post_send(send_ring->qp, send_info);
 
-	return 0;
+out_unlock:
+	spin_unlock(&send_ring->lock);
+	return ret;
 }
 
 static int dr_get_tbl_copy_details(struct mlx5dr_domain *dmn,
@@ -558,14 +562,13 @@ int mlx5dr_send_postsend_action(struct mlx5dr_domain *dmn,
 	int ret;
 
 	send_info.write.addr = (uintptr_t)action->rewrite.data;
-	send_info.write.length = action->rewrite.chunk->byte_size;
+	send_info.write.length = action->rewrite.num_of_actions *
+				 DR_MODIFY_ACTION_SIZE;
 	send_info.write.lkey = 0;
 	send_info.remote_addr = action->rewrite.chunk->mr_addr;
 	send_info.rkey = action->rewrite.chunk->rkey;
 
-	mutex_lock(&dmn->mutex);
 	ret = dr_postsend_icm_data(dmn, &send_info);
-	mutex_unlock(&dmn->mutex);
 
 	return ret;
 }
@@ -651,8 +654,10 @@ static int dr_prepare_qp_to_rts(struct mlx5dr_domain *dmn)
 
 	/* Init */
 	ret = dr_modify_qp_rst2init(dmn->mdev, dr_qp, port);
-	if (ret)
+	if (ret) {
+		mlx5dr_err(dmn, "Failed modify QP rst2init\n");
 		return ret;
+	}
 
 	/* RTR */
 	ret = mlx5dr_cmd_query_gid(dmn->mdev, port, gid_index, &rtr_attr.dgid_attr);
@@ -667,8 +672,10 @@ static int dr_prepare_qp_to_rts(struct mlx5dr_domain *dmn)
 	rtr_attr.udp_src_port	= dmn->info.caps.roce_min_src_udp;
 
 	ret = dr_cmd_modify_qp_init2rtr(dmn->mdev, dr_qp, &rtr_attr);
-	if (ret)
+	if (ret) {
+		mlx5dr_err(dmn, "Failed modify QP init2rtr\n");
 		return ret;
+	}
 
 	/* RTS */
 	rts_attr.timeout	= 14;
@@ -676,8 +683,10 @@ static int dr_prepare_qp_to_rts(struct mlx5dr_domain *dmn)
 	rts_attr.rnr_retry	= 7;
 
 	ret = dr_cmd_modify_qp_rtr2rts(dmn->mdev, dr_qp, &rts_attr);
-	if (ret)
+	if (ret) {
+		mlx5dr_err(dmn, "Failed modify QP rtr2rts\n");
 		return ret;
+	}
 
 	return 0;
 }
@@ -686,6 +695,12 @@ static void dr_cq_event(struct mlx5_core_cq *mcq,
 			enum mlx5_event event)
 {
 	pr_info("CQ event %u on CQ #%u\n", event, mcq->cqn);
+}
+
+static void dr_cq_complete(struct mlx5_core_cq *mcq,
+			   struct mlx5_eqe *eqe)
+{
+	pr_err("CQ completion CQ: #%u\n", mcq->cqn);
 }
 
 static struct mlx5dr_cq *dr_create_cq(struct mlx5_core_dev *mdev,
@@ -749,6 +764,7 @@ static struct mlx5dr_cq *dr_create_cq(struct mlx5_core_dev *mdev,
 	mlx5_fill_page_frag_array(&cq->wq_ctrl.buf, pas);
 
 	cq->mcq.event = dr_cq_event;
+	cq->mcq.comp  = dr_cq_complete;
 
 	err = mlx5_core_create_cq(mdev, &cq->mcq, in, inlen, out, sizeof(out));
 	kvfree(in);
@@ -760,7 +776,12 @@ static struct mlx5dr_cq *dr_create_cq(struct mlx5_core_dev *mdev,
 	cq->mcq.set_ci_db = cq->wq_ctrl.db.db;
 	cq->mcq.arm_db = cq->wq_ctrl.db.db + 1;
 	*cq->mcq.set_ci_db = 0;
-	*cq->mcq.arm_db = 0;
+
+	/* set no-zero value, in order to avoid the HW to run db-recovery on
+	 * CQ that used in polling mode.
+	 */
+	*cq->mcq.arm_db = cpu_to_be32(2 << 28);
+
 	cq->mcq.vector = 0;
 	cq->mcq.irqn = irqn;
 	cq->mcq.uar = uar;
@@ -861,6 +882,7 @@ int mlx5dr_send_ring_alloc(struct mlx5dr_domain *dmn)
 	cq_size = QUEUE_SIZE + 1;
 	dmn->send_ring->cq = dr_create_cq(dmn->mdev, dmn->uar, cq_size);
 	if (!dmn->send_ring->cq) {
+		mlx5dr_err(dmn, "Failed creating CQ\n");
 		ret = -ENOMEM;
 		goto free_send_ring;
 	}
@@ -869,9 +891,11 @@ int mlx5dr_send_ring_alloc(struct mlx5dr_domain *dmn)
 	init_attr.pdn = dmn->pdn;
 	init_attr.uar = dmn->uar;
 	init_attr.max_send_wr = QUEUE_SIZE;
+	spin_lock_init(&dmn->send_ring->lock);
 
 	dmn->send_ring->qp = dr_create_rc_qp(dmn->mdev, &init_attr);
 	if (!dmn->send_ring->qp)  {
+		mlx5dr_err(dmn, "Failed creating QP\n");
 		ret = -ENOMEM;
 		goto clean_cq;
 	}
@@ -902,7 +926,6 @@ int mlx5dr_send_ring_alloc(struct mlx5dr_domain *dmn)
 		goto clean_qp;
 	}
 
-	memset(dmn->send_ring->buf, 0, size);
 	dmn->send_ring->buf_size = size;
 
 	dmn->send_ring->mr = dr_reg_mr(dmn->mdev,
@@ -973,7 +996,9 @@ int mlx5dr_send_ring_force_drain(struct mlx5dr_domain *dmn)
 			return ret;
 	}
 
+	spin_lock(&send_ring->lock);
 	ret = dr_handle_pending_wc(dmn, send_ring);
+	spin_unlock(&send_ring->lock);
 
 	return ret;
 }

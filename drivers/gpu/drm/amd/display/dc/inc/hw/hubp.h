@@ -38,13 +38,16 @@ enum cursor_pitch {
 };
 
 enum cursor_lines_per_chunk {
-#if defined(CONFIG_DRM_AMD_DC_DCN2_0)
 	CURSOR_LINE_PER_CHUNK_1 = 0, /* new for DCN2 */
-#endif
 	CURSOR_LINE_PER_CHUNK_2 = 1,
 	CURSOR_LINE_PER_CHUNK_4,
 	CURSOR_LINE_PER_CHUNK_8,
 	CURSOR_LINE_PER_CHUNK_16
+};
+
+enum hubp_ind_block_size {
+	hubp_ind_block_unconstrained = 0,
+	hubp_ind_block_64b,
 };
 
 struct hubp {
@@ -58,6 +61,26 @@ struct hubp {
 	int mpcc_id;
 	struct dc_cursor_attributes curs_attr;
 	bool power_gated;
+};
+
+struct surface_flip_registers {
+	uint32_t DCSURF_SURFACE_CONTROL;
+	uint32_t DCSURF_PRIMARY_META_SURFACE_ADDRESS_HIGH;
+	uint32_t DCSURF_PRIMARY_META_SURFACE_ADDRESS;
+	uint32_t DCSURF_PRIMARY_SURFACE_ADDRESS_HIGH;
+	uint32_t DCSURF_PRIMARY_SURFACE_ADDRESS;
+	uint32_t DCSURF_PRIMARY_META_SURFACE_ADDRESS_HIGH_C;
+	uint32_t DCSURF_PRIMARY_META_SURFACE_ADDRESS_C;
+	uint32_t DCSURF_PRIMARY_SURFACE_ADDRESS_HIGH_C;
+	uint32_t DCSURF_PRIMARY_SURFACE_ADDRESS_C;
+	uint32_t DCSURF_SECONDARY_META_SURFACE_ADDRESS_HIGH;
+	uint32_t DCSURF_SECONDARY_META_SURFACE_ADDRESS;
+	uint32_t DCSURF_SECONDARY_SURFACE_ADDRESS_HIGH;
+	uint32_t DCSURF_SECONDARY_SURFACE_ADDRESS;
+	bool tmz_surface;
+	bool immediate;
+	uint8_t vmid;
+	bool grph_stereo;
 };
 
 struct hubp_funcs {
@@ -74,11 +97,15 @@ struct hubp_funcs {
 			struct _vcs_dpi_display_ttu_regs_st *ttu_regs);
 
 	void (*dcc_control)(struct hubp *hubp, bool enable,
-			bool independent_64b_blks);
+			enum hubp_ind_block_size blk_size);
+
 	void (*mem_program_viewport)(
 			struct hubp *hubp,
 			const struct rect *viewport,
 			const struct rect *viewport_c);
+
+	void (*apply_PLAT_54186_wa)(struct hubp *hubp,
+			const struct dc_plane_address *address);
 
 	bool (*hubp_program_surface_flip_and_addr)(
 		struct hubp *hubp,
@@ -103,16 +130,13 @@ struct hubp_funcs {
 		struct hubp *hubp,
 		enum surface_pixel_format format,
 		union dc_tiling_info *tiling_info,
-		union plane_size *plane_size,
+		struct plane_size *plane_size,
 		enum dc_rotation_angle rotation,
 		struct dc_plane_dcc_param *dcc,
 		bool horizontal_mirror,
 		unsigned int compa_level);
 
 	bool (*hubp_is_flip_pending)(struct hubp *hubp);
-
-	void (*hubp_update_dchub)(struct hubp *hubp,
-				struct dchub_init_data *dh_data);
 
 	void (*set_blank)(struct hubp *hubp, bool blank);
 	void (*set_hubp_blank_en)(struct hubp *hubp, bool blank);
@@ -136,7 +160,6 @@ struct hubp_funcs {
 	unsigned int (*hubp_get_underflow_status)(struct hubp *hubp);
 	void (*hubp_init)(struct hubp *hubp);
 
-#if defined(CONFIG_DRM_AMD_DC_DCN2_0)
 	void (*dmdata_set_attributes)(
 			struct hubp *hubp,
 			const struct dc_dmdata_attributes *attr);
@@ -156,7 +179,13 @@ struct hubp_funcs {
 	void (*hubp_set_flip_control_surface_gsl)(
 		struct hubp *hubp,
 		bool enable);
-#endif
+
+	void (*validate_dml_output)(
+			struct hubp *hubp,
+			struct dc_context *ctx,
+			struct _vcs_dpi_display_rq_regs_st *dml_rq_regs,
+			struct _vcs_dpi_display_dlg_regs_st *dml_dlg_attr,
+			struct _vcs_dpi_display_ttu_regs_st *dml_ttu_attr);
 
 };
 

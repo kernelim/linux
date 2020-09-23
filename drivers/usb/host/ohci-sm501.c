@@ -49,7 +49,7 @@ static const struct hc_driver ohci_sm501_hc_driver = {
 	 * generic hardware linkage
 	 */
 	.irq =			ohci_irq,
-	.flags =		HCD_USB11 | HCD_MEMORY | HCD_LOCAL_MEM,
+	.flags =		HCD_USB11 | HCD_DMA | HCD_MEMORY,
 
 	/*
 	 * basic lifecycle operations
@@ -126,8 +126,7 @@ static int ohci_hcd_sm501_drv_probe(struct platform_device *pdev)
 
 	retval = dma_declare_coherent_memory(dev, mem->start,
 					 mem->start - mem->parent->start,
-					 resource_size(mem),
-					 DMA_MEMORY_EXCLUSIVE);
+					 resource_size(mem));
 	if (retval) {
 		dev_err(dev, "cannot declare coherent memory\n");
 		goto err1;

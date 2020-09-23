@@ -3,7 +3,7 @@
 #
 config XFRM
        bool
-       depends on NET
+       depends on INET
        select GRO_CELLS
 
 config XFRM_OFFLOAD
@@ -14,9 +14,9 @@ config XFRM_ALGO
 	select XFRM
 	select CRYPTO
 
+if INET
 config XFRM_USER
 	tristate "Transformation user configuration interface"
-	depends on INET
 	select XFRM_ALGO
 	---help---
 	  Support for Transformation(XFRM) user configuration interface
@@ -55,7 +55,7 @@ config XFRM_MIGRATE
 
 config XFRM_STATISTICS
 	bool "Transformation statistics"
-	depends on INET && XFRM && PROC_FS
+	depends on XFRM && PROC_FS
 	---help---
 	  This statistics is not a SNMP/MIB specification but shows
 	  statistics about transformation error (or almost error) factor
@@ -94,3 +94,8 @@ config NET_KEY_MIGRATE
 	  <draft-sugimoto-mip6-pfkey-migrate>.
 
 	  If unsure, say N.
+
+config XFRM_ESPINTCP
+	bool
+
+endif # INET

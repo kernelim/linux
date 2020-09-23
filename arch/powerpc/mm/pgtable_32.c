@@ -43,6 +43,25 @@ EXPORT_SYMBOL(ioremap_bot);	/* aka VMALLOC_END */
 
 extern char etext[], _stext[], _sinittext[], _einittext[];
 
+#ifdef CONFIG_ZONE_DEVICE
+/*
+ * Override the generic version in mm/memremap.c.
+ *
+ * With hash translation, the direct-map range is mapped with just one
+ * page size selected by htab_init_page_sizes(). Consult
+ * mmu_psize_defs[] to determine the minimum page size alignment.
+ */
+unsigned long memremap_compat_align(void)
+{
+	unsigned int shift = mmu_psize_defs[mmu_linear_psize].shift;
+
+	if (radix_enabled())
+		return SUBSECTION_SIZE;
+	return max(SUBSECTION_SIZE, 1UL << shift);
+}
+EXPORT_SYMBOL_GPL(memremap_compat_align);
+#endif
+
 __ref pte_t *pte_alloc_one_kernel(struct mm_struct *mm, unsigned long address)
 {
 	pte_t *pte;
@@ -50,7 +69,7 @@ __ref pte_t *pte_alloc_one_kernel(struct mm_struct *mm, unsigned long address)
 	if (slab_is_available()) {
 		pte = (pte_t *)__get_free_page(GFP_KERNEL|__GFP_ZERO);
 	} else {
-		pte = __va(memblock_alloc(PAGE_SIZE, PAGE_SIZE));
+		pte = __va(memblock_phys_alloc(PAGE_SIZE, PAGE_SIZE));
 		if (pte)
 			clear_page(pte);
 	}
@@ -76,18 +95,38 @@ pgtable_t pte_alloc_one(struct mm_struct *mm, unsigned long address)
 void __iomem *
 ioremap(phys_addr_t addr, unsigned long size)
 {
-	return __ioremap_caller(addr, size, _PAGE_NO_CACHE | _PAGE_GUARDED,
-				__builtin_return_address(0));
+	pgprot_t prot = pgprot_noncached(PAGE_KERNEL);
+
+	return __ioremap_caller(addr, size, prot, __builtin_return_address(0));
 }
 EXPORT_SYMBOL(ioremap);
 
 void __iomem *
 ioremap_wc(phys_addr_t addr, unsigned long size)
 {
-	return __ioremap_caller(addr, size, _PAGE_NO_CACHE,
-				__builtin_return_address(0));
+	pgprot_t prot = pgprot_noncached_wc(PAGE_KERNEL);
+
+	return __ioremap_caller(addr, size, prot, __builtin_return_address(0));
 }
 EXPORT_SYMBOL(ioremap_wc);
+
+void __iomem *
+ioremap_wt(phys_addr_t addr, unsigned long size)
+{
+	pgprot_t prot = pgprot_cached_wthru(PAGE_KERNEL);
+
+	return __ioremap_caller(addr, size, prot, __builtin_return_address(0));
+}
+EXPORT_SYMBOL(ioremap_wt);
+
+void __iomem *
+ioremap_coherent(phys_addr_t addr, unsigned long size)
+{
+	pgprot_t prot = pgprot_cached(PAGE_KERNEL);
+
+	return __ioremap_caller(addr, size, prot, __builtin_return_address(0));
+}
+EXPORT_SYMBOL(ioremap_coherent);
 
 void __iomem *
 ioremap_prot(phys_addr_t addr, unsigned long size, unsigned long flags)
@@ -100,31 +139,22 @@ ioremap_prot(phys_addr_t addr, unsigned long size, unsigned long flags)
 	flags &= ~(_PAGE_USER | _PAGE_EXEC);
 	flags |= _PAGE_PRIVILEGED;
 
-	return __ioremap_caller(addr, size, flags, __builtin_return_address(0));
+	return __ioremap_caller(addr, size, __pgprot(flags), __builtin_return_address(0));
 }
 EXPORT_SYMBOL(ioremap_prot);
 
 void __iomem *
 __ioremap(phys_addr_t addr, unsigned long size, unsigned long flags)
 {
-	return __ioremap_caller(addr, size, flags, __builtin_return_address(0));
+	return __ioremap_caller(addr, size, __pgprot(flags), __builtin_return_address(0));
 }
 
 void __iomem *
-__ioremap_caller(phys_addr_t addr, unsigned long size, unsigned long flags,
-		 void *caller)
+__ioremap_caller(phys_addr_t addr, unsigned long size, pgprot_t prot, void *caller)
 {
 	unsigned long v, i;
 	phys_addr_t p;
 	int err;
-
-	/* Make sure we have the base flags */
-	if ((flags & _PAGE_PRESENT) == 0)
-		flags |= pgprot_val(PAGE_KERNEL);
-
-	/* Non-cacheable page cannot be coherent */
-	if (flags & _PAGE_NO_CACHE)
-		flags &= ~_PAGE_COHERENT;
 
 	/*
 	 * Choose an address to map it to.
@@ -183,7 +213,7 @@ __ioremap_caller(phys_addr_t addr, unsigned long size, unsigned long flags,
 
 	err = 0;
 	for (i = 0; i < size && err == 0; i += PAGE_SIZE)
-		err = map_kernel_page(v+i, p+i, flags);
+		err = map_kernel_page(v + i, p + i, prot);
 	if (err) {
 		if (slab_is_available())
 			vunmap((void *)v);
@@ -209,7 +239,7 @@ void iounmap(volatile void __iomem *addr)
 }
 EXPORT_SYMBOL(iounmap);
 
-int map_kernel_page(unsigned long va, phys_addr_t pa, int flags)
+int map_kernel_page(unsigned long va, phys_addr_t pa, pgprot_t prot)
 {
 	pmd_t *pd;
 	pte_t *pg;
@@ -225,9 +255,8 @@ int map_kernel_page(unsigned long va, phys_addr_t pa, int flags)
 		 * hash table
 		 */
 		BUG_ON((pte_val(*pg) & (_PAGE_PRESENT | _PAGE_HASHPTE)) &&
-		       flags);
-		set_pte_at(&init_mm, va, pg, pfn_pte(pa >> PAGE_SHIFT,
-						     __pgprot(flags)));
+		       pgprot_val(prot));
+		set_pte_at(&init_mm, va, pg, pfn_pte(pa >> PAGE_SHIFT, prot));
 	}
 	smp_wmb();
 	return err;
@@ -238,7 +267,7 @@ int map_kernel_page(unsigned long va, phys_addr_t pa, int flags)
  */
 static void __init __mapin_ram_chunk(unsigned long offset, unsigned long top)
 {
-	unsigned long v, s, f;
+	unsigned long v, s;
 	phys_addr_t p;
 	int ktext;
 
@@ -248,11 +277,10 @@ static void __init __mapin_ram_chunk(unsigned long offset, unsigned long top)
 	for (; s < top; s += PAGE_SIZE) {
 		ktext = ((char *)v >= _stext && (char *)v < etext) ||
 			((char *)v >= _sinittext && (char *)v < _einittext);
-		f = ktext ? pgprot_val(PAGE_KERNEL_TEXT) : pgprot_val(PAGE_KERNEL);
-		map_kernel_page(v, p, f);
-#ifdef CONFIG_PPC_STD_MMU_32
+		map_kernel_page(v, p, ktext ? PAGE_KERNEL_TEXT : PAGE_KERNEL);
+#ifdef CONFIG_PPC_BOOK3S_32
 		if (ktext)
-			hash_preload(&init_mm, v, 0, 0x300);
+			hash_preload(&init_mm, v, false, 0x300);
 #endif
 		v += PAGE_SIZE;
 		p += PAGE_SIZE;

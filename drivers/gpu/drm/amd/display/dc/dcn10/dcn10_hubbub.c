@@ -104,7 +104,7 @@ void hubbub1_allow_self_refresh_control(struct hubbub *hubbub, bool allow)
 			DCHUBBUB_ARB_ALLOW_SELF_REFRESH_FORCE_ENABLE, !allow);
 }
 
-bool hububu1_is_allow_self_refresh_enabled(struct hubbub *hubbub)
+bool hubbub1_is_allow_self_refresh_enabled(struct hubbub *hubbub)
 {
 	struct dcn10_hubbub *hubbub1 = TO_DCN10_HUBBUB(hubbub);
 	uint32_t enable = 0;
@@ -840,8 +840,8 @@ static void hubbub1_det_request_size(
 
 	hubbub1_get_blk256_size(&blk256_width, &blk256_height, bpe);
 
-	swath_bytes_horz_wc = height * blk256_height * bpe;
-	swath_bytes_vert_wc = width * blk256_width * bpe;
+	swath_bytes_horz_wc = width * blk256_height * bpe;
+	swath_bytes_vert_wc = height * blk256_width * bpe;
 
 	*req128_horz_wc = (2 * swath_bytes_horz_wc <= detile_buf_size) ?
 			false : /* full 256B request */
@@ -930,6 +930,9 @@ static bool hubbub1_get_dcc_compression_cap(struct hubbub *hubbub,
 		output->grph.rgb.max_compressed_blk_size = 64;
 		output->grph.rgb.independent_64b_blks = true;
 		break;
+	default:
+		ASSERT(false);
+		break;
 	}
 
 	output->capable = true;
@@ -945,6 +948,8 @@ static const struct hubbub_funcs hubbub1_funcs = {
 	.get_dcc_compression_cap = hubbub1_get_dcc_compression_cap,
 	.wm_read_state = hubbub1_wm_read_state,
 	.program_watermarks = hubbub1_program_watermarks,
+	.is_allow_self_refresh_enabled = hubbub1_is_allow_self_refresh_enabled,
+	.allow_self_refresh_control = hubbub1_allow_self_refresh_control,
 };
 
 void hubbub1_construct(struct hubbub *hubbub,

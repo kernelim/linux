@@ -217,7 +217,7 @@ struct proto_ops {
 	RH_KABI_RESERVE(5)
 	RH_KABI_RESERVE(6)
 	RH_KABI_RESERVE(7)
-	RH_KABI_SIZE_AND_EXTEND(proto_ops_extended)
+	RH_KABI_AUX_EMBED(proto_ops_extended)
 };
 
 #define DECLARE_SOCKADDR(type, dst, src)	\

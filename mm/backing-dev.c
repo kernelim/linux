@@ -12,13 +12,16 @@
 #include <linux/device.h>
 #include <trace/events/writeback.h>
 
+static char noop_bdi_dev_name[BDI_DEV_NAME_LEN];
 struct backing_dev_info noop_backing_dev_info = {
 	.name		= "noop",
 	.capabilities	= BDI_CAP_NO_ACCT_AND_WRITEBACK,
+	.dev_name	= noop_bdi_dev_name,
 };
 EXPORT_SYMBOL_GPL(noop_backing_dev_info);
 
 static struct class *bdi_class;
+static const char *bdi_unknown_name = "(unknown)";
 
 /*
  * bdi_lock protects updates to bdi_list. bdi_list has RCU reader side
@@ -249,8 +252,8 @@ static int __init default_bdi_init(void)
 {
 	int err;
 
-	bdi_wq = alloc_workqueue("writeback", WQ_MEM_RECLAIM | WQ_FREEZABLE |
-					      WQ_UNBOUND | WQ_SYSFS, 0);
+	bdi_wq = alloc_workqueue("writeback", WQ_MEM_RECLAIM | WQ_UNBOUND |
+				 WQ_SYSFS, 0);
 	if (!bdi_wq)
 		return -ENOMEM;
 
@@ -690,6 +693,12 @@ static int cgwb_bdi_init(struct backing_dev_info *bdi)
 	bdi->cgwb_congested_tree = RB_ROOT;
 	mutex_init(&bdi->cgwb_release_mutex);
 
+	bdi->wb_switch_rwsem = kzalloc(sizeof(struct rw_semaphore), GFP_KERNEL);
+	if (!bdi->wb_switch_rwsem)
+		return -ENOMEM;
+	else
+		init_rwsem(bdi->wb_switch_rwsem);
+
 	ret = wb_init(&bdi->wb, bdi, 1, GFP_KERNEL);
 	if (!ret) {
 		bdi->wb.memcg_css = &root_mem_cgroup->css;
@@ -863,7 +872,14 @@ struct backing_dev_info *bdi_alloc_node(gfp_t gfp_mask, int node_id)
 	if (!bdi)
 		return NULL;
 
+	bdi->dev_name = kzalloc(BDI_DEV_NAME_LEN, GFP_KERNEL);
+	if (!bdi->dev_name) {
+		kfree(bdi);
+		return NULL;
+	}
+
 	if (bdi_init(bdi)) {
+		kfree(bdi->dev_name);
 		kfree(bdi);
 		return NULL;
 	}
@@ -874,11 +890,23 @@ EXPORT_SYMBOL(bdi_alloc_node);
 int bdi_register_va(struct backing_dev_info *bdi, const char *fmt, va_list args)
 {
 	struct device *dev;
+	char name[BDI_DEV_NAME_LEN];
+	char *devname;
 
 	if (bdi->dev)	/* The driver needs to use separate queues per device */
 		return 0;
 
-	dev = device_create_vargs(bdi_class, NULL, MKDEV(0, 0), bdi, fmt, args);
+	/*
+	 * RHEL only: 3rd party module may define one BDI instance in static
+	 * memorym, and .dev_name may not be allocated.
+	 */
+	if (bdi->dev_name)
+		devname = bdi->dev_name;
+	else
+		devname = name;
+
+	vsnprintf(devname, BDI_DEV_NAME_LEN, fmt, args);
+	dev = device_create(bdi_class, NULL, MKDEV(0, 0), bdi, devname);
 	if (IS_ERR(dev))
 		return PTR_ERR(dev);
 
@@ -965,6 +993,10 @@ static void release_bdi(struct kref *ref)
 	WARN_ON_ONCE(bdi->dev);
 	wb_exit(&bdi->wb);
 	cgwb_bdi_exit(bdi);
+#ifdef CONFIG_CGROUP_WRITEBACK
+	kfree(bdi->wb_switch_rwsem);
+#endif
+	kfree(bdi->dev_name);
 	kfree(bdi);
 }
 
@@ -973,6 +1005,14 @@ void bdi_put(struct backing_dev_info *bdi)
 	kref_put(&bdi->refcnt, release_bdi);
 }
 EXPORT_SYMBOL(bdi_put);
+
+const char *bdi_dev_name(struct backing_dev_info *bdi)
+{
+	if (!bdi || !bdi->dev || !bdi->dev_name)
+		return bdi_unknown_name;
+	return bdi->dev_name;
+}
+EXPORT_SYMBOL_GPL(bdi_dev_name);
 
 static wait_queue_head_t congestion_wqh[2] = {
 		__WAIT_QUEUE_HEAD_INITIALIZER(congestion_wqh[0]),

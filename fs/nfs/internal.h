@@ -16,14 +16,6 @@ extern const struct export_operations nfs_export_ops;
 
 struct nfs_string;
 
-/* Maximum number of readahead requests
- * FIXME: this should really be a sysctl so that users may tune it to suit
- *        their needs. People that do NFS over a slow network, might for
- *        instance want to reduce it to something closer to 1 for improved
- *        interactive response.
- */
-#define NFS_MAX_READAHEAD	(RPC_DEF_SLOT_TABLE - 1)
-
 static inline void nfs_attr_check_mountpoint(struct super_block *parent, struct nfs_fattr *fattr)
 {
 	if (!nfs_fsid_equal(&NFS_SB(parent)->fsid, &fattr->fsid))
@@ -81,8 +73,10 @@ struct nfs_client_initdata {
 	struct nfs_subversion *nfs_mod;
 	int proto;
 	u32 minorversion;
+	unsigned int nconnect;
 	struct net *net;
 	const struct rpc_timeout *timeparms;
+	const struct cred *cred;
 };
 
 /*
@@ -121,6 +115,7 @@ struct nfs_parsed_mount_data {
 		char			*export_path;
 		int			port;
 		unsigned short		protocol;
+		unsigned short		nconnect;
 	} nfs_server;
 
 	struct security_mnt_opts lsm_opts;
@@ -156,6 +151,7 @@ extern void nfs_umount(const struct nfs_mount_request *info);
 /* client.c */
 extern const struct rpc_program nfs_program;
 extern void nfs_clients_init(struct net *net);
+extern void nfs_clients_exit(struct net *net);
 extern struct nfs_client *nfs_alloc_client(const struct nfs_client_initdata *);
 int nfs_create_rpc_client(struct nfs_client *, const struct nfs_client_initdata *, rpc_authflavor_t);
 struct nfs_client *nfs_get_client(const struct nfs_client_initdata *);
@@ -168,7 +164,6 @@ int nfs_init_server_rpcclient(struct nfs_server *, const struct rpc_timeout *t,
 struct nfs_server *nfs_alloc_server(void);
 void nfs_server_copy_userdata(struct nfs_server *, struct nfs_server *);
 
-extern void nfs_cleanup_cb_ident_idr(struct net *);
 extern void nfs_put_client(struct nfs_client *);
 extern void nfs_free_client(struct nfs_client *);
 extern struct nfs_client *nfs4_find_client_ident(struct net *, int);
@@ -441,7 +436,7 @@ struct vfsmount *nfs_do_submount(struct dentry *, struct nfs_fh *,
 				 struct nfs_fattr *, rpc_authflavor_t);
 
 /* getroot.c */
-extern struct dentry *nfs_get_root(struct super_block *, struct nfs_fh *,
+extern struct dentry *nfs_get_root(struct super_block *, struct nfs_mount_info *,
 				   const char *);
 #if IS_ENABLED(CONFIG_NFS_V4)
 extern struct dentry *nfs4_get_root(struct super_block *, struct nfs_fh *,
@@ -711,14 +706,14 @@ unsigned int nfs_page_array_len(unsigned int base, size_t len)
 }
 
 /*
- * Convert a struct timespec into a 64-bit change attribute
+ * Convert a struct timespec64 into a 64-bit change attribute
  *
- * This does approximately the same thing as timespec_to_ns(),
+ * This does approximately the same thing as timespec64_to_ns(),
  * but for calculation efficiency, we multiply the seconds by
  * 1024*1024*1024.
  */
 static inline
-u64 nfs_timespec_to_change_attr(const struct timespec *ts)
+u64 nfs_timespec_to_change_attr(const struct timespec64 *ts)
 {
 	return ((u64)ts->tv_sec << 30) + ts->tv_nsec;
 }
@@ -765,15 +760,20 @@ static inline bool nfs_error_is_fatal(int err)
 	case -ESTALE:
 	case -E2BIG:
 	case -ENOMEM:
+	case -ETIMEDOUT:
 		return true;
 	default:
 		return false;
 	}
 }
 
-static inline void nfs_context_set_write_error(struct nfs_open_context *ctx, int error)
+static inline bool nfs_error_is_fatal_on_server(int err)
 {
-	ctx->error = error;
-	smp_wmb();
-	set_bit(NFS_CONTEXT_ERROR_WRITE, &ctx->flags);
+	switch (err) {
+	case 0:
+	case -ERESTARTSYS:
+	case -EINTR:
+		return false;
+	}
+	return nfs_error_is_fatal(err);
 }

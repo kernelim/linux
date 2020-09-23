@@ -15,7 +15,6 @@
 #include <linux/export.h>
 #include <linux/of_fdt.h>
 #include <linux/memblock.h>
-#include <linux/bootmem.h>
 #include <linux/moduleparam.h>
 #include <linux/swap.h>
 #include <linux/swapops.h>
@@ -595,7 +594,7 @@ static inline bool is_power_of_4(unsigned long x)
 	return false;
 }
 
-static int __init add_huge_page_size(unsigned long long size)
+bool __init arch_hugetlb_valid_size(unsigned long size)
 {
 	int shift = __ffs(size);
 	int mmu_psize;
@@ -603,17 +602,17 @@ static int __init add_huge_page_size(unsigned long long size)
 	/* Check that it is a page size supported by the hardware and
 	 * that it fits within pagetable and slice limits. */
 	if (size <= PAGE_SIZE)
-		return -EINVAL;
+		return false;
 #if defined(CONFIG_PPC_FSL_BOOK3E)
 	if (!is_power_of_4(size))
-		return -EINVAL;
+		return false;
 #elif !defined(CONFIG_PPC_8xx)
 	if (!is_power_of_2(size) || (shift > SLICE_HIGH_SHIFT))
-		return -EINVAL;
+		return false;
 #endif
 
 	if ((mmu_psize = shift_to_mmu_psize(shift)) < 0)
-		return -EINVAL;
+		return false;
 
 #ifdef CONFIG_PPC_BOOK3S_64
 	/*
@@ -626,38 +625,28 @@ static int __init add_huge_page_size(unsigned long long size)
 	 */
 	if (radix_enabled()) {
 		if (mmu_psize != MMU_PAGE_2M && mmu_psize != MMU_PAGE_1G)
-			return -EINVAL;
+			return false;
 	} else {
 		if (mmu_psize != MMU_PAGE_16M && mmu_psize != MMU_PAGE_16G)
-			return -EINVAL;
+			return false;
 	}
 #endif
 
 	BUG_ON(mmu_psize_defs[mmu_psize].shift != shift);
 
-	/* Return if huge page size has already been setup */
-	if (size_to_hstate(size))
-		return 0;
+	return true;
+}
+
+static int __init add_huge_page_size(unsigned long long size)
+{
+	int shift = __ffs(size);
+
+	if (!arch_hugetlb_valid_size((unsigned long)size))
+		return -EINVAL;
 
 	hugetlb_add_hstate(shift - PAGE_SHIFT);
-
 	return 0;
 }
-
-static int __init hugepage_setup_sz(char *str)
-{
-	unsigned long long size;
-
-	size = memparse(str, &str);
-
-	if (add_huge_page_size(size) != 0) {
-		hugetlb_bad_size();
-		pr_err("Invalid huge page size specified(%llu)\n", size);
-	}
-
-	return 1;
-}
-__setup("hugepagesz=", hugepage_setup_sz);
 
 struct kmem_cache *hugepte_cache;
 static int __init hugetlbpage_init(void)

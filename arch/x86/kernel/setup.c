@@ -30,7 +30,6 @@
 #include <linux/sfi.h>
 #include <linux/apm_bios.h>
 #include <linux/initrd.h>
-#include <linux/bootmem.h>
 #include <linux/memblock.h>
 #include <linux/seq_file.h>
 #include <linux/console.h>
@@ -556,7 +555,7 @@ static void __init reserve_crashkernel(void)
 	 * region.
 	 */
 	if (mem_encrypt_active())
-		mem_enc_req = ALIGN(swiotlb_size_or_default(), SZ_1M);
+		mem_enc_req = min(ALIGN(swiotlb_size_or_default(), SZ_1M), 64UL << 20);
 	else
 		mem_enc_req = 0;
 
@@ -828,126 +827,6 @@ static void __init trim_low_memory_range(void)
 	memblock_reserve(0, ALIGN(reserve_low, PAGE_SIZE));
 }
 
-static bool valid_amd_epyc(const char *model_id)
-{
-	int len;
-
-	len = strlen("AMD EPYC 7");
-
-	if (!strncmp(model_id, "AMD EPYC 7", len)) {
-		len += 3;
-		/*
-		 * AMD EPYC 7xx1 == NAPLES (8.0)
-		 * AMD EPYC 7xx2 == ROME   (8.1/8.0z)
-		 */
-		if (strlen(model_id) >= len) {
-			if (model_id[len-1] == '1' ||
-			    model_id[len-1] == '2')
-				return true;
-		}
-	}
-
-	return false;
-}
-
-static bool valid_amd_ryzen(const char *model_id)
-{
-	const char *ryzen5 = "AMD Ryzen 5";
-	const char *ryzen7 = "AMD Ryzen 7";
-
-	if (!strncmp(model_id, ryzen5, strlen(ryzen5)))
-		return true;
-	else if (!strncmp(model_id, ryzen7, strlen(ryzen7)))
-		return true;
-
-	return false;
-}
-
-static bool valid_amd_processor(__u8 family, const char *model_id, bool guest)
-{
-	bool valid = false;
-
-	switch(family) {
-	case 0x15:
-		valid = true;
-		break;
-
-	case 0x17:
-		if (!guest) {
-			if (!strncmp(model_id, "AMD EPYC", 8))
-				valid = valid_amd_epyc(model_id);
-			else if (!strncmp(model_id, "AMD Ryzen", 9))
-				valid = valid_amd_ryzen(model_id);
-		}
-		else {
-			/* guest names do not conform to bare metal */
-			if (!strncmp(model_id, "AMD EPYC", 8))
-				valid = true;
-		}
-		break;
-
-	default:
-		break;
-	}
-
-	return valid;
-}
-
-static bool valid_intel_processor(__u8 family, __u8 model, __u8 stepping)
-{
-	bool valid;
-
-	if (family != 6)
-		return false;
-
-	switch(model) {
-	case INTEL_FAM6_KABYLAKE: /* 8.0, 8.1 CFL(s13) */
-		valid = (stepping <= 13);
-		break;
-
-	case INTEL_FAM6_KABYLAKE_L: /* 8.0, 8.1 WHL(s12) */
-		valid = (stepping <= 12);
-		break;
-
-	case INTEL_FAM6_COMETLAKE: /* 8.2 CML-H/CML-S */
-		valid = (stepping <= 5);
-		break;
-
-	case INTEL_FAM6_COMETLAKE_L: /* 8.2 CML-U(v1) */
-		valid = (stepping == 0);
-		break;
-
-	case INTEL_FAM6_XEON_PHI_KNM: /* 8.0 */
-	case INTEL_FAM6_ATOM_GOLDMONT: /* 8.0 */
-	case INTEL_FAM6_ATOM_GOLDMONT_PLUS: /* 8.0 */
-	case INTEL_FAM6_ATOM_GOLDMONT_D: /* 8.0 */
-	case INTEL_FAM6_XEON_PHI_KNL: /* 8.0 */
-	case INTEL_FAM6_BROADWELL_D: /* 8.0 */
-	case INTEL_FAM6_BROADWELL_X: /* 8.0 */
-	case INTEL_FAM6_ATOM_SILVERMONT_D: /* 8.0 */
-	case INTEL_FAM6_BROADWELL_G: /* 8.0 */
-	case INTEL_FAM6_HASWELL_G: /* 8.0 */
-	case INTEL_FAM6_HASWELL_L: /* 8.0 */
-		valid = true;
-		break;
-
-	case INTEL_FAM6_SKYLAKE_L: /* 8.0 */
-	case INTEL_FAM6_SKYLAKE: /* 8.0 */
-		valid = (stepping <= 4);
-		break;
-
-	case INTEL_FAM6_SKYLAKE_X: /* 8.0:SKX,CLX  8.2:CPX */
-		valid = (stepping <= 11);
-		break;
-
-	default:
-		valid = (model <= INTEL_FAM6_HASWELL_X); /* 8.0 */
-		break;
-	}
-
-	return valid;
-}
-
 static void rh_check_supported(void)
 {
 	bool guest;
@@ -967,27 +846,8 @@ static void rh_check_supported(void)
 	 */
 	switch (boot_cpu_data.x86_vendor) {
 	case X86_VENDOR_AMD:
-		if (!valid_amd_processor(boot_cpu_data.x86,
-					 boot_cpu_data.x86_model_id, guest)) {
-			pr_crit("Detected CPU family %xh model %d\n",
-				boot_cpu_data.x86,
-				boot_cpu_data.x86_model);
-			mark_hardware_unsupported("AMD Processor");
-		}
-		break;
-
 	case X86_VENDOR_INTEL:
-		if (!valid_intel_processor(boot_cpu_data.x86,
-					   boot_cpu_data.x86_model,
-					   boot_cpu_data.x86_stepping)) {
-			pr_crit("Detected CPU family %d model %d stepping %d\n",
-				boot_cpu_data.x86,
-				boot_cpu_data.x86_model,
-				boot_cpu_data.x86_stepping);
-			mark_hardware_unsupported("Intel Processor");
-		}
 		break;
-
 	default:
 		pr_crit("Detected processor %s %s\n",
 			boot_cpu_data.x86_vendor_id,

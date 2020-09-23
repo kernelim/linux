@@ -28,16 +28,17 @@
 #ifndef __AST_DRV_H__
 #define __AST_DRV_H__
 
-#include <drm/drm_encoder.h>
-#include <drm/drm_fb_helper.h>
-
-#include <drm/drm_gem.h>
-#include <drm/drm_gem_vram_helper.h>
-
-#include <drm/drm_vram_mm_helper.h>
-
+#include <linux/types.h>
+#include <linux/io.h>
 #include <linux/i2c.h>
 #include <linux/i2c-algo-bit.h>
+
+#include <drm/drm_connector.h>
+#include <drm/drm_crtc.h>
+#include <drm/drm_encoder.h>
+#include <drm/drm_mode.h>
+#include <drm/drm_framebuffer.h>
+#include <drm/drm_fb_helper.h>
 
 #define DRIVER_AUTHOR		"Dave Airlie"
 
@@ -81,7 +82,24 @@ enum ast_tx_chip {
 #define AST_DRAM_4Gx16   7
 #define AST_DRAM_8Gx16   8
 
-struct ast_fbdev;
+
+#define AST_MAX_HWC_WIDTH	64
+#define AST_MAX_HWC_HEIGHT	64
+
+#define AST_HWC_SIZE		(AST_MAX_HWC_WIDTH * AST_MAX_HWC_HEIGHT * 2)
+#define AST_HWC_SIGNATURE_SIZE	32
+
+#define AST_DEFAULT_HWC_NUM	2
+
+/* define for signature structure */
+#define AST_HWC_SIGNATURE_CHECKSUM	0x00
+#define AST_HWC_SIGNATURE_SizeX		0x04
+#define AST_HWC_SIGNATURE_SizeY		0x08
+#define AST_HWC_SIGNATURE_X		0x0C
+#define AST_HWC_SIGNATURE_Y		0x10
+#define AST_HWC_SIGNATURE_HOTSPOTX	0x14
+#define AST_HWC_SIGNATURE_HOTSPOTY	0x18
+
 
 struct ast_private {
 	struct drm_device *dev;
@@ -96,12 +114,16 @@ struct ast_private {
 	uint32_t mclk;
 	uint32_t vram_size;
 
-	struct ast_fbdev *fbdev;
-
 	int fb_mtrr;
 
-	struct drm_gem_object *cursor_cache;
-	int next_cursor;
+	struct {
+		struct drm_gem_vram_object *gbo[AST_DEFAULT_HWC_NUM];
+		unsigned int next_index;
+	} cursor;
+
+	struct drm_plane primary_plane;
+	struct drm_plane cursor_plane;
+
 	bool support_wide_screen;
 	enum {
 		ast_use_p2a,
@@ -117,8 +139,6 @@ struct ast_private {
 
 int ast_driver_load(struct drm_device *dev, unsigned long flags);
 void ast_driver_unload(struct drm_device *dev);
-
-struct ast_gem_object;
 
 #define AST_IO_AR_PORT_WRITE		(0x40)
 #define AST_IO_MISC_PORT_WRITE		(0x42)
@@ -202,23 +222,6 @@ static inline void ast_open_key(struct ast_private *ast)
 
 #define AST_VIDMEM_DEFAULT_SIZE AST_VIDMEM_SIZE_8M
 
-#define AST_MAX_HWC_WIDTH 64
-#define AST_MAX_HWC_HEIGHT 64
-
-#define AST_HWC_SIZE                (AST_MAX_HWC_WIDTH*AST_MAX_HWC_HEIGHT*2)
-#define AST_HWC_SIGNATURE_SIZE      32
-
-#define AST_DEFAULT_HWC_NUM 2
-/* define for signature structure */
-#define AST_HWC_SIGNATURE_CHECKSUM  0x00
-#define AST_HWC_SIGNATURE_SizeX     0x04
-#define AST_HWC_SIGNATURE_SizeY     0x08
-#define AST_HWC_SIGNATURE_X         0x0C
-#define AST_HWC_SIGNATURE_Y         0x10
-#define AST_HWC_SIGNATURE_HOTSPOTX  0x14
-#define AST_HWC_SIGNATURE_HOTSPOTY  0x18
-
-
 struct ast_i2c_chan {
 	struct i2c_adapter adapter;
 	struct drm_device *dev;
@@ -239,24 +242,9 @@ struct ast_encoder {
 	struct drm_encoder base;
 };
 
-struct ast_framebuffer {
-	struct drm_framebuffer base;
-	struct drm_gem_object *obj;
-};
-
-struct ast_fbdev {
-	struct drm_fb_helper helper; /* must be first */
-	struct ast_framebuffer afb;
-	void *sysram;
-	int size;
-	int x1, y1, x2, y2; /* dirty rect */
-	spinlock_t dirty_lock;
-};
-
 #define to_ast_crtc(x) container_of(x, struct ast_crtc, base)
 #define to_ast_connector(x) container_of(x, struct ast_connector, base)
 #define to_ast_encoder(x) container_of(x, struct ast_encoder, base)
-#define to_ast_framebuffer(x) container_of(x, struct ast_framebuffer, base)
 
 struct ast_vbios_stdtable {
 	u8 misc;
@@ -293,28 +281,25 @@ struct ast_vbios_mode_info {
 	const struct ast_vbios_enhtable *enh_table;
 };
 
+struct ast_crtc_state {
+	struct drm_crtc_state base;
+
+	/* Last known format of primary plane */
+	const struct drm_format_info *format;
+
+	struct ast_vbios_mode_info vbios_mode_info;
+};
+
+#define to_ast_crtc_state(state) container_of(state, struct ast_crtc_state, base)
+
 extern int ast_mode_init(struct drm_device *dev);
 extern void ast_mode_fini(struct drm_device *dev);
-
-int ast_framebuffer_init(struct drm_device *dev,
-			 struct ast_framebuffer *ast_fb,
-			 const struct drm_mode_fb_cmd2 *mode_cmd,
-			 struct drm_gem_object *obj);
-
-int ast_fbdev_init(struct drm_device *dev);
-void ast_fbdev_fini(struct drm_device *dev);
-void ast_fbdev_set_suspend(struct drm_device *dev, int state);
-void ast_fbdev_set_base(struct ast_private *ast, unsigned long gpu_addr);
 
 #define AST_MM_ALIGN_SHIFT 4
 #define AST_MM_ALIGN_MASK ((1 << AST_MM_ALIGN_SHIFT) - 1)
 
 int ast_mm_init(struct ast_private *ast);
 void ast_mm_fini(struct ast_private *ast);
-
-int ast_gem_create(struct drm_device *dev,
-		   u32 size, bool iskernel,
-		   struct drm_gem_object **obj);
 
 /* ast post */
 void ast_enable_vga(struct drm_device *dev);

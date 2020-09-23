@@ -7,6 +7,7 @@
  */
 
 #include <linux/nfs_fs.h>
+#include <linux/nfs_mount.h>
 #include <linux/nfs_page.h>
 #include <linux/module.h>
 #include <linux/sched/mm.h>
@@ -27,6 +28,8 @@
 
 #define FF_LAYOUT_POLL_RETRY_MAX     (15*HZ)
 #define FF_LAYOUTRETURN_MAXERR 20
+
+static unsigned short io_maxretrans;
 
 static void ff_layout_read_record_layoutstats_done(struct rpc_task *task,
 		struct nfs_pgio_header *hdr);
@@ -871,7 +874,7 @@ ff_layout_pg_get_read(struct nfs_pageio_descriptor *pgio,
 {
 	pnfs_put_lseg(pgio->pg_lseg);
 	pgio->pg_lseg = pnfs_update_layout(pgio->pg_inode,
-					   req->wb_context,
+					   nfs_req_openctx(req),
 					   0,
 					   NFS4_MAX_UINT64,
 					   IOMODE_READ,
@@ -925,13 +928,21 @@ retry:
 	pgm = &pgio->pg_mirrors[0];
 	pgm->pg_bsize = mirror->mirror_ds->ds_versions[0].rsize;
 
+	if (NFS_SERVER(pgio->pg_inode)->flags &
+			(NFS_MOUNT_SOFT|NFS_MOUNT_SOFTERR))
+		pgio->pg_maxretrans = io_maxretrans;
 	return;
 out_nolseg:
 	if (pgio->pg_error < 0)
 		return;
 out_mds:
+	trace_pnfs_mds_fallback_pg_init_read(pgio->pg_inode,
+			0, NFS4_MAX_UINT64, IOMODE_READ,
+			NFS_I(pgio->pg_inode)->layout,
+			pgio->pg_lseg);
 	pnfs_put_lseg(pgio->pg_lseg);
 	pgio->pg_lseg = NULL;
+	pgio->pg_maxretrans = 0;
 	nfs_pageio_reset_read_mds(pgio);
 }
 
@@ -950,7 +961,7 @@ retry:
 	pnfs_generic_pg_check_layout(pgio);
 	if (!pgio->pg_lseg) {
 		pgio->pg_lseg = pnfs_update_layout(pgio->pg_inode,
-						   req->wb_context,
+						   nfs_req_openctx(req),
 						   0,
 						   NFS4_MAX_UINT64,
 						   IOMODE_RW,
@@ -972,9 +983,8 @@ retry:
 		goto out_mds;
 
 	/* Use a direct mapping of ds_idx to pgio mirror_idx */
-	if (WARN_ON_ONCE(pgio->pg_mirror_count !=
-	    FF_LAYOUT_MIRROR_COUNT(pgio->pg_lseg)))
-		goto out_mds;
+	if (pgio->pg_mirror_count != FF_LAYOUT_MIRROR_COUNT(pgio->pg_lseg))
+		goto out_eagain;
 
 	for (i = 0; i < pgio->pg_mirror_count; i++) {
 		mirror = FF_LAYOUT_COMP(pgio->pg_lseg, i);
@@ -992,12 +1002,24 @@ retry:
 		pgm->pg_bsize = mirror->mirror_ds->ds_versions[0].wsize;
 	}
 
+	if (NFS_SERVER(pgio->pg_inode)->flags &
+			(NFS_MOUNT_SOFT|NFS_MOUNT_SOFTERR))
+		pgio->pg_maxretrans = io_maxretrans;
 	return;
-
+out_eagain:
+	pnfs_generic_pg_cleanup(pgio);
+	pgio->pg_error = -EAGAIN;
+	return;
 out_mds:
+	trace_pnfs_mds_fallback_pg_init_write(pgio->pg_inode,
+			0, NFS4_MAX_UINT64, IOMODE_RW,
+			NFS_I(pgio->pg_inode)->layout,
+			pgio->pg_lseg);
 	pnfs_put_lseg(pgio->pg_lseg);
 	pgio->pg_lseg = NULL;
+	pgio->pg_maxretrans = 0;
 	nfs_pageio_reset_write_mds(pgio);
+	pgio->pg_error = -EAGAIN;
 }
 
 static unsigned int
@@ -1006,7 +1028,7 @@ ff_layout_pg_get_mirror_count_write(struct nfs_pageio_descriptor *pgio,
 {
 	if (!pgio->pg_lseg) {
 		pgio->pg_lseg = pnfs_update_layout(pgio->pg_inode,
-						   req->wb_context,
+						   nfs_req_openctx(req),
 						   0,
 						   NFS4_MAX_UINT64,
 						   IOMODE_RW,
@@ -1021,6 +1043,10 @@ ff_layout_pg_get_mirror_count_write(struct nfs_pageio_descriptor *pgio,
 	if (pgio->pg_lseg)
 		return FF_LAYOUT_MIRROR_COUNT(pgio->pg_lseg);
 
+	trace_pnfs_mds_fallback_pg_get_mirror_count(pgio->pg_inode,
+			0, NFS4_MAX_UINT64, IOMODE_RW,
+			NFS_I(pgio->pg_inode)->layout,
+			pgio->pg_lseg);
 	/* no lseg means that pnfs is not in use, so no mirroring here */
 	nfs_pageio_reset_write_mds(pgio);
 out:
@@ -1070,6 +1096,10 @@ static void ff_layout_reset_write(struct nfs_pgio_header *hdr, bool retry_pnfs)
 			hdr->args.count,
 			(unsigned long long)hdr->args.offset);
 
+		trace_pnfs_mds_fallback_write_done(hdr->inode,
+				hdr->args.offset, hdr->args.count,
+				IOMODE_RW, NFS_I(hdr->inode)->layout,
+				hdr->lseg);
 		task->tk_status = pnfs_write_done_resend_to_mds(hdr);
 	}
 }
@@ -1089,6 +1119,10 @@ static void ff_layout_reset_read(struct nfs_pgio_header *hdr)
 			hdr->args.count,
 			(unsigned long long)hdr->args.offset);
 
+		trace_pnfs_mds_fallback_read_done(hdr->inode,
+				hdr->args.offset, hdr->args.count,
+				IOMODE_READ, NFS_I(hdr->inode)->layout,
+				hdr->lseg);
 		task->tk_status = pnfs_read_done_resend_to_mds(hdr);
 	}
 }
@@ -1234,9 +1268,10 @@ static int ff_layout_async_handle_error(struct rpc_task *task,
 
 static void ff_layout_io_track_ds_error(struct pnfs_layout_segment *lseg,
 					int idx, u64 offset, u64 length,
-					u32 status, int opnum, int error)
+					u32 *op_status, int opnum, int error)
 {
 	struct nfs4_ff_layout_mirror *mirror;
+	u32 status = *op_status;
 	int err;
 
 	if (status == 0) {
@@ -1254,10 +1289,10 @@ static void ff_layout_io_track_ds_error(struct pnfs_layout_segment *lseg,
 		case -ENOBUFS:
 		case -EPIPE:
 		case -EPERM:
-			status = NFS4ERR_NXIO;
+			*op_status = status = NFS4ERR_NXIO;
 			break;
 		case -EACCES:
-			status = NFS4ERR_ACCESS;
+			*op_status = status = NFS4ERR_ACCESS;
 			break;
 		default:
 			return;
@@ -1289,16 +1324,19 @@ static int ff_layout_read_done_cb(struct rpc_task *task,
 	int new_idx = hdr->pgio_mirror_idx;
 	int err;
 
-	trace_nfs4_pnfs_read(hdr, task->tk_status);
-	if (task->tk_status < 0)
+	if (task->tk_status < 0) {
 		ff_layout_io_track_ds_error(hdr->lseg, hdr->pgio_mirror_idx,
 					    hdr->args.offset, hdr->args.count,
-					    hdr->res.op_status, OP_READ,
+					    &hdr->res.op_status, OP_READ,
 					    task->tk_status);
+		trace_ff_layout_read_error(hdr);
+	}
+
 	err = ff_layout_async_handle_error(task, hdr->args.context->state,
 					   hdr->ds_clp, hdr->lseg,
 					   hdr->pgio_mirror_idx);
 
+	trace_nfs4_pnfs_read(hdr, err);
 	clear_bit(NFS_IOHDR_RESEND_PNFS, &hdr->flags);
 	clear_bit(NFS_IOHDR_RESEND_MDS, &hdr->flags);
 	switch (err) {
@@ -1462,16 +1500,19 @@ static int ff_layout_write_done_cb(struct rpc_task *task,
 	loff_t end_offs = 0;
 	int err;
 
-	trace_nfs4_pnfs_write(hdr, task->tk_status);
-	if (task->tk_status < 0)
+	if (task->tk_status < 0) {
 		ff_layout_io_track_ds_error(hdr->lseg, hdr->pgio_mirror_idx,
 					    hdr->args.offset, hdr->args.count,
-					    hdr->res.op_status, OP_WRITE,
+					    &hdr->res.op_status, OP_WRITE,
 					    task->tk_status);
+		trace_ff_layout_write_error(hdr);
+	}
+
 	err = ff_layout_async_handle_error(task, hdr->args.context->state,
 					   hdr->ds_clp, hdr->lseg,
 					   hdr->pgio_mirror_idx);
 
+	trace_nfs4_pnfs_write(hdr, err);
 	clear_bit(NFS_IOHDR_RESEND_PNFS, &hdr->flags);
 	clear_bit(NFS_IOHDR_RESEND_MDS, &hdr->flags);
 	switch (err) {
@@ -1505,15 +1546,18 @@ static int ff_layout_commit_done_cb(struct rpc_task *task,
 {
 	int err;
 
-	trace_nfs4_pnfs_commit_ds(data, task->tk_status);
-	if (task->tk_status < 0)
+	if (task->tk_status < 0) {
 		ff_layout_io_track_ds_error(data->lseg, data->ds_commit_index,
 					    data->args.offset, data->args.count,
-					    data->res.op_status, OP_COMMIT,
+					    &data->res.op_status, OP_COMMIT,
 					    task->tk_status);
+		trace_ff_layout_commit_error(data);
+	}
+
 	err = ff_layout_async_handle_error(task, NULL, data->ds_clp,
 					   data->lseg, data->ds_commit_index);
 
+	trace_nfs4_pnfs_commit_ds(data, err);
 	switch (err) {
 	case -NFS4ERR_RESET_TO_PNFS:
 		pnfs_generic_prepare_to_resend_writes(data);
@@ -1805,6 +1849,9 @@ ff_layout_read_pagelist(struct nfs_pgio_header *hdr)
 out_failed:
 	if (ff_layout_avoid_mds_available_ds(lseg))
 		return PNFS_TRY_AGAIN;
+	trace_pnfs_mds_fallback_read_pagelist(hdr->inode,
+			hdr->args.offset, hdr->args.count,
+			IOMODE_READ, NFS_I(hdr->inode)->layout, lseg);
 	return PNFS_NOT_ATTEMPTED;
 }
 
@@ -1870,6 +1917,9 @@ ff_layout_write_pagelist(struct nfs_pgio_header *hdr, int sync)
 out_failed:
 	if (ff_layout_avoid_mds_available_ds(lseg))
 		return PNFS_TRY_AGAIN;
+	trace_pnfs_mds_fallback_write_pagelist(hdr->inode,
+			hdr->args.offset, hdr->args.count,
+			IOMODE_RW, NFS_I(hdr->inode)->layout, lseg);
 	return PNFS_NOT_ATTEMPTED;
 }
 
@@ -2498,3 +2548,7 @@ MODULE_DESCRIPTION("The NFSv4 flexfile layout driver");
 
 module_init(nfs4flexfilelayout_init);
 module_exit(nfs4flexfilelayout_exit);
+
+module_param(io_maxretrans, ushort, 0644);
+MODULE_PARM_DESC(io_maxretrans, "The  number of times the NFSv4.1 client "
+			"retries an I/O request before returning an error. ");

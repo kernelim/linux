@@ -7,6 +7,7 @@
 #include <linux/spinlock.h>
 #include <linux/mm_types.h>
 #include <linux/srcu.h>
+#include <linux/interval_tree.h>
 #include <linux/rh_kabi.h>
 
 struct mmu_notifier;
@@ -15,7 +16,43 @@ struct mmu_notifier_ops;
 /* mmu_notifier_ops flags */
 #define MMU_INVALIDATE_DOES_NOT_BLOCK	(0x01)
 
-#ifdef CONFIG_MMU_NOTIFIER
+/**
+ * enum mmu_notifier_event - reason for the mmu notifier callback
+ * @MMU_NOTIFY_UNMAP: either munmap() that unmap the range or a mremap() that
+ * move the range
+ *
+ * @MMU_NOTIFY_CLEAR: clear page table entry (many reasons for this like
+ * madvise() or replacing a page by another one, ...).
+ *
+ * @MMU_NOTIFY_PROTECTION_VMA: update is due to protection change for the range
+ * ie using the vma access permission (vm_page_prot) to update the whole range
+ * is enough no need to inspect changes to the CPU page table (mprotect()
+ * syscall)
+ *
+ * @MMU_NOTIFY_PROTECTION_PAGE: update is due to change in read/write flag for
+ * pages in the range so to mirror those changes the user must inspect the CPU
+ * page table (from the end callback).
+ *
+ * @MMU_NOTIFY_SOFT_DIRTY: soft dirty accounting (still same page and same
+ * access flags). User should soft dirty the page in the end callback to make
+ * sure that anyone relying on soft dirtyness catch pages that might be written
+ * through non CPU mappings.
+ *
+ * @MMU_NOTIFY_RELEASE: used during mmu_interval_notifier invalidate to signal
+ * that the mm refcount is zero and the range is no longer accessible.
+ */
+enum mmu_notifier_event {
+	MMU_NOTIFY_UNMAP = 0,
+	MMU_NOTIFY_CLEAR,
+	MMU_NOTIFY_PROTECTION_VMA,
+	MMU_NOTIFY_PROTECTION_PAGE,
+	MMU_NOTIFY_SOFT_DIRTY,
+	MMU_NOTIFY_RELEASE,
+};
+
+#ifdef CONFIG_LOCKDEP
+extern struct lockdep_map __mmu_notifier_invalidate_range_start_map;
+#endif
 
 /*
  * The mmu notifier_mm structure is allocated and installed in
@@ -23,11 +60,27 @@ struct mmu_notifier_ops;
  * critical section and it's released only when mm_count reaches zero
  * in mmdrop().
  */
+#ifdef __GENKSYMS__
 struct mmu_notifier_mm {
-	/* all mmu notifiers registerd in this mm are queued in this list */
+	/* all mmu notifiers registered in this mm are queued in this list */
 	struct hlist_head list;
-	/* to serialize the list modifications and hlist_unhashed */
 	spinlock_t lock;
+};
+#else
+struct mmu_notifier_mm;
+#endif
+struct mmu_notifier;
+struct mmu_interval_notifier;
+/* mmu_notifier_ops flags */
+#define MMU_INVALIDATE_DOES_NOT_BLOCK	(0x01)
+
+#define MMU_NOTIFIER_RANGE_BLOCKABLE (1 << 0)
+struct mmu_notifier_range {
+	struct mm_struct *mm;
+	unsigned long start;
+	unsigned long end;
+	unsigned flags;
+	enum mmu_notifier_event event;
 };
 
 struct mmu_notifier_ops {
@@ -188,8 +241,18 @@ struct mmu_notifier_ops {
 	void (*invalidate_range)(struct mmu_notifier *mn, struct mm_struct *mm,
 				 unsigned long start, unsigned long end);
 
-	RH_KABI_RESERVE(1)
-	RH_KABI_RESERVE(2)
+       /*
+	* These callbacks are used with the get/put interface to manage the
+	* lifetime of the mmu_notifier memory. alloc_notifier() returns a new
+	* notifier for use with the mm.
+	*
+	* free_notifier() is only called after the mmu_notifier has been
+	* fully put, calls to any ops callback are prevented and no ops
+	* callbacks are currently running. It is called from a SRCU callback
+	* and cannot sleep.
+	*/
+	RH_KABI_USE(1, struct mmu_notifier *(*alloc_notifier)(struct mm_struct *mm))
+	RH_KABI_USE(2, void (*free_notifier)(struct mmu_notifier *mn))
 	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)
 };
@@ -205,17 +268,59 @@ struct mmu_notifier_ops {
  * 2. One of the reverse map locks is held (i_mmap_rwsem or anon_vma->rwsem).
  * 3. No other concurrent thread can access the list (release)
  */
+struct mmu_notifier_rh {
+	struct mm_struct *mm;
+	struct rcu_head rcu;
+	unsigned int users;
+	struct mmu_notifier *back_ptr;
+};
+
 struct mmu_notifier {
 	struct hlist_node hlist;
 	const struct mmu_notifier_ops *ops;
-	RH_KABI_RESERVE(1)
-	RH_KABI_RESERVE(2)
+	RH_KABI_USE_AUX_PTR(1, 2, mmu_notifier)
 };
 
+/**
+ * struct mmu_interval_notifier_ops
+ * @invalidate: Upon return the caller must stop using any SPTEs within this
+ *              range. This function can sleep. Return false only if sleeping
+ *              was required but mmu_notifier_range_blockable(range) is false.
+ */
+struct mmu_interval_notifier_ops {
+	bool (*invalidate)(struct mmu_interval_notifier *mni,
+			   const struct mmu_notifier_range *range,
+			   unsigned long cur_seq);
+};
+
+struct mmu_interval_notifier {
+	struct interval_tree_node interval_tree;
+	const struct mmu_interval_notifier_ops *ops;
+	struct mm_struct *mm;
+	struct hlist_node deferred_item;
+	unsigned long invalidate_seq;
+};
+
+#ifdef CONFIG_MMU_NOTIFIER
 static inline int mm_has_notifiers(struct mm_struct *mm)
 {
 	return unlikely(mm->mmu_notifier_mm);
 }
+
+struct mmu_notifier *mmu_notifier_get_locked(const struct mmu_notifier_ops *ops,
+					     struct mm_struct *mm);
+static inline struct mmu_notifier *
+mmu_notifier_get(const struct mmu_notifier_ops *ops, struct mm_struct *mm)
+{
+	struct mmu_notifier *ret;
+
+	down_write(&mm->mmap_sem);
+	ret = mmu_notifier_get_locked(ops, mm);
+	up_write(&mm->mmap_sem);
+	return ret;
+}
+void mmu_notifier_put(struct mmu_notifier *mn);
+void mmu_notifier_synchronize(void);
 
 extern int mmu_notifier_register(struct mmu_notifier *mn,
 				 struct mm_struct *mm);
@@ -225,6 +330,81 @@ extern void mmu_notifier_unregister(struct mmu_notifier *mn,
 				    struct mm_struct *mm);
 extern void mmu_notifier_unregister_no_release(struct mmu_notifier *mn,
 					       struct mm_struct *mm);
+
+unsigned long mmu_interval_read_begin(struct mmu_interval_notifier *mni);
+int mmu_interval_notifier_insert(struct mmu_interval_notifier *mni,
+				 struct mm_struct *mm, unsigned long start,
+				 unsigned long length,
+				 const struct mmu_interval_notifier_ops *ops);
+int mmu_interval_notifier_insert_locked(
+	struct mmu_interval_notifier *mni, struct mm_struct *mm,
+	unsigned long start, unsigned long length,
+	const struct mmu_interval_notifier_ops *ops);
+void mmu_interval_notifier_remove(struct mmu_interval_notifier *mni);
+
+/**
+ * mmu_interval_set_seq - Save the invalidation sequence
+ * @mni - The mni passed to invalidate
+ * @cur_seq - The cur_seq passed to the invalidate() callback
+ *
+ * This must be called unconditionally from the invalidate callback of a
+ * struct mmu_interval_notifier_ops under the same lock that is used to call
+ * mmu_interval_read_retry(). It updates the sequence number for later use by
+ * mmu_interval_read_retry(). The provided cur_seq will always be odd.
+ *
+ * If the caller does not call mmu_interval_read_begin() or
+ * mmu_interval_read_retry() then this call is not required.
+ */
+static inline void mmu_interval_set_seq(struct mmu_interval_notifier *mni,
+					unsigned long cur_seq)
+{
+	WRITE_ONCE(mni->invalidate_seq, cur_seq);
+}
+
+/**
+ * mmu_interval_read_retry - End a read side critical section against a VA range
+ * mni: The range
+ * seq: The return of the paired mmu_interval_read_begin()
+ *
+ * This MUST be called under a user provided lock that is also held
+ * unconditionally by op->invalidate() when it calls mmu_interval_set_seq().
+ *
+ * Each call should be paired with a single mmu_interval_read_begin() and
+ * should be used to conclude the read side.
+ *
+ * Returns true if an invalidation collided with this critical section, and
+ * the caller should retry.
+ */
+static inline bool mmu_interval_read_retry(struct mmu_interval_notifier *mni,
+					   unsigned long seq)
+{
+	return mni->invalidate_seq != seq;
+}
+
+/**
+ * mmu_interval_check_retry - Test if a collision has occurred
+ * mni: The range
+ * seq: The return of the matching mmu_interval_read_begin()
+ *
+ * This can be used in the critical section between mmu_interval_read_begin()
+ * and mmu_interval_read_retry().  A return of true indicates an invalidation
+ * has collided with this critical region and a future
+ * mmu_interval_read_retry() will return true.
+ *
+ * False is not reliable and only suggests a collision may not have
+ * occured. It can be called many times and does not have to hold the user
+ * provided lock.
+ *
+ * This call can be used as part of loops and other expensive operations to
+ * expedite a retry.
+ */
+static inline bool mmu_interval_check_retry(struct mmu_interval_notifier *mni,
+				    unsigned long seq)
+{
+	/* Pairs with the WRITE_ONCE in mmu_interval_set_seq() */
+	return READ_ONCE(mni->invalidate_seq) != seq;
+}
+
 extern void __mmu_notifier_mm_destroy(struct mm_struct *mm);
 extern void __mmu_notifier_release(struct mm_struct *mm);
 extern int __mmu_notifier_clear_flush_young(struct mm_struct *mm,
@@ -288,8 +468,10 @@ static inline void mmu_notifier_change_pte(struct mm_struct *mm,
 static inline void mmu_notifier_invalidate_range_start(struct mm_struct *mm,
 				  unsigned long start, unsigned long end)
 {
+	lock_map_acquire(&__mmu_notifier_invalidate_range_start_map);
 	if (mm_has_notifiers(mm))
 		__mmu_notifier_invalidate_range_start(mm, start, end);
+	lock_map_release(&__mmu_notifier_invalidate_range_start_map);
 }
 
 static inline void mmu_notifier_invalidate_range_end(struct mm_struct *mm,
@@ -433,7 +615,6 @@ static inline void mmu_notifier_mm_destroy(struct mm_struct *mm)
 
 extern void mmu_notifier_call_srcu(struct rcu_head *rcu,
 				   void (*func)(struct rcu_head *rcu));
-extern void mmu_notifier_synchronize(void);
 
 #else /* CONFIG_MMU_NOTIFIER */
 
@@ -505,6 +686,10 @@ static inline void mmu_notifier_mm_destroy(struct mm_struct *mm)
 #define pmdp_huge_clear_flush_notify pmdp_huge_clear_flush
 #define pudp_huge_clear_flush_notify pudp_huge_clear_flush
 #define set_pte_at_notify set_pte_at
+
+static inline void mmu_notifier_synchronize(void)
+{
+}
 
 #endif /* CONFIG_MMU_NOTIFIER */
 

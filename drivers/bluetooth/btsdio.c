@@ -160,11 +160,20 @@ static int btsdio_rx_packet(struct btsdio_data *data)
 
 	data->hdev->stat.byte_rx += len;
 
-	hci_skb_pkt_type(skb) = hdr[3];
-
-	err = hci_recv_frame(data->hdev, skb);
-	if (err < 0)
-		return err;
+	switch (hdr[3]) {
+	case HCI_EVENT_PKT:
+	case HCI_ACLDATA_PKT:
+	case HCI_SCODATA_PKT:
+	case HCI_ISODATA_PKT:
+		hci_skb_pkt_type(skb) = hdr[3];
+		err = hci_recv_frame(data->hdev, skb);
+		if (err < 0)
+			return err;
+		break;
+	default:
+		kfree_skb(skb);
+		return -EINVAL;
+	}
 
 	sdio_writeb(data->func, 0x00, REG_PC_RRT, NULL);
 
@@ -293,13 +302,18 @@ static int btsdio_probe(struct sdio_func *func,
 		tuple = tuple->next;
 	}
 
-	/* BCM43341 devices soldered onto the PCB (non-removable) use an
-	 * uart connection for bluetooth, ignore the BT SDIO interface.
+	/* Broadcom devices soldered onto the PCB (non-removable) use an
+	 * UART connection for Bluetooth, ignore the BT SDIO interface.
 	 */
 	if (func->vendor == SDIO_VENDOR_ID_BROADCOM &&
-	    func->device == SDIO_DEVICE_ID_BROADCOM_43341 &&
-	    !mmc_card_is_removable(func->card->host))
-		return -ENODEV;
+	    !mmc_card_is_removable(func->card->host)) {
+		switch (func->device) {
+		case SDIO_DEVICE_ID_BROADCOM_43341:
+		case SDIO_DEVICE_ID_BROADCOM_43430:
+		case SDIO_DEVICE_ID_BROADCOM_4356:
+			return -ENODEV;
+		}
+	}
 
 	data = devm_kzalloc(&func->dev, sizeof(*data), GFP_KERNEL);
 	if (!data)

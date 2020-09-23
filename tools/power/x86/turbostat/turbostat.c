@@ -2765,12 +2765,19 @@ void re_initialize(void)
 void set_max_cpu_num(void)
 {
 	FILE *filep;
+	int base_cpu;
 	unsigned long dummy;
+	char pathname[64];
 
+	base_cpu = sched_getcpu();
+	if (base_cpu < 0)
+		err(1, "cannot find calling cpu ID");
+	sprintf(pathname,
+		"/sys/devices/system/cpu/cpu%d/topology/thread_siblings",
+		base_cpu);
+
+	filep = fopen_or_die(pathname, "r");
 	topo.max_cpu_num = 0;
-	filep = fopen_or_die(
-			"/sys/devices/system/cpu/cpu0/topology/thread_siblings",
-			"r");
 	while (fscanf(filep, "%lx,", &dummy) == 1)
 		topo.max_cpu_num += BITMASK_SIZE;
 	fclose(filep);
@@ -4499,10 +4506,10 @@ void decode_feature_control_msr(void)
 {
 	unsigned long long msr;
 
-	if (!get_msr(base_cpu, MSR_IA32_FEATURE_CONTROL, &msr))
+	if (!get_msr(base_cpu, MSR_IA32_FEAT_CTL, &msr))
 		fprintf(outf, "cpu%d: MSR_IA32_FEATURE_CONTROL: 0x%08llx (%sLocked %s)\n",
 			base_cpu, msr,
-			msr & FEATURE_CONTROL_LOCKED ? "" : "UN-",
+			msr & FEAT_CTL_LOCKED ? "" : "UN-",
 			msr & (1 << 18) ? "SGX" : "");
 }
 
@@ -4616,10 +4623,15 @@ unsigned int intel_model_duplicates(unsigned int model)
 
 	case INTEL_FAM6_ICELAKE_L:
 	case INTEL_FAM6_ICELAKE_NNPI:
+	case INTEL_FAM6_TIGERLAKE_L:
+	case INTEL_FAM6_TIGERLAKE:
 		return INTEL_FAM6_CANNONLAKE_L;
 
 	case INTEL_FAM6_ATOM_TREMONT_D:
 		return INTEL_FAM6_ATOM_GOLDMONT_D;
+
+	case INTEL_FAM6_ICELAKE_X:
+		return INTEL_FAM6_SKYLAKE_X;
 	}
 	return model;
 }

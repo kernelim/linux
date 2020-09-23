@@ -12,8 +12,75 @@
  */
 enum bpf_field_info_kind {
 	BPF_FIELD_BYTE_OFFSET = 0,	/* field byte offset */
+	BPF_FIELD_BYTE_SIZE = 1,
 	BPF_FIELD_EXISTS = 2,		/* field existence in target kernel */
+	BPF_FIELD_SIGNED = 3,
+	BPF_FIELD_LSHIFT_U64 = 4,
+	BPF_FIELD_RSHIFT_U64 = 5,
 };
+
+#define __CORE_RELO(src, field, info)					      \
+	__builtin_preserve_field_info((src)->field, BPF_FIELD_##info)
+
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+#define __CORE_BITFIELD_PROBE_READ(dst, src, fld)			      \
+	bpf_probe_read((void *)dst,					      \
+		       __CORE_RELO(src, fld, BYTE_SIZE),		      \
+		       (const void *)src + __CORE_RELO(src, fld, BYTE_OFFSET))
+#else
+/* semantics of LSHIFT_64 assumes loading values into low-ordered bytes, so
+ * for big-endian we need to adjust destination pointer accordingly, based on
+ * field byte size
+ */
+#define __CORE_BITFIELD_PROBE_READ(dst, src, fld)			      \
+	bpf_probe_read((void *)dst + (8 - __CORE_RELO(src, fld, BYTE_SIZE)),  \
+		       __CORE_RELO(src, fld, BYTE_SIZE),		      \
+		       (const void *)src + __CORE_RELO(src, fld, BYTE_OFFSET))
+#endif
+
+/*
+ * Extract bitfield, identified by s->field, and return its value as u64.
+ * All this is done in relocatable manner, so bitfield changes such as
+ * signedness, bit size, offset changes, this will be handled automatically.
+ * This version of macro is using bpf_probe_read() to read underlying integer
+ * storage. Macro functions as an expression and its return type is
+ * bpf_probe_read()'s return value: 0, on success, <0 on error.
+ */
+#define BPF_CORE_READ_BITFIELD_PROBED(s, field) ({			      \
+	unsigned long long val = 0;					      \
+									      \
+	__CORE_BITFIELD_PROBE_READ(&val, s, field);			      \
+	val <<= __CORE_RELO(s, field, LSHIFT_U64);			      \
+	if (__CORE_RELO(s, field, SIGNED))				      \
+		val = ((long long)val) >> __CORE_RELO(s, field, RSHIFT_U64);  \
+	else								      \
+		val = val >> __CORE_RELO(s, field, RSHIFT_U64);		      \
+	val;								      \
+})
+
+/*
+ * Extract bitfield, identified by s->field, and return its value as u64.
+ * This version of macro is using direct memory reads and should be used from
+ * BPF program types that support such functionality (e.g., typed raw
+ * tracepoints).
+ */
+#define BPF_CORE_READ_BITFIELD(s, field) ({				      \
+	const void *p = (const void *)s + __CORE_RELO(s, field, BYTE_OFFSET); \
+	unsigned long long val;						      \
+									      \
+	switch (__CORE_RELO(s, field, BYTE_SIZE)) {			      \
+	case 1: val = *(const unsigned char *)p;			      \
+	case 2: val = *(const unsigned short *)p;			      \
+	case 4: val = *(const unsigned int *)p;				      \
+	case 8: val = *(const unsigned long long *)p;			      \
+	}								      \
+	val <<= __CORE_RELO(s, field, LSHIFT_U64);			      \
+	if (__CORE_RELO(s, field, SIGNED))				      \
+		val = ((long long)val) >> __CORE_RELO(s, field, RSHIFT_U64);  \
+	else								      \
+		val = val >> __CORE_RELO(s, field, RSHIFT_U64);		      \
+	val;								      \
+})
 
 /*
  * Convenience macro to check that field actually exists in target kernel's.
@@ -29,6 +96,13 @@ enum bpf_field_info_kind {
 #define bpf_core_field_exists(field)					    \
 	__builtin_preserve_field_info(field, BPF_FIELD_EXISTS)
 #endif /* __has_builtin */
+
+/*
+ * Convenience macro to get byte size of a field. Works for integers,
+ * struct/unions, pointers, arrays, and enums.
+ */
+#define bpf_core_field_size(field)					    \
+	__builtin_preserve_field_info(field, BPF_FIELD_BYTE_SIZE)
 
 /*
  * bpf_core_read() abstracts away bpf_probe_read() call and captures offset
@@ -116,11 +190,11 @@ enum bpf_field_info_kind {
 	read_fn((void *)(dst), sizeof(*(dst)), &((src_type)(src))->accessor)
 
 /* "recursively" read a sequence of inner pointers using local __t var */
+#define ___rd_first(src, a) ___read(bpf_core_read, &__t, ___type(src), src, a);
 #define ___rd_last(...)							    \
 	___read(bpf_core_read, &__t,					    \
 		___type(___nolast(__VA_ARGS__)), __t, ___last(__VA_ARGS__));
-#define ___rd_p0(src) const void *__t = src;
-#define ___rd_p1(...) ___rd_p0(___nolast(__VA_ARGS__)) ___rd_last(__VA_ARGS__)
+#define ___rd_p1(...) const void *__t; ___rd_first(__VA_ARGS__)
 #define ___rd_p2(...) ___rd_p1(___nolast(__VA_ARGS__)) ___rd_last(__VA_ARGS__)
 #define ___rd_p3(...) ___rd_p2(___nolast(__VA_ARGS__)) ___rd_last(__VA_ARGS__)
 #define ___rd_p4(...) ___rd_p3(___nolast(__VA_ARGS__)) ___rd_last(__VA_ARGS__)

@@ -200,7 +200,7 @@ static void mlx5e_ethtool_get_speed_arr(struct mlx5_core_dev *mdev,
 					struct ptys2ethtool_config **arr,
 					u32 *size)
 {
-	bool ext = MLX5_CAP_PCAM_FEATURE(mdev, ptys_extended_ethernet);
+	bool ext = mlx5e_ptys_ext_supported(mdev);
 
 	*arr = ext ? ptys2ext_ethtool_table : ptys2legacy_ethtool_table;
 	*size = ext ? ARRAY_SIZE(ptys2ext_ethtool_table) :
@@ -357,7 +357,7 @@ int mlx5e_ethtool_set_ringparam(struct mlx5e_priv *priv,
 		goto unlock;
 	}
 
-	err = mlx5e_safe_switch_channels(priv, &new_channels, NULL);
+	err = mlx5e_safe_switch_channels(priv, &new_channels, NULL, NULL);
 
 unlock:
 	mutex_unlock(&priv->state_lock);
@@ -432,9 +432,7 @@ int mlx5e_ethtool_set_channels(struct mlx5e_priv *priv,
 
 	if (!test_bit(MLX5E_STATE_OPENED, &priv->state)) {
 		*cur_params = new_channels.params;
-		if (!netif_is_rxfh_configured(priv->netdev))
-			mlx5e_build_default_indir_rqt(priv->rss_params.indirection_rqt,
-						      MLX5E_INDIR_RQT_SIZE, count);
+		mlx5e_num_channels_changed(priv);
 		goto out;
 	}
 
@@ -442,12 +440,9 @@ int mlx5e_ethtool_set_channels(struct mlx5e_priv *priv,
 	if (arfs_enabled)
 		mlx5e_arfs_disable(priv);
 
-	if (!netif_is_rxfh_configured(priv->netdev))
-		mlx5e_build_default_indir_rqt(priv->rss_params.indirection_rqt,
-					      MLX5E_INDIR_RQT_SIZE, count);
-
 	/* Switch to new channels, set new parameters and close old ones */
-	err = mlx5e_safe_switch_channels(priv, &new_channels, NULL);
+	err = mlx5e_safe_switch_channels(priv, &new_channels,
+					 mlx5e_num_channels_changed_ctx, NULL);
 
 	if (arfs_enabled) {
 		int err2 = mlx5e_arfs_enable(priv);
@@ -532,8 +527,8 @@ int mlx5e_ethtool_set_coalesce(struct mlx5e_priv *priv,
 	struct dim_cq_moder *rx_moder, *tx_moder;
 	struct mlx5_core_dev *mdev = priv->mdev;
 	struct mlx5e_channels new_channels = {};
+	bool reset_rx, reset_tx;
 	int err = 0;
-	bool reset;
 
 	if (!MLX5_CAP_GEN(mdev, cq_moderation))
 		return -EOPNOTSUPP;
@@ -571,16 +566,29 @@ int mlx5e_ethtool_set_coalesce(struct mlx5e_priv *priv,
 	}
 	/* we are opened */
 
-	reset = (!!coal->use_adaptive_rx_coalesce != priv->channels.params.rx_dim_enabled) ||
-		(!!coal->use_adaptive_tx_coalesce != priv->channels.params.tx_dim_enabled);
+	reset_rx = !!coal->use_adaptive_rx_coalesce != priv->channels.params.rx_dim_enabled;
+	reset_tx = !!coal->use_adaptive_tx_coalesce != priv->channels.params.tx_dim_enabled;
 
-	if (!reset) {
+	if (!reset_rx && !reset_tx) {
 		mlx5e_set_priv_channels_coalesce(priv, coal);
 		priv->channels.params = new_channels.params;
 		goto out;
 	}
 
-	err = mlx5e_safe_switch_channels(priv, &new_channels, NULL);
+	if (reset_rx) {
+		u8 mode = MLX5E_GET_PFLAG(&new_channels.params,
+					  MLX5E_PFLAG_RX_CQE_BASED_MODER);
+
+		mlx5e_reset_rx_moderation(&new_channels.params, mode);
+	}
+	if (reset_tx) {
+		u8 mode = MLX5E_GET_PFLAG(&new_channels.params,
+					  MLX5E_PFLAG_TX_CQE_BASED_MODER);
+
+		mlx5e_reset_tx_moderation(&new_channels.params, mode);
+	}
+
+	err = mlx5e_safe_switch_channels(priv, &new_channels, NULL, NULL);
 
 out:
 	mutex_unlock(&priv->state_lock);
@@ -773,6 +781,7 @@ static void ptys2ethtool_supported_advertised_port(struct ethtool_link_ksettings
 
 static void get_speed_duplex(struct net_device *netdev,
 			     u32 eth_proto_oper, bool force_legacy,
+			     u16 data_rate_oper,
 			     struct ethtool_link_ksettings *link_ksettings)
 {
 	struct mlx5e_priv *priv = netdev_priv(netdev);
@@ -784,7 +793,10 @@ static void get_speed_duplex(struct net_device *netdev,
 
 	speed = mlx5e_port_ptys2speed(priv->mdev, eth_proto_oper, force_legacy);
 	if (!speed) {
-		speed = SPEED_UNKNOWN;
+		if (data_rate_oper)
+			speed = 100 * data_rate_oper;
+		else
+			speed = SPEED_UNKNOWN;
 		goto out;
 	}
 
@@ -864,7 +876,7 @@ static void get_lp_advertising(struct mlx5_core_dev *mdev, u32 eth_proto_lp,
 			       struct ethtool_link_ksettings *link_ksettings)
 {
 	unsigned long *lp_advertising = link_ksettings->link_modes.lp_advertising;
-	bool ext = MLX5_CAP_PCAM_FEATURE(mdev, ptys_extended_ethernet);
+	bool ext = mlx5e_ptys_ext_supported(mdev);
 
 	ptys2ethtool_adver_link(lp_advertising, eth_proto_lp, ext);
 }
@@ -873,17 +885,18 @@ int mlx5e_ethtool_get_link_ksettings(struct mlx5e_priv *priv,
 				     struct ethtool_link_ksettings *link_ksettings)
 {
 	struct mlx5_core_dev *mdev = priv->mdev;
-	u32 out[MLX5_ST_SZ_DW(ptys_reg)] = {0};
+	u32 out[MLX5_ST_SZ_DW(ptys_reg)] = {};
+	u32 eth_proto_admin;
+	u8 an_disable_admin;
+	u16 data_rate_oper;
+	u32 eth_proto_oper;
+	u32 eth_proto_cap;
+	u8 connector_type;
 	u32 rx_pause = 0;
 	u32 tx_pause = 0;
-	u32 eth_proto_cap;
-	u32 eth_proto_admin;
 	u32 eth_proto_lp;
-	u32 eth_proto_oper;
-	u8 an_disable_admin;
-	u8 an_status;
-	u8 connector_type;
 	bool admin_ext;
+	u8 an_status;
 	bool ext;
 	int err;
 
@@ -893,7 +906,7 @@ int mlx5e_ethtool_get_link_ksettings(struct mlx5e_priv *priv,
 			   __func__, err);
 		goto err_query_regs;
 	}
-	ext = MLX5_CAP_PCAM_FEATURE(mdev, ptys_extended_ethernet);
+	ext = !!MLX5_GET_ETH_PROTO(ptys_reg, out, true, eth_proto_capability);
 	eth_proto_cap    = MLX5_GET_ETH_PROTO(ptys_reg, out, ext,
 					      eth_proto_capability);
 	eth_proto_admin  = MLX5_GET_ETH_PROTO(ptys_reg, out, ext,
@@ -917,6 +930,7 @@ int mlx5e_ethtool_get_link_ksettings(struct mlx5e_priv *priv,
 	an_disable_admin    = MLX5_GET(ptys_reg, out, an_disable_admin);
 	an_status	    = MLX5_GET(ptys_reg, out, an_status);
 	connector_type	    = MLX5_GET(ptys_reg, out, connector_type);
+	data_rate_oper	    = MLX5_GET(ptys_reg, out, data_rate_oper);
 
 	mlx5_query_port_pause(mdev, &rx_pause, &tx_pause);
 
@@ -927,7 +941,7 @@ int mlx5e_ethtool_get_link_ksettings(struct mlx5e_priv *priv,
 	get_advertising(eth_proto_admin, tx_pause, rx_pause, link_ksettings,
 			admin_ext);
 	get_speed_duplex(priv->netdev, eth_proto_oper, !admin_ext,
-			 link_ksettings);
+			 data_rate_oper, link_ksettings);
 
 	eth_proto_oper = eth_proto_oper ? eth_proto_oper : eth_proto_cap;
 
@@ -1045,7 +1059,7 @@ int mlx5e_ethtool_set_link_ksettings(struct mlx5e_priv *priv,
 	autoneg = link_ksettings->base.autoneg;
 	speed = link_ksettings->base.speed;
 
-	ext_supported = MLX5_CAP_PCAM_FEATURE(mdev, ptys_extended_ethernet);
+	ext_supported = mlx5e_ptys_ext_supported(mdev);
 	ext = ext_requested(autoneg, adver, ext_supported);
 	if (!ext_supported && ext)
 		return -EOPNOTSUPP;
@@ -1152,7 +1166,8 @@ int mlx5e_set_rxfh(struct net_device *dev, const u32 *indir,
 	struct mlx5e_priv *priv = netdev_priv(dev);
 	struct mlx5e_rss_params *rss = &priv->rss_params;
 	int inlen = MLX5_ST_SZ_BYTES(modify_tir_in);
-	bool hash_changed = false;
+	bool refresh_tirs = false;
+	bool refresh_rqt = false;
 	void *in;
 
 	if ((hfunc != ETH_RSS_HASH_NO_CHANGE) &&
@@ -1168,36 +1183,38 @@ int mlx5e_set_rxfh(struct net_device *dev, const u32 *indir,
 
 	if (hfunc != ETH_RSS_HASH_NO_CHANGE && hfunc != rss->hfunc) {
 		rss->hfunc = hfunc;
-		hash_changed = true;
+		refresh_rqt = true;
+		refresh_tirs = true;
 	}
 
 	if (indir) {
 		memcpy(rss->indirection_rqt, indir,
 		       sizeof(rss->indirection_rqt));
-
-		if (test_bit(MLX5E_STATE_OPENED, &priv->state)) {
-			u32 rqtn = priv->indir_rqt.rqtn;
-			struct mlx5e_redirect_rqt_param rrp = {
-				.is_rss = true,
-				{
-					.rss = {
-						.hfunc = rss->hfunc,
-						.channels  = &priv->channels,
-					},
-				},
-			};
-
-			mlx5e_redirect_rqt(priv, rqtn, MLX5E_INDIR_RQT_SIZE, rrp);
-		}
+		refresh_rqt = true;
 	}
 
 	if (key) {
 		memcpy(rss->toeplitz_hash_key, key,
 		       sizeof(rss->toeplitz_hash_key));
-		hash_changed = hash_changed || rss->hfunc == ETH_RSS_HASH_TOP;
+		refresh_tirs = refresh_tirs || rss->hfunc == ETH_RSS_HASH_TOP;
 	}
 
-	if (hash_changed)
+	if (refresh_rqt && test_bit(MLX5E_STATE_OPENED, &priv->state)) {
+		struct mlx5e_redirect_rqt_param rrp = {
+			.is_rss = true,
+			{
+				.rss = {
+					.hfunc = rss->hfunc,
+					.channels  = &priv->channels,
+				},
+			},
+		};
+		u32 rqtn = priv->indir_rqt.rqtn;
+
+		mlx5e_redirect_rqt(priv, rqtn, MLX5E_INDIR_RQT_SIZE, rrp);
+	}
+
+	if (refresh_tirs)
 		mlx5e_modify_tirs_hash(priv, in, inlen);
 
 	mutex_unlock(&priv->state_lock);
@@ -1739,7 +1756,7 @@ static int set_pflag_cqe_based_moder(struct net_device *netdev, bool enable,
 		return 0;
 	}
 
-	return mlx5e_safe_switch_channels(priv, &new_channels, NULL);
+	return mlx5e_safe_switch_channels(priv, &new_channels, NULL, NULL);
 }
 
 static int set_pflag_tx_cqe_based_moder(struct net_device *netdev, bool enable)
@@ -1772,7 +1789,7 @@ int mlx5e_modify_rx_cqe_compression_locked(struct mlx5e_priv *priv, bool new_val
 		return 0;
 	}
 
-	err = mlx5e_safe_switch_channels(priv, &new_channels, NULL);
+	err = mlx5e_safe_switch_channels(priv, &new_channels, NULL, NULL);
 	if (err)
 		return err;
 
@@ -1829,7 +1846,7 @@ static int set_pflag_rx_striding_rq(struct net_device *netdev, bool enable)
 		return 0;
 	}
 
-	return mlx5e_safe_switch_channels(priv, &new_channels, NULL);
+	return mlx5e_safe_switch_channels(priv, &new_channels, NULL, NULL);
 }
 
 static int set_pflag_rx_no_csum_complete(struct net_device *netdev, bool enable)
@@ -1873,7 +1890,7 @@ static int set_pflag_xdp_tx_mpwqe(struct net_device *netdev, bool enable)
 		return 0;
 	}
 
-	err = mlx5e_safe_switch_channels(priv, &new_channels, NULL);
+	err = mlx5e_safe_switch_channels(priv, &new_channels, NULL, NULL);
 	return err;
 }
 
@@ -1962,6 +1979,9 @@ int mlx5e_set_rxnfc(struct net_device *dev, struct ethtool_rxnfc *cmd)
 }
 
 const struct ethtool_ops mlx5e_ethtool_ops = {
+	.supported_coalesce_params = ETHTOOL_COALESCE_USECS |
+				     ETHTOOL_COALESCE_MAX_FRAMES |
+				     ETHTOOL_COALESCE_USE_ADAPTIVE,
 	.get_drvinfo       = mlx5e_get_drvinfo,
 	.get_link          = ethtool_op_get_link,
 	.get_strings       = mlx5e_get_strings,

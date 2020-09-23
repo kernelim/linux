@@ -288,8 +288,8 @@ reserve memory.
 
 The automatically reserved memory size varies based on architecture.
 The size changes according to system memory size like below:
-    x86_64: 1G-64G:160M,64G-1T:256M,1T-:512M
-    s390x:  4G-64G:160M,64G-1T:256M,1T-:512M
+    x86_64: 1G-4G:160M,4G-64G:192M,64G-1T:256M,1T-:512M
+    s390x:  1G-4G:160M,4G-64G:192M,64G-1T:256M,1T-:512M
     arm64:  2G-:448M
     ppc64:  2G-4G:384M,4G-16G:512M,16G-64G:1G,64G-128G:2G,128G-:4G
 
@@ -511,6 +511,14 @@ The kernel parameter, panic_on_warn, calls panic() in all WARN() paths.  This
 will cause a kdump to occur at the panic() call.  In cases where a user wants
 to specify this during runtime, /proc/sys/kernel/panic_on_warn can be set to 1
 to achieve the same behaviour.
+
+Trigger Kdump on add_taint()
+============================
+
+The kernel parameter panic_on_taint facilitates a conditional call to panic()
+from within add_taint() whenever the value set in this bitmask matches with the
+bit flag being set by add_taint().
+This will cause a kdump to occur at the add_taint()->panic() call.
 
 Contact
 =======

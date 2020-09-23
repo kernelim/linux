@@ -42,6 +42,8 @@
 #include <linux/inetdevice.h>
 #include <net/addrconf.h>
 
+#include <trace/events/neigh.h>
+
 #define DEBUG
 #define NEIGH_DEBUG 1
 #define neigh_dbg(level, fmt, ...)		\
@@ -99,9 +101,7 @@ static int neigh_blackhole(struct neighbour *neigh, struct sk_buff *skb)
 
 static void neigh_cleanup_and_release(struct neighbour *neigh)
 {
-	if (neigh->parms->neigh_cleanup)
-		neigh->parms->neigh_cleanup(neigh);
-
+	trace_neigh_cleanup_and_release(neigh, 0);
 	__neigh_notify(neigh, RTM_DELNEIGH, 0, 0);
 	call_netevent_notifiers(NETEVENT_NEIGH_UPDATE, neigh);
 	neigh_release(neigh);
@@ -233,7 +233,8 @@ static void pneigh_queue_purge(struct sk_buff_head *list)
 	}
 }
 
-static void neigh_flush_dev(struct neigh_table *tbl, struct net_device *dev)
+static void neigh_flush_dev(struct neigh_table *tbl, struct net_device *dev,
+			    bool skip_perm)
 {
 	int i;
 	struct neigh_hash_table *nht;
@@ -248,6 +249,10 @@ static void neigh_flush_dev(struct neigh_table *tbl, struct net_device *dev)
 		while ((n = rcu_dereference_protected(*np,
 					lockdep_is_held(&tbl->lock))) != NULL) {
 			if (dev && n->dev != dev) {
+				np = &n->next;
+				continue;
+			}
+			if (skip_perm && n->nud_state & NUD_PERMANENT) {
 				np = &n->next;
 				continue;
 			}
@@ -286,19 +291,33 @@ static void neigh_flush_dev(struct neigh_table *tbl, struct net_device *dev)
 void neigh_changeaddr(struct neigh_table *tbl, struct net_device *dev)
 {
 	write_lock_bh(&tbl->lock);
-	neigh_flush_dev(tbl, dev);
+	neigh_flush_dev(tbl, dev, false);
 	write_unlock_bh(&tbl->lock);
 }
 EXPORT_SYMBOL(neigh_changeaddr);
 
-int neigh_ifdown(struct neigh_table *tbl, struct net_device *dev)
+static int __neigh_ifdown(struct neigh_table *tbl, struct net_device *dev,
+			  bool skip_perm)
 {
 	write_lock_bh(&tbl->lock);
-	neigh_flush_dev(tbl, dev);
+	neigh_flush_dev(tbl, dev, skip_perm);
 	pneigh_ifdown_and_unlock(tbl, dev);
 
 	del_timer_sync(&tbl->proxy_timer);
 	pneigh_queue_purge(&tbl->proxy_queue);
+	return 0;
+}
+
+int neigh_carrier_down(struct neigh_table *tbl, struct net_device *dev)
+{
+	__neigh_ifdown(tbl, dev, true);
+	return 0;
+}
+EXPORT_SYMBOL(neigh_carrier_down);
+
+int neigh_ifdown(struct neigh_table *tbl, struct net_device *dev)
+{
+	__neigh_ifdown(tbl, dev, false);
 	return 0;
 }
 EXPORT_SYMBOL(neigh_ifdown);
@@ -968,11 +987,12 @@ static void neigh_timer_handler(struct timer_list *t)
 			neigh->updated = jiffies;
 			atomic_set(&neigh->probes, 0);
 			notify = 1;
-			next = now + NEIGH_VAR(neigh->parms, RETRANS_TIME);
+			next = now + max(NEIGH_VAR(neigh->parms, RETRANS_TIME),
+					 HZ/100);
 		}
 	} else {
 		/* NUD_PROBE|NUD_INCOMPLETE */
-		next = now + NEIGH_VAR(neigh->parms, RETRANS_TIME);
+		next = now + max(NEIGH_VAR(neigh->parms, RETRANS_TIME), HZ/100);
 	}
 
 	if ((neigh->nud_state & (NUD_INCOMPLETE | NUD_PROBE)) &&
@@ -984,8 +1004,8 @@ static void neigh_timer_handler(struct timer_list *t)
 	}
 
 	if (neigh->nud_state & NUD_IN_TIMER) {
-		if (time_before(next, jiffies + HZ/2))
-			next = jiffies + HZ/2;
+		if (time_before(next, jiffies + HZ/100))
+			next = jiffies + HZ/100;
 		if (!mod_timer(&neigh->timer, next))
 			neigh_hold(neigh);
 	}
@@ -998,6 +1018,8 @@ out:
 
 	if (notify)
 		neigh_update_notify(neigh, 0);
+
+	trace_neigh_timer_handler(neigh, 0);
 
 	neigh_release(neigh);
 }
@@ -1026,7 +1048,7 @@ int __neigh_event_send(struct neighbour *neigh, struct sk_buff *skb)
 			neigh->nud_state     = NUD_INCOMPLETE;
 			neigh->updated = now;
 			next = now + max(NEIGH_VAR(neigh->parms, RETRANS_TIME),
-					 HZ/2);
+					 HZ/100);
 			neigh_add_timer(neigh, next);
 			immediate_probe = true;
 		} else {
@@ -1071,6 +1093,7 @@ out_unlock_bh:
 	else
 		write_unlock(&neigh->lock);
 	local_bh_enable();
+	trace_neigh_event_send_done(neigh, rc);
 	return rc;
 
 out_dead:
@@ -1078,6 +1101,7 @@ out_dead:
 		goto out_unlock_bh;
 	write_unlock_bh(&neigh->lock);
 	kfree_skb(skb);
+	trace_neigh_event_send_dead(neigh, 1);
 	return 1;
 }
 EXPORT_SYMBOL(__neigh_event_send);
@@ -1131,6 +1155,8 @@ static int __neigh_update(struct neighbour *neigh, const u8 *lladdr,
 	int notify = 0;
 	struct net_device *dev;
 	int update_isrouter = 0;
+
+	trace_neigh_update(neigh, lladdr, new, flags, nlmsg_pid);
 
 	write_lock_bh(&neigh->lock);
 
@@ -1295,6 +1321,8 @@ out:
 	if (notify)
 		neigh_update_notify(neigh, nlmsg_pid);
 
+	trace_neigh_update_done(neigh, err);
+
 	return err;
 }
 
@@ -1318,7 +1346,8 @@ void __neigh_set_probe_once(struct neighbour *neigh)
 	neigh->nud_state = NUD_INCOMPLETE;
 	atomic_set(&neigh->probes, neigh_max_probes(neigh));
 	neigh_add_timer(neigh,
-			jiffies + NEIGH_VAR(neigh->parms, RETRANS_TIME));
+			jiffies + max(NEIGH_VAR(neigh->parms, RETRANS_TIME),
+				      HZ/100));
 }
 EXPORT_SYMBOL(__neigh_set_probe_once);
 

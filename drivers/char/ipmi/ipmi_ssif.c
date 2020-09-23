@@ -313,6 +313,7 @@ static int start_send(struct ssif_info *ssif_info,
 
 static unsigned long *ipmi_ssif_lock_cond(struct ssif_info *ssif_info,
 					  unsigned long *flags)
+	__acquires(&ssif_info->lock)
 {
 	spin_lock_irqsave(&ssif_info->lock, *flags);
 	return flags;
@@ -320,6 +321,7 @@ static unsigned long *ipmi_ssif_lock_cond(struct ssif_info *ssif_info,
 
 static void ipmi_ssif_unlock_cond(struct ssif_info *ssif_info,
 				  unsigned long *flags)
+	__releases(&ssif_info->lock)
 {
 	spin_unlock_irqrestore(&ssif_info->lock, *flags);
 }
@@ -775,10 +777,14 @@ static void msg_done_handler(struct ssif_info *ssif_info, int result,
 	flags = ipmi_ssif_lock_cond(ssif_info, &oflags);
 	msg = ssif_info->curr_msg;
 	if (msg) {
+		if (data) {
+			if (len > IPMI_MAX_MSG_LENGTH)
+				len = IPMI_MAX_MSG_LENGTH;
+			memcpy(msg->rsp, data, len);
+		} else {
+			len = 0;
+		}
 		msg->rsp_size = len;
-		if (msg->rsp_size > IPMI_MAX_MSG_LENGTH)
-			msg->rsp_size = IPMI_MAX_MSG_LENGTH;
-		memcpy(msg->rsp, data, msg->rsp_size);
 		ssif_info->curr_msg = NULL;
 	}
 
@@ -1941,8 +1947,8 @@ static int ssif_adapter_handler(struct device *adev, void *opaque)
 	if (adev->type != &i2c_adapter_type)
 		return 0;
 
-	addr_info->added_client = i2c_new_device(to_i2c_adapter(adev),
-						 &addr_info->binfo);
+	addr_info->added_client = i2c_new_client_device(to_i2c_adapter(adev),
+							&addr_info->binfo);
 
 	if (!addr_info->adapter_name)
 		return 1; /* Only try the first I2C adapter by default. */
@@ -2017,7 +2023,7 @@ static void free_ssif_clients(void)
 static unsigned short *ssif_address_list(void)
 {
 	struct ssif_addr_info *info;
-	unsigned int count = 0, i;
+	unsigned int count = 0, i = 0;
 	unsigned short *address_list;
 
 	list_for_each_entry(info, &ssif_infos, link)
@@ -2028,18 +2034,17 @@ static unsigned short *ssif_address_list(void)
 	if (!address_list)
 		return NULL;
 
-	i = 0;
 	list_for_each_entry(info, &ssif_infos, link) {
 		unsigned short addr = info->binfo.addr;
 		int j;
 
 		for (j = 0; j < i; j++) {
 			if (address_list[j] == addr)
-				goto skip_addr;
+				/* Found a dup. */
+				break;
 		}
-		address_list[i] = addr;
-skip_addr:
-		i++;
+		if (j == i) /* Didn't find it in the list. */
+			address_list[i++] = addr;
 	}
 	address_list[i] = I2C_CLIENT_END;
 

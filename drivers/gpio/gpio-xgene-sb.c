@@ -28,6 +28,7 @@
 #include <linux/acpi.h>
 
 #include "gpiolib.h"
+#include "gpiolib-acpi.h"
 
 /* Common property names */
 #define XGENE_NIRQ_PROPERTY		"apm,nr-irqs"
@@ -133,7 +134,7 @@ static int xgene_gpio_sb_to_irq(struct gpio_chip *gc, u32 gpio)
 	fwspec.fwnode = gc->parent->fwnode;
 	fwspec.param_count = 2;
 	fwspec.param[0] = GPIO_TO_HWIRQ(priv, gpio);
-	fwspec.param[1] = IRQ_TYPE_NONE;
+	fwspec.param[1] = IRQ_TYPE_EDGE_RISING;
 	return irq_create_fwspec_mapping(&fwspec);
 }
 

@@ -80,6 +80,7 @@ static int rh_features_show(struct ctl_table *ctl, int write,
 	tbl.data = kmalloc(tbl.maxlen, GFP_KERNEL);
 	if (!tbl.data)
 		return -ENOMEM;
+	((char *)tbl.data)[0] = '\0';
 
 	rcu_read_lock();
 	list_for_each_entry_rcu(feat, &rh_feature_list, list) {

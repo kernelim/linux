@@ -40,64 +40,40 @@
 #include "book3s.h"
 #include "trace.h"
 
-#define VM_STAT(x, ...) offsetof(struct kvm, stat.x), KVM_STAT_VM, ## __VA_ARGS__
-#define VCPU_STAT(x, ...) offsetof(struct kvm_vcpu, stat.x), KVM_STAT_VCPU, ## __VA_ARGS__
-
 /* #define EXIT_DEBUG */
 
 struct kvm_stats_debugfs_item debugfs_entries[] = {
-	{ "exits",       VCPU_STAT(sum_exits) },
-	{ "mmio",        VCPU_STAT(mmio_exits) },
-	{ "sig",         VCPU_STAT(signal_exits) },
-	{ "sysc",        VCPU_STAT(syscall_exits) },
-	{ "inst_emu",    VCPU_STAT(emulated_inst_exits) },
-	{ "dec",         VCPU_STAT(dec_exits) },
-	{ "ext_intr",    VCPU_STAT(ext_intr_exits) },
-	{ "queue_intr",  VCPU_STAT(queue_intr) },
-	{ "halt_poll_success_ns",	VCPU_STAT(halt_poll_success_ns) },
-	{ "halt_poll_fail_ns",		VCPU_STAT(halt_poll_fail_ns) },
-	{ "halt_wait_ns",		VCPU_STAT(halt_wait_ns) },
-	{ "halt_successful_poll", VCPU_STAT(halt_successful_poll), },
-	{ "halt_attempted_poll", VCPU_STAT(halt_attempted_poll), },
-	{ "halt_successful_wait",	VCPU_STAT(halt_successful_wait) },
-	{ "halt_poll_invalid", VCPU_STAT(halt_poll_invalid) },
-	{ "halt_wakeup", VCPU_STAT(halt_wakeup) },
-	{ "pf_storage",  VCPU_STAT(pf_storage) },
-	{ "sp_storage",  VCPU_STAT(sp_storage) },
-	{ "pf_instruc",  VCPU_STAT(pf_instruc) },
-	{ "sp_instruc",  VCPU_STAT(sp_instruc) },
-	{ "ld",          VCPU_STAT(ld) },
-	{ "ld_slow",     VCPU_STAT(ld_slow) },
-	{ "st",          VCPU_STAT(st) },
-	{ "st_slow",     VCPU_STAT(st_slow) },
-	{ "pthru_all",       VCPU_STAT(pthru_all) },
-	{ "pthru_host",      VCPU_STAT(pthru_host) },
-	{ "pthru_bad_aff",   VCPU_STAT(pthru_bad_aff) },
-	{ "largepages_2M",    VM_STAT(num_2M_pages, .mode = 0444) },
-	{ "largepages_1G",    VM_STAT(num_1G_pages, .mode = 0444) },
+	VCPU_STAT("exits", sum_exits),
+	VCPU_STAT("mmio", mmio_exits),
+	VCPU_STAT("sig", signal_exits),
+	VCPU_STAT("sysc", syscall_exits),
+	VCPU_STAT("inst_emu", emulated_inst_exits),
+	VCPU_STAT("dec", dec_exits),
+	VCPU_STAT("ext_intr", ext_intr_exits),
+	VCPU_STAT("queue_intr", queue_intr),
+	VCPU_STAT("halt_poll_success_ns", halt_poll_success_ns),
+	VCPU_STAT("halt_poll_fail_ns", halt_poll_fail_ns),
+	VCPU_STAT("halt_wait_ns", halt_wait_ns),
+	VCPU_STAT("halt_successful_poll", halt_successful_poll),
+	VCPU_STAT("halt_attempted_poll", halt_attempted_poll),
+	VCPU_STAT("halt_successful_wait", halt_successful_wait),
+	VCPU_STAT("halt_poll_invalid", halt_poll_invalid),
+	VCPU_STAT("halt_wakeup", halt_wakeup),
+	VCPU_STAT("pf_storage", pf_storage),
+	VCPU_STAT("sp_storage", sp_storage),
+	VCPU_STAT("pf_instruc", pf_instruc),
+	VCPU_STAT("sp_instruc", sp_instruc),
+	VCPU_STAT("ld", ld),
+	VCPU_STAT("ld_slow", ld_slow),
+	VCPU_STAT("st", st),
+	VCPU_STAT("st_slow", st_slow),
+	VCPU_STAT("pthru_all", pthru_all),
+	VCPU_STAT("pthru_host", pthru_host),
+	VCPU_STAT("pthru_bad_aff", pthru_bad_aff),
+	VM_STAT("largepages_2M", num_2M_pages, .mode = 0444),
+	VM_STAT("largepages_1G", num_1G_pages, .mode = 0444),
 	{ NULL }
 };
-
-void kvmppc_unfixup_split_real(struct kvm_vcpu *vcpu)
-{
-	if (vcpu->arch.hflags & BOOK3S_HFLAG_SPLIT_HACK) {
-		ulong pc = kvmppc_get_pc(vcpu);
-		ulong lr = kvmppc_get_lr(vcpu);
-		if ((pc & SPLIT_HACK_MASK) == SPLIT_HACK_OFFS)
-			kvmppc_set_pc(vcpu, pc & ~SPLIT_HACK_MASK);
-		if ((lr & SPLIT_HACK_MASK) == SPLIT_HACK_OFFS)
-			kvmppc_set_lr(vcpu, lr & ~SPLIT_HACK_MASK);
-		vcpu->arch.hflags &= ~BOOK3S_HFLAG_SPLIT_HACK;
-	}
-}
-EXPORT_SYMBOL_GPL(kvmppc_unfixup_split_real);
-
-static inline unsigned long kvmppc_interrupt_offset(struct kvm_vcpu *vcpu)
-{
-	if (!is_kvmppc_hv_enabled(vcpu->kvm))
-		return to_book3s(vcpu)->hior;
-	return 0;
-}
 
 static inline void kvmppc_update_int_pending(struct kvm_vcpu *vcpu,
 			unsigned long pending_now, unsigned long old_pending)
@@ -138,11 +114,7 @@ static inline bool kvmppc_critical_section(struct kvm_vcpu *vcpu)
 
 void kvmppc_inject_interrupt(struct kvm_vcpu *vcpu, int vec, u64 flags)
 {
-	kvmppc_unfixup_split_real(vcpu);
-	kvmppc_set_srr0(vcpu, kvmppc_get_pc(vcpu));
-	kvmppc_set_srr1(vcpu, (kvmppc_get_msr(vcpu) & ~0x783f0000ul) | flags);
-	kvmppc_set_pc(vcpu, kvmppc_interrupt_offset(vcpu) + vec);
-	vcpu->arch.mmu.reset_msr(vcpu);
+	vcpu->kvm->arch.kvm_ops->inject_interrupt(vcpu, vec, flags);
 }
 
 static int kvmppc_book3s_vec2irqprio(unsigned int vec)
@@ -500,11 +472,6 @@ int kvmppc_load_last_inst(struct kvm_vcpu *vcpu,
 }
 EXPORT_SYMBOL_GPL(kvmppc_load_last_inst);
 
-int kvm_arch_vcpu_setup(struct kvm_vcpu *vcpu)
-{
-	return 0;
-}
-
 int kvmppc_subarch_vcpu_init(struct kvm_vcpu *vcpu)
 {
 	return 0;
@@ -818,9 +785,9 @@ void kvmppc_decrementer_func(struct kvm_vcpu *vcpu)
 	kvm_vcpu_kick(vcpu);
 }
 
-struct kvm_vcpu *kvmppc_core_vcpu_create(struct kvm *kvm, unsigned int id)
+int kvmppc_core_vcpu_create(struct kvm_vcpu *vcpu)
 {
-	return kvm->arch.kvm_ops->vcpu_create(kvm, id);
+	return vcpu->kvm->arch.kvm_ops->vcpu_create(vcpu);
 }
 
 void kvmppc_core_vcpu_free(struct kvm_vcpu *vcpu)
@@ -833,21 +800,19 @@ int kvmppc_core_check_requests(struct kvm_vcpu *vcpu)
 	return vcpu->kvm->arch.kvm_ops->check_requests(vcpu);
 }
 
+void kvm_arch_sync_dirty_log(struct kvm *kvm, struct kvm_memory_slot *memslot)
+{
+
+}
+
 int kvm_vm_ioctl_get_dirty_log(struct kvm *kvm, struct kvm_dirty_log *log)
 {
 	return kvm->arch.kvm_ops->get_dirty_log(kvm, log);
 }
 
-void kvmppc_core_free_memslot(struct kvm *kvm, struct kvm_memory_slot *free,
-			      struct kvm_memory_slot *dont)
+void kvmppc_core_free_memslot(struct kvm *kvm, struct kvm_memory_slot *slot)
 {
-	kvm->arch.kvm_ops->free_memslot(free, dont);
-}
-
-int kvmppc_core_create_memslot(struct kvm *kvm, struct kvm_memory_slot *slot,
-			       unsigned long npages)
-{
-	return kvm->arch.kvm_ops->create_memslot(slot, npages);
+	kvm->arch.kvm_ops->free_memslot(slot);
 }
 
 void kvmppc_core_flush_memslot(struct kvm *kvm, struct kvm_memory_slot *memslot)
@@ -857,9 +822,11 @@ void kvmppc_core_flush_memslot(struct kvm *kvm, struct kvm_memory_slot *memslot)
 
 int kvmppc_core_prepare_memory_region(struct kvm *kvm,
 				struct kvm_memory_slot *memslot,
-				const struct kvm_userspace_memory_region *mem)
+				const struct kvm_userspace_memory_region *mem,
+				enum kvm_mr_change change)
 {
-	return kvm->arch.kvm_ops->prepare_memory_region(kvm, memslot, mem);
+	return kvm->arch.kvm_ops->prepare_memory_region(kvm, memslot, mem,
+							change);
 }
 
 void kvmppc_core_commit_memory_region(struct kvm *kvm,
@@ -890,11 +857,6 @@ int kvm_set_spte_hva(struct kvm *kvm, unsigned long hva, pte_t pte)
 {
 	kvm->arch.kvm_ops->set_spte_hva(kvm, hva, pte);
 	return 0;
-}
-
-void kvmppc_mmu_destroy(struct kvm_vcpu *vcpu)
-{
-	vcpu->kvm->arch.kvm_ops->mmu_destroy(vcpu);
 }
 
 int kvmppc_core_init_vm(struct kvm *kvm)

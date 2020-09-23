@@ -43,8 +43,11 @@ struct pci_controller_ops {
 	void		(*teardown_msi_irqs)(struct pci_dev *pdev);
 #endif
 
-	int             (*dma_set_mask)(struct pci_dev *pdev, u64 dma_mask);
-	u64		(*dma_get_required_mask)(struct pci_dev *pdev);
+	RH_KABI_DEPRECATE_FN(int, dma_set_mask, struct pci_dev *pdev,
+			     u64 dma_mask)
+	RH_KABI_REPLACE(u64 (*dma_get_required_mask)(struct pci_dev *pdev),
+			bool (*iommu_bypass_supported)(struct pci_dev *pdev,
+				u64 mask))
 
 	void		(*shutdown)(struct pci_controller *hose);
 };
@@ -274,6 +277,8 @@ extern int pcibios_map_io_space(struct pci_bus *bus);
 /* Get the PCI host controller for an OF device */
 extern struct pci_controller *pci_find_hose_for_OF_device(
 			struct device_node* node);
+
+extern struct pci_controller *pci_find_controller_for_domain(int domain_nr);
 
 /* Fill up host controller resources from the OF node */
 extern void pci_process_bridge_OF_ranges(struct pci_controller *hose,

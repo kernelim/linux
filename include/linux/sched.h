@@ -21,12 +21,15 @@
 #include <linux/seccomp.h>
 #include <linux/nodemask.h>
 #include <linux/rcupdate.h>
+#include <linux/refcount.h>
 #include <linux/resource.h>
 #include <linux/latencytop.h>
 #include <linux/sched/prio.h>
+#include <linux/sched/types.h>
 #include <linux/signal_types.h>
 #include <linux/mm_types_task.h>
 #include <linux/task_io_accounting.h>
+#include <linux/posix-timers.h>
 #include <linux/rseq.h>
 #include <linux/rh_kabi.h>
 
@@ -108,10 +111,6 @@ struct task_group;
 #define task_is_stopped(task)		((task->state & __TASK_STOPPED) != 0)
 
 #define task_is_stopped_or_traced(task)	((task->state & (__TASK_STOPPED | __TASK_TRACED)) != 0)
-
-#define task_contributes_to_load(task)	((task->state & TASK_UNINTERRUPTIBLE) != 0 && \
-					 (task->flags & PF_FROZEN) == 0 && \
-					 (task->state & TASK_NOLOAD) == 0)
 
 #ifdef CONFIG_DEBUG_ATOMIC_SLEEP
 
@@ -242,27 +241,6 @@ struct prev_cputime {
 #endif
 };
 
-/**
- * struct task_cputime - collected CPU time counts
- * @utime:		time spent in user mode, in nanoseconds
- * @stime:		time spent in kernel mode, in nanoseconds
- * @sum_exec_runtime:	total time spent on the CPU, in nanoseconds
- *
- * This structure groups together three kinds of CPU time that are tracked for
- * threads and thread groups.  Most things considering CPU time want to group
- * these counts together and treat all three of them in parallel.
- */
-struct task_cputime {
-	u64				utime;
-	u64				stime;
-	unsigned long long		sum_exec_runtime;
-};
-
-/* Alternate field names when used on cache expirations: */
-#define virt_exp			utime
-#define prof_exp			stime
-#define sched_exp			sum_exec_runtime
-
 enum vtime_state {
 	/* Task is sleeping or running in a CPU with VTIME inactive: */
 	VTIME_INACTIVE = 0,
@@ -276,10 +254,16 @@ struct vtime {
 	seqcount_t		seqcount;
 	unsigned long long	starttime;
 	enum vtime_state	state;
+	/* cpu is defined in struct task_struct->task_struct_rh->vtime_cpu */
 	u64			utime;
 	u64			stime;
 	u64			gtime;
 };
+
+#ifdef CONFIG_SMP
+extern struct root_domain def_root_domain;
+extern struct mutex sched_domains_mutex;
+#endif
 
 struct sched_info {
 #ifdef CONFIG_SCHED_INFO
@@ -570,7 +554,7 @@ union rcu_special {
 		u8			blocked;
 		u8			need_qs;
 		u8			exp_hint; /* Hint for performance. */
-		u8			pad; /* No garbage from compiler! */
+		u8			deferred_qs;
 	} b; /* Bits. */
 	u32 s; /* Set of bits. */
 };
@@ -584,6 +568,15 @@ enum perf_event_task_context {
 
 struct wake_q_node {
 	struct wake_q_node *next;
+};
+
+struct task_struct_rh {
+	/* Empty if CONFIG_POSIX_CPUTIMERS=n */
+	struct posix_cputimers posix_cputimers;
+	/* struct vtime->cpu */
+	unsigned int vtime_cpu;
+	u64				parent_exec_id;
+	u64				self_exec_id;
 };
 
 struct task_struct {
@@ -604,7 +597,7 @@ struct task_struct {
 	randomized_struct_fields_start
 
 	void				*stack;
-	atomic_t			usage;
+	RH_KABI_REPLACE(atomic_t usage, refcount_t usage)
 	/* Per task flags (PF_*), defined further below: */
 	unsigned int			flags;
 	unsigned int			ptrace;
@@ -656,7 +649,7 @@ struct task_struct {
 
 	unsigned int			policy;
 	int				nr_cpus_allowed;
-	cpumask_t			cpus_allowed;
+	RH_KABI_RENAME(cpumask_t cpus_allowed, cpumask_t cpus_mask);
 
 #ifdef CONFIG_PREEMPT_RCU
 	int				rcu_read_lock_nesting;
@@ -722,8 +715,7 @@ struct task_struct {
 	unsigned			restore_sigmask:1;
 #endif
 #ifdef CONFIG_MEMCG
-	RH_KABI_REPLACE_UNSAFE(unsigned	memcg_may_oom:1,
-			       unsigned	in_user_fault:1)
+	unsigned	 RH_KABI_RENAME(memcg_may_oom, in_user_fault):1;
 #ifdef CONFIG_MEMCG_KMEM
 	RH_KABI_DEPRECATE(unsigned,	memcg_kmem_skip_account:1)
 #endif
@@ -803,8 +795,8 @@ struct task_struct {
 	long				rh_reserved2;
 #endif
 	struct pid			*thread_pid;
-	long				rh_reserved3;
-	long				rh_reserved4;
+	RH_KABI_USE(3, const cpumask_t  *cpus_ptr)
+	struct task_struct_rh		*task_struct_rh;
 	struct pid			*rh_pgid;
 	long				rh_reserved5;
 	long				rh_reserved6;
@@ -850,9 +842,11 @@ struct task_struct {
 	unsigned long			min_flt;
 	unsigned long			maj_flt;
 
-#ifdef CONFIG_POSIX_TIMERS
-	struct task_cputime		cputime_expires;
-	struct list_head		cpu_timers[3];
+	RH_KABI_DEPRECATE(struct task_cputime, cputime_expires)
+#ifdef CONFIG_FUTEX
+	RH_KABI_REPLACE_SPLIT(struct list_head	cpu_timers[3],
+			      struct mutex	futex_exit_mutex,
+			      unsigned int	futex_state)
 #endif
 
 	/* Process credentials: */
@@ -917,8 +911,8 @@ struct task_struct {
 	struct seccomp			seccomp;
 
 	/* Thread group tracking: */
-	u32				parent_exec_id;
-	u32				self_exec_id;
+	RH_KABI_DEPRECATE(u32, parent_exec_id)
+	RH_KABI_DEPRECATE(u32, self_exec_id)
 
 	/* Protection against (de-)allocation: mm, files, fs, tty, keyrings, mems_allowed, mempolicy: */
 	spinlock_t			alloc_lock;
@@ -1020,7 +1014,7 @@ struct task_struct {
 	/* cg_list protected by css_set_lock and tsk->alloc_lock: */
 	struct list_head		cg_list;
 #endif
-#ifdef CONFIG_RESCTRL
+#ifdef CONFIG_X86_CPU_RESCTRL
 	u32				closid;
 	u32				rmid;
 #endif
@@ -1110,7 +1104,10 @@ struct task_struct {
 
 	struct tlbflush_unmap_batch	tlb_ubc;
 
-	struct rcu_head			rcu;
+	RH_KABI_REPLACE(struct rcu_head rcu, union {
+		refcount_t		rcu_users;
+		struct rcu_head		rcu;
+	})
 
 	/* Cache last used pipe for splice(): */
 	struct pipe_inode_info		*splice_pipe;
@@ -1239,24 +1236,13 @@ struct task_struct {
 	 */
 	randomized_struct_fields_end
 
-#ifdef __GENKSYMS__
-	RH_KABI_RESERVE(1)
-	RH_KABI_RESERVE(2)
-	RH_KABI_RESERVE(3)
-	RH_KABI_RESERVE(4)
-	RH_KABI_RESERVE(5)
-	RH_KABI_RESERVE(6)
-	RH_KABI_RESERVE(7)
-	RH_KABI_RESERVE(8)
-#else
 	/*
 	 * RHEL8: With PIDTYPE_MAX equals 4, the following fields will
 	 * occupy 8 long's. There are some rh_reserved* fields up near
 	 * the pid_link structure that can be reused for other purpose.
 	 */
 	/* PID/PID hash table linkage. */
-	struct hlist_node		pid_links[PIDTYPE_MAX];
-#endif
+	RH_KABI_USE(1, 2, 3, 4, 5, 6, 7, 8, struct hlist_node pid_links[PIDTYPE_MAX])
 
 	/* CPU-specific state of this task: */
 	struct thread_struct		thread;
@@ -1266,6 +1252,12 @@ struct task_struct {
 	 * structure.  It *MUST* be at the end of 'task_struct'.
 	 *
 	 * Do not put anything below here!
+	 */
+
+	/*
+	 * RHEL: There is a task_struct_rh that can be safely used to add
+	 * elements to.  task_struct, and task_struct_rh are only allocated
+	 * within the kernel.
 	 */
 };
 
@@ -1428,7 +1420,6 @@ extern struct pid *cad_pid;
  */
 #define PF_IDLE			0x00000002	/* I am an IDLE thread */
 #define PF_EXITING		0x00000004	/* Getting shut down */
-#define PF_EXITPIDONE		0x00000008	/* PI exit done on shut down */
 #define PF_VCPU			0x00000010	/* I'm a virtual CPU */
 #define PF_WQ_WORKER		0x00000020	/* I'm a workqueue worker */
 #define PF_FORKNOEXEC		0x00000040	/* Forked but didn't exec */
@@ -1451,9 +1442,10 @@ extern struct pid *cad_pid;
 #define PF_SWAPWRITE		0x00800000	/* Allowed to write to swap */
 #define PF_MEMSTALL		0x01000000	/* Stalled due to lack of memory */
 #define PF_UMH			0x02000000	/* I'm an Usermodehelper process */
-#define PF_NO_SETAFFINITY	0x04000000	/* Userland is not allowed to meddle with cpus_allowed */
+#define PF_NO_SETAFFINITY	0x04000000	/* Userland is not allowed to meddle with cpus_mask */
 #define PF_MCE_EARLY		0x08000000      /* Early kill for mce process policy */
 #define PF_MEMALLOC_NOCMA	0x10000000	/* All allocation request will have _GFP_MOVABLE cleared */
+#define PF_IO_WORKER		0x20000000	/* Task is an IO worker */
 #define PF_MUTEX_TESTER		0x20000000	/* Thread belongs to the rt mutex tester */
 #define PF_FREEZER_SKIP		0x40000000	/* Freezer should not count it as freezable */
 #define PF_SUSPEND_TASK		0x80000000      /* This thread called freeze_processes() and should not be frozen */
@@ -1750,7 +1742,7 @@ static inline int test_tsk_need_resched(struct task_struct *tsk)
  * value indicates whether a reschedule was done in fact.
  * cond_resched_lock() will drop the spinlock before scheduling,
  */
-#ifndef CONFIG_PREEMPT
+#ifndef CONFIG_PREEMPTION
 extern int _cond_resched(void);
 #else
 static inline int _cond_resched(void) { return 0; }
@@ -1779,12 +1771,12 @@ static inline void cond_resched_rcu(void)
 
 /*
  * Does a critical section need to be broken due to another
- * task waiting?: (technically does not depend on CONFIG_PREEMPT,
+ * task waiting?: (technically does not depend on CONFIG_PREEMPTION,
  * but a general need for low latency)
  */
 static inline int spin_needbreak(spinlock_t *lock)
 {
-#ifdef CONFIG_PREEMPT
+#ifdef CONFIG_PREEMPTION
 	return spin_is_contended(lock);
 #else
 	return 0;
@@ -1834,7 +1826,10 @@ static inline void set_task_cpu(struct task_struct *p, unsigned int cpu)
  * running or not.
  */
 #ifndef vcpu_is_preempted
-# define vcpu_is_preempted(cpu)	false
+static inline bool vcpu_is_preempted(int cpu)
+{
+	return false;
+}
 #endif
 
 extern long sched_setaffinity(pid_t pid, const struct cpumask *new_mask);

@@ -25,9 +25,6 @@
 #include <linux/percpu.h>
 #include <asm/module.h>
 
-/* In stripped ARM and x86-64 modules, ~ is surprisingly rare. */
-#define MODULE_SIG_STRING "~Module signature appended~\n"
-
 /* Not Yet Implemented */
 #define MODULE_SUPPORTED_DEVICE(name)
 
@@ -655,6 +652,7 @@ static inline bool is_livepatch_module(struct module *mod)
 #endif /* CONFIG_LIVEPATCH */
 
 bool is_module_sig_enforced(void);
+void set_module_sig_enforced(void);
 
 #else /* !CONFIG_MODULES... */
 
@@ -773,6 +771,10 @@ static inline bool module_requested_async_probing(struct module *module)
 static inline bool is_module_sig_enforced(void)
 {
 	return false;
+}
+
+static inline void set_module_sig_enforced(void)
+{
 }
 
 /* Dereference module function descriptor */

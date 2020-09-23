@@ -25,7 +25,6 @@
 #include <err.h>
 #include <dwarf.h>
 
-#include "perf.h"
 #include "genelf.h"
 #include "../util/jitdump.h"
 

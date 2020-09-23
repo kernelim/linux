@@ -99,6 +99,7 @@ typedef	struct {
 #define EFI_MEMORY_MORE_RELIABLE \
 				((u64)0x0000000000010000ULL)	/* higher reliability */
 #define EFI_MEMORY_RO		((u64)0x0000000000020000ULL)	/* read-only */
+#define EFI_MEMORY_SP		((u64)0x0000000000040000ULL)	/* soft reserved */
 #define EFI_MEMORY_RUNTIME	((u64)0x8000000000000000ULL)	/* range requires runtime mapping */
 #define EFI_MEMORY_DESCRIPTOR_VERSION	1
 
@@ -676,6 +677,7 @@ void efi_native_runtime_setup(void);
 #define LINUX_EFI_LOADER_ENTRY_GUID		EFI_GUID(0x4a67b082, 0x0a4c, 0x41cf,  0xb6, 0xc7, 0x44, 0x0b, 0x29, 0xbb, 0x8c, 0x4f)
 #define LINUX_EFI_RANDOM_SEED_TABLE_GUID	EFI_GUID(0x1ce1e5bc, 0x7ceb, 0x42f2,  0x81, 0xe5, 0x8a, 0xad, 0xf1, 0x80, 0xf5, 0x7b)
 #define LINUX_EFI_TPM_EVENT_LOG_GUID		EFI_GUID(0xb7799cb0, 0xeca2, 0x4943,  0x96, 0x67, 0x1f, 0xae, 0x07, 0xb7, 0x47, 0xfa)
+#define LINUX_EFI_TPM_FINAL_LOG_GUID		EFI_GUID(0x1e2ed096, 0x30e2, 0x4254,  0xbd, 0x89, 0x86, 0x3b, 0xbe, 0xf8, 0x23, 0x25)
 #define LINUX_EFI_MEMRESERVE_TABLE_GUID		EFI_GUID(0x888eb0c6, 0x8ede, 0x4ff5,  0xa8, 0xf0, 0x9a, 0xee, 0x5c, 0xb9, 0x77, 0xc2)
 #define LINUX_EFI_MOK_VARIABLE_TABLE_GUID	EFI_GUID(0xc451ed2b, 0x9694, 0x45d3,  0xba, 0xba, 0xed, 0x9f, 0x89, 0x88, 0xa3, 0x89)
 
@@ -977,6 +979,7 @@ extern struct efi {
 	unsigned long mem_attr_table;	/* memory attributes table */
 	unsigned long rng_seed;		/* UEFI firmware random seed */
 	unsigned long tpm_log;		/* TPM2 Event Log table */
+	unsigned long tpm_final_log;	/* TPM2 Final Events Log table */
 	unsigned long mem_reserve;	/* Linux EFI memreserve table */
 	unsigned long mokvar_table;	/* MOK variable config table */
 	efi_get_time_t *get_time;
@@ -1185,6 +1188,7 @@ extern int __init efi_setup_pcdp_console(char *);
 #define EFI_NX_PE_DATA		9	/* Can runtime data regions be mapped non-executable? */
 #define EFI_MEM_ATTR		10	/* Did firmware publish an EFI_MEMORY_ATTRIBUTES table? */
 #define EFI_SECURE_BOOT		11	/* Are we in Secure Boot mode? */
+#define EFI_MEM_NO_SOFT_RESERVE	12	/* Is the kernel configured to ignore soft reservations? */
 
 enum efi_secureboot_mode {
 	efi_secureboot_mode_unset,
@@ -1203,6 +1207,14 @@ static inline bool efi_enabled(int feature)
 }
 extern void efi_reboot(enum reboot_mode reboot_mode, const char *__unused);
 
+bool __pure __efi_soft_reserve_enabled(void);
+
+static inline bool __pure efi_soft_reserve_enabled(void)
+{
+	return IS_ENABLED(CONFIG_EFI_SOFT_RESERVE)
+		&& __efi_soft_reserve_enabled();
+}
+
 extern bool efi_is_table_address(unsigned long phys_addr);
 extern void __init efi_set_secure_boot(enum efi_secureboot_mode mode);
 #else
@@ -1215,6 +1227,11 @@ efi_reboot(enum reboot_mode reboot_mode, const char *__unused) {}
 
 static inline bool
 efi_capsule_pending(int *reset_type)
+{
+	return false;
+}
+
+static inline bool efi_soft_reserve_enabled(void)
 {
 	return false;
 }
@@ -1623,6 +1640,7 @@ efi_status_t efi_setup_gop(efi_system_table_t *sys_table_arg,
 
 bool efi_runtime_disabled(void);
 extern void efi_call_virt_check_flags(unsigned long flags, const char *call);
+extern unsigned long efi_call_virt_save_flags(void);
 
 enum efi_secureboot_mode efi_get_secureboot(efi_system_table_t *sys_table);
 
@@ -1662,7 +1680,7 @@ void efi_retrieve_tpm2_eventlog(efi_system_table_t *sys_table);
 									\
 	arch_efi_call_virt_setup();					\
 									\
-	local_save_flags(__flags);					\
+	__flags = efi_call_virt_save_flags();				\
 	__s = arch_efi_call_virt(p, f, args);				\
 	efi_call_virt_check_flags(__flags, __stringify(f));		\
 									\
@@ -1677,7 +1695,7 @@ void efi_retrieve_tpm2_eventlog(efi_system_table_t *sys_table);
 									\
 	arch_efi_call_virt_setup();					\
 									\
-	local_save_flags(__flags);					\
+	__flags = efi_call_virt_save_flags();				\
 	arch_efi_call_virt(p, f, args);					\
 	efi_call_virt_check_flags(__flags, __stringify(f));		\
 									\
@@ -1704,6 +1722,7 @@ struct linux_efi_random_seed {
 
 struct linux_efi_tpm_eventlog {
 	u32	size;
+	u32	final_events_preboot_size;
 	u8	version;
 	u8	log[];
 };
@@ -1711,6 +1730,13 @@ struct linux_efi_tpm_eventlog {
 extern int efi_tpm_eventlog_init(void);
 
 extern unsigned long rci2_table_phys;
+
+struct efi_tcg2_final_events_table {
+	u64 version;
+	u64 nr_events;
+	u8 events[];
+};
+extern int efi_tpm_final_log_size;
 
 /*
  * efi_runtime_service() function identifiers.

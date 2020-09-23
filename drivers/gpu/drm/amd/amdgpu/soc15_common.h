@@ -52,6 +52,7 @@
 		uint32_t old_ = 0;	\
 		uint32_t tmp_ = RREG32(adev->reg_offset[ip##_HWIP][inst][reg##_BASE_IDX] + reg); \
 		uint32_t loop = adev->usec_timeout;		\
+		ret = 0;					\
 		while ((tmp_ & (mask)) != (expected_value)) {	\
 			if (old_ != tmp_) {			\
 				loop = adev->usec_timeout;	\
@@ -69,9 +70,10 @@
 		}						\
 	} while (0)
 
+#define AMDGPU_VIRT_SUPPORT_RLC_PRG_REG(a) (amdgpu_sriov_vf((a)) && !amdgpu_sriov_runtime((a)))
 #define WREG32_RLC(reg, value) \
 	do {							\
-		if (amdgpu_virt_support_rlc_prg_reg(adev)) {    \
+		if (AMDGPU_VIRT_SUPPORT_RLC_PRG_REG(adev)) {    \
 			uint32_t i = 0;	\
 			uint32_t retries = 50000;	\
 			uint32_t r0 = adev->reg_offset[GC_HWIP][0][mmSCRATCH_REG0_BASE_IDX] + mmSCRATCH_REG0;	\
@@ -96,7 +98,7 @@
 #define WREG32_SOC15_RLC_SHADOW(ip, inst, reg, value) \
 	do {							\
 		uint32_t target_reg = adev->reg_offset[ip##_HWIP][inst][reg##_BASE_IDX] + reg;\
-		if (amdgpu_virt_support_rlc_prg_reg(adev)) {    \
+		if (AMDGPU_VIRT_SUPPORT_RLC_PRG_REG(adev)) {    \
 			uint32_t r2 = adev->reg_offset[GC_HWIP][0][mmSCRATCH_REG1_BASE_IDX] + mmSCRATCH_REG2;	\
 			uint32_t r3 = adev->reg_offset[GC_HWIP][0][mmSCRATCH_REG1_BASE_IDX] + mmSCRATCH_REG3;	\
 			uint32_t grbm_cntl = adev->reg_offset[GC_HWIP][0][mmGRBM_GFX_CNTL_BASE_IDX] + mmGRBM_GFX_CNTL;   \

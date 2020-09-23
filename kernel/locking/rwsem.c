@@ -30,7 +30,6 @@
 #include <linux/rwsem.h>
 #include <linux/atomic.h>
 
-#include "rwsem.h"
 #include "lock_events.h"
 
 #ifndef RWSEM_INIT_ONLY
@@ -667,8 +666,6 @@ static inline bool rwsem_can_spin_on_owner(struct rw_semaphore *sem,
 	struct task_struct *owner;
 	unsigned long flags;
 	bool ret = true;
-
-	BUILD_BUG_ON(!(RWSEM_OWNER_UNKNOWN & RWSEM_NONSPINNABLE));
 
 	if (need_resched()) {
 		lockevent_inc(rwsem_opt_fail);
@@ -1346,7 +1343,7 @@ static struct rw_semaphore *rwsem_downgrade_wake(struct rw_semaphore *sem)
 /*
  * lock for reading
  */
-inline void __down_read(struct rw_semaphore *sem)
+static inline void __down_read(struct rw_semaphore *sem)
 {
 	if (!rwsem_read_trylock(sem)) {
 		rwsem_down_read_slowpath(sem, TASK_UNINTERRUPTIBLE);
@@ -1434,7 +1431,7 @@ static inline int __down_write_trylock(struct rw_semaphore *sem)
 /*
  * unlock after reading
  */
-inline void __up_read(struct rw_semaphore *sem)
+static inline void __up_read(struct rw_semaphore *sem)
 {
 	long tmp;
 
@@ -1512,7 +1509,7 @@ int __sched down_read_killable(struct rw_semaphore *sem)
 	rwsem_acquire_read(&sem->dep_map, 0, 0, _RET_IP_);
 
 	if (LOCK_CONTENDED_RETURN(sem, __down_read_trylock, __down_read_killable)) {
-		rwsem_release(&sem->dep_map, 1, _RET_IP_);
+		rwsem_release(&sem->dep_map, _RET_IP_);
 		return -EINTR;
 	}
 
@@ -1554,7 +1551,7 @@ int __sched down_write_killable(struct rw_semaphore *sem)
 
 	if (LOCK_CONTENDED_RETURN(sem, __down_write_trylock,
 				  __down_write_killable)) {
-		rwsem_release(&sem->dep_map, 1, _RET_IP_);
+		rwsem_release(&sem->dep_map, _RET_IP_);
 		return -EINTR;
 	}
 
@@ -1581,7 +1578,7 @@ EXPORT_SYMBOL(down_write_trylock);
  */
 void up_read(struct rw_semaphore *sem)
 {
-	rwsem_release(&sem->dep_map, 1, _RET_IP_);
+	rwsem_release(&sem->dep_map, _RET_IP_);
 	__up_read(sem);
 }
 EXPORT_SYMBOL(up_read);
@@ -1591,7 +1588,7 @@ EXPORT_SYMBOL(up_read);
  */
 void up_write(struct rw_semaphore *sem)
 {
-	rwsem_release(&sem->dep_map, 1, _RET_IP_);
+	rwsem_release(&sem->dep_map, _RET_IP_);
 	__up_write(sem);
 }
 EXPORT_SYMBOL(up_write);
@@ -1647,7 +1644,7 @@ int __sched down_write_killable_nested(struct rw_semaphore *sem, int subclass)
 
 	if (LOCK_CONTENDED_RETURN(sem, __down_write_trylock,
 				  __down_write_killable)) {
-		rwsem_release(&sem->dep_map, 1, _RET_IP_);
+		rwsem_release(&sem->dep_map, _RET_IP_);
 		return -EINTR;
 	}
 

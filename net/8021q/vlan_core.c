@@ -223,6 +223,33 @@ static int vlan_kill_rx_filter_info(struct net_device *dev, __be16 proto, u16 vi
 		return -ENODEV;
 }
 
+int vlan_for_each(struct net_device *dev,
+		  int (*action)(struct net_device *dev, int vid, void *arg),
+		  void *arg)
+{
+	struct vlan_vid_info *vid_info;
+	struct vlan_info *vlan_info;
+	struct net_device *vdev;
+	int ret;
+
+	ASSERT_RTNL();
+
+	vlan_info = rtnl_dereference(dev->vlan_info);
+	if (!vlan_info)
+		return 0;
+
+	list_for_each_entry(vid_info, &vlan_info->vid_list, list) {
+		vdev = vlan_group_get_device(&vlan_info->grp, vid_info->proto,
+					     vid_info->vid);
+		ret = action(vdev, vid_info->vid, arg);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(vlan_for_each);
+
 int vlan_filter_push_vids(struct vlan_info *vlan_info, __be16 proto)
 {
 	struct net_device *real_dev = vlan_info->real_dev;
@@ -427,13 +454,14 @@ bool vlan_uses_dev(const struct net_device *dev)
 }
 EXPORT_SYMBOL(vlan_uses_dev);
 
-static struct sk_buff **vlan_gro_receive(struct sk_buff **head,
-					 struct sk_buff *skb)
+static struct sk_buff *vlan_gro_receive(struct list_head *head,
+					struct sk_buff *skb)
 {
-	struct sk_buff *p, **pp = NULL;
-	struct vlan_hdr *vhdr;
-	unsigned int hlen, off_vlan;
 	const struct packet_offload *ptype;
+	unsigned int hlen, off_vlan;
+	struct sk_buff *pp = NULL;
+	struct vlan_hdr *vhdr;
+	struct sk_buff *p;
 	__be16 type;
 	int flush = 1;
 
@@ -455,7 +483,7 @@ static struct sk_buff **vlan_gro_receive(struct sk_buff **head,
 
 	flush = 0;
 
-	for (p = *head; p; p = p->next) {
+	list_for_each_entry(p, head, list) {
 		struct vlan_hdr *vhdr2;
 
 		if (!NAPI_GRO_CB(p)->same_flow)

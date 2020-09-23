@@ -41,6 +41,7 @@
 #define RMID_VAL_UNAVAIL		BIT_ULL(62)
 
 DECLARE_STATIC_KEY_FALSE(rdt_enable_key);
+DECLARE_STATIC_KEY_FALSE(rdt_mon_enable_key);
 
 /**
  * struct mon_evt - Entry in the event list of a resource

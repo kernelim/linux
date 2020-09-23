@@ -28,7 +28,7 @@ static int _nfs42_proc_fallocate(struct rpc_message *msg, struct file *filep,
 		.falloc_fh	= NFS_FH(inode),
 		.falloc_offset	= offset,
 		.falloc_length	= len,
-		.falloc_bitmask	= server->cache_consistency_bitmask,
+		.falloc_bitmask	= nfs4_fattr_bitmap,
 	};
 	struct nfs42_falloc_res res = {
 		.falloc_server	= server,
@@ -283,14 +283,14 @@ static ssize_t _nfs42_proc_copy(struct file *src,
 		status = handle_async_copy(res, server, src, dst,
 				&args->src_stateid);
 		if (status)
-			return status;
+			goto out;
 	}
 
 	if ((!res->synchronous || !args->sync) &&
 			res->write_res.verifier.committed != NFS_FILE_SYNC) {
 		status = process_copy_commit(dst, pos_dst, res);
 		if (status)
-			return status;
+			goto out;
 	}
 
 	truncate_pagecache_range(dst_inode, pos_dst,

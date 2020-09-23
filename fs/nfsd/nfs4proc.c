@@ -232,7 +232,7 @@ do_open_lookup(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate, stru
 	if (!*resfh)
 		return nfserr_jukebox;
 	fh_init(*resfh, NFS4_FHSIZE);
-	open->op_truncate = 0;
+	open->op_truncate = false;
 
 	if (open->op_create) {
 		/* FIXME: check session persistence and pnfs flags.
@@ -365,7 +365,7 @@ nfsd4_open(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 	if (open->op_create && open->op_claim_type != NFS4_OPEN_CLAIM_NULL)
 		return nfserr_inval;
 
-	open->op_created = 0;
+	open->op_created = false;
 	/*
 	 * RFC5661 18.51.3
 	 * Before RECLAIM_COMPLETE done, server should deny new lock
@@ -568,17 +568,11 @@ nfsd4_access(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 
 static void gen_boot_verifier(nfs4_verifier *verifier, struct net *net)
 {
-	__be32 verf[2];
-	struct nfsd_net *nn = net_generic(net, nfsd_net_id);
+	__be32 *verf = (__be32 *)verifier->data;
 
-	/*
-	 * This is opaque to client, so no need to byte-swap. Use
-	 * __force to keep sparse happy. y2038 time_t overflow is
-	 * irrelevant in this usage.
-	 */
-	verf[0] = (__force __be32)nn->nfssvc_boot.tv_sec;
-	verf[1] = (__force __be32)nn->nfssvc_boot.tv_nsec;
-	memcpy(verifier->data, verf, sizeof(verifier->data));
+	BUILD_BUG_ON(2*sizeof(*verf) != sizeof(verifier->data));
+
+	nfsd_copy_boot_verifier(verf, net_generic(net, nfsd_net_id));
 }
 
 static __be32
@@ -981,7 +975,7 @@ nfsd4_setattr(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 	if (status)
 		goto out;
 	status = nfsd_setattr(rqstp, &cstate->current_fh, &setattr->sa_iattr,
-				0, (time_t)0);
+				0, (time64_t)0);
 out:
 	fh_drop_write(&cstate->current_fh);
 	return status;
@@ -1929,6 +1923,7 @@ nfsd4_proc_compound(struct svc_rqst *rqstp)
 	struct nfsd4_compound_state *cstate = &resp->cstate;
 	struct svc_fh *current_fh = &cstate->current_fh;
 	struct svc_fh *save_fh = &cstate->save_fh;
+	struct nfsd_net *nn = net_generic(SVC_NET(rqstp), nfsd_net_id);
 	__be32		status;
 
 	svcxdr_init_encode(rqstp, resp);
@@ -1951,7 +1946,7 @@ nfsd4_proc_compound(struct svc_rqst *rqstp)
 	 * According to RFC3010, this takes precedence over all other errors.
 	 */
 	status = nfserr_minor_vers_mismatch;
-	if (nfsd_minorversion(args->minorversion, NFSD_TEST) <= 0)
+	if (nfsd_minorversion(nn, args->minorversion, NFSD_TEST) <= 0)
 		goto out;
 	status = nfserr_resource;
 	if (args->opcnt > NFSD_MAX_OPS_PER_COMPOUND)

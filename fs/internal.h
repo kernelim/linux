@@ -40,7 +40,7 @@ static inline int __sync_blockdev(struct block_device *bdev, int wait)
 /*
  * buffer.c
  */
-extern void guard_bio_eod(int rw, struct bio *bio);
+extern void guard_bio_eod(struct bio *bio);
 extern int __block_write_begin_int(struct page *page, loff_t pos, unsigned len,
 		get_block_t *get_block, struct iomap *iomap);
 
@@ -52,6 +52,8 @@ extern void __init chrdev_init(void);
 /*
  * namei.c
  */
+extern int filename_lookup(int dfd, struct filename *name, unsigned flags,
+			   struct path *path, struct path *root);
 extern int user_path_mountpoint_at(int, const char __user *, unsigned int, struct path *);
 extern int vfs_path_lookup(struct dentry *, struct vfsmount *,
 			   const char *, unsigned int, struct path *);
@@ -117,6 +119,7 @@ extern struct file *do_filp_open(int dfd, struct filename *pathname,
 		const struct open_flags *op);
 extern struct file *do_file_open_root(struct dentry *, struct vfsmount *,
 		const char *, const struct open_flags *);
+extern int build_open_flags(int flags, umode_t mode, struct open_flags *op);
 
 long do_sys_ftruncate(unsigned int fd, loff_t length, int small);
 long do_faccessat(int dfd, const char __user *filename, int mode);
@@ -136,8 +139,6 @@ extern int dentry_needs_remove_privs(struct dentry *dentry);
 /*
  * fs-writeback.c
  */
-extern void inode_io_list_del(struct inode *inode);
-
 extern long get_nr_dirty_inodes(void);
 extern int invalidate_inodes(struct super_block *, bool);
 
@@ -176,15 +177,11 @@ extern const struct dentry_operations ns_dentry_operations;
 extern int do_vfs_ioctl(struct file *file, unsigned int fd, unsigned int cmd,
 		    unsigned long arg);
 
-/*
- * iomap support:
- */
-typedef loff_t (*iomap_actor_t)(struct inode *inode, loff_t pos, loff_t len,
-		void *data, struct iomap *iomap);
-
-loff_t iomap_apply(struct inode *inode, loff_t pos, loff_t length,
-		unsigned flags, const struct iomap_ops *ops, void *data,
-		iomap_actor_t actor);
-
 /* direct-io.c: */
 int sb_init_dio_done_wq(struct super_block *sb);
+
+/*
+ * fs/stat.c:
+ */
+unsigned vfs_stat_set_lookup_flags(unsigned *lookup_flags, int flags);
+int cp_statx(const struct kstat *stat, struct statx __user *buffer);

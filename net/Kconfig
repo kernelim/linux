@@ -51,6 +51,9 @@ config NET_INGRESS
 config NET_EGRESS
 	bool
 
+config NET_REDIRECT
+	bool
+
 config SKB_EXTENSIONS
 	bool
 
@@ -92,6 +95,7 @@ if INET
 source "net/ipv4/Kconfig"
 source "net/ipv6/Kconfig"
 source "net/netlabel/Kconfig"
+source "net/mptcp/Kconfig"
 
 endif # if INET
 
@@ -109,9 +113,10 @@ config NETWORK_PHY_TIMESTAMPING
 	bool "Timestamping in PHY devices"
 	select NET_PTP_CLASSIFY
 	help
-	  This allows timestamping of network packets by PHYs with
-	  hardware timestamping capabilities. This option adds some
-	  overhead in the transmit and receive paths.
+	  This allows timestamping of network packets by PHYs (or
+	  other MII bus snooping devices) with hardware timestamping
+	  capabilities. This option adds some overhead in the transmit
+	  and receive paths.
 
 	  If you are unsure how to answer this question, answer N.
 
@@ -430,6 +435,7 @@ config NET_SOCK_MSG
 config NET_DEVLINK
 	bool
 	default n
+	imply NET_DROP_MONITOR
 
 config PAGE_POOL
        bool

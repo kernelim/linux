@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: GPL-2.0
-targets += trampoline.o purgatory.ro kexec-purgatory.c
+targets += trampoline_$(BITS).o purgatory.ro kexec-purgatory.c
 
 LDFLAGS_purgatory.ro := -e purgatory_start -r --no-undefined
 
-$(obj)/purgatory.ro: $(obj)/trampoline.o FORCE
+$(obj)/purgatory.ro: $(obj)/trampoline_$(BITS).o FORCE
 		$(call if_changed,ld)
 
 CMD_BIN2C = $(objtree)/scripts/basic/bin2c

@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * KVM_SET_SREGS tests
  *
  * Copyright (C) 2018, Google LLC.
- *
- * This work is licensed under the terms of the GNU GPL, version 2.
  *
  * This is a regression test for the bug fixed by the following commit:
  * d3802286fa0f ("kvm: x86: Disallow illegal IA32_APIC_BASE MSR values")

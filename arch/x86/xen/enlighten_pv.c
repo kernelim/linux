@@ -23,7 +23,7 @@
 #include <linux/start_kernel.h>
 #include <linux/sched.h>
 #include <linux/kprobes.h>
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 #include <linux/export.h>
 #include <linux/mm.h>
 #include <linux/page-flags.h>
@@ -31,7 +31,6 @@
 #include <linux/console.h>
 #include <linux/pci.h>
 #include <linux/gfp.h>
-#include <linux/memblock.h>
 #include <linux/edd.h>
 #include <linux/frame.h>
 
@@ -1225,6 +1224,7 @@ asmlinkage __visible void __init xen_start_kernel(void)
 	x86_platform.get_nmi_reason = xen_get_nmi_reason;
 
 	x86_init.resources.memory_setup = xen_memory_setup;
+	x86_init.irqs.intr_mode_select	= x86_init_noop;
 	x86_init.irqs.intr_mode_init	= x86_init_noop;
 	x86_init.oem.arch_setup = xen_arch_setup;
 	x86_init.oem.banner = xen_banner;
@@ -1457,4 +1457,5 @@ const __initconst struct hypervisor_x86 x86_hyper_xen_pv = {
 	.detect                 = xen_platform_pv,
 	.type			= X86_HYPER_XEN_PV,
 	.runtime.pin_vcpu       = xen_pin_vcpu,
+	.ignore_nopv		= true,
 };

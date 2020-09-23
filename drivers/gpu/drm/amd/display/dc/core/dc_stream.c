@@ -27,14 +27,12 @@
 #include <linux/slab.h>
 
 #include "dm_services.h"
+#include "basics/dc_common.h"
 #include "dc.h"
 #include "core_types.h"
 #include "resource.h"
 #include "ipp.h"
 #include "timing_generator.h"
-#if defined(CONFIG_DRM_AMD_DC_DCN1_0)
-#include "dcn10/dcn10_hw_sequencer.h"
-#endif
 
 #define DC_LOGGER dc->ctx->logger
 
@@ -58,7 +56,7 @@ void update_stream_signal(struct dc_stream_state *stream, struct dc_sink *sink)
 	}
 }
 
-static void construct(struct dc_stream_state *stream,
+static bool dc_stream_construct(struct dc_stream_state *stream,
 	struct dc_sink *dc_sink_data)
 {
 	uint32_t i = 0;
@@ -108,7 +106,6 @@ static void construct(struct dc_stream_state *stream,
 	/* EDID CAP translation for HDMI 2.0 */
 	stream->timing.flags.LTE_340MCSC_SCRAMBLE = dc_sink_data->edid_caps.lte_340mcsc_scramble;
 
-#ifdef CONFIG_DRM_AMD_DC_DSC_SUPPORT
 	memset(&stream->timing.dsc_cfg, 0, sizeof(stream->timing.dsc_cfg));
 	stream->timing.dsc_cfg.num_slices_h = 0;
 	stream->timing.dsc_cfg.num_slices_v = 0;
@@ -117,19 +114,24 @@ static void construct(struct dc_stream_state *stream,
 	stream->timing.dsc_cfg.linebuf_depth = 9;
 	stream->timing.dsc_cfg.version_minor = 2;
 	stream->timing.dsc_cfg.ycbcr422_simple = 0;
-#endif
 
 	update_stream_signal(stream, dc_sink_data);
 
 	stream->out_transfer_func = dc_create_transfer_func();
+	if (stream->out_transfer_func == NULL) {
+		dc_sink_release(dc_sink_data);
+		return false;
+	}
 	stream->out_transfer_func->type = TF_TYPE_BYPASS;
 	stream->out_transfer_func->ctx = stream->ctx;
 
 	stream->stream_id = stream->ctx->dc_stream_id_count;
 	stream->ctx->dc_stream_id_count++;
+
+	return true;
 }
 
-static void destruct(struct dc_stream_state *stream)
+static void dc_stream_destruct(struct dc_stream_state *stream)
 {
 	dc_sink_release(stream->sink);
 	if (stream->out_transfer_func != NULL) {
@@ -147,7 +149,7 @@ static void dc_stream_free(struct kref *kref)
 {
 	struct dc_stream_state *stream = container_of(kref, struct dc_stream_state, refcount);
 
-	destruct(stream);
+	dc_stream_destruct(stream);
 	kfree(stream);
 }
 
@@ -168,13 +170,20 @@ struct dc_stream_state *dc_create_stream_for_sink(
 
 	stream = kzalloc(sizeof(struct dc_stream_state), GFP_KERNEL);
 	if (stream == NULL)
-		return NULL;
+		goto alloc_fail;
 
-	construct(stream, sink);
+	if (dc_stream_construct(stream, sink) == false)
+		goto construct_fail;
 
 	kref_init(&stream->refcount);
 
 	return stream;
+
+construct_fail:
+	kfree(stream);
+
+alloc_fail:
+	return NULL;
 }
 
 struct dc_stream_state *dc_copy_stream(const struct dc_stream_state *stream)
@@ -235,34 +244,6 @@ struct dc_stream_status *dc_stream_get_status(
 	return dc_stream_get_status_from_state(dc->current_state, stream);
 }
 
-static void delay_cursor_until_vupdate(struct pipe_ctx *pipe_ctx, struct dc *dc)
-{
-#if defined(CONFIG_DRM_AMD_DC_DCN1_0)
-	unsigned int vupdate_line;
-	unsigned int lines_to_vupdate, us_to_vupdate, vpos, nvpos;
-	struct dc_stream_state *stream = pipe_ctx->stream;
-	unsigned int us_per_line;
-
-	if (stream->ctx->asic_id.chip_family == FAMILY_RV &&
-			ASICREV_IS_RAVEN(stream->ctx->asic_id.hw_internal_rev)) {
-
-		vupdate_line = get_vupdate_offset_from_vsync(pipe_ctx);
-		if (!dc_stream_get_crtc_position(dc, &stream, 1, &vpos, &nvpos))
-			return;
-
-		if (vpos >= vupdate_line)
-			return;
-
-		us_per_line = stream->timing.h_total * 10000 / stream->timing.pix_clk_100hz;
-		lines_to_vupdate = vupdate_line - vpos;
-		us_to_vupdate = lines_to_vupdate * us_per_line;
-
-		/* 70 us is a conservative estimate of cursor update time*/
-		if (us_to_vupdate < 70)
-			udelay(us_to_vupdate);
-	}
-#endif
-}
 
 /**
  * dc_stream_set_cursor_attributes() - Update cursor attributes and set cursor surface address
@@ -272,7 +253,7 @@ bool dc_stream_set_cursor_attributes(
 	const struct dc_cursor_attributes *attributes)
 {
 	int i;
-	struct dc  *core_dc;
+	struct dc  *dc;
 	struct resource_context *res_ctx;
 	struct pipe_ctx *pipe_to_program = NULL;
 
@@ -290,8 +271,8 @@ bool dc_stream_set_cursor_attributes(
 		return false;
 	}
 
-	core_dc = stream->ctx->dc;
-	res_ctx = &core_dc->current_state->res_ctx;
+	dc = stream->ctx->dc;
+	res_ctx = &dc->current_state->res_ctx;
 	stream->cursor_attributes = *attributes;
 
 	for (i = 0; i < MAX_PIPES; i++) {
@@ -302,18 +283,16 @@ bool dc_stream_set_cursor_attributes(
 
 		if (!pipe_to_program) {
 			pipe_to_program = pipe_ctx;
-
-			delay_cursor_until_vupdate(pipe_ctx, core_dc);
-			core_dc->hwss.pipe_control_lock(core_dc, pipe_to_program, true);
+			dc->hwss.cursor_lock(dc, pipe_to_program, true);
 		}
 
-		core_dc->hwss.set_cursor_attribute(pipe_ctx);
-		if (core_dc->hwss.set_cursor_sdr_white_level)
-			core_dc->hwss.set_cursor_sdr_white_level(pipe_ctx);
+		dc->hwss.set_cursor_attribute(pipe_ctx);
+		if (dc->hwss.set_cursor_sdr_white_level)
+			dc->hwss.set_cursor_sdr_white_level(pipe_ctx);
 	}
 
 	if (pipe_to_program)
-		core_dc->hwss.pipe_control_lock(core_dc, pipe_to_program, false);
+		dc->hwss.cursor_lock(dc, pipe_to_program, false);
 
 	return true;
 }
@@ -323,7 +302,7 @@ bool dc_stream_set_cursor_position(
 	const struct dc_cursor_position *position)
 {
 	int i;
-	struct dc  *core_dc;
+	struct dc  *dc;
 	struct resource_context *res_ctx;
 	struct pipe_ctx *pipe_to_program = NULL;
 
@@ -337,8 +316,8 @@ bool dc_stream_set_cursor_position(
 		return false;
 	}
 
-	core_dc = stream->ctx->dc;
-	res_ctx = &core_dc->current_state->res_ctx;
+	dc = stream->ctx->dc;
+	res_ctx = &dc->current_state->res_ctx;
 	stream->cursor_position = *position;
 
 	for (i = 0; i < MAX_PIPES; i++) {
@@ -353,21 +332,18 @@ bool dc_stream_set_cursor_position(
 
 		if (!pipe_to_program) {
 			pipe_to_program = pipe_ctx;
-
-			delay_cursor_until_vupdate(pipe_ctx, core_dc);
-			core_dc->hwss.pipe_control_lock(core_dc, pipe_to_program, true);
+			dc->hwss.cursor_lock(dc, pipe_to_program, true);
 		}
 
-		core_dc->hwss.set_cursor_position(pipe_ctx);
+		dc->hwss.set_cursor_position(pipe_ctx);
 	}
 
 	if (pipe_to_program)
-		core_dc->hwss.pipe_control_lock(core_dc, pipe_to_program, false);
+		dc->hwss.cursor_lock(dc, pipe_to_program, false);
 
 	return true;
 }
 
-#if defined(CONFIG_DRM_AMD_DC_DCN2_0)
 bool dc_stream_add_writeback(struct dc *dc,
 		struct dc_stream_state *stream,
 		struct dc_writeback_info *wb_info)
@@ -411,25 +387,30 @@ bool dc_stream_add_writeback(struct dc *dc,
 		stream->writeback_info[stream->num_wb_info++] = *wb_info;
 	}
 
-	if (!dc->hwss.update_bandwidth(dc, dc->current_state)) {
-		dm_error("DC: update_bandwidth failed!\n");
-		return false;
-	}
-
-	/* enable writeback */
 	if (dc->hwss.enable_writeback) {
 		struct dc_stream_status *stream_status = dc_stream_get_status(stream);
 		struct dwbc *dwb = dc->res_pool->dwbc[wb_info->dwb_pipe_inst];
+		dwb->otg_inst = stream_status->primary_otg_inst;
+	}
+	if (IS_DIAG_DC(dc->ctx->dce_environment)) {
+		if (!dc->hwss.update_bandwidth(dc, dc->current_state)) {
+			dm_error("DC: update_bandwidth failed!\n");
+			return false;
+		}
 
-		if (dwb->funcs->is_enabled(dwb)) {
-			/* writeback pipe already enabled, only need to update */
-			dc->hwss.update_writeback(dc, stream_status, wb_info, dc->current_state);
-		} else {
-			/* Enable writeback pipe from scratch*/
-			dc->hwss.enable_writeback(dc, stream_status, wb_info, dc->current_state);
+		/* enable writeback */
+		if (dc->hwss.enable_writeback) {
+			struct dwbc *dwb = dc->res_pool->dwbc[wb_info->dwb_pipe_inst];
+
+			if (dwb->funcs->is_enabled(dwb)) {
+				/* writeback pipe already enabled, only need to update */
+				dc->hwss.update_writeback(dc, wb_info, dc->current_state);
+			} else {
+				/* Enable writeback pipe from scratch*/
+				dc->hwss.enable_writeback(dc, wb_info, dc->current_state);
+			}
 		}
 	}
-
 	return true;
 }
 
@@ -468,26 +449,35 @@ bool dc_stream_remove_writeback(struct dc *dc,
 	}
 	stream->num_wb_info = j;
 
-	/* recalculate and apply DML parameters */
-	if (!dc->hwss.update_bandwidth(dc, dc->current_state)) {
-		dm_error("DC: update_bandwidth failed!\n");
-		return false;
+	if (IS_DIAG_DC(dc->ctx->dce_environment)) {
+		/* recalculate and apply DML parameters */
+		if (!dc->hwss.update_bandwidth(dc, dc->current_state)) {
+			dm_error("DC: update_bandwidth failed!\n");
+			return false;
+		}
+
+		/* disable writeback */
+		if (dc->hwss.disable_writeback)
+			dc->hwss.disable_writeback(dc, dwb_pipe_inst);
 	}
-
-	/* disable writeback */
-	if (dc->hwss.disable_writeback)
-		dc->hwss.disable_writeback(dc, dwb_pipe_inst);
-
 	return true;
 }
-#endif
 
+bool dc_stream_warmup_writeback(struct dc *dc,
+		int num_dwb,
+		struct dc_writeback_info *wb_info)
+{
+	if (dc->hwss.mmhubbub_warmup)
+		return dc->hwss.mmhubbub_warmup(dc, num_dwb, wb_info);
+	else
+		return false;
+}
 uint32_t dc_stream_get_vblank_counter(const struct dc_stream_state *stream)
 {
 	uint8_t i;
-	struct dc  *core_dc = stream->ctx->dc;
+	struct dc  *dc = stream->ctx->dc;
 	struct resource_context *res_ctx =
-		&core_dc->current_state->res_ctx;
+		&dc->current_state->res_ctx;
 
 	for (i = 0; i < MAX_PIPES; i++) {
 		struct timing_generator *tg = res_ctx->pipe_ctx[i].stream_res.tg;
@@ -544,9 +534,9 @@ bool dc_stream_get_scanoutpos(const struct dc_stream_state *stream,
 {
 	uint8_t i;
 	bool ret = false;
-	struct dc  *core_dc = stream->ctx->dc;
+	struct dc  *dc = stream->ctx->dc;
 	struct resource_context *res_ctx =
-		&core_dc->current_state->res_ctx;
+		&dc->current_state->res_ctx;
 
 	for (i = 0; i < MAX_PIPES; i++) {
 		struct timing_generator *tg = res_ctx->pipe_ctx[i].stream_res.tg;
@@ -566,10 +556,9 @@ bool dc_stream_get_scanoutpos(const struct dc_stream_state *stream,
 
 	return ret;
 }
-#if defined(CONFIG_DRM_AMD_DC_DCN2_0)
+
 bool dc_stream_dmdata_status_done(struct dc *dc, struct dc_stream_state *stream)
 {
-	bool status = true;
 	struct pipe_ctx *pipe = NULL;
 	int i;
 
@@ -585,8 +574,7 @@ bool dc_stream_dmdata_status_done(struct dc *dc, struct dc_stream_state *stream)
 	if (i == MAX_PIPES)
 		return true;
 
-	status = dc->hwss.dmdata_status_done(pipe);
-	return status;
+	return dc->hwss.dmdata_status_done(pipe);
 }
 
 bool dc_stream_set_dynamic_metadata(struct dc *dc,
@@ -596,6 +584,14 @@ bool dc_stream_set_dynamic_metadata(struct dc *dc,
 	struct pipe_ctx *pipe_ctx = NULL;
 	struct hubp *hubp;
 	int i;
+
+	/* Dynamic metadata is only supported on HDMI or DP */
+	if (!dc_is_hdmi_signal(stream->signal) && !dc_is_dp_signal(stream->signal))
+		return false;
+
+	/* Check hardware support */
+	if (!dc->hwss.program_dmdata_engine)
+		return false;
 
 	for (i = 0; i < MAX_PIPES; i++) {
 		pipe_ctx = &dc->current_state->res_ctx.pipe_ctx[i];
@@ -612,23 +608,7 @@ bool dc_stream_set_dynamic_metadata(struct dc *dc,
 
 	pipe_ctx->stream->dmdata_address = attr->address;
 
-	if (pipe_ctx->stream_res.stream_enc &&
-			pipe_ctx->stream_res.stream_enc->funcs->set_dynamic_metadata != NULL) {
-		if (pipe_ctx->stream->dmdata_address.quad_part != 0) {
-			/* if using dynamic meta, don't set up generic infopackets */
-			pipe_ctx->stream_res.encoder_info_frame.hdrsmd.valid = false;
-			pipe_ctx->stream_res.stream_enc->funcs->set_dynamic_metadata(
-					pipe_ctx->stream_res.stream_enc,
-					true, pipe_ctx->plane_res.hubp->inst,
-					dc_is_dp_signal(pipe_ctx->stream->signal) ?
-							dmdata_dp : dmdata_hdmi);
-		} else
-			pipe_ctx->stream_res.stream_enc->funcs->set_dynamic_metadata(
-					pipe_ctx->stream_res.stream_enc,
-					false, pipe_ctx->plane_res.hubp->inst,
-					dc_is_dp_signal(pipe_ctx->stream->signal) ?
-							dmdata_dp : dmdata_hdmi);
-	}
+	dc->hwss.program_dmdata_engine(pipe_ctx);
 
 	if (hubp->funcs->dmdata_set_attributes != NULL &&
 			pipe_ctx->stream->dmdata_address.quad_part != 0) {
@@ -637,7 +617,6 @@ bool dc_stream_set_dynamic_metadata(struct dc *dc,
 
 	return true;
 }
-#endif
 
 void dc_stream_log(const struct dc *dc, const struct dc_stream_state *stream)
 {

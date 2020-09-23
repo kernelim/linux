@@ -288,15 +288,17 @@ For instance if the device flags for device entries are:
     WRITE (1 << 62)
 
 Now let say that device driver wants to fault with at least read a range then
-it does set:
-    range->default_flags = (1 << 63)
+it does set::
+
+    range->default_flags = (1 << 63);
     range->pfn_flags_mask = 0;
 
 and calls hmm_range_fault() as described above. This will fill fault all page
 in the range with at least read permission.
 
 Now let say driver wants to do the same except for one page in the range for
-which its want to have write. Now driver set:
+which its want to have write. Now driver set::
+
     range->default_flags = (1 << 63);
     range->pfn_flags_mask = (1 << 62);
     range->pfns[index_of_write] = (1 << 62);
@@ -327,89 +329,13 @@ directly using struct page for device memory which left most kernel code paths
 unaware of the difference. We only need to make sure that no one ever tries to
 map those pages from the CPU side.
 
-HMM provides a set of helpers to register and hotplug device memory as a new
-region needing a struct page. This is offered through a very simple API::
-
- struct hmm_devmem *hmm_devmem_add(const struct hmm_devmem_ops *ops,
-                                   struct device *device,
-                                   unsigned long size);
- void hmm_devmem_remove(struct hmm_devmem *devmem);
-
-The hmm_devmem_ops is where most of the important things are::
-
- struct hmm_devmem_ops {
-     void (*free)(struct hmm_devmem *devmem, struct page *page);
-     int (*fault)(struct hmm_devmem *devmem,
-                  struct vm_area_struct *vma,
-                  unsigned long addr,
-                  struct page *page,
-                  unsigned flags,
-                  pmd_t *pmdp);
- };
-
-The first callback (free()) happens when the last reference on a device page is
-dropped. This means the device page is now free and no longer used by anyone.
-The second callback happens whenever the CPU tries to access a device page
-which it cannot do. This second callback must trigger a migration back to
-system memory.
-
 
 Migration to and from device memory
 ===================================
 
 Because the CPU cannot access device memory, migration must use the device DMA
-engine to perform copy from and to device memory. For this we need a new
-migration helper::
-
- int migrate_vma(const struct migrate_vma_ops *ops,
-                 struct vm_area_struct *vma,
-                 unsigned long mentries,
-                 unsigned long start,
-                 unsigned long end,
-                 unsigned long *src,
-                 unsigned long *dst,
-                 void *private);
-
-Unlike other migration functions it works on a range of virtual address, there
-are two reasons for that. First, device DMA copy has a high setup overhead cost
-and thus batching multiple pages is needed as otherwise the migration overhead
-makes the whole exercise pointless. The second reason is because the
-migration might be for a range of addresses the device is actively accessing.
-
-The migrate_vma_ops struct defines two callbacks. First one (alloc_and_copy())
-controls destination memory allocation and copy operation. Second one is there
-to allow the device driver to perform cleanup operations after migration::
-
- struct migrate_vma_ops {
-     void (*alloc_and_copy)(struct vm_area_struct *vma,
-                            const unsigned long *src,
-                            unsigned long *dst,
-                            unsigned long start,
-                            unsigned long end,
-                            void *private);
-     void (*finalize_and_map)(struct vm_area_struct *vma,
-                              const unsigned long *src,
-                              const unsigned long *dst,
-                              unsigned long start,
-                              unsigned long end,
-                              void *private);
- };
-
-It is important to stress that these migration helpers allow for holes in the
-virtual address range. Some pages in the range might not be migrated for all
-the usual reasons (page is pinned, page is locked, ...). This helper does not
-fail but just skips over those pages.
-
-The alloc_and_copy() might decide to not migrate all pages in the
-range (for reasons under the callback control). For those, the callback just
-has to leave the corresponding dst entry empty.
-
-Finally, the migration of the struct page might fail (for file backed page) for
-various reasons (failure to freeze reference, or update page cache, ...). If
-that happens, then the finalize_and_map() can catch any pages that were not
-migrated. Note those pages were still copied to a new page and thus we wasted
-bandwidth but this is considered as a rare event and a price that we are
-willing to pay to keep all the code simpler.
+engine to perform copy from and to device memory. For this we need to use
+migrate_vma_setup(), migrate_vma_pages(), and migrate_vma_finalize() helpers.
 
 
 Memory cgroup (memcg) and rss accounting

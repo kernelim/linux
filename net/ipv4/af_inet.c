@@ -255,6 +255,11 @@ static int inet_create(struct net *net, struct socket *sock, int protocol,
 	int try_loading_module = 0;
 	int err;
 
+	if (unlikely(protocol == IPPROTO_MPTCP_KERN))
+		return -EPROTONOSUPPORT;
+	if (unlikely(protocol == IPPROTO_MPTCP))
+		protocol = IPPROTO_MPTCP_KERN;
+
 	if (protocol < 0 || protocol >= IPPROTO_MAX)
 		return -EINVAL;
 
@@ -785,15 +790,24 @@ int inet_getname(struct socket *sock, struct sockaddr *uaddr,
 }
 EXPORT_SYMBOL(inet_getname);
 
-int inet_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
+int inet_send_prepare(struct sock *sk)
 {
-	struct sock *sk = sock->sk;
-
 	sock_rps_record_flow(sk);
 
 	/* We may need to bind the socket. */
 	if (!inet_sk(sk)->inet_num && !sk->sk_prot->no_autobind &&
 	    inet_autobind(sk))
+		return -EAGAIN;
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(inet_send_prepare);
+
+int inet_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
+{
+	struct sock *sk = sock->sk;
+
+	if (unlikely(inet_send_prepare(sk)))
 		return -EAGAIN;
 
 	return sk->sk_prot->sendmsg(sk, msg, size);
@@ -805,11 +819,7 @@ ssize_t inet_sendpage(struct socket *sock, struct page *page, int offset,
 {
 	struct sock *sk = sock->sk;
 
-	sock_rps_record_flow(sk);
-
-	/* We may need to bind the socket. */
-	if (!inet_sk(sk)->inet_num && !sk->sk_prot->no_autobind &&
-	    inet_autobind(sk))
+	if (unlikely(inet_send_prepare(sk)))
 		return -EAGAIN;
 
 	if (sk->sk_prot->sendpage)
@@ -1386,16 +1396,16 @@ out:
 }
 EXPORT_SYMBOL(inet_gso_segment);
 
-INDIRECT_CALLABLE_DECLARE(struct sk_buff **tcp4_gro_receive(struct sk_buff **,
-							    struct sk_buff *));
-INDIRECT_CALLABLE_DECLARE(struct sk_buff **udp4_gro_receive(struct sk_buff **,
-							    struct sk_buff *));
-struct sk_buff **inet_gro_receive(struct sk_buff **head, struct sk_buff *skb)
+INDIRECT_CALLABLE_DECLARE(struct sk_buff *tcp4_gro_receive(struct list_head *,
+							   struct sk_buff *));
+INDIRECT_CALLABLE_DECLARE(struct sk_buff *udp4_gro_receive(struct list_head *,
+							   struct sk_buff *));
+struct sk_buff *inet_gro_receive(struct list_head *head, struct sk_buff *skb)
 {
 	const struct net_offload *ops;
-	struct sk_buff **pp = NULL;
-	struct sk_buff *p;
+	struct sk_buff *pp = NULL;
 	const struct iphdr *iph;
+	struct sk_buff *p;
 	unsigned int hlen;
 	unsigned int off;
 	unsigned int id;
@@ -1431,7 +1441,7 @@ struct sk_buff **inet_gro_receive(struct sk_buff **head, struct sk_buff *skb)
 	flush = (u16)((ntohl(*(__be32 *)iph) ^ skb_gro_len(skb)) | (id & ~IP_DF));
 	id >>= 16;
 
-	for (p = *head; p; p = p->next) {
+	list_for_each_entry(p, head, list) {
 		struct iphdr *iph2;
 		u16 flush_id;
 
@@ -1512,8 +1522,8 @@ out:
 }
 EXPORT_SYMBOL(inet_gro_receive);
 
-static struct sk_buff **ipip_gro_receive(struct sk_buff **head,
-					 struct sk_buff *skb)
+static struct sk_buff *ipip_gro_receive(struct list_head *head,
+					struct sk_buff *skb)
 {
 	if (NAPI_GRO_CB(skb)->encap_mark) {
 		NAPI_GRO_CB(skb)->flush = 1;
@@ -1779,6 +1789,10 @@ static __net_exit void ipv4_mib_exit_net(struct net *net)
 	free_percpu(net->mib.net_statistics);
 	free_percpu(net->mib.ip_statistics);
 	free_percpu(net->mib.tcp_statistics);
+#ifdef CONFIG_MPTCP
+	/* allocated on demand, see mptcp_init_sock() */
+	free_percpu(net->mptcp_mib.mptcp_statistics);
+#endif
 }
 
 static __net_initdata struct pernet_operations ipv4_mib_ops = {

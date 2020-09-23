@@ -3,17 +3,20 @@
  * Copyright (C) 2012 Russell King
  *  Written from the i915 driver.
  */
+
 #include <linux/errno.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 
 #include <drm/drm_fb_helper.h>
+#include <drm/drm_fourcc.h>
+
 #include "armada_crtc.h"
 #include "armada_drm.h"
 #include "armada_fb.h"
 #include "armada_gem.h"
 
-static /*const*/ struct fb_ops armada_fb_ops = {
+static const struct fb_ops armada_fb_ops = {
 	.owner		= THIS_MODULE,
 	DRM_FB_HELPER_DEFAULT_OPS,
 	.fb_fillrect	= drm_fb_helper_cfb_fillrect,

@@ -30,9 +30,6 @@ if [ $UID != 0 ]; then
 	exit $ksft_skip
 fi
 
-echo $msg CONFIG_IPV6_SEG6_LWTUNNEL is not enabled in RHEL >&2
-exit $ksft_skip
-
 TMP_FILE="/tmp/selftest_lwt_seg6local.txt"
 
 cleanup()

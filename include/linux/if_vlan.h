@@ -133,6 +133,9 @@ struct vlan_pcpu_stats {
 
 extern struct net_device *__vlan_find_dev_deep_rcu(struct net_device *real_dev,
 					       __be16 vlan_proto, u16 vlan_id);
+extern int vlan_for_each(struct net_device *dev,
+			 int (*action)(struct net_device *dev, int vid,
+				       void *arg), void *arg);
 extern struct net_device *vlan_dev_real_dev(const struct net_device *dev);
 extern u16 vlan_dev_vlan_id(const struct net_device *dev);
 extern __be16 vlan_dev_vlan_proto(const struct net_device *dev);
@@ -184,7 +187,6 @@ struct vlan_dev_priv {
 #ifdef CONFIG_NET_POLL_CONTROLLER
 	struct netpoll				*netpoll;
 #endif
-	unsigned int				nest_level;
 };
 
 static inline struct vlan_dev_priv *vlan_dev_priv(const struct net_device *dev)
@@ -223,17 +225,20 @@ extern void vlan_vids_del_by_dev(struct net_device *dev,
 
 extern bool vlan_uses_dev(const struct net_device *dev);
 
-static inline int vlan_get_encap_level(struct net_device *dev)
-{
-	BUG_ON(!is_vlan_dev(dev));
-	return vlan_dev_priv(dev)->nest_level;
-}
 #else
 static inline struct net_device *
 __vlan_find_dev_deep_rcu(struct net_device *real_dev,
 		     __be16 vlan_proto, u16 vlan_id)
 {
 	return NULL;
+}
+
+static inline int
+vlan_for_each(struct net_device *dev,
+	      int (*action)(struct net_device *dev, int vid, void *arg),
+	      void *arg)
+{
+	return 0;
 }
 
 static inline struct net_device *vlan_dev_real_dev(const struct net_device *dev)
@@ -288,11 +293,6 @@ static inline void vlan_vids_del_by_dev(struct net_device *dev,
 static inline bool vlan_uses_dev(const struct net_device *dev)
 {
 	return false;
-}
-static inline int vlan_get_encap_level(struct net_device *dev)
-{
-	BUG();
-	return 0;
 }
 #endif
 

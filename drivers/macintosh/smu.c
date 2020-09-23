@@ -23,7 +23,7 @@
 #include <linux/kernel.h>
 #include <linux/device.h>
 #include <linux/dmapool.h>
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 #include <linux/vmalloc.h>
 #include <linux/highmem.h>
 #include <linux/jiffies.h>
@@ -38,7 +38,6 @@
 #include <linux/of_irq.h>
 #include <linux/of_platform.h>
 #include <linux/slab.h>
-#include <linux/memblock.h>
 #include <linux/sched/signal.h>
 
 #include <asm/byteorder.h>
@@ -134,7 +133,7 @@ static void smu_start_cmd(void)
 	/* Flush command and data to RAM */
 	faddr = (unsigned long)smu->cmd_buf;
 	fend = faddr + smu->cmd_buf->length + 2;
-	flush_inval_dcache_range(faddr, fend);
+	flush_dcache_range(faddr, fend);
 
 
 	/* We also disable NAP mode for the duration of the command
@@ -196,7 +195,7 @@ static irqreturn_t smu_db_intr(int irq, void *arg)
 		 * reply length (it's only 2 cache lines anyway)
 		 */
 		faddr = (unsigned long)smu->cmd_buf;
-		flush_inval_dcache_range(faddr, faddr + 256);
+		flush_dcache_range(faddr, faddr + 256);
 
 		/* Now check ack */
 		ack = (~cmd->cmd) & 0xff;
@@ -493,7 +492,7 @@ int __init smu_init (void)
 		goto fail_np;
 	}
 
-	smu = alloc_bootmem(sizeof(struct smu_device));
+	smu = memblock_alloc(sizeof(struct smu_device), SMP_CACHE_BYTES);
 
 	spin_lock_init(&smu->lock);
 	INIT_LIST_HEAD(&smu->cmd_list);
@@ -569,7 +568,7 @@ fail_msg_node:
 fail_db_node:
 	of_node_put(smu->db_node);
 fail_bootmem:
-	free_bootmem(__pa(smu), sizeof(struct smu_device));
+	memblock_free(__pa(smu), sizeof(struct smu_device));
 	smu = NULL;
 fail_np:
 	of_node_put(np);

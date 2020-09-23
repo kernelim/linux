@@ -223,6 +223,14 @@ enter_lazy_tlb(struct mm_struct *mm, struct task_struct *tsk)
 		per_cpu(cpu_not_lazy_tlb, cpu) = false;
 		if (!system_uses_ttbr0_pan())
 			cpu_set_reserved_ttbr0();
+		/*
+		 * DSB will flush the speculative pagetable walks on
+		 * the old asid. It's required before decreasing
+		 * nr_active_mm because after decreasing nr_active_mm
+		 * the tlbi broadcast may not happen on the unloaded
+		 * asid before the pagetables are freed.
+		 */
+		dsb(ish);
 		atomic_dec(&mm->context.nr_active_mm);
 	}
 	VM_WARN_ON(atomic_read(&mm->context.nr_active_mm) < 0);
@@ -260,6 +268,14 @@ switch_mm(struct mm_struct *prev, struct mm_struct *next,
 	} else if (prev != next) {
 		atomic_inc(&next->context.nr_active_mm);
 		__switch_mm(next, cpu);
+		/*
+		 * DSB will flush the speculative pagetable walks on
+		 * the old asid. It's required before decreasing
+		 * nr_active_mm because after decreasing nr_active_mm
+		 * the tlbi broadcast may not happen on the unloaded
+		 * asid before the pagetables are freed.
+		 */
+		dsb(ish);
 		atomic_dec(&prev->context.nr_active_mm);
 	}
 	VM_WARN_ON(!atomic_read(&next->context.nr_active_mm));

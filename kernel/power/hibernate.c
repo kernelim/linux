@@ -14,7 +14,6 @@
 
 #include <linux/export.h>
 #include <linux/suspend.h>
-#include <linux/syscalls.h>
 #include <linux/reboot.h>
 #include <linux/string.h>
 #include <linux/device.h>
@@ -669,7 +668,7 @@ static int load_image_and_restore(void)
 	error = swsusp_read(&flags);
 	swsusp_close(FMODE_READ);
 	if (!error)
-		hibernation_restore(flags & SF_PLATFORM_MODE);
+		error = hibernation_restore(flags & SF_PLATFORM_MODE);
 
 	pr_err("Failed to load hibernation image, recovering.\n");
 	swsusp_free();
@@ -708,9 +707,7 @@ int hibernate(void)
 		goto Exit;
 	}
 
-	pr_info("Syncing filesystems ... \n");
-	ksys_sync();
-	pr_info("done.\n");
+	ksys_sync_helper();
 
 	error = freeze_processes();
 	if (error)
@@ -891,6 +888,13 @@ static int software_resume(void)
 	error = freeze_processes();
 	if (error)
 		goto Close_Finish;
+
+	error = freeze_kernel_threads();
+	if (error) {
+		thaw_processes();
+		goto Close_Finish;
+	}
+
 	error = load_image_and_restore();
 	thaw_processes();
  Finish:

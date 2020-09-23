@@ -181,15 +181,15 @@ static int ipv6_exthdrs_len(struct ipv6hdr *iph,
 	return len;
 }
 
-INDIRECT_CALLABLE_DECLARE(struct sk_buff **tcp6_gro_receive(struct sk_buff **,
-							    struct sk_buff *));
-INDIRECT_CALLABLE_DECLARE(struct sk_buff **udp6_gro_receive(struct sk_buff **,
-							    struct sk_buff *));
-INDIRECT_CALLABLE_SCOPE struct sk_buff **ipv6_gro_receive(struct sk_buff **head,
-							  struct sk_buff *skb)
+INDIRECT_CALLABLE_DECLARE(struct sk_buff *tcp6_gro_receive(struct list_head *,
+							   struct sk_buff *));
+INDIRECT_CALLABLE_DECLARE(struct sk_buff *udp6_gro_receive(struct list_head *,
+							   struct sk_buff *));
+INDIRECT_CALLABLE_SCOPE struct sk_buff *ipv6_gro_receive(struct list_head *head,
+							 struct sk_buff *skb)
 {
 	const struct net_offload *ops;
-	struct sk_buff **pp = NULL;
+	struct sk_buff *pp = NULL;
 	struct sk_buff *p;
 	struct ipv6hdr *iph;
 	unsigned int nlen;
@@ -236,7 +236,7 @@ INDIRECT_CALLABLE_SCOPE struct sk_buff **ipv6_gro_receive(struct sk_buff **head,
 	flush--;
 	nlen = skb_network_header_len(skb);
 
-	for (p = *head; p; p = p->next) {
+	list_for_each_entry(p, head, list) {
 		const struct ipv6hdr *iph2;
 		__be32 first_word; /* <Version:4><Traffic_Class:8><Flow_Label:20> */
 
@@ -293,8 +293,8 @@ out:
 	return pp;
 }
 
-static struct sk_buff **sit_ip6ip6_gro_receive(struct sk_buff **head,
-					       struct sk_buff *skb)
+static struct sk_buff *sit_ip6ip6_gro_receive(struct list_head *head,
+					      struct sk_buff *skb)
 {
 	/* Common GRO receive for SIT and IP6IP6 */
 
@@ -308,8 +308,8 @@ static struct sk_buff **sit_ip6ip6_gro_receive(struct sk_buff **head,
 	return ipv6_gro_receive(head, skb);
 }
 
-static struct sk_buff **ip4ip6_gro_receive(struct sk_buff **head,
-					   struct sk_buff *skb)
+static struct sk_buff *ip4ip6_gro_receive(struct list_head *head,
+					  struct sk_buff *skb)
 {
 	/* Common GRO receive for SIT and IP6IP6 */
 

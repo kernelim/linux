@@ -6,7 +6,7 @@
 
 #include <linux/dma-buf.h>
 #include <linux/highmem.h>
-#include <linux/reservation.h>
+#include <linux/dma-resv.h>
 
 #include "i915_drv.h"
 #include "i915_gem_object.h"
@@ -93,40 +93,6 @@ static void i915_gem_dmabuf_vunmap(struct dma_buf *dma_buf, void *vaddr)
 	i915_gem_object_unpin_map(obj);
 }
 
-static void *i915_gem_dmabuf_kmap(struct dma_buf *dma_buf, unsigned long page_num)
-{
-	struct drm_i915_gem_object *obj = dma_buf_to_obj(dma_buf);
-	struct page *page;
-
-	if (page_num >= obj->base.size >> PAGE_SHIFT)
-		return NULL;
-
-	if (!i915_gem_object_has_struct_page(obj))
-		return NULL;
-
-	if (i915_gem_object_pin_pages(obj))
-		return NULL;
-
-	/* Synchronisation is left to the caller (via .begin_cpu_access()) */
-	page = i915_gem_object_get_page(obj, page_num);
-	if (IS_ERR(page))
-		goto err_unpin;
-
-	return kmap(page);
-
-err_unpin:
-	i915_gem_object_unpin_pages(obj);
-	return NULL;
-}
-
-static void i915_gem_dmabuf_kunmap(struct dma_buf *dma_buf, unsigned long page_num, void *addr)
-{
-	struct drm_i915_gem_object *obj = dma_buf_to_obj(dma_buf);
-
-	kunmap(virt_to_page(addr));
-	i915_gem_object_unpin_pages(obj);
-}
-
 static int i915_gem_dmabuf_mmap(struct dma_buf *dma_buf, struct vm_area_struct *vma)
 {
 	struct drm_i915_gem_object *obj = dma_buf_to_obj(dma_buf);
@@ -195,8 +161,6 @@ static const struct dma_buf_ops i915_dmabuf_ops =  {
 	.map_dma_buf = i915_gem_map_dma_buf,
 	.unmap_dma_buf = i915_gem_unmap_dma_buf,
 	.release = drm_gem_dmabuf_release,
-	.map = i915_gem_dmabuf_kmap,
-	.unmap = i915_gem_dmabuf_kunmap,
 	.mmap = i915_gem_dmabuf_mmap,
 	.vmap = i915_gem_dmabuf_vmap,
 	.vunmap = i915_gem_dmabuf_vunmap,
@@ -204,8 +168,7 @@ static const struct dma_buf_ops i915_dmabuf_ops =  {
 	.end_cpu_access = i915_gem_end_cpu_access,
 };
 
-struct dma_buf *i915_gem_prime_export(struct drm_device *dev,
-				      struct drm_gem_object *gem_obj, int flags)
+struct dma_buf *i915_gem_prime_export(struct drm_gem_object *gem_obj, int flags)
 {
 	struct drm_i915_gem_object *obj = to_intel_bo(gem_obj);
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
@@ -222,7 +185,7 @@ struct dma_buf *i915_gem_prime_export(struct drm_device *dev,
 			return ERR_PTR(ret);
 	}
 
-	return drm_gem_dmabuf_export(dev, &exp_info);
+	return drm_gem_dmabuf_export(gem_obj->dev, &exp_info);
 }
 
 static int i915_gem_object_get_pages_dmabuf(struct drm_i915_gem_object *obj)
@@ -257,6 +220,7 @@ static const struct drm_i915_gem_object_ops i915_gem_object_dmabuf_ops = {
 struct drm_gem_object *i915_gem_prime_import(struct drm_device *dev,
 					     struct dma_buf *dma_buf)
 {
+	static struct lock_class_key lock_class;
 	struct dma_buf_attachment *attach;
 	struct drm_i915_gem_object *obj;
 	int ret;
@@ -288,7 +252,7 @@ struct drm_gem_object *i915_gem_prime_import(struct drm_device *dev,
 	}
 
 	drm_gem_private_object_init(dev, &obj->base, dma_buf->size);
-	i915_gem_object_init(obj, &i915_gem_object_dmabuf_ops);
+	i915_gem_object_init(obj, &i915_gem_object_dmabuf_ops, &lock_class);
 	obj->base.import_attach = attach;
 	obj->base.resv = dma_buf->resv;
 

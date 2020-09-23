@@ -6,7 +6,7 @@
  * Licensed under the GPL.
  */
 
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 #include <linux/etherdevice.h>
 #include <linux/ethtool.h>
 #include <linux/inetdevice.h>
@@ -249,7 +249,7 @@ static void uml_net_set_multicast_list(struct net_device *dev)
 	return;
 }
 
-static void uml_net_tx_timeout(struct net_device *dev)
+static void uml_net_tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	netif_trans_update(dev);
 	netif_wake_queue(dev);
@@ -650,7 +650,7 @@ static int __init eth_setup(char *str)
 		return 1;
 	}
 
-	new = alloc_bootmem(sizeof(*new));
+	new = memblock_alloc(sizeof(*new), 0);
 
 	INIT_LIST_HEAD(&new->list);
 	new->index = n;

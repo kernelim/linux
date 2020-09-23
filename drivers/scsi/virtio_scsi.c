@@ -99,16 +99,8 @@ static inline struct Scsi_Host *virtio_scsi_host(struct virtio_device *vdev)
 
 static void virtscsi_compute_resid(struct scsi_cmnd *sc, u32 resid)
 {
-	if (!resid)
-		return;
-
-	if (!scsi_bidi_cmnd(sc)) {
+	if (resid)
 		scsi_set_resid(sc, resid);
-		return;
-	}
-
-	scsi_in(sc)->resid = min(resid, scsi_in(sc)->length);
-	scsi_out(sc)->resid = resid - scsi_in(sc)->resid;
 }
 
 /**
@@ -361,6 +353,14 @@ static void virtscsi_rescan_hotunplug(struct virtio_scsi *vscsi)
 		if (result == 0 && inq_result[0] >> 5) {
 			/* PQ indicates the LUN is not attached */
 			scsi_remove_device(sdev);
+		} else if (host_byte(result) == DID_BAD_TARGET) {
+			/*
+			 * If all LUNs of a virtio-scsi device are unplugged
+			 * it will respond with BAD TARGET on any INQUIRY
+			 * command.
+			 * Remove the device in this case as well.
+			 */
+			scsi_remove_device(sdev);
 		}
 	}
 
@@ -426,9 +426,9 @@ static int __virtscsi_add_cmd(struct virtqueue *vq,
 
 	if (sc && sc->sc_data_direction != DMA_NONE) {
 		if (sc->sc_data_direction != DMA_FROM_DEVICE)
-			out = &scsi_out(sc)->table;
+			out = &sc->sdb.table;
 		if (sc->sc_data_direction != DMA_TO_DEVICE)
-			in = &scsi_in(sc)->table;
+			in = &sc->sdb.table;
 	}
 
 	/* Request header.  */

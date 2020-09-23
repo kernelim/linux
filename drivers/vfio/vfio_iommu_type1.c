@@ -282,21 +282,8 @@ static int vfio_lock_acct(struct vfio_dma *dma, long npage, bool async)
 
 	ret = down_write_killable(&mm->mmap_sem);
 	if (!ret) {
-		if (npage > 0) {
-			if (!dma->lock_cap) {
-				unsigned long limit;
-
-				limit = task_rlimit(dma->task,
-						RLIMIT_MEMLOCK) >> PAGE_SHIFT;
-
-				if (mm->locked_vm + npage > limit)
-					ret = -ENOMEM;
-			}
-		}
-
-		if (!ret)
-			mm->locked_vm += npage;
-
+		ret = __account_locked_vm(mm, abs(npage), npage > 0, dma->task,
+					  dma->lock_cap);
 		up_write(&mm->mmap_sem);
 	}
 
@@ -310,31 +297,13 @@ static int vfio_lock_acct(struct vfio_dma *dma, long npage, bool async)
  * Some mappings aren't backed by a struct page, for example an mmap'd
  * MMIO range for our own or another device.  These use a different
  * pfn conversion and shouldn't be tracked as locked pages.
+ * For compound pages, any driver that sets the reserved bit in head
+ * page needs to set the reserved bit in all subpages to be safe.
  */
 static bool is_invalid_reserved_pfn(unsigned long pfn)
 {
-	if (pfn_valid(pfn)) {
-		bool reserved;
-		struct page *tail = pfn_to_page(pfn);
-		struct page *head = compound_head(tail);
-		reserved = !!(PageReserved(head));
-		if (head != tail) {
-			/*
-			 * "head" is not a dangling pointer
-			 * (compound_head takes care of that)
-			 * but the hugepage may have been split
-			 * from under us (and we may not hold a
-			 * reference count on the head page so it can
-			 * be reused before we run PageReferenced), so
-			 * we've to check PageTail before returning
-			 * what we just read.
-			 */
-			smp_rmb();
-			if (PageTail(tail))
-				return reserved;
-		}
-		return PageReserved(tail);
-	}
+	if (pfn_valid(pfn))
+		return PageReserved(pfn_to_page(pfn));
 
 	return true;
 }
@@ -637,7 +606,7 @@ static int vfio_iommu_type1_pin_pages(void *iommu_data,
 			continue;
 		}
 
-		remote_vaddr = dma->vaddr + iova - dma->iova;
+		remote_vaddr = dma->vaddr + (iova - dma->iova);
 		ret = vfio_pin_page_external(dma, remote_vaddr, &phys_pfn[i],
 					     do_accounting);
 		if (ret)
@@ -1026,32 +995,6 @@ unlock:
 	return ret;
 }
 
-/*
- * Turns out AMD IOMMU has a page table bug where it won't map large pages
- * to a region that previously mapped smaller pages.  This should be fixed
- * soon, so this is just a temporary workaround to break mappings down into
- * PAGE_SIZE.  Better to map smaller pages than nothing.
- */
-static int map_try_harder(struct vfio_domain *domain, dma_addr_t iova,
-			  unsigned long pfn, long npage, int prot)
-{
-	long i;
-	int ret = 0;
-
-	for (i = 0; i < npage; i++, pfn++, iova += PAGE_SIZE) {
-		ret = iommu_map(domain->domain, iova,
-				(phys_addr_t)pfn << PAGE_SHIFT,
-				PAGE_SIZE, prot | domain->prot);
-		if (ret)
-			break;
-	}
-
-	for (; i < npage && i > 0; i--, iova -= PAGE_SIZE)
-		iommu_unmap(domain->domain, iova, PAGE_SIZE);
-
-	return ret;
-}
-
 static int vfio_iommu_map(struct vfio_iommu *iommu, dma_addr_t iova,
 			  unsigned long pfn, long npage, int prot)
 {
@@ -1061,11 +1004,8 @@ static int vfio_iommu_map(struct vfio_iommu *iommu, dma_addr_t iova,
 	list_for_each_entry(d, &iommu->domain_list, next) {
 		ret = iommu_map(d->domain, iova, (phys_addr_t)pfn << PAGE_SHIFT,
 				npage << PAGE_SHIFT, prot | d->prot);
-		if (ret) {
-			if (ret != -EBUSY ||
-			    map_try_harder(d, iova, pfn, npage, prot))
-				goto unwind;
-		}
+		if (ret)
+			goto unwind;
 
 		cond_resched();
 	}
@@ -1732,7 +1672,7 @@ static int vfio_iommu_type1_attach_group(void *iommu_data,
 	struct bus_type *bus = NULL;
 	int ret;
 	bool resv_msi, msi_remap;
-	phys_addr_t resv_msi_base;
+	phys_addr_t resv_msi_base = 0;
 	struct iommu_domain_geometry geo;
 	LIST_HEAD(iova_copy);
 	LIST_HEAD(group_resv_regions);
@@ -2141,6 +2081,7 @@ static void *vfio_iommu_type1_open(unsigned long arg)
 		break;
 	case VFIO_TYPE1_NESTING_IOMMU:
 		iommu->nesting = true;
+		/* fall through */
 	case VFIO_TYPE1v2_IOMMU:
 		iommu->v2 = true;
 		break;

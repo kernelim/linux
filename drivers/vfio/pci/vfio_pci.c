@@ -113,13 +113,15 @@ static inline bool vfio_pci_is_vga(struct pci_dev *pdev)
 static void vfio_pci_probe_mmaps(struct vfio_pci_device *vdev)
 {
 	struct resource *res;
-	int bar;
+	int i;
 	struct vfio_pci_dummy_resource *dummy_res;
 
 	INIT_LIST_HEAD(&vdev->dummy_resources_list);
 
-	for (bar = PCI_STD_RESOURCES; bar <= PCI_STD_RESOURCE_END; bar++) {
-		res = vdev->pdev->resource + bar;
+	for (i = 0; i < PCI_STD_NUM_BARS; i++) {
+		int bar = i + PCI_STD_RESOURCES;
+
+		res = &vdev->pdev->resource[bar];
 
 		if (!IS_ENABLED(CONFIG_VFIO_PCI_MMAP))
 			goto no_mmap;
@@ -407,7 +409,8 @@ static void vfio_pci_disable(struct vfio_pci_device *vdev)
 
 	vfio_config_free(vdev);
 
-	for (bar = PCI_STD_RESOURCES; bar <= PCI_STD_RESOURCE_END; bar++) {
+	for (i = 0; i < PCI_STD_NUM_BARS; i++) {
+		bar = i + PCI_STD_RESOURCES;
 		if (!vdev->barmap[bar])
 			continue;
 		pci_iounmap(pdev, vdev->barmap[bar]);
@@ -447,11 +450,20 @@ static void vfio_pci_disable(struct vfio_pci_device *vdev)
 	pci_write_config_word(pdev, PCI_COMMAND, PCI_COMMAND_INTX_DISABLE);
 
 	/*
-	 * Try to reset the device.  The success of this is dependent on
-	 * being able to lock the device, which is not always possible.
+	 * Try to get the locks ourselves to prevent a deadlock. The
+	 * success of this is dependent on being able to lock the device,
+	 * which is not always possible.
+	 * We can not use the "try" reset interface here, which will
+	 * overwrite the previously restored configuration information.
 	 */
-	if (vdev->reset_works && !pci_try_reset_function(pdev))
-		vdev->needs_reset = false;
+	if (vdev->reset_works && pci_cfg_access_trylock(pdev)) {
+		if (device_trylock(&pdev->dev)) {
+			if (!__pci_reset_function_locked(pdev))
+				vdev->needs_reset = false;
+			device_unlock(&pdev->dev);
+		}
+		pci_cfg_access_unlock(pdev);
+	}
 
 	pci_restore_state(pdev);
 out:
@@ -472,6 +484,19 @@ static void vfio_pci_release(void *device_data)
 	if (!(--vdev->refcnt)) {
 		vfio_spapr_pci_eeh_release(vdev->pdev);
 		vfio_pci_disable(vdev);
+		mutex_lock(&vdev->igate);
+		if (vdev->err_trigger) {
+			eventfd_ctx_put(vdev->err_trigger);
+			vdev->err_trigger = NULL;
+		}
+		mutex_unlock(&vdev->igate);
+
+		mutex_lock(&vdev->igate);
+		if (vdev->req_trigger) {
+			eventfd_ctx_put(vdev->req_trigger);
+			vdev->req_trigger = NULL;
+		}
+		mutex_unlock(&vdev->igate);
 	}
 
 	mutex_unlock(&vdev->reflck->lock);
@@ -885,7 +910,7 @@ static long vfio_pci_ioctl(void *device_data,
 		case VFIO_PCI_ERR_IRQ_INDEX:
 			if (pci_is_pcie(vdev->pdev))
 				break;
-		/* pass thru to return error */
+		/* fall through */
 		default:
 			return -EINVAL;
 		}
@@ -1958,11 +1983,11 @@ static void __init vfio_pci_fill_ids(void)
 		rc = pci_add_dynid(&vfio_pci_driver, vendor, device,
 				   subvendor, subdevice, class, class_mask, 0);
 		if (rc)
-			pr_warn("failed to add dynamic id [%04hx:%04hx[%04hx:%04hx]] class %#08x/%08x (%d)\n",
+			pr_warn("failed to add dynamic id [%04x:%04x[%04x:%04x]] class %#08x/%08x (%d)\n",
 				vendor, device, subvendor, subdevice,
 				class, class_mask, rc);
 		else
-			pr_info("add [%04hx:%04hx[%04hx:%04hx]] class %#08x/%08x\n",
+			pr_info("add [%04x:%04x[%04x:%04x]] class %#08x/%08x\n",
 				vendor, device, subvendor, subdevice,
 				class, class_mask);
 	}

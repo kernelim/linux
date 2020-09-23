@@ -140,7 +140,7 @@ static int mlx5_cmd_dr_create_flow_group(struct mlx5_flow_root_namespace *ns,
 					 struct mlx5_flow_group *fg)
 {
 	struct mlx5dr_matcher *matcher;
-	u16 priority = MLX5_GET(create_flow_group_in, in,
+	u32 priority = MLX5_GET(create_flow_group_in, in,
 				start_flow_index);
 	u8 match_criteria_enable = MLX5_GET(create_flow_group_in,
 					    in,
@@ -564,7 +564,7 @@ static int mlx5_cmd_dr_modify_header_alloc(struct mlx5_flow_root_namespace *ns,
 	struct mlx5dr_action *action;
 	size_t actions_sz;
 
-	actions_sz = MLX5_UN_SZ_BYTES(set_action_in_add_action_in_auto) *
+	actions_sz = MLX5_UN_SZ_BYTES(set_add_copy_action_in_auto) *
 		num_actions;
 	action = mlx5dr_action_create_modify_header(dr_domain, 0,
 						    actions_sz,

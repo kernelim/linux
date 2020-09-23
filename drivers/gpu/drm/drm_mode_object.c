@@ -42,6 +42,8 @@ int __drm_mode_object_add(struct drm_device *dev, struct drm_mode_object *obj,
 {
 	int ret;
 
+	WARN_ON(!dev->driver->load && dev->registered && !obj_free_cb);
+
 	mutex_lock(&dev->mode_config.idr_mutex);
 	ret = idr_alloc(&dev->mode_config.object_idr, register_obj ? obj : NULL,
 			1, 0, GFP_KERNEL);
@@ -102,6 +104,8 @@ void drm_mode_object_register(struct drm_device *dev,
 void drm_mode_object_unregister(struct drm_device *dev,
 				struct drm_mode_object *object)
 {
+	WARN_ON(!dev->driver->load && dev->registered && !object->free_cb);
+
 	mutex_lock(&dev->mode_config.idr_mutex);
 	if (object->id) {
 		idr_remove(&dev->mode_config.object_idr, object->id);
@@ -220,12 +224,26 @@ EXPORT_SYMBOL(drm_mode_object_get);
  * This attaches the given property to the modeset object with the given initial
  * value. Currently this function cannot fail since the properties are stored in
  * a statically sized array.
+ *
+ * Note that all properties must be attached before the object itself is
+ * registered and accessible from userspace.
  */
 void drm_object_attach_property(struct drm_mode_object *obj,
 				struct drm_property *property,
 				uint64_t init_val)
 {
 	int count = obj->properties->count;
+	struct drm_device *dev = property->dev;
+
+
+	if (obj->type == DRM_MODE_OBJECT_CONNECTOR) {
+		struct drm_connector *connector = obj_to_connector(obj);
+
+		WARN_ON(!dev->driver->load &&
+			connector->registration_state == DRM_CONNECTOR_REGISTERED);
+	} else {
+		WARN_ON(!dev->driver->load && dev->registered);
+	}
 
 	if (count == DRM_OBJECT_MAX_PROPERTY) {
 		WARN(1, "Failed to attach object property (type: 0x%x). Please "

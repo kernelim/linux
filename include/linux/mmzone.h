@@ -247,13 +247,20 @@ enum node_stat_item {
 	/*
 	 * RHEL8:
 	 * New node stat item should be put here to avoid changing kABI
-	 * signature of pg_data_t. The size of vm_stat[] will change.
-	 * However, vm_stat is the last field of pg_data_t and so it won't
-	 * affect offsets of existing fields. The per-node pg_data_t is
-	 * allocated by the core kernel code and accessed by other as
-	 * an array of pointers to pg_data_t. So changing the size of
-	 * pg_data_t because of additional vm_stat items will not impact
-	 * others.
+	 * signature of pg_data_t. The size of vm_stat[] of pg_data_t and
+	 * vm_node_stat_diff[] of per_cpu_nodestat will change. However,
+	 * they are the the last field of their respective structures
+	 * and so it won't affect offsets of existing fields. These two
+	 * structures are all allocated dynamically and so increasing their
+	 * array size won't affect kABI.
+	 *
+	 * However, NR_VM_NODE_STAT_ITEMS does get used in lruvec_stat[] of
+	 * mem_cgroup_per_node (memcontrol.h) and lumped into MEMCG_NR_STAT.
+	 * The change in MEMCG_NR_STAT does increase the size of stat[] of
+	 * memcg_vmstats_percpu and vmstats[] of mem_cgroup structures.
+	 * These arrays are not at the end of the structure and so changing
+	 * the array size will break offsets of existing fields that
+	 * follows the arrays.
 	 */
 	WORKINGSET_RESTORE,
 #endif
@@ -320,11 +327,6 @@ struct lruvec {
 	struct pglist_data *pgdat;
 #endif
 };
-
-/* Mask used at gathering information at once (see memcontrol.c) */
-#define LRU_ALL_FILE (BIT(LRU_INACTIVE_FILE) | BIT(LRU_ACTIVE_FILE))
-#define LRU_ALL_ANON (BIT(LRU_INACTIVE_ANON) | BIT(LRU_ACTIVE_ANON))
-#define LRU_ALL	     ((1 << NR_LRU_LISTS) - 1)
 
 /* Isolate unmapped file */
 #define ISOLATE_UNMAPPED	((__force isolate_mode_t)0x2)
@@ -711,13 +713,12 @@ typedef struct pglist_data {
 	struct page_ext *node_page_ext;
 #endif
 #endif
-#ifndef CONFIG_NO_BOOTMEM
-	struct bootmem_data *bdata;
-#endif
 #if defined(CONFIG_MEMORY_HOTPLUG) || defined(CONFIG_DEFERRED_STRUCT_PAGE_INIT)
 	/*
 	 * Must be held any time you expect node_start_pfn, node_present_pages
 	 * or node_spanned_pages stay constant.
+	 * Also synchronizes pgdat->first_deferred_pfn during deferred page
+	 * init.
 	 *
 	 * pgdat_resize_lock() and pgdat_resize_unlock() are provided to
 	 * manipulate node_size_lock without checking for CONFIG_MEMORY_HOTPLUG
@@ -792,7 +793,13 @@ typedef struct pglist_data {
 #endif
 
 	/* Fields commonly accessed by the page reclaim scanner */
-	struct lruvec		lruvec;
+
+	/*
+	 * NOTE: THIS IS UNUSED IF MEMCG IS ENABLED.
+	 *
+	 * Use mem_cgroup_lruvec() to look up lruvecs.
+	 */
+	struct lruvec		RH_KABI_RENAME(lruvec, __lruvec);
 
 	unsigned long		flags;
 
@@ -820,11 +827,6 @@ typedef struct pglist_data {
 static inline spinlock_t *zone_lru_lock(struct zone *zone)
 {
 	return &zone->zone_pgdat->lru_lock;
-}
-
-static inline struct lruvec *node_lruvec(struct pglist_data *pgdat)
-{
-	return &pgdat->lruvec;
 }
 
 static inline unsigned long pgdat_end_pfn(pg_data_t *pgdat)
@@ -871,7 +873,7 @@ static inline struct pglist_data *lruvec_pgdat(struct lruvec *lruvec)
 #ifdef CONFIG_MEMCG
 	return lruvec->pgdat;
 #else
-	return container_of(lruvec, struct pglist_data, lruvec);
+	return container_of(lruvec, struct pglist_data, __lruvec);
 #endif
 }
 
@@ -935,7 +937,7 @@ static inline int is_highmem_idx(enum zone_type idx)
 }
 
 /**
- * is_highmem - helper function to quickly check if a struct zone is a 
+ * is_highmem - helper function to quickly check if a struct zone is a
  *              highmem zone or not.  This is an attempt to keep references
  *              to ZONE_{DMA/NORMAL/HIGHMEM/etc} in general code to a minimum.
  * @zone - pointer to struct zone variable
@@ -1172,6 +1174,7 @@ static inline unsigned long section_nr_to_pfn(unsigned long sec)
 #define SECTION_ALIGN_DOWN(pfn)	((pfn) & PAGE_SECTION_MASK)
 
 #define SUBSECTION_SHIFT 21
+#define SUBSECTION_SIZE (1UL << SUBSECTION_SHIFT)
 
 #define PFN_SUBSECTION_SHIFT (SUBSECTION_SHIFT - PAGE_SHIFT)
 #define PAGES_PER_SUBSECTION (1UL << PFN_SUBSECTION_SHIFT)
@@ -1214,7 +1217,7 @@ struct mem_section {
 	RH_KABI_REPLACE(
 		unsigned long *pageblock_flags,
 		struct mem_section_usage *usage)
-#ifdef CONFIG_PAGE_EXTENSION
+#if defined(CONFIG_PAGE_EXTENSION) && !defined(__GENKSYMS__)
 	/*
 	 * If SPARSEMEM, pgdat doesn't have page_ext pointer. We use
 	 * section. (see page_ext.h about this.)

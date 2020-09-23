@@ -205,11 +205,9 @@ static void enc2_stream_encoder_stop_hdmi_info_packets(
 		HDMI_GENERIC7_LINE, 0);
 }
 
-#ifdef CONFIG_DRM_AMD_DC_DSC_SUPPORT
-
 
 /* Update GSP7 SDP 128 byte long */
-static void enc2_send_gsp7_128_info_packet(
+static void enc2_update_gsp7_128_info_packet(
 	struct dcn10_stream_encoder *enc1,
 	const struct dc_info_packet_128 *info_packet)
 {
@@ -277,18 +275,9 @@ static void enc2_send_gsp7_128_info_packet(
 static void enc2_dp_set_dsc_config(struct stream_encoder *enc,
 					enum optc_dsc_mode dsc_mode,
 					uint32_t dsc_bytes_per_pixel,
-					uint32_t dsc_slice_width,
-					uint8_t *dsc_packed_pps)
+					uint32_t dsc_slice_width)
 {
 	struct dcn10_stream_encoder *enc1 = DCN10STRENC_FROM_STRENC(enc);
-	uint32_t dsc_value = 0;
-
-	dsc_value = REG_READ(DP_DSC_CNTL);
-
-	/* dsc disable skip */
-	if ((dsc_value & 0x3) == 0x0)
-		return;
-
 
 	REG_UPDATE_2(DP_DSC_CNTL,
 			DP_DSC_MODE, dsc_mode,
@@ -296,8 +285,16 @@ static void enc2_dp_set_dsc_config(struct stream_encoder *enc,
 
 	REG_SET(DP_DSC_BYTES_PER_PIXEL, 0,
 		DP_DSC_BYTES_PER_PIXEL, dsc_bytes_per_pixel);
+}
 
-	if (dsc_mode != OPTC_DSC_DISABLED) {
+
+static void enc2_dp_set_dsc_pps_info_packet(struct stream_encoder *enc,
+					bool enable,
+					uint8_t *dsc_packed_pps)
+{
+	struct dcn10_stream_encoder *enc1 = DCN10STRENC_FROM_STRENC(enc);
+
+	if (enable) {
 		struct dc_info_packet_128 pps_sdp;
 
 		ASSERT(dsc_packed_pps);
@@ -309,7 +306,7 @@ static void enc2_dp_set_dsc_config(struct stream_encoder *enc,
 		pps_sdp.hb2 = 127;
 		pps_sdp.hb3 = 0;
 		memcpy(&pps_sdp.sb[0], dsc_packed_pps, sizeof(pps_sdp.sb));
-		enc2_send_gsp7_128_info_packet(enc1, &pps_sdp);
+		enc2_update_gsp7_128_info_packet(enc1, &pps_sdp);
 
 		/* Enable Generic Stream Packet 7 (GSP) transmission */
 		//REG_UPDATE(DP_SEC_CNTL,
@@ -340,9 +337,8 @@ static void enc2_dp_set_dsc_config(struct stream_encoder *enc,
 		REG_UPDATE(DP_SEC_CNTL2, DP_SEC_GSP7_PPS, 0);
 	}
 }
-#endif
 
-#ifdef CONFIG_DRM_AMD_DC_DSC_SUPPORT
+
 /* this function read dsc related register fields to be logged later in dcn10_log_hw_state
  * into a dcn_dsc_state struct.
  */
@@ -363,7 +359,6 @@ static void enc2_read_state(struct stream_encoder *enc, struct enc_state *s)
 		REG_GET(DP_SEC_CNTL, DP_SEC_STREAM_ENABLE, &s->sec_stream_enable);
 	}
 }
-#endif
 
 /* Set Dynamic Metadata-configuration.
  *   enable_dme:         TRUE: enables Dynamic Metadata Enfine, FALSE: disables DME
@@ -373,7 +368,7 @@ static void enc2_read_state(struct stream_encoder *enc, struct enc_state *s)
  *
  *   Ensure the OTG master update lock is set when changing DME configuration.
  */
-static void enc2_set_dynamic_metadata(struct stream_encoder *enc,
+void enc2_set_dynamic_metadata(struct stream_encoder *enc,
 		bool enable_dme,
 		uint32_t hubp_requestor_id,
 		enum dynamic_metadata_mode dmdata_mode)
@@ -443,10 +438,8 @@ static bool is_two_pixels_per_containter(const struct dc_crtc_timing *timing)
 {
 	bool two_pix = timing->pixel_encoding == PIXEL_ENCODING_YCBCR420;
 
-#ifdef CONFIG_DRM_AMD_DC_DSC_SUPPORT
 	two_pix = two_pix || (timing->flags.DSC && timing->pixel_encoding == PIXEL_ENCODING_YCBCR422
 			&& !timing->dsc_cfg.ycbcr422_simple);
-#endif
 	return two_pix;
 }
 
@@ -463,7 +456,7 @@ void enc2_stream_encoder_dp_unblank(
 		uint64_t m_vid_l = n_vid;
 
 		/* YCbCr 4:2:0 : Computed VID_M will be 2X the input rate */
-		if (is_two_pixels_per_containter(&param->timing) || param->odm) {
+		if (is_two_pixels_per_containter(&param->timing) || param->opp_cnt > 1) {
 			/*this logic should be the same in get_pixel_clock_parameters() */
 			n_multiply = 1;
 		}
@@ -544,11 +537,16 @@ void enc2_stream_encoder_dp_set_stream_attribute(
 	struct stream_encoder *enc,
 	struct dc_crtc_timing *crtc_timing,
 	enum dc_color_space output_color_space,
+	bool use_vsc_sdp_for_colorimetry,
 	uint32_t enable_sdp_splitting)
 {
 	struct dcn10_stream_encoder *enc1 = DCN10STRENC_FROM_STRENC(enc);
 
-	enc1_stream_encoder_dp_set_stream_attribute(enc, crtc_timing, output_color_space, enable_sdp_splitting);
+	enc1_stream_encoder_dp_set_stream_attribute(enc,
+			crtc_timing,
+			output_color_space,
+			use_vsc_sdp_for_colorimetry,
+			enable_sdp_splitting);
 
 	REG_UPDATE(DP_SEC_FRAMING4,
 		DP_SST_SDP_SPLITTING, enable_sdp_splitting);
@@ -571,6 +569,8 @@ static const struct stream_encoder_funcs dcn20_str_enc_funcs = {
 		enc2_stream_encoder_stop_hdmi_info_packets,
 	.update_dp_info_packets =
 		enc2_stream_encoder_update_dp_info_packets,
+	.send_immediate_sdp_message =
+		enc1_stream_encoder_send_immediate_sdp_message,
 	.stop_dp_info_packets =
 		enc1_stream_encoder_stop_dp_info_packets,
 	.dp_blank =
@@ -588,14 +588,16 @@ static const struct stream_encoder_funcs dcn20_str_enc_funcs = {
 	.setup_stereo_sync  = enc1_setup_stereo_sync,
 	.set_avmute = enc1_stream_encoder_set_avmute,
 	.dig_connect_to_otg  = enc1_dig_connect_to_otg,
-#ifdef CONFIG_DRM_AMD_DC_DSC_SUPPORT
-	.enc_read_state = enc2_read_state,
-#endif
+	.dig_source_otg = enc1_dig_source_otg,
 
-#ifdef CONFIG_DRM_AMD_DC_DSC_SUPPORT
+	.dp_get_pixel_format =
+		enc1_stream_encoder_dp_get_pixel_format,
+
+	.enc_read_state = enc2_read_state,
 	.dp_set_dsc_config = enc2_dp_set_dsc_config,
-#endif
+	.dp_set_dsc_pps_info_packet = enc2_dp_set_dsc_pps_info_packet,
 	.set_dynamic_metadata = enc2_set_dynamic_metadata,
+	.hdmi_reset_stream_attribute = enc1_reset_hdmi_stream_attribute,
 };
 
 void dcn20_stream_encoder_construct(

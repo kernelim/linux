@@ -1,0 +1,2 @@
+timeout=0
+rhskip="test_bpftool_build.sh test_lwt_seg6local.sh"

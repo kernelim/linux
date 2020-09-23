@@ -9,8 +9,8 @@ NAME = Merciless Moray
 # DRM backport version
 #
 RHEL_DRM_VERSION = 5
-RHEL_DRM_PATCHLEVEL = 3
-RHEL_DRM_SUBLEVEL = 0
+RHEL_DRM_PATCHLEVEL = 6
+RHEL_DRM_SUBLEVEL = 19
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
@@ -1222,9 +1222,8 @@ PHONY += kselftest
 kselftest:
 	$(Q)$(MAKE) -C $(srctree)/tools/testing/selftests run_tests
 
-PHONY += kselftest-clean
-kselftest-clean:
-	$(Q)$(MAKE) -C $(srctree)/tools/testing/selftests clean
+kselftest-%: FORCE
+	$(Q)$(MAKE) -C $(srctree)/tools/testing/selftests $*
 
 PHONY += kselftest-merge
 kselftest-merge:

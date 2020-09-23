@@ -93,8 +93,8 @@
 					base)
 #endif /* CONFIG_ARM64_FORCE_52BIT */
 
-extern phys_addr_t arm64_dma_phys_limit;
-#define ARCH_LOW_ADDRESS_LIMIT	(arm64_dma_phys_limit - 1)
+extern phys_addr_t arm64_dma32_phys_limit;
+#define ARCH_LOW_ADDRESS_LIMIT	(arm64_dma32_phys_limit - 1)
 
 struct debug_info {
 #ifdef CONFIG_HAVE_HW_BREAKPOINT
@@ -190,6 +190,9 @@ static inline void start_thread_common(struct pt_regs *regs, unsigned long pc)
 	memset(regs, 0, sizeof(*regs));
 	forget_syscall(regs);
 	regs->pc = pc;
+
+	if (system_uses_irq_prio_masking())
+		regs->pmr_save = GIC_PRIO_IRQON;
 }
 
 static inline void set_ssbs_bit(struct pt_regs *regs)

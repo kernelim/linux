@@ -141,7 +141,7 @@
 #include <linux/cpu.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 
 #include <linux/platform_data/ti-sysc.h>
 
@@ -725,7 +725,7 @@ static int __init _setup_clkctrl_provider(struct device_node *np)
 	struct clkctrl_provider *provider;
 	u64 size;
 
-	provider = memblock_virt_alloc(sizeof(*provider), 0);
+	provider = memblock_alloc(sizeof(*provider), 0);
 	if (!provider)
 		return -ENOMEM;
 

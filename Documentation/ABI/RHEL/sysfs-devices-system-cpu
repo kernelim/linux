@@ -1,0 +1,9 @@
+What:		/sys/devices/system/cpu/split_lock_detect
+Date:		June 2019
+Description:	Control Intel Split Lock detection
+
+		Read/write interface to control split lock detection:
+			"off"	split lock detection is disabled
+			"warn"  warn on split lock detection
+			"fatal" panic or terminate user-process on split
+				lock detection.

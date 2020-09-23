@@ -6,6 +6,7 @@
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/kernel.h>
+#include <linux/gpio/consumer.h>
 #include <linux/acpi.h>
 #include <linux/acpi_iort.h>
 #include <linux/signal.h>
@@ -2182,6 +2183,7 @@ int __init acpi_scan_init(void)
 	acpi_pci_root_init();
 	acpi_pci_link_init();
 	acpi_processor_init();
+	acpi_platform_init();
 	acpi_lpss_init();
 	acpi_apd_init();
 	acpi_cmos_rtc_init();

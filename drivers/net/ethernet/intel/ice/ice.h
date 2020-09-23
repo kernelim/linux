@@ -29,10 +29,19 @@
 #include <linux/ip.h>
 #include <linux/sctp.h>
 #include <linux/ipv6.h>
+#include <linux/pkt_sched.h>
 #include <linux/if_bridge.h>
 #include <linux/ctype.h>
+#include <linux/bpf.h>
 #include <linux/avf/virtchnl.h>
+#include <linux/cpu_rmap.h>
+#include <net/devlink.h>
 #include <net/ipv6.h>
+#include <net/xdp_sock.h>
+#include <net/geneve.h>
+#include <net/gre.h>
+#include <net/udp_tunnel.h>
+#include <net/vxlan.h>
 #include "ice_devids.h"
 #include "ice_type.h"
 #include "ice_txrx.h"
@@ -42,6 +51,9 @@
 #include "ice_sched.h"
 #include "ice_virtchnl_pf.h"
 #include "ice_sriov.h"
+#include "ice_fdir.h"
+#include "ice_xsk.h"
+#include "ice_arfs.h"
 
 extern const char ice_drv_ver[];
 #define ICE_BAR0		0
@@ -56,8 +68,8 @@ extern const char ice_drv_ver[];
 #define ICE_INT_NAME_STR_LEN	(IFNAMSIZ + 16)
 #define ICE_AQ_LEN		64
 #define ICE_MBXSQ_LEN		64
-#define ICE_MBXRQ_LEN		512
 #define ICE_MIN_MSIX		2
+#define ICE_FDIR_MSIX		1
 #define ICE_NO_VSI		0xffff
 #define ICE_VSI_MAP_CONTIG	0
 #define ICE_VSI_MAP_SCATTER	1
@@ -66,7 +78,6 @@ extern const char ice_drv_ver[];
 #define ICE_Q_WAIT_RETRY_LIMIT	10
 #define ICE_Q_WAIT_MAX_RETRY	(5 * ICE_Q_WAIT_RETRY_LIMIT)
 #define ICE_MAX_LG_RSS_QS	256
-#define ICE_MAX_SMALL_RSS_QS	8
 #define ICE_RES_VALID_BIT	0x8000
 #define ICE_RES_MISC_VEC_ID	(ICE_RES_VALID_BIT - 1)
 #define ICE_INVAL_Q_INDEX	0xffff
@@ -78,8 +89,7 @@ extern const char ice_drv_ver[];
 
 #define ICE_DFLT_NETIF_M (NETIF_MSG_DRV | NETIF_MSG_PROBE | NETIF_MSG_LINK)
 
-#define ICE_MAX_MTU	(ICE_AQ_SET_MAC_FRAME_SIZE_MAX - \
-			(ETH_HLEN + ETH_FCS_LEN + (VLAN_HLEN * 2)))
+#define ICE_MAX_MTU	(ICE_AQ_SET_MAC_FRAME_SIZE_MAX - ICE_ETH_PKT_HDR_PAD)
 
 #define ICE_UP_TABLE_TRANSLATE(val, i) \
 		(((val) << ICE_AQ_VSI_UP_TABLE_UP##i##_S) & \
@@ -88,6 +98,7 @@ extern const char ice_drv_ver[];
 #define ICE_TX_DESC(R, i) (&(((struct ice_tx_desc *)((R)->desc))[i]))
 #define ICE_RX_DESC(R, i) (&(((union ice_32b_rx_flex_desc *)((R)->desc))[i]))
 #define ICE_TX_CTX_DESC(R, i) (&(((struct ice_tx_ctx_desc *)((R)->desc))[i]))
+#define ICE_TX_FDIRDESC(R, i) (&(((struct ice_fltr_desc *)((R)->desc))[i]))
 
 /* Macro for each VSI in a PF */
 #define ice_for_each_vsi(pf, i) \
@@ -127,6 +138,16 @@ extern const char ice_drv_ver[];
 				     ICE_PROMISC_VLAN_TX  | \
 				     ICE_PROMISC_VLAN_RX)
 
+#define ice_pf_to_dev(pf) (&((pf)->pdev->dev))
+
+struct ice_txq_meta {
+	u32 q_teid;	/* Tx-scheduler element identifier */
+	u16 q_id;	/* Entry in VSI's txq_map bitmap */
+	u16 q_handle;	/* Relative index of Tx queue within TC */
+	u16 vsi_idx;	/* VSI index that Tx queue belongs to */
+	u8 tc;		/* TC number that Tx queue belongs to */
+};
+
 struct ice_tc_info {
 	u16 qoffset;
 	u16 qcount_tx;
@@ -161,6 +182,8 @@ struct ice_sw {
 	struct ice_pf *pf;
 	u16 sw_id;		/* switch ID for this switch */
 	u16 bridge_mode;	/* VEB/VEPA/Port Virtualizer */
+	struct ice_vsi *dflt_vsi;	/* default VSI for this switch */
+	u8 dflt_vsi_ena:1;	/* true if above dflt_vsi is enabled */
 };
 
 enum ice_state {
@@ -169,6 +192,7 @@ enum ice_state {
 	__ICE_NEEDS_RESTART,
 	__ICE_PREPARED_FOR_RESET,	/* set by driver when prepared */
 	__ICE_RESET_OICR_RECV,		/* set by driver after rcv reset OICR */
+	__ICE_DCBNL_DEVRESET,		/* set by dcbnl devreset */
 	__ICE_PFR_REQ,			/* set by driver and peers */
 	__ICE_CORER_REQ,		/* set by driver and peers */
 	__ICE_GLOBR_REQ,		/* set by driver and peers */
@@ -195,7 +219,10 @@ enum ice_state {
 	__ICE_CFG_BUSY,
 	__ICE_SERVICE_SCHED,
 	__ICE_SERVICE_DIS,
+	__ICE_FD_FLUSH_REQ,
 	__ICE_OICR_INTR_DIS,		/* Global OICR interrupt disabled */
+	__ICE_MDD_VF_PRINT_PENDING,	/* set when MDD event handle */
+	__ICE_VF_RESETS_DISABLED,	/* disable resets during ice_remove */
 	__ICE_STATE_NBITS		/* must be last */
 };
 
@@ -227,8 +254,8 @@ struct ice_vsi {
 	u32 tx_busy;
 	u32 rx_buf_failed;
 	u32 rx_page_failed;
-	int num_q_vectors;
-	int base_vector;		/* IRQ base for OS reserved vectors */
+	u16 num_q_vectors;
+	u16 base_vector;		/* IRQ base for OS reserved vectors */
 	enum ice_vsi_type type;
 	u16 vsi_num;			/* HW (absolute) index of this VSI */
 	u16 idx;			/* software index in pf->vsi[] */
@@ -236,6 +263,8 @@ struct ice_vsi {
 	s16 vf_id;			/* VF ID for SR-IOV VSIs */
 
 	u16 ethtype;			/* Ethernet protocol for pause frame */
+	u16 num_gfltr;
+	u16 num_bfltr;
 
 	/* RSS config */
 	u16 rss_table_size;	/* HW RSS table size */
@@ -243,6 +272,14 @@ struct ice_vsi {
 	u8 *rss_hkey_user;	/* User configured hash keys */
 	u8 *rss_lut_user;	/* User configured lookup table entries */
 	u8 rss_lut_type;	/* used to configure Get/Set RSS LUT AQ call */
+
+	/* aRFS members only allocated for the PF VSI */
+#define ICE_MAX_ARFS_LIST	1024
+#define ICE_ARFS_LST_MASK	(ICE_MAX_ARFS_LIST - 1)
+	struct hlist_head *arfs_fltr_list;
+	struct ice_arfs_active_fltr_cntrs *arfs_fltr_cntrs;
+	spinlock_t arfs_lock;	/* protects aRFS hash table and filter state */
+	atomic_t *arfs_last_fltr_id;
 
 	u16 max_frame;
 	u16 rx_buf_len;
@@ -261,6 +298,7 @@ struct ice_vsi {
 	u8 current_isup:1;		 /* Sync 'link up' logging */
 	u8 stat_offsets_loaded:1;
 	u8 vlan_ena:1;
+	u16 num_vlan;
 
 	/* queue information */
 	u8 tx_mapping_mode;		 /* ICE_MAP_MODE_[CONTIG|SCATTER] */
@@ -271,9 +309,18 @@ struct ice_vsi {
 	u16 num_txq;			 /* Used Tx queues */
 	u16 alloc_rxq;			 /* Allocated Rx queues */
 	u16 num_rxq;			 /* Used Rx queues */
+	u16 req_txq;			 /* User requested Tx queues */
+	u16 req_rxq;			 /* User requested Rx queues */
 	u16 num_rx_desc;
 	u16 num_tx_desc;
 	struct ice_tc_cfg tc_cfg;
+	struct bpf_prog *xdp_prog;
+	struct ice_ring **xdp_rings;	 /* XDP ring array */
+	u16 num_xdp_txq;		 /* Used XDP queues */
+	u8 xdp_mapping_mode;		 /* ICE_MAP_MODE_[CONTIG|SCATTER] */
+	struct xdp_umem **xsk_umems;
+	u16 num_xsk_umems_used;
+	u16 num_xsk_umems;
 } ____cacheline_internodealigned_in_smp;
 
 /* struct that defines an interrupt vector */
@@ -308,16 +355,25 @@ enum ice_pf_flags {
 	ICE_FLAG_SRIOV_CAPABLE,
 	ICE_FLAG_DCB_CAPABLE,
 	ICE_FLAG_DCB_ENA,
+	ICE_FLAG_FD_ENA,
 	ICE_FLAG_ADV_FEATURES,
 	ICE_FLAG_LINK_DOWN_ON_CLOSE_ENA,
 	ICE_FLAG_NO_MEDIA,
 	ICE_FLAG_FW_LLDP_AGENT,
 	ICE_FLAG_ETHTOOL_CTXT,		/* set when ethtool holds RTNL lock */
+	ICE_FLAG_LEGACY_RX,
+	ICE_FLAG_VF_TRUE_PROMISC_ENA,
+	ICE_FLAG_MDD_AUTO_RESET_VF,
 	ICE_PF_FLAGS_NBITS		/* must be last */
 };
 
 struct ice_pf {
 	struct pci_dev *pdev;
+
+	/* devlink port data */
+	struct devlink_port devlink_port;
+
+	struct devlink_region *nvm_region;
 
 	/* OS reserved IRQ details */
 	struct msix_entry *msix_entries;
@@ -328,14 +384,18 @@ struct ice_pf {
 	 */
 	u16 sriov_base_vector;
 
+	u16 ctrl_vsi_idx;		/* control VSI index in pf->vsi array */
+
 	struct ice_vsi **vsi;		/* VSIs created by the driver */
 	struct ice_sw *first_sw;	/* first switch created by firmware */
 	/* Virtchnl/SR-IOV config info */
 	struct ice_vf *vf;
-	int num_alloc_vfs;		/* actual number of VFs allocated */
+	u16 num_alloc_vfs;		/* actual number of VFs allocated */
 	u16 num_vfs_supported;		/* num VFs supported for this PF */
-	u16 num_vf_qps;			/* num queue pairs per VF */
-	u16 num_vf_msix;		/* num vectors per VF */
+	u16 num_qps_per_vf;
+	u16 num_msix_per_vf;
+	/* used to ratelimit the MDD event logging */
+	unsigned long last_printed_mdd_jiffies;
 	DECLARE_BITMAP(state, __ICE_STATE_NBITS);
 	DECLARE_BITMAP(flags, ICE_PF_FLAGS_NBITS);
 	unsigned long *avail_txqs;	/* bitmap to track PF Tx queue usage */
@@ -346,13 +406,14 @@ struct ice_pf {
 	struct work_struct serv_task;
 	struct mutex avail_q_mutex;	/* protects access to avail_[rx|tx]qs */
 	struct mutex sw_mutex;		/* lock for protecting VSI alloc flow */
+	struct mutex tc_mutex;		/* lock to protect TC changes */
 	u32 msg_enable;
 	u32 hw_csum_rx_error;
-	u32 oicr_idx;		/* Other interrupt cause MSIX vector index */
-	u32 num_avail_sw_msix;	/* remaining MSIX SW vectors left unclaimed */
+	u16 oicr_idx;		/* Other interrupt cause MSIX vector index */
+	u16 num_avail_sw_msix;	/* remaining MSIX SW vectors left unclaimed */
 	u16 max_pf_txqs;	/* Total Tx queues PF wide */
 	u16 max_pf_rxqs;	/* Total Rx queues PF wide */
-	u32 num_lan_msix;	/* Total MSIX vectors for base driver */
+	u16 num_lan_msix;	/* Total MSIX vectors for base driver */
 	u16 num_lan_tx;		/* num LAN Tx queues setup */
 	u16 num_lan_rx;		/* num LAN Rx queues setup */
 	u16 next_vsi;		/* Next free slot in pf->vsi[] - 0-based! */
@@ -417,6 +478,38 @@ static inline struct ice_pf *ice_netdev_to_pf(struct net_device *netdev)
 	return np->vsi->back;
 }
 
+static inline bool ice_is_xdp_ena_vsi(struct ice_vsi *vsi)
+{
+	return !!vsi->xdp_prog;
+}
+
+static inline void ice_set_ring_xdp(struct ice_ring *ring)
+{
+	ring->flags |= ICE_TX_FLAGS_RING_XDP;
+}
+
+/**
+ * ice_xsk_umem - get XDP UMEM bound to a ring
+ * @ring - ring to use
+ *
+ * Returns a pointer to xdp_umem structure if there is an UMEM present,
+ * NULL otherwise.
+ */
+static inline struct xdp_umem *ice_xsk_umem(struct ice_ring *ring)
+{
+	struct xdp_umem **umems = ring->vsi->xsk_umems;
+	u16 qid = ring->q_index;
+
+	if (ice_ring_is_xdp(ring))
+		qid -= ring->vsi->num_xdp_txq;
+
+	if (qid >= ring->vsi->num_xsk_umems || !umems || !umems[qid] ||
+	    !ice_is_xdp_ena_vsi(ring->vsi))
+		return NULL;
+
+	return umems[qid];
+}
+
 /**
  * ice_get_main_vsi - Get the PF VSI
  * @pf: PF instance
@@ -431,27 +524,66 @@ static inline struct ice_vsi *ice_get_main_vsi(struct ice_pf *pf)
 	return NULL;
 }
 
+/**
+ * ice_get_ctrl_vsi - Get the control VSI
+ * @pf: PF instance
+ */
+static inline struct ice_vsi *ice_get_ctrl_vsi(struct ice_pf *pf)
+{
+	/* if pf->ctrl_vsi_idx is ICE_NO_VSI, control VSI was not set up */
+	if (!pf->vsi || pf->ctrl_vsi_idx == ICE_NO_VSI)
+		return NULL;
+
+	return pf->vsi[pf->ctrl_vsi_idx];
+}
+
+#define ICE_FD_STAT_CTR_BLOCK_COUNT	256
+#define ICE_FD_STAT_PF_IDX(base_idx) \
+			((base_idx) * ICE_FD_STAT_CTR_BLOCK_COUNT)
+#define ICE_FD_SB_STAT_IDX(base_idx) ICE_FD_STAT_PF_IDX(base_idx)
+
 int ice_vsi_setup_tx_rings(struct ice_vsi *vsi);
 int ice_vsi_setup_rx_rings(struct ice_vsi *vsi);
+int ice_vsi_open_ctrl(struct ice_vsi *vsi);
 void ice_set_ethtool_ops(struct net_device *netdev);
 void ice_set_ethtool_safe_mode_ops(struct net_device *netdev);
 u16 ice_get_avail_txq_count(struct ice_pf *pf);
 u16 ice_get_avail_rxq_count(struct ice_pf *pf);
+int ice_vsi_recfg_qs(struct ice_vsi *vsi, int new_rx, int new_tx);
 void ice_update_vsi_stats(struct ice_vsi *vsi);
 void ice_update_pf_stats(struct ice_pf *pf);
 int ice_up(struct ice_vsi *vsi);
 int ice_down(struct ice_vsi *vsi);
 int ice_vsi_cfg(struct ice_vsi *vsi);
 struct ice_vsi *ice_lb_vsi_setup(struct ice_pf *pf, struct ice_port_info *pi);
+int ice_prepare_xdp_rings(struct ice_vsi *vsi, struct bpf_prog *prog);
+int ice_destroy_xdp_rings(struct ice_vsi *vsi);
+int
+ice_xdp_xmit(struct net_device *dev, int n, struct xdp_frame **frames,
+	     u32 flags);
 int ice_set_rss(struct ice_vsi *vsi, u8 *seed, u8 *lut, u16 lut_size);
 int ice_get_rss(struct ice_vsi *vsi, u8 *seed, u8 *lut, u16 lut_size);
 void ice_fill_rss_lut(u8 *lut, u16 rss_table_size, u16 rss_size);
+int ice_schedule_reset(struct ice_pf *pf, enum ice_reset_req reset);
 void ice_print_link_msg(struct ice_vsi *vsi, bool isup);
-#ifdef CONFIG_DCB
-int ice_pf_ena_all_vsi(struct ice_pf *pf, bool locked);
-void ice_pf_dis_all_vsi(struct ice_pf *pf, bool locked);
-#endif /* CONFIG_DCB */
+const char *ice_stat_str(enum ice_status stat_err);
+const char *ice_aq_str(enum ice_aq_err aq_err);
+int
+ice_fdir_write_fltr(struct ice_pf *pf, struct ice_fdir_fltr *input, bool add,
+		    bool is_tun);
+void ice_vsi_manage_fdir(struct ice_vsi *vsi, bool ena);
+int ice_add_fdir_ethtool(struct ice_vsi *vsi, struct ethtool_rxnfc *cmd);
+int ice_del_fdir_ethtool(struct ice_vsi *vsi, struct ethtool_rxnfc *cmd);
+int ice_get_ethtool_fdir_entry(struct ice_hw *hw, struct ethtool_rxnfc *cmd);
+int
+ice_get_fdir_fltr_ids(struct ice_hw *hw, struct ethtool_rxnfc *cmd,
+		      u32 *rule_locs);
+void ice_fdir_release_flows(struct ice_hw *hw);
+void ice_fdir_replay_flows(struct ice_hw *hw);
+void ice_fdir_replay_fltrs(struct ice_pf *pf);
+int ice_fdir_create_dflt_rules(struct ice_pf *pf);
 int ice_open(struct net_device *netdev);
 int ice_stop(struct net_device *netdev);
+void ice_service_task_schedule(struct ice_pf *pf);
 
 #endif /* _ICE_H_ */

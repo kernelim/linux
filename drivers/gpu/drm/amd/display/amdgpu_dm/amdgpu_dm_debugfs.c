@@ -657,6 +657,7 @@ static ssize_t dp_phy_test_pattern_debugfs_write(struct file *f, const char __us
 	dc_link_set_test_pattern(
 		link,
 		test_pattern,
+		DP_TEST_PATTERN_COLOR_SPACE_RGB,
 		&link_training_settings,
 		custom_pattern,
 		10);
@@ -934,13 +935,58 @@ static const struct {
 		{"link_settings", &dp_link_settings_debugfs_fops},
 		{"phy_settings", &dp_phy_settings_debugfs_fop},
 		{"test_pattern", &dp_phy_test_pattern_fops},
-		{"output_bpc", &output_bpc_fops},
 		{"vrr_range", &vrr_range_fops},
 		{"sdp_message", &sdp_message_fops},
 		{"aux_dpcd_address", &dp_dpcd_address_debugfs_fops},
 		{"aux_dpcd_size", &dp_dpcd_size_debugfs_fops},
 		{"aux_dpcd_data", &dp_dpcd_data_debugfs_fops}
 };
+
+/*
+ * Force YUV420 output if available from the given mode
+ */
+static int force_yuv420_output_set(void *data, u64 val)
+{
+	struct amdgpu_dm_connector *connector = data;
+
+	connector->force_yuv420_output = (bool)val;
+
+	return 0;
+}
+
+/*
+ * Check if YUV420 is forced when available from the given mode
+ */
+static int force_yuv420_output_get(void *data, u64 *val)
+{
+	struct amdgpu_dm_connector *connector = data;
+
+	*val = connector->force_yuv420_output;
+
+	return 0;
+}
+
+DEFINE_DEBUGFS_ATTRIBUTE(force_yuv420_output_fops, force_yuv420_output_get,
+			 force_yuv420_output_set, "%llu\n");
+
+/*
+ *  Read PSR state
+ */
+static int psr_get(void *data, u64 *val)
+{
+	struct amdgpu_dm_connector *connector = data;
+	struct dc_link *link = connector->dc_link;
+	uint32_t psr_state = 0;
+
+	dc_link_get_psr_state(link, &psr_state);
+
+	*val = psr_state;
+
+	return 0;
+}
+
+
+DEFINE_DEBUGFS_ATTRIBUTE(psr_fops, psr_get, NULL, "%llu\n");
 
 void connector_debugfs_init(struct amdgpu_dm_connector *connector)
 {
@@ -955,6 +1001,14 @@ void connector_debugfs_init(struct amdgpu_dm_connector *connector)
 					    dp_debugfs_entries[i].fops);
 		}
 	}
+	if (connector->base.connector_type == DRM_MODE_CONNECTOR_eDP)
+		debugfs_create_file_unsafe("psr_state", 0444, dir, connector, &psr_fops);
+
+	debugfs_create_file_unsafe("force_yuv420_output", 0644, dir, connector,
+				   &force_yuv420_output_fops);
+
+	debugfs_create_file("output_bpc", 0644, dir, connector,
+			    &output_bpc_fops);
 }
 
 /*
@@ -1053,9 +1107,33 @@ static int target_backlight_read(struct seq_file *m, void *data)
 	return 0;
 }
 
+static int mst_topo(struct seq_file *m, void *unused)
+{
+	struct drm_info_node *node = (struct drm_info_node *)m->private;
+	struct drm_device *dev = node->minor->dev;
+	struct drm_connector *connector;
+	struct drm_connector_list_iter conn_iter;
+	struct amdgpu_dm_connector *aconnector;
+
+	drm_connector_list_iter_begin(dev, &conn_iter);
+	drm_for_each_connector_iter(connector, &conn_iter) {
+		if (connector->connector_type != DRM_MODE_CONNECTOR_DisplayPort)
+			continue;
+
+		aconnector = to_amdgpu_dm_connector(connector);
+
+		seq_printf(m, "\nMST topology for connector %d\n", aconnector->connector_id);
+		drm_dp_mst_dump_topology(m, &aconnector->mst_mgr);
+	}
+	drm_connector_list_iter_end(&conn_iter);
+
+	return 0;
+}
+
 static const struct drm_info_list amdgpu_dm_debugfs_list[] = {
 	{"amdgpu_current_backlight_pwm", &current_backlight_read},
 	{"amdgpu_target_backlight_pwm", &target_backlight_read},
+	{"amdgpu_mst_topology", &mst_topo},
 };
 
 /*

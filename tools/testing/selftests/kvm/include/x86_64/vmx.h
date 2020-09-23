@@ -1,10 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * tools/testing/selftests/kvm/include/x86_64/vmx.h
  *
  * Copyright (C) 2018, Google LLC.
- *
- * This work is licensed under the terms of the GNU GPL, version 2.
- *
  */
 
 #ifndef SELFTEST_KVM_VMX_H
@@ -20,8 +18,8 @@
 /*
  * Definitions of Primary Processor-Based VM-Execution Controls.
  */
-#define CPU_BASED_VIRTUAL_INTR_PENDING		0x00000004
-#define CPU_BASED_USE_TSC_OFFSETING		0x00000008
+#define CPU_BASED_INTR_WINDOW_EXITING		0x00000004
+#define CPU_BASED_USE_TSC_OFFSETTING		0x00000008
 #define CPU_BASED_HLT_EXITING			0x00000080
 #define CPU_BASED_INVLPG_EXITING		0x00000200
 #define CPU_BASED_MWAIT_EXITING			0x00000400
@@ -32,7 +30,7 @@
 #define CPU_BASED_CR8_LOAD_EXITING		0x00080000
 #define CPU_BASED_CR8_STORE_EXITING		0x00100000
 #define CPU_BASED_TPR_SHADOW			0x00200000
-#define CPU_BASED_VIRTUAL_NMI_PENDING		0x00400000
+#define CPU_BASED_NMI_WINDOW_EXITING		0x00400000
 #define CPU_BASED_MOV_DR_EXITING		0x00800000
 #define CPU_BASED_UNCOND_IO_EXITING		0x01000000
 #define CPU_BASED_USE_IO_BITMAPS		0x02000000
@@ -105,7 +103,7 @@
 #define EXIT_REASON_EXCEPTION_NMI	0
 #define EXIT_REASON_EXTERNAL_INTERRUPT	1
 #define EXIT_REASON_TRIPLE_FAULT	2
-#define EXIT_REASON_PENDING_INTERRUPT	7
+#define EXIT_REASON_INTERRUPT_WINDOW	7
 #define EXIT_REASON_NMI_WINDOW		8
 #define EXIT_REASON_TASK_SWITCH		9
 #define EXIT_REASON_CPUID		10
@@ -577,11 +575,35 @@ struct vmx_pages {
 	void *eptp;
 };
 
+union vmx_basic {
+	u64 val;
+	struct {
+		u32 revision;
+		u32	size:13,
+			reserved1:3,
+			width:1,
+			dual:1,
+			type:4,
+			insouts:1,
+			ctrl:1,
+			vm_entry_exception_ctrl:1,
+			reserved2:7;
+	};
+};
+
+union vmx_ctrl_msr {
+	u64 val;
+	struct {
+		u32 set, clr;
+	};
+};
+
 struct vmx_pages *vcpu_alloc_vmx(struct kvm_vm *vm, vm_vaddr_t *p_vmx_gva);
 bool prepare_for_vmx_operation(struct vmx_pages *vmx);
 void prepare_vmcs(struct vmx_pages *vmx, void *guest_rip, void *guest_rsp);
 bool load_vmcs(struct vmx_pages *vmx);
 
+bool nested_vmx_supported(void);
 void nested_vmx_check_supported(void);
 
 void nested_pg_map(struct vmx_pages *vmx, struct kvm_vm *vm,

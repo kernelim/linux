@@ -186,7 +186,7 @@ static void pci_dma_dev_setup_pasemi(struct pci_dev *dev)
 	 */
 	if (dev->vendor == 0x1959 && dev->device == 0xa007 &&
 	    !firmware_has_feature(FW_FEATURE_LPAR)) {
-		dev->dev.dma_ops = &dma_nommu_ops;
+		dev->dev.dma_ops = NULL;
 		/*
 		 * Set the coherent DMA mask to prevent the iommu
 		 * being used unnecessarily
@@ -213,7 +213,7 @@ static int __init iob_init(struct device_node *dn)
 	printk(KERN_INFO "IOBMAP L2 allocated at: %p\n", iob_l2_base);
 
 	/* Allocate a spare page to map all invalid IOTLB pages. */
-	tmp = memblock_alloc(IOBMAP_PAGE_SIZE, IOBMAP_PAGE_SIZE);
+	tmp = memblock_phys_alloc(IOBMAP_PAGE_SIZE, IOBMAP_PAGE_SIZE);
 	if (!tmp)
 		panic("IOBMAP: Cannot allocate spare page!");
 	/* Empty l1 is marked invalid */

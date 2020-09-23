@@ -17,7 +17,7 @@
 #include "ip6_offload.h"
 
 INDIRECT_CALLABLE_SCOPE
-struct sk_buff **tcp6_gro_receive(struct sk_buff **head, struct sk_buff *skb)
+struct sk_buff *tcp6_gro_receive(struct list_head *head, struct sk_buff *skb)
 {
 	/* Don't bother verifying checksum if we're going to flush anyway. */
 	if (!NAPI_GRO_CB(skb)->flush &&

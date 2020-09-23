@@ -46,7 +46,6 @@
 #include <linux/raw.h>
 #include <linux/blkdev.h>
 #include <linux/elevator.h>
-#include <linux/rtc.h>
 #include <linux/pci.h>
 #include <linux/serial.h>
 #include <linux/if_tun.h>
@@ -57,10 +56,6 @@
 #include <linux/cec.h>
 
 #include "internal.h"
-
-#include <net/bluetooth/bluetooth.h>
-#include <net/bluetooth/hci_sock.h>
-#include <net/bluetooth/rfcomm.h>
 
 #include <linux/capi.h>
 #include <linux/gigaset_dev.h>
@@ -572,23 +567,6 @@ static int mt_ioctl_trans(struct file *file,
 #define HCIUARTSETFLAGS		_IOW('U', 203, int)
 #define HCIUARTGETFLAGS		_IOR('U', 204, int)
 
-#define BNEPCONNADD	_IOW('B', 200, int)
-#define BNEPCONNDEL	_IOW('B', 201, int)
-#define BNEPGETCONNLIST	_IOR('B', 210, int)
-#define BNEPGETCONNINFO	_IOR('B', 211, int)
-#define BNEPGETSUPPFEAT	_IOR('B', 212, int)
-
-#define CMTPCONNADD	_IOW('C', 200, int)
-#define CMTPCONNDEL	_IOW('C', 201, int)
-#define CMTPGETCONNLIST	_IOR('C', 210, int)
-#define CMTPGETCONNINFO	_IOR('C', 211, int)
-
-#define HIDPCONNADD	_IOW('H', 200, int)
-#define HIDPCONNDEL	_IOW('H', 201, int)
-#define HIDPGETCONNLIST	_IOR('H', 210, int)
-#define HIDPGETCONNINFO	_IOR('H', 211, int)
-
-
 struct serial_struct32 {
         compat_int_t    type;
         compat_int_t    line;
@@ -650,72 +628,6 @@ static int serial_struct_ioctl(struct file *file,
         }
         return err;
 }
-
-#define RTC_IRQP_READ32		_IOR('p', 0x0b, compat_ulong_t)
-#define RTC_IRQP_SET32		_IOW('p', 0x0c, compat_ulong_t)
-#define RTC_EPOCH_READ32	_IOR('p', 0x0d, compat_ulong_t)
-#define RTC_EPOCH_SET32		_IOW('p', 0x0e, compat_ulong_t)
-
-static int rtc_ioctl(struct file *file,
-		unsigned cmd, void __user *argp)
-{
-	unsigned long __user *valp = compat_alloc_user_space(sizeof(*valp));
-	int ret;
-
-	if (valp == NULL)
-		return -EFAULT;
-	switch (cmd) {
-	case RTC_IRQP_READ32:
-	case RTC_EPOCH_READ32:
-		ret = do_ioctl(file, (cmd == RTC_IRQP_READ32) ?
-					RTC_IRQP_READ : RTC_EPOCH_READ,
-					(unsigned long)valp);
-		if (ret)
-			return ret;
-		return convert_in_user(valp, (unsigned int __user *)argp);
-	case RTC_IRQP_SET32:
-		return do_ioctl(file, RTC_IRQP_SET, (unsigned long)argp);
-	case RTC_EPOCH_SET32:
-		return do_ioctl(file, RTC_EPOCH_SET, (unsigned long)argp);
-	}
-
-	return -ENOIOCTLCMD;
-}
-
-/* on ia32 l_start is on a 32-bit boundary */
-#if defined(CONFIG_IA64) || defined(CONFIG_X86_64)
-struct space_resv_32 {
-	__s16		l_type;
-	__s16		l_whence;
-	__s64		l_start	__attribute__((packed));
-			/* len == 0 means until end of file */
-	__s64		l_len __attribute__((packed));
-	__s32		l_sysid;
-	__u32		l_pid;
-	__s32		l_pad[4];	/* reserve area */
-};
-
-#define FS_IOC_RESVSP_32		_IOW ('X', 40, struct space_resv_32)
-#define FS_IOC_RESVSP64_32	_IOW ('X', 42, struct space_resv_32)
-
-/* just account for different alignment */
-static int compat_ioctl_preallocate(struct file *file,
-			struct space_resv_32    __user *p32)
-{
-	struct space_resv	__user *p = compat_alloc_user_space(sizeof(*p));
-
-	if (copy_in_user(&p->l_type,	&p32->l_type,	sizeof(s16)) ||
-	    copy_in_user(&p->l_whence,	&p32->l_whence, sizeof(s16)) ||
-	    copy_in_user(&p->l_start,	&p32->l_start,	sizeof(s64)) ||
-	    copy_in_user(&p->l_len,	&p32->l_len,	sizeof(s64)) ||
-	    copy_in_user(&p->l_sysid,	&p32->l_sysid,	sizeof(s32)) ||
-	    copy_in_user(&p->l_pid,	&p32->l_pid,	sizeof(u32)) ||
-	    copy_in_user(&p->l_pad,	&p32->l_pad,	4*sizeof(u32)))
-		return -EFAULT;
-
-	return ioctl_preallocate(file, p);
-}
-#endif
 
 /*
  * simple reversible transform to make our table more evenly
@@ -789,19 +701,7 @@ COMPATIBLE_IOCTL(TCSETS2)
 COMPATIBLE_IOCTL(TCSETSW2)
 COMPATIBLE_IOCTL(TCSETSF2)
 #endif
-/* Little f */
-COMPATIBLE_IOCTL(FIOCLEX)
-COMPATIBLE_IOCTL(FIONCLEX)
-COMPATIBLE_IOCTL(FIOASYNC)
-COMPATIBLE_IOCTL(FIONBIO)
-COMPATIBLE_IOCTL(FIONREAD)  /* This is also TIOCINQ */
-COMPATIBLE_IOCTL(FS_IOC_FIEMAP)
-/* 0x00 */
-COMPATIBLE_IOCTL(FIBMAP)
-COMPATIBLE_IOCTL(FIGETBSZ)
 /* 'X' - originally XFS but some now in the VFS */
-COMPATIBLE_IOCTL(FIFREEZE)
-COMPATIBLE_IOCTL(FITHAW)
 COMPATIBLE_IOCTL(FITRIM)
 COMPATIBLE_IOCTL(KDGETKEYCODE)
 COMPATIBLE_IOCTL(KDSETKEYCODE)
@@ -834,21 +734,6 @@ COMPATIBLE_IOCTL(SCSI_IOCTL_GET_PCI)
 /* Big V (don't complain on serial console) */
 IGNORE_IOCTL(VT_OPENQRY)
 IGNORE_IOCTL(VT_GETMODE)
-/* Little p (/dev/rtc, /dev/envctrl, etc.) */
-COMPATIBLE_IOCTL(RTC_AIE_ON)
-COMPATIBLE_IOCTL(RTC_AIE_OFF)
-COMPATIBLE_IOCTL(RTC_UIE_ON)
-COMPATIBLE_IOCTL(RTC_UIE_OFF)
-COMPATIBLE_IOCTL(RTC_PIE_ON)
-COMPATIBLE_IOCTL(RTC_PIE_OFF)
-COMPATIBLE_IOCTL(RTC_WIE_ON)
-COMPATIBLE_IOCTL(RTC_WIE_OFF)
-COMPATIBLE_IOCTL(RTC_ALM_SET)
-COMPATIBLE_IOCTL(RTC_ALM_READ)
-COMPATIBLE_IOCTL(RTC_RD_TIME)
-COMPATIBLE_IOCTL(RTC_SET_TIME)
-COMPATIBLE_IOCTL(RTC_WKALM_SET)
-COMPATIBLE_IOCTL(RTC_WKALM_RD)
 /*
  * These two are only for the sbus rtc driver, but
  * hwclock tries them on every rtc device first when
@@ -859,8 +744,6 @@ COMPATIBLE_IOCTL(_IOR('p', 20, int[7])) /* RTCGET */
 COMPATIBLE_IOCTL(_IOW('p', 21, int[7])) /* RTCSET */
 /* Little m */
 COMPATIBLE_IOCTL(MTIOCTOP)
-/* Socket level stuff */
-COMPATIBLE_IOCTL(FIOQSIZE)
 #ifdef CONFIG_BLOCK
 /* md calls this on random blockdevs */
 IGNORE_IOCTL(RAID_VERSION)
@@ -1103,50 +986,11 @@ COMPATIBLE_IOCTL(RNDADDENTROPY)
 COMPATIBLE_IOCTL(RNDZAPENTCNT)
 COMPATIBLE_IOCTL(RNDCLEARPOOL)
 /* Bluetooth */
-COMPATIBLE_IOCTL(HCIDEVUP)
-COMPATIBLE_IOCTL(HCIDEVDOWN)
-COMPATIBLE_IOCTL(HCIDEVRESET)
-COMPATIBLE_IOCTL(HCIDEVRESTAT)
-COMPATIBLE_IOCTL(HCIGETDEVLIST)
-COMPATIBLE_IOCTL(HCIGETDEVINFO)
-COMPATIBLE_IOCTL(HCIGETCONNLIST)
-COMPATIBLE_IOCTL(HCIGETCONNINFO)
-COMPATIBLE_IOCTL(HCIGETAUTHINFO)
-COMPATIBLE_IOCTL(HCISETRAW)
-COMPATIBLE_IOCTL(HCISETSCAN)
-COMPATIBLE_IOCTL(HCISETAUTH)
-COMPATIBLE_IOCTL(HCISETENCRYPT)
-COMPATIBLE_IOCTL(HCISETPTYPE)
-COMPATIBLE_IOCTL(HCISETLINKPOL)
-COMPATIBLE_IOCTL(HCISETLINKMODE)
-COMPATIBLE_IOCTL(HCISETACLMTU)
-COMPATIBLE_IOCTL(HCISETSCOMTU)
-COMPATIBLE_IOCTL(HCIBLOCKADDR)
-COMPATIBLE_IOCTL(HCIUNBLOCKADDR)
-COMPATIBLE_IOCTL(HCIINQUIRY)
 COMPATIBLE_IOCTL(HCIUARTSETPROTO)
 COMPATIBLE_IOCTL(HCIUARTGETPROTO)
 COMPATIBLE_IOCTL(HCIUARTGETDEVICE)
 COMPATIBLE_IOCTL(HCIUARTSETFLAGS)
 COMPATIBLE_IOCTL(HCIUARTGETFLAGS)
-COMPATIBLE_IOCTL(RFCOMMCREATEDEV)
-COMPATIBLE_IOCTL(RFCOMMRELEASEDEV)
-COMPATIBLE_IOCTL(RFCOMMGETDEVLIST)
-COMPATIBLE_IOCTL(RFCOMMGETDEVINFO)
-COMPATIBLE_IOCTL(RFCOMMSTEALDLC)
-COMPATIBLE_IOCTL(BNEPCONNADD)
-COMPATIBLE_IOCTL(BNEPCONNDEL)
-COMPATIBLE_IOCTL(BNEPGETCONNLIST)
-COMPATIBLE_IOCTL(BNEPGETCONNINFO)
-COMPATIBLE_IOCTL(BNEPGETSUPPFEAT)
-COMPATIBLE_IOCTL(CMTPCONNADD)
-COMPATIBLE_IOCTL(CMTPCONNDEL)
-COMPATIBLE_IOCTL(CMTPGETCONNLIST)
-COMPATIBLE_IOCTL(CMTPGETCONNINFO)
-COMPATIBLE_IOCTL(HIDPCONNADD)
-COMPATIBLE_IOCTL(HIDPCONNDEL)
-COMPATIBLE_IOCTL(HIDPGETCONNLIST)
-COMPATIBLE_IOCTL(HIDPGETCONNINFO)
 /* CAPI */
 COMPATIBLE_IOCTL(CAPI_REGISTER)
 COMPATIBLE_IOCTL(CAPI_GET_MANUFACTURER)
@@ -1243,17 +1087,6 @@ COMPATIBLE_IOCTL(VIDEO_GET_NAVI)
 COMPATIBLE_IOCTL(VIDEO_SET_ATTRIBUTES)
 COMPATIBLE_IOCTL(VIDEO_GET_SIZE)
 COMPATIBLE_IOCTL(VIDEO_GET_FRAME_RATE)
-/* cec */
-COMPATIBLE_IOCTL(CEC_ADAP_G_CAPS)
-COMPATIBLE_IOCTL(CEC_ADAP_G_LOG_ADDRS)
-COMPATIBLE_IOCTL(CEC_ADAP_S_LOG_ADDRS)
-COMPATIBLE_IOCTL(CEC_ADAP_G_PHYS_ADDR)
-COMPATIBLE_IOCTL(CEC_ADAP_S_PHYS_ADDR)
-COMPATIBLE_IOCTL(CEC_G_MODE)
-COMPATIBLE_IOCTL(CEC_S_MODE)
-COMPATIBLE_IOCTL(CEC_TRANSMIT)
-COMPATIBLE_IOCTL(CEC_RECEIVE)
-COMPATIBLE_IOCTL(CEC_DQEVENT)
 
 /* joystick */
 COMPATIBLE_IOCTL(JSIOCGVERSION)
@@ -1335,12 +1168,6 @@ static long do_ioctl_trans(unsigned int cmd,
 	case TIOCGSERIAL:
 	case TIOCSSERIAL:
 		return serial_struct_ioctl(file, cmd, argp);
-	/* Not implemented in the native kernel */
-	case RTC_IRQP_READ32:
-	case RTC_IRQP_SET32:
-	case RTC_EPOCH_READ32:
-	case RTC_EPOCH_SET32:
-		return rtc_ioctl(file, cmd, argp);
 
 	/* dvb */
 	case VIDEO_GET_EVENT:
@@ -1416,20 +1243,40 @@ COMPAT_SYSCALL_DEFINE3(ioctl, unsigned int, fd, unsigned int, cmd,
 	if (error)
 		goto out_fput;
 
-	/*
-	 * To allow the compat_ioctl handlers to be self contained
-	 * we need to check the common ioctls here first.
-	 * Just handle them with the standard handlers below.
-	 */
 	switch (cmd) {
+	/* these are never seen by ->ioctl(), no argument or int argument */
 	case FIOCLEX:
 	case FIONCLEX:
+	case FIFREEZE:
+	case FITHAW:
+	case FICLONE:
+		goto do_ioctl;
+	/* these are never seen by ->ioctl(), pointer argument */
 	case FIONBIO:
 	case FIOASYNC:
 	case FIOQSIZE:
-		break;
-
-#if defined(CONFIG_IA64) || defined(CONFIG_X86_64)
+	case FS_IOC_FIEMAP:
+	case FIGETBSZ:
+	case FICLONERANGE:
+	case FIDEDUPERANGE:
+		goto found_handler;
+	/*
+	 * The next group is the stuff handled inside file_ioctl().
+	 * For regular files these never reach ->ioctl(); for
+	 * devices, sockets, etc. they do and one (FIONREAD) is
+	 * even accepted in some cases.  In all those cases
+	 * argument has the same type, so we can handle these
+	 * here, shunting them towards do_vfs_ioctl().
+	 * ->compat_ioctl() will never see any of those.
+	 */
+	/* pointer argument, never actually handled by ->ioctl() */
+	case FIBMAP:
+		goto found_handler;
+	/* handled by some ->ioctl(); always a pointer to int */
+	case FIONREAD:
+		goto found_handler;
+	/* these two get messy on amd64 due to alignment differences */
+#if defined(CONFIG_X86_64)
 	case FS_IOC_RESVSP_32:
 	case FS_IOC_RESVSP64_32:
 		error = compat_ioctl_preallocate(f.file, compat_ptr(arg));
@@ -1437,22 +1284,8 @@ COMPAT_SYSCALL_DEFINE3(ioctl, unsigned int, fd, unsigned int, cmd,
 #else
 	case FS_IOC_RESVSP:
 	case FS_IOC_RESVSP64:
-		error = ioctl_preallocate(f.file, compat_ptr(arg));
-		goto out_fput;
+		goto found_handler;
 #endif
-
-	case FICLONE:
-	case FICLONERANGE:
-	case FIDEDUPERANGE:
-	case FS_IOC_FIEMAP:
-		goto do_ioctl;
-
-	case FIBMAP:
-	case FIGETBSZ:
-	case FIONREAD:
-		if (S_ISREG(file_inode(f.file)->i_mode))
-			break;
-		/*FALL THROUGH*/
 
 	default:
 		if (f.file->f_op->compat_ioctl) {

@@ -57,6 +57,9 @@ enum {
   IPPROTO_ESP = 50,		/* Encapsulation Security Payload protocol */
 #define IPPROTO_ESP		IPPROTO_ESP
   IPPROTO_AH = 51,		/* Authentication Header protocol	*/
+#ifdef __KERNEL__		/* RHEL KABI: internal protocol value for MPTCP */
+#define IPPROTO_MPTCP_KERN	 66
+#endif
 #define IPPROTO_AH		IPPROTO_AH
   IPPROTO_MTP = 92,		/* Multicast Transport Protocol		*/
 #define IPPROTO_MTP		IPPROTO_MTP
@@ -77,6 +80,7 @@ enum {
   IPPROTO_RAW = 255,		/* Raw IP packets			*/
 #define IPPROTO_RAW		IPPROTO_RAW
   IPPROTO_MAX
+#define IPPROTO_MPTCP		262
 };
 #endif
 

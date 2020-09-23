@@ -47,17 +47,11 @@ page-alloc-$(CONFIG_SHUFFLE_PAGE_ALLOCATOR) += shuffle.o
 
 obj-y += page-alloc.o
 obj-y += init-mm.o
-
-ifdef CONFIG_NO_BOOTMEM
-	obj-y		+= nobootmem.o
-else
-	obj-y		+= bootmem.o
-endif
+obj-y += memblock.o
 
 ifdef CONFIG_MMU
 	obj-$(CONFIG_ADVISE_SYSCALLS)	+= madvise.o
 endif
-obj-$(CONFIG_HAVE_MEMBLOCK) += memblock.o
 
 obj-$(CONFIG_SWAP)	+= page_io.o swap_state.o swapfile.o swap_slots.o
 obj-$(CONFIG_FRONTSWAP)	+= frontswap.o
@@ -111,3 +105,4 @@ obj-$(CONFIG_PERCPU_STATS) += percpu-stats.o
 obj-$(CONFIG_ZONE_DEVICE) += memremap.o
 obj-$(CONFIG_HMM) += hmm.o
 obj-$(CONFIG_MEMFD_CREATE) += memfd.o
+obj-$(CONFIG_MAPPING_DIRTY_HELPERS) += mapping_dirty_helpers.o

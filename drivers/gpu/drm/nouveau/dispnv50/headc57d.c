@@ -151,17 +151,20 @@ headc57d_olut_load(struct drm_color_lut *in, int size, void __iomem *mem)
 	writew(readw(mem - 4), mem + 4);
 }
 
-void
-headc57d_olut(struct nv50_head *head, struct nv50_head_atom *asyh)
+bool
+headc57d_olut(struct nv50_head *head, struct nv50_head_atom *asyh, int size)
 {
+	if (size != 0 && size != 256 && size != 1024)
+		return false;
+
 	asyh->olut.mode = 2; /* DIRECT10 */
 	asyh->olut.size = 4 /* VSS header. */ + 1024 + 1 /* Entries. */;
 	asyh->olut.output_mode = 1; /* INTERPOLATE_ENABLE. */
-	if (asyh->state.gamma_lut &&
-	    asyh->state.gamma_lut->length / sizeof(struct drm_color_lut) == 256)
+	if (size == 256)
 		asyh->olut.load = headc57d_olut_load_8;
 	else
 		asyh->olut.load = headc57d_olut_load;
+	return true;
 }
 
 static void
@@ -170,14 +173,15 @@ headc57d_mode(struct nv50_head *head, struct nv50_head_atom *asyh)
 	struct nv50_dmac *core = &nv50_disp(head->base.base.dev)->core->chan;
 	struct nv50_head_mode *m = &asyh->mode;
 	u32 *push;
-	if ((push = evo_wait(core, 12))) {
+	if ((push = evo_wait(core, 13))) {
 		evo_mthd(push, 0x2064 + (head->base.index * 0x400), 5);
 		evo_data(push, (m->v.active  << 16) | m->h.active );
 		evo_data(push, (m->v.synce   << 16) | m->h.synce  );
 		evo_data(push, (m->v.blanke  << 16) | m->h.blanke );
 		evo_data(push, (m->v.blanks  << 16) | m->h.blanks );
 		evo_data(push, (m->v.blank2e << 16) | m->v.blank2s);
-		evo_mthd(push, 0x200c + (head->base.index * 0x400), 1);
+		evo_mthd(push, 0x2008 + (head->base.index * 0x400), 2);
+		evo_data(push, m->interlace);
 		evo_data(push, m->clock * 1000);
 		evo_mthd(push, 0x2028 + (head->base.index * 0x400), 1);
 		evo_data(push, m->clock * 1000);
@@ -194,6 +198,7 @@ headc57d = {
 	.mode = headc57d_mode,
 	.olut = headc57d_olut,
 	.olut_identity = true,
+	.olut_size = 1024,
 	.olut_set = headc57d_olut_set,
 	.olut_clr = headc57d_olut_clr,
 	.curs_layout = head917d_curs_layout,

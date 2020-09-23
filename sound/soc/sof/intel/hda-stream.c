@@ -20,6 +20,7 @@
 #include <sound/hda_register.h>
 #include <sound/sof.h>
 #include "../ops.h"
+#include "../sof-audio.h"
 #include "hda.h"
 
 /*
@@ -190,7 +191,7 @@ hda_dsp_stream_get(struct snd_sof_dev *sdev, int direction)
 	 * Workaround to address a known issue with host DMA that results
 	 * in xruns during pause/release in capture scenarios.
 	 */
-	if (!IS_ENABLED(SND_SOC_SOF_HDA_ALWAYS_ENABLE_DMI_L1))
+	if (!IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_ALWAYS_ENABLE_DMI_L1))
 		if (stream && direction == SNDRV_PCM_STREAM_CAPTURE)
 			snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,
 						HDA_VS_INTEL_EM2,
@@ -228,7 +229,7 @@ int hda_dsp_stream_put(struct snd_sof_dev *sdev, int direction, int stream_tag)
 	spin_unlock_irq(&bus->reg_lock);
 
 	/* Enable DMI L1 entry if there are no capture streams open */
-	if (!IS_ENABLED(SND_SOC_SOF_HDA_ALWAYS_ENABLE_DMI_L1))
+	if (!IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_ALWAYS_ENABLE_DMI_L1))
 		if (!active_capture_stream)
 			snd_sof_dsp_update_bits(sdev, HDA_DSP_HDA_BAR,
 						HDA_VS_INTEL_EM2,
@@ -546,27 +547,46 @@ int hda_dsp_stream_hw_free(struct snd_sof_dev *sdev,
 					SOF_HDA_REG_PP_PPCTL, mask, 0);
 	spin_unlock_irq(&bus->reg_lock);
 
+	stream->substream = NULL;
+
 	return 0;
 }
 
-irqreturn_t hda_dsp_stream_interrupt(int irq, void *context)
+bool hda_dsp_check_stream_irq(struct snd_sof_dev *sdev)
 {
-	struct hdac_bus *bus = context;
-	int ret = IRQ_WAKE_THREAD;
+	struct hdac_bus *bus = sof_to_bus(sdev);
+	bool ret = false;
 	u32 status;
 
-	spin_lock(&bus->reg_lock);
+	/* The function can be called at irq thread, so use spin_lock_irq */
+	spin_lock_irq(&bus->reg_lock);
 
 	status = snd_hdac_chip_readl(bus, INTSTS);
 	dev_vdbg(bus->dev, "stream irq, INTSTS status: 0x%x\n", status);
 
-	/* Register inaccessible, ignore it.*/
-	if (status == 0xffffffff)
-		ret = IRQ_NONE;
+	/* if Register inaccessible, ignore it.*/
+	if (status != 0xffffffff)
+		ret = true;
 
-	spin_unlock(&bus->reg_lock);
+	spin_unlock_irq(&bus->reg_lock);
 
 	return ret;
+}
+
+static void
+hda_dsp_set_bytes_transferred(struct hdac_stream *hstream, u64 buffer_size)
+{
+	u64 prev_pos, pos, num_bytes;
+
+	div64_u64_rem(hstream->curr_pos, buffer_size, &prev_pos);
+	pos = snd_hdac_stream_get_pos_posbuf(hstream);
+
+	if (pos < prev_pos)
+		num_bytes = (buffer_size - prev_pos) +  pos;
+	else
+		num_bytes = pos - prev_pos;
+
+	hstream->curr_pos += num_bytes;
 }
 
 static bool hda_dsp_stream_check(struct hdac_bus *bus, u32 status)
@@ -586,14 +606,19 @@ static bool hda_dsp_stream_check(struct hdac_bus *bus, u32 status)
 			snd_hdac_stream_writeb(s, SD_STS, sd_status);
 
 			active = true;
-			if (!s->substream ||
+			if ((!s->substream && !s->cstream) ||
 			    !s->running ||
 			    (sd_status & SOF_HDA_CL_DMA_SD_INT_COMPLETE) == 0)
 				continue;
 
 			/* Inform ALSA only in case not do that with IPC */
-			if (sof_hda->no_ipc_position)
+			if (s->substream && sof_hda->no_ipc_position) {
 				snd_sof_pcm_period_elapsed(s->substream);
+			} else if (s->cstream) {
+				hda_dsp_set_bytes_transferred(s,
+					s->cstream->runtime->buffer_size);
+				snd_compr_fragment_elapsed(s->cstream);
+			}
 		}
 	}
 
@@ -602,7 +627,8 @@ static bool hda_dsp_stream_check(struct hdac_bus *bus, u32 status)
 
 irqreturn_t hda_dsp_stream_threaded_handler(int irq, void *context)
 {
-	struct hdac_bus *bus = context;
+	struct snd_sof_dev *sdev = context;
+	struct hdac_bus *bus = sof_to_bus(sdev);
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA)
 	u32 rirb_status;
 #endif

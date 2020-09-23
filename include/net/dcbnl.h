@@ -138,7 +138,7 @@ struct dcbnl_rtnl_ops {
 	RH_KABI_RESERVE(13)
 	RH_KABI_RESERVE(14)
 	RH_KABI_RESERVE(15)
-	RH_KABI_SIZE_AND_EXTEND(dcbnl_rtnl_ops_extended)
+	RH_KABI_AUX_EMBED(dcbnl_rtnl_ops_extended)
 };
 
 #endif /* __NET_DCBNL_H__ */

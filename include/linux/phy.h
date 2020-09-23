@@ -22,10 +22,12 @@
 #include <linux/linkmode.h>
 #include <linux/mdio.h>
 #include <linux/mii.h>
+#include <linux/mii_timestamper.h>
 #include <linux/module.h>
 #include <linux/timer.h>
 #include <linux/workqueue.h>
 #include <linux/mod_devicetable.h>
+#include <linux/u64_stats_sync.h>
 
 #include <linux/atomic.h>
 
@@ -62,6 +64,9 @@ extern __ETHTOOL_DECLARE_LINK_MODE_MASK(phy_10gbit_full_features) __ro_after_ini
 #define PHY_10GBIT_FEC_FEATURES ((unsigned long *)&phy_10gbit_fec_features)
 #define PHY_10GBIT_FULL_FEATURES ((unsigned long *)&phy_10gbit_full_features)
 
+extern const int phy_basic_ports_array[3];
+extern const int phy_fibre_port_array[1];
+extern const int phy_all_ports_features_array[7];
 extern const int phy_10_100_features_array[4];
 extern const int phy_basic_t1_features_array[2];
 extern const int phy_gbit_features_array[2];
@@ -105,6 +110,14 @@ typedef enum {
 	PHY_INTERFACE_MODE_XAUI,
 	/* 10GBASE-KR, XFI, SFI - single lane 10G Serdes */
 	PHY_INTERFACE_MODE_10GKR,
+        /* RHEL: Fields adding at the end are safe. But code, which iterate
+	 * over all modes and use PHY_INTERFACE_MODE_MAX will need recompile
+	 * for use new interface modes. It is for example fuctions like
+	 * of_get_phy_mode()
+        */
+#ifndef __GENKSYMS__
+	PHY_INTERFACE_MODE_USXGMII,
+#endif
 	PHY_INTERFACE_MODE_MAX,
 } phy_interface_t;
 
@@ -180,6 +193,8 @@ static inline const char *phy_modes(phy_interface_t interface)
 		return "xaui";
 	case PHY_INTERFACE_MODE_10GKR:
 		return "10gbase-kr";
+	case PHY_INTERFACE_MODE_USXGMII:
+		return "usxgmii";
 	default:
 		return "unknown";
 	}
@@ -187,7 +202,6 @@ static inline const char *phy_modes(phy_interface_t interface)
 
 
 #define PHY_INIT_TIMEOUT	100000
-#define PHY_STATE_TIME		1
 #define PHY_FORCE_TIMEOUT	10
 
 #define PHY_MAX_ADDR	32
@@ -200,10 +214,23 @@ static inline const char *phy_modes(phy_interface_t interface)
 /* Or MII_ADDR_C45 into regnum for read/write on mii_bus to enable the 21 bit
    IEEE 802.3ae clause 45 addressing mode used by 10GIGE phy chips. */
 #define MII_ADDR_C45 (1<<30)
+#define MII_DEVADDR_C45_SHIFT	16
+#define MII_REGADDR_C45_MASK	GENMASK(15, 0)
 
 struct device;
 struct phylink;
+struct sfp_bus;
+struct sfp_upstream_ops;
 struct sk_buff;
+
+struct mdio_bus_stats {
+	u64_stats_t transfers;
+	u64_stats_t errors;
+	u64_stats_t writes;
+	u64_stats_t reads;
+	/* Must be last, add new statistics above */
+	struct u64_stats_sync syncp;
+};
 
 /*
  * The Bus class for PHYs.  Devices which provide access to
@@ -217,6 +244,7 @@ struct mii_bus {
 	int (*read)(struct mii_bus *bus, int addr, int regnum);
 	int (*write)(struct mii_bus *bus, int addr, int regnum, u16 val);
 	int (*reset)(struct mii_bus *bus);
+	RH_KABI_BROKEN_INSERT(struct mdio_bus_stats stats[PHY_MAX_ADDR])
 
 	/*
 	 * A lock to ensure that only one thing can read/write
@@ -297,12 +325,6 @@ struct phy_device *mdiobus_scan(struct mii_bus *bus, int addr);
  * - irq or timer will set RUNNING if link comes back
  * - phy_stop moves to HALTED
  *
- * FORCING: PHY is being configured with forced settings
- * - if link is up, move to RUNNING
- * - If link is down, we drop to the next highest setting, and
- *   retry (FORCING) after a timeout
- * - phy_stop moves to HALTED
- *
  * RUNNING: PHY is currently up, running, and possibly sending
  * and/or receiving packets
  * - irq or timer will set NOLINK if link goes down
@@ -340,7 +362,6 @@ enum phy_state {
 	PHY_UP,
 	PHY_RUNNING,
 	PHY_NOLINK,
-	PHY_FORCING,
 };
 #endif /* __GENKSYMS__ */
 
@@ -365,14 +386,15 @@ struct phy_c45_device_ids {
  * is_gigabit_capable: Set to true if PHY supports 1000Mbps
  * has_fixups: Set to true if this phy has fixups/quirks.
  * suspended: Set to true if this phy has been suspended successfully.
+ * suspended_by_mdio_bus: Set to true if this phy was suspended by MDIO bus.
  * sysfs_links: Internal boolean tracking sysfs symbolic links setup/removal.
  * loopback_enabled: Set true if this phy has been loopbacked successfully.
  * state: state of the PHY for management purposes
  * dev_flags: Device-specific flags used by the PHY driver.
- * link_timeout: The number of timer firings to wait before the
- * giving up on the current attempt at acquiring a link
  * irq: IRQ number of the PHY's interrupt (-1 if none)
  * phy_timer: The timer for handling the state machine
+ * sfp_bus_attached: flag indicating whether the SFP bus has been attached
+ * sfp_bus: SFP bus attached to this PHY's fiber port
  * attached_dev: The attached enet driver's device instance ptr
  * adjust_link: Callback for the enet controller to respond to
  * changes in the link state.
@@ -413,8 +435,9 @@ struct phy_device {
 	RH_KABI_FILL_HOLE(unsigned autoneg_complete:1)
 	/* Interrupts are enabled */
 	RH_KABI_FILL_HOLE(unsigned interrupts:1)
+	RH_KABI_FILL_HOLE(unsigned suspended_by_mdio_bus:1)
 
-	/* 20 bits hole remain */
+	/* 19 bits hole remain */
 
 	enum phy_state state;
 
@@ -444,7 +467,7 @@ struct phy_device {
 	/* Energy efficient ethernet modes which should be prohibited */
 	u32 eee_broken_modes;
 
-	int link_timeout;
+	RH_KABI_DEPRECATE(int, link_timeout)
 
 #ifdef CONFIG_LED_TRIGGER_PHY
 	struct phy_led_trigger *phy_led_triggers;
@@ -470,6 +493,17 @@ struct phy_device {
 
 	struct mutex lock;
 
+	/* RHEL specific: further changes here need to be accompanied by
+         * increasing the RH_KABI_FORCE_CHANGE version of
+         * phy_driver[s]_register.
+         */
+	RH_KABI_BROKEN_INSERT_BLOCK(
+	/* This may be modified under the rtnl lock */
+	bool sfp_bus_attached;
+	struct sfp_bus *sfp_bus;
+	struct mii_timestamper *mii_ts;
+	) /* RH_KABI_BROKEN_INSERT_BLOCK */
+
 	struct phylink *phylink;
 	struct net_device *attached_dev;
 
@@ -484,6 +518,7 @@ struct phy_device {
 	__ETHTOOL_DECLARE_LINK_MODE_MASK(supported);
 	__ETHTOOL_DECLARE_LINK_MODE_MASK(advertising);
 	__ETHTOOL_DECLARE_LINK_MODE_MASK(lp_advertising);
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(adv_old);
 	) /* RH_KABI_BROKEN_INSERT_BLOCK */
 
 	void (*phy_link_change)(struct phy_device *, bool up, bool do_carrier);
@@ -571,6 +606,7 @@ struct phy_driver {
 	/*
 	 * Checks if the PHY generated an interrupt.
 	 * For multi-PHY devices with shared PHY interrupt pin
+	 * Set interrupt bits have to be cleared.
 	 */
 	int (*did_interrupt)(struct phy_device *phydev);
 
@@ -583,28 +619,17 @@ struct phy_driver {
 	 */
 	int (*match_phy_device)(struct phy_device *phydev);
 
-	/* Handles ethtool queries for hardware time stamping. */
-	int (*ts_info)(struct phy_device *phydev, struct ethtool_ts_info *ti);
-
-	/* Handles SIOCSHWTSTAMP ioctl for hardware time stamping. */
-	int  (*hwtstamp)(struct phy_device *phydev, struct ifreq *ifr);
-
-	/*
-	 * Requests a Rx timestamp for 'skb'. If the skb is accepted,
-	 * the phy driver promises to deliver it using netif_rx() as
-	 * soon as a timestamp becomes available. One of the
-	 * PTP_CLASS_ values is passed in 'type'. The function must
-	 * return true if the skb is accepted for delivery.
-	 */
-	bool (*rxtstamp)(struct phy_device *dev, struct sk_buff *skb, int type);
-
-	/*
-	 * Requests a Tx timestamp for 'skb'. The phy driver promises
-	 * to deliver it using skb_complete_tx_timestamp() as soon as a
-	 * timestamp becomes available. One of the PTP_CLASS_ values
-	 * is passed in 'type'.
-	 */
-	void (*txtstamp)(struct phy_device *dev, struct sk_buff *skb, int type);
+	/* RHEL specific: these fields was replaced by new mii_timestamper
+	 * interface.
+	*/
+	RH_KABI_DEPRECATE_FN(int, ts_info, struct phy_device *phydev,
+			     struct ethtool_ts_info *ti)
+	RH_KABI_DEPRECATE_FN(int,  hwtstamp, struct phy_device *phydev,
+			     struct ifreq *ifr)
+	RH_KABI_DEPRECATE_FN(bool, rxtstamp, struct phy_device *dev,
+			     struct sk_buff *skb, int type)
+	RH_KABI_DEPRECATE_FN(void, txtstamp, struct phy_device *dev,
+			     struct sk_buff *skb, int type)
 
 	/* Some devices (e.g. qnap TS-119P II) require PHY register changes to
 	 * enable Wake on LAN, so set_wol is provided to be called in the
@@ -678,6 +703,9 @@ struct phy_driver {
          * Should only set phydev->supported.
          */
 	RH_KABI_BROKEN_INSERT(int (*get_features)(struct phy_device *phydev))
+
+	/* Override default interrupt handling */
+        RH_KABI_BROKEN_INSERT(int (*handle_interrupt)(struct phy_device *phydev))
 };
 #define to_phy_driver(d) container_of(to_mdio_common_driver(d),		\
 				      struct phy_driver, mdiodrv)
@@ -717,6 +745,7 @@ size_t phy_speeds(unsigned int *speeds, size_t size,
 		  unsigned long *mask);
 void of_set_phy_supported(struct phy_device *phydev);
 void of_set_phy_eee_broken(struct phy_device *phydev);
+int phy_speed_down_core(struct phy_device *phydev);
 
 /**
  * phy_is_started - Convenience function to check whether PHY is started
@@ -727,6 +756,7 @@ static inline bool phy_is_started(struct phy_device *phydev)
 	return phydev->state >= PHY_UP;
 }
 
+void phy_resolve_aneg_pause(struct phy_device *phydev);
 void phy_resolve_aneg_linkmode(struct phy_device *phydev);
 
 /**
@@ -978,6 +1008,66 @@ static inline bool phy_polling_mode(struct phy_device *phydev)
 }
 
 /**
+ * phy_has_hwtstamp - Tests whether a PHY time stamp configuration.
+ * @phydev: the phy_device struct
+ */
+static inline bool phy_has_hwtstamp(struct phy_device *phydev)
+{
+	return phydev && phydev->mii_ts && phydev->mii_ts->hwtstamp;
+}
+
+/**
+ * phy_has_rxtstamp - Tests whether a PHY supports receive time stamping.
+ * @phydev: the phy_device struct
+ */
+static inline bool phy_has_rxtstamp(struct phy_device *phydev)
+{
+	return phydev && phydev->mii_ts && phydev->mii_ts->rxtstamp;
+}
+
+/**
+ * phy_has_tsinfo - Tests whether a PHY reports time stamping and/or
+ * PTP hardware clock capabilities.
+ * @phydev: the phy_device struct
+ */
+static inline bool phy_has_tsinfo(struct phy_device *phydev)
+{
+	return phydev && phydev->mii_ts && phydev->mii_ts->ts_info;
+}
+
+/**
+ * phy_has_txtstamp - Tests whether a PHY supports transmit time stamping.
+ * @phydev: the phy_device struct
+ */
+static inline bool phy_has_txtstamp(struct phy_device *phydev)
+{
+	return phydev && phydev->mii_ts && phydev->mii_ts->txtstamp;
+}
+
+static inline int phy_hwtstamp(struct phy_device *phydev, struct ifreq *ifr)
+{
+	return phydev->mii_ts->hwtstamp(phydev->mii_ts, ifr);
+}
+
+static inline bool phy_rxtstamp(struct phy_device *phydev, struct sk_buff *skb,
+				int type)
+{
+	return phydev->mii_ts->rxtstamp(phydev->mii_ts, skb, type);
+}
+
+static inline int phy_ts_info(struct phy_device *phydev,
+			      struct ethtool_ts_info *tsinfo)
+{
+	return phydev->mii_ts->ts_info(phydev->mii_ts, tsinfo);
+}
+
+static inline void phy_txtstamp(struct phy_device *phydev, struct sk_buff *skb,
+				int type)
+{
+	phydev->mii_ts->txtstamp(phydev->mii_ts, skb, type);
+}
+
+/**
  * phy_is_internal - Convenience function for testing if a PHY is internal
  * @phydev: the phy_device struct
  */
@@ -1036,10 +1126,12 @@ int phy_select_page(struct phy_device *phydev, int page);
 int phy_restore_page(struct phy_device *phydev, int oldpage, int ret);
 int phy_read_paged(struct phy_device *phydev, int page, u32 regnum);
 int phy_write_paged(struct phy_device *phydev, int page, u32 regnum, u16 val);
+int phy_modify_paged_changed(struct phy_device *phydev, int page, u32 regnum,
+			     u16 mask, u16 set);
 int phy_modify_paged(struct phy_device *phydev, int page, u32 regnum,
 		     u16 mask, u16 set);
 
-struct phy_device *phy_device_create(struct mii_bus *bus, int addr, int phy_id,
+struct phy_device *phy_device_create(struct mii_bus *bus, int addr, u32 phy_id,
 				     bool is_c45,
 				     struct phy_c45_device_ids *c45_ids);
 #if IS_ENABLED(CONFIG_PHYLIB)
@@ -1066,6 +1158,10 @@ int phy_suspend(struct phy_device *phydev);
 int phy_resume(struct phy_device *phydev);
 int __phy_resume(struct phy_device *phydev);
 int phy_loopback(struct phy_device *phydev, bool enable);
+void phy_sfp_attach(void *upstream, struct sfp_bus *bus);
+void phy_sfp_detach(void *upstream, struct sfp_bus *bus);
+int phy_sfp_probe(struct phy_device *phydev,
+	          const struct sfp_upstream_ops *ops);
 struct phy_device *phy_attach(struct net_device *dev, const char *bus_id,
 			      phy_interface_t interface);
 struct phy_device *phy_find_first(struct mii_bus *bus);
@@ -1111,24 +1207,44 @@ static inline const char *phydev_name(const struct phy_device *phydev)
 	return dev_name(&phydev->mdio.dev);
 }
 
+static inline void phy_lock_mdio_bus(struct phy_device *phydev)
+{
+	mutex_lock(&phydev->mdio.bus->mdio_lock);
+}
+
+static inline void phy_unlock_mdio_bus(struct phy_device *phydev)
+{
+	mutex_unlock(&phydev->mdio.bus->mdio_lock);
+}
+
 void phy_attached_print(struct phy_device *phydev, const char *fmt, ...)
 	__printf(2, 3);
+char *phy_attached_info_irq(struct phy_device *phydev)
+	__malloc;
 void phy_attached_info(struct phy_device *phydev);
 
 /* Clause 22 PHY */
-int genphy_config_init(struct phy_device *phydev);
 int genphy_read_abilities(struct phy_device *phydev);
 int genphy_setup_forced(struct phy_device *phydev);
 int genphy_restart_aneg(struct phy_device *phydev);
+int genphy_check_and_restart_aneg(struct phy_device *phydev, bool restart);
 int genphy_config_eee_advert(struct phy_device *phydev);
-int genphy_config_aneg(struct phy_device *phydev);
+int __genphy_config_aneg(struct phy_device *phydev, bool changed);
 int genphy_aneg_done(struct phy_device *phydev);
 int genphy_update_link(struct phy_device *phydev);
+int genphy_read_lpa(struct phy_device *phydev);
+int genphy_read_status_fixed(struct phy_device *phydev);
 int genphy_read_status(struct phy_device *phydev);
 int genphy_suspend(struct phy_device *phydev);
 int genphy_resume(struct phy_device *phydev);
 int genphy_loopback(struct phy_device *phydev, bool enable);
 int genphy_soft_reset(struct phy_device *phydev);
+
+static inline int genphy_config_aneg(struct phy_device *phydev)
+{
+	return __genphy_config_aneg(phydev, false);
+}
+
 static inline int genphy_no_soft_reset(struct phy_device *phydev)
 {
 	return 0;
@@ -1145,6 +1261,10 @@ int genphy_read_mmd_unsupported(struct phy_device *phdev, int devad,
 				u16 regnum);
 int genphy_write_mmd_unsupported(struct phy_device *phdev, int devnum,
 				 u16 regnum, u16 val);
+
+/* Clause 37 */
+int genphy_c37_config_aneg(struct phy_device *phydev);
+int genphy_c37_read_status(struct phy_device *phydev);
 
 /* Clause 45 PHY */
 int genphy_c45_restart_aneg(struct phy_device *phydev);
@@ -1182,22 +1302,25 @@ void phy_drivers_unregister(struct phy_driver *drv, int n);
  * hide checksum change and old driver loaded with new kernel will crash. We
  * need change phy_driver{s}_register
  */
-RH_KABI_FORCE_CHANGE(3)
+RH_KABI_FORCE_CHANGE(4)
 int phy_driver_register(struct phy_driver *new_driver, struct module *owner);
-RH_KABI_FORCE_CHANGE(3)
+RH_KABI_FORCE_CHANGE(4)
 int phy_drivers_register(struct phy_driver *new_driver, int n,
 			 struct module *owner);
 void phy_state_machine(struct work_struct *work);
+void phy_queue_state_machine(struct phy_device *phydev, unsigned long jiffies);
 void phy_mac_interrupt(struct phy_device *phydev);
 void phy_start_machine(struct phy_device *phydev);
 void phy_stop_machine(struct phy_device *phydev);
-int phy_ethtool_sset(struct phy_device *phydev, struct ethtool_cmd *cmd);
 void phy_ethtool_ksettings_get(struct phy_device *phydev,
 			       struct ethtool_link_ksettings *cmd);
 int phy_ethtool_ksettings_set(struct phy_device *phydev,
 			      const struct ethtool_link_ksettings *cmd);
 int phy_mii_ioctl(struct phy_device *phydev, struct ifreq *ifr, int cmd);
+int phy_do_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd);
+int phy_do_ioctl_running(struct net_device *dev, struct ifreq *ifr, int cmd);
 void phy_request_interrupt(struct phy_device *phydev);
+void phy_free_interrupt(struct phy_device *phydev);
 void phy_print_status(struct phy_device *phydev);
 int phy_set_max_speed(struct phy_device *phydev, u32 max_speed);
 void phy_remove_link_mode(struct phy_device *phydev, u32 link_mode);

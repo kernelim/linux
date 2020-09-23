@@ -17,9 +17,13 @@
 #include "util/event.h"  /* proc_map_timeout */
 #include "util/hist.h"  /* perf_hist_config */
 #include "util/llvm-utils.h"   /* perf_llvm_config */
+#include "build-id.h"
+#include "debug.h"
 #include "config.h"
+#include "debug.h"
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <linux/string.h>
 #include <linux/zalloc.h>
@@ -362,6 +366,18 @@ int perf_config_u64(u64 *dest, const char *name, const char *value)
 int perf_config_int(int *dest, const char *name, const char *value)
 {
 	long ret = 0;
+	if (!perf_parse_long(value, &ret)) {
+		bad_config(name);
+		return -1;
+	}
+	*dest = ret;
+	return 0;
+}
+
+int perf_config_u8(u8 *dest, const char *name, const char *value)
+{
+	long ret = 0;
+
 	if (!perf_parse_long(value, &ret)) {
 		bad_config(name);
 		return -1;

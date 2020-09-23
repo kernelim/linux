@@ -1339,7 +1339,7 @@ static struct rapl_package *rapl_add_package(int cpu, struct rapl_if_priv *priv)
 	if (topology_max_die_per_package() > 1)
 		snprintf(rp->name, PACKAGE_DOMAIN_NAME_LENGTH,
 			"package-%d-die-%d", c->phys_proc_id,
-			 c->cpuinfo_x86_extended_rh.cpu_die_id);
+			 c->_rh.cpu_die_id);
 	else
 		snprintf(rp->name, PACKAGE_DOMAIN_NAME_LENGTH, "package-%d",
 			c->phys_proc_id);

@@ -15,7 +15,6 @@
 #include <linux/export.h>
 #include <linux/screen_info.h>
 #include <linux/memblock.h>
-#include <linux/bootmem.h>
 #include <linux/initrd.h>
 #include <linux/root_dev.h>
 #include <linux/highmem.h>
@@ -611,7 +610,7 @@ static void __init bootmem_init(void)
 		extern void show_kernel_relocation(const char *level);
 
 		offset = __pa_symbol(_text) - __pa_symbol(VMLINUX_LOAD_ADDRESS);
-		free_bootmem(__pa_symbol(VMLINUX_LOAD_ADDRESS), offset);
+		memblock_free(__pa_symbol(VMLINUX_LOAD_ADDRESS), offset);
 
 #if defined(CONFIG_DEBUG_KERNEL) && defined(CONFIG_DEBUG_INFO)
 		/*
@@ -952,7 +951,7 @@ static void __init resource_init(void)
 		if (end >= HIGHMEM_START)
 			end = HIGHMEM_START - 1;
 
-		res = alloc_bootmem(sizeof(struct resource));
+		res = memblock_alloc(sizeof(struct resource), 0);
 
 		res->start = start;
 		res->end = end;

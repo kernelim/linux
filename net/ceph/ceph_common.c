@@ -175,6 +175,10 @@ int ceph_compare_options(struct ceph_options *new_opt,
 		}
 	}
 
+	ret = ceph_compare_crush_locs(&opt1->crush_locs, &opt2->crush_locs);
+	if (ret)
+		return ret;
+
 	/* any matching mon ip implies a match */
 	for (i = 0; i < opt1->num_mon; i++) {
 		if (ceph_monmap_contains(client->monc.monmap,
@@ -260,6 +264,8 @@ enum {
 	Opt_secret,
 	Opt_key,
 	Opt_ip,
+	Opt_crush_location,
+	Opt_read_from_replica,
 	Opt_last_string,
 	/* string args above */
 	Opt_share,
@@ -287,6 +293,8 @@ static match_table_t opt_tokens = {
 	{Opt_secret, "secret=%s"},
 	{Opt_key, "key=%s"},
 	{Opt_ip, "ip=%s"},
+	{Opt_crush_location, "crush_location=%s"},
+	{Opt_read_from_replica, "read_from_replica=%s"},
 	/* string args above */
 	{Opt_share, "share"},
 	{Opt_noshare, "noshare"},
@@ -305,6 +313,8 @@ static match_table_t opt_tokens = {
 void ceph_destroy_options(struct ceph_options *opt)
 {
 	dout("destroy_options %p\n", opt);
+
+	ceph_clear_crush_locs(&opt->crush_locs);
 	kfree(opt->name);
 	if (opt->key) {
 		ceph_crypto_key_destroy(opt->key);
@@ -374,6 +384,8 @@ ceph_parse_options(char *options, const char *dev_name,
 	opt = kzalloc(sizeof(*opt), GFP_KERNEL);
 	if (!opt)
 		return ERR_PTR(-ENOMEM);
+
+	opt->crush_locs = RB_ROOT;
 	opt->mon_addr = kcalloc(CEPH_MAX_MON, sizeof(*opt->mon_addr),
 				GFP_KERNEL);
 	if (!opt->mon_addr)
@@ -388,6 +400,7 @@ ceph_parse_options(char *options, const char *dev_name,
 	opt->mount_timeout = CEPH_MOUNT_TIMEOUT_DEFAULT;
 	opt->osd_idle_ttl = CEPH_OSD_IDLE_TTL_DEFAULT;
 	opt->osd_request_timeout = CEPH_OSD_REQUEST_TIMEOUT_DEFAULT;
+	opt->read_from_replica = CEPH_READ_FROM_REPLICA_DEFAULT;
 
 	/* get mon ip(s) */
 	/* ip1[:port1][,ip2[:port2]...] */
@@ -476,6 +489,28 @@ ceph_parse_options(char *options, const char *dev_name,
 			err = get_secret(opt->key, argstr[0].from);
 			if (err < 0)
 				goto out;
+			break;
+		case Opt_crush_location:
+			ceph_clear_crush_locs(&opt->crush_locs);
+			err = ceph_parse_crush_location(argstr[0].from,
+							&opt->crush_locs);
+			if (err) {
+				pr_err("failed to parse CRUSH location: %d\n",
+				       err);
+				goto out;
+			}
+			break;
+		case Opt_read_from_replica:
+			if (!strcmp(argstr[0].from, "no")) {
+				opt->read_from_replica = 0;
+			} else if (!strcmp(argstr[0].from, "balance")) {
+				opt->read_from_replica = CEPH_OSD_FLAG_BALANCE_READS;
+			} else if (!strcmp(argstr[0].from, "localize")) {
+				opt->read_from_replica = CEPH_OSD_FLAG_LOCALIZE_READS;
+			} else {
+				err = -EINVAL;
+				goto out;
+			}
 			break;
 
 			/* misc */
@@ -577,6 +612,7 @@ int ceph_print_client_options(struct seq_file *m, struct ceph_client *client,
 {
 	struct ceph_options *opt = client->options;
 	size_t pos = m->count;
+	struct rb_node *n;
 
 	if (opt->name) {
 		seq_puts(m, "name=");
@@ -585,6 +621,28 @@ int ceph_print_client_options(struct seq_file *m, struct ceph_client *client,
 	}
 	if (opt->key)
 		seq_puts(m, "secret=<hidden>,");
+
+	if (!RB_EMPTY_ROOT(&opt->crush_locs)) {
+		seq_puts(m, "crush_location=");
+		for (n = rb_first(&opt->crush_locs); ; ) {
+			struct crush_loc_node *loc =
+			    rb_entry(n, struct crush_loc_node, cl_node);
+
+			seq_printf(m, "%s:%s", loc->cl_loc.cl_type_name,
+				   loc->cl_loc.cl_name);
+			n = rb_next(n);
+			if (!n)
+				break;
+
+			seq_putc(m, '|');
+		}
+		seq_putc(m, ',');
+	}
+	if (opt->read_from_replica == CEPH_OSD_FLAG_BALANCE_READS) {
+		seq_puts(m, "read_from_replica=balance,");
+	} else if (opt->read_from_replica == CEPH_OSD_FLAG_LOCALIZE_READS) {
+		seq_puts(m, "read_from_replica=localize,");
+	}
 
 	if (opt->flags & CEPH_OPT_FSID)
 		seq_printf(m, "fsid=%pU,", &opt->fsid);

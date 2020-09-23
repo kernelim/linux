@@ -4,6 +4,8 @@
 #ifndef __MLX5E_FLOW_STEER_H__
 #define __MLX5E_FLOW_STEER_H__
 
+#include "mod_hdr.h"
+
 enum {
 	MLX5E_TC_FT_LEVEL = 0,
 	MLX5E_TC_TTC_FT_LEVEL,
@@ -21,6 +23,7 @@ struct mlx5e_tc_table {
 	DECLARE_HASHTABLE(hairpin_tbl, 8);
 
 	struct notifier_block     netdevice_nb;
+	struct netdev_net_notifier	netdevice_nn;
 };
 
 struct mlx5e_flow_table {
@@ -95,8 +98,14 @@ struct mlx5e_tirc_config {
 enum mlx5e_tunnel_types {
 	MLX5E_TT_IPV4_GRE,
 	MLX5E_TT_IPV6_GRE,
+	MLX5E_TT_IPV4_IPIP,
+	MLX5E_TT_IPV6_IPIP,
+	MLX5E_TT_IPV4_IPV6,
+	MLX5E_TT_IPV6_IPV6,
 	MLX5E_NUM_TUNNEL_TT,
 };
+
+bool mlx5e_tunnel_inner_ft_supported(struct mlx5_core_dev *mdev);
 
 /* L3/L4 traffic type classifier */
 struct mlx5e_ttc_table {
@@ -115,6 +124,22 @@ enum {
 	MLX5E_ARFS_FT_LEVEL
 #endif
 };
+
+#define MLX5E_TTC_NUM_GROUPS	3
+#define MLX5E_TTC_GROUP1_SIZE	(BIT(3) + MLX5E_NUM_TUNNEL_TT)
+#define MLX5E_TTC_GROUP2_SIZE	 BIT(1)
+#define MLX5E_TTC_GROUP3_SIZE	 BIT(0)
+#define MLX5E_TTC_TABLE_SIZE	(MLX5E_TTC_GROUP1_SIZE +\
+				 MLX5E_TTC_GROUP2_SIZE +\
+				 MLX5E_TTC_GROUP3_SIZE)
+
+#define MLX5E_INNER_TTC_NUM_GROUPS	3
+#define MLX5E_INNER_TTC_GROUP1_SIZE	BIT(3)
+#define MLX5E_INNER_TTC_GROUP2_SIZE	BIT(1)
+#define MLX5E_INNER_TTC_GROUP3_SIZE	BIT(0)
+#define MLX5E_INNER_TTC_TABLE_SIZE	(MLX5E_INNER_TTC_GROUP1_SIZE +\
+					 MLX5E_INNER_TTC_GROUP2_SIZE +\
+					 MLX5E_INNER_TTC_GROUP3_SIZE)
 
 #ifdef CONFIG_MLX5_EN_RXNFC
 
@@ -231,6 +256,9 @@ void mlx5e_disable_cvlan_filter(struct mlx5e_priv *priv);
 
 int mlx5e_create_flow_steering(struct mlx5e_priv *priv);
 void mlx5e_destroy_flow_steering(struct mlx5e_priv *priv);
+
+bool mlx5e_tunnel_proto_supported(struct mlx5_core_dev *mdev, u8 proto_type);
+bool mlx5e_any_tunnel_proto_supported(struct mlx5_core_dev *mdev);
 
 #endif /* __MLX5E_FLOW_STEER_H__ */
 

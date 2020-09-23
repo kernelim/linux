@@ -34,13 +34,15 @@ struct poll_table_struct;
 
 /**
  * union v4l2_ctrl_ptr - A pointer to a control value.
- * @p_s32:	Pointer to a 32-bit signed value.
- * @p_s64:	Pointer to a 64-bit signed value.
- * @p_u8:	Pointer to a 8-bit unsigned value.
- * @p_u16:	Pointer to a 16-bit unsigned value.
- * @p_u32:	Pointer to a 32-bit unsigned value.
- * @p_char:	Pointer to a string.
- * @p:		Pointer to a compound value.
+ * @p_s32:			Pointer to a 32-bit signed value.
+ * @p_s64:			Pointer to a 64-bit signed value.
+ * @p_u8:			Pointer to a 8-bit unsigned value.
+ * @p_u16:			Pointer to a 16-bit unsigned value.
+ * @p_u32:			Pointer to a 32-bit unsigned value.
+ * @p_char:			Pointer to a string.
+ * @p_mpeg2_slice_params:	Pointer to a MPEG2 slice parameters structure.
+ * @p_mpeg2_quantization:	Pointer to a MPEG2 quantization data structure.
+ * @p:				Pointer to a compound value.
  */
 union v4l2_ctrl_ptr {
 	s32 *p_s32;
@@ -49,6 +51,8 @@ union v4l2_ctrl_ptr {
 	u16 *p_u16;
 	u32 *p_u32;
 	char *p_char;
+	struct v4l2_ctrl_mpeg2_slice_params *p_mpeg2_slice_params;
+	struct v4l2_ctrl_mpeg2_quantization *p_mpeg2_quantization;
 	void *p;
 };
 
@@ -247,6 +251,8 @@ struct v4l2_ctrl {
  * @ctrl:	The actual control information.
  * @helper:	Pointer to helper struct. Used internally in
  *		``prepare_ext_ctrls`` function at ``v4l2-ctrl.c``.
+ * @from_other_dev: If true, then @ctrl was defined in another
+ *		device than the &struct v4l2_ctrl_handler.
  *
  * Each control handler has a list of these refs. The list_head is used to
  * keep a sorted-by-control-ID list of all controls, while the next pointer
@@ -257,6 +263,7 @@ struct v4l2_ctrl_ref {
 	struct v4l2_ctrl_ref *next;
 	struct v4l2_ctrl *ctrl;
 	struct v4l2_ctrl_helper *helper;
+	bool from_other_dev;
 };
 
 /**
@@ -633,6 +640,8 @@ typedef bool (*v4l2_ctrl_filter)(const struct v4l2_ctrl *ctrl);
  * @add:	The control handler whose controls you want to add to
  *		the @hdl control handler.
  * @filter:	This function will filter which controls should be added.
+ * @from_other_dev: If true, then the controls in @add were defined in another
+ *		device than @hdl.
  *
  * Does nothing if either of the two handlers is a NULL pointer.
  * If @filter is NULL, then all controls are added. Otherwise only those
@@ -642,7 +651,8 @@ typedef bool (*v4l2_ctrl_filter)(const struct v4l2_ctrl *ctrl);
  */
 int v4l2_ctrl_add_handler(struct v4l2_ctrl_handler *hdl,
 			  struct v4l2_ctrl_handler *add,
-			  v4l2_ctrl_filter filter);
+			  v4l2_ctrl_filter filter,
+			  bool from_other_dev);
 
 /**
  * v4l2_ctrl_radio_filter() - Standard filter for radio controls.

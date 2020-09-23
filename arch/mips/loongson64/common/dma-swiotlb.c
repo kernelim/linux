@@ -4,7 +4,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/scatterlist.h>
 #include <linux/swiotlb.h>
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 
 #include <asm/bootinfo.h>
 #include <boot_param.h>

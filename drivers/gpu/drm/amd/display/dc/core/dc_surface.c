@@ -37,7 +37,7 @@
 /*******************************************************************************
  * Private functions
  ******************************************************************************/
-static void construct(struct dc_context *ctx, struct dc_plane_state *plane_state)
+static void dc_plane_construct(struct dc_context *ctx, struct dc_plane_state *plane_state)
 {
 	plane_state->ctx = ctx;
 
@@ -50,7 +50,6 @@ static void construct(struct dc_context *ctx, struct dc_plane_state *plane_state
 		plane_state->in_transfer_func->type = TF_TYPE_BYPASS;
 		plane_state->in_transfer_func->ctx = ctx;
 	}
-#if defined(CONFIG_DRM_AMD_DC_DCN2_0)
 	plane_state->in_shaper_func = dc_create_transfer_func();
 	if (plane_state->in_shaper_func != NULL) {
 		plane_state->in_shaper_func->type = TF_TYPE_BYPASS;
@@ -60,7 +59,6 @@ static void construct(struct dc_context *ctx, struct dc_plane_state *plane_state
 	plane_state->lut3d_func = dc_create_3dlut_func();
 	if (plane_state->lut3d_func != NULL) {
 		plane_state->lut3d_func->ctx = ctx;
-		plane_state->lut3d_func->initialized = false;
 	}
 	plane_state->blend_tf = dc_create_transfer_func();
 	if (plane_state->blend_tf != NULL) {
@@ -68,10 +66,9 @@ static void construct(struct dc_context *ctx, struct dc_plane_state *plane_state
 		plane_state->blend_tf->ctx = ctx;
 	}
 
-#endif
 }
 
-static void destruct(struct dc_plane_state *plane_state)
+static void dc_plane_destruct(struct dc_plane_state *plane_state)
 {
 	if (plane_state->gamma_correction != NULL) {
 		dc_gamma_release(&plane_state->gamma_correction);
@@ -81,7 +78,6 @@ static void destruct(struct dc_plane_state *plane_state)
 				plane_state->in_transfer_func);
 		plane_state->in_transfer_func = NULL;
 	}
-#if defined(CONFIG_DRM_AMD_DC_DCN2_0)
 	if (plane_state->in_shaper_func != NULL) {
 		dc_transfer_func_release(
 				plane_state->in_shaper_func);
@@ -98,7 +94,6 @@ static void destruct(struct dc_plane_state *plane_state)
 		plane_state->blend_tf = NULL;
 	}
 
-#endif
 }
 
 /*******************************************************************************
@@ -113,16 +108,14 @@ void enable_surface_flip_reporting(struct dc_plane_state *plane_state,
 
 struct dc_plane_state *dc_create_plane_state(struct dc *dc)
 {
-	struct dc *core_dc = dc;
-
 	struct dc_plane_state *plane_state = kvzalloc(sizeof(*plane_state),
-						      GFP_KERNEL);
+							GFP_KERNEL);
 
 	if (NULL == plane_state)
 		return NULL;
 
 	kref_init(&plane_state->refcount);
-	construct(core_dc->ctx, plane_state);
+	dc_plane_construct(dc->ctx, plane_state);
 
 	return plane_state;
 }
@@ -142,7 +135,7 @@ const struct dc_plane_status *dc_plane_get_status(
 		const struct dc_plane_state *plane_state)
 {
 	const struct dc_plane_status *plane_status;
-	struct dc  *core_dc;
+	struct dc  *dc;
 	int i;
 
 	if (!plane_state ||
@@ -153,15 +146,15 @@ const struct dc_plane_status *dc_plane_get_status(
 	}
 
 	plane_status = &plane_state->status;
-	core_dc = plane_state->ctx->dc;
+	dc = plane_state->ctx->dc;
 
-	if (core_dc->current_state == NULL)
+	if (dc->current_state == NULL)
 		return NULL;
 
 	/* Find the current plane state and set its pending bit to false */
-	for (i = 0; i < core_dc->res_pool->pipe_count; i++) {
+	for (i = 0; i < dc->res_pool->pipe_count; i++) {
 		struct pipe_ctx *pipe_ctx =
-				&core_dc->current_state->res_ctx.pipe_ctx[i];
+				&dc->current_state->res_ctx.pipe_ctx[i];
 
 		if (pipe_ctx->plane_state != plane_state)
 			continue;
@@ -171,14 +164,14 @@ const struct dc_plane_status *dc_plane_get_status(
 		break;
 	}
 
-	for (i = 0; i < core_dc->res_pool->pipe_count; i++) {
+	for (i = 0; i < dc->res_pool->pipe_count; i++) {
 		struct pipe_ctx *pipe_ctx =
-				&core_dc->current_state->res_ctx.pipe_ctx[i];
+				&dc->current_state->res_ctx.pipe_ctx[i];
 
 		if (pipe_ctx->plane_state != plane_state)
 			continue;
 
-		core_dc->hwss.update_pending_status(pipe_ctx);
+		dc->hwss.update_pending_status(pipe_ctx);
 	}
 
 	return plane_status;
@@ -192,7 +185,7 @@ void dc_plane_state_retain(struct dc_plane_state *plane_state)
 static void dc_plane_state_free(struct kref *kref)
 {
 	struct dc_plane_state *plane_state = container_of(kref, struct dc_plane_state, refcount);
-	destruct(plane_state);
+	dc_plane_destruct(plane_state);
 	kvfree(plane_state);
 }
 
@@ -263,7 +256,6 @@ alloc_fail:
 	return NULL;
 }
 
-#if defined(CONFIG_DRM_AMD_DC_DCN2_0)
 static void dc_3dlut_func_free(struct kref *kref)
 {
 	struct dc_3dlut *lut = container_of(kref, struct dc_3dlut, refcount);
@@ -279,7 +271,7 @@ struct dc_3dlut *dc_create_3dlut_func(void)
 		goto alloc_fail;
 
 	kref_init(&lut->refcount);
-	lut->initialized = false;
+	lut->state.raw = 0;
 
 	return lut;
 
@@ -297,6 +289,5 @@ void dc_3dlut_func_retain(struct dc_3dlut *lut)
 {
 	kref_get(&lut->refcount);
 }
-#endif
 
 

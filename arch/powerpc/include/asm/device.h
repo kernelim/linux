@@ -34,7 +34,7 @@ struct dev_archdata {
 	void			*iommu_domain;
 #endif
 #ifdef CONFIG_SWIOTLB
-	dma_addr_t		max_direct_dma_addr;
+	RH_KABI_DEPRECATE(dma_addr_t, max_direct_dma_addr)
 #endif
 #ifdef CONFIG_PPC64
 	struct pci_dn		*pci_data;
@@ -53,7 +53,5 @@ struct dev_archdata {
 struct pdev_archdata {
 	u64 dma_mask;
 };
-
-#define ARCH_HAS_DMA_GET_REQUIRED_MASK
 
 #endif /* _ASM_POWERPC_DEVICE_H */

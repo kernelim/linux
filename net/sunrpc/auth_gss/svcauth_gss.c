@@ -48,12 +48,11 @@
 #include <linux/sunrpc/svcauth.h>
 #include <linux/sunrpc/svcauth_gss.h>
 #include <linux/sunrpc/cache.h>
+
+#include <trace/events/rpcgss.h>
+
 #include "gss_rpc_upcall.h"
 
-
-#if IS_ENABLED(CONFIG_SUNRPC_DEBUG)
-# define RPCDBG_FACILITY	RPCDBG_AUTH
-#endif
 
 /* The rpcsec_init cache is used for mapping RPCSEC_GSS_{,CONT_}INIT requests
  * into replies.
@@ -199,7 +198,7 @@ static int rsi_parse(struct cache_detail *cd,
 	char *ep;
 	int len;
 	struct rsi rsii, *rsip = NULL;
-	time_t expiry;
+	time64_t expiry;
 	int status = -EINVAL;
 
 	memset(&rsii, 0, sizeof(rsii));
@@ -432,7 +431,7 @@ static int rsc_parse(struct cache_detail *cd,
 	int id;
 	int len, rv;
 	struct rsc rsci, *rscp = NULL;
-	time_t expiry;
+	time64_t expiry;
 	int status = -EINVAL;
 	struct gss_api_mech *gm = NULL;
 
@@ -473,12 +472,12 @@ static int rsc_parse(struct cache_detail *cd,
 		 * treatment so are checked for validity here.)
 		 */
 		/* uid */
-		rsci.cred.cr_uid = make_kuid(&init_user_ns, id);
+		rsci.cred.cr_uid = make_kuid(current_user_ns(), id);
 
 		/* gid */
 		if (get_int(&mesg, &id))
 			goto out;
-		rsci.cred.cr_gid = make_kgid(&init_user_ns, id);
+		rsci.cred.cr_gid = make_kgid(current_user_ns(), id);
 
 		/* number of additional gid's */
 		if (get_int(&mesg, &N))
@@ -496,7 +495,7 @@ static int rsc_parse(struct cache_detail *cd,
 			kgid_t kgid;
 			if (get_int(&mesg, &id))
 				goto out;
-			kgid = make_kgid(&init_user_ns, id);
+			kgid = make_kgid(current_user_ns(), id);
 			if (!gid_valid(kgid))
 				goto out;
 			rsci.cred.cr_group_info->gid[i] = kgid;
@@ -709,14 +708,12 @@ gss_verify_header(struct svc_rqst *rqstp, struct rsc *rsci,
 	}
 
 	if (gc->gc_seq > MAXSEQ) {
-		dprintk("RPC:       svcauth_gss: discarding request with "
-				"large sequence number %d\n", gc->gc_seq);
+		trace_rpcgss_svc_large_seqno(rqstp->rq_xid, gc->gc_seq);
 		*authp = rpcsec_gsserr_ctxproblem;
 		return SVC_DENIED;
 	}
 	if (!gss_check_seq_num(rsci, gc->gc_seq)) {
-		dprintk("RPC:       svcauth_gss: discarding request with "
-				"old sequence number %d\n", gc->gc_seq);
+		trace_rpcgss_svc_old_seqno(rqstp->rq_xid, gc->gc_seq);
 		return SVC_DROP;
 	}
 	return SVC_OK;
@@ -799,7 +796,7 @@ u32 svcauth_gss_flavor(struct auth_domain *dom)
 
 EXPORT_SYMBOL_GPL(svcauth_gss_flavor);
 
-int
+struct auth_domain *
 svcauth_gss_register_pseudoflavor(u32 pseudoflavor, char * name)
 {
 	struct gss_domain	*new;
@@ -816,21 +813,23 @@ svcauth_gss_register_pseudoflavor(u32 pseudoflavor, char * name)
 	new->h.flavour = &svcauthops_gss;
 	new->pseudoflavor = pseudoflavor;
 
-	stat = 0;
 	test = auth_domain_lookup(name, &new->h);
-	if (test != &new->h) { /* Duplicate registration */
+	if (test != &new->h) {
+		pr_warn("svc: duplicate registration of gss pseudo flavour %s.\n",
+			name);
+		stat = -EADDRINUSE;
 		auth_domain_put(test);
-		kfree(new->h.name);
-		goto out_free_dom;
+		goto out_free_name;
 	}
-	return 0;
+	return test;
 
+out_free_name:
+	kfree(new->h.name);
 out_free_dom:
 	kfree(new);
 out:
-	return stat;
+	return ERR_PTR(stat);
 }
-
 EXPORT_SYMBOL_GPL(svcauth_gss_register_pseudoflavor);
 
 static inline int
@@ -924,7 +923,7 @@ static int
 unwrap_priv_data(struct svc_rqst *rqstp, struct xdr_buf *buf, u32 seq, struct gss_ctx *ctx)
 {
 	u32 priv_len, maj_stat;
-	int pad, saved_len, remaining_len, offset;
+	int pad, remaining_len, offset;
 
 	clear_bit(RQ_SPLICE_OK, &rqstp->rq_flags);
 
@@ -944,12 +943,8 @@ unwrap_priv_data(struct svc_rqst *rqstp, struct xdr_buf *buf, u32 seq, struct gs
 	buf->len -= pad;
 	fix_priv_head(buf, pad);
 
-	/* Maybe it would be better to give gss_unwrap a length parameter: */
-	saved_len = buf->len;
-	buf->len = priv_len;
-	maj_stat = gss_unwrap(ctx, 0, buf);
+	maj_stat = gss_unwrap(ctx, 0, priv_len, buf);
 	pad = priv_len - buf->len;
-	buf->len = saved_len;
 	buf->len -= pad;
 	/* The upper layers assume the buffer is aligned on 4-byte boundaries.
 	 * In the krb5p case, at least, the data ends up offset, so we need to
@@ -1217,7 +1212,7 @@ static int gss_proxy_save_rsc(struct cache_detail *cd,
 	static atomic64_t ctxhctr;
 	long long ctxh;
 	struct gss_api_mech *gm = NULL;
-	time_t expiry;
+	time64_t expiry;
 	int status = -EINVAL;
 
 	memset(&rsci, 0, sizeof(rsci));
@@ -1241,9 +1236,9 @@ static int gss_proxy_save_rsc(struct cache_detail *cd,
 	if (!ud->found_creds) {
 		/* userspace seem buggy, we should always get at least a
 		 * mapping to nobody */
-		dprintk("RPC:       No creds found!\n");
 		goto out;
 	} else {
+		struct timespec64 boot;
 
 		/* steal creds */
 		rsci.cred = ud->creds;
@@ -1264,6 +1259,9 @@ static int gss_proxy_save_rsc(struct cache_detail *cd,
 						&expiry, GFP_KERNEL);
 		if (status)
 			goto out;
+
+		getboottime64(&boot);
+		expiry -= boot.tv_sec;
 	}
 
 	rsci.h.expiry_time = expiry;
@@ -1303,9 +1301,8 @@ static int svcauth_gss_proxy_init(struct svc_rqst *rqstp,
 	if (status)
 		goto out;
 
-	dprintk("RPC:       svcauth_gss: gss major status = %d "
-			"minor status = %d\n",
-			ud.major_status, ud.minor_status);
+	trace_rpcgss_svc_accept_upcall(rqstp->rq_xid, ud.major_status,
+				       ud.minor_status);
 
 	switch (ud.major_status) {
 	case GSS_S_CONTINUE_NEEDED:
@@ -1313,31 +1310,23 @@ static int svcauth_gss_proxy_init(struct svc_rqst *rqstp,
 		break;
 	case GSS_S_COMPLETE:
 		status = gss_proxy_save_rsc(sn->rsc_cache, &ud, &handle);
-		if (status) {
-			pr_info("%s: gss_proxy_save_rsc failed (%d)\n",
-				__func__, status);
+		if (status)
 			goto out;
-		}
 		cli_handle.data = (u8 *)&handle;
 		cli_handle.len = sizeof(handle);
 		break;
 	default:
-		ret = SVC_CLOSE;
 		goto out;
 	}
 
 	/* Got an answer to the upcall; use it: */
 	if (gss_write_init_verf(sn->rsc_cache, rqstp,
-				&cli_handle, &ud.major_status)) {
-		pr_info("%s: gss_write_init_verf failed\n", __func__);
+				&cli_handle, &ud.major_status))
 		goto out;
-	}
 	if (gss_write_resv(resv, PAGE_SIZE,
 			   &cli_handle, &ud.out_token,
-			   ud.major_status, ud.minor_status)) {
-		pr_info("%s: gss_write_resv failed\n", __func__);
+			   ud.major_status, ud.minor_status))
 		goto out;
-	}
 
 	ret = SVC_COMPLETE;
 out:
@@ -1488,8 +1477,7 @@ svcauth_gss_accept(struct svc_rqst *rqstp, __be32 *authp)
 	int		ret;
 	struct sunrpc_net *sn = net_generic(SVC_NET(rqstp), sunrpc_net_id);
 
-	dprintk("RPC:       svcauth_gss: argv->iov_len = %zd\n",
-			argv->iov_len);
+	trace_rpcgss_svc_accept(rqstp->rq_xid, argv->iov_len);
 
 	*authp = rpc_autherr_badcred;
 	if (!svcdata)
@@ -1697,7 +1685,8 @@ svcauth_gss_wrap_resp_integ(struct svc_rqst *rqstp)
 	resv->iov_len += XDR_QUADLEN(mic.len) << 2;
 	/* not strictly required: */
 	resbuf->len += XDR_QUADLEN(mic.len) << 2;
-	BUG_ON(resv->iov_len > PAGE_SIZE);
+	if (resv->iov_len > PAGE_SIZE)
+		goto out_err;
 out:
 	stat = 0;
 out_err:
@@ -1733,9 +1722,11 @@ svcauth_gss_wrap_resp_priv(struct svc_rqst *rqstp)
 	 * both the head and tail.
 	 */
 	if (resbuf->tail[0].iov_base) {
-		BUG_ON(resbuf->tail[0].iov_base >= resbuf->head[0].iov_base
-							+ PAGE_SIZE);
-		BUG_ON(resbuf->tail[0].iov_base < resbuf->head[0].iov_base);
+		if (resbuf->tail[0].iov_base >=
+			resbuf->head[0].iov_base + PAGE_SIZE)
+			return -EINVAL;
+		if (resbuf->tail[0].iov_base < resbuf->head[0].iov_base)
+			return -EINVAL;
 		if (resbuf->tail[0].iov_len + resbuf->head[0].iov_len
 				+ 2 * RPC_MAX_AUTH_SIZE > PAGE_SIZE)
 			return -ENOMEM;

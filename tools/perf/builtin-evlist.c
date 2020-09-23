@@ -5,13 +5,12 @@
  */
 #include "builtin.h"
 
-#include "util/util.h"
-
 #include <linux/list.h>
 
 #include "perf.h"
 #include "util/evlist.h"
 #include "util/evsel.h"
+#include "util/evsel_fprintf.h"
 #include "util/parse-events.h"
 #include <subcmd/parse-options.h>
 #include "util/session.h"
@@ -22,7 +21,7 @@
 static int __cmd_evlist(const char *file_name, struct perf_attr_details *details)
 {
 	struct perf_session *session;
-	struct perf_evsel *pos;
+	struct evsel *pos;
 	struct perf_data data = {
 		.path      = file_name,
 		.mode      = PERF_DATA_MODE_READ,
@@ -37,7 +36,7 @@ static int __cmd_evlist(const char *file_name, struct perf_attr_details *details
 	evlist__for_each_entry(session->evlist, pos) {
 		perf_evsel__fprintf(pos, details, stdout);
 
-		if (pos->attr.type == PERF_TYPE_TRACEPOINT)
+		if (pos->core.attr.type == PERF_TYPE_TRACEPOINT)
 			has_tracepoint = true;
 	}
 

@@ -27,18 +27,28 @@
 
 #include <net/netfilter/nf_conntrack_tuple.h>
 
+struct nf_ct_udp {
+	unsigned long	stream_ts;
+};
+
 /* per conntrack: protocol private data */
 union nf_conntrack_proto {
 	/* insert conntrack proto private data here */
 	struct nf_ct_dccp dccp;
 	struct ip_ct_sctp sctp;
 	struct ip_ct_tcp tcp;
+	struct nf_ct_udp udp;
 	struct nf_ct_gre gre;
 	unsigned int tmpl_padto;
 };
 
 union nf_conntrack_expect_proto {
 	/* insert expect proto private data here */
+};
+
+struct nf_conntrack_net {
+	unsigned int users4;
+	unsigned int users6;
 };
 
 #include <linux/types.h>
@@ -179,8 +189,6 @@ bool nf_ct_delete(struct nf_conn *ct, u32 pid, int report);
 bool nf_ct_get_tuplepr(const struct sk_buff *skb, unsigned int nhoff,
 		       u_int16_t l3num, struct net *net,
 		       struct nf_conntrack_tuple *tuple);
-bool nf_ct_invert_tuplepr(struct nf_conntrack_tuple *inverse,
-			  const struct nf_conntrack_tuple *orig);
 
 void __nf_ct_refresh_acct(struct nf_conn *ct, enum ip_conntrack_info ctinfo,
 			  const struct sk_buff *skb,

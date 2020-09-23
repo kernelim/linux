@@ -123,8 +123,8 @@ static struct gfs2_sbd *init_sbd(struct super_block *sb)
 
 	spin_lock_init(&sdp->sd_log_lock);
 	atomic_set(&sdp->sd_log_pinned, 0);
-	INIT_LIST_HEAD(&sdp->sd_log_le_revoke);
-	INIT_LIST_HEAD(&sdp->sd_log_le_ordered);
+	INIT_LIST_HEAD(&sdp->sd_log_revokes);
+	INIT_LIST_HEAD(&sdp->sd_log_ordered);
 	spin_lock_init(&sdp->sd_ordered_lock);
 
 	init_waitqueue_head(&sdp->sd_log_waitq);
@@ -551,6 +551,8 @@ static int gfs2_jindex_hold(struct gfs2_sbd *sdp, struct gfs2_holder *ji_gh)
 	mutex_lock(&sdp->sd_jindex_mutex);
 
 	for (;;) {
+		struct gfs2_inode *jip;
+
 		error = gfs2_glock_nq_init(dip->i_gl, LM_ST_SHARED, 0, ji_gh);
 		if (error)
 			break;
@@ -579,7 +581,7 @@ static int gfs2_jindex_hold(struct gfs2_sbd *sdp, struct gfs2_holder *ji_gh)
 
 		INIT_WORK(&jd->jd_work, gfs2_recover_func);
 		jd->jd_inode = gfs2_lookupi(sdp->sd_jindex, &name, 1);
-		if (!jd->jd_inode || IS_ERR(jd->jd_inode)) {
+		if (IS_ERR_OR_NULL(jd->jd_inode)) {
 			if (!jd->jd_inode)
 				error = -ENOENT;
 			else
@@ -590,54 +592,14 @@ static int gfs2_jindex_hold(struct gfs2_sbd *sdp, struct gfs2_holder *ji_gh)
 
 		spin_lock(&sdp->sd_jindex_spin);
 		jd->jd_jid = sdp->sd_journals++;
+		jip = GFS2_I(jd->jd_inode);
+		jd->jd_no_addr = jip->i_no_addr;
 		list_add_tail(&jd->jd_list, &sdp->sd_jindex_list);
 		spin_unlock(&sdp->sd_jindex_spin);
 	}
 
 	mutex_unlock(&sdp->sd_jindex_mutex);
 
-	return error;
-}
-
-/**
- * check_journal_clean - Make sure a journal is clean for a spectator mount
- * @sdp: The GFS2 superblock
- * @jd: The journal descriptor
- *
- * Returns: 0 if the journal is clean or locked, else an error
- */
-static int check_journal_clean(struct gfs2_sbd *sdp, struct gfs2_jdesc *jd)
-{
-	int error;
-	struct gfs2_holder j_gh;
-	struct gfs2_log_header_host head;
-	struct gfs2_inode *ip;
-
-	ip = GFS2_I(jd->jd_inode);
-	error = gfs2_glock_nq_init(ip->i_gl, LM_ST_SHARED, LM_FLAG_NOEXP |
-				   GL_EXACT | GL_NOCACHE, &j_gh);
-	if (error) {
-		fs_err(sdp, "Error locking journal for spectator mount.\n");
-		return -EPERM;
-	}
-	error = gfs2_jdesc_check(jd);
-	if (error) {
-		fs_err(sdp, "Error checking journal for spectator mount.\n");
-		goto out_unlock;
-	}
-	error = gfs2_find_jhead(jd, &head);
-	if (error) {
-		fs_err(sdp, "Error parsing journal for spectator mount.\n");
-		goto out_unlock;
-	}
-	if (!(head.lh_flags & GFS2_LOG_HEAD_UNMOUNT)) {
-		error = -EPERM;
-		fs_err(sdp, "jid=%u: Journal is dirty, so the first mounter "
-		       "must not be a spectator.\n", jd->jd_jid);
-	}
-
-out_unlock:
-	gfs2_glock_dq_uninit(&j_gh);
 	return error;
 }
 
@@ -693,7 +655,8 @@ static int init_journal(struct gfs2_sbd *sdp, int undo)
 
 		error = gfs2_glock_nq_num(sdp, sdp->sd_lockstruct.ls_jid,
 					  &gfs2_journal_glops,
-					  LM_ST_EXCLUSIVE, LM_FLAG_NOEXP,
+					  LM_ST_EXCLUSIVE,
+					  LM_FLAG_NOEXP | GL_NOCACHE,
 					  &sdp->sd_journal_gh);
 		if (error) {
 			fs_err(sdp, "can't acquire journal glock: %d\n", error);
@@ -701,6 +664,7 @@ static int init_journal(struct gfs2_sbd *sdp, int undo)
 		}
 
 		ip = GFS2_I(sdp->sd_jdesc->jd_inode);
+		sdp->sd_jinode_gl = ip->i_gl;
 		error = gfs2_glock_nq_init(ip->i_gl, LM_ST_SHARED,
 					   LM_FLAG_NOEXP | GL_EXACT | GL_NOCACHE,
 					   &sdp->sd_jinode_gh);
@@ -731,7 +695,7 @@ static int init_journal(struct gfs2_sbd *sdp, int undo)
 			struct gfs2_jdesc *jd = gfs2_jdesc_find(sdp, x);
 
 			if (sdp->sd_args.ar_spectator) {
-				error = check_journal_clean(sdp, jd);
+				error = check_journal_clean(sdp, jd, true);
 				if (error)
 					goto fail_jinode_gh;
 				continue;
@@ -761,10 +725,13 @@ static int init_journal(struct gfs2_sbd *sdp, int undo)
 	return 0;
 
 fail_jinode_gh:
-	if (!sdp->sd_args.ar_spectator)
+	/* A withdraw may have done dq/uninit so now we need to check it */
+	if (!sdp->sd_args.ar_spectator &&
+	    gfs2_holder_initialized(&sdp->sd_jinode_gh))
 		gfs2_glock_dq_uninit(&sdp->sd_jinode_gh);
 fail_journal_gh:
-	if (!sdp->sd_args.ar_spectator)
+	if (!sdp->sd_args.ar_spectator &&
+	    gfs2_holder_initialized(&sdp->sd_journal_gh))
 		gfs2_glock_dq_uninit(&sdp->sd_journal_gh);
 fail_jindex:
 	gfs2_jindex_free(sdp);
@@ -1007,8 +974,7 @@ hostdata_error:
 void gfs2_lm_unmount(struct gfs2_sbd *sdp)
 {
 	const struct lm_lockops *lm = sdp->sd_lockstruct.ls_ops;
-	if (likely(!test_bit(SDF_SHUTDOWN, &sdp->sd_flags)) &&
-	    lm->lm_unmount)
+	if (likely(!gfs2_withdrawn(sdp)) && lm->lm_unmount)
 		lm->lm_unmount(sdp);
 }
 

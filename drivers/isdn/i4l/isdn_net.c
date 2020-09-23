@@ -1129,7 +1129,7 @@ isdn_net_adjust_hdr(struct sk_buff *skb, struct net_device *dev)
 }
 
 
-static void isdn_net_tx_timeout(struct net_device *ndev)
+static void isdn_net_tx_timeout(struct net_device *ndev, unsigned int txqueue)
 {
 	isdn_net_local *lp = netdev_priv(ndev);
 

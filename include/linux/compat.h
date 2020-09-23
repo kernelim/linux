@@ -110,8 +110,6 @@ typedef struct compat_sigaltstack {
 typedef __compat_uid32_t	compat_uid_t;
 typedef __compat_gid32_t	compat_gid_t;
 
-typedef	compat_ulong_t		compat_aio_context_t;
-
 struct compat_sel_arg_struct;
 struct rusage;
 
@@ -454,8 +452,6 @@ struct compat_sysctl_args;
 struct compat_kexec_segment;
 struct compat_mq_attr;
 struct compat_msgbuf;
-
-extern void compat_exit_robust_list(struct task_struct *curr);
 
 #define BITS_PER_COMPAT_LONG    (8*sizeof(compat_long_t))
 

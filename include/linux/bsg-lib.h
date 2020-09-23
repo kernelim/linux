@@ -71,8 +71,9 @@ struct bsg_job {
 
 	void *dd_data;		/* Used for driver-specific storage */
 
-	RH_KABI_RESERVE(1)
-	RH_KABI_RESERVE(2)
+	/* BIDI support */
+	RH_KABI_USE(1, struct request *bidi_rq)
+	RH_KABI_USE(2, struct bio *bidi_bio)
 };
 
 void bsg_job_done(struct bsg_job *job, int result,

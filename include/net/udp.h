@@ -170,8 +170,8 @@ static inline void udp_csum_pull_header(struct sk_buff *skb)
 typedef struct sock *(*udp_lookup_t)(struct sk_buff *skb, __be16 sport,
 				     __be16 dport);
 
-struct sk_buff **udp_gro_receive(struct sk_buff **head, struct sk_buff *skb,
-				 struct udphdr *uh, udp_lookup_t lookup);
+struct sk_buff *udp_gro_receive(struct list_head *head, struct sk_buff *skb,
+				struct udphdr *uh, udp_lookup_t lookup);
 int udp_gro_complete(struct sk_buff *skb, int nhoff, udp_lookup_t lookup);
 
 struct sk_buff *__udp_gso_segment(struct sk_buff *gso_skb,
@@ -258,13 +258,13 @@ void skb_consume_udp(struct sock *sk, struct sk_buff *skb, int len);
 int __udp_enqueue_schedule_skb(struct sock *sk, struct sk_buff *skb);
 void udp_skb_destructor(struct sock *sk, struct sk_buff *skb);
 struct sk_buff *__skb_recv_udp(struct sock *sk, unsigned int flags,
-			       int noblock, int *peeked, int *off, int *err);
+			       int noblock, int *off, int *err);
 static inline struct sk_buff *skb_recv_udp(struct sock *sk, unsigned int flags,
 					   int noblock, int *err)
 {
-	int peeked, off = 0;
+	int off = 0;
 
-	return __skb_recv_udp(sk, flags, noblock, &peeked, &off, err);
+	return __skb_recv_udp(sk, flags, noblock, &off, err);
 }
 
 int udp_v4_early_demux(struct sk_buff *skb);
@@ -449,5 +449,10 @@ void udp_encap_enable(void);
 DECLARE_STATIC_KEY_FALSE(udpv6_encap_needed_key);
 void udpv6_encap_enable(void);
 #endif
+
+#ifdef CONFIG_BPF_STREAM_PARSER
+struct sk_psock;
+struct proto *udp_bpf_get_proto(struct sock *sk, struct sk_psock *psock);
+#endif /* BPF_STREAM_PARSER */
 
 #endif	/* _UDP_H */

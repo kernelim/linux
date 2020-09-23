@@ -1,12 +1,4 @@
-/* (C) 1999-2001 Paul `Rusty' Russell
- * (C) 2002-2004 Netfilter Core Team <coreteam@netfilter.org>
- * (C) 2005-2012 Patrick McHardy <kaber@trash.net>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- */
-
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/types.h>
 #include <linux/netfilter.h>
 #include <linux/slab.h>
@@ -24,7 +16,6 @@
 
 #include <net/netfilter/nf_conntrack.h>
 #include <net/netfilter/nf_conntrack_core.h>
-#include <net/netfilter/nf_conntrack_l3proto.h>
 #include <net/netfilter/nf_conntrack_l4proto.h>
 #include <net/netfilter/nf_conntrack_expect.h>
 #include <net/netfilter/nf_conntrack_helper.h>
@@ -33,15 +24,14 @@
 #include <net/netfilter/nf_conntrack_timestamp.h>
 #include <linux/rculist_nulls.h>
 
-MODULE_LICENSE("GPL");
+unsigned int nf_conntrack_net_id __read_mostly;
 
 #ifdef CONFIG_NF_CONNTRACK_PROCFS
 void
 print_tuple(struct seq_file *s, const struct nf_conntrack_tuple *tuple,
-            const struct nf_conntrack_l3proto *l3proto,
             const struct nf_conntrack_l4proto *l4proto)
 {
-	switch (l3proto->l3proto) {
+	switch (tuple->src.l3num) {
 	case NFPROTO_IPV4:
 		seq_printf(s, "src=%pI4 dst=%pI4 ",
 			   &tuple->src.u3.ip, &tuple->dst.u3.ip);
@@ -282,7 +272,6 @@ static int ct_seq_show(struct seq_file *s, void *v)
 {
 	struct nf_conntrack_tuple_hash *hash = v;
 	struct nf_conn *ct = nf_ct_tuplehash_to_ctrack(hash);
-	const struct nf_conntrack_l3proto *l3proto;
 	const struct nf_conntrack_l4proto *l4proto;
 	struct net *net = seq_file_net(s);
 	int ret = 0;
@@ -303,14 +292,12 @@ static int ct_seq_show(struct seq_file *s, void *v)
 	if (!net_eq(nf_ct_net(ct), net))
 		goto release;
 
-	l3proto = __nf_ct_l3proto_find(nf_ct_l3num(ct));
-	WARN_ON(!l3proto);
-	l4proto = __nf_ct_l4proto_find(nf_ct_l3num(ct), nf_ct_protonum(ct));
+	l4proto = __nf_ct_l4proto_find(nf_ct_protonum(ct));
 	WARN_ON(!l4proto);
 
 	ret = -ENOSPC;
 	seq_printf(s, "%-8s %u %-8s %u ",
-		   l3proto_name(l3proto->l3proto), nf_ct_l3num(ct),
+		   l3proto_name(nf_ct_l3num(ct)), nf_ct_l3num(ct),
 		   l4proto_name(l4proto->l4proto), nf_ct_protonum(ct));
 
 	if (!test_bit(IPS_OFFLOAD_BIT, &ct->status))
@@ -320,7 +307,7 @@ static int ct_seq_show(struct seq_file *s, void *v)
 		l4proto->print_conntrack(s, ct);
 
 	print_tuple(s, &ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple,
-		    l3proto, l4proto);
+		    l4proto);
 
 	ct_show_zone(s, ct, NF_CT_ZONE_DIR_ORIG);
 
@@ -333,15 +320,16 @@ static int ct_seq_show(struct seq_file *s, void *v)
 	if (!(test_bit(IPS_SEEN_REPLY_BIT, &ct->status)))
 		seq_puts(s, "[UNREPLIED] ");
 
-	print_tuple(s, &ct->tuplehash[IP_CT_DIR_REPLY].tuple,
-		    l3proto, l4proto);
+	print_tuple(s, &ct->tuplehash[IP_CT_DIR_REPLY].tuple, l4proto);
 
 	ct_show_zone(s, ct, NF_CT_ZONE_DIR_REPL);
 
 	if (seq_print_acct(s, ct, IP_CT_DIR_REPLY))
 		goto release;
 
-	if (test_bit(IPS_OFFLOAD_BIT, &ct->status))
+	if (test_bit(IPS_HW_OFFLOAD_BIT, &ct->status))
+		seq_puts(s, "[HW_OFFLOAD] ");
+	else if (test_bit(IPS_OFFLOAD_BIT, &ct->status))
 		seq_puts(s, "[OFFLOAD] ");
 	else if (test_bit(IPS_ASSURED_BIT, &ct->status))
 		seq_puts(s, "[ASSURED] ");
@@ -419,18 +407,18 @@ static int ct_cpu_seq_show(struct seq_file *seq, void *v)
 	const struct ip_conntrack_stat *st = v;
 
 	if (v == SEQ_START_TOKEN) {
-		seq_puts(seq, "entries  clashres found new invalid ignore delete delete_list insert insert_failed drop early_drop icmp_error  expect_new expect_create expect_delete search_restart\n");
+		seq_puts(seq, "entries  searched found new invalid ignore delete delete_list insert insert_failed drop early_drop icmp_error  expect_new expect_create expect_delete search_restart\n");
 		return 0;
 	}
 
 	seq_printf(seq, "%08x  %08x %08x %08x %08x %08x %08x %08x "
 			"%08x %08x %08x %08x %08x  %08x %08x %08x %08x\n",
 		   nr_conntracks,
-		   st->clash_resolve,
+		   0,
 		   st->found,
 		   0,
 		   st->invalid,
-		   0,
+		   st->ignore,
 		   0,
 		   0,
 		   st->insert,
@@ -680,6 +668,8 @@ static void nf_conntrack_pernet_exit(struct list_head *net_exit_list)
 static struct pernet_operations nf_conntrack_net_ops = {
 	.init		= nf_conntrack_pernet_init,
 	.exit_batch	= nf_conntrack_pernet_exit,
+	.id		= &nf_conntrack_net_id,
+	.size = sizeof(struct nf_conntrack_net),
 };
 
 static int __init nf_conntrack_standalone_init(void)
@@ -732,10 +722,3 @@ static void __exit nf_conntrack_standalone_fini(void)
 
 module_init(nf_conntrack_standalone_init);
 module_exit(nf_conntrack_standalone_fini);
-
-/* Some modules need us, but don't depend directly on any symbol.
-   They should call this. */
-void need_conntrack(void)
-{
-}
-EXPORT_SYMBOL_GPL(need_conntrack);

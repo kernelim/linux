@@ -24,7 +24,7 @@
 #include <sys/ioctl.h>
 #include <sys/syscall.h>
 #include "bpf_util.h"
-#include "libbpf.h"
+#include <bpf/libbpf.h>
 #include <sys/resource.h>
 #include <libgen.h>
 
@@ -664,6 +664,9 @@ int main(int ac, char **argv)
 			return 1;
 		}
 	}
+
+	if (!(flags & XDP_FLAGS_SKB_MODE))
+		flags |= XDP_FLAGS_DRV_MODE;
 
 	if (optind == ac) {
 		usage(basename(argv[0]));

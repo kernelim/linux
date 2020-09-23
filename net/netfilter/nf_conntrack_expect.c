@@ -28,8 +28,10 @@
 
 #include <net/netfilter/nf_conntrack.h>
 #include <net/netfilter/nf_conntrack_core.h>
+#include <net/netfilter/nf_conntrack_ecache.h>
 #include <net/netfilter/nf_conntrack_expect.h>
 #include <net/netfilter/nf_conntrack_helper.h>
+#include <net/netfilter/nf_conntrack_l4proto.h>
 #include <net/netfilter/nf_conntrack_tuple.h>
 #include <net/netfilter/nf_conntrack_zones.h>
 
@@ -610,9 +612,7 @@ static int exp_seq_show(struct seq_file *s, void *v)
 		   expect->tuple.src.l3num,
 		   expect->tuple.dst.protonum);
 	print_tuple(s, &expect->tuple,
-		    __nf_ct_l3proto_find(expect->tuple.src.l3num),
-		    __nf_ct_l4proto_find(expect->tuple.src.l3num,
-				       expect->tuple.dst.protonum));
+		    __nf_ct_l4proto_find(expect->tuple.dst.protonum));
 
 	if (expect->flags & NF_CT_EXPECT_PERMANENT) {
 		seq_puts(s, "PERMANENT");

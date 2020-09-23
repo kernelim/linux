@@ -20,13 +20,6 @@
 #ifdef RH_DRM_BACKPORT
 #ifdef CONFIG_MMU_NOTIFIER
 
-struct mmu_notifier_range {
-	struct mm_struct *mm;
-	unsigned long start;
-	unsigned long end;
-	bool blockable;
-};
-
 struct __rh_drm_mmu_notifier;
 struct __rh_drm_mmu_notifier_ops {
 	/*
@@ -183,10 +176,25 @@ struct __rh_drm_mmu_notifier_ops {
 	void (*invalidate_range)(struct __rh_drm_mmu_notifier *mn,
 				 struct mm_struct *mm,
 				 unsigned long start, unsigned long end);
+
+	/*
+	 * These callbacks are used with the get/put interface to manage the
+	 * lifetime of the mmu_notifier memory. alloc_notifier() returns a new
+	 * notifier for use with the mm.
+	 *
+	 * free_notifier() is only called after the mmu_notifier has been
+	 * fully put, calls to any ops callback are prevented and no ops
+	 * callbacks are currently running. It is called from a SRCU callback
+	 * and cannot sleep.
+	 */
+	struct mmu_notifier *(*alloc_notifier)(struct mm_struct *mm);
+	void (*free_notifier)(struct __rh_drm_mmu_notifier *subscription);
+
 };
 
 struct __rh_drm_mmu_notifier {
 	struct mmu_notifier base;
+	struct mmu_notifier_rh _rh;
 	struct mmu_notifier_ops base_ops;
 	const struct __rh_drm_mmu_notifier_ops *ops;
 };
@@ -206,6 +214,8 @@ __rh_drm_mmu_notifier_unregister(struct __rh_drm_mmu_notifier *mn,
 	orig_func(&mn->base, mm);
 }
 
+extern void __rh_drm_mmu_notifier_put(struct __rh_drm_mmu_notifier *mn);
+
 static inline bool
 mmu_notifier_range_blockable(const struct mmu_notifier_range *range)
 {
@@ -224,6 +234,8 @@ mmu_notifier_range_blockable(const struct mmu_notifier_range *range)
 #define mmu_notifier_unregister_no_release(mn, mm) \
 	__rh_drm_mmu_notifier_unregister(mn, mm, \
 					 mmu_notifier_unregister_no_release)
+#define mmu_notifier_put(mn) \
+	__rh_drm_mmu_notifier_put(mn)
 
 #endif /* CONFIG_MMU_NOTIFIER */
 #endif /* RH_DRM_BACKPORT */

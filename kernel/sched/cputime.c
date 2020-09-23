@@ -476,7 +476,7 @@ void account_process_tick(struct task_struct *p, int user_tick)
 	u64 cputime, steal;
 	struct rq *rq = this_rq();
 
-	if (vtime_accounting_cpu_enabled())
+	if (vtime_accounting_enabled_this_cpu())
 		return;
 
 	if (sched_clock_irqtime) {
@@ -521,50 +521,6 @@ void account_idle_ticks(unsigned long ticks)
 
 	cputime -= steal;
 	account_idle_time(cputime);
-}
-
-/*
- * Perform (stime * rtime) / total, but avoid multiplication overflow by
- * loosing precision when the numbers are big.
- */
-static u64 scale_stime(u64 stime, u64 rtime, u64 total)
-{
-	u64 scaled;
-
-	for (;;) {
-		/* Make sure "rtime" is the bigger of stime/rtime */
-		if (stime > rtime)
-			swap(rtime, stime);
-
-		/* Make sure 'total' fits in 32 bits */
-		if (total >> 32)
-			goto drop_precision;
-
-		/* Does rtime (and thus stime) fit in 32 bits? */
-		if (!(rtime >> 32))
-			break;
-
-		/* Can we just balance rtime/stime rather than dropping bits? */
-		if (stime >> 31)
-			goto drop_precision;
-
-		/* We can grow stime and shrink rtime and try to make them both fit */
-		stime <<= 1;
-		rtime >>= 1;
-		continue;
-
-drop_precision:
-		/* We drop from rtime, it has more bits than stime */
-		rtime >>= 1;
-		total >>= 1;
-	}
-
-	/*
-	 * Make sure gcc understands that this is a 32x32->64 multiply,
-	 * followed by a 64/32->64 divide.
-	 */
-	scaled = div_u64((u64) (u32) stime * (u64) (u32) rtime, (u32)total);
-	return scaled;
 }
 
 /*
@@ -626,7 +582,7 @@ void cputime_adjust(struct task_cputime *curr, struct prev_cputime *prev,
 		goto update;
 	}
 
-	stime = scale_stime(stime, rtime, stime + utime);
+	stime = mul_u64_u64_div_u64(stime, rtime, stime + utime);
 
 update:
 	/*
@@ -739,7 +695,7 @@ void vtime_account_system(struct task_struct *tsk)
 
 	write_seqcount_begin(&vtime->seqcount);
 	/* We might have scheduled out from guest path */
-	if (current->flags & PF_VCPU)
+	if (tsk->flags & PF_VCPU)
 		vtime_account_guest(tsk, vtime);
 	else
 		__vtime_account_system(tsk, vtime);
@@ -782,7 +738,7 @@ void vtime_guest_enter(struct task_struct *tsk)
 	 */
 	write_seqcount_begin(&vtime->seqcount);
 	__vtime_account_system(tsk, vtime);
-	current->flags |= PF_VCPU;
+	tsk->flags |= PF_VCPU;
 	write_seqcount_end(&vtime->seqcount);
 }
 EXPORT_SYMBOL_GPL(vtime_guest_enter);
@@ -793,7 +749,7 @@ void vtime_guest_exit(struct task_struct *tsk)
 
 	write_seqcount_begin(&vtime->seqcount);
 	vtime_account_guest(tsk, vtime);
-	current->flags &= ~PF_VCPU;
+	tsk->flags &= ~PF_VCPU;
 	write_seqcount_end(&vtime->seqcount);
 }
 EXPORT_SYMBOL_GPL(vtime_guest_exit);
@@ -809,6 +765,7 @@ void arch_vtime_task_switch(struct task_struct *prev)
 
 	write_seqcount_begin(&vtime->seqcount);
 	vtime->state = VTIME_INACTIVE;
+	prev->task_struct_rh->vtime_cpu = -1;
 	write_seqcount_end(&vtime->seqcount);
 
 	vtime = &current->vtime;
@@ -816,6 +773,7 @@ void arch_vtime_task_switch(struct task_struct *prev)
 	write_seqcount_begin(&vtime->seqcount);
 	vtime->state = VTIME_SYS;
 	vtime->starttime = sched_clock();
+	prev->task_struct_rh->vtime_cpu = smp_processor_id();
 	write_seqcount_end(&vtime->seqcount);
 }
 
@@ -828,6 +786,7 @@ void vtime_init_idle(struct task_struct *t, int cpu)
 	write_seqcount_begin(&vtime->seqcount);
 	vtime->state = VTIME_SYS;
 	vtime->starttime = sched_clock();
+	t->task_struct_rh->vtime_cpu = cpu;
 	write_seqcount_end(&vtime->seqcount);
 	local_irq_restore(flags);
 }
@@ -892,4 +851,189 @@ void task_cputime(struct task_struct *t, u64 *utime, u64 *stime)
 			*stime += vtime->stime + delta;
 	} while (read_seqcount_retry(&vtime->seqcount, seq));
 }
+
+static int vtime_state_fetch(struct vtime *vtime, int cpu, unsigned int vtime_cpu)
+{
+	int state = READ_ONCE(vtime->state);
+
+	/*
+	 * We raced against a context switch, fetch the
+	 * kcpustat task again.
+	 */
+	if (vtime_cpu != cpu && vtime_cpu != -1)
+		return -EAGAIN;
+
+	/*
+	 * Two possible things here:
+	 * 1) We are seeing the scheduling out task (prev) or any past one.
+	 * 2) We are seeing the scheduling in task (next) but it hasn't
+	 *    passed though vtime_task_switch() yet so the pending
+	 *    cputime of the prev task may not be flushed yet.
+	 *
+	 * Case 1) is ok but 2) is not. So wait for a safe VTIME state.
+	 */
+	if (state == VTIME_INACTIVE)
+		return -EAGAIN;
+
+	return state;
+}
+
+static int kcpustat_field_vtime(u64 *cpustat,
+				struct vtime *vtime,
+				enum cpu_usage_stat usage,
+				int cpu, u64 *val,
+				unsigned int vtime_cpu)
+{
+	unsigned int seq;
+
+	do {
+		int state;
+
+		seq = read_seqcount_begin(&vtime->seqcount);
+
+		state = vtime_state_fetch(vtime, cpu, vtime_cpu);
+		if (state < 0)
+			return state;
+
+		*val = cpustat[usage];
+
+		if (state == VTIME_SYS)
+			*val += vtime->stime + vtime_delta(vtime);
+
+	} while (read_seqcount_retry(&vtime->seqcount, seq));
+
+	return 0;
+}
+
+u64 kcpustat_field(struct kernel_cpustat *kcpustat,
+		   enum cpu_usage_stat usage, int cpu)
+{
+	u64 *cpustat = kcpustat->cpustat;
+	struct rq *rq;
+	u64 val;
+	int err;
+
+	if (!vtime_accounting_enabled_cpu(cpu))
+		return cpustat[usage];
+
+	/* Only support sys vtime for now */
+	if (usage != CPUTIME_SYSTEM)
+		return cpustat[usage];
+
+	rq = cpu_rq(cpu);
+
+	for (;;) {
+		struct task_struct *curr;
+		struct vtime *vtime;
+
+		rcu_read_lock();
+		curr = rcu_dereference(rq->curr);
+		if (WARN_ON_ONCE(!curr)) {
+			rcu_read_unlock();
+			return cpustat[usage];
+		}
+
+		vtime = &curr->vtime;
+		err = kcpustat_field_vtime(cpustat, vtime, usage, cpu, &val,
+					   curr->task_struct_rh->vtime_cpu);
+		rcu_read_unlock();
+
+		if (!err)
+			return val;
+
+		cpu_relax();
+	}
+}
+EXPORT_SYMBOL_GPL(kcpustat_field);
+
+static int kcpustat_cpu_fetch_vtime(struct kernel_cpustat *dst,
+				    const struct kernel_cpustat *src,
+				    struct task_struct *tsk, int cpu)
+{
+	struct vtime *vtime = &tsk->vtime;
+	unsigned int seq;
+
+	do {
+		u64 *cpustat;
+		u64 delta;
+		int state;
+
+		seq = read_seqcount_begin(&vtime->seqcount);
+
+		state = vtime_state_fetch(vtime, cpu,
+					  tsk->task_struct_rh->vtime_cpu);
+		if (state < 0)
+			return state;
+
+		*dst = *src;
+		cpustat = dst->cpustat;
+
+		/* Task is sleeping, dead or idle, nothing to add */
+		if (state < VTIME_SYS)
+			continue;
+
+		delta = vtime_delta(vtime);
+
+		/*
+		 * Task runs either in user (including guest) or kernel space,
+		 * add pending nohz time to the right place.
+		 */
+		if (state == VTIME_SYS) {
+			cpustat[CPUTIME_SYSTEM] += vtime->stime + delta;
+		} else if (state == VTIME_USER) {
+			if (task_nice(tsk) > 0)
+				cpustat[CPUTIME_NICE] += vtime->utime + delta;
+			else
+				cpustat[CPUTIME_USER] += vtime->utime + delta;
+		} /* RHEL has not implemented VTIME_GUEST
+		     else {
+			WARN_ON_ONCE(state != VTIME_GUEST);
+			if (task_nice(tsk) > 0) {
+				cpustat[CPUTIME_GUEST_NICE] += vtime->gtime + delta;
+				cpustat[CPUTIME_NICE] += vtime->gtime + delta;
+			} else {
+				cpustat[CPUTIME_GUEST] += vtime->gtime + delta;
+				cpustat[CPUTIME_USER] += vtime->gtime + delta;
+			}
+		} */
+	} while (read_seqcount_retry(&vtime->seqcount, seq));
+
+	return 0;
+}
+
+void kcpustat_cpu_fetch(struct kernel_cpustat *dst, int cpu)
+{
+	const struct kernel_cpustat *src = &kcpustat_cpu(cpu);
+	struct rq *rq;
+	int err;
+
+	if (!vtime_accounting_enabled_cpu(cpu)) {
+		*dst = *src;
+		return;
+	}
+
+	rq = cpu_rq(cpu);
+
+	for (;;) {
+		struct task_struct *curr;
+
+		rcu_read_lock();
+		curr = rcu_dereference(rq->curr);
+		if (WARN_ON_ONCE(!curr)) {
+			rcu_read_unlock();
+			*dst = *src;
+			return;
+		}
+
+		err = kcpustat_cpu_fetch_vtime(dst, src, curr, cpu);
+		rcu_read_unlock();
+
+		if (!err)
+			return;
+
+		cpu_relax();
+	}
+}
+EXPORT_SYMBOL_GPL(kcpustat_cpu_fetch);
+
 #endif /* CONFIG_VIRT_CPU_ACCOUNTING_GEN */

@@ -390,6 +390,7 @@ fib_carrier_unicast_test()
 
 	set -e
 	$IP link set dev dummy0 carrier off
+	sleep 1
 	set +e
 
 	echo "    Carrier down"
@@ -722,14 +723,14 @@ route_setup()
 	ip -netns ns2 li add dummy1 type dummy
 	ip -netns ns2 li set dummy1 up
 
-	$IP -6 addr add 2001:db8:101::1/64 dev veth1
-	$IP -6 addr add 2001:db8:103::1/64 dev veth3
+	$IP -6 addr add 2001:db8:101::1/64 dev veth1 nodad
+	$IP -6 addr add 2001:db8:103::1/64 dev veth3 nodad
 	$IP addr add 172.16.101.1/24 dev veth1
 	$IP addr add 172.16.103.1/24 dev veth3
 
-	ip -netns ns2 -6 addr add 2001:db8:101::2/64 dev veth2
-	ip -netns ns2 -6 addr add 2001:db8:103::2/64 dev veth4
-	ip -netns ns2 -6 addr add 2001:db8:104::1/64 dev dummy1
+	ip -netns ns2 -6 addr add 2001:db8:101::2/64 dev veth2 nodad
+	ip -netns ns2 -6 addr add 2001:db8:103::2/64 dev veth4 nodad
+	ip -netns ns2 -6 addr add 2001:db8:104::1/64 dev dummy1 nodad
 
 	ip -netns ns2 addr add 172.16.101.2/24 dev veth2
 	ip -netns ns2 addr add 172.16.103.2/24 dev veth4
@@ -859,6 +860,12 @@ ipv6_rt_replace_mpath()
 	run_cmd "$IP -6 ro replace 2001:db8:104::/64 nexthop via 2001:db8:101::3"
 	check_route6 "2001:db8:104::/64 via 2001:db8:101::3 dev veth1 metric 1024"
 	log_test $? 0 "Multipath with single path via multipath attribute"
+
+	# multipath with dev-only
+	add_initial_route6 "nexthop via 2001:db8:101::2 nexthop via 2001:db8:103::2"
+	run_cmd "$IP -6 ro replace 2001:db8:104::/64 dev veth1"
+	check_route6 "2001:db8:104::/64 dev veth1 metric 1024"
+	log_test $? 0 "Multipath with dev-only"
 
 	# route replace fails - invalid nexthop 1
 	add_initial_route6 "nexthop via 2001:db8:101::2 nexthop via 2001:db8:103::2"
@@ -1054,6 +1061,9 @@ ipv6_route_metrics_test()
 	$IP -6 ro add 2001:db8:104::/64 via 2001:db8:101::2 mtu 1300
 	run_cmd "ip netns exec ns1 ${ping6} -w1 -c1 -s 1500 2001:db8:104::1"
 	log_test $? 0 "Using route with mtu metric"
+
+	run_cmd "$IP -6 ro add 2001:db8:114::/64 via  2001:db8:101::2  congctl lock foo"
+	log_test $? 2 "Invalid metric (fails metric_convert)"
 
 	route_cleanup
 }
@@ -1440,6 +1450,9 @@ ipv4_route_metrics_test()
 	$IP ro add 172.16.104.0/24 via 172.16.101.2 mtu 1300
 	run_cmd "ip netns exec ns1 ping -w1 -c1 -s 1500 172.16.104.1"
 	log_test $? 0 "Using route with mtu metric"
+
+	run_cmd "$IP ro add 172.16.111.0/24 via 172.16.101.2 congctl lock foo"
+	log_test $? 2 "Invalid metric (fails metric_convert)"
 
 	route_cleanup
 }

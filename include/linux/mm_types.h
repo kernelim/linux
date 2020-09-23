@@ -157,7 +157,8 @@ struct page {
 		struct {	/* ZONE_DEVICE pages */
 			/** @pgmap: Points to the hosting device page map. */
 			struct dev_pagemap *pgmap;
-			unsigned long hmm_data;
+			RH_KABI_REPLACE(unsigned long hmm_data,
+					void *zone_device_data)
 			unsigned long _zd_pad_1;	/* uses mapping */
 		};
 
@@ -210,6 +211,11 @@ struct page {
 	int _last_cpupid;
 #endif
 } _struct_page_alignment;
+
+static inline atomic_t *compound_mapcount_ptr(struct page *page)
+{
+	return &page[1].compound_mapcount;
+}
 
 #define PAGE_FRAG_CACHE_MAX_SIZE	__ALIGN_MASK(32768, ~PAGE_MASK)
 #define PAGE_FRAG_CACHE_MAX_ORDER	get_order(PAGE_FRAG_CACHE_MAX_SIZE)
@@ -292,7 +298,12 @@ struct vm_area_struct {
 	/* Second cache line starts here. */
 
 	struct mm_struct *vm_mm;	/* The address space we belong to. */
-	pgprot_t vm_page_prot;		/* Access permissions of this VMA. */
+
+	/*
+	 * Access permissions of this VMA.
+	 * See vmf_insert_mixed_prot() for discussion.
+	 */
+	pgprot_t vm_page_prot;
 	unsigned long vm_flags;		/* Flags, see mm.h. */
 
 	/*
@@ -416,7 +427,7 @@ struct mm_struct {
 		/*
 		 * RHEL KABI NOTE: due to changes for BZ#1620349 mm_types.h is
 		 * being exposed to the vdso32 object build, thus we need the
-		 * _UNSAFE variant of RH_KABI_REPLACE in order to placate the
+		 * _BROKEN variant of RH_KABI_REPLACE in order to placate the
 		 * static assertion check embedded into the safe macro.
 		 * Although unsigned long and atomic64_t do not have a type size
 		 * match in the vdso32 object build case, it is, actually, safe
@@ -426,7 +437,7 @@ struct mm_struct {
 		 * struct mm_struct is required, the type sizes and aligment are
 		 * a perfect match, as expected.
 		 */
-		RH_KABI_REPLACE_UNSAFE(
+		RH_KABI_BROKEN_REPLACE(
 		unsigned long pinned_vm,
 		atomic64_t    pinned_vm
 		)			   /* Refcount permanently increased */
@@ -529,7 +540,21 @@ struct mm_struct {
 	RH_KABI_RESERVE(5)
 	RH_KABI_RESERVE(6)
 	RH_KABI_RESERVE(7)
+
+#if defined(CONFIG_PPC64) && defined (CONFIG_PPC_VAS)
+	/*
+	 * In upstream vas_windows is defined in arch specific mm_context struct
+	 * (arch/powerpc/include/asm/mmu.h).
+	 * To fix kABI breakage, adding here but will be defined only for powerpc.
+	 * Though used only on powerNV and P9 (or later) right now, will be needed
+	 * in future when we add NX-GZIP support on powerVM.
+	 * Leaving first 7 reserves for arch independent elements if needed in future
+	 * so that will be placed in same location for all archs.
+	 */
+	RH_KABI_USE(8, atomic_t vas_windows)
+#else
 	RH_KABI_RESERVE(8)
+#endif
 
 	/*
 	 * The mm_cpumask needs to be at the end of mm_struct, because it
@@ -652,10 +677,7 @@ struct vm_fault;
  *
  * Page fault handlers return a bitmask of %VM_FAULT values.
  */
-RH_KABI_REPLACE_UNSAFE(
-	typedef int vm_fault_t,
-	typedef __bitwise unsigned int vm_fault_t
-)
+typedef RH_KABI_ADD_MODIFIER(__bitwise unsigned) int vm_fault_t;
 
 /**
  * enum vm_fault_reason - Page fault handlers return a bitmask of

@@ -17,7 +17,7 @@
  * Refer to include/linux/hmm.h for information about heterogeneous memory
  * management or HMM for short.
  */
-#include <linux/mm.h>
+#include <linux/pagewalk.h>
 #include <linux/hmm.h>
 #include <linux/init.h>
 #include <linux/rmap.h>
@@ -558,6 +558,9 @@ static int hmm_vma_handle_pte(struct mm_walk *walk, unsigned long addr,
 		swp_entry_t entry = pte_to_swp_entry(pte);
 
 		if (!non_swap_entry(entry)) {
+			cpu_flags = pte_to_hmm_pfn_flags(range, pte);
+			hmm_pte_need_fault(hmm_vma_walk, orig_pfn, cpu_flags,
+					   &fault, &write_fault);
 			if (fault || write_fault)
 				goto fault;
 			return 0;
@@ -953,6 +956,13 @@ void hmm_range_unregister(struct hmm_range *range)
 }
 EXPORT_SYMBOL(hmm_range_unregister);
 
+static const struct mm_walk_ops hmm_walk_ops = {
+	.pud_entry	= hmm_vma_walk_pud,
+	.pmd_entry	= hmm_vma_walk_pmd,
+	.pte_hole	= hmm_vma_walk_hole,
+	.hugetlb_entry	= hmm_vma_walk_hugetlb_entry,
+};
+
 /*
  * hmm_range_snapshot() - snapshot CPU page table for a range
  * @range: range
@@ -973,7 +983,6 @@ long hmm_range_snapshot(struct hmm_range *range)
 	struct hmm_vma_walk hmm_vma_walk;
 	struct hmm *hmm = range->hmm;
 	struct vm_area_struct *vma;
-	struct mm_walk mm_walk;
 
 	lockdep_assert_held(&hmm->mm->mmap_sem);
 	do {
@@ -1011,20 +1020,10 @@ long hmm_range_snapshot(struct hmm_range *range)
 		hmm_vma_walk.last = start;
 		hmm_vma_walk.fault = false;
 		hmm_vma_walk.range = range;
-		mm_walk.private = &hmm_vma_walk;
 		end = min(range->end, vma->vm_end);
 
-		mm_walk.vma = vma;
-		mm_walk.mm = vma->vm_mm;
-		mm_walk.pte_entry = NULL;
-		mm_walk.test_walk = NULL;
-		mm_walk.hugetlb_entry = NULL;
-		mm_walk.pud_entry = hmm_vma_walk_pud;
-		mm_walk.pmd_entry = hmm_vma_walk_pmd;
-		mm_walk.pte_hole = hmm_vma_walk_hole;
-		mm_walk.hugetlb_entry = hmm_vma_walk_hugetlb_entry;
-
-		walk_page_range(start, end, &mm_walk);
+		walk_page_range(vma->vm_mm, 0, end, &hmm_walk_ops,
+				&hmm_vma_walk);
 		start = end;
 	} while (start < range->end);
 
@@ -1067,7 +1066,6 @@ long hmm_range_fault(struct hmm_range *range, bool block)
 	struct hmm_vma_walk hmm_vma_walk;
 	struct hmm *hmm = range->hmm;
 	struct vm_area_struct *vma;
-	struct mm_walk mm_walk;
 	int ret;
 
 	lockdep_assert_held(&hmm->mm->mmap_sem);
@@ -1108,21 +1106,14 @@ long hmm_range_fault(struct hmm_range *range, bool block)
 		hmm_vma_walk.fault = true;
 		hmm_vma_walk.block = block;
 		hmm_vma_walk.range = range;
-		mm_walk.private = &hmm_vma_walk;
 		end = min(range->end, vma->vm_end);
 
-		mm_walk.vma = vma;
-		mm_walk.mm = vma->vm_mm;
-		mm_walk.pte_entry = NULL;
-		mm_walk.test_walk = NULL;
-		mm_walk.hugetlb_entry = NULL;
-		mm_walk.pud_entry = hmm_vma_walk_pud;
-		mm_walk.pmd_entry = hmm_vma_walk_pmd;
-		mm_walk.pte_hole = hmm_vma_walk_hole;
-		mm_walk.hugetlb_entry = hmm_vma_walk_hugetlb_entry;
+		walk_page_range(vma->vm_mm, start, end, &hmm_walk_ops,
+				&hmm_vma_walk);
 
 		do {
-			ret = walk_page_range(start, end, &mm_walk);
+			ret = walk_page_range(vma->vm_mm, start, end,
+					&hmm_walk_ops, &hmm_vma_walk);
 			start = hmm_vma_walk.last;
 
 			/* Keep trying while the range is valid. */
@@ -1294,127 +1285,3 @@ long hmm_range_dma_unmap(struct hmm_range *range,
 }
 EXPORT_SYMBOL(hmm_range_dma_unmap);
 #endif /* IS_ENABLED(CONFIG_HMM_MIRROR) */
-
-
-#if IS_ENABLED(CONFIG_DEVICE_PRIVATE)
-struct page *hmm_vma_alloc_locked_page(struct vm_area_struct *vma,
-				       unsigned long addr)
-{
-	struct page *page;
-
-	page = alloc_page_vma(GFP_HIGHUSER, vma, addr);
-	if (!page)
-		return NULL;
-	lock_page(page);
-	return page;
-}
-EXPORT_SYMBOL(hmm_vma_alloc_locked_page);
-
-
-static void hmm_devmem_ref_release(struct percpu_ref *ref)
-{
-	struct hmm_devmem *devmem;
-
-	devmem = container_of(ref, struct hmm_devmem, ref);
-	complete(&devmem->completion);
-}
-
-static void hmm_devmem_ref_exit(struct dev_pagemap *pgmap)
-{
-	struct hmm_devmem *devmem;
-
-	devmem = container_of(pgmap, struct hmm_devmem, pagemap);
-	wait_for_completion(&devmem->completion);
-	percpu_ref_exit(pgmap->ref);
-}
-
-static void hmm_devmem_ref_kill(struct dev_pagemap *pgmap)
-{
-	percpu_ref_kill(pgmap->ref);
-}
-
-static vm_fault_t hmm_devmem_migrate_to_ram(struct vm_fault *vmf)
-{
-	struct hmm_devmem *devmem =
-		container_of(vmf->page->pgmap, struct hmm_devmem, pagemap);
-
-	return devmem->ops->fault(devmem, vmf->vma, vmf->address, vmf->page,
-			vmf->flags, vmf->pmd);
-}
-
-static void hmm_devmem_free(struct page *page)
-{
-	struct hmm_devmem *devmem =
-		container_of(page->pgmap, struct hmm_devmem, pagemap);
-
-	devmem->ops->free(devmem, page);
-}
-
-static const struct dev_pagemap_ops hmm_pagemap_ops = {
-	.page_free		= hmm_devmem_free,
-	.kill			= hmm_devmem_ref_kill,
-	.cleanup		= hmm_devmem_ref_exit,
-	.migrate_to_ram		= hmm_devmem_migrate_to_ram,
-};
-
-/*
- * hmm_devmem_add() - hotplug ZONE_DEVICE memory for device memory
- *
- * @ops: memory event device driver callback (see struct hmm_devmem_ops)
- * @device: device struct to bind the resource too
- * @size: size in bytes of the device memory to add
- * Return: pointer to new hmm_devmem struct ERR_PTR otherwise
- *
- * This function first finds an empty range of physical address big enough to
- * contain the new resource, and then hotplugs it as ZONE_DEVICE memory, which
- * in turn allocates struct pages. It does not do anything beyond that; all
- * events affecting the memory will go through the various callbacks provided
- * by hmm_devmem_ops struct.
- *
- * Device driver should call this function during device initialization and
- * is then responsible of memory management. HMM only provides helpers.
- */
-struct hmm_devmem *hmm_devmem_add(const struct hmm_devmem_ops *ops,
-				  struct device *device,
-				  unsigned long size)
-{
-	struct hmm_devmem *devmem;
-	void *result;
-	int ret;
-
-	devmem = devm_kzalloc(device, sizeof(*devmem), GFP_KERNEL);
-	if (!devmem)
-		return ERR_PTR(-ENOMEM);
-
-	init_completion(&devmem->completion);
-	devmem->pfn_first = -1UL;
-	devmem->pfn_last = -1UL;
-	devmem->resource = NULL;
-	devmem->device = device;
-	devmem->ops = ops;
-
-	ret = percpu_ref_init(&devmem->ref, &hmm_devmem_ref_release,
-			      0, GFP_KERNEL);
-	if (ret)
-		return ERR_PTR(ret);
-
-	devmem->resource = devm_request_free_mem_region(device, &iomem_resource,
-			size);
-	if (IS_ERR(devmem->resource))
-		return ERR_CAST(devmem->resource);
-	devmem->pfn_first = devmem->resource->start >> PAGE_SHIFT;
-	devmem->pfn_last = devmem->pfn_first +
-			   (resource_size(devmem->resource) >> PAGE_SHIFT);
-
-	devmem->pagemap.type = MEMORY_DEVICE_PRIVATE;
-	devmem->pagemap.res = *devmem->resource;
-	devmem->pagemap.ops = &hmm_pagemap_ops;
-	devmem->pagemap.ref = &devmem->ref;
-
-	result = devm_memremap_pages(devmem->device, &devmem->pagemap);
-	if (IS_ERR(result))
-		return result;
-	return devmem;
-}
-EXPORT_SYMBOL_GPL(hmm_devmem_add);
-#endif /* CONFIG_DEVICE_PRIVATE  */

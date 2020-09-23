@@ -285,7 +285,7 @@ static void mdio_write(struct net_device *dev, int phy_id, int loc, int val)
 static int read_eprom_word(pegasus_t *pegasus, __u8 index, __u16 *retdata)
 {
 	int i;
-	__u8 tmp;
+	__u8 tmp = 0;
 	__le16 retdatai;
 	int ret;
 
@@ -696,7 +696,7 @@ static void intr_callback(struct urb *urb)
 			  "can't resubmit interrupt urb, %d\n", res);
 }
 
-static void pegasus_tx_timeout(struct net_device *net)
+static void pegasus_tx_timeout(struct net_device *net, unsigned int txqueue)
 {
 	pegasus_t *pegasus = netdev_priv(net);
 	netif_warn(pegasus, timer, net, "tx timeout\n");
@@ -1011,6 +1011,7 @@ static int pegasus_ioctl(struct net_device *net, struct ifreq *rq, int cmd)
 	switch (cmd) {
 	case SIOCDEVPRIVATE:
 		data[0] = pegasus->phy;
+		/* fall through */
 	case SIOCDEVPRIVATE + 1:
 		read_mii_word(pegasus, data[0], data[1] & 0x1f, &data[3]);
 		res = 0;
@@ -1067,7 +1068,7 @@ static inline void setup_pegasus_II(pegasus_t *pegasus)
 
 	set_register(pegasus, Reg1d, 0);
 	set_register(pegasus, Reg7b, 1);
-	mdelay(100);
+	msleep(100);
 	if ((pegasus->features & HAS_HOME_PNA) && mii_mode)
 		set_register(pegasus, Reg7b, 0);
 	else

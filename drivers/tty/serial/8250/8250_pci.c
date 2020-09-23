@@ -43,8 +43,6 @@ struct pci_serial_quirk {
 	void	(*exit)(struct pci_dev *dev);
 };
 
-#define PCI_NUM_BAR_RESOURCES	6
-
 struct serial_private {
 	struct pci_dev		*dev;
 	unsigned int		nr;
@@ -74,7 +72,7 @@ setup_port(struct serial_private *priv, struct uart_8250_port *port,
 {
 	struct pci_dev *dev = priv->dev;
 
-	if (bar >= PCI_NUM_BAR_RESOURCES)
+	if (bar >= PCI_STD_NUM_BARS)
 		return -EINVAL;
 
 	if (pci_resource_flags(dev, bar) & IORESOURCE_MEM) {
@@ -3467,6 +3465,11 @@ static int
 serial_pci_guess_board(struct pci_dev *dev, struct pciserial_board *board)
 {
 	int num_iomem, num_port, first_port = -1, i;
+	int rc;
+
+	rc = serial_pci_is_class_communication(dev);
+	if (rc)
+		return rc;
 
 	/*
 	 * Should we try to make guesses for multiport serial devices later?
@@ -3475,7 +3478,7 @@ serial_pci_guess_board(struct pci_dev *dev, struct pciserial_board *board)
 		return -ENODEV;
 
 	num_iomem = num_port = 0;
-	for (i = 0; i < PCI_NUM_BAR_RESOURCES; i++) {
+	for (i = 0; i < PCI_STD_NUM_BARS; i++) {
 		if (pci_resource_flags(dev, i) & IORESOURCE_IO) {
 			num_port++;
 			if (first_port == -1)
@@ -3503,7 +3506,7 @@ serial_pci_guess_board(struct pci_dev *dev, struct pciserial_board *board)
 	 */
 	first_port = -1;
 	num_port = 0;
-	for (i = 0; i < PCI_NUM_BAR_RESOURCES; i++) {
+	for (i = 0; i < PCI_STD_NUM_BARS; i++) {
 		if (pci_resource_flags(dev, i) & IORESOURCE_IO &&
 		    pci_resource_len(dev, i) == 8 &&
 		    (first_port == -1 || (first_port + num_port) == i)) {
@@ -3693,10 +3696,6 @@ pciserial_init_one(struct pci_dev *dev, const struct pci_device_id *ent)
 	}
 
 	board = &pci_boards[ent->driver_data];
-
-	rc = serial_pci_is_class_communication(dev);
-	if (rc)
-		return rc;
 
 	rc = serial_pci_is_blacklisted(dev);
 	if (rc)

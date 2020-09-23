@@ -26,6 +26,7 @@
 #ifndef _LINUX_RH_KABI_H
 #define _LINUX_RH_KABI_H
 
+#include <linux/kconfig.h>
 #include <linux/compiler.h>
 #include <linux/stringify.h>
 
@@ -42,16 +43,31 @@
  *   Adds a new const modifier to a function parameter preserving the old
  *   checksum.
  *
+ * RH_KABI_ADD_MODIFIER
+ *   Adds a new modifier to a function parameter or a typedef, preserving
+ *   the old checksum.  Useful e.g. for adding rcu annotations or changing
+ *   int to unsigned.  Beware that this may change the semantics; if you're
+ *   sure this is safe, always explain why binary compatibility with 3rd
+ *   party modules is retained.
+ *
  * RH_KABI_DEPRECATE
- *   Mark the element as deprecated and make it unusable by modules while
- *   preserving kABI checksums.
+ *   Marks the element as deprecated and make it unusable by modules while
+ *   keeping a hole in its place to preserve binary compatibility.
  *
  * RH_KABI_DEPRECATE_FN
- *   Mark the function pointer as deprecated and make it unusable by modules
- *   while preserving kABI checksums.
+ *   Marks the function pointer as deprecated and make it unusable by modules
+ *   while keeping a hole in its place to preserve binary compatibility.
  *
  * RH_KABI_EXTEND
- *   Simple macro for adding a new element to a struct.
+ *   Adds a new field to a struct.  This must always be added to the end of
+ *   the struct.  Before using this macro, make sure this is actually safe
+ *   to do - there is a number of conditions under which it is *not* safe.
+ *   In particular (but not limited to), this macro cannot be used:
+ *   - if the struct in question is embedded in another struct, or
+ *   - if the struct is allocated by drivers either statically or
+ *     dynamically, or
+ *   - if the struct is allocated together with driver data (an example of
+ *     such behavior is struct net_device or struct request).
  *
  * RH_KABI_EXTEND_WITH_SIZE
  *   Adds a new element (usually a struct) to a struct and reserves extra
@@ -67,28 +83,26 @@
  *   guarantee.
  *
  * RH_KABI_FILL_HOLE
- *   Simple macro for filling a hole in a struct.
+ *   Fills a hole in a struct.
  *
  *   Warning: only use if a hole exists for _all_ arches.  Use pahole to verify.
  *
  * RH_KABI_RENAME
- *   Simple macro for renaming an element without changing its type.  This
- *   macro can be used in bitfields, for example.
+ *   Renames an element without changing its type.  This macro can be used in
+ *   bitfields, for example.
  *
  *   NOTE: this macro does not add the final ';'
  *
  * RH_KABI_REPLACE
- *   Simple replacement of _orig with a union of _orig and _new.
+ *   Replaces the _orig field by the _new field.  The size of the occupied
+ *   space is preserved, it's fine if the _new field is smaller than the
+ *   _orig field.  If a _new field is larger or has a different alignment,
+ *   compilation will abort.
  *
- *   The RH_KABI_REPLACE* macros attempt to add the ability to use the '_new'
- *   element while preserving size alignment with the '_orig' element.
- *
- *   The #ifdef __GENKSYMS__ preserves the kABI agreement, while the anonymous
- *   union structure preserves the size alignment (assuming the '_new' element
- *   is not bigger than the '_orig' element).
- *
- * RH_KABI_REPLACE_UNSAFE
- *   Unsafe version of RH_KABI_REPLACE.  Only use for typedefs.
+ * RH_KABI_REPLACE_SPLIT
+ *   Works the same as RH_KABI_REPLACE but replaces a single _orig field by
+ *   multiple new fields.  The checks for size and alignment done by
+ *   RH_KABI_REPLACE are still applied.
  *
  * RH_KABI_HIDE_INCLUDE
  *   Hides the given include file from kABI checksum computations.  This is
@@ -106,6 +120,158 @@
  *
  *   Example usage:
  *   #include RH_KABI_FAKE_INCLUDE(<linux/rhashtable.h>)
+ *
+ * RH_KABI_RESERVE
+ *   Adds a reserved field to a struct.  This is done prior to kABI freeze
+ *   for structs that cannot be expanded later using RH_KABI_EXTEND (for
+ *   example because they are embedded in another struct or because they are
+ *   allocated by drivers or because they use unusual memory layout).  The
+ *   size of the reserved field is 'unsigned long' and is assumed to be
+ *   8 bytes.
+ *
+ *   The argument is a number unique for the given struct; usually, multiple
+ *   RH_KABI_RESERVE macros are added to a struct with numbers starting from
+ *   one.
+ *
+ *   Example usage:
+ *   struct foo {
+ *           int a;
+ *           RH_KABI_RESERVE(1)
+ *           RH_KABI_RESERVE(2)
+ *           RH_KABI_RESERVE(3)
+ *           RH_KABI_RESERVE(4)
+ *   };
+ *
+ * RH_KABI_USE
+ *   Uses a previously reserved field or multiple fields.  The arguments are
+ *   one or more numbers assigned to RH_KABI_RESERVE, followed by a field to
+ *   be put in their place.  The compiler ensures that the new field is not
+ *   larger than the reserved area.
+ *
+ *   Example usage:
+ *   struct foo {
+ *           int a;
+ *           RH_KABI_USE(1, int b)
+ *           RH_KABI_USE(2, 3, int c[3])
+ *           RH_KABI_RESERVE(4)
+ *   };
+ *
+ * RH_KABI_USE_SPLIT
+ *   Works the same as RH_KABI_USE but replaces a single reserved field by
+ *   multiple new fields.
+ *
+ * RH_KABI_AUX_EMBED
+ * RH_KABI_AUX_PTR
+ *   Adds an extenstion of a struct in the form of "auxiliary structure".
+ *   This is done prior to kABI freeze for structs that cannot be expanded
+ *   later using RH_KABI_EXTEND.  See also RH_KABI_RESERVED, these two
+ *   approaches can (and often are) combined.
+ *
+ *   To use this for 'struct foo' (the "base structure"), define a new
+ *   structure called 'struct foo_rh'; this new struct is called "auxiliary
+ *   structure".  Then add RH_KABI_AUX_EMBED or RH_KABI_AUX_PTR to the end
+ *   of the base structure.  The argument is the name of the base structure,
+ *   without the 'struct' keyword.
+ *
+ *   RH_KABI_AUX_PTR stores a pointer to the aux structure in the base
+ *   struct.  The lifecycle of the aux struct needs to be properly taken
+ *   care of.
+ *
+ *   RH_KABI_AUX_EMBED embeds the aux struct into the base struct.  This
+ *   cannot be used when the base struct is itself embedded into another
+ *   struct, allocated in an array, etc.
+ *
+ *   Both approaches (ptr and embed) work correctly even when the aux struct
+ *   is allocated by modules.  To ensure this, the code responsible for
+ *   allocation/assignment of the aux struct has to properly set the size of
+ *   the aux struct; see the RH_KABI_AUX_SET_SIZE and RH_KABI_AUX_INIT_SIZE
+ *   macros.
+ *
+ *   New fields can be later added to the auxiliary structure, always to its
+ *   end.  Note the auxiliary structure cannot be shrunk in size later (i.e.,
+ *   fields cannot be removed, only deprecated).  Any code accessing fields
+ *   from the aux struct must guard the access using the RH_KABI_AUX macro.
+ *   The access itself is then done via a '_rh' field in the base struct.
+ *
+ *   The auxiliary structure is not guaranteed for access by modules unless
+ *   explicitly commented as such in the declaration of the aux struct
+ *   itself or some of its elements.
+ *
+ *   Example:
+ *
+ *   struct foo_rh {
+ *           int newly_added;
+ *   };
+ *
+ *   struct foo {
+ *           bool big_hammer;
+ *           RH_KABI_AUX_PTR(foo)
+ *   };
+ *
+ *   void use(struct foo *f)
+ *   {
+ *           if (RH_KABI_AUX(f, foo, newly_added))
+ *                   f->_rh->newly_added = 123;
+ *	     else
+ *	             // the field 'newly_added' is not present in the passed
+ *	             // struct, fall back to old behavior
+ *	             f->big_hammer = true;
+ *   }
+ *
+ *   static struct foo_rh my_foo_rh {
+ *           .newly_added = 0;
+ *   }
+ *
+ *   static struct foo my_foo = {
+ *           .big_hammer = false,
+ *           ._rh = &my_foo_rh,
+ *           RH_KABI_AUX_INIT_SIZE(foo)
+ *   };
+ *
+ * RH_KABI_USE_AUX_PTR
+ *   Creates an auxiliary structure post kABI freeze.  This works by using
+ *   two reserved fields (thus there has to be two reserved fields still
+ *   available) and converting them to RH_KABI_AUX_PTR.
+ *
+ *   Example:
+ *
+ *   struct foo_rh {
+ *   };
+ *
+ *   struct foo {
+ *           int a;
+ *           RH_KABI_RESERVE(1)
+ *           RH_KABI_USE_AUX_PTR(2, 3, foo)
+ *   };
+ *
+ * RH_KABI_AUX_SET_SIZE
+ * RH_KABI_AUX_INIT_SIZE
+ *   Calculates and stores the size of the auxiliary structure.
+ *
+ *   RH_KABI_AUX_SET_SIZE is for dynamically allocated base structs,
+ *   RH_KABI_AUX_INIT_SIZE is for statically allocated case structs.
+ *
+ *   These macros must be called from the allocation (RH_KABI_AUX_SET_SIZE)
+ *   or declaration (RH_KABI_AUX_INIT_SIZE) site, regardless of whether
+ *   that happens in the kernel or in a module.  Without calling one of
+ *   these macros, the aux struct will appear to have no fields to the
+ *   kernel.
+ *
+ *   Note: since RH_KABI_AUX_SET_SIZE is intended to be invoked outside of
+ *   a struct definition, it does not add the semicolon and must be
+ *   terminated by semicolon by the caller.
+ *
+ * RH_KABI_AUX
+ *   Verifies that the given field exists in the given auxiliary structure.
+ *   This MUST be called prior to accessing that field; failing to do that
+ *   may lead to invalid memory access.
+ *
+ *   The first argument is a pointer to the base struct, the second argument
+ *   is the name of the base struct (without the 'struct' keyword), the
+ *   third argument is the field name.
+ *
+ *   This macro works for structs extended by either of RH_KABI_AUX_EMBED,
+ *   RH_KABI_AUX_PTR and RH_KABI_USE_AUX_PTR.
  *
  * RH_KABI_FORCE_CHANGE
  *   Force change of the symbol checksum.  The argument of the macro is a
@@ -164,6 +330,10 @@
  *   by ';' inside(!) the macro parameter.  The macro itself must not be
  *   terminated by ';'.
  *
+ * RH_KABI_BROKEN_REPLACE
+ *   Replace a field by a different one without doing any checking.  This
+ *   allows replacing a field by another with a different size.  Similarly
+ *   to other RH_KABI_BROKEN macros, use of this indicates a kABI breakage.
  */
 
 #undef linux
@@ -172,6 +342,7 @@
 #ifdef __GENKSYMS__
 
 # define RH_KABI_CONST
+# define RH_KABI_ADD_MODIFIER(_new)
 # define RH_KABI_EXTEND(_new)
 # define RH_KABI_FILL_HOLE(_new)
 # define RH_KABI_FORCE_CHANGE(ver)		__attribute__((rh_kabi_change ## ver))
@@ -182,11 +353,11 @@
 # define RH_KABI_BROKEN_REMOVE(_orig)		_orig;
 # define RH_KABI_BROKEN_INSERT_BLOCK(_new)
 # define RH_KABI_BROKEN_REMOVE_BLOCK(_orig)	_orig
+# define RH_KABI_BROKEN_REPLACE(_orig, _new)	_orig;
 
 # define _RH_KABI_DEPRECATE(_type, _orig)	_type _orig
 # define _RH_KABI_DEPRECATE_FN(_type, _orig, _args...)	_type (*_orig)(_args)
 # define _RH_KABI_REPLACE(_orig, _new)		_orig
-# define _RH_KABI_REPLACE_UNSAFE(_orig, _new)	_orig
 # define _RH_KABI_EXCLUDE(_elem)
 
 #else
@@ -194,6 +365,7 @@
 # define RH_KABI_ALIGN_WARNING ".  Disable CONFIG_RH_KABI_SIZE_ALIGN_CHECKS if debugging."
 
 # define RH_KABI_CONST				const
+# define RH_KABI_ADD_MODIFIER(_new)		_new
 # define RH_KABI_EXTEND(_new)			_new;
 # define RH_KABI_FILL_HOLE(_new)		_new;
 # define RH_KABI_FORCE_CHANGE(ver)
@@ -204,6 +376,7 @@
 # define RH_KABI_BROKEN_REMOVE(_orig)
 # define RH_KABI_BROKEN_INSERT_BLOCK(_new)	_new
 # define RH_KABI_BROKEN_REMOVE_BLOCK(_orig)
+# define RH_KABI_BROKEN_REPLACE(_orig, _new)	_new;
 
 
 #if IS_BUILTIN(CONFIG_RH_KABI_SIZE_ALIGN_CHECKS)
@@ -235,47 +408,56 @@
 		} RH_KABI_UNIQUE_ID;			  \
 		__RH_KABI_CHECK_SIZE_ALIGN(_orig, _new);  \
 	}
-# define _RH_KABI_REPLACE_UNSAFE(_orig, _new)	_new
 
 # define _RH_KABI_EXCLUDE(_elem)		_elem
 
 #endif /* __GENKSYMS__ */
 
-/* semicolon added wrappers for the RH_KABI_REPLACE macros */
 # define RH_KABI_DEPRECATE(_type, _orig)	_RH_KABI_DEPRECATE(_type, _orig);
 # define RH_KABI_DEPRECATE_FN(_type, _orig, _args...)  \
 	_RH_KABI_DEPRECATE_FN(_type, _orig, _args);
 # define RH_KABI_REPLACE(_orig, _new)		_RH_KABI_REPLACE(_orig, _new);
-# define RH_KABI_REPLACE_UNSAFE(_orig, _new)	_RH_KABI_REPLACE_UNSAFE(_orig, _new);
-/*
- * Macro for breaking up a random element into two smaller chunks using an
- * anonymous struct inside an anonymous union.
- */
-# define RH_KABI_REPLACE2(orig, _new1, _new2)	RH_KABI_REPLACE(orig, struct{ _new1; _new2;})
+
+#define _RH_KABI_REPLACE1(_new)		_new;
+#define _RH_KABI_REPLACE2(_new, ...)	_new; _RH_KABI_REPLACE1(__VA_ARGS__)
+#define _RH_KABI_REPLACE3(_new, ...)	_new; _RH_KABI_REPLACE2(__VA_ARGS__)
+#define _RH_KABI_REPLACE4(_new, ...)	_new; _RH_KABI_REPLACE3(__VA_ARGS__)
+#define _RH_KABI_REPLACE5(_new, ...)	_new; _RH_KABI_REPLACE4(__VA_ARGS__)
+#define _RH_KABI_REPLACE6(_new, ...)	_new; _RH_KABI_REPLACE5(__VA_ARGS__)
+#define _RH_KABI_REPLACE7(_new, ...)	_new; _RH_KABI_REPLACE6(__VA_ARGS__)
+#define _RH_KABI_REPLACE8(_new, ...)	_new; _RH_KABI_REPLACE7(__VA_ARGS__)
+#define _RH_KABI_REPLACE9(_new, ...)	_new; _RH_KABI_REPLACE8(__VA_ARGS__)
+#define _RH_KABI_REPLACE10(_new, ...)	_new; _RH_KABI_REPLACE9(__VA_ARGS__)
+#define _RH_KABI_REPLACE11(_new, ...)	_new; _RH_KABI_REPLACE10(__VA_ARGS__)
+#define _RH_KABI_REPLACE12(_new, ...)	_new; _RH_KABI_REPLACE11(__VA_ARGS__)
+
+#define RH_KABI_REPLACE_SPLIT(_orig, ...)	_RH_KABI_REPLACE(_orig, \
+		struct { __PASTE(_RH_KABI_REPLACE, COUNT_ARGS(__VA_ARGS__))(__VA_ARGS__) });
 
 # define RH_KABI_RESERVE(n)		_RH_KABI_RESERVE(n);
-/*
- * Simple wrappers to replace standard Red Hat reserved elements.
- */
-# define RH_KABI_USE(n, _new)		RH_KABI_REPLACE(_RH_KABI_RESERVE(n), _new)
-/*
- * Macros for breaking up a reserved element into two smaller chunks using
- * an anonymous struct inside an anonymous union.
- */
-# define RH_KABI_USE2(n, _new1, _new2)	RH_KABI_REPLACE(_RH_KABI_RESERVE(n), struct{ _new1; _new2; })
 
-/*
- * We tried to standardize on Red Hat reserved names.  These wrappers
- * leverage those common names making it easier to read and find in the
- * code.
- */
+#define _RH_KABI_USE1(n, _new)	_RH_KABI_RESERVE(n), _new
+#define _RH_KABI_USE2(n, ...)	_RH_KABI_RESERVE(n); _RH_KABI_USE1(__VA_ARGS__)
+#define _RH_KABI_USE3(n, ...)	_RH_KABI_RESERVE(n); _RH_KABI_USE2(__VA_ARGS__)
+#define _RH_KABI_USE4(n, ...)	_RH_KABI_RESERVE(n); _RH_KABI_USE3(__VA_ARGS__)
+#define _RH_KABI_USE5(n, ...)	_RH_KABI_RESERVE(n); _RH_KABI_USE4(__VA_ARGS__)
+#define _RH_KABI_USE6(n, ...)	_RH_KABI_RESERVE(n); _RH_KABI_USE5(__VA_ARGS__)
+#define _RH_KABI_USE7(n, ...)	_RH_KABI_RESERVE(n); _RH_KABI_USE6(__VA_ARGS__)
+#define _RH_KABI_USE8(n, ...)	_RH_KABI_RESERVE(n); _RH_KABI_USE7(__VA_ARGS__)
+#define _RH_KABI_USE9(n, ...)	_RH_KABI_RESERVE(n); _RH_KABI_USE8(__VA_ARGS__)
+#define _RH_KABI_USE10(n, ...)	_RH_KABI_RESERVE(n); _RH_KABI_USE9(__VA_ARGS__)
+#define _RH_KABI_USE11(n, ...)	_RH_KABI_RESERVE(n); _RH_KABI_USE10(__VA_ARGS__)
+#define _RH_KABI_USE12(n, ...)	_RH_KABI_RESERVE(n); _RH_KABI_USE11(__VA_ARGS__)
+
+#define _RH_KABI_USE(...)	_RH_KABI_REPLACE(__VA_ARGS__)
+#define RH_KABI_USE(n, ...)	_RH_KABI_USE(__PASTE(_RH_KABI_USE, COUNT_ARGS(__VA_ARGS__))(n, __VA_ARGS__));
+
+# define RH_KABI_USE_SPLIT(n, ...)	RH_KABI_REPLACE_SPLIT(_RH_KABI_RESERVE(n), __VA_ARGS__)
+
 # define _RH_KABI_RESERVE(n)		unsigned long rh_reserved##n
 
 #define RH_KABI_EXCLUDE(_elem)		_RH_KABI_EXCLUDE(_elem);
 
-/*
- * Extending a struct while reserving extra space.
- */
 #define RH_KABI_EXTEND_WITH_SIZE(_new, _size)				\
 	RH_KABI_EXTEND(union {						\
 		_new;							\
@@ -283,74 +465,32 @@
 		__RH_KABI_CHECK_SIZE(_new, 8 * (_size));		\
 	})
 
-/*
- * RHEL macros to extend structs.
- *
- * base struct: The struct being extended.  For example, pci_dev.
- * extended struct: The Red Hat struct being added to the base struct.
- *		    For example, pci_dev_rh.
- *
- * These macros should be used to extend structs before KABI freeze.
- * They can be used post-KABI freeze in the limited case of the base
- * struct not being embedded in another struct.
- *
- * Extended structs cannot be shrunk in size as changes will break
- * the size & offset comparison.
- *
- * Extended struct elements are not guaranteed for access by modules unless
- * explicitly commented as such in the declaration of the extended struct or
- * the element in the extended struct.
- */
-
-/*
- * RH_KABI_SIZE_AND_EXTEND|_PTR() extends a struct by embedding or adding
- * a pointer in a base struct.  The name of the new struct is the name
- * of the base struct appended with _rh.
- */
-#define _RH_KABI_SIZE_AND_EXTEND_PTR(_struct)				\
+#define _RH_KABI_AUX_PTR(_struct)					\
 	size_t _struct##_size_rh;					\
-	RH_KABI_EXCLUDE(struct _struct##_rh *_struct##_rh)
-#define RH_KABI_SIZE_AND_EXTEND_PTR(_struct)				\
-	_RH_KABI_SIZE_AND_EXTEND_PTR(_struct)
+	_RH_KABI_EXCLUDE(struct _struct##_rh *_rh)
+#define RH_KABI_AUX_PTR(_struct)					\
+	_RH_KABI_AUX_PTR(_struct);
 
-#define _RH_KABI_SIZE_AND_EXTEND(_struct)				\
+#define _RH_KABI_AUX_EMBED(_struct)					\
 	size_t _struct##_size_rh;					\
-	RH_KABI_EXCLUDE(struct _struct##_rh _struct##_rh)
-#define RH_KABI_SIZE_AND_EXTEND(_struct)				\
-	_RH_KABI_SIZE_AND_EXTEND(_struct)
+	_RH_KABI_EXCLUDE(struct _struct##_rh _rh)
+#define RH_KABI_AUX_EMBED(_struct)					\
+	_RH_KABI_AUX_EMBED(_struct);
 
-/*
- * RH_KABI_SET_SIZE calculates and sets the size of the extended struct and
- * stores it in the size_rh field for structs that are dynamically allocated.
- * This macro MUST be called when expanding a base struct with
- * RH_KABI_SIZE_AND_EXTEND, and it MUST be called from the allocation site
- * regardless of being allocated in the kernel or a module.
- * Note: since this macro is intended to be invoked outside of a struct,
- * a semicolon is necessary at the end of the line where it is invoked.
- */
-#define RH_KABI_SET_SIZE(_name, _struct) ({				\
-	_name->_struct##_size_rh = sizeof(struct _struct##_rh);		\
+#define RH_KABI_USE_AUX_PTR(n1, n2, _struct)				\
+	RH_KABI_USE(n1, n2,						\
+		     struct { RH_KABI_AUX_PTR(_struct) })
+
+#define RH_KABI_AUX_SET_SIZE(_name, _struct) ({				\
+	(_name)->_struct##_size_rh = sizeof(struct _struct##_rh);	\
 })
 
-/*
- * RH_KABI_INIT_SIZE calculates and sets the size of the extended struct and
- * stores it in the size_rh field for structs that are statically allocated.
- * This macro MUST be called when expanding a base struct with
- * RH_KABI_SIZE_AND_EXTEND, and it MUST be called from the declaration site
- * regardless of being allocated in the kernel or a module.
- */
-#define RH_KABI_INIT_SIZE(_struct)					\
+#define RH_KABI_AUX_INIT_SIZE(_struct)					\
 	._struct##_size_rh = sizeof(struct _struct##_rh),
 
-/*
- * RH_KABI_CHECK_EXT verifies allocated memory exists.  This MUST be called to
- * verify that memory in the _rh struct is valid, and can be called
- * regardless if RH_KABI_SIZE_AND_EXTEND or RH_KABI_SIZE_AND_EXTEND_PTR is
- * used.
- */
-#define RH_KABI_CHECK_EXT(_ptr, _struct, _field) ({			\
+#define RH_KABI_AUX(_ptr, _struct, _field) ({				\
 	size_t __off = offsetof(struct _struct##_rh, _field);		\
-	_ptr->_struct##_size_rh > __off ? true : false;			\
+	(_ptr)->_struct##_size_rh > __off ? true : false;		\
 })
 
 #endif /* _LINUX_RH_KABI_H */

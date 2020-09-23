@@ -27,6 +27,7 @@
 #include <linux/scatterlist.h>
 #include <linux/export.h>
 #include <linux/slab.h>
+#include <linux/module.h>
 
 #include "blk.h"
 
@@ -381,11 +382,45 @@ static blk_status_t blk_integrity_nop_fn(struct blk_integrity_iter *iter)
 	return BLK_STS_OK;
 }
 
+static void blk_integrity_nop_prepare(struct request *rq)
+{
+}
+
+static void blk_integrity_nop_complete(struct request *rq,
+		unsigned int nr_bytes)
+{
+}
+
+static const struct blk_integrity_profile_ext_ops nop_profile_ops = {
+	.prepare_fn = blk_integrity_nop_prepare,
+	.complete_fn = blk_integrity_nop_complete,
+};
+
 static const struct blk_integrity_profile nop_profile = {
 	.name = "nop",
 	.generate_fn = blk_integrity_nop_fn,
 	.verify_fn = blk_integrity_nop_fn,
+	.ext_ops = &nop_profile_ops,
 };
+
+/*
+ * We know all in-tree profiles are static variable
+ */
+static bool is_3rd_party_dynamic_profile(const struct blk_integrity_profile *profile)
+{
+	unsigned long start = (unsigned long) &_stext,
+		      end   = (unsigned long) &_end,
+		      addr  = (unsigned long) profile;
+
+	/* static variable? */
+	if ((addr >= start) && (addr < end))
+		return false;
+
+	if(is_module_address(addr))
+		return false;
+
+	return true;
+}
 
 /**
  * blk_integrity_register - Register a gendisk as being integrity-capable
@@ -411,6 +446,21 @@ void blk_integrity_register(struct gendisk *disk, struct blk_integrity *template
 	bi->tag_size = template->tag_size;
 
 	disk->queue->backing_dev_info->capabilities |= BDI_CAP_STABLE_WRITES;
+
+	if (!bi->profile->ext_ops)
+		((struct blk_integrity_profile *)bi->profile)->ext_ops =
+			&nop_profile_ops;
+
+	/*
+	 * In case of 3rd party module, if template->profile isn't defined
+	 * as static variable, force to assign .ext_ops as &nop_profile_ops.
+	 *
+	 * If any such 3rd party module wants to define its own .ext_ops in
+	 * future, please assign them after blk_integrity_register returns.
+	 */
+	if (is_3rd_party_dynamic_profile(bi->profile))
+		((struct blk_integrity_profile *)bi->profile)->ext_ops =
+			&nop_profile_ops;
 }
 EXPORT_SYMBOL(blk_integrity_register);
 

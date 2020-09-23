@@ -34,7 +34,7 @@ static void svc_delete_xprt(struct svc_xprt *xprt);
 /* apparently the "standard" is that clients close
  * idle connections after 5 minutes, servers after
  * 6 minutes
- *   http://www.connectathon.org/talks96/nfstcp.pdf
+ *   http://nfsv4bat.org/Documents/ConnectAThon/1996/nfstcp.pdf
  */
 static int svc_conn_age_period = 6*60;
 
@@ -136,6 +136,7 @@ static void svc_xprt_free(struct kref *kref)
 	struct module *owner = xprt->xpt_class->xcl_owner;
 	if (test_bit(XPT_CACHE_AUTH, &xprt->xpt_flags))
 		svcauth_unix_info_release(xprt);
+	put_cred(xprt->xpt_cred);
 	put_net(xprt->xpt_net);
 	/* See comment on corresponding get in xs_setup_bc_tcp(): */
 	if (xprt->xpt_bc_xprt)
@@ -252,7 +253,8 @@ void svc_add_new_perm_xprt(struct svc_serv *serv, struct svc_xprt *new)
 
 static int _svc_create_xprt(struct svc_serv *serv, const char *xprt_name,
 			    struct net *net, const int family,
-			    const unsigned short port, int flags)
+			    const unsigned short port, int flags,
+			    const struct cred *cred)
 {
 	struct svc_xprt_class *xcl;
 
@@ -273,6 +275,7 @@ static int _svc_create_xprt(struct svc_serv *serv, const char *xprt_name,
 			module_put(xcl->xcl_owner);
 			return PTR_ERR(newxprt);
 		}
+		newxprt->xpt_cred = get_cred(cred);
 		svc_add_new_perm_xprt(serv, newxprt);
 		newport = svc_xprt_local_port(newxprt);
 		return newport;
@@ -286,15 +289,16 @@ static int _svc_create_xprt(struct svc_serv *serv, const char *xprt_name,
 
 int svc_create_xprt(struct svc_serv *serv, const char *xprt_name,
 		    struct net *net, const int family,
-		    const unsigned short port, int flags)
+		    const unsigned short port, int flags,
+		    const struct cred *cred)
 {
 	int err;
 
 	dprintk("svc: creating transport %s[%d]\n", xprt_name, port);
-	err = _svc_create_xprt(serv, xprt_name, net, family, port, flags);
+	err = _svc_create_xprt(serv, xprt_name, net, family, port, flags, cred);
 	if (err == -EPROTONOSUPPORT) {
 		request_module("svc%s", xprt_name);
-		err = _svc_create_xprt(serv, xprt_name, net, family, port, flags);
+		err = _svc_create_xprt(serv, xprt_name, net, family, port, flags, cred);
 	}
 	if (err < 0)
 		dprintk("svc: transport %s not found, err %d\n",
@@ -782,9 +786,10 @@ static int svc_handle_xprt(struct svc_rqst *rqstp, struct svc_xprt *xprt)
 		__module_get(xprt->xpt_class->xcl_owner);
 		svc_check_conn_limits(xprt->xpt_server);
 		newxpt = xprt->xpt_ops->xpo_accept(xprt);
-		if (newxpt)
+		if (newxpt) {
+			newxpt->xpt_cred = get_cred(xprt->xpt_cred);
 			svc_add_new_temp_xprt(serv, newxpt);
-		else
+		} else
 			module_put(xprt->xpt_class->xcl_owner);
 	} else if (svc_xprt_reserve_slot(rqstp, xprt)) {
 		/* XPT_DATA|XPT_DEFERRED case: */
@@ -796,6 +801,8 @@ static int svc_handle_xprt(struct svc_rqst *rqstp, struct svc_xprt *xprt)
 			len = svc_deferred_recv(rqstp);
 		else
 			len = xprt->xpt_ops->xpo_recvfrom(rqstp);
+		if (len > 0)
+			trace_svc_recvfrom(&rqstp->rq_arg);
 		rqstp->rq_stime = ktime_get();
 		rqstp->rq_reserved = serv->sv_max_mesg;
 		atomic_add(rqstp->rq_reserved, &xprt->xpt_reserved);
@@ -899,6 +906,7 @@ int svc_send(struct svc_rqst *rqstp)
 	xb->len = xb->head[0].iov_len +
 		xb->page_len +
 		xb->tail[0].iov_len;
+	trace_svc_sendto(xb);
 
 	/* Grab mutex to serialize outgoing data. */
 	mutex_lock(&xprt->xpt_mutex);
@@ -1022,6 +1030,8 @@ static void svc_delete_xprt(struct svc_xprt *xprt)
 
 	dprintk("svc: svc_delete_xprt(%p)\n", xprt);
 	xprt->xpt_ops->xpo_detach(xprt);
+	if (xprt->xpt_bc_xprt)
+		xprt->xpt_bc_xprt->ops->close(xprt->xpt_bc_xprt);
 
 	spin_lock_bh(&serv->sv_lock);
 	list_del_init(&xprt->xpt_list);

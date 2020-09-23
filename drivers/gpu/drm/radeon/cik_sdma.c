@@ -333,7 +333,7 @@ void cik_sdma_enable(struct radeon_device *rdev, bool enable)
 	u32 me_cntl, reg_offset;
 	int i;
 
-	if (enable == false) {
+	if (!enable) {
 		cik_sdma_gfx_stop(rdev);
 		cik_sdma_rlc_stop(rdev);
 	}
@@ -579,7 +579,7 @@ void cik_sdma_fini(struct radeon_device *rdev)
 struct radeon_fence *cik_copy_dma(struct radeon_device *rdev,
 				  uint64_t src_offset, uint64_t dst_offset,
 				  unsigned num_gpu_pages,
-				  struct reservation_object *resv)
+				  struct dma_resv *resv)
 {
 	struct radeon_fence *fence;
 	struct radeon_sync sync;

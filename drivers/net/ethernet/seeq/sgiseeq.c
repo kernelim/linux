@@ -643,7 +643,7 @@ static int sgiseeq_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	return NETDEV_TX_OK;
 }
 
-static void timeout(struct net_device *dev)
+static void timeout(struct net_device *dev, unsigned int txqueue)
 {
 	printk(KERN_NOTICE "%s: transmit timed out, resetting\n", dev->name);
 	sgiseeq_reset(dev);

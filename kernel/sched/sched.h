@@ -180,6 +180,11 @@ static inline bool valid_policy(int policy)
 		rt_policy(policy) || dl_policy(policy);
 }
 
+static inline int task_has_idle_policy(struct task_struct *p)
+{
+	return idle_policy(p->policy);
+}
+
 static inline int task_has_rt_policy(struct task_struct *p)
 {
 	return rt_policy(p->policy);
@@ -341,8 +346,12 @@ struct cfs_bandwidth {
 	RH_KABI_DEPRECATE(u64, runtime_expires)
 	RH_KABI_DEPRECATE(int, expires_seq)
 
-	RH_KABI_REPLACE2(short idle, u8 idle, u8 period_active)
-	RH_KABI_REPLACE2(short period_active, u8 distribute_running, u8 slack_started)
+	RH_KABI_REPLACE_SPLIT(short idle,
+				u8 idle,
+				u8 period_active)
+	RH_KABI_REPLACE_SPLIT(short period_active,
+				u8 distribute_running,
+				u8 slack_started)
 
 	struct hrtimer		period_timer;
 	struct hrtimer		slack_timer;
@@ -490,7 +499,7 @@ struct cfs_rq {
 	struct load_weight	load;
 	unsigned long		runnable_weight;
 	unsigned int		nr_running;
-	unsigned int		h_nr_running;
+	unsigned int		h_nr_running;      /* SCHED_{NORMAL,BATCH,IDLE} */
 
 	u64			exec_clock;
 	u64			min_vruntime;
@@ -512,7 +521,7 @@ struct cfs_rq {
 #ifdef	CONFIG_SCHED_DEBUG
 	unsigned int		nr_spread_over;
 #endif
-
+	RH_KABI_FILL_HOLE(unsigned int idle_h_nr_running) /* SCHED_IDLE */
 #ifdef CONFIG_SMP
 	/*
 	 * CFS load tracking
@@ -744,7 +753,7 @@ struct root_domain {
 	 * - More than one runnable task
 	 * - Running task is misfit
 	 */
-	RH_KABI_REPLACE_UNSAFE(bool overload, int overload)
+	RH_KABI_BROKEN_REPLACE(bool overload, int overload)
 
 	/*
 	 * The bit corresponding to a CPU gets set here if such CPU has more
@@ -789,9 +798,6 @@ struct root_domain {
 	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)
 };
-
-extern struct root_domain def_root_domain;
-extern struct mutex sched_domains_mutex;
 
 extern void init_defrootdomain(void);
 extern int sched_init_domains(const struct cpumask *cpu_map);
@@ -857,7 +863,7 @@ struct rq {
 	 */
 	unsigned long		nr_uninterruptible;
 
-	struct task_struct	*curr;
+	struct task_struct __rcu	*curr;
 	struct task_struct	*idle;
 	struct task_struct	*stop;
 	unsigned long		next_balance;
@@ -868,6 +874,10 @@ struct rq {
 	RH_KABI_DEPRECATE(u64, clock_task)
 
 	atomic_t		nr_iowait;
+
+#ifdef CONFIG_MEMBARRIER
+	RH_KABI_FILL_HOLE(int membarrier_state) /* KABI use 4-byte hole */
+#endif
 
 #ifdef CONFIG_SMP
 	struct root_domain	*rd;
@@ -1426,9 +1436,13 @@ static inline void unregister_sched_domain_sysctl(void)
 }
 #endif
 
+extern int newidle_balance(struct rq *this_rq, struct rq_flags *rf);
+
 #else
 
 static inline void sched_ttwu_pending(void) { }
+
+static inline int newidle_balance(struct rq *this_rq, struct rq_flags *rf) { return 0; }
 
 #endif /* CONFIG_SMP */
 
@@ -1606,7 +1620,8 @@ static inline int task_on_rq_migrating(struct task_struct *p)
  */
 #define WF_SYNC			0x01		/* Waker goes to sleep after wakeup */
 #define WF_FORK			0x02		/* Child wakeup after fork */
-#define WF_MIGRATED		0x4		/* Internal use, task got migrated */
+#define WF_MIGRATED		0x04		/* Internal use, task got migrated */
+#define WF_ON_RQ		0x08		/* Wakee is on_rq */
 
 /*
  * To aid in avoiding the subversion of "niceness" due to uneven distribution
@@ -1672,17 +1687,10 @@ struct sched_class {
 
 	void (*check_preempt_curr)(struct rq *rq, struct task_struct *p, int flags);
 
-	/*
-	 * It is the responsibility of the pick_next_task() method that will
-	 * return the next task to call put_prev_task() on the @prev task or
-	 * something equivalent.
-	 *
-	 * May return RETRY_TASK when it finds a higher prio class has runnable
-	 * tasks.
-	 */
-	struct task_struct * (*pick_next_task)(struct rq *rq,
-					       struct task_struct *prev,
-					       struct rq_flags *rf);
+	RH_KABI_REPLACE(struct task_struct * (*pick_next_task)(struct rq *rq,
+							       struct task_struct *prev,
+						               struct rq_flags *rf),
+			struct task_struct *(*pick_next_task)(struct rq *rq))
 	void (*put_prev_task)(struct rq *rq, struct task_struct *p);
 
 #ifdef CONFIG_SMP
@@ -1699,7 +1707,8 @@ struct sched_class {
 	void (*rq_offline)(struct rq *rq);
 #endif
 
-	void (*set_curr_task)(struct rq *rq);
+	RH_KABI_REPLACE(void (*set_curr_task)(struct rq *rq),
+			void (*set_next_task)(struct rq *rq, struct task_struct *p, bool first))
 	void (*task_tick)(struct rq *rq, struct task_struct *p, int queued);
 	void (*task_fork)(struct task_struct *p);
 	void (*task_dead)(struct task_struct *p);
@@ -1726,19 +1735,21 @@ struct sched_class {
 	void (*task_change_group)(struct task_struct *p, int type);
 #endif
 
-	RH_KABI_RESERVE(1)
+	RH_KABI_USE(1, int (*balance)(struct rq *rq, struct task_struct *prev, struct rq_flags *rf))
 	RH_KABI_RESERVE(2)
 
 };
 
 static inline void put_prev_task(struct rq *rq, struct task_struct *prev)
 {
+	WARN_ON_ONCE(rq->curr != prev);
 	prev->sched_class->put_prev_task(rq, prev);
 }
 
-static inline void set_curr_task(struct rq *rq, struct task_struct *curr)
+static inline void set_next_task(struct rq *rq, struct task_struct *next)
 {
-	curr->sched_class->set_curr_task(rq);
+	WARN_ON_ONCE(rq->curr != next);
+	next->sched_class->set_next_task(rq, next, false);
 }
 
 #ifdef CONFIG_SMP
@@ -1746,8 +1757,12 @@ static inline void set_curr_task(struct rq *rq, struct task_struct *curr)
 #else
 #define sched_class_highest (&dl_sched_class)
 #endif
+
+#define for_class_range(class, _from, _to) \
+	for (class = (_from); class != (_to); class = class->next)
+
 #define for_each_class(class) \
-   for (class = sched_class_highest; class; class = class->next)
+	for_class_range(class, sched_class_highest, NULL)
 
 extern const struct sched_class stop_sched_class;
 extern const struct sched_class dl_sched_class;
@@ -1755,6 +1770,28 @@ extern const struct sched_class rt_sched_class;
 extern const struct sched_class fair_sched_class;
 extern const struct sched_class idle_sched_class;
 
+static inline bool sched_stop_runnable(struct rq *rq)
+{
+	return rq->stop && task_on_rq_queued(rq->stop);
+}
+
+static inline bool sched_dl_runnable(struct rq *rq)
+{
+	return rq->dl.dl_nr_running > 0;
+}
+
+static inline bool sched_rt_runnable(struct rq *rq)
+{
+	return rq->rt.rt_queued > 0;
+}
+
+static inline bool sched_fair_runnable(struct rq *rq)
+{
+	return rq->cfs.nr_running > 0;
+}
+
+extern struct task_struct *pick_next_task_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf);
+extern struct task_struct *pick_next_task_idle(struct rq *rq);
 
 #ifdef CONFIG_SMP
 
@@ -1818,6 +1855,8 @@ extern void init_dl_rq_bw_ratio(struct dl_rq *dl_rq);
 #define BW_SHIFT		20
 #define BW_UNIT			(1 << BW_SHIFT)
 #define RATIO_SHIFT		8
+#define MAX_BW_BITS		(64 - BW_SHIFT)
+#define MAX_BW			((1ULL << MAX_BW_BITS) - 1)
 unsigned long to_ratio(u64 period, u64 runtime);
 
 extern void init_entity_runnable_average(struct sched_entity *se);
@@ -1912,6 +1951,13 @@ static inline int hrtick_enabled(struct rq *rq)
 
 #endif /* CONFIG_SCHED_HRTICK */
 
+#ifndef arch_scale_freq_tick
+static __always_inline
+void arch_scale_freq_tick(void)
+{
+}
+#endif
+
 #ifndef arch_scale_freq_capacity
 static __always_inline
 unsigned long arch_scale_freq_capacity(int cpu)
@@ -1921,7 +1967,7 @@ unsigned long arch_scale_freq_capacity(int cpu)
 #endif
 
 #ifdef CONFIG_SMP
-#ifdef CONFIG_PREEMPT
+#ifdef CONFIG_PREEMPTION
 
 static inline void double_rq_lock(struct rq *rq1, struct rq *rq2);
 
@@ -1973,7 +2019,7 @@ static inline int _double_lock_balance(struct rq *this_rq, struct rq *busiest)
 	return ret;
 }
 
-#endif /* CONFIG_PREEMPT */
+#endif /* CONFIG_PREEMPTION */
 
 /*
  * double_lock_balance - lock the busiest runqueue, this_rq is locked already.
@@ -2355,6 +2401,36 @@ unsigned long scale_irq_capacity(unsigned long util, unsigned long irq, unsigned
 extern struct static_key_false sched_energy_present;
 #endif
 
+#ifdef CONFIG_MEMBARRIER
+/*
+ * The scheduler provides memory barriers required by membarrier between:
+ * - prior user-space memory accesses and store to rq->membarrier_state,
+ * - store to rq->membarrier_state and following user-space memory accesses.
+ * In the same way it provides those guarantees around store to rq->curr.
+ */
+static inline void membarrier_switch_mm(struct rq *rq,
+					struct mm_struct *prev_mm,
+					struct mm_struct *next_mm)
+{
+	int membarrier_state;
+
+	if (prev_mm == next_mm)
+		return;
+
+	membarrier_state = atomic_read(&next_mm->membarrier_state);
+	if (READ_ONCE(rq->membarrier_state) == membarrier_state)
+		return;
+
+	WRITE_ONCE(rq->membarrier_state, membarrier_state);
+}
+#else
+static inline void membarrier_switch_mm(struct rq *rq,
+					struct mm_struct *prev_mm,
+					struct mm_struct *next_mm)
+{
+}
+#endif
+
 #ifdef CONFIG_SMP
 static inline bool is_per_cpu_kthread(struct task_struct *p)
 {
@@ -2365,5 +2441,5 @@ static inline bool is_per_cpu_kthread(struct task_struct *p)
 		return false;
 
 	return true;
- }
- #endif
+}
+#endif

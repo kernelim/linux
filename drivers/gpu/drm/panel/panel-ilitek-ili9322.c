@@ -349,7 +349,6 @@ static const struct regmap_config ili9322_regmap_config = {
 
 static int ili9322_init(struct drm_panel *panel, struct ili9322 *ili)
 {
-	struct drm_connector *connector = panel->connector;
 	u8 reg;
 	int ret;
 	int i;
@@ -407,23 +406,11 @@ static int ili9322_init(struct drm_panel *panel, struct ili9322 *ili)
 	 * Polarity and inverted color order for RGB input.
 	 * None of this applies in the BT.656 mode.
 	 */
-	if (ili->conf->dclk_active_high) {
+	reg = 0;
+	if (ili->conf->dclk_active_high)
 		reg = ILI9322_POL_DCLK;
-		connector->display_info.bus_flags |=
-			DRM_BUS_FLAG_PIXDATA_DRIVE_POSEDGE;
-	} else {
-		reg = 0;
-		connector->display_info.bus_flags |=
-			DRM_BUS_FLAG_PIXDATA_DRIVE_NEGEDGE;
-	}
-	if (ili->conf->de_active_high) {
+	if (ili->conf->de_active_high)
 		reg |= ILI9322_POL_DE;
-		connector->display_info.bus_flags |=
-			DRM_BUS_FLAG_DE_HIGH;
-	} else {
-		connector->display_info.bus_flags |=
-			DRM_BUS_FLAG_DE_LOW;
-	}
 	if (ili->conf->hsync_active_high)
 		reg |= ILI9322_POL_HSYNC;
 	if (ili->conf->vsync_active_high)
@@ -654,37 +641,49 @@ static const struct drm_display_mode itu_r_bt_656_720_mode = {
 	.flags = 0,
 };
 
-static int ili9322_get_modes(struct drm_panel *panel)
+static int ili9322_get_modes(struct drm_panel *panel,
+			     struct drm_connector *connector)
 {
-	struct drm_connector *connector = panel->connector;
 	struct ili9322 *ili = panel_to_ili9322(panel);
+	struct drm_device *drm = connector->dev;
 	struct drm_display_mode *mode;
+	struct drm_display_info *info;
 
-	connector->display_info.width_mm = ili->conf->width_mm;
-	connector->display_info.height_mm = ili->conf->height_mm;
+	info = &connector->display_info;
+	info->width_mm = ili->conf->width_mm;
+	info->height_mm = ili->conf->height_mm;
+	if (ili->conf->dclk_active_high)
+		info->bus_flags |= DRM_BUS_FLAG_PIXDATA_DRIVE_POSEDGE;
+	else
+		info->bus_flags |= DRM_BUS_FLAG_PIXDATA_DRIVE_NEGEDGE;
+
+	if (ili->conf->de_active_high)
+		info->bus_flags |= DRM_BUS_FLAG_DE_HIGH;
+	else
+		info->bus_flags |= DRM_BUS_FLAG_DE_LOW;
 
 	switch (ili->input) {
 	case ILI9322_INPUT_SRGB_DUMMY_320X240:
-		mode = drm_mode_duplicate(panel->drm, &srgb_320x240_mode);
+		mode = drm_mode_duplicate(drm, &srgb_320x240_mode);
 		break;
 	case ILI9322_INPUT_SRGB_DUMMY_360X240:
-		mode = drm_mode_duplicate(panel->drm, &srgb_360x240_mode);
+		mode = drm_mode_duplicate(drm, &srgb_360x240_mode);
 		break;
 	case ILI9322_INPUT_PRGB_THROUGH:
 	case ILI9322_INPUT_PRGB_ALIGNED:
-		mode = drm_mode_duplicate(panel->drm, &prgb_320x240_mode);
+		mode = drm_mode_duplicate(drm, &prgb_320x240_mode);
 		break;
 	case ILI9322_INPUT_YUV_640X320_YCBCR:
-		mode = drm_mode_duplicate(panel->drm, &yuv_640x320_mode);
+		mode = drm_mode_duplicate(drm, &yuv_640x320_mode);
 		break;
 	case ILI9322_INPUT_YUV_720X360_YCBCR:
-		mode = drm_mode_duplicate(panel->drm, &yuv_720x360_mode);
+		mode = drm_mode_duplicate(drm, &yuv_720x360_mode);
 		break;
 	case ILI9322_INPUT_ITU_R_BT656_720X360_YCBCR:
-		mode = drm_mode_duplicate(panel->drm, &itu_r_bt_656_720_mode);
+		mode = drm_mode_duplicate(drm, &itu_r_bt_656_720_mode);
 		break;
 	case ILI9322_INPUT_ITU_R_BT656_640X320_YCBCR:
-		mode = drm_mode_duplicate(panel->drm, &itu_r_bt_656_640_mode);
+		mode = drm_mode_duplicate(drm, &itu_r_bt_656_640_mode);
 		break;
 	default:
 		mode = NULL;
@@ -897,9 +896,8 @@ static int ili9322_probe(struct spi_device *spi)
 		ili->input = ili->conf->input;
 	}
 
-	drm_panel_init(&ili->panel);
-	ili->panel.dev = dev;
-	ili->panel.funcs = &ili9322_drm_funcs;
+	drm_panel_init(&ili->panel, dev, &ili9322_drm_funcs,
+		       DRM_MODE_CONNECTOR_DPI);
 
 	return drm_panel_add(&ili->panel);
 }

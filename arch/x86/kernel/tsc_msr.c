@@ -65,7 +65,7 @@ static int match_cpu(u8 family, u8 model)
 /*
  * MSR-based CPU/TSC frequency discovery for certain CPUs.
  *
- * Set global "lapic_timer_frequency" to bus_clock_cycles/jiffy
+ * Set global "lapic_timer_period" to bus_clock_cycles/jiffy
  * Return processor base frequency in KHz, or 0 on failure.
  */
 unsigned long cpu_khz_from_msr(void)
@@ -98,7 +98,7 @@ unsigned long cpu_khz_from_msr(void)
 	res = freq * ratio;
 
 #ifdef CONFIG_X86_LOCAL_APIC
-	lapic_timer_frequency = (freq * 1000) / HZ;
+	lapic_timer_period = (freq * 1000) / HZ;
 #endif
 
 	/*

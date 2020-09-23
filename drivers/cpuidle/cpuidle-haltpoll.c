@@ -18,6 +18,10 @@
 #include <linux/kvm_para.h>
 #include <linux/cpuidle_haltpoll.h>
 
+static bool force __read_mostly;
+module_param(force, bool, 0444);
+MODULE_PARM_DESC(force, "Load unconditionally");
+
 static struct cpuidle_device __percpu *haltpoll_cpuidle_devices;
 static enum cpuhp_state haltpoll_hp_state;
 
@@ -89,14 +93,23 @@ static void haltpoll_uninit(void)
 	haltpoll_cpuidle_devices = NULL;
 }
 
+static bool haltpool_want(void)
+{
+	return kvm_para_has_hint(KVM_HINTS_REALTIME) || force;
+}
+
 static int __init haltpoll_init(void)
 {
 	int ret;
 	struct cpuidle_driver *drv = &haltpoll_driver;
 
+	/* Do not load haltpoll if idle= is passed */
+	if (boot_option_idle_override != IDLE_NO_OVERRIDE)
+		return -ENODEV;
+
 	cpuidle_poll_state_init(drv);
 
-	if (!kvm_para_available())
+	if (!kvm_para_available() || !haltpool_want())
 		return -ENODEV;
 
 	ret = rhel_cpuidle_register_driver_hpoll(drv);

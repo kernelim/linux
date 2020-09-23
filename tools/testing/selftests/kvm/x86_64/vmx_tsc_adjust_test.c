@@ -1,10 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * vmx_tsc_adjust_test
  *
  * Copyright (C) 2018, Google LLC.
- *
- * This work is licensed under the terms of the GNU GPL, version 2.
- *
  *
  * IA32_TSC_ADJUST test
  *
@@ -100,7 +98,7 @@ static void l1_guest_code(struct vmx_pages *vmx_pages)
 	prepare_vmcs(vmx_pages, l2_guest_code,
 		     &l2_guest_stack[L2_GUEST_STACK_SIZE]);
 	control = vmreadz(CPU_BASED_VM_EXEC_CONTROL);
-	control |= CPU_BASED_USE_MSR_BITMAPS | CPU_BASED_USE_TSC_OFFSETING;
+	control |= CPU_BASED_USE_MSR_BITMAPS | CPU_BASED_USE_TSC_OFFSETTING;
 	vmwrite(CPU_BASED_VM_EXEC_CONTROL, control);
 	vmwrite(TSC_OFFSET, TSC_OFFSET_VALUE);
 
@@ -123,8 +121,8 @@ static void l1_guest_code(struct vmx_pages *vmx_pages)
 
 static void report(int64_t val)
 {
-	printf("IA32_TSC_ADJUST is %ld (%lld * TSC_ADJUST_VALUE + %lld).\n",
-	       val, val / TSC_ADJUST_VALUE, val % TSC_ADJUST_VALUE);
+	pr_info("IA32_TSC_ADJUST is %ld (%lld * TSC_ADJUST_VALUE + %lld).\n",
+		val, val / TSC_ADJUST_VALUE, val % TSC_ADJUST_VALUE);
 }
 
 int main(int argc, char *argv[])
@@ -152,7 +150,7 @@ int main(int argc, char *argv[])
 
 		switch (get_ucall(vm, VCPU_ID, &uc)) {
 		case UCALL_ABORT:
-			TEST_ASSERT(false, "%s", (const char *)uc.args[0]);
+			TEST_FAIL("%s", (const char *)uc.args[0]);
 			/* NOT REACHED */
 		case UCALL_SYNC:
 			report(uc.args[1]);
@@ -160,7 +158,7 @@ int main(int argc, char *argv[])
 		case UCALL_DONE:
 			goto done;
 		default:
-			TEST_ASSERT(false, "Unknown ucall 0x%x.", uc.cmd);
+			TEST_FAIL("Unknown ucall %lu", uc.cmd);
 		}
 	}
 

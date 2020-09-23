@@ -25,6 +25,7 @@
 
 #include <linux/slab.h>
 
+#include "resource.h"
 #include "dm_services.h"
 #include "dce_calcs.h"
 #include "dc.h"
@@ -153,14 +154,14 @@ static void calculate_bandwidth(
 
 
 
-	if (data->d0_underlay_mode == bw_def_none) { d0_underlay_enable = 0; }
-	else {
-		d0_underlay_enable = 1;
-	}
-	if (data->d1_underlay_mode == bw_def_none) { d1_underlay_enable = 0; }
-	else {
-		d1_underlay_enable = 1;
-	}
+	if (data->d0_underlay_mode == bw_def_none)
+		d0_underlay_enable = false;
+	else
+		d0_underlay_enable = true;
+	if (data->d1_underlay_mode == bw_def_none)
+		d1_underlay_enable = false;
+	else
+		d1_underlay_enable = true;
 	data->number_of_underlay_surfaces = d0_underlay_enable + d1_underlay_enable;
 	switch (data->underlay_surface_type) {
 	case bw_def_420:
@@ -285,8 +286,8 @@ static void calculate_bandwidth(
 	data->cursor_width_pixels[2] = bw_int_to_fixed(0);
 	data->cursor_width_pixels[3] = bw_int_to_fixed(0);
 	/* graphics surface parameters from spreadsheet*/
-	fbc_enabled = 0;
-	lpt_enabled = 0;
+	fbc_enabled = false;
+	lpt_enabled = false;
 	for (i = 4; i <= maximum_number_of_surfaces - 3; i++) {
 		if (i < data->number_of_displays + 4) {
 			if (i == 4 && data->d0_underlay_mode == bw_def_underlay_only) {
@@ -337,9 +338,9 @@ static void calculate_bandwidth(
 			data->access_one_channel_only[i] = 0;
 		}
 		if (data->fbc_en[i] == 1) {
-			fbc_enabled = 1;
+			fbc_enabled = true;
 			if (data->lpt_en[i] == 1) {
-				lpt_enabled = 1;
+				lpt_enabled = true;
 			}
 		}
 		data->cursor_width_pixels[i] = bw_int_to_fixed(vbios->cursor_width);
@@ -2852,7 +2853,7 @@ static void populate_initial_data(
 			data->src_height[num_displays * 2 + j] = bw_int_to_fixed(pipe[i].bottom_pipe->plane_res.scl_data.viewport.height);
 			data->src_width[num_displays * 2 + j] = bw_int_to_fixed(pipe[i].bottom_pipe->plane_res.scl_data.viewport.width);
 			data->pitch_in_pixels[num_displays * 2 + j] = bw_int_to_fixed(
-					pipe[i].bottom_pipe->plane_state->plane_size.grph.surface_pitch);
+					pipe[i].bottom_pipe->plane_state->plane_size.surface_pitch);
 			data->h_taps[num_displays * 2 + j] = bw_int_to_fixed(pipe[i].bottom_pipe->plane_res.scl_data.taps.h_taps);
 			data->v_taps[num_displays * 2 + j] = bw_int_to_fixed(pipe[i].bottom_pipe->plane_res.scl_data.taps.v_taps);
 			data->h_scale_ratio[num_displays * 2 + j] = fixed31_32_to_bw_fixed(
@@ -2977,6 +2978,32 @@ static void populate_initial_data(
 	data->number_of_displays = num_displays;
 }
 
+static bool all_displays_in_sync(const struct pipe_ctx pipe[],
+				 int pipe_count)
+{
+	const struct pipe_ctx *active_pipes[MAX_PIPES];
+	int i, num_active_pipes = 0;
+
+	for (i = 0; i < pipe_count; i++) {
+		if (!pipe[i].stream || pipe[i].top_pipe)
+			continue;
+
+		active_pipes[num_active_pipes++] = &pipe[i];
+	}
+
+	if (!num_active_pipes)
+		return false;
+
+	for (i = 1; i < num_active_pipes; ++i) {
+		if (!resource_are_streams_timing_synchronizable(
+			    active_pipes[0]->stream, active_pipes[i]->stream)) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
 /**
  * Return:
  *	true -	Display(s) configuration supported.
@@ -2998,8 +3025,10 @@ bool bw_calcs(struct dc_context *ctx,
 
 	populate_initial_data(pipe, pipe_count, data);
 
-	/*TODO: this should be taken out calcs output and assigned during timing sync for pplib use*/
-	calcs_output->all_displays_in_sync = false;
+	if (ctx->dc->config.multi_mon_pp_mclk_switch)
+		calcs_output->all_displays_in_sync = all_displays_in_sync(pipe, pipe_count);
+	else
+		calcs_output->all_displays_in_sync = false;
 
 	if (data->number_of_displays != 0) {
 		uint8_t yclk_lvl, sclk_lvl;

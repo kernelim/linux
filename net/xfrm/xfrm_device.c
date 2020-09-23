@@ -23,6 +23,84 @@
 #include <linux/notifier.h>
 
 #ifdef CONFIG_XFRM_OFFLOAD
+static void __xfrm_transport_prep(struct xfrm_state *x, struct sk_buff *skb,
+				  unsigned int hsize)
+{
+	struct xfrm_offload *xo = xfrm_offload(skb);
+
+	skb_reset_mac_len(skb);
+	if (xo->flags & XFRM_GSO_SEGMENT)
+		skb->transport_header -= x->props.header_len;
+
+	pskb_pull(skb, skb_transport_offset(skb) + x->props.header_len);
+}
+
+static void __xfrm_mode_tunnel_prep(struct xfrm_state *x, struct sk_buff *skb,
+				    unsigned int hsize)
+
+{
+	struct xfrm_offload *xo = xfrm_offload(skb);
+
+	if (xo->flags & XFRM_GSO_SEGMENT)
+		skb->transport_header = skb->network_header + hsize;
+
+	skb_reset_mac_len(skb);
+	pskb_pull(skb, skb->mac_len + x->props.header_len);
+}
+
+static void __xfrm_mode_beet_prep(struct xfrm_state *x, struct sk_buff *skb,
+				  unsigned int hsize)
+{
+	struct xfrm_offload *xo = xfrm_offload(skb);
+	int phlen = 0;
+
+	if (xo->flags & XFRM_GSO_SEGMENT)
+		skb->transport_header = skb->network_header + hsize;
+
+	skb_reset_mac_len(skb);
+	if (x->sel.family != AF_INET6) {
+		phlen = IPV4_BEET_PHMAXLEN;
+		if (x->outer_mode->family == AF_INET6)
+			phlen += sizeof(struct ipv6hdr) - sizeof(struct iphdr);
+	}
+
+	pskb_pull(skb, skb->mac_len + hsize + (x->props.header_len - phlen));
+}
+
+/* Adjust pointers into the packet when IPsec is done at layer2 */
+static void xfrm_outer_mode_prep(struct xfrm_state *x, struct sk_buff *skb)
+{
+	switch (x->outer_mode->encap) {
+	case XFRM_MODE_TUNNEL:
+		if (x->outer_mode->family == AF_INET)
+			return __xfrm_mode_tunnel_prep(x, skb,
+						       sizeof(struct iphdr));
+		if (x->outer_mode->family == AF_INET6)
+			return __xfrm_mode_tunnel_prep(x, skb,
+						       sizeof(struct ipv6hdr));
+		break;
+	case XFRM_MODE_TRANSPORT:
+		if (x->outer_mode->family == AF_INET)
+			return __xfrm_transport_prep(x, skb,
+						     sizeof(struct iphdr));
+		if (x->outer_mode->family == AF_INET6)
+			return __xfrm_transport_prep(x, skb,
+						     sizeof(struct ipv6hdr));
+		break;
+	case XFRM_MODE_BEET:
+		if (x->outer_mode->family == AF_INET)
+			return __xfrm_mode_beet_prep(x, skb,
+						     sizeof(struct iphdr));
+		if (x->outer_mode->family == AF_INET6)
+			return __xfrm_mode_beet_prep(x, skb,
+						     sizeof(struct ipv6hdr));
+		break;
+	case XFRM_MODE_ROUTEOPTIMIZATION:
+	case XFRM_MODE_IN_TRIGGER:
+		break;
+	}
+}
+
 struct sk_buff *validate_xmit_xfrm(struct sk_buff *skb, netdev_features_t features, bool *again)
 {
 	int err;
@@ -33,7 +111,7 @@ struct sk_buff *validate_xmit_xfrm(struct sk_buff *skb, netdev_features_t featur
 	netdev_features_t esp_features = features;
 	struct xfrm_offload *xo = xfrm_offload(skb);
 
-	if (!xo)
+	if (!xo || (xo->flags & XFRM_XMIT))
 		return skb;
 
 	if (!(features & NETIF_F_HW_ESP))
@@ -52,6 +130,8 @@ struct sk_buff *validate_xmit_xfrm(struct sk_buff *skb, netdev_features_t featur
 		*again = true;
 		return skb;
 	}
+
+	xo->flags |= XFRM_XMIT;
 
 	if (skb_is_gso(skb)) {
 		struct net_device *dev = skb->dev;
@@ -76,7 +156,8 @@ struct sk_buff *validate_xmit_xfrm(struct sk_buff *skb, netdev_features_t featur
 	}
 
 	if (!skb->next) {
-		x->outer_mode->xmit(x, skb);
+		esp_features |= skb->dev->gso_partial_features;
+		xfrm_outer_mode_prep(x, skb);
 
 		xo->flags |= XFRM_DEV_RESUME;
 
@@ -99,12 +180,14 @@ struct sk_buff *validate_xmit_xfrm(struct sk_buff *skb, netdev_features_t featur
 
 	do {
 		struct sk_buff *nskb = skb2->next;
-		skb2->next = NULL;
+
+		esp_features |= skb->dev->gso_partial_features;
+		skb_mark_not_on_list(skb2);
 
 		xo = xfrm_offload(skb2);
 		xo->flags |= XFRM_DEV_RESUME;
 
-		x->outer_mode->xmit(x, skb2);
+		xfrm_outer_mode_prep(x, skb2);
 
 		err = x->type_offload->xmit(x, skb2, esp_features);
 		if (!err) {
@@ -336,6 +419,7 @@ static int xfrm_dev_event(struct notifier_block *this, unsigned long event, void
 		return xfrm_dev_feat_change(dev);
 
 	case NETDEV_DOWN:
+	case NETDEV_UNREGISTER:
 		return xfrm_dev_down(dev);
 	}
 	return NOTIFY_DONE;

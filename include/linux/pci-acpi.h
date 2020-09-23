@@ -112,15 +112,17 @@ extern const guid_t pci_acpi_dsm_guid;
 #define RESET_DELAY_DSM			0x08
 #define FUNCTION_DELAY_DSM		0x09
 
+#ifdef CONFIG_PCIE_EDR
+void pci_acpi_add_edr_notifier(struct pci_dev *pdev);
+void pci_acpi_remove_edr_notifier(struct pci_dev *pdev);
+#else
+static inline void pci_acpi_add_edr_notifier(struct pci_dev *pdev) { }
+static inline void pci_acpi_remove_edr_notifier(struct pci_dev *pdev) { }
+#endif /* CONFIG_PCIE_EDR */
+
 #else	/* CONFIG_ACPI */
 static inline void acpi_pci_add_bus(struct pci_bus *bus) { }
 static inline void acpi_pci_remove_bus(struct pci_bus *bus) { }
 #endif	/* CONFIG_ACPI */
-
-#ifdef CONFIG_ACPI_APEI
-extern bool aer_acpi_firmware_first(void);
-#else
-static inline bool aer_acpi_firmware_first(void) { return false; }
-#endif
 
 #endif	/* _PCI_ACPI_H_ */

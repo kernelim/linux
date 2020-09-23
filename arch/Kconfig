@@ -94,7 +94,7 @@ config STATIC_KEYS_SELFTEST
 config OPTPROBES
 	def_bool y
 	depends on KPROBES && HAVE_OPTPROBES
-	select TASKS_RCU if PREEMPT
+	select TASKS_RCU if PREEMPTION
 
 config KPROBES_ON_FTRACE
 	def_bool y
@@ -893,7 +893,10 @@ config COMPAT_32BIT_TIME
 	  This is relevant on all 32-bit architectures, and 64-bit architectures
 	  as part of compat syscall handling.
 
-config ARCH_NO_COHERENT_DMA_MMAP
+config ARCH_NO_PREEMPT
+	bool
+
+config ARCH_SUPPORTS_RT
 	bool
 
 config CPU_NO_EFFICIENT_FFS
@@ -1000,5 +1003,8 @@ config LOCK_EVENT_COUNTS
 	  in the system with minimal performance impact. This reduces
 	  the chance of application behavior change because of timing
 	  differences. The counts are reported via debugfs.
+
+config ARCH_HAS_MEM_ENCRYPT
+	bool
 
 source "kernel/gcov/Kconfig"

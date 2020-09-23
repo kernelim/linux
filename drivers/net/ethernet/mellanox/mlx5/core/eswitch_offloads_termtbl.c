@@ -49,9 +49,8 @@ mlx5_eswitch_termtbl_create(struct mlx5_core_dev *dev,
 			    struct mlx5_termtbl_handle *tt,
 			    struct mlx5_flow_act *flow_act)
 {
-	static const struct mlx5_flow_spec spec = {};
+	struct mlx5_flow_table_attr ft_attr = {};
 	struct mlx5_flow_namespace *root_ns;
-	int prio, flags;
 	int err;
 
 	root_ns = mlx5_get_flow_namespace(dev, MLX5_FLOW_NAMESPACE_FDB);
@@ -63,16 +62,17 @@ mlx5_eswitch_termtbl_create(struct mlx5_core_dev *dev,
 	/* As this is the terminating action then the termination table is the
 	 * same prio as the slow path
 	 */
-	prio = FDB_SLOW_PATH;
-	flags = MLX5_FLOW_TABLE_TERMINATION;
-	tt->termtbl = mlx5_create_auto_grouped_flow_table(root_ns, prio, 1, 1,
-							  0, flags);
+	ft_attr.flags = MLX5_FLOW_TABLE_TERMINATION;
+	ft_attr.prio = FDB_SLOW_PATH;
+	ft_attr.max_fte = 1;
+	ft_attr.autogroup.max_num_groups = 1;
+	tt->termtbl = mlx5_create_auto_grouped_flow_table(root_ns, &ft_attr);
 	if (IS_ERR(tt->termtbl)) {
 		esw_warn(dev, "Failed to create termination table\n");
 		return -EOPNOTSUPP;
 	}
 
-	tt->rule = mlx5_add_flow_rules(tt->termtbl, &spec, flow_act,
+	tt->rule = mlx5_add_flow_rules(tt->termtbl, NULL, flow_act,
 				       &tt->dest, 1);
 
 	if (IS_ERR(tt->rule)) {
@@ -180,7 +180,7 @@ mlx5_eswitch_termtbl_actions_move(struct mlx5_flow_act *src,
 static bool mlx5_eswitch_offload_is_uplink_port(const struct mlx5_eswitch *esw,
 						const struct mlx5_flow_spec *spec)
 {
-	u32 port_mask, port_value;
+	u16 port_mask, port_value;
 
 	if (MLX5_CAP_ESW_FLOWTABLE(esw->dev, flow_source))
 		return spec->flow_context.flow_source ==
@@ -190,7 +190,7 @@ static bool mlx5_eswitch_offload_is_uplink_port(const struct mlx5_eswitch *esw,
 			     misc_parameters.source_port);
 	port_value = MLX5_GET(fte_match_param, spec->match_value,
 			      misc_parameters.source_port);
-	return (port_mask & port_value & 0xffff) == MLX5_VPORT_UPLINK;
+	return (port_mask & port_value) == MLX5_VPORT_UPLINK;
 }
 
 bool

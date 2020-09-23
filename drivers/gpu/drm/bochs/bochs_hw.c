@@ -2,6 +2,10 @@
 /*
  */
 
+#include <linux/pci.h>
+
+#include <drm/drm_fourcc.h>
+
 #include "bochs.h"
 
 /* ---------------------------------------------------------------------- */
@@ -249,7 +253,7 @@ void bochs_hw_setformat(struct bochs_device *bochs,
 		DRM_ERROR("%s: Huh? Got framebuffer format 0x%x",
 			  __func__, format->format);
 		break;
-	};
+	}
 }
 
 void bochs_hw_setbase(struct bochs_device *bochs,

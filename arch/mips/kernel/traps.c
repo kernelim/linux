@@ -28,7 +28,7 @@
 #include <linux/smp.h>
 #include <linux/spinlock.h>
 #include <linux/kallsyms.h>
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 #include <linux/interrupt.h>
 #include <linux/ptrace.h>
 #include <linux/kgdb.h>
@@ -1176,12 +1176,12 @@ static void mt_ase_fp_affinity(void)
 		 * restricted the allowed set to exclude any CPUs with FPUs,
 		 * we'll skip the procedure.
 		 */
-		if (cpumask_intersects(&current->cpus_allowed, &mt_fpu_cpumask)) {
+		if (cpumask_intersects(&current->cpus_mask, &mt_fpu_cpumask)) {
 			cpumask_t tmask;
 
 			current->thread.user_cpus_allowed
-				= current->cpus_allowed;
-			cpumask_and(&tmask, &current->cpus_allowed,
+				= current->cpus_mask;
+			cpumask_and(&tmask, &current->cpus_mask,
 				    &mt_fpu_cpumask);
 			set_cpus_allowed_ptr(current, &tmask);
 			set_thread_flag(TIF_FPUBOUND);
@@ -2270,7 +2270,7 @@ void __init trap_init(void)
 		phys_addr_t ebase_pa;
 
 		ebase = (unsigned long)
-			__alloc_bootmem(size, 1 << fls(size), 0);
+			memblock_alloc_from(size, 1 << fls(size), 0);
 
 		/*
 		 * Try to ensure ebase resides in KSeg0 if possible.

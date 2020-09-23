@@ -57,7 +57,6 @@
 #include "smb2proto.h"
 #include "smbdirect.h"
 #include "dns_resolve.h"
-#include "cifsfs.h"
 #ifdef CONFIG_CIFS_DFS_UPCALL
 #include "dfs_cache.h"
 #endif
@@ -74,7 +73,7 @@ enum {
 	Opt_user_xattr, Opt_nouser_xattr,
 	Opt_forceuid, Opt_noforceuid,
 	Opt_forcegid, Opt_noforcegid,
-	Opt_noblocksend, Opt_noautotune,
+	Opt_noblocksend, Opt_noautotune, Opt_nolease,
 	Opt_hard, Opt_soft, Opt_perm, Opt_noperm,
 	Opt_mapposix, Opt_nomapposix,
 	Opt_mapchars, Opt_nomapchars, Opt_sfu,
@@ -91,21 +90,23 @@ enum {
 	Opt_serverino, Opt_noserverino,
 	Opt_rwpidforward, Opt_cifsacl, Opt_nocifsacl,
 	Opt_acl, Opt_noacl, Opt_locallease,
-	Opt_sign, Opt_seal, Opt_noac,
+	Opt_sign, Opt_ignore_signature, Opt_seal, Opt_noac,
 	Opt_fsc, Opt_mfsymlinks,
 	Opt_multiuser, Opt_sloppy, Opt_nosharesock,
 	Opt_persistent, Opt_nopersistent,
 	Opt_resilient, Opt_noresilient,
-	Opt_domainauto, Opt_rdma, Opt_modesid,
+	Opt_domainauto, Opt_rdma, Opt_modesid, Opt_rootfs,
+	Opt_multichannel, Opt_nomultichannel,
 	Opt_compress,
 
 	/* Mount options which take numeric value */
 	Opt_backupuid, Opt_backupgid, Opt_uid,
 	Opt_cruid, Opt_gid, Opt_file_mode,
 	Opt_dirmode, Opt_port,
+	Opt_min_enc_offload,
 	Opt_blocksize, Opt_rsize, Opt_wsize, Opt_actimeo,
 	Opt_echo_interval, Opt_max_credits, Opt_handletimeout,
-	Opt_snapshot,
+	Opt_snapshot, Opt_max_channels,
 
 	/* Mount options which take string value */
 	Opt_user, Opt_pass, Opt_ip,
@@ -134,6 +135,7 @@ static const match_table_t cifs_mount_option_tokens = {
 	{ Opt_noforcegid, "noforcegid" },
 	{ Opt_noblocksend, "noblocksend" },
 	{ Opt_noautotune, "noautotune" },
+	{ Opt_nolease, "nolease" },
 	{ Opt_hard, "hard" },
 	{ Opt_soft, "soft" },
 	{ Opt_perm, "perm" },
@@ -183,6 +185,7 @@ static const match_table_t cifs_mount_option_tokens = {
 	{ Opt_noacl, "noacl" },
 	{ Opt_locallease, "locallease" },
 	{ Opt_sign, "sign" },
+	{ Opt_ignore_signature, "signloosely" },
 	{ Opt_seal, "seal" },
 	{ Opt_noac, "noac" },
 	{ Opt_fsc, "fsc" },
@@ -196,6 +199,8 @@ static const match_table_t cifs_mount_option_tokens = {
 	{ Opt_noresilient, "noresilienthandles"},
 	{ Opt_domainauto, "domainauto"},
 	{ Opt_rdma, "rdma"},
+	{ Opt_multichannel, "multichannel" },
+	{ Opt_nomultichannel, "nomultichannel" },
 
 	{ Opt_backupuid, "backupuid=%s" },
 	{ Opt_backupgid, "backupgid=%s" },
@@ -206,6 +211,7 @@ static const match_table_t cifs_mount_option_tokens = {
 	{ Opt_dirmode, "dirmode=%s" },
 	{ Opt_dirmode, "dir_mode=%s" },
 	{ Opt_port, "port=%s" },
+	{ Opt_min_enc_offload, "esize=%s" },
 	{ Opt_blocksize, "bsize=%s" },
 	{ Opt_rsize, "rsize=%s" },
 	{ Opt_wsize, "wsize=%s" },
@@ -214,6 +220,7 @@ static const match_table_t cifs_mount_option_tokens = {
 	{ Opt_echo_interval, "echo_interval=%s" },
 	{ Opt_max_credits, "max_credits=%s" },
 	{ Opt_snapshot, "snapshot=%s" },
+	{ Opt_max_channels, "max_channels=%s" },
 	{ Opt_compress, "compress=%s" },
 
 	{ Opt_blank_user, "user=" },
@@ -262,6 +269,7 @@ static const match_table_t cifs_mount_option_tokens = {
 	{ Opt_ignore, "nomand" },
 	{ Opt_ignore, "relatime" },
 	{ Opt_ignore, "_netdev" },
+	{ Opt_rootfs, "rootfs" },
 
 	{ Opt_err, NULL }
 };
@@ -298,6 +306,8 @@ enum {
 	Opt_cache_loose,
 	Opt_cache_strict,
 	Opt_cache_none,
+	Opt_cache_ro,
+	Opt_cache_rw,
 	Opt_cache_err
 };
 
@@ -305,6 +315,8 @@ static const match_table_t cifs_cacheflavor_tokens = {
 	{ Opt_cache_loose, "loose" },
 	{ Opt_cache_strict, "strict" },
 	{ Opt_cache_none, "none" },
+	{ Opt_cache_ro, "ro" },
+	{ Opt_cache_rw, "singleclient" },
 	{ Opt_cache_err, NULL }
 };
 
@@ -376,40 +388,7 @@ static inline int reconn_set_ipaddr(struct TCP_Server_Info *server)
 #endif
 
 #ifdef CONFIG_CIFS_DFS_UPCALL
-struct super_cb_data {
-	struct TCP_Server_Info *server;
-	struct cifs_sb_info *cifs_sb;
-};
-
 /* These functions must be called with server->srv_mutex held */
-
-static void super_cb(struct super_block *sb, void *arg)
-{
-	struct super_cb_data *d = arg;
-	struct cifs_sb_info *cifs_sb;
-	struct cifs_tcon *tcon;
-
-	if (d->cifs_sb)
-		return;
-
-	cifs_sb = CIFS_SB(sb);
-	tcon = cifs_sb_master_tcon(cifs_sb);
-	if (tcon->ses->server == d->server)
-		d->cifs_sb = cifs_sb;
-}
-
-static inline struct cifs_sb_info *
-find_super_by_tcp(struct TCP_Server_Info *server)
-{
-	struct super_cb_data d = {
-		.server = server,
-		.cifs_sb = NULL,
-	};
-
-	iterate_supers_type(&cifs_fs_type, super_cb, &d);
-	return d.cifs_sb ? d.cifs_sb : ERR_PTR(-ENOENT);
-}
-
 static void reconn_inval_dfs_target(struct TCP_Server_Info *server,
 				    struct cifs_sb_info *cifs_sb,
 				    struct dfs_cache_tgt_list *tgt_list,
@@ -471,6 +450,7 @@ cifs_reconnect(struct TCP_Server_Info *server)
 	struct mid_q_entry *mid_entry;
 	struct list_head retry_list;
 #ifdef CONFIG_CIFS_DFS_UPCALL
+	struct super_block *sb = NULL;
 	struct cifs_sb_info *cifs_sb = NULL;
 	struct dfs_cache_tgt_list tgt_list = {0};
 	struct dfs_cache_tgt_iterator *tgt_it = NULL;
@@ -480,13 +460,15 @@ cifs_reconnect(struct TCP_Server_Info *server)
 	server->nr_targets = 1;
 #ifdef CONFIG_CIFS_DFS_UPCALL
 	spin_unlock(&GlobalMid_Lock);
-	cifs_sb = find_super_by_tcp(server);
-	if (IS_ERR(cifs_sb)) {
-		rc = PTR_ERR(cifs_sb);
+	sb = cifs_get_tcp_super(server);
+	if (IS_ERR(sb)) {
+		rc = PTR_ERR(sb);
 		cifs_dbg(FYI, "%s: will not do DFS failover: rc = %d\n",
 			 __func__, rc);
-		cifs_sb = NULL;
+		sb = NULL;
 	} else {
+		cifs_sb = CIFS_SB(sb);
+
 		rc = reconn_setup_dfs_targets(cifs_sb, &tgt_list, &tgt_it);
 		if (rc && (rc != -EOPNOTSUPP)) {
 			cifs_server_dbg(VFS, "%s: no target servers for DFS failover\n",
@@ -503,6 +485,10 @@ cifs_reconnect(struct TCP_Server_Info *server)
 		/* the demux thread will exit normally
 		next time through the loop */
 		spin_unlock(&GlobalMid_Lock);
+#ifdef CONFIG_CIFS_DFS_UPCALL
+		dfs_cache_free_tgts(&tgt_list);
+		cifs_put_tcp_super(sb);
+#endif
 		return rc;
 	} else
 		server->tcpStatus = CifsNeedReconnect;
@@ -629,7 +615,10 @@ cifs_reconnect(struct TCP_Server_Info *server)
 				 __func__, rc);
 		}
 		dfs_cache_free_tgts(&tgt_list);
+
 	}
+
+	cifs_put_tcp_super(sb);
 #endif
 	if (server->tcpStatus == CifsNeedNegotiate)
 		mod_delayed_work(cifsiod_wq, &server->echo, 0);
@@ -715,7 +704,7 @@ server_unresponsive(struct TCP_Server_Info *server)
 	 * We need to wait 3 echo intervals to make sure we handle such
 	 * situations right:
 	 * 1s  client sends a normal SMB request
-	 * 3s  client gets a response
+	 * 2s  client gets a response
 	 * 30s echo workqueue job pops, and decides we got a response recently
 	 *     and don't need to send another
 	 * ...
@@ -1435,14 +1424,32 @@ cifs_parse_cache_flavor(char *value, struct smb_vol *vol)
 	case Opt_cache_loose:
 		vol->direct_io = false;
 		vol->strict_io = false;
+		vol->cache_ro = false;
+		vol->cache_rw = false;
 		break;
 	case Opt_cache_strict:
 		vol->direct_io = false;
 		vol->strict_io = true;
+		vol->cache_ro = false;
+		vol->cache_rw = false;
 		break;
 	case Opt_cache_none:
 		vol->direct_io = true;
 		vol->strict_io = false;
+		vol->cache_ro = false;
+		vol->cache_rw = false;
+		break;
+	case Opt_cache_ro:
+		vol->direct_io = false;
+		vol->strict_io = false;
+		vol->cache_ro = true;
+		vol->cache_rw = false;
+		break;
+	case Opt_cache_rw:
+		vol->direct_io = false;
+		vol->strict_io = false;
+		vol->cache_ro = false;
+		vol->cache_rw = true;
 		break;
 	default:
 		cifs_dbg(VFS, "bad cache= option: %s\n", value);
@@ -1654,6 +1661,10 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 
 	vol->echo_interval = SMB_ECHO_INTERVAL_DEFAULT;
 
+	/* default to no multichannel (single server connection) */
+	vol->multichannel = false;
+	vol->max_channels = 1;
+
 	if (!mountdata)
 		goto cifs_parse_mount_err;
 
@@ -1730,6 +1741,9 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 		case Opt_noautotune:
 			vol->noautotune = 1;
 			break;
+		case Opt_nolease:
+			vol->no_lease = 1;
+			break;
 		case Opt_hard:
 			vol->retry = 1;
 			break;
@@ -1764,6 +1778,11 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 			break;
 		case Opt_nodfs:
 			vol->nodfs = 1;
+			break;
+		case Opt_rootfs:
+#ifdef CONFIG_CIFS_ROOT
+			vol->rootfs = true;
+#endif
 			break;
 		case Opt_posixpaths:
 			vol->posix_paths = 1;
@@ -1872,6 +1891,10 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 		case Opt_sign:
 			vol->sign = true;
 			break;
+		case Opt_ignore_signature:
+			vol->sign = true;
+			vol->ignore_signature = true;
+			break;
 		case Opt_seal:
 			/* we do not do the following in secFlags because seal
 			 * is a per tree connection (mount) not a per socket
@@ -1934,6 +1957,16 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 			break;
 		case Opt_rdma:
 			vol->rdma = true;
+			break;
+		case Opt_multichannel:
+			vol->multichannel = true;
+			/* if number of channels not specified, default to 2 */
+			if (vol->max_channels < 2)
+				vol->max_channels = 2;
+			break;
+		case Opt_nomultichannel:
+			vol->multichannel = false;
+			vol->max_channels = 1;
 			break;
 		case Opt_compress:
 			vol->compression = UNKNOWN_TYPE;
@@ -2005,6 +2038,13 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 				goto cifs_parse_mount_err;
 			}
 			port = (unsigned short)option;
+			break;
+		case Opt_min_enc_offload:
+			if (get_option_ul(args, &option)) {
+				cifs_dbg(VFS, "Invalid minimum encrypted read offload size (esize)\n");
+				goto cifs_parse_mount_err;
+			}
+			vol->min_offload = option;
 			break;
 		case Opt_blocksize:
 			if (get_option_ul(args, &option)) {
@@ -2090,6 +2130,15 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 				goto cifs_parse_mount_err;
 			}
 			vol->max_credits = option;
+			break;
+		case Opt_max_channels:
+			if (get_option_ul(args, &option) || option < 1 ||
+				option > CIFS_MAX_CHANNELS) {
+				cifs_dbg(VFS, "%s: Invalid max_channels value, needs to be 1-%d\n",
+					 __func__, CIFS_MAX_CHANNELS);
+				goto cifs_parse_mount_err;
+			}
+			vol->max_channels = option;
 			break;
 
 		/* String Arguments */
@@ -2603,6 +2652,12 @@ static int match_server(struct TCP_Server_Info *server, struct smb_vol *vol)
 	if (server->rdma != vol->rdma)
 		return 0;
 
+	if (server->ignore_signature != vol->ignore_signature)
+		return 0;
+
+	if (server->min_offload != vol->min_offload)
+		return 0;
+
 	return 1;
 }
 
@@ -2613,7 +2668,11 @@ cifs_find_tcp_session(struct smb_vol *vol)
 
 	spin_lock(&cifs_tcp_ses_lock);
 	list_for_each_entry(server, &cifs_tcp_ses_list, tcp_ses_list) {
-		if (!match_server(server, vol))
+		/*
+		 * Skip ses channels since they're only handled in lower layers
+		 * (e.g. cifs_send_recv).
+		 */
+		if (server->is_channel || !match_server(server, vol))
 			continue;
 
 		++server->srv_count;
@@ -2670,7 +2729,7 @@ cifs_put_tcp_session(struct TCP_Server_Info *server, int from_reconnect)
 		force_sig(SIGKILL, task);
 }
 
-static struct TCP_Server_Info *
+struct TCP_Server_Info *
 cifs_get_tcp_session(struct smb_vol *volume_info)
 {
 	struct TCP_Server_Info *tcp_ses = NULL;
@@ -2698,11 +2757,13 @@ cifs_get_tcp_session(struct smb_vol *volume_info)
 		goto out_err_crypto_release;
 	}
 
-	tcp_ses->noblocksnd = volume_info->noblocksnd;
+	tcp_ses->noblockcnt = volume_info->rootfs;
+	tcp_ses->noblocksnd = volume_info->noblocksnd || volume_info->rootfs;
 	tcp_ses->noautotune = volume_info->noautotune;
 	tcp_ses->tcp_nodelay = volume_info->sockopt_tcp_nodelay;
 	tcp_ses->rdma = volume_info->rdma;
 	tcp_ses->in_flight = 0;
+	tcp_ses->max_in_flight = 0;
 	tcp_ses->credits = 1;
 	init_waitqueue_head(&tcp_ses->response_q);
 	init_waitqueue_head(&tcp_ses->request_q);
@@ -2727,7 +2788,11 @@ cifs_get_tcp_session(struct smb_vol *volume_info)
 	       sizeof(tcp_ses->srcaddr));
 	memcpy(&tcp_ses->dstaddr, &volume_info->dstaddr,
 		sizeof(tcp_ses->dstaddr));
-	generate_random_uuid(tcp_ses->client_guid);
+	if (volume_info->use_client_guid)
+		memcpy(tcp_ses->client_guid, volume_info->client_guid,
+		       SMB2_CLIENT_GUID_SIZE);
+	else
+		generate_random_uuid(tcp_ses->client_guid);
 	/*
 	 * at this point we are the only ones with the pointer
 	 * to the struct since the kernel thread not created yet
@@ -2777,10 +2842,11 @@ smbd_connected:
 		module_put(THIS_MODULE);
 		goto out_err_crypto_release;
 	}
+	tcp_ses->min_offload = volume_info->min_offload;
 	tcp_ses->tcpStatus = CifsNeedNegotiate;
 
 	tcp_ses->nr_targets = 1;
-
+	tcp_ses->ignore_signature = volume_info->ignore_signature;
 	/* thread spawned, put it on the list */
 	spin_lock(&cifs_tcp_ses_lock);
 	list_add(&tcp_ses->tcp_ses_list, &cifs_tcp_ses_list);
@@ -2813,6 +2879,13 @@ static int match_session(struct cifs_ses *ses, struct smb_vol *vol)
 {
 	if (vol->sectype != Unspecified &&
 	    vol->sectype != ses->sectype)
+		return 0;
+
+	/*
+	 * If an existing session is limited to less channels than
+	 * requested, it should not be reused
+	 */
+	if (ses->chan_max < vol->max_channels)
 		return 0;
 
 	switch (ses->sectype) {
@@ -2984,6 +3057,14 @@ void cifs_put_smb_ses(struct cifs_ses *ses)
 	spin_lock(&cifs_tcp_ses_lock);
 	list_del_init(&ses->smb_ses_list);
 	spin_unlock(&cifs_tcp_ses_lock);
+
+	/* close any extra channels */
+	if (ses->chan_count > 1) {
+		int i;
+
+		for (i = 1; i < ses->chan_count; i++)
+			cifs_put_tcp_session(ses->chans[i].server, 0);
+	}
 
 	sesInfoFree(ses);
 	cifs_put_tcp_session(server, 0);
@@ -3230,16 +3311,26 @@ cifs_get_smb_ses(struct TCP_Server_Info *server, struct smb_vol *volume_info)
 
 	ses->sectype = volume_info->sectype;
 	ses->sign = volume_info->sign;
-
 	mutex_lock(&ses->session_mutex);
+
+	/* add server as first channel */
+	ses->chans[0].server = server;
+	ses->chan_count = 1;
+	ses->chan_max = volume_info->multichannel ? volume_info->max_channels:1;
+
 	rc = cifs_negotiate_protocol(xid, ses);
 	if (!rc)
 		rc = cifs_setup_session(xid, ses, volume_info->local_nls);
+
+	/* each channel uses a different signing key */
+	memcpy(ses->chans[0].signkey, ses->smb3signingkey,
+	       sizeof(ses->smb3signingkey));
+
 	mutex_unlock(&ses->session_mutex);
 	if (rc)
 		goto get_ses_fail;
 
-	/* success, put it on the list */
+	/* success, put it on the list and add it as first channel */
 	spin_lock(&cifs_tcp_ses_lock);
 	list_add(&ses->smb_ses_list, &server->smb_ses_list);
 	spin_unlock(&cifs_tcp_ses_lock);
@@ -3267,6 +3358,8 @@ static int match_tcon(struct cifs_tcon *tcon, struct smb_vol *volume_info)
 	if (tcon->snapshot_time != volume_info->snapshot_time)
 		return 0;
 	if (tcon->handle_timeout != volume_info->handle_timeout)
+		return 0;
+	if (tcon->no_lease != volume_info->no_lease)
 		return 0;
 	return 1;
 }
@@ -3473,6 +3566,14 @@ cifs_get_tcon(struct cifs_ses *ses, struct smb_vol *volume_info)
 		tcon->use_resilient = true;
 	}
 
+	/* If the user really knows what they are doing they can override */
+	if (tcon->share_flags & SMB2_SHAREFLAG_NO_CACHING) {
+		if (volume_info->cache_ro)
+			cifs_dbg(VFS, "cache=ro requested on mount but NO_CACHING flag set on share\n");
+		else if (volume_info->cache_rw)
+			cifs_dbg(VFS, "cache=singleclient requested on mount but NO_CACHING flag set on share\n");
+	}
+
 	/*
 	 * We can have only one retry value for a connection to a share so for
 	 * resources mounted more than once to the same server share the last
@@ -3482,6 +3583,7 @@ cifs_get_tcon(struct cifs_ses *ses, struct smb_vol *volume_info)
 	tcon->nocase = volume_info->nocase;
 	tcon->nohandlecache = volume_info->nohandlecache;
 	tcon->local_lease = volume_info->local_lease;
+	tcon->no_lease = volume_info->no_lease;
 	INIT_LIST_HEAD(&tcon->pending_opens);
 
 	spin_lock(&cifs_tcp_ses_lock);
@@ -3563,8 +3665,10 @@ match_prepath(struct super_block *sb, struct cifs_mnt_data *mnt_data)
 {
 	struct cifs_sb_info *old = CIFS_SB(sb);
 	struct cifs_sb_info *new = mnt_data->cifs_sb;
-	bool old_set = old->mnt_cifs_flags & CIFS_MOUNT_USE_PREFIX_PATH;
-	bool new_set = new->mnt_cifs_flags & CIFS_MOUNT_USE_PREFIX_PATH;
+	bool old_set = (old->mnt_cifs_flags & CIFS_MOUNT_USE_PREFIX_PATH) &&
+		old->prepath;
+	bool new_set = (new->mnt_cifs_flags & CIFS_MOUNT_USE_PREFIX_PATH) &&
+		new->prepath;
 
 	if (old_set && new_set && !strcmp(new->prepath, old->prepath))
 		return 1;
@@ -3832,7 +3936,15 @@ generic_ip_connect(struct TCP_Server_Info *server)
 		 socket->sk->sk_sndbuf,
 		 socket->sk->sk_rcvbuf, socket->sk->sk_rcvtimeo);
 
-	rc = socket->ops->connect(socket, saddr, slen, 0);
+	rc = socket->ops->connect(socket, saddr, slen,
+				  server->noblockcnt ? O_NONBLOCK : 0);
+	/*
+	 * When mounting SMB root file systems, we do not want to block in
+	 * connect. Otherwise bail out and then let cifs_reconnect() perform
+	 * reconnect failover - if possible.
+	 */
+	if (server->noblockcnt && rc == -EINPROGRESS)
+		rc = 0;
 	if (rc < 0) {
 		cifs_dbg(FYI, "Error %d connecting to server\n", rc);
 		sock_release(socket);
@@ -3995,7 +4107,7 @@ int cifs_setup_cifs_sb(struct smb_vol *pvolume_info,
 	cifs_sb->mnt_gid = pvolume_info->linux_gid;
 	cifs_sb->mnt_file_mode = pvolume_info->file_mode;
 	cifs_sb->mnt_dir_mode = pvolume_info->dir_mode;
-	cifs_dbg(FYI, "file mode: 0x%hx  dir mode: 0x%hx\n",
+	cifs_dbg(FYI, "file mode: %04ho  dir mode: %04ho\n",
 		 cifs_sb->mnt_file_mode, cifs_sb->mnt_dir_mode);
 
 	cifs_sb->actimeo = pvolume_info->actimeo;
@@ -4057,6 +4169,14 @@ int cifs_setup_cifs_sb(struct smb_vol *pvolume_info,
 	if (pvolume_info->direct_io) {
 		cifs_dbg(FYI, "mounting share using direct i/o\n");
 		cifs_sb->mnt_cifs_flags |= CIFS_MOUNT_DIRECT_IO;
+	}
+	if (pvolume_info->cache_ro) {
+		cifs_dbg(VFS, "mounting share with read only caching. Ensure that the share will not be modified while in use.\n");
+		cifs_sb->mnt_cifs_flags |= CIFS_MOUNT_RO_CACHE;
+	} else if (pvolume_info->cache_rw) {
+		cifs_dbg(VFS, "mounting share in single client RW caching mode. Ensure that no other systems will be accessing the share.\n");
+		cifs_sb->mnt_cifs_flags |= (CIFS_MOUNT_RO_CACHE |
+					    CIFS_MOUNT_RW_CACHE);
 	}
 	if (pvolume_info->mfsymlinks) {
 		if (pvolume_info->sfu_emul) {
@@ -4200,8 +4320,18 @@ static int mount_get_conns(struct smb_vol *vol, struct cifs_sb_info *cifs_sb,
 		tcon->unix_ext = 0; /* server does not support them */
 
 	/* do not care if a following call succeed - informational */
-	if (!tcon->pipe && server->ops->qfs_tcon)
-		server->ops->qfs_tcon(*xid, tcon);
+	if (!tcon->pipe && server->ops->qfs_tcon) {
+		server->ops->qfs_tcon(*xid, tcon, cifs_sb);
+		if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_RO_CACHE) {
+			if (tcon->fsDevInfo.DeviceCharacteristics &
+			    cpu_to_le32(FILE_READ_ONLY_DEVICE))
+				cifs_dbg(VFS, "mounted to read only share\n");
+			else if ((cifs_sb->mnt_cifs_flags &
+				  CIFS_MOUNT_RW_CACHE) == 0)
+				cifs_dbg(VFS, "read only mount of RW share\n");
+			/* no need to log a RW mount of a typical RW share */
+		}
+	}
 
 	cifs_sb->wsize = server->ops->negotiate_wsize(tcon, vol);
 	cifs_sb->rsize = server->ops->negotiate_rsize(tcon, vol);
@@ -4375,7 +4505,7 @@ static int setup_dfs_tgt_conn(const char *path,
 	int rc;
 	struct dfs_info3_param ref = {0};
 	char *mdata = NULL, *fake_devname = NULL;
-	struct smb_vol fake_vol = {0};
+	struct smb_vol fake_vol = {NULL};
 
 	cifs_dbg(FYI, "%s: dfs path: %s\n", __func__, path);
 
@@ -4618,6 +4748,17 @@ static int is_path_remote(struct cifs_sb_info *cifs_sb, struct smb_vol *vol,
 }
 
 #ifdef CONFIG_CIFS_DFS_UPCALL
+static inline void set_root_tcon(struct cifs_sb_info *cifs_sb,
+				 struct cifs_tcon *tcon,
+				 struct cifs_tcon **root)
+{
+	spin_lock(&cifs_tcp_ses_lock);
+	tcon->tc_count++;
+	tcon->remap = cifs_remap(cifs_sb);
+	spin_unlock(&cifs_tcp_ses_lock);
+	*root = tcon;
+}
+
 int cifs_mount(struct cifs_sb_info *cifs_sb, struct smb_vol *vol)
 {
 	int rc = 0;
@@ -4719,18 +4860,10 @@ int cifs_mount(struct cifs_sb_info *cifs_sb, struct smb_vol *vol)
 	/* Cache out resolved root server */
 	(void)dfs_cache_find(xid, ses, cifs_sb->local_nls, cifs_remap(cifs_sb),
 			     root_path + 1, NULL, NULL);
-	/*
-	 * Save root tcon for additional DFS requests to update or create a new
-	 * DFS cache entry, or even perform DFS failover.
-	 */
-	spin_lock(&cifs_tcp_ses_lock);
-	tcon->tc_count++;
-	tcon->dfs_path = root_path;
+	kfree(root_path);
 	root_path = NULL;
-	tcon->remap = cifs_remap(cifs_sb);
-	spin_unlock(&cifs_tcp_ses_lock);
 
-	root_tcon = tcon;
+	set_root_tcon(cifs_sb, tcon, &root_tcon);
 
 	for (count = 1; ;) {
 		if (!rc && tcon) {
@@ -4767,6 +4900,15 @@ int cifs_mount(struct cifs_sb_info *cifs_sb, struct smb_vol *vol)
 			mount_put_conns(cifs_sb, xid, server, ses, tcon);
 			rc = mount_get_conns(vol, cifs_sb, &xid, &server, &ses,
 					     &tcon);
+			/*
+			 * Ensure that DFS referrals go through new root server.
+			 */
+			if (!rc && tcon &&
+			    (tcon->share_flags & (SHI1005_FLAGS_DFS |
+						  SHI1005_FLAGS_DFS_ROOT))) {
+				cifs_put_tcon(root_tcon);
+				set_root_tcon(cifs_sb, tcon, &root_tcon);
+			}
 		}
 		if (rc) {
 			if (rc == -EACCES || rc == -EOPNOTSUPP)
@@ -4813,8 +4955,18 @@ int cifs_mount(struct cifs_sb_info *cifs_sb, struct smb_vol *vol)
 	 * dentry revalidation to think the dentry are stale (ESTALE).
 	 */
 	cifs_autodisable_serverino(cifs_sb);
+	/*
+	 * Force the use of prefix path to support failover on DFS paths that
+	 * resolve to targets that have different prefix paths.
+	 */
+	cifs_sb->mnt_cifs_flags |= CIFS_MOUNT_USE_PREFIX_PATH;
+	kfree(cifs_sb->prepath);
+	cifs_sb->prepath = vol->prepath;
+	vol->prepath = NULL;
+
 out:
 	free_xid(xid);
+	cifs_try_adding_channels(ses);
 	return mount_setup_tlink(cifs_sb, ses, tcon);
 
 error:
@@ -5060,7 +5212,7 @@ int
 cifs_negotiate_protocol(const unsigned int xid, struct cifs_ses *ses)
 {
 	int rc = 0;
-	struct TCP_Server_Info *server = ses->server;
+	struct TCP_Server_Info *server = cifs_ses_server(ses);
 
 	if (!server->ops->need_neg || !server->ops->negotiate)
 		return -ENOSYS;
@@ -5087,22 +5239,24 @@ cifs_setup_session(const unsigned int xid, struct cifs_ses *ses,
 		   struct nls_table *nls_info)
 {
 	int rc = -ENOSYS;
-	struct TCP_Server_Info *server = ses->server;
+	struct TCP_Server_Info *server = cifs_ses_server(ses);
 
-	ses->capabilities = server->capabilities;
-	if (linuxExtEnabled == 0)
-		ses->capabilities &= (~server->vals->cap_unix);
+	if (!ses->binding) {
+		ses->capabilities = server->capabilities;
+		if (linuxExtEnabled == 0)
+			ses->capabilities &= (~server->vals->cap_unix);
+
+		if (ses->auth_key.response) {
+			cifs_dbg(FYI, "Free previous auth_key.response = %p\n",
+				 ses->auth_key.response);
+			kfree(ses->auth_key.response);
+			ses->auth_key.response = NULL;
+			ses->auth_key.len = 0;
+		}
+	}
 
 	cifs_dbg(FYI, "Security Mode: 0x%x Capabilities: 0x%x TimeAdjust: %d\n",
 		 server->sec_mode, server->capabilities, server->timeAdj);
-
-	if (ses->auth_key.response) {
-		cifs_dbg(FYI, "Free previous auth_key.response = %p\n",
-			 ses->auth_key.response);
-		kfree(ses->auth_key.response);
-		ses->auth_key.response = NULL;
-		ses->auth_key.len = 0;
-	}
 
 	if (server->ops->sess_setup)
 		rc = server->ops->sess_setup(xid, ses, nls_info);

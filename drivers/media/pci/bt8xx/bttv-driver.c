@@ -2473,8 +2473,8 @@ static int bttv_querycap(struct file *file, void  *priv,
 	if (0 == v4l2)
 		return -EINVAL;
 
-	strlcpy(cap->driver, "bttv", sizeof(cap->driver));
-	strlcpy(cap->card, btv->video_dev.name, sizeof(cap->card));
+	strscpy(cap->driver, "bttv", sizeof(cap->driver));
+	strscpy(cap->card, btv->video_dev.name, sizeof(cap->card));
 	snprintf(cap->bus_info, sizeof(cap->bus_info),
 		 "PCI:%s", pci_name(btv->c.pci));
 	cap->capabilities =
@@ -2535,7 +2535,7 @@ static int bttv_enum_fmt_cap_ovr(struct v4l2_fmtdesc *f)
 		return -EINVAL;
 
 	f->pixelformat = formats[i].fourcc;
-	strlcpy(f->description, formats[i].name, sizeof(f->description));
+	strscpy(f->description, formats[i].name, sizeof(f->description));
 
 	return i;
 }
@@ -4211,7 +4211,7 @@ static int bttv_probe(struct pci_dev *dev, const struct pci_device_id *pci_id)
 	/* register video4linux + input */
 	if (!bttv_tvcards[btv->c.type].no_video) {
 		v4l2_ctrl_add_handler(&btv->radio_ctrl_handler, hdl,
-				v4l2_ctrl_radio_filter);
+				v4l2_ctrl_radio_filter, false);
 		if (btv->radio_ctrl_handler.error) {
 			result = btv->radio_ctrl_handler.error;
 			goto fail2;

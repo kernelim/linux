@@ -200,6 +200,8 @@ extern int ptep_set_access_flags(struct vm_area_struct *vma, unsigned long addre
 #if _PAGE_WRITETHRU != 0
 #define pgprot_cached_wthru(prot) (__pgprot((pgprot_val(prot) & ~_PAGE_CACHE_CTL) | \
 				            _PAGE_COHERENT | _PAGE_WRITETHRU))
+#else
+#define pgprot_cached_wthru(prot)	pgprot_noncached(prot)
 #endif
 
 #define pgprot_cached_noncoherent(prot) \
@@ -240,6 +242,19 @@ static inline int pgd_huge(pgd_t pgd)
 #define pgd_huge		pgd_huge
 
 #define is_hugepd(hpd)		(hugepd_ok(hpd))
+#endif
+
+/*
+ * This gets called at the end of handling a page fault, when
+ * the kernel has put a new PTE into the page table for the process.
+ * We use it to ensure coherency between the i-cache and d-cache
+ * for the page which has just been mapped in.
+ */
+#if defined(CONFIG_PPC_FSL_BOOK3E) && defined(CONFIG_HUGETLB_PAGE)
+void update_mmu_cache(struct vm_area_struct *vma, unsigned long address, pte_t *ptep);
+#else
+static inline
+void update_mmu_cache(struct vm_area_struct *vma, unsigned long address, pte_t *ptep) {}
 #endif
 
 #endif /* __ASSEMBLY__ */

@@ -237,8 +237,8 @@ static int rvin_group_init(struct rvin_group *group, struct rvin_dev *vin)
 	match = of_match_node(vin->dev->driver->of_match_table,
 			      vin->dev->of_node);
 
-	strlcpy(mdev->driver_name, KBUILD_MODNAME, sizeof(mdev->driver_name));
-	strlcpy(mdev->model, match->compatible, sizeof(mdev->model));
+	strscpy(mdev->driver_name, KBUILD_MODNAME, sizeof(mdev->driver_name));
+	strscpy(mdev->model, match->compatible, sizeof(mdev->model));
 	snprintf(mdev->bus_info, sizeof(mdev->bus_info), "platform:%s",
 		 dev_name(mdev->dev));
 
@@ -442,7 +442,7 @@ static int rvin_digital_subdevice_attach(struct rvin_dev *vin,
 		return ret;
 
 	ret = v4l2_ctrl_add_handler(&vin->ctrl_handler, subdev->ctrl_handler,
-				    NULL);
+				    NULL, true);
 	if (ret < 0) {
 		v4l2_ctrl_handler_free(&vin->ctrl_handler);
 		return ret;

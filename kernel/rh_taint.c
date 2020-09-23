@@ -24,7 +24,7 @@
 void mark_hardware_unsupported(const char *msg)
 {
 	/* Print one single message */
-	pr_crit("Warning: %s - this hardware has not undergone testing by Red Hat and might not be certified. Please consult https://hardware.redhat.com for certified hardware.\n", msg);
+	pr_crit("Warning: %s - this hardware has not undergone testing by Red Hat and might not be certified. Please consult https://catalog.redhat.com for certified hardware.\n", msg);
 }
 EXPORT_SYMBOL(mark_hardware_unsupported);
 

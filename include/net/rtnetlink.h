@@ -131,7 +131,7 @@ struct rtnl_link_ops {
 	RH_KABI_RESERVE(13)
 	RH_KABI_RESERVE(14)
 	RH_KABI_RESERVE(15)
-	RH_KABI_SIZE_AND_EXTEND(rtnl_link_ops_extended)
+	RH_KABI_AUX_EMBED(rtnl_link_ops_extended)
 };
 
 int __rtnl_link_register(struct rtnl_link_ops *ops);

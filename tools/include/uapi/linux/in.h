@@ -77,6 +77,7 @@ enum {
   IPPROTO_RAW = 255,		/* Raw IP packets			*/
 #define IPPROTO_RAW		IPPROTO_RAW
   IPPROTO_MAX
+#define IPPROTO_MPTCP		262
 };
 #endif
 

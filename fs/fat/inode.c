@@ -30,6 +30,11 @@
 
 #define KB_IN_SECTORS 2
 
+/* DOS dates from 1980/1/1 through 2107/12/31 */
+#define FAT_DATE_MIN (0<<9 | 1<<5 | 1)
+#define FAT_DATE_MAX (127<<9 | 12<<5 | 31)
+#define FAT_TIME_MAX (23<<11 | 59<<5 | 29)
+
 /*
  * A deserialized copy of the on-disk structure laid out in struct
  * fat_boot_sector.
@@ -508,7 +513,6 @@ static int fat_validate_dir(struct inode *dir)
 /* doesn't deal with root inode */
 int fat_fill_inode(struct inode *inode, struct msdos_dir_entry *de)
 {
-	struct timespec ts;
 	struct msdos_sb_info *sbi = MSDOS_SB(inode->i_sb);
 	int error;
 
@@ -559,14 +563,11 @@ int fat_fill_inode(struct inode *inode, struct msdos_dir_entry *de)
 	inode->i_blocks = ((inode->i_size + (sbi->cluster_size - 1))
 			   & ~((loff_t)sbi->cluster_size - 1)) >> 9;
 
-	fat_time_fat2unix(sbi, &ts, de->time, de->date, 0);
-	inode->i_mtime = timespec_to_timespec64(ts);
+	fat_time_fat2unix(sbi, &inode->i_mtime, de->time, de->date, 0);
 	if (sbi->options.isvfat) {
-		fat_time_fat2unix(sbi, &ts, de->ctime,
+		fat_time_fat2unix(sbi, &inode->i_ctime, de->ctime,
 				  de->cdate, de->ctime_cs);
-		inode->i_ctime = timespec_to_timespec64(ts);
-		fat_time_fat2unix(sbi, &ts, 0, de->adate, 0);
-		inode->i_atime = timespec_to_timespec64(ts);
+		fat_time_fat2unix(sbi, &inode->i_atime, 0, de->adate, 0);
 	} else
 		inode->i_ctime = inode->i_atime = inode->i_mtime;
 
@@ -843,7 +844,6 @@ static int fat_statfs(struct dentry *dentry, struct kstatfs *buf)
 
 static int __fat_write_inode(struct inode *inode, int wait)
 {
-	struct timespec ts;
 	struct super_block *sb = inode->i_sb;
 	struct msdos_sb_info *sbi = MSDOS_SB(sb);
 	struct buffer_head *bh;
@@ -881,16 +881,13 @@ retry:
 		raw_entry->size = cpu_to_le32(inode->i_size);
 	raw_entry->attr = fat_make_attrs(inode);
 	fat_set_start(raw_entry, MSDOS_I(inode)->i_logstart);
-	ts = timespec64_to_timespec(inode->i_mtime);
-	fat_time_unix2fat(sbi, &ts, &raw_entry->time,
+	fat_time_unix2fat(sbi, &inode->i_mtime, &raw_entry->time,
 			  &raw_entry->date, NULL);
 	if (sbi->options.isvfat) {
 		__le16 atime;
-		ts = timespec64_to_timespec(inode->i_ctime);
-		fat_time_unix2fat(sbi, &ts, &raw_entry->ctime,
+		fat_time_unix2fat(sbi, &inode->i_ctime, &raw_entry->ctime,
 				  &raw_entry->cdate, &raw_entry->ctime_cs);
-		ts = timespec64_to_timespec(inode->i_atime);
-		fat_time_unix2fat(sbi, &ts, &atime,
+		fat_time_unix2fat(sbi, &inode->i_atime, &atime,
 				  &raw_entry->adate, NULL);
 	}
 	spin_unlock(&sbi->inode_hash_lock);
@@ -1618,6 +1615,7 @@ int fat_fill_super(struct super_block *sb, void *data, int silent, int isvfat,
 	int debug;
 	long error;
 	char buf[50];
+	struct timespec64 ts;
 
 	/*
 	 * GFP_KERNEL is ok here, because while we do hold the
@@ -1706,6 +1704,12 @@ int fat_fill_super(struct super_block *sb, void *data, int silent, int isvfat,
 	sbi->free_clus_valid = 0;
 	sbi->prev_free = FAT_START_ENT;
 	sb->s_maxbytes = 0xffffffff;
+	fat_time_fat2unix(sbi, &ts, 0, cpu_to_le16(FAT_DATE_MIN), 0);
+	sb->s_time_min = ts.tv_sec;
+
+	fat_time_fat2unix(sbi, &ts, cpu_to_le16(FAT_TIME_MAX),
+			  cpu_to_le16(FAT_DATE_MAX), 0);
+	sb->s_time_max = ts.tv_sec;
 
 	if (!sbi->fat_length && bpb.fat32_length) {
 		struct fat_boot_fsinfo *fsinfo;

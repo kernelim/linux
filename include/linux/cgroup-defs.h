@@ -268,6 +268,12 @@ struct css_set {
 
 	/* For RCU-protected deletion */
 	struct rcu_head rcu_head;
+
+	/*
+	 * RHEL8: css_set structures are dynamically allocated and
+	 *	  used by core kernel only.
+	 */
+	RH_KABI_EXTEND(struct list_head dying_tasks)
 };
 
 struct cgroup_base_stat {
@@ -451,7 +457,7 @@ struct cgroup {
 	struct list_head rstat_css_list;
 
 	/* cgroup basic resource statistics */
-	struct cgroup_base_stat pending_bstat;	/* pending from children */
+	struct cgroup_base_stat RH_KABI_RENAME(pending_bstat, last_bstat);
 	struct cgroup_base_stat bstat;
 	struct prev_cputime prev_cputime;	/* for printing out cputime */
 
@@ -665,7 +671,7 @@ struct cgroup_subsys {
 	void (*cancel_fork)(struct task_struct *task);
 	void (*fork)(struct task_struct *task);
 	void (*exit)(struct task_struct *task);
-	void (*free)(struct task_struct *task);
+	void (*RH_KABI_RENAME(free, release))(struct task_struct *task);
 	void (*bind)(struct cgroup_subsys_state *root_css);
 
 	bool early_init:1;

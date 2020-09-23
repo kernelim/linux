@@ -70,6 +70,7 @@
 #include <linux/blkdev.h>
 #include <linux/gfp.h>
 #include <linux/blk-mq.h>
+#include <linux/lockdep.h>
 
 #include "blk.h"
 #include "blk-mq.h"
@@ -215,6 +216,16 @@ static void flush_end_io(struct request *flush_rq, blk_status_t error)
 
 	/* release the tag's ownership to the req cloned from */
 	spin_lock_irqsave(&fq->mq_flush_lock, flags);
+
+	if (!refcount_dec_and_test(&flush_rq->ref)) {
+		fq->rq_status = error;
+		spin_unlock_irqrestore(&fq->mq_flush_lock, flags);
+		return;
+	}
+
+	if (fq->rq_status != BLK_STS_OK)
+		error = fq->rq_status;
+
 	hctx = flush_rq->mq_hctx;
 	if (!q->elevator) {
 		blk_mq_tag_set_rq(hctx, flush_rq->tag, fq->orig_rq);
@@ -466,7 +477,8 @@ struct blk_flush_queue *blk_alloc_flush_queue(struct request_queue *q,
 		int node, int cmd_size, gfp_t flags)
 {
 	struct blk_flush_queue *fq;
-	int rq_sz = sizeof(struct request);
+	int rq_sz = sizeof(struct request_aux) + sizeof(struct request);
+	void *p;
 
 	fq = kzalloc_node(sizeof(*fq), flags, node);
 	if (!fq)
@@ -475,13 +487,18 @@ struct blk_flush_queue *blk_alloc_flush_queue(struct request_queue *q,
 	spin_lock_init(&fq->mq_flush_lock);
 
 	rq_sz = round_up(rq_sz + cmd_size, cache_line_size());
-	fq->flush_rq = kzalloc_node(rq_sz, flags, node);
-	if (!fq->flush_rq)
+	p = kzalloc_node(rq_sz, flags, node);
+	if (!p)
 		goto fail_rq;
+
+	fq->flush_rq = p + sizeof(struct request_aux);
 
 	INIT_LIST_HEAD(&fq->flush_queue[0]);
 	INIT_LIST_HEAD(&fq->flush_queue[1]);
 	INIT_LIST_HEAD(&fq->flush_data_in_flight);
+
+	lockdep_register_key(&fq->key);
+	lockdep_set_class(&fq->mq_flush_lock, &fq->key);
 
 	return fq;
 
@@ -497,6 +514,7 @@ void blk_free_flush_queue(struct blk_flush_queue *fq)
 	if (!fq)
 		return;
 
-	kfree(fq->flush_rq);
+	lockdep_unregister_key(&fq->key);
+	kfree((void *)fq->flush_rq - sizeof(struct request_aux));
 	kfree(fq);
 }

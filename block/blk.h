@@ -30,6 +30,8 @@ struct blk_flush_queue {
 	 */
 	struct request		*orig_rq;
 	spinlock_t		mq_flush_lock;
+	RH_KABI_EXTEND(blk_status_t 		rq_status)
+	RH_KABI_EXTEND(struct lock_class_key	key)
 };
 
 extern struct kmem_cache *blk_requestq_cachep;
@@ -45,6 +47,12 @@ blk_get_flush_queue(struct request_queue *q, struct blk_mq_ctx *ctx)
 static inline void __blk_get_queue(struct request_queue *q)
 {
 	kobject_get(&q->kobj);
+}
+
+static inline bool
+is_flush_rq(struct request *req, struct blk_mq_hw_ctx *hctx)
+{
+	return hctx->fq->flush_rq == req;
 }
 
 struct blk_flush_queue *blk_alloc_flush_queue(struct request_queue *q,
@@ -178,7 +186,7 @@ void blk_account_io_done(struct request *req, u64 now);
 
 void blk_insert_flush(struct request *rq);
 
-int elevator_init_mq(struct request_queue *q);
+void elevator_init_mq(struct request_queue *q);
 int elevator_switch_mq(struct request_queue *q,
 			      struct elevator_type *new_e);
 void __elevator_exit(struct request_queue *, struct elevator_queue *);
@@ -227,14 +235,11 @@ int blk_dev_init(void);
  * Contribute to IO statistics IFF:
  *
  *	a) it's attached to a gendisk, and
- *	b) the queue had IO stats enabled when this request was started, and
- *	c) it's a file system request
+ *	b) the queue had IO stats enabled when this request was started
  */
 static inline bool blk_do_io_stat(struct request *rq)
 {
-	return rq->rq_disk &&
-	       (rq->rq_flags & RQF_IO_STAT) &&
-		!blk_rq_is_passthrough(rq);
+	return rq->rq_disk && (rq->rq_flags & RQF_IO_STAT);
 }
 
 static inline void req_set_nomerge(struct request_queue *q, struct request *req)
@@ -336,5 +341,11 @@ void blk_queue_free_zone_bitmaps(struct request_queue *q);
 #else
 static inline void blk_queue_free_zone_bitmaps(struct request_queue *q) {}
 #endif
+
+/* internal helper for accessing request_aux  */
+static inline struct request_aux *rq_aux(const struct request *rq)
+{
+	return (struct request_aux *)((void *)rq - sizeof(struct request_aux));
+}
 
 #endif /* BLK_INTERNAL_H */

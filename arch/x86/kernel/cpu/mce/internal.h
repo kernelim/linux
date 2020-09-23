@@ -52,11 +52,13 @@ unsigned long cmci_intel_adjust_timer(unsigned long interval);
 bool mce_intel_cmci_poll(void);
 void mce_intel_hcpu_update(unsigned long cpu);
 void cmci_disable_bank(int bank);
+bool intel_filter_mce(struct mce *m);
 #else
 # define cmci_intel_adjust_timer mce_adjust_timer_default
 static inline bool mce_intel_cmci_poll(void) { return false; }
 static inline void mce_intel_hcpu_update(unsigned long cpu) { }
 static inline void cmci_disable_bank(int bank) { }
+static inline bool intel_filter_mce(struct mce *m) { return false; };
 #endif
 
 void mce_timer_kick(unsigned long interval);
@@ -169,5 +171,8 @@ struct mca_msr_regs {
 };
 
 extern struct mca_msr_regs msr_ops;
+
+/* Decide whether to add MCE record to MCE event pool or filter it out. */
+extern bool filter_mce(struct mce *m);
 
 #endif /* __X86_MCE_INTERNAL_H__ */

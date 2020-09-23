@@ -13,22 +13,12 @@
 	.code64
 	.section .entry.text, "ax"
 
-#ifdef CC_USING_FENTRY
 # define function_hook	__fentry__
 EXPORT_SYMBOL(__fentry__)
-#else
-# define function_hook	mcount
-EXPORT_SYMBOL(mcount)
-#endif
 
 #ifdef CONFIG_FRAME_POINTER
-# ifdef CC_USING_FENTRY
 /* Save parent and function stack frames (rip and rbp) */
 #  define MCOUNT_FRAME_SIZE	(8+16*2)
-# else
-/* Save just function stack frame (rip and rbp) */
-#  define MCOUNT_FRAME_SIZE	(8+16)
-# endif
 #else
 /* No need to save a stack frame */
 # define MCOUNT_FRAME_SIZE	0
@@ -75,17 +65,13 @@ EXPORT_SYMBOL(mcount)
 	 * fentry is called before the stack frame is set up, where as mcount
 	 * is called afterward.
 	 */
-#ifdef CC_USING_FENTRY
+
 	/* Save the parent pointer (skip orig rbp and our return address) */
 	pushq \added+8*2(%rsp)
 	pushq %rbp
 	movq %rsp, %rbp
 	/* Save the return address (now skip orig rbp, rbp and parent) */
 	pushq \added+8*3(%rsp)
-#else
-	/* Can't assume that rip is before this (unless added was zero) */
-	pushq \added+8(%rsp)
-#endif
 	pushq %rbp
 	movq %rsp, %rbp
 #endif /* CONFIG_FRAME_POINTER */
@@ -101,6 +87,7 @@ EXPORT_SYMBOL(mcount)
 	movq %rdi, RDI(%rsp)
 	movq %r8, R8(%rsp)
 	movq %r9, R9(%rsp)
+	movq $0, ORIG_RAX(%rsp)
 	/*
 	 * Save the original RBP. Even though the mcount ABI does not
 	 * require this, it helps out callers.
@@ -113,12 +100,7 @@ EXPORT_SYMBOL(mcount)
 	movq %rdx, RBP(%rsp)
 
 	/* Copy the parent address into %rsi (second parameter) */
-#ifdef CC_USING_FENTRY
 	movq MCOUNT_REG_SIZE+8+\added(%rsp), %rsi
-#else
-	/* %rdx contains original %rbp */
-	movq 8(%rdx), %rsi
-#endif
 
 	 /* Move RIP to its proper location */
 	movq MCOUNT_REG_SIZE+\added(%rsp), %rdi
@@ -132,7 +114,11 @@ EXPORT_SYMBOL(mcount)
 	subq $MCOUNT_INSN_SIZE, %rdi
 	.endm
 
-.macro restore_mcount_regs
+.macro restore_mcount_regs save=0
+
+	/* ftrace_regs_caller or frame pointers require this */
+	movq RBP(%rsp), %rbp
+
 	movq R9(%rsp), %r9
 	movq R8(%rsp), %r8
 	movq RDI(%rsp), %rdi
@@ -141,10 +127,7 @@ EXPORT_SYMBOL(mcount)
 	movq RCX(%rsp), %rcx
 	movq RAX(%rsp), %rax
 
-	/* ftrace_regs_caller can modify %rbp */
-	movq RBP(%rsp), %rbp
-
-	addq $MCOUNT_REG_SIZE, %rsp
+	addq $MCOUNT_REG_SIZE-\save, %rsp
 
 	.endm
 
@@ -193,6 +176,8 @@ ENDPROC(ftrace_caller)
 ENTRY(ftrace_regs_caller)
 	/* Save the current flags before any operations that can change them */
 	pushfq
+
+	UNWIND_HINT_SAVE
 
 	/* added 8 bytes to save flags */
 	save_mcount_regs 8
@@ -244,7 +229,33 @@ GLOBAL(ftrace_regs_call)
 	movq R10(%rsp), %r10
 	movq RBX(%rsp), %rbx
 
-	restore_mcount_regs
+	movq ORIG_RAX(%rsp), %rax
+	movq %rax, MCOUNT_REG_SIZE-8(%rsp)
+
+	/* If ORIG_RAX is anything but zero, make this a call to that */
+	movq ORIG_RAX(%rsp), %rax
+	cmpq	$0, %rax
+	je	1f
+
+	/* Swap the flags with orig_rax */
+	movq MCOUNT_REG_SIZE(%rsp), %rdi
+	movq %rdi, MCOUNT_REG_SIZE-8(%rsp)
+	movq %rax, MCOUNT_REG_SIZE(%rsp)
+
+	restore_mcount_regs 8
+
+	jmp	2f
+
+1:	restore_mcount_regs
+
+
+2:
+	/*
+	 * The stack layout is nondetermistic here, depending on which path was
+	 * taken.  This confuses objtool and ORC, rightfully so.  For now,
+	 * pretend the stack always looks like the non-direct case.
+	 */
+	UNWIND_HINT_RESTORE
 
 	/* Restore flags */
 	popfq
@@ -303,15 +314,8 @@ ENTRY(ftrace_graph_caller)
 	/* Saves rbp into %rdx and fills first parameter  */
 	save_mcount_regs
 
-#ifdef CC_USING_FENTRY
 	leaq MCOUNT_REG_SIZE+8(%rsp), %rsi
 	movq $0, %rdx	/* No framepointers needed */
-#else
-	/* Save address of the return address of traced function */
-	leaq 8(%rdx), %rsi
-	/* ftrace does sanity checks against frame pointers */
-	movq (%rdx), %rdx
-#endif
 	call	prepare_ftrace_return
 
 	restore_mcount_regs

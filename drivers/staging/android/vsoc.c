@@ -443,7 +443,7 @@ static int handle_vsoc_cond_wait(struct file *filp, struct vsoc_cond_wait *arg)
 		hrtimer_set_expires_range_ns(&to->timer, timespec_to_ktime(ts),
 					     current->timer_slack_ns);
 
-		hrtimer_init_sleeper(to, current);
+		hrtimer_init_sleeper(to);
 	}
 
 	while (1) {
@@ -461,7 +461,7 @@ static int handle_vsoc_cond_wait(struct file *filp, struct vsoc_cond_wait *arg)
 			break;
 		}
 		if (to) {
-			hrtimer_start_expires(&to->timer, HRTIMER_MODE_ABS);
+			hrtimer_sleeper_start_expires(to, HRTIMER_MODE_ABS);
 			if (likely(to->task))
 				freezable_schedule();
 			hrtimer_cancel(&to->timer);

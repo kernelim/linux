@@ -2,7 +2,6 @@
 #define _LINUX_MEMBLOCK_H
 #ifdef __KERNEL__
 
-#ifdef CONFIG_HAVE_MEMBLOCK
 /*
  * Logical memory blocks.
  *
@@ -16,11 +15,30 @@
 
 #include <linux/init.h>
 #include <linux/mm.h>
+#include <asm/dma.h>
+
+extern unsigned long max_low_pfn;
+extern unsigned long min_low_pfn;
+
+/*
+ * highest page
+ */
+extern unsigned long max_pfn;
+/*
+ * highest possible page
+ */
+extern unsigned long long max_possible_pfn;
 
 #define INIT_MEMBLOCK_REGIONS	128
 #define INIT_PHYSMEM_REGIONS	4
 
-/* Definition of memblock flags. */
+/**
+ * enum memblock_flags - definition of memory region attributes
+ * @MEMBLOCK_NONE: no special request
+ * @MEMBLOCK_HOTPLUG: hotpluggable region
+ * @MEMBLOCK_MIRROR: mirrored region
+ * @MEMBLOCK_NOMAP: don't add to kernel direct mapping
+ */
 enum memblock_flags {
 	MEMBLOCK_NONE		= 0x0,	/* No special request */
 	MEMBLOCK_HOTPLUG	= 0x1,	/* hotpluggable region */
@@ -28,6 +46,13 @@ enum memblock_flags {
 	MEMBLOCK_NOMAP		= 0x4,	/* don't add to kernel direct mapping */
 };
 
+/**
+ * struct memblock_region - represents a memory region
+ * @base: physical address of the region
+ * @size: size of the region
+ * @flags: memory region attributes
+ * @nid: NUMA node id
+ */
 struct memblock_region {
 	phys_addr_t base;
 	phys_addr_t size;
@@ -37,14 +62,30 @@ struct memblock_region {
 #endif
 };
 
+/**
+ * struct memblock_type - collection of memory regions of certain type
+ * @cnt: number of regions
+ * @max: size of the allocated array
+ * @total_size: size of all regions
+ * @regions: array of regions
+ * @name: the memory type symbolic name
+ */
 struct memblock_type {
-	unsigned long cnt;	/* number of regions */
-	unsigned long max;	/* size of the allocated array */
-	phys_addr_t total_size;	/* size of all regions */
+	unsigned long cnt;
+	unsigned long max;
+	phys_addr_t total_size;
 	struct memblock_region *regions;
 	char *name;
 };
 
+/**
+ * struct memblock - memblock allocator metadata
+ * @bottom_up: is bottom up direction?
+ * @current_limit: physical address of the current allocation limit
+ * @memory: usabe memory regions
+ * @reserved: reserved memory regions
+ * @physmem: all physical memory
+ */
 struct memblock {
 	bool bottom_up;  /* is bottom up direction? */
 	phys_addr_t current_limit;
@@ -90,6 +131,10 @@ int memblock_mark_mirror(phys_addr_t base, phys_addr_t size);
 int memblock_mark_nomap(phys_addr_t base, phys_addr_t size);
 int memblock_clear_nomap(phys_addr_t base, phys_addr_t size);
 enum memblock_flags choose_memblock_flags(void);
+
+unsigned long memblock_free_all(void);
+void reset_node_managed_pages(pg_data_t *pgdat);
+void reset_all_zones_managed_pages(void);
 
 /* Low level functions */
 int memblock_add_range(struct memblock_type *type,
@@ -203,6 +248,50 @@ void __next_mem_pfn_range(int *idx, int nid, unsigned long *out_start_pfn,
 	     i >= 0; __next_mem_pfn_range(&i, nid, p_start, p_end, p_nid))
 #endif /* CONFIG_HAVE_MEMBLOCK_NODE_MAP */
 
+#ifdef CONFIG_DEFERRED_STRUCT_PAGE_INIT
+void __next_mem_pfn_range_in_zone(u64 *idx, struct zone *zone,
+				  unsigned long *out_spfn,
+				  unsigned long *out_epfn);
+/**
+ * for_each_free_mem_range_in_zone - iterate through zone specific free
+ * memblock areas
+ * @i: u64 used as loop variable
+ * @zone: zone in which all of the memory blocks reside
+ * @p_start: ptr to phys_addr_t for start address of the range, can be %NULL
+ * @p_end: ptr to phys_addr_t for end address of the range, can be %NULL
+ *
+ * Walks over free (memory && !reserved) areas of memblock in a specific
+ * zone. Available once memblock and an empty zone is initialized. The main
+ * assumption is that the zone start, end, and pgdat have been associated.
+ * This way we can use the zone to determine NUMA node, and if a given part
+ * of the memblock is valid for the zone.
+ */
+#define for_each_free_mem_pfn_range_in_zone(i, zone, p_start, p_end)	\
+	for (i = 0,							\
+	     __next_mem_pfn_range_in_zone(&i, zone, p_start, p_end);	\
+	     i != U64_MAX;					\
+	     __next_mem_pfn_range_in_zone(&i, zone, p_start, p_end))
+
+/**
+ * for_each_free_mem_range_in_zone_from - iterate through zone specific
+ * free memblock areas from a given point
+ * @i: u64 used as loop variable
+ * @zone: zone in which all of the memory blocks reside
+ * @p_start: ptr to phys_addr_t for start address of the range, can be %NULL
+ * @p_end: ptr to phys_addr_t for end address of the range, can be %NULL
+ *
+ * Walks over free (memory && !reserved) areas of memblock in a specific
+ * zone, continuing from current position. Available as soon as memblock is
+ * initialized.
+ */
+#define for_each_free_mem_pfn_range_in_zone_from(i, zone, p_start, p_end) \
+	for (; i != U64_MAX;					  \
+	     __next_mem_pfn_range_in_zone(&i, zone, p_start, p_end))
+
+int __init deferred_page_init_max_threads(const struct cpumask *node_cpumask);
+
+#endif /* CONFIG_DEFERRED_STRUCT_PAGE_INIT */
+
 /**
  * for_each_free_mem_range - iterate through free memblock areas
  * @i: u64 used as loop variable
@@ -272,10 +361,117 @@ static inline int memblock_get_region_node(const struct memblock_region *r)
 }
 #endif /* CONFIG_HAVE_MEMBLOCK_NODE_MAP */
 
-phys_addr_t memblock_alloc_nid(phys_addr_t size, phys_addr_t align, int nid);
-phys_addr_t memblock_alloc_try_nid(phys_addr_t size, phys_addr_t align, int nid);
+/* Flags for memblock allocation APIs */
+#define MEMBLOCK_ALLOC_ANYWHERE	(~(phys_addr_t)0)
+#define MEMBLOCK_ALLOC_ACCESSIBLE	0
+#define MEMBLOCK_ALLOC_KASAN		1
 
-phys_addr_t memblock_alloc(phys_addr_t size, phys_addr_t align);
+/* We are using top down, so it is safe to use 0 here */
+#define MEMBLOCK_LOW_LIMIT 0
+
+#ifndef ARCH_LOW_ADDRESS_LIMIT
+#define ARCH_LOW_ADDRESS_LIMIT  0xffffffffUL
+#endif
+
+phys_addr_t memblock_phys_alloc_nid(phys_addr_t size, phys_addr_t align, int nid);
+phys_addr_t memblock_phys_alloc_try_nid(phys_addr_t size, phys_addr_t align, int nid);
+
+phys_addr_t memblock_phys_alloc(phys_addr_t size, phys_addr_t align);
+
+void *memblock_alloc_try_nid_raw(phys_addr_t size, phys_addr_t align,
+				 phys_addr_t min_addr, phys_addr_t max_addr,
+				 int nid);
+void *memblock_alloc_try_nid_nopanic(phys_addr_t size, phys_addr_t align,
+				     phys_addr_t min_addr, phys_addr_t max_addr,
+				     int nid);
+void *memblock_alloc_try_nid(phys_addr_t size, phys_addr_t align,
+			     phys_addr_t min_addr, phys_addr_t max_addr,
+			     int nid);
+
+static inline void * __init memblock_alloc(phys_addr_t size,  phys_addr_t align)
+{
+	return memblock_alloc_try_nid(size, align, MEMBLOCK_LOW_LIMIT,
+				      MEMBLOCK_ALLOC_ACCESSIBLE, NUMA_NO_NODE);
+}
+
+static inline void * __init memblock_alloc_raw(phys_addr_t size,
+					       phys_addr_t align)
+{
+	return memblock_alloc_try_nid_raw(size, align, MEMBLOCK_LOW_LIMIT,
+					  MEMBLOCK_ALLOC_ACCESSIBLE,
+					  NUMA_NO_NODE);
+}
+
+static inline void * __init memblock_alloc_from(phys_addr_t size,
+						phys_addr_t align,
+						phys_addr_t min_addr)
+{
+	return memblock_alloc_try_nid(size, align, min_addr,
+				      MEMBLOCK_ALLOC_ACCESSIBLE, NUMA_NO_NODE);
+}
+
+static inline void * __init memblock_alloc_nopanic(phys_addr_t size,
+						   phys_addr_t align)
+{
+	return memblock_alloc_try_nid_nopanic(size, align, MEMBLOCK_LOW_LIMIT,
+					      MEMBLOCK_ALLOC_ACCESSIBLE,
+					      NUMA_NO_NODE);
+}
+
+static inline void * __init memblock_alloc_low(phys_addr_t size,
+					       phys_addr_t align)
+{
+	return memblock_alloc_try_nid(size, align, MEMBLOCK_LOW_LIMIT,
+				      ARCH_LOW_ADDRESS_LIMIT, NUMA_NO_NODE);
+}
+static inline void * __init memblock_alloc_low_nopanic(phys_addr_t size,
+						       phys_addr_t align)
+{
+	return memblock_alloc_try_nid_nopanic(size, align, MEMBLOCK_LOW_LIMIT,
+					      ARCH_LOW_ADDRESS_LIMIT,
+					      NUMA_NO_NODE);
+}
+
+static inline void * __init memblock_alloc_from_nopanic(phys_addr_t size,
+							phys_addr_t align,
+							phys_addr_t min_addr)
+{
+	return memblock_alloc_try_nid_nopanic(size, align, min_addr,
+					      MEMBLOCK_ALLOC_ACCESSIBLE,
+					      NUMA_NO_NODE);
+}
+
+static inline void * __init memblock_alloc_node(phys_addr_t size,
+						phys_addr_t align, int nid)
+{
+	return memblock_alloc_try_nid(size, align, MEMBLOCK_LOW_LIMIT,
+				      MEMBLOCK_ALLOC_ACCESSIBLE, nid);
+}
+
+static inline void * __init memblock_alloc_node_nopanic(phys_addr_t size,
+							int nid)
+{
+	return memblock_alloc_try_nid_nopanic(size, SMP_CACHE_BYTES,
+					      MEMBLOCK_LOW_LIMIT,
+					      MEMBLOCK_ALLOC_ACCESSIBLE, nid);
+}
+
+static inline void __init memblock_free_early(phys_addr_t base,
+					      phys_addr_t size)
+{
+	__memblock_free_early(base, size);
+}
+
+static inline void __init memblock_free_early_nid(phys_addr_t base,
+						  phys_addr_t size, int nid)
+{
+	__memblock_free_early(base, size);
+}
+
+static inline void __init memblock_free_late(phys_addr_t base, phys_addr_t size)
+{
+	__memblock_free_late(base, size);
+}
 
 /*
  * Set the allocation direction to bottom-up or top-down.
@@ -294,11 +490,6 @@ static inline bool memblock_bottom_up(void)
 {
 	return memblock.bottom_up;
 }
-
-/* Flags for memblock_alloc_base() amd __memblock_alloc_base() */
-#define MEMBLOCK_ALLOC_ANYWHERE	(~(phys_addr_t)0)
-#define MEMBLOCK_ALLOC_ACCESSIBLE	0
-#define MEMBLOCK_ALLOC_KASAN		1
 
 phys_addr_t __init memblock_alloc_range(phys_addr_t size, phys_addr_t align,
 					phys_addr_t start, phys_addr_t end,
@@ -405,6 +596,31 @@ static inline unsigned long memblock_region_reserved_end_pfn(const struct memblo
 	     i < memblock_type->cnt;					\
 	     i++, rgn = &memblock_type->regions[i])
 
+extern void *alloc_large_system_hash(const char *tablename,
+				     unsigned long bucketsize,
+				     unsigned long numentries,
+				     int scale,
+				     int flags,
+				     unsigned int *_hash_shift,
+				     unsigned int *_hash_mask,
+				     unsigned long low_limit,
+				     unsigned long high_limit);
+
+#define HASH_EARLY	0x00000001	/* Allocating during early boot? */
+#define HASH_SMALL	0x00000002	/* sub-page allocation allowed, min
+					 * shift passed via *_hash_shift */
+#define HASH_ZERO	0x00000004	/* Zero allocated hash table */
+
+/* Only NUMA needs hash distribution. 64bit NUMA architectures have
+ * sufficient vmalloc space.
+ */
+#ifdef CONFIG_NUMA
+#define HASHDIST_DEFAULT IS_ENABLED(CONFIG_64BIT)
+extern int hashdist;		/* Distribute hashes across NUMA nodes? */
+#else
+#define hashdist (0)
+#endif
+
 #ifdef CONFIG_MEMTEST
 extern void early_memtest(phys_addr_t start, phys_addr_t end);
 #else
@@ -412,12 +628,6 @@ static inline void early_memtest(phys_addr_t start, phys_addr_t end)
 {
 }
 #endif
-#else
-static inline phys_addr_t memblock_alloc(phys_addr_t size, phys_addr_t align)
-{
-	return 0;
-}
-#endif /* CONFIG_HAVE_MEMBLOCK */
 
 #endif /* __KERNEL__ */
 

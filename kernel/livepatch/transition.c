@@ -90,7 +90,7 @@ static void klp_complete_transition(void)
 		 klp_target_state == KLP_PATCHED ? "patching" : "unpatching");
 
 	if (klp_transition_patch->replace && klp_target_state == KLP_PATCHED) {
-		klp_discard_replaced_patches(klp_transition_patch);
+		klp_unpatch_replaced_patches(klp_transition_patch);
 		klp_discard_nops(klp_transition_patch);
 	}
 
@@ -259,7 +259,6 @@ static int klp_check_stack(struct task_struct *task, char *err_buf)
 	int ret, nr_entries;
 
 	ret = stack_trace_save_tsk_reliable(task, entries, ARRAY_SIZE(entries));
-	WARN_ON_ONCE(ret == -ENOSYS);
 	if (ret < 0) {
 		snprintf(err_buf, STACK_ERR_BUF_SIZE,
 			 "%s: %s:%d has an unreliable stack\n",
@@ -293,11 +292,11 @@ static int klp_check_stack(struct task_struct *task, char *err_buf)
  */
 static bool klp_try_switch_task(struct task_struct *task)
 {
+	static char err_buf[STACK_ERR_BUF_SIZE];
 	struct rq *rq;
 	struct rq_flags flags;
 	int ret;
 	bool success = false;
-	char err_buf[STACK_ERR_BUF_SIZE];
 
 	err_buf[0] = '\0';
 
@@ -347,7 +346,6 @@ done:
 		pr_debug("%s", err_buf);
 
 	return success;
-
 }
 
 /*
@@ -460,14 +458,14 @@ void klp_try_complete_transition(void)
 	klp_complete_transition();
 
 	/*
-	 * It would make more sense to free the patch in
+	 * It would make more sense to free the unused patches in
 	 * klp_complete_transition() but it is called also
 	 * from klp_cancel_transition().
 	 */
-	if (!patch->enabled) {
-		klp_free_patch_start(patch);
-		schedule_work(&patch->free_work);
-	}
+	if (!patch->enabled)
+		klp_free_patch_async(patch);
+	else if (patch->replace)
+		klp_free_replaced_patches_async(patch);
 }
 
 /*

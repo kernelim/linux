@@ -126,7 +126,7 @@ static int __init show_diag_stat_init(void)
 
 device_initcall(show_diag_stat_init);
 
-void diag_stat_inc(enum diag_stat_enum nr)
+void notrace diag_stat_inc(enum diag_stat_enum nr)
 {
 	this_cpu_inc(diag_stat.counter[nr]);
 	trace_s390_diagnose(diag_map[nr].code);

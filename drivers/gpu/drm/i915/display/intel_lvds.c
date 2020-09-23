@@ -42,7 +42,7 @@
 #include "i915_drv.h"
 #include "intel_atomic.h"
 #include "intel_connector.h"
-#include "intel_drv.h"
+#include "intel_display_types.h"
 #include "intel_gmbus.h"
 #include "intel_lvds.h"
 #include "intel_panel.h"
@@ -135,7 +135,7 @@ static void intel_lvds_get_config(struct intel_encoder *encoder,
 	else
 		flags |= DRM_MODE_FLAG_PVSYNC;
 
-	pipe_config->base.adjusted_mode.flags |= flags;
+	pipe_config->hw.adjusted_mode.flags |= flags;
 
 	if (INTEL_GEN(dev_priv) < 5)
 		pipe_config->gmch_pfit.lvds_border_bits =
@@ -148,7 +148,7 @@ static void intel_lvds_get_config(struct intel_encoder *encoder,
 		pipe_config->gmch_pfit.control |= tmp & PANEL_8TO6_DITHER_ENABLE;
 	}
 
-	pipe_config->base.adjusted_mode.crtc_clock = pipe_config->port_clock;
+	pipe_config->hw.adjusted_mode.crtc_clock = pipe_config->port_clock;
 }
 
 static void intel_lvds_pps_get_hw_state(struct drm_i915_private *dev_priv,
@@ -230,9 +230,9 @@ static void intel_pre_enable_lvds(struct intel_encoder *encoder,
 {
 	struct intel_lvds_encoder *lvds_encoder = to_lvds_encoder(&encoder->base);
 	struct drm_i915_private *dev_priv = to_i915(encoder->base.dev);
-	struct intel_crtc *crtc = to_intel_crtc(pipe_config->base.crtc);
-	const struct drm_display_mode *adjusted_mode = &pipe_config->base.adjusted_mode;
-	int pipe = crtc->pipe;
+	struct intel_crtc *crtc = to_intel_crtc(pipe_config->uapi.crtc);
+	const struct drm_display_mode *adjusted_mode = &pipe_config->hw.adjusted_mode;
+	enum pipe pipe = crtc->pipe;
 	u32 temp;
 
 	if (HAS_PCH_SPLIT(dev_priv)) {
@@ -318,8 +318,7 @@ static void intel_enable_lvds(struct intel_encoder *encoder,
 	I915_WRITE(PP_CONTROL(0), I915_READ(PP_CONTROL(0)) | PANEL_POWER_ON);
 	POSTING_READ(lvds_encoder->reg);
 
-	if (intel_wait_for_register(&dev_priv->uncore,
-				    PP_STATUS(0), PP_ON, PP_ON, 5000))
+	if (intel_de_wait_for_set(dev_priv, PP_STATUS(0), PP_ON, 5000))
 		DRM_ERROR("timed out waiting for panel to power on\n");
 
 	intel_panel_enable_backlight(pipe_config, conn_state);
@@ -333,8 +332,7 @@ static void intel_disable_lvds(struct intel_encoder *encoder,
 	struct drm_i915_private *dev_priv = to_i915(encoder->base.dev);
 
 	I915_WRITE(PP_CONTROL(0), I915_READ(PP_CONTROL(0)) & ~PANEL_POWER_ON);
-	if (intel_wait_for_register(&dev_priv->uncore,
-				    PP_STATUS(0), PP_ON, 0, 1000))
+	if (intel_de_wait_for_clear(dev_priv, PP_STATUS(0), PP_ON, 1000))
 		DRM_ERROR("timed out waiting for panel to power off\n");
 
 	I915_WRITE(lvds_encoder->reg, I915_READ(lvds_encoder->reg) & ~LVDS_PORT_EN);
@@ -394,8 +392,8 @@ static int intel_lvds_compute_config(struct intel_encoder *intel_encoder,
 		to_lvds_encoder(&intel_encoder->base);
 	struct intel_connector *intel_connector =
 		lvds_encoder->attached_connector;
-	struct drm_display_mode *adjusted_mode = &pipe_config->base.adjusted_mode;
-	struct intel_crtc *intel_crtc = to_intel_crtc(pipe_config->base.crtc);
+	struct drm_display_mode *adjusted_mode = &pipe_config->hw.adjusted_mode;
+	struct intel_crtc *intel_crtc = to_intel_crtc(pipe_config->uapi.crtc);
 	unsigned int lvds_bpp;
 
 	/* Should never happen!! */
@@ -901,12 +899,10 @@ void intel_lvds_init(struct drm_i915_private *dev_priv)
 	intel_encoder->power_domain = POWER_DOMAIN_PORT_OTHER;
 	intel_encoder->port = PORT_NONE;
 	intel_encoder->cloneable = 0;
-	if (HAS_PCH_SPLIT(dev_priv))
-		intel_encoder->crtc_mask = (1 << 0) | (1 << 1) | (1 << 2);
-	else if (IS_GEN(dev_priv, 4))
-		intel_encoder->crtc_mask = (1 << 0) | (1 << 1);
+	if (INTEL_GEN(dev_priv) < 4)
+		intel_encoder->pipe_mask = BIT(PIPE_B);
 	else
-		intel_encoder->crtc_mask = (1 << 1);
+		intel_encoder->pipe_mask = ~0;
 
 	drm_connector_helper_add(connector, &intel_lvds_connector_helper_funcs);
 	connector->display_info.subpixel_order = SubPixelHorizontalRGB;

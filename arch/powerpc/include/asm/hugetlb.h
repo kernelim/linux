@@ -4,7 +4,6 @@
 
 #ifdef CONFIG_HUGETLB_PAGE
 #include <asm/page.h>
-#include <asm-generic/hugetlb.h>
 
 extern struct kmem_cache *hugepte_cache;
 
@@ -101,8 +100,6 @@ static inline int is_hugepage_only_range(struct mm_struct *mm,
 	return 0;
 }
 
-void book3e_hugetlb_preload(struct vm_area_struct *vma, unsigned long ea,
-			    pte_t pte);
 #ifdef CONFIG_PPC_8xx
 static inline void flush_hugetlb_page(struct vm_area_struct *vma,
 				      unsigned long vmaddr)
@@ -113,6 +110,7 @@ static inline void flush_hugetlb_page(struct vm_area_struct *vma,
 void flush_hugetlb_page(struct vm_area_struct *vma, unsigned long vmaddr);
 #endif
 
+#define __HAVE_ARCH_HUGETLB_FREE_PGD_RANGE
 void hugetlb_free_pgd_range(struct mmu_gather *tlb, unsigned long addr,
 			    unsigned long end, unsigned long floor,
 			    unsigned long ceiling);
@@ -178,6 +176,8 @@ static inline pte_t huge_ptep_get(pte_t *ptep)
 static inline void arch_clear_hugepage_flags(struct page *page)
 {
 }
+
+#include <asm-generic/hugetlb.h>
 
 #else /* ! CONFIG_HUGETLB_PAGE */
 static inline void flush_hugetlb_page(struct vm_area_struct *vma,

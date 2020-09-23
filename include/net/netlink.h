@@ -290,9 +290,13 @@ enum nla_policy_validation {
  */
 struct nla_policy {
 #ifdef __BIG_ENDIAN__
-	RH_KABI_REPLACE2(u16 type, u8 validation_type, u8 type)
+	RH_KABI_REPLACE_SPLIT(u16 type,
+			      u8 validation_type,
+			      u8 type)
 #else
-	RH_KABI_REPLACE2(u16 type, u8 type, u8 validation_type)
+	RH_KABI_REPLACE_SPLIT(u16 type,
+			      u8 type,
+			      u8 validation_type)
 #endif
 	u16		len;
 #ifdef __GENKSYMS__
@@ -1480,6 +1484,21 @@ static inline int nla_put_in6_addr(struct sk_buff *skb, int attrtype,
 }
 
 /**
+ * nla_put_bitfield32 - Add a bitfield32 netlink attribute to a socket buffer
+ * @skb: socket buffer to add attribute to
+ * @attrtype: attribute type
+ * @value: value carrying bits
+ * @selector: selector of valid bits
+ */
+static inline int nla_put_bitfield32(struct sk_buff *skb, int attrtype,
+				     __u32 value, __u32 selector)
+{
+	struct nla_bitfield32 tmp = { value, selector, };
+
+	return nla_put(skb, attrtype, sizeof(tmp), &tmp);
+}
+
+/**
  * nla_get_u32 - return payload of u32 attribute
  * @nla: u32 netlink attribute
  */
@@ -1749,7 +1768,7 @@ static inline void nla_nest_cancel(struct sk_buff *skb, struct nlattr *start)
 }
 
 /**
- * nla_validate_nested - Validate a stream of nested attributes
+ * __nla_validate_nested - Validate a stream of nested attributes
  * @start: container attribute
  * @maxtype: maximum attribute type to be expected
  * @policy: validation policy
@@ -1772,9 +1791,9 @@ static inline int __nla_validate_nested(const struct nlattr *start, int maxtype,
 }
 
 static inline int
-nl80211_validate_nested(const struct nlattr *start, int maxtype,
-			const struct nla_policy *policy,
-			struct netlink_ext_ack *extack)
+nla_validate_nested(const struct nlattr *start, int maxtype,
+		    const struct nla_policy *policy,
+		    struct netlink_ext_ack *extack)
 {
 	return __nla_validate_nested(start, maxtype, policy,
 				     NL_VALIDATE_STRICT, extack);

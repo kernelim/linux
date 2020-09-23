@@ -210,7 +210,7 @@ static int ima_calc_file_hash_atfm(struct file *file,
 {
 	loff_t i_size, offset;
 	char *rbuf[2] = { NULL, };
-	int rc, read = 0, rbuf_len, active = 0, ahash_rc = 0;
+	int rc, rbuf_len, active = 0, ahash_rc = 0;
 	struct ahash_request *req;
 	struct scatterlist sg[1];
 	struct crypto_wait wait;
@@ -257,11 +257,6 @@ static int ima_calc_file_hash_atfm(struct file *file,
 					  &rbuf_size[1], 0);
 	}
 
-	if (!(file->f_mode & FMODE_READ)) {
-		file->f_mode |= FMODE_READ;
-		read = 1;
-	}
-
 	for (offset = 0; offset < i_size; offset += rbuf_len) {
 		if (!rbuf[1] && offset) {
 			/* Not using two buffers, and it is not the first
@@ -276,8 +271,16 @@ static int ima_calc_file_hash_atfm(struct file *file,
 		rbuf_len = min_t(loff_t, i_size - offset, rbuf_size[active]);
 		rc = integrity_kernel_read(file, offset, rbuf[active],
 					   rbuf_len);
-		if (rc != rbuf_len)
+		if (rc != rbuf_len) {
+			if (rc >= 0)
+				rc = -EINVAL;
+			/*
+			 * Forward current rc, do not overwrite with return value
+			 * from ahash_wait()
+			 */
+			ahash_wait(ahash_rc, &wait);
 			goto out3;
+		}
 
 		if (rbuf[1] && offset) {
 			/* Using two buffers, and it is not the first
@@ -300,8 +303,6 @@ static int ima_calc_file_hash_atfm(struct file *file,
 	/* wait for the last update request to complete */
 	rc = ahash_wait(ahash_rc, &wait);
 out3:
-	if (read)
-		file->f_mode &= ~FMODE_READ;
 	ima_free_pages(rbuf[0], rbuf_size[0]);
 	ima_free_pages(rbuf[1], rbuf_size[1]);
 out2:
@@ -336,7 +337,7 @@ static int ima_calc_file_hash_tfm(struct file *file,
 {
 	loff_t i_size, offset = 0;
 	char *rbuf;
-	int rc, read = 0;
+	int rc;
 	SHASH_DESC_ON_STACK(shash, tfm);
 
 	shash->tfm = tfm;
@@ -357,11 +358,6 @@ static int ima_calc_file_hash_tfm(struct file *file,
 	if (!rbuf)
 		return -ENOMEM;
 
-	if (!(file->f_mode & FMODE_READ)) {
-		file->f_mode |= FMODE_READ;
-		read = 1;
-	}
-
 	while (offset < i_size) {
 		int rbuf_len;
 
@@ -378,8 +374,6 @@ static int ima_calc_file_hash_tfm(struct file *file,
 		if (rc)
 			break;
 	}
-	if (read)
-		file->f_mode &= ~FMODE_READ;
 	kfree(rbuf);
 out:
 	if (!rc)
@@ -420,6 +414,8 @@ int ima_calc_file_hash(struct file *file, struct ima_digest_data *hash)
 {
 	loff_t i_size;
 	int rc;
+	struct file *f = file;
+	bool new_file_instance = false, modified_mode = false;
 
 	/*
 	 * For consistency, fail file's opened with the O_DIRECT flag on
@@ -431,15 +427,41 @@ int ima_calc_file_hash(struct file *file, struct ima_digest_data *hash)
 		return -EINVAL;
 	}
 
-	i_size = i_size_read(file_inode(file));
-
-	if (ima_ahash_minsize && i_size >= ima_ahash_minsize) {
-		rc = ima_calc_file_ahash(file, hash);
-		if (!rc)
-			return 0;
+	/* Open a new file instance in O_RDONLY if we cannot read */
+	if (!(file->f_mode & FMODE_READ)) {
+		int flags = file->f_flags & ~(O_WRONLY | O_APPEND |
+				O_TRUNC | O_CREAT | O_NOCTTY | O_EXCL);
+		flags |= O_RDONLY;
+		f = dentry_open(&file->f_path, flags, file->f_cred);
+		if (IS_ERR(f)) {
+			/*
+			 * Cannot open the file again, lets modify f_mode
+			 * of original and continue
+			 */
+			pr_info_ratelimited("Unable to reopen file for reading.\n");
+			f = file;
+			f->f_mode |= FMODE_READ;
+			modified_mode = true;
+		} else {
+			new_file_instance = true;
+		}
 	}
 
-	return ima_calc_file_shash(file, hash);
+	i_size = i_size_read(file_inode(f));
+
+	if (ima_ahash_minsize && i_size >= ima_ahash_minsize) {
+		rc = ima_calc_file_ahash(f, hash);
+		if (!rc)
+			goto out;
+	}
+
+	rc = ima_calc_file_shash(f, hash);
+out:
+	if (new_file_instance)
+		fput(f);
+	else if (modified_mode)
+		f->f_mode &= ~FMODE_READ;
+	return rc;
 }
 
 /*
@@ -629,7 +651,7 @@ int ima_calc_buffer_hash(const void *buf, loff_t len,
 	return calc_buffer_shash(buf, len, hash);
 }
 
-static void __init ima_pcrread(u32 idx, struct tpm_digest *d)
+static void ima_pcrread(u32 idx, struct tpm_digest *d)
 {
 	if (!ima_tpm_chip)
 		return;
@@ -639,18 +661,29 @@ static void __init ima_pcrread(u32 idx, struct tpm_digest *d)
 }
 
 /*
- * Calculate the boot aggregate hash
+ * The boot_aggregate is a cumulative hash over TPM registers 0 - 7.  With
+ * TPM 1.2 the boot_aggregate was based on reading the SHA1 PCRs, but with
+ * TPM 2.0 hash agility, TPM chips could support multiple TPM PCR banks,
+ * allowing firmware to configure and enable different banks.
+ *
+ * Knowing which TPM bank is read to calculate the boot_aggregate digest
+ * needs to be conveyed to a verifier.  For this reason, use the same
+ * hash algorithm for reading the TPM PCRs as for calculating the boot
+ * aggregate digest as stored in the measurement list.
  */
-static int __init ima_calc_boot_aggregate_tfm(char *digest,
-					      struct crypto_shash *tfm)
+static int ima_calc_boot_aggregate_tfm(char *digest, u16 alg_id,
+				       struct crypto_shash *tfm)
 {
-	struct tpm_digest d = { .alg_id = TPM_ALG_SHA1, .digest = {0} };
+	struct tpm_digest d = { .alg_id = alg_id, .digest = {0} };
 	int rc;
 	u32 i;
 	SHASH_DESC_ON_STACK(shash, tfm);
 
 	shash->tfm = tfm;
 	shash->flags = 0;
+
+	pr_devel("calculating the boot-aggregate based on TPM bank: %04x\n",
+		 d.alg_id);
 
 	rc = crypto_shash_init(shash);
 	if (rc != 0)
@@ -660,24 +693,48 @@ static int __init ima_calc_boot_aggregate_tfm(char *digest,
 	for (i = TPM_PCR0; i < TPM_PCR8; i++) {
 		ima_pcrread(i, &d);
 		/* now accumulate with current aggregate */
-		rc = crypto_shash_update(shash, d.digest, TPM_DIGEST_SIZE);
+		rc = crypto_shash_update(shash, d.digest,
+					 crypto_shash_digestsize(tfm));
 	}
 	if (!rc)
 		crypto_shash_final(shash, digest);
 	return rc;
 }
 
-int __init ima_calc_boot_aggregate(struct ima_digest_data *hash)
+int ima_calc_boot_aggregate(struct ima_digest_data *hash)
 {
 	struct crypto_shash *tfm;
-	int rc;
+	u16 crypto_id, alg_id;
+	int rc, i, bank_idx = -1;
+
+	for (i = 0; i < ima_tpm_chip->nr_allocated_banks; i++) {
+		crypto_id = ima_tpm_chip->allocated_banks[i].crypto_id;
+		if (crypto_id == hash->algo) {
+			bank_idx = i;
+			break;
+		}
+
+		if (crypto_id == HASH_ALGO_SHA256)
+			bank_idx = i;
+
+		if (bank_idx == -1 && crypto_id == HASH_ALGO_SHA1)
+			bank_idx = i;
+	}
+
+	if (bank_idx == -1) {
+		pr_err("No suitable TPM algorithm for boot aggregate\n");
+		return 0;
+	}
+
+	hash->algo = ima_tpm_chip->allocated_banks[bank_idx].crypto_id;
 
 	tfm = ima_alloc_tfm(hash->algo);
 	if (IS_ERR(tfm))
 		return PTR_ERR(tfm);
 
 	hash->length = crypto_shash_digestsize(tfm);
-	rc = ima_calc_boot_aggregate_tfm(hash->digest, tfm);
+	alg_id = ima_tpm_chip->allocated_banks[bank_idx].alg_id;
+	rc = ima_calc_boot_aggregate_tfm(hash->digest, alg_id, tfm);
 
 	ima_free_tfm(tfm);
 

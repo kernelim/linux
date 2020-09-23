@@ -365,6 +365,19 @@ config NET_SCH_PIE
 
 	  If unsure, say N.
 
+config NET_SCH_FQ_PIE
+	depends on NET_SCH_PIE
+	tristate "Flow Queue Proportional Integral controller Enhanced (FQ-PIE)"
+	help
+	  Say Y here if you want to use the Flow Queue Proportional Integral
+	  controller Enhanced (FQ-PIE) packet scheduling algorithm.
+	  For more information, please see https://tools.ietf.org/html/rfc8033
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called sch_fq_pie.
+
+	  If unsure, say N.
+
 config NET_SCH_INGRESS
 	tristate "Ingress/classifier-action Qdisc"
 	depends on NET_CLS_ACT
@@ -407,6 +420,23 @@ config NET_SCH_PLUG
 
 	  To compile this code as a module, choose M here: the
 	  module will be called sch_plug.
+
+config NET_SCH_ETS
+	tristate "Enhanced transmission selection scheduler (ETS)"
+	help
+          The Enhanced Transmission Selection scheduler is a classful
+          queuing discipline that merges functionality of PRIO and DRR
+          qdiscs in one scheduler. ETS makes it easy to configure a set of
+          strict and bandwidth-sharing bands to implement the transmission
+          selection described in 802.1Qaz.
+
+	  Say Y here if you want to use the ETS packet scheduling
+	  algorithm.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called sch_ets.
+
+	  If unsure, say N.
 
 menuconfig NET_SCH_DEFAULT
 	bool "Allow override default queue discipline"
@@ -941,7 +971,7 @@ config NET_ACT_TUNNEL_KEY
 
 config NET_ACT_CT
 	tristate "connection tracking tc action"
-	depends on NET_CLS_ACT && NF_CONNTRACK && NF_NAT
+	depends on NET_CLS_ACT && NF_CONNTRACK && NF_NAT && NF_FLOW_TABLE
 	help
 	  Say Y here to allow sending the packets to conntrack module.
 
@@ -949,6 +979,18 @@ config NET_ACT_CT
 
 	  To compile this code as a module, choose M here: the
 	  module will be called act_ct.
+
+config NET_ACT_GATE
+	tristate "Frame gate entry list control tc action"
+	depends on NET_CLS_ACT
+	help
+	  Say Y here to allow to control the ingress flow to be passed at
+	  specific time slot and be dropped at other specific time slot by
+	  the gate entry list.
+
+	  If unsure, say N.
+	  To compile this code as a module, choose M here: the
+	  module will be called act_gate.
 
 config NET_IFE_SKBMARK
 	tristate "Support to encoding decoding skb mark on IFE action"

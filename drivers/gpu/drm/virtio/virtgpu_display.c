@@ -25,11 +25,14 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include "virtgpu_drv.h"
 #include <drm/drm_atomic_helper.h>
+#include <drm/drm_damage_helper.h>
+#include <drm/drm_fourcc.h>
 #include <drm/drm_gem_framebuffer_helper.h>
 #include <drm/drm_probe_helper.h>
-#include <drm/drm_damage_helper.h>
+#include <drm/drm_vblank.h>
+
+#include "virtgpu_drv.h"
 
 #define XRES_MIN    32
 #define YRES_MIN    32
@@ -39,6 +42,9 @@
 
 #define XRES_MAX  8192
 #define YRES_MAX  8192
+
+#define drm_connector_to_virtio_gpu_output(x) \
+	container_of(x, struct virtio_gpu_output, conn)
 
 static const struct drm_crtc_funcs virtio_gpu_crtc_funcs = {
 	.set_config             = drm_atomic_helper_set_config,
@@ -56,7 +62,7 @@ static const struct drm_framebuffer_funcs virtio_gpu_fb_funcs = {
 	.dirty = drm_atomic_helper_dirtyfb,
 };
 
-int
+static int
 virtio_gpu_framebuffer_init(struct drm_device *dev,
 			    struct virtio_gpu_framebuffer *vgfb,
 			    const struct drm_mode_fb_cmd2 *mode_cmd,

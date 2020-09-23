@@ -17,10 +17,12 @@
 #include <linux/nfs3.h>
 #include <linux/nfs4.h>
 #include <linux/sunrpc/svc.h>
+#include <linux/sunrpc/svc_xprt.h>
 #include <linux/sunrpc/msg_prot.h>
 
 #include <uapi/linux/nfsd/debug.h>
 
+#include "netns.h"
 #include "stats.h"
 #include "export.h"
 
@@ -73,7 +75,7 @@ extern const struct seq_operations nfs_exports_op;
 /*
  * Function prototypes.
  */
-int		nfsd_svc(int nrservs, struct net *net);
+int		nfsd_svc(int nrservs, struct net *net, const struct cred *cred);
 int		nfsd_dispatch(struct svc_rqst *rqstp, __be32 *statp);
 
 int		nfsd_nrthreads(struct net *);
@@ -84,6 +86,19 @@ int		nfsd_pool_stats_open(struct inode *, struct file *);
 int		nfsd_pool_stats_release(struct inode *, struct file *);
 
 void		nfsd_destroy(struct net *net);
+
+int get_nfsdfs(struct net *);
+
+struct nfsdfs_client {
+	struct kref cl_ref;
+	void (*cl_release)(struct kref *kref);
+};
+
+struct nfsdfs_client *get_nfsdfs_client(struct inode *);
+struct dentry *nfsd_client_mkdir(struct nfsd_net *nn,
+		struct nfsdfs_client *ncl, u32 id, const struct tree_descr *);
+void nfsd_client_rmdir(struct dentry *dentry);
+
 
 #if defined(CONFIG_NFSD_V2_ACL) || defined(CONFIG_NFSD_V3_ACL)
 #ifdef CONFIG_NFSD_V2_ACL
@@ -98,10 +113,12 @@ extern const struct svc_version nfsd_acl_version3;
 #endif
 #endif
 
+struct nfsd_net;
+
 enum vers_op {NFSD_SET, NFSD_CLEAR, NFSD_TEST, NFSD_AVAIL };
-int nfsd_vers(int vers, enum vers_op change);
-int nfsd_minorversion(u32 minorversion, enum vers_op change);
-void nfsd_reset_versions(void);
+int nfsd_vers(struct nfsd_net *nn, int vers, enum vers_op change);
+int nfsd_minorversion(struct nfsd_net *nn, u32 minorversion, enum vers_op change);
+void nfsd_reset_versions(struct nfsd_net *nn);
 int nfsd_create_serv(struct net *net);
 
 extern int nfsd_max_blksize;
@@ -109,6 +126,12 @@ extern int nfsd_max_blksize;
 static inline int nfsd_v4client(struct svc_rqst *rq)
 {
 	return rq->rq_prog == NFS_PROGRAM && rq->rq_vers == 4;
+}
+static inline struct user_namespace *
+nfsd_user_namespace(const struct svc_rqst *rqstp)
+{
+	const struct cred *cred = rqstp->rq_xprt->xpt_cred;
+	return cred ? cred->user_ns : &init_user_ns;
 }
 
 /* 
@@ -122,7 +145,6 @@ int nfs4_state_start(void);
 int nfs4_state_start_net(struct net *net);
 void nfs4_state_shutdown(void);
 void nfs4_state_shutdown_net(struct net *net);
-void nfs4_reset_lease(time_t leasetime);
 int nfs4_reset_recoverydir(char *recdir);
 char * nfs4_recoverydir(void);
 bool nfsd4_spo_must_allow(struct svc_rqst *rqstp);
@@ -133,7 +155,6 @@ static inline int nfs4_state_start(void) { return 0; }
 static inline int nfs4_state_start_net(struct net *net) { return 0; }
 static inline void nfs4_state_shutdown(void) { }
 static inline void nfs4_state_shutdown_net(struct net *net) { }
-static inline void nfs4_reset_lease(time_t leasetime) { }
 static inline int nfs4_reset_recoverydir(char *recdir) { return 0; }
 static inline char * nfs4_recoverydir(void) {return NULL; }
 static inline bool nfsd4_spo_must_allow(struct svc_rqst *rqstp)
@@ -260,7 +281,8 @@ void		nfsd_lockd_shutdown(void);
 #define nfserr_union_notsupp		cpu_to_be32(NFS4ERR_UNION_NOTSUPP)
 #define nfserr_offload_denied		cpu_to_be32(NFS4ERR_OFFLOAD_DENIED)
 #define nfserr_wrong_lfs		cpu_to_be32(NFS4ERR_WRONG_LFS)
-#define nfserr_badlabel		cpu_to_be32(NFS4ERR_BADLABEL)
+#define nfserr_badlabel			cpu_to_be32(NFS4ERR_BADLABEL)
+#define nfserr_file_open		cpu_to_be32(NFS4ERR_FILE_OPEN)
 
 /* error codes for internal use */
 /* if a request fails due to kmalloc failure, it gets dropped.

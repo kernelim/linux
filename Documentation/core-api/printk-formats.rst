@@ -79,6 +79,18 @@ has the added benefit of providing a unique identifier. On 64-bit machines
 the first 32 bits are zeroed. The kernel will print ``(ptrval)`` until it
 gathers enough entropy. If you *really* want the address see %px below.
 
+Error Pointers
+--------------
+
+::
+
+	%pe	-ENOSPC
+
+For printing error pointers (i.e. a pointer for which IS_ERR() is true)
+as a symbolic error name. Error values for which no symbolic name is
+known are printed in decimal, while a non-ERR_PTR passed as the
+argument to %pe gets treated as ordinary %p.
+
 Symbols/Function Pointers
 -------------------------
 
@@ -109,6 +121,20 @@ The ``B`` specifier results in the symbol name with offsets and should be
 used when printing stack backtraces. The specifier takes into
 consideration the effect of compiler optimisations which may occur
 when tail-calls are used and marked with the noreturn GCC attribute.
+
+Probed Pointers from BPF / tracing
+----------------------------------
+
+::
+
+	%pks	kernel string
+	%pus	user string
+
+The ``k`` and ``u`` specifiers are used for printing prior probed memory from
+either kernel memory (k) or user memory (u). The subsequent ``s`` specifier
+results in printing a string. For direct use in regular vsnprintf() the (k)
+and (u) annotation is ignored, however, when used out of BPF's bpf_trace_printk(),
+for example, it reads the memory it is pointing to without faulting.
 
 Kernel Pointers
 ---------------

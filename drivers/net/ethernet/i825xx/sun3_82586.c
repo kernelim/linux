@@ -124,7 +124,7 @@ static int     sun3_82586_close(struct net_device *dev);
 static int     sun3_82586_send_packet(struct sk_buff *,struct net_device *);
 static struct  net_device_stats *sun3_82586_get_stats(struct net_device *dev);
 static void    set_multicast_list(struct net_device *dev);
-static void    sun3_82586_timeout(struct net_device *dev);
+static void    sun3_82586_timeout(struct net_device *dev, unsigned int txqueue);
 #if 0
 static void    sun3_82586_dump(struct net_device *,void *);
 #endif
@@ -964,7 +964,7 @@ static void startrecv586(struct net_device *dev)
 	WAIT_4_SCB_CMD_RUC();	/* wait for accept cmd. (no timeout!!) */
 }
 
-static void sun3_82586_timeout(struct net_device *dev)
+static void sun3_82586_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	struct priv *p = netdev_priv(dev);
 #ifndef NO_NOPCOMMANDS

@@ -32,6 +32,9 @@
 
 #define ECC_DIGITS_TO_BYTES_SHIFT 3
 
+struct ecc_curve;
+struct ecc_point;
+
 /**
  * ecc_is_key_valid() - Validate a given ECDH private key
  *
@@ -72,6 +75,20 @@ int ecc_gen_privkey(unsigned int curve_id, unsigned int ndigits, u64 *privkey);
  */
 int ecc_make_pub_key(const unsigned int curve_id, unsigned int ndigits,
 		     const u64 *private_key, u64 *public_key);
+
+/**
+ * ecc_is_pubkey_valid_full() - Full public key validation
+ *
+ * @curve:		elliptic curve domain parameters
+ * @pk:			public key as a point
+ *
+ * Valdiate public key according to SP800-56A section 5.6.2.3.3 ECC Full
+ * Public-Key Validation Routine.
+ *
+ * Return: 0 if validation is successful, -EINVAL if validation is failed.
+ */
+int ecc_is_pubkey_valid_full(const struct ecc_curve *curve,
+			     struct ecc_point *pk);
 
 /**
  * crypto_ecdh_shared_secret() - Compute a shared secret

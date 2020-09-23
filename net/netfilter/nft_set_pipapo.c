@@ -1159,7 +1159,9 @@ static int nft_pipapo_insert(const struct net *net, const struct nft_set *set,
 		end += NFT_PIPAPO_GROUPS_PADDED_SIZE(f->groups);
 	}
 
-	if (!*this_cpu_ptr(m->scratch) || bsize_max > m->bsize_max) {
+	if (!*get_cpu_ptr(m->scratch) || bsize_max > m->bsize_max) {
+		put_cpu_ptr(m->scratch);
+
 		err = pipapo_realloc_scratch(m, bsize_max);
 		if (err)
 			return err;
@@ -1167,6 +1169,8 @@ static int nft_pipapo_insert(const struct net *net, const struct nft_set *set,
 		this_cpu_write(nft_pipapo_scratch_index, false);
 
 		m->bsize_max = bsize_max;
+	} else {
+		put_cpu_ptr(m->scratch);
 	}
 
 	*ext2 = &e->ext;

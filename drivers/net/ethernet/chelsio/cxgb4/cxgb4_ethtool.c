@@ -103,6 +103,7 @@ static const char stats_strings[][ETH_GSTRING_LEN] = {
 	"rx_bg3_frames_trunc    ",
 
 	"tso                    ",
+	"uso                    ",
 	"tx_csum_offload        ",
 	"rx_csum_good           ",
 	"vlan_extractions       ",
@@ -117,6 +118,15 @@ static char adapter_stats_strings[][ETH_GSTRING_LEN] = {
 	"db_empty               ",
 	"write_coal_success     ",
 	"write_coal_fail        ",
+#ifdef CONFIG_CHELSIO_TLS_DEVICE
+	"tx_tls_encrypted_packets",
+	"tx_tls_encrypted_bytes  ",
+	"tx_tls_ctx              ",
+	"tx_tls_ooo              ",
+	"tx_tls_skip_no_sync_data",
+	"tx_tls_drop_no_sync_data",
+	"tx_tls_drop_bypass_req  ",
+#endif
 };
 
 static char loopback_stats_strings[][ETH_GSTRING_LEN] = {
@@ -187,9 +197,7 @@ static void get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)
 		sizeof(info->bus_info));
 	info->regdump_len = get_regs_len(dev);
 
-	if (!adapter->params.fw_vers)
-		strcpy(info->fw_version, "N/A");
-	else
+	if (adapter->params.fw_vers)
 		snprintf(info->fw_version, sizeof(info->fw_version),
 			 "%u.%u.%u.%u, TP %u.%u.%u.%u",
 			 FW_HDR_FW_VER_MAJOR_G(adapter->params.fw_vers),
@@ -232,6 +240,7 @@ static void get_strings(struct net_device *dev, u32 stringset, u8 *data)
  */
 struct queue_port_stats {
 	u64 tso;
+	u64 uso;
 	u64 tx_csum;
 	u64 rx_csum;
 	u64 vlan_ex;
@@ -246,25 +255,46 @@ struct adapter_stats {
 	u64 db_empty;
 	u64 wc_success;
 	u64 wc_fail;
+#ifdef CONFIG_CHELSIO_TLS_DEVICE
+	u64 tx_tls_encrypted_packets;
+	u64 tx_tls_encrypted_bytes;
+	u64 tx_tls_ctx;
+	u64 tx_tls_ooo;
+	u64 tx_tls_skip_no_sync_data;
+	u64 tx_tls_drop_no_sync_data;
+	u64 tx_tls_drop_bypass_req;
+#endif
 };
 
 static void collect_sge_port_stats(const struct adapter *adap,
 				   const struct port_info *p,
 				   struct queue_port_stats *s)
 {
-	int i;
 	const struct sge_eth_txq *tx = &adap->sge.ethtxq[p->first_qset];
 	const struct sge_eth_rxq *rx = &adap->sge.ethrxq[p->first_qset];
+	struct sge_eohw_txq *eohw_tx;
+	unsigned int i;
 
 	memset(s, 0, sizeof(*s));
 	for (i = 0; i < p->nqsets; i++, rx++, tx++) {
 		s->tso += tx->tso;
+		s->uso += tx->uso;
 		s->tx_csum += tx->tx_cso;
 		s->rx_csum += rx->stats.rx_cso;
 		s->vlan_ex += rx->stats.vlan_ex;
 		s->vlan_ins += tx->vlan_ins;
 		s->gro_pkts += rx->stats.lro_pkts;
 		s->gro_merged += rx->stats.lro_merged;
+	}
+
+	if (adap->sge.eohw_txq) {
+		eohw_tx = &adap->sge.eohw_txq[p->first_qset];
+		for (i = 0; i < p->nqsets; i++, eohw_tx++) {
+			s->tso += eohw_tx->tso;
+			s->uso += eohw_tx->uso;
+			s->tx_csum += eohw_tx->tx_cso;
+			s->vlan_ins += eohw_tx->vlan_ins;
+		}
 	}
 }
 
@@ -805,8 +835,8 @@ static void get_pauseparam(struct net_device *dev,
 	struct port_info *p = netdev_priv(dev);
 
 	epause->autoneg = (p->link_cfg.requested_fc & PAUSE_AUTONEG) != 0;
-	epause->rx_pause = (p->link_cfg.fc & PAUSE_RX) != 0;
-	epause->tx_pause = (p->link_cfg.fc & PAUSE_TX) != 0;
+	epause->rx_pause = (p->link_cfg.advertised_fc & PAUSE_RX) != 0;
+	epause->tx_pause = (p->link_cfg.advertised_fc & PAUSE_TX) != 0;
 }
 
 static int set_pauseparam(struct net_device *dev,

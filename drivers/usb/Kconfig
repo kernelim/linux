@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0
 #
 # USB device configuration
 #
@@ -44,6 +45,7 @@ config USB_ARCH_HAS_HCD
 config USB
 	tristate "Support for Host-side USB"
 	depends on USB_ARCH_HAS_HCD
+	select GENERIC_ALLOCATOR
 	select USB_COMMON
 	select NLS  # for UTF-8 strings
 	---help---
@@ -204,9 +206,5 @@ config USB_ULPI_BUS
 
 	  To compile this driver as a module, choose M here: the module will
 	  be called ulpi.
-
-config USB_ROLE_SWITCH
-	tristate
-	select USB_COMMON
 
 endif # USB_SUPPORT

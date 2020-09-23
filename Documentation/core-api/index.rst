@@ -29,6 +29,7 @@ Core utilities
    printk-formats
    circular-buffers
    gfp_mask-from-fs-io
+   padata
 
 Interfaces for kernel debugging
 ===============================
