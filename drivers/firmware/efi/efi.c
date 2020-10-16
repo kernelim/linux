@@ -55,6 +55,9 @@ struct efi __read_mostly efi = {
 	.rng_seed		= EFI_INVALID_TABLE_ADDR,
 	.tpm_log		= EFI_INVALID_TABLE_ADDR,
 	.mem_reserve		= EFI_INVALID_TABLE_ADDR,
+#ifdef CONFIG_LOAD_UEFI_KEYS
+	.mokvar_table		= EFI_INVALID_TABLE_ADDR,
+#endif
 };
 EXPORT_SYMBOL(efi);
 
@@ -77,6 +80,9 @@ static unsigned long *efi_tables[] = {
 	&efi.mem_attr_table,
 #ifdef CONFIG_EFI_RCI2_TABLE
 	&rci2_table_phys,
+#endif
+#ifdef CONFIG_LOAD_UEFI_KEYS
+	&efi.mokvar_table,
 #endif
 };
 
@@ -503,6 +509,9 @@ static __initdata efi_config_table_type_t common_tables[] = {
 	{LINUX_EFI_MEMRESERVE_TABLE_GUID, "MEMRESERVE", &efi.mem_reserve},
 #ifdef CONFIG_EFI_RCI2_TABLE
 	{DELLEMC_EFI_RCI2_TABLE_GUID, NULL, &rci2_table_phys},
+#endif
+#ifdef CONFIG_LOAD_UEFI_KEYS
+	{LINUX_EFI_MOK_VARIABLE_TABLE_GUID, "MOKvar", &efi.mokvar_table},
 #endif
 	{NULL_GUID, NULL, NULL},
 };
@@ -1044,7 +1053,7 @@ int __ref efi_mem_reserve_persistent(phys_addr_t addr, u64 size)
 	/* first try to find a slot in an existing linked list entry */
 	for (prsv = efi_memreserve_root->next; prsv; prsv = rsv->next) {
 		rsv = memremap(prsv, sizeof(*rsv), MEMREMAP_WB);
-		index = __atomic_add_unless(&rsv->count, 1, rsv->size);
+		index = atomic_fetch_add_unless(&rsv->count, 1, rsv->size);
 		if (index < rsv->size) {
 			rsv->entry[index].base = addr;
 			rsv->entry[index].size = size;

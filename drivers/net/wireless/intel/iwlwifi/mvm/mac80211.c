@@ -823,11 +823,7 @@ void iwl_mvm_mac_itxq_xmit(struct ieee80211_hw *hw, struct ieee80211_txq *txq)
 	 * If 2, another thread is currently TXing, and it will already double
 	 * check the queue, so do nothing.
 	 */
-#if 0 /* Not in RHEL */
 	if (atomic_fetch_add_unless(&mvmtxq->tx_request, 1, 2))
-#else
-	if (__atomic_add_unless(&mvmtxq->tx_request, 1, 2))
-#endif
 		return;
 
 

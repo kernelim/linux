@@ -105,6 +105,7 @@ static int pefile_parse_binary(const void *pebuf, unsigned int pelen,
 
 	chkaddr(ctx->header_size, ddir->certs.virtual_address,
 		ddir->certs.size);
+	ctx->certs_offset = ddir->certs.virtual_address;
 	ctx->sig_offset = ddir->certs.virtual_address;
 	ctx->sig_len = ddir->certs.size;
 	pr_debug("cert = %x @%x [%*ph]\n",
@@ -139,10 +140,10 @@ static int pefile_strip_sig_wrapper(const void *pebuf,
 	pr_debug("sig wrapper = { %x, %x, %x }\n",
 		 wrapper.length, wrapper.revision, wrapper.cert_type);
 
-	/* Both pesign and sbsign round up the length of certificate table
+	/* This key wrapper must fit within the remaining signature space.
+	 * But it's ok if there's leftover space for additional sigs.
+	 * Both pesign and sbsign round up the length of certificate table
 	 * (in optional header data directories) to 8 byte alignment.
-	 * This key wrapper must fit within the remaining signature space.
-	 * But it's ok if there's leftover space, perhaps for other sigs.
 	 */
 	if (round_up(wrapper.length, 8) > ctx->sig_len) {
 		pr_debug("Signature wrapper len wrong\n");
@@ -202,6 +203,34 @@ check_len:
 not_pkcs7:
 	pr_debug("Signature data not PKCS#7\n");
 	return -ELIBBAD;
+}
+
+/*
+ * pefile_next_sig() - Advance context to next signature
+ *
+ * If possible, advance the signature context (ctx->sig_offset, ctx->sig_len)
+ * to delimit the remaining space in the pefile certs area where there may be
+ * additional signatures after the current one.
+ *
+ * Returns:
+ *  true  if signature context was advanced into space after current sig
+ *  false if we have reached the end of the certs area
+ */
+static bool pefile_next_sig(struct pefile_context *ctx)
+{
+	unsigned int next_sig_offset;	/* pefile offset to sig */
+	unsigned int next_certs_offset;	/* certs offset to sig */
+
+	next_sig_offset = round_up(ctx->sig_offset + ctx->sig_len, 8);
+	next_certs_offset = next_sig_offset - ctx->certs_offset;
+
+	if (next_certs_offset >= ctx->certs_size)
+		return false;
+
+	ctx->sig_offset = next_sig_offset;
+	ctx->sig_len = ctx->certs_size - next_certs_offset;
+
+	return true;
 }
 
 /*
@@ -397,8 +426,14 @@ error_no_desc:
  * @trust_keys: Signing certificate(s) to use as starting points
  * @usage: The use to which the key is being put.
  *
- * Validate that the certificate chain inside the PKCS#7 message inside the PE
+ * Validate that the certificate chain inside a PKCS#7 message inside the PE
  * binary image intersects keys we already know and trust.
+ *
+ * Note that the PE binary image may be signed more than once with different
+ * keys. Although verification is only required via a single signature, every
+ * signature must be checked to make sure that its associated key has not
+ * been blocked. In particular, any error other than the key is not found in
+ * the trusted keys results in failure.
  *
  * Returns, in order of descending priority:
  *
@@ -424,6 +459,7 @@ int verify_pefile_signature(const void *pebuf, unsigned pelen,
 {
 	struct pefile_context ctx;
 	int ret;
+	int ret_final = -ENOKEY;
 
 	kenter("");
 
@@ -432,26 +468,41 @@ int verify_pefile_signature(const void *pebuf, unsigned pelen,
 	if (ret < 0)
 		return ret;
 
-	ret = pefile_strip_sig_wrapper(pebuf, &ctx);
-	if (ret < 0)
-		return ret;
-
-	ret = verify_pkcs7_signature(NULL, 0,
-				     pebuf + ctx.sig_offset, ctx.sig_len,
-				     trusted_keys, usage,
-				     mscode_parse, &ctx);
-	if (ret < 0)
-		goto error;
-
-	pr_debug("Digest: %u [%*ph]\n",
-		 ctx.digest_len, ctx.digest_len, ctx.digest);
-
-	/* Generate the digest and check against the PKCS7 certificate
-	 * contents.
+	/* The pefile may have multiple signatures with different keys.
+	 * pefile_parse_binary set the context to the first signature
+	 * and pefile_next_sig advances the context to potential next.
 	 */
-	ret = pefile_digest_pe(pebuf, pelen, &ctx);
+	do {
+		ret = pefile_strip_sig_wrapper(pebuf, &ctx);
+		if (ret < 0)
+			return ret;
 
-error:
-	kzfree(ctx.digest);
-	return ret;
+		ret = verify_pkcs7_signature(NULL, 0,
+					     pebuf + ctx.sig_offset,
+					     ctx.sig_len,
+					     trusted_keys, usage,
+					     mscode_parse, &ctx);
+		if (ret < 0) {
+			kfree(ctx.digest);
+			ctx.digest = NULL;
+			if (ret == -ENOKEY)
+				continue;
+			return ret;
+		}
+
+		pr_debug("Digest: %u [%*ph]\n",
+			 ctx.digest_len, ctx.digest_len, ctx.digest);
+
+		/* Generate the digest and check against the PKCS7 certificate
+		 * contents.
+		 */
+		ret_final = pefile_digest_pe(pebuf, pelen, &ctx);
+		kfree(ctx.digest);
+		ctx.digest = NULL;
+		if (ret_final < 0)
+			return ret_final;
+
+	} while (pefile_next_sig(&ctx));
+
+	return ret_final;
 }

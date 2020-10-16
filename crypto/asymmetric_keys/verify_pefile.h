@@ -18,6 +18,7 @@ struct pefile_context {
 	unsigned	cert_dirent_offset;
 	unsigned	n_data_dirents;
 	unsigned	n_sections;
+	unsigned	certs_offset;
 	unsigned	certs_size;
 	unsigned	sig_offset;
 	unsigned	sig_len;

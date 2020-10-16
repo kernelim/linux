@@ -143,6 +143,8 @@ static int queue_userspace_packet(struct datapath *dp, struct sk_buff *,
 				  const struct dp_upcall_info *,
 				  uint32_t cutlen);
 
+static void ovs_dp_masks_rebalance(struct work_struct *work);
+
 /* Must be called with rcu_read_lock or ovs_mutex. */
 const char *ovs_dp_name(const struct datapath *dp)
 {
@@ -2307,6 +2309,23 @@ out:
 	return skb->len;
 }
 
+static void ovs_dp_masks_rebalance(struct work_struct *work)
+{
+	struct ovs_net *ovs_net = container_of(work, struct ovs_net,
+					       masks_rebalance.work);
+	struct datapath *dp;
+
+	ovs_lock();
+
+	list_for_each_entry(dp, &ovs_net->dps, list_node)
+		ovs_flow_masks_rebalance(&dp->table);
+
+	ovs_unlock();
+
+	schedule_delayed_work(&ovs_net->masks_rebalance,
+			      msecs_to_jiffies(DP_MASKS_REBALANCE_INTERVAL));
+}
+
 static const struct nla_policy vport_policy[OVS_VPORT_ATTR_MAX + 1] = {
 	[OVS_VPORT_ATTR_NAME] = { .type = NLA_NUL_STRING, .len = IFNAMSIZ - 1 },
 	[OVS_VPORT_ATTR_STATS] = { .len = sizeof(struct ovs_vport_stats) },
@@ -2401,6 +2420,9 @@ static int __net_init ovs_init_net(struct net *net)
 
 	INIT_LIST_HEAD(&ovs_net->dps);
 	INIT_WORK(&ovs_net->dp_notify_work, ovs_dp_notify_wq);
+	INIT_DELAYED_WORK(&ovs_net->masks_rebalance, ovs_dp_masks_rebalance);
+	schedule_delayed_work(&ovs_net->masks_rebalance,
+			      msecs_to_jiffies(DP_MASKS_REBALANCE_INTERVAL));
 	return ovs_ct_init(net);
 }
 
@@ -2453,6 +2475,7 @@ static void __net_exit ovs_exit_net(struct net *dnet)
 
 	ovs_unlock();
 
+	cancel_delayed_work_sync(&ovs_net->masks_rebalance);
 	cancel_work_sync(&ovs_net->dp_notify_work);
 }
 

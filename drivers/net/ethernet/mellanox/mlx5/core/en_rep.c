@@ -1620,6 +1620,7 @@ static void mlx5e_cleanup_rep_rx(struct mlx5e_priv *priv)
 {
 	struct mlx5e_rep_priv *rpriv = priv->ppriv;
 
+	mlx5e_ethtool_cleanup_steering(priv);
 	mlx5_del_flow_rules(rpriv->vport_rx_rule);
 	mlx5e_destroy_rep_root_ft(priv);
 	mlx5e_destroy_ttc_table(priv, &priv->fs.ttc);

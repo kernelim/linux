@@ -128,7 +128,7 @@ static int caps_show_cb(struct inode *inode, struct ceph_cap *cap, void *p)
 {
 	struct seq_file *s = p;
 
-	seq_printf(s, "0x%-17lx%-17s%-17s\n", inode->i_ino,
+	seq_printf(s, "0x%-17llx%-17s%-17s\n", ceph_ino(inode),
 		   ceph_cap_string(cap->issued),
 		   ceph_cap_string(cap->implemented));
 	return 0;
