@@ -1195,6 +1195,10 @@ static int esw_offloads_start(struct mlx5_eswitch *esw)
 	}
 
 	mlx5_eswitch_disable_sriov(esw);
+
+	mlx5_modify_vport_admin_state(esw->dev, MLX5_VPORT_STATE_OP_MOD_UPLINK,
+				      0, 0, MLX5_VPORT_ADMIN_STATE_AUTO);
+
 	err = mlx5_eswitch_enable_sriov(esw, num_vfs, SRIOV_OFFLOADS);
 	if (err) {
 		NL_SET_ERR_MSG_MOD(extack,

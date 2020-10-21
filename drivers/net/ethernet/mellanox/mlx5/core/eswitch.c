@@ -1463,7 +1463,7 @@ static void esw_apply_vport_conf(struct mlx5_eswitch *esw,
 
 	mlx5_modify_vport_admin_state(esw->dev,
 				      MLX5_VPORT_STATE_OP_MOD_ESW_VPORT,
-				      vport_num,
+				      vport_num, 1,
 				      vport->info.link_state);
 	mlx5_modify_nic_vport_mac_address(esw->dev, vport_num, vport->info.mac);
 	mlx5_modify_nic_vport_node_guid(esw->dev, vport_num, vport->info.node_guid);
@@ -1575,10 +1575,11 @@ static void esw_disable_vport(struct mlx5_eswitch *esw, int vport_num)
 	esw_vport_change_handle_locked(vport);
 	vport->enabled_events = 0;
 	esw_vport_disable_qos(esw, vport_num);
-	if (vport_num && esw->mode == SRIOV_LEGACY) {
+	if (vport_num &&
+	    esw->mode == SRIOV_LEGACY) {
 		mlx5_modify_vport_admin_state(esw->dev,
 					      MLX5_VPORT_STATE_OP_MOD_ESW_VPORT,
-					      vport_num,
+					      vport_num, 1,
 					      MLX5_VPORT_ADMIN_STATE_DOWN);
 		esw_vport_disable_egress_acl(esw, vport);
 		esw_vport_disable_ingress_acl(esw, vport);
@@ -1842,23 +1843,27 @@ int mlx5_eswitch_set_vport_state(struct mlx5_eswitch *esw,
 				 int vport, int link_state)
 {
 	struct mlx5_vport *evport;
+	int opmod = MLX5_VPORT_STATE_OP_MOD_ESW_VPORT;
+	int other_vport = 1;
 	int err = 0;
 
 	if (!ESW_ALLOWED(esw))
 		return -EPERM;
-	if (!LEGAL_VPORT(esw, vport))
+	if ((vport != FDB_UPLINK_VPORT) && !LEGAL_VPORT(esw, vport))
 		return -EINVAL;
 
+	if (vport == FDB_UPLINK_VPORT) {
+		opmod = MLX5_VPORT_STATE_OP_MOD_UPLINK;
+		other_vport = 0;
+		vport = 0;
+	}
 	mutex_lock(&esw->state_lock);
 	evport = &esw->vports[vport];
 
-	err = mlx5_modify_vport_admin_state(esw->dev,
-					    MLX5_VPORT_STATE_OP_MOD_ESW_VPORT,
-					    vport, link_state);
+	err = mlx5_modify_vport_admin_state(esw->dev, opmod, vport, other_vport, link_state);
 	if (err) {
-		mlx5_core_warn(esw->dev,
-			       "Failed to set vport %d link state, err = %d",
-			       vport, err);
+		mlx5_core_warn(esw->dev, "Failed to set vport %d link state, opmod = %d, err = %d",
+			       vport, opmod, err);
 		goto unlock;
 	}
 
@@ -2121,7 +2126,7 @@ static int mlx5_eswitch_query_vport_drop_stats(struct mlx5_core_dev *dev,
 	    !MLX5_CAP_GEN(dev, transmit_discard_vport_down))
 		return 0;
 
-	err = mlx5_query_vport_down_stats(dev, vport_idx,
+	err = mlx5_query_vport_down_stats(dev, vport_idx, 1,
 					  &rx_discard_vport_down,
 					  &tx_discard_vport_down);
 	if (err)
@@ -2158,8 +2163,7 @@ int mlx5_eswitch_get_vport_stats(struct mlx5_eswitch *esw,
 		 MLX5_CMD_OP_QUERY_VPORT_COUNTER);
 	MLX5_SET(query_vport_counter_in, in, op_mod, 0);
 	MLX5_SET(query_vport_counter_in, in, vport_number, vport);
-	if (vport)
-		MLX5_SET(query_vport_counter_in, in, other_vport, 1);
+	MLX5_SET(query_vport_counter_in, in, other_vport, 1);
 
 	memset(out, 0, outlen);
 	err = mlx5_cmd_exec(esw->dev, in, sizeof(in), out, outlen);

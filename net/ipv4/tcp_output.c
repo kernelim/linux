@@ -1118,6 +1118,7 @@ int tcp_fragment(struct sock *sk, enum tcp_queue tcp_queue,
 		 unsigned int mss_now)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
+	unsigned int max_write_qlen;
 	struct sk_buff *buff;
 	int nsize, old_factor;
 	long limit;
@@ -1137,8 +1138,9 @@ int tcp_fragment(struct sock *sk, enum tcp_queue tcp_queue,
 	 * Also allow first and last skb in retransmit queue to be split.
 	 */
 	limit = sk->sk_sndbuf + 2 * SKB_TRUESIZE(GSO_MAX_SIZE);
+	max_write_qlen = max_t(unsigned int, 3072, (limit / SKB_TRUESIZE(1280)));
 	if (unlikely(((sk->sk_wmem_queued >> 1) > limit ||
-		      skb_queue_len(&sk->sk_write_queue) > 2048) &&
+		      skb_queue_len(&sk->sk_write_queue) > max_write_qlen) &&
 		     tcp_queue != TCP_FRAG_IN_WRITE_QUEUE &&
 		     skb != tcp_write_queue_head(sk) &&
 		     skb != tcp_rtx_queue_tail(sk))) {
