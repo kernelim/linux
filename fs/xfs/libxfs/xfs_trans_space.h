@@ -49,8 +49,8 @@
 	XFS_DAREMOVE_SPACE_RES(mp, XFS_DATA_FORK)
 #define	XFS_IALLOC_SPACE_RES(mp)	\
 	((mp)->m_ialloc_blks + \
-	 (xfs_sb_version_hasfinobt(&mp->m_sb) ? 2 : 1 * \
-	  ((mp)->m_in_maxlevels - 1)))
+	 ((xfs_sb_version_hasfinobt(&mp->m_sb) ? 2 : 1) * \
+	  (mp)->m_in_maxlevels))
 
 /*
  * Space reservation values for various transactions.

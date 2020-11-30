@@ -1617,6 +1617,7 @@ static void clean_mr(struct mlx5_ib_dev *dev, struct mlx5_ib_mr *mr)
 
 static void dereg_mr(struct mlx5_ib_dev *dev, struct mlx5_ib_mr *mr)
 {
+	bool allocated_from_cache = mr->allocated_from_cache;
 	int npages = mr->npages;
 	struct ib_umem *umem = mr->umem;
 
@@ -1657,7 +1658,7 @@ static void dereg_mr(struct mlx5_ib_dev *dev, struct mlx5_ib_mr *mr)
 		ib_umem_release(umem);
 		atomic_sub(npages, &dev->mdev->priv.reg_pages);
 	}
-	if (!mr->allocated_from_cache)
+	if (!allocated_from_cache)
 		kfree(mr);
 }
 

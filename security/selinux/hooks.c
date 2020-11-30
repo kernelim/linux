@@ -4394,6 +4394,15 @@ static int selinux_socket_connect(struct socket *sock, struct sockaddr *address,
 	if (err)
 		return err;
 
+	if (addrlen < offsetofend(struct sockaddr, sa_family))
+		return -EINVAL;
+
+	/* connect(AF_UNSPEC) has special handling, as it is a documented
+	 * way to disconnect the socket
+	 */
+	if (address->sa_family == AF_UNSPEC)
+		return 0;
+
 	/*
 	 * If a TCP or DCCP socket, check name_connect permission for the port.
 	 */

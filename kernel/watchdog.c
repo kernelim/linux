@@ -77,8 +77,6 @@ static inline void watchdog_update_hrtimer_threshold(u64 period) { }
 #define for_each_watchdog_cpu(cpu) \
 	for_each_cpu_and((cpu), cpu_online_mask, &watchdog_cpumask)
 
-atomic_t watchdog_park_in_progress = ATOMIC_INIT(0);
-
 /*
  * The 'watchdog_running' variable is set to 1 when the watchdog threads
  * are registered/started and is set to 0 when the watchdog threads are
@@ -394,14 +392,11 @@ static struct perf_event_attr wd_hw_attr = {
 
 /* Callback function for perf event subsystem */
 static void watchdog_overflow_callback(struct perf_event *event,
-		 struct perf_sample_data *data,
-		 struct pt_regs *regs)
+				       struct perf_sample_data *data,
+				       struct pt_regs *regs)
 {
 	/* Ensure the watchdog never gets throttled */
 	event->hw.interrupts = 0;
-
-	if (atomic_read(&watchdog_park_in_progress) != 0)
-		return;
 
 	if (__this_cpu_read(watchdog_nmi_touch) == true) {
 		__this_cpu_write(watchdog_nmi_touch, false);
@@ -471,9 +466,6 @@ static enum hrtimer_restart watchdog_timer_fn(struct hrtimer *hrtimer)
 	struct pt_regs *regs = get_irq_regs();
 	int duration;
 	int softlockup_all_cpu_backtrace = sysctl_softlockup_all_cpu_backtrace;
-
-	if (atomic_read(&watchdog_park_in_progress) != 0)
-		return HRTIMER_NORESTART;
 
 	/* kick the hardlockup detector */
 	watchdog_interrupt_count();
@@ -588,20 +580,21 @@ static void watchdog_enable(unsigned int cpu)
 {
 	struct hrtimer *hrtimer = &__raw_get_cpu_var(watchdog_hrtimer);
 
-	/* kick off the timer for the hardlockup detector */
+	/*
+	 * Start the timer first to prevent the NMI watchdog triggering
+	 * before the timer has a chance to fire.
+	 */
 	hrtimer_init(hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	hrtimer->function = watchdog_timer_fn;
-
-	/* Enable the perf event */
-	watchdog_nmi_enable(cpu);
-
-	/* done here because hrtimer_start can only pin to smp_processor_id() */
 	hrtimer_start(hrtimer, ns_to_ktime(sample_period),
 		      HRTIMER_MODE_REL_PINNED);
 
-	/* initialize timestamp */
-	watchdog_set_prio(SCHED_FIFO, MAX_RT_PRIO - 1);
+	/* Initialize timestamp */
 	__touch_watchdog();
+	/* Enable the perf event */
+	watchdog_nmi_enable(cpu);
+
+	watchdog_set_prio(SCHED_FIFO, MAX_RT_PRIO - 1);
 }
 
 static void watchdog_disable(unsigned int cpu)
@@ -609,9 +602,13 @@ static void watchdog_disable(unsigned int cpu)
 	struct hrtimer *hrtimer = &__raw_get_cpu_var(watchdog_hrtimer);
 
 	watchdog_set_prio(SCHED_NORMAL, 0);
-	hrtimer_cancel(hrtimer);
-	/* disable the perf event */
+	/*
+	 * Disable the perf event first. That prevents that a large delay
+	 * between disabling the timer and disabling the perf event causes
+	 * the perf NMI to detect a false positive.
+	 */
 	watchdog_nmi_disable(cpu);
+	hrtimer_cancel(hrtimer);
 }
 
 static void watchdog_cleanup(unsigned int cpu, bool online)
@@ -785,16 +782,11 @@ static int watchdog_park_threads(void)
 {
 	int cpu, ret = 0;
 
-	atomic_set(&watchdog_park_in_progress, 1);
-
 	for_each_watchdog_cpu(cpu) {
 		ret = kthread_park(per_cpu(softlockup_watchdog, cpu));
 		if (ret)
 			break;
 	}
-
-	atomic_set(&watchdog_park_in_progress, 0);
-
 	return ret;
 }
 

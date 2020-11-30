@@ -705,7 +705,7 @@ xfs_ialloc_ag_alloc(
 		args.minalignslop = xfs_ialloc_cluster_alignment(args.mp) - 1;
 
 		/* Allow space for the inode btree to split. */
-		args.minleft = args.mp->m_in_maxlevels - 1;
+		args.minleft = args.mp->m_in_maxlevels;
 		if ((error = xfs_alloc_vextent(&args)))
 			return error;
 
@@ -753,7 +753,7 @@ xfs_ialloc_ag_alloc(
 		/*
 		 * Allow space for the inode btree to split.
 		 */
-		args.minleft = args.mp->m_in_maxlevels - 1;
+		args.minleft = args.mp->m_in_maxlevels;
 		if ((error = xfs_alloc_vextent(&args)))
 			return error;
 	}

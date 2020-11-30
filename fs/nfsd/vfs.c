@@ -1378,6 +1378,9 @@ nfsd_create(struct svc_rqst *rqstp, struct svc_fh *fhp,
 		goto out;
 	}
 
+	if (!IS_POSIXACL(dirp))
+		iap->ia_mode &= ~current_umask();
+
 	/*
 	 * Get the dir op function pointer.
 	 */
@@ -1547,6 +1550,9 @@ do_nfsd_create(struct svc_rqst *rqstp, struct svc_fh *fhp,
 		fh_drop_write(fhp);
 		goto out;
 	}
+
+	if (!IS_POSIXACL(dirp))
+		iap->ia_mode &= ~current_umask();
 
 	host_err = vfs_create(dirp, dchild, iap->ia_mode, true);
 	if (host_err < 0) {

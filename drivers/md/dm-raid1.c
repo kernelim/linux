@@ -1413,6 +1413,28 @@ static int mirror_iterate_devices(struct dm_target *ti,
 	return ret;
 }
 
+static int mirror_merge(struct dm_target *ti, struct bvec_merge_data *bvm,
+			struct bio_vec *biovec, int max_size)
+{
+	struct mirror_set *ms = ti->private;
+	unsigned i;
+
+	for (i = 0; i < ms->nr_mirrors; i++) {
+		int merge;
+		struct bvec_merge_data bvm_local = *bvm;
+		struct mirror *m = &ms->mirror[i];
+		struct request_queue *q = bdev_get_queue(m->dev->bdev);
+
+		bvm_local.bi_bdev = m->dev->bdev;
+		bvm_local.bi_sector = m->offset + dm_target_offset(m->ms->ti, bvm->bi_sector);
+
+		merge = q->merge_bvec_fn(q, &bvm_local, biovec);
+		max_size = min(max_size, merge);
+	}
+
+	return max_size;
+}
+
 static struct target_type mirror_target = {
 	.name	 = "mirror",
 	.version = {1, 13, 2},
@@ -1426,6 +1448,7 @@ static struct target_type mirror_target = {
 	.resume	 = mirror_resume,
 	.status	 = mirror_status,
 	.iterate_devices = mirror_iterate_devices,
+	.merge = mirror_merge,
 };
 
 static int __init dm_mirror_init(void)

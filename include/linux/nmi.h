@@ -66,7 +66,6 @@ extern int soft_watchdog_enabled;
 extern int watchdog_user_enabled;
 extern int watchdog_thresh;
 extern struct cpumask watchdog_cpumask;
-extern atomic_t watchdog_park_in_progress;
 extern int sysctl_softlockup_all_cpu_backtrace;
 extern int sysctl_hardlockup_all_cpu_backtrace;
 struct ctl_table;
