@@ -135,7 +135,6 @@ enum cpuhp_state {
 	/* Must be the last timer callback */
 	CPUHP_AP_DUMMY_TIMER_STARTING,
 	CPUHP_AP_ARM_XEN_STARTING,
-	/* kABI: CPUHP_AP_ARM_KVMPV_STARTING, */
 	CPUHP_AP_ARM_CORESIGHT_STARTING,
 	CPUHP_AP_ARM64_ISNDEP_STARTING,
 	CPUHP_AP_SMPCFD_DYING,
@@ -182,9 +181,6 @@ enum cpuhp_state {
 };
 
 /* Reuse other arch's entries to avoid kABI breakage */
-#define CPUHP_AP_ARM_KVMPV_STARTING	\
-		CPUHP_AP_X86_TBOOT_DYING
-
 #define CPUHP_AP_PERF_ARM_CAVIUM_TX2_UNCORE_ONLINE	\
 		CPUHP_AP_PERF_POWERPC_NEST_IMC_ONLINE
 

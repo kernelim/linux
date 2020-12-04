@@ -228,6 +228,7 @@ struct hib_bio_batch {
 	atomic_t		count;
 	wait_queue_head_t	wait;
 	blk_status_t		error;
+	struct blk_plug		plug;
 };
 
 static void hib_init_batch(struct hib_bio_batch *hb)
@@ -235,6 +236,12 @@ static void hib_init_batch(struct hib_bio_batch *hb)
 	atomic_set(&hb->count, 0);
 	init_waitqueue_head(&hb->wait);
 	hb->error = BLK_STS_OK;
+	blk_start_plug(&hb->plug);
+}
+
+static void hib_finish_batch(struct hib_bio_batch *hb)
+{
+	blk_finish_plug(&hb->plug);
 }
 
 static void hib_end_io(struct bio *bio)
@@ -296,6 +303,10 @@ static int hib_submit_io(int op, int op_flags, pgoff_t page_off, void *addr,
 
 static blk_status_t hib_wait_io(struct hib_bio_batch *hb)
 {
+	/*
+	 * We are relying on the behavior of blk_plug that a thread with
+	 * a plug will flush the plug list before sleeping.
+	 */
 	wait_event(hb->wait, atomic_read(&hb->count) == 0);
 	return blk_status_to_errno(hb->error);
 }
@@ -563,6 +574,7 @@ static int save_image(struct swap_map_handle *handle,
 		nr_pages++;
 	}
 	err2 = hib_wait_io(&hb);
+	hib_finish_batch(&hb);
 	stop = ktime_get();
 	if (!ret)
 		ret = err2;
@@ -856,6 +868,7 @@ out_finish:
 		pr_info("Image saving done\n");
 	swsusp_show_speed(start, stop, nr_to_write, "Wrote");
 out_clean:
+	hib_finish_batch(&hb);
 	if (crc) {
 		if (crc->thr)
 			kthread_stop(crc->thr);
@@ -1087,6 +1100,7 @@ static int load_image(struct swap_map_handle *handle,
 		nr_pages++;
 	}
 	err2 = hib_wait_io(&hb);
+	hib_finish_batch(&hb);
 	stop = ktime_get();
 	if (!ret)
 		ret = err2;
@@ -1450,6 +1464,7 @@ out_finish:
 	}
 	swsusp_show_speed(start, stop, nr_to_read, "Read");
 out_clean:
+	hib_finish_batch(&hb);
 	for (i = 0; i < ring_size; i++)
 		free_page((unsigned long)page[i]);
 	if (crc) {

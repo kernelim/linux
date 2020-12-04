@@ -607,3 +607,8 @@ in your dentry operations instead.
 	->clone_file_range() and ->dedupe_file_range have been replaced with
 	->remap_file_range().  See Documentation/filesystems/vfs.txt for more
 	information.
+--
+[mandatory]
+	DCACHE_RCUACCESS is gone; having an RCU delay on dentry freeing is the
+	default.  DCACHE_NORCU opts out, and only d_alloc_pseudo() has any
+	business doing so.
