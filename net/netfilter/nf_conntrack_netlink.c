@@ -1125,6 +1125,9 @@ ctnetlink_parse_tuple(const struct nlattr * const cda[],
 	if (err < 0)
 		return err;
 
+	if (l3num != NFPROTO_IPV4 && l3num != NFPROTO_IPV6)
+		return -EOPNOTSUPP;
+
 	if (!tb[CTA_TUPLE_IP])
 		return -EINVAL;
 

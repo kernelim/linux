@@ -455,7 +455,8 @@ static int ratelimit_disable __read_mostly;
 module_param_named(ratelimit_disable, ratelimit_disable, int, 0644);
 MODULE_PARM_DESC(ratelimit_disable, "Disable random ratelimit suppression");
 
-static const struct file_operations extrng_fops;
+static const struct file_operations extrng_random_fops;
+static const struct file_operations extrng_urandom_fops;
 
 /**********************************************************************
  *
@@ -1989,6 +1990,13 @@ random_poll(struct file *file, poll_table * wait)
 	return mask;
 }
 
+static __poll_t
+extrng_poll(struct file *file, poll_table * wait)
+{
+	/* extrng pool is always full, always read, no writes */
+	return EPOLLIN | EPOLLRDNORM;
+}
+
 static int
 write_pool(struct entropy_store *r, const char __user *buffer, size_t count)
 {
@@ -2106,7 +2114,25 @@ static int random_open(struct inode *inode, struct file *filp)
 	if (!rng)
 		return 0;
 
-	filp->f_op = &extrng_fops;
+	filp->f_op = &extrng_random_fops;
+
+	return 0;
+}
+
+static int urandom_open(struct inode *inode, struct file *filp)
+{
+	const struct random_extrng *rng;
+
+	rcu_read_lock();
+	rng = extrng;
+	if (rng && !try_module_get(rng->owner))
+		rng = NULL;
+	rcu_read_unlock();
+
+	if (!rng)
+		return 0;
+
+	filp->f_op = &extrng_urandom_fops;
 
 	return 0;
 }
@@ -2134,7 +2160,7 @@ const struct file_operations random_fops = {
 };
 
 const struct file_operations urandom_fops = {
-	.open  = random_open,
+	.open  = urandom_open,
 	.read  = urandom_read,
 	.write = random_write,
 	.unlocked_ioctl = random_ioctl,
@@ -2142,8 +2168,19 @@ const struct file_operations urandom_fops = {
 	.llseek = noop_llseek,
 };
 
-static const struct file_operations extrng_fops = {
+static const struct file_operations extrng_random_fops = {
 	.open  = random_open,
+	.read  = extrng_read,
+	.write = random_write,
+	.poll  = extrng_poll,
+	.unlocked_ioctl = random_ioctl,
+	.fasync = random_fasync,
+	.llseek = noop_llseek,
+	.release = extrng_release,
+};
+
+static const struct file_operations extrng_urandom_fops = {
+	.open  = urandom_open,
 	.read  = extrng_read,
 	.write = random_write,
 	.unlocked_ioctl = random_ioctl,
