@@ -682,17 +682,29 @@ static void reparent_leader(struct task_struct *father, struct task_struct *p,
 	kill_orphaned_pgrp(p, father);
 }
 
-static void forget_original_parent(struct task_struct *father)
+/*
+ * This does two things:
+ *
+ * A.  Make init inherit all the child processes
+ * B.  Check to see if any process groups have become orphaned
+ *	as a result of our exiting, and if they have any stopped
+ *	jobs, send them a SIGHUP and then a SIGCONT.  (POSIX 3.2.2.2)
+ */
+static void forget_original_parent(struct task_struct *father,
+					struct list_head *dead)
 {
 	struct task_struct *p, *n, *reaper;
-	LIST_HEAD(dead_children);
 
-	tasklist_write_lock_irq();
 	/*
 	 * Note that exit_ptrace() and find_new_reaper() might
 	 * drop tasklist_lock and reacquire it.
 	 */
 	exit_ptrace(father);
+
+	if (list_empty(&father->children) &&
+	    task_active_pid_ns(father)->child_reaper != father)
+		return;
+
 	reaper = find_new_reaper(father);
 
 	list_for_each_entry_safe(p, n, &father->children, sibling) {
@@ -707,16 +719,9 @@ static void forget_original_parent(struct task_struct *father)
 				group_send_sig_info(t->pdeath_signal,
 						    SEND_SIG_NOINFO, t);
 		} while_each_thread(p, t);
-		reparent_leader(father, p, &dead_children);
+		reparent_leader(father, p, dead);
 	}
-	qwrite_unlock_irq(&tasklist_lock);
-
 	BUG_ON(!list_empty(&father->children));
-
-	list_for_each_entry_safe(p, n, &dead_children, sibling) {
-		list_del_init(&p->sibling);
-		release_task(p);
-	}
 }
 
 /*
@@ -726,18 +731,12 @@ static void forget_original_parent(struct task_struct *father)
 static void exit_notify(struct task_struct *tsk, int group_dead)
 {
 	bool autoreap;
-
-	/*
-	 * This does two things:
-	 *
-  	 * A.  Make init inherit all the child processes
-	 * B.  Check to see if any process groups have become orphaned
-	 *	as a result of our exiting, and if they have any stopped
-	 *	jobs, send them a SIGHUP and then a SIGCONT.  (POSIX 3.2.2.2)
-	 */
-	forget_original_parent(tsk);
+	struct task_struct *p, *n;
+	LIST_HEAD(dead);
 
 	tasklist_write_lock_irq();
+	forget_original_parent(tsk, &dead);
+
 	if (group_dead)
 		kill_orphaned_pgrp(tsk->group_leader, NULL);
 
@@ -760,6 +759,11 @@ static void exit_notify(struct task_struct *tsk, int group_dead)
 	if (unlikely(tsk->signal->notify_count < 0))
 		wake_up_process(tsk->signal->group_exit_task);
 	qwrite_unlock_irq(&tasklist_lock);
+
+	list_for_each_entry_safe(p, n, &dead, sibling) {
+		list_del_init(&p->sibling);
+		release_task(p);
+	}
 
 	/* If the process is dead, release it - nobody will wait for it */
 	if (autoreap)

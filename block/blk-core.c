@@ -2536,13 +2536,19 @@ void blk_account_io_done(struct request *req)
 		const int rw = rq_data_dir(req);
 		struct hd_struct *part;
 		int cpu;
+		bool is_mq = !!req->q->mq_ops;
 
 		cpu = part_stat_lock();
 		part = req->part;
 
+		if (is_mq)
+			update_io_ticks(part, jiffies, cpu, true);
 		part_stat_inc(cpu, part, ios[rw]);
 		part_stat_add(cpu, part, ticks[rw], duration);
-		part_round_stats(req->q, cpu, part);
+		if (!is_mq)
+			part_round_stats(req->q, cpu, part);
+		else
+			part_stat_add(cpu, part, time_in_queue, duration);
 		part_dec_in_flight(req->q, part, rw);
 
 		hd_struct_put(part);
@@ -2577,6 +2583,7 @@ void blk_account_io_start(struct request *rq, bool new_io)
 	struct hd_struct *part;
 	int rw = rq_data_dir(rq);
 	int cpu;
+	bool is_mq = !!rq->q->mq_ops;
 
 	if (!blk_do_io_stat(rq))
 		return;
@@ -2600,10 +2607,14 @@ void blk_account_io_start(struct request *rq, bool new_io)
 			part = &rq->rq_disk->part0;
 			hd_struct_get(part);
 		}
-		part_round_stats(rq->q, cpu, part);
+		if (!is_mq)
+			part_round_stats(rq->q, cpu, part);
 		part_inc_in_flight(rq->q, part, rw);
 		rq->part = part;
 	}
+
+	if (is_mq)
+		update_io_ticks(part, jiffies, cpu, false);
 
 	part_stat_unlock();
 }

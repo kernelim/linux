@@ -749,11 +749,15 @@ filelayout_free_lseg(struct pnfs_layout_segment *lseg)
 	/* This assumes a single RW lseg */
 	if (lseg->pls_range.iomode == IOMODE_RW) {
 		struct nfs4_filelayout *flo;
+		struct inode *inode;
 
 		flo = FILELAYOUT_FROM_HDR(lseg->pls_layout);
+		inode = flo->generic_hdr.plh_inode;
+		spin_lock(&inode->i_lock);
 		flo->commit_info.nbuckets = 0;
 		kfree(flo->commit_info.buckets);
 		flo->commit_info.buckets = NULL;
+		spin_unlock(&inode->i_lock);
 	}
 	_filelayout_free_lseg(fl);
 }

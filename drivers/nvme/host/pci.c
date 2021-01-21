@@ -2568,6 +2568,8 @@ static const struct pci_device_id nvme_id_table[] = {
 		.driver_data = NVME_QUIRK_DELAY_BEFORE_CHK_RDY, },
 	{ PCI_DEVICE_SUB(0x144d, 0xa824, 0x1028, PCI_ANY_ID),   /* Samsung PM1733/PM1735 */
 		.driver_data = NVME_QUIRK_MAX_IO_QUEUES, },
+	{ PCI_DEVICE_SUB(0x1E0F, 0x0007, 0x1028, PCI_ANY_ID),   /* Kioxia CM6 NVMe drive*/
+		.driver_data = NVME_QUIRK_MAX_IO_QUEUES, },
 	{ PCI_DEVICE_CLASS(PCI_CLASS_STORAGE_EXPRESS, 0xffffff) },
 	{ 0, }
 };

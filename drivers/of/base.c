@@ -1721,12 +1721,25 @@ int of_attach_node(struct device_node *np)
 {
 	unsigned long flags;
 	int rc;
+	const __be32 *phandle;
+	int sz;
 
 	rc = of_reconfig_notify(OF_RECONFIG_ATTACH_NODE, np);
 	if (rc)
 		return rc;
 
 	raw_spin_lock_irqsave(&devtree_lock, flags);
+
+	np->name = __of_get_property(np, "name", NULL) ? : "<NULL>";
+	np->type = __of_get_property(np, "device_type", NULL) ? : "<NULL>";
+
+	phandle = __of_get_property(np, "phandle", &sz);
+	if (!phandle)
+		phandle = __of_get_property(np, "linux,phandle", &sz);
+	if (IS_ENABLED(PPC_PSERIES) && !phandle)
+		phandle = __of_get_property(np, "ibm,phandle", &sz);
+	np->phandle = (phandle && (sz >= 4)) ? be32_to_cpup(phandle) : 0;
+
 	np->sibling = np->parent->child;
 	np->parent->child = np;
 	raw_spin_unlock_irqrestore(&devtree_lock, flags);

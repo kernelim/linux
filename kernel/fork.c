@@ -102,6 +102,11 @@ int max_threads;		/* tunable limit on nr_threads */
 
 DEFINE_PER_CPU(unsigned long, process_counts) = 0;
 
+/*
+ * Queued rwlock is a fair lock. So the tasklist_waiters mechanism isn't
+ * needed to prevent lock starvation when qrwlock is enabled.
+ */
+#ifndef CONFIG_QUEUED_RWLOCKS
 /* Place it into the same section/cacheline with tasklist_lock */
 __attribute__((__section__(".data..cacheline_aligned")))
 static atomic_t tasklist_waiters = ATOMIC_INIT(0);
@@ -131,6 +136,19 @@ void tasklist_read_lock(void)
 no_wait:
 	qread_lock(&tasklist_lock);
 }
+#else
+__cacheline_aligned DEFINE_QRWLOCK(tasklist_lock);  /* outer */
+
+void tasklist_write_lock_irq(void)
+{
+	qwrite_lock_irq(&tasklist_lock);
+}
+
+void tasklist_read_lock(void)
+{
+	qread_lock(&tasklist_lock);
+}
+#endif /* CONFIG_QUEUED_RWLOCKS */
 
 #ifdef CONFIG_PROVE_RCU
 int lockdep_tasklist_lock_is_held(void)

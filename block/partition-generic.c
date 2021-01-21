@@ -116,9 +116,12 @@ ssize_t part_stat_show(struct device *dev,
 	unsigned int inflight[2];
 	int cpu;
 
-	cpu = part_stat_lock();
-	part_round_stats(q, cpu, p);
-	part_stat_unlock();
+	if (!q->mq_ops) {
+		cpu = part_stat_lock();
+		part_round_stats(q, cpu, p);
+		part_stat_unlock();
+	}
+
 	part_in_flight(q, p, inflight);
 	return sprintf(buf,
 		"%8lu %8lu %8llu %8u "

@@ -36,29 +36,15 @@ static bool drbd_may_do_local_read(struct drbd_conf *mdev, sector_t sector, int 
 /* Update disk stats at start of I/O request */
 static void _drbd_start_io_acct(struct drbd_conf *mdev, struct drbd_request *req)
 {
-	const int rw = bio_data_dir(req->master_bio);
-	int cpu;
-	cpu = part_stat_lock();
-	part_round_stats(cpu, &mdev->vdisk->part0);
-	part_stat_inc(cpu, &mdev->vdisk->part0, ios[rw]);
-	part_stat_add(cpu, &mdev->vdisk->part0, sectors[rw], req->i.size >> 9);
-	(void) cpu; /* The macro invocations above want the cpu argument, I do not like
-		       the compiler warning about cpu only assigned but never used... */
-	part_inc_in_flight(&mdev->vdisk->part0, rw);
-	part_stat_unlock();
+	generic_start_io_acct(mdev->rq_queue, bio_data_dir(req->master_bio), req->i.size >> 9,
+			      &mdev->vdisk->part0);
 }
 
 /* Update disk stats when completing request upwards */
 static void _drbd_end_io_acct(struct drbd_conf *mdev, struct drbd_request *req)
 {
-	int rw = bio_data_dir(req->master_bio);
-	unsigned long duration = jiffies - req->start_time;
-	int cpu;
-	cpu = part_stat_lock();
-	part_stat_add(cpu, &mdev->vdisk->part0, ticks[rw], duration);
-	part_round_stats(cpu, &mdev->vdisk->part0);
-	part_dec_in_flight(&mdev->vdisk->part0, rw);
-	part_stat_unlock();
+	generic_end_io_acct(mdev->rq_queue, bio_data_dir(req->master_bio),
+			    &mdev->vdisk->part0, req->start_time);
 }
 
 static struct drbd_request *drbd_req_new(struct drbd_conf *mdev,
