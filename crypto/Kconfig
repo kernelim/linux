@@ -432,7 +432,6 @@ config CRYPTO_CFB
 config CRYPTO_CTR
 	tristate "CTR support"
 	select CRYPTO_BLKCIPHER
-	select CRYPTO_SEQIV
 	select CRYPTO_MANAGER
 	help
 	  CTR: Counter mode
@@ -1848,7 +1847,7 @@ config CRYPTO_DRBG_HASH
 config CRYPTO_DRBG_CTR
 	bool "Enable CTR DRBG"
 	select CRYPTO_AES
-	depends on CRYPTO_CTR
+	select CRYPTO_CTR
 	help
 	  Enable the CTR DRBG variant as defined in NIST SP800-90A.
 

@@ -81,7 +81,7 @@ struct kvm_svm {
 
 struct kvm_vcpu;
 
-struct nested_state {
+struct svm_nested_state {
 	struct vmcb *hsave;
 	u64 hsave_msr;
 	u64 vm_cr_msr;
@@ -133,7 +133,7 @@ struct vcpu_svm {
 
 	ulong nmi_iret_rip;
 
-	struct nested_state nested;
+	struct svm_nested_state nested;
 
 	bool nmi_singlestep;
 	u64 nmi_singlestep_guest_rflags;
@@ -188,18 +188,18 @@ static inline struct kvm_svm *to_kvm_svm(struct kvm *kvm)
 	return container_of(kvm, struct kvm_svm, kvm);
 }
 
-static inline void mark_all_dirty(struct vmcb *vmcb)
+static inline void vmcb_mark_all_dirty(struct vmcb *vmcb)
 {
 	vmcb->control.clean = 0;
 }
 
-static inline void mark_all_clean(struct vmcb *vmcb)
+static inline void vmcb_mark_all_clean(struct vmcb *vmcb)
 {
 	vmcb->control.clean = ((1 << VMCB_DIRTY_MAX) - 1)
 			       & ~VMCB_ALWAYS_DIRTY_MASK;
 }
 
-static inline void mark_dirty(struct vmcb *vmcb, int bit)
+static inline void vmcb_mark_dirty(struct vmcb *vmcb, int bit)
 {
 	vmcb->control.clean &= ~(1 << bit);
 }
@@ -293,7 +293,7 @@ static inline void clr_exception_intercept(struct vcpu_svm *svm, int bit)
 	recalc_intercepts(svm);
 }
 
-static inline void set_intercept(struct vcpu_svm *svm, int bit)
+static inline void svm_set_intercept(struct vcpu_svm *svm, int bit)
 {
 	struct vmcb *vmcb = get_host_vmcb(svm);
 
@@ -302,7 +302,7 @@ static inline void set_intercept(struct vcpu_svm *svm, int bit)
 	recalc_intercepts(svm);
 }
 
-static inline void clr_intercept(struct vcpu_svm *svm, int bit)
+static inline void svm_clr_intercept(struct vcpu_svm *svm, int bit)
 {
 	struct vmcb *vmcb = get_host_vmcb(svm);
 
@@ -311,7 +311,7 @@ static inline void clr_intercept(struct vcpu_svm *svm, int bit)
 	recalc_intercepts(svm);
 }
 
-static inline bool is_intercept(struct vcpu_svm *svm, int bit)
+static inline bool svm_is_intercept(struct vcpu_svm *svm, int bit)
 {
 	return (svm->vmcb->control.intercept & (1ULL << bit)) != 0;
 }
@@ -365,7 +365,7 @@ void svm_set_gif(struct vcpu_svm *svm, bool value);
 #define NESTED_EXIT_DONE	1	/* Exit caused nested vmexit  */
 #define NESTED_EXIT_CONTINUE	2	/* Further checks needed      */
 
-static inline bool svm_nested_virtualize_tpr(struct kvm_vcpu *vcpu)
+static inline bool nested_svm_virtualize_tpr(struct kvm_vcpu *vcpu)
 {
 	struct vcpu_svm *svm = to_svm(vcpu);
 
@@ -420,7 +420,7 @@ extern int avic;
 static inline void avic_update_vapic_bar(struct vcpu_svm *svm, u64 data)
 {
 	svm->vmcb->control.avic_vapic_bar = data & VMCB_AVIC_APIC_BAR_MASK;
-	mark_dirty(svm->vmcb, VMCB_AVIC);
+	vmcb_mark_dirty(svm->vmcb, VMCB_AVIC);
 }
 
 static inline bool avic_vcpu_is_running(struct kvm_vcpu *vcpu)

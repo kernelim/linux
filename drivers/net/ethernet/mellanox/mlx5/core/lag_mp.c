@@ -10,7 +10,7 @@
 
 static bool mlx5_lag_multipath_check_prereq(struct mlx5_lag *ldev)
 {
-	if (!ldev->pf[MLX5_LAG_P1].dev || !ldev->pf[MLX5_LAG_P2].dev)
+	if (!mlx5_lag_is_ready(ldev))
 		return false;
 
 	return mlx5_esw_multipath_prereq(ldev->pf[MLX5_LAG_P1].dev,
@@ -127,7 +127,12 @@ static void mlx5_lag_fib_route_event(struct mlx5_lag *ldev,
 			struct net_device *nh_dev = fi->fib_nh[0].nh_dev;
 			int i = mlx5_lag_dev_get_netdev_idx(ldev, nh_dev);
 
-			mlx5_lag_set_port_affinity(ldev, ++i);
+			if (i < 0)
+				i = MLX5_LAG_NORMAL_AFFINITY;
+			else
+				++i;
+
+			mlx5_lag_set_port_affinity(ldev, i);
 		}
 		return;
 	}

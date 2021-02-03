@@ -699,8 +699,14 @@ static void build_protos(struct proto prot[TLS_NUM_CONFIG][TLS_NUM_CONFIG],
 
 static int tls_init(struct sock *sk)
 {
+	static bool warned = false;
 	struct tls_context *ctx;
 	int rc = 0;
+
+	if (!warned) {
+		mark_tech_preview("kTLS", THIS_MODULE);
+		warned = true;
+	}
 
 	tls_build_proto(sk);
 
@@ -867,7 +873,6 @@ static int __init tls_register(void)
 	tls_device_init();
 	tcp_register_ulp(&tcp_tls_ulp_ops);
 
-	mark_tech_preview("kTLS", THIS_MODULE);
 	return 0;
 }
 

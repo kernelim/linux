@@ -48,13 +48,6 @@ static void nested_svm_inject_npf_exit(struct kvm_vcpu *vcpu,
 	svm->vmcb->control.exit_info_1 &= ~0xffffffffULL;
 	svm->vmcb->control.exit_info_1 |= fault->error_code;
 
-	/*
-	 * The present bit is always zero for page structure faults on real
-	 * hardware.
-	 */
-	if (svm->vmcb->control.exit_info_1 & (2ULL << 32))
-		svm->vmcb->control.exit_info_1 &= ~1;
-
 	nested_svm_vmexit(svm);
 }
 
@@ -106,7 +99,7 @@ void recalc_intercepts(struct vcpu_svm *svm)
 {
 	struct vmcb_control_area *c, *h, *g;
 
-	mark_dirty(svm->vmcb, VMCB_INTERCEPTS);
+	vmcb_mark_dirty(svm->vmcb, VMCB_INTERCEPTS);
 
 	if (!is_guest_mode(&svm->vcpu))
 		return;
@@ -207,6 +200,20 @@ static bool nested_svm_vmrun_msrpm(struct vcpu_svm *svm)
 	return true;
 }
 
+static bool svm_get_nested_state_pages(struct kvm_vcpu *vcpu)
+{
+	struct vcpu_svm *svm = to_svm(vcpu);
+	if (!nested_svm_vmrun_msrpm(svm)) {
+		vcpu->run->exit_reason = KVM_EXIT_INTERNAL_ERROR;
+		vcpu->run->internal.suberror =
+			KVM_INTERNAL_ERROR_EMULATION;
+		vcpu->run->internal.ndata = 0;
+		return false;
+	}
+
+	return true;
+}
+
 static bool nested_vmcb_check_controls(struct vmcb_control_area *control)
 {
 	if ((control->intercept & (1ULL << INTERCEPT_VMRUN)) == 0)
@@ -229,6 +236,9 @@ static bool nested_vmcb_checks(struct vmcb *vmcb)
 
 	if (((vmcb->save.cr0 & X86_CR0_CD) == 0) &&
 	    (vmcb->save.cr0 & X86_CR0_NW))
+		return false;
+
+	if (!kvm_dr6_valid(vmcb->save.dr6) || !kvm_dr7_valid(vmcb->save.dr7))
 		return false;
 
 	return nested_vmcb_check_controls(&vmcb->control);
@@ -258,7 +268,7 @@ void sync_nested_vmcb_control(struct vcpu_svm *svm)
 	/* Only a few fields of int_ctl are written by the processor.  */
 	mask = V_IRQ_MASK | V_TPR_MASK;
 	if (!(svm->nested.ctl.int_ctl & V_INTR_MASKING_MASK) &&
-	    is_intercept(svm, INTERCEPT_VINTR)) {
+	    svm_is_intercept(svm, INTERCEPT_VINTR)) {
 		/*
 		 * In order to request an interrupt window, L0 is usurping
 		 * svm->vmcb->control.int_ctl and possibly setting V_IRQ
@@ -405,7 +415,7 @@ static void nested_prepare_vmcb_control(struct vcpu_svm *svm)
 	 */
 	recalc_intercepts(svm);
 
-	mark_all_dirty(svm->vmcb);
+	vmcb_mark_all_dirty(svm->vmcb);
 }
 
 int enter_svm_guest_mode(struct vcpu_svm *svm, u64 vmcb_gpa,
@@ -568,7 +578,6 @@ int nested_svm_vmexit(struct vcpu_svm *svm)
 	svm->vcpu.arch.mp_state = KVM_MP_STATE_RUNNABLE;
 
 	/* Give the current vmcb to the guest */
-	svm_set_gif(svm, false);
 
 	nested_vmcb->save.es     = vmcb->save.es;
 	nested_vmcb->save.cs     = vmcb->save.cs;
@@ -614,6 +623,9 @@ int nested_svm_vmexit(struct vcpu_svm *svm)
 	/* Restore the original control entries */
 	copy_vmcb_control_area(&vmcb->control, &hsave->control);
 
+	/* On vmexit the  GIF is set to false */
+	svm_set_gif(svm, false);
+
 	svm->vmcb->control.tsc_offset = svm->vcpu.arch.tsc_offset =
 		svm->vcpu.arch.l1_tsc_offset;
 
@@ -637,7 +649,7 @@ int nested_svm_vmexit(struct vcpu_svm *svm)
 	svm->vmcb->save.cpl = 0;
 	svm->vmcb->control.exit_int_info = 0;
 
-	mark_all_dirty(svm->vmcb);
+	vmcb_mark_all_dirty(svm->vmcb);
 
 	trace_kvm_nested_vmexit_inject(nested_vmcb->control.exit_code,
 				       nested_vmcb->control.exit_info_1,
@@ -682,6 +694,8 @@ void svm_leave_nested(struct vcpu_svm *svm)
 		copy_vmcb_control_area(&vmcb->control, &hsave->control);
 		nested_svm_uninit_mmu_context(&svm->vcpu);
 	}
+
+	kvm_clear_request(KVM_REQ_GET_NESTED_STATE_PAGES, &svm->vcpu);
 }
 
 static int nested_svm_exit_handled_msr(struct vcpu_svm *svm)
@@ -1042,9 +1056,13 @@ static int svm_set_nested_state(struct kvm_vcpu *vcpu,
 	struct vmcb *hsave = svm->nested.hsave;
 	struct vmcb __user *user_vmcb = (struct vmcb __user *)
 		&user_kvm_nested_state->data.svm[0];
-	struct vmcb_control_area ctl;
-	struct vmcb_save_area save;
+	struct vmcb_control_area *ctl;
+	struct vmcb_save_area *save;
+	int ret;
 	u32 cr0;
+
+	BUILD_BUG_ON(sizeof(struct vmcb_control_area) + sizeof(struct vmcb_save_area) >
+		     KVM_STATE_NESTED_SVM_VMCB_SIZE);
 
 	if (kvm_state->format != KVM_STATE_NESTED_FORMAT_SVM)
 		return -EINVAL;
@@ -1070,20 +1088,30 @@ static int svm_set_nested_state(struct kvm_vcpu *vcpu,
 
 	if (!(kvm_state->flags & KVM_STATE_NESTED_GUEST_MODE)) {
 		svm_leave_nested(svm);
-		goto out_set_gif;
+		svm_set_gif(svm, !!(kvm_state->flags & KVM_STATE_NESTED_GIF_SET));
+		return 0;
 	}
 
 	if (!page_address_valid(vcpu, kvm_state->hdr.svm.vmcb_pa))
 		return -EINVAL;
 	if (kvm_state->size < sizeof(*kvm_state) + KVM_STATE_NESTED_SVM_VMCB_SIZE)
 		return -EINVAL;
-	if (copy_from_user(&ctl, &user_vmcb->control, sizeof(ctl)))
-		return -EFAULT;
-	if (copy_from_user(&save, &user_vmcb->save, sizeof(save)))
-		return -EFAULT;
 
-	if (!nested_vmcb_check_controls(&ctl))
-		return -EINVAL;
+	ret  = -ENOMEM;
+	ctl  = kzalloc(sizeof(*ctl),  GFP_KERNEL);
+	save = kzalloc(sizeof(*save), GFP_KERNEL);
+	if (!ctl || !save)
+		goto out_free;
+
+	ret = -EFAULT;
+	if (copy_from_user(ctl, &user_vmcb->control, sizeof(*ctl)))
+		goto out_free;
+	if (copy_from_user(save, &user_vmcb->save, sizeof(*save)))
+		goto out_free;
+
+	ret = -EINVAL;
+	if (!nested_vmcb_check_controls(ctl))
+		goto out_free;
 
 	/*
 	 * Processor state contains L2 state.  Check that it is
@@ -1091,15 +1119,15 @@ static int svm_set_nested_state(struct kvm_vcpu *vcpu,
 	 */
 	cr0 = kvm_read_cr0(vcpu);
         if (((cr0 & X86_CR0_CD) == 0) && (cr0 & X86_CR0_NW))
-                return -EINVAL;
+		goto out_free;
 
 	/*
 	 * Validate host state saved from before VMRUN (see
 	 * nested_svm_check_permissions).
 	 * TODO: validate reserved bits for all saved state.
 	 */
-	if (!(save.cr0 & X86_CR0_PG))
-		return -EINVAL;
+	if (!(save->cr0 & X86_CR0_PG))
+		goto out_free;
 
 	/*
 	 * All checks done, we can enter guest mode.  L1 control fields
@@ -1108,19 +1136,24 @@ static int svm_set_nested_state(struct kvm_vcpu *vcpu,
 	 * contains saved L1 state.
 	 */
 	copy_vmcb_control_area(&hsave->control, &svm->vmcb->control);
-	hsave->save = save;
+	hsave->save = *save;
 
 	svm->nested.vmcb = kvm_state->hdr.svm.vmcb_pa;
-	load_nested_vmcb_control(svm, &ctl);
+	load_nested_vmcb_control(svm, ctl);
 	nested_prepare_vmcb_control(svm);
 
-out_set_gif:
-	svm_set_gif(svm, !!(kvm_state->flags & KVM_STATE_NESTED_GIF_SET));
-	return 0;
+	kvm_make_request(KVM_REQ_GET_NESTED_STATE_PAGES, vcpu);
+	ret = 0;
+out_free:
+	kfree(save);
+	kfree(ctl);
+
+	return ret;
 }
 
 struct kvm_x86_nested_ops svm_nested_ops = {
 	.check_events = svm_check_nested_events,
+	.get_nested_state_pages = svm_get_nested_state_pages,
 	.get_state = svm_get_nested_state,
 	.set_state = svm_set_nested_state,
 };

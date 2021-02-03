@@ -528,7 +528,7 @@ struct sched_dl_entity {
 	 * overruns.
 	 */
 	unsigned int			dl_throttled      : 1;
-	unsigned int			dl_boosted        : 1;
+	RH_KABI_DEPRECATE(unsigned int,	dl_boosted        : 1)
 	unsigned int			dl_yielded        : 1;
 	unsigned int			dl_non_contending : 1;
 	unsigned int			dl_overrun	  : 1;
@@ -798,7 +798,17 @@ struct task_struct {
 	RH_KABI_USE(3, const cpumask_t  *cpus_ptr)
 	struct task_struct_rh		*task_struct_rh;
 	struct pid			*rh_pgid;
+	/* RH KABI: using rh_reserved5 instead of placing this at the end of sched_dl_entity */
+#ifdef CONFIG_RT_MUTEXES
+	/*
+	 * Priority Inheritance. When a DEADLINE scheduling entity is boosted
+	 * pi_se points to the donor, otherwise points to the dl_se it belongs
+	 * to (the original one/itself).
+	 */
+	struct sched_dl_entity 		*pi_se;
+#else
 	long				rh_reserved5;
+#endif
 	long				rh_reserved6;
 	struct pid			*rh_sid;
 #endif

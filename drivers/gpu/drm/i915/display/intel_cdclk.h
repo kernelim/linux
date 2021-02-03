@@ -32,18 +32,9 @@ void intel_update_rawclk(struct drm_i915_private *dev_priv);
 bool intel_cdclk_needs_modeset(const struct intel_cdclk_state *a,
 			       const struct intel_cdclk_state *b);
 void intel_cdclk_swap_state(struct intel_atomic_state *state);
-void
-intel_set_cdclk_pre_plane_update(struct drm_i915_private *dev_priv,
-				 const struct intel_cdclk_state *old_state,
-				 const struct intel_cdclk_state *new_state,
-				 enum pipe pipe);
-void
-intel_set_cdclk_post_plane_update(struct drm_i915_private *dev_priv,
-				  const struct intel_cdclk_state *old_state,
-				  const struct intel_cdclk_state *new_state,
-				  enum pipe pipe);
-void intel_dump_cdclk_state(const struct intel_cdclk_state *cdclk_state,
-			    const char *context);
+void intel_set_cdclk_pre_plane_update(struct intel_atomic_state *state);
+void intel_set_cdclk_post_plane_update(struct intel_atomic_state *state);
+void intel_dump_cdclk_state(const struct intel_cdclk_state *cdclk_state, const char *context);
 int intel_modeset_calc_cdclk(struct intel_atomic_state *state);
 
 #endif /* __INTEL_CDCLK_H__ */

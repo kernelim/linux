@@ -517,6 +517,19 @@ static void hsw_activate_psr2(struct intel_dp *intel_dp)
 	else
 		val |= EDP_PSR2_TP2_TIME_2500us;
 
+	if (INTEL_GEN(dev_priv) >= 12) {
+		/*
+		 * TODO: 7 lines of IO_BUFFER_WAKE and FAST_WAKE are default
+		 * values from BSpec. In order to setting an optimal power
+		 * consumption, lower than 4k resoluition mode needs to decrese
+		 * IO_BUFFER_WAKE and FAST_WAKE. And higher than 4K resolution
+		 * mode needs to increase IO_BUFFER_WAKE and FAST_WAKE.
+		 */
+		val |= TGL_EDP_PSR2_BLOCK_COUNT_NUM_2;
+		val |= TGL_EDP_PSR2_IO_BUFFER_WAKE(7);
+		val |= TGL_EDP_PSR2_FAST_WAKE(7);
+	}
+
 	/*
 	 * PSR2 HW is incorrectly using EDP_PSR_TP1_TP3_SEL and BSpec is
 	 * recommending keep this bit unset while PSR2 is enabled.
