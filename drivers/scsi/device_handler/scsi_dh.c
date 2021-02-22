@@ -365,7 +365,6 @@ int scsi_register_device_handler(struct scsi_device_handler *scsi_dh,
 	if (!scsi_dh->attach || !scsi_dh->detach)
 		return -EINVAL;
 
-	spin_lock(&list_lock);
 	if (scsi_dh_aux_src) {
 		scsi_dh_aux = kzalloc(sizeof(struct scsi_device_handler_aux), GFP_KERNEL);
 		if (!scsi_dh_aux)
@@ -373,8 +372,10 @@ int scsi_register_device_handler(struct scsi_device_handler *scsi_dh,
 
 		memcpy(scsi_dh_aux, scsi_dh_aux_src, scsi_dh_aux_src_size);
 		scsi_dh_aux->scsi_dh = scsi_dh;
-		list_add(&scsi_dh_aux->list, &scsi_dh_aux_list);
 	}
+	spin_lock(&list_lock);
+	if (scsi_dh_aux)
+		list_add(&scsi_dh_aux->list, &scsi_dh_aux_list);
 	list_add(&scsi_dh->list, &scsi_dh_list);
 	spin_unlock(&list_lock);
 

@@ -3983,8 +3983,10 @@ static int alloc_irq_index(struct irq_cfg *cfg, u16 devid, int count)
 			if (!irte_info->ir_data) {
 				int ret = setup_amd_ir_data(irte_info);
 
-				if (ret)
-					return ret;
+				if (ret) {
+					index = ret;
+					goto out;
+				}
 			}
 
 			for (; c != 0; --c)
@@ -4414,7 +4416,6 @@ static void compose_msi_msg(struct pci_dev *pdev,
 static int msi_alloc_irq(struct pci_dev *pdev, int irq, int nvec)
 {
 	struct irq_cfg *cfg;
-	int index;
 	u16 devid;
 
 	if (!pdev)
@@ -4425,9 +4426,17 @@ static int msi_alloc_irq(struct pci_dev *pdev, int irq, int nvec)
 		return -EINVAL;
 
 	devid = get_device_id(&pdev->dev);
-	index = alloc_irq_index(cfg, devid, nvec);
+	/*
+         * RHEL7: The iommu calls pci_enable_msi during init, but
+         *        remapping ops are already set up. Allow it to
+         *        continue with the call to setup_msi_irq without
+         *        remapping. The iommu's entry in the rlookup table
+         *        is set to null. See iommu_init_one.
+         */
+	if (!amd_iommu_rlookup_table[devid])
+		return MAX_IRQS_PER_TABLE;
 
-	return index < 0 ? MAX_IRQS_PER_TABLE : index;
+	return alloc_irq_index(cfg, devid, nvec);
 }
 
 static int amd_ir_set_vcpu_affinity(int irq, void *vcpu_info)

@@ -1231,16 +1231,14 @@ static void call_timer_fn(struct timer_list *timer, void (*fn)(unsigned long),
  *
  * This function remedies this situation by requeuing all the timers in
  * the cascading timer wheel and adjusting timer_jiffies to the min() of
- * current jiffies and the expiry times of all active timers. The expiry
- * times of expired deferrable timers will be set to the new timer_jiffies.
+ * current jiffies and the expiry times of all timers.
  */
 static noinline void requeue_timers(struct tvec_base *base)
 {
 	struct timer_list *timer, *tmp;
 	struct list_head list, head, *vecs;
 	unsigned long min_jiffies = jiffies;
-	unsigned long nactive = base->active_timers;
-	unsigned long nall = base->all_timers;
+	unsigned long count = 0;
 	int i;
 
 	lockdep_assert_held(&base->lock);
@@ -1260,46 +1258,24 @@ static noinline void requeue_timers(struct tvec_base *base)
 		 * Check all the timers in list and move them over to head.
 		 */
 		list_for_each_entry_safe(timer, tmp, &list, entry) {
-			base->all_timers--;
-			if (!tbase_get_deferrable(timer->base)) {
-				base->active_timers--;
-				if (time_before(timer->expires, min_jiffies))
-					min_jiffies = timer->expires;
-			}
+			count++;
+			if (time_before(timer->expires, min_jiffies))
+				min_jiffies = timer->expires;
 			list_add_tail(&timer->entry, &head);
 		}
-		if (!base->all_timers)
+		if (base->all_timers == count)
 			break;
 	}
-	WARN_ON_ONCE(base->all_timers || base->active_timers);
+	WARN_ON_ONCE(base->all_timers != count ||
+		     time_before(min_jiffies, base->timer_jiffies));
 
 	/*
-	 * Restore all_timers and active_timers.
 	 * Requeue timers back into timer wheel with timer_jiffies
 	 * set to min_jiffies.
 	 */
-	base->all_timers = nall;
-	base->active_timers = nactive;
 	base->timer_jiffies = min_jiffies;
-
-	list_for_each_entry_safe(timer, tmp, &head, entry) {
-		unsigned long old_expires;
-		bool restore = false;
-
-		/*
-		 * For expiry time that is < min_jiffies (deferrable ones),
-		 * temporarily change it to min_jiffies, insert the timer
-		 * without accounting and restore the expiry time.
-		 */
-		if (time_before(timer->expires, min_jiffies)) {
-			old_expires = timer->expires;
-			timer->expires = min_jiffies;
-			restore = true;
-		}
+	list_for_each_entry_safe(timer, tmp, &head, entry)
 		__internal_add_timer(base, timer);
-		if (restore)
-			timer->expires = old_expires;
-	}
 }
 
 #define INDEX(N) ((base->timer_jiffies >> (TVR_BITS + (N) * TVN_BITS)) & TVN_MASK)
@@ -1314,14 +1290,16 @@ static noinline void requeue_timers(struct tvec_base *base)
 static inline void __run_timers(struct tvec_base *base)
 {
 	struct timer_list *timer;
+	unsigned long threshold;
 
 	spin_lock_irq(&base->lock);
 
 	/*
-	 * Requeue the timers if jiffies - timer_jiffies >= 2*TVEC_LEN.
+	 * Requeue timers if both jiffies & next_timer are over the threshold.
 	 */
-	if (base->all_timers &&
-	    time_after_eq(jiffies, base->timer_jiffies + 2 * TVEC_LEN))
+	threshold = base->timer_jiffies + 2 * TVEC_LEN;
+	if (base->all_timers && time_after_eq(jiffies, threshold) &&
+	    time_after_eq(base->next_timer, threshold))
 		requeue_timers(base);
 
 	while (time_after_eq(jiffies, base->timer_jiffies)) {

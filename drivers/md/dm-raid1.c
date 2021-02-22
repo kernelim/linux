@@ -1421,10 +1421,14 @@ static int mirror_merge(struct dm_target *ti, struct bvec_merge_data *bvm,
 
 	for (i = 0; i < ms->nr_mirrors; i++) {
 		int merge;
-		struct bvec_merge_data bvm_local = *bvm;
+		struct bvec_merge_data bvm_local;
 		struct mirror *m = &ms->mirror[i];
 		struct request_queue *q = bdev_get_queue(m->dev->bdev);
 
+		if (!q->merge_bvec_fn)
+			continue;
+
+		bvm_local = *bvm;
 		bvm_local.bi_bdev = m->dev->bdev;
 		bvm_local.bi_sector = m->offset + dm_target_offset(m->ms->ti, bvm->bi_sector);
 
