@@ -236,6 +236,8 @@ static int tcm_loop_issue_tmr(struct tcm_loop_tpg *tl_tpg,
 	struct tcm_loop_cmd *tl_cmd = NULL;
 	int ret = TMR_FUNCTION_FAILED, rc;
 
+	flush_workqueue(tcm_loop_workqueue);
+
 	/*
 	 * Locate the tl_nexus and se_sess pointers
 	 */
@@ -1248,7 +1250,7 @@ static int __init tcm_loop_fabric_init(void)
 {
 	int ret = -ENOMEM;
 
-	tcm_loop_workqueue = alloc_workqueue("tcm_loop", 0, 0);
+	tcm_loop_workqueue = alloc_workqueue("tcm_loop", WQ_MEM_RECLAIM, 0);
 	if (!tcm_loop_workqueue)
 		goto out;
 

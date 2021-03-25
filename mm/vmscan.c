@@ -376,6 +376,14 @@ unsigned long shrink_slab(struct shrink_control *shrink,
 			new_nr = atomic_long_read(&shrinker->nr_in_batch);
 
 		trace_mm_shrink_slab_end(shrinker, shrink_ret, nr, new_nr);
+
+		/*
+		 * Bail out if someone wants to (un)register a shrinker to
+		 * prevent the operation from being stalled for long periods
+		 * due to parallel ongoing shrinking.
+		 */
+		if (rwsem_is_contended(&shrinker_rwsem))
+			break;
 	}
 	up_read(&shrinker_rwsem);
 out:

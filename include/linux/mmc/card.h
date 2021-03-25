@@ -308,6 +308,8 @@ struct mmc_card {
 	unsigned int    nr_parts;
 
 	unsigned int		bouncesz;	/* Bounce buffer size */
+
+	RH_KABI_EXTEND(struct workqueue_struct *complete_wq)	/* Private workqueue */
 };
 
 static inline bool mmc_large_sector(struct mmc_card *card)

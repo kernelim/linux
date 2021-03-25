@@ -1259,6 +1259,8 @@ struct sched_rt_entity {
 	unsigned long timeout;
 	unsigned long watchdog_stamp;
 	unsigned int time_slice;
+	RH_KABI_FILL_HOLE(unsigned short on_rq)
+	RH_KABI_FILL_HOLE(unsigned short on_list)
 
 	struct sched_rt_entity *back;
 #ifdef CONFIG_RT_GROUP_SCHED
@@ -3258,7 +3260,7 @@ static inline void ptrace_signal_wake_up(struct task_struct *t, bool resume)
 
 static inline unsigned int task_cpu(const struct task_struct *p)
 {
-	return task_thread_info(p)->cpu;
+	return READ_ONCE(task_thread_info(p)->cpu);
 }
 
 static inline int task_node(const struct task_struct *p)
