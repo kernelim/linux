@@ -207,6 +207,7 @@ qla24xx_dump_ram(struct qla_hw_data *ha, uint32_t addr, uint32_t *ram,
 		WRT_REG_WORD(&reg->mailbox0, MBC_DUMP_RISC_RAM_EXTENDED);
 		WRT_REG_WORD(&reg->mailbox1, LSW(addr));
 		WRT_REG_WORD(&reg->mailbox8, MSW(addr));
+		WRT_REG_WORD(&reg->mailbox10, 0);
 
 		WRT_REG_WORD(&reg->mailbox2, MSW(LSD(dump_dma)));
 		WRT_REG_WORD(&reg->mailbox3, LSW(LSD(dump_dma)));

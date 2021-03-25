@@ -1,0 +1,41 @@
+# This CI will only work for trusted contributors. CI for public contributors
+# runs via a webhook on the merge requests. There's nothing you have to do if
+# you want your changes tested -- created pipelines will be automatically
+# linked in the merge request and appropriate labels will be added to it.
+# Changes to this file will NOT be reflected in the testing.
+
+workflow:
+  rules:
+    - if: $CI_MERGE_REQUEST_ID
+
+trigger_pipeline:
+  variables:
+    git_url: ${CI_MERGE_REQUEST_PROJECT_URL}
+    branch: ${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}
+    commit_hash: ${CI_COMMIT_SHA}
+    name: kernel-rhel8
+    mr_id: ${CI_MERGE_REQUEST_IID}
+    mr_url: ${CI_MERGE_REQUEST_PROJECT_URL}/-/merge_requests/${CI_MERGE_REQUEST_IID}
+    title: ${CI_COMMIT_TITLE}
+
+    send_ready_for_test_pre: 'True'
+    send_ready_for_test_post: 'True'
+    kernel_type: internal
+    make_target: rpm
+    builder_image: quay.io/cki/builder-rhel8
+    architectures: 'x86_64 ppc64le aarch64 s390x'
+    build_kabi_whitelist: 'true'
+    tree_yaml_name: rhel
+    kpet_tree_family: rhel8
+    package_name: kernel
+    publish_elsewhere: 'true'
+    native_tools: 'true'
+    # Skip testing for now to save resources. Uncomment ystream_distro and remove
+    # the skip_ beaker line when ready for production.
+    #skip_beaker: 'true'
+    disttag_override: '.el8_3'
+  trigger:
+    project: redhat/red-hat-ci-tools/kernel/cki-internal-pipelines/cki-internal-contributors
+    branch: rhel8
+    strategy: depend
+

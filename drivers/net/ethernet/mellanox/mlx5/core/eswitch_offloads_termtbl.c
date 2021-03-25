@@ -122,6 +122,7 @@ mlx5_eswitch_termtbl_get_create(struct mlx5_eswitch *esw,
 	tt->dest.type = MLX5_FLOW_DESTINATION_TYPE_VPORT;
 	tt->dest.vport.num = dest->vport.num;
 	tt->dest.vport.vhca_id = dest->vport.vhca_id;
+	tt->dest.vport.flags = dest->vport.flags;
 	memcpy(&tt->flow_act, flow_act, sizeof(*flow_act));
 
 	err = mlx5_eswitch_termtbl_create(esw->dev, tt, flow_act);

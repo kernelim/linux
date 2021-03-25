@@ -279,7 +279,6 @@ extern void __audit_syscall_entry(int major, unsigned long a0, unsigned long a1,
 extern void __audit_syscall_exit(int ret_success, long ret_value);
 extern struct filename *__audit_reusename(const __user char *uptr);
 extern void __audit_getname(struct filename *name);
-
 extern void __audit_inode(struct filename *name, const struct dentry *dentry,
 				unsigned int flags);
 extern void __audit_file(const struct file *);
@@ -565,14 +564,6 @@ static inline struct filename *audit_reusename(const __user char *name)
 	return NULL;
 }
 static inline void audit_getname(struct filename *name)
-{ }
-static inline void __audit_inode(struct filename *name,
-					const struct dentry *dentry,
-					unsigned int flags)
-{ }
-static inline void __audit_inode_child(struct inode *parent,
-					const struct dentry *dentry,
-					const unsigned char type)
 { }
 static inline void audit_inode(struct filename *name,
 				const struct dentry *dentry,
