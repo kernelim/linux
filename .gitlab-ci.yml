@@ -8,27 +8,44 @@ workflow:
   rules:
     - if: $CI_MERGE_REQUEST_ID
 
+variables:
+  git_url: ${CI_MERGE_REQUEST_PROJECT_URL}.git
+  branch: ${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}
+  commit_hash: ${CI_COMMIT_SHA}
+  mr_id: ${CI_MERGE_REQUEST_IID}
+  mr_url: ${CI_MERGE_REQUEST_PROJECT_URL}/-/merge_requests/${CI_MERGE_REQUEST_IID}
+  title: ${CI_COMMIT_TITLE}
+  kernel_type: internal
+  make_target: rpm
+  builder_image: quay.io/cki/builder-rhel7
+  build_kabi_whitelist: 'true'
+  tree_yaml_name: rhel
+  publish_elsewhere: 'true'
+
+realtime_check:
+  variables:
+    name: kernel-rt-rhel7
+    merge_tree: ${CI_MERGE_REQUEST_PROJECT_URL}
+    merge_branch: main-rt
+    architectures: 'x86_64'
+    kpet_tree_family: rhel7-rt
+    package_name: kernel-rt
+    srpm_make_target: 'rt-srpm'
+    skip_test: 'true'
+  trigger:
+    project: redhat/red-hat-ci-tools/kernel/cki-internal-pipelines/cki-internal-contributors
+    branch: rhel7
+    strategy: depend
+  allow_failure: true
+
 trigger_pipeline:
   variables:
-    git_url: ${CI_MERGE_REQUEST_PROJECT_URL}.git
-    branch: ${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}
-    commit_hash: ${CI_COMMIT_SHA}
     name: kernel-rhel7
-    mr_id: ${CI_MERGE_REQUEST_IID}
-    mr_url: ${CI_MERGE_REQUEST_PROJECT_URL}/-/merge_requests/${CI_MERGE_REQUEST_IID}
-    title: ${CI_COMMIT_TITLE}
-
     send_ready_for_test_pre: 'True'
     send_ready_for_test_post: 'True'
-    kernel_type: internal
-    make_target: rpm
-    builder_image: quay.io/cki/builder-rhel7
     architectures: 'x86_64 ppc64le ppc64 s390x'
-    build_kabi_whitelist: 'true'
-    tree_yaml_name: rhel
     kpet_tree_family: rhel7
     package_name: kernel
-    publish_elsewhere: 'true'
     native_tools: 'false'
   trigger:
     project: redhat/red-hat-ci-tools/kernel/cki-internal-pipelines/cki-internal-contributors

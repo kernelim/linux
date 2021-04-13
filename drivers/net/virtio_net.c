@@ -1516,7 +1516,7 @@ err:
 
 static int virtnet_probe(struct virtio_device *vdev)
 {
-	int i, err;
+	int err;
 	struct net_device *dev;
 	struct virtnet_info *vi;
 	u16 max_queue_pairs;
@@ -1674,23 +1674,11 @@ static int virtnet_probe(struct virtio_device *vdev)
 
 	virtio_device_ready(vdev);
 
-	/* Last of all, set up some receive buffers. */
-	for (i = 0; i < vi->curr_queue_pairs; i++) {
-		try_fill_recv(vi, &vi->rq[i], GFP_KERNEL);
-
-		/* If we didn't even get one input buffer, we're useless. */
-		if (vi->rq[i].num == 0) {
-			free_unused_bufs(vi);
-			err = -ENOMEM;
-			goto free_recv_bufs;
-		}
-	}
-
 	vi->nb.notifier_call = &virtnet_cpu_callback;
 	err = register_hotcpu_notifier(&vi->nb);
 	if (err) {
 		pr_debug("virtio_net: registering cpu notifier failed\n");
-		goto free_recv_bufs;
+		goto free_unregister_netdev;
 	}
 
 	rtnl_lock();
@@ -1712,10 +1700,9 @@ static int virtnet_probe(struct virtio_device *vdev)
 
 	return 0;
 
-free_recv_bufs:
+free_unregister_netdev:
 	vi->vdev->config->reset(vdev);
 
-	free_receive_bufs(vi);
 	unregister_netdev(dev);
 free_failover:
 	net_failover_destroy(vi->failover);
