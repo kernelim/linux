@@ -144,8 +144,10 @@ static ssize_t crc_control_write(struct file *file, const char __user *ubuf,
 		source[len - 1] = '\0';
 
 	ret = crtc->funcs->verify_crc_source(crtc, source, &values_cnt);
-	if (ret)
+	if (ret) {
+		kfree(source);
 		return ret;
+	}
 
 	spin_lock_irq(&crc->lock);
 
@@ -372,7 +374,7 @@ void drm_debugfs_crtc_crc_add(struct drm_crtc *crtc)
 
 	crc_ent = debugfs_create_dir("crc", crtc->debugfs_entry);
 
-	debugfs_create_file("control", S_IRUGO, crc_ent, crtc,
+	debugfs_create_file("control", S_IRUGO | S_IWUSR, crc_ent, crtc,
 			    &drm_crtc_crc_control_fops);
 	debugfs_create_file("data", S_IRUGO, crc_ent, crtc,
 			    &drm_crtc_crc_data_fops);

@@ -30,9 +30,6 @@
 
 #define NO_IOMMU	1
 
-static const struct of_device_id __iommu_of_table_sentinel
-	__used __section(__iommu_of_table_end);
-
 /**
  * of_get_dma_window - Parse *dma-window property and returns 0 if found.
  *
@@ -101,19 +98,6 @@ int of_get_dma_window(struct device_node *dn, const char *prefix, int index,
 }
 EXPORT_SYMBOL_GPL(of_get_dma_window);
 
-static bool of_iommu_driver_present(struct device_node *np)
-{
-	/*
-	 * If the IOMMU still isn't ready by the time we reach init, assume
-	 * it never will be. We don't want to defer indefinitely, nor attempt
-	 * to dereference __iommu_of_table after it's been freed.
-	 */
-	if (system_state >= SYSTEM_RUNNING)
-		return false;
-
-	return of_match_node(&__iommu_of_table, np);
-}
-
 static int of_iommu_xlate(struct device *dev,
 			  struct of_phandle_args *iommu_spec)
 {
@@ -123,8 +107,7 @@ static int of_iommu_xlate(struct device *dev,
 
 	ops = iommu_ops_from_fwnode(fwnode);
 	if ((ops && !ops->of_xlate) ||
-	    !of_device_is_available(iommu_spec->np) ||
-	    (!ops && !of_iommu_driver_present(iommu_spec->np)))
+	    !of_device_is_available(iommu_spec->np))
 		return NO_IOMMU;
 
 	ret = iommu_fwspec_init(dev, &iommu_spec->np->fwnode, ops);
@@ -136,7 +119,7 @@ static int of_iommu_xlate(struct device *dev,
 	 * a proper probe-ordering dependency mechanism in future.
 	 */
 	if (!ops)
-		return -EPROBE_DEFER;
+		return driver_deferred_probe_check_state(dev);
 
 	if (!try_module_get(ops->owner))
 		return -ENODEV;

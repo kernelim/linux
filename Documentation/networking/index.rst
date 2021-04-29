@@ -7,6 +7,7 @@ Contents:
    :maxdepth: 2
 
    af_xdp
+   bareudp
    batman-adv
    can
    can_ucan_protocol
@@ -14,6 +15,7 @@ Contents:
    e100
    e1000
    device_drivers/google/gve.rst
+   ethtool-netlink
    kapi
    z8530book
    msg_zerocopy
@@ -21,6 +23,8 @@ Contents:
    sfp-phylink
    tls
    tls-offload
+   filter
+   mptcp-sysctl
 
 .. only::  subproject
 

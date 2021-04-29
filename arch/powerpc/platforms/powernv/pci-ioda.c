@@ -266,8 +266,8 @@ static void pnv_ioda_reserve_dev_m64_pe(struct pci_dev *pdev,
 		if (!r->parent || !pnv_pci_is_m64(phb, r))
 			continue;
 
-		start = _ALIGN_DOWN(r->start - base, sgsz);
-		end = _ALIGN_UP(r->end - base, sgsz);
+		start = ALIGN_DOWN(r->start - base, sgsz);
+		end = ALIGN(r->end - base, sgsz);
 		for (segno = start / sgsz; segno < end / sgsz; segno++) {
 			if (pe_bitmap)
 				set_bit(segno, pe_bitmap);
@@ -363,7 +363,7 @@ static struct pnv_ioda_pe *pnv_ioda_pick_m64_pe(struct pci_bus *bus, bool all)
 		return NULL;
 
 	/* Allocate bitmap */
-	size = _ALIGN_UP(phb->ioda.total_pe_num / 8, sizeof(unsigned long));
+	size = ALIGN(phb->ioda.total_pe_num / 8, sizeof(unsigned long));
 	pe_alloc = kzalloc(size, GFP_KERNEL);
 	if (!pe_alloc) {
 		pr_warn("%s: Out of memory !\n",
@@ -2557,7 +2557,7 @@ unsigned long pnv_pci_ioda2_get_table_size(__u32 page_shift,
 	direct_table_size =  1UL << table_shift;
 
 	for ( ; levels; --levels) {
-		bytes += _ALIGN_UP(tce_table_size, direct_table_size);
+		bytes += ALIGN(tce_table_size, direct_table_size);
 
 		tce_table_size /= direct_table_size;
 		tce_table_size <<= 3;
@@ -3752,6 +3752,9 @@ static void __init pnv_pci_init_ioda_phb(struct device_node *np,
 	pr_debug("  PHB-ID  : 0x%016llx\n", phb_id);
 
 	phb = memblock_alloc(sizeof(*phb), SMP_CACHE_BYTES);
+	if (!phb)
+		panic("%s: Failed to allocate %zu bytes\n", __func__,
+		      sizeof(*phb));
 
 	/* Allocate PCI controller */
 	phb->hose = hose = pcibios_alloc_controller(np);
@@ -3798,6 +3801,9 @@ static void __init pnv_pci_init_ioda_phb(struct device_node *np,
 		phb->diag_data_size = PNV_PCI_DIAG_BUF_SIZE;
 
 	phb->diag_data = memblock_alloc(phb->diag_data_size, SMP_CACHE_BYTES);
+	if (!phb->diag_data)
+		panic("%s: Failed to allocate %u bytes\n", __func__,
+		      phb->diag_data_size);
 
 	/* Parse 32-bit and IO ranges (if any) */
 	pci_process_bridge_OF_ranges(hose, np, !hose->global_number);
@@ -3841,7 +3847,7 @@ static void __init pnv_pci_init_ioda_phb(struct device_node *np,
 				PNV_IODA1_DMA32_SEGSIZE;
 
 	/* Allocate aux data & arrays. We don't have IO ports on PHB3 */
-	size = _ALIGN_UP(max_t(unsigned, phb->ioda.total_pe_num, 8) / 8,
+	size = ALIGN(max_t(unsigned, phb->ioda.total_pe_num, 8) / 8,
 			sizeof(unsigned long));
 	m64map_off = size;
 	size += phb->ioda.total_pe_num * sizeof(phb->ioda.m64_segmap[0]);
@@ -3857,6 +3863,8 @@ static void __init pnv_pci_init_ioda_phb(struct device_node *np,
 	pemap_off = size;
 	size += phb->ioda.total_pe_num * sizeof(struct pnv_ioda_pe);
 	aux = memblock_alloc(size, SMP_CACHE_BYTES);
+	if (!aux)
+		panic("%s: Failed to allocate %lu bytes\n", __func__, size);
 	phb->ioda.pe_alloc = aux;
 	phb->ioda.m64_segmap = aux + m64map_off;
 	phb->ioda.m32_segmap = aux + m32map_off;

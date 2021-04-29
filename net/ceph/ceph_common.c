@@ -266,6 +266,7 @@ enum {
 	Opt_ip,
 	Opt_crush_location,
 	Opt_read_from_replica,
+	Opt_ms_mode,
 	Opt_last_string,
 	/* string args above */
 	Opt_share,
@@ -295,6 +296,7 @@ static match_table_t opt_tokens = {
 	{Opt_ip, "ip=%s"},
 	{Opt_crush_location, "crush_location=%s"},
 	{Opt_read_from_replica, "read_from_replica=%s"},
+	{Opt_ms_mode, "ms_mode=%s"},
 	/* string args above */
 	{Opt_share, "share"},
 	{Opt_noshare, "noshare"},
@@ -555,6 +557,28 @@ ceph_parse_options(char *options, const char *dev_name,
 			opt->osd_request_timeout = msecs_to_jiffies(intval * 1000);
 			break;
 
+		case Opt_ms_mode:
+			if (!strcmp(argstr[0].from, "legacy")) {
+				opt->con_modes[0] = CEPH_CON_MODE_UNKNOWN;
+				opt->con_modes[1] = CEPH_CON_MODE_UNKNOWN;
+			} else if (!strcmp(argstr[0].from, "crc")) {
+				opt->con_modes[0] = CEPH_CON_MODE_CRC;
+				opt->con_modes[1] = CEPH_CON_MODE_UNKNOWN;
+			} else if (!strcmp(argstr[0].from, "secure")) {
+				opt->con_modes[0] = CEPH_CON_MODE_SECURE;
+				opt->con_modes[1] = CEPH_CON_MODE_UNKNOWN;
+			} else if (!strcmp(argstr[0].from, "prefer-crc")) {
+				opt->con_modes[0] = CEPH_CON_MODE_CRC;
+				opt->con_modes[1] = CEPH_CON_MODE_SECURE;
+			} else if (!strcmp(argstr[0].from, "prefer-secure")) {
+				opt->con_modes[0] = CEPH_CON_MODE_SECURE;
+				opt->con_modes[1] = CEPH_CON_MODE_CRC;
+			} else {
+				err = -EINVAL;
+				goto out;
+			}
+			break;
+
 		case Opt_share:
 			opt->flags &= ~CEPH_OPT_NOSHARE;
 			break;
@@ -642,6 +666,21 @@ int ceph_print_client_options(struct seq_file *m, struct ceph_client *client,
 		seq_puts(m, "read_from_replica=balance,");
 	} else if (opt->read_from_replica == CEPH_OSD_FLAG_LOCALIZE_READS) {
 		seq_puts(m, "read_from_replica=localize,");
+	}
+	if (opt->con_modes[0] != CEPH_CON_MODE_UNKNOWN) {
+		if (opt->con_modes[0] == CEPH_CON_MODE_CRC &&
+		    opt->con_modes[1] == CEPH_CON_MODE_UNKNOWN) {
+			seq_puts(m, "ms_mode=crc,");
+		} else if (opt->con_modes[0] == CEPH_CON_MODE_SECURE &&
+			   opt->con_modes[1] == CEPH_CON_MODE_UNKNOWN) {
+			seq_puts(m, "ms_mode=secure,");
+		} else if (opt->con_modes[0] == CEPH_CON_MODE_CRC &&
+			   opt->con_modes[1] == CEPH_CON_MODE_SECURE) {
+			seq_puts(m, "ms_mode=prefer-crc,");
+		} else if (opt->con_modes[0] == CEPH_CON_MODE_SECURE &&
+			   opt->con_modes[1] == CEPH_CON_MODE_CRC) {
+			seq_puts(m, "ms_mode=prefer-secure,");
+		}
 	}
 
 	if (opt->flags & CEPH_OPT_FSID)

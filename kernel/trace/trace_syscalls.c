@@ -312,7 +312,7 @@ static void ftrace_syscall_enter(void *data, struct pt_regs *regs, long id)
 	struct syscall_trace_enter *entry;
 	struct syscall_metadata *sys_data;
 	struct ring_buffer_event *event;
-	struct ring_buffer *buffer;
+	struct trace_buffer *buffer;
 	unsigned long irq_flags;
 	int pc;
 	int syscall_nr;
@@ -339,7 +339,7 @@ static void ftrace_syscall_enter(void *data, struct pt_regs *regs, long id)
 	local_save_flags(irq_flags);
 	pc = preempt_count();
 
-	buffer = tr->trace_buffer.buffer;
+	buffer = tr->array_buffer.buffer;
 	event = trace_buffer_lock_reserve(buffer,
 			sys_data->enter_event->event.type, size, irq_flags, pc);
 	if (!event)
@@ -360,7 +360,7 @@ static void ftrace_syscall_exit(void *data, struct pt_regs *regs, long ret)
 	struct syscall_trace_exit *entry;
 	struct syscall_metadata *sys_data;
 	struct ring_buffer_event *event;
-	struct ring_buffer *buffer;
+	struct trace_buffer *buffer;
 	unsigned long irq_flags;
 	int pc;
 	int syscall_nr;
@@ -384,7 +384,7 @@ static void ftrace_syscall_exit(void *data, struct pt_regs *regs, long ret)
 	local_save_flags(irq_flags);
 	pc = preempt_count();
 
-	buffer = tr->trace_buffer.buffer;
+	buffer = tr->array_buffer.buffer;
 	event = trace_buffer_lock_reserve(buffer,
 			sys_data->exit_event->event.type, sizeof(*entry),
 			irq_flags, pc);

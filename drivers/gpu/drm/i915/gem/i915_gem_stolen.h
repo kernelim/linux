@@ -28,7 +28,8 @@ i915_gem_object_create_stolen(struct drm_i915_private *dev_priv,
 struct drm_i915_gem_object *
 i915_gem_object_create_stolen_for_preallocated(struct drm_i915_private *dev_priv,
 					       resource_size_t stolen_offset,
-					       resource_size_t gtt_offset,
 					       resource_size_t size);
+
+#define I915_GEM_STOLEN_BIAS SZ_128K
 
 #endif /* __I915_GEM_STOLEN_H__ */

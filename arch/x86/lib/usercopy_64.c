@@ -37,8 +37,8 @@ unsigned long __clear_user(void __user *addr, unsigned long size)
 		"3:	lea 0(%[size1],%[size8],8),%[size8]\n"
 		"	jmp 2b\n"
 		".previous\n"
-		_ASM_EXTABLE(0b,3b)
-		_ASM_EXTABLE(1b,2b)
+		_ASM_EXTABLE_UA(0b, 3b)
+		_ASM_EXTABLE_UA(1b, 2b)
 		: [size8] "=&c"(size), [dst] "=&D" (__d0)
 		: [size1] "r"(size & 7), "[size8]" (size / 8), "[dst]"(addr));
 	clac();
@@ -53,26 +53,6 @@ unsigned long clear_user(void __user *to, unsigned long n)
 	return n;
 }
 EXPORT_SYMBOL(clear_user);
-
-/*
- * Try to copy last bytes and clear the rest if needed.
- * Since protection fault in copy_from/to_user is not a normal situation,
- * it is not necessary to optimize tail handling.
- */
-__visible unsigned long
-copy_user_handle_tail(char *to, char *from, unsigned len)
-{
-	for (; len; --len, to++) {
-		char c;
-
-		if (__get_user_nocheck(c, from++, sizeof(char)))
-			break;
-		if (__put_user_nocheck(c, to, sizeof(char)))
-			break;
-	}
-	clac();
-	return len;
-}
 
 /*
  * Similar to copy_user_handle_tail, probe for the write fault point,

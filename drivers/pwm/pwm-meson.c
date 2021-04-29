@@ -292,7 +292,7 @@ static void meson_pwm_disable(struct meson_pwm *meson, unsigned int id)
 }
 
 static int meson_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
-			   struct pwm_state *state)
+			   const struct pwm_state *state)
 {
 	struct meson_pwm_channel *channel = pwm_get_chip_data(pwm);
 	struct meson_pwm *meson = to_meson_pwm(chip);

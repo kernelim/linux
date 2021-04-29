@@ -214,6 +214,7 @@ static int symbol_valid(struct sym_entry *s)
 	static char *special_prefixes[] = {
 		"__crc_",		/* modversions */
 		"__efistub_",		/* arm64 EFI stub namespace */
+		"__kvm_nvhe_",		/* arm64 non-VHE KVM namespace */
 		NULL };
 
 	static char *special_suffixes[] = {

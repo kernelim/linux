@@ -11,6 +11,7 @@
 #include <linux/blktrace_api.h>
 #include <linux/blk-mq.h>
 #include <linux/blk-cgroup.h>
+#include <linux/debugfs.h>
 
 #include "blk.h"
 #include "blk-mq.h"
@@ -219,6 +220,13 @@ static ssize_t queue_write_zeroes_max_show(struct request_queue *q, char *page)
 {
 	return sprintf(page, "%llu\n",
 		(unsigned long long)q->limits.max_write_zeroes_sectors << 9);
+}
+
+static ssize_t queue_zone_append_max_show(struct request_queue *q, char *page)
+{
+	unsigned long long max_sectors = q->limits.max_zone_append_sectors;
+
+	return sprintf(page, "%llu\n", max_sectors << SECTOR_SHIFT);
 }
 
 static ssize_t
@@ -675,6 +683,11 @@ static struct queue_sysfs_entry queue_write_zeroes_max_entry = {
 	.show = queue_write_zeroes_max_show,
 };
 
+static struct queue_sysfs_entry queue_zone_append_max_entry = {
+	.attr = {.name = "zone_append_max_bytes", .mode = 0444 },
+	.show = queue_zone_append_max_show,
+};
+
 static struct queue_sysfs_entry queue_nonrot_entry = {
 	.attr = {.name = "rotational", .mode = 0644 },
 	.show = queue_show_nonrot,
@@ -786,6 +799,7 @@ static struct attribute *default_attrs[] = {
 	&queue_unpriv_sgio_entry.attr,
 	&queue_write_same_max_entry.attr,
 	&queue_write_zeroes_max_entry.attr,
+	&queue_zone_append_max_entry.attr,
 	&queue_nonrot_entry.attr,
 	&queue_zoned_entry.attr,
 	&queue_nr_zones_entry.attr,
@@ -922,6 +936,9 @@ static void blk_release_queue(struct kobject *kobj)
 		blk_mq_release(q);
 
 	blk_trace_shutdown(q);
+	mutex_lock(&q->debugfs_mutex);
+	debugfs_remove_recursive(q->debugfs_dir);
+	mutex_unlock(&q->debugfs_mutex);
 
 	if (queue_is_mq(q))
 		blk_mq_debugfs_unregister(q);
@@ -986,6 +1003,11 @@ int blk_register_queue(struct gendisk *disk)
 		blk_trace_remove_sysfs(dev);
 		goto unlock;
 	}
+
+	mutex_lock(&q->debugfs_mutex);
+	q->debugfs_dir = debugfs_create_dir(kobject_name(q->kobj.parent),
+					    blk_debugfs_root);
+	mutex_unlock(&q->debugfs_mutex);
 
 	if (queue_is_mq(q)) {
 		__blk_mq_register_dev(dev, q);

@@ -25,6 +25,7 @@
 #include <linux/cpu.h>
 #include <linux/tick.h>
 #include <linux/slab.h>
+#include <linux/smp.h>
 #include <linux/acpi.h>
 #include <asm/mwait.h>
 #include <xen/xen.h>
@@ -95,7 +96,7 @@ static void round_robin_cpu(unsigned int tsk_index)
 	cpumask_var_t tmp;
 	int cpu;
 	unsigned long min_weight = -1;
-	unsigned long uninitialized_var(preferred_cpu);
+	unsigned long preferred_cpu = (unsigned long)smp_processor_id() ;
 
 	if (!alloc_cpumask_var(&tmp, GFP_KERNEL))
 		return;
@@ -143,12 +144,11 @@ static unsigned int idle_pct = 5; /* percentage */
 static unsigned int round_robin_time = 1; /* second */
 static int power_saving_thread(void *data)
 {
-	struct sched_param param = {.sched_priority = 1};
 	int do_sleep;
 	unsigned int tsk_index = (unsigned long)data;
 	u64 last_jiffies = 0;
 
-	sched_setscheduler(current, SCHED_RR, &param);
+	sched_set_fifo_low(current);
 
 	while (!kthread_should_stop()) {
 		unsigned long expire_time;

@@ -127,7 +127,7 @@ EXPORT_SYMBOL_GPL(rtc_read_time);
 
 int rtc_set_time(struct rtc_device *rtc, struct rtc_time *tm)
 {
-	int err;
+	int err, uie;
 
 	err = rtc_valid_tm(tm);
 	if (err != 0)
@@ -138,6 +138,17 @@ int rtc_set_time(struct rtc_device *rtc, struct rtc_time *tm)
 		return err;
 
 	rtc_subtract_offset(rtc, tm);
+
+#ifdef CONFIG_RTC_INTF_DEV_UIE_EMUL
+	uie = rtc->uie_rtctimer.enabled || rtc->uie_irq_active;
+#else
+	uie = rtc->uie_rtctimer.enabled;
+#endif
+	if (uie) {
+		err = rtc_update_irq_enable(rtc, 0);
+		if (err)
+			return err;
+	}
 
 	err = mutex_lock_interruptible(&rtc->ops_lock);
 	if (err)
@@ -161,6 +172,12 @@ int rtc_set_time(struct rtc_device *rtc, struct rtc_time *tm)
 	mutex_unlock(&rtc->ops_lock);
 	/* A timer might have just expired */
 	schedule_work(&rtc->irqwork);
+
+	if (uie) {
+		err = rtc_update_irq_enable(rtc, 1);
+		if (err)
+			return err;
+	}
 
 	trace_rtc_set_time(rtc_tm_to_time64(tm), err);
 	return err;
@@ -539,7 +556,9 @@ EXPORT_SYMBOL_GPL(rtc_alarm_irq_enable);
 
 int rtc_update_irq_enable(struct rtc_device *rtc, unsigned int enabled)
 {
-	int err = mutex_lock_interruptible(&rtc->ops_lock);
+	int rc = 0, err;
+
+	err = mutex_lock_interruptible(&rtc->ops_lock);
 	if (err)
 		return err;
 
@@ -562,7 +581,9 @@ int rtc_update_irq_enable(struct rtc_device *rtc, unsigned int enabled)
 		struct rtc_time tm;
 		ktime_t now, onesec;
 
-		__rtc_read_time(rtc, &tm);
+		rc = __rtc_read_time(rtc, &tm);
+		if (rc)
+			goto out;
 		onesec = ktime_set(1, 0);
 		now = rtc_tm_to_ktime(tm);
 		rtc->uie_rtctimer.node.expires = ktime_add(now, onesec);
@@ -573,12 +594,21 @@ int rtc_update_irq_enable(struct rtc_device *rtc, unsigned int enabled)
 
 out:
 	mutex_unlock(&rtc->ops_lock);
+
+	/*
+	 * __rtc_read_time() failed, this probably means that the RTC time has
+	 * never been set or less probably there is a transient error on the
+	 * bus. In any case, avoid enabling emulation has this will fail when
+	 * reading the time too.
+	 */
+	if (rc)
+		return rc;
+
 #ifdef CONFIG_RTC_INTF_DEV_UIE_EMUL
 	/*
-	 * Enable emulation if the driver did not provide
-	 * the update_irq_enable function pointer or if returned
-	 * -EINVAL to signal that it has been configured without
-	 * interrupts or that are not available at the moment.
+	 * Enable emulation if the driver returned -EINVAL to signal that it has
+	 * been configured without interrupts or they are not available at the
+	 * moment.
 	 */
 	if (err == -EINVAL)
 		err = rtc_dev_update_irq_enable_emul(rtc, enabled);

@@ -9,6 +9,8 @@
 
 #include <linux/uaccess.h>
 #include <linux/ptrace.h>
+
+#include <asm/cpu_entry_area.h>
 #include <asm/switch_to.h>
 
 enum stack_type {
@@ -33,6 +35,8 @@ bool in_entry_stack(unsigned long *stack, struct stack_info *info);
 
 int get_stack_info(unsigned long *stack, struct task_struct *task,
 		   struct stack_info *info, unsigned long *visit_mask);
+bool get_stack_info_noinstr(unsigned long *stack, struct task_struct *task,
+			    struct stack_info *info);
 
 const char *stack_type_name(enum stack_type type);
 
@@ -76,7 +80,7 @@ static inline unsigned long *
 get_stack_pointer(struct task_struct *task, struct pt_regs *regs)
 {
 	if (regs)
-		return (unsigned long *)kernel_stack_pointer(regs);
+		return (unsigned long *)regs->sp;
 
 	if (task == current)
 		return __builtin_frame_address(0);

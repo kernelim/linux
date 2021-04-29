@@ -106,6 +106,10 @@ struct ftrace_likely_data {
 	unsigned long			constant;
 };
 
+/* Section for code which can't be instrumented at all */
+#define noinstr								\
+	noinline notrace __attribute((__section__(".noinstr.text")))
+
 #endif /* __KERNEL__ */
 
 #endif /* __ASSEMBLY__ */

@@ -65,11 +65,15 @@ static noinline struct mem_section __ref *sparse_index_alloc(int nid)
 	unsigned long array_size = SECTIONS_PER_ROOT *
 				   sizeof(struct mem_section);
 
-	if (slab_is_available())
+	if (slab_is_available()) {
 		section = kzalloc_node(array_size, GFP_KERNEL, nid);
-	else
+	} else {
 		section = memblock_alloc_node(array_size, SMP_CACHE_BYTES,
 					      nid);
+		if (!section)
+			panic("%s: Failed to allocate %lu bytes nid=%d\n",
+			      __func__, array_size, nid);
+	}
 
 	return section;
 }
@@ -192,16 +196,6 @@ static void section_mark_present(struct mem_section *ms)
 	ms->section_mem_map |= SECTION_MARKED_PRESENT;
 }
 
-static inline unsigned long next_present_section_nr(unsigned long section_nr)
-{
-	do {
-		section_nr++;
-		if (present_section_nr(section_nr))
-			return section_nr;
-	} while ((section_nr <= __highest_present_section_nr));
-
-	return -1;
-}
 #define for_each_present_section_nr(start, section_nr)		\
 	for (section_nr = next_present_section_nr(start-1);	\
 	     ((section_nr != -1) &&				\
@@ -260,6 +254,9 @@ void __init memory_present(int nid, unsigned long start, unsigned long end)
 		size = sizeof(struct mem_section*) * NR_SECTION_ROOTS;
 		align = 1 << (INTERNODE_CACHE_SHIFT);
 		mem_section = memblock_alloc(size, align);
+		if (!mem_section)
+			panic("%s: Failed to allocate %lu bytes align=0x%lx\n",
+			      __func__, size, align);
 	}
 #endif
 
@@ -430,13 +427,17 @@ struct page __init *__populate_section_memmap(unsigned long pfn,
 {
 	unsigned long size = section_map_size();
 	struct page *map = sparse_buffer_alloc(size);
+	phys_addr_t addr = __pa(MAX_DMA_ADDRESS);
 
 	if (map)
 		return map;
 
-	map = memblock_alloc_try_nid(size,
-					  PAGE_SIZE, __pa(MAX_DMA_ADDRESS),
+	map = memblock_alloc_try_nid_raw(size, size, addr,
 					  MEMBLOCK_ALLOC_ACCESSIBLE, nid);
+	if (!map)
+		panic("%s: Failed to allocate %lu bytes align=0x%lx nid=%d from=%pa\n",
+		      __func__, size, PAGE_SIZE, nid, &addr);
+
 	return map;
 }
 #endif /* !CONFIG_SPARSEMEM_VMEMMAP */
@@ -446,11 +447,15 @@ static void *sparsemap_buf_end __meminitdata;
 
 static void __init sparse_buffer_init(unsigned long size, int nid)
 {
+	phys_addr_t addr = __pa(MAX_DMA_ADDRESS);
 	WARN_ON(sparsemap_buf);	/* forgot to call sparse_buffer_fini()? */
-	sparsemap_buf =
-		memblock_alloc_try_nid_raw(size, PAGE_SIZE,
-						__pa(MAX_DMA_ADDRESS),
-						MEMBLOCK_ALLOC_ACCESSIBLE, nid);
+	/*
+	 * Pre-allocated buffer is mainly used by __populate_section_memmap
+	 * and we want it to be properly aligned to the section size - this is
+	 * especially the case for VMEMMAP which maps memmap to PMDs
+	 */
+	sparsemap_buf = memblock_alloc_try_nid_raw(size, section_map_size(),
+					addr, MEMBLOCK_ALLOC_ACCESSIBLE, nid);
 	sparsemap_buf_end = sparsemap_buf + size;
 }
 
@@ -703,6 +708,7 @@ static void section_deactivate(unsigned long pfn, unsigned long nr_pages,
 	struct mem_section *ms = __pfn_to_section(pfn);
 	bool section_is_early = early_section(ms);
 	struct page *memmap = NULL;
+	bool empty;
 	unsigned long *subsection_map = ms->usage
 		? &ms->usage->subsection_map[0] : NULL;
 
@@ -733,7 +739,8 @@ static void section_deactivate(unsigned long pfn, unsigned long nr_pages,
 	 * For 2/ and 3/ the SPARSEMEM_VMEMMAP={y,n} cases are unified
 	 */
 	bitmap_xor(subsection_map, map, subsection_map, SUBSECTIONS_PER_SECTION);
-	if (bitmap_empty(subsection_map, SUBSECTIONS_PER_SECTION)) {
+	empty = bitmap_empty(subsection_map, SUBSECTIONS_PER_SECTION);
+	if (empty) {
 		unsigned long section_nr = pfn_to_section_nr(pfn);
 
 		/*
@@ -748,13 +755,25 @@ static void section_deactivate(unsigned long pfn, unsigned long nr_pages,
 			ms->usage = NULL;
 		}
 		memmap = sparse_decode_mem_map(ms->section_mem_map, section_nr);
-		ms->section_mem_map = (unsigned long)NULL;
+		/*
+		 * Mark the section invalid so that valid_section()
+		 * return false. This prevents code from dereferencing
+		 * ms->usage array.
+		 */
+		ms->section_mem_map &= ~SECTION_HAS_MEM_MAP;
 	}
 
-	if (section_is_early && memmap)
-		free_map_bootmem(memmap);
-	else
+	/*
+	 * The memmap of early sections is always fully populated. See
+	 * section_activate() and pfn_valid() .
+	 */
+	if (!section_is_early)
 		depopulate_section_memmap(pfn, nr_pages, altmap);
+	else if (memmap)
+		free_map_bootmem(memmap);
+
+	if (empty)
+		ms->section_mem_map = (unsigned long)NULL;
 }
 
 static struct page * __meminit section_activate(int nid, unsigned long pfn,
@@ -853,7 +872,7 @@ int __meminit sparse_add_section(int nid, unsigned long start_pfn,
 
 	/* Align memmap to section boundary in the subsection case */
 	if (section_nr_to_pfn(section_nr) != start_pfn)
-		memmap = pfn_to_kaddr(section_nr_to_pfn(section_nr));
+		memmap = pfn_to_page(section_nr_to_pfn(section_nr));
 	sparse_init_one_section(ms, section_nr, memmap, ms->usage, 0);
 
 	return 0;

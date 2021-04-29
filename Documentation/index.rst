@@ -95,6 +95,14 @@ needed).
    bpf/index
    PCI/index
 
+Architecture-agnostic documentation
+-----------------------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   asm-annotations
+
 Architecture-specific documentation
 -----------------------------------
 

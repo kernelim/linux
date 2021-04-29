@@ -55,10 +55,27 @@ enum crypto_ops {
 
 struct zcrypt_queue;
 
+/* struct to hold tracking information for a userspace request/response */
+struct zcrypt_track {
+	int again_counter;		/* retry attempts counter */
+	int last_qid;			/* last qid used */
+	int last_rc;			/* last return code */
+#ifdef CONFIG_ZCRYPT_DEBUG
+	struct ap_fi fi;		/* failure injection cmd */
+#endif
+};
+
+/* defines related to message tracking */
+#define TRACK_AGAIN_MAX 10
+#define TRACK_AGAIN_CARD_WEIGHT_PENALTY  1000
+#define TRACK_AGAIN_QUEUE_WEIGHT_PENALTY 10000
+
 struct zcrypt_ops {
-	long (*rsa_modexpo)(struct zcrypt_queue *, struct ica_rsa_modexpo *);
+	long (*rsa_modexpo)(struct zcrypt_queue *, struct ica_rsa_modexpo *,
+			    struct ap_message *);
 	long (*rsa_modexpo_crt)(struct zcrypt_queue *,
-				struct ica_rsa_modexpo_crt *);
+				struct ica_rsa_modexpo_crt *,
+				struct ap_message *);
 	long (*send_cprb)(struct zcrypt_queue *, struct ica_xcRB *,
 			  struct ap_message *);
 	long (*send_ep11_cprb)(struct zcrypt_queue *, struct ep11_urb *,
@@ -82,7 +99,7 @@ struct zcrypt_card {
 	int min_mod_size;		/* Min number of bits. */
 	int max_mod_size;		/* Max number of bits. */
 	int max_exp_bit_length;
-	int speed_rating[NUM_OPS];	/* Speed idx of crypto ops. */
+	const int *speed_rating;	/* Speed idx of crypto ops. */
 	atomic_t load;			/* Utilization of the crypto device */
 
 	int request_count;		/* # current requests. */

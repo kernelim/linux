@@ -357,6 +357,16 @@ void security_bprm_committed_creds(struct linux_binprm *bprm)
 	call_void_hook(bprm_committed_creds, bprm);
 }
 
+int security_fs_context_dup(struct fs_context *fc, struct fs_context *src_fc)
+{
+	return call_int_hook(fs_context_dup, 0, fc, src_fc);
+}
+
+int security_fs_context_parse_param(struct fs_context *fc, struct fs_parameter *param)
+{
+	return call_int_hook(fs_context_parse_param, -ENOPARAM, fc, param);
+}
+
 int security_sb_alloc(struct super_block *sb)
 {
 	return call_int_hook(sb_alloc_security, 0, sb);
@@ -367,20 +377,31 @@ void security_sb_free(struct super_block *sb)
 	call_void_hook(sb_free_security, sb);
 }
 
-int security_sb_copy_data(char *orig, char *copy)
+void security_free_mnt_opts(void **mnt_opts)
 {
-	return call_int_hook(sb_copy_data, 0, orig, copy);
+	if (!*mnt_opts)
+		return;
+	call_void_hook(sb_free_mnt_opts, *mnt_opts);
+	*mnt_opts = NULL;
 }
-EXPORT_SYMBOL(security_sb_copy_data);
+EXPORT_SYMBOL(security_free_mnt_opts);
 
-int security_sb_remount(struct super_block *sb, void *data)
+int security_sb_eat_lsm_opts(char *options, void **mnt_opts)
 {
-	return call_int_hook(sb_remount, 0, sb, data);
+	return call_int_hook(sb_eat_lsm_opts, 0, options, mnt_opts);
 }
+EXPORT_SYMBOL(security_sb_eat_lsm_opts);
 
-int security_sb_kern_mount(struct super_block *sb, int flags, void *data)
+int security_sb_remount(struct super_block *sb,
+			void *mnt_opts)
 {
-	return call_int_hook(sb_kern_mount, 0, sb, flags, data);
+	return call_int_hook(sb_remount, 0, sb, mnt_opts);
+}
+EXPORT_SYMBOL(security_sb_remount);
+
+int security_sb_kern_mount(struct super_block *sb)
+{
+	return call_int_hook(sb_kern_mount, 0, sb);
 }
 
 int security_sb_show_options(struct seq_file *m, struct super_block *sb)
@@ -410,13 +431,13 @@ int security_sb_pivotroot(const struct path *old_path, const struct path *new_pa
 }
 
 int security_sb_set_mnt_opts(struct super_block *sb,
-				struct security_mnt_opts *opts,
+				void *mnt_opts,
 				unsigned long kern_flags,
 				unsigned long *set_kern_flags)
 {
 	return call_int_hook(sb_set_mnt_opts,
-				opts->num_mnt_opts ? -EOPNOTSUPP : 0, sb,
-				opts, kern_flags, set_kern_flags);
+				mnt_opts ? -EOPNOTSUPP : 0, sb,
+				mnt_opts, kern_flags, set_kern_flags);
 }
 EXPORT_SYMBOL(security_sb_set_mnt_opts);
 
@@ -430,11 +451,18 @@ int security_sb_clone_mnt_opts(const struct super_block *oldsb,
 }
 EXPORT_SYMBOL(security_sb_clone_mnt_opts);
 
-int security_sb_parse_opts_str(char *options, struct security_mnt_opts *opts)
+int security_add_mnt_opt(const char *option, const char *val, int len,
+			 void **mnt_opts)
 {
-	return call_int_hook(sb_parse_opts_str, 0, options, opts);
+	return call_int_hook(sb_add_mnt_opt, -EINVAL,
+					option, val, len, mnt_opts);
 }
-EXPORT_SYMBOL(security_sb_parse_opts_str);
+EXPORT_SYMBOL(security_add_mnt_opt);
+
+int security_move_mount(const struct path *from_path, const struct path *to_path)
+{
+	return call_int_hook(move_mount, 0, from_path, to_path);
+}
 
 int security_inode_alloc(struct inode *inode)
 {
@@ -1490,7 +1518,7 @@ void security_sock_graft(struct sock *sk, struct socket *parent)
 }
 EXPORT_SYMBOL(security_sock_graft);
 
-int security_inet_conn_request(struct sock *sk,
+int security_inet_conn_request(const struct sock *sk,
 			struct sk_buff *skb, struct request_sock *req)
 {
 	return call_int_hook(inet_conn_request, 0, sk, skb, req);
@@ -1790,3 +1818,30 @@ void security_bpf_prog_free(struct bpf_prog_aux *aux)
 	call_void_hook(bpf_prog_free_security, aux);
 }
 #endif /* CONFIG_BPF_SYSCALL */
+
+#ifdef CONFIG_PERF_EVENTS
+int security_perf_event_open(struct perf_event_attr *attr, int type)
+{
+	return call_int_hook(perf_event_open, 0, attr, type);
+}
+
+int security_perf_event_alloc(struct perf_event *event)
+{
+	return call_int_hook(perf_event_alloc, 0, event);
+}
+
+void security_perf_event_free(struct perf_event *event)
+{
+	call_void_hook(perf_event_free, event);
+}
+
+int security_perf_event_read(struct perf_event *event)
+{
+	return call_int_hook(perf_event_read, 0, event);
+}
+
+int security_perf_event_write(struct perf_event *event)
+{
+	return call_int_hook(perf_event_write, 0, event);
+}
+#endif /* CONFIG_PERF_EVENTS */

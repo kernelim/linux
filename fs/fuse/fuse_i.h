@@ -148,6 +148,20 @@ struct fuse_inode {
 
 	/** Lock to protect write related fields */
 	spinlock_t lock;
+
+	/**
+	 * Can't take inode lock in fault path (leads to circular dependency).
+	 * Introduce another semaphore which can be taken in fault path and
+	 * then other filesystem paths can take this to block faults.
+	 */
+	struct rw_semaphore i_mmap_sem;
+
+#ifdef CONFIG_FUSE_DAX
+	/*
+	 * Dax specific inode data
+	 */
+	struct fuse_inode_dax *dax;
+#endif
 };
 
 /** FUSE inode state bits */
@@ -158,6 +172,8 @@ enum {
 	FUSE_I_INIT_RDPLUS,
 	/** An operation changing file size is in progress  */
 	FUSE_I_SIZE_UNSTABLE,
+	/* Bad inode */
+	FUSE_I_BAD,
 };
 
 struct fuse_conn;
@@ -482,9 +498,14 @@ struct fuse_fs_context {
 	bool destroy:1;
 	bool no_control:1;
 	bool no_force_umount:1;
-	bool no_mount_options:1;
+	bool legacy_opts_show:1;
+	bool dax:1;
 	unsigned int max_read;
 	unsigned int blksize;
+	const char *subtype;
+
+	/* DAX device, may be NULL */
+	struct dax_device *dax_dev;
 
 	/* fuse_dev pointer to fill in, should contain NULL on entry */
 	void **fudptr;
@@ -609,6 +630,9 @@ struct fuse_conn {
 	/** cache READLINK responses in page cache */
 	unsigned cache_symlinks:1;
 
+	/* show legacy mount options */
+	unsigned int legacy_opts_show:1;
+
 	/*
 	 * The following bitfields are only for optimization purposes
 	 * and hence races in setting them will not cause malfunction
@@ -716,9 +740,6 @@ struct fuse_conn {
 	/** Do not allow MNT_FORCE umount */
 	unsigned int no_force_umount:1;
 
-	/* Do not show mount options */
-	unsigned int no_mount_options:1;
-
 	/** The number of requests waiting for completion */
 	atomic_t num_waiting;
 
@@ -754,6 +775,11 @@ struct fuse_conn {
 
 	/** List of device instances belonging to this connection */
 	struct list_head devices;
+
+#ifdef CONFIG_FUSE_DAX
+	/* Dax specific conn data, non-NULL if DAX is enabled */
+	struct fuse_conn_dax *dax;
+#endif
 };
 
 static inline struct fuse_conn *get_fuse_conn_super(struct super_block *sb)
@@ -784,6 +810,16 @@ static inline int invalid_nodeid(u64 nodeid)
 static inline u64 fuse_get_attr_version(struct fuse_conn *fc)
 {
 	return atomic64_read(&fc->attr_version);
+}
+
+static inline void fuse_make_bad(struct inode *inode)
+{
+	set_bit(FUSE_I_BAD, &get_fuse_inode(inode)->state);
+}
+
+static inline bool fuse_is_bad(struct inode *inode)
+{
+	return unlikely(test_bit(FUSE_I_BAD, &get_fuse_inode(inode)->state));
 }
 
 /** Device operations */
@@ -965,9 +1001,9 @@ void fuse_send_init(struct fuse_conn *fc);
 /**
  * Fill in superblock and initialize fuse connection
  * @sb: partially-initialized superblock to fill in
- * @mount_data: mount parameters
+ * @ctx: mount context
  */
-int fuse_fill_super_common(struct super_block *sb, struct fuse_fs_context *d);
+int fuse_fill_super_common(struct super_block *sb, struct fuse_fs_context *ctx);
 
 /**
  * Disassociate fuse connection from superblock and kill the superblock
@@ -1091,5 +1127,21 @@ unsigned int fuse_len_args(unsigned int numargs, struct fuse_arg *args);
  */
 u64 fuse_get_unique(struct fuse_iqueue *fiq);
 void fuse_free_conn(struct fuse_conn *fc);
+
+/* dax.c */
+
+#define FUSE_IS_DAX(inode) (IS_ENABLED(CONFIG_FUSE_DAX) && IS_DAX(inode))
+
+ssize_t fuse_dax_read_iter(struct kiocb *iocb, struct iov_iter *to);
+ssize_t fuse_dax_write_iter(struct kiocb *iocb, struct iov_iter *from);
+int fuse_dax_mmap(struct file *file, struct vm_area_struct *vma);
+int fuse_dax_break_layouts(struct inode *inode, u64 dmap_start, u64 dmap_end);
+int fuse_dax_conn_alloc(struct fuse_conn *fc, struct dax_device *dax_dev);
+void fuse_dax_conn_free(struct fuse_conn *fc);
+bool fuse_dax_inode_alloc(struct super_block *sb, struct fuse_inode *fi);
+void fuse_dax_inode_init(struct inode *inode);
+void fuse_dax_inode_cleanup(struct inode *inode);
+bool fuse_dax_check_alignment(struct fuse_conn *fc, unsigned int map_alignment);
+void fuse_dax_cancel_work(struct fuse_conn *fc);
 
 #endif /* _FS_FUSE_I_H */

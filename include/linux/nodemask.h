@@ -94,6 +94,7 @@
 #include <linux/threads.h>
 #include <linux/bitmap.h>
 #include <linux/numa.h>
+#include <linux/rh_kabi.h>
 
 typedef struct { DECLARE_BITMAP(bits, MAX_NUMNODES); } nodemask_t;
 extern nodemask_t _unused_nodemask_arg_;
@@ -399,6 +400,7 @@ enum node_states {
 #endif
 	N_MEMORY,		/* The node has memory(regular, high, movable) */
 	N_CPU,		/* The node has one or more cpus */
+	N_GENERIC_INITIATOR,	/* The node has one or more Generic Initiators */
 	NR_NODE_STATES
 };
 
@@ -444,7 +446,7 @@ static inline int next_memory_node(int nid)
 	return next_node(nid, node_states[N_MEMORY]);
 }
 
-extern int nr_node_ids;
+extern RH_KABI_ADD_MODIFIER(unsigned) int nr_node_ids;
 extern int nr_online_nodes;
 
 static inline void node_set_online(int nid)
@@ -485,7 +487,7 @@ static inline int num_node_state(enum node_states state)
 #define first_online_node	0
 #define first_memory_node	0
 #define next_online_node(nid)	(MAX_NUMNODES)
-#define nr_node_ids		1
+#define nr_node_ids		1U
 #define nr_online_nodes		1
 
 #define node_set_online(node)	   node_set_state((node), N_ONLINE)

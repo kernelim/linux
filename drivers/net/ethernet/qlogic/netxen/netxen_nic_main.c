@@ -1595,6 +1595,9 @@ netxen_nic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (err)
 		goto err_out_disable_msi;
 
+	/* mark hardware as deprecated in RHEL8 */
+	mark_hardware_deprecated(netxen_nic_driver_name);
+
 	pci_set_drvdata(pdev, adapter);
 
 	netxen_schedule_work(adapter, netxen_fw_poll_work, FW_POLL_DELAY);

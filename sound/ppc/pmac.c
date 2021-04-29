@@ -24,11 +24,11 @@
 
 
 /* fixed frequency table for awacs, screamer, burgundy, DACA (44100 max) */
-static int awacs_freqs[8] = {
+static const int awacs_freqs[8] = {
 	44100, 29400, 22050, 17640, 14700, 11025, 8820, 7350
 };
 /* fixed frequency table for tumbler */
-static int tumbler_freqs[1] = {
+static const int tumbler_freqs[1] = {
 	44100
 };
 
@@ -226,7 +226,7 @@ static int snd_pmac_pcm_prepare(struct snd_pmac *chip, struct pmac_stream *rec, 
 		offset += rec->period_size;
 	}
 	/* make loop */
-	cp->command = cpu_to_le16(DBDMA_NOP + BR_ALWAYS);
+	cp->command = cpu_to_le16(DBDMA_NOP | BR_ALWAYS);
 	cp->cmd_dep = cpu_to_le32(rec->cmd.addr);
 
 	snd_pmac_dma_stop(rec);
@@ -728,7 +728,7 @@ void snd_pmac_beep_dma_start(struct snd_pmac *chip, int bytes, unsigned long add
 	chip->extra_dma.cmds->xfer_status = cpu_to_le16(0);
 	chip->extra_dma.cmds->cmd_dep = cpu_to_le32(chip->extra_dma.addr);
 	chip->extra_dma.cmds->phy_addr = cpu_to_le32(addr);
-	chip->extra_dma.cmds->command = cpu_to_le16(OUTPUT_MORE + BR_ALWAYS);
+	chip->extra_dma.cmds->command = cpu_to_le16(OUTPUT_MORE | BR_ALWAYS);
 	out_le32(&chip->awacs->control,
 		 (in_le32(&chip->awacs->control) & ~0x1f00)
 		 | (speed << 8));
@@ -1106,7 +1106,7 @@ static int pmac_hp_detect_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static struct snd_kcontrol_new auto_mute_controls[] = {
+static const struct snd_kcontrol_new auto_mute_controls[] = {
 	{ .iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	  .name = "Auto Mute Switch",
 	  .info = snd_pmac_boolean_mono_info,
@@ -1176,7 +1176,7 @@ int snd_pmac_new(struct snd_card *card, struct snd_pmac **chip_return)
 	np = chip->node;
 	chip->requested = 0;
 	if (chip->is_k2) {
-		static char *rnames[] = {
+		static const char * const rnames[] = {
 			"Sound Control", "Sound DMA" };
 		for (i = 0; i < 2; i ++) {
 			if (of_address_to_resource(np->parent, i,
@@ -1201,7 +1201,7 @@ int snd_pmac_new(struct snd_card *card, struct snd_pmac **chip_return)
 		txdma_addr = chip->rsrc[1].start;
 		rxdma_addr = txdma_addr + 0x100;
 	} else {
-		static char *rnames[] = {
+		static const char * const rnames[] = {
 			"Sound Control", "Sound Tx DMA", "Sound Rx DMA" };
 		for (i = 0; i < 3; i ++) {
 			if (of_address_to_resource(np, i,

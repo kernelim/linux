@@ -280,6 +280,7 @@ void kvm_pmu_vcpu_destroy(struct kvm_vcpu *vcpu)
 
 	for (i = 0; i < ARMV8_PMU_MAX_COUNTERS; i++)
 		kvm_pmu_release_perf_event(&pmu->pmc[i]);
+	irq_work_sync(&vcpu->arch.pmu.overflow_work);
 }
 
 u64 kvm_pmu_valid_counter_mask(struct kvm_vcpu *vcpu)
@@ -445,6 +446,22 @@ void kvm_pmu_sync_hwstate(struct kvm_vcpu *vcpu)
 }
 
 /**
+ * When perf interrupt is an NMI, we cannot safely notify the vcpu corresponding
+ * to the event.
+ * This is why we need a callback to do it once outside of the NMI context.
+ */
+static void kvm_pmu_perf_overflow_notify_vcpu(struct irq_work *work)
+{
+	struct kvm_vcpu *vcpu;
+	struct kvm_pmu *pmu;
+
+	pmu = container_of(work, struct kvm_pmu, overflow_work);
+	vcpu = kvm_pmc_to_vcpu(pmu->pmc);
+
+	kvm_vcpu_kick(vcpu);
+}
+
+/**
  * When the perf event overflows, set the overflow status and inform the vcpu.
  */
 static void kvm_pmu_perf_overflow(struct perf_event *perf_event,
@@ -476,7 +493,11 @@ static void kvm_pmu_perf_overflow(struct perf_event *perf_event,
 
 	if (kvm_pmu_overflow_status(vcpu)) {
 		kvm_make_request(KVM_REQ_IRQ_PENDING, vcpu);
-		kvm_vcpu_kick(vcpu);
+
+		if (!in_nmi())
+			kvm_vcpu_kick(vcpu);
+		else
+			irq_work_queue(&vcpu->arch.pmu.overflow_work);
 	}
 
 	cpu_pmu->pmu.start(perf_event, PERF_EF_RELOAD);
@@ -746,15 +767,6 @@ int kvm_arm_pmu_v3_enable(struct kvm_vcpu *vcpu)
 
 static int kvm_arm_pmu_v3_init(struct kvm_vcpu *vcpu)
 {
-	if (!kvm_arm_support_pmu_v3())
-		return -ENODEV;
-
-	if (!test_bit(KVM_ARM_VCPU_PMU_V3, vcpu->arch.features))
-		return -ENXIO;
-
-	if (vcpu->arch.pmu.created)
-		return -EBUSY;
-
 	if (irqchip_in_kernel(vcpu->kvm)) {
 		int ret;
 
@@ -774,6 +786,9 @@ static int kvm_arm_pmu_v3_init(struct kvm_vcpu *vcpu)
 		if (ret)
 			return ret;
 	}
+
+	init_irq_work(&vcpu->arch.pmu.overflow_work,
+		      kvm_pmu_perf_overflow_notify_vcpu);
 
 	vcpu->arch.pmu.created = true;
 	return 0;
@@ -807,6 +822,12 @@ static bool pmu_irq_is_valid(struct kvm *kvm, int irq)
 
 int kvm_arm_pmu_v3_set_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr)
 {
+	if (!kvm_arm_support_pmu_v3() || !kvm_vcpu_has_pmu(vcpu))
+		return -ENODEV;
+
+	if (vcpu->arch.pmu.created)
+		return -EBUSY;
+
 	switch (attr->attr) {
 	case KVM_ARM_VCPU_PMU_V3_IRQ: {
 		int __user *uaddr = (int __user *)(long)attr->addr;
@@ -814,9 +835,6 @@ int kvm_arm_pmu_v3_set_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr)
 
 		if (!irqchip_in_kernel(vcpu->kvm))
 			return -EINVAL;
-
-		if (!test_bit(KVM_ARM_VCPU_PMU_V3, vcpu->arch.features))
-			return -ENODEV;
 
 		if (get_user(irq, uaddr))
 			return -EFAULT;
@@ -852,7 +870,7 @@ int kvm_arm_pmu_v3_get_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr)
 		if (!irqchip_in_kernel(vcpu->kvm))
 			return -EINVAL;
 
-		if (!test_bit(KVM_ARM_VCPU_PMU_V3, vcpu->arch.features))
+		if (!kvm_vcpu_has_pmu(vcpu))
 			return -ENODEV;
 
 		if (!kvm_arm_pmu_irq_initialized(vcpu))
@@ -871,8 +889,7 @@ int kvm_arm_pmu_v3_has_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr)
 	switch (attr->attr) {
 	case KVM_ARM_VCPU_PMU_V3_IRQ:
 	case KVM_ARM_VCPU_PMU_V3_INIT:
-		if (kvm_arm_support_pmu_v3() &&
-		    test_bit(KVM_ARM_VCPU_PMU_V3, vcpu->arch.features))
+		if (kvm_arm_support_pmu_v3() && kvm_vcpu_has_pmu(vcpu))
 			return 0;
 	}
 

@@ -372,7 +372,7 @@ static inline void patch_slb_encoding(unsigned int *insn_addr,
 	 * back.
 	 */
 	unsigned int insn = (*insn_addr & 0xffff0000) | immed;
-	patch_instruction(insn_addr, insn);
+	patch_instruction((struct ppc_inst *)insn_addr, ppc_inst(insn));
 }
 
 extern u32 slb_miss_kernel_load_linear[];

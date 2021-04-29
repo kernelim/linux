@@ -629,7 +629,7 @@ struct fifo_buffer {
 	int total; /* sum of all values */
 	int values[0];
 };
-extern struct fifo_buffer *fifo_alloc(int fifo_size);
+extern struct fifo_buffer *fifo_alloc(unsigned int fifo_size);
 
 /* flag bits per connection */
 enum {
@@ -1585,13 +1585,6 @@ static inline void drbd_tcp_uncork(struct socket *sock)
 {
 	int val = 0;
 	(void) kernel_setsockopt(sock, SOL_TCP, TCP_CORK,
-			(char*)&val, sizeof(val));
-}
-
-static inline void drbd_tcp_nodelay(struct socket *sock)
-{
-	int val = 1;
-	(void) kernel_setsockopt(sock, SOL_TCP, TCP_NODELAY,
 			(char*)&val, sizeof(val));
 }
 

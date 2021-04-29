@@ -102,7 +102,7 @@ static void rockchip_pwm_get_state(struct pwm_chip *chip,
 }
 
 static void rockchip_pwm_config(struct pwm_chip *chip, struct pwm_device *pwm,
-			       struct pwm_state *state)
+			       const struct pwm_state *state)
 {
 	struct rockchip_pwm_chip *pc = to_rockchip_pwm_chip(chip);
 	unsigned long period, duty;
@@ -186,7 +186,7 @@ static int rockchip_pwm_enable(struct pwm_chip *chip,
 }
 
 static int rockchip_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
-			      struct pwm_state *state)
+			      const struct pwm_state *state)
 {
 	struct rockchip_pwm_chip *pc = to_rockchip_pwm_chip(chip);
 	struct pwm_state curstate;

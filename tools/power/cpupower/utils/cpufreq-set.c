@@ -1,7 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  (C) 2004-2009  Dominik Brodowski <linux@dominikbrodowski.de>
- *
- *  Licensed under the terms of the GNU GPL License version 2.
  */
 
 
@@ -312,6 +311,7 @@ int cmd_freq_set(int argc, char **argv)
 		}
 	}
 
+	get_cpustate();
 
 	/* loop over CPUs */
 	for (cpu = bitmask_first(cpus_chosen);
@@ -328,6 +328,8 @@ int cmd_freq_set(int argc, char **argv)
 			return ret;
 		}
 	}
+
+	print_offline_cpus();
 
 	return 0;
 }

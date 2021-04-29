@@ -10,6 +10,7 @@
  *
  */
 
+#include <linux/clocksource.h>
 #include <linux/clockchips.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
@@ -36,8 +37,7 @@ unsigned long profile_pc(struct pt_regs *regs)
 #ifdef CONFIG_FRAME_POINTER
 		return *(unsigned long *)(regs->bp + sizeof(long));
 #else
-		unsigned long *sp =
-			(unsigned long *)kernel_stack_pointer(regs);
+		unsigned long *sp = (unsigned long *)regs->sp;
 		/*
 		 * Return address is either directly at stack pointer
 		 * or above a saved flags. Eflags has bits 22-31 zero,
@@ -106,6 +106,9 @@ static __init void x86_late_time_init(void)
 	 */
 	x86_init.irqs.intr_mode_init();
 	tsc_init();
+
+	if (static_cpu_has(X86_FEATURE_WAITPKG))
+		use_tpause_delay();
 }
 
 /*
@@ -115,4 +118,19 @@ static __init void x86_late_time_init(void)
 void __init time_init(void)
 {
 	late_time_init = x86_late_time_init;
+}
+
+/*
+ * Sanity check the vdso related archdata content.
+ */
+void clocksource_arch_init(struct clocksource *cs)
+{
+	if (cs->vdso_clock_mode == VDSO_CLOCKMODE_NONE)
+		return;
+
+	if (cs->mask != CLOCKSOURCE_MASK(64)) {
+		pr_warn("clocksource %s registered with invalid mask %016llx for VDSO. Disabling VDSO support.\n",
+			cs->name, cs->mask);
+		cs->vdso_clock_mode = VDSO_CLOCKMODE_NONE;
+	}
 }

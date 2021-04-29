@@ -1,64 +1,7 @@
-/******************************************************************************
- *
- * This file is provided under a dual BSD/GPLv2 license.  When using or
- * redistributing this file, you may do so under either license.
- *
- * GPL LICENSE SUMMARY
- *
- * Copyright (C) 2018 - 2019 Intel Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.
- *
- * The full GNU General Public License is included in this distribution
- * in the file called COPYING.
- *
- * Contact Information:
- *  Intel Linux Wireless <linuxwifi@intel.com>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
- * BSD LICENSE
- *
- * Copyright (C) 2018 - 2019 Intel Corporation
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name Intel Corporation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
-
+// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
+/*
+ * Copyright (C) 2018-2020 Intel Corporation
+ */
 #include <linux/firmware.h>
 #include "iwl-drv.h"
 #include "iwl-trans.h"
@@ -165,28 +108,40 @@ static int iwl_dbg_tlv_alloc_buf_alloc(struct iwl_trans *trans,
 				       struct iwl_ucode_tlv *tlv)
 {
 	struct iwl_fw_ini_allocation_tlv *alloc = (void *)tlv->data;
-	u32 buf_location = le32_to_cpu(alloc->buf_location);
-	u32 alloc_id = le32_to_cpu(alloc->alloc_id);
+	u32 buf_location;
+	u32 alloc_id;
 
-	if (le32_to_cpu(tlv->length) != sizeof(*alloc) ||
-	    (buf_location != IWL_FW_INI_LOCATION_SRAM_PATH &&
-	     buf_location != IWL_FW_INI_LOCATION_DRAM_PATH))
+	if (le32_to_cpu(tlv->length) != sizeof(*alloc))
 		return -EINVAL;
 
-	if ((buf_location == IWL_FW_INI_LOCATION_SRAM_PATH &&
-	     alloc_id != IWL_FW_INI_ALLOCATION_ID_DBGC1) ||
-	    (buf_location == IWL_FW_INI_LOCATION_DRAM_PATH &&
-	     (alloc_id == IWL_FW_INI_ALLOCATION_INVALID ||
-	      alloc_id >= IWL_FW_INI_ALLOCATION_NUM))) {
-		IWL_ERR(trans,
-			"WRT: Invalid allocation id %u for allocation TLV\n",
-			alloc_id);
-		return -EINVAL;
-	}
+	buf_location = le32_to_cpu(alloc->buf_location);
+	alloc_id = le32_to_cpu(alloc->alloc_id);
+
+	if (buf_location == IWL_FW_INI_LOCATION_INVALID ||
+	    buf_location >= IWL_FW_INI_LOCATION_NUM)
+		goto err;
+
+	if (alloc_id == IWL_FW_INI_ALLOCATION_INVALID ||
+	    alloc_id >= IWL_FW_INI_ALLOCATION_NUM)
+		goto err;
+
+	if (buf_location == IWL_FW_INI_LOCATION_NPK_PATH &&
+	    alloc_id != IWL_FW_INI_ALLOCATION_ID_DBGC1)
+		goto err;
+
+	if (buf_location == IWL_FW_INI_LOCATION_SRAM_PATH &&
+	    alloc_id != IWL_FW_INI_ALLOCATION_ID_DBGC1 &&
+	    alloc_id != IWL_FW_INI_ALLOCATION_ID_INTERNAL)
+		goto err;
 
 	trans->dbg.fw_mon_cfg[alloc_id] = *alloc;
 
 	return 0;
+err:
+	IWL_ERR(trans,
+		"WRT: Invalid allocation id %u and/or location id %u for allocation TLV\n",
+		alloc_id, buf_location);
+	return -EINVAL;
 }
 
 static int iwl_dbg_tlv_alloc_hcmd(struct iwl_trans *trans,
@@ -225,6 +180,13 @@ static int iwl_dbg_tlv_alloc_region(struct iwl_trans *trans,
 	if (le32_to_cpu(tlv->length) < sizeof(*reg))
 		return -EINVAL;
 
+	/* For safe using a string from FW make sure we have a
+	 * null terminator
+	 */
+	reg->name[IWL_FW_INI_MAX_NAME - 1] = 0;
+
+	IWL_DEBUG_FW(trans, "WRT: parsing region: %s\n", reg->name);
+
 	if (id >= IWL_FW_INI_MAX_REGION_ID) {
 		IWL_ERR(trans, "WRT: Invalid region id %u\n", id);
 		return -EINVAL;
@@ -234,6 +196,12 @@ static int iwl_dbg_tlv_alloc_region(struct iwl_trans *trans,
 	    type >= IWL_FW_INI_REGION_NUM) {
 		IWL_ERR(trans, "WRT: Invalid region type %u\n", type);
 		return -EINVAL;
+	}
+
+	if (type == IWL_FW_INI_REGION_PCI_IOSF_CONFIG &&
+	    !trans->ops->read_config32) {
+		IWL_ERR(trans, "WRT: Unsupported region type %u\n", type);
+		return -EOPNOTSUPP;
 	}
 
 	active_reg = &trans->dbg.active_regions[id];
@@ -257,6 +225,8 @@ static int iwl_dbg_tlv_alloc_trigger(struct iwl_trans *trans,
 {
 	struct iwl_fw_ini_trigger_tlv *trig = (void *)tlv->data;
 	u32 tp = le32_to_cpu(trig->time_point);
+	struct iwl_ucode_tlv *dup = NULL;
+	int ret;
 
 	if (le32_to_cpu(tlv->length) < sizeof(*trig))
 		return -EINVAL;
@@ -269,10 +239,20 @@ static int iwl_dbg_tlv_alloc_trigger(struct iwl_trans *trans,
 		return -EINVAL;
 	}
 
-	if (!le32_to_cpu(trig->occurrences))
+	if (!le32_to_cpu(trig->occurrences)) {
+		dup = kmemdup(tlv, sizeof(*tlv) + le32_to_cpu(tlv->length),
+				GFP_KERNEL);
+		if (!dup)
+			return -ENOMEM;
+		trig = (void *)dup->data;
 		trig->occurrences = cpu_to_le32(-1);
+		tlv = dup;
+	}
 
-	return iwl_dbg_tlv_add(tlv, &trans->dbg.time_point[tp].trig_list);
+	ret = iwl_dbg_tlv_add(tlv, &trans->dbg.time_point[tp].trig_list);
+	kfree(dup);
+
+	return ret;
 }
 
 static int (*dbg_tlv_alloc[])(struct iwl_trans *trans,
@@ -454,7 +434,7 @@ void iwl_dbg_tlv_load_bin(struct device *dev, struct iwl_trans *trans)
 	if (!iwlwifi_mod_params.enable_ini)
 		return;
 
-	res = request_firmware(&fw, "iwl-debug-yoyo.bin", dev);
+	res = firmware_request_nowarn(&fw, "iwl-debug-yoyo.bin", dev);
 	if (res)
 		return;
 
@@ -771,7 +751,7 @@ static bool is_trig_data_contained(struct iwl_ucode_tlv *new,
 	struct iwl_fw_ini_trigger_tlv *old_trig = (void *)old->data;
 	__le32 *new_data = new_trig->data, *old_data = old_trig->data;
 	u32 new_dwords_num = iwl_tlv_array_len(new, new_trig, data);
-	u32 old_dwords_num = iwl_tlv_array_len(new, new_trig, data);
+	u32 old_dwords_num = iwl_tlv_array_len(old, old_trig, data);
 	int i, j;
 
 	for (i = 0; i < new_dwords_num; i++) {
@@ -921,9 +901,8 @@ static bool iwl_dbg_tlv_check_fw_pkt(struct iwl_fw_runtime *fwrt,
 	struct iwl_rx_packet *pkt = tp_data->fw_pkt;
 	struct iwl_cmd_header *wanted_hdr = (void *)&trig_data;
 
-	if (pkt && ((wanted_hdr->cmd == 0 && wanted_hdr->group_id == 0) ||
-		    (pkt->hdr.cmd == wanted_hdr->cmd &&
-		     pkt->hdr.group_id == wanted_hdr->group_id))) {
+	if (pkt && (pkt->hdr.cmd == wanted_hdr->cmd &&
+		    pkt->hdr.group_id == wanted_hdr->group_id)) {
 		struct iwl_rx_packet *fw_pkt =
 			kmemdup(pkt,
 				sizeof(*pkt) + iwl_rx_packet_payload_len(pkt),
@@ -985,6 +964,9 @@ static void iwl_dbg_tlv_init_cfg(struct iwl_fw_runtime *fwrt)
 {
 	enum iwl_fw_ini_buffer_location *ini_dest = &fwrt->trans->dbg.ini_dest;
 	int ret, i;
+
+	if (*ini_dest != IWL_FW_INI_LOCATION_INVALID)
+		return;
 
 	IWL_DEBUG_FW(fwrt,
 		     "WRT: Generating active triggers list, domain 0x%x\n",
@@ -1050,6 +1032,7 @@ void iwl_dbg_tlv_time_point(struct iwl_fw_runtime *fwrt,
 		break;
 	case IWL_FW_INI_TIME_POINT_FW_RSP_OR_NOTIF:
 	case IWL_FW_INI_TIME_POINT_MISSED_BEACONS:
+	case IWL_FW_INI_TIME_POINT_FW_DHC_NOTIFICATION:
 		iwl_dbg_tlv_send_hcmds(fwrt, hcmd_list);
 		iwl_dbg_tlv_tp_trigger(fwrt, trig_list, tp_data,
 				       iwl_dbg_tlv_check_fw_pkt);

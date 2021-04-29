@@ -192,9 +192,9 @@ static void aa_free_data(void *ptr, void *arg)
 {
 	struct aa_data *data = ptr;
 
-	kzfree(data->data);
-	kzfree(data->key);
-	kzfree(data);
+	kfree_sensitive(data->data);
+	kfree_sensitive(data->key);
+	kfree_sensitive(data);
 }
 
 /**

@@ -129,6 +129,7 @@ static int __cifs_reconnect_tcon(const struct nls_table *nlsc,
 				 struct cifs_tcon *tcon)
 {
 	int rc;
+	struct TCP_Server_Info *server = tcon->ses->server;
 	struct dfs_cache_tgt_list tl;
 	struct dfs_cache_tgt_iterator *it = NULL;
 	char *tree;
@@ -141,15 +142,14 @@ static int __cifs_reconnect_tcon(const struct nls_table *nlsc,
 	if (!tree)
 		return -ENOMEM;
 
-	if (tcon->ipc) {
-		scnprintf(tree, MAX_TREE_SIZE, "\\\\%s\\IPC$",
-			  tcon->ses->server->hostname);
-		rc = CIFSTCon(0, tcon->ses, tree, tcon, nlsc);
-		goto out;
-	}
-
 	if (!tcon->dfs_path) {
-		rc = CIFSTCon(0, tcon->ses, tcon->treeName, tcon, nlsc);
+		if (tcon->ipc) {
+			scnprintf(tree, MAX_TREE_SIZE, "\\\\%s\\IPC$",
+				  server->hostname);
+			rc = CIFSTCon(0, tcon->ses, tree, tcon, nlsc);
+		} else {
+			rc = CIFSTCon(0, tcon->ses, tcon->treeName, tcon, nlsc);
+		}
 		goto out;
 	}
 
@@ -157,13 +157,13 @@ static int __cifs_reconnect_tcon(const struct nls_table *nlsc,
 	if (rc)
 		goto out;
 
-	extract_unc_hostname(tcon->ses->server->hostname, &tcp_host,
-			     &tcp_host_len);
+	extract_unc_hostname(server->hostname, &tcp_host, &tcp_host_len);
 
 	for (it = dfs_cache_get_tgt_iterator(&tl); it;
 	     it = dfs_cache_get_next_tgt(&tl, it)) {
 		const char *share, *prefix;
 		size_t share_len, prefix_len;
+		bool target_match;
 
 		rc = dfs_cache_get_tgt_share(it, &share, &share_len, &prefix,
 					     &prefix_len);
@@ -177,19 +177,38 @@ static int __cifs_reconnect_tcon(const struct nls_table *nlsc,
 
 		if (dfs_host_len != tcp_host_len
 		    || strncasecmp(dfs_host, tcp_host, dfs_host_len) != 0) {
-			cifs_dbg(FYI, "%s: skipping %.*s, doesn't match %.*s",
+			cifs_dbg(FYI, "%s: %.*s doesn't match %.*s\n",
 				 __func__,
 				 (int)dfs_host_len, dfs_host,
 				 (int)tcp_host_len, tcp_host);
-			continue;
+
+			rc = match_target_ip(server, dfs_host, dfs_host_len,
+					     &target_match);
+			if (rc) {
+				cifs_dbg(VFS, "%s: failed to match target ip: %d\n",
+					 __func__, rc);
+				break;
+			}
+
+			if (!target_match) {
+				cifs_dbg(FYI, "%s: skipping target\n", __func__);
+				continue;
+			}
 		}
 
-		scnprintf(tree, MAX_TREE_SIZE, "\\%.*s", (int)share_len, share);
-
-		rc = CIFSTCon(0, tcon->ses, tree, tcon, nlsc);
-		if (!rc) {
-			rc = update_super_prepath(tcon, prefix, prefix_len);
-			break;
+		if (tcon->ipc) {
+			scnprintf(tree, MAX_TREE_SIZE, "\\\\%.*s\\IPC$",
+				  (int)share_len, share);
+			rc = CIFSTCon(0, tcon->ses, tree, tcon, nlsc);
+		} else {
+			scnprintf(tree, MAX_TREE_SIZE, "\\%.*s", (int)share_len,
+				  share);
+			rc = CIFSTCon(0, tcon->ses, tree, tcon, nlsc);
+			if (!rc) {
+				rc = update_super_prepath(tcon, prefix,
+							  prefix_len);
+				break;
+			}
 		}
 		if (rc == -EREMOTE)
 			break;
@@ -262,8 +281,8 @@ cifs_reconnect_tcon(struct cifs_tcon *tcon, int smb_command)
 						      (server->tcpStatus != CifsNeedReconnect),
 						      10 * HZ);
 		if (rc < 0) {
-			cifs_dbg(FYI, "%s: aborting reconnect due to a received"
-				 " signal by the process\n", __func__);
+			cifs_dbg(FYI, "%s: aborting reconnect due to a received signal by the process\n",
+				 __func__);
 			return -ERESTARTSYS;
 		}
 
@@ -324,14 +343,14 @@ cifs_reconnect_tcon(struct cifs_tcon *tcon, int smb_command)
 	cifs_dbg(FYI, "reconnect tcon rc = %d\n", rc);
 
 	if (rc) {
-		printk_once(KERN_WARNING "reconnect tcon failed rc = %d\n", rc);
+		pr_warn_once("reconnect tcon failed rc = %d\n", rc);
 		goto out;
 	}
 
 	atomic_inc(&tconInfoReconnectCount);
 
 	/* tell server Unix caps we support */
-	if (ses->capabilities & CAP_UNIX)
+	if (cap_unix(ses))
 		reset_cifs_unix_caps(0, tcon, NULL, NULL);
 
 	/*
@@ -557,7 +576,7 @@ cifs_enable_signing(struct TCP_Server_Info *server, bool mnt_sign_required)
 	/* If server requires signing, does client allow it? */
 	if (srv_sign_required) {
 		if (!mnt_sign_enabled) {
-			cifs_dbg(VFS, "Server requires signing, but it's disabled in SecurityFlags!");
+			cifs_dbg(VFS, "Server requires signing, but it's disabled in SecurityFlags!\n");
 			return -ENOTSUPP;
 		}
 		server->sign = true;
@@ -566,14 +585,14 @@ cifs_enable_signing(struct TCP_Server_Info *server, bool mnt_sign_required)
 	/* If client requires signing, does server allow it? */
 	if (mnt_sign_required) {
 		if (!srv_sign_enabled) {
-			cifs_dbg(VFS, "Server does not support signing!");
+			cifs_dbg(VFS, "Server does not support signing!\n");
 			return -ENOTSUPP;
 		}
 		server->sign = true;
 	}
 
 	if (cifs_rdma_enabled(server) && server->sign)
-		cifs_dbg(VFS, "Signing is enabled, and RDMA read/write will be disabled");
+		cifs_dbg(VFS, "Signing is enabled, and RDMA read/write will be disabled\n");
 
 	return 0;
 }
@@ -594,6 +613,8 @@ decode_lanman_negprot_rsp(struct TCP_Server_Info *server, NEGOTIATE_RSP *pSMBr)
 			       cifs_max_pending);
 	set_credits(server, server->maxReq);
 	server->maxBuf = le16_to_cpu(rsp->MaxBufSize);
+	/* set up max_read for readpages check */
+	server->max_read = server->maxBuf;
 	/* even though we do not use raw we might as well set this
 	accurately, in case we ever find a need for it */
 	if ((le16_to_cpu(rsp->RawMode) & RAW_ENABLE) == RAW_ENABLE) {
@@ -701,7 +722,7 @@ CIFSSMBNegotiate(const unsigned int xid, struct cifs_ses *ses)
 	pSMB->hdr.Flags2 |= (SMBFLG2_UNICODE | SMBFLG2_ERR_STATUS);
 
 	if (should_set_ext_sec_flag(ses->sectype)) {
-		cifs_dbg(FYI, "Requesting extended security.");
+		cifs_dbg(FYI, "Requesting extended security\n");
 		pSMB->hdr.Flags2 |= SMBFLG2_EXT_SEC;
 	}
 
@@ -755,6 +776,8 @@ CIFSSMBNegotiate(const unsigned int xid, struct cifs_ses *ses)
 	set_credits(server, server->maxReq);
 	/* probably no need to store and check maxvcs */
 	server->maxBuf = le32_to_cpu(pSMBr->MaxBufferSize);
+	/* set up max_read for readpages check */
+	server->max_read = server->maxBuf;
 	server->max_rw = le32_to_cpu(pSMBr->MaxRawSize);
 	cifs_dbg(NOISY, "Max buf = %d\n", ses->server->maxBuf);
 	server->capabilities = le32_to_cpu(pSMBr->Capabilities);
@@ -1602,7 +1625,6 @@ cifs_readv_receive(struct TCP_Server_Info *server, struct mid_q_entry *mid)
 	if (server->ops->is_session_expired &&
 	    server->ops->is_session_expired(buf)) {
 		cifs_reconnect(server);
-		wake_up(&server->response_q);
 		return -1;
 	}
 
@@ -2149,8 +2171,8 @@ cifs_writev_requeue(struct cifs_writedata *wdata)
 			}
 		}
 
+		kref_put(&wdata2->refcount, cifs_writedata_release);
 		if (rc) {
-			kref_put(&wdata2->refcount, cifs_writedata_release);
 			if (is_retryable_error(rc))
 				continue;
 			i += nr_pages;
@@ -2372,7 +2394,7 @@ int
 CIFSSMBWrite2(const unsigned int xid, struct cifs_io_parms *io_parms,
 	      unsigned int *nbytes, struct kvec *iov, int n_vec)
 {
-	int rc = -EACCES;
+	int rc;
 	WRITE_REQ *pSMB = NULL;
 	int wct;
 	int smb_hdr_len;
@@ -3865,7 +3887,7 @@ GetExtAttrRetry:
 			struct file_chattr_info *pfinfo;
 			/* BB Do we need a cast or hash here ? */
 			if (count != 16) {
-				cifs_dbg(FYI, "Illegal size ret in GetExtAttr\n");
+				cifs_dbg(FYI, "Invalid size ret in GetExtAttr\n");
 				rc = -EIO;
 				goto GetExtAttrOut;
 			}
@@ -4241,7 +4263,7 @@ QFileInfoRetry:
 	rc = SendReceive(xid, tcon->ses, (struct smb_hdr *) pSMB,
 			 (struct smb_hdr *) pSMBr, &bytes_returned, 0);
 	if (rc) {
-		cifs_dbg(FYI, "Send error in QFileInfo = %d", rc);
+		cifs_dbg(FYI, "Send error in QFileInfo = %d\n", rc);
 	} else {		/* decode response */
 		rc = validate_t2((struct smb_t2_rsp *)pSMBr);
 
@@ -4408,7 +4430,7 @@ UnixQFileInfoRetry:
 	rc = SendReceive(xid, tcon->ses, (struct smb_hdr *) pSMB,
 			 (struct smb_hdr *) pSMBr, &bytes_returned, 0);
 	if (rc) {
-		cifs_dbg(FYI, "Send error in UnixQFileInfo = %d", rc);
+		cifs_dbg(FYI, "Send error in UnixQFileInfo = %d\n", rc);
 	} else {		/* decode response */
 		rc = validate_t2((struct smb_t2_rsp *)pSMBr);
 
@@ -4490,7 +4512,7 @@ UnixQPathInfoRetry:
 	rc = SendReceive(xid, tcon->ses, (struct smb_hdr *) pSMB,
 			 (struct smb_hdr *) pSMBr, &bytes_returned, 0);
 	if (rc) {
-		cifs_dbg(FYI, "Send error in UnixQPathInfo = %d", rc);
+		cifs_dbg(FYI, "Send error in UnixQPathInfo = %d\n", rc);
 	} else {		/* decode response */
 		rc = validate_t2((struct smb_t2_rsp *)pSMBr);
 
@@ -4910,7 +4932,7 @@ GetInodeNumberRetry:
 			struct file_internal_info *pfinfo;
 			/* BB Do we need a cast or hash here ? */
 			if (count < 8) {
-				cifs_dbg(FYI, "Illegal size ret in QryIntrnlInf\n");
+				cifs_dbg(FYI, "Invalid size ret in QryIntrnlInf\n");
 				rc = -EIO;
 				goto GetInodeNumOut;
 			}
@@ -5891,10 +5913,42 @@ CIFSSMBSetFileDisposition(const unsigned int xid, struct cifs_tcon *tcon,
 	return rc;
 }
 
+static int
+CIFSSMBSetPathInfoFB(const unsigned int xid, struct cifs_tcon *tcon,
+		     const char *fileName, const FILE_BASIC_INFO *data,
+		     const struct nls_table *nls_codepage,
+		     struct cifs_sb_info *cifs_sb)
+{
+	int oplock = 0;
+	struct cifs_open_parms oparms;
+	struct cifs_fid fid;
+	int rc;
+
+	oparms.tcon = tcon;
+	oparms.cifs_sb = cifs_sb;
+	oparms.desired_access = GENERIC_WRITE;
+	oparms.create_options = cifs_create_options(cifs_sb, 0);
+	oparms.disposition = FILE_OPEN;
+	oparms.path = fileName;
+	oparms.fid = &fid;
+	oparms.reconnect = false;
+
+	rc = CIFS_open(xid, &oparms, &oplock, NULL);
+	if (rc)
+		goto out;
+
+	rc = CIFSSMBSetFileInfo(xid, tcon, data, fid.netfid, current->tgid);
+	CIFSSMBClose(xid, tcon, fid.netfid);
+out:
+
+	return rc;
+}
+
 int
 CIFSSMBSetPathInfo(const unsigned int xid, struct cifs_tcon *tcon,
 		   const char *fileName, const FILE_BASIC_INFO *data,
-		   const struct nls_table *nls_codepage, int remap)
+		   const struct nls_table *nls_codepage,
+		     struct cifs_sb_info *cifs_sb)
 {
 	TRANSACTION2_SPI_REQ *pSMB = NULL;
 	TRANSACTION2_SPI_RSP *pSMBr = NULL;
@@ -5903,6 +5957,7 @@ CIFSSMBSetPathInfo(const unsigned int xid, struct cifs_tcon *tcon,
 	int bytes_returned = 0;
 	char *data_offset;
 	__u16 params, param_offset, offset, byte_count, count;
+	int remap = cifs_remap(cifs_sb);
 
 	cifs_dbg(FYI, "In SetTimes\n");
 
@@ -5964,6 +6019,10 @@ SetTimesRetry:
 
 	if (rc == -EAGAIN)
 		goto SetTimesRetry;
+
+	if (rc == -EOPNOTSUPP)
+		return CIFSSMBSetPathInfoFB(xid, tcon, fileName, data,
+					    nls_codepage, cifs_sb);
 
 	return rc;
 }

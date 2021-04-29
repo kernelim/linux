@@ -1,67 +1,9 @@
-/******************************************************************************
- *
- * This file is provided under a dual BSD/GPLv2 license.  When using or
- * redistributing this file, you may do so under either license.
- *
- * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2012 - 2014 Intel Corporation. All rights reserved.
- * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
- * Copyright(c) 2016 - 2017 Intel Deutschland GmbH
- * Copyright(c) 2018 - 2019 Intel Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * The full GNU General Public License is included in this distribution
- * in the file called COPYING.
- *
- * Contact Information:
- *  Intel Linux Wireless <linuxwifi@intel.com>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
- * BSD LICENSE
- *
- * Copyright(c) 2012 - 2014 Intel Corporation. All rights reserved.
- * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
- * Copyright(c) 2016 - 2017 Intel Deutschland GmbH
- * Copyright(c) 2018 - 2019 Intel Corporation
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name Intel Corporation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
-
+/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
+/*
+ * Copyright (C) 2012-2014, 2018-2020 Intel Corporation
+ * Copyright (C) 2013-2015 Intel Mobile Communications GmbH
+ * Copyright (C) 2016-2017 Intel Deutschland GmbH
+ */
 #ifndef __iwl_fw_api_scan_h__
 #define __iwl_fw_api_scan_h__
 
@@ -95,6 +37,7 @@ struct iwl_ssid_ie {
 #define IWL_SCAN_MAX_BLACKLIST_LEN	64
 #define IWL_SCAN_SHORT_BLACKLIST_LEN	16
 #define IWL_SCAN_MAX_PROFILES		11
+#define IWL_SCAN_MAX_PROFILES_V2	8
 #define SCAN_OFFLOAD_PROBE_REQ_SIZE	512
 #define SCAN_NUM_BAND_PROBE_DATA_V_1	2
 #define SCAN_NUM_BAND_PROBE_DATA_V_2	3
@@ -116,12 +59,12 @@ enum scan_framework_client {
 };
 
 /**
- * struct iwl_scan_offload_blacklist - SCAN_OFFLOAD_BLACKLIST_S
+ * struct iwl_scan_offload_blocklist - SCAN_OFFLOAD_BLACKLIST_S
  * @ssid:		MAC address to filter out
  * @reported_rssi:	AP rssi reported to the host
  * @client_bitmap: clients ignore this entry  - enum scan_framework_client
  */
-struct iwl_scan_offload_blacklist {
+struct iwl_scan_offload_blocklist {
 	u8 ssid[ETH_ALEN];
 	u8 reported_rssi;
 	u8 client_bitmap;
@@ -160,9 +103,8 @@ struct iwl_scan_offload_profile {
 } __packed;
 
 /**
- * struct iwl_scan_offload_profile_cfg - SCAN_OFFLOAD_PROFILES_CFG_API_S_VER_1
- * @profiles:		profiles to search for match
- * @blacklist_len:	length of blacklist
+ * struct iwl_scan_offload_profile_cfg_data
+ * @blocklist_len:	length of blocklist
  * @num_profiles:	num of profiles in the list
  * @match_notify:	clients waiting for match found notification
  * @pass_match:		clients waiting for the results
@@ -170,9 +112,8 @@ struct iwl_scan_offload_profile {
  * @any_beacon_notify:	clients waiting for match notification without match
  * @reserved:		reserved
  */
-struct iwl_scan_offload_profile_cfg {
-	struct iwl_scan_offload_profile profiles[IWL_SCAN_MAX_PROFILES];
-	u8 blacklist_len;
+struct iwl_scan_offload_profile_cfg_data {
+	u8 blocklist_len;
 	u8 num_profiles;
 	u8 match_notify;
 	u8 pass_match;
@@ -180,6 +121,26 @@ struct iwl_scan_offload_profile_cfg {
 	u8 any_beacon_notify;
 	u8 reserved[2];
 } __packed;
+
+/**
+ * struct iwl_scan_offload_profile_cfg
+ * @profiles:	profiles to search for match
+ * @data:	the rest of the data for profile_cfg
+ */
+struct iwl_scan_offload_profile_cfg_v1 {
+	struct iwl_scan_offload_profile profiles[IWL_SCAN_MAX_PROFILES];
+	struct iwl_scan_offload_profile_cfg_data data;
+} __packed; /* SCAN_OFFLOAD_PROFILES_CFG_API_S_VER_1-2*/
+
+/**
+ * struct iwl_scan_offload_profile_cfg
+ * @profiles:	profiles to search for match
+ * @data:	the rest of the data for profile_cfg
+ */
+struct iwl_scan_offload_profile_cfg {
+	struct iwl_scan_offload_profile profiles[IWL_SCAN_MAX_PROFILES_V2];
+	struct iwl_scan_offload_profile_cfg_data data;
+} __packed; /* SCAN_OFFLOAD_PROFILES_CFG_API_S_VER_3*/
 
 /**
  * struct iwl_scan_schedule_lmac - schedule of scan offload
@@ -511,6 +472,11 @@ enum iwl_channel_flags {
 	IWL_CHANNEL_FLAG_PRE_SCAN_PASSIVE2ACTIVE	= BIT(3),
 };
 
+enum iwl_uhb_chan_cfg_flags {
+	IWL_UHB_CHAN_CFG_FLAG_UNSOLICITED_PROBE_RES = BIT(24),
+	IWL_UHB_CHAN_CFG_FLAG_PSC_CHAN_NO_LISTEN    = BIT(25),
+	IWL_UHB_CHAN_CFG_FLAG_FORCE_PASSIVE         = BIT(26),
+};
 /**
  * struct iwl_scan_dwell
  * @active:		default dwell time for active scan
@@ -702,13 +668,16 @@ struct  iwl_scan_channel_cfg_umac {
 			u8 channel_num;
 			u8 iter_count;
 			__le16 iter_interval;
-		} v1;  /* SCAN_CHANNEL_CFG_S_VER1 */
+		} v1;  /* SCAN_CHANNEL_CONFIG_API_S_VER_1 */
 		struct {
 			u8 channel_num;
 			u8 band;
 			u8 iter_count;
 			u8 iter_interval;
-		 } v2; /* SCAN_CHANNEL_CFG_S_VER2 */
+		 } v2; /* SCAN_CHANNEL_CONFIG_API_S_VER_2
+			* SCAN_CHANNEL_CONFIG_API_S_VER_3
+			* SCAN_CHANNEL_CONFIG_API_S_VER_4
+			*/
 	};
 } __packed;
 
@@ -943,6 +912,25 @@ struct iwl_scan_channel_params_v4 {
 	u8 adwell_ch_override_bitmap[16];
 } __packed; /* SCAN_CHANNEL_PARAMS_API_S_VER_4 also
 	       SCAN_CHANNEL_PARAMS_API_S_VER_5 */
+
+/**
+ * struct iwl_scan_channel_params_v6
+ * @flags: channel flags &enum iwl_scan_channel_flags
+ * @count: num of channels in scan request
+ * @n_aps_override: override the number of APs the FW uses to calculate dwell
+ *	time when adaptive dwell is used.
+ *	Channel k will use n_aps_override[i] when BIT(20 + i) is set in
+ *	channel_config[k].flags
+ * @channel_config: array of explicit channel configurations
+ *                  for 2.4Ghz and 5.2Ghz bands
+ */
+struct iwl_scan_channel_params_v6 {
+	u8 flags;
+	u8 count;
+	u8 n_aps_override[2];
+	struct iwl_scan_channel_cfg_umac channel_config[SCAN_MAX_NUM_CHANS_V3];
+} __packed; /* SCAN_CHANNEL_PARAMS_API_S_VER_6 */
+
 /**
  * struct iwl_scan_general_params_v10
  * @flags: &enum iwl_umac_scan_flags
@@ -1010,18 +998,18 @@ struct iwl_scan_req_params_v12 {
 } __packed; /* SCAN_REQUEST_PARAMS_API_S_VER_12 */
 
 /**
- * struct iwl_scan_req_params_v13
+ * struct iwl_scan_req_params_v14
  * @general_params: &struct iwl_scan_general_params_v10
- * @channel_params: &struct iwl_scan_channel_params_v4
+ * @channel_params: &struct iwl_scan_channel_params_v6
  * @periodic_params: &struct iwl_scan_periodic_parms_v1
  * @probe_params: &struct iwl_scan_probe_params_v4
  */
-struct iwl_scan_req_params_v13 {
+struct iwl_scan_req_params_v14 {
 	struct iwl_scan_general_params_v10 general_params;
-	struct iwl_scan_channel_params_v4 channel_params;
+	struct iwl_scan_channel_params_v6 channel_params;
 	struct iwl_scan_periodic_parms_v1 periodic_params;
 	struct iwl_scan_probe_params_v4 probe_params;
-} __packed; /* SCAN_REQUEST_PARAMS_API_S_VER_13 */
+} __packed; /* SCAN_REQUEST_PARAMS_API_S_VER_14 */
 
 /**
  * struct iwl_scan_req_umac_v12
@@ -1036,16 +1024,16 @@ struct iwl_scan_req_umac_v12 {
 } __packed; /* SCAN_REQUEST_CMD_UMAC_API_S_VER_12 */
 
 /**
- * struct iwl_scan_req_umac_v13
+ * struct iwl_scan_req_umac_v14
  * @uid: scan id, &enum iwl_umac_scan_uid_offsets
  * @ooc_priority: out of channel priority - &enum iwl_scan_priority
  * @scan_params: scan parameters
  */
-struct iwl_scan_req_umac_v13 {
+struct iwl_scan_req_umac_v14 {
 	__le32 uid;
 	__le32 ooc_priority;
-	struct iwl_scan_req_params_v13 scan_params;
-} __packed; /* SCAN_REQUEST_CMD_UMAC_API_S_VER_13 */
+	struct iwl_scan_req_params_v14 scan_params;
+} __packed; /* SCAN_REQUEST_CMD_UMAC_API_S_VER_14 */
 
 /**
  * struct iwl_umac_scan_abort
@@ -1121,7 +1109,7 @@ struct iwl_scan_offload_profiles_query_v1 {
 	u8 resume_while_scanning;
 	u8 self_recovery;
 	__le16 reserved;
-	struct iwl_scan_offload_profile_match_v1 matches[IWL_SCAN_MAX_PROFILES];
+	struct iwl_scan_offload_profile_match_v1 matches[0];
 } __packed; /* SCAN_OFFLOAD_PROFILES_QUERY_RSP_S_VER_2 */
 
 /**
@@ -1165,7 +1153,7 @@ struct iwl_scan_offload_profiles_query {
 	u8 resume_while_scanning;
 	u8 self_recovery;
 	__le16 reserved;
-	struct iwl_scan_offload_profile_match matches[IWL_SCAN_MAX_PROFILES];
+	struct iwl_scan_offload_profile_match matches[0];
 } __packed; /* SCAN_OFFLOAD_PROFILES_QUERY_RSP_S_VER_3 */
 
 /**

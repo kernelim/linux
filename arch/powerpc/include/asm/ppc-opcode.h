@@ -81,6 +81,22 @@
 #define	__REGA0_R30	30
 #define	__REGA0_R31	31
 
+#define IMM_L(i)               ((uintptr_t)(i) & 0xffff)
+#define IMM_DS(i)              ((uintptr_t)(i) & 0xfffc)
+#define IMM_DQ(i)              ((uintptr_t)(i) & 0xfff0)
+#define IMM_D0(i)              (((uintptr_t)(i) >> 16) & 0x3ffff)
+#define IMM_D1(i)              IMM_L(i)
+
+/*
+ * 16-bit immediate helper macros: HA() is for use with sign-extending instrs
+ * (e.g. LD, ADDI).  If the bottom 16 bits is "-ve", add another bit into the
+ * top half to negate the effect (i.e. 0xffff + 1 = 0x(1)0000).
+ */
+#define IMM_H(i)                ((uintptr_t)(i)>>16)
+#define IMM_HA(i)               (((uintptr_t)(i)>>16) +                       \
+					(((uintptr_t)(i) & 0x8000) >> 15))
+
+
 /* opcode and xopcode for instructions */
 #define OP_TRAP 3
 #define OP_TRAP_64 2
@@ -163,6 +179,9 @@
 /* VMX Vector Store Instructions */
 #define OP_31_XOP_STVX          231
 
+/* Prefixed Instructions */
+#define OP_PREFIX		1
+
 #define OP_31   31
 #define OP_LWZ  32
 #define OP_STFS 52
@@ -197,6 +216,7 @@
 #define OP_LQ    56
 
 /* sorted alphabetically */
+#define PPC_INST_BCCTR_FLUSH		0x4c400420
 #define PPC_INST_BHRBE			0x7c00025c
 #define PPC_INST_CLRBHRB		0x7c00035c
 #define PPC_INST_COPY			0x7c20060c
@@ -221,6 +241,8 @@
 #define PPC_INST_STWCX			0x7c00012d
 #define PPC_INST_LWSYNC			0x7c2004ac
 #define PPC_INST_SYNC			0x7c0004ac
+#define PPC_INST_PHWSYNC		0x7c8004ac
+#define PPC_INST_PLWSYNC		0x7ca004ac
 #define PPC_INST_SYNC_MASK		0xfc0007fe
 #define PPC_INST_ISYNC			0x4c00012c
 #define PPC_INST_LXVD2X			0x7c000698
@@ -285,6 +307,8 @@
 #define PPC_INST_TABORT			0x7c00071d
 #define PPC_INST_TSR			0x7c0005dd
 
+#define PPC_INST_DCBF			0x7c0000ac
+
 #define PPC_INST_NAP			0x4c000364
 #define PPC_INST_SLEEP			0x4c0003a4
 #define PPC_INST_WINKLE			0x4c0003e4
@@ -328,6 +352,7 @@
 #define PPC_INST_ADDI			0x38000000
 #define PPC_INST_ADDIS			0x3c000000
 #define PPC_INST_ADD			0x7c000214
+#define PPC_INST_ADDC			0x7c000014
 #define PPC_INST_SUB			0x7c000050
 #define PPC_INST_BLR			0x4e800020
 #define PPC_INST_BLRL			0x4e800021
@@ -336,6 +361,9 @@
 #define PPC_INST_MULLW			0x7c0001d6
 #define PPC_INST_MULHWU			0x7c000016
 #define PPC_INST_MULLI			0x1c000000
+#define PPC_INST_MADDHD			0x10000030
+#define PPC_INST_MADDHDU		0x10000031
+#define PPC_INST_MADDLD			0x10000033
 #define PPC_INST_DIVWU			0x7c000396
 #define PPC_INST_DIVD			0x7c0003d2
 #define PPC_INST_DIVDU			0x7c000392
@@ -375,9 +403,22 @@
 #define PPC_INST_LVX			0x7c0000ce
 #define PPC_INST_STVX			0x7c0001ce
 
+/* Prefixes */
+#define PPC_INST_LFS			0xc0000000
+#define PPC_INST_STFS			0xd0000000
+#define PPC_INST_LFD			0xc8000000
+#define PPC_INST_STFD			0xd8000000
+#define PPC_PREFIX_MLS			0x06000000
+#define PPC_PREFIX_8LS			0x04000000
+
+/* Prefixed instructions */
+#define PPC_INST_PLD			0xe4000000
+#define PPC_INST_PSTD			0xf4000000
+
 /* macros to insert fields into opcodes */
 #define ___PPC_RA(a)	(((a) & 0x1f) << 16)
 #define ___PPC_RB(b)	(((b) & 0x1f) << 11)
+#define ___PPC_RC(c)	(((c) & 0x1f) << 6)
 #define ___PPC_RS(s)	(((s) & 0x1f) << 21)
 #define ___PPC_RT(t)	___PPC_RS(t)
 #define ___PPC_R(r)	(((r) & 0x1) << 16)
@@ -392,18 +433,21 @@
 #define __PPC_XB(b)	((((b) & 0x1f) << 11) | (((b) & 0x20) >> 4))
 #define __PPC_XS(s)	((((s) & 0x1f) << 21) | (((s) & 0x20) >> 5))
 #define __PPC_XT(s)	__PPC_XS(s)
+#define __PPC_XSP(s)	((((s) & 0x1e) | (((s) >> 5) & 0x1)) << 21)
+#define __PPC_XTP(s)	__PPC_XSP(s)
 #define __PPC_T_TLB(t)	(((t) & 0x3) << 21)
 #define __PPC_WC(w)	(((w) & 0x3) << 21)
 #define __PPC_WS(w)	(((w) & 0x1f) << 11)
 #define __PPC_SH(s)	__PPC_WS(s)
 #define __PPC_SH64(s)	(__PPC_SH(s) | (((s) & 0x20) >> 4))
-#define __PPC_MB(s)	(((s) & 0x1f) << 6)
+#define __PPC_MB(s)	___PPC_RC(s)
 #define __PPC_ME(s)	(((s) & 0x1f) << 1)
 #define __PPC_MB64(s)	(__PPC_MB(s) | ((s) & 0x20))
 #define __PPC_ME64(s)	__PPC_MB64(s)
 #define __PPC_BI(s)	(((s) & 0x1f) << 16)
 #define __PPC_CT(t)	(((t) & 0x0f) << 21)
 #define __PPC_SPR(r)	((((r) & 0x1f) << 16) | ((((r) >> 5) & 0x1f) << 11))
+#define __PPC_PRFX_R(r)	(((r) & 0x1) << 20)
 
 /*
  * Only use the larx hint bit on 64bit CPUs. e500v1/v2 based CPUs will treat a
@@ -415,7 +459,192 @@
 #define __PPC_EH(eh)	0
 #endif
 
+/* Base instruction encoding */
+#define PPC_RAW_CP_ABORT		(PPC_INST_CP_ABORT)
+#define PPC_RAW_COPY(a, b)		(PPC_INST_COPY | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_DARN(t, l)		(PPC_INST_DARN | ___PPC_RT(t) | (((l) & 0x3) << 16))
+#define PPC_RAW_DCBAL(a, b)		(PPC_INST_DCBAL | __PPC_RA(a) | __PPC_RB(b))
+#define PPC_RAW_DCBZL(a, b)		(PPC_INST_DCBZL | __PPC_RA(a) | __PPC_RB(b))
+#define PPC_RAW_LQARX(t, a, b, eh)	(PPC_INST_LQARX | ___PPC_RT(t) | ___PPC_RA(a) | ___PPC_RB(b) | __PPC_EH(eh))
+#define PPC_RAW_LDARX(t, a, b, eh)	(PPC_INST_LDARX | ___PPC_RT(t) | ___PPC_RA(a) | ___PPC_RB(b) | __PPC_EH(eh))
+#define PPC_RAW_LWARX(t, a, b, eh)	(PPC_INST_LWARX | ___PPC_RT(t) | ___PPC_RA(a) | ___PPC_RB(b) | __PPC_EH(eh))
+#define PPC_RAW_PHWSYNC			(PPC_INST_PHWSYNC)
+#define PPC_RAW_PLWSYNC			(PPC_INST_PLWSYNC)
+#define PPC_RAW_STQCX(t, a, b)		(PPC_INST_STQCX | ___PPC_RT(t) | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_MADDHD(t, a, b, c)	(PPC_INST_MADDHD | ___PPC_RT(t) | ___PPC_RA(a) | ___PPC_RB(b) | ___PPC_RC(c))
+#define PPC_RAW_MADDHDU(t, a, b, c)	(PPC_INST_MADDHDU | ___PPC_RT(t) | ___PPC_RA(a) | ___PPC_RB(b) | ___PPC_RC(c))
+#define PPC_RAW_MADDLD(t, a, b, c)	(PPC_INST_MADDLD | ___PPC_RT(t) | ___PPC_RA(a) | ___PPC_RB(b) | ___PPC_RC(c))
+#define PPC_RAW_MSGSND(b)		(PPC_INST_MSGSND | ___PPC_RB(b))
+#define PPC_RAW_MSGSYNC			(PPC_INST_MSGSYNC)
+#define PPC_RAW_MSGCLR(b)		(PPC_INST_MSGCLR | ___PPC_RB(b))
+#define PPC_RAW_MSGSNDP(b)		(PPC_INST_MSGSNDP | ___PPC_RB(b))
+#define PPC_RAW_MSGCLRP(b)		(PPC_INST_MSGCLRP | ___PPC_RB(b))
+#define PPC_RAW_PASTE(a, b)		(PPC_INST_PASTE | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_POPCNTB(a, s)		(PPC_INST_POPCNTB | __PPC_RA(a) | __PPC_RS(s))
+#define PPC_RAW_POPCNTD(a, s)		(PPC_INST_POPCNTD | __PPC_RA(a) | __PPC_RS(s))
+#define PPC_RAW_POPCNTW(a, s)		(PPC_INST_POPCNTW | __PPC_RA(a) | __PPC_RS(s))
+#define PPC_RAW_RFCI			(PPC_INST_RFCI)
+#define PPC_RAW_RFDI			(PPC_INST_RFDI)
+#define PPC_RAW_RFMCI			(PPC_INST_RFMCI)
+#define PPC_RAW_TLBILX(t, a, b)		(PPC_INST_TLBILX | __PPC_T_TLB(t) | __PPC_RA0(a) | __PPC_RB(b))
+#define PPC_RAW_WAIT(w)			(PPC_INST_WAIT | __PPC_WC(w))
+#define PPC_RAW_TLBIE(lp, a)		(PPC_INST_TLBIE | ___PPC_RB(a) | ___PPC_RS(lp))
+#define PPC_RAW_TLBIE_5(rb, rs, ric, prs, r) \
+	(PPC_INST_TLBIE | ___PPC_RB(rb) | ___PPC_RS(rs) | ___PPC_RIC(ric) | ___PPC_PRS(prs) | ___PPC_R(r))
+#define PPC_RAW_TLBIEL(rb, rs, ric, prs, r) \
+	(PPC_INST_TLBIEL | ___PPC_RB(rb) | ___PPC_RS(rs) | ___PPC_RIC(ric) | ___PPC_PRS(prs) | ___PPC_R(r))
+#define PPC_RAW_TLBSRX_DOT(a, b)	(PPC_INST_TLBSRX_DOT | __PPC_RA0(a) | __PPC_RB(b))
+#define PPC_RAW_TLBIVAX(a, b)		(PPC_INST_TLBIVAX | __PPC_RA0(a) | __PPC_RB(b))
+#define PPC_RAW_ERATWE(s, a, w)		(PPC_INST_ERATWE | __PPC_RS(s) | __PPC_RA(a) | __PPC_WS(w))
+#define PPC_RAW_ERATRE(s, a, w)		(PPC_INST_ERATRE | __PPC_RS(s) | __PPC_RA(a) | __PPC_WS(w))
+#define PPC_RAW_ERATILX(t, a, b)	(PPC_INST_ERATILX | __PPC_T_TLB(t) | __PPC_RA0(a) | __PPC_RB(b))
+#define PPC_RAW_ERATIVAX(s, a, b)	(PPC_INST_ERATIVAX | __PPC_RS(s) | __PPC_RA0(a) | __PPC_RB(b))
+#define PPC_RAW_ERATSX(t, a, w)		(PPC_INST_ERATSX | __PPC_RS(t) | __PPC_RA0(a) | __PPC_RB(b))
+#define PPC_RAW_ERATSX_DOT(t, a, w)	(PPC_INST_ERATSX_DOT | __PPC_RS(t) | __PPC_RA0(a) | __PPC_RB(b))
+#define PPC_RAW_SLBFEE_DOT(t, b)	(PPC_INST_SLBFEE | __PPC_RT(t) | __PPC_RB(b))
+#define __PPC_RAW_SLBFEE_DOT(t, b)	(PPC_INST_SLBFEE | ___PPC_RT(t) | ___PPC_RB(b))
+#define PPC_RAW_ICBT(c, a, b)		(PPC_INST_ICBT | __PPC_CT(c) | __PPC_RA0(a) | __PPC_RB(b))
+#define PPC_RAW_LBZCIX(t, a, b)		(PPC_INST_LBZCIX | __PPC_RT(t) | __PPC_RA(a) | __PPC_RB(b))
+#define PPC_RAW_STBCIX(s, a, b)		(PPC_INST_STBCIX | __PPC_RS(s) | __PPC_RA(a) | __PPC_RB(b))
+#define PPC_RAW_DCBFPS(a, b)		(PPC_INST_DCBF | ___PPC_RA(a) | ___PPC_RB(b) | (4 << 21))
+#define PPC_RAW_DCBSTPS(a, b)		(PPC_INST_DCBF | ___PPC_RA(a) | ___PPC_RB(b) | (6 << 21))
+/*
+ * Define what the VSX XX1 form instructions will look like, then add
+ * the 128 bit load store instructions based on that.
+ */
+#define VSX_XX1(s, a, b)		(__PPC_XS(s) | __PPC_RA(a) | __PPC_RB(b))
+#define VSX_XX3(t, a, b)		(__PPC_XT(t) | __PPC_XA(a) | __PPC_XB(b))
+#define PPC_RAW_STXVD2X(s, a, b)	(PPC_INST_STXVD2X | VSX_XX1((s), a, b))
+#define PPC_RAW_LXVD2X(s, a, b)		(PPC_INST_LXVD2X | VSX_XX1((s), a, b))
+#define PPC_RAW_MFVRD(a, t)		(PPC_INST_MFVSRD | VSX_XX1((t) + 32, a, R0))
+#define PPC_RAW_MTVRD(t, a)		(PPC_INST_MTVSRD | VSX_XX1((t) + 32, a, R0))
+#define PPC_RAW_VPMSUMW(t, a, b)	(PPC_INST_VPMSUMW | VSX_XX3((t), a, b))
+#define PPC_RAW_VPMSUMD(t, a, b)	(PPC_INST_VPMSUMD | VSX_XX3((t), a, b))
+#define PPC_RAW_XXLOR(t, a, b)		(PPC_INST_XXLOR | VSX_XX3((t), a, b))
+#define PPC_RAW_XXSWAPD(t, a)		(PPC_INST_XXSWAPD | VSX_XX3((t), a, a))
+#define PPC_RAW_XVCPSGNDP(t, a, b)	((PPC_INST_XVCPSGNDP | VSX_XX3((t), (a), (b))))
+#define PPC_RAW_VPERMXOR(vrt, vra, vrb, vrc) \
+	((PPC_INST_VPERMXOR | ___PPC_RT(vrt) | ___PPC_RA(vra) | ___PPC_RB(vrb) | (((vrc) & 0x1f) << 6)))
+#define PPC_RAW_LXVP(xtp, a, i)		(0x18000000 | __PPC_XTP(xtp) | ___PPC_RA(a) | IMM_DQ(i))
+#define PPC_RAW_STXVP(xsp, a, i)	(0x18000001 | __PPC_XSP(xsp) | ___PPC_RA(a) | IMM_DQ(i))
+#define PPC_RAW_LXVPX(xtp, a, b)	(0x7c00029a | __PPC_XTP(xtp) | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_STXVPX(xsp, a, b)	(0x7c00039a | __PPC_XSP(xsp) | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_PLXVP(xtp, i, a, pr) \
+	((PPC_PREFIX_8LS | __PPC_PRFX_R(pr) | IMM_D0(i)) << 32 | (0xe8000000 | __PPC_XTP(xtp) | ___PPC_RA(a) | IMM_D1(i)))
+#define PPC_RAW_PSTXVP(xsp, i, a, pr) \
+	((PPC_PREFIX_8LS | __PPC_PRFX_R(pr) | IMM_D0(i)) << 32 | (0xf8000000 | __PPC_XSP(xsp) | ___PPC_RA(a) | IMM_D1(i)))
+#define PPC_RAW_NAP			(PPC_INST_NAP)
+#define PPC_RAW_SLEEP			(PPC_INST_SLEEP)
+#define PPC_RAW_WINKLE			(PPC_INST_WINKLE)
+#define PPC_RAW_STOP			(PPC_INST_STOP)
+#define PPC_RAW_CLRBHRB			(PPC_INST_CLRBHRB)
+#define PPC_RAW_MFBHRBE(r, n)		(PPC_INST_BHRBE | __PPC_RT(r) | (((n) & 0x3ff) << 11))
+#define PPC_RAW_TRECHKPT		(PPC_INST_TRECHKPT)
+#define PPC_RAW_TRECLAIM(r)		(PPC_INST_TRECLAIM | __PPC_RA(r))
+#define PPC_RAW_TABORT(r)		(PPC_INST_TABORT | __PPC_RA(r))
+#define TMRN(x)				((((x) & 0x1f) << 16) | (((x) & 0x3e0) << 6))
+#define PPC_RAW_MTTMR(tmr, r)		(PPC_INST_MTTMR | TMRN(tmr) | ___PPC_RS(r))
+#define PPC_RAW_MFTMR(tmr, r)		(PPC_INST_MFTMR | TMRN(tmr) | ___PPC_RT(r))
+#define PPC_RAW_ICSWX(s, a, b)		(PPC_INST_ICSWX | ___PPC_RS(s) | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_ICSWEPX(s, a, b)	(PPC_INST_ICSWEPX | ___PPC_RS(s) | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_SLBIA(IH)		(PPC_INST_SLBIA | (((IH) & 0x7) << 21))
+#define PPC_RAW_VCMPEQUD_RC(vrt, vra, vrb) \
+	(PPC_INST_VCMPEQUD | ___PPC_RT(vrt) | ___PPC_RA(vra) | ___PPC_RB(vrb) | __PPC_RC21)
+#define PPC_RAW_VCMPEQUB_RC(vrt, vra, vrb) \
+	(PPC_INST_VCMPEQUB | ___PPC_RT(vrt) | ___PPC_RA(vra) | ___PPC_RB(vrb) | __PPC_RC21)
+#define PPC_RAW_LD(r, base, i)		(PPC_INST_LD | ___PPC_RT(r) | ___PPC_RA(base) | IMM_DS(i))
+#define PPC_RAW_LWZ(r, base, i)		(PPC_INST_LWZ | ___PPC_RT(r) | ___PPC_RA(base) | IMM_L(i))
+#define PPC_RAW_LWZX(t, a, b)		(PPC_INST_LWZX | ___PPC_RT(t) | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_STD(r, base, i)		(PPC_INST_STD | ___PPC_RS(r) | ___PPC_RA(base) | IMM_DS(i))
+#define PPC_RAW_STDCX(s, a, b)		(PPC_INST_STDCX | ___PPC_RS(s) | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_LFSX(t, a, b)		(PPC_INST_LFSX | ___PPC_RT(t) | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_STFSX(s, a, b)		(PPC_INST_STFSX | ___PPC_RS(s) | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_LFDX(t, a, b)		(PPC_INST_LFDX | ___PPC_RT(t) | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_STFDX(s, a, b)		(PPC_INST_STFDX | ___PPC_RS(s) | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_LVX(t, a, b)		(PPC_INST_LVX | ___PPC_RT(t) | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_STVX(s, a, b)		(PPC_INST_STVX | ___PPC_RS(s) | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_ADD(t, a, b)		(PPC_INST_ADD | ___PPC_RT(t) | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_ADD_DOT(t, a, b)	(PPC_INST_ADD | ___PPC_RT(t) | ___PPC_RA(a) | ___PPC_RB(b) | 0x1)
+#define PPC_RAW_ADDC(t, a, b)		(PPC_INST_ADDC | ___PPC_RT(t) | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_ADDC_DOT(t, a, b)	(PPC_INST_ADDC | ___PPC_RT(t) | ___PPC_RA(a) | ___PPC_RB(b) | 0x1)
+#define PPC_RAW_NOP()			(PPC_INST_NOP)
+#define PPC_RAW_BLR()			(PPC_INST_BLR)
+#define PPC_RAW_BLRL()			(PPC_INST_BLRL)
+#define PPC_RAW_MTLR(r)			(PPC_INST_MTLR | ___PPC_RT(r))
+#define PPC_RAW_BCTR()			(PPC_INST_BCTR)
+#define PPC_RAW_MTCTR(r)		(PPC_INST_MTCTR | ___PPC_RT(r))
+#define PPC_RAW_ADDI(d, a, i)		(PPC_INST_ADDI | ___PPC_RT(d) | ___PPC_RA(a) | IMM_L(i))
+#define PPC_RAW_LI(r, i)		PPC_RAW_ADDI(r, 0, i)
+#define PPC_RAW_ADDIS(d, a, i)		(PPC_INST_ADDIS | ___PPC_RT(d) | ___PPC_RA(a) | IMM_L(i))
+#define PPC_RAW_LIS(r, i)		PPC_RAW_ADDIS(r, 0, i)
+#define PPC_RAW_STDX(r, base, b)	(PPC_INST_STDX | ___PPC_RS(r) | ___PPC_RA(base) | ___PPC_RB(b))
+#define PPC_RAW_STDU(r, base, i)	(PPC_INST_STDU | ___PPC_RS(r) | ___PPC_RA(base) | ((i) & 0xfffc))
+#define PPC_RAW_STW(r, base, i)		(PPC_INST_STW | ___PPC_RS(r) | ___PPC_RA(base) | IMM_L(i))
+#define PPC_RAW_STWU(r, base, i)	(PPC_INST_STWU | ___PPC_RS(r) | ___PPC_RA(base) | IMM_L(i))
+#define PPC_RAW_STH(r, base, i)		(PPC_INST_STH | ___PPC_RS(r) | ___PPC_RA(base) | IMM_L(i))
+#define PPC_RAW_STB(r, base, i)		(PPC_INST_STB | ___PPC_RS(r) | ___PPC_RA(base) | IMM_L(i))
+#define PPC_RAW_LBZ(r, base, i)		(PPC_INST_LBZ | ___PPC_RT(r) | ___PPC_RA(base) | IMM_L(i))
+#define PPC_RAW_LDX(r, base, b)		(PPC_INST_LDX | ___PPC_RT(r) | ___PPC_RA(base) | ___PPC_RB(b))
+#define PPC_RAW_LHZ(r, base, i)		(PPC_INST_LHZ | ___PPC_RT(r) | ___PPC_RA(base) | IMM_L(i))
+#define PPC_RAW_LHBRX(r, base, b)	(PPC_INST_LHBRX | ___PPC_RT(r) | ___PPC_RA(base) | ___PPC_RB(b))
+#define PPC_RAW_LDBRX(r, base, b)	(PPC_INST_LDBRX | ___PPC_RT(r) | ___PPC_RA(base) | ___PPC_RB(b))
+#define PPC_RAW_STWCX(s, a, b)		(PPC_INST_STWCX | ___PPC_RS(s) | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_CMPWI(a, i)		(PPC_INST_CMPWI | ___PPC_RA(a) | IMM_L(i))
+#define PPC_RAW_CMPDI(a, i)		(PPC_INST_CMPDI | ___PPC_RA(a) | IMM_L(i))
+#define PPC_RAW_CMPW(a, b)		(PPC_INST_CMPW | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_CMPD(a, b)		(PPC_INST_CMPD | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_CMPLWI(a, i)		(PPC_INST_CMPLWI | ___PPC_RA(a) | IMM_L(i))
+#define PPC_RAW_CMPLDI(a, i)		(PPC_INST_CMPLDI | ___PPC_RA(a) | IMM_L(i))
+#define PPC_RAW_CMPLW(a, b)		(PPC_INST_CMPLW | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_CMPLD(a, b)		(PPC_INST_CMPLD | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_SUB(d, a, b)		(PPC_INST_SUB | ___PPC_RT(d) | ___PPC_RB(a) | ___PPC_RA(b))
+#define PPC_RAW_MULD(d, a, b)		(PPC_INST_MULLD | ___PPC_RT(d) | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_MULW(d, a, b)		(PPC_INST_MULLW | ___PPC_RT(d) | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_MULHWU(d, a, b)		(PPC_INST_MULHWU | ___PPC_RT(d) | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_MULI(d, a, i)		(PPC_INST_MULLI | ___PPC_RT(d) | ___PPC_RA(a) | IMM_L(i))
+#define PPC_RAW_DIVWU(d, a, b)		(PPC_INST_DIVWU | ___PPC_RT(d) | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_DIVDU(d, a, b)		(PPC_INST_DIVDU | ___PPC_RT(d) | ___PPC_RA(a) | ___PPC_RB(b))
+#define PPC_RAW_AND(d, a, b)		(PPC_INST_AND | ___PPC_RA(d) | ___PPC_RS(a) | ___PPC_RB(b))
+#define PPC_RAW_ANDI(d, a, i)		(PPC_INST_ANDI | ___PPC_RA(d) | ___PPC_RS(a) | IMM_L(i))
+#define PPC_RAW_AND_DOT(d, a, b)	(PPC_INST_ANDDOT | ___PPC_RA(d) | ___PPC_RS(a) | ___PPC_RB(b))
+#define PPC_RAW_OR(d, a, b)		(PPC_INST_OR | ___PPC_RA(d) | ___PPC_RS(a) | ___PPC_RB(b))
+#define PPC_RAW_MR(d, a)		PPC_RAW_OR(d, a, a)
+#define PPC_RAW_ORI(d, a, i)		(PPC_INST_ORI | ___PPC_RA(d) | ___PPC_RS(a) | IMM_L(i))
+#define PPC_RAW_ORIS(d, a, i)		(PPC_INST_ORIS | ___PPC_RA(d) | ___PPC_RS(a) | IMM_L(i))
+#define PPC_RAW_XOR(d, a, b)		(PPC_INST_XOR | ___PPC_RA(d) | ___PPC_RS(a) | ___PPC_RB(b))
+#define PPC_RAW_XORI(d, a, i)		(PPC_INST_XORI | ___PPC_RA(d) | ___PPC_RS(a) | IMM_L(i))
+#define PPC_RAW_XORIS(d, a, i)		(PPC_INST_XORIS | ___PPC_RA(d) | ___PPC_RS(a) | IMM_L(i))
+#define PPC_RAW_EXTSW(d, a)		(PPC_INST_EXTSW | ___PPC_RA(d) | ___PPC_RS(a))
+#define PPC_RAW_SLW(d, a, s)		(PPC_INST_SLW | ___PPC_RA(d) | ___PPC_RS(a) | ___PPC_RB(s))
+#define PPC_RAW_SLD(d, a, s)		(PPC_INST_SLD | ___PPC_RA(d) | ___PPC_RS(a) | ___PPC_RB(s))
+#define PPC_RAW_SRW(d, a, s)		(PPC_INST_SRW | ___PPC_RA(d) | ___PPC_RS(a) | ___PPC_RB(s))
+#define PPC_RAW_SRAW(d, a, s)		(PPC_INST_SRAW | ___PPC_RA(d) | ___PPC_RS(a) | ___PPC_RB(s))
+#define PPC_RAW_SRAWI(d, a, i)		(PPC_INST_SRAWI | ___PPC_RA(d) | ___PPC_RS(a) | __PPC_SH(i))
+#define PPC_RAW_SRD(d, a, s)		(PPC_INST_SRD | ___PPC_RA(d) | ___PPC_RS(a) | ___PPC_RB(s))
+#define PPC_RAW_SRAD(d, a, s)		(PPC_INST_SRAD | ___PPC_RA(d) | ___PPC_RS(a) | ___PPC_RB(s))
+#define PPC_RAW_SRADI(d, a, i)		(PPC_INST_SRADI | ___PPC_RA(d) | ___PPC_RS(a) | __PPC_SH64(i))
+#define PPC_RAW_RLWINM(d, a, i, mb, me)	\
+	(PPC_INST_RLWINM | ___PPC_RA(d) | ___PPC_RS(a) | __PPC_SH(i) | __PPC_MB(mb) | __PPC_ME(me))
+#define PPC_RAW_RLWINM_DOT(d, a, i, mb, me) \
+	(PPC_INST_RLWINM_DOT | ___PPC_RA(d) | ___PPC_RS(a) | __PPC_SH(i) | __PPC_MB(mb) | __PPC_ME(me))
+#define PPC_RAW_RLWIMI(d, a, i, mb, me) \
+	(PPC_INST_RLWIMI | ___PPC_RA(d) | ___PPC_RS(a) | __PPC_SH(i) | __PPC_MB(mb) | __PPC_ME(me))
+#define PPC_RAW_RLDICL(d, a, i, mb)     (PPC_INST_RLDICL | ___PPC_RA(d) | ___PPC_RS(a) | __PPC_SH64(i) | __PPC_MB64(mb))
+#define PPC_RAW_RLDICR(d, a, i, me)     (PPC_INST_RLDICR | ___PPC_RA(d) | ___PPC_RS(a) | __PPC_SH64(i) | __PPC_ME64(me))
+
+/* slwi = rlwinm Rx, Ry, n, 0, 31-n */
+#define PPC_RAW_SLWI(d, a, i)		PPC_RAW_RLWINM(d, a, i, 0, 31-(i))
+/* srwi = rlwinm Rx, Ry, 32-n, n, 31 */
+#define PPC_RAW_SRWI(d, a, i)		PPC_RAW_RLWINM(d, a, 32-(i), i, 31)
+/* sldi = rldicr Rx, Ry, n, 63-n */
+#define PPC_RAW_SLDI(d, a, i)		PPC_RAW_RLDICR(d, a, i, 63-(i))
+/* sldi = rldicl Rx, Ry, 64-n, n */
+#define PPC_RAW_SRDI(d, a, i)		PPC_RAW_RLDICL(d, a, 64-(i), i)
+
+#define PPC_RAW_NEG(d, a)		(PPC_INST_NEG | ___PPC_RT(d) | ___PPC_RA(a))
+
 /* Deal with instructions that older assemblers aren't aware of */
+#define	PPC_BCCTR_FLUSH		stringify_in_c(.long PPC_INST_BCCTR_FLUSH)
 #define	PPC_CP_ABORT		stringify_in_c(.long PPC_INST_CP_ABORT)
 #define	PPC_COPY(a, b)		stringify_in_c(.long PPC_INST_COPY | \
 					___PPC_RA(a) | ___PPC_RB(b))
@@ -438,6 +667,15 @@
 #define PPC_STQCX(t, a, b)	stringify_in_c(.long PPC_INST_STQCX | \
 					___PPC_RT(t) | ___PPC_RA(a) | \
 					___PPC_RB(b))
+#define PPC_MADDHD(t, a, b, c)	stringify_in_c(.long PPC_INST_MADDHD | \
+					___PPC_RT(t) | ___PPC_RA(a)  | \
+					___PPC_RB(b) | ___PPC_RC(c))
+#define PPC_MADDHDU(t, a, b, c)	stringify_in_c(.long PPC_INST_MADDHDU | \
+					___PPC_RT(t) | ___PPC_RA(a)   | \
+					___PPC_RB(b) | ___PPC_RC(c))
+#define PPC_MADDLD(t, a, b, c)	stringify_in_c(.long PPC_INST_MADDLD | \
+					___PPC_RT(t) | ___PPC_RA(a)  | \
+					___PPC_RB(b) | ___PPC_RC(c))
 #define PPC_MSGSND(b)		stringify_in_c(.long PPC_INST_MSGSND | \
 					___PPC_RB(b))
 #define PPC_MSGSYNC		stringify_in_c(.long PPC_INST_MSGSYNC)
@@ -505,12 +743,14 @@
 #define STBCIX(s,a,b)		stringify_in_c(.long PPC_INST_STBCIX | \
 				       __PPC_RS(s) | __PPC_RA(a) | __PPC_RB(b))
 
-/*
- * Define what the VSX XX1 form instructions will look like, then add
- * the 128 bit load store instructions based on that.
- */
-#define VSX_XX1(s, a, b)	(__PPC_XS(s) | __PPC_RA(a) | __PPC_RB(b))
-#define VSX_XX3(t, a, b)	(__PPC_XT(t) | __PPC_XA(a) | __PPC_XB(b))
+#define	PPC_DCBFPS(a, b)	stringify_in_c(.long PPC_INST_DCBF |	\
+				       ___PPC_RA(a) | ___PPC_RB(b) | (4 << 21))
+#define	PPC_DCBSTPS(a, b)	stringify_in_c(.long PPC_INST_DCBF |	\
+				       ___PPC_RA(a) | ___PPC_RB(b) | (6 << 21))
+
+#define	PPC_PHWSYNC		stringify_in_c(.long PPC_INST_PHWSYNC)
+#define	PPC_PLWSYNC		stringify_in_c(.long PPC_INST_PLWSYNC)
+
 #define STXVD2X(s, a, b)	stringify_in_c(.long PPC_INST_STXVD2X | \
 					       VSX_XX1((s), a, b))
 #define LXVD2X(s, a, b)		stringify_in_c(.long PPC_INST_LXVD2X | \
@@ -555,7 +795,6 @@
 					       | __PPC_RA(r))
 
 /* book3e thread control instructions */
-#define TMRN(x)			((((x) & 0x1f) << 16) | (((x) & 0x3e0) << 6))
 #define MTTMR(tmr, r)		stringify_in_c(.long PPC_INST_MTTMR | \
 					       TMRN(tmr) | ___PPC_RS(r))
 #define MFTMR(tmr, r)		stringify_in_c(.long PPC_INST_MFTMR | \

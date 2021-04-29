@@ -45,6 +45,7 @@
 #include <asm/tlbflush.h>
 #include <asm/siginfo.h>
 #include <asm/debug.h>
+#include <asm/inst.h>
 
 static inline bool notify_page_fault(struct pt_regs *regs)
 {
@@ -70,13 +71,13 @@ static inline bool notify_page_fault(struct pt_regs *regs)
  * Check whether the instruction inst is a store using
  * an update addressing form which will update r1.
  */
-static bool store_updates_sp(unsigned int inst)
+static bool store_updates_sp(struct ppc_inst inst)
 {
 	/* check for 1 in the rA field */
-	if (((inst >> 16) & 0x1f) != 1)
+	if (((ppc_inst_val(inst) >> 16) & 0x1f) != 1)
 		return false;
 	/* check major opcode */
-	switch (inst >> 26) {
+	switch (ppc_inst_primary_opcode(inst)) {
 	case OP_STWU:
 	case OP_STBU:
 	case OP_STHU:
@@ -84,10 +85,10 @@ static bool store_updates_sp(unsigned int inst)
 	case OP_STFDU:
 		return true;
 	case OP_STD:	/* std or stdu */
-		return (inst & 3) == 1;
+		return (ppc_inst_val(inst) & 3) == 1;
 	case OP_31:
 		/* check minor opcode */
-		switch ((inst >> 1) & 0x3ff) {
+		switch ((ppc_inst_val(inst) >> 1) & 0x3ff) {
 		case OP_31_XOP_STDUX:
 		case OP_31_XOP_STWUX:
 		case OP_31_XOP_STBUX:
@@ -280,7 +281,7 @@ static bool bad_stack_expansion(struct pt_regs *regs, unsigned long address,
 	 * expand to 1MB without further checks.
 	 */
 	if (address + 0x100000 < vma->vm_end) {
-		unsigned int __user *nip = (unsigned int __user *)regs->nip;
+		struct ppc_inst __user *nip = (struct ppc_inst __user *)regs->nip;
 		/* get user regs even if this fault is in kernel mode */
 		struct pt_regs *uregs = current->thread.regs;
 		if (uregs == NULL)
@@ -303,13 +304,9 @@ static bool bad_stack_expansion(struct pt_regs *regs, unsigned long address,
 
 		if ((flags & FAULT_FLAG_WRITE) && (flags & FAULT_FLAG_USER) &&
 		    access_ok(nip, sizeof(*nip))) {
-			unsigned int inst;
-			int res;
+			struct ppc_inst inst;
 
-			pagefault_disable();
-			res = __get_user_inatomic(inst, nip);
-			pagefault_enable();
-			if (!res)
+			if (!probe_user_read_inst(&inst, nip))
 				return !store_updates_sp(inst);
 			*must_retry = true;
 		}
@@ -461,7 +458,7 @@ static int __do_page_fault(struct pt_regs *regs, unsigned long address,
 {
 	struct vm_area_struct * vma;
 	struct mm_struct *mm = current->mm;
-	unsigned int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
+	unsigned int flags = FAULT_FLAG_DEFAULT;
  	int is_exec = TRAP(regs) == 0x400;
 	int is_user = user_mode(regs);
 	int is_write = page_fault_is_write(error_code);
@@ -595,28 +592,18 @@ good_area:
 
 	major |= fault & VM_FAULT_MAJOR;
 
+	if (fault_signal_pending(fault, regs))
+		return user_mode(regs) ? 0 : SIGBUS;
+
 	/*
 	 * Handle the retry right now, the mmap_sem has been released in that
 	 * case.
 	 */
 	if (unlikely(fault & VM_FAULT_RETRY)) {
-		/* We retry only once */
 		if (flags & FAULT_FLAG_ALLOW_RETRY) {
-			/*
-			 * Clear FAULT_FLAG_ALLOW_RETRY to avoid any risk
-			 * of starvation.
-			 */
-			flags &= ~FAULT_FLAG_ALLOW_RETRY;
 			flags |= FAULT_FLAG_TRIED;
-			if (!fatal_signal_pending(current))
-				goto retry;
+			goto retry;
 		}
-
-		/*
-		 * User mode? Just return to handle the fatal exception otherwise
-		 * return to bad_page_fault
-		 */
-		return is_user ? 0 : SIGBUS;
 	}
 
 	up_read(&current->mm->mmap_sem);

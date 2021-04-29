@@ -25,10 +25,12 @@
 #define FIXMAP_PMD_TOP	507
 
 #ifndef __ASSEMBLY__
+#include <linux/rh_kabi.h>
 #include <linux/kernel.h>
-#include <asm/acpi.h>
+#include RH_KABI_FAKE_INCLUDE(<asm/acpi.h>)
 #include <asm/apicdef.h>
 #include <asm/page.h>
+#include RH_KABI_HIDE_INCLUDE(<asm/pgtable_types.h>)
 #ifdef CONFIG_X86_32
 #include <linux/threads.h>
 #include <asm/kmap_types.h>

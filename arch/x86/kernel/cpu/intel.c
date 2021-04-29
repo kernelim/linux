@@ -22,7 +22,9 @@
 #include <asm/cpu_device_id.h>
 #include <asm/cmdline.h>
 #include <asm/traps.h>
+#include <asm/resctrl.h>
 #include <asm/kdebug.h>
+#include <asm/numa.h>
 
 #ifdef CONFIG_X86_64
 #include <linux/topology.h>
@@ -356,6 +358,11 @@ static void early_init_intel(struct cpuinfo_x86 *c)
 	 */
 	if (detect_extended_topology_early(c) < 0)
 		detect_ht_early(c);
+}
+
+static void bsp_init_intel(struct cpuinfo_x86 *c)
+{
+	resctrl_cpu_detect(c);
 }
 
 #ifdef CONFIG_X86_32
@@ -1029,6 +1036,7 @@ static const struct cpu_dev intel_cpu_dev = {
 #endif
 	.c_detect_tlb	= intel_detect_tlb,
 	.c_early_init   = early_init_intel,
+	.c_bsp_init	= bsp_init_intel,
 	.c_init		= init_intel,
 	.c_bsp_resume	= intel_bsp_resume,
 	.c_x86_vendor	= X86_VENDOR_INTEL,
@@ -1107,7 +1115,7 @@ static void __init split_lock_setup(void)
 
 	rdmsrl(MSR_TEST_CTRL, msr_test_ctrl_cache);
 
-	if (!split_lock_verify_msr(sld_state == sld_off)) {
+	if (!split_lock_verify_msr(sld_state != sld_off)) {
 		pr_info("MSR access failed: Disabled\n");
 		return;
 	}
@@ -1133,7 +1141,7 @@ static void sld_update_msr(bool on)
 
 static void split_lock_init(void)
 {
-	split_lock_verify_msr(sld_state == sld_off);
+	split_lock_verify_msr(sld_state != sld_off);
 }
 
 /* RHEL8 only split_lock enable/disable sysfs file */

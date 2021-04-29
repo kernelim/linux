@@ -62,9 +62,9 @@ error:
 
 static void dh_free_data(struct dh *dh)
 {
-	kzfree(dh->key);
-	kzfree(dh->p);
-	kzfree(dh->g);
+	kfree_sensitive(dh->key);
+	kfree_sensitive(dh->p);
+	kfree_sensitive(dh->g);
 }
 
 struct dh_completion {
@@ -131,7 +131,7 @@ static void kdf_dealloc(struct kdf_sdesc *sdesc)
 	if (sdesc->shash.tfm)
 		crypto_free_shash(sdesc->shash.tfm);
 
-	kzfree(sdesc);
+	kfree_sensitive(sdesc);
 }
 
 /*
@@ -225,7 +225,7 @@ static int keyctl_dh_compute_kdf(struct kdf_sdesc *sdesc,
 		ret = -EFAULT;
 
 err:
-	kzfree(outbuf);
+	kfree_sensitive(outbuf);
 	return ret;
 }
 
@@ -400,11 +400,11 @@ long __keyctl_dh_compute(struct keyctl_dh_params __user *params,
 out6:
 	kpp_request_free(req);
 out5:
-	kzfree(outbuf);
+	kfree_sensitive(outbuf);
 out4:
 	crypto_free_kpp(tfm);
 out3:
-	kzfree(secret);
+	kfree_sensitive(secret);
 out2:
 	dh_free_data(&dh_inputs);
 out1:

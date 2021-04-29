@@ -1066,12 +1066,11 @@ __bpf_map__config_event(struct bpf_map *map,
 			struct parse_events_term *term,
 			struct evlist *evlist)
 {
-	struct evsel *evsel;
 	const struct bpf_map_def *def;
 	struct bpf_map_op *op;
 	const char *map_name = bpf_map__name(map);
+	struct evsel *evsel = evlist__find_evsel_by_str(evlist, term->val.str);
 
-	evsel = perf_evlist__find_evsel_by_str(evlist, term->val.str);
 	if (!evsel) {
 		pr_debug("Event (for '%s') '%s' doesn't exist\n",
 			 map_name, term->val.str);
@@ -1225,7 +1224,7 @@ bpf__obj_config_map(struct bpf_object *obj,
 out:
 	free(map_name);
 	if (!err)
-		key_scan_pos += strlen(map_opt);
+		*key_scan_pos += strlen(map_opt);
 	return err;
 }
 
@@ -1430,7 +1429,7 @@ apply_config_evsel_for_key(const char *name, int map_fd, void *pkey,
 		return -BPF_LOADER_ERRNO__OBJCONF_MAP_EVTINH;
 	}
 
-	if (perf_evsel__is_bpf_output(evsel))
+	if (evsel__is_bpf_output(evsel))
 		check_pass = true;
 	if (attr->type == PERF_TYPE_RAW)
 		check_pass = true;

@@ -31,10 +31,11 @@ int acpi_numa __initdata;
 
 int pxm_to_node(int pxm)
 {
-	if (pxm < 0)
+	if (pxm < 0 || pxm >= MAX_PXM_DOMAINS || numa_off)
 		return NUMA_NO_NODE;
 	return pxm_to_node_map[pxm];
 }
+EXPORT_SYMBOL(pxm_to_node);
 
 int node_to_pxm(int node)
 {
@@ -71,47 +72,6 @@ int acpi_map_pxm_to_node(int pxm)
 	return node;
 }
 EXPORT_SYMBOL(acpi_map_pxm_to_node);
-
-/**
- * acpi_map_pxm_to_online_node - Map proximity ID to online node
- * @pxm: ACPI proximity ID
- *
- * This is similar to acpi_map_pxm_to_node(), but always returns an online
- * node.  When the mapped node from a given proximity ID is offline, it
- * looks up the node distance table and returns the nearest online node.
- *
- * ACPI device drivers, which are called after the NUMA initialization has
- * completed in the kernel, can call this interface to obtain their device
- * NUMA topology from ACPI tables.  Such drivers do not have to deal with
- * offline nodes.  A node may be offline when a device proximity ID is
- * unique, SRAT memory entry does not exist, or NUMA is disabled, ex.
- * "numa=off" on x86.
- */
-int acpi_map_pxm_to_online_node(int pxm)
-{
-	int node, min_node;
-
-	node = acpi_map_pxm_to_node(pxm);
-
-	if (node == NUMA_NO_NODE)
-		node = 0;
-
-	min_node = node;
-	if (!node_online(node)) {
-		int min_dist = INT_MAX, dist, n;
-
-		for_each_online_node(n) {
-			dist = node_distance(node, n);
-			if (dist < min_dist) {
-				min_dist = dist;
-				min_node = n;
-			}
-		}
-	}
-
-	return min_node;
-}
-EXPORT_SYMBOL(acpi_map_pxm_to_online_node);
 
 static void __init
 acpi_table_print_srat_entry(struct acpi_subtable_header *header)
@@ -170,6 +130,36 @@ acpi_table_print_srat_entry(struct acpi_subtable_header *header)
 		}
 		break;
 
+	case ACPI_SRAT_TYPE_GENERIC_AFFINITY:
+	{
+		struct acpi_srat_generic_affinity *p =
+			(struct acpi_srat_generic_affinity *)header;
+
+		if (p->device_handle_type == 0) {
+			/*
+			 * For pci devices this may be the only place they
+			 * are assigned a proximity domain
+			 */
+			pr_debug("SRAT Generic Initiator(Seg:%u BDF:%u) in proximity domain %d %s\n",
+				 *(u16 *)(&p->device_handle[0]),
+				 *(u16 *)(&p->device_handle[2]),
+				 p->proximity_domain,
+				 (p->flags & ACPI_SRAT_GENERIC_AFFINITY_ENABLED) ?
+				"enabled" : "disabled");
+		} else {
+			/*
+			 * In this case we can rely on the device having a
+			 * proximity domain reference
+			 */
+			pr_debug("SRAT Generic Initiator(HID=%.8s UID=%.4s) in proximity domain %d %s\n",
+				(char *)(&p->device_handle[0]),
+				(char *)(&p->device_handle[8]),
+				p->proximity_domain,
+				(p->flags & ACPI_SRAT_GENERIC_AFFINITY_ENABLED) ?
+				"enabled" : "disabled");
+		}
+	}
+	break;
 	default:
 		pr_warn("Found unsupported SRAT entry (type = 0x%x)\n",
 			header->type);
@@ -270,7 +260,7 @@ acpi_numa_memory_affinity_init(struct acpi_srat_mem_affinity *ma)
 		pxm &= 0xff;
 
 	node = acpi_map_pxm_to_node(pxm);
-	if (node == NUMA_NO_NODE || node >= MAX_NUMNODES) {
+	if (node == NUMA_NO_NODE) {
 		pr_err("SRAT: Too many proximity domains.\n");
 		goto out_err_bad_srat;
 	}
@@ -331,8 +321,6 @@ acpi_parse_x2apic_affinity(union acpi_subtable_headers *header,
 	struct acpi_srat_x2apic_cpu_affinity *processor_affinity;
 
 	processor_affinity = (struct acpi_srat_x2apic_cpu_affinity *)header;
-	if (!processor_affinity)
-		return -EINVAL;
 
 	acpi_table_print_srat_entry(&header->common);
 
@@ -349,8 +337,6 @@ acpi_parse_processor_affinity(union acpi_subtable_headers *header,
 	struct acpi_srat_cpu_affinity *processor_affinity;
 
 	processor_affinity = (struct acpi_srat_cpu_affinity *)header;
-	if (!processor_affinity)
-		return -EINVAL;
 
 	acpi_table_print_srat_entry(&header->common);
 
@@ -367,8 +353,6 @@ acpi_parse_gicc_affinity(union acpi_subtable_headers *header,
 	struct acpi_srat_gicc_affinity *processor_affinity;
 
 	processor_affinity = (struct acpi_srat_gicc_affinity *)header;
-	if (!processor_affinity)
-		return -EINVAL;
 
 	acpi_table_print_srat_entry(&header->common);
 
@@ -377,6 +361,41 @@ acpi_parse_gicc_affinity(union acpi_subtable_headers *header,
 
 	return 0;
 }
+
+#if defined(CONFIG_X86) || defined(CONFIG_ARM64)
+static int __init
+acpi_parse_gi_affinity(union acpi_subtable_headers *header,
+		       const unsigned long end)
+{
+	struct acpi_srat_generic_affinity *gi_affinity;
+	int node;
+
+	gi_affinity = (struct acpi_srat_generic_affinity *)header;
+	if (!gi_affinity)
+		return -EINVAL;
+	acpi_table_print_srat_entry(&header->common);
+
+	if (!(gi_affinity->flags & ACPI_SRAT_GENERIC_AFFINITY_ENABLED))
+		return -EINVAL;
+
+	node = acpi_map_pxm_to_node(gi_affinity->proximity_domain);
+	if (node == NUMA_NO_NODE || node >= MAX_NUMNODES) {
+		pr_err("SRAT: Too many proximity domains.\n");
+		return -EINVAL;
+	}
+	node_set(node, numa_nodes_parsed);
+	node_set_state(node, N_GENERIC_INITIATOR);
+
+	return 0;
+}
+#else
+static int __init
+acpi_parse_gi_affinity(union acpi_subtable_headers *header,
+		       const unsigned long end)
+{
+	return 0;
+}
+#endif /* defined(CONFIG_X86) || defined (CONFIG_ARM64) */
 
 static int __initdata parsed_numa_memblks;
 
@@ -387,8 +406,6 @@ acpi_parse_memory_affinity(union acpi_subtable_headers * header,
 	struct acpi_srat_mem_affinity *memory_affinity;
 
 	memory_affinity = (struct acpi_srat_mem_affinity *)header;
-	if (!memory_affinity)
-		return -EINVAL;
 
 	acpi_table_print_srat_entry(&header->common);
 
@@ -433,7 +450,7 @@ int __init acpi_numa_init(void)
 
 	/* SRAT: System Resource Affinity Table */
 	if (!acpi_table_parse(ACPI_SIG_SRAT, acpi_parse_srat)) {
-		struct acpi_subtable_proc srat_proc[3];
+		struct acpi_subtable_proc srat_proc[4];
 
 		memset(srat_proc, 0, sizeof(srat_proc));
 		srat_proc[0].id = ACPI_SRAT_TYPE_CPU_AFFINITY;
@@ -442,6 +459,8 @@ int __init acpi_numa_init(void)
 		srat_proc[1].handler = acpi_parse_x2apic_affinity;
 		srat_proc[2].id = ACPI_SRAT_TYPE_GICC_AFFINITY;
 		srat_proc[2].handler = acpi_parse_gicc_affinity;
+		srat_proc[3].id = ACPI_SRAT_TYPE_GENERIC_AFFINITY;
+		srat_proc[3].handler = acpi_parse_gi_affinity;
 
 		acpi_table_parse_entries_array(ACPI_SIG_SRAT,
 					sizeof(struct acpi_table_srat),
@@ -484,6 +503,6 @@ int acpi_get_node(acpi_handle handle)
 
 	pxm = acpi_get_pxm(handle);
 
-	return acpi_map_pxm_to_node(pxm);
+	return pxm_to_node(pxm);
 }
 EXPORT_SYMBOL(acpi_get_node);

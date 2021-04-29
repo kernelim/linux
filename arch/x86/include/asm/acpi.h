@@ -23,6 +23,9 @@
  *
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
+
+#include <linux/rh_kabi.h>
+
 #include <acpi/pdc_intel.h>
 
 #include <asm/numa.h>
@@ -30,7 +33,7 @@
 #include <asm/processor.h>
 #include <asm/mmu.h>
 #include <asm/mpspec.h>
-#include <asm/realmode.h>
+#include RH_KABI_FAKE_INCLUDE(<asm/realmode.h>)
 #include <asm/x86_init.h>
 
 #ifdef CONFIG_ACPI_APEI
@@ -79,10 +82,7 @@ static inline void acpi_disable_pci(void)
 extern int (*acpi_suspend_lowlevel)(void);
 
 /* Physical address to resume after wakeup */
-static inline unsigned long acpi_get_wakeup_address(void)
-{
-	return ((unsigned long)(real_mode_header->wakeup_start));
-}
+unsigned long acpi_get_wakeup_address(void);
 
 /*
  * Check if the CPU can handle C2 and deeper
@@ -170,8 +170,6 @@ static inline u64 x86_default_get_root_pointer(void)
 #ifdef CONFIG_ACPI_NUMA
 extern int x86_acpi_numa_init(void);
 #endif /* CONFIG_ACPI_NUMA */
-
-#define acpi_unlazy_tlb(x)	leave_mm(x)
 
 #ifdef CONFIG_ACPI_APEI
 static inline pgprot_t arch_apei_get_mem_attribute(phys_addr_t addr)

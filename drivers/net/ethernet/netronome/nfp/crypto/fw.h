@@ -9,6 +9,14 @@
 #define NFP_NET_CRYPTO_OP_TLS_1_2_AES_GCM_128_ENC	0
 #define NFP_NET_CRYPTO_OP_TLS_1_2_AES_GCM_128_DEC	1
 
+struct nfp_net_tls_resync_req {
+	__be32 fw_handle[2];
+	__be32 tcp_seq;
+	u8 l3_offset;
+	u8 l4_offset;
+	u8 resv[2];
+};
+
 struct nfp_crypto_reply_simple {
 	struct nfp_ccm_hdr hdr;
 	__be32 error;
@@ -31,6 +39,8 @@ struct nfp_crypto_req_add_front {
 	u8 key_len;
 	__be16 ipver_vlan __packed;
 	u8 l4_proto;
+#define NFP_NET_TLS_NON_ADDR_KEY_LEN	8
+	u8 l3_addrs[0];
 };
 
 struct nfp_crypto_req_add_back {

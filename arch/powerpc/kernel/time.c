@@ -187,6 +187,8 @@ static unsigned long read_spurr(unsigned long tb)
 
 #ifdef CONFIG_PPC_SPLPAR
 
+#include <asm/dtl.h>
+
 /*
  * Scan the dispatch trace log and count up the stolen time.
  * Should be called with interrupts disabled.

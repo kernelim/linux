@@ -17,6 +17,8 @@ struct linux_binprm;
 struct path;
 struct mount;
 struct shrink_control;
+struct fs_context;
+struct user_namespace;
 
 /*
  * block_dev.c
@@ -40,7 +42,6 @@ static inline int __sync_blockdev(struct block_device *bdev, int wait)
 /*
  * buffer.c
  */
-extern void guard_bio_eod(struct bio *bio);
 extern int __block_write_begin_int(struct page *page, loff_t pos, unsigned len,
 		get_block_t *get_block, struct iomap *iomap);
 
@@ -48,6 +49,15 @@ extern int __block_write_begin_int(struct page *page, loff_t pos, unsigned len,
  * char_dev.c
  */
 extern void __init chrdev_init(void);
+
+/*
+ * fs_context.c
+ */
+extern const struct fs_context_operations legacy_fs_context_ops;
+extern int parse_monolithic_mount_data(struct fs_context *, void *);
+extern void fc_drop_locked(struct fs_context *);
+extern void vfs_clean_context(struct fs_context *fc);
+extern int finish_clean_context(struct fs_context *fc);
 
 /*
  * namei.c
@@ -85,6 +95,7 @@ extern int __mnt_want_write_file(struct file *);
 extern void __mnt_drop_write(struct vfsmount *);
 extern void __mnt_drop_write_file(struct file *);
 
+extern void dissolve_on_fput(struct vfsmount *);
 /*
  * fs_struct.c
  */
@@ -99,11 +110,10 @@ extern struct file *alloc_empty_file_noaccount(int, const struct cred *);
 /*
  * super.c
  */
-extern int do_remount_sb(struct super_block *, int, void *, int);
+extern int reconfigure_super(struct fs_context *);
 extern bool trylock_super(struct super_block *sb);
-extern struct dentry *mount_fs(struct file_system_type *,
-			       int, const char *, void *);
 extern struct super_block *user_get_super(dev_t);
+extern bool mount_capable(struct fs_context *);
 
 /*
  * open.c
@@ -122,7 +132,6 @@ extern struct file *do_file_open_root(struct dentry *, struct vfsmount *,
 extern int build_open_flags(int flags, umode_t mode, struct open_flags *op);
 
 long do_sys_ftruncate(unsigned int fd, loff_t length, int small);
-long do_faccessat(int dfd, const char __user *filename, int mode);
 int do_fchmodat(int dfd, const char __user *filename, umode_t mode);
 int do_fchownat(int dfd, const char __user *filename, uid_t user, gid_t group,
 		int flag);

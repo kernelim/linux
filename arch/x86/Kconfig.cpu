@@ -474,3 +474,8 @@ config CPU_SUP_UMC_32
 	  CPU might render the kernel unbootable.
 
 	  If unsure, say N.
+
+config AS_TPAUSE
+	bool $(as-instr,tpause %ecx)
+	---help---
+	  Supported by RHEL8.4 and greater

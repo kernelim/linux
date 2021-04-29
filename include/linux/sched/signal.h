@@ -10,6 +10,8 @@
 #include <linux/cred.h>
 #include <linux/rh_kabi.h>
 #include <linux/posix-timers.h>
+#include RH_KABI_HIDE_INCLUDE(<linux/mm_types.h>)
+#include RH_KABI_HIDE_INCLUDE(<asm/ptrace.h>)
 
 /*
  * Types defining task->signal and task->sighand and APIs using them:
@@ -384,6 +386,20 @@ static inline int signal_pending_state(long state, struct task_struct *p)
 }
 
 /*
+ * This should only be used in fault handlers to decide whether we
+ * should stop the current fault routine to handle the signals
+ * instead, especially with the case where we've got interrupted with
+ * a VM_FAULT_RETRY.
+ */
+static inline bool fault_signal_pending(vm_fault_t fault_flags,
+					struct pt_regs *regs)
+{
+	return unlikely((fault_flags & VM_FAULT_RETRY) &&
+			(fatal_signal_pending(current) ||
+			 (user_mode(regs) && signal_pending(current))));
+}
+
+/*
  * Reevaluate whether the task has signals pending delivery.
  * Wake the task if so.
  * This is required every time the blocked sigset_t changes.
@@ -649,6 +665,8 @@ static inline int thread_group_empty(struct task_struct *p)
 
 #define delay_group_leader(p) \
 		(thread_group_leader(p) && !thread_group_empty(p))
+
+extern bool thread_group_exited(struct pid *pid);
 
 extern struct sighand_struct *__lock_task_sighand(struct task_struct *tsk,
 							unsigned long *flags);

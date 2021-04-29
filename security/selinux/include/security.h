@@ -41,10 +41,11 @@
 #define POLICYDB_VERSION_XPERMS_IOCTL	30
 #define POLICYDB_VERSION_INFINIBAND		31
 #define POLICYDB_VERSION_GLBLUB		32
+#define POLICYDB_VERSION_COMP_FTRANS	33 /* compressed filename transitions */
 
 /* Range of policy versions we understand*/
 #define POLICYDB_VERSION_MIN   POLICYDB_VERSION_BASE
-#define POLICYDB_VERSION_MAX   POLICYDB_VERSION_GLBLUB
+#define POLICYDB_VERSION_MAX   POLICYDB_VERSION_COMP_FTRANS
 
 /* Mask for just the mount related flags */
 #define SE_MNTMASK	0x0f
@@ -64,11 +65,11 @@
 /* RHEL8-only */
 #define SE_SBGENFS_SYMLINKS	0x8000
 
-#define CONTEXT_STR	"context="
-#define FSCONTEXT_STR	"fscontext="
-#define ROOTCONTEXT_STR	"rootcontext="
-#define DEFCONTEXT_STR	"defcontext="
-#define LABELSUPP_STR "seclabel"
+#define CONTEXT_STR	"context"
+#define FSCONTEXT_STR	"fscontext"
+#define ROOTCONTEXT_STR	"rootcontext"
+#define DEFCONTEXT_STR	"defcontext"
+#define SECLABEL_STR "seclabel"
 
 struct netlbl_lsm_secattr;
 
@@ -111,6 +112,10 @@ struct selinux_state {
 	bool checkreqprot;
 	bool initialized;
 	bool policycap[__POLICYDB_CAPABILITY_MAX];
+
+	struct page *status_page;
+	struct mutex status_lock;
+
 	struct selinux_avc *avc;
 	struct selinux_ss *ss;
 } __randomize_layout;

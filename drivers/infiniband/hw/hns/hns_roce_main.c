@@ -716,6 +716,8 @@ int hns_roce_init(struct hns_roce_dev *hr_dev)
 	int ret;
 	struct device *dev = hr_dev->dev;
 
+	mark_hardware_unsupported(DRV_NAME);
+
 	if (hr_dev->hw->reset) {
 		ret = hr_dev->hw->reset(hr_dev, true);
 		if (ret) {

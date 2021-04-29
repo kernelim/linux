@@ -219,7 +219,7 @@ static int atmel_ac97c_playback_prepare(struct snd_pcm_substream *substream)
 	switch (runtime->format) {
 	case SNDRV_PCM_FORMAT_S16_LE:
 		break;
-	case SNDRV_PCM_FORMAT_S16_BE: /* fall through */
+	case SNDRV_PCM_FORMAT_S16_BE:
 		word &= ~(AC97C_CMR_CEM_LITTLE);
 		break;
 	default:
@@ -301,7 +301,7 @@ static int atmel_ac97c_capture_prepare(struct snd_pcm_substream *substream)
 	switch (runtime->format) {
 	case SNDRV_PCM_FORMAT_S16_LE:
 		break;
-	case SNDRV_PCM_FORMAT_S16_BE: /* fall through */
+	case SNDRV_PCM_FORMAT_S16_BE:
 		word &= ~(AC97C_CMR_CEM_LITTLE);
 		break;
 	default:
@@ -477,12 +477,12 @@ static irqreturn_t atmel_ac97c_interrupt(int irq, void *dev)
 		struct snd_pcm_runtime *runtime;
 		int offset, next_period, block_size;
 		dev_dbg(&chip->pdev->dev, "channel A event%s%s%s%s%s%s\n",
-				casr & AC97C_CSR_OVRUN   ? " OVRUN"   : "",
-				casr & AC97C_CSR_RXRDY   ? " RXRDY"   : "",
-				casr & AC97C_CSR_UNRUN   ? " UNRUN"   : "",
-				casr & AC97C_CSR_TXEMPTY ? " TXEMPTY" : "",
-				casr & AC97C_CSR_TXRDY   ? " TXRDY"   : "",
-				!casr                    ? " NONE"    : "");
+			(casr & AC97C_CSR_OVRUN)   ? " OVRUN"   : "",
+			(casr & AC97C_CSR_RXRDY)   ? " RXRDY"   : "",
+			(casr & AC97C_CSR_UNRUN)   ? " UNRUN"   : "",
+			(casr & AC97C_CSR_TXEMPTY) ? " TXEMPTY" : "",
+			(casr & AC97C_CSR_TXRDY)   ? " TXRDY"   : "",
+			!casr                      ? " NONE"    : "");
 		if ((casr & camr) & AC97C_CSR_ENDTX) {
 			runtime = chip->playback_substream->runtime;
 			block_size = frames_to_bytes(runtime, runtime->period_size);
@@ -523,11 +523,11 @@ static irqreturn_t atmel_ac97c_interrupt(int irq, void *dev)
 
 	if (sr & AC97C_SR_COEVT) {
 		dev_info(&chip->pdev->dev, "codec channel event%s%s%s%s%s\n",
-				cosr & AC97C_CSR_OVRUN   ? " OVRUN"   : "",
-				cosr & AC97C_CSR_RXRDY   ? " RXRDY"   : "",
-				cosr & AC97C_CSR_TXEMPTY ? " TXEMPTY" : "",
-				cosr & AC97C_CSR_TXRDY   ? " TXRDY"   : "",
-				!cosr                    ? " NONE"    : "");
+			 (cosr & AC97C_CSR_OVRUN)   ? " OVRUN"   : "",
+			 (cosr & AC97C_CSR_RXRDY)   ? " RXRDY"   : "",
+			 (cosr & AC97C_CSR_TXEMPTY) ? " TXEMPTY" : "",
+			 (cosr & AC97C_CSR_TXRDY)   ? " TXRDY"   : "",
+			 !cosr                      ? " NONE"    : "");
 		retval = IRQ_HANDLED;
 	}
 

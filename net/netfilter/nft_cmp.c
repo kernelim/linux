@@ -13,6 +13,7 @@
 #include <linux/module.h>
 #include <linux/netlink.h>
 #include <linux/netfilter.h>
+#include <linux/if_arp.h>
 #include <linux/netfilter/nf_tables.h>
 #include <net/netfilter/nf_tables_core.h>
 #include <net/netfilter/nf_tables_offload.h>
@@ -125,16 +126,21 @@ static int __nft_cmp_offload(struct nft_offload_ctx *ctx,
 	u8 *mask = (u8 *)&flow->match.mask;
 	u8 *key = (u8 *)&flow->match.key;
 
-	if (priv->op != NFT_CMP_EQ || reg->len != priv->len)
+	if (priv->op != NFT_CMP_EQ || priv->len > reg->len)
 		return -EOPNOTSUPP;
 
-	memcpy(key + reg->offset, &priv->data, priv->len);
-	memcpy(mask + reg->offset, &reg->mask, priv->len);
+	memcpy(key + reg->offset, &priv->data, reg->len);
+	memcpy(mask + reg->offset, &reg->mask, reg->len);
 
 	flow->match.dissector.used_keys |= BIT(reg->key);
 	flow->match.dissector.offset[reg->key] = reg->base_offset;
 
-	nft_offload_update_dependency(ctx, &priv->data, priv->len);
+	if (reg->key == FLOW_DISSECTOR_KEY_META &&
+	    reg->offset == offsetof(struct nft_flow_key, meta.ingress_iftype) &&
+	    nft_reg_load16(priv->data.data) != ARPHRD_ETHER)
+		return -EOPNOTSUPP;
+
+	nft_offload_update_dependency(ctx, &priv->data, reg->len);
 
 	return 0;
 }

@@ -2365,6 +2365,7 @@ static void ath11k_qmi_driver_event_work(struct work_struct *work)
 			break;
 		case ATH11K_QMI_EVENT_FW_READY:
 			if (test_bit(ATH11K_FLAG_REGISTERED, &ab->dev_flags)) {
+				ath11k_hal_dump_srng_stats(ab);
 				queue_work(ab->workqueue, &ab->restart_work);
 				break;
 			}
@@ -2418,6 +2419,7 @@ int ath11k_qmi_init_service(struct ath11k_base *ab)
 			     ATH11K_QMI_WLFW_SERVICE_INS_ID_V01);
 	if (ret < 0) {
 		ath11k_warn(ab, "failed to add qmi lookup\n");
+		destroy_workqueue(ab->qmi.event_wq);
 		return ret;
 	}
 

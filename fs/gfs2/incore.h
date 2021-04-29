@@ -44,6 +44,10 @@ struct gfs2_log_header_host {
 	u32 lh_flags;		/* GFS2_LOG_HEAD_... */
 	u32 lh_tail;		/* Block number of log tail */
 	u32 lh_blkno;
+
+	s64 lh_local_total;
+	s64 lh_local_free;
+	s64 lh_local_dinodes;
 };
 
 /*
@@ -600,10 +604,10 @@ struct gfs2_args {
 	unsigned int ar_rgrplvb:1;		/* use lvbs for rgrp info */
 	unsigned int ar_loccookie:1;		/* use location based readdir
 						   cookies */
-	int ar_commit;				/* Commit interval */
-	int ar_statfs_quantum;			/* The fast statfs interval */
-	int ar_quota_quantum;			/* The quota interval */
-	int ar_statfs_percent;			/* The % change to force sync */
+	s32 ar_commit;				/* Commit interval */
+	s32 ar_statfs_quantum;			/* The fast statfs interval */
+	s32 ar_quota_quantum;			/* The quota interval */
+	s32 ar_statfs_percent;			/* The % change to force sync */
 };
 
 struct gfs2_tune {
@@ -710,6 +714,13 @@ struct gfs2_pcpu_lkstats {
 	struct gfs2_lkstats lkstats[10];
 };
 
+/* List of local (per node) statfs inodes */
+struct lcl_statfs_inode {
+	struct list_head si_list;
+	struct inode *si_sc_inode;
+	unsigned int si_jid; /* journal id this statfs inode corresponds to */
+};
+
 struct gfs2_sbd {
 	struct super_block *sd_vfs;
 	struct gfs2_pcpu_lkstats __percpu *sd_lkstats;
@@ -759,6 +770,7 @@ struct gfs2_sbd {
 	struct inode *sd_jindex;
 	struct inode *sd_statfs_inode;
 	struct inode *sd_sc_inode;
+	struct list_head sd_sc_inodes_list;
 	struct inode *sd_qc_inode;
 	struct inode *sd_rindex;
 	struct inode *sd_quota_inode;

@@ -28,9 +28,11 @@
 #include <linux/percpu.h>
 #include <linux/export.h>
 #include <linux/irq_work.h>
+#include <linux/extable.h>
 
 #include <asm/machdep.h>
 #include <asm/mce.h>
+#include <asm/extable.h>
 
 static DEFINE_PER_CPU(int, mce_nest_count);
 static DEFINE_PER_CPU(struct machine_check_event[MAX_MC_EVT], mce_event);
@@ -116,6 +118,7 @@ void save_mce_event(struct pt_regs *regs, long handled,
 	mce->srr1 = regs->msr;
 	mce->gpr3 = regs->gpr[3];
 	mce->in_use = 1;
+	mce->cpu = get_paca()->paca_index;
 
 	/* Mark it recovered if we have handled it and MSR(RI=1). */
 	if (handled && (regs->msr & MSR_RI))
@@ -125,6 +128,8 @@ void save_mce_event(struct pt_regs *regs, long handled,
 
 	mce->initiator = mce_err->initiator;
 	mce->severity = mce_err->severity;
+	mce->sync_error = mce_err->sync_error;
+	mce->error_class = mce_err->error_class;
 
 	/*
 	 * Populate the mce error_type and type-specific error_type.
@@ -260,6 +265,19 @@ void machine_check_queue_event(void)
 	/* Queue irq work to process this event later. */
 	irq_work_queue(&mce_event_process_work);
 }
+
+void mce_common_process_ue(struct pt_regs *regs,
+			   struct mce_error_info *mce_err)
+{
+	const struct exception_table_entry *entry;
+
+	entry = search_kernel_exception_table(regs->nip);
+	if (entry) {
+		mce_err->ignore_event = true;
+		regs->nip = extable_fixup(entry);
+	}
+}
+
 /*
  * process pending MCE event from the mce event queue. This function will be
  * called during syscall exit.
@@ -335,7 +353,11 @@ static void machine_check_process_queued_event(struct irq_work *work)
 void machine_check_print_event_info(struct machine_check_event *evt,
 				    bool user_mode, bool in_guest)
 {
-	const char *level, *sevstr, *subtype;
+	const char *level, *sevstr, *subtype, *err_type, *initiator;
+	uint64_t ea = 0, pa = 0;
+	int n = 0;
+	char dar_str[50];
+	char pa_str[50];
 	static const char *mc_ue_types[] = {
 		"Indeterminate",
 		"Instruction fetch",
@@ -361,6 +383,7 @@ void machine_check_print_event_info(struct machine_check_event *evt,
 	static const char *mc_user_types[] = {
 		"Indeterminate",
 		"tlbie(l) invalid",
+		"scv invalid",
 	};
 	static const char *mc_ra_types[] = {
 		"Indeterminate",
@@ -382,6 +405,13 @@ void machine_check_print_event_info(struct machine_check_event *evt,
 		"Store (timeout)",
 		"Page table walk Load/Store (timeout)",
 	};
+	static const char *mc_error_class[] = {
+		"Unknown",
+		"Hardware error",
+		"Probable Hardware error (some chance of software cause)",
+		"Software error",
+		"Probable Software error (some chance of hardware cause)",
+	};
 
 	/* Print things out */
 	if (evt->version != MCE_V1) {
@@ -396,9 +426,9 @@ void machine_check_print_event_info(struct machine_check_event *evt,
 		break;
 	case MCE_SEV_WARNING:
 		level = KERN_WARNING;
-		sevstr = "";
+		sevstr = "Warning";
 		break;
-	case MCE_SEV_ERROR_SYNC:
+	case MCE_SEV_SEVERE:
 		level = KERN_ERR;
 		sevstr = "Severe";
 		break;
@@ -409,101 +439,139 @@ void machine_check_print_event_info(struct machine_check_event *evt,
 		break;
 	}
 
-	printk("%s%s Machine check interrupt [%s]\n", level, sevstr,
-	       evt->disposition == MCE_DISPOSITION_RECOVERED ?
-	       "Recovered" : "Not recovered");
-
-	if (in_guest) {
-		printk("%s  Guest NIP: %016llx\n", level, evt->srr0);
-	} else if (user_mode) {
-		printk("%s  NIP: [%016llx] PID: %d Comm: %s\n", level,
-			evt->srr0, current->pid, current->comm);
-	} else {
-		printk("%s  NIP [%016llx]: %pS\n", level, evt->srr0,
-		       (void *)evt->srr0);
+	switch(evt->initiator) {
+	case MCE_INITIATOR_CPU:
+		initiator = "CPU";
+		break;
+	case MCE_INITIATOR_PCI:
+		initiator = "PCI";
+		break;
+	case MCE_INITIATOR_ISA:
+		initiator = "ISA";
+		break;
+	case MCE_INITIATOR_MEMORY:
+		initiator = "Memory";
+		break;
+	case MCE_INITIATOR_POWERMGM:
+		initiator = "Power Management";
+		break;
+	case MCE_INITIATOR_UNKNOWN:
+	default:
+		initiator = "Unknown";
+		break;
 	}
 
-	printk("%s  Initiator: %s\n", level,
-	       evt->initiator == MCE_INITIATOR_CPU ? "CPU" : "Unknown");
 	switch (evt->error_type) {
 	case MCE_ERROR_TYPE_UE:
+		err_type = "UE";
 		subtype = evt->u.ue_error.ue_error_type <
 			ARRAY_SIZE(mc_ue_types) ?
 			mc_ue_types[evt->u.ue_error.ue_error_type]
 			: "Unknown";
-		printk("%s  Error type: UE [%s]\n", level, subtype);
 		if (evt->u.ue_error.effective_address_provided)
-			printk("%s    Effective address: %016llx\n",
-			       level, evt->u.ue_error.effective_address);
+			ea = evt->u.ue_error.effective_address;
 		if (evt->u.ue_error.physical_address_provided)
-			printk("%s    Physical address:  %016llx\n",
-			       level, evt->u.ue_error.physical_address);
+			pa = evt->u.ue_error.physical_address;
 		break;
 	case MCE_ERROR_TYPE_SLB:
+		err_type = "SLB";
 		subtype = evt->u.slb_error.slb_error_type <
 			ARRAY_SIZE(mc_slb_types) ?
 			mc_slb_types[evt->u.slb_error.slb_error_type]
 			: "Unknown";
-		printk("%s  Error type: SLB [%s]\n", level, subtype);
 		if (evt->u.slb_error.effective_address_provided)
-			printk("%s    Effective address: %016llx\n",
-			       level, evt->u.slb_error.effective_address);
+			ea = evt->u.slb_error.effective_address;
 		break;
 	case MCE_ERROR_TYPE_ERAT:
+		err_type = "ERAT";
 		subtype = evt->u.erat_error.erat_error_type <
 			ARRAY_SIZE(mc_erat_types) ?
 			mc_erat_types[evt->u.erat_error.erat_error_type]
 			: "Unknown";
-		printk("%s  Error type: ERAT [%s]\n", level, subtype);
 		if (evt->u.erat_error.effective_address_provided)
-			printk("%s    Effective address: %016llx\n",
-			       level, evt->u.erat_error.effective_address);
+			ea = evt->u.erat_error.effective_address;
 		break;
 	case MCE_ERROR_TYPE_TLB:
+		err_type = "TLB";
 		subtype = evt->u.tlb_error.tlb_error_type <
 			ARRAY_SIZE(mc_tlb_types) ?
 			mc_tlb_types[evt->u.tlb_error.tlb_error_type]
 			: "Unknown";
-		printk("%s  Error type: TLB [%s]\n", level, subtype);
 		if (evt->u.tlb_error.effective_address_provided)
-			printk("%s    Effective address: %016llx\n",
-			       level, evt->u.tlb_error.effective_address);
+			ea = evt->u.tlb_error.effective_address;
 		break;
 	case MCE_ERROR_TYPE_USER:
+		err_type = "User";
 		subtype = evt->u.user_error.user_error_type <
 			ARRAY_SIZE(mc_user_types) ?
 			mc_user_types[evt->u.user_error.user_error_type]
 			: "Unknown";
-		printk("%s  Error type: User [%s]\n", level, subtype);
 		if (evt->u.user_error.effective_address_provided)
-			printk("%s    Effective address: %016llx\n",
-			       level, evt->u.user_error.effective_address);
+			ea = evt->u.user_error.effective_address;
 		break;
 	case MCE_ERROR_TYPE_RA:
+		err_type = "Real address";
 		subtype = evt->u.ra_error.ra_error_type <
 			ARRAY_SIZE(mc_ra_types) ?
 			mc_ra_types[evt->u.ra_error.ra_error_type]
 			: "Unknown";
-		printk("%s  Error type: Real address [%s]\n", level, subtype);
 		if (evt->u.ra_error.effective_address_provided)
-			printk("%s    Effective address: %016llx\n",
-			       level, evt->u.ra_error.effective_address);
+			ea = evt->u.ra_error.effective_address;
 		break;
 	case MCE_ERROR_TYPE_LINK:
+		err_type = "Link";
 		subtype = evt->u.link_error.link_error_type <
 			ARRAY_SIZE(mc_link_types) ?
 			mc_link_types[evt->u.link_error.link_error_type]
 			: "Unknown";
-		printk("%s  Error type: Link [%s]\n", level, subtype);
 		if (evt->u.link_error.effective_address_provided)
-			printk("%s    Effective address: %016llx\n",
-			       level, evt->u.link_error.effective_address);
+			ea = evt->u.link_error.effective_address;
+		break;
+	case MCE_ERROR_TYPE_DCACHE:
+		err_type = "D-Cache";
+		subtype = "Unknown";
+		break;
+	case MCE_ERROR_TYPE_ICACHE:
+		err_type = "I-Cache";
+		subtype = "Unknown";
 		break;
 	default:
 	case MCE_ERROR_TYPE_UNKNOWN:
-		printk("%s  Error type: Unknown\n", level);
+		err_type = "Unknown";
+		subtype = "";
 		break;
 	}
+
+	dar_str[0] = pa_str[0] = '\0';
+	if (ea && evt->srr0 != ea) {
+		/* Load/Store address */
+		n = sprintf(dar_str, "DAR: %016llx ", ea);
+		if (pa)
+			sprintf(dar_str + n, "paddr: %016llx ", pa);
+	} else if (pa) {
+		sprintf(pa_str, " paddr: %016llx", pa);
+	}
+
+	printk("%sMCE: CPU%d: machine check (%s) %s %s %s %s[%s]\n",
+		level, evt->cpu, sevstr, in_guest ? "Guest" : "Host",
+		err_type, subtype, dar_str,
+		evt->disposition == MCE_DISPOSITION_RECOVERED ?
+		"Recovered" : "Not recovered");
+
+	if (in_guest || user_mode) {
+		printk("%sMCE: CPU%d: PID: %d Comm: %s %sNIP: [%016llx]%s\n",
+			level, evt->cpu, current->pid, current->comm,
+			in_guest ? "Guest " : "", evt->srr0, pa_str);
+	} else {
+		printk("%sMCE: CPU%d: NIP: [%016llx] %pS%s\n",
+			level, evt->cpu, evt->srr0, (void *)evt->srr0, pa_str);
+	}
+
+	printk("%sMCE: CPU%d: Initiator %s\n", level, evt->cpu, initiator);
+
+	subtype = evt->error_class < ARRAY_SIZE(mc_error_class) ?
+		mc_error_class[evt->error_class] : "Unknown";
+	printk("%sMCE: CPU%d: %s\n", level, evt->cpu, subtype);
 }
 EXPORT_SYMBOL_GPL(machine_check_print_event_info);
 
@@ -636,7 +704,7 @@ long hmi_exception_realmode(struct pt_regs *regs)
 {	
 	int ret;
 
-	__this_cpu_inc(irq_stat.hmi_exceptions);
+	local_paca->hmi_irqs++;
 
 	ret = hmi_handle_debugtrig(regs);
 	if (ret >= 0)

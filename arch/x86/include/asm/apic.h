@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #ifndef _ASM_X86_APIC_H
 #define _ASM_X86_APIC_H
 
@@ -256,6 +257,7 @@ static inline u64 native_x2apic_icr_read(void)
 
 extern int x2apic_mode;
 extern int x2apic_phys;
+extern void __init x2apic_set_max_apicid(u32 apicid);
 extern void __init check_x2apic(void);
 extern void x2apic_setup(void);
 static inline int x2apic_enabled(void)
@@ -277,7 +279,6 @@ struct irq_data;
 
 /*
  * Copyright 2004 James Cleverdon, IBM.
- * Subject to the GNU Public License, v.2
  *
  * Generic APIC sub-arch data struct.
  *
@@ -306,7 +307,8 @@ struct apic {
 	/* dest_logical is used by the IPI functions */
 	u32	dest_logical;
 	u32	disable_esr;
-	u32	irq_delivery_mode;
+
+	RH_KABI_REPLACE(u32 irq_delivery_mode, enum apic_delivery_modes delivery_mode)
 	u32	irq_dest_mode;
 
 	u32	(*calc_dest_apicid)(unsigned int cpu);
@@ -478,8 +480,6 @@ static inline unsigned default_get_apic_id(unsigned long x)
 
 #ifdef CONFIG_X86_64
 extern void apic_send_IPI_self(int vector);
-
-DECLARE_PER_CPU(int, x2apic_extra_bits);
 #endif
 
 extern void generic_bigsmp_probe(void);
@@ -553,6 +553,12 @@ static inline void exiting_ack_irq(void)
 	ack_APIC_irq();
 	irq_exit();
 }
+
+struct msi_msg;
+struct irq_cfg;
+
+extern void __irq_msi_compose_msg(struct irq_cfg *cfg, struct msi_msg *msg,
+				  bool dmar);
 
 extern void ioapic_zap_locks(void);
 

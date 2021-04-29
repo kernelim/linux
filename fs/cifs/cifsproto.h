@@ -45,25 +45,25 @@ extern int smb_send(struct TCP_Server_Info *, struct smb_hdr *,
 			unsigned int /* length */);
 extern unsigned int _get_xid(void);
 extern void _free_xid(unsigned int);
-#define get_xid()						\
-({								\
+#define get_xid()							\
+({									\
 	unsigned int __xid = _get_xid();				\
-	cifs_dbg(FYI, "CIFS VFS: in %s as Xid: %u with uid: %d\n",	\
+	cifs_dbg(FYI, "VFS: in %s as Xid: %u with uid: %d\n",		\
 		 __func__, __xid,					\
 		 from_kuid(&init_user_ns, current_fsuid()));		\
-	trace_smb3_enter(__xid, __func__);			\
-	__xid;							\
+	trace_smb3_enter(__xid, __func__);				\
+	__xid;								\
 })
 
-#define free_xid(curr_xid)					\
-do {								\
-	_free_xid(curr_xid);					\
-	cifs_dbg(FYI, "CIFS VFS: leaving %s (xid = %u) rc = %d\n",	\
-		 __func__, curr_xid, (int)rc);			\
-	if (rc)							\
+#define free_xid(curr_xid)						\
+do {									\
+	_free_xid(curr_xid);						\
+	cifs_dbg(FYI, "VFS: leaving %s (xid = %u) rc = %d\n",		\
+		 __func__, curr_xid, (int)rc);				\
+	if (rc)								\
 		trace_smb3_exit_err(curr_xid, __func__, (int)rc);	\
-	else							\
-		trace_smb3_exit_done(curr_xid, __func__);	\
+	else								\
+		trace_smb3_exit_done(curr_xid, __func__);		\
 } while (0)
 extern int init_cifs_idmap(void);
 extern void exit_cifs_idmap(void);
@@ -89,6 +89,7 @@ extern void cifs_mid_q_entry_release(struct mid_q_entry *midEntry);
 extern void cifs_wake_up_task(struct mid_q_entry *mid);
 extern int cifs_handle_standard(struct TCP_Server_Info *server,
 				struct mid_q_entry *mid);
+extern bool cifs_match_ipaddr(struct sockaddr *srcaddr, struct sockaddr *rhs);
 extern int cifs_discard_remaining_data(struct TCP_Server_Info *server);
 extern int cifs_call_async(struct TCP_Server_Info *server,
 			struct smb_rqst *rqst,
@@ -153,6 +154,7 @@ extern int decode_negTokenInit(unsigned char *security_blob, int length,
 extern int cifs_convert_address(struct sockaddr *dst, const char *src, int len);
 extern void cifs_set_port(struct sockaddr *addr, const unsigned short int port);
 extern int map_smb_to_linux_error(char *buf, bool logErr);
+extern int map_and_check_smb_error(struct mid_q_entry *mid, bool logErr);
 extern void header_assemble(struct smb_hdr *, char /* command */ ,
 			    const struct cifs_tcon *, int /* length of
 			    fixed section (word count) in two byte units */);
@@ -197,6 +199,8 @@ extern struct inode *cifs_iget(struct super_block *sb,
 extern int cifs_get_inode_info(struct inode **inode, const char *full_path,
 			       FILE_ALL_INFO *data, struct super_block *sb,
 			       int xid, const struct cifs_fid *fid);
+extern int smb311_posix_get_inode_info(struct inode **pinode, const char *search_path,
+			struct super_block *sb, unsigned int xid);
 extern int cifs_get_inode_info_unix(struct inode **pinode,
 			const unsigned char *search_path,
 			struct super_block *sb, unsigned int xid);
@@ -219,6 +223,7 @@ extern int set_cifs_acl(struct cifs_ntsd *, __u32, struct inode *,
 				const char *, int);
 extern unsigned int setup_authusers_ACE(struct cifs_ace *pace);
 extern unsigned int setup_special_mode_ACE(struct cifs_ace *pace, __u64 nmode);
+extern unsigned int setup_special_user_owner_ACE(struct cifs_ace *pace);
 
 extern void dequeue_mid(struct mid_q_entry *mid, bool malformed);
 extern int cifs_read_from_socket(struct TCP_Server_Info *server, char *buf,
@@ -340,7 +345,7 @@ extern int CIFSSMBQFSPosixInfo(const unsigned int xid, struct cifs_tcon *tcon,
 extern int CIFSSMBSetPathInfo(const unsigned int xid, struct cifs_tcon *tcon,
 			const char *fileName, const FILE_BASIC_INFO *data,
 			const struct nls_table *nls_codepage,
-			int remap_special_chars);
+			struct cifs_sb_info *cifs_sb);
 extern int CIFSSMBSetFileInfo(const unsigned int xid, struct cifs_tcon *tcon,
 			const FILE_BASIC_INFO *data, __u16 fid,
 			__u32 pid_of_opener);
@@ -621,6 +626,10 @@ static inline int get_dfs_path(const unsigned int xid, struct cifs_ses *ses,
 	return dfs_cache_find(xid, ses, nls_codepage, remap, old_path,
 			      referral, NULL);
 }
+
+int match_target_ip(struct TCP_Server_Info *server,
+		    const char *share, size_t share_len,
+		    bool *result);
 #endif
 
 static inline int cifs_create_options(struct cifs_sb_info *cifs_sb, int options)

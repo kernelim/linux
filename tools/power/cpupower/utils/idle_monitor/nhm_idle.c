@@ -1,7 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  (C) 2010,2011       Thomas Renninger <trenn@suse.de>, Novell Inc.
- *
- *  Licensed under the terms of the GNU GPL License version 2.
  *
  *  Based on Len Brown's <lenb@kernel.org> turbostat tool.
  */
@@ -92,7 +91,7 @@ static int nhm_get_count(enum intel_nhm_id id, unsigned long long *val,
 		break;
 	default:
 		return -1;
-	};
+	}
 	if (read_msr(cpu, msr, val))
 		return -1;
 

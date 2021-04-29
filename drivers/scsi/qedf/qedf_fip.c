@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  QLogic FCoE Offload Driver
  *  Copyright (c) 2016-2018 Cavium Inc.
- *
- *  This software is available under the terms of the GNU General Public License
- *  (GPL) Version 2, available from the file COPYING in the main directory of
- *  this source tree.
  */
 #include <linux/if_ether.h>
 #include <linux/if_vlan.h>
@@ -23,7 +20,7 @@ void qedf_fcoe_send_vlan_req(struct qedf_ctx *qedf)
 #define MY_FIP_ALL_FCF_MACS        ((__u8[6]) { 1, 0x10, 0x18, 1, 0, 2 })
 	static u8 my_fcoe_all_fcfs[ETH_ALEN] = MY_FIP_ALL_FCF_MACS;
 	unsigned long flags = 0;
-	int rc = -1;
+	int rc;
 
 	skb = dev_alloc_skb(sizeof(struct fip_vlan));
 	if (!skb) {

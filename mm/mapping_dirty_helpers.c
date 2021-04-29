@@ -151,7 +151,9 @@ static int wp_clean_pre_vma(unsigned long start, unsigned long end,
 	wpwalk->tlbflush_start = end;
 	wpwalk->tlbflush_end = start;
 
-	mmu_notifier_invalidate_range_start(walk->mm, start, end);
+	mmu_notifier_range_init(&wpwalk->range, MMU_NOTIFY_PROTECTION_PAGE, 0,
+				walk->vma, walk->mm, start, end);
+	mmu_notifier_invalidate_range_start(&wpwalk->range);
 	flush_cache_range(walk->vma, start, end);
 
 	/*
@@ -181,7 +183,7 @@ static void wp_clean_post_vma(struct mm_walk *walk)
 		flush_tlb_range(walk->vma, wpwalk->tlbflush_start,
 				wpwalk->tlbflush_end);
 
-	mmu_notifier_invalidate_range_end(walk->mm, wpwalk->tlbflush_end, wpwalk->tlbflush_start);
+	mmu_notifier_invalidate_range_end(&wpwalk->range);
 	dec_tlb_flush_pending(walk->mm);
 }
 

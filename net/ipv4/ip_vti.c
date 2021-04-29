@@ -223,11 +223,14 @@ static netdev_tx_t vti_xmit(struct sk_buff *skb, struct net_device *dev,
 	}
 
 	dst_hold(dst);
-	dst = xfrm_lookup(tunnel->net, dst, fl, NULL, 0);
+	dst = xfrm_lookup_route(tunnel->net, dst, fl, NULL, 0);
 	if (IS_ERR(dst)) {
 		dev->stats.tx_carrier_errors++;
 		goto tx_error_icmp;
 	}
+
+	if (dst->flags & DST_XFRM_QUEUE)
+		goto queued;
 
 	if (!vti_state_check(dst->xfrm, parms->iph.daddr, parms->iph.saddr)) {
 		dev->stats.tx_carrier_errors++;
@@ -260,6 +263,7 @@ static netdev_tx_t vti_xmit(struct sk_buff *skb, struct net_device *dev,
 		goto tx_error;
 	}
 
+queued:
 	skb_scrub_packet(skb, !net_eq(tunnel->net, dev_net(dev)));
 	skb_dst_set(skb, dst);
 	skb->dev = skb_dst(skb)->dev;
@@ -496,12 +500,14 @@ static struct xfrm_tunnel vti_ipip_handler __read_mostly = {
 	.priority	=	0,
 };
 
+#if IS_ENABLED(CONFIG_IPV6)
 static struct xfrm_tunnel vti_ipip6_handler __read_mostly = {
 	.handler	=	vti_rcv_tunnel,
 	.cb_handler	=	vti_rcv_cb,
 	.err_handler	=	vti4_err,
 	.priority	=	0,
 };
+#endif
 #endif
 
 static int __net_init vti_init_net(struct net *net)

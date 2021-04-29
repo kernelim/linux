@@ -148,7 +148,7 @@ static int crypto_gcm_setkey(struct crypto_aead *aead, const u8 *key,
 			      CRYPTO_TFM_RES_MASK);
 
 out:
-	kzfree(data);
+	kfree_sensitive(data);
 	return err;
 }
 

@@ -572,8 +572,8 @@ ACQUIRE 는 해당 오퍼레이션의 로드 부분에만 적용되고 RELEASE �
 	[*] 버스 마스터링 DMA 와 일관성에 대해서는 다음을 참고하시기 바랍니다:
 
 	    Documentation/PCI/pci.rst
-	    Documentation/DMA-API-HOWTO.txt
-	    Documentation/DMA-API.txt
+	    Documentation/core-api/dma-api-howto.rst
+	    Documentation/core-api/dma-api.rst
 
 
 데이터 의존성 배리어 (역사적)
@@ -1905,7 +1905,7 @@ Mandatory 배리어들은 SMP 시스템에서도 UP 시스템에서도 SMP 효�
      캐시 일관성이 있는 메모리 (cache coherent memory) 쓰기가 완료되었음을
      보장해주기 위해 필요합니다.
 
-     consistent memory 에 대한 자세한 내용을 위해선 Documentation/DMA-API.txt
+     consistent memory 에 대한 자세한 내용을 위해선 Documentation/core-api/dma-api.rst
      문서를 참고하세요.
 
 

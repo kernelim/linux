@@ -32,6 +32,7 @@
 #include <linux/nfs_fs.h>
 #include <linux/nfs_fs_sb.h>
 #include <linux/nfs_mount.h>
+#include <uapi/linux/mount.h>
 
 #include "do_mounts.h"
 
@@ -383,12 +384,10 @@ void __init mount_block_root(char *name, int flags)
 	struct page *page = alloc_page(GFP_KERNEL);
 	char *fs_names = page_address(page);
 	char *p;
-#ifdef CONFIG_BLOCK
 	char b[BDEVNAME_SIZE];
-#else
-	const char *b = name;
-#endif
 
+	scnprintf(b, BDEVNAME_SIZE, "unknown-block(%u,%u)",
+		  MAJOR(ROOT_DEV), MINOR(ROOT_DEV));
 	get_fs_names(fs_names);
 retry:
 	for (p = fs_names; *p; p += strlen(p)+1) {
@@ -405,9 +404,6 @@ retry:
 		 * and bad superblock on root device.
 		 * and give them a list of the available devices
 		 */
-#ifdef CONFIG_BLOCK
-		__bdevname(ROOT_DEV, b);
-#endif
 		printk("VFS: Cannot open root device \"%s\" or %s: error %d\n",
 				root_device_name, b, err);
 		printk("Please append a correct \"root=\" boot option; here are the available partitions:\n");
@@ -430,9 +426,6 @@ retry:
 	for (p = fs_names; *p; p += strlen(p)+1)
 		printk(" %s", p);
 	printk("\n");
-#ifdef CONFIG_BLOCK
-	__bdevname(ROOT_DEV, b);
-#endif
 	panic("VFS: Unable to mount root fs on %s", b);
 out:
 	put_page(page);
@@ -604,44 +597,23 @@ out:
 }
 
 static bool is_tmpfs;
-static struct dentry *rootfs_mount(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data)
+static int rootfs_init_fs_context(struct fs_context *fc)
 {
-	static unsigned long once;
-	void *fill = ramfs_fill_super;
-
-	if (test_and_set_bit(0, &once))
-		return ERR_PTR(-ENODEV);
-
 	if (IS_ENABLED(CONFIG_TMPFS) && is_tmpfs)
-		fill = shmem_fill_super;
+		return shmem_init_fs_context(fc);
 
-	return mount_nodev(fs_type, flags, data, fill);
+	return ramfs_init_fs_context(fc);
 }
 
-static struct file_system_type rootfs_fs_type = {
+struct file_system_type rootfs_fs_type = {
 	.name		= "rootfs",
-	.mount		= rootfs_mount,
+	.init_fs_context = rootfs_init_fs_context,
 	.kill_sb	= kill_litter_super,
 };
 
-int __init init_rootfs(void)
+void __init init_rootfs(void)
 {
-	int err = register_filesystem(&rootfs_fs_type);
-
-	if (err)
-		return err;
-
 	if (IS_ENABLED(CONFIG_TMPFS) && !saved_root_name[0] &&
-		(!root_fs_names || strstr(root_fs_names, "tmpfs"))) {
-		err = shmem_init();
+		(!root_fs_names || strstr(root_fs_names, "tmpfs")))
 		is_tmpfs = true;
-	} else {
-		err = init_ramfs_fs();
-	}
-
-	if (err)
-		unregister_filesystem(&rootfs_fs_type);
-
-	return err;
 }

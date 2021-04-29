@@ -737,9 +737,9 @@ void gfs2_clear_rgrpd(struct gfs2_sbd *sdp)
 		}
 
 		gfs2_free_clones(rgd);
+		return_all_reservations(rgd);
 		kfree(rgd->rd_bits);
 		rgd->rd_bits = NULL;
-		return_all_reservations(rgd);
 		kmem_cache_free(gfs2_rgrpd_cachep, rgd);
 	}
 }
@@ -1391,6 +1391,9 @@ int gfs2_fitrim(struct file *filp, void __user *argp)
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
+
+	if (!test_bit(SDF_JOURNAL_LIVE, &sdp->sd_flags))
+		return -EROFS;
 
 	if (!blk_queue_discard(q))
 		return -EOPNOTSUPP;
@@ -2473,8 +2476,8 @@ void __gfs2_free_blocks(struct gfs2_inode *ip, u64 bstart, u32 blen, int meta)
 	gfs2_rgrp_out(rgd, rgd->rd_bits[0].bi_bh->b_data);
 
 	/* Directories keep their data in the metadata address space */
-	if (meta || ip->i_depth)
-		gfs2_meta_wipe(ip, bstart, blen);
+	if (meta || ip->i_depth || gfs2_is_jdata(ip))
+		gfs2_journal_wipe(ip, bstart, blen);
 }
 
 /**
@@ -2532,7 +2535,7 @@ void gfs2_free_di(struct gfs2_rgrpd *rgd, struct gfs2_inode *ip)
 	gfs2_statfs_change(sdp, 0, +1, -1);
 	trace_gfs2_block_alloc(ip, rgd, ip->i_no_addr, 1, GFS2_BLKST_FREE);
 	gfs2_quota_change(ip, -1, ip->i_inode.i_uid, ip->i_inode.i_gid);
-	gfs2_meta_wipe(ip, ip->i_no_addr, 1);
+	gfs2_journal_wipe(ip, ip->i_no_addr, 1);
 }
 
 /**

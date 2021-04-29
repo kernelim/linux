@@ -1168,7 +1168,7 @@ static void retrieve_status(struct dm_table *table,
 		spec->sector_start = ti->begin;
 		spec->length = ti->len;
 		strncpy(spec->target_type, ti->type->name,
-			sizeof(spec->target_type));
+			sizeof(spec->target_type) - 1);
 
 		outptr += sizeof(struct dm_target_spec);
 		remaining = len - (outptr - outbuf);
@@ -1471,7 +1471,7 @@ static void retrieve_deps(struct dm_table *table,
 	/*
 	 * Check we have enough space.
 	 */
-	needed = sizeof(*deps) + (sizeof(*deps->dev) * count);
+	needed = struct_size(deps, dev, count);
 	if (len < needed) {
 		param->flags |= DM_BUFFER_FULL_FLAG;
 		return;
@@ -2044,3 +2044,4 @@ out:
 
 	return r;
 }
+EXPORT_SYMBOL_GPL(dm_copy_name_and_uuid);

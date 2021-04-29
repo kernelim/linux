@@ -68,6 +68,8 @@ struct wpan_dev;
 struct mpls_dev;
 /* UDP Tunnel offloads */
 struct udp_tunnel_info;
+struct udp_tunnel_nic_info;
+struct udp_tunnel_nic;
 struct bpf_prog;
 struct xdp_buff;
 
@@ -295,6 +297,7 @@ enum netdev_state_t {
 	__LINK_STATE_NOCARRIER,
 	__LINK_STATE_LINKWATCH_PENDING,
 	__LINK_STATE_DORMANT,
+	__LINK_STATE_TESTING,
 };
 
 
@@ -887,8 +890,6 @@ enum bpf_netdev_command {
 	 */
 	XDP_SETUP_PROG,
 	XDP_SETUP_PROG_HW,
-	XDP_QUERY_PROG,
-	XDP_QUERY_PROG_HW,
 	/* BPF program for offload callbacks, invoked at program load time. */
 	BPF_OFFLOAD_MAP_ALLOC,
 	BPF_OFFLOAD_MAP_FREE,
@@ -900,6 +901,19 @@ struct bpf_prog_offload_ops;
 struct netlink_ext_ack;
 struct xdp_umem;
 struct xdp_dev_bulk_queue;
+struct bpf_xdp_link;
+
+enum bpf_xdp_mode {
+	XDP_MODE_SKB = 0,
+	XDP_MODE_DRV = 1,
+	XDP_MODE_HW = 2,
+	__MAX_XDP_MODE
+};
+
+struct bpf_xdp_entity {
+	struct bpf_prog *prog;
+	struct bpf_xdp_link *link;
+};
 
 struct netdev_bpf {
 	enum bpf_netdev_command command;
@@ -909,12 +923,6 @@ struct netdev_bpf {
 			u32 flags;
 			struct bpf_prog *prog;
 			struct netlink_ext_ack *extack;
-		};
-		/* XDP_QUERY_PROG, XDP_QUERY_PROG_HW */
-		struct {
-			u32 prog_id;
-			/* flags with which program was installed */
-			u32 prog_flags;
 		};
 		/* BPF_OFFLOAD_MAP_ALLOC, BPF_OFFLOAD_MAP_FREE */
 		struct {
@@ -1202,6 +1210,12 @@ struct devlink;
  *
  * int (*ndo_del_slave)(struct net_device *dev, struct net_device *slave_dev);
  *	Called to release previously enslaved netdev.
+ *
+ * struct net_device *(*ndo_get_xmit_slave)(struct net_device *dev,
+ *					    struct sk_buff *skb,
+ *					    bool all_slaves);
+ *	Get the xmit slave of master device. If all_slaves is true, function
+ *	assume all the slaves can transmit.
  *
  *      Feature/offload setting functions.
  * netdev_features_t (*ndo_fix_features)(struct net_device *dev,
@@ -1539,7 +1553,9 @@ struct net_device_ops {
 						   int vf,
 						   struct ifla_vf_guid *node_guid,
 						   struct ifla_vf_guid *port_guid))
-	RH_KABI_RESERVE(5)
+	RH_KABI_USE(5, struct net_device* (*ndo_get_xmit_slave)(struct net_device *dev,
+								struct sk_buff *skb,
+								bool all_slaves))
 	RH_KABI_RESERVE(6)
 	RH_KABI_RESERVE(7)
 	RH_KABI_RESERVE(8)
@@ -1903,13 +1919,9 @@ struct net_device_extended_rh {
  *	@phydev:	Physical device may attach itself
  *			for hardware timestamping
  *	@sfp_bus:	attached &struct sfp_bus structure.
- *	@qdisc_tx_busylock_key: lockdep class annotating Qdisc->busylock
- *				spinlock
- *	@qdisc_running_key:	lockdep class annotating Qdisc->running seqcount
- *	@qdisc_xmit_lock_key:	lockdep class annotating
- *				netdev_queue->_xmit_lock spinlock
- *	@addr_list_lock_key:	lockdep class annotating
- *				net_device->addr_list_lock spinlock
+ *
+ *	@qdisc_tx_busylock: lockdep class annotating Qdisc->busylock spinlock
+ *	@qdisc_running_key: lockdep class annotating Qdisc->running seqcount
  *
  *	@proto_down:	protocol port state information can be sent to the
  *			switch driver and used to set the phys state of the
@@ -1920,6 +1932,11 @@ struct net_device_extended_rh {
  *	@net_notifier_list:	List of per-net netdev notifier block
  *				that follow this device when it is moved
  *				to another network namespace.
+ *
+ *	@udp_tunnel_nic_info:	static structure describing the UDP tunnel
+ *				offload capabilities of the device
+ *	@udp_tunnel_nic:	UDP tunnel offload state
+ *	@xdp_state:		stores info on attached XDP BPF programs
  *
  *	FIXME: cleanup struct net_device such that network protocol info
  *	moves out.
@@ -2212,18 +2229,8 @@ struct net_device {
 #endif
 	struct phy_device	*phydev;
 	struct sfp_bus		*sfp_bus;
-	RH_KABI_DEPRECATE(struct lock_class_key	*, qdisc_tx_busylock)
-	RH_KABI_DEPRECATE(struct lock_class_key	*, qdisc_running_key)
-	/* RHEL: The KABI breakage here is not real. We are inserting
-	 * 4 fields of type struct lock_class_key but the size of this
-	 * structure is zero for non-debug kernel configs because
-	 * LOCKDEP is not enabled for them and for debug flavours
-	 * KABI is not preserved.
-	 */
-	RH_KABI_BROKEN_INSERT(struct lock_class_key qdisc_tx_busylock_key)
-	RH_KABI_BROKEN_INSERT(struct lock_class_key qdisc_running_key)
-	RH_KABI_BROKEN_INSERT(struct lock_class_key qdisc_xmit_lock_key)
-	RH_KABI_BROKEN_INSERT(struct lock_class_key addr_list_lock_key)
+	struct lock_class_key	*qdisc_tx_busylock;
+	struct lock_class_key	*qdisc_running_key;
 	bool			proto_down;
 	RH_KABI_FILL_HOLE(unsigned	wol_enabled:1)
 
@@ -2233,9 +2240,12 @@ struct net_device {
 	RH_KABI_USE(1, struct mpls_dev __rcu   *mpls_ptr)
 	RH_KABI_USE(2, 3, struct list_head	net_notifier_list)
 	RH_KABI_USE(4, struct xdp_dev_bulk_queue __percpu *xdp_bulkq)
-	RH_KABI_RESERVE(5)
-	RH_KABI_RESERVE(6)
-	RH_KABI_RESERVE(7)
+	RH_KABI_USE(5, const struct udp_tunnel_nic_info	*udp_tunnel_nic_info)
+	RH_KABI_USE(6, struct udp_tunnel_nic	*udp_tunnel_nic)
+
+	/* protected by rtnl_lock */
+	RH_KABI_USE(7, struct bpf_xdp_entity	*xdp_state)
+
 	RH_KABI_RESERVE(8)
 	RH_KABI_RESERVE(9)
 	RH_KABI_RESERVE(10)
@@ -2303,6 +2313,22 @@ int netdev_get_num_tc(struct net_device *dev)
 	return dev->num_tc;
 }
 
+static inline void net_prefetch(void *p)
+{
+	prefetch(p);
+#if L1_CACHE_BYTES < 128
+	prefetch((u8 *)p + L1_CACHE_BYTES);
+#endif
+}
+
+static inline void net_prefetchw(void *p)
+{
+	prefetchw(p);
+#if L1_CACHE_BYTES < 128
+	prefetchw((u8 *)p + L1_CACHE_BYTES);
+#endif
+}
+
 void netdev_unbind_sb_channel(struct net_device *dev,
 			      struct net_device *sb_dev);
 int netdev_bind_sb_channel_queue(struct net_device *dev,
@@ -2337,6 +2363,23 @@ static inline void netdev_for_each_tx_queue(struct net_device *dev,
 
 	for (i = 0; i < dev->num_tx_queues; i++)
 		f(dev, &dev->_tx[i], arg);
+}
+
+#define netdev_lockdep_set_classes(dev)				\
+{								\
+	static struct lock_class_key qdisc_tx_busylock_key;	\
+	static struct lock_class_key qdisc_running_key;		\
+	static struct lock_class_key qdisc_xmit_lock_key;	\
+	static struct lock_class_key dev_addr_list_lock_key;	\
+	unsigned int i;						\
+								\
+	(dev)->qdisc_tx_busylock = &qdisc_tx_busylock_key;	\
+	(dev)->qdisc_running_key = &qdisc_running_key;		\
+	lockdep_set_class(&(dev)->addr_list_lock,		\
+			  &dev_addr_list_lock_key);		\
+	for (i = 0; i < (dev)->num_tx_queues; i++)		\
+		lockdep_set_class(&(dev)->_tx[i]._xmit_lock,	\
+				  &qdisc_xmit_lock_key);	\
 }
 
 struct netdev_queue *netdev_pick_tx(struct net_device *dev,
@@ -2503,7 +2546,8 @@ struct napi_gro_cb {
 	/* Number of gro_receive callbacks this packet already went through */
 	u8 recursion_counter:4;
 
-	/* 1 bit hole */
+	/* GRO is done by frag_list pointer chaining. */
+	u8	is_flist:1;
 
 	/* used to support CHECKSUM_COMPLETE for tunneling protocols */
 	__wsum	csum;
@@ -2631,6 +2675,7 @@ enum netdev_lag_hash {
 	NETDEV_LAG_HASH_L23,
 	NETDEV_LAG_HASH_E23,
 	NETDEV_LAG_HASH_E34,
+	NETDEV_LAG_HASH_VLAN_SRCMAC,
 	NETDEV_LAG_HASH_UNKNOWN,
 };
 
@@ -2846,9 +2891,21 @@ u16 dev_pick_tx_zero(struct net_device *dev, struct sk_buff *skb,
 u16 dev_pick_tx_cpu_id(struct net_device *dev, struct sk_buff *skb,
 		       struct net_device *sb_dev,
 		       select_queue_fallback_t fallback);
+
 int dev_queue_xmit(struct sk_buff *skb);
 int dev_queue_xmit_accel(struct sk_buff *skb, struct net_device *sb_dev);
-int dev_direct_xmit(struct sk_buff *skb, u16 queue_id);
+int __dev_direct_xmit(struct sk_buff *skb, u16 queue_id);
+
+static inline int dev_direct_xmit(struct sk_buff *skb, u16 queue_id)
+{
+	int ret;
+
+	ret = __dev_direct_xmit(skb, queue_id);
+	if (!dev_xmit_complete(ret))
+		kfree_skb(skb);
+	return ret;
+}
+
 int register_netdevice(struct net_device *dev);
 void unregister_netdevice_queue(struct net_device *dev, struct list_head *head);
 void unregister_netdevice_many(struct list_head *head);
@@ -2863,6 +2920,9 @@ void netdev_freemem(struct net_device *dev);
 void synchronize_net(void);
 int init_dummy_netdev(struct net_device *dev);
 
+struct net_device *netdev_get_xmit_slave(struct net_device *dev,
+					 struct sk_buff *skb,
+					 bool all_slaves);
 struct net_device *dev_get_by_index(struct net *net, int ifindex);
 struct net_device *__dev_get_by_index(struct net *net, int ifindex);
 struct net_device *dev_get_by_index_rcu(struct net *net, int ifindex);
@@ -2870,6 +2930,7 @@ struct net_device *dev_get_by_napi_id(unsigned int napi_id);
 int netdev_get_name(struct net *net, char *name, int ifindex);
 int dev_restart(struct net_device *dev);
 int skb_gro_receive(struct sk_buff *p, struct sk_buff *skb);
+int skb_gro_receive_list(struct sk_buff *p, struct sk_buff *skb);
 
 static inline unsigned int skb_gro_offset(const struct sk_buff *skb)
 {
@@ -3352,7 +3413,6 @@ static inline void netif_stop_queue(struct net_device *dev)
 }
 
 void netif_tx_stop_all_queues(struct net_device *dev);
-void netdev_update_lockdep_key(struct net_device *dev);
 
 static inline bool netif_tx_queue_stopped(const struct netdev_queue *dev_queue)
 {
@@ -3908,8 +3968,9 @@ struct sk_buff *dev_hard_start_xmit(struct sk_buff *skb, struct net_device *dev,
 typedef int (*bpf_op_t)(struct net_device *dev, struct netdev_bpf *bpf);
 int dev_change_xdp_fd(struct net_device *dev, struct netlink_ext_ack *extack,
 		      int fd, int expected_fd, u32 flags);
-u32 __dev_xdp_query(struct net_device *dev, bpf_op_t xdp_op,
-		    enum bpf_netdev_command cmd);
+int bpf_xdp_link_attach(const union bpf_attr *attr, struct bpf_prog *prog);
+u32 dev_xdp_prog_id(struct net_device *dev, enum bpf_xdp_mode mode);
+
 int xdp_umem_query(struct net_device *dev, u16 queue_id);
 
 int __dev_forward_skb(struct net_device *dev, struct sk_buff *skb);
@@ -4038,6 +4099,46 @@ static inline bool netif_dormant(const struct net_device *dev)
 
 
 /**
+ *	netif_testing_on - mark device as under test.
+ *	@dev: network device
+ *
+ * Mark device as under test (as per RFC2863).
+ *
+ * The testing state indicates that some test(s) must be performed on
+ * the interface. After completion, of the test, the interface state
+ * will change to up, dormant, or down, as appropriate.
+ */
+static inline void netif_testing_on(struct net_device *dev)
+{
+	if (!test_and_set_bit(__LINK_STATE_TESTING, &dev->state))
+		linkwatch_fire_event(dev);
+}
+
+/**
+ *	netif_testing_off - set device as not under test.
+ *	@dev: network device
+ *
+ * Device is not in testing state.
+ */
+static inline void netif_testing_off(struct net_device *dev)
+{
+	if (test_and_clear_bit(__LINK_STATE_TESTING, &dev->state))
+		linkwatch_fire_event(dev);
+}
+
+/**
+ *	netif_testing - test if device is under test
+ *	@dev: network device
+ *
+ * Check if device is under test
+ */
+static inline bool netif_testing(const struct net_device *dev)
+{
+	return test_bit(__LINK_STATE_TESTING, &dev->state);
+}
+
+
+/**
  *	netif_oper_up - test if device is operational
  *	@dev: network device
  *
@@ -4069,22 +4170,48 @@ void netif_device_attach(struct net_device *dev);
  */
 
 enum {
-	NETIF_MSG_DRV		= 0x0001,
-	NETIF_MSG_PROBE		= 0x0002,
-	NETIF_MSG_LINK		= 0x0004,
-	NETIF_MSG_TIMER		= 0x0008,
-	NETIF_MSG_IFDOWN	= 0x0010,
-	NETIF_MSG_IFUP		= 0x0020,
-	NETIF_MSG_RX_ERR	= 0x0040,
-	NETIF_MSG_TX_ERR	= 0x0080,
-	NETIF_MSG_TX_QUEUED	= 0x0100,
-	NETIF_MSG_INTR		= 0x0200,
-	NETIF_MSG_TX_DONE	= 0x0400,
-	NETIF_MSG_RX_STATUS	= 0x0800,
-	NETIF_MSG_PKTDATA	= 0x1000,
-	NETIF_MSG_HW		= 0x2000,
-	NETIF_MSG_WOL		= 0x4000,
+	NETIF_MSG_DRV_BIT,
+	NETIF_MSG_PROBE_BIT,
+	NETIF_MSG_LINK_BIT,
+	NETIF_MSG_TIMER_BIT,
+	NETIF_MSG_IFDOWN_BIT,
+	NETIF_MSG_IFUP_BIT,
+	NETIF_MSG_RX_ERR_BIT,
+	NETIF_MSG_TX_ERR_BIT,
+	NETIF_MSG_TX_QUEUED_BIT,
+	NETIF_MSG_INTR_BIT,
+	NETIF_MSG_TX_DONE_BIT,
+	NETIF_MSG_RX_STATUS_BIT,
+	NETIF_MSG_PKTDATA_BIT,
+	NETIF_MSG_HW_BIT,
+	NETIF_MSG_WOL_BIT,
+
+	/* When you add a new bit above, update netif_msg_class_names array
+	 * in net/ethtool/common.c
+	 */
+	NETIF_MSG_CLASS_COUNT,
 };
+/* Both ethtool_ops interface and internal driver implementation use u32 */
+static_assert(NETIF_MSG_CLASS_COUNT <= 32);
+
+#define __NETIF_MSG_BIT(bit)	((u32)1 << (bit))
+#define __NETIF_MSG(name)	__NETIF_MSG_BIT(NETIF_MSG_ ## name ## _BIT)
+
+#define NETIF_MSG_DRV		__NETIF_MSG(DRV)
+#define NETIF_MSG_PROBE		__NETIF_MSG(PROBE)
+#define NETIF_MSG_LINK		__NETIF_MSG(LINK)
+#define NETIF_MSG_TIMER		__NETIF_MSG(TIMER)
+#define NETIF_MSG_IFDOWN	__NETIF_MSG(IFDOWN)
+#define NETIF_MSG_IFUP		__NETIF_MSG(IFUP)
+#define NETIF_MSG_RX_ERR	__NETIF_MSG(RX_ERR)
+#define NETIF_MSG_TX_ERR	__NETIF_MSG(TX_ERR)
+#define NETIF_MSG_TX_QUEUED	__NETIF_MSG(TX_QUEUED)
+#define NETIF_MSG_INTR		__NETIF_MSG(INTR)
+#define NETIF_MSG_TX_DONE	__NETIF_MSG(TX_DONE)
+#define NETIF_MSG_RX_STATUS	__NETIF_MSG(RX_STATUS)
+#define NETIF_MSG_PKTDATA	__NETIF_MSG(PKTDATA)
+#define NETIF_MSG_HW		__NETIF_MSG(HW)
+#define NETIF_MSG_WOL		__NETIF_MSG(WOL)
 
 #define netif_msg_drv(p)	((p)->msg_enable & NETIF_MSG_DRV)
 #define netif_msg_probe(p)	((p)->msg_enable & NETIF_MSG_PROBE)
@@ -4269,6 +4396,11 @@ static inline void netif_tx_disable(struct net_device *dev)
 static inline void netif_addr_lock(struct net_device *dev)
 {
 	spin_lock(&dev->addr_list_lock);
+}
+
+static inline void netif_addr_lock_nested(struct net_device *dev)
+{
+	spin_lock_nested(&dev->addr_list_lock, dev->lower_level);
 }
 
 static inline void netif_addr_lock_bh(struct net_device *dev)
@@ -4564,6 +4696,15 @@ struct netdev_notifier_bonding_info {
 void netdev_bonding_info_change(struct net_device *dev,
 				struct netdev_bonding_info *bonding_info);
 
+#if IS_ENABLED(CONFIG_ETHTOOL_NETLINK)
+void ethtool_notify(struct net_device *dev, unsigned int cmd, const void *data);
+#else
+static inline void ethtool_notify(struct net_device *dev, unsigned int cmd,
+				  const void *data)
+{
+}
+#endif
+
 static inline
 struct sk_buff *skb_gso_segment(struct sk_buff *skb, netdev_features_t features)
 {
@@ -4724,6 +4865,7 @@ static inline bool net_gso_ok(netdev_features_t features, int gso_type)
 	BUILD_BUG_ON(SKB_GSO_ESP != (NETIF_F_GSO_ESP >> NETIF_F_GSO_SHIFT));
 	BUILD_BUG_ON(SKB_GSO_UDP != (NETIF_F_GSO_UDP >> NETIF_F_GSO_SHIFT));
 	BUILD_BUG_ON(SKB_GSO_UDP_L4 != (NETIF_F_GSO_UDP_L4 >> NETIF_F_GSO_SHIFT));
+	BUILD_BUG_ON(SKB_GSO_FRAGLIST != (NETIF_F_GSO_FRAGLIST >> NETIF_F_GSO_SHIFT));
 
 	return (features & feature) == feature;
 }

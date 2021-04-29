@@ -36,6 +36,8 @@
 #include <net/pkt_sched.h>
 #include <net/pkt_cls.h>
 
+#include <trace/events/qdisc.h>
+
 /*
 
    Short review.
@@ -269,7 +271,8 @@ static struct Qdisc *qdisc_match_from_root(struct Qdisc *root, u32 handle)
 	    root->handle == handle)
 		return root;
 
-	hash_for_each_possible_rcu(qdisc_dev(root)->qdisc_hash, q, hash, handle) {
+	hash_for_each_possible_rcu(qdisc_dev(root)->qdisc_hash, q, hash, handle,
+				   lockdep_rtnl_is_held()) {
 		if (q->handle == handle)
 			return q;
 	}
@@ -413,7 +416,8 @@ struct qdisc_rate_table *qdisc_get_rtab(struct tc_ratespec *r,
 {
 	struct qdisc_rate_table *rtab;
 
-	if (tab == NULL || r->rate == 0 || r->cell_log == 0 ||
+	if (tab == NULL || r->rate == 0 ||
+	    r->cell_log == 0 || r->cell_log >= 32 ||
 	    nla_len(tab) != TC_RTAB_SIZE) {
 		NL_SET_ERR_MSG(extack, "Invalid rate table parameters for searching");
 		return NULL;
@@ -1095,8 +1099,7 @@ skip:
 		int err;
 
 		/* Only support running class lockless if parent is lockless */
-		if (new && (new->flags & TCQ_F_NOLOCK) &&
-		    parent && !(parent->flags & TCQ_F_NOLOCK))
+		if (new && (new->flags & TCQ_F_NOLOCK) && !(parent->flags & TCQ_F_NOLOCK))
 			qdisc_clear_nolock(new);
 
 		if (!cops || !cops->graft)
@@ -1287,6 +1290,7 @@ static struct Qdisc *qdisc_create(struct net_device *dev,
 	}
 
 	qdisc_hash_add(sch, false);
+	trace_qdisc_create(ops, dev, parent);
 
 	return sch;
 

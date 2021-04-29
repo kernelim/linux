@@ -80,7 +80,7 @@ static int gfs2_get_block_noalloc(struct inode *inode, sector_t lblock,
 	if (error)
 		return error;
 	if (!buffer_mapped(bh_result))
-		return -EIO;
+		return -ENODATA;
 	return 0;
 }
 
@@ -138,11 +138,16 @@ static int gfs2_writepage(struct page *page, struct writeback_control *wbc)
 	return nobh_writepage(page, gfs2_get_block_noalloc, wbc);
 }
 
-/* This is the same as calling block_write_full_page, but it also
+/**
+ * gfs2_write_jdata_page - gfs2 jdata-specific version of block_write_full_page
+ * @page: The page to write
+ * @wbc: The writeback control
+ *
+ * This is the same as calling block_write_full_page, but it also
  * writes pages outside of i_size
  */
-static int gfs2_write_full_page(struct page *page, get_block_t *get_block,
-				struct writeback_control *wbc)
+static int gfs2_write_jdata_page(struct page *page,
+				 struct writeback_control *wbc)
 {
 	struct inode * const inode = page->mapping->host;
 	loff_t i_size = i_size_read(inode);
@@ -160,7 +165,7 @@ static int gfs2_write_full_page(struct page *page, get_block_t *get_block,
 	if (page->index == end_index && offset)
 		zero_user_segment(page, offset, PAGE_SIZE);
 
-	return __block_write_full_page(inode, page, get_block, wbc,
+	return __block_write_full_page(inode, page, gfs2_get_block_noalloc, wbc,
 				       end_buffer_async_write);
 }
 
@@ -189,7 +194,7 @@ static int __gfs2_jdata_writepage(struct page *page, struct writeback_control *w
 		}
 		gfs2_page_add_databufs(ip, page, 0, sdp->sd_vfs->s_blocksize);
 	}
-	return gfs2_write_full_page(page, gfs2_get_block_noalloc, wbc);
+	return gfs2_write_jdata_page(page, wbc);
 }
 
 /**
@@ -738,7 +743,8 @@ int gfs2_stuffed_write_end(struct inode *inode, struct buffer_head *dibh,
  
 static int jdata_set_page_dirty(struct page *page)
 {
-	SetPageChecked(page);
+	if (current->journal_info)
+		SetPageChecked(page);
 	return __set_page_dirty_buffers(page);
 }
 
@@ -780,8 +786,11 @@ static void gfs2_discard(struct gfs2_sbd *sdp, struct buffer_head *bh)
 	if (bd) {
 		if (!list_empty(&bd->bd_list) && !buffer_pinned(bh))
 			list_del_init(&bd->bd_list);
-		else
+		else {
+			spin_lock(&sdp->sd_ail_lock);
 			gfs2_remove_from_journal(bh, REMOVE_JDATA);
+			spin_unlock(&sdp->sd_ail_lock);
+		}
 	}
 	bh->b_bdev = NULL;
 	clear_buffer_mapped(bh);
@@ -853,7 +862,6 @@ int gfs2_releasepage(struct page *page, gfp_t gfp_mask)
 	 */
 
 	gfs2_log_lock(sdp);
-	spin_lock(&sdp->sd_ail_lock);
 	head = bh = page_buffers(page);
 	do {
 		if (atomic_read(&bh->b_count))
@@ -865,7 +873,6 @@ int gfs2_releasepage(struct page *page, gfp_t gfp_mask)
 			goto cannot_release;
 		bh = bh->b_this_page;
 	} while(bh != head);
-	spin_unlock(&sdp->sd_ail_lock);
 
 	head = bh = page_buffers(page);
 	do {
@@ -891,7 +898,6 @@ int gfs2_releasepage(struct page *page, gfp_t gfp_mask)
 	return try_to_free_buffers(page);
 
 cannot_release:
-	spin_unlock(&sdp->sd_ail_lock);
 	gfs2_log_unlock(sdp);
 	return 0;
 }

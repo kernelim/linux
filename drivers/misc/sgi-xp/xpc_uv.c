@@ -22,6 +22,7 @@
 #include <linux/module.h>
 #include <linux/err.h>
 #include <linux/slab.h>
+#include <linux/numa.h>
 #include <asm/uv/uv_hub.h>
 #if defined CONFIG_X86_64
 #include <asm/uv/bios.h>
@@ -47,6 +48,8 @@ struct uv_IO_APIC_route_entry {
 		__reserved_2	: 15,
 		dest		: 32;
 };
+
+#define sn_partition_id 0
 #endif
 
 static struct xpc_heartbeat_uv *xpc_heartbeat_uv;
@@ -61,7 +64,7 @@ static struct xpc_heartbeat_uv *xpc_heartbeat_uv;
 					 XPC_NOTIFY_MSG_SIZE_UV)
 #define XPC_NOTIFY_IRQ_NAME		"xpc_notify"
 
-static int xpc_mq_node = -1;
+static int xpc_mq_node = NUMA_NO_NODE;
 
 static struct xpc_gru_mq_uv *xpc_activate_mq_uv;
 static struct xpc_gru_mq_uv *xpc_notify_mq_uv;

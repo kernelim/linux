@@ -56,8 +56,9 @@ enum {
 	NETIF_F_GSO_ESP_BIT,		/* ... ESP with TSO */
 	NETIF_F_GSO_UDP_BIT,		/* ... UFO, deprecated except tuntap */
 	NETIF_F_GSO_UDP_L4_BIT,		/* ... UDP payload GSO (not UFO) */
+	NETIF_F_GSO_FRAGLIST_BIT,		/* ... Fraglist GSO */
 	/**/NETIF_F_GSO_LAST =		/* last bit, see GSO_MASK */
-		NETIF_F_GSO_UDP_L4_BIT,
+		NETIF_F_GSO_FRAGLIST_BIT,
 
 	/* RHEL only: bits reserved for future features.
 	 * GSO-related bit must be allocated from the top of this list, and
@@ -66,14 +67,13 @@ enum {
 	 * The reserved space is limited: we need good reasons to use each
 	 * bit.
 	 */
-	__NETIF_F_RH_KABI_PLACEHOLDER_1,
 	__NETIF_F_RH_KABI_PLACEHOLDER_2,
 	__NETIF_F_RH_KABI_PLACEHOLDER_3,
 	__NETIF_F_RH_KABI_PLACEHOLDER_4,
 	__NETIF_F_RH_KABI_PLACEHOLDER_5,
 	__NETIF_F_RH_KABI_PLACEHOLDER_6,
 	__NETIF_F_RH_KABI_PLACEHOLDER_7,
-	__NETIF_F_RH_KABI_PLACEHOLDER_8,
+	NETIF_F_GRO_FRAGLIST_BIT,	/* Fraglist GRO */
 	NETIF_F_HW_TLS_RX_BIT,		/* Hardware TLS RX offload */
 
 	NETIF_F_FCOE_CRC_BIT,		/* FCoE CRC32 */
@@ -169,6 +169,8 @@ enum {
 #define NETIF_F_GSO_UDP_L4	__NETIF_F(GSO_UDP_L4)
 #define NETIF_F_HW_TLS_TX	__NETIF_F(HW_TLS_TX)
 #define NETIF_F_HW_TLS_RX	__NETIF_F(HW_TLS_RX)
+#define NETIF_F_GRO_FRAGLIST	__NETIF_F(GRO_FRAGLIST)
+#define NETIF_F_GSO_FRAGLIST	__NETIF_F(GSO_FRAGLIST)
 
 #define for_each_netdev_feature(mask_addr, bit)	\
 	for_each_set_bit(bit, (unsigned long *)mask_addr, NETDEV_FEATURE_COUNT)
@@ -226,6 +228,9 @@ enum {
 
 /* changeable features with no special hardware requirements */
 #define NETIF_F_SOFT_FEATURES	(NETIF_F_GSO | NETIF_F_GRO)
+
+/* Changeable features with no special hardware requirements that defaults to off. */
+#define NETIF_F_SOFT_FEATURES_OFF	NETIF_F_GRO_FRAGLIST
 
 #define NETIF_F_VLAN_FEATURES	(NETIF_F_HW_VLAN_CTAG_FILTER | \
 				 NETIF_F_HW_VLAN_CTAG_RX | \

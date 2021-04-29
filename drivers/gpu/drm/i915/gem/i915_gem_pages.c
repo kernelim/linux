@@ -83,10 +83,12 @@ void __i915_gem_object_set_pages(struct drm_i915_gem_object *obj,
 
 int ____i915_gem_object_get_pages(struct drm_i915_gem_object *obj)
 {
+	struct drm_i915_private *i915 = to_i915(obj->base.dev);
 	int err;
 
 	if (unlikely(obj->mm.madv != I915_MADV_WILLNEED)) {
-		DRM_DEBUG("Attempting to obtain a purgeable object\n");
+		drm_dbg(&i915->drm,
+			"Attempting to obtain a purgeable object\n");
 		return -EFAULT;
 	}
 
@@ -197,8 +199,6 @@ int __i915_gem_object_put_pages(struct drm_i915_gem_object *obj)
 	if (i915_gem_object_has_pinned_pages(obj))
 		return -EBUSY;
 
-	GEM_BUG_ON(atomic_read(&obj->bind_count));
-
 	/* May be called by shrinker from within get_pages() (on another bo) */
 	mutex_lock(&obj->mm.lock);
 	if (unlikely(atomic_read(&obj->mm.pages_pin_count))) {
@@ -254,9 +254,35 @@ static void *i915_gem_object_map(struct drm_i915_gem_object *obj,
 	if (!i915_gem_object_has_struct_page(obj) && type != I915_MAP_WC)
 		return NULL;
 
+	if (GEM_WARN_ON(type == I915_MAP_WC &&
+			!static_cpu_has(X86_FEATURE_PAT)))
+		return NULL;
+
 	/* A single page can always be kmapped */
-	if (n_pte == 1 && type == I915_MAP_WB)
-		return kmap(sg_page(sgt->sgl));
+	if (n_pte == 1 && type == I915_MAP_WB) {
+		struct page *page = sg_page(sgt->sgl);
+
+		/*
+		 * On 32b, highmem using a finite set of indirect PTE (i.e.
+		 * vmap) to provide virtual mappings of the high pages.
+		 * As these are finite, map_new_virtual() must wait for some
+		 * other kmap() to finish when it runs out. If we map a large
+		 * number of objects, there is no method for it to tell us
+		 * to release the mappings, and we deadlock.
+		 *
+		 * However, if we make an explicit vmap of the page, that
+		 * uses a larger vmalloc arena, and also has the ability
+		 * to tell us to release unwanted mappings. Most importantly,
+		 * it will fail and propagate an error instead of waiting
+		 * forever.
+		 *
+		 * So if the page is beyond the 32b boundary, make an explicit
+		 * vmap. On 64b, this check will be optimised away as we can
+		 * directly kmap any page on the system.
+		 */
+		if (!PageHighMem(page))
+			return kmap(page);
+	}
 
 	mem = stack;
 	if (n_pte > ARRAY_SIZE(stack)) {
@@ -276,7 +302,7 @@ static void *i915_gem_object_map(struct drm_i915_gem_object *obj,
 	switch (type) {
 	default:
 		MISSING_CASE(type);
-		/* fallthrough - to use PAGE_KERNEL anyway */
+		fallthrough;	/* to use PAGE_KERNEL anyway */
 	case I915_MAP_WB:
 		pgprot = PAGE_KERNEL;
 		break;
@@ -391,6 +417,7 @@ void __i915_gem_object_flush_map(struct drm_i915_gem_object *obj,
 	GEM_BUG_ON(range_overflows_t(typeof(obj->base.size),
 				     offset, size, obj->base.size));
 
+	wmb(); /* let all previous writes be visible to coherent partners */
 	obj->mm.dirty = true;
 
 	if (obj->cache_coherent & I915_BO_CACHE_COHERENT_FOR_WRITE)
@@ -405,6 +432,21 @@ void __i915_gem_object_flush_map(struct drm_i915_gem_object *obj,
 		obj->write_domain &= ~I915_GEM_DOMAIN_CPU;
 		obj->cache_dirty = false;
 	}
+}
+
+void __i915_gem_object_release_map(struct drm_i915_gem_object *obj)
+{
+	GEM_BUG_ON(!obj->mm.mapping);
+
+	/*
+	 * We allow removing the mapping from underneath pinned pages!
+	 *
+	 * Furthermore, since this is an unsafe operation reserved only
+	 * for construction time manipulation, we ignore locking prudence.
+	 */
+	unmap_object(obj, page_mask_bits(fetch_and_zero(&obj->mm.mapping)));
+
+	i915_gem_object_unpin_map(obj);
 }
 
 struct scatterlist *

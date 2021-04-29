@@ -1,5 +1,6 @@
 hugepage-mmap
 hugepage-shm
+khugepaged
 map_hugetlb
 thuge-gen
 compaction_test

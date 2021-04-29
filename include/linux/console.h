@@ -22,6 +22,7 @@ struct console_font_op;
 struct console_font;
 struct module;
 struct tty_struct;
+struct notifier_block;
 
 /*
  * this is what the terminal answers to a ESC-Z or csi0c query.
@@ -228,5 +229,9 @@ static inline bool vgacon_text_force(void) { return false; }
 #endif
 
 extern void console_init(void);
+
+/* For deferred console takeover */
+void dummycon_register_output_notifier(struct notifier_block *nb);
+void dummycon_unregister_output_notifier(struct notifier_block *nb);
 
 #endif /* _LINUX_CONSOLE_H */

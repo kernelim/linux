@@ -1161,6 +1161,8 @@ int phys_mem_access_prot_allowed(struct file *file, unsigned long pfn,
 static inline void init_espfix_bsp(void) { }
 #endif
 
+extern void __init pgd_cache_init(void);
+
 #ifndef __HAVE_ARCH_PFN_MODIFY_ALLOWED
 static inline bool pfn_modify_allowed(unsigned long pfn, pgprot_t prot)
 {
@@ -1211,6 +1213,26 @@ static inline bool arch_has_pfn_modify_check(void)
 #endif
 #ifndef pmd_offset_lockless
 #define pmd_offset_lockless(pudp, pud, address) pmd_offset(&(pud), address)
+#endif
+
+/*
+ * p?d_leaf() - true if this entry is a final mapping to a physical address.
+ * This differs from p?d_huge() by the fact that they are always available (if
+ * the architecture supports large pages at the appropriate level) even
+ * if CONFIG_HUGETLB_PAGE is not defined.
+ * Only meaningful when called on a valid entry.
+ */
+#ifndef pgd_leaf
+#define pgd_leaf(x)	0
+#endif
+#ifndef p4d_leaf
+#define p4d_leaf(x)	0
+#endif
+#ifndef pud_leaf
+#define pud_leaf(x)	0
+#endif
+#ifndef pmd_leaf
+#define pmd_leaf(x)	0
 #endif
 
 #endif /* _ASM_GENERIC_PGTABLE_H */

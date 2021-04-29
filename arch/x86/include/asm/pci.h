@@ -7,6 +7,7 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/scatterlist.h>
+#include <linux/numa.h>
 #include <asm/io.h>
 #include <asm/pat.h>
 #include <asm/x86_init.h>
@@ -138,7 +139,7 @@ cpumask_of_pcibus(const struct pci_bus *bus)
 	int node;
 
 	node = __pcibus_to_node(bus);
-	return (node == -1) ? cpu_online_mask :
+	return (node == NUMA_NO_NODE) ? cpu_online_mask :
 			      cpumask_of_node(node);
 }
 #endif

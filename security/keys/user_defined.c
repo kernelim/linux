@@ -86,7 +86,7 @@ EXPORT_SYMBOL_GPL(user_preparse);
  */
 void user_free_preparse(struct key_preparsed_payload *prep)
 {
-	kzfree(prep->payload.data[0]);
+	kfree_sensitive(prep->payload.data[0]);
 }
 EXPORT_SYMBOL_GPL(user_free_preparse);
 
@@ -95,7 +95,7 @@ static void user_free_payload_rcu(struct rcu_head *head)
 	struct user_key_payload *payload;
 
 	payload = container_of(head, struct user_key_payload, rcu);
-	kzfree(payload);
+	kfree_sensitive(payload);
 }
 
 /*
@@ -151,7 +151,7 @@ void user_destroy(struct key *key)
 {
 	struct user_key_payload *upayload = key->payload.data[0];
 
-	kzfree(upayload);
+	kfree_sensitive(upayload);
 }
 
 EXPORT_SYMBOL_GPL(user_destroy);

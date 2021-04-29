@@ -334,6 +334,20 @@
  *   Replace a field by a different one without doing any checking.  This
  *   allows replacing a field by another with a different size.  Similarly
  *   to other RH_KABI_BROKEN macros, use of this indicates a kABI breakage.
+ *
+ * RH_KABI_BROKEN_INSERT_ENUM
+ * RH_KABI_BROKEN_REMOVE_ENUM
+ *   Insert a field to the middle of an enumaration type / delete a field from
+ *   an enumaration type. Note that this can break kABI especially if the
+ *   number of enum fields is used in an array within a structure. It can be
+ *   done only when it is certain that no 3rd party driver will use the
+ *   enumeration type or a structure that embeds an array with size determined
+ *   by an enumeration type.
+ *
+ * RH_KABI_EXTEND_ENUM
+ *   Adds a new field to an enumeration type.  This must always be added to
+ *   the end of the enum.  Before using this macro, make sure this is actually
+ *   safe to do.
  */
 
 #undef linux
@@ -354,6 +368,9 @@
 # define RH_KABI_BROKEN_INSERT_BLOCK(_new)
 # define RH_KABI_BROKEN_REMOVE_BLOCK(_orig)	_orig
 # define RH_KABI_BROKEN_REPLACE(_orig, _new)	_orig;
+# define RH_KABI_BROKEN_INSERT_ENUM(_new)
+# define RH_KABI_BROKEN_REMOVE_ENUM(_orig)	_orig,
+# define RH_KABI_EXTEND_ENUM(_new)
 
 # define _RH_KABI_DEPRECATE(_type, _orig)	_type _orig
 # define _RH_KABI_DEPRECATE_FN(_type, _orig, _args...)	_type (*_orig)(_args)
@@ -377,7 +394,9 @@
 # define RH_KABI_BROKEN_INSERT_BLOCK(_new)	_new
 # define RH_KABI_BROKEN_REMOVE_BLOCK(_orig)
 # define RH_KABI_BROKEN_REPLACE(_orig, _new)	_new;
-
+# define RH_KABI_BROKEN_INSERT_ENUM(_new)	_new,
+# define RH_KABI_BROKEN_REMOVE_ENUM(_orig)
+# define RH_KABI_EXTEND_ENUM(_new)		_new,
 
 #if IS_BUILTIN(CONFIG_RH_KABI_SIZE_ALIGN_CHECKS)
 # define __RH_KABI_CHECK_SIZE_ALIGN(_orig, _new)			\

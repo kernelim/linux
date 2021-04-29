@@ -146,11 +146,6 @@ struct mlx4_ib_mw {
 	struct mlx4_mw		mmw;
 };
 
-struct mlx4_ib_fmr {
-	struct ib_fmr           ibfmr;
-	struct mlx4_fmr         mfmr;
-};
-
 #define MAX_REGS_PER_FLOW 2
 
 struct mlx4_flow_reg_id {
@@ -238,7 +233,8 @@ enum mlx4_ib_mad_ifc_flags {
 };
 
 enum {
-	MLX4_NUM_TUNNEL_BUFS		= 256,
+	MLX4_NUM_TUNNEL_BUFS		= 512,
+	MLX4_NUM_WIRE_BUFS		= 2048,
 };
 
 struct mlx4_ib_tunnel_header {
@@ -459,6 +455,7 @@ struct mlx4_ib_demux_pv_ctx {
 	struct ib_pd *pd;
 	struct work_struct work;
 	struct workqueue_struct *wq;
+	struct workqueue_struct *wi_wq;
 	struct mlx4_ib_demux_pv_qp qp[2];
 };
 
@@ -466,6 +463,7 @@ struct mlx4_ib_demux_ctx {
 	struct ib_device *ib_dev;
 	int port;
 	struct workqueue_struct *wq;
+	struct workqueue_struct *wi_wq;
 	struct workqueue_struct *ud_wq;
 	spinlock_t ud_lock;
 	atomic64_t subnet_prefix;
@@ -497,6 +495,7 @@ struct mlx4_ib_sriov {
 	spinlock_t id_map_lock;
 	struct rb_root sl_id_map;
 	struct list_head cm_list;
+	struct xarray xa_rej_tmout;
 };
 
 struct gid_cache_context {
@@ -679,11 +678,6 @@ static inline struct mlx4_ib_mw *to_mmw(struct ib_mw *ibmw)
 	return container_of(ibmw, struct mlx4_ib_mw, ibmw);
 }
 
-static inline struct mlx4_ib_fmr *to_mfmr(struct ib_fmr *ibfmr)
-{
-	return container_of(ibfmr, struct mlx4_ib_fmr, ibfmr);
-}
-
 static inline struct mlx4_ib_flow *to_mflow(struct ib_flow *ibflow)
 {
 	return container_of(ibflow, struct mlx4_ib_flow, ibflow);
@@ -739,7 +733,7 @@ struct ib_mw *mlx4_ib_alloc_mw(struct ib_pd *pd, enum ib_mw_type type,
 			       struct ib_udata *udata);
 int mlx4_ib_dealloc_mw(struct ib_mw *mw);
 struct ib_mr *mlx4_ib_alloc_mr(struct ib_pd *pd, enum ib_mr_type mr_type,
-			       u32 max_num_sg, struct ib_udata *udata);
+			       u32 max_num_sg);
 int mlx4_ib_map_mr_sg(struct ib_mr *ibmr, struct scatterlist *sg, int sg_nents,
 		      unsigned int *sg_offset);
 int mlx4_ib_modify_cq(struct ib_cq *cq, u16 cq_count, u16 cq_period);
@@ -752,7 +746,7 @@ int mlx4_ib_arm_cq(struct ib_cq *cq, enum ib_cq_notify_flags flags);
 void __mlx4_ib_cq_clean(struct mlx4_ib_cq *cq, u32 qpn, struct mlx4_ib_srq *srq);
 void mlx4_ib_cq_clean(struct mlx4_ib_cq *cq, u32 qpn, struct mlx4_ib_srq *srq);
 
-int mlx4_ib_create_ah(struct ib_ah *ah, struct rdma_ah_attr *ah_attr, u32 flags,
+int mlx4_ib_create_ah(struct ib_ah *ah, struct rdma_ah_init_attr *init_attr,
 		      struct ib_udata *udata);
 int mlx4_ib_create_ah_slave(struct ib_ah *ah, struct rdma_ah_attr *ah_attr,
 			    int slave_sgid_index, u8 *s_mac, u16 vlan_tag);
@@ -794,12 +788,6 @@ int mlx4_ib_process_mad(struct ib_device *ibdev, int mad_flags, u8 port_num,
 int mlx4_ib_mad_init(struct mlx4_ib_dev *dev);
 void mlx4_ib_mad_cleanup(struct mlx4_ib_dev *dev);
 
-struct ib_fmr *mlx4_ib_fmr_alloc(struct ib_pd *pd, int mr_access_flags,
-				  struct ib_fmr_attr *fmr_attr);
-int mlx4_ib_map_phys_fmr(struct ib_fmr *ibfmr, u64 *page_list, int npages,
-			 u64 iova);
-int mlx4_ib_unmap_fmr(struct list_head *fmr_list);
-int mlx4_ib_fmr_dealloc(struct ib_fmr *fmr);
 int __mlx4_ib_query_port(struct ib_device *ibdev, u8 port,
 			 struct ib_port_attr *props, int netw_view);
 int __mlx4_ib_query_pkey(struct ib_device *ibdev, u8 port, u16 index,

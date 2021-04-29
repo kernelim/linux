@@ -56,10 +56,10 @@ ifndef VERBOSE
 endif
 
 FEATURE_USER = .libbpf
-FEATURE_TESTS = libelf libelf-mmap zlib bpf reallocarray
+FEATURE_TESTS = libelf zlib bpf
 FEATURE_DISPLAY = libelf zlib bpf
 
-INCLUDES = -I. -I$(srctree)/tools/include -I$(srctree)/tools/arch/$(ARCH)/include/uapi -I$(srctree)/tools/include/uapi
+INCLUDES = -I. -I$(srctree)/tools/include -I$(srctree)/tools/include/uapi
 FEATURE_CHECK_CFLAGS-bpf = $(INCLUDES)
 
 check_feat := 1
@@ -96,14 +96,6 @@ ifdef EXTRA_CFLAGS
   CFLAGS := $(EXTRA_CFLAGS)
 else
   CFLAGS := -g -Wall
-endif
-
-ifeq ($(feature-libelf-mmap), 1)
-  override CFLAGS += -DHAVE_LIBELF_MMAP_SUPPORT
-endif
-
-ifeq ($(feature-reallocarray), 0)
-  override CFLAGS += -DCOMPAT_NEED_REALLOCARRAY
 endif
 
 # Append required CFLAGS
@@ -152,6 +144,8 @@ GLOBAL_SYM_COUNT = $(shell readelf -s --wide $(BPF_IN_SHARED) | \
 			   awk '/GLOBAL/ && /DEFAULT/ && !/UND/ {print $$NF}' | \
 			   sort -u | wc -l)
 VERSIONED_SYM_COUNT = $(shell readelf --dyn-syms --wide $(OUTPUT)libbpf.so | \
+			      sed 's/\[.*\]//' | \
+			      awk '/GLOBAL/ && /DEFAULT/ && !/UND/ {print $$NF}' | \
 			      grep -Eo '[^ ]+@LIBBPF_' | cut -d@ -f1 | sort -u | wc -l)
 
 CMD_TARGETS = $(LIB_TARGET) $(PC_FILE)
@@ -219,6 +213,8 @@ check_abi: $(OUTPUT)libbpf.so
 		    awk '/GLOBAL/ && /DEFAULT/ && !/UND/ {print $$NF}'|  \
 		    sort -u > $(OUTPUT)libbpf_global_syms.tmp;		 \
 		readelf --dyn-syms --wide $(OUTPUT)libbpf.so |		 \
+		    sed 's/\[.*\]//' |					 \
+		    awk '/GLOBAL/ && /DEFAULT/ && !/UND/ {print $$NF}'|  \
 		    grep -Eo '[^ ]+@LIBBPF_' | cut -d@ -f1 |		 \
 		    sort -u > $(OUTPUT)libbpf_versioned_syms.tmp; 	 \
 		diff -u $(OUTPUT)libbpf_global_syms.tmp			 \
@@ -264,7 +260,7 @@ install_pkgconfig: $(PC_FILE)
 	$(call QUIET_INSTALL, $(PC_FILE)) \
 		$(call do_install,$(PC_FILE),$(libdir_SQ)/pkgconfig,644)
 
-install: install_lib install_pkgconfig
+install: install_lib install_pkgconfig install_headers
 
 ### Cleaning rules
 

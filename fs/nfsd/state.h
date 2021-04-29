@@ -56,13 +56,6 @@ typedef struct {
 	stateid_opaque_t        si_opaque;
 } stateid_t;
 
-#define STATEID_FMT	"(%08x/%08x/%08x/%08x)"
-#define STATEID_VAL(s) \
-	(s)->si_opaque.so_clid.cl_boot, \
-	(s)->si_opaque.so_clid.cl_id, \
-	(s)->si_opaque.so_id, \
-	(s)->si_generation
-
 struct nfsd4_callback {
 	struct nfs4_client *cb_clp;
 	struct rpc_message cb_msg;

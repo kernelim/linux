@@ -273,7 +273,12 @@ static void __gfs2_glock_put(struct gfs2_glock *gl)
 	gfs2_glock_remove_from_lru(gl);
 	spin_unlock(&gl->gl_lockref.lock);
 	GLOCK_BUG_ON(gl, !list_empty(&gl->gl_holders));
-	GLOCK_BUG_ON(gl, mapping && mapping->nrpages && !gfs2_withdrawn(sdp));
+	if (mapping) {
+		truncate_inode_pages_final(mapping);
+		if (!gfs2_withdrawn(sdp))
+			GLOCK_BUG_ON(gl, mapping->nrpages ||
+				     mapping->nrexceptional);
+	}
 	trace_gfs2_glock_put(gl);
 	sdp->sd_lockstruct.ls_ops->lm_put_lock(gl);
 }
@@ -596,7 +601,14 @@ __acquires(&gl->gl_lockref.lock)
 	GLOCK_BUG_ON(gl, gl->gl_state == gl->gl_target);
 	if ((target == LM_ST_UNLOCKED || target == LM_ST_DEFERRED) &&
 	    glops->go_inval) {
-		set_bit(GLF_INVALIDATE_IN_PROGRESS, &gl->gl_flags);
+		/*
+		 * If another process is already doing the invalidate, let that
+		 * finish first.  The glock state machine will get back to this
+		 * holder again later.
+		 */
+		if (test_and_set_bit(GLF_INVALIDATE_IN_PROGRESS,
+				     &gl->gl_flags))
+			return;
 		do_error(gl, 0); /* Fail queued try locks */
 	}
 	gl->gl_req = target;
@@ -617,7 +629,7 @@ __acquires(&gl->gl_lockref.lock)
 				fs_err(sdp, "Error %d syncing glock \n", ret);
 				gfs2_dump_glock(NULL, gl, true);
 			}
-			goto out;
+			goto skip_inval;
 		}
 	}
 	if (test_bit(GLF_INVALIDATE_IN_PROGRESS, &gl->gl_flags)) {
@@ -637,6 +649,7 @@ __acquires(&gl->gl_lockref.lock)
 		clear_bit(GLF_INVALIDATE_IN_PROGRESS, &gl->gl_flags);
 	}
 
+skip_inval:
 	gfs2_glock_hold(gl);
 	/*
 	 * Check for an error encountered since we called go_sync and go_inval.
@@ -784,9 +797,11 @@ static void gfs2_glock_poke(struct gfs2_glock *gl)
 	struct gfs2_holder gh;
 	int error;
 
-	error = gfs2_glock_nq_init(gl, LM_ST_SHARED, flags, &gh);
+	gfs2_holder_init(gl, LM_ST_SHARED, flags, &gh);
+	error = gfs2_glock_nq(&gh);
 	if (!error)
 		gfs2_glock_dq(&gh);
+	gfs2_holder_uninit(&gh);
 }
 
 static bool gfs2_try_evict(struct gfs2_glock *gl)

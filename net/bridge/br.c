@@ -42,7 +42,9 @@ static int br_device_event(struct notifier_block *unused, unsigned long event, v
 
 	/* register of bridge completed, add sysfs entries */
 	if ((dev->priv_flags & IFF_EBRIDGE) && event == NETDEV_REGISTER) {
-		br_sysfs_addbr(dev);
+		err = br_sysfs_addbr(dev);
+		if (err)
+			return notifier_from_errno(err);
 		return NOTIFY_DONE;
 	}
 
@@ -177,6 +179,11 @@ static int br_switchdev_event(struct notifier_block *unused,
 		fdb_info = ptr;
 		br_fdb_offloaded_set(br, p, fdb_info->addr,
 				     fdb_info->vid, fdb_info->offloaded);
+		break;
+	case SWITCHDEV_FDB_FLUSH_TO_BRIDGE:
+		fdb_info = ptr;
+		/* Don't delete static entries */
+		br_fdb_delete_by_port(br, p, fdb_info->vid, 0);
 		break;
 	}
 

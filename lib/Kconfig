@@ -413,10 +413,6 @@ config XARRAY_MULTI
 	  Support entries which occupy multiple consecutive indices in the
 	  XArray.
 
-config RADIX_TREE_MULTIORDER
-	bool
-	select XARRAY_MULTI
-
 config ASSOCIATIVE_ARRAY
 	bool
 	help
@@ -577,6 +573,11 @@ config OID_REGISTRY
 config UCS2_STRING
         tristate
 
+#
+# generic vdso
+#
+source "lib/vdso/Kconfig"
+
 source "lib/fonts/Kconfig"
 
 config SG_SPLIT
@@ -632,6 +633,13 @@ config PARMAN
 config PRIME_NUMBERS
 	tristate
 
+config PLDMFW
+	bool
+	default n
+
+config OBJAGG
+	tristate "objagg" if COMPILE_TEST
+
 config STRING_SELFTEST
 	tristate "Test string functions"
 
@@ -654,6 +662,3 @@ config GENERIC_LIB_CMPDI2
 
 config GENERIC_LIB_UCMPDI2
 	bool
-
-config OBJAGG
-	tristate "objagg" if COMPILE_TEST

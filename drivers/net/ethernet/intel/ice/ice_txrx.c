@@ -509,6 +509,22 @@ static unsigned int ice_rx_offset(struct ice_ring *rx_ring)
 	return 0;
 }
 
+static unsigned int
+ice_rx_frame_truesize(struct ice_ring *rx_ring, unsigned int __maybe_unused size)
+{
+	unsigned int truesize;
+
+#if (PAGE_SIZE < 8192)
+	truesize = ice_rx_pg_size(rx_ring) / 2; /* Must be power-of-2 */
+#else
+	truesize = ice_rx_offset(rx_ring) ?
+		SKB_DATA_ALIGN(ice_rx_offset(rx_ring) + size) +
+		SKB_DATA_ALIGN(sizeof(struct skb_shared_info)) :
+		SKB_DATA_ALIGN(size);
+#endif
+	return truesize;
+}
+
 /**
  * ice_run_xdp - Executes an XDP program on initialized xdp_buff
  * @rx_ring: Rx ring
@@ -539,10 +555,10 @@ ice_run_xdp(struct ice_ring *rx_ring, struct xdp_buff *xdp,
 		break;
 	default:
 		bpf_warn_invalid_xdp_action(act);
-		/* fallthrough -- not supported action */
+		fallthrough;
 	case XDP_ABORTED:
 		trace_xdp_exception(rx_ring->netdev, xdp_prog, act);
-		/* fallthrough -- handle aborts by dropping frame */
+		fallthrough;
 	case XDP_DROP:
 		result = ICE_XDP_CONSUMED;
 		break;
@@ -615,10 +631,8 @@ ice_alloc_mapped_page(struct ice_ring *rx_ring, struct ice_rx_buf *bi)
 	dma_addr_t dma;
 
 	/* since we are recycling buffers we should seldom need to alloc */
-	if (likely(page)) {
-		rx_ring->rx_stats.page_reuse_count++;
+	if (likely(page))
 		return true;
-	}
 
 	/* alloc new page for storage */
 	page = dev_alloc_pages(ice_rx_pg_order(rx_ring));
@@ -905,10 +919,7 @@ ice_build_skb(struct ice_ring *rx_ring, struct ice_rx_buf *rx_buf,
 	 * likely have a consumer accessing first few bytes of meta
 	 * data, and then actual data.
 	 */
-	prefetch(xdp->data_meta);
-#if L1_CACHE_BYTES < 128
-	prefetch((void *)(xdp->data + L1_CACHE_BYTES));
-#endif
+	net_prefetch(xdp->data_meta);
 	/* build an skb around the page buffer */
 	skb = build_skb(xdp->data_hard_start, truesize);
 	if (unlikely(!skb))
@@ -950,10 +961,7 @@ ice_construct_skb(struct ice_ring *rx_ring, struct ice_rx_buf *rx_buf,
 	struct sk_buff *skb;
 
 	/* prefetch first cache line of first page */
-	prefetch(xdp->data);
-#if L1_CACHE_BYTES < 128
-	prefetch((void *)(xdp->data + L1_CACHE_BYTES));
-#endif /* L1_CACHE_BYTES */
+	net_prefetch(xdp->data);
 
 	/* allocate a skb to store the frags */
 	skb = __napi_alloc_skb(&rx_ring->q_vector->napi, ICE_RX_HDR_SIZE,
@@ -1017,7 +1025,6 @@ static void ice_put_rx_buf(struct ice_ring *rx_ring, struct ice_rx_buf *rx_buf)
 	if (ice_can_reuse_rx_page(rx_buf)) {
 		/* hand second half of page back to the ring */
 		ice_reuse_rx_page(rx_ring, rx_buf);
-		rx_ring->rx_stats.page_reuse_count++;
 	} else {
 		/* we are not reusing the buffer so unmap it */
 		dma_unmap_page_attrs(rx_ring->dev, rx_buf->dma,
@@ -1078,6 +1085,10 @@ int ice_clean_rx_irq(struct ice_ring *rx_ring, int budget)
 	bool failure;
 
 	xdp.rxq = &rx_ring->xdp_rxq;
+	/* Frame size depend on rx_ring setup when PAGE_SIZE=4K */
+#if (PAGE_SIZE < 8192)
+	xdp.frame_sz = ice_rx_frame_truesize(rx_ring, 0);
+#endif
 
 	/* start the loop to process Rx packets bounded by 'budget' */
 	while (likely(total_rx_pkts < (unsigned int)budget)) {
@@ -1131,6 +1142,10 @@ int ice_clean_rx_irq(struct ice_ring *rx_ring, int budget)
 		xdp.data_hard_start = xdp.data - ice_rx_offset(rx_ring);
 		xdp.data_meta = xdp.data;
 		xdp.data_end = xdp.data + size;
+#if (PAGE_SIZE > 4096)
+		/* At larger PAGE_SIZE, frame_sz depend on len size */
+		xdp.frame_sz = ice_rx_frame_truesize(rx_ring, size);
+#endif
 
 		rcu_read_lock();
 		xdp_prog = READ_ONCE(rx_ring->xdp_prog);
@@ -1144,16 +1159,8 @@ int ice_clean_rx_irq(struct ice_ring *rx_ring, int budget)
 		if (!xdp_res)
 			goto construct_skb;
 		if (xdp_res & (ICE_XDP_TX | ICE_XDP_REDIR)) {
-			unsigned int truesize;
-
-#if (PAGE_SIZE < 8192)
-			truesize = ice_rx_pg_size(rx_ring) / 2;
-#else
-			truesize = SKB_DATA_ALIGN(ice_rx_offset(rx_ring) +
-						  size);
-#endif
 			xdp_xmit |= xdp_res;
-			ice_rx_buf_adjust_pg_offset(rx_buf, truesize);
+			ice_rx_buf_adjust_pg_offset(rx_buf, xdp.frame_sz);
 		} else {
 			rx_buf->pagecnt_bias++;
 		}
@@ -1238,12 +1245,12 @@ construct_skb:
  * @itr: ITR value to update
  *
  * Calculate how big of an increment should be applied to the ITR value passed
- * in based on wmem_default, SKB overhead, Ethernet overhead, and the current
+ * in based on wmem_default, SKB overhead, ethernet overhead, and the current
  * link speed.
  *
  * The following is a calculation derived from:
  *  wmem_default / (size + overhead) = desired_pkts_per_int
- *  rate / bits_per_byte / (size + Ethernet overhead) = pkt_rate
+ *  rate / bits_per_byte / (size + ethernet overhead) = pkt_rate
  *  (desired_pkt_rate / pkt_rate) * usecs_per_sec = ITR value
  *
  * Assuming wmem_default is 212992 and overhead is 640 bytes per
@@ -2037,49 +2044,25 @@ int ice_tx_csum(struct ice_tx_buf *first, struct ice_tx_offload_params *off)
  *
  * Checks the skb and set up correspondingly several generic transmit flags
  * related to VLAN tagging for the HW, such as VLAN, DCB, etc.
- *
- * Returns error code indicate the frame should be dropped upon error and the
- * otherwise returns 0 to indicate the flags has been set properly.
  */
-static int
+static void
 ice_tx_prepare_vlan_flags(struct ice_ring *tx_ring, struct ice_tx_buf *first)
 {
 	struct sk_buff *skb = first->skb;
-	__be16 protocol = skb->protocol;
 
-	if (protocol == htons(ETH_P_8021Q) &&
-	    !(tx_ring->netdev->features & NETIF_F_HW_VLAN_CTAG_TX)) {
-		/* when HW VLAN acceleration is turned off by the user the
-		 * stack sets the protocol to 8021q so that the driver
-		 * can take any steps required to support the SW only
-		 * VLAN handling. In our case the driver doesn't need
-		 * to take any further steps so just set the protocol
-		 * to the encapsulated ethertype.
-		 */
-		skb->protocol = vlan_get_protocol(skb);
-		return 0;
-	}
+	/* nothing left to do, software offloaded VLAN */
+	if (!skb_vlan_tag_present(skb) && eth_type_vlan(skb->protocol))
+		return;
 
-	/* if we have a HW VLAN tag being added, default to the HW one */
+	/* currently, we always assume 802.1Q for VLAN insertion as VLAN
+	 * insertion for 802.1AD is not supported
+	 */
 	if (skb_vlan_tag_present(skb)) {
 		first->tx_flags |= skb_vlan_tag_get(skb) << ICE_TX_FLAGS_VLAN_S;
 		first->tx_flags |= ICE_TX_FLAGS_HW_VLAN;
-	} else if (protocol == htons(ETH_P_8021Q)) {
-		struct vlan_hdr *vhdr, _vhdr;
-
-		/* for SW VLAN, check the next protocol and store the tag */
-		vhdr = (struct vlan_hdr *)skb_header_pointer(skb, ETH_HLEN,
-							     sizeof(_vhdr),
-							     &_vhdr);
-		if (!vhdr)
-			return -EINVAL;
-
-		first->tx_flags |= ntohs(vhdr->h_vlan_TCI) <<
-				   ICE_TX_FLAGS_VLAN_S;
-		first->tx_flags |= ICE_TX_FLAGS_SW_VLAN;
 	}
 
-	return ice_tx_prepare_vlan_flags_dcb(tx_ring, first);
+	ice_tx_prepare_vlan_flags_dcb(tx_ring, first);
 }
 
 /**
@@ -2302,9 +2285,29 @@ static bool __ice_chk_linearize(struct sk_buff *skb)
 	/* Walk through fragments adding latest fragment, testing it, and
 	 * then removing stale fragments from the sum.
 	 */
-	stale = &skb_shinfo(skb)->frags[0];
-	for (;;) {
+	for (stale = &skb_shinfo(skb)->frags[0];; stale++) {
+		int stale_size = skb_frag_size(stale);
+
 		sum += skb_frag_size(frag++);
+
+		/* The stale fragment may present us with a smaller
+		 * descriptor than the actual fragment size. To account
+		 * for that we need to remove all the data on the front and
+		 * figure out what the remainder would be in the last
+		 * descriptor associated with the fragment.
+		 */
+		if (stale_size > ICE_MAX_DATA_PER_TXD) {
+			int align_pad = -(skb_frag_off(stale)) &
+					(ICE_MAX_READ_REQ_SIZE - 1);
+
+			sum -= align_pad;
+			stale_size -= align_pad;
+
+			do {
+				sum -= ICE_MAX_DATA_PER_TXD_ALIGNED;
+				stale_size -= ICE_MAX_DATA_PER_TXD_ALIGNED;
+			} while (stale_size > ICE_MAX_DATA_PER_TXD);
+		}
 
 		/* if sum is negative we failed to make sufficient progress */
 		if (sum < 0)
@@ -2313,7 +2316,7 @@ static bool __ice_chk_linearize(struct sk_buff *skb)
 		if (!nr_frags--)
 			break;
 
-		sum -= skb_frag_size(stale++);
+		sum -= stale_size;
 	}
 
 	return false;
@@ -2387,8 +2390,7 @@ ice_xmit_frame_ring(struct sk_buff *skb, struct ice_ring *tx_ring)
 	first->tx_flags = 0;
 
 	/* prepare the VLAN tagging flags for Tx */
-	if (ice_tx_prepare_vlan_flags(tx_ring, first))
-		goto out_drop;
+	ice_tx_prepare_vlan_flags(tx_ring, first);
 
 	/* set up TSO offload */
 	tso = ice_tso(first, &offload);

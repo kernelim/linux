@@ -1,3 +1,6 @@
+.. SPDX-License-Identifier: GPL-2.0
+.. include:: <isonum.txt>
+
 .. |struct dev_pm_ops| replace:: :c:type:`struct dev_pm_ops <dev_pm_ops>`
 .. |struct dev_pm_domain| replace:: :c:type:`struct dev_pm_domain <dev_pm_domain>`
 .. |struct bus_type| replace:: :c:type:`struct bus_type <bus_type>`
@@ -10,11 +13,12 @@
 Device Power Management Basics
 ==============================
 
-::
+:Copyright: |copy| 2010-2011 Rafael J. Wysocki <rjw@sisk.pl>, Novell Inc.
+:Copyright: |copy| 2010 Alan Stern <stern@rowland.harvard.edu>
+:Copyright: |copy| 2016 Intel Corporation
 
- Copyright (c) 2010-2011 Rafael J. Wysocki <rjw@sisk.pl>, Novell Inc.
- Copyright (c) 2010 Alan Stern <stern@rowland.harvard.edu>
- Copyright (c) 2016 Intel Corp., Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+:Author: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+
 
 Most of the code in Linux is device drivers, so most of the Linux power
 management (PM) code is also driver-specific.  Most drivers will do very
@@ -355,9 +359,9 @@ the phases are: ``prepare``, ``suspend``, ``suspend_late``, ``suspend_noirq``.
 	runtime PM disabled.
 
 	This feature also can be controlled by device drivers by using the
-	``DPM_FLAG_NEVER_SKIP`` and ``DPM_FLAG_SMART_PREPARE`` driver power
-	management flags.  [Typically, they are set at the time the driver is
-	probed against the device in question by passing them to the
+	``DPM_FLAG_NO_DIRECT_COMPLETE`` and ``DPM_FLAG_SMART_PREPARE`` driver
+	power management flags.  [Typically, they are set at the time the driver
+	is probed against the device in question by passing them to the
 	:c:func:`dev_pm_set_driver_flags` helper function.]  If the first of
 	these flags is set, the PM core will not apply the direct-complete
 	procedure described above to the given device and, consequenty, to any
@@ -797,7 +801,7 @@ general.]
 However, it often is desirable to leave devices in suspend after system
 transitions to the working state, especially if those devices had been in
 runtime suspend before the preceding system-wide suspend (or analogous)
-transition.  Device drivers can use the ``DPM_FLAG_LEAVE_SUSPENDED`` flag to
+transition.  Device drivers can use the ``DPM_FLAG_MAY_SKIP_RESUME`` flag to
 indicate to the PM core (and middle-layer code) that they prefer the specific
 devices handled by them to be left suspended and they have no problems with
 skipping their system-wide resume callbacks for this reason.  Whether or not the
@@ -819,7 +823,7 @@ device really can be left in suspend.
 
 For devices whose "noirq", "late" and "early" driver callbacks are invoked
 directly by the PM core, all of the system-wide resume callbacks are skipped if
-``DPM_FLAG_LEAVE_SUSPENDED`` is set and the device is in runtime suspend during
+``DPM_FLAG_MAY_SKIP_RESUME`` is set and the device is in runtime suspend during
 the ``suspend_noirq`` (or analogous) phase or the transition under way is a
 proper system suspend (rather than anything related to hibernation) and the
 device's wakeup settings are suitable for runtime PM (that is, it cannot

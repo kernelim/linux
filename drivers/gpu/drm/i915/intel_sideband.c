@@ -242,8 +242,9 @@ u32 vlv_dpio_read(struct drm_i915_private *i915, enum pipe pipe, int reg)
 	 * FIXME: There might be some registers where all 1's is a valid value,
 	 * so ideally we should check the register offset instead...
 	 */
-	WARN(val == 0xffffffff, "DPIO read pipe %c reg 0x%x == 0x%x\n",
-	     pipe_name(pipe), reg, val);
+	drm_WARN(&i915->drm, val == 0xffffffff,
+		 "DPIO read pipe %c reg 0x%x == 0x%x\n",
+		 pipe_name(pipe), reg, val);
 
 	return val;
 }
@@ -335,7 +336,7 @@ void intel_sbi_write(struct drm_i915_private *i915, u16 reg, u32 value,
 	intel_sbi_rw(i915, reg, destination, &value, false);
 }
 
-static inline int gen6_check_mailbox_status(u32 mbox)
+static int gen6_check_mailbox_status(u32 mbox)
 {
 	switch (mbox & GEN6_PCODE_ERROR_MASK) {
 	case GEN6_PCODE_SUCCESS:
@@ -355,7 +356,7 @@ static inline int gen6_check_mailbox_status(u32 mbox)
 	}
 }
 
-static inline int gen7_check_mailbox_status(u32 mbox)
+static int gen7_check_mailbox_status(u32 mbox)
 {
 	switch (mbox & GEN6_PCODE_ERROR_MASK) {
 	case GEN6_PCODE_SUCCESS:
@@ -366,6 +367,12 @@ static inline int gen7_check_mailbox_status(u32 mbox)
 		return -ETIMEDOUT;
 	case GEN7_PCODE_ILLEGAL_DATA:
 		return -EINVAL;
+	case GEN11_PCODE_ILLEGAL_SUBCOMMAND:
+		return -ENXIO;
+	case GEN11_PCODE_LOCKED:
+		return -EBUSY;
+	case GEN11_PCODE_REJECTED:
+		return -EACCES;
 	case GEN7_PCODE_MIN_FREQ_TABLE_GT_RATIO_OUT_OF_RANGE:
 		return -EOVERFLOW;
 	default:
@@ -424,7 +431,7 @@ int sandybridge_pcode_read(struct drm_i915_private *i915, u32 mbox,
 
 	mutex_lock(&i915->sb_lock);
 	err = __sandybridge_pcode_rw(i915, mbox, val, val1,
-				     500, 0,
+				     500, 20,
 				     true);
 	mutex_unlock(&i915->sb_lock);
 
@@ -526,7 +533,7 @@ int skl_pcode_request(struct drm_i915_private *i915, u32 mbox, u32 request,
 	 */
 	drm_dbg_kms(&i915->drm,
 		    "PCODE timeout, retrying with preemption disabled\n");
-	WARN_ON_ONCE(timeout_base_ms > 3);
+	drm_WARN_ON_ONCE(&i915->drm, timeout_base_ms > 3);
 	preempt_disable();
 	ret = wait_for_atomic(COND, 50);
 	preempt_enable();
@@ -535,4 +542,19 @@ out:
 	mutex_unlock(&i915->sb_lock);
 	return ret ? ret : status;
 #undef COND
+}
+
+void intel_pcode_init(struct drm_i915_private *i915)
+{
+	int ret;
+
+	if (!IS_DGFX(i915))
+		return;
+
+	ret = skl_pcode_request(i915, DG1_PCODE_STATUS,
+				DG1_UNCORE_GET_INIT_STATUS,
+				DG1_UNCORE_INIT_STATUS_COMPLETE,
+				DG1_UNCORE_INIT_STATUS_COMPLETE, 50);
+	if (ret)
+		drm_err(&i915->drm, "Pcode did not report uncore initialization completion!\n");
 }

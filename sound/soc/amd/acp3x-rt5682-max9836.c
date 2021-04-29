@@ -30,6 +30,7 @@ static struct snd_soc_jack pco_jack;
 static struct clk *rt5682_dai_wclk;
 static struct clk *rt5682_dai_bclk;
 static struct gpio_desc *dmic_sel;
+void *soc_is_rltk_max(struct device *dev);
 
 static int acp3x_5682_init(struct snd_soc_pcm_runtime *rtd)
 {
@@ -105,7 +106,7 @@ static int acp3x_5682_init(struct snd_soc_pcm_runtime *rtd)
 static int rt5682_clk_enable(struct snd_pcm_substream *substream)
 {
 	int ret = 0;
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
 
 	/* RT5682 will support only 48K output with 48M mclk */
 	clk_set_rate(rt5682_dai_wclk, 48000);
@@ -116,6 +117,34 @@ static int rt5682_clk_enable(struct snd_pcm_substream *substream)
 		return ret;
 	}
 
+	return ret;
+}
+
+static int acp3x_1015_hw_params(struct snd_pcm_substream *substream,
+					struct snd_pcm_hw_params *params)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *codec_dai;
+	int srate, i, ret;
+
+	ret = 0;
+	srate = params_rate(params);
+
+	for_each_rtd_codec_dais(rtd, i, codec_dai) {
+		if (strcmp(codec_dai->name, "rt1015-aif"))
+			continue;
+		ret = snd_soc_dai_set_bclk_ratio(codec_dai, 64);
+		if (ret < 0)
+			return ret;
+		ret = snd_soc_dai_set_pll(codec_dai, 0, RT1015_PLL_S_BCLK,
+						64 * srate, 256 * srate);
+		if (ret < 0)
+			return ret;
+		ret = snd_soc_dai_set_sysclk(codec_dai, RT1015_SCLK_S_PLL,
+					256 * srate, SND_SOC_CLOCK_IN);
+		if (ret < 0)
+			return ret;
+	}
 	return ret;
 }
 
@@ -147,7 +176,7 @@ static const struct snd_pcm_hw_constraint_list constraints_channels = {
 static int acp3x_5682_startup(struct snd_pcm_substream *substream)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
 	struct snd_soc_card *card = rtd->card;
 	struct acp3x_platform_info *machine = snd_soc_card_get_drvdata(card);
 
@@ -165,7 +194,7 @@ static int acp3x_5682_startup(struct snd_pcm_substream *substream)
 static int acp3x_max_startup(struct snd_pcm_substream *substream)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
 	struct snd_soc_card *card = rtd->card;
 	struct acp3x_platform_info *machine = snd_soc_card_get_drvdata(card);
 
@@ -181,32 +210,34 @@ static int acp3x_max_startup(struct snd_pcm_substream *substream)
 
 static int acp3x_ec_dmic0_startup(struct snd_pcm_substream *substream)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
 	struct snd_soc_card *card = rtd->card;
 	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
 	struct acp3x_platform_info *machine = snd_soc_card_get_drvdata(card);
 
 	machine->cap_i2s_instance = I2S_BT_INSTANCE;
 	snd_soc_dai_set_bclk_ratio(codec_dai, 64);
-	if (dmic_sel)
-		gpiod_set_value(dmic_sel, 0);
 
 	return rt5682_clk_enable(substream);
 }
 
-static int acp3x_ec_dmic1_startup(struct snd_pcm_substream *substream)
+static int dmic_switch;
+
+static int dmic_get(struct snd_kcontrol *kcontrol,
+			 struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_card *card = rtd->card;
-	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
-	struct acp3x_platform_info *machine = snd_soc_card_get_drvdata(card);
+	ucontrol->value.integer.value[0] = dmic_switch;
+	return 0;
+}
 
-	machine->cap_i2s_instance = I2S_BT_INSTANCE;
-	snd_soc_dai_set_bclk_ratio(codec_dai, 64);
-	if (dmic_sel)
-		gpiod_set_value(dmic_sel, 1);
-
-	return rt5682_clk_enable(substream);
+static int dmic_set(struct snd_kcontrol *kcontrol,
+			 struct snd_ctl_elem_value *ucontrol)
+{
+	if (dmic_sel) {
+		dmic_switch = ucontrol->value.integer.value[0];
+		gpiod_set_value(dmic_sel, dmic_switch);
+	}
+	return 0;
 }
 
 static void rt5682_shutdown(struct snd_pcm_substream *substream)
@@ -222,15 +253,11 @@ static const struct snd_soc_ops acp3x_5682_ops = {
 static const struct snd_soc_ops acp3x_max_play_ops = {
 	.startup = acp3x_max_startup,
 	.shutdown = rt5682_shutdown,
+	.hw_params = acp3x_1015_hw_params,
 };
 
 static const struct snd_soc_ops acp3x_ec_cap0_ops = {
 	.startup = acp3x_ec_dmic0_startup,
-	.shutdown = rt5682_shutdown,
-};
-
-static const struct snd_soc_ops acp3x_ec_cap1_ops = {
-	.startup = acp3x_ec_dmic1_startup,
 	.shutdown = rt5682_shutdown,
 };
 
@@ -279,61 +306,82 @@ static struct snd_soc_dai_link acp3x_dai_5682_98357[] = {
 		.ops = &acp3x_ec_cap0_ops,
 		SND_SOC_DAILINK_REG(acp3x_bt, cros_ec, platform),
 	},
-	{
-		.name = "acp3x-ec-dmic1-capture",
-		.stream_name = "Capture DMIC1",
-		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF
-				| SND_SOC_DAIFMT_CBS_CFS,
-		.dpcm_capture = 1,
-		.ops = &acp3x_ec_cap1_ops,
-		SND_SOC_DAILINK_REG(acp3x_bt, cros_ec, platform),
-	},
 };
 
-static const struct snd_soc_dapm_widget acp3x_widgets[] = {
+static const char * const dmic_mux_text[] = {
+	"Front Mic",
+	"Rear Mic",
+};
+
+static SOC_ENUM_SINGLE_DECL(
+		acp3x_dmic_enum, SND_SOC_NOPM, 0, dmic_mux_text);
+
+static const struct snd_kcontrol_new acp3x_dmic_mux_control =
+	SOC_DAPM_ENUM_EXT("DMIC Select Mux", acp3x_dmic_enum,
+			  dmic_get, dmic_set);
+
+static const struct snd_soc_dapm_widget acp3x_5682_widgets[] = {
 	SND_SOC_DAPM_HP("Headphone Jack", NULL),
 	SND_SOC_DAPM_SPK("Spk", NULL),
 	SND_SOC_DAPM_MIC("Headset Mic", NULL),
+	SND_SOC_DAPM_MUX("Dmic Mux", SND_SOC_NOPM, 0, 0,
+			 &acp3x_dmic_mux_control),
 };
 
-static const struct snd_soc_dapm_route acp3x_audio_route[] = {
+static const struct snd_soc_dapm_route acp3x_5682_audio_route[] = {
 	{"Headphone Jack", NULL, "HPOL"},
 	{"Headphone Jack", NULL, "HPOR"},
 	{"IN1P", NULL, "Headset Mic"},
 	{"Spk", NULL, "Speaker"},
+	{"Dmic Mux", "Front Mic", "DMIC"},
+	{"Dmic Mux", "Rear Mic", "DMIC"},
 };
 
-static const struct snd_kcontrol_new acp3x_mc_controls[] = {
+static const struct snd_kcontrol_new acp3x_5682_mc_controls[] = {
 	SOC_DAPM_PIN_SWITCH("Headphone Jack"),
 	SOC_DAPM_PIN_SWITCH("Spk"),
 	SOC_DAPM_PIN_SWITCH("Headset Mic"),
 };
 
-static struct snd_soc_card acp3x_card = {
+static struct snd_soc_card acp3x_5682 = {
 	.name = "acp3xalc5682m98357",
 	.owner = THIS_MODULE,
 	.dai_link = acp3x_dai_5682_98357,
 	.num_links = ARRAY_SIZE(acp3x_dai_5682_98357),
-	.dapm_widgets = acp3x_widgets,
-	.num_dapm_widgets = ARRAY_SIZE(acp3x_widgets),
-	.dapm_routes = acp3x_audio_route,
-	.num_dapm_routes = ARRAY_SIZE(acp3x_audio_route),
-	.controls = acp3x_mc_controls,
-	.num_controls = ARRAY_SIZE(acp3x_mc_controls),
+	.dapm_widgets = acp3x_5682_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(acp3x_5682_widgets),
+	.dapm_routes = acp3x_5682_audio_route,
+	.num_dapm_routes = ARRAY_SIZE(acp3x_5682_audio_route),
+	.controls = acp3x_5682_mc_controls,
+	.num_controls = ARRAY_SIZE(acp3x_5682_mc_controls),
 };
+
+void *soc_is_rltk_max(struct device *dev)
+{
+	const struct acpi_device_id *match;
+
+	match = acpi_match_device(dev->driver->acpi_match_table, dev);
+	if (!match)
+		return NULL;
+	return (void *)match->driver_data;
+}
 
 static int acp3x_probe(struct platform_device *pdev)
 {
 	int ret;
 	struct snd_soc_card *card;
 	struct acp3x_platform_info *machine;
+	struct device *dev = &pdev->dev;
+
+	card = (struct snd_soc_card *)soc_is_rltk_max(dev);
+	if (!card)
+		return -ENODEV;
 
 	machine = devm_kzalloc(&pdev->dev, sizeof(*machine), GFP_KERNEL);
 	if (!machine)
 		return -ENOMEM;
 
-	card = &acp3x_card;
-	acp3x_card.dev = &pdev->dev;
+	card->dev = &pdev->dev;
 	platform_set_drvdata(pdev, card);
 	snd_soc_card_set_drvdata(card, machine);
 
@@ -344,18 +392,23 @@ static int acp3x_probe(struct platform_device *pdev)
 		return PTR_ERR(dmic_sel);
 	}
 
-	ret = devm_snd_soc_register_card(&pdev->dev, &acp3x_card);
+	ret = devm_snd_soc_register_card(&pdev->dev, card);
 	if (ret) {
-		dev_err(&pdev->dev,
+		if (ret != -EPROBE_DEFER)
+			dev_err(&pdev->dev,
 				"devm_snd_soc_register_card(%s) failed: %d\n",
-				acp3x_card.name, ret);
-		return ret;
+				card->name, ret);
+		else
+			dev_dbg(&pdev->dev,
+				"devm_snd_soc_register_card(%s) probe deferred: %d\n",
+				card->name, ret);
 	}
-	return 0;
+
+	return ret;
 }
 
 static const struct acpi_device_id acp3x_audio_acpi_match[] = {
-	{ "AMDI5682", 0 },
+	{ "AMDI5682", (unsigned long)&acp3x_5682},
 	{},
 };
 MODULE_DEVICE_TABLE(acpi, acp3x_audio_acpi_match);

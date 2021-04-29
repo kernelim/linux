@@ -37,7 +37,6 @@ netdev_tx_t br_dev_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct pcpu_sw_netstats *brstats = this_cpu_ptr(br->stats);
 	const struct nf_br_ops *nf_ops;
 	const unsigned char *dest;
-	struct ethhdr *eth;
 	u16 vid = 0;
 
 	rcu_read_lock();
@@ -56,15 +55,14 @@ netdev_tx_t br_dev_xmit(struct sk_buff *skb, struct net_device *dev)
 	BR_INPUT_SKB_CB(skb)->brdev = dev;
 
 	skb_reset_mac_header(skb);
-	eth = eth_hdr(skb);
 	skb_pull(skb, ETH_HLEN);
 
 	if (!br_allowed_ingress(br, br_vlan_group_rcu(br), skb, &vid))
 		goto out;
 
 	if (IS_ENABLED(CONFIG_INET) &&
-	    (eth->h_proto == htons(ETH_P_ARP) ||
-	     eth->h_proto == htons(ETH_P_RARP)) &&
+	    (eth_hdr(skb)->h_proto == htons(ETH_P_ARP) ||
+	     eth_hdr(skb)->h_proto == htons(ETH_P_RARP)) &&
 	    br_opt_get(br, BROPT_NEIGH_SUPPRESS_ENABLED)) {
 		br_do_proxy_suppress_arp(skb, br, vid, NULL);
 	} else if (IS_ENABLED(CONFIG_IPV6) &&
@@ -109,6 +107,13 @@ out:
 	return NETDEV_TX_OK;
 }
 
+static struct lock_class_key bridge_netdev_addr_lock_key;
+
+static void br_set_lockdep_class(struct net_device *dev)
+{
+	lockdep_set_class(&dev->addr_list_lock, &bridge_netdev_addr_lock_key);
+}
+
 static int br_dev_init(struct net_device *dev)
 {
 	struct net_bridge *br = netdev_priv(dev);
@@ -124,9 +129,17 @@ static int br_dev_init(struct net_device *dev)
 		return err;
 	}
 
+	err = br_mdb_hash_init(br);
+	if (err) {
+		free_percpu(br->stats);
+		br_fdb_hash_fini(br);
+		return err;
+	}
+
 	err = br_vlan_init(br);
 	if (err) {
 		free_percpu(br->stats);
+		br_mdb_hash_fini(br);
 		br_fdb_hash_fini(br);
 		return err;
 	}
@@ -135,9 +148,11 @@ static int br_dev_init(struct net_device *dev)
 	if (err) {
 		free_percpu(br->stats);
 		br_vlan_flush(br);
+		br_mdb_hash_fini(br);
 		br_fdb_hash_fini(br);
 	}
 
+	br_set_lockdep_class(dev);
 	return err;
 }
 
@@ -148,6 +163,7 @@ static void br_dev_uninit(struct net_device *dev)
 	br_multicast_dev_del(br);
 	br_multicast_uninit_stats(br);
 	br_vlan_flush(br);
+	br_mdb_hash_fini(br);
 	br_fdb_hash_fini(br);
 	free_percpu(br->stats);
 }

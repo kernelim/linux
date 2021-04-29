@@ -12,6 +12,7 @@
 #include <asm/page_types.h>
 #include <asm/asm-offsets.h>
 #include <asm/processor-flags.h>
+#include <asm/frame.h>
 
 .text
 
@@ -24,10 +25,21 @@ ENTRY(swsusp_arch_suspend)
 	pushfl
 	popl saved_context_eflags
 
+	/* save cr3 */
+	movl	%cr3, %eax
+	movl	%eax, restore_cr3
+
+	FRAME_BEGIN
 	call swsusp_save
+	FRAME_END
 	ret
+ENDPROC(swsusp_arch_suspend)
 
 ENTRY(restore_image)
+	/* prepare to jump to the image kernel */
+	movl	restore_jump_address, %ebx
+	movl	restore_cr3, %ebp
+
 	movl	mmu_cr4_features, %ecx
 	movl	resume_pg_dir, %eax
 	subl	$__PAGE_OFFSET, %eax
@@ -58,10 +70,13 @@ copy_loop:
 	.p2align 4,,7
 
 done:
+	jmpl	*%ebx
+
+	/* code below belongs to the image kernel */
+	.align PAGE_SIZE
+ENTRY(restore_registers)
 	/* go back to the original page tables */
-	movl	$swapper_pg_dir, %eax
-	subl	$__PAGE_OFFSET, %eax
-	movl	%eax, %cr3
+	movl	%ebp, %cr3
 	movl	mmu_cr4_features, %ecx
 	jecxz	1f	# cr4 Pentium and higher, skip if zero
 	movl	%ecx, %cr4;  # turn PGE back on
@@ -83,3 +98,4 @@ done:
 	xorl	%eax, %eax
 
 	ret
+ENDPROC(restore_registers)

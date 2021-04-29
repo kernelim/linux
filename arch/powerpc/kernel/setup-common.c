@@ -320,6 +320,7 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 				min = pvr & 0xFF;
 				break;
 			case 0x004e: /* POWER9 bits 12-15 give chip type */
+			case 0x0080: /* POWER10 bit 12 gives SMT8/4 */
 				maj = (pvr >> 8) & 0x0F;
 				min = pvr & 0xFF;
 				break;
@@ -877,6 +878,12 @@ void __init setup_arch(char **cmdline_p)
 	 */
 	initialize_cache_info();
 
+	/*
+	 * Lock down the kernel if booted in secure mode. This is required to
+	 * maintain kernel integrity.
+	 */
+	init_lockdown();
+
 	/* Initialize RTAS if available. */
 	rtas_initialize();
 
@@ -925,8 +932,6 @@ void __init setup_arch(char **cmdline_p)
 
 	/* On BookE, setup per-core TLB data structures. */
 	setup_tlb_core_data();
-
-	smp_release_cpus();
 #endif
 
 	/* Print various info about the machine that has been gathered so far. */
@@ -960,7 +965,11 @@ void __init setup_arch(char **cmdline_p)
 	exc_lvl_early_init();
 	emergency_stack_init();
 
+	smp_release_cpus();
+
 	initmem_init();
+
+	early_memtest(min_low_pfn << PAGE_SHIFT, max_low_pfn << PAGE_SHIFT);
 
 #ifdef CONFIG_DUMMY_CONSOLE
 	conswitchp = &dummy_con;

@@ -12,6 +12,7 @@
 #include <linux/memblock.h>
 #include <misc/cxl-base.h>
 
+#include <asm/debugfs.h>
 #include <asm/pgalloc.h>
 #include <asm/tlb.h>
 #include <asm/trace.h>
@@ -26,9 +27,6 @@ unsigned long __pmd_frag_nr;
 EXPORT_SYMBOL(__pmd_frag_nr);
 unsigned long __pmd_frag_size_shift;
 EXPORT_SYMBOL(__pmd_frag_size_shift);
-
-int (*register_process_table)(unsigned long base, unsigned long page_size,
-			      unsigned long tbl_size);
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 /*
@@ -73,7 +71,7 @@ void set_pmd_at(struct mm_struct *mm, unsigned long addr,
 #ifdef CONFIG_DEBUG_VM
 	WARN_ON(pte_present(pmd_pte(*pmdp)) && !pte_protnone(pmd_pte(*pmdp)));
 	assert_spin_locked(pmd_lockptr(mm, pmdp));
-	WARN_ON(!(pmd_trans_huge(pmd) || pmd_devmap(pmd)));
+	WARN_ON(!(pmd_large(pmd) || pmd_devmap(pmd)));
 #endif
 	trace_hugepage_set_pmd(addr, pmd_val(pmd));
 	return set_pte_at(mm, addr, pmdp_ptep(pmdp), pmd_pte(pmd));
@@ -182,12 +180,13 @@ void mmu_cleanup_all(void)
 }
 
 #ifdef CONFIG_MEMORY_HOTPLUG
-int __meminit create_section_mapping(unsigned long start, unsigned long end, int nid)
+int __meminit create_section_mapping(unsigned long start, unsigned long end,
+				     int nid, pgprot_t prot)
 {
 	if (radix_enabled())
-		return radix__create_section_mapping(start, end, nid);
+		return radix__create_section_mapping(start, end, nid, prot);
 
-	return hash__create_section_mapping(start, end, nid);
+	return hash__create_section_mapping(start, end, nid, prot);
 }
 
 int __meminit remove_section_mapping(unsigned long start, unsigned long end)
@@ -222,24 +221,21 @@ void __init mmu_partition_table_init(void)
 
 static void flush_partition(unsigned int lpid, bool radix)
 {
-	asm volatile("ptesync" : : : "memory");
 	if (radix) {
-		asm volatile(PPC_TLBIE_5(%0,%1,2,0,1) : :
-			     "r" (TLBIEL_INVAL_SET_LPID), "r" (lpid));
-		asm volatile(PPC_TLBIE_5(%0,%1,2,1,1) : :
-			     "r" (TLBIEL_INVAL_SET_LPID), "r" (lpid));
-		trace_tlbie(lpid, 0, TLBIEL_INVAL_SET_LPID, lpid, 2, 0, 1);
+		radix__flush_all_lpid(lpid);
+		radix__flush_all_lpid_guest(lpid);
 	} else {
+		asm volatile("ptesync" : : : "memory");
 		asm volatile(PPC_TLBIE_5(%0,%1,2,0,0) : :
 			     "r" (TLBIEL_INVAL_SET_LPID), "r" (lpid));
+		/* do we need fixup here ?*/
+		asm volatile("eieio; tlbsync; ptesync" : : : "memory");
 		trace_tlbie(lpid, 0, TLBIEL_INVAL_SET_LPID, lpid, 2, 0, 0);
 	}
-	/* do we need fixup here ?*/
-	asm volatile("eieio; tlbsync; ptesync" : : : "memory");
 }
 
 void mmu_partition_table_set_entry(unsigned int lpid, unsigned long dw0,
-				  unsigned long dw1)
+				  unsigned long dw1, bool flush)
 {
 	unsigned long old = be64_to_cpu(partition_tb[lpid].patb0);
 
@@ -266,7 +262,12 @@ void mmu_partition_table_set_entry(unsigned int lpid, unsigned long dw0,
 		uv_register_pate(lpid, dw0, dw1);
 		pr_info("PATE registered by ultravisor: dw0 = 0x%lx, dw1 = 0x%lx\n",
 			dw0, dw1);
-	} else {
+	} else if (flush) {
+		/*
+		 * Boot does not need to flush, because MMU is off and each
+		 * CPU does a tlbiel_all() before switching them on, which
+		 * flushes everything.
+		 */
 		flush_partition(lpid, (old & PATB_HR));
 	}
 }
@@ -307,6 +308,8 @@ static pmd_t *__alloc_for_pmdcache(struct mm_struct *mm)
 		return NULL;
 	}
 
+	atomic_set(&page->pt_frag_refcount, 1);
+
 	ret = page_address(page);
 	/*
 	 * if we support only one fragment just return the
@@ -322,7 +325,7 @@ static pmd_t *__alloc_for_pmdcache(struct mm_struct *mm)
 	 * count.
 	 */
 	if (likely(!mm->context.pmd_frag)) {
-		set_page_count(page, PMD_FRAG_NR);
+		atomic_set(&page->pt_frag_refcount, PMD_FRAG_NR);
 		mm->context.pmd_frag = ret + PMD_FRAG_SIZE;
 	}
 	spin_unlock(&mm->page_table_lock);
@@ -345,9 +348,13 @@ void pmd_fragment_free(unsigned long *pmd)
 {
 	struct page *page = virt_to_page(pmd);
 
-	if (put_page_testzero(page)) {
+	if (PageReserved(page))
+		return free_reserved_page(page);
+
+	BUG_ON(atomic_read(&page->pt_frag_refcount) <= 0);
+	if (atomic_dec_and_test(&page->pt_frag_refcount)) {
 		pgtable_pmd_page_dtor(page);
-		free_unref_page(page);
+		__free_page(page);
 	}
 }
 
@@ -389,6 +396,7 @@ static pte_t *__alloc_for_ptecache(struct mm_struct *mm, int kernel)
 			return NULL;
 	}
 
+	atomic_set(&page->pt_frag_refcount, 1);
 
 	ret = page_address(page);
 	/*
@@ -404,7 +412,7 @@ static pte_t *__alloc_for_ptecache(struct mm_struct *mm, int kernel)
 	 * count.
 	 */
 	if (likely(!mm->context.pte_frag)) {
-		set_page_count(page, PTE_FRAG_NR);
+		atomic_set(&page->pt_frag_refcount, PTE_FRAG_NR);
 		mm->context.pte_frag = ret + PTE_FRAG_SIZE;
 	}
 	spin_unlock(&mm->page_table_lock);
@@ -412,7 +420,7 @@ static pte_t *__alloc_for_ptecache(struct mm_struct *mm, int kernel)
 	return (pte_t *)ret;
 }
 
-pte_t *pte_fragment_alloc(struct mm_struct *mm, unsigned long vmaddr, int kernel)
+pte_t *pte_fragment_alloc(struct mm_struct *mm, int kernel)
 {
 	pte_t *pte;
 
@@ -427,10 +435,14 @@ void pte_fragment_free(unsigned long *table, int kernel)
 {
 	struct page *page = virt_to_page(table);
 
-	if (put_page_testzero(page)) {
+	if (PageReserved(page))
+                return free_reserved_page(page);
+
+	BUG_ON(atomic_read(&page->pt_frag_refcount) <= 0);
+	if (atomic_dec_and_test(&page->pt_frag_refcount)) {
 		if (!kernel)
 			pgtable_page_dtor(page);
-		free_unref_page(page);
+		__free_page(page);
 	}
 }
 
@@ -444,7 +456,7 @@ static inline void pgtable_free(void *table, int index)
 		pmd_fragment_free(table);
 		break;
 	case PUD_INDEX:
-		kmem_cache_free(PGT_CACHE(PUD_CACHE_INDEX), table);
+		__pud_free(table);
 		break;
 #if defined(CONFIG_PPC_4K_PAGES) && defined(CONFIG_HUGETLB_PAGE)
 		/* 16M hugepd directory at pud level */
@@ -502,3 +514,49 @@ int pmd_move_must_withdraw(struct spinlock *new_pmd_ptl,
 
 	return true;
 }
+
+/*
+ * Does the CPU support tlbie?
+ */
+bool tlbie_capable __read_mostly = true;
+EXPORT_SYMBOL(tlbie_capable);
+
+/*
+ * Should tlbie be used for management of CPU TLBs, for kernel and process
+ * address spaces? tlbie may still be used for nMMU accelerators, and for KVM
+ * guest address spaces.
+ */
+bool tlbie_enabled __read_mostly = true;
+
+static int __init setup_disable_tlbie(char *str)
+{
+	if (!radix_enabled()) {
+		pr_err("disable_tlbie: Unable to disable TLBIE with Hash MMU.\n");
+		return 1;
+	}
+
+	tlbie_capable = false;
+	tlbie_enabled = false;
+
+        return 1;
+}
+__setup("disable_tlbie", setup_disable_tlbie);
+
+static int __init pgtable_debugfs_setup(void)
+{
+	if (!tlbie_capable)
+		return 0;
+
+	/*
+	 * There is no locking vs tlb flushing when changing this value.
+	 * The tlb flushers will see one value or another, and use either
+	 * tlbie or tlbiel with IPIs. In both cases the TLBs will be
+	 * invalidated as expected.
+	 */
+	debugfs_create_bool("tlbie_enabled", 0600,
+			powerpc_debugfs_root,
+			&tlbie_enabled);
+
+	return 0;
+}
+arch_initcall(pgtable_debugfs_setup);

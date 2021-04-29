@@ -452,10 +452,13 @@ begin:
 	}
 
 	skb = f->head;
-	if (skb && !skb_is_tcp_pure_ack(skb)) {
-		u64 time_next_packet = f->time_next_packet;
+	if (skb) {
+		u64 time_next_packet = max_t(u64, ktime_to_ns(skb->tstamp),
+					     f->time_next_packet);
+
 		if (now < time_next_packet) {
 			head->first = f->next;
+			f->time_next_packet = time_next_packet;
 			fq_flow_set_throttled(q, f);
 			goto begin;
 		}
@@ -479,26 +482,29 @@ begin:
 		goto begin;
 	}
 	prefetch(&skb->end);
-	f->credit -= qdisc_pkt_len(skb);
+	plen = qdisc_pkt_len(skb);
+	f->credit -= plen;
 
 	if (!q->rate_enable)
 		goto out;
 
-	/* Do not pace locally generated ack packets */
-	if (skb_is_tcp_pure_ack(skb))
-		goto out;
-
 	rate = q->flow_max_rate;
-	if (skb->sk)
-		rate = min(skb->sk->sk_pacing_rate, rate);
 
-	if (rate <= q->low_rate_threshold) {
-		f->credit = 0;
-		plen = qdisc_pkt_len(skb);
-	} else {
-		plen = max(qdisc_pkt_len(skb), q->quantum);
-		if (f->credit > 0)
-			goto out;
+	/* If EDT time was provided for this skb, we need to
+	 * update f->time_next_packet only if this qdisc enforces
+	 * a flow max rate.
+	 */
+	if (!skb->tstamp) {
+		if (skb->sk)
+			rate = min(skb->sk->sk_pacing_rate, rate);
+
+		if (rate <= q->low_rate_threshold) {
+			f->credit = 0;
+		} else {
+			plen = max(plen, q->quantum);
+			if (f->credit > 0)
+				goto out;
+		}
 	}
 	if (rate != ~0U) {
 		u64 len = (u64)plen * NSEC_PER_SEC;
@@ -812,7 +818,7 @@ static int fq_init(struct Qdisc *sch, struct nlattr *opt,
 	/* Default ce_threshold of 4294 seconds */
 	q->ce_threshold		= (u64)NSEC_PER_USEC * ~0U;
 
-	qdisc_watchdog_init(&q->watchdog, sch);
+	qdisc_watchdog_init_clockid(&q->watchdog, sch, CLOCK_MONOTONIC);
 
 	if (opt)
 		err = fq_change(sch, opt, extack);
@@ -927,3 +933,4 @@ module_init(fq_module_init)
 module_exit(fq_module_exit)
 MODULE_AUTHOR("Eric Dumazet");
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("Fair Queue Packet Scheduler");

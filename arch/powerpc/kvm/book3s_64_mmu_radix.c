@@ -42,7 +42,8 @@ unsigned long __kvmhv_copy_tofrom_guest_radix(int lpid, int pid,
 	/* Can't access quadrants 1 or 2 in non-HV mode, call the HV to do it */
 	if (kvmhv_on_pseries())
 		return plpar_hcall_norets(H_COPY_TOFROM_GUEST, lpid, pid, eaddr,
-					  __pa(to), __pa(from), n);
+					  (to != NULL) ? __pa(to): 0,
+					  (from != NULL) ? __pa(from): 0, n);
 
 	quadrant = 1;
 	if (!pid)
@@ -65,12 +66,10 @@ unsigned long __kvmhv_copy_tofrom_guest_radix(int lpid, int pid,
 	}
 	isync();
 
-	pagefault_disable();
 	if (is_load)
-		ret = raw_copy_from_user(to, from, n);
+		ret = probe_user_read(to, (const void __user *)from, n);
 	else
-		ret = raw_copy_to_user(to, from, n);
-	pagefault_enable();
+		ret = probe_user_write((void __user *)to, from, n);
 
 	/* switch the pid first to avoid running host with unallocated pid */
 	if (quadrant == 1 && pid != old_pid)
@@ -164,7 +163,9 @@ int kvmppc_mmu_walk_radix_tree(struct kvm_vcpu *vcpu, gva_t eaddr,
 			return -EINVAL;
 		/* Read the entry from guest memory */
 		addr = base + (index * sizeof(rpte));
+		vcpu->srcu_idx = srcu_read_lock(&kvm->srcu);
 		ret = kvm_read_guest(kvm, addr, &rpte, sizeof(rpte));
+		srcu_read_unlock(&kvm->srcu, vcpu->srcu_idx);
 		if (ret) {
 			if (pte_ret_p)
 				*pte_ret_p = addr;
@@ -240,7 +241,9 @@ int kvmppc_mmu_radix_translate_table(struct kvm_vcpu *vcpu, gva_t eaddr,
 
 	/* Read the table to find the root of the radix tree */
 	ptbl = (table & PRTB_MASK) + (table_index * sizeof(entry));
+	vcpu->srcu_idx = srcu_read_lock(&kvm->srcu);
 	ret = kvm_read_guest(kvm, ptbl, &entry, sizeof(entry));
+	srcu_read_unlock(&kvm->srcu, vcpu->srcu_idx);
 	if (ret)
 		return ret;
 
@@ -346,7 +349,7 @@ static unsigned long kvmppc_radix_update_pte(struct kvm *kvm, pte_t *ptep,
 	return __radix_pte_update(ptep, clr, set);
 }
 
-void kvmppc_radix_set_pte_at(struct kvm *kvm, unsigned long addr,
+static void kvmppc_radix_set_pte_at(struct kvm *kvm, unsigned long addr,
 			     pte_t *ptep, pte_t pte)
 {
 	radix__set_pte_at(kvm->mm, addr, ptep, pte, 0);
@@ -357,7 +360,13 @@ static struct kmem_cache *kvm_pmd_cache;
 
 static pte_t *kvmppc_pte_alloc(void)
 {
-	return kmem_cache_alloc(kvm_pte_cache, GFP_KERNEL);
+	pte_t *pte;
+
+	pte = kmem_cache_alloc(kvm_pte_cache, GFP_KERNEL);
+	/* pmd_populate() will only reference _pa(pte). */
+	kmemleak_ignore(pte);
+
+	return pte;
 }
 
 static void kvmppc_pte_free(pte_t *ptep)
@@ -365,15 +374,15 @@ static void kvmppc_pte_free(pte_t *ptep)
 	kmem_cache_free(kvm_pte_cache, ptep);
 }
 
-/* Like pmd_huge() and pmd_large(), but works regardless of config options */
-static inline int pmd_is_leaf(pmd_t pmd)
-{
-	return !!(pmd_val(pmd) & _PAGE_PTE);
-}
-
 static pmd_t *kvmppc_pmd_alloc(void)
 {
-	return kmem_cache_alloc(kvm_pmd_cache, GFP_KERNEL);
+	pmd_t *pmd;
+
+	pmd = kmem_cache_alloc(kvm_pmd_cache, GFP_KERNEL);
+	/* pud_populate() will only reference _pa(pmd). */
+	kmemleak_ignore(pmd);
+
+	return pmd;
 }
 
 static void kvmppc_pmd_free(pmd_t *pmdp)
@@ -494,7 +503,7 @@ static void kvmppc_unmap_free_pud(struct kvm *kvm, pud_t *pud,
 	for (iu = 0; iu < PTRS_PER_PUD; ++iu, ++p) {
 		if (!pud_present(*p))
 			continue;
-		if (pud_huge(*p)) {
+		if (pud_is_leaf(*p)) {
 			pud_clear(p);
 		} else {
 			pmd_t *pmd;
@@ -593,7 +602,7 @@ int kvmppc_create_pte(struct kvm *kvm, pgd_t *pgtable, pte_t pte,
 		new_pud = pud_alloc_one(kvm->mm, gpa);
 
 	pmd = NULL;
-	if (pud && pud_present(*pud) && !pud_huge(*pud))
+	if (pud && pud_present(*pud) && !pud_is_leaf(*pud))
 		pmd = pmd_offset(pud, gpa);
 	else if (level <= 1)
 		new_pmd = kvmppc_pmd_alloc();
@@ -616,7 +625,7 @@ int kvmppc_create_pte(struct kvm *kvm, pgd_t *pgtable, pte_t pte,
 		new_pud = NULL;
 	}
 	pud = pud_offset(pgd, gpa);
-	if (pud_huge(*pud)) {
+	if (pud_is_leaf(*pud)) {
 		unsigned long hgpa = gpa & PUD_MASK;
 
 		/* Check if we raced and someone else has set the same thing */
@@ -900,7 +909,7 @@ int kvmppc_book3s_instantiate_page(struct kvm_vcpu *vcpu,
 	return ret;
 }
 
-int kvmppc_book3s_radix_page_fault(struct kvm_run *run, struct kvm_vcpu *vcpu,
+int kvmppc_book3s_radix_page_fault(struct kvm_vcpu *vcpu,
 				   unsigned long ea, unsigned long dsisr)
 {
 	struct kvm *kvm = vcpu->kvm;
@@ -946,7 +955,7 @@ int kvmppc_book3s_radix_page_fault(struct kvm_run *run, struct kvm_vcpu *vcpu,
 			kvmppc_core_queue_data_storage(vcpu, ea, dsisr);
 			return RESUME_GUEST;
 		}
-		return kvmppc_hv_emulate_mmio(run, vcpu, gpa, ea, writing);
+		return kvmppc_hv_emulate_mmio(vcpu, gpa, ea, writing);
 	}
 
 	if (memslot->flags & KVM_MEM_READONLY) {
@@ -1053,7 +1062,7 @@ static int kvm_radix_test_clear_dirty(struct kvm *kvm,
 {
 	unsigned long gfn = memslot->base_gfn + pagenum;
 	unsigned long gpa = gfn << PAGE_SHIFT;
-	pte_t *ptep;
+	pte_t *ptep, pte;
 	unsigned int shift;
 	int ret = 0;
 	unsigned long old, *rmapp;
@@ -1061,12 +1070,35 @@ static int kvm_radix_test_clear_dirty(struct kvm *kvm,
 	if (kvm->arch.secure_guest & KVMPPC_SECURE_INIT_DONE)
 		return ret;
 
-	ptep = find_kvm_secondary_pte(kvm, gpa, &shift);
-	if (ptep && pte_present(*ptep) && pte_dirty(*ptep)) {
-		ret = 1;
-		if (shift)
-			ret = 1 << (shift - PAGE_SHIFT);
+	/*
+	 * For performance reasons we don't hold kvm->mmu_lock while walking the
+	 * partition scoped table.
+	 */
+	ptep = find_kvm_secondary_pte_unlocked(kvm, gpa, &shift);
+	if (!ptep)
+		return 0;
+
+	pte = READ_ONCE(*ptep);
+	if (pte_present(pte) && pte_dirty(pte)) {
 		spin_lock(&kvm->mmu_lock);
+		/*
+		 * Recheck the pte again
+		 */
+		if (pte_val(pte) != pte_val(*ptep)) {
+			/*
+			 * We have KVM_MEM_LOG_DIRTY_PAGES enabled. Hence we can
+			 * only find PAGE_SIZE pte entries here. We can continue
+			 * to use the pte addr returned by above page table
+			 * walk.
+			 */
+			if (!pte_present(*ptep) || !pte_dirty(*ptep)) {
+				spin_unlock(&kvm->mmu_lock);
+				return 0;
+			}
+		}
+
+		ret = 1;
+		VM_BUG_ON(shift);
 		old = kvmppc_radix_update_pte(kvm, ptep, _PAGE_DIRTY, 0,
 					      gpa, shift);
 		kvmppc_radix_tlbie_page(kvm, gpa, shift, kvm->arch.lpid);

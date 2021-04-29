@@ -57,7 +57,10 @@ extern void text_poke_bp_batch(struct text_poke_loc *tp, unsigned int nr_entries
 extern void text_poke_loc_init(struct text_poke_loc *tp, void *addr,
 			       const void *opcode, size_t len, const void *emulate);
 extern int after_bootmem;
+extern __ro_after_init struct mm_struct *poking_mm;
+extern __ro_after_init unsigned long poking_addr;
 
+#ifndef CONFIG_UML_X86
 static inline void int3_emulate_jmp(struct pt_regs *regs, unsigned long ip)
 {
 	regs->ip = ip;
@@ -75,7 +78,6 @@ static inline void int3_emulate_jmp(struct pt_regs *regs, unsigned long ip)
 #define JMP8_INSN_SIZE		2
 #define JMP8_INSN_OPCODE	0xEB
 
-#ifdef CONFIG_X86_64
 static inline void int3_emulate_push(struct pt_regs *regs, unsigned long val)
 {
 	/*
@@ -93,6 +95,6 @@ static inline void int3_emulate_call(struct pt_regs *regs, unsigned long func)
 	int3_emulate_push(regs, regs->ip - INT3_INSN_SIZE + CALL_INSN_SIZE);
 	int3_emulate_jmp(regs, func);
 }
-#endif
+#endif /* !CONFIG_UML_X86 */
 
 #endif /* _ASM_X86_TEXT_PATCHING_H */

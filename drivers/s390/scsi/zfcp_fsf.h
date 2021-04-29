@@ -172,6 +172,8 @@
 #define FSF_FEATURE_ELS_CT_CHAINED_SBALS	0x00000020
 #define FSF_FEATURE_UPDATE_ALERT		0x00000100
 #define FSF_FEATURE_MEASUREMENT_DATA		0x00000200
+#define FSF_FEATURE_REQUEST_SFP_DATA		0x00000200
+#define FSF_FEATURE_REPORT_SFP_DATA		0x00000800
 #define FSF_FEATURE_FC_SECURITY			0x00001000
 #define FSF_FEATURE_DIF_PROT_TYPE1		0x00010000
 #define FSF_FEATURE_DIX_PROT_TCPIP		0x00020000
@@ -424,9 +426,24 @@ struct fsf_qtcb_bottom_port {
 	u8 cb_util;
 	u8 a_util;
 	u8 res2;
-	u8 res3[12];
+	s16 temperature;
+	u16 vcc;
+	u16 tx_bias;
+	u16 tx_power;
+	u16 rx_power;
+	union {
+		u16 raw;
+		struct {
+			u16 fec_active		:1;
+			u16:7;
+			u16 connector_type	:2;
+			u16 sfp_invalid		:1;
+			u16 optical_port	:1;
+			u16 port_tx_type	:4;
+		};
+	} sfp_flags;
 	u32 fc_security_algorithms;
-	u8 res4[236];
+	u8 res3[236];
 } __attribute__ ((packed));
 
 union fsf_qtcb_bottom {
@@ -457,8 +474,8 @@ struct zfcp_blk_drv_data {
 
 /**
  * struct zfcp_fsf_ct_els - zfcp data for ct or els request
- * @req: scatter-gather list for request
- * @resp: scatter-gather list for response
+ * @req: scatter-gather list for request, points to &zfcp_fc_req.sg_req or BSG
+ * @resp: scatter-gather list for response, points to &zfcp_fc_req.sg_rsp or BSG
  * @handler: handler function (called for response to the request)
  * @handler_data: data passed to handler function
  * @port: Optional pointer to port for zfcp internal ELS (only test link ADISC)

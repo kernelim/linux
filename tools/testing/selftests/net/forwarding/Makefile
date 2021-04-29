@@ -6,11 +6,7 @@ TEST_PROGS = bridge_igmp.sh \
 	bridge_vlan_aware.sh \
 	bridge_vlan_unaware.sh \
 	ethtool.sh \
-	gre_inner_v4_multipath.sh \
-	gre_inner_v6_multipath.sh \
 	gre_multipath.sh \
-	ip6gre_inner_v4_multipath.sh \
-	ip6gre_inner_v6_multipath.sh \
 	ipip_flat_gre_key.sh \
 	ipip_flat_gre_keys.sh \
 	ipip_flat_gre.sh \
@@ -35,7 +31,6 @@ TEST_PROGS = bridge_igmp.sh \
 	router_bridge.sh \
 	router_bridge_vlan.sh \
 	router_broadcast.sh \
-	router_mpath_nh.sh \
 	router_multicast.sh \
 	router_multipath.sh \
 	router.sh \
@@ -48,6 +43,7 @@ TEST_PROGS = bridge_igmp.sh \
 	tc_chains.sh \
 	tc_flower_router.sh \
 	tc_flower.sh \
+	tc_mpls_l2vpn.sh \
 	tc_shblocks.sh \
 	tc_vlan_modify.sh \
 	vxlan_asymmetric.sh \

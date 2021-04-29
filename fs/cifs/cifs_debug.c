@@ -234,8 +234,6 @@ static int cifs_debug_data_proc_show(struct seq_file *m, void *v)
 	struct cifs_ses *ses;
 	struct cifs_tcon *tcon;
 	int i, j;
-	const char *security_types[] = {"Unspecified", "LANMAN", "NTLM",
-                                       "NTLMv2", "RawNTLMSSP", "Kerberos"};
 
 	seq_puts(m,
 		    "Display Internal CIFS Data Structures for Debugging\n"
@@ -338,10 +336,8 @@ static int cifs_debug_data_proc_show(struct seq_file *m, void *v)
 			atomic_read(&server->smbd_conn->send_credits),
 			atomic_read(&server->smbd_conn->receive_credits),
 			server->smbd_conn->receive_credit_target);
-		seq_printf(m, "\nPending send_pending: %x "
-			"send_payload_pending: %x",
-			atomic_read(&server->smbd_conn->send_pending),
-			atomic_read(&server->smbd_conn->send_payload_pending));
+		seq_printf(m, "\nPending send_pending: %x ",
+			atomic_read(&server->smbd_conn->send_pending));
 		seq_printf(m, "\nReceive buffers count_receive_queue: %x "
 			"count_empty_packet_queue: %x",
 			server->smbd_conn->count_receive_queue,
@@ -394,7 +390,7 @@ skip_rdma:
 			}
 
 			seq_printf(m,"Security type: %s\n",
-                                      security_types[server->ops->select_sectype(server, ses->sectype)]);
+				get_security_type_str(server->ops->select_sectype(server, ses->sectype)));
 
 			if (server->rdma)
 				seq_printf(m, "RDMA\n\t");
@@ -416,6 +412,10 @@ skip_rdma:
 			if (ses->sign)
 				seq_puts(m, " signed");
 
+			seq_printf(m, "\n\tUser: %d Cred User: %d",
+				   from_kuid(&init_user_ns, ses->linux_uid),
+				   from_kuid(&init_user_ns, ses->cred_uid));
+
 			if (ses->chan_count > 1) {
 				seq_printf(m, "\n\n\tExtra Channels: %zu\n",
 					   ses->chan_count-1);
@@ -423,7 +423,7 @@ skip_rdma:
 					cifs_dump_channel(m, j, &ses->chans[j]);
 			}
 
-			seq_puts(m, "\n\tShares:");
+			seq_puts(m, "\n\n\tShares:");
 			j = 0;
 
 			seq_printf(m, "\n\t%d) IPC: ", j);

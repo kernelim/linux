@@ -36,15 +36,18 @@
 #include <linux/vmalloc.h>
 #include <linux/ktime.h>
 
+#include <net/tls.h>
 #include <net/vxlan.h>
 
 #include "nfpcore/nfp_nsp.h"
+#include "ccm.h"
 #include "nfp_app.h"
 #include "nfp_net_ctrl.h"
 #include "nfp_net.h"
 #include "nfp_net_sriov.h"
 #include "nfp_port.h"
 #include "crypto/crypto.h"
+#include "crypto/fw.h"
 
 /**
  * nfp_net_get_fw_version() - Read and parse the FW version
@@ -228,6 +231,7 @@ static void nfp_net_reconfig_sync_enter(struct nfp_net *nn)
 
 	spin_lock_bh(&nn->reconfig_lock);
 
+	WARN_ON(nn->reconfig_sync_present);
 	nn->reconfig_sync_present = true;
 
 	if (nn->reconfig_timer_active) {
@@ -336,6 +340,24 @@ int nfp_net_mbox_reconfig(struct nfp_net *nn, u32 mbox_cmd)
 		nn_err(nn, "Mailbox update error\n");
 		return ret;
 	}
+
+	return -nn_readl(nn, mbox + NFP_NET_CFG_MBOX_SIMPLE_RET);
+}
+
+void nfp_net_mbox_reconfig_post(struct nfp_net *nn, u32 mbox_cmd)
+{
+	u32 mbox = nn->tlv_caps.mbox_off;
+
+	nn_writeq(nn, mbox + NFP_NET_CFG_MBOX_SIMPLE_CMD, mbox_cmd);
+
+	nfp_net_reconfig_post(nn, NFP_NET_CFG_UPDATE_MBOX);
+}
+
+int nfp_net_mbox_reconfig_wait_posted(struct nfp_net *nn)
+{
+	u32 mbox = nn->tlv_caps.mbox_off;
+
+	nfp_net_reconfig_wait_posted(nn);
 
 	return -nn_readl(nn, mbox + NFP_NET_CFG_MBOX_SIMPLE_RET);
 }
@@ -801,6 +823,100 @@ static void nfp_net_tx_csum(struct nfp_net_dp *dp,
 	u64_stats_update_end(&r_vec->tx_sync);
 }
 
+static struct sk_buff *
+nfp_net_tls_tx(struct nfp_net_dp *dp, struct nfp_net_r_vector *r_vec,
+	       struct sk_buff *skb, u64 *tls_handle, int *nr_frags)
+{
+#ifdef CONFIG_TLS_DEVICE
+	struct nfp_net_tls_offload_ctx *ntls;
+	struct sk_buff *nskb;
+	bool resync_pending;
+	u32 datalen, seq;
+
+	if (likely(!dp->ktls_tx))
+		return skb;
+	if (!skb->sk || !tls_is_sk_tx_device_offloaded(skb->sk))
+		return skb;
+
+	datalen = skb->len - (skb_transport_offset(skb) + tcp_hdrlen(skb));
+	seq = ntohl(tcp_hdr(skb)->seq);
+	ntls = tls_driver_ctx(skb->sk, TLS_OFFLOAD_CTX_DIR_TX);
+	resync_pending = tls_offload_tx_resync_pending(skb->sk);
+	if (unlikely(resync_pending || ntls->next_seq != seq)) {
+		/* Pure ACK out of order already */
+		if (!datalen)
+			return skb;
+
+		u64_stats_update_begin(&r_vec->tx_sync);
+		r_vec->tls_tx_fallback++;
+		u64_stats_update_end(&r_vec->tx_sync);
+
+		nskb = tls_encrypt_skb(skb);
+		if (!nskb) {
+			u64_stats_update_begin(&r_vec->tx_sync);
+			r_vec->tls_tx_no_fallback++;
+			u64_stats_update_end(&r_vec->tx_sync);
+			return NULL;
+		}
+		/* encryption wasn't necessary */
+		if (nskb == skb)
+			return skb;
+		/* we don't re-check ring space */
+		if (unlikely(skb_is_nonlinear(nskb))) {
+			nn_dp_warn(dp, "tls_encrypt_skb() produced fragmented frame\n");
+			u64_stats_update_begin(&r_vec->tx_sync);
+			r_vec->tx_errors++;
+			u64_stats_update_end(&r_vec->tx_sync);
+			dev_kfree_skb_any(nskb);
+			return NULL;
+		}
+
+		/* jump forward, a TX may have gotten lost, need to sync TX */
+		if (!resync_pending && seq - ntls->next_seq < U32_MAX / 4)
+			tls_offload_tx_resync_request(nskb->sk, seq,
+						      ntls->next_seq);
+
+		*nr_frags = 0;
+		return nskb;
+	}
+
+	if (datalen) {
+		u64_stats_update_begin(&r_vec->tx_sync);
+		if (!skb_is_gso(skb))
+			r_vec->hw_tls_tx++;
+		else
+			r_vec->hw_tls_tx += skb_shinfo(skb)->gso_segs;
+		u64_stats_update_end(&r_vec->tx_sync);
+	}
+
+	memcpy(tls_handle, ntls->fw_handle, sizeof(ntls->fw_handle));
+	ntls->next_seq += datalen;
+#endif
+	return skb;
+}
+
+static void nfp_net_tls_tx_undo(struct sk_buff *skb, u64 tls_handle)
+{
+#ifdef CONFIG_TLS_DEVICE
+	struct nfp_net_tls_offload_ctx *ntls;
+	u32 datalen, seq;
+
+	if (!tls_handle)
+		return;
+	if (WARN_ON_ONCE(!skb->sk || !tls_is_sk_tx_device_offloaded(skb->sk)))
+		return;
+
+	datalen = skb->len - (skb_transport_offset(skb) + tcp_hdrlen(skb));
+	seq = ntohl(tcp_hdr(skb)->seq);
+
+	ntls = tls_driver_ctx(skb->sk, TLS_OFFLOAD_CTX_DIR_TX);
+	if (ntls->next_seq == seq + datalen)
+		ntls->next_seq = seq;
+	else
+		WARN_ON_ONCE(1);
+#endif
+}
+
 static void nfp_net_tx_xmit_more_flush(struct nfp_net_tx_ring *tx_ring)
 {
 	wmb();
@@ -861,7 +977,7 @@ static int nfp_net_prep_tx_meta(struct sk_buff *skb, u64 tls_handle)
 static int nfp_net_tx(struct sk_buff *skb, struct net_device *netdev)
 {
 	struct nfp_net *nn = netdev_priv(netdev);
-	const struct skb_frag_struct *frag;
+	const skb_frag_t *frag;
 	int f, nr_frags, wr_idx, md_bytes;
 	struct nfp_net_tx_ring *tx_ring;
 	struct nfp_net_r_vector *r_vec;
@@ -891,6 +1007,12 @@ static int nfp_net_tx(struct sk_buff *skb, struct net_device *netdev)
 		r_vec->tx_busy++;
 		u64_stats_update_end(&r_vec->tx_sync);
 		return NETDEV_TX_BUSY;
+	}
+
+	skb = nfp_net_tls_tx(dp, r_vec, skb, &tls_handle, &nr_frags);
+	if (unlikely(!skb)) {
+		nfp_net_tx_xmit_more_flush(tx_ring);
+		return NETDEV_TX_OK;
 	}
 
 	md_bytes = nfp_net_prep_tx_meta(skb, tls_handle);
@@ -1004,6 +1126,7 @@ err_flush:
 	u64_stats_update_begin(&r_vec->tx_sync);
 	r_vec->tx_errors++;
 	u64_stats_update_end(&r_vec->tx_sync);
+	nfp_net_tls_tx_undo(skb, tls_handle);
 	dev_kfree_skb_any(skb);
 	return NETDEV_TX_OK;
 }
@@ -1034,7 +1157,7 @@ static void nfp_net_tx_complete(struct nfp_net_tx_ring *tx_ring, int budget)
 	todo = D_IDX(tx_ring, qcp_rd_p - tx_ring->qcp_rd_p);
 
 	while (todo--) {
-		const struct skb_frag_struct *frag;
+		const skb_frag_t *frag;
 		struct nfp_net_tx_buf *tx_buf;
 		struct sk_buff *skb;
 		int fidx, nr_frags;
@@ -1149,7 +1272,7 @@ static bool nfp_net_xdp_complete(struct nfp_net_tx_ring *tx_ring)
 static void
 nfp_net_tx_ring_reset(struct nfp_net_dp *dp, struct nfp_net_tx_ring *tx_ring)
 {
-	const struct skb_frag_struct *frag;
+	const skb_frag_t *frag;
 	struct netdev_queue *nd_q;
 
 	while (!tx_ring->is_xdp && tx_ring->rd_p != tx_ring->wr_p) {
@@ -1202,14 +1325,8 @@ nfp_net_tx_ring_reset(struct nfp_net_dp *dp, struct nfp_net_tx_ring *tx_ring)
 static void nfp_net_tx_timeout(struct net_device *netdev, unsigned int txqueue)
 {
 	struct nfp_net *nn = netdev_priv(netdev);
-	int i;
 
-	for (i = 0; i < nn->dp.netdev->real_num_tx_queues; i++) {
-		if (!netif_tx_queue_stopped(netdev_get_tx_queue(netdev, i)))
-			continue;
-		nn_warn(nn, "TX timeout on ring: %d\n", i);
-	}
-	nn_warn(nn, "TX watchdog timeout\n");
+	nn_warn(nn, "TX watchdog timeout on ring: %u\n", txqueue);
 }
 
 /* Receive processing
@@ -1545,9 +1662,9 @@ nfp_net_set_hash_desc(struct net_device *netdev, struct nfp_meta_parsed *meta,
 			 &rx_hash->hash);
 }
 
-static void *
+static bool
 nfp_net_parse_meta(struct net_device *netdev, struct nfp_meta_parsed *meta,
-		   void *data, int meta_len)
+		   void *data, void *pkt, unsigned int pkt_len, int meta_len)
 {
 	u32 meta_info;
 
@@ -1577,14 +1694,20 @@ nfp_net_parse_meta(struct net_device *netdev, struct nfp_meta_parsed *meta,
 				(__force __wsum)__get_unaligned_cpu32(data);
 			data += 4;
 			break;
+		case NFP_NET_META_RESYNC_INFO:
+			if (nfp_net_tls_rx_resync_req(netdev, data, pkt,
+						      pkt_len))
+				return NULL;
+			data += sizeof(struct nfp_net_tls_resync_req);
+			break;
 		default:
-			return NULL;
+			return true;
 		}
 
 		meta_info >>= NFP_NET_META_FIELD_SIZE;
 	}
 
-	return data;
+	return data != pkt;
 }
 
 static void
@@ -1618,9 +1741,14 @@ nfp_net_tx_xdp_buf(struct nfp_net_dp *dp, struct nfp_net_rx_ring *rx_ring,
 		   struct nfp_net_rx_buf *rxbuf, unsigned int dma_off,
 		   unsigned int pkt_len, bool *completed)
 {
+	unsigned int dma_map_sz = dp->fl_bufsz - NFP_NET_RX_BUF_NON_DATA;
 	struct nfp_net_tx_buf *txbuf;
 	struct nfp_net_tx_desc *txd;
 	int wr_idx;
+
+	/* Reject if xdp_adjust_tail grow packet beyond DMA area */
+	if (pkt_len + dma_off > dma_map_sz)
+		return false;
 
 	if (unlikely(nfp_net_tx_full(tx_ring, 1))) {
 		if (!*completed) {
@@ -1694,6 +1822,7 @@ static int nfp_net_rx(struct nfp_net_rx_ring *rx_ring, int budget)
 	rcu_read_lock();
 	xdp_prog = READ_ONCE(dp->xdp_prog);
 	true_bufsz = xdp_prog ? PAGE_SIZE : dp->fl_bufsz;
+	xdp.frame_sz = PAGE_SIZE - NFP_NET_RX_BUF_HEADROOM;
 	xdp.rxq = &rx_ring->xdp_rxq;
 	tx_ring = r_vec->xdp_ring;
 
@@ -1769,12 +1898,10 @@ static int nfp_net_rx(struct nfp_net_rx_ring *rx_ring, int budget)
 			nfp_net_set_hash_desc(dp->netdev, &meta,
 					      rxbuf->frag + meta_off, rxd);
 		} else if (meta_len) {
-			void *end;
-
-			end = nfp_net_parse_meta(dp->netdev, &meta,
-						 rxbuf->frag + meta_off,
-						 meta_len);
-			if (unlikely(end != rxbuf->frag + pkt_off)) {
+			if (unlikely(nfp_net_parse_meta(dp->netdev, &meta,
+							rxbuf->frag + meta_off,
+							rxbuf->frag + pkt_off,
+							pkt_len, meta_len))) {
 				nn_dp_warn(dp, "invalid RX packet metadata\n");
 				nfp_net_rx_drop(dp, r_vec, rx_ring, rxbuf,
 						NULL);
@@ -1875,6 +2002,15 @@ static int nfp_net_rx(struct nfp_net_rx_ring *rx_ring, int budget)
 		skb->protocol = eth_type_trans(skb, netdev);
 
 		nfp_net_rx_csum(dp, r_vec, rxd, &meta, skb);
+
+#ifdef CONFIG_TLS_DEVICE
+		if (rxd->rxd.flags & PCIE_DESC_RX_DECRYPTED) {
+			skb->decrypted = true;
+			u64_stats_update_begin(&r_vec->rx_sync);
+			r_vec->hw_tls_rx++;
+			u64_stats_update_end(&r_vec->rx_sync);
+		}
+#endif
 
 		if (rxd->rxd.flags & PCIE_DESC_RX_VLAN)
 			__vlan_hwaccel_put_tag(skb, htons(ETH_P_8021Q),
@@ -2247,9 +2383,9 @@ nfp_net_tx_ring_alloc(struct nfp_net_dp *dp, struct nfp_net_tx_ring *tx_ring)
 	tx_ring->cnt = dp->txd_cnt;
 
 	tx_ring->size = array_size(tx_ring->cnt, sizeof(*tx_ring->txds));
-	tx_ring->txds = dma_zalloc_coherent(dp->dev, tx_ring->size,
-					    &tx_ring->dma,
-					    GFP_KERNEL | __GFP_NOWARN);
+	tx_ring->txds = dma_alloc_coherent(dp->dev, tx_ring->size,
+					   &tx_ring->dma,
+					   GFP_KERNEL | __GFP_NOWARN);
 	if (!tx_ring->txds) {
 		netdev_warn(dp->netdev, "failed to allocate TX descriptor ring memory, requested descriptor count: %d, consider lowering descriptor count\n",
 			    tx_ring->cnt);
@@ -2405,9 +2541,9 @@ nfp_net_rx_ring_alloc(struct nfp_net_dp *dp, struct nfp_net_rx_ring *rx_ring)
 
 	rx_ring->cnt = dp->rxd_cnt;
 	rx_ring->size = array_size(rx_ring->cnt, sizeof(*rx_ring->rxds));
-	rx_ring->rxds = dma_zalloc_coherent(dp->dev, rx_ring->size,
-					    &rx_ring->dma,
-					    GFP_KERNEL | __GFP_NOWARN);
+	rx_ring->rxds = dma_alloc_coherent(dp->dev, rx_ring->size,
+					   &rx_ring->dma,
+					   GFP_KERNEL | __GFP_NOWARN);
 	if (!rx_ring->rxds) {
 		netdev_warn(dp->netdev, "failed to allocate RX descriptor ring memory, requested descriptor count: %d, consider lowering descriptor count\n",
 			    rx_ring->cnt);
@@ -3517,9 +3653,6 @@ static int nfp_net_xdp_setup_drv(struct nfp_net *nn, struct netdev_bpf *bpf)
 	struct nfp_net_dp *dp;
 	int err;
 
-	if (!xdp_attachment_flags_ok(&nn->xdp, bpf))
-		return -EBUSY;
-
 	if (!prog == !nn->dp.xdp_prog) {
 		WRITE_ONCE(nn->dp.xdp_prog, prog);
 		xdp_attachment_setup(&nn->xdp, bpf);
@@ -3548,9 +3681,6 @@ static int nfp_net_xdp_setup_hw(struct nfp_net *nn, struct netdev_bpf *bpf)
 {
 	int err;
 
-	if (!xdp_attachment_flags_ok(&nn->xdp_hw, bpf))
-		return -EBUSY;
-
 	err = nfp_app_xdp_offload(nn->app, nn, bpf->prog, bpf->extack);
 	if (err)
 		return err;
@@ -3568,10 +3698,6 @@ static int nfp_net_xdp(struct net_device *netdev, struct netdev_bpf *xdp)
 		return nfp_net_xdp_setup_drv(nn, xdp);
 	case XDP_SETUP_PROG_HW:
 		return nfp_net_xdp_setup_hw(nn, xdp);
-	case XDP_QUERY_PROG:
-		return xdp_attachment_query(&nn->xdp, xdp);
-	case XDP_QUERY_PROG_HW:
-		return xdp_attachment_query(&nn->xdp_hw, xdp);
 	default:
 		return nfp_app_bpf(nn->app, nn, xdp);
 	}
@@ -3731,11 +3857,12 @@ nfp_net_alloc(struct pci_dev *pdev, void __iomem *ctrl_bar, bool needs_netdev,
 
 	timer_setup(&nn->reconfig_timer, nfp_net_reconfig_timer, 0);
 
-	skb_queue_head_init(&nn->mbox_cmsg.queue);
-	init_waitqueue_head(&nn->mbox_cmsg.wq);
-
 	err = nfp_net_tlv_caps_parse(&nn->pdev->dev, nn->dp.ctrl_bar,
 				     &nn->tlv_caps);
+	if (err)
+		goto err_free_nn;
+
+	err = nfp_ccm_mbox_alloc(nn);
 	if (err)
 		goto err_free_nn;
 
@@ -3756,7 +3883,7 @@ err_free_nn:
 void nfp_net_free(struct nfp_net *nn)
 {
 	WARN_ON(timer_pending(&nn->reconfig_timer) || nn->reconfig_posted);
-	WARN_ON(!skb_queue_empty(&nn->mbox_cmsg.queue));
+	nfp_ccm_mbox_free(nn);
 
 	if (nn->dp.netdev)
 		free_netdev(nn->dp.netdev);
@@ -3985,14 +4112,7 @@ int nfp_net_init(struct nfp_net *nn)
 
 	/* Set default MTU and Freelist buffer size */
 	if (!nfp_net_is_data_vnic(nn) && nn->app->ctrl_mtu) {
-		if (nn->app->ctrl_mtu <= nn->max_mtu) {
-			nn->dp.mtu = nn->app->ctrl_mtu;
-		} else {
-			if (nn->app->ctrl_mtu != NFP_APP_CTRL_MTU_MAX)
-				nn_warn(nn, "app requested MTU above max supported %u > %u\n",
-					nn->app->ctrl_mtu, nn->max_mtu);
-			nn->dp.mtu = nn->max_mtu;
-		}
+		nn->dp.mtu = min(nn->app->ctrl_mtu, nn->max_mtu);
 	} else if (nn->max_mtu < NFP_NET_DEFAULT_MTU) {
 		nn->dp.mtu = nn->max_mtu;
 	} else {
@@ -4034,9 +4154,13 @@ int nfp_net_init(struct nfp_net *nn)
 	if (nn->dp.netdev) {
 		nfp_net_netdev_init(nn);
 
-		err = nfp_net_tls_init(nn);
+		err = nfp_ccm_mbox_init(nn);
 		if (err)
 			return err;
+
+		err = nfp_net_tls_init(nn);
+		if (err)
+			goto err_clean_mbox;
 	}
 
 	nfp_net_vecs_init(nn);
@@ -4044,6 +4168,10 @@ int nfp_net_init(struct nfp_net *nn)
 	if (!nn->dp.netdev)
 		return 0;
 	return register_netdev(nn->dp.netdev);
+
+err_clean_mbox:
+	nfp_ccm_mbox_clean(nn);
+	return err;
 }
 
 /**
@@ -4056,5 +4184,6 @@ void nfp_net_clean(struct nfp_net *nn)
 		return;
 
 	unregister_netdev(nn->dp.netdev);
+	nfp_ccm_mbox_clean(nn);
 	nfp_net_reconfig_wait_posted(nn);
 }

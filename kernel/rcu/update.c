@@ -52,6 +52,8 @@
 #include <linux/tick.h>
 #include <linux/rcupdate_wait.h>
 #include <linux/sched/isolation.h>
+#include <linux/kprobes.h>
+#include <linux/slab.h>
 
 #define CREATE_TRACE_POINTS
 
@@ -63,9 +65,7 @@
 #define MODULE_PARAM_PREFIX "rcupdate."
 
 #ifndef CONFIG_TINY_RCU
-extern int rcu_expedited; /* from sysctl */
 module_param(rcu_expedited, int, 0);
-extern int rcu_normal; /* from sysctl */
 module_param(rcu_normal, int, 0);
 static int rcu_normal_after_boot;
 module_param(rcu_normal_after_boot, int, 0);
@@ -231,6 +231,7 @@ static int __init rcu_set_runtime_mode(void)
 {
 	rcu_test_sync_prims();
 	rcu_scheduler_active = RCU_SCHEDULER_RUNNING;
+	kfree_rcu_scheduler_running();
 	rcu_test_sync_prims();
 	return 0;
 }
@@ -240,18 +241,30 @@ core_initcall(rcu_set_runtime_mode);
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 static struct lock_class_key rcu_lock_key;
-struct lockdep_map rcu_lock_map =
-	STATIC_LOCKDEP_MAP_INIT("rcu_read_lock", &rcu_lock_key);
+struct lockdep_map rcu_lock_map = {
+	.name = "rcu_read_lock",
+	.key = &rcu_lock_key,
+	.wait_type_outer = LD_WAIT_FREE,
+	.wait_type_inner = LD_WAIT_CONFIG, /* XXX PREEMPT_RCU ? */
+};
 EXPORT_SYMBOL_GPL(rcu_lock_map);
 
 static struct lock_class_key rcu_bh_lock_key;
-struct lockdep_map rcu_bh_lock_map =
-	STATIC_LOCKDEP_MAP_INIT("rcu_read_lock_bh", &rcu_bh_lock_key);
+struct lockdep_map rcu_bh_lock_map = {
+	.name = "rcu_read_lock_bh",
+	.key = &rcu_bh_lock_key,
+	.wait_type_outer = LD_WAIT_FREE,
+	.wait_type_inner = LD_WAIT_CONFIG, /* PREEMPT_LOCK also makes BH preemptible */
+};
 EXPORT_SYMBOL_GPL(rcu_bh_lock_map);
 
 static struct lock_class_key rcu_sched_lock_key;
-struct lockdep_map rcu_sched_lock_map =
-	STATIC_LOCKDEP_MAP_INIT("rcu_read_lock_sched", &rcu_sched_lock_key);
+struct lockdep_map rcu_sched_lock_map = {
+	.name = "rcu_read_lock_sched",
+	.key = &rcu_sched_lock_key,
+	.wait_type_outer = LD_WAIT_FREE,
+	.wait_type_inner = LD_WAIT_SPIN,
+};
 EXPORT_SYMBOL_GPL(rcu_sched_lock_map);
 
 static struct lock_class_key rcu_callback_key;
@@ -265,6 +278,7 @@ int notrace debug_lockdep_rcu_enabled(void)
 	       current->lockdep_recursion == 0;
 }
 EXPORT_SYMBOL_GPL(debug_lockdep_rcu_enabled);
+NOKPROBE_SYMBOL(debug_lockdep_rcu_enabled);
 
 /**
  * rcu_read_lock_held() - might we be in RCU read-side critical section?
@@ -447,7 +461,7 @@ struct debug_obj_descr rcuhead_debug_descr = {
 EXPORT_SYMBOL_GPL(rcuhead_debug_descr);
 #endif /* #ifdef CONFIG_DEBUG_OBJECTS_RCU_HEAD */
 
-#if defined(CONFIG_TREE_RCU) || defined(CONFIG_PREEMPT_RCU) || defined(CONFIG_RCU_TRACE)
+#if defined(CONFIG_TREE_RCU) || defined(CONFIG_RCU_TRACE)
 void do_trace_rcu_torture_read(const char *rcutorturename, struct rcu_head *rhp,
 			       unsigned long secs,
 			       unsigned long c_old, unsigned long c)
@@ -474,6 +488,8 @@ EXPORT_SYMBOL_GPL(rcutorture_sched_setaffinity);
 #endif
 
 #ifdef CONFIG_RCU_STALL_COMMON
+int rcu_cpu_stall_ftrace_dump __read_mostly;
+module_param(rcu_cpu_stall_ftrace_dump, int, 0644);
 int rcu_cpu_stall_suppress __read_mostly; /* 1 = suppress stall warnings. */
 EXPORT_SYMBOL_GPL(rcu_cpu_stall_suppress);
 module_param(rcu_cpu_stall_suppress, int, 0644);
@@ -863,14 +879,22 @@ static void test_callback(struct rcu_head *r)
 
 DEFINE_STATIC_SRCU(early_srcu);
 
+struct early_boot_kfree_rcu {
+	struct rcu_head rh;
+};
+
 static void early_boot_test_call_rcu(void)
 {
 	static struct rcu_head head;
 	static struct rcu_head shead;
+	struct early_boot_kfree_rcu *rhp;
 
 	call_rcu(&head, test_callback);
 	if (IS_ENABLED(CONFIG_SRCU))
 		call_srcu(&early_srcu, &shead, test_callback);
+	rhp = kmalloc(sizeof(*rhp), GFP_KERNEL);
+	if (!WARN_ON_ONCE(!rhp))
+		kfree_rcu(rhp, rh);
 }
 
 void rcu_early_boot_tests(void)

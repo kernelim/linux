@@ -26,6 +26,8 @@
 #include <asm/ptrace.h>
 #include <asm/reg.h>
 
+#define perf_arch_bpf_user_pt_regs(regs) &regs->user_regs
+
 /*
  * Overload regs->result to specify whether we should use the MSR (result
  * is zero) or the SIAR (result is non zero).
@@ -40,4 +42,7 @@
 
 /* To support perf_regs sier update */
 extern bool is_sier_available(void);
+/* To define perf extended regs mask value */
+extern u64 PERF_REG_EXTENDED_MASK;
+#define PERF_REG_EXTENDED_MASK	PERF_REG_EXTENDED_MASK
 #endif

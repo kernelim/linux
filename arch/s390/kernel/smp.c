@@ -759,6 +759,9 @@ void __init smp_detect_cpus(void)
 
 	/* Get CPU information */
 	info = memblock_alloc(sizeof(*info), 8);
+	if (!info)
+		panic("%s: Failed to allocate %zu bytes align=0x%x\n",
+		      __func__, sizeof(*info), 8);
 	smp_get_core_info(info, 1);
 	/* Find boot CPU type */
 	if (sclp.has_core_type) {

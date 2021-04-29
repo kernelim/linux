@@ -249,6 +249,7 @@
 struct tty_struct;
 struct tty_driver;
 struct serial_icounter_struct;
+struct serial_struct;
 
 struct tty_operations {
 	struct tty_struct * (*lookup)(struct tty_driver *driver,
@@ -294,6 +295,8 @@ struct tty_operations {
 	void (*poll_put_char)(struct tty_driver *driver, int line, char ch);
 #endif
 	int (*proc_show)(struct seq_file *, void *);
+	RH_KABI_EXTEND(int  (*get_serial)(struct tty_struct *tty, struct serial_struct *p))
+	RH_KABI_EXTEND(int  (*set_serial)(struct tty_struct *tty, struct serial_struct *p))
 } __randomize_layout;
 
 struct tty_driver {

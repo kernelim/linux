@@ -24,6 +24,7 @@
 #include <linux/cpu.h>
 #include <linux/debugfs.h>
 #include <linux/fs.h>
+#include <linux/fs_parser.h>
 #include <linux/sysfs.h>
 #include <linux/kernfs.h>
 #include <linux/seq_buf.h>
@@ -32,10 +33,11 @@
 #include <linux/sched/task.h>
 #include <linux/slab.h>
 #include <linux/task_work.h>
+#include <linux/user_namespace.h>
 
 #include <uapi/linux/magic.h>
 
-#include <asm/resctrl_sched.h>
+#include <asm/resctrl.h>
 #include "internal.h"
 
 DEFINE_STATIC_KEY_FALSE(rdt_enable_key);
@@ -598,6 +600,18 @@ static int __rdtgroup_move_task(struct task_struct *tsk,
 	return ret;
 }
 
+static bool is_closid_match(struct task_struct *t, struct rdtgroup *r)
+{
+	return (rdt_alloc_capable &&
+	       (r->type == RDTCTRL_GROUP) && (t->closid == r->closid));
+}
+
+static bool is_rmid_match(struct task_struct *t, struct rdtgroup *r)
+{
+	return (rdt_mon_capable &&
+	       (r->type == RDTMON_GROUP) && (t->rmid == r->mon.rmid));
+}
+
 /**
  * rdtgroup_tasks_assigned - Test if tasks have been assigned to resource group
  * @r: Resource group
@@ -613,8 +627,7 @@ int rdtgroup_tasks_assigned(struct rdtgroup *r)
 
 	rcu_read_lock();
 	for_each_process_thread(p, t) {
-		if ((r->type == RDTCTRL_GROUP && t->closid == r->closid) ||
-		    (r->type == RDTMON_GROUP && t->rmid == r->mon.rmid)) {
+		if (is_closid_match(t, r) || is_rmid_match(t, r)) {
 			ret = 1;
 			break;
 		}
@@ -712,8 +725,7 @@ static void show_rdt_tasks(struct rdtgroup *r, struct seq_file *s)
 
 	rcu_read_lock();
 	for_each_process_thread(p, t) {
-		if ((r->type == RDTCTRL_GROUP && t->closid == r->closid) ||
-		    (r->type == RDTMON_GROUP && t->rmid == r->mon.rmid))
+		if (is_closid_match(t, r) || is_rmid_match(t, r))
 			seq_printf(s, "%d\n", t->pid);
 	}
 	rcu_read_unlock();
@@ -1023,6 +1035,19 @@ static int max_threshold_occ_show(struct kernfs_open_file *of,
 	return 0;
 }
 
+static int rdt_thread_throttle_mode_show(struct kernfs_open_file *of,
+					 struct seq_file *seq, void *v)
+{
+	struct rdt_resource *r = of->kn->parent->priv;
+
+	if (r->membw.throttle_mode == THREAD_THROTTLE_PER_THREAD)
+		seq_puts(seq, "per-thread\n");
+	else
+		seq_puts(seq, "max\n");
+
+	return 0;
+}
+
 static ssize_t max_threshold_occ_write(struct kernfs_open_file *of,
 				       char *buf, size_t nbytes, loff_t off)
 {
@@ -1123,6 +1148,7 @@ static int rdt_cdp_peer_get(struct rdt_resource *r, struct rdt_domain *d,
 	_d_cdp = rdt_find_domain(_r_cdp, d->id, NULL);
 	if (WARN_ON(IS_ERR_OR_NULL(_d_cdp))) {
 		_r_cdp = NULL;
+		_d_cdp = NULL;
 		ret = -EINVAL;
 	}
 
@@ -1518,6 +1544,17 @@ static struct rftype res_common_files[] = {
 		.seq_show	= rdt_delay_linear_show,
 		.fflags		= RF_CTRL_INFO | RFTYPE_RES_MB,
 	},
+	/*
+	 * Platform specific which (if any) capabilities are provided by
+	 * thread_throttle_mode. Defer "fflags" initialization to platform
+	 * discovery.
+	 */
+	{
+		.name		= "thread_throttle_mode",
+		.mode		= 0444,
+		.kf_ops		= &rdtgroup_kf_single_ops,
+		.seq_show	= rdt_thread_throttle_mode_show,
+	},
 	{
 		.name		= "max_threshold_occupancy",
 		.mode		= 0644,
@@ -1588,7 +1625,7 @@ static int rdtgroup_add_files(struct kernfs_node *kn, unsigned long fflags)
 	lockdep_assert_held(&rdtgroup_mutex);
 
 	for (rft = rfts; rft < rfts + len; rft++) {
-		if ((fflags & rft->fflags) == rft->fflags) {
+		if (rft->fflags && ((fflags & rft->fflags) == rft->fflags)) {
 			ret = rdtgroup_add_file(kn, rft);
 			if (ret)
 				goto error;
@@ -1603,6 +1640,33 @@ error:
 			kernfs_remove_by_name(kn, rft->name);
 	}
 	return ret;
+}
+
+static struct rftype *rdtgroup_get_rftype_by_name(const char *name)
+{
+	struct rftype *rfts, *rft;
+	int len;
+
+	rfts = res_common_files;
+	len = ARRAY_SIZE(res_common_files);
+
+	for (rft = rfts; rft < rfts + len; rft++) {
+		if (!strcmp(rft->name, name))
+			return rft;
+	}
+
+	return NULL;
+}
+
+void __init thread_throttle_mode_init(void)
+{
+	struct rftype *rft;
+
+	rft = rdtgroup_get_rftype_by_name("thread_throttle_mode");
+	if (!rft)
+		return;
+
+	rft->fflags = RF_CTRL_INFO | RFTYPE_RES_MB;
 }
 
 /**
@@ -1865,6 +1929,19 @@ static int set_cache_qos_cfg(int level, bool enable)
 	return 0;
 }
 
+/* Restore the qos cfg state when a domain comes online */
+void rdt_domain_reconfigure_cdp(struct rdt_resource *r)
+{
+	if (!r->alloc_capable)
+		return;
+
+	if (r == &rdt_resources_all[RDT_RESOURCE_L2DATA])
+		l2_qos_cfg_update(&r->alloc_enabled);
+
+	if (r == &rdt_resources_all[RDT_RESOURCE_L3DATA])
+		l3_qos_cfg_update(&r->alloc_enabled);
+}
+
 /*
  * Enable or disable the MBA software controller
  * which helps user specify bandwidth in MBps.
@@ -1950,46 +2027,6 @@ static void cdp_disable_all(void)
 		cdpl2_disable();
 }
 
-static int parse_rdtgroupfs_options(char *data)
-{
-	char *token, *o = data;
-	int ret = 0;
-
-	while ((token = strsep(&o, ",")) != NULL) {
-		if (!*token) {
-			ret = -EINVAL;
-			goto out;
-		}
-
-		if (!strcmp(token, "cdp")) {
-			ret = cdpl3_enable();
-			if (ret)
-				goto out;
-		} else if (!strcmp(token, "cdpl2")) {
-			ret = cdpl2_enable();
-			if (ret)
-				goto out;
-		} else if (!strcmp(token, "mba_MBps")) {
-			if (boot_cpu_data.x86_vendor == X86_VENDOR_INTEL)
-				ret = set_mba_sc(true);
-			else
-				ret = -EINVAL;
-			if (ret)
-				goto out;
-		} else {
-			ret = -EINVAL;
-			goto out;
-		}
-	}
-
-	return 0;
-
-out:
-	pr_err("Invalid mount option \"%s\"\n", token);
-
-	return ret;
-}
-
 /*
  * We don't allow rdtgroup directories to be created anywhere
  * except the root directory. Thus when looking for the rdtgroup
@@ -2061,13 +2098,27 @@ static int mkdir_mondata_all(struct kernfs_node *parent_kn,
 			     struct rdtgroup *prgrp,
 			     struct kernfs_node **mon_data_kn);
 
-static struct dentry *rdt_mount(struct file_system_type *fs_type,
-				int flags, const char *unused_dev_name,
-				void *data)
+static int rdt_enable_ctx(struct rdt_fs_context *ctx)
 {
+	int ret = 0;
+
+	if (ctx->enable_cdpl2)
+		ret = cdpl2_enable();
+
+	if (!ret && ctx->enable_cdpl3)
+		ret = cdpl3_enable();
+
+	if (!ret && ctx->enable_mba_mbps)
+		ret = set_mba_sc(true);
+
+	return ret;
+}
+
+static int rdt_get_tree(struct fs_context *fc)
+{
+	struct rdt_fs_context *ctx = rdt_fc2context(fc);
 	struct rdt_domain *dom;
 	struct rdt_resource *r;
-	struct dentry *dentry;
 	int ret;
 
 	cpus_read_lock();
@@ -2076,53 +2127,42 @@ static struct dentry *rdt_mount(struct file_system_type *fs_type,
 	 * resctrl file system can only be mounted once.
 	 */
 	if (static_branch_unlikely(&rdt_enable_key)) {
-		dentry = ERR_PTR(-EBUSY);
+		ret = -EBUSY;
 		goto out;
 	}
 
-	ret = parse_rdtgroupfs_options(data);
-	if (ret) {
-		dentry = ERR_PTR(ret);
+	ret = rdt_enable_ctx(ctx);
+	if (ret < 0)
 		goto out_cdp;
-	}
 
 	closid_init();
 
 	ret = rdtgroup_create_info_dir(rdtgroup_default.kn);
-	if (ret) {
-		dentry = ERR_PTR(ret);
-		goto out_cdp;
-	}
+	if (ret < 0)
+		goto out_mba;
 
 	if (rdt_mon_capable) {
 		ret = mongroup_create_dir(rdtgroup_default.kn,
 					  &rdtgroup_default, "mon_groups",
 					  &kn_mongrp);
-		if (ret) {
-			dentry = ERR_PTR(ret);
+		if (ret < 0)
 			goto out_info;
-		}
 		kernfs_get(kn_mongrp);
 
 		ret = mkdir_mondata_all(rdtgroup_default.kn,
 					&rdtgroup_default, &kn_mondata);
-		if (ret) {
-			dentry = ERR_PTR(ret);
+		if (ret < 0)
 			goto out_mongrp;
-		}
 		kernfs_get(kn_mondata);
 		rdtgroup_default.mon.mon_data_kn = kn_mondata;
 	}
 
 	ret = rdt_pseudo_lock_init();
-	if (ret) {
-		dentry = ERR_PTR(ret);
+	if (ret)
 		goto out_mondata;
-	}
 
-	dentry = kernfs_mount(fs_type, flags, rdt_root,
-			      RDTGROUP_SUPER_MAGIC, NULL);
-	if (IS_ERR(dentry))
+	ret = kernfs_get_tree(fc);
+	if (ret < 0)
 		goto out_psl;
 
 	if (rdt_alloc_capable)
@@ -2151,14 +2191,89 @@ out_mongrp:
 		kernfs_remove(kn_mongrp);
 out_info:
 	kernfs_remove(kn_info);
+out_mba:
+	if (ctx->enable_mba_mbps)
+		set_mba_sc(false);
 out_cdp:
 	cdp_disable_all();
 out:
 	rdt_last_cmd_clear();
 	mutex_unlock(&rdtgroup_mutex);
 	cpus_read_unlock();
+	return ret;
+}
 
-	return dentry;
+enum rdt_param {
+	Opt_cdp,
+	Opt_cdpl2,
+	Opt_mba_mbps,
+	nr__rdt_params
+};
+
+static const struct fs_parameter_spec rdt_fs_parameters[] = {
+	fsparam_flag("cdp",		Opt_cdp),
+	fsparam_flag("cdpl2",		Opt_cdpl2),
+	fsparam_flag("mba_MBps",	Opt_mba_mbps),
+	{}
+};
+
+static int rdt_parse_param(struct fs_context *fc, struct fs_parameter *param)
+{
+	struct rdt_fs_context *ctx = rdt_fc2context(fc);
+	struct fs_parse_result result;
+	int opt;
+
+	opt = fs_parse(fc, rdt_fs_parameters, param, &result);
+	if (opt < 0)
+		return opt;
+
+	switch (opt) {
+	case Opt_cdp:
+		ctx->enable_cdpl3 = true;
+		return 0;
+	case Opt_cdpl2:
+		ctx->enable_cdpl2 = true;
+		return 0;
+	case Opt_mba_mbps:
+		if (boot_cpu_data.x86_vendor != X86_VENDOR_INTEL)
+			return -EINVAL;
+		ctx->enable_mba_mbps = true;
+		return 0;
+	}
+
+	return -EINVAL;
+}
+
+static void rdt_fs_context_free(struct fs_context *fc)
+{
+	struct rdt_fs_context *ctx = rdt_fc2context(fc);
+
+	kernfs_free_fs_context(fc);
+	kfree(ctx);
+}
+
+static const struct fs_context_operations rdt_fs_context_ops = {
+	.free		= rdt_fs_context_free,
+	.parse_param	= rdt_parse_param,
+	.get_tree	= rdt_get_tree,
+};
+
+static int rdt_init_fs_context(struct fs_context *fc)
+{
+	struct rdt_fs_context *ctx;
+
+	ctx = kzalloc(sizeof(struct rdt_fs_context), GFP_KERNEL);
+	if (!ctx)
+		return -ENOMEM;
+
+	ctx->kfc.root = rdt_root;
+	ctx->kfc.magic = RDTGROUP_SUPER_MAGIC;
+	fc->fs_private = &ctx->kfc;
+	fc->ops = &rdt_fs_context_ops;
+	put_user_ns(fc->user_ns);
+	fc->user_ns = get_user_ns(&init_user_ns);
+	fc->global = true;
+	return 0;
 }
 
 static int reset_all_ctrls(struct rdt_resource *r)
@@ -2197,18 +2312,6 @@ static int reset_all_ctrls(struct rdt_resource *r)
 	free_cpumask_var(cpu_mask);
 
 	return 0;
-}
-
-static bool is_closid_match(struct task_struct *t, struct rdtgroup *r)
-{
-	return (rdt_alloc_capable &&
-		(r->type == RDTCTRL_GROUP) && (t->closid == r->closid));
-}
-
-static bool is_rmid_match(struct task_struct *t, struct rdtgroup *r)
-{
-	return (rdt_mon_capable &&
-		(r->type == RDTMON_GROUP) && (t->rmid == r->mon.rmid));
 }
 
 /*
@@ -2339,9 +2442,10 @@ static void rdt_kill_sb(struct super_block *sb)
 }
 
 static struct file_system_type rdt_fs_type = {
-	.name    = "resctrl",
-	.mount   = rdt_mount,
-	.kill_sb = rdt_kill_sb,
+	.name			= "resctrl",
+	.init_fs_context	= rdt_init_fs_context,
+	.parameters		= rdt_fs_parameters,
+	.kill_sb		= rdt_kill_sb,
 };
 
 static int mon_addfile(struct kernfs_node *parent_kn, const char *name,
@@ -2426,7 +2530,7 @@ static int mkdir_mondata_subdir(struct kernfs_node *parent_kn,
 			goto out_destroy;
 
 		if (is_mbm_event(mevt->evtid))
-			mon_event_read(&rr, d, prgrp, mevt->evtid, true);
+			mon_event_read(&rr, r, d, prgrp, mevt->evtid, true);
 	}
 	kernfs_activate(kn);
 	return 0;
@@ -3149,7 +3253,7 @@ int __init rdtgroup_init(void)
 	 * It may also be ok since that would enable debugging of RDT before
 	 * resctrl is mounted.
 	 * The reason why the debugfs directory is created here and not in
-	 * rdt_mount() is because rdt_mount() takes rdtgroup_mutex and
+	 * rdt_get_tree() is because rdt_get_tree() takes rdtgroup_mutex and
 	 * during the debugfs directory creation also &sb->s_type->i_mutex_key
 	 * (the lockdep class of inode->i_rwsem). Other filesystem
 	 * interactions (eg. SyS_getdents) have the lock ordering:

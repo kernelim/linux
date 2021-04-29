@@ -74,6 +74,10 @@ struct proc_dir_entry *proc_create_net_single_write(const char *name, umode_t mo
 						    proc_write_t write,
 						    void *data);
 
+struct bpf_iter_aux_info;
+extern int bpf_iter_init_seq_net(void *priv_data, struct bpf_iter_aux_info *aux);
+extern void bpf_iter_fini_seq_net(void *priv_data);
+
 #else /* CONFIG_PROC_FS */
 
 static inline void proc_root_init(void)

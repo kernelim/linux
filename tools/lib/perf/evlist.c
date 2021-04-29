@@ -11,10 +11,8 @@
 #include <internal/mmap.h>
 #include <internal/cpumap.h>
 #include <internal/threadmap.h>
-#include <internal/xyarray.h>
 #include <internal/lib.h>
 #include <linux/zalloc.h>
-#include <sys/ioctl.h>
 #include <stdlib.h>
 #include <errno.h>
 #include <unistd.h>
@@ -45,6 +43,9 @@ static void __perf_evlist__propagate_maps(struct perf_evlist *evlist,
 	 * keep it, if there's no target cpu list defined.
 	 */
 	if (!evsel->own_cpus || evlist->has_user_cpus) {
+		perf_cpu_map__put(evsel->cpus);
+		evsel->cpus = perf_cpu_map__get(evlist->cpus);
+	} else if (!evsel->system_wide && perf_cpu_map__empty(evlist->cpus)) {
 		perf_cpu_map__put(evsel->cpus);
 		evsel->cpus = perf_cpu_map__get(evlist->cpus);
 	} else if (evsel->cpus != evsel->own_cpus) {
@@ -125,8 +126,10 @@ static void perf_evlist__purge(struct perf_evlist *evlist)
 void perf_evlist__exit(struct perf_evlist *evlist)
 {
 	perf_cpu_map__put(evlist->cpus);
+	perf_cpu_map__put(evlist->all_cpus);
 	perf_thread_map__put(evlist->threads);
 	evlist->cpus = NULL;
+	evlist->all_cpus = NULL;
 	evlist->threads = NULL;
 	fdarray__exit(&evlist->pollfd);
 }
@@ -305,9 +308,9 @@ int perf_evlist__alloc_pollfd(struct perf_evlist *evlist)
 }
 
 int perf_evlist__add_pollfd(struct perf_evlist *evlist, int fd,
-			    void *ptr, short revent)
+			    void *ptr, short revent, enum fdarray_flags flags)
 {
-	int pos = fdarray__add(&evlist->pollfd, fd, revent | POLLERR | POLLHUP);
+	int pos = fdarray__add(&evlist->pollfd, fd, revent | POLLERR | POLLHUP, flags);
 
 	if (pos >= 0) {
 		evlist->pollfd.priv[pos].ptr = ptr;
@@ -488,7 +491,7 @@ mmap_per_evsel(struct perf_evlist *evlist, struct perf_evlist_mmap_ops *ops,
 		revent = !overwrite ? POLLIN : 0;
 
 		if (!evsel->system_wide &&
-		    perf_evlist__add_pollfd(evlist, fd, map, revent) < 0) {
+		    perf_evlist__add_pollfd(evlist, fd, map, revent, fdarray_flag__default) < 0) {
 			perf_mmap__put(map);
 			return -1;
 		}

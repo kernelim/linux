@@ -46,25 +46,7 @@ void nf_unregister_queue_handler(struct net *net)
 }
 EXPORT_SYMBOL(nf_unregister_queue_handler);
 
-static void nf_queue_entry_release_br_nf_refs(struct sk_buff *skb)
-{
-#if IS_ENABLED(CONFIG_BRIDGE_NETFILTER)
-	struct nf_bridge_info *nf_bridge = nf_bridge_info_get(skb);
-
-	if (nf_bridge) {
-		struct net_device *physdev;
-
-		physdev = nf_bridge_get_physindev(skb);
-		if (physdev)
-			dev_put(physdev);
-		physdev = nf_bridge_get_physoutdev(skb);
-		if (physdev)
-			dev_put(physdev);
-	}
-#endif
-}
-
-void nf_queue_entry_release_refs(struct nf_queue_entry *entry)
+static void nf_queue_entry_release_refs(struct nf_queue_entry *entry)
 {
 	struct nf_hook_state *state = &entry->state;
 
@@ -76,24 +58,34 @@ void nf_queue_entry_release_refs(struct nf_queue_entry *entry)
 	if (state->sk)
 		sock_put(state->sk);
 
-	nf_queue_entry_release_br_nf_refs(entry->skb);
+#if IS_ENABLED(CONFIG_BRIDGE_NETFILTER)
+	if (entry->physin)
+		dev_put(entry->physin);
+	if (entry->physout)
+		dev_put(entry->physout);
+#endif
 }
-EXPORT_SYMBOL_GPL(nf_queue_entry_release_refs);
 
-static void nf_queue_entry_get_br_nf_refs(struct sk_buff *skb)
+void nf_queue_entry_free(struct nf_queue_entry *entry)
+{
+	nf_queue_entry_release_refs(entry);
+	kfree(entry);
+}
+EXPORT_SYMBOL_GPL(nf_queue_entry_free);
+
+static void __nf_queue_entry_init_physdevs(struct nf_queue_entry *entry)
 {
 #if IS_ENABLED(CONFIG_BRIDGE_NETFILTER)
-	struct nf_bridge_info *nf_bridge = nf_bridge_info_get(skb);
+	const struct sk_buff *skb = entry->skb;
+	struct nf_bridge_info *nf_bridge;
 
+	nf_bridge = nf_bridge_info_get(skb);
 	if (nf_bridge) {
-		struct net_device *physdev;
-
-		physdev = nf_bridge_get_physindev(skb);
-		if (physdev)
-			dev_hold(physdev);
-		physdev = nf_bridge_get_physoutdev(skb);
-		if (physdev)
-			dev_hold(physdev);
+		entry->physin = nf_bridge_get_physindev(skb);
+		entry->physout = nf_bridge_get_physoutdev(skb);
+	} else {
+		entry->physin = NULL;
+		entry->physout = NULL;
 	}
 #endif
 }
@@ -110,7 +102,12 @@ void nf_queue_entry_get_refs(struct nf_queue_entry *entry)
 	if (state->sk)
 		sock_hold(state->sk);
 
-	nf_queue_entry_get_br_nf_refs(entry->skb);
+#if IS_ENABLED(CONFIG_BRIDGE_NETFILTER)
+	if (entry->physin)
+		dev_hold(entry->physin);
+	if (entry->physout)
+		dev_hold(entry->physout);
+#endif
 }
 EXPORT_SYMBOL_GPL(nf_queue_entry_get_refs);
 
@@ -201,6 +198,8 @@ static int __nf_queue(struct sk_buff *skb, const struct nf_hook_state *state,
 		.hook_index = index,
 		.size	= sizeof(*entry) + route_key_size,
 	};
+
+	__nf_queue_entry_init_physdevs(entry);
 
 	nf_queue_entry_get_refs(entry);
 
@@ -305,12 +304,10 @@ void nf_reinject(struct nf_queue_entry *entry, unsigned int verdict)
 
 	hooks = nf_hook_entries_head(net, pf, entry->state.hook);
 
-	nf_queue_entry_release_refs(entry);
-
 	i = entry->hook_index;
 	if (WARN_ON_ONCE(!hooks || i >= hooks->num_hook_entries)) {
 		kfree_skb(skb);
-		kfree(entry);
+		nf_queue_entry_free(entry);
 		return;
 	}
 
@@ -349,6 +346,6 @@ next_hook:
 		kfree_skb(skb);
 	}
 
-	kfree(entry);
+	nf_queue_entry_free(entry);
 }
 EXPORT_SYMBOL(nf_reinject);

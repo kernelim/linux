@@ -209,6 +209,7 @@ static int do_ipv6_setsockopt(struct sock *sk, int level, int optname,
 
 			fl6_free_socklist(sk);
 			__ipv6_sock_mc_close(sk);
+			__ipv6_sock_ac_close(sk);
 
 			/*
 			 * Sock is moving from IPv6 to IPv4 (sk_prot), so
@@ -462,7 +463,7 @@ static int do_ipv6_setsockopt(struct sock *sk, int level, int optname,
 				struct ipv6_sr_hdr *srh = (struct ipv6_sr_hdr *)
 							  opt->srcrt;
 
-				if (!seg6_validate_srh(srh, optlen))
+				if (!seg6_validate_srh(srh, optlen, false))
 					goto sticky_done;
 				break;
 			}

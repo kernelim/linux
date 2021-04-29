@@ -201,6 +201,12 @@ enum tls_context_flags {
 	 * to be atomic.
 	 */
 	TLS_TX_SYNC_SCHED = 1,
+	/* tls_dev_del was called for the RX side, device state was released,
+	 * but tls_ctx->netdev might still be kept, because TX-side driver
+	 * resources might not be released yet. Used to prevent the second
+	 * tls_dev_del call in tls_device_down if it happens simultaneously.
+	 */
+	TLS_RX_DEV_CLOSED = 2,
 };
 
 struct cipher_context {
@@ -287,10 +293,19 @@ struct tls_context {
 enum tls_offload_sync_type {
 	TLS_OFFLOAD_SYNC_TYPE_DRIVER_REQ = 0,
 	TLS_OFFLOAD_SYNC_TYPE_CORE_NEXT_HINT = 1,
+	TLS_OFFLOAD_SYNC_TYPE_DRIVER_REQ_ASYNC = 2,
 };
 
 #define TLS_DEVICE_RESYNC_NH_START_IVAL		2
 #define TLS_DEVICE_RESYNC_NH_MAX_IVAL		128
+
+#define TLS_DEVICE_RESYNC_ASYNC_LOGMAX		13
+struct tls_offload_resync_async {
+	atomic64_t req;
+	u16 loglen;
+	u16 rcd_delta;
+	u32 log[TLS_DEVICE_RESYNC_ASYNC_LOGMAX];
+};
 
 struct tls_offload_context_rx {
 	/* sw must be the first member of tls_offload_context_rx */
@@ -310,6 +325,10 @@ struct tls_offload_context_rx {
 			u32 decrypted_failed;
 			u32 decrypted_tgt;
 		} resync_nh;
+		/* TLS_OFFLOAD_SYNC_TYPE_DRIVER_REQ_ASYNC */
+		struct {
+			struct tls_offload_resync_async *resync_async;
+		};
 	};
 	u8 driver_state[] __aligned(8);
 	/* The TLS layer reserves room for driver specific state
@@ -455,6 +474,18 @@ static inline bool tls_bigint_increment(unsigned char *seq, int len)
 	return (i == -1);
 }
 
+static inline void tls_bigint_subtract(unsigned char *seq, int  n)
+{
+	u64 rcd_sn;
+	__be64 *p;
+
+	BUILD_BUG_ON(TLS_MAX_REC_SEQ_SIZE != 8);
+
+	p = (__be64 *)seq;
+	rcd_sn = be64_to_cpu(*p);
+	*p = cpu_to_be64(rcd_sn - n);
+}
+
 static inline struct tls_context *tls_get_ctx(const struct sock *sk)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
@@ -567,6 +598,15 @@ static inline bool tls_sw_has_ctx_tx(const struct sock *sk)
 	return !!tls_sw_ctx_tx(ctx);
 }
 
+static inline bool tls_sw_has_ctx_rx(const struct sock *sk)
+{
+	struct tls_context *ctx = tls_get_ctx(sk);
+
+	if (!ctx)
+		return false;
+	return !!tls_sw_ctx_rx(ctx);
+}
+
 void tls_sw_write_space(struct sock *sk, struct tls_context *ctx);
 void tls_device_write_space(struct sock *sk, struct tls_context *ctx);
 
@@ -593,13 +633,38 @@ tls_driver_ctx(const struct sock *sk, enum tls_offload_ctx_dir direction)
 }
 #endif
 
+#define RESYNC_REQ BIT(0)
+#define RESYNC_REQ_ASYNC BIT(1)
 /* The TLS context is valid until sk_destruct is called */
 static inline void tls_offload_rx_resync_request(struct sock *sk, __be32 seq)
 {
 	struct tls_context *tls_ctx = tls_get_ctx(sk);
 	struct tls_offload_context_rx *rx_ctx = tls_offload_ctx_rx(tls_ctx);
 
-	atomic64_set(&rx_ctx->resync_req, ((u64)ntohl(seq) << 32) | 1);
+	atomic64_set(&rx_ctx->resync_req, ((u64)ntohl(seq) << 32) | RESYNC_REQ);
+}
+
+/* Log all TLS record header TCP sequences in [seq, seq+len] */
+static inline void
+tls_offload_rx_resync_async_request_start(struct sock *sk, __be32 seq, u16 len)
+{
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
+	struct tls_offload_context_rx *rx_ctx = tls_offload_ctx_rx(tls_ctx);
+
+	atomic64_set(&rx_ctx->resync_async->req, ((u64)ntohl(seq) << 32) |
+		     ((u64)len << 16) | RESYNC_REQ | RESYNC_REQ_ASYNC);
+	rx_ctx->resync_async->loglen = 0;
+	rx_ctx->resync_async->rcd_delta = 0;
+}
+
+static inline void
+tls_offload_rx_resync_async_request_end(struct sock *sk, __be32 seq)
+{
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
+	struct tls_offload_context_rx *rx_ctx = tls_offload_ctx_rx(tls_ctx);
+
+	atomic64_set(&rx_ctx->resync_async->req,
+		     ((u64)ntohl(seq) << 32) | RESYNC_REQ);
 }
 
 static inline void

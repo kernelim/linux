@@ -187,6 +187,7 @@ ext4_read_inode_bitmap(struct super_block *sb, ext4_group_t block_group)
 	/*
 	 * submit the buffer_head for reading
 	 */
+	clear_buffer_verified(bh);
 	trace_ext4_load_inode_bitmap(sb, block_group);
 	bh->b_end_io = ext4_end_bitmap_read;
 	get_bh(bh);
@@ -1119,7 +1120,7 @@ got:
 	ei->i_block_group = group;
 	ei->i_last_alloc_group = ~0;
 
-	ext4_set_inode_flags(inode);
+	ext4_set_inode_flags(inode, true);
 	if (IS_DIRSYNC(inode))
 		ext4_handle_sync(handle);
 	if (insert_inode_locked(inode) < 0) {
@@ -1444,7 +1445,7 @@ int ext4_init_inode_table(struct super_block *sb, ext4_group_t group,
 	if (ret < 0)
 		goto err_out;
 	if (barrier)
-		blkdev_issue_flush(sb->s_bdev, GFP_NOFS, NULL);
+		blkdev_issue_flush(sb->s_bdev, GFP_NOFS);
 
 skip_zeroout:
 	ext4_lock_group(sb, group);

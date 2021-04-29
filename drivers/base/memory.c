@@ -96,20 +96,6 @@ void unregister_memory_notifier(struct notifier_block *nb)
 }
 EXPORT_SYMBOL(unregister_memory_notifier);
 
-static ATOMIC_NOTIFIER_HEAD(memory_isolate_chain);
-
-int register_memory_isolate_notifier(struct notifier_block *nb)
-{
-	return atomic_notifier_chain_register(&memory_isolate_chain, nb);
-}
-EXPORT_SYMBOL(register_memory_isolate_notifier);
-
-void unregister_memory_isolate_notifier(struct notifier_block *nb)
-{
-	atomic_notifier_chain_unregister(&memory_isolate_chain, nb);
-}
-EXPORT_SYMBOL(unregister_memory_isolate_notifier);
-
 static void memory_block_release(struct device *dev)
 {
 	struct memory_block *mem = to_memory_block(dev);
@@ -199,11 +185,6 @@ int memory_notify(unsigned long val, void *v)
 	return blocking_notifier_call_chain(&memory_chain, val, v);
 }
 
-int memory_isolate_notify(unsigned long val, void *v)
-{
-	return atomic_notifier_call_chain(&memory_isolate_chain, val, v);
-}
-
 /*
  * The probe routines leave the pages uninitialized, just as the bootmem code
  * does. Make sure we do not access them, but instead use only information from
@@ -249,7 +230,7 @@ static bool pages_correctly_probed(unsigned long start_pfn)
  */
 static int
 memory_block_action(unsigned long start_section_nr, unsigned long action,
-		    int online_type)
+		    int online_type, int nid)
 {
 	unsigned long start_pfn;
 	unsigned long nr_pages = PAGES_PER_SECTION * sections_per_block;
@@ -262,7 +243,7 @@ memory_block_action(unsigned long start_section_nr, unsigned long action,
 		if (!pages_correctly_probed(start_pfn))
 			return -EBUSY;
 
-		ret = online_pages(start_pfn, nr_pages, online_type);
+		ret = online_pages(start_pfn, nr_pages, online_type, nid);
 		break;
 	case MEM_OFFLINE:
 		ret = offline_pages(start_pfn, nr_pages);
@@ -288,7 +269,7 @@ static int memory_block_change_state(struct memory_block *mem,
 		mem->state = MEM_GOING_OFFLINE;
 
 	ret = memory_block_action(mem->start_section_nr, to_state,
-				mem->online_type);
+				  mem->online_type, mem->nid);
 
 	mem->state = ret ? from_state_req : to_state;
 
@@ -406,7 +387,6 @@ static ssize_t valid_zones_show(struct device *dev,
 	struct memory_block *mem = to_memory_block(dev);
 	unsigned long start_pfn = section_nr_to_pfn(mem->start_section_nr);
 	unsigned long nr_pages = PAGES_PER_SECTION * sections_per_block;
-	unsigned long valid_start_pfn, valid_end_pfn;
 	struct zone *default_zone;
 	int nid;
 
@@ -419,11 +399,11 @@ static ssize_t valid_zones_show(struct device *dev,
 		 * The block contains more than one zone can not be offlined.
 		 * This can happen e.g. for ZONE_DMA and ZONE_DMA32
 		 */
-		if (!test_pages_in_a_zone(start_pfn, start_pfn + nr_pages,
-					  &valid_start_pfn, &valid_end_pfn))
+		default_zone = test_pages_in_a_zone(start_pfn,
+						    start_pfn + nr_pages);
+		if (!default_zone)
 			return sprintf(buf, "none\n");
-		start_pfn = valid_start_pfn;
-		strcat(buf, page_zone(pfn_to_page(start_pfn))->name);
+		strcat(buf, default_zone->name);
 		goto out;
 	}
 
@@ -544,12 +524,7 @@ static ssize_t soft_offline_page_store(struct device *dev,
 	if (kstrtoull(buf, 0, &pfn) < 0)
 		return -EINVAL;
 	pfn >>= PAGE_SHIFT;
-	if (!pfn_valid(pfn))
-		return -ENXIO;
-	/* Only online pages can be soft-offlined (esp., not ZONE_DEVICE). */
-	if (!pfn_to_online_page(pfn))
-		return -EIO;
-	ret = soft_offline_page(pfn_to_page(pfn), 0);
+	ret = soft_offline_page(pfn, 0);
 	return ret == 0 ? count : ret;
 }
 
@@ -673,7 +648,6 @@ static int init_memory_block(struct memory_block **memory,
 		return -ENOMEM;
 
 	mem->start_section_nr = block_id * sections_per_block;
-	mem->end_section_nr = mem->start_section_nr + sections_per_block - 1;
 	mem->state = state;
 	start_pfn = section_nr_to_pfn(mem->start_section_nr);
 	mem->phys_device = arch_get_memory_phys_device(start_pfn);

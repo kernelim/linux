@@ -1206,20 +1206,7 @@ static int dasd_hosts_show(struct seq_file *m, void *v)
 	return rc;
 }
 
-static int dasd_hosts_open(struct inode *inode, struct file *file)
-{
-	struct dasd_device *device = inode->i_private;
-
-	return single_open(file, dasd_hosts_show, device);
-}
-
-static const struct file_operations dasd_hosts_fops = {
-	.owner		= THIS_MODULE,
-	.open		= dasd_hosts_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
+DEFINE_SHOW_ATTRIBUTE(dasd_hosts);
 
 static void dasd_hosts_exit(struct dasd_device *device)
 {
@@ -2122,20 +2109,25 @@ static void __dasd_device_start_head(struct dasd_device *device)
 
 static void __dasd_device_check_path_events(struct dasd_device *device)
 {
+	__u8 tbvpm, fcsecpm;
 	int rc;
 
-	if (!dasd_path_get_tbvpm(device))
+	tbvpm = dasd_path_get_tbvpm(device);
+	fcsecpm = dasd_path_get_fcsecpm(device);
+
+	if (!tbvpm && !fcsecpm)
 		return;
 
 	if (device->stopped &
 	    ~(DASD_STOPPED_DC_WAIT | DASD_UNRESUMED_PM))
 		return;
-	rc = device->discipline->verify_path(device,
-					     dasd_path_get_tbvpm(device));
-	if (rc)
+	rc = device->discipline->pe_handler(device, tbvpm, fcsecpm);
+	if (rc) {
 		dasd_device_set_timer(device, 50);
-	else
+	} else {
 		dasd_path_clear_all_verify(device);
+		dasd_path_clear_all_fcsec(device);
+	}
 };
 
 /*
@@ -2816,7 +2808,7 @@ static void __dasd_cleanup_cqr(struct dasd_ccw_req *cqr)
 			blk_update_request(req, BLK_STS_OK,
 					   blk_rq_bytes(req) - proc_bytes);
 			blk_mq_requeue_request(req, true);
-		} else {
+		} else if (likely(!blk_should_fake_timeout(req->q))) {
 			blk_mq_complete_request(req);
 		}
 	}
@@ -2993,6 +2985,12 @@ static int _dasd_requeue_request(struct dasd_ccw_req *cqr)
 
 	if (!block)
 		return -EINVAL;
+	/*
+	 * If the request is an ERP request there is nothing to requeue.
+	 * This will be done with the remaining original request.
+	 */
+	if (cqr->refers)
+		return 0;
 	spin_lock_irq(&cqr->dq->lock);
 	req = (struct request *) cqr->callback_data;
 	blk_mq_requeue_request(req, false);
@@ -3479,8 +3477,7 @@ static void dasd_generic_auto_online(void *data, async_cookie_t cookie)
  * Initial attempt at a probe function. this can be simplified once
  * the other detection code is gone.
  */
-int dasd_generic_probe(struct ccw_device *cdev,
-		       struct dasd_discipline *discipline)
+int dasd_generic_probe(struct ccw_device *cdev)
 {
 	int ret;
 
@@ -3882,6 +3879,10 @@ void dasd_generic_path_event(struct ccw_device *cdev, int *path_event)
 				      "Pathgroup re-established\n");
 			if (device->discipline->kick_validate)
 				device->discipline->kick_validate(device);
+		}
+		if (path_event[chp] & PE_PATH_FCES_EVENT) {
+			dasd_path_fcsec_update(device, chp);
+			dasd_schedule_device_bh(device);
 		}
 	}
 	hpfpm = dasd_path_get_hpfpm(device);

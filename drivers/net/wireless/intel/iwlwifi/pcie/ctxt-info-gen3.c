@@ -1,54 +1,7 @@
-/******************************************************************************
- *
- * This file is provided under a dual BSD/GPLv2 license.  When using or
- * redistributing this file, you may do so under either license.
- *
- * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2018 - 2019 Intel Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * BSD LICENSE
- *
- * Copyright(c) 2018 - 2019 Intel Corporation
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name Intel Corporation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
-
+// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
+/*
+ * Copyright (C) 2018-2020 Intel Corporation
+ */
 #include "iwl-trans.h"
 #include "iwl-fh.h"
 #include "iwl-context-info-gen3.h"
@@ -84,32 +37,35 @@ iwl_pcie_ctxt_info_dbg_enable(struct iwl_trans *trans,
 
 	fw_mon_cfg = &trans->dbg.fw_mon_cfg[alloc_id];
 
-	if (le32_to_cpu(fw_mon_cfg->buf_location) ==
-	    IWL_FW_INI_LOCATION_SRAM_PATH) {
+	switch (le32_to_cpu(fw_mon_cfg->buf_location)) {
+	case IWL_FW_INI_LOCATION_SRAM_PATH:
 		dbg_flags |= IWL_PRPH_SCRATCH_EDBG_DEST_INTERNAL;
-
 		IWL_DEBUG_FW(trans,
-			     "WRT: Applying SMEM buffer destination\n");
+				"WRT: Applying SMEM buffer destination\n");
+		break;
 
-		goto out;
-	}
-
-	if (le32_to_cpu(fw_mon_cfg->buf_location) ==
-	    IWL_FW_INI_LOCATION_DRAM_PATH &&
-	    trans->dbg.fw_mon_ini[alloc_id].num_frags) {
-		struct iwl_dram_data *frag =
-			&trans->dbg.fw_mon_ini[alloc_id].frags[0];
-
-		dbg_flags |= IWL_PRPH_SCRATCH_EDBG_DEST_DRAM;
-
+	case IWL_FW_INI_LOCATION_NPK_PATH:
+		dbg_flags |= IWL_PRPH_SCRATCH_EDBG_DEST_TB22DTF;
 		IWL_DEBUG_FW(trans,
-			     "WRT: Applying DRAM destination (alloc_id=%u)\n",
-			     alloc_id);
+			     "WRT: Applying NPK buffer destination\n");
+		break;
 
-		dbg_cfg->hwm_base_addr = cpu_to_le64(frag->physical);
-		dbg_cfg->hwm_size = cpu_to_le32(frag->size);
+	case IWL_FW_INI_LOCATION_DRAM_PATH:
+		if (trans->dbg.fw_mon_ini[alloc_id].num_frags) {
+			struct iwl_dram_data *frag =
+				&trans->dbg.fw_mon_ini[alloc_id].frags[0];
+			dbg_flags |= IWL_PRPH_SCRATCH_EDBG_DEST_DRAM;
+			dbg_cfg->hwm_base_addr = cpu_to_le64(frag->physical);
+			dbg_cfg->hwm_size = cpu_to_le32(frag->size);
+			IWL_DEBUG_FW(trans,
+				     "WRT: Applying DRAM destination (alloc_id=%u, num_frags=%u)\n",
+				     alloc_id,
+				     trans->dbg.fw_mon_ini[alloc_id].num_frags);
+		}
+		break;
+	default:
+		IWL_ERR(trans, "WRT: Invalid buffer destination\n");
 	}
-
 out:
 	if (dbg_flags)
 		*control_flags |= IWL_PRPH_SCRATCH_EARLY_DEBUG_EN | dbg_flags;
@@ -135,9 +91,17 @@ int iwl_pcie_ctxt_info_gen3_init(struct iwl_trans *trans,
 	case IWL_AMSDU_2K:
 		break;
 	case IWL_AMSDU_4K:
+		control_flags |= IWL_PRPH_SCRATCH_RB_SIZE_4K;
+		break;
 	case IWL_AMSDU_8K:
+		control_flags |= IWL_PRPH_SCRATCH_RB_SIZE_4K;
+		/* if firmware supports the ext size, tell it */
+		control_flags |= IWL_PRPH_SCRATCH_RB_SIZE_EXT_8K;
+		break;
 	case IWL_AMSDU_12K:
 		control_flags |= IWL_PRPH_SCRATCH_RB_SIZE_4K;
+		/* if firmware supports the ext size, tell it */
+		control_flags |= IWL_PRPH_SCRATCH_RB_SIZE_EXT_16K;
 		break;
 	}
 
@@ -210,7 +174,7 @@ int iwl_pcie_ctxt_info_gen3_init(struct iwl_trans *trans,
 	ctxt_info_gen3->tr_idx_arr_size =
 		cpu_to_le16(IWL_NUM_OF_TRANSFER_RINGS);
 	ctxt_info_gen3->mtr_base_addr =
-		cpu_to_le64(trans_pcie->txq[trans_pcie->cmd_queue]->dma_addr);
+		cpu_to_le64(trans->txqs.txq[trans->txqs.cmd.q_id]->dma_addr);
 	ctxt_info_gen3->mcr_base_addr =
 		cpu_to_le64(trans_pcie->rxq->used_bd_dma);
 	ctxt_info_gen3->mtr_size =
@@ -241,6 +205,26 @@ int iwl_pcie_ctxt_info_gen3_init(struct iwl_trans *trans,
 
 	iwl_set_bit(trans, CSR_CTXT_INFO_BOOT_CTRL,
 		    CSR_AUTO_FUNC_BOOT_ENA);
+
+	if (trans->trans_cfg->device_family == IWL_DEVICE_FAMILY_AX210) {
+		/*
+		 * The firmware initializes this again later (to a smaller
+		 * value), but for the boot process initialize the LTR to
+		 * ~250 usec.
+		 */
+		u32 val = CSR_LTR_LONG_VAL_AD_NO_SNOOP_REQ |
+			  u32_encode_bits(CSR_LTR_LONG_VAL_AD_SCALE_USEC,
+					  CSR_LTR_LONG_VAL_AD_NO_SNOOP_SCALE) |
+			  u32_encode_bits(250,
+					  CSR_LTR_LONG_VAL_AD_NO_SNOOP_VAL) |
+			  CSR_LTR_LONG_VAL_AD_SNOOP_REQ |
+			  u32_encode_bits(CSR_LTR_LONG_VAL_AD_SCALE_USEC,
+					  CSR_LTR_LONG_VAL_AD_SNOOP_SCALE) |
+			  u32_encode_bits(250, CSR_LTR_LONG_VAL_AD_SNOOP_VAL);
+
+		iwl_write32(trans, CSR_LTR_LONG_VAL_AD, val);
+	}
+
 	if (trans->trans_cfg->device_family >= IWL_DEVICE_FAMILY_AX210)
 		iwl_write_umac_prph(trans, UREG_CPU_INIT_RUN, 1);
 	else
@@ -289,4 +273,31 @@ void iwl_pcie_ctxt_info_gen3_free(struct iwl_trans *trans)
 			  trans_pcie->prph_info_dma_addr);
 	trans_pcie->prph_info_dma_addr = 0;
 	trans_pcie->prph_info = NULL;
+}
+
+int iwl_trans_pcie_ctx_info_gen3_set_pnvm(struct iwl_trans *trans,
+					  const void *data, u32 len)
+{
+	struct iwl_trans_pcie *trans_pcie = IWL_TRANS_GET_PCIE_TRANS(trans);
+	struct iwl_prph_scratch_ctrl_cfg *prph_sc_ctrl =
+		&trans_pcie->prph_scratch->ctrl_cfg;
+	int ret;
+
+	if (trans->trans_cfg->device_family < IWL_DEVICE_FAMILY_AX210)
+		return 0;
+
+	ret = iwl_pcie_ctxt_info_alloc_dma(trans, data, len,
+					   &trans_pcie->pnvm_dram);
+	if (ret < 0) {
+		IWL_DEBUG_FW(trans, "Failed to allocate PNVM DMA %d.\n",
+			     ret);
+		return ret;
+	}
+
+	prph_sc_ctrl->pnvm_cfg.pnvm_base_addr =
+		cpu_to_le64(trans_pcie->pnvm_dram.physical);
+	prph_sc_ctrl->pnvm_cfg.pnvm_size =
+		cpu_to_le32(trans_pcie->pnvm_dram.size);
+
+	return 0;
 }

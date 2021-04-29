@@ -64,6 +64,7 @@ enum wb_reason {
 	 * so it has a mismatch name.
 	 */
 	WB_REASON_FORKER_THREAD,
+	RH_KABI_EXTEND_ENUM(WB_REASON_FOREIGN_FLUSH)
 
 	WB_REASON_MAX,
 };
@@ -198,7 +199,7 @@ struct backing_dev_info {
 	congested_fn *congested_fn; /* Function pointer if device is md/dm */
 	void *congested_data;	/* Pointer to aux data for congested func */
 
-	const char *name;
+	RH_KABI_DEPRECATE(const char *, name)
 
 	struct kref refcnt;	/* Reference counter for the structure */
 	unsigned int capabilities; /* Device capabilities */
@@ -235,8 +236,17 @@ struct backing_dev_info {
 	/* no cgwb switch while syncing */
 	RH_KABI_USE(1, struct rw_semaphore *wb_switch_rwsem)
 	RH_KABI_USE(2, char *dev_name)
-	RH_KABI_RESERVE(3)
+	RH_KABI_USE(3, u64 id)
 	RH_KABI_RESERVE(4)
+
+	/*
+	 * RHEL8 Note:
+	 * Except for noop_backing_dev_info in mm/backing-dev.c, all the
+	 * other backing_dev_info structures are allocated dynamically by
+	 * bdi_alloc(). It is also not embedded in other structures. So it
+	 * is safe to use RH_KABI_EXTEND().
+	 */
+	RH_KABI_EXTEND(struct rb_node rb_node)	/* keyed by ->id */
 };
 
 #define BDI_DEV_NAME_LEN 64

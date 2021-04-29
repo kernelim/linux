@@ -435,6 +435,9 @@ int arch_add_memory(int nid, u64 start, u64 size, struct vmem_altmap *altmap,
 	unsigned long nr_pages = size >> PAGE_SHIFT;
 	int ret;
 
+	if (WARN_ON_ONCE(params->pgprot.pgprot != PAGE_KERNEL.pgprot))
+		return -EINVAL;
+
 	/* We only have ZONE_NORMAL, so this is easy.. */
 	ret = __add_pages(nid, start_pfn, nr_pages, altmap, want_memblock);
 	if (unlikely(ret))

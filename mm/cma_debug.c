@@ -166,7 +166,6 @@ static void cma_debugfs_add_one(struct cma *cma, int idx)
 {
 	struct dentry *tmp;
 	char name[16];
-	int u32s;
 
 	scnprintf(name, sizeof(name), "cma-%s", cma->name);
 
@@ -182,8 +181,10 @@ static void cma_debugfs_add_one(struct cma *cma, int idx)
 	debugfs_create_file("used", 0444, tmp, cma, &cma_used_fops);
 	debugfs_create_file("maxchunk", 0444, tmp, cma, &cma_maxchunk_fops);
 
-	u32s = DIV_ROUND_UP(cma_bitmap_maxno(cma), BITS_PER_BYTE * sizeof(u32));
-	debugfs_create_u32_array("bitmap", 0444, tmp, (u32 *)cma->bitmap, u32s);
+	cma->dfs_bitmap.array = (u32 *)cma->bitmap;
+	cma->dfs_bitmap.n_elements = DIV_ROUND_UP(cma_bitmap_maxno(cma),
+						  BITS_PER_BYTE * sizeof(u32));
+	debugfs_create_u32_array("bitmap", 0444, tmp, &cma->dfs_bitmap);
 }
 
 static int __init cma_debugfs_init(void)

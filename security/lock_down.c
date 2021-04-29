@@ -17,6 +17,9 @@
 #ifdef CONFIG_S390
 #include <asm/ipl.h>
 #endif
+#ifdef CONFIG_PPC64
+#include <asm/secure_boot.h>
+#endif
 
 #ifndef CONFIG_LOCK_DOWN_MANDATORY
 static __ro_after_init bool kernel_locked_down;
@@ -64,6 +67,10 @@ void __init init_lockdown(void)
 #ifdef CONFIG_S390
 	if (ipl_get_secureboot())
 		lock_kernel_down("Secure IPL");
+#endif
+#ifdef CONFIG_PPC64
+	if (is_ppc_secureboot_enabled())
+		lock_kernel_down("Power secure boot");
 #endif
 }
 

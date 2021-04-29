@@ -31,7 +31,8 @@ xarray: $(CORE_OFILES)
 multiorder: multiorder.o $(CORE_OFILES)
 
 clean:
-	$(RM) $(TARGETS) *.o radix-tree.c idr.c generated/map-shift.h
+	$(RM) $(TARGETS) *.o radix-tree.c idr.c generated/map-shift.h \
+		linux/rh_kabi.h
 
 vpath %.c ../../lib
 
@@ -40,7 +41,8 @@ $(OFILES): Makefile *.h */*.h generated/map-shift.h \
 	../../include/asm/*.h \
 	../../../include/linux/xarray.h \
 	../../../include/linux/radix-tree.h \
-	../../../include/linux/idr.h
+	../../../include/linux/idr.h \
+	linux/rh_kabi.h
 
 radix-tree.c: ../../../lib/radix-tree.c
 	sed -e 's/^static //' -e 's/__always_inline //' -e 's/inline //' < $< > $@
@@ -55,3 +57,6 @@ generated/map-shift.h:
 		echo "#define XA_CHUNK_SHIFT $(SHIFT)" >		\
 				generated/map-shift.h;			\
 	fi
+
+linux/rh_kabi.h:
+	cp ../../../include/linux/rh_kabi.h linux/

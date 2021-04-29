@@ -1217,7 +1217,7 @@ static int snd_hdspm_use_is_exclusive(struct hdspm *hdspm)
 	return ret;
 }
 
-/* round arbitary sample rates to commonly known rates */
+/* round arbitrary sample rates to commonly known rates */
 static int hdspm_round_frequency(int rate)
 {
 	if (rate < 38050)
@@ -3027,8 +3027,8 @@ static int hdspm_autosync_ref(struct hdspm *hdspm)
 
 		unsigned int status = hdspm_read(hdspm, HDSPM_statusRegister);
 		unsigned int syncref = (status >> HDSPM_AES32_syncref_bit) & 0xF;
-		if ((syncref >= HDSPM_AES32_AUTOSYNC_FROM_WORD) &&
-				(syncref <= HDSPM_AES32_AUTOSYNC_FROM_SYNC_IN)) {
+		/* syncref >= HDSPM_AES32_AUTOSYNC_FROM_WORD is always true */
+		if (syncref <= HDSPM_AES32_AUTOSYNC_FROM_SYNC_IN) {
 			return syncref;
 		}
 		return HDSPM_AES32_AUTOSYNC_FROM_NONE;

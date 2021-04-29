@@ -1,7 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  (C) 2010,2011       Thomas Renninger <trenn@suse.de>, Novell Inc.
- *
- *  Licensed under the terms of the GNU GPL License version 2.
  *
  * Miscellaneous helpers which do not fit or are worth
  * to put into separate headers
@@ -95,6 +94,8 @@ struct cpupower_cpu_info {
  */
 extern int get_cpu_info(struct cpupower_cpu_info *cpu_info);
 extern struct cpupower_cpu_info cpupower_cpu_info;
+
+
 /* cpuid and cpuinfo helpers  **************************/
 
 /* X86 ONLY ****************************************/
@@ -171,5 +172,15 @@ static inline unsigned int cpuid_ebx(unsigned int op) { return 0; };
 static inline unsigned int cpuid_ecx(unsigned int op) { return 0; };
 static inline unsigned int cpuid_edx(unsigned int op) { return 0; };
 #endif /* defined(__i386__) || defined(__x86_64__) */
+
+/*
+ * CPU State related functions
+ */
+extern struct bitmask *online_cpus;
+extern struct bitmask *offline_cpus;
+
+void get_cpustate(void);
+void print_online_cpus(void);
+void print_offline_cpus(void);
 
 #endif /* __CPUPOWERUTILS_HELPERS__ */

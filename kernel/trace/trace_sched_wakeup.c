@@ -89,7 +89,7 @@ func_prolog_preempt_disable(struct trace_array *tr,
 	if (cpu != wakeup_current_cpu)
 		goto out_enable;
 
-	*data = per_cpu_ptr(tr->trace_buffer.data, cpu);
+	*data = per_cpu_ptr(tr->array_buffer.data, cpu);
 	disabled = atomic_inc_return(&(*data)->disabled);
 	if (unlikely(disabled != 1))
 		goto out;
@@ -387,7 +387,7 @@ tracing_sched_switch_trace(struct trace_array *tr,
 			   unsigned long flags, int pc)
 {
 	struct trace_event_call *call = &event_context_switch;
-	struct ring_buffer *buffer = tr->trace_buffer.buffer;
+	struct trace_buffer *buffer = tr->array_buffer.buffer;
 	struct ring_buffer_event *event;
 	struct ctx_switch_entry *entry;
 
@@ -417,7 +417,7 @@ tracing_sched_wakeup_trace(struct trace_array *tr,
 	struct trace_event_call *call = &event_wakeup;
 	struct ring_buffer_event *event;
 	struct ctx_switch_entry *entry;
-	struct ring_buffer *buffer = tr->trace_buffer.buffer;
+	struct trace_buffer *buffer = tr->array_buffer.buffer;
 
 	event = trace_buffer_lock_reserve(buffer, TRACE_WAKE,
 					  sizeof(*entry), flags, pc);
@@ -468,7 +468,7 @@ probe_wakeup_sched_switch(void *ignore, bool preempt,
 
 	/* disable local data, not wakeup_cpu data */
 	cpu = raw_smp_processor_id();
-	disabled = atomic_inc_return(&per_cpu_ptr(wakeup_trace->trace_buffer.data, cpu)->disabled);
+	disabled = atomic_inc_return(&per_cpu_ptr(wakeup_trace->array_buffer.data, cpu)->disabled);
 	if (likely(disabled != 1))
 		goto out;
 
@@ -480,7 +480,7 @@ probe_wakeup_sched_switch(void *ignore, bool preempt,
 		goto out_unlock;
 
 	/* The task we are waiting for is waking up */
-	data = per_cpu_ptr(wakeup_trace->trace_buffer.data, wakeup_cpu);
+	data = per_cpu_ptr(wakeup_trace->array_buffer.data, wakeup_cpu);
 
 	__trace_function(wakeup_trace, CALLER_ADDR0, CALLER_ADDR1, flags, pc);
 	tracing_sched_switch_trace(wakeup_trace, prev, next, flags, pc);
@@ -502,7 +502,7 @@ out_unlock:
 	arch_spin_unlock(&wakeup_lock);
 	local_irq_restore(flags);
 out:
-	atomic_dec(&per_cpu_ptr(wakeup_trace->trace_buffer.data, cpu)->disabled);
+	atomic_dec(&per_cpu_ptr(wakeup_trace->array_buffer.data, cpu)->disabled);
 }
 
 static void __wakeup_reset(struct trace_array *tr)
@@ -521,7 +521,7 @@ static void wakeup_reset(struct trace_array *tr)
 {
 	unsigned long flags;
 
-	tracing_reset_online_cpus(&tr->trace_buffer);
+	tracing_reset_online_cpus(&tr->array_buffer);
 
 	local_irq_save(flags);
 	arch_spin_lock(&wakeup_lock);
@@ -559,7 +559,7 @@ probe_wakeup(void *ignore, struct task_struct *p)
 		return;
 
 	pc = preempt_count();
-	disabled = atomic_inc_return(&per_cpu_ptr(wakeup_trace->trace_buffer.data, cpu)->disabled);
+	disabled = atomic_inc_return(&per_cpu_ptr(wakeup_trace->array_buffer.data, cpu)->disabled);
 	if (unlikely(disabled != 1))
 		goto out;
 
@@ -591,7 +591,7 @@ probe_wakeup(void *ignore, struct task_struct *p)
 
 	local_save_flags(flags);
 
-	data = per_cpu_ptr(wakeup_trace->trace_buffer.data, wakeup_cpu);
+	data = per_cpu_ptr(wakeup_trace->array_buffer.data, wakeup_cpu);
 	data->preempt_timestamp = ftrace_now(cpu);
 	tracing_sched_wakeup_trace(wakeup_trace, p, current, flags, pc);
 
@@ -605,7 +605,7 @@ probe_wakeup(void *ignore, struct task_struct *p)
 out_locked:
 	arch_spin_unlock(&wakeup_lock);
 out:
-	atomic_dec(&per_cpu_ptr(wakeup_trace->trace_buffer.data, cpu)->disabled);
+	atomic_dec(&per_cpu_ptr(wakeup_trace->array_buffer.data, cpu)->disabled);
 }
 
 static void start_wakeup_tracer(struct trace_array *tr)

@@ -177,8 +177,14 @@ xfs_file_dio_aio_read(
 
 	file_accessed(iocb->ki_filp);
 
-	xfs_ilock(ip, XFS_IOLOCK_SHARED);
-	ret = iomap_dio_rw(iocb, to, &xfs_iomap_ops, NULL, is_sync_kiocb(iocb));
+	if (iocb->ki_flags & IOCB_NOWAIT) {
+		if (!xfs_ilock_nowait(ip, XFS_IOLOCK_SHARED))
+			return -EAGAIN;
+	} else {
+		xfs_ilock(ip, XFS_IOLOCK_SHARED);
+	}
+	ret = iomap_dio_rw(iocb, to, &xfs_read_iomap_ops, NULL,
+			is_sync_kiocb(iocb));
 	xfs_iunlock(ip, XFS_IOLOCK_SHARED);
 
 	return ret;
@@ -205,7 +211,7 @@ xfs_file_dax_read(
 		xfs_ilock(ip, XFS_IOLOCK_SHARED);
 	}
 
-	ret = dax_iomap_rw(iocb, to, &xfs_iomap_ops);
+	ret = dax_iomap_rw(iocb, to, &xfs_read_iomap_ops);
 	xfs_iunlock(ip, XFS_IOLOCK_SHARED);
 
 	file_accessed(iocb->ki_filp);
@@ -341,7 +347,7 @@ restart:
 	
 		trace_xfs_zero_eof(ip, isize, iocb->ki_pos - isize);
 		error = iomap_zero_range(inode, isize, iocb->ki_pos - isize,
-				NULL, &xfs_iomap_ops);
+				NULL, &xfs_buffered_write_iomap_ops);
 		if (error)
 			return error;
 	} else
@@ -476,8 +482,7 @@ xfs_file_dio_aio_write(
 	int			unaligned_io = 0;
 	int			iolock;
 	size_t			count = iov_iter_count(from);
-	struct xfs_buftarg      *target = XFS_IS_REALTIME_INODE(ip) ?
-					mp->m_rtdev_targp : mp->m_ddev_targp;
+	struct xfs_buftarg      *target = xfs_inode_buftarg(ip);
 
 	/* DIO must be aligned to device logical sector size */
 	if ((iocb->ki_pos | count) & target->bt_logical_sectormask)
@@ -500,7 +505,7 @@ xfs_file_dio_aio_write(
 		 */
 		if (xfs_is_cow_inode(ip)) {
 			trace_xfs_reflink_bounce_dio_write(ip, iocb->ki_pos, count);
-			return -EREMCHG;
+			return -ENOTBLK;
 		}
 		iolock = XFS_IOLOCK_EXCL;
 	} else {
@@ -541,14 +546,15 @@ xfs_file_dio_aio_write(
 	 * If unaligned, this is the only IO in-flight. Wait on it before we
 	 * release the iolock to prevent subsequent overlapping IO.
 	 */
-	ret = iomap_dio_rw(iocb, from, &xfs_iomap_ops, &xfs_dio_write_ops,
+	ret = iomap_dio_rw(iocb, from, &xfs_direct_write_iomap_ops,
+			   &xfs_dio_write_ops,
 			   is_sync_kiocb(iocb) || unaligned_io);
 out:
 	xfs_iunlock(ip, iolock);
 
 	/*
-	 * No fallback to buffered IO on errors for XFS, direct IO will either
-	 * complete fully or fail.
+	 * No fallback to buffered IO after short writes for XFS, direct I/O
+	 * will either complete fully or return an error.
 	 */
 	ASSERT(ret < 0 || ret == count);
 	return ret;
@@ -581,7 +587,7 @@ xfs_file_dax_write(
 	count = iov_iter_count(from);
 
 	trace_xfs_file_dax_write(ip, count, pos);
-	ret = dax_iomap_rw(iocb, from, &xfs_iomap_ops);
+	ret = dax_iomap_rw(iocb, from, &xfs_direct_write_iomap_ops);
 	if (ret > 0 && iocb->ki_pos > i_size_read(inode)) {
 		i_size_write(inode, iocb->ki_pos);
 		error = xfs_setfilesize(ip, pos, ret);
@@ -628,7 +634,8 @@ write_retry:
 	current->backing_dev_info = inode_to_bdi(inode);
 
 	trace_xfs_file_buffered_write(ip, iov_iter_count(from), iocb->ki_pos);
-	ret = iomap_file_buffered_write(iocb, from, &xfs_iomap_ops);
+	ret = iomap_file_buffered_write(iocb, from,
+			&xfs_buffered_write_iomap_ops);
 	if (likely(ret >= 0))
 		iocb->ki_pos += ret;
 
@@ -707,7 +714,7 @@ xfs_file_write_iter(
 		 * allow an operation to fall back to buffered mode.
 		 */
 		ret = xfs_file_dio_aio_write(iocb, from);
-		if (ret != -EREMCHG)
+		if (ret != -ENOTBLK)
 			return ret;
 	}
 
@@ -891,16 +898,30 @@ xfs_file_fallocate(
 		}
 
 		if (mode & FALLOC_FL_ZERO_RANGE) {
-			error = xfs_zero_file_space(ip, offset, len);
+			/*
+			 * Punch a hole and prealloc the range.  We use a hole
+			 * punch rather than unwritten extent conversion for two
+			 * reasons:
+			 *
+			 *   1.) Hole punch handles partial block zeroing for us.
+			 *   2.) If prealloc returns ENOSPC, the file range is
+			 *       still zero-valued by virtue of the hole punch.
+			 */
+			unsigned int blksize = i_blocksize(inode);
+
+			trace_xfs_zero_file_space(ip);
+
+			error = xfs_free_file_space(ip, offset, len);
+			if (error)
+				goto out_unlock;
+
+			len = round_up(offset + len, blksize) -
+			      round_down(offset, blksize);
+			offset = round_down(offset, blksize);
 		} else if (mode & FALLOC_FL_UNSHARE_RANGE) {
 			error = xfs_reflink_unshare(ip, offset, len);
 			if (error)
 				goto out_unlock;
-
-			if (!xfs_is_always_cow_inode(ip)) {
-				error = xfs_alloc_file_space(ip, offset, len,
-						XFS_BMAPI_PREALLOC);
-			}
 		} else {
 			/*
 			 * If always_cow mode we can't use preallocations and
@@ -910,12 +931,14 @@ xfs_file_fallocate(
 				error = -EOPNOTSUPP;
 				goto out_unlock;
 			}
+		}
 
+		if (!xfs_is_always_cow_inode(ip)) {
 			error = xfs_alloc_file_space(ip, offset, len,
 						     XFS_BMAPI_PREALLOC);
+			if (error)
+				goto out_unlock;
 		}
-		if (error)
-			goto out_unlock;
 	}
 
 	if (file->f_flags & O_DSYNC)
@@ -1073,7 +1096,7 @@ xfs_dir_open(
 	 */
 	mode = xfs_ilock_data_map_shared(ip);
 	if (ip->i_d.di_nextents > 0)
-		error = xfs_dir3_data_readahead(ip, 0, -1);
+		error = xfs_dir3_data_readahead(ip, 0, 0);
 	xfs_iunlock(ip, mode);
 	return error;
 }
@@ -1170,12 +1193,16 @@ __xfs_filemap_fault(
 	if (IS_DAX(inode)) {
 		pfn_t pfn;
 
-		ret = dax_iomap_fault(vmf, pe_size, &pfn, NULL, &xfs_iomap_ops);
+		ret = dax_iomap_fault(vmf, pe_size, &pfn, NULL,
+				(write_fault && !vmf->cow_page) ?
+				 &xfs_direct_write_iomap_ops :
+				 &xfs_read_iomap_ops);
 		if (ret & VM_FAULT_NEEDDSYNC)
 			ret = dax_finish_sync_fault(vmf, pe_size, pfn);
 	} else {
 		if (write_fault)
-			ret = iomap_page_mkwrite(vmf, &xfs_iomap_ops);
+			ret = iomap_page_mkwrite(vmf,
+					&xfs_buffered_write_iomap_ops);
 		else
 			ret = filemap_fault(vmf);
 	}
@@ -1239,19 +1266,22 @@ static const struct vm_operations_struct xfs_file_vm_ops = {
 
 STATIC int
 xfs_file_mmap(
-	struct file	*filp,
-	struct vm_area_struct *vma)
+	struct file		*file,
+	struct vm_area_struct	*vma)
 {
+	struct inode		*inode = file_inode(file);
+	struct xfs_buftarg	*target = xfs_inode_buftarg(XFS_I(inode));
+
 	/*
-	 * We don't support synchronous mappings for non-DAX files. At least
-	 * until someone comes with a sensible use case.
+	 * We don't support synchronous mappings for non-DAX files and
+	 * for DAX files if underneath dax_device is not synchronous.
 	 */
-	if (!IS_DAX(file_inode(filp)) && (vma->vm_flags & VM_SYNC))
+	if (!daxdev_mapping_supported(vma, target->bt_daxdev))
 		return -EOPNOTSUPP;
 
-	file_accessed(filp);
+	file_accessed(file);
 	vma->vm_ops = &xfs_file_vm_ops;
-	if (IS_DAX(file_inode(filp)))
+	if (IS_DAX(inode))
 		vma->vm_flags |= VM_HUGEPAGE;
 	return 0;
 }

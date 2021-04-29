@@ -93,6 +93,11 @@ static int mlx5_devlink_reload_down(struct devlink *devlink, bool netns_change,
 {
 	struct mlx5_core_dev *dev = devlink_priv(devlink);
 
+	if (mlx5_lag_is_active(dev)) {
+		NL_SET_ERR_MSG_MOD(extack, "reload is unsupported in Lag mode\n");
+		return -EOPNOTSUPP;
+	}
+
 	mlx5_unload_one(dev, false);
 	return 0;
 }
@@ -113,6 +118,8 @@ static const struct devlink_ops mlx5_devlink_ops = {
 	.eswitch_inline_mode_get = mlx5_devlink_eswitch_inline_mode_get,
 	.eswitch_encap_mode_set = mlx5_devlink_eswitch_encap_mode_set,
 	.eswitch_encap_mode_get = mlx5_devlink_eswitch_encap_mode_get,
+	.port_function_hw_addr_get = mlx5_devlink_port_function_hw_addr_get,
+	.port_function_hw_addr_set = mlx5_devlink_port_function_hw_addr_set,
 #endif
 	.flash_update = mlx5_devlink_flash_update,
 	.info_get = mlx5_devlink_info_get,
@@ -203,6 +210,10 @@ static int mlx5_devlink_enable_roce_validate(struct devlink *devlink, u32 id,
 
 	if (new_state && !MLX5_CAP_GEN(dev, roce)) {
 		NL_SET_ERR_MSG_MOD(extack, "Device doesn't support RoCE");
+		return -EOPNOTSUPP;
+	}
+	if (mlx5_core_is_mp_slave(dev) || mlx5_lag_is_active(dev)) {
+		NL_SET_ERR_MSG_MOD(extack, "Multi port slave/Lag device can't configure RoCE");
 		return -EOPNOTSUPP;
 	}
 

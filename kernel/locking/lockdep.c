@@ -52,6 +52,7 @@
 #include <linux/jhash.h>
 #include <linux/nmi.h>
 #include <linux/rcupdate.h>
+#include <linux/kprobes.h>
 
 #include <asm/sections.h>
 
@@ -74,6 +75,23 @@ module_param(lock_stat, int, 0644);
 #define lock_stat 0
 #endif
 
+DEFINE_PER_CPU(unsigned int, lockdep_recursion);
+EXPORT_PER_CPU_SYMBOL_GPL(lockdep_recursion);
+
+static __always_inline bool lockdep_enabled(void)
+{
+	if (!debug_locks)
+		return false;
+
+	if (this_cpu_read(lockdep_recursion))
+		return false;
+
+	if (current->lockdep_recursion)
+		return false;
+
+	return true;
+}
+
 /*
  * lockdep_lock: protects the lockdep graph, the hashes and the
  *               class/list/hash allocators.
@@ -82,12 +100,39 @@ module_param(lock_stat, int, 0644);
  * to use a raw spinlock - we really dont want the spinlock
  * code to recurse back into the lockdep code...
  */
-static arch_spinlock_t lockdep_lock = (arch_spinlock_t)__ARCH_SPIN_LOCK_UNLOCKED;
+static arch_spinlock_t __lock = (arch_spinlock_t)__ARCH_SPIN_LOCK_UNLOCKED;
+static struct task_struct *__owner;
+
+static inline void lockdep_lock(void)
+{
+	DEBUG_LOCKS_WARN_ON(!irqs_disabled());
+
+	arch_spin_lock(&__lock);
+	__owner = current;
+	__this_cpu_inc(lockdep_recursion);
+}
+
+static inline void lockdep_unlock(void)
+{
+	if (debug_locks && DEBUG_LOCKS_WARN_ON(__owner != current))
+		return;
+
+	__this_cpu_dec(lockdep_recursion);
+	__owner = NULL;
+	arch_spin_unlock(&__lock);
+}
+
+static inline bool lockdep_assert_locked(void)
+{
+	return DEBUG_LOCKS_WARN_ON(__owner != current);
+}
+
 static struct task_struct *lockdep_selftest_task_struct;
+
 
 static int graph_lock(void)
 {
-	arch_spin_lock(&lockdep_lock);
+	lockdep_lock();
 	/*
 	 * Make sure that if another CPU detected a bug while
 	 * walking the graph we dont change it (while the other
@@ -95,27 +140,15 @@ static int graph_lock(void)
 	 * dropped already)
 	 */
 	if (!debug_locks) {
-		arch_spin_unlock(&lockdep_lock);
+		lockdep_unlock();
 		return 0;
 	}
-	/* prevent any recursions within lockdep from causing deadlocks */
-	current->lockdep_recursion++;
 	return 1;
 }
 
-static inline int graph_unlock(void)
+static inline void graph_unlock(void)
 {
-	if (debug_locks && !arch_spin_is_locked(&lockdep_lock)) {
-		/*
-		 * The lockdep graph lock isn't locked while we expect it to
-		 * be, we're confused now, bye!
-		 */
-		return DEBUG_LOCKS_WARN_ON(1);
-	}
-
-	current->lockdep_recursion--;
-	arch_spin_unlock(&lockdep_lock);
-	return 0;
+	lockdep_unlock();
 }
 
 /*
@@ -126,7 +159,7 @@ static inline int debug_locks_off_graph_unlock(void)
 {
 	int ret = debug_locks_off();
 
-	arch_spin_unlock(&lockdep_lock);
+	lockdep_unlock();
 
 	return ret;
 }
@@ -382,17 +415,16 @@ void lockdep_init_task(struct task_struct *task)
 	task->lockdep_recursion = 0;
 }
 
-void lockdep_off(void)
+static __always_inline void lockdep_recursion_inc(void)
 {
-	current->lockdep_recursion++;
+	__this_cpu_inc(lockdep_recursion);
 }
-EXPORT_SYMBOL(lockdep_off);
 
-void lockdep_on(void)
+static __always_inline void lockdep_recursion_finish(void)
 {
-	current->lockdep_recursion--;
+	if (WARN_ON_ONCE(__this_cpu_dec_return(lockdep_recursion)))
+		__this_cpu_write(lockdep_recursion, 0);
 }
-EXPORT_SYMBOL(lockdep_on);
 
 void lockdep_set_selftest_task(struct task_struct *task)
 {
@@ -465,7 +497,7 @@ struct lock_trace {
 	struct hlist_node	hash_entry;
 	u32			hash;
 	u32			nr_entries;
-	unsigned long		entries[0] __aligned(sizeof(unsigned long));
+	unsigned long		entries[] __aligned(sizeof(unsigned long));
 };
 #define LOCK_TRACE_SIZE_IN_LONGS				\
 	(sizeof(struct lock_trace) / sizeof(unsigned long))
@@ -580,6 +612,9 @@ static const char *usage_str[] =
 #include "lockdep_states.h"
 #undef LOCKDEP_STATE
 	[LOCK_USED] = "INITIAL USE",
+	[LOCK_USED_READ] = "INITIAL READ USE",
+	/* abused as string storage for verify_lock_unused() */
+	[LOCK_USAGE_STATES] = "IN-NMI",
 };
 #endif
 
@@ -658,7 +693,9 @@ static void print_lock_name(struct lock_class *class)
 
 	printk(KERN_CONT " (");
 	__print_lock_name(class);
-	printk(KERN_CONT "){%s}", usage);
+	printk(KERN_CONT "){%s}-{%hd:%hd}", usage,
+			class->wait_type_outer ?: class->wait_type_inner,
+			class->wait_type_inner);
 }
 
 static void print_lockdep_cache(struct lockdep_map *lock)
@@ -792,7 +829,8 @@ static int count_matching_names(struct lock_class *new_class)
 	return count + 1;
 }
 
-static inline struct lock_class *
+/* used from NMI context -- must be lockless */
+static __always_inline struct lock_class *
 look_up_lock_class(const struct lockdep_map *lock, unsigned int subclass)
 {
 	struct lockdep_subclass_key *key;
@@ -1238,6 +1276,8 @@ register_lock_class(struct lockdep_map *lock, unsigned int subclass, int force)
 	WARN_ON_ONCE(!list_empty(&class->locks_before));
 	WARN_ON_ONCE(!list_empty(&class->locks_after));
 	class->name_version = count_matching_names(class);
+	class->wait_type_inner = lock->wait_type_inner;
+	class->wait_type_outer = lock->wait_type_outer;
 	/*
 	 * We use RCU's safe list-add method to make
 	 * parallel walking of the hash-list safe:
@@ -1477,6 +1517,8 @@ static int __bfs(struct lock_list *source_entry,
 	struct circular_queue *cq = &lock_cq;
 	int ret = 1;
 
+	lockdep_assert_locked();
+
 	if (match(source_entry, data)) {
 		*target_entry = source_entry;
 		ret = 0;
@@ -1498,8 +1540,6 @@ static int __bfs(struct lock_list *source_entry,
 		}
 
 		head = get_dep_list(lock, offset);
-
-		DEBUG_LOCKS_WARN_ON(!irqs_disabled());
 
 		list_for_each_entry_rcu(entry, head, entry) {
 			if (!lock_accessed(entry)) {
@@ -1727,11 +1767,9 @@ unsigned long lockdep_count_forward_deps(struct lock_class *class)
 	this.class = class;
 
 	raw_local_irq_save(flags);
-	current->lockdep_recursion = 1;
-	arch_spin_lock(&lockdep_lock);
+	lockdep_lock();
 	ret = __lockdep_count_forward_deps(&this);
-	arch_spin_unlock(&lockdep_lock);
-	current->lockdep_recursion = 0;
+	lockdep_unlock();
 	raw_local_irq_restore(flags);
 
 	return ret;
@@ -1756,11 +1794,9 @@ unsigned long lockdep_count_backward_deps(struct lock_class *class)
 	this.class = class;
 
 	raw_local_irq_save(flags);
-	current->lockdep_recursion = 1;
-	arch_spin_lock(&lockdep_lock);
+	lockdep_lock();
 	ret = __lockdep_count_backward_deps(&this);
-	arch_spin_unlock(&lockdep_lock);
-	current->lockdep_recursion = 0;
+	lockdep_unlock();
 	raw_local_irq_restore(flags);
 
 	return ret;
@@ -1932,7 +1968,7 @@ static void print_lock_class_header(struct lock_class *class, int depth)
 #endif
 	printk(KERN_CONT " {\n");
 
-	for (bit = 0; bit < LOCK_USAGE_STATES; bit++) {
+	for (bit = 0; bit < LOCK_TRACE_STATES; bit++) {
 		if (class->usage_mask & (1 << bit)) {
 			int len = depth;
 
@@ -2055,9 +2091,9 @@ print_bad_irq_dependency(struct task_struct *curr,
 	pr_warn("-----------------------------------------------------\n");
 	pr_warn("%s/%d [HC%u[%lu]:SC%u[%lu]:HE%u:SE%u] is trying to acquire:\n",
 		curr->comm, task_pid_nr(curr),
-		curr->hardirq_context, hardirq_count() >> HARDIRQ_SHIFT,
+		lockdep_hardirq_context(), hardirq_count() >> HARDIRQ_SHIFT,
 		curr->softirq_context, softirq_count() >> SOFTIRQ_SHIFT,
-		curr->hardirqs_enabled,
+		lockdep_hardirqs_enabled(),
 		curr->softirqs_enabled);
 	print_lock(next);
 
@@ -3044,7 +3080,7 @@ static inline int add_chain_cache(struct task_struct *curr,
 	 * disabled to make this an IRQ-safe lock.. for recursion reasons
 	 * lockdep won't complain about its own locking errors.
 	 */
-	if (DEBUG_LOCKS_WARN_ON(!irqs_disabled()))
+	if (lockdep_assert_locked())
 		return 0;
 
 	chain = alloc_lock_chain();
@@ -3324,10 +3360,10 @@ print_usage_bug(struct task_struct *curr, struct held_lock *this,
 
 	pr_warn("%s/%d [HC%u[%lu]:SC%u[%lu]:HE%u:SE%u] takes:\n",
 		curr->comm, task_pid_nr(curr),
-		trace_hardirq_context(curr), hardirq_count() >> HARDIRQ_SHIFT,
-		trace_softirq_context(curr), softirq_count() >> SOFTIRQ_SHIFT,
-		trace_hardirqs_enabled(curr),
-		trace_softirqs_enabled(curr));
+		lockdep_hardirq_context(), hardirq_count() >> HARDIRQ_SHIFT,
+		lockdep_softirq_context(curr), softirq_count() >> SOFTIRQ_SHIFT,
+		lockdep_hardirqs_enabled(),
+		lockdep_softirqs_enabled(curr));
 	print_lock(this);
 
 	pr_warn("{%s} state was registered at:\n", usage_str[prev_bit]);
@@ -3477,19 +3513,21 @@ check_usage_backwards(struct task_struct *curr, struct held_lock *this,
 
 void print_irqtrace_events(struct task_struct *curr)
 {
-	printk("irq event stamp: %u\n", curr->irq_events);
+	const struct irqtrace_events *trace = &curr->irqtrace;
+
+	printk("irq event stamp: %u\n", trace->irq_events);
 	printk("hardirqs last  enabled at (%u): [<%px>] %pS\n",
-		curr->hardirq_enable_event, (void *)curr->hardirq_enable_ip,
-		(void *)curr->hardirq_enable_ip);
+		trace->hardirq_enable_event, (void *)trace->hardirq_enable_ip,
+		(void *)trace->hardirq_enable_ip);
 	printk("hardirqs last disabled at (%u): [<%px>] %pS\n",
-		curr->hardirq_disable_event, (void *)curr->hardirq_disable_ip,
-		(void *)curr->hardirq_disable_ip);
+		trace->hardirq_disable_event, (void *)trace->hardirq_disable_ip,
+		(void *)trace->hardirq_disable_ip);
 	printk("softirqs last  enabled at (%u): [<%px>] %pS\n",
-		curr->softirq_enable_event, (void *)curr->softirq_enable_ip,
-		(void *)curr->softirq_enable_ip);
+		trace->softirq_enable_event, (void *)trace->softirq_enable_ip,
+		(void *)trace->softirq_enable_ip);
 	printk("softirqs last disabled at (%u): [<%px>] %pS\n",
-		curr->softirq_disable_event, (void *)curr->softirq_disable_ip,
-		(void *)curr->softirq_disable_ip);
+		trace->softirq_disable_event, (void *)trace->softirq_disable_ip,
+		(void *)trace->softirq_disable_ip);
 }
 
 static int HARDIRQ_verbose(struct lock_class *class)
@@ -3609,12 +3647,9 @@ mark_held_locks(struct task_struct *curr, enum lock_usage_bit base_bit)
 /*
  * Hardirqs will be enabled:
  */
-static void __trace_hardirqs_on_caller(unsigned long ip)
+static void __trace_hardirqs_on_caller(void)
 {
 	struct task_struct *curr = current;
-
-	/* we'll do an OFF -> ON transition: */
-	curr->hardirqs_enabled = 1;
 
 	/*
 	 * We are going to turn hardirqs on, so set the
@@ -3628,22 +3663,33 @@ static void __trace_hardirqs_on_caller(unsigned long ip)
 	 * this bit from being set before)
 	 */
 	if (curr->softirqs_enabled)
-		if (!mark_held_locks(curr, LOCK_ENABLED_SOFTIRQ))
-			return;
-
-	curr->hardirq_enable_ip = ip;
-	curr->hardirq_enable_event = ++curr->irq_events;
-	debug_atomic_inc(hardirqs_on_events);
+		mark_held_locks(curr, LOCK_ENABLED_SOFTIRQ);
 }
 
-__visible void trace_hardirqs_on_caller(unsigned long ip)
+/**
+ * lockdep_hardirqs_on_prepare - Prepare for enabling interrupts
+ * @ip:		Caller address
+ *
+ * Invoked before a possible transition to RCU idle from exit to user or
+ * guest mode. This ensures that all RCU operations are done before RCU
+ * stops watching. After the RCU transition lockdep_hardirqs_on() has to be
+ * invoked to set the final state.
+ */
+void lockdep_hardirqs_on_prepare(unsigned long ip)
 {
-	time_hardirqs_on(CALLER_ADDR0, ip);
-
-	if (unlikely(!debug_locks || current->lockdep_recursion))
+	if (unlikely(!debug_locks))
 		return;
 
-	if (unlikely(current->hardirqs_enabled)) {
+	/*
+	 * NMIs do not (and cannot) track lock dependencies, nothing to do.
+	 */
+	if (unlikely(in_nmi()))
+		return;
+
+	if (unlikely(this_cpu_read(lockdep_recursion)))
+		return;
+
+	if (unlikely(lockdep_hardirqs_enabled())) {
 		/*
 		 * Neither irq nor preemption are disabled here
 		 * so this is racy by nature but losing one hit
@@ -3671,31 +3717,98 @@ __visible void trace_hardirqs_on_caller(unsigned long ip)
 	 * Can't allow enabling interrupts while in an interrupt handler,
 	 * that's general bad form and such. Recursion, limited stack etc..
 	 */
-	if (DEBUG_LOCKS_WARN_ON(current->hardirq_context))
+	if (DEBUG_LOCKS_WARN_ON(lockdep_hardirq_context()))
 		return;
 
-	current->lockdep_recursion = 1;
-	__trace_hardirqs_on_caller(ip);
-	current->lockdep_recursion = 0;
-}
-EXPORT_SYMBOL(trace_hardirqs_on_caller);
+	current->hardirq_chain_key = current->curr_chain_key;
 
-void trace_hardirqs_on(void)
-{
-	trace_hardirqs_on_caller(CALLER_ADDR0);
+	lockdep_recursion_inc();
+	__trace_hardirqs_on_caller();
+	lockdep_recursion_finish();
 }
-EXPORT_SYMBOL(trace_hardirqs_on);
+EXPORT_SYMBOL_GPL(lockdep_hardirqs_on_prepare);
+
+void noinstr lockdep_hardirqs_on(unsigned long ip)
+{
+	struct irqtrace_events *trace = &current->irqtrace;
+
+	if (unlikely(!debug_locks))
+		return;
+
+	/*
+	 * NMIs can happen in the middle of local_irq_{en,dis}able() where the
+	 * tracking state and hardware state are out of sync.
+	 *
+	 * NMIs must save lockdep_hardirqs_enabled() to restore IRQ state from,
+	 * and not rely on hardware state like normal interrupts.
+	 */
+	if (unlikely(in_nmi())) {
+		if (!IS_ENABLED(CONFIG_TRACE_IRQFLAGS_NMI))
+			return;
+
+		/*
+		 * Skip:
+		 *  - recursion check, because NMI can hit lockdep;
+		 *  - hardware state check, because above;
+		 *  - chain_key check, see lockdep_hardirqs_on_prepare().
+		 */
+		goto skip_checks;
+	}
+
+	if (unlikely(this_cpu_read(lockdep_recursion)))
+		return;
+
+	if (lockdep_hardirqs_enabled()) {
+		/*
+		 * Neither irq nor preemption are disabled here
+		 * so this is racy by nature but losing one hit
+		 * in a stat is not a big deal.
+		 */
+		__debug_atomic_inc(redundant_hardirqs_on);
+		return;
+	}
+
+	/*
+	 * We're enabling irqs and according to our state above irqs weren't
+	 * already enabled, yet we find the hardware thinks they are in fact
+	 * enabled.. someone messed up their IRQ state tracing.
+	 */
+	if (DEBUG_LOCKS_WARN_ON(!irqs_disabled()))
+		return;
+
+	/*
+	 * Ensure the lock stack remained unchanged between
+	 * lockdep_hardirqs_on_prepare() and lockdep_hardirqs_on().
+	 */
+	DEBUG_LOCKS_WARN_ON(current->hardirq_chain_key !=
+			    current->curr_chain_key);
+
+skip_checks:
+	/* we'll do an OFF -> ON transition: */
+	__this_cpu_write(hardirqs_enabled, 1);
+	trace->hardirq_enable_ip = ip;
+	trace->hardirq_enable_event = ++trace->irq_events;
+	debug_atomic_inc(hardirqs_on_events);
+}
+EXPORT_SYMBOL_GPL(lockdep_hardirqs_on);
 
 /*
  * Hardirqs were disabled:
  */
-__visible void trace_hardirqs_off_caller(unsigned long ip)
+void noinstr lockdep_hardirqs_off(unsigned long ip)
 {
-	struct task_struct *curr = current;
+	if (unlikely(!debug_locks))
+		return;
 
-	time_hardirqs_off(CALLER_ADDR0, ip);
-
-	if (unlikely(!debug_locks || current->lockdep_recursion))
+	/*
+	 * Matching lockdep_hardirqs_on(), allow NMIs in the middle of lockdep;
+	 * they will restore the software state. This ensures the software
+	 * state is consistent inside NMIs as well.
+	 */
+	if (in_nmi()) {
+		if (!IS_ENABLED(CONFIG_TRACE_IRQFLAGS_NMI))
+			return;
+	} else if (__this_cpu_read(lockdep_recursion))
 		return;
 
 	/*
@@ -3705,33 +3818,30 @@ __visible void trace_hardirqs_off_caller(unsigned long ip)
 	if (DEBUG_LOCKS_WARN_ON(!irqs_disabled()))
 		return;
 
-	if (curr->hardirqs_enabled) {
+	if (lockdep_hardirqs_enabled()) {
+		struct irqtrace_events *trace = &current->irqtrace;
+
 		/*
 		 * We have done an ON -> OFF transition:
 		 */
-		curr->hardirqs_enabled = 0;
-		curr->hardirq_disable_ip = ip;
-		curr->hardirq_disable_event = ++curr->irq_events;
+		__this_cpu_write(hardirqs_enabled, 0);
+		trace->hardirq_disable_ip = ip;
+		trace->hardirq_disable_event = ++trace->irq_events;
 		debug_atomic_inc(hardirqs_off_events);
-	} else
+	} else {
 		debug_atomic_inc(redundant_hardirqs_off);
+	}
 }
-EXPORT_SYMBOL(trace_hardirqs_off_caller);
-
-void trace_hardirqs_off(void)
-{
-	trace_hardirqs_off_caller(CALLER_ADDR0);
-}
-EXPORT_SYMBOL(trace_hardirqs_off);
+EXPORT_SYMBOL_GPL(lockdep_hardirqs_off);
 
 /*
  * Softirqs will be enabled:
  */
-void trace_softirqs_on(unsigned long ip)
+void lockdep_softirqs_on(unsigned long ip)
 {
-	struct task_struct *curr = current;
+	struct irqtrace_events *trace = &current->irqtrace;
 
-	if (unlikely(!debug_locks || current->lockdep_recursion))
+	if (unlikely(!lockdep_enabled()))
 		return;
 
 	/*
@@ -3741,37 +3851,35 @@ void trace_softirqs_on(unsigned long ip)
 	if (DEBUG_LOCKS_WARN_ON(!irqs_disabled()))
 		return;
 
-	if (curr->softirqs_enabled) {
+	if (current->softirqs_enabled) {
 		debug_atomic_inc(redundant_softirqs_on);
 		return;
 	}
 
-	current->lockdep_recursion = 1;
+	lockdep_recursion_inc();
 	/*
 	 * We'll do an OFF -> ON transition:
 	 */
-	curr->softirqs_enabled = 1;
-	curr->softirq_enable_ip = ip;
-	curr->softirq_enable_event = ++curr->irq_events;
+	current->softirqs_enabled = 1;
+	trace->softirq_enable_ip = ip;
+	trace->softirq_enable_event = ++trace->irq_events;
 	debug_atomic_inc(softirqs_on_events);
 	/*
 	 * We are going to turn softirqs on, so set the
 	 * usage bit for all held locks, if hardirqs are
 	 * enabled too:
 	 */
-	if (curr->hardirqs_enabled)
-		mark_held_locks(curr, LOCK_ENABLED_SOFTIRQ);
-	current->lockdep_recursion = 0;
+	if (lockdep_hardirqs_enabled())
+		mark_held_locks(current, LOCK_ENABLED_SOFTIRQ);
+	lockdep_recursion_finish();
 }
 
 /*
  * Softirqs were disabled:
  */
-void trace_softirqs_off(unsigned long ip)
+void lockdep_softirqs_off(unsigned long ip)
 {
-	struct task_struct *curr = current;
-
-	if (unlikely(!debug_locks || current->lockdep_recursion))
+	if (unlikely(!lockdep_enabled()))
 		return;
 
 	/*
@@ -3780,13 +3888,15 @@ void trace_softirqs_off(unsigned long ip)
 	if (DEBUG_LOCKS_WARN_ON(!irqs_disabled()))
 		return;
 
-	if (curr->softirqs_enabled) {
+	if (current->softirqs_enabled) {
+		struct irqtrace_events *trace = &current->irqtrace;
+
 		/*
 		 * We have done an ON -> OFF transition:
 		 */
-		curr->softirqs_enabled = 0;
-		curr->softirq_disable_ip = ip;
-		curr->softirq_disable_event = ++curr->irq_events;
+		current->softirqs_enabled = 0;
+		trace->softirq_disable_ip = ip;
+		trace->softirq_disable_event = ++trace->irq_events;
 		debug_atomic_inc(softirqs_off_events);
 		/*
 		 * Whoops, we wanted softirqs off, so why aren't they?
@@ -3808,7 +3918,7 @@ mark_usage(struct task_struct *curr, struct held_lock *hlock, int check)
 	 */
 	if (!hlock->trylock) {
 		if (hlock->read) {
-			if (curr->hardirq_context)
+			if (lockdep_hardirq_context())
 				if (!mark_lock(curr, hlock,
 						LOCK_USED_IN_HARDIRQ_READ))
 					return 0;
@@ -3817,7 +3927,7 @@ mark_usage(struct task_struct *curr, struct held_lock *hlock, int check)
 						LOCK_USED_IN_SOFTIRQ_READ))
 					return 0;
 		} else {
-			if (curr->hardirq_context)
+			if (lockdep_hardirq_context())
 				if (!mark_lock(curr, hlock, LOCK_USED_IN_HARDIRQ))
 					return 0;
 			if (curr->softirq_context)
@@ -3855,7 +3965,7 @@ lock_used:
 
 static inline unsigned int task_irq_context(struct task_struct *task)
 {
-	return LOCK_CHAIN_HARDIRQ_CONTEXT * !!task->hardirq_context +
+	return LOCK_CHAIN_HARDIRQ_CONTEXT * !!lockdep_hardirq_context() +
 	       LOCK_CHAIN_SOFTIRQ_CONTEXT * !!task->softirq_context;
 }
 
@@ -3888,12 +3998,17 @@ static int separate_irq_context(struct task_struct *curr,
 static int mark_lock(struct task_struct *curr, struct held_lock *this,
 			     enum lock_usage_bit new_bit)
 {
-	unsigned int new_mask = 1 << new_bit, ret = 1;
+	unsigned int new_mask, ret = 1;
 
 	if (new_bit >= LOCK_USAGE_STATES) {
 		DEBUG_LOCKS_WARN_ON(1);
 		return 0;
 	}
+
+	if (new_bit == LOCK_USED && this->read)
+		new_bit = LOCK_USED_READ;
+
+	new_mask = 1 << new_bit;
 
 	/*
 	 * If already set then do not dirty the cacheline,
@@ -3907,26 +4022,32 @@ static int mark_lock(struct task_struct *curr, struct held_lock *this,
 	/*
 	 * Make sure we didn't race:
 	 */
-	if (unlikely(hlock_class(this)->usage_mask & new_mask)) {
-		graph_unlock();
-		return 1;
-	}
+	if (unlikely(hlock_class(this)->usage_mask & new_mask))
+		goto unlock;
 
 	hlock_class(this)->usage_mask |= new_mask;
 
-	if (!(hlock_class(this)->usage_traces[new_bit] = save_trace()))
-		return 0;
-
-	switch (new_bit) {
-	case LOCK_USED:
-		debug_atomic_dec(nr_unused_locks);
-		break;
-	default:
-		ret = mark_lock_irq(curr, this, new_bit);
-		if (!ret)
+	if (new_bit < LOCK_TRACE_STATES) {
+		if (!(hlock_class(this)->usage_traces[new_bit] = save_trace()))
 			return 0;
 	}
 
+	switch (new_bit) {
+	case 0 ... LOCK_USED-1:
+		ret = mark_lock_irq(curr, this, new_bit);
+		if (!ret)
+			return 0;
+		break;
+
+	case LOCK_USED:
+		debug_atomic_dec(nr_unused_locks);
+		break;
+
+	default:
+		break;
+	}
+
+unlock:
 	graph_unlock();
 
 	/*
@@ -3940,6 +4061,124 @@ static int mark_lock(struct task_struct *curr, struct held_lock *this,
 	}
 
 	return ret;
+}
+
+static inline short task_wait_context(struct task_struct *curr)
+{
+	/*
+	 * Set appropriate wait type for the context; for IRQs we have to take
+	 * into account force_irqthread as that is implied by PREEMPT_RT.
+	 */
+	if (lockdep_hardirq_context()) {
+		/*
+		 * Check if force_irqthreads will run us threaded.
+		 */
+		if (curr->hardirq_threaded || curr->irq_config)
+			return LD_WAIT_CONFIG;
+
+		return LD_WAIT_SPIN;
+	} else if (curr->softirq_context) {
+		/*
+		 * Softirqs are always threaded.
+		 */
+		return LD_WAIT_CONFIG;
+	}
+
+	return LD_WAIT_MAX;
+}
+
+static int
+print_lock_invalid_wait_context(struct task_struct *curr,
+				struct held_lock *hlock)
+{
+	short curr_inner;
+
+	if (!debug_locks_off())
+		return 0;
+	if (debug_locks_silent)
+		return 0;
+
+	pr_warn("\n");
+	pr_warn("=============================\n");
+	pr_warn("[ BUG: Invalid wait context ]\n");
+	print_kernel_ident();
+	pr_warn("-----------------------------\n");
+
+	pr_warn("%s/%d is trying to lock:\n", curr->comm, task_pid_nr(curr));
+	print_lock(hlock);
+
+	pr_warn("other info that might help us debug this:\n");
+
+	curr_inner = task_wait_context(curr);
+	pr_warn("context-{%d:%d}\n", curr_inner, curr_inner);
+
+	lockdep_print_held_locks(curr);
+
+	pr_warn("stack backtrace:\n");
+	dump_stack();
+
+	return 0;
+}
+
+/*
+ * Verify the wait_type context.
+ *
+ * This check validates we takes locks in the right wait-type order; that is it
+ * ensures that we do not take mutexes inside spinlocks and do not attempt to
+ * acquire spinlocks inside raw_spinlocks and the sort.
+ *
+ * The entire thing is slightly more complex because of RCU, RCU is a lock that
+ * can be taken from (pretty much) any context but also has constraints.
+ * However when taken in a stricter environment the RCU lock does not loosen
+ * the constraints.
+ *
+ * Therefore we must look for the strictest environment in the lock stack and
+ * compare that to the lock we're trying to acquire.
+ */
+static int check_wait_context(struct task_struct *curr, struct held_lock *next)
+{
+	short next_inner = hlock_class(next)->wait_type_inner;
+	short next_outer = hlock_class(next)->wait_type_outer;
+	short curr_inner;
+	int depth;
+
+	if (!curr->lockdep_depth || !next_inner || next->trylock)
+		return 0;
+
+	if (!next_outer)
+		next_outer = next_inner;
+
+	/*
+	 * Find start of current irq_context..
+	 */
+	for (depth = curr->lockdep_depth - 1; depth >= 0; depth--) {
+		struct held_lock *prev = curr->held_locks + depth;
+		if (prev->irq_context != next->irq_context)
+			break;
+	}
+	depth++;
+
+	curr_inner = task_wait_context(curr);
+
+	for (; depth < curr->lockdep_depth; depth++) {
+		struct held_lock *prev = curr->held_locks + depth;
+		short prev_inner = hlock_class(prev)->wait_type_inner;
+
+		if (prev_inner) {
+			/*
+			 * We can have a bigger inner than a previous one
+			 * when outer is smaller than inner, as with RCU.
+			 *
+			 * Also due to trylocks.
+			 */
+			curr_inner = min(curr_inner, prev_inner);
+		}
+	}
+
+	if (next_outer > curr_inner)
+		return print_lock_invalid_wait_context(curr, next);
+
+	return 0;
 }
 
 #else /* CONFIG_PROVE_LOCKING */
@@ -3961,13 +4200,20 @@ static inline int separate_irq_context(struct task_struct *curr,
 	return 0;
 }
 
+static inline int check_wait_context(struct task_struct *curr,
+				     struct held_lock *next)
+{
+	return 0;
+}
+
 #endif /* CONFIG_PROVE_LOCKING */
 
 /*
  * Initialize a lock instance's lock-class mapping info:
  */
-void lockdep_init_map(struct lockdep_map *lock, const char *name,
-		      struct lock_class_key *key, int subclass)
+void lockdep_init_map_waits(struct lockdep_map *lock, const char *name,
+			    struct lock_class_key *key, int subclass,
+			    short inner, short outer)
 {
 	int i;
 
@@ -3987,6 +4233,9 @@ void lockdep_init_map(struct lockdep_map *lock, const char *name,
 	}
 
 	lock->name = name;
+
+	lock->wait_type_outer = outer;
+	lock->wait_type_inner = inner;
 
 	/*
 	 * No key, no joy, we need to hash something.
@@ -4011,17 +4260,17 @@ void lockdep_init_map(struct lockdep_map *lock, const char *name,
 	if (subclass) {
 		unsigned long flags;
 
-		if (DEBUG_LOCKS_WARN_ON(current->lockdep_recursion))
+		if (DEBUG_LOCKS_WARN_ON(!lockdep_enabled()))
 			return;
 
 		raw_local_irq_save(flags);
-		current->lockdep_recursion = 1;
+		lockdep_recursion_inc();
 		register_lock_class(lock, subclass, 1);
-		current->lockdep_recursion = 0;
+		lockdep_recursion_finish();
 		raw_local_irq_restore(flags);
 	}
 }
-EXPORT_SYMBOL_GPL(lockdep_init_map);
+EXPORT_SYMBOL_GPL(lockdep_init_map_waits);
 
 struct lock_class_key __lockdep_no_validate__;
 EXPORT_SYMBOL_GPL(__lockdep_no_validate__);
@@ -4122,7 +4371,7 @@ static int __lock_acquire(struct lockdep_map *lock, unsigned int subclass,
 
 	class_idx = class - lock_classes;
 
-	if (depth) {
+	if (depth) { /* we're holding locks */
 		hlock = curr->held_locks + depth - 1;
 		if (hlock->class_idx == class_idx && nest_lock) {
 			if (!references)
@@ -4163,6 +4412,9 @@ static int __lock_acquire(struct lockdep_map *lock, unsigned int subclass,
 	hlock->holdtime_stamp = lockstat_clock();
 #endif
 	hlock->pin_count = pin_count;
+
+	if (check_wait_context(curr, hlock))
+		return 0;
 
 	/* Initialize the lock usage bit */
 	if (!mark_usage(curr, hlock, check))
@@ -4267,8 +4519,8 @@ static void print_unlock_imbalance_bug(struct task_struct *curr,
 	dump_stack();
 }
 
-static int match_held_lock(const struct held_lock *hlock,
-					const struct lockdep_map *lock)
+static noinstr int match_held_lock(const struct held_lock *hlock,
+				   const struct lockdep_map *lock)
 {
 	if (hlock->instance == lock)
 		return 1;
@@ -4399,7 +4651,9 @@ __lock_set_class(struct lockdep_map *lock, const char *name,
 		return 0;
 	}
 
-	lockdep_init_map(lock, name, key, 0);
+	lockdep_init_map_waits(lock, name, key, 0,
+			       lock->wait_type_inner,
+			       lock->wait_type_outer);
 	class = register_lock_class(lock, subclass, 0);
 	hlock->class_idx = class - lock_classes;
 
@@ -4555,7 +4809,8 @@ __lock_release(struct lockdep_map *lock, unsigned long ip)
 	return 0;
 }
 
-static int __lock_is_held(const struct lockdep_map *lock, int read)
+static __always_inline
+int __lock_is_held(const struct lockdep_map *lock, int read)
 {
 	struct task_struct *curr = current;
 	int i;
@@ -4659,11 +4914,11 @@ static void check_flags(unsigned long flags)
 		return;
 
 	if (irqs_disabled_flags(flags)) {
-		if (DEBUG_LOCKS_WARN_ON(current->hardirqs_enabled)) {
+		if (DEBUG_LOCKS_WARN_ON(lockdep_hardirqs_enabled())) {
 			printk("possible reason: unannotated irqs-off.\n");
 		}
 	} else {
-		if (DEBUG_LOCKS_WARN_ON(!current->hardirqs_enabled)) {
+		if (DEBUG_LOCKS_WARN_ON(!lockdep_hardirqs_enabled())) {
 			printk("possible reason: unannotated irqs-on.\n");
 		}
 	}
@@ -4694,15 +4949,15 @@ void lock_set_class(struct lockdep_map *lock, const char *name,
 {
 	unsigned long flags;
 
-	if (unlikely(current->lockdep_recursion))
+	if (unlikely(!lockdep_enabled()))
 		return;
 
 	raw_local_irq_save(flags);
-	current->lockdep_recursion = 1;
+	lockdep_recursion_inc();
 	check_flags(flags);
 	if (__lock_set_class(lock, name, key, subclass, ip))
 		check_chain_key(current);
-	current->lockdep_recursion = 0;
+	lockdep_recursion_finish();
 	raw_local_irq_restore(flags);
 }
 EXPORT_SYMBOL_GPL(lock_set_class);
@@ -4711,18 +4966,56 @@ void lock_downgrade(struct lockdep_map *lock, unsigned long ip)
 {
 	unsigned long flags;
 
-	if (unlikely(current->lockdep_recursion))
+	if (unlikely(!lockdep_enabled()))
 		return;
 
 	raw_local_irq_save(flags);
-	current->lockdep_recursion = 1;
+	lockdep_recursion_inc();
 	check_flags(flags);
 	if (__lock_downgrade(lock, ip))
 		check_chain_key(current);
-	current->lockdep_recursion = 0;
+	lockdep_recursion_finish();
 	raw_local_irq_restore(flags);
 }
 EXPORT_SYMBOL_GPL(lock_downgrade);
+
+/* NMI context !!! */
+static void verify_lock_unused(struct lockdep_map *lock, struct held_lock *hlock, int subclass)
+{
+#ifdef CONFIG_PROVE_LOCKING
+	struct lock_class *class = look_up_lock_class(lock, subclass);
+	unsigned long mask = LOCKF_USED;
+
+	/* if it doesn't have a class (yet), it certainly hasn't been used yet */
+	if (!class)
+		return;
+
+	/*
+	 * READ locks only conflict with USED, such that if we only ever use
+	 * READ locks, there is no deadlock possible -- RCU.
+	 */
+	if (!hlock->read)
+		mask |= LOCKF_USED_READ;
+
+	if (!(class->usage_mask & mask))
+		return;
+
+	hlock->class_idx = class - lock_classes;
+
+	print_usage_bug(current, hlock, LOCK_USED, LOCK_USAGE_STATES);
+#endif
+}
+
+static bool lockdep_nmi(void)
+{
+	if (raw_cpu_read(lockdep_recursion))
+		return false;
+
+	if (!in_nmi())
+		return false;
+
+	return true;
+}
 
 /*
  * We are not always called with irqs disabled - do that here,
@@ -4734,17 +5027,38 @@ void lock_acquire(struct lockdep_map *lock, unsigned int subclass,
 {
 	unsigned long flags;
 
-	if (unlikely(current->lockdep_recursion))
+	trace_lock_acquire(lock, subclass, trylock, read, check, nest_lock, ip);
+
+	if (!debug_locks)
 		return;
+
+	if (unlikely(!lockdep_enabled())) {
+		/* XXX allow trylock from NMI ?!? */
+		if (lockdep_nmi() && !trylock) {
+			struct held_lock hlock;
+
+			hlock.acquire_ip = ip;
+			hlock.instance = lock;
+			hlock.nest_lock = nest_lock;
+			hlock.irq_context = 2; // XXX
+			hlock.trylock = trylock;
+			hlock.read = read;
+			hlock.check = check;
+			hlock.hardirqs_off = true;
+			hlock.references = 0;
+
+			verify_lock_unused(lock, &hlock, subclass);
+		}
+		return;
+	}
 
 	raw_local_irq_save(flags);
 	check_flags(flags);
 
-	current->lockdep_recursion = 1;
-	trace_lock_acquire(lock, subclass, trylock, read, check, nest_lock, ip);
+	lockdep_recursion_inc();
 	__lock_acquire(lock, subclass, trylock, read, check,
 		       irqs_disabled_flags(flags), nest_lock, ip, 0, 0);
-	current->lockdep_recursion = 0;
+	lockdep_recursion_finish();
 	raw_local_irq_restore(flags);
 }
 EXPORT_SYMBOL_GPL(lock_acquire);
@@ -4753,54 +5067,57 @@ void lock_release(struct lockdep_map *lock, unsigned long ip)
 {
 	unsigned long flags;
 
-	if (unlikely(current->lockdep_recursion))
+	trace_lock_release(lock, ip);
+
+	if (unlikely(!lockdep_enabled()))
 		return;
 
 	raw_local_irq_save(flags);
 	check_flags(flags);
-	current->lockdep_recursion = 1;
-	trace_lock_release(lock, ip);
+
+	lockdep_recursion_inc();
 	if (__lock_release(lock, ip))
 		check_chain_key(current);
-	current->lockdep_recursion = 0;
+	lockdep_recursion_finish();
 	raw_local_irq_restore(flags);
 }
 EXPORT_SYMBOL_GPL(lock_release);
 
-int lock_is_held_type(const struct lockdep_map *lock, int read)
+noinstr int lock_is_held_type(const struct lockdep_map *lock, int read)
 {
 	unsigned long flags;
 	int ret = 0;
 
-	if (unlikely(current->lockdep_recursion))
+	if (unlikely(!lockdep_enabled()))
 		return 1; /* avoid false negative lockdep_assert_held() */
 
 	raw_local_irq_save(flags);
 	check_flags(flags);
 
-	current->lockdep_recursion = 1;
+	lockdep_recursion_inc();
 	ret = __lock_is_held(lock, read);
-	current->lockdep_recursion = 0;
+	lockdep_recursion_finish();
 	raw_local_irq_restore(flags);
 
 	return ret;
 }
 EXPORT_SYMBOL_GPL(lock_is_held_type);
+NOKPROBE_SYMBOL(lock_is_held_type);
 
 struct pin_cookie lock_pin_lock(struct lockdep_map *lock)
 {
 	struct pin_cookie cookie = NIL_COOKIE;
 	unsigned long flags;
 
-	if (unlikely(current->lockdep_recursion))
+	if (unlikely(!lockdep_enabled()))
 		return cookie;
 
 	raw_local_irq_save(flags);
 	check_flags(flags);
 
-	current->lockdep_recursion = 1;
+	lockdep_recursion_inc();
 	cookie = __lock_pin_lock(lock);
-	current->lockdep_recursion = 0;
+	lockdep_recursion_finish();
 	raw_local_irq_restore(flags);
 
 	return cookie;
@@ -4811,15 +5128,15 @@ void lock_repin_lock(struct lockdep_map *lock, struct pin_cookie cookie)
 {
 	unsigned long flags;
 
-	if (unlikely(current->lockdep_recursion))
+	if (unlikely(!lockdep_enabled()))
 		return;
 
 	raw_local_irq_save(flags);
 	check_flags(flags);
 
-	current->lockdep_recursion = 1;
+	lockdep_recursion_inc();
 	__lock_repin_lock(lock, cookie);
-	current->lockdep_recursion = 0;
+	lockdep_recursion_finish();
 	raw_local_irq_restore(flags);
 }
 EXPORT_SYMBOL_GPL(lock_repin_lock);
@@ -4828,15 +5145,15 @@ void lock_unpin_lock(struct lockdep_map *lock, struct pin_cookie cookie)
 {
 	unsigned long flags;
 
-	if (unlikely(current->lockdep_recursion))
+	if (unlikely(!lockdep_enabled()))
 		return;
 
 	raw_local_irq_save(flags);
 	check_flags(flags);
 
-	current->lockdep_recursion = 1;
+	lockdep_recursion_inc();
 	__lock_unpin_lock(lock, cookie);
-	current->lockdep_recursion = 0;
+	lockdep_recursion_finish();
 	raw_local_irq_restore(flags);
 }
 EXPORT_SYMBOL_GPL(lock_unpin_lock);
@@ -4945,8 +5262,6 @@ __lock_acquired(struct lockdep_map *lock, unsigned long ip)
 		hlock->holdtime_stamp = now;
 	}
 
-	trace_lock_acquired(lock, ip);
-
 	stats = get_lock_stats(hlock_class(hlock));
 	if (waittime) {
 		if (hlock->read)
@@ -4966,18 +5281,16 @@ void lock_contended(struct lockdep_map *lock, unsigned long ip)
 {
 	unsigned long flags;
 
-	if (unlikely(!lock_stat || !debug_locks))
-		return;
+	trace_lock_acquired(lock, ip);
 
-	if (unlikely(current->lockdep_recursion))
+	if (unlikely(!lock_stat || !lockdep_enabled()))
 		return;
 
 	raw_local_irq_save(flags);
 	check_flags(flags);
-	current->lockdep_recursion = 1;
-	trace_lock_contended(lock, ip);
+	lockdep_recursion_inc();
 	__lock_contended(lock, ip);
-	current->lockdep_recursion = 0;
+	lockdep_recursion_finish();
 	raw_local_irq_restore(flags);
 }
 EXPORT_SYMBOL_GPL(lock_contended);
@@ -4986,17 +5299,16 @@ void lock_acquired(struct lockdep_map *lock, unsigned long ip)
 {
 	unsigned long flags;
 
-	if (unlikely(!lock_stat || !debug_locks))
-		return;
+	trace_lock_contended(lock, ip);
 
-	if (unlikely(current->lockdep_recursion))
+	if (unlikely(!lock_stat || !lockdep_enabled()))
 		return;
 
 	raw_local_irq_save(flags);
 	check_flags(flags);
-	current->lockdep_recursion = 1;
+	lockdep_recursion_inc();
 	__lock_acquired(lock, ip);
-	current->lockdep_recursion = 0;
+	lockdep_recursion_finish();
 	raw_local_irq_restore(flags);
 }
 EXPORT_SYMBOL_GPL(lock_acquired);
@@ -5197,8 +5509,7 @@ static void free_zapped_rcu(struct rcu_head *ch)
 		return;
 
 	raw_local_irq_save(flags);
-	arch_spin_lock(&lockdep_lock);
-	current->lockdep_recursion = 1;
+	lockdep_lock();
 
 	/* closed head */
 	pf = delayed_free.pf + (delayed_free.index ^ 1);
@@ -5210,8 +5521,7 @@ static void free_zapped_rcu(struct rcu_head *ch)
 	 */
 	call_rcu_zapped(delayed_free.pf + delayed_free.index);
 
-	current->lockdep_recursion = 0;
-	arch_spin_unlock(&lockdep_lock);
+	lockdep_unlock();
 	raw_local_irq_restore(flags);
 }
 
@@ -5256,13 +5566,11 @@ static void lockdep_free_key_range_reg(void *start, unsigned long size)
 	init_data_structures_once();
 
 	raw_local_irq_save(flags);
-	arch_spin_lock(&lockdep_lock);
-	current->lockdep_recursion = 1;
+	lockdep_lock();
 	pf = get_pending_free();
 	__lockdep_free_key_range(pf, start, size);
 	call_rcu_zapped(pf);
-	current->lockdep_recursion = 0;
-	arch_spin_unlock(&lockdep_lock);
+	lockdep_unlock();
 	raw_local_irq_restore(flags);
 
 	/*
@@ -5284,10 +5592,10 @@ static void lockdep_free_key_range_imm(void *start, unsigned long size)
 	init_data_structures_once();
 
 	raw_local_irq_save(flags);
-	arch_spin_lock(&lockdep_lock);
+	lockdep_lock();
 	__lockdep_free_key_range(pf, start, size);
 	__free_zapped_classes(pf);
-	arch_spin_unlock(&lockdep_lock);
+	lockdep_unlock();
 	raw_local_irq_restore(flags);
 }
 
@@ -5383,10 +5691,10 @@ static void lockdep_reset_lock_imm(struct lockdep_map *lock)
 	unsigned long flags;
 
 	raw_local_irq_save(flags);
-	arch_spin_lock(&lockdep_lock);
+	lockdep_lock();
 	__lockdep_reset_lock(pf, lock);
 	__free_zapped_classes(pf);
-	arch_spin_unlock(&lockdep_lock);
+	lockdep_unlock();
 	raw_local_irq_restore(flags);
 }
 

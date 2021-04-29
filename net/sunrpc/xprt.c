@@ -606,6 +606,11 @@ static void xprt_reset_majortimeo(struct rpc_rqst *req)
 	req->rq_majortimeo += xprt_calc_majortimeo(req);
 }
 
+static void xprt_reset_minortimeo(struct rpc_rqst *req)
+{
+	req->rq_minortimeo += req->rq_timeout;
+}
+
 static void xprt_init_majortimeo(struct rpc_task *task, struct rpc_rqst *req)
 {
 	unsigned long time_init;
@@ -617,6 +622,7 @@ static void xprt_init_majortimeo(struct rpc_task *task, struct rpc_rqst *req)
 		time_init = xprt_abs_ktime_to_jiffies(task->tk_start);
 	req->rq_timeout = task->tk_client->cl_timeout->to_initval;
 	req->rq_majortimeo = time_init + xprt_calc_majortimeo(req);
+	req->rq_minortimeo = time_init + req->rq_timeout;
 }
 
 /**
@@ -630,6 +636,8 @@ int xprt_adjust_timeout(struct rpc_rqst *req)
 	const struct rpc_timeout *to = req->rq_task->tk_client->cl_timeout;
 	int status = 0;
 
+	if (time_before(jiffies, req->rq_minortimeo))
+		return status;
 	if (time_before(jiffies, req->rq_majortimeo)) {
 		if (to->to_exponential)
 			req->rq_timeout <<= 1;
@@ -648,6 +656,7 @@ int xprt_adjust_timeout(struct rpc_rqst *req)
 		spin_unlock(&xprt->transport_lock);
 		status = -ETIMEDOUT;
 	}
+	xprt_reset_minortimeo(req);
 
 	if (req->rq_timeout == 0) {
 		printk(KERN_WARNING "xprt_adjust_timeout: rq_timeout = 0!\n");
@@ -662,6 +671,7 @@ static void xprt_autoclose(struct work_struct *work)
 		container_of(work, struct rpc_xprt, task_cleanup);
 	unsigned int pflags = memalloc_nofs_save();
 
+	trace_xprt_disconnect_auto(xprt);
 	clear_bit(XPRT_CLOSE_WAIT, &xprt->state);
 	xprt->ops->close(xprt);
 	xprt_release_write(xprt, NULL);
@@ -676,7 +686,7 @@ static void xprt_autoclose(struct work_struct *work)
  */
 void xprt_disconnect_done(struct rpc_xprt *xprt)
 {
-	dprintk("RPC:       disconnected transport %p\n", xprt);
+	trace_xprt_disconnect_done(xprt);
 	spin_lock(&xprt->transport_lock);
 	xprt_clear_connected(xprt);
 	xprt_clear_write_space_locked(xprt);
@@ -693,6 +703,8 @@ EXPORT_SYMBOL_GPL(xprt_disconnect_done);
  */
 void xprt_force_disconnect(struct rpc_xprt *xprt)
 {
+	trace_xprt_disconnect_force(xprt);
+
 	/* Don't race with the test_bit() in xprt_clear_locked() */
 	spin_lock(&xprt->transport_lock);
 	set_bit(XPRT_CLOSE_WAIT, &xprt->state);
@@ -831,8 +843,10 @@ void xprt_connect(struct rpc_task *task)
 	if (!xprt_lock_write(xprt, task))
 		return;
 
-	if (test_and_clear_bit(XPRT_CLOSE_WAIT, &xprt->state))
+	if (test_and_clear_bit(XPRT_CLOSE_WAIT, &xprt->state)) {
+		trace_xprt_disconnect_cleanup(xprt);
 		xprt->ops->close(xprt);
+	}
 
 	if (!xprt_connected(xprt)) {
 		task->tk_rqstp->rq_connect_cookie = xprt->connect_cookie;
@@ -1459,7 +1473,7 @@ xprt_request_transmit(struct rpc_rqst *req, struct rpc_task *snd_task)
 	 */
 	req->rq_ntrans++;
 
-	trace_xprt_sendto(&req->rq_snd_buf);
+	trace_rpc_xdr_sendto(task, &req->rq_snd_buf);
 	connect_cookie = xprt->connect_cookie;
 	status = xprt->ops->send_request(req);
 	if (status != 0) {
@@ -1902,11 +1916,8 @@ struct rpc_xprt *xprt_create_transport(struct xprt_create *args)
 
 found:
 	xprt = t->setup(args);
-	if (IS_ERR(xprt)) {
-		dprintk("RPC:       xprt_create_transport: failed, %ld\n",
-				-PTR_ERR(xprt));
+	if (IS_ERR(xprt))
 		goto out;
-	}
 	if (args->flags & XPRT_CREATE_NO_IDLE_TIMEOUT)
 		xprt->idle_timeout = 0;
 	INIT_WORK(&xprt->task_cleanup, xprt_autoclose);
@@ -1927,8 +1938,7 @@ found:
 
 	rpc_xprt_debugfs_register(xprt);
 
-	dprintk("RPC:       created transport %p with %u slots\n", xprt,
-			xprt->max_reqs);
+	trace_xprt_create(xprt);
 out:
 	return xprt;
 }
@@ -1937,6 +1947,8 @@ static void xprt_destroy_cb(struct work_struct *work)
 {
 	struct rpc_xprt *xprt =
 		container_of(work, struct rpc_xprt, task_cleanup);
+
+	trace_xprt_destroy(xprt);
 
 	rpc_xprt_debugfs_unregister(xprt);
 	rpc_destroy_wait_queue(&xprt->binding);
@@ -1962,8 +1974,6 @@ static void xprt_destroy_cb(struct work_struct *work)
  */
 static void xprt_destroy(struct rpc_xprt *xprt)
 {
-	dprintk("RPC:       destroying transport %p\n", xprt);
-
 	/*
 	 * Exclude transport connect/disconnect handlers and autoclose
 	 */

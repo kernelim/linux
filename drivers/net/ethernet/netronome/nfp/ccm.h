@@ -26,6 +26,7 @@ enum nfp_ccm_type {
 	NFP_CCM_TYPE_CRYPTO_ADD		= 10,
 	NFP_CCM_TYPE_CRYPTO_DEL		= 11,
 	NFP_CCM_TYPE_CRYPTO_UPDATE	= 12,
+	NFP_CCM_TYPE_CRYPTO_RESYNC	= 13,
 	__NFP_CCM_TYPE_MAX,
 };
 
@@ -83,6 +84,8 @@ enum nfp_ccm_mbox_tlv_type {
 
 /**
  * struct nfp_ccm - common control message handling
+ * @app:		APP handle
+ *
  * @tag_allocator:	bitmap of control message tags in use
  * @tag_alloc_next:	next tag bit to allocate
  * @tag_alloc_last:	next tag bit to be freed
@@ -98,7 +101,7 @@ struct nfp_ccm {
 	u16 tag_alloc_last;
 
 	struct sk_buff_head replies;
-	struct wait_queue_head wq;
+	wait_queue_head_t wq;
 };
 
 int nfp_ccm_init(struct nfp_ccm *ccm, struct nfp_app *app);
@@ -108,12 +111,22 @@ struct sk_buff *
 nfp_ccm_communicate(struct nfp_ccm *ccm, struct sk_buff *skb,
 		    enum nfp_ccm_type type, unsigned int reply_size);
 
+int nfp_ccm_mbox_alloc(struct nfp_net *nn);
+void nfp_ccm_mbox_free(struct nfp_net *nn);
+int nfp_ccm_mbox_init(struct nfp_net *nn);
+void nfp_ccm_mbox_clean(struct nfp_net *nn);
 bool nfp_ccm_mbox_fits(struct nfp_net *nn, unsigned int size);
 struct sk_buff *
-nfp_ccm_mbox_alloc(struct nfp_net *nn, unsigned int req_size,
-		   unsigned int reply_size, gfp_t flags);
+nfp_ccm_mbox_msg_alloc(struct nfp_net *nn, unsigned int req_size,
+		       unsigned int reply_size, gfp_t flags);
+int __nfp_ccm_mbox_communicate(struct nfp_net *nn, struct sk_buff *skb,
+			       enum nfp_ccm_type type,
+			       unsigned int reply_size,
+			       unsigned int max_reply_size, bool critical);
 int nfp_ccm_mbox_communicate(struct nfp_net *nn, struct sk_buff *skb,
 			     enum nfp_ccm_type type,
 			     unsigned int reply_size,
 			     unsigned int max_reply_size);
+int nfp_ccm_mbox_post(struct nfp_net *nn, struct sk_buff *skb,
+		      enum nfp_ccm_type type, unsigned int max_reply_size);
 #endif

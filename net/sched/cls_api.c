@@ -25,7 +25,6 @@
 #include <linux/kmod.h>
 #include <linux/slab.h>
 #include <linux/idr.h>
-#include <linux/rhashtable.h>
 #include <linux/jhash.h>
 #include <linux/rculist.h>
 #include <net/net_namespace.h>
@@ -627,7 +626,7 @@ static int tcf_block_setup(struct tcf_block *block,
 			   struct flow_block_offload *bo);
 
 static void tcf_block_offload_init(struct flow_block_offload *bo,
-				   struct net_device *dev,
+				   struct net_device *dev, struct Qdisc *sch,
 				   enum flow_block_command command,
 				   enum flow_block_binder_type binder_type,
 				   struct flow_block *flow_block,
@@ -639,6 +638,7 @@ static void tcf_block_offload_init(struct flow_block_offload *bo,
 	bo->block = flow_block;
 	bo->block_shared = shared;
 	bo->extack = extack;
+	bo->sch = sch;
 	INIT_LIST_HEAD(&bo->cb_list);
 }
 
@@ -649,18 +649,20 @@ static void tc_block_indr_cleanup(struct flow_block_cb *block_cb)
 {
 	struct tcf_block *block = block_cb->indr.data;
 	struct net_device *dev = block_cb->indr.dev;
+	struct Qdisc *sch = block_cb->indr.sch;
 	struct netlink_ext_ack extack = {};
 	struct flow_block_offload bo;
 
-	tcf_block_offload_init(&bo, dev, FLOW_BLOCK_UNBIND,
+	tcf_block_offload_init(&bo, dev, sch, FLOW_BLOCK_UNBIND,
 			       block_cb->indr.binder_type,
 			       &block->flow_block, tcf_block_shared(block),
 			       &extack);
-	down_write(&block->cb_lock);
-	list_move(&block_cb->list, &bo.cb_list);
-	up_write(&block->cb_lock);
 	rtnl_lock();
+	down_write(&block->cb_lock);
+	list_del(&block_cb->driver_list);
+	list_move(&block_cb->list, &bo.cb_list);
 	tcf_block_unbind(block, &bo);
+	up_write(&block->cb_lock);
 	rtnl_unlock();
 }
 
@@ -670,14 +672,14 @@ static bool tcf_block_offload_in_use(struct tcf_block *block)
 }
 
 static int tcf_block_offload_cmd(struct tcf_block *block,
-				 struct net_device *dev,
+				 struct net_device *dev, struct Qdisc *sch,
 				 struct tcf_block_ext_info *ei,
 				 enum flow_block_command command,
 				 struct netlink_ext_ack *extack)
 {
 	struct flow_block_offload bo = {};
 
-	tcf_block_offload_init(&bo, dev, command, ei->binder_type,
+	tcf_block_offload_init(&bo, dev, sch, command, ei->binder_type,
 			       &block->flow_block, tcf_block_shared(block),
 			       extack);
 
@@ -694,7 +696,7 @@ static int tcf_block_offload_cmd(struct tcf_block *block,
 		return tcf_block_setup(block, &bo);
 	}
 
-	flow_indr_dev_setup_offload(dev, TC_SETUP_BLOCK, block, &bo,
+	flow_indr_dev_setup_offload(dev, sch, TC_SETUP_BLOCK, block, &bo,
 				    tc_block_indr_cleanup);
 	tcf_block_setup(block, &bo);
 
@@ -721,7 +723,7 @@ static int tcf_block_offload_bind(struct tcf_block *block, struct Qdisc *q,
 		goto err_unlock;
 	}
 
-	err = tcf_block_offload_cmd(block, dev, ei, FLOW_BLOCK_BIND, extack);
+	err = tcf_block_offload_cmd(block, dev, q, ei, FLOW_BLOCK_BIND, extack);
 	if (err == -EOPNOTSUPP)
 		goto no_offload_dev_inc;
 	if (err)
@@ -748,7 +750,7 @@ static void tcf_block_offload_unbind(struct tcf_block *block, struct Qdisc *q,
 	int err;
 
 	down_write(&block->cb_lock);
-	err = tcf_block_offload_cmd(block, dev, ei, FLOW_BLOCK_UNBIND, NULL);
+	err = tcf_block_offload_cmd(block, dev, q, ei, FLOW_BLOCK_UNBIND, NULL);
 	if (err == -EOPNOTSUPP)
 		goto no_offload_dev_dec;
 	up_write(&block->cb_lock);
@@ -1542,7 +1544,7 @@ static inline int __tcf_classify(struct sk_buff *skb,
 reclassify:
 #endif
 	for (; tp; tp = rcu_dereference_bh(tp->next)) {
-		__be16 protocol = tc_skb_protocol(skb);
+		__be16 protocol = skb_protocol(skb, false);
 		int err;
 
 		if (tp->protocol != protocol &&
@@ -1632,6 +1634,7 @@ int tcf_classify_ingress(struct sk_buff *skb,
 		if (WARN_ON_ONCE(!ext))
 			return TC_ACT_SHOT;
 		ext->chain = last_executed_chain;
+		ext->mru = qdisc_skb_cb(skb)->mru;
 	}
 
 	return ret;
@@ -1800,7 +1803,7 @@ static int tcf_fill_node(struct net *net, struct sk_buff *skb,
 			 struct tcf_proto *tp, struct tcf_block *block,
 			 struct Qdisc *q, u32 parent, void *fh,
 			 u32 portid, u32 seq, u16 flags, int event,
-			 bool rtnl_held)
+			 bool terse_dump, bool rtnl_held)
 {
 	struct tcmsg *tcm;
 	struct nlmsghdr  *nlh;
@@ -1827,6 +1830,14 @@ static int tcf_fill_node(struct net *net, struct sk_buff *skb,
 		goto nla_put_failure;
 	if (!fh) {
 		tcm->tcm_handle = 0;
+	} else if (terse_dump) {
+		if (tp->ops->terse_dump) {
+			if (tp->ops->terse_dump(net, tp, fh, skb, tcm,
+						rtnl_held) < 0)
+				goto nla_put_failure;
+		} else {
+			goto cls_op_not_supp;
+		}
 	} else {
 		if (tp->ops->dump &&
 		    tp->ops->dump(net, tp, fh, skb, tcm, rtnl_held) < 0)
@@ -1837,6 +1848,7 @@ static int tcf_fill_node(struct net *net, struct sk_buff *skb,
 
 out_nlmsg_trim:
 nla_put_failure:
+cls_op_not_supp:
 	nlmsg_trim(skb, b);
 	return -1;
 }
@@ -1857,7 +1869,7 @@ static int tfilter_notify(struct net *net, struct sk_buff *oskb,
 
 	if (tcf_fill_node(net, skb, tp, block, q, parent, fh, portid,
 			  n->nlmsg_seq, n->nlmsg_flags, event,
-			  rtnl_held) <= 0) {
+			  false, rtnl_held) <= 0) {
 		kfree_skb(skb);
 		return -EINVAL;
 	}
@@ -1889,7 +1901,7 @@ static int tfilter_del_notify(struct net *net, struct sk_buff *oskb,
 
 	if (tcf_fill_node(net, skb, tp, block, q, parent, fh, portid,
 			  n->nlmsg_seq, n->nlmsg_flags, RTM_DELTFILTER,
-			  rtnl_held) <= 0) {
+			  false, rtnl_held) <= 0) {
 		NL_SET_ERR_MSG(extack, "Failed to build del event notification");
 		kfree_skb(skb);
 		return -EINVAL;
@@ -2450,6 +2462,7 @@ struct tcf_dump_args {
 	struct tcf_block *block;
 	struct Qdisc *q;
 	u32 parent;
+	bool terse_dump;
 };
 
 static int tcf_node_dump(struct tcf_proto *tp, void *n, struct tcf_walker *arg)
@@ -2460,12 +2473,12 @@ static int tcf_node_dump(struct tcf_proto *tp, void *n, struct tcf_walker *arg)
 	return tcf_fill_node(net, a->skb, tp, a->block, a->q, a->parent,
 			     n, NETLINK_CB(a->cb->skb).portid,
 			     a->cb->nlh->nlmsg_seq, NLM_F_MULTI,
-			     RTM_NEWTFILTER, true);
+			     RTM_NEWTFILTER, a->terse_dump, true);
 }
 
 static bool tcf_chain_dump(struct tcf_chain *chain, struct Qdisc *q, u32 parent,
 			   struct sk_buff *skb, struct netlink_callback *cb,
-			   long index_start, long *p_index)
+			   long index_start, long *p_index, bool terse)
 {
 	struct net *net = sock_net(skb->sk);
 	struct tcf_block *block = chain->block;
@@ -2494,7 +2507,7 @@ static bool tcf_chain_dump(struct tcf_chain *chain, struct Qdisc *q, u32 parent,
 			if (tcf_fill_node(net, skb, tp, block, q, parent, NULL,
 					  NETLINK_CB(cb->skb).portid,
 					  cb->nlh->nlmsg_seq, NLM_F_MULTI,
-					  RTM_NEWTFILTER, true) <= 0)
+					  RTM_NEWTFILTER, false, true) <= 0)
 				goto errout;
 			cb->args[1] = 1;
 		}
@@ -2510,6 +2523,7 @@ static bool tcf_chain_dump(struct tcf_chain *chain, struct Qdisc *q, u32 parent,
 		arg.w.skip = cb->args[1] - 1;
 		arg.w.count = 0;
 		arg.w.cookie = cb->args[2];
+		arg.terse_dump = terse;
 		tp->ops->walk(tp, &arg.w, true);
 		cb->args[2] = arg.w.cookie;
 		cb->args[1] = arg.w.count + 1;
@@ -2523,6 +2537,11 @@ errout:
 	return false;
 }
 
+static const u32 tca_dump_flags_terse = TCA_DUMP_FLAGS_TERSE;
+static const struct nla_policy tcf_tfilter_dump_policy[TCA_MAX + 1] = {
+	[TCA_DUMP_FLAGS] = NLA_POLICY_BITFIELD32_PTR(&tca_dump_flags_terse),
+};
+
 /* called with RTNL */
 static int tc_dump_tfilter(struct sk_buff *skb, struct netlink_callback *cb)
 {
@@ -2532,6 +2551,7 @@ static int tc_dump_tfilter(struct sk_buff *skb, struct netlink_callback *cb)
 	struct Qdisc *q = NULL;
 	struct tcf_block *block;
 	struct tcmsg *tcm = nlmsg_data(cb->nlh);
+	bool terse_dump = false;
 	long index_start;
 	long index;
 	u32 parent;
@@ -2541,9 +2561,16 @@ static int tc_dump_tfilter(struct sk_buff *skb, struct netlink_callback *cb)
 		return skb->len;
 
 	err = nlmsg_parse_deprecated(cb->nlh, sizeof(*tcm), tca, TCA_MAX,
-				     NULL, cb->extack);
+				     tcf_tfilter_dump_policy, cb->extack);
 	if (err)
 		return err;
+
+	if (tca[TCA_DUMP_FLAGS]) {
+		struct nla_bitfield32 flags =
+			nla_get_bitfield32(tca[TCA_DUMP_FLAGS]);
+
+		terse_dump = flags.value & TCA_DUMP_FLAGS_TERSE;
+	}
 
 	if (tcm->tcm_ifindex == TCM_IFINDEX_MAGIC_BLOCK) {
 		block = tcf_block_refcnt_get(net, tcm->tcm_block_index);
@@ -2602,7 +2629,7 @@ static int tc_dump_tfilter(struct sk_buff *skb, struct netlink_callback *cb)
 		    nla_get_u32(tca[TCA_CHAIN]) != chain->index)
 			continue;
 		if (!tcf_chain_dump(chain, q, parent, skb, cb,
-				    index_start, &index)) {
+				    index_start, &index, terse_dump)) {
 			tcf_chain_put(chain);
 			err = -EMSGSIZE;
 			break;
@@ -3105,7 +3132,8 @@ int tcf_exts_dump(struct sk_buff *skb, struct tcf_exts *exts)
 			if (nest == NULL)
 				goto nla_put_failure;
 
-			if (tcf_action_dump(skb, exts->actions, 0, 0) < 0)
+			if (tcf_action_dump(skb, exts->actions, 0, 0, false)
+			    < 0)
 				goto nla_put_failure;
 			nla_nest_end(skb, nest);
 		} else if (exts->police) {
@@ -3129,6 +3157,31 @@ nla_put_failure:
 }
 EXPORT_SYMBOL(tcf_exts_dump);
 
+int tcf_exts_terse_dump(struct sk_buff *skb, struct tcf_exts *exts)
+{
+#ifdef CONFIG_NET_CLS_ACT
+	struct nlattr *nest;
+
+	if (!exts->action || !tcf_exts_has_actions(exts))
+		return 0;
+
+	nest = nla_nest_start_noflag(skb, exts->action);
+	if (!nest)
+		goto nla_put_failure;
+
+	if (tcf_action_dump(skb, exts->actions, 0, 0, true) < 0)
+		goto nla_put_failure;
+	nla_nest_end(skb, nest);
+	return 0;
+
+nla_put_failure:
+	nla_nest_cancel(skb, nest);
+	return -1;
+#else
+	return 0;
+#endif
+}
+EXPORT_SYMBOL(tcf_exts_terse_dump);
 
 int tcf_exts_dump_stats(struct sk_buff *skb, struct tcf_exts *exts)
 {
@@ -3615,9 +3668,11 @@ int tc_setup_flow_action(struct flow_action *flow_action,
 			tcf_sample_get_group(entry, act);
 		} else if (is_tcf_police(act)) {
 			entry->id = FLOW_ACTION_POLICE;
-			entry->police.burst = tcf_police_tcfp_burst(act);
+			entry->police.burst = tcf_police_burst(act);
 			entry->police.rate_bytes_ps =
 				tcf_police_rate_bytes_ps(act);
+			entry->police.mtu = tcf_police_tcfp_mtu(act);
+			entry->police.index = act->tcfa_index;
 		} else if (is_tcf_ct(act)) {
 			entry->id = FLOW_ACTION_CT;
 			entry->ct.action = tcf_ct_action(act);
@@ -3663,7 +3718,7 @@ int tc_setup_flow_action(struct flow_action *flow_action,
 			entry->gate.num_entries = tcf_gate_num_entries(act);
 			err = tcf_gate_get_entries(entry, act);
 			if (err)
-				goto err_out;
+				goto err_out_locked;
 		} else {
 			err = -EOPNOTSUPP;
 			goto err_out_locked;
@@ -3700,6 +3755,119 @@ unsigned int tcf_exts_num_actions(struct tcf_exts *exts)
 	return num_acts;
 }
 EXPORT_SYMBOL(tcf_exts_num_actions);
+
+#ifdef CONFIG_NET_CLS_ACT
+static int tcf_qevent_parse_block_index(struct nlattr *block_index_attr,
+					u32 *p_block_index,
+					struct netlink_ext_ack *extack)
+{
+	*p_block_index = nla_get_u32(block_index_attr);
+	if (!*p_block_index) {
+		NL_SET_ERR_MSG(extack, "Block number may not be zero");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+int tcf_qevent_init(struct tcf_qevent *qe, struct Qdisc *sch,
+		    enum flow_block_binder_type binder_type,
+		    struct nlattr *block_index_attr,
+		    struct netlink_ext_ack *extack)
+{
+	u32 block_index;
+	int err;
+
+	if (!block_index_attr)
+		return 0;
+
+	err = tcf_qevent_parse_block_index(block_index_attr, &block_index, extack);
+	if (err)
+		return err;
+
+	if (!block_index)
+		return 0;
+
+	qe->info.binder_type = binder_type;
+	qe->info.chain_head_change = tcf_chain_head_change_dflt;
+	qe->info.chain_head_change_priv = &qe->filter_chain;
+	qe->info.block_index = block_index;
+
+	return tcf_block_get_ext(&qe->block, sch, &qe->info, extack);
+}
+EXPORT_SYMBOL(tcf_qevent_init);
+
+void tcf_qevent_destroy(struct tcf_qevent *qe, struct Qdisc *sch)
+{
+	if (qe->info.block_index)
+		tcf_block_put_ext(qe->block, sch, &qe->info);
+}
+EXPORT_SYMBOL(tcf_qevent_destroy);
+
+int tcf_qevent_validate_change(struct tcf_qevent *qe, struct nlattr *block_index_attr,
+			       struct netlink_ext_ack *extack)
+{
+	u32 block_index;
+	int err;
+
+	if (!block_index_attr)
+		return 0;
+
+	err = tcf_qevent_parse_block_index(block_index_attr, &block_index, extack);
+	if (err)
+		return err;
+
+	/* Bounce newly-configured block or change in block. */
+	if (block_index != qe->info.block_index) {
+		NL_SET_ERR_MSG(extack, "Change of blocks is not supported");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(tcf_qevent_validate_change);
+
+struct sk_buff *tcf_qevent_handle(struct tcf_qevent *qe, struct Qdisc *sch, struct sk_buff *skb,
+				  struct sk_buff **to_free, int *ret)
+{
+	struct tcf_result cl_res;
+	struct tcf_proto *fl;
+
+	if (!qe->info.block_index)
+		return skb;
+
+	fl = rcu_dereference_bh(qe->filter_chain);
+
+	switch (tcf_classify(skb, fl, &cl_res, false)) {
+	case TC_ACT_SHOT:
+		qdisc_qstats_drop(sch);
+		__qdisc_drop(skb, to_free);
+		*ret = __NET_XMIT_BYPASS;
+		return NULL;
+	case TC_ACT_STOLEN:
+	case TC_ACT_QUEUED:
+	case TC_ACT_TRAP:
+		__qdisc_drop(skb, to_free);
+		*ret = __NET_XMIT_STOLEN;
+		return NULL;
+	case TC_ACT_REDIRECT:
+		skb_do_redirect(skb);
+		*ret = __NET_XMIT_STOLEN;
+		return NULL;
+	}
+
+	return skb;
+}
+EXPORT_SYMBOL(tcf_qevent_handle);
+
+int tcf_qevent_dump(struct sk_buff *skb, int attr_name, struct tcf_qevent *qe)
+{
+	if (!qe->info.block_index)
+		return 0;
+	return nla_put_u32(skb, attr_name, qe->info.block_index);
+}
+EXPORT_SYMBOL(tcf_qevent_dump);
+#endif
 
 static __net_init int tcf_net_init(struct net *net)
 {

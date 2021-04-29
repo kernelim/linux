@@ -65,6 +65,8 @@ struct kvm_stats_debugfs_item debugfs_entries[] = {
 	VCPU_STAT("halt_wakeup", halt_wakeup),
 	VCPU_STAT("doorbell", dbell_exits),
 	VCPU_STAT("guest doorbell", gdbell_exits),
+	VCPU_STAT("halt_poll_success_ns", halt_poll_success_ns),
+	VCPU_STAT("halt_poll_fail_ns", halt_poll_fail_ns),
 	VM_STAT("remote_tlb_flush", remote_tlb_flush),
 	{ NULL }
 };
@@ -738,13 +740,13 @@ int kvmppc_core_check_requests(struct kvm_vcpu *vcpu)
 	return r;
 }
 
-int kvmppc_vcpu_run(struct kvm_run *kvm_run, struct kvm_vcpu *vcpu)
+int kvmppc_vcpu_run(struct kvm_vcpu *vcpu)
 {
 	int ret, s;
 	struct debug_reg debug;
 
 	if (!vcpu->arch.sane) {
-		kvm_run->exit_reason = KVM_EXIT_INTERNAL_ERROR;
+		vcpu->run->exit_reason = KVM_EXIT_INTERNAL_ERROR;
 		return -EINVAL;
 	}
 
@@ -786,7 +788,7 @@ int kvmppc_vcpu_run(struct kvm_run *kvm_run, struct kvm_vcpu *vcpu)
 	vcpu->arch.pgdir = vcpu->kvm->mm->pgd;
 	kvmppc_fix_ee_before_entry();
 
-	ret = __kvmppc_vcpu_run(kvm_run, vcpu);
+	ret = __kvmppc_vcpu_run(vcpu);
 
 	/* No need for guest_exit. It's done in handle_exit.
 	   We also get here with interrupts enabled. */
@@ -808,11 +810,11 @@ out:
 	return ret;
 }
 
-static int emulation_exit(struct kvm_run *run, struct kvm_vcpu *vcpu)
+static int emulation_exit(struct kvm_vcpu *vcpu)
 {
 	enum emulation_result er;
 
-	er = kvmppc_emulate_instruction(run, vcpu);
+	er = kvmppc_emulate_instruction(vcpu);
 	switch (er) {
 	case EMULATE_DONE:
 		/* don't overwrite subtypes, just account kvm_stats */
@@ -829,8 +831,8 @@ static int emulation_exit(struct kvm_run *run, struct kvm_vcpu *vcpu)
 		       __func__, vcpu->arch.regs.nip, vcpu->arch.last_inst);
 		/* For debugging, encode the failing instruction and
 		 * report it to userspace. */
-		run->hw.hardware_exit_reason = ~0ULL << 32;
-		run->hw.hardware_exit_reason |= vcpu->arch.last_inst;
+		vcpu->run->hw.hardware_exit_reason = ~0ULL << 32;
+		vcpu->run->hw.hardware_exit_reason |= vcpu->arch.last_inst;
 		kvmppc_core_queue_program(vcpu, ESR_PIL);
 		return RESUME_HOST;
 
@@ -842,8 +844,9 @@ static int emulation_exit(struct kvm_run *run, struct kvm_vcpu *vcpu)
 	}
 }
 
-static int kvmppc_handle_debug(struct kvm_run *run, struct kvm_vcpu *vcpu)
+static int kvmppc_handle_debug(struct kvm_vcpu *vcpu)
 {
+	struct kvm_run *run = vcpu->run;
 	struct debug_reg *dbg_reg = &(vcpu->arch.dbg_reg);
 	u32 dbsr = vcpu->arch.dbsr;
 
@@ -962,7 +965,7 @@ static void kvmppc_restart_interrupt(struct kvm_vcpu *vcpu,
 	}
 }
 
-static int kvmppc_resume_inst_load(struct kvm_run *run, struct kvm_vcpu *vcpu,
+static int kvmppc_resume_inst_load(struct kvm_vcpu *vcpu,
 				  enum emulation_result emulated, u32 last_inst)
 {
 	switch (emulated) {
@@ -974,8 +977,8 @@ static int kvmppc_resume_inst_load(struct kvm_run *run, struct kvm_vcpu *vcpu,
 		       __func__, vcpu->arch.regs.nip);
 		/* For debugging, encode the failing instruction and
 		 * report it to userspace. */
-		run->hw.hardware_exit_reason = ~0ULL << 32;
-		run->hw.hardware_exit_reason |= last_inst;
+		vcpu->run->hw.hardware_exit_reason = ~0ULL << 32;
+		vcpu->run->hw.hardware_exit_reason |= last_inst;
 		kvmppc_core_queue_program(vcpu, ESR_PIL);
 		return RESUME_HOST;
 
@@ -989,9 +992,9 @@ static int kvmppc_resume_inst_load(struct kvm_run *run, struct kvm_vcpu *vcpu,
  *
  * Return value is in the form (errcode<<2 | RESUME_FLAG_HOST | RESUME_FLAG_NV)
  */
-int kvmppc_handle_exit(struct kvm_run *run, struct kvm_vcpu *vcpu,
-                       unsigned int exit_nr)
+int kvmppc_handle_exit(struct kvm_vcpu *vcpu, unsigned int exit_nr)
 {
+	struct kvm_run *run = vcpu->run;
 	int r = RESUME_HOST;
 	int s;
 	int idx;
@@ -1032,7 +1035,7 @@ int kvmppc_handle_exit(struct kvm_run *run, struct kvm_vcpu *vcpu,
 	run->ready_for_interrupt_injection = 1;
 
 	if (emulated != EMULATE_DONE) {
-		r = kvmppc_resume_inst_load(run, vcpu, emulated, last_inst);
+		r = kvmppc_resume_inst_load(vcpu, emulated, last_inst);
 		goto out;
 	}
 
@@ -1092,7 +1095,7 @@ int kvmppc_handle_exit(struct kvm_run *run, struct kvm_vcpu *vcpu,
 		break;
 
 	case BOOKE_INTERRUPT_HV_PRIV:
-		r = emulation_exit(run, vcpu);
+		r = emulation_exit(vcpu);
 		break;
 
 	case BOOKE_INTERRUPT_PROGRAM:
@@ -1102,7 +1105,7 @@ int kvmppc_handle_exit(struct kvm_run *run, struct kvm_vcpu *vcpu,
 			 * We are here because of an SW breakpoint instr,
 			 * so lets return to host to handle.
 			 */
-			r = kvmppc_handle_debug(run, vcpu);
+			r = kvmppc_handle_debug(vcpu);
 			run->exit_reason = KVM_EXIT_DEBUG;
 			kvmppc_account_exit(vcpu, DEBUG_EXITS);
 			break;
@@ -1123,7 +1126,7 @@ int kvmppc_handle_exit(struct kvm_run *run, struct kvm_vcpu *vcpu,
 			break;
 		}
 
-		r = emulation_exit(run, vcpu);
+		r = emulation_exit(vcpu);
 		break;
 
 	case BOOKE_INTERRUPT_FP_UNAVAIL:
@@ -1290,7 +1293,7 @@ int kvmppc_handle_exit(struct kvm_run *run, struct kvm_vcpu *vcpu,
 			 * actually RAM. */
 			vcpu->arch.paddr_accessed = gpaddr;
 			vcpu->arch.vaddr_accessed = eaddr;
-			r = kvmppc_emulate_mmio(run, vcpu);
+			r = kvmppc_emulate_mmio(vcpu);
 			kvmppc_account_exit(vcpu, MMIO_EXITS);
 		}
 
@@ -1341,7 +1344,7 @@ int kvmppc_handle_exit(struct kvm_run *run, struct kvm_vcpu *vcpu,
 	}
 
 	case BOOKE_INTERRUPT_DEBUG: {
-		r = kvmppc_handle_debug(run, vcpu);
+		r = kvmppc_handle_debug(vcpu);
 		if (r == RESUME_HOST)
 			run->exit_reason = KVM_EXIT_DEBUG;
 		kvmppc_account_exit(vcpu, DEBUG_EXITS);
@@ -1755,12 +1758,12 @@ int kvmppc_set_one_reg(struct kvm_vcpu *vcpu, u64 id,
 
 int kvm_arch_vcpu_ioctl_get_fpu(struct kvm_vcpu *vcpu, struct kvm_fpu *fpu)
 {
-	return -ENOTSUPP;
+	return -EOPNOTSUPP;
 }
 
 int kvm_arch_vcpu_ioctl_set_fpu(struct kvm_vcpu *vcpu, struct kvm_fpu *fpu)
 {
-	return -ENOTSUPP;
+	return -EOPNOTSUPP;
 }
 
 int kvm_arch_vcpu_ioctl_translate(struct kvm_vcpu *vcpu,
@@ -1781,7 +1784,7 @@ void kvm_arch_sync_dirty_log(struct kvm *kvm, struct kvm_memory_slot *memslot)
 
 int kvm_vm_ioctl_get_dirty_log(struct kvm *kvm, struct kvm_dirty_log *log)
 {
-	return -ENOTSUPP;
+	return -EOPNOTSUPP;
 }
 
 void kvmppc_core_free_memslot(struct kvm *kvm, struct kvm_memory_slot *slot)

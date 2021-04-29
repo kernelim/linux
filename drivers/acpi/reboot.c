@@ -3,6 +3,7 @@
 #include <linux/pci.h>
 #include <linux/acpi.h>
 #include <acpi/reboot.h>
+#include <linux/delay.h>
 
 void acpi_reboot(void)
 {
@@ -52,4 +53,14 @@ void acpi_reboot(void)
 		acpi_reset();
 		break;
 	}
+
+	/*
+	 * Some platforms do not shut down immediately after writing to the
+	 * ACPI reset register, and this results in racing with the
+	 * subsequent reboot mechanism.
+	 *
+	 * The 15ms delay has been found to be long enough for the system
+	 * to reboot on the affected platforms.
+	 */
+	mdelay(15);
 }

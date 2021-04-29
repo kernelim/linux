@@ -8,6 +8,7 @@
 #include <asm/io.h>
 #include <asm/hyperv-tlfs.h>
 #include <asm/nospec-branch.h>
+#include <asm/paravirt.h>
 
 typedef int (*hyperv_fill_flush_list_func)(
 		struct hv_guest_mapping_flush_list *flush,
@@ -49,14 +50,29 @@ typedef int (*hyperv_fill_flush_list_func)(
 #define hv_set_reference_tsc(val) \
 	wrmsrl(HV_X64_MSR_REFERENCE_TSC, val)
 #define hv_set_clocksource_vdso(val) \
-	((val).archdata.vclock_mode = VCLOCK_HVCLOCK)
+	((val).vdso_clock_mode = VDSO_CLOCKMODE_HVCLOCK)
+#define hv_enable_vdso_clocksource() \
+	vclocks_set_used(VDSO_CLOCKMODE_HVCLOCK);
 #define hv_get_raw_timer() rdtsc_ordered()
+#define hv_get_vector() HYPERVISOR_CALLBACK_VECTOR
 
 void hyperv_callback_vector(void);
 void hyperv_reenlightenment_vector(void);
 #ifdef CONFIG_TRACING
 #define trace_hyperv_callback_vector hyperv_callback_vector
 #endif
+
+/*
+ * Reference to pv_ops must be inline so objtool
+ * detection of noinstr violations can work correctly.
+ */
+static __always_inline void hv_setup_sched_clock(void *sched_clock)
+{
+#ifdef CONFIG_PARAVIRT
+	pv_time_ops.sched_clock = sched_clock;
+#endif
+}
+
 void hyperv_vector_handler(struct pt_regs *regs);
 
 /*

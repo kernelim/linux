@@ -21,6 +21,8 @@
 #include <linux/ip.h>
 #include <linux/mpls.h>
 
+#include <linux/rh_features.h>
+
 #include <net/sch_generic.h>
 #include <net/pkt_cls.h>
 #include <net/ip.h>
@@ -33,6 +35,11 @@
 #include <net/dst_metadata.h>
 
 #include <uapi/linux/netfilter/nf_conntrack_common.h>
+
+#define TCA_FLOWER_KEY_CT_FLAGS_MAX \
+		((__TCA_FLOWER_KEY_CT_FLAGS_MAX - 1) << 1)
+#define TCA_FLOWER_KEY_CT_FLAGS_MASK \
+		(TCA_FLOWER_KEY_CT_FLAGS_MAX - 1)
 
 struct fl_flow_key {
 	struct flow_dissector_key_meta meta;
@@ -68,6 +75,7 @@ struct fl_flow_key {
 		};
 	} tp_range;
 	struct flow_dissector_key_ct ct;
+	struct flow_dissector_key_hash hash;
 } __aligned(BITS_PER_LONG / 8); /* Ensure that we can do comparisons as longs. */
 
 struct fl_flow_mask_range {
@@ -276,14 +284,16 @@ static struct cls_fl_filter *fl_lookup_range(struct fl_flow_mask *mask,
 	return NULL;
 }
 
-static struct cls_fl_filter *fl_lookup(struct fl_flow_mask *mask,
-				       struct fl_flow_key *mkey,
-				       struct fl_flow_key *key)
+static noinline_for_stack
+struct cls_fl_filter *fl_mask_lookup(struct fl_flow_mask *mask, struct fl_flow_key *key)
 {
-	if ((mask->flags & TCA_FLOWER_MASK_FLAGS_RANGE))
-		return fl_lookup_range(mask, mkey, key);
+	struct fl_flow_key mkey;
 
-	return __fl_lookup(mask, mkey);
+	fl_set_masked_key(&mkey, key, mask);
+	if ((mask->flags & TCA_FLOWER_MASK_FLAGS_RANGE))
+		return fl_lookup_range(mask, &mkey, key);
+
+	return __fl_lookup(mask, &mkey);
 }
 
 static u16 fl_ct_info_to_flower_map[] = {
@@ -292,9 +302,11 @@ static u16 fl_ct_info_to_flower_map[] = {
 	[IP_CT_RELATED] =		TCA_FLOWER_KEY_CT_FLAGS_TRACKED |
 					TCA_FLOWER_KEY_CT_FLAGS_RELATED,
 	[IP_CT_ESTABLISHED_REPLY] =	TCA_FLOWER_KEY_CT_FLAGS_TRACKED |
-					TCA_FLOWER_KEY_CT_FLAGS_ESTABLISHED,
+					TCA_FLOWER_KEY_CT_FLAGS_ESTABLISHED |
+					TCA_FLOWER_KEY_CT_FLAGS_REPLY,
 	[IP_CT_RELATED_REPLY] =		TCA_FLOWER_KEY_CT_FLAGS_TRACKED |
-					TCA_FLOWER_KEY_CT_FLAGS_RELATED,
+					TCA_FLOWER_KEY_CT_FLAGS_RELATED |
+					TCA_FLOWER_KEY_CT_FLAGS_REPLY,
 	[IP_CT_NEW] =			TCA_FLOWER_KEY_CT_FLAGS_TRACKED |
 					TCA_FLOWER_KEY_CT_FLAGS_NEW,
 };
@@ -303,7 +315,7 @@ static int fl_classify(struct sk_buff *skb, const struct tcf_proto *tp,
 		       struct tcf_result *res)
 {
 	struct cls_fl_head *head = rcu_dereference_bh(tp->root);
-	struct fl_flow_key skb_mkey;
+	bool post_ct = qdisc_skb_cb(skb)->post_ct;
 	struct fl_flow_key skb_key;
 	struct fl_flow_mask *mask;
 	struct cls_fl_filter *f;
@@ -316,16 +328,16 @@ static int fl_classify(struct sk_buff *skb, const struct tcf_proto *tp,
 		/* skb_flow_dissect() does not set n_proto in case an unknown
 		 * protocol, so do it rather here.
 		 */
-		skb_key.basic.n_proto = skb->protocol;
+		skb_key.basic.n_proto = skb_protocol(skb, false);
 		skb_flow_dissect_tunnel_info(skb, &mask->dissector, &skb_key);
 		skb_flow_dissect_ct(skb, &mask->dissector, &skb_key,
 				    fl_ct_info_to_flower_map,
-				    ARRAY_SIZE(fl_ct_info_to_flower_map));
+				    ARRAY_SIZE(fl_ct_info_to_flower_map),
+				    post_ct);
+		skb_flow_dissect_hash(skb, &mask->dissector, &skb_key);
 		skb_flow_dissect(skb, &mask->dissector, &skb_key, 0);
 
-		fl_set_masked_key(&skb_mkey, &skb_key, mask);
-
-		f = fl_lookup(mask, &skb_mkey, &skb_key);
+		f = fl_mask_lookup(mask, &skb_key);
 		if (f && !tc_skip_sw(f->flags)) {
 			*res = f->res;
 			return tcf_exts_exec(skb, &f->exts, res);
@@ -496,6 +508,7 @@ static void fl_hw_update_stats(struct tcf_proto *tp, struct cls_fl_filter *f,
 
 	tcf_exts_stats_update(&f->exts, cls_flower.stats.bytes,
 			      cls_flower.stats.pkts,
+			      cls_flower.stats.drops,
 			      cls_flower.stats.lastused,
 			      cls_flower.stats.used_hw_stats,
 			      cls_flower.stats.used_hw_stats_valid);
@@ -672,6 +685,7 @@ static const struct nla_policy fl_policy[TCA_FLOWER_MAX + 1] = {
 	[TCA_FLOWER_KEY_MPLS_BOS]	= { .type = NLA_U8 },
 	[TCA_FLOWER_KEY_MPLS_TC]	= { .type = NLA_U8 },
 	[TCA_FLOWER_KEY_MPLS_LABEL]	= { .type = NLA_U32 },
+	[TCA_FLOWER_KEY_MPLS_OPTS]	= { .type = NLA_NESTED },
 	[TCA_FLOWER_KEY_TCP_FLAGS]	= { .type = NLA_U16 },
 	[TCA_FLOWER_KEY_TCP_FLAGS_MASK]	= { .type = NLA_U16 },
 	[TCA_FLOWER_KEY_IP_TOS]		= { .type = NLA_U8 },
@@ -687,8 +701,10 @@ static const struct nla_policy fl_policy[TCA_FLOWER_MAX + 1] = {
 	[TCA_FLOWER_KEY_ENC_IP_TTL_MASK] = { .type = NLA_U8 },
 	[TCA_FLOWER_KEY_ENC_OPTS]	= { .type = NLA_NESTED },
 	[TCA_FLOWER_KEY_ENC_OPTS_MASK]	= { .type = NLA_NESTED },
-	[TCA_FLOWER_KEY_CT_STATE]	= { .type = NLA_U16 },
-	[TCA_FLOWER_KEY_CT_STATE_MASK]	= { .type = NLA_U16 },
+	[TCA_FLOWER_KEY_CT_STATE]	=
+		NLA_POLICY_MASK(NLA_U16, TCA_FLOWER_KEY_CT_FLAGS_MASK),
+	[TCA_FLOWER_KEY_CT_STATE_MASK]	=
+		NLA_POLICY_MASK(NLA_U16, TCA_FLOWER_KEY_CT_FLAGS_MASK),
 	[TCA_FLOWER_KEY_CT_ZONE]	= { .type = NLA_U16 },
 	[TCA_FLOWER_KEY_CT_ZONE_MASK]	= { .type = NLA_U16 },
 	[TCA_FLOWER_KEY_CT_MARK]	= { .type = NLA_U32 },
@@ -698,6 +714,9 @@ static const struct nla_policy fl_policy[TCA_FLOWER_MAX + 1] = {
 	[TCA_FLOWER_KEY_CT_LABELS_MASK]	= { .type = NLA_BINARY,
 					    .len = 128 / BITS_PER_BYTE },
 	[TCA_FLOWER_FLAGS]		= { .type = NLA_U32 },
+	[TCA_FLOWER_KEY_HASH]		= { .type = NLA_U32 },
+	[TCA_FLOWER_KEY_HASH_MASK]	= { .type = NLA_U32 },
+
 };
 
 static const struct nla_policy
@@ -728,6 +747,15 @@ erspan_opt_policy[TCA_FLOWER_KEY_ENC_OPT_ERSPAN_MAX + 1] = {
 	[TCA_FLOWER_KEY_ENC_OPT_ERSPAN_INDEX]      = { .type = NLA_U32 },
 	[TCA_FLOWER_KEY_ENC_OPT_ERSPAN_DIR]        = { .type = NLA_U8 },
 	[TCA_FLOWER_KEY_ENC_OPT_ERSPAN_HWID]       = { .type = NLA_U8 },
+};
+
+static const struct nla_policy
+mpls_stack_entry_policy[TCA_FLOWER_KEY_MPLS_OPT_LSE_MAX + 1] = {
+	[TCA_FLOWER_KEY_MPLS_OPT_LSE_DEPTH]    = { .type = NLA_U8 },
+	[TCA_FLOWER_KEY_MPLS_OPT_LSE_TTL]      = { .type = NLA_U8 },
+	[TCA_FLOWER_KEY_MPLS_OPT_LSE_BOS]      = { .type = NLA_U8 },
+	[TCA_FLOWER_KEY_MPLS_OPT_LSE_TC]       = { .type = NLA_U8 },
+	[TCA_FLOWER_KEY_MPLS_OPT_LSE_LABEL]    = { .type = NLA_U32 },
 };
 
 static void fl_set_key_val(struct nlattr **tb,
@@ -780,14 +808,159 @@ static int fl_set_key_port_range(struct nlattr **tb, struct fl_flow_key *key,
 	return 0;
 }
 
+static int fl_set_key_mpls_lse(const struct nlattr *nla_lse,
+			       struct flow_dissector_key_mpls *key_val,
+			       struct flow_dissector_key_mpls *key_mask,
+			       struct netlink_ext_ack *extack)
+{
+	struct nlattr *tb[TCA_FLOWER_KEY_MPLS_OPT_LSE_MAX + 1];
+	struct flow_dissector_mpls_lse *lse_mask;
+	struct flow_dissector_mpls_lse *lse_val;
+	u8 lse_index;
+	u8 depth;
+	int err;
+
+	err = nla_parse_nested(tb, TCA_FLOWER_KEY_MPLS_OPT_LSE_MAX, nla_lse,
+			       mpls_stack_entry_policy, extack);
+	if (err < 0)
+		return err;
+
+	if (!tb[TCA_FLOWER_KEY_MPLS_OPT_LSE_DEPTH]) {
+		NL_SET_ERR_MSG(extack, "Missing MPLS option \"depth\"");
+		return -EINVAL;
+	}
+
+	depth = nla_get_u8(tb[TCA_FLOWER_KEY_MPLS_OPT_LSE_DEPTH]);
+
+	/* LSE depth starts at 1, for consistency with terminology used by
+	 * RFC 3031 (section 3.9), where depth 0 refers to unlabeled packets.
+	 */
+	if (depth < 1 || depth > FLOW_DIS_MPLS_MAX) {
+		NL_SET_ERR_MSG_ATTR(extack,
+				    tb[TCA_FLOWER_KEY_MPLS_OPT_LSE_DEPTH],
+				    "Invalid MPLS depth");
+		return -EINVAL;
+	}
+	lse_index = depth - 1;
+
+	dissector_set_mpls_lse(key_val, lse_index);
+	dissector_set_mpls_lse(key_mask, lse_index);
+
+	lse_val = &key_val->ls[lse_index];
+	lse_mask = &key_mask->ls[lse_index];
+
+	if (tb[TCA_FLOWER_KEY_MPLS_OPT_LSE_TTL]) {
+		lse_val->mpls_ttl = nla_get_u8(tb[TCA_FLOWER_KEY_MPLS_OPT_LSE_TTL]);
+		lse_mask->mpls_ttl = MPLS_TTL_MASK;
+	}
+	if (tb[TCA_FLOWER_KEY_MPLS_OPT_LSE_BOS]) {
+		u8 bos = nla_get_u8(tb[TCA_FLOWER_KEY_MPLS_OPT_LSE_BOS]);
+
+		if (bos & ~MPLS_BOS_MASK) {
+			NL_SET_ERR_MSG_ATTR(extack,
+					    tb[TCA_FLOWER_KEY_MPLS_OPT_LSE_BOS],
+					    "Bottom Of Stack (BOS) must be 0 or 1");
+			return -EINVAL;
+		}
+		lse_val->mpls_bos = bos;
+		lse_mask->mpls_bos = MPLS_BOS_MASK;
+	}
+	if (tb[TCA_FLOWER_KEY_MPLS_OPT_LSE_TC]) {
+		u8 tc = nla_get_u8(tb[TCA_FLOWER_KEY_MPLS_OPT_LSE_TC]);
+
+		if (tc & ~MPLS_TC_MASK) {
+			NL_SET_ERR_MSG_ATTR(extack,
+					    tb[TCA_FLOWER_KEY_MPLS_OPT_LSE_TC],
+					    "Traffic Class (TC) must be between 0 and 7");
+			return -EINVAL;
+		}
+		lse_val->mpls_tc = tc;
+		lse_mask->mpls_tc = MPLS_TC_MASK;
+	}
+	if (tb[TCA_FLOWER_KEY_MPLS_OPT_LSE_LABEL]) {
+		u32 label = nla_get_u32(tb[TCA_FLOWER_KEY_MPLS_OPT_LSE_LABEL]);
+
+		if (label & ~MPLS_LABEL_MASK) {
+			NL_SET_ERR_MSG_ATTR(extack,
+					    tb[TCA_FLOWER_KEY_MPLS_OPT_LSE_LABEL],
+					    "Label must be between 0 and 1048575");
+			return -EINVAL;
+		}
+		lse_val->mpls_label = label;
+		lse_mask->mpls_label = MPLS_LABEL_MASK;
+	}
+
+	return 0;
+}
+
+static int fl_set_key_mpls_opts(const struct nlattr *nla_mpls_opts,
+				struct flow_dissector_key_mpls *key_val,
+				struct flow_dissector_key_mpls *key_mask,
+				struct netlink_ext_ack *extack)
+{
+	struct nlattr *nla_lse;
+	int rem;
+	int err;
+
+	if (!(nla_mpls_opts->nla_type & NLA_F_NESTED)) {
+		NL_SET_ERR_MSG_ATTR(extack, nla_mpls_opts,
+				    "NLA_F_NESTED is missing");
+		return -EINVAL;
+	}
+
+	nla_for_each_nested(nla_lse, nla_mpls_opts, rem) {
+		if (nla_type(nla_lse) != TCA_FLOWER_KEY_MPLS_OPTS_LSE) {
+			NL_SET_ERR_MSG_ATTR(extack, nla_lse,
+					    "Invalid MPLS option type");
+			return -EINVAL;
+		}
+
+		err = fl_set_key_mpls_lse(nla_lse, key_val, key_mask, extack);
+		if (err < 0)
+			return err;
+	}
+	if (rem) {
+		NL_SET_ERR_MSG(extack,
+			       "Bytes leftover after parsing MPLS options");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static int fl_set_key_mpls(struct nlattr **tb,
 			   struct flow_dissector_key_mpls *key_val,
 			   struct flow_dissector_key_mpls *key_mask,
 			   struct netlink_ext_ack *extack)
 {
+	struct flow_dissector_mpls_lse *lse_mask;
+	struct flow_dissector_mpls_lse *lse_val;
+
+	if (tb[TCA_FLOWER_KEY_MPLS_OPTS]) {
+		if (tb[TCA_FLOWER_KEY_MPLS_TTL] ||
+		    tb[TCA_FLOWER_KEY_MPLS_BOS] ||
+		    tb[TCA_FLOWER_KEY_MPLS_TC] ||
+		    tb[TCA_FLOWER_KEY_MPLS_LABEL]) {
+			NL_SET_ERR_MSG_ATTR(extack,
+					    tb[TCA_FLOWER_KEY_MPLS_OPTS],
+					    "MPLS label, Traffic Class, Bottom Of Stack and Time To Live must be encapsulated in the MPLS options attribute");
+			return -EBADMSG;
+		}
+
+		rh_mark_used_feature("flower/mpls_multilabel");
+
+		return fl_set_key_mpls_opts(tb[TCA_FLOWER_KEY_MPLS_OPTS],
+					    key_val, key_mask, extack);
+	}
+
+	lse_val = &key_val->ls[0];
+	lse_mask = &key_mask->ls[0];
+
 	if (tb[TCA_FLOWER_KEY_MPLS_TTL]) {
-		key_val->mpls_ttl = nla_get_u8(tb[TCA_FLOWER_KEY_MPLS_TTL]);
-		key_mask->mpls_ttl = MPLS_TTL_MASK;
+		lse_val->mpls_ttl = nla_get_u8(tb[TCA_FLOWER_KEY_MPLS_TTL]);
+		lse_mask->mpls_ttl = MPLS_TTL_MASK;
+		dissector_set_mpls_lse(key_val, 0);
+		dissector_set_mpls_lse(key_mask, 0);
 	}
 	if (tb[TCA_FLOWER_KEY_MPLS_BOS]) {
 		u8 bos = nla_get_u8(tb[TCA_FLOWER_KEY_MPLS_BOS]);
@@ -798,8 +971,10 @@ static int fl_set_key_mpls(struct nlattr **tb,
 					    "Bottom Of Stack (BOS) must be 0 or 1");
 			return -EINVAL;
 		}
-		key_val->mpls_bos = bos;
-		key_mask->mpls_bos = MPLS_BOS_MASK;
+		lse_val->mpls_bos = bos;
+		lse_mask->mpls_bos = MPLS_BOS_MASK;
+		dissector_set_mpls_lse(key_val, 0);
+		dissector_set_mpls_lse(key_mask, 0);
 	}
 	if (tb[TCA_FLOWER_KEY_MPLS_TC]) {
 		u8 tc = nla_get_u8(tb[TCA_FLOWER_KEY_MPLS_TC]);
@@ -810,8 +985,10 @@ static int fl_set_key_mpls(struct nlattr **tb,
 					    "Traffic Class (TC) must be between 0 and 7");
 			return -EINVAL;
 		}
-		key_val->mpls_tc = tc;
-		key_mask->mpls_tc = MPLS_TC_MASK;
+		lse_val->mpls_tc = tc;
+		lse_mask->mpls_tc = MPLS_TC_MASK;
+		dissector_set_mpls_lse(key_val, 0);
+		dissector_set_mpls_lse(key_mask, 0);
 	}
 	if (tb[TCA_FLOWER_KEY_MPLS_LABEL]) {
 		u32 label = nla_get_u32(tb[TCA_FLOWER_KEY_MPLS_LABEL]);
@@ -822,8 +999,10 @@ static int fl_set_key_mpls(struct nlattr **tb,
 					    "Label must be between 0 and 1048575");
 			return -EINVAL;
 		}
-		key_val->mpls_label = label;
-		key_mask->mpls_label = MPLS_LABEL_MASK;
+		lse_val->mpls_label = label;
+		lse_mask->mpls_label = MPLS_LABEL_MASK;
+		dissector_set_mpls_lse(key_val, 0);
+		dissector_set_mpls_lse(key_mask, 0);
 	}
 	return 0;
 }
@@ -1015,8 +1194,10 @@ static int fl_set_vxlan_opt(const struct nlattr *nla, struct fl_flow_key *key,
 		return -EINVAL;
 	}
 
-	if (tb[TCA_FLOWER_KEY_ENC_OPT_VXLAN_GBP])
+	if (tb[TCA_FLOWER_KEY_ENC_OPT_VXLAN_GBP]) {
 		md->gbp = nla_get_u32(tb[TCA_FLOWER_KEY_ENC_OPT_VXLAN_GBP]);
+		md->gbp &= VXLAN_GBP_MASK;
+	}
 
 	return sizeof(*md);
 }
@@ -1061,6 +1242,7 @@ static int fl_set_erspan_opt(const struct nlattr *nla, struct fl_flow_key *key,
 		}
 		if (tb[TCA_FLOWER_KEY_ENC_OPT_ERSPAN_INDEX]) {
 			nla = tb[TCA_FLOWER_KEY_ENC_OPT_ERSPAN_INDEX];
+			memset(&md->u, 0x00, sizeof(md->u));
 			md->u.index = nla_get_be32(nla);
 		}
 	} else if (md->version == 2) {
@@ -1223,12 +1405,33 @@ static int fl_set_enc_opt(struct nlattr **tb, struct fl_flow_key *key,
 	return 0;
 }
 
+static int fl_validate_ct_state(u16 state, struct nlattr *tb,
+				struct netlink_ext_ack *extack)
+{
+	if (state && !(state & TCA_FLOWER_KEY_CT_FLAGS_TRACKED)) {
+		NL_SET_ERR_MSG_ATTR(extack, tb,
+				    "no trk, so no other flag can be set");
+		return -EINVAL;
+	}
+
+	if (state & TCA_FLOWER_KEY_CT_FLAGS_NEW &&
+	    state & TCA_FLOWER_KEY_CT_FLAGS_ESTABLISHED) {
+		NL_SET_ERR_MSG_ATTR(extack, tb,
+				    "new and est are mutually exclusive");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static int fl_set_key_ct(struct nlattr **tb,
 			 struct flow_dissector_key_ct *key,
 			 struct flow_dissector_key_ct *mask,
 			 struct netlink_ext_ack *extack)
 {
 	if (tb[TCA_FLOWER_KEY_CT_STATE]) {
+		int err;
+
 		if (!IS_ENABLED(CONFIG_NF_CONNTRACK)) {
 			NL_SET_ERR_MSG(extack, "Conntrack isn't enabled");
 			return -EOPNOTSUPP;
@@ -1236,6 +1439,13 @@ static int fl_set_key_ct(struct nlattr **tb,
 		fl_set_key_val(tb, &key->ct_state, TCA_FLOWER_KEY_CT_STATE,
 			       &mask->ct_state, TCA_FLOWER_KEY_CT_STATE_MASK,
 			       sizeof(key->ct_state));
+
+		err = fl_validate_ct_state(mask->ct_state,
+					   tb[TCA_FLOWER_KEY_CT_STATE_MASK],
+					   extack);
+		if (err)
+			return err;
+
 	}
 	if (tb[TCA_FLOWER_KEY_CT_ZONE]) {
 		if (!IS_ENABLED(CONFIG_NF_CONNTRACK_ZONES)) {
@@ -1471,6 +1681,10 @@ static int fl_set_key(struct net *net, struct nlattr **tb,
 
 	fl_set_key_ip(tb, true, &key->enc_ip, &mask->enc_ip);
 
+	fl_set_key_val(tb, &key->hash.hash, TCA_FLOWER_KEY_HASH,
+		       &mask->hash.hash, TCA_FLOWER_KEY_HASH_MASK,
+		       sizeof(key->hash.hash));
+
 	if (tb[TCA_FLOWER_KEY_ENC_OPTS]) {
 		ret = fl_set_enc_opt(tb, key, mask, extack);
 		if (ret)
@@ -1585,6 +1799,8 @@ static void fl_init_dissector(struct flow_dissector *dissector,
 			     FLOW_DISSECTOR_KEY_ENC_OPTS, enc_opts);
 	FL_KEY_SET_IF_MASKED(mask, keys, cnt,
 			     FLOW_DISSECTOR_KEY_CT, ct);
+	FL_KEY_SET_IF_MASKED(mask, keys, cnt,
+			     FLOW_DISSECTOR_KEY_HASH, hash);
 
 	skb_flow_dissector_init(dissector, keys, cnt);
 }
@@ -2222,35 +2438,132 @@ static int fl_dump_key_port_range(struct sk_buff *skb, struct fl_flow_key *key,
 	return 0;
 }
 
+static int fl_dump_key_mpls_opt_lse(struct sk_buff *skb,
+				    struct flow_dissector_key_mpls *mpls_key,
+				    struct flow_dissector_key_mpls *mpls_mask,
+				    u8 lse_index)
+{
+	struct flow_dissector_mpls_lse *lse_mask = &mpls_mask->ls[lse_index];
+	struct flow_dissector_mpls_lse *lse_key = &mpls_key->ls[lse_index];
+	int err;
+
+	err = nla_put_u8(skb, TCA_FLOWER_KEY_MPLS_OPT_LSE_DEPTH,
+			 lse_index + 1);
+	if (err)
+		return err;
+
+	if (lse_mask->mpls_ttl) {
+		err = nla_put_u8(skb, TCA_FLOWER_KEY_MPLS_OPT_LSE_TTL,
+				 lse_key->mpls_ttl);
+		if (err)
+			return err;
+	}
+	if (lse_mask->mpls_bos) {
+		err = nla_put_u8(skb, TCA_FLOWER_KEY_MPLS_OPT_LSE_BOS,
+				 lse_key->mpls_bos);
+		if (err)
+			return err;
+	}
+	if (lse_mask->mpls_tc) {
+		err = nla_put_u8(skb, TCA_FLOWER_KEY_MPLS_OPT_LSE_TC,
+				 lse_key->mpls_tc);
+		if (err)
+			return err;
+	}
+	if (lse_mask->mpls_label) {
+		err = nla_put_u32(skb, TCA_FLOWER_KEY_MPLS_OPT_LSE_LABEL,
+				  lse_key->mpls_label);
+		if (err)
+			return err;
+	}
+
+	return 0;
+}
+
+static int fl_dump_key_mpls_opts(struct sk_buff *skb,
+				 struct flow_dissector_key_mpls *mpls_key,
+				 struct flow_dissector_key_mpls *mpls_mask)
+{
+	struct nlattr *opts;
+	struct nlattr *lse;
+	u8 lse_index;
+	int err;
+
+	opts = nla_nest_start(skb, TCA_FLOWER_KEY_MPLS_OPTS);
+	if (!opts)
+		return -EMSGSIZE;
+
+	for (lse_index = 0; lse_index < FLOW_DIS_MPLS_MAX; lse_index++) {
+		if (!(mpls_mask->used_lses & 1 << lse_index))
+			continue;
+
+		lse = nla_nest_start(skb, TCA_FLOWER_KEY_MPLS_OPTS_LSE);
+		if (!lse) {
+			err = -EMSGSIZE;
+			goto err_opts;
+		}
+
+		err = fl_dump_key_mpls_opt_lse(skb, mpls_key, mpls_mask,
+					       lse_index);
+		if (err)
+			goto err_opts_lse;
+		nla_nest_end(skb, lse);
+	}
+	nla_nest_end(skb, opts);
+
+	return 0;
+
+err_opts_lse:
+	nla_nest_cancel(skb, lse);
+err_opts:
+	nla_nest_cancel(skb, opts);
+
+	return err;
+}
+
 static int fl_dump_key_mpls(struct sk_buff *skb,
 			    struct flow_dissector_key_mpls *mpls_key,
 			    struct flow_dissector_key_mpls *mpls_mask)
 {
+	struct flow_dissector_mpls_lse *lse_mask;
+	struct flow_dissector_mpls_lse *lse_key;
 	int err;
 
-	if (!memchr_inv(mpls_mask, 0, sizeof(*mpls_mask)))
+	if (!mpls_mask->used_lses)
 		return 0;
-	if (mpls_mask->mpls_ttl) {
+
+	lse_mask = &mpls_mask->ls[0];
+	lse_key = &mpls_key->ls[0];
+
+	/* For backward compatibility, don't use the MPLS nested attributes if
+	 * the rule can be expressed using the old attributes.
+	 */
+	if (mpls_mask->used_lses & ~1 ||
+	    (!lse_mask->mpls_ttl && !lse_mask->mpls_bos &&
+	     !lse_mask->mpls_tc && !lse_mask->mpls_label))
+		return fl_dump_key_mpls_opts(skb, mpls_key, mpls_mask);
+
+	if (lse_mask->mpls_ttl) {
 		err = nla_put_u8(skb, TCA_FLOWER_KEY_MPLS_TTL,
-				 mpls_key->mpls_ttl);
+				 lse_key->mpls_ttl);
 		if (err)
 			return err;
 	}
-	if (mpls_mask->mpls_tc) {
+	if (lse_mask->mpls_tc) {
 		err = nla_put_u8(skb, TCA_FLOWER_KEY_MPLS_TC,
-				 mpls_key->mpls_tc);
+				 lse_key->mpls_tc);
 		if (err)
 			return err;
 	}
-	if (mpls_mask->mpls_label) {
+	if (lse_mask->mpls_label) {
 		err = nla_put_u32(skb, TCA_FLOWER_KEY_MPLS_LABEL,
-				  mpls_key->mpls_label);
+				  lse_key->mpls_label);
 		if (err)
 			return err;
 	}
-	if (mpls_mask->mpls_bos) {
+	if (lse_mask->mpls_bos) {
 		err = nla_put_u8(skb, TCA_FLOWER_KEY_MPLS_BOS,
-				 mpls_key->mpls_bos);
+				 lse_key->mpls_bos);
 		if (err)
 			return err;
 	}
@@ -2708,6 +3021,11 @@ static int fl_dump_key(struct sk_buff *skb, struct net *net,
 	if (fl_dump_key_flags(skb, key->control.flags, mask->control.flags))
 		goto nla_put_failure;
 
+	if (fl_dump_key_val(skb, &key->hash.hash, TCA_FLOWER_KEY_HASH,
+			     &mask->hash.hash, TCA_FLOWER_KEY_HASH_MASK,
+			     sizeof(key->hash.hash)))
+		goto nla_put_failure;
+
 	return 0;
 
 nla_put_failure:
@@ -2762,6 +3080,48 @@ static int fl_dump(struct net *net, struct tcf_proto *tp, void *fh,
 
 	if (tcf_exts_dump_stats(skb, &f->exts) < 0)
 		goto nla_put_failure;
+
+	return skb->len;
+
+nla_put_failure_locked:
+	spin_unlock(&tp->lock);
+nla_put_failure:
+	nla_nest_cancel(skb, nest);
+	return -1;
+}
+
+static int fl_terse_dump(struct net *net, struct tcf_proto *tp, void *fh,
+			 struct sk_buff *skb, struct tcmsg *t, bool rtnl_held)
+{
+	struct cls_fl_filter *f = fh;
+	struct nlattr *nest;
+	bool skip_hw;
+
+	if (!f)
+		return skb->len;
+
+	t->tcm_handle = f->handle;
+
+	nest = nla_nest_start_noflag(skb, TCA_OPTIONS);
+	if (!nest)
+		goto nla_put_failure;
+
+	spin_lock(&tp->lock);
+
+	skip_hw = tc_skip_hw(f->flags);
+
+	if (f->flags && nla_put_u32(skb, TCA_FLOWER_FLAGS, f->flags))
+		goto nla_put_failure_locked;
+
+	spin_unlock(&tp->lock);
+
+	if (!skip_hw)
+		fl_hw_update_stats(tp, f, rtnl_held);
+
+	if (tcf_exts_terse_dump(skb, &f->exts))
+		goto nla_put_failure;
+
+	nla_nest_end(skb, nest);
 
 	return skb->len;
 
@@ -2836,6 +3196,7 @@ static struct tcf_proto_ops cls_fl_ops __read_mostly = {
 	.hw_add		= fl_hw_add,
 	.hw_del		= fl_hw_del,
 	.dump		= fl_dump,
+	.terse_dump	= fl_terse_dump,
 	.bind_class	= fl_bind_class,
 	.tmplt_create	= fl_tmplt_create,
 	.tmplt_destroy	= fl_tmplt_destroy,

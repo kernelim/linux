@@ -31,7 +31,7 @@ struct dev_archdata {
 #endif
 
 #ifdef CONFIG_IOMMU_API
-	void			*iommu_domain;
+	RH_KABI_DEPRECATE(void *, iommu_domain)
 #endif
 #ifdef CONFIG_SWIOTLB
 	RH_KABI_DEPRECATE(dma_addr_t, max_direct_dma_addr)

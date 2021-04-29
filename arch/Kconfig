@@ -245,11 +245,18 @@ config ARCH_HAS_SET_DIRECT_MAP
 	bool
 
 #
-# Select if arch has an uncached kernel segment and provides the
-# uncached_kernel_address / cached_kernel_address symbols to use it
+# Select if the architecture provides the arch_dma_set_uncached symbol to
+# either provide an uncached segement alias for a DMA allocation, or
+# to remap the page tables in place.
 #
-config ARCH_HAS_UNCACHED_SEGMENT
-	select ARCH_HAS_DMA_PREP_COHERENT
+config ARCH_HAS_DMA_SET_UNCACHED
+	bool
+
+#
+# Select if the architectures provides the arch_dma_clear_uncached symbol
+# to undo an in-place page table remap for uncached access.
+#
+config ARCH_HAS_DMA_CLEAR_UNCACHED
 	bool
 
 # Select if arch init_task must go in the __init_task_data section
@@ -368,6 +375,22 @@ config HAVE_ARCH_JUMP_LABEL_RELATIVE
 
 config HAVE_RCU_TABLE_FREE
 	bool
+
+config HAVE_MMU_GATHER_PAGE_SIZE
+	bool
+
+config MMU_GATHER_NO_RANGE
+	bool
+
+config HAVE_MMU_GATHER_NO_GATHER
+	bool
+
+config ARCH_WANT_IRQS_OFF_ACTIVATE_MM
+	bool
+	help
+	  Temporary select until all architectures can be converted to have
+	  irqs disabled over activate_mm. Architectures that do IPI based TLB
+	  shootdowns should enable this.
 
 config ARCH_HAVE_NMI_SAFE_CMPXCHG
 	bool
@@ -1002,6 +1025,9 @@ config LOCK_EVENT_COUNTS
 	  differences. The counts are reported via debugfs.
 
 config ARCH_HAS_MEM_ENCRYPT
+	bool
+
+config ARCH_HAS_VDSO_DATA
 	bool
 
 source "kernel/gcov/Kconfig"

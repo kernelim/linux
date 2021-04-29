@@ -310,13 +310,17 @@ Code  Seq#(hex)	Include File		Comments
 					<mailto:tlewis@mindspring.com>
 0xA3	90-9F	linux/dtlk.h
 0xA4	00-1F	uapi/linux/tee.h	Generic TEE subsystem
+0xA4	00-1F	uapi/asm/sgx.h		<mailto:linux-sgx@vger.kernel.org>
 0xAA	00-3F	linux/uapi/linux/userfaultfd.h
 0xAB	00-1F	linux/nbd.h
 0xAC	00-1F	linux/raw.h
 0xAD	00	Netfilter device	in development:
 					<mailto:rusty@rustcorp.com.au>
-0xAE	all	linux/kvm.h		Kernel-based Virtual Machine
+0xAE	00-1F	linux/kvm.h		Kernel-based Virtual Machine
 					<mailto:kvm@vger.kernel.org>
+0xAE	40-FF	linux/kvm.h		Kernel-based Virtual Machine
+					<mailto:kvm@vger.kernel.org>
+0xAE	20-3F	linux/nitro_enclaves.h	Nitro Enclaves
 0xAF	00-1F	linux/fsl_hypervisor.h	Freescale hypervisor
 0xB0	all	RATIO devices		in development:
 					<mailto:vgo@ratio.de>

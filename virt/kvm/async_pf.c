@@ -63,6 +63,7 @@ static void async_pf_execute(struct work_struct *work)
 	unsigned long addr = apf->addr;
 	gpa_t cr2_or_gpa = apf->cr2_or_gpa;
 	int locked = 1;
+	bool first;
 
 	might_sleep();
 
@@ -81,9 +82,13 @@ static void async_pf_execute(struct work_struct *work)
 		kvm_arch_async_page_present(vcpu, apf);
 
 	spin_lock(&vcpu->async_pf.lock);
+	first = list_empty(&vcpu->async_pf.done);
 	list_add_tail(&apf->link, &vcpu->async_pf.done);
 	apf->vcpu = NULL;
 	spin_unlock(&vcpu->async_pf.lock);
+
+	if (!IS_ENABLED(CONFIG_KVM_ASYNC_PF_SYNC) && first)
+		kvm_arch_async_page_present_queued(vcpu);
 
 	/*
 	 * apf may be freed by kvm_check_async_pf_completion() after
@@ -92,8 +97,7 @@ static void async_pf_execute(struct work_struct *work)
 
 	trace_kvm_async_pf_completed(addr, cr2_or_gpa);
 
-	if (swq_has_sleeper(&vcpu->wq))
-		swake_up_one(&vcpu->wq);
+	rcuwait_wake_up(&vcpu->wait);
 
 	mmput(mm);
 	kvm_put_kvm(vcpu->kvm);
@@ -164,17 +168,21 @@ void kvm_check_async_pf_completion(struct kvm_vcpu *vcpu)
 	}
 }
 
-int kvm_setup_async_pf(struct kvm_vcpu *vcpu, gpa_t cr2_or_gpa,
-		       unsigned long hva, struct kvm_arch_async_pf *arch)
+/*
+ * Try to schedule a job to handle page fault asynchronously. Returns 'true' on
+ * success, 'false' on failure (page fault has to be handled synchronously).
+ */
+bool kvm_setup_async_pf(struct kvm_vcpu *vcpu, gpa_t cr2_or_gpa,
+			unsigned long hva, struct kvm_arch_async_pf *arch)
 {
 	struct kvm_async_pf *work;
 
 	if (vcpu->async_pf.queued >= ASYNC_PF_PER_VCPU)
-		return 0;
+		return false;
 
 	/* Arch specific code should not do async PF in this case */
 	if (unlikely(kvm_is_error_hva(hva)))
-		return 0;
+		return false;
 
 	/*
 	 * do alloc nowait since if we are going to sleep anyway we
@@ -182,7 +190,7 @@ int kvm_setup_async_pf(struct kvm_vcpu *vcpu, gpa_t cr2_or_gpa,
 	 */
 	work = kmem_cache_zalloc(async_pf_cache, GFP_NOWAIT | __GFP_NOWARN);
 	if (!work)
-		return 0;
+		return false;
 
 	work->wakeup_all = false;
 	work->vcpu = vcpu;
@@ -201,12 +209,13 @@ int kvm_setup_async_pf(struct kvm_vcpu *vcpu, gpa_t cr2_or_gpa,
 
 	schedule_work(&work->work);
 
-	return 1;
+	return true;
 }
 
 int kvm_async_pf_wakeup_all(struct kvm_vcpu *vcpu)
 {
 	struct kvm_async_pf *work;
+	bool first;
 
 	if (!list_empty_careful(&vcpu->async_pf.done))
 		return 0;
@@ -219,8 +228,12 @@ int kvm_async_pf_wakeup_all(struct kvm_vcpu *vcpu)
 	INIT_LIST_HEAD(&work->queue); /* for list_del to work */
 
 	spin_lock(&vcpu->async_pf.lock);
+	first = list_empty(&vcpu->async_pf.done);
 	list_add_tail(&work->link, &vcpu->async_pf.done);
 	spin_unlock(&vcpu->async_pf.lock);
+
+	if (!IS_ENABLED(CONFIG_KVM_ASYNC_PF_SYNC) && first)
+		kvm_arch_async_page_present_queued(vcpu);
 
 	vcpu->async_pf.queued++;
 	return 0;

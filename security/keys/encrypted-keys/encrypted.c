@@ -828,13 +828,13 @@ static int encrypted_instantiate(struct key *key,
 	ret = encrypted_init(epayload, key->description, format, master_desc,
 			     decrypted_datalen, hex_encoded_iv);
 	if (ret < 0) {
-		kzfree(epayload);
+		kfree_sensitive(epayload);
 		goto out;
 	}
 
 	rcu_assign_keypointer(key, epayload);
 out:
-	kzfree(datablob);
+	kfree_sensitive(datablob);
 	return ret;
 }
 
@@ -843,7 +843,7 @@ static void encrypted_rcu_free(struct rcu_head *rcu)
 	struct encrypted_key_payload *epayload;
 
 	epayload = container_of(rcu, struct encrypted_key_payload, rcu);
-	kzfree(epayload);
+	kfree_sensitive(epayload);
 }
 
 /*
@@ -901,7 +901,7 @@ static int encrypted_update(struct key *key, struct key_preparsed_payload *prep)
 	rcu_assign_keypointer(key, new_epayload);
 	call_rcu(&epayload->rcu, encrypted_rcu_free);
 out:
-	kzfree(buf);
+	kfree_sensitive(buf);
 	return ret;
 }
 
@@ -962,7 +962,7 @@ static long encrypted_read(const struct key *key, char *buffer,
 	memzero_explicit(derived_key, sizeof(derived_key));
 
 	memcpy(buffer, ascii_buf, asciiblob_len);
-	kzfree(ascii_buf);
+	kfree_sensitive(ascii_buf);
 
 	return asciiblob_len;
 out:
@@ -977,7 +977,7 @@ out:
  */
 static void encrypted_destroy(struct key *key)
 {
-	kzfree(key->payload.data[0]);
+	kfree_sensitive(key->payload.data[0]);
 }
 
 struct key_type key_type_encrypted = {

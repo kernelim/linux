@@ -562,12 +562,12 @@ int kvm_arch_vcpu_ioctl_set_regs(struct kvm_vcpu *vcpu, struct kvm_regs *regs)
 
 int kvm_arch_vcpu_ioctl_get_fpu(struct kvm_vcpu *vcpu, struct kvm_fpu *fpu)
 {
-	return -ENOTSUPP;
+	return -EOPNOTSUPP;
 }
 
 int kvm_arch_vcpu_ioctl_set_fpu(struct kvm_vcpu *vcpu, struct kvm_fpu *fpu)
 {
-	return -ENOTSUPP;
+	return -EOPNOTSUPP;
 }
 
 int kvmppc_get_one_reg(struct kvm_vcpu *vcpu, u64 id,
@@ -759,9 +759,9 @@ void kvmppc_set_msr(struct kvm_vcpu *vcpu, u64 msr)
 }
 EXPORT_SYMBOL_GPL(kvmppc_set_msr);
 
-int kvmppc_vcpu_run(struct kvm_run *kvm_run, struct kvm_vcpu *vcpu)
+int kvmppc_vcpu_run(struct kvm_vcpu *vcpu)
 {
-	return vcpu->kvm->arch.kvm_ops->vcpu_run(kvm_run, vcpu);
+	return vcpu->kvm->arch.kvm_ops->vcpu_run(vcpu);
 }
 
 int kvm_arch_vcpu_ioctl_translate(struct kvm_vcpu *vcpu,
@@ -882,13 +882,15 @@ void kvmppc_core_destroy_vm(struct kvm *kvm)
 
 #ifdef CONFIG_KVM_XICS
 	/*
-	 * Free the XIVE devices which are not directly freed by the
+	 * Free the XIVE and XICS devices which are not directly freed by the
 	 * device 'release' method
 	 */
 	kfree(kvm->arch.xive_devices.native);
 	kvm->arch.xive_devices.native = NULL;
 	kfree(kvm->arch.xive_devices.xics_on_xive);
 	kvm->arch.xive_devices.xics_on_xive = NULL;
+	kfree(kvm->arch.xics_device);
+	kvm->arch.xics_device = NULL;
 #endif /* CONFIG_KVM_XICS */
 }
 

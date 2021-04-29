@@ -282,7 +282,8 @@ config ICE
 	default n
 	depends on PCI_MSI
 	select NET_DEVLINK
-	---help---
+	select PLDMFW
+	help
 	  This driver supports Intel(R) Ethernet Connection E800 Series of
 	  devices.  For more information on how to identify your adapter, go
 	  to the Adapter & Driver ID Guide that can be located at:
@@ -303,6 +304,9 @@ config FM10K
 	  go to the Adapter & Driver ID Guide that can be located at:
 
 	  <http://support.intel.com>
+
+	  More specific information on configuring the driver is in
+	  <file:Documentation/networking/device_drivers/ethernet/intel/fm10k.rst>.
 
 	  To compile this driver as a module, choose M here. The module
 	  will be called fm10k.  MSI-X interrupt support is required

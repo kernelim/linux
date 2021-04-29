@@ -2271,10 +2271,7 @@ static int hns3_handle_rx_bd(struct hns3_enet_ring *ring,
 	 * lines. In such a case, single fetch would suffice to cache in the
 	 * relevant part of the header.
 	 */
-	prefetch(va);
-#if L1_CACHE_BYTES < 128
-	prefetch(va + L1_CACHE_BYTES);
-#endif
+	net_prefetch(va);
 
 	skb = *out_skb = napi_alloc_skb(&ring->tqp_vector->napi,
 					HNS3_RX_HEAD_SIZE);

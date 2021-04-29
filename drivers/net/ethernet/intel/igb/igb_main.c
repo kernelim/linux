@@ -38,12 +38,6 @@
 #include <linux/i2c.h>
 #include "igb.h"
 
-#define MAJ 5
-#define MIN 6
-#define BUILD 0
-#define DRV_VERSION __stringify(MAJ) "." __stringify(MIN) "." \
-__stringify(BUILD) "-k"
-
 enum queue_mode {
 	QUEUE_MODE_STRICT_PRIORITY,
 	QUEUE_MODE_STREAM_RESERVATION,
@@ -55,7 +49,6 @@ enum tx_queue_prio {
 };
 
 char igb_driver_name[] = "igb";
-char igb_driver_version[] = DRV_VERSION;
 static const char igb_driver_string[] =
 				"Intel(R) Gigabit Ethernet Network Driver";
 static const char igb_copyright[] =
@@ -240,7 +233,6 @@ static struct pci_driver igb_driver = {
 MODULE_AUTHOR("Intel Corporation, <e1000-devel@lists.sourceforge.net>");
 MODULE_DESCRIPTION("Intel(R) Gigabit Ethernet Network Driver");
 MODULE_LICENSE("GPL v2");
-MODULE_VERSION(DRV_VERSION);
 
 #define DEFAULT_MSG_ENABLE (NETIF_MSG_DRV|NETIF_MSG_PROBE|NETIF_MSG_LINK)
 static int debug = -1;
@@ -557,8 +549,7 @@ exit:
 
 /**
  *  igb_get_i2c_data - Reads the I2C SDA data bit
- *  @hw: pointer to hardware structure
- *  @i2cctl: Current value of I2CCTL register
+ *  @data: opaque pointer to adapter struct
  *
  *  Returns the I2C data bit value
  **/
@@ -666,8 +657,7 @@ static int __init igb_init_module(void)
 {
 	int ret;
 
-	pr_info("%s - version %s\n",
-	       igb_driver_string, igb_driver_version);
+	pr_info("%s\n", igb_driver_string);
 	pr_info("%s\n", igb_copyright);
 
 #ifdef CONFIG_IGB_DCA
@@ -720,14 +710,13 @@ static void igb_cache_ring_register(struct igb_adapter *adapter)
 				adapter->rx_ring[i]->reg_idx = rbase_offset +
 							       Q_IDX_82576(i);
 		}
-		/* Fall through */
+		fallthrough;
 	case e1000_82575:
 	case e1000_82580:
 	case e1000_i350:
 	case e1000_i354:
 	case e1000_i210:
 	case e1000_i211:
-		/* Fall through */
 	default:
 		for (; i < adapter->num_rx_queues; i++)
 			adapter->rx_ring[i]->reg_idx = rbase_offset + i;
@@ -2230,7 +2219,6 @@ void igb_down(struct igb_adapter *adapter)
 
 void igb_reinit_locked(struct igb_adapter *adapter)
 {
-	WARN_ON(in_interrupt());
 	while (test_and_set_bit(__IGB_RESETTING, &adapter->state))
 		usleep_range(1000, 2000);
 	igb_down(adapter);
@@ -2882,7 +2870,7 @@ void igb_set_fw_version(struct igb_adapter *adapter)
 				 fw.invm_img_type);
 			break;
 		}
-		/* fall through */
+		fallthrough;
 	default:
 		/* if option is rom valid, display its version too */
 		if (fw.or_valid) {
@@ -3398,7 +3386,9 @@ static int igb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 			  "Width x1" : "unknown"), netdev->dev_addr);
 	}
 
-	if ((hw->mac.type >= e1000_i210 ||
+	if ((hw->mac.type == e1000_82576 &&
+	     rd32(E1000_EECD) & E1000_EECD_PRES) ||
+	    (hw->mac.type >= e1000_i210 ||
 	     igb_get_flash_presence_i210(hw))) {
 		ret_val = igb_read_part_string(hw, part_str,
 					       E1000_PBANUM_LENGTH);
@@ -3445,7 +3435,7 @@ static int igb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		}
 	}
 
-	dev_pm_set_driver_flags(&pdev->dev, DPM_FLAG_NEVER_SKIP);
+	dev_pm_set_driver_flags(&pdev->dev, DPM_FLAG_NO_DIRECT_COMPLETE);
 
 	pm_runtime_put_noidle(&pdev->dev);
 	return 0;
@@ -3733,13 +3723,13 @@ unsigned int igb_get_max_rss_queues(struct igb_adapter *adapter)
 			max_rss_queues = 1;
 			break;
 		}
-		/* fall through */
+		fallthrough;
 	case e1000_82576:
 		if (!!adapter->vfs_allocated_count) {
 			max_rss_queues = 2;
 			break;
 		}
-		/* fall through */
+		fallthrough;
 	case e1000_82580:
 	case e1000_i354:
 	default:
@@ -3878,6 +3868,7 @@ static int igb_sw_init(struct igb_adapter *adapter)
 /**
  *  igb_open - Called when a network interface is made active
  *  @netdev: network interface device structure
+ *  @resuming: indicates whether we are in a resume call
  *
  *  Returns 0 on success, negative value on failure
  *
@@ -3995,6 +3986,7 @@ int igb_open(struct net_device *netdev)
 /**
  *  igb_close - Disables a network interface
  *  @netdev: network interface device structure
+ *  @suspending: indicates we are in a suspend call
  *
  *  Returns 0, this is not allowed to fail
  *
@@ -4878,14 +4870,14 @@ static int igb_vlan_promisc_enable(struct igb_adapter *adapter)
 		/* VLAN filtering needed for VLAN prio filter */
 		if (adapter->netdev->features & NETIF_F_NTUPLE)
 			break;
-		/* fall through */
+		fallthrough;
 	case e1000_82576:
 	case e1000_82580:
 	case e1000_i354:
 		/* VLAN filtering needed for pool filtering */
 		if (adapter->vfs_allocated_count)
 			break;
-		/* fall through */
+		fallthrough;
 	default:
 		return 1;
 	}
@@ -5165,7 +5157,7 @@ bool igb_has_link(struct igb_adapter *adapter)
 	case e1000_media_type_copper:
 		if (!hw->mac.get_link_status)
 			return true;
-		/* fall through */
+		fallthrough;
 	case e1000_media_type_internal_serdes:
 		hw->mac.ops.check_for_link(hw);
 		link_active = !hw->mac.get_link_status;
@@ -5229,7 +5221,7 @@ static void igb_check_lvmmc(struct igb_adapter *adapter)
 
 /**
  *  igb_watchdog - Timer Call-back
- *  @data: pointer to adapter cast into an unsigned long
+ *  @t: pointer to timer_list containing our private info pointer
  **/
 static void igb_watchdog(struct timer_list *t)
 {
@@ -5825,7 +5817,7 @@ csum_failed:
 	switch (skb->csum_offset) {
 	case offsetof(struct tcphdr, check):
 		type_tucmd = E1000_ADVTXD_TUCMD_L4T_TCP;
-		/* fall through */
+		fallthrough;
 	case offsetof(struct udphdr, check):
 		break;
 	case offsetof(struct sctphdr, checksum):
@@ -5837,7 +5829,7 @@ csum_failed:
 			type_tucmd = E1000_ADVTXD_TUCMD_L4T_SCTP;
 			break;
 		}
-		/* fall through */
+		fallthrough;
 	default:
 		skb_checksum_help(skb);
 		goto csum_failed;
@@ -6202,8 +6194,9 @@ static netdev_tx_t igb_xmit_frame(struct sk_buff *skb,
 /**
  *  igb_tx_timeout - Respond to a Tx Hang
  *  @netdev: network interface device structure
+ *  @txqueue: number of the Tx queue that hung (unused)
  **/
-static void igb_tx_timeout(struct net_device *netdev, unsigned int txqueue)
+static void igb_tx_timeout(struct net_device *netdev, unsigned int __always_unused txqueue)
 {
 	struct igb_adapter *adapter = netdev_priv(netdev);
 	struct e1000_hw *hw = &adapter->hw;
@@ -6224,9 +6217,18 @@ static void igb_reset_task(struct work_struct *work)
 	struct igb_adapter *adapter;
 	adapter = container_of(work, struct igb_adapter, reset_task);
 
+	rtnl_lock();
+	/* If we're already down or resetting, just bail */
+	if (test_bit(__IGB_DOWN, &adapter->state) ||
+	    test_bit(__IGB_RESETTING, &adapter->state)) {
+		rtnl_unlock();
+		return;
+	}
+
 	igb_dump(adapter);
 	netdev_err(adapter->netdev, "Reset adapter\n");
 	igb_reinit_locked(adapter);
+	rtnl_unlock();
 }
 
 /**
@@ -6715,7 +6717,7 @@ static int __igb_notify_dca(struct device *dev, void *data)
 			igb_setup_dca(adapter);
 			break;
 		}
-		/* Fall Through - since DCA is disabled. */
+		fallthrough; /* since DCA is disabled. */
 	case DCA_PROVIDER_REMOVE:
 		if (adapter->flags & IGB_FLAG_DCA_ENABLED) {
 			/* without this a class_device is left
@@ -7168,7 +7170,7 @@ static void igb_flush_mac_table(struct igb_adapter *adapter)
 
 	for (i = 0; i < hw->mac.rar_entry_count; i++) {
 		adapter->mac_table[i].state &= ~IGB_MAC_STATE_IN_USE;
-		memset(adapter->mac_table[i].addr, 0, ETH_ALEN);
+		eth_zero_addr(adapter->mac_table[i].addr);
 		adapter->mac_table[i].queue = 0;
 		igb_rar_set_index(adapter, i);
 	}
@@ -7317,7 +7319,7 @@ static int igb_del_mac_filter_flags(struct igb_adapter *adapter,
 		} else {
 			adapter->mac_table[i].state = 0;
 			adapter->mac_table[i].queue = 0;
-			memset(adapter->mac_table[i].addr, 0, ETH_ALEN);
+			eth_zero_addr(adapter->mac_table[i].addr);
 		}
 
 		igb_rar_set_index(adapter, i);
@@ -8047,10 +8049,7 @@ static struct sk_buff *igb_construct_skb(struct igb_ring *rx_ring,
 	struct sk_buff *skb;
 
 	/* prefetch first cache line of first page */
-	prefetch(va);
-#if L1_CACHE_BYTES < 128
-	prefetch(va + L1_CACHE_BYTES);
-#endif
+	net_prefetch(va);
 
 	/* allocate a skb to store the frags */
 	skb = napi_alloc_skb(&rx_ring->q_vector->napi, IGB_RX_HDR_LEN);
@@ -8104,10 +8103,7 @@ static struct sk_buff *igb_build_skb(struct igb_ring *rx_ring,
 	struct sk_buff *skb;
 
 	/* prefetch first cache line of first page */
-	prefetch(va);
-#if L1_CACHE_BYTES < 128
-	prefetch(va + L1_CACHE_BYTES);
-#endif
+	net_prefetch(va);
 
 	/* build an skb around the page buffer */
 	skb = build_skb(va - IGB_SKB_PAD, truesize);
@@ -8188,7 +8184,6 @@ static inline void igb_rx_hash(struct igb_ring *ring,
  *  igb_is_non_eop - process handling of non-EOP buffers
  *  @rx_ring: Rx ring being processed
  *  @rx_desc: Rx descriptor for current buffer
- *  @skb: current socket buffer containing buffer in progress
  *
  *  This function updates next to clean.  If the buffer is an EOP buffer
  *  this function exits returning false, otherwise it will place the
@@ -8467,8 +8462,9 @@ static bool igb_alloc_mapped_page(struct igb_ring *rx_ring,
 }
 
 /**
- *  igb_alloc_rx_buffers - Replace used receive buffers; packet split
- *  @adapter: address of board private structure
+ *  igb_alloc_rx_buffers - Replace used receive buffers
+ *  @rx_ring: rx descriptor ring to allocate new receive buffers
+ *  @cleaned_count: count of buffers to allocate
  **/
 void igb_alloc_rx_buffers(struct igb_ring *rx_ring, u16 cleaned_count)
 {
@@ -8537,9 +8533,9 @@ void igb_alloc_rx_buffers(struct igb_ring *rx_ring, u16 cleaned_count)
 
 /**
  * igb_mii_ioctl -
- * @netdev:
- * @ifreq:
- * @cmd:
+ * @netdev: pointer to netdev struct
+ * @ifr: interface structure
+ * @cmd: ioctl command to execute
  **/
 static int igb_mii_ioctl(struct net_device *netdev, struct ifreq *ifr, int cmd)
 {
@@ -8567,9 +8563,9 @@ static int igb_mii_ioctl(struct net_device *netdev, struct ifreq *ifr, int cmd)
 
 /**
  * igb_ioctl -
- * @netdev:
- * @ifreq:
- * @cmd:
+ * @netdev: pointer to netdev struct
+ * @ifr: interface structure
+ * @cmd: ioctl command to execute
  **/
 static int igb_ioctl(struct net_device *netdev, struct ifreq *ifr, int cmd)
 {
@@ -9384,13 +9380,13 @@ static void igb_vmm_control(struct igb_adapter *adapter)
 		reg = rd32(E1000_DTXCTL);
 		reg |= E1000_DTXCTL_VLAN_ADDED;
 		wr32(E1000_DTXCTL, reg);
-		/* Fall through */
+		fallthrough;
 	case e1000_82580:
 		/* enable replication vlan tag stripping */
 		reg = rd32(E1000_RPLOLR);
 		reg |= E1000_RPLOLR_STRVLAN;
 		wr32(E1000_RPLOLR, reg);
-		/* Fall through */
+		fallthrough;
 	case e1000_i350:
 		/* none of the above registers are supported by i350 */
 		break;

@@ -1215,6 +1215,9 @@ static int gfs2_iomap_end(struct inode *inode, loff_t pos, loff_t length,
 
 	gfs2_inplace_release(ip);
 
+	if (ip->i_qadata && ip->i_qadata->qa_qd_num)
+		gfs2_quota_unlock(ip);
+
 	if (length != written && (iomap->flags & IOMAP_F_NEW)) {
 		/* Deallocate blocks that were just allocated. */
 		loff_t blockmask = i_blocksize(inode) - 1;
@@ -1226,9 +1229,6 @@ static int gfs2_iomap_end(struct inode *inode, loff_t pos, loff_t length,
 			punch_hole(ip, pos, end - pos);
 		}
 	}
-
-	if (ip->i_qadata && ip->i_qadata->qa_qd_num)
-		gfs2_quota_unlock(ip);
 
 	if (unlikely(!written))
 		goto out_unlock;
@@ -1277,6 +1277,7 @@ int gfs2_block_map(struct inode *inode, sector_t lblock,
 	loff_t length = bh_map->b_size;
 	struct metapath mp = { .mp_aheight = 1, };
 	struct iomap iomap = { };
+	int flags = create ? IOMAP_WRITE : 0;
 	int ret;
 
 	clear_buffer_mapped(bh_map);
@@ -1284,15 +1285,10 @@ int gfs2_block_map(struct inode *inode, sector_t lblock,
 	clear_buffer_boundary(bh_map);
 	trace_gfs2_bmap(ip, bh_map, lblock, create, 1);
 
-	if (create) {
-		ret = gfs2_iomap_get(inode, pos, length, IOMAP_WRITE, &iomap, &mp);
-		if (!ret && iomap.type == IOMAP_HOLE)
-			ret = gfs2_iomap_alloc(inode, &iomap, IOMAP_WRITE, &mp);
-		release_metapath(&mp);
-	} else {
-		ret = gfs2_iomap_get(inode, pos, length, 0, &iomap, &mp);
-		release_metapath(&mp);
-	}
+	ret = gfs2_iomap_get(inode, pos, length, flags, &iomap, &mp);
+	if (create && !ret && iomap.type == IOMAP_HOLE)
+		ret = gfs2_iomap_alloc(inode, &iomap, IOMAP_WRITE, &mp);
+	release_metapath(&mp);
 	if (ret)
 		goto out;
 
@@ -2496,7 +2492,15 @@ int __gfs2_punch_hole(struct file *file, loff_t offset, loff_t length)
 	struct inode *inode = file_inode(file);
 	struct gfs2_inode *ip = GFS2_I(inode);
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
+	unsigned int blocksize = i_blocksize(inode);
+	loff_t start, end;
 	int error;
+
+	start = round_down(offset, blocksize);
+	end = round_up(offset + length, blocksize) - 1;
+	error = filemap_write_and_wait_range(inode->i_mapping, start, end);
+	if (error)
+		return error;
 
 	if (gfs2_is_jdata(ip))
 		error = gfs2_trans_begin(sdp, RES_DINODE + 2 * RES_JDATA,
@@ -2511,9 +2515,8 @@ int __gfs2_punch_hole(struct file *file, loff_t offset, loff_t length)
 		if (error)
 			goto out;
 	} else {
-		unsigned int start_off, end_len, blocksize;
+		unsigned int start_off, end_len;
 
-		blocksize = i_blocksize(inode);
 		start_off = offset & (blocksize - 1);
 		end_len = (offset + length) & (blocksize - 1);
 		if (start_off) {

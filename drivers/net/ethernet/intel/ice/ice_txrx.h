@@ -38,7 +38,8 @@
  */
 #if (PAGE_SIZE < 8192)
 #define ICE_2K_TOO_SMALL_WITH_PADDING \
-((NET_SKB_PAD + ICE_RXBUF_1536) > SKB_WITH_OVERHEAD(ICE_RXBUF_2048))
+	((unsigned int)(NET_SKB_PAD + ICE_RXBUF_1536) > \
+			SKB_WITH_OVERHEAD(ICE_RXBUF_2048))
 
 /**
  * ice_compute_pad - compute the padding
@@ -107,8 +108,8 @@ static inline int ice_skb_pad(void)
 #define DESC_NEEDED (MAX_SKB_FRAGS + ICE_DESCS_FOR_CTX_DESC + \
 		     ICE_DESCS_PER_CACHE_LINE + ICE_DESCS_FOR_SKB_DATA_PTR)
 #define ICE_DESC_UNUSED(R)	\
-	((((R)->next_to_clean > (R)->next_to_use) ? 0 : (R)->count) + \
-	(R)->next_to_clean - (R)->next_to_use - 1)
+	(u16)((((R)->next_to_clean > (R)->next_to_use) ? 0 : (R)->count) + \
+	      (R)->next_to_clean - (R)->next_to_use - 1)
 
 #define ICE_TX_FLAGS_TSO	BIT(0)
 #define ICE_TX_FLAGS_HW_VLAN	BIT(1)
@@ -162,17 +163,16 @@ struct ice_tx_offload_params {
 };
 
 struct ice_rx_buf {
-	struct sk_buff *skb;
-	dma_addr_t dma;
 	union {
 		struct {
+			struct sk_buff *skb;
+			dma_addr_t dma;
 			struct page *page;
 			unsigned int page_offset;
 			u16 pagecnt_bias;
 		};
 		struct {
-			void *addr;
-			u64 handle;
+			struct xdp_buff *xdp;
 		};
 	};
 };
@@ -193,7 +193,7 @@ struct ice_rxq_stats {
 	u64 non_eop_descs;
 	u64 alloc_page_failed;
 	u64 alloc_buf_failed;
-	u64 page_reuse_count;
+	u64 gro_dropped; /* GRO returned dropped */
 };
 
 /* this enum matches hardware bits and is meant to be used by DYN_CTLN
@@ -296,7 +296,6 @@ struct ice_ring {
 	struct rcu_head rcu;		/* to avoid race on free */
 	struct bpf_prog *xdp_prog;
 	struct xdp_umem *xsk_umem;
-	struct zero_copy_allocator zca;
 	/* CL3 - 3rd cacheline starts here */
 	struct xdp_rxq_info xdp_rxq;
 	/* CLX - the below items are only accessed infrequently and should be

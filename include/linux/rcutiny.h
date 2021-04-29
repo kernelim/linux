@@ -47,9 +47,29 @@ static inline void synchronize_rcu_expedited(void)
 	synchronize_rcu();
 }
 
-static inline void kfree_call_rcu(struct rcu_head *head, rcu_callback_t func)
+/*
+ * Add one more declaration of kvfree() here. It is
+ * not so straight forward to just include <linux/mm.h>
+ * where it is defined due to getting many compile
+ * errors caused by that include.
+ */
+extern void kvfree(const void *addr);
+
+static inline void kvfree_call_rcu(struct rcu_head *head, rcu_callback_t func)
 {
-	call_rcu(head, func);
+	if (head) {
+		call_rcu(head, func);
+		return;
+	}
+
+	// kvfree_rcu(one_arg) call.
+	might_sleep();
+	synchronize_rcu();
+	kvfree((void *) func);
+}
+static void kfree_call_rcu(struct rcu_head *head, rcu_callback_t func)
+{
+	kvfree_call_rcu(head,func);
 }
 
 void rcu_qs(void);
@@ -97,6 +117,8 @@ static inline void rcu_scheduler_starting(void) { }
 #endif /* #else #ifndef CONFIG_SRCU */
 static inline void rcu_end_inkernel_boot(void) { }
 static inline bool rcu_is_watching(void) { return true; }
+static inline void rcu_momentary_dyntick_idle(void) { }
+static inline void kfree_rcu_scheduler_running(void) { }
 
 /* Avoid RCU read-side critical sections leaking across. */
 static inline void rcu_all_qs(void) { barrier(); }

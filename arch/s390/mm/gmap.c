@@ -67,7 +67,7 @@ static struct gmap *gmap_alloc(unsigned long limit)
 	INIT_RADIX_TREE(&gmap->host_to_rmap, GFP_ATOMIC);
 	spin_lock_init(&gmap->guest_table_lock);
 	spin_lock_init(&gmap->shadow_lock);
-	atomic_set(&gmap->ref_count, 1);
+	refcount_set(&gmap->ref_count, 1);
 	page = alloc_pages(GFP_KERNEL, CRST_ALLOC_ORDER);
 	if (!page)
 		goto out_free;
@@ -214,7 +214,7 @@ static void gmap_free(struct gmap *gmap)
  */
 struct gmap *gmap_get(struct gmap *gmap)
 {
-	atomic_inc(&gmap->ref_count);
+	refcount_inc(&gmap->ref_count);
 	return gmap;
 }
 EXPORT_SYMBOL_GPL(gmap_get);
@@ -227,7 +227,7 @@ EXPORT_SYMBOL_GPL(gmap_get);
  */
 void gmap_put(struct gmap *gmap)
 {
-	if (atomic_dec_return(&gmap->ref_count) == 0)
+	if (refcount_dec_and_test(&gmap->ref_count))
 		gmap_free(gmap);
 }
 EXPORT_SYMBOL_GPL(gmap_put);
@@ -787,16 +787,20 @@ static void gmap_call_notifier(struct gmap *gmap, unsigned long start,
 static inline unsigned long *gmap_table_walk(struct gmap *gmap,
 					     unsigned long gaddr, int level)
 {
-	unsigned long *table;
+	const int asce_type = gmap->asce & _ASCE_TYPE_MASK;
+	unsigned long *table = gmap->table;
 
-	if ((gmap->asce & _ASCE_TYPE_MASK) + 4 < (level * 4))
-		return NULL;
 	if (gmap_is_shadow(gmap) && gmap->removed)
 		return NULL;
-	if (gaddr & (-1UL << (31 + ((gmap->asce & _ASCE_TYPE_MASK) >> 2)*11)))
+
+	if (WARN_ON_ONCE(level > (asce_type >> 2) + 1))
 		return NULL;
-	table = gmap->table;
-	switch (gmap->asce & _ASCE_TYPE_MASK) {
+
+	if (asce_type != _ASCE_TYPE_REGION1 &&
+	    gaddr & (-1UL << (31 + (asce_type >> 2) * 11)))
+		return NULL;
+
+	switch (asce_type) {
 	case _ASCE_TYPE_REGION1:
 		table += (gaddr & _REGION1_INDEX) >> _REGION1_SHIFT;
 		if (level == 4)
@@ -804,7 +808,7 @@ static inline unsigned long *gmap_table_walk(struct gmap *gmap,
 		if (*table & _REGION_ENTRY_INVALID)
 			return NULL;
 		table = (unsigned long *)(*table & _REGION_ENTRY_ORIGIN);
-		/* Fallthrough */
+		fallthrough;
 	case _ASCE_TYPE_REGION2:
 		table += (gaddr & _REGION2_INDEX) >> _REGION2_SHIFT;
 		if (level == 3)
@@ -812,7 +816,7 @@ static inline unsigned long *gmap_table_walk(struct gmap *gmap,
 		if (*table & _REGION_ENTRY_INVALID)
 			return NULL;
 		table = (unsigned long *)(*table & _REGION_ENTRY_ORIGIN);
-		/* Fallthrough */
+		fallthrough;
 	case _ASCE_TYPE_REGION3:
 		table += (gaddr & _REGION3_INDEX) >> _REGION3_SHIFT;
 		if (level == 2)
@@ -820,7 +824,7 @@ static inline unsigned long *gmap_table_walk(struct gmap *gmap,
 		if (*table & _REGION_ENTRY_INVALID)
 			return NULL;
 		table = (unsigned long *)(*table & _REGION_ENTRY_ORIGIN);
-		/* Fallthrough */
+		fallthrough;
 	case _ASCE_TYPE_SEGMENT:
 		table += (gaddr & _SEGMENT_INDEX) >> _SEGMENT_SHIFT;
 		if (level == 1)
@@ -907,10 +911,16 @@ static inline pmd_t *gmap_pmd_op_walk(struct gmap *gmap, unsigned long gaddr)
 	pmd_t *pmdp;
 
 	BUG_ON(gmap_is_shadow(gmap));
-	spin_lock(&gmap->guest_table_lock);
 	pmdp = (pmd_t *) gmap_table_walk(gmap, gaddr, 1);
+	if (!pmdp)
+		return NULL;
 
-	if (!pmdp || pmd_none(*pmdp)) {
+	/* without huge pages, there is no need to take the table lock */
+	if (!gmap->mm->context.allow_gmap_hpage_1m)
+		return pmd_none(*pmdp) ? NULL : pmdp;
+
+	spin_lock(&gmap->guest_table_lock);
+	if (pmd_none(*pmdp)) {
 		spin_unlock(&gmap->guest_table_lock);
 		return NULL;
 	}
@@ -1588,7 +1598,7 @@ static struct gmap *gmap_find_shadow(struct gmap *parent, unsigned long asce,
 			continue;
 		if (!sg->initialized)
 			return ERR_PTR(-EAGAIN);
-		atomic_inc(&sg->ref_count);
+		refcount_inc(&sg->ref_count);
 		return sg;
 	}
 	return NULL;
@@ -1676,7 +1686,7 @@ struct gmap *gmap_shadow(struct gmap *parent, unsigned long asce,
 			}
 		}
 	}
-	atomic_set(&new->ref_count, 2);
+	refcount_set(&new->ref_count, 2);
 	list_add(&new->list, &parent->children);
 	if (asce & _ASCE_REAL_SPACE) {
 		/* nothing to protect, return right away */
@@ -1834,6 +1844,7 @@ int gmap_shadow_r3t(struct gmap *sg, unsigned long saddr, unsigned long r3t,
 		goto out_free;
 	} else if (*table & _REGION_ENTRY_ORIGIN) {
 		rc = -EAGAIN;		/* Race with shadow */
+		goto out_free;
 	}
 	crst_table_init(s_r3t, _REGION3_ENTRY_EMPTY);
 	/* mark as invalid as long as the parent table is not protected */
@@ -2418,8 +2429,8 @@ EXPORT_SYMBOL_GPL(gmap_pmdp_idte_global);
  * This function is assumed to be called with the guest_table_lock
  * held.
  */
-bool gmap_test_and_clear_dirty_pmd(struct gmap *gmap, pmd_t *pmdp,
-				   unsigned long gaddr)
+static bool gmap_test_and_clear_dirty_pmd(struct gmap *gmap, pmd_t *pmdp,
+					  unsigned long gaddr)
 {
 	if (pmd_val(*pmdp) & _SEGMENT_ENTRY_INVALID)
 		return false;
@@ -2474,23 +2485,36 @@ void gmap_sync_dirty_log_pmd(struct gmap *gmap, unsigned long bitmap[4],
 }
 EXPORT_SYMBOL_GPL(gmap_sync_dirty_log_pmd);
 
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+static int thp_split_walk_pmd_entry(pmd_t *pmd, unsigned long addr,
+				    unsigned long end, struct mm_walk *walk)
+{
+	struct vm_area_struct *vma = walk->vma;
+
+	split_huge_pmd(vma, pmd, addr);
+	return 0;
+}
+
+static const struct mm_walk_ops thp_split_walk_ops = {
+	.pmd_entry	= thp_split_walk_pmd_entry,
+};
+
 static inline void thp_split_mm(struct mm_struct *mm)
 {
-#ifdef CONFIG_TRANSPARENT_HUGEPAGE
 	struct vm_area_struct *vma;
-	unsigned long addr;
 
 	for (vma = mm->mmap; vma != NULL; vma = vma->vm_next) {
-		for (addr = vma->vm_start;
-		     addr < vma->vm_end;
-		     addr += PAGE_SIZE)
-			follow_page(vma, addr, FOLL_SPLIT);
 		vma->vm_flags &= ~VM_HUGEPAGE;
 		vma->vm_flags |= VM_NOHUGEPAGE;
+		walk_page_vma(vma, &thp_split_walk_ops, NULL);
 	}
 	mm->def_flags |= VM_NOHUGEPAGE;
-#endif
 }
+#else
+static inline void thp_split_mm(struct mm_struct *mm)
+{
+}
+#endif /* CONFIG_TRANSPARENT_HUGEPAGE */
 
 /*
  * Remove all empty zero pages from the mapping for lazy refaulting
@@ -2656,7 +2680,7 @@ static int __s390_reset_acc(pte_t *ptep, unsigned long addr,
 	pte_t pte = READ_ONCE(*ptep);
 
 	if (pte_present(pte))
-		WARN_ON_ONCE(uv_convert_from_secure(pte_val(pte) & PAGE_MASK));
+		WARN_ON_ONCE(uv_destroy_page(pte_val(pte) & PAGE_MASK));
 	return 0;
 }
 

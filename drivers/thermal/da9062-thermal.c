@@ -58,7 +58,6 @@ struct da9062_thermal {
 	struct da9062 *hw;
 	struct delayed_work work;
 	struct thermal_zone_device *zone;
-	enum thermal_device_mode mode;
 	struct mutex lock; /* protection for da9062_thermal temperature */
 	int temperature;
 	int irq;
@@ -130,14 +129,6 @@ static irqreturn_t da9062_thermal_irq_handler(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-static int da9062_thermal_get_mode(struct thermal_zone_device *z,
-				   enum thermal_device_mode *mode)
-{
-	struct da9062_thermal *thermal = z->devdata;
-	*mode = thermal->mode;
-	return 0;
-}
-
 static int da9062_thermal_get_trip_type(struct thermal_zone_device *z,
 					int trip,
 					enum thermal_trip_type *type)
@@ -190,7 +181,6 @@ static int da9062_thermal_get_temp(struct thermal_zone_device *z,
 
 static struct thermal_zone_device_ops da9062_thermal_ops = {
 	.get_temp	= da9062_thermal_get_temp,
-	.get_mode	= da9062_thermal_get_mode,
 	.get_trip_type	= da9062_thermal_get_trip_type,
 	.get_trip_temp	= da9062_thermal_get_trip_temp,
 };
@@ -242,7 +232,6 @@ static int da9062_thermal_probe(struct platform_device *pdev)
 
 	thermal->config = match->data;
 	thermal->hw = chip;
-	thermal->mode = THERMAL_DEVICE_ENABLED;
 	thermal->dev = &pdev->dev;
 
 	INIT_DELAYED_WORK(&thermal->work, da9062_thermal_poll_on);
@@ -256,6 +245,11 @@ static int da9062_thermal_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "Cannot register thermal zone device\n");
 		ret = PTR_ERR(thermal->zone);
 		goto err;
+	}
+	ret = thermal_zone_device_enable(thermal->zone);
+	if (ret) {
+		dev_err(&pdev->dev, "Cannot enable thermal zone device\n");
+		goto err_zone;
 	}
 
 	dev_dbg(&pdev->dev,

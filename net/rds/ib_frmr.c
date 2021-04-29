@@ -58,7 +58,7 @@ static struct rds_ib_mr *rds_ib_alloc_frmr(struct rds_ib_device *rds_ibdev,
 
 	frmr = &ibmr->u.frmr;
 	frmr->mr = ib_alloc_mr(rds_ibdev->pd, IB_MR_TYPE_MEM_REG,
-			 pool->fmr_attr.max_pages);
+			 pool->max_pages);
 	if (IS_ERR(frmr->mr)) {
 		pr_warn("RDS/IB: %s failed to allocate MR", __func__);
 		goto out_no_cigar;
@@ -205,7 +205,7 @@ static int rds_ib_map_frmr(struct rds_ib_device *rds_ibdev,
 	}
 	frmr->dma_npages += len >> PAGE_SHIFT;
 
-	if (frmr->dma_npages > ibmr->pool->fmr_attr.max_pages) {
+	if (frmr->dma_npages > ibmr->pool->max_pages) {
 		ret = -EMSGSIZE;
 		goto out_unmap;
 	}

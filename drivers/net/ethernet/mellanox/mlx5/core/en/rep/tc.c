@@ -107,12 +107,16 @@ void mlx5e_rep_update_flows(struct mlx5e_priv *priv,
 		mlx5e_tc_encap_flows_del(priv, e, &flow_list);
 
 	if (neigh_connected && !(e->flags & MLX5_ENCAP_ENTRY_VALID)) {
+		struct net_device *route_dev;
+
 		ether_addr_copy(e->h_dest, ha);
 		ether_addr_copy(eth->h_dest, ha);
 		/* Update the encap source mac, in case that we delete
 		 * the flows when encap source mac changed.
 		 */
-		ether_addr_copy(eth->h_source, e->route_dev->dev_addr);
+		route_dev = __dev_get_by_index(dev_net(priv->netdev), e->route_dev_ifindex);
+		if (route_dev)
+			ether_addr_copy(eth->h_source, route_dev->dev_addr);
 
 		mlx5e_tc_encap_flows_add(priv, e, &flow_list);
 	}
@@ -404,10 +408,12 @@ static void mlx5e_rep_indr_block_unbind(void *cb_priv)
 static LIST_HEAD(mlx5e_block_cb_list);
 
 static int
-mlx5e_rep_indr_setup_block(struct net_device *netdev,
+mlx5e_rep_indr_setup_block(struct net_device *netdev, struct Qdisc *sch,
 			   struct mlx5e_rep_priv *rpriv,
 			   struct flow_block_offload *f,
-			   flow_setup_cb_t *setup_cb)
+			   flow_setup_cb_t *setup_cb,
+			   void *data,
+			   void (*cleanup)(struct flow_block_cb *block_cb))
 {
 	struct mlx5e_priv *priv = netdev_priv(rpriv->netdev);
 	struct mlx5e_rep_indr_block_priv *indr_priv;
@@ -438,8 +444,10 @@ mlx5e_rep_indr_setup_block(struct net_device *netdev,
 		list_add(&indr_priv->list,
 			 &rpriv->uplink_priv.tc_indr_block_priv_list);
 
-		block_cb = flow_block_cb_alloc(setup_cb, indr_priv, indr_priv,
-					       mlx5e_rep_indr_block_unbind);
+		block_cb = flow_indr_block_cb_alloc(setup_cb, indr_priv, indr_priv,
+						    mlx5e_rep_indr_block_unbind,
+						    f, netdev, sch, data, rpriv,
+						    cleanup);
 		if (IS_ERR(block_cb)) {
 			list_del(&indr_priv->list);
 			kfree(indr_priv);
@@ -458,7 +466,7 @@ mlx5e_rep_indr_setup_block(struct net_device *netdev,
 		if (!block_cb)
 			return -ENOENT;
 
-		flow_block_cb_remove(block_cb, f);
+		flow_indr_block_cb_remove(block_cb, f);
 		list_del(&block_cb->driver_list);
 		return 0;
 	default:
@@ -468,16 +476,20 @@ mlx5e_rep_indr_setup_block(struct net_device *netdev,
 }
 
 static
-int mlx5e_rep_indr_setup_cb(struct net_device *netdev, void *cb_priv,
-			    enum tc_setup_type type, void *type_data)
+int mlx5e_rep_indr_setup_cb(struct net_device *netdev, struct Qdisc *sch, void *cb_priv,
+			    enum tc_setup_type type, void *type_data,
+			    void *data,
+			    void (*cleanup)(struct flow_block_cb *block_cb))
 {
 	switch (type) {
 	case TC_SETUP_BLOCK:
-		return mlx5e_rep_indr_setup_block(netdev, cb_priv, type_data,
-						  mlx5e_rep_indr_setup_tc_cb);
+		return mlx5e_rep_indr_setup_block(netdev, sch, cb_priv, type_data,
+						  mlx5e_rep_indr_setup_tc_cb,
+						  data, cleanup);
 	case TC_SETUP_FT:
-		return mlx5e_rep_indr_setup_block(netdev, cb_priv, type_data,
-						  mlx5e_rep_indr_setup_ft_cb);
+		return mlx5e_rep_indr_setup_block(netdev, sch, cb_priv, type_data,
+						  mlx5e_rep_indr_setup_ft_cb,
+						  data, cleanup);
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -496,7 +508,7 @@ int mlx5e_rep_tc_netdevice_event_register(struct mlx5e_rep_priv *rpriv)
 void mlx5e_rep_tc_netdevice_event_unregister(struct mlx5e_rep_priv *rpriv)
 {
 	flow_indr_dev_unregister(mlx5e_rep_indr_setup_cb, rpriv,
-				 mlx5e_rep_indr_setup_tc_cb);
+				 mlx5e_rep_indr_block_unbind);
 }
 
 #if IS_ENABLED(CONFIG_NET_TC_SKB_EXT)
@@ -614,6 +626,11 @@ bool mlx5e_rep_tc_update_skb(struct mlx5_cqe64 *cqe,
 
 	if (!reg_c0)
 		return true;
+
+	/* If reg_c0 is not equal to the default flow tag then skb->mark
+	 * is not supported and must be reset back to 0.
+	 */
+	skb->mark = 0;
 
 	priv = netdev_priv(skb->dev);
 	esw = priv->mdev->priv.eswitch;

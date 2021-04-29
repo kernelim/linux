@@ -25,19 +25,6 @@ struct scsi_host_cmd_pool;
 struct scsi_transport_template;
 
 
-/*
- * The various choices mean:
- * NONE: Self evident.	Host adapter is not capable of scatter-gather.
- * ALL:	 Means that the host adapter module can do scatter-gather,
- *	 and that there is no limit to the size of the table to which
- *	 we scatter/gather data.  The value we set here is the maximum
- *	 single element sglist.  To use chained sglists, the adapter
- *	 has to set a value beyond ALL (and correctly use the chain
- *	 handling API.
- * Anything else:  Indicates the maximum number of chains that can be
- *	 used in one scatter-gather request.
- */
-#define SG_NONE 0
 #define SG_ALL	SG_CHUNK_SIZE
 
 #define MODE_UNKNOWN 0x00
@@ -305,11 +292,7 @@ struct scsi_host_template {
 	/*
 	 * This is an optional routine that allows the transport to become
 	 * involved when a scsi io timer fires. The return value tells the
-	 * timer routine how to finish the io timeout handling:
-	 * EH_HANDLED:		I fixed the error, please complete the command
-	 * EH_RESET_TIMER:	I need more time, reset the timer and
-	 *			begin counting again
-	 * EH_DONE:		Begin normal error recovery
+	 * timer routine how to finish the io timeout handling.
 	 *
 	 * Status: OPTIONAL
 	 */
@@ -440,7 +423,10 @@ struct scsi_host_template {
 	unsigned no_write_same:1;
 
 	/* True if the low-level driver supports blk-mq only */
-	unsigned force_blk_mq:1;
+	RH_KABI_DEPRECATE(unsigned, force_blk_mq:1)
+
+	/* True if the host uses host-wide tagspace */
+	RH_KABI_FILL_HOLE(unsigned host_tagset:1)
 
 	/*
 	 * Countdown for host blocking with no commands outstanding.
@@ -497,13 +483,19 @@ struct scsi_host_template {
 	 */
 	RH_KABI_USE(1, void (*commit_rqs)(struct Scsi_Host *, u16))
 
+	/*
+	 * Optional routine that allows the transport to decide if a cmd
+	 * is retryable. Return true if the transport is in a state the
+	 * cmd should be retried on.
+	 */
+	RH_KABI_USE(2, bool (*eh_should_retry_cmd)(struct scsi_cmnd *scmd))
+
 	/* FOR RH USE ONLY
 	 *
 	 * The following padding has been inserted before ABI freeze to
 	 * allow extending the structure while preserving ABI.
 	 */
 
-	RH_KABI_RESERVE(2)
 	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)
 };
@@ -626,7 +618,8 @@ struct Scsi_Host {
 	 *
 	 * Note: it is assumed that each hardware queue has a queue depth of
 	 * can_queue. In other words, the total queue depth per host
-	 * is nr_hw_queues * can_queue.
+	 * is nr_hw_queues * can_queue. However, for when host_tagset is set,
+	 * the total queue depth is can_queue.
 	 */
 	unsigned nr_hw_queues;
 	/* 
@@ -668,6 +661,9 @@ struct Scsi_Host {
 
 	/* Host responded with short (<36 bytes) INQUIRY result */
 	unsigned short_inquiry:1;
+
+	/* True if the host uses host-wide tagspace */
+	RH_KABI_FILL_HOLE(unsigned host_tagset:1)
 
 	/*
 	 * Optional work queue to be utilized by the transport
@@ -785,6 +781,8 @@ extern void scsi_host_put(struct Scsi_Host *t);
 extern struct Scsi_Host *scsi_host_lookup(unsigned short);
 extern const char *scsi_host_state_name(enum scsi_host_state);
 extern void scsi_cmd_get_serial(struct Scsi_Host *, struct scsi_cmnd *);
+extern void scsi_host_complete_all_commands(struct Scsi_Host *shost,
+					    int status);
 
 static inline int __must_check scsi_add_host(struct Scsi_Host *host,
 					     struct device *dev)
@@ -809,6 +807,11 @@ static inline int scsi_host_scan_allowed(struct Scsi_Host *shost)
 
 extern void scsi_unblock_requests(struct Scsi_Host *);
 extern void scsi_block_requests(struct Scsi_Host *);
+extern int scsi_host_block(struct Scsi_Host *shost);
+extern int scsi_host_unblock(struct Scsi_Host *shost, int new_state);
+
+void scsi_host_busy_iter(struct Scsi_Host *,
+			 bool (*fn)(struct scsi_cmnd *, void *, bool), void *priv);
 
 struct class_container;
 

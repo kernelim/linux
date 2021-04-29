@@ -27,12 +27,15 @@
 #ifndef __INCLUDE_LINUX_RCU_SEGCBLIST_H
 #define __INCLUDE_LINUX_RCU_SEGCBLIST_H
 
+#include <linux/types.h>
+#include <linux/atomic.h>
+
 /* Simple unsegmented callback lists. */
 struct rcu_cblist {
 	struct rcu_head *head;
 	struct rcu_head **tail;
 	long len;
-	long len_lazy;
+	RH_KABI_DEPRECATE(long, len_lazy)
 };
 
 #define RCU_CBLIST_INITIALIZER(n) { .head = NULL, .tail = &n.head }
@@ -78,8 +81,14 @@ struct rcu_segcblist {
 	struct rcu_head *head;
 	struct rcu_head **tails[RCU_CBLIST_NSEGS];
 	unsigned long gp_seq[RCU_CBLIST_NSEGS];
+#ifdef CONFIG_RCU_NOCB_CPU
+	RH_KABI_REPLACE(long len, atomic_long_t len)
+#else
 	long len;
-	long len_lazy;
+#endif
+	RH_KABI_REPLACE_SPLIT(long len_lazy,
+			      u8 enabled,
+			      u8 offloaded)
 };
 
 #define RCU_SEGCBLIST_INITIALIZER(n) \

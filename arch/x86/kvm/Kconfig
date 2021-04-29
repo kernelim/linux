@@ -27,7 +27,6 @@ config KVM
 	depends on X86_LOCAL_APIC
 	select PREEMPT_NOTIFIERS
 	select MMU_NOTIFIER
-	select ANON_INODES
 	select HAVE_KVM_IRQCHIP
 	select HAVE_KVM_IRQFD
 	select IRQ_BYPASS_MANAGER
@@ -66,6 +65,7 @@ config KVM_WERROR
 	default y if X86_64 && !KASAN
 	# We use the dependency on !COMPILE_TEST to not be enabled
 	# blindly in allmodconfig or allyesconfig configurations
+	depends on KVM
 	depends on (X86_64 && !KASAN) || !COMPILE_TEST
 	depends on EXPERT
 	help

@@ -214,7 +214,7 @@ static inline void native_load_gdt(const struct desc_ptr *dtr)
 	asm volatile("lgdt %0"::"m" (*dtr));
 }
 
-static inline void native_load_idt(const struct desc_ptr *dtr)
+static __always_inline void native_load_idt(const struct desc_ptr *dtr)
 {
 	asm volatile("lidt %0"::"m" (*dtr));
 }
@@ -389,11 +389,38 @@ static inline void set_desc_limit(struct desc_struct *desc, unsigned long limit)
 void update_intr_gate(unsigned int n, const void *addr);
 void alloc_intr_gate(unsigned int n, const void *addr);
 
+static inline void init_idt_data(struct idt_data *data, unsigned int n,
+				 const void *addr)
+{
+	BUG_ON(n > 0xFF);
+
+	memset(data, 0, sizeof(*data));
+	data->vector	= n;
+	data->addr	= addr;
+	data->segment	= __KERNEL_CS;
+	data->bits.type	= GATE_INTERRUPT;
+	data->bits.p	= 1;
+}
+
+static inline void idt_init_desc(gate_desc *gate, const struct idt_data *d)
+{
+	unsigned long addr = (unsigned long) d->addr;
+
+	gate->offset_low	= (u16) addr;
+	gate->segment		= (u16) d->segment;
+	gate->bits		= d->bits;
+	gate->offset_middle	= (u16) (addr >> 16);
+#ifdef CONFIG_X86_64
+	gate->offset_high	= (u32) (addr >> 32);
+	gate->reserved		= 0;
+#endif
+}
+
 extern unsigned long system_vectors[];
 
 #ifdef CONFIG_X86_64
 DECLARE_PER_CPU(u32, debug_idt_ctr);
-static inline bool is_debug_idt_enabled(void)
+static __always_inline bool is_debug_idt_enabled(void)
 {
 	if (this_cpu_read(debug_idt_ctr))
 		return true;
@@ -401,7 +428,7 @@ static inline bool is_debug_idt_enabled(void)
 	return false;
 }
 
-static inline void load_debug_idt(void)
+static __always_inline void load_debug_idt(void)
 {
 	load_idt((const struct desc_ptr *)&debug_idt_descr);
 }
@@ -423,7 +450,7 @@ static inline void load_debug_idt(void)
  * that doesn't need to disable interrupts, as nothing should be
  * bothering the CPU then.
  */
-static inline void load_current_idt(void)
+static __always_inline void load_current_idt(void)
 {
 	if (is_debug_idt_enabled())
 		load_debug_idt();

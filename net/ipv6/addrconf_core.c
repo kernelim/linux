@@ -174,6 +174,13 @@ eafnosupport_ip6_mtu_from_fib6(struct fib6_info *f6i, struct in6_addr *daddr,
 	return 0;
 }
 
+static int eafnosupport_ipv6_fragment(struct net *net, struct sock *sk, struct sk_buff *skb,
+				      int (*output)(struct net *, struct sock *, struct sk_buff *))
+{
+	kfree_skb(skb);
+	return -EAFNOSUPPORT;
+}
+
 const struct ipv6_stub *ipv6_stub __read_mostly = &(struct ipv6_stub) {
 	.ipv6_dst_lookup_flow = eafnosupport_ipv6_dst_lookup_flow,
 	.ipv6_route_input  = eafnosupport_ipv6_route_input,
@@ -182,6 +189,7 @@ const struct ipv6_stub *ipv6_stub __read_mostly = &(struct ipv6_stub) {
 	.fib6_lookup       = eafnosupport_fib6_lookup,
 	.fib6_multipath_select = eafnosupport_fib6_multipath_select,
 	.ip6_mtu_from_fib6 = eafnosupport_ip6_mtu_from_fib6,
+	.ipv6_fragment	   = eafnosupport_ipv6_fragment,
 };
 EXPORT_SYMBOL_GPL(ipv6_stub);
 

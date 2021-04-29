@@ -550,6 +550,12 @@ static struct ctl_table ipv4_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_doulongvec_minmax,
 	},
+	{
+		.procname	= "tcp_tx_skb_cache",
+		.data		= &tcp_tx_skb_cache_key.key,
+		.mode		= 0644,
+		.proc_handler	= proc_do_static_key,
+	},
 	{ }
 };
 

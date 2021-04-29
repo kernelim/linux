@@ -28,7 +28,9 @@ struct vm_area_struct;
 struct super_block;
 struct file_system_type;
 struct poll_table_struct;
+struct fs_context;
 
+struct kernfs_fs_context;
 struct kernfs_open_node;
 struct kernfs_iattrs;
 
@@ -105,6 +107,7 @@ struct kernfs_elem_attr {
 	struct kernfs_node	*notify_next;	/* for kernfs_notify() */
 };
 
+/* RHEL: keep it for kABI check */
 /* represent a kernfs node */
 union kernfs_node_id {
 	struct {
@@ -156,7 +159,13 @@ struct kernfs_node {
 
 	void			*priv;
 
-	union kernfs_node_id	id;
+	/*
+	 * 64bit unique ID.  Lower 32bits carry the inode number and lower
+	 * generation.
+	 */
+	RH_KABI_REPLACE(union kernfs_node_id	id,
+			u64			id)
+
 	unsigned short		flags;
 	umode_t			mode;
 	struct kernfs_iattrs	*iattr;
@@ -170,7 +179,8 @@ struct kernfs_node {
  * kernfs_node parameter.
  */
 struct kernfs_syscall_ops {
-	int (*remount_fs)(struct kernfs_root *root, int *flags, char *data);
+	RH_KABI_DEPRECATE_FN(int, remount_fs, struct kernfs_root *root,
+			     int *flags, char *data)
 	int (*show_options)(struct seq_file *sf, struct kernfs_root *root);
 
 	int (*mkdir)(struct kernfs_node *parent, const char *name,
@@ -278,11 +288,43 @@ struct kernfs_ops {
 	RH_KABI_RESERVE(2)
 };
 
+/*
+ * The kernfs superblock creation/mount parameter context.
+ */
+struct kernfs_fs_context {
+	struct kernfs_root	*root;		/* Root of the hierarchy being mounted */
+	void			*ns_tag;	/* Namespace tag of the mount (or NULL) */
+	unsigned long		magic;		/* File system specific magic number */
+
+	/* The following are set/used by kernfs_mount() */
+	bool			new_sb_created;	/* Set to T if we allocated a new sb */
+};
+
 #ifdef CONFIG_KERNFS
 
 static inline enum kernfs_node_type kernfs_type(struct kernfs_node *kn)
 {
 	return kn->flags & KERNFS_TYPE_MASK;
+}
+
+static inline ino_t kernfs_id_ino(u64 id)
+{
+	return (u32)id;
+}
+
+static inline u32 kernfs_id_gen(u64 id)
+{
+	return id >> 32;
+}
+
+static inline ino_t kernfs_ino(struct kernfs_node *kn)
+{
+	return kernfs_id_ino(kn->id);
+}
+
+static inline ino_t kernfs_gen(struct kernfs_node *kn)
+{
+	return kernfs_id_gen(kn->id);
 }
 
 /**
@@ -370,16 +412,13 @@ int kernfs_xattr_set(struct kernfs_node *kn, const char *name,
 		     const void *value, size_t size, int flags);
 
 const void *kernfs_super_ns(struct super_block *sb);
-struct dentry *kernfs_mount_ns(struct file_system_type *fs_type, int flags,
-			       struct kernfs_root *root, unsigned long magic,
-			       bool *new_sb_created, const void *ns);
+int kernfs_get_tree(struct fs_context *fc);
+void kernfs_free_fs_context(struct fs_context *fc);
 void kernfs_kill_sb(struct super_block *sb);
-struct super_block *kernfs_pin_sb(struct kernfs_root *root, const void *ns);
 
 void kernfs_init(void);
 
-struct kernfs_node *kernfs_get_node_by_id(struct kernfs_root *root,
-	const union kernfs_node_id *id);
+struct kernfs_node *kernfs_get_node_by_id(struct kernfs_root *root, u64 id);
 #else	/* CONFIG_KERNFS */
 
 static inline enum kernfs_node_type kernfs_type(struct kernfs_node *kn)
@@ -484,11 +523,10 @@ static inline int kernfs_xattr_set(struct kernfs_node *kn, const char *name,
 static inline const void *kernfs_super_ns(struct super_block *sb)
 { return NULL; }
 
-static inline struct dentry *
-kernfs_mount_ns(struct file_system_type *fs_type, int flags,
-		struct kernfs_root *root, unsigned long magic,
-		bool *new_sb_created, const void *ns)
-{ return ERR_PTR(-ENOSYS); }
+static inline int kernfs_get_tree(struct fs_context *fc)
+{ return -ENOSYS; }
+
+static inline void kernfs_free_fs_context(struct fs_context *fc) { }
 
 static inline void kernfs_kill_sb(struct super_block *sb) { }
 
@@ -568,15 +606,6 @@ static inline int kernfs_rename(struct kernfs_node *kn,
 				const char *new_name)
 {
 	return kernfs_rename_ns(kn, new_parent, new_name, NULL);
-}
-
-static inline struct dentry *
-kernfs_mount(struct file_system_type *fs_type, int flags,
-		struct kernfs_root *root, unsigned long magic,
-		bool *new_sb_created)
-{
-	return kernfs_mount_ns(fs_type, flags, root,
-				magic, new_sb_created, NULL);
 }
 
 #endif	/* __LINUX_KERNFS_H */

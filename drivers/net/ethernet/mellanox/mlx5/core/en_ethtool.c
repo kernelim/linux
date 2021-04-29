@@ -194,6 +194,24 @@ void mlx5e_build_ptys2ethtool_map(void)
 				       ETHTOOL_LINK_MODE_200000baseLR4_ER4_FR4_Full_BIT,
 				       ETHTOOL_LINK_MODE_200000baseDR4_Full_BIT,
 				       ETHTOOL_LINK_MODE_200000baseCR4_Full_BIT);
+	MLX5_BUILD_PTYS2ETHTOOL_CONFIG(MLX5E_100GAUI_1_100GBASE_CR_KR, ext,
+				       ETHTOOL_LINK_MODE_100000baseKR_Full_BIT,
+				       ETHTOOL_LINK_MODE_100000baseSR_Full_BIT,
+				       ETHTOOL_LINK_MODE_100000baseLR_ER_FR_Full_BIT,
+				       ETHTOOL_LINK_MODE_100000baseDR_Full_BIT,
+				       ETHTOOL_LINK_MODE_100000baseCR_Full_BIT);
+	MLX5_BUILD_PTYS2ETHTOOL_CONFIG(MLX5E_200GAUI_2_200GBASE_CR2_KR2, ext,
+				       ETHTOOL_LINK_MODE_200000baseKR2_Full_BIT,
+				       ETHTOOL_LINK_MODE_200000baseSR2_Full_BIT,
+				       ETHTOOL_LINK_MODE_200000baseLR2_ER2_FR2_Full_BIT,
+				       ETHTOOL_LINK_MODE_200000baseDR2_Full_BIT,
+				       ETHTOOL_LINK_MODE_200000baseCR2_Full_BIT);
+	MLX5_BUILD_PTYS2ETHTOOL_CONFIG(MLX5E_400GAUI_4_400GBASE_CR4_KR4, ext,
+				       ETHTOOL_LINK_MODE_400000baseKR4_Full_BIT,
+				       ETHTOOL_LINK_MODE_400000baseSR4_Full_BIT,
+				       ETHTOOL_LINK_MODE_400000baseLR4_ER4_FR4_Full_BIT,
+				       ETHTOOL_LINK_MODE_400000baseDR4_Full_BIT,
+				       ETHTOOL_LINK_MODE_400000baseCR4_Full_BIT);
 }
 
 static void mlx5e_ethtool_get_speed_arr(struct mlx5_core_dev *mdev,
@@ -225,7 +243,7 @@ int mlx5e_ethtool_get_sset_count(struct mlx5e_priv *priv, int sset)
 		return MLX5E_NUM_PFLAGS;
 	case ETH_SS_TEST:
 		return mlx5e_self_test_num(priv);
-	/* fallthrough */
+		fallthrough;
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -427,12 +445,18 @@ int mlx5e_ethtool_set_channels(struct mlx5e_priv *priv,
 		goto out;
 	}
 
-	new_channels.params = priv->channels.params;
+	new_channels.params = *cur_params;
 	new_channels.params.num_channels = count;
 
 	if (!test_bit(MLX5E_STATE_OPENED, &priv->state)) {
+		struct mlx5e_params old_params;
+
+		old_params = *cur_params;
 		*cur_params = new_channels.params;
-		mlx5e_num_channels_changed(priv);
+		err = mlx5e_num_channels_changed(priv);
+		if (err)
+			*cur_params = old_params;
+
 		goto out;
 	}
 
@@ -499,7 +523,7 @@ static int mlx5e_get_coalesce(struct net_device *netdev,
 #define MLX5E_MAX_COAL_FRAMES		MLX5_MAX_CQ_COUNT
 
 static void
-mlx5e_set_priv_channels_coalesce(struct mlx5e_priv *priv, struct ethtool_coalesce *coal)
+mlx5e_set_priv_channels_tx_coalesce(struct mlx5e_priv *priv, struct ethtool_coalesce *coal)
 {
 	struct mlx5_core_dev *mdev = priv->mdev;
 	int tc;
@@ -514,6 +538,17 @@ mlx5e_set_priv_channels_coalesce(struct mlx5e_priv *priv, struct ethtool_coalesc
 						coal->tx_coalesce_usecs,
 						coal->tx_max_coalesced_frames);
 		}
+	}
+}
+
+static void
+mlx5e_set_priv_channels_rx_coalesce(struct mlx5e_priv *priv, struct ethtool_coalesce *coal)
+{
+	struct mlx5_core_dev *mdev = priv->mdev;
+	int i;
+
+	for (i = 0; i < priv->channels.num; ++i) {
+		struct mlx5e_channel *c = priv->channels.c[i];
 
 		mlx5_core_modify_cq_moderation(mdev, &c->rq.cq.mcq,
 					       coal->rx_coalesce_usecs,
@@ -560,20 +595,8 @@ int mlx5e_ethtool_set_coalesce(struct mlx5e_priv *priv,
 	tx_moder->pkts    = coal->tx_max_coalesced_frames;
 	new_channels.params.tx_dim_enabled = !!coal->use_adaptive_tx_coalesce;
 
-	if (!test_bit(MLX5E_STATE_OPENED, &priv->state)) {
-		priv->channels.params = new_channels.params;
-		goto out;
-	}
-	/* we are opened */
-
 	reset_rx = !!coal->use_adaptive_rx_coalesce != priv->channels.params.rx_dim_enabled;
 	reset_tx = !!coal->use_adaptive_tx_coalesce != priv->channels.params.tx_dim_enabled;
-
-	if (!reset_rx && !reset_tx) {
-		mlx5e_set_priv_channels_coalesce(priv, coal);
-		priv->channels.params = new_channels.params;
-		goto out;
-	}
 
 	if (reset_rx) {
 		u8 mode = MLX5E_GET_PFLAG(&new_channels.params,
@@ -586,6 +609,20 @@ int mlx5e_ethtool_set_coalesce(struct mlx5e_priv *priv,
 					  MLX5E_PFLAG_TX_CQE_BASED_MODER);
 
 		mlx5e_reset_tx_moderation(&new_channels.params, mode);
+	}
+
+	if (!test_bit(MLX5E_STATE_OPENED, &priv->state)) {
+		priv->channels.params = new_channels.params;
+		goto out;
+	}
+
+	if (!reset_rx && !reset_tx) {
+		if (!coal->use_adaptive_rx_coalesce)
+			mlx5e_set_priv_channels_rx_coalesce(priv, coal);
+		if (!coal->use_adaptive_tx_coalesce)
+			mlx5e_set_priv_channels_tx_coalesce(priv, coal);
+		priv->channels.params = new_channels.params;
+		goto out;
 	}
 
 	err = mlx5e_safe_switch_channels(priv, &new_channels, NULL, NULL);
@@ -641,6 +678,8 @@ static const u32 pplm_fec_2_ethtool[] = {
 	[MLX5E_FEC_NOFEC] = ETHTOOL_FEC_OFF,
 	[MLX5E_FEC_FIRECODE] = ETHTOOL_FEC_BASER,
 	[MLX5E_FEC_RS_528_514] = ETHTOOL_FEC_RS,
+	[MLX5E_FEC_RS_544_514] = ETHTOOL_FEC_RS,
+	[MLX5E_FEC_LLRS_272_257_1] = ETHTOOL_FEC_LLRS,
 };
 
 static u32 pplm2ethtool_fec(u_long fec_mode, unsigned long size)
@@ -658,45 +697,50 @@ static u32 pplm2ethtool_fec(u_long fec_mode, unsigned long size)
 	return 0;
 }
 
-/* we use ETHTOOL_FEC_* offset and apply it to ETHTOOL_LINK_MODE_FEC_*_BIT */
-static u32 ethtool_fec2ethtool_caps(u_long ethtool_fec_code)
-{
-	u32 offset;
+#define MLX5E_ADVERTISE_SUPPORTED_FEC(mlx5_fec, ethtool_fec)		\
+	do {								\
+		if (mlx5e_fec_in_caps(dev, 1 << (mlx5_fec)))		\
+			__set_bit(ethtool_fec,				\
+				  link_ksettings->link_modes.supported);\
+	} while (0)
 
-	offset = find_first_bit(&ethtool_fec_code, sizeof(u32));
-	offset -= ETHTOOL_FEC_OFF_BIT;
-	offset += ETHTOOL_LINK_MODE_FEC_NONE_BIT;
-
-	return offset;
-}
+static const u32 pplm_fec_2_ethtool_linkmodes[] = {
+	[MLX5E_FEC_NOFEC] = ETHTOOL_LINK_MODE_FEC_NONE_BIT,
+	[MLX5E_FEC_FIRECODE] = ETHTOOL_LINK_MODE_FEC_BASER_BIT,
+	[MLX5E_FEC_RS_528_514] = ETHTOOL_LINK_MODE_FEC_RS_BIT,
+	[MLX5E_FEC_RS_544_514] = ETHTOOL_LINK_MODE_FEC_RS_BIT,
+	[MLX5E_FEC_LLRS_272_257_1] = ETHTOOL_LINK_MODE_FEC_LLRS_BIT,
+};
 
 static int get_fec_supported_advertised(struct mlx5_core_dev *dev,
 					struct ethtool_link_ksettings *link_ksettings)
 {
-	u_long fec_caps = 0;
-	u32 active_fec = 0;
-	u32 offset;
+	unsigned long active_fec_long;
+	u32 active_fec;
 	u32 bitn;
 	int err;
 
-	err = mlx5e_get_fec_caps(dev, (u8 *)&fec_caps);
+	err = mlx5e_get_fec_mode(dev, &active_fec, NULL);
 	if (err)
 		return (err == -EOPNOTSUPP) ? 0 : err;
 
-	err = mlx5e_get_fec_mode(dev, &active_fec, NULL);
-	if (err)
-		return err;
+	MLX5E_ADVERTISE_SUPPORTED_FEC(MLX5E_FEC_NOFEC,
+				      ETHTOOL_LINK_MODE_FEC_NONE_BIT);
+	MLX5E_ADVERTISE_SUPPORTED_FEC(MLX5E_FEC_FIRECODE,
+				      ETHTOOL_LINK_MODE_FEC_BASER_BIT);
+	MLX5E_ADVERTISE_SUPPORTED_FEC(MLX5E_FEC_RS_528_514,
+				      ETHTOOL_LINK_MODE_FEC_RS_BIT);
+	MLX5E_ADVERTISE_SUPPORTED_FEC(MLX5E_FEC_LLRS_272_257_1,
+				      ETHTOOL_LINK_MODE_FEC_LLRS_BIT);
 
-	for_each_set_bit(bitn, &fec_caps, ARRAY_SIZE(pplm_fec_2_ethtool)) {
-		u_long ethtool_bitmask = pplm_fec_2_ethtool[bitn];
-
-		offset = ethtool_fec2ethtool_caps(ethtool_bitmask);
-		__set_bit(offset, link_ksettings->link_modes.supported);
-	}
-
-	active_fec = pplm2ethtool_fec(active_fec, sizeof(u32) * BITS_PER_BYTE);
-	offset = ethtool_fec2ethtool_caps(active_fec);
-	__set_bit(offset, link_ksettings->link_modes.advertising);
+	active_fec_long = active_fec;
+	/* active fec is a bit set, find out which bit is set and
+	 * advertise the corresponding ethtool bit
+	 */
+	bitn = find_first_bit(&active_fec_long, sizeof(active_fec_long) * BITS_PER_BYTE);
+	if (bitn < ARRAY_SIZE(pplm_fec_2_ethtool_linkmodes))
+		__set_bit(pplm_fec_2_ethtool_linkmodes[bitn],
+			  link_ksettings->link_modes.advertising);
 
 	return 0;
 }
@@ -983,6 +1027,22 @@ static int mlx5e_get_link_ksettings(struct net_device *netdev,
 	return mlx5e_ethtool_get_link_ksettings(priv, link_ksettings);
 }
 
+static int mlx5e_speed_validate(struct net_device *netdev, bool ext,
+				const unsigned long link_modes, u8 autoneg)
+{
+	/* Extended link-mode has no speed limitations. */
+	if (ext)
+		return 0;
+
+	if ((link_modes & MLX5E_PROT_MASK(MLX5E_56GBASE_R4)) &&
+	    autoneg != AUTONEG_ENABLE) {
+		netdev_err(netdev, "%s: 56G link speed requires autoneg enabled\n",
+			   __func__);
+		return -EINVAL;
+	}
+	return 0;
+}
+
 static u32 mlx5e_ethtool2ptys_adver_link(const unsigned long *link_modes)
 {
 	u32 i, ptys_modes = 0;
@@ -1005,7 +1065,8 @@ static u32 mlx5e_ethtool2ptys_ext_adver_link(const unsigned long *link_modes)
 	unsigned long modes[2];
 
 	for (i = 0; i < MLX5E_EXT_LINK_MODES_NUMBER; ++i) {
-		if (*ptys2ext_ethtool_table[i].advertised == 0)
+		if (ptys2ext_ethtool_table[i].advertised[0] == 0 &&
+		    ptys2ext_ethtool_table[i].advertised[1] == 0)
 			continue;
 		memset(modes, 0, sizeof(modes));
 		bitmap_and(modes, ptys2ext_ethtool_table[i].advertised,
@@ -1075,13 +1136,9 @@ int mlx5e_ethtool_set_link_ksettings(struct mlx5e_priv *priv,
 	link_modes = autoneg == AUTONEG_ENABLE ? ethtool2ptys_adver_func(adver) :
 		mlx5e_port_speed2linkmodes(mdev, speed, !ext);
 
-	if ((link_modes & MLX5E_PROT_MASK(MLX5E_56GBASE_R4)) &&
-	    autoneg != AUTONEG_ENABLE) {
-		netdev_err(priv->netdev, "%s: 56G link speed requires autoneg enabled\n",
-			   __func__);
-		err = -EINVAL;
+	err = mlx5e_speed_validate(priv->netdev, ext, link_modes, autoneg);
+	if (err)
 		goto out;
-	}
 
 	link_modes = link_modes & eproto.cap;
 	if (!link_modes) {
@@ -1215,7 +1272,7 @@ int mlx5e_set_rxfh(struct net_device *dev, const u32 *indir,
 	}
 
 	if (refresh_tirs)
-		mlx5e_modify_tirs_hash(priv, in, inlen);
+		mlx5e_modify_tirs_hash(priv, in);
 
 	mutex_unlock(&priv->state_lock);
 
@@ -1528,8 +1585,8 @@ static int mlx5e_get_fecparam(struct net_device *netdev,
 {
 	struct mlx5e_priv *priv = netdev_priv(netdev);
 	struct mlx5_core_dev *mdev = priv->mdev;
-	u8 fec_configured = 0;
-	u32 fec_active = 0;
+	u16 fec_configured;
+	u32 fec_active;
 	int err;
 
 	err = mlx5e_get_fec_mode(mdev, &fec_active, &fec_configured);
@@ -1537,14 +1594,14 @@ static int mlx5e_get_fecparam(struct net_device *netdev,
 	if (err)
 		return err;
 
-	fecparam->active_fec = pplm2ethtool_fec((u_long)fec_active,
-						sizeof(u32) * BITS_PER_BYTE);
+	fecparam->active_fec = pplm2ethtool_fec((unsigned long)fec_active,
+						sizeof(unsigned long) * BITS_PER_BYTE);
 
 	if (!fecparam->active_fec)
 		return -EOPNOTSUPP;
 
-	fecparam->fec = pplm2ethtool_fec((u_long)fec_configured,
-					 sizeof(u8) * BITS_PER_BYTE);
+	fecparam->fec = pplm2ethtool_fec((unsigned long)fec_configured,
+					 sizeof(unsigned long) * BITS_PER_BYTE);
 
 	return 0;
 }
@@ -1554,9 +1611,13 @@ static int mlx5e_set_fecparam(struct net_device *netdev,
 {
 	struct mlx5e_priv *priv = netdev_priv(netdev);
 	struct mlx5_core_dev *mdev = priv->mdev;
-	u8 fec_policy = 0;
+	u16 fec_policy = 0;
 	int mode;
 	int err;
+
+	if (bitmap_weight((unsigned long *)&fecparam->fec,
+			  ETHTOOL_FEC_LLRS_BIT + 1) > 1)
+		return -EOPNOTSUPP;
 
 	for (mode = 0; mode < ARRAY_SIZE(pplm_fec_2_ethtool); mode++) {
 		if (!(pplm_fec_2_ethtool[mode] & fecparam->fec))
@@ -1871,7 +1932,7 @@ static int set_pflag_rx_no_csum_complete(struct net_device *netdev, bool enable)
 	return 0;
 }
 
-static int set_pflag_xdp_tx_mpwqe(struct net_device *netdev, bool enable)
+static int set_pflag_tx_mpwqe_common(struct net_device *netdev, u32 flag, bool enable)
 {
 	struct mlx5e_priv *priv = netdev_priv(netdev);
 	struct mlx5_core_dev *mdev = priv->mdev;
@@ -1883,7 +1944,7 @@ static int set_pflag_xdp_tx_mpwqe(struct net_device *netdev, bool enable)
 
 	new_channels.params = priv->channels.params;
 
-	MLX5E_SET_PFLAG(&new_channels.params, MLX5E_PFLAG_XDP_TX_MPWQE, enable);
+	MLX5E_SET_PFLAG(&new_channels.params, flag, enable);
 
 	if (!test_bit(MLX5E_STATE_OPENED, &priv->state)) {
 		priv->channels.params = new_channels.params;
@@ -1894,6 +1955,16 @@ static int set_pflag_xdp_tx_mpwqe(struct net_device *netdev, bool enable)
 	return err;
 }
 
+static int set_pflag_xdp_tx_mpwqe(struct net_device *netdev, bool enable)
+{
+	return set_pflag_tx_mpwqe_common(netdev, MLX5E_PFLAG_XDP_TX_MPWQE, enable);
+}
+
+static int set_pflag_skb_tx_mpwqe(struct net_device *netdev, bool enable)
+{
+	return set_pflag_tx_mpwqe_common(netdev, MLX5E_PFLAG_SKB_TX_MPWQE, enable);
+}
+
 static const struct pflag_desc mlx5e_priv_flags[MLX5E_NUM_PFLAGS] = {
 	{ "rx_cqe_moder",        set_pflag_rx_cqe_based_moder },
 	{ "tx_cqe_moder",        set_pflag_tx_cqe_based_moder },
@@ -1901,6 +1972,7 @@ static const struct pflag_desc mlx5e_priv_flags[MLX5E_NUM_PFLAGS] = {
 	{ "rx_striding_rq",      set_pflag_rx_striding_rq },
 	{ "rx_no_csum_complete", set_pflag_rx_no_csum_complete },
 	{ "xdp_tx_mpwqe",        set_pflag_xdp_tx_mpwqe },
+	{ "skb_tx_mpwqe",        set_pflag_skb_tx_mpwqe },
 };
 
 static int mlx5e_handle_pflag(struct net_device *netdev,

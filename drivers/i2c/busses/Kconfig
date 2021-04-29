@@ -136,7 +136,9 @@ config I2C_I801
 	    Cedar Fork (PCH)
 	    Ice Lake (PCH)
 	    Comet Lake (PCH)
+	    Elkhart Lake (PCH)
 	    Tiger Lake (PCH)
+	    Emmitsburg (PCH)
 
 	  This driver can also be built as a module.  If so, the module
 	  will be called i2c-i801.
@@ -229,6 +231,15 @@ config I2C_NFORCE2_S4985
 
 	  This driver can also be built as a module.  If so, the module
 	  will be called i2c-nforce2-s4985.
+
+config I2C_NVIDIA_GPU
+	tristate "NVIDIA GPU I2C controller"
+	depends on PCI
+	help
+	  If you say yes to this option, support will be included for the
+	  NVIDIA GPU I2C controller which is used to communicate with the GPU's
+	  Type-C controller. This driver can also be built as a module called
+	  i2c-nvidia-gpu.
 
 config I2C_SIS5595
 	tristate "SiS 5595"
@@ -687,6 +698,19 @@ config I2C_LPC2K
 
 	  This driver can also be built as a module.  If so, the module
 	  will be called i2c-lpc2k.
+
+config I2C_MLXBF
+        tristate "Mellanox BlueField I2C controller"
+        depends on MELLANOX_PLATFORM && ARM64
+        help
+          Enabling this option will add I2C SMBus support for Mellanox BlueField
+          system.
+
+          This driver can also be built as a module. If so, the module will be
+          called i2c-mlxbf.
+
+          This driver implements an I2C SMBus host controller and enables both
+          master and slave functions.
 
 config I2C_MESON
 	tristate "Amlogic Meson I2C controller"

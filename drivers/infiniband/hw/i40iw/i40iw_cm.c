@@ -2330,7 +2330,7 @@ static void i40iw_rem_ref_cm_node(struct i40iw_cm_node *cm_node)
 	iwqp = cm_node->iwqp;
 	if (iwqp) {
 		iwqp->cm_node = NULL;
-		i40iw_rem_ref(&iwqp->ibqp);
+		i40iw_qp_rem_ref(&iwqp->ibqp);
 		cm_node->iwqp = NULL;
 	} else if (cm_node->qhash_set) {
 		i40iw_get_addr_info(cm_node, &nfo);
@@ -3460,7 +3460,7 @@ void i40iw_cm_disconn(struct i40iw_qp *iwqp)
 		kfree(work);
 		return;
 	}
-	i40iw_add_ref(&iwqp->ibqp);
+	i40iw_qp_add_ref(&iwqp->ibqp);
 	spin_unlock_irqrestore(&iwdev->qptable_lock, flags);
 
 	work->iwqp = iwqp;
@@ -3631,7 +3631,7 @@ static void i40iw_disconnect_worker(struct work_struct *work)
 
 	kfree(dwork);
 	i40iw_cm_disconn_true(iwqp);
-	i40iw_rem_ref(&iwqp->ibqp);
+	i40iw_qp_rem_ref(&iwqp->ibqp);
 }
 
 /**
@@ -3753,7 +3753,7 @@ int i40iw_accept(struct iw_cm_id *cm_id, struct iw_cm_conn_param *conn_param)
 	cm_node->lsmm_size = accept.size + conn_param->private_data_len;
 	i40iw_cm_init_tsa_conn(iwqp, cm_node);
 	cm_id->add_ref(cm_id);
-	i40iw_add_ref(&iwqp->ibqp);
+	i40iw_qp_add_ref(&iwqp->ibqp);
 
 	attr.qp_state = IB_QPS_RTS;
 	cm_node->qhash_set = false;
@@ -3916,7 +3916,7 @@ int i40iw_connect(struct iw_cm_id *cm_id, struct iw_cm_conn_param *conn_param)
 	iwqp->cm_node = cm_node;
 	cm_node->iwqp = iwqp;
 	iwqp->cm_id = cm_id;
-	i40iw_add_ref(&iwqp->ibqp);
+	i40iw_qp_add_ref(&iwqp->ibqp);
 
 	if (cm_node->state != I40IW_CM_STATE_OFFLOADED) {
 		cm_node->state = I40IW_CM_STATE_SYN_SENT;

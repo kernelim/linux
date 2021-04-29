@@ -159,7 +159,12 @@ class IocgStat:
         else:
             self.inflight_pct = 0
 
-        self.debt_ms = iocg.abs_vdebt.counter.value_() / VTIME_PER_USEC / 1000
+        # vdebt used to be an atomic64_t and is now u64, support both
+        try:
+            self.debt_ms = iocg.abs_vdebt.counter.value_() / VTIME_PER_USEC / 1000
+        except:
+            self.debt_ms = iocg.abs_vdebt.value_() / VTIME_PER_USEC / 1000
+
         self.use_delay = blkg.use_delay.counter.value_()
         self.delay_ms = blkg.delay_nsec.counter.value_() / 1_000_000
 
@@ -167,7 +172,7 @@ class IocgStat:
         self.usages = []
         self.usage = 0
         for i in range(NR_USAGE_SLOTS):
-            usage = iocg.usages[(usage_idx + i) % NR_USAGE_SLOTS].value_()
+            usage = iocg.usages[(usage_idx + 1 + i) % NR_USAGE_SLOTS].value_()
             upct = usage * 100 / HWEIGHT_WHOLE
             self.usages.append(upct)
             self.usage = max(self.usage, upct)

@@ -6,6 +6,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/blk-mq.h>
+#include <linux/list_sort.h>
 
 #include <trace/events/block.h>
 
@@ -88,6 +89,37 @@ void blk_mq_sched_restart(struct blk_mq_hw_ctx *hctx)
 	blk_mq_run_hw_queue(hctx, true);
 }
 
+static int sched_rq_cmp(void *priv, struct list_head *a, struct list_head *b)
+{
+	struct request *rqa = container_of(a, struct request, queuelist);
+	struct request *rqb = container_of(b, struct request, queuelist);
+
+	return rqa->mq_hctx > rqb->mq_hctx;
+}
+
+static bool blk_mq_dispatch_hctx_list(struct list_head *rq_list)
+{
+	struct blk_mq_hw_ctx *hctx =
+		list_first_entry(rq_list, struct request, queuelist)->mq_hctx;
+	struct request *rq;
+	LIST_HEAD(hctx_list);
+	unsigned int count = 0;
+	bool ret;
+
+	list_for_each_entry(rq, rq_list, queuelist) {
+		if (rq->mq_hctx != hctx) {
+			list_cut_before(&hctx_list, rq_list, &rq->queuelist);
+			goto dispatch;
+		}
+		count++;
+	}
+	list_splice_tail_init(rq_list, &hctx_list);
+
+dispatch:
+	ret = blk_mq_dispatch_rq_list(hctx, &hctx_list, count);
+	return ret;
+}
+
 #define BLK_MQ_BUDGET_DELAY	3		/* ms units */
 
 /*
@@ -98,12 +130,20 @@ void blk_mq_sched_restart(struct blk_mq_hw_ctx *hctx)
  * Returns -EAGAIN if hctx->dispatch was found non-empty and run_work has to
  * be run again.  This is necessary to avoid starving flushes.
  */
-static int blk_mq_do_dispatch_sched(struct blk_mq_hw_ctx *hctx)
+static int __blk_mq_do_dispatch_sched(struct blk_mq_hw_ctx *hctx)
 {
 	struct request_queue *q = hctx->queue;
 	struct elevator_queue *e = q->elevator;
+	bool multi_hctxs = false, run_queue = false;
+	bool dispatched = false, busy = false;
+	unsigned int max_dispatch;
 	LIST_HEAD(rq_list);
-	int ret = 0;
+	int count = 0;
+
+	if (hctx->dispatch_busy)
+		max_dispatch = 1;
+	else
+		max_dispatch = hctx->queue->nr_requests;
 
 	do {
 		struct request *rq;
@@ -112,7 +152,7 @@ static int blk_mq_do_dispatch_sched(struct blk_mq_hw_ctx *hctx)
 			break;
 
 		if (!list_empty_careful(&hctx->dispatch)) {
-			ret = -EAGAIN;
+			busy = true;
 			break;
 		}
 
@@ -129,7 +169,7 @@ static int blk_mq_do_dispatch_sched(struct blk_mq_hw_ctx *hctx)
 			 * no guarantee anyone will kick the queue.  Kick it
 			 * ourselves.
 			 */
-			blk_mq_delay_run_hw_queues(q, BLK_MQ_BUDGET_DELAY);
+			run_queue = true;
 			break;
 		}
 
@@ -138,8 +178,42 @@ static int blk_mq_do_dispatch_sched(struct blk_mq_hw_ctx *hctx)
 		 * if this rq won't be queued to driver via .queue_rq()
 		 * in blk_mq_dispatch_rq_list().
 		 */
-		list_add(&rq->queuelist, &rq_list);
-	} while (blk_mq_dispatch_rq_list(q, &rq_list, true));
+		list_add_tail(&rq->queuelist, &rq_list);
+		if (rq->mq_hctx != hctx)
+			multi_hctxs = true;
+	} while (++count < max_dispatch);
+
+	if (!count) {
+		if (run_queue)
+			blk_mq_delay_run_hw_queues(q, BLK_MQ_BUDGET_DELAY);
+	} else if (multi_hctxs) {
+		/*
+		 * Requests from different hctx may be dequeued from some
+		 * schedulers, such as bfq and deadline.
+		 *
+		 * Sort the requests in the list according to their hctx,
+		 * dispatch batching requests from same hctx at a time.
+		 */
+		list_sort(NULL, &rq_list, sched_rq_cmp);
+		do {
+			dispatched |= blk_mq_dispatch_hctx_list(&rq_list);
+		} while (!list_empty(&rq_list));
+	} else {
+		dispatched = blk_mq_dispatch_rq_list(hctx, &rq_list, count);
+	}
+
+	if (busy)
+		return -EAGAIN;
+	return !!dispatched;
+}
+
+static int blk_mq_do_dispatch_sched(struct blk_mq_hw_ctx *hctx)
+{
+	int ret;
+
+	do {
+		ret = __blk_mq_do_dispatch_sched(hctx);
+	} while (ret == 1);
 
 	return ret;
 }
@@ -169,10 +243,9 @@ static int blk_mq_do_dispatch_ctx(struct blk_mq_hw_ctx *hctx)
 	LIST_HEAD(rq_list);
 	struct blk_mq_ctx *ctx = READ_ONCE(hctx->dispatch_from);
 	int ret = 0;
+	struct request *rq;
 
 	do {
-		struct request *rq;
-
 		if (!list_empty_careful(&hctx->dispatch)) {
 			ret = -EAGAIN;
 			break;
@@ -208,13 +281,13 @@ static int blk_mq_do_dispatch_ctx(struct blk_mq_hw_ctx *hctx)
 		/* round robin for fair dispatch */
 		ctx = blk_mq_next_ctx(hctx, rq->mq_ctx);
 
-	} while (blk_mq_dispatch_rq_list(q, &rq_list, true));
+	} while (blk_mq_dispatch_rq_list(rq->mq_hctx, &rq_list, 1));
 
 	WRITE_ONCE(hctx->dispatch_from, ctx);
 	return ret;
 }
 
-int __blk_mq_sched_dispatch_requests(struct blk_mq_hw_ctx *hctx)
+static int __blk_mq_sched_dispatch_requests(struct blk_mq_hw_ctx *hctx)
 {
 	struct request_queue *q = hctx->queue;
 	struct elevator_queue *e = q->elevator;
@@ -248,7 +321,7 @@ int __blk_mq_sched_dispatch_requests(struct blk_mq_hw_ctx *hctx)
 	 */
 	if (!list_empty(&rq_list)) {
 		blk_mq_sched_mark_restart_hctx(hctx);
-		if (blk_mq_dispatch_rq_list(q, &rq_list, false)) {
+		if (blk_mq_dispatch_rq_list(hctx, &rq_list, 0)) {
 			if (has_sched_dispatch)
 				ret = blk_mq_do_dispatch_sched(hctx);
 			else
@@ -261,7 +334,7 @@ int __blk_mq_sched_dispatch_requests(struct blk_mq_hw_ctx *hctx)
 		ret = blk_mq_do_dispatch_ctx(hctx);
 	} else {
 		blk_mq_flush_busy_ctxs(hctx, &rq_list);
-		blk_mq_dispatch_rq_list(q, &rq_list, false);
+		blk_mq_dispatch_rq_list(hctx, &rq_list, 0);
 	}
 
 	return ret;
@@ -458,6 +531,28 @@ void blk_mq_sched_insert_request(struct request *rq, bool at_head,
 	WARN_ON(e && (rq->tag != -1));
 
 	if (blk_mq_sched_bypass_insert(hctx, !!e, rq)) {
+		/*
+		 * Firstly normal IO request is inserted to scheduler queue or
+		 * sw queue, meantime we add flush request to dispatch queue(
+		 * hctx->dispatch) directly and there is at most one in-flight
+		 * flush request for each hw queue, so it doesn't matter to add
+		 * flush request to tail or front of the dispatch queue.
+		 *
+		 * Secondly in case of NCQ, flush request belongs to non-NCQ
+		 * command, and queueing it will fail when there is any
+		 * in-flight normal IO request(NCQ command). When adding flush
+		 * rq to the front of hctx->dispatch, it is easier to introduce
+		 * extra time to flush rq's latency because of S_SCHED_RESTART
+		 * compared with adding to the tail of dispatch queue, then
+		 * chance of flush merge is increased, and less flush requests
+		 * will be issued to controller. It is observed that ~10% time
+		 * is saved in blktests block/004 on disk attached to AHCI/NCQ
+		 * drive when adding flush rq to the front of hctx->dispatch.
+		 *
+		 * Simply queue flush rq to the front of hctx->dispatch so that
+		 * intensive flush workloads can benefit in case of NCQ HW.
+		 */
+		at_head = (rq->rq_flags & RQF_FLUSH_SEQ) ? true : at_head;
 		blk_mq_request_bypass_insert(rq, at_head, false);
 		goto run;
 	}
@@ -518,9 +613,11 @@ static void blk_mq_sched_free_tags(struct blk_mq_tag_set *set,
 				   struct blk_mq_hw_ctx *hctx,
 				   unsigned int hctx_idx)
 {
+	unsigned int flags = set->flags & ~BLK_MQ_F_TAG_HCTX_SHARED;
+
 	if (hctx->sched_tags) {
 		blk_mq_free_rqs(set, hctx->sched_tags, hctx_idx);
-		blk_mq_free_rq_map(hctx->sched_tags);
+		blk_mq_free_rq_map(hctx->sched_tags, flags);
 		hctx->sched_tags = NULL;
 	}
 }
@@ -530,10 +627,12 @@ static int blk_mq_sched_alloc_tags(struct request_queue *q,
 				   unsigned int hctx_idx)
 {
 	struct blk_mq_tag_set *set = q->tag_set;
+	/* Clear HCTX_SHARED so tags are init'ed */
+	unsigned int flags = set->flags & ~BLK_MQ_F_TAG_HCTX_SHARED;
 	int ret;
 
 	hctx->sched_tags = blk_mq_alloc_rq_map(set, hctx_idx, q->nr_requests,
-					       set->reserved_tags);
+					       set->reserved_tags, flags);
 	if (!hctx->sched_tags)
 		return -ENOMEM;
 
@@ -551,8 +650,11 @@ static void blk_mq_sched_tags_teardown(struct request_queue *q)
 	int i;
 
 	queue_for_each_hw_ctx(q, hctx, i) {
+		/* Clear HCTX_SHARED so tags are freed */
+		unsigned int flags = hctx->flags & ~BLK_MQ_F_TAG_HCTX_SHARED;
+
 		if (hctx->sched_tags) {
-			blk_mq_free_rq_map(hctx->sched_tags);
+			blk_mq_free_rq_map(hctx->sched_tags, flags);
 			hctx->sched_tags = NULL;
 		}
 	}

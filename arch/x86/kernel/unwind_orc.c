@@ -639,7 +639,7 @@ void __unwind_start(struct unwind_state *state, struct task_struct *task,
 			goto the_end;
 
 		state->ip = regs->ip;
-		state->sp = kernel_stack_pointer(regs);
+		state->sp = regs->sp;
 		state->bp = regs->bp;
 		state->regs = regs;
 		state->full_regs = true;

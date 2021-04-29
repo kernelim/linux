@@ -29,7 +29,12 @@
 
 #ifndef __ASSEMBLY__
 
-struct pt_regs {
+#if defined(__KERNEL__) && !defined(__GENKSYMS__)
+struct user_pt_regs
+#else
+struct pt_regs
+#endif
+{
 	unsigned long gpr[32];
 	unsigned long nip;
 	unsigned long msr;
@@ -213,6 +218,7 @@ struct ppc_debug_info {
 #define PPC_DEBUG_FEATURE_DATA_BP_RANGE		0x0000000000000004
 #define PPC_DEBUG_FEATURE_DATA_BP_MASK		0x0000000000000008
 #define PPC_DEBUG_FEATURE_DATA_BP_DAWR		0x0000000000000010
+#define PPC_DEBUG_FEATURE_DATA_BP_ARCH_31	0x0000000000000020
 
 #ifndef __ASSEMBLY__
 

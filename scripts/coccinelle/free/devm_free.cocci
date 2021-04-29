@@ -92,7 +92,7 @@ position p;
 (
  kfree@p(x)
 |
- kzfree@p(x)
+ kfree_sensitive@p(x)
 |
  __krealloc@p(x, ...)
 |
@@ -117,7 +117,7 @@ position p != safe.p;
 (
 * kfree@p(x)
 |
-* kzfree@p(x)
+* kfree_sensitive@p(x)
 |
 * __krealloc@p(x, ...)
 |

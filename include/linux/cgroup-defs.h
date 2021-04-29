@@ -89,6 +89,16 @@ enum {
 	 * Enable cpuset controller in v1 cgroup to use v2 behavior.
 	 */
 	CGRP_ROOT_CPUSET_V2_MODE = (1 << 4),
+
+	/*
+	 * Enable legacy local memory.events.
+	 */
+	CGRP_ROOT_MEMORY_LOCAL_EVENTS = (1 << 5),
+
+	/*
+	 * Enable recursive subtree protection
+	 */
+	CGRP_ROOT_MEMORY_RECURSIVE_PROT = (1 << 6),
 };
 
 /* cftype->flags */
@@ -362,7 +372,7 @@ struct cgroup {
 	 *
 	 * Allocating/Removing ID must be protected by cgroup_mutex.
 	 */
-	int id;
+	RH_KABI_DEPRECATE(int, id)
 
 	/*
 	 * The depth this cgroup is at.  The root is at depth zero and each
@@ -508,7 +518,8 @@ struct cgroup {
 	 */
 
 	/* ids of the ancestors at each level including self */
-	int ancestor_ids[];
+	RH_KABI_BROKEN_REPLACE(int ancestor_ids[],
+			       u64 ancestor_ids[])
 };
 
 /*
@@ -528,8 +539,15 @@ struct cgroup_root {
 	/* The root cgroup.  Root is destroyed on its release. */
 	struct cgroup cgrp;
 
+	/*
+	 * RHEL8:
+	 * The cgroup structures are all allocated by the core kernel,
+	 * see comment above
+	 */
+
 	/* for cgrp->ancestor_ids[0] */
-	int cgrp_ancestor_id_storage;
+	RH_KABI_BROKEN_REPLACE(int cgrp_ancestor_id_storage,
+			       u64 cgrp_ancestor_id_storage)
 
 	/* Number of cgroups in the hierarchy, used only for /proc/cgroups */
 	atomic_t nr_cgrps;
@@ -541,7 +559,7 @@ struct cgroup_root {
 	unsigned int flags;
 
 	/* IDs for cgroups in this hierarchy */
-	struct idr cgroup_idr;
+	RH_KABI_DEPRECATE(struct idr, cgroup_idr)
 
 	/* The path to use for release notifications. */
 	char release_agent_path[PATH_MAX];
@@ -823,7 +841,7 @@ struct sock_cgroup_data {
 	union {
 #ifdef __LITTLE_ENDIAN
 		struct {
-			u8	is_data;
+			RH_KABI_REPLACE_SPLIT(u8 is_data, u8 is_data : 1, u8 no_refcnt : 1, u8 unused : 6)
 			u8	padding;
 			u16	prioidx;
 			u32	classid;
@@ -833,7 +851,7 @@ struct sock_cgroup_data {
 			u32	classid;
 			u16	prioidx;
 			u8	padding;
-			u8	is_data;
+			RH_KABI_REPLACE_SPLIT(u8 is_data, u8 unused : 6, u8 no_refcnt : 1, u8 is_data : 1)
 		} __packed;
 #endif
 		u64		val;

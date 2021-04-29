@@ -94,6 +94,7 @@
 #include <linux/rodata_test.h>
 #include <linux/jump_label.h>
 #include <linux/mem_encrypt.h>
+#include <linux/kcsan.h>
 
 #include <asm/io.h>
 #include <asm/bugs.h>
@@ -499,6 +500,10 @@ void __init __weak thread_stack_cache_init(void)
 
 void __init __weak mem_encrypt_init(void) { }
 
+void __init __weak poking_init(void) { }
+
+void __init __weak pgd_cache_init(void) { }
+
 bool initcall_debug;
 core_param(initcall_debug, initcall_debug, bool, 0644);
 
@@ -520,6 +525,7 @@ static void __init mm_init(void)
 	 * bigger than MAX_ORDER unless SPARSEMEM.
 	 */
 	page_ext_init_flatmem();
+	init_debug_pagealloc();
 	mem_init();
 	kmem_cache_init();
 	pgtable_init();
@@ -529,6 +535,7 @@ static void __init mm_init(void)
 	init_espfix_bsp();
 	/* Should be run after espfix64 is set up. */
 	pti_init();
+	pgd_cache_init();
 }
 
 asmlinkage __visible void __init start_kernel(void)
@@ -658,6 +665,7 @@ asmlinkage __visible void __init start_kernel(void)
 	profile_init();
 	call_function_init();
 	WARN(!irqs_disabled(), "Interrupts were enabled early\n");
+
 	early_boot_irqs_disabled = false;
 	local_irq_enable();
 
@@ -734,15 +742,13 @@ asmlinkage __visible void __init start_kernel(void)
 	taskstats_init_early();
 	delayacct_init();
 
+	poking_init();
 	check_bugs();
 
 	acpi_subsystem_init();
 	arch_post_acpi_subsys_init();
 	sfi_init_late();
-
-	if (efi_enabled(EFI_RUNTIME_SERVICES)) {
-		efi_free_boot_services();
-	}
+	kcsan_init();
 
 	/* Do the rest non-__init'ed, we're now alive */
 	rest_init();
@@ -982,7 +988,6 @@ static void __init do_initcalls(void)
 static void __init do_basic_setup(void)
 {
 	cpuset_init_smp();
-	shmem_init();
 	driver_init();
 	init_irq_proc();
 	do_ctors();

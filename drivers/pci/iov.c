@@ -133,12 +133,35 @@ static void pci_read_vf_config_common(struct pci_dev *virtfn)
 			     &physfn->sriov->subsystem_device);
 }
 
+int pci_iov_sysfs_link(struct pci_dev *dev,
+		struct pci_dev *virtfn, int id)
+{
+	char buf[VIRTFN_ID_LEN];
+	int rc;
+
+	sprintf(buf, "virtfn%u", id);
+	rc = sysfs_create_link(&dev->dev.kobj, &virtfn->dev.kobj, buf);
+	if (rc)
+		goto failed;
+	rc = sysfs_create_link(&virtfn->dev.kobj, &dev->dev.kobj, "physfn");
+	if (rc)
+		goto failed1;
+
+	kobject_uevent(&virtfn->dev.kobj, KOBJ_CHANGE);
+
+	return 0;
+
+failed1:
+	sysfs_remove_link(&dev->dev.kobj, buf);
+failed:
+	return rc;
+}
+
 int pci_iov_add_virtfn(struct pci_dev *dev, int id)
 {
 	int i;
 	int rc = -ENOMEM;
 	u64 size;
-	char buf[VIRTFN_ID_LEN];
 	struct pci_dev *virtfn;
 	struct resource *res;
 	struct pci_sriov *iov = dev->sriov;
@@ -157,6 +180,7 @@ int pci_iov_add_virtfn(struct pci_dev *dev, int id)
 	virtfn->device = iov->vf_device;
 	virtfn->is_virtfn = 1;
 	virtfn->physfn = pci_dev_get(dev);
+	virtfn->no_command_memory = 1;
 
 	if (id == 0)
 		pci_read_vf_config_common(virtfn);
@@ -182,26 +206,16 @@ int pci_iov_add_virtfn(struct pci_dev *dev, int id)
 	}
 
 	pci_device_add(virtfn, virtfn->bus);
-
-	sprintf(buf, "virtfn%u", id);
-	rc = sysfs_create_link(&dev->dev.kobj, &virtfn->dev.kobj, buf);
+	rc = pci_iov_sysfs_link(dev, virtfn, id);
 	if (rc)
-		goto failed2;
-	rc = sysfs_create_link(&virtfn->dev.kobj, &dev->dev.kobj, "physfn");
-	if (rc)
-		goto failed3;
-
-	kobject_uevent(&virtfn->dev.kobj, KOBJ_CHANGE);
+		goto failed1;
 
 	pci_bus_add_device(virtfn);
 
 	return 0;
 
-failed3:
-	sysfs_remove_link(&dev->dev.kobj, buf);
-failed2:
-	pci_stop_and_remove_bus_device(virtfn);
 failed1:
+	pci_stop_and_remove_bus_device(virtfn);
 	pci_dev_put(dev);
 failed0:
 	virtfn_remove_bus(dev->bus, bus);
@@ -557,9 +571,6 @@ static void sriov_del_vfs(struct pci_dev *dev)
 {
 	struct pci_sriov *iov = dev->sriov;
 	int i;
-
-	if (dev->no_vf_scan)
-		return;
 
 	for (i = 0; i < iov->num_VFs; i++)
 		pci_iov_remove_virtfn(dev, i);

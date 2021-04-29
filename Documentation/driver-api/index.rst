@@ -34,6 +34,7 @@ available subsections can be seen below.
    spi
    i2c
    ipmb
+   ipmi
    hsi
    edac
    scsi
@@ -50,6 +51,7 @@ available subsections can be seen below.
    uio-howto
    firmware/index
    pinctl
+   pldmfw/index
    gpio/index
    misc_devices
    dmaengine/index

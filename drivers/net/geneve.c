@@ -224,8 +224,7 @@ static void geneve_rx(struct geneve_dev *geneve, struct geneve_sock *gs,
 	if (ip_tunnel_collect_metadata() || gs->collect_md) {
 		__be16 flags;
 
-		flags = TUNNEL_KEY | TUNNEL_GENEVE_OPT |
-			(gnvh->oam ? TUNNEL_OAM : 0) |
+		flags = TUNNEL_KEY | (gnvh->oam ? TUNNEL_OAM : 0) |
 			(gnvh->critical ? TUNNEL_CRIT_OPT : 0);
 
 		tun_dst = udp_tun_rx_dst(skb, geneve_get_sk_family(gs), flags,
@@ -1874,9 +1873,11 @@ static int geneve_netdevice_event(struct notifier_block *unused,
 	    event == NETDEV_UDP_TUNNEL_DROP_INFO) {
 		geneve_offload_rx_ports(dev, event == NETDEV_UDP_TUNNEL_PUSH_INFO);
 	} else if (event == NETDEV_UNREGISTER) {
-		geneve_offload_rx_ports(dev, false);
+		if (!dev->udp_tunnel_nic_info)
+			geneve_offload_rx_ports(dev, false);
 	} else if (event == NETDEV_REGISTER) {
-		geneve_offload_rx_ports(dev, true);
+		if (!dev->udp_tunnel_nic_info)
+			geneve_offload_rx_ports(dev, true);
 	}
 
 	return NOTIFY_DONE;

@@ -33,15 +33,12 @@
 static inline void __clear_shadow_entry(struct address_space *mapping,
 				pgoff_t index, void *entry)
 {
-	struct radix_tree_node *node;
-	void **slot;
+	XA_STATE(xas, &mapping->i_pages, index);
 
-	if (!__radix_tree_lookup(&mapping->i_pages, index, &node, &slot))
+	xas_set_update(&xas, workingset_update_node);
+	if (xas_load(&xas) != entry)
 		return;
-	if (*slot != entry)
-		return;
-	__radix_tree_replace(&mapping->i_pages, node, slot, NULL,
-			     workingset_update_node);
+	xas_store(&xas, NULL);
 	mapping->nrexceptional--;
 }
 
@@ -542,6 +539,8 @@ EXPORT_SYMBOL(truncate_inode_pages_final);
  * invalidate_mapping_pages() will not block on IO activity. It will not
  * invalidate pages which are dirty, locked, under writeback or mapped into
  * pagetables.
+ *
+ * Return: the number of the pages that were invalidated
  */
 unsigned long invalidate_mapping_pages(struct address_space *mapping,
 		pgoff_t start, pgoff_t end)
@@ -592,6 +591,16 @@ unsigned long invalidate_mapping_pages(struct address_space *mapping,
 					unlock_page(page);
 					continue;
 				}
+
+				/* Take a pin outside pagevec */
+				get_page(page);
+
+				/*
+				 * Drop extra pins before trying to invalidate
+				 * the huge page.
+				 */
+				pagevec_remove_exceptionals(&pvec);
+				pagevec_release(&pvec);
 			}
 
 			ret = invalidate_inode_page(page);
@@ -602,6 +611,8 @@ unsigned long invalidate_mapping_pages(struct address_space *mapping,
 			 */
 			if (!ret)
 				deactivate_file_page(page);
+			if (PageTransHuge(page))
+				put_page(page);
 			count += ret;
 		}
 		pagevec_remove_exceptionals(&pvec);
@@ -667,7 +678,7 @@ static int do_launder_page(struct address_space *mapping, struct page *page)
  * Any pages which are found to be mapped into pagetables are unmapped prior to
  * invalidation.
  *
- * Returns -EBUSY if any pages could not be invalidated.
+ * Return: -EBUSY if any pages could not be invalidated.
  */
 int invalidate_inode_pages2_range(struct address_space *mapping,
 				  pgoff_t start, pgoff_t end)
@@ -742,10 +753,10 @@ int invalidate_inode_pages2_range(struct address_space *mapping,
 		index++;
 	}
 	/*
-	 * For DAX we invalidate page tables after invalidating radix tree.  We
+	 * For DAX we invalidate page tables after invalidating page cache.  We
 	 * could invalidate page tables while invalidating each entry however
 	 * that would be expensive. And doing range unmapping before doesn't
-	 * work as we have no cheap way to find whether radix tree entry didn't
+	 * work as we have no cheap way to find whether page cache entry didn't
 	 * get remapped later.
 	 */
 	if (dax_mapping(mapping)) {
@@ -764,7 +775,7 @@ EXPORT_SYMBOL_GPL(invalidate_inode_pages2_range);
  * Any pages which are found to be mapped into pagetables are unmapped prior to
  * invalidation.
  *
- * Returns -EBUSY if any pages could not be invalidated.
+ * Return: -EBUSY if any pages could not be invalidated.
  */
 int invalidate_inode_pages2(struct address_space *mapping)
 {

@@ -14,6 +14,7 @@
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <linux/kernel.h>
 
 #define KVM_UTIL_PGS_PER_HUGEPG 512
@@ -664,13 +665,21 @@ void vm_userspace_mem_region_add(struct kvm_vm *vm,
 
 	/* As needed perform madvise */
 	if (src_type == VM_MEM_SRC_ANONYMOUS || src_type == VM_MEM_SRC_ANONYMOUS_THP) {
-		ret = madvise(region->host_mem, npages * vm->page_size,
-			     src_type == VM_MEM_SRC_ANONYMOUS ? MADV_NOHUGEPAGE : MADV_HUGEPAGE);
-		TEST_ASSERT(ret == 0, "madvise failed,\n"
-			    "  addr: %p\n"
-			    "  length: 0x%lx\n"
-			    "  src_type: %x",
-			    region->host_mem, npages * vm->page_size, src_type);
+		struct stat statbuf;
+
+		ret = stat("/sys/kernel/mm/transparent_hugepage", &statbuf);
+		TEST_ASSERT(ret == 0 || (ret == -1 && errno == ENOENT),
+			    "stat /sys/kernel/mm/transparent_hugepage");
+
+		TEST_ASSERT(ret == 0 || src_type != VM_MEM_SRC_ANONYMOUS_THP,
+			    "VM_MEM_SRC_ANONYMOUS_THP requires THP to be configured in the host kernel");
+
+		if (ret == 0) {
+			ret = madvise(region->host_mem, npages * vm->page_size,
+				      src_type == VM_MEM_SRC_ANONYMOUS ? MADV_NOHUGEPAGE : MADV_HUGEPAGE);
+			TEST_ASSERT(ret == 0, "madvise failed, addr: %p length: 0x%lx src_type: %x",
+				    region->host_mem, npages * vm->page_size, src_type);
+		}
 	}
 
 	region->unused_phy_pages = sparsebit_alloc();
@@ -1252,6 +1261,35 @@ void vcpu_set_mp_state(struct kvm_vm *vm, uint32_t vcpuid,
 }
 
 /*
+ * VM VCPU Get Reg List
+ *
+ * Input Args:
+ *   vm - Virtual Machine
+ *   vcpuid - VCPU ID
+ *
+ * Output Args:
+ *   None
+ *
+ * Return:
+ *   A pointer to an allocated struct kvm_reg_list
+ *
+ * Get the list of guest registers which are supported for
+ * KVM_GET_ONE_REG/KVM_SET_ONE_REG calls
+ */
+struct kvm_reg_list *vcpu_get_reg_list(struct kvm_vm *vm, uint32_t vcpuid)
+{
+	struct kvm_reg_list reg_list_n = { .n = 0 }, *reg_list;
+	int ret;
+
+	ret = _vcpu_ioctl(vm, vcpuid, KVM_GET_REG_LIST, &reg_list_n);
+	TEST_ASSERT(ret == -1 && errno == E2BIG, "KVM_GET_REG_LIST n=0");
+	reg_list = calloc(1, sizeof(*reg_list) + reg_list_n.n * sizeof(__u64));
+	reg_list->n = reg_list_n.n;
+	vcpu_ioctl(vm, vcpuid, KVM_GET_REG_LIST, reg_list);
+	return reg_list;
+}
+
+/*
  * VM VCPU Regs Get
  *
  * Input Args:
@@ -1516,6 +1554,32 @@ void vm_ioctl(struct kvm_vm *vm, unsigned long cmd, void *arg)
 	ret = ioctl(vm->fd, cmd, arg);
 	TEST_ASSERT(ret == 0, "vm ioctl %lu failed, rc: %i errno: %i (%s)",
 		cmd, ret, errno, strerror(errno));
+}
+
+/*
+ * KVM system ioctl
+ *
+ * Input Args:
+ *   vm - Virtual Machine
+ *   cmd - Ioctl number
+ *   arg - Argument to pass to the ioctl
+ *
+ * Return: None
+ *
+ * Issues an arbitrary ioctl on a KVM fd.
+ */
+void kvm_ioctl(struct kvm_vm *vm, unsigned long cmd, void *arg)
+{
+	int ret;
+
+	ret = ioctl(vm->kvm_fd, cmd, arg);
+	TEST_ASSERT(ret == 0, "KVM ioctl %lu failed, rc: %i errno: %i (%s)",
+		cmd, ret, errno, strerror(errno));
+}
+
+int _kvm_ioctl(struct kvm_vm *vm, unsigned long cmd, void *arg)
+{
+	return ioctl(vm->kvm_fd, cmd, arg);
 }
 
 /*

@@ -102,55 +102,11 @@ struct free_area {
 	unsigned long		nr_free;
 };
 
-/* Used for pages not on another list */
-static inline void add_to_free_area(struct page *page, struct free_area *area,
-			     int migratetype)
-{
-	list_add(&page->lru, &area->free_list[migratetype]);
-	area->nr_free++;
-}
-
-/* Used for pages not on another list */
-static inline void add_to_free_area_tail(struct page *page, struct free_area *area,
-				  int migratetype)
-{
-	list_add_tail(&page->lru, &area->free_list[migratetype]);
-	area->nr_free++;
-}
-
-#ifdef CONFIG_SHUFFLE_PAGE_ALLOCATOR
-/* Used to preserve page allocation order entropy */
-void add_to_free_area_random(struct page *page, struct free_area *area,
-		int migratetype);
-#else
-static inline void add_to_free_area_random(struct page *page,
-		struct free_area *area, int migratetype)
-{
-	add_to_free_area(page, area, migratetype);
-}
-#endif
-
-/* Used for pages which are on another list */
-static inline void move_to_free_area(struct page *page, struct free_area *area,
-			     int migratetype)
-{
-	list_move(&page->lru, &area->free_list[migratetype]);
-}
-
 static inline struct page *get_page_from_free_area(struct free_area *area,
 					    int migratetype)
 {
 	return list_first_entry_or_null(&area->free_list[migratetype],
 					struct page, lru);
-}
-
-static inline void del_page_from_free_area(struct page *page,
-		struct free_area *area)
-{
-	list_del(&page->lru);
-	__ClearPageBuddy(page);
-	set_page_private(page, 0);
-	area->nr_free--;
 }
 
 static inline bool free_area_empty(struct free_area *area, int migratetype)
@@ -217,12 +173,20 @@ enum node_stat_item {
 	NR_INACTIVE_FILE,	/*  "     "     "   "       "         */
 	NR_ACTIVE_FILE,		/*  "     "     "   "       "         */
 	NR_UNEVICTABLE,		/*  "     "     "   "       "         */
-	NR_SLAB_RECLAIMABLE,
-	NR_SLAB_UNRECLAIMABLE,
+	NR_SLAB_RECLAIMABLE_B,
+	NR_SLAB_UNRECLAIMABLE_B,
 	NR_ISOLATED_ANON,	/* Temporary isolated pages from anon lru */
 	NR_ISOLATED_FILE,	/* Temporary isolated pages from file lru */
-	WORKINGSET_REFAULT,
-	WORKINGSET_ACTIVATE,
+	RH_KABI_BROKEN_INSERT_ENUM(WORKINGSET_NODES)
+	WORKINGSET_REFAULT_BASE,
+	RH_KABI_BROKEN_INSERT_ENUM(WORKINGSET_REFAULT_ANON = WORKINGSET_REFAULT_BASE)
+	RH_KABI_BROKEN_INSERT_ENUM(WORKINGSET_REFAULT_FILE)
+	WORKINGSET_ACTIVATE_BASE,
+	RH_KABI_BROKEN_INSERT_ENUM(WORKINGSET_ACTIVATE_ANON = WORKINGSET_ACTIVATE_BASE)
+	RH_KABI_BROKEN_INSERT_ENUM(WORKINGSET_ACTIVATE_FILE)
+	RH_KABI_BROKEN_INSERT_ENUM(WORKINGSET_RESTORE_BASE)
+	RH_KABI_BROKEN_INSERT_ENUM(WORKINGSET_RESTORE_ANON = WORKINGSET_RESTORE_BASE)
+	RH_KABI_BROKEN_INSERT_ENUM(WORKINGSET_RESTORE_FILE)
 	WORKINGSET_NODERECLAIM,
 	NR_ANON_MAPPED,	/* Mapped anonymous pages */
 	NR_FILE_MAPPED,	/* pagecache pages mapped into pagetables.
@@ -234,8 +198,10 @@ enum node_stat_item {
 	NR_SHMEM,		/* shmem pages (included tmpfs/GEM pages) */
 	NR_SHMEM_THPS,
 	NR_SHMEM_PMDMAPPED,
+	RH_KABI_BROKEN_INSERT_ENUM(NR_FILE_THPS)
+	RH_KABI_BROKEN_INSERT_ENUM(NR_FILE_PMDMAPPED)
 	NR_ANON_THPS,
-	NR_UNSTABLE_NFS,	/* NFS unstable pages */
+	RH_KABI_BROKEN_REMOVE_ENUM(NR_UNSTABLE_NFS)
 	NR_VMSCAN_WRITE,
 	NR_VMSCAN_IMMEDIATE,	/* Prioritise for reclaim when writeback ends */
 	NR_DIRTIED,		/* page dirtyings since bootup */
@@ -243,29 +209,28 @@ enum node_stat_item {
 	RH_KABI_RENAME(NR_INDIRECTLY_RECLAIMABLE_BYTES,
 		       NR_KERNEL_MISC_RECLAIMABLE),
 				/* reclaimable non-slab kernel pages */
-#ifndef __GENKSYMS__
-	/*
-	 * RHEL8:
-	 * New node stat item should be put here to avoid changing kABI
-	 * signature of pg_data_t. The size of vm_stat[] of pg_data_t and
-	 * vm_node_stat_diff[] of per_cpu_nodestat will change. However,
-	 * they are the the last field of their respective structures
-	 * and so it won't affect offsets of existing fields. These two
-	 * structures are all allocated dynamically and so increasing their
-	 * array size won't affect kABI.
-	 *
-	 * However, NR_VM_NODE_STAT_ITEMS does get used in lruvec_stat[] of
-	 * mem_cgroup_per_node (memcontrol.h) and lumped into MEMCG_NR_STAT.
-	 * The change in MEMCG_NR_STAT does increase the size of stat[] of
-	 * memcg_vmstats_percpu and vmstats[] of mem_cgroup structures.
-	 * These arrays are not at the end of the structure and so changing
-	 * the array size will break offsets of existing fields that
-	 * follows the arrays.
-	 */
-	WORKINGSET_RESTORE,
-#endif
 	NR_VM_NODE_STAT_ITEMS
 };
+
+/*
+ * Returns true if the value is measured in bytes (most vmstat values are
+ * measured in pages). This defines the API part, the internal representation
+ * might be different.
+ */
+static __always_inline bool vmstat_item_in_bytes(int idx)
+{
+	/*
+	 * Global and per-node slab counters track slab pages.
+	 * It's expected that changes are multiples of PAGE_SIZE.
+	 * Internally values are stored in pages.
+	 *
+	 * Per-memcg and per-lruvec counters track memory, consumed
+	 * by individual slab objects. These counters are actually
+	 * byte-precise.
+	 */
+	return (idx == NR_SLAB_RECLAIMABLE_B ||
+		idx == NR_SLAB_UNRECLAIMABLE_B);
+}
 
 /*
  * We do arithmetic on the LRU lists in various places in the code,
@@ -293,12 +258,12 @@ enum lru_list {
 
 #define for_each_evictable_lru(lru) for (lru = 0; lru <= LRU_ACTIVE_FILE; lru++)
 
-static inline int is_file_lru(enum lru_list lru)
+static inline bool is_file_lru(enum lru_list lru)
 {
 	return (lru == LRU_INACTIVE_FILE || lru == LRU_ACTIVE_FILE);
 }
 
-static inline int is_active_lru(enum lru_list lru)
+static inline bool is_active_lru(enum lru_list lru)
 {
 	return (lru == LRU_ACTIVE_ANON || lru == LRU_ACTIVE_FILE);
 }
@@ -316,13 +281,32 @@ struct zone_reclaim_stat {
 	unsigned long		recent_scanned[2];
 };
 
+enum lruvec_flags {
+	LRUVEC_CONGESTED,		/* lruvec has many dirty pages
+					 * backed by a congested BDI
+					 */
+};
+
 struct lruvec {
 	struct list_head		lists[NR_LRU_LISTS];
-	struct zone_reclaim_stat	reclaim_stat;
-	/* Evictions & activations on the inactive file list */
-	atomic_long_t			inactive_age;
-	/* Refaults at the time of last reclaim cycle */
-	unsigned long			refaults;
+	/*
+	 * These track the cost of reclaiming one LRU - file or anon -
+	 * over the other. As the observed cost of reclaiming one LRU
+	 * increases, the reclaim scan balance tips toward the other.
+	 */
+	RH_KABI_REPLACE_SPLIT(
+		struct zone_reclaim_stat	reclaim_stat,
+		unsigned long			anon_cost,
+		unsigned long			file_cost,
+		/* Refaults at the time of last reclaim cycle, anon=0, file=1 */
+		unsigned long			refaults[2])
+
+	/* Non-resident age, driven by LRU movement */
+	atomic_long_t			RH_KABI_RENAME(inactive_age,
+						       nonresident_age);
+	/* Various lruvec state flags (enum lruvec_flags) */
+	RH_KABI_REPLACE(unsigned long		refaults,
+			unsigned long		flags)
 #ifdef CONFIG_MEMCG
 	struct pglist_data *pgdat;
 #endif
@@ -345,9 +329,10 @@ enum zone_watermarks {
 	NR_WMARK
 };
 
-#define min_wmark_pages(z) (z->watermark[WMARK_MIN])
-#define low_wmark_pages(z) (z->watermark[WMARK_LOW])
-#define high_wmark_pages(z) (z->watermark[WMARK_HIGH])
+#define min_wmark_pages(z) (z->_watermark[WMARK_MIN] + z->watermark_boost)
+#define low_wmark_pages(z) (z->_watermark[WMARK_LOW] + z->watermark_boost)
+#define high_wmark_pages(z) (z->_watermark[WMARK_HIGH] + z->watermark_boost)
+#define wmark_pages(z, i) (z->_watermark[i] + z->watermark_boost)
 
 struct per_cpu_pages {
 	int count;		/* number of pages in the list */
@@ -438,7 +423,7 @@ struct zone {
 	/* Read-mostly fields */
 
 	/* zone watermarks, access with *_wmark_pages(zone) macros */
-	unsigned long watermark[NR_WMARK];
+	unsigned long RH_KABI_RENAME(watermark, _watermark)[NR_WMARK];
 
 	unsigned long nr_reserved_highatomic;
 
@@ -504,14 +489,10 @@ struct zone {
 	 * Write access to present_pages at runtime should be protected by
 	 * mem_hotplug_begin/end(). Any reader who can't tolerant drift of
 	 * present_pages should get_online_mems() to get a stable value.
-	 *
-	 * Read access to managed_pages should be safe because it's unsigned
-	 * long. Write access to zone->managed_pages and totalram_pages are
-	 * protected by managed_page_count_lock at runtime. Idealy only
-	 * adjust_managed_page_count() should be used instead of directly
-	 * touching zone->managed_pages and totalram_pages.
 	 */
-	unsigned long		managed_pages;
+	RH_KABI_REPLACE(
+		unsigned long	managed_pages,
+		atomic_long_t	managed_pages)
 	unsigned long		spanned_pages;
 	unsigned long		present_pages;
 
@@ -532,6 +513,8 @@ struct zone {
 #endif
 
 	int initialized;
+
+	RH_KABI_FILL_HOLE(unsigned long watermark_boost)
 
 	/* Write-intensive fields used from the page allocator */
 	ZONE_PADDING(_pad1_)
@@ -582,8 +565,13 @@ struct zone {
 
 	ZONE_PADDING(_pad3_)
 
+#if defined CONFIG_COMPACTION || defined CONFIG_CMA
+	RH_KABI_USE(1, unsigned long compact_init_migrate_pfn)
+	RH_KABI_USE(2, unsigned long compact_init_free_pfn)
+#else
 	RH_KABI_RESERVE(1)
 	RH_KABI_RESERVE(2)
+#endif
 
 	/* Zone statistics */
 	atomic_long_t		vm_stat[NR_VM_ZONE_STAT_ITEMS];
@@ -591,9 +579,6 @@ struct zone {
 } ____cacheline_internodealigned_in_smp;
 
 enum pgdat_flags {
-	PGDAT_CONGESTED,		/* pgdat has many dirty pages backed by
-					 * a congested BDI
-					 */
 	PGDAT_DIRTY,			/* reclaim scanning has recently found
 					 * many dirty file pages at the tail
 					 * of the LRU.
@@ -603,6 +588,17 @@ enum pgdat_flags {
 					 */
 	PGDAT_RECLAIM_LOCKED,		/* prevents concurrent reclaim */
 };
+
+enum zone_flags {
+	ZONE_BOOSTED_WATERMARK,		/* zone recently boosted watermarks.
+					 * Cleared when kswapd is woken.
+					 */
+};
+
+static inline unsigned long zone_managed_pages(struct zone *zone)
+{
+	return (unsigned long)atomic_long_read(&zone->managed_pages);
+}
 
 static inline unsigned long zone_end_pfn(const struct zone *zone)
 {
@@ -694,6 +690,14 @@ struct zonelist {
 extern struct page *mem_map;
 #endif
 
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+struct deferred_split {
+	spinlock_t split_queue_lock;
+	struct list_head split_queue;
+	unsigned long split_queue_len;
+};
+#endif
+
 /*
  * On NUMA machines, each NUMA node would have a pg_data_t to describe
  * it's memory layout. On UMA machines there is a single pglist_data which
@@ -715,8 +719,8 @@ typedef struct pglist_data {
 #endif
 #if defined(CONFIG_MEMORY_HOTPLUG) || defined(CONFIG_DEFERRED_STRUCT_PAGE_INIT)
 	/*
-	 * Must be held any time you expect node_start_pfn, node_present_pages
-	 * or node_spanned_pages stay constant.
+	 * Must be held any time you expect node_start_pfn,
+	 * node_present_pages, node_spanned_pages or nr_zones to stay constant.
 	 * Also synchronizes pgdat->first_deferred_pfn during deferred page
 	 * init.
 	 *
@@ -787,9 +791,13 @@ typedef struct pglist_data {
 #endif /* CONFIG_DEFERRED_STRUCT_PAGE_INIT */
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+#ifdef __GENKSYMS__
 	spinlock_t split_queue_lock;
 	struct list_head split_queue;
 	unsigned long split_queue_len;
+#else
+	struct deferred_split deferred_split_queue;
+#endif
 #endif
 
 	/* Fields commonly accessed by the page reclaim scanner */
@@ -824,10 +832,6 @@ typedef struct pglist_data {
 
 #define node_start_pfn(nid)	(NODE_DATA(nid)->node_start_pfn)
 #define node_end_pfn(nid) pgdat_end_pfn(NODE_DATA(nid))
-static inline spinlock_t *zone_lru_lock(struct zone *zone)
-{
-	return &zone->zone_pgdat->lru_lock;
-}
 
 static inline unsigned long pgdat_end_pfn(pg_data_t *pgdat)
 {
@@ -909,7 +913,7 @@ static inline int local_memory_node(int node_id) { return node_id; };
  */
 static inline bool managed_zone(struct zone *zone)
 {
-	return zone->managed_pages;
+	return zone_managed_pages(zone);
 }
 
 /* Returns true if a zone has memory */
@@ -918,12 +922,31 @@ static inline bool populated_zone(struct zone *zone)
 	return zone->present_pages;
 }
 
+#ifdef CONFIG_NUMA
+static inline int zone_to_nid(struct zone *zone)
+{
+	return zone->node;
+}
+
+static inline void zone_set_nid(struct zone *zone, int nid)
+{
+	zone->node = nid;
+}
+#else
+static inline int zone_to_nid(struct zone *zone)
+{
+	return 0;
+}
+
+static inline void zone_set_nid(struct zone *zone, int nid) {}
+#endif
+
 extern int movable_zone;
 
 #ifdef CONFIG_HIGHMEM
 static inline int zone_movable_is_highmem(void)
 {
-#ifdef CONFIG_HAVE_MEMBLOCK_NODE_MAP
+#ifdef CONFIG_NEED_MULTIPLE_NODES
 	return movable_zone == ZONE_HIGHMEM;
 #else
 	return (ZONE_MOVABLE - 1) == ZONE_HIGHMEM;
@@ -959,6 +982,8 @@ static inline int is_highmem(struct zone *zone)
 /* These two functions are used to setup the per zone pages min values */
 struct ctl_table;
 int min_free_kbytes_sysctl_handler(struct ctl_table *, int,
+					void __user *, size_t *, loff_t *);
+int watermark_boost_factor_sysctl_handler(struct ctl_table *, int,
 					void __user *, size_t *, loff_t *);
 int watermark_scale_factor_sysctl_handler(struct ctl_table *, int,
 					void __user *, size_t *, loff_t *);
@@ -1033,12 +1058,7 @@ static inline int zonelist_zone_idx(struct zoneref *zoneref)
 
 static inline int zonelist_node_idx(struct zoneref *zoneref)
 {
-#ifdef CONFIG_NUMA
-	/* zone_to_nid not available in this context */
-	return zoneref->zone->node;
-#else
-	return 0;
-#endif /* CONFIG_NUMA */
+	return zone_to_nid(zoneref->zone);
 }
 
 struct zoneref *__next_zones_zonelist(struct zoneref *z,
@@ -1128,15 +1148,6 @@ static inline struct zoneref *first_zones_zonelist(struct zonelist *zonelist,
 
 #ifdef CONFIG_SPARSEMEM
 #include <asm/sparsemem.h>
-#endif
-
-#if !defined(CONFIG_HAVE_ARCH_EARLY_PFN_TO_NID) && \
-	!defined(CONFIG_HAVE_MEMBLOCK_NODE_MAP)
-static inline unsigned long early_pfn_to_nid(unsigned long pfn)
-{
-	BUILD_BUG_ON(IS_ENABLED(CONFIG_NUMA));
-	return 0;
-}
 #endif
 
 #ifdef CONFIG_FLATMEM
@@ -1384,11 +1395,21 @@ static inline int pfn_valid(unsigned long pfn)
 }
 #endif
 
-static inline int pfn_present(unsigned long pfn)
+static inline int pfn_in_present_section(unsigned long pfn)
 {
 	if (pfn_to_section_nr(pfn) >= NR_MEM_SECTIONS)
 		return 0;
 	return present_section(__nr_to_section(pfn_to_section_nr(pfn)));
+}
+
+static inline unsigned long next_present_section_nr(unsigned long section_nr)
+{
+	while (++section_nr <= __highest_present_section_nr) {
+		if (present_section_nr(section_nr))
+			return section_nr;
+	}
+
+	return -1;
 }
 
 /*
@@ -1411,7 +1432,7 @@ void sparse_init(void);
 #else
 #define sparse_init()	do {} while (0)
 #define sparse_index_init(_sec, _nid)  do {} while (0)
-#define pfn_present pfn_valid
+#define pfn_in_present_section pfn_valid
 #define subsection_map_init(_pfn, _nr_pages) do {} while (0)
 #endif /* CONFIG_SPARSEMEM */
 
@@ -1434,7 +1455,7 @@ void memory_present(int nid, unsigned long start, unsigned long end);
 
 /*
  * If it is possible to have holes within a MAX_ORDER_NR_PAGES, then we
- * need to check pfn validility within that MAX_ORDER_NR_PAGES block.
+ * need to check pfn validity within that MAX_ORDER_NR_PAGES block.
  * pfn_valid_within() should be used in this case; we optimise this away
  * when we have no holes within a MAX_ORDER_NR_PAGES block.
  */

@@ -41,7 +41,9 @@ Supported adapters:
   * Intel Cedar Fork (PCH)
   * Intel Ice Lake (PCH)
   * Intel Comet Lake (PCH)
+  * Intel Elkhart Lake (PCH)
   * Intel Tiger Lake (PCH)
+  * Intel Emmitsburg (PCH)
 
    Datasheets: Publicly available at the Intel website
 

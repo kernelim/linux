@@ -33,6 +33,7 @@
 #include <net/netns/mpls.h>
 #include <net/netns/can.h>
 #include RH_KABI_HIDE_INCLUDE(<net/netns/xdp.h>)
+#include <net/netns/bpf.h>
 #include <linux/ns_common.h>
 #include <linux/idr.h>
 #include <linux/skbuff.h>
@@ -168,7 +169,7 @@ struct net {
 
 	RH_KABI_EXTEND(int	ipv4_sysctl_ip_fwd_update_priority)
 	RH_KABI_EXTEND(int	ipv4_sysctl_tcp_min_snd_mss)
-	RH_KABI_EXTEND(struct bpf_prog __rcu	*flow_dissector_prog)
+	RH_KABI_EXTEND(void *rh_unused)		/* available for reuse */
 	RH_KABI_EXTEND(siphash_key_t ipv4_ip_id_key)
 	RH_KABI_EXTEND(u32	hash_mix)
 	RH_KABI_EXTEND_WITH_SIZE(struct netns_xdp xdp, 21)
@@ -176,6 +177,7 @@ struct net {
 	RH_KABI_EXTEND(struct list_head        xfrm_inexact_bins)
 	RH_KABI_EXTEND(struct raw_notifier_head	netdev_chain)
 	RH_KABI_EXTEND(struct list_head		nft_module_list)
+	RH_KABI_EXTEND(struct list_head		nft_notify_list)
 	RH_KABI_EXTEND(struct mutex		nft_commit_mutex)
 #ifdef CONFIG_NF_CT_PROTO_GRE
 	RH_KABI_EXTEND(struct nf_gre_net	nf_ct_gre)
@@ -185,6 +187,9 @@ struct net {
 	RH_KABI_EXTEND(struct netns_mptcp_mib  mptcp_mib)
 #endif
 	RH_KABI_EXTEND(atomic64_t		net_cookie) /* written once */
+	RH_KABI_EXTEND(int	sctp_pf_expose)
+	RH_KABI_EXTEND(int	sctp_ps_retrans)
+	RH_KABI_EXTEND_WITH_SIZE(struct netns_bpf bpf, 128)
 } __randomize_layout;
 
 #include <linux/seq_file_net.h>
@@ -341,9 +346,9 @@ static inline struct net *read_pnet(const possible_net_t *pnet)
 #endif
 
 int peernet2id_alloc(struct net *net, struct net *peer, gfp_t gfp);
-int peernet2id(struct net *net, struct net *peer);
-bool peernet_has_id(struct net *net, struct net *peer);
-struct net *get_net_ns_by_id(struct net *net, int id);
+int peernet2id(const struct net *net, struct net *peer);
+bool peernet_has_id(const struct net *net, struct net *peer);
+struct net *get_net_ns_by_id(const struct net *net, int id);
 
 struct pernet_operations {
 	struct list_head list;
@@ -421,7 +426,7 @@ static inline void unregister_net_sysctl_table(struct ctl_table_header *header)
 }
 #endif
 
-static inline int rt_genid_ipv4(struct net *net)
+static inline int rt_genid_ipv4(const struct net *net)
 {
 	return atomic_read(&net->ipv4.rt_genid);
 }
@@ -453,7 +458,7 @@ static inline void rt_genid_bump_all(struct net *net)
 	rt_genid_bump_ipv6(net);
 }
 
-static inline int fnhe_genid(struct net *net)
+static inline int fnhe_genid(const struct net *net)
 {
 	return atomic_read(&net->fnhe_genid);
 }

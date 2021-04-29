@@ -18,6 +18,8 @@
 
 #include <asm/mmu.h>
 
+#include <linux/rh_kabi.h>
+
 #ifndef AT_VECTOR_SIZE_ARCH
 #define AT_VECTOR_SIZE_ARCH 0
 #endif
@@ -81,7 +83,7 @@ struct page {
 		struct {	/* Page cache and anonymous pages */
 			/**
 			 * @lru: Pageout list, eg. active_list protected by
-			 * zone_lru_lock.  Sometimes used as a generic list
+			 * pgdat->lru_lock.  Sometimes used as a generic list
 			 * by the page owner.
 			 */
 			struct list_head lru;
@@ -141,13 +143,18 @@ struct page {
 		struct {	/* Second tail page of compound page */
 			unsigned long _compound_pad_1;	/* compound_head */
 			unsigned long _compound_pad_2;
+			/* For both global and memcg */
 			struct list_head deferred_list;
 		};
 		struct {	/* Page table pages */
 			unsigned long _pt_pad_1;	/* compound_head */
 			pgtable_t pmd_huge_pte; /* protected by page->ptl */
 			unsigned long _pt_pad_2;	/* mapping */
-			struct mm_struct *pt_mm;	/* x86 pgds only */
+			RH_KABI_REPLACE(struct mm_struct *pt_mm,
+					union {
+						struct mm_struct *pt_mm; /* x86 pgds only */
+						atomic_t pt_frag_refcount; /* powerpc */
+			})
 #if ALLOC_SPLIT_PTLOCKS
 			spinlock_t *ptl;
 #else
@@ -189,7 +196,11 @@ struct page {
 	atomic_t _refcount;
 
 #ifdef CONFIG_MEMCG
-	struct mem_cgroup *mem_cgroup;
+	RH_KABI_REPLACE(struct mem_cgroup *mem_cgroup,
+			union {
+				struct mem_cgroup *mem_cgroup;
+				struct obj_cgroup **obj_cgroups;
+			})
 #endif
 
 	/*
@@ -533,7 +544,11 @@ struct mm_struct {
 #endif
 	} __randomize_layout;
 
+#if defined(CONFIG_IOMMU_SUPPORT)
+	RH_KABI_USE(1, u32 pasid)
+#else
 	RH_KABI_RESERVE(1)
+#endif
 	RH_KABI_RESERVE(2)
 	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)

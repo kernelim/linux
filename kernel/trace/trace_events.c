@@ -243,7 +243,7 @@ bool trace_event_ignore_this_pid(struct trace_event_file *trace_file)
 	if (!pid_list)
 		return false;
 
-	data = this_cpu_ptr(tr->trace_buffer.data);
+	data = this_cpu_ptr(tr->array_buffer.data);
 
 	return data->ignore_pid;
 }
@@ -552,7 +552,7 @@ event_filter_pid_sched_switch_probe_pre(void *data, bool preempt,
 
 	pid_list = rcu_dereference_sched(tr->filtered_pids);
 
-	this_cpu_write(tr->trace_buffer.data->ignore_pid,
+	this_cpu_write(tr->array_buffer.data->ignore_pid,
 		       trace_ignore_this_task(pid_list, prev) &&
 		       trace_ignore_this_task(pid_list, next));
 }
@@ -566,7 +566,7 @@ event_filter_pid_sched_switch_probe_post(void *data, bool preempt,
 
 	pid_list = rcu_dereference_sched(tr->filtered_pids);
 
-	this_cpu_write(tr->trace_buffer.data->ignore_pid,
+	this_cpu_write(tr->array_buffer.data->ignore_pid,
 		       trace_ignore_this_task(pid_list, next));
 }
 
@@ -577,12 +577,12 @@ event_filter_pid_sched_wakeup_probe_pre(void *data, struct task_struct *task)
 	struct trace_pid_list *pid_list;
 
 	/* Nothing to do if we are already tracing */
-	if (!this_cpu_read(tr->trace_buffer.data->ignore_pid))
+	if (!this_cpu_read(tr->array_buffer.data->ignore_pid))
 		return;
 
 	pid_list = rcu_dereference_sched(tr->filtered_pids);
 
-	this_cpu_write(tr->trace_buffer.data->ignore_pid,
+	this_cpu_write(tr->array_buffer.data->ignore_pid,
 		       trace_ignore_this_task(pid_list, task));
 }
 
@@ -593,13 +593,13 @@ event_filter_pid_sched_wakeup_probe_post(void *data, struct task_struct *task)
 	struct trace_pid_list *pid_list;
 
 	/* Nothing to do if we are not tracing */
-	if (this_cpu_read(tr->trace_buffer.data->ignore_pid))
+	if (this_cpu_read(tr->array_buffer.data->ignore_pid))
 		return;
 
 	pid_list = rcu_dereference_sched(tr->filtered_pids);
 
 	/* Set tracing if current is enabled */
-	this_cpu_write(tr->trace_buffer.data->ignore_pid,
+	this_cpu_write(tr->array_buffer.data->ignore_pid,
 		       trace_ignore_this_task(pid_list, current));
 }
 
@@ -631,7 +631,7 @@ static void __ftrace_clear_event_pids(struct trace_array *tr)
 	}
 
 	for_each_possible_cpu(cpu)
-		per_cpu_ptr(tr->trace_buffer.data, cpu)->ignore_pid = false;
+		per_cpu_ptr(tr->array_buffer.data, cpu)->ignore_pid = false;
 
 	rcu_assign_pointer(tr->filtered_pids, NULL);
 
@@ -1584,7 +1584,7 @@ static void ignore_task_cpu(void *data)
 	pid_list = rcu_dereference_protected(tr->filtered_pids,
 					     mutex_is_locked(&event_mutex));
 
-	this_cpu_write(tr->trace_buffer.data->ignore_pid,
+	this_cpu_write(tr->array_buffer.data->ignore_pid,
 		       trace_ignore_this_task(pid_list, current));
 }
 
@@ -3368,8 +3368,8 @@ static void __init
 function_test_events_call(unsigned long ip, unsigned long parent_ip,
 			  struct ftrace_ops *op, struct pt_regs *pt_regs)
 {
+	struct trace_buffer *buffer;
 	struct ring_buffer_event *event;
-	struct ring_buffer *buffer;
 	struct ftrace_entry *entry;
 	unsigned long flags;
 	long disabled;

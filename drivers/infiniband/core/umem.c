@@ -54,7 +54,7 @@ static void __ib_umem_release(struct ib_device *dev, struct ib_umem *umem, int d
 
 	for_each_sg_page(umem->sg_head.sgl, &sg_iter, umem->sg_nents, 0) {
 		page = sg_page_iter_page(&sg_iter);
-		put_user_pages_dirty_lock(&page, 1, umem->writable && dirty);
+		unpin_user_pages_dirty_lock(&page, 1, umem->writable && dirty);
 	}
 
 	sg_free_table(&umem->sg_head);
@@ -204,6 +204,7 @@ struct ib_umem *ib_umem_get(struct ib_udata *udata, unsigned long addr,
 	unsigned long lock_limit;
 	unsigned long new_pinned;
 	unsigned long cur_base;
+	unsigned long dma_attr = 0;
 	struct mm_struct *mm;
 	unsigned long npages;
 	int ret;
@@ -275,7 +276,8 @@ struct ib_umem *ib_umem_get(struct ib_udata *udata, unsigned long addr,
 	sg = umem->sg_head.sgl;
 
 	while (npages) {
-		ret = get_user_pages_fast(cur_base,
+		cond_resched();
+		ret = pin_user_pages_fast(cur_base,
 					  min_t(unsigned long, npages,
 						PAGE_SIZE /
 						sizeof(struct page *)),
@@ -293,10 +295,13 @@ struct ib_umem *ib_umem_get(struct ib_udata *udata, unsigned long addr,
 
 	sg_mark_end(sg);
 
-	umem->nmap = ib_dma_map_sg(context->device,
-				  umem->sg_head.sgl,
-				  umem->sg_nents,
-				  DMA_BIDIRECTIONAL);
+	if (access & IB_ACCESS_RELAXED_ORDERING)
+		dma_attr |= DMA_ATTR_WEAK_ORDERING;
+
+	umem->nmap =
+		ib_dma_map_sg_attrs(context->device,
+				    umem->sg_head.sgl, umem->sg_nents,
+				    DMA_BIDIRECTIONAL, dma_attr);
 
 	if (!umem->nmap) {
 		ret = -ENOMEM;

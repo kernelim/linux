@@ -13,6 +13,7 @@
 #include <linux/kdebug.h>
 #include <linux/kprobes.h>
 #include <linux/bsearch.h>
+#include <linux/sync_core.h>
 #include <asm/text-patching.h>
 #include <asm/alternative.h>
 #include <asm/sections.h>
@@ -689,6 +690,9 @@ void __init_or_module text_poke_early(void *addr, const void *opcode,
 		 */
 	}
 }
+
+__ro_after_init struct mm_struct *poking_mm;
+__ro_after_init unsigned long poking_addr;
 
 static void *__text_poke(void *addr, const void *opcode, size_t len)
 {

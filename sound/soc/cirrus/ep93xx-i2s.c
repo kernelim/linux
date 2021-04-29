@@ -369,7 +369,7 @@ static int ep93xx_i2s_suspend(struct snd_soc_component *component)
 {
 	struct ep93xx_i2s_info *info = snd_soc_component_get_drvdata(component);
 
-	if (!component->active)
+	if (!snd_soc_component_active(component))
 		return 0;
 
 	ep93xx_i2s_disable(info, SNDRV_PCM_STREAM_PLAYBACK);
@@ -382,7 +382,7 @@ static int ep93xx_i2s_resume(struct snd_soc_component *component)
 {
 	struct ep93xx_i2s_info *info = snd_soc_component_get_drvdata(component);
 
-	if (!component->active)
+	if (!snd_soc_component_active(component))
 		return 0;
 
 	ep93xx_i2s_enable(info, SNDRV_PCM_STREAM_PLAYBACK);

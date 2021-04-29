@@ -1084,6 +1084,7 @@ static rx_handler_result_t macsec_handle_frame(struct sk_buff **pskb)
 	struct macsec_rx_sa *rx_sa;
 	struct macsec_rxh_data *rxd;
 	struct macsec_dev *macsec;
+	unsigned int len;
 	sci_t sci;
 	u32 pn;
 	bool cbit;
@@ -1240,9 +1241,10 @@ deliver:
 	macsec_rxsc_put(rx_sc);
 
 	skb_orphan(skb);
+	len = skb->len;
 	ret = gro_cells_receive(&macsec->gro_cells, skb);
 	if (ret == NET_RX_SUCCESS)
-		count_rx(dev, skb->len);
+		count_rx(dev, len);
 	else
 		macsec->secy.netdev->stats.rx_dropped++;
 
@@ -3222,6 +3224,8 @@ static int macsec_add_dev(struct net_device *dev, sci_t sci, u8 icv_len)
 	return 0;
 }
 
+static struct lock_class_key macsec_netdev_addr_lock_key;
+
 static int macsec_newlink(struct net *net, struct net_device *dev,
 			  struct nlattr *tb[], struct nlattr *data[],
 			  struct netlink_ext_ack *extack)
@@ -3260,6 +3264,10 @@ static int macsec_newlink(struct net *net, struct net_device *dev,
 	err = register_netdevice(dev);
 	if (err < 0)
 		return err;
+
+	netdev_lockdep_set_classes(dev);
+	lockdep_set_class(&dev->addr_list_lock,
+			  &macsec_netdev_addr_lock_key);
 
 	err = netdev_upper_dev_link(real_dev, dev, extack);
 	if (err < 0)

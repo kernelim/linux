@@ -37,8 +37,6 @@
 
 #include "internal.h"
 
-#define _COMPONENT		ACPI_PCI_COMPONENT
-ACPI_MODULE_NAME("pci_root");
 #define ACPI_PCI_ROOT_CLASS		"pci_bridge"
 #define ACPI_PCI_ROOT_DEVICE_NAME	"PCI Root Bridge"
 static int acpi_pci_root_add(struct acpi_device *device,
@@ -75,7 +73,7 @@ static DEFINE_MUTEX(osc_lock);
 
 /**
  * acpi_is_root_bridge - determine whether an ACPI CA node is a PCI root bridge
- * @handle - the ACPI CA node in question.
+ * @handle:  the ACPI CA node in question.
  *
  * Note: we could make this API take a struct acpi_device * instead, but
  * for now, it's more convenient to operate on an acpi_handle.
@@ -168,7 +166,7 @@ static void decode_osc_bits(struct acpi_pci_root *root, char *msg, u32 word,
 	buf[0] = '\0';
 	for (i = 0, entry = table; i < size; i++, entry++)
 		if (word & entry->bit)
-			len += snprintf(buf + len, sizeof(buf) - len, "%s%s",
+			len += scnprintf(buf + len, sizeof(buf) - len, "%s%s",
 					len ? " " : "", entry->desc);
 
 	dev_info(&root->device->dev, "_OSC: %s [%s]\n", msg, buf);
@@ -946,7 +944,7 @@ struct pci_bus *acpi_pci_root_create(struct acpi_pci_root *root,
 	 * assignments made by firmware for this host bridge.
 	 */
 	obj = acpi_evaluate_dsm(ACPI_HANDLE(bus->bridge), &pci_acpi_dsm_guid, 1,
-	                        IGNORE_PCI_BOOT_CONFIG_DSM, NULL);
+				DSM_PCI_PRESERVE_BOOT_CONFIG, NULL);
 	if (obj && obj->type == ACPI_TYPE_INTEGER && obj->integer.value == 0)
 		host_bridge->preserve_config = 1;
 	ACPI_FREE(obj);

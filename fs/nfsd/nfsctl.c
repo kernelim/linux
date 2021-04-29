@@ -7,6 +7,7 @@
 #include <linux/slab.h>
 #include <linux/namei.h>
 #include <linux/ctype.h>
+#include <linux/fs_context.h>
 
 #include <linux/sunrpc/svcsock.h>
 #include <linux/lockd/lockd.h>
@@ -236,7 +237,7 @@ static inline struct net *netns(struct file *file)
 	return file_inode(file)->i_sb->s_fs_info;
 }
 
-/**
+/*
  * write_unlock_ip - Release all locks used by a client
  *
  * Experimental.
@@ -275,7 +276,7 @@ static ssize_t write_unlock_ip(struct file *file, char *buf, size_t size)
 	return nlmsvc_unlock_all_by_ip(sap);
 }
 
-/**
+/*
  * write_unlock_fs - Release all locks on a local file system
  *
  * Experimental.
@@ -325,7 +326,7 @@ static ssize_t write_unlock_fs(struct file *file, char *buf, size_t size)
 	return error;
 }
 
-/**
+/*
  * write_filehandle - Get a variable-length NFS file handle by path
  *
  * On input, the buffer contains a '\n'-terminated C string comprised of
@@ -400,7 +401,7 @@ static ssize_t write_filehandle(struct file *file, char *buf, size_t size)
 	return mesg - buf;	
 }
 
-/**
+/*
  * write_threads - Start NFSD, or report the current number of running threads
  *
  * Input:
@@ -450,7 +451,7 @@ static ssize_t write_threads(struct file *file, char *buf, size_t size)
 	return scnprintf(buf, SIMPLE_TRANSACTION_LIMIT, "%d\n", rv);
 }
 
-/**
+/*
  * write_pool_threads - Set or report the current number of threads per pool
  *
  * Input:
@@ -659,7 +660,7 @@ out:
 	return tlen + len;
 }
 
-/**
+/*
  * write_versions - Set or report the available NFS protocol versions
  *
  * Input:
@@ -809,7 +810,7 @@ static ssize_t __write_ports(struct file *file, char *buf, size_t size,
 	return -EINVAL;
 }
 
-/**
+/*
  * write_ports - Pass a socket file descriptor or transport name to listen on
  *
  * Input:
@@ -865,7 +866,7 @@ static ssize_t write_ports(struct file *file, char *buf, size_t size)
 
 int nfsd_max_blksize;
 
-/**
+/*
  * write_maxblksize - Set or report the current NFS blksize
  *
  * Input:
@@ -915,7 +916,7 @@ static ssize_t write_maxblksize(struct file *file, char *buf, size_t size)
 							nfsd_max_blksize);
 }
 
-/**
+/*
  * write_maxconn - Set or report the current max number of connections
  *
  * Input:
@@ -996,7 +997,7 @@ static ssize_t nfsd4_write_time(struct file *file, char *buf, size_t size,
 	return rv;
 }
 
-/**
+/*
  * write_leasetime - Set or report the current NFSv4 lease time
  *
  * Input:
@@ -1023,7 +1024,7 @@ static ssize_t write_leasetime(struct file *file, char *buf, size_t size)
 	return nfsd4_write_time(file, buf, size, &nn->nfsd4_lease, nn);
 }
 
-/**
+/*
  * write_gracetime - Set or report current NFSv4 grace period time
  *
  * As above, but sets the time of the NFSv4 grace period.
@@ -1067,7 +1068,7 @@ static ssize_t __write_recoverydir(struct file *file, char *buf, size_t size,
 							nfs4_recoverydir());
 }
 
-/**
+/*
  * write_recoverydir - Set or report the pathname of the recovery directory
  *
  * Input:
@@ -1099,7 +1100,7 @@ static ssize_t write_recoverydir(struct file *file, char *buf, size_t size)
 	return rv;
 }
 
-/**
+/*
  * write_v4_end_grace - release grace period for nfsd's v4.x lock manager
  *
  * Input:
@@ -1336,7 +1337,7 @@ void nfsd_client_rmdir(struct dentry *dentry)
 	inode_unlock(dir);
 }
 
-static int nfsd_fill_super(struct super_block * sb, void * data, int silent)
+static int nfsd_fill_super(struct super_block *sb, struct fs_context *fc)
 {
 	struct nfsd_net *nn = net_generic(current->nsproxy->net_ns,
 							nfsd_net_id);
@@ -1371,7 +1372,7 @@ static int nfsd_fill_super(struct super_block * sb, void * data, int silent)
 #endif
 		/* last one */ {""}
 	};
-	get_net(sb->s_fs_info);
+
 	ret = simple_fill_super(sb, 0x6e667364, nfsd_files);
 	if (ret)
 		return ret;
@@ -1380,14 +1381,30 @@ static int nfsd_fill_super(struct super_block * sb, void * data, int silent)
 		return PTR_ERR(dentry);
 	nn->nfsd_client_dir = dentry;
 	return 0;
-
 }
 
-static struct dentry *nfsd_mount(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data)
+static int nfsd_fs_get_tree(struct fs_context *fc)
 {
-	struct net *net = current->nsproxy->net_ns;
-	return mount_ns(fs_type, flags, data, net, net->user_ns, nfsd_fill_super);
+	return get_tree_keyed(fc, nfsd_fill_super, get_net(fc->net_ns));
+}
+
+static void nfsd_fs_free_fc(struct fs_context *fc)
+{
+	if (fc->s_fs_info)
+		put_net(fc->s_fs_info);
+}
+
+static const struct fs_context_operations nfsd_fs_context_ops = {
+	.free		= nfsd_fs_free_fc,
+	.get_tree	= nfsd_fs_get_tree,
+};
+
+static int nfsd_init_fs_context(struct fs_context *fc)
+{
+	put_user_ns(fc->user_ns);
+	fc->user_ns = get_user_ns(fc->net_ns->user_ns);
+	fc->ops = &nfsd_fs_context_ops;
+	return 0;
 }
 
 static void nfsd_umount(struct super_block *sb)
@@ -1401,7 +1418,7 @@ static void nfsd_umount(struct super_block *sb)
 static struct file_system_type nfsd_fs_type = {
 	.owner		= THIS_MODULE,
 	.name		= "nfsd",
-	.mount		= nfsd_mount,
+	.init_fs_context = nfsd_init_fs_context,
 	.kill_sb	= nfsd_umount,
 };
 MODULE_ALIAS_FS("nfsd");

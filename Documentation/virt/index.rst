@@ -10,6 +10,7 @@ Linux Virtualization Support
    kvm/index
    paravirt_ops
    guest-halt-polling
+   ne_overview
 
 .. only:: html and subproject
 

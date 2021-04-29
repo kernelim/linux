@@ -56,6 +56,10 @@ void test_test_lsm(void)
 	struct lsm *skel = NULL;
 	int err, duration = 0;
 
+	printf("%s:SKIP:disabled in RHEL\n", __func__);
+	test__skip();
+	return;
+
 	skel = lsm__open_and_load();
 	if (CHECK(!skel, "skel_load", "lsm skeleton failed\n"))
 		goto close_prog;

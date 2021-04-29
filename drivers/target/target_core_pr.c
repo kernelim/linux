@@ -1172,7 +1172,6 @@ static struct t10_pr_registration *__core_scsi3_locate_pr_reg(
 {
 	struct t10_reservation *pr_tmpl = &dev->t10_pr;
 	struct t10_pr_registration *pr_reg, *pr_reg_tmp;
-	struct se_portal_group *tpg;
 
 	spin_lock(&pr_tmpl->registration_lock);
 	list_for_each_entry_safe(pr_reg, pr_reg_tmp,
@@ -1183,21 +1182,11 @@ static struct t10_pr_registration *__core_scsi3_locate_pr_reg(
 		if (pr_reg->pr_reg_nacl != nacl)
 			continue;
 
-		tpg = pr_reg->pr_reg_nacl->se_tpg;
 		/*
 		 * If this registration does NOT contain a fabric provided
 		 * ISID, then we have found a match.
 		 */
 		if (!pr_reg->isid_present_at_reg) {
-			/*
-			 * Determine if this SCSI device server requires that
-			 * SCSI Intiatior TransportID w/ ISIDs is enforced
-			 * for fabric modules (iSCSI) requiring them.
-			 */
-			if (tpg->se_tpg_tfo->sess_get_initiator_sid != NULL) {
-				if (dev->dev_attrib.enforce_pr_isids)
-					continue;
-			}
 			atomic_inc_mb(&pr_reg->pr_res_holders);
 			spin_unlock(&pr_tmpl->registration_lock);
 			return pr_reg;
@@ -1543,13 +1532,16 @@ core_scsi3_decode_spec_i_port(
 		kfree(tidh_new);
 		return TCM_INSUFFICIENT_REGISTRATION_RESOURCES;
 	}
+
+	if (core_scsi3_lunacl_depend_item(local_pr_reg->pr_reg_deve)) {
+		kfree(tidh_new);
+		kref_put(&local_pr_reg->pr_reg_deve->pr_kref,
+			 target_pr_kref_release);
+		kmem_cache_free(t10_pr_reg_cache, local_pr_reg);
+		return TCM_INSUFFICIENT_REGISTRATION_RESOURCES;
+	}
+
 	tidh_new->dest_pr_reg = local_pr_reg;
-	/*
-	 * The local I_T nexus does not hold any configfs dependances,
-	 * so we set tidh_new->dest_se_deve to NULL to prevent the
-	 * configfs_undepend_item() calls in the tid_dest_list loops below.
-	 */
-	tidh_new->dest_se_deve = NULL;
 	list_add_tail(&tidh_new->dest_list, &tid_dest_list);
 
 	if (cmd->data_length < 28) {
@@ -1604,10 +1596,25 @@ core_scsi3_decode_spec_i_port(
 				continue;
 			dest_rtpi = tmp_lun->lun_rtpi;
 
+			iport_ptr = NULL;
 			i_str = target_parse_pr_out_transport_id(tmp_tpg,
 					ptr, &tid_len, &iport_ptr);
 			if (!i_str)
 				continue;
+			/*
+			 * Determine if this SCSI device server requires that
+			 * SCSI Intiatior TransportID w/ ISIDs is enforced
+			 * for fabric modules (iSCSI) requiring them.
+			 */
+			if (tpg->se_tpg_tfo->sess_get_initiator_sid &&
+			    dev->dev_attrib.enforce_pr_isids &&
+			    !iport_ptr) {
+				pr_warn("SPC-PR: enforce_pr_isids is set but a isid has not been sent in the SPEC_I_PT data for %s.",
+					i_str);
+				ret = TCM_INVALID_PARAMETER_LIST;
+				spin_unlock(&dev->se_port_lock);
+				goto out_unmap;
+			}
 
 			atomic_inc_mb(&tmp_tpg->tpg_pr_ref_count);
 			spin_unlock(&dev->se_port_lock);
@@ -1823,12 +1830,9 @@ core_scsi3_decode_spec_i_port(
 			dest_node_acl->initiatorname, i_buf, (dest_se_deve) ?
 			dest_se_deve->mapped_lun : 0);
 
-		if (!dest_se_deve) {
-			kref_put(&local_pr_reg->pr_reg_deve->pr_kref,
-				 target_pr_kref_release);
+		if (dest_pr_reg == local_pr_reg)
 			continue;
-		}
-		core_scsi3_lunacl_undepend_item(dest_se_deve);
+
 		core_scsi3_nodeacl_undepend_item(dest_node_acl);
 		core_scsi3_tpg_undepend_item(dest_tpg);
 	}
@@ -1842,10 +1846,15 @@ out:
 	 * including *dest_pr_reg and the configfs dependances..
 	 */
 	list_for_each_entry_safe(tidh, tidh_tmp, &tid_dest_list, dest_list) {
+		bool is_local = false;
+
 		dest_tpg = tidh->dest_tpg;
 		dest_node_acl = tidh->dest_node_acl;
 		dest_se_deve = tidh->dest_se_deve;
 		dest_pr_reg = tidh->dest_pr_reg;
+
+		if (dest_pr_reg == local_pr_reg)
+			is_local = true;
 
 		list_del(&tidh->dest_list);
 		kfree(tidh);
@@ -1862,13 +1871,11 @@ out:
 		}
 
 		kmem_cache_free(t10_pr_reg_cache, dest_pr_reg);
-
-		if (!dest_se_deve) {
-			kref_put(&local_pr_reg->pr_reg_deve->pr_kref,
-				 target_pr_kref_release);
-			continue;
-		}
 		core_scsi3_lunacl_undepend_item(dest_se_deve);
+
+		if (is_local)
+			continue;
+
 		core_scsi3_nodeacl_undepend_item(dest_node_acl);
 		core_scsi3_tpg_undepend_item(dest_tpg);
 	}
@@ -4099,7 +4106,7 @@ target_check_reservation(struct se_cmd *cmd)
 		return 0;
 	if (!dev->dev_attrib.emulate_pr)
 		return 0;
-	if (dev->transport->transport_flags & TRANSPORT_FLAG_PASSTHROUGH_PGR)
+	if (dev->transport_flags & TRANSPORT_FLAG_PASSTHROUGH_PGR)
 		return 0;
 
 	spin_lock(&dev->dev_reservation_lock);

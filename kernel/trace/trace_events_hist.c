@@ -640,7 +640,7 @@ static notrace void trace_event_raw_event_synth(void *__data,
 	struct trace_event_file *trace_file = __data;
 	struct synth_trace_event *entry;
 	struct trace_event_buffer fbuffer;
-	struct ring_buffer *buffer;
+	struct trace_buffer *buffer;
 	struct synth_event *event;
 	unsigned int i, n_u64;
 	int fields_size = 0;
@@ -656,7 +656,7 @@ static notrace void trace_event_raw_event_synth(void *__data,
 	 * Avoid ring buffer recursion detection, as this event
 	 * is being performed within another event.
 	 */
-	buffer = trace_file->tr->trace_buffer.buffer;
+	buffer = trace_file->tr->array_buffer.buffer;
 	ring_buffer_nest_start(buffer);
 
 	entry = trace_event_buffer_reserve(&fbuffer, trace_file,

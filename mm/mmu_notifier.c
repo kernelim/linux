@@ -460,30 +460,15 @@ static void mn_hlist_invalidate_range_start(struct mmu_notifier_mm *mmn_mm,
 	srcu_read_unlock(&srcu, id);
 }
 
-static inline void mmu_notifier_range_init(struct mmu_notifier_range *range,
-					   struct mm_struct *mm,
-					   unsigned long start,
-					   unsigned long end)
+void __mmu_notifier_invalidate_range_start(struct mmu_notifier_range *range)
 {
-	memset(range, 0, sizeof(*range));
-	range->mm = mm;
-	range->start = start;
-	range->end = end;
-}
-
-void __mmu_notifier_invalidate_range_start(struct mm_struct *mm,
-					   unsigned long start, unsigned long end)
-{
-	struct mmu_notifier_mm *mmn_mm = mm->mmu_notifier_mm;
-	struct mmu_notifier_range range;
-
-	mmu_notifier_range_init(&range, mm, start, end);
+	struct mmu_notifier_mm *mmn_mm = range->mm->mmu_notifier_mm;
 
 	if (mmn_mm->has_itree) {
-		mn_itree_invalidate(mmn_mm, &range);
+		mn_itree_invalidate(mmn_mm, range);
 	}
 	if (!hlist_empty(&mmn_mm->list))
-		mn_hlist_invalidate_range_start(mmn_mm, &range);
+		mn_hlist_invalidate_range_start(mmn_mm, range);
 }
 
 static void mn_hlist_invalidate_end(struct mmu_notifier_mm *mmn_mm,
@@ -519,21 +504,17 @@ static void mn_hlist_invalidate_end(struct mmu_notifier_mm *mmn_mm,
 	srcu_read_unlock(&srcu, id);
 }
 
-void __mmu_notifier_invalidate_range_end(struct mm_struct *mm,
-					 unsigned long start, unsigned long end,
+void __mmu_notifier_invalidate_range_end(struct mmu_notifier_range *range,
 					 bool only_end)
 {
-	struct mmu_notifier_mm *mmn_mm = mm->mmu_notifier_mm;
-	struct mmu_notifier_range range;
-
-	mmu_notifier_range_init(&range, mm, start, end);
+	struct mmu_notifier_mm *mmn_mm = range->mm->mmu_notifier_mm;
 
 	lock_map_acquire(&__mmu_notifier_invalidate_range_start_map);
 	if (mmn_mm->has_itree)
 		mn_itree_inv_end(mmn_mm);
 
 	if (!hlist_empty(&mmn_mm->list))
-		mn_hlist_invalidate_end(mmn_mm, &range, only_end);
+		mn_hlist_invalidate_end(mmn_mm, range, only_end);
 	lock_map_release(&__mmu_notifier_invalidate_range_start_map);
 }
 
@@ -879,7 +860,7 @@ static int __mmu_interval_notifier_insert(
 		return -EOVERFLOW;
 
 	/* Must call with a mmget() held */
-	if (WARN_ON(atomic_read(&mm->mm_count) <= 0))
+	if (WARN_ON(atomic_read(&mm->mm_users) <= 0))
 		return -EINVAL;
 
 	/* pairs with mmdrop in mmu_interval_notifier_remove() */

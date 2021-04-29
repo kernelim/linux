@@ -19,6 +19,7 @@
 #include <asm/firmware.h>
 #include <asm/ptrace.h>
 #include <asm/code-patching.h>
+#include <asm/inst.h>
 
 #define PERF_8xx_ID_CPU_CYCLES		1
 #define PERF_8xx_ID_HW_INSTRUCTIONS	2
@@ -165,8 +166,8 @@ static void mpc8xx_pmu_read(struct perf_event *event)
 static void mpc8xx_pmu_del(struct perf_event *event, int flags)
 {
 	/* mfspr r10, SPRN_SPRG_SCRATCH0 */
-	unsigned int insn = PPC_INST_MFSPR | __PPC_RS(R10) |
-			    __PPC_SPR(SPRN_SPRG_SCRATCH0);
+	unsigned int insn = ppc_inst(PPC_INST_MFSPR | __PPC_RS(R10) |
+				     __PPC_SPR(SPRN_SPRG_SCRATCH0));
 
 	mpc8xx_pmu_read(event);
 

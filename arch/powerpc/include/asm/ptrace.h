@@ -24,7 +24,40 @@
 #define _ASM_POWERPC_PTRACE_H
 
 #include <uapi/asm/ptrace.h>
+#include <linux/rh_kabi.h>
 
+#if !defined(__ASSEMBLY__) && !defined(__GENKSYMS__)
+struct pt_regs
+{
+	union {
+		struct user_pt_regs user_regs;
+		struct {
+			unsigned long gpr[32];
+			unsigned long nip;
+			unsigned long msr;
+			unsigned long orig_gpr3;
+			unsigned long ctr;
+			unsigned long link;
+			unsigned long xer;
+			unsigned long ccr;
+#ifdef __powerpc64__
+			unsigned long softe;
+#else
+			unsigned long mq;
+#endif
+			unsigned long trap;
+			unsigned long dar;
+			unsigned long dsisr;
+			unsigned long result;
+		};
+	};
+
+#ifdef __powerpc64__
+	RH_KABI_EXTEND(unsigned long ppr)
+	RH_KABI_EXTEND(unsigned long __pad)	/* Maintain 16 byte interrupt stack alignment */
+#endif
+};
+#endif
 
 #ifdef __powerpc64__
 
@@ -216,6 +249,8 @@ static inline unsigned long regs_get_kernel_stack_nth(struct pt_regs *regs,
 #endif /* __ASSEMBLY__ */
 
 #ifndef __powerpc64__
+/* We need PT_SOFTE defined at all time to avoid #ifdefs */
+#define PT_SOFTE PT_MQ
 #else /* __powerpc64__ */
 #define PT_FPSCR32 (PT_FPR0 + 2*32 + 1)	/* each FP reg occupies 2 32-bit userspace slots */
 #define PT_VR0_32 164	/* each Vector reg occupies 4 slots in 32-bit */

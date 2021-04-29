@@ -63,14 +63,12 @@ __visible DEFINE_PER_CPU_PAGE_ALIGNED(struct tss_struct, cpu_tss_rw) = {
 		 */
 		.sp0 = (1UL << (BITS_PER_LONG-1)) + 1,
 
-#ifdef CONFIG_X86_64
 		/*
 		 * .sp1 is cpu_current_top_of_stack.  The init task never
 		 * runs user code, but cpu_current_top_of_stack should still
 		 * be well defined before the first context switch.
 		 */
 		.sp1 = TOP_OF_INIT_STACK,
-#endif
 
 #ifdef CONFIG_X86_32
 		.ss0 = __KERNEL_DS,
@@ -135,6 +133,108 @@ void exit_thread(struct task_struct *tsk)
 	fpu__drop(fpu);
 }
 
+static int set_new_tls(struct task_struct *p, unsigned long tls)
+{
+	struct user_desc __user *utls = (struct user_desc __user *)tls;
+
+	if (in_ia32_syscall())
+		return do_set_thread_area(p, -1, utls, 0);
+	else
+		return do_set_thread_area_64(p, ARCH_SET_FS, tls);
+}
+
+static inline int copy_io_bitmap(struct task_struct *tsk)
+{
+	if (likely(!test_tsk_thread_flag(current, TIF_IO_BITMAP)))
+		return 0;
+
+	tsk->thread.io_bitmap_ptr = kmemdup(current->thread.io_bitmap_ptr,
+					    IO_BITMAP_BYTES, GFP_KERNEL);
+	if (!tsk->thread.io_bitmap_ptr) {
+		tsk->thread.io_bitmap_max = 0;
+		return -ENOMEM;
+	}
+	set_tsk_thread_flag(tsk, TIF_IO_BITMAP);
+	return 0;
+}
+
+static inline void free_io_bitmap(struct task_struct *tsk)
+{
+	if (tsk->thread.io_bitmap_ptr) {
+		kfree(tsk->thread.io_bitmap_ptr);
+		tsk->thread.io_bitmap_ptr = NULL;
+		tsk->thread.io_bitmap_max = 0;
+	}
+}
+
+int copy_thread_tls(unsigned long clone_flags, unsigned long sp,
+		    unsigned long arg, struct task_struct *p, unsigned long tls)
+{
+	struct inactive_task_frame *frame;
+	struct fork_frame *fork_frame;
+	struct pt_regs *childregs;
+	int ret;
+
+	childregs = task_pt_regs(p);
+	fork_frame = container_of(childregs, struct fork_frame, regs);
+	frame = &fork_frame->frame;
+
+	/*
+	 * For a new task use the RESET flags value since there is no before.
+	 * All the status flags are zero; DF and all the system flags must also
+	 * be 0, specifically IF must be 0 because we context switch to the new
+	 * task with interrupts disabled.
+	 */
+	frame->flags = X86_EFLAGS_FIXED;
+	frame->bp = 0;
+	frame->ret_addr = (unsigned long) ret_from_fork;
+	p->thread.sp = (unsigned long) fork_frame;
+	p->thread.io_bitmap_ptr = NULL;
+	memset(p->thread.ptrace_bps, 0, sizeof(p->thread.ptrace_bps));
+
+#ifdef CONFIG_X86_64
+	current_save_fsgs();
+	p->thread.fsindex = current->thread.fsindex;
+	p->thread.fsbase = current->thread.fsbase;
+	p->thread.gsindex = current->thread.gsindex;
+	p->thread.gsbase = current->thread.gsbase;
+
+	savesegment(es, p->thread.es);
+	savesegment(ds, p->thread.ds);
+#else
+	p->thread.sp0 = (unsigned long) (childregs + 1);
+#endif
+
+	/* Kernel thread ? */
+	if (unlikely(p->flags & PF_KTHREAD)) {
+		memset(childregs, 0, sizeof(struct pt_regs));
+		kthread_frame_init(frame, sp, arg);
+		return 0;
+	}
+
+	frame->bx = 0;
+	*childregs = *current_pt_regs();
+	childregs->ax = 0;
+	if (sp)
+		childregs->sp = sp;
+
+#ifdef CONFIG_X86_32
+	task_user_gs(p) = get_user_gs(current_pt_regs());
+#endif
+
+	ret = copy_io_bitmap(p);
+	if (ret)
+		return ret;
+
+	/* Set a new TLS for the child thread? */
+	if (clone_flags & CLONE_SETTLS) {
+		ret = set_new_tls(p, tls);
+		if (ret)
+			free_io_bitmap(p);
+	}
+	return ret;
+}
+
 void flush_thread(void)
 {
 	struct task_struct *tsk = current;
@@ -142,7 +242,7 @@ void flush_thread(void)
 	flush_ptrace_hw_breakpoint(tsk);
 	memset(tsk->thread.tls_array, 0, sizeof(tsk->thread.tls_array));
 
-	fpu__clear(&tsk->thread.fpu);
+	fpu__clear_all(&tsk->thread.fpu);
 }
 
 void disable_TSC(void)
@@ -577,9 +677,7 @@ void arch_cpu_idle(void)
  */
 void __cpuidle default_idle(void)
 {
-	trace_cpu_idle_rcuidle(1, smp_processor_id());
 	safe_halt();
-	trace_cpu_idle_rcuidle(PWR_EVENT_EXIT, smp_processor_id());
 }
 #if defined(CONFIG_APM_MODULE) || defined(CONFIG_HALTPOLL_CPUIDLE_MODULE)
 EXPORT_SYMBOL(default_idle);
@@ -685,7 +783,6 @@ static int prefer_mwait_c1_over_halt(const struct cpuinfo_x86 *c)
 static __cpuidle void mwait_idle(void)
 {
 	if (!current_set_polling_and_test()) {
-		trace_cpu_idle_rcuidle(1, smp_processor_id());
 		if (this_cpu_has(X86_BUG_CLFLUSH_MONITOR)) {
 			mb(); /* quirk */
 			clflush((void *)&current_thread_info()->flags);
@@ -697,7 +794,6 @@ static __cpuidle void mwait_idle(void)
 			__sti_mwait(0, 0);
 		else
 			local_irq_enable();
-		trace_cpu_idle_rcuidle(PWR_EVENT_EXIT, smp_processor_id());
 	} else {
 		local_irq_enable();
 	}

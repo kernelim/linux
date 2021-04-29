@@ -43,6 +43,8 @@
 #include <linux/export.h>
 #include <linux/jump_label.h>
 #include <linux/set_memory.h>
+#include <linux/sync_core.h>
+#include <linux/hardirq.h>
 
 #include <asm/intel-family.h>
 #include <asm/processor.h>
@@ -250,6 +252,8 @@ static void __print_mce(struct mce *m)
 		pr_cont("ADDR %llx ", m->addr);
 	if (m->misc)
 		pr_cont("MISC %llx ", m->misc);
+	if (m->ppin)
+		pr_cont("PPIN %llx ", m->ppin);
 
 	if (mce_flags.smca) {
 		if (m->synd)
@@ -537,6 +541,14 @@ bool mce_is_memory_error(struct mce *m)
 }
 EXPORT_SYMBOL_GPL(mce_is_memory_error);
 
+static bool whole_page(struct mce *m)
+{
+	if (!mca_cfg.ser || !(m->status & MCI_STATUS_MISCV))
+		return true;
+
+	return MCI_MISC_ADDR_LSB(m->misc) >= PAGE_SHIFT;
+}
+
 bool mce_is_correctable(struct mce *m)
 {
 	if (m->cpuvendor == X86_VENDOR_AMD && m->status & MCI_STATUS_DEFERRED)
@@ -602,7 +614,7 @@ static int srao_decode_notifier(struct notifier_block *nb, unsigned long val,
 	if (mce_usable_address(mce) && (mce->severity == MCE_AO_SEVERITY)) {
 		pfn = mce->addr >> PAGE_SHIFT;
 		if (!memory_failure(pfn, 0))
-			set_mce_nospec(pfn);
+			set_mce_nospec(pfn, whole_page(mce));
 	}
 
 	return NOTIFY_OK;
@@ -1067,13 +1079,14 @@ static int do_memory_failure(struct mce *m)
 	int ret;
 
 	pr_err("Uncorrected hardware memory error in user-access at %llx", m->addr);
-	if (!(m->mcgstatus & MCG_STATUS_RIPV))
+
+	if (!current->task_struct_rh->mce_ripv)
 		flags |= MF_MUST_KILL;
 	ret = memory_failure(m->addr >> PAGE_SHIFT, flags);
 	if (ret)
 		pr_err("Memory error not recovered");
 	else
-		set_mce_nospec(m->addr >> PAGE_SHIFT);
+		set_mce_nospec(m->addr >> PAGE_SHIFT, current->task_struct_rh->mce_whole_page);
 	return ret;
 }
 
@@ -1221,7 +1234,7 @@ void do_machine_check(struct pt_regs *regs, long error_code)
 	if (__mc_check_crashing_cpu(cpu))
 		return;
 
-	ist_enter(regs);
+	nmi_enter();
 
 	this_cpu_inc(mce_exception_count);
 
@@ -1312,20 +1325,25 @@ void do_machine_check(struct pt_regs *regs, long error_code)
 
 	/* Fault was in user mode and we need to take some action */
 	if ((m.cs & 3) == 3) {
-		ist_begin_non_atomic(regs);
+		/* If this triggers there is no way to recover. Die hard. */
+		BUG_ON(!on_thread_stack() || !user_mode(regs));
 		local_irq_enable();
+		preempt_enable();
+
+		current->task_struct_rh->mce_ripv = !!(m.mcgstatus & MCG_STATUS_RIPV);
+		current->task_struct_rh->mce_whole_page = whole_page(&m);
 
 		if (kill_it || do_memory_failure(&m))
 			force_sig(SIGBUS, current);
+		preempt_disable();
 		local_irq_disable();
-		ist_end_non_atomic();
 	} else {
 		if (!fixup_exception(regs, X86_TRAP_MC))
 			mce_panic("Failed kernel mode recovery", &m, NULL);
 	}
 
 out_ist:
-	ist_exit(regs);
+	nmi_exit();
 }
 EXPORT_SYMBOL_GPL(do_machine_check);
 

@@ -55,9 +55,11 @@ extern struct cifs_ses *smb2_find_smb_ses(struct TCP_Server_Info *server,
 extern struct cifs_tcon *smb2_find_smb_tcon(struct TCP_Server_Info *server,
 						__u64 ses_id, __u32  tid);
 extern int smb2_calc_signature(struct smb_rqst *rqst,
-				struct TCP_Server_Info *server);
+				struct TCP_Server_Info *server,
+				bool allocate_crypto);
 extern int smb3_calc_signature(struct smb_rqst *rqst,
-				struct TCP_Server_Info *server);
+				struct TCP_Server_Info *server,
+				bool allocate_crypto);
 extern void smb2_echo_request(struct work_struct *work);
 extern __le32 smb2_get_lease_state(struct cifsInodeInfo *cinode);
 extern bool smb2_is_valid_oplock_break(char *buffer,
@@ -139,6 +141,7 @@ extern int SMB2_tdis(const unsigned int xid, struct cifs_tcon *tcon);
 extern int SMB2_open(const unsigned int xid, struct cifs_open_parms *oparms,
 		     __le16 *path, __u8 *oplock,
 		     struct smb2_file_all_info *buf,
+		     struct create_posix_rsp *posix,
 		     struct kvec *err_iov, int *resp_buftype);
 extern int SMB2_open_init(struct cifs_tcon *tcon,
 			  struct TCP_Server_Info *server,
@@ -179,6 +182,8 @@ extern int SMB2_flush_init(const unsigned int xid, struct smb_rqst *rqst,
 			   struct TCP_Server_Info *server,
 			   u64 persistent_file_id, u64 volatile_file_id);
 extern void SMB2_flush_free(struct smb_rqst *rqst);
+extern int SMB311_posix_query_info(const unsigned int xid, struct cifs_tcon *tcon,
+		u64 persistent_fid, u64 volatile_fid, struct smb311_posix_qinfo *data, u32 *plen);
 extern int SMB2_query_info(const unsigned int xid, struct cifs_tcon *tcon,
 			   u64 persistent_file_id, u64 volatile_file_id,
 			   struct smb2_file_all_info *data);
@@ -265,7 +270,8 @@ extern enum securityEnum smb2_select_sectype(struct TCP_Server_Info *,
 extern void smb2_parse_contexts(struct TCP_Server_Info *server,
 				struct smb2_create_rsp *rsp,
 				unsigned int *epoch, char *lease_key,
-				__u8 *oplock, struct smb2_file_all_info *buf);
+				__u8 *oplock, struct smb2_file_all_info *buf,
+				struct create_posix_rsp *posix);
 extern int smb3_encryption_required(const struct cifs_tcon *tcon);
 extern int smb2_validate_iov(unsigned int offset, unsigned int buffer_length,
 			     struct kvec *iov, unsigned int min_buf_size);
@@ -285,4 +291,11 @@ extern int smb2_query_info_compound(const unsigned int xid,
 				    u32 class, u32 type, u32 output_len,
 				    struct kvec *rsp, int *buftype,
 				    struct cifs_sb_info *cifs_sb);
+/* query path info from the server using SMB311 POSIX extensions*/
+extern int smb311_posix_query_path_info(const unsigned int xid, struct cifs_tcon *tcon,
+			struct cifs_sb_info *sb, const char *path, struct smb311_posix_qinfo *qinf,
+			bool *adjust_tx, bool *symlink);
+int posix_info_parse(const void *beg, const void *end,
+		     struct smb2_posix_info_parsed *out);
+int posix_info_sid_size(const void *beg, const void *end);
 #endif			/* _SMB2PROTO_H */

@@ -203,10 +203,6 @@ static void __rpc_add_wait_queue(struct rpc_wait_queue *queue,
 		struct rpc_task *task,
 		unsigned char queue_priority)
 {
-	WARN_ON_ONCE(RPC_IS_QUEUED(task));
-	if (RPC_IS_QUEUED(task))
-		return;
-
 	INIT_LIST_HEAD(&task->u.tk_wait.timer_list);
 	if (RPC_IS_PRIORITY(queue))
 		__rpc_add_wait_queue_priority(queue, task, queue_priority);
@@ -381,7 +377,7 @@ static void rpc_make_runnable(struct workqueue_struct *wq,
  * NB: An RPC task will only receive interrupt-driven events as long
  * as it's on a wait queue.
  */
-static void __rpc_sleep_on_priority(struct rpc_wait_queue *q,
+static void __rpc_do_sleep_on_priority(struct rpc_wait_queue *q,
 		struct rpc_task *task,
 		unsigned char queue_priority)
 {
@@ -394,12 +390,23 @@ static void __rpc_sleep_on_priority(struct rpc_wait_queue *q,
 
 }
 
+static void __rpc_sleep_on_priority(struct rpc_wait_queue *q,
+		struct rpc_task *task,
+		unsigned char queue_priority)
+{
+	if (WARN_ON_ONCE(RPC_IS_QUEUED(task)))
+		return;
+	__rpc_do_sleep_on_priority(q, task, queue_priority);
+}
+
 static void __rpc_sleep_on_priority_timeout(struct rpc_wait_queue *q,
 		struct rpc_task *task, unsigned long timeout,
 		unsigned char queue_priority)
 {
+	if (WARN_ON_ONCE(RPC_IS_QUEUED(task)))
+		return;
 	if (time_is_after_jiffies(timeout)) {
-		__rpc_sleep_on_priority(q, task, queue_priority);
+		__rpc_do_sleep_on_priority(q, task, queue_priority);
 		__rpc_add_timer(q, task, timeout);
 	} else
 		task->tk_status = -ETIMEDOUT;
@@ -979,8 +986,11 @@ void rpc_execute(struct rpc_task *task)
 
 	rpc_set_active(task);
 	rpc_make_runnable(rpciod_workqueue, task);
-	if (!is_async)
+	if (!is_async) {
+		unsigned int pflags = memalloc_nofs_save();
 		__rpc_execute(task);
+		memalloc_nofs_restore(pflags);
+	}
 }
 
 static void rpc_async_schedule(struct work_struct *work)
@@ -1161,7 +1171,8 @@ static void rpc_release_resources_task(struct rpc_task *task)
 {
 	xprt_release(task);
 	if (task->tk_msg.rpc_cred) {
-		put_cred(task->tk_msg.rpc_cred);
+		if (!(task->tk_flags & RPC_TASK_CRED_NOREF))
+			put_cred(task->tk_msg.rpc_cred);
 		task->tk_msg.rpc_cred = NULL;
 	}
 	rpc_task_release_client(task);

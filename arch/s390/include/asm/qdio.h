@@ -29,7 +29,7 @@
  * @sliba: storage list information block address
  * @sla: storage list address
  * @slsba: storage list state block address
- * @akey: access key for DLIB
+ * @akey: access key for SLIB
  * @bkey: access key for SL
  * @ckey: access key for SBALs
  * @dkey: access key for SLSB
@@ -51,11 +51,10 @@ struct qdesfmt0 {
 /**
  * struct qdr - queue description record (QDR)
  * @qfmt: queue format
- * @pfmt: implementation dependent parameter format
  * @ac: adapter characteristics
  * @iqdcnt: input queue descriptor count
  * @oqdcnt: output queue descriptor count
- * @iqdsz: inpout queue descriptor size
+ * @iqdsz: input queue descriptor size
  * @oqdsz: output queue descriptor size
  * @qiba: queue information block address
  * @qkey: queue information block key
@@ -63,8 +62,7 @@ struct qdesfmt0 {
  */
 struct qdr {
 	u32 qfmt   : 8;
-	u32 pfmt   : 8;
-	u32	   : 8;
+	u32	   : 16;
 	u32 ac	   : 8;
 	u32	   : 8;
 	u32 iqdcnt : 8;
@@ -229,7 +227,7 @@ struct qdio_buffer {
  * @sbal: absolute SBAL address
  */
 struct sl_element {
-	unsigned long sbal;
+	u64 sbal;
 } __attribute__ ((packed));
 
 /**
@@ -327,8 +325,8 @@ typedef void qdio_handler_t(struct ccw_device *, unsigned int, int,
 
 /**
  * struct qdio_initialize - qdio initialization data
- * @cdev: associated ccw device
  * @q_format: queue format
+ * @qdr_ac: feature flags to set
  * @adapter_name: name for the adapter
  * @qib_param_field_format: format for qib_parm_field
  * @qib_param_field: pointer to 128 bytes or NULL, if no param field
@@ -339,14 +337,14 @@ typedef void qdio_handler_t(struct ccw_device *, unsigned int, int,
  * @no_output_qs: number of output queues
  * @input_handler: handler to be called for input queues
  * @output_handler: handler to be called for output queues
- * @queue_start_poll_array: polling handlers (one per input queue or NULL)
+ * @irq_poll: Data IRQ polling handler (NULL when not supported)
+ * @scan_threshold: # of in-use buffers that triggers scan on output queue
  * @int_parm: interruption parameter
- * @input_sbal_addr_array:  address of no_input_qs * 128 pointers
- * @output_sbal_addr_array: address of no_output_qs * 128 pointers
+ * @input_sbal_addr_array:  per-queue array, each element points to 128 SBALs
+ * @output_sbal_addr_array: per-queue array, each element points to 128 SBALs
  * @output_sbal_state_array: no_output_qs * 128 state info (for CQ or NULL)
  */
 struct qdio_initialize {
-	struct ccw_device *cdev;
 	unsigned char q_format;
 	unsigned char qdr_ac;
 	unsigned char adapter_name[8];
@@ -359,42 +357,13 @@ struct qdio_initialize {
 	unsigned int no_output_qs;
 	qdio_handler_t *input_handler;
 	qdio_handler_t *output_handler;
-	void (**queue_start_poll_array) (struct ccw_device *, int,
-					  unsigned long);
+	void (*irq_poll)(struct ccw_device *cdev, unsigned long data);
 	unsigned int scan_threshold;
 	unsigned long int_parm;
-	struct qdio_buffer **input_sbal_addr_array;
-	struct qdio_buffer **output_sbal_addr_array;
+	struct qdio_buffer ***input_sbal_addr_array;
+	struct qdio_buffer ***output_sbal_addr_array;
 	struct qdio_outbuf_state *output_sbal_state_array;
 };
-
-/**
- * enum qdio_brinfo_entry_type - type of address entry for qdio_brinfo_desc()
- * @l3_ipv6_addr: entry contains IPv6 address
- * @l3_ipv4_addr: entry contains IPv4 address
- * @l2_addr_lnid: entry contains MAC address and VLAN ID
- */
-enum qdio_brinfo_entry_type {l3_ipv6_addr, l3_ipv4_addr, l2_addr_lnid};
-
-/**
- * struct qdio_brinfo_entry_XXX - Address entry for qdio_brinfo_desc()
- * @nit:  Network interface token
- * @addr: Address of one of the three types
- *
- * The struct is passed to the callback function by qdio_brinfo_desc()
- */
-struct qdio_brinfo_entry_l3_ipv6 {
-	u64 nit;
-	struct { unsigned char _s6_addr[16]; } addr;
-} __packed;
-struct qdio_brinfo_entry_l3_ipv4 {
-	u64 nit;
-	struct { uint32_t _s_addr; } addr;
-} __packed;
-struct qdio_brinfo_entry_l2 {
-	u64 nit;
-	struct { u8 mac[6]; u16 lnid; } addr_lnid;
-} __packed;
 
 #define QDIO_STATE_INACTIVE		0x00000002 /* after qdio_cleanup */
 #define QDIO_STATE_ESTABLISHED		0x00000004 /* after qdio_establish */
@@ -409,14 +378,16 @@ int qdio_alloc_buffers(struct qdio_buffer **buf, unsigned int count);
 void qdio_free_buffers(struct qdio_buffer **buf, unsigned int count);
 void qdio_reset_buffers(struct qdio_buffer **buf, unsigned int count);
 
-extern int qdio_allocate(struct qdio_initialize *);
-extern int qdio_establish(struct qdio_initialize *);
+extern int qdio_allocate(struct ccw_device *cdev, unsigned int no_input_qs,
+			 unsigned int no_output_qs);
+extern int qdio_establish(struct ccw_device *cdev,
+			  struct qdio_initialize *init_data);
 extern int qdio_activate(struct ccw_device *);
 extern void qdio_release_aob(struct qaob *);
 extern int do_QDIO(struct ccw_device *, unsigned int, int, unsigned int,
 		   unsigned int);
-extern int qdio_start_irq(struct ccw_device *, int);
-extern int qdio_stop_irq(struct ccw_device *, int);
+extern int qdio_start_irq(struct ccw_device *cdev);
+extern int qdio_stop_irq(struct ccw_device *cdev);
 extern int qdio_get_next_buffers(struct ccw_device *, int, int *, int *);
 extern int qdio_inspect_queue(struct ccw_device *cdev, unsigned int nr,
 			      bool is_input, unsigned int *bufnr,
@@ -424,10 +395,5 @@ extern int qdio_inspect_queue(struct ccw_device *cdev, unsigned int nr,
 extern int qdio_shutdown(struct ccw_device *, int);
 extern int qdio_free(struct ccw_device *);
 extern int qdio_get_ssqd_desc(struct ccw_device *, struct qdio_ssqd_desc *);
-extern int qdio_pnso_brinfo(struct subchannel_id schid,
-		int cnc, u16 *response,
-		void (*cb)(void *priv, enum qdio_brinfo_entry_type type,
-				void *entry),
-		void *priv);
 
 #endif /* __QDIO_H__ */

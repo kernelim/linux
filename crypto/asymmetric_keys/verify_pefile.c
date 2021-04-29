@@ -412,7 +412,7 @@ static int pefile_digest_pe(const void *pebuf, unsigned int pelen,
 	}
 
 error:
-	kzfree(desc);
+	kfree_sensitive(desc);
 error_no_desc:
 	crypto_free_shash(tfm);
 	kleave(" = %d", ret);

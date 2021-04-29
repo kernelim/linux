@@ -1363,7 +1363,6 @@ cxgbit_pass_accept_req(struct cxgbit_device *cdev, struct sk_buff *skb)
 	cxgbit_sock_reset_wr_list(csk);
 	spin_lock_init(&csk->lock);
 	init_waitqueue_head(&csk->waitq);
-	init_waitqueue_head(&csk->ack_waitq);
 	csk->lock_owner = false;
 
 	if (cxgbit_alloc_csk_skb(csk)) {
@@ -1488,6 +1487,26 @@ u32 cxgbit_send_tx_flowc_wr(struct cxgbit_sock *csk)
 	return flowclen16;
 }
 
+static int
+cxgbit_send_tcb_skb(struct cxgbit_sock *csk, struct sk_buff *skb)
+{
+	spin_lock_bh(&csk->lock);
+	if (unlikely(csk->com.state != CSK_STATE_ESTABLISHED)) {
+		spin_unlock_bh(&csk->lock);
+		pr_err("%s: csk 0x%p, tid %u, state %u\n",
+		       __func__, csk, csk->tid, csk->com.state);
+		__kfree_skb(skb);
+		return -1;
+	}
+
+	cxgbit_get_csk(csk);
+	cxgbit_init_wr_wait(&csk->com.wr_wait);
+	cxgbit_ofld_send(csk->com.cdev, skb);
+	spin_unlock_bh(&csk->lock);
+
+	return 0;
+}
+
 int cxgbit_setup_conn_digest(struct cxgbit_sock *csk)
 {
 	struct sk_buff *skb;
@@ -1513,10 +1532,8 @@ int cxgbit_setup_conn_digest(struct cxgbit_sock *csk)
 				(dcrc ? ULP_CRC_DATA : 0)) << 4);
 	set_wr_txq(skb, CPL_PRIORITY_CONTROL, csk->ctrlq_idx);
 
-	cxgbit_get_csk(csk);
-	cxgbit_init_wr_wait(&csk->com.wr_wait);
-
-	cxgbit_ofld_send(csk->com.cdev, skb);
+	if (cxgbit_send_tcb_skb(csk, skb))
+		return -1;
 
 	ret = cxgbit_wait_for_reply(csk->com.cdev,
 				    &csk->com.wr_wait,
@@ -1548,10 +1565,8 @@ int cxgbit_setup_conn_pgidx(struct cxgbit_sock *csk, u32 pg_idx)
 	req->val = cpu_to_be64(pg_idx << 8);
 	set_wr_txq(skb, CPL_PRIORITY_CONTROL, csk->ctrlq_idx);
 
-	cxgbit_get_csk(csk);
-	cxgbit_init_wr_wait(&csk->com.wr_wait);
-
-	cxgbit_ofld_send(csk->com.cdev, skb);
+	if (cxgbit_send_tcb_skb(csk, skb))
+		return -1;
 
 	ret = cxgbit_wait_for_reply(csk->com.cdev,
 				    &csk->com.wr_wait,
@@ -1874,7 +1889,6 @@ static void cxgbit_fw4_ack(struct cxgbit_sock *csk, struct sk_buff *skb)
 		if (csk->snd_una != snd_una) {
 			csk->snd_una = snd_una;
 			dst_confirm(csk->dst);
-			wake_up(&csk->ack_waitq);
 		}
 	}
 

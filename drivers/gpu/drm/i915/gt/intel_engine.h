@@ -107,7 +107,20 @@ execlists_num_ports(const struct intel_engine_execlists * const execlists)
 static inline struct i915_request *
 execlists_active(const struct intel_engine_execlists *execlists)
 {
-	return *READ_ONCE(execlists->active);
+	struct i915_request * const *cur, * const *old, *active;
+
+	cur = READ_ONCE(execlists->active);
+	smp_rmb(); /* pairs with overwrite protection in process_csb() */
+	do {
+		old = cur;
+
+		active = READ_ONCE(*cur);
+		cur = READ_ONCE(execlists->active);
+
+		smp_rmb(); /* and complete the seqlock retry */
+	} while (unlikely(cur != old));
+
+	return active;
 }
 
 static inline void
@@ -174,7 +187,6 @@ intel_write_status_page(struct intel_engine_cs *engine, int reg, u32 value)
 #define I915_GEM_HWS_SEQNO		0x40
 #define I915_GEM_HWS_SEQNO_ADDR		(I915_GEM_HWS_SEQNO * sizeof(u32))
 #define I915_GEM_HWS_SCRATCH		0x80
-#define I915_GEM_HWS_SCRATCH_ADDR	(I915_GEM_HWS_SCRATCH * sizeof(u32))
 
 #define I915_HWS_CSB_BUF0_INDEX		0x10
 #define I915_HWS_CSB_WRITE_INDEX	0x1f
@@ -186,11 +198,15 @@ void intel_engine_cleanup(struct intel_engine_cs *engine);
 int intel_engines_init_mmio(struct intel_gt *gt);
 int intel_engines_init(struct intel_gt *gt);
 
+void intel_engine_free_request_pool(struct intel_engine_cs *engine);
+
 void intel_engines_release(struct intel_gt *gt);
 void intel_engines_free(struct intel_gt *gt);
 
 int intel_engine_init_common(struct intel_engine_cs *engine);
 void intel_engine_cleanup_common(struct intel_engine_cs *engine);
+
+int intel_engine_resume(struct intel_engine_cs *engine);
 
 int intel_ring_submission_setup(struct intel_engine_cs *engine);
 
@@ -220,6 +236,9 @@ intel_engine_signal_breadcrumbs(struct intel_engine_cs *engine)
 
 void intel_engine_reset_breadcrumbs(struct intel_engine_cs *engine);
 void intel_engine_fini_breadcrumbs(struct intel_engine_cs *engine);
+
+void intel_engine_transfer_stale_breadcrumbs(struct intel_engine_cs *engine,
+					     struct intel_context *ce);
 
 void intel_engine_print_breadcrumbs(struct intel_engine_cs *engine,
 				    struct drm_printer *p);
@@ -315,35 +334,13 @@ void intel_engine_dump(struct intel_engine_cs *engine,
 		       struct drm_printer *m,
 		       const char *header, ...);
 
-int intel_enable_engine_stats(struct intel_engine_cs *engine);
-void intel_disable_engine_stats(struct intel_engine_cs *engine);
-
-ktime_t intel_engine_get_busy_time(struct intel_engine_cs *engine);
+ktime_t intel_engine_get_busy_time(struct intel_engine_cs *engine,
+				   ktime_t *now);
 
 struct i915_request *
 intel_engine_find_active_request(struct intel_engine_cs *engine);
 
 u32 intel_engine_context_size(struct intel_gt *gt, u8 class);
-
-#if IS_ENABLED(CONFIG_DRM_I915_SELFTEST)
-
-static inline bool inject_preempt_hang(struct intel_engine_execlists *execlists)
-{
-	if (!execlists->preempt_hang.inject_hang)
-		return false;
-
-	complete(&execlists->preempt_hang.completion);
-	return true;
-}
-
-#else
-
-static inline bool inject_preempt_hang(struct intel_engine_execlists *execlists)
-{
-	return false;
-}
-
-#endif
 
 void intel_engine_init_active(struct intel_engine_cs *engine,
 			      unsigned int subclass);
@@ -358,6 +355,15 @@ intel_engine_has_preempt_reset(const struct intel_engine_cs *engine)
 		return false;
 
 	return intel_engine_has_preemption(engine);
+}
+
+static inline bool
+intel_engine_has_heartbeat(const struct intel_engine_cs *engine)
+{
+	if (!IS_ACTIVE(CONFIG_DRM_I915_HEARTBEAT_INTERVAL))
+		return false;
+
+	return READ_ONCE(engine->props.heartbeat_interval_ms);
 }
 
 #endif /* _INTEL_RINGBUFFER_H_ */

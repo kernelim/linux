@@ -26,6 +26,7 @@
 #include <linux/sched.h>
 #include <linux/ptrace.h>
 #include <uapi/linux/audit.h>
+#include <uapi/linux/netfilter/nf_tables.h>
 
 #define AUDIT_INO_UNSET ((unsigned long)-1)
 #define AUDIT_DEV_UNSET ((dev_t)-1)
@@ -33,7 +34,7 @@
 struct audit_sig_info {
 	uid_t		uid;
 	pid_t		pid;
-	char		ctx[0];
+	char		ctx[];
 };
 
 struct audit_buffer;
@@ -112,6 +113,23 @@ enum audit_nfcfgop {
 	AUDIT_XT_OP_REGISTER,
 	AUDIT_XT_OP_REPLACE,
 	AUDIT_XT_OP_UNREGISTER,
+	AUDIT_NFT_OP_TABLE_REGISTER,
+	AUDIT_NFT_OP_TABLE_UNREGISTER,
+	AUDIT_NFT_OP_CHAIN_REGISTER,
+	AUDIT_NFT_OP_CHAIN_UNREGISTER,
+	AUDIT_NFT_OP_RULE_REGISTER,
+	AUDIT_NFT_OP_RULE_UNREGISTER,
+	AUDIT_NFT_OP_SET_REGISTER,
+	AUDIT_NFT_OP_SET_UNREGISTER,
+	AUDIT_NFT_OP_SETELEM_REGISTER,
+	AUDIT_NFT_OP_SETELEM_UNREGISTER,
+	AUDIT_NFT_OP_GEN_REGISTER,
+	AUDIT_NFT_OP_OBJ_REGISTER,
+	AUDIT_NFT_OP_OBJ_UNREGISTER,
+	AUDIT_NFT_OP_OBJ_RESET,
+	AUDIT_NFT_OP_FLOWTABLE_REGISTER,
+	AUDIT_NFT_OP_FLOWTABLE_UNREGISTER,
+	AUDIT_NFT_OP_INVALID,
 };
 
 extern int is_audit_feature_set(int which);
@@ -390,7 +408,7 @@ extern void __audit_fanotify(unsigned int response);
 extern void __audit_tk_injoffset(struct timespec64 offset);
 extern void __audit_ntp_log(const struct audit_ntp_data *ad);
 extern void __audit_log_nfcfg(const char *name, u8 af, unsigned int nentries,
-			      enum audit_nfcfgop op);
+			      enum audit_nfcfgop op, gfp_t gfp);
 
 static inline void audit_ipc_obj(struct kern_ipc_perm *ipcp)
 {
@@ -528,10 +546,10 @@ static inline void audit_ntp_log(const struct audit_ntp_data *ad)
 
 static inline void audit_log_nfcfg(const char *name, u8 af,
 				   unsigned int nentries,
-				   enum audit_nfcfgop op)
+				   enum audit_nfcfgop op, gfp_t gfp)
 {
 	if (audit_enabled)
-		__audit_log_nfcfg(name, af, nentries, op);
+		__audit_log_nfcfg(name, af, nentries, op, gfp);
 }
 
 extern int audit_n_rules;
@@ -661,7 +679,7 @@ static inline void audit_ptrace(struct task_struct *t)
 
 static inline void audit_log_nfcfg(const char *name, u8 af,
 				   unsigned int nentries,
-				   enum audit_nfcfgop op)
+				   enum audit_nfcfgop op, gfp_t gfp)
 { }
 
 #define audit_n_rules 0
@@ -671,11 +689,6 @@ static inline void audit_log_nfcfg(const char *name, u8 af,
 static inline bool audit_loginuid_set(struct task_struct *tsk)
 {
 	return uid_valid(audit_get_loginuid(tsk));
-}
-
-static inline void audit_log_string(struct audit_buffer *ab, const char *buf)
-{
-	audit_log_n_string(ab, buf, strlen(buf));
 }
 
 #endif

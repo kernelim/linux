@@ -157,22 +157,6 @@ config DELL_RBU
 	 image for the image update to take effect.
 	 See <file:Documentation/dell_rbu.txt> for more details on the driver.
 
-config DCDBAS
-	tristate "Dell Systems Management Base Driver"
-	depends on X86
-	help
-	  The Dell Systems Management Base Driver provides a sysfs interface
-	  for systems management software to perform System Management
-	  Interrupts (SMIs) and Host Control Actions (system power cycle or
-	  power off after OS shutdown) on certain Dell systems.
-
-	  See <file:Documentation/dcdbas.txt> for more details on the driver
-	  and the Dell systems on which Dell systems management software makes
-	  use of this driver.
-
-	  Say Y or M here to enable the driver for use by Dell systems
-	  management software such as Dell OpenManage.
-
 config DMIID
     bool "Export DMI identification via sysfs to userspace"
     depends on DMI

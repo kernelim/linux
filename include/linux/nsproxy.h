@@ -36,6 +36,8 @@ struct nsproxy {
 	struct pid_namespace *pid_ns_for_children;
 	struct net 	     *net_ns;
 	struct cgroup_namespace *cgroup_ns;
+	RH_KABI_EXTEND(struct time_namespace *time_ns)
+	RH_KABI_EXTEND(struct time_namespace *time_ns_for_children)
 };
 extern struct nsproxy init_nsproxy;
 

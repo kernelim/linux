@@ -216,7 +216,7 @@ static long kvmppc_rm_ioba_validate(struct kvmppc_spapr_tce_table *stt,
 
 	idx = (ioba >> stt->page_shift) - stt->offset;
 	sttpage = idx / TCES_PER_PAGE;
-	sttpages = _ALIGN_UP(idx % TCES_PER_PAGE + npages, TCES_PER_PAGE) /
+	sttpages = ALIGN(idx % TCES_PER_PAGE + npages, TCES_PER_PAGE) /
 			TCES_PER_PAGE;
 	for (i = sttpage; i < sttpage + sttpages; ++i)
 		if (!stt->pages[i])
@@ -248,7 +248,7 @@ static long iommu_tce_xchg_no_kill_rm(struct mm_struct *mm,
 	return ret;
 }
 
-extern void iommu_tce_kill_rm(struct iommu_table *tbl,
+static void iommu_tce_kill_rm(struct iommu_table *tbl,
 		unsigned long entry, unsigned long pages)
 {
 	if (tbl->it_ops->tce_kill)

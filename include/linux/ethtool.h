@@ -37,7 +37,7 @@ struct compat_ethtool_rxnfc {
 	compat_u64			data;
 	struct compat_ethtool_rx_flow_spec fs;
 	u32				rule_cnt;
-	u32				rule_locs[0];
+	u32				rule_locs[];
 };
 
 #endif /* CONFIG_COMPAT */
@@ -87,6 +87,22 @@ struct net_device;
 /* Some generic methods drivers may use in their ethtool_ops */
 u32 ethtool_op_get_link(struct net_device *dev);
 int ethtool_op_get_ts_info(struct net_device *dev, struct ethtool_ts_info *eti);
+
+
+/**
+ * struct ethtool_link_ext_state_info - link extended state and substate.
+ */
+struct ethtool_link_ext_state_info {
+	enum ethtool_link_ext_state link_ext_state;
+	union {
+		enum ethtool_link_ext_substate_autoneg autoneg;
+		enum ethtool_link_ext_substate_link_training link_training;
+		enum ethtool_link_ext_substate_link_logical_mismatch link_logical_mismatch;
+		enum ethtool_link_ext_substate_bad_signal_integrity bad_signal_integrity;
+		enum ethtool_link_ext_substate_cable_issue cable_issue;
+		u8 __link_ext_substate;
+	};
+};
 
 /**
  * ethtool_rxfh_indir_default - get default value for RX flow hash indirection
@@ -216,6 +232,16 @@ bool ethtool_convert_link_mode_to_legacy_u32(u32 *legacy_u32,
 #define ETHTOOL_COALESCE_USECS_LOW_HIGH					\
 	(ETHTOOL_COALESCE_RX_USECS_LOW | ETHTOOL_COALESCE_TX_USECS_LOW | \
 	 ETHTOOL_COALESCE_RX_USECS_HIGH | ETHTOOL_COALESCE_TX_USECS_HIGH)
+#define ETHTOOL_COALESCE_MAX_FRAMES_LOW_HIGH	\
+	(ETHTOOL_COALESCE_RX_MAX_FRAMES_LOW |	\
+	 ETHTOOL_COALESCE_TX_MAX_FRAMES_LOW |	\
+	 ETHTOOL_COALESCE_RX_MAX_FRAMES_HIGH |	\
+	 ETHTOOL_COALESCE_TX_MAX_FRAMES_HIGH)
+#define ETHTOOL_COALESCE_PKT_RATE_RX_USECS				\
+	(ETHTOOL_COALESCE_USE_ADAPTIVE_RX |				\
+	 ETHTOOL_COALESCE_RX_USECS_LOW | ETHTOOL_COALESCE_RX_USECS_HIGH | \
+	 ETHTOOL_COALESCE_PKT_RATE_LOW | ETHTOOL_COALESCE_PKT_RATE_HIGH | \
+	 ETHTOOL_COALESCE_RATE_SAMPLE_INTERVAL)
 
 struct ethtool_ops_extended_rh {
 };
@@ -248,6 +274,11 @@ struct ethtool_ops_extended_rh {
  * @get_link: Report whether physical link is up.  Will only be called if
  *	the netdev is up.  Should usually be set to ethtool_op_get_link(),
  *	which uses netif_carrier_ok().
+ * @get_link_ext_state: Report link extended state. Should set link_ext_state and
+ *	link_ext_substate (link_ext_substate of 0 means link_ext_substate is unknown,
+ *	do not attach ext_substate attribute to netlink message). If link_ext_state
+ *	and link_ext_substate are unknown, return -ENODATA. If not implemented,
+ *	link_ext_state and link_ext_substate will not be sent to userspace.
  * @get_eeprom: Read data from the device EEPROM.
  *	Should fill in the magic field.  Don't need to check len for zero
  *	or wraparound.  Fill in the data argument with the eeprom values
@@ -311,6 +342,15 @@ struct ethtool_ops_extended_rh {
  * @set_rxfh: Set the contents of the RX flow hash indirection table, hash
  *	key, and/or hash function.  Arguments which are set to %NULL or zero
  *	will remain unchanged.
+ *	Returns a negative error code or zero. An error code must be returned
+ *	if at least one unsupported change was requested.
+ * @get_rxfh_context: Get the contents of the RX flow hash indirection table,
+ *	hash key, and/or hash function assiciated to the given rss context.
+ *	Returns a negative error code or zero.
+ * @set_rxfh_context: Create, remove and configure RSS contexts. Allows setting
+ *	the contents of the RX flow hash indirection table, hash key, and/or
+ *	hash function associated to the given context. Arguments which are set
+ *	to %NULL or zero will remain unchanged.
  *	Returns a negative error code or zero. An error code must be returned
  *	if at least one unsupported change was requested.
  * @get_channels: Get number of channels.
@@ -466,7 +506,8 @@ struct ethtool_ops {
 	RH_KABI_USE(2, int	(*set_link_ksettings)(struct net_device *,
 				      const struct ethtool_link_ksettings *))
 	RH_KABI_USE(3, u32	supported_coalesce_params)
-	RH_KABI_RESERVE(4)
+	RH_KABI_USE(4, int	(*get_link_ext_state)(struct net_device *,
+				      struct ethtool_link_ext_state_info *))
 	RH_KABI_RESERVE(5)
 	RH_KABI_RESERVE(6)
 	RH_KABI_RESERVE(7)
@@ -499,7 +540,7 @@ struct ethtool_ops {
 
 struct ethtool_rx_flow_rule {
 	struct flow_rule	*rule;
-	unsigned long		priv[0];
+	unsigned long		priv[];
 };
 
 struct ethtool_rx_flow_spec_input {
@@ -510,5 +551,11 @@ struct ethtool_rx_flow_spec_input {
 struct ethtool_rx_flow_rule *
 ethtool_rx_flow_rule_create(const struct ethtool_rx_flow_spec_input *input);
 void ethtool_rx_flow_rule_destroy(struct ethtool_rx_flow_rule *rule);
+
+bool ethtool_virtdev_validate_cmd(const struct ethtool_link_ksettings *cmd);
+int ethtool_virtdev_set_link_ksettings(struct net_device *dev,
+				       const struct ethtool_link_ksettings *cmd,
+				       u32 *dev_speed, u8 *dev_duplex);
+
 
 #endif /* _LINUX_ETHTOOL_H */

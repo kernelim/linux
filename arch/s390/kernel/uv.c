@@ -119,6 +119,26 @@ static int uv_pin_shared(unsigned long paddr)
 }
 
 /*
+ * Requests the Ultravisor to destroy a guest page and make it
+ * accessible to the host. The destroy clears the page instead of
+ * exporting.
+ *
+ * @paddr: Absolute host address of page to be destroyed
+ */
+int uv_destroy_page(unsigned long paddr)
+{
+	struct uv_cb_cfs uvcb = {
+		.header.cmd = UVC_CMD_DESTR_SEC_STOR,
+		.header.len = sizeof(uvcb),
+		.paddr = paddr
+	};
+
+	if (uv_call(0, (u64)&uvcb))
+		return -EINVAL;
+	return 0;
+}
+
+/*
  * Requests the Ultravisor to encrypt a guest page and make it
  * accessible to the host for paging (export).
  *
@@ -331,7 +351,7 @@ EXPORT_SYMBOL_GPL(arch_make_page_accessible);
 static ssize_t uv_query_facilities(struct kobject *kobj,
 				   struct kobj_attribute *attr, char *page)
 {
-	return snprintf(page, PAGE_SIZE, "%lx\n%lx\n%lx\n%lx\n",
+	return scnprintf(page, PAGE_SIZE, "%lx\n%lx\n%lx\n%lx\n",
 			uv_info.inst_calls_list[0],
 			uv_info.inst_calls_list[1],
 			uv_info.inst_calls_list[2],
@@ -344,7 +364,7 @@ static struct kobj_attribute uv_query_facilities_attr =
 static ssize_t uv_query_max_guest_cpus(struct kobject *kobj,
 				       struct kobj_attribute *attr, char *page)
 {
-	return snprintf(page, PAGE_SIZE, "%d\n",
+	return scnprintf(page, PAGE_SIZE, "%d\n",
 			uv_info.max_guest_cpus);
 }
 
@@ -354,7 +374,7 @@ static struct kobj_attribute uv_query_max_guest_cpus_attr =
 static ssize_t uv_query_max_guest_vms(struct kobject *kobj,
 				      struct kobj_attribute *attr, char *page)
 {
-	return snprintf(page, PAGE_SIZE, "%d\n",
+	return scnprintf(page, PAGE_SIZE, "%d\n",
 			uv_info.max_num_sec_conf);
 }
 
@@ -364,7 +384,7 @@ static struct kobj_attribute uv_query_max_guest_vms_attr =
 static ssize_t uv_query_max_guest_addr(struct kobject *kobj,
 				       struct kobj_attribute *attr, char *page)
 {
-	return snprintf(page, PAGE_SIZE, "%lx\n",
+	return scnprintf(page, PAGE_SIZE, "%lx\n",
 			uv_info.max_sec_stor_addr);
 }
 

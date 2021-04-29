@@ -308,10 +308,10 @@ void iommu_release_device(struct device *dev)
 		return;
 
 	iommu_device_unlink(dev->iommu->iommu_dev, dev);
-	iommu_group_remove_device(dev);
 
 	ops->release_device(dev);
 
+	iommu_group_remove_device(dev);
 	module_put(ops->owner);
 	dev_iommu_free(dev);
 }
@@ -396,8 +396,8 @@ static ssize_t iommu_group_show_name(struct iommu_group *group, char *buf)
  * Elements are sorted by start address and overlapping segments
  * of the same type are merged.
  */
-int iommu_insert_resv_region(struct iommu_resv_region *new,
-			     struct list_head *regions)
+static int iommu_insert_resv_region(struct iommu_resv_region *new,
+				    struct list_head *regions)
 {
 	struct iommu_resv_region *iter, *tmp, *nr, *top;
 	LIST_HEAD(stack);
@@ -1198,11 +1198,12 @@ EXPORT_SYMBOL_GPL(iommu_report_device_fault);
 int iommu_page_response(struct device *dev,
 			struct iommu_page_response *msg)
 {
-	bool pasid_valid;
+	bool needs_pasid;
 	int ret = -EINVAL;
 	struct iommu_fault_event *evt;
 	struct iommu_fault_page_request *prm;
 	struct dev_iommu *param = dev->iommu;
+	bool has_pasid = msg->flags & IOMMU_PAGE_RESP_PASID_VALID;
 	struct iommu_domain *domain = iommu_get_domain_for_dev(dev);
 
 	if (!domain || !domain->ops->page_response)
@@ -1227,14 +1228,24 @@ int iommu_page_response(struct device *dev,
 	 */
 	list_for_each_entry(evt, &param->fault_param->faults, list) {
 		prm = &evt->fault.prm;
-		pasid_valid = prm->flags & IOMMU_FAULT_PAGE_REQUEST_PASID_VALID;
-
-		if ((pasid_valid && prm->pasid != msg->pasid) ||
-		    prm->grpid != msg->grpid)
+		if (prm->grpid != msg->grpid)
 			continue;
 
-		/* Sanitize the reply */
-		msg->flags = pasid_valid ? IOMMU_PAGE_RESP_PASID_VALID : 0;
+		/*
+		 * If the PASID is required, the corresponding request is
+		 * matched using the group ID, the PASID valid bit and the PASID
+		 * value. Otherwise only the group ID matches request and
+		 * response.
+		 */
+		needs_pasid = prm->flags & IOMMU_FAULT_PAGE_RESPONSE_NEEDS_PASID;
+		if (needs_pasid && (!has_pasid || msg->pasid != prm->pasid))
+			continue;
+
+		if (!needs_pasid && has_pasid) {
+			/* No big deal, just clear it. */
+			msg->flags &= ~IOMMU_PAGE_RESP_PASID_VALID;
+			msg->pasid = 0;
+		}
 
 		ret = domain->ops->page_response(dev, evt, msg);
 		list_del(&evt->list);
@@ -1949,6 +1960,46 @@ out_unlock:
 }
 EXPORT_SYMBOL_GPL(iommu_attach_device);
 
+int iommu_deferred_attach(struct device *dev, struct iommu_domain *domain)
+{
+	const struct iommu_ops *ops = domain->ops;
+
+	if (ops->is_attach_deferred && ops->is_attach_deferred(domain, dev))
+		return __iommu_attach_device(domain, dev);
+
+	return 0;
+}
+
+int iommu_cache_invalidate(struct iommu_domain *domain, struct device *dev,
+			   struct iommu_cache_invalidate_info *inv_info)
+{
+	if (unlikely(!domain->ops->cache_invalidate))
+		return -ENODEV;
+
+	return domain->ops->cache_invalidate(domain, dev, inv_info);
+}
+EXPORT_SYMBOL_GPL(iommu_cache_invalidate);
+
+int iommu_sva_bind_gpasid(struct iommu_domain *domain,
+			   struct device *dev, struct iommu_gpasid_bind_data *data)
+{
+	if (unlikely(!domain->ops->sva_bind_gpasid))
+		return -ENODEV;
+
+	return domain->ops->sva_bind_gpasid(domain, dev, data);
+}
+EXPORT_SYMBOL_GPL(iommu_sva_bind_gpasid);
+
+int iommu_sva_unbind_gpasid(struct iommu_domain *domain, struct device *dev,
+			     ioasid_t pasid)
+{
+	if (unlikely(!domain->ops->sva_unbind_gpasid))
+		return -ENODEV;
+
+	return domain->ops->sva_unbind_gpasid(dev, pasid);
+}
+EXPORT_SYMBOL_GPL(iommu_sva_unbind_gpasid);
+
 static void __iommu_detach_device(struct iommu_domain *domain,
 				  struct device *dev)
 {
@@ -2137,8 +2188,8 @@ static size_t iommu_pgsize(struct iommu_domain *domain,
 	return pgsize;
 }
 
-int __iommu_map(struct iommu_domain *domain, unsigned long iova,
-	      phys_addr_t paddr, size_t size, int prot, gfp_t gfp)
+static int __iommu_map(struct iommu_domain *domain, unsigned long iova,
+		       phys_addr_t paddr, size_t size, int prot, gfp_t gfp)
 {
 	const struct iommu_ops *ops = domain->ops;
 	unsigned long orig_iova = iova;
@@ -2288,9 +2339,9 @@ size_t iommu_unmap_fast(struct iommu_domain *domain,
 }
 EXPORT_SYMBOL_GPL(iommu_unmap_fast);
 
-size_t __iommu_map_sg(struct iommu_domain *domain, unsigned long iova,
-		    struct scatterlist *sg, unsigned int nents, int prot,
-		    gfp_t gfp)
+static size_t __iommu_map_sg(struct iommu_domain *domain, unsigned long iova,
+			     struct scatterlist *sg, unsigned int nents, int prot,
+			     gfp_t gfp)
 {
 	size_t len = 0, mapped = 0;
 	phys_addr_t start;
@@ -2519,71 +2570,6 @@ struct iommu_resv_region *iommu_alloc_resv_region(phys_addr_t start,
 	return region;
 }
 EXPORT_SYMBOL_GPL(iommu_alloc_resv_region);
-
-static int
-request_default_domain_for_dev(struct device *dev, unsigned long type)
-{
-	struct iommu_domain *domain;
-	struct iommu_group *group;
-	int ret;
-
-	/* Device must already be in a group before calling this function */
-	group = iommu_group_get(dev);
-	if (!group)
-		return -EINVAL;
-
-	mutex_lock(&group->mutex);
-
-	ret = 0;
-	if (group->default_domain && group->default_domain->type == type)
-		goto out;
-
-	/* Don't change mappings of existing devices */
-	ret = -EBUSY;
-	if (iommu_group_device_count(group) != 1)
-		goto out;
-
-	ret = -ENOMEM;
-	domain = __iommu_domain_alloc(dev->bus, type);
-	if (!domain)
-		goto out;
-
-	/* Attach the device to the domain */
-	ret = __iommu_attach_group(domain, group);
-	if (ret) {
-		iommu_domain_free(domain);
-		goto out;
-	}
-
-	/* Make the domain the default for this group */
-	if (group->default_domain)
-		iommu_domain_free(group->default_domain);
-	group->default_domain = domain;
-
-	iommu_create_device_direct_mappings(group, dev);
-
-	dev_info(dev, "Using iommu %s mapping\n",
-		 type == IOMMU_DOMAIN_DMA ? "dma" : "direct");
-
-	ret = 0;
-out:
-	mutex_unlock(&group->mutex);
-	iommu_group_put(group);
-
-	return ret;
-}
-
-/* Request that a device is direct mapped by the IOMMU */
-int iommu_request_dm_for_dev(struct device *dev)
-{
-	return request_default_domain_for_dev(dev, IOMMU_DOMAIN_IDENTITY);
-}
-
-/* Request that a device can't be direct mapped by the IOMMU */
-int iommu_request_dma_domain_for_dev(struct device *dev)
-{
-	return request_default_domain_for_dev(dev, IOMMU_DOMAIN_DMA);
-}
 
 void iommu_set_default_passthrough(bool cmd_line)
 {
@@ -2886,18 +2872,7 @@ void iommu_sva_unbind_device(struct iommu_sva *handle)
 }
 EXPORT_SYMBOL_GPL(iommu_sva_unbind_device);
 
-int iommu_sva_set_ops(struct iommu_sva *handle,
-		      const struct iommu_sva_ops *sva_ops)
-{
-	if (handle->ops && handle->ops != sva_ops)
-		return -EEXIST;
-
-	handle->ops = sva_ops;
-	return 0;
-}
-EXPORT_SYMBOL_GPL(iommu_sva_set_ops);
-
-int iommu_sva_get_pasid(struct iommu_sva *handle)
+u32 iommu_sva_get_pasid(struct iommu_sva *handle)
 {
 	const struct iommu_ops *ops = handle->dev->bus->iommu_ops;
 

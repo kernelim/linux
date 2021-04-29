@@ -33,6 +33,7 @@
 #include <asm/processor-flags.h>
 #include <asm/asm-offsets.h>
 #include <asm/bootparam.h>
+#include <asm/desc_defs.h>
 #include "pgtable.h"
 
 /*
@@ -40,8 +41,7 @@
  */
 	.hidden _bss
 	.hidden _ebss
-	.hidden _got
-	.hidden _egot
+	.hidden _end
 
 	__HEAD
 	.code32
@@ -87,7 +87,7 @@ ENTRY(startup_32)
 
 	call	verify_cpu
 	testl	%eax, %eax
-	jnz	no_longmode
+	jnz	.Lno_longmode
 
 /*
  * Compute the delta between where we were compiled to run at
@@ -306,25 +306,6 @@ ENTRY(startup_64)
 	leaq	boot_stack_end(%rbx), %rsp
 
 	/*
-	 * paging_prepare() and cleanup_trampoline() below can have GOT
-	 * references. Adjust the table with address we are running at.
-	 *
-	 * Zero RAX for adjust_got: the GOT was not adjusted before;
-	 * there's no adjustment to undo.
-	 */
-	xorq	%rax, %rax
-
-	/*
-	 * Calculate the address the binary is loaded at and use it as
-	 * a GOT adjustment.
-	 */
-	call	1f
-1:	popq	%rdi
-	subq	$1b, %rdi
-
-	call	adjust_got
-
-	/*
 	 * At this point we are in long mode with 4-level paging enabled,
 	 * but we might want to enable 5-level paging or vice versa.
 	 *
@@ -353,6 +334,18 @@ ENTRY(startup_64)
 	leaq	gdt(%rip), %rax
 	movq	%rax, gdt64+2(%rip)
 	lgdt	gdt64(%rip)
+
+	/* Reload CS so IRET returns to a CS actually in the GDT */
+	pushq	$__KERNEL_CS
+	leaq	.Lon_kernel_cs(%rip), %rax
+	pushq	%rax
+	lretq
+
+.Lon_kernel_cs:
+
+	pushq	%rsi
+	call	load_stage1_idt
+	popq	%rsi
 
 	/*
 	 * paging_prepare() sets up the trampoline and checks if we need to
@@ -405,21 +398,6 @@ trampoline_return:
 	pushq	$0
 	popfq
 
-	/*
-	 * Previously we've adjusted the GOT with address the binary was
-	 * loaded at. Now we need to re-adjust for relocation address.
-	 *
-	 * Calculate the address the binary is loaded at, so that we can
-	 * undo the previous GOT adjustment.
-	 */
-	call	1f
-1:	popq	%rax
-	subq	$1b, %rax
-
-	/* The new adjustment is the relocation address */
-	movq	%rbx, %rdi
-	call	adjust_got
-
 /*
  * Copy the compressed kernel to the end of our buffer
  * where decompression in place becomes safe.
@@ -434,10 +412,20 @@ trampoline_return:
 	cld
 	popq	%rsi
 
+	/*
+	 * The GDT may get overwritten either during the copy we just did or
+	 * during extract_kernel below. To avoid any issues, repoint the GDTR
+	 * to the new copy of the GDT.
+	 */
+	leaq	gdt64(%rbx), %rax
+	leaq	gdt(%rbx), %rdx
+	movq	%rdx, 2(%rax)
+	lgdt	(%rax)
+
 /*
  * Jump to the relocated address.
  */
-	leaq	relocated(%rbx), %rax
+	leaq	.Lrelocated(%rbx), %rax
 	jmp	*%rax
 
 #ifdef CONFIG_EFI_STUB
@@ -508,7 +496,7 @@ ENDPROC(efi64_stub_entry)
 #endif
 
 	.text
-relocated:
+.Lrelocated:
 
 /*
  * Clear BSS (stack is currently empty)
@@ -519,6 +507,24 @@ relocated:
 	subq	%rdi, %rcx
 	shrq	$3, %rcx
 	rep	stosq
+
+/*
+ * If running as an SEV guest, the encryption mask is required in the
+ * page-table setup code below. When the guest also has SEV-ES enabled
+ * set_sev_encryption_mask() will cause #VC exceptions, but the stage2
+ * handler can't map its GHCB because the page-table is not set up yet.
+ * So set up the encryption mask here while still on the stage1 #VC
+ * handler. Then load stage2 IDT and switch to the kernel's own
+ * page-table.
+ */
+	pushq	%rsi
+	call	set_sev_encryption_mask
+	call	load_stage2_idt
+
+	/* Pass boot_params to initialize_identity_maps() */
+	movq	(%rsp), %rdi
+	call	initialize_identity_maps
+	popq	%rsi
 
 /*
  * Do the extraction, and jump to the new kernel..
@@ -537,27 +543,6 @@ relocated:
  * Jump to the decompressed kernel.
  */
 	jmp	*%rax
-
-/*
- * Adjust the global offset table
- *
- * RAX is the previous adjustment of the table to undo (use 0 if it's the
- * first time we touch GOT).
- * RDI is the new adjustment to apply.
- */
-adjust_got:
-	/* Walk through the GOT adding the address to the entries */
-	leaq	_got(%rip), %rdx
-	leaq	_egot(%rip), %rcx
-1:
-	cmpq	%rcx, %rdx
-	jae	2f
-	subq	%rax, (%rdx)	/* Undo previous adjustment */
-	addq	%rdi, (%rdx)	/* Apply the new adjustment */
-	addq	$8, %rdx
-	jmp	1b
-2:
-	ret
 
 	.code32
 /*
@@ -609,7 +594,7 @@ ENTRY(trampoline_32bit_src)
 	movl	%eax, %cr4
 
 	/* Calculate address of paging_enabled() once we are executing in the trampoline */
-	leal	paging_enabled - trampoline_32bit_src + TRAMPOLINE_32BIT_CODE_OFFSET(%ecx), %eax
+	leal	.Lpaging_enabled - trampoline_32bit_src + TRAMPOLINE_32BIT_CODE_OFFSET(%ecx), %eax
 
 	/* Prepare the stack for far return to Long Mode */
 	pushl	$__KERNEL_CS
@@ -622,7 +607,7 @@ ENTRY(trampoline_32bit_src)
 	lret
 
 	.code64
-paging_enabled:
+.Lpaging_enabled:
 	/* Return from the trampoline */
 	jmp	*%rdi
 
@@ -634,7 +619,7 @@ paging_enabled:
 	.org	trampoline_32bit_src + TRAMPOLINE_32BIT_CODE_SIZE
 
 	.code32
-no_longmode:
+.Lno_longmode:
 	/* This isn't an x86-64 CPU, so hang intentionally, we cannot continue */
 1:
 	hlt
@@ -659,6 +644,18 @@ gdt:
 	.quad	0x0080890000000000	/* TS descriptor */
 	.quad   0x0000000000000000	/* TS continued */
 gdt_end:
+
+SYM_DATA_START(boot_idt_desc)
+	.word	boot_idt_end - boot_idt - 1
+	.quad	0
+SYM_DATA_END(boot_idt_desc)
+	.balign 8
+SYM_DATA_START(boot_idt)
+	.rept	BOOT_IDT_ENTRIES
+	.quad	0
+	.quad	0
+	.endr
+SYM_DATA_END_LABEL(boot_idt, SYM_L_GLOBAL, boot_idt_end)
 
 #ifdef CONFIG_EFI_STUB
 efi_config:

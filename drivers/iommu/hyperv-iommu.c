@@ -131,7 +131,7 @@ static int hyperv_irq_remapping_activate(struct irq_domain *domain,
 	return 0;
 }
 
-static struct irq_domain_ops hyperv_ir_domain_ops = {
+static const struct irq_domain_ops hyperv_ir_domain_ops = {
 	.alloc = hyperv_irq_remapping_alloc,
 	.free = hyperv_irq_remapping_free,
 	.activate = hyperv_irq_remapping_activate,
@@ -143,6 +143,7 @@ static int __init hyperv_prepare_irq_remapping(void)
 	int i;
 
 	if (!hypervisor_is_type(X86_HYPER_MS_HYPERV) ||
+	    x86_init.hyper.msi_ext_dest_id() ||
 	    !x2apic_supported())
 		return -ENODEV;
 

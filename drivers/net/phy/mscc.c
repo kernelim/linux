@@ -69,9 +69,15 @@ enum rgmii_rx_clock_delay {
 #define MSCC_PHY_EXT_PHY_CNTL_2		  24
 
 #define MII_VSC85XX_INT_MASK		  25
-#define MII_VSC85XX_INT_MASK_MASK	  0xa000
-#define MII_VSC85XX_INT_MASK_WOL	  0x0040
+#define MII_VSC85XX_INT_MASK_MDINT	  BIT(15)
+#define MII_VSC85XX_INT_MASK_LINK_CHG	  BIT(13)
+#define MII_VSC85XX_INT_MASK_WOL	  BIT(6)
+#define MII_VSC85XX_INT_MASK_EXT	  BIT(5)
 #define MII_VSC85XX_INT_STATUS		  26
+
+#define MII_VSC85XX_INT_MASK_MASK	  (MII_VSC85XX_INT_MASK_MDINT    | \
+					   MII_VSC85XX_INT_MASK_LINK_CHG | \
+					   MII_VSC85XX_INT_MASK_EXT)
 
 #define MSCC_PHY_WOL_MAC_CONTROL          27
 #define EDGE_RATE_CNTL_POS                5
@@ -1737,8 +1743,8 @@ static int vsc8584_config_init(struct phy_device *phydev)
 
 	val = phy_read(phydev, MSCC_PHY_EXT_PHY_CNTL_1);
 	val &= ~(MEDIA_OP_MODE_MASK | VSC8584_MAC_IF_SELECTION_MASK);
-	val |= MEDIA_OP_MODE_COPPER | (VSC8584_MAC_IF_SELECTION_SGMII <<
-				       VSC8584_MAC_IF_SELECTION_POS);
+	val |= (MEDIA_OP_MODE_COPPER << MEDIA_OP_MODE_POS) |
+	       (VSC8584_MAC_IF_SELECTION_SGMII << VSC8584_MAC_IF_SELECTION_POS);
 	ret = phy_write(phydev, MSCC_PHY_EXT_PHY_CNTL_1, val);
 
 	ret = genphy_soft_reset(phydev);
@@ -2163,7 +2169,7 @@ static int vsc8514_config_init(struct phy_device *phydev)
 		return ret;
 
 	ret = phy_modify(phydev, MSCC_PHY_EXT_PHY_CNTL_1, MEDIA_OP_MODE_MASK,
-			 MEDIA_OP_MODE_COPPER);
+			 MEDIA_OP_MODE_COPPER << MEDIA_OP_MODE_POS);
 
 	if (ret)
 		return ret;

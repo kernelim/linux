@@ -41,7 +41,7 @@ static struct kernfs_iattrs *__kernfs_iattrs(struct kernfs_node *kn, int alloc)
 	if (kn->iattr || !alloc)
 		goto out_unlock;
 
-	kn->iattr = kzalloc(sizeof(struct kernfs_iattrs), GFP_KERNEL);
+	kn->iattr = kmem_cache_zalloc(kernfs_iattrs_cache, GFP_KERNEL);
 	if (!kn->iattr)
 		goto out_unlock;
 
@@ -202,7 +202,7 @@ static void kernfs_init_inode(struct kernfs_node *kn, struct inode *inode)
 	inode->i_private = kn;
 	inode->i_mapping->a_ops = &kernfs_aops;
 	inode->i_op = &kernfs_iops;
-	inode->i_generation = kn->id.generation;
+	inode->i_generation = kernfs_gen(kn);
 
 	set_default_inode_attr(inode, kn->mode);
 	kernfs_refresh_inode(kn, inode);
@@ -248,7 +248,7 @@ struct inode *kernfs_get_inode(struct super_block *sb, struct kernfs_node *kn)
 {
 	struct inode *inode;
 
-	inode = iget_locked(sb, kn->id.ino);
+	inode = iget_locked(sb, kernfs_ino(kn));
 	if (inode && (inode->i_state & I_NEW))
 		kernfs_init_inode(kn, inode);
 

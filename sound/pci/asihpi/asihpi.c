@@ -258,15 +258,6 @@ static inline u16 hpi_stream_group_reset(u32 h_stream)
 		return hpi_instream_group_reset(h_stream);
 }
 
-static inline u16 hpi_stream_group_get_map(
-				u32 h_stream, u32 *mo, u32 *mi)
-{
-	if (hpi_handle_object(h_stream) ==  HPI_OBJ_OSTREAM)
-		return hpi_outstream_group_get_map(h_stream, mo, mi);
-	else
-		return hpi_instream_group_get_map(h_stream, mo, mi);
-}
-
 static u16 handle_error(u16 err, int line, char *filename)
 {
 	if (err)
@@ -1904,7 +1895,7 @@ static int snd_asihpi_tuner_band_get(struct snd_kcontrol *kcontrol,
 	*/
 	u16 band, idx;
 	u16 tuner_bands[HPI_TUNER_BAND_LAST];
-	u32 num_bands = 0;
+	__always_unused u32 num_bands;
 
 	num_bands = asihpi_tuner_band_query(kcontrol, tuner_bands,
 				HPI_TUNER_BAND_LAST);
@@ -1931,7 +1922,7 @@ static int snd_asihpi_tuner_band_put(struct snd_kcontrol *kcontrol,
 	unsigned int idx;
 	u16 band;
 	u16 tuner_bands[HPI_TUNER_BAND_LAST];
-	u32 num_bands = 0;
+	__always_unused u32 num_bands;
 
 	num_bands = asihpi_tuner_band_query(kcontrol, tuner_bands,
 			HPI_TUNER_BAND_LAST);
@@ -2161,7 +2152,6 @@ static int snd_card_asihpi_mux_count_sources(struct snd_kcontrol *snd_control)
 static int snd_asihpi_mux_info(struct snd_kcontrol *kcontrol,
 			       struct snd_ctl_elem_info *uinfo)
 {
-	int err;
 	u16 src_node_type, src_node_index;
 	u32 h_control = kcontrol->private_value;
 
@@ -2174,10 +2164,9 @@ static int snd_asihpi_mux_info(struct snd_kcontrol *kcontrol,
 		uinfo->value.enumerated.item =
 		    uinfo->value.enumerated.items - 1;
 
-	err =
-	    hpi_multiplexer_query_source(h_control,
-					uinfo->value.enumerated.item,
-					&src_node_type, &src_node_index);
+	hpi_multiplexer_query_source(h_control,
+				     uinfo->value.enumerated.item,
+				     &src_node_type, &src_node_index);
 
 	sprintf(uinfo->value.enumerated.name, "%s %d",
 		asihpi_src_names[src_node_type - HPI_SOURCENODE_NONE],

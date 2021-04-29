@@ -410,6 +410,7 @@ EXPORT_SYMBOL(ib_umem_odp_alloc_implicit);
  *        ib_alloc_implicit_odp_umem()
  * @addr: The starting userspace VA
  * @size: The length of the userspace VA
+ * @ops: MMU interval ops, currently only @invalidate
  */
 struct ib_umem_odp *ib_umem_odp_alloc_child(struct ib_umem_odp *root,
 					    unsigned long addr, size_t size)
@@ -452,6 +453,7 @@ EXPORT_SYMBOL(ib_umem_odp_alloc_child);
  * @addr: userspace virtual address to start at
  * @size: length of region to pin
  * @access: IB_ACCESS_xxx flags for memory being pinned
+ * @ops: MMU interval ops, currently only @invalidate
  *
  * The driver should use when the access flags indicate ODP memory. It avoids
  * pinning, instead, stores the mm for future page fault handling in
@@ -541,9 +543,8 @@ EXPORT_SYMBOL(ib_umem_odp_release);
  * The function returns -EFAULT if the DMA mapping operation fails. It returns
  * -EAGAIN if a concurrent invalidation prevents us from updating the page.
  *
- * The page is released via put_user_page even if the operation failed. For
- * on-demand pinning, the page is released whenever it isn't stored in the
- * umem.
+ * The page is released via put_page even if the operation failed. For on-demand
+ * pinning, the page is released whenever it isn't stored in the umem.
  */
 static int ib_umem_odp_map_dma_single_page(
 		struct ib_umem_odp *umem_odp,
@@ -602,7 +603,7 @@ static int ib_umem_odp_map_dma_single_page(
 	}
 
 out:
-	put_user_page(page);
+	put_page(page);
 	return ret;
 }
 
@@ -712,7 +713,7 @@ int ib_umem_odp_map_dma_pages(struct ib_umem_odp *umem_odp, u64 user_virt,
 					ret = -EFAULT;
 					break;
 				}
-				put_user_page(local_page_list[j]);
+				put_page(local_page_list[j]);
 				continue;
 			}
 
@@ -739,8 +740,8 @@ int ib_umem_odp_map_dma_pages(struct ib_umem_odp *umem_odp, u64 user_virt,
 			 * ib_umem_odp_map_dma_single_page().
 			 */
 			if (npages - (j + 1) > 0)
-				put_user_pages(&local_page_list[j+1],
-					       npages - (j + 1));
+				release_pages(&local_page_list[j+1],
+					      npages - (j + 1));
 			break;
 		}
 	}

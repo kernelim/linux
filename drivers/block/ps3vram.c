@@ -736,16 +736,15 @@ static int ps3vram_probe(struct ps3_system_bus_device *dev)
 
 	ps3vram_proc_init(dev);
 
-	queue = blk_alloc_queue(GFP_KERNEL);
+	queue = blk_alloc_queue_rh(ps3vram_make_request, NUMA_NO_NODE);
 	if (!queue) {
-		dev_err(&dev->core, "blk_alloc_queue failed\n");
+		dev_err(&dev->core, "blk_alloc_queue_rh failed\n");
 		error = -ENOMEM;
 		goto out_cache_cleanup;
 	}
 
 	priv->queue = queue;
 	queue->queuedata = dev;
-	blk_queue_make_request(queue, ps3vram_make_request);
 	blk_queue_max_segments(queue, BLK_MAX_SEGMENTS);
 	blk_queue_max_segment_size(queue, BLK_MAX_SEGMENT_SIZE);
 	blk_queue_max_hw_sectors(queue, BLK_SAFE_MAX_SECTORS);

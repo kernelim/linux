@@ -61,8 +61,11 @@ static struct {
  */
 static void mvpp2_mac_config(struct phylink_config *config, unsigned int mode,
 			     const struct phylink_link_state *state);
-static void mvpp2_mac_link_up(struct phylink_config *config, unsigned int mode,
-			      phy_interface_t interface, struct phy_device *phy);
+static void mvpp2_mac_link_up(struct phylink_config *config,
+			      struct phy_device *phy,
+			      unsigned int mode, phy_interface_t interface,
+			      int speed, int duplex,
+			      bool tx_pause, bool rx_pause);
 
 /* Queue modes */
 #define MVPP2_QDIST_SINGLE_MODE	0
@@ -3155,6 +3158,9 @@ static void mvpp2_start_dev(struct mvpp2_port *port)
 			.link = 1,
 		};
 		mvpp2_mac_config(&port->phylink_config, MLO_AN_INBAND, &state);
+		mvpp2_mac_link_up(&port->phylink_config, NULL,
+				  MLO_AN_INBAND, port->phy_interface,
+				  SPEED_UNKNOWN, DUPLEX_UNKNOWN, false, false);
 	}
 
 	netif_tx_start_all_queues(port->dev);
@@ -4188,8 +4194,8 @@ static void mvpp2_phylink_validate(struct phylink_config *config,
 		   __ETHTOOL_LINK_MODE_MASK_NBITS);
 }
 
-static void mvpp22_xlg_link_state(struct mvpp2_port *port,
-				  struct phylink_link_state *state)
+static void mvpp22_xlg_pcs_get_state(struct mvpp2_port *port,
+				     struct phylink_link_state *state)
 {
 	u32 val;
 
@@ -4208,8 +4214,8 @@ static void mvpp22_xlg_link_state(struct mvpp2_port *port,
 		state->pause |= MLO_PAUSE_RX;
 }
 
-static void mvpp2_gmac_link_state(struct mvpp2_port *port,
-				  struct phylink_link_state *state)
+static void mvpp2_gmac_pcs_get_state(struct mvpp2_port *port,
+				     struct phylink_link_state *state)
 {
 	u32 val;
 
@@ -4242,8 +4248,8 @@ static void mvpp2_gmac_link_state(struct mvpp2_port *port,
 		state->pause |= MLO_PAUSE_TX;
 }
 
-static int mvpp2_phylink_mac_link_state(struct phylink_config *config,
-					struct phylink_link_state *state)
+static void mvpp2_phylink_mac_pcs_get_state(struct phylink_config *config,
+					    struct phylink_link_state *state)
 {
 	struct mvpp2_port *port = container_of(config, struct mvpp2_port,
 					       phylink_config);
@@ -4253,13 +4259,12 @@ static int mvpp2_phylink_mac_link_state(struct phylink_config *config,
 		mode &= MVPP22_XLG_CTRL3_MACMODESELECT_MASK;
 
 		if (mode == MVPP22_XLG_CTRL3_MACMODESELECT_10G) {
-			mvpp22_xlg_link_state(port, state);
-			return 1;
+			mvpp22_xlg_pcs_get_state(port, state);
+			return;
 		}
 	}
 
-	mvpp2_gmac_link_state(port, state);
-	return 1;
+	mvpp2_gmac_pcs_get_state(port, state);
 }
 
 static void mvpp2_mac_an_restart(struct phylink_config *config)
@@ -4436,8 +4441,11 @@ static void mvpp2_mac_config(struct phylink_config *config, unsigned int mode,
 	}
 }
 
-static void mvpp2_mac_link_up(struct phylink_config *config, unsigned int mode,
-			      phy_interface_t interface, struct phy_device *phy)
+static void mvpp2_mac_link_up(struct phylink_config *config,
+			      struct phy_device *phy,
+			      unsigned int mode, phy_interface_t interface,
+			      int speed, int duplex,
+			      bool tx_pause, bool rx_pause)
 {
 	struct net_device *dev = to_net_dev(config->dev);
 	struct mvpp2_port *port = netdev_priv(dev);
@@ -4490,7 +4498,7 @@ static void mvpp2_mac_link_down(struct phylink_config *config,
 
 static const struct phylink_mac_ops mvpp2_phylink_ops = {
 	.validate = mvpp2_phylink_validate,
-	.mac_link_state = mvpp2_phylink_mac_link_state,
+	.mac_pcs_get_state = mvpp2_phylink_mac_pcs_get_state,
 	.mac_an_restart = mvpp2_mac_an_restart,
 	.mac_config = mvpp2_mac_config,
 	.mac_link_up = mvpp2_mac_link_up,

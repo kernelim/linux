@@ -21,7 +21,7 @@
  * specified in
  * https://developer.arm.com/docs/den0028/latest
  *
- * This code is up-to-date with version DEN 0028 B
+ * This code is up-to-date with version DEN 0028 C
  */
 
 #define ARM_SMCCC_STD_CALL	        _AC(0,U)
@@ -67,6 +67,7 @@
 
 #define ARM_SMCCC_VERSION_1_0		0x10000
 #define ARM_SMCCC_VERSION_1_1		0x10001
+#define ARM_SMCCC_VERSION_1_2		0x10002
 
 #define ARM_SMCCC_VERSION_FUNC_ID					\
 	ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL,				\
@@ -87,6 +88,30 @@
 	ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL,				\
 			   ARM_SMCCC_SMC_32,				\
 			   0, 0x7fff)
+
+#define SMCCC_ARCH_WORKAROUND_RET_UNAFFECTED	1
+
+/* Paravirtualised time calls (defined by ARM DEN0057A) */
+#define ARM_SMCCC_HV_PV_TIME_FEATURES				\
+	ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL,			\
+			   ARM_SMCCC_SMC_64,			\
+			   ARM_SMCCC_OWNER_STANDARD_HYP,	\
+			   0x20)
+
+#define ARM_SMCCC_HV_PV_TIME_ST					\
+	ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL,			\
+			   ARM_SMCCC_SMC_64,			\
+			   ARM_SMCCC_OWNER_STANDARD_HYP,	\
+			   0x21)
+
+/*
+ * Return codes defined in ARM DEN 0070A
+ * ARM DEN 0070A is now merged/consolidated into ARM DEN 0028 C
+ */
+#define SMCCC_RET_SUCCESS			0
+#define SMCCC_RET_NOT_SUPPORTED			-1
+#define SMCCC_RET_NOT_REQUIRED			-2
+#define SMCCC_RET_INVALID_PARAMETER		-3
 
 #ifndef __ASSEMBLY__
 
@@ -325,11 +350,6 @@ asmlinkage void __arm_smccc_hvc(unsigned long a0, unsigned long a1,
  */
 #define arm_smccc_1_1_hvc(...)	__arm_smccc_1_1(SMCCC_HVC_INST, __VA_ARGS__)
 
-/* Return codes defined in ARM DEN 0070A */
-#define SMCCC_RET_SUCCESS			0
-#define SMCCC_RET_NOT_SUPPORTED			-1
-#define SMCCC_RET_NOT_REQUIRED			-2
-
 /*
  * Like arm_smccc_1_1* but always returns SMCCC_RET_NOT_SUPPORTED.
  * Used when the SMCCC conduit is not defined. The empty asm statement
@@ -374,19 +394,6 @@ asmlinkage void __arm_smccc_hvc(unsigned long a0, unsigned long a1,
 		}							\
 		method;							\
 	})
-
-/* Paravirtualised time calls (defined by ARM DEN0057A) */
-#define ARM_SMCCC_HV_PV_TIME_FEATURES				\
-	ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL,			\
-			   ARM_SMCCC_SMC_64,			\
-			   ARM_SMCCC_OWNER_STANDARD_HYP,	\
-			   0x20)
-
-#define ARM_SMCCC_HV_PV_TIME_ST					\
-	ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL,			\
-			   ARM_SMCCC_SMC_64,			\
-			   ARM_SMCCC_OWNER_STANDARD_HYP,	\
-			   0x21)
 
 #endif /*__ASSEMBLY__*/
 #endif /*__LINUX_ARM_SMCCC_H*/

@@ -563,7 +563,7 @@ show_sas_phy_enable(struct device *dev, struct device_attribute *attr,
 {
 	struct sas_phy *phy = transport_class_to_phy(dev);
 
-	return snprintf(buf, 20, "%d", phy->enabled);
+	return snprintf(buf, 20, "%d\n", phy->enabled);
 }
 
 static DEVICE_ATTR(enable, S_IRUGO | S_IWUSR, show_sas_phy_enable,
@@ -607,7 +607,6 @@ sas_phy_protocol_attr(identify.target_port_protocols,
 sas_phy_simple_attr(identify.sas_address, sas_address, "0x%016llx\n",
 		unsigned long long);
 sas_phy_simple_attr(identify.phy_identifier, phy_identifier, "%d\n", u8);
-//sas_phy_simple_attr(port_identifier, port_identifier, "%d\n", int);
 sas_phy_linkspeed_attr(negotiated_linkrate);
 sas_phy_linkspeed_attr(minimum_linkrate_hw);
 sas_phy_linkspeed_rw_attr(minimum_linkrate);
@@ -1527,7 +1526,7 @@ int sas_rphy_add(struct sas_rphy *rphy)
 	list_add_tail(&rphy->list, &sas_host->rphy_list);
 	if (identify->device_type == SAS_END_DEVICE &&
 	    (identify->target_port_protocols &
-	     (SAS_PROTOCOL_SSP|SAS_PROTOCOL_STP|SAS_PROTOCOL_SATA)))
+	     (SAS_PROTOCOL_SSP | SAS_PROTOCOL_STP | SAS_PROTOCOL_SATA)))
 		rphy->scsi_target_id = sas_host->next_target_id++;
 	else if (identify->device_type == SAS_END_DEVICE)
 		rphy->scsi_target_id = -1;
@@ -1790,7 +1789,6 @@ sas_attach_transport(struct sas_function_template *ft)
 	SETUP_PHY_ATTRIBUTE(device_type);
 	SETUP_PHY_ATTRIBUTE(sas_address);
 	SETUP_PHY_ATTRIBUTE(phy_identifier);
-	//SETUP_PHY_ATTRIBUTE(port_identifier);
 	SETUP_PHY_ATTRIBUTE(negotiated_linkrate);
 	SETUP_PHY_ATTRIBUTE(minimum_linkrate_hw);
 	SETUP_PHY_ATTRIBUTE_RW(minimum_linkrate);

@@ -40,15 +40,17 @@ static u32 tcp_clamp_rto_to_user_timeout(const struct sock *sk)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	u32 elapsed, start_ts;
+	s32 remaining;
 
 	start_ts = tcp_retransmit_stamp(sk);
 	if (!icsk->icsk_user_timeout || !start_ts)
 		return icsk->icsk_rto;
 	elapsed = tcp_time_stamp(tcp_sk(sk)) - start_ts;
-	if (elapsed >= icsk->icsk_user_timeout)
+	remaining = icsk->icsk_user_timeout - elapsed;
+	if (remaining <= 0)
 		return 1; /* user timeout has passed; fire ASAP */
-	else
-		return min_t(u32, icsk->icsk_rto, msecs_to_jiffies(icsk->icsk_user_timeout - elapsed));
+
+	return min_t(u32, icsk->icsk_rto, msecs_to_jiffies(remaining));
 }
 
 /**
@@ -213,7 +215,7 @@ static bool retransmits_timed_out(struct sock *sk,
 				(boundary - linear_backoff_thresh) * TCP_RTO_MAX;
 		timeout = jiffies_to_msecs(timeout);
 	}
-	return (tcp_time_stamp(tcp_sk(sk)) - start_ts) >= timeout;
+	return (s32)(tcp_time_stamp(tcp_sk(sk)) - start_ts - timeout) >= 0;
 }
 
 /* A write timeout has occurred. Process the after effects. */
@@ -292,14 +294,14 @@ void tcp_delack_timer_handler(struct sock *sk)
 	icsk->icsk_ack.pending &= ~ICSK_ACK_TIMER;
 
 	if (inet_csk_ack_scheduled(sk)) {
-		if (!icsk->icsk_ack.pingpong) {
+		if (!inet_csk_in_pingpong_mode(sk)) {
 			/* Delayed ACK missed: inflate ATO. */
 			icsk->icsk_ack.ato = min(icsk->icsk_ack.ato << 1, icsk->icsk_rto);
 		} else {
 			/* Delayed ACK missed: leave pingpong mode and
 			 * deflate ATO.
 			 */
-			icsk->icsk_ack.pingpong = 0;
+			inet_csk_exit_pingpong_mode(sk);
 			icsk->icsk_ack.ato      = TCP_ATO_MIN;
 		}
 		tcp_mstamp_refresh(tcp_sk(sk));
@@ -365,7 +367,7 @@ static void tcp_probe_timer(struct sock *sk)
 	 */
 	start_ts = tcp_skb_timestamp(skb);
 	if (!start_ts)
-		skb->skb_mstamp = tp->tcp_mstamp;
+		skb->skb_mstamp_ns = tp->tcp_clock_cache;
 	else if (icsk->icsk_user_timeout &&
 		 (s32)(tcp_time_stamp(tp) - start_ts) > icsk->icsk_user_timeout)
 		goto abort;

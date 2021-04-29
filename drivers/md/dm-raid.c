@@ -254,7 +254,7 @@ struct raid_set {
 		int mode;
 	} journal_dev;
 
-	struct raid_dev dev[0];
+	struct raid_dev dev[];
 };
 
 static void rs_config_backup(struct raid_set *rs, struct rs_layout *l)
@@ -2345,8 +2345,6 @@ static int super_init_validation(struct raid_set *rs, struct md_rdev *rdev)
 
 	if (new_devs == rs->raid_disks || !rebuilds) {
 		/* Replace a broken device */
-		if (new_devs == 1 && !rs->delta_disks)
-			;
 		if (new_devs == rs->raid_disks) {
 			DMINFO("Superblocks created for new raid set");
 			set_bit(MD_ARRAY_FIRST_USE, &mddev->flags);
@@ -2971,11 +2969,6 @@ static void configure_discard_support(struct raid_set *rs)
 		}
 	}
 
-	/*
-	 * RAID1 and RAID10 personalities require bio splitting,
-	 * RAID0/4/5/6 don't and process large discard bios properly.
-	 */
-	ti->split_discard_bios = !!(rs_is_raid1(rs) || rs_is_raid10(rs));
 	ti->num_discard_bios = 1;
 }
 
@@ -3743,10 +3736,19 @@ static int raid_iterate_devices(struct dm_target *ti,
 static void raid_io_hints(struct dm_target *ti, struct queue_limits *limits)
 {
 	struct raid_set *rs = ti->private;
-	unsigned int chunk_size = to_bytes(rs->md.chunk_sectors);
+	unsigned int chunk_size_bytes = to_bytes(rs->md.chunk_sectors);
 
-	blk_limits_io_min(limits, chunk_size);
-	blk_limits_io_opt(limits, chunk_size * mddev_data_stripes(rs));
+	blk_limits_io_min(limits, chunk_size_bytes);
+	blk_limits_io_opt(limits, chunk_size_bytes * mddev_data_stripes(rs));
+
+	/*
+	 * RAID0 and RAID10 personalities require bio splitting,
+	 * RAID1/4/5/6 don't and process large discard bios properly.
+	 */
+	if (rs_is_raid0(rs) || rs_is_raid10(rs)) {
+		limits->discard_granularity = chunk_size_bytes;
+		limits->max_discard_sectors = rs->md.chunk_sectors;
+	}
 }
 
 static void raid_postsuspend(struct dm_target *ti)

@@ -938,8 +938,9 @@ out:
  *
  * Return: 0 on success, -errno on failure
  */
-int hv_read_config_block(struct pci_dev *pdev, void *buf, unsigned int len,
-			 unsigned int block_id, unsigned int *bytes_returned)
+static int hv_read_config_block(struct pci_dev *pdev, void *buf,
+				unsigned int len, unsigned int block_id,
+				unsigned int *bytes_returned)
 {
 	struct hv_pcibus_device *hbus =
 		container_of(pdev->bus->sysdata, struct hv_pcibus_device,
@@ -1018,8 +1019,8 @@ static void hv_pci_write_config_compl(void *context, struct pci_response *resp,
  *
  * Return: 0 on success, -errno on failure
  */
-int hv_write_config_block(struct pci_dev *pdev, void *buf, unsigned int len,
-			  unsigned int block_id)
+static int hv_write_config_block(struct pci_dev *pdev, void *buf,
+				unsigned int len, unsigned int block_id)
 {
 	struct hv_pcibus_device *hbus =
 		container_of(pdev->bus->sysdata, struct hv_pcibus_device,
@@ -1087,9 +1088,9 @@ int hv_write_config_block(struct pci_dev *pdev, void *buf, unsigned int len,
  *
  * Return: 0 on success, -errno on failure
  */
-int hv_register_block_invalidate(struct pci_dev *pdev, void *context,
-				 void (*block_invalidate)(void *context,
-							  u64 block_mask))
+static int hv_register_block_invalidate(struct pci_dev *pdev, void *context,
+					void (*block_invalidate)(void *context,
+								 u64 block_mask))
 {
 	struct hv_pcibus_device *hbus =
 		container_of(pdev->bus->sysdata, struct hv_pcibus_device,
@@ -1225,7 +1226,7 @@ static void hv_irq_unmask(struct irq_data *data)
 	params->int_target.vector = cfg->vector;
 
 	/*
-	 * Honoring apic->irq_delivery_mode set to dest_Fixed by
+	 * Honoring apic->delivery_mode set to APIC_DELIVERY_MODE_FIXED by
 	 * setting the HV_DEVICE_INTERRUPT_TARGET_MULTICAST flag results in a
 	 * spurious interrupt storm. Not doing so does not seem to have a
 	 * negative effect (yet?).
@@ -1323,7 +1324,7 @@ static u32 hv_compose_msi_req_v1(
 	int_pkt->wslot.slot = slot;
 	int_pkt->int_desc.vector = vector;
 	int_pkt->int_desc.vector_count = 1;
-	int_pkt->int_desc.delivery_mode = dest_Fixed;
+	int_pkt->int_desc.delivery_mode = APIC_DELIVERY_MODE_FIXED;
 
 	/*
 	 * Create MSI w/ dummy vCPU set, overwritten by subsequent retarget in
@@ -1344,7 +1345,7 @@ static u32 hv_compose_msi_req_v2(
 	int_pkt->wslot.slot = slot;
 	int_pkt->int_desc.vector = vector;
 	int_pkt->int_desc.vector_count = 1;
-	int_pkt->int_desc.delivery_mode = dest_Fixed;
+	int_pkt->int_desc.delivery_mode = APIC_DELIVERY_MODE_FIXED;
 
 	/*
 	 * Create MSI w/ dummy vCPU set targeting just one vCPU, overwritten
@@ -1373,11 +1374,11 @@ static void hv_compose_msi_msg(struct irq_data *data, struct msi_msg *msg)
 {
 	struct irq_cfg *cfg = irqd_cfg(data);
 	struct hv_pcibus_device *hbus;
+	struct vmbus_channel *channel;
 	struct hv_pci_dev *hpdev;
 	struct pci_bus *pbus;
 	struct pci_dev *pdev;
 	struct cpumask *dest;
-	unsigned long flags;
 	struct compose_comp_ctxt comp;
 	struct tran_int_desc *int_desc;
 	struct {
@@ -1395,6 +1396,7 @@ static void hv_compose_msi_msg(struct irq_data *data, struct msi_msg *msg)
 	dest = irq_data_get_effective_affinity_mask(data);
 	pbus = pdev->bus;
 	hbus = container_of(pbus->sysdata, struct hv_pcibus_device, sysdata);
+	channel = hbus->hdev->channel;
 	hpdev = get_pcichild_wslot(hbus, devfn_to_wslot(pdev->devfn));
 	if (!hpdev)
 		goto return_null_message;
@@ -1453,41 +1455,50 @@ static void hv_compose_msi_msg(struct irq_data *data, struct msi_msg *msg)
 	}
 
 	/*
+	 * Prevents hv_pci_onchannelcallback() from running concurrently
+	 * in the tasklet.
+	 */
+	tasklet_disable(&channel->callback_event);
+
+	/*
 	 * Since this function is called with IRQ locks held, can't
 	 * do normal wait for completion; instead poll.
 	 */
 	while (!try_wait_for_completion(&comp.comp_pkt.host_event)) {
+		unsigned long flags;
+
 		/* 0xFFFF means an invalid PCI VENDOR ID. */
 		if (hv_pcifront_get_vendor_id(hpdev) == 0xFFFF) {
 			dev_err_once(&hbus->hdev->device,
 				     "the device has gone\n");
-			goto free_int_desc;
+			goto enable_tasklet;
 		}
 
 		/*
-		 * When the higher level interrupt code calls us with
-		 * interrupt disabled, we must poll the channel by calling
-		 * the channel callback directly when channel->target_cpu is
-		 * the current CPU. When the higher level interrupt code
-		 * calls us with interrupt enabled, let's add the
-		 * local_irq_save()/restore() to avoid race:
-		 * hv_pci_onchannelcallback() can also run in tasklet.
+		 * Make sure that the ring buffer data structure doesn't get
+		 * freed while we dereference the ring buffer pointer.  Test
+		 * for the channel's onchannel_callback being NULL within a
+		 * sched_lock critical section.  See also the inline comments
+		 * in vmbus_reset_channel_cb().
 		 */
-		local_irq_save(flags);
-
-		if (hbus->hdev->channel->target_cpu == smp_processor_id())
-			hv_pci_onchannelcallback(hbus);
-
-		local_irq_restore(flags);
+		spin_lock_irqsave(&channel->sched_lock, flags);
+		if (unlikely(channel->onchannel_callback == NULL)) {
+			spin_unlock_irqrestore(&channel->sched_lock, flags);
+			goto enable_tasklet;
+		}
+		hv_pci_onchannelcallback(hbus);
+		spin_unlock_irqrestore(&channel->sched_lock, flags);
 
 		if (hpdev->state == hv_pcichild_ejecting) {
 			dev_err_once(&hbus->hdev->device,
 				     "the device is being ejected\n");
-			goto free_int_desc;
+			goto enable_tasklet;
 		}
 
 		udelay(100);
 	}
+
+	tasklet_enable(&channel->callback_event);
 
 	if (comp.comp_pkt.completion_status < 0) {
 		dev_err(&hbus->hdev->device,
@@ -1512,6 +1523,8 @@ static void hv_compose_msi_msg(struct irq_data *data, struct msi_msg *msg)
 	put_pcichild(hpdev);
 	return;
 
+enable_tasklet:
+	tasklet_enable(&channel->callback_event);
 free_int_desc:
 	kfree(int_desc);
 drop_reference:
@@ -2215,10 +2228,8 @@ static void hv_pci_devices_present(struct hv_pcibus_device *hbus,
 	struct hv_dr_state *dr;
 	int i;
 
-	dr = kzalloc(offsetof(struct hv_dr_state, func) +
-		     (sizeof(struct hv_pcidev_description) *
-		      (relations->device_count)), GFP_NOWAIT);
-
+	dr = kzalloc(struct_size(dr, func, relations->device_count),
+		     GFP_NOWAIT);
 	if (!dr)
 		return;
 
@@ -2252,10 +2263,8 @@ static void hv_pci_devices_present2(struct hv_pcibus_device *hbus,
 	struct hv_dr_state *dr;
 	int i;
 
-	dr = kzalloc(offsetof(struct hv_dr_state, func) +
-		     (sizeof(struct hv_pcidev_description) *
-		      (relations->device_count)), GFP_NOWAIT);
-
+	dr = kzalloc(struct_size(dr, func, relations->device_count),
+		     GFP_NOWAIT);
 	if (!dr)
 		return;
 
@@ -2449,9 +2458,8 @@ static void hv_pci_onchannelcallback(void *context)
 
 				bus_rel = (struct pci_bus_relations *)buffer;
 				if (bytes_recvd <
-				    offsetof(struct pci_bus_relations, func) +
-				    (sizeof(struct pci_function_description) *
-				     (bus_rel->device_count))) {
+					struct_size(bus_rel, func,
+						    bus_rel->device_count)) {
 					dev_err(&hbus->hdev->device,
 						"bus relations too small\n");
 					break;
@@ -2464,9 +2472,8 @@ static void hv_pci_onchannelcallback(void *context)
 
 				bus_rel2 = (struct pci_bus_relations2 *)buffer;
 				if (bytes_recvd <
-				    offsetof(struct pci_bus_relations2, func) +
-				    (sizeof(struct pci_function_description2) *
-				     (bus_rel2->device_count))) {
+					struct_size(bus_rel2, func,
+						    bus_rel2->device_count)) {
 					dev_err(&hbus->hdev->device,
 						"bus relations v2 too small\n");
 					break;
@@ -2522,7 +2529,10 @@ static void hv_pci_onchannelcallback(void *context)
 
 /**
  * hv_pci_protocol_negotiation() - Set up protocol
- * @hdev:	VMBus's tracking struct for this root PCI bus
+ * @hdev:		VMBus's tracking struct for this root PCI bus.
+ * @version:		Array of supported channel protocol versions in
+ *			the order of probing - highest go first.
+ * @num_version:	Number of elements in the version array.
  *
  * This driver is intended to support running on Windows 10
  * (server) and later versions. It will not run on earlier

@@ -129,6 +129,7 @@ void core_tmr_abort_task(
 	struct se_tmr_req *tmr,
 	struct se_session *se_sess)
 {
+	LIST_HEAD(aborted_list);
 	struct se_cmd *se_cmd, *next;
 	unsigned long flags;
 	bool rc;
@@ -157,7 +158,7 @@ void core_tmr_abort_task(
 		if (!rc)
 			continue;
 
-		list_del_init(&se_cmd->state_list);
+		list_move_tail(&se_cmd->state_list, &aborted_list);
 		se_cmd->state_active = false;
 
 		spin_unlock_irqrestore(&dev->execute_task_lock, flags);
@@ -167,9 +168,14 @@ void core_tmr_abort_task(
 		 * code.
 		 */
 		if (!tmr->tmr_dev)
-			WARN_ON_ONCE(transport_lookup_tmr_lun(tmr->task_cmd,
-						se_cmd->orig_fe_lun) < 0);
+			WARN_ON_ONCE(transport_lookup_tmr_lun(tmr->task_cmd) <
+					0);
 
+		if (dev->transport->tmr_notify)
+			dev->transport->tmr_notify(dev, TMR_ABORT_TASK,
+						   &aborted_list);
+
+		list_del_init(&se_cmd->state_list);
 		target_put_cmd_and_wait(se_cmd);
 
 		printk("ABORT_TASK: Sending TMR_FUNCTION_COMPLETE for"
@@ -179,6 +185,9 @@ void core_tmr_abort_task(
 		return;
 	}
 	spin_unlock_irqrestore(&dev->execute_task_lock, flags);
+
+	if (dev->transport->tmr_notify)
+		dev->transport->tmr_notify(dev, TMR_ABORT_TASK, &aborted_list);
 
 	printk("ABORT_TASK: Sending TMR_TASK_DOES_NOT_EXIST for ref_tag: %lld\n",
 			tmr->ref_task_tag);
@@ -330,6 +339,11 @@ static void core_tmr_drain_state_list(
 		cmd->state_active = false;
 	}
 	spin_unlock_irqrestore(&dev->execute_task_lock, flags);
+
+	if (dev->transport->tmr_notify)
+		dev->transport->tmr_notify(dev, preempt_and_abort_list ?
+					   TMR_LUN_RESET_PRO : TMR_LUN_RESET,
+					   &drain_task_list);
 
 	while (!list_empty(&drain_task_list)) {
 		cmd = list_entry(drain_task_list.next, struct se_cmd, state_list);

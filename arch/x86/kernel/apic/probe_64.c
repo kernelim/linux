@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright 2004 James Cleverdon, IBM.
- * Subject to the GNU Public License, v.2
  *
  * Generic APIC sub-arch probe layer.
  *
@@ -8,6 +8,7 @@
  * Martin Bligh, Andi Kleen, James Bottomley, John Stultz, and
  * James Cleverdon.
  */
+#include <linux/thread_info.h>
 #include <linux/threads.h>
 #include <linux/cpumask.h>
 #include <linux/string.h>

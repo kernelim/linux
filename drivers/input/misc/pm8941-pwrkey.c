@@ -183,10 +183,8 @@ static int pm8941_pwrkey_probe(struct platform_device *pdev)
 	}
 
 	pwrkey->irq = platform_get_irq(pdev, 0);
-	if (pwrkey->irq < 0) {
-		dev_err(&pdev->dev, "failed to get irq\n");
+	if (pwrkey->irq < 0)
 		return pwrkey->irq;
-	}
 
 	error = of_property_read_u32(pdev->dev.of_node, "reg",
 				     &pwrkey->baseaddr);

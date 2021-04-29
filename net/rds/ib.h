@@ -216,12 +216,10 @@ struct rds_ib_device {
 	struct list_head	conn_list;
 	struct ib_device	*dev;
 	struct ib_pd		*pd;
-	bool                    use_fastreg;
 
 	unsigned int		max_mrs;
 	struct rds_ib_mr_pool	*mr_1m_pool;
 	struct rds_ib_mr_pool   *mr_8k_pool;
-	unsigned int		fmr_max_remaps;
 	unsigned int		max_8k_mrs;
 	unsigned int		max_1m_mrs;
 	int			max_sge;

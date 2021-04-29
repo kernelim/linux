@@ -335,6 +335,19 @@
 #define __no_sanitize_address __attribute__((no_sanitize_address))
 #endif
 
+#if __has_attribute(__no_sanitize_address__)
+#define __no_sanitize_address __attribute__((no_sanitize_address))
+#else
+#define __no_sanitize_address
+#endif
+
+#if defined(__SANITIZE_THREAD__) && __has_attribute(__no_sanitize_thread__)
+#define __no_sanitize_thread                                                   \
+	__attribute__((__noinline__)) __attribute__((no_sanitize_thread))
+#else
+#define __no_sanitize_thread
+#endif
+
 #if GCC_VERSION >= 50100
 /*
  * Mark structures as requiring designated initializers.

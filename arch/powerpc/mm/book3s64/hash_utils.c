@@ -780,7 +780,7 @@ static unsigned long __init htab_get_table_size(void)
 }
 
 #ifdef CONFIG_MEMORY_HOTPLUG
-int resize_hpt_for_hotplug(unsigned long new_mem_size)
+static int resize_hpt_for_hotplug(unsigned long new_mem_size)
 {
 	unsigned target_hpt_shift;
 
@@ -804,11 +804,21 @@ int resize_hpt_for_hotplug(unsigned long new_mem_size)
 	return 0;
 }
 
-int hash__create_section_mapping(unsigned long start, unsigned long end, int nid)
+int hash__create_section_mapping(unsigned long start, unsigned long end,
+				 int nid, pgprot_t prot)
 {
-	int rc = htab_bolt_mapping(start, end, __pa(start),
-				   pgprot_val(PAGE_KERNEL), mmu_linear_psize,
-				   mmu_kernel_ssize);
+	int rc;
+
+	if (end >= H_VMALLOC_START) {
+		pr_warn("Outside the supported range\n");
+		return -1;
+	}
+
+	resize_hpt_for_hotplug(memblock_phys_mem_size());
+
+	rc = htab_bolt_mapping(start, end, __pa(start),
+			       pgprot_val(prot), mmu_linear_psize,
+			       mmu_kernel_ssize);
 
 	if (rc < 0) {
 		int rc2 = htab_remove_mapping(start, end, mmu_linear_psize,
@@ -823,6 +833,10 @@ int hash__remove_section_mapping(unsigned long start, unsigned long end)
 	int rc = htab_remove_mapping(start, end, mmu_linear_psize,
 				     mmu_kernel_ssize);
 	WARN_ON(rc < 0);
+
+	if (resize_hpt_for_hotplug(memblock_phys_mem_size()) == -ENOSPC)
+		pr_warn("Hash collision while resizing HPT\n");
+
 	return rc;
 }
 #endif /* CONFIG_MEMORY_HOTPLUG */
@@ -837,7 +851,7 @@ static void __init hash_init_partition_table(phys_addr_t hash_table,
 	 * For now, UPRT is 0 and we have no segment table.
 	 */
 	htab_size =  __ilog2(htab_size) - 18;
-	mmu_partition_table_set_entry(0, hash_table | htab_size, 0);
+	mmu_partition_table_set_entry(0, hash_table | htab_size, 0, false);
 	pr_info("Partition table %p\n", partition_tb);
 }
 
@@ -871,12 +885,6 @@ static void __init htab_initialize(void)
 		/* Using a hypervisor which owns the htab */
 		htab_address = NULL;
 		_SDR1 = 0; 
-		/*
-		 * On POWER9, we need to do a H_REGISTER_PROC_TBL hcall
-		 * to inform the hypervisor that we wish to use the HPT.
-		 */
-		if (cpu_has_feature(CPU_FTR_ARCH_300))
-			register_process_table(0, 0, 0);
 #ifdef CONFIG_FA_DUMP
 		/*
 		 * If firmware assisted dump is active firmware preserves
@@ -1522,6 +1530,7 @@ static void hash_preload(struct mm_struct *mm, pte_t *ptep, unsigned long ea,
 	pgd_t *pgdir;
 	int rc, ssize, update_flags = 0;
 	unsigned long access = _PAGE_PRESENT | _PAGE_READ | (is_exec ? _PAGE_EXEC : 0);
+	unsigned long flags;
 
 	BUG_ON(REGION_ID(ea) != USER_REGION_ID);
 
@@ -1555,6 +1564,28 @@ static void hash_preload(struct mm_struct *mm, pte_t *ptep, unsigned long ea,
 		return;
 #endif /* CONFIG_PPC_64K_PAGES */
 
+	/*
+	 * __hash_page_* must run with interrupts off, as it sets the
+	 * H_PAGE_BUSY bit. It's possible for perf interrupts to hit at any
+	 * time and may take a hash fault reading the user stack, see
+	 * read_user_stack_slow() in the powerpc/perf code.
+	 *
+	 * If that takes a hash fault on the same page as we lock here, it
+	 * will bail out when seeing H_PAGE_BUSY set, and retry the access
+	 * leading to an infinite loop.
+	 *
+	 * Disabling interrupts here does not prevent perf interrupts, but it
+	 * will prevent them taking hash faults (see the NMI test in
+	 * do_hash_page), then read_user_stack's copy_from_user_nofault will
+	 * fail and perf will fall back to read_user_stack_slow(), which
+	 * walks the Linux page tables.
+	 *
+	 * Interrupts must also be off for the duration of the
+	 * mm_is_thread_local test and update, to prevent preempt running the
+	 * mm on another CPU (XXX: this may be racy vs kthread_use_mm).
+	 */
+	local_irq_save(flags);
+
 	/* Is that local to this CPU ? */
 	if (mm_is_thread_local(mm))
 		update_flags |= HPTE_LOCAL_UPDATE;
@@ -1577,6 +1608,8 @@ static void hash_preload(struct mm_struct *mm, pte_t *ptep, unsigned long ea,
 				   mm->context.user_psize,
 				   mm->context.user_psize,
 				   pte_val(*ptep));
+
+	local_irq_restore(flags);
 }
 
 /*

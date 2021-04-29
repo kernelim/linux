@@ -42,7 +42,7 @@ static const struct mmu_notifier_ops hmm_mmu_notifier_ops;
  * hmm_get_or_create - register HMM against an mm (HMM internal)
  *
  * @mm: mm struct to attach to
- * Returns: returns an HMM object, either by referencing the existing
+ * Return: an HMM object, either by referencing the existing
  *          (per-process) object, or by creating a new one.
  *
  * This is not intended to be used directly by device drivers. If mm already
@@ -340,8 +340,8 @@ static int hmm_pfns_bad(unsigned long addr,
 }
 
 /*
- * hmm_vma_walk_hole() - handle a range lacking valid pmd or pte(s)
- * @start: range virtual start address (inclusive)
+ * hmm_vma_walk_hole_() - handle a range lacking valid pmd or pte(s)
+ * @addr: range virtual start address (inclusive)
  * @end: range virtual end address (exclusive)
  * @fault: should we fault or not ?
  * @write_fault: write fault ?
@@ -391,9 +391,9 @@ static inline void hmm_pte_need_fault(const struct hmm_vma_walk *hmm_vma_walk,
 	/*
 	 * So we not only consider the individual per page request we also
 	 * consider the default flags requested for the range. The API can
-	 * be use in 2 fashions. The first one where the HMM user coalesce
-	 * multiple page fault into one request and set flags per pfns for
-	 * of those faults. The second one where the HMM user want to pre-
+	 * be used 2 ways. The first one where the HMM user coalesces
+	 * multiple page faults into one request and sets flags per pfn for
+	 * those faults. The second one where the HMM user wants to pre-
 	 * fault a range with specific flags. For the latter one it is a
 	 * waste to have the user pre-fill the pfn arrays with a default
 	 * flags value.
@@ -403,7 +403,7 @@ static inline void hmm_pte_need_fault(const struct hmm_vma_walk *hmm_vma_walk,
 	/* We aren't ask to do anything ... */
 	if (!(pfns & range->flags[HMM_PFN_VALID]))
 		return;
-	/* If this is device memory than only fault if explicitly requested */
+	/* If this is device memory then only fault if explicitly requested */
 	if ((cpu_flags & range->flags[HMM_PFN_DEVICE_PRIVATE])) {
 		/* Do we fault on device memory ? */
 		if (pfns & range->flags[HMM_PFN_DEVICE_PRIVATE]) {
@@ -445,7 +445,7 @@ static void hmm_range_need_fault(const struct hmm_vma_walk *hmm_vma_walk,
 }
 
 static int hmm_vma_walk_hole(unsigned long addr, unsigned long end,
-			     struct mm_walk *walk)
+			     __always_unused int depth, struct mm_walk *walk)
 {
 	struct hmm_vma_walk *hmm_vma_walk = walk->private;
 	struct hmm_range *range = hmm_vma_walk->range;
@@ -517,7 +517,7 @@ static int hmm_vma_handle_pmd(struct mm_walk *walk,
 	hmm_vma_walk->last = end;
 	return 0;
 #else
-	/* If THP is not enabled then we should never reach that code ! */
+	/* If THP is not enabled then we should never reach this code ! */
 	return -EINVAL;
 #endif
 }
@@ -537,7 +537,6 @@ static int hmm_vma_handle_pte(struct mm_walk *walk, unsigned long addr,
 {
 	struct hmm_vma_walk *hmm_vma_walk = walk->private;
 	struct hmm_range *range = hmm_vma_walk->range;
-	struct vm_area_struct *vma = walk->vma;
 	bool fault, write_fault;
 	uint64_t cpu_flags;
 	pte_t pte = *ptep;
@@ -589,14 +588,14 @@ static int hmm_vma_handle_pte(struct mm_walk *walk, unsigned long addr,
 			if (fault || write_fault) {
 				pte_unmap(ptep);
 				hmm_vma_walk->last = addr;
-				migration_entry_wait(vma->vm_mm,
-						     pmdp, addr);
+				migration_entry_wait(walk->mm, pmdp, addr);
 				return -EBUSY;
 			}
 			return 0;
 		}
 
 		/* Report error for everything else */
+		pte_unmap(ptep);
 		*pfn = range->values[HMM_PFN_ERROR];
 		return -EFAULT;
 	} else {
@@ -611,11 +610,25 @@ static int hmm_vma_handle_pte(struct mm_walk *walk, unsigned long addr,
 	if (pte_devmap(pte)) {
 		hmm_vma_walk->pgmap = get_dev_pagemap(pte_pfn(pte),
 					      hmm_vma_walk->pgmap);
-		if (unlikely(!hmm_vma_walk->pgmap))
+		if (unlikely(!hmm_vma_walk->pgmap)) {
+			pte_unmap(ptep);
 			return -EBUSY;
-	} else if (IS_ENABLED(CONFIG_ARCH_HAS_PTE_SPECIAL) && pte_special(pte)) {
+		}
+	}
+
+	/*
+	 * Since each architecture defines a struct page for the zero page, just
+	 * fall through and treat it like a normal page.
+	 */
+	if (pte_special(pte) && !is_zero_pfn(pte_pfn(pte))) {
+		hmm_pte_need_fault(hmm_vma_walk, orig_pfn, 0, &fault,
+				   &write_fault);
+		if (fault || write_fault) {
+			pte_unmap(ptep);
+			return -EFAULT;
+		}
 		*pfn = range->values[HMM_PFN_SPECIAL];
-		return -EFAULT;
+		return 0;
 	}
 
 	*pfn = hmm_device_entry_from_pfn(range, pte_pfn(pte)) | cpu_flags;
@@ -638,17 +651,15 @@ static int hmm_vma_walk_pmd(pmd_t *pmdp,
 {
 	struct hmm_vma_walk *hmm_vma_walk = walk->private;
 	struct hmm_range *range = hmm_vma_walk->range;
-	struct vm_area_struct *vma = walk->vma;
 	uint64_t *pfns = range->pfns;
 	unsigned long addr = start, i;
 	pte_t *ptep;
 	pmd_t pmd;
 
-
 again:
 	pmd = READ_ONCE(*pmdp);
 	if (pmd_none(pmd))
-		return hmm_vma_walk_hole(start, end, walk);
+		return hmm_vma_walk_hole(start, end, -1, walk);
 
 	if (pmd_huge(pmd) && (range->vma->vm_flags & VM_HUGETLB))
 		return hmm_pfns_bad(start, end, walk);
@@ -666,7 +677,7 @@ again:
 				     0, &fault, &write_fault);
 		if (fault || write_fault) {
 			hmm_vma_walk->last = addr;
-			pmd_migration_entry_wait(vma->vm_mm, pmdp);
+			pmd_migration_entry_wait(walk->mm, pmdp);
 			return -EBUSY;
 		}
 		return 0;
@@ -675,11 +686,11 @@ again:
 
 	if (pmd_devmap(pmd) || pmd_trans_huge(pmd)) {
 		/*
-		 * No need to take pmd_lock here, even if some other threads
+		 * No need to take pmd_lock here, even if some other thread
 		 * is splitting the huge pmd we will get that event through
 		 * mmu_notifier callback.
 		 *
-		 * So just read pmd value and check again its a transparent
+		 * So just read pmd value and check again it's a transparent
 		 * huge or device mapping one and compute corresponding pfn
 		 * values.
 		 */
@@ -693,7 +704,7 @@ again:
 	}
 
 	/*
-	 * We have handled all the valid case above ie either none, migration,
+	 * We have handled all the valid cases above ie either none, migration,
 	 * huge or transparent huge. At this point either it is a valid pmd
 	 * entry pointing to pte directory or it is a bad pmd that will not
 	 * recover.
@@ -708,7 +719,7 @@ again:
 
 		r = hmm_vma_handle_pte(walk, addr, end, pmdp, ptep, &pfns[i]);
 		if (r) {
-			/* hmm_vma_handle_pte() did unmap pte directory */
+			/* hmm_vma_handle_pte() did pte_unmap() */
 			hmm_vma_walk->last = addr;
 			return r;
 		}
@@ -736,23 +747,32 @@ static int hmm_vma_walk_pud(pud_t *pudp,
 {
 	struct hmm_vma_walk *hmm_vma_walk = walk->private;
 	struct hmm_range *range = hmm_vma_walk->range;
-	unsigned long addr = start, next;
-	pmd_t *pmdp;
+	unsigned long addr = start;
 	pud_t pud;
-	int ret;
+	int ret = 0;
+	spinlock_t *ptl = pud_trans_huge_lock(pudp, walk->vma);
 
-again:
+	if (!ptl)
+		return 0;
+
+	/* Normally we don't want to split the huge page */
+	walk->action = ACTION_CONTINUE;
+
 	pud = READ_ONCE(*pudp);
-	if (pud_none(pud))
-		return hmm_vma_walk_hole(start, end, walk);
+	if (pud_none(pud)) {
+		spin_unlock(ptl);
+		return hmm_vma_walk_hole(start, end, -1, walk);
+	}
 
 	if (pud_huge(pud) && pud_devmap(pud)) {
 		unsigned long i, npages, pfn;
 		uint64_t *pfns, cpu_flags;
 		bool fault, write_fault;
 
-		if (!pud_present(pud))
-			return hmm_vma_walk_hole(start, end, walk);
+		if (!pud_present(pud)) {
+			spin_unlock(ptl);
+			return hmm_vma_walk_hole(start, end, -1, walk);
+		}
 
 		i = (addr - range->start) >> PAGE_SHIFT;
 		npages = (end - addr) >> PAGE_SHIFT;
@@ -761,16 +781,20 @@ again:
 		cpu_flags = pud_to_hmm_pfn_flags(range, pud);
 		hmm_range_need_fault(hmm_vma_walk, pfns, npages,
 				     cpu_flags, &fault, &write_fault);
-		if (fault || write_fault)
-			return hmm_vma_walk_hole_(addr, end, fault,
-						write_fault, walk);
+		if (fault || write_fault) {
+			spin_unlock(ptl);
+			return hmm_vma_walk_hole_(addr, end, fault, write_fault,
+						  walk);
+		}
 
 		pfn = pud_pfn(pud) + ((addr & ~PUD_MASK) >> PAGE_SHIFT);
 		for (i = 0; i < npages; ++i, ++pfn) {
 			hmm_vma_walk->pgmap = get_dev_pagemap(pfn,
 					      hmm_vma_walk->pgmap);
-			if (unlikely(!hmm_vma_walk->pgmap))
-				return -EBUSY;
+			if (unlikely(!hmm_vma_walk->pgmap)) {
+				ret = -EBUSY;
+				goto out_unlock;
+			}
 			pfns[i] = hmm_device_entry_from_pfn(range, pfn) |
 				  cpu_flags;
 		}
@@ -779,22 +803,15 @@ again:
 			hmm_vma_walk->pgmap = NULL;
 		}
 		hmm_vma_walk->last = end;
-		return 0;
+		goto out_unlock;
 	}
 
-	split_huge_pud(walk->vma, pudp, addr);
-	if (pud_none(*pudp))
-		goto again;
+	/* Ask for the PUD to be split */
+	walk->action = ACTION_SUBTREE;
 
-	pmdp = pmd_offset(pudp, addr);
-	do {
-		next = pmd_addr_end(addr, end);
-		ret = hmm_vma_walk_pmd(pmdp, addr, next, walk);
-		if (ret)
-			return ret;
-	} while (pmdp++, addr = next, addr != end);
-
-	return 0;
+out_unlock:
+	spin_unlock(ptl);
+	return ret;
 }
 
 static int hmm_vma_walk_hugetlb_entry(pte_t *pte, unsigned long hmask,
@@ -813,10 +830,10 @@ static int hmm_vma_walk_hugetlb_entry(pte_t *pte, unsigned long hmask,
 	pte_t entry;
 	int ret = 0;
 
-	size = 1UL << huge_page_shift(h);
+	size = huge_page_size(h);
 	mask = size - 1;
 	if (range->page_shift != PAGE_SHIFT) {
-		/* Make sure we are looking at full page. */
+		/* Make sure we are looking at a full page. */
 		if (start & mask)
 			return -EINVAL;
 		if (end < (start + size))
@@ -827,8 +844,7 @@ static int hmm_vma_walk_hugetlb_entry(pte_t *pte, unsigned long hmask,
 		size = PAGE_SIZE;
 	}
 
-
-	ptl = huge_pte_lock(hstate_vma(walk->vma), walk->mm, pte);
+	ptl = huge_pte_lock(hstate_vma(vma), walk->mm, pte);
 	entry = huge_ptep_get(pte);
 
 	i = (start - range->start) >> range->page_shift;
@@ -877,7 +893,7 @@ static void hmm_pfns_clear(struct hmm_range *range,
  * @start: start virtual address (inclusive)
  * @end: end virtual address (exclusive)
  * @page_shift: expect page shift for the range
- * Returns 0 on success, -EFAULT if the address space is no longer valid
+ * Return: 0 on success, -EFAULT if the address space is no longer valid
  *
  * Track updates to the CPU page table see include/linux/hmm.h
  */
