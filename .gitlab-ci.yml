@@ -21,6 +21,7 @@ variables:
   build_kabi_whitelist: 'true'
   tree_yaml_name: rhel
   publish_elsewhere: 'true'
+  disttag_override: '.el8_4'
 
 realtime_check:
   variables:

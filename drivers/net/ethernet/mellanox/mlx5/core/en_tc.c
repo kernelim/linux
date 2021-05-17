@@ -2453,6 +2453,16 @@ static int __parse_cls_flower(struct mlx5e_priv *priv,
 			*match_level = MLX5_MATCH_L4;
 	}
 
+	/* Currenlty supported only for MPLS over UDP */
+	if (flow_rule_match_key(rule, FLOW_DISSECTOR_KEY_MPLS) &&
+	    !netif_is_bareudp(filter_dev)) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "Matching on MPLS is supported only for MPLS over UDP");
+		netdev_err(priv->netdev,
+			   "Matching on MPLS is supported only for MPLS over UDP\n");
+		return -EOPNOTSUPP;
+	}
+
 	return 0;
 }
 
@@ -3176,6 +3186,13 @@ static bool same_hw_devs(struct mlx5e_priv *priv, struct mlx5e_priv *peer_priv)
 	psystem_guid = mlx5_query_nic_system_image_guid(pmdev);
 
 	return (fsystem_guid == psystem_guid);
+}
+
+static bool same_vf_reps(struct mlx5e_priv *priv,
+			 struct net_device *out_dev)
+{
+	return mlx5e_eswitch_vf_rep(priv->netdev) &&
+	       priv->netdev == out_dev;
 }
 
 static int add_vlan_rewrite_action(struct mlx5e_priv *priv, int namespace,
@@ -4103,6 +4120,12 @@ static int parse_tc_fdb_actions(struct mlx5e_priv *priv,
 				if (!mlx5e_is_valid_eswitch_fwd_dev(priv, out_dev)) {
 					NL_SET_ERR_MSG_MOD(extack,
 							   "devices are not on same switch HW, can't offload forwarding");
+					return -EOPNOTSUPP;
+				}
+
+				if (same_vf_reps(priv, out_dev)) {
+					NL_SET_ERR_MSG_MOD(extack,
+							   "can't forward from a VF to itself");
 					return -EOPNOTSUPP;
 				}
 
