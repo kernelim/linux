@@ -15,6 +15,7 @@ enum {
 #ifdef CONFIG_MEMCG
 #include <linux/bit_spinlock.h>
 #include <linux/page_ext.h>
+#include <linux/page_owner.h>
 
 /*
  * Page Cgroup can be considered as an extended mem_map.

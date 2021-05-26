@@ -99,11 +99,11 @@ static int nft_log_init(const struct nft_ctx *ctx,
 	}
 
 	if (ctx->afi->family == NFPROTO_INET) {
-		ret = nf_logger_find_get(NFPROTO_IPV4, li->type);
+		ret = nf_logger_find_get(NFPROTO_IPV4, li->type, true);
 		if (ret < 0)
 			return ret;
 
-		ret = nf_logger_find_get(NFPROTO_IPV6, li->type);
+		ret = nf_logger_find_get(NFPROTO_IPV6, li->type, true);
 		if (ret < 0) {
 			nf_logger_put(NFPROTO_IPV4, li->type);
 			return ret;
@@ -111,7 +111,7 @@ static int nft_log_init(const struct nft_ctx *ctx,
 		return 0;
 	}
 
-	return nf_logger_find_get(ctx->afi->family, li->type);
+	return nf_logger_find_get(ctx->afi->family, li->type, true);
 }
 
 static void nft_log_destroy(const struct nft_ctx *ctx,

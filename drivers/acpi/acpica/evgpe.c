@@ -92,6 +92,7 @@ acpi_ev_update_gpe_enable_mask(struct acpi_gpe_event_info *gpe_event_info)
 		ACPI_SET_BIT(gpe_register_info->enable_for_run,
 			     (u8)register_bit);
 	}
+	gpe_register_info->enable_mask = gpe_register_info->enable_for_run;
 
 	return_ACPI_STATUS(AE_OK);
 }
@@ -132,7 +133,7 @@ acpi_status acpi_ev_enable_gpe(struct acpi_gpe_event_info *gpe_event_info)
 
 	/* Enable the requested GPE */
 
-	status = acpi_hw_low_set_gpe(gpe_event_info, ACPI_GPE_ENABLE_SAVE);
+	status = acpi_hw_low_set_gpe(gpe_event_info, ACPI_GPE_ENABLE);
 	return_ACPI_STATUS(status);
 }
 
@@ -266,7 +267,7 @@ acpi_ev_remove_gpe_reference(struct acpi_gpe_event_info *gpe_event_info)
 		if (ACPI_SUCCESS(status)) {
 			status =
 			    acpi_hw_low_set_gpe(gpe_event_info,
-						     ACPI_GPE_DISABLE_SAVE);
+						ACPI_GPE_DISABLE);
 		}
 
 		if (ACPI_FAILURE(status)) {

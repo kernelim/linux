@@ -2681,6 +2681,11 @@ int security_set_bools(int len, int *values)
 	int i, rc;
 	int lenp, seqno = 0;
 	struct cond_node *cur;
+	char **changed_names;
+
+	changed_names = kcalloc(len, sizeof(*changed_names), GFP_KERNEL);
+	if (!changed_names)
+		return -ENOMEM;
 
 	write_lock_irq(&policy_rwlock);
 
@@ -2691,14 +2696,12 @@ int security_set_bools(int len, int *values)
 
 	for (i = 0; i < len; i++) {
 		if (!!values[i] != policydb.bool_val_to_struct[i]->state) {
-			audit_log(current->audit_context, GFP_ATOMIC,
-				AUDIT_MAC_CONFIG_CHANGE,
-				"bool=%s val=%d old_val=%d auid=%u ses=%u",
-				sym_name(&policydb, SYM_BOOLS, i),
-				!!values[i],
-				policydb.bool_val_to_struct[i]->state,
-				from_kuid(&init_user_ns, audit_get_loginuid(current)),
-				audit_get_sessionid(current));
+			changed_names[i] = kstrdup(sym_name(&policydb, SYM_BOOLS, i),
+						   GFP_ATOMIC);
+			if (!changed_names[i]) {
+				rc = -ENOMEM;
+				goto out;
+			}
 		}
 		if (values[i])
 			policydb.bool_val_to_struct[i]->state = 1;
@@ -2717,11 +2720,24 @@ int security_set_bools(int len, int *values)
 out:
 	write_unlock_irq(&policy_rwlock);
 	if (!rc) {
+		for (i = 0; i < len; i++) {
+			if (changed_names[i]) {
+				audit_log(current->audit_context, GFP_KERNEL,
+					AUDIT_MAC_CONFIG_CHANGE,
+					"bool=%s val=%d old_val=%d auid=%u ses=%u",
+					changed_names[i], !!values[i], !values[i],
+					from_kuid(&init_user_ns, audit_get_loginuid(current)),
+					audit_get_sessionid(current));
+			}
+		}
 		avc_ss_reset(seqno);
 		selnl_notify_policyload(seqno);
 		selinux_status_update_policyload(seqno);
 		selinux_xfrm_notify_policyload();
 	}
+	for (i = 0; i < len; i++)
+		kfree(changed_names[i]);
+	kfree(changed_names);
 	return rc;
 }
 

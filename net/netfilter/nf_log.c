@@ -7,6 +7,7 @@
 #include <linux/seq_file.h>
 #include <net/protocol.h>
 #include <net/netfilter/nf_log.h>
+#include <linux/netfilter/nfnetlink.h>
 
 #include "nf_internals.h"
 
@@ -164,14 +165,27 @@ void nf_logger_request_module(int pf, enum nf_log_type type)
 }
 EXPORT_SYMBOL_GPL(nf_logger_request_module);
 
-int nf_logger_find_get(int pf, enum nf_log_type type)
+int nf_logger_find_get(int pf, enum nf_log_type type, bool nftables)
 {
 	struct nf_logger *logger;
 	int ret = -ENOENT;
 
 	logger = loggers[pf][type];
-	if (logger == NULL)
+	if (logger == NULL) {
+		if (nftables) {
+			nfnl_unlock(NFNL_SUBSYS_NFTABLES);
+			request_module("nf-logger-%u-%u", pf, type);
+			nfnl_lock(NFNL_SUBSYS_NFTABLES);
+			rcu_read_lock();
+			logger = rcu_dereference(loggers[pf][type]);
+			rcu_read_unlock();
+
+			/* mutex was dropped, can't return 0 anymore */
+			return logger ? -EAGAIN : -ENOENT;
+		}
+
 		request_module("nf-logger-%u-%u", pf, type);
+	}
 
 	rcu_read_lock();
 	logger = rcu_dereference(loggers[pf][type]);

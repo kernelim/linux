@@ -151,6 +151,19 @@ static int __meminit init_section_page_cgroup(unsigned long pfn, int nid)
 		return -ENOMEM;
 	}
 
+#ifdef CONFIG_PAGE_OWNER
+	if (!page_owner_disabled) {
+		gfp_t flags = GFP_KERNEL | __GFP_ZERO | __GFP_NOWARN;
+		size_t size = sizeof(struct page_owner);
+		int i;
+
+		for (i = 0; i < PAGES_PER_SECTION; i++) {
+			struct page_ext *p = &(base + i)->ext;
+			p->owner = kmalloc_node(size, flags, nid);
+		}
+	}
+#endif
+
 	/*
 	 * The passed "pfn" may not be aligned to SECTION.  For the calculation
 	 * we need to apply a mask.
@@ -163,6 +176,17 @@ static int __meminit init_section_page_cgroup(unsigned long pfn, int nid)
 #ifdef CONFIG_MEMORY_HOTPLUG
 static void free_page_cgroup(void *addr)
 {
+#ifdef CONFIG_PAGE_OWNER
+	if (!page_owner_disabled) {
+		struct page_cgroup *base = addr;
+		int i;
+
+		for (i = 0; i < PAGES_PER_SECTION; i++) {
+			struct page_ext *p = &(base + i)->ext;
+			kfree(p->owner);
+		}
+	}
+#endif
 	if (is_vmalloc_addr(addr)) {
 		vfree(addr);
 	} else {

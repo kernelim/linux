@@ -243,6 +243,13 @@ static void delete_partition_rcu_cb(struct rcu_head *head)
 
 void __delete_partition(struct hd_struct *part)
 {
+	struct gendisk *disk = part_to_disk(part);
+	struct disk_part_tbl *ptbl =
+		rcu_dereference_protected(disk->part_tbl, 1);
+
+	rcu_assign_pointer(ptbl->last_lookup, NULL);
+	put_device(disk_to_dev(disk));
+
 	call_rcu(&part->rcu_head, delete_partition_rcu_cb);
 }
 
@@ -258,8 +265,12 @@ void delete_partition(struct gendisk *disk, int partno)
 	if (!part)
 		return;
 
+	/*
+	 * ->part_tbl is referenced in this part's release handler, so
+	 *  we have to hold the disk device
+	 */
+	get_device(disk_to_dev(part_to_disk(part)));
 	rcu_assign_pointer(ptbl->part[partno], NULL);
-	rcu_assign_pointer(ptbl->last_lookup, NULL);
 	kobject_put(part->holder_dir);
 	device_del(part_to_dev(part));
 

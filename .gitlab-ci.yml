@@ -25,7 +25,7 @@ variables:
 realtime_check:
   variables:
     name: kernel-rt-rhel7
-    merge_tree: ${CI_MERGE_REQUEST_PROJECT_URL}
+    merge_tree: ${CI_MERGE_REQUEST_PROJECT_URL}.git
     merge_branch: main-rt
     architectures: 'x86_64'
     kpet_tree_family: rhel7-rt

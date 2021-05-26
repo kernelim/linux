@@ -1088,7 +1088,7 @@ static void pagetypeinfo_showmixedcount_print(struct seq_file *m,
 			if (!test_bit(PAGE_EXT_OWNER, &page_ext->flags))
 				continue;
 
-			page_mt = gfpflags_to_migratetype(page_ext->gfp_mask);
+			page_mt = gfpflags_to_migratetype(page_ext->owner->gfp_mask);
 			if (pageblock_mt != page_mt) {
 				if (is_migrate_cma(pageblock_mt))
 					count[MIGRATE_MOVABLE]++;
@@ -1098,7 +1098,7 @@ static void pagetypeinfo_showmixedcount_print(struct seq_file *m,
 				pfn = block_end_pfn;
 				break;
 			}
-			pfn += (1UL << page_ext->order) - 1;
+			pfn += (1UL << page_ext->owner->order) - 1;
 		}
 	}
 

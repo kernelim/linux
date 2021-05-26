@@ -435,6 +435,18 @@ void efi_switch_mm(struct mm_struct *mm)
 	efi_scratch.prev_mm = current->active_mm;
 	current->active_mm = mm;
 	switch_mm(efi_scratch.prev_mm, mm, NULL);
+	/*
+	 * RHEL-7: switch_mm() will prematurely flip cpu_tlbstate
+	 * back to TLBSTATE_OK for this kernel thread, which will
+	 * potentially trigger the assertion at leave_mm(), if the
+	 * work queued to run after the EFI thunk happens to initiate
+	 * a TLB flush (i.e.: if a flush worker is queued after the
+	 * efivars read/write work). We just need to make sure we're
+	 * setting cpu_tlbstate back to TLBSTATE_LAZY after flipping
+	 * back and forth the page tables, as in RHEL-7 kernel threads
+	 * are expected to be in TLBSTATE_LAZY state all the way.
+	 */
+	enter_lazy_tlb(mm, current);
 }
 
 #ifdef CONFIG_EFI_MIXED

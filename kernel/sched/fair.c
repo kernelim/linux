@@ -5852,10 +5852,11 @@ static unsigned long scale_rt_power(int cpu)
 		available = total - avg;
 	}
 
-	if (unlikely((s64)total < SCHED_POWER_SCALE))
-		total = SCHED_POWER_SCALE;
-
 	total >>= SCHED_POWER_SHIFT;
+
+	/* make sure we don't divide by 0 when truncated to 32 bits */
+	if (unlikely((u32)total < 1))
+		total = 1;
 
 	return div_u64(available, total);
 }

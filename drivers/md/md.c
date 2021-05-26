@@ -316,6 +316,7 @@ static void md_make_request(struct request_queue *q, struct bio *bio)
 	const int rw = bio_data_dir(bio);
 	struct mddev *mddev = q->queuedata;
 	unsigned int sectors;
+	int cpu;
 
 	if (mddev == NULL || mddev->pers == NULL) {
 		bio_io_error(bio);
@@ -335,7 +336,10 @@ static void md_make_request(struct request_queue *q, struct bio *bio)
 	bio->bi_rw &= ~REQ_NOMERGE;
 	md_handle_request(mddev, bio);
 
-	generic_start_io_acct(q, rw, sectors, &mddev->gendisk->part0);
+	cpu = part_stat_lock();
+	part_stat_inc(cpu, &mddev->gendisk->part0, ios[rw]);
+	part_stat_add(cpu, &mddev->gendisk->part0, sectors[rw], sectors);
+	part_stat_unlock();
 }
 
 /* mddev_suspend makes sure no new requests are submitted

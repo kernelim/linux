@@ -13,7 +13,7 @@ MODULE_ALIAS("ip6t_TRACE");
 
 static int trace_tg_check(const struct xt_tgchk_param *par)
 {
-	return nf_logger_find_get(par->family, NF_LOG_TYPE_LOG);
+	return nf_logger_find_get(par->family, NF_LOG_TYPE_LOG, par->nft_compat);
 }
 
 static void trace_tg_destroy(const struct xt_tgdtor_param *par)

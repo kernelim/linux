@@ -64,7 +64,7 @@ int nf_log_bind_pf(struct net *net, u_int8_t pf,
 		   const struct nf_logger *logger);
 void nf_log_unbind_pf(struct net *net, u_int8_t pf);
 
-int nf_logger_find_get(int pf, enum nf_log_type type);
+int nf_logger_find_get(int pf, enum nf_log_type type, bool nftables);
 void nf_logger_put(int pf, enum nf_log_type type);
 void nf_logger_request_module(int pf, enum nf_log_type type);
 

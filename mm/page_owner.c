@@ -8,7 +8,7 @@
 #include <linux/jump_label.h>
 #include "internal.h"
 
-static bool page_owner_disabled = true;
+bool page_owner_disabled = true;
 struct static_key page_owner_inited = STATIC_KEY_INIT_FALSE;
 
 static void init_early_allocated_pages(void);
@@ -61,39 +61,45 @@ void __reset_page_owner(struct page *page, unsigned int order)
 void __set_page_owner(struct page *page, unsigned int order, gfp_t gfp_mask)
 {
 	struct page_ext *page_ext = lookup_page_ext(page);
-	struct stack_trace trace = {
-		.nr_entries = 0,
-		.max_entries = ARRAY_SIZE(page_ext->trace_entries),
-		.entries = &page_ext->trace_entries[0],
-		.skip = 3,
-	};
 
-	save_stack_trace(&trace);
+	if (page_ext->owner) {
+		struct stack_trace trace = {
+			.nr_entries = 0,
+			.max_entries = ARRAY_SIZE(page_ext->owner->trace_entries),
+			.entries = &page_ext->owner->trace_entries[0],
+			.skip = 3,
+		};
 
-	page_ext->order = order;
-	page_ext->gfp_mask = gfp_mask;
-	page_ext->nr_entries = trace.nr_entries;
+		save_stack_trace(&trace);
 
-	__set_bit(PAGE_EXT_OWNER, &page_ext->flags);
+		page_ext->owner->order = order;
+		page_ext->owner->gfp_mask = gfp_mask;
+		page_ext->owner->nr_entries = trace.nr_entries;
+
+		__set_bit(PAGE_EXT_OWNER, &page_ext->flags);
+	}
 }
 
 gfp_t __get_page_owner_gfp(struct page *page)
 {
 	struct page_ext *page_ext = lookup_page_ext(page);
 
-	return page_ext->gfp_mask;
+	if (page_ext->owner)
+		return page_ext->owner->gfp_mask;
+
+	return 0;
 }
 
 static ssize_t
 print_page_owner(char __user *buf, size_t count, unsigned long pfn,
-		struct page *page, struct page_ext *page_ext)
+		struct page *page, struct page_owner *page_own)
 {
 	int ret;
 	int pageblock_mt, page_mt;
 	char *kbuf;
 	struct stack_trace trace = {
-		.nr_entries = page_ext->nr_entries,
-		.entries = &page_ext->trace_entries[0],
+		.nr_entries = page_own->nr_entries,
+		.entries = &page_own->trace_entries[0],
 	};
 
 	kbuf = kmalloc(count, GFP_KERNEL);
@@ -102,14 +108,14 @@ print_page_owner(char __user *buf, size_t count, unsigned long pfn,
 
 	ret = snprintf(kbuf, count,
 			"Page allocated via order %u, mask 0x%x\n",
-			page_ext->order, page_ext->gfp_mask);
+			page_own->order, page_own->gfp_mask);
 
 	if (ret >= count)
 		goto err;
 
 	/* Print information relevant to grouping pages by mobility */
 	pageblock_mt = get_pageblock_migratetype(page);
-	page_mt  = gfpflags_to_migratetype(page_ext->gfp_mask);
+	page_mt  = gfpflags_to_migratetype(page_own->gfp_mask);
 	ret += snprintf(kbuf + ret, count - ret,
 			"PFN %lu Block %lu type %d %s Flags %s%s%s%s%s%s%s%s%s%s%s%s\n",
 			pfn,
@@ -206,7 +212,7 @@ read_page_owner(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 		/* Record the next PFN to read in the file offset */
 		*ppos = (pfn - min_low_pfn) + 1;
 
-		return print_page_owner(buf, count, pfn, page, page_ext);
+		return print_page_owner(buf, count, pfn, page, page_ext->owner);
 	}
 
 	return 0;

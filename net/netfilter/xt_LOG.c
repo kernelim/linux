@@ -61,7 +61,7 @@ static int log_tg_check(const struct xt_tgchk_param *par)
 		return -EINVAL;
 	}
 
-	return nf_logger_find_get(par->family, NF_LOG_TYPE_LOG);
+	return nf_logger_find_get(par->family, NF_LOG_TYPE_LOG, par->nft_compat);
 }
 
 static void log_tg_destroy(const struct xt_tgdtor_param *par)

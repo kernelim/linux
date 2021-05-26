@@ -106,6 +106,11 @@ static void sanitize_options_early(struct drm_i915_private *i915)
 	struct intel_uc_fw *guc_fw = &i915->guc.fw;
 	struct intel_uc_fw *huc_fw = &i915->huc.fw;
 
+	if (i915_modparams.enable_guc != 0) {
+		DRM_WARN("GUC firmware is insecure - CVE 2020-12362\n"
+			 "Please update to a newer release to get secure GUC\n");
+	}
+
 	/* A negative value means "use platform default" */
 	if (i915_modparams.enable_guc < 0)
 		i915_modparams.enable_guc = __get_platform_enable_guc(i915);

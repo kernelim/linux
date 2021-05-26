@@ -30,6 +30,14 @@ enum page_ext_flags {
 #endif
 };
 
+#ifdef CONFIG_PAGE_OWNER
+struct page_owner {
+	unsigned int order;
+	gfp_t gfp_mask;
+	unsigned int nr_entries;
+	unsigned long trace_entries[8];
+};
+#endif
 /*
  * Page Extension can be considered as an extended mem_map.
  * A page_ext page is associated with every page descriptor. The
@@ -40,10 +48,7 @@ enum page_ext_flags {
 struct page_ext {
 	unsigned long flags;
 #ifdef CONFIG_PAGE_OWNER
-	unsigned int order;
-	gfp_t gfp_mask;
-	unsigned int nr_entries;
-	unsigned long trace_entries[8];
+	struct page_owner *owner;
 #endif
 };
 
