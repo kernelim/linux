@@ -18,11 +18,12 @@ variables:
   title: ${CI_COMMIT_TITLE}
   kernel_type: internal
   make_target: rpm
-  builder_image: quay.io/cki/builder-rhel8
-  build_kabi_whitelist: 'true'
+  builder_image: quay.io/cki/builder-rhel8.4
+  build_kabi_stablelist: 'true'
   tree_yaml_name: rhel
   publish_elsewhere: 'true'
   disttag_override: '.el8_4'
+  skip_results: 'true'
 
 realtime_check:
   variables:

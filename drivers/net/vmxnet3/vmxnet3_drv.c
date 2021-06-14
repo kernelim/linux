@@ -3170,6 +3170,11 @@ vmxnet3_declare_features(struct vmxnet3_adapter *adapter, bool dma64)
 				~(NETIF_F_HW_VLAN_CTAG_TX |
 				  NETIF_F_HW_VLAN_CTAG_RX);
 	netdev->features = netdev->hw_features | NETIF_F_HW_VLAN_CTAG_FILTER;
+
+	if (VMXNET3_VERSION_GE_4(adapter)) {
+		netdev->features &= ~(NETIF_F_GSO_UDP_TUNNEL |
+				      NETIF_F_GSO_UDP_TUNNEL_CSUM);
+	}
 }
 
 
