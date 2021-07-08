@@ -645,8 +645,6 @@ static void pi_state_update_owner(struct futex_pi_state *pi_state,
 {
 	struct task_struct *old_owner = pi_state->owner;
 
-	lockdep_assert_held(&pi_state->pi_mutex.wait_lock);
-
 	if (old_owner) {
 		raw_spin_lock_irq(&old_owner->pi_lock);
 		WARN_ON(list_empty(&pi_state->list));

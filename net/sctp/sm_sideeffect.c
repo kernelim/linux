@@ -1473,9 +1473,23 @@ static int sctp_cmd_interpreter(sctp_event_t event_type,
 			timeout = asoc->timeouts[cmd->obj.to];
 			BUG_ON(!timeout);
 
-			timer->expires = jiffies + timeout;
-			sctp_association_hold(asoc);
-			add_timer(timer);
+			/*
+			 * SCTP has a hard time with timer starts.  Because we process
+			 * timer starts as side effects, it can be hard to tell if we
+			 * have already started a timer or not, which leads to BUG
+			 * halts when we call add_timer. So here, instead of just starting
+			 * a timer, if the timer is already started, and just mod
+			 * the timer with the shorter of the two expiration times
+			 */
+			if (!timer_pending(timer)) {
+				timer->expires = jiffies + timeout;
+				sctp_association_hold(asoc);
+				add_timer(timer);
+				break;
+			}
+
+			if (time_after(timer->expires, jiffies + timeout))
+				mod_timer(timer, jiffies + timeout);
 			break;
 
 		case SCTP_CMD_TIMER_RESTART:

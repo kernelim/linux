@@ -1,54 +1,73 @@
+---
 # This CI will only work for trusted contributors. CI for public contributors
 # runs via a webhook on the merge requests. There's nothing you have to do if
 # you want your changes tested -- created pipelines will be automatically
 # linked in the merge request and appropriate labels will be added to it.
 # Changes to this file will NOT be reflected in the testing.
 
-workflow:
-  rules:
-    - if: $CI_MERGE_REQUEST_ID
+include:
+  - project: cki-project/pipeline-definition
+    ref: main
+    file: kernel_templates.yml
 
-variables:
-  git_url: ${CI_MERGE_REQUEST_PROJECT_URL}.git
-  branch: ${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}
-  commit_hash: ${CI_COMMIT_SHA}
-  mr_id: ${CI_MERGE_REQUEST_IID}
-  mr_url: ${CI_MERGE_REQUEST_PROJECT_URL}/-/merge_requests/${CI_MERGE_REQUEST_IID}
-  title: ${CI_COMMIT_TITLE}
-  kernel_type: internal
-  make_target: rpm
-  builder_image: quay.io/cki/builder-rhel7
-  build_kabi_whitelist: 'true'
-  tree_yaml_name: rhel
-  publish_elsewhere: 'true'
+workflow: !reference [.workflow]
 
-realtime_check:
-  variables:
-    name: kernel-rt-rhel7
-    merge_tree: ${CI_MERGE_REQUEST_PROJECT_URL}.git
-    merge_branch: main-rt
-    architectures: 'x86_64'
-    kpet_tree_family: rhel7-rt
-    package_name: kernel-rt
-    srpm_make_target: 'rt-srpm'
-    skip_test: 'true'
+# Basic bridge job
+.trigger:
   trigger:
-    project: redhat/red-hat-ci-tools/kernel/cki-internal-pipelines/cki-internal-contributors
     branch: rhel7
-    strategy: depend
-  allow_failure: true
-
-trigger_pipeline:
   variables:
+    kernel_type: internal
+    make_target: rpm
+    builder_image: quay.io/cki/builder-rhel7
+    build_kabi_stablelist: 'true'
+    tree_yaml_name: rhel
+    publish_elsewhere: 'true'
     name: kernel-rhel7
-    send_ready_for_test_pre: 'True'
-    send_ready_for_test_post: 'True'
     architectures: 'x86_64 ppc64le ppc64 s390x'
     kpet_tree_family: rhel7
-    package_name: kernel
-    native_tools: 'false'
-  trigger:
-    project: redhat/red-hat-ci-tools/kernel/cki-internal-pipelines/cki-internal-contributors
-    branch: rhel7
-    strategy: depend
 
+# Realtime specific configuration
+.realtime_check:
+  # best-effort, shouldn't block MRs
+  allow_failure: true
+  trigger:
+    branch: rhel7-rt
+  variables:
+    # adjust configuration above slightly for -rt
+    name: kernel-rt-rhel7
+    package_name: kernel-rt
+    merge_tree: ${CI_MERGE_REQUEST_PROJECT_URL}.git
+    merge_branch: main-rt
+    srpm_make_target: 'rt-srpm'
+    # realtime is x86-only
+    architectures: 'x86_64'
+    # no testing
+    skip_test: 'true'
+    skip_results: 'true'
+
+# regular pipelines
+
+merge_request_regular:
+  extends: [.internal, .merge_request, .with_notifications,
+            .trigger]
+
+realtime_check_regular:
+  extends: [.internal, .merge_request,
+            .trigger, .realtime_check]
+
+baseline_regular:
+  extends: [.internal, .baseline, .with_notifications,
+            .trigger]
+
+# private pipelines
+
+merge_request_private:
+  extends: [.scratch, .merge_request,
+            .trigger]
+
+realtime_check_private:
+  extends: [.scratch, .merge_request,
+            .trigger, .realtime_check]
+
+# no private baselines as repos are mirrored

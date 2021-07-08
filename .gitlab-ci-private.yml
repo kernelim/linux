@@ -19,9 +19,10 @@ variables:
   kernel_type: internal
   make_target: rpm
   builder_image: quay.io/cki/builder-rhel7
-  build_kabi_whitelist: 'true'
+  build_kabi_stablelist: 'true'
   tree_yaml_name: rhel
   publish_elsewhere: 'true'
+  skip_results: 'true'
 
 realtime_check:
   variables:

@@ -399,10 +399,7 @@ static void aer_error_resume(struct pci_dev *dev)
 	pos = pci_find_ext_capability(dev, PCI_EXT_CAP_ID_ERR);
 	pci_read_config_dword(dev, pos + PCI_ERR_UNCOR_STATUS, &status);
 	pci_read_config_dword(dev, pos + PCI_ERR_UNCOR_SEVER, &mask);
-	if (dev->error_state == pci_channel_io_normal)
-		status &= ~mask; /* Clear corresponding nonfatal bits */
-	else
-		status &= mask; /* Clear corresponding fatal bits */
+	status &= ~mask; /* Clear corresponding nonfatal bits */
 	pci_write_config_dword(dev, pos + PCI_ERR_UNCOR_STATUS, status);
 }
 

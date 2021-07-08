@@ -859,8 +859,8 @@ static int nvme_trans_log_info_exceptions(struct nvme_ns *ns,
 		temp_k = (smart_log->temperature[1] << 8) +
 				(smart_log->temperature[0]);
 		temp_c = temp_k - KELVIN_TEMP_FACTOR;
+		kfree(smart_log);
 	}
-	kfree(smart_log);
 
 	log_response[0] = LOG_PAGE_INFORMATIONAL_EXCEPTIONS_PAGE;
 	/* Subpage=0x00, Page Length MSB=0 */
@@ -906,8 +906,9 @@ static int nvme_trans_log_temperature(struct nvme_ns *ns, struct sg_io_hdr *hdr,
 		temp_k = (smart_log->temperature[1] << 8) +
 				(smart_log->temperature[0]);
 		temp_c_cur = temp_k - KELVIN_TEMP_FACTOR;
+
+		kfree(smart_log);
 	}
-	kfree(smart_log);
 
 	/* Get Features for Temp Threshold */
 	res = nvme_get_features(ns->ctrl, NVME_FEAT_TEMP_THRESH, 0, NULL, 0,

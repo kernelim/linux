@@ -936,9 +936,33 @@ struct numa_group {
 /* Averaged statistics, and temporary buffers. */
 #define NR_NUMA_HINT_FAULT_BUCKETS (NR_NUMA_HINT_FAULT_STATS * 2)
 
+/*
+ * For functions that can be called in multiple contexts that permit reading
+ * ->numa_group (see struct task_struct for locking rules).
+ */
+static struct numa_group *deref_task_numa_group(struct task_struct *p)
+{
+	return rcu_dereference_check(p->numa_group, p == current ||
+		(lockdep_is_held(&task_rq(p)->lock) && !READ_ONCE(p->on_cpu)));
+}
+
+static struct numa_group *deref_curr_numa_group(struct task_struct *p)
+{
+	return rcu_dereference_protected(p->numa_group, p == current);
+}
+
 pid_t task_numa_group_id(struct task_struct *p)
 {
-	return p->numa_group ? p->numa_group->gid : 0;
+	struct numa_group *ng;
+	pid_t gid = 0;
+
+	rcu_read_lock();
+	ng = rcu_dereference(p->numa_group);
+	if (ng)
+		gid = ng->gid;
+	rcu_read_unlock();
+
+	return gid;
 }
 
 static inline int task_faults_idx(int nid, int priv)
@@ -957,10 +981,12 @@ static inline unsigned long task_faults(struct task_struct *p, int nid)
 
 static inline unsigned long group_faults(struct task_struct *p, int nid)
 {
-	if (!p->numa_group)
+	struct numa_group *ng = deref_task_numa_group(p);
+
+	if (!ng)
 		return 0;
 
-	return p->numa_group->faults[2*nid] + p->numa_group->faults[2*nid+1];
+	return ng->faults[2*nid] + ng->faults[2*nid+1];
 }
 
 static inline unsigned long group_faults_cpu(struct numa_group *group, int nid)
@@ -992,16 +1018,18 @@ static inline unsigned long task_weight(struct task_struct *p, int nid)
 
 static inline unsigned long group_weight(struct task_struct *p, int nid)
 {
-	if (!p->numa_group || !p->numa_group->total_faults)
+	struct numa_group *ng = deref_task_numa_group(p);
+
+	if (!ng || !ng->total_faults)
 		return 0;
 
-	return 1000 * group_faults(p, nid) / p->numa_group->total_faults;
+	return 1000 * group_faults(p, nid) / ng->total_faults;
 }
 
 bool should_numa_migrate_memory(struct task_struct *p, struct page * page,
 				int src_nid, int dst_cpu)
 {
-	struct numa_group *ng = p->numa_group;
+	struct numa_group *ng = deref_curr_numa_group(p);
 	int dst_nid = cpu_to_node(dst_cpu);
 	int last_cpupid, this_cpupid;
 
@@ -1152,12 +1180,13 @@ static void task_numa_assign(struct task_numa_env *env,
 static void task_numa_compare(struct task_numa_env *env,
 			      long taskimp, long groupimp)
 {
+	struct numa_group *cur_ng, *p_ng = deref_curr_numa_group(env->p);
 	struct rq *src_rq = cpu_rq(env->src_cpu);
 	struct rq *dst_rq = cpu_rq(env->dst_cpu);
+	long imp = p_ng ? groupimp : taskimp;
 	struct task_struct *cur;
 	long dst_load, src_load;
 	long load;
-	long imp = (groupimp > 0) ? groupimp : taskimp;
 
 	rcu_read_lock();
 	cur = ACCESS_ONCE(dst_rq->curr);
@@ -1180,14 +1209,15 @@ static void task_numa_compare(struct task_numa_env *env,
 		 * If dst and source tasks are in the same NUMA group, or not
 		 * in any group then look only at task weights.
 		 */
-		if (cur->numa_group == env->p->numa_group) {
+		cur_ng = rcu_dereference(cur->numa_group);
+		if (cur_ng == p_ng) {
 			imp = taskimp + task_weight(cur, env->src_nid) -
 			      task_weight(cur, env->dst_nid);
 			/*
 			 * Add some hysteresis to prevent swapping the
 			 * tasks within a group over tiny differences.
 			 */
-			if (cur->numa_group)
+			if (cur_ng)
 				imp -= imp/16;
 		} else {
 			/*
@@ -1195,12 +1225,7 @@ static void task_numa_compare(struct task_numa_env *env,
 			 * itself (not part of a group), use the task weight
 			 * instead.
 			 */
-			if (env->p->numa_group)
-				imp = groupimp;
-			else
-				imp = taskimp;
-
-			if (cur->numa_group)
+			if (cur_ng)
 				imp += group_weight(cur, env->src_nid) -
 				       group_weight(cur, env->dst_nid);
 			else
@@ -1532,8 +1557,10 @@ static void task_numa_placement(struct task_struct *p)
 	unsigned long max_faults = 0, max_group_faults = 0;
 	unsigned long fault_types[2] = { 0, 0 };
 	unsigned long total_faults;
+	unsigned long irq_flags;
 	u64 runtime, period;
 	spinlock_t *group_lock = NULL;
+	struct numa_group *ng;
 
 	seq = ACCESS_ONCE(p->mm->numa_scan_seq);
 	if (p->numa_scan_seq == seq)
@@ -1546,9 +1573,10 @@ static void task_numa_placement(struct task_struct *p)
 	runtime = numa_get_avg_runtime(p, &period);
 
 	/* If the task is part of a group prevent parallel updates to group stats */
-	if (p->numa_group) {
-		group_lock = &p->numa_group->lock;
-		spin_lock(group_lock);
+	ng = deref_curr_numa_group(p);
+	if (ng) {
+		group_lock = &ng->lock;
+		spin_lock_irqsave(group_lock, irq_flags);
 	}
 
 	/* Find the node with the highest number of faults */
@@ -1583,12 +1611,12 @@ static void task_numa_placement(struct task_struct *p)
 			p->numa_faults_cpu[i] += f_diff;
 			faults += p->numa_faults_memory[i];
 			p->total_numa_faults += diff;
-			if (p->numa_group) {
+			if (ng) {
 				/* safe because we can only change our own group */
-				p->numa_group->faults[i] += diff;
-				p->numa_group->faults_cpu[i] += f_diff;
-				p->numa_group->total_faults += diff;
-				group_faults += p->numa_group->faults[i];
+				ng->faults[i] += diff;
+				ng->faults_cpu[i] += f_diff;
+				ng->total_faults += diff;
+				group_faults += ng->faults[i];
 			}
 		}
 
@@ -1605,8 +1633,8 @@ static void task_numa_placement(struct task_struct *p)
 
 	update_task_scan_period(p, fault_types[0], fault_types[1]);
 
-	if (p->numa_group) {
-		update_numa_active_node_mask(p->numa_group);
+	if (ng) {
+		update_numa_active_node_mask(ng);
 		/*
 		 * If the preferred task and group nids are different,
 		 * iterate over the nodes again to find the best place.
@@ -1623,7 +1651,7 @@ static void task_numa_placement(struct task_struct *p)
 			}
 		}
 
-		spin_unlock(group_lock);
+		spin_unlock_irqrestore(group_lock, irq_flags);
 	}
 
 	/* Preferred node as the node with the most faults */
@@ -1650,11 +1678,12 @@ static void task_numa_group(struct task_struct *p, int cpupid, int flags,
 {
 	struct numa_group *grp, *my_grp;
 	struct task_struct *tsk;
+	unsigned long irq_flags;
 	bool join = false;
 	int cpu = cpupid_to_cpu(cpupid);
 	int i;
 
-	if (unlikely(!p->numa_group)) {
+	if (unlikely(!deref_curr_numa_group(p))) {
 		unsigned int size = sizeof(struct numa_group) +
 				    4*nr_node_ids*sizeof(unsigned long);
 
@@ -1692,7 +1721,7 @@ static void task_numa_group(struct task_struct *p, int cpupid, int flags,
 	if (!grp)
 		goto unlock;
 
-	my_grp = p->numa_group;
+	my_grp = deref_curr_numa_group(p);
 	if (grp == my_grp)
 		goto unlock;
 
@@ -1729,7 +1758,9 @@ unlock:
 	if (!join)
 		return;
 
-	double_lock(&my_grp->lock, &grp->lock);
+	WARN_ON(irqs_disabled());
+	local_irq_save(irq_flags);
+	double_lock_irq(&my_grp->lock, &grp->lock);
 
 	for (i = 0; i < NR_NUMA_HINT_FAULT_STATS * nr_node_ids; i++) {
 		my_grp->faults[i] -= p->numa_faults_memory[i];
@@ -1743,37 +1774,65 @@ unlock:
 	grp->nr_tasks++;
 
 	spin_unlock(&my_grp->lock);
-	spin_unlock(&grp->lock);
+	spin_unlock_irqrestore(&grp->lock, irq_flags);
 
 	rcu_assign_pointer(p->numa_group, grp);
 
 	put_numa_group(my_grp);
 }
 
-void task_numa_free(struct task_struct *p)
+/*
+ * Get rid of NUMA staticstics associated with a task (either current or dead).
+ * If @final is set, the task is dead and has reached refcount zero, so we can
+ * safely free all relevant data structures. Otherwise, there might be
+ * concurrent reads from places like load balancing and procfs, and we should
+ * reset the data back to default state without freeing ->numa_faults_memory.
+ */
+void task_numa_free(struct task_struct *p, bool final)
 {
-	struct numa_group *grp = p->numa_group;
+	/* safe: p either is current or is being freed by current */
+	struct numa_group *grp = rcu_dereference_raw(p->numa_group);
 	int i;
 	void *numa_faults = p->numa_faults_memory;
 
+	if (!numa_faults)
+		return;
+
 	if (grp) {
-		spin_lock(&grp->lock);
+		unsigned long irq_flags;
+		spin_lock_irqsave(&grp->lock, irq_flags);
 		for (i = 0; i < NR_NUMA_HINT_FAULT_STATS * nr_node_ids; i++)
 			grp->faults[i] -= p->numa_faults_memory[i];
 		grp->total_faults -= p->total_numa_faults;
 
 		list_del(&p->numa_entry);
 		grp->nr_tasks--;
-		spin_unlock(&grp->lock);
+		spin_unlock_irqrestore(&grp->lock, irq_flags);
 		rcu_assign_pointer(p->numa_group, NULL);
 		put_numa_group(grp);
 	}
 
-	p->numa_faults_memory = NULL;
-	p->numa_faults_buffer_memory = NULL;
-	p->numa_faults_cpu= NULL;
-	p->numa_faults_buffer_cpu = NULL;
-	kfree(numa_faults);
+	if (final) {
+		p->numa_faults_memory = NULL;
+		p->numa_faults_buffer_memory = NULL;
+		p->numa_faults_cpu= NULL;
+		p->numa_faults_buffer_cpu = NULL;
+		kfree(numa_faults);
+	} else {
+		/*
+		 * RHEL-7 misses the overhaul of upstream commit 44dba3d5d6a1
+		 * ("sched: Refactor task_struct to use numa_faults instead
+		 *  of numa_* pointers"), therefore in order to easily zero out
+		 * all of the NUMA hint counters and averaged statistics for
+		 * this instance we simplify the step as a single memset() call.
+		 * 'size' is computed to the size of the whole allocated buffer,
+		 * exactly as performed by task_numa_fault().
+		 */
+		size_t size = sizeof(*p->numa_faults_memory) *
+			      NR_NUMA_HINT_FAULT_BUCKETS * nr_node_ids;
+		p->total_numa_faults = 0;
+		memset(p->numa_faults_memory, 0, size);
+	}
 }
 
 /*

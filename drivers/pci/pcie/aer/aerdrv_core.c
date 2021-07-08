@@ -26,6 +26,7 @@
 #include <linux/slab.h>
 #include <linux/kfifo.h>
 #include "aerdrv.h"
+#include "../../pci.h"
 
 static bool forceload;
 static bool nosourceid;
@@ -473,34 +474,77 @@ static pci_ers_result_t reset_link(struct pci_dev *dev)
 }
 
 /**
- * do_recovery - handle nonfatal/fatal error recovery process
+ * do_fatal_recovery - handle fatal error recovery process
  * @dev: pointer to a pci_dev data structure of agent detecting an error
- * @severity: error severity type
  *
- * Invoked when an error is nonfatal/fatal. Once being invoked, broadcast
+ * Invoked when an error is fatal. Once being invoked, removes the devices
+ * beneath this AER agent, followed by reset link e.g. secondary bus reset
+ * followed by re-enumeration of devices.
+ */
+static void do_fatal_recovery(struct pci_dev *dev)
+{
+	struct pci_dev *udev;
+	struct pci_bus *parent;
+	struct pci_dev *pdev, *temp;
+	pci_ers_result_t result;
+
+	if (dev->hdr_type == PCI_HEADER_TYPE_BRIDGE)
+		udev = dev;
+	else
+		udev = dev->bus->self;
+
+	parent = udev->subordinate;
+	pci_lock_rescan_remove();
+	pci_dev_get(dev);
+	list_for_each_entry_safe_reverse(pdev, temp, &parent->devices,
+					 bus_list) {
+		pci_dev_get(pdev);
+		pci_dev_set_disconnected(pdev, NULL);
+		if (pci_has_subordinate(pdev))
+			pci_walk_bus(pdev->subordinate,
+				     pci_dev_set_disconnected, NULL);
+		pci_stop_and_remove_bus_device(pdev);
+		pci_dev_put(pdev);
+	}
+
+	result = reset_link(udev);
+
+	if (dev->hdr_type == PCI_HEADER_TYPE_BRIDGE) {
+		/*
+		 * If the error is reported by a bridge, we think this error
+		 * is related to the downstream link of the bridge, so we
+		 * do error recovery on all subordinates of the bridge instead
+		 * of the bridge and clear the error status of the bridge.
+		 */
+		pci_cleanup_aer_uncorrect_error_status(dev);
+	}
+
+	if (result != PCI_ERS_RESULT_RECOVERED)
+		pci_info(dev, "AER: Device recovery from fatal error failed\n");
+
+	pci_dev_put(dev);
+	pci_unlock_rescan_remove();
+}
+
+/**
+ * do_nonfatal_recovery - handle nonfatal error recovery process
+ * @dev: pointer to a pci_dev data structure of agent detecting an error
+ *
+ * Invoked when an error is nonfatal. Once being invoked, broadcast
  * error detected message to all downstream drivers within a hierarchy in
  * question and return the returned code.
  */
-static void do_recovery(struct pci_dev *dev, int severity)
+static void do_nonfatal_recovery(struct pci_dev *dev)
 {
-	pci_ers_result_t status, result = PCI_ERS_RESULT_RECOVERED;
+	pci_ers_result_t status;
 	enum pci_channel_state state;
 
-	if (severity == AER_FATAL)
-		state = pci_channel_io_frozen;
-	else
-		state = pci_channel_io_normal;
+	state = pci_channel_io_normal;
 
 	status = broadcast_error_message(dev,
 			state,
 			"error_detected",
 			report_error_detected);
-
-	if (severity == AER_FATAL) {
-		result = reset_link(dev);
-		if (result != PCI_ERS_RESULT_RECOVERED)
-			goto failed;
-	}
 
 	if (status == PCI_ERS_RESULT_CAN_RECOVER)
 		status = broadcast_error_message(dev,
@@ -509,11 +553,6 @@ static void do_recovery(struct pci_dev *dev, int severity)
 				report_mmio_enabled);
 
 	if (status == PCI_ERS_RESULT_NEED_RESET) {
-		/*
-		 * TODO: Should call platform-specific
-		 * functions to reset slot before calling
-		 * drivers' slot_reset callbacks?
-		 */
 		status = broadcast_error_message(dev,
 				state,
 				"slot_reset",
@@ -532,7 +571,6 @@ static void do_recovery(struct pci_dev *dev, int severity)
 	return;
 
 failed:
-	/* TODO: Should kernel panic here? */
 	dev_info(&dev->dev, "AER: Device recovery failed\n");
 }
 
@@ -559,8 +597,10 @@ static void handle_error_source(struct pcie_device *aerdev,
 		if (pos)
 			pci_write_config_dword(dev, pos + PCI_ERR_COR_STATUS,
 					info->status);
-	} else
-		do_recovery(dev, info->severity);
+	} else if (info->severity == AER_NONFATAL)
+		do_nonfatal_recovery(dev);
+	else if (info->severity == AER_FATAL)
+		do_fatal_recovery(dev);
 }
 
 #ifdef CONFIG_ACPI_APEI_PCIEAER
@@ -624,7 +664,10 @@ static void aer_recover_work_func(struct work_struct *work)
 			continue;
 		}
 		cper_print_aer(pdev, entry.severity, entry.regs);
-		do_recovery(pdev, entry.severity);
+		if (entry.severity == AER_NONFATAL)
+			do_nonfatal_recovery(pdev);
+		else if (entry.severity == AER_FATAL)
+			do_fatal_recovery(pdev);
 		pci_dev_put(pdev);
 	}
 }
