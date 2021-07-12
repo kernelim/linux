@@ -1,53 +1,74 @@
+---
 # This CI will only work for trusted contributors. CI for public contributors
 # runs via a webhook on the merge requests. There's nothing you have to do if
 # you want your changes tested -- created pipelines will be automatically
 # linked in the merge request and appropriate labels will be added to it.
 # Changes to this file will NOT be reflected in the testing.
 
-workflow:
-  rules:
-    - if: $CI_MERGE_REQUEST_ID
+include:
+  - project: cki-project/pipeline-definition
+    ref: main
+    file: kernel_templates.yml
 
-variables:
-  git_url: ${CI_MERGE_REQUEST_PROJECT_URL}
-  branch: ${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}
-  commit_hash: ${CI_COMMIT_SHA}
-  mr_id: ${CI_MERGE_REQUEST_IID}
-  mr_url: ${CI_MERGE_REQUEST_PROJECT_URL}/-/merge_requests/${CI_MERGE_REQUEST_IID}
-  title: ${CI_COMMIT_TITLE}
-  kernel_type: internal
-  make_target: rpm
-  builder_image: quay.io/cki/builder-rhel8.4
-  build_kabi_stablelist: 'true'
-  tree_yaml_name: rhel
-  publish_elsewhere: 'true'
-  disttag_override: '.el8_4'
+workflow: !reference [.workflow]
 
-realtime_check:
-  variables:
-    name: kernel-rt-rhel8
-    merge_tree: ${CI_MERGE_REQUEST_PROJECT_URL}
-    merge_branch: 8.4-rt
-    architectures: 'x86_64'
-    package_name: kernel-rt
-    skip_test: 'true'
-    skip_results: 'true'
+# Basic bridge job
+.trigger:
   trigger:
-    project: redhat/red-hat-ci-tools/kernel/cki-internal-pipelines/cki-internal-contributors
     branch: rhel8
-    strategy: depend
-  allow_failure: true
-
-trigger_pipeline:
   variables:
+    kernel_type: internal
+    make_target: rpm
+    builder_image: quay.io/cki/builder-rhel8.4
+    build_kabi_stablelist: 'true'
+    tree_yaml_name: rhel
+    publish_elsewhere: 'true'
     name: kernel-rhel8
-    send_ready_for_test_pre: 'True'
-    send_ready_for_test_post: 'True'
     architectures: 'x86_64 ppc64le aarch64 s390x'
     kpet_tree_family: rhel8
     native_tools: 'true'
-  trigger:
-    project: redhat/red-hat-ci-tools/kernel/cki-internal-pipelines/cki-internal-contributors
-    branch: rhel8
-    strategy: depend
+    disttag_override: '.el8_4'
 
+# Realtime specific configuration
+.realtime_check:
+  # best-effort, shouldn't block MRs
+  allow_failure: true
+  trigger:
+    branch: rhel8-rt
+  variables:
+    # adjust configuration above slightly for -rt
+    name: kernel-rt-rhel8
+    package_name: kernel-rt
+    merge_tree: ${CI_MERGE_REQUEST_PROJECT_URL}
+    merge_branch: 8.4-rt
+    # realtime is x86-only
+    architectures: 'x86_64'
+    # no testing
+    skip_test: 'true'
+    skip_results: 'true'
+
+# regular pipelines
+
+merge_request_regular:
+  extends: [.internal, .merge_request, .with_notifications,
+            .trigger]
+
+realtime_check_regular:
+  extends: [.internal, .merge_request,
+            .trigger, .realtime_check]
+
+baseline_regular:
+  extends: [.internal, .baseline, .with_notifications,
+            .trigger]
+
+# private pipelines
+
+merge_request_private:
+  extends: [.scratch, .merge_request,
+            .trigger]
+
+realtime_check_private:
+  extends: [.scratch, .merge_request,
+            .trigger, .realtime_check]
+
+# no private baselines as repos are mirrored

@@ -164,6 +164,7 @@ MODULE_PARM_DESC(debug, "Debug level (0=none,...,16=all)");
 MODULE_AUTHOR("Intel Corporation, <linux.nics@intel.com>");
 MODULE_DESCRIPTION("Intel(R) 10 Gigabit PCI Express Network Driver");
 MODULE_LICENSE("GPL v2");
+MODULE_VERSION(UTS_RELEASE);
 
 static struct workqueue_struct *ixgbe_wq;
 

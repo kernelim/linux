@@ -25,6 +25,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/aer.h>
 #include <linux/prefetch.h>
+#include <generated/utsrelease.h>
 
 #include "e1000.h"
 
@@ -7903,5 +7904,5 @@ module_exit(e1000_exit_module);
 MODULE_AUTHOR("Intel Corporation, <linux.nics@intel.com>");
 MODULE_DESCRIPTION("Intel(R) PRO/1000 Network Driver");
 MODULE_LICENSE("GPL v2");
-
+MODULE_VERSION(UTS_RELEASE);
 /* netdev.c */

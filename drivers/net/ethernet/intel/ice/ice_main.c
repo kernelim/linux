@@ -14,6 +14,13 @@
 #include "ice_dcb_nl.h"
 #include "ice_devlink.h"
 
+#define DRV_VERSION_MAJOR 0
+#define DRV_VERSION_MINOR 8
+#define DRV_VERSION_BUILD 2
+
+#define DRV_VERSION	__stringify(DRV_VERSION_MAJOR) "." \
+			__stringify(DRV_VERSION_MINOR) "." \
+			__stringify(DRV_VERSION_BUILD) "-k"
 #define DRV_SUMMARY	"Intel(R) Ethernet Connection E800 Series Linux Driver"
 static const char ice_driver_string[] = DRV_SUMMARY;
 static const char ice_copyright[] = "Copyright (c) 2018, Intel Corporation.";
@@ -25,6 +32,7 @@ static const char ice_copyright[] = "Copyright (c) 2018, Intel Corporation.";
 MODULE_AUTHOR("Intel Corporation, <linux.nics@intel.com>");
 MODULE_DESCRIPTION(DRV_SUMMARY);
 MODULE_LICENSE("GPL v2");
+MODULE_VERSION(DRV_VERSION);
 MODULE_FIRMWARE(ICE_DDP_PKG_FILE);
 
 static int debug = -1;

@@ -8,6 +8,7 @@
 #include <net/tcp.h>
 #include <linux/if_macvlan.h>
 #include <linux/prefetch.h>
+#include <generated/utsrelease.h>
 
 #include "fm10k.h"
 
@@ -20,6 +21,7 @@ static const char fm10k_copyright[] =
 MODULE_AUTHOR("Intel Corporation, <linux.nics@intel.com>");
 MODULE_DESCRIPTION(DRV_SUMMARY);
 MODULE_LICENSE("GPL v2");
+MODULE_VERSION(UTS_RELEASE);
 
 /* single workqueue for entire fm10k driver */
 struct workqueue_struct *fm10k_workqueue;

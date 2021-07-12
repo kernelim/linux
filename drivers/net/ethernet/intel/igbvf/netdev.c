@@ -23,6 +23,7 @@
 #include <linux/sctp.h>
 
 #include "igbvf.h"
+#include <generated/utsrelease.h>
 
 char igbvf_driver_name[] = "igbvf";
 static const char igbvf_driver_string[] =
@@ -2995,5 +2996,6 @@ module_exit(igbvf_exit_module);
 MODULE_AUTHOR("Intel Corporation, <e1000-devel@lists.sourceforge.net>");
 MODULE_DESCRIPTION("Intel(R) Gigabit Virtual Function Network Driver");
 MODULE_LICENSE("GPL v2");
+MODULE_VERSION(UTS_RELEASE);
 
 /* netdev.c */

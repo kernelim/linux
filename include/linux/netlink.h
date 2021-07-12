@@ -11,6 +11,8 @@
 
 struct net;
 
+void do_trace_netlink_extack(const char *msg);
+
 static inline struct nlmsghdr *nlmsg_hdr(const struct sk_buff *skb)
 {
 	return (struct nlmsghdr *)skb->data;
@@ -88,6 +90,8 @@ struct netlink_ext_ack {
 	static const char __msg[] = msg;		\
 	struct netlink_ext_ack *__extack = (extack);	\
 							\
+	do_trace_netlink_extack(__msg);			\
+							\
 	if (__extack)					\
 		__extack->_msg = __msg;			\
 } while (0)
@@ -103,6 +107,8 @@ struct netlink_ext_ack {
 #define NL_SET_ERR_MSG_ATTR(extack, attr, msg) do {	\
 	static const char __msg[] = msg;		\
 	struct netlink_ext_ack *__extack = (extack);	\
+							\
+	do_trace_netlink_extack(__msg);			\
 							\
 	if (__extack) {					\
 		__extack->_msg = __msg;			\

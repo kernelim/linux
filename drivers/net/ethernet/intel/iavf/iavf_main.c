@@ -4,6 +4,7 @@
 #include "iavf.h"
 #include "iavf_prototype.h"
 #include "iavf_client.h"
+#include <generated/utsrelease.h>
 /* All iavf tracepoints are defined by the include below, which must
  * be included exactly once across the whole kernel with
  * CREATE_TRACE_POINTS defined
@@ -47,6 +48,7 @@ MODULE_ALIAS("i40evf");
 MODULE_AUTHOR("Intel Corporation, <linux.nics@intel.com>");
 MODULE_DESCRIPTION("Intel(R) Ethernet Adaptive Virtual Function Network Driver");
 MODULE_LICENSE("GPL v2");
+MODULE_VERSION(UTS_RELEASE);
 
 static const struct net_device_ops iavf_netdev_ops;
 struct workqueue_struct *iavf_wq;
