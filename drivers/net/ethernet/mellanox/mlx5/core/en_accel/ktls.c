@@ -58,12 +58,15 @@ void mlx5e_ktls_build_netdev(struct mlx5e_priv *priv)
 	struct net_device *netdev = priv->netdev;
 	struct mlx5_core_dev *mdev = priv->mdev;
 
-	if (mlx5_accel_is_ktls_tx(mdev)) {
+	if (!mlx5e_accel_is_ktls_tx(mdev) && !mlx5e_accel_is_ktls_rx(mdev))
+		return;
+
+	if (mlx5e_accel_is_ktls_tx(mdev)) {
 		netdev->hw_features |= NETIF_F_HW_TLS_TX;
 		netdev->features    |= NETIF_F_HW_TLS_TX;
 	}
 
-	if (mlx5_accel_is_ktls_rx(mdev))
+	if (mlx5e_accel_is_ktls_rx(mdev))
 		netdev->hw_features |= NETIF_F_HW_TLS_RX;
 
 	netdev->tlsdev_ops = &mlx5e_ktls_ops;

@@ -1939,7 +1939,7 @@ static int set_pflag_tx_mpwqe_common(struct net_device *netdev, u32 flag, bool e
 	struct mlx5e_channels new_channels = {};
 	int err;
 
-	if (enable && !MLX5_CAP_ETH(mdev, enhanced_multi_pkt_send_wqe))
+	if (enable && !mlx5e_tx_mpwqe_supported(mdev))
 		return -EOPNOTSUPP;
 
 	new_channels.params = priv->channels.params;

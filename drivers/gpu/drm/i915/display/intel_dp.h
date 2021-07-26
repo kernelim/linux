@@ -128,4 +128,7 @@ static inline unsigned int intel_dp_unused_lane_mask(int lane_count)
 
 u32 intel_dp_mode_to_fec_clock(u32 mode_clock);
 
+void intel_dp_sync_state(struct intel_encoder *encoder,
+			 const struct intel_crtc_state *crtc_state);
+
 #endif /* __INTEL_DP_H__ */

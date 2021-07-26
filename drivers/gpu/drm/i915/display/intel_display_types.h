@@ -187,6 +187,13 @@ struct intel_encoder {
 	void (*get_config)(struct intel_encoder *,
 			   struct intel_crtc_state *pipe_config);
 	/*
+	 * Optional hook called during init/resume to sync any state
+	 * stored in the encoder (eg. DP link parameters) wrt. the HW state.
+	 */
+	void (*sync_state)(struct intel_encoder *encoder,
+			   const struct intel_crtc_state *crtc_state);
+
+	/*
 	 * Acquires the power domains needed for an active encoder during
 	 * hardware state readout.
 	 */

@@ -1080,6 +1080,14 @@ void mlx5e_netdev_cleanup(struct net_device *netdev, struct mlx5e_priv *priv);
 struct net_device*
 mlx5e_create_netdev(struct mlx5_core_dev *mdev, const struct mlx5e_profile *profile,
 		    int nch, void *ppriv);
+
+static inline bool
+mlx5e_tx_mpwqe_supported(struct mlx5_core_dev *mdev)
+{
+	return !is_kdump_kernel() &&
+		MLX5_CAP_ETH(mdev, enhanced_multi_pkt_send_wqe);
+}
+
 int mlx5e_attach_netdev(struct mlx5e_priv *priv);
 void mlx5e_detach_netdev(struct mlx5e_priv *priv);
 void mlx5e_destroy_netdev(struct mlx5e_priv *priv);

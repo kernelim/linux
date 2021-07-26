@@ -197,10 +197,7 @@ struct page {
 
 #ifdef CONFIG_MEMCG
 	RH_KABI_REPLACE(struct mem_cgroup *mem_cgroup,
-			union {
-				struct mem_cgroup *mem_cgroup;
-				struct obj_cgroup **obj_cgroups;
-			})
+			unsigned long memcg_data)
 #endif
 
 	/*

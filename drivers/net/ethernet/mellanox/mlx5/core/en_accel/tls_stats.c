@@ -52,7 +52,7 @@ static const struct counter_desc mlx5e_tls_sw_stats_desc[] = {
 
 static bool is_tls_atomic_stats(struct mlx5e_priv *priv)
 {
-	return priv->tls && !mlx5_accel_is_ktls_device(priv->mdev);
+	return priv->tls && !mlx5e_accel_is_ktls_device(priv->mdev);
 }
 
 int mlx5e_tls_get_count(struct mlx5e_priv *priv)
