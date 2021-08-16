@@ -5623,7 +5623,9 @@ static void be_worker(struct work_struct *work)
 	 * mcc completions
 	 */
 	if (!netif_running(adapter->netdev)) {
+		local_bh_disable();
 		be_process_mcc(adapter);
+		local_bh_enable();
 		goto reschedule;
 	}
 

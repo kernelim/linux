@@ -394,9 +394,15 @@ nf_nat_setup_info(struct nf_conn *ct,
 	if (nat == NULL)
 		return NF_ACCEPT;
 
+	/* Can't setup nat info for confirmed ct. */
+	if (nf_ct_is_confirmed(ct))
+		return NF_ACCEPT;
+
 	NF_CT_ASSERT(maniptype == NF_NAT_MANIP_SRC ||
 		     maniptype == NF_NAT_MANIP_DST);
-	BUG_ON(nf_nat_initialized(ct, maniptype));
+
+	if (WARN_ON(nf_nat_initialized(ct, maniptype)))
+		return NF_DROP;
 
 	/* What we've got will look like inverse of reply. Normally
 	 * this is what is in the conntrack, except for prior

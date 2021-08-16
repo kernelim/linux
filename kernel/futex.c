@@ -647,6 +647,18 @@ static void pi_state_update_owner(struct futex_pi_state *pi_state,
 
 	if (old_owner) {
 		raw_spin_lock_irq(&old_owner->pi_lock);
+		/*
+		 * We might race with exit_pi_state_list().
+		 * If that happened, the pi_state structure
+		 * should have been removed from the list.
+		 * In this case, we just do nothing and return.
+		 * Also see the comments in free_pi_state().
+		 */
+		if (pi_state->owner == NULL) {
+			raw_spin_unlock_irq(&old_owner->pi_lock);
+			return;
+		}
+
 		WARN_ON(list_empty(&pi_state->list));
 		list_del_init(&pi_state->list);
 		raw_spin_unlock_irq(&old_owner->pi_lock);
@@ -672,7 +684,13 @@ static void free_pi_state(struct futex_pi_state *pi_state)
 	 */
 	if (pi_state->owner) {
 		pi_state_update_owner(pi_state, NULL);
-		rt_mutex_proxy_unlock(&pi_state->pi_mutex, pi_state->owner);
+		/*
+		 * We might race with exit_pi_state_list() when the
+		 * process is exiting. If that happened, the pi_mutex
+		 * should have been released already.
+		 */
+		if (pi_state->owner)
+			rt_mutex_proxy_unlock(&pi_state->pi_mutex, pi_state->owner);
 	}
 
 	if (current->pi_state_cache)
@@ -1745,6 +1763,7 @@ retry_private:
 				/* -EDEADLK */
 				this->pi_state = NULL;
 				free_pi_state(pi_state);
+				pi_state = NULL;
 				goto out_unlock;
 			}
 		}

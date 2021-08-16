@@ -1502,6 +1502,7 @@ static void __vunmap(const void *addr, int deallocate_pages)
 
 			BUG_ON(!page);
 			__free_pages(page, 0);
+			cond_resched();
 		}
 
 		if (area->flags & VM_VPAGES)
@@ -1603,11 +1604,12 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 {
 	const int order = 0;
 	struct page **pages;
-	unsigned int nr_pages, array_size, i;
+	unsigned int nr_pages, i;
+	unsigned long array_size;
 	gfp_t nested_gfp = (gfp_mask & GFP_RECLAIM_MASK) | __GFP_ZERO;
 
 	nr_pages = (area->size - PAGE_SIZE) >> PAGE_SHIFT;
-	array_size = (nr_pages * sizeof(struct page *));
+	array_size = (unsigned long)nr_pages * sizeof(struct page *);
 
 	area->nr_pages = nr_pages;
 	/* Please note that the recursion is strictly bounded. */

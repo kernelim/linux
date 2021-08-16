@@ -934,8 +934,8 @@ s32 ixgbe_mii_bus_init(struct ixgbe_hw *hw)
 	}
 
 	/* Use the position of the device in the PCI hierarchy as the id */
-	snprintf(bus->id, MII_BUS_ID_SIZE, "%s-%x", ixgbe_driver_name,
-		 (pdev->bus->number << 8) | pdev->devfn);
+	snprintf(bus->id, MII_BUS_ID_SIZE, "%s-%.8s%02x", ixgbe_driver_name,
+		 pci_name(pdev), pdev->devfn);
 
 	bus->name = "ixgbe-mdio";
 	bus->priv = adapter;

@@ -377,8 +377,8 @@ struct memcg_cache_params {
 		struct kmem_cache *memcg_caches[0];
 #else
 		struct {
-			struct kmem_cache *memcg_caches[0];
 			struct rcu_head rcu_head;
+			struct kmem_cache *memcg_caches[0];
 		};
 #endif
 		struct {
