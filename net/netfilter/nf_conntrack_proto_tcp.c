@@ -1476,6 +1476,14 @@ static struct ctl_table tcp_sysctl_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+	{
+		.procname	= "nf_flowtable_tcp_timeout",
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_jiffies,
+	},
+#endif
 	{ }
 };
 #endif /* CONFIG_SYSCTL */
@@ -1483,6 +1491,10 @@ static struct ctl_table tcp_sysctl_table[] = {
 static int tcp_kmemdup_sysctl_table(struct nf_proto_net *pn,
 				    struct nf_tcp_net *tn)
 {
+	struct nf_ip_net *nin = container_of(tn, struct nf_ip_net, tcp);
+	struct netns_ct *nc = container_of(nin, struct netns_ct, nf_ct_proto);
+	struct net *net = container_of(nc, struct net, ct);
+
 #ifdef CONFIG_SYSCTL
 	if (pn->ctl_table)
 		return 0;
@@ -1506,6 +1518,9 @@ static int tcp_kmemdup_sysctl_table(struct nf_proto_net *pn,
 	pn->ctl_table[10].data = &tn->tcp_loose;
 	pn->ctl_table[11].data = &tn->tcp_be_liberal;
 	pn->ctl_table[12].data = &tn->tcp_max_retrans;
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+	pn->ctl_table[13].data = &net->nf_tcp_net_offload_timeout;
+#endif
 #endif
 	return 0;
 }
@@ -1528,6 +1543,10 @@ static int tcp_init_net(struct net *net)
 		tn->tcp_loose = nf_ct_tcp_loose;
 		tn->tcp_be_liberal = nf_ct_tcp_be_liberal;
 		tn->tcp_max_retrans = nf_ct_tcp_max_retrans;
+
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+		net->nf_tcp_net_offload_timeout = 30 * HZ;
+#endif
 	}
 
 	return tcp_kmemdup_sysctl_table(pn, tn);

@@ -280,6 +280,14 @@ static struct ctl_table udp_sysctl_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_jiffies,
 	},
+#if IS_ENABLED(CONFIG_NFT_FLOW_OFFLOAD)
+	{
+		.procname	= "nf_flowtable_udp_timeout",
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_jiffies,
+	},
+#endif
 	{ }
 };
 #endif /* CONFIG_SYSCTL */
@@ -287,6 +295,10 @@ static struct ctl_table udp_sysctl_table[] = {
 static int udp_kmemdup_sysctl_table(struct nf_proto_net *pn,
 				    struct nf_udp_net *un)
 {
+	struct nf_ip_net *nin = container_of(un, struct nf_ip_net, udp);
+	struct netns_ct *nc = container_of(nin, struct netns_ct, nf_ct_proto);
+	struct net *net = container_of(nc, struct net, ct);
+
 #ifdef CONFIG_SYSCTL
 	if (pn->ctl_table)
 		return 0;
@@ -297,6 +309,9 @@ static int udp_kmemdup_sysctl_table(struct nf_proto_net *pn,
 		return -ENOMEM;
 	pn->ctl_table[0].data = &un->timeouts[UDP_CT_UNREPLIED];
 	pn->ctl_table[1].data = &un->timeouts[UDP_CT_REPLIED];
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+	pn->ctl_table[2].data = &net->nf_udp_net_offload_timeout;
+#endif
 #endif
 	return 0;
 }
@@ -311,6 +326,10 @@ static int udp_init_net(struct net *net)
 
 		for (i = 0; i < UDP_CT_MAX; i++)
 			un->timeouts[i] = udp_timeouts[i];
+
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+		net->nf_udp_net_offload_timeout = 30 * HZ;
+#endif
 	}
 
 	return udp_kmemdup_sysctl_table(pn, un);

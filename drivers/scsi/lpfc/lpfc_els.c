@@ -1204,6 +1204,7 @@ flogifail:
 		lpfc_issue_clear_la(phba, vport);
 	}
 out:
+	phba->hba_flag &= ~HBA_FLOGI_OUTSTANDING;
 	lpfc_els_free_iocb(phba, cmdiocb);
 }
 
@@ -1346,7 +1347,7 @@ lpfc_issue_els_flogi(struct lpfc_vport *vport, struct lpfc_nodelist *ndlp,
 
 	rc = lpfc_issue_fabric_iocb(phba, elsiocb);
 
-	phba->hba_flag |= HBA_FLOGI_ISSUED;
+	phba->hba_flag |= (HBA_FLOGI_ISSUED | HBA_FLOGI_OUTSTANDING);
 
 	/* Check for a deferred FLOGI ACC condition */
 	if (phba->defer_flogi_acc_flag) {
@@ -1422,8 +1423,13 @@ lpfc_els_abort_flogi(struct lpfc_hba *phba)
 		if (icmd->ulpCommand == CMD_ELS_REQUEST64_CR) {
 			ndlp = (struct lpfc_nodelist *)(iocb->context1);
 			if (ndlp && NLP_CHK_NODE_ACT(ndlp) &&
-			    (ndlp->nlp_DID == Fabric_DID))
+			    (ndlp->nlp_DID == Fabric_DID)) {
+				if ((phba->pport->fc_flag & FC_PT2PT) &&
+				    !(phba->pport->fc_flag & FC_PT2PT_PLOGI))
+					iocb->fabric_iocb_cmpl =
+						lpfc_ignore_els_cmpl;
 				lpfc_sli_issue_abort_iotag(phba, pring, iocb);
+			}
 		}
 	}
 	spin_unlock_irq(&phba->hbalock);

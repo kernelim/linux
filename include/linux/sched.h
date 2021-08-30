@@ -714,7 +714,7 @@ struct task_struct {
 	unsigned			sched_reset_on_fork:1;
 	unsigned			sched_contributes_to_load:1;
 	unsigned			sched_migrated:1;
-	unsigned			sched_remote_wakeup:1;
+	RH_KABI_DEPRECATE(unsigned,	sched_remote_wakeup:1)
 #ifdef CONFIG_PSI
 	RH_KABI_FILL_HOLE(unsigned	sched_psi_wake_requeue:1)
 #endif
@@ -751,6 +751,20 @@ struct task_struct {
 	/* task is frozen/stopped (used by the cgroup freezer) */
 	RH_KABI_FILL_HOLE(unsigned	frozen:1)
 #endif
+	/*
+	 * This field must not be in the scheduler word above due to wakelist
+	 * queueing no longer being serialized by p->on_cpu. However:
+	 *
+	 * p->XXX = X;			ttwu()
+	 * schedule()			  if (p->on_rq && ..) // false
+	 *   smp_mb__after_spinlock();	  if (smp_load_acquire(&p->on_cpu) && //true
+	 *   deactivate_task()		      ttwu_queue_wakelist())
+	 *     p->on_rq = 0;			p->sched_remote_wakeup = Y;
+	 *
+	 * guarantees all stores of 'current' are visible before
+	 * ->sched_remote_wakeup gets used, so it can be in this word.
+	 */
+	RH_KABI_FILL_HOLE(unsigned	sched_remote_wakeup:1)
 
 	unsigned long			atomic_flags; /* Flags requiring atomic access. */
 
@@ -1871,6 +1885,8 @@ static inline void set_task_cpu(struct task_struct *p, unsigned int cpu)
 }
 
 #endif /* CONFIG_SMP */
+
+extern bool sched_task_on_rq(struct task_struct *p);
 
 /*
  * In order to reduce various lock holder preemption latencies provide an
