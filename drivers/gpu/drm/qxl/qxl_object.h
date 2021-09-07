@@ -27,11 +27,11 @@
 
 #include "qxl_drv.h"
 
-static inline int qxl_bo_reserve(struct qxl_bo *bo, bool no_wait)
+static inline int qxl_bo_reserve(struct qxl_bo *bo)
 {
 	int r;
 
-	r = ttm_bo_reserve(&bo->tbo, true, no_wait, NULL);
+	r = ttm_bo_reserve(&bo->tbo, true, false, NULL);
 	if (unlikely(r != 0)) {
 		if (r != -ERESTARTSYS) {
 			struct drm_device *ddev = bo->tbo.base.dev;
@@ -84,10 +84,13 @@ static inline int qxl_bo_wait(struct qxl_bo *bo, u32 *mem_type,
 extern int qxl_bo_create(struct qxl_device *qdev,
 			 unsigned long size,
 			 bool kernel, bool pinned, u32 domain,
+			 u32 priority,
 			 struct qxl_surface *surf,
 			 struct qxl_bo **bo_ptr);
-extern int qxl_bo_kmap(struct qxl_bo *bo, void **ptr);
-extern void qxl_bo_kunmap(struct qxl_bo *bo);
+int qxl_bo_vmap(struct qxl_bo *bo, void **ptr);
+int qxl_bo_vmap_locked(struct qxl_bo *bo, void **ptr);
+int qxl_bo_vunmap(struct qxl_bo *bo);
+void qxl_bo_vunmap_locked(struct qxl_bo *bo);
 void *qxl_bo_kmap_atomic_page(struct qxl_device *qdev, struct qxl_bo *bo, int page_offset);
 void qxl_bo_kunmap_atomic_page(struct qxl_device *qdev, struct qxl_bo *bo, void *map);
 extern struct qxl_bo *qxl_bo_ref(struct qxl_bo *bo);

@@ -60,7 +60,7 @@ void *qxl_gem_prime_vmap(struct drm_gem_object *obj)
 	void *ptr;
 	int ret;
 
-	ret = qxl_bo_kmap(bo, &ptr);
+	ret = qxl_bo_vmap(bo, &ptr);
 	if (ret < 0)
 		return ERR_PTR(ret);
 
@@ -71,7 +71,7 @@ void qxl_gem_prime_vunmap(struct drm_gem_object *obj, void *vaddr)
 {
 	struct qxl_bo *bo = gem_to_qxl_bo(obj);
 
-	qxl_bo_kunmap(bo);
+	qxl_bo_vunmap(bo);
 }
 
 int qxl_gem_prime_mmap(struct drm_gem_object *obj,
