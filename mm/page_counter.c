@@ -26,7 +26,11 @@ int page_counter_cancel(struct page_counter *counter, unsigned long nr_pages)
 	new = atomic_long_sub_return(nr_pages, &counter->count);
 
 	/* More uncharges than charges? */
-	WARN_ON_ONCE(new < 0);
+	if (WARN_ONCE(new < 0, "page_counter underflow: %ld nr_pages=%lu\n",
+		      new, nr_pages)) {
+		new = 0;
+		atomic_long_set(&counter->count, new);
+	}
 
 	return new > 0;
 }

@@ -111,6 +111,7 @@ struct connection {
 #define CF_IS_OTHERCON 5
 #define CF_CLOSE 6
 #define CF_APP_LIMITED 7
+#define CF_CLOSING 8
 	struct list_head writequeue;  /* List of outgoing writequeue_entries */
 	spinlock_t writequeue_lock;
 	int (*rx_action) (struct connection *);	/* What to do when active */
@@ -410,17 +411,23 @@ int dlm_lowcomms_addr(int nodeid, struct sockaddr_storage *addr, int len)
 /* Data available on socket or listen socket received a connect */
 static void lowcomms_data_ready(struct sock *sk, int count_unused)
 {
-	struct connection *con = sock2con(sk);
+	struct connection *con;
+
+	read_lock_bh(&sk->sk_callback_lock);
+	con = sock2con(sk);
 	if (con && !test_and_set_bit(CF_READ_PENDING, &con->flags))
 		queue_work(recv_workqueue, &con->rwork);
+	read_unlock_bh(&sk->sk_callback_lock);
 }
 
 static void lowcomms_write_space(struct sock *sk)
 {
-	struct connection *con = sock2con(sk);
+	struct connection *con;
 
+	read_lock_bh(&sk->sk_callback_lock);
+	con = sock2con(sk);
 	if (!con)
-		return;
+		goto out;
 
 	clear_bit(SOCK_NOSPACE, &con->sock->flags);
 
@@ -429,8 +436,9 @@ static void lowcomms_write_space(struct sock *sk)
 		clear_bit(SOCK_ASYNC_NOSPACE, &con->sock->flags);
 	}
 
-	if (!test_and_set_bit(CF_WRITE_PENDING, &con->flags))
-		queue_work(send_workqueue, &con->swork);
+	queue_work(send_workqueue, &con->swork);
+out:
+	read_unlock_bh(&sk->sk_callback_lock);
 }
 
 static inline void lowcomms_connect_sock(struct connection *con)
@@ -583,11 +591,16 @@ static void make_sockaddr(struct sockaddr_storage *saddr, uint16_t port,
 static void close_connection(struct connection *con, bool and_other,
 			     bool tx, bool rx)
 {
-	clear_bit(CF_WRITE_PENDING, &con->flags);
-	if (tx && cancel_work_sync(&con->swork))
+	bool closing = test_and_set_bit(CF_CLOSING, &con->flags);
+
+	if (tx && !closing && cancel_work_sync(&con->swork)) {
 		log_print("canceled swork for node %d", con->nodeid);
-	if (rx && cancel_work_sync(&con->rwork))
+		clear_bit(CF_WRITE_PENDING, &con->flags);
+	}
+	if (rx && !closing && cancel_work_sync(&con->rwork)) {
 		log_print("canceled rwork for node %d", con->nodeid);
+		clear_bit(CF_READ_PENDING, &con->flags);
+	}
 
 	mutex_lock(&con->sock_mutex);
 	if (con->sock) {
@@ -606,6 +619,7 @@ static void close_connection(struct connection *con, bool and_other,
 
 	con->retries = 0;
 	mutex_unlock(&con->sock_mutex);
+	clear_bit(CF_CLOSING, &con->flags);
 }
 
 /* Data received from remote end */
@@ -796,26 +810,23 @@ static int tcp_accept_from_sock(struct connection *con)
 			othercon->nodeid = nodeid;
 			othercon->rx_action = receive_from_sock;
 			mutex_init(&othercon->sock_mutex);
+			INIT_LIST_HEAD(&othercon->writequeue);
+			spin_lock_init(&othercon->writequeue_lock);
 			INIT_WORK(&othercon->swork, process_send_sockets);
 			INIT_WORK(&othercon->rwork, process_recv_sockets);
 			set_bit(CF_IS_OTHERCON, &othercon->flags);
+		} else {
+			/* close other sock con if we have something new */
+			close_connection(othercon, false, true, false);
 		}
-		if (!othercon->sock) {
-			newcon->othercon = othercon;
-			othercon->sock = newsock;
-			newsock->sk->sk_user_data = othercon;
-			add_sock(newsock, othercon);
-			addcon = othercon;
-		}
-		else {
-			printk("Extra connection from node %d attempted\n", nodeid);
-			result = -EAGAIN;
-			mutex_unlock(&newcon->sock_mutex);
-			goto accept_err;
-		}
+
+		mutex_lock_nested(&othercon->sock_mutex, 2);
+		newcon->othercon = othercon;
+		add_sock(newsock, othercon);
+		addcon = othercon;
+		mutex_unlock(&othercon->sock_mutex);
 	}
 	else {
-		newsock->sk->sk_user_data = newcon;
 		newcon->rx_action = receive_from_sock;
 		add_sock(newsock, newcon);
 		addcon = newcon;
@@ -909,24 +920,26 @@ static int sctp_accept_from_sock(struct connection *con)
 			othercon->nodeid = nodeid;
 			othercon->rx_action = receive_from_sock;
 			mutex_init(&othercon->sock_mutex);
+			INIT_LIST_HEAD(&othercon->writequeue);
+			spin_lock_init(&othercon->writequeue_lock);
 			INIT_WORK(&othercon->swork, process_send_sockets);
 			INIT_WORK(&othercon->rwork, process_recv_sockets);
 			set_bit(CF_IS_OTHERCON, &othercon->flags);
 		}
+		mutex_lock_nested(&othercon->sock_mutex, 2);
 		if (!othercon->sock) {
 			newcon->othercon = othercon;
-			othercon->sock = newsock;
-			newsock->sk->sk_user_data = othercon;
 			add_sock(newsock, othercon);
 			addcon = othercon;
+			mutex_unlock(&othercon->sock_mutex);
 		} else {
 			printk("Extra connection from node %d attempted\n", nodeid);
 			ret = -EAGAIN;
+			mutex_unlock(&othercon->sock_mutex);
 			mutex_unlock(&newcon->sock_mutex);
 			goto accept_err;
 		}
 	} else {
-		newsock->sk->sk_user_data = newcon;
 		newcon->rx_action = receive_from_sock;
 		add_sock(newsock, newcon);
 		addcon = newcon;
@@ -1053,7 +1066,6 @@ static void sctp_connect_to_sock(struct connection *con)
 	if (result < 0)
 		goto socket_err;
 
-	sock->sk->sk_user_data = con;
 	con->rx_action = receive_from_sock;
 	con->connect_action = sctp_connect_to_sock;
 	add_sock(sock, con);
@@ -1076,7 +1088,6 @@ static void sctp_connect_to_sock(struct connection *con)
 		result = 0;
 	if (result == 0)
 		goto out;
-
 
 bind_err:
 	con->sock = NULL;
@@ -1102,7 +1113,6 @@ socket_err:
 
 out:
 	mutex_unlock(&con->sock_mutex);
-	set_bit(CF_WRITE_PENDING, &con->flags);
 }
 
 /* Connect a new socket to its peer */
@@ -1140,7 +1150,6 @@ static void tcp_connect_to_sock(struct connection *con)
 		goto out_err;
 	}
 
-	sock->sk->sk_user_data = con;
 	con->rx_action = receive_from_sock;
 	con->connect_action = tcp_connect_to_sock;
 	add_sock(sock, con);
@@ -1196,7 +1205,6 @@ out_err:
 	}
 out:
 	mutex_unlock(&con->sock_mutex);
-	set_bit(CF_WRITE_PENDING, &con->flags);
 	return;
 }
 
@@ -1231,10 +1239,12 @@ static struct socket *tcp_create_listen_sock(struct connection *con,
 	if (result < 0) {
 		log_print("Failed to set SO_REUSEADDR on socket: %d", result);
 	}
+	write_lock_bh(&sock->sk->sk_callback_lock);
 	sock->sk->sk_user_data = con;
 	save_listen_callbacks(sock);
 	con->rx_action = tcp_accept_from_sock;
 	con->connect_action = tcp_connect_to_sock;
+	write_unlock_bh(&sock->sk->sk_callback_lock);
 
 	/* Bind to our port */
 	make_sockaddr(saddr, dlm_config.ci_tcp_port, &addr_len);
@@ -1453,9 +1463,7 @@ void dlm_lowcomms_commit_buffer(void *mh)
 	e->len = e->end - e->offset;
 	spin_unlock(&con->writequeue_lock);
 
-	if (!test_and_set_bit(CF_WRITE_PENDING, &con->flags)) {
-		queue_work(send_workqueue, &con->swork);
-	}
+	queue_work(send_workqueue, &con->swork);
 	return;
 
 out:
@@ -1525,12 +1533,15 @@ out:
 send_error:
 	mutex_unlock(&con->sock_mutex);
 	close_connection(con, false, false, true);
-	lowcomms_connect_sock(con);
+	/* Requeue the send work. When the work daemon runs again, it will try
+	   a new connection, then call this function again. */
+	queue_work(send_workqueue, &con->swork);
 	return;
 
 out_connect:
 	mutex_unlock(&con->sock_mutex);
-	lowcomms_connect_sock(con);
+	queue_work(send_workqueue, &con->swork);
+	cond_resched();
 }
 
 static void clean_one_writequeue(struct connection *con)
@@ -1590,9 +1601,10 @@ static void process_send_sockets(struct work_struct *work)
 {
 	struct connection *con = container_of(work, struct connection, swork);
 
+	clear_bit(CF_WRITE_PENDING, &con->flags);
 	if (con->sock == NULL) /* not mutex protected so check it inside too */
 		con->connect_action(con);
-	if (test_and_clear_bit(CF_WRITE_PENDING, &con->flags))
+	if (!list_empty(&con->writequeue))
 		send_to_sock(con);
 }
 
@@ -1629,11 +1641,25 @@ static int work_start(void)
 	return 0;
 }
 
+static void _stop_conn(struct connection *con, bool and_other)
+{
+	mutex_lock(&con->sock_mutex);
+	set_bit(CF_CLOSE, &con->flags);
+	set_bit(CF_READ_PENDING, &con->flags);
+	set_bit(CF_WRITE_PENDING, &con->flags);
+	if (con->sock && con->sock->sk) {
+		write_lock_bh(&con->sock->sk->sk_callback_lock);
+		con->sock->sk->sk_user_data = NULL;
+		write_unlock_bh(&con->sock->sk->sk_callback_lock);
+	}
+	if (con->othercon && and_other)
+		_stop_conn(con->othercon, false);
+	mutex_unlock(&con->sock_mutex);
+}
+
 static void stop_conn(struct connection *con)
 {
-	con->flags |= 0x0F;
-	if (con->sock && con->sock->sk)
-		con->sock->sk->sk_user_data = NULL;
+	_stop_conn(con, true);
 }
 
 static void free_conn(struct connection *con)
@@ -1645,6 +1671,36 @@ static void free_conn(struct connection *con)
 	kmem_cache_free(con_cache, con);
 }
 
+static void work_flush(void)
+{
+	int ok;
+	int i;
+	struct hlist_node *n;
+	struct connection *con;
+
+	flush_workqueue(recv_workqueue);
+	flush_workqueue(send_workqueue);
+	do {
+		ok = 1;
+		foreach_conn(stop_conn);
+		flush_workqueue(recv_workqueue);
+		flush_workqueue(send_workqueue);
+		for (i = 0; i < CONN_HASH_SIZE && ok; i++) {
+			hlist_for_each_entry_safe(con, n,
+						  &connection_hash[i], list) {
+				ok &= test_bit(CF_READ_PENDING, &con->flags);
+				ok &= test_bit(CF_WRITE_PENDING, &con->flags);
+				if (con->othercon) {
+					ok &= test_bit(CF_READ_PENDING,
+						       &con->othercon->flags);
+					ok &= test_bit(CF_WRITE_PENDING,
+						       &con->othercon->flags);
+				}
+			}
+		}
+	} while (!ok);
+}
+
 void dlm_lowcomms_stop(void)
 {
 	/* Set all the flags to prevent any
@@ -1652,11 +1708,10 @@ void dlm_lowcomms_stop(void)
 	*/
 	mutex_lock(&connections_lock);
 	dlm_allow_conn = 0;
-	foreach_conn(stop_conn);
+	mutex_unlock(&connections_lock);
+	work_flush();
 	clean_writequeues();
 	foreach_conn(free_conn);
-	mutex_unlock(&connections_lock);
-
 	work_stop();
 
 	kmem_cache_destroy(con_cache);

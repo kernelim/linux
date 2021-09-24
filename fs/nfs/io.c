@@ -38,22 +38,11 @@ nfs_start_io_read(struct inode *inode)
 {
 	struct nfs_inode *nfsi = NFS_I(inode);
 
-	mutex_lock(&inode->i_mutex);
-
-	if (test_bit(NFS_INO_ODIRECT, &nfsi->flags) != 0)
+	if (test_bit(NFS_INO_ODIRECT, &nfsi->flags) != 0) {
+		mutex_lock(&inode->i_mutex);
 		nfs_block_o_direct(nfsi, inode);
-}
-
-/**
- * nfs_end_io_read - declare that the buffered read operation is done
- * @inode - file inode
- *
- * Declare that a buffered read operation is done, and release i_mutex.
- */
-void
-nfs_end_io_read(struct inode *inode)
-{
-	mutex_unlock(&inode->i_mutex);
+		mutex_unlock(&inode->i_mutex);
+	}
 }
 
 /**

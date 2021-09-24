@@ -420,7 +420,6 @@ extern void nfs_sb_deactive(struct super_block *sb);
 
 /* io.c */
 extern void nfs_start_io_read(struct inode *inode);
-extern void nfs_end_io_read(struct inode *inode);
 extern void nfs_start_io_write(struct inode *inode);
 extern void nfs_end_io_write(struct inode *inode);
 extern void nfs_start_io_direct(struct inode *inode);
