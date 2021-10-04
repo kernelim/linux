@@ -61,7 +61,7 @@ struct fw_page {
 	u32			function;
 	unsigned long		bitmask;
 	struct list_head	list;
-	unsigned		free_count;
+	unsigned int free_count;
 };
 
 enum {
@@ -243,7 +243,7 @@ static void free_fwp(struct mlx5_core_dev *dev, struct fw_page *fwp,
 	rb_erase(&fwp->rb_node, root);
 	if (in_free_list)
 		list_del(&fwp->list);
-	dma_unmap_page(dev->device, fwp->addr & MLX5_U64_4K_PAGE_MASK,
+	dma_unmap_page(mlx5_core_dma_dev(dev), fwp->addr & MLX5_U64_4K_PAGE_MASK,
 		       PAGE_SIZE, DMA_BIDIRECTIONAL);
 	__free_page(fwp->page);
 	kfree(fwp);
@@ -270,7 +270,7 @@ static void free_4k(struct mlx5_core_dev *dev, u64 addr, u32 function)
 
 static int alloc_system_page(struct mlx5_core_dev *dev, u32 function)
 {
-	struct device *device = dev->device;
+	struct device *device = mlx5_core_dma_dev(dev);
 	int nid = dev_to_node(device);
 	struct page *page;
 	u64 zero_addr = 1;

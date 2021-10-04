@@ -125,7 +125,7 @@ void __kvm_tlb_flush_vmid(struct kvm *kvm)
 	__tlb_switch_to_host(kvm, &cxt);
 }
 
-void __kvm_tlb_flush_local_vmid(struct kvm_vcpu *vcpu)
+void __kvm_flush_cpu_context(struct kvm_vcpu *vcpu)
 {
 	struct kvm *kvm = vcpu->kvm;
 	struct tlb_inv_context cxt;
@@ -134,6 +134,7 @@ void __kvm_tlb_flush_local_vmid(struct kvm_vcpu *vcpu)
 	__tlb_switch_to_guest(kvm, &cxt);
 
 	__tlbi(vmalle1);
+	asm volatile("ic iallu");
 	dsb(nsh);
 	isb();
 

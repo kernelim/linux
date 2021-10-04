@@ -414,6 +414,7 @@ void smp_yield_cpu(int cpu)
 		asm volatile("diag 0,0,0x44");
 	}
 }
+EXPORT_SYMBOL_GPL(smp_yield_cpu);
 
 /*
  * Send cpus emergency shutdown signal. This gives the cpus the
@@ -591,14 +592,14 @@ int smp_store_status(int cpu)
 /*
  * Collect CPU state of the previous, crashed system.
  * There are four cases:
- * 1) standard zfcp dump
- *    condition: OLDMEM_BASE == NULL && ipl_info.type == IPL_TYPE_FCP_DUMP
+ * 1) standard zfcp/nvme dump
+ *    condition: OLDMEM_BASE == NULL && is_ipl_type_dump() == true
  *    The state for all CPUs except the boot CPU needs to be collected
  *    with sigp stop-and-store-status. The boot CPU state is located in
  *    the absolute lowcore of the memory stored in the HSA. The zcore code
  *    will copy the boot CPU state from the HSA.
- * 2) stand-alone kdump for SCSI (zfcp dump with swapped memory)
- *    condition: OLDMEM_BASE != NULL && ipl_info.type == IPL_TYPE_FCP_DUMP
+ * 2) stand-alone kdump for SCSI/NVMe (zfcp/nvme dump with swapped memory)
+ *    condition: OLDMEM_BASE != NULL && is_ipl_type_dump() == true
  *    The state for all CPUs except the boot CPU needs to be collected
  *    with sigp stop-and-store-status. The firmware or the boot-loader
  *    stored the registers of the boot CPU in the absolute lowcore in the
@@ -645,7 +646,7 @@ void __init smp_save_dump_cpus(void)
 	unsigned long page;
 	bool is_boot_cpu;
 
-	if (!(OLDMEM_BASE || ipl_info.type == IPL_TYPE_FCP_DUMP))
+	if (!(OLDMEM_BASE || is_ipl_type_dump()))
 		/* No previous system present, normal boot. */
 		return;
 	/* Allocate a page as dumping area for the store status sigps */
@@ -667,7 +668,7 @@ void __init smp_save_dump_cpus(void)
 			/* Get the vector registers */
 			smp_save_cpu_vxrs(sa, addr, is_boot_cpu, page);
 		/*
-		 * For a zfcp dump OLDMEM_BASE == NULL and the registers
+		 * For a zfcp/nvme dump OLDMEM_BASE == NULL and the registers
 		 * of the boot CPU are stored in the HSA. To retrieve
 		 * these registers an SCLP request is required which is
 		 * done by drivers/s390/char/zcore.c:init_cpu_info()

@@ -86,6 +86,8 @@ nf_osf_match(const struct sk_buff *skb, u_int8_t family,
 
 		_optp = optp = skb_header_pointer(skb, ip_hdrlen(skb) +
 				sizeof(struct tcphdr), optsize, opts);
+		if (!optp)
+			return false;
 	}
 
 	list_for_each_entry_rcu(kf, &nf_osf_fingers[df], finger_entry) {

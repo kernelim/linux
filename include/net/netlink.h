@@ -142,7 +142,7 @@
  * Attribute Misc:
  *   nla_memcpy(dest, nla, count)	copy attribute into memory
  *   nla_memcmp(nla, data, size)	compare attribute with memory area
- *   nla_strlcpy(dst, nla, size)	copy attribute to a sized string
+ *   nla_strscpy(dst, nla, size)	copy attribute to a sized string
  *   nla_strcmp(nla, str)		compare attribute with string
  *
  * Attribute Parsing:
@@ -550,7 +550,7 @@ int __nla_parse(struct nlattr **tb, int maxtype, const struct nlattr *head,
 		struct netlink_ext_ack *extack);
 int nla_policy_len(const struct nla_policy *, int);
 struct nlattr *nla_find(const struct nlattr *head, int len, int attrtype);
-size_t nla_strlcpy(char *dst, const struct nlattr *nla, size_t dstsize);
+ssize_t nla_strscpy(char *dst, const struct nlattr *nla, size_t dstsize);
 char *nla_strdup(const struct nlattr *nla, gfp_t flags);
 int nla_memcpy(void *dest, const struct nlattr *src, int count);
 int nla_memcmp(const struct nlattr *nla, const void *data, size_t size);
@@ -1992,10 +1992,17 @@ void nla_get_range_unsigned(const struct nla_policy *pt,
 void nla_get_range_signed(const struct nla_policy *pt,
 			  struct netlink_range_validation_signed *range);
 
-int netlink_policy_dump_start(const struct nla_policy *policy,
-			      unsigned int maxtype,
-			      unsigned long *state);
-bool netlink_policy_dump_loop(unsigned long *state);
-int netlink_policy_dump_write(struct sk_buff *skb, unsigned long state);
+struct netlink_policy_dump_state;
+
+int netlink_policy_dump_add_policy(struct netlink_policy_dump_state **pstate,
+				   const struct nla_policy *policy,
+				   unsigned int maxtype);
+int netlink_policy_dump_get_policy_idx(struct netlink_policy_dump_state *state,
+				       const struct nla_policy *policy,
+				       unsigned int maxtype);
+bool netlink_policy_dump_loop(struct netlink_policy_dump_state *state);
+int netlink_policy_dump_write(struct sk_buff *skb,
+			      struct netlink_policy_dump_state *state);
+void netlink_policy_dump_free(struct netlink_policy_dump_state *state);
 
 #endif

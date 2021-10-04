@@ -1090,12 +1090,9 @@ static bool qede_rx_xdp(struct qede_dev *edev,
 	struct xdp_buff xdp;
 	enum xdp_action act;
 
-	xdp.data_hard_start = page_address(bd->data);
-	xdp.data = xdp.data_hard_start + *data_offset;
-	xdp_set_data_meta_invalid(&xdp);
-	xdp.data_end = xdp.data + *len;
-	xdp.rxq = &rxq->xdp_rxq;
-	xdp.frame_sz = rxq->rx_buf_seg_size; /* PAGE_SIZE when XDP enabled */
+	xdp_init_buff(&xdp, rxq->rx_buf_seg_size, &rxq->xdp_rxq);
+	xdp_prepare_buff(&xdp, page_address(bd->data), *data_offset,
+			 *len, false);
 
 	/* Queues always have a full reset currently, so for the time
 	 * being until there's atomic program replace just mark read
@@ -1217,12 +1214,9 @@ static int qede_rx_build_jumbo(struct qede_dev *edev,
 		dma_unmap_page(rxq->dev, bd->mapping,
 			       PAGE_SIZE, DMA_FROM_DEVICE);
 
-		skb_fill_page_desc(skb, skb_shinfo(skb)->nr_frags++,
-				   bd->data, rxq->rx_headroom, cur_size);
+		skb_add_rx_frag(skb, skb_shinfo(skb)->nr_frags, bd->data,
+				rxq->rx_headroom, cur_size, PAGE_SIZE);
 
-		skb->truesize += PAGE_SIZE;
-		skb->data_len += cur_size;
-		skb->len += cur_size;
 		pkt_len -= cur_size;
 	}
 
@@ -1800,6 +1794,11 @@ netdev_features_t qede_features_check(struct sk_buff *skb,
 			      ntohs(udp_hdr(skb)->dest) != gnv_port))
 				return features & ~(NETIF_F_CSUM_MASK |
 						    NETIF_F_GSO_MASK);
+		} else if (l4_proto == IPPROTO_IPIP) {
+			/* IPIP tunnels are unknown to the device or at least unsupported natively,
+			 * offloads for them can't be done trivially, so disable them for such skb.
+			 */
+			return features & ~(NETIF_F_CSUM_MASK | NETIF_F_GSO_MASK);
 		}
 	}
 

@@ -322,7 +322,8 @@ void *memremap_pages(struct dev_pagemap *pgmap, int nid)
 
 		zone = &NODE_DATA(nid)->node_zones[ZONE_DEVICE];
 		move_pfn_range_to_zone(zone, PHYS_PFN(res->start),
-				PHYS_PFN(resource_size(res)), params.altmap);
+				PHYS_PFN(resource_size(res)), params.altmap,
+				MIGRATE_MOVABLE);
 	}
 
 	mem_hotplug_done();

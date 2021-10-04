@@ -195,7 +195,7 @@ void rcu_segcblist_offload(struct rcu_segcblist *rsclp)
 bool rcu_segcblist_ready_cbs(struct rcu_segcblist *rsclp)
 {
 	return rcu_segcblist_is_enabled(rsclp) &&
-	       &rsclp->head != rsclp->tails[RCU_DONE_TAIL];
+	       &rsclp->head != READ_ONCE(rsclp->tails[RCU_DONE_TAIL]);
 }
 
 /*
@@ -394,8 +394,6 @@ void rcu_segcblist_insert_pend_cbs(struct rcu_segcblist *rsclp,
 		return; /* Nothing to do. */
 	WRITE_ONCE(*rsclp->tails[RCU_NEXT_TAIL], rclp->head);
 	WRITE_ONCE(rsclp->tails[RCU_NEXT_TAIL], rclp->tail);
-	rclp->head = NULL;
-	rclp->tail = &rclp->head;
 }
 
 /*

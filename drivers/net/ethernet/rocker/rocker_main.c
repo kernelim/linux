@@ -2750,7 +2750,7 @@ static void rocker_switchdev_event_work(struct work_struct *work)
 	switch (switchdev_work->event) {
 	case SWITCHDEV_FDB_ADD_TO_DEVICE:
 		fdb_info = &switchdev_work->fdb_info;
-		if (!fdb_info->added_by_user)
+		if (!fdb_info->added_by_user || fdb_info->is_local)
 			break;
 		err = rocker_world_port_fdb_add(rocker_port, fdb_info);
 		if (err) {
@@ -2761,7 +2761,7 @@ static void rocker_switchdev_event_work(struct work_struct *work)
 		break;
 	case SWITCHDEV_FDB_DEL_TO_DEVICE:
 		fdb_info = &switchdev_work->fdb_info;
-		if (!fdb_info->added_by_user)
+		if (!fdb_info->added_by_user || fdb_info->is_local)
 			break;
 		err = rocker_world_port_fdb_del(rocker_port, fdb_info);
 		if (err)
@@ -3083,9 +3083,10 @@ struct rocker_walk_data {
 	struct rocker_port *port;
 };
 
-static int rocker_lower_dev_walk(struct net_device *lower_dev, void *_data)
+static int rocker_lower_dev_walk(struct net_device *lower_dev,
+				 struct netdev_nested_priv *priv)
 {
-	struct rocker_walk_data *data = _data;
+	struct rocker_walk_data *data = (struct rocker_walk_data *)priv->data;
 	int ret = 0;
 
 	if (rocker_port_dev_check_under(lower_dev, data->rocker)) {
@@ -3099,6 +3100,7 @@ static int rocker_lower_dev_walk(struct net_device *lower_dev, void *_data)
 struct rocker_port *rocker_port_dev_lower_find(struct net_device *dev,
 					       struct rocker *rocker)
 {
+	struct netdev_nested_priv priv;
 	struct rocker_walk_data data;
 
 	if (rocker_port_dev_check_under(dev, rocker))
@@ -3106,7 +3108,8 @@ struct rocker_port *rocker_port_dev_lower_find(struct net_device *dev,
 
 	data.rocker = rocker;
 	data.port = NULL;
-	netdev_walk_all_lower_dev(dev, rocker_lower_dev_walk, &data);
+	priv.data = (void *)&data;
+	netdev_walk_all_lower_dev(dev, rocker_lower_dev_walk, &priv);
 
 	return data.port;
 }

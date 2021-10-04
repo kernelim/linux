@@ -269,6 +269,8 @@ static int siena_probe_nic(struct efx_nic *efx)
 	nic_data->efx = efx;
 	efx->nic_data = nic_data;
 
+	mark_hardware_deprecated("SFC9000 family");
+
 	if (efx_farch_fpga_ver(efx) != 0) {
 		netif_err(efx, probe, efx->net_dev,
 			  "Siena FPGA not supported\n");
@@ -994,7 +996,6 @@ const struct efx_nic_type siena_a0_nic_type = {
 	.start_stats = efx_mcdi_mac_start_stats,
 	.pull_stats = efx_mcdi_mac_pull_stats,
 	.stop_stats = efx_mcdi_mac_stop_stats,
-	.set_id_led = efx_mcdi_set_id_led,
 	.push_irq_moderation = siena_push_irq_moderation,
 	.reconfigure_mac = siena_mac_reconfigure,
 	.check_mac_fault = efx_mcdi_mac_check_fault,

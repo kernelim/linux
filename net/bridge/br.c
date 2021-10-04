@@ -40,12 +40,19 @@ static int br_device_event(struct notifier_block *unused, unsigned long event, v
 	bool changed_addr;
 	int err;
 
-	/* register of bridge completed, add sysfs entries */
-	if ((dev->priv_flags & IFF_EBRIDGE) && event == NETDEV_REGISTER) {
-		err = br_sysfs_addbr(dev);
+	if (dev->priv_flags & IFF_EBRIDGE) {
+		err = br_vlan_bridge_event(dev, event, ptr);
 		if (err)
 			return notifier_from_errno(err);
-		return NOTIFY_DONE;
+
+		if (event == NETDEV_REGISTER) {
+			/* register of bridge completed, add sysfs entries */
+			err = br_sysfs_addbr(dev);
+			if (err)
+				return notifier_from_errno(err);
+
+			return NOTIFY_DONE;
+		}
 	}
 
 	/* not a port of a bridge */
@@ -127,6 +134,9 @@ static int br_device_event(struct notifier_block *unused, unsigned long event, v
 		call_netdevice_notifiers(event, br->dev);
 		break;
 	}
+
+	if (event != NETDEV_UNREGISTER)
+		br_vlan_port_event(p, event);
 
 	/* Events that may cause spanning tree to refresh */
 	if (!notified && (event == NETDEV_CHANGEADDR || event == NETDEV_UP ||

@@ -1,5 +1,5 @@
 *.d
-/bpftool-bootstrap
+/bootstrap/
 /bpftool
 bpftool*.8
 bpf-helpers.*

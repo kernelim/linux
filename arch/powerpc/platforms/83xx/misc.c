@@ -148,8 +148,6 @@ void __init mpc83xx_setup_arch(void)
 {
 	if (ppc_md.progress)
 		ppc_md.progress("mpc83xx_setup_arch()", 0);
-
-	mpc83xx_setup_pci();
 }
 
 int machine_check_83xx(struct pt_regs *regs)

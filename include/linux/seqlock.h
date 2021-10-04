@@ -30,7 +30,7 @@
  *
  * As a consequence, we take the following best-effort approach for raw usage
  * via seqcount_t under KCSAN: upon beginning a seq-reader critical section,
- * pessimistically mark then next KCSAN_SEQLOCK_REGION_MAX memory accesses as
+ * pessimistically mark the next KCSAN_SEQLOCK_REGION_MAX memory accesses as
  * atomics; if there is a matching read_seqcount_retry() call, no following
  * memory operations are considered atomic. Usage of the seqlock_t interface
  * is not affected.
@@ -523,7 +523,7 @@ static inline void write_seqcount_t_end(seqcount_t *s)
  * consistency guarantee. It is one wmb cheaper, because it can collapse
  * the two back-to-back wmb()s.
  *
- * Note that, writes surrounding the barrier should be declared atomic (e.g.
+ * Note that writes surrounding the barrier should be declared atomic (e.g.
  * via WRITE_ONCE): a) to ensure the writes become visible to other threads
  * atomically, avoiding compiler optimizations; b) to document which writes are
  * meant to propagate to the reader critical section. This is necessary because
@@ -751,7 +751,7 @@ static inline unsigned read_seqbegin(const seqlock_t *sl)
 {
 	unsigned ret = read_seqcount_begin(&sl->seqcount);
 
-	kcsan_atomic_next(0);  /* non-raw usage, assume closing read_seqretry */
+	kcsan_atomic_next(0);  /* non-raw usage, assume closing read_seqretry() */
 	kcsan_flat_atomic_begin();
 	return ret;
 }
@@ -770,7 +770,7 @@ static inline unsigned read_seqbegin(const seqlock_t *sl)
 static inline unsigned read_seqretry(const seqlock_t *sl, unsigned start)
 {
 	/*
-	 * Assume not nested: read_seqretry may be called multiple times when
+	 * Assume not nested: read_seqretry() may be called multiple times when
 	 * completing read critical section.
 	 */
 	kcsan_flat_atomic_end();

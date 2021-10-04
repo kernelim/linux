@@ -106,7 +106,7 @@ do {									\
 static uint at76_debug = DBG_DEFAULTS;
 
 /* Protect against concurrent firmware loading and parsing */
-static struct mutex fw_mutex;
+static DEFINE_MUTEX(fw_mutex);
 
 static struct fwentry firmwares[] = {
 	[0] = { "" },
@@ -437,7 +437,7 @@ static int at76_usbdfu_download(struct usb_device *udev, u8 *buf, u32 size,
 
 		case STATE_DFU_DOWNLOAD_IDLE:
 			at76_dbg(DBG_DFU, "DOWNLOAD...");
-			/* fall through */
+			fallthrough;
 		case STATE_DFU_IDLE:
 			at76_dbg(DBG_DFU, "DFU IDLE");
 
@@ -2577,8 +2577,6 @@ static int __init at76_mod_init(void)
 	int result;
 
 	printk(KERN_INFO DRIVER_DESC " " DRIVER_VERSION " loading\n");
-
-	mutex_init(&fw_mutex);
 
 	/* register this driver with the USB subsystem */
 	result = usb_register(&at76_driver);

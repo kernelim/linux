@@ -617,8 +617,11 @@ struct phy_device {
 			void (*phy_link_change)(struct phy_device *phydev, bool up))
 	void (*adjust_link)(struct net_device *dev);
 };
-#define to_phy_device(d) container_of(to_mdio_device(d), \
-				      struct phy_device, mdio)
+
+static inline struct phy_device *to_phy_device(const struct device *dev)
+{
+	return container_of(to_mdio_device(dev), struct phy_device, mdio);
+}
 
 /* A structure containing possible configuration parameters
  * for a TDR cable test. The driver does not need to implement
@@ -702,18 +705,15 @@ struct phy_driver {
 	/* Determines the negotiated speed and duplex */
 	int (*read_status)(struct phy_device *phydev);
 
-	/* Clears any pending interrupts */
-	int (*ack_interrupt)(struct phy_device *phydev);
+	RH_KABI_DEPRECATE_FN(int, ack_interrupt, struct phy_device *phydev)
 
-	/* Enables or disables interrupts */
+	/** @config_intr: Enables or disables interrupts.
+	 * It should also clear any pending interrupts prior to enabling the
+	 * IRQs and after disabling them.
+	 */
 	int (*config_intr)(struct phy_device *phydev);
 
-	/*
-	 * Checks if the PHY generated an interrupt.
-	 * For multi-PHY devices with shared PHY interrupt pin
-	 * Set interrupt bits have to be cleared.
-	 */
-	int (*did_interrupt)(struct phy_device *phydev);
+	RH_KABI_DEPRECATE_FN(int, did_interrupt, struct phy_device *phydev)
 
 	/* Clears up any memory if needed */
 	void (*remove)(struct phy_device *phydev);
@@ -1437,16 +1437,13 @@ int genphy_suspend(struct phy_device *phydev);
 int genphy_resume(struct phy_device *phydev);
 int genphy_loopback(struct phy_device *phydev, bool enable);
 int genphy_soft_reset(struct phy_device *phydev);
+irqreturn_t genphy_handle_interrupt_no_ack(struct phy_device *phydev);
 
 static inline int genphy_config_aneg(struct phy_device *phydev)
 {
 	return __genphy_config_aneg(phydev, false);
 }
 
-static inline int genphy_no_ack_interrupt(struct phy_device *phydev)
-{
-	return 0;
-}
 static inline int genphy_no_config_intr(struct phy_device *phydev)
 {
 	return 0;
@@ -1474,6 +1471,7 @@ int genphy_c45_read_mdix(struct phy_device *phydev);
 int genphy_c45_pma_read_abilities(struct phy_device *phydev);
 int genphy_c45_read_status(struct phy_device *phydev);
 int genphy_c45_config_aneg(struct phy_device *phydev);
+int genphy_c45_loopback(struct phy_device *phydev, bool enable);
 
 /* Generic C45 PHY driver */
 extern struct phy_driver genphy_c45_driver;
@@ -1504,8 +1502,10 @@ int phy_driver_register(struct phy_driver *new_driver, struct module *owner);
 RH_KABI_FORCE_CHANGE(5)
 int phy_drivers_register(struct phy_driver *new_driver, int n,
 			 struct module *owner);
+void phy_error(struct phy_device *phydev);
 void phy_state_machine(struct work_struct *work);
 void phy_queue_state_machine(struct phy_device *phydev, unsigned long jiffies);
+void phy_trigger_machine(struct phy_device *phydev);
 void phy_mac_interrupt(struct phy_device *phydev);
 void phy_start_machine(struct phy_device *phydev);
 void phy_stop_machine(struct phy_device *phydev);
@@ -1531,6 +1531,10 @@ void phy_set_asym_pause(struct phy_device *phydev, bool rx, bool tx);
 bool phy_validate_pause(struct phy_device *phydev,
 			struct ethtool_pauseparam *pp);
 void phy_get_pause(struct phy_device *phydev, bool *tx_pause, bool *rx_pause);
+
+s32 phy_get_internal_delay(struct phy_device *phydev, struct device *dev,
+			   const int *delay_values, int size, bool is_rx);
+
 void phy_resolve_pause(unsigned long *local_adv, unsigned long *partner_adv,
 		       bool *tx_pause, bool *rx_pause);
 
@@ -1567,51 +1571,10 @@ int __init mdio_bus_init(void);
 void mdio_bus_exit(void);
 #endif
 
-/* Inline function for use within net/core/ethtool.c (built-in) */
-static inline int phy_ethtool_get_strings(struct phy_device *phydev, u8 *data)
-{
-	if (!phydev->drv)
-		return -EIO;
-
-	mutex_lock(&phydev->lock);
-	phydev->drv->get_strings(phydev, data);
-	mutex_unlock(&phydev->lock);
-
-	return 0;
-}
-
-static inline int phy_ethtool_get_sset_count(struct phy_device *phydev)
-{
-	int ret;
-
-	if (!phydev->drv)
-		return -EIO;
-
-	if (phydev->drv->get_sset_count &&
-	    phydev->drv->get_strings &&
-	    phydev->drv->get_stats) {
-		mutex_lock(&phydev->lock);
-		ret = phydev->drv->get_sset_count(phydev);
-		mutex_unlock(&phydev->lock);
-
-		return ret;
-	}
-
-	return -EOPNOTSUPP;
-}
-
-static inline int phy_ethtool_get_stats(struct phy_device *phydev,
-					struct ethtool_stats *stats, u64 *data)
-{
-	if (!phydev->drv)
-		return -EIO;
-
-	mutex_lock(&phydev->lock);
-	phydev->drv->get_stats(phydev, stats, data);
-	mutex_unlock(&phydev->lock);
-
-	return 0;
-}
+int phy_ethtool_get_strings(struct phy_device *phydev, u8 *data);
+int phy_ethtool_get_sset_count(struct phy_device *phydev);
+int phy_ethtool_get_stats(struct phy_device *phydev,
+			  struct ethtool_stats *stats, u64 *data);
 
 static inline int phy_package_read(struct phy_device *phydev, u32 regnum)
 {

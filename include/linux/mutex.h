@@ -20,6 +20,7 @@
 #include <linux/osq_lock.h>
 #include <linux/debug_locks.h>
 
+struct ww_class;
 struct ww_acquire_ctx;
 
 /*
@@ -64,9 +65,6 @@ struct mutex {
 	struct lockdep_map	dep_map;
 #endif
 };
-
-struct ww_class;
-struct ww_acquire_ctx;
 
 struct ww_mutex {
 	struct mutex base;
@@ -152,7 +150,7 @@ extern bool mutex_is_locked(struct mutex *lock);
 
 /*
  * See kernel/locking/mutex.c for detailed documentation of these APIs.
- * Also see Documentation/locking/mutex-design.txt.
+ * Also see Documentation/locking/mutex-design.rst.
  */
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 extern void mutex_lock_nested(struct mutex *lock, unsigned int subclass);

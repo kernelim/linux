@@ -941,7 +941,7 @@ static int dmz_iterate_devices(struct dm_target *ti,
 static struct target_type dmz_type = {
 	.name		 = "zoned",
 	.version	 = {1, 0, 0},
-	.features	 = DM_TARGET_SINGLETON | DM_TARGET_ZONED_HM,
+	.features	 = DM_TARGET_SINGLETON | DM_TARGET_MIXED_ZONED_MODEL,
 	.module		 = THIS_MODULE,
 	.ctr		 = dmz_ctr,
 	.dtr		 = dmz_dtr,

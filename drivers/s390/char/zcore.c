@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-1.0+
 /*
  * zcore module to export memory content and register sets for creating system
- * dumps on SCSI disks (zfcpdump). The "zcore/mem" debugfs file shows the same
- * dump format as s390 standalone dumps.
+ * dumps on SCSI/NVMe disks (zfcp/nvme dump). The "zcore/mem" debugfs file
+ * shows the same dump format as s390 standalone dumps.
  *
  * For more information please refer to Documentation/s390/zfcpdump.rst
  *
@@ -288,7 +288,7 @@ static int __init zcore_init(void)
 	unsigned char arch;
 	int rc;
 
-	if (ipl_info.type != IPL_TYPE_FCP_DUMP)
+	if (!is_ipl_type_dump())
 		return -ENODATA;
 	if (OLDMEM_BASE)
 		return -ENODATA;
@@ -297,9 +297,16 @@ static int __init zcore_init(void)
 	debug_register_view(zcore_dbf, &debug_sprintf_view);
 	debug_set_level(zcore_dbf, 6);
 
-	TRACE("devno:  %x\n", ipl_info.data.fcp.dev_id.devno);
-	TRACE("wwpn:   %llx\n", (unsigned long long) ipl_info.data.fcp.wwpn);
-	TRACE("lun:    %llx\n", (unsigned long long) ipl_info.data.fcp.lun);
+	if (ipl_info.type == IPL_TYPE_FCP_DUMP) {
+		TRACE("type:   fcp\n");
+		TRACE("devno:  %x\n", ipl_info.data.fcp.dev_id.devno);
+		TRACE("wwpn:   %llx\n", (unsigned long long) ipl_info.data.fcp.wwpn);
+		TRACE("lun:    %llx\n", (unsigned long long) ipl_info.data.fcp.lun);
+	} else if (ipl_info.type == IPL_TYPE_NVME_DUMP) {
+		TRACE("type:   nvme\n");
+		TRACE("fid:    %x\n", ipl_info.data.nvme.fid);
+		TRACE("nsid:   %x\n", ipl_info.data.nvme.nsid);
+	}
 
 	rc = sclp_sdias_init();
 	if (rc)

@@ -56,7 +56,7 @@ Operation Modes
 
 ``intel_pstate`` can operate in two different modes, active or passive.  In the
 active mode, it uses its own internal performance scaling governor algorithm or
-allows the hardware to do preformance scaling by itself, while in the passive
+allows the hardware to do performance scaling by itself, while in the passive
 mode it responds to requests made by a generic ``CPUFreq`` governor implementing
 a certain performance scaling algorithm.  Which of them will be in effect
 depends on what kernel command line options are used and on the capabilities of
@@ -65,9 +65,10 @@ the processor.
 Active Mode
 -----------
 
-This is the default operation mode of ``intel_pstate``.  If it works in this
-mode, the ``scaling_driver`` policy attribute in ``sysfs`` for all ``CPUFreq``
-policies contains the string "intel_pstate".
+This is the default operation mode of ``intel_pstate`` for processors with
+hardware-managed P-states (HWP) support.  If it works in this mode, the
+``scaling_driver`` policy attribute in ``sysfs`` for all ``CPUFreq`` policies
+contains the string "intel_pstate".
 
 In this mode the driver bypasses the scaling governors layer of ``CPUFreq`` and
 provides its own scaling algorithms for P-state selection.  Those algorithms
@@ -143,12 +144,13 @@ internal P-state selection logic to be less performance-focused.
 Active Mode Without HWP
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-This is the default operation mode for processors that do not support the HWP
-feature.  It also is used by default with the ``intel_pstate=no_hwp`` argument
-in the kernel command line.  However, in this mode ``intel_pstate`` may refuse
-to work with the given processor if it does not recognize it.  [Note that
-``intel_pstate`` will never refuse to work with any processor with the HWP
-feature enabled.]
+This operation mode is optional for processors that do not support the HWP
+feature or when the ``intel_pstate=no_hwp`` argument is passed to the kernel in
+the command line.  The active mode is used in those cases if the
+``intel_pstate=active`` argument is passed to the kernel in the command line.
+In this mode ``intel_pstate`` may refuse to work with processors that are not
+recognized by it.  [Note that ``intel_pstate`` will never refuse to work with
+any processor with the HWP feature enabled.]
 
 In this mode ``intel_pstate`` registers utilization update callbacks with the
 CPU scheduler in order to run a P-state selection algorithm, either
@@ -193,16 +195,15 @@ is not set.
 Passive Mode
 ------------
 
-This mode is used if the ``intel_pstate=passive`` argument is passed to the
-kernel in the command line (it implies the ``intel_pstate=no_hwp`` setting too).
-Like in the active mode without HWP support, in this mode ``intel_pstate`` may
-refuse to work with the given processor if it does not recognize it. [Note that the
+This is the default operation mode of ``intel_pstate`` for processors without
+hardware-managed P-states (HWP) support.  It is always used if the
+``intel_pstate=passive`` argument is passed to the kernel in the command line
+regardless of whether or not the given processor supports HWP.  [Note that the
 ``intel_pstate=no_hwp`` setting causes the driver to start in the passive mode
 if it is not combined with ``intel_pstate=active``.]  Like in the active mode
 without HWP support, in this mode ``intel_pstate`` may refuse to work with
 processors that are not recognized by it if HWP is prevented from being enabled
 through the kernel command line.
-
 
 If the driver works in this mode, the ``scaling_driver`` policy attribute in
 ``sysfs`` for all ``CPUFreq`` policies contains the string "intel_cpufreq".
@@ -379,13 +380,13 @@ argument is passed to the kernel in the command line.
 
 ``no_turbo``
 	If set (equal to 1), the driver is not allowed to set any turbo P-states
-	(see `Turbo P-states Support`_).  If unset (equalt to 0, which is the
+	(see `Turbo P-states Support`_).  If unset (equal to 0, which is the
 	default), turbo P-states can be set by the driver.
 	[Note that ``intel_pstate`` does not support the general ``boost``
 	attribute (supported by some other scaling drivers) which is replaced
 	by this one.]
 
-	This attrubute does not affect the maximum supported frequency value
+	This attribute does not affect the maximum supported frequency value
 	supplied to the ``CPUFreq`` core and exposed via the policy interface,
 	but it affects the maximum possible value of per-policy P-state	limits
 	(see `Interpretation of Policy Attributes`_ below for details).
@@ -721,7 +722,7 @@ core (for the policies with other scaling governors).
 
 The ``ftrace`` interface can be used for low-level diagnostics of
 ``intel_pstate``.  For example, to check how often the function to set a
-P-state is called, the ``ftrace`` filter can be set to to
+P-state is called, the ``ftrace`` filter can be set to
 :c:func:`intel_pstate_set_pstate`::
 
  # cd /sys/kernel/debug/tracing/

@@ -336,6 +336,7 @@ static inline void
 nf_ct_set(struct sk_buff *skb, struct nf_conn *ct, enum ip_conntrack_info info)
 {
 	skb->_nfct = (unsigned long)ct | info;
+	skb->slow_gro |= !!skb->_nfct;
 }
 
 #define NF_CT_STAT_INC(net, count)	  __this_cpu_inc((net)->ct.stat->count)

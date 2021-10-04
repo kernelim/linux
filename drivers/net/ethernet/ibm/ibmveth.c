@@ -1292,36 +1292,41 @@ static void ibmveth_rx_csum_helper(struct sk_buff *skb,
 		iph_proto = iph6->nexthdr;
 	}
 
-	/* In OVS environment, when a flow is not cached, specifically for a
-	 * new TCP connection, the first packet information is passed up
+	/* When CSO is enabled the TCP checksum may have be set to NULL by
+	 * the sender given that we zeroed out TCP checksum field in
+	 * transmit path (refer ibmveth_start_xmit routine). In this case set
+	 * up CHECKSUM_PARTIAL. If the packet is forwarded, the checksum will
+	 * then be recalculated by the destination NIC (CSO must be enabled
+	 * on the destination NIC).
+	 *
+	 * In an OVS environment, when a flow is not cached, specifically for a
+	 * new TCP connection, the first packet information is passed up to
 	 * the user space for finding a flow. During this process, OVS computes
 	 * checksum on the first packet when CHECKSUM_PARTIAL flag is set.
 	 *
-	 * Given that we zeroed out TCP checksum field in transmit path
-	 * (refer ibmveth_start_xmit routine) as we set "no checksum bit",
-	 * OVS computed checksum will be incorrect w/o TCP pseudo checksum
-	 * in the packet. This leads to OVS dropping the packet and hence
-	 * TCP retransmissions are seen.
-	 *
-	 * So, re-compute TCP pseudo header checksum.
+	 * So, re-compute TCP pseudo header checksum when configured for
+	 * trunk mode.
 	 */
-	if (iph_proto == IPPROTO_TCP && adapter->is_active_trunk) {
+	if (iph_proto == IPPROTO_TCP) {
 		struct tcphdr *tcph = (struct tcphdr *)(skb->data + iphlen);
-
-		tcphdrlen = skb->len - iphlen;
-
-		/* Recompute TCP pseudo header checksum */
-		if (skb_proto == ETH_P_IP)
-			tcph->check = ~csum_tcpudp_magic(iph->saddr,
+		if (tcph->check == 0x0000) {
+			/* Recompute TCP pseudo header checksum  */
+			if (adapter->is_active_trunk) {
+				tcphdrlen = skb->len - iphlen;
+				if (skb_proto == ETH_P_IP)
+					tcph->check =
+					 ~csum_tcpudp_magic(iph->saddr,
 					iph->daddr, tcphdrlen, iph_proto, 0);
-		else if (skb_proto == ETH_P_IPV6)
-			tcph->check = ~csum_ipv6_magic(&iph6->saddr,
+				else if (skb_proto == ETH_P_IPV6)
+					tcph->check =
+					 ~csum_ipv6_magic(&iph6->saddr,
 					&iph6->daddr, tcphdrlen, iph_proto, 0);
-
-		/* Setup SKB fields for checksum offload */
-		skb_partial_csum_set(skb, iphlen,
-				     offsetof(struct tcphdr, check));
-		skb_reset_network_header(skb);
+			}
+			/* Setup SKB fields for checksum offload */
+			skb_partial_csum_set(skb, iphlen,
+					     offsetof(struct tcphdr, check));
+			skb_reset_network_header(skb);
+		}
 	}
 }
 
@@ -1763,7 +1768,7 @@ static int ibmveth_probe(struct vio_dev *dev, const struct vio_device_id *id)
 	return 0;
 }
 
-static int ibmveth_remove(struct vio_dev *dev)
+static void ibmveth_remove(struct vio_dev *dev)
 {
 	struct net_device *netdev = dev_get_drvdata(&dev->dev);
 	struct ibmveth_adapter *adapter = netdev_priv(netdev);
@@ -1776,8 +1781,6 @@ static int ibmveth_remove(struct vio_dev *dev)
 
 	free_netdev(netdev);
 	dev_set_drvdata(&dev->dev, NULL);
-
-	return 0;
 }
 
 static struct attribute veth_active_attr;

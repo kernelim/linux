@@ -46,6 +46,8 @@ static ssize_t usbip_sockfd_store(struct device *dev, struct device_attribute *a
 	int sockfd = 0;
 	struct socket *socket;
 	int rv;
+	struct task_struct *tcp_rx = NULL;
+	struct task_struct *tcp_tx = NULL;
 
 	if (!sdev) {
 		dev_err(dev, "sdev is null\n");
@@ -61,6 +63,7 @@ static ssize_t usbip_sockfd_store(struct device *dev, struct device_attribute *a
 
 		dev_info(dev, "stub up\n");
 
+		mutex_lock(&sdev->ud.sysfs_lock);
 		spin_lock_irq(&sdev->ud.lock);
 
 		if (sdev->ud.status != SDEV_ST_AVAILABLE) {
@@ -69,22 +72,48 @@ static ssize_t usbip_sockfd_store(struct device *dev, struct device_attribute *a
 		}
 
 		socket = sockfd_lookup(sockfd, &err);
-		if (!socket)
+		if (!socket) {
+			dev_err(dev, "failed to lookup sock");
 			goto err;
+		}
 
+		if (socket->type != SOCK_STREAM) {
+			dev_err(dev, "Expecting SOCK_STREAM - found %d",
+				socket->type);
+			goto sock_err;
+		}
+
+		/* unlock and create threads and get tasks */
+		spin_unlock_irq(&sdev->ud.lock);
+		tcp_rx = kthread_create(stub_rx_loop, &sdev->ud, "stub_rx");
+		if (IS_ERR(tcp_rx)) {
+			sockfd_put(socket);
+			goto unlock_mutex;
+		}
+		tcp_tx = kthread_create(stub_tx_loop, &sdev->ud, "stub_tx");
+		if (IS_ERR(tcp_tx)) {
+			kthread_stop(tcp_rx);
+			sockfd_put(socket);
+			goto unlock_mutex;
+		}
+
+		/* get task structs now */
+		get_task_struct(tcp_rx);
+		get_task_struct(tcp_tx);
+
+		/* lock and update sdev->ud state */
+		spin_lock_irq(&sdev->ud.lock);
 		sdev->ud.tcp_socket = socket;
 		sdev->ud.sockfd = sockfd;
-
-		spin_unlock_irq(&sdev->ud.lock);
-
-		sdev->ud.tcp_rx = kthread_get_run(stub_rx_loop, &sdev->ud,
-						  "stub_rx");
-		sdev->ud.tcp_tx = kthread_get_run(stub_tx_loop, &sdev->ud,
-						  "stub_tx");
-
-		spin_lock_irq(&sdev->ud.lock);
+		sdev->ud.tcp_rx = tcp_rx;
+		sdev->ud.tcp_tx = tcp_tx;
 		sdev->ud.status = SDEV_ST_USED;
 		spin_unlock_irq(&sdev->ud.lock);
+
+		wake_up_process(sdev->ud.tcp_rx);
+		wake_up_process(sdev->ud.tcp_tx);
+
+		mutex_unlock(&sdev->ud.sysfs_lock);
 
 	} else {
 		dev_info(dev, "stub down\n");
@@ -96,48 +125,28 @@ static ssize_t usbip_sockfd_store(struct device *dev, struct device_attribute *a
 		spin_unlock_irq(&sdev->ud.lock);
 
 		usbip_event_add(&sdev->ud, SDEV_EVENT_DOWN);
+		mutex_unlock(&sdev->ud.sysfs_lock);
 	}
 
 	return count;
 
+sock_err:
+	sockfd_put(socket);
 err:
 	spin_unlock_irq(&sdev->ud.lock);
+unlock_mutex:
+	mutex_unlock(&sdev->ud.sysfs_lock);
 	return -EINVAL;
 }
 static DEVICE_ATTR_WO(usbip_sockfd);
 
-static int stub_add_files(struct device *dev)
-{
-	int err = 0;
-
-	err = device_create_file(dev, &dev_attr_usbip_status);
-	if (err)
-		goto err_status;
-
-	err = device_create_file(dev, &dev_attr_usbip_sockfd);
-	if (err)
-		goto err_sockfd;
-
-	err = device_create_file(dev, &dev_attr_usbip_debug);
-	if (err)
-		goto err_debug;
-
-	return 0;
-
-err_debug:
-	device_remove_file(dev, &dev_attr_usbip_sockfd);
-err_sockfd:
-	device_remove_file(dev, &dev_attr_usbip_status);
-err_status:
-	return err;
-}
-
-static void stub_remove_files(struct device *dev)
-{
-	device_remove_file(dev, &dev_attr_usbip_status);
-	device_remove_file(dev, &dev_attr_usbip_sockfd);
-	device_remove_file(dev, &dev_attr_usbip_debug);
-}
+static struct attribute *usbip_attrs[] = {
+	&dev_attr_usbip_status.attr,
+	&dev_attr_usbip_sockfd.attr,
+	&dev_attr_usbip_debug.attr,
+	NULL,
+};
+ATTRIBUTE_GROUPS(usbip);
 
 static void stub_shutdown_connection(struct usbip_device *ud)
 {
@@ -267,6 +276,7 @@ static struct stub_device *stub_device_alloc(struct usb_device *udev)
 	sdev->ud.side		= USBIP_STUB;
 	sdev->ud.status		= SDEV_ST_AVAILABLE;
 	spin_lock_init(&sdev->ud.lock);
+	mutex_init(&sdev->ud.sysfs_lock);
 	sdev->ud.tcp_socket	= NULL;
 	sdev->ud.sockfd		= -1;
 
@@ -379,17 +389,8 @@ static int stub_probe(struct usb_device *udev)
 		goto err_port;
 	}
 
-	rc = stub_add_files(&udev->dev);
-	if (rc) {
-		dev_err(&udev->dev, "stub_add_files for %s\n", udev_busid);
-		goto err_files;
-	}
-
 	return 0;
 
-err_files:
-	usb_hub_release_port(udev->parent, udev->portnum,
-			     (struct usb_dev_state *) udev);
 err_port:
 	dev_set_drvdata(&udev->dev, NULL);
 	usb_put_dev(udev);
@@ -457,7 +458,6 @@ static void stub_disconnect(struct usb_device *udev)
 	/*
 	 * NOTE: rx/tx threads are invoked for each usb_device.
 	 */
-	stub_remove_files(&udev->dev);
 
 	/* release port */
 	rc = usb_hub_release_port(udev->parent, udev->portnum,
@@ -526,4 +526,5 @@ struct usb_device_driver stub_driver = {
 	.resume		= stub_resume,
 #endif
 	.supports_autosuspend	=	0,
+	.dev_groups	= usbip_groups,
 };

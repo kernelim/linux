@@ -14,10 +14,6 @@ config NFT_BRIDGE_REJECT
 	help
 	  Add support to reject packets.
 
-config NF_LOG_BRIDGE
-	tristate "Bridge packet logging"
-	select NF_LOG_COMMON
-
 endif # NF_TABLES_BRIDGE
 
 menuconfig BRIDGE_NF_EBTABLES

@@ -134,6 +134,10 @@ config HAVE_FAST_GUP
 config ARCH_DISCARD_MEMBLOCK
 	bool
 
+# Keep arch NUMA mapping infrastructure post-init.
+config NUMA_KEEP_MEMINFO
+	bool
+
 config MEMORY_ISOLATION
 	bool
 
@@ -147,8 +151,10 @@ config HAVE_BOOTMEM_INFO_NODE
 # eventually, we can have this option just 'select SPARSEMEM'
 config MEMORY_HOTPLUG
 	bool "Allow for memory hot-add"
+	select MEMORY_ISOLATION
 	depends on SPARSEMEM || X86_64_ACPI_NUMA
 	depends on ARCH_ENABLE_MEMORY_HOTPLUG
+	select NUMA_KEEP_MEMINFO if NUMA
 
 config MEMORY_HOTPLUG_SPARSE
 	def_bool y
@@ -172,7 +178,6 @@ config MEMORY_HOTPLUG_DEFAULT_ONLINE
 
 config MEMORY_HOTREMOVE
 	bool "Allow for memory hot remove"
-	select MEMORY_ISOLATION
 	select HAVE_BOOTMEM_INFO_NODE if (X86_64 || PPC64)
 	depends on MEMORY_HOTPLUG && ARCH_ENABLE_MEMORY_HOTREMOVE
 	depends on MIGRATION
@@ -431,10 +436,6 @@ config THP_SWAP
 
 	  For selection by architectures with reasonable THP sizes.
 
-config	TRANSPARENT_HUGE_PAGECACHE
-	def_bool y
-	depends on TRANSPARENT_HUGEPAGE
-
 #
 # UP and nommu archs use km based percpu allocator
 #
@@ -597,7 +598,7 @@ config ZSMALLOC
 
 config PGTABLE_MAPPING
 	bool "Use page table mapping to access object in zsmalloc"
-	depends on ZSMALLOC
+	depends on ZSMALLOC=y
 	help
 	  By default, zsmalloc uses a copy-based object mapping method to
 	  access allocations that span two pages. However, if a particular
@@ -685,28 +686,15 @@ config ZONE_DEVICE
 
 	  If FS_DAX is enabled, then say Y.
 
-config ARCH_HAS_HMM
-	bool
-	default y
-	depends on (X86_64 || PPC64)
-	depends on ZONE_DEVICE
-	depends on MMU && 64BIT
-	depends on MEMORY_HOTPLUG
-	depends on MEMORY_HOTREMOVE
-	depends on SPARSEMEM_VMEMMAP
-
 config DEV_PAGEMAP_OPS
 	bool
 
-config HMM
-	bool
-	select MIGRATE_VMA_HELPER
-
 config HMM_MIRROR
 	bool "HMM mirror CPU page table into a device page table"
-	depends on ARCH_HAS_HMM
+	depends on (X86_64 || PPC64)
+	depends on MMU && 64BIT
 	select MMU_NOTIFIER
-	select HMM
+	select MIGRATE_VMA_HELPER
 	help
 	  Select HMM_MIRROR if you want to mirror range of the CPU page table of a
 	  process into a device page table. Here, mirror means "keep synchronized".
@@ -724,6 +712,9 @@ config DEVICE_PRIVATE
 	  Allows creation of struct pages to represent unaddressable device
 	  memory; i.e., memory that is only accessible from the device (or
 	  group of devices). You likely also want to select HMM_MIRROR.
+
+config VMAP_PFN
+	bool
 
 config FRAME_VECTOR
 	bool
@@ -755,7 +746,7 @@ config GUP_GET_PTE_LOW_HIGH
 
 config READ_ONLY_THP_FOR_FS
 	bool "Read-only THP for filesystems (EXPERIMENTAL)"
-	depends on TRANSPARENT_HUGE_PAGECACHE && SHMEM
+	depends on TRANSPARENT_HUGEPAGE && SHMEM
 
 	help
 	  Allow khugepaged to put read-only file-backed pages in THP.

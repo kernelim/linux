@@ -277,6 +277,7 @@ define_show_state_str_function(name)
 define_show_state_str_function(desc)
 define_show_state_rh_ull_function(above)
 define_show_state_rh_ull_function(below)
+define_show_state_rh_ull_function(rejected)
 
 static ssize_t show_state_disable(struct cpuidle_state *state,
 				  struct cpuidle_state_usage *state_usage,
@@ -333,6 +334,7 @@ define_one_state_ro(time, show_state_time);
 define_one_state_rw(disable, show_state_disable, store_state_disable);
 define_one_rh_state_ro(above, show_state_above);
 define_one_rh_state_ro(below, show_state_below);
+define_one_rh_state_ro(rejected, show_state_rejected);
 define_one_state_ro(default_status, show_state_default_status);
 
 static struct attribute *cpuidle_state_default_attrs[] = {
@@ -342,6 +344,7 @@ static struct attribute *cpuidle_state_default_attrs[] = {
 	&attr_residency.attr,
 	&attr_power.attr,
 	&attr_usage.attr,
+	&attr_rejected.attr,
 	&attr_time.attr,
 	&attr_disable.attr,
 	&attr_above.attr,

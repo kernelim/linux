@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
-/**
+/*
  * dwc3-of-simple.c - OF glue layer for simple integrations
  *
- * Copyright (c) 2015 Texas Instruments Incorporated - http://www.ti.com
+ * Copyright (c) 2015 Texas Instruments Incorporated - https://www.ti.com
  *
  * Author: Felipe Balbi <balbi@ti.com>
  *
@@ -109,12 +109,9 @@ err_resetc_put:
 	return ret;
 }
 
-static int dwc3_of_simple_remove(struct platform_device *pdev)
+static void __dwc3_of_simple_teardown(struct dwc3_of_simple *simple)
 {
-	struct dwc3_of_simple	*simple = platform_get_drvdata(pdev);
-	struct device		*dev = &pdev->dev;
-
-	of_platform_depopulate(dev);
+	of_platform_depopulate(simple->dev);
 
 	clk_bulk_disable_unprepare(simple->num_clocks, simple->clks);
 	clk_bulk_put_all(simple->num_clocks, simple->clks);
@@ -125,11 +122,25 @@ static int dwc3_of_simple_remove(struct platform_device *pdev)
 
 	reset_control_put(simple->resets);
 
-	pm_runtime_disable(dev);
-	pm_runtime_put_noidle(dev);
-	pm_runtime_set_suspended(dev);
+	pm_runtime_disable(simple->dev);
+	pm_runtime_put_noidle(simple->dev);
+	pm_runtime_set_suspended(simple->dev);
+}
+
+static int dwc3_of_simple_remove(struct platform_device *pdev)
+{
+	struct dwc3_of_simple	*simple = platform_get_drvdata(pdev);
+
+	__dwc3_of_simple_teardown(simple);
 
 	return 0;
+}
+
+static void dwc3_of_simple_shutdown(struct platform_device *pdev)
+{
+	struct dwc3_of_simple	*simple = platform_get_drvdata(pdev);
+
+	__dwc3_of_simple_teardown(simple);
 }
 
 static int __maybe_unused dwc3_of_simple_runtime_suspend(struct device *dev)
@@ -182,6 +193,7 @@ static const struct of_device_id of_dwc3_simple_match[] = {
 	{ .compatible = "amlogic,meson-axg-dwc3" },
 	{ .compatible = "amlogic,meson-gxl-dwc3" },
 	{ .compatible = "allwinner,sun50i-h6-dwc3" },
+	{ .compatible = "intel,keembay-dwc3" },
 	{ /* Sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, of_dwc3_simple_match);
@@ -189,6 +201,7 @@ MODULE_DEVICE_TABLE(of, of_dwc3_simple_match);
 static struct platform_driver dwc3_of_simple_driver = {
 	.probe		= dwc3_of_simple_probe,
 	.remove		= dwc3_of_simple_remove,
+	.shutdown	= dwc3_of_simple_shutdown,
 	.driver		= {
 		.name	= "dwc3-of-simple",
 		.of_match_table = of_dwc3_simple_match,

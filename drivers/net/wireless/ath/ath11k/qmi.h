@@ -12,18 +12,22 @@
 #define ATH11K_HOST_VERSION_STRING		"WIN"
 #define ATH11K_QMI_WLANFW_TIMEOUT_MS		5000
 #define ATH11K_QMI_MAX_BDF_FILE_NAME_SIZE	64
-#define ATH11K_QMI_BDF_ADDRESS			0x4B0C0000
+#define ATH11K_QMI_CALDB_ADDRESS		0x4BA00000
 #define ATH11K_QMI_BDF_MAX_SIZE			(256 * 1024)
 #define ATH11K_QMI_CALDATA_OFFSET		(128 * 1024)
 #define ATH11K_QMI_WLANFW_MAX_BUILD_ID_LEN_V01	128
 #define ATH11K_QMI_WLFW_SERVICE_ID_V01		0x45
 #define ATH11K_QMI_WLFW_SERVICE_VERS_V01	0x01
 #define ATH11K_QMI_WLFW_SERVICE_INS_ID_V01	0x02
+#define ATH11K_QMI_WLFW_SERVICE_INS_ID_V01_QCA6390	0x01
+#define ATH11K_QMI_WLFW_SERVICE_INS_ID_V01_IPQ8074	0x02
+#define ATH11K_QMI_WLFW_SERVICE_INS_ID_V01_QCN9074	0x07
 #define ATH11K_QMI_WLANFW_MAX_TIMESTAMP_LEN_V01	32
 #define ATH11K_QMI_RESP_LEN_MAX			8192
-#define ATH11K_QMI_WLANFW_MAX_NUM_MEM_SEG_V01	32
+#define ATH11K_QMI_WLANFW_MAX_NUM_MEM_SEG_V01	52
 #define ATH11K_QMI_CALDB_SIZE			0x480000
-#define ATH11K_QMI_DEFAULT_CAL_FILE_NAME	"caldata.bin"
+#define ATH11K_QMI_BDF_EXT_STR_LENGTH		0x20
+#define ATH11K_QMI_FW_MEM_REQ_SEGMENT_CNT	3
 
 #define QMI_WLFW_REQUEST_MEM_IND_V01		0x0035
 #define QMI_WLFW_FW_MEM_READY_IND_V01		0x0037
@@ -33,6 +37,7 @@
 #define QMI_WLANFW_MAX_DATA_SIZE_V01		6144
 #define ATH11K_FIRMWARE_MODE_OFF		4
 #define ATH11K_QMI_TARGET_MEM_MODE_DEFAULT	0
+#define ATH11K_COLD_BOOT_FW_RESET_DELAY		(40 * HZ)
 
 struct ath11k_base;
 
@@ -40,6 +45,11 @@ enum ath11k_qmi_file_type {
 	ATH11K_QMI_FILE_TYPE_BDF_GOLDEN,
 	ATH11K_QMI_FILE_TYPE_CALDATA,
 	ATH11K_QMI_MAX_FILE_TYPE,
+};
+
+enum ath11k_qmi_bdf_type {
+	ATH11K_QMI_BDF_TYPE_BIN			= 0,
+	ATH11K_QMI_BDF_TYPE_ELF			= 1,
 };
 
 enum ath11k_qmi_event_type {
@@ -72,7 +82,7 @@ struct ath11k_qmi_ce_cfg {
 	int svc_to_ce_map_len;
 	const u8 *shadow_reg;
 	int shadow_reg_len;
-	u8 *shadow_reg_v2;
+	u32 *shadow_reg_v2;
 	int shadow_reg_v2_len;
 };
 
@@ -85,7 +95,7 @@ struct target_mem_chunk {
 	u32 size;
 	u32 type;
 	dma_addr_t paddr;
-	u32 vaddr;
+	u32 *vaddr;
 };
 
 struct target_info {
@@ -96,6 +106,13 @@ struct target_info {
 	u32 fw_version;
 	char fw_build_timestamp[ATH11K_QMI_WLANFW_MAX_TIMESTAMP_LEN_V01 + 1];
 	char fw_build_id[ATH11K_QMI_WLANFW_MAX_BUILD_ID_LEN_V01 + 1];
+	char bdf_ext[ATH11K_QMI_BDF_EXT_STR_LENGTH];
+};
+
+struct m3_mem_region {
+	u32 size;
+	dma_addr_t paddr;
+	void *vaddr;
 };
 
 struct ath11k_qmi {
@@ -110,8 +127,12 @@ struct ath11k_qmi {
 	struct target_mem_chunk target_mem[ATH11K_QMI_WLANFW_MAX_NUM_MEM_SEG_V01];
 	u32 mem_seg_count;
 	u32 target_mem_mode;
+	bool target_mem_delayed;
 	u8 cal_done;
 	struct target_info target;
+	struct m3_mem_region m3_mem;
+	unsigned int service_ins_id;
+	wait_queue_head_t cold_boot_waitq;
 };
 
 #define QMI_WLANFW_HOST_CAP_REQ_MSG_V01_MAX_LEN		189
@@ -122,6 +143,7 @@ struct ath11k_qmi {
 #define QMI_IPQ8074_FW_MEM_MODE				0xFF
 #define HOST_DDR_REGION_TYPE				0x1
 #define BDF_MEM_REGION_TYPE				0x2
+#define M3_DUMP_REGION_TYPE				0x3
 #define CALDB_MEM_REGION_TYPE				0x4
 
 struct qmi_wlanfw_host_cap_req_msg_v01 {
@@ -197,8 +219,8 @@ struct qmi_wlanfw_ind_register_resp_msg_v01 {
 	u64 fw_status;
 };
 
-#define QMI_WLANFW_REQUEST_MEM_IND_MSG_V01_MAX_LEN	1124
-#define QMI_WLANFW_RESPOND_MEM_REQ_MSG_V01_MAX_LEN	548
+#define QMI_WLANFW_REQUEST_MEM_IND_MSG_V01_MAX_LEN	1824
+#define QMI_WLANFW_RESPOND_MEM_REQ_MSG_V01_MAX_LEN	888
 #define QMI_WLANFW_RESPOND_MEM_RESP_MSG_V01_MAX_LEN	7
 #define QMI_WLANFW_REQUEST_MEM_IND_V01			0x0035
 #define QMI_WLANFW_RESPOND_MEM_REQ_V01			0x0036
@@ -251,6 +273,14 @@ struct qmi_wlanfw_respond_mem_resp_msg_v01 {
 };
 
 struct qmi_wlanfw_fw_mem_ready_ind_msg_v01 {
+	char placeholder;
+};
+
+struct qmi_wlanfw_fw_ready_ind_msg_v01 {
+	char placeholder;
+};
+
+struct qmi_wlanfw_fw_cold_cal_done_ind_msg_v01 {
 	char placeholder;
 };
 

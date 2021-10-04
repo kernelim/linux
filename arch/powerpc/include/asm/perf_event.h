@@ -16,6 +16,8 @@
 
 #ifdef CONFIG_PPC_PERF_CTRS
 #include <asm/perf_event_server.h>
+#else
+static inline unsigned long get_pmcs_ext_regs(int idx) { return 0; }
 #endif
 
 #ifdef CONFIG_FSL_EMB_PERF_EVENT
@@ -42,6 +44,7 @@
 
 /* To support perf_regs sier update */
 extern bool is_sier_available(void);
+extern unsigned long get_pmcs_ext_regs(int idx);
 /* To define perf extended regs mask value */
 extern u64 PERF_REG_EXTENDED_MASK;
 #define PERF_REG_EXTENDED_MASK	PERF_REG_EXTENDED_MASK

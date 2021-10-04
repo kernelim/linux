@@ -1057,7 +1057,7 @@ error:
 	return ret;
 }
 
-static int nx842_remove(struct vio_dev *viodev)
+static void nx842_remove(struct vio_dev *viodev)
 {
 	struct nx842_devdata *old_devdata;
 	unsigned long flags;
@@ -1078,8 +1078,6 @@ static int nx842_remove(struct vio_dev *viodev)
 	if (old_devdata)
 		kfree(old_devdata->counters);
 	kfree(old_devdata);
-
-	return 0;
 }
 
 static const struct vio_device_id nx842_vio_driver_ids[] = {

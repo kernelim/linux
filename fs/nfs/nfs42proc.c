@@ -306,9 +306,10 @@ static ssize_t _nfs42_proc_copy(struct file *src,
 	truncate_pagecache_range(dst_inode, pos_dst,
 				 pos_dst + res->write_res.count);
 	spin_lock(&dst_inode->i_lock);
-	NFS_I(dst_inode)->cache_validity |= (NFS_INO_REVAL_PAGECACHE |
-			NFS_INO_REVAL_FORCED | NFS_INO_INVALID_SIZE |
-			NFS_INO_INVALID_ATTR | NFS_INO_INVALID_DATA);
+	nfs_set_cache_invalid(
+		dst_inode, NFS_INO_REVAL_PAGECACHE | NFS_INO_REVAL_FORCED |
+				   NFS_INO_INVALID_SIZE | NFS_INO_INVALID_ATTR |
+				   NFS_INO_INVALID_DATA);
 	spin_unlock(&dst_inode->i_lock);
 	status = res->write_res.count;
 out:
@@ -515,7 +516,10 @@ static loff_t _nfs42_proc_llseek(struct file *filep,
 	if (status)
 		return status;
 
-	return vfs_setpos(filep, res.sr_offset, inode->i_sb->s_maxbytes);
+	if (whence == SEEK_DATA && res.sr_eof)
+		return -NFS4ERR_NXIO;
+	else
+		return vfs_setpos(filep, res.sr_offset, inode->i_sb->s_maxbytes);
 }
 
 loff_t nfs42_proc_llseek(struct file *filep, loff_t offset, int whence)

@@ -34,6 +34,9 @@
 #include "avc_ss.h"
 #include "classmap.h"
 
+#define CREATE_TRACE_POINTS
+#include <trace/events/avc.h>
+
 #define AVC_CACHE_SLOTS			512
 #define AVC_DEF_CACHE_THRESHOLD		512
 #define AVC_CACHE_RECLAIM		16
@@ -118,11 +121,11 @@ void avc_set_cache_threshold(struct selinux_avc *avc,
 	avc->avc_cache_threshold = cache_threshold;
 }
 
-static struct avc_callback_node *avc_callbacks;
-static struct kmem_cache *avc_node_cachep;
-static struct kmem_cache *avc_xperms_data_cachep;
-static struct kmem_cache *avc_xperms_decision_cachep;
-static struct kmem_cache *avc_xperms_cachep;
+static struct avc_callback_node *avc_callbacks __ro_after_init;
+static struct kmem_cache *avc_node_cachep __ro_after_init;
+static struct kmem_cache *avc_xperms_data_cachep __ro_after_init;
+static struct kmem_cache *avc_xperms_decision_cachep __ro_after_init;
+static struct kmem_cache *avc_xperms_cachep __ro_after_init;
 
 static inline int avc_hash(u32 ssid, u32 tsid, u16 tclass)
 {
@@ -705,32 +708,36 @@ static void avc_audit_post_callback(struct audit_buffer *ab, void *a)
 {
 	struct common_audit_data *ad = a;
 	struct selinux_audit_data *sad = ad->selinux_audit_data;
-	char *scontext;
+	char *scontext = NULL;
+	char *tcontext = NULL;
+	const char *tclass = NULL;
 	u32 scontext_len;
+	u32 tcontext_len;
 	int rc;
 
 	rc = security_sid_to_context(sad->state, sad->ssid, &scontext,
 				     &scontext_len);
 	if (rc)
 		audit_log_format(ab, " ssid=%d", sad->ssid);
-	else {
+	else
 		audit_log_format(ab, " scontext=%s", scontext);
-		kfree(scontext);
-	}
 
-	rc = security_sid_to_context(sad->state, sad->tsid, &scontext,
-				     &scontext_len);
+	rc = security_sid_to_context(sad->state, sad->tsid, &tcontext,
+				     &tcontext_len);
 	if (rc)
 		audit_log_format(ab, " tsid=%d", sad->tsid);
-	else {
-		audit_log_format(ab, " tcontext=%s", scontext);
-		kfree(scontext);
-	}
+	else
+		audit_log_format(ab, " tcontext=%s", tcontext);
 
-	audit_log_format(ab, " tclass=%s", secclass_map[sad->tclass-1].name);
+	tclass = secclass_map[sad->tclass-1].name;
+	audit_log_format(ab, " tclass=%s", tclass);
 
 	if (sad->denied)
 		audit_log_format(ab, " permissive=%u", sad->result ? 0 : 1);
+
+	trace_selinux_audited(sad, scontext, tcontext, tclass);
+	kfree(tcontext);
+	kfree(scontext);
 
 	/* in case of invalid context report also the actual context string */
 	rc = security_sid_to_context_inval(sad->state, sad->ssid, &scontext,

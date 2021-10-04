@@ -29,6 +29,8 @@
 #include <net/flow.h>
 #include <net/inet_sock.h>
 #include <net/ip_fib.h>
+#include <net/arp.h>
+#include <net/ndisc.h>
 #include <linux/in_route.h>
 #include <linux/rtnetlink.h>
 #include <linux/rcupdate.h>
@@ -356,6 +358,30 @@ static inline int ip4_dst_hoplimit(const struct dst_entry *dst)
 	if (hoplimit == 0)
 		hoplimit = net->ipv4.sysctl_ip_default_ttl;
 	return hoplimit;
+}
+
+static inline struct neighbour *ip_neigh_gw4(struct net_device *dev,
+					     __be32 daddr)
+{
+	struct neighbour *neigh;
+
+	neigh = __ipv4_neigh_lookup_noref(dev, daddr);
+	if (unlikely(!neigh))
+		neigh = __neigh_create(&arp_tbl, &daddr, dev, false);
+
+	return neigh;
+}
+
+static inline struct neighbour *ip_neigh_for_gw(struct rtable *rt,
+						struct sk_buff *skb)
+{
+	struct net_device *dev = rt->dst.dev;
+	struct neighbour *neigh;
+	u32 nexthop;
+
+	nexthop = (__force u32) rt_nexthop(rt, ip_hdr(skb)->daddr);
+	neigh = ip_neigh_gw4(dev, nexthop);
+	return neigh;
 }
 
 #endif	/* _ROUTE_H */

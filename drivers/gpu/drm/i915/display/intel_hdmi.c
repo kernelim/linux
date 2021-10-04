@@ -518,10 +518,10 @@ static u32 vlv_infoframes_enabled(struct intel_encoder *encoder,
 		      VIDEO_DIP_ENABLE_SPD | VIDEO_DIP_ENABLE_GCP);
 }
 
-static void hsw_write_infoframe(struct intel_encoder *encoder,
-				const struct intel_crtc_state *crtc_state,
-				unsigned int type,
-				const void *frame, ssize_t len)
+void hsw_write_infoframe(struct intel_encoder *encoder,
+			 const struct intel_crtc_state *crtc_state,
+			 unsigned int type,
+			 const void *frame, ssize_t len)
 {
 	const u32 *data = frame;
 	struct drm_i915_private *dev_priv = to_i915(encoder->base.dev);
@@ -555,10 +555,9 @@ static void hsw_write_infoframe(struct intel_encoder *encoder,
 	intel_de_posting_read(dev_priv, ctl_reg);
 }
 
-static void hsw_read_infoframe(struct intel_encoder *encoder,
-			       const struct intel_crtc_state *crtc_state,
-			       unsigned int type,
-			       void *frame, ssize_t len)
+void hsw_read_infoframe(struct intel_encoder *encoder,
+			const struct intel_crtc_state *crtc_state,
+			unsigned int type, void *frame, ssize_t len)
 {
 	struct drm_i915_private *dev_priv = to_i915(encoder->base.dev);
 	enum transcoder cpu_transcoder = crtc_state->cpu_transcoder;
@@ -1477,7 +1476,8 @@ int intel_hdmi_hdcp_read_v_prime_part(struct intel_digital_port *dig_port,
 	return ret;
 }
 
-static int kbl_repositioning_enc_en_signal(struct intel_connector *connector)
+static int kbl_repositioning_enc_en_signal(struct intel_connector *connector,
+					   enum transcoder cpu_transcoder)
 {
 	struct drm_i915_private *dev_priv = to_i915(connector->base.dev);
 	struct intel_digital_port *dig_port = intel_attached_dig_port(connector);
@@ -1494,13 +1494,16 @@ static int kbl_repositioning_enc_en_signal(struct intel_connector *connector)
 		usleep_range(25, 50);
 	}
 
-	ret = intel_ddi_toggle_hdcp_signalling(&dig_port->base, false);
+	ret = intel_ddi_toggle_hdcp_bits(&dig_port->base, cpu_transcoder,
+					 false, TRANS_DDI_HDCP_SIGNALLING);
 	if (ret) {
 		drm_err(&dev_priv->drm,
 			"Disable HDCP signalling failed (%d)\n", ret);
 		return ret;
 	}
-	ret = intel_ddi_toggle_hdcp_signalling(&dig_port->base, true);
+
+	ret = intel_ddi_toggle_hdcp_bits(&dig_port->base, cpu_transcoder,
+					 true, TRANS_DDI_HDCP_SIGNALLING);
 	if (ret) {
 		drm_err(&dev_priv->drm,
 			"Enable HDCP signalling failed (%d)\n", ret);
@@ -1512,6 +1515,7 @@ static int kbl_repositioning_enc_en_signal(struct intel_connector *connector)
 
 static
 int intel_hdmi_hdcp_toggle_signalling(struct intel_digital_port *dig_port,
+				      enum transcoder cpu_transcoder,
 				      bool enable)
 {
 	struct intel_hdmi *hdmi = &dig_port->hdmi;
@@ -1522,7 +1526,9 @@ int intel_hdmi_hdcp_toggle_signalling(struct intel_digital_port *dig_port,
 	if (!enable)
 		usleep_range(6, 60); /* Bspec says >= 6us */
 
-	ret = intel_ddi_toggle_hdcp_signalling(&dig_port->base, enable);
+	ret = intel_ddi_toggle_hdcp_bits(&dig_port->base,
+					 cpu_transcoder, enable,
+					 TRANS_DDI_HDCP_SIGNALLING);
 	if (ret) {
 		drm_err(&dev_priv->drm, "%s HDCP signalling failed (%d)\n",
 			enable ? "Enable" : "Disable", ret);
@@ -1534,17 +1540,17 @@ int intel_hdmi_hdcp_toggle_signalling(struct intel_digital_port *dig_port,
 	 * opportunity and enc_en signalling in KABYLAKE.
 	 */
 	if (IS_KABYLAKE(dev_priv) && enable)
-		return kbl_repositioning_enc_en_signal(connector);
+		return kbl_repositioning_enc_en_signal(connector,
+						       cpu_transcoder);
 
 	return 0;
 }
 
 static
-bool intel_hdmi_hdcp_check_link_once(struct intel_digital_port *dig_port)
+bool intel_hdmi_hdcp_check_link_once(struct intel_digital_port *dig_port,
+				     struct intel_connector *connector)
 {
 	struct drm_i915_private *i915 = to_i915(dig_port->base.base.dev);
-	struct intel_connector *connector =
-		dig_port->hdmi.attached_connector;
 	enum port port = dig_port->base.port;
 	enum transcoder cpu_transcoder = connector->hdcp.cpu_transcoder;
 	int ret;
@@ -1572,13 +1578,14 @@ bool intel_hdmi_hdcp_check_link_once(struct intel_digital_port *dig_port)
 }
 
 static
-bool intel_hdmi_hdcp_check_link(struct intel_digital_port *dig_port)
+bool intel_hdmi_hdcp_check_link(struct intel_digital_port *dig_port,
+				struct intel_connector *connector)
 {
 	struct drm_i915_private *i915 = to_i915(dig_port->base.base.dev);
 	int retry;
 
 	for (retry = 0; retry < 3; retry++)
-		if (intel_hdmi_hdcp_check_link_once(dig_port))
+		if (intel_hdmi_hdcp_check_link_once(dig_port, connector))
 			return true;
 
 	drm_err(&i915->drm, "Link check failed\n");
@@ -1726,7 +1733,8 @@ int intel_hdmi_hdcp2_read_msg(struct intel_digital_port *dig_port,
 }
 
 static
-int intel_hdmi_hdcp2_check_link(struct intel_digital_port *dig_port)
+int intel_hdmi_hdcp2_check_link(struct intel_digital_port *dig_port,
+				struct intel_connector *connector)
 {
 	u8 rx_status[HDCP_2_2_HDMI_RXSTATUS_LEN];
 	int ret;
@@ -2210,7 +2218,11 @@ hdmi_port_clock_valid(struct intel_hdmi *hdmi,
 					  has_hdmi_sink))
 		return MODE_CLOCK_HIGH;
 
-	/* BXT DPLL can't generate 223-240 MHz */
+	/* GLK DPLL can't generate 446-480 MHz */
+	if (IS_GEMINILAKE(dev_priv) && clock > 446666 && clock < 480000)
+		return MODE_CLOCK_RANGE;
+
+	/* BXT/GLK DPLL can't generate 223-240 MHz */
 	if (IS_GEN9_LP(dev_priv) && clock > 223333 && clock < 240000)
 		return MODE_CLOCK_RANGE;
 
@@ -2268,38 +2280,21 @@ intel_hdmi_mode_valid(struct drm_connector *connector,
 	if (status != MODE_OK)
 		return status;
 
-	return intel_mode_valid_max_plane_size(dev_priv, mode);
+	return intel_mode_valid_max_plane_size(dev_priv, mode, false);
 }
 
-static bool hdmi_deep_color_possible(const struct intel_crtc_state *crtc_state,
-				     int bpc)
+bool intel_hdmi_deep_color_possible(const struct intel_crtc_state *crtc_state,
+				    int bpc, bool has_hdmi_sink, bool ycbcr420_output)
 {
-	struct drm_i915_private *dev_priv =
-		to_i915(crtc_state->uapi.crtc->dev);
 	struct drm_atomic_state *state = crtc_state->uapi.state;
 	struct drm_connector_state *connector_state;
 	struct drm_connector *connector;
-	const struct drm_display_mode *adjusted_mode =
-		&crtc_state->hw.adjusted_mode;
 	int i;
-
-	if (HAS_GMCH(dev_priv))
-		return false;
-
-	if (bpc == 10 && INTEL_GEN(dev_priv) < 11)
-		return false;
 
 	if (crtc_state->pipe_bpp < bpc * 3)
 		return false;
 
-	if (!crtc_state->has_hdmi_sink)
-		return false;
-
-	/*
-	 * HDMI deep color affects the clocks, so it's only possible
-	 * when not cloning with other encoder types.
-	 */
-	if (crtc_state->output_types != 1 << INTEL_OUTPUT_HDMI)
+	if (!has_hdmi_sink)
 		return false;
 
 	for_each_new_connector_in_state(state, connector, connector_state, i) {
@@ -2308,7 +2303,7 @@ static bool hdmi_deep_color_possible(const struct intel_crtc_state *crtc_state,
 		if (connector_state->crtc != crtc_state->uapi.crtc)
 			continue;
 
-		if (crtc_state->output_format == INTEL_OUTPUT_FORMAT_YCBCR420) {
+		if (ycbcr420_output) {
 			const struct drm_hdmi_info *hdmi = &info->hdmi;
 
 			if (bpc == 12 && !(hdmi->y420_dc_modes &
@@ -2327,6 +2322,30 @@ static bool hdmi_deep_color_possible(const struct intel_crtc_state *crtc_state,
 		}
 	}
 
+	return true;
+}
+
+static bool hdmi_deep_color_possible(const struct intel_crtc_state *crtc_state,
+				     int bpc)
+{
+	struct drm_i915_private *dev_priv =
+		to_i915(crtc_state->uapi.crtc->dev);
+	const struct drm_display_mode *adjusted_mode =
+		&crtc_state->hw.adjusted_mode;
+
+	if (HAS_GMCH(dev_priv))
+		return false;
+
+	if (bpc == 10 && INTEL_GEN(dev_priv) < 11)
+		return false;
+
+	/*
+	 * HDMI deep color affects the clocks, so it's only possible
+	 * when not cloning with other encoder types.
+	 */
+	if (crtc_state->output_types != BIT(INTEL_OUTPUT_HDMI))
+		return false;
+
 	/* Display Wa_1405510057:icl,ehl */
 	if (crtc_state->output_format == INTEL_OUTPUT_FORMAT_YCBCR420 &&
 	    bpc == 10 && IS_GEN(dev_priv, 11) &&
@@ -2334,7 +2353,10 @@ static bool hdmi_deep_color_possible(const struct intel_crtc_state *crtc_state,
 	     adjusted_mode->crtc_hblank_start) % 8 == 2)
 		return false;
 
-	return true;
+	return intel_hdmi_deep_color_possible(crtc_state, bpc,
+					      crtc_state->has_hdmi_sink,
+					      crtc_state->output_format ==
+					      INTEL_OUTPUT_FORMAT_YCBCR420);
 }
 
 static int
@@ -2459,6 +2481,23 @@ bool intel_hdmi_limited_color_range(const struct intel_crtc_state *crtc_state,
 	}
 }
 
+static bool intel_hdmi_has_audio(struct intel_encoder *encoder,
+				 const struct intel_crtc_state *crtc_state,
+				 const struct drm_connector_state *conn_state)
+{
+	struct intel_hdmi *intel_hdmi = enc_to_intel_hdmi(encoder);
+	const struct intel_digital_connector_state *intel_conn_state =
+		to_intel_digital_connector_state(conn_state);
+
+	if (!crtc_state->has_hdmi_sink)
+		return false;
+
+	if (intel_conn_state->force_audio == HDMI_AUDIO_AUTO)
+		return intel_hdmi->has_audio;
+	else
+		return intel_conn_state->force_audio == HDMI_AUDIO_ON;
+}
+
 int intel_hdmi_compute_config(struct intel_encoder *encoder,
 			      struct intel_crtc_state *pipe_config,
 			      struct drm_connector_state *conn_state)
@@ -2468,8 +2507,6 @@ int intel_hdmi_compute_config(struct intel_encoder *encoder,
 	struct drm_display_mode *adjusted_mode = &pipe_config->hw.adjusted_mode;
 	struct drm_connector *connector = conn_state->connector;
 	struct drm_scdc *scdc = &connector->display_info.hdmi.scdc;
-	struct intel_digital_connector_state *intel_conn_state =
-		to_intel_digital_connector_state(conn_state);
 	int ret;
 
 	if (adjusted_mode->flags & DRM_MODE_FLAG_DBLSCAN)
@@ -2495,13 +2532,8 @@ int intel_hdmi_compute_config(struct intel_encoder *encoder,
 	if (HAS_PCH_SPLIT(dev_priv) && !HAS_DDI(dev_priv))
 		pipe_config->has_pch_encoder = true;
 
-	if (pipe_config->has_hdmi_sink) {
-		if (intel_conn_state->force_audio == HDMI_AUDIO_AUTO)
-			pipe_config->has_audio = intel_hdmi->has_audio;
-		else
-			pipe_config->has_audio =
-				intel_conn_state->force_audio == HDMI_AUDIO_ON;
-	}
+	pipe_config->has_audio =
+		intel_hdmi_has_audio(encoder, pipe_config, conn_state);
 
 	ret = intel_hdmi_compute_clock(encoder, pipe_config);
 	if (ret)
@@ -2667,6 +2699,9 @@ intel_hdmi_detect(struct drm_connector *connector, bool force)
 	drm_dbg_kms(&dev_priv->drm, "[CONNECTOR:%d:%s]\n",
 		    connector->base.id, connector->name);
 
+	if (!INTEL_DISPLAY_ENABLED(dev_priv))
+		return connector_status_disconnected;
+
 	wakeref = intel_display_power_get(dev_priv, POWER_DOMAIN_GMBUS);
 
 	if (INTEL_GEN(dev_priv) >= 11 &&
@@ -2746,8 +2781,9 @@ static void vlv_hdmi_pre_enable(struct intel_atomic_state *state,
 	vlv_phy_pre_encoder_enable(encoder, pipe_config);
 
 	/* HDMI 1.0V-2dB */
-	vlv_set_phy_signal_level(encoder, 0x2b245f5f, 0x00002000, 0x5578b83a,
-				 0x2b247878);
+	vlv_set_phy_signal_level(encoder, pipe_config,
+				 0x2b245f5f, 0x00002000,
+				 0x5578b83a, 0x2b247878);
 
 	dig_port->set_infoframes(encoder,
 			      pipe_config->has_infoframe,
@@ -2824,7 +2860,7 @@ static void chv_hdmi_pre_enable(struct intel_atomic_state *state,
 
 	/* FIXME: Program the support xxx V-dB */
 	/* Use 800mV-0dB */
-	chv_set_phy_signal_level(encoder, 128, 102, false);
+	chv_set_phy_signal_level(encoder, pipe_config, 128, 102, false);
 
 	dig_port->set_infoframes(encoder,
 			      pipe_config->has_infoframe,
@@ -2920,21 +2956,12 @@ static void
 intel_hdmi_add_properties(struct intel_hdmi *intel_hdmi, struct drm_connector *connector)
 {
 	struct drm_i915_private *dev_priv = to_i915(connector->dev);
-	struct intel_digital_port *dig_port =
-				hdmi_to_dig_port(intel_hdmi);
 
 	intel_attach_force_audio_property(connector);
 	intel_attach_broadcast_rgb_property(connector);
 	intel_attach_aspect_ratio_property(connector);
 
-	/*
-	 * Attach Colorspace property for Non LSPCON based device
-	 * ToDo: This needs to be extended for LSPCON implementation
-	 * as well. Will be implemented separately.
-	 */
-	if (!dig_port->lspcon.active)
-		intel_attach_colorspace_property(connector);
-
+	intel_attach_hdmi_colorspace_property(connector);
 	drm_connector_attach_content_type_property(connector);
 
 	if (INTEL_GEN(dev_priv) >= 10 || IS_GEMINILAKE(dev_priv))
@@ -3110,6 +3137,45 @@ static u8 rkl_port_to_ddc_pin(struct drm_i915_private *dev_priv, enum port port)
 	return GMBUS_PIN_1_BXT + phy;
 }
 
+static u8 gen9bc_tgp_port_to_ddc_pin(struct drm_i915_private *i915, enum port port)
+{
+	enum phy phy = intel_port_to_phy(i915, port);
+
+	drm_WARN_ON(&i915->drm, port == PORT_A);
+
+	/*
+	 * Pin mapping for GEN9 BC depends on which PCH is present.  With TGP,
+	 * final two outputs use type-c pins, even though they're actually
+	 * combo outputs.  With CMP, the traditional DDI A-D pins are used for
+	 * all outputs.
+	 */
+	if (INTEL_PCH_TYPE(i915) >= PCH_TGP && phy >= PHY_C)
+		return GMBUS_PIN_9_TC1_ICP + phy - PHY_C;
+
+	return GMBUS_PIN_1_BXT + phy;
+}
+
+static u8 dg1_port_to_ddc_pin(struct drm_i915_private *dev_priv, enum port port)
+{
+	return intel_port_to_phy(dev_priv, port) + 1;
+}
+
+static u8 adls_port_to_ddc_pin(struct drm_i915_private *dev_priv, enum port port)
+{
+	enum phy phy = intel_port_to_phy(dev_priv, port);
+
+	WARN_ON(port == PORT_B || port == PORT_C);
+
+	/*
+	 * Pin mapping for ADL-S requires TC pins for all combo phy outputs
+	 * except first combo output.
+	 */
+	if (phy == PHY_A)
+		return GMBUS_PIN_1_BXT;
+
+	return GMBUS_PIN_9_TC1_ICP + phy - PHY_B;
+}
+
 static u8 g4x_port_to_ddc_pin(struct drm_i915_private *dev_priv,
 			      enum port port)
 {
@@ -3147,8 +3213,14 @@ static u8 intel_hdmi_ddc_pin(struct intel_encoder *encoder)
 		return ddc_pin;
 	}
 
-	if (IS_ROCKETLAKE(dev_priv))
+	if (HAS_PCH_ADP(dev_priv))
+		ddc_pin = adls_port_to_ddc_pin(dev_priv, port);
+	else if (INTEL_PCH_TYPE(dev_priv) >= PCH_DG1)
+		ddc_pin = dg1_port_to_ddc_pin(dev_priv, port);
+	else if (IS_ROCKETLAKE(dev_priv))
 		ddc_pin = rkl_port_to_ddc_pin(dev_priv, port);
+	else if (IS_GEN9_BC(dev_priv) && HAS_PCH_TGP(dev_priv))
+		ddc_pin = gen9bc_tgp_port_to_ddc_pin(dev_priv, port);
 	else if (HAS_PCH_MCC(dev_priv))
 		ddc_pin = mcc_port_to_ddc_pin(dev_priv, port);
 	else if (INTEL_PCH_TYPE(dev_priv) >= PCH_ICP)
@@ -3185,7 +3257,7 @@ void intel_infoframe_init(struct intel_digital_port *dig_port)
 		dig_port->set_infoframes = g4x_set_infoframes;
 		dig_port->infoframes_enabled = g4x_infoframes_enabled;
 	} else if (HAS_DDI(dev_priv)) {
-		if (dig_port->lspcon.active) {
+		if (intel_bios_is_lspcon_present(dev_priv, dig_port->base.port)) {
 			dig_port->write_infoframe = lspcon_write_infoframe;
 			dig_port->read_infoframe = lspcon_read_infoframe;
 			dig_port->set_infoframes = lspcon_set_infoframes;
@@ -3250,7 +3322,6 @@ void intel_hdmi_init_connector(struct intel_digital_port *dig_port,
 	if (INTEL_GEN(dev_priv) >= 10 || IS_GEMINILAKE(dev_priv))
 		connector->ycbcr_420_allowed = true;
 
-	intel_encoder->hpd_pin = intel_hpd_pin_default(dev_priv, port);
 	intel_connector->polled = DRM_CONNECTOR_POLL_HPD;
 
 	if (HAS_DDI(dev_priv))
@@ -3264,7 +3335,7 @@ void intel_hdmi_init_connector(struct intel_digital_port *dig_port,
 	intel_hdmi->attached_connector = intel_connector;
 
 	if (is_hdcp_supported(dev_priv, port)) {
-		int ret = intel_hdcp_init(intel_connector,
+		int ret = intel_hdcp_init(intel_connector, dig_port,
 					  &intel_hdmi_hdcp_shim);
 		if (ret)
 			drm_dbg_kms(&dev_priv->drm,
@@ -3335,6 +3406,8 @@ void intel_hdmi_init(struct drm_i915_private *dev_priv,
 
 	intel_encoder = &dig_port->base;
 
+	mutex_init(&dig_port->hdcp_mutex);
+
 	drm_encoder_init(&dev_priv->drm, &intel_encoder->base,
 			 &intel_hdmi_enc_funcs, DRM_MODE_ENCODER_TMDS,
 			 "HDMI %c", port_name(port));
@@ -3382,6 +3455,7 @@ void intel_hdmi_init(struct drm_i915_private *dev_priv,
 		intel_encoder->pipe_mask = ~0;
 	}
 	intel_encoder->cloneable = 1 << INTEL_OUTPUT_ANALOG;
+	intel_encoder->hpd_pin = intel_hpd_pin_default(dev_priv, port);
 	/*
 	 * BSpec is unclear about HDMI+HDMI cloning on g4x, but it seems
 	 * to work on real hardware. And since g4x can send infoframes to
@@ -3398,4 +3472,237 @@ void intel_hdmi_init(struct drm_i915_private *dev_priv,
 
 	dig_port->aux_ch = intel_bios_port_aux_ch(dev_priv, port);
 	intel_hdmi_init_connector(dig_port, intel_connector);
+}
+
+/*
+ * intel_hdmi_dsc_get_slice_height - get the dsc slice_height
+ * @vactive: Vactive of a display mode
+ *
+ * @return: appropriate dsc slice height for a given mode.
+ */
+int intel_hdmi_dsc_get_slice_height(int vactive)
+{
+	int slice_height;
+
+	/*
+	 * Slice Height determination : HDMI2.1 Section 7.7.5.2
+	 * Select smallest slice height >=96, that results in a valid PPS and
+	 * requires minimum padding lines required for final slice.
+	 *
+	 * Assumption : Vactive is even.
+	 */
+	for (slice_height = 96; slice_height <= vactive; slice_height += 2)
+		if (vactive % slice_height == 0)
+			return slice_height;
+
+	return 0;
+}
+
+/*
+ * intel_hdmi_dsc_get_num_slices - get no. of dsc slices based on dsc encoder
+ * and dsc decoder capabilities
+ *
+ * @crtc_state: intel crtc_state
+ * @src_max_slices: maximum slices supported by the DSC encoder
+ * @src_max_slice_width: maximum slice width supported by DSC encoder
+ * @hdmi_max_slices: maximum slices supported by sink DSC decoder
+ * @hdmi_throughput: maximum clock per slice (MHz) supported by HDMI sink
+ *
+ * @return: num of dsc slices that can be supported by the dsc encoder
+ * and decoder.
+ */
+int
+intel_hdmi_dsc_get_num_slices(const struct intel_crtc_state *crtc_state,
+			      int src_max_slices, int src_max_slice_width,
+			      int hdmi_max_slices, int hdmi_throughput)
+{
+/* Pixel rates in KPixels/sec */
+#define HDMI_DSC_PEAK_PIXEL_RATE		2720000
+/*
+ * Rates at which the source and sink are required to process pixels in each
+ * slice, can be two levels: either atleast 340000KHz or atleast 40000KHz.
+ */
+#define HDMI_DSC_MAX_ENC_THROUGHPUT_0		340000
+#define HDMI_DSC_MAX_ENC_THROUGHPUT_1		400000
+
+/* Spec limits the slice width to 2720 pixels */
+#define MAX_HDMI_SLICE_WIDTH			2720
+	int kslice_adjust;
+	int adjusted_clk_khz;
+	int min_slices;
+	int target_slices;
+	int max_throughput; /* max clock freq. in khz per slice */
+	int max_slice_width;
+	int slice_width;
+	int pixel_clock = crtc_state->hw.adjusted_mode.crtc_clock;
+
+	if (!hdmi_throughput)
+		return 0;
+
+	/*
+	 * Slice Width determination : HDMI2.1 Section 7.7.5.1
+	 * kslice_adjust factor for 4:2:0, and 4:2:2 formats is 0.5, where as
+	 * for 4:4:4 is 1.0. Multiplying these factors by 10 and later
+	 * dividing adjusted clock value by 10.
+	 */
+	if (crtc_state->output_format == INTEL_OUTPUT_FORMAT_YCBCR444 ||
+	    crtc_state->output_format == INTEL_OUTPUT_FORMAT_RGB)
+		kslice_adjust = 10;
+	else
+		kslice_adjust = 5;
+
+	/*
+	 * As per spec, the rate at which the source and the sink process
+	 * the pixels per slice are at two levels: atleast 340Mhz or 400Mhz.
+	 * This depends upon the pixel clock rate and output formats
+	 * (kslice adjust).
+	 * If pixel clock * kslice adjust >= 2720MHz slices can be processed
+	 * at max 340MHz, otherwise they can be processed at max 400MHz.
+	 */
+
+	adjusted_clk_khz = DIV_ROUND_UP(kslice_adjust * pixel_clock, 10);
+
+	if (adjusted_clk_khz <= HDMI_DSC_PEAK_PIXEL_RATE)
+		max_throughput = HDMI_DSC_MAX_ENC_THROUGHPUT_0;
+	else
+		max_throughput = HDMI_DSC_MAX_ENC_THROUGHPUT_1;
+
+	/*
+	 * Taking into account the sink's capability for maximum
+	 * clock per slice (in MHz) as read from HF-VSDB.
+	 */
+	max_throughput = min(max_throughput, hdmi_throughput * 1000);
+
+	min_slices = DIV_ROUND_UP(adjusted_clk_khz, max_throughput);
+	max_slice_width = min(MAX_HDMI_SLICE_WIDTH, src_max_slice_width);
+
+	/*
+	 * Keep on increasing the num of slices/line, starting from min_slices
+	 * per line till we get such a number, for which the slice_width is
+	 * just less than max_slice_width. The slices/line selected should be
+	 * less than or equal to the max horizontal slices that the combination
+	 * of PCON encoder and HDMI decoder can support.
+	 */
+	slice_width = max_slice_width;
+
+	do {
+		if (min_slices <= 1 && src_max_slices >= 1 && hdmi_max_slices >= 1)
+			target_slices = 1;
+		else if (min_slices <= 2 && src_max_slices >= 2 && hdmi_max_slices >= 2)
+			target_slices = 2;
+		else if (min_slices <= 4 && src_max_slices >= 4 && hdmi_max_slices >= 4)
+			target_slices = 4;
+		else if (min_slices <= 8 && src_max_slices >= 8 && hdmi_max_slices >= 8)
+			target_slices = 8;
+		else if (min_slices <= 12 && src_max_slices >= 12 && hdmi_max_slices >= 12)
+			target_slices = 12;
+		else if (min_slices <= 16 && src_max_slices >= 16 && hdmi_max_slices >= 16)
+			target_slices = 16;
+		else
+			return 0;
+
+		slice_width = DIV_ROUND_UP(crtc_state->hw.adjusted_mode.hdisplay, target_slices);
+		if (slice_width >= max_slice_width)
+			min_slices = target_slices + 1;
+	} while (slice_width >= max_slice_width);
+
+	return target_slices;
+}
+
+/*
+ * intel_hdmi_dsc_get_bpp - get the appropriate compressed bits_per_pixel based on
+ * source and sink capabilities.
+ *
+ * @src_fraction_bpp: fractional bpp supported by the source
+ * @slice_width: dsc slice width supported by the source and sink
+ * @num_slices: num of slices supported by the source and sink
+ * @output_format: video output format
+ * @hdmi_all_bpp: sink supports decoding of 1/16th bpp setting
+ * @hdmi_max_chunk_bytes: max bytes in a line of chunks supported by sink
+ *
+ * @return: compressed bits_per_pixel in step of 1/16 of bits_per_pixel
+ */
+int
+intel_hdmi_dsc_get_bpp(int src_fractional_bpp, int slice_width, int num_slices,
+		       int output_format, bool hdmi_all_bpp,
+		       int hdmi_max_chunk_bytes)
+{
+	int max_dsc_bpp, min_dsc_bpp;
+	int target_bytes;
+	bool bpp_found = false;
+	int bpp_decrement_x16;
+	int bpp_target;
+	int bpp_target_x16;
+
+	/*
+	 * Get min bpp and max bpp as per Table 7.23, in HDMI2.1 spec
+	 * Start with the max bpp and keep on decrementing with
+	 * fractional bpp, if supported by PCON DSC encoder
+	 *
+	 * for each bpp we check if no of bytes can be supported by HDMI sink
+	 */
+
+	/* Assuming: bpc as 8*/
+	if (output_format == INTEL_OUTPUT_FORMAT_YCBCR420) {
+		min_dsc_bpp = 6;
+		max_dsc_bpp = 3 * 4; /* 3*bpc/2 */
+	} else if (output_format == INTEL_OUTPUT_FORMAT_YCBCR444 ||
+		   output_format == INTEL_OUTPUT_FORMAT_RGB) {
+		min_dsc_bpp = 8;
+		max_dsc_bpp = 3 * 8; /* 3*bpc */
+	} else {
+		/* Assuming 4:2:2 encoding */
+		min_dsc_bpp = 7;
+		max_dsc_bpp = 2 * 8; /* 2*bpc */
+	}
+
+	/*
+	 * Taking into account if all dsc_all_bpp supported by HDMI2.1 sink
+	 * Section 7.7.34 : Source shall not enable compressed Video
+	 * Transport with bpp_target settings above 12 bpp unless
+	 * DSC_all_bpp is set to 1.
+	 */
+	if (!hdmi_all_bpp)
+		max_dsc_bpp = min(max_dsc_bpp, 12);
+
+	/*
+	 * The Sink has a limit of compressed data in bytes for a scanline,
+	 * as described in max_chunk_bytes field in HFVSDB block of edid.
+	 * The no. of bytes depend on the target bits per pixel that the
+	 * source configures. So we start with the max_bpp and calculate
+	 * the target_chunk_bytes. We keep on decrementing the target_bpp,
+	 * till we get the target_chunk_bytes just less than what the sink's
+	 * max_chunk_bytes, or else till we reach the min_dsc_bpp.
+	 *
+	 * The decrement is according to the fractional support from PCON DSC
+	 * encoder. For fractional BPP we use bpp_target as a multiple of 16.
+	 *
+	 * bpp_target_x16 = bpp_target * 16
+	 * So we need to decrement by {1, 2, 4, 8, 16} for fractional bpps
+	 * {1/16, 1/8, 1/4, 1/2, 1} respectively.
+	 */
+
+	bpp_target = max_dsc_bpp;
+
+	/* src does not support fractional bpp implies decrement by 16 for bppx16 */
+	if (!src_fractional_bpp)
+		src_fractional_bpp = 1;
+	bpp_decrement_x16 = DIV_ROUND_UP(16, src_fractional_bpp);
+	bpp_target_x16 = (bpp_target * 16) - bpp_decrement_x16;
+
+	while (bpp_target_x16 > (min_dsc_bpp * 16)) {
+		int bpp;
+
+		bpp = DIV_ROUND_UP(bpp_target_x16, 16);
+		target_bytes = DIV_ROUND_UP((num_slices * slice_width * bpp), 8);
+		if (target_bytes <= hdmi_max_chunk_bytes) {
+			bpp_found = true;
+			break;
+		}
+		bpp_target_x16 -= bpp_decrement_x16;
+	}
+	if (bpp_found)
+		return bpp_target_x16;
+
+	return 0;
 }

@@ -1151,7 +1151,6 @@ qed_rdma_destroy_cq(void *rdma_cxt,
 	DP_VERBOSE(p_hwfn, QED_MSG_RDMA, "icid = %08x\n", in_params->icid);
 
 	p_ramrod_res =
-	    (struct rdma_destroy_cq_output_params *)
 	    dma_alloc_coherent(&p_hwfn->cdev->pdev->dev,
 			       sizeof(struct rdma_destroy_cq_output_params),
 			       &ramrod_res_phys, GFP_KERNEL);
@@ -1520,7 +1519,7 @@ qed_rdma_register_tid(void *rdma_cxt,
 		  params->pbl_two_level);
 
 	SET_FIELD(flags, RDMA_REGISTER_TID_RAMROD_DATA_ZERO_BASED,
-		  params->zbva);
+		  false);
 
 	SET_FIELD(flags, RDMA_REGISTER_TID_RAMROD_DATA_PHY_MR, params->phy_mr);
 
@@ -1582,15 +1581,7 @@ qed_rdma_register_tid(void *rdma_cxt,
 	p_ramrod->pd = cpu_to_le16(params->pd);
 	p_ramrod->length_hi = (u8)(params->length >> 32);
 	p_ramrod->length_lo = DMA_LO_LE(params->length);
-	if (params->zbva) {
-		/* Lower 32 bits of the registered MR address.
-		 * In case of zero based MR, will hold FBO
-		 */
-		p_ramrod->va.hi = 0;
-		p_ramrod->va.lo = cpu_to_le32(params->fbo);
-	} else {
-		DMA_REGPAIR_LE(p_ramrod->va, params->vaddr);
-	}
+	DMA_REGPAIR_LE(p_ramrod->va, params->vaddr);
 	DMA_REGPAIR_LE(p_ramrod->pbl_base, params->pbl_ptr);
 
 	/* DIF */

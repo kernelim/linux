@@ -694,7 +694,8 @@ void radix__early_init_mmu_secondary(void)
 	tlbiel_all();
 }
 
-void radix__mmu_cleanup_all(void)
+/* Called during kexec sequence with MMU off */
+notrace void radix__mmu_cleanup_all(void)
 {
 	unsigned long lpcr;
 

@@ -594,6 +594,7 @@ static int br_process_vlan_info(struct net_bridge *br,
 					   extack);
 			if (err)
 				break;
+			cond_resched();
 		}
 		*vinfo_last = NULL;
 

@@ -43,13 +43,14 @@ struct genl_info;
  *	Note that unbind() will not be called symmetrically if the
  *	generic netlink family is removed while there are still open
  *	sockets.
- * @attrbuf: buffer to store parsed attributes (private)
  * @mcgrps: multicast groups used by this family
  * @n_mcgrps: number of multicast groups
  * @mcgrp_offset: starting number of multicast group IDs in this family
  *	(private)
  * @ops: the operations supported by this family
  * @n_ops: number of operations supported by this family
+ * @small_ops: the small-struct operations supported by this family
+ * @n_small_ops: number of small-struct operations supported by this family
  */
 struct genl_family {
 	int			id;		/* private */
@@ -59,6 +60,8 @@ struct genl_family {
 	unsigned int		maxattr;
 	bool			netnsok;
 	bool			parallel_ops;
+	RH_KABI_FILL_HOLE(u8	n_small_ops)
+	/* RHEL: Hole - 5 bytes remain */
 	const struct nla_policy *policy;
 	int			(*pre_doit)(const struct genl_ops *ops,
 					    struct sk_buff *skb,
@@ -68,7 +71,7 @@ struct genl_family {
 					     struct genl_info *info);
 	int			(*mcast_bind)(struct net *net, int group);
 	void			(*mcast_unbind)(struct net *net, int group);
-	struct nlattr **	attrbuf;	/* private */
+	RH_KABI_DEPRECATE(struct nlattr **, attrbuf)
 	const struct genl_ops *	ops;
 	const struct genl_multicast_group *mcgrps;
 	unsigned int		n_ops;
@@ -76,7 +79,7 @@ struct genl_family {
 	unsigned int		mcgrp_offset;	/* private */
 	struct module		*module;
 
-	RH_KABI_RESERVE(1)
+	RH_KABI_USE(1, const struct genl_small_ops *small_ops)
 	RH_KABI_RESERVE(2)
 	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)
@@ -85,8 +88,6 @@ struct genl_family {
 	RH_KABI_RESERVE(7)
 	RH_KABI_RESERVE(8)
 };
-
-struct nlattr **genl_family_attrbuf(const struct genl_family *family);
 
 /**
  * struct genl_info - receiving information
@@ -132,9 +133,6 @@ static inline int genl_err_attr(struct genl_info *info, int err,
 	return err;
 }
 
-struct genl_ops_extended_rh {
-};
-
 enum genl_validate_flags {
 	GENL_DONT_VALIDATE_STRICT		= BIT(0),
 	GENL_DONT_VALIDATE_DUMP			= BIT(1),
@@ -142,10 +140,36 @@ enum genl_validate_flags {
 };
 
 /**
+ * struct genl_small_ops - generic netlink operations (small version)
+ * @cmd: command identifier
+ * @internal_flags: flags used by the family
+ * @flags: flags
+ * @validate: validation flags from enum genl_validate_flags
+ * @doit: standard command callback
+ * @dumpit: callback for dumpers
+ *
+ * This is a cut-down version of struct genl_ops for users who don't need
+ * most of the ancillary infra and want to save space.
+ */
+struct genl_small_ops {
+	int	(*doit)(struct sk_buff *skb, struct genl_info *info);
+	int	(*dumpit)(struct sk_buff *skb, struct netlink_callback *cb);
+	u8	cmd;
+	u8	internal_flags;
+	u8	flags;
+	u8	validate;
+};
+
+struct genl_ops_extended_rh {
+};
+
+/**
  * struct genl_ops - generic netlink operations
  * @cmd: command identifier
  * @internal_flags: flags used by the family
  * @flags: flags
+ * @maxattr: maximum number of attributes supported
+ * @policy: netlink policy (takes precedence over family policy)
  * @doit: standard command callback
  * @start: start callback for dumps
  * @dumpit: callback for dumpers
@@ -163,8 +187,8 @@ struct genl_ops {
 	u8			flags;
 	u8			validate;
 
-	RH_KABI_RESERVE(1)
-	RH_KABI_RESERVE(2)
+	RH_KABI_USE(1, const struct nla_policy *policy)
+	RH_KABI_USE_SPLIT(2, unsigned int maxattr)
 	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)
 	RH_KABI_RESERVE(5)
@@ -172,6 +196,24 @@ struct genl_ops {
 	RH_KABI_RESERVE(7)
 	RH_KABI_AUX_EMBED(genl_ops_extended)
 };
+
+/**
+ * struct genl_info - info that is available during dumpit op call
+ * @family: generic netlink family - for internal genl code usage
+ * @ops: generic netlink ops - for internal genl code usage
+ * @attrs: netlink attributes
+ */
+struct genl_dumpit_info {
+	const struct genl_family *family;
+	struct genl_ops op;
+	struct nlattr **attrs;
+};
+
+static inline const struct genl_dumpit_info *
+genl_dumpit_info(struct netlink_callback *cb)
+{
+	return cb->data;
+}
 
 int genl_register_family(struct genl_family *family);
 int genl_unregister_family(const struct genl_family *family);

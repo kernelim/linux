@@ -87,7 +87,6 @@ static int n_adapters_found;
 
 MODULE_AUTHOR("Broadcom Corporation");
 MODULE_DESCRIPTION("Broadcom 802.11n wireless LAN driver.");
-MODULE_SUPPORTED_DEVICE("Broadcom 802.11n WLAN cards");
 MODULE_LICENSE("Dual BSD/GPL");
 /* This needs to be adjusted when brcms_firmwares changes */
 MODULE_FIRMWARE("brcm/bcm43xx-0.fw");
@@ -275,14 +274,13 @@ static void brcms_set_basic_rate(struct brcm_rateset *rs, u16 rate, bool is_br)
 	}
 }
 
-/**
+/*
  * This function frees the WL per-device resources.
  *
  * This function frees resources owned by the WL device pointed to
  * by the wl parameter.
  *
  * precondition: can both be called locked and unlocked
- *
  */
 static void brcms_free(struct brcms_info *wl)
 {
@@ -1115,7 +1113,7 @@ static int ieee_hw_init(struct ieee80211_hw *hw)
 	return ieee_hw_rate_init(hw);
 }
 
-/**
+/*
  * attach to the WL device.
  *
  * Attach to the WL device identified by vendor and device parameters.
@@ -1210,7 +1208,7 @@ fail:
 
 
 
-/**
+/*
  * determines if a device is a WL device, and if so, attaches it.
  *
  * This function determines if a device pointed to by pdev is a WL device,
@@ -1290,7 +1288,7 @@ static struct bcma_driver brcms_bcma_driver = {
 	.id_table = brcms_coreid_table,
 };
 
-/**
+/*
  * This is the main entry point for the brcmsmac driver.
  *
  * This function is scheduled upon module initialization and
@@ -1317,7 +1315,7 @@ static int __init brcms_module_init(void)
 	return 0;
 }
 
-/**
+/*
  * This function unloads the brcmsmac driver from the system.
  *
  * This function unconditionally unloads the brcmsmac driver module from the

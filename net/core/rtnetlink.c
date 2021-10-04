@@ -1795,6 +1795,9 @@ static const struct nla_policy ifla_policy[IFLA_MAX+1] = {
 	[IFLA_CARRIER_DOWN_COUNT] = { .type = NLA_U32 },
 	[IFLA_MIN_MTU]		= { .type = NLA_U32 },
 	[IFLA_MAX_MTU]		= { .type = NLA_U32 },
+	[IFLA_PROP_LIST]	= { .type = NLA_NESTED },
+	[IFLA_ALT_IFNAME]	= { .type = NLA_STRING,
+				    .len = ALTIFNAMSIZ - 1 },
 	[IFLA_PERM_ADDRESS]	= { .type = NLA_REJECT },
 };
 
@@ -1860,7 +1863,7 @@ static const struct rtnl_link_ops *linkinfo_to_kind_ops(const struct nlattr *nla
 	if (linfo[IFLA_INFO_KIND]) {
 		char kind[MODULE_NAME_LEN];
 
-		nla_strlcpy(kind, linfo[IFLA_INFO_KIND], sizeof(kind));
+		nla_strscpy(kind, linfo[IFLA_INFO_KIND], sizeof(kind));
 		ops = rtnl_link_ops_get(kind);
 	}
 
@@ -2518,7 +2521,7 @@ static int do_setlink(const struct sk_buff *skb,
 		sa->sa_family = dev->type;
 		memcpy(sa->sa_data, nla_data(tb[IFLA_ADDRESS]),
 		       dev->addr_len);
-		err = dev_set_mac_address(dev, sa, extack);
+		err = dev_set_mac_address_user(dev, sa, extack);
 		kfree(sa);
 		if (err)
 			goto errout;
@@ -2823,7 +2826,7 @@ static int rtnl_setlink(struct sk_buff *skb, struct nlmsghdr *nlh,
 		goto errout;
 
 	if (tb[IFLA_IFNAME])
-		nla_strlcpy(ifname, tb[IFLA_IFNAME], IFNAMSIZ);
+		nla_strscpy(ifname, tb[IFLA_IFNAME], IFNAMSIZ);
 	else
 		ifname[0] = '\0';
 
@@ -2920,7 +2923,7 @@ static int rtnl_dellink(struct sk_buff *skb, struct nlmsghdr *nlh,
 		return err;
 
 	if (tb[IFLA_IFNAME])
-		nla_strlcpy(ifname, tb[IFLA_IFNAME], IFNAMSIZ);
+		nla_strscpy(ifname, tb[IFLA_IFNAME], IFNAMSIZ);
 
 	if (tb[IFLA_TARGET_NETNSID]) {
 		netnsid = nla_get_s32(tb[IFLA_TARGET_NETNSID]);
@@ -3107,7 +3110,7 @@ replay:
 		return err;
 
 	if (tb[IFLA_IFNAME])
-		nla_strlcpy(ifname, tb[IFLA_IFNAME], IFNAMSIZ);
+		nla_strscpy(ifname, tb[IFLA_IFNAME], IFNAMSIZ);
 	else
 		ifname[0] = '\0';
 
@@ -3141,7 +3144,7 @@ replay:
 		memset(linkinfo, 0, sizeof(linkinfo));
 
 	if (linkinfo[IFLA_INFO_KIND]) {
-		nla_strlcpy(kind, linkinfo[IFLA_INFO_KIND], sizeof(kind));
+		nla_strscpy(kind, linkinfo[IFLA_INFO_KIND], sizeof(kind));
 		ops = rtnl_link_ops_get(kind);
 	} else {
 		kind[0] = '\0';
@@ -3423,7 +3426,7 @@ static int rtnl_getlink(struct sk_buff *skb, struct nlmsghdr *nlh,
 	}
 
 	if (tb[IFLA_IFNAME])
-		nla_strlcpy(ifname, tb[IFLA_IFNAME], IFNAMSIZ);
+		nla_strscpy(ifname, tb[IFLA_IFNAME], IFNAMSIZ);
 
 	if (tb[IFLA_EXT_MASK])
 		ext_filter_mask = nla_get_u32(tb[IFLA_EXT_MASK]);
@@ -3461,6 +3464,101 @@ out:
 		put_net(tgt_net);
 
 	return err;
+}
+
+static int rtnl_alt_ifname(int cmd, struct net_device *dev, struct nlattr *attr,
+			   bool *changed, struct netlink_ext_ack *extack)
+{
+	char *alt_ifname;
+	int err;
+
+	err = nla_validate(attr, attr->nla_len, IFLA_MAX, ifla_policy, extack);
+	if (err)
+		return err;
+
+	alt_ifname = nla_strdup(attr, GFP_KERNEL);
+	if (!alt_ifname)
+		return -ENOMEM;
+
+	if (cmd == RTM_NEWLINKPROP) {
+		err = netdev_name_node_alt_create(dev, alt_ifname);
+		if (!err)
+			alt_ifname = NULL;
+	} else if (cmd == RTM_DELLINKPROP) {
+		err = netdev_name_node_alt_destroy(dev, alt_ifname);
+	} else {
+		WARN_ON_ONCE(1);
+		err = -EINVAL;
+	}
+
+	kfree(alt_ifname);
+	if (!err)
+		*changed = true;
+	return err;
+}
+
+static int rtnl_linkprop(int cmd, struct sk_buff *skb, struct nlmsghdr *nlh,
+			 struct netlink_ext_ack *extack)
+{
+	struct net *net = sock_net(skb->sk);
+	struct nlattr *tb[IFLA_MAX + 1];
+	struct net_device *dev;
+	struct ifinfomsg *ifm;
+	bool changed = false;
+	struct nlattr *attr;
+	int err, rem;
+
+	err = nlmsg_parse(nlh, sizeof(*ifm), tb, IFLA_MAX, ifla_policy, extack);
+	if (err)
+		return err;
+
+	err = rtnl_ensure_unique_netns(tb, extack, true);
+	if (err)
+		return err;
+
+	ifm = nlmsg_data(nlh);
+	if (ifm->ifi_index > 0) {
+		dev = __dev_get_by_index(net, ifm->ifi_index);
+	} else if (tb[IFLA_IFNAME]) {
+		char ifname[IFNAMSIZ];
+
+		nla_strscpy(ifname, tb[IFLA_IFNAME], IFNAMSIZ);
+		dev = __dev_get_by_name(net, ifname);
+	} else {
+		return -EINVAL;
+	}
+
+	if (!dev)
+		return -ENODEV;
+
+	if (!tb[IFLA_PROP_LIST])
+		return 0;
+
+	nla_for_each_nested(attr, tb[IFLA_PROP_LIST], rem) {
+		switch (nla_type(attr)) {
+		case IFLA_ALT_IFNAME:
+			err = rtnl_alt_ifname(cmd, dev, attr, &changed, extack);
+			if (err)
+				return err;
+			break;
+		}
+	}
+
+	if (changed)
+		netdev_state_change(dev);
+	return 0;
+}
+
+static int rtnl_newlinkprop(struct sk_buff *skb, struct nlmsghdr *nlh,
+			    struct netlink_ext_ack *extack)
+{
+	return rtnl_linkprop(RTM_NEWLINKPROP, skb, nlh, extack);
+}
+
+static int rtnl_dellinkprop(struct sk_buff *skb, struct nlmsghdr *nlh,
+			    struct netlink_ext_ack *extack)
+{
+	return rtnl_linkprop(RTM_DELLINKPROP, skb, nlh, extack);
 }
 
 static u16 rtnl_calcit(struct sk_buff *skb, struct nlmsghdr *nlh)
@@ -5422,6 +5520,9 @@ void __init rtnetlink_init(void)
 	rtnl_register(PF_UNSPEC, RTM_GETADDR, NULL, rtnl_dump_all, 0);
 	rtnl_register(PF_UNSPEC, RTM_GETROUTE, NULL, rtnl_dump_all, 0);
 	rtnl_register(PF_UNSPEC, RTM_GETNETCONF, NULL, rtnl_dump_all, 0);
+
+	rtnl_register(PF_UNSPEC, RTM_NEWLINKPROP, rtnl_newlinkprop, NULL, 0);
+	rtnl_register(PF_UNSPEC, RTM_DELLINKPROP, rtnl_dellinkprop, NULL, 0);
 
 	rtnl_register(PF_BRIDGE, RTM_NEWNEIGH, rtnl_fdb_add, NULL, 0);
 	rtnl_register(PF_BRIDGE, RTM_DELNEIGH, rtnl_fdb_del, NULL, 0);

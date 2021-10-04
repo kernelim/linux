@@ -30,8 +30,10 @@
 
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_crtc_helper.h>
+#include <drm/drm_drv.h>
 #include <drm/drm_gem.h>
 #include <drm/drm_gem_vram_helper.h>
+#include <drm/drm_managed.h>
 
 #include "ast_drv.h"
 
@@ -65,8 +67,9 @@ uint8_t ast_get_index_reg_mask(struct ast_private *ast,
 
 static void ast_detect_config_mode(struct drm_device *dev, u32 *scu_rev)
 {
-	struct device_node *np = dev->pdev->dev.of_node;
+	struct device_node *np = dev->dev->of_node;
 	struct ast_private *ast = to_ast_private(dev);
+	struct pci_dev *pdev = to_pci_dev(dev->dev);
 	uint32_t data, jregd0, jregd1;
 
 	/* Defaults */
@@ -83,7 +86,7 @@ static void ast_detect_config_mode(struct drm_device *dev, u32 *scu_rev)
 	}
 
 	/* Not all families have a P2A bridge */
-	if (dev->pdev->device != PCI_CHIP_AST2000)
+	if (pdev->device != PCI_CHIP_AST2000)
 		return;
 
 	/*
@@ -117,6 +120,7 @@ static void ast_detect_config_mode(struct drm_device *dev, u32 *scu_rev)
 static int ast_detect_chip(struct drm_device *dev, bool *need_post)
 {
 	struct ast_private *ast = to_ast_private(dev);
+	struct pci_dev *pdev = to_pci_dev(dev->dev);
 	uint32_t jreg, scu_rev;
 
 	/*
@@ -141,16 +145,19 @@ static int ast_detect_chip(struct drm_device *dev, bool *need_post)
 	ast_detect_config_mode(dev, &scu_rev);
 
 	/* Identify chipset */
-	if (dev->pdev->revision >= 0x40) {
+	if (pdev->revision >= 0x50) {
+		ast->chip = AST2600;
+		drm_info(dev, "AST 2600 detected\n");
+	} else if (pdev->revision >= 0x40) {
 		ast->chip = AST2500;
 		drm_info(dev, "AST 2500 detected\n");
-	} else if (dev->pdev->revision >= 0x30) {
+	} else if (pdev->revision >= 0x30) {
 		ast->chip = AST2400;
 		drm_info(dev, "AST 2400 detected\n");
-	} else if (dev->pdev->revision >= 0x20) {
+	} else if (pdev->revision >= 0x20) {
 		ast->chip = AST2300;
 		drm_info(dev, "AST 2300 detected\n");
-	} else if (dev->pdev->revision >= 0x10) {
+	} else if (pdev->revision >= 0x10) {
 		switch (scu_rev & 0x0300) {
 		case 0x0200:
 			ast->chip = AST1100;
@@ -230,11 +237,11 @@ static int ast_detect_chip(struct drm_device *dev, bool *need_post)
 			ast->tx_chip_type = AST_TX_SIL164;
 			break;
 		case 0x08:
-			ast->dp501_fw_addr = kzalloc(32*1024, GFP_KERNEL);
+			ast->dp501_fw_addr = drmm_kzalloc(dev, 32*1024, GFP_KERNEL);
 			if (ast->dp501_fw_addr) {
 				/* backup firmware */
 				if (ast_backup_fw(dev, ast->dp501_fw_addr, 32*1024)) {
-					kfree(ast->dp501_fw_addr);
+					drmm_kfree(dev, ast->dp501_fw_addr);
 					ast->dp501_fw_addr = NULL;
 				}
 			}
@@ -260,7 +267,7 @@ static int ast_detect_chip(struct drm_device *dev, bool *need_post)
 
 static int ast_get_dram_info(struct drm_device *dev)
 {
-	struct device_node *np = dev->pdev->dev.of_node;
+	struct device_node *np = dev->dev->of_node;
 	struct ast_private *ast = to_ast_private(dev);
 	uint32_t mcr_cfg, mcr_scu_mpll, mcr_scu_strap;
 	uint32_t denum, num, div, ref_pll, dsel;
@@ -378,49 +385,61 @@ static int ast_get_dram_info(struct drm_device *dev)
 	return 0;
 }
 
-int ast_driver_load(struct drm_device *dev, unsigned long flags)
+/*
+ * Run this function as part of the HW device cleanup; not
+ * when the DRM device gets released.
+ */
+static void ast_device_release(void *data)
 {
+	struct ast_private *ast = data;
+
+	/* enable standard VGA decode */
+	ast_set_index_reg(ast, AST_IO_CRTC_PORT, 0xa1, 0x04);
+}
+
+struct ast_private *ast_device_create(const struct drm_driver *drv,
+				      struct pci_dev *pdev,
+				      unsigned long flags)
+{
+	struct drm_device *dev;
 	struct ast_private *ast;
 	bool need_post;
 	int ret = 0;
 
-	ast = kzalloc(sizeof(struct ast_private), GFP_KERNEL);
-	if (!ast)
-		return -ENOMEM;
+	ast = devm_drm_dev_alloc(&pdev->dev, drv, struct ast_private, base);
+	if (IS_ERR(ast))
+		return ast;
+	dev = &ast->base;
 
-	dev->dev_private = ast;
-	ast->dev = dev;
+	pci_set_drvdata(pdev, dev);
 
-	ast->regs = pci_iomap(dev->pdev, 1, 0);
-	if (!ast->regs) {
-		ret = -EIO;
-		goto out_free;
-	}
+	ast->regs = pci_iomap(pdev, 1, 0);
+	if (!ast->regs)
+		return ERR_PTR(-EIO);
 
 	/*
 	 * If we don't have IO space at all, use MMIO now and
 	 * assume the chip has MMIO enabled by default (rev 0x20
 	 * and higher).
 	 */
-	if (!(pci_resource_flags(dev->pdev, 2) & IORESOURCE_IO)) {
+	if (!(pci_resource_flags(pdev, 2) & IORESOURCE_IO)) {
 		drm_info(dev, "platform has no IO space, trying MMIO\n");
 		ast->ioregs = ast->regs + AST_IO_MM_OFFSET;
 	}
 
 	/* "map" IO regs if the above hasn't done so already */
 	if (!ast->ioregs) {
-		ast->ioregs = pci_iomap(dev->pdev, 2, 0);
-		if (!ast->ioregs) {
-			ret = -EIO;
-			goto out_free;
-		}
+		ast->ioregs = pci_iomap(pdev, 2, 0);
+		if (!ast->ioregs)
+			return ERR_PTR(-EIO);
 	}
 
 	ast_detect_chip(dev, &need_post);
 
 	ret = ast_get_dram_info(dev);
 	if (ret)
-		goto out_free;
+		return ERR_PTR(ret);
+
 	drm_info(dev, "dram MCLK=%u Mhz type=%d bus_width=%d\n",
 		 ast->mclk, ast->dram_type, ast->dram_bus_width);
 
@@ -429,28 +448,15 @@ int ast_driver_load(struct drm_device *dev, unsigned long flags)
 
 	ret = ast_mm_init(ast);
 	if (ret)
-		goto out_free;
+		return ERR_PTR(ret);
 
 	ret = ast_mode_config_init(ast);
 	if (ret)
-		goto out_free;
+		return ERR_PTR(ret);
 
-	return 0;
-out_free:
-	kfree(ast);
-	dev->dev_private = NULL;
-	return ret;
-}
+	ret = devm_add_action_or_reset(dev->dev, ast_device_release, ast);
+	if (ret)
+		return ERR_PTR(ret);
 
-void ast_driver_unload(struct drm_device *dev)
-{
-	struct ast_private *ast = to_ast_private(dev);
-
-	/* enable standard VGA decode */
-	ast_set_index_reg(ast, AST_IO_CRTC_PORT, 0xa1, 0x04);
-
-	ast_release_firmware(dev);
-	kfree(ast->dp501_fw_addr);
-
-	kfree(ast);
+	return ast;
 }

@@ -133,7 +133,7 @@ static int __bad_area(struct pt_regs *regs, unsigned long address, int si_code)
 	 * Something tried to access memory that isn't in our memory map..
 	 * Fix it, but check if it's kernel or user first..
 	 */
-	up_read(&mm->mmap_sem);
+	mmap_read_unlock(mm);
 
 	return __bad_area_nosemaphore(regs, address, si_code);
 }
@@ -163,13 +163,13 @@ static noinline int bad_access_pkey(struct pt_regs *regs, unsigned long address,
 	 * 2. T1   : set AMR to deny access to pkey=4, touches, page
 	 * 3. T1   : faults...
 	 * 4.    T2: mprotect_key(foo, PAGE_SIZE, pkey=5);
-	 * 5. T1   : enters fault handler, takes mmap_sem, etc...
+	 * 5. T1   : enters fault handler, takes mmap_lock, etc...
 	 * 6. T1   : reaches here, sees vma_pkey(vma)=5, when we really
 	 *	     faulted on a pte with its pkey=4.
 	 */
 	pkey = vma_pkey(vma);
 
-	up_read(&mm->mmap_sem);
+	mmap_read_unlock(mm);
 
 	/*
 	 * If we are in kernel mode, bail out with a SEGV, this will
@@ -506,9 +506,9 @@ static int __do_page_fault(struct pt_regs *regs, unsigned long address,
 	perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS, 1, regs, address);
 
 	/*
-	 * We want to do this outside mmap_sem, because reading code around nip
+	 * We want to do this outside mmap_lock, because reading code around nip
 	 * can result in fault, which will cause a deadlock when called with
-	 * mmap_sem held
+	 * mmap_lock held
 	 */
 	if (is_user)
 		flags |= FAULT_FLAG_USER;
@@ -520,7 +520,7 @@ static int __do_page_fault(struct pt_regs *regs, unsigned long address,
 	/* When running in the kernel we expect faults to occur only to
 	 * addresses in user space.  All other faults represent errors in the
 	 * kernel and should generate an OOPS.  Unfortunately, in the case of an
-	 * erroneous fault occurring in a code path which already holds mmap_sem
+	 * erroneous fault occurring in a code path which already holds mmap_lock
 	 * we will deadlock attempting to validate the fault against the
 	 * address space.  Luckily the kernel only validly references user
 	 * space from well defined areas of code, which are listed in the
@@ -532,12 +532,12 @@ static int __do_page_fault(struct pt_regs *regs, unsigned long address,
 	 * source.  If this is invalid we can skip the address space check,
 	 * thus avoiding the deadlock.
 	 */
-	if (unlikely(!down_read_trylock(&mm->mmap_sem))) {
+	if (unlikely(!mmap_read_trylock(mm))) {
 		if (!is_user && !search_exception_tables(regs->nip))
 			return bad_area_nosemaphore(regs, address);
 
 retry:
-		down_read(&mm->mmap_sem);
+		mmap_read_lock(mm);
 	} else {
 		/*
 		 * The above down_read_trylock() might have succeeded in
@@ -561,7 +561,7 @@ retry:
 		if (!must_retry)
 			return bad_area(regs, address);
 
-		up_read(&mm->mmap_sem);
+		mmap_read_unlock(mm);
 		if (fault_in_pages_readable((const char __user *)regs->nip,
 					    sizeof(unsigned int)))
 			return bad_area_nosemaphore(regs, address);
@@ -596,7 +596,7 @@ good_area:
 		return user_mode(regs) ? 0 : SIGBUS;
 
 	/*
-	 * Handle the retry right now, the mmap_sem has been released in that
+	 * Handle the retry right now, the mmap_lock has been released in that
 	 * case.
 	 */
 	if (unlikely(fault & VM_FAULT_RETRY)) {
@@ -606,7 +606,7 @@ good_area:
 		}
 	}
 
-	up_read(&current->mm->mmap_sem);
+	mmap_read_unlock(current->mm);
 
 	if (unlikely(fault & VM_FAULT_ERROR))
 		return mm_fault_error(regs, address, fault);

@@ -27,20 +27,36 @@
 
 #define ARCH_EFI_IRQ_FLAGS_MASK	X86_EFLAGS_IF
 
+static inline void efi_fpu_begin(void)
+{
+	/*
+	 * The UEFI calling convention (UEFI spec 2.3.2 and 2.3.4) requires
+	 * that FCW and MXCSR (64-bit) must be initialized prior to calling
+	 * UEFI code.  (Oddly the spec does not require that the FPU stack
+	 * be empty.)
+	 */
+	kernel_fpu_begin_mask(KFPU_387 | KFPU_MXCSR);
+}
+
+static inline void efi_fpu_end(void)
+{
+	kernel_fpu_end();
+}
+
 #ifdef CONFIG_X86_32
 
 extern asmlinkage unsigned long efi_call_phys(void *, ...);
 
 #define arch_efi_call_virt_setup()					\
 ({									\
-	kernel_fpu_begin();						\
+	efi_fpu_begin();						\
 	firmware_restrict_branch_speculation_start();			\
 })
 
 #define arch_efi_call_virt_teardown()					\
 ({									\
 	firmware_restrict_branch_speculation_end();			\
-	kernel_fpu_end();						\
+	efi_fpu_end();							\
 })
 
 
@@ -73,8 +89,7 @@ struct efi_scratch {
 #define arch_efi_call_virt_setup()					\
 ({									\
 	efi_sync_low_kernel_mappings();					\
-	preempt_disable();						\
-	__kernel_fpu_begin();						\
+	efi_fpu_begin();						\
 	firmware_restrict_branch_speculation_start();			\
 	efi_switch_mm(&efi_mm);						\
 })
@@ -86,8 +101,7 @@ struct efi_scratch {
 ({									\
 	efi_switch_mm(efi_scratch.prev_mm);				\
 	firmware_restrict_branch_speculation_end();			\
-	__kernel_fpu_end();						\
-	preempt_enable();						\
+	efi_fpu_end();							\
 })
 
 extern void __iomem *__init efi_ioremap(unsigned long addr, unsigned long size,

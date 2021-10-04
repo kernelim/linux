@@ -194,7 +194,6 @@ struct __rh_drm_mmu_notifier_ops {
 
 struct __rh_drm_mmu_notifier {
 	struct mmu_notifier base;
-	struct mmu_notifier_rh _rh;
 	struct mmu_notifier_ops base_ops;
 	const struct __rh_drm_mmu_notifier_ops *ops;
 };

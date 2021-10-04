@@ -334,7 +334,10 @@ LIBBPF_0.1.0 {
 
 LIBBPF_0.2.0 {
 	global:
+		bpf_prog_bind_map;
+		bpf_prog_test_run_opts;
 		bpf_program__attach_freplace;
+		bpf_program__section_name;
 		btf__add_array;
 		btf__add_const;
 		btf__add_enum;
@@ -360,4 +363,27 @@ LIBBPF_0.2.0 {
 		btf__new_empty;
 		btf__set_endianness;
 		btf__str_by_offset;
+		perf_buffer__buffer_cnt;
+		perf_buffer__buffer_fd;
+		perf_buffer__epoll_fd;
+		perf_buffer__consume_buffer;
+		xsk_socket__create_shared;
 } LIBBPF_0.1.0;
+
+LIBBPF_0.3.0 {
+	global:
+		btf__base_btf;
+		btf__parse_elf_split;
+		btf__parse_raw_split;
+		btf__parse_split;
+		btf__new_empty_split;
+		btf__new_split;
+		ring_buffer__epoll_fd;
+		xsk_setup_xdp_prog;
+		xsk_socket__update_xskmap;
+} LIBBPF_0.2.0;
+
+LIBBPF_0.4.0 {
+	global:
+		btf__add_float;
+} LIBBPF_0.3.0;

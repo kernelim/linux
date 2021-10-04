@@ -28,6 +28,9 @@ asmlinkage void invalid_TSS(void);
 asmlinkage void segment_not_present(void);
 asmlinkage void stack_segment(void);
 asmlinkage void general_protection(void);
+#if IS_ENABLED(CONFIG_KVM_INTEL)
+asmlinkage void nmi_noist(void);
+#endif
 asmlinkage void page_fault(void);
 asmlinkage void async_page_fault(void);
 asmlinkage void spurious_interrupt_bug(void);

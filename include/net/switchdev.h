@@ -58,6 +58,7 @@ enum switchdev_attr_id {
 	SWITCHDEV_ATTR_ID_BRIDGE_MROUTER,
 #ifndef __GENKSYMS__
 	SWITCHDEV_ATTR_ID_PORT_PRE_BRIDGE_FLAGS,
+	SWITCHDEV_ATTR_ID_BRIDGE_VLAN_PROTOCOL,
 #endif
 };
 
@@ -75,6 +76,7 @@ struct switchdev_attr {
 		bool mrouter;				/* PORT_MROUTER */
 		clock_t ageing_time;			/* BRIDGE_AGEING_TIME */
 		bool vlan_filtering;			/* BRIDGE_VLAN_FILTERING */
+		RH_KABI_EXTEND(u16 vlan_protocol)	/* BRIDGE_VLAN_PROTOCOL */
 		bool mc_disabled;			/* MC_DISABLED */
 	} u;
 };
@@ -186,6 +188,7 @@ struct switchdev_notifier_fdb_info {
 	const unsigned char *addr;
 	u16 vid;
 	u8 added_by_user:1,
+	   is_local:1,
 	   offloaded:1;
 };
 

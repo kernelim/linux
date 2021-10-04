@@ -1394,7 +1394,7 @@ static struct snd_soc_dai_driver dac31xx_dai_driver[] = {
 			.formats	 = AIC31XX_FORMATS,
 		},
 		.ops = &aic31xx_dai_ops,
-		.symmetric_rates = 1,
+		.symmetric_rate = 1,
 	}
 };
 
@@ -1416,7 +1416,7 @@ static struct snd_soc_dai_driver aic31xx_dai_driver[] = {
 			.formats	 = AIC31XX_FORMATS,
 		},
 		.ops = &aic31xx_dai_ops,
-		.symmetric_rates = 1,
+		.symmetric_rate = 1,
 	}
 };
 

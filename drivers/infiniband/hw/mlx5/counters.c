@@ -117,7 +117,7 @@ err_bound:
 	return ret;
 }
 
-static void mlx5_ib_destroy_counters(struct ib_counters *counters)
+static int mlx5_ib_destroy_counters(struct ib_counters *counters)
 {
 	struct mlx5_ib_mcounters *mcounters = to_mcounters(counters);
 
@@ -125,6 +125,7 @@ static void mlx5_ib_destroy_counters(struct ib_counters *counters)
 	if (mcounters->hw_cntrs_hndl)
 		mlx5_fc_destroy(to_mdev(counters->device)->mdev,
 				mcounters->hw_cntrs_hndl);
+	return 0;
 }
 
 static int mlx5_ib_create_counters(struct ib_counters *counters,
@@ -136,13 +137,6 @@ static int mlx5_ib_create_counters(struct ib_counters *counters,
 	return 0;
 }
 
-
-static bool is_mdev_switchdev_mode(const struct mlx5_core_dev *mdev)
-{
-	return MLX5_ESWITCH_MANAGER(mdev) &&
-	       mlx5_ib_eswitch_mode(mdev->priv.eswitch) ==
-		       MLX5_ESWITCH_OFFLOADS;
-}
 
 static const struct mlx5_ib_counters *get_counters(struct mlx5_ib_dev *dev,
 						   u8 port_num)

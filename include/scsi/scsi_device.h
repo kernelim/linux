@@ -8,6 +8,7 @@
 #include <linux/blkdev.h>
 #include <scsi/scsi.h>
 #include <linux/atomic.h>
+#include <linux/sbitmap.h>
 
 #include <linux/rh_kabi.h>
 
@@ -241,7 +242,8 @@ struct scsi_device {
 	RH_KABI_USE(1, struct scsi_vpd __rcu *vpd_pg0)
 	RH_KABI_USE(2, struct scsi_vpd __rcu *vpd_pg89)
 	RH_KABI_USE(3, atomic_t restarts)
-	RH_KABI_RESERVE(4)
+	RH_KABI_USE(4, struct sbitmap *budget_map)
+
 	RH_KABI_RESERVE(5)
 	RH_KABI_RESERVE(6)
 
@@ -607,6 +609,11 @@ static inline int scsi_device_supports_vpd(struct scsi_device *sdev)
 	if (sdev->scsi_level >= SCSI_SPC_2 && !sdev->skip_vpd_pages)
 		return 1;
 	return 0;
+}
+
+static inline int scsi_device_busy(struct scsi_device *sdev)
+{
+	return sbitmap_weight(sdev->budget_map);
 }
 
 #define MODULE_ALIAS_SCSI_DEVICE(type) \

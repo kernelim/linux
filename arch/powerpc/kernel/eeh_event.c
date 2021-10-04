@@ -35,7 +35,7 @@
  */
 
 static DEFINE_SPINLOCK(eeh_eventlist_lock);
-static struct semaphore eeh_eventlist_sem;
+static DECLARE_COMPLETION(eeh_eventlist_event);
 static LIST_HEAD(eeh_eventlist);
 
 /**
@@ -54,7 +54,7 @@ static int eeh_event_handler(void * dummy)
 	struct eeh_event *event;
 
 	while (!kthread_should_stop()) {
-		if (down_interruptible(&eeh_eventlist_sem))
+		if (wait_for_completion_interruptible(&eeh_eventlist_event))
 			break;
 
 		/* Fetch EEH event from the queue */
@@ -91,9 +91,6 @@ int eeh_event_init(void)
 {
 	struct task_struct *t;
 	int ret = 0;
-
-	/* Initialize semaphore */
-	sema_init(&eeh_eventlist_sem, 0);
 
 	t = kthread_run(eeh_event_handler, NULL, "eehd");
 	if (IS_ERR(t)) {
@@ -156,7 +153,7 @@ int eeh_send_failure_event(struct eeh_pe *pe)
 	spin_unlock_irqrestore(&eeh_eventlist_lock, flags);
 
 	/* For EEH deamon to knick in */
-	up(&eeh_eventlist_sem);
+	complete(&eeh_eventlist_event);
 
 	return 0;
 }

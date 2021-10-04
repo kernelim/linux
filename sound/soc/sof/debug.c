@@ -351,7 +351,7 @@ static ssize_t sof_dfsentry_write(struct file *file, const char __user *buffer,
 	char *string;
 	int ret;
 
-	string = kzalloc(count, GFP_KERNEL);
+	string = kzalloc(count+1, GFP_KERNEL);
 	if (!string)
 		return -ENOMEM;
 
@@ -609,14 +609,16 @@ int snd_sof_debugfs_buf_item(struct snd_sof_dev *sdev,
 	dfse->sdev = sdev;
 
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_DEBUG_IPC_FLOOD_TEST)
-	/*
-	 * cache_buf is unused for SOF_DFSENTRY_TYPE_BUF debugfs entries.
-	 * So, use it to save the results of the last IPC flood test.
-	 */
-	dfse->cache_buf = devm_kzalloc(sdev->dev, IPC_FLOOD_TEST_RESULT_LEN,
-				       GFP_KERNEL);
-	if (!dfse->cache_buf)
-		return -ENOMEM;
+	if (!strncmp(name, "ipc_flood", strlen("ipc_flood"))) {
+		/*
+		 * cache_buf is unused for SOF_DFSENTRY_TYPE_BUF debugfs entries.
+		 * So, use it to save the results of the last IPC flood test.
+		 */
+		dfse->cache_buf = devm_kzalloc(sdev->dev, IPC_FLOOD_TEST_RESULT_LEN,
+					       GFP_KERNEL);
+		if (!dfse->cache_buf)
+			return -ENOMEM;
+	}
 #endif
 
 	dfse->dfsentry = debugfs_create_file(name, mode, sdev->debugfs_root,

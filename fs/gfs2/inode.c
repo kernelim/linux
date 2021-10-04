@@ -38,6 +38,10 @@
 #include "super.h"
 #include "glops.h"
 
+static const struct inode_operations gfs2_file_iops;
+static const struct inode_operations gfs2_dir_iops;
+static const struct inode_operations gfs2_symlink_iops;
+
 static int iget_test(struct inode *inode, void *opaque)
 {
 	u64 no_addr = *(u64 *)opaque;
@@ -488,8 +492,8 @@ static void init_dinode(struct gfs2_inode *dip, struct gfs2_inode *ip,
 	di = (struct gfs2_dinode *)dibh->b_data;
 	gfs2_dinode_out(ip, di);
 
-	di->di_major = cpu_to_be32(MAJOR(ip->i_inode.i_rdev));
-	di->di_minor = cpu_to_be32(MINOR(ip->i_inode.i_rdev));
+	di->di_major = cpu_to_be32(imajor(&ip->i_inode));
+	di->di_minor = cpu_to_be32(iminor(&ip->i_inode));
 	di->__pad1 = 0;
 	di->__pad2 = 0;
 	di->__pad3 = 0;
@@ -607,7 +611,7 @@ static int gfs2_create_inode(struct inode *dir, struct dentry *dentry,
 	struct inode *inode = NULL;
 	struct gfs2_inode *dip = GFS2_I(dir), *ip;
 	struct gfs2_sbd *sdp = GFS2_SB(&dip->i_inode);
-	struct gfs2_glock *io_gl = NULL;
+	struct gfs2_glock *io_gl;
 	int error, free_vfs_inode = 1;
 	u32 aflags = 0;
 	unsigned blocks = 1;
@@ -678,7 +682,6 @@ static int gfs2_create_inode(struct inode *dir, struct dentry *dentry,
 	inode->i_rdev = dev;
 	inode->i_size = size;
 	inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
-	gfs2_set_inode_blocks(inode, 1);
 	munge_mode_uid_gid(dip, inode);
 	check_and_update_goal(dip);
 	ip->i_goal = dip->i_goal;
@@ -749,8 +752,6 @@ static int gfs2_create_inode(struct inode *dir, struct dentry *dentry,
 	init_dinode(dip, ip, symname);
 	gfs2_trans_end(sdp);
 
-	BUG_ON(test_and_set_bit(GLF_INODE_CREATING, &io_gl->gl_flags));
-
 	error = gfs2_glock_nq_init(io_gl, LM_ST_SHARED, GL_EXACT, &ip->i_iopen_gh);
 	if (error)
 		goto fail_gunlock2;
@@ -796,7 +797,6 @@ static int gfs2_create_inode(struct inode *dir, struct dentry *dentry,
 	gfs2_glock_dq_uninit(ghs);
 	gfs2_qa_put(ip);
 	gfs2_glock_dq_uninit(ghs + 1);
-	clear_bit(GLF_INODE_CREATING, &io_gl->gl_flags);
 	gfs2_glock_put(io_gl);
 	gfs2_qa_put(dip);
 	return error;
@@ -805,7 +805,6 @@ fail_gunlock3:
 	glock_clear_object(io_gl, ip);
 	gfs2_glock_dq_uninit(&ip->i_iopen_gh);
 fail_gunlock2:
-	clear_bit(GLF_INODE_CREATING, &io_gl->gl_flags);
 	glock_clear_object(io_gl, ip);
 	gfs2_glock_put(io_gl);
 fail_free_inode:
@@ -965,6 +964,7 @@ static int gfs2_link(struct dentry *old_dentry, struct inode *dir,
 		break;
 	case 0:
 		error = -EEXIST;
+		goto out_gunlock;
 	default:
 		goto out_gunlock;
 	}
@@ -1149,7 +1149,7 @@ static int gfs2_unlink(struct inode *dir, struct dentry *dentry)
 	if (!rgd)
 		goto out_inodes;
 
-	gfs2_holder_init(rgd->rd_gl, LM_ST_EXCLUSIVE, 0, ghs + 2);
+	gfs2_holder_init(rgd->rd_gl, LM_ST_EXCLUSIVE, LM_FLAG_NODE_SCOPE, ghs + 2);
 
 
 	error = gfs2_glock_nq(ghs); /* parent */
@@ -1455,8 +1455,8 @@ static int gfs2_rename(struct inode *odir, struct dentry *odentry,
 			error = -ENOENT;
 			goto out_gunlock;
 		}
-		error = gfs2_glock_nq_init(nrgd->rd_gl, LM_ST_EXCLUSIVE, 0,
-					   &rd_gh);
+		error = gfs2_glock_nq_init(nrgd->rd_gl, LM_ST_EXCLUSIVE,
+					   LM_FLAG_NODE_SCOPE, &rd_gh);
 		if (error)
 			goto out_gunlock;
 	}
@@ -1506,6 +1506,7 @@ static int gfs2_rename(struct inode *odir, struct dentry *odentry,
 			break;
 		case 0:
 			error = -EEXIST;
+			goto out_gunlock;
 		default:
 			goto out_gunlock;
 		};
@@ -1879,7 +1880,7 @@ static int __gfs2_setattr_simple(struct inode *inode, struct iattr *attr)
  * Returns: errno
  */
 
-int gfs2_setattr_simple(struct inode *inode, struct iattr *attr)
+static int gfs2_setattr_simple(struct inode *inode, struct iattr *attr)
 {
 	int error;
 
@@ -2122,7 +2123,26 @@ loff_t gfs2_seek_hole(struct file *file, loff_t offset)
 	return vfs_setpos(file, ret, inode->i_sb->s_maxbytes);
 }
 
-const struct inode_operations gfs2_file_iops = {
+static int gfs2_update_time(struct inode *inode, struct timespec64 *time,
+			    int flags)
+{
+	struct gfs2_inode *ip = GFS2_I(inode);
+	struct gfs2_glock *gl = ip->i_gl;
+	struct gfs2_holder *gh;
+	int error;
+
+	gh = gfs2_glock_is_locked_by_me(gl);
+	if (gh && !gfs2_glock_is_held_excl(gl)) {
+		gfs2_glock_dq(gh);
+		gfs2_holder_reinit(LM_ST_EXCLUSIVE, 0, gh);
+		error = gfs2_glock_nq(gh);
+		if (error)
+			return error;
+	}
+	return generic_update_time(inode, time, flags);
+}
+
+static const struct inode_operations gfs2_file_iops = {
 	.permission = gfs2_permission,
 	.setattr = gfs2_setattr,
 	.getattr = gfs2_getattr,
@@ -2130,9 +2150,10 @@ const struct inode_operations gfs2_file_iops = {
 	.fiemap = gfs2_fiemap,
 	.get_acl = gfs2_get_acl,
 	.set_acl = gfs2_set_acl,
+	.update_time = gfs2_update_time,
 };
 
-const struct inode_operations gfs2_dir_iops = {
+static const struct inode_operations gfs2_dir_iops = {
 	.create = gfs2_create,
 	.lookup = gfs2_lookup,
 	.link = gfs2_link,
@@ -2149,10 +2170,11 @@ const struct inode_operations gfs2_dir_iops = {
 	.fiemap = gfs2_fiemap,
 	.get_acl = gfs2_get_acl,
 	.set_acl = gfs2_set_acl,
+	.update_time = gfs2_update_time,
 	.atomic_open = gfs2_atomic_open,
 };
 
-const struct inode_operations gfs2_symlink_iops = {
+static const struct inode_operations gfs2_symlink_iops = {
 	.get_link = gfs2_get_link,
 	.permission = gfs2_permission,
 	.setattr = gfs2_setattr,

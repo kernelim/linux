@@ -77,6 +77,7 @@ const struct x86_cpu_id_v2 *x86_match_cpu_v2(const struct x86_cpu_id_v2 *match)
 	}
 	return NULL;
 }
+EXPORT_SYMBOL(x86_match_cpu_v2);
 
 static const struct x86_cpu_desc *
 x86_match_cpu_with_stepping(const struct x86_cpu_desc *match)

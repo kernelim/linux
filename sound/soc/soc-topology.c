@@ -1672,17 +1672,17 @@ static void set_dai_flags(struct snd_soc_dai_driver *dai_drv,
 			  unsigned int flag_mask, unsigned int flags)
 {
 	if (flag_mask & SND_SOC_TPLG_DAI_FLGBIT_SYMMETRIC_RATES)
-		dai_drv->symmetric_rates =
-			flags & SND_SOC_TPLG_DAI_FLGBIT_SYMMETRIC_RATES ? 1 : 0;
+		dai_drv->symmetric_rate =
+			(flags & SND_SOC_TPLG_DAI_FLGBIT_SYMMETRIC_RATES) ? 1 : 0;
 
 	if (flag_mask & SND_SOC_TPLG_DAI_FLGBIT_SYMMETRIC_CHANNELS)
 		dai_drv->symmetric_channels =
-			flags & SND_SOC_TPLG_DAI_FLGBIT_SYMMETRIC_CHANNELS ?
+			(flags & SND_SOC_TPLG_DAI_FLGBIT_SYMMETRIC_CHANNELS) ?
 			1 : 0;
 
 	if (flag_mask & SND_SOC_TPLG_DAI_FLGBIT_SYMMETRIC_SAMPLEBITS)
-		dai_drv->symmetric_samplebits =
-			flags & SND_SOC_TPLG_DAI_FLGBIT_SYMMETRIC_SAMPLEBITS ?
+		dai_drv->symmetric_sample_bits =
+			(flags & SND_SOC_TPLG_DAI_FLGBIT_SYMMETRIC_SAMPLEBITS) ?
 			1 : 0;
 }
 
@@ -1764,23 +1764,23 @@ static void set_link_flags(struct snd_soc_dai_link *link,
 		unsigned int flag_mask, unsigned int flags)
 {
 	if (flag_mask & SND_SOC_TPLG_LNK_FLGBIT_SYMMETRIC_RATES)
-		link->symmetric_rates =
-			flags & SND_SOC_TPLG_LNK_FLGBIT_SYMMETRIC_RATES ? 1 : 0;
+		link->symmetric_rate =
+			(flags & SND_SOC_TPLG_LNK_FLGBIT_SYMMETRIC_RATES) ? 1 : 0;
 
 	if (flag_mask & SND_SOC_TPLG_LNK_FLGBIT_SYMMETRIC_CHANNELS)
 		link->symmetric_channels =
-			flags & SND_SOC_TPLG_LNK_FLGBIT_SYMMETRIC_CHANNELS ?
+			(flags & SND_SOC_TPLG_LNK_FLGBIT_SYMMETRIC_CHANNELS) ?
 			1 : 0;
 
 	if (flag_mask & SND_SOC_TPLG_LNK_FLGBIT_SYMMETRIC_SAMPLEBITS)
-		link->symmetric_samplebits =
-			flags & SND_SOC_TPLG_LNK_FLGBIT_SYMMETRIC_SAMPLEBITS ?
+		link->symmetric_sample_bits =
+			(flags & SND_SOC_TPLG_LNK_FLGBIT_SYMMETRIC_SAMPLEBITS) ?
 			1 : 0;
 
 	if (flag_mask & SND_SOC_TPLG_LNK_FLGBIT_VOICE_WAKEUP)
 		link->ignore_suspend =
-		flags & SND_SOC_TPLG_LNK_FLGBIT_VOICE_WAKEUP ?
-		1 : 0;
+			(flags & SND_SOC_TPLG_LNK_FLGBIT_VOICE_WAKEUP) ?
+			1 : 0;
 }
 
 /* create the FE DAI link */
@@ -1901,7 +1901,7 @@ static void stream_caps_new_ver(struct snd_soc_tplg_stream_caps *dest,
  * @src: older version of pcm as a source
  * @pcm: latest version of pcm created from the source
  *
- * Support from vesion 4. User should free the returned pcm manually.
+ * Support from version 4. User should free the returned pcm manually.
  */
 static int pcm_new_ver(struct soc_tplg *tplg,
 		       struct snd_soc_tplg_pcm *src,
@@ -2089,7 +2089,7 @@ static void set_link_hw_format(struct snd_soc_dai_link *link,
  * @src: old version of phyical link config as a source
  * @link: latest version of physical link config created from the source
  *
- * Support from vesion 4. User need free the returned link config manually.
+ * Support from version 4. User need free the returned link config manually.
  */
 static int link_new_ver(struct soc_tplg *tplg,
 			struct snd_soc_tplg_link_config *src,
@@ -2400,7 +2400,7 @@ static int soc_tplg_dai_elems_load(struct soc_tplg *tplg,
  * @src: old version of manifest as a source
  * @manifest: latest version of manifest created from the source
  *
- * Support from vesion 4. Users need free the returned manifest manually.
+ * Support from version 4. Users need free the returned manifest manually.
  */
 static int manifest_new_ver(struct soc_tplg *tplg,
 			    struct snd_soc_tplg_manifest *src,
@@ -2660,8 +2660,14 @@ int snd_soc_tplg_component_load(struct snd_soc_component *comp,
 	struct soc_tplg tplg;
 	int ret;
 
-	/* component needs to exist to keep and reference data while parsing */
-	if (!comp)
+	/*
+	 * check if we have sane parameters:
+	 * comp - needs to exist to keep and reference data while parsing
+	 * comp->dev - used for resource management and prints
+	 * comp->card - used for setting card related parameters
+	 * fw - we need it, as it is the very thing we parse
+	 */
+	if (!comp || !comp->dev || !comp->card || !fw)
 		return -EINVAL;
 
 	/* setup parsing context */
@@ -2669,11 +2675,13 @@ int snd_soc_tplg_component_load(struct snd_soc_component *comp,
 	tplg.fw = fw;
 	tplg.dev = comp->dev;
 	tplg.comp = comp;
-	tplg.ops = ops;
-	tplg.io_ops = ops->io_ops;
-	tplg.io_ops_count = ops->io_ops_count;
-	tplg.bytes_ext_ops = ops->bytes_ext_ops;
-	tplg.bytes_ext_ops_count = ops->bytes_ext_ops_count;
+	if (ops) {
+		tplg.ops = ops;
+		tplg.io_ops = ops->io_ops;
+		tplg.io_ops_count = ops->io_ops_count;
+		tplg.bytes_ext_ops = ops->bytes_ext_ops;
+		tplg.bytes_ext_ops_count = ops->bytes_ext_ops_count;
+	}
 
 	ret = soc_tplg_load(&tplg);
 	/* free the created components if fail to load topology */

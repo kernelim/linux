@@ -704,7 +704,7 @@ struct bio_set {
 	struct work_struct	rescue_work;
 	struct workqueue_struct	*rescue_workqueue;
 
-	RH_KABI_RESERVE(1)
+	RH_KABI_USE(1, unsigned int back_pad)
 	RH_KABI_RESERVE(2)
 	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)

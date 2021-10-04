@@ -828,7 +828,7 @@ static int gfs2_adjust_quota(struct gfs2_inode *ip, loff_t loc,
 	u64 size;
 
 	if (gfs2_is_stuffed(ip)) {
-		err = gfs2_unstuff_dinode(ip, NULL);
+		err = gfs2_unstuff_dinode(ip);
 		if (err)
 			return err;
 	}
@@ -1192,7 +1192,7 @@ static int print_message(struct gfs2_quota_data *qd, char *type)
  *
  * Returns: 0 on success.
  *                  min_req = ap->min_target ? ap->min_target : ap->target;
- *                  quota must allow atleast min_req blks for success and
+ *                  quota must allow at least min_req blks for success and
  *                  ap->allowed is set to the number of blocks allowed
  *
  *          -EDQUOT otherwise, quota violation. ap->allowed is set to number
@@ -1378,8 +1378,8 @@ int gfs2_quota_init(struct gfs2_sbd *sdp)
 		unsigned int y;
 
 		if (!extlen) {
-			int new = 0;
-			error = gfs2_extent_map(&ip->i_inode, x, &new, &dblock, &extlen);
+			extlen = 32;
+			error = gfs2_get_extent(&ip->i_inode, x, &dblock, &extlen);
 			if (error)
 				goto fail;
 		}

@@ -23,6 +23,8 @@
 
 #include <net/sock.h>
 
+#include <linux/rh_kabi.h>
+
 struct request_sock;
 struct sk_buff;
 struct dst_entry;
@@ -45,6 +47,13 @@ struct request_sock_ops {
 
 int inet_rtx_syn_ack(const struct sock *parent, struct request_sock *req);
 
+struct saved_syn {
+	u32 mac_hdrlen;
+	u32 network_hdrlen;
+	u32 tcp_hdrlen;
+	u8 data[];
+};
+
 /* struct request_sock - mini sock to represent a connection request
  */
 struct request_sock {
@@ -65,7 +74,7 @@ struct request_sock {
 	struct timer_list		rsk_timer;
 	const struct request_sock_ops	*rsk_ops;
 	struct sock			*sk;
-	u32				*saved_syn;
+	RH_KABI_REPLACE(u32 *saved_syn, struct saved_syn *saved_syn)
 	u32				secid;
 	u32				peer_secid;
 };

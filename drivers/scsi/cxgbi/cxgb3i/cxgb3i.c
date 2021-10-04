@@ -361,7 +361,7 @@ static inline void make_tx_data_wr(struct cxgbi_sock *csk, struct sk_buff *skb,
 	/* len includes the length of any HW ULP additions */
 	req->len = htonl(len);
 	/* V_TX_ULP_SUBMODE sets both the mode and submode */
-	req->flags = htonl(V_TX_ULP_SUBMODE(cxgbi_skcb_ulp_mode(skb)) |
+	req->flags = htonl(V_TX_ULP_SUBMODE(cxgbi_skcb_tx_ulp_mode(skb)) |
 			   V_TX_SHOVE((skb_peek(&csk->write_queue) ? 0 : 1)));
 	req->sndseq = htonl(csk->snd_nxt);
 	req->param = htonl(V_TX_PORT(l2t->smt_idx));
@@ -442,7 +442,7 @@ static int push_tx_frames(struct cxgbi_sock *csk, int req_completion)
 				req_completion = 1;
 				csk->wr_una_cred = 0;
 			}
-			len += cxgbi_ulp_extra_len(cxgbi_skcb_ulp_mode(skb));
+			len += cxgbi_ulp_extra_len(cxgbi_skcb_tx_ulp_mode(skb));
 			make_tx_data_wr(csk, skb, len, req_completion);
 			csk->snd_nxt += len;
 			cxgbi_skcb_clear_flag(skb, SKCBF_TX_NEED_HDR);
@@ -645,7 +645,7 @@ static int abort_status_to_errno(struct cxgbi_sock *csk, int abort_reason,
 				 int *need_rst)
 {
 	switch (abort_reason) {
-	case CPL_ERR_BAD_SYN: /* fall through */
+	case CPL_ERR_BAD_SYN:
 	case CPL_ERR_CONN_RESET:
 		return csk->state > CTP_ESTABLISHED ? -EPIPE : -ECONNRESET;
 	case CPL_ERR_XMIT_TIMEDOUT:

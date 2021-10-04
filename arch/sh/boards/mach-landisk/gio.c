@@ -31,11 +31,10 @@ static int openCnt;
 
 static int gio_open(struct inode *inode, struct file *filp)
 {
-	int minor;
+	int minor = iminor(inode);
 	int ret = -ENOENT;
 
 	preempt_disable();
-	minor = MINOR(inode->i_rdev);
 	if (minor < DEVCOUNT) {
 		if (openCnt > 0) {
 			ret = -EALREADY;
@@ -50,9 +49,8 @@ static int gio_open(struct inode *inode, struct file *filp)
 
 static int gio_close(struct inode *inode, struct file *filp)
 {
-	int minor;
+	int minor = iminor(inode);
 
-	minor = MINOR(inode->i_rdev);
 	if (minor < DEVCOUNT) {
 		openCnt--;
 	}

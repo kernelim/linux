@@ -565,7 +565,7 @@ bool mm_has_blockable_invalidate_notifiers(struct mm_struct *mm)
 }
 
 /*
- * Same as mmu_notifier_register but here the caller must hold the mmap_sem in
+ * Same as mmu_notifier_register but here the caller must hold the mmap_lock in
  * write mode. A NULL mn signals the notifier is being registered for itree
  * mode.
  */
@@ -574,8 +574,17 @@ int __mmu_notifier_register(struct mmu_notifier *mn, struct mm_struct *mm)
 	struct mmu_notifier_mm *mmu_notifier_mm = NULL;
 	int ret;
 
-	lockdep_assert_held_write(&mm->mmap_sem);
+	mmap_assert_write_locked(mm);
 	BUG_ON(atomic_read(&mm->mm_users) <= 0);
+
+	if (mn) {
+		mn->_rh = kmalloc(sizeof(*mn->_rh), GFP_KERNEL);
+		if (!mn->_rh) {
+			return -ENOMEM;
+		}
+		mn->_rh->back_ptr = mn;
+		RH_KABI_AUX_SET_SIZE(mn, mmu_notifier);
+	}
 
 	if (!mm->mmu_notifier_mm) {
 		/*
@@ -585,8 +594,10 @@ int __mmu_notifier_register(struct mmu_notifier *mn, struct mm_struct *mm)
 		 */
 		mmu_notifier_mm =
 			kzalloc(sizeof(struct mmu_notifier_mm), GFP_KERNEL);
-		if (!mmu_notifier_mm)
-			return -ENOMEM;
+		if (!mmu_notifier_mm) {
+			ret = -ENOMEM;
+			goto out_free_rh;
+		}
 
 		INIT_HLIST_HEAD(&mmu_notifier_mm->list);
 		spin_lock_init(&mmu_notifier_mm->lock);
@@ -638,6 +649,9 @@ int __mmu_notifier_register(struct mmu_notifier *mn, struct mm_struct *mm)
 
 out_clean:
 	kfree(mmu_notifier_mm);
+out_free_rh:
+	if (mn)
+		kfree(mn->_rh);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(__mmu_notifier_register);
@@ -647,7 +661,7 @@ EXPORT_SYMBOL_GPL(__mmu_notifier_register);
  * @mn: The notifier to attach
  * @mm: The mm to attach the notifier to
  *
- * Must not hold mmap_sem nor any other VM related lock when calling
+ * Must not hold mmap_lock nor any other VM related lock when calling
  * this registration function. Must also ensure mm_users can't go down
  * to zero while this runs to avoid races with mmu_notifier_release,
  * so mm has to be current->mm or the mm should be pinned safely such
@@ -665,9 +679,9 @@ int mmu_notifier_register(struct mmu_notifier *mn, struct mm_struct *mm)
 {
 	int ret;
 
-	down_write(&mm->mmap_sem);
+	mmap_write_lock(mm);
 	ret = __mmu_notifier_register(mn, mm);
-	up_write(&mm->mmap_sem);
+	mmap_write_unlock(mm);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(mmu_notifier_register);
@@ -708,7 +722,7 @@ find_get_mmu_notifier(struct mm_struct *mm, const struct mmu_notifier_ops *ops)
  * are the same.
  *
  * Each call to mmu_notifier_get() must be paired with a call to
- * mmu_notifier_put(). The caller must hold the write side of mm->mmap_sem.
+ * mmu_notifier_put(). The caller must hold the write side of mm->mmap_lock.
  *
  * While the caller has a mmu_notifier get the mm pointer will remain valid,
  * and can be converted to an active mm pointer via mmget_not_zero().
@@ -719,7 +733,7 @@ struct mmu_notifier *mmu_notifier_get_locked(const struct mmu_notifier_ops *ops,
 	struct mmu_notifier *mn;
 	int ret;
 
-	lockdep_assert_held_write(&mm->mmap_sem);
+	mmap_assert_write_locked(mm);
 
 	if (mm->mmu_notifier_mm) {
 		mn = find_get_mmu_notifier(mm, ops);
@@ -731,21 +745,11 @@ struct mmu_notifier *mmu_notifier_get_locked(const struct mmu_notifier_ops *ops,
 	if (IS_ERR(mn))
 		return mn;
 
-	mn->_rh = kmalloc(sizeof(*mn->_rh), GFP_KERNEL);
-	if (!mn->_rh) {
-		ret = -ENOMEM;
-		goto out_free;
-	}
-	mn->_rh->back_ptr = mn;
-	RH_KABI_AUX_SET_SIZE(mn, mmu_notifier);
-
 	mn->ops = ops;
 	ret = __mmu_notifier_register(mn, mm);
 	if (ret)
-		goto out_free_rh;
+		goto out_free;
 	return mn;
-out_free_rh:
-	kfree(mn->_rh);
 out_free:
 	mn->ops->free_notifier(mn);
 	return ERR_PTR(ret);
@@ -805,11 +809,18 @@ void mmu_notifier_unregister(struct mmu_notifier *mn, struct mm_struct *mm)
 	 */
 	synchronize_srcu(&srcu);
 
+	kfree(mn->_rh);
+
 	BUG_ON(atomic_read(&mm->mm_count) <= 0);
 
 	mmdrop(mm);
 }
 EXPORT_SYMBOL_GPL(mmu_notifier_unregister);
+
+static void mmu_notifier_rh_free_rcu(struct rcu_head *rcu)
+{
+	kfree(container_of(rcu, struct mmu_notifier_rh, rcu));
+}
 
 /*
  * Same as mmu_notifier_unregister but no callback and no srcu synchronization.
@@ -824,6 +835,8 @@ void mmu_notifier_unregister_no_release(struct mmu_notifier *mn,
 	 */
 	hlist_del_init_rcu(&mn->hlist);
 	spin_unlock(&mm->mmu_notifier_mm->lock);
+
+	call_srcu(&srcu, &mn->_rh->rcu, mmu_notifier_rh_free_rcu);
 
 	BUG_ON(atomic_read(&mm->mm_count) <= 0);
 	mmdrop(mm);
@@ -928,7 +941,7 @@ int mmu_interval_notifier_insert(struct mmu_interval_notifier *mni,
 	struct mmu_notifier_mm *mmn_mm;
 	int ret;
 
-	might_lock(&mm->mmap_sem);
+	might_lock(&mm->mmap_lock);
 
 	mmn_mm = smp_load_acquire(&mm->mmu_notifier_mm);
 	if (!mmn_mm || !mmn_mm->has_itree) {
@@ -950,7 +963,7 @@ int mmu_interval_notifier_insert_locked(
 	struct mmu_notifier_mm *mmn_mm;
 	int ret;
 
-	lockdep_assert_held_write(&mm->mmap_sem);
+	mmap_assert_write_locked(mm);
 
 	mmn_mm = mm->mmu_notifier_mm;
 	if (!mmn_mm || !mmn_mm->has_itree) {

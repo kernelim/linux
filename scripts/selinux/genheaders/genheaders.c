@@ -126,6 +126,14 @@ int main(int argc, char *argv[])
 		struct security_class_mapping *map = &secclass_map[i];
 		int len = strlen(map->name);
 		for (j = 0; map->perms[j]; j++) {
+			/*
+			 * RHEL8-only: skip empty string perms to support the
+			 * exclusion of CAP_PERFMON and CAP_BPF from SELinux
+			 * in RHEL-8, while allowing CAP_CHECKPOINT_RESTORE
+			 * to be checked.
+			 */
+			if (!strcmp(map->perms[j], ""))
+				continue;
 			if (j >= 32) {
 				fprintf(stderr, "Too many permissions to fit into an access vector at (%s, %s).\n",
 					map->name, map->perms[j]);

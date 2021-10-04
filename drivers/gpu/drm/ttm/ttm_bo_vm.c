@@ -31,7 +31,6 @@
 
 #define pr_fmt(fmt) "[TTM] " fmt
 
-#include <drm/ttm/ttm_module.h>
 #include <drm/ttm/ttm_bo_driver.h>
 #include <drm/ttm/ttm_placement.h>
 #include <drm/drm_vma_manager.h>
@@ -101,8 +100,7 @@ static unsigned long ttm_bo_io_mem_pfn(struct ttm_buffer_object *bo,
 	if (bdev->driver->io_mem_pfn)
 		return bdev->driver->io_mem_pfn(bo, page_offset);
 
-	return ((bo->mem.bus.base + bo->mem.bus.offset) >> PAGE_SHIFT)
-		+ page_offset;
+	return (bo->mem.bus.offset >> PAGE_SHIFT) + page_offset;
 }
 
 /**
@@ -158,6 +156,15 @@ vm_fault_t ttm_bo_vm_reserve(struct ttm_buffer_object *bo,
 			return VM_FAULT_NOPAGE;
 	}
 
+	/*
+	 * Refuse to fault imported pages. This should be handled
+	 * (if at all) by redirecting mmap to the exporter.
+	 */
+	if (bo->ttm && (bo->ttm->page_flags & TTM_PAGE_FLAG_SG)) {
+		dma_resv_unlock(bo->base.resv);
+		return VM_FAULT_SIGBUS;
+	}
+
 	return 0;
 }
 EXPORT_SYMBOL(ttm_bo_vm_reserve);
@@ -191,7 +198,7 @@ static vm_fault_t ttm_bo_vm_insert_huge(struct vm_fault *vmf,
 
 	/* Fault should not cross bo boundary. */
 	page_offset &= ~(fault_page_size - 1);
-	if (page_offset + fault_page_size > bo->num_pages)
+	if (page_offset + fault_page_size > bo->mem.num_pages)
 		goto out_fallback;
 
 	if (bo->mem.bus.is_iomem)
@@ -281,39 +288,6 @@ vm_fault_t ttm_bo_vm_fault_reserved(struct vm_fault *vmf,
 	pgoff_t i;
 	vm_fault_t ret = VM_FAULT_NOPAGE;
 	unsigned long address = vmf->address;
-	struct ttm_mem_type_manager *man =
-		&bdev->man[bo->mem.mem_type];
-
-	/*
-	 * Refuse to fault imported pages. This should be handled
-	 * (if at all) by redirecting mmap to the exporter.
-	 */
-	if (bo->ttm && (bo->ttm->page_flags & TTM_PAGE_FLAG_SG))
-		return VM_FAULT_SIGBUS;
-
-	if (bdev->driver->fault_reserve_notify) {
-		struct dma_fence *moving = dma_fence_get(bo->moving);
-
-		err = bdev->driver->fault_reserve_notify(bo);
-		switch (err) {
-		case 0:
-			break;
-		case -EBUSY:
-		case -ERESTARTSYS:
-			dma_fence_put(moving);
-			return VM_FAULT_NOPAGE;
-		default:
-			dma_fence_put(moving);
-			return VM_FAULT_SIGBUS;
-		}
-
-		if (bo->moving != moving) {
-			spin_lock(&ttm_bo_glob.lru_lock);
-			ttm_bo_move_to_lru_tail(bo, NULL);
-			spin_unlock(&ttm_bo_glob.lru_lock);
-		}
-		dma_fence_put(moving);
-	}
 
 	/*
 	 * Wait for buffer data in transit, due to a pipelined
@@ -323,50 +297,38 @@ vm_fault_t ttm_bo_vm_fault_reserved(struct vm_fault *vmf,
 	if (unlikely(ret != 0))
 		return ret;
 
-	err = ttm_mem_io_lock(man, true);
+	err = ttm_mem_io_reserve(bdev, &bo->mem);
 	if (unlikely(err != 0))
-		return VM_FAULT_NOPAGE;
-	err = ttm_mem_io_reserve_vm(bo);
-	if (unlikely(err != 0)) {
-		ret = VM_FAULT_SIGBUS;
-		goto out_io_unlock;
-	}
+		return VM_FAULT_SIGBUS;
 
 	page_offset = ((address - vma->vm_start) >> PAGE_SHIFT) +
 		vma->vm_pgoff - drm_vma_node_start(&bo->base.vma_node);
 	page_last = vma_pages(vma) + vma->vm_pgoff -
 		drm_vma_node_start(&bo->base.vma_node);
 
-	if (unlikely(page_offset >= bo->num_pages)) {
-		ret = VM_FAULT_SIGBUS;
-		goto out_io_unlock;
-	}
+	if (unlikely(page_offset >= bo->mem.num_pages))
+		return VM_FAULT_SIGBUS;
 
-	prot = ttm_io_prot(bo->mem.placement, prot);
+	prot = ttm_io_prot(bo, &bo->mem, prot);
 	if (!bo->mem.bus.is_iomem) {
 		struct ttm_operation_ctx ctx = {
 			.interruptible = false,
 			.no_wait_gpu = false,
-			.flags = TTM_OPT_FLAG_FORCE_ALLOC
-
+			.force_alloc = true
 		};
 
 		ttm = bo->ttm;
-		if (ttm_tt_populate(bo->ttm, &ctx)) {
-			ret = VM_FAULT_OOM;
-			goto out_io_unlock;
-		}
+		if (ttm_tt_populate(bdev, bo->ttm, &ctx))
+			return VM_FAULT_OOM;
 	} else {
 		/* Iomem should not be marked encrypted */
 		prot = pgprot_decrypted(prot);
 	}
 
 	/* We don't prefault on huge faults. Yet. */
-	if (IS_ENABLED(CONFIG_TRANSPARENT_HUGEPAGE) && fault_page_size != 1) {
-		ret = ttm_bo_vm_insert_huge(vmf, bo, page_offset,
-					    fault_page_size, prot);
-		goto out_io_unlock;
-	}
+	if (IS_ENABLED(CONFIG_TRANSPARENT_HUGEPAGE) && fault_page_size != 1)
+		return ttm_bo_vm_insert_huge(vmf, bo, page_offset,
+					     fault_page_size, prot);
 
 	/*
 	 * Speculatively prefault a number of pages. Only error on
@@ -378,8 +340,7 @@ vm_fault_t ttm_bo_vm_fault_reserved(struct vm_fault *vmf,
 		} else {
 			page = ttm->pages[page_offset];
 			if (unlikely(!page && i == 0)) {
-				ret = VM_FAULT_OOM;
-				goto out_io_unlock;
+				return VM_FAULT_OOM;
 			} else if (unlikely(!page)) {
 				break;
 			}
@@ -406,7 +367,7 @@ vm_fault_t ttm_bo_vm_fault_reserved(struct vm_fault *vmf,
 		/* Never error on prefaulted PTEs */
 		if (unlikely((ret & VM_FAULT_ERROR))) {
 			if (i == 0)
-				goto out_io_unlock;
+				return VM_FAULT_NOPAGE;
 			else
 				break;
 		}
@@ -415,9 +376,6 @@ vm_fault_t ttm_bo_vm_fault_reserved(struct vm_fault *vmf,
 		if (unlikely(++page_offset >= page_last))
 			break;
 	}
-	ret = VM_FAULT_NOPAGE;
-out_io_unlock:
-	ttm_mem_io_unlock(man);
 	return ret;
 }
 EXPORT_SYMBOL(ttm_bo_vm_fault_reserved);
@@ -511,7 +469,7 @@ int ttm_bo_vm_access(struct vm_area_struct *vma, unsigned long addr,
 		 << PAGE_SHIFT);
 	int ret;
 
-	if (len < 1 || (offset + len) >> PAGE_SHIFT > bo->num_pages)
+	if (len < 1 || (offset + len) >> PAGE_SHIFT > bo->mem.num_pages)
 		return -EIO;
 
 	ret = ttm_bo_reserve(bo, true, false, NULL);

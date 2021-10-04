@@ -89,9 +89,7 @@ u32 ethtool_op_get_link(struct net_device *dev);
 int ethtool_op_get_ts_info(struct net_device *dev, struct ethtool_ts_info *eti);
 
 
-/**
- * struct ethtool_link_ext_state_info - link extended state and substate.
- */
+/* Link extended state and substate. */
 struct ethtool_link_ext_state_info {
 	enum ethtool_link_ext_state link_ext_state;
 	union {
@@ -130,6 +128,17 @@ struct ethtool_link_ksettings {
 		__ETHTOOL_DECLARE_LINK_MODE_MASK(advertising);
 		__ETHTOOL_DECLARE_LINK_MODE_MASK(lp_advertising);
 	} link_modes;
+	/*
+	 * RHEL: NIC drivers do not allocate instances of this structure
+	 * by themselves and there is no exported function that works
+	 * with this structure on KABI allow-list. But this could be changed
+	 * if functions like __ethtool_get_link_ksettings() would be placed
+	 * on KABI allow-list.
+	 */
+	RH_KABI_EXTEND_WITH_SIZE(struct {
+				 u32	lanes;
+				 },
+				 4)
 };
 
 /**
@@ -217,6 +226,7 @@ bool ethtool_convert_link_mode_to_legacy_u32(u32 *legacy_u32,
 #define ETHTOOL_COALESCE_TX_USECS_HIGH		BIT(19)
 #define ETHTOOL_COALESCE_TX_MAX_FRAMES_HIGH	BIT(20)
 #define ETHTOOL_COALESCE_RATE_SAMPLE_INTERVAL	BIT(21)
+#define ETHTOOL_COALESCE_ALL_PARAMS		GENMASK(21, 0)
 
 #define ETHTOOL_COALESCE_USECS						\
 	(ETHTOOL_COALESCE_RX_USECS | ETHTOOL_COALESCE_TX_USECS)
@@ -243,11 +253,34 @@ bool ethtool_convert_link_mode_to_legacy_u32(u32 *legacy_u32,
 	 ETHTOOL_COALESCE_PKT_RATE_LOW | ETHTOOL_COALESCE_PKT_RATE_HIGH | \
 	 ETHTOOL_COALESCE_RATE_SAMPLE_INTERVAL)
 
+#define ETHTOOL_STAT_NOT_SET	(~0ULL)
+
+/**
+ * struct ethtool_pause_stats - statistics for IEEE 802.3x pause frames
+ * @tx_pause_frames: transmitted pause frame count. Reported to user space
+ *	as %ETHTOOL_A_PAUSE_STAT_TX_FRAMES.
+ *
+ *	Equivalent to `30.3.4.2 aPAUSEMACCtrlFramesTransmitted`
+ *	from the standard.
+ *
+ * @rx_pause_frames: received pause frame count. Reported to user space
+ *	as %ETHTOOL_A_PAUSE_STAT_RX_FRAMES. Equivalent to:
+ *
+ *	Equivalent to `30.3.4.3 aPAUSEMACCtrlFramesReceived`
+ *	from the standard.
+ */
+struct ethtool_pause_stats {
+	u64 tx_pause_frames;
+	u64 rx_pause_frames;
+};
+
 struct ethtool_ops_extended_rh {
 };
 
 /**
  * struct ethtool_ops - optional netdev operations
+ * @cap_link_lanes_supported: indicates if the driver supports lanes
+ *	parameter.
  * @supported_coalesce_params: supported types of interrupt coalescing.
  * @get_settings: DEPRECATED, use %get_link_ksettings/%set_link_ksettings
  *	API. Get various device settings including Ethernet link
@@ -279,6 +312,9 @@ struct ethtool_ops_extended_rh {
  *	do not attach ext_substate attribute to netlink message). If link_ext_state
  *	and link_ext_substate are unknown, return -ENODATA. If not implemented,
  *	link_ext_state and link_ext_substate will not be sent to userspace.
+ * @get_eeprom_len: Read range of EEPROM addresses for validation of
+ *	@get_eeprom and @set_eeprom requests.
+ *	Returns 0 if device does not support EEPROM access.
  * @get_eeprom: Read data from the device EEPROM.
  *	Should fill in the magic field.  Don't need to check len for zero
  *	or wraparound.  Fill in the data argument with the eeprom values
@@ -295,6 +331,9 @@ struct ethtool_ops_extended_rh {
  *	Returns a negative error code or zero.
  * @get_ringparam: Report ring sizes
  * @set_ringparam: Set ring sizes.  Returns a negative error code or zero.
+ * @get_pause_stats: Report pause frame statistics. Drivers must not zero
+ *	statistics which they don't report. The stats structure is initialized
+ *	to ETHTOOL_STAT_NOT_SET indicating driver does not report statistics.
  * @get_pauseparam: Report pause parameters
  * @set_pauseparam: Set pause parameters.  Returns a negative error code
  *	or zero.
@@ -368,6 +407,8 @@ struct ethtool_ops_extended_rh {
  * @get_module_eeprom: Get the eeprom information from the plug-in module
  * @get_eee: Get Energy-Efficient (EEE) supported and status.
  * @set_eee: Set EEE status (enable/disable) as well as LPI timers.
+ * @get_tunable: Read the value of a driver / device tunable.
+ * @set_tunable: Set the value of a driver / device tunable.
  * @get_per_queue_coalesce: Get interrupt coalescing parameters per queue.
  *	It must check that the given queue number is valid. If neither a RX nor
  *	a TX queue has this number, return -EINVAL. If only a RX queue or a TX
@@ -397,6 +438,8 @@ struct ethtool_ops_extended_rh {
  * @get_ethtool_phy_stats: Return extended statistics about the PHY device.
  *	This is only useful if the device maintains PHY statistics and
  *	cannot use the standard PHY library helpers.
+ * @get_phy_tunable: Read the value of a PHY tunable.
+ * @set_phy_tunable: Set the value of a PHY tunable.
  *
  * All operations are optional (i.e. the function pointer may be set
  * to %NULL) and callers must take this into account.  Callers must
@@ -505,12 +548,16 @@ struct ethtool_ops {
 				      struct ethtool_link_ksettings *))
 	RH_KABI_USE(2, int	(*set_link_ksettings)(struct net_device *,
 				      const struct ethtool_link_ksettings *))
-	RH_KABI_USE(3, u32	supported_coalesce_params)
+	RH_KABI_USE_SPLIT(3,	u32	supported_coalesce_params,
+				u32     cap_link_lanes_supported:1)
 	RH_KABI_USE(4, int	(*get_link_ext_state)(struct net_device *,
 				      struct ethtool_link_ext_state_info *))
-	RH_KABI_RESERVE(5)
-	RH_KABI_RESERVE(6)
-	RH_KABI_RESERVE(7)
+	RH_KABI_USE(5, void	(*get_pause_stats)(struct net_device *dev,
+				   struct ethtool_pause_stats *pause_stats))
+	RH_KABI_USE(6, int	(*get_phy_tunable)(struct net_device *,
+				   const struct ethtool_tunable *, void *))
+	RH_KABI_USE(7, int	(*set_phy_tunable)(struct net_device *,
+				   const struct ethtool_tunable *, const void *))
 	RH_KABI_RESERVE(8)
 	RH_KABI_RESERVE(9)
 	RH_KABI_RESERVE(10)
@@ -557,5 +604,55 @@ int ethtool_virtdev_set_link_ksettings(struct net_device *dev,
 				       const struct ethtool_link_ksettings *cmd,
 				       u32 *dev_speed, u8 *dev_duplex);
 
+struct netlink_ext_ack;
+struct phy_device;
+struct phy_tdr_config;
 
+/**
+ * struct ethtool_phy_ops - Optional PHY device options
+ * @get_sset_count: Get number of strings that @get_strings will write.
+ * @get_strings: Return a set of strings that describe the requested objects
+ * @get_stats: Return extended statistics about the PHY device.
+ * @start_cable_test: Start a cable test
+ * @start_cable_test_tdr: Start a Time Domain Reflectometry cable test
+ *
+ * All operations are optional (i.e. the function pointer may be set to %NULL)
+ * and callers must take this into account. Callers must hold the RTNL lock.
+ */
+struct ethtool_phy_ops {
+	int (*get_sset_count)(struct phy_device *dev);
+	int (*get_strings)(struct phy_device *dev, u8 *data);
+	int (*get_stats)(struct phy_device *dev,
+			 struct ethtool_stats *stats, u64 *data);
+	int (*start_cable_test)(struct phy_device *phydev,
+				struct netlink_ext_ack *extack);
+	int (*start_cable_test_tdr)(struct phy_device *phydev,
+				    struct netlink_ext_ack *extack,
+				    const struct phy_tdr_config *config);
+};
+
+/**
+ * ethtool_set_ethtool_phy_ops - Set the ethtool_phy_ops singleton
+ * @ops: Ethtool PHY operations to set
+ */
+void ethtool_set_ethtool_phy_ops(const struct ethtool_phy_ops *ops);
+
+/*
+ * ethtool_params_from_link_mode - Derive link parameters from a given link mode
+ * @link_ksettings: Link parameters to be derived from the link mode
+ * @link_mode: Link mode
+ */
+void
+ethtool_params_from_link_mode(struct ethtool_link_ksettings *link_ksettings,
+			      enum ethtool_link_mode_bit_indices link_mode);
+
+/**
+ * ethtool_sprintf - Write formatted string to ethtool string data
+ * @data: Pointer to start of string to update
+ * @fmt: Format of string to write
+ *
+ * Write formatted string to data. Update data to point at start of
+ * next string.
+ */
+extern __printf(2, 3) void ethtool_sprintf(u8 **data, const char *fmt, ...);
 #endif /* _LINUX_ETHTOOL_H */

@@ -11,6 +11,7 @@
  */
 #define pr_fmt(fmt) "rodata_test: " fmt
 
+#include <linux/rodata_test.h>
 #include <linux/uaccess.h>
 #include <asm/sections.h>
 

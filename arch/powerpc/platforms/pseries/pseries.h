@@ -115,6 +115,7 @@ static inline unsigned long cmo_get_page_size(void)
 
 int dlpar_workqueue_init(void);
 
+extern u32 pseries_security_flavor;
 void pseries_setup_rfi_flush(void);
 
 #endif /* _PSERIES_PSERIES_H */

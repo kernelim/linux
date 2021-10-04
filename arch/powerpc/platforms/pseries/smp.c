@@ -46,10 +46,9 @@
 #include <asm/plpar_wrappers.h>
 #include <asm/code-patching.h>
 #include <asm/svm.h>
+#include <asm/kvm_guest.h>
 
 #include "pseries.h"
-#include "offline_states.h"
-
 
 /*
  * The Primary thread of each non-boot processor was started from the OF client
@@ -112,10 +111,7 @@ static inline int smp_startup_cpu(unsigned int lcpu)
 
 	/* Fixup atomic count: it exited inside IRQ handler. */
 	task_thread_info(paca_ptrs[lcpu]->__current)->preempt_count	= 0;
-#ifdef CONFIG_HOTPLUG_CPU
-	if (get_cpu_current_state(lcpu) == CPU_STATE_INACTIVE)
-		goto out;
-#endif
+
 	/* 
 	 * If the RTAS start-cpu token does not exist then presume the
 	 * cpu is already spinning.
@@ -130,9 +126,6 @@ static inline int smp_startup_cpu(unsigned int lcpu)
 		return 0;
 	}
 
-#ifdef CONFIG_HOTPLUG_CPU
-out:
-#endif
 	return 1;
 }
 
@@ -147,10 +140,6 @@ static void smp_setup_cpu(int cpu)
 		vpa_init(cpu);
 
 	cpumask_clear_cpu(cpu, of_spin_mask);
-#ifdef CONFIG_HOTPLUG_CPU
-	set_cpu_current_state(cpu, CPU_STATE_ONLINE);
-	set_default_offline_state(cpu);
-#endif
 }
 
 static int smp_pSeries_kick_cpu(int nr)
@@ -167,20 +156,6 @@ static int smp_pSeries_kick_cpu(int nr)
 	 * the processor will continue on to secondary_start
 	 */
 	paca_ptrs[nr]->cpu_start = 1;
-#ifdef CONFIG_HOTPLUG_CPU
-	set_preferred_offline_state(nr, CPU_STATE_ONLINE);
-
-	if (get_cpu_current_state(nr) == CPU_STATE_INACTIVE) {
-		long rc;
-		unsigned long hcpuid;
-
-		hcpuid = get_hard_smp_processor_id(nr);
-		rc = plpar_hcall_norets(H_PROD, hcpuid);
-		if (rc != H_SUCCESS)
-			printk(KERN_ERR "Error: Prod to wake up processor %d "
-						"Ret= %ld\n", nr, rc);
-	}
-#endif
 
 	return 0;
 }
@@ -240,7 +215,7 @@ static __init void pSeries_smp_probe(void)
 	if (!cpu_has_feature(CPU_FTR_SMT))
 		return;
 
-	if (is_kvm_guest()) {
+	if (check_kvm_guest()) {
 		/*
 		 * KVM emulates doorbells by disabling FSCR[MSGP] so msgsndp
 		 * faults to the hypervisor which then reads the instruction

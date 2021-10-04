@@ -146,7 +146,8 @@ ieee80211_bss_info_update(struct ieee80211_local *local,
 			  struct ieee80211_mgmt *mgmt, size_t len,
 			  struct ieee80211_channel *channel)
 {
-	bool beacon = ieee80211_is_beacon(mgmt->frame_control);
+	bool beacon = ieee80211_is_beacon(mgmt->frame_control) ||
+		      ieee80211_is_s1g_beacon(mgmt->frame_control);
 	struct cfg80211_bss *cbss, *non_tx_cbss;
 	struct ieee80211_bss *bss, *non_tx_bss;
 	struct cfg80211_inform_bss bss_meta = {
@@ -195,6 +196,11 @@ ieee80211_bss_info_update(struct ieee80211_local *local,
 		elements = mgmt->u.probe_resp.variable;
 		baselen = offsetof(struct ieee80211_mgmt,
 				   u.probe_resp.variable);
+	} else if (ieee80211_is_s1g_beacon(mgmt->frame_control)) {
+		struct ieee80211_ext *ext = (void *) mgmt;
+
+		baselen = offsetof(struct ieee80211_ext, u.s1g_beacon.variable);
+		elements = ext->u.s1g_beacon.variable;
 	} else {
 		baselen = offsetof(struct ieee80211_mgmt, u.beacon.variable);
 		elements = mgmt->u.beacon.variable;
@@ -246,9 +252,12 @@ void ieee80211_scan_rx(struct ieee80211_local *local, struct sk_buff *skb)
 	struct ieee80211_bss *bss;
 	struct ieee80211_channel *channel;
 
-	if (skb->len < 24 ||
-	    (!ieee80211_is_probe_resp(mgmt->frame_control) &&
-	     !ieee80211_is_beacon(mgmt->frame_control)))
+	if (ieee80211_is_s1g_beacon(mgmt->frame_control)) {
+		if (skb->len < 15)
+			return;
+	} else if (skb->len < 24 ||
+		 (!ieee80211_is_probe_resp(mgmt->frame_control) &&
+		  !ieee80211_is_beacon(mgmt->frame_control)))
 		return;
 
 	sdata1 = rcu_dereference(local->scan_sdata);
@@ -909,6 +918,17 @@ static void ieee80211_scan_state_set_channel(struct ieee80211_local *local,
 	local->scan_chandef.center_freq1 = chan->center_freq;
 	local->scan_chandef.freq1_offset = chan->freq_offset;
 	local->scan_chandef.center_freq2 = 0;
+
+	/* For scanning on the S1G band, ignore scan_width (which is constant
+	 * across all channels) for now since channel width is specific to each
+	 * channel. Detect the required channel width here and likely revisit
+	 * later. Maybe scan_width could be used to build the channel scan list?
+	 */
+	if (chan->band == NL80211_BAND_S1GHZ) {
+		local->scan_chandef.width = ieee80211_s1g_channel_width(chan);
+		goto set_channel;
+	}
+
 	switch (scan_req->scan_width) {
 	case NL80211_BSS_CHAN_WIDTH_5:
 		local->scan_chandef.width = NL80211_CHAN_WIDTH_5;
@@ -929,8 +949,14 @@ static void ieee80211_scan_state_set_channel(struct ieee80211_local *local,
 		else
 			local->scan_chandef.width = NL80211_CHAN_WIDTH_20_NOHT;
 		break;
+	case NL80211_BSS_CHAN_WIDTH_1:
+	case NL80211_BSS_CHAN_WIDTH_2:
+		/* shouldn't get here, S1G handled above */
+		WARN_ON(1);
+		break;
 	}
 
+set_channel:
 	if (ieee80211_hw_config(local, IEEE80211_CONF_CHANGE_CHANNEL))
 		skip = 1;
 

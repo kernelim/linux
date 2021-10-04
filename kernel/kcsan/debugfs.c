@@ -6,6 +6,7 @@
 #include <linux/debugfs.h>
 #include <linux/init.h>
 #include <linux/kallsyms.h>
+#include <linux/sched.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/sort.h>
@@ -24,39 +25,32 @@ static atomic_long_t counters[KCSAN_COUNTER_COUNT];
  * whitelist or blacklist.
  */
 static struct {
-	unsigned long *addrs; /* array of addresses */
-	size_t size; /* current size */
-	int used; /* number of elements used */
-	bool sorted; /* if elements are sorted */
-	bool whitelist; /* if list is a blacklist or whitelist */
+	unsigned long	*addrs;		/* array of addresses */
+	size_t		size;		/* current size */
+	int		used;		/* number of elements used */
+	bool		sorted;		/* if elements are sorted */
+	bool		whitelist;	/* if list is a blacklist or whitelist */
 } report_filterlist = {
-	.addrs = NULL,
-	.size = 8, /* small initial size */
-	.used = 0,
-	.sorted = false,
-	.whitelist = false, /* default is blacklist */
+	.addrs		= NULL,
+	.size		= 8,		/* small initial size */
+	.used		= 0,
+	.sorted		= false,
+	.whitelist	= false,	/* default is blacklist */
 };
 static DEFINE_SPINLOCK(report_filterlist_lock);
 
 static const char *counter_to_name(enum kcsan_counter_id id)
 {
 	switch (id) {
-	case KCSAN_COUNTER_USED_WATCHPOINTS:
-		return "used_watchpoints";
-	case KCSAN_COUNTER_SETUP_WATCHPOINTS:
-		return "setup_watchpoints";
-	case KCSAN_COUNTER_DATA_RACES:
-		return "data_races";
-	case KCSAN_COUNTER_NO_CAPACITY:
-		return "no_capacity";
-	case KCSAN_COUNTER_REPORT_RACES:
-		return "report_races";
-	case KCSAN_COUNTER_RACES_UNKNOWN_ORIGIN:
-		return "races_unknown_origin";
-	case KCSAN_COUNTER_UNENCODABLE_ACCESSES:
-		return "unencodable_accesses";
-	case KCSAN_COUNTER_ENCODING_FALSE_POSITIVES:
-		return "encoding_false_positives";
+	case KCSAN_COUNTER_USED_WATCHPOINTS:		return "used_watchpoints";
+	case KCSAN_COUNTER_SETUP_WATCHPOINTS:		return "setup_watchpoints";
+	case KCSAN_COUNTER_DATA_RACES:			return "data_races";
+	case KCSAN_COUNTER_ASSERT_FAILURES:		return "assert_failures";
+	case KCSAN_COUNTER_NO_CAPACITY:			return "no_capacity";
+	case KCSAN_COUNTER_REPORT_RACES:		return "report_races";
+	case KCSAN_COUNTER_RACES_UNKNOWN_ORIGIN:	return "races_unknown_origin";
+	case KCSAN_COUNTER_UNENCODABLE_ACCESSES:	return "unencodable_accesses";
+	case KCSAN_COUNTER_ENCODING_FALSE_POSITIVES:	return "encoding_false_positives";
 	case KCSAN_COUNTER_COUNT:
 		BUG();
 	}
@@ -76,9 +70,9 @@ void kcsan_counter_dec(enum kcsan_counter_id id)
 /*
  * The microbenchmark allows benchmarking KCSAN core runtime only. To run
  * multiple threads, pipe 'microbench=<iters>' from multiple tasks into the
- * debugfs file.
+ * debugfs file. This will not generate any conflicts, and tests fast-path only.
  */
-static void microbenchmark(unsigned long iters)
+static noinline void microbenchmark(unsigned long iters)
 {
 	cycles_t cycles;
 
@@ -88,16 +82,63 @@ static void microbenchmark(unsigned long iters)
 	while (iters--) {
 		/*
 		 * We can run this benchmark from multiple tasks; this address
-		 * calculation increases likelyhood of some accesses overlapping
-		 * (they still won't conflict because all are reads).
+		 * calculation increases likelyhood of some accesses
+		 * overlapping. Make the access type an atomic read, to never
+		 * set up watchpoints and test the fast-path only.
 		 */
 		unsigned long addr =
 			iters % (CONFIG_KCSAN_NUM_WATCHPOINTS * PAGE_SIZE);
-		__kcsan_check_read((void *)addr, sizeof(long));
+		__kcsan_check_access((void *)addr, sizeof(long), KCSAN_ACCESS_ATOMIC);
 	}
 	cycles = get_cycles() - cycles;
 
 	pr_info("KCSAN: %s end   | cycles: %llu\n", __func__, cycles);
+}
+
+/*
+ * Simple test to create conflicting accesses. Write 'test=<iters>' to KCSAN's
+ * debugfs file from multiple tasks to generate real conflicts and show reports.
+ */
+static long test_dummy;
+static long test_flags;
+static noinline void test_thread(unsigned long iters)
+{
+	const long CHANGE_BITS = 0xff00ff00ff00ff00L;
+	const struct kcsan_ctx ctx_save = current->kcsan_ctx;
+	cycles_t cycles;
+
+	/* We may have been called from an atomic region; reset context. */
+	memset(&current->kcsan_ctx, 0, sizeof(current->kcsan_ctx));
+
+	pr_info("KCSAN: %s begin | iters: %lu\n", __func__, iters);
+	pr_info("test_dummy@%px, test_flags@%px\n", &test_dummy, &test_flags);
+
+	cycles = get_cycles();
+	while (iters--) {
+		/* These all should generate reports. */
+		__kcsan_check_read(&test_dummy, sizeof(test_dummy));
+		ASSERT_EXCLUSIVE_WRITER(test_dummy);
+		ASSERT_EXCLUSIVE_ACCESS(test_dummy);
+
+		ASSERT_EXCLUSIVE_BITS(test_flags, ~CHANGE_BITS); /* no report */
+		__kcsan_check_read(&test_flags, sizeof(test_flags)); /* no report */
+
+		ASSERT_EXCLUSIVE_BITS(test_flags, CHANGE_BITS); /* report */
+		__kcsan_check_read(&test_flags, sizeof(test_flags)); /* no report */
+
+		/* not actually instrumented */
+		WRITE_ONCE(test_dummy, iters);  /* to observe value-change */
+		__kcsan_check_write(&test_dummy, sizeof(test_dummy));
+
+		test_flags ^= CHANGE_BITS; /* generate value-change */
+		__kcsan_check_write(&test_flags, sizeof(test_flags));
+	}
+	cycles = get_cycles() - cycles;
+
+	pr_info("KCSAN: %s end   | cycles: %llu\n", __func__, cycles);
+
+	/* restore context */
+	current->kcsan_ctx = ctx_save;
 }
 
 static int cmp_filterlist_addrs(const void *rhs, const void *lhs)
@@ -116,7 +157,7 @@ bool kcsan_skip_report_debugfs(unsigned long func_addr)
 
 	if (!kallsyms_lookup_size_offset(func_addr, &symbolsize, &offset))
 		return false;
-	func_addr -= offset; /* get function start */
+	func_addr -= offset; /* Get function start */
 
 	spin_lock_irqsave(&report_filterlist_lock, flags);
 	if (report_filterlist.used == 0)
@@ -195,6 +236,7 @@ static ssize_t insert_report_filterlist(const char *func)
 
 out:
 	spin_unlock_irqrestore(&report_filterlist_lock, flags);
+
 	return ret;
 }
 
@@ -226,8 +268,8 @@ static int debugfs_open(struct inode *inode, struct file *file)
 	return single_open(file, show_info, NULL);
 }
 
-static ssize_t debugfs_write(struct file *file, const char __user *buf,
-			     size_t count, loff_t *off)
+static ssize_t
+debugfs_write(struct file *file, const char __user *buf, size_t count, loff_t *off)
 {
 	char kbuf[KSYM_NAME_LEN];
 	char *arg;
@@ -248,6 +290,12 @@ static ssize_t debugfs_write(struct file *file, const char __user *buf,
 		if (kstrtoul(&arg[sizeof("microbench=") - 1], 0, &iters))
 			return -EINVAL;
 		microbenchmark(iters);
+	} else if (!strncmp(arg, "test=", sizeof("test=") - 1)) {
+		unsigned long iters;
+
+		if (kstrtoul(&arg[sizeof("test=") - 1], 0, &iters))
+			return -EINVAL;
+		test_thread(iters);
 	} else if (!strcmp(arg, "whitelist")) {
 		set_report_filterlist_whitelist(true);
 	} else if (!strcmp(arg, "blacklist")) {
@@ -264,10 +312,13 @@ static ssize_t debugfs_write(struct file *file, const char __user *buf,
 	return count;
 }
 
-static const struct file_operations debugfs_ops = { .read = seq_read,
-						    .open = debugfs_open,
-						    .write = debugfs_write,
-						    .release = single_release };
+static const struct file_operations debugfs_ops =
+{
+	.read	 = seq_read,
+	.open	 = debugfs_open,
+	.write	 = debugfs_write,
+	.release = single_release
+};
 
 void __init kcsan_debugfs_init(void)
 {

@@ -10,9 +10,11 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <linux/tcp.h>
+#include <linux/udp.h>
 #include <arpa/inet.h>
 #include <net/if.h>
 #include <netinet/in.h>
+#include <netinet/ip.h>
 #include <netdb.h>
 #include <fcntl.h>
 #include <libgen.h>
@@ -24,6 +26,10 @@
 #include <unistd.h>
 #include <time.h>
 #include <errno.h>
+
+#include <linux/xfrm.h>
+#include <linux/ipsec.h>
+#include <linux/pfkeyv2.h>
 
 #ifndef IPV6_UNICAST_IF
 #define IPV6_UNICAST_IF         76
@@ -90,6 +96,9 @@ struct sock_args {
 		struct in_addr  in;
 		struct in6_addr in6;
 	} expected_raddr;
+
+	/* ESP in UDP encap test */
+	int use_xfrm;
 };
 
 static int server_mode;
@@ -1109,6 +1118,41 @@ static int bind_socket(int sd, struct sock_args *args)
 	return 0;
 }
 
+static int config_xfrm_policy(int sd, struct sock_args *args)
+{
+	struct xfrm_userpolicy_info policy = {};
+	int type = UDP_ENCAP_ESPINUDP;
+	int xfrm_af = IP_XFRM_POLICY;
+	int level = SOL_IP;
+
+	if (args->type != SOCK_DGRAM) {
+		log_error("Invalid socket type. Only DGRAM could be used for XFRM\n");
+		return 1;
+	}
+
+	policy.action = XFRM_POLICY_ALLOW;
+	policy.sel.family = args->version;
+	if (args->version == AF_INET6) {
+		xfrm_af = IPV6_XFRM_POLICY;
+		level = SOL_IPV6;
+	}
+
+	policy.dir = XFRM_POLICY_OUT;
+	if (setsockopt(sd, level, xfrm_af, &policy, sizeof(policy)) < 0)
+		return 1;
+
+	policy.dir = XFRM_POLICY_IN;
+	if (setsockopt(sd, level, xfrm_af, &policy, sizeof(policy)) < 0)
+		return 1;
+
+	if (setsockopt(sd, IPPROTO_UDP, UDP_ENCAP, &type, sizeof(type)) < 0) {
+		log_err_errno("Failed to set xfrm encap");
+		return 1;
+	}
+
+	return 0;
+}
+
 static int lsock_init(struct sock_args *args)
 {
 	long flags;
@@ -1151,6 +1195,11 @@ static int lsock_init(struct sock_args *args)
 
 	if (fcntl(sd, F_SETFD, FD_CLOEXEC) < 0)
 		log_err_errno("Failed to set close-on-exec flag");
+
+	if (args->use_xfrm && config_xfrm_policy(sd, args)) {
+		log_err_errno("Failed to set xfrm policy");
+		goto err;
+	}
 
 out:
 	return sd;
@@ -1522,7 +1571,7 @@ static char *random_msg(int len)
 	return m;
 }
 
-#define GETOPT_STR  "sr:l:p:t:g:P:DRn:M:d:SCi6L:0:1:2:Fbq"
+#define GETOPT_STR  "sr:l:p:t:g:P:DRn:M:d:SCi6xL:0:1:2:Fbq"
 
 static void print_usage(char *prog)
 {
@@ -1541,6 +1590,7 @@ static void print_usage(char *prog)
 	"    -P proto      protocol for socket: icmp, ospf (default: none)\n"
 	"    -D|R          datagram (D) / raw (R) socket (default stream)\n"
 	"    -l addr       local address to bind to\n"
+	"    -x            configure XFRM policy on socket\n"
 	"\n"
 	"    -d dev        bind socket to given device name\n"
 	"    -S            use setsockopt (IP_UNICAST_IF or IP_MULTICAST_IF)\n"
@@ -1700,6 +1750,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'q':
 			quiet = 1;
+			break;
+		case 'x':
+			args.use_xfrm = 1;
 			break;
 		default:
 			print_usage(argv[0]);

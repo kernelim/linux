@@ -27,6 +27,31 @@
 #include <asm/mmu.h>
 
 /*
+ * Get translation granule of the system, which is decided by
+ * PAGE_SIZE.  Used by TTL.
+ *  - 4KB	: 1
+ *  - 16KB	: 2
+ *  - 64KB	: 3
+ */
+#define TLBI_TTL_TG_4K		1
+#define TLBI_TTL_TG_16K		2
+#define TLBI_TTL_TG_64K		3
+
+static inline unsigned long get_trans_granule(void)
+{
+	switch (PAGE_SIZE) {
+	case SZ_4K:
+		return TLBI_TTL_TG_4K;
+	case SZ_16K:
+		return TLBI_TTL_TG_16K;
+	case SZ_64K:
+		return TLBI_TTL_TG_64K;
+	default:
+		return 0;
+	}
+}
+
+/*
  * Raw TLBI operations.
  *
  * Where necessary, use the __tlbi() macro to avoid asm()
@@ -69,6 +94,45 @@
 		__ta |= (unsigned long)(asid) << 48;		\
 		__ta;						\
 	})
+
+
+/*
+ * This macro creates a properly formatted VA operand for the TLB RANGE.
+ * The value bit assignments are:
+ *
+ * +----------+------+-------+-------+-------+----------------------+
+ * |   ASID   |  TG  | SCALE |  NUM  |  TTL  |        BADDR         |
+ * +-----------------+-------+-------+-------+----------------------+
+ * |63      48|47  46|45   44|43   39|38   37|36                   0|
+ *
+ * The address range is determined by below formula:
+ * [BADDR, BADDR + (NUM + 1) * 2^(5*SCALE + 1) * PAGESIZE)
+ *
+ */
+#define __TLBI_VADDR_RANGE(addr, asid, scale, num, ttl)		\
+	({							\
+		unsigned long __ta = (addr) >> PAGE_SHIFT;	\
+		__ta &= GENMASK_ULL(36, 0);			\
+		__ta |= (unsigned long)(ttl) << 37;		\
+		__ta |= (unsigned long)(num) << 39;		\
+		__ta |= (unsigned long)(scale) << 44;		\
+		__ta |= get_trans_granule() << 46;		\
+		__ta |= (unsigned long)(asid) << 48;		\
+		__ta;						\
+	})
+
+/* These macros are used by the TLBI RANGE feature. */
+#define __TLBI_RANGE_PAGES(num, scale)	\
+	((unsigned long)((num) + 1) << (5 * (scale) + 1))
+#define MAX_TLBI_RANGE_PAGES		__TLBI_RANGE_PAGES(31, 3)
+
+/*
+ * Generate 'num' values from -1 to 30 with -1 rejected by the
+ * __flush_tlb_range() loop below.
+ */
+#define TLBI_RANGE_MASK			GENMASK_ULL(4, 0)
+#define __TLBI_RANGE_NUM(pages, scale)	\
+	((((pages) >> (5 * (scale) + 1)) & TLBI_RANGE_MASK) - 1)
 
 /*
  *	TLB Invalidation
@@ -250,31 +314,44 @@ static inline void flush_tlb_page(struct vm_area_struct *vma,
  * This is meant to avoid soft lock-ups on large TLB flushing ranges and not
  * necessarily a performance improvement.
  */
-#define MAX_TLBI_OPS	1024UL
+#define MAX_TLBI_OPS	PTRS_PER_PTE
 
 static inline void __flush_tlb_range(struct vm_area_struct *vma,
 				     unsigned long start, unsigned long end,
 				     unsigned long stride, bool last_level)
 {
 	struct mm_struct *mm = vma->vm_mm;
+	int num = 0;
+	int scale = 0;
 	unsigned long asid = ASID(mm);
 	unsigned long addr;
+	unsigned long pages;
 	enum tlb_flush_types flush;
 
-	if ((end - start) > (MAX_TLBI_OPS * stride)) {
+	start = round_down(start, stride);
+	end = round_up(end, stride);
+	pages = (end - start) >> PAGE_SHIFT;
+
+	/*
+	 * When not uses TLB range ops, we can handle up to
+	 * (MAX_TLBI_OPS - 1) pages;
+	 * When uses TLB range ops, we can handle up to
+	 * (MAX_TLBI_RANGE_PAGES - 1) pages.
+	 */
+	if ((!system_supports_tlb_range() &&
+	     (end - start) >= (MAX_TLBI_OPS * stride)) ||
+	    pages >= MAX_TLBI_RANGE_PAGES) {
 		flush_tlb_mm(mm);
 		return;
 	}
 
-	/* Convert the stride into units of 4k */
-	stride >>= 12;
-
-	start = __TLBI_VADDR(start, asid);
-	end = __TLBI_VADDR(end, asid);
-
 	flush = tlb_flush_check(mm, get_cpu());
 	switch (flush) {
 	case TLB_FLUSH_LOCAL:
+		stride >>= PAGE_SHIFT;
+
+		start = __TLBI_VADDR(start, asid);
+		end = __TLBI_VADDR(end, asid);
 
 		dsb(nshst);
 		for (addr = start; addr < end; addr += stride) {
@@ -296,17 +373,38 @@ static inline void __flush_tlb_range(struct vm_area_struct *vma,
 		put_cpu();
 
 		dsb(ishst);
-		for (addr = start; addr < end; addr += stride) {
-			if (last_level) {
-				__tlbi(vale1is, addr);
-				__tlbi_user(vale1is, addr);
+		while (pages > 0) {
+			if (!system_supports_tlb_range() ||
+			    pages % 2 == 1) {
+			        addr = __TLBI_VADDR(start, asid);
+				if (last_level) {
+					__tlbi(vale1is, addr);
+					__tlbi_user(vale1is, addr);
+				} else {
+					__tlbi(vae1is, addr);
+					__tlbi_user(vae1is, addr);
+				}
+				start += stride;
+				pages -= stride >> PAGE_SHIFT;
 			} else {
-				__tlbi(vae1is, addr);
-				__tlbi_user(vae1is, addr);
+				num = __TLBI_RANGE_NUM(pages, scale);
+				if (num >= 0) {
+					addr = __TLBI_VADDR_RANGE(start, asid, scale,
+								  num, 0);
+					if (last_level) {
+						 __tlbi(rvale1is, addr);
+						 __tlbi_user(rvale1is, addr);
+					} else {
+						__tlbi(rvae1is, addr);
+						__tlbi_user(rvae1is, addr);
+					}
+					start += __TLBI_RANGE_PAGES(num, scale) << PAGE_SHIFT;
+					pages -= __TLBI_RANGE_PAGES(num, scale);
+				}
+				scale++;
 			}
 		}
 		dsb(ish);
-
 		break;
 	}
 }

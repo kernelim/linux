@@ -316,9 +316,23 @@ void gfs2_glock_put(struct gfs2_glock *gl)
 static inline int may_grant(const struct gfs2_glock *gl, const struct gfs2_holder *gh)
 {
 	const struct gfs2_holder *gh_head = list_first_entry(&gl->gl_holders, const struct gfs2_holder, gh_list);
-	if ((gh->gh_state == LM_ST_EXCLUSIVE ||
-	     gh_head->gh_state == LM_ST_EXCLUSIVE) && gh != gh_head)
-		return 0;
+
+	if (gh != gh_head) {
+		/**
+		 * Here we make a special exception to grant holders who agree
+		 * to share the EX lock with other holders who also have the
+		 * bit set. If the original holder has the LM_FLAG_NODE_SCOPE bit
+		 * is set, we grant more holders with the bit set.
+		 */
+		if (gh_head->gh_state == LM_ST_EXCLUSIVE &&
+		    (gh_head->gh_flags & LM_FLAG_NODE_SCOPE) &&
+		    gh->gh_state == LM_ST_EXCLUSIVE &&
+		    (gh->gh_flags & LM_FLAG_NODE_SCOPE))
+			return 1;
+		if ((gh->gh_state == LM_ST_EXCLUSIVE ||
+		     gh_head->gh_state == LM_ST_EXCLUSIVE))
+			return 0;
+	}
 	if (gl->gl_state == gh->gh_state)
 		return 1;
 	if (gh->gh_flags & GL_EXACT)
@@ -461,9 +475,6 @@ static void state_change(struct gfs2_glock *gl, unsigned int new_state)
 		else
 			gl->gl_lockref.count--;
 	}
-	if (held1 && held2 && list_empty(&gl->gl_holders))
-		clear_bit(GLF_QUEUED, &gl->gl_flags);
-
 	if (new_state != gl->gl_target)
 		/* shorten our minimum hold time */
 		gl->gl_hold_time = max(gl->gl_hold_time - GL_GLOCK_HOLD_DECR,
@@ -558,7 +569,7 @@ retry:
 	if (state != LM_ST_UNLOCKED) {
 		if (glops->go_xmote_bh) {
 			spin_unlock(&gl->gl_lockref.lock);
-			rv = glops->go_xmote_bh(gl, gh);
+			rv = glops->go_xmote_bh(gl);
 			spin_lock(&gl->gl_lockref.lock);
 			if (rv) {
 				do_error(gl, rv);
@@ -862,12 +873,6 @@ static void delete_work_func(struct work_struct *work)
 	clear_bit(GLF_PENDING_DELETE, &gl->gl_flags);
 	spin_unlock(&gl->gl_lockref.lock);
 
-	/* If someone's using this glock to create a new dinode, the block must
-	   have been freed by another node, then re-used, in which case our
-	   iopen callback is too late after the fact. Ignore it. */
-	if (test_bit(GLF_INODE_CREATING, &gl->gl_flags))
-		goto out;
-
 	if (test_bit(GLF_DEMOTE, &gl->gl_flags)) {
 		/*
 		 * If we can evict the inode, give the remote node trying to
@@ -1040,6 +1045,7 @@ int gfs2_glock_get(struct gfs2_sbd *sdp, u64 number,
 	gl->gl_node.next = NULL;
 	gl->gl_flags = 0;
 	gl->gl_name = name;
+	lockdep_set_subclass(&gl->gl_lockref.lock, glops->go_subclass);
 	gl->gl_lockref.count = 1;
 	gl->gl_state = LM_ST_UNLOCKED;
 	gl->gl_target = LM_ST_UNLOCKED;
@@ -1083,7 +1089,8 @@ int gfs2_glock_get(struct gfs2_sbd *sdp, u64 number,
 out_free:
 	kfree(gl->gl_lksb.sb_lvbptr);
 	kmem_cache_free(cachep, gl);
-	atomic_dec(&sdp->sd_glock_disposal);
+	if (atomic_dec_and_test(&sdp->sd_glock_disposal))
+		wake_up(&sdp->sd_glock_wait);
 
 out:
 	return ret;
@@ -1353,7 +1360,6 @@ fail:
 		if (unlikely((gh->gh_flags & LM_FLAG_PRIORITY) && !insert_pt))
 			insert_pt = &gh2->gh_list;
 	}
-	set_bit(GLF_QUEUED, &gl->gl_flags);
 	trace_gfs2_glock_queue(gh, 1);
 	gfs2_glstats_inc(gl, GFS2_LKS_QCOUNT);
 	gfs2_sbstats_inc(gl, GFS2_LKS_QCOUNT);
@@ -1654,16 +1660,15 @@ void gfs2_glock_cb(struct gfs2_glock *gl, unsigned int state)
 	unsigned long now = jiffies;
 
 	gfs2_glock_hold(gl);
+	spin_lock(&gl->gl_lockref.lock);
 	holdtime = gl->gl_tchange + gl->gl_hold_time;
-	if (test_bit(GLF_QUEUED, &gl->gl_flags) &&
+	if (!list_empty(&gl->gl_holders) &&
 	    gl->gl_name.ln_type == LM_TYPE_INODE) {
 		if (time_before(now, holdtime))
 			delay = holdtime - now;
 		if (test_bit(GLF_REPLY_PENDING, &gl->gl_flags))
 			delay = gl->gl_hold_time;
 	}
-
-	spin_lock(&gl->gl_lockref.lock);
 	handle_callback(gl, state, delay, true);
 	__gfs2_glock_queue_work(gl, delay);
 	spin_unlock(&gl->gl_lockref.lock);
@@ -1850,10 +1855,9 @@ static struct shrinker glock_shrinker = {
 };
 
 /**
- * examine_bucket - Call a function for glock in a hash bucket
+ * glock_hash_walk - Call a function for glock in a hash bucket
  * @examiner: the function
  * @sdp: the filesystem
- * @bucket: the bucket
  *
  * Note that the function can be called multiple times on the same
  * object.  So the user must ensure that the function can cope with
@@ -2042,6 +2046,8 @@ static const char *hflags2str(char *buf, u16 flags, unsigned long iflags)
 		*p++ = 'A';
 	if (flags & LM_FLAG_PRIORITY)
 		*p++ = 'p';
+	if (flags & LM_FLAG_NODE_SCOPE)
+		*p++ = 'n';
 	if (flags & GL_ASYNC)
 		*p++ = 'a';
 	if (flags & GL_EXACT)
@@ -2110,7 +2116,7 @@ static const char *gflags2str(char *buf, const struct gfs2_glock *gl)
 		*p++ = 'I';
 	if (test_bit(GLF_FROZEN, gflags))
 		*p++ = 'F';
-	if (test_bit(GLF_QUEUED, gflags))
+	if (!list_empty(&gl->gl_holders))
 		*p++ = 'q';
 	if (test_bit(GLF_LRU, gflags))
 		*p++ = 'L';
@@ -2499,71 +2505,29 @@ static const struct file_operations gfs2_sbstats_fops = {
 	.release = seq_release,
 };
 
-int gfs2_create_debugfs_file(struct gfs2_sbd *sdp)
+void gfs2_create_debugfs_file(struct gfs2_sbd *sdp)
 {
-	struct dentry *dent;
+	sdp->debugfs_dir = debugfs_create_dir(sdp->sd_table_name, gfs2_root);
 
-	dent = debugfs_create_dir(sdp->sd_table_name, gfs2_root);
-	if (IS_ERR_OR_NULL(dent))
-		goto fail;
-	sdp->debugfs_dir = dent;
+	debugfs_create_file("glocks", S_IFREG | S_IRUGO, sdp->debugfs_dir, sdp,
+			    &gfs2_glocks_fops);
 
-	dent = debugfs_create_file("glocks",
-				   S_IFREG | S_IRUGO,
-				   sdp->debugfs_dir, sdp,
-				   &gfs2_glocks_fops);
-	if (IS_ERR_OR_NULL(dent))
-		goto fail;
-	sdp->debugfs_dentry_glocks = dent;
+	debugfs_create_file("glstats", S_IFREG | S_IRUGO, sdp->debugfs_dir, sdp,
+			    &gfs2_glstats_fops);
 
-	dent = debugfs_create_file("glstats",
-				   S_IFREG | S_IRUGO,
-				   sdp->debugfs_dir, sdp,
-				   &gfs2_glstats_fops);
-	if (IS_ERR_OR_NULL(dent))
-		goto fail;
-	sdp->debugfs_dentry_glstats = dent;
-
-	dent = debugfs_create_file("sbstats",
-				   S_IFREG | S_IRUGO,
-				   sdp->debugfs_dir, sdp,
-				   &gfs2_sbstats_fops);
-	if (IS_ERR_OR_NULL(dent))
-		goto fail;
-	sdp->debugfs_dentry_sbstats = dent;
-
-	return 0;
-fail:
-	gfs2_delete_debugfs_file(sdp);
-	return dent ? PTR_ERR(dent) : -ENOMEM;
+	debugfs_create_file("sbstats", S_IFREG | S_IRUGO, sdp->debugfs_dir, sdp,
+			    &gfs2_sbstats_fops);
 }
 
 void gfs2_delete_debugfs_file(struct gfs2_sbd *sdp)
 {
-	if (sdp->debugfs_dir) {
-		if (sdp->debugfs_dentry_glocks) {
-			debugfs_remove(sdp->debugfs_dentry_glocks);
-			sdp->debugfs_dentry_glocks = NULL;
-		}
-		if (sdp->debugfs_dentry_glstats) {
-			debugfs_remove(sdp->debugfs_dentry_glstats);
-			sdp->debugfs_dentry_glstats = NULL;
-		}
-		if (sdp->debugfs_dentry_sbstats) {
-			debugfs_remove(sdp->debugfs_dentry_sbstats);
-			sdp->debugfs_dentry_sbstats = NULL;
-		}
-		debugfs_remove(sdp->debugfs_dir);
-		sdp->debugfs_dir = NULL;
-	}
+	debugfs_remove_recursive(sdp->debugfs_dir);
+	sdp->debugfs_dir = NULL;
 }
 
-int gfs2_register_debugfs(void)
+void gfs2_register_debugfs(void)
 {
 	gfs2_root = debugfs_create_dir("gfs2", NULL);
-	if (IS_ERR(gfs2_root))
-		return PTR_ERR(gfs2_root);
-	return gfs2_root ? 0 : -ENOMEM;
 }
 
 void gfs2_unregister_debugfs(void)

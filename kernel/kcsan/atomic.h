@@ -6,7 +6,7 @@
 #include <linux/jiffies.h>
 
 /*
- * Helper that returns true if access to ptr should be considered as an atomic
+ * Helper that returns true if access to @ptr should be considered an atomic
  * access, even though it is not explicitly atomic.
  *
  * List all volatile globals that have been observed in races, to suppress
@@ -18,7 +18,7 @@
  * than cast to volatile. Eventually, we hope to be able to remove this
  * function.
  */
-static inline bool kcsan_is_atomic(const volatile void *ptr)
+static __always_inline bool kcsan_is_atomic(const volatile void *ptr)
 {
 	/* only jiffies for now */
 	return ptr == &jiffies;

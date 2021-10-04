@@ -162,37 +162,6 @@ struct sge_opaque_hdr {
 	dma_addr_t addr[MAX_SKB_FRAGS + 1];
 };
 
-struct chcr_ipsec_req {
-	struct ulp_txpkt ulptx;
-	struct ulptx_idata sc_imm;
-	struct cpl_tx_sec_pdu sec_cpl;
-	struct _key_ctx key_ctx;
-};
-
-struct chcr_ipsec_wr {
-	struct fw_ulptx_wr wreq;
-	struct chcr_ipsec_req req;
-};
-
-#define ESN_IV_INSERT_OFFSET 12
-struct chcr_ipsec_aadiv {
-	__be32 spi;
-	u8 seq_no[8];
-	u8 iv[8];
-};
-
-struct ipsec_sa_entry {
-	int hmac_ctrl;
-	u16 esn;
-	u16 resv;
-	unsigned int enckey_len;
-	unsigned int kctx_len;
-	unsigned int authsize;
-	__be32 key_ctx_hdr;
-	char salt[MAX_SALT];
-	char key[2 * AES_MAX_KEY_SIZE];
-};
-
 /*
  *      sgl_len - calculates the size of an SGL of the given capacity
  *      @n: the number of SGL entries
@@ -221,18 +190,4 @@ int chcr_uld_rx_handler(void *handle, const __be64 *rsp,
 int chcr_uld_tx_handler(struct sk_buff *skb, struct net_device *dev);
 int chcr_handle_resp(struct crypto_async_request *req, unsigned char *input,
 		     int err);
-int chcr_ipsec_xmit(struct sk_buff *skb, struct net_device *dev);
-void chcr_add_xfrmops(const struct cxgb4_lld_info *lld);
-#ifdef CONFIG_CHELSIO_TLS_DEVICE
-int chcr_ktls_cpl_act_open_rpl(struct adapter *adap, unsigned char *input);
-int chcr_ktls_cpl_set_tcb_rpl(struct adapter *adap, unsigned char *input);
-int chcr_ktls_xmit(struct sk_buff *skb, struct net_device *dev);
-extern int chcr_ktls_dev_add(struct net_device *netdev, struct sock *sk,
-			     enum tls_offload_ctx_dir direction,
-			     struct tls_crypto_info *crypto_info,
-			     u32 start_offload_tcp_sn);
-extern void chcr_ktls_dev_del(struct net_device *netdev,
-			      struct tls_context *tls_ctx,
-			      enum tls_offload_ctx_dir direction);
-#endif
 #endif /* __CHCR_CORE_H__ */

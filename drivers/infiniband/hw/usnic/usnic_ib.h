@@ -86,8 +86,6 @@ struct usnic_ib_dev {
 
 	/* sysfs vars for QPN reporting */
 	struct kobject *qpn_kobj;
-	struct notifier_block netdev_nb;
-	struct notifier_block inet_nb;
 };
 
 struct usnic_ib_vf {

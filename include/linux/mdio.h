@@ -55,7 +55,11 @@ struct mdio_device {
 	unsigned int reset_assert_delay;
 	unsigned int reset_deassert_delay;
 };
-#define to_mdio_device(d) container_of(d, struct mdio_device, dev)
+
+static inline struct mdio_device *to_mdio_device(const struct device *dev)
+{
+	return container_of(dev, struct mdio_device, dev);
+}
 
 /* struct mdio_driver_common: Common to all MDIO drivers */
 struct mdio_driver_common {
@@ -63,8 +67,12 @@ struct mdio_driver_common {
 	int flags;
 };
 #define MDIO_DEVICE_FLAG_PHY		1
-#define to_mdio_common_driver(d) \
-	container_of(d, struct mdio_driver_common, driver)
+
+static inline struct mdio_driver_common *
+to_mdio_common_driver(const struct device_driver *driver)
+{
+	return container_of(driver, struct mdio_driver_common, driver);
+}
 
 /* struct mdio_driver: Generic MDIO driver */
 struct mdio_driver {
@@ -79,8 +87,13 @@ struct mdio_driver {
 	/* Clears up any memory if needed */
 	void (*remove)(struct mdio_device *mdiodev);
 };
-#define to_mdio_driver(d)						\
-	container_of(to_mdio_common_driver(d), struct mdio_driver, mdiodrv)
+
+static inline struct mdio_driver *
+to_mdio_driver(const struct device_driver *driver)
+{
+	return container_of(to_mdio_common_driver(driver), struct mdio_driver,
+			    mdiodrv);
+}
 
 /* device driver data */
 static inline void mdiodev_set_drvdata(struct mdio_device *mdio, void *data)
@@ -362,6 +375,12 @@ static inline int mdiobus_c45_read(struct mii_bus *bus, int prtad, int devad,
 				   u16 regnum)
 {
 	return mdiobus_read(bus, prtad, mdiobus_c45_addr(devad, regnum));
+}
+
+static inline int mdiobus_c45_write(struct mii_bus *bus, int prtad, int devad,
+				    u16 regnum, u16 val)
+{
+	return mdiobus_write(bus, prtad, mdiobus_c45_addr(devad, regnum), val);
 }
 
 int mdiobus_register_device(struct mdio_device *mdiodev);

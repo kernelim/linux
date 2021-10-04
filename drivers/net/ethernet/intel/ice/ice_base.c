@@ -315,14 +315,14 @@ int ice_setup_rx_ctx(struct ice_ring *ring)
 		if (!xdp_rxq_info_is_reg(&ring->xdp_rxq))
 			/* coverity[check_return] */
 			xdp_rxq_info_reg(&ring->xdp_rxq, ring->netdev,
-					 ring->q_index);
+					 ring->q_index, ring->q_vector->napi.napi_id);
 
-		ring->xsk_umem = ice_xsk_umem(ring);
-		if (ring->xsk_umem) {
+		ring->xsk_pool = ice_xsk_pool(ring);
+		if (ring->xsk_pool) {
 			xdp_rxq_info_unreg_mem_model(&ring->xdp_rxq);
 
 			ring->rx_buf_len =
-				xsk_umem_get_rx_frame_size(ring->xsk_umem);
+				xsk_pool_get_rx_frame_size(ring->xsk_pool);
 			/* For AF_XDP ZC, we disallow packets to span on
 			 * multiple buffers, thus letting us skip that
 			 * handling in the fast-path.
@@ -333,7 +333,7 @@ int ice_setup_rx_ctx(struct ice_ring *ring)
 							 NULL);
 			if (err)
 				return err;
-			xsk_buff_set_rxq_info(ring->xsk_umem, &ring->xdp_rxq);
+			xsk_pool_set_rxq_info(ring->xsk_pool, &ring->xdp_rxq);
 
 			dev_info(dev, "Registered XDP mem model MEM_TYPE_XSK_BUFF_POOL on Rx ring %d\n",
 				 ring->q_index);
@@ -342,7 +342,7 @@ int ice_setup_rx_ctx(struct ice_ring *ring)
 				/* coverity[check_return] */
 				xdp_rxq_info_reg(&ring->xdp_rxq,
 						 ring->netdev,
-						 ring->q_index);
+						 ring->q_index, ring->q_vector->napi.napi_id);
 
 			err = xdp_rxq_info_reg_mem_model(&ring->xdp_rxq,
 							 MEM_TYPE_PAGE_SHARED,
@@ -427,18 +427,20 @@ int ice_setup_rx_ctx(struct ice_ring *ring)
 	ring->tail = hw->hw_addr + QRX_TAIL(pf_q);
 	writel(0, ring->tail);
 
-	if (ring->xsk_umem) {
-		if (!xsk_buff_can_alloc(ring->xsk_umem, num_bufs)) {
-			dev_warn(dev, "UMEM does not provide enough addresses to fill %d buffers on Rx ring %d\n",
+	if (ring->xsk_pool) {
+		bool ok;
+
+		if (!xsk_buff_can_alloc(ring->xsk_pool, num_bufs)) {
+			dev_warn(dev, "XSK buffer pool does not provide enough addresses to fill %d buffers on Rx ring %d\n",
 				 num_bufs, ring->q_index);
 			dev_warn(dev, "Change Rx ring/fill queue size to avoid performance issues\n");
 
 			return 0;
 		}
 
-		err = ice_alloc_rx_bufs_zc(ring, num_bufs);
-		if (err)
-			dev_info(dev, "Failed to allocate some buffers on UMEM enabled Rx ring %d (pf_q %d)\n",
+		ok = ice_alloc_rx_bufs_zc(ring, num_bufs);
+		if (!ok)
+			dev_info(dev, "Failed to allocate some buffers on XSK buffer pool enabled Rx ring %d (pf_q %d)\n",
 				 ring->q_index, pf_q);
 		return 0;
 	}

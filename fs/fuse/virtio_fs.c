@@ -340,7 +340,6 @@ static void virtio_fs_request_dispatch_work(struct work_struct *work)
 	struct fuse_req *req;
 	struct virtio_fs_vq *fsvq = container_of(work, struct virtio_fs_vq,
 						 dispatch_work.work);
-	struct fuse_conn *fc = fsvq->fud->fc;
 	int ret;
 
 	pr_debug("virtio-fs: worker %s called.\n", __func__);
@@ -355,7 +354,7 @@ static void virtio_fs_request_dispatch_work(struct work_struct *work)
 
 		list_del_init(&req->list);
 		spin_unlock(&fsvq->lock);
-		fuse_request_end(fc, req);
+		fuse_request_end(req);
 	}
 
 	/* Dispatch pending requests */
@@ -386,7 +385,7 @@ static void virtio_fs_request_dispatch_work(struct work_struct *work)
 			spin_unlock(&fsvq->lock);
 			pr_err("virtio-fs: virtio_fs_enqueue_req() failed %d\n",
 			       ret);
-			fuse_request_end(fc, req);
+			fuse_request_end(req);
 		}
 	}
 }
@@ -546,7 +545,6 @@ static void virtio_fs_request_complete(struct fuse_req *req,
 				       struct virtio_fs_vq *fsvq)
 {
 	struct fuse_pqueue *fpq = &fsvq->fud->pq;
-	struct fuse_conn *fc = fsvq->fud->fc;
 	struct fuse_args *args;
 	struct fuse_args_pages *ap;
 	unsigned int len, i, thislen;
@@ -579,7 +577,7 @@ static void virtio_fs_request_complete(struct fuse_req *req,
 	clear_bit(FR_SENT, &req->flags);
 	spin_unlock(&fpq->lock);
 
-	fuse_request_end(fc, req);
+	fuse_request_end(req);
 	spin_lock(&fsvq->lock);
 	dec_in_flight_req(fsvq);
 	spin_unlock(&fsvq->lock);
@@ -1294,7 +1292,8 @@ static inline void virtio_fs_ctx_set_defaults(struct fuse_fs_context *ctx)
 
 static int virtio_fs_fill_super(struct super_block *sb, struct fs_context *fsc)
 {
-	struct fuse_conn *fc = get_fuse_conn_super(sb);
+	struct fuse_mount *fm = get_fuse_mount_super(sb);
+	struct fuse_conn *fc = fm->fc;
 	struct virtio_fs *fs = fc->iq.priv;
 	struct fuse_fs_context *ctx = fsc->fs_private;
 	unsigned int i;
@@ -1325,8 +1324,15 @@ static int virtio_fs_fill_super(struct super_block *sb, struct fs_context *fsc)
 
 	/* virtiofs allocates and installs its own fuse devices */
 	ctx->fudptr = NULL;
-	if (ctx->dax)
+	if (ctx->dax) {
+		if (!fs->dax_dev) {
+			err = -EINVAL;
+			pr_err("virtio-fs: dax can't be enabled as filesystem"
+			       " device does not support it.\n");
+			goto err_free_fuse_devs;
+		}
 		ctx->dax_dev = fs->dax_dev;
+	}
 	err = fuse_fill_super_common(sb, ctx);
 	if (err < 0)
 		goto err_free_fuse_devs;
@@ -1339,7 +1345,7 @@ static int virtio_fs_fill_super(struct super_block *sb, struct fs_context *fsc)
 
 	/* Previous unmount will stop all queues. Start these again */
 	virtio_fs_start_all_queues(fs);
-	fuse_send_init(fc);
+	fuse_send_init(fm);
 	mutex_unlock(&virtio_fs_mutex);
 	return 0;
 
@@ -1350,21 +1356,14 @@ err:
 	return err;
 }
 
-static void virtio_kill_sb(struct super_block *sb)
+static void virtio_fs_conn_destroy(struct fuse_mount *fm)
 {
-	struct fuse_conn *fc = get_fuse_conn_super(sb);
-	struct virtio_fs *vfs;
-	struct virtio_fs_vq *fsvq;
+	struct fuse_conn *fc = fm->fc;
+	struct virtio_fs *vfs = fc->iq.priv;
+	struct virtio_fs_vq *fsvq = &vfs->vqs[VQ_HIPRIO];
 
-	/* If mount failed, we can still be called without any fc */
-	if (!fc)
-		return fuse_kill_sb_anon(sb);
-
-	vfs = fc->iq.priv;
-	fsvq = &vfs->vqs[VQ_HIPRIO];
-
-	/* Stop dax worker. Soon evict_inodes() will be called which will
-	 * free all memory ranges belonging to all inodes.
+	/* Stop dax worker. Soon evict_inodes() will be called which
+	 * will free all memory ranges belonging to all inodes.
 	 */
 	if (IS_ENABLED(CONFIG_FUSE_DAX))
 		fuse_dax_cancel_work(fc);
@@ -1375,9 +1374,9 @@ static void virtio_kill_sb(struct super_block *sb)
 	spin_unlock(&fsvq->lock);
 	virtio_fs_drain_all_queues(vfs);
 
-	fuse_kill_sb_anon(sb);
+	fuse_conn_destroy(fm);
 
-	/* fuse_kill_sb_anon() must have sent destroy. Stop all queues
+	/* fuse_conn_destroy() must have sent destroy. Stop all queues
 	 * and drain one more time and free fuse devices. Freeing fuse
 	 * devices will drop their reference on fuse_conn and that in
 	 * turn will drop its reference on virtio_fs object.
@@ -1387,24 +1386,27 @@ static void virtio_kill_sb(struct super_block *sb)
 	virtio_fs_free_devs(vfs);
 }
 
+static void virtio_kill_sb(struct super_block *sb)
+{
+	struct fuse_mount *fm = get_fuse_mount_super(sb);
+	bool last;
+
+	/* If mount failed, we can still be called without any fc */
+	if (fm) {
+		last = fuse_mount_remove(fm);
+		if (last)
+			virtio_fs_conn_destroy(fm);
+	}
+	kill_anon_super(sb);
+}
+
 static int virtio_fs_test_super(struct super_block *sb,
 				struct fs_context *fsc)
 {
-	struct fuse_conn *fc = fsc->s_fs_info;
+	struct fuse_mount *fsc_fm = fsc->s_fs_info;
+	struct fuse_mount *sb_fm = get_fuse_mount_super(sb);
 
-	return fc->iq.priv == get_fuse_conn_super(sb)->iq.priv;
-}
-
-static int virtio_fs_set_super(struct super_block *sb,
-			       struct fs_context *fsc)
-{
-	int err;
-
-	err = get_anon_bdev(&sb->s_dev);
-	if (!err)
-		fuse_conn_get(fsc->s_fs_info);
-
-	return err;
+	return fsc_fm->fc->iq.priv == sb_fm->fc->iq.priv;
 }
 
 static int virtio_fs_get_tree(struct fs_context *fsc)
@@ -1412,6 +1414,7 @@ static int virtio_fs_get_tree(struct fs_context *fsc)
 	struct virtio_fs *fs;
 	struct super_block *sb;
 	struct fuse_conn *fc;
+	struct fuse_mount *fm;
 	int err;
 
 	/* This gets a reference on virtio_fs object. This ptr gets installed
@@ -1424,28 +1427,36 @@ static int virtio_fs_get_tree(struct fs_context *fsc)
 		return -EINVAL;
 	}
 
+	err = -ENOMEM;
 	fc = kzalloc(sizeof(struct fuse_conn), GFP_KERNEL);
-	if (!fc) {
-		mutex_lock(&virtio_fs_mutex);
-		virtio_fs_put(fs);
-		mutex_unlock(&virtio_fs_mutex);
-		return -ENOMEM;
-	}
+	if (!fc)
+		goto out_err;
 
-	fuse_conn_init(fc, get_user_ns(current_user_ns()), &virtio_fs_fiq_ops,
-		       fs);
+	fm = kzalloc(sizeof(struct fuse_mount), GFP_KERNEL);
+	if (!fm)
+		goto out_err;
+
+	fuse_conn_init(fc, fm, get_user_ns(current_user_ns()),
+		       &virtio_fs_fiq_ops, fs);
 	fc->release = fuse_free_conn;
 	fc->delete_stale = true;
+	fc->auto_submounts = true;
 
-	fsc->s_fs_info = fc;
-	sb = sget_fc(fsc, virtio_fs_test_super, virtio_fs_set_super);
-	fuse_conn_put(fc);
+	fsc->s_fs_info = fm;
+	sb = sget_fc(fsc, virtio_fs_test_super, set_anon_super_fc);
+	if (fsc->s_fs_info) {
+		fuse_conn_put(fc);
+		kfree(fm);
+	}
 	if (IS_ERR(sb))
 		return PTR_ERR(sb);
 
 	if (!sb->s_root) {
 		err = virtio_fs_fill_super(sb, fsc);
 		if (err) {
+			fuse_conn_put(fc);
+			kfree(fm);
+			sb->s_fs_info = NULL;
 			deactivate_locked_super(sb);
 			return err;
 		}
@@ -1456,6 +1467,13 @@ static int virtio_fs_get_tree(struct fs_context *fsc)
 	WARN_ON(fsc->root);
 	fsc->root = dget(sb->s_root);
 	return 0;
+
+out_err:
+	kfree(fc);
+	mutex_lock(&virtio_fs_mutex);
+	virtio_fs_put(fs);
+	mutex_unlock(&virtio_fs_mutex);
+	return err;
 }
 
 static const struct fs_context_operations virtio_fs_context_ops = {

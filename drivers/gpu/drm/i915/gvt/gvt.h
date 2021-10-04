@@ -33,6 +33,10 @@
 #ifndef _GVT_H_
 #define _GVT_H_
 
+#include <uapi/linux/pci_regs.h>
+
+#include "i915_drv.h"
+
 #include "debug.h"
 #include "hypercall.h"
 #include "mmio.h"
@@ -56,7 +60,7 @@ struct intel_gvt_host {
 	struct device *dev;
 	bool initialized;
 	int hypervisor_type;
-	struct intel_gvt_mpt *mpt;
+	const struct intel_gvt_mpt *mpt;
 };
 
 extern struct intel_gvt_host intel_gvt_host;
@@ -244,7 +248,7 @@ struct gvt_mmio_block {
 #define INTEL_GVT_MMIO_HASH_BITS 11
 
 struct intel_gvt_mmio {
-	u8 *mmio_attribute;
+	u16 *mmio_attribute;
 /* Register contains RO bits */
 #define F_RO		(1 << 0)
 /* Register contains graphics address */
@@ -255,12 +259,16 @@ struct intel_gvt_mmio {
 #define F_CMD_ACCESS	(1 << 3)
 /* This reg has been accessed by a VM */
 #define F_ACCESSED	(1 << 4)
-/* This reg has been accessed through GPU commands */
-#define F_CMD_ACCESSED	(1 << 5)
+/* This reg requires save & restore during host PM suspend/resume */
+#define F_PM_SAVE	(1 << 5)
 /* This reg could be accessed by unaligned address */
 #define F_UNALIGN	(1 << 6)
-/* This reg is saved/restored in context */
-#define F_IN_CTX	(1 << 7)
+/* This reg is in GVT's mmio save-restor list and in hardware
+ * logical context image
+ */
+#define F_SR_IN_CTX	(1 << 7)
+/* Value of command write of this reg needs to be patched */
+#define F_CMD_WRITE_PATCH	(1 << 8)
 
 	struct gvt_mmio_block *mmio_block;
 	unsigned int num_mmio_block;
@@ -327,6 +335,7 @@ struct intel_gvt {
 		u32 *mocs_mmio_offset_list;
 		u32 mocs_mmio_offset_list_cnt;
 	} engine_mmio_list;
+	bool is_reg_whitelist_updated;
 
 	struct dentry *debugfs_root;
 };
@@ -409,6 +418,9 @@ int intel_gvt_load_firmware(struct intel_gvt *gvt);
 
 #define vgpu_fence_base(vgpu) (vgpu->fence.base)
 #define vgpu_fence_sz(vgpu) (vgpu->fence.size)
+
+/* ring context size i.e. the first 0x50 dwords*/
+#define RING_CTX_SIZE 320
 
 struct intel_vgpu_creation_params {
 	__u64 handle;
@@ -597,15 +609,30 @@ static inline void intel_gvt_mmio_set_accessed(
 }
 
 /**
- * intel_gvt_mmio_is_cmd_accessed - mark a MMIO could be accessed by command
+ * intel_gvt_mmio_is_cmd_accessible - if a MMIO could be accessed by command
+ * @gvt: a GVT device
+ * @offset: register offset
+ *
+ * Returns:
+ * True if an MMIO is able to be accessed by GPU commands
+ */
+static inline bool intel_gvt_mmio_is_cmd_accessible(
+			struct intel_gvt *gvt, unsigned int offset)
+{
+	return gvt->mmio.mmio_attribute[offset >> 2] & F_CMD_ACCESS;
+}
+
+/**
+ * intel_gvt_mmio_set_cmd_accessible -
+ *				mark a MMIO could be accessible by command
  * @gvt: a GVT device
  * @offset: register offset
  *
  */
-static inline bool intel_gvt_mmio_is_cmd_access(
+static inline void intel_gvt_mmio_set_cmd_accessible(
 			struct intel_gvt *gvt, unsigned int offset)
 {
-	return gvt->mmio.mmio_attribute[offset >> 2] & F_CMD_ACCESS;
+	gvt->mmio.mmio_attribute[offset >> 2] |= F_CMD_ACCESS;
 }
 
 /**
@@ -618,18 +645,6 @@ static inline bool intel_gvt_mmio_is_unalign(
 			struct intel_gvt *gvt, unsigned int offset)
 {
 	return gvt->mmio.mmio_attribute[offset >> 2] & F_UNALIGN;
-}
-
-/**
- * intel_gvt_mmio_set_cmd_accessed - mark a MMIO has been accessed by command
- * @gvt: a GVT device
- * @offset: register offset
- *
- */
-static inline void intel_gvt_mmio_set_cmd_accessed(
-			struct intel_gvt *gvt, unsigned int offset)
-{
-	gvt->mmio.mmio_attribute[offset >> 2] |= F_CMD_ACCESSED;
 }
 
 /**
@@ -648,37 +663,70 @@ static inline bool intel_gvt_mmio_has_mode_mask(
 }
 
 /**
- * intel_gvt_mmio_is_in_ctx - check if a MMIO has in-ctx mask
+ * intel_gvt_mmio_is_sr_in_ctx -
+ *		check if an MMIO has F_SR_IN_CTX mask
  * @gvt: a GVT device
  * @offset: register offset
  *
  * Returns:
- * True if a MMIO has a in-context mask, false if it isn't.
+ * True if an MMIO has an F_SR_IN_CTX  mask, false if it isn't.
  *
  */
-static inline bool intel_gvt_mmio_is_in_ctx(
+static inline bool intel_gvt_mmio_is_sr_in_ctx(
 			struct intel_gvt *gvt, unsigned int offset)
 {
-	return gvt->mmio.mmio_attribute[offset >> 2] & F_IN_CTX;
+	return gvt->mmio.mmio_attribute[offset >> 2] & F_SR_IN_CTX;
 }
 
 /**
- * intel_gvt_mmio_set_in_ctx - mask a MMIO in logical context
+ * intel_gvt_mmio_set_sr_in_ctx -
+ *		mask an MMIO in GVT's mmio save-restore list and also
+ *		in hardware logical context image
  * @gvt: a GVT device
  * @offset: register offset
  *
  */
-static inline void intel_gvt_mmio_set_in_ctx(
+static inline void intel_gvt_mmio_set_sr_in_ctx(
 			struct intel_gvt *gvt, unsigned int offset)
 {
-	gvt->mmio.mmio_attribute[offset >> 2] |= F_IN_CTX;
+	gvt->mmio.mmio_attribute[offset >> 2] |= F_SR_IN_CTX;
 }
 
 void intel_gvt_debugfs_add_vgpu(struct intel_vgpu *vgpu);
+/**
+ * intel_gvt_mmio_set_cmd_write_patch -
+ *				mark an MMIO if its cmd write needs to be
+ *				patched
+ * @gvt: a GVT device
+ * @offset: register offset
+ *
+ */
+static inline void intel_gvt_mmio_set_cmd_write_patch(
+			struct intel_gvt *gvt, unsigned int offset)
+{
+	gvt->mmio.mmio_attribute[offset >> 2] |= F_CMD_WRITE_PATCH;
+}
+
+/**
+ * intel_gvt_mmio_is_cmd_write_patch - check if an mmio's cmd access needs to
+ * be patched
+ * @gvt: a GVT device
+ * @offset: register offset
+ *
+ * Returns:
+ * True if GPU commmand write to an MMIO should be patched
+ */
+static inline bool intel_gvt_mmio_is_cmd_write_patch(
+			struct intel_gvt *gvt, unsigned int offset)
+{
+	return gvt->mmio.mmio_attribute[offset >> 2] & F_CMD_WRITE_PATCH;
+}
+
 void intel_gvt_debugfs_remove_vgpu(struct intel_vgpu *vgpu);
 void intel_gvt_debugfs_init(struct intel_gvt *gvt);
 void intel_gvt_debugfs_clean(struct intel_gvt *gvt);
 
+int intel_gvt_pm_resume(struct intel_gvt *gvt);
 
 #include "trace.h"
 #include "mpt.h"

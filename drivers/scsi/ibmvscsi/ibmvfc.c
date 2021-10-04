@@ -6117,7 +6117,7 @@ out:
  * Return value:
  * 	0
  **/
-static int ibmvfc_remove(struct vio_dev *vdev)
+static void ibmvfc_remove(struct vio_dev *vdev)
 {
 	struct ibmvfc_host *vhost = dev_get_drvdata(&vdev->dev);
 	LIST_HEAD(purge);
@@ -6149,7 +6149,6 @@ static int ibmvfc_remove(struct vio_dev *vdev)
 	spin_unlock(&ibmvfc_driver_lock);
 	scsi_host_put(vhost->host);
 	LEAVE;
-	return 0;
 }
 
 /**

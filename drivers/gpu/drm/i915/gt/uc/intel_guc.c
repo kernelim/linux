@@ -579,20 +579,8 @@ int intel_guc_reset_engine(struct intel_guc *guc,
  */
 int intel_guc_resume(struct intel_guc *guc)
 {
-	u32 action[] = {
-		INTEL_GUC_ACTION_EXIT_S_STATE,
-		GUC_POWER_D0,
-	};
-
-	/*
-	 * If GuC communication is enabled but submission is not supported,
-	 * we do not need to resume the GuC but we do need to enable the
-	 * GuC communication on resume (above).
-	 */
-	if (!intel_guc_submission_is_used(guc) || !intel_guc_is_ready(guc))
-		return 0;
-
-	return intel_guc_send(guc, action, ARRAY_SIZE(action));
+	/* XXX: to be implemented with submission interface rework */
+	return 0;
 }
 
 /**
@@ -659,7 +647,7 @@ struct i915_vma *intel_guc_allocate_vma(struct intel_guc *guc, u32 size)
 		goto err;
 
 	flags = PIN_OFFSET_BIAS | i915_ggtt_pin_bias(vma);
-	ret = i915_ggtt_pin(vma, 0, flags);
+	ret = i915_ggtt_pin(vma, NULL, 0, flags);
 	if (ret) {
 		vma = ERR_PTR(ret);
 		goto err;

@@ -29,10 +29,24 @@
 
 #include "i915_active.h"
 #include "i915_syncmap.h"
-#include "gt/intel_timeline_types.h"
+#include "intel_timeline_types.h"
+
+struct drm_printer;
 
 struct intel_timeline *
-intel_timeline_create(struct intel_gt *gt, struct i915_vma *global_hwsp);
+__intel_timeline_create(struct intel_gt *gt,
+			struct i915_vma *global_hwsp,
+			unsigned int offset);
+
+static inline struct intel_timeline *
+intel_timeline_create(struct intel_gt *gt)
+{
+	return __intel_timeline_create(gt, NULL, 0);
+}
+
+struct intel_timeline *
+intel_timeline_create_from_engine(struct intel_engine_cs *engine,
+				  unsigned int offset);
 
 static inline struct intel_timeline *
 intel_timeline_get(struct intel_timeline *timeline)
@@ -71,7 +85,8 @@ static inline bool intel_timeline_sync_is_later(struct intel_timeline *tl,
 	return __intel_timeline_sync_is_later(tl, fence->context, fence->seqno);
 }
 
-int intel_timeline_pin(struct intel_timeline *tl);
+void __intel_timeline_pin(struct intel_timeline *tl);
+int intel_timeline_pin(struct intel_timeline *tl, struct i915_gem_ww_ctx *ww);
 void intel_timeline_enter(struct intel_timeline *tl);
 int intel_timeline_get_seqno(struct intel_timeline *tl,
 			     struct i915_request *rq,
@@ -87,5 +102,19 @@ int intel_timeline_read_hwsp(struct i915_request *from,
 
 void intel_gt_init_timelines(struct intel_gt *gt);
 void intel_gt_fini_timelines(struct intel_gt *gt);
+
+void intel_gt_show_timelines(struct intel_gt *gt,
+			     struct drm_printer *m,
+			     void (*show_request)(struct drm_printer *m,
+						  const struct i915_request *rq,
+						  const char *prefix,
+						  int indent));
+
+static inline bool
+intel_timeline_is_last(const struct intel_timeline *tl,
+		       const struct i915_request *rq)
+{
+	return list_is_last_rcu(&rq->link, &tl->requests);
+}
 
 #endif

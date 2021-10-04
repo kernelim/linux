@@ -1,5 +1,5 @@
 #
-# NFC sybsystem configuration
+# NFC subsystem configuration
 #
 
 menuconfig NFC

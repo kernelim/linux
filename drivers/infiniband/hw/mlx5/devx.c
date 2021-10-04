@@ -93,9 +93,6 @@ struct devx_async_event_file {
 struct devx_umem {
 	struct mlx5_core_dev		*mdev;
 	struct ib_umem			*umem;
-	u32				page_offset;
-	int				page_shift;
-	int				ncont;
 	u32				dinlen;
 	u32				dinbox[MLX5_ST_SZ_DW(destroy_umem_in)];
 };
@@ -633,9 +630,8 @@ static bool devx_is_valid_obj_id(struct uverbs_attr_bundle *attrs,
 	case UVERBS_OBJECT_QP:
 	{
 		struct mlx5_ib_qp *qp = to_mqp(uobj->object);
-		enum ib_qp_type	qp_type = qp->ibqp.qp_type;
 
-		if (qp_type == IB_QPT_RAW_PACKET ||
+		if (qp->type == IB_QPT_RAW_PACKET ||
 		    (qp->flags & IB_QP_CREATE_SOURCE_QPN)) {
 			struct mlx5_ib_raw_packet_qp *raw_packet_qp =
 							 &qp->raw_packet_qp;
@@ -652,10 +648,9 @@ static bool devx_is_valid_obj_id(struct uverbs_attr_bundle *attrs,
 					       sq->tisn) == obj_id);
 		}
 
-		if (qp_type == MLX5_IB_QPT_DCT)
+		if (qp->type == MLX5_IB_QPT_DCT)
 			return get_enc_obj_id(MLX5_CMD_OP_CREATE_DCT,
 					      qp->dct.mdct.mqp.qpn) == obj_id;
-
 		return get_enc_obj_id(MLX5_CMD_OP_CREATE_QP,
 				      qp->ibqp.qp_num) == obj_id;
 	}
@@ -1119,7 +1114,7 @@ static void devx_obj_build_destroy_cmd(void *in, void *out, void *din,
 	case MLX5_CMD_OP_CREATE_MKEY:
 		MLX5_SET(destroy_mkey_in, din, opcode,
 			 MLX5_CMD_OP_DESTROY_MKEY);
-		MLX5_SET(destroy_mkey_in, in, mkey_index, *obj_id);
+		MLX5_SET(destroy_mkey_in, din, mkey_index, *obj_id);
 		break;
 	case MLX5_CMD_OP_CREATE_CQ:
 		MLX5_SET(destroy_cq_in, din, opcode, MLX5_CMD_OP_DESTROY_CQ);
@@ -1313,9 +1308,9 @@ static int devx_handle_mkey_indirect(struct devx_obj *obj,
 	mkey->size = MLX5_GET64(mkc, mkc, len);
 	mkey->pd = MLX5_GET(mkc, mkc, pd);
 	devx_mr->ndescs = MLX5_GET(mkc, mkc, translations_octword_size);
+	init_waitqueue_head(&mkey->wait);
 
-	return xa_err(xa_store(&dev->odp_mkeys, mlx5_base_mkey(mkey->key), mkey,
-			       GFP_KERNEL));
+	return mlx5r_store_odp_mkey(dev, mkey);
 }
 
 static int devx_handle_mkey_create(struct mlx5_ib_dev *dev,
@@ -1388,16 +1383,15 @@ static int devx_obj_cleanup(struct ib_uobject *uobject,
 	int ret;
 
 	dev = mlx5_udata_to_mdev(&attrs->driver_udata);
-	if (obj->flags & DEVX_OBJ_FLAGS_INDIRECT_MKEY) {
+	if (obj->flags & DEVX_OBJ_FLAGS_INDIRECT_MKEY &&
+	    xa_erase(&obj->ib_dev->odp_mkeys,
+		     mlx5_base_mkey(obj->devx_mr.mmkey.key)))
 		/*
 		 * The pagefault_single_data_segment() does commands against
 		 * the mmkey, we must wait for that to stop before freeing the
 		 * mkey, as another allocation could get the same mkey #.
 		 */
-		xa_erase(&obj->ib_dev->odp_mkeys,
-			 mlx5_base_mkey(obj->devx_mr.mmkey.key));
-		synchronize_srcu(&dev->odp_srcu);
-	}
+		mlx5r_deref_wait_odp_mkey(&obj->devx_mr.mmkey);
 
 	if (obj->flags & DEVX_OBJ_FLAGS_DCT)
 		ret = mlx5_core_destroy_dct(obj->ib_dev, &obj->core_dct);
@@ -1406,7 +1400,7 @@ static int devx_obj_cleanup(struct ib_uobject *uobject,
 	else
 		ret = mlx5_cmd_exec(obj->ib_dev->mdev, obj->dinbox,
 				    obj->dinlen, out, sizeof(out));
-	if (ib_is_destroy_retryable(ret, why, uobject))
+	if (ret)
 		return ret;
 
 	devx_event_table = &dev->devx_event_table;
@@ -1441,6 +1435,16 @@ static void devx_cq_comp(struct mlx5_core_cq *mcq, struct mlx5_eqe *eqe)
 	dispatch_event_fd(&obj_event->obj_sub_list, eqe);
 out:
 	rcu_read_unlock();
+}
+
+static bool is_apu_thread_cq(struct mlx5_ib_dev *dev, const void *in)
+{
+	if (!MLX5_CAP_GEN(dev->mdev, apu) ||
+	    !MLX5_GET(cqc, MLX5_ADDR_OF(create_cq_in, in, cq_context),
+		      apu_thread_cq))
+		return false;
+
+	return true;
 }
 
 static int UVERBS_HANDLER(MLX5_IB_METHOD_DEVX_OBJ_CREATE)(
@@ -1496,7 +1500,8 @@ static int UVERBS_HANDLER(MLX5_IB_METHOD_DEVX_OBJ_CREATE)(
 		obj->flags |= DEVX_OBJ_FLAGS_DCT;
 		err = mlx5_core_create_dct(dev, &obj->core_dct, cmd_in,
 					   cmd_in_len, cmd_out, cmd_out_len);
-	} else if (opcode == MLX5_CMD_OP_CREATE_CQ) {
+	} else if (opcode == MLX5_CMD_OP_CREATE_CQ &&
+		   !is_apu_thread_cq(dev, cmd_in)) {
 		obj->flags |= DEVX_OBJ_FLAGS_CQ;
 		obj->core_cq.comp = devx_cq_comp;
 		err = mlx5_core_create_cq(dev->mdev, &obj->core_cq,
@@ -2066,8 +2071,10 @@ static int UVERBS_HANDLER(MLX5_IB_METHOD_DEVX_SUBSCRIBE_EVENT)(
 
 		num_alloc_xa_entries++;
 		event_sub = kzalloc(sizeof(*event_sub), GFP_KERNEL);
-		if (!event_sub)
+		if (!event_sub) {
+			err = -ENOMEM;
 			goto err;
+		}
 
 		list_add_tail(&event_sub->event_list, &sub_list);
 		uverbs_uobject_get(&ev_file->uobj);
@@ -2152,9 +2159,7 @@ static int devx_umem_get(struct mlx5_ib_dev *dev, struct ib_ucontext *ucontext,
 	u64 addr;
 	size_t size;
 	u32 access;
-	int npages;
 	int err;
-	u32 page_mask;
 
 	if (uverbs_copy_from(&addr, attrs, MLX5_IB_ATTR_DEVX_UMEM_REG_ADDR) ||
 	    uverbs_copy_from(&size, attrs, MLX5_IB_ATTR_DEVX_UMEM_REG_LEN))
@@ -2168,57 +2173,62 @@ static int devx_umem_get(struct mlx5_ib_dev *dev, struct ib_ucontext *ucontext,
 	if (err)
 		return err;
 
-	err = ib_check_mr_access(access);
+	err = ib_check_mr_access(&dev->ib_dev, access);
 	if (err)
 		return err;
 
 	obj->umem = ib_umem_get(&attrs->driver_udata, addr, size, access);
 	if (IS_ERR(obj->umem))
 		return PTR_ERR(obj->umem);
-
-	mlx5_ib_cont_pages(obj->umem, obj->umem->address,
-			   MLX5_MKEY_PAGE_SHIFT_MASK, &npages,
-			   &obj->page_shift, &obj->ncont, NULL);
-
-	if (!npages) {
-		ib_umem_release(obj->umem);
-		return -EINVAL;
-	}
-
-	page_mask = (1 << obj->page_shift) - 1;
-	obj->page_offset = obj->umem->address & page_mask;
-
 	return 0;
 }
 
-static int devx_umem_reg_cmd_alloc(struct uverbs_attr_bundle *attrs,
+static int devx_umem_reg_cmd_alloc(struct mlx5_ib_dev *dev,
+				   struct uverbs_attr_bundle *attrs,
 				   struct devx_umem *obj,
 				   struct devx_umem_reg_cmd *cmd)
 {
-	cmd->inlen = MLX5_ST_SZ_BYTES(create_umem_in) +
-		    (MLX5_ST_SZ_BYTES(mtt) * obj->ncont);
-	cmd->in = uverbs_zalloc(attrs, cmd->inlen);
-	return PTR_ERR_OR_ZERO(cmd->in);
-}
-
-static void devx_umem_reg_cmd_build(struct mlx5_ib_dev *dev,
-				    struct devx_umem *obj,
-				    struct devx_umem_reg_cmd *cmd)
-{
-	void *umem;
+	unsigned int page_size;
 	__be64 *mtt;
+	void *umem;
+
+	/*
+	 * We don't know what the user intends to use this umem for, but the HW
+	 * restrictions must be met. MR, doorbell records, QP, WQ and CQ all
+	 * have different requirements. Since we have no idea how to sort this
+	 * out, only support PAGE_SIZE with the expectation that userspace will
+	 * provide the necessary alignments inside the known PAGE_SIZE and that
+	 * FW will check everything.
+	 */
+	page_size = ib_umem_find_best_pgoff(
+		obj->umem, PAGE_SIZE,
+		__mlx5_page_offset_to_bitmask(__mlx5_bit_sz(umem, page_offset),
+					      0));
+	if (!page_size)
+		return -EINVAL;
+
+	cmd->inlen = MLX5_ST_SZ_BYTES(create_umem_in) +
+		     (MLX5_ST_SZ_BYTES(mtt) *
+		      ib_umem_num_dma_blocks(obj->umem, page_size));
+	cmd->in = uverbs_zalloc(attrs, cmd->inlen);
+	if (IS_ERR(cmd->in))
+		return PTR_ERR(cmd->in);
 
 	umem = MLX5_ADDR_OF(create_umem_in, cmd->in, umem);
 	mtt = (__be64 *)MLX5_ADDR_OF(umem, umem, mtt);
 
 	MLX5_SET(create_umem_in, cmd->in, opcode, MLX5_CMD_OP_CREATE_UMEM);
-	MLX5_SET64(umem, umem, num_of_mtt, obj->ncont);
-	MLX5_SET(umem, umem, log_page_size, obj->page_shift -
-					    MLX5_ADAPTER_PAGE_SHIFT);
-	MLX5_SET(umem, umem, page_offset, obj->page_offset);
-	mlx5_ib_populate_pas(dev, obj->umem, obj->page_shift, mtt,
+	MLX5_SET64(umem, umem, num_of_mtt,
+		   ib_umem_num_dma_blocks(obj->umem, page_size));
+	MLX5_SET(umem, umem, log_page_size,
+		 order_base_2(page_size) - MLX5_ADAPTER_PAGE_SHIFT);
+	MLX5_SET(umem, umem, page_offset,
+		 ib_umem_dma_offset(obj->umem, page_size));
+
+	mlx5_ib_populate_pas(obj->umem, page_size, mtt,
 			     (obj->umem->writable ? MLX5_IB_MTT_WRITE : 0) |
-			     MLX5_IB_MTT_READ);
+				     MLX5_IB_MTT_READ);
+	return 0;
 }
 
 static int UVERBS_HANDLER(MLX5_IB_METHOD_DEVX_UMEM_REG)(
@@ -2245,11 +2255,9 @@ static int UVERBS_HANDLER(MLX5_IB_METHOD_DEVX_UMEM_REG)(
 	if (err)
 		goto err_obj_free;
 
-	err = devx_umem_reg_cmd_alloc(attrs, obj, &cmd);
+	err = devx_umem_reg_cmd_alloc(dev, attrs, obj, &cmd);
 	if (err)
 		goto err_umem_release;
-
-	devx_umem_reg_cmd_build(dev, obj, &cmd);
 
 	MLX5_SET(create_umem_in, cmd.in, uid, c->devx_uid);
 	err = mlx5_cmd_exec(dev->mdev, cmd.in, cmd.inlen, cmd.out,
@@ -2282,7 +2290,7 @@ static int devx_umem_cleanup(struct ib_uobject *uobject,
 	int err;
 
 	err = mlx5_cmd_exec(obj->mdev, obj->dinbox, obj->dinlen, out, sizeof(out));
-	if (ib_is_destroy_retryable(err, why, uobject))
+	if (err)
 		return err;
 
 	ib_umem_release(obj->umem);
@@ -2695,8 +2703,8 @@ static const struct file_operations devx_async_event_fops = {
 	.llseek	 = no_llseek,
 };
 
-static int devx_async_cmd_event_destroy_uobj(struct ib_uobject *uobj,
-					     enum rdma_remove_reason why)
+static void devx_async_cmd_event_destroy_uobj(struct ib_uobject *uobj,
+					      enum rdma_remove_reason why)
 {
 	struct devx_async_cmd_event_file *comp_ev_file =
 		container_of(uobj, struct devx_async_cmd_event_file,
@@ -2718,11 +2726,10 @@ static int devx_async_cmd_event_destroy_uobj(struct ib_uobject *uobj,
 		kvfree(entry);
 	}
 	spin_unlock_irq(&comp_ev_file->ev_queue.lock);
-	return 0;
 };
 
-static int devx_async_event_destroy_uobj(struct ib_uobject *uobj,
-					 enum rdma_remove_reason why)
+static void devx_async_event_destroy_uobj(struct ib_uobject *uobj,
+					  enum rdma_remove_reason why)
 {
 	struct devx_async_event_file *ev_file =
 		container_of(uobj, struct devx_async_event_file,
@@ -2766,7 +2773,6 @@ static int devx_async_event_destroy_uobj(struct ib_uobject *uobj,
 	mutex_unlock(&dev->devx_event_table.event_xa_lock);
 
 	put_device(&dev->ib_dev.dev);
-	return 0;
 };
 
 DECLARE_UVERBS_NAMED_METHOD(

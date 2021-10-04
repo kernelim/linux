@@ -490,7 +490,7 @@ static void dax_i_callback(struct rcu_head *head)
 	kfree(dax_dev->host);
 	dax_dev->host = NULL;
 	if (inode->i_rdev)
-		ida_simple_remove(&dax_minor_ida, MINOR(inode->i_rdev));
+		ida_simple_remove(&dax_minor_ida, iminor(inode));
 	kmem_cache_free(dax_cache, dax_dev);
 }
 

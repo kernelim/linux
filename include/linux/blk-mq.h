@@ -187,8 +187,13 @@ struct blk_mq_queue_data {
 typedef blk_status_t (queue_rq_fn)(struct blk_mq_hw_ctx *,
 		const struct blk_mq_queue_data *);
 typedef void (commit_rqs_fn)(struct blk_mq_hw_ctx *);
+#ifndef __GENKSYMS__
+typedef int (get_budget_fn)(struct request_queue *);
+typedef void (put_budget_fn)(struct request_queue *, int);
+#else
 typedef bool (get_budget_fn)(struct blk_mq_hw_ctx *);
 typedef void (put_budget_fn)(struct blk_mq_hw_ctx *);
+#endif
 typedef enum blk_eh_timer_return (timeout_fn)(struct request *, bool);
 typedef int (init_hctx_fn)(struct blk_mq_hw_ctx *, void *, unsigned int);
 typedef void (exit_hctx_fn)(struct blk_mq_hw_ctx *, unsigned int);
@@ -286,8 +291,16 @@ struct blk_mq_ops {
 	 */
 	RH_KABI_USE(1, cleanup_rq_fn           *cleanup_rq)
 
-	RH_KABI_RESERVE(2)
-	RH_KABI_RESERVE(3)
+	/*
+	 * Store rq's budget token
+	 */
+	RH_KABI_USE(2, void (*set_rq_budget_token)(struct request *, int))
+
+	/*
+	 * Retrieve rq's budget token
+	 */
+	RH_KABI_USE(3, int (*get_rq_budget_token)(struct request *))
+
 	RH_KABI_RESERVE(4)
 	RH_KABI_RESERVE(5)
 	RH_KABI_RESERVE(6)
@@ -402,6 +415,18 @@ static inline int blk_mq_request_completed(struct request *rq)
 	return blk_mq_rq_state(rq) == MQ_RQ_COMPLETE;
 }
 
+/*
+ *
+ * Set the state to complete when completing a request from inside ->queue_rq.
+ * This is used by drivers that want to ensure special complete actions that
+ * need access to the request are called on failure, e.g. by nvme for
+ * multipathing.
+ */
+static inline void blk_mq_set_request_complete(struct request *rq)
+{
+	WRITE_ONCE(rq->state, MQ_RQ_COMPLETE);
+}
+
 void blk_mq_start_request(struct request *rq);
 void blk_mq_end_request(struct request *rq, blk_status_t error);
 void __blk_mq_end_request(struct request *rq, blk_status_t error);
@@ -411,8 +436,6 @@ void blk_mq_kick_requeue_list(struct request_queue *q);
 void blk_mq_delay_kick_requeue_list(struct request_queue *q, unsigned long msecs);
 void blk_mq_complete_request(struct request *rq);
 bool blk_mq_complete_request_remote(struct request *rq);
-bool blk_mq_bio_list_merge(struct request_queue *q, struct list_head *list,
-			   struct bio *bio);
 bool blk_mq_queue_stopped(struct request_queue *q);
 void blk_mq_stop_hw_queue(struct blk_mq_hw_ctx *hctx);
 void blk_mq_start_hw_queue(struct blk_mq_hw_ctx *hctx);

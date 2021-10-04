@@ -952,6 +952,7 @@ void rt2x00queue_unpause_queue(struct data_queue *queue)
 		 * receive frames.
 		 */
 		queue->rt2x00dev->ops->lib->kick_queue(queue);
+		break;
 	default:
 		break;
 	}

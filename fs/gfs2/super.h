@@ -33,7 +33,7 @@ extern int gfs2_lookup_in_master_dir(struct gfs2_sbd *sdp, char *filename,
 				     struct gfs2_inode **ipp);
 
 extern int gfs2_make_fs_rw(struct gfs2_sbd *sdp);
-extern int gfs2_make_fs_ro(struct gfs2_sbd *sdp);
+extern void gfs2_make_fs_ro(struct gfs2_sbd *sdp);
 extern void gfs2_online_uevent(struct gfs2_sbd *sdp);
 extern int gfs2_statfs_init(struct gfs2_sbd *sdp);
 extern void gfs2_statfs_change(struct gfs2_sbd *sdp, s64 total, s64 free,
@@ -45,7 +45,6 @@ extern void gfs2_statfs_change_out(const struct gfs2_statfs_change_host *sc,
 extern void update_statfs(struct gfs2_sbd *sdp, struct buffer_head *m_bh,
 			  struct buffer_head *l_bh);
 extern int gfs2_statfs_sync(struct super_block *sb, int type);
-extern int gfs2_make_fs_ro(struct gfs2_sbd *sdp);
 extern void gfs2_freeze_func(struct work_struct *work);
 
 extern void free_lcl_statfs_inodes(struct gfs2_sbd *sdp);

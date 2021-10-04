@@ -246,7 +246,7 @@ static void __init conmode_default(void)
 #ifdef CONFIG_CRASH_DUMP
 static void __init setup_zfcpdump(void)
 {
-	if (ipl_info.type != IPL_TYPE_FCP_DUMP)
+	if (!is_ipl_type_dump())
 		return;
 	if (OLDMEM_BASE)
 		return;
@@ -1136,7 +1136,7 @@ void __init setup_arch(char **cmdline_p)
 	if (IS_ENABLED(CONFIG_EXPOLINE))
 		nospec_init_branches();
 
-	/* Setup zfcpdump support */
+	/* Setup zfcp/nvme dump support */
 	setup_zfcpdump();
 
 	/* Add system specific data to the random pool */

@@ -847,7 +847,7 @@ out:
 	return rc;
 }
 
-static long _zcrypt_send_cprb(struct ap_perms *perms,
+static long _zcrypt_send_cprb(bool userspace, struct ap_perms *perms,
 			      struct zcrypt_track *tr,
 			      struct ica_xcRB *xcRB)
 {
@@ -875,7 +875,7 @@ static long _zcrypt_send_cprb(struct ap_perms *perms,
 	}
 #endif
 
-	rc = get_cprb_fc(xcRB, &ap_msg, &func_code, &domain);
+	rc = get_cprb_fc(userspace, xcRB, &ap_msg, &func_code, &domain);
 	if (rc)
 		goto out;
 
@@ -901,6 +901,9 @@ static long _zcrypt_send_cprb(struct ap_perms *perms,
 		/* Check for user selected CCA card */
 		if (xcRB->user_defined != AUTOSELECT &&
 		    xcRB->user_defined != zc->card->id)
+			continue;
+		/* check if request size exceeds card max msg size */
+		if (ap_msg.len > zc->card->maxmsgsize)
 			continue;
 		/* check if device node has admission for this card */
 		if (!zcrypt_check_card(perms, zc->card->id))
@@ -958,7 +961,7 @@ static long _zcrypt_send_cprb(struct ap_perms *perms,
 	}
 #endif
 
-	rc = pref_zq->ops->send_cprb(pref_zq, xcRB, &ap_msg);
+	rc = pref_zq->ops->send_cprb(userspace, pref_zq, xcRB, &ap_msg);
 
 	spin_lock(&zcrypt_list_lock);
 	zcrypt_drop_queue(pref_zc, pref_zq, mod, wgt);
@@ -977,7 +980,7 @@ out:
 
 long zcrypt_send_cprb(struct ica_xcRB *xcRB)
 {
-	return _zcrypt_send_cprb(&ap_perms, NULL, xcRB);
+	return _zcrypt_send_cprb(false, &ap_perms, NULL, xcRB);
 }
 EXPORT_SYMBOL(zcrypt_send_cprb);
 
@@ -1008,7 +1011,7 @@ static bool is_desired_ep11_queue(unsigned int dev_qid,
 	return false;
 }
 
-static long _zcrypt_send_ep11_cprb(struct ap_perms *perms,
+static long _zcrypt_send_ep11_cprb(bool userspace, struct ap_perms *perms,
 				   struct zcrypt_track *tr,
 				   struct ep11_urb *xcrb)
 {
@@ -1046,7 +1049,7 @@ static long _zcrypt_send_ep11_cprb(struct ap_perms *perms,
 		}
 
 		uptr = (struct ep11_target_dev __force __user *) xcrb->targets;
-		if (copy_from_user(targets, uptr,
+		if (z_copy_from_user(userspace, targets, uptr,
 				   target_num * sizeof(*targets))) {
 			func_code = 0;
 			rc = -EFAULT;
@@ -1054,7 +1057,7 @@ static long _zcrypt_send_ep11_cprb(struct ap_perms *perms,
 		}
 	}
 
-	rc = get_ep11cprb_fc(xcrb, &ap_msg, &func_code);
+	rc = get_ep11cprb_fc(userspace, xcrb, &ap_msg, &func_code);
 	if (rc)
 		goto out_free;
 
@@ -1069,6 +1072,9 @@ static long _zcrypt_send_ep11_cprb(struct ap_perms *perms,
 		/* Check for user selected EP11 card */
 		if (targets &&
 		    !is_desired_ep11_card(zc->card->id, target_num, targets))
+			continue;
+		/* check if request size exceeds card max msg size */
+		if (ap_msg.len > zc->card->maxmsgsize)
 			continue;
 		/* check if device node has admission for this card */
 		if (!zcrypt_check_card(perms, zc->card->id))
@@ -1115,7 +1121,7 @@ static long _zcrypt_send_ep11_cprb(struct ap_perms *perms,
 	}
 
 	qid = pref_zq->queue->qid;
-	rc = pref_zq->ops->send_ep11_cprb(pref_zq, xcrb, &ap_msg);
+	rc = pref_zq->ops->send_ep11_cprb(userspace, pref_zq, xcrb, &ap_msg);
 
 	spin_lock(&zcrypt_list_lock);
 	zcrypt_drop_queue(pref_zc, pref_zq, mod, wgt);
@@ -1136,7 +1142,7 @@ out:
 
 long zcrypt_send_ep11_cprb(struct ep11_urb *xcrb)
 {
-	return _zcrypt_send_ep11_cprb(&ap_perms, NULL, xcrb);
+	return _zcrypt_send_ep11_cprb(false, &ap_perms, NULL, xcrb);
 }
 EXPORT_SYMBOL(zcrypt_send_ep11_cprb);
 
@@ -1510,7 +1516,7 @@ static int zsecsendcprb_ioctl(struct ap_perms *perms, unsigned long arg)
 #endif
 
 	do {
-		rc = _zcrypt_send_cprb(perms, &tr, &xcRB);
+		rc = _zcrypt_send_cprb(true, perms, &tr, &xcRB);
 		if (rc == -EAGAIN)
 			tr.again_counter++;
 #ifdef CONFIG_ZCRYPT_DEBUG
@@ -1521,7 +1527,7 @@ static int zsecsendcprb_ioctl(struct ap_perms *perms, unsigned long arg)
 	/* on failure: retry once again after a requested rescan */
 	if ((rc == -ENODEV) && (zcrypt_process_rescan()))
 		do {
-			rc = _zcrypt_send_cprb(perms, &tr, &xcRB);
+			rc = _zcrypt_send_cprb(true, perms, &tr, &xcRB);
 			if (rc == -EAGAIN)
 				tr.again_counter++;
 		} while (rc == -EAGAIN && tr.again_counter < TRACK_AGAIN_MAX);
@@ -1554,7 +1560,7 @@ static int zsendep11cprb_ioctl(struct ap_perms *perms, unsigned long arg)
 #endif
 
 	do {
-		rc = _zcrypt_send_ep11_cprb(perms, &tr, &xcrb);
+		rc = _zcrypt_send_ep11_cprb(true, perms, &tr, &xcrb);
 		if (rc == -EAGAIN)
 			tr.again_counter++;
 #ifdef CONFIG_ZCRYPT_DEBUG
@@ -1565,7 +1571,7 @@ static int zsendep11cprb_ioctl(struct ap_perms *perms, unsigned long arg)
 	/* on failure: retry once again after a requested rescan */
 	if ((rc == -ENODEV) && (zcrypt_process_rescan()))
 		do {
-			rc = _zcrypt_send_ep11_cprb(perms, &tr, &xcrb);
+			rc = _zcrypt_send_ep11_cprb(true, perms, &tr, &xcrb);
 			if (rc == -EAGAIN)
 				tr.again_counter++;
 		} while (rc == -EAGAIN && tr.again_counter < TRACK_AGAIN_MAX);
@@ -1855,14 +1861,14 @@ static long trans_xcRB32(struct ap_perms *perms, struct file *filp,
 	xcRB64.priority_window = xcRB32.priority_window;
 	xcRB64.status = xcRB32.status;
 	do {
-		rc = _zcrypt_send_cprb(perms, &tr, &xcRB64);
+		rc = _zcrypt_send_cprb(true, perms, &tr, &xcRB64);
 		if (rc == -EAGAIN)
 			tr.again_counter++;
 	} while (rc == -EAGAIN && tr.again_counter < TRACK_AGAIN_MAX);
 	/* on failure: retry once again after a requested rescan */
 	if ((rc == -ENODEV) && (zcrypt_process_rescan()))
 		do {
-			rc = _zcrypt_send_cprb(perms, &tr, &xcRB64);
+			rc = _zcrypt_send_cprb(true, perms, &tr, &xcRB64);
 			if (rc == -EAGAIN)
 				tr.again_counter++;
 		} while (rc == -EAGAIN && tr.again_counter < TRACK_AGAIN_MAX);
@@ -1992,6 +1998,72 @@ void zcrypt_rng_device_remove(void)
 	}
 	mutex_unlock(&zcrypt_rng_mutex);
 }
+
+/*
+ * Wait until the zcrypt api is operational.
+ * The AP bus scan and the binding of ap devices to device drivers is
+ * an asynchronous job. This function waits until these initial jobs
+ * are done and so the zcrypt api should be ready to serve crypto
+ * requests - if there are resources available. The function uses an
+ * internal timeout of 60s. The very first caller will either wait for
+ * ap bus bindings complete or the timeout happens. This state will be
+ * remembered for further callers which will only be blocked until a
+ * decision is made (timeout or bindings complete).
+ * On timeout -ETIME is returned, on success the return value is 0.
+ */
+int zcrypt_wait_api_operational(void)
+{
+	static DEFINE_MUTEX(zcrypt_wait_api_lock);
+	static int zcrypt_wait_api_state;
+	int rc;
+
+	rc = mutex_lock_interruptible(&zcrypt_wait_api_lock);
+	if (rc)
+		return rc;
+
+	switch (zcrypt_wait_api_state) {
+	case 0:
+		/* initial state, invoke wait for the ap bus complete */
+		rc = ap_wait_init_apqn_bindings_complete(
+			msecs_to_jiffies(60 * 1000));
+		switch (rc) {
+		case 0:
+			/* ap bus bindings are complete */
+			zcrypt_wait_api_state = 1;
+			break;
+		case -EINTR:
+			/* interrupted, go back to caller */
+			break;
+		case -ETIME:
+			/* timeout */
+			ZCRYPT_DBF(DBF_WARN,
+				   "%s ap_wait_init_apqn_bindings_complete() returned with ETIME\n",
+				   __func__);
+			zcrypt_wait_api_state = -ETIME;
+			break;
+		default:
+			/* other failure */
+			ZCRYPT_DBF(DBF_DEBUG,
+				   "%s ap_wait_init_apqn_bindings_complete() failure rc=%d\n",
+				   __func__, rc);
+			break;
+		}
+		break;
+	case 1:
+		/* a previous caller already found ap bus bindings complete */
+		rc = 0;
+		break;
+	default:
+		/* a previous caller had timeout or other failure */
+		rc = zcrypt_wait_api_state;
+		break;
+	}
+
+	mutex_unlock(&zcrypt_wait_api_lock);
+
+	return rc;
+}
+EXPORT_SYMBOL(zcrypt_wait_api_operational);
 
 int __init zcrypt_debug_init(void)
 {

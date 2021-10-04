@@ -527,6 +527,10 @@ nmi_restart:
 }
 NOKPROBE_SYMBOL(do_nmi);
 
+#if IS_ENABLED(CONFIG_KVM_INTEL)
+EXPORT_SYMBOL_GPL(nmi_noist);
+#endif
+
 void stop_nmi(void)
 {
 	ignore_nmis++;

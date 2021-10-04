@@ -25,7 +25,7 @@
 
 	.text
 	.code64
-ENTRY(efi64_thunk)
+SYM_FUNC_START(efi64_thunk)
 	push	%rbp
 	push	%rbx
 
@@ -69,4 +69,4 @@ ENTRY(efi64_thunk)
 2:	pushl	$__KERNEL_CS
 	pushl	%ebp
 	lret
-ENDPROC(efi64_thunk)
+SYM_FUNC_END(efi64_thunk)

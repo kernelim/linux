@@ -178,6 +178,7 @@ extern struct kmem_cache *gfs2_bufdata_cachep;
 extern struct kmem_cache *gfs2_rgrpd_cachep;
 extern struct kmem_cache *gfs2_quotad_cachep;
 extern struct kmem_cache *gfs2_qadata_cachep;
+extern struct kmem_cache *gfs2_trans_cachep;
 extern mempool_t *gfs2_page_pool;
 extern struct workqueue_struct *gfs2_control_wq;
 
@@ -218,6 +219,11 @@ static inline bool gfs2_withdrawing(struct gfs2_sbd *sdp)
 {
 	return test_bit(SDF_WITHDRAWING, &sdp->sd_flags) &&
 	       !test_bit(SDF_WITHDRAWN, &sdp->sd_flags);
+}
+
+static inline bool gfs2_withdraw_in_prog(struct gfs2_sbd *sdp)
+{
+	return test_bit(SDF_WITHDRAW_IN_PROG, &sdp->sd_flags);
 }
 
 #define gfs2_tune_get(sdp, field) \

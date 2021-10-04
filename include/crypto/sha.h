@@ -136,6 +136,7 @@ static inline int sha256_init(struct sha256_state *sctx)
 extern int sha256_update(struct sha256_state *sctx, const u8 *input,
 			 unsigned int length);
 extern int sha256_final(struct sha256_state *sctx, u8 *hash);
+void sha256(const u8 *data, unsigned int len, u8 *out);
 
 static inline int sha224_init(struct sha256_state *sctx)
 {

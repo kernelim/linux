@@ -1445,6 +1445,9 @@ exit:
 			emit(ARM_LDR_I(rn, ARM_SP, STACK_VAR(src_lo)), ctx);
 		emit_ldx_r(dst, rn, dstk, off, ctx, BPF_SIZE(code));
 		break;
+	/* speculation barrier */
+	case BPF_ST | BPF_NOSPEC:
+		break;
 	/* ST: *(size *)(dst + off) = imm */
 	case BPF_ST | BPF_MEM | BPF_W:
 	case BPF_ST | BPF_MEM | BPF_H:

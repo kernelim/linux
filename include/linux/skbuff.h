@@ -688,6 +688,7 @@ typedef unsigned char *sk_buff_data_t;
  *	@csum_not_inet: use CRC32c to resolve CHECKSUM_PARTIAL
  *	@dst_pending_confirm: need to confirm neighbour
  *	@decrypted: Decrypted SKB
+ *	@slow_gro: state present at GRO time, slower prepare step required
  *	@napi_id: id of the NAPI struct this skb came from
  *	@secmark: security marking
  *	@mark: Generic packet mark
@@ -861,8 +862,9 @@ struct sk_buff {
 	 * 'tc_index') is 2 bytes hole so we can put new fields here.
 	 */
 	RH_KABI_FILL_HOLE(__u8	decrypted:1)
+	RH_KABI_FILL_HOLE(__u8	slow_gro:1)
 
-	/* 15 bits remain - update after adding new field here */
+	/* 14 bits remain - update after adding new field here */
 
 	union {
 		__wsum		csum;
@@ -1004,6 +1006,7 @@ static inline struct dst_entry *skb_dst(const struct sk_buff *skb)
  */
 static inline void skb_dst_set(struct sk_buff *skb, struct dst_entry *dst)
 {
+	skb->slow_gro |= !!dst;
 	skb->_skb_refdst = (unsigned long)dst;
 }
 
@@ -1020,6 +1023,7 @@ static inline void skb_dst_set(struct sk_buff *skb, struct dst_entry *dst)
 static inline void skb_dst_set_noref(struct sk_buff *skb, struct dst_entry *dst)
 {
 	WARN_ON(!rcu_read_lock_held() && !rcu_read_lock_bh_held());
+	skb->slow_gro |= !!dst;
 	skb->_skb_refdst = (unsigned long)dst | SKB_DST_NOREF;
 }
 
@@ -2571,6 +2575,11 @@ static inline int skb_mac_header_was_set(const struct sk_buff *skb)
 	return skb->mac_header != (typeof(skb->mac_header))~0U;
 }
 
+static inline void skb_unset_mac_header(struct sk_buff *skb)
+{
+	skb->mac_header = (typeof(skb->mac_header))~0U;
+}
+
 static inline void skb_reset_mac_header(struct sk_buff *skb)
 {
 	skb->mac_header = skb->data - skb->head;
@@ -2943,12 +2952,28 @@ static inline struct page *dev_alloc_page(void)
 }
 
 /**
+ * dev_page_is_reusable - check whether a page can be reused for network Rx
+ * @page: the page to test
+ *
+ * A page shouldn't be considered for reusing/recycling if it was allocated
+ * under memory pressure or at a distant memory node.
+ *
+ * Returns false if this page should be returned to page allocator, true
+ * otherwise.
+ */
+static inline bool dev_page_is_reusable(const struct page *page)
+{
+	return likely(page_to_nid(page) == numa_mem_id() &&
+		      !page_is_pfmemalloc(page));
+}
+
+/**
  *	skb_propagate_pfmemalloc - Propagate pfmemalloc if skb is allocated after RX page
  *	@page: The page that was allocated from skb_alloc_page
  *	@skb: The skb that may need pfmemalloc set
  */
-static inline void skb_propagate_pfmemalloc(struct page *page,
-					     struct sk_buff *skb)
+static inline void skb_propagate_pfmemalloc(const struct page *page,
+					    struct sk_buff *skb)
 {
 	if (page_is_pfmemalloc(page))
 		skb->pfmemalloc = true;
@@ -4138,6 +4163,16 @@ static inline void nf_conntrack_get(struct nf_conntrack *nfct)
 }
 #endif
 
+static inline unsigned long skb_get_nfct(const struct sk_buff *skb)
+{
+#if IS_ENABLED(CONFIG_NF_CONNTRACK)
+	return skb->_nfct;
+#else
+	return 0UL;
+#endif
+}
+
+
 /* RHEL: Helper function that needs to be called when skb_ext_put() and
  * skb_ext_reset() are called. This helper takes care of skb->sp
  * (and maybe about skb->nf_bridge in future) that cannot be converted
@@ -4222,6 +4257,15 @@ static inline void skb_ext_copy(struct sk_buff *dst, const struct sk_buff *src)
 {
 	skb_ext_put(dst);
 	__skb_ext_copy(dst, src);
+
+#ifdef CONFIG_XFRM
+	/* RHEL: Also copy the secpath, which was freed by
+	 * __rh_skb_ext_put(). Like in __rh_skb_ext_put(), we need to
+	 * expand the implementation of secpath_get(). */
+	if (src->sp)
+		refcount_inc((refcount_t *)src->sp);
+	dst->sp = src->sp;
+#endif
 }
 
 static inline bool __skb_ext_exist(const struct skb_ext *ext, enum skb_ext_id i)
@@ -4341,6 +4385,7 @@ static inline void nf_copy(struct sk_buff *dst, const struct sk_buff *src)
 #if IS_ENABLED(CONFIG_BRIDGE_NETFILTER)
 	nf_bridge_put(dst->nf_bridge);
 #endif
+	dst->slow_gro = src->slow_gro;
 	__nf_copy(dst, src, true);
 }
 
@@ -4645,6 +4690,11 @@ static inline void skb_reset_redirect(struct sk_buff *skb)
 #ifdef CONFIG_NET_REDIRECT
 	skb->redirected = 0;
 #endif
+}
+
+static inline bool skb_csum_is_sctp(struct sk_buff *skb)
+{
+	return skb->csum_not_inet;
 }
 
 #endif	/* __KERNEL__ */

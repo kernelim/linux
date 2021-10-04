@@ -286,3 +286,13 @@ int sha224_final(struct sha256_state *sctx, u8 *out)
 	return __sha256_final(sctx, out, 7);
 }
 EXPORT_SYMBOL(sha224_final);
+
+void sha256(const u8 *data, unsigned int len, u8 *out)
+{
+	struct sha256_state sctx;
+
+	sha256_init(&sctx);
+	sha256_update(&sctx, data, len);
+	sha256_final(&sctx, out);
+}
+EXPORT_SYMBOL(sha256);

@@ -72,7 +72,7 @@ enum {
 	__NETIF_F_RH_KABI_PLACEHOLDER_4,
 	__NETIF_F_RH_KABI_PLACEHOLDER_5,
 	__NETIF_F_RH_KABI_PLACEHOLDER_6,
-	__NETIF_F_RH_KABI_PLACEHOLDER_7,
+	NETIF_F_GRO_UDP_FWD_BIT,	/* Allow UDP GRO for forwarding */
 	NETIF_F_GRO_FRAGLIST_BIT,	/* Fraglist GRO */
 	NETIF_F_HW_TLS_RX_BIT,		/* Hardware TLS RX offload */
 
@@ -171,6 +171,7 @@ enum {
 #define NETIF_F_HW_TLS_RX	__NETIF_F(HW_TLS_RX)
 #define NETIF_F_GRO_FRAGLIST	__NETIF_F(GRO_FRAGLIST)
 #define NETIF_F_GSO_FRAGLIST	__NETIF_F(GSO_FRAGLIST)
+#define NETIF_F_GRO_UDP_FWD	__NETIF_F(GRO_UDP_FWD)
 
 #define for_each_netdev_feature(mask_addr, bit)	\
 	for_each_set_bit(bit, (unsigned long *)mask_addr, NETDEV_FEATURE_COUNT)
@@ -203,8 +204,8 @@ enum {
 				 NETIF_F_FSO)
 
 /* List of features with software fallbacks. */
-#define NETIF_F_GSO_SOFTWARE	(NETIF_F_ALL_TSO | \
-				 NETIF_F_GSO_SCTP)
+#define NETIF_F_GSO_SOFTWARE	(NETIF_F_ALL_TSO | NETIF_F_GSO_SCTP |	     \
+				 NETIF_F_GSO_UDP_L4 | NETIF_F_GSO_FRAGLIST)
 
 /*
  * If one device supports one of these features, then enable them
@@ -230,7 +231,7 @@ enum {
 #define NETIF_F_SOFT_FEATURES	(NETIF_F_GSO | NETIF_F_GRO)
 
 /* Changeable features with no special hardware requirements that defaults to off. */
-#define NETIF_F_SOFT_FEATURES_OFF	NETIF_F_GRO_FRAGLIST
+#define NETIF_F_SOFT_FEATURES_OFF	(NETIF_F_GRO_FRAGLIST | NETIF_F_GRO_UDP_FWD)
 
 #define NETIF_F_VLAN_FEATURES	(NETIF_F_HW_VLAN_CTAG_FILTER | \
 				 NETIF_F_HW_VLAN_CTAG_RX | \

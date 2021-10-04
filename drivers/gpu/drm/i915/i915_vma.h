@@ -237,8 +237,17 @@ static inline void i915_vma_unlock(struct i915_vma *vma)
 }
 
 int __must_check
-i915_vma_pin(struct i915_vma *vma, u64 size, u64 alignment, u64 flags);
-int i915_ggtt_pin(struct i915_vma *vma, u32 align, unsigned int flags);
+i915_vma_pin_ww(struct i915_vma *vma, struct i915_gem_ww_ctx *ww,
+		u64 size, u64 alignment, u64 flags);
+
+static inline int __must_check
+i915_vma_pin(struct i915_vma *vma, u64 size, u64 alignment, u64 flags)
+{
+	return i915_vma_pin_ww(vma, NULL, size, alignment, flags);
+}
+
+int i915_ggtt_pin(struct i915_vma *vma, struct i915_gem_ww_ctx *ww,
+		  u32 align, unsigned int flags);
 
 static inline int i915_vma_pin_count(const struct i915_vma *vma)
 {
@@ -353,6 +362,21 @@ i915_vma_unpin_fence(struct i915_vma *vma)
 }
 
 void i915_vma_parked(struct intel_gt *gt);
+
+static inline bool i915_vma_is_scanout(const struct i915_vma *vma)
+{
+	return test_bit(I915_VMA_SCANOUT_BIT, __i915_vma_flags(vma));
+}
+
+static inline void i915_vma_mark_scanout(struct i915_vma *vma)
+{
+	set_bit(I915_VMA_SCANOUT_BIT, __i915_vma_flags(vma));
+}
+
+static inline void i915_vma_clear_scanout(struct i915_vma *vma)
+{
+	clear_bit(I915_VMA_SCANOUT_BIT, __i915_vma_flags(vma));
+}
 
 #define for_each_until(cond) if (cond) break; else
 

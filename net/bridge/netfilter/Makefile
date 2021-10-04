@@ -5,9 +5,6 @@
 
 obj-$(CONFIG_NFT_BRIDGE_REJECT)  += nft_reject_bridge.o
 
-# packet logging
-obj-$(CONFIG_NF_LOG_BRIDGE) += nf_log_bridge.o
-
 obj-$(CONFIG_BRIDGE_NF_EBTABLES) += ebtables.o
 
 # tables

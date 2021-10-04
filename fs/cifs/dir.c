@@ -33,6 +33,7 @@
 #include "cifs_debug.h"
 #include "cifs_fs_sb.h"
 #include "cifs_unicode.h"
+#include "fs_context.h"
 
 static void
 renew_parental_timestamps(struct dentry *direntry)
@@ -46,10 +47,10 @@ renew_parental_timestamps(struct dentry *direntry)
 }
 
 char *
-cifs_build_path_to_root(struct smb_vol *vol, struct cifs_sb_info *cifs_sb,
+cifs_build_path_to_root(struct smb3_fs_context *ctx, struct cifs_sb_info *cifs_sb,
 			struct cifs_tcon *tcon, int add_treename)
 {
-	int pplen = vol->prepath ? strlen(vol->prepath) + 1 : 0;
+	int pplen = ctx->prepath ? strlen(ctx->prepath) + 1 : 0;
 	int dfsplen;
 	char *full_path = NULL;
 
@@ -71,7 +72,7 @@ cifs_build_path_to_root(struct smb_vol *vol, struct cifs_sb_info *cifs_sb,
 	if (dfsplen)
 		memcpy(full_path, tcon->treeName, dfsplen);
 	full_path[dfsplen] = CIFS_DIR_SEP(cifs_sb);
-	memcpy(full_path + dfsplen + 1, vol->prepath, pplen);
+	memcpy(full_path + dfsplen + 1, ctx->prepath, pplen);
 	convert_delimiter(full_path, CIFS_DIR_SEP(cifs_sb));
 	return full_path;
 }
@@ -662,6 +663,7 @@ cifs_lookup(struct inode *parent_dir_inode, struct dentry *direntry,
 	struct cifs_tcon *pTcon;
 	struct inode *newInode = NULL;
 	char *full_path = NULL;
+	int retry_count = 0;
 
 	xid = get_xid();
 
@@ -703,6 +705,7 @@ cifs_lookup(struct inode *parent_dir_inode, struct dentry *direntry,
 	cifs_dbg(FYI, "Full path: %s inode = 0x%p\n",
 		 full_path, d_inode(direntry));
 
+again:
 	if (pTcon->posix_extensions)
 		rc = smb311_posix_get_inode_info(&newInode, full_path, parent_dir_inode->i_sb, xid);
 	else if (pTcon->unix_ext) {
@@ -717,6 +720,8 @@ cifs_lookup(struct inode *parent_dir_inode, struct dentry *direntry,
 		/* since paths are not looked up by component - the parent
 		   directories are presumed to be good here */
 		renew_parental_timestamps(direntry);
+	} else if (rc == -EAGAIN && retry_count++ < 10) {
+		goto again;
 	} else if (rc == -ENOENT) {
 		cifs_set_time(direntry, jiffies);
 		newInode = NULL;

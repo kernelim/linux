@@ -1938,6 +1938,7 @@ static int add_follower(struct hda_codec *codec,
  * @followers: follower control names (optional)
  * @suffix: suffix string to each follower name (optional)
  * @init_follower_vol: initialize followers to unmute/0dB
+ * @access: kcontrol access rights
  * @ctl_ret: store the vmaster kcontrol in return
  *
  * Create a virtual master control with the given name.  The TLV data
@@ -1952,7 +1953,7 @@ static int add_follower(struct hda_codec *codec,
 int __snd_hda_add_vmaster(struct hda_codec *codec, char *name,
 			  unsigned int *tlv, const char * const *followers,
 			  const char *suffix, bool init_follower_vol,
-			  struct snd_kcontrol **ctl_ret)
+			  unsigned int access, struct snd_kcontrol **ctl_ret)
 {
 	struct snd_kcontrol *kctl;
 	int err;
@@ -1968,6 +1969,7 @@ int __snd_hda_add_vmaster(struct hda_codec *codec, char *name,
 	kctl = snd_ctl_make_virtual_master(name, tlv);
 	if (!kctl)
 		return -ENOMEM;
+	kctl->vd[0].access |= access;
 	err = snd_hda_ctl_add(codec, 0, kctl);
 	if (err < 0)
 		return err;
@@ -1994,87 +1996,29 @@ int __snd_hda_add_vmaster(struct hda_codec *codec, char *name,
 }
 EXPORT_SYMBOL_GPL(__snd_hda_add_vmaster);
 
-/*
- * mute-LED control using vmaster
- */
-static int vmaster_mute_mode_info(struct snd_kcontrol *kcontrol,
-				  struct snd_ctl_elem_info *uinfo)
-{
-	static const char * const texts[] = {
-		"On", "Off", "Follow Master"
-	};
-
-	return snd_ctl_enum_info(uinfo, 1, 3, texts);
-}
-
-static int vmaster_mute_mode_get(struct snd_kcontrol *kcontrol,
-				 struct snd_ctl_elem_value *ucontrol)
-{
-	struct hda_vmaster_mute_hook *hook = snd_kcontrol_chip(kcontrol);
-	ucontrol->value.enumerated.item[0] = hook->mute_mode;
-	return 0;
-}
-
-static int vmaster_mute_mode_put(struct snd_kcontrol *kcontrol,
-				 struct snd_ctl_elem_value *ucontrol)
-{
-	struct hda_vmaster_mute_hook *hook = snd_kcontrol_chip(kcontrol);
-	unsigned int old_mode = hook->mute_mode;
-
-	hook->mute_mode = ucontrol->value.enumerated.item[0];
-	if (hook->mute_mode > HDA_VMUTE_FOLLOW_MASTER)
-		hook->mute_mode = HDA_VMUTE_FOLLOW_MASTER;
-	if (old_mode == hook->mute_mode)
-		return 0;
-	snd_hda_sync_vmaster_hook(hook);
-	return 1;
-}
-
-static const struct snd_kcontrol_new vmaster_mute_mode = {
-	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
-	.name = "Mute-LED Mode",
-	.info = vmaster_mute_mode_info,
-	.get = vmaster_mute_mode_get,
-	.put = vmaster_mute_mode_put,
-};
-
 /* meta hook to call each driver's vmaster hook */
 static void vmaster_hook(void *private_data, int enabled)
 {
 	struct hda_vmaster_mute_hook *hook = private_data;
 
-	if (hook->mute_mode != HDA_VMUTE_FOLLOW_MASTER)
-		enabled = hook->mute_mode;
 	hook->hook(hook->codec, enabled);
 }
 
 /**
- * snd_hda_add_vmaster_hook - Add a vmaster hook for mute-LED
+ * snd_hda_add_vmaster_hook - Add a vmaster hw specific hook
  * @codec: the HDA codec
  * @hook: the vmaster hook object
- * @expose_enum_ctl: flag to create an enum ctl
  *
- * Add a mute-LED hook with the given vmaster switch kctl.
- * When @expose_enum_ctl is set, "Mute-LED Mode" control is automatically
- * created and associated with the given hook.
+ * Add a hw specific hook (like EAPD) with the given vmaster switch kctl.
  */
 int snd_hda_add_vmaster_hook(struct hda_codec *codec,
-			     struct hda_vmaster_mute_hook *hook,
-			     bool expose_enum_ctl)
+			     struct hda_vmaster_mute_hook *hook)
 {
-	struct snd_kcontrol *kctl;
-
 	if (!hook->hook || !hook->sw_kctl)
 		return 0;
 	hook->codec = codec;
-	hook->mute_mode = HDA_VMUTE_FOLLOW_MASTER;
 	snd_ctl_add_vmaster_hook(hook->sw_kctl, vmaster_hook, hook);
-	if (!expose_enum_ctl)
-		return 0;
-	kctl = snd_ctl_new1(&vmaster_mute_mode, hook);
-	if (!kctl)
-		return -ENOMEM;
-	return snd_hda_ctl_add(codec, 0, kctl);
+	return 0;
 }
 EXPORT_SYMBOL_GPL(snd_hda_add_vmaster_hook);
 
@@ -2967,21 +2911,27 @@ static int hda_codec_runtime_resume(struct device *dev)
 	pm_runtime_mark_last_busy(dev);
 	return 0;
 }
+
 #endif /* CONFIG_PM */
 
 #ifdef CONFIG_PM_SLEEP
-static int hda_codec_force_resume(struct device *dev)
+static int hda_codec_pm_prepare(struct device *dev)
+{
+	dev->power.power_state = PMSG_SUSPEND;
+	return pm_runtime_suspended(dev);
+}
+
+static void hda_codec_pm_complete(struct device *dev)
 {
 	struct hda_codec *codec = dev_to_hda_codec(dev);
-	int ret;
 
-	ret = pm_runtime_force_resume(dev);
-	/* schedule jackpoll work for jack detection update */
-	if (codec->jackpoll_interval ||
-	    (pm_runtime_suspended(dev) && hda_codec_need_resume(codec)))
-		schedule_delayed_work(&codec->jackpoll_work,
-				      codec->jackpoll_interval);
-	return ret;
+	/* If no other pm-functions are called between prepare() and complete() */
+	if (dev->power.power_state.event == PM_EVENT_SUSPEND)
+		dev->power.power_state = PMSG_RESUME;
+
+	if (pm_runtime_suspended(dev) && (codec->jackpoll_interval ||
+	    hda_codec_need_resume(codec) || codec->forced_resume))
+		pm_request_resume(dev);
 }
 
 static int hda_codec_pm_suspend(struct device *dev)
@@ -2993,7 +2943,7 @@ static int hda_codec_pm_suspend(struct device *dev)
 static int hda_codec_pm_resume(struct device *dev)
 {
 	dev->power.power_state = PMSG_RESUME;
-	return hda_codec_force_resume(dev);
+	return pm_runtime_force_resume(dev);
 }
 
 static int hda_codec_pm_freeze(struct device *dev)
@@ -3005,19 +2955,21 @@ static int hda_codec_pm_freeze(struct device *dev)
 static int hda_codec_pm_thaw(struct device *dev)
 {
 	dev->power.power_state = PMSG_THAW;
-	return hda_codec_force_resume(dev);
+	return pm_runtime_force_resume(dev);
 }
 
 static int hda_codec_pm_restore(struct device *dev)
 {
 	dev->power.power_state = PMSG_RESTORE;
-	return hda_codec_force_resume(dev);
+	return pm_runtime_force_resume(dev);
 }
 #endif /* CONFIG_PM_SLEEP */
 
 /* referred in hda_bind.c */
 const struct dev_pm_ops hda_codec_driver_pm = {
 #ifdef CONFIG_PM_SLEEP
+	.prepare = hda_codec_pm_prepare,
+	.complete = hda_codec_pm_complete,
 	.suspend = hda_codec_pm_suspend,
 	.resume = hda_codec_pm_resume,
 	.freeze = hda_codec_pm_freeze,
@@ -3480,7 +3432,7 @@ EXPORT_SYMBOL_GPL(snd_hda_check_amp_list_power);
  */
 
 /**
- * snd_hda_input_mux_info_info - Info callback helper for the input-mux enum
+ * snd_hda_input_mux_info - Info callback helper for the input-mux enum
  * @imux: imux helper object
  * @uinfo: pointer to get/store the data
  */
@@ -3503,7 +3455,7 @@ int snd_hda_input_mux_info(const struct hda_input_mux *imux,
 EXPORT_SYMBOL_GPL(snd_hda_input_mux_info);
 
 /**
- * snd_hda_input_mux_info_put - Put callback helper for the input-mux enum
+ * snd_hda_input_mux_put - Put callback helper for the input-mux enum
  * @codec: the HDA codec
  * @imux: imux helper object
  * @ucontrol: pointer to get/store the data
@@ -3938,7 +3890,7 @@ unsigned int snd_hda_correct_pin_ctl(struct hda_codec *codec,
 EXPORT_SYMBOL_GPL(snd_hda_correct_pin_ctl);
 
 /**
- * _snd_hda_pin_ctl - Helper to set pin ctl value
+ * _snd_hda_set_pin_ctl - Helper to set pin ctl value
  * @codec: the HDA codec
  * @pin: referred pin NID
  * @val: pin control value to set
@@ -3996,7 +3948,7 @@ int snd_hda_add_imux_item(struct hda_codec *codec,
 			 sizeof(imux->items[imux->num_items].label),
 			 "%s %d", label, label_idx);
 	else
-		strlcpy(imux->items[imux->num_items].label, label,
+		strscpy(imux->items[imux->num_items].label, label,
 			sizeof(imux->items[imux->num_items].label));
 	imux->items[imux->num_items].index = index;
 	imux->num_items++;

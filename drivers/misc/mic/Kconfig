@@ -5,6 +5,7 @@ comment "Intel MIC Bus Driver"
 config INTEL_MIC_BUS
 	tristate "Intel MIC Bus Driver"
 	depends on 64BIT && PCI && X86
+	select DMA_OPS
 	help
 	  This option is selected by any driver which registers a
 	  device or driver on the MIC Bus, such as CONFIG_INTEL_MIC_HOST,
@@ -22,6 +23,7 @@ comment "SCIF Bus Driver"
 config SCIF_BUS
 	tristate "SCIF Bus Driver"
 	depends on 64BIT && PCI && X86
+	select DMA_OPS
 	help
 	  This option is selected by any driver which registers a
 	  device or driver on the SCIF Bus, such as CONFIG_INTEL_MIC_HOST
@@ -38,6 +40,7 @@ comment "VOP Bus Driver"
 
 config VOP_BUS
 	tristate "VOP Bus Driver"
+	select DMA_OPS
 	help
 	  This option is selected by any driver which registers a
 	  device or driver on the VOP Bus, such as CONFIG_INTEL_MIC_HOST
@@ -56,6 +59,7 @@ config INTEL_MIC_HOST
 	tristate "Intel MIC Host Driver"
 	depends on 64BIT && PCI && X86
 	depends on INTEL_MIC_BUS && SCIF_BUS && MIC_COSM && VOP_BUS
+	select DMA_OPS
 	help
 	  This enables Host Driver support for the Intel Many Integrated
 	  Core (MIC) family of PCIe form factor coprocessor devices that
@@ -131,7 +135,7 @@ comment "VOP Driver"
 
 config VOP
 	tristate "VOP Driver"
-	depends on VOP_BUS && VHOST_DPN
+	depends on VOP_BUS
 	select VHOST_RING
 	select VIRTIO
 	help

@@ -207,6 +207,50 @@ enum udp_tunnel_nic_info_flags {
 	 * Driver will not receive any callback associated with port 4789.
 	 */
 	UDP_TUNNEL_NIC_INFO_STATIC_IANA_VXLAN	= BIT(3),
+
+	/* RHEL: Indicates that structure udp_tunnel_nic_info is extended
+	 * and contains '_rh' sub-structure with additional fields.
+	 * Drivers that allocate this structure and use fields present
+	 * in udp_tunnel_nic_info_rh have to set this flag.
+	 *
+	 * Example:
+	 * static const struct udp_tunnel_nic_info example_udp_tunnels = {
+	 *	.sync_table     = example_udp_tunnel_sync,
+	 *	.flags          = UDP_TUNNEL_NIC_INFO_MAY_SLEEP |
+	 *			  UDP_TUNNEL_NIC_INFO_OPEN_ONLY |
+	 *			  __RH_UDP_TUNNEL_NIC_INFO_EXTENDED;
+	 *	.tables         = {
+	 *		{ .n_entries = 1, .tunnel_types = UDP_TUNNEL_TYPE_VXLAN,  },
+	 *	},
+	 *	_rh.ext_field = 1234,
+	 *	RH_KABI_AUX_INIT_SIZE(udp_tunnel_nic_info)
+	 */
+	__RH_UDP_TUNNEL_NIC_INFO_EXTENDED	= BIT(31),
+};
+
+struct udp_tunnel_nic_info_rh {
+	struct udp_tunnel_nic_shared *shared;
+};
+
+#define RH_UDP_TUNNEL_NIC_INFO_AUX(info, field) \
+	(((info)->flags & __RH_UDP_TUNNEL_NIC_INFO_EXTENDED) && \
+	 RH_KABI_AUX((info), udp_tunnel_nic_info, field))
+#define RH_UDP_TUNNEL_NIC_INFO_AUX_GET(info, field, ifnotset) \
+	(RH_UDP_TUNNEL_NIC_INFO_AUX(info, field) ? (info)->_rh.field : (ifnotset))
+
+struct udp_tunnel_nic;
+
+#define UDP_TUNNEL_NIC_MAX_SHARING_DEVICES	(U16_MAX / 2)
+
+struct udp_tunnel_nic_shared {
+	struct udp_tunnel_nic *udp_tunnel_nic_info;
+
+	struct list_head devices;
+};
+
+struct udp_tunnel_nic_shared_node {
+	struct net_device *dev;
+	struct list_head list;
 };
 
 /**
@@ -214,6 +258,7 @@ enum udp_tunnel_nic_info_flags {
  * @set_port:	callback for adding a new port
  * @unset_port:	callback for removing a port
  * @sync_table:	callback for syncing the entire port table at once
+ * @shared:	reference to device global state (optional)
  * @flags:	device flags from enum udp_tunnel_nic_info_flags
  * @tables:	UDP port tables this device has
  * @tables.n_entries:		number of entries in this table
@@ -221,6 +266,12 @@ enum udp_tunnel_nic_info_flags {
  *
  * Drivers are expected to provide either @set_port and @unset_port callbacks
  * or the @sync_table callback. Callbacks are invoked with rtnl lock held.
+ *
+ * Devices which (misguidedly) share the UDP tunnel port table across multiple
+ * netdevs should allocate an instance of struct udp_tunnel_nic_shared and
+ * point @shared at it.
+ * There must never be more than %UDP_TUNNEL_NIC_MAX_SHARING_DEVICES devices
+ * sharing a table.
  *
  * Known limitations:
  *  - UDP tunnel port notifications are fundamentally best-effort -
@@ -249,6 +300,8 @@ struct udp_tunnel_nic_info {
 		unsigned int n_entries;
 		unsigned int tunnel_types;
 	} tables[UDP_TUNNEL_NIC_MAX_TABLES];
+
+	RH_KABI_AUX_EMBED(udp_tunnel_nic_info);
 };
 
 /* UDP tunnel module dependencies

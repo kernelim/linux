@@ -82,15 +82,6 @@ static void nbio_v7_4_mc_access_enable(struct amdgpu_device *adev, bool enable)
 		WREG32_SOC15(NBIO, 0, mmBIF_FB_EN, 0);
 }
 
-static void nbio_v7_4_hdp_flush(struct amdgpu_device *adev,
-				struct amdgpu_ring *ring)
-{
-	if (!ring || !ring->funcs->emit_wreg)
-		WREG32_NO_KIQ((adev->rmmio_remap.reg_offset + KFD_MMIO_REMAP_HDP_MEM_FLUSH_CNTL) >> 2, 0);
-	else
-		amdgpu_ring_emit_wreg(ring, (adev->rmmio_remap.reg_offset + KFD_MMIO_REMAP_HDP_MEM_FLUSH_CNTL) >> 2, 0);
-}
-
 static u32 nbio_v7_4_get_memsize(struct amdgpu_device *adev)
 {
 	return RREG32_SOC15(NBIO, 0, mmRCC_CONFIG_MEMSIZE);
@@ -302,6 +293,7 @@ static void nbio_v7_4_handle_ras_controller_intr_no_bifring(struct amdgpu_device
 	uint32_t bif_doorbell_intr_cntl;
 	struct ras_manager *obj = amdgpu_ras_find_obj(adev, adev->nbio.ras_if);
 	struct ras_err_data err_data = {0, 0, 0, NULL};
+	struct amdgpu_ras *ras = amdgpu_ras_get_context(adev);
 
 	bif_doorbell_intr_cntl = RREG32_SOC15(NBIO, 0, mmBIF_DOORBELL_INT_CNTL);
 	if (REG_GET_FIELD(bif_doorbell_intr_cntl,
@@ -312,28 +304,31 @@ static void nbio_v7_4_handle_ras_controller_intr_no_bifring(struct amdgpu_device
 						RAS_CNTLR_INTERRUPT_CLEAR, 1);
 		WREG32_SOC15(NBIO, 0, mmBIF_DOORBELL_INT_CNTL, bif_doorbell_intr_cntl);
 
-		/*
-		 * clear error status after ras_controller_intr according to
-		 * hw team and count ue number for query
-		 */
-		nbio_v7_4_query_ras_error_count(adev, &err_data);
+		if (!ras->disable_ras_err_cnt_harvest) {
+			/*
+			 * clear error status after ras_controller_intr
+			 * according to hw team and count ue number
+			 * for query
+			 */
+			nbio_v7_4_query_ras_error_count(adev, &err_data);
 
-		/* logging on error counter and printing for awareness */
-		obj->err_data.ue_count += err_data.ue_count;
-		obj->err_data.ce_count += err_data.ce_count;
+			/* logging on error cnt and printing for awareness */
+			obj->err_data.ue_count += err_data.ue_count;
+			obj->err_data.ce_count += err_data.ce_count;
 
-		if (err_data.ce_count)
-			dev_info(adev->dev, "%ld correctable hardware "
-					"errors detected in %s block, "
-					"no user action is needed.\n",
-					obj->err_data.ce_count,
-					adev->nbio.ras_if->name);
+			if (err_data.ce_count)
+				dev_info(adev->dev, "%ld correctable hardware "
+						"errors detected in %s block, "
+						"no user action is needed.\n",
+						obj->err_data.ce_count,
+						adev->nbio.ras_if->name);
 
-		if (err_data.ue_count)
-			dev_info(adev->dev, "%ld uncorrectable hardware "
-					"errors detected in %s block\n",
-					obj->err_data.ue_count,
-					adev->nbio.ras_if->name);
+			if (err_data.ue_count)
+				dev_info(adev->dev, "%ld uncorrectable hardware "
+						"errors detected in %s block\n",
+						obj->err_data.ue_count,
+						adev->nbio.ras_if->name);
+		}
 
 		dev_info(adev->dev, "RAS controller interrupt triggered "
 					"by NBIF error\n");
@@ -537,7 +532,6 @@ const struct amdgpu_nbio_funcs nbio_v7_4_funcs = {
 	.get_pcie_data_offset = nbio_v7_4_get_pcie_data_offset,
 	.get_rev_id = nbio_v7_4_get_rev_id,
 	.mc_access_enable = nbio_v7_4_mc_access_enable,
-	.hdp_flush = nbio_v7_4_hdp_flush,
 	.get_memsize = nbio_v7_4_get_memsize,
 	.sdma_doorbell_range = nbio_v7_4_sdma_doorbell_range,
 	.vcn_doorbell_range = nbio_v7_4_vcn_doorbell_range,

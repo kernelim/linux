@@ -424,6 +424,8 @@ config NET_SB1000
 
 source "drivers/net/phy/Kconfig"
 
+source "drivers/net/pcs/Kconfig"
+
 source "drivers/net/plip/Kconfig"
 
 source "drivers/net/ppp/Kconfig"
@@ -518,6 +520,7 @@ config NETDEVSIM
 	depends on DEBUG_FS
 	depends on INET
 	depends on IPV6 || IPV6=n
+	depends on PSAMPLE || PSAMPLE=n
 	select NET_DEVLINK
 	help
 	  This driver is a developer testing tool and software model that can

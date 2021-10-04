@@ -500,16 +500,17 @@ static int cache_clean(void)
  */
 static void do_cache_clean(struct work_struct *work)
 {
-	int delay = 5;
-	if (cache_clean() == -1)
-		delay = round_jiffies_relative(30*HZ);
+	int delay;
 
 	if (list_empty(&cache_list))
-		delay = 0;
+		return;
 
-	if (delay)
-		queue_delayed_work(system_power_efficient_wq,
-				   &cache_cleaner, delay);
+	if (cache_clean() == -1)
+		delay = round_jiffies_relative(30*HZ);
+	else
+		delay = 5;
+
+	queue_delayed_work(system_power_efficient_wq, &cache_cleaner, delay);
 }
 
 
@@ -1419,10 +1420,10 @@ static int c_show(struct seq_file *m, void *p)
 	cache_get(cp);
 	if (cache_check(cd, cp, NULL))
 		/* cache_check does a cache_put on failure */
-		seq_printf(m, "# ");
+		seq_puts(m, "# ");
 	else {
 		if (cache_is_expired(cd, cp))
-			seq_printf(m, "# ");
+			seq_puts(m, "# ");
 		cache_put(cp, cd);
 	}
 

@@ -14,9 +14,18 @@
 #include <linux/sysfs.h>
 #include "ifcvf_base.h"
 
-#define VERSION_STRING  "0.1"
 #define DRIVER_AUTHOR   "Intel Corporation"
 #define IFCVF_DRIVER_NAME       "ifcvf"
+
+static irqreturn_t ifcvf_config_changed(int irq, void *arg)
+{
+	struct ifcvf_hw *vf = arg;
+
+	if (vf->config_cb.callback)
+		return vf->config_cb.callback(vf->config_cb.private);
+
+	return IRQ_HANDLED;
+}
 
 static irqreturn_t ifcvf_intr_handler(int irq, void *arg)
 {
@@ -26,6 +35,75 @@ static irqreturn_t ifcvf_intr_handler(int irq, void *arg)
 		return vring->cb.callback(vring->cb.private);
 
 	return IRQ_HANDLED;
+}
+
+static void ifcvf_free_irq_vectors(void *data)
+{
+	pci_free_irq_vectors(data);
+}
+
+static void ifcvf_free_irq(struct ifcvf_adapter *adapter, int queues)
+{
+	struct pci_dev *pdev = adapter->pdev;
+	struct ifcvf_hw *vf = &adapter->vf;
+	int i;
+
+
+	for (i = 0; i < queues; i++) {
+		devm_free_irq(&pdev->dev, vf->vring[i].irq, &vf->vring[i]);
+		vf->vring[i].irq = -EINVAL;
+	}
+
+	devm_free_irq(&pdev->dev, vf->config_irq, vf);
+	ifcvf_free_irq_vectors(pdev);
+}
+
+static int ifcvf_request_irq(struct ifcvf_adapter *adapter)
+{
+	struct pci_dev *pdev = adapter->pdev;
+	struct ifcvf_hw *vf = &adapter->vf;
+	int vector, i, ret, irq;
+
+	ret = pci_alloc_irq_vectors(pdev, IFCVF_MAX_INTR,
+				    IFCVF_MAX_INTR, PCI_IRQ_MSIX);
+	if (ret < 0) {
+		IFCVF_ERR(pdev, "Failed to alloc IRQ vectors\n");
+		return ret;
+	}
+
+	snprintf(vf->config_msix_name, 256, "ifcvf[%s]-config\n",
+		 pci_name(pdev));
+	vector = 0;
+	vf->config_irq = pci_irq_vector(pdev, vector);
+	ret = devm_request_irq(&pdev->dev, vf->config_irq,
+			       ifcvf_config_changed, 0,
+			       vf->config_msix_name, vf);
+	if (ret) {
+		IFCVF_ERR(pdev, "Failed to request config irq\n");
+		return ret;
+	}
+
+	for (i = 0; i < IFCVF_MAX_QUEUE_PAIRS * 2; i++) {
+		snprintf(vf->vring[i].msix_name, 256, "ifcvf[%s]-%d\n",
+			 pci_name(pdev), i);
+		vector = i + IFCVF_MSI_QUEUE_OFF;
+		irq = pci_irq_vector(pdev, vector);
+		ret = devm_request_irq(&pdev->dev, irq,
+				       ifcvf_intr_handler, 0,
+				       vf->vring[i].msix_name,
+				       &vf->vring[i]);
+		if (ret) {
+			IFCVF_ERR(pdev,
+				  "Failed to request irq for vq %d\n", i);
+			ifcvf_free_irq(adapter, i);
+
+			return ret;
+		}
+
+		vf->vring[i].irq = irq;
+	}
+
+	return 0;
 }
 
 static int ifcvf_start_datapath(void *private)
@@ -90,10 +168,23 @@ static struct ifcvf_hw *vdpa_to_vf(struct vdpa_device *vdpa_dev)
 
 static u64 ifcvf_vdpa_get_features(struct vdpa_device *vdpa_dev)
 {
+	struct ifcvf_adapter *adapter = vdpa_to_adapter(vdpa_dev);
 	struct ifcvf_hw *vf = vdpa_to_vf(vdpa_dev);
+	struct pci_dev *pdev = adapter->pdev;
+
 	u64 features;
 
-	features = ifcvf_get_features(vf) & IFCVF_SUPPORTED_FEATURES;
+	switch (vf->dev_type) {
+	case VIRTIO_ID_NET:
+		features = ifcvf_get_features(vf) & IFCVF_NET_SUPPORTED_FEATURES;
+		break;
+	case VIRTIO_ID_BLOCK:
+		features = ifcvf_get_features(vf);
+		break;
+	default:
+		features = 0;
+		IFCVF_ERR(pdev, "VIRTIO ID %u not supported\n", vf->dev_type);
+	}
 
 	return features;
 }
@@ -101,6 +192,11 @@ static u64 ifcvf_vdpa_get_features(struct vdpa_device *vdpa_dev)
 static int ifcvf_vdpa_set_features(struct vdpa_device *vdpa_dev, u64 features)
 {
 	struct ifcvf_hw *vf = vdpa_to_vf(vdpa_dev);
+	int ret;
+
+	ret = ifcvf_verify_min_features(vf, features);
+	if (ret)
+		return ret;
 
 	vf->req_features = features;
 
@@ -118,17 +214,37 @@ static void ifcvf_vdpa_set_status(struct vdpa_device *vdpa_dev, u8 status)
 {
 	struct ifcvf_adapter *adapter;
 	struct ifcvf_hw *vf;
+	u8 status_old;
+	int ret;
 
 	vf  = vdpa_to_vf(vdpa_dev);
 	adapter = dev_get_drvdata(vdpa_dev->dev.parent);
+	status_old = ifcvf_get_status(vf);
+
+	if (status_old == status)
+		return;
+
+	if ((status_old & VIRTIO_CONFIG_S_DRIVER_OK) &&
+	    !(status & VIRTIO_CONFIG_S_DRIVER_OK)) {
+		ifcvf_stop_datapath(adapter);
+		ifcvf_free_irq(adapter, IFCVF_MAX_QUEUE_PAIRS * 2);
+	}
 
 	if (status == 0) {
-		ifcvf_stop_datapath(adapter);
 		ifcvf_reset_vring(adapter);
 		return;
 	}
 
-	if (status & VIRTIO_CONFIG_S_DRIVER_OK) {
+	if ((status & VIRTIO_CONFIG_S_DRIVER_OK) &&
+	    !(status_old & VIRTIO_CONFIG_S_DRIVER_OK)) {
+		ret = ifcvf_request_irq(adapter);
+		if (ret) {
+			status = ifcvf_get_status(vf);
+			status |= VIRTIO_CONFIG_S_FAILED;
+			ifcvf_set_status(vf, status);
+			return;
+		}
+
 		if (ifcvf_start_datapath(adapter) < 0)
 			IFCVF_ERR(adapter->pdev,
 				  "Failed to set ifcvf vdpa  status %u\n",
@@ -143,19 +259,21 @@ static u16 ifcvf_vdpa_get_vq_num_max(struct vdpa_device *vdpa_dev)
 	return IFCVF_QUEUE_MAX;
 }
 
-static u64 ifcvf_vdpa_get_vq_state(struct vdpa_device *vdpa_dev, u16 qid)
+static int ifcvf_vdpa_get_vq_state(struct vdpa_device *vdpa_dev, u16 qid,
+				   struct vdpa_vq_state *state)
 {
 	struct ifcvf_hw *vf = vdpa_to_vf(vdpa_dev);
 
-	return ifcvf_get_vq_state(vf, qid);
+	state->split.avail_index = ifcvf_get_vq_state(vf, qid);
+	return 0;
 }
 
 static int ifcvf_vdpa_set_vq_state(struct vdpa_device *vdpa_dev, u16 qid,
-				   u64 num)
+				   const struct vdpa_vq_state *state)
 {
 	struct ifcvf_hw *vf = vdpa_to_vf(vdpa_dev);
 
-	return ifcvf_set_vq_state(vf, qid, num);
+	return ifcvf_set_vq_state(vf, qid, state->split.avail_index);
 }
 
 static void ifcvf_vdpa_set_vq_cb(struct vdpa_device *vdpa_dev, u16 qid,
@@ -218,17 +336,44 @@ static u32 ifcvf_vdpa_get_generation(struct vdpa_device *vdpa_dev)
 
 static u32 ifcvf_vdpa_get_device_id(struct vdpa_device *vdpa_dev)
 {
-	return VIRTIO_ID_NET;
+	struct ifcvf_hw *vf = vdpa_to_vf(vdpa_dev);
+
+	return vf->dev_type;
 }
 
 static u32 ifcvf_vdpa_get_vendor_id(struct vdpa_device *vdpa_dev)
 {
-	return IFCVF_SUBSYS_VENDOR_ID;
+	struct ifcvf_adapter *adapter = vdpa_to_adapter(vdpa_dev);
+	struct pci_dev *pdev = adapter->pdev;
+
+	return pdev->subsystem_vendor;
 }
 
 static u32 ifcvf_vdpa_get_vq_align(struct vdpa_device *vdpa_dev)
 {
 	return IFCVF_QUEUE_ALIGNMENT;
+}
+
+static size_t ifcvf_vdpa_get_config_size(struct vdpa_device *vdpa_dev)
+{
+	struct ifcvf_adapter *adapter = vdpa_to_adapter(vdpa_dev);
+	struct ifcvf_hw *vf = vdpa_to_vf(vdpa_dev);
+	struct pci_dev *pdev = adapter->pdev;
+	size_t size;
+
+	switch (vf->dev_type) {
+	case VIRTIO_ID_NET:
+		size = sizeof(struct virtio_net_config);
+		break;
+	case VIRTIO_ID_BLOCK:
+		size = sizeof(struct virtio_blk_config);
+		break;
+	default:
+		size = 0;
+		IFCVF_ERR(pdev, "VIRTIO ID %u not supported\n", vf->dev_type);
+	}
+
+	return size;
 }
 
 static void ifcvf_vdpa_get_config(struct vdpa_device *vdpa_dev,
@@ -254,7 +399,33 @@ static void ifcvf_vdpa_set_config(struct vdpa_device *vdpa_dev,
 static void ifcvf_vdpa_set_config_cb(struct vdpa_device *vdpa_dev,
 				     struct vdpa_callback *cb)
 {
-	/* We don't support config interrupt */
+	struct ifcvf_hw *vf = vdpa_to_vf(vdpa_dev);
+
+	vf->config_cb.callback = cb->callback;
+	vf->config_cb.private = cb->private;
+}
+
+static int ifcvf_vdpa_get_vq_irq(struct vdpa_device *vdpa_dev,
+				 u16 qid)
+{
+	struct ifcvf_hw *vf = vdpa_to_vf(vdpa_dev);
+
+	return vf->vring[qid].irq;
+}
+
+static struct vdpa_notification_area ifcvf_get_vq_notification(struct vdpa_device *vdpa_dev,
+							       u16 idx)
+{
+	struct ifcvf_hw *vf = vdpa_to_vf(vdpa_dev);
+	struct vdpa_notification_area area;
+
+	area.addr = vf->vring[idx].notify_pa;
+	if (!vf->notify_off_multiplier)
+		area.size = PAGE_SIZE;
+	else
+		area.size = vf->notify_off_multiplier;
+
+	return area;
 }
 
 /*
@@ -274,54 +445,25 @@ static const struct vdpa_config_ops ifc_vdpa_ops = {
 	.get_vq_ready	= ifcvf_vdpa_get_vq_ready,
 	.set_vq_num	= ifcvf_vdpa_set_vq_num,
 	.set_vq_address	= ifcvf_vdpa_set_vq_address,
+	.get_vq_irq	= ifcvf_vdpa_get_vq_irq,
 	.kick_vq	= ifcvf_vdpa_kick_vq,
 	.get_generation	= ifcvf_vdpa_get_generation,
 	.get_device_id	= ifcvf_vdpa_get_device_id,
 	.get_vendor_id	= ifcvf_vdpa_get_vendor_id,
 	.get_vq_align	= ifcvf_vdpa_get_vq_align,
+	.get_config_size	= ifcvf_vdpa_get_config_size,
 	.get_config	= ifcvf_vdpa_get_config,
 	.set_config	= ifcvf_vdpa_set_config,
 	.set_config_cb  = ifcvf_vdpa_set_config_cb,
+	.get_vq_notification = ifcvf_get_vq_notification,
 };
-
-static int ifcvf_request_irq(struct ifcvf_adapter *adapter)
-{
-	struct pci_dev *pdev = adapter->pdev;
-	struct ifcvf_hw *vf = &adapter->vf;
-	int vector, i, ret, irq;
-
-
-	for (i = 0; i < IFCVF_MAX_QUEUE_PAIRS * 2; i++) {
-		snprintf(vf->vring[i].msix_name, 256, "ifcvf[%s]-%d\n",
-			 pci_name(pdev), i);
-		vector = i + IFCVF_MSI_QUEUE_OFF;
-		irq = pci_irq_vector(pdev, vector);
-		ret = devm_request_irq(&pdev->dev, irq,
-				       ifcvf_intr_handler, 0,
-				       vf->vring[i].msix_name,
-				       &vf->vring[i]);
-		if (ret) {
-			IFCVF_ERR(pdev,
-				  "Failed to request irq for vq %d\n", i);
-			return ret;
-		}
-		vf->vring[i].irq = irq;
-	}
-
-	return 0;
-}
-
-static void ifcvf_free_irq_vectors(void *data)
-{
-	pci_free_irq_vectors(data);
-}
 
 static int ifcvf_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	struct device *dev = &pdev->dev;
 	struct ifcvf_adapter *adapter;
 	struct ifcvf_hw *vf;
-	int ret;
+	int ret, i;
 
 	ret = pcim_enable_device(pdev);
 	if (ret) {
@@ -336,23 +478,9 @@ static int ifcvf_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return ret;
 	}
 
-	ret = pci_set_dma_mask(pdev, DMA_BIT_MASK(64));
+	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
 	if (ret) {
-		IFCVF_ERR(pdev, "No usable DMA confiugration\n");
-		return ret;
-	}
-
-	ret = pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(64));
-	if (ret) {
-		IFCVF_ERR(pdev,
-			  "No usable coherent DMA confiugration\n");
-		return ret;
-	}
-
-	ret = pci_alloc_irq_vectors(pdev, IFCVF_MAX_INTR,
-				    IFCVF_MAX_INTR, PCI_IRQ_MSIX);
-	if (ret < 0) {
-		IFCVF_ERR(pdev, "Failed to alloc irq vectors\n");
+		IFCVF_ERR(pdev, "No usable DMA configuration\n");
 		return ret;
 	}
 
@@ -364,7 +492,7 @@ static int ifcvf_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	adapter = vdpa_alloc_device(struct ifcvf_adapter, vdpa,
-				    dev, &ifc_vdpa_ops);
+				    dev, &ifc_vdpa_ops, NULL);
 	if (adapter == NULL) {
 		IFCVF_ERR(pdev, "Failed to allocate vDPA structure");
 		return -ENOMEM;
@@ -374,16 +502,23 @@ static int ifcvf_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	pci_set_drvdata(pdev, adapter);
 
 	vf = &adapter->vf;
+
+	/* This drirver drives both modern virtio devices and transitional
+	 * devices in modern mode.
+	 * vDPA requires feature bit VIRTIO_F_ACCESS_PLATFORM,
+	 * so legacy devices and transitional devices in legacy
+	 * mode will not work for vDPA, this driver will not
+	 * drive devices with legacy interface.
+	 */
+	if (pdev->device < 0x1040)
+		vf->dev_type =  pdev->subsystem_device;
+	else
+		vf->dev_type =  pdev->device - 0x1040;
+
 	vf->base = pcim_iomap_table(pdev);
 
 	adapter->pdev = pdev;
 	adapter->vdpa.dma_dev = &pdev->dev;
-
-	ret = ifcvf_request_irq(adapter);
-	if (ret) {
-		IFCVF_ERR(pdev, "Failed to request MSI-X irq\n");
-		goto err;
-	}
 
 	ret = ifcvf_init_hw(vf, pdev);
 	if (ret) {
@@ -391,7 +526,12 @@ static int ifcvf_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto err;
 	}
 
-	ret = vdpa_register_device(&adapter->vdpa);
+	for (i = 0; i < IFCVF_MAX_QUEUE_PAIRS * 2; i++)
+		vf->vring[i].irq = -EINVAL;
+
+	vf->hw_features = ifcvf_get_hw_features(vf);
+
+	ret = vdpa_register_device(&adapter->vdpa, IFCVF_MAX_QUEUE_PAIRS * 2);
 	if (ret) {
 		IFCVF_ERR(pdev, "Failed to register ifcvf to vdpa bus");
 		goto err;
@@ -412,10 +552,22 @@ static void ifcvf_remove(struct pci_dev *pdev)
 }
 
 static struct pci_device_id ifcvf_pci_ids[] = {
-	{ PCI_DEVICE_SUB(IFCVF_VENDOR_ID,
-		IFCVF_DEVICE_ID,
-		IFCVF_SUBSYS_VENDOR_ID,
-		IFCVF_SUBSYS_DEVICE_ID) },
+	/* N3000 network device */
+	{ PCI_DEVICE_SUB(PCI_VENDOR_ID_REDHAT_QUMRANET,
+			 N3000_DEVICE_ID,
+			 PCI_VENDOR_ID_INTEL,
+			 N3000_SUBSYS_DEVICE_ID) },
+	/* C5000X-PL network device */
+	{ PCI_DEVICE_SUB(PCI_VENDOR_ID_REDHAT_QUMRANET,
+			 VIRTIO_TRANS_ID_NET,
+			 PCI_VENDOR_ID_INTEL,
+			 VIRTIO_ID_NET) },
+	/* C5000X-PL block device */
+	{ PCI_DEVICE_SUB(PCI_VENDOR_ID_REDHAT_QUMRANET,
+			 VIRTIO_TRANS_ID_BLOCK,
+			 PCI_VENDOR_ID_INTEL,
+			 VIRTIO_ID_BLOCK) },
+
 	{ 0 },
 };
 MODULE_DEVICE_TABLE(pci, ifcvf_pci_ids);
@@ -430,4 +582,3 @@ static struct pci_driver ifcvf_driver = {
 module_pci_driver(ifcvf_driver);
 
 MODULE_LICENSE("GPL v2");
-MODULE_VERSION(VERSION_STRING);

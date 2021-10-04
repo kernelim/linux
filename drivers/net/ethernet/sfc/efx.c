@@ -33,31 +33,9 @@
 #include "selftest.h"
 #include "sriov.h"
 
-#include "mcdi.h"
+#include "mcdi_port_common.h"
 #include "mcdi_pcol.h"
 #include "workarounds.h"
-
-/**************************************************************************
- *
- * Type name strings
- *
- **************************************************************************
- */
-
-/* UDP tunnel type names */
-static const char *const efx_udp_tunnel_type_names[] = {
-	[TUNNEL_ENCAP_UDP_PORT_ENTRY_VXLAN] = "vxlan",
-	[TUNNEL_ENCAP_UDP_PORT_ENTRY_GENEVE] = "geneve",
-};
-
-void efx_get_udp_tunnel_type_name(u16 type, char *buf, size_t buflen)
-{
-	if (type < ARRAY_SIZE(efx_udp_tunnel_type_names) &&
-	    efx_udp_tunnel_type_names[type] != NULL)
-		snprintf(buf, buflen, "%s", efx_udp_tunnel_type_names[type]);
-	else
-		snprintf(buf, buflen, "type %d", type);
-}
 
 /**************************************************************************
  *
@@ -171,23 +149,17 @@ static int efx_init_port(struct efx_nic *efx)
 
 	mutex_lock(&efx->mac_lock);
 
-	rc = efx->phy_op->init(efx);
-	if (rc)
-		goto fail1;
-
 	efx->port_initialized = true;
 
 	/* Ensure the PHY advertises the correct flow control settings */
-	rc = efx->phy_op->reconfigure(efx);
+	rc = efx_mcdi_port_reconfigure(efx);
 	if (rc && rc != -EPERM)
-		goto fail2;
+		goto fail;
 
 	mutex_unlock(&efx->mac_lock);
 	return 0;
 
-fail2:
-	efx->phy_op->fini(efx);
-fail1:
+fail:
 	mutex_unlock(&efx->mac_lock);
 	return rc;
 }
@@ -199,7 +171,6 @@ static void efx_fini_port(struct efx_nic *efx)
 	if (!efx->port_initialized)
 		return;
 
-	efx->phy_op->fini(efx);
 	efx->port_initialized = false;
 
 	efx->link_state.up = false;
@@ -613,52 +584,6 @@ static int efx_vlan_rx_kill_vid(struct net_device *net_dev, __be16 proto, u16 vi
 		return -EOPNOTSUPP;
 }
 
-static int efx_udp_tunnel_type_map(enum udp_parsable_tunnel_type in)
-{
-	switch (in) {
-	case UDP_TUNNEL_TYPE_VXLAN:
-		return TUNNEL_ENCAP_UDP_PORT_ENTRY_VXLAN;
-	case UDP_TUNNEL_TYPE_GENEVE:
-		return TUNNEL_ENCAP_UDP_PORT_ENTRY_GENEVE;
-	default:
-		return -1;
-	}
-}
-
-static void efx_udp_tunnel_add(struct net_device *dev, struct udp_tunnel_info *ti)
-{
-	struct efx_nic *efx = netdev_priv(dev);
-	struct efx_udp_tunnel tnl;
-	int efx_tunnel_type;
-
-	efx_tunnel_type = efx_udp_tunnel_type_map(ti->type);
-	if (efx_tunnel_type < 0)
-		return;
-
-	tnl.type = (u16)efx_tunnel_type;
-	tnl.port = ti->port;
-
-	if (efx->type->udp_tnl_add_port)
-		(void)efx->type->udp_tnl_add_port(efx, tnl);
-}
-
-static void efx_udp_tunnel_del(struct net_device *dev, struct udp_tunnel_info *ti)
-{
-	struct efx_nic *efx = netdev_priv(dev);
-	struct efx_udp_tunnel tnl;
-	int efx_tunnel_type;
-
-	efx_tunnel_type = efx_udp_tunnel_type_map(ti->type);
-	if (efx_tunnel_type < 0)
-		return;
-
-	tnl.type = (u16)efx_tunnel_type;
-	tnl.port = ti->port;
-
-	if (efx->type->udp_tnl_del_port)
-		(void)efx->type->udp_tnl_del_port(efx, tnl);
-}
-
 static const struct net_device_ops efx_netdev_ops = {
 	.ndo_open		= efx_net_open,
 	.ndo_stop		= efx_net_stop,
@@ -671,6 +596,7 @@ static const struct net_device_ops efx_netdev_ops = {
 	.ndo_set_mac_address	= efx_set_mac_address,
 	.ndo_set_rx_mode	= efx_set_rx_mode,
 	.ndo_set_features	= efx_set_features,
+	.ndo_features_check	= efx_features_check,
 	.ndo_vlan_rx_add_vid	= efx_vlan_rx_add_vid,
 	.ndo_vlan_rx_kill_vid	= efx_vlan_rx_kill_vid,
 #ifdef CONFIG_SFC_SRIOV
@@ -686,8 +612,8 @@ static const struct net_device_ops efx_netdev_ops = {
 #ifdef CONFIG_RFS_ACCEL
 	.ndo_rx_flow_steer	= efx_filter_rfs,
 #endif
-	.ndo_udp_tunnel_add	= efx_udp_tunnel_add,
-	.ndo_udp_tunnel_del	= efx_udp_tunnel_del,
+	.ndo_udp_tunnel_add	= udp_tunnel_nic_add_port,
+	.ndo_udp_tunnel_del	= udp_tunnel_nic_del_port,
 	.ndo_xdp_xmit		= efx_xdp_xmit,
 	.ndo_bpf		= efx_xdp
 };
@@ -765,13 +691,13 @@ static struct notifier_block efx_netdev_notifier = {
 	.notifier_call = efx_netdev_event,
 };
 
-static ssize_t
-show_phy_type(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t phy_type_show(struct device *dev,
+			     struct device_attribute *attr, char *buf)
 {
 	struct efx_nic *efx = dev_get_drvdata(dev);
 	return sprintf(buf, "%d\n", efx->phy_type);
 }
-static DEVICE_ATTR(phy_type, 0444, show_phy_type, NULL);
+static DEVICE_ATTR_RO(phy_type);
 
 static int efx_register_netdev(struct efx_nic *efx)
 {
@@ -798,8 +724,7 @@ static int efx_register_netdev(struct efx_nic *efx)
 	efx->state = STATE_READY;
 	smp_mb(); /* ensure we change state before checking reset_pending */
 	if (efx->reset_pending) {
-		netif_err(efx, probe, efx->net_dev,
-			  "aborting probe due to scheduled reset\n");
+		pci_err(efx->pci_dev, "aborting probe due to scheduled reset\n");
 		rc = -EIO;
 		goto fail_locked;
 	}
@@ -1066,8 +991,7 @@ static int efx_pci_probe_main(struct efx_nic *efx)
 	rc = efx->type->init(efx);
 	up_write(&efx->filter_sem);
 	if (rc) {
-		netif_err(efx, probe, efx->net_dev,
-			  "failed to initialise NIC\n");
+		pci_err(efx->pci_dev, "failed to initialise NIC\n");
 		goto fail3;
 	}
 
@@ -1114,8 +1038,8 @@ static int efx_pci_probe_post_io(struct efx_nic *efx)
 	if (efx->type->sriov_init) {
 		rc = efx->type->sriov_init(efx);
 		if (rc)
-			netif_err(efx, probe, efx->net_dev,
-				  "SR-IOV can't be enabled rc %d\n", rc);
+			pci_err(efx->pci_dev, "SR-IOV can't be enabled rc %d\n",
+				rc);
 	}
 
 	/* Determine netdevice features */
@@ -1182,8 +1106,7 @@ static int efx_pci_probe(struct pci_dev *pci_dev,
 	if (rc)
 		goto fail1;
 
-	netif_info(efx, probe, efx->net_dev,
-		   "Solarflare NIC detected\n");
+	pci_info(pci_dev, "Solarflare NIC detected\n");
 
 	if (!efx->type->is_vf)
 		efx_probe_vpd_strings(efx);
@@ -1297,7 +1220,7 @@ static int efx_pm_thaw(struct device *dev)
 			goto fail;
 
 		mutex_lock(&efx->mac_lock);
-		efx->phy_op->reconfigure(efx);
+		efx_mcdi_port_reconfigure(efx);
 		mutex_unlock(&efx->mac_lock);
 
 		efx_start_all(efx);
@@ -1404,7 +1327,7 @@ static int __init efx_init_module(void)
 {
 	int rc;
 
-	printk(KERN_INFO "Solarflare NET driver v" EFX_DRIVER_VERSION "\n");
+	printk(KERN_INFO "Solarflare NET driver\n");
 
 	rc = register_netdevice_notifier(&efx_netdev_notifier);
 	if (rc)
@@ -1466,4 +1389,3 @@ MODULE_AUTHOR("Solarflare Communications and "
 MODULE_DESCRIPTION("Solarflare network driver");
 MODULE_LICENSE("GPL");
 MODULE_DEVICE_TABLE(pci, efx_pci_table);
-MODULE_VERSION(EFX_DRIVER_VERSION);

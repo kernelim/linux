@@ -89,9 +89,15 @@ static void usnic_ib_dump_vf(struct usnic_ib_vf *vf, char *buf, int buf_sz)
 
 void usnic_ib_log_vf(struct usnic_ib_vf *vf)
 {
-	char buf[1000];
-	usnic_ib_dump_vf(vf, buf, sizeof(buf));
+	char *buf = kzalloc(1000, GFP_KERNEL);
+
+	if (!buf)
+		return;
+
+	usnic_ib_dump_vf(vf, buf, 1000);
 	usnic_dbg("%s\n", buf);
+
+	kfree(buf);
 }
 
 /* Start of netdev section */
@@ -114,7 +120,7 @@ static void usnic_ib_qp_grp_modify_active_to_err(struct usnic_ib_dev *us_ibdev)
 								IB_QPS_ERR,
 								NULL);
 				if (status) {
-					usnic_err("Failed to transistion qp grp %u from %s to %s\n",
+					usnic_err("Failed to transition qp grp %u from %s to %s\n",
 						qp_grp->grp_id,
 						usnic_ib_qp_grp_state_to_string
 						(cur_state),
@@ -216,16 +222,23 @@ static int usnic_ib_netdevice_event(struct notifier_block *notifier,
 					unsigned long event, void *ptr)
 {
 	struct usnic_ib_dev *us_ibdev;
+	struct ib_device *ibdev;
 
 	struct net_device *netdev = netdev_notifier_info_to_dev(ptr);
 
-	us_ibdev = container_of(notifier, struct usnic_ib_dev, netdev_nb);
-	if (us_ibdev->netdev == netdev)
-		usnic_ib_handle_usdev_event(us_ibdev, event);
+	ibdev = ib_device_get_by_netdev(netdev, RDMA_DRIVER_USNIC);
+	if (!ibdev)
+		return NOTIFY_DONE;
 
+	us_ibdev = container_of(ibdev, struct usnic_ib_dev, ib_dev);
+	usnic_ib_handle_usdev_event(us_ibdev, event);
+	ib_device_put(ibdev);
 	return NOTIFY_DONE;
 }
 
+static struct notifier_block usnic_ib_netdevice_notifier = {
+	.notifier_call = usnic_ib_netdevice_event
+};
 /* End of netdev section */
 
 /* Start of inet section */
@@ -274,14 +287,20 @@ static int usnic_ib_inetaddr_event(struct notifier_block *notifier,
 	struct usnic_ib_dev *us_ibdev;
 	struct in_ifaddr *ifa = ptr;
 	struct net_device *netdev = ifa->ifa_dev->dev;
+	struct ib_device *ibdev;
 
-	us_ibdev = container_of(notifier, struct usnic_ib_dev, inet_nb);
-	if (us_ibdev->netdev == netdev)
-		usnic_ib_handle_inet_event(us_ibdev, event, ptr);
+	ibdev = ib_device_get_by_netdev(netdev, RDMA_DRIVER_USNIC);
+	if (!ibdev)
+		return NOTIFY_DONE;
 
+	us_ibdev = container_of(ibdev, struct usnic_ib_dev, ib_dev);
+	usnic_ib_handle_inet_event(us_ibdev, event, ptr);
+	ib_device_put(ibdev);
 	return NOTIFY_DONE;
 }
-
+static struct notifier_block usnic_ib_inetaddr_notifier = {
+	.notifier_call = usnic_ib_inetaddr_event
+};
 /* End of inet section*/
 
 static int usnic_port_immutable(struct ib_device *ibdev, u8 port_num,
@@ -296,7 +315,6 @@ static int usnic_port_immutable(struct ib_device *ibdev, u8 port_num,
 	if (err)
 		return err;
 
-	immutable->pkey_tbl_len = attr.pkey_tbl_len;
 	immutable->gid_tbl_len = attr.gid_tbl_len;
 
 	return 0;
@@ -331,13 +349,11 @@ static const struct ib_device_ops usnic_dev_ops = {
 	.destroy_qp = usnic_ib_destroy_qp,
 	.get_dev_fw_str = usnic_get_dev_fw_str,
 	.get_link_layer = usnic_ib_port_link_layer,
-	.get_netdev = usnic_get_netdev,
 	.get_port_immutable = usnic_port_immutable,
 	.mmap = usnic_ib_mmap,
 	.modify_qp = usnic_ib_modify_qp,
 	.query_device = usnic_ib_query_device,
 	.query_gid = usnic_ib_query_gid,
-	.query_pkey = usnic_ib_query_pkey,
 	.query_port = usnic_ib_query_port,
 	.query_qp = usnic_ib_query_qp,
 	.reg_user_mr = usnic_ib_reg_mr,
@@ -353,7 +369,7 @@ static void *usnic_ib_device_add(struct pci_dev *dev)
 	union ib_gid gid;
 	struct in_device *ind;
 	struct net_device *netdev;
-	int err;
+	int ret;
 
 	usnic_dbg("\n");
 	netdev = pci_get_drvdata(dev);
@@ -382,44 +398,17 @@ static void *usnic_ib_device_add(struct pci_dev *dev)
 	us_ibdev->ib_dev.num_comp_vectors = USNIC_IB_NUM_COMP_VECTORS;
 	us_ibdev->ib_dev.dev.parent = &dev->dev;
 
-	us_ibdev->ib_dev.uverbs_cmd_mask =
-		(1ull << IB_USER_VERBS_CMD_GET_CONTEXT) |
-		(1ull << IB_USER_VERBS_CMD_QUERY_DEVICE) |
-		(1ull << IB_USER_VERBS_CMD_QUERY_PORT) |
-		(1ull << IB_USER_VERBS_CMD_ALLOC_PD) |
-		(1ull << IB_USER_VERBS_CMD_DEALLOC_PD) |
-		(1ull << IB_USER_VERBS_CMD_REG_MR) |
-		(1ull << IB_USER_VERBS_CMD_DEREG_MR) |
-		(1ull << IB_USER_VERBS_CMD_CREATE_COMP_CHANNEL) |
-		(1ull << IB_USER_VERBS_CMD_CREATE_CQ) |
-		(1ull << IB_USER_VERBS_CMD_DESTROY_CQ) |
-		(1ull << IB_USER_VERBS_CMD_CREATE_QP) |
-		(1ull << IB_USER_VERBS_CMD_MODIFY_QP) |
-		(1ull << IB_USER_VERBS_CMD_QUERY_QP) |
-		(1ull << IB_USER_VERBS_CMD_DESTROY_QP) |
-		(1ull << IB_USER_VERBS_CMD_ATTACH_MCAST) |
-		(1ull << IB_USER_VERBS_CMD_DETACH_MCAST) |
-		(1ull << IB_USER_VERBS_CMD_OPEN_QP);
-
 	ib_set_device_ops(&us_ibdev->ib_dev, &usnic_dev_ops);
 
 	rdma_set_device_sysfs_group(&us_ibdev->ib_dev, &usnic_attr_group);
 
-	if (ib_register_device(&us_ibdev->ib_dev, "usnic_%d"))
+	ret = ib_device_set_netdev(&us_ibdev->ib_dev, us_ibdev->netdev, 1);
+	if (ret)
 		goto err_fwd_dealloc;
 
-	us_ibdev->netdev_nb.notifier_call = usnic_ib_netdevice_event;
-	err = register_netdevice_notifier(&us_ibdev->netdev_nb);
-	if (err) {
-		usnic_err("Failed to register netdev notifier\n");
+	dma_set_max_seg_size(&dev->dev, SZ_2G);
+	if (ib_register_device(&us_ibdev->ib_dev, "usnic_%d", &dev->dev))
 		goto err_fwd_dealloc;
-	}
-	us_ibdev->inet_nb.notifier_call = usnic_ib_inetaddr_event;
-	err = register_inetaddr_notifier(&us_ibdev->inet_nb);
-	if (err) {
-		usnic_err("Failed to register inet addr notifier\n");
-		goto err_netdev_notifier;
-	}
 
 	usnic_fwd_set_mtu(us_ibdev->ufdev, us_ibdev->netdev->mtu);
 	usnic_fwd_set_mac(us_ibdev->ufdev, us_ibdev->netdev->dev_addr);
@@ -449,8 +438,6 @@ static void *usnic_ib_device_add(struct pci_dev *dev)
 		   us_ibdev->ufdev->link_up, us_ibdev->ufdev->mtu);
 	return us_ibdev;
 
-err_netdev_notifier:
-	unregister_netdevice_notifier(&us_ibdev->netdev_nb);
 err_fwd_dealloc:
 	usnic_fwd_dev_free(us_ibdev->ufdev);
 err_dealloc:
@@ -463,8 +450,6 @@ static void usnic_ib_device_remove(struct usnic_ib_dev *us_ibdev)
 {
 	usnic_info("Unregistering %s\n", dev_name(&us_ibdev->ib_dev.dev));
 	usnic_ib_sysfs_unregister_usdev(us_ibdev);
-	unregister_inetaddr_notifier(&us_ibdev->inet_nb);
-	unregister_netdevice_notifier(&us_ibdev->netdev_nb);
 	usnic_fwd_dev_free(us_ibdev->ufdev);
 	ib_unregister_device(&us_ibdev->ib_dev);
 	ib_dealloc_device(&us_ibdev->ib_dev);
@@ -669,16 +654,32 @@ static int __init usnic_ib_init(void)
 		goto out_umem_fini;
 	}
 
+	err = register_netdevice_notifier(&usnic_ib_netdevice_notifier);
+	if (err) {
+		usnic_err("Failed to register netdev notifier\n");
+		goto out_pci_unreg;
+	}
+
+	err = register_inetaddr_notifier(&usnic_ib_inetaddr_notifier);
+	if (err) {
+		usnic_err("Failed to register inet addr notifier\n");
+		goto out_unreg_netdev_notifier;
+	}
+
 	err = usnic_transport_init();
 	if (err) {
 		usnic_err("Failed to initialize transport\n");
-		goto out_pci_unreg;
+		goto out_unreg_inetaddr_notifier;
 	}
 
 	usnic_debugfs_init();
 
 	return 0;
 
+out_unreg_inetaddr_notifier:
+	unregister_inetaddr_notifier(&usnic_ib_inetaddr_notifier);
+out_unreg_netdev_notifier:
+	unregister_netdevice_notifier(&usnic_ib_netdevice_notifier);
 out_pci_unreg:
 	pci_unregister_driver(&usnic_ib_pci_driver);
 out_umem_fini:
@@ -691,6 +692,8 @@ static void __exit usnic_ib_destroy(void)
 	usnic_dbg("\n");
 	usnic_debugfs_exit();
 	usnic_transport_fini();
+	unregister_inetaddr_notifier(&usnic_ib_inetaddr_notifier);
+	unregister_netdevice_notifier(&usnic_ib_netdevice_notifier);
 	pci_unregister_driver(&usnic_ib_pci_driver);
 }
 

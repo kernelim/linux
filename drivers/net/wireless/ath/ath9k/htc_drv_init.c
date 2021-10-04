@@ -246,7 +246,7 @@ static unsigned int ath9k_regread(void *hw_priv, u32 reg_offset)
 	if (unlikely(r)) {
 		ath_dbg(common, WMI, "REGISTER READ FAILED: (0x%04x, %d)\n",
 			reg_offset, r);
-		return -EIO;
+		return -1;
 	}
 
 	return be32_to_cpu(val);
@@ -973,7 +973,7 @@ err_init:
 	ath9k_stop_wmi(priv);
 	hif_dev = (struct hif_device_usb *)htc_handle->hif_dev;
 	ath9k_hif_usb_dealloc_urbs(hif_dev);
-	ath9k_destoy_wmi(priv);
+	ath9k_destroy_wmi(priv);
 err_free:
 	ieee80211_free_hw(hw);
 	return ret;

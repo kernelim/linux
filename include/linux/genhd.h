@@ -222,7 +222,10 @@ struct gendisk {
 	struct lockdep_map lockdep_map;
 
 	RH_KABI_USE(1, struct cdrom_device_info *cdi)
-	RH_KABI_RESERVE(2)
+	RH_KABI_USE(2, unsigned long state)
+#define GD_NEED_PART_SCAN		0
+#define GD_READ_ONLY			1
+
 	RH_KABI_RESERVE(3)
 	RH_KABI_RESERVE(4)
 };
@@ -267,7 +270,6 @@ static inline dev_t part_devt(struct hd_struct *part)
 	return part_to_dev(part)->devt;
 }
 
-extern struct hd_struct *__disk_get_part(struct gendisk *disk, int partno);
 extern struct hd_struct *disk_get_part(struct gendisk *disk, int partno);
 
 static inline void disk_put_part(struct hd_struct *part)
@@ -433,17 +435,21 @@ extern struct block_device *bdget_disk(struct gendisk *disk, int partno);
 extern void set_device_ro(struct block_device *bdev, int flag);
 extern void set_disk_ro(struct gendisk *disk, int flag);
 
+static inline int get_disk_ro_state(struct gendisk *disk)
+{
+	return test_bit(GD_READ_ONLY, &disk->state);
+}
+
 static inline int get_disk_ro(struct gendisk *disk)
 {
-	return disk->part0.policy;
+	return disk->part0.policy || get_disk_ro_state(disk);
 }
 
 extern void disk_block_events(struct gendisk *disk);
 extern void disk_unblock_events(struct gendisk *disk);
 extern void disk_flush_events(struct gendisk *disk, unsigned int mask);
-extern bool set_capacity_revalidate_and_notify(struct gendisk *disk,
-			sector_t size, bool revalidate);
-extern unsigned int disk_clear_events(struct gendisk *disk, unsigned int mask);
+bool set_capacity_revalidate_and_notify(struct gendisk *disk, sector_t size,
+		bool update_bdev);
 
 /* drivers/char/random.c */
 extern void add_disk_randomness(struct gendisk *disk) __latent_entropy;
@@ -470,15 +476,8 @@ int blk_drop_partitions(struct block_device *bdev);
 extern void printk_all_partitions(void);
 
 extern struct gendisk *__alloc_disk_node(int minors, int node_id);
-extern struct kobject *get_disk_and_module(struct gendisk *disk);
 extern void put_disk(struct gendisk *disk);
 extern void put_disk_and_module(struct gendisk *disk);
-extern void blk_register_region(dev_t devt, unsigned long range,
-			struct module *module,
-			struct kobject *(*probe)(dev_t, int *, void *),
-			int (*lock)(dev_t, void *),
-			void *data);
-extern void blk_unregister_region(dev_t devt, unsigned long range);
 
 #define alloc_disk_node(minors, node_id)				\
 ({									\
@@ -497,6 +496,38 @@ extern void blk_unregister_region(dev_t devt, unsigned long range);
 })
 
 #define alloc_disk(minors) alloc_disk_node(minors, NUMA_NO_NODE)
+
+int register_blkdev(unsigned int major, const char *name);
+int __register_blkdev(unsigned int major, const char *name,
+		void (*probe)(dev_t devt));
+void unregister_blkdev(unsigned int major, const char *name);
+
+void revalidate_disk_size(struct gendisk *disk, bool verbose);
+bool bdev_check_media_change(struct block_device *bdev);
+int __invalidate_device(struct block_device *bdev, bool kill_dirty);
+int invalidate_partition(struct gendisk *disk, int partno);
+void bd_set_nr_sectors(struct block_device *bdev, sector_t sectors);
+
+int ioctl_by_bdev(struct block_device *bdev, unsigned cmd, unsigned long arg);
+
+/* for drivers/char/raw.c: */
+int blkdev_ioctl(struct block_device *, fmode_t, unsigned, unsigned long);
+long compat_blkdev_ioctl(struct file *, unsigned, unsigned long);
+
+#ifdef CONFIG_SYSFS
+int bd_link_disk_holder(struct block_device *bdev, struct gendisk *disk);
+void bd_unlink_disk_holder(struct block_device *bdev, struct gendisk *disk);
+#else
+static inline int bd_link_disk_holder(struct block_device *bdev,
+				      struct gendisk *disk)
+{
+	return 0;
+}
+static inline void bd_unlink_disk_holder(struct block_device *bdev,
+					 struct gendisk *disk)
+{
+}
+#endif /* CONFIG_SYSFS */
 
 #else /* CONFIG_BLOCK */
 

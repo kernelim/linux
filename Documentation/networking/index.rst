@@ -25,6 +25,9 @@ Contents:
    tls-offload
    filter
    mptcp-sysctl
+   statistics
+   tipc
+   vxlan
 
 .. only::  subproject
 

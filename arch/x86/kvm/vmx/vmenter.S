@@ -28,7 +28,7 @@
 #define VCPU_R15	__VCPU_REGS_R15 * WORD_SIZE
 #endif
 
-	.text
+.section .noinstr.text, "ax"
 
 /**
  * vmx_vmenter - VM-Enter the current loaded VMCS
@@ -44,7 +44,7 @@
  * they VM-Fail, whereas a successful VM-Enter + VM-Exit will jump
  * to vmx_vmexit.
  */
-ENTRY(vmx_vmenter)
+SYM_FUNC_START_LOCAL(vmx_vmenter)
 	/* EFLAGS.ZF is set if VMCS.LAUNCHED == 0 */
 	je 2f
 
@@ -62,7 +62,7 @@ ENTRY(vmx_vmenter)
 	_ASM_EXTABLE(1b, 3b)
 	_ASM_EXTABLE(2b, 3b)
 
-ENDPROC(vmx_vmenter)
+SYM_FUNC_END(vmx_vmenter)
 
 /**
  * vmx_vmexit - Handle a VMX VM-Exit
@@ -74,7 +74,7 @@ ENDPROC(vmx_vmenter)
  * here after hardware loads the host's state, i.e. this is the destination
  * referred to by VMCS.HOST_RIP.
  */
-ENTRY(vmx_vmexit)
+SYM_FUNC_START(vmx_vmexit)
 #ifdef CONFIG_RETPOLINE
 	ALTERNATIVE "jmp .Lvmexit_skip_rsb", "", X86_FEATURE_RETPOLINE
 	/* Preserve guest's RAX, it's used to stuff the RSB. */
@@ -90,7 +90,7 @@ ENTRY(vmx_vmexit)
 .Lvmexit_skip_rsb:
 #endif
 	ret
-ENDPROC(vmx_vmexit)
+SYM_FUNC_END(vmx_vmexit)
 
 /**
  * __vmx_vcpu_run - Run a vCPU via a transition to VMX guest mode
@@ -101,7 +101,7 @@ ENDPROC(vmx_vmexit)
  * Returns:
  *	0 on VM-Exit, 1 on VM-Fail
  */
-ENTRY(__vmx_vcpu_run)
+SYM_FUNC_START(__vmx_vcpu_run)
 	push %_ASM_BP
 	mov  %_ASM_SP, %_ASM_BP
 #ifdef CONFIG_X86_64
@@ -233,7 +233,10 @@ ENTRY(__vmx_vcpu_run)
 	/* VM-Fail.  Out-of-line to avoid a taken Jcc after VM-Exit. */
 2:	mov $1, %eax
 	jmp 1b
-ENDPROC(__vmx_vcpu_run)
+SYM_FUNC_END(__vmx_vcpu_run)
+
+
+.section .text, "ax"
 
 /**
  * vmread_error_trampoline - Trampoline from inline asm to vmread_error()
@@ -243,7 +246,7 @@ ENDPROC(__vmx_vcpu_run)
  * Save and restore volatile registers across a call to vmread_error().  Note,
  * all parameters are passed on the stack.
  */
-ENTRY(vmread_error_trampoline)
+SYM_FUNC_START(vmread_error_trampoline)
 	push %_ASM_BP
 	mov  %_ASM_SP, %_ASM_BP
 
@@ -291,9 +294,9 @@ ENTRY(vmread_error_trampoline)
 	pop %_ASM_BP
 
 	ret
-ENDPROC(vmread_error_trampoline)
+SYM_FUNC_END(vmread_error_trampoline)
 
-ENTRY(vmx_do_interrupt_nmi_irqoff)
+SYM_FUNC_START(vmx_do_interrupt_nmi_irqoff)
 	/*
 	 * Unconditionally create a stack frame, getting the correct RSP on the
 	 * stack (for x86-64) would take two instructions anyways, and RBP can
@@ -324,4 +327,4 @@ ENTRY(vmx_do_interrupt_nmi_irqoff)
 	mov %_ASM_BP, %_ASM_SP
 	pop %_ASM_BP
 	ret
-ENDPROC(vmx_do_interrupt_nmi_irqoff)
+SYM_FUNC_END(vmx_do_interrupt_nmi_irqoff)

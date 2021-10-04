@@ -16,7 +16,7 @@ static struct idxd_desc *__get_desc(struct idxd_wq *wq, int idx, int cpu)
 
 	desc = wq->descs[idx];
 	memset(desc->hw, 0, sizeof(struct dsa_hw_desc));
-	memset(desc->completion, 0, sizeof(struct dsa_completion_record));
+	memset(desc->completion, 0, idxd->compl_size);
 	desc->cpu = cpu;
 
 	if (device_pasid_enabled(idxd))
@@ -87,7 +87,7 @@ int idxd_submit_desc(struct idxd_wq *wq, struct idxd_desc *desc)
 	if (idxd->state != IDXD_DEV_ENABLED)
 		return -EIO;
 
-	portal = wq->portal + idxd_get_wq_portal_offset(IDXD_PORTAL_LIMITED);
+	portal = wq->portal;
 
 	/*
 	 * The wmb() flushes writes to coherent DMA data before

@@ -37,6 +37,10 @@ static __always_inline void vmcs_check32(unsigned long field)
 {
 	BUILD_BUG_ON_MSG(__builtin_constant_p(field) && ((field) & 0x6000) == 0,
 			 "32-bit accessor invalid for 16-bit field");
+	BUILD_BUG_ON_MSG(__builtin_constant_p(field) && ((field) & 0x6001) == 0x2000,
+			 "32-bit accessor invalid for 64-bit field");
+	BUILD_BUG_ON_MSG(__builtin_constant_p(field) && ((field) & 0x6001) == 0x2001,
+			 "32-bit accessor invalid for 64-bit high field");
 	BUILD_BUG_ON_MSG(__builtin_constant_p(field) && ((field) & 0x6000) == 0x6000,
 			 "32-bit accessor invalid for natural width field");
 }
@@ -146,7 +150,9 @@ do {									\
 			  : : op1 : "cc" : error, fault);		\
 	return;								\
 error:									\
+	instrumentation_begin();					\
 	insn##_error(error_args);					\
+	instrumentation_end();						\
 	return;								\
 fault:									\
 	kvm_spurious_fault();						\
@@ -161,7 +167,9 @@ do {									\
 			  : : op1, op2 : "cc" : error, fault);		\
 	return;								\
 error:									\
+	instrumentation_begin();					\
 	insn##_error(error_args);					\
+	instrumentation_end();						\
 	return;								\
 fault:									\
 	kvm_spurious_fault();						\

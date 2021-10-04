@@ -691,7 +691,7 @@ static struct snd_soc_dai_driver cs35l33_dai = {
 			.formats = CS35L33_FORMATS,
 		},
 		.ops = &cs35l33_ops,
-		.symmetric_rates = 1,
+		.symmetric_rate = 1,
 };
 
 static int cs35l33_set_hg_data(struct snd_soc_component *component,
@@ -1201,6 +1201,7 @@ static int cs35l33_i2c_probe(struct i2c_client *i2c_client,
 		dev_err(&i2c_client->dev,
 			"CS35L33 Device ID (%X). Expected ID %X\n",
 			devid, CS35L33_CHIP_ID);
+		ret = -EINVAL;
 		goto err_enable;
 	}
 

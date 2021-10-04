@@ -27,6 +27,8 @@
 
 #include <uapi/drm/i915_drm.h>
 
+#include "intel_step.h"
+
 #include "display/intel_display.h"
 
 #include "gt/intel_engine_types.h"
@@ -79,10 +81,12 @@ enum intel_platform {
 	/* gen11 */
 	INTEL_ICELAKE,
 	INTEL_ELKHARTLAKE,
+	INTEL_JASPERLAKE,
 	/* gen12 */
 	INTEL_TIGERLAKE,
 	INTEL_ROCKETLAKE,
 	INTEL_DG1,
+	INTEL_ALDERLAKE_S,
 	INTEL_MAX_PLATFORMS
 };
 
@@ -122,7 +126,6 @@ enum intel_ppgtt_type {
 	func(has_llc); \
 	func(has_logical_ring_contexts); \
 	func(has_logical_ring_elsq); \
-	func(has_logical_ring_preemption); \
 	func(has_master_unit_irq); \
 	func(has_pooled_eu); \
 	func(has_rc6); \
@@ -185,6 +188,8 @@ struct intel_device_info {
 #undef DEFINE_FLAG
 
 	struct {
+		u8 version;
+
 #define DEFINE_FLAG(name) u8 name:1
 		DEV_INFO_DISPLAY_FOR_EACH_FLAG(DEFINE_FLAG);
 #undef DEFINE_FLAG
@@ -224,8 +229,7 @@ struct intel_runtime_info {
 
 	u32 rawclk_freq;
 
-	u32 cs_timestamp_frequency_hz;
-	u32 cs_timestamp_period_ns;
+	struct intel_step_info step;
 };
 
 struct intel_driver_caps {

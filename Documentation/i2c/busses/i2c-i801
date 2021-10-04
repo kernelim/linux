@@ -44,6 +44,7 @@ Supported adapters:
   * Intel Elkhart Lake (PCH)
   * Intel Tiger Lake (PCH)
   * Intel Emmitsburg (PCH)
+  * Intel Alder Lake (PCH)
 
    Datasheets: Publicly available at the Intel website
 

@@ -4,6 +4,7 @@
  */
 
 #include "gt/intel_gt.h"
+#include "gt/intel_lrc.h"
 #include "intel_guc_ads.h"
 #include "intel_uc.h"
 #include "i915_drv.h"
@@ -220,6 +221,7 @@ int intel_guc_ads_create(struct intel_guc *guc)
 void intel_guc_ads_destroy(struct intel_guc *guc)
 {
 	i915_vma_unpin_and_release(&guc->ads_vma, I915_VMA_RELEASE_MAP);
+	guc->ads_blob = NULL;
 }
 
 static void guc_ads_private_data_reset(struct intel_guc *guc)

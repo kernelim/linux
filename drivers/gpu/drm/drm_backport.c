@@ -130,10 +130,6 @@ int __rh_drm_mmu_notifier_register(struct __rh_drm_mmu_notifier *mn,
 				   int (*orig_func)(struct mmu_notifier *,
 						    struct mm_struct *))
 {
-	mn->base._rh = &mn->_rh;
-	mn->_rh.back_ptr = &mn->base;
-	RH_KABI_AUX_SET_SIZE(&mn->base, mmu_notifier);
-
 	memset(&mn->base_ops, 0, sizeof(mn->base_ops));
 	mn->base_ops.flags = mn->ops->flags;
 

@@ -14,15 +14,8 @@
 #include <asm/hwcap.h>
 #include <asm/sysreg.h>
 
-/*
- * In the arm64 world (as in the ARM world), elf_hwcap is used both internally
- * in the kernel and for user space to keep track of which optional features
- * are supported by the current system. So let's map feature 'x' to HWCAP_x.
- * Note that HWCAP_x constants are bit fields so we need to take the log.
- */
-
-#define MAX_CPU_FEATURES	(8 * sizeof(elf_hwcap))
-#define cpu_feature(x)		ilog2(HWCAP_ ## x)
+#define MAX_CPU_FEATURES	64
+#define cpu_feature(x)		KERNEL_HWCAP_ ## x
 
 #ifndef __ASSEMBLY__
 
@@ -45,9 +38,10 @@
  */
 
 enum ftr_type {
-	FTR_EXACT,	/* Use a predefined safe value */
-	FTR_LOWER_SAFE,	/* Smaller value is safe */
-	FTR_HIGHER_SAFE,/* Bigger value is safe */
+	FTR_EXACT,			/* Use a predefined safe value */
+	FTR_LOWER_SAFE,			/* Smaller value is safe */
+	FTR_HIGHER_SAFE,		/* Bigger value is safe */
+	FTR_HIGHER_OR_ZERO_SAFE,	/* Bigger value is safe, but 0 is biggest */
 };
 
 #define FTR_STRICT	true	/* SANITY check strict matching required */
@@ -399,11 +393,13 @@ extern DECLARE_BITMAP(boot_capabilities, ARM64_NPATCHABLE);
 	for_each_set_bit(cap, cpu_hwcaps, ARM64_NCAPS)
 
 bool this_cpu_has_cap(unsigned int cap);
+void cpu_set_feature(unsigned int num);
+bool cpu_have_feature(unsigned int num);
+unsigned long cpu_get_elf_hwcap(void);
+unsigned long cpu_get_elf_hwcap2(void);
 
-static inline bool cpu_have_feature(unsigned int num)
-{
-	return elf_hwcap & (1UL << num);
-}
+#define cpu_set_named_feature(name) cpu_set_feature(cpu_feature(name))
+#define cpu_have_named_feature(name) cpu_have_feature(cpu_feature(name))
 
 static __always_inline bool system_capabilities_finalized(void)
 {
@@ -666,11 +662,11 @@ static __always_inline bool system_supports_cnp(void)
 		cpus_have_const_cap(ARM64_HAS_CNP);
 }
 
-#define ARM64_BP_HARDEN_UNKNOWN		-1
-#define ARM64_BP_HARDEN_WA_NEEDED	0
-#define ARM64_BP_HARDEN_NOT_REQUIRED	1
-
-int get_spectre_v2_workaround_state(void);
+static inline bool system_supports_tlb_range(void)
+{
+	return IS_ENABLED(CONFIG_ARM64_TLB_RANGE) &&
+		cpus_have_const_cap(ARM64_HAS_TLB_RANGE);
+}
 
 static inline bool system_supports_address_auth(void)
 {
@@ -697,6 +693,12 @@ static inline bool system_has_prio_mask_debugging(void)
 	return IS_ENABLED(CONFIG_ARM64_DEBUG_PRIORITY_MASKING) &&
 	       system_uses_irq_prio_masking();
 }
+
+#define ARM64_BP_HARDEN_UNKNOWN		-1
+#define ARM64_BP_HARDEN_WA_NEEDED	0
+#define ARM64_BP_HARDEN_NOT_REQUIRED	1
+
+int get_spectre_v2_workaround_state(void);
 
 #define ARM64_SSBD_UNKNOWN		-1
 #define ARM64_SSBD_FORCE_DISABLE	0

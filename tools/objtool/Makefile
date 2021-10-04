@@ -7,11 +7,9 @@ ARCH := x86
 endif
 
 # always use the host compiler
-HOSTCC	?= gcc
-HOSTLD	?= ld
+AR	 = $(HOSTAR)
 CC	 = $(HOSTCC)
 LD	 = $(HOSTLD)
-AR	 = ar
 
 ifeq ($(srctree),)
 srctree := $(patsubst %/,%,$(dir $(CURDIR)))

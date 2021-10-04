@@ -81,33 +81,12 @@
  *
  * It is only valid and used by digital port encoder.
  *
- * Return pin that is associatade with @port and HDP_NONE if no pin is
- * hard associated with that @port.
+ * Return pin that is associatade with @port.
  */
 enum hpd_pin intel_hpd_pin_default(struct drm_i915_private *dev_priv,
 				   enum port port)
 {
-	enum phy phy = intel_port_to_phy(dev_priv, port);
-
-	/*
-	 * RKL + TGP PCH is a special case; we effectively choose the hpd_pin
-	 * based on the DDI rather than the PHY (i.e., the last two outputs
-	 * shold be HPD_PORT_{D,E} rather than {C,D}.  Note that this differs
-	 * from the behavior of both TGL+TGP and RKL+CMP.
-	 */
-	if (IS_ROCKETLAKE(dev_priv) && HAS_PCH_TGP(dev_priv))
-		return HPD_PORT_A + port - PORT_A;
-
-	switch (phy) {
-	case PHY_F:
-		return IS_CNL_WITH_PORT_F(dev_priv) ? HPD_PORT_E : HPD_PORT_F;
-	case PHY_A ... PHY_E:
-	case PHY_G ... PHY_I:
-		return HPD_PORT_A + phy - PHY_A;
-	default:
-		MISSING_CASE(phy);
-		return HPD_NONE;
-	}
+	return HPD_PORT_A + port - PORT_A;
 }
 
 #define HPD_STORM_DETECT_PERIOD		1000
@@ -234,6 +213,12 @@ intel_hpd_irq_storm_switch_to_polling(struct drm_i915_private *dev_priv)
 	}
 }
 
+static void intel_hpd_irq_setup(struct drm_i915_private *i915)
+{
+	if (i915->display_irqs_enabled && i915->display.hpd_irq_setup)
+		i915->display.hpd_irq_setup(i915);
+}
+
 static void intel_hpd_irq_storm_reenable_work(struct work_struct *work)
 {
 	struct drm_i915_private *dev_priv =
@@ -269,8 +254,7 @@ static void intel_hpd_irq_storm_reenable_work(struct work_struct *work)
 			dev_priv->hotplug.stats[pin].state = HPD_ENABLED;
 	}
 
-	if (dev_priv->display_irqs_enabled && dev_priv->display.hpd_irq_setup)
-		dev_priv->display.hpd_irq_setup(dev_priv);
+	intel_hpd_irq_setup(dev_priv);
 
 	spin_unlock_irq(&dev_priv->irq_lock);
 
@@ -503,7 +487,6 @@ void intel_hpd_irq_handler(struct drm_i915_private *dev_priv,
 	 * only the one of them (DP) will have ->hpd_pulse().
 	 */
 	for_each_intel_encoder(&dev_priv->drm, encoder) {
-		bool has_hpd_pulse = intel_encoder_has_hpd_pulse(encoder);
 		enum port port = encoder->port;
 		bool long_hpd;
 
@@ -511,7 +494,7 @@ void intel_hpd_irq_handler(struct drm_i915_private *dev_priv,
 		if (!(BIT(pin) & pin_mask))
 			continue;
 
-		if (!has_hpd_pulse)
+		if (!intel_encoder_has_hpd_pulse(encoder))
 			continue;
 
 		long_hpd = long_mask & BIT(pin);
@@ -578,8 +561,8 @@ void intel_hpd_irq_handler(struct drm_i915_private *dev_priv,
 	 * Disable any IRQs that storms were detected on. Polling enablement
 	 * happens later in our hotplug work.
 	 */
-	if (storm_detected && dev_priv->display_irqs_enabled)
-		dev_priv->display.hpd_irq_setup(dev_priv);
+	if (storm_detected)
+		intel_hpd_irq_setup(dev_priv);
 	spin_unlock(&dev_priv->irq_lock);
 
 	/*
@@ -621,12 +604,9 @@ void intel_hpd_init(struct drm_i915_private *dev_priv)
 	 * Interrupt setup is already guaranteed to be single-threaded, this is
 	 * just to make the assert_spin_locked checks happy.
 	 */
-	if (dev_priv->display_irqs_enabled && dev_priv->display.hpd_irq_setup) {
-		spin_lock_irq(&dev_priv->irq_lock);
-		if (dev_priv->display_irqs_enabled)
-			dev_priv->display.hpd_irq_setup(dev_priv);
-		spin_unlock_irq(&dev_priv->irq_lock);
-	}
+	spin_lock_irq(&dev_priv->irq_lock);
+	intel_hpd_irq_setup(dev_priv);
+	spin_unlock_irq(&dev_priv->irq_lock);
 }
 
 static void i915_hpd_poll_init_work(struct work_struct *work)

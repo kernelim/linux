@@ -133,8 +133,15 @@ int uv_destroy_page(unsigned long paddr)
 		.paddr = paddr
 	};
 
-	if (uv_call(0, (u64)&uvcb))
+	if (uv_call(0, (u64)&uvcb)) {
+		/*
+		 * Older firmware uses 107/d as an indication of a non secure
+		 * page. Let us emulate the newer variant (no-op).
+		 */
+		if (uvcb.header.rc == 0x107 && uvcb.header.rrc == 0xd)
+			return 0;
 		return -EINVAL;
+	}
 	return 0;
 }
 
@@ -225,7 +232,7 @@ int gmap_make_secure(struct gmap *gmap, unsigned long gaddr, void *uvcb)
 
 again:
 	rc = -EFAULT;
-	down_read(&gmap->mm->mmap_sem);
+	mmap_read_lock(gmap->mm);
 
 	uaddr = __gmap_translate(gmap, gaddr);
 	if (IS_ERR_VALUE(uaddr))
@@ -254,7 +261,7 @@ again:
 	pte_unmap_unlock(ptep, ptelock);
 	unlock_page(page);
 out:
-	up_read(&gmap->mm->mmap_sem);
+	mmap_read_unlock(gmap->mm);
 
 	if (rc == -EAGAIN) {
 		wait_on_page_writeback(page);
@@ -365,7 +372,7 @@ static ssize_t uv_query_max_guest_cpus(struct kobject *kobj,
 				       struct kobj_attribute *attr, char *page)
 {
 	return scnprintf(page, PAGE_SIZE, "%d\n",
-			uv_info.max_guest_cpus);
+			uv_info.max_guest_cpu_id + 1);
 }
 
 static struct kobj_attribute uv_query_max_guest_cpus_attr =
@@ -403,6 +410,41 @@ static struct attribute_group uv_query_attr_group = {
 	.attrs = uv_query_attrs,
 };
 
+static ssize_t uv_is_prot_virt_guest(struct kobject *kobj,
+				     struct kobj_attribute *attr, char *page)
+{
+	int val = 0;
+
+#ifdef CONFIG_PROTECTED_VIRTUALIZATION_GUEST
+	val = prot_virt_guest;
+#endif
+	return scnprintf(page, PAGE_SIZE, "%d\n", val);
+}
+
+static ssize_t uv_is_prot_virt_host(struct kobject *kobj,
+				    struct kobj_attribute *attr, char *page)
+{
+	int val = 0;
+
+#if IS_ENABLED(CONFIG_KVM)
+	val = prot_virt_host;
+#endif
+
+	return scnprintf(page, PAGE_SIZE, "%d\n", val);
+}
+
+static struct kobj_attribute uv_prot_virt_guest =
+	__ATTR(prot_virt_guest, 0444, uv_is_prot_virt_guest, NULL);
+
+static struct kobj_attribute uv_prot_virt_host =
+	__ATTR(prot_virt_host, 0444, uv_is_prot_virt_host, NULL);
+
+static const struct attribute *uv_prot_virt_attrs[] = {
+	&uv_prot_virt_guest.attr,
+	&uv_prot_virt_host.attr,
+	NULL,
+};
+
 static struct kset *uv_query_kset;
 static struct kobject *uv_kobj;
 
@@ -417,15 +459,23 @@ static int __init uv_info_init(void)
 	if (!uv_kobj)
 		return -ENOMEM;
 
-	uv_query_kset = kset_create_and_add("query", NULL, uv_kobj);
-	if (!uv_query_kset)
+	rc = sysfs_create_files(uv_kobj, uv_prot_virt_attrs);
+	if (rc)
 		goto out_kobj;
+
+	uv_query_kset = kset_create_and_add("query", NULL, uv_kobj);
+	if (!uv_query_kset) {
+		rc = -ENOMEM;
+		goto out_ind_files;
+	}
 
 	rc = sysfs_create_group(&uv_query_kset->kobj, &uv_query_attr_group);
 	if (!rc)
 		return 0;
 
 	kset_unregister(uv_query_kset);
+out_ind_files:
+	sysfs_remove_files(uv_kobj, uv_prot_virt_attrs);
 out_kobj:
 	kobject_del(uv_kobj);
 	kobject_put(uv_kobj);

@@ -68,8 +68,8 @@
 
 #define        arg1_low32 %edi
 
-ENTRY(crc_t10dif_pcl)
 .align 16
+SYM_FUNC_START(crc_t10dif_pcl)
 
 	# adjust the 16-bit initial_crc value, scale it to 32 bits
 	shl	$16, arg1_low32
@@ -552,7 +552,7 @@ _only_less_than_2:
 
 	jmp	_barrett
 
-ENDPROC(crc_t10dif_pcl)
+SYM_FUNC_END(crc_t10dif_pcl)
 
 .section	.rodata, "a", @progbits
 .align 16

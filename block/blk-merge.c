@@ -11,6 +11,7 @@
 #include <trace/events/block.h>
 
 #include "blk.h"
+#include RH_KABI_HIDE_INCLUDE("blk-rq-qos.h")
 
 /*
  * Check if the two bvecs from two bios can be merged to one segment.  If yes,
@@ -241,6 +242,12 @@ split:
 	*segs = nsegs;
 
 	if (do_split) {
+		/*
+		 * Bio splitting may cause subtle trouble such as hang when doing sync
+		 * iopoll in direct IO routine. Given performance gain of iopoll for
+		 * big IO can be trival, disable iopoll when split needed.
+		 */
+		bio->bi_opf &= ~REQ_HIPRI;
 		new = bio_split(bio, sectors, GFP_NOIO, bs);
 		if (new)
 			bio = new;
@@ -308,6 +315,13 @@ static unsigned int __blk_recalc_rq_segments(struct request_queue *q,
 	switch (bio_op(bio)) {
 	case REQ_OP_DISCARD:
 	case REQ_OP_SECURE_ERASE:
+		if (queue_max_discard_segments(q) > 1) {
+			nr_phys_segs = 0;
+			for_each_bio(bio)
+				nr_phys_segs++;
+			return nr_phys_segs;
+		}
+		return 1;
 	case REQ_OP_WRITE_ZEROES:
 		return 0;
 	case REQ_OP_WRITE_SAME:
@@ -518,10 +532,14 @@ static inline int ll_new_hw_segment(struct request_queue *q,
 {
 	int nr_phys_segs = bio_phys_segments(q, bio);
 
-	if (req->nr_phys_segments + nr_phys_segs > blk_rq_get_max_segments(req))
+	if (blk_integrity_merge_bio(q, req, bio) == false)
 		goto no_merge;
 
-	if (blk_integrity_merge_bio(q, req, bio) == false)
+	/* discard request merge won't add new segment */
+	if (req_op(req) == REQ_OP_DISCARD)
+		return 1;
+
+	if (req->nr_phys_segments + nr_phys_segs > blk_rq_get_max_segments(req))
 		goto no_merge;
 
 	/*
@@ -673,22 +691,6 @@ static void blk_account_io_merge_request(struct request *req)
 
 		hd_struct_put(req->part);
 	}
-}
-
-/*
- * Two cases of handling DISCARD merge:
- * If max_discard_segments > 1, the driver takes every bio
- * as a range and send them to controller together. The ranges
- * needn't to be contiguous.
- * Otherwise, the bios/requests will be handled as same as
- * others which should be contiguous.
- */
-static inline bool blk_discard_mergable(struct request *req)
-{
-	if (req_op(req) == REQ_OP_DISCARD &&
-	    queue_max_discard_segments(req->q) > 1)
-		return true;
-	return false;
 }
 
 static enum elv_merge blk_try_req_merge(struct request *req,
@@ -880,3 +882,197 @@ enum elv_merge blk_try_merge(struct request *rq, struct bio *bio)
 		return ELEVATOR_FRONT_MERGE;
 	return ELEVATOR_NO_MERGE;
 }
+
+static void blk_account_io_merge_bio(struct request *req)
+{
+	if (!blk_do_io_stat(req))
+		return;
+
+	part_stat_lock();
+	part_stat_inc(req->part, merges[op_stat_group(req_op(req))]);
+	part_stat_unlock();
+}
+
+bool bio_attempt_back_merge(struct request_queue *q, struct request *req,
+			    struct bio *bio)
+{
+	const int ff = bio->bi_opf & REQ_FAILFAST_MASK;
+
+	if (!ll_back_merge_fn(q, req, bio))
+		return false;
+
+	trace_block_bio_backmerge(q, req, bio);
+	rq_qos_merge(req->q, req, bio);
+
+	if ((req->cmd_flags & REQ_FAILFAST_MASK) != ff)
+		blk_rq_set_mixed_merge(req);
+
+	req->biotail->bi_next = bio;
+	req->biotail = bio;
+	req->__data_len += bio->bi_iter.bi_size;
+
+	blk_account_io_merge_bio(req);
+	return true;
+}
+
+bool bio_attempt_front_merge(struct request_queue *q, struct request *req,
+			     struct bio *bio)
+{
+	const int ff = bio->bi_opf & REQ_FAILFAST_MASK;
+
+	if (!ll_front_merge_fn(q, req, bio))
+		return false;
+
+	trace_block_bio_frontmerge(q, req, bio);
+	rq_qos_merge(req->q, req, bio);
+
+	if ((req->cmd_flags & REQ_FAILFAST_MASK) != ff)
+		blk_rq_set_mixed_merge(req);
+
+	bio->bi_next = req->bio;
+	req->bio = bio;
+
+	req->__sector = bio->bi_iter.bi_sector;
+	req->__data_len += bio->bi_iter.bi_size;
+
+	blk_account_io_merge_bio(req);
+	return true;
+}
+
+bool bio_attempt_discard_merge(struct request_queue *q, struct request *req,
+		struct bio *bio)
+{
+	unsigned short segments = blk_rq_nr_discard_segments(req);
+
+	if (segments >= queue_max_discard_segments(q))
+		goto no_merge;
+	if (blk_rq_sectors(req) + bio_sectors(bio) >
+	    blk_rq_get_max_sectors(req, blk_rq_pos(req)))
+		goto no_merge;
+
+	rq_qos_merge(q, req, bio);
+
+	req->biotail->bi_next = bio;
+	req->biotail = bio;
+	req->__data_len += bio->bi_iter.bi_size;
+	req->nr_phys_segments = segments + 1;
+
+	blk_account_io_merge_bio(req);
+	return true;
+no_merge:
+	req_set_nomerge(q, req);
+	return false;
+}
+
+/**
+ * blk_attempt_plug_merge - try to merge with %current's plugged list
+ * @q: request_queue new bio is being queued at
+ * @bio: new bio being queued
+ * @request_count: out parameter for number of traversed plugged requests
+ * @same_queue_rq: pointer to &struct request that gets filled in when
+ * another request associated with @q is found on the plug list
+ * (optional, may be %NULL)
+ *
+ * Determine whether @bio being queued on @q can be merged with a request
+ * on %current's plugged list.  Returns %true if merge was successful,
+ * otherwise %false.
+ *
+ * Plugging coalesces IOs from the same issuer for the same purpose without
+ * going through @q->queue_lock.  As such it's more of an issuing mechanism
+ * than scheduling, and the request, while may have elvpriv data, is not
+ * added on the elevator at this point.  In addition, we don't have
+ * reliable access to the elevator outside queue lock.  Only check basic
+ * merging parameters without querying the elevator.
+ *
+ * Caller must ensure !blk_queue_nomerges(q) beforehand.
+ */
+bool blk_attempt_plug_merge(struct request_queue *q, struct bio *bio,
+			    struct request **same_queue_rq)
+{
+	struct blk_plug *plug;
+	struct request *rq;
+	struct list_head *plug_list;
+
+	plug = blk_mq_plug(q, bio);
+	if (!plug)
+		return false;
+
+	plug_list = &plug->mq_list;
+
+	list_for_each_entry_reverse(rq, plug_list, queuelist) {
+		bool merged = false;
+
+		if (rq->q == q && same_queue_rq) {
+			/*
+			 * Only blk-mq multiple hardware queues case checks the
+			 * rq in the same queue, there should be only one such
+			 * rq in a queue
+			 **/
+			*same_queue_rq = rq;
+		}
+
+		if (rq->q != q || !blk_rq_merge_ok(rq, bio))
+			continue;
+
+		switch (blk_try_merge(rq, bio)) {
+		case ELEVATOR_BACK_MERGE:
+			merged = bio_attempt_back_merge(q, rq, bio);
+			break;
+		case ELEVATOR_FRONT_MERGE:
+			merged = bio_attempt_front_merge(q, rq, bio);
+			break;
+		case ELEVATOR_DISCARD_MERGE:
+			merged = bio_attempt_discard_merge(q, rq, bio);
+			break;
+		default:
+			break;
+		}
+
+		if (merged)
+			return true;
+	}
+
+	return false;
+}
+
+/*
+ * Iterate list of requests and see if we can merge this bio with any
+ * of them.
+ */
+bool blk_bio_list_merge(struct request_queue *q, struct list_head *list,
+			   struct bio *bio)
+{
+	struct request *rq;
+	int checked = 8;
+
+	list_for_each_entry_reverse(rq, list, queuelist) {
+		bool merged = false;
+
+		if (!checked--)
+			break;
+
+		if (!blk_rq_merge_ok(rq, bio))
+			continue;
+
+		switch (blk_try_merge(rq, bio)) {
+		case ELEVATOR_BACK_MERGE:
+			if (blk_mq_sched_allow_merge(q, rq, bio))
+				merged = bio_attempt_back_merge(q, rq, bio);
+			break;
+		case ELEVATOR_FRONT_MERGE:
+			if (blk_mq_sched_allow_merge(q, rq, bio))
+				merged = bio_attempt_front_merge(q, rq, bio);
+			break;
+		case ELEVATOR_DISCARD_MERGE:
+			merged = bio_attempt_discard_merge(q, rq, bio);
+			break;
+		default:
+			continue;
+		}
+
+		return merged;
+	}
+
+	return false;
+}
+EXPORT_SYMBOL_GPL(blk_bio_list_merge);

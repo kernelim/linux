@@ -541,7 +541,7 @@ batadv_netlink_dump_hardifs(struct sk_buff *msg, struct netlink_callback *cb)
 	return msg->len;
 }
 
-static const struct genl_ops batadv_netlink_ops[] = {
+static const struct genl_small_ops batadv_netlink_ops[] = {
 	{
 		.cmd = BATADV_CMD_GET_MESH_INFO,
 		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
@@ -637,8 +637,8 @@ struct genl_family batadv_netlink_family __ro_after_init = {
 	.policy = batadv_netlink_policy,
 	.netnsok = true,
 	.module = THIS_MODULE,
-	.ops = batadv_netlink_ops,
-	.n_ops = ARRAY_SIZE(batadv_netlink_ops),
+	.small_ops = batadv_netlink_ops,
+	.n_small_ops = ARRAY_SIZE(batadv_netlink_ops),
 	.mcgrps = batadv_netlink_mcgrps,
 	.n_mcgrps = ARRAY_SIZE(batadv_netlink_mcgrps),
 };

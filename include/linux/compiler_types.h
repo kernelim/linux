@@ -235,6 +235,10 @@ struct ftrace_likely_data {
 # define randomized_struct_fields_end
 #endif
 
+#ifndef __noscs
+# define __noscs
+#endif
+
 /*
  * Tell gcc if a function is cold. The compiler will assume any path
  * directly leading to the call is unlikely.
@@ -264,10 +268,6 @@ struct ftrace_likely_data {
 #define __assume_aligned(a, ...)
 #endif
 
-
-#ifndef __no_fgcse
-# define __no_fgcse
-#endif
 
 /* Are two types/vars the same type (ignoring qualifiers)? */
 #ifndef __same_type

@@ -833,6 +833,9 @@ intel_crt_detect(struct drm_connector *connector,
 		    connector->base.id, connector->name,
 		    force);
 
+	if (!INTEL_DISPLAY_ENABLED(dev_priv))
+		return connector_status_disconnected;
+
 	if (dev_priv->params.load_detect_test) {
 		wakeref = intel_display_power_get(dev_priv,
 						  intel_encoder->power_domain);
@@ -1072,6 +1075,8 @@ void intel_crt_init(struct drm_i915_private *dev_priv)
 		crt->base.enable = hsw_enable_crt;
 		crt->base.disable = hsw_disable_crt;
 		crt->base.post_disable = hsw_post_disable_crt;
+		crt->base.enable_clock = hsw_ddi_enable_clock;
+		crt->base.disable_clock = hsw_ddi_disable_clock;
 	} else {
 		if (HAS_PCH_SPLIT(dev_priv)) {
 			crt->base.compute_config = pch_crt_compute_config;

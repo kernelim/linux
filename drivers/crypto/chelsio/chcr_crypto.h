@@ -160,9 +160,9 @@ static inline struct chcr_context *a_ctx(struct crypto_aead *tfm)
 	return crypto_aead_ctx(tfm);
 }
 
-static inline struct chcr_context *c_ctx(struct crypto_ablkcipher *tfm)
+static inline struct chcr_context *c_ctx(struct crypto_skcipher *tfm)
 {
-	return crypto_ablkcipher_ctx(tfm);
+	return crypto_skcipher_ctx(tfm);
 }
 
 static inline struct chcr_context *h_ctx(struct crypto_ahash *tfm)
@@ -171,7 +171,7 @@ static inline struct chcr_context *h_ctx(struct crypto_ahash *tfm)
 }
 
 struct ablk_ctx {
-	struct crypto_skcipher *sw_cipher;
+	struct crypto_sync_skcipher *sw_cipher;
 	struct crypto_cipher *aes_generic;
 	__be32 key_ctx_hdr;
 	unsigned int enckey_len;
@@ -224,7 +224,7 @@ struct chcr_authenc_ctx {
 
 struct __aead_ctx {
 	struct chcr_gcm_ctx gcm[0];
-	struct chcr_authenc_ctx authenc[0];
+	struct chcr_authenc_ctx authenc[];
 };
 
 struct chcr_aead_ctx {
@@ -236,7 +236,7 @@ struct chcr_aead_ctx {
 	u8 nonce[4];
 	u16 hmac_ctrl;
 	u16 mayverify;
-	struct	__aead_ctx ctx[0];
+	struct	__aead_ctx ctx[];
 };
 
 struct hmac_ctx {
@@ -248,7 +248,7 @@ struct hmac_ctx {
 struct __crypto_ctx {
 	struct hmac_ctx hmacctx[0];
 	struct ablk_ctx ablkctx[0];
-	struct chcr_aead_ctx aeadctx[0];
+	struct chcr_aead_ctx aeadctx[];
 };
 
 struct chcr_context {
@@ -258,7 +258,7 @@ struct chcr_context {
 	unsigned int  ntxq;
 	unsigned int  nrxq;
 	struct completion cbc_aes_aio_done;
-	struct __crypto_ctx crypto_ctx[0];
+	struct __crypto_ctx crypto_ctx[];
 };
 
 struct chcr_hctx_per_wr {
@@ -291,7 +291,7 @@ struct chcr_ahash_req_ctx {
 	u8 bfr2[CHCR_HASH_MAX_BLOCK_SIZE_128];
 };
 
-struct chcr_blkcipher_req_ctx {
+struct chcr_skcipher_req_ctx {
 	struct sk_buff *skb;
 	struct scatterlist *dstsg;
 	unsigned int processed;
@@ -303,6 +303,7 @@ struct chcr_blkcipher_req_ctx {
 	unsigned int op;
 	u16 imm;
 	u8 iv[CHCR_MAX_CRYPTO_IV_LEN];
+	u8 init_iv[CHCR_MAX_CRYPTO_IV_LEN];
 	u16 txqidx;
 	u16 rxqidx;
 };
@@ -311,7 +312,7 @@ struct chcr_alg_template {
 	u32 type;
 	u32 is_registered;
 	union {
-		struct crypto_alg crypto;
+		struct skcipher_alg skcipher;
 		struct ahash_alg hash;
 		struct aead_alg aead;
 	} alg;
@@ -330,12 +331,12 @@ void chcr_add_aead_dst_ent(struct aead_request *req,
 			   struct cpl_rx_phys_dsgl *phys_cpl,
 			   unsigned short qid);
 void chcr_add_aead_src_ent(struct aead_request *req, struct ulptx_sgl *ulptx);
-void chcr_add_cipher_src_ent(struct ablkcipher_request *req,
+void chcr_add_cipher_src_ent(struct skcipher_request *req,
 			     void *ulptx,
 			     struct  cipher_wr_param *wrparam);
-int chcr_cipher_dma_map(struct device *dev, struct ablkcipher_request *req);
-void chcr_cipher_dma_unmap(struct device *dev, struct ablkcipher_request *req);
-void chcr_add_cipher_dst_ent(struct ablkcipher_request *req,
+int chcr_cipher_dma_map(struct device *dev, struct skcipher_request *req);
+void chcr_cipher_dma_unmap(struct device *dev, struct skcipher_request *req);
+void chcr_add_cipher_dst_ent(struct skcipher_request *req,
 			     struct cpl_rx_phys_dsgl *phys_cpl,
 			     struct  cipher_wr_param *wrparam,
 			     unsigned short qid);

@@ -87,7 +87,7 @@ struct packet_fanout {
 		struct bpf_prog __rcu	*bpf_prog;
 	};
 	struct list_head	list;
-	struct sock		*arr[PACKET_FANOUT_MAX];
+	struct sock	__rcu	*arr[PACKET_FANOUT_MAX];
 	spinlock_t		lock;
 	refcount_t		sk_ref;
 	struct packet_type	prot_hook ____cacheline_aligned_in_smp;

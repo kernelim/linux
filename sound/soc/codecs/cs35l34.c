@@ -666,7 +666,7 @@ static struct snd_soc_dai_driver cs35l34_dai = {
 			.formats = CS35L34_FORMATS,
 		},
 		.ops = &cs35l34_ops,
-		.symmetric_rates = 1,
+		.symmetric_rate = 1,
 };
 
 static int cs35l34_boost_inductor(struct cs35l34_private *cs35l34,
@@ -800,6 +800,9 @@ static struct regmap_config cs35l34_regmap = {
 	.readable_reg = cs35l34_readable_register,
 	.precious_reg = cs35l34_precious_register,
 	.cache_type = REGCACHE_RBTREE,
+
+	.use_single_read = true,
+	.use_single_write = true,
 };
 
 static int cs35l34_handle_of_data(struct i2c_client *i2c_client,

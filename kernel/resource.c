@@ -319,34 +319,39 @@ int release_resource(struct resource *old)
 EXPORT_SYMBOL(release_resource);
 
 /**
- * Finds the lowest iomem resource that covers part of [start..end].  The
- * caller must specify start, end, flags, and desc (which may be
+ * Finds the lowest iomem resource that covers part of [@start..@end].  The
+ * caller must specify @start, @end, @flags, and @desc (which may be
  * IORES_DESC_NONE).
  *
- * If a resource is found, returns 0 and *res is overwritten with the part
- * of the resource that's within [start..end]; if none is found, returns
- * -1.
+ * If a resource is found, returns 0 and @*res is overwritten with the part
+ * of the resource that's within [@start..@end]; if none is found, returns
+ * -1 or -EINVAL for other invalid parameters.
  *
  * This function walks the whole tree and not just first level children
- * unless @first_level_children_only is true.
+ * unless @first_lvl is true.
+ *
+ * @start:	start address of the resource searched for
+ * @end:	end address of same resource
+ * @flags:	flags which the resource must have
+ * @desc:	descriptor the resource must have
+ * @first_lvl:	walk only the first level children, if set
+ * @res:	return ptr, if resource found
  */
 static int find_next_iomem_res(resource_size_t start, resource_size_t end,
 			       unsigned long flags, unsigned long desc,
-			       bool first_level_children_only,
-			       struct resource *res)
+			       bool first_lvl, struct resource *res)
 {
 	struct resource *p;
-	bool sibling_only = false;
 
-	BUG_ON(!res);
-	BUG_ON(start >= end);
+	if (!res)
+		return -EINVAL;
 
-	if (first_level_children_only)
-		sibling_only = true;
+	if (start >= end)
+		return -EINVAL;
 
 	read_lock(&resource_lock);
 
-	for (p = iomem_resource.child; p; p = next_resource(p, sibling_only)) {
+	for (p = iomem_resource.child; p; p = next_resource(p, first_lvl)) {
 		if ((p->flags & flags) != flags)
 			continue;
 		if ((desc != IORES_DESC_NONE) && (desc != p->desc))
@@ -373,15 +378,14 @@ static int find_next_iomem_res(resource_size_t start, resource_size_t end,
 
 static int __walk_iomem_res_desc(resource_size_t start, resource_size_t end,
 				 unsigned long flags, unsigned long desc,
-				 bool first_level_children_only, void *arg,
+				 bool first_lvl, void *arg,
 				 int (*func)(struct resource *, void *))
 {
 	struct resource res;
 	int ret = -EINVAL;
 
 	while (start < end &&
-	       !find_next_iomem_res(start, end, flags, desc,
-				    first_level_children_only, &res)) {
+	       !find_next_iomem_res(start, end, flags, desc, first_lvl, &res)) {
 		ret = (*func)(&res, arg);
 		if (ret)
 			break;
@@ -392,7 +396,7 @@ static int __walk_iomem_res_desc(resource_size_t start, resource_size_t end,
 	return ret;
 }
 
-/*
+/**
  * Walks through iomem resources and calls func() with matching resource
  * ranges. This walks through whole tree and not just first level children.
  * All the memory ranges which overlap start,end and also match flags and
@@ -402,6 +406,8 @@ static int __walk_iomem_res_desc(resource_size_t start, resource_size_t end,
  * @flags: I/O resource flags
  * @start: start addr
  * @end: end addr
+ * @arg: function argument for the callback @func
+ * @func: callback function that is called for each qualifying resource area
  *
  * NOTE: For a new descriptor search, define a new IORES_DESC in
  * <linux/ioport.h> and set it in 'desc' of a target resource entry.
@@ -421,7 +427,7 @@ EXPORT_SYMBOL_GPL(walk_iomem_res_desc);
  * ranges.
  */
 int walk_system_ram_res(u64 start, u64 end, void *arg,
-				int (*func)(struct resource *, void *))
+			int (*func)(struct resource *, void *))
 {
 	unsigned long flags = IORESOURCE_SYSTEM_RAM | IORESOURCE_BUSY;
 
@@ -448,9 +454,12 @@ int walk_mem_res(u64 start, u64 end, void *arg,
  * This function calls the @func callback against all memory ranges of type
  * System RAM which are marked as IORESOURCE_SYSTEM_RAM and IORESOUCE_BUSY.
  * It is to be used only for System RAM.
+ *
+ * This will find System RAM ranges that are children of top-level resources
+ * in addition to top-level System RAM resources.
  */
 int walk_system_ram_range(unsigned long start_pfn, unsigned long nr_pages,
-		void *arg, int (*func)(unsigned long, unsigned long, void *))
+			  void *arg, int (*func)(unsigned long, unsigned long, void *))
 {
 	resource_size_t start, end;
 	unsigned long flags;
@@ -463,9 +472,9 @@ int walk_system_ram_range(unsigned long start_pfn, unsigned long nr_pages,
 	flags = IORESOURCE_SYSTEM_RAM | IORESOURCE_BUSY;
 	while (start < end &&
 	       !find_next_iomem_res(start, end, flags, IORES_DESC_NONE,
-				    true, &res)) {
-		pfn = (res.start + PAGE_SIZE - 1) >> PAGE_SHIFT;
-		end_pfn = (res.end + 1) >> PAGE_SHIFT;
+				    false, &res)) {
+		pfn = PFN_UP(res.start);
+		end_pfn = PFN_DOWN(res.end + 1);
 		if (end_pfn > pfn)
 			ret = (*func)(pfn, end_pfn - pfn, arg);
 		if (ret)
@@ -515,9 +524,12 @@ EXPORT_SYMBOL_GPL(page_is_ram);
 int region_intersects(resource_size_t start, size_t size, unsigned long flags,
 		      unsigned long desc)
 {
-	resource_size_t end = start + size - 1;
+	struct resource res;
 	int type = 0; int other = 0;
 	struct resource *p;
+
+	res.start = start;
+	res.end = start + size - 1;
 
 	read_lock(&resource_lock);
 	for (p = iomem_resource.child; p ; p = p->sibling) {
@@ -525,22 +537,18 @@ int region_intersects(resource_size_t start, size_t size, unsigned long flags,
 				((desc == IORES_DESC_NONE) ||
 				 (desc == p->desc)));
 
-		if (start >= p->start && start <= p->end)
-			is_type ? type++ : other++;
-		if (end >= p->start && end <= p->end)
-			is_type ? type++ : other++;
-		if (p->start >= start && p->end <= end)
+		if (resource_overlaps(p, &res))
 			is_type ? type++ : other++;
 	}
 	read_unlock(&resource_lock);
 
+	if (type == 0)
+		return REGION_DISJOINT;
+
 	if (other == 0)
-		return type ? REGION_INTERSECTS : REGION_DISJOINT;
+		return REGION_INTERSECTS;
 
-	if (type)
-		return REGION_MIXED;
-
-	return REGION_DISJOINT;
+	return REGION_MIXED;
 }
 EXPORT_SYMBOL_GPL(region_intersects);
 
@@ -646,8 +654,8 @@ static int find_resource(struct resource *root, struct resource *new,
  * @constraint: the size and alignment constraints to be met.
  */
 static int reallocate_resource(struct resource *root, struct resource *old,
-			resource_size_t newsize,
-			struct resource_constraint  *constraint)
+			       resource_size_t newsize,
+			       struct resource_constraint *constraint)
 {
 	int err=0;
 	struct resource new = *old;
@@ -960,7 +968,7 @@ skip:
  * Existing children of the resource are assumed to be immutable.
  */
 int adjust_resource(struct resource *res, resource_size_t start,
-			resource_size_t size)
+		    resource_size_t size)
 {
 	int result;
 
@@ -971,9 +979,9 @@ int adjust_resource(struct resource *res, resource_size_t start,
 }
 EXPORT_SYMBOL(adjust_resource);
 
-static void __init __reserve_region_with_split(struct resource *root,
-		resource_size_t start, resource_size_t end,
-		const char *name)
+static void __init
+__reserve_region_with_split(struct resource *root, resource_size_t start,
+			    resource_size_t end, const char *name)
 {
 	struct resource *parent = root;
 	struct resource *conflict;
@@ -1032,9 +1040,9 @@ static void __init __reserve_region_with_split(struct resource *root,
 
 }
 
-void __init reserve_region_with_split(struct resource *root,
-		resource_size_t start, resource_size_t end,
-		const char *name)
+void __init
+reserve_region_with_split(struct resource *root, resource_size_t start,
+			  resource_size_t end, const char *name)
 {
 	int abort = 0;
 
@@ -1169,7 +1177,7 @@ EXPORT_SYMBOL(__request_region);
  * The described resource region must match a currently busy region.
  */
 void __release_region(struct resource *parent, resource_size_t start,
-			resource_size_t n)
+		      resource_size_t n)
 {
 	struct resource **p;
 	resource_size_t end;
@@ -1231,7 +1239,7 @@ EXPORT_SYMBOL(__release_region);
  *   simplicity.  Enhance this logic when necessary.
  */
 int release_mem_region_adjustable(struct resource *parent,
-			resource_size_t start, resource_size_t size)
+				  resource_size_t start, resource_size_t size)
 {
 	struct resource **p;
 	struct resource *res;
@@ -1407,9 +1415,9 @@ static int devm_region_match(struct device *dev, void *res, void *match_data)
 		this->start == match->start && this->n == match->n;
 }
 
-struct resource * __devm_request_region(struct device *dev,
-				struct resource *parent, resource_size_t start,
-				resource_size_t n, const char *name)
+struct resource *
+__devm_request_region(struct device *dev, struct resource *parent,
+		      resource_size_t start, resource_size_t n, const char *name)
 {
 	struct region_devres *dr = NULL;
 	struct resource *res;

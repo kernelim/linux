@@ -10,6 +10,14 @@
 #define __LIBBPF_LIBBPF_INTERNAL_H
 
 #include <stdlib.h>
+#include <limits.h>
+
+/* make sure libbpf doesn't use kernel-only integer typedefs */
+#pragma GCC poison u8 u16 u32 u64 s8 s16 s32 s64
+
+/* prevent accidental re-addition of reallocarray() */
+#pragma GCC poison reallocarray
+
 #include "libbpf.h"
 
 #define BTF_INFO_ENC(kind, kind_flag, vlen) \
@@ -23,6 +31,8 @@
 #define BTF_MEMBER_ENC(name, type, bits_offset) (name), (type), (bits_offset)
 #define BTF_PARAM_ENC(name, type) (name), (type)
 #define BTF_VAR_SECINFO_ENC(type, offset, size) (type), (offset), (size)
+#define BTF_TYPE_FLOAT_ENC(name, sz) \
+	BTF_TYPE_ENC(name, BTF_INFO_ENC(BTF_KIND_FLOAT, 0, 0), sz)
 
 #ifndef likely
 #define likely(x) __builtin_expect(!!(x), 1)
@@ -70,6 +80,9 @@ do {				\
 #define pr_info(fmt, ...)	__pr(LIBBPF_INFO, fmt, ##__VA_ARGS__)
 #define pr_debug(fmt, ...)	__pr(LIBBPF_DEBUG, fmt, ##__VA_ARGS__)
 
+#ifndef __has_builtin
+#define __has_builtin(x) 0
+#endif
 /*
  * Re-implement glibc's reallocarray() for libbpf internal-only use.
  * reallocarray(), unfortunately, is not available in all versions of glibc,
@@ -83,13 +96,20 @@ static inline void *libbpf_reallocarray(void *ptr, size_t nmemb, size_t size)
 {
 	size_t total;
 
+#if __has_builtin(__builtin_mul_overflow)
 	if (unlikely(__builtin_mul_overflow(nmemb, size, &total)))
 		return NULL;
+#else
+	if (size == 0 || nmemb > ULONG_MAX / size)
+		return NULL;
+	total = nmemb * size;
+#endif
 	return realloc(ptr, total);
 }
 
 void *btf_add_mem(void **data, size_t *cap_cnt, size_t elem_sz,
 		  size_t cur_cnt, size_t max_cnt, size_t add_cnt);
+int btf_ensure_mem(void **data, size_t *cap_cnt, size_t elem_sz, size_t need_cnt);
 
 static inline bool libbpf_validate_opts(const char *opts,
 					size_t opts_sz, size_t user_sz,
@@ -122,28 +142,52 @@ static inline bool libbpf_validate_opts(const char *opts,
 	((opts) && opts->sz >= offsetofend(typeof(*(opts)), field))
 #define OPTS_GET(opts, field, fallback_value) \
 	(OPTS_HAS(opts, field) ? (opts)->field : fallback_value)
+#define OPTS_SET(opts, field, value)		\
+	do {					\
+		if (OPTS_HAS(opts, field))	\
+			(opts)->field = value;	\
+	} while (0)
 
 int parse_cpu_mask_str(const char *s, bool **mask, int *mask_sz);
 int parse_cpu_mask_file(const char *fcpu, bool **mask, int *mask_sz);
 int libbpf__load_raw_btf(const char *raw_types, size_t types_len,
 			 const char *str_sec, size_t str_len);
 
+struct bpf_prog_load_params {
+	enum bpf_prog_type prog_type;
+	enum bpf_attach_type expected_attach_type;
+	const char *name;
+	const struct bpf_insn *insns;
+	size_t insn_cnt;
+	const char *license;
+	__u32 kern_version;
+	__u32 attach_prog_fd;
+	__u32 attach_btf_obj_fd;
+	__u32 attach_btf_id;
+	__u32 prog_ifindex;
+	__u32 prog_btf_fd;
+	__u32 prog_flags;
+
+	__u32 func_info_rec_size;
+	const void *func_info;
+	__u32 func_info_cnt;
+
+	__u32 line_info_rec_size;
+	const void *line_info;
+	__u32 line_info_cnt;
+
+	__u32 log_level;
+	char *log_buf;
+	size_t log_buf_sz;
+};
+
+int libbpf__bpf_prog_load(const struct bpf_prog_load_params *load_attr);
+
 int bpf_object__section_size(const struct bpf_object *obj, const char *name,
 			     __u32 *size);
 int bpf_object__variable_offset(const struct bpf_object *obj, const char *name,
 				__u32 *off);
-
-struct nlattr;
-typedef int (*libbpf_dump_nlmsg_t)(void *cookie, void *msg, struct nlattr **tb);
-int libbpf_netlink_open(unsigned int *nl_pid);
-int libbpf_nl_get_link(int sock, unsigned int nl_pid,
-		       libbpf_dump_nlmsg_t dump_link_nlmsg, void *cookie);
-int libbpf_nl_get_class(int sock, unsigned int nl_pid, int ifindex,
-			libbpf_dump_nlmsg_t dump_class_nlmsg, void *cookie);
-int libbpf_nl_get_qdisc(int sock, unsigned int nl_pid, int ifindex,
-			libbpf_dump_nlmsg_t dump_qdisc_nlmsg, void *cookie);
-int libbpf_nl_get_filter(int sock, unsigned int nl_pid, int ifindex, int handle,
-			 libbpf_dump_nlmsg_t dump_filter_nlmsg, void *cookie);
+struct btf *btf_get_from_fd(int btf_fd, struct btf *base_btf);
 
 struct btf_ext_info {
 	/*
@@ -246,6 +290,12 @@ enum bpf_core_relo_kind {
 	BPF_FIELD_SIGNED = 3,		/* field signedness (0 - unsigned, 1 - signed) */
 	BPF_FIELD_LSHIFT_U64 = 4,	/* bitfield-specific left bitshift */
 	BPF_FIELD_RSHIFT_U64 = 5,	/* bitfield-specific right bitshift */
+	BPF_TYPE_ID_LOCAL = 6,		/* type ID in local BPF object */
+	BPF_TYPE_ID_TARGET = 7,		/* type ID in target kernel */
+	BPF_TYPE_EXISTS = 8,		/* type existence in target kernel */
+	BPF_TYPE_SIZE = 9,		/* type size in bytes */
+	BPF_ENUMVAL_EXISTS = 10,	/* enum value existence in target kernel */
+	BPF_ENUMVAL_VALUE = 11,		/* enum value integer value */
 };
 
 /* The minimum bpf_core_relo checked by the loader

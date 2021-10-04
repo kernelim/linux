@@ -12,6 +12,84 @@
 #include "export.h"
 #include "nfsfh.h"
 
+#define NFSD_TRACE_PROC_ARG_FIELDS \
+		__field(unsigned int, netns_ino) \
+		__field(u32, xid) \
+		__array(unsigned char, server, sizeof(struct sockaddr_in6)) \
+		__array(unsigned char, client, sizeof(struct sockaddr_in6))
+
+#define NFSD_TRACE_PROC_ARG_ASSIGNMENTS \
+		do { \
+			__entry->netns_ino = SVC_NET(rqstp)->ns.inum; \
+			__entry->xid = be32_to_cpu(rqstp->rq_xid); \
+			memcpy(__entry->server, &rqstp->rq_xprt->xpt_local, \
+			       rqstp->rq_xprt->xpt_locallen); \
+			memcpy(__entry->client, &rqstp->rq_xprt->xpt_remote, \
+			       rqstp->rq_xprt->xpt_remotelen); \
+		} while (0);
+
+#define NFSD_TRACE_PROC_RES_FIELDS \
+		__field(unsigned int, netns_ino) \
+		__field(u32, xid) \
+		__field(unsigned long, status) \
+		__array(unsigned char, server, sizeof(struct sockaddr_in6)) \
+		__array(unsigned char, client, sizeof(struct sockaddr_in6))
+
+#define NFSD_TRACE_PROC_RES_ASSIGNMENTS(error) \
+		do { \
+			__entry->netns_ino = SVC_NET(rqstp)->ns.inum; \
+			__entry->xid = be32_to_cpu(rqstp->rq_xid); \
+			__entry->status = be32_to_cpu(error); \
+			memcpy(__entry->server, &rqstp->rq_xprt->xpt_local, \
+			       rqstp->rq_xprt->xpt_locallen); \
+			memcpy(__entry->client, &rqstp->rq_xprt->xpt_remote, \
+			       rqstp->rq_xprt->xpt_remotelen); \
+		} while (0);
+
+TRACE_EVENT(nfsd_garbage_args_err,
+	TP_PROTO(
+		const struct svc_rqst *rqstp
+	),
+	TP_ARGS(rqstp),
+	TP_STRUCT__entry(
+		NFSD_TRACE_PROC_ARG_FIELDS
+
+		__field(u32, vers)
+		__field(u32, proc)
+	),
+	TP_fast_assign(
+		NFSD_TRACE_PROC_ARG_ASSIGNMENTS
+
+		__entry->vers = rqstp->rq_vers;
+		__entry->proc = rqstp->rq_proc;
+	),
+	TP_printk("xid=0x%08x vers=%u proc=%u",
+		__entry->xid, __entry->vers, __entry->proc
+	)
+);
+
+TRACE_EVENT(nfsd_cant_encode_err,
+	TP_PROTO(
+		const struct svc_rqst *rqstp
+	),
+	TP_ARGS(rqstp),
+	TP_STRUCT__entry(
+		NFSD_TRACE_PROC_ARG_FIELDS
+
+		__field(u32, vers)
+		__field(u32, proc)
+	),
+	TP_fast_assign(
+		NFSD_TRACE_PROC_ARG_ASSIGNMENTS
+
+		__entry->vers = rqstp->rq_vers;
+		__entry->proc = rqstp->rq_proc;
+	),
+	TP_printk("xid=0x%08x vers=%u proc=%u",
+		__entry->xid, __entry->vers, __entry->proc
+	)
+);
+
 TRACE_EVENT(nfsd_compound,
 	TP_PROTO(const struct svc_rqst *rqst,
 		 u32 args_opcnt),
@@ -50,6 +128,56 @@ TRACE_EVENT(nfsd_compound_status,
 		__entry->resp_opcnt, __entry->args_opcnt,
 		__get_str(name), __entry->status)
 )
+
+TRACE_EVENT(nfsd_compound_decode_err,
+	TP_PROTO(
+		const struct svc_rqst *rqstp,
+		u32 args_opcnt,
+		u32 resp_opcnt,
+		u32 opnum,
+		__be32 status
+	),
+	TP_ARGS(rqstp, args_opcnt, resp_opcnt, opnum, status),
+	TP_STRUCT__entry(
+		NFSD_TRACE_PROC_RES_FIELDS
+
+		__field(u32, args_opcnt)
+		__field(u32, resp_opcnt)
+		__field(u32, opnum)
+	),
+	TP_fast_assign(
+		NFSD_TRACE_PROC_RES_ASSIGNMENTS(status)
+
+		__entry->args_opcnt = args_opcnt;
+		__entry->resp_opcnt = resp_opcnt;
+		__entry->opnum = opnum;
+	),
+	TP_printk("op=%u/%u opnum=%u status=%lu",
+		__entry->resp_opcnt, __entry->args_opcnt,
+		__entry->opnum, __entry->status)
+);
+
+TRACE_EVENT(nfsd_compound_encode_err,
+	TP_PROTO(
+		const struct svc_rqst *rqstp,
+		u32 opnum,
+		__be32 status
+	),
+	TP_ARGS(rqstp, opnum, status),
+	TP_STRUCT__entry(
+		NFSD_TRACE_PROC_RES_FIELDS
+
+		__field(u32, opnum)
+	),
+	TP_fast_assign(
+		NFSD_TRACE_PROC_RES_ASSIGNMENTS(status)
+
+		__entry->opnum = opnum;
+	),
+	TP_printk("opnum=%u status=%lu",
+		__entry->opnum, __entry->status)
+);
+
 
 DECLARE_EVENT_CLASS(nfsd_fh_err_class,
 	TP_PROTO(struct svc_rqst *rqstp,
@@ -287,8 +415,8 @@ DEFINE_STATEID_EVENT(layout_recall_done);
 DEFINE_STATEID_EVENT(layout_recall_fail);
 DEFINE_STATEID_EVENT(layout_recall_release);
 
-DEFINE_STATEID_EVENT(deleg_open);
-DEFINE_STATEID_EVENT(deleg_none);
+DEFINE_STATEID_EVENT(open);
+DEFINE_STATEID_EVENT(deleg_read);
 DEFINE_STATEID_EVENT(deleg_break);
 DEFINE_STATEID_EVENT(deleg_recall);
 
